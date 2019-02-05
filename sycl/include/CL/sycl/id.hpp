@@ -75,7 +75,7 @@ public:
   }
 
   // OP is: +, -, *, /, %, <<, >>, &, |, ^, &&, ||, <, >, <=, >=
-  #define GEN_OP(op)                                                           \
+  #define __SYCL_GEN_OPT(op)                                                   \
     id<dimensions> operator op(const id<dimensions> &rhs) const {              \
       id<dimensions> result;                                                   \
       for (int i = 0; i < dimensions; ++i) {                                   \
@@ -100,27 +100,27 @@ public:
     }                                                                          \
 
 
-  GEN_OP(+)
-  GEN_OP(-)
-  GEN_OP(*)
-  GEN_OP(/)
-  GEN_OP(%)
-  GEN_OP(<<)
-  GEN_OP(>>)
-  GEN_OP(&)
-  GEN_OP(|)
-  GEN_OP(^)
-  GEN_OP(&&)
-  GEN_OP(||)
-  GEN_OP(<)
-  GEN_OP(>)
-  GEN_OP(<=)
-  GEN_OP(>=)
+  __SYCL_GEN_OPT(+)
+  __SYCL_GEN_OPT(-)
+  __SYCL_GEN_OPT(*)
+  __SYCL_GEN_OPT(/)
+  __SYCL_GEN_OPT(%)
+  __SYCL_GEN_OPT(<<)
+  __SYCL_GEN_OPT(>>)
+  __SYCL_GEN_OPT(&)
+  __SYCL_GEN_OPT(|)
+  __SYCL_GEN_OPT(^)
+  __SYCL_GEN_OPT(&&)
+  __SYCL_GEN_OPT(||)
+  __SYCL_GEN_OPT(<)
+  __SYCL_GEN_OPT(>)
+  __SYCL_GEN_OPT(<=)
+  __SYCL_GEN_OPT(>=)
 
-  #undef GEN_OP
+  #undef __SYCL_GEN_OPT
 
   // OP is: +=, -=, *=, /=, %=, <<=, >>=, &=, |=, ^=
-  #define GEN_OP(op)                                                           \
+  #define __SYCL_GEN_OPT(op)                                                   \
     id<dimensions> &operator op(const id<dimensions> &rhs) {                   \
       for (int i = 0; i < dimensions; ++i) {                                   \
         this->common_array[i] op rhs.common_array[i];                          \
@@ -134,18 +134,18 @@ public:
       return *this;                                                            \
     }                                                                          \
 
-  GEN_OP(+=)
-  GEN_OP(-=)
-  GEN_OP(*=)
-  GEN_OP(/=)
-  GEN_OP(%=)
-  GEN_OP(<<=)
-  GEN_OP(>>=)
-  GEN_OP(&=)
-  GEN_OP(|=)
-  GEN_OP(^=)
+  __SYCL_GEN_OPT(+=)
+  __SYCL_GEN_OPT(-=)
+  __SYCL_GEN_OPT(*=)
+  __SYCL_GEN_OPT(/=)
+  __SYCL_GEN_OPT(%=)
+  __SYCL_GEN_OPT(<<=)
+  __SYCL_GEN_OPT(>>=)
+  __SYCL_GEN_OPT(&=)
+  __SYCL_GEN_OPT(|=)
+  __SYCL_GEN_OPT(^=)
 
-  #undef GEN_OP
+  #undef __SYCL_GEN_OPT
 };
 
 namespace detail {
