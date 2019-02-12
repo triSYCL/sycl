@@ -36,16 +36,23 @@ public:
       }
 
       cl_int Error = CL_SUCCESS;
-#ifdef CL_VERSION_2_0
-      vector_class<cl_queue_properties> CreationFlagProperties = {
-          CL_QUEUE_PROPERTIES, CreationFlags, 0};
-      m_CommandQueue = clCreateCommandQueueWithProperties(
-          m_Context.get(), m_Device.get(), CreationFlagProperties.data(),
-          &Error);
-#else
+
+// XOCL TODO:
+//  This probably shouldn't use the CL_VERSION_2_0 macro, a better approach
+//  would be to Query the device for the supported OCL version and then make a
+//  choice. Many devices on a system, with the possibility of many different
+// platforms not all devices will support the same OCL version.
+// #ifdef CL_VERSION_2_0
+//       vector_class<cl_queue_properties> CreationFlagProperties = {
+//           CL_QUEUE_PROPERTIES, CreationFlags, 0};
+//       m_CommandQueue = clCreateCommandQueueWithProperties(
+//           m_Context.get(), m_Device.get(), CreationFlagProperties.data(),
+//           &Error);
+// #else
       m_CommandQueue = clCreateCommandQueue(m_Context.get(), m_Device.get(),
                                             CreationFlags, &Error);
-#endif
+// #endif
+
       CHECK_OCL_CODE(Error);
       // TODO catch an exception and put it to list of asynchronous exceptions
     }

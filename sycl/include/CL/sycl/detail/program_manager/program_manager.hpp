@@ -62,6 +62,7 @@ public:
 
 private:
   const vector_class<char> getSpirvSource();
+  const vector_class<char> getBinarySource(std::string FileExtension);
   void build(cl_program &ClProgram, const string_class &Options = "",
              std::vector<cl_device_id> ClDevices = std::vector<cl_device_id>());
 
@@ -74,7 +75,6 @@ private:
   ProgramManager(ProgramManager const &) = delete;
   ProgramManager &operator=(ProgramManager const &) = delete;
 
-  unique_ptr_class<vector_class<char>> m_SpirvSource;
   std::map<context, cl_program, ContextLess> m_CachedSpirvPrograms;
   std::map<cl_program, std::map<string_class, cl_kernel>> m_CachedKernels;
 

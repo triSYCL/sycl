@@ -115,7 +115,28 @@ static cl_program createProgram(const platform &Platform,
 cl_program ProgramManager::getBuiltOpenCLProgram(const context &Context) {
   cl_program &ClProgram = m_CachedSpirvPrograms[Context];
   if (!ClProgram) {
-    vector_class<char> DeviceProg = getSpirvSource();
+    // TODO: This shouldn't just check the first initial device, realistically
+    // there should be some indication of what the primary device is on the
+    // platform/the one the user wishes to use.
+    // Or create a program for the device with the worst support, with the
+    // expectation that newer devices can consume it.
+    // Or create several programs based on the required source.
+    // Perhaps I'm putting to much weight on the device having the right support
+    // however and it should be the platform.
+    auto Devices = Context.get_devices();
+    vector_class<char> DeviceProg;
+    device Device;
+    if (!Devices.empty()) {
+       Device = Devices[0];
+      // Is there a need for two getXSource? Could perhaps unify the
+      // implementations and change the file extension looked for based on
+      // whats supported
+      if (Device.has_extension("cl_khr_il_program")) {
+        DeviceProg = getSpirvSource();
+      } else {
+        DeviceProg = getBinarySource(".bin");
+      }
+    }
 
     cl_context ClContext = Context.get();
     const platform &Platform = Context.get_platform();
@@ -147,45 +168,65 @@ cl_program ProgramManager::getClProgramFromClKernel(cl_kernel ClKernel) {
   return ClProgram;
 }
 
+const vector_class<char> ProgramManager::getBinarySource(std::string FileExtension) {
+  // TODO FIXME make this function thread-safe
+  vector_class<char> DeviceProg;
+
+  std::ifstream File("kernel" + FileExtension, std::ios::binary);
+  if (!File.is_open()) {
+    throw compile_program_error(("Can not open kernel" + FileExtension + "\n").c_str());
+  }
+
+  File.seekg(0, std::ios::end);
+  DeviceProg = vector_class<char>(File.tellg());
+  File.seekg(0);
+  File.read(DeviceProg.data(), DeviceProg.size());
+  File.close();
+
+  return DeviceProg;
+}
+
 const vector_class<char> ProgramManager::getSpirvSource() {
   // TODO FIXME make this function thread-safe
-  if (!m_SpirvSource) {
+  vector_class<char> DeviceProg;
 
-    if (DeviceImages && !std::getenv("SYCL_USE_KERNEL_SPV")) {
-      assert(DeviceImages->NumDeviceImages == 1 &&
-             "only single image is supported for now");
-      const __tgt_device_image &Img = DeviceImages->DeviceImages[0];
-      auto *BegPtr = reinterpret_cast<const char *>(Img.ImageStart);
-      auto *EndPtr = reinterpret_cast<const char *>(Img.ImageEnd);
-      ptrdiff_t ImgSize = EndPtr - BegPtr;
-      m_SpirvSource.reset(new vector_class<char>(static_cast<size_t>(ImgSize)));
-      // TODO this code is expected to be heavily refactored, this copying
-      // might be redundant (unless we don't want to work on live .rodata)
-      std::copy(BegPtr, EndPtr, m_SpirvSource->begin());
+  if (DeviceImages && !std::getenv("SYCL_USE_KERNEL_SPV")) {
+    assert(DeviceImages->NumDeviceImages == 1 &&
+           "only single image is supported for now");
+    const __tgt_device_image &Img = DeviceImages->DeviceImages[0];
+    auto *BegPtr = reinterpret_cast<const char *>(Img.ImageStart);
+    auto *EndPtr = reinterpret_cast<const char *>(Img.ImageEnd);
+    ptrdiff_t ImgSize = EndPtr - BegPtr;
+    DeviceProg.clear();
+    DeviceProg.resize(static_cast<size_t>(ImgSize));
 
-      if (std::getenv("SYCL_DUMP_IMAGES")) {
-        std::ofstream F("kernel.spv", std::ios::binary);
+    // TODO this code is expected to be heavily refactored, this copying
+    // might be redundant (unless we don't want to work on live .rodata)
+    std::copy(BegPtr, EndPtr, DeviceProg.begin());
 
-        if (!F.is_open())
-          throw compile_program_error("Can not write kernel.spv\n");
+    if (std::getenv("SYCL_DUMP_IMAGES")) {
+      std::ofstream F("kernel.spv", std::ios::binary);
 
-        F.write(BegPtr, ImgSize);
-        F.close();
-      }
-    } else {
-      std::ifstream File("kernel.spv", std::ios::binary);
-      if (!File.is_open()) {
-        throw compile_program_error("Can not open kernel.spv\n");
-      }
-      File.seekg(0, std::ios::end);
-      m_SpirvSource.reset(new vector_class<char>(File.tellg()));
-      File.seekg(0);
-      File.read(m_SpirvSource->data(), m_SpirvSource->size());
-      File.close();
+      if (!F.is_open())
+        throw compile_program_error("Can not write kernel.spv\n");
+
+      F.write(BegPtr, ImgSize);
+      F.close();
     }
+  } else {
+    std::ifstream File("kernel.spv", std::ios::binary);
+    if (!File.is_open()) {
+      throw compile_program_error("Can not open kernel.spv\n");
+    }
+
+    File.seekg(0, std::ios::end);
+    DeviceProg = vector_class<char>(File.tellg());
+    File.seekg(0);
+    File.read(DeviceProg.data(), DeviceProg.size());
+    File.close();
   }
-  // TODO makes unnecessary copy of the data
-  return *m_SpirvSource.get();
+
+  return DeviceProg;
 }
 
 void ProgramManager::build(cl_program &ClProgram, const string_class &Options,

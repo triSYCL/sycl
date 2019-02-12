@@ -19,6 +19,7 @@ set(LLVM_LINK_COMPONENTS
   Vectorize
   Passes
   ASFixer
+  InSPIRation
   )
 
 # Support plugins.
