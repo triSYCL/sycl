@@ -135,16 +135,16 @@ public:
     cl_int Error = CL_SUCCESS;
     cl_command_queue Queue;
     cl_context ClContext = detail::getSyclObjImpl(m_Context)->getHandleRef();
-#ifdef CL_VERSION_2_0
-    cl_queue_properties CreationFlagProperties[] = {
-        CL_QUEUE_PROPERTIES, CreationFlags, 0};
-    Queue = clCreateCommandQueueWithProperties(
-        ClContext, m_Device.get(), CreationFlagProperties,
-        &Error);
-#else
+// #ifdef CL_VERSION_2_0
+//     cl_queue_properties CreationFlagProperties[] = {
+//         CL_QUEUE_PROPERTIES, CreationFlags, 0};
+//     Queue = clCreateCommandQueueWithProperties(
+//         ClContext, m_Device.get(), CreationFlagProperties,
+//         &Error);
+// #else
     Queue = clCreateCommandQueue(ClContext, m_Device.get(),
                                           CreationFlags, &Error);
-#endif
+// #endif
     CHECK_OCL_CODE(Error);
     // TODO catch an exception and put it to list of asynchronous exceptions
 

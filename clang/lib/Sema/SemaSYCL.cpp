@@ -746,7 +746,12 @@ static std::string constructKernelName(QualType KernelNameType,
 
   MC->mangleTypeName(KernelNameType, Out);
 
-  return Out.str();
+  // Non-mangled name... perhaps some checks are required to prevent accessing
+  // non existing information, relying a lot on checks prior to this.
+  // llvm::errs() << KernelNameType.getBaseTypeIdentifier()->getName() << "\n";
+
+  return KernelNameType.getBaseTypeIdentifier()->getName();
+  // return Out.str();
 }
 
 void Sema::ConstructSYCLKernel(FunctionDecl *KernelCallerFunc) {
