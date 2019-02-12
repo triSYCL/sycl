@@ -5,10 +5,9 @@
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
 //==--------------- math.cpp - SYCL math test ------------------------------==//
 //
-// The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -51,14 +50,15 @@ int main() {
         resultAccessor[wiID.get(0)] += cl::sycl::native::exp(2.f);
         resultAccessor[wiID.get(0)] += cl::sycl::fabs(-2.f);
         resultAccessor[wiID.get(0)] += cl::sycl::fabs(1.0);
+        resultAccessor[wiID.get(0)] += cl::sycl::floor(-3.4);
+        resultAccessor[wiID.get(0)] += cl::sycl::ceil(2.4);
       });
     });
   }
-
   for (size_t i = 0; i < 10; ++i) {
-    /* Result of addition of 2 + 1 + 7.389... + 2 + 1*/
-    assert(result[i] > 13 && result[i] < 14 &&
-           "Expected result[i] > 13 &&  result[i] < 14");
+    /* Result of addition of 2 + 1 + 7.389... + 2 + 1 -4 + 3*/
+    assert(result[i] > 12 && result[i] < 13 &&
+           "Expected result[i] > 12 &&  result[i] < 13");
   }
 
   return 0;

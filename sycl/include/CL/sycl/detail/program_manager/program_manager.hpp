@@ -1,9 +1,8 @@
 //==------ program_manager.hpp --- SYCL program manager---------------------==//
 //
-// The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -51,6 +50,7 @@ namespace detail {
 class ProgramManager {
 public:
   static ProgramManager &getInstance();
+  cl_program createOpenCLProgram(const context &Context);
   cl_program getBuiltOpenCLProgram(const context &Context);
   cl_kernel getOrCreateKernel(const context &Context, const char *KernelName);
   cl_program getClProgramFromClKernel(cl_kernel ClKernel);

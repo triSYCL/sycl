@@ -34,6 +34,12 @@ find_package(OpenCL REQUIRED)
 include_directories(${OpenCL_INCLUDE_DIRS})
 link_libraries(OpenCL)
 
+# Configure SYCL version macro
+set(sycl_inc_dir ${CMAKE_CURRENT_SOURCE_DIR}/include/CL)
+string(TIMESTAMP __SYCL_COMPILER_VERSION "%Y%m%d")
+set(version_header "${sycl_inc_dir}/sycl/version.hpp")
+configure_file("${version_header}.in" "${version_header}")
+
 # Copy SYCL headers
 set(sycl_inc_dir ${CMAKE_CURRENT_SOURCE_DIR}/include/CL)
 set(dst_dir ${LLVM_LIBRARY_OUTPUT_INTDIR}/clang/${CLANG_VERSION}/include/CL)
@@ -68,6 +74,7 @@ set(OPENCL_INCLUDE "${OpenCL_INCLUDE_DIRS}")
 add_library("${SYCLLibrary}" SHARED
   "${includeRootPath}/CL/sycl.hpp"
   "${sourceRootPath}/detail/common.cpp"
+  "${sourceRootPath}/detail/context_impl.cpp"
   "${sourceRootPath}/detail/device_info.cpp"
   "${sourceRootPath}/detail/event_impl.cpp"
   "${sourceRootPath}/detail/force_device.cpp"

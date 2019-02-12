@@ -1,9 +1,8 @@
 //===-- clang-offload-wrapper/ClangOffloadWrapper.cpp ---------------------===//
 //
-//                     The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 ///
@@ -288,7 +287,7 @@ private:
     // Get RegFuncName function declaration.
     auto *RegFuncTy =
         FunctionType::get(Type::getVoidTy(C), {getBinDescPtrTy()}, false);
-    auto *RegFunc = M.getOrInsertFunction(RegFuncName, RegFuncTy);
+    FunctionCallee RegFunc = M.getOrInsertFunction(RegFuncName, RegFuncTy);
 
     // Construct function body
     IRBuilder<> Builder(BasicBlock::Create(C, "entry", Func));
@@ -308,7 +307,7 @@ private:
     // Get UnregFuncName function declaration.
     auto *UnRegFuncTy =
         FunctionType::get(Type::getVoidTy(C), {getBinDescPtrTy()}, false);
-    auto *UnRegFunc = M.getOrInsertFunction(UnregFuncName, UnRegFuncTy);
+    FunctionCallee UnRegFunc = M.getOrInsertFunction(UnregFuncName, UnRegFuncTy);
 
     // Construct function body
     IRBuilder<> Builder(BasicBlock::Create(C, "entry", Func));

@@ -1,15 +1,15 @@
 //==------ program_manager.cpp --- SYCL program manager---------------------==//
 //
-// The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
 #include <CL/sycl/context.hpp>
 #include <CL/sycl/detail/common.hpp>
 #include <CL/sycl/detail/program_manager/program_manager.hpp>
+#include <CL/sycl/device.hpp>
 #include <CL/sycl/exception.hpp>
 #include <CL/sycl/stl.hpp>
 
@@ -32,7 +32,7 @@ static cl_device_id getFirstDevice(cl_context Context) {
   cl_uint NumDevices = 0;
   cl_int Err = clGetContextInfo(Context, CL_CONTEXT_NUM_DEVICES,
                                 sizeof(NumDevices), &NumDevices,
-                                /*param_value_size_ret=*/ nullptr);
+                                /*param_value_size_ret=*/nullptr);
   CHECK_OCL_CODE(Err);
   assert(NumDevices > 0 && "Context without devices?");
 
@@ -55,7 +55,7 @@ static cl_program createBinaryProgram(const cl_context Context,
   cl_uint NumDevices = 0;
   CHECK_OCL_CODE(clGetContextInfo(Context, CL_CONTEXT_NUM_DEVICES,
                                   sizeof(NumDevices), &NumDevices,
-                                  /*param_value_size_ret=*/ nullptr));
+                                  /*param_value_size_ret=*/nullptr));
   assert(NumDevices > 0 &&
          "Only a single device is supported for AOT compilation");
 #endif
@@ -64,10 +64,9 @@ static cl_program createBinaryProgram(const cl_context Context,
   cl_int Err = CL_SUCCESS;
   cl_int BinaryStatus = CL_SUCCESS;
   size_t BinarySize = BinProg.size();
-  const unsigned char *Binary = (const unsigned char *) &BinProg[0];
-  cl_program Program =
-    clCreateProgramWithBinary(Context, 1, &Device, &BinarySize, &Binary,
-                              &BinaryStatus, &Err);
+  const unsigned char *Binary = (const unsigned char *)&BinProg[0];
+  cl_program Program = clCreateProgramWithBinary(
+      Context, 1, &Device, &BinarySize, &Binary, &BinaryStatus, &Err);
   CHECK_OCL_CODE(Err);
 
   return Program;
@@ -112,16 +111,20 @@ static cl_program createProgram(const platform &Platform,
   return Program;
 }
 
+cl_program ProgramManager::createOpenCLProgram(const context &Context) {
+  vector_class<char> DeviceProg = getSpirvSource();
+  cl_context ClContext = detail::getSyclObjImpl(Context)->getHandleRef();
+  const platform &Platform = Context.get_platform();
+  cl_program ClProgram = createProgram(Platform, ClContext, DeviceProg);
+  return ClProgram;
+}
+
 cl_program ProgramManager::getBuiltOpenCLProgram(const context &Context) {
   cl_program &ClProgram = m_CachedSpirvPrograms[Context];
   if (!ClProgram) {
     vector_class<char> DeviceProg = getSpirvSource();
 
-    cl_context ClContext = Context.get();
-    const platform &Platform = Context.get_platform();
-    ClProgram = createProgram(Platform, ClContext, DeviceProg);
-    clReleaseContext(ClContext);
-
+    ClProgram = createOpenCLProgram(Context);
     build(ClProgram);
   }
   return ClProgram;

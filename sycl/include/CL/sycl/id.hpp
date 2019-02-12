@@ -1,9 +1,8 @@
 //==----------- id.hpp --- SYCL iteration id -------------------------==//
 //
-// The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -19,7 +18,7 @@ template <int dimensions> class range;
 template <int dimensions = 1> struct id : public detail::array<dimensions> {
 public:
   using base = detail::array<dimensions>;
-  INLINE_IF_DEVICE id() = default;
+  id() = default;
 
   /* The following constructor is only available in the id struct
    * specialization where: dimensions==1 */
@@ -149,7 +148,7 @@ public:
 };
 
 namespace detail {
-template <int dimensions> INLINE_IF_DEVICE
+template <int dimensions>
 size_t getOffsetForId(range<dimensions> Range, id<dimensions> Id,
                       id<dimensions> Offset) {
   size_t offset = 0;

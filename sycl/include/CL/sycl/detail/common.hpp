@@ -1,9 +1,8 @@
 //==---------- common.hpp ----- Common declarations ------------------------==//
 //
-// The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -73,16 +72,6 @@ const char *stringifyErrorCode(cl_int error);
 #else
 #define ALWAYS_INLINE
 #endif
-
-// TODO this macro is introduced to workaround SPIRV translator problem with
-// dropping linkonce_odr attribute leading to duplicated symbol errors in
-// the bitcode linker for functions defined in the headers. Remove once fixed.
-#ifdef __SYCL_DEVICE_ONLY__
-#define INLINE_IF_DEVICE ALWAYS_INLINE
-#else
-#define INLINE_IF_DEVICE
-#endif // __SYCL_DEVICE_ONLY__
-
 
 namespace cl {
 namespace sycl {

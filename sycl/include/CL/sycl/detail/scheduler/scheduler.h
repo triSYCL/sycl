@@ -1,9 +1,8 @@
 //==----------- scheduler.h ------------------------------------------------==//
 //
-// The LLVM Compiler Infrastructure
-//
-// This file is distributed under the University of Illinois Open Source
-// License. See LICENSE.TXT for details.
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
 
@@ -22,6 +21,7 @@
 #include <iostream>
 #include <map>
 #include <set>
+#include <unordered_set>
 #include <vector>
 
 namespace cl {
@@ -157,6 +157,10 @@ public:
   // Waits for the event passed.
   void waitForEvent(EventImplPtr Event);
 
+  // Calls asynchronous handler for the passed event Event
+  // and for those other events that Event depends on.
+  void throwForEventRecursive(EventImplPtr Event);
+
   // Adds new node to graph, creating an Alloca and MemMove commands if
   // needed.
   cl::sycl::event addNode(Node NewNode);
@@ -190,14 +194,17 @@ public:
   //
   void parallelReadOpt();
 
-  static Scheduler &getInstance() {
-    static Scheduler instance;
-    return instance;
-  }
+  static Scheduler &getInstance();
 
   enum DumpOptions { Text = 0, WholeGraph = 1, RunGraph = 2 };
   bool getDumpFlagValue(DumpOptions DumpOption);
 
+  // Recursively walks through the dependencies and initializes
+  // the given EventsSet with the events that the Event
+  // waits for. The unordered_set is used to collect unuque events,
+  // and the unordered_set is convenient as it does not need operator<().
+  void getDepEventsRecursive(std::unordered_set<cl::sycl::event> &EventsSet,
+                             EventImplPtr Event);
 protected:
   // TODO: Add releasing of OpenCL buffers.
 
@@ -211,7 +218,6 @@ protected:
   // Recursively generates dot records for the command passed and all that the
   // command depends on.
   void printGraphForCommand(CommandPtr Cmd, std::ostream &Stream) const;
-
 private:
   Scheduler();
   ~Scheduler();
@@ -226,6 +232,15 @@ private:
 
   Scheduler(Scheduler const &) = delete;
   Scheduler &operator=(Scheduler const &) = delete;
+
+  // Returns the pointer to the command associated with the given event,
+  // or nullptr if none is found.
+  CommandPtr getCmdForEvent(EventImplPtr Event);
+
+  // Basically it is the helper method for throwForEventRecursive() now.
+  // It calls async handler for the command Cmd and those other
+  // commands that Cmd depends on.
+  void throwForCmdRecursive(std::shared_ptr<Command> Cmd);
 };
 
 } // namespace simple_scheduler
