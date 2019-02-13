@@ -112,7 +112,29 @@ static cl_program createProgram(const platform &Platform,
 }
 
 cl_program ProgramManager::createOpenCLProgram(const context &Context) {
-  vector_class<char> DeviceProg = getSpirvSource();
+  // TODO: This shouldn't just check the first initial device, realistically
+  // there should be some indication of what the primary device is on the
+  // platform/the one the user wishes to use.
+  // Or create a program for the device with the worst support, with the
+  // expectation that newer devices can consume it.
+  // Or create several programs based on the required source.
+  // Perhaps I'm putting to much weight on the device having the right support
+  // however and it should be the platform.
+  auto Devices = Context.get_devices();
+  vector_class<char> DeviceProg;
+  device Device;
+  if (!Devices.empty()) {
+     Device = Devices[0];
+    // Is there a need for two getXSource? Could perhaps unify the
+    // implementations and change the file extension looked for based on
+    // whats supported
+    if (Device.has_extension("cl_khr_il_program")) {
+      DeviceProg = getSpirvSource();
+    } else {
+      DeviceProg = getBinarySource(".bin");
+    }
+  }
+
   cl_context ClContext = detail::getSyclObjImpl(Context)->getHandleRef();
   const platform &Platform = Context.get_platform();
   cl_program ClProgram = createProgram(Platform, ClContext, DeviceProg);
@@ -122,29 +144,6 @@ cl_program ProgramManager::createOpenCLProgram(const context &Context) {
 cl_program ProgramManager::getBuiltOpenCLProgram(const context &Context) {
   cl_program &ClProgram = m_CachedSpirvPrograms[Context];
   if (!ClProgram) {
-    // TODO: This shouldn't just check the first initial device, realistically
-    // there should be some indication of what the primary device is on the
-    // platform/the one the user wishes to use.
-    // Or create a program for the device with the worst support, with the
-    // expectation that newer devices can consume it.
-    // Or create several programs based on the required source.
-    // Perhaps I'm putting to much weight on the device having the right support
-    // however and it should be the platform.
-    auto Devices = Context.get_devices();
-    vector_class<char> DeviceProg;
-    device Device;
-    if (!Devices.empty()) {
-       Device = Devices[0];
-      // Is there a need for two getXSource? Could perhaps unify the
-      // implementations and change the file extension looked for based on
-      // whats supported
-      if (Device.has_extension("cl_khr_il_program")) {
-        DeviceProg = getSpirvSource();
-      } else {
-        DeviceProg = getBinarySource(".bin");
-      }
-    }
-
     ClProgram = createOpenCLProgram(Context);
     build(ClProgram);
   }
