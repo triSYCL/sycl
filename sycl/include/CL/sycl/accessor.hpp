@@ -67,8 +67,8 @@ public:
 
   dataT &operator[](size_t index) {
     ids[accessorDim - 1] = index;
-    return accRef.__impl()->Data[getOffsetForId(
-      accRef.__impl()->Range, ids, accRef.__impl()->Offset)];
+    return accRef.__get_impl()->Data[getOffsetForId(
+      accRef.__get_impl()->Range, ids, accRef.__get_impl()->Offset)];
   }
 };
 
@@ -89,8 +89,8 @@ public:
   typename detail::remove_AS<dataT>::type
   operator[](size_t index) {
     ids[accessorDim - 1] = index;
-    return accRef.__impl()->Data[getOffsetForId(
-      accRef.__impl()->Range, ids, accRef.__impl()->Offset)];
+    return accRef.__get_impl()->Data[getOffsetForId(
+      accRef.__get_impl()->Range, ids, accRef.__get_impl()->Offset)];
   }
 };
 
@@ -125,11 +125,12 @@ SYCL_ACCESSOR_IMPL(isTargetHostAccess(accessTarget) && dimensions == 0) {
 SYCL_ACCESSOR_IMPL(isTargetHostAccess(accessTarget) && dimensions > 0) {
   dataT *Data;
   range<dimensions> Range;
+  range<dimensions> BufRange;
   id<dimensions> Offset;
 
-  accessor_impl(dataT *Data, range<dimensions> Range,
-                id<dimensions> Offset = {})
-      : Data(Data), Range(Range), Offset(Offset) {}
+  accessor_impl(dataT * Data, range<dimensions> Range,
+                range<dimensions> BufRange, id<dimensions> Offset = {})
+      : Data(Data), Range(Range), BufRange(BufRange), Offset(Offset) {}
 
   // Returns the number of accessed elements.
   size_t get_count() const { return Range.size(); }
@@ -146,10 +147,9 @@ SYCL_ACCESSOR_IMPL(!isTargetHostAccess(accessTarget) &&
   // reinterpret casting while setting kernel arguments in order to get cl_mem
   // value from the buffer regardless of the accessor's dimensionality.
 #ifndef __SYCL_DEVICE_ONLY__
-  detail::buffer_impl<dataT, 1> *m_Buf = nullptr;
-
+  detail::buffer_impl<buffer_allocator<char>> *m_Buf = nullptr;
 #else
-  char padding[sizeof(detail::buffer_impl<dataT, dimensions> *)];
+  char padding[sizeof(detail::buffer_impl<buffer_allocator<char>> *)];
 #endif // __SYCL_DEVICE_ONLY__
 
   dataT *Data;
@@ -182,22 +182,23 @@ SYCL_ACCESSOR_IMPL(!isTargetHostAccess(accessTarget) &&
   // reinterpret casting while setting kernel arguments in order to get cl_mem
   // value from the buffer regardless of the accessor's dimensionality.
 #ifndef __SYCL_DEVICE_ONLY__
-  detail::buffer_impl<dataT, dimensions> *m_Buf = nullptr;
+  detail::buffer_impl<buffer_allocator<char>> *m_Buf = nullptr;
 #else
-  char padding[sizeof(detail::buffer_impl<dataT, dimensions> *)];
+  char padding[sizeof(detail::buffer_impl<buffer_allocator<char>> *)];
 #endif // __SYCL_DEVICE_ONLY__
 
   dataT *Data;
   range<dimensions> Range;
+  range<dimensions> BufRange;
   id<dimensions> Offset;
 
   // Device accessors must be associated with a command group handler.
   // The handler though can be nullptr at the creation point if the
   // accessor is a placeholder accessor.
-  accessor_impl(dataT *Data, range<dimensions> Range,
-                handler *Handler = nullptr, id<dimensions> Offset = {})
-      : Data(Data), Range(Range), Offset(Offset)
-  {}
+  accessor_impl(dataT * Data, range<dimensions> Range,
+                range<dimensions> BufRange, handler *Handler = nullptr,
+                id<dimensions> Offset = {})
+      : Data(Data), Range(Range), BufRange(BufRange), Offset(Offset) {}
 
   // Returns the number of accessed elements.
   size_t get_count() const { return Range.size(); }
@@ -306,11 +307,11 @@ protected:
   using _ImplT =
       accessor_impl<dataT, dimensions, accessMode, accessTarget, isPlaceholder>;
 
-  const _ImplT *__impl() const {
+  const _ImplT *__get_impl() const {
     return reinterpret_cast<const _ImplT *>(this);
   }
 
-  _ImplT *__impl() { return reinterpret_cast<_ImplT *>(this); }
+  _ImplT *__get_impl() { return reinterpret_cast<_ImplT *>(this); }
 
   static_assert(
       std::is_same<typename DeviceValueType<dataT, accessTarget>::type,
@@ -346,15 +347,15 @@ SYCL_ACCESSOR_SUBCLASS(accessor_common, accessor_base, true /* always */) {
   size_t get_size() const { return this->get_count() * sizeof(dataT); }
 
   // Returns the number of accessed elements.
-  size_t get_count() const { return this->__impl()->get_count(); }
+  size_t get_count() const { return this->__get_impl()->get_count(); }
 
   template <int Dimensions = dimensions>
   typename std::enable_if<(Dimensions > 0), range<Dimensions>>::type
-  get_range() const { return this->__impl()->Range; }
+  get_range() const { return this->__get_impl()->Range; }
 
   template <int Dimensions = dimensions>
   typename std::enable_if<(Dimensions > 0), id<Dimensions>>::type
-  get_offset() const { return this->__impl()->Offset; }
+  get_offset() const { return this->__get_impl()->Offset; }
 };
 
 SYCL_ACCESSOR_SUBCLASS(accessor_opdata_w, accessor_common,
@@ -364,7 +365,7 @@ SYCL_ACCESSOR_SUBCLASS(accessor_opdata_w, accessor_common,
                         accessMode == access::mode::discard_read_write) &&
                        dimensions == 0) {
   operator dataT &() const {
-    return this->__impl()->Data[0];
+    return this->__get_impl()->Data[0];
   }
 };
 
@@ -375,7 +376,7 @@ SYCL_ACCESSOR_SUBCLASS(accessor_subscript_wn, accessor_opdata_w,
                         accessMode == access::mode::discard_read_write) &&
                        dimensions > 0) {
   dataT &operator[](id<dimensions> index) const {
-    return this->__impl()->Data[getOffsetForId(
+    return this->__get_impl()->Data[getOffsetForId(
       this->get_range(), index, this->get_offset())];
   }
 
@@ -406,7 +407,7 @@ SYCL_ACCESSOR_SUBCLASS(accessor_subscript_w, accessor_subscript_wn,
       getOffsetForId(this->get_range(), index, this->get_offset()));
   }
   dataT &operator[](size_t index) const {
-    return this->__impl()->Data[index];
+    return this->__get_impl()->Data[index];
   }
 };
 
@@ -414,7 +415,7 @@ SYCL_ACCESSOR_SUBCLASS(accessor_opdata_r, accessor_subscript_w,
                        accessMode == access::mode::read && dimensions == 0) {
   using PureType = typename detail::remove_AS<dataT>::type;
   operator PureType() const {
-    return this->__impl()->Data[0];
+    return this->__get_impl()->Data[0];
   }
 };
 
@@ -422,7 +423,7 @@ SYCL_ACCESSOR_SUBCLASS(accessor_subscript_rn, accessor_opdata_r,
                        accessMode == access::mode::read && dimensions > 0) {
   typename detail::remove_AS<dataT>::type
   operator[](id<dimensions> index) const {
-    return this->__impl()->Data[getOffsetForId(
+    return this->__get_impl()->Data[getOffsetForId(
       this->get_range(), index, this->get_offset())];
   }
 
@@ -445,7 +446,7 @@ SYCL_ACCESSOR_SUBCLASS(accessor_subscript_r, accessor_subscript_rn,
   }
   typename detail::remove_AS<dataT>::type
   operator[](size_t index) const {
-    return this->__impl()->Data[index];
+    return this->__get_impl()->Data[index];
   }
 };
 
@@ -467,7 +468,7 @@ SYCL_ACCESSOR_SUBCLASS(accessor_subscript_atomic_eq0, accessor_subscript_r,
       getAddressSpace<accessTarget>::value;
   operator atomic<PureType, addressSpace>() const {
     return atomic<PureType, addressSpace>(
-        multi_ptr<PureType, addressSpace>(&(this->__impl()->Data[0])));
+        multi_ptr<PureType, addressSpace>(&(this->__get_impl()->Data[0])));
   }
 };
 
@@ -480,8 +481,8 @@ SYCL_ACCESSOR_SUBCLASS(accessor_subscript_atomic_gt0,
       getAddressSpace<accessTarget>::value;
   atomic<PureType, addressSpace> operator[](id<dimensions> index) const {
     return atomic<PureType, addressSpace>(
-        multi_ptr<PureType, addressSpace>(&(this->__impl()->Data[getOffsetForId(
-            this->__impl()->Range, index, this->__impl()->Offset)])));
+        multi_ptr<PureType, addressSpace>(&(this->__get_impl()->Data[getOffsetForId(
+            this->__get_impl()->Range, index, this->__get_impl()->Offset)])));
   }
 };
 
@@ -494,7 +495,7 @@ SYCL_ACCESSOR_SUBCLASS(accessor_subscript_atomic_eq1,
       getAddressSpace<accessTarget>::value;
   atomic<PureType, addressSpace> operator[](size_t index) const {
     return atomic<PureType, addressSpace>(
-        multi_ptr<PureType, addressSpace>(&(this->__impl()->Data[index])));
+        multi_ptr<PureType, addressSpace>(&(this->__get_impl()->Data[index])));
   }
 };
 
@@ -509,7 +510,7 @@ SYCL_ACCESSOR_SUBCLASS(accessor_pointer, accessor_subscript_atomic_eq1, true) {
   typename std::enable_if<(AccessTarget == access::target::host_buffer),
                           dataT *>::type
   get_pointer() const {
-    return this->__impl()->Data;
+    return this->__get_impl()->Data;
   }
   /* Available only when: accessTarget == access::target::global_buffer */
   template <typename DataT = typename detail::remove_AS<dataT>::type,
@@ -517,7 +518,7 @@ SYCL_ACCESSOR_SUBCLASS(accessor_pointer, accessor_subscript_atomic_eq1, true) {
   typename std::enable_if<(AccessTarget == access::target::global_buffer),
                           global_ptr<DataT>>::type
   get_pointer() const {
-    return global_ptr<DataT>(this->__impl()->Data);
+    return global_ptr<DataT>(this->__get_impl()->Data);
   }
   /* Available only when: accessTarget == access::target::constant_buffer */
   template <typename DataT = typename detail::remove_AS<dataT>::type,
@@ -525,7 +526,7 @@ SYCL_ACCESSOR_SUBCLASS(accessor_pointer, accessor_subscript_atomic_eq1, true) {
   typename std::enable_if<(AccessTarget == access::target::constant_buffer),
                           constant_ptr<DataT>>::type
   get_pointer() const {
-    return constant_ptr<DataT>(this->__impl()->Data);
+    return constant_ptr<DataT>(this->__get_impl()->Data);
   }
   /* Available only when: accessTarget == access::target::local */
   template <typename DataT = typename detail::remove_AS<dataT>::type,
@@ -533,7 +534,7 @@ SYCL_ACCESSOR_SUBCLASS(accessor_pointer, accessor_subscript_atomic_eq1, true) {
   typename std::enable_if<(AccessTarget == access::target::local),
                           local_ptr<DataT>>::type
   get_pointer() const {
-    return local_ptr<DataT>(this->__impl()->Data);
+    return local_ptr<DataT>(this->__get_impl()->Data);
   }
 };
 
@@ -633,8 +634,8 @@ public:
 #ifdef __SYCL_DEVICE_ONLY__
       ; // This ctor can't be used in device code, so no need to define it.
 #else // !__SYCL_DEVICE_ONLY__
-      : __impl(detail::getSyclObjImpl(bufferRef)->BufPtr,
-               detail::getSyclObjImpl(bufferRef)->Range,
+      : __impl((dataT *)detail::getSyclObjImpl(bufferRef)->BufPtr,
+               bufferRef.get_range(), bufferRef.get_range(),
                &commandGroupHandlerRef) {
     auto BufImpl = detail::getSyclObjImpl(bufferRef);
     if (BufImpl->OpenCLInterop && !BufImpl->isValidAccessToMem(accessMode)) {
@@ -669,8 +670,8 @@ public:
                AccessTarget == access::target::constant_buffer))) &&
             Dimensions > 0),
            buffer<DataT, Dimensions>>::type &bufferRef)
-      : __impl(detail::getSyclObjImpl(bufferRef)->BufPtr,
-               detail::getSyclObjImpl(bufferRef)->Range) {
+      : __impl((dataT *)detail::getSyclObjImpl(bufferRef)->BufPtr,
+               bufferRef.get_range(), bufferRef.get_range()) {
     auto BufImpl = detail::getSyclObjImpl(bufferRef);
     if (AccessTarget == access::target::host_buffer) {
       if (BufImpl->OpenCLInterop) {
@@ -701,17 +702,17 @@ public:
             access::target AccessTarget = accessTarget,
             access::placeholder IsPlaceholder = isPlaceholder>
   accessor(typename std::enable_if<
-           (IsPlaceholder == access::placeholder::false_t &&
-            (AccessTarget == access::target::global_buffer ||
-             AccessTarget == access::target::constant_buffer) &&
-            Dimensions > 0),
-           buffer<DataT, Dimensions>>::type &bufferRef,
+               (IsPlaceholder == access::placeholder::false_t &&
+                (AccessTarget == access::target::global_buffer ||
+                 AccessTarget == access::target::constant_buffer) &&
+                Dimensions > 0),
+               buffer<DataT, Dimensions>>::type &bufferRef,
            handler &commandGroupHandlerRef)
 #ifdef __SYCL_DEVICE_ONLY__
       ; // This ctor can't be used in device code, so no need to define it.
 #else
-      : __impl(detail::getSyclObjImpl(bufferRef)->BufPtr,
-               detail::getSyclObjImpl(bufferRef)->Range,
+      : __impl((dataT *)detail::getSyclObjImpl(bufferRef)->BufPtr,
+               bufferRef.get_range(), bufferRef.get_range(),
                &commandGroupHandlerRef) {
     auto BufImpl = detail::getSyclObjImpl(bufferRef);
     if (BufImpl->OpenCLInterop && !BufImpl->isValidAccessToMem(accessMode)) {
@@ -739,20 +740,19 @@ public:
             access::target AccessTarget = accessTarget,
             access::placeholder IsPlaceholder = isPlaceholder>
   accessor(typename std::enable_if<
-           ((IsPlaceholder == access::placeholder::false_t &&
-             AccessTarget == access::target::host_buffer) ||
-            (IsPlaceholder == access::placeholder::true_t &&
-             (AccessTarget == access::target::global_buffer ||
-              AccessTarget == access::target::constant_buffer) &&
-             Dimensions > 0)),
-           buffer<DataT, Dimensions>>::type &bufferRef,
-           range<Dimensions> Range,
-           id<Dimensions> Offset = {}
-          )
+               ((IsPlaceholder == access::placeholder::false_t &&
+                 AccessTarget == access::target::host_buffer) ||
+                (IsPlaceholder == access::placeholder::true_t &&
+                 (AccessTarget == access::target::global_buffer ||
+                  AccessTarget == access::target::constant_buffer) &&
+                 Dimensions > 0)),
+               buffer<DataT, Dimensions>>::type &bufferRef,
+           range<Dimensions> Range, id<Dimensions> Offset = {})
 #ifdef __SYCL_DEVICE_ONLY__
       ; // This ctor can't be used in device code, so no need to define it.
-#else // !__SYCL_DEVICE_ONLY__
-      : __impl(detail::getSyclObjImpl(bufferRef)->BufPtr, Range, Offset) {
+#else   // !__SYCL_DEVICE_ONLY__
+      : __impl(detail::getSyclObjImpl(bufferRef)->BufPtr, Range,
+               bufferRef.get_range(), Offset) {
     auto BufImpl = detail::getSyclObjImpl(bufferRef);
     if (AccessTarget == access::target::host_buffer) {
       if (BufImpl->OpenCLInterop) {
@@ -769,7 +769,7 @@ public:
           "interoperability buffer");
     }
   }
-#endif // !__SYCL_DEVICE_ONLY__
+#endif  // !__SYCL_DEVICE_ONLY__
 
   // buffer ctor #6:
   //   accessor(buffer &, handler &, range Range, id Offset);
@@ -784,20 +784,18 @@ public:
             access::target AccessTarget = accessTarget,
             access::placeholder IsPlaceholder = isPlaceholder>
   accessor(typename std::enable_if<
-           (IsPlaceholder == access::placeholder::false_t &&
-            (AccessTarget == access::target::global_buffer ||
-             AccessTarget == access::target::constant_buffer) &&
-            Dimensions > 0),
-           buffer<DataT, Dimensions>>::type &bufferRef,
-           handler &commandGroupHandlerRef,
-           range<Dimensions> Range,
-           id<Dimensions> Offset = {}
-          )
+               (IsPlaceholder == access::placeholder::false_t &&
+                (AccessTarget == access::target::global_buffer ||
+                 AccessTarget == access::target::constant_buffer) &&
+                Dimensions > 0),
+               buffer<DataT, Dimensions>>::type &bufferRef,
+           handler &commandGroupHandlerRef, range<Dimensions> Range,
+           id<Dimensions> Offset = {})
 #ifdef __SYCL_DEVICE_ONLY__
       ; // This ctor can't be used in device code, so no need to define it.
-#else // !__SYCL_DEVICE_ONLY__
-      : __impl(detail::getSyclObjImpl(bufferRef)->BufPtr, Range,
-               &commandGroupHandlerRef, Offset) {
+#else   // !__SYCL_DEVICE_ONLY__
+      : __impl((dataT *)detail::getSyclObjImpl(bufferRef)->BufPtr, Range,
+               bufferRef.get_range(), &commandGroupHandlerRef, Offset) {
     auto BufImpl = detail::getSyclObjImpl(bufferRef);
     if (BufImpl->OpenCLInterop && !BufImpl->isValidAccessToMem(accessMode)) {
       throw cl::sycl::runtime_error(
@@ -807,7 +805,7 @@ public:
     commandGroupHandlerRef.AddBufDep<AccessMode, AccessTarget>(*BufImpl);
     __impl.m_Buf = BufImpl.get();
   }
-#endif // !__SYCL_DEVICE_ONLY__
+#endif  // !__SYCL_DEVICE_ONLY__
 
   // TODO:
   // local accessor ctor #1
