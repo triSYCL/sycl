@@ -128,6 +128,9 @@ cl_program ProgramManager::createOpenCLProgram(const context &Context) {
     // Is there a need for two getXSource? Could perhaps unify the
     // implementations and change the file extension looked for based on
     // whats supported
+    // TOOD: Unify these calls or just use getSpirvSource, which involves
+    // changing the Makefile a little (change the xocc -l stage extension
+    // from .bin to .spv output)
     if (Device.has_extension("cl_khr_il_program")) {
       DeviceProg = getSpirvSource();
     } else {
@@ -174,16 +177,29 @@ const vector_class<char> ProgramManager::getBinarySource(std::string FileExtensi
   // TODO FIXME make this function thread-safe
   vector_class<char> DeviceProg;
 
-  std::ifstream File("kernel" + FileExtension, std::ios::binary);
-  if (!File.is_open()) {
-    throw compile_program_error(("Can not open kernel" + FileExtension + "\n").c_str());
-  }
+  if (DeviceImages) {
+    const __tgt_device_image &Img = DeviceImages->DeviceImages[0];
+    auto *BegPtr = reinterpret_cast<const char *>(Img.ImageStart);
+    auto *EndPtr = reinterpret_cast<const char *>(Img.ImageEnd);
+    ptrdiff_t ImgSize = EndPtr - BegPtr;
+    DeviceProg.clear();
+    DeviceProg.resize(static_cast<size_t>(ImgSize));
 
-  File.seekg(0, std::ios::end);
-  DeviceProg = vector_class<char>(File.tellg());
-  File.seekg(0);
-  File.read(DeviceProg.data(), DeviceProg.size());
-  File.close();
+    // TODO this code is expected to be heavily refactored, this copying
+    // might be redundant (unless we don't want to work on live .rodata)
+    std::copy(BegPtr, EndPtr, DeviceProg.begin());
+  } else {
+    std::ifstream File("kernel" + FileExtension, std::ios::binary);
+    if (!File.is_open()) {
+      throw compile_program_error(("Can not open kernel" + FileExtension + "\n").c_str());
+    }
+
+    File.seekg(0, std::ios::end);
+    DeviceProg = vector_class<char>(File.tellg());
+    File.seekg(0);
+    File.read(DeviceProg.data(), DeviceProg.size());
+    File.close();
+  }
 
   return DeviceProg;
 }

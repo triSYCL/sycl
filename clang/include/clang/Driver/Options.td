@@ -1695,6 +1695,10 @@ def fstrict_overflow : Flag<["-"], "fstrict-overflow">, Group<f_Group>;
 def fsycl : Flag<["-"], "fsycl">, Group<f_Group>, Flags<[CC1Option, NoArgumentUnused]>,
   HelpText<"generate SYCL code.">;
 def fno_sycl : Flag<["-"], "fno-sycl">, Group<f_Group>, Flags<[NoArgumentUnused]>;
+def fsycl_xocc_device : Flag<["-"], "fsycl-xocc-device">, Flags<[DriverOption, CC1Option]>,
+  HelpText<"Convert LLVM bitcode to be consumable by Xilinx XOCC for FPGA consumption, "
+           "this is a temporary flag ideally this would be detected via device triple, but the current "
+           "SYCL implementation uses the spir64 flag to also target SPIR-V.">;
 def fsycl_targets_EQ : CommaJoined<["-"], "fsycl-targets=">, Flags<[DriverOption, CC1Option]>,
   HelpText<"Specify comma-separated list of triples SYCL offloading targets to be supported">;
 def fsycl_add_targets_EQ : CommaJoined<["-"], "fsycl-add-targets=">, Flags<[DriverOption]>,

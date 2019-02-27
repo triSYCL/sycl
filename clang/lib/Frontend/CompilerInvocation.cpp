@@ -2883,6 +2883,7 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   }
 
   Opts.SYCL = Args.hasArg(options::OPT_fsycl_is_device);
+  Opts.SYCLXOCCDevice = Args.hasArg(options::OPT_fsycl_xocc_device);
   Opts.SYCLUseBitcode = Args.hasFlag(options::OPT_fsycl_use_bitcode,
                                      options::OPT_fno_sycl_use_bitcode, false);
 

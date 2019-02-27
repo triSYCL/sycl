@@ -739,19 +739,19 @@ static std::string eraseAnonNamespace(std::string S) {
 // Creates a mangled kernel name for given kernel name type
 static std::string constructKernelName(QualType KernelNameType,
                                        ASTContext &AC) {
-  std::unique_ptr<MangleContext> MC(AC.createMangleContext());
-
   SmallString<256> Result;
   llvm::raw_svector_ostream Out(Result);
 
-  MC->mangleTypeName(KernelNameType, Out);
+  if (AC.getLangOpts().SYCLXOCCDevice) {
+    // Non-mangled name... perhaps some checks are required to prevent accessing
+    // non existing information, relying a lot on checks prior to this.
+    return KernelNameType.getBaseTypeIdentifier()->getName();
+  } else {
+    std::unique_ptr<MangleContext> MC(AC.createMangleContext());
 
-  // Non-mangled name... perhaps some checks are required to prevent accessing
-  // non existing information, relying a lot on checks prior to this.
-  // llvm::errs() << KernelNameType.getBaseTypeIdentifier()->getName() << "\n";
-
-  return KernelNameType.getBaseTypeIdentifier()->getName();
-  // return Out.str();
+    MC->mangleTypeName(KernelNameType, Out);
+    return Out.str();
+  }
 }
 
 void Sema::ConstructSYCLKernel(FunctionDecl *KernelCallerFunc) {

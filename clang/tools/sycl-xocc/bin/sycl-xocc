@@ -1,0 +1,65 @@
+#!/bin/bash
+# This is an extra layer of abstraction on top of the shell invocing the
+# XOCC compiler. As SPIR/LLVM-IR is a second class citizen in XOCC for the
+# moment it has some little niggling details that need worked on and the idea
+# is that this script will work around those with some aid from Clang/LLVM.
+#
+# One of the main examples is that XOCC can only compile one kernel from LLVM-BC
+# at a time and it requires the kernels name (also required for kernel specific
+# optimizations). This poses a problem as there can be multiple kernels in a
+# file. And when making a normal naked xocc -c command in the driver
+# you won't have the neccesarry information as the command is generated before
+# the file's have even started to be compiled (Perhaps there is that I am
+# unaware of). So no kernel names and no idea how many xocc commands you'd need
+# to generate per file (no idea how many kernels are in a file).
+#
+# This works around that by having the driver create an opt pass that generates
+# an intermediate file with the needed information that we eat up and can then
+# loop over each kernel in a file. It's simple at the moment just kernel names,
+# but could expand in the future to include optimization information for each
+# kernel.
+#
+# Arguments:
+# $1 == xocc's real shell invocation that invokes the xocc compiler
+# $2 == -c or -l for the current xocc stage
+# $3 == data file contianing all of our lovely kernel names that we wish to
+#       compile
+# $4 == our .xpirbc input file or the name of our linker output file
+# $5 == temporary file directory to place intermediate .xo files or to retrieve
+#       intermediate .xo files for linking when -l speciifed
+
+usage() { echo xocc_compile: error: $2 >&2; exit $1; }
+
+[ $# -eq 0      ] && usage 1 "no xocc shell or bin"
+[ $# -eq 0      ] && usage 2 "no compilation option specified"
+[ $# -eq 0      ] && usage 3 "no data file"
+
+# load in our information file to a shell variable
+DATA=$(<$3)
+
+if [[ $2 = "-c" ]]; then
+  [ $# -eq 0      ] && usage 4 "no xpirbc input file"
+  [ $# -eq 0      ] && usage 5 "no file directory for output specified"
+
+  while IFS= read -r X
+  do
+  if [[ -n "$X" ]]; then
+    $1 --target $XCL_EMULATION_MODE --platform xilinx_vcu1525_dynamic_5_1 \
+      --save-temps -c -k $X -o $5/$X.xo $4
+  fi
+  done <<< $DATA
+elif [[ $2 = "-l" ]]; then
+  [ $# -eq 0      ] && usage 4 "no output file specified"
+  [ $# -eq 0      ] && usage 5 "no directory containing .xo's to link specified"
+
+  LINKER_LIST=""
+  while IFS= read -r X
+  do
+  if [[ -n "$X" ]]; then
+      LINKER_LIST="$5/$X.xo $LINKER_LIST"
+  fi
+  done <<< $DATA
+
+  $1 --target $XCL_EMULATION_MODE --platform xilinx_vcu1525_dynamic_5_1 -l \
+    --save-temps -o $4 $LINKER_LIST
+fi

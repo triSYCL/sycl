@@ -48,7 +48,7 @@ struct InSPIRation : public ModulePass {
 
 
   bool doInitialization(Module &M) override {
-    LLVM_DEBUG(errs() << "Enter: " << M.getModuleIdentifier() << "\n\n");
+    // LLVM_DEBUG(dbgs() << "Enter: " << M.getModuleIdentifier() << "\n\n");
 
     // Do not change the code
     return false;
@@ -56,7 +56,7 @@ struct InSPIRation : public ModulePass {
 
 
   bool doFinalization(Module &M) override {
-    LLVM_DEBUG(errs() << "Exit: " << M.getModuleIdentifier() << "\n\n");
+    // LLVM_DEBUG(dbgs() << "Exit: " << M.getModuleIdentifier() << "\n\n");
     // Do not change the code
     return false;
   }

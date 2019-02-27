@@ -3527,6 +3527,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                      options::OPT_fno_sycl_use_bitcode, true)) {
       CmdArgs.push_back("-fsycl-use-bitcode");
     }
+    if (Args.hasArg(options::OPT_fsycl_xocc_device)) {
+      CmdArgs.push_back("-fsycl-xocc-device");
+    }
   }
 
   if (IsOpenMPDevice) {
@@ -3605,7 +3608,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                JA.getType() == types::TY_LTO_BC) {
       CmdArgs.push_back("-emit-llvm-bc");
     } else if (JA.getType() == types::TY_PP_Asm) {
-      CmdArgs.push_back("-S");
+      if (IsSYCLOffloadDevice && IsSYCLDevice &&
+          Args.hasArg(options::OPT_fsycl_xocc_device)) {
+        CmdArgs.push_back("-emit-llvm");
+      } else {
+        CmdArgs.push_back("-S");
+      }
     } else if (JA.getType() == types::TY_AST) {
       CmdArgs.push_back("-emit-pch");
     } else if (JA.getType() == types::TY_ModuleFile) {
