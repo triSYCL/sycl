@@ -146,7 +146,7 @@ const char *SYCL::AssemblerXOCC::constructOptCommand(
 
   // Just slightly modified bc output, but xocc won't take .bc named files..
   std::string TmpFileName = C.getDriver().GetTemporaryPath(
-      Inputs[0].getBaseInput() + "-optimized", "xpirbc");
+      std::string(Inputs[0].getBaseInput()) + "-optimized", "xpirbc");
   const char *OutputFileName =
       C.addTempFile(C.getArgs().MakeArgString(TmpFileName));
   CmdArgs.push_back(OutputFileName);
@@ -177,7 +177,7 @@ const char *SYCL::AssemblerXOCC::constructLLVMLinkCommand(
   // Add an intermediate output file.
   CmdArgs.push_back("-o");
   SmallString<128> TmpName(C.getDriver().GetTemporaryPath(
-                           Inputs[0].getBaseInput() + "-linked", "xpirbc"));
+      std::string(Inputs[0].getBaseInput()) + "-linked", "xpirbc"));
   const char *OutputFileName =
       C.addTempFile(C.getArgs().MakeArgString(TmpName));
   CmdArgs.push_back(OutputFileName);
@@ -207,8 +207,8 @@ const char *SYCL::AssemblerXOCC::constructXOCCCompileCommand(
   // OutputFileDir
   SmallString<256> KernelNameFile;
   path::system_temp_directory(true, KernelNameFile);
-  path::append(KernelNameFile, "KernelNames_" +
-                          std::string(Inputs[0].getBaseInput()));
+  path::append(KernelNameFile,
+               "KernelNames_" + std::string(Inputs[0].getBaseInput()));
   path::replace_extension(KernelNameFile, "txt",
                                      path::Style::native);
   CmdArgs.push_back(C.getArgs().MakeArgString(KernelNameFile));
@@ -464,10 +464,6 @@ SYCLToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
 }
 
 Tool *SYCLToolChain::SelectTool(const JobAction &JA) const {
-  llvm::errs() << "Selecting Tools isXOCCCompilation? "  << isXOCCCompilation << "\n";
-  llvm::errs() << "Selecting Tool For Job: " << JA.getClassName() << "\n";
-  llvm::errs() << "For which target triple: " << getTriple().getTriple() << "\n";
-
   switch (JA.getKind()) {
   case Action::LinkJobClass:
     if (!Linker) {
@@ -506,4 +502,3 @@ void SYCLToolChain::AddClangCXXStdlibIncludeArgs(const ArgList &Args,
                                                  ArgStringList &CC1Args) const {
   HostTC.AddClangCXXStdlibIncludeArgs(Args, CC1Args);
 }
-

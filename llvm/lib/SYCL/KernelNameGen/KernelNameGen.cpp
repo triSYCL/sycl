@@ -57,8 +57,6 @@ struct KernelNameGen : public ModulePass {
 
   /// Visit all the functions of the module
   bool runOnModule(Module &M) override {
-    llvm::errs() << "KernelNameGen Opt Module Executing \n";
-
     // funcCount is for naming new name for each function called in kernel
     int funcCount = 0, kernelCount = 0, counter = 0;
 
