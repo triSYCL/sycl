@@ -12,37 +12,45 @@
 
 namespace cl {
 namespace __spirv {
-typedef size_t size_t_vec __attribute__((ext_vector_type(3)));
+// TODO: Perhaps encapsulate them more similarly to SPIRV and see if they work  
+#ifdef __SYCL_SPIR_DEVICE__
+  size_t get_global_size(uint dimindx);
+  size_t get_local_size(uint dimindx);
+  size_t get_global_id(uint dimindx);
+  size_t get_local_id(uint dimindx);
+  size_t get_global_offset(uint dimindx);
+  size_t get_group_id(uint dimindx);
+#endif
+  typedef size_t size_t_vec __attribute__((ext_vector_type(3)));
 
-extern const __constant size_t_vec VarGlobalSize;
-extern const __constant size_t_vec VarGlobalInvocationId;
-extern const __constant size_t_vec VarWorkgroupSize;
-extern const __constant size_t_vec VarLocalInvocationId;
-extern const __constant size_t_vec VarWorkgroupId;
-extern const __constant size_t_vec VarGlobalOffset;
+  extern const __constant size_t_vec VarGlobalSize;
+  extern const __constant size_t_vec VarGlobalInvocationId;
+  extern const __constant size_t_vec VarWorkgroupSize;
+  extern const __constant size_t_vec VarLocalInvocationId;
+  extern const __constant size_t_vec VarWorkgroupId;
+  extern const __constant size_t_vec VarGlobalOffset;
 
-#define DEFINE_INT_ID_TO_XYZ_CONVERTER(POSTFIX)                                \
-  template <int ID> static size_t get##POSTFIX();                              \
-  template <> static size_t get##POSTFIX<0>() { return Var##POSTFIX.x; }       \
-  template <> static size_t get##POSTFIX<1>() { return Var##POSTFIX.y; }       \
-  template <> static size_t get##POSTFIX<2>() { return Var##POSTFIX.z; }
+  #define DEFINE_INT_ID_TO_XYZ_CONVERTER(POSTFIX)                                \
+    template <int ID> static size_t get##POSTFIX();                              \
+    template <> static size_t get##POSTFIX<0>() { return Var##POSTFIX.x; }       \
+    template <> static size_t get##POSTFIX<1>() { return Var##POSTFIX.y; }       \
+    template <> static size_t get##POSTFIX<2>() { return Var##POSTFIX.z; }
 
-DEFINE_INT_ID_TO_XYZ_CONVERTER(GlobalSize);
-DEFINE_INT_ID_TO_XYZ_CONVERTER(GlobalInvocationId)
-DEFINE_INT_ID_TO_XYZ_CONVERTER(WorkgroupSize)
-DEFINE_INT_ID_TO_XYZ_CONVERTER(LocalInvocationId)
-DEFINE_INT_ID_TO_XYZ_CONVERTER(WorkgroupId)
-DEFINE_INT_ID_TO_XYZ_CONVERTER(GlobalOffset)
+  DEFINE_INT_ID_TO_XYZ_CONVERTER(GlobalSize);
+  DEFINE_INT_ID_TO_XYZ_CONVERTER(GlobalInvocationId)
+  DEFINE_INT_ID_TO_XYZ_CONVERTER(WorkgroupSize)
+  DEFINE_INT_ID_TO_XYZ_CONVERTER(LocalInvocationId)
+  DEFINE_INT_ID_TO_XYZ_CONVERTER(WorkgroupId)
+  DEFINE_INT_ID_TO_XYZ_CONVERTER(GlobalOffset)
 
-#undef DEFINE_INT_ID_TO_XYZ_CONVERTER
+  #undef DEFINE_INT_ID_TO_XYZ_CONVERTER
 
-extern const __constant uint32_t VarSubgroupSize;
-extern const __constant uint32_t VarSubgroupMaxSize;
-extern const __constant uint32_t VarNumSubgroups;
-extern const __constant uint32_t VarNumEnqueuedSubgroups;
-extern const __constant uint32_t VarSubgroupId;
-extern const __constant uint32_t VarSubgroupLocalInvocationId;
-
+  extern const __constant uint32_t VarSubgroupSize;
+  extern const __constant uint32_t VarSubgroupMaxSize;
+  extern const __constant uint32_t VarNumSubgroups;
+  extern const __constant uint32_t VarNumEnqueuedSubgroups;
+  extern const __constant uint32_t VarSubgroupId;
+  extern const __constant uint32_t VarSubgroupLocalInvocationId;
 } // namespace __spirv
 } // namespace cl
 #endif // __SYCL_DEVICE_ONLY__

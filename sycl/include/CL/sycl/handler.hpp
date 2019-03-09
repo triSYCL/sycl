@@ -25,15 +25,6 @@
 #include <memory>
 #include <type_traits>
 
-#ifdef __SYCL_DEVICE_ONLY__
-size_t get_global_size(uint dimindx);
-size_t get_local_size(uint dimindx);
-size_t get_global_id(uint dimindx);
-size_t get_local_id(uint dimindx);
-size_t get_global_offset(uint dimindx);
-size_t get_group_id(uint dimindx);
-#endif
-
 template <typename T_src, int dim_src, cl::sycl::access::mode mode_src,
           cl::sycl::access::target tgt_src, typename T_dest, int dim_dest,
           cl::sycl::access::mode mode_dest, cl::sycl::access::target tgt_dest,
@@ -303,11 +294,13 @@ public:
                               KernelType>::type kernelFunc) {
     id<dimensions> global_id;
 
+#ifdef __SYCL_SPIR_DEVICE__
     for (int i = 0; i < dimensions; ++i) {
-       global_id[i] = get_global_id(i);
+       global_id[i] = cl::__spirv::get_global_id(i);
     }
-
-    // detail::initGlobalInvocationId<dimensions>(global_id);
+#else
+    detail::initGlobalInvocationId<dimensions>(global_id);
+#endif
 
     kernelFunc(global_id);
   }
@@ -321,14 +314,15 @@ public:
     id<dimensions> global_id;
     range<dimensions> global_size;
 
+#ifdef __SYCL_SPIR_DEVICE__
     for (int i = 0; i < dimensions; ++i) {
-      global_id[i] = get_global_id(i);
-      global_size[i] = get_global_size(i);
+      global_id[i] = cl::__spirv::get_global_id(i);
+      global_size[i] = cl::__spirv::get_global_size(i);
     }
-
-    // detail::initGlobalInvocationId<dimensions>(global_id);
-    // detail::initGlobalSize<dimensions>(global_size);
-
+#else
+    detail::initGlobalInvocationId<dimensions>(global_id);
+    detail::initGlobalSize<dimensions>(global_size);
+#endif
     item<dimensions, false> Item =
         detail::Builder::createItem<dimensions, false>(global_size, global_id);
     kernelFunc(Item);
@@ -347,21 +341,23 @@ public:
     id<dimensions> local_id;
     id<dimensions> global_offset;
 
+#ifdef __SYCL_SPIR_DEVICE__
     for (int i = 0; i < dimensions; ++i) {
-      global_size[i] = get_global_size(i);
-      local_size[i] = get_local_size(i);
-      group_id[i] = get_group_id(i);
-      global_id[i] = get_global_id(i);
-      local_id[i] = get_local_id(i);
-      global_offset[i] = get_global_offset(i);
+      global_size[i] = cl::__spirv::get_global_size(i);
+      local_size[i] = cl::__spirv::get_local_size(i);
+      group_id[i] = cl::__spirv::get_group_id(i);
+      global_id[i] = cl::__spirv::get_global_id(i);
+      local_id[i] = cl::__spirv::get_local_id(i);
+      global_offset[i] = cl::__spirv::get_global_offset(i);
     }
-
-    // detail::initGlobalSize<dimensions>(global_size);
-    // detail::initWorkgroupSize<dimensions>(local_size);
-    // detail::initWorkgroupId<dimensions>(group_id);
-    // detail::initGlobalInvocationId<dimensions>(global_id);
-    // detail::initLocalInvocationId<dimensions>(local_id);
-    // detail::initGlobalOffset<dimensions>(global_offset);
+#else
+    detail::initGlobalSize<dimensions>(global_size);
+    detail::initWorkgroupSize<dimensions>(local_size);
+    detail::initWorkgroupId<dimensions>(group_id);
+    detail::initGlobalInvocationId<dimensions>(global_id);
+    detail::initLocalInvocationId<dimensions>(local_id);
+    detail::initGlobalOffset<dimensions>(global_offset);
+#endif
 
     group<dimensions> Group = detail::Builder::createGroup<dimensions>(
         global_size, local_size, group_id);

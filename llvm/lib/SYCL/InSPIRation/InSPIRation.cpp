@@ -38,6 +38,12 @@ using namespace llvm;
 // namespace
 namespace {
 
+// avoid recreation of regex's we won't alter at runtime
+// matches spirv ocl namespace
+static std::regex matchSPIRVOCL {"(_Z[0-9]+__spirv_ocl_)"};
+// matches number between Z and _ (?<=Z)(\\d+)(?=_)
+static std::regex matchZVal {"(\\d)(\\d+)(?=_)"};
+
 /// Transform the SYCL kernel functions into SPIR-compatible kernels
 struct InSPIRation : public ModulePass {
 
@@ -46,6 +52,32 @@ struct InSPIRation : public ModulePass {
 
   InSPIRation() : ModulePass(ID) {}
 
+  // Welcome to the world of assumptions, this works assuming the spirv
+  // namespace in the SYCL namespace remains the same and assuming that the
+  // functions are the same name as the spir built-ins.
+  void renameSPIRVIntrinsicToSPIR(Function &F) {
+    auto func_name = F.getName().str();
+    auto regex_name = std::regex_replace(func_name,
+                                         matchSPIRVOCL,
+                                         "");
+
+    if (func_name != regex_name) {
+      std::cmatch capture;
+      if (std::regex_search(func_name.c_str(), capture, matchZVal)) {
+        auto zVal = std::stoi(capture[0]);
+
+       // The poor mans mangling to a spir builtin, we know that the function
+       // type itself is fine, we just need to work out the _Z mangling as spir
+       // built-ins don't sit inside a namespace. All _Z is in this case is the
+       // number of characters in the functions name which we can work out by
+       // removing the number of characters in __spirv_ocl_ (12) from the
+       // original mangled names _Z value.
+       // SPIR manglings for reference:
+       // https://github.com/KhronosGroup/SPIR-Tools/wiki/SPIR-2.0-built-in-functions
+       F.setName("_Z" + std::to_string(zVal - 12) + regex_name);
+      }
+    }
+  }
 
   bool doInitialization(Module &M) override {
     // LLVM_DEBUG(dbgs() << "Enter: " << M.getModuleIdentifier() << "\n\n");
@@ -142,6 +174,8 @@ struct InSPIRation : public ModulePass {
     // funcCount is for naming new name for each function called in kernel
     int funcCount = 0, kernelCount = 0, counter = 0;
 
+    std::vector<Function*> declarations;
+
     for (auto &F : M.functions()) {
         if (isKernel(F)) {
           kernelSPIRify(F);
@@ -201,7 +235,22 @@ struct InSPIRation : public ModulePass {
           // counter = 0;
           // for (auto &B : F)
           //   B.setName("label_" + Twine{counter++});
+      } else if (isTransitiveNonIntrinsicFunc(F)
+                  && F.isDeclaration()) {
+        // push back intrinsics to make sure we handle naming after changing the
+        // name of all functions to sycl_func.
+        // Note: if we stop the renaming of all functions to sycl_func_N a more
+        // complex modification to this pass may be required that makes sure all
+        // functions on the device with the same name as a built-in are changed
+        // so they have no conflicts with the built-in functions.  
+        declarations.push_back(&F);
       }
+    }
+
+    for (auto F : declarations) {
+      // aims to catch things preceded by a namespace of the style:
+      // _Z16__spirv_ocl_ and use the end section as a SPIR call
+      renameSPIRVIntrinsicToSPIR(*F);
     }
 
     setSPIRVersion(M);
