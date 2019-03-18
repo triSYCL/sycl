@@ -2,9 +2,14 @@
   Attempt at translating SDAccel Examples edge_detection example to SYCL
 
   Intel compile example command (use intel_selector from device_selectors.hpp):
-  $ISYCL_BIN_DIR/clang++ -std=c++14 -fsycl edge_detection.cpp -o \
+  $ISYCL_BIN_DIR/clang++ -std=c++17 -fsycl edge_detection.cpp -o \
     edge_detection -lsycl -lOpenCL `pkg-config --libs opencv`
 
+  NOTE: POCL won't actually work with this example because it uses std::sqrt
+    POCL doesn't have the appropriate SPIR builtin manglings in it's library
+    so it doesn't execute correctly (can't find the correct symbols). This is
+    a problem on their end rather than ours and I'm not sure its worth making
+    a fix to their problem (POCL issue #698).
   POCL compile example, unfortunately there is no 1 instruction compilation for
   POCL at the moment it needs to be 2 stepped as it uses spir-df:
   1) $ISYCL_BIN_DIR/clang++ --sycl -fsycl-use-bitcode -Xclang \
@@ -14,14 +19,15 @@
       edge_detection.cpp -o edge_detection -lsycl -lOpenCL \
       \ `pkg-config --libs opencv`
 
+
+  XOCC compile command:
+  $ISYCL_BIN_DIR/clang++ -D__SYCL_SPIR_DEVICE__ -std=c++17 -fsycl \
+    -fsycl-xocc-device edge_detection.cpp -o edge_detection \
+    -lsycl -lOpenCL `pkg-config --libs opencv`
+
 */
 
-// TODO: Double check there is an issue with event profiling between pocl and iocl
-//       perhaps check what XRT does. If there is, then dig into where this is a
-//       problem.
-
 #include <CL/sycl.hpp>
-
 #include <iostream>
 #include <iterator>
 #include <string>
@@ -30,46 +36,19 @@
 #include <cstdlib>
 
 
-// OpenCV Includes - Could probably swap these out if they're only required for
-// outputting an image
+// OpenCV Includes
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
 
-#include "../../../device_selectors.hpp"
+#include "../../../utilities/device_selectors.hpp"
 
 using namespace cl::sycl;
 
-// This or a variant of it should be added to our variation of the SYCL runtime
-// to prevent redefining it in all examples
-// class XOCLDeviceSelector : public device_selector {
-//  public:
-//    int operator()(const device &Device) const override {
-//      const std::string DeviceVendor = Device.get_info<info::device::vendor>();
-//      return (DeviceVendor.find("Xilinx") != std::string::npos) ? 1 : -1;
-//    }
-//  };
-
- // Using this until the SYCL implementation works out a way to deal with the
- // std library when compiling for device (issue #15)
- short getMax(cv::Mat mat) {
- 	short max = 0;
-
- 	size_t rows = mat.rows;
- 	size_t cols = mat.cols;
-
- 	for(size_t r = 0; r < rows; r++) {
- 		for(size_t c = 0; c < cols; c++) {
- 			uchar tmp = mat.at<uchar>(r,c);
- 			if(tmp > max) {
- 				max = tmp;
- 			}
- 		}
- 	}
-
- 	return max;
- }
+// removes this if you wish to compile for Intel, the Xilinx extensions
+// don't play nice with it for the moment
+#define XILINX
 
 int main(int argc, char* argv[]) {
   if(argc != 2) {
@@ -83,103 +62,132 @@ int main(int argc, char* argv[]) {
   cv::cvtColor(inputColor, inputRaw, CV_BGR2GRAY);
   inputRaw.convertTo(input, CV_8UC1);
 
-  // could make this and the calculations based on it all fixed constexpr values
-  // if we want to stay true to the usage of fixed #defines from the example
-  auto height = input.rows; // old val 1895
-  auto width = input.cols;  // old val 1024
-  auto area = height * width;
+  // using fixed constexpr values stays more true to the original implementation
+  // however you can in theory just use input.rows/cols to support a wider range
+  // of images sizes. In either case having these outside relies on the SYCL
+  // implementation being able to capture these values in the kernel which at
+  // the moment it doesn't seem to be able to do.
+  #define WIDTH  1024
+  #define HEIGHT 1895
+  // constexpr auto height = 1895; // input.rows;
+  // constexpr auto width = 1024; // input.cols;
+  // constexpr auto area = height * width;
 
+#ifdef XILINX
   selector_defines::XOCLDeviceSelector xocl;
-  selector_defines::POCLDeviceSelector pocl;
+  queue q { xocl , property::queue::enable_profiling() };
+#else
   selector_defines::IntelDeviceSelector iocl;
-
-  // queue q { xocl };
-  queue q { iocl , property::queue::enable_profiling() }; // should default to IOCL
+  queue q { iocl , property::queue::enable_profiling() };
+#endif
 
   // may need to modify this to be different if input.isContinuous
   buffer<uchar> ib(input.begin<uchar>(), input.end<uchar>());
-  buffer<uchar> ob(range<1>(height*width));
+
+  buffer<uchar> ob(range<1>{HEIGHT * WIDTH/*area*/});
 
   std::cout << "Calculating Max Energy... \n";
-  // auto iMax = *std::max_element(input.begin<uchar>(), input.end<uchar>(),
-  //                                   [](auto i, auto j){ return i < j; });
-  short iMax = getMax(input);
+
+  short iMax = 0;
+  // Work around for bug in the main SYCL implementation relating to unusable
+  // std lib functions when compiling for device (device doesn't care about the
+  // host components but still has to compile them)
+#ifndef __SYCL_DEVICE_ONLY__
+  iMax = *std::max_element(input.begin<uchar>(), input.end<uchar>(),
+                            [](auto i, auto j){ return i < j; });
+#endif
+
   std::cout << "inputBits = " << ceil(log2(iMax)) << " coefMax = 2 \n";
   std::cout << "Max Energy = " << ceil(log2((long long)iMax * 2 * 3 * 3)) + 1
             << " Bits \n";
-
-  printf("%d \n", width);
-
+  std::cout << "Image Dimensions: " << input.size() << "\n";
 
   // mapping the enqueueTask call to a single_task, interested in seeing if a
   // parallel_for without a fixed 1-1-1 mapping is workable on an FPGA though..
   // as its a much cleaner way to express this algorithm. I'm pretty sure sw and
   // hw emulation would work with a parallel_for as is, but how would a real
   // FPGA deal with it?
-  std::cout << "Launching Kernel..." << std::endl;
+  std::cout << "Launching Kernel... \n";
+
   auto event = q.submit([&](handler &cgh) {
     auto pixel_rb = ib.get_access<access::mode::read>(cgh);
     auto pixel_wb = ob.get_access<access::mode::write>(cgh);
-    // printf("submitting kernel \n");
-    //
-    int w = 512;
 
-    // A typical FPGA-style pipelined kernel loosely based on
-    // krnl_sobelfilter.cl from the SDAccel example set
-    // TODO: -reqd_work_group_size should be applied to the kernel perhaps
-    cgh.single_task<class krnl_sobel>([=]() {
-      printf("in single_task \n");
-      // // TODO: Port xcl_array_partition opt from triSYCL for these in the
-      // // future
-      // char const gx[3][3] = {{-1, 0, 1}, {-2, 0, 2}, {-1, 0, 1}};
-      // char const gy[3][3] = {{1, 2, 1}, {0, 0, 0}, {-1, -2, -1}};
-      // int magX, magY;
-      //
-      printf("%d \n", w);
-      // for (int x = 0; x < width; ++x) {
-      //   for (int y = 0; y < height; ++y) {
-      //     magX = 0; magY = 0;
-      //     // printf("%d \n", x + y * width);
-      //     // printf("%u \n", pixel_rb[x + y * width]);
-      //     for (int i = 0; i < 3; ++i) {
-      //       for (int j = 0; j < 3; ++j) {
-      //         int index = (x + i - 1) + (y + j - 1) * width;
-      //         // magX += pixel_rb[index] * gx[i][j];
-      //         // magY += pixel_rb[index] * gy[i][j];
-      //       }
-      //     }
-      //
-      //     // pixel_wb[x + y * width] = (uchar)cl::sycl::sqrt((float)magX);
-      //     // pixel_wb[x + y * width] = 10; //(int)cl::sycl::sqrt(10.0f);
-      //     // cl::sycl::sqrt(10.0f)
-      //   }
-      // }
+    printf("pixel_rb size in submit: %zu \n", pixel_rb.get_size());
+    printf("pixel_rb count in submit: %zu \n", pixel_rb.get_count());
 
+    cgh.single_task<class krnl_sobel>(
+     [=]() {
+#ifdef XILINX
+      auto gX = xilinx::partition_array<char, 9,
+                xilinx::partition::complete<0>>({-1, 0, 1, -2, 0, 2, -1, 0, 1});
+
+      auto gY = xilinx::partition_array<char, 9,
+                xilinx::partition::complete<0>>({1, 2, 1, 0, 0, 0, -1, -2, -1});
+#else
+      char const gX[9] = {-1, 0, 1, -2, 0, 2, -1, 0, 1};
+      char const gY[9] = {1, 2, 1, 0, 0, 0, -1, -2, -1};
+#endif
+      int magX, magY, gI, pIndex, sum;
+
+
+      // Simplified version of krnl_sobelfilter.cl that gives the same output
+      // results however the krnl_sobelfilter.cl is more hardware optimized than
+      // this so gets better results 25062438 ns vs 17447508 ns
+      // the krnl_sobelfilter uses:
+      // * xcl_array_partition for sobel kernels
+      // * xcl_array_partition for intermediate registers
+      // * uses xcl_pipeline_loop to pipeline the for loop
+      // * restricts the kernel using reqd_work_group_size
+      // * generally pays more attention to bit width when transferring data
+#ifdef XILINX
+        xilinx::pipeline([&] {
+#endif
+          for (size_t x = 1; x < WIDTH - 1/*width - 1*/; ++x) {
+            for (size_t y = 1; y < HEIGHT - 1/*height - 1*/; ++y) {
+                magX = 0; magY = 0;
+
+                for(size_t k = 0; k < 3; ++k) {
+                  for(size_t l = 0; l < 3; ++l) {
+                    gI = k * 3 + l;
+                    pIndex =  (x + k - 1) + (y + l - 1) * WIDTH;
+                    magX += gX[gI] * pixel_rb[pIndex];
+                    magY += gY[gI] * pixel_rb[pIndex];
+                  }
+                }
+
+                // capping at 0xFF means no blurring of edges when it gets
+                // converted back to a char from an int
+                sum = std::abs(magX) + std::abs(magY);
+                pixel_wb[x + y * WIDTH] = (sum > 0xFF) ? 0xFF : (char)sum;
+            }
+          }
+#ifdef XILINX
+      });
+#endif
     });
   });
 
   // a buffer access or a wait MUST be used before querying the event when
-  // using intel cl as it's these block, get_profiling_info is not a blocking
-  // event in the sycl specication at the moment. Is querying an event in OpenCL?
-  q.wait();
+  // using Intel SYCL runtime at the moment as get_profiling_info is not a
+  // blocking event in the SYCL specification at the moment(change in progress).
+  auto pixel_rb = ob.get_access<access::mode::read>();
 
   std::cout << "Getting Result... \n";
-  // may not work just yet, as it doesn't seem to work on the host.
-  // if not can show off CL interop for the time being using event.get()
   auto nstimeend = event.get_profiling_info<info::event_profiling::command_end>();
   auto nstimestart = event.get_profiling_info<info::event_profiling::command_start>();
   auto duration = nstimeend-nstimestart;
   std::cout << "Kernel Duration: " << duration << " ns \n";
 
-  auto pixel_rb = ob.get_access<access::mode::read>();
-
   std::cout << "Calculating Output energy.... \n";
 
-  cv::Mat output(height, width, CV_8UC1, pixel_rb.get_pointer());
+  cv::Mat output(HEIGHT/*height*/, WIDTH/*width*/, CV_8UC1, pixel_rb.get_pointer());
 
-  // auto oMax = *std::max_element(output.begin<uchar>(), output.end<uchar>(),
-  //                               [=](auto i, auto j){ return i < j; });
-  auto oMax = getMax(output);
+  short oMax = 0;
+#ifndef __SYCL_DEVICE_ONLY__
+  oMax = *std::max_element(output.begin<uchar>(), output.end<uchar>(),
+                            [=](auto i, auto j){ return i < j; });
+#endif
 
   std::cout << "outputBits = " << ceil(log2(oMax)) << "\n";
 
