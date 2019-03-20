@@ -140,31 +140,36 @@ int main(int argc, char* argv[]) {
       // * uses xcl_pipeline_loop to pipeline the for loop
       // * restricts the kernel using reqd_work_group_size
       // * generally pays more attention to bit width when transferring data
-#ifdef XILINX
-        xilinx::pipeline([&] {
-#endif
-          for (size_t x = 1; x < WIDTH - 1/*width - 1*/; ++x) {
-            for (size_t y = 1; y < HEIGHT - 1/*height - 1*/; ++y) {
-                magX = 0; magY = 0;
 
-                for(size_t k = 0; k < 3; ++k) {
-                  for(size_t l = 0; l < 3; ++l) {
-                    gI = k * 3 + l;
-                    pIndex =  (x + k - 1) + (y + l - 1) * WIDTH;
-                    magX += gX[gI] * pixel_rb[pIndex];
-                    magY += gY[gI] * pixel_rb[pIndex];
-                  }
+      // NOTE: To pipeline the top loops similar to SDAccel's example this has
+      // to  be reworked a little as currently the memory consumption of this
+      // loop is too large for pipelining and causes an error when compiling
+      // for HW. Currently pipelining the inner loop instead.
+      for (size_t x = 1; x < WIDTH - 1/*width - 1*/; ++x) {
+        for (size_t y = 1; y < HEIGHT - 1/*height - 1*/; ++y) {
+            magX = 0; magY = 0;
+
+#ifdef XILINX
+            xilinx::pipeline([&] {
+#endif
+              for(size_t k = 0; k < 3; ++k) {
+                for(size_t l = 0; l < 3; ++l) {
+                  gI = k * 3 + l;
+                  pIndex =  (x + k - 1) + (y + l - 1) * WIDTH;
+                  magX += gX[gI] * pixel_rb[pIndex];
+                  magY += gY[gI] * pixel_rb[pIndex];
                 }
-
-                // capping at 0xFF means no blurring of edges when it gets
-                // converted back to a char from an int
-                sum = std::abs(magX) + std::abs(magY);
-                pixel_wb[x + y * WIDTH] = (sum > 0xFF) ? 0xFF : (char)sum;
-            }
-          }
+              }
 #ifdef XILINX
-      });
+            });
 #endif
+
+            // capping at 0xFF means no blurring of edges when it gets
+            // converted back to a char from an int
+            sum = std::abs(magX) + std::abs(magY);
+            pixel_wb[x + y * WIDTH] = (sum > 0xFF) ? 0xFF : (char)sum;
+        }
+      }
     });
   });
 

@@ -9,9 +9,7 @@
 #ifndef SYCL_XILINX_OPT_DECORATE_FUNC_HPP
 #define SYCL_XILINX_OPT_DECORATE_FUNC_HPP
 
-namespace cl {
-namespace sycl {
-namespace xilinx {
+namespace cl::sycl::xilinx {
 
 /** Apply dataflow execution on functions or loops
 
@@ -56,8 +54,6 @@ void pipeline(T functor) noexcept {
 //   functor();
 // };
 
-} // namespace xilinx
-} // namespace sycl
-} // namespace cl
+}
 
 #endif // SYCL_XILINX_OPT_DECORATE_FUNC_HPP

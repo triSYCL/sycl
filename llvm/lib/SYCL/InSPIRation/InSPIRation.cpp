@@ -20,6 +20,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/Demangle/Demangle.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Constants.h"
@@ -32,23 +33,49 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
+#define BOOST_NO_EXCEPTIONS
+
+// TODO: Perhaps BOOST should appropriately be included through cmake. At the
+// moment it's found via existing in the environment I think.. seems a little
+// unclear at least. This goes for the run-time as well.
+#include <boost/container_hash/hash.hpp> // uuid_hasher
+#include <boost/uuid/uuid_generators.hpp> // sha name_gen/generator
+#include <boost/uuid/uuid_io.hpp> // uuid to_string
+
+// BOOST_NO_EXCEPTIONS enabled so we need to define our own throw_exception or
+// get a linker error.
+namespace boost {
+  void throw_exception(std::exception const & e) {}
+}
+
 using namespace llvm;
 
 // Put the code in an anonymous namespace to avoid polluting the global
 // namespace
 namespace {
 
-// avoid recreation of regex's we won't alter at runtime
-// matches spirv ocl namespace
+// Create static regex's to avoid recreation of regex's we won't alter at
+// runtime
+
+// matches spirv::ocl namespace AFTER reflower, this may change if the reflower
+// gets removed.
 static std::regex matchSPIRVOCL {"(_Z[0-9]+__spirv_ocl_)"};
+
 // matches number between Z and _ (?<=Z)(\\d+)(?=_)
 static std::regex matchZVal {"(\\d)(\\d+)(?=_)"};
+
+// matches the reqd_work_group_size template's unmangled name and doesn't care
+// what's in the angular brackets. So the same capture could work for any
+// property.
+static std::regex matchReqdWorkGroupSize {"cl::sycl::xilinx::reqd_work_group_size<(.*?)>"};
+
+// Just matches integers
+static std::regex matchInt {"[0-9]+"};
 
 /// Transform the SYCL kernel functions into SPIR-compatible kernels
 struct InSPIRation : public ModulePass {
 
   static char ID; // Pass identification, replacement for typeid
-
 
   InSPIRation() : ModulePass(ID) {}
 
@@ -56,14 +83,14 @@ struct InSPIRation : public ModulePass {
   // namespace in the SYCL namespace remains the same and assuming that the
   // functions are the same name as the spir built-ins.
   void renameSPIRVIntrinsicToSPIR(Function &F) {
-    auto func_name = F.getName().str();
-    auto regex_name = std::regex_replace(func_name,
-                                         matchSPIRVOCL,
-                                         "");
+    auto funcName = F.getName().str();
+    auto regexName = std::regex_replace(funcName,
+                                        matchSPIRVOCL,
+                                        "");
 
-    if (func_name != regex_name) {
+    if (funcName != regexName) {
       std::cmatch capture;
-      if (std::regex_search(func_name.c_str(), capture, matchZVal)) {
+      if (std::regex_search(funcName.c_str(), capture, matchZVal)) {
         auto zVal = std::stoi(capture[0]);
 
        // The poor mans mangling to a spir builtin, we know that the function
@@ -74,7 +101,7 @@ struct InSPIRation : public ModulePass {
        // original mangled names _Z value.
        // SPIR manglings for reference:
        // https://github.com/KhronosGroup/SPIR-Tools/wiki/SPIR-2.0-built-in-functions
-       F.setName("_Z" + std::to_string(zVal - 12) + regex_name);
+       F.setName("_Z" + std::to_string(zVal - 12) + regexName);
       }
     }
   }
@@ -101,6 +128,79 @@ struct InSPIRation : public ModulePass {
   /// Do transforms on a SPIR Kernel
   void kernelSPIRify(Function &F) {
     // no op at the moment
+  }
+
+  auto getReqdWorkGroupSize(std::string demangledName, LLVMContext &Ctx) {
+    std::cmatch capture;
+
+    SmallVector<llvm::Metadata *, 8> reqdWorkGroupSize;
+
+    if (std::regex_search(demangledName.c_str(), capture, matchReqdWorkGroupSize)) {
+      // if we're here we have captured at least one reqd_work_group_size
+      // we only really care about the first application, because multiple
+      // uses of this property on one kernel are invalid.
+      // TODO: Enforce the use of a single reqd_work_group_size in the template
+      // interface in someway at compile time
+       std::string s = capture[0].str();
+       std::sregex_token_iterator rend;
+       std::sregex_token_iterator a ( s.begin(), s.end(), matchInt );
+
+       // only really care about the first 3 values, anymore and the
+       // reqd_work_group_size interface is incorrect
+       unsigned i = 0;
+       auto Int32Ty = llvm::Type::getInt32Ty(Ctx);
+       while (a!=rend && i < 3) {
+         reqdWorkGroupSize.push_back(
+             llvm::ConstantAsMetadata::get(
+                 llvm::ConstantInt::get(Int32Ty, std::stoi(*a++))));
+        ++i;
+      }
+    }
+
+    return reqdWorkGroupSize;
+  }
+
+  /// Apply properties to a kernel
+  void applyKernelProperties(Function &F) {
+    auto &ctx = F.getContext();
+
+    auto funcMangledName = F.getName().str();
+    auto demangledName = demangle(funcMangledName);
+    auto reqdWorkGroupSize = getReqdWorkGroupSize(demangledName, ctx);
+
+    if (reqdWorkGroupSize.size() == 3)
+      F.setMetadata("reqd_work_group_size",
+                    llvm::MDNode::get(ctx, reqdWorkGroupSize));
+  }
+
+  /// Transform a mangled kernel name to a hash that can be given to xocc
+  /// without error and used in the run time to correctly retrieve the kernel
+  void hashKernelName(Function &F) {
+    llvm::errs() << "function name mangling before hash converison: "
+                 << F.getName().str() << "\n";
+    // can technically use our own "namespace" to generate the sha1 rather than
+    // ns::dns, it works for now for testing purposes
+    // Note: LLVM has SHA1, but if we use LLVM sha1 we can't recreate it in the
+    // run-time. Perhaps it can be utilized in another way to achieve similar
+    // results though.
+    boost::uuids::name_generator_sha1 gen(boost::uuids::ns::dns());
+
+    // long uid example: 8e6761a3-f150-580f-bae8-7d8d86bfa552
+    boost::uuids::uuid uDoc = gen(F.getName().str());
+    llvm::errs() << "as uid: " << boost::uuids::to_string(uDoc) << "\n";
+
+    // converted to a hash value example: 14050332600208107103
+    boost::hash<boost::uuids::uuid> uuidHasher;
+    std::size_t uuidHashValue = uuidHasher(uDoc);
+    llvm::errs() << "converted to a hash value: " << uuidHashValue << "\n";
+
+    // The uid on it's own is too long for xocc it has a 64 character limit for
+    // the kernels name and the name of its compute unit. By default the compute
+    // unit name is the kernel name with an _N, uid's are over 32 chars long so
+    // 32*2 + another few characters pushes it over the limit. Perhaps its
+    // possible to just take part of it but it may be harder to avoid name
+    // collisions that way.
+    F.setName(std::to_string(uuidHashValue));
   }
 
   /// Add metadata for the SPIR 2.0 version
@@ -172,15 +272,15 @@ struct InSPIRation : public ModulePass {
   /// Visit all the functions of the module
   bool runOnModule(Module &M) override {
     // funcCount is for naming new name for each function called in kernel
-    int funcCount = 0, kernelCount = 0, counter = 0;
+    int funcCount = 0, counter = 0;
 
     std::vector<Function*> declarations;
 
     for (auto &F : M.functions()) {
         if (isKernel(F)) {
           kernelSPIRify(F);
-
-          // F.setName("sycl_kernel_" + Twine{kernelCount++});
+          applyKernelProperties(F);
+          hashKernelName(F);
 
           // if your arguments have no name xocc will commit sepuku when
           // generating xml, so adding names to anonymous captures.
@@ -242,7 +342,7 @@ struct InSPIRation : public ModulePass {
         // Note: if we stop the renaming of all functions to sycl_func_N a more
         // complex modification to this pass may be required that makes sure all
         // functions on the device with the same name as a built-in are changed
-        // so they have no conflicts with the built-in functions.  
+        // so they have no conflicts with the built-in functions.
         declarations.push_back(&F);
       }
     }

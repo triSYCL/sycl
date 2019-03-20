@@ -38,6 +38,7 @@
 #include <CL/sycl/xilinx/ssdm_inst.hpp>
 #include <CL/sycl/xilinx/partition_array.hpp>
 #include <CL/sycl/xilinx/opt_decorate_func.hpp>
+#include <CL/sycl/xilinx/kernel_properties.hpp>
 
 // Do not include RT only function implementations for device code as it leads
 // to problem. Should be finally fixed when we introduce library.

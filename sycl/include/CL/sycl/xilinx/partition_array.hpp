@@ -19,9 +19,7 @@
 #include <cstddef>
 #include <type_traits>
 
-namespace cl {
-namespace sycl {
-namespace xilinx {
+namespace cl::sycl::xilinx {
 
 /** Kind of array partition
 
@@ -240,8 +238,6 @@ struct partition_array {
   }
 };
 
-} // namespace xilinx
-} // namespace sycl
-} // namespace cl
+} // namespace cl::sycl::xilinx
 
 #endif// SYCL_XILINX_PARTITION_ARRAY_HPP

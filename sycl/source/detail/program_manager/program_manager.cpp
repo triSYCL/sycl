@@ -13,6 +13,10 @@
 #include <CL/sycl/exception.hpp>
 #include <CL/sycl/stl.hpp>
 
+#include <boost/container_hash/hash.hpp> // uuid_hasher
+#include <boost/uuid/uuid_generators.hpp> // sha name_gen/generator
+#include <boost/uuid/uuid_io.hpp> // uuid to_string
+
 #include <assert.h>
 #include <cstdlib>
 #include <fstream>
@@ -153,14 +157,41 @@ cl_program ProgramManager::getBuiltOpenCLProgram(const context &Context) {
   return ClProgram;
 }
 
+static std::string getKernelHashName(const char *KernelName) {
+
+  boost::uuids::name_generator_sha1 gen(boost::uuids::ns::dns());
+
+  boost::uuids::uuid udoc = gen(KernelName);
+
+  boost::hash<boost::uuids::uuid> uuid_hasher;
+  std::size_t uuid_hash_value = uuid_hasher(udoc);
+
+  return std::to_string(uuid_hash_value);
+}
+
 cl_kernel ProgramManager::getOrCreateKernel(const context &Context,
                                             const char *KernelName) {
   cl_program Program = getBuiltOpenCLProgram(Context);
   auto &KernelsCache = m_CachedKernels[Program];
-  cl_kernel &Kernel = KernelsCache[string_class(KernelName)];
+
+  // TODO: Extend this to work for more than the first device in the context
+  // most of the run-time only works with a single device right now, but this
+  // should be changed long term.
+  // TODO: Perhaps it should also be more robust in that it checks for more than
+  // just the device vendor
+  auto Devices = Context.get_devices();
+  std::string hashed_name;
+  if (!Devices.empty())
+    if (Devices[0].get_info<info::device::vendor>() == "Xilinx")
+      hashed_name = getKernelHashName(KernelName);
+
+  cl_kernel &Kernel =
+      KernelsCache[(hashed_name.empty()) ? string_class(KernelName)
+                                         : hashed_name];
   if (!Kernel) {
     cl_int Err = CL_SUCCESS;
-    Kernel = clCreateKernel(Program, KernelName, &Err);
+    Kernel = clCreateKernel(
+      Program, (hashed_name.empty()) ? KernelName : hashed_name.c_str(), &Err);
     CHECK_OCL_CODE(Err);
   }
   return Kernel;
