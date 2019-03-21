@@ -749,6 +749,7 @@ static std::string eraseClassAndStruct(std::string S) {
 
   return S;
 }
+
 // Creates a mangled kernel name for given kernel name type
 static std::string constructKernelName(QualType KernelNameType,
                                        ASTContext &AC) {
@@ -772,7 +773,6 @@ void Sema::ConstructSYCLKernel(FunctionDecl *KernelCallerFunc) {
   // The first template argument always describes the kernel name - whether
   // it is lambda or functor.
   QualType KernelNameType = TemplateArgs->get(0).getAsType();
-
   std::string Name = constructKernelName(KernelNameType, getASTContext());
   populateIntHeader(getSyclIntegrationHeader(), Name, KernelNameType, LE);
   FunctionDecl *SYCLKernel =
@@ -1035,7 +1035,8 @@ void SYCLIntegrationHeader::emit(raw_ostream &O) {
   for (const KernelDesc &K : KernelDescs) {
     const size_t N = K.Params.size();
     O << "template <> struct KernelInfo<"
-      << eraseClassAndStruct(eraseAnonNamespace(K.NameType.getAsString())) << "> {\n";
+      << eraseClassAndStruct(eraseAnonNamespace(K.NameType.getAsString()))
+      << "> {\n";
     O << "  static constexpr const char* getName() { return \"" << K.Name
       << "\"; }\n";
     O << "  static constexpr unsigned getNumParams() { return " << N << "; }\n";
