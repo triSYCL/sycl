@@ -57,6 +57,11 @@ int main() {
   selector_defines::XOCLDeviceSelector xocc;
   queue q { xocc };
 
+  // Note: cl::sycl::xilinx::reqd_work_group_size shouldn't be used with
+  // single_task realistically as the run-time currently just uses a
+  // clEnqueueNDRange for it which causes a run-time error if you try to apply
+  // the attribute.
+  // /storage/ogozillo/intel-sycl/build/lib/clang/9.0.0/include/CL/sycl/detail/scheduler/commands.cpp:129:
   q.submit([&](handler &cgh) {
       cgh.single_task< reqd_work_group_size_test<
                           xilinx::reqd_work_group_size<16,16,16>,
