@@ -21,7 +21,7 @@
 
 
   XOCC compile command:
-  $ISYCL_BIN_DIR/clang++ -D__SYCL_SPIR_DEVICE__ -std=c++17 -fsycl \
+  $ISYCL_BIN_DIR/clang++ -D__SYCL_SPIR_DEVICE__ -DXILINX -std=c++17 -fsycl \
     -fsycl-xocc-device edge_detection.cpp -o edge_detection \
     -lsycl -lOpenCL `pkg-config --libs opencv`
 
@@ -45,10 +45,6 @@
 #include "../../../utilities/device_selectors.hpp"
 
 using namespace cl::sycl;
-
-// removes this if you wish to compile for Intel, the Xilinx extensions
-// don't play nice with it for the moment
-#define XILINX
 
 int main(int argc, char* argv[]) {
   if(argc != 2) {
@@ -74,12 +70,11 @@ int main(int argc, char* argv[]) {
   // constexpr auto area = height * width;
 
 #ifdef XILINX
-  selector_defines::XOCLDeviceSelector xocl;
-  queue q { xocl , property::queue::enable_profiling() };
+  selector_defines::XOCLDeviceSelector selector;
 #else
-  selector_defines::IntelDeviceSelector iocl;
-  queue q { iocl , property::queue::enable_profiling() };
+  selector_defines::IntelDeviceSelector selector;
 #endif
+  queue q { selector , property::queue::enable_profiling() };
 
   // may need to modify this to be different if input.isContinuous
   buffer<uchar> ib(input.begin<uchar>(), input.end<uchar>());
