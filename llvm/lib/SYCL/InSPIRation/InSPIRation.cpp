@@ -39,10 +39,17 @@ using namespace llvm;
 namespace {
 
 // avoid recreation of regex's we won't alter at runtime
-// matches spirv ocl namespace
+
+// matches __spirv_ocl_ which is the transformed namespace of certain builtins
+// in the cl::__spirv namespace after translation by the reflower (e.g. math
+// functions like sqrt)
 static std::regex matchSPIRVOCL {"(_Z[0-9]+__spirv_ocl_)"};
-// matches number between Z and _ (?<=Z)(\\d+)(?=_)
-static std::regex matchZVal {"(\\d)(\\d+)(?=_)"};
+// matches number between Z and _ (\\d+)(?=_)
+static std::regex matchZVal {"(\\d+)(?=_)"};
+// This is to give clarity to why we negate a value from the Z mangle component
+// rather than having a magical number, we have the size of the string we've
+// removed from the mangling.
+static std::string SPIRVNamespace("__spirv_ocl_");
 
 /// Transform the SYCL kernel functions into SPIR-compatible kernels
 struct InSPIRation : public ModulePass {
@@ -52,9 +59,12 @@ struct InSPIRation : public ModulePass {
 
   InSPIRation() : ModulePass(ID) {}
 
-  // Welcome to the world of assumptions, this works assuming the spirv
-  // namespace in the SYCL namespace remains the same and assuming that the
-  // functions are the same name as the spir built-ins.
+  // This function works assuming the built-ins inside of the cl::__spirv
+  // namespace undergo the transformation in the reflower to use the mangling
+  // __spirv_ocl_ in place of the regular namespace mangling. It also works
+  // assuming that the function contained inside the cl::__spirv namespace are
+  // named the same as an OpenCL/SPIR built-in e.g. it's still named sqrt with a
+  // valid SPIR/OpenCL overload.
   void renameSPIRVIntrinsicToSPIR(Function &F) {
     auto func_name = F.getName().str();
     auto regex_name = std::regex_replace(func_name,
@@ -66,7 +76,7 @@ struct InSPIRation : public ModulePass {
       if (std::regex_search(func_name.c_str(), capture, matchZVal)) {
         auto zVal = std::stoi(capture[0]);
 
-       // The poor mans mangling to a spir builtin, we know that the function
+       // The poor man's mangling to a spir builtin, we know that the function
        // type itself is fine, we just need to work out the _Z mangling as spir
        // built-ins don't sit inside a namespace. All _Z is in this case is the
        // number of characters in the functions name which we can work out by
@@ -74,7 +84,8 @@ struct InSPIRation : public ModulePass {
        // original mangled names _Z value.
        // SPIR manglings for reference:
        // https://github.com/KhronosGroup/SPIR-Tools/wiki/SPIR-2.0-built-in-functions
-       F.setName("_Z" + std::to_string(zVal - 12) + regex_name);
+       F.setName("_Z" + std::to_string(zVal - SPIRVNamespace.size())
+                + regex_name);
       }
     }
   }
@@ -165,9 +176,12 @@ struct InSPIRation : public ModulePass {
   }
 
   /// Hopeful list/probably impractical asks for XOCC:
-  /// 1) Make XML generator/reader a little kinder towards arguments with no names if possible
-  /// 2) Allow -k all for llvm-ir input/spir-df so it can search for all SPIR_KERNEL's in a binary
-  /// 3) Be a little more name mangle friendly when reading in input e.g. accept: $_
+  /// 1) Make XML generator/reader a little kinder towards arguments with no
+  ///   names if possible
+  /// 2) Allow -k all for llvm-ir input/spir-df so it can search for all
+  ///    SPIR_KERNEL's in a binary
+  /// 3) Be a little more name mangle friendly when reading in input e.g.
+  ///    accept: $_
 
   /// Visit all the functions of the module
   bool runOnModule(Module &M) override {
@@ -242,7 +256,7 @@ struct InSPIRation : public ModulePass {
         // Note: if we stop the renaming of all functions to sycl_func_N a more
         // complex modification to this pass may be required that makes sure all
         // functions on the device with the same name as a built-in are changed
-        // so they have no conflicts with the built-in functions.  
+        // so they have no conflict with the built-in functions.
         declarations.push_back(&F);
       }
     }

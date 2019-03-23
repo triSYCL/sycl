@@ -12,7 +12,7 @@
 
 namespace cl {
 namespace __spirv {
-// TODO: Perhaps encapsulate them more similarly to SPIRV and see if they work  
+// TODO: Perhaps encapsulate them more similarly to SPIRV and see if they work
 #ifdef __SYCL_SPIR_DEVICE__
   size_t get_global_size(uint dimindx);
   size_t get_local_size(uint dimindx);
