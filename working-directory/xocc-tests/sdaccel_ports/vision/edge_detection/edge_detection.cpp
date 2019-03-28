@@ -46,6 +46,8 @@
 
 using namespace cl::sycl;
 
+class krnl_sobel;
+
 int main(int argc, char* argv[]) {
   if(argc != 2) {
       std::cout << "Usage: " << argv[0] << "<input> \n";
@@ -111,7 +113,7 @@ int main(int argc, char* argv[]) {
     printf("pixel_rb size in submit: %zu \n", pixel_rb.get_size());
     printf("pixel_rb count in submit: %zu \n", pixel_rb.get_count());
 
-    cgh.single_task<class krnl_sobel>(
+    cgh.single_task<xilinx::reqd_work_group_size<1, 1, 1, krnl_sobel> >(
      [=]() {
 #ifdef XILINX
       auto gX = xilinx::partition_array<char, 9,

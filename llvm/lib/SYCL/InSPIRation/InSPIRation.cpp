@@ -59,18 +59,21 @@ namespace {
 
 // matches spirv::ocl namespace AFTER reflower, this may change if the reflower
 // gets removed.
-static std::regex matchSPIRVOCL {"(_Z[0-9]+__spirv_ocl_)"};
+static const std::regex matchSPIRVOCL {"(_Z[0-9]+__spirv_ocl_)"};
 
 // matches number between Z and _ (?<=Z)(\\d+)(?=_)
-static std::regex matchZVal {"(\\d)(\\d+)(?=_)"};
+static const std::regex matchZVal {"(\\d)(\\d+)(?=_)"};
 
-// matches the reqd_work_group_size template's unmangled name and doesn't care
-// what's in the angular brackets. So the same capture could work for any
-// property.
-static std::regex matchReqdWorkGroupSize {"cl::sycl::xilinx::reqd_work_group_size<(.*?)>"};
+// matches reqd_work_group_size based on it's current template parameter list of
+// 3 digits, doesn't care what the next adjoining type is or however many there
+// are in this case. Technically the demangler enforces spacing between the
+// commas but just in case it ever changes.
+static const std::regex matchReqdWorkGroupSize {
+    "cl::sycl::xilinx::reqd_work_group_size<[0-9]+,\\s?[0-9]+,\\s?[0-9]+,"};
+
 
 // Just matches integers
-static std::regex matchInt {"[0-9]+"};
+static const std::regex matchInt {"[0-9]+"};
 
 /// Transform the SYCL kernel functions into SPIR-compatible kernels
 struct InSPIRation : public ModulePass {
@@ -130,18 +133,17 @@ struct InSPIRation : public ModulePass {
     // no op at the moment
   }
 
-  auto getReqdWorkGroupSize(std::string demangledName, LLVMContext &Ctx) {
-    std::cmatch capture;
-
+  auto getReqdWorkGroupSize(const std::string demangledName, LLVMContext &Ctx) {
     SmallVector<llvm::Metadata *, 8> reqdWorkGroupSize;
+    std::smatch capture;
 
-    if (std::regex_search(demangledName.c_str(), capture, matchReqdWorkGroupSize)) {
+    if (std::regex_search(demangledName, capture, matchReqdWorkGroupSize)) {
       // if we're here we have captured at least one reqd_work_group_size
       // we only really care about the first application, because multiple
       // uses of this property on one kernel are invalid.
       // TODO: Enforce the use of a single reqd_work_group_size in the template
       // interface in someway at compile time
-       std::string s = capture[0].str();
+       std::string s = capture[0];
        std::sregex_token_iterator rend;
        std::sregex_token_iterator a ( s.begin(), s.end(), matchInt );
 
@@ -165,7 +167,7 @@ struct InSPIRation : public ModulePass {
     auto &ctx = F.getContext();
 
     auto funcMangledName = F.getName().str();
-    auto demangledName = demangle(funcMangledName);
+    auto demangledName = llvm::demangle(funcMangledName);
     auto reqdWorkGroupSize = getReqdWorkGroupSize(demangledName, ctx);
 
     if (reqdWorkGroupSize.size() == 3)

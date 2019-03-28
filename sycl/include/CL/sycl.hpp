@@ -36,9 +36,10 @@
 #include <CL/sycl/types.hpp>
 #include <CL/sycl/version.hpp>
 
-// These require > C++ 17 for now and they break some Clang Unit tests involving
+// These require > C++ 17 for now which breaks some Clang Unit tests involving
 // SYCL making it difficult to test for breakage.
 #if (defined(__cplusplus) && (__cplusplus == 201703L))
+#define __SYCL_VENDOR_XILINX_EXTENSIONS__
 #include <CL/sycl/xilinx/ssdm_inst.hpp>
 #include <CL/sycl/xilinx/partition_array.hpp>
 #include <CL/sycl/xilinx/opt_decorate_func.hpp>
