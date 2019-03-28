@@ -43,13 +43,13 @@ namespace {
 // matches __spirv_ocl_ which is the transformed namespace of certain builtins
 // in the cl::__spirv namespace after translation by the reflower (e.g. math
 // functions like sqrt)
-static std::regex matchSPIRVOCL {"(_Z[0-9]+__spirv_ocl_)"};
+static const std::regex matchSPIRVOCL {"(_Z[0-9]+__spirv_ocl_)"};
 // matches number between Z and _ (\\d+)(?=_)
-static std::regex matchZVal {"(\\d+)(?=_)"};
+static const std::regex matchZVal {"(\\d+)(?=_)"};
 // This is to give clarity to why we negate a value from the Z mangle component
 // rather than having a magical number, we have the size of the string we've
 // removed from the mangling.
-static std::string SPIRVNamespace("__spirv_ocl_");
+static const std::string SPIRVNamespace("__spirv_ocl_");
 
 /// Transform the SYCL kernel functions into SPIR-compatible kernels
 struct InSPIRation : public ModulePass {
@@ -66,14 +66,14 @@ struct InSPIRation : public ModulePass {
   // named the same as an OpenCL/SPIR built-in e.g. it's still named sqrt with a
   // valid SPIR/OpenCL overload.
   void renameSPIRVIntrinsicToSPIR(Function &F) {
-    auto func_name = F.getName().str();
+    const auto func_name = F.getName().str();
     auto regex_name = std::regex_replace(func_name,
                                          matchSPIRVOCL,
                                          "");
 
     if (func_name != regex_name) {
-      std::cmatch capture;
-      if (std::regex_search(func_name.c_str(), capture, matchZVal)) {
+      std::smatch capture;
+      if (std::regex_search(func_name, capture, matchZVal)) {
         auto zVal = std::stoi(capture[0]);
 
        // The poor man's mangling to a spir builtin, we know that the function
@@ -146,7 +146,7 @@ struct InSPIRation : public ModulePass {
     OCLVerMD->addOperand(llvm::MDNode::get(Ctx, OCLVerElts));
   }
 
-  /// Remove extra SPIRV metadata for now, doesn't really crash XOCC but its
+  /// Remove extra SPIRV metadata for now, doesn't really crash xocc but its
   /// not required. Another method would just be to modify the SYCL Clang
   /// frontend to generate the actual SPIR/OCL metadata we need rather than
   /// always SPIRV/CL++ metadata
@@ -175,10 +175,10 @@ struct InSPIRation : public ModulePass {
     return false;
   }
 
-  /// Hopeful list/probably impractical asks for XOCC:
+  /// Hopeful list/probably impractical asks for xocc:
   /// 1) Make XML generator/reader a little kinder towards arguments with no
   ///   names if possible
-  /// 2) Allow -k all for llvm-ir input/spir-df so it can search for all
+  /// 2) Allow -k all for LLVM IR input/SPIR-df so it can search for all
   ///    SPIR_KERNEL's in a binary
   /// 3) Be a little more name mangle friendly when reading in input e.g.
   ///    accept: $_
@@ -253,7 +253,7 @@ struct InSPIRation : public ModulePass {
                   && F.isDeclaration()) {
         // push back intrinsics to make sure we handle naming after changing the
         // name of all functions to sycl_func.
-        // Note: if we stop the renaming of all functions to sycl_func_N a more
+        // Note: if we do not rename all the functions to sycl_func_N, a more
         // complex modification to this pass may be required that makes sure all
         // functions on the device with the same name as a built-in are changed
         // so they have no conflict with the built-in functions.
