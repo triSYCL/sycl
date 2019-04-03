@@ -6,10 +6,12 @@
 // License. See LICENSE.TXT for details.
 //
 //===----------------------------------------------------------------------===//
-//
-// Rewrite the kernels and functions so that they are compatible with SPIR
-// representation as described in "The SPIR Specification Version 2.0 -
-// Provisional" from Khronos Group.
+///
+/// \file
+/// Rewrite the kernels and functions so that they are compatible with SPIR
+/// representation as described in "The SPIR Specification Version 2.0 -
+/// Provisional" from Khronos Group.
+///
 // ===---------------------------------------------------------------------===//
 
 #include <cstddef>
@@ -35,9 +37,9 @@
 
 #define BOOST_NO_EXCEPTIONS
 
-// TODO: Perhaps BOOST should appropriately be included through cmake. At the
-// moment it's found via existing in the environment I think.. seems a little
-// unclear at least. This goes for the run-time as well.
+/// \todo: Perhaps BOOST should appropriately be included through cmake. At the
+/// moment it's found via existing in the environment I think.. seems a little
+/// unclear at least. This goes for the run-time as well.
 #include <boost/container_hash/hash.hpp> // uuid_hasher
 #include <boost/uuid/uuid_generators.hpp> // sha name_gen/generator
 #include <boost/uuid/uuid_io.hpp> // uuid to_string
@@ -78,19 +80,19 @@ static const std::regex matchSomeNaturalInteger {R"(\d+)"};
 // removed from the mangling.
 static const std::string SPIRVNamespace("__spirv_ocl_");
 
-// Transform the SYCL kernel functions into SPIR-compatible kernels
+/// Transform the SYCL kernel functions into xocc SPIR-compatible kernels
 struct InSPIRation : public ModulePass {
 
   static char ID; // Pass identification, replacement for typeid
 
   InSPIRation() : ModulePass(ID) {}
 
-  // This function works assuming the built-ins inside of the cl::__spirv
-  // namespace undergo the transformation in the reflower to use the mangling
-  // __spirv_ocl_ in place of the regular namespace mangling. It also works
-  // assuming that the function contained inside the cl::__spirv namespace are
-  // named the same as an OpenCL/SPIR built-in e.g. it's still named sqrt with
-  // a valid SPIR/OpenCL overload.
+  /// This function works assuming the built-ins inside of the cl::__spirv
+  /// namespace undergo the transformation in the reflower to use the mangling
+  /// __spirv_ocl_ in place of the regular namespace mangling. It also works
+  /// assuming that the function contained inside the cl::__spirv namespace are
+  /// named the same as an OpenCL/SPIR built-in e.g. it's still named sqrt with
+  /// a valid SPIR/OpenCL overload.
   void renameSPIRVIntrinsicToSPIR(Function &F) {
     const auto funcName = F.getName().str();
     auto regexName = std::regex_replace(funcName,
@@ -130,20 +132,20 @@ struct InSPIRation : public ModulePass {
     return false;
   }
 
-  // Do transforms on a SPIR function called by a SPIR kernel
+  /// Do transforms on a SPIR function called by a SPIR kernel
   void kernelCallFuncSPIRify(Function &F) {
     // no op at the moment
   }
 
-  // Do transforms on a SPIR Kernel
+  /// Do transforms on a SPIR Kernel
   void kernelSPIRify(Function &F) {
     // no op at the moment
   }
 
-  // Retrieves the ReqdWorkGroupSize values from a demangled function name
-  // using regex.
+  /// Retrieves the ReqdWorkGroupSize values from a demangled function name
+  /// using regex.
   SmallVector<llvm::Metadata *, 8>
-    getReqdWorkGroupSize(const std::string& demangledName, LLVMContext &Ctx) {
+  getReqdWorkGroupSize(const std::string& demangledName, LLVMContext &Ctx) {
     SmallVector<llvm::Metadata *, 8> reqdWorkGroupSize;
     std::smatch capture;
 
@@ -151,8 +153,8 @@ struct InSPIRation : public ModulePass {
     // we only really care about the first application, because multiple
     // uses of this property on one kernel are invalid.
     if (std::regex_search(demangledName, capture, matchReqdWorkGroupSize)) {
-      // TODO: Enforce the use of a single reqd_work_group_size in the template
-      // interface in someway at compile time
+      /// \todo: Enforce the use of a single reqd_work_group_size in the template
+      /// interface in someway at compile time
       auto Int32Ty = llvm::Type::getInt32Ty(Ctx);
       std::string s = capture[0];
       std::sregex_token_iterator workGroupSizes{s.begin(), s.end(),
@@ -161,28 +163,28 @@ struct InSPIRation : public ModulePass {
       // reqd_work_group_size interface is incorrect
       for (unsigned i = 0;
            i < 3 && workGroupSizes != std::sregex_token_iterator{};
-           ++i, workGroupSizes++) {
+           ++i, ++workGroupSizes) {
         reqdWorkGroupSize.push_back(
             llvm::ConstantAsMetadata::get(
                 llvm::ConstantInt::get(Int32Ty, std::stoi(*workGroupSizes))));
       }
 
       if (reqdWorkGroupSize.size() != 3)
-        llvm_unreachable("The reqd_work_group_size properties dimensions are "
-                          "not equal to 3");
+        report_fatal_error("The reqd_work_group_size properties dimensions are "
+                           "not equal to 3");
     }
 
     return reqdWorkGroupSize;
   }
 
-  // In SYCL, kernel names are defined by types and in our current
-  // implementation we wrap our SYCL kernel names with properties that are
-  // defined as template types. For example ReqdWorkGroupSize is defined as
-  // one of these when the kernel name is translated from type to kernel name
-  // the information is retained and we can retrieve it in this LLVM pass by
-  // using regex on it.
-  // This is something we can improve on in the future, but the concept works
-  // for the moment.
+  /// In SYCL, kernel names are defined by types and in our current
+  /// implementation we wrap our SYCL kernel names with properties that are
+  /// defined as template types. For example ReqdWorkGroupSize is defined as
+  /// one of these when the kernel name is translated from type to kernel name
+  /// the information is retained and we can retrieve it in this LLVM pass by
+  /// using regex on it.
+  /// This is something we can improve on in the future, but the concept works
+  /// for the moment.
   void applyKernelProperties(Function &F) {
     auto &ctx = F.getContext();
 
@@ -195,27 +197,27 @@ struct InSPIRation : public ModulePass {
                     llvm::MDNode::get(ctx, reqdWorkGroupSize));
   }
 
-  // Sets a unique name to a function which is currently computed from a SHA-1
-  // hash of the original name.
-  //
-  // This unique name is used for kernel names so that they can be passed to
-  // the xocc compiler without error and then recomputed and used in the run
-  // time (program_manager) to correctly retrieve the kernel from the binary.
-  // This is required as xocc doesn't like certain characters in mangled names
-  // and we need a name that can be used in the run-time and passed to the
-  // compiler.
-  // The hash is recomputed in the run-time from the kernel name found in the
-  // integrated header as we currently do not wish to alter the integrated
-  // header with an LLVM pass as it will take some alteration to the driver
-  // and header that are not set in stone yet.
-  // Perhaps in the future that may be the direction that is taken however.
+  /// Sets a unique name to a function which is currently computed from a SHA-1
+  /// hash of the original name.
+  ///
+  /// This unique name is used for kernel names so that they can be passed to
+  /// the xocc compiler without error and then recomputed and used in the run
+  /// time (program_manager) to correctly retrieve the kernel from the binary.
+  /// This is required as xocc doesn't like certain characters in mangled names
+  /// and we need a name that can be used in the run-time and passed to the
+  /// compiler.
+  /// The hash is recomputed in the run-time from the kernel name found in the
+  /// integrated header as we currently do not wish to alter the integrated
+  /// header with an LLVM pass as it will take some alteration to the driver
+  /// and header that are not set in stone yet.
+  /// Perhaps in the future that may be the direction that is taken however.
   void setUniqueName(Function &F) {
     // can technically use our own "namespace" to generate the SHA-1 rather than
     // ns::dns, it works for now for testing purposes
     // Note: LLVM has SHA-1, but if we use LLVM SHA-1 we can't recreate it in the
     // run-time. Perhaps it can be utilized in another way to achieve similar
     // results though.
-    boost::uuids::name_generator_latest gen(boost::uuids::ns::dns());
+    boost::uuids::name_generator_latest gen{boost::uuids::ns::dns()};
 
     // long uuid example: 8e6761a3-f150-580f-bae8-7d8d86bfa552
     boost::uuids::uuid uDoc = gen(F.getName().str());
@@ -228,19 +230,19 @@ struct InSPIRation : public ModulePass {
     // the kernels name and the name of its compute unit. By default the compute
     // unit name is the kernel name with an _N, uuid's are over 32 chars long so
     // 32*2 + another few characters pushes it over the limit.
-    // \TODO In the middle term change this to take the lowest bits of the SHA-1
-    //       uuid e.g. take the string, regex to remove the '-' then take the
-    //       max characters you can fit from the end (30-31~?). Echo the changes
-    //       to the SYCL run-time's program_manager.cpp so the modified kernel
-    //       names are correctly computed and can be found in the binary.
-    // \TODO In the long-term come up with a better way of doing this than
-    //       changing all the names to a SHA-1 hash. Like asking for an update
-    //       to the xocc compiler to accept characters that appear in mangled
-    //       names
+    /// \todo In the middle term change this to take the lowest bits of the SHA-1
+    ///       uuid e.g. take the string, regex to remove the '-' then take the
+    ///       max characters you can fit from the end (30-31~?). Echo the changes
+    ///       to the SYCL run-time's program_manager.cpp so the modified kernel
+    ///       names are correctly computed and can be found in the binary.
+    /// \todo In the long-term come up with a better way of doing this than
+    ///       changing all the names to a SHA-1 hash. Like asking for an update
+    ///       to the xocc compiler to accept characters that appear in mangled
+    ///       names
     F.setName(std::to_string(uuidHashValue));
   }
 
-  // Add metadata for the SPIR 2.0 version
+  /// Add metadata for the SPIR 2.0 version
   void setSPIRVersion(Module &M) {
     /* Get InSPIRation from SPIRTargetCodeGenInfo::emitTargetMD in
        tools/clang/lib/CodeGen/TargetInfo.cpp */
@@ -257,7 +259,7 @@ struct InSPIRation : public ModulePass {
   }
 
 
-  // Add metadata for the OpenCL 1.2 version
+  /// Add metadata for the OpenCL 1.2 version
   void setOpenCLVersion(Module &M) {
     auto &Ctx = M.getContext();
     auto Int32Ty = llvm::Type::getInt32Ty(Ctx);
@@ -272,10 +274,10 @@ struct InSPIRation : public ModulePass {
     OCLVerMD->addOperand(llvm::MDNode::get(Ctx, OCLVerElts));
   }
 
-  // Remove extra SPIRV metadata for now, doesn't really crash xocc but its
-  // not required. Another method would just be to modify the SYCL Clang
-  // frontend to generate the actual SPIR/OCL metadata we need rather than
-  // always SPIRV/CL++ metadata
+  /// Remove extra SPIRV metadata for now, doesn't really crash xocc but its
+  /// not required. Another method would just be to modify the SYCL Clang
+  /// frontend to generate the actual SPIR/OCL metadata we need rather than
+  /// always SPIRV/CL++ metadata
   void removeOldMetadata(Module &M) {
     llvm::NamedMDNode *Old =
       M.getOrInsertNamedMetadata("spirv.Source");
@@ -283,7 +285,7 @@ struct InSPIRation : public ModulePass {
       M.eraseNamedMetadata(Old);
   }
 
-  // Set the output Triple to SPIR
+  /// Set the output Triple to SPIR
   void setSPIRTriple(Module &M) {
     M.setTargetTriple("spir64");
   }
@@ -309,7 +311,7 @@ struct InSPIRation : public ModulePass {
   // 3) Be a little more name mangle friendly when reading in input e.g.
   //    accept: $_
 
-  // Visit all the functions of the module
+  /// Visit all the functions of the module
   bool runOnModule(Module &M) override {
     // funcCount is for naming new name for each function called in kernel
     int funcCount = 0;
@@ -340,14 +342,14 @@ struct InSPIRation : public ModulePass {
           //   B.setName("label_" + Twine{counter++});
 
 
-        // \todo Possible: We don't modify declarations right now as this will
-        // destroy the names of SPIR/CL intrinsics as they aren't actually
-        // considered intrinsics by LLVM IR. If there is ever a need to modify
-        // declarations in someway then the best way to do it would be to have a
-        // comprehensive list of mangled SPIR intrinsic names and check against
-        // it. Note: This is only relevant if we still modify the name of every
-        // function to be sycl_func_x, if xocc ever gets a little friendlier to
-        // spir input, probably not required.
+        /// \todo Possible: We don't modify declarations right now as this will
+        /// destroy the names of SPIR/CL intrinsics as they aren't actually
+        /// considered intrinsics by LLVM IR. If there is ever a need to modify
+        /// declarations in someway then the best way to do it would be to have a
+        /// comprehensive list of mangled SPIR intrinsic names and check against
+        /// it. Note: This is only relevant if we still modify the name of every
+        /// function to be sycl_func_x, if xocc ever gets a little friendlier to
+        /// spir input, probably not required.
         } else if (isTransitiveNonIntrinsicFunc(F)
                     && !F.isDeclaration()) {
           // After kernels code selection, there are only two kinds of functions

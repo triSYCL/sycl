@@ -5,9 +5,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// The main include header for Xilinx FPGA extensions
-//
+///
+/// \file
+/// The main include header for Xilinx FPGA extensions
+///
 //===----------------------------------------------------------------------===//
 
 #ifndef SYCL_XILINX_FPGA_HPP

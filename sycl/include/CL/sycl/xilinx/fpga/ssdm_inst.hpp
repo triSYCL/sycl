@@ -5,9 +5,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// This file defines some of the SSDM intrinsics used in Xilinx tools.
-//
+///
+/// \file
+/// This file defines some of the SSDM intrinsics used in Xilinx tools.
+///
 //===----------------------------------------------------------------------===//
 
 #ifndef SYCL_XILINX_FPGA_SSDM_INST_HPP

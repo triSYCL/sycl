@@ -5,13 +5,13 @@
   $ISYCL_BIN_DIR/clang++ -std=c++17 -fsycl edge_detection.cpp -o \
     edge_detection -lsycl -lOpenCL `pkg-config --libs opencv`
 
-  NOTE: POCL won't actually work with this example because it uses std::sqrt
+  NOTE: POCL won't actually work with this example because it uses std::abs
     POCL doesn't have the appropriate SPIR builtin manglings in it's library
     so it doesn't execute correctly (can't find the correct symbols). This is
     a problem on their end rather than ours and I'm not sure its worth making
-    a fix to their problem on our (POCL issue #698). For example, modifying our
-    llvm pass to explicitly change built-in manglings to suit pocl based on a
-    compiler flag does not seem like something that is ideal to implement or
+    a fix to their problem on our end (POCL issue #698). For example, modifying
+    our LLVM pass to explicitly change built-in manglings to suit POCL based on
+    a compiler flag does not seem like something that is ideal to implement or
     maintain.
 
   POCL compile example, unfortunately there is no 1 instruction compilation for
@@ -78,9 +78,8 @@ int main(int argc, char* argv[]) {
   queue q { selector , property::queue::enable_profiling() };
 
   // may need to modify this to be different if input.isContinuous
-  buffer<uchar> ib(input.begin<uchar>(), input.end<uchar>());
-
-  buffer<uchar> ob(range<1>{area});
+  buffer<uchar> ib{input.begin<uchar>(), input.end<uchar>()};
+  buffer<uchar> ob{range<1>{area}};
 
   std::cout << "Calculating Max Energy... \n";
 
@@ -101,8 +100,8 @@ int main(int argc, char* argv[]) {
 
   // mapping the enqueueTask call to a single_task, interested in seeing if a
   // parallel_for without a fixed 1-1-1 mapping is workable on an FPGA though..
-  // as its a much cleaner way to express this algorithm. I'm pretty sure sw and
-  // hw emulation would work with a parallel_for as is, but how would a real
+  // as its a much cleaner way to express this algorithm. I'm pretty sure SW and
+  // HW emulation would work with a parallel_for as is, but how would a real
   // FPGA deal with it?
   std::cout << "Launching Kernel... \n";
 
@@ -140,7 +139,7 @@ int main(int argc, char* argv[]) {
 
       // NOTE: To pipeline the top loops similar to SDAccel's example this has
       // to be reworked a little as currently the memory consumption of this
-      // loop is too large for pipe-lining and causes an error when compiling
+      // loop is too large for pipelining and causes an error when compiling
       // for HW. Currently pipe-lining the inner loop instead.
       for (size_t x = 1; x < width - 1; ++x) {
         for (size_t y = 1; y < height - 1; ++y) {

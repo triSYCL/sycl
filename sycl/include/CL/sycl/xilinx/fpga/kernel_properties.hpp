@@ -5,12 +5,12 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-//  This file contains the kernel property template classes that can be applied
-//  to kernel names to apply properties to that kernel.
-//
-//  It also contains helper functions oriented around these kernel properties.
-//
+///
+///  \file
+///  This file contains the kernel property template classes that can be applied
+///  to kernel names to apply properties to that kernel.
+///  It also contains helper functions oriented around these kernel properties.
+///
 //===----------------------------------------------------------------------===//
 
 #ifndef SYCL_XILINX_FPGA_KERNEL_PROPERTIES_HPP
@@ -21,13 +21,13 @@
 #include <regex>
 
 namespace cl::sycl::xilinx {
-  // This is the reqd_work_group_size property that you can wrap around SYCL
-  // kernel names (defined as classes or structs). It applies the OpenCL
-  // reqd_work_group_size attribute to the kernel that is generated.
-  //
-  // TOCONSIDER: the typename component could be variadic  instead. But that may
-  // introduce more complexity than if every property simply takes a single
-  // extra type.
+  /// This is the reqd_work_group_size property that you can wrap around SYCL
+  /// kernel names (defined as classes or structs). It applies the OpenCL
+  /// reqd_work_group_size attribute to the kernel that is generated.
+  ///
+  /// \todo: Consider the typename component could be variadic instead. But that
+  /// may introduce more complexity than if every property simply takes a single
+  /// extra type.
   template <int DimX, int DimY, int DimZ, typename T>
   struct reqd_work_group_size {
     static constexpr int x = DimX;
@@ -35,15 +35,15 @@ namespace cl::sycl::xilinx {
     static constexpr int z = DimZ;
   };
 
-  // Retrieves the ReqdWorkGroupSize values from a demangled function name
-  // using regex.
-  //
-  // In SYCL, kernel names are defined by types and in our current
-  // implementation we wrap our SYCL kernel names with properties that are
-  // defined as template types. For example ReqdWorkGroupSize is defined as
-  // one of these when the kernel name is translated from type to kernel name
-  // the information is retained and we can retrieve it in this LLVM pass by
-  // using regex on it.
+  /// Retrieves the ReqdWorkGroupSize values from a demangled function name
+  /// using regex.
+  ///
+  /// In SYCL, kernel names are defined by types and in our current
+  /// implementation we wrap our SYCL kernel names with properties that are
+  /// defined as template types. For example ReqdWorkGroupSize is defined as
+  /// one of these when the kernel name is translated from type to kernel name
+  /// the information is retained and we can retrieve it in this LLVM pass by
+  /// using regex on it.
   static std::vector<size_t>
   get_reqd_work_group_size(std::string mangledKernelName) {
     static const std::regex matchSomeNaturalInteger {R"(\d+)"};
@@ -65,7 +65,7 @@ namespace cl::sycl::xilinx {
        // reqd_work_group_size interface is incorrect
        for (unsigned i = 0;
             i < 3 && workGroupSizes != std::sregex_token_iterator{};
-            ++i, workGroupSizes++) {
+            ++i, ++workGroupSizes) {
           reqd.push_back(std::stoi(*workGroupSizes));
        }
 

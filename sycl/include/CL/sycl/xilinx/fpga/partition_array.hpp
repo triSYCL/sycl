@@ -5,25 +5,20 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// This file contains a class expressing arrays that can be partitioned.
-//
-// \TODO While Xilinx xocc supports multidimensional C arrays, the
-//    current implementation only support 1-dim array partition.
-//    mdspan C++20 syntax.
-// \TODO Extend this with multidimensional C++ arrays, such as with future
-//
-//
+///
+/// \file
+/// This file contains a class expressing arrays that can be partitioned.
+///
+/// \todo While Xilinx xocc supports multidimensional C arrays, the
+/// current implementation only support 1-dim array partition.
+///    .
+/// \todo Extend this with multidimensional C++ arrays, such as with future
+/// mdspan C++20 syntax.
+///
 //===----------------------------------------------------------------------===//
 
 #ifndef SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP
 #define SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP
-
-// TODO: While Xilinx xocc supports multidimensional C arrays, the
-// current implementation only support 1-dim array partition.
-
-// TODO: Extend this with multidimensional C++ arrays, such as with future
-// mdspan C++20 syntax.
 
 #include <array>
 #include <cstddef>

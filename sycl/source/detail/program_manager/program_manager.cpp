@@ -146,7 +146,7 @@ cl_program ProgramManager::getBuiltOpenCLProgram(const context &Context) {
 // characters in mangled names very well e.g. '$'.
 static std::string getUniqueName(const char *KernelName) {
 
-  boost::uuids::name_generator_latest gen(boost::uuids::ns::dns());
+  boost::uuids::name_generator_latest gen{boost::uuids::ns::dns()};
 
   boost::uuids::uuid udoc = gen(KernelName);
 
@@ -172,7 +172,7 @@ cl_kernel ProgramManager::getOrCreateKernel(const context &Context,
 
   cl_kernel &Kernel =
       KernelsCache[uniqueName.empty() ? string_class{KernelName}
-                                          : uniqueName];
+                                      : uniqueName];
   if (!Kernel) {
     cl_int Err = CL_SUCCESS;
     Kernel = clCreateKernel(

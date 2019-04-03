@@ -23,10 +23,10 @@
   As they directly check against the generated integration header to make sure
   that it's correct and hasn't regressed.
 
-  This test actually directly corresponds to sycl/test/regression/kernel_name_class.cpp
-  I did not realize this before I wrote this! But this is also an executeable
-  implementation of the CodeGen test integration_header.cpp, so somewhat useful
-  I suppose.
+  This test is similar to sycl/test/regression/kernel_name_class.cpp
+
+  But started as an executable variation of integration_header.cpp from the
+  CodeGenSYCL tests.
 
   Intel command:
   $ISYCL_BIN_DIR/clang++ -std=c++11 -fsycl integration_header_check.cpp -o \

@@ -741,9 +741,9 @@ static std::string eraseClassAndStruct(std::string S) {
   const char S1[] = "class ";
   const char S2[] = "struct ";
 
-  // TODO: Change this to be a little more C++ oriented using std::string or
-  // string_view for S1 and S2 and avoiding explicitly skipping the terminating
-  // character '\0' (try to use string size() instead)
+  /// \todo Change this to be a little more C++ oriented using std::string or
+  /// string_view for S1 and S2 and avoiding explicitly skipping the terminating
+  /// character '\0' (try to use string size() instead)
   for (auto Pos = S.find(S1); Pos != StringRef::npos; Pos = S.find(S1, Pos))
     S.erase(Pos, sizeof(S1) - 1);
 

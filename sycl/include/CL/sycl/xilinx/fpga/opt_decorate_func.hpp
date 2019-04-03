@@ -5,10 +5,11 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-//
-// This file includes some decorating functions for some optimizations supported
-// by Xilinx tools.
-//
+///
+/// \file
+/// This file includes some decorating functions for some optimizations supported
+/// by Xilinx tools.
+///
 //===----------------------------------------------------------------------===//
 
 #ifndef SYCL_XILINX_FPGA_OPT_DECORATE_FUNC_HPP
