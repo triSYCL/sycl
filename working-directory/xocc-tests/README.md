@@ -19,15 +19,15 @@ standard command from the Intel SYCL up-streaming effort:
 $ISYCL_BIN_DIR/clang++ -std=c++17 -fsycl test-case.cpp -o test-case \
   -lsycl -lOpenCL
 
-It's noteworthy that the SYCL run-time is compiled using C++20, most of the
-current features are C++11 compatible outside of the Xilinx vendor components
-for the moment. This is likely to change however. You can also only compile
-source code with C++11 to C++17 for the time being as the standard library
-wrapper stubs need to be updated for C++20.
+It is noteworthy that the Xilinx SYCL run-time is compiled using C++20,
+most of the current features are C++11 compatible outside of the Xilinx
+vendor components for the moment. This is likely to change however. You
+can also only compile source code with C++11 to C++17 for the time being
+as the standard library wrapper stubs need to be updated for C++20.
 
 You'll also have to swap out the device selector for the test as using an
 XOCCDeviceSelector with an Intel (SPIRV) compiled executeable will cause
-the program_manager to emit a run-time error when it feeds the kernel 
+the program_manager to emit a run-time error when it feeds the kernel
 binary to the wrong OpenCL run-time.
 
 Test Directories

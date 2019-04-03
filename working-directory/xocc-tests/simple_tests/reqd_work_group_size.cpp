@@ -14,7 +14,7 @@
   is appropriately applied (in this case the test is just that the correct
   kernels execute).
 
-  The kernels that should fail on execution for xilinx devices are numbers 6,7,8
+  The kernels that should fail on execution for Xilinx devices are numbers 6,7,8
   and 9. Compiling without XOCC/Xilinx related flags results in the property
   being ignored for now.
 
@@ -54,6 +54,8 @@
 
 using namespace cl::sycl;
 
+// Forward declaring some class names that are similar to the property name to
+// make sure that it's not inaccurately chosen
 class reqd_work_group_size_test;
 class reqd_work_group_size_test2;
 class reqd_work_group_size_test3;

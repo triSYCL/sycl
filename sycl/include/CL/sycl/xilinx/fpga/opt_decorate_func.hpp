@@ -1,13 +1,18 @@
-//==- opt_decorate_func.hpp --- SYCL xilinx extension         ---------------==//
+//==- opt_decorate_func.hpp --- SYCL Xilinx extension         ---------------==//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file includes some decorating functions for some optimizations supported
+// by Xilinx tools.
+//
+//===----------------------------------------------------------------------===//
 
-#ifndef SYCL_XILINX_OPT_DECORATE_FUNC_HPP
-#define SYCL_XILINX_OPT_DECORATE_FUNC_HPP
+#ifndef SYCL_XILINX_FPGA_OPT_DECORATE_FUNC_HPP
+#define SYCL_XILINX_FPGA_OPT_DECORATE_FUNC_HPP
 
 namespace cl::sycl::xilinx {
 
@@ -56,4 +61,4 @@ void pipeline(T functor) noexcept {
 
 }
 
-#endif // SYCL_XILINX_OPT_DECORATE_FUNC_HPP
+#endif // SYCL_XILINX_FPGA_OPT_DECORATE_FUNC_HPP

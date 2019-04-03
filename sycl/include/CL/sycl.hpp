@@ -40,10 +40,7 @@
 // SYCL making it difficult to test for breakage.
 #if (defined(__cplusplus) && (__cplusplus == 201703L))
 #define __SYCL_VENDOR_XILINX_EXTENSIONS__
-#include <CL/sycl/xilinx/ssdm_inst.hpp>
-#include <CL/sycl/xilinx/partition_array.hpp>
-#include <CL/sycl/xilinx/opt_decorate_func.hpp>
-#include <CL/sycl/xilinx/kernel_properties.hpp>
+#include <CL/sycl/xilinx/fpga.hpp>
 #endif
 
 // Do not include RT only function implementations for device code as it leads

@@ -137,9 +137,16 @@ cl_program ProgramManager::getBuiltOpenCLProgram(const context &Context) {
   return ClProgram;
 }
 
-static std::string getKernelHashName(const char *KernelName) {
+// Gets a unique name to a kernel name which is currently computed from a SHA-1
+// hash of the kernel name. This unique name is used in place of the kernels
+// mangled name inside of xocc computed binaries containing the kernels.
+//
+// This is in part due to a limitation of xocc in which it requires kernel names
+// to be passed to it when compiling kernels and it doesn't handle certain
+// characters in mangled names very well e.g. '$'.
+static std::string getUniqueName(const char *KernelName) {
 
-  boost::uuids::name_generator_sha1 gen(boost::uuids::ns::dns());
+  boost::uuids::name_generator_latest gen(boost::uuids::ns::dns());
 
   boost::uuids::uuid udoc = gen(KernelName);
 
@@ -157,21 +164,19 @@ cl_kernel ProgramManager::getOrCreateKernel(const context &Context,
   // TODO: Extend this to work for more than the first device in the context
   // most of the run-time only works with a single device right now, but this
   // should be changed long term.
-  // TODO: Perhaps it should also be more robust in that it checks for more than
-  // just the device vendor
   auto Devices = Context.get_devices();
-  std::string hashed_name;
-  if (!Devices.empty())
-    if (Devices[0].get_info<info::device::vendor>() == "Xilinx")
-      hashed_name = getKernelHashName(KernelName);
+  std::string uniqueName;
+  if (!Devices.empty()
+    && Devices[0].get_info<info::device::vendor>() == "Xilinx")
+      uniqueName = getUniqueName(KernelName);
 
   cl_kernel &Kernel =
-      KernelsCache[(hashed_name.empty()) ? string_class(KernelName)
-                                         : hashed_name];
+      KernelsCache[uniqueName.empty() ? string_class{KernelName}
+                                          : uniqueName];
   if (!Kernel) {
     cl_int Err = CL_SUCCESS;
     Kernel = clCreateKernel(
-      Program, (hashed_name.empty()) ? KernelName : hashed_name.c_str(), &Err);
+      Program, uniqueName.empty() ? KernelName : uniqueName.c_str(), &Err);
     CHECK_OCL_CODE(Err);
   }
   return Kernel;

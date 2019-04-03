@@ -1,13 +1,23 @@
-//==- partition_array.hpp --- SYCL xilinx array partition extension  -------==//
+//==- partition_array.hpp --- SYCL Xilinx array partition extension  -------==//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file contains a class expressing arrays that can be partitioned.
+//
+// \TODO While Xilinx xocc supports multidimensional C arrays, the
+//    current implementation only support 1-dim array partition.
+//    mdspan C++20 syntax.
+// \TODO Extend this with multidimensional C++ arrays, such as with future
+//
+//
+//===----------------------------------------------------------------------===//
 
-#ifndef SYCL_XILINX_PARTITION_ARRAY_HPP
-#define SYCL_XILINX_PARTITION_ARRAY_HPP
+#ifndef SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP
+#define SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP
 
 // TODO: While Xilinx xocc supports multidimensional C arrays, the
 // current implementation only support 1-dim array partition.
@@ -240,4 +250,4 @@ struct partition_array {
 
 } // namespace cl::sycl::xilinx
 
-#endif// SYCL_XILINX_PARTITION_ARRAY_HPP
+#endif// SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP

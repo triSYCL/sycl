@@ -15,7 +15,7 @@
 #include <CL/sycl/exception.hpp>
 
 #if (defined(__SYCL_VENDOR_XILINX_EXTENSIONS__))
-#include <CL/sycl/xilinx/kernel_properties.hpp>
+#include <CL/sycl/xilinx/fpga/kernel_properties.hpp>
 #endif
 
 #include <cassert>

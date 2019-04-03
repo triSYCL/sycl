@@ -1,13 +1,17 @@
-//==- partition_array.hpp --- SYCL xilinx SSDM intrinsics            -------==//
+//==- partition_array.hpp --- SYCL Xilinx SSDM intrinsics            -------==//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This file defines some of the SSDM intrinsics used in Xilinx tools.
+//
+//===----------------------------------------------------------------------===//
 
-#ifndef SYCL_XILINX_SSDM_INST_HPP
-#define SYCL_XILINX_SSDM_INST_HPP
+#ifndef SYCL_XILINX_FPGA_SSDM_INST_HPP
+#define SYCL_XILINX_FPGA_SSDM_INST_HPP
 
 // This file defines some of the SSDM intrinsics used in Xilinx tools.
 
@@ -30,4 +34,4 @@ extern "C" {
 #define _ssdm_SpecArrayPartition(...) do { } while (0)
 #endif
 
-#endif // SYCL_XILINX_SSDM_INST_HPP
+#endif // SYCL_XILINX_FPGA_SSDM_INST_HPP

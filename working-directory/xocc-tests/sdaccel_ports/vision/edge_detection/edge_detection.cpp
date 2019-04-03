@@ -9,7 +9,11 @@
     POCL doesn't have the appropriate SPIR builtin manglings in it's library
     so it doesn't execute correctly (can't find the correct symbols). This is
     a problem on their end rather than ours and I'm not sure its worth making
-    a fix to their problem (POCL issue #698).
+    a fix to their problem on our (POCL issue #698). For example, modifying our
+    llvm pass to explicitly change built-in manglings to suit pocl based on a
+    compiler flag does not seem like something that is ideal to implement or
+    maintain.
+
   POCL compile example, unfortunately there is no 1 instruction compilation for
   POCL at the moment it needs to be 2 stepped as it uses spir-df:
   1) $ISYCL_BIN_DIR/clang++ --sycl -fsycl-use-bitcode -Xclang \
@@ -17,8 +21,7 @@
     kernel.bin
   2) $ISYCL_BIN_DIR/clang++ -std=c++14 -include edge_detection-int-header.h \
       edge_detection.cpp -o edge_detection -lsycl -lOpenCL \
-      \ `pkg-config --libs opencv`
-
+      `pkg-config --libs opencv`
 
   XOCC compile command:
   $ISYCL_BIN_DIR/clang++ -D__SYCL_SPIR_DEVICE__ -DXILINX -std=c++17 -fsycl \
@@ -49,7 +52,7 @@ using namespace cl::sycl;
 class krnl_sobel;
 
 int main(int argc, char* argv[]) {
-  if(argc != 2) {
+  if (argc != 2) {
       std::cout << "Usage: " << argv[0] << "<input> \n";
       return 1;
   }
@@ -62,14 +65,10 @@ int main(int argc, char* argv[]) {
 
   // using fixed constexpr values stays more true to the original implementation
   // however you can in theory just use input.rows/cols to support a wider range
-  // of images sizes. In either case having these outside relies on the SYCL
-  // implementation being able to capture these values in the kernel which at
-  // the moment it doesn't seem to be able to do.
-  #define WIDTH  1024
-  #define HEIGHT 1895
-  // constexpr auto height = 1895; // input.rows;
-  // constexpr auto width = 1024; // input.cols;
-  // constexpr auto area = height * width;
+  // of image sizes.
+  constexpr auto height = 1895; // input.rows;
+  constexpr auto width = 1024; // input.cols;
+  constexpr auto area = height * width;
 
 #ifdef XILINX
   selector_defines::XOCLDeviceSelector selector;
@@ -81,7 +80,7 @@ int main(int argc, char* argv[]) {
   // may need to modify this to be different if input.isContinuous
   buffer<uchar> ib(input.begin<uchar>(), input.end<uchar>());
 
-  buffer<uchar> ob(range<1>{HEIGHT * WIDTH/*area*/});
+  buffer<uchar> ob(range<1>{area});
 
   std::cout << "Calculating Max Energy... \n";
 
@@ -89,6 +88,7 @@ int main(int argc, char* argv[]) {
   // Work around for bug in the main SYCL implementation relating to unusable
   // std lib functions when compiling for device (device doesn't care about the
   // host components but still has to compile them)
+  // Issue: https://github.com/intel/llvm/issues/15
 #ifndef __SYCL_DEVICE_ONLY__
   iMax = *std::max_element(input.begin<uchar>(), input.end<uchar>(),
                             [](auto i, auto j){ return i < j; });
@@ -139,11 +139,11 @@ int main(int argc, char* argv[]) {
       // * generally pays more attention to bit width when transferring data
 
       // NOTE: To pipeline the top loops similar to SDAccel's example this has
-      // to  be reworked a little as currently the memory consumption of this
-      // loop is too large for pipelining and causes an error when compiling
-      // for HW. Currently pipelining the inner loop instead.
-      for (size_t x = 1; x < WIDTH - 1/*width - 1*/; ++x) {
-        for (size_t y = 1; y < HEIGHT - 1/*height - 1*/; ++y) {
+      // to be reworked a little as currently the memory consumption of this
+      // loop is too large for pipe-lining and causes an error when compiling
+      // for HW. Currently pipe-lining the inner loop instead.
+      for (size_t x = 1; x < width - 1; ++x) {
+        for (size_t y = 1; y < height - 1; ++y) {
             magX = 0; magY = 0;
 
 #ifdef XILINX
@@ -152,7 +152,7 @@ int main(int argc, char* argv[]) {
               for(size_t k = 0; k < 3; ++k) {
                 for(size_t l = 0; l < 3; ++l) {
                   gI = k * 3 + l;
-                  pIndex =  (x + k - 1) + (y + l - 1) * WIDTH;
+                  pIndex =  (x + k - 1) + (y + l - 1) * width;
                   magX += gX[gI] * pixel_rb[pIndex];
                   magY += gY[gI] * pixel_rb[pIndex];
                 }
@@ -164,7 +164,7 @@ int main(int argc, char* argv[]) {
             // capping at 0xFF means no blurring of edges when it gets
             // converted back to a char from an int
             sum = std::abs(magX) + std::abs(magY);
-            pixel_wb[x + y * WIDTH] = (sum > 0xFF) ? 0xFF : (char)sum;
+            pixel_wb[x + y * width] = (sum > 0xFF) ? 0xFF : (char)sum;
         }
       }
     });
@@ -183,9 +183,13 @@ int main(int argc, char* argv[]) {
 
   std::cout << "Calculating Output energy.... \n";
 
-  cv::Mat output(HEIGHT/*height*/, WIDTH/*width*/, CV_8UC1, pixel_rb.get_pointer());
+  cv::Mat output(height, width, CV_8UC1, pixel_rb.get_pointer());
 
   short oMax = 0;
+// Work around for bug in the main SYCL implementation relating to unusable
+// std lib functions when compiling for device (device doesn't care about the
+// host components but still has to compile them)
+// Issue: https://github.com/intel/llvm/issues/15
 #ifndef __SYCL_DEVICE_ONLY__
   oMax = *std::max_element(output.begin<uchar>(), output.end<uchar>(),
                             [=](auto i, auto j){ return i < j; });
