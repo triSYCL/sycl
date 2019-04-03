@@ -14,6 +14,10 @@
 #include <CL/sycl/detail/scheduler/requirements.h>
 #include <CL/sycl/exception.hpp>
 
+#if (defined(__SYCL_VENDOR_XILINX_EXTENSIONS__))
+#include <CL/sycl/xilinx/fpga/kernel_properties.hpp>
+#endif
+
 #include <cassert>
 
 namespace csd = cl::sycl::detail;
@@ -116,15 +120,42 @@ ExecuteKernelCommand<
     SingleTask>::runEnqueueNDRangeKernel(cl_command_queue &EnvQueue,
                                          cl_kernel &Kernel,
                                          std::vector<cl_event> CLEvents) {
+  // TODO: Think about if there is a point in "passing" the property down to
+  // here, as in reality the LocalWorkSize is never specified in this
+  // implementation of runEnqueueNDRangeKernel. This implementation of
+  // runEnqueueNDRangeKernel is for cases where the SYCL parallelism construct
+  // is a single_task or a parallel_for without an nd_range (just global range).
+  // So all we're really doing is enforcing a local work group size that a user
+  // can't actually get access to as item has no get_local related methods.
+  // There is no SYCL specification restriction on this use of the attribute
+  // but perhaps it's not needed. Although, maybe there is use case for someone
+  // enforcing a reqd_work_group_size on the global range a kernel is invoked
+  // with. In either case it can be removed and all you would have to do for the
+  // case of single_task is check if the SingleTask variable is true and if it
+  // is specify a LocalWorkSize of 1,1,1 else specify nullptr (this meets the
+  // OpenCL restrictions on ReqdWorkGroupSize).
+  // This will also enforce LocalWorkSize on Intel devices if
+  // reqd_work_group_size is specified and the std is >= 17. Perhaps not ideal.
+  std::vector<size_t> ReqdWorkGroupSize;
+  #if (defined(__SYCL_VENDOR_XILINX_EXTENSIONS__))
+  ReqdWorkGroupSize =
+      cl::sycl::xilinx::get_reqd_work_group_size(m_KernelName);
+  #endif
+
+  size_t LocalWorkSize[Dimensions];
   size_t GlobalWorkSize[Dimensions];
   size_t GlobalWorkOffset[Dimensions];
+
   for (int I = 0; I < Dimensions; I++) {
     GlobalWorkSize[I] = m_WorkItemsRange[I];
     GlobalWorkOffset[I] = m_WorkItemsOffset[I];
+    LocalWorkSize[I] = (ReqdWorkGroupSize.size() >0) ? ReqdWorkGroupSize[I] : 0;
   }
+
   cl_event CLEvent;
   cl_int error = clEnqueueNDRangeKernel(
-      EnvQueue, Kernel, Dimensions, GlobalWorkOffset, GlobalWorkSize, nullptr,
+      EnvQueue, Kernel, Dimensions, GlobalWorkOffset, GlobalWorkSize,
+      (ReqdWorkGroupSize.size() > 0) ? LocalWorkSize :  nullptr,
       CLEvents.size(), CLEvents.data(), &CLEvent);
   CHECK_OCL_CODE(error);
   return CLEvent;
