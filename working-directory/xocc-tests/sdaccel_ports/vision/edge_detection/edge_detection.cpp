@@ -140,7 +140,7 @@ int main(int argc, char* argv[]) {
       // NOTE: To pipeline the top loops similar to SDAccel's example this has
       // to be reworked a little as currently the memory consumption of this
       // loop is too large for pipelining and causes an error when compiling
-      // for HW. Currently pipe-lining the inner loop instead.
+      // for HW. Currently pipelining the inner loop instead.
       for (size_t x = 1; x < width - 1; ++x) {
         for (size_t y = 1; y < height - 1; ++y) {
             magX = 0; magY = 0;
