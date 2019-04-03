@@ -36,6 +36,13 @@
 #include <CL/sycl/types.hpp>
 #include <CL/sycl/version.hpp>
 
+// These require > C++ 17 for now, but compiling all the tests with C++17 breaks
+// some Clang Unit tests involving SYCL making it difficult to test for breakage.
+#if (defined(__cplusplus) && (__cplusplus == 201703L))
+#define __SYCL_VENDOR_XILINX_EXTENSIONS__
+#include <CL/sycl/xilinx/fpga.hpp>
+#endif
+
 // Do not include RT only function implementations for device code as it leads
 // to problem. Should be finally fixed when we introduce library.
 #ifndef __SYCL_DEVICE_ONLY__

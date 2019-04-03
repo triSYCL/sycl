@@ -13,6 +13,10 @@
 #include <CL/sycl/exception.hpp>
 #include <CL/sycl/stl.hpp>
 
+#include <boost/container_hash/hash.hpp> // uuid_hasher
+#include <boost/uuid/uuid_generators.hpp> // sha name_gen/generator
+#include <boost/uuid/uuid_io.hpp> // uuid to_string
+
 #include <assert.h>
 #include <cstdlib>
 #include <fstream>
@@ -112,31 +116,11 @@ static cl_program createProgram(const platform &Platform,
 }
 
 cl_program ProgramManager::createOpenCLProgram(const context &Context) {
-  // TODO: This shouldn't just check the first initial device, realistically
-  // there should be some indication of what the primary device is on the
-  // platform/the one the user wishes to use.
-  // Or create a program for the device with the worst support, with the
-  // expectation that newer devices can consume it.
-  // Or create several programs based on the required source.
-  // Perhaps I'm putting to much weight on the device having the right support
-  // however and it should be the platform.
-  auto Devices = Context.get_devices();
   vector_class<char> DeviceProg;
-  device Device;
-  if (!Devices.empty()) {
-     Device = Devices[0];
-    // Is there a need for two getXSource? Could perhaps unify the
-    // implementations and change the file extension looked for based on
-    // whats supported
-    // TOOD: Unify these calls or just use getSpirvSource, which involves
-    // changing the Makefile a little (change the xocc -l stage extension
-    // from .bin to .spv output)
-    if (Device.has_extension("cl_khr_il_program")) {
-      DeviceProg = getSpirvSource();
-    } else {
-      DeviceProg = getBinarySource(".bin");
-    }
-  }
+
+  // despite being named getSpirvSource this works for any binary file, even
+  // spir-df. Just make sure to postfix it with .spv for the time being.
+  DeviceProg = getSpirvSource();
 
   cl_context ClContext = detail::getSyclObjImpl(Context)->getHandleRef();
   const platform &Platform = Context.get_platform();
@@ -153,14 +137,46 @@ cl_program ProgramManager::getBuiltOpenCLProgram(const context &Context) {
   return ClProgram;
 }
 
+// Gets a unique name to a kernel name which is currently computed from a SHA-1
+// hash of the kernel name. This unique name is used in place of the kernels
+// mangled name inside of xocc computed binaries containing the kernels.
+//
+// This is in part due to a limitation of xocc in which it requires kernel names
+// to be passed to it when compiling kernels and it doesn't handle certain
+// characters in mangled names very well e.g. '$'.
+static std::string getUniqueName(const char *KernelName) {
+
+  boost::uuids::name_generator_latest gen{boost::uuids::ns::dns()};
+
+  boost::uuids::uuid udoc = gen(KernelName);
+
+  boost::hash<boost::uuids::uuid> uuid_hasher;
+  std::size_t uuid_hash_value = uuid_hasher(udoc);
+
+  return std::to_string(uuid_hash_value);
+}
+
 cl_kernel ProgramManager::getOrCreateKernel(const context &Context,
                                             const char *KernelName) {
   cl_program Program = getBuiltOpenCLProgram(Context);
   auto &KernelsCache = m_CachedKernels[Program];
-  cl_kernel &Kernel = KernelsCache[string_class(KernelName)];
+
+  // TODO: Extend this to work for more than the first device in the context
+  // most of the run-time only works with a single device right now, but this
+  // should be changed long term.
+  auto Devices = Context.get_devices();
+  std::string uniqueName;
+  if (!Devices.empty()
+    && Devices[0].get_info<info::device::vendor>() == "Xilinx")
+      uniqueName = getUniqueName(KernelName);
+
+  cl_kernel &Kernel =
+      KernelsCache[uniqueName.empty() ? string_class{KernelName}
+                                      : uniqueName];
   if (!Kernel) {
     cl_int Err = CL_SUCCESS;
-    Kernel = clCreateKernel(Program, KernelName, &Err);
+    Kernel = clCreateKernel(
+      Program, uniqueName.empty() ? KernelName : uniqueName.c_str(), &Err);
     CHECK_OCL_CODE(Err);
   }
   return Kernel;
@@ -171,37 +187,6 @@ cl_program ProgramManager::getClProgramFromClKernel(cl_kernel ClKernel) {
   CHECK_OCL_CODE(clGetKernelInfo(ClKernel, CL_KERNEL_PROGRAM,
                                  sizeof(cl_program), &ClProgram, nullptr));
   return ClProgram;
-}
-
-const vector_class<char> ProgramManager::getBinarySource(std::string FileExtension) {
-  // TODO FIXME make this function thread-safe
-  vector_class<char> DeviceProg;
-
-  if (DeviceImages) {
-    const __tgt_device_image &Img = DeviceImages->DeviceImages[0];
-    auto *BegPtr = reinterpret_cast<const char *>(Img.ImageStart);
-    auto *EndPtr = reinterpret_cast<const char *>(Img.ImageEnd);
-    ptrdiff_t ImgSize = EndPtr - BegPtr;
-    DeviceProg.clear();
-    DeviceProg.resize(static_cast<size_t>(ImgSize));
-
-    // TODO this code is expected to be heavily refactored, this copying
-    // might be redundant (unless we don't want to work on live .rodata)
-    std::copy(BegPtr, EndPtr, DeviceProg.begin());
-  } else {
-    std::ifstream File("kernel" + FileExtension, std::ios::binary);
-    if (!File.is_open()) {
-      throw compile_program_error(("Can not open kernel" + FileExtension + "\n").c_str());
-    }
-
-    File.seekg(0, std::ios::end);
-    DeviceProg = vector_class<char>(File.tellg());
-    File.seekg(0);
-    File.read(DeviceProg.data(), DeviceProg.size());
-    File.close();
-  }
-
-  return DeviceProg;
 }
 
 const vector_class<char> ProgramManager::getSpirvSource() {
