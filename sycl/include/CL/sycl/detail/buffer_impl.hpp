@@ -37,16 +37,18 @@ class handler;
 class queue;
 template <int dimentions> class id;
 template <int dimentions> class range;
-template <class T> using buffer_allocator = std::allocator<T>;
+using buffer_allocator = std::allocator<char>;
 namespace detail {
 template <typename AllocatorT> class buffer_impl {
 public:
-  buffer_impl(const size_t sizeInBytes, const property_list &propList)
-      : buffer_impl((void *)nullptr, sizeInBytes, propList) {}
+  buffer_impl(const size_t sizeInBytes, const property_list &propList,
+              AllocatorT allocator = AllocatorT())
+      : buffer_impl((void *)nullptr, sizeInBytes, propList, allocator) {}
 
   buffer_impl(void *hostData, const size_t sizeInBytes,
-              const property_list &propList)
-      : SizeInBytes(sizeInBytes), Props(propList) {
+              const property_list &propList,
+              AllocatorT allocator = AllocatorT())
+      : SizeInBytes(sizeInBytes), Props(propList), MAllocator(allocator) {
     if (Props.has_property<property::buffer::use_host_ptr>()) {
       BufPtr = hostData;
     } else {
@@ -62,8 +64,9 @@ public:
 
   // TODO temporary solution for allowing initialisation with const data
   buffer_impl(const void *hostData, const size_t sizeInBytes,
-              const property_list &propList)
-      : SizeInBytes(sizeInBytes), Props(propList) {
+              const property_list &propList,
+              AllocatorT allocator = AllocatorT())
+      : SizeInBytes(sizeInBytes), Props(propList), MAllocator(allocator) {
     if (Props.has_property<property::buffer::use_host_ptr>()) {
       // TODO make this buffer read only
       BufPtr = const_cast<void *>(hostData);
@@ -79,8 +82,9 @@ public:
 
   template <typename T>
   buffer_impl(const shared_ptr_class<T> &hostData, const size_t sizeInBytes,
-              const property_list &propList)
-      : SizeInBytes(sizeInBytes), Props(propList) {
+              const property_list &propList,
+              AllocatorT allocator = AllocatorT())
+      : SizeInBytes(sizeInBytes), Props(propList), MAllocator(allocator) {
     if (Props.has_property<property::buffer::use_host_ptr>()) {
       BufPtr = hostData.get();
     } else {
@@ -97,8 +101,9 @@ public:
 
   template <class InputIterator>
   buffer_impl(InputIterator first, InputIterator last, const size_t sizeInBytes,
-              const property_list &propList)
-      : SizeInBytes(sizeInBytes), Props(propList) {
+              const property_list &propList,
+              AllocatorT allocator = AllocatorT())
+      : SizeInBytes(sizeInBytes), Props(propList), MAllocator(allocator) {
     if (Props.has_property<property::buffer::use_host_ptr>()) {
       // TODO next line looks unsafe
       BufPtr = &*first;
@@ -114,8 +119,9 @@ public:
   }
 
   buffer_impl(cl_mem MemObject, const context &SyclContext,
-              event AvailableEvent = {})
-      : OpenCLInterop(true), AvailableEvent(AvailableEvent) {
+              const size_t sizeInBytes, event AvailableEvent = {})
+      : OpenCLInterop(true), SizeInBytes(sizeInBytes),
+        AvailableEvent(AvailableEvent) {
     if (SyclContext.is_host())
       throw cl::sycl::invalid_parameter_error(
           "Creation of interoperability buffer using host context is not "
@@ -140,7 +146,7 @@ public:
           .copyBack<access::mode::read_write, access::target::host_buffer>(
               *this);
 
-    if (uploadData != nullptr) {
+    if (uploadData != nullptr && NeedWriteBack) {
       uploadData();
     }
 
@@ -170,7 +176,7 @@ public:
       throw cl::sycl::runtime_error(
           "set_final_data could not be used with interoperability buffer");
     static_assert(!std::is_const<Destination>::value,
-                  "Сan not write in a constant Destination. Destination should "
+                  "Can not write in a constant Destination. Destination should "
                   "not be const.");
     uploadData = [this, final_data]() mutable {
       auto *Ptr =
@@ -181,6 +187,10 @@ public:
       std::copy(Ptr, Ptr + SizeInBytes / ValSize, final_data);
     };
   }
+
+  void set_write_back(bool flag) { NeedWriteBack = flag; }
+
+  AllocatorT get_allocator() const { return MAllocator; }
 
   template <typename T, int dimensions, access::mode mode,
             access::target target = access::target::global_buffer>
@@ -197,6 +207,34 @@ public:
   get_access(buffer<T, dimensions, AllocatorT> &Buffer) {
     return accessor<T, dimensions, mode, access::target::host_buffer,
                     access::placeholder::false_t>(Buffer);
+  }
+
+  template <typename T, int dimensions, access::mode mode,
+            access::target target = access::target::global_buffer>
+  accessor<T, dimensions, mode, target, access::placeholder::false_t>
+  get_access(buffer<T, dimensions, AllocatorT> &Buffer,
+             handler &commandGroupHandler, range<dimensions> accessRange,
+             id<dimensions> accessOffset) {
+    return accessor<T, dimensions, mode, target, access::placeholder::false_t>(
+        Buffer, commandGroupHandler, accessRange, accessOffset);
+  }
+
+  template <typename T, int dimensions, access::mode mode>
+  accessor<T, dimensions, mode, access::target::host_buffer,
+           access::placeholder::false_t>
+  get_access(buffer<T, dimensions, AllocatorT> &Buffer,
+             range<dimensions> accessRange, id<dimensions> accessOffset) {
+    return accessor<T, dimensions, mode, access::target::host_buffer,
+                    access::placeholder::false_t>(Buffer, accessRange,
+                                                  accessOffset);
+  }
+
+  template <typename propertyT> bool has_property() const {
+    return Props.has_property<propertyT>();
+  }
+
+  template <typename propertyT> propertyT get_property() const {
+    return Props.get_property<propertyT>();
   }
 
 public:
@@ -243,8 +281,10 @@ private:
   // This field must be the first to guarantee that it's safe to use
   // reinterpret casting while setting kernel arguments in order to get cl_mem
   // value from the buffer regardless of its dimensionality.
+  AllocatorT MAllocator;
   OpenCLMemState OCLState;
   bool OpenCLInterop = false;
+  bool NeedWriteBack = true;
   event AvailableEvent;
   cl_context OpenCLContext = nullptr;
   void *BufPtr = nullptr;
@@ -277,7 +317,6 @@ void buffer_impl<AllocatorT>::fill(QueueImplPtr Queue,
   ContextImplPtr Context = detail::getSyclObjImpl(Queue->get_context());
 
   OCLState.Queue = std::move(Queue);
-  Event->setIsHostEvent(false);
 
   cl_event &BufEvent = Event->getHandleRef();
   std::vector<cl_event> CLEvents =
@@ -290,6 +329,7 @@ void buffer_impl<AllocatorT>::fill(QueueImplPtr Queue,
 
   CHECK_OCL_CODE(Error);
   CHECK_OCL_CODE(clReleaseCommandQueue(CommandQueue));
+  Event->setContextImpl(Context);
 }
 
 template <typename AllocatorT>
@@ -340,7 +380,7 @@ void buffer_impl<AllocatorT>::copy(
   CHECK_OCL_CODE(Error);
   CHECK_OCL_CODE(clReleaseCommandQueue(CommandQueue));
   OCLState.Queue = std::move(Queue);
-  Event->setIsHostEvent(false);
+  Event->setContextImpl(Context);
 }
 
 template <typename AllocatorT>
@@ -362,7 +402,7 @@ void buffer_impl<AllocatorT>::moveMemoryTo(
   // TODO: Check discuss if "user host" and "host device" are the same.
   if ((Queue->is_host()) && (OCLState.Queue->is_host())) {
     detail::waitEvents(DepEvents);
-    Event->setIsHostEvent(true);
+    Event->setContextImpl(Context);
     OCLState.Queue = std::move(Queue);
     return;
   }
@@ -386,8 +426,8 @@ void buffer_impl<AllocatorT>::moveMemoryTo(
         /*blocking_read=*/CL_FALSE, /*offset=*/0, ByteSize, BufPtr,
         CLEvents.size(), CLEvents.data(), &ReadBufEvent);
     CHECK_OCL_CODE(Error);
-
-    Event->setIsHostEvent(false);
+    Event->setContextImpl(
+        detail::getSyclObjImpl(OCLState.Queue->get_context()));
 
     OCLState.Queue = std::move(Queue);
     return;
@@ -434,7 +474,7 @@ void buffer_impl<AllocatorT>::moveMemoryTo(
                              ByteSize, BufPtr, CLEvents.size(), CLEvents.data(),
                              &WriteBufEvent); // replace &WriteBufEvent to NULL
     CHECK_OCL_CODE(Error);
-    Event->setIsHostEvent(false);
+    Event->setContextImpl(Context);
 
     return;
   }
@@ -489,9 +529,12 @@ void buffer_impl<AllocatorT>::allocate(QueueImplPtr Queue,
         "context associated with the OpenCL memory object.");
 
   if (OpenCLInterop) {
-    AvailableEvent.wait();
+    // For interoperability instance of the SYCL buffer class being constructed
+    // must wait for the SYCL event parameter, if one is provided,
+    // availableEvent to signal that the cl_mem instance is ready to be used
+    // Move availableEvent to SYCL scheduler ownership to handle dependencies.
+    Event = detail::getSyclObjImpl(AvailableEvent);
     OCLState.Queue = std::move(Queue);
-    Event->setIsHostEvent(true);
     return;
   }
 
@@ -513,13 +556,12 @@ void buffer_impl<AllocatorT>::allocate(QueueImplPtr Queue,
 
     OCLState.Queue = std::move(Queue);
     OCLState.Mem = Mem;
-
-    Event->setIsHostEvent(false);
+    Event->setContextImpl(Context);
 
     return;
   }
   if (Queue->is_host()) {
-    Event->setIsHostEvent(true);
+    Event->setContextImpl(Context);
     OCLState.Queue = std::move(Queue);
     return;
   }
