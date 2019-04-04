@@ -55,6 +55,7 @@
 // CHECK-NEXT:   { kernel_param_kind_t::kind_accessor, 2016, 4 },
 // CHECK-NEXT:   { kernel_param_kind_t::kind_std_layout, 1, 4 },
 // CHECK-NEXT:   { kernel_param_kind_t::kind_std_layout, 1, 5 },
+// CHECK-NEXT:   { kernel_param_kind_t::kind_std_layout, 1, 6 },
 // CHECK-EMPTY:
 // CHECK-NEXT: };
 //
