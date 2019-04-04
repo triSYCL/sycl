@@ -126,6 +126,7 @@ add_subdirectory( tools )
 set(manifest_list)
 set( DEPLOY_LIST
   sycl
+  sycl-xocc
   ocl_lib
   ocl_headers
   sycl_headers
