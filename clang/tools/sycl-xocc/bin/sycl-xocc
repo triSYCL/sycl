@@ -28,6 +28,9 @@
 # $5 == temporary file directory to place intermediate .xo files or to retrieve
 #       intermediate .xo files for linking when -l speciifed
 
+# TODO: Pass an argument through the driver to set options like XILINX_PLATFORM, 
+# the environment variables are a quick workaround to swap boards. 
+
 usage() { echo xocc_compile: error: $2 >&2; exit $1; }
 
 [ $# -eq 0      ] && usage 1 "no xocc shell or bin"
@@ -44,7 +47,7 @@ if [[ $2 = "-c" ]]; then
   while IFS= read -r X
   do
   if [[ -n "$X" ]]; then
-    $1 --target $XCL_EMULATION_MODE --platform xilinx_vcu1525_dynamic_5_1 \
+    $1 --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM \
       --save-temps -c -k $X -o $5/$X.xo $4
   fi
   done <<< $DATA
@@ -60,6 +63,6 @@ elif [[ $2 = "-l" ]]; then
   fi
   done <<< $DATA
 
-  $1 --target $XCL_EMULATION_MODE --platform xilinx_vcu1525_dynamic_5_1 -l \
+  $1 --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM -l \
     --save-temps -o $4 $LINKER_LIST
 fi

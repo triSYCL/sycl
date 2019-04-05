@@ -1,3 +1,5 @@
+// RUN: true
+
 /*
   Testing if constexpr values carry across as expected from the host to the
   device e.g. as a compile time hardcoded value and not by value copy

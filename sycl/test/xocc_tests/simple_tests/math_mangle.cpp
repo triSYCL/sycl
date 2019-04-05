@@ -1,3 +1,5 @@
+// RUN: true
+
 /*
   This test is similar to id_mangle.cpp in that it's mostly for testing the
   correct generation of SPIR built-ins when compiling for xocc. Incorrect

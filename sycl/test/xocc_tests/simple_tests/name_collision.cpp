@@ -1,3 +1,5 @@
+// RUN: true
+
 #include <CL/sycl.hpp>
 
 using namespace cl::sycl;

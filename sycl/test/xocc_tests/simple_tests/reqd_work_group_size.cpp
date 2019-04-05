@@ -1,3 +1,5 @@
+// RUN: true
+
 /*
   This test is intended to check the LLVM IR output for correctness
   (reqd_work_group_size attribute is applied to the kernel via meta-data) and to

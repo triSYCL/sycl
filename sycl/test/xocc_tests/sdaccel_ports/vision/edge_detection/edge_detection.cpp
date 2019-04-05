@@ -1,3 +1,5 @@
+// RUN: true
+
 /*
   Attempt at translating SDAccel Examples edge_detection example to SYCL
 

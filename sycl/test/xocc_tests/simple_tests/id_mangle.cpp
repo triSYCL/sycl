@@ -1,3 +1,5 @@
+// RUN: true
+
 /*
   Test to see if the world will explode when using SPIR built-ins that are
   derived from those in cl__spirv on Xilinx FPGAs when compiling using xocc.

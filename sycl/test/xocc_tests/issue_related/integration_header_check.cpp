@@ -1,3 +1,5 @@
+// RUN: true
+
 /*
   The main point of the test is to check if you can name SYCL kernels in
   certain ways without the compiler or run-time breaking due to an

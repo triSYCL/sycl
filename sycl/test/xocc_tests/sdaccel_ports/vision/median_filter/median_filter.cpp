@@ -1,3 +1,5 @@
+// RUN: true
+
 /*
   $ISYCL_BIN_DIR/clang++ -std=c++14 -fsycl median_filter.cpp -o \
     median_filter -lsycl -lOpenCL `pkg-config --libs opencv`

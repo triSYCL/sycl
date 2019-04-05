@@ -1,3 +1,5 @@
+// RUN: true
+
 #include <iostream>
 #include <CL/sycl.hpp>
 

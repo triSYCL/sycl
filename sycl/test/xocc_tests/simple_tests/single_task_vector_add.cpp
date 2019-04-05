@@ -1,3 +1,5 @@
+// RUN: true
+
 /*
    A simple typical FPGA-like kernel adding 2 vectors
 */

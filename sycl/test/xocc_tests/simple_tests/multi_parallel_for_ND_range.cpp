@@ -1,3 +1,5 @@
+// RUN: true
+
 #include <CL/sycl.hpp>
 #include <iostream>
 #include <numeric>
@@ -24,11 +26,7 @@ class XOCLDeviceSelector : public device_selector {
 
 
 template <int Dimensions, class kernel_name>
-void gen_nd_range(range<Dimensions> k_range) {
-  XOCLDeviceSelector xocl;
-
-  queue my_queue{xocl};
-
+void gen_nd_range(range<Dimensions> k_range, queue my_queue) {
   buffer<unsigned int> a(k_range.size());
 
   my_queue.submit([&](handler &cgh) {
@@ -46,7 +44,7 @@ void gen_nd_range(range<Dimensions> k_range) {
   auto acc_r = a.get_access<access::mode::read>();
 
   for (unsigned int i = 0; i < k_range.size(); ++i) {
-      // std::cout << acc_r[i] << " == " << k_range.size() + i << std::endl;
+    //  std::cout << acc_r[i] << " == " << k_range.size() + i << std::endl;
       assert(acc_r[i] == k_range.size() + i &&
         "incorrect result acc_r[i] != k_range.size() + i");
   }
@@ -54,8 +52,31 @@ void gen_nd_range(range<Dimensions> k_range) {
   my_queue.wait();
 }
 
+
+/*
+  Kernel Names:
+  par_1d
+  par_2d_square
+  par_2d_rect
+  par_3d_square
+  par_3d_rect
+*/
+// This test does not deal with duplicate kernel names, it was to test the
+// ability to extract all the kernels from a file that contained multiple
+// kernels in the one translation unit when using xocc (xpirbc consumption path
+// doesn't allow you to pass -k all, each kernel needs to be compiled and linked
+// separately before being linked together).
+// At the time of this test, unique names for every kernel are a requirement
 int main(int argc, char *argv[]) {
-  gen_nd_range<2, class add>({10, 10}); // change the name later..
+  XOCLDeviceSelector xocl;
+
+  queue my_queue{xocl};
+
+  gen_nd_range<1, class par_1d>({10}, my_queue);
+  gen_nd_range<2, class par_2d_square>({10, 10}, my_queue);
+  gen_nd_range<2, class par_2d_rect>({12, 6}, my_queue);
+  gen_nd_range<3, class par_3d_square>({10, 10, 10}, my_queue);
+  gen_nd_range<3, class par_3d_rect>({12, 8, 16}, my_queue);
 
   return 0;
 }

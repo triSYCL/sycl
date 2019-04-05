@@ -1,3 +1,4 @@
+// RUN: true
 #include <CL/sycl.hpp>
 
 #include "../utilities/device_selectors.hpp"

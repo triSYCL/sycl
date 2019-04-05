@@ -122,16 +122,30 @@ static std::string getUniqueName(const char *KernelName) {
 cl_kernel ProgramManager::getOrCreateKernel(OSModuleHandle M,
                                             const context &Context,
                                             const string_class &KernelName) {
+
+  /// \todo: Extend this to work for more than the first device in the context
+  /// most of the run-time only works with a single device right now, but this
+  /// should be changed long term.
+  /// \todo: This works at the moment, but there needs to be a change earlier on
+  /// in the runtime to exchange the real kernel name with the hashed kernel
+  /// name so the hashed variant is always used when its a Xilinx device.
+  auto Devices = Context.get_devices();
+  std::string uniqueName = KernelName;
+  if (!Devices.empty()
+      && Devices[0].get_info<info::device::vendor>() == "Xilinx")
+    uniqueName = getUniqueName(uniqueName.c_str());
+
   if (DbgProgMgr > 0) {
     std::cerr << ">>> ProgramManager::getOrCreateKernel(" << M << ", "
-              << getRawSyclObjImpl(Context) << ", " << KernelName << ")\n";
+              << getRawSyclObjImpl(Context) << ", " << uniqueName << ")\n";
   }
   cl_program Program = getBuiltOpenCLProgram(M, Context);
   std::map<string_class, cl_kernel> &KernelsCache = m_CachedKernels[Program];
-  cl_kernel &Kernel = KernelsCache[KernelName];
+
+  cl_kernel &Kernel = KernelsCache[uniqueName];
   if (!Kernel) {
     cl_int Err = CL_SUCCESS;
-    Kernel = clCreateKernel(Program, KernelName.c_str(), &Err);
+    Kernel = clCreateKernel(Program, uniqueName.c_str(), &Err);
     CHECK_OCL_CODE(Err);
   }
   return Kernel;

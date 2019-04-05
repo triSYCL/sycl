@@ -1,3 +1,5 @@
+// RUN: true
+
 /*
    This test aims to check if the vector class and related built-ins are still
    broken or if they function correctly (once they work, this should be moved to
