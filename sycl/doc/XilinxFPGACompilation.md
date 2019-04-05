@@ -115,7 +115,7 @@ At the moment we only support one step compilation, so you can't easily compile
 just the device side component and then link it to the host side component.
 
 The compiler invocation for the `single_task_vector_add.cpp` example inside
-the [simple_tests](sycl/tests/xocc_tests/simple_tests) folder looks like this:
+the [simple_tests](../test/xocc_tests/simple_tests) folder looks like this:
 
 ```bash
 $SYCL_BIN_DIR/clang++ -D__SYCL_SPIR_DEVICE__ -std=c++17 -fsycl \
