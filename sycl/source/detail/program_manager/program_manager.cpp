@@ -132,8 +132,8 @@ cl_kernel ProgramManager::getOrCreateKernel(OSModuleHandle M,
   auto Devices = Context.get_devices();
   std::string uniqueName = KernelName;
   if (!Devices.empty()
-    && Devices[0].get_info<info::device::vendor>() == "Xilinx")
-      uniqueName = getUniqueName(uniqueName.c_str());
+      && Devices[0].get_info<info::device::vendor>() == "Xilinx")
+    uniqueName = getUniqueName(uniqueName.c_str());
 
   if (DbgProgMgr > 0) {
     std::cerr << ">>> ProgramManager::getOrCreateKernel(" << M << ", "

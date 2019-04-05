@@ -9,24 +9,27 @@ can to the Intel implementation, but in some areas were still working on that.
 One of the significant differences of compilation for Xilinx FPGAs over the
 ordinary compiler directive is that Xilinx devices require offline compilation
 of SYCL kernels to binary before being wrapped into the end fat binary. The
-offline compilation of these kernels is done by Xilinx's xocc compiler rather
+offline compilation of these kernels is done by Xilinx's `xocc` compiler rather
 than the SYCL device compiler itself in this case. The device compilers job is
-to compile SYCL kernels to a format edible by xocc, then take the output of xocc
-and wrap it into the fat binary as normal.
+to compile SYCL kernels to a format edible by `xocc`, then take the output of
+`xocc` and wrap it into the fat binary as normal.
 
-Xilinx's xocc compiler unfortunately doesn't take SPIR-V which is what raises
+Xilinx's `xocc` compiler unfortunately doesn't take SPIR-V which is what raises
 some problems (among other idiosyncrasies) as the current SYCL implementation
-revolves around SPIR-V. It's main method of consumption is spir-df a slightly
+revolves around SPIR-V. It's main method of consumption is SPIR-df a slightly
 modified version of LLVM-IR. So a lot of our modifications revolve around being
-the middle man between xocc and the SYCL device compiler and runtime for the
+the middle man between `xocc` and the SYCL device compiler and runtime for the
 moment, they are not the simple whims of the insane! Hopefully..
 
 ## Software requirements
 
 Installing Xilinx FPGA compatible software stack:
-  1. OpenCL headers: Download the OpenCL headers from [github.com/KhronosGroup/OpenCL-Headers](https://github.com/KhronosGroup/OpenCL-Headers)
+  1. OpenCL headers: On Ubuntu/Debian this can be done by installing the
+  opencl-c-headers package, e.g. `apt install opencl-c-headers`.
+  Alternatively the headers can be download from
+  [github.com/KhronosGroup/OpenCL-Headers](https://github.com/KhronosGroup/OpenCL-Headers)
   2. Xilinx runtime (XRT) for FPGAs: Download, build and install [XRT](https://github.com/Xilinx/XRT), this contains the OpenCL runtime.
-  3. Xilinx SDx (preferably 2018.3+): Download and Install [SDx](https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/sdx-development-environments.html) which contains the xocc compiler.
+  3. Xilinx SDx (2018.3+): Download and Install [SDx](https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/sdx-development-environments.html) which contains the `xocc` compiler.
 
 ## Environment & Setup
 
@@ -34,15 +37,14 @@ For the moment this projects only been tested on Linux (Ubuntu 18.10), so for
 now we shall only detail the minimum setup required in this context.
 
 In addition to the required environment variables for the base SYCL
-implementation specified in GetStartedWithSYCLCompiler.md; compilation and
+implementation specified in [GetStartedWithSYCLCompiler.md](GetStartedWithSYCLCompiler.md); compilation and
 execution of SYCL on FPGAs requires the following:
 
-To setup SDx for access to the XOCC compiler the following steps are required:
+To setup SDx for access to the `xocc` compiler the following steps are required:
 
 ```bash
 export XILINX_SDX=/path_to/SDx/2019.1
-export PATH=$XILINX_SDX/bin:$PATH
-export PATH=$XILINX_SDX/lib/lnx64.o:$PATH
+PATH=$XILINX_SDX/bin:$XILINX_SDX/lib/lnx64.o:$PATH
 ```
 
 To setup XRT for the runtime the following steps are required:
@@ -50,7 +52,7 @@ To setup XRT for the runtime the following steps are required:
 ```bash
 export XILINX_XRT=/path_to/xrt
 export LD_LIBRARY_PATH=$XILINX_XRT/lib:$LD_LIBRARY_PATH
-export PATH=$XILINX_XRT/bin:$PATH
+PATH=$XILINX_XRT/bin:$PATH
 ```
 
 On top of the above you should specify emulation mode which indicates to the
@@ -61,14 +63,13 @@ environment (the runtime will try to do things it can't).
 
 The emulation mode can be set as:
 
-* sw_emu for software emulation, this is the simplest and quickest compilation
-  mode that xocc provides.
-* hw_emu for hardware emulation, this more accurately represents the hardware
+* `sw_emu` for software emulation, this is the simplest and quickest compilation
+  mode that `xocc` provides.
+* `hw_emu` for hardware emulation, this more accurately represents the hardware
   your targeting and does more detailed compilation and profiling. It takes
   extra time to compile and link.
-* hw for actual hardware compilation, takes a significant length of time to
-  compile for a specified device target. Not technically emulation, but the
-  driver currently requires it to be specified for the time being.
+* `hw` for actual hardware compilation, takes a significant length of time to
+  compile for a specified device target.
 
 The emulation mode can be specified as follows:
 
@@ -113,8 +114,8 @@ needing updated for C++20.
 At the moment we only support one step compilation, so you can't easily compile
 just the device side component and then link it to the host side component.
 
-The compiler invocation for the single_task_vector_add.cpp example inside the
-tests/xocc_tests/simple_tests folder looks like this:
+The compiler invocation for the `single_task_vector_add.cpp` example inside
+the [simple_tests](sycl/tests/xocc_tests/simple_tests) folder looks like this:
 
 ```bash
 $SYCL_BIN_DIR/clang++ -D__SYCL_SPIR_DEVICE__ -std=c++17 -fsycl \
@@ -126,17 +127,17 @@ Be aware that compiling for FPGA is rather slow.
 
 ## Compiler invocation differences
 
-The *-fsycl-xocc-device* compiler directive is a flag we use to force certain
+The `-fsycl-xocc-device` compiler directive is a flag we use to force certain
 things in the compiler at the moment, like picking our device ToolChain's
 Assembler and Linker over the regular SYCL ToolChain's Linker. It also forces
 the assembler stage of the Clang compiler to emit LLVM-IR for the moment. In the
 future we hope to remove this and have this sort of thing defined by the device
 target instead, to be more inline with the main Intel SYCL implementation.
 
-The *__SYCL_SPIR_DEVICE__* environment variable currently tells the runtime to
-use SPIR intrinsics in place of SPIR-V intrinsics at the moment.
-e.g. get_global_id in place of GlobalInvocationId. In the future this will
-probably be defined by default when -fsycl-xocc-device is specified to the
+The `__SYCL_SPIR_DEVICE__` environment variable currently tells the runtime to
+use SPIR intrinsics in place of SPIR-V intrinsics at the moment,
+e.g. `get_global_id` in place of `GlobalInvocationId`. In the future this will
+probably be defined by default when `-fsycl-xocc-device` is specified to the
 compiler.
 
 ## Tested with

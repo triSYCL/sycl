@@ -41,7 +41,7 @@ in more complex examples!
 These tests should all be executable in conjunction with the Xilinx SDAccel and
 Vivado tool chains alongside an installation of the XRT runtime. A more
 comprehensive setup explanation can be found in
-[XilinxFPGACompilation.md](sycl/XilinxFPGACompilation.md)
+[XilinxFPGACompilation.md](XilinxFPGACompilation.md)
 
 Most of the tests in this folder are executable using either Xilinx or Intel
 OpenCL supporting hardware based on the following two compiler commands (just
@@ -66,21 +66,21 @@ stated at the top of the file in the comment.
 
 ## Test Specific Defines
 
-Currently the addition of a *XILINX* define is used in some test cases to state
+Currently the addition of a `XILINX` define is used in some test cases to state
 that the appropriate Xilinx selector should be used over an Intel selector. It
 also specifies that certain Xilinx specific things should be used in the test
-like vendor extensions. A good example of this is the *edge_detection.cpp* test
+like vendor extensions. A good example of this is the `edge_detection.cpp` test
 in sdaccel_ports.
 
-The define can be specified via the command line using *-DXILINX* or directly in
-the file using *#define XILINX*.
+The define can be specified via the command line using `-DXILINX` or directly in
+the file using `#define XILINX`.
 
 ## Notes
 
 A common problem you may run into is that a test will compile fine but when you
 execute it the runtime will complain when it tries to launch a kernel. This is
 sometimes an indication that the incorrect selector is in use and the SYCL
-runtime is feeding the device runtime an incompatible binary. e.g. using
+runtime is feeding the devices runtime an incompatible binary, e.g. using
 XOCCDeviceSelector with an Intel (SPIRV) compiled executable will cause the
 program_manager to emit a runtime error. So be careful and use the correct
 selector!
