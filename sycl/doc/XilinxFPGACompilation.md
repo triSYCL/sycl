@@ -31,6 +31,39 @@ Installing Xilinx FPGA compatible software stack:
   2. Xilinx runtime (XRT) for FPGAs: Download, build and install [XRT](https://github.com/Xilinx/XRT), this contains the OpenCL runtime.
   3. Xilinx SDx (2018.3+): Download and Install [SDx](https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/sdx-development-environments.html) which contains the `xocc` compiler.
 
+## Platforms
+
+It's of note that the SDx 2018.3 install comes with several platforms that do
+not work with the SYCL compiler, i.e. the ZYNC family of boards. Instead, you'll
+have to use one of the newer boards, like the Alveo U250 (xilinx_u250_xdma_201830_1).
+This requires some additional installation steps for the moment as it doesn't come
+packaged with the SDx download for the moment.
+
+How to:
+  1) Download the Deployment and Development Shell for your OS from the [Alveo U250 getting started page](https://www.xilinx.com/products/boards-and-kits/alveo/u250.html#gettingStarted).
+    Note: you can also install the release version of the XRT runtime from here if you would rather use this than build from source.
+  2) a) Install XRT if you haven't already: ``sudo apt install xrt_201830.2.1.1695_<OS>-xrt.deb``
+    b) Install the Deployment Shell:
+    ``sudo apt install <deb-dir>/xilinx-u250-xdma-201830.1_<OS>.deb``
+    c) Install the Development Shell:
+    ``sudo apt install <deb-dir>/xilinx-vcu1525-xdma-201830.1-dev_<OS>.deb``
+
+If you have trouble installing these via the package manager (for example using
+a newer distribution like Ubuntu 18.10) it's possible to extract the files and
+manually install them. The directory structure of the package mimics the default
+install locations on your system, e.g. /opt/xilinx/platforms. If you choose the
+extraction route then all you really require for emulation is the files inside
+the Development Shell.
+
+The main files required for emulation of a U250 board are found inside the Development Shell under platforms.
+
+The main files required for deployment to a U250 board are inside the Deployment
+Shell.
+
+This set of instructions should be applicable to other boards you wish to test,
+you can search for boards via the [boards-and-kits](https://www.xilinx.com/products/boards-and-kits/)
+page.
+
 ## Environment & Setup
 
 For the moment this projects only been tested on Linux (Ubuntu 18.10), so for
@@ -43,7 +76,7 @@ execution of SYCL on FPGAs requires the following:
 To setup SDx for access to the `xocc` compiler the following steps are required:
 
 ```bash
-export XILINX_SDX=/path_to/SDx/2019.1
+export XILINX_SDX=/path_to/SDx/2018.3
 PATH=$XILINX_SDX/bin:$XILINX_SDX/lib/lnx64.o:$PATH
 ```
 
@@ -83,7 +116,7 @@ platform your trying to compile for and the runtime the platform it should be
 executing for.
 
 ```bash
-export XILINX_PLATFORM=zed
+export XILINX_PLATFORM=xilinx_u250_xdma_201830_1
 ```
 
 Generate an emulation configuration file, this should be in the executable
@@ -144,3 +177,4 @@ compiler.
 * Ubuntu 18.10
 * XRT 2018.3
 * SDx 2018.3
+* Alveo U250 Platform: xilinx_u250_xdma_201830_1
