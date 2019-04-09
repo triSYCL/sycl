@@ -35,23 +35,20 @@ Installing Xilinx FPGA compatible software stack:
 
 It's of note that the SDx 2018.3 install comes with several platforms that do
 not work with the SYCL compiler, i.e. the ZYNC family of boards. Instead, you'll
-have to use one of the newer boards, like the Alveo U250 (xilinx_u250_xdma_201830_1).
+have to use one of the newer boards, like the Alveo U250 (*xilinx_u250_xdma_201830_1*).
 This requires some additional installation steps for the moment as it doesn't come
-packaged with the SDx download for the moment.
+packaged with the SDx download.
 
 How to:
-  1) Download the Deployment and Development Shell for your OS from the [Alveo U250 getting started page](https://www.xilinx.com/products/boards-and-kits/alveo/u250.html#gettingStarted).
-    Note: you can also install the release version of the XRT runtime from here if you would rather use this than build from source.
-  2) a) Install XRT if you haven't already: ``sudo apt install xrt_201830.2.1.1695_<OS>-xrt.deb``
-    b) Install the Deployment Shell:
-    ``sudo apt install <deb-dir>/xilinx-u250-xdma-201830.1_<OS>.deb``
-    c) Install the Development Shell:
-    ``sudo apt install <deb-dir>/xilinx-vcu1525-xdma-201830.1-dev_<OS>.deb``
+  1. Download the Deployment and Development Shell for your OS from the [Alveo U250 getting started page](https://www.xilinx.com/products/boards-and-kits/alveo/u250.html#gettingStarted). **Note**: you can also install the release version of the XRT runtime from here if you would rather use this than build from source.
+  2. 1. Install XRT if you haven't already: ``sudo apt install xrt_201830.2.1.1695_<OS>-xrt.deb``
+     2. Install the Deployment Shell: ``sudo apt install xilinx-u250-xdma-201830.1_<OS>.deb``
+     3. Install the Development Shell: ``sudo apt install xilinx-u250-xdma-201830.1-dev_<OS>.deb``
 
 If you have trouble installing these via the package manager (for example using
 a newer distribution like Ubuntu 18.10) it's possible to extract the files and
 manually install them. The directory structure of the package mimics the default
-install locations on your system, e.g. /opt/xilinx/platforms. If you choose the
+install locations on your system, e.g. */opt/xilinx/platforms*. If you choose the
 extraction route then all you really require for emulation is the files inside
 the Development Shell.
 
