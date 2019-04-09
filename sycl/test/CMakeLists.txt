@@ -14,6 +14,7 @@ set(SYCL_TEST_DEPS
   llc
   clang
   sycl-headers
+  sycl-xocc
   get_device_count_by_type
   FileCheck
   ${SYCLLibrary}
