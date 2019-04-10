@@ -24,26 +24,29 @@ moment, they are not the simple whims of the insane! Hopefully..
 ## Software requirements
 
 Installing Xilinx FPGA compatible software stack:
-  1. OpenCL headers: On Ubuntu/Debian this can be done by installing the
-  opencl-c-headers package, e.g. `apt install opencl-c-headers`.
-  Alternatively the headers can be download from
-  [github.com/KhronosGroup/OpenCL-Headers](https://github.com/KhronosGroup/OpenCL-Headers)
-  2. Xilinx runtime (XRT) for FPGAs: Download, build and install [XRT](https://github.com/Xilinx/XRT), this contains the OpenCL runtime.
-  3. Xilinx SDx (2018.3+): Download and Install [SDx](https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/sdx-development-environments.html) which contains the `xocc` compiler.
+  1.  OpenCL headers: On Ubuntu/Debian this can be done by installing the
+      opencl-c-headers package, e.g. `apt install opencl-c-headers`.
+      Alternatively the headers can be download from
+      [github.com/KhronosGroup/OpenCL-Headers](https://github.com/KhronosGroup/OpenCL-Headers)
+  2.  Xilinx runtime (XRT) for FPGAs: Download, build and install [XRT](https://github.com/Xilinx/XRT),
+      this contains the OpenCL runtime.
+  3.  Xilinx SDx (2018.3+): Download and Install [SDx](https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/sdx-development-environments.html)
+      which contains the `xocc` compiler.
 
 ## Platforms
 
 It's of note that the SDx 2018.3 install comes with several platforms that do
-not work with the SYCL compiler, i.e. the ZYNC family of boards. Instead, you'll
-have to use one of the newer boards, like the Alveo U250 (*xilinx_u250_xdma_201830_1*).
-This requires some additional installation steps for the moment as it doesn't come
-packaged with the SDx download.
+not work with the SYCL compiler. Instead, you'll have to use one of the newer
+boards, like the Alveo U250 (*xilinx_u250_xdma_201830_1*). This requires some
+additional installation steps as it doesn't come packaged with the SDx download.
 
 How to:
-  1. Download the Deployment and Development Shell for your OS from the [Alveo U250 getting started page](https://www.xilinx.com/products/boards-and-kits/alveo/u250.html#gettingStarted). **Note**: you can also install the release version of the XRT runtime from here if you would rather use this than build from source.
-  2. 1. Install XRT if you haven't already: ``sudo apt install xrt_201830.2.1.1695_<OS>-xrt.deb``
-     2. Install the Deployment Shell: ``sudo apt install xilinx-u250-xdma-201830.1_<OS>.deb``
-     3. Install the Development Shell: ``sudo apt install xilinx-u250-xdma-201830.1-dev_<OS>.deb``
+  1.  Download the Deployment and Development Shells from the
+      [Alveo U250 getting started page](https://www.xilinx.com/products/boards-and-kits/alveo/u250.html#gettingStarted).
+      In the following instructions we assume Debian/Ubuntu Linux, however RHEL
+      and CentOS packages are also available.
+  2.  1. Install the Deployment Shell: ``sudo apt install xilinx-u250-xdma-201830.1_<OS>.deb``
+      2. Install the Development Shell: ``sudo apt install xilinx-u250-xdma-201830.1-dev_<OS>.deb``
 
 If you have trouble installing these via the package manager (for example using
 a newer distribution like Ubuntu 18.10) it's possible to extract the files and
@@ -52,7 +55,8 @@ install locations on your system, e.g. */opt/xilinx/platforms*. If you choose th
 extraction route then all you really require for emulation is the files inside
 the Development Shell.
 
-The main files required for emulation of a U250 board are found inside the Development Shell under platforms.
+The main files required for emulation of a U250 board are found inside the
+Development Shell under platforms.
 
 The main files required for deployment to a U250 board are inside the Deployment
 Shell.
@@ -67,8 +71,8 @@ For the moment this projects only been tested on Linux (Ubuntu 18.10), so for
 now we shall only detail the minimum setup required in this context.
 
 In addition to the required environment variables for the base SYCL
-implementation specified in [GetStartedWithSYCLCompiler.md](GetStartedWithSYCLCompiler.md); compilation and
-execution of SYCL on FPGAs requires the following:
+implementation specified in [GetStartedWithSYCLCompiler.md](GetStartedWithSYCLCompiler.md);
+compilation and execution of SYCL on FPGAs requires the following:
 
 To setup SDx for access to the `xocc` compiler the following steps are required:
 
