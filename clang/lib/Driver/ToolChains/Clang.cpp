@@ -3538,7 +3538,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (IsSYCLDevice) {
     // We want to compile sycl kernels.
     if (types::isCXX(Input.getType()))
-      CmdArgs.push_back("-std=c++11");
+      if (Arg *A = Args.getLastArg(options::OPT_std_EQ))
+        CmdArgs.push_back(Args.MakeArgString(std::string("-std=")
+                          + A->getValue()));
     CmdArgs.push_back("-fsycl-is-device");
     // Pass the triple of host when doing SYCL
     std::string NormalizedTriple =
