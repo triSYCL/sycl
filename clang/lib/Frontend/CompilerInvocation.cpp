@@ -2834,9 +2834,15 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
     }
   }
 
+  Opts.SYCLIsDevice   = Args.hasArg(options::OPT_fsycl_is_device);
+  Opts.SYCLXOCCDevice = Args.hasArg(options::OPT_fsycl_xocc_device);
+  Opts.SYCLAllowFuncPtr = Args.hasFlag(options::OPT_fsycl_allow_func_ptr,
+                                  options::OPT_fno_sycl_allow_func_ptr, false);
+
   // Set the flag to prevent the implementation from emitting device exception
   // handling code for those requiring so.
-  if ((Opts.OpenMPIsDevice && T.isNVPTX()) || Opts.OpenCLCPlusPlus) {
+  if ((Opts.OpenMPIsDevice && T.isNVPTX()) || Opts.OpenCLCPlusPlus
+    || Opts.SYCLIsDevice) {
     Opts.Exceptions = 0;
     Opts.CXXExceptions = 0;
   }
@@ -2885,11 +2891,6 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
       Diags.Report(diag::err_drv_omp_host_ir_file_not_found)
           << Opts.OMPHostIRFile;
   }
-
-  Opts.SYCLIsDevice   = Args.hasArg(options::OPT_fsycl_is_device);
-  Opts.SYCLXOCCDevice = Args.hasArg(options::OPT_fsycl_xocc_device);
-  Opts.SYCLAllowFuncPtr = Args.hasFlag(options::OPT_fsycl_allow_func_ptr,
-                                  options::OPT_fno_sycl_allow_func_ptr, false);
 
   // Set CUDA mode for OpenMP target NVPTX if specified in options
   Opts.OpenMPCUDAMode = Opts.OpenMPIsDevice && T.isNVPTX() &&
