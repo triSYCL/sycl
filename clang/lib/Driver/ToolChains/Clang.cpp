@@ -3552,9 +3552,18 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                      options::OPT_fno_sycl_allow_func_ptr, false)) {
       CmdArgs.push_back("-fsycl-allow-func-ptr");
     }
+
+    // Push on and enable for device side compilation
     if (Args.hasArg(options::OPT_fsycl_xocc_device)) {
       CmdArgs.push_back("-fsycl-xocc-device");
+      CmdArgs.push_back("-D__SYCL_SPIR_DEVICE__");
     }
+  }
+
+  // These are defined for both the host and device compilation phases when it's
+  // a xilinx sycl device.
+  if (Args.hasArg(options::OPT_fsycl_xocc_device)) {
+    CmdArgs.push_back("-D__SYCL_XILINX_ONLY__");
   }
 
   if (IsOpenMPDevice) {
