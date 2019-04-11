@@ -15,8 +15,9 @@
 #define SYCL_XILINX_FPGA_SSDM_INST_HPP
 
 // This file defines some of the SSDM intrinsics used in Xilinx tools.
-
-#ifdef __SYCL_DEVICE_ONLY__
+// The SSDM intrinsics and the SYCL extensions that rely on them should be a
+// no-op on non-Xilinx devices and a no-op on the host
+#if (defined(__SYCL_DEVICE_ONLY__) && defined(__SYCL_XILINX_ONLY__))
 extern "C" {
   /// SSDM Intrinsics: dataflow operation
   void _ssdm_op_SpecDataflowPipeline(...)

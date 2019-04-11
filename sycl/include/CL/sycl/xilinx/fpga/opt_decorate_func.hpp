@@ -53,13 +53,6 @@ void pipeline(T functor) noexcept {
   functor();
 }
 
-// auto pipeline = [] (auto functor) noexcept {
-//   /* SSDM instruction is inserted before the argument functor to guide xocc to
-//      do pipeline. */
-//   _ssdm_op_SpecPipeline(1, 1, 0, 0, "");
-//   functor();
-// };
-
 }
 
 #endif // SYCL_XILINX_FPGA_OPT_DECORATE_FUNC_HPP
