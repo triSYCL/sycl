@@ -1061,6 +1061,20 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
   // SYCL device compiler which doesn't produce host binary.
   if (LangOpts.SYCLIsDevice) {
     Builder.defineMacro("__SYCL_DEVICE_ONLY__", "1");
+
+    // Defines a macro that switches on SPIR intrinsics in SYCL runtime, used
+    // by Xilinx FPGA devices for the moment
+    if (LangOpts.SYCLXOCCDevice) {
+      Builder.defineMacro("__SYCL_SPIR_DEVICE__");
+    }
+  }
+
+  // These are defined for both the host and device compilation phases when it's
+  // a Xilinx SYCL FPGA device.
+  // \todo When our implementation of the SYCL ToolChain/Driver is cleaned up
+  //  replace this with a "XOCCHostAndDevice" LangOpt (better name though)
+  if (LangOpts.SYCLXOCCDevice) {
+    Builder.defineMacro("__SYCL_XILINX_ONLY__");
   }
 
   // OpenCL definitions.
