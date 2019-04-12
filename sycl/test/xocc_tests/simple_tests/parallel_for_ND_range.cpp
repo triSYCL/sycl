@@ -1,39 +1,28 @@
 // RUN: true
 
-#include <CL/sycl.hpp>
-#include <iostream>
-#include <numeric>
-#include <vector>
-
 /*
   The aim of this test is to check that multidimensional kernels are executing
   appropriately using OpenCL ND range kernels and outputting correct
   information.
 */
+
+#include <CL/sycl.hpp>
+#include <iostream>
+#include <numeric>
+#include <vector>
+
+#include "../utilities/device_selectors.hpp"
+
 using namespace cl::sycl;
-
-class XOCLDeviceSelector : public device_selector {
- public:
-   int operator()(const cl::sycl::device &Device) const override {
-     using namespace cl::sycl::info;
-
-     const std::string DeviceName = Device.get_info<info::device::name>();
-     const std::string DeviceVendor = Device.get_info<info::device::vendor>();
-
-     return (DeviceVendor.find("Xilinx") != std::string::npos) ? 1 : -1;
-   }
- };
-
 
 template <int Dimensions, class kernel_name>
 void gen_nd_range(range<Dimensions> k_range) {
-  XOCLDeviceSelector xocl;
-
-  queue my_queue{xocl};
+  selector_defines::CompiledForDeviceSelector selector;
+  queue q { selector };
 
   buffer<unsigned int> a(k_range.size());
 
-  my_queue.submit([&](handler &cgh) {
+  q.submit([&](handler &cgh) {
     auto acc = a.get_access<access::mode::write>(cgh);
 
     cgh.parallel_for<kernel_name>(k_range, [=](item<Dimensions> index) {
@@ -53,7 +42,7 @@ void gen_nd_range(range<Dimensions> k_range) {
         "incorrect result acc_r[i] != k_range.size() + i");
   }
 
-  my_queue.wait();
+  q.wait();
 }
 
 int main(int argc, char *argv[]) {

@@ -1,8 +1,16 @@
 // RUN: true
 
 /*
-  $ISYCL_BIN_DIR/clang++ -std=c++14 -fsycl median_filter.cpp -o \
-    median_filter -lsycl -lOpenCL `pkg-config --libs opencv`
+  Currently incomplete SDAccel median_filter example, has the relevant boiler
+  plate but not the kernel compute component
+
+  Intel:
+  $ISYCL_BIN_DIR/clang++ -std=c++2a -fsycl median_filter.cpp -o \
+    median_filter -lOpenCL `pkg-config --libs opencv`
+
+  Xilinx:
+  $ISYCL_BIN_DIR/clang++ -std=c++2a -fsycl fsycl-xocc-device \
+    -median_filter.cpp -o median_filter -lOpenCL `pkg-config --libs opencv`
 */
 
 #include <CL/sycl.hpp>
@@ -38,10 +46,8 @@ int main(int argc, char* argv[]) {
   int wh[2] = {width, height};
   buffer<int> whb(wh, range<1>{2});
 
-  selector_defines::XOCLDeviceSelector xocl;
-  selector_defines::IntelDeviceSelector iocl;
-
-  queue q { iocl , property::queue::enable_profiling() }; // should default to IOCL
+  selector_defines::CompiledForDeviceSelector selector;
+  queue q { selector , property::queue::enable_profiling() };
 
   std::cout << "Found Device="
             << q.get_device().get_info<info::device::name>() << "\n";

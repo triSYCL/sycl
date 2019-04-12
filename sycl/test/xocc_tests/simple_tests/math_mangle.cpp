@@ -13,6 +13,7 @@
 
 #include <CL/sycl.hpp>
 #include <iostream>
+
 #include "../utilities/device_selectors.hpp"
 
 using namespace cl::sycl;
@@ -25,11 +26,10 @@ bool CloseEnough(float a, float b)
 }
 
 int main(int argc, char* argv[]) {
-  selector_defines::XOCLDeviceSelector xocl;
-
+  selector_defines::CompiledForDeviceSelector selector;
+  queue q { selector };
   buffer<float, 1> test_buffer{range<1>{13}};
 
-  queue q { xocl };
   q.submit([&](handler &cgh) {
     auto wb = test_buffer.get_access<access::mode::write>(cgh);
 

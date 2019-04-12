@@ -18,15 +18,20 @@ class id_mangle;
 // define a host function that will be called on the device and the host to test
 // that the correct value is returned for the user defined function and it's not
 // replaced by a built-in call and it's not broken in someway.
+// Note: This doesn't work on Intel devices at the moment, even using an
+// unaltered Intel SYCL compiler, this external get_global_id call seems to
+// overwrite the index implementation somehow.
+// /todo Look into this? I assumed using SPIRV oriented calls should avoid this
+//  interaction. Perhaps a misunderstanding on my part?
+#ifdef __SYCL_XILINX_ONLY__
 size_t get_global_id(uint dimindx) {
   return 1000;
 };
+#endif
 
 int main() {
-
-  selector_defines::XOCLDeviceSelector xocl;
-
-  queue q{xocl};
+  selector_defines::CompiledForDeviceSelector selector;
+  queue q { selector };
 
   auto nd = nd_range<3>(range<3>(2, 2, 2), range<3>(1, 1, 1));
 
@@ -36,8 +41,9 @@ int main() {
     auto wb = test_buffer.get_access<access::mode::write>(cgh);
 
     cgh.parallel_for<id_mangle>(nd, [=](nd_item<3> index) {
+#ifdef __SYCL_XILINX_ONLY__
         wb[0] += get_global_id(0);
-
+#endif
         wb[1] += index.get_global_id(0);
         wb[1] += index.get_global_id(1);
         wb[1] += index.get_global_id(2);
@@ -75,6 +81,7 @@ int main() {
   });
 
   auto rb = test_buffer.get_access<access::mode::read>();
+  q.wait();
 
   // The hard coded values tested against here are based on the kernel being
   // executed 8 times (2*2*2) with a local work group size of 1x1x1. Probably
@@ -84,8 +91,10 @@ int main() {
 
   // all of our invocations of the user defined get_global_id on the device plus
   // one host invocation should sum up to 9000
+#ifdef __SYCL_XILINX_ONLY__
   printf("get_global_id user defined summation: %d \n", rb[0] + (int)get_global_id(0));
   assert(rb[0] + get_global_id(0) == 9000);
+#endif
 
   printf("get_global_id built-in summation: %d \n", rb[1]);
   assert(rb[1] == 12);

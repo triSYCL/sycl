@@ -9,12 +9,9 @@ using namespace cl::sycl;
 
 class event_wait;
 
-// Isn't a problem with pocl or iocl
 int main() {
-  selector_defines::IntelDeviceSelector iocl;
-  selector_defines::POCLDeviceSelector pocl;
-
-  queue q{property::queue::enable_profiling()};
+  selector_defines::CompiledForDeviceSelector selector;
+  queue q{selector, property::queue::enable_profiling()};
 
   auto e = q.submit([&](handler &cgh) {
       int w = 512;

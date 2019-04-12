@@ -8,9 +8,8 @@ using namespace cl::sycl;
 class are_you_broken;
 
 int main() {
-  selector_defines::IntelDeviceSelector iocl;
-
-  queue q {iocl};
+  selector_defines::CompiledForDeviceSelector selector;
+  queue q { selector };
 
   auto e = q.submit([&](handler &cgh) {
     int w = 512;

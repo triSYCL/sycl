@@ -23,8 +23,8 @@ class vec_math_host_conflict;
 
 // Isn't a problem with pocl or iocl
 int main() {
-  selector_defines::IntelDeviceSelector iocl;
-  queue q{iocl};
+  selector_defines::CompiledForDeviceSelector selector;
+  queue q { selector };
 
   auto e = q.submit([&](handler &cgh) {
       cgh.single_task<vec_math_host_conflict>([=]() {
