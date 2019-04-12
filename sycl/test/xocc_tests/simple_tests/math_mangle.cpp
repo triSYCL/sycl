@@ -27,7 +27,7 @@ bool CloseEnough(float a, float b)
 
 int main(int argc, char* argv[]) {
   selector_defines::CompiledForDeviceSelector selector;
-  queue q { selector };
+  queue q {selector};
   buffer<float, 1> test_buffer{range<1>{13}};
 
   q.submit([&](handler &cgh) {

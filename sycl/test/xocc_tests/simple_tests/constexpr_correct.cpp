@@ -19,7 +19,7 @@ int add(int v1, int v2) {
 
 int main() {
   selector_defines::CompiledForDeviceSelector selector;
-  queue q { selector };
+  queue q {selector};
 
   constexpr int host_to_device = 20;
   int try_capture = 30;

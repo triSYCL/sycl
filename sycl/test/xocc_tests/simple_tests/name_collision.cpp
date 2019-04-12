@@ -10,7 +10,7 @@ class add_2;
 
 int main() {
   selector_defines::CompiledForDeviceSelector selector;
-  queue q { selector };
+  queue q {selector};
 
   q.submit([&] (handler &cgh) {
     cgh.single_task<add_2>([=] () {

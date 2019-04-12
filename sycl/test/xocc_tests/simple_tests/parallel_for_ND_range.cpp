@@ -18,7 +18,7 @@ using namespace cl::sycl;
 template <int Dimensions, class kernel_name>
 void gen_nd_range(range<Dimensions> k_range) {
   selector_defines::CompiledForDeviceSelector selector;
-  queue q { selector };
+  queue q {selector};
 
   buffer<unsigned int> a(k_range.size());
 

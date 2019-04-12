@@ -33,7 +33,7 @@ namespace cl::sycl::xilinx {
 */
 
 template <typename T>
-void dataflow(T functor) noexcept {
+void dataflow(T functor) {
   _ssdm_op_SpecDataflowPipeline(-1, "");
   functor();
 }
@@ -48,7 +48,7 @@ void dataflow(T functor) noexcept {
     pipeline way.
 */
 template <typename T>
-void pipeline(T functor) noexcept {
+void pipeline(T functor) {
   _ssdm_op_SpecPipeline(1, 1, 0, 0, "");
   functor();
 }

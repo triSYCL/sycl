@@ -31,7 +31,7 @@ size_t get_global_id(uint dimindx) {
 
 int main() {
   selector_defines::CompiledForDeviceSelector selector;
-  queue q { selector };
+  queue q {selector};
 
   auto nd = nd_range<3>(range<3>(2, 2, 2), range<3>(1, 1, 1));
 

@@ -47,7 +47,7 @@ int main(int argc, char* argv[]) {
   buffer<int> whb(wh, range<1>{2});
 
   selector_defines::CompiledForDeviceSelector selector;
-  queue q { selector , property::queue::enable_profiling() };
+  queue q {selector , property::queue::enable_profiling()};
 
   std::cout << "Found Device="
             << q.get_device().get_info<info::device::name>() << "\n";

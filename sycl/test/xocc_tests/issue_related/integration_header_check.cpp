@@ -78,8 +78,8 @@ template <typename... Ts> class sixth_kernel;
 
 int main() {
   selector_defines::CompiledForDeviceSelector selector;
-  queue q { selector };
-  
+  queue q {selector};
+
   buffer<int> ob(range<1>{1});
 
   q.submit([&](handler &cgh) {

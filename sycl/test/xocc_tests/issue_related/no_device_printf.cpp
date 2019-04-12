@@ -9,7 +9,7 @@ class are_you_broken;
 
 int main() {
   selector_defines::CompiledForDeviceSelector selector;
-  queue q { selector };
+  queue q {selector};
 
   auto e = q.submit([&](handler &cgh) {
     int w = 512;

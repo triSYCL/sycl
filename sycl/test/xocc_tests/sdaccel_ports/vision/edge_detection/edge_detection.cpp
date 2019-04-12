@@ -53,7 +53,7 @@ int main(int argc, char* argv[]) {
   constexpr auto area = height * width;
 
   selector_defines::CompiledForDeviceSelector selector;
-  queue q { selector , property::queue::enable_profiling() };
+  queue q {selector, property::queue::enable_profiling()};
 
   // may need to modify this to be different if input.isContinuous
   buffer<uchar> ib{input.begin<uchar>(), input.end<uchar>()};
@@ -90,7 +90,7 @@ int main(int argc, char* argv[]) {
     printf("pixel_rb size in submit: %zu \n", pixel_rb.get_size());
     printf("pixel_rb count in submit: %zu \n", pixel_rb.get_count());
 
-    cgh.single_task<xilinx::reqd_work_group_size<1, 1, 1, krnl_sobel> >(
+    cgh.single_task<xilinx::reqd_work_group_size<1, 1, 1, krnl_sobel>>(
      [=]() {
       auto gX = xilinx::partition_array<char, 9,
                 xilinx::partition::complete<0>>({-1, 0, 1, -2, 0, 2, -1, 0, 1});
@@ -132,7 +132,7 @@ int main(int argc, char* argv[]) {
           // capping at 0xFF means no blurring of edges when it gets
           // converted back to a char from an int
           sum = std::abs(magX) + std::abs(magY);
-          pixel_wb[x + y * width] = (sum > 0xFF) ? 0xFF : (char)sum;
+          pixel_wb[x + y * width] = min(sum, 0xFF);
         }
       }
     });

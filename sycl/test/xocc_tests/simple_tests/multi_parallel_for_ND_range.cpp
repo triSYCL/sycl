@@ -57,7 +57,7 @@ void gen_nd_range(range<Dimensions> k_range, queue q) {
 // separately before being linked together).
 int main(int argc, char *argv[]) {
   selector_defines::CompiledForDeviceSelector selector;
-  queue q { selector };
+  queue q {selector};
 
   gen_nd_range<1, class par_1d>({10}, q);
   gen_nd_range<2, class par_2d_square>({10, 10}, q);

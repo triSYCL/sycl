@@ -32,7 +32,7 @@ int main(int argc, char *argv[]) {
   }
 
   selector_defines::CompiledForDeviceSelector selector;
-  queue q { selector };
+  queue q {selector};
 
   std::cout << "Queue Device: " << q.get_device().get_info<info::device::name>() << std::endl;
   std::cout << "Queue Device Vendor: " << q.get_device().get_info<info::device::vendor>() << std::endl;

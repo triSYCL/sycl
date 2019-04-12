@@ -77,7 +77,7 @@ namespace cl::sycl::xilinx {
 
 int main() {
   selector_defines::CompiledForDeviceSelector selector;
-  queue q { selector };
+  queue q {selector};
 
   range<3> k_range {8,8,8};
   buffer<unsigned int> ob(range<1>{1});
