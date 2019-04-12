@@ -134,14 +134,10 @@ emconfigutil -f $XILINX_PLATFORM --nd 1
 ## C++ Standard
 
 It's noteworthy that we've altered the SYCL runtime to be compiled using C++20,
-most of the current features are C++11 compatible outside of the components in
-the Xilinx vendor related directories for the moment. However, this is likely to
-change as we're interested in altering the runtime with newer C++ features.
-
-There is an issue at the moment that you can only compile source code with C++11
-to C++17 for the time being even though the runtime is compiled using C++20. We
-believe it's a side effect of the runtime libraries C++ standard wrapper stubs
-needing updated for C++20.
+so we advise compiling your source code with C++20 (`-std=c++2a`). Although, most
+of the runtimes current features are C++11 compatible outside of the components
+in the Xilinx vendor related directories. However, this is likely to change as
+we're interested in altering the runtime with newer C++ features.
 
 ## Compiling a SYCL program
 
@@ -152,9 +148,8 @@ The compiler invocation for the `single_task_vector_add.cpp` example inside
 the [simple_tests](../test/xocc_tests/simple_tests) folder looks like this:
 
 ```bash
-$SYCL_BIN_DIR/clang++ -D__SYCL_SPIR_DEVICE__ -std=c++17 -fsycl \
-  -fsycl-xocc-device single_task_vector_add.cpp -o single_task_vector_add \
-  -lOpenCL
+$SYCL_BIN_DIR/clang++ -std=c++2a -fsycl -fsycl-xocc-device \
+  single_task_vector_add.cpp -o single_task_vector_add -lOpenCL
 ```
 
 Be aware that compiling for FPGA is rather slow.
@@ -163,16 +158,11 @@ Be aware that compiling for FPGA is rather slow.
 
 The `-fsycl-xocc-device` compiler directive is a flag we use to force certain
 things in the compiler at the moment, like picking our device ToolChain's
-Assembler and Linker over the regular SYCL ToolChain's Linker. It also forces
-the assembler stage of the Clang compiler to emit LLVM-IR for the moment. In the
-future we hope to remove this and have this sort of thing defined by the device
-target instead, to be more inline with the main Intel SYCL implementation.
-
-The `__SYCL_SPIR_DEVICE__` environment variable currently tells the runtime to
-use SPIR intrinsics in place of SPIR-V intrinsics at the moment,
-e.g. `get_global_id` in place of `GlobalInvocationId`. In the future this will
-probably be defined by default when `-fsycl-xocc-device` is specified to the
-compiler.
+Assembler and Linker over the regular SYCL ToolChain's Linker and defining some
+environment variables that are used by the runtime. It also forces the assembler
+stage of the Clang compiler to emit LLVM-IR for the moment. In the future we
+hope to remove this and have this sort of thing defined by the device target
+instead, to be more inline with the main Intel SYCL implementation.
 
 ## Tested with
 * Ubuntu 18.10

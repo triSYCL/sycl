@@ -50,40 +50,21 @@ be-aware that some tests still use hard-coded selectors for now):
 ### Xilinx Compile Command:
 
 ```bash
-$SYCL_BIN_DIR/clang++ -D__SYCL_SPIR_DEVICE__ -std=c++17 -fsycl  \
-  -fsycl-xocc-device test-case.cpp -o test-case -lOpenCL
+$SYCL_BIN_DIR/clang++ -std=c++2a -fsycl -fsycl-xocc-device test-case.cpp -o \
+  test-case -lOpenCL
 ```
 
 ### Regular Compile Command:
 
 ```bash
-$SYCL_BIN_DIR/clang++ -std=c++17 -fsycl test-case.cpp -o test-case \
+$SYCL_BIN_DIR/clang++ -std=c++2a -fsycl test-case.cpp -o test-case \
   -lOpenCL
 ```
 
 If a test requires a more complex incantation than the above then it should be
 stated at the top of the file in the comment.
 
-## Test Specific Defines
-
-Currently the addition of a `XILINX` define is used in some test cases to state
-that the appropriate Xilinx selector should be used over an Intel selector. It
-also specifies that certain Xilinx specific things should be used in the test
-like vendor extensions. A good example of this is the `edge_detection.cpp` test
-in sdaccel_ports.
-
-The define can be specified via the command line using `-DXILINX` or directly in
-the file using `#define XILINX`.
-
 ## Notes
-
-A common problem you may run into is that a test will compile fine but when you
-execute it the runtime will complain when it tries to launch a kernel. This is
-sometimes an indication that the incorrect selector is in use and the SYCL
-runtime is feeding the devices runtime an incompatible binary, e.g. using
-XOCCDeviceSelector with an Intel (SPIRV) compiled executable will cause the
-program_manager to emit a runtime error. So be careful and use the correct
-selector!
 
 These tests have only been run on hardware emulation and software emulation so
 far and not on actual hardware.
