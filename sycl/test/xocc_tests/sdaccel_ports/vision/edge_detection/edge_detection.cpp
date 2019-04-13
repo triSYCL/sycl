@@ -4,31 +4,12 @@
   Attempt at translating SDAccel Examples edge_detection example to SYCL
 
   Intel compile example command (use intel_selector from device_selectors.hpp):
-  $ISYCL_BIN_DIR/clang++ -std=c++17 -fsycl edge_detection.cpp -o \
-    edge_detection -lsycl -lOpenCL `pkg-config --libs opencv`
-
-  NOTE: POCL won't actually work with this example because it uses std::abs
-    POCL doesn't have the appropriate SPIR builtin manglings in it's library
-    so it doesn't execute correctly (can't find the correct symbols). This is
-    a problem on their end rather than ours and I'm not sure its worth making
-    a fix to their problem on our end (POCL issue #698). For example, modifying
-    our LLVM pass to explicitly change built-in manglings to suit POCL based on
-    a compiler flag does not seem like something that is ideal to implement or
-    maintain.
-
-  POCL compile example, unfortunately there is no 1 instruction compilation for
-  POCL at the moment it needs to be 2 stepped as it uses spir-df:
-  1) $ISYCL_BIN_DIR/clang++ --sycl -fsycl-use-bitcode -Xclang \
-    -fsycl-int-header=edge_detection-int-header.h -c edge_detection.cpp -o \
-    kernel.bin
-  2) $ISYCL_BIN_DIR/clang++ -std=c++14 -include edge_detection-int-header.h \
-      edge_detection.cpp -o edge_detection -lsycl -lOpenCL \
-      `pkg-config --libs opencv`
+  $ISYCL_BIN_DIR/clang++ -std=c++2a -fsycl edge_detection.cpp -o \
+    edge_detection -lOpenCL `pkg-config --libs opencv`
 
   XOCC compile command:
-  $ISYCL_BIN_DIR/clang++ -D__SYCL_SPIR_DEVICE__ -DXILINX -std=c++17 -fsycl \
-    -fsycl-xocc-device edge_detection.cpp -o edge_detection \
-    -lsycl -lOpenCL `pkg-config --libs opencv`
+  $ISYCL_BIN_DIR/clang++ -std=c++2a -fsycl -fsycl-xocc-device \
+    edge_detection.cpp -o edge_detection -lOpenCL `pkg-config --libs opencv`
 
 */
 
@@ -39,7 +20,6 @@
 #include <fstream>
 #include <algorithm>
 #include <cstdlib>
-
 
 // OpenCV Includes
 #include <opencv2/opencv.hpp>
@@ -72,12 +52,8 @@ int main(int argc, char* argv[]) {
   constexpr auto width = 1024; // input.cols;
   constexpr auto area = height * width;
 
-#ifdef XILINX
-  selector_defines::XOCLDeviceSelector selector;
-#else
-  selector_defines::IntelDeviceSelector selector;
-#endif
-  queue q { selector , property::queue::enable_profiling() };
+  selector_defines::CompiledForDeviceSelector selector;
+  queue q {selector, property::queue::enable_profiling()};
 
   // may need to modify this to be different if input.isContinuous
   buffer<uchar> ib{input.begin<uchar>(), input.end<uchar>()};
@@ -114,20 +90,15 @@ int main(int argc, char* argv[]) {
     printf("pixel_rb size in submit: %zu \n", pixel_rb.get_size());
     printf("pixel_rb count in submit: %zu \n", pixel_rb.get_count());
 
-    cgh.single_task<xilinx::reqd_work_group_size<1, 1, 1, krnl_sobel> >(
+    cgh.single_task<xilinx::reqd_work_group_size<1, 1, 1, krnl_sobel>>(
      [=]() {
-#ifdef XILINX
       auto gX = xilinx::partition_array<char, 9,
                 xilinx::partition::complete<0>>({-1, 0, 1, -2, 0, 2, -1, 0, 1});
 
       auto gY = xilinx::partition_array<char, 9,
                 xilinx::partition::complete<0>>({1, 2, 1, 0, 0, 0, -1, -2, -1});
-#else
-      char const gX[9] = {-1, 0, 1, -2, 0, 2, -1, 0, 1};
-      char const gY[9] = {1, 2, 1, 0, 0, 0, -1, -2, -1};
-#endif
-      int magX, magY, gI, pIndex, sum;
 
+      int magX, magY, gI, pIndex, sum;
 
       // Simplified version of krnl_sobelfilter.cl that gives the same output
       // results however the krnl_sobelfilter.cl is more hardware optimized than
@@ -145,27 +116,23 @@ int main(int argc, char* argv[]) {
       // for HW. Currently pipelining the inner loop instead.
       for (size_t x = 1; x < width - 1; ++x) {
         for (size_t y = 1; y < height - 1; ++y) {
-            magX = 0; magY = 0;
+          magX = 0; magY = 0;
 
-#ifdef XILINX
-            xilinx::pipeline([&] {
-#endif
-              for(size_t k = 0; k < 3; ++k) {
-                for(size_t l = 0; l < 3; ++l) {
-                  gI = k * 3 + l;
-                  pIndex =  (x + k - 1) + (y + l - 1) * width;
-                  magX += gX[gI] * pixel_rb[pIndex];
-                  magY += gY[gI] * pixel_rb[pIndex];
-                }
+          xilinx::pipeline([&] {
+            for(size_t k = 0; k < 3; ++k) {
+              for(size_t l = 0; l < 3; ++l) {
+                gI = k * 3 + l;
+                pIndex =  (x + k - 1) + (y + l - 1) * width;
+                magX += gX[gI] * pixel_rb[pIndex];
+                magY += gY[gI] * pixel_rb[pIndex];
               }
-#ifdef XILINX
-            });
-#endif
+            }
+          });
 
-            // capping at 0xFF means no blurring of edges when it gets
-            // converted back to a char from an int
-            sum = std::abs(magX) + std::abs(magY);
-            pixel_wb[x + y * width] = (sum > 0xFF) ? 0xFF : (char)sum;
+          // capping at 0xFF means no blurring of edges when it gets
+          // converted back to a char from an int
+          sum = std::abs(magX) + std::abs(magY);
+          pixel_wb[x + y * width] = min(sum, 0xFF);
         }
       }
     });

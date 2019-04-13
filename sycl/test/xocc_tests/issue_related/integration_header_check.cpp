@@ -31,13 +31,12 @@
   CodeGenSYCL tests.
 
   Intel command:
-  $ISYCL_BIN_DIR/clang++ -std=c++11 -fsycl integration_header_check.cpp -o \
-    integration_header_check -lsycl -lOpenCL
+  $ISYCL_BIN_DIR/clang++ -std=c++2a -fsycl integration_header_check.cpp -o \
+    integration_header_check -lOpenCL
 
   Xilinx command:
-  $ISYCL_BIN_DIR/clang++ -D__SYCL_SPIR_DEVICE__ -DXILINX -std=c++11 -fsycl \
-    -fsycl-xocc-device integration_header_check.cpp \
-    -o integration_header_check -lsycl -lOpenCL
+  $ISYCL_BIN_DIR/clang++ -std=c++2a -fsycl -fsycl-xocc-device \
+    integration_header_check.cpp -o integration_header_check -lOpenCL
 */
 
 #include <CL/sycl.hpp>
@@ -78,12 +77,9 @@ template <typename... Ts> class sixth_kernel;
 }
 
 int main() {
-#ifdef XILINX
- selector_defines::XOCLDeviceSelector selector;
-#else
- selector_defines::IntelDeviceSelector selector;
-#endif
+  selector_defines::CompiledForDeviceSelector selector;
   queue q {selector};
+
   buffer<int> ob(range<1>{1});
 
   q.submit([&](handler &cgh) {

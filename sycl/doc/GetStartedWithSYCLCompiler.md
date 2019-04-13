@@ -122,7 +122,7 @@ int main() {
 To build simple-sycl-app run following command:
 
    ```console
-   clang++ -std=c++11 -fsycl simple-sycl-app.cpp -o simple-sycl-app -lOpenCL
+   clang++ -std=c++2a -fsycl simple-sycl-app.cpp -o simple-sycl-app -lOpenCL
    ```
 
 This `simple-sycl-app` application doesn't specify SYCL device for execution,

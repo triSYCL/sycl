@@ -14,7 +14,7 @@
 #include <CL/sycl/detail/scheduler/requirements.h>
 #include <CL/sycl/exception.hpp>
 
-#if (defined(__SYCL_VENDOR_XILINX_EXTENSIONS__))
+#if (defined(__SYCL_XILINX_ONLY__) && defined(__cplusplus) && (__cplusplus >= 201703L))
 #include <CL/sycl/xilinx/fpga/kernel_properties.hpp>
 #endif
 
@@ -137,10 +137,10 @@ ExecuteKernelCommand<
   // This will also enforce LocalWorkSize on Intel devices if
   // reqd_work_group_size is specified and the std is >= 17. Perhaps not ideal.
   std::vector<size_t> ReqdWorkGroupSize;
-  #if (defined(__SYCL_VENDOR_XILINX_EXTENSIONS__))
+#if (defined(__SYCL_XILINX_ONLY__) && defined(__cplusplus) && (__cplusplus >= 201703L))
   ReqdWorkGroupSize =
       cl::sycl::xilinx::get_reqd_work_group_size(m_KernelName);
-  #endif
+#endif
 
   size_t LocalWorkSize[Dimensions];
   size_t GlobalWorkSize[Dimensions];

@@ -3537,8 +3537,16 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   if (IsSYCLDevice) {
     // We want to compile sycl kernels.
-    if (types::isCXX(Input.getType()))
-      CmdArgs.push_back("-std=c++11");
+    if (types::isCXX(Input.getType())) {
+      // Take the given -std option otherwise default to c++11 the minimum C++
+      // version supported in SYCL
+      if (Arg *A = Args.getLastArg(options::OPT_std_EQ))
+        CmdArgs.push_back(Args.MakeArgString(std::string("-std=")
+                          + A->getValue()));
+      else
+        CmdArgs.push_back("-std=c++11");
+    }
+
     CmdArgs.push_back("-fsycl-is-device");
     // Pass the triple of host when doing SYCL
     std::string NormalizedTriple =
@@ -3550,9 +3558,22 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                      options::OPT_fno_sycl_allow_func_ptr, false)) {
       CmdArgs.push_back("-fsycl-allow-func-ptr");
     }
-    if (Args.hasArg(options::OPT_fsycl_xocc_device)) {
-      CmdArgs.push_back("-fsycl-xocc-device");
-    }
+  }
+
+  // Push on argument for all invocations of Clang, including host compilation
+  // this forces things like:
+  // 1) The SYCL toolchain to pick the Xilinx Toolchain
+  // 2) The InitPreprocessor to define some Xilinx related macros which force
+  //    alternate paths in the SYCL runtime
+  // 3) The assembler stage of clang to emit llvm ir (-emit-llvm) rather than
+  //     assembly (-S)
+  // \todo This should all be refactored when the driver gets refactored and we
+  //       move to a target oriented compiler invocation e.g. xilinx-fpga32/64
+  //       it may take adding a few extra internal LangOpts to the compiler for
+  //       Xilinx SYCL but it should be more flexible and easier to decipher
+  //       in the long run
+  if (Args.hasArg(options::OPT_fsycl_xocc_device)) {
+    CmdArgs.push_back("-fsycl-xocc-device");
   }
 
   if (IsOpenMPDevice) {

@@ -76,13 +76,8 @@ namespace cl::sycl::xilinx {
 }
 
 int main() {
-#ifdef XILINX
-  selector_defines::XOCLDeviceSelector selector;
-#else
-  selector_defines::IntelDeviceSelector selector;
-#endif
-
-  queue q { selector };
+  selector_defines::CompiledForDeviceSelector selector;
+  queue q {selector};
 
   range<3> k_range {8,8,8};
   buffer<unsigned int> ob(range<1>{1});
@@ -171,7 +166,7 @@ int main() {
   });
 
   rb = ob.get_access<access::mode::read>();
-#ifdef XILINX
+#ifdef __SYCL_XILINX_ONLY__
     assert(rb[0] == 5); // should still be 5
 #else
     assert(rb[0] == 6); // shouldn't hinder intel implementation
@@ -193,7 +188,7 @@ int main() {
   });
 
   rb = ob.get_access<access::mode::read>();
-#ifdef XILINX
+#ifdef __SYCL_XILINX_ONLY__
   assert(rb[0] == 5); // should still be 5
 #else
   assert(rb[0] == 7); // shouldn't hinder intel implementation
@@ -214,7 +209,7 @@ int main() {
   });
 
   rb = ob.get_access<access::mode::read>();
-#ifdef XILINX
+#ifdef __SYCL_XILINX_ONLY__
   assert(rb[0] == 5); // should still be 5
 #else
   assert(rb[0] == 8); // shouldn't hinder intel implementation
@@ -243,7 +238,7 @@ int main() {
   });
 
   rb = ob.get_access<access::mode::read>();
-#ifdef XILINX
+#ifdef __SYCL_XILINX_ONLY__
   assert(rb[0] == 5); // should still be 5
 #else
   assert(rb[0] == 9); // shouldn't hinder intel implementation
