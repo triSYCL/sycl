@@ -43,7 +43,8 @@ public:
 
   program_impl(vector_class<std::shared_ptr<program_impl>> ProgramList,
                string_class LinkOptions = "")
-      : State(program_state::linked), LinkOptions(LinkOptions) {
+      : State(program_state::linked), LinkOptions(LinkOptions),
+        BuildOptions(LinkOptions) {
     // Verify arguments
     if (ProgramList.empty()) {
       throw runtime_error("Non-empty vector of programs expected");
@@ -65,22 +66,24 @@ public:
     if (!is_host()) {
       vector_class<cl_device_id> ClDevices(get_cl_devices());
       vector_class<cl_program> ClPrograms;
+      bool NonInterOpToLink = false;
       for (const auto &Prg : ProgramList) {
+        if (!Prg->IsLinkable && NonInterOpToLink)
+          continue;
+        NonInterOpToLink |= !Prg->IsLinkable;
         ClPrograms.push_back(Prg->ClProgram);
       }
-      cl_int Err;
+      cl_int Err = CL_SUCCESS;
       ClProgram = clLinkProgram(detail::getSyclObjImpl(Context)->getHandleRef(),
                                 ClDevices.size(), ClDevices.data(),
-                                LinkOptions.c_str(), ProgramList.size(),
+                                LinkOptions.c_str(), ClPrograms.size(),
                                 ClPrograms.data(), nullptr, nullptr, &Err);
       CHECK_OCL_CODE_THROW(Err, compile_program_error);
     }
   }
 
   program_impl(const context &Context, cl_program ClProgram)
-      : ClProgram(ClProgram), Context(Context) {
-    // TODO it's unclear how to handle getting compile, link and build options
-    // in this case
+      : ClProgram(ClProgram), Context(Context), IsLinkable(true) {
     // TODO handle the case when cl_program build is in progress
     cl_uint NumDevices;
     CHECK_OCL_CODE(clGetProgramInfo(ClProgram, CL_PROGRAM_NUM_DEVICES,
@@ -95,16 +98,29 @@ public:
     CHECK_OCL_CODE(clGetProgramBuildInfo(
         ClProgram, Devices[0].get(), CL_PROGRAM_BINARY_TYPE,
         sizeof(cl_program_binary_type), &BinaryType, nullptr));
+    size_t Size = 0;
+    CHECK_OCL_CODE(clGetProgramBuildInfo(ClProgram, Devices[0].get(),
+                                         CL_PROGRAM_BUILD_OPTIONS, 0, nullptr,
+                                         &Size));
+    std::vector<char> OptionsVector(Size);
+    CHECK_OCL_CODE(clGetProgramBuildInfo(ClProgram, Devices[0].get(),
+                                         CL_PROGRAM_BUILD_OPTIONS, Size,
+                                         OptionsVector.data(), nullptr));
+    string_class Options(OptionsVector.begin(), OptionsVector.end());
     switch (BinaryType) {
     case CL_PROGRAM_BINARY_TYPE_NONE:
       State = program_state::none;
       break;
     case CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT:
       State = program_state::compiled;
+      CompileOptions = Options;
+      BuildOptions = Options;
       break;
     case CL_PROGRAM_BINARY_TYPE_LIBRARY:
     case CL_PROGRAM_BINARY_TYPE_EXECUTABLE:
       State = program_state::linked;
+      LinkOptions = "";
+      BuildOptions = Options;
     }
     CHECK_OCL_CODE(clRetainProgram(ClProgram));
   }
@@ -189,7 +205,8 @@ public:
                         ClDevices.size(), ClDevices.data(), LinkOptions.c_str(),
                         1, &ClProgram, nullptr, nullptr, &Err);
       CHECK_OCL_CODE_THROW(Err, compile_program_error);
-      LinkOptions = LinkOptions;
+      this->LinkOptions = LinkOptions;
+      BuildOptions = LinkOptions;
     }
     State = program_state::linked;
   }
@@ -304,6 +321,7 @@ private:
       throw compile_program_error("Program compilation error");
     }
     CompileOptions = Options;
+    BuildOptions = Options;
   }
 
   void build(const string_class &Options) {
@@ -368,6 +386,7 @@ private:
   cl_program ClProgram = nullptr;
   program_state State = program_state::none;
   context Context;
+  bool IsLinkable = false;
   vector_class<device> Devices;
   string_class CompileOptions;
   string_class LinkOptions;
