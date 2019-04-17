@@ -116,7 +116,7 @@ static std::string getUniqueName(const char *KernelName) {
   boost::hash<boost::uuids::uuid> uuid_hasher;
   std::size_t uuid_hash_value = uuid_hasher(udoc);
 
-  return std::to_string(uuid_hash_value);
+  return "x" + std::to_string(uuid_hash_value);
 }
 
 cl_kernel ProgramManager::getOrCreateKernel(OSModuleHandle M,
