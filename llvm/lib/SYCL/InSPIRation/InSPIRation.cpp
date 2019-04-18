@@ -244,7 +244,7 @@ struct InSPIRation : public ModulePass {
     ///       changing all the names to a SHA-1 hash. Like asking for an update
     ///       to the xocc compiler to accept characters that appear in mangled
     ///       names
-    F.setName(std::to_string(uuidHashValue));
+    F.setName("x" + std::to_string(uuidHashValue));
   }
 
   /// Add metadata for the SPIR 2.0 version
