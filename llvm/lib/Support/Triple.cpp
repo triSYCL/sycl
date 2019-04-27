@@ -69,6 +69,8 @@ StringRef Triple::getArchTypeName(ArchType Kind) {
   case wasm64:         return "wasm64";
   case renderscript32: return "renderscript32";
   case renderscript64: return "renderscript64";
+  case fpga32: return "fpga32";
+  case fpga64: return "fpga64";
   }
 
   llvm_unreachable("Invalid ArchType!");
@@ -165,6 +167,7 @@ StringRef Triple::getVendorTypeName(VendorType Kind) {
   case Mesa: return "mesa";
   case SUSE: return "suse";
   case OpenEmbedded: return "oe";
+  case Xilinx: return "xilinx";
   }
 
   llvm_unreachable("Invalid VendorType!");
@@ -308,6 +311,8 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
     .Case("wasm64", wasm64)
     .Case("renderscript32", renderscript32)
     .Case("renderscript64", renderscript64)
+    .Case("fpga32", fpga32)
+    .Case("fpga64", fpga64)
     .Default(UnknownArch);
 }
 
@@ -434,6 +439,8 @@ static Triple::ArchType parseArch(StringRef ArchName) {
     .Case("wasm64", Triple::wasm64)
     .Case("renderscript32", Triple::renderscript32)
     .Case("renderscript64", Triple::renderscript64)
+    .Case("fpga32", Triple::fpga32)
+    .Case("fpga64", Triple::fpga64)
     .Default(Triple::UnknownArch);
 
   // Some architectures require special parsing logic just to compute the
@@ -467,6 +474,7 @@ static Triple::VendorType parseVendor(StringRef VendorName) {
     .Case("mesa", Triple::Mesa)
     .Case("suse", Triple::SUSE)
     .Case("oe", Triple::OpenEmbedded)
+    .Case("xilinx", Triple::Xilinx)
     .Default(Triple::UnknownVendor);
 }
 
@@ -651,6 +659,8 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   case Triple::avr:
   case Triple::bpfeb:
   case Triple::bpfel:
+  case Triple::fpga32:
+  case Triple::fpga64:
   case Triple::hexagon:
   case Triple::lanai:
   case Triple::hsail:
@@ -1240,6 +1250,7 @@ static unsigned getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
   case llvm::Triple::shave:
   case llvm::Triple::wasm32:
   case llvm::Triple::renderscript32:
+  case llvm::Triple::fpga32:
     return 32;
 
   case llvm::Triple::aarch64:
@@ -1262,6 +1273,7 @@ static unsigned getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
   case llvm::Triple::spir64:
   case llvm::Triple::wasm64:
   case llvm::Triple::renderscript64:
+  case llvm::Triple::fpga64:
     return 64;
   }
   llvm_unreachable("Invalid architecture value");
@@ -1320,6 +1332,7 @@ Triple Triple::get32BitArchVariant() const {
   case Triple::shave:
   case Triple::wasm32:
   case Triple::renderscript32:
+  case Triple::fpga32:
     // Already 32-bit.
     break;
 
@@ -1338,6 +1351,7 @@ Triple Triple::get32BitArchVariant() const {
   case Triple::spir64:         T.setArch(Triple::spir);    break;
   case Triple::wasm64:         T.setArch(Triple::wasm32);  break;
   case Triple::renderscript64: T.setArch(Triple::renderscript32); break;
+  case Triple::fpga64:         T.setArch(Triple::fpga32);    break;
   }
   return T;
 }
@@ -1381,6 +1395,7 @@ Triple Triple::get64BitArchVariant() const {
   case Triple::x86_64:
   case Triple::wasm64:
   case Triple::renderscript64:
+  case Triple::fpga64:
     // Already 64-bit.
     break;
 
@@ -1401,6 +1416,7 @@ Triple Triple::get64BitArchVariant() const {
   case Triple::thumbeb:         T.setArch(Triple::aarch64_be); break;
   case Triple::wasm32:          T.setArch(Triple::wasm64);     break;
   case Triple::renderscript32:  T.setArch(Triple::renderscript64);     break;
+  case Triple::fpga32:          T.setArch(Triple::fpga64);     break;
   }
   return T;
 }
@@ -1438,6 +1454,8 @@ Triple Triple::getBigEndianArchVariant() const {
   case Triple::xcore:
   case Triple::renderscript32:
   case Triple::renderscript64:
+  case Triple::fpga32:
+  case Triple::fpga64:
 
   // ARM is intentionally unsupported here, changing the architecture would
   // drop any arch suffixes.
@@ -1528,6 +1546,8 @@ bool Triple::isLittleEndian() const {
   case Triple::tcele:
   case Triple::renderscript32:
   case Triple::renderscript64:
+  case Triple::fpga32:
+  case Triple::fpga64:
     return true;
   default:
     return false;

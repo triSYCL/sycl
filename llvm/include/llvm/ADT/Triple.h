@@ -94,7 +94,9 @@ public:
     wasm64,         // WebAssembly with 64-bit pointers
     renderscript32, // 32-bit RenderScript
     renderscript64, // 64-bit RenderScript
-    LastArchType = renderscript64
+    fpga32,         // 32-bit FPGA
+    fpga64,         // 64-bit FPGA
+    LastArchType = fpga64
   };
   enum SubArchType {
     NoSubArch,
@@ -147,7 +149,8 @@ public:
     Mesa,
     SUSE,
     OpenEmbedded,
-    LastVendorType = OpenEmbedded
+    Xilinx,
+    LastVendorType = Xilinx
   };
   enum OSType {
     UnknownOS,
@@ -211,7 +214,7 @@ public:
     CoreCLR,
     Simulator,  // Simulator variants of other systems, e.g., Apple's iOS
     SYCLDevice,
-    LastEnvironmentType = Simulator
+    LastEnvironmentType = SYCLDevice
   };
   enum ObjectFormatType {
     UnknownObjectFormat,
@@ -482,6 +485,19 @@ public:
 
   bool isSYCLDeviceEnvironment() const {
     return getEnvironment() == Triple::SYCLDevice;
+  }
+
+  bool isXilinxSYCLDevice() const {
+    return (getArch() == Triple::fpga64
+        || getArch() == Triple::fpga32)
+        && getVendor() == Triple::Xilinx
+        && isSYCLDeviceEnvironment();
+  }
+
+  bool isXilinxFPGA() const {
+    return (getArch() == Triple::fpga64
+        || getArch() == Triple::fpga32)
+        && getVendor() == Triple::Xilinx;
   }
 
   bool isOSNetBSD() const {
