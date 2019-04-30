@@ -353,6 +353,16 @@ XOCCToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
   return DAL;
 }
 
+Tool *XOCCToolChain::buildAssembler() const {
+  assert(getTriple().isXilinxFPGA());
+  return new tools::SYCL::AssemblerXOCC(*this);
+}
+
+Tool *XOCCToolChain::buildLinker() const {
+  assert(getTriple().isXilinxFPGA());
+  return new tools::SYCL::LinkerXOCC(*this);
+}
+
 // Tool *XOCCToolChain::SelectTool(const JobAction &JA) const {
 //   switch (JA.getKind()) {
 //   case Action::LinkJobClass:

@@ -162,10 +162,8 @@ public:
   XOCCInstallationDetector XOCCInstallation;
 
 protected:
-
-private:
-  mutable std::unique_ptr<Tool> Assembler;
-  mutable std::unique_ptr<Tool> Linker;
+  Tool *buildAssembler() const override;
+  Tool *buildLinker() const override;
 };
 
 } // end namespace toolchains
