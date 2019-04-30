@@ -3565,13 +3565,9 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // triple of the thing currently being compiled. To do this we would need to
   // remove the reliance on a host side definition (__SYCL_XILINX_ONLY__)
   // inside of InitPreprocessor.cpp
-  bool IsXilinxFPGA = false;
-  if (IsSYCL)
-    IsXilinxFPGA = C.getSingleOffloadToolChain<Action::OFK_SYCL>()
-                       ->getTriple()
-                       .isXilinxFPGA();
-
-  if (IsXilinxFPGA)
+  if (IsSYCL &&
+      C.getSingleOffloadToolChain<Action::OFK_SYCL>()
+          ->getTriple().isXilinxFPGA())
     CmdArgs.push_back("-fsycl-xocc");
 
   if (IsOpenMPDevice) {
@@ -3650,11 +3646,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                JA.getType() == types::TY_LTO_BC) {
       CmdArgs.push_back("-emit-llvm-bc");
     } else if (JA.getType() == types::TY_PP_Asm) {
-      if (IsSYCLOffloadDevice && IsSYCLDevice && IsXilinxFPGA) {
-        CmdArgs.push_back("-emit-llvm");
-      } else {
-        CmdArgs.push_back("-S");
-      }
+      CmdArgs.push_back("-S");
     } else if (JA.getType() == types::TY_AST) {
       CmdArgs.push_back("-emit-pch");
     } else if (JA.getType() == types::TY_ModuleFile) {

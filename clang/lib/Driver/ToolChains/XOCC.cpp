@@ -57,34 +57,28 @@ XOCCInstallationDetector::XOCCInstallationDetector(
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-////                            XOCC Assembler
+////                            XOCC Linker
 ///////////////////////////////////////////////////////////////////////////////
 
-// NOTE: The Output argument is completely ignored in this Job, this Job does
-// not currently output the .o file specified by the Output argument. It
-// generates a number of temporary .xo files which are read in by the LinkerXOCC
-// Tool which then links them together. Perhaps a better method needs to be
-// designed, however it's difficult to work around XOCCs requirements outside of
-// perhaps merging the XOCC Assembler and Linker stage into one.
-void SYCL::AssemblerXOCC::ConstructJob(Compilation &C, const JobAction &JA,
-                                       const InputInfo &Output,
-                                       const InputInfoList &Inputs,
-                                       const ArgList &Args,
-                                       const char *LinkingOutput) const {
+void SYCL::LinkerXOCC::ConstructJob(Compilation &C, const JobAction &JA,
+                                   const InputInfo &Output,
+                                   const InputInfoList &Inputs,
+                                   const ArgList &Args,
+                                   const char *LinkingOutput) const {
+  const char *OptOutputName = constructOptCommand(C, JA, Inputs, Args,
+                                                  Inputs[0].getFilename());
 
-   const char *OptOutputName = constructOptCommand(C, JA, Inputs, Args,
-                                                   Inputs[0].getFilename());
+  const char *LLVMLinkOutputName = constructLLVMLinkCommand(C, JA,
+                                                            Inputs, Args,
+                                                            OptOutputName);
 
-   const char *LLVMLinkOutputName = constructLLVMLinkCommand(C, JA,
-                                                             Inputs, Args,
-                                                             OptOutputName);
+  constructXOCCCompileCommand(C, JA, Inputs, Args, LLVMLinkOutputName);
 
-   const char *XOCCOutputName = constructXOCCCompileCommand(C, JA, Inputs, Args,
-                                                            LLVMLinkOutputName);
+  constructXOCCLinkerCommand(C, JA, Output, Inputs, Args);
 }
 
 // Inherited from HIP toolchain with some modifications.
-const char *SYCL::AssemblerXOCC::constructOptCommand(
+const char *SYCL::LinkerXOCC::constructOptCommand(
     Compilation &C, const JobAction &JA, const InputInfoList &Inputs,
     const llvm::opt::ArgList &Args, const char *InputFileName) const {
   // Construct opt command.
@@ -158,7 +152,7 @@ const char *SYCL::AssemblerXOCC::constructOptCommand(
   return OutputFileName;
 }
 
-const char *SYCL::AssemblerXOCC::constructLLVMLinkCommand(
+const char *SYCL::LinkerXOCC::constructLLVMLinkCommand(
   Compilation &C, const JobAction &JA,  const InputInfoList &Inputs,
   const llvm::opt::ArgList &Args, const char *InputFileName) const {
 
@@ -187,7 +181,8 @@ const char *SYCL::AssemblerXOCC::constructLLVMLinkCommand(
   C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, None));
   return OutputFileName;
 }
-const char *SYCL::AssemblerXOCC::constructXOCCCompileCommand(
+
+const char *SYCL::LinkerXOCC::constructXOCCCompileCommand(
   Compilation &C, const JobAction &JA, const InputInfoList &Inputs,
   const llvm::opt::ArgList &Args, const char *InputFileName) const {
 
@@ -237,21 +232,6 @@ const char *SYCL::AssemblerXOCC::constructXOCCCompileCommand(
 
  // There are multiple outputs from this phase, one per kernel in the file
   return "";
-}
-
-///////////////////////////////////////////////////////////////////////////////
-////                            XOCC Linker
-///////////////////////////////////////////////////////////////////////////////
-
-void SYCL::LinkerXOCC::ConstructJob(Compilation &C, const JobAction &JA,
-                                   const InputInfo &Output,
-                                   const InputInfoList &Inputs,
-                                   const ArgList &Args,
-                                   const char *LinkingOutput) const {
-
-  const char *XOCCOutputName = constructXOCCLinkerCommand(C, JA, Output,
-                                                          Inputs, Args);
-
 }
 
 const char *SYCL::LinkerXOCC::constructXOCCLinkerCommand(Compilation &C,
@@ -353,36 +333,10 @@ XOCCToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
   return DAL;
 }
 
-Tool *XOCCToolChain::buildAssembler() const {
-  assert(getTriple().isXilinxFPGA());
-  return new tools::SYCL::AssemblerXOCC(*this);
-}
-
 Tool *XOCCToolChain::buildLinker() const {
   assert(getTriple().isXilinxFPGA());
   return new tools::SYCL::LinkerXOCC(*this);
 }
-
-// Tool *XOCCToolChain::SelectTool(const JobAction &JA) const {
-//   switch (JA.getKind()) {
-//   case Action::LinkJobClass:
-//     if (!Linker) {
-//       if (isXOCCCompilation)
-//         Linker.reset(new tools::SYCL::LinkerXOCC(*this));
-//       else
-//         Linker.reset(new tools::SYCL::Linker(*this));
-//     }
-//     return Linker.get();
-//   case Action::AssembleJobClass:
-//     if (isXOCCCompilation) {
-//       if (!Assembler)
-//         Assembler.reset(new tools::SYCL::AssemblerXOCC(*this));
-//       return Assembler.get();
-//     }
-//   default:
-//     return ToolChain::getTool(JA.getKind());
-//   }
-// }
 
 void XOCCToolChain::addClangWarningOptions(ArgStringList &CC1Args) const {
   HostTC.addClangWarningOptions(CC1Args);

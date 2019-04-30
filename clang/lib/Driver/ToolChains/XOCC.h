@@ -57,22 +57,29 @@ public:
 namespace tools {
 namespace SYCL {
 
-// Technically this is not an Assemble Stage, it's a Compile Stage.
+
+// Technically this is not just a Linker Stage, it's a Compile and Linker Stage.
 // However, it fits in after the Clang compiler has compiled the device code to
-// IR and outputs an XO (Xilinx Object). So it's hard to say where it fits,
-// it seems less intrusive than adding a second Compile stage for the moment.
-class LLVM_LIBRARY_VISIBILITY AssemblerXOCC : public Tool {
- public:
-   AssemblerXOCC(const ToolChain &TC)
-       : Tool("XOCC::AssemblerXOCC", "sycl-assembler-xocc", TC) {}
+// BC and allows us to compile to an xcl binary to be offloaded. It's less
+// complex and intrusive than optionally altering the SYCL offloader phases
+// based on target and is similar to what the existing SYCL ToolChain does.
+//
+// Compiles all the kernels into .xo files and then links all of the .xo files
+// (individual kernels) into a final binary blob that can be offloaded and
+// wrapped into the final binary. Which XRT can then loaded and execute like a
+// normal pre-compiled OpenCL binary.
+class LLVM_LIBRARY_VISIBILITY LinkerXOCC : public Tool {
+public:
+  LinkerXOCC(const ToolChain &TC) : Tool("XOCC::LinkerXOCC", "sycl-link-xocc", TC) {}
 
   // technically true, but we don't care about it having integrated C++ for now
-   bool hasIntegratedCPP() const override { return false; }
+  bool hasIntegratedCPP() const override { return false; }
 
-   void ConstructJob(Compilation &C, const JobAction &JA,
-                     const InputInfo &Output, const InputInfoList &Inputs,
-                     const llvm::opt::ArgList &TCArgs,
-                     const char *LinkingOutput) const override;
+  void ConstructJob(Compilation &C, const JobAction &JA,
+                    const InputInfo &Output, const InputInfoList &Inputs,
+                    const llvm::opt::ArgList &TCArgs,
+                    const char *LinkingOutput) const override;
+
   private:
     /// \return opt output file name.
     const char *constructOptCommand(Compilation &C, const JobAction &JA,
@@ -96,29 +103,12 @@ class LLVM_LIBRARY_VISIBILITY AssemblerXOCC : public Tool {
                                           const InputInfoList &Inputs,
                                           const llvm::opt::ArgList &Args,
                                           const char *InputFileName) const;
-};
 
-// Links all of the .xo files (individual kernels) into a final binary blob that
-// can be loaded in via the XRT run time
-class LLVM_LIBRARY_VISIBILITY LinkerXOCC : public Tool {
-public:
-  LinkerXOCC(const ToolChain &TC) : Tool("XOCC::LinkerXOCC", "sycl-link-xocc", TC) {}
-
-  // technically true, but we don't care about it having integrated C++ for now
-  bool hasIntegratedCPP() const override { return false; }
-
-  void ConstructJob(Compilation &C, const JobAction &JA,
-                    const InputInfo &Output, const InputInfoList &Inputs,
-                    const llvm::opt::ArgList &TCArgs,
-                    const char *LinkingOutput) const override;
-
-  private:
     const char *constructXOCCLinkerCommand(Compilation &C, const JobAction &JA,
                                            const InputInfo &Output,
                                            const InputInfoList &Inputs,
                                            const llvm::opt::ArgList &Args)
                                            const;
-
 };
 
 } // end namespace SYCL
@@ -143,7 +133,7 @@ public:
                          Action::OffloadKind DeviceOffloadKind) const override;
 
   // \todo change when remove assembler
-  bool useIntegratedAs() const override { return false; }
+  bool useIntegratedAs() const override { return true; }
 
   bool isPICDefault() const override { return false; }
   bool isPIEDefault() const override { return false; }
@@ -162,7 +152,6 @@ public:
   XOCCInstallationDetector XOCCInstallation;
 
 protected:
-  Tool *buildAssembler() const override;
   Tool *buildLinker() const override;
 };
 
