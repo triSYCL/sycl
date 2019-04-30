@@ -2834,8 +2834,13 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
     }
   }
 
+  // SYCLXOCCDevice forces things like:
+  // 1) The InitPreprocessor to define some Xilinx related macros which force
+  //    alternate paths in the SYCL runtime
+  // 2) The assembler stage of clang to emit llvm ir (-emit-llvm) rather than
+  //     assembly (-S)
+  Opts.SYCLXOCCDevice = Args.hasArg(options::OPT_fsycl_xocc);
   Opts.SYCLIsDevice   = Args.hasArg(options::OPT_fsycl_is_device);
-  Opts.SYCLXOCCDevice = Args.hasArg(options::OPT_fsycl_xocc_device);
   Opts.SYCLAllowFuncPtr = Args.hasFlag(options::OPT_fsycl_allow_func_ptr,
                                   options::OPT_fno_sycl_allow_func_ptr, false);
 

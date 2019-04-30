@@ -1071,8 +1071,10 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
 
   // These are defined for both the host and device compilation phases when it's
   // a Xilinx SYCL FPGA device.
-  // \todo When our implementation of the SYCL ToolChain/Driver is cleaned up
-  //  replace this with a "XOCCHostAndDevice" LangOpt (better name though)
+  // Note: I don't think pushing Xilinx defines onto the host compilation will
+  // be a good long term solution, it will probably cause some conflicts when
+  // compiling for multiple targets, what if I want to compile for both an Intel
+  // and Xilinx platform? Will they mesh well on the host?
   if (LangOpts.SYCLXOCCDevice) {
     Builder.defineMacro("__SYCL_XILINX_ONLY__");
   }

@@ -842,6 +842,9 @@ def fopenmp_host_ir_file_path : Separate<["-"], "fopenmp-host-ir-file-path">,
 // SYCL Options
 //===----------------------------------------------------------------------===//
 
+def fsycl_xocc : Flag<["-"], "fsycl-xocc">,
+  HelpText<"Indicates that the compiler is using the Xilinx xocc backend, "
+           "allowing optional xocc requirements, e.g. compiler defines">;
 def fsycl_is_device : Flag<["-"], "fsycl-is-device">,
   HelpText<"Generate code for SYCL device.">;
 

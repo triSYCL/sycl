@@ -3560,21 +3560,19 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     }
   }
 
-  // Push on argument for all invocations of Clang, including host compilation
-  // this forces things like:
-  // 1) The SYCL toolchain to pick the Xilinx Toolchain
-  // 2) The InitPreprocessor to define some Xilinx related macros which force
-  //    alternate paths in the SYCL runtime
-  // 3) The assembler stage of clang to emit llvm ir (-emit-llvm) rather than
-  //     assembly (-S)
-  // \todo This should all be refactored when the driver gets refactored and we
-  //       move to a target oriented compiler invocation e.g. xilinx-fpga32/64
-  //       it may take adding a few extra internal LangOpts to the compiler for
-  //       Xilinx SYCL but it should be more flexible and easier to decipher
-  //       in the long run
-  if (Args.hasArg(options::OPT_fsycl_xocc_device)) {
-    CmdArgs.push_back("-fsycl-xocc-device");
-  }
+  // \todo Extend this to use getOffloadToolChains<Action::OFK_SYCL> and loop
+  // over to check for the Xilinx triple or even better make this reliant on the
+  // triple of the thing currently being compiled. To do this we would need to
+  // remove the reliance on a host side definition (__SYCL_XILINX_ONLY__)
+  // inside of InitPreprocessor.cpp
+  bool IsXilinxFPGA = false;
+  if (IsSYCL)
+    IsXilinxFPGA = C.getSingleOffloadToolChain<Action::OFK_SYCL>()
+                       ->getTriple()
+                       .isXilinxFPGA();
+
+  if (IsXilinxFPGA)
+    CmdArgs.push_back("-fsycl-xocc");
 
   if (IsOpenMPDevice) {
     // We have to pass the triple of the host if compiling for an OpenMP device.
@@ -3652,8 +3650,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                JA.getType() == types::TY_LTO_BC) {
       CmdArgs.push_back("-emit-llvm-bc");
     } else if (JA.getType() == types::TY_PP_Asm) {
-      if (IsSYCLOffloadDevice && IsSYCLDevice &&
-          Args.hasArg(options::OPT_fsycl_xocc_device)) {
+      if (IsSYCLOffloadDevice && IsSYCLDevice && IsXilinxFPGA) {
         CmdArgs.push_back("-emit-llvm");
       } else {
         CmdArgs.push_back("-S");
