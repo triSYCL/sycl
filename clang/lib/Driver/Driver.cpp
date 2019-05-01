@@ -5104,39 +5104,39 @@ const ToolChain &Driver::getOffloadingDeviceToolChain(const ArgList &Args,
   // device ToolChain we create depends on both.
   auto &TC = ToolChains[Target.str() + "/" + HostTC.getTriple().str()];
   if (!TC) {
-    // This switch hierarchy is the same as getToolChain at the moment OS > Arch
-    // Perhaps there is another hierarchy that better suits device offloading
-    // ToolChains though. Perhaps as we pass in OffloadKind it could be
-    // categorized better by what programming model your offloading to.
-    // The interesting thing about that is it then makes sense to have OpenMP in
-    // here and you can abstract the basic getToolChain call away in here
-    // perhaps.
-    switch (Target.getOS()) {
-      case llvm::Triple::AMDHSA:
-        TC = llvm::make_unique<toolchains::HIPToolChain>(
-          *this, Target, HostTC, Args);
+    // Categorized by offload kind > arch rather than OS > arch like
+    // the normal getToolChain call, as it seems a reasonable way to categorize
+    // things.
+    switch (TargetDeviceOffloadKind) {
+      case Action::OFK_Cuda:
+          TC = llvm::make_unique<toolchains::CudaToolChain>(
+            *this, Target, HostTC, Args, TargetDeviceOffloadKind);
       break;
-      case llvm::Triple::CUDA:
-        TC = llvm::make_unique<toolchains::CudaToolChain>(
-          *this, Target, HostTC, Args, TargetDeviceOffloadKind);
+      case Action::OFK_HIP:
+          TC = llvm::make_unique<toolchains::HIPToolChain>(
+            *this, Target, HostTC, Args);
       break;
-      default:
+      case Action::OFK_OpenMP:
+          // omp + nvptx
+          TC = llvm::make_unique<toolchains::CudaToolChain>(
+            *this, Target, HostTC, Args, TargetDeviceOffloadKind);
+      break;
+      case Action::OFK_SYCL:
         switch (Target.getArch()) {
           case llvm::Triple::spir:
           case llvm::Triple::spir64:
-            if (Target.isSYCLDeviceEnvironment())
-              TC = llvm::make_unique<toolchains::SYCLToolChain>(
-                *this, Target, HostTC, Args);
+            TC = llvm::make_unique<toolchains::SYCLToolChain>(
+              *this, Target, HostTC, Args);
           break;
           case llvm::Triple::fpga32:
           case llvm::Triple::fpga64:
-            if (Target.isXilinxSYCLDevice())
-              TC = llvm::make_unique<toolchains::XOCCToolChain>(
-                *this, Target, HostTC, Args);
-          break;
-          default:
+            TC = llvm::make_unique<toolchains::XOCCToolChain>(
+              *this, Target, HostTC, Args);
           break;
         }
+      break;
+      default:
+      break;
     }
   }
 
