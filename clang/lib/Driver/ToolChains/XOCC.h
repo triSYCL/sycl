@@ -12,11 +12,6 @@
 #include "clang/Driver/ToolChain.h"
 #include "clang/Driver/Tool.h"
 
-// \todo Link XOCC/SYCL toolchain driver to OpenMP style
-// \todo Remove old flag -fsycl-xocc-device
-// \todo Combine XOCC Assembler and Linker
-// \todo Move more commands into script if possible, stop partial split between
-//    drivers and scripts
 namespace clang {
 namespace driver {
 

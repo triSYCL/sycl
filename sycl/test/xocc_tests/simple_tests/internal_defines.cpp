@@ -1,3 +1,5 @@
+// RUN: true
+
 /*
 
   This test is checking if the implementation defined defines created by the

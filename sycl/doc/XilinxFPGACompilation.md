@@ -148,21 +148,22 @@ The compiler invocation for the `single_task_vector_add.cpp` example inside
 the [simple_tests](../test/xocc_tests/simple_tests) folder looks like this:
 
 ```bash
-$SYCL_BIN_DIR/clang++ -std=c++2a -fsycl -fsycl-xocc-device \
-  single_task_vector_add.cpp -o single_task_vector_add -lOpenCL
+$SYCL_BIN_DIR/clang++ -std=c++2a -fsycl \
+  -fsycl-targets=fpga64-xilinx-unknown-sycldevice single_task_vector_add.cpp \
+  -o single_task_vector_add -lOpenCL
 ```
 
 Be aware that compiling for FPGA is rather slow.
 
 ## Compiler invocation differences
 
-The `-fsycl-xocc-device` compiler directive is a flag we use to force certain
-things in the compiler at the moment, like picking our device ToolChain's
-Assembler and Linker over the regular SYCL ToolChain's Linker and defining some
-environment variables that are used by the runtime. It also forces the assembler
-stage of the Clang compiler to emit LLVM-IR for the moment. In the future we
-hope to remove this and have this sort of thing defined by the device target
-instead, to be more inline with the main Intel SYCL implementation.
+By setting the `fsycl-targets` to `fpga64-xilinx-unknown-sycldevice` you're 
+telling  the compiler to use our XOCC Tools and compile the device side code 
+for Xilinx FPGA. 
+
+This hasn't been tested with mutliple `fsycl-targets` yet (e.g. offloading to 
+both a Xilinx and Intel FPGA) and is unlikely to work, so I would advise 
+sticking to compiling for a single target at the moment. 
 
 ## Tested with
 * Ubuntu 18.10
