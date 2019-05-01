@@ -81,34 +81,10 @@ public:
                     const char *LinkingOutput) const override;
 
   private:
-    /// \return opt output file name.
-    const char *constructOptCommand(Compilation &C, const JobAction &JA,
-                                    const InputInfoList &Inputs,
-                                    const llvm::opt::ArgList &Args,
-                                    const char *InputFileName) const;
-
-    /// \returns the xocc output file name
-    /// Technically it's an XOCC compile stage but it acts sort of like our
-    /// assembler, it takes in SPIR .bc and outputs an object file (.xo) of an
-    /// individual kernel (it may be possible to generate extra "compilation"
-    /// phases for SYCL when compiling for XOCC supported FPGA devices it may be
-    /// a lot more work though and requires some further thought)
-    const char *constructXOCCCompileCommand(Compilation &C, const JobAction &JA,
-                                            const InputInfoList &Inputs,
-                                            const llvm::opt::ArgList &Args,
-                                            const char *InputFileName) const;
-
-    /// \return llvm-link output file name.
-    const char *constructLLVMLinkCommand(Compilation &C, const JobAction &JA,
-                                          const InputInfoList &Inputs,
-                                          const llvm::opt::ArgList &Args,
-                                          const char *InputFileName) const;
-
-    const char *constructXOCCLinkerCommand(Compilation &C, const JobAction &JA,
-                                           const InputInfo &Output,
-                                           const InputInfoList &Inputs,
-                                           const llvm::opt::ArgList &Args)
-                                           const;
+    void constructSYCLXOCCCommand(Compilation &C, const JobAction &JA,
+                                  const InputInfo &Output,
+                                  const InputInfoList &Inputs,
+                                  const llvm::opt::ArgList &Args) const;
 };
 
 } // end namespace SYCL
