@@ -101,6 +101,14 @@ done <<< $DATA
 $XOCC --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM -l \
   --save-temps -o "$6" $LINKER_LIST
 
+# Irrelevant for compilation of binary, dumps useful debug information from 
+# the generated xcl binary into the temp directory. E.g. what args are bound 
+# to which banks, overall kernel signature etc. 
+if [ -z "$XILINX_XRT" ]; then
+  $XILINX_XRT/bin/xclbinutil --info --input "$6" &> "$5/$6.xclbinutil.dump"
+fi
+  
+  
 # TODO: Cleanup temporary files we allocated in the systems tmp directory and 
 # when --save-temps is fixed for SYCL compilation optionally keep them as they
 # are quite useful when debugging
