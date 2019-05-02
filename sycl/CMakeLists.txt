@@ -34,6 +34,39 @@ find_package(OpenCL REQUIRED)
 include_directories(${OpenCL_INCLUDE_DIRS})
 link_libraries(${OpenCL_LIBRARY})
 
+# Try find and include XRT OpenCL in the build components to allow access to 
+# Xilinx CL extensions in the runtime
+if (DEFINED ENV{XILINX_XRT})
+  if(EXISTS "$ENV{XILINX_XRT}/include" AND EXISTS "$ENV{XILINX_XRT}/lib")
+    message(STATUS "XILINX_XRT enabled")
+    message(STATUS "XILINX_XRT Include: $ENV{XILINX_XRT}/include") 
+    #message(STATUS "XILINX_XRT Lib: $ENV{XILINX_XRT}/lib") 
+    
+    # This definition is used by the build system when building the SYCL 
+    # includes/libs and defined by Clang compiler when compiling SYCL code for 
+    # our FPGAs using xocc. I don't think we gain too much from adding an new 
+    # seperate define at the moment, it will just add something else to keep 
+    # track of.
+    # Not a huge fan of this old school CMake command, but the minimum is 3.2 
+    # so no add_compile_definitions 
+    # \todo: exchange  add_definitions for target_compile_definitions
+    add_definitions(-D__SYCL_XILINX_ONLY__)
+    
+    # Add SYSTEM infront to cheat the build system into thinking its a system 
+    # include and silencing warnings from XRT when building... don't want more
+    # compiler noise that we can't control  
+    include_directories(SYSTEM $ENV{XILINX_XRT}/include)
+    
+    # Probably not required, also not sure I want to consider linking all of the
+    # libs, perhaps just: libxilinxopencl.so
+    # link_directories(SYSTEM $ENV{XILINX_XRT}/lib)
+  else()
+    message(STATUS "Invalid XILINX_XRT no lib or include directories found")   
+  endif()
+else()
+  message(STATUS "XILINX_XRT not set, xilinx cl ext disabled")
+endif()
+
 # Configure SYCL version macro
 set(sycl_inc_dir ${CMAKE_CURRENT_SOURCE_DIR}/include/CL)
 string(TIMESTAMP __SYCL_COMPILER_VERSION "%Y%m%d")
