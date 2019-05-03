@@ -3565,8 +3565,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // triple of the thing currently being compiled. To do this we would need to
   // remove the reliance on a host side definition (__SYCL_XILINX_ONLY__)
   // inside of InitPreprocessor.cpp
-  if (IsSYCL &&
-      C.getSingleOffloadToolChain<Action::OFK_SYCL>()
+  if (IsSYCL
+      && C.getSingleOffloadToolChain<Action::OFK_SYCL>()
           ->getTriple().isXilinxFPGA())
     CmdArgs.push_back("-fsycl-xocc");
 

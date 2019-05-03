@@ -557,11 +557,11 @@ private:
 
   /// Retrieves a ToolChain for a particular device \p Target triple
   ///
-  /// HostTC is the host ToolChain paired with the device
+  /// \param[in] HostTC is the host ToolChain paired with the device
   ///
-  /// Action (e.g. OFK_Cuda/OFK_OpenMP/OFK_SYCL) is an Offloading action that is
-  /// optionally passed to a ToolChain (used by CUDA, to specify if it's used in
-  /// conjunction with OpenMP)
+  /// \param[in] Action (e.g. OFK_Cuda/OFK_OpenMP/OFK_SYCL) is an Offloading
+  /// action that is optionally passed to a ToolChain (used by CUDA, to specify
+  /// if it's used in conjunction with OpenMP)
   ///
   /// Will cache ToolChains for the life of the driver object, and create them
   /// on-demand.

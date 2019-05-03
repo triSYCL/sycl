@@ -621,6 +621,9 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
         HostTriple.isArch64Bit() ? "nvptx64-nvidia-cuda" : "nvptx-nvidia-cuda";
     llvm::Triple CudaTriple(DeviceTripleStr);
 
+    // Use the device and host triple as the key into
+    // getOffloadingDeviceToolChain, because the device toolchain we create
+    // depends on both.
     auto CudaTC = &getOffloadingDeviceToolChain(C.getInputArgs(), CudaTriple,
                                                 *HostTC, OFK);
     C.addOffloadDeviceToolChain(CudaTC, OFK);
@@ -631,6 +634,9 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
     DeviceTripleStr = "amdgcn-amd-amdhsa";
     llvm::Triple HIPTriple(DeviceTripleStr);
 
+    // Use the device and host triple as the key into
+    // getOffloadingDeviceToolChain, because the device toolchain we create
+    // depends on both.
     auto HIPTC = &getOffloadingDeviceToolChain(C.getInputArgs(), HIPTriple,
                                               *HostTC, OFK);
     C.addOffloadDeviceToolChain(HIPTC, OFK);
@@ -767,6 +773,9 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
           else {
             const ToolChain *HostTC =
                 C.getSingleOffloadToolChain<Action::OFK_Host>();
+            // Use the device and host triple as the key into
+            // getOffloadingDeviceToolChain, because the device toolchain we
+            // create depends on both.
             auto SYCLTC = &getOffloadingDeviceToolChain(C.getInputArgs(), TT,
                                                      *HostTC, Action::OFK_SYCL);
             C.addOffloadDeviceToolChain(SYCLTC, Action::OFK_SYCL);
@@ -5109,34 +5118,36 @@ const ToolChain &Driver::getOffloadingDeviceToolChain(const ArgList &Args,
     // things.
     switch (TargetDeviceOffloadKind) {
       case Action::OFK_Cuda:
-          TC = llvm::make_unique<toolchains::CudaToolChain>(
-            *this, Target, HostTC, Args, TargetDeviceOffloadKind);
-      break;
+        TC = llvm::make_unique<toolchains::CudaToolChain>(
+          *this, Target, HostTC, Args, TargetDeviceOffloadKind);
+        break;
       case Action::OFK_HIP:
-          TC = llvm::make_unique<toolchains::HIPToolChain>(
-            *this, Target, HostTC, Args);
-      break;
+        TC = llvm::make_unique<toolchains::HIPToolChain>(
+          *this, Target, HostTC, Args);
+        break;
       case Action::OFK_OpenMP:
-          // omp + nvptx
-          TC = llvm::make_unique<toolchains::CudaToolChain>(
-            *this, Target, HostTC, Args, TargetDeviceOffloadKind);
-      break;
+        // omp + nvptx
+        TC = llvm::make_unique<toolchains::CudaToolChain>(
+          *this, Target, HostTC, Args, TargetDeviceOffloadKind);
+        break;
       case Action::OFK_SYCL:
         switch (Target.getArch()) {
           case llvm::Triple::spir:
           case llvm::Triple::spir64:
             TC = llvm::make_unique<toolchains::SYCLToolChain>(
               *this, Target, HostTC, Args);
-          break;
+            break;
           case llvm::Triple::fpga32:
           case llvm::Triple::fpga64:
             TC = llvm::make_unique<toolchains::XOCCToolChain>(
               *this, Target, HostTC, Args);
-          break;
+            break;
+          default:
+            llvm_unreachable("Unexpected option.");
         }
       break;
       default:
-      break;
+        llvm_unreachable("Unexpected option.");
     }
   }
 

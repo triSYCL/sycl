@@ -36,31 +36,48 @@
 # the environment variables are a quick workaround to swap boards. 
 usage() { echo xocc_compile: error: $2 >&2; exit $1; }
 
-[ $# -eq 0      ] && usage 1 "no sdx bin directory containing xocc"
-[ $# -eq 0      ] && usage 2 "no driver path specified"
-[ $# -eq 0      ] && usage 3 "no source file name"
-[ $# -eq 0      ] && usage 4 "no input file name"
-[ $# -eq 0      ] && usage 5 "no temporary directory specified"
-[ $# -eq 0      ] && usage 6 "no final output file specified"
+if [[ -z "$1" ]]; then
+  usage 1 "no sdx bin directory containing xocc"
+fi
+
+if [[ -z "$2" ]]; then
+  usage 2 "no driver path specified"
+fi
+
+if [[ -z "$3" ]]; then
+  usage 3 "no source file name"
+fi
+
+if [[ -z "$4" ]]; then
+  usage 4 "no input file name"
+fi
+
+if [[ -z "$5" ]]; then
+  usage 5 "no temporary directory specified"
+fi
+
+if [[ -z "$6" ]]; then
+  usage 6 "no final output file specified"
+fi
 
 # Hardcoded path from the bin directory that xocc is stored in, works for now 
 # but a future TODO might be to allow this to be optionally specified as an 
 # ENV variable 
-XOCC_LIB_SPIR=$1/../lnx64/lib/libspir64-39-hls.bc
+XOCC_LIB_SPIR="$1/../lnx64/lib/libspir64-39-hls.bc"
 
 # Perhaps not so important that the linker is the one packaged with the Clang
 # build, but it's important that Opt is so that it's packaged with the correct 
 # LLVM passes. 
-OPT=$2/opt
-LLVM_LINK=$2/llvm-link
-XOCC=$1/xocc
+OPT="$2/opt"
+LLVM_LINK="$2/llvm-link"
+XOCC="$1/xocc"
 
-$OPT -O3 -asfix -globaldce -inSPIRation -globaldce -kernelNameGen $4 -o \
-  $5/$3_kernels-optimized.bc
+$OPT -O3 -asfix -globaldce -inSPIRation -globaldce -kernelNameGen "$4" -o \
+  "$5/$3_kernels-optimized.bc"
 
 # Link our XOCC SPIR binaries in 
-$LLVM_LINK $5/$3_kernels-optimized.bc $XOCC_LIB_SPIR -o \
-  $5/$3_kernels-linked.xpirbc 
+$LLVM_LINK "$5/$3_kernels-optimized.bc" $XOCC_LIB_SPIR -o \
+  "$5/$3_kernels-linked.xpirbc" 
 
 # Our file containing the KernelNames is placed in the systems temporary 
 # directory (or wherever the Clang driver is told is the temporary directory) 
@@ -76,13 +93,13 @@ while IFS= read -r X
 do
 if [[ -n "$X" ]]; then
   $XOCC --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM \
-    --save-temps -c -k $X -o $5/$X.xo $5/$3_kernels-linked.xpirbc 
+    --save-temps -c -k "$X" -o "$5/$X.xo" "$5/$3_kernels-linked.xpirbc" 
     LINKER_LIST="$5/$X.xo $LINKER_LIST"
 fi
 done <<< $DATA
 
 $XOCC --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM -l \
-  --save-temps -o $6 $LINKER_LIST
+  --save-temps -o "$6" $LINKER_LIST
 
 # TODO: Cleanup temporary files we allocated in the systems tmp directory and 
 # when --save-temps is fixed for SYCL compilation optionally keep them as they
