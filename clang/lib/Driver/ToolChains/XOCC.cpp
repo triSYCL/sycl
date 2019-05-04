@@ -48,7 +48,7 @@ XOCCInstallationDetector::XOCCInstallationDetector(
 
     // TODO: Check if this assumption is correct in all installations and give
     // environment variable specifier option or an argument to the Driver
-    SDXPath = path::parent_path(xoccDir);;
+    SDXPath = path::parent_path(xoccDir);
     LibPath = SDXPath + "/lnx64/lib";
 
     // TODO: slightly stricter IsValid test.. check all strings aren't empty

@@ -157,16 +157,27 @@ Be aware that compiling for FPGA is rather slow.
 
 ## Compiler invocation differences
 
-By setting the `fsycl-targets` to `fpga64-xilinx-unknown-sycldevice` you're 
+By setting the `-fsycl-targets` to `fpga64-xilinx-unknown-sycldevice` you're 
 telling  the compiler to use our XOCC Tools and compile the device side code 
-for Xilinx FPGA. 
+for Xilinx FPGA.
 
-This hasn't been tested with mutliple `fsycl-targets` yet (e.g. offloading to 
-both a Xilinx and Intel FPGA) and is unlikely to work, so I would advise 
-sticking to compiling for a single target at the moment. 
+This hasn't been tested with mutliple `-fsycl-targets` yet (e.g. offloading to 
+both a Xilinx and Intel FPGA) and is unlikely to work, so it is advisable to 
+stick to compiling for a single target at the moment.
 
 ## Tested with
 * Ubuntu 18.10
 * XRT 2018.3
 * SDx 2018.3
 * Alveo U250 Platform: xilinx_u250_xdma_201830_1
+
+## Extra Notes:
+* The Driver ToolChain, currently makes some assumptions about the `SDx` 
+  installation. For example, it assumes that `xocc` is inside SDx's bin folder 
+  and that the lib folder containing `SPIR` builtins that kernels are linked 
+  against are in a `/lnx64/lib` directory relative to the bin folders parent. 
+  This can be seen and altered in `XOCC.cpp` if so desired. A future, aim is 
+  to allow the user to pass arguments through the compiler to assign these if 
+  the assumptions are false. However, in the basic 2018.3 release the standard 
+  directory structure that is assumed is correct without alterations.
+     

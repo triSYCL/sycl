@@ -29,35 +29,52 @@ int main() {
   queue q {selector};
 
 #ifdef __SYCL_SPIR_DEVICE__
-        printf("__SYCL_SPIR_DEVICE__ defined on host \n");
+        std::cout << "__SYCL_SPIR_DEVICE__ defined on host \n";
 #else
-        printf("__SYCL_SPIR_DEVICE__ not defined on host \n");
+        std::cout << "__SYCL_SPIR_DEVICE__ not defined on host \n";
 #endif
 
 #ifdef __SYCL_XILINX_ONLY__
-        printf("__SYCL_XILINX_ONLY__ defined on host \n");
+        std::cout << "__SYCL_XILINX_ONLY__ defined on host \n";
 #else
-        printf("__SYCL_XILINX_ONLY__ not defined on host \n");
+        std::cout << "__SYCL_XILINX_ONLY__ not defined on host \n";
 #endif
 
+  buffer<unsigned int> ob(range<1>{2});
+  
   q.submit([&](handler &cgh) {
+    auto wb = ob.get_access<access::mode::write>(cgh);
     cgh.single_task<class add>([=]() {
-
 #ifdef __SYCL_SPIR_DEVICE__
-      printf("__SYCL_SPIR_DEVICE__ defined on device \n");
+      wb[0] = 1;
 #else
-      printf("__SYCL_SPIR_DEVICE__ not defined on device \n");
+      wb[0] = 2;
 #endif
 
 #ifdef __SYCL_XILINX_ONLY__
-      printf("__SYCL_XILINX_ONLY__ defined on device \n");
+      wb[1] = 1;
 #else
-      printf("__SYCL_XILINX_ONLY__ not defined on device \n");
+      wb[1] = 2;
 #endif
     });
   });
 
-  q.wait();
+   auto rb = ob.get_access<access::mode::read>();
+       
+   if (rb[0] == 1)   
+      std::cout << "__SYCL_SPIR_DEVICE__ defined on device \n";
+   else if (rb[0] == 2) 
+      std::cout << "__SYCL_SPIR_DEVICE__ not defined on device \n";
+   else
+      assert("kernel failure");
+       
+   if (rb[1] == 1)   
+      std::cout << "__SYCL_XILINX_ONLY__ defined on device \n";
+   else if (rb[1] == 2) 
+      std::cout << "__SYCL_XILINX_ONLY__ not defined on device \n";
+   else
+      assert("kernel failure");
+  
 
   return 0;
 }

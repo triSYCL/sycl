@@ -53,6 +53,8 @@ public:
     avr,            // AVR: Atmel AVR microcontroller
     bpfel,          // eBPF or extended BPF or 64-bit BPF (little endian)
     bpfeb,          // eBPF or extended BPF or 64-bit BPF (big endian)
+    fpga32,         // 32-bit FPGA
+    fpga64,         // 64-bit FPGA
     hexagon,        // Hexagon: hexagon
     mips,           // MIPS: mips, mipsallegrex, mipsr6
     mipsel,         // MIPSEL: mipsel, mipsallegrexe, mipsr6el
@@ -94,9 +96,7 @@ public:
     wasm64,         // WebAssembly with 64-bit pointers
     renderscript32, // 32-bit RenderScript
     renderscript64, // 64-bit RenderScript
-    fpga32,         // 32-bit FPGA
-    fpga64,         // 64-bit FPGA
-    LastArchType = fpga64
+    LastArchType = renderscript64
   };
   enum SubArchType {
     NoSubArch,
