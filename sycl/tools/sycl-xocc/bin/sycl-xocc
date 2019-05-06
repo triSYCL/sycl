@@ -98,7 +98,12 @@ if [[ -n "$X" ]]; then
 fi
 done <<< $DATA
 
-$XOCC --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM -l \
+# \todo Revisit removal of hlsDataflowStrictMode in the future to see if we
+# can compile for hw_emu with it on or if it outputs clearer diagnostics so 
+# we can track down the problem (when I tested this it seems that the call 
+# to log the error was possibly broken)
+$XOCC --xp param:compiler.hlsDataflowStrictMode=off \
+  --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM -l \
   --save-temps -o "$6" $LINKER_LIST
 
 # Irrelevant for compilation of binary, dumps useful debug information from 
@@ -107,8 +112,7 @@ $XOCC --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM -l \
 if [ -z "$XILINX_XRT" ]; then
   $XILINX_XRT/bin/xclbinutil --info --input "$6" &> "$5/$6.xclbinutil.dump"
 fi
-  
-  
+
 # TODO: Cleanup temporary files we allocated in the systems tmp directory and 
 # when --save-temps is fixed for SYCL compilation optionally keep them as they
 # are quite useful when debugging
