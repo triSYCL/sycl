@@ -336,16 +336,8 @@ struct InSPIRation : public ModulePass {
           // generating the name from the accessor/capture the arguments
           // come from.
           counter = 0;
-          for (Function::arg_iterator I = F.arg_begin(), E = F.arg_end();
-                I != E; ++I) {
-              I->setName("arg_" + Twine{counter++});
-          }
-
-          // Rename basic block name
-          // counter = 0;
-          // for (auto &B : F)
-          //   B.setName("label_" + Twine{counter++});
-
+          for (auto &Arg : F.args())
+            Arg.setName("arg_" + Twine{counter++});
 
         /// \todo Possible: We don't modify declarations right now as this will
         /// destroy the names of SPIR/CL intrinsics as they aren't actually
@@ -363,10 +355,9 @@ struct InSPIRation : public ModulePass {
           kernelCallFuncSPIRify(F);
 
           counter = 0;
-          for (Function::arg_iterator I = F.arg_begin(), E = F.arg_end();
-                I != E; ++I) {
-              I->setName("arg_" + Twine{counter++});
-          }
+          for (auto &Arg : F.args())
+            Arg.setName("arg_" + Twine{counter++});
+          
 
           // Modify the name of funcions called by SYCL kernel since function
           // names with $ sign would choke Xilinx xocc.
@@ -378,11 +369,6 @@ struct InSPIRation : public ModulePass {
 
           // Rename function name
           F.setName("sycl_func_" + Twine{funcCount++});
-
-          // Rename basic block name
-          // counter = 0;
-          // for (auto &B : F)
-          //   B.setName("label_" + Twine{counter++});
       } else if (isTransitiveNonIntrinsicFunc(F)
                   && F.isDeclaration()) {
         // push back intrinsics to make sure we handle naming after changing the

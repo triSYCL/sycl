@@ -72,7 +72,7 @@ OPT="$2/opt"
 LLVM_LINK="$2/llvm-link"
 XOCC="$1/xocc"
 
-$OPT -O3 -asfix -globaldce -inSPIRation -globaldce -kernelNameGen "$4" -o \
+$OPT -O3 -asfix -globaldce -inSPIRation -globaldce -kernelPropGen "$4" -o \
   "$5/$3_kernels-optimized.bc"
 
 # Link our XOCC SPIR binaries in 

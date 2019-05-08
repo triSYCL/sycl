@@ -1,4 +1,4 @@
-//===- KernelNameGen.cpp                                      ---------------===//
+//===- KernelPropGen.cpp                                      ---------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -16,7 +16,7 @@
 #include <regex>
 #include <string>
 
-#include "llvm/SYCL/KernelNameGen.h"
+#include "llvm/SYCL/KernelPropGen.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
@@ -32,11 +32,11 @@ using namespace llvm;
 namespace {
 
 /// Retrieve the names for all kernels in the module and place them into a file
-struct KernelNameGen : public ModulePass {
+struct KernelPropGen : public ModulePass {
 
   static char ID; // Pass identification, replacement for typeid
 
-  KernelNameGen() : ModulePass(ID) {}
+  KernelPropGen() : ModulePass(ID) {}
 
   bool isKernel(const Function &F) {
     if (F.getCallingConv() == CallingConv::SPIR_KERNEL)
@@ -49,7 +49,7 @@ struct KernelNameGen : public ModulePass {
     std::error_code EC =
           llvm::sys::fs::openFileForWrite(Path, FileFD);
     if (EC) {
-      llvm::errs() << "Error in KernelNameGen Pass: " << EC.message() << "\n";
+      llvm::errs() << "Error in KernelPropGen Pass: " << EC.message() << "\n";
     }
 
     return FileFD;
@@ -57,9 +57,6 @@ struct KernelNameGen : public ModulePass {
 
   /// Visit all the functions of the module
   bool runOnModule(Module &M) override {
-    // funcCount is for naming new name for each function called in kernel
-    int funcCount = 0, kernelCount = 0, counter = 0;
-
     SmallString<256> TDir;
     llvm::sys::path::system_temp_directory(true, TDir);
     std::string file = "KernelNames_" + M.getSourceFileName();
@@ -72,7 +69,15 @@ struct KernelNameGen : public ModulePass {
 
     if (O.has_error())
       return false;
-
+  
+    // 1) The option of using Accessors is ONLY viable if I can get the 
+    //  integration header inside llvm passes, I need to see if I can 
+    //  snatch it 
+    // 2) The other option is going to be to assume that arguments to kernels 
+    //  with an address space on them are always buffers and to assign them to 
+    //  DDR banks.
+    // i) How does xocc decide that it needs to infer the specific arguments it's
+    //  passed to DDR banks?
     for (auto &F : M.functions()) {
       if (isKernel(F)) {
         O << F.getName() << "\n";
@@ -87,11 +92,11 @@ struct KernelNameGen : public ModulePass {
 }
 
 namespace llvm {
-void initializeKernelNameGenPass(PassRegistry &Registry);
+void initializeKernelPropGenPass(PassRegistry &Registry);
 }
 
-INITIALIZE_PASS(KernelNameGen, "kernelNameGen",
+INITIALIZE_PASS(KernelPropGen, "kernelPropGen",
   "pass that finds kernel names and places them into a text file", false, false)
-ModulePass *llvm::createKernelNameGenPass() { return new KernelNameGen(); }
+ModulePass *llvm::createKernelPropGenPass() { return new KernelPropGen(); }
 
-char KernelNameGen::ID = 0;
+char KernelPropGen::ID = 0;

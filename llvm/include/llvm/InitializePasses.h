@@ -414,7 +414,7 @@ void initializeWriteThinLTOBitcodePass(PassRegistry&);
 void initializeXRayInstrumentationPass(PassRegistry&);
 void initializeASFixerPass(PassRegistry&);
 void initializeInSPIRationPass(PassRegistry&);
-void initializeKernelNameGenPass(PassRegistry&);
+void initializeKernelPropGenPass(PassRegistry&);
 
 } // end namespace llvm
 
