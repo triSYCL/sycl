@@ -50,8 +50,9 @@ be-aware that some tests still use hard-coded selectors for now):
 ### Xilinx Compile Command:
 
 ```bash
-$SYCL_BIN_DIR/clang++ -std=c++2a -fsycl -fsycl-xocc-device test-case.cpp -o \
-  test-case -lOpenCL
+$SYCL_BIN_DIR/clang++ -std=c++2a -fsycl \ 
+  -fsycl-targets=fpga64-xilinx-unknown-sycldevice test-case.cpp \ 
+  -o test-case -lOpenCL
 ```
 
 ### Regular Compile Command:

@@ -30,13 +30,6 @@
   But started as an executable variation of integration_header.cpp from the
   CodeGenSYCL tests.
 
-  Intel command:
-  $ISYCL_BIN_DIR/clang++ -std=c++2a -fsycl integration_header_check.cpp -o \
-    integration_header_check -lOpenCL
-
-  Xilinx command:
-  $ISYCL_BIN_DIR/clang++ -std=c++2a -fsycl -fsycl-xocc-device \
-    integration_header_check.cpp -o integration_header_check -lOpenCL
 */
 
 #include <CL/sycl.hpp>

@@ -61,11 +61,12 @@ add_clang_library(clangDriver
   ToolChains/OpenBSD.cpp
   ToolChains/PS4CPU.cpp
   ToolChains/RISCVToolchain.cpp
+  ToolChains/SYCL.cpp
   ToolChains/Solaris.cpp
   ToolChains/TCE.cpp
   ToolChains/WebAssembly.cpp
   ToolChains/XCore.cpp
-  ToolChains/SYCL.cpp
+  ToolChains/XOCC.cpp
   Types.cpp
   XRayArgs.cpp
 
