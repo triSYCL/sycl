@@ -638,7 +638,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
     // getOffloadingDeviceToolChain, because the device toolchain we create
     // depends on both.
     auto HIPTC = &getOffloadingDeviceToolChain(C.getInputArgs(), HIPTriple,
-                                              *HostTC, OFK);
+                                               *HostTC, OFK);
     C.addOffloadDeviceToolChain(HIPTC, OFK);
   }
 
@@ -777,7 +777,8 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
             // getOffloadingDeviceToolChain, because the device toolchain we
             // create depends on both.
             auto SYCLTC = &getOffloadingDeviceToolChain(C.getInputArgs(), TT,
-                                                     *HostTC, Action::OFK_SYCL);
+                                                        *HostTC,
+                                                        Action::OFK_SYCL);
             C.addOffloadDeviceToolChain(SYCLTC, Action::OFK_SYCL);
           }
         }
