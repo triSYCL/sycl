@@ -575,6 +575,23 @@ void buffer_impl<AllocatorT>::allocate(QueueImplPtr Queue,
     // pushing this data through in a "C++ way" without modifying the SYCL
     // compiler will be difficult I think (tying this information up as an
     // extra component of the accessor's could be the ideal route in this case).
+    // \todo When we decide on an SYCL extension to assign DDR buffers this 
+    // should be changed to be optional based on the device contained in the 
+    // queue rather than a xilinx related IFDEF, this needs to be thought about
+    // carefully as it will have an impact on the build system as well as the 
+    // runtime.
+    //  1) An option may be to have the CMAKE build system and compiler create 
+    //   another macro for SYCL_XILINX_XRT_EXTENSIONS, when XRT is detected 
+    //   (by both the compiler and build system) the macro is defined, when the
+    //   macro is defined we add the alternative code path that allows optional
+    //   selection of our extensions based on the device information (so 
+    //   contians both the regular buffer creation and xilinx buffer creation 
+    //   code, but only when its a XILINX device will our buffer extension be
+    //   chosen). When the macro is not in place it simply compiles the regular 
+    //   buffer generation code without the XRT extension for buffer creation.
+    //   This could perhaps be extendable to most of the XRT CL extensions. 
+    //   However, I am loathe to add another MACRO as it could eventually become
+    //   a difficult balancing act. Some discussion required.
     cl_mem_ext_ptr_t mext = {0};
     mext.banks = 0 | XCL_MEM_TOPOLOGY;
     cl_mem Mem =
