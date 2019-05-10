@@ -52,7 +52,7 @@ be-aware that some tests still use hard-coded selectors for now):
 ```bash
 $SYCL_BIN_DIR/clang++ -std=c++2a -fsycl \ 
   -fsycl-targets=fpga64-xilinx-unknown-sycldevice test-case.cpp \ 
-  -o test-case -lOpenCL
+  -o test-case -lOpenCL -I/opt/xilinx/xrt/include/
 ```
 
 ### Regular Compile Command:
