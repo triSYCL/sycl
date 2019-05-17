@@ -295,17 +295,38 @@ struct InSPIRation : public ModulePass {
     M.setTargetTriple("spir64");
   }
 
+  /// Test if a function is a SPIR kernel
   bool isKernel(const Function &F) {
     if (F.getCallingConv() == CallingConv::SPIR_KERNEL)
       return true;
     return false;
   }
 
+  /// Test if a function is a non-intrinsic SPIR function, indicating that it is
+  /// a user created function that the SYCL compiler has transitively generated
+  /// or one that comes from an existing library of SPIR functions (hls spir
+  /// libraries)
   bool isTransitiveNonIntrinsicFunc(const Function &F) {
     if (F.getCallingConv() == CallingConv::SPIR_FUNC
         && !F.isIntrinsic())
       return true;
     return false;
+  }
+
+  /// This function gives llvm::function arguments with no name
+  /// a default name e.g. arg_0, arg_1..
+  ///
+  /// Thus is because if your arguments have no name xocc will commit sepuku
+  /// when generating xml. Perhaps it's possible to move this to the Clang
+  /// Frontend by generating the name from the accessor/capture the arguments
+  /// come from, but I believe it requires a special compiler invocation option
+  /// to keep arg names from the frontend in the LLVM bitcode.
+  void giveNameToArguments(Function &F) {
+    int counter = 0;
+    for (auto &Arg : F.args()) {
+      if (!Arg.hasName())
+        Arg.setName("arg_" + Twine{counter++});
+    }
   }
 
   // Hopeful list/probably impractical asks for xocc:
@@ -320,7 +341,6 @@ struct InSPIRation : public ModulePass {
   bool runOnModule(Module &M) override {
     // funcCount is for naming new name for each function called in kernel
     int funcCount = 0;
-    int counter = 0;
 
     std::vector<Function*> declarations;
 
@@ -329,15 +349,7 @@ struct InSPIRation : public ModulePass {
           kernelSPIRify(F);
           applyKernelProperties(F);
           setUniqueName(F);
-
-          // if your arguments have no name xocc will commit sepuku when
-          // generating xml, so adding names to anonymous captures.
-          // Perhaps it's possible to move this to the Clang Frontend by
-          // generating the name from the accessor/capture the arguments
-          // come from.
-          counter = 0;
-          for (auto &Arg : F.args())
-            Arg.setName("arg_" + Twine{counter++});
+          giveNameToArguments(F);
 
         /// \todo Possible: We don't modify declarations right now as this will
         /// destroy the names of SPIR/CL intrinsics as they aren't actually
@@ -353,11 +365,6 @@ struct InSPIRation : public ModulePass {
           // left: funcions called by kernels or LLVM intrinsic functions.
           // For functions called in SYCL kernels, put SPIR calling convention.
           kernelCallFuncSPIRify(F);
-
-          counter = 0;
-          for (auto &Arg : F.args())
-            Arg.setName("arg_" + Twine{counter++});
-          
 
           // Modify the name of funcions called by SYCL kernel since function
           // names with $ sign would choke Xilinx xocc.
