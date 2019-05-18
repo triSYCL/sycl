@@ -304,7 +304,7 @@ struct InSPIRation : public ModulePass {
 
   /// Test if a function is a non-intrinsic SPIR function, indicating that it is
   /// a user created function that the SYCL compiler has transitively generated
-  /// or one that comes from an existing library of SPIR functions (hls spir
+  /// or one that comes from an existing library of SPIR functions (HLS SPIR
   /// libraries)
   bool isTransitiveNonIntrinsicFunc(const Function &F) {
     if (F.getCallingConv() == CallingConv::SPIR_FUNC
@@ -316,8 +316,8 @@ struct InSPIRation : public ModulePass {
   /// This function gives llvm::function arguments with no name
   /// a default name e.g. arg_0, arg_1..
   ///
-  /// Thus is because if your arguments have no name xocc will commit sepuku
-  /// when generating xml. Perhaps it's possible to move this to the Clang
+  /// This is because if your arguments have no name xocc will commit sepuku
+  /// when generating XML. Perhaps it's possible to move this to the Clang
   /// Frontend by generating the name from the accessor/capture the arguments
   /// come from, but I believe it requires a special compiler invocation option
   /// to keep arg names from the frontend in the LLVM bitcode.
