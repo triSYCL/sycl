@@ -34,6 +34,38 @@ find_package(OpenCL REQUIRED)
 include_directories(${OpenCL_INCLUDE_DIRS})
 link_libraries(${OpenCL_LIBRARY})
 
+# Try to find and include XRT OpenCL in the build components to allow access to 
+# Xilinx CL extensions in the source files when compiling the runtimes 
+# libSYCL.so, this unfortunately isn't relevant when a user is compiling there 
+# own files, they'll still have to add -I/opt/xilinx/xrt/include/. 
+# It's only relevant to the clang build system and the libSYCL.so file that's 
+# compiled, the header files are recompiled on a per application basis as far as
+# I'm aware.
+# NOTE: This isn't really used at the moment as the extensions are only really 
+# used in the buffer_impl.h file for now and those are walled behind Xilinx 
+# IFDEF's for now. However, ideally we would move away from macro usage and 
+# check the device context for a Xilinx device in use and optionally execute the 
+# Xilinx Extensions rather than optionally compile them. This, however would 
+# make XRT a required installation for compiling for any device not just Xilinx 
+# devices, there is a related \todo in buffer_impl.hpp for this
+if (DEFINED ENV{XILINX_XRT})
+  if(EXISTS "$ENV{XILINX_XRT}/include" AND EXISTS "$ENV{XILINX_XRT}/lib")
+    message(STATUS "XILINX_XRT enabled")
+    message(STATUS "XILINX_XRT Include: $ENV{XILINX_XRT}/include") 
+    #message(STATUS "XILINX_XRT Lib: $ENV{XILINX_XRT}/lib") 
+
+    # Add SYSTEM infront to cheat the build system into thinking its a system 
+    # include and silencing warnings from XRT when building... don't want more
+    # compiler noise that we can't control
+    include_directories(SYSTEM $ENV{XILINX_XRT}/include)
+    # link_directories(SYSTEM $ENV{XILINX_XRT}/lib)
+  else()
+    message(STATUS "Invalid XILINX_XRT no lib or include directories found")   
+  endif()
+else()
+  message(STATUS "XILINX_XRT not set, xilinx cl ext disabled")
+endif()
+
 # Configure SYCL version macro
 set(sycl_inc_dir ${CMAKE_CURRENT_SOURCE_DIR}/include/CL)
 string(TIMESTAMP __SYCL_COMPILER_VERSION "%Y%m%d")

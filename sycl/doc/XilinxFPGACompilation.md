@@ -150,7 +150,7 @@ the [simple_tests](../test/xocc_tests/simple_tests) folder looks like this:
 ```bash
 $SYCL_BIN_DIR/clang++ -std=c++2a -fsycl \
   -fsycl-targets=fpga64-xilinx-unknown-sycldevice single_task_vector_add.cpp \
-  -o single_task_vector_add -lOpenCL
+  -o single_task_vector_add -lOpenCL -I/opt/xilinx/xrt/include/
 ```
 
 Be aware that compiling for FPGA is rather slow.
@@ -164,6 +164,11 @@ for Xilinx FPGA.
 This hasn't been tested with mutliple `-fsycl-targets` yet (e.g. offloading to 
 both a Xilinx and Intel FPGA) and is unlikely to work, so it is advisable to 
 stick to compiling for a single target at the moment.
+
+The runtime makes use of some Xilinx XRT OpenCL extensions when compiling for
+Xilinx FPGAs, as such you need to include the XRT include directory for the time
+being as they do not get packaged with the regular OpenCL include directory for 
+now. The default install location for this on Debian/Ubuntu is: `/opt/xilinx/xrt/include/`
 
 ## Tested with
 * Ubuntu 18.10

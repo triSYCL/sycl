@@ -535,7 +535,7 @@ int main(int argc, char **argv) {
   // (e.g. initializeTransformUtils(Registry) etc. above)
   initializeASFixerPass(Registry);
   initializeInSPIRationPass(Registry);
-  initializeKernelNameGenPass(Registry);
+  initializeKernelPropGenPass(Registry);
 
 
 #ifdef LINK_POLLY_INTO_TOOLS

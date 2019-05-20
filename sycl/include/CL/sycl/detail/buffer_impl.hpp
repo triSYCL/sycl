@@ -19,6 +19,10 @@
 #include <CL/sycl/stl.hpp>
 #include <CL/sycl/types.hpp>
 
+#if (defined(__SYCL_XILINX_ONLY__))
+#include <CL/cl_ext_xilinx.h>
+#endif
+
 #include <functional>
 #include <memory>
 #include <type_traits>
@@ -555,11 +559,51 @@ void buffer_impl<AllocatorT>::allocate(QueueImplPtr Queue,
     size_t ByteSize = get_size();
     cl_int Error;
 
+#if (defined(__SYCL_XILINX_ONLY__))
+    // This currently enforces assignment of all buffers to DDR bank 0 via
+    // Xilinx OpenCL extensions, which we also enforce when compiling the
+    // kernels via xocc (0 is usually the default inferred space, but some get
+    // inferred to bank 1, notably Alveo U200 boards). XRT seems to have slowly
+    // gotten stricter with these assignments when compiling for hw_emu, so it's
+    // something we have to do to conform for the moment (but generally a good
+    // thing to conform as it means closer alignment to actual hardware
+    // compilation).
+    // \todo I believe a way to allow users to specify DDR bank assignments at a
+    // SYCL level should be the end goal here, assign a DDR bank to kernel/CU
+    // mapping via an accessor or buffer. The hard part of this is that the
+    // compiler will need access to this information when compiling the kernels,
+    // pushing this data through in a "C++ way" without modifying the SYCL
+    // compiler will be difficult I think (tying this information up as an
+    // extra component of the accessor's could be the ideal route in this case).
+    // \todo When we decide on an SYCL extension to assign DDR buffers this 
+    // should be changed to be optional based on the device contained in the 
+    // queue rather than a xilinx related IFDEF, this needs to be thought about
+    // carefully as it will have an impact on the build system as well as the 
+    // runtime.
+    //  1) An option may be to have the CMAKE build system and compiler create 
+    //   another macro for SYCL_XILINX_XRT_EXTENSIONS, when XRT is detected 
+    //   (by both the compiler and build system) the macro is defined, when the
+    //   macro is defined we add the alternative code path that allows optional
+    //   selection of our extensions based on the device information (so 
+    //   contians both the regular buffer creation and xilinx buffer creation 
+    //   code, but only when its a XILINX device will our buffer extension be
+    //   chosen). When the macro is not in place it simply compiles the regular 
+    //   buffer generation code without the XRT extension for buffer creation.
+    //   This could perhaps be extendable to most of the XRT CL extensions. 
+    //   However, I am loathe to add another MACRO as it could eventually become
+    //   a difficult balancing act. Some discussion required.
+    cl_mem_ext_ptr_t mext = {0};
+    mext.banks = 0 | XCL_MEM_TOPOLOGY;
+    cl_mem Mem =
+        clCreateBuffer(Context->getHandleRef(), convertSycl2OCLMode(mode)
+                      | CL_MEM_EXT_PTR_XILINX, ByteSize, &mext, &Error);
+    CHECK_OCL_CODE(Error);
+#else
     cl_mem Mem =
         clCreateBuffer(Context->getHandleRef(), convertSycl2OCLMode(mode),
                        ByteSize, nullptr, &Error);
     CHECK_OCL_CODE(Error);
-
+#endif
     cl_event &WriteBufEvent = Event->getHandleRef();
     Error = clEnqueueWriteBuffer(Queue->getHandleRef(), Mem,
                                  /*blocking_write=*/CL_FALSE, /*offset=*/0,

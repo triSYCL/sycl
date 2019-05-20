@@ -1,4 +1,4 @@
-//===- KernelNameGen.h - SYCL Kernel Name Gen pass  -----------------------===//
+//===- KernelPropGen.h - SYCL Kernel Properties Generator pass  -----------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -12,15 +12,15 @@
 // required, as it's a fairly trivial pass on its own.
 // ===---------------------------------------------------------------------===//
 
-#ifndef LLVM_SYCL_KERNEL_NAME_GEN_H
-#define LLVM_SYCL_KERNEL_NAME_GEN_H
+#ifndef LLVM_SYCL_KERNEL_PROP_GEN_H
+#define LLVM_SYCL_KERNEL_PROP_GEN_H
 
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 
 namespace llvm {
 
-ModulePass *createKernelNameGenPass();
+ModulePass *createKernelPropGenPass();
 
 }
 

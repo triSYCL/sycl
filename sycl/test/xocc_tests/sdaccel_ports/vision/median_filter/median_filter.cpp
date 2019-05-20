@@ -11,7 +11,8 @@
   Xilinx:
   $ISYCL_BIN_DIR/clang++ -std=c++2a -fsycl \
     -fsycl-targets=fpga64-xilinx-unknown-sycldevice median_filter.cpp \
-     -o median_filter -lOpenCL `pkg-config --libs opencv`
+     -o median_filter -lOpenCL `pkg-config --libs opencv` \
+     -I/opt/xilinx/xrt/include/
 */
 
 #include <CL/sycl.hpp>

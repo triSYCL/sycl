@@ -20,7 +20,7 @@ set(LLVM_LINK_COMPONENTS
   Passes
   ASFixer
   InSPIRation
-  KernelNameGen
+  KernelPropGen
   )
 
 # Support plugins.
