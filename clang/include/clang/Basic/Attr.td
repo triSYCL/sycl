@@ -16,6 +16,8 @@ def DocCatFunction : DocumentationCategory<"Function Attributes">;
 def DocCatVariable : DocumentationCategory<"Variable Attributes">;
 def DocCatType : DocumentationCategory<"Type Attributes">;
 def DocCatStmt : DocumentationCategory<"Statement Attributes">;
+def DocCatDecl : DocumentationCategory<"Declaration Attributes">;
+
 // Attributes listed under the Undocumented category do not generate any public
 // documentation. Ideally, this category should be used for internal-only
 // attributes which contain no spellings.
@@ -416,6 +418,10 @@ def SubjectMatcherForObjCProtocol : AttrSubjectMatcherRule<"objc_protocol",
 }
 def SubjectMatcherForObjCCategory : AttrSubjectMatcherRule<"objc_category",
                                                            [ObjCCategory]> {
+  let LangOpts = [ObjC];
+}
+def SubjectMatcherForObjCImplementation :
+    AttrSubjectMatcherRule<"objc_implementation", [ObjCImpl]> {
   let LangOpts = [ObjC];
 }
 def SubjectMatcherForObjCMethod : AttrSubjectMatcherRule<"objc_method",
@@ -1387,6 +1393,50 @@ def Mode : Attr {
   let PragmaAttributeSupport = 0;
 }
 
+def IntelFPGAIVDep : Attr {
+  let Spellings = [CXX11<"intelfpga","ivdep">];
+  let Args = [IntArgument<"Safelen">];
+  let LangOpts = [SYCL];
+  let AdditionalMembers = [{
+    static const char *getName() {
+      return "ivdep";
+    }
+  }];
+  let Documentation = [IntelFPGAIVDepAttrDocs];
+}
+
+def IntelFPGAII : Attr {
+  let Spellings = [CXX11<"intelfpga","ii">];
+  let Args = [IntArgument<"Interval">];
+  let LangOpts = [SYCL];
+  let AdditionalMembers = [{
+    static const char *getName() {
+      return "ii";
+    }
+  }];
+  let Documentation = [IntelFPGAIIAttrDocs];
+}
+
+def IntelFPGAMaxConcurrency : Attr {
+  let Spellings = [CXX11<"intelfpga","max_concurrency">];
+  let Args = [IntArgument<"NThreads">];
+  let LangOpts = [SYCL];
+  let AdditionalMembers = [{
+    static const char *getName() {
+      return "max_concurrency";
+    }
+  }];
+  let Documentation = [IntelFPGAMaxConcurrencyAttrDocs];
+}
+
+def IntelFPGALocalNonConstVar : SubsetSubject<Var,
+                              [{S->hasLocalStorage() &&
+                                S->getKind() != Decl::ImplicitParam &&
+                                S->getKind() != Decl::ParmVar &&
+                                S->getKind() != Decl::NonTypeTemplateParm &&
+                                !S->getType().isConstQualified()}],
+                              "local non-const variables">;
+
 def IntelFPGAConstVar : SubsetSubject<Var,
                       [{S->getKind() != Decl::ImplicitParam &&
                         S->getKind() != Decl::ParmVar &&
@@ -1411,8 +1461,24 @@ def IntelFPGALocalOrStaticVar : SubsetSubject<Var,
                                  S->hasLocalStorage())}],
                               "local variables, static variables">;
 
+def IntelFPGADoublePump : Attr {
+  let Spellings = [CXX11<"intelfpga", "doublepump">];
+  let Subjects = SubjectList<[IntelFPGAConstVar, IntelFPGALocalOrStaticVar,
+                              Field], ErrorDiag>;
+  let LangOpts = [SYCL];
+  let Documentation = [IntelFPGADoublePumpAttrDocs];
+}
+
+def IntelFPGASinglePump : Attr {
+  let Spellings = [CXX11<"intelfpga", "singlepump">];
+  let Subjects = SubjectList<[IntelFPGAConstVar, IntelFPGALocalOrStaticVar,
+                              Field], ErrorDiag>;
+  let LangOpts = [SYCL];
+  let Documentation = [IntelFPGASinglePumpAttrDocs];
+}
+
 def IntelFPGAMemory : Attr {
-  let Spellings = [GNU<"memory">, CXX11<"intelfpga", "memory">];
+  let Spellings = [CXX11<"intelfpga", "memory">];
   let Args = [EnumArgument<"Kind", "MemoryKind",
                            ["MLAB", "BLOCK_RAM", ""],
                            ["MLAB", "BlockRAM", "Default"], 1>];
@@ -1432,7 +1498,7 @@ def IntelFPGAMemory : Attr {
 }
 
 def IntelFPGARegister : Attr {
-  let Spellings = [GNU<"register">, CXX11<"intelfpga", "register">];
+  let Spellings = [CXX11<"intelfpga", "register">];
   let Subjects = SubjectList<[IntelFPGAConstVar, IntelFPGALocalOrStaticVar,
                               Field], ErrorDiag>;
   let LangOpts = [SYCL];
@@ -1441,7 +1507,7 @@ def IntelFPGARegister : Attr {
 
 // One integral argument.
 def IntelFPGABankWidth : Attr {
-  let Spellings = [GNU<"bankwidth">, CXX11<"intelfpga","bankwidth">];
+  let Spellings = [CXX11<"intelfpga","bankwidth">];
   let Args = [ExprArgument<"Value">];
   let Subjects = SubjectList<[IntelFPGAConstVar, IntelFPGALocalStaticSlaveMemVar,
                               Field], ErrorDiag>;
@@ -1458,7 +1524,7 @@ def IntelFPGABankWidth : Attr {
 }
 
 def IntelFPGANumBanks : Attr {
-  let Spellings = [GNU<"numbanks">, CXX11<"intelfpga","numbanks">];
+  let Spellings = [CXX11<"intelfpga","numbanks">];
   let Args = [ExprArgument<"Value">];
   let Subjects = SubjectList<[IntelFPGAConstVar, IntelFPGALocalStaticSlaveMemVar,
                               Field], ErrorDiag>;
@@ -1467,6 +1533,22 @@ def IntelFPGANumBanks : Attr {
   let AdditionalMembers = [{
     static unsigned getMinValue() {
       return 1;
+    }
+    static unsigned getMaxValue() {
+      return 1024*1024;
+    }
+  }];
+}
+
+def IntelFPGAMaxPrivateCopies : InheritableAttr {
+  let Spellings = [CXX11<"intelfpga","max_private_copies">];
+  let Args = [ExprArgument<"Value">];
+  let LangOpts = [SYCL];
+  let Subjects = SubjectList<[IntelFPGALocalNonConstVar, Field], ErrorDiag>;
+  let Documentation = [IntelFPGAMaxPrivateCopiesAttrDocs];
+  let AdditionalMembers = [{
+    static unsigned getMinValue() {
+      return 0;
     }
     static unsigned getMaxValue() {
       return 1024*1024;
@@ -1662,17 +1744,12 @@ def ReturnsNonNull : InheritableAttr {
 // pass_object_size(N) indicates that the parameter should have
 // __builtin_object_size with Type=N evaluated on the parameter at the callsite.
 def PassObjectSize : InheritableParamAttr {
-  let Spellings = [Clang<"pass_object_size">];
+  let Spellings = [Clang<"pass_object_size">,
+                   Clang<"pass_dynamic_object_size">];
+  let Accessors = [Accessor<"isDynamic", [Clang<"pass_dynamic_object_size">]>];
   let Args = [IntArgument<"Type">];
   let Subjects = SubjectList<[ParmVar]>;
   let Documentation = [PassObjectSizeDocs];
-}
-
-def FortifyStdLib : InheritableAttr {
-  let Spellings = [Clang<"fortify_stdlib">];
-  let Args = [IntArgument<"Type">, IntArgument<"Flag">];
-  let Subjects = SubjectList<[Function]>;
-  let Documentation = [FortifyStdLibDocs];
 }
 
 // Nullability type attributes.
@@ -1868,7 +1945,7 @@ def ObjCRootClass : InheritableAttr {
 
 def ObjCNonLazyClass : Attr {
   let Spellings = [Clang<"objc_nonlazy_class">];
-  let Subjects = SubjectList<[ObjCInterface], ErrorDiag>;
+  let Subjects = SubjectList<[ObjCInterface, ObjCImpl], ErrorDiag>;
   let LangOpts = [ObjC];
   let Documentation = [ObjCNonLazyClassDocs];
 }
@@ -2864,6 +2941,12 @@ def : IgnoredAttr {
   let Spellings = [Declspec<"property">];
 }
 
+def MSAllocator : InheritableAttr {
+  let Spellings = [Declspec<"allocator">];
+  let Subjects = SubjectList<[Function]>;
+  let Documentation = [MSAllocatorDocs];
+}
+
 def MSStruct : InheritableAttr {
   let Spellings = [GCC<"ms_struct">];
   let Subjects = SubjectList<[Record]>;
@@ -3252,6 +3335,29 @@ def OMPDeclareTargetDecl : InheritableAttr {
       return llvm::None;
     }
   }];
+}
+
+def OMPAllocateDecl : InheritableAttr {
+  // This attribute has no spellings as it is only ever created implicitly.
+  let Spellings = [];
+  let SemaHandler = 0;
+  let Args = [
+    EnumArgument<"AllocatorType", "AllocatorTypeTy",
+                 [
+                   "omp_default_mem_alloc", "omp_large_cap_mem_alloc",
+                   "omp_const_mem_alloc", "omp_high_bw_mem_alloc",
+                   "omp_low_lat_mem_alloc", "omp_cgroup_mem_alloc",
+                   "omp_pteam_mem_alloc", "omp_thread_mem_alloc", ""
+                 ],
+                 [
+                   "OMPDefaultMemAlloc", "OMPLargeCapMemAlloc",
+                   "OMPConstMemAlloc", "OMPHighBWMemAlloc", "OMPLowLatMemAlloc",
+                   "OMPCGroupMemAlloc", "OMPPTeamMemAlloc", "OMPThreadMemAlloc",
+                   "OMPUserDefinedMemAlloc"
+                 ]>,
+    ExprArgument<"Allocator">
+  ];
+  let Documentation = [Undocumented];
 }
 
 def InternalLinkage : InheritableAttr {

@@ -331,6 +331,13 @@ template <> inline void SPIRVMap<Decoration, std::string>::init() {
   add(DecorationMaxByteOffset, "MaxByteOffset");
   add(DecorationNoSignedWrap, "NoSignedWrap");
   add(DecorationNoUnsignedWrap, "NoUnsignedWrap");
+  add(DecorationRegisterINTEL, "RegisterINTEL");
+  add(DecorationMemoryINTEL, "MemoryINTEL");
+  add(DecorationNumbanksINTEL, "NumbanksINTEL");
+  add(DecorationBankwidthINTEL, "BankwidthINTEL");
+  add(DecorationMaxconcurrencyINTEL, "MaxconcurrencyINTEL");
+  add(DecorationSinglepumpINTEL, "SinglepumpINTEL");
+  add(DecorationDoublepumpINTEL, "DoublepumpINTEL");
 }
 SPIRV_DEF_NAMEMAP(Decoration, SPIRVDecorationNameMap)
 
@@ -476,6 +483,7 @@ template <> inline void SPIRVMap<Capability, std::string>::init() {
       "SubgroupAvcMotionEstimationIntraINTEL");
   add(CapabilitySubgroupAvcMotionEstimationChromaINTEL,
       "SubgroupAvcMotionEstimationChromaINTEL");
+  add(CapabilityFPGAMemoryAttributesINTEL, "FPGAMemoryAttributesINTEL");
 }
 SPIRV_DEF_NAMEMAP(Capability, SPIRVCapabilityNameMap)
 

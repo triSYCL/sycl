@@ -32,8 +32,9 @@ const Dst *getParamAddress(const Src *ptr, uint64_t Offset) {
 }
 
 template <int AccessDimensions, typename KernelType>
-uint passGlobalAccessorAsArg(uint I, int LambdaOffset, cl_kernel ClKernel,
-                             const KernelType &HostKernel) {
+uint32_t passGlobalAccessorAsArg(uint32_t I, int LambdaOffset,
+                                 cl_kernel ClKernel,
+                                 const KernelType &HostKernel) {
   using AccType = accessor<char, AccessDimensions, access::mode::read,
                            access::target::global_buffer,
                            access::placeholder::false_t>;
@@ -55,8 +56,9 @@ uint passGlobalAccessorAsArg(uint I, int LambdaOffset, cl_kernel ClKernel,
 }
 
 template <int AccessDimensions, typename KernelType>
-uint passLocalAccessorAsArg(uint I, int LambdaOffset, cl_kernel ClKernel,
-                            const KernelType &HostKernel) {
+uint32_t passLocalAccessorAsArg(uint32_t I, int LambdaOffset,
+                                cl_kernel ClKernel,
+                                const KernelType &HostKernel) {
   using AccType = accessor<char, AccessDimensions, access::mode::read,
                            access::target::local,
                            access::placeholder::false_t>;
@@ -96,7 +98,7 @@ void ExecuteKernelCommand<
   }
 
   if (m_KernelArgs != nullptr) {
-    unsigned ArgumentID = 0;
+    uint32_t ArgumentID = 0;
     for (unsigned I = 0; I < m_KernelArgsNum; ++I) {
       switch (m_KernelArgs[I].kind) {
       case csd::kernel_param_kind_t::kind_std_layout: {
@@ -163,9 +165,16 @@ void ExecuteKernelCommand<
         }
         break;
       }
-      // TODO implement
-      case csd::kernel_param_kind_t::kind_sampler:
-        assert(0);
+      case csd::kernel_param_kind_t::kind_sampler: {
+        sampler *SamplerPtr =
+            const_cast<sampler *>(getParamAddress<cl::sycl::sampler>(
+                &m_HostKernel, m_KernelArgs[I].offset));
+        cl_sampler clSampler =
+            detail::getSyclObjImpl(*SamplerPtr)->getOrCreateSampler(Context);
+        CHECK_OCL_CODE(clSetKernelArg(m_ClKernel, ArgumentID,
+                                      sizeof(cl_sampler), &clSampler));
+        ArgumentID++;
+      }
       }
     }
   }

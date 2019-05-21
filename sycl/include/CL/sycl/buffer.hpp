@@ -7,7 +7,11 @@
 //===----------------------------------------------------------------------===//
 
 #pragma once
-#include <CL/sycl/detail/buffer_impl.hpp>
+#ifdef SCHEDULER_20
+  #include <CL/sycl/detail/buffer_impl2.hpp>
+#else
+  #include <CL/sycl/detail/buffer_impl.hpp>
+#endif // SCHEDULER_20
 #include <CL/sycl/detail/common.hpp>
 #include <CL/sycl/exception.hpp>
 #include <CL/sycl/stl.hpp>
@@ -30,6 +34,11 @@ public:
   using allocator_type = AllocatorT;
   template <int dims>
   using EnableIfOneDimension = typename std::enable_if<1 == dims>::type;
+
+  template <typename ItA, typename ItB>
+  using EnableIfSameNonConstIterators =
+      typename std::enable_if<std::is_same<ItA, ItB>::value &&
+                              !std::is_const<ItA>::value, ItA>::type;
 
   buffer(const range<dimensions> &bufferRange,
          const property_list &propList = {})
@@ -59,14 +68,18 @@ public:
         hostData, get_count() * sizeof(T), propList, allocator);
   }
 
-  buffer(const T *hostData, const range<dimensions> &bufferRange,
+  template <typename _T = T>
+  buffer(EnableIfSameNonConstIterators<T, _T> const *hostData,
+         const range<dimensions> &bufferRange,
          const property_list &propList = {})
       : Range(bufferRange), MemRange(bufferRange) {
     impl = std::make_shared<detail::buffer_impl<AllocatorT>>(
         hostData, get_count() * sizeof(T), propList);
   }
 
-  buffer(const T *hostData, const range<dimensions> &bufferRange,
+  template <typename _T = T>
+  buffer(EnableIfSameNonConstIterators<T, _T> const *hostData,
+         const range<dimensions> &bufferRange,
          AllocatorT allocator, const property_list &propList = {})
       : Range(bufferRange), MemRange(bufferRange) {
     impl = std::make_shared<detail::buffer_impl<AllocatorT>>(

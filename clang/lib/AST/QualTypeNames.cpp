@@ -109,6 +109,11 @@ static bool getFullyQualifiedTemplateArgument(const ASTContext &Ctx,
       Arg = TemplateArgument(QTFQ);
       Changed = true;
     }
+  } else if (Arg.getKind() == TemplateArgument::Pack) {
+    for (const auto &It : Arg.pack_elements()) {
+      Changed |= getFullyQualifiedTemplateArgument(
+          Ctx, const_cast<TemplateArgument &>(It), WithGlobalNsPrefix);
+    }
   }
   return Changed;
 }
@@ -374,6 +379,19 @@ QualType getFullyQualifiedType(QualType QT, const ASTContext &Ctx,
     Qualifiers Quals = QT.getQualifiers();
     QT = getFullyQualifiedType(QT->getPointeeType(), Ctx, WithGlobalNsPrefix);
     QT = Ctx.getPointerType(QT);
+    // Add back the qualifiers.
+    QT = Ctx.getQualifiedType(QT, Quals);
+    return QT;
+  }
+
+  if (auto *MPT = dyn_cast<MemberPointerType>(QT.getTypePtr())) {
+    // Get the qualifiers.
+    Qualifiers Quals = QT.getQualifiers();
+    // Fully qualify the pointee and class types.
+    QT = getFullyQualifiedType(QT->getPointeeType(), Ctx, WithGlobalNsPrefix);
+    QualType Class = getFullyQualifiedType(QualType(MPT->getClass(), 0), Ctx,
+                                           WithGlobalNsPrefix);
+    QT = Ctx.getMemberPointerType(QT, Class.getTypePtr());
     // Add back the qualifiers.
     QT = Ctx.getQualifiedType(QT, Quals);
     return QT;
