@@ -114,7 +114,7 @@ fi
 # output file name including extensions and path
 OUTPUT_FILE_NAME="$6"
 
-$OPT -O3 -asfix -globaldce -inSPIRation -globaldce -kernelPropGen \
+$OPT -asfix -O3 -globaldce -inSPIRation -globaldce -kernelPropGen \
   "$INPUT_FILE_NAME" -o "$TEMPORARY_DIR/$SOURCE_FILE_NAME_kernels-optimized.bc"
 
 # Link our XOCC SPIR binaries in
