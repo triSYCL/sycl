@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++11 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clang -std=c++17 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
@@ -51,7 +51,7 @@ int main() {
       size_t max_sg_num = get_sg_size(Device);
       size_t max_wg_size = Device.get_info<info::device::max_work_group_size>();
       program Prog(Queue.get_context());
-      /* TODO: replace with pure SYCL code when fixed problem with consumption 
+      /* TODO: replace with pure SYCL code when fixed problem with consumption
        * kernels defined using program objects on GPU device
       Prog.build_with_kernel_type<kernel_sg>();
       kernel Kernel = Prog.get_kernel<kernel_sg>();

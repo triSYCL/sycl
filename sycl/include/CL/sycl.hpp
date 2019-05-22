@@ -41,13 +41,7 @@
 #include <CL/sycl/types.hpp>
 #include <CL/sycl/version.hpp>
 
-// These require > C++ 17 for now, but compiling all the tests with C++17 breaks
-// some Clang Unit tests involving SYCL making it difficult to test for breakage
-// \todo update SYCL unit tests to compile for C++ 17 (or 2a/20) so this define
-// can be removed
-#if (defined(__cplusplus) && (__cplusplus >= 201703L))
 #include <CL/sycl/xilinx/fpga.hpp>
-#endif
 
 #ifndef SCHEDULER_20
 // Do not include RT only function implementations for device code as it leads
