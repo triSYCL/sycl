@@ -5,26 +5,6 @@
   certain ways without the compiler or run-time breaking due to an
   incorrectly generated integration header.
 
-  This test is checking if the alterations that were made to SemaSYCL to alter
-  the integration header generation break any prior examples at run-time or
-  compilation. The modification to SemaSYCL removed:
-   global namespacing - KernelInfo<::kernel_name>
-   inline class/struct keywords - KernelInfo<struct kernel_name>
-
-  And instead replaced them with a fully qualified variant with the correct
-  namespaces, so that they always have to refer to previous definitions in
-  the header. This is currently an issue under review against the Intel SYCL
-  implementation: https://github.com/intel/llvm/pull/46
-
-  So there is a chance it will be altered again.
-
-  The change broke the CodeGen tests:
-  Clang :: CodeGenSYCL/integration_header.cpp
-  Clang :: CodeGenSYCL/kernel_functor.cpp
-
-  As they directly check against the generated integration header to make sure
-  that it's correct and hasn't regressed.
-
   This test is similar to sycl/test/regression/kernel_name_class.cpp
 
   But started as an executable variation of integration_header.cpp from the
