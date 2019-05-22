@@ -121,6 +121,13 @@ $OPT -asfix -O3 -globaldce -inSPIRation -globaldce -kernelPropGen \
 $LLVM_LINK "$TEMPORARY_DIR/$SOURCE_FILE_NAME_kernels-optimized.bc" \
   $XOCC_LIB_SPIR -o "$TEMPORARY_DIR/$SOURCE_FILE_NAME_kernels-linked.xpirbc"
 
+# Using the LLVM Linker will add more incompatible IR so run the downgrader in
+# a second pass afterwards, rather than once before in the first opt pass
+# and then again after linking.
+$OPT -O3 -xoccIRDowngrader \
+  "$TEMPORARY_DIR/$SOURCE_FILE_NAME_kernels-linked.xpirbc" -o \
+  "$TEMPORARY_DIR/$SOURCE_FILE_NAME_kernels-linked.xpirbc"
+
 # Our bash file containing kernel property environment variables is placed in
 # the systems temporary directory (or wherever the Clang driver is told is the
 # temporary directory) and is postfixed with the source files name. It's
