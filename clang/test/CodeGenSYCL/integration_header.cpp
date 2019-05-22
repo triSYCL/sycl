@@ -45,10 +45,6 @@
 // CHECK-NEXT:   { kernel_param_kind_t::kind_std_layout, 4, 0 },
 // CHECK-NEXT:   { kernel_param_kind_t::kind_accessor, 6112, 4 },
 // CHECK-EMPTY:
-// CHECK-NEXT:   //--- _ZTS13fourth_kernelIJN15template_arg_ns14namespaced_argILi1EEEEE
-// CHECK-NEXT:   { kernel_param_kind_t::kind_std_layout, 4, 0 },
-// CHECK-NEXT:   { kernel_param_kind_t::kind_accessor, 6112, 4 },
-// CHECK-EMPTY:
 // CHECK-NEXT: };
 //
 // CHECK: template <class KernelNameType> struct KernelInfo;
@@ -123,12 +119,6 @@ int main() {
     if (i == 13) {
       acc2.use();
     }
-  });
-
-    kernel_single_task<class fourth_kernel<template_arg_ns::namespaced_arg<1>>>([=]() {
-      if (i == 13) {
-        acc2.use();
-      }
   });
 
   return 0;

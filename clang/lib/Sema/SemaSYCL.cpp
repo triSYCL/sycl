@@ -932,30 +932,16 @@ static std::string eraseAnonNamespace(std::string S) {
   return S;
 }
 
-// Removes all "class" and "struct" substrings from given string
-static std::string eraseClassAndStruct(std::string S) {
-  const char S1[] = "class ";
-  const char S2[] = "struct ";
-
-  /// \todo Change this to be a little more C++ oriented using std::string or
-  /// string_view for S1 and S2 and avoiding explicitly skipping the terminating
-  /// character '\0' (try to use string size() instead)
-  for (auto Pos = S.find(S1); Pos != StringRef::npos; Pos = S.find(S1, Pos))
-    S.erase(Pos, sizeof(S1) - 1);
-
-  for (auto Pos = S.find(S2); Pos != StringRef::npos; Pos = S.find(S2, Pos))
-    S.erase(Pos, sizeof(S2) - 1);
-
-  return S;
-}
-
 // Creates a mangled kernel name for given kernel name type
 static std::string constructKernelName(QualType KernelNameType,
                                        ASTContext &AC) {
+  std::unique_ptr<MangleContext> MC(AC.createMangleContext());
+
   SmallString<256> Result;
   llvm::raw_svector_ostream Out(Result);
-  std::unique_ptr<MangleContext> MC(AC.createMangleContext());
+
   MC->mangleTypeName(KernelNameType, Out);
+
   return Out.str();
 }
 
@@ -971,7 +957,8 @@ void Sema::ConstructSYCLKernel(FunctionDecl *KernelCallerFunc) {
   assert(TemplateArgs && "No template argument info");
   // The first template argument always describes the kernel name - whether
   // it is lambda or functor.
-  QualType KernelNameType = TemplateArgs->get(0).getAsType();
+  QualType KernelNameType = TypeName::getFullyQualifiedType(
+      TemplateArgs->get(0).getAsType(), getASTContext(), true);
   std::string Name = constructKernelName(KernelNameType, getASTContext());
   populateIntHeader(getSyclIntegrationHeader(), Name, KernelNameType, LE);
   FunctionDecl *SYCLKernel =
@@ -1251,8 +1238,7 @@ void SYCLIntegrationHeader::emit(raw_ostream &O) {
   for (const KernelDesc &K : KernelDescs) {
     const size_t N = K.Params.size();
     O << "template <> struct KernelInfo<"
-      << eraseClassAndStruct(eraseAnonNamespace(K.NameType.getAsString()))
-      << "> {\n";
+      << eraseAnonNamespace(K.NameType.getAsString()) << "> {\n";
     O << "  DLL_LOCAL\n";
     O << "  static constexpr const char* getName() { return \"" << K.Name
       << "\"; }\n";
