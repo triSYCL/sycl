@@ -218,6 +218,7 @@ add_custom_target( sycl-toolchain
           llvm-dis
           llvm-spirv
           llvm-link
+          sycl-xocc
           opt
   COMMENT "Building SYCL compiler toolchain..."
 )
