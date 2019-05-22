@@ -1396,7 +1396,7 @@ private:
   // Indexer used in the swizzles.def. C++11 way, a bit more verbose
   // than C++14 way.
   struct IndexerHelper {
-    static const constexpr int IDXs[] = {Indexes...};
+    static const constexpr int IDXs[sizeof...(Indexes)] = {Indexes...};
     static constexpr int get(int index) {
       return IDXs[index >= getNumElements() ? 0 : index];
     }
