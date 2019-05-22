@@ -81,25 +81,36 @@ endif()
 set(SYCL_INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/include/")
 set(OPENCL_INCLUDE "${OpenCL_INCLUDE_DIRS}")
 
-# Try to find and include XRT OpenCL in the build components to allow access to
-# Xilinx CL extensions in the source files when compiling the runtimes
-# libSYCL.so, this unfortunately isn't relevant when a user is compiling there
-# own files, they'll still have to add -I/opt/xilinx/xrt/include/.
-# It's only relevant to the clang build system and the libSYCL.so file that's
-# compiled, the header files are recompiled on a per application basis as far as
-# I'm aware.
-# NOTE: This isn't really used at the moment as the extensions are only really
-# used in the buffer_impl.h file for now and those are walled behind Xilinx
-# IFDEF's for now. However, ideally we would move away from macro usage and
-# check the device context for a Xilinx device in use and optionally execute the
-# Xilinx Extensions rather than optionally compile them. This, however would
-# make XRT a required installation for compiling for any device not just Xilinx
-# devices, there is a related \todo in buffer_impl.hpp for this
+#  Try to find and include XRT OpenCL in the build components to allow access to
+#  Xilinx CL extensions in the source files when compiling the runtimes
+#  libSYCL.so, this unfortunately isn't relevant when a user is compiling there
+#  own files, they'll still have to add -I/opt/xilinx/xrt/include/.
+#  It's only relevant to the clang build system and the libSYCL.so file that's
+#  compiled, the header files are recompiled on a per application basis as far as
+#  I'm aware.
+#  \todo We could enforce the download and installation of the XRT runtime
+#  similarly to what's done with the OpenCL headers at the moment that makes
+#  things a little easier. As it wouldn't matter if someone only wanted to build
+#  to run on another platform, they would always have XRT and it's extensions
+#  wouldn't break the runtime by being missing'
 if (DEFINED ENV{XILINX_XRT})
   if(EXISTS "$ENV{XILINX_XRT}/include" AND EXISTS "$ENV{XILINX_XRT}/lib")
     message(STATUS "XILINX_XRT enabled")
     message(STATUS "XILINX_XRT Include: $ENV{XILINX_XRT}/include")
     #message(STATUS "XILINX_XRT Lib: $ENV{XILINX_XRT}/lib")
+
+    # Activate alternate code paths containing XRT extensions + normal SYCL code
+    # path. Rather than only compiling the normal SYCL code path. When defined
+    # by the CMake build system __SYCL_XILINX_ONLY__ is only really relevant to
+    # source files that get compiled into the libSYCL.so library. The compiler
+    # still has to internally define __SYCL_XILINX_ONLY__ when compiling user
+    # code as it's still required by the headers that get compiled.
+    # NOTE: I chose to use __SYCL_XILINX_ONLY__ for both the build define and
+    # compiler generated define to cut down on the amount of macro usage, they
+    # also at the time of creation do very similar things, this may change in
+    # the future but I think it will be unlikely. As __SYCL_XILINX_ONLY__ is
+    # mostly related to enforcing XILINX only code paths.
+    add_definitions(-D__SYCL_XILINX_ONLY__)
 
     # Add SYSTEM infront to cheat the build system into thinking its a system
     # include and silencing warnings from XRT when building... don't want more
