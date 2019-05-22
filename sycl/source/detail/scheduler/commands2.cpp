@@ -17,6 +17,10 @@
 #include <CL/sycl/detail/scheduler/scheduler.hpp>
 #include <CL/sycl/sampler.hpp>
 
+#if (defined(__SYCL_XILINX_ONLY__) && defined(__cplusplus) && (__cplusplus >= 201703L))
+#include <CL/sycl/xilinx/fpga/kernel_properties.hpp>
+#endif
+
 #include <vector>
 
 namespace cl {
@@ -366,11 +370,36 @@ cl_int ExecCGCommand::enqueueImp() {
       }
     }
 
+    // TODO: Think about if there is a point in "passing" the property down to
+    // here, as in reality the LocalWorkSize is never specified in this
+    // implementation of runEnqueueNDRangeKernel. This implementation of
+    // runEnqueueNDRangeKernel is for cases where the SYCL parallelism construct
+    // is a single_task or a parallel_for without an nd_range (just global
+    // range). So all we're really doing is enforcing a local work group size
+    // that a user can't actually get access to as item has no get_local related
+    // methods.
+    // There is no SYCL specification restriction on this use of the attribute
+    // but perhaps it's not needed. Although, maybe there is use case for someone
+    // enforcing a reqd_work_group_size on the global range a kernel is invoked
+    // with. In either case it can be removed and all you would have to do for
+    // the case of single_task is check if the SingleTask variable is true and
+    // if it is specify a LocalWorkSize of 1,1,1 else specify nullptr (this
+    // meets the OpenCL restrictions on ReqdWorkGroupSize).
+    // This will also enforce LocalWorkSize on Intel devices if
+    // reqd_work_group_size is specified and the std is >= 17. Perhaps not
+    // ideal.
+    std::vector<size_t> ReqdWorkGroupSize;
+#if (defined(__SYCL_XILINX_ONLY__) && defined(__cplusplus) && (__cplusplus >= 201703L))
+    ReqdWorkGroupSize =
+        cl::sycl::xilinx::get_reqd_work_group_size(ExecKernel->getKernelName());
+#endif
+
     cl_int Error = CL_SUCCESS;
     Error = clEnqueueNDRangeKernel(
         MQueue->getHandleRef(), Kernel, NDRDesc.Dims, &NDRDesc.GlobalOffset[0],
         &NDRDesc.GlobalSize[0],
-        NDRDesc.LocalSize[0] ? &NDRDesc.LocalSize[0] : nullptr,
+        NDRDesc.LocalSize[0] ? &NDRDesc.LocalSize[0]
+          : ReqdWorkGroupSize.size() > 0 ? &ReqdWorkGroupSize[0] : nullptr,
         RawEvents.size(), RawEvents.empty() ? nullptr : &RawEvents[0], &Event);
     CHECK_OCL_CODE(Error);
     return CL_SUCCESS;
