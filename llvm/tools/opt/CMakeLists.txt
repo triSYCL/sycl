@@ -21,6 +21,7 @@ set(LLVM_LINK_COMPONENTS
   ASFixer
   InSPIRation
   KernelPropGen
+  XOCCIRDowngrader
   )
 
 # Support plugins.
