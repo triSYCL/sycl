@@ -64,6 +64,7 @@ class reqd_work_group_size_test3;
 class reqd_work_group_size_test4;
 class reqd_work_group_size_test5;
 class reqd_work_group_size_test6;
+class reqd_work_group_size_test7;
 class reqd_work_group_size_test8;
 class reqd_work_group_size_test9;
 class reqd_work_group_size_test10;
@@ -81,73 +82,88 @@ int main() {
 
   range<3> k_range {8,8,8};
   buffer<unsigned int> ob(range<1>{1});
-  std::cout << "reqd_work_group_size_test begin \n";
+
+  auto wb = ob.get_access<access::mode::write>();
+  wb[0] = 0;
+
+  std::cout << "reqd_work_group_size_test begin (xilinx fail, intel pass) \n";
 
   {
-    // Should pick up reqd_work_group_size<8, 8, 8> and apply it and ignore the
-    // random template inside of the xilinx namespace. As it's 8, 8, 8 the same as
-    // k_range it shouldn't break.
+    // This is an illegal use-case of reqd_work_group_size, there is no local
+    // work group size specified to this form of parallelism construct and we
+    // do not wish to enforce reqd_work_group_size in the runtime instead. As
+    // without access to an nd_item the user cannot access the local space.
+    // There is no SYCL rules for this, however in the context of OpenCL no
+    // defined local work group size is illegal when using the
+    // reqd_work_group_size attribute, so we are trying to stick to that in this
+    // case.
     q.submit([&](handler &cgh) {
       auto wb = ob.get_access<access::mode::write>(cgh);
-      cgh.parallel_for<xilinx::reqd_work_group_size<
-          8, 8, 8, xilinx::conflict_test<30, reqd_work_group_size_test>>>(
+      cgh.parallel_for<
+          xilinx::reqd_work_group_size<4, 4, 4, reqd_work_group_size_test>>(
           k_range, [=](item<3> index) { wb[0] = 1; });
     });
 
     auto rb = ob.get_access<access::mode::read>();
-    assert(rb[0] == 1);
+
+    if (q.get_context().get_platform().get_info<info::platform::vendor>()
+        =="Xilinx") {
+      assert(rb[0] == 0); // should still be 0
+    } else {
+      assert(rb[0] == 1); // shouldn't hinder intel implementation
+    }
   }
 
   std::cout << "reqd_work_group_size_test2 begin \n";
 
   {
-    // This test should pick up reqd_work_group_size<2, 2, 2> which is a valid
-    // size and run. If the secondary reqd_work_group_size is chosen incorrectly
-    // this should emit a run-time error.
+    // Valid and probably main use case for Xilinx FPGAs that allows the kernel
+    // to be optimized.
     q.submit([&](handler &cgh) {
       auto wb = ob.get_access<access::mode::write>(cgh);
-      cgh.parallel_for <
-          xilinx::reqd_work_group_size<2, 2, 2,
-              xilinx::reqd_work_group_size<5, 5, 5,
-               reqd_work_group_size_test2>> >(
-              k_range, [=](item<3> index) { wb[0] = 2; });
+      cgh.single_task<
+          xilinx::reqd_work_group_size<1, 1, 1, reqd_work_group_size_test2>>(
+          [=]() { wb[0] = 2; });
     });
 
     auto rb = ob.get_access<access::mode::read>();
     assert(rb[0] == 2);
   }
 
-  std::cout << "reqd_work_group_size_test3 begin \n";
+  std::cout << "reqd_work_group_size_test3 begin (xilinx fail, intel pass) \n";
+
+  nd_range<3> ndr {range<3>{16,16,16}, range<3>{4,4,4}};
 
   {
-    // A normal valid use case in the sense it doesn't break the OpenCL rules or
-    // the current SYCL specification rules.
-    // Although without access to an nd_item it's usage is a little suspect but
-    // valid at the moment (because we check the property and assign it at a
-    // clEnqueueNDRangeKernel level, not a fan of it at the moment but there is
-    // no specification related wording restricting this attributes usage with
-    // any SYCL parallelism constructs)
+    // An invalid use case reqd_work_group_size is bigger than the global range
+    // and the local range
     q.submit([&](handler &cgh) {
       auto wb = ob.get_access<access::mode::write>(cgh);
       cgh.parallel_for<
-          xilinx::reqd_work_group_size<4, 4, 4, reqd_work_group_size_test3>>(
-          k_range, [=](item<3> index) { wb[0] = 3; });
+          xilinx::reqd_work_group_size<24, 24, 24, reqd_work_group_size_test3>>(
+            ndr, [=](nd_item<3> index) { wb[0] = 3; });
     });
 
     auto rb = ob.get_access<access::mode::read>();
-    assert(rb[0] == 3);
+    if (q.get_context().get_platform().get_info<info::platform::vendor>()
+        =="Xilinx") {
+      assert(rb[0] == 2); // should still be 2
+    } else {
+      assert(rb[0] == 3); // shouldn't hinder intel implementation
+    }
   }
 
   std::cout << "reqd_work_group_size_test4 begin \n";
 
   {
-    // Valid and probably main use case for Xilinx FPGAs that allows the kernel to
-    // be optimized.
+    // Should pick up reqd_work_group_size<4, 4, 4> and apply it and ignore the
+    // random template inside of the xilinx namespace. As it's 4, 4, 4 the same
+    // as nd_range's local it shouldn't break.
     q.submit([&](handler &cgh) {
       auto wb = ob.get_access<access::mode::write>(cgh);
-      cgh.single_task<
-          xilinx::reqd_work_group_size<1, 1, 1, reqd_work_group_size_test4>>(
-          [=]() { wb[0] = 4; });
+      cgh.parallel_for<xilinx::reqd_work_group_size<
+          4, 4, 4, xilinx::conflict_test<30, reqd_work_group_size_test4>>>(
+          ndr, [=](nd_item<3> index) { wb[0] = 4; });
     });
 
     auto rb = ob.get_access<access::mode::read>();
@@ -157,127 +173,104 @@ int main() {
   std::cout << "reqd_work_group_size_test5 begin \n";
 
   {
-    // normal execution nothing bad should happen
+    // This test should pick up reqd_work_group_size<4, 4, 4> which is a valid
+    // size and run. If the secondary reqd_work_group_size is chosen incorrectly
+    // this should emit a run-time error.
     q.submit([&](handler &cgh) {
-        auto wb = ob.get_access<access::mode::write>(cgh);
-        cgh.single_task< reqd_work_group_size_test5 >(
-          [=]() {
-            wb[0] = 5;
-          });
+      auto wb = ob.get_access<access::mode::write>(cgh);
+      cgh.parallel_for<xilinx::reqd_work_group_size<4, 4, 4,
+                        xilinx::reqd_work_group_size<5, 5, 5,
+                          reqd_work_group_size_test5>>>(
+        ndr, [=](nd_item<3> index) { wb[0] = 5; });
     });
 
     auto rb = ob.get_access<access::mode::read>();
     assert(rb[0] == 5);
   }
 
-  std::cout << "reqd_work_group_size_test6 begin (xilinx fail, intel pass) \n";
+  std::cout << "xilinx::reqd_work_group_size<16, 16, 16, int> begin \n";
 
   {
-    // An invalid use case reqd_work_group_size is bigger than the global range
-    q.submit([&](handler &cgh) {
-      auto wb = ob.get_access<access::mode::write>(cgh);
-      cgh.parallel_for <
-          xilinx::reqd_work_group_size<16, 16, 16, reqd_work_group_size_test6> >(
-              k_range, [=](item<3> index) { wb[0] = 6; });
-    });
-
-  auto rb = ob.get_access<access::mode::read>();
-#ifdef __SYCL_XILINX_ONLY__
-    assert(rb[0] == 5); // should still be 5
-#else
-    assert(rb[0] == 6); // shouldn't hinder intel implementation
-#endif
-  }
-
-  std::cout << "xilinx::reqd_work_group_size<16, 16, 16, int> begin"
-            << "(xilinx fail, intel pass) \n";
-
-  {
-    // TODO/FIXME?: This is an invalid (but compileable) use case but should it
-    //  be legal to name kernels like this using a property?
+    // TODO/FIXME?: This is an "valid" (compileable and executeable) use case
+    // but should it be legal to name kernels like this using a property?
     // It should be possible to restrict it via constraints on the template
     // property.
     q.submit([&](handler &cgh) {
       auto wb = ob.get_access<access::mode::write>(cgh);
-      cgh.parallel_for< xilinx::reqd_work_group_size<16, 16, 16, int> >(
-          k_range, [=](item<3> index) {
-            wb[0] = 7;
+      cgh.parallel_for<xilinx::reqd_work_group_size<4, 4, 4, int>>(
+          ndr, [=](nd_item<3> index) {
+            wb[0] = 6;
           });
     });
 
     auto rb = ob.get_access<access::mode::read>();
-#ifdef __SYCL_XILINX_ONLY__
-    assert(rb[0] == 5); // should still be 5
-#else
-    assert(rb[0] == 7); // shouldn't hinder intel implementation
-#endif
+    assert(rb[0] == 6);
   }
 
-  std::cout << "reqd_work_group_size_test8 begin (xilinx fail, intel pass) \n";
+  std::cout << "reqd_work_group_size_test6 begin (xilinx fail, intel pass) \n";
 
-  nd_range<3> ndr {range<3>{16,16,16}, range<3>{8,8,8}};
   {
     // breaks your specifying an incorrect workgroup size. It is larger than the
     // nd_range's maximum local size
     q.submit([&](handler &cgh) {
       auto wb = ob.get_access<access::mode::write>(cgh);
       cgh.parallel_for<
-          xilinx::reqd_work_group_size<16, 16, 16, reqd_work_group_size_test8>>(
+          xilinx::reqd_work_group_size<8, 8, 8, reqd_work_group_size_test6>>(
           ndr, [=](nd_item<3> index) {
-            wb[0] = 8;
+            wb[0] = 7;
           });
     });
 
     auto rb = ob.get_access<access::mode::read>();
-#ifdef __SYCL_XILINX_ONLY__
-    assert(rb[0] == 5); // should still be 5
-#else
-    assert(rb[0] == 8); // shouldn't hinder intel implementation
-#endif
+    if (q.get_context().get_platform().get_info<info::platform::vendor>()
+        =="Xilinx") {
+      assert(rb[0] == 6); // should still be 6
+    } else {
+      assert(rb[0] == 7); // shouldn't hinder intel implementation
+    }
   }
 
-  std::cout << "reqd_work_group_size_test9 begin (xilinx fail, intel pass) \n";
+  std::cout << "reqd_work_group_size_test7 begin (xilinx fail, intel pass) \n";
+
   {
     /*
     Invalid and breaks. While it is smaller than the specified global and
     local_work_size of the nd_range it's not the same as the nd_range...
 
-    We don't want to enforce a reqd_work_group_size of 4x4x4 on something that's
-    already defined by an nd_range to be 8x8x8. It's possible to
-    enforce the reqd_work_group_size property over the nd_range similar to the
-    parallel_for where the local size isn't specified (for now, not sure if
-    this is what we really want to do) but your breaking the API as the
-    nd_item's properties would be what the user specified via the nd_range all
-    that would change is the underlying call to clEnqueueNDRangeKernel.
+    We don't want to enforce a reqd_work_group_size of 2x2x2 on something that's
+    already defined by an nd_range to be 4x4x4. It's possible to
+    enforce the reqd_work_group_size property over the nd_range in the runtime
+    but your breaking the API as the nd_item's properties would be what the user
+    specified via the nd_range.
     */
     q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::write>(cgh);
     cgh.parallel_for<
-        xilinx::reqd_work_group_size<4, 4, 4, reqd_work_group_size_test9>>(
+        xilinx::reqd_work_group_size<2, 2, 2, reqd_work_group_size_test7>>(
         ndr, [=](nd_item<3> index) {
-          wb[0] = 9;
+          wb[0] = 8;
         });
     });
 
     auto rb = ob.get_access<access::mode::read>();
-#ifdef __SYCL_XILINX_ONLY__
-    assert(rb[0] == 5); // should still be 5
-#else
-    assert(rb[0] == 9); // shouldn't hinder intel implementation
-#endif
+    if (q.get_context().get_platform().get_info<info::platform::vendor>()
+        =="Xilinx") {
+      assert(rb[0] == 6); // should still be 6
+    } else {
+      assert(rb[0] == 8); // shouldn't hinder intel implementation
+    }
   }
 
-  std::cout << "reqd_work_group_size_test10 begin \n";
+  std::cout << "reqd_work_group_size_test8 begin \n";
 
   buffer<unsigned int> ob2(range<1>{16*16*16});
-
   {
     // legal and the one test in here that is intended to give an "interesting"
     // output result for the moment.
     q.submit([&](handler &cgh) {
       auto wb = ob2.get_access<access::mode::write>(cgh);
       cgh.parallel_for<
-          xilinx::reqd_work_group_size<8, 8, 8, reqd_work_group_size_test10>>(
+          xilinx::reqd_work_group_size<4, 4, 4, reqd_work_group_size_test8>>(
           ndr, [=](nd_item<3> index) {
             wb[index.get_global_linear_id()] = index.get_local_linear_id();
           });
@@ -288,7 +281,43 @@ int main() {
     for (size_t i = 0; i != ob2.get_count(); ++i) {
       sum += rb[i];
     }
-    assert(sum == 1046528);
+    assert(sum == 129024);
+  }
+
+  std::cout << "reqd_work_group_size_test9 begin \n";
+
+  {
+    // This is perhaps the one time using a reqd_work_group_size on a
+    // parallel_for with no local range is legal as it's basically defining
+    // a single_task
+    range<1> single_range{1};
+    q.submit([&](handler &cgh) {
+      auto wb = ob.get_access<access::mode::write>(cgh);
+      cgh.parallel_for<
+          xilinx::reqd_work_group_size<1, 1, 1, reqd_work_group_size_test9>>(
+          single_range, [=](item<1> index) {
+            wb[0] = 9;
+          });
+    });
+
+    auto rb = ob.get_access<access::mode::read>();
+    assert(rb[0] == 9);
+  }
+
+  std::cout << "reqd_work_group_size_test10 begin \n";
+
+  {
+    // We force this into a reqd_work_group_size by appending the template
+    // to the kernel name inside of the handler anyway. So this should be the
+    // same as if a user explicitlyapplied the property to the name.
+    q.submit([&](handler &cgh) {
+      auto wb = ob.get_access<access::mode::write>(cgh);
+      cgh.single_task<reqd_work_group_size_test10>(
+          [=]() { wb[0] = 10; });
+    });
+
+    auto rb = ob.get_access<access::mode::read>();
+    assert(rb[0] == 10);
   }
 
   std::cout << "exiting test \n";

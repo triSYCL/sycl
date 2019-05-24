@@ -28,6 +28,8 @@
 #include <CL/sycl/property_list.hpp>
 #include <CL/sycl/stl.hpp>
 
+#include <CL/sycl/xilinx/fpga/kernel_properties.hpp>
+
 #include <functional>
 #include <memory>
 #include <type_traits>
@@ -281,9 +283,11 @@ public:
   template <typename KernelName, typename KernelType>
   void single_task(KernelType kernelFunc) {
 #ifdef __SYCL_DEVICE_ONLY__
-    kernel_single_task<KernelName>(kernelFunc);
+    kernel_single_task<xilinx::reqd_work_group_size<1, 1, 1,
+                       KernelName>>(kernelFunc);
 #else
-    using KI = cl::sycl::detail::KernelInfo<KernelName>;
+    using KI = cl::sycl::detail::KernelInfo<
+                 xilinx::reqd_work_group_size<1, 1, 1, KernelName>>;
     m_Node.addKernel(csd::OSUtil::getOSModuleHandle(KI::getName()),
                      KI::getName(), KI::getNumParams(), &KI::getParamDesc(0),
                      std::move(kernelFunc));
@@ -501,13 +505,15 @@ public:
   template <typename KernelName, typename KernelType>
   void single_task(kernel syclKernel, KernelType kernelFunc) {
 #ifdef __SYCL_DEVICE_ONLY__
-    kernel_single_task<KernelName>(kernelFunc);
+    kernel_single_task<xilinx::reqd_work_group_size<1, 1, 1,
+                       KernelName>>(kernelFunc);
 #else
     cl_kernel clKernel = nullptr;
     if (!is_host()) {
       clKernel = syclKernel.get();
     }
-    using KI = cl::sycl::detail::KernelInfo<KernelName>;
+    using KI = cl::sycl::detail::KernelInfo<
+                 xilinx::reqd_work_group_size<1, 1, 1, KernelName>>;
     m_Node.addKernel(csd::OSUtil::getOSModuleHandle(KI::getName()),
                      KI::getName(), KI::getNumParams(), &KI::getParamDesc(0),
                      std::move(kernelFunc), clKernel);

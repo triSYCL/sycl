@@ -370,36 +370,36 @@ cl_int ExecCGCommand::enqueueImp() {
       }
     }
 
-    // TODO: Think about if there is a point in "passing" the property down to
-    // here, as in reality the LocalWorkSize is never specified in this
-    // implementation of runEnqueueNDRangeKernel. This implementation of
-    // runEnqueueNDRangeKernel is for cases where the SYCL parallelism construct
-    // is a single_task or a parallel_for without an nd_range (just global
-    // range). So all we're really doing is enforcing a local work group size
-    // that a user can't actually get access to as item has no get_local related
-    // methods.
-    // There is no SYCL specification restriction on this use of the attribute
-    // but perhaps it's not needed. Although, maybe there is use case for someone
-    // enforcing a reqd_work_group_size on the global range a kernel is invoked
-    // with. In either case it can be removed and all you would have to do for
-    // the case of single_task is check if the SingleTask variable is true and
-    // if it is specify a LocalWorkSize of 1,1,1 else specify nullptr (this
-    // meets the OpenCL restrictions on ReqdWorkGroupSize).
-    // This will also enforce LocalWorkSize on Intel devices if
-    // reqd_work_group_size is specified and the std is >= 17. Perhaps not
-    // ideal.
-    std::vector<size_t> ReqdWorkGroupSize;
-#if (defined(__SYCL_XILINX_ONLY__))
-    ReqdWorkGroupSize =
-        cl::sycl::xilinx::get_reqd_work_group_size(ExecKernel->getKernelName());
-#endif
+    // If global size is 1, local size is 0 and Dimensions are 1, for all
+    // intents and purposes we can consider it a single_task and pass 1,1,1
+    // instead of nullptr. The precedence for this assumption is in the
+    // handler2.hpp single_task call where MNDRDesc is hardcoded to a be:
+    // range<1>({1}). Even if it turns out to be a 1D parallel_for with no
+    // local size defined it really doesn't matter as the OpenCL runtime can
+    // only automatically make a decision to set the local size to 1 or 0. The
+    // affect of passing nullptr to clEnqueueNDRangeKernel is the OpenCL runtime
+    // chosing the 'optimal' local work group size (implementation defined),
+    // sadly if you pass a nullptr when the reqd_work_group_size attribute is on
+    // your kernel, it is an OpenCL runtime error, so as xocc always applies
+    // the reqd_work_group_size attribute to single_task we must make sure we
+    // define a local work group size when we can justify the kernel is a single
+    // task.
+    // \todo Perhaps an extra CG type notifying the type of parallelism
+    //    construct could be useful, similar to CG::CGTYPE::KERNEL, except a
+    //    subtype like CG::CGTYPE::KERNEL_SINGLE_TASK. Ideally it wouldn't
+    //    replace CG::CGTYPE::KERNEL and just be some extra stored CG
+    //    information. It's worth waiting to see if there is any real use for it
+    //    outside of this very specific use case though
+    if (NDRDesc.Dims == 1 && NDRDesc.GlobalSize[0] == 1
+        && NDRDesc.LocalSize[0] == 0)
+        NDRDesc.LocalSize[0] = 1;
+
 
     cl_int Error = CL_SUCCESS;
     Error = clEnqueueNDRangeKernel(
         MQueue->getHandleRef(), Kernel, NDRDesc.Dims, &NDRDesc.GlobalOffset[0],
         &NDRDesc.GlobalSize[0],
-        NDRDesc.LocalSize[0] ? &NDRDesc.LocalSize[0]
-          : ReqdWorkGroupSize.size() > 0 ? &ReqdWorkGroupSize[0] : nullptr,
+        NDRDesc.LocalSize[0] ? &NDRDesc.LocalSize[0] : nullptr,
         RawEvents.size(), RawEvents.empty() ? nullptr : &RawEvents[0], &Event);
     CHECK_OCL_CODE(Error);
     return CL_SUCCESS;

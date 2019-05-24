@@ -29,6 +29,8 @@
 
 #include <CL/sycl/stl.hpp>
 
+#include <CL/sycl/xilinx/fpga/kernel_properties.hpp>
+
 #include <functional>
 #include <memory>
 #include <type_traits>
@@ -550,11 +552,13 @@ public:
   template <typename KernelName, typename KernelType>
   void single_task(KernelType KernelFunc) {
 #ifdef __SYCL_DEVICE_ONLY__
-    kernel_single_task<KernelName>(KernelFunc);
+    kernel_single_task<xilinx::reqd_work_group_size<1, 1, 1,
+                       KernelName>>(KernelFunc);
 #else
     MNDRDesc.set(range<1>{1});
 
-    StoreLambda<KernelName, KernelType, /*Dims*/ 0, void>(KernelFunc);
+    StoreLambda<xilinx::reqd_work_group_size<1, 1, 1, KernelName>, KernelType,
+                /*Dims*/ 0, void>(KernelFunc);
     MCGType = detail::CG::KERNEL;
 #endif
   }
@@ -688,12 +692,13 @@ public:
   template <typename KernelName, typename KernelType>
   void single_task(kernel SyclKernel, KernelType KernelFunc) {
 #ifdef __SYCL_DEVICE_ONLY__
-    kernel_single_task<KernelName>(KernelFunc);
+    kernel_single_task<xilinx::reqd_work_group_size<1, 1, 1,
+                       KernelName>>(KernelFunc);
 #else
     MNDRDesc.set(range<1>{1});
     MSyclKernel = detail::getSyclObjImpl(std::move(SyclKernel));
-    StoreLambda<KernelName, KernelType, /*Dims*/ 0, void>(
-        std::move(KernelFunc));
+    StoreLambda<xilinx::reqd_work_group_size<1, 1, 1 ,KernelName>, KernelType,
+                /*Dims*/ 0, void>(std::move(KernelFunc));
     MCGType = detail::CG::KERNEL;
 #endif
   }
