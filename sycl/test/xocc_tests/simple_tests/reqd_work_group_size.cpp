@@ -210,8 +210,8 @@ int main() {
   std::cout << "reqd_work_group_size_test6 begin (xilinx fail, intel pass) \n";
 
   {
-    // breaks your specifying an incorrect workgroup size. It is larger than the
-    // nd_range's maximum local size
+    // breaks as you are specifying an incorrect workgroup size. It is larger
+    // than the nd_range's maximum local size
     q.submit([&](handler &cgh) {
       auto wb = ob.get_access<access::mode::write>(cgh);
       cgh.parallel_for<
@@ -240,8 +240,8 @@ int main() {
     We don't want to enforce a reqd_work_group_size of 2x2x2 on something that's
     already defined by an nd_range to be 4x4x4. It's possible to
     enforce the reqd_work_group_size property over the nd_range in the runtime
-    but your breaking the API as the nd_item's properties would be what the user
-    specified via the nd_range.
+    but you are breaking the API as the nd_item's properties would be what the
+    user specified via the nd_range.
     */
     q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::write>(cgh);

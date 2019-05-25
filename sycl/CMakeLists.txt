@@ -81,18 +81,18 @@ endif()
 set(SYCL_INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/include/")
 set(OPENCL_INCLUDE "${OpenCL_INCLUDE_DIRS}")
 
-#  Try to find and include XRT OpenCL in the build components to allow access to
-#  Xilinx CL extensions in the source files when compiling the runtimes
-#  libSYCL.so, this unfortunately isn't relevant when a user is compiling there
-#  own files, they'll still have to add -I/opt/xilinx/xrt/include/.
-#  It's only relevant to the clang build system and the libSYCL.so file that's
-#  compiled, the header files are recompiled on a per application basis as far as
-#  I'm aware.
-#  \todo We could enforce the download and installation of the XRT runtime
-#  similarly to what's done with the OpenCL headers at the moment that makes
-#  things a little easier. As it wouldn't matter if someone only wanted to build
-#  to run on another platform, they would always have XRT and it's extensions
-#  wouldn't break the runtime by being missing'
+# Try to find and include XRT OpenCL in the build components to allow access to
+# Xilinx OpenCL extensions in the source files when compiling the runtimes
+# libSYCL.so, this unfortunately isn't relevant when a user is compiling there
+# own files, they'll still have to add -I/opt/xilinx/xrt/include/.
+# It's only relevant to the Clang build system and the libSYCL.so file that's
+# compiled, the header files are recompiled on a per application basis as far as
+# I'm aware.
+# \todo We could enforce the download and installation of the XRT runtime
+# similarly to what's done with the OpenCL headers at the moment that makes
+# things a little easier. As it wouldn't matter if someone only wanted to build
+# to run on another platform, they would always have XRT and it's extensions
+# wouldn't break the runtime by being missing
 if (DEFINED ENV{XILINX_XRT})
   if(EXISTS "$ENV{XILINX_XRT}/include" AND EXISTS "$ENV{XILINX_XRT}/lib")
     message(STATUS "XILINX_XRT enabled")

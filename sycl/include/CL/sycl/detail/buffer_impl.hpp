@@ -592,22 +592,22 @@ void buffer_impl<AllocatorT>::allocate(QueueImplPtr Queue,
     // something we have to do to conform for the moment (but generally a good
     // thing to conform as it means closer alignment to actual hardware
     // compilation).
-    // \todo I believe a way to allow users to specify DDR bank assignments at a
+    // \todo A way to allow users to specify DDR bank assignments at a
     // SYCL level should be the end goal here, assign a DDR bank to kernel/CU
     // mapping via an accessor or buffer. The hard part of this is that the
     // compiler will need access to this information when compiling the kernels,
     // pushing this data through in a "C++ way" without modifying the SYCL
-    // compiler will be difficult I think (tying this information up as an
-    // extra component of the accessor's could be the ideal route in this case).
+    // compiler will be difficult (tying this information up as an  extra
+    // component of the accessor's could be the ideal route in this case).
     // \todo Alternatively the cl_mem_ext_ptr_t assignment of DDR banks seems to
     // be legacy in 2019.1, it may be possible to assign buffers to kernel
     // arguments in just the runtime and bypass the requirements for specifying
     // appropriate DDR banks, if that makes things easier, this can be done via
     // the alternate union form of cl_mem_ext_ptr_t:
     // struct { // interpreted kernel arg assignment
-    // unsigned int argidx;  // Top 8 bits reserved for XCL_MEM_EXT flags
-    // void *host_ptr_;      // use as host_ptr
-    // cl_kernel kernel;
+    //   unsigned int argidx;  // Top 8 bits reserved for XCL_MEM_EXT flags
+    //   void *host_ptr_;      // use as host_ptr
+    //   cl_kernel kernel;
     // };
     // This hasn't been tested but may be an alternative to assigning DDR banks
     // per buffer. However, being able to specify DDR bank assignments to a
@@ -617,7 +617,8 @@ void buffer_impl<AllocatorT>::allocate(QueueImplPtr Queue,
     // as part of the kernel name via a kernel property similar to
     // the way we handle reqd_work_group_size at the moment
     cl_mem Mem;
-    if (Context->get_platform().get_info<info::platform::vendor>() =="Xilinx") {
+    if (Context->get_platform().get_info<info::platform::vendor>()
+        == "Xilinx") {
       cl_mem_ext_ptr_t mext = {0};
       mext.banks = 0 | XCL_MEM_TOPOLOGY;
       Mem = clCreateBuffer(Context->getHandleRef(), CL_MEM_READ_WRITE
