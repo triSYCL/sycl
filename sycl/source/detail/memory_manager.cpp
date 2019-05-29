@@ -103,9 +103,58 @@ void *MemoryManager::allocateMemBuffer(ContextImplPtr TargetContext,
     CreationFlags |=
         HostPtrReadOnly ? CL_MEM_COPY_HOST_PTR : CL_MEM_USE_HOST_PTR;
   cl_int Error = CL_SUCCESS;
+
+#if (defined(__SYCL_XILINX_ONLY__))
+  // This currently enforces assignment of all buffers to DDR bank 0 via
+  // Xilinx OpenCL extensions, which we also enforce when compiling the
+  // kernels via xocc (0 is usually the default inferred space, but some get
+  // inferred to bank 1, notably Alveo U200 boards). XRT seems to have slowly
+  // gotten stricter with these assignments when compiling for hw_emu, so it's
+  // something we have to do to conform for the moment (but generally a good
+  // thing to conform as it means closer alignment to actual hardware
+  // compilation).
+  // \todo A way to allow users to specify DDR bank assignments at a
+  // SYCL level should be the end goal here, assign a DDR bank to kernel/CU
+  // mapping via an accessor or buffer. The hard part of this is that the
+  // compiler will need access to this information when compiling the kernels,
+  // pushing this data through in a "C++ way" without modifying the SYCL
+  // compiler will be difficult (tying this information up as an extra component
+  // of the accessor's could be the ideal route in this case).
+  // \todo Alternatively the cl_mem_ext_ptr_t assignment of DDR banks seems to
+  // be legacy in 2019.1, it may be possible to assign buffers to kernel
+  // arguments in just the runtime and bypass the requirements for specifying
+  // appropriate DDR banks, if that makes things easier, this can be done via
+  // the alternate union form of cl_mem_ext_ptr_t:
+  // struct { // interpreted kernel arg assignment
+  //   unsigned int argidx;  // Top 8 bits reserved for XCL_MEM_EXT flags
+  //   void *host_ptr_;      // use as host_ptr
+  //   cl_kernel kernel;
+  // };
+  // This hasn't been tested but may be an alternative to assigning DDR banks
+  // per buffer. However, being able to specify DDR bank assignments to a
+  // kernel, is still very useful, but if this method works, perhaps we can
+  // detach the idea of assigning DDR banks via the buffer/accessor (which
+  // makes it difficult to pass information to the kernel) and instead have it
+  // as part of the kernel name via a kernel property similar to
+  // the way we handle reqd_work_group_size at the moment
+  cl_mem NewMem;
+  if (TargetContext->get_platform().get_info<info::platform::vendor>()
+      == "Xilinx") {
+    cl_mem_ext_ptr_t mext = {0};
+    mext.banks = 0 | XCL_MEM_TOPOLOGY;
+    mext.host_ptr = UserPtr;
+    NewMem = clCreateBuffer(TargetContext->getHandleRef(), CreationFlags
+                            | CL_MEM_EXT_PTR_XILINX, Size, &mext, &Error);
+  } else {
+    NewMem = clCreateBuffer(TargetContext->getHandleRef(), CreationFlags,
+                            Size, UserPtr, &Error);
+  }
+  CHECK_OCL_CODE(Error);
+#else
   cl_mem NewMem = clCreateBuffer(TargetContext->getHandleRef(), CreationFlags,
                                  Size, UserPtr, &Error);
   CHECK_OCL_CODE(Error);
+#endif
   return NewMem;
 }
 
@@ -338,6 +387,14 @@ void *MemoryManager::map(SYCLMemObjT *SYCLMemObj, void *Mem, QueueImplPtr Queue,
       AccessRange[0], DepEvents.size(),
       DepEvents.empty() ? nullptr : &DepEvents[0], &OutEvent, &Error);
   CHECK_OCL_CODE(Error);
+
+  // XRT doesn't really seem to play well with Dependent Events in
+  // clEnqueueUnmapMemObject at the moment. I have opened an issue:
+  // https://github.com/Xilinx/XRT/issues/1425 to get some clarification on it.
+  Error = clWaitForEvents(1, &OutEvent);
+  CHECK_OCL_CODE(Error);
+  OutEvent = nullptr;
+
   return MappedPtr;
 }
 

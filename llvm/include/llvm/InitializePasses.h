@@ -415,6 +415,7 @@ void initializeXRayInstrumentationPass(PassRegistry&);
 void initializeASFixerPass(PassRegistry&);
 void initializeInSPIRationPass(PassRegistry&);
 void initializeKernelPropGenPass(PassRegistry&);
+void initializeXOCCIRDowngraderPass(PassRegistry&);
 
 } // end namespace llvm
 

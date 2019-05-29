@@ -44,7 +44,9 @@ namespace cl::sycl::xilinx {
   /// one of these when the kernel name is translated from type to kernel name
   /// the information is retained and we can retrieve it in this LLVM pass by
   /// using regex on it.
-  static std::vector<size_t>
+  /// \todo Unused in runtime at the moment, remove eventually if no longer
+  ///   required.
+  [[maybe_unused]] static std::vector<size_t>
   get_reqd_work_group_size(std::string mangledKernelName) {
     static const std::regex matchSomeNaturalInteger {R"(\d+)"};
     static const std::regex matchReqdWorkGroupSize {

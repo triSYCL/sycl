@@ -29,6 +29,8 @@
 
 #include <CL/sycl/stl.hpp>
 
+#include <CL/sycl/xilinx/fpga/kernel_properties.hpp>
+
 #include <functional>
 #include <memory>
 #include <type_traits>
@@ -445,7 +447,13 @@ public:
                               KernelType>::type KernelFunc) {
     id<dimensions> global_id;
 
+#ifdef __SYCL_SPIR_DEVICE__
+    for (int i = 0; i < dimensions; ++i) {
+       global_id[i] = cl::__spirv::get_global_id(i);
+    }
+#else
     detail::initGlobalInvocationId<dimensions>(global_id);
+#endif
 
     KernelFunc(global_id);
   }
@@ -459,8 +467,15 @@ public:
     id<dimensions> global_id;
     range<dimensions> global_size;
 
+#ifdef __SYCL_SPIR_DEVICE__
+    for (int i = 0; i < dimensions; ++i) {
+      global_id[i] = cl::__spirv::get_global_id(i);
+      global_size[i] = cl::__spirv::get_global_size(i);
+    }
+#else
     detail::initGlobalInvocationId<dimensions>(global_id);
     detail::initGlobalSize<dimensions>(global_size);
+#endif
 
     item<dimensions, false> Item =
         detail::Builder::createItem<dimensions, false>(global_size, global_id);
@@ -480,12 +495,23 @@ public:
     id<dimensions> local_id;
     id<dimensions> global_offset;
 
+#ifdef __SYCL_SPIR_DEVICE__
+    for (int i = 0; i < dimensions; ++i) {
+      global_size[i] = cl::__spirv::get_global_size(i);
+      local_size[i] = cl::__spirv::get_local_size(i);
+      group_id[i] = cl::__spirv::get_group_id(i);
+      global_id[i] = cl::__spirv::get_global_id(i);
+      local_id[i] = cl::__spirv::get_local_id(i);
+      global_offset[i] = cl::__spirv::get_global_offset(i);
+    }
+#else
     detail::initGlobalSize<dimensions>(global_size);
     detail::initWorkgroupSize<dimensions>(local_size);
     detail::initWorkgroupId<dimensions>(group_id);
     detail::initGlobalInvocationId<dimensions>(global_id);
     detail::initLocalInvocationId<dimensions>(local_id);
     detail::initGlobalOffset<dimensions>(global_offset);
+#endif
 
     group<dimensions> Group = detail::Builder::createGroup<dimensions>(
         global_size, local_size, group_id);
@@ -526,11 +552,13 @@ public:
   template <typename KernelName, typename KernelType>
   void single_task(KernelType KernelFunc) {
 #ifdef __SYCL_DEVICE_ONLY__
-    kernel_single_task<KernelName>(KernelFunc);
+    kernel_single_task<xilinx::reqd_work_group_size<1, 1, 1,
+                       KernelName>>(KernelFunc);
 #else
     MNDRDesc.set(range<1>{1});
 
-    StoreLambda<KernelName, KernelType, /*Dims*/ 0, void>(KernelFunc);
+    StoreLambda<xilinx::reqd_work_group_size<1, 1, 1, KernelName>, KernelType,
+                /*Dims*/ 0, void>(KernelFunc);
     MCGType = detail::CG::KERNEL;
 #endif
   }
@@ -664,12 +692,13 @@ public:
   template <typename KernelName, typename KernelType>
   void single_task(kernel SyclKernel, KernelType KernelFunc) {
 #ifdef __SYCL_DEVICE_ONLY__
-    kernel_single_task<KernelName>(KernelFunc);
+    kernel_single_task<xilinx::reqd_work_group_size<1, 1, 1,
+                       KernelName>>(KernelFunc);
 #else
     MNDRDesc.set(range<1>{1});
     MSyclKernel = detail::getSyclObjImpl(std::move(SyclKernel));
-    StoreLambda<KernelName, KernelType, /*Dims*/ 0, void>(
-        std::move(KernelFunc));
+    StoreLambda<xilinx::reqd_work_group_size<1, 1, 1 ,KernelName>, KernelType,
+                /*Dims*/ 0, void>(std::move(KernelFunc));
     MCGType = detail::CG::KERNEL;
 #endif
   }

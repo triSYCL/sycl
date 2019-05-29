@@ -17,6 +17,10 @@
 #include <CL/sycl/detail/scheduler/scheduler.hpp>
 #include <CL/sycl/sampler.hpp>
 
+#if (defined(__SYCL_XILINX_ONLY__))
+#include <CL/sycl/xilinx/fpga/kernel_properties.hpp>
+#endif
+
 #include <vector>
 
 namespace cl {
@@ -365,6 +369,31 @@ cl_int ExecCGCommand::enqueueImp() {
         assert(!"Unhandled");
       }
     }
+
+    // If global size is 1, local size is 0 and Dimensions are 1, for all
+    // intents and purposes we can consider it a single_task and pass 1,1,1
+    // instead of nullptr. The precedence for this assumption is in the
+    // handler2.hpp single_task call where MNDRDesc is hardcoded to a be:
+    // range<1>({1}). Even if it turns out to be a 1D parallel_for with no
+    // local size defined it really doesn't matter as the OpenCL runtime can
+    // only automatically make a decision to set the local size to 1 or 0. The
+    // affect of passing nullptr to clEnqueueNDRangeKernel is the OpenCL runtime
+    // chosing the 'optimal' local work group size (implementation defined),
+    // sadly if you pass a nullptr when the reqd_work_group_size attribute is on
+    // your kernel, it is an OpenCL runtime error, so as xocc always applies
+    // the reqd_work_group_size attribute to single_task we must make sure we
+    // define a local work group size when we can justify the kernel is a single
+    // task.
+    // \todo Perhaps an extra CG type notifying the type of parallelism
+    //    construct could be useful, similar to CG::CGTYPE::KERNEL, except a
+    //    subtype like CG::CGTYPE::KERNEL_SINGLE_TASK. Ideally it wouldn't
+    //    replace CG::CGTYPE::KERNEL and just be some extra stored CG
+    //    information. It's worth waiting to see if there is any real use for it
+    //    outside of this very specific use case though
+    if (NDRDesc.Dims == 1 && NDRDesc.GlobalSize[0] == 1
+        && NDRDesc.LocalSize[0] == 0)
+        NDRDesc.LocalSize[0] = 1;
+
 
     cl_int Error = CL_SUCCESS;
     Error = clEnqueueNDRangeKernel(

@@ -535,7 +535,7 @@ int main(int argc, char **argv) {
   initializeASFixerPass(Registry);
   initializeInSPIRationPass(Registry);
   initializeKernelPropGenPass(Registry);
-
+  initializeXOCCIRDowngraderPass(Registry);
 
 #ifdef LINK_POLLY_INTO_TOOLS
   polly::initializePollyPasses(Registry);

@@ -34,54 +34,56 @@ int main() {
   queue q {selector};
 
   auto nd = nd_range<3>(range<3>(2, 2, 2), range<3>(1, 1, 1));
+  buffer<int, 1> test_buffer{range<1>{8}};
 
-  buffer<int, 1> test_buffer{range<1>{11}};
+  {
+    auto wb = test_buffer.get_access<access::mode::write>();
+    for (int i = 0; i < wb.get_count(); ++i)
+      wb[i] = 0;
+  }
 
   q.submit([&](handler &cgh) {
     auto wb = test_buffer.get_access<access::mode::write>(cgh);
 
     cgh.parallel_for<id_mangle>(nd, [=](nd_item<3> index) {
 #ifdef __SYCL_XILINX_ONLY__
-        wb[0] += get_global_id(0);
+        wb[index.get_global_linear_id()] += get_global_id(0);
 #endif
-        wb[1] += index.get_global_id(0);
-        wb[1] += index.get_global_id(1);
-        wb[1] += index.get_global_id(2);
+        wb[index.get_global_linear_id()] += index.get_global_id(0);
+        wb[index.get_global_linear_id()] += index.get_global_id(1);
+        wb[index.get_global_linear_id()] += index.get_global_id(2);
 
-        wb[2] += index.get_global_linear_id();
+        wb[index.get_global_linear_id()] += index.get_local_id(0);
+        wb[index.get_global_linear_id()] += index.get_local_id(1);
+        wb[index.get_global_linear_id()] += index.get_local_id(2);
 
-        wb[3] += index.get_local_id(0);
-        wb[3] += index.get_local_id(1);
-        wb[3] += index.get_local_id(2);
+        wb[index.get_global_linear_id()] += index.get_local_linear_id();
 
-        wb[4] += index.get_local_linear_id();
+        wb[index.get_global_linear_id()] += index.get_group(0);
+        wb[index.get_global_linear_id()] += index.get_group(1);
+        wb[index.get_global_linear_id()] += index.get_group(2);
 
-        wb[5] += index.get_group(0);
-        wb[5] += index.get_group(1);
-        wb[5] += index.get_group(2);
+        wb[index.get_global_linear_id()] += index.get_group_linear_id();
 
-        wb[6] += index.get_group_linear_id();
+        wb[index.get_global_linear_id()] += index.get_group_range(0);
+        wb[index.get_global_linear_id()] += index.get_group_range(1);
+        wb[index.get_global_linear_id()] += index.get_group_range(2);
 
-        wb[7] += index.get_group_range(0);
-        wb[7] += index.get_group_range(1);
-        wb[7] += index.get_group_range(2);
+        wb[index.get_global_linear_id()] += index.get_global_range(0);
+        wb[index.get_global_linear_id()] += index.get_global_range(1);
+        wb[index.get_global_linear_id()] += index.get_global_range(2);
 
-        wb[8] += index.get_global_range(0);
-        wb[8] += index.get_global_range(1);
-        wb[8] += index.get_global_range(2);
+        wb[index.get_global_linear_id()] += index.get_local_range(0);
+        wb[index.get_global_linear_id()] += index.get_local_range(1);
+        wb[index.get_global_linear_id()] += index.get_local_range(2);
 
-        wb[9] += index.get_local_range(0);
-        wb[9] += index.get_local_range(1);
-        wb[9] += index.get_local_range(2);
-
-        wb[10] += index.get_offset()[0];
-        wb[10] += index.get_offset()[1];
-        wb[10] += index.get_offset()[2];
+        wb[index.get_global_linear_id()] += index.get_offset()[0];
+        wb[index.get_global_linear_id()] += index.get_offset()[1];
+        wb[index.get_global_linear_id()] += index.get_offset()[2];
     });
   });
 
   auto rb = test_buffer.get_access<access::mode::read>();
-  q.wait();
 
   // The hard coded values tested against here are based on the kernel being
   // executed 8 times (2*2*2) with a local work group size of 1x1x1. Probably
@@ -89,42 +91,22 @@ int main() {
   // mostly about checking for compile errors or run-time ABI problems for
   // missing functions.
 
+  int sum = 0;
+  for (int i = 0; i < rb.get_count(); ++i) {
+    sum += rb[i];
+  }
+
   // all of our invocations of the user defined get_global_id on the device plus
-  // one host invocation should sum up to 9000
+  // one host invocation should sum up to 9000, this is only relevant for Xilinx
+  // at the moment
 #ifdef __SYCL_XILINX_ONLY__
-  printf("get_global_id user defined summation: %d \n", rb[0] + (int)get_global_id(0));
-  assert(rb[0] + get_global_id(0) == 9000);
+  std::cout << "sum of all id's, sizes and offsets and user get_global_id call "
+            <<  sum << "\n";
+  assert((sum + get_global_id(0)) == 9172);
+#else
+  std::cout << "sum of all id's, sizes and offsets: " <<  sum << "\n";
+  assert(sum == 172);
 #endif
-
-  printf("get_global_id built-in summation: %d \n", rb[1]);
-  assert(rb[1] == 12);
-
-  printf("get_global_linear_id built-in summation: %d \n", rb[2]);
-  assert(rb[2] == 28);
-
-  printf("get_local_id built-in summation: %d \n", rb[3]);
-  assert(rb[3] == 0);
-
-  printf("get_local_linear_id built-in summation: %d \n", rb[4]);
-  assert(rb[4] == 0);
-
-  printf("get_group_id built-in summation: %d \n", rb[5]);
-  assert(rb[5] == 12);
-
-  printf("get_group_linear_id built-in summation: %d \n", rb[6]);
-  assert(rb[6] == 28);
-
-  printf("get_group_range built-in summation: %d \n", rb[7]);
-  assert(rb[7] == 48);
-
-  printf("get_global_range built-in summation: %d \n", rb[8]);
-  assert(rb[8] == 48);
-
-  printf("get_local_range built-in summation: %d \n", rb[9]);
-  assert(rb[9] == 24);
-
-  printf("get_offset built-in summation: %d \n", rb[10]);
-  assert(rb[10] == 0);
 
   return 0;
 }
