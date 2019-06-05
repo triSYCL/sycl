@@ -101,7 +101,7 @@ int main() {
   // at the moment
 #ifdef __SYCL_XILINX_ONLY__
   std::cout << "sum of all id's, sizes and offsets and user get_global_id call "
-            <<  sum << "\n";
+            <<  sum + get_global_id(0) << "\n";
   assert((sum + get_global_id(0)) == 9172);
 #else
   std::cout << "sum of all id's, sizes and offsets: " <<  sum << "\n";
