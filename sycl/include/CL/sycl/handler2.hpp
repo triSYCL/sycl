@@ -10,7 +10,12 @@
 
 #pragma once
 
+#ifdef __SYCL_SPIR_DEVICE__
+#include <CL/__spir/spir_vars.hpp>
+#else
 #include <CL/__spirv/spirv_vars.hpp>
+#endif
+
 #include <CL/sycl/access/access.hpp>
 #include <CL/sycl/accessor.hpp>
 #include <CL/sycl/context.hpp>
