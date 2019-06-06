@@ -10,11 +10,11 @@ adaptations.
 
 ## Installing the Alveo U200 board
 
-If you do not have a real board and wants to use only software or
+If you do not have a real board and want to use only software or
 hardware emulation, just skip this section.
 
 Install an Alveo U200 board in the machine with the right cooling.
-The PCIe auxiliary power is not necessary for simple test not using the full
+The PCIe auxiliary power is not necessary for simple tests not using the full
 power of the board.
 
 
@@ -22,7 +22,7 @@ power of the board.
 
 Update the BIOS of your machine to the latest version. The Alveo U200
 board might not be detected by `lspci` at the PCIe level if you do not
-have a good BIOS.
+have an up-to-date BIOS.
 
 If you are running Linux on top of an EFI BIOS, you can probably use
 the firmware capsule concept and try:
@@ -35,9 +35,9 @@ sudo fwupdmgr refresh
 sudo fwupdmgr update
 ```
 
-If you are not running an EFI BIOS, you can follow the manual recipe
-of the BIOS update for your the motherboard. Typically look for the
-latest BIOS version, put it on a FAT32-formatted USB stick and goes
+If you are not running an EFI BIOS, you can follow the manual BIOS
+update recipe for your motherboard. Typically look for the
+latest BIOS version, put it on a FAT32-formatted USB stick and go
 into the BIOS setup at boot time to ask for the explicit
 update. Often, there is no need to build a bootable USB stick.
 
@@ -53,7 +53,7 @@ So, create a `/etc/apt/sources.list.d/xrt-bionic.list` file with this content:
 deb http://us.archive.ubuntu.com/ubuntu/ bionic main restricted
 ```
 
-Then install the less oldest supported kernel by XRT
+Then install the latest supported kernel by XRT
 ```bash
 sudo apt update
 sudo apt install linux-image-4.15.0-50-generic \
@@ -62,8 +62,8 @@ sudo apt install linux-image-4.15.0-50-generic \
   linux-headers-4.15.0-50 linux-headers-4.15.0-50-generic
 ```
 
-Edit `/etc/default/grub` to save the kernel choice at boot to be the
-default one by default:
+Edit `/etc/default/grub` to pick the last manual boot kernel choice as
+default:
 ```
 #GRUB_DEFAULT=0
 GRUB_SAVEDEFAULT=true
@@ -75,9 +75,9 @@ Update the boot configuration
 sudo update-grub
 ```
 
-Reboot the machine by picking the Linux kernel 4.15 in the "Advanced
-Options for Ubuntu" Grub menu. Next time it should also reboot with
-this version if you do not change anything.
+Reboot the machine by manually picking the Linux kernel 4.15 in the
+"Advanced Options for Ubuntu" Grub menu. Next time it should also
+reboot with this version if you do not change anything.
 
 
 ## Installing the Xilinx runtime
@@ -91,11 +91,11 @@ cd XRT/build
 # Compile the Xilinx runtime
 ./build.sh
 # Install the runtime and compile/install the Linux kernel driver
-# (adapt to the real name that might be different)
+# (adapt to the real name if different)
 sudo apt install --reinstall ./Release/xrt_201910.2.2.0_19.04-xrt.deb
 ```
 
-It will install the user-mode XRT runtime, at least compile and
+It will install the user-mode XRT runtime and at least compile and
 install the Xilinx device driver modules for the Linux 4.15 kernel,
 even if it fails for the other kernels installed on the machine. If
 you do not plan to run on the real FPGA board but only use software or
@@ -147,7 +147,7 @@ chmod +x Xilinx_SDAccel_2019.1_0524_1430_Lin64.bin
 ./Xilinx_SDAccel_2019.1_0524_1430_Lin64.bin
 ```
 
-Select the `UltraScale+` platform for the U200 and install it to
+Select the `UltraScale+` platform for the U200 and install it in
 `/opt/xilinx` (because it is the default location used by XRT too).
 
 Ask for a 30 day trial license for example. It puts some information
@@ -155,7 +155,7 @@ into `~/.Xilinx`.
 
 SDAccel comes with some old useless pieces of XRT to
 generate/instrospect the bitstream containers and still wants to use
-them... So we need to patch SDx to avoid using a wrong XRT by executing:
+them... So we need to patch SDx to use the right XRT by executing:
 ```bash
 sudo ln -s $XILINX_XRT /opt/xilinx/SDx/2019.1/xrt/xrt-2.1.0-ubuntu19.04
 ```
@@ -168,7 +168,7 @@ which is an FPGA configuration that pre-defines an architecture on the
 FPGA to execute some kernels in some reconfigurable area.
 
 To develop some kernels for your FPGA board and to run some
-simulations, you need a development shell that will content some
+simulations, you need a development shell that will contain some
 internal description specific to the FPGA and its deployment shell so
 that the tools can generate the right bitstream for the kernels or the
 simulation details.
@@ -195,7 +195,7 @@ If you do not want to use a real board, skip this section.
 If you want to use a real board, follow the recipe "Generating the
 xbutil flash Command" from
 https://www.xilinx.com/html_docs/accelerator_cards/alveo_doc/ftt1547585535561.html
-about how to concretely generate the exact flashing command.
+about how to correctly generate the exact flashing command.
 
 Typically you run:
 ```bash
@@ -276,8 +276,8 @@ INFO: Card[0] validated successfully.
 INFO: All cards validated successfully.
 ```
 
-It looks there is a problem in the Linux `udev` configuration not
-making the DRM driver accessible for some `other` users. A crude
+It looks there is a problem in the Linux `udev` configuration
+making the DRM driver inaccessible for some `other` users. A crude
 work-around for now is for example to run
 ```bash
 sudo chmod 666 /dev/dri/renderD129
@@ -312,7 +312,7 @@ cmake -DCMAKE_BUILD_TYPE=Release \
 make -j`nproc` check-all
 ```
 
-Some checks are still failing but that does not seem to be an issue.
+Some checks may fail but that may not be an issue.
 
 
 ## Compiling and running an application
@@ -388,7 +388,7 @@ cd $SYCL_HOME/sycl/test/xocc_tests/simple_tests
 Note that the compilation line does not change, just the environment
 variable and the use or not of `emconfigutil`.
 
-### Running bigger example on real FPGA
+### Running a bigger example on real FPGA
 
 To run a SYCL translation of
 https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
@@ -408,25 +408,26 @@ and then look at the `input.bmp` and `output.bmp` images.
 
 ## Cleaning up some buffer allocation
 
-The XRT memory model is quite richer (and more complex...) than the
+The XRT memory model is richer (and more complex...) than the
 OpenCL memory model: buffers can be allocated on some DDR or HBM
 memory banks, buffers can be shared between different processes on the
 host, etc.
 
 This means that the buffer lifetime is actually handled by the `xocl`
-kernel driver across the machine to manage this memory sharing, if
-required. The OpenCL buffer creation and destruction APIs handle this
-and fortunately this is hidden by the higher-level SYCL framework.
+kernel driver across the Linux system image to manage this memory
+sharing across different processes, if required. The OpenCL buffer
+creation and destruction APIs handle this and fortunately this is
+hidden by the higher-level SYCL framework.
 
 But if a SYCL program crashes before deallocating the OpenCL buffer
-and the user try to allocate some other buffers at the same place on
+and the user tries to allocate some other buffers at the same place on
 the FPGA board with another program, then the runtime refuses to load
 the program, with some error like:
 ```
 [XRT] ERROR: Failed to load xclbin.
 OpenCL API failed. /var/tmp/rkeryell/SYCL/sycl/sycl/source/detail/program_manager/program_manager.cpp:78: OpenCL API returns: -44 (CL_INVALID_PROGRAM)
 ```
-and with some kernel message that can be display by executing `dmesg`
+and with some kernel message that can be displayed by executing `dmesg`
 like:
 ```
 [256564.482271] [drm] Finding MEM_TOPOLOGY section header
@@ -438,8 +439,8 @@ like:
 ```
 
 Then you need to explicitly deallocate the buffer because the device
-driver has still the hope a program wants to use the data of the
-allocated buffer in some future...
+driver still has the hope a program wants to use the data of the
+allocated buffer in the future...
 
 This can be done by removing the kernel driver and reloading it by
 executing:
