@@ -936,8 +936,8 @@ public:
      // the xocc hw_emu passes as it's passing a raw pointer to a kernel with no
      // address space qualifier because we're not wrapping it in a buffer and
      // using an accessor.
-     // We don't actually care about this parallel_for on device it's a pure
-     // host parallel_for, the actualy H2D/D2H copy is done via OpenCL calls
+     // We don't actually care about this parallel_for on device since it's a
+     // pure host parallel_for, the real H2D/D2H copy is done via OpenCL calls
      // so this is a 'quick fix' for us. At least until the below TODO is
      // implemented and it's pushed down to the memory manager. The alternative
      // would be to just wrap things in a buffer like the original handler but
@@ -985,8 +985,8 @@ public:
      // the xocc hw_emu passes as it's passing a raw pointer to a kernel with no
      // address space qualifier because we're not wrapping it in a buffer and
      // using an accessor.
-     // We don't actually care about this parallel_for on device it's a pure
-     // host parallel_for, the actualy H2D/D2H copy is done via OpenCL calls
+     // We don't actually care about this parallel_for on device since it's a
+     // pure host parallel_for, the real H2D/D2H copy is done via OpenCL calls
      // so this is a 'quick fix' for us. At least until the below TODO is
      // implemented and it's pushed down to the memory manager. The alternative
      // would be to just wrap things in a buffer like the original handler but
@@ -1049,8 +1049,8 @@ public:
      // the xocc hw_emu passes as it's passing a raw pointer to a kernel with no
      // address space qualifier because we're not wrapping it in a buffer and
      // using an accessor.
-     // We don't actually care about this parallel_for on device it's a pure
-     // host parallel_for, the actualy H2D/D2H copy is done via OpenCL calls
+     // We don't actually care about this parallel_for on device since it's a
+     // pure host parallel_for, the real H2D/D2H copy is done via OpenCL calls
      // so this is a 'quick fix' for us. At least until the below TODO is
      // implemented and it's pushed down to the memory manager. The alternative
      // would be to just wrap things in a buffer like the original handler but
@@ -1131,10 +1131,11 @@ public:
       *PatternPtr = Pattern;
     } else {
 
-   // This makes sure we don't compile this on the device, I've not tested this
-   // one but... I'd rather not compile it on the device if it's not required
-   // and it will eventually be implemented in a host centric way as described
-   // by the TODO, similar to the reasoning behind the handler.copy #IF blocks
+   // This makes sure the parallel_for is not compiled for the device, similar
+   // to the copy methods. As it's a host side implementation there is no point
+   // spending compile time on it. It will eventually be implemented in a host
+   // centric way as describedby the TODO, so the #if block can be removed
+   // eventually similar to the reasoning behind the handler.copy.
 #if (!defined(__SYCL_DEVICE_ONLY__) && !defined(__SYCL_XILINX_ONLY__))
       // TODO: Temporary implementation for host. Should be handled by memory
       // manger.

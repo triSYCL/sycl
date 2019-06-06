@@ -81,10 +81,10 @@ static const std::regex matchSomeNaturalInteger {R"(\d+)"};
 // This is to give clarity to why we negate a value from the Z mangle component
 // rather than having a magical number, we have the size of the string we've
 // removed from the mangling.
-static const std::string SPIROCL("__spir_ocl_");
-static const std::string SPIRVOCL("__spirv_ocl_");
-static const std::string SPIRVOCLS("__spirv_ocl_s_");
-static const std::string SPIRVOCLU("__spirv_ocl_u_");
+static const std::string SPIROCL {"__spir_ocl_"};
+static const std::string SPIRVOCL{"__spirv_ocl_"};
+static const std::string SPIRVOCLS{"__spirv_ocl_s_"};
+static const std::string SPIRVOCLU{"__spirv_ocl_u_"};
 
 /// Transform the SYCL kernel functions into xocc SPIR-compatible kernels
 struct InSPIRation : public ModulePass {
@@ -101,7 +101,7 @@ struct InSPIRation : public ModulePass {
 
   /// Note: running this call on real SPIRV builtins is unlikely to yield a
   /// working SPIR builtin as they 1) May not be named the same/have a SPIR
-  /// equivelant 2) Are not neccessarily function calls, but possibly a magic
+  /// equivalent 2) Are not necessarily function calls, but possibly a magic
   /// variable like __spirv_BuiltInGlobalSize, something more complex would be
   /// required.
   void removePrefixFromMangling(Function &F, const std::regex Match,
@@ -409,7 +409,7 @@ struct InSPIRation : public ModulePass {
       // the builtin implementation stabilizes
       removePrefixFromMangling(*F, matchSPIRVOCLU, SPIRVOCLU);
       removePrefixFromMangling(*F, matchSPIRVOCLS, SPIRVOCLS);
-      removePrefixFromMangling(*F, matchSPIRVOCL,  SPIRVOCL);
+      removePrefixFromMangling(*F, matchSPIRVOCL, SPIRVOCL);
       removePrefixFromMangling(*F, matchSPIROCL, SPIROCL);
     }
 

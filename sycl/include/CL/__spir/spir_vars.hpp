@@ -13,7 +13,7 @@
 // Although the __spirv_BuiltInSubgroupSize builtins at the end of the file
 // currently do not have a SPIR variation, so they will break at the moment,
 // they're included here so as not to break the compilation for the moment
-// (although it may be more desireable than a runtime error/symbol missing
+// (although it may be more desirable than a runtime error/symbol missing
 //  error)
 
 // These are converted to SPIR builtins by the inSPIRation pass.
@@ -24,7 +24,7 @@ size_t __spir_ocl_get_local_id(uint dimindx);
 size_t __spir_ocl_get_global_offset(uint dimindx);
 size_t __spir_ocl_get_group_id(uint dimindx);
 
-enum SYCLBuiltinTypes {
+enum class SYCLBuiltinTypes {
    SYCLBuiltinGlobalSize,
    SYCLBuiltinGlobalInvocationId,
    SYCLBuiltinWorkgroupSize,
@@ -39,33 +39,32 @@ enum SYCLBuiltinTypes {
 // Note: There is an arguably more powerful but harder to maintain
 // implementation of this in a prior commit that could allow better
 // redirection/offloading to arbitrary builtins, if the need arises.
-template <int ID>
-size_t MapTo(SYCLBuiltinTypes builtin) {
+constexpr size_t MapTo(SYCLBuiltinTypes builtin, int ID) {
   switch (builtin) {
-    case SYCLBuiltinGlobalSize:
+    case SYCLBuiltinTypes::SYCLBuiltinGlobalSize:
         return __spir_ocl_get_global_size(ID);
     break;
-    case SYCLBuiltinGlobalInvocationId:
+    case SYCLBuiltinTypes::SYCLBuiltinGlobalInvocationId:
       return __spir_ocl_get_global_id(ID);
     break;
-    case SYCLBuiltinWorkgroupSize:
+    case SYCLBuiltinTypes::SYCLBuiltinWorkgroupSize:
       return __spir_ocl_get_local_size(ID);
     break;
-    case SYCLBuiltinLocalInvocationId:
+    case SYCLBuiltinTypes::SYCLBuiltinLocalInvocationId:
       return __spir_ocl_get_local_id(ID);
     break;
-    case SYCLBuiltinWorkgroupId:
+    case SYCLBuiltinTypes::SYCLBuiltinWorkgroupId:
       return __spir_ocl_get_group_id(ID);
     break;
-    case SYCLBuiltinGlobalOffset:
+    case SYCLBuiltinTypes::SYCLBuiltinGlobalOffset:
       return __spir_ocl_get_global_offset(ID);
     break;
   }
 }
 
-#define DEFINE_SYCL_SPIR_CONVERTER(POSTFIX)               \
-  template <int ID> static size_t get##POSTFIX() {        \
-    return MapTo<ID>(SYCLBuiltin##POSTFIX);               \
+#define DEFINE_SYCL_SPIR_CONVERTER(POSTFIX)                                 \
+  template <int ID> static size_t get##POSTFIX() {                          \
+    return MapTo(SYCLBuiltinTypes::SYCLBuiltin##POSTFIX, ID);               \
   }
 
 DEFINE_SYCL_SPIR_CONVERTER(GlobalSize);
@@ -78,8 +77,8 @@ DEFINE_SYCL_SPIR_CONVERTER(GlobalOffset)
 #undef DEFINE_SYCL_SPIR_CONVERTER
 
 // SPIRV intrinsics/builtins that we currently don't map for yet (unsure if
-// they have equivelant SPIR or HLS mappings).
-// TODO: Look into these to see if we have equivelants
+// they have equivalent SPIR or HLS mappings).
+// TODO: Look into these to see if we have equivalents
 extern "C" const __constant uint32_t __spirv_BuiltInSubgroupSize;
 extern "C" const __constant uint32_t __spirv_BuiltInSubgroupMaxSize;
 extern "C" const __constant uint32_t __spirv_BuiltInNumSubgroups;
