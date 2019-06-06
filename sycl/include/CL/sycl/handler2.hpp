@@ -10,7 +10,12 @@
 
 #pragma once
 
+#ifdef __SYCL_SPIR_DEVICE__
+#include <CL/__spir/spir_vars.hpp>
+#else
 #include <CL/__spirv/spirv_vars.hpp>
+#endif
+
 #include <CL/sycl/access/access.hpp>
 #include <CL/sycl/accessor.hpp>
 #include <CL/sycl/context.hpp>
@@ -538,13 +543,7 @@ public:
                               KernelType>::type KernelFunc) {
     id<dimensions> global_id;
 
-#ifdef __SYCL_SPIR_DEVICE__
-    for (int i = 0; i < dimensions; ++i) {
-       global_id[i] = cl::__spirv::get_global_id(i);
-    }
-#else
     detail::initGlobalInvocationId<dimensions>(global_id);
-#endif
 
     KernelFunc(global_id);
   }
@@ -558,15 +557,8 @@ public:
     id<dimensions> global_id;
     range<dimensions> global_size;
 
-#ifdef __SYCL_SPIR_DEVICE__
-    for (int i = 0; i < dimensions; ++i) {
-      global_id[i] = cl::__spirv::get_global_id(i);
-      global_size[i] = cl::__spirv::get_global_size(i);
-    }
-#else
     detail::initGlobalInvocationId<dimensions>(global_id);
     detail::initGlobalSize<dimensions>(global_size);
-#endif
 
     item<dimensions, false> Item =
         detail::Builder::createItem<dimensions, false>(global_size, global_id);
@@ -586,23 +578,12 @@ public:
     id<dimensions> local_id;
     id<dimensions> global_offset;
 
-#ifdef __SYCL_SPIR_DEVICE__
-    for (int i = 0; i < dimensions; ++i) {
-      global_size[i] = cl::__spirv::get_global_size(i);
-      local_size[i] = cl::__spirv::get_local_size(i);
-      group_id[i] = cl::__spirv::get_group_id(i);
-      global_id[i] = cl::__spirv::get_global_id(i);
-      local_id[i] = cl::__spirv::get_local_id(i);
-      global_offset[i] = cl::__spirv::get_global_offset(i);
-    }
-#else
     detail::initGlobalSize<dimensions>(global_size);
     detail::initWorkgroupSize<dimensions>(local_size);
     detail::initWorkgroupId<dimensions>(group_id);
     detail::initGlobalInvocationId<dimensions>(global_id);
     detail::initLocalInvocationId<dimensions>(local_id);
     detail::initGlobalOffset<dimensions>(global_offset);
-#endif
 
     group<dimensions> Group = detail::Builder::createGroup<dimensions>(
         global_size, local_size, group_id);
@@ -951,6 +932,17 @@ public:
   copy(accessor<T_Src, Dims, AccessMode, AccessTarget, IsPlaceholder> Src,
        T_Dst *Dst) {
     if (MIsHost) {
+     // This makes sure we don't compile this on the device, it will kill one of
+     // the xocc hw_emu passes as it's passing a raw pointer to a kernel with no
+     // address space qualifier because we're not wrapping it in a buffer and
+     // using an accessor.
+     // We don't actually care about this parallel_for on device since it's a
+     // pure host parallel_for, the real H2D/D2H copy is done via OpenCL calls
+     // so this is a 'quick fix' for us. At least until the below TODO is
+     // implemented and it's pushed down to the memory manager. The alternative
+     // would be to just wrap things in a buffer like the original handler but
+     // that seems like it could be more error prone.
+#if (!defined(__SYCL_DEVICE_ONLY__) && !defined(__SYCL_XILINX_ONLY__))
       // TODO: Temporary implementation for host. Should be handled by memory
       // manger.
       range<Dims> Range = Src.get_range();
@@ -962,7 +954,7 @@ public:
           LinearIndex += Range[I] * Index[I];
         ((T_Src *)Dst)[LinearIndex] = Src[Index];
       });
-
+#endif
       return;
     }
     MCGType = detail::CG::COPY_ACC_TO_PTR;
@@ -989,6 +981,17 @@ public:
        accessor<T_Dst, Dims, AccessMode, AccessTarget, IsPlaceholder> Dst) {
 
     if (MIsHost) {
+     // This makes sure we don't compile this on the device, it will kill one of
+     // the xocc hw_emu passes as it's passing a raw pointer to a kernel with no
+     // address space qualifier because we're not wrapping it in a buffer and
+     // using an accessor.
+     // We don't actually care about this parallel_for on device since it's a
+     // pure host parallel_for, the real H2D/D2H copy is done via OpenCL calls
+     // so this is a 'quick fix' for us. At least until the below TODO is
+     // implemented and it's pushed down to the memory manager. The alternative
+     // would be to just wrap things in a buffer like the original handler but
+     // that seems like it could be more error prone.
+#if (!defined(__SYCL_DEVICE_ONLY__) && !defined(__SYCL_XILINX_ONLY__))
       // TODO: Temporary implementation for host. Should be handled by memory
       // manger.
       range<Dims> Range = Dst.get_range();
@@ -1001,7 +1004,7 @@ public:
 
         Dst[Index] = ((T_Dst *)Src)[LinearIndex];
       });
-
+#endif
       return;
     }
     MCGType = detail::CG::COPY_PTR_TO_ACC;
@@ -1042,6 +1045,17 @@ public:
            Dst) {
 
     if (MIsHost) {
+     // This makes sure we don't compile this on the device, it will kill one of
+     // the xocc hw_emu passes as it's passing a raw pointer to a kernel with no
+     // address space qualifier because we're not wrapping it in a buffer and
+     // using an accessor.
+     // We don't actually care about this parallel_for on device since it's a
+     // pure host parallel_for, the real H2D/D2H copy is done via OpenCL calls
+     // so this is a 'quick fix' for us. At least until the below TODO is
+     // implemented and it's pushed down to the memory manager. The alternative
+     // would be to just wrap things in a buffer like the original handler but
+     // that seems like it could be more error prone.
+#if (!defined(__SYCL_DEVICE_ONLY__) && !defined(__SYCL_XILINX_ONLY__))
       range<Dims_Src> Range = Dst.get_range();
       parallel_for< class __copyAcc2Acc< T_Src, Dims_Src, AccessMode_Src,
                                          AccessTarget_Src, T_Dst, Dims_Dst,
@@ -1051,7 +1065,7 @@ public:
                                          (Range, [=](id<Dims_Src> Index) {
         Dst[Index] = Src[Index];
       });
-
+#endif
       return;
     }
     MCGType = detail::CG::COPY_ACC_TO_ACC;
@@ -1117,6 +1131,12 @@ public:
       *PatternPtr = Pattern;
     } else {
 
+   // This makes sure the parallel_for is not compiled for the device, similar
+   // to the copy methods. As it's a host side implementation there is no point
+   // spending compile time on it. It will eventually be implemented in a host
+   // centric way as describedby the TODO, so the #if block can be removed
+   // eventually similar to the reasoning behind the handler.copy.
+#if (!defined(__SYCL_DEVICE_ONLY__) && !defined(__SYCL_XILINX_ONLY__))
       // TODO: Temporary implementation for host. Should be handled by memory
       // manger.
       range<Dims> Range = Dst.get_range();
@@ -1124,6 +1144,7 @@ public:
                                 IsPlaceholder>>(Range, [=](id<Dims> Index) {
         Dst[Index] = Pattern;
       });
+#endif
     }
   }
 };

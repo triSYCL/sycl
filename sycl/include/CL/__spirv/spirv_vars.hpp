@@ -10,16 +10,6 @@
 
 #ifdef __SYCL_DEVICE_ONLY__
 
-// TODO: Perhaps encapsulate them more similarly to SPIRV and see if they work
-#ifdef __SYCL_SPIR_DEVICE__
-size_t get_global_size(uint dimindx);
-size_t get_local_size(uint dimindx);
-size_t get_global_id(uint dimindx);
-size_t get_local_id(uint dimindx);
-size_t get_global_offset(uint dimindx);
-size_t get_group_id(uint dimindx);
-#endif
-
 typedef size_t size_t_vec __attribute__((ext_vector_type(3)));
 extern "C" const __constant size_t_vec __spirv_BuiltInGlobalSize;
 extern "C" const __constant size_t_vec __spirv_BuiltInGlobalInvocationId;
@@ -33,6 +23,7 @@ extern "C" const __constant size_t_vec __spirv_BuiltInGlobalOffset;
   template <> size_t get##POSTFIX<0>() { return __spirv_BuiltIn##POSTFIX.x; }  \
   template <> size_t get##POSTFIX<1>() { return __spirv_BuiltIn##POSTFIX.y; }  \
   template <> size_t get##POSTFIX<2>() { return __spirv_BuiltIn##POSTFIX.z; }
+
 
 DEFINE_INT_ID_TO_XYZ_CONVERTER(GlobalSize);
 DEFINE_INT_ID_TO_XYZ_CONVERTER(GlobalInvocationId)
