@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++11 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clang -std=c++17 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
 // RUN: %t.out
 //===- MultipleDevices.cpp - Test checkking multi-device execution --------===//
 //

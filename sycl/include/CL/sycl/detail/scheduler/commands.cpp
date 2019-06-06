@@ -14,10 +14,6 @@
 #include <CL/sycl/detail/scheduler/requirements.h>
 #include <CL/sycl/exception.hpp>
 
-#if (defined(__SYCL_XILINX_ONLY__) && defined(__cplusplus) && (__cplusplus >= 201703L))
-#include <CL/sycl/xilinx/fpga/kernel_properties.hpp>
-#endif
-
 #include <cassert>
 
 namespace csd = cl::sycl::detail;
@@ -32,8 +28,9 @@ const Dst *getParamAddress(const Src *ptr, uint64_t Offset) {
 }
 
 template <int AccessDimensions, typename KernelType>
-uint passGlobalAccessorAsArg(uint I, int LambdaOffset, cl_kernel ClKernel,
-                             const KernelType &HostKernel) {
+uint32_t passGlobalAccessorAsArg(uint32_t I, int LambdaOffset,
+                                 cl_kernel ClKernel,
+                                 const KernelType &HostKernel) {
   using AccType = accessor<char, AccessDimensions, access::mode::read,
                            access::target::global_buffer,
                            access::placeholder::false_t>;
@@ -55,8 +52,9 @@ uint passGlobalAccessorAsArg(uint I, int LambdaOffset, cl_kernel ClKernel,
 }
 
 template <int AccessDimensions, typename KernelType>
-uint passLocalAccessorAsArg(uint I, int LambdaOffset, cl_kernel ClKernel,
-                            const KernelType &HostKernel) {
+uint32_t passLocalAccessorAsArg(uint32_t I, int LambdaOffset,
+                                cl_kernel ClKernel,
+                                const KernelType &HostKernel) {
   using AccType = accessor<char, AccessDimensions, access::mode::read,
                            access::target::local,
                            access::placeholder::false_t>;
@@ -96,7 +94,7 @@ void ExecuteKernelCommand<
   }
 
   if (m_KernelArgs != nullptr) {
-    unsigned ArgumentID = 0;
+    uint32_t ArgumentID = 0;
     for (unsigned I = 0; I < m_KernelArgsNum; ++I) {
       switch (m_KernelArgs[I].kind) {
       case csd::kernel_param_kind_t::kind_std_layout: {
@@ -163,9 +161,16 @@ void ExecuteKernelCommand<
         }
         break;
       }
-      // TODO implement
-      case csd::kernel_param_kind_t::kind_sampler:
-        assert(0);
+      case csd::kernel_param_kind_t::kind_sampler: {
+        sampler *SamplerPtr =
+            const_cast<sampler *>(getParamAddress<cl::sycl::sampler>(
+                &m_HostKernel, m_KernelArgs[I].offset));
+        cl_sampler clSampler =
+            detail::getSyclObjImpl(*SamplerPtr)->getOrCreateSampler(Context);
+        CHECK_OCL_CODE(clSetKernelArg(m_ClKernel, ArgumentID,
+                                      sizeof(cl_sampler), &clSampler));
+        ArgumentID++;
+      }
       }
     }
   }
@@ -199,28 +204,6 @@ ExecuteKernelCommand<
     SingleTask>::runEnqueueNDRangeKernel(cl_command_queue &EnvQueue,
                                          cl_kernel &Kernel,
                                          std::vector<cl_event> CLEvents) {
-  // TODO: Think about if there is a point in "passing" the property down to
-  // here, as in reality the LocalWorkSize is never specified in this
-  // implementation of runEnqueueNDRangeKernel. This implementation of
-  // runEnqueueNDRangeKernel is for cases where the SYCL parallelism construct
-  // is a single_task or a parallel_for without an nd_range (just global range).
-  // So all we're really doing is enforcing a local work group size that a user
-  // can't actually get access to as item has no get_local related methods.
-  // There is no SYCL specification restriction on this use of the attribute
-  // but perhaps it's not needed. Although, maybe there is use case for someone
-  // enforcing a reqd_work_group_size on the global range a kernel is invoked
-  // with. In either case it can be removed and all you would have to do for the
-  // case of single_task is check if the SingleTask variable is true and if it
-  // is specify a LocalWorkSize of 1,1,1 else specify nullptr (this meets the
-  // OpenCL restrictions on ReqdWorkGroupSize).
-  // This will also enforce LocalWorkSize on Intel devices if
-  // reqd_work_group_size is specified and the std is >= 17. Perhaps not ideal.
-  std::vector<size_t> ReqdWorkGroupSize;
-#if (defined(__SYCL_XILINX_ONLY__) && defined(__cplusplus) && (__cplusplus >= 201703L))
-  ReqdWorkGroupSize =
-      cl::sycl::xilinx::get_reqd_work_group_size(m_KernelName);
-#endif
-
   size_t LocalWorkSize[Dimensions];
   size_t GlobalWorkSize[Dimensions];
   size_t GlobalWorkOffset[Dimensions];
@@ -228,14 +211,30 @@ ExecuteKernelCommand<
   for (int I = 0; I < Dimensions; I++) {
     GlobalWorkSize[I] = m_WorkItemsRange[I];
     GlobalWorkOffset[I] = m_WorkItemsOffset[I];
-    LocalWorkSize[I] = (ReqdWorkGroupSize.size() >0) ? ReqdWorkGroupSize[I] : 0;
+    LocalWorkSize[I] = 1;
   }
 
+  // If it's a single task we apply a work group size of 1x1x1 or if it's a
+  // parallel_for with no local size and a global size and dimension of 1
+  // as it's defined in such a way that it is indistinguishable from a
+  // single_task in SCHEDULER_20 at the moment (even if this is SCHEDULER_10
+  // keeping the semantics a·nal·o·gous across the schedulers is ideal.
+  // Otherwise, we do not care, this however means that other than the previous
+  // mentioned case of a parallel for using xilinx::reqd_work_group_size with
+  // parallel_for's with no local work size defined via an nd_range is going to
+  // illicit an OpenCL runtime error (arguably a reasonable response as it's as
+  // if you are not passing a local size to clEnqueueNDRangeKernel yourself).
+  // In the cases where a user can define a local size for the parallel_for, it
+  // is up to the user to make sure the reqd_work_group_size and parallel_for
+  // meet the OpenCL rules, we do not enforce this in the SYCL runtime.
+  bool UseLocalWorkSize = SingleTask ? true : (Dimensions == 1
+                                               && GlobalWorkSize[0] == 1) ?
+                                               true : false;
   cl_event CLEvent;
   cl_int error = clEnqueueNDRangeKernel(
       EnvQueue, Kernel, Dimensions, GlobalWorkOffset, GlobalWorkSize,
-      (ReqdWorkGroupSize.size() > 0) ? LocalWorkSize :  nullptr,
-      CLEvents.size(), CLEvents.data(), &CLEvent);
+      UseLocalWorkSize ? LocalWorkSize :  nullptr, CLEvents.size(), CLEvents.data(),
+      &CLEvent);
   CHECK_OCL_CODE(error);
   return CLEvent;
 }

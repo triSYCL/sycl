@@ -37,7 +37,7 @@ class krnl_sobel;
 
 int main(int argc, char* argv[]) {
   if (argc != 2) {
-      std::cout << "Usage: " << argv[0] << "<input> \n";
+      std::cout << "Usage: " << argv[0] << " <input>\n";
       return 1;
   }
 
@@ -93,6 +93,9 @@ int main(int argc, char* argv[]) {
     printf("pixel_rb count in submit: %zu \n", pixel_rb.get_count());
 
     cgh.single_task<xilinx::reqd_work_group_size<1, 1, 1, krnl_sobel>>(
+    // The reqd_work_group_size is already actually applied internally for single
+    // tasks but this showcases it's usage none the less, as it can be applied
+    // to parallel_fors with local sizes
      [=]() {
       auto gX = xilinx::partition_array<char, 9,
                 xilinx::partition::complete<0>>({-1, 0, 1, -2, 0, 2, -1, 0, 1});
@@ -100,7 +103,7 @@ int main(int argc, char* argv[]) {
       auto gY = xilinx::partition_array<char, 9,
                 xilinx::partition::complete<0>>({1, 2, 1, 0, 0, 0, -1, -2, -1});
 
-      int magX, magY, gI, pIndex, sum;
+      int magX, magY, gI, pIndex;
 
       // Simplified version of krnl_sobelfilter.cl that gives the same output
       // results however the krnl_sobelfilter.cl is more hardware optimized than
@@ -133,8 +136,8 @@ int main(int argc, char* argv[]) {
 
           // capping at 0xFF means no blurring of edges when it gets
           // converted back to a char from an int
-          sum = std::abs(magX) + std::abs(magY);
-          pixel_wb[x + y * width] = min(sum, 0xFF);
+          pixel_wb[x + y * width] = cl::sycl::min((int)(cl::sycl::abs(magX)
+                                                  + cl::sycl::abs(magY)), 0xFF);
         }
       }
     });

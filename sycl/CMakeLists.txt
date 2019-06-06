@@ -5,6 +5,7 @@ project(sycl-solution)
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
+set(CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ON)
 
 if(MSVC)
   set_property(GLOBAL PROPERTY USE_FOLDERS ON)
@@ -27,62 +28,120 @@ endif()
 # Unlike PACKAGE_VERSION, CLANG_VERSION does not include LLVM_VERSION_SUFFIX.
 set(CLANG_VERSION "${CLANG_VERSION_MAJOR}.${CLANG_VERSION_MINOR}.${CLANG_VERSION_PATCHLEVEL}")
 
-set ( LLVM_INST_INC_DIRECTORY "lib${LLVM_LIBDIR_SUFFIX}/clang/${CLANG_VERSION}/include" )
+set(LLVM_INST_INC_DIRECTORY "lib${LLVM_LIBDIR_SUFFIX}/clang/${CLANG_VERSION}/include")
+set(dst_dir ${LLVM_LIBRARY_OUTPUT_INTDIR}/clang/${CLANG_VERSION}/include)
 
-find_package(OpenCL REQUIRED)
+find_package(OpenCL)
 
-include_directories(${OpenCL_INCLUDE_DIRS})
-link_libraries(${OpenCL_LIBRARY})
+include(ExternalProject)
 
-# Try to find and include XRT OpenCL in the build components to allow access to 
-# Xilinx CL extensions in the source files when compiling the runtimes 
-# libSYCL.so, this unfortunately isn't relevant when a user is compiling there 
-# own files, they'll still have to add -I/opt/xilinx/xrt/include/. 
-# It's only relevant to the clang build system and the libSYCL.so file that's 
+if( NOT OpenCL_INCLUDE_DIRS )
+  message ("OpenCL_INCLUDE_DIRS is missed. Try to download headers from github.com")
+  set(OpenCL_INCLUDE_DIRS "${CMAKE_CURRENT_BINARY_DIR}/OpenCL/inc")
+  ExternalProject_Add(ocl-headers
+    GIT_REPOSITORY    https://github.com/KhronosGroup/OpenCL-Headers.git
+    GIT_TAG           origin/master
+    SOURCE_DIR        "${CMAKE_CURRENT_BINARY_DIR}/OpenCL/inc"
+    CONFIGURE_COMMAND ""
+    BUILD_COMMAND     ${CMAKE_COMMAND} -E copy_directory ${OpenCL_INCLUDE_DIRS}/CL ${dst_dir}/CL
+    INSTALL_COMMAND   ""
+    STEP_TARGETS      build
+    COMMENT           "Downloading OpenCL headers."
+  )
+else()
+  message("OpenCL header have been found under ${OpenCL_INCLUDE_DIRS}.")
+  add_custom_target( ocl-headers ALL
+    DEPENDS ${OpenCL_INCLUDE_DIRS}
+    COMMAND ${CMAKE_COMMAND} -E copy_directory ${OpenCL_INCLUDE_DIRS}/CL ${dst_dir}/CL
+    COMMENT "Copying OpenCL headers ..."
+  )
+endif()
+
+if( NOT OpenCL_LIBRARIES )
+  message("OpenCL_LIBRARIES is missed. Try to build from GitHub sources.")
+  set(OpenCL_LIBRARIES "${LLVM_LIBRARY_OUTPUT_INTDIR}/libOpenCL.so")
+  ExternalProject_Add(ocl-icd
+    GIT_REPOSITORY    https://github.com/KhronosGroup/OpenCL-ICD-Loader.git
+    GIT_TAG           origin/master
+    SOURCE_DIR        "${CMAKE_CURRENT_BINARY_DIR}/OpenCL/icd"
+    CONFIGURE_COMMAND ""
+    BUILD_IN_SOURCE   TRUE
+    BUILD_COMMAND     make C_INCLUDE_PATH=${CMAKE_CURRENT_BINARY_DIR}/OpenCL/inc
+    INSTALL_COMMAND   ${CMAKE_COMMAND} -E copy_directory ${CMAKE_CURRENT_BINARY_DIR}/OpenCL/icd/build ${LLVM_LIBRARY_OUTPUT_INTDIR}
+    STEP_TARGETS      build,install
+    DEPENDS           ocl-headers
+  )
+else()
+  message("OpenCL loader has been found: ${OpenCL_LIBRARIES}.")
+  file(GLOB ICD_LOADER_SRC "${OpenCL_LIBRARIES}*")
+  file(COPY ${ICD_LOADER_SRC} DESTINATION ${LLVM_LIBRARY_OUTPUT_INTDIR})
+  add_custom_target(ocl-icd DEPENDS ${OpenCL_LIBRARIES} COMMENT "Copying OpenCL ICD Loader ...")
+endif()
+
+set(SYCL_INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/include/")
+set(OPENCL_INCLUDE "${OpenCL_INCLUDE_DIRS}")
+
+# Try to find and include XRT OpenCL in the build components to allow access to
+# Xilinx OpenCL extensions in the source files when compiling the runtimes
+# libSYCL.so, this unfortunately isn't relevant when a user is compiling there
+# own files, they'll still have to add -I/opt/xilinx/xrt/include/.
+# It's only relevant to the Clang build system and the libSYCL.so file that's
 # compiled, the header files are recompiled on a per application basis as far as
 # I'm aware.
-# NOTE: This isn't really used at the moment as the extensions are only really 
-# used in the buffer_impl.h file for now and those are walled behind Xilinx 
-# IFDEF's for now. However, ideally we would move away from macro usage and 
-# check the device context for a Xilinx device in use and optionally execute the 
-# Xilinx Extensions rather than optionally compile them. This, however would 
-# make XRT a required installation for compiling for any device not just Xilinx 
-# devices, there is a related \todo in buffer_impl.hpp for this
+# \todo We could enforce the download and installation of the XRT runtime
+# similarly to what's done with the OpenCL headers at the moment that makes
+# things a little easier. As it wouldn't matter if someone only wanted to build
+# to run on another platform, they would always have XRT and it's extensions
+# wouldn't break the runtime by being missing
 if (DEFINED ENV{XILINX_XRT})
   if(EXISTS "$ENV{XILINX_XRT}/include" AND EXISTS "$ENV{XILINX_XRT}/lib")
     message(STATUS "XILINX_XRT enabled")
-    message(STATUS "XILINX_XRT Include: $ENV{XILINX_XRT}/include") 
-    #message(STATUS "XILINX_XRT Lib: $ENV{XILINX_XRT}/lib") 
+    message(STATUS "XILINX_XRT Include: $ENV{XILINX_XRT}/include")
+    #message(STATUS "XILINX_XRT Lib: $ENV{XILINX_XRT}/lib")
 
-    # Add SYSTEM infront to cheat the build system into thinking its a system 
+    # Activate alternate code paths containing XRT extensions + normal SYCL code
+    # path. Rather than only compiling the normal SYCL code path. When defined
+    # by the CMake build system __SYCL_XILINX_ONLY__ is only really relevant to
+    # source files that get compiled into the libSYCL.so library. The compiler
+    # still has to internally define __SYCL_XILINX_ONLY__ when compiling user
+    # code as it's still required by the headers that get compiled.
+    # NOTE: I chose to use __SYCL_XILINX_ONLY__ for both the build define and
+    # compiler generated define to cut down on the amount of macro usage, they
+    # also at the time of creation do very similar things, this may change in
+    # the future but I think it will be unlikely. As __SYCL_XILINX_ONLY__ is
+    # mostly related to enforcing XILINX only code paths.
+    add_definitions(-D__SYCL_XILINX_ONLY__)
+
+    # Add SYSTEM infront to cheat the build system into thinking its a system
     # include and silencing warnings from XRT when building... don't want more
     # compiler noise that we can't control
     include_directories(SYSTEM $ENV{XILINX_XRT}/include)
     # link_directories(SYSTEM $ENV{XILINX_XRT}/lib)
   else()
-    message(STATUS "Invalid XILINX_XRT no lib or include directories found")   
+    message(STATUS "Invalid XILINX_XRT no lib or include directories found")
   endif()
 else()
   message(STATUS "XILINX_XRT not set, xilinx cl ext disabled")
 endif()
 
 # Configure SYCL version macro
-set(sycl_inc_dir ${CMAKE_CURRENT_SOURCE_DIR}/include/CL)
+set(sycl_inc_dir ${CMAKE_CURRENT_SOURCE_DIR}/include)
 string(TIMESTAMP __SYCL_COMPILER_VERSION "%Y%m%d")
-set(version_header "${sycl_inc_dir}/sycl/version.hpp")
+set(version_header "${sycl_inc_dir}/CL/sycl/version.hpp")
 configure_file("${version_header}.in" "${version_header}")
 
 # Copy SYCL headers
-set(sycl_inc_dir ${CMAKE_CURRENT_SOURCE_DIR}/include/CL)
-set(dst_dir ${LLVM_LIBRARY_OUTPUT_INTDIR}/clang/${CLANG_VERSION}/include/CL)
 add_custom_target(sycl-headers ALL
-COMMAND ${CMAKE_COMMAND} -E copy_directory ${sycl_inc_dir} ${dst_dir}
+COMMAND ${CMAKE_COMMAND} -E copy_directory ${sycl_inc_dir}/CL ${dst_dir}/CL
 COMMENT "Copying SYCL headers ...")
 
 # Main library
 
 set(sourceRootPath "${CMAKE_CURRENT_SOURCE_DIR}/source")
 set(includeRootPath "${CMAKE_CURRENT_SOURCE_DIR}/include")
+
+include_directories(AFTER "${includeRootPath}" "${OpenCL_INCLUDE_DIRS}")
+link_libraries(${OpenCL_LIBRARIES})
 
 set(SYCLLibrary sycl)
 
@@ -100,9 +159,6 @@ set(CLANG_IN_BUILD "${LLVM_BINARY_DIR}/bin/clang")
 
 set(LLVM_TOOLS_DIR "${LLVM_BINARY_DIR}/bin/")
 
-set(SYCL_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/include/")
-set(OPENCL_INCLUDE "${OpenCL_INCLUDE_DIRS}")
-
 add_library("${SYCLLibrary}" SHARED
   "${includeRootPath}/CL/sycl.hpp"
   "${sourceRootPath}/detail/builtins.cpp"
@@ -115,6 +171,7 @@ add_library("${SYCLLibrary}" SHARED
   "${sourceRootPath}/detail/helpers.cpp"
   "${sourceRootPath}/detail/kernel_impl.cpp"
   "${sourceRootPath}/detail/kernel_info.cpp"
+  "${sourceRootPath}/detail/memory_manager.cpp"
   "${sourceRootPath}/detail/platform_host.cpp"
   "${sourceRootPath}/detail/platform_opencl.cpp"
   "${sourceRootPath}/detail/platform_info.cpp"
@@ -122,9 +179,15 @@ add_library("${SYCLLibrary}" SHARED
   "${sourceRootPath}/detail/program_manager/program_manager.cpp"
   "${sourceRootPath}/detail/queue_impl.cpp"
   "${sourceRootPath}/detail/os_util.cpp"
+  "${sourceRootPath}/detail/platform_util.cpp"
+  "${sourceRootPath}/detail/sampler_impl.cpp"
   "${sourceRootPath}/detail/scheduler/commands.cpp"
+  "${sourceRootPath}/detail/scheduler/commands2.cpp"
   "${sourceRootPath}/detail/scheduler/printers.cpp"
   "${sourceRootPath}/detail/scheduler/scheduler.cpp"
+  "${sourceRootPath}/detail/scheduler/graph_processor.cpp"
+  "${sourceRootPath}/detail/scheduler/graph_builder.cpp"
+  "${sourceRootPath}/detail/scheduler/scheduler2.cpp"
   "${sourceRootPath}/detail/util.cpp"
   "${sourceRootPath}/context.cpp"
   "${sourceRootPath}/device.cpp"
@@ -135,10 +198,30 @@ add_library("${SYCLLibrary}" SHARED
   "${sourceRootPath}/kernel.cpp"
   "${sourceRootPath}/platform.cpp"
   "${sourceRootPath}/queue.cpp"
+  "${sourceRootPath}/sampler.cpp"
   "${sourceRootPath}/spirv_ops.cpp"
 )
 
-include_directories("${SYCLLibrary}" "${includeRootPath}")
+add_dependencies("${SYCLLibrary}"
+  ocl-icd
+  ocl-headers
+  sycl-headers
+)
+
+add_custom_target( sycl-toolchain
+  DEPENDS "${SYCLLibrary}"
+          clang
+          clang-offload-wrapper
+          clang-offload-bundler
+          llc
+          llvm-as
+          llvm-dis
+          llvm-spirv
+          llvm-link
+          sycl-xocc
+          opt
+  COMMENT "Building SYCL compiler toolchain..."
+)
 
 set_target_properties("${SYCLLibrary}" PROPERTIES LINKER_LANGUAGE CXX)
 
@@ -151,41 +234,7 @@ if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
 endif()
 
 install(TARGETS "${SYCLLibrary}" DESTINATION "lib" COMPONENT ${SYCLLibrary})
-install(DIRECTORY "${includeRootPath}/." DESTINATION "${LLVM_INST_INC_DIRECTORY}" COMPONENT sycl_headers)
+install(DIRECTORY "${includeRootPath}/." DESTINATION "${LLVM_INST_INC_DIRECTORY}" COMPONENT sycl-headers)
 
 add_subdirectory( test )
 add_subdirectory( tools )
-
-set(manifest_list)
-set( DEPLOY_LIST
-  sycl
-  sycl-xocc
-  ocl_lib
-  ocl_headers
-  sycl_headers
-  clang
-  clang-offload-wrapper
-  clang-offload-bundler
-  llc
-  llvm-as
-  llvm-dis
-  llvm-spirv
-  llvm-link
-  opt
-)
-
-foreach( comp ${DEPLOY_LIST} )
-
-  message( STATUS "Adding component ${comp} to deploy")
-
-  set (manifest ${CMAKE_CURRENT_BINARY_DIR}/install_manifest_${comp}.txt)
-  add_custom_command(OUTPUT ${manifest}
-                     COMMAND "${CMAKE_COMMAND}"
-                             "-DCMAKE_INSTALL_COMPONENT=${comp}"
-                             -P "${CMAKE_BINARY_DIR}/cmake_install.cmake"
-                     COMMENT "Deploying component ${comp}"
-                     USES_TERMINAL)
-  list(APPEND manifest_list ${manifest})
-endforeach( comp )
-
-add_custom_target(deploy DEPENDS ${manifest_list})

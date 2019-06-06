@@ -29,14 +29,17 @@
 // CHECK-NEXT:   { kernel_param_kind_t::kind_std_layout, 4, 0 },
 // CHECK-NEXT:   { kernel_param_kind_t::kind_accessor, 4062, 4 },
 // CHECK-NEXT:   { kernel_param_kind_t::kind_accessor, 6112, 7 },
+// CHECK-NEXT:   { kernel_param_kind_t::kind_sampler, 8, 16 },
 // CHECK-EMPTY:
 // CHECK-NEXT:   //--- _ZTSN16second_namespace13second_kernelIcEE
 // CHECK-NEXT:   { kernel_param_kind_t::kind_std_layout, 4, 0 },
 // CHECK-NEXT:   { kernel_param_kind_t::kind_accessor, 6112, 4 },
+// CHECK-NEXT:   { kernel_param_kind_t::kind_sampler, 8, 8 },
 // CHECK-EMPTY:
 // CHECK-NEXT:   //--- _ZTS12third_kernelILi1Ei5pointIZ4mainE1XEE
 // CHECK-NEXT:   { kernel_param_kind_t::kind_std_layout, 4, 0 },
 // CHECK-NEXT:   { kernel_param_kind_t::kind_accessor, 6112, 4 },
+// CHECK-NEXT:   { kernel_param_kind_t::kind_sampler, 8, 8 },
 // CHECK-EMPTY:
 // CHECK-NEXT:   //--- _ZTS13fourth_kernelIJN15template_arg_ns14namespaced_argILi1EEEEE
 // CHECK-NEXT:   { kernel_param_kind_t::kind_std_layout, 4, 0 },
@@ -45,10 +48,10 @@
 // CHECK-NEXT: };
 //
 // CHECK: template <class KernelNameType> struct KernelInfo;
-// CHECK: template <> struct KernelInfo<first_kernel> {
-// CHECK: template <> struct KernelInfo<second_namespace::second_kernel<char>> {
-// CHECK: template <> struct KernelInfo<third_kernel<1, int, point<X> >> {
-// CHECK: template <> struct KernelInfo<fourth_kernel<template_arg_ns::namespaced_arg<1> >> {
+// CHECK: template <> struct KernelInfo<class first_kernel> {
+// CHECK: template <> struct KernelInfo<::second_namespace::second_kernel<char>> {
+// CHECK: template <> struct KernelInfo<::third_kernel<1, int, ::point<X> >> {
+// CHECK: template <> struct KernelInfo<::fourth_kernel< ::template_arg_ns::namespaced_arg<1> >> {
 
 #include "sycl.hpp"
 
@@ -68,11 +71,11 @@ template <int a, typename T1, typename T2>
 class third_kernel;
 
 namespace template_arg_ns {
-  template <int DimX>
-  struct namespaced_arg {};
-}
+template <int DimX>
+struct namespaced_arg {};
+} // namespace template_arg_ns
 
-template <typename ...Ts>
+template <typename... Ts>
 class fourth_kernel;
 
 int main() {
@@ -83,6 +86,7 @@ int main() {
                      cl::sycl::access::placeholder::true_t>
       acc2;
   int i = 13;
+  cl::sycl::sampler smplr;
   // TODO: Uncomemnt when structures in kernel arguments are correctly processed
   //       by SYCL compiler
   /*  struct {
@@ -95,17 +99,20 @@ int main() {
 
       acc1.use();
       acc2.use();
+      smplr.use();
     }
   });
 
   kernel_single_task<class second_namespace::second_kernel<char>>([=]() {
     if (i == 13) {
       acc2.use();
+      smplr.use();
     }
   });
   kernel_single_task<class third_kernel<1, int,point<struct X>>>([=]() {
     if (i == 13) {
       acc2.use();
+      smplr.use();
     }
   });
   kernel_single_task<class fourth_kernel<template_arg_ns::namespaced_arg<1>>>([=]() {

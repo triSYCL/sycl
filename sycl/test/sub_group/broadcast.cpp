@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++11 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clang -std=c++17 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
@@ -33,9 +33,16 @@ template <typename T> void check(queue &Queue) {
           sgsizeacc[0] = SG.get_max_local_range()[0];
       });
     });
+
+    // Temporary workaround to avoid waiting for the task while still blocked
+    // task is located in the same queue.
+    size_t sg_size = 0;
+    {
+      auto sgsizeacc = sgsizebuf.get_access<access::mode::read_write>();
+      sg_size = sgsizeacc[0];
+    }
+
     auto syclacc = syclbuf.template get_access<access::mode::read_write>();
-    auto sgsizeacc = sgsizebuf.get_access<access::mode::read_write>();
-    size_t sg_size = sgsizeacc[0];
     if (sg_size == 0)
       sg_size = L;
     int WGid = -1, SGid = 0;

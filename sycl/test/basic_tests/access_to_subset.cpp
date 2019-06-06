@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++11 -fsycl %s -o %t.out -lstdc++ -lOpenCL
+// RUN: %clang -std=c++17 -fsycl %s -o %t.out -lstdc++ -lOpenCL
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
@@ -29,6 +29,11 @@ int main() {
     auto offset = id<2>(1, 1);
     auto subRange = range<2>(M - 2, N - 2);
     queue myQueue;
+    myQueue.submit([&](handler &cgh) {
+      acc_w B(Buffer, cgh);
+      cgh.parallel_for<class bufferByRange2_init>(
+          origRange, [=](id<2> index) { B[index] = 0; });
+    });
     myQueue.submit([&](handler &cgh) {
       acc_w B(Buffer, cgh, subRange, offset);
       cgh.parallel_for<class bufferByRange2>(

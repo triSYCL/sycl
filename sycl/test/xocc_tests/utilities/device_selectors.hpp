@@ -26,8 +26,10 @@ namespace selector_defines {
    class IntelDeviceSelector : public device_selector {
     public:
       int operator()(const cl::sycl::device &Device) const override {
-        const std::string DeviceVendor = Device.get_info<info::device::vendor>();
-        return (DeviceVendor.find("Intel(R) Corporation") != std::string::npos) ? 1 : -1;
+        const std::string DeviceVendor =
+          Device.get_info<info::device::vendor>();
+        return (DeviceVendor.find("Intel(R) Corporation") != std::string::npos)
+                ? 1 : -1;
       }
     };
 
@@ -39,11 +41,14 @@ namespace selector_defines {
      public:
        int operator()(const cl::sycl::device &Device) const override {
 #ifdef __SYCL_XILINX_ONLY__
-          const std::string DeviceVendor = Device.get_info<info::device::vendor>();
-          return (DeviceVendor.find("Xilinx") != std::string::npos) ? 1 : -1;
+        const std::string DeviceVendor =
+          Device.get_info<info::device::vendor>();
+        return (DeviceVendor.find("Xilinx") != std::string::npos) ? 1 : -1;
 #else
-         const std::string DeviceVendor = Device.get_info<info::device::vendor>();
-         return (DeviceVendor.find("Intel(R) Corporation") != std::string::npos) ? 1 : -1;
+        const std::string DeviceVendor =
+          Device.get_info<info::device::vendor>();
+        return (DeviceVendor.find("Intel(R) Corporation") != std::string::npos)
+                ? 1 : -1;
 #endif
        }
      };

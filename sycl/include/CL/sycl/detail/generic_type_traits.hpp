@@ -11,10 +11,8 @@
 #include <CL/sycl/pointers.hpp>
 #include <CL/sycl/types.hpp>
 
+#include <limits>
 #include <type_traits>
-
-// TODO Delete when half type will supported by SYCL Runtime
-#define __HALF_NO_ENABLED
 
 namespace cl {
 namespace sycl {
@@ -61,7 +59,6 @@ using is_genfloatd =
     std::integral_constant<bool, is_contained<T, type_list<cl_double>>::value ||
                                      is_doublen<T>::value>;
 
-#ifndef __HALF_NO_ENABLED
 // halfn: half2, half3, half4, half8, half16
 template <typename T>
 using is_halfn = typename is_contained<
@@ -72,34 +69,23 @@ template <typename T>
 using is_genfloath =
     std::integral_constant<bool, is_contained<T, type_list<cl_half>>::value ||
                                      is_halfn<T>::value>;
-#endif
 
 // genfloat: genfloatf, genfloatd, genfloath
 template <typename T>
 using is_genfloat = std::integral_constant<bool, is_genfloatf<T>::value ||
-                                                     is_genfloatd<T>::value
-#ifndef __HALF_NO_ENABLED
-                                                     || is_genfloath<T>::value
-#endif
-                                           >;
+                                                     is_genfloatd<T>::value ||
+                                                     is_genfloath<T>::value>;
 
 // sgenfloat: float, double, half
 template <typename T>
-using is_sgenfloat = typename is_contained<T, type_list<cl_float, cl_double
-#ifndef __HALF_NO_ENABLED
-                                                        ,
-                                                        cl_half
-#endif
-                                                        >>::type;
+using is_sgenfloat =
+    typename is_contained<T, type_list<cl_float, cl_double, cl_half>>::type;
 
 // vgenfloat: floatn, doublen, halfn
 template <typename T>
 using is_vgenfloat =
-    std::integral_constant<bool, is_floatn<T>::value || is_doublen<T>::value
-#ifndef __HALF_NO_ENABLED
-                                     || is_halfn<T>::value
-#endif
-                           >;
+    std::integral_constant<bool, is_floatn<T>::value || is_doublen<T>::value ||
+                                     is_halfn<T>::value>;
 
 // gengeofloat: float, float2, float3, float4
 template <typename T>
@@ -111,12 +97,10 @@ template <typename T>
 using is_gengeodouble = typename is_contained<
     T, type_list<cl_double, cl_double2, cl_double3, cl_double4>>::type;
 
-#ifndef __HALF_NO_ENABLED
 // gengeohalf: half, half2, half3, half4
 template <typename T>
 using is_gengeohalf = typename is_contained<
     T, type_list<cl_half, cl_half2, cl_half3, cl_half4>>::type;
-#endif
 
 // gengeofloat: float, float2, float3, float4
 template <typename T>
@@ -129,12 +113,22 @@ using is_vgengeodouble =
     typename is_contained<T,
                           type_list<cl_double2, cl_double3, cl_double4>>::type;
 
-#ifndef __HALF_NO_ENABLED
 // gengeohalf: half2, half3, half4
 template <typename T>
 using is_vgengeohalf =
     typename is_contained<T, type_list<cl_half2, cl_half3, cl_half4>>::type;
-#endif
+
+// sgengeo: float, double, half
+template <typename T>
+using is_sgengeo = std::integral_constant<
+    bool, is_contained<T, type_list<cl_float, cl_double, cl_half>>::value>;
+
+// vgengeo: vgengeofloat, vgengeodouble, vgengeohalf
+template <typename T>
+using is_vgengeo =
+    std::integral_constant<bool, is_vgengeofloat<T>::value ||
+                                     is_vgengeodouble<T>::value ||
+                                     is_vgengeohalf<T>::value>;
 
 // gencrossfloat:  float3, float4
 template <typename T>
@@ -146,22 +140,17 @@ template <typename T>
 using is_gencrossdouble =
     typename is_contained<T, type_list<cl_double3, cl_double4>>::type;
 
-#ifndef __HALF_NO_ENABLED
 // gencrosshalf: half3, half4
 template <typename T>
 using is_gencrosshalf =
     typename is_contained<T, type_list<cl_half3, cl_half4>>::type;
-#endif
 
 // gencross: gencrossfloat, gencrossdouble, gencrosshalf
 template <typename T>
 using is_gencross =
     std::integral_constant<bool, is_gencrossfloat<T>::value ||
-                                     is_gencrossdouble<T>::value
-#ifndef __HALF_NO_ENABLED
-                                     || is_gencrosshalf<T>::value
-#endif
-                           >;
+                                     is_gencrossdouble<T>::value ||
+                                     is_gencrosshalf<T>::value>;
 
 // charn: char2, char3, char4, char8, char16
 template <typename T>
@@ -367,11 +356,15 @@ template <typename T>
 using is_gentype = std::integral_constant<bool, is_genfloat<T>::value ||
                                                     is_geninteger<T>::value>;
 
+// forward declarations
+template <typename T> class TryToGetElementType;
+
 // genintegerNbit All types within geninteger whose base type are N bits in
 // size, where N = 8, 16, 32, 64
 template <typename T, int N>
 using is_igenintegerNbit = typename std::integral_constant<
-    bool, is_igeninteger<T>::value || (sizeof(typename T::element_type) == N)>;
+    bool, is_igeninteger<T>::value &&
+              (sizeof(typename TryToGetElementType<T>::type) == N)>;
 
 // igeninteger8bit All types within igeninteger whose base type are 8 bits in
 // size
@@ -393,7 +386,8 @@ template <typename T> using is_igeninteger64bit = is_igenintegerNbit<T, 8>;
 // size, where N = 8, 16, 32, 64.
 template <typename T, int N>
 using is_ugenintegerNbit = typename std::integral_constant<
-    bool, is_ugeninteger<T>::value || (sizeof(typename T::element_type) == N)>;
+    bool, is_ugeninteger<T>::value &&
+              (sizeof(typename TryToGetElementType<T>::type) == N)>;
 
 // ugeninteger8bit All types within ugeninteger whose base type are 8 bits in
 // size
@@ -415,7 +409,8 @@ template <typename T> using is_ugeninteger64bit = is_ugenintegerNbit<T, 8>;
 // size, where N = 8, 16, 32, 64.
 template <typename T, int N>
 using is_genintegerNbit = typename std::integral_constant<
-    bool, is_geninteger<T>::value || (sizeof(typename T::element_type) == N)>;
+    bool, is_geninteger<T>::value &&
+              (sizeof(typename TryToGetElementType<T>::type) == N)>;
 
 // geninteger8bit All types within geninteger whose base type are 8 bits in size
 template <typename T> using is_geninteger8bit = is_genintegerNbit<T, 1>;
@@ -463,14 +458,12 @@ using is_genfloatptr =
                                      is_MultiPtrOfGLR<P, cl_float4>::value ||
                                      is_MultiPtrOfGLR<P, cl_float8>::value ||
                                      is_MultiPtrOfGLR<P, cl_float16>::value ||
-#ifndef __HALF_NO_ENABLED
                                      is_MultiPtrOfGLR<P, cl_half>::value ||
                                      is_MultiPtrOfGLR<P, cl_half2>::value ||
                                      is_MultiPtrOfGLR<P, cl_half3>::value ||
                                      is_MultiPtrOfGLR<P, cl_half4>::value ||
                                      is_MultiPtrOfGLR<P, cl_half8>::value ||
                                      is_MultiPtrOfGLR<P, cl_half16>::value ||
-#endif
                                      is_MultiPtrOfGLR<P, cl_double>::value ||
                                      is_MultiPtrOfGLR<P, cl_double2>::value ||
                                      is_MultiPtrOfGLR<P, cl_double3>::value ||
@@ -499,7 +492,6 @@ template <> struct unsign_integral_to_float_point<cl_uint16> {
   using type = cl_float16;
 };
 
-#ifndef __HALF_NO_ENABLED
 template <> struct unsign_integral_to_float_point<cl_ushort> {
   using type = cl_half;
 };
@@ -518,7 +510,6 @@ template <> struct unsign_integral_to_float_point<cl_ushort8> {
 template <> struct unsign_integral_to_float_point<cl_ushort16> {
   using type = cl_half16;
 };
-#endif
 
 template <> struct unsign_integral_to_float_point<cl_ulong> {
   using type = cl_double;
@@ -585,7 +576,6 @@ template <> struct float_point_to_sign_integral<cl_float16> {
   using type = cl_int16;
 };
 
-#ifndef __HALF_NO_ENABLED
 template <> struct float_point_to_sign_integral<cl_half> {
   using type = cl_int;
 };
@@ -604,7 +594,6 @@ template <> struct float_point_to_sign_integral<cl_half8> {
 template <> struct float_point_to_sign_integral<cl_half16> {
   using type = cl_short16;
 };
-#endif
 
 template <> struct float_point_to_sign_integral<cl_double> {
   using type = cl_int;
@@ -633,14 +622,14 @@ template <> struct float_point_to_int<cl_float3> { using type = cl_int3; };
 template <> struct float_point_to_int<cl_float4> { using type = cl_int4; };
 template <> struct float_point_to_int<cl_float8> { using type = cl_int8; };
 template <> struct float_point_to_int<cl_float16> { using type = cl_int16; };
-#ifndef __HALF_NO_ENABLED
+
 template <> struct float_point_to_int<cl_half> { using type = cl_int; };
 template <> struct float_point_to_int<cl_half2> { using type = cl_int2; };
 template <> struct float_point_to_int<cl_half3> { using type = cl_int3; };
 template <> struct float_point_to_int<cl_half4> { using type = cl_int4; };
 template <> struct float_point_to_int<cl_half8> { using type = cl_int8; };
 template <> struct float_point_to_int<cl_half16> { using type = cl_int16; };
-#endif
+
 template <> struct float_point_to_int<cl_double> { using type = cl_int; };
 template <> struct float_point_to_int<cl_double2> { using type = cl_int2; };
 template <> struct float_point_to_int<cl_double3> { using type = cl_int3; };
@@ -649,34 +638,35 @@ template <> struct float_point_to_int<cl_double8> { using type = cl_int8; };
 template <> struct float_point_to_int<cl_double16> { using type = cl_int16; };
 
 // Used for abs and abs_diff built-in
-template <typename T> struct make_unsigned;
-template <> struct make_unsigned<char> { using type = uchar; };
-template <> struct make_unsigned<char2> { using type = uchar2; };
-template <> struct make_unsigned<char3> { using type = uchar3; };
-template <> struct make_unsigned<char4> { using type = uchar4; };
-template <> struct make_unsigned<char8> { using type = uchar8; };
-template <> struct make_unsigned<char16> { using type = uchar16; };
+template <typename T> struct make_unsigned { using type = T; };
 
-template <> struct make_unsigned<short> { using type = ushort; };
-template <> struct make_unsigned<short2> { using type = ushort2; };
-template <> struct make_unsigned<short3> { using type = ushort3; };
-template <> struct make_unsigned<short4> { using type = ushort4; };
-template <> struct make_unsigned<short8> { using type = ushort8; };
-template <> struct make_unsigned<short16> { using type = ushort16; };
+template <> struct make_unsigned<cl_char> { using type = cl_uchar; };
+template <> struct make_unsigned<cl_char2> { using type = cl_uchar2; };
+template <> struct make_unsigned<cl_char3> { using type = cl_uchar3; };
+template <> struct make_unsigned<cl_char4> { using type = cl_uchar4; };
+template <> struct make_unsigned<cl_char8> { using type = cl_uchar8; };
+template <> struct make_unsigned<cl_char16> { using type = cl_uchar16; };
 
-template <> struct make_unsigned<int> { using type = uint; };
-template <> struct make_unsigned<int2> { using type = uint2; };
-template <> struct make_unsigned<int3> { using type = uint3; };
-template <> struct make_unsigned<int4> { using type = uint4; };
-template <> struct make_unsigned<int8> { using type = uint8; };
-template <> struct make_unsigned<int16> { using type = uint16; };
+template <> struct make_unsigned<cl_short> { using type = cl_ushort; };
+template <> struct make_unsigned<cl_short2> { using type = cl_ushort2; };
+template <> struct make_unsigned<cl_short3> { using type = cl_ushort3; };
+template <> struct make_unsigned<cl_short4> { using type = cl_ushort4; };
+template <> struct make_unsigned<cl_short8> { using type = cl_ushort8; };
+template <> struct make_unsigned<cl_short16> { using type = cl_ushort16; };
 
-template <> struct make_unsigned<long> { using type = ulong; };
-template <> struct make_unsigned<long2> { using type = ulong2; };
-template <> struct make_unsigned<long3> { using type = ulong3; };
-template <> struct make_unsigned<long4> { using type = ulong4; };
-template <> struct make_unsigned<long8> { using type = ulong8; };
-template <> struct make_unsigned<long16> { using type = ulong16; };
+template <> struct make_unsigned<cl_int> { using type = cl_uint; };
+template <> struct make_unsigned<cl_int2> { using type = cl_uint2; };
+template <> struct make_unsigned<cl_int3> { using type = cl_uint3; };
+template <> struct make_unsigned<cl_int4> { using type = cl_uint4; };
+template <> struct make_unsigned<cl_int8> { using type = cl_uint8; };
+template <> struct make_unsigned<cl_int16> { using type = cl_uint16; };
+
+template <> struct make_unsigned<cl_long> { using type = cl_ulong; };
+template <> struct make_unsigned<cl_long2> { using type = cl_ulong2; };
+template <> struct make_unsigned<cl_long3> { using type = cl_ulong3; };
+template <> struct make_unsigned<cl_long4> { using type = cl_ulong4; };
+template <> struct make_unsigned<cl_long8> { using type = cl_ulong8; };
+template <> struct make_unsigned<cl_long16> { using type = cl_ulong16; };
 
 template <> struct make_unsigned<longlong> { using type = ulonglong; };
 template <> struct make_unsigned<longlong2> { using type = ulonglong2; };
@@ -685,30 +675,292 @@ template <> struct make_unsigned<longlong4> { using type = ulonglong4; };
 template <> struct make_unsigned<longlong8> { using type = ulonglong8; };
 template <> struct make_unsigned<longlong16> { using type = ulonglong16; };
 
+template <typename T> struct make_signed { using type = T; };
+
+template <> struct make_signed<cl_uchar> { using type = cl_char; };
+template <> struct make_signed<cl_uchar2> { using type = cl_char2; };
+template <> struct make_signed<cl_uchar3> { using type = cl_char3; };
+template <> struct make_signed<cl_uchar4> { using type = cl_char4; };
+template <> struct make_signed<cl_uchar8> { using type = cl_char8; };
+template <> struct make_signed<cl_uchar16> { using type = cl_char16; };
+
+template <> struct make_signed<cl_ushort> { using type = cl_short; };
+template <> struct make_signed<cl_ushort2> { using type = cl_short2; };
+template <> struct make_signed<cl_ushort3> { using type = cl_short3; };
+template <> struct make_signed<cl_ushort4> { using type = cl_short4; };
+template <> struct make_signed<cl_ushort8> { using type = cl_short8; };
+template <> struct make_signed<cl_ushort16> { using type = cl_short16; };
+
+template <> struct make_signed<cl_uint> { using type = cl_int; };
+template <> struct make_signed<cl_uint2> { using type = cl_int2; };
+template <> struct make_signed<cl_uint3> { using type = cl_int3; };
+template <> struct make_signed<cl_uint4> { using type = cl_int4; };
+template <> struct make_signed<cl_uint8> { using type = cl_int8; };
+template <> struct make_signed<cl_uint16> { using type = cl_int16; };
+
+template <> struct make_signed<cl_ulong> { using type = cl_long; };
+template <> struct make_signed<cl_ulong2> { using type = cl_long2; };
+template <> struct make_signed<cl_ulong3> { using type = cl_long3; };
+template <> struct make_signed<cl_ulong4> { using type = cl_long4; };
+template <> struct make_signed<cl_ulong8> { using type = cl_long8; };
+template <> struct make_signed<cl_ulong16> { using type = cl_long16; };
+
+template <> struct make_signed<ulonglong> { using type = longlong; };
+template <> struct make_signed<ulonglong2> { using type = longlong2; };
+template <> struct make_signed<ulonglong3> { using type = longlong3; };
+template <> struct make_signed<ulonglong4> { using type = longlong4; };
+template <> struct make_signed<ulonglong8> { using type = longlong8; };
+template <> struct make_signed<ulonglong16> { using type = longlong16; };
+
 // Used for upsample built-in
 // Bases on Table 4.93: Scalar data type aliases supported by SYCL
 template <typename T> struct make_upper;
-template <> struct make_upper<cl::sycl::cl_char> {
-  using type = cl::sycl::cl_short;
+
+template <> struct make_upper<cl_char> { using type = cl_short; };
+template <> struct make_upper<cl_char2> { using type = cl_short2; };
+template <> struct make_upper<cl_char3> { using type = cl_short3; };
+template <> struct make_upper<cl_char4> { using type = cl_short4; };
+template <> struct make_upper<cl_char8> { using type = cl_short8; };
+template <> struct make_upper<cl_char16> { using type = cl_short16; };
+
+template <> struct make_upper<cl_uchar> { using type = cl_ushort; };
+template <> struct make_upper<cl_uchar2> { using type = cl_ushort2; };
+template <> struct make_upper<cl_uchar3> { using type = cl_ushort3; };
+template <> struct make_upper<cl_uchar4> { using type = cl_ushort4; };
+template <> struct make_upper<cl_uchar8> { using type = cl_ushort8; };
+template <> struct make_upper<cl_uchar16> { using type = cl_ushort16; };
+
+template <> struct make_upper<cl_short> { using type = cl_int; };
+template <> struct make_upper<cl_short2> { using type = cl_int2; };
+template <> struct make_upper<cl_short3> { using type = cl_int3; };
+template <> struct make_upper<cl_short4> { using type = cl_int4; };
+template <> struct make_upper<cl_short8> { using type = cl_int8; };
+template <> struct make_upper<cl_short16> { using type = cl_int16; };
+
+template <> struct make_upper<cl_ushort> { using type = cl_uint; };
+template <> struct make_upper<cl_ushort2> { using type = cl_uint2; };
+template <> struct make_upper<cl_ushort3> { using type = cl_uint3; };
+template <> struct make_upper<cl_ushort4> { using type = cl_uint4; };
+template <> struct make_upper<cl_ushort8> { using type = cl_uint8; };
+template <> struct make_upper<cl_ushort16> { using type = cl_uint16; };
+
+template <> struct make_upper<cl_int> { using type = cl_long; };
+template <> struct make_upper<cl_int2> { using type = cl_long2; };
+template <> struct make_upper<cl_int3> { using type = cl_long3; };
+template <> struct make_upper<cl_int4> { using type = cl_long4; };
+template <> struct make_upper<cl_int8> { using type = cl_long8; };
+template <> struct make_upper<cl_int16> { using type = cl_long16; };
+
+template <> struct make_upper<cl_uint> { using type = cl_ulong; };
+template <> struct make_upper<cl_uint2> { using type = cl_ulong2; };
+template <> struct make_upper<cl_uint3> { using type = cl_ulong3; };
+template <> struct make_upper<cl_uint4> { using type = cl_ulong4; };
+template <> struct make_upper<cl_uint8> { using type = cl_ulong8; };
+template <> struct make_upper<cl_uint16> { using type = cl_ulong16; };
+
+template <> struct make_upper<cl_long> { using type = longlong; };
+template <> struct make_upper<cl_long2> { using type = longlong2; };
+template <> struct make_upper<cl_long3> { using type = longlong3; };
+template <> struct make_upper<cl_long4> { using type = longlong4; };
+template <> struct make_upper<cl_long8> { using type = longlong8; };
+template <> struct make_upper<cl_long16> { using type = longlong16; };
+
+template <> struct make_upper<cl_ulong> { using type = ulonglong; };
+template <> struct make_upper<cl_ulong2> { using type = ulonglong2; };
+template <> struct make_upper<cl_ulong3> { using type = ulonglong3; };
+template <> struct make_upper<cl_ulong4> { using type = ulonglong4; };
+template <> struct make_upper<cl_ulong8> { using type = ulonglong8; };
+template <> struct make_upper<cl_ulong16> { using type = ulonglong16; };
+
+// Try to get pointer_t, otherwise T
+template <typename T> class TryToGetPointerT {
+  static T check(...);
+  template <typename A> static typename A::pointer_t check(const A &);
+
+public:
+  using type = decltype(check(T()));
+  static constexpr bool value = !std::is_same<T, type>::value;
 };
-template <> struct make_upper<cl::sycl::cl_uchar> {
-  using type = cl::sycl::cl_ushort;
+
+// Try to get element_type, otherwise T
+template <typename T> class TryToGetElementType {
+  static T check(...);
+  template <typename A> static typename A::element_type check(const A &);
+
+public:
+  using type = decltype(check(T()));
+  static constexpr bool value = !std::is_same<T, type>::value;
 };
-template <> struct make_upper<cl::sycl::cl_short> {
-  using type = cl::sycl::cl_int;
+
+// Try to get vector_t, otherwise T
+template <typename T> class TryToGetVectorT {
+  static T check(...);
+  template <typename A> static typename A::vector_t check(const A &);
+
+public:
+  using type = decltype(check(T()));
+  static constexpr bool value = !std::is_same<T, type>::value;
 };
-template <> struct make_upper<cl::sycl::cl_ushort> {
-  using type = cl::sycl::cl_uint;
+
+// Try to get pointer_t (if pointer_t indicates on the type with vector_t
+// creates a pointer type on vector_t), otherwise T
+template <typename T> class TryToGetPointerVecT {
+  static T check(...);
+  template <typename A>
+  static typename PtrValueType<
+      typename TryToGetVectorT<typename TryToGetElementType<A>::type>::type,
+      A::address_space>::type *
+  check(const A &);
+
+public:
+  using type = decltype(check(T()));
 };
-template <> struct make_upper<cl::sycl::cl_int> {
-  using type = cl::sycl::cl_long;
+
+template <typename T, typename = typename std::enable_if<
+                          TryToGetPointerT<T>::value, std::true_type>::type>
+typename TryToGetPointerVecT<T>::type TryToGetPointer(T &t) {
+  // TODO find the better way to get the pointer to underlying data from vec
+  // class
+  return reinterpret_cast<typename TryToGetPointerVecT<T>::type>(t.get());
+}
+
+template <typename T, typename = typename std::enable_if<
+                          !TryToGetPointerT<T>::value, std::false_type>::type>
+T TryToGetPointer(T &t) {
+  return t;
+}
+
+// Converts T to OpenCL friendly
+template <typename T>
+using ConvertToOpenCLType = std::conditional<
+    TryToGetVectorT<T>::value, typename TryToGetVectorT<T>::type,
+    typename std::conditional<TryToGetPointerT<T>::value,
+                              typename TryToGetPointerVecT<T>::type, T>::type>;
+
+// Used for all,any and select relational built-in functions
+template <typename T> inline constexpr T msbMask(T) {
+  using UT = typename std::make_unsigned<T>::type;
+  return T(UT(1) << (sizeof(T) * 8 - 1));
+}
+
+template <typename T> inline constexpr bool msbIsSet(const T x) {
+  return (x & msbMask(x));
+}
+
+template <typename T>
+using common_rel_ret_t = typename detail::float_point_to_sign_integral<T>::type;
+
+// forward declaration
+template <int N> struct Boolean;
+
+// Try to get vector element count or 1 otherwise
+template <typename T, typename Enable = void> class TryToGetNumElements;
+
+template <typename T>
+struct TryToGetNumElements<
+    T, typename std::enable_if<TryToGetVectorT<T>::value>::type> {
+  static constexpr int value = T::get_count();
 };
-template <> struct make_upper<cl::sycl::cl_uint> {
-  using type = cl::sycl::cl_ulong;
+template <typename T>
+struct TryToGetNumElements<
+    T, typename std::enable_if<!TryToGetVectorT<T>::value>::type> {
+  static constexpr int value = 1;
 };
+
+// Used for relational comparison built-in functions
+template <typename T> struct RelationalReturnType {
+#ifdef __SYCL_DEVICE_ONLY__
+  using type = Boolean<TryToGetNumElements<T>::value>;
+#else
+  using type = common_rel_ret_t<T>;
+#endif
+};
+
+// Used for select built-in function
+template <typename T> struct SelectWrapperTypeArgC {
+#ifdef __SYCL_DEVICE_ONLY__
+  using type = Boolean<TryToGetNumElements<T>::value>;
+#else
+  using type = T;
+#endif
+};
+
+template <typename T>
+using select_arg_c_t = typename SelectWrapperTypeArgC<T>::type;
+
+template <typename T> using rel_ret_t = typename RelationalReturnType<T>::type;
+
+// Used for any and all built-in functions
+template <typename T> struct RelationalTestForSignBitType {
+#ifdef __SYCL_DEVICE_ONLY__
+  using return_type = detail::Boolean<1>;
+  using argument_type = detail::Boolean<TryToGetNumElements<T>::value>;
+#else
+  using return_type = cl::sycl::cl_int;
+  using argument_type = T;
+#endif
+};
+
+template <typename T>
+using rel_sign_bit_test_ret_t =
+    typename RelationalTestForSignBitType<T>::return_type;
+
+template <typename T>
+using rel_sign_bit_test_arg_t =
+    typename RelationalTestForSignBitType<T>::argument_type;
+
+template <typename T, typename Enable = void> struct RelConverter;
+
+template <typename T>
+struct RelConverter<
+    T, typename std::enable_if<TryToGetElementType<T>::value>::type> {
+  static const int N = T::get_count();
+#ifdef __SYCL_DEVICE_ONLY__
+  using bool_t = typename Boolean<N>::vector_t;
+  using ret_t = common_rel_ret_t<T>;
+#else
+  using bool_t = Boolean<N>;
+  using ret_t = rel_ret_t<T>;
+#endif
+
+  static ret_t apply(bool_t value) {
+#ifdef __SYCL_DEVICE_ONLY__
+    typename ret_t::vector_t result(0);
+    for (size_t I = 0; I < N; ++I) {
+      result[I] = 0 - value[I];
+    }
+    return result;
+#else
+    return value;
+#endif
+  }
+};
+
+template <typename T>
+struct RelConverter<
+    T, typename std::enable_if<!TryToGetElementType<T>::value>::type> {
+  using R = rel_ret_t<T>;
+#ifdef __SYCL_DEVICE_ONLY__
+  using value_t = bool;
+#else
+  using value_t = R;
+#endif
+
+  static R apply(value_t value) { return value; }
+};
+
+template <typename T> static constexpr T max_v() {
+  return std::numeric_limits<T>::max();
+}
+
+template <typename T> static constexpr T min_v() {
+  return std::numeric_limits<T>::min();
+}
+
+template <typename T> static constexpr T quiet_NaN() {
+  return std::numeric_limits<T>::quiet_NaN();
+}
 
 } // namespace detail
 } // namespace sycl
 } // namespace cl
-
-#undef __HALF_NO_ENABLED

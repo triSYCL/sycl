@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++11 -g %s -o %t.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clang -std=c++17 -g %s -o %t.out -lstdc++ -lOpenCL -lsycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 
 //==--------------- device.cpp - SYCL device test --------------------------==//

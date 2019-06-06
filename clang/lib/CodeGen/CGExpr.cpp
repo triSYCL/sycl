@@ -339,8 +339,8 @@ pushTemporaryCleanup(CodeGenFunction &CGF, const MaterializeTemporaryExpr *M,
           dyn_cast_or_null<VarDecl>(M->getExtendingDecl()));
       CleanupArg = llvm::Constant::getNullValue(CGF.Int8PtrTy);
     } else {
-      CleanupFn = CGF.CGM.getAddrAndTypeOfCXXStructor(ReferenceTemporaryDtor,
-                                                      StructorType::Complete);
+      CleanupFn = CGF.CGM.getAddrAndTypeOfCXXStructor(
+          GlobalDecl(ReferenceTemporaryDtor, Dtor_Complete));
       CleanupArg = cast<llvm::Constant>(ReferenceTemporary.getPointer());
     }
     CGF.CGM.getCXXABI().registerGlobalDtor(
@@ -1089,10 +1089,8 @@ Address CodeGenFunction::EmitPointerWithAlignment(const Expr *E,
                                       CodeGenFunction::CFITCK_UnrelatedCast,
                                       CE->getBeginLoc());
         }
-        return CE->getCastKind() != CK_AddressSpaceConversion
-                   ? Builder.CreateBitCast(Addr, ConvertType(E->getType()))
-                   : Builder.CreateAddrSpaceCast(Addr,
-                                                 ConvertType(E->getType()));
+        return Builder.CreatePointerBitCastOrAddrSpaceCast(
+            Addr, ConvertType(E->getType()));
       }
       break;
 
@@ -1294,6 +1292,8 @@ LValue CodeGenFunction::EmitLValue(const Expr *E) {
     return EmitCXXBindTemporaryLValue(cast<CXXBindTemporaryExpr>(E));
   case Expr::CXXUuidofExprClass:
     return EmitCXXUuidofLValue(cast<CXXUuidofExpr>(E));
+  case Expr::LambdaExprClass:
+    return EmitAggExprToLValue(E);
 
   case Expr::ExprWithCleanupsClass: {
     const auto *cleanups = cast<ExprWithCleanups>(E);
@@ -1741,6 +1741,18 @@ void CodeGenFunction::EmitStoreOfScalar(llvm::Value *Value, Address Addr,
     return;
   }
 
+  if (getenv("ENABLE_INFER_AS")) {
+    if (auto *PtrTy = dyn_cast<llvm::PointerType>(Value->getType())) {
+      auto *ExpectedPtrType =
+          cast<llvm::PointerType>(Addr.getType()->getElementType());
+      unsigned ValueAS = PtrTy->getAddressSpace();
+      unsigned ExpectedAS = ExpectedPtrType->getAddressSpace();
+      if (ValueAS != ExpectedAS) {
+        Value =
+            Builder.CreatePointerBitCastOrAddrSpaceCast(Value, ExpectedPtrType);
+      }
+    }
+  }
   llvm::StoreInst *Store = Builder.CreateStore(Value, Addr, Volatile);
   if (isNontemporal) {
     llvm::MDNode *Node =
@@ -4678,7 +4690,8 @@ RValue CodeGenFunction::EmitCall(QualType CalleeType, const CGCallee &OrigCallee
       llvm::Constant *StaticData[] = {EmitCheckSourceLocation(E->getBeginLoc()),
                                       EmitCheckTypeDescriptor(CalleeType)};
       EmitCheck(std::make_pair(CalleeRTTIMatch, SanitizerKind::Function),
-                SanitizerHandler::FunctionTypeMismatch, StaticData, CalleePtr);
+                SanitizerHandler::FunctionTypeMismatch, StaticData,
+                {CalleePtr, CalleeRTTI, FTRTTIConst});
 
       Builder.CreateBr(Cont);
       EmitBlock(Cont);

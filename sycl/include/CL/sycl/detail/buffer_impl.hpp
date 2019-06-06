@@ -6,12 +6,19 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifdef SCHEDULER_20
+
+#include <CL/sycl/detail/buffer_impl2.hpp>
+
+#else
+
 #pragma once
 
 #include <CL/sycl/access/access.hpp>
 #include <CL/sycl/context.hpp>
 #include <CL/sycl/detail/common.hpp>
 #include <CL/sycl/detail/helpers.hpp>
+#include <CL/sycl/detail/aligned_allocator.hpp>
 #include <CL/sycl/detail/queue_impl.hpp>
 #include <CL/sycl/detail/scheduler/scheduler.h>
 #include <CL/sycl/handler.hpp>
@@ -39,9 +46,9 @@ class accessor;
 template <typename T, int dimensions, typename AllocatorT> class buffer;
 class handler;
 class queue;
-template <int dimentions> class id;
+template <int dimentions> struct id;
 template <int dimentions> class range;
-using buffer_allocator = std::allocator<char>;
+using buffer_allocator = aligned_allocator<char, /*alignment*/ 64>;
 namespace detail {
 template <typename AllocatorT> class buffer_impl {
 public:
@@ -52,16 +59,15 @@ public:
   buffer_impl(void *hostData, const size_t sizeInBytes,
               const property_list &propList,
               AllocatorT allocator = AllocatorT())
-      : SizeInBytes(sizeInBytes), Props(propList), MAllocator(allocator) {
-    if (Props.has_property<property::buffer::use_host_ptr>()) {
-      BufPtr = hostData;
-    } else {
-      BufData.resize(get_size());
-      BufPtr = reinterpret_cast<void *>(BufData.data());
-      if (hostData != nullptr) {
-        auto HostPtr = reinterpret_cast<char *>(hostData);
-        set_final_data(HostPtr);
-        std::copy(HostPtr, HostPtr + SizeInBytes, BufData.data());
+      : SizeInBytes(sizeInBytes), Props(propList), BufPtr(hostData),
+        MAllocator(allocator) {
+    if (!Props.has_property<property::buffer::use_host_ptr>()) {
+      BufPtr = allocateHostMem();
+      if (hostData) {
+        set_final_data(reinterpret_cast<char *>(hostData));
+        std::copy(reinterpret_cast<char *>(hostData),
+                  reinterpret_cast<char *>(hostData) + SizeInBytes,
+                  reinterpret_cast<char *>(BufPtr));
       }
     }
   }
@@ -70,17 +76,16 @@ public:
   buffer_impl(const void *hostData, const size_t sizeInBytes,
               const property_list &propList,
               AllocatorT allocator = AllocatorT())
-      : SizeInBytes(sizeInBytes), Props(propList), MAllocator(allocator) {
-    if (Props.has_property<property::buffer::use_host_ptr>()) {
+      : SizeInBytes(sizeInBytes), Props(propList),
+        BufPtr(const_cast<void *>(hostData)), MAllocator(allocator) {
+    if (!Props.has_property<property::buffer::use_host_ptr>()) {
       // TODO make this buffer read only
-      BufPtr = const_cast<void *>(hostData);
-    } else {
-      BufData.resize(get_size());
-      BufPtr = reinterpret_cast<void *>(BufData.data());
-      if (hostData != nullptr) {
-        std::copy((char *)hostData, (char *)hostData + SizeInBytes,
-                  BufData.data());
-      }
+      BufPtr = allocateHostMem();
+      if (hostData)
+        std::copy(const_cast<char *>(reinterpret_cast<const char *>(hostData)),
+                  const_cast<char *>(
+                    reinterpret_cast<const char *>(hostData)) + SizeInBytes,
+                  const_cast<char *>(reinterpret_cast<const char *>(BufPtr)));
     }
   }
 
@@ -88,17 +93,16 @@ public:
   buffer_impl(const shared_ptr_class<T> &hostData, const size_t sizeInBytes,
               const property_list &propList,
               AllocatorT allocator = AllocatorT())
-      : SizeInBytes(sizeInBytes), Props(propList), MAllocator(allocator) {
-    if (Props.has_property<property::buffer::use_host_ptr>()) {
-      BufPtr = hostData.get();
-    } else {
-      BufData.resize(get_size());
-      BufPtr = reinterpret_cast<void *>(BufData.data());
-      if (hostData.get() != nullptr) {
+      : SizeInBytes(sizeInBytes), Props(propList), BufPtr(hostData.get()),
+        MAllocator(allocator) {
+    if (!Props.has_property<property::buffer::use_host_ptr>()) {
+      BufPtr = allocateHostMem();
+      if (hostData.get()) {
         weak_ptr_class<T> hostDataWeak = hostData;
         set_final_data(hostDataWeak);
-        std::copy((char *)hostData.get(), (char *)hostData.get() + SizeInBytes,
-                  BufData.data());
+        std::copy(reinterpret_cast<char *>(hostData.get()),
+                  reinterpret_cast<char *>(hostData.get()) + SizeInBytes,
+                  reinterpret_cast<char *>(BufPtr));
       }
     }
   }
@@ -124,8 +128,7 @@ public:
               const size_t sizeInBytes, const property_list &propList,
               AllocatorT allocator = AllocatorT())
       : SizeInBytes(sizeInBytes), Props(propList), MAllocator(allocator) {
-    BufData.resize(get_size());
-    BufPtr = reinterpret_cast<void *>(BufData.data());
+    BufPtr = allocateHostMem();
     // We need cast BufPtr to pointer to the iteration type to get correct
     // offset in std::copy when it will increment destination pointer.
     auto *Ptr =
@@ -141,8 +144,7 @@ public:
               const size_t sizeInBytes, const property_list &propList,
               AllocatorT allocator = AllocatorT())
       : SizeInBytes(sizeInBytes), Props(propList), MAllocator(allocator) {
-    BufData.resize(get_size());
-    BufPtr = reinterpret_cast<void *>(BufData.data());
+    BufPtr = allocateHostMem();
     // We need cast BufPtr to pointer to the iteration type to get correct
     // offset in std::copy when it will increment destination pointer.
     typedef typename std::iterator_traits<InputIterator>::value_type value;
@@ -152,9 +154,10 @@ public:
   }
 
   buffer_impl(cl_mem MemObject, const context &SyclContext,
-              const size_t sizeInBytes, event AvailableEvent = {})
+              const size_t sizeInBytes, event AvailableEvent = {},
+              AllocatorT allocator = AllocatorT())
       : OpenCLInterop(true), SizeInBytes(sizeInBytes),
-        AvailableEvent(AvailableEvent) {
+        AvailableEvent(AvailableEvent), MAllocator(allocator) {
     if (SyclContext.is_host())
       throw cl::sycl::invalid_parameter_error(
           "Creation of interoperability buffer using host context is not "
@@ -169,8 +172,7 @@ public:
     OCLState.Mem = MemObject;
     CHECK_OCL_CODE(clRetainMemObject(MemObject));
 
-    BufData.resize(get_size());
-    BufPtr = reinterpret_cast<void *>(BufData.data());
+    BufPtr = allocateHostMem();
   }
 
   size_t get_size() const { return SizeInBytes; }
@@ -188,6 +190,12 @@ public:
 
     if (OpenCLInterop)
       CHECK_OCL_CODE_NO_EXC(clReleaseMemObject(OCLState.Mem));
+
+    if (!Props.has_property<property::buffer::use_host_ptr>()) {
+      if (BufPtr)
+        MAllocator.deallocate(reinterpret_cast<
+            typename AllocatorT::pointer>(BufPtr), SizeInBytes);
+    }
   }
 
   void set_final_data(std::nullptr_t) { uploadData = nullptr; }
@@ -256,6 +264,13 @@ public:
                                                   accessOffset);
   }
 
+  inline void *allocateHostMem() {
+    size_t AllocatorValueSize = sizeof(typename AllocatorT::value_type);
+    size_t AllocationSize = get_size() / AllocatorValueSize;
+    AllocationSize += (get_size() % AllocatorValueSize) ? 1 : 0;
+    return MAllocator.allocate(AllocationSize);
+  }
+
   template <typename propertyT> bool has_property() const {
     return Props.has_property<propertyT>();
   }
@@ -266,7 +281,7 @@ public:
 
 public:
   void moveMemoryTo(QueueImplPtr Queue, std::vector<cl::sycl::event> DepEvents,
-                    EventImplPtr Event);
+                    EventImplPtr Event, cl::sycl::access::mode Mode);
 
   void fill(QueueImplPtr Queue, std::vector<cl::sycl::event> DepEvents,
             EventImplPtr Event, const void *Pattern, size_t PatternSize,
@@ -285,7 +300,7 @@ public:
   bool isValidAccessToMem(cl::sycl::access::mode AccessMode);
 
   void allocate(QueueImplPtr Queue, std::vector<cl::sycl::event> DepEvents,
-                EventImplPtr Event, cl::sycl::access::mode mode);
+                EventImplPtr Event);
 
   cl_mem getOpenCLMem() const;
 
@@ -315,7 +330,6 @@ private:
   event AvailableEvent;
   cl_context OpenCLContext = nullptr;
   void *BufPtr = nullptr;
-  vector_class<byte> BufData;
   // TODO: enable support of cl_mem objects from multiple contexts
   // TODO: at the current moment, using a buffer on multiple devices
   // or on a device and a host simultaneously is not supported (the
@@ -413,7 +427,7 @@ void buffer_impl<AllocatorT>::copy(
 template <typename AllocatorT>
 void buffer_impl<AllocatorT>::moveMemoryTo(
     QueueImplPtr Queue, std::vector<cl::sycl::event> DepEvents,
-    EventImplPtr Event) {
+    EventImplPtr Event, cl::sycl::access::mode Mode) {
 
   ContextImplPtr Context = detail::getSyclObjImpl(Queue->get_context());
 
@@ -435,6 +449,10 @@ void buffer_impl<AllocatorT>::moveMemoryTo(
 
   // Copy from OCL device to host device.
   if (!OCLState.Queue->is_host() && Queue->is_host()) {
+    if (Mode == cl::sycl::access::mode::discard_write &&
+        Mode == cl::sycl::access::mode::discard_read_write)
+      return;
+
     const size_t ByteSize = get_size();
 
     std::vector<cl_event> CLEvents =
@@ -488,13 +506,18 @@ void buffer_impl<AllocatorT>::moveMemoryTo(
 
     std::vector<cl_event> CLEvents =
         detail::getOrWaitEvents(std::move(DepEvents), Context);
+    if (Mode == cl::sycl::access::mode::discard_write &&
+        Mode == cl::sycl::access::mode::discard_read_write)
+      return;
+
     cl_event &WriteBufEvent = Event->getHandleRef();
     // Enqueue copying from host to new OCL buffer.
     Error =
         clEnqueueWriteBuffer(OCLState.Queue->getHandleRef(), OCLState.Mem,
                              /*blocking_write=*/CL_FALSE, /*offset=*/0,
-                             ByteSize, BufPtr, CLEvents.size(), CLEvents.data(),
-                             &WriteBufEvent); // replace &WriteBufEvent to NULL
+                             ByteSize, BufPtr, CLEvents.size(),
+                             CLEvents.data(), /*replace &WriteBufEvent
+                                                to NULL*/ &WriteBufEvent);
     CHECK_OCL_CODE(Error);
     Event->setContextImpl(Context);
 
@@ -511,8 +534,10 @@ buffer_impl<AllocatorT>::convertSycl2OCLMode(cl::sycl::access::mode mode) {
   case cl::sycl::access::mode::read:
     return CL_MEM_READ_ONLY;
   case cl::sycl::access::mode::write:
+  case cl::sycl::access::mode::discard_write:
     return CL_MEM_WRITE_ONLY;
   case cl::sycl::access::mode::read_write:
+  case cl::sycl::access::mode::discard_read_write:
   case cl::sycl::access::mode::atomic:
     return CL_MEM_READ_WRITE;
   default:
@@ -538,8 +563,7 @@ bool buffer_impl<AllocatorT>::isValidAccessToMem(
 template <typename AllocatorT>
 void buffer_impl<AllocatorT>::allocate(QueueImplPtr Queue,
                                        std::vector<cl::sycl::event> DepEvents,
-                                       EventImplPtr Event,
-                                       cl::sycl::access::mode mode) {
+                                       EventImplPtr Event) {
 
   detail::waitEvents(DepEvents);
 
@@ -568,39 +592,45 @@ void buffer_impl<AllocatorT>::allocate(QueueImplPtr Queue,
     // something we have to do to conform for the moment (but generally a good
     // thing to conform as it means closer alignment to actual hardware
     // compilation).
-    // \todo I believe a way to allow users to specify DDR bank assignments at a
+    // \todo A way to allow users to specify DDR bank assignments at a
     // SYCL level should be the end goal here, assign a DDR bank to kernel/CU
     // mapping via an accessor or buffer. The hard part of this is that the
     // compiler will need access to this information when compiling the kernels,
     // pushing this data through in a "C++ way" without modifying the SYCL
-    // compiler will be difficult I think (tying this information up as an
-    // extra component of the accessor's could be the ideal route in this case).
-    // \todo When we decide on an SYCL extension to assign DDR buffers this 
-    // should be changed to be optional based on the device contained in the 
-    // queue rather than a xilinx related IFDEF, this needs to be thought about
-    // carefully as it will have an impact on the build system as well as the 
-    // runtime.
-    //  1) An option may be to have the CMAKE build system and compiler create 
-    //   another macro for SYCL_XILINX_XRT_EXTENSIONS, when XRT is detected 
-    //   (by both the compiler and build system) the macro is defined, when the
-    //   macro is defined we add the alternative code path that allows optional
-    //   selection of our extensions based on the device information (so 
-    //   contians both the regular buffer creation and xilinx buffer creation 
-    //   code, but only when its a XILINX device will our buffer extension be
-    //   chosen). When the macro is not in place it simply compiles the regular 
-    //   buffer generation code without the XRT extension for buffer creation.
-    //   This could perhaps be extendable to most of the XRT CL extensions. 
-    //   However, I am loathe to add another MACRO as it could eventually become
-    //   a difficult balancing act. Some discussion required.
-    cl_mem_ext_ptr_t mext = {0};
-    mext.banks = 0 | XCL_MEM_TOPOLOGY;
-    cl_mem Mem =
-        clCreateBuffer(Context->getHandleRef(), convertSycl2OCLMode(mode)
-                      | CL_MEM_EXT_PTR_XILINX, ByteSize, &mext, &Error);
+    // compiler will be difficult (tying this information up as an  extra
+    // component of the accessor's could be the ideal route in this case).
+    // \todo Alternatively the cl_mem_ext_ptr_t assignment of DDR banks seems to
+    // be legacy in 2019.1, it may be possible to assign buffers to kernel
+    // arguments in just the runtime and bypass the requirements for specifying
+    // appropriate DDR banks, if that makes things easier, this can be done via
+    // the alternate union form of cl_mem_ext_ptr_t:
+    // struct { // interpreted kernel arg assignment
+    //   unsigned int argidx;  // Top 8 bits reserved for XCL_MEM_EXT flags
+    //   void *host_ptr_;      // use as host_ptr
+    //   cl_kernel kernel;
+    // };
+    // This hasn't been tested but may be an alternative to assigning DDR banks
+    // per buffer. However, being able to specify DDR bank assignments to a
+    // kernel, is still very useful, but if this method works, perhaps we can
+    // detach the idea of assigning DDR banks via the buffer/accessor (which
+    // makes it difficult to pass information to the kernel) and instead have it
+    // as part of the kernel name via a kernel property similar to
+    // the way we handle reqd_work_group_size at the moment
+    cl_mem Mem;
+    if (Context->get_platform().get_info<info::platform::vendor>()
+        == "Xilinx") {
+      cl_mem_ext_ptr_t mext = {0};
+      mext.banks = 0 | XCL_MEM_TOPOLOGY;
+      Mem = clCreateBuffer(Context->getHandleRef(), CL_MEM_READ_WRITE
+                           | CL_MEM_EXT_PTR_XILINX, ByteSize, &mext, &Error);
+    } else {
+      Mem = clCreateBuffer(Context->getHandleRef(), CL_MEM_READ_WRITE,
+                           ByteSize, nullptr, &Error);
+    }
     CHECK_OCL_CODE(Error);
 #else
     cl_mem Mem =
-        clCreateBuffer(Context->getHandleRef(), convertSycl2OCLMode(mode),
+        clCreateBuffer(Context->getHandleRef(), CL_MEM_READ_WRITE,
                        ByteSize, nullptr, &Error);
     CHECK_OCL_CODE(Error);
 #endif
@@ -634,3 +664,4 @@ cl_mem buffer_impl<AllocatorT>::getOpenCLMem() const {
 } // namespace detail
 } // namespace sycl
 } // namespace cl
+#endif // SCHEDULER_20

@@ -2508,6 +2508,7 @@ static void handleAvailabilityAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
               else
                 return VersionTuple(NewMajor, Version.getMinor().getValue());
             }
+            return VersionTuple(NewMajor);
           }
 
           return VersionTuple(2, 0);
@@ -2612,6 +2613,14 @@ static void handleVisibilityAttr(Sema &S, Decl *D, const ParsedAttr &AL,
     S.Diag(AL.getRange().getBegin(), diag::err_attribute_wrong_decl_type)
         << AL << ExpectedTypeOrNamespace;
     return;
+  }
+
+  // Visibility attributes have no effect on symbols with internal linkage.
+  if (const auto *ND = dyn_cast<NamedDecl>(D)) {
+    if (!ND->isExternallyVisible())
+      S.Diag(AL.getRange().getBegin(),
+             diag::warn_attribute_ignored_on_non_external)
+          << AL;
   }
 
   // Check that the argument is a string literal.
@@ -3782,6 +3791,28 @@ bool Sema::checkRangedIntegralArgument(Expr *E, const AttrType *TmpAttr,
 }
 
 template <typename AttrType>
+void Sema::AddOneConstantValueAttr(SourceRange AttrRange, Decl *D, Expr *E,
+                                   unsigned SpellingListIndex) {
+  AttrType TmpAttr(AttrRange, Context, E, SpellingListIndex);
+
+  if (!E->isValueDependent()) {
+    ExprResult ICE;
+    if (checkRangedIntegralArgument<AttrType>(E, &TmpAttr, ICE))
+      return;
+    E = ICE.get();
+  }
+
+  if (IntelFPGAMaxPrivateCopiesAttr::classof(&TmpAttr)) {
+    if (!D->hasAttr<IntelFPGAMemoryAttr>())
+      D->addAttr(IntelFPGAMemoryAttr::CreateImplicit(
+          Context, IntelFPGAMemoryAttr::Default));
+  }
+
+  D->addAttr(::new (Context)
+                 AttrType(AttrRange, Context, E, SpellingListIndex));
+}
+
+template <typename AttrType>
 void Sema::AddOneConstantPowerTwoValueAttr(SourceRange AttrRange, Decl *D,
                                            Expr *E,
                                            unsigned SpellingListIndex) {
@@ -4705,7 +4736,8 @@ bool Sema::CheckCallingConvAttr(const ParsedAttr &Attrs, CallingConv &CC,
   }
   if (A != TargetInfo::CCCR_OK) {
     if (A == TargetInfo::CCCR_Warning)
-      Diag(Attrs.getLoc(), diag::warn_cconv_ignored) << Attrs;
+      Diag(Attrs.getLoc(), diag::warn_cconv_ignored)
+          << Attrs << (int)CallingConventionIgnoredReason::ForThisTarget;
 
     // This convention is not valid for the target. Use the default function or
     // method calling convention.
@@ -4991,8 +5023,28 @@ static bool checkForDuplicateAttribute(Sema &S, Decl *D,
   return false;
 }
 
-/// Handle the __memory__ attribute.
-/// This is incompatible with the __register__ attribute.
+/// Handle the [[intelfpga::doublepump]] and [[intelfpga::singlepump]] attributes.
+/// One but not both can be specified
+/// Both are incompatible with the __register__ attribute.
+template <typename AttrType, typename IncompatAttrType>
+static void handleIntelFPGAPumpAttr(Sema &S, Decl *D, const ParsedAttr &Attr) {
+
+  checkForDuplicateAttribute<AttrType>(S, D, Attr);
+  if (checkAttrMutualExclusion<IncompatAttrType>(S, D, Attr))
+    return;
+
+  if (checkAttrMutualExclusion<IntelFPGARegisterAttr>(S, D, Attr))
+    return;
+
+  if (!D->hasAttr<IntelFPGAMemoryAttr>())
+    D->addAttr(IntelFPGAMemoryAttr::CreateImplicit(
+        S.Context, IntelFPGAMemoryAttr::Default));
+
+  handleSimpleAttribute<AttrType>(S, D, Attr);
+}
+
+/// Handle the [[intelfpga::memory]] attribute.
+/// This is incompatible with the [[intelfpga::register]] attribute.
 static void handleIntelFPGAMemoryAttr(Sema &S, Decl *D,
                                       const ParsedAttr &Attr) {
 
@@ -5035,7 +5087,13 @@ static bool checkIntelFPGARegisterAttrCompatibility(Sema &S, Decl *D,
     if (!MA->isImplicit() &&
         checkAttrMutualExclusion<IntelFPGAMemoryAttr>(S, D, Attr))
       InCompat = true;
+  if (checkAttrMutualExclusion<IntelFPGADoublePumpAttr>(S, D, Attr))
+    InCompat = true;
+  if (checkAttrMutualExclusion<IntelFPGASinglePumpAttr>(S, D, Attr))
+    InCompat = true;
   if (checkAttrMutualExclusion<IntelFPGABankWidthAttr>(S, D, Attr))
+    InCompat = true;
+  if (checkAttrMutualExclusion<IntelFPGAMaxPrivateCopiesAttr>(S, D, Attr))
     InCompat = true;
   if (auto *NBA = D->getAttr<IntelFPGANumBanksAttr>())
     if (!NBA->isImplicit() &&
@@ -5045,7 +5103,7 @@ static bool checkIntelFPGARegisterAttrCompatibility(Sema &S, Decl *D,
   return InCompat;
 }
 
-/// Handle the __register__ attribute.
+/// Handle the [[intelfpga::register]] attribute.
 /// This is incompatible with most of the other memory attributes.
 static void handleIntelFPGARegisterAttr(Sema &S, Decl *D,
                                         const ParsedAttr &Attr) {
@@ -5057,7 +5115,7 @@ static void handleIntelFPGARegisterAttr(Sema &S, Decl *D,
   handleSimpleAttribute<IntelFPGARegisterAttr>(S, D, Attr);
 }
 
-/// Handle the bankwidth and numbanks attributes.
+/// Handle the [[intelfpga::bankwidth]] and [[intelfpga::numbanks]] attributes.
 /// These require a single constant power of two greater than zero.
 /// These are incompatible with the register attribute.
 /// The numbanks and bank_bits attributes are related.  If bank_bits exists
@@ -5070,6 +5128,17 @@ static void handleOneConstantPowerTwoValueAttr(Sema &S, Decl *D,
     return;
 
   S.AddOneConstantPowerTwoValueAttr<AttrType>(
+      Attr.getRange(), D, Attr.getArgAsExpr(0),
+      Attr.getAttributeSpellingListIndex());
+}
+
+static void handleIntelFPGAMaxPrivateCopiesAttr(Sema &S, Decl *D,
+                                              const ParsedAttr &Attr) {
+  checkForDuplicateAttribute<IntelFPGAMaxPrivateCopiesAttr>(S, D, Attr);
+  if (checkAttrMutualExclusion<IntelFPGARegisterAttr>(S, D, Attr))
+    return;
+
+  S.AddOneConstantValueAttr<IntelFPGAMaxPrivateCopiesAttr>(
       Attr.getRange(), D, Attr.getArgAsExpr(0),
       Attr.getAttributeSpellingListIndex());
 }
@@ -6674,31 +6743,6 @@ static void handleObjCExternallyRetainedAttr(Sema &S, Decl *D,
   handleSimpleAttribute<ObjCExternallyRetainedAttr>(S, D, AL);
 }
 
-static void handleFortifyStdLib(Sema &S, Decl *D, const ParsedAttr &AL) {
-  auto *FD = cast<FunctionDecl>(D);
-  unsigned VariantID = Builtin::getFortifiedVariantFunction(FD->getBuiltinID());
-  if (VariantID == 0) {
-    S.Diag(D->getLocation(), diag::err_fortify_std_lib_bad_decl);
-    return;
-  }
-
-  uint32_t BOSType, Flag;
-  if (!checkUInt32Argument(S, AL, AL.getArgAsExpr(0), BOSType, 0, true) ||
-      !checkUInt32Argument(S, AL, AL.getArgAsExpr(1), Flag, 1, true))
-    return;
-
-  if (BOSType > 3) {
-    S.Diag(AL.getArgAsExpr(0)->getBeginLoc(),
-           diag::err_attribute_argument_out_of_range)
-        << AL << 0 << 3;
-    return;
-  }
-
-  D->addAttr(::new (S.getASTContext()) FortifyStdLibAttr(
-      AL.getLoc(), S.getASTContext(), BOSType, Flag,
-      AL.getAttributeSpellingListIndex()));
-}
-
 static void handleMIGServerRoutineAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   // Check that the return type is a `typedef int kern_return_t` or a typedef
   // around it, because otherwise MIG convention checks make no sense.
@@ -6719,6 +6763,20 @@ static void handleMIGServerRoutineAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   }
 
   handleSimpleAttribute<MIGServerRoutineAttr>(S, D, AL);
+}
+
+static void handleMSAllocatorAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
+  // Warn if the return type is not a pointer or reference type.
+  if (auto *FD = dyn_cast<FunctionDecl>(D)) {
+    QualType RetTy = FD->getReturnType();
+    if (!RetTy->isPointerType() && !RetTy->isReferenceType()) {
+      S.Diag(AL.getLoc(), diag::warn_declspec_allocator_nonpointer)
+          << AL.getRange() << RetTy;
+      return;
+    }
+  }
+
+  handleSimpleAttribute<MSAllocatorAttr>(S, D, AL);
 }
 
 //===----------------------------------------------------------------------===//
@@ -7424,6 +7482,14 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     break;
 
   // Intel FPGA specific attributes
+  case ParsedAttr::AT_IntelFPGADoublePump:
+    handleIntelFPGAPumpAttr<IntelFPGADoublePumpAttr, IntelFPGASinglePumpAttr>(
+        S, D, AL);
+    break;
+  case ParsedAttr::AT_IntelFPGASinglePump:
+    handleIntelFPGAPumpAttr<IntelFPGASinglePumpAttr, IntelFPGADoublePumpAttr>(
+        S, D, AL);
+    break;
   case ParsedAttr::AT_IntelFPGAMemory:
     handleIntelFPGAMemoryAttr(S, D, AL);
     break;
@@ -7435,6 +7501,9 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     break;
   case ParsedAttr::AT_IntelFPGANumBanks:
     handleOneConstantPowerTwoValueAttr<IntelFPGANumBanksAttr>(S, D, AL);
+    break;
+  case ParsedAttr::AT_IntelFPGAMaxPrivateCopies:
+    handleIntelFPGAMaxPrivateCopiesAttr(S, D, AL);
     break;
 
   case ParsedAttr::AT_AnyX86NoCallerSavedRegisters:
@@ -7469,12 +7538,12 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     handleObjCExternallyRetainedAttr(S, D, AL);
     break;
 
-  case ParsedAttr::AT_FortifyStdLib:
-    handleFortifyStdLib(S, D, AL);
-    break;
-
   case ParsedAttr::AT_MIGServerRoutine:
     handleMIGServerRoutineAttr(S, D, AL);
+    break;
+
+  case ParsedAttr::AT_MSAllocator:
+    handleMSAllocatorAttr(S, D, AL);
     break;
   }
 }

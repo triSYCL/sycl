@@ -8,10 +8,14 @@
 
 #pragma once
 
+#ifndef SCHEDULER_10
+  #define SCHEDULER_20
+#endif
+
 #include <CL/sycl/accessor.hpp>
 #include <CL/sycl/atomic.hpp>
-#include <CL/sycl/builtins.hpp>
 #include <CL/sycl/buffer.hpp>
+#include <CL/sycl/builtins.hpp>
 #include <CL/sycl/context.hpp>
 #include <CL/sycl/device.hpp>
 #include <CL/sycl/device_selector.hpp>
@@ -33,15 +37,13 @@
 #include <CL/sycl/program.hpp>
 #include <CL/sycl/queue.hpp>
 #include <CL/sycl/range.hpp>
+#include <CL/sycl/sampler.hpp>
 #include <CL/sycl/types.hpp>
 #include <CL/sycl/version.hpp>
 
-// These require > C++ 17 for now, but compiling all the tests with C++17 breaks
-// some Clang Unit tests involving SYCL making it difficult to test for breakage.
-#if (defined(__cplusplus) && (__cplusplus >= 201703L))
 #include <CL/sycl/xilinx/fpga.hpp>
-#endif
 
+#ifndef SCHEDULER_20
 // Do not include RT only function implementations for device code as it leads
 // to problem. Should be finally fixed when we introduce library.
 #ifndef __SYCL_DEVICE_ONLY__
@@ -51,3 +53,4 @@
 #include <CL/sycl/detail/scheduler/printers.cpp>
 #include <CL/sycl/detail/scheduler/scheduler.cpp>
 #endif //__SYCL_DEVICE_ONLY__
+#endif // !SCHEDULER_20

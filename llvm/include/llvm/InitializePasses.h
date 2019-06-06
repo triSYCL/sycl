@@ -134,7 +134,6 @@ void initializeEarlyIfConverterPass(PassRegistry&);
 void initializeEarlyMachineLICMPass(PassRegistry&);
 void initializeEarlyTailDuplicatePass(PassRegistry&);
 void initializeEdgeBundlesPass(PassRegistry&);
-void initializeEfficiencySanitizerPass(PassRegistry&);
 void initializeEliminateAvailableExternallyLegacyPassPass(PassRegistry&);
 void initializeEntryExitInstrumenterPass(PassRegistry&);
 void initializeExpandISelPseudosPass(PassRegistry&);
@@ -220,6 +219,7 @@ void initializeLoopDeletionLegacyPassPass(PassRegistry&);
 void initializeLoopDistributeLegacyPass(PassRegistry&);
 void initializeLoopExtractorPass(PassRegistry&);
 void initializeLoopGuardWideningLegacyPassPass(PassRegistry&);
+void initializeLoopFuseLegacyPass(PassRegistry&);
 void initializeLoopIdiomRecognizeLegacyPassPass(PassRegistry&);
 void initializeLoopInfoWrapperPassPass(PassRegistry&);
 void initializeLoopInstSimplifyLegacyPassPass(PassRegistry&);
@@ -415,6 +415,7 @@ void initializeXRayInstrumentationPass(PassRegistry&);
 void initializeASFixerPass(PassRegistry&);
 void initializeInSPIRationPass(PassRegistry&);
 void initializeKernelPropGenPass(PassRegistry&);
+void initializeXOCCIRDowngraderPass(PassRegistry&);
 
 } // end namespace llvm
 

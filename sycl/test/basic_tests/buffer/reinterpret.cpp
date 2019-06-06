@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++11 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clang -std=c++17 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
@@ -11,6 +11,8 @@
 //===----------------------------------------------------------------------===//
 
 #include <CL/sycl.hpp>
+
+#include <climits>
 
 // This tests verifies basic cases of using cl::sycl::buffer::reinterpret
 // functionality - changing buffer type and range. This test checks that

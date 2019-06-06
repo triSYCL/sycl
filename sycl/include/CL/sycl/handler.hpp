@@ -6,12 +6,18 @@
 //
 //===----------------------------------------------------------------------===//
 
+#ifdef SCHEDULER_20
+#include <CL/sycl/handler2.hpp>
+
+#else
+
 #pragma once
 
 #include <CL/__spirv/spirv_vars.hpp>
 #include <CL/sycl/access/access.hpp>
 #include <CL/sycl/context.hpp>
 #include <CL/sycl/detail/common.hpp>
+#include <CL/sycl/detail/aligned_allocator.hpp>
 #include <CL/sycl/detail/os_util.hpp>
 #include <CL/sycl/detail/scheduler/scheduler.h>
 #include <CL/sycl/event.hpp>
@@ -21,6 +27,8 @@
 #include <CL/sycl/nd_range.hpp>
 #include <CL/sycl/property_list.hpp>
 #include <CL/sycl/stl.hpp>
+
+#include <CL/sycl/xilinx/fpga/kernel_properties.hpp>
 
 #include <functional>
 #include <memory>
@@ -54,6 +62,7 @@ class queue;
 template <typename DataT, int Dimensions, access::mode AccessMode,
           access::target AccessTarget, access::placeholder IsPlaceholder>
 class accessor;
+using buffer_allocator = aligned_allocator<char, /*alignment*/ 64>;
 template <typename T, int Dimensions, typename AllocatorT> class buffer;
 namespace detail {
 
@@ -274,9 +283,11 @@ public:
   template <typename KernelName, typename KernelType>
   void single_task(KernelType kernelFunc) {
 #ifdef __SYCL_DEVICE_ONLY__
-    kernel_single_task<KernelName>(kernelFunc);
+    kernel_single_task<xilinx::reqd_work_group_size<1, 1, 1,
+                       KernelName>>(kernelFunc);
 #else
-    using KI = cl::sycl::detail::KernelInfo<KernelName>;
+    using KI = cl::sycl::detail::KernelInfo<
+                 xilinx::reqd_work_group_size<1, 1, 1, KernelName>>;
     m_Node.addKernel(csd::OSUtil::getOSModuleHandle(KI::getName()),
                      KI::getName(), KI::getNumParams(), &KI::getParamDesc(0),
                      std::move(kernelFunc));
@@ -494,13 +505,15 @@ public:
   template <typename KernelName, typename KernelType>
   void single_task(kernel syclKernel, KernelType kernelFunc) {
 #ifdef __SYCL_DEVICE_ONLY__
-    kernel_single_task<KernelName>(kernelFunc);
+    kernel_single_task<xilinx::reqd_work_group_size<1, 1, 1,
+                       KernelName>>(kernelFunc);
 #else
     cl_kernel clKernel = nullptr;
     if (!is_host()) {
       clKernel = syclKernel.get();
     }
-    using KI = cl::sycl::detail::KernelInfo<KernelName>;
+    using KI = cl::sycl::detail::KernelInfo<
+                 xilinx::reqd_work_group_size<1, 1, 1, KernelName>>;
     m_Node.addKernel(csd::OSUtil::getOSModuleHandle(KI::getName()),
                      KI::getName(), KI::getNumParams(), &KI::getParamDesc(0),
                      std::move(kernelFunc), clKernel);
@@ -610,8 +623,7 @@ public:
     range<dim> Range =
         getAccessorRangeHelper<T_src, dim, mode, tgt,
                                isPlaceholder>::getAccessorRange(src);
-    // TODO use buffer_allocator when it is possible
-    buffer<T_src, dim, std::allocator<char>> Buffer(
+    buffer<T_src, dim, buffer_allocator> Buffer(
         (shared_ptr_class<T_src>)dest, Range,
         {property::buffer::use_host_ptr()});
     accessor<T_src, dim, access::mode::write, access::target::global_buffer,
@@ -631,8 +643,7 @@ public:
     range<dim> Range =
         getAccessorRangeHelper<T_dest, dim, mode, tgt,
                                isPlaceholder>::getAccessorRange(dest);
-    // TODO use buffer_allocator when it is possible
-    buffer<T_dest, dim, std::allocator<char>> Buffer(
+    buffer<T_dest, dim, buffer_allocator> Buffer(
         (shared_ptr_class<T_dest>)src, Range,
         {property::buffer::use_host_ptr()});
     accessor<T_dest, dim, access::mode::read, access::target::global_buffer,
@@ -651,8 +662,7 @@ public:
     range<dim> Range =
         getAccessorRangeHelper<T_src, dim, mode, tgt,
                                isPlaceholder>::getAccessorRange(src);
-    // TODO use buffer_allocator when it is possible
-    buffer<T_src, dim, std::allocator<char>> Buffer(
+    buffer<T_src, dim, buffer_allocator> Buffer(
         (T_src *)dest, Range, {property::buffer::use_host_ptr()});
     accessor<T_src, dim, access::mode::write, access::target::global_buffer,
              access::placeholder::false_t>
@@ -670,8 +680,7 @@ public:
     range<dim> Range =
         getAccessorRangeHelper<T_dest, dim, mode, tgt,
                                isPlaceholder>::getAccessorRange(dest);
-    // TODO use buffer_allocator when it is possible
-    buffer<T_dest, dim, std::allocator<char>> Buffer(
+    buffer<T_dest, dim, buffer_allocator> Buffer(
         (T_dest *)src, Range, {property::buffer::use_host_ptr()});
     accessor<T_dest, dim, access::mode::read, access::target::global_buffer,
              access::placeholder::false_t>
@@ -753,3 +762,4 @@ public:
 };
 } // namespace sycl
 } // namespace cl
+#endif // SCHEDULER_20
