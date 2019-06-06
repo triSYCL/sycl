@@ -16,8 +16,8 @@ program.
 
 ## What is SYCL
 
-([SYCL](https://www.khronos.org/sycl/)) is a single-source
-C++14/C++17/C++20-based DSEL (Domain Specific Embedded Language) aimed at
+[SYCL](https://www.khronos.org/sycl/) is a single-source
+modern C++11/.../C++20-based DSEL (Domain Specific Embedded Language) aimed at
 facilitating the programming of heterogeneous accelerators.
 
 ## triSYCL for Xilinx FPGA with Xilinx SDx xocc
@@ -25,7 +25,7 @@ facilitating the programming of heterogeneous accelerators.
 Some LLVM passes and some C++ SYCL runtime from
 https://github.com/triSYCL/triSYCL are merged-in with a new Clang
 driver and scripts to use Xilinx SDx
-[xocc](https://www.xilinx.com/html_docs/xilinx2018_3/sdaccel_doc/wrj1504034328013.html#wrj1504034328013)
+[xocc](https://www.xilinx.com/html_docs/xilinx2019_1/sdaccel_doc/wrj1504034328013.html)
 as a back-end for Xilinx FPGA using the open-source runtime and
 device-driver https://github.com/Xilinx/XRT
 
@@ -34,7 +34,8 @@ device-driver https://github.com/Xilinx/XRT
 This is a fork of the Intel SYCL upstreaming effort
 ([https://github.com/intel/llvm/tree/sycl](https://github.com/intel/llvm/tree/sycl))
 with some alterations made to allow SYCL compilation for Xilinx FPGA's. However,
-the alterations made shouldn't affect previous targets supported by this tool.
+the alterations made shouldn't affect previous targets supported by
+the Intel tool.
 
 ## SYCL Related Documentation
 
@@ -55,9 +56,9 @@ The [XilinxFPGACompilation.md](sycl/doc/XilinxFPGACompilation.md) documents the
 required software and the main differences when compiling an example for Xilinx
 FPGA when using the branch or some variation of it.
 
-The [Tests.md](sycl/doc/Tests.md) covers a few details about the the additional
-xocc_tests directory we added to the sycl/test/ directory among some other small
-details.
+The [Tests.md](sycl/doc/Tests.md) covers a few details about the the
+additional [xocc_tests](sycl/test/xocc_tests) directory we added to
+the [sycl/test](sycl/test) directory among some other small details.
 
 ## License
 See [LICENSE.txt](llvm/LICENSE.TXT) for details.
