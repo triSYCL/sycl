@@ -12,6 +12,7 @@
 //===----------------------------------------------------------------------===//
 
 #include <CL/sycl.hpp>
+
 #include <iostream>
 #include <numeric>
 #include <string>
@@ -40,6 +41,13 @@ int main() {
         auto acc = buf.get_access<cl::sycl::access::mode::read_write>(cgh);
         cgh.single_task<class SingleTask>(krn, [=]() { acc[0] = acc[0] + 1; });
       });
+      if (!q.is_host()) {
+        const std::string integrationHeaderKernelName =
+            cl::sycl::detail::KernelInfo<SingleTask>::getName();
+        const std::string clKerneName =
+            krn.get_info<cl::sycl::info::kernel::function_name>();
+        assert(integrationHeaderKernelName == clKerneName);
+      }
     }
     assert(data == 1);
 
@@ -146,11 +154,18 @@ int main() {
         assert(err == CL_SUCCESS);
 
         cl::sycl::program prog(ctx);
-        prog.build_with_source("kernel void ParallelFor(global int* a) "
-                               "{a[get_global_id(0)]+=1; }\n");
+        prog.build_with_source(
+            "kernel void ParallelFor(__global int* a, int v, __local int *l) "
+            "{ size_t index = get_global_id(0); l[index] = a[index];"
+            " l[index] += v; a[index] = l[index]; }\n");
 
         q.submit([&](cl::sycl::handler &cgh) {
-          cgh.set_args(clBuffer);
+          const int value = 1;
+          auto local_acc =
+              cl::sycl::accessor<int, 1, cl::sycl::access::mode::read_write,
+                                 cl::sycl::access::target::local>(
+                  cl::sycl::range<1>(10), cgh);
+          cgh.set_args(clBuffer, value, local_acc);
           cgh.parallel_for(cl::sycl::range<1>(10),
                            prog.get_kernel("ParallelFor"));
         });

@@ -59,15 +59,15 @@ class Util {
 public:
   using DeclContextDesc = std::pair<clang::Decl::Kind, StringRef>;
 
-  /// Checks whether given clang type is a full specialization of the sycl
+  /// Checks whether given clang type is a full specialization of the SYCL
   /// accessor class.
   static bool isSyclAccessorType(const QualType &Ty);
 
-  /// Checks whether given clang type is a full specialization of the sycl
+  /// Checks whether given clang type is a full specialization of the SYCL
   /// sampler class.
   static bool isSyclSamplerType(const QualType &Ty);
 
-  /// Checks whether given clang type is the sycl stream class.
+  /// Checks whether given clang type is the SYCL stream class.
   static bool isSyclStreamType(const QualType &Ty);
 
   /// Checks whether given clang type is declared in the given hierarchy of
@@ -299,6 +299,41 @@ public:
     }
   }
 
+  // Traverses over CallGraph to collect list of attributes applied to
+  // functions called by SYCLKernel (either directly and indirectly) which needs
+  // to be propagated down to callers and applied to SYCL kernels.
+  // For example, reqd_work_group_size, vec_len_hint, reqd_sub_group_size
+  // Attributes applied to SYCLKernel are also included
+  void CollectPossibleKernelAttributes(FunctionDecl *SYCLKernel,
+                                       llvm::SmallPtrSet<Attr *, 4> &Attrs) {
+    llvm::SmallPtrSet<FunctionDecl *, 16> Visited;
+    llvm::SmallVector<FunctionDecl *, 16> WorkList;
+    WorkList.push_back(SYCLKernel);
+
+    while (!WorkList.empty()) {
+      FunctionDecl *FD = WorkList.back();
+      WorkList.pop_back();
+      if (!Visited.insert(FD).second)
+        continue; // We've already seen this Decl
+
+      if (auto *A = FD->getAttr<IntelReqdSubGroupSizeAttr>())
+        Attrs.insert(A);
+      // TODO: reqd_work_group_size, vec_len_hint should be handled here
+
+      CallGraphNode *N = SYCLCG.getNode(FD);
+      if (!N)
+        continue;
+
+      for (const CallGraphNode *CI : *N) {
+        if (auto *Callee = dyn_cast<FunctionDecl>(CI->getDecl())) {
+          Callee = Callee->getCanonicalDecl();
+          if (!Visited.count(Callee))
+            WorkList.push_back(Callee);
+        }
+      }
+    }
+  }
+
 private:
   bool CheckSYCLType(QualType Ty, SourceRange Loc) {
     if (Ty->isVariableArrayType()) {
@@ -412,6 +447,16 @@ static FunctionDecl *CreateSYCLKernelFunction(ASTContext &Context,
   DC->addDecl(SYCLKernel);
   return SYCLKernel;
 }
+/// Return __init method
+static CXXMethodDecl *getInitMethod(const CXXRecordDecl *CRD) {
+  CXXMethodDecl *InitMethod;
+  auto It = std::find_if(CRD->methods().begin(), CRD->methods().end(),
+                         [](const CXXMethodDecl *Method) {
+                           return Method->getNameAsString() == "__init";
+                         });
+  InitMethod = (It != CRD->methods().end()) ? *It : nullptr;
+  return InitMethod;
+}
 
 static CompoundStmt *
 CreateSYCLKernelBody(Sema &S, FunctionDecl *KernelCallerFunc, DeclContext *DC) {
@@ -479,13 +524,7 @@ CreateSYCLKernelBody(Sema &S, FunctionDecl *KernelCallerFunc, DeclContext *DC) {
             DeclarationNameInfo(Field->getDeclName(), SourceLocation()),
             nullptr, Field->getType(), VK_LValue, OK_Ordinary);
 
-        CXXMethodDecl *InitMethod = nullptr;
-        for (auto Method : CRD->methods()) {
-          if (Method->getNameInfo().getName().getAsString() == "__init") {
-            InitMethod = Method;
-            break;
-          }
-        }
+        CXXMethodDecl *InitMethod = getInitMethod(CRD);
         assert(InitMethod && "The accessor must have the __init method");
 
         // [kenrel_obj or wrapper object].accessor.__init
@@ -581,13 +620,7 @@ CreateSYCLKernelBody(Sema &S, FunctionDecl *KernelCallerFunc, DeclContext *DC) {
             DeclarationNameInfo(Field->getDeclName(), SourceLocation()),
             nullptr, Field->getType(), VK_LValue, OK_Ordinary);
 
-        CXXMethodDecl *InitMethod = nullptr;
-        for (auto Method : CRD->methods()) {
-          if (Method->getNameInfo().getName().getAsString() == "__init") {
-            InitMethod = Method;
-            break;
-          }
-        }
+        CXXMethodDecl *InitMethod = getInitMethod(CRD);
         assert(InitMethod && "The sampler must have the __init method");
 
         // kernel_obj.sampler.__init
@@ -687,34 +720,6 @@ static target getAccessTarget(const ClassTemplateSpecializationDecl *AccTy) {
       AccTy->getTemplateArgs()[3].getAsIntegral().getExtValue());
 }
 
-///
-static FieldDecl *getFieldDeclByName(const CXXRecordDecl *RD,
-                                     const ArrayRef<StringRef> FldExpr,
-                                     uint64_t *Offset = nullptr) {
-
-  FieldDecl *Res = nullptr;
-
-  for (const auto FldName : FldExpr) {
-    Res = nullptr;
-    assert(RD && "field lookup in non-struct type");
-
-    for (FieldDecl *Fld : RD->fields()) {
-      if (Fld->getNameAsString() == FldName) {
-        if (Offset) {
-          const ASTRecordLayout &LO =
-              RD->getASTContext().getASTRecordLayout(RD);
-          *Offset += LO.getFieldOffset(Fld->getFieldIndex()) / 8;
-        }
-        RD = Fld->getType()->getAsCXXRecordDecl();
-        Res = Fld;
-        break;
-      }
-    }
-    assert(Res && "field declaration must have been found");
-  }
-  return Res;
-}
-
 static void buildArgTys(ASTContext &Context, CXXRecordDecl *KernelObj,
                         SmallVectorImpl<ParamDesc> &ParamDescs) {
   const LambdaCapture *Cpt = KernelObj->captures_begin();
@@ -755,20 +760,27 @@ static void buildArgTys(ASTContext &Context, CXXRecordDecl *KernelObj,
 
     CreateAndAddPrmDsc(Fld, PointerType);
 
-    FieldDecl *AccessRangeFld =
-        getFieldDeclByName(RecordDecl, {"impl", "AccessRange"});
+    CXXMethodDecl *InitMethod = getInitMethod(RecordDecl);
+    assert(InitMethod && "accessor must have __init method");
+
+    // Expected accessor __init method has four parameters
+    // void __init(_ValueType *Ptr, range<dimensions> AccessRange,
+    //               range<dimensions> MemRange, id<dimensions> Offset)
+    auto *FuncDecl = cast<FunctionDecl>(InitMethod);
+    ParmVarDecl *AccessRangeFld = FuncDecl->getParamDecl(1);
+    ParmVarDecl *MemRangeFld = FuncDecl->getParamDecl(2);
+    ParmVarDecl *OffsetFld = FuncDecl->getParamDecl(3);
+
     assert(AccessRangeFld &&
-           "The accessor.impl must contain the AccessRange field");
-    CreateAndAddPrmDsc(AccessRangeFld, AccessRangeFld->getType());
+            "The accessor __init method must contain the AccessRange parameter");
+    assert(MemRangeFld &&
+            "The accessor __init method must contain the MemRange parameter");
+    assert(OffsetFld &&
+            "The accessor __init method must contain the Offset parameter");
 
-    FieldDecl *MemRangeFld =
-        getFieldDeclByName(RecordDecl, {"impl", "MemRange"});
-    assert(MemRangeFld && "The accessor.impl must contain the MemRange field");
-    CreateAndAddPrmDsc(MemRangeFld, MemRangeFld->getType());
-
-    FieldDecl *OffsetFld = getFieldDeclByName(RecordDecl, {"impl", "Offset"});
-    assert(OffsetFld && "The accessor.impl must contain the Offset field");
-    CreateAndAddPrmDsc(OffsetFld, OffsetFld->getType());
+    CreateAndAddPrmDsc(Fld, AccessRangeFld->getType());
+    CreateAndAddPrmDsc(Fld, MemRangeFld->getType());
+    CreateAndAddPrmDsc(Fld, OffsetFld->getType());
   };
 
   std::function<void(const FieldDecl *, const QualType &ArgTy)>
@@ -799,10 +811,16 @@ static void buildArgTys(ASTContext &Context, CXXRecordDecl *KernelObj,
       const auto *RecordDecl = ArgTy->getAsCXXRecordDecl();
       assert(RecordDecl && "sampler must be of a record type");
 
-      FieldDecl *ImplFld =
-          getFieldDeclByName(RecordDecl, {"impl", "m_Sampler"});
-      assert(ImplFld && "The sampler must contain impl field");
-      CreateAndAddPrmDsc(ImplFld, ImplFld->getType());
+      CXXMethodDecl *InitMethod = getInitMethod(RecordDecl);
+      assert(InitMethod && "sampler must have __init method");
+
+      // sampler __init method has only one parameter
+      // void __init(__ocl_sampler_t *Sampler)
+      auto *FuncDecl = cast<FunctionDecl>(InitMethod);
+      ParmVarDecl *SamplerArg = FuncDecl->getParamDecl(0);
+      assert(SamplerArg && "sampler __init method must have sampler parameter");
+
+      CreateAndAddPrmDsc(Fld, SamplerArg->getType());
     } else if (Util::isSyclStreamType(ArgTy)) {
       // the parameter is a SYCL stream object
       llvm_unreachable("streams not supported yet");
@@ -893,13 +911,18 @@ static void populateIntHeader(SYCLIntegrationHeader &H, const StringRef Name,
       populateHeaderForAccessor(ArgTy, Offset);
     } else if (Util::isSyclSamplerType(ArgTy)) {
       // The parameter is a SYCL sampler object
-      // It has only one descriptor, "m_Sampler"
       const auto *SamplerTy = ArgTy->getAsCXXRecordDecl();
       assert(SamplerTy && "sampler must be of a record type");
-      FieldDecl *ImplFld =
-          getFieldDeclByName(SamplerTy, {"impl", "m_Sampler"}, &Offset);
-      uint64_t Sz =
-          Ctx.getTypeSizeInChars(ImplFld->getType()).getQuantity();
+
+      CXXMethodDecl *InitMethod = getInitMethod(SamplerTy);
+      assert(InitMethod && "sampler must have __init method");
+
+      // sampler __init method has only one argument
+      // void __init(__ocl_sampler_t *Sampler)
+      auto *FuncDecl = cast<FunctionDecl>(InitMethod);
+      ParmVarDecl *SamplerArg = FuncDecl->getParamDecl(0);
+      assert(SamplerArg && "sampler __init method must have sampler parameter");
+      uint64_t Sz = Ctx.getTypeSizeInChars(SamplerArg->getType()).getQuantity();
       H.addParamDesc(SYCLIntegrationHeader::kind_sampler,
                      static_cast<unsigned>(Sz), static_cast<unsigned>(Offset));
     } else if (Util::isSyclStreamType(ArgTy)) {
@@ -963,6 +986,10 @@ void Sema::ConstructSYCLKernel(FunctionDecl *KernelCallerFunc) {
   populateIntHeader(getSyclIntegrationHeader(), Name, KernelNameType, LE);
   FunctionDecl *SYCLKernel =
       CreateSYCLKernelFunction(getASTContext(), Name, ParamDescs);
+
+  // Let's copy source location of a functor/lambda to emit nicer diagnostics
+  SYCLKernel->setLocation(LE->getLocation());
+
   CompoundStmt *SYCLKernelBody =
       CreateSYCLKernelBody(*this, KernelCallerFunc, SYCLKernel);
   SYCLKernel->setBody(SYCLKernelBody);
@@ -980,6 +1007,39 @@ void Sema::MarkDevice(void) {
     if (auto SYCLKernel = dyn_cast<FunctionDecl>(D)) {
       llvm::SmallPtrSet<FunctionDecl *, 10> VisitedSet;
       Marker.CollectKernelSet(SYCLKernel, SYCLKernel, VisitedSet);
+
+      // Let's propagate attributes from device functions to a SYCL kernels
+      llvm::SmallPtrSet<Attr *, 4> Attrs;
+      // This function collects all kernel attributes which might be applied to
+      // a device functions, but need to be propageted down to callers, i.e.
+      // SYCL kernels
+      Marker.CollectPossibleKernelAttributes(SYCLKernel, Attrs);
+      for (auto *A : Attrs) {
+        switch (A->getKind()) {
+          case attr::Kind::IntelReqdSubGroupSize: {
+            auto *Attr = cast<IntelReqdSubGroupSizeAttr>(A);
+            if (auto *Existing =
+                    SYCLKernel->getAttr<IntelReqdSubGroupSizeAttr>()) {
+              if (Existing->getSubGroupSize() != Attr->getSubGroupSize()) {
+                Diag(SYCLKernel->getLocation(),
+                     diag::err_conflicting_sycl_kernel_attributes);
+                Diag(Existing->getLocation(), diag::note_conflicting_attribute);
+                Diag(Attr->getLocation(), diag::note_conflicting_attribute);
+                SYCLKernel->setInvalidDecl();
+              }
+            } else {
+              SYCLKernel->addAttr(A);
+            }
+            break;
+          }
+          // TODO: reqd_work_group_size, vec_len_hint should be handled here
+          default:
+            // Seeing this means that CollectPossibleKernelAttributes was
+            // updated while this switch wasn't...or something went wrong
+            llvm_unreachable("Unexpected attribute was collected by "
+                             "CollectPossibleKernelAttributes");
+        }
+      }
     }
   }
   for (const auto &elt : Marker.KernelSet) {

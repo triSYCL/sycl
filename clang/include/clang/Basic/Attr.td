@@ -300,6 +300,9 @@ def ObjC : LangOpt<"ObjC">;
 def BlocksSupported : LangOpt<"Blocks">;
 def ObjCAutoRefCount : LangOpt<"ObjCAutoRefCount">;
 
+// Language option for CMSE extensions
+def Cmse : LangOpt<"Cmse">;
+
 // Defines targets for target-specific attributes. Empty lists are unchecked.
 class TargetSpec {
   // Specifies Architectures for which the target applies, based off the
@@ -1041,11 +1044,12 @@ def OpenCLUnrollHint : InheritableAttr {
   let Documentation = [OpenCLUnrollHintDocs];
 }
 
-def OpenCLIntelReqdSubGroupSize: InheritableAttr {
-  let Spellings = [GNU<"intel_reqd_sub_group_size">];
+def IntelReqdSubGroupSize: InheritableAttr {
+  let Spellings = [GNU<"intel_reqd_sub_group_size">, CXX11<"cl", "intel_reqd_sub_group_size">];
   let Args = [UnsignedArgument<"SubGroupSize">];
-  let Subjects = SubjectList<[Function], ErrorDiag>;
-  let Documentation = [OpenCLIntelReqdSubGroupSizeDocs];
+  let Subjects = SubjectList<[Function, CXXMethod], ErrorDiag>;
+  let Documentation = [IntelReqdSubGroupSizeDocs];
+  let LangOpts = [OpenCL, SYCL];
 }
 
 // This attribute is both a type attribute, and a declaration attribute (for
