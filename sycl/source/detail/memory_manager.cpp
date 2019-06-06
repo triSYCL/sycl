@@ -165,7 +165,7 @@ void copyH2D(SYCLMemObjT *SYCLMemObj, char *SrcMem, QueueImplPtr SrcQueue,
              unsigned int DimDst, sycl::range<3> DstSize,
              sycl::range<3> DstAccessRange, sycl::id<3> DstOffset,
              unsigned int DstElemSize, std::vector<cl_event> DepEvents,
-             cl_event &OutEvent) {
+             bool UseExclusiveQueue, cl_event &OutEvent) {
   // TODO: Handle images.
 
   // Adjust first dimension of copy range and offset as OpenCL expects size in
@@ -177,9 +177,13 @@ void copyH2D(SYCLMemObjT *SYCLMemObj, char *SrcMem, QueueImplPtr SrcQueue,
   SrcSize[0] *= SrcElemSize;
   DstSize[0] *= DstElemSize;
 
+  cl_command_queue CLQueue = UseExclusiveQueue
+                                 ? TgtQueue->getExclusiveQueueHandleRef()
+                                 : TgtQueue->getHandleRef();
+
   if (1 == DimDst && 1 == DimSrc) {
     CHECK_OCL_CODE(clEnqueueWriteBuffer(
-        TgtQueue->getHandleRef(), DstMem,
+        CLQueue, DstMem,
         /*blocking_write=*/CL_FALSE, DstOffset[0], DstAccessRange[0],
         SrcMem + DstOffset[0], DepEvents.size(), &DepEvents[0], &OutEvent));
   } else {
@@ -189,7 +193,7 @@ void copyH2D(SYCLMemObjT *SYCLMemObj, char *SrcMem, QueueImplPtr SrcQueue,
     size_t HostRowPitch = (1 == DimDst) ? 0 : DstSize[0];
     size_t HostSlicePitch = (3 == DimDst) ? DstSize[0] * DstSize[1] : 0;
     CHECK_OCL_CODE(clEnqueueWriteBufferRect(
-        TgtQueue->getHandleRef(), DstMem,
+        CLQueue, DstMem,
         /*blocking_write=*/CL_FALSE, &DstOffset[0], &SrcOffset[0],
         &DstAccessRange[0], BufferRowPitch, BufferSlicePitch, HostRowPitch,
         HostSlicePitch, SrcMem, DepEvents.size(), &DepEvents[0], &OutEvent));
@@ -203,7 +207,7 @@ void copyD2H(SYCLMemObjT *SYCLMemObj, cl_mem SrcMem, QueueImplPtr SrcQueue,
              unsigned int DimDst, sycl::range<3> DstSize,
              sycl::range<3> DstAccessRange, sycl::id<3> DstOffset,
              unsigned int DstElemSize, std::vector<cl_event> DepEvents,
-             cl_event &OutEvent) {
+             bool UseExclusiveQueue, cl_event &OutEvent) {
   // TODO: Handle images.
 
   // Adjust sizes of 1 dimensions as OpenCL expects size in bytes.
@@ -214,9 +218,13 @@ void copyD2H(SYCLMemObjT *SYCLMemObj, cl_mem SrcMem, QueueImplPtr SrcQueue,
   SrcSize[0] *= SrcElemSize;
   DstSize[0] *= DstElemSize;
 
+  cl_command_queue CLQueue = UseExclusiveQueue
+                                 ? SrcQueue->getExclusiveQueueHandleRef()
+                                 : SrcQueue->getHandleRef();
+
   if (1 == DimDst && 1 == DimSrc) {
     CHECK_OCL_CODE(clEnqueueReadBuffer(
-        SrcQueue->getHandleRef(), SrcMem,
+        CLQueue, SrcMem,
         /*blocking_read=*/CL_FALSE, DstOffset[0], DstAccessRange[0],
         DstMem + DstOffset[0], DepEvents.size(), &DepEvents[0], &OutEvent));
   } else {
@@ -226,7 +234,7 @@ void copyD2H(SYCLMemObjT *SYCLMemObj, cl_mem SrcMem, QueueImplPtr SrcQueue,
     size_t HostRowPitch = (1 == DimDst) ? 0 : DstSize[0];
     size_t HostSlicePitch = (3 == DimDst) ? DstSize[0] * DstSize[1] : 0;
     CHECK_OCL_CODE(clEnqueueReadBufferRect(
-        SrcQueue->getHandleRef(), SrcMem,
+        CLQueue, SrcMem,
         /*blocking_read=*/CL_FALSE, &SrcOffset[0], &DstOffset[0],
         &SrcAccessRange[0], BufferRowPitch, BufferSlicePitch, HostRowPitch,
         HostSlicePitch, DstMem, DepEvents.size(), &DepEvents[0], &OutEvent));
@@ -240,7 +248,7 @@ void copyD2D(SYCLMemObjT *SYCLMemObj, cl_mem SrcMem, QueueImplPtr SrcQueue,
              unsigned int DimDst, sycl::range<3> DstSize,
              sycl::range<3> DstAccessRange, sycl::id<3> DstOffset,
              unsigned int DstElemSize, std::vector<cl_event> DepEvents,
-             cl_event &OutEvent) {
+             bool UseExclusiveQueue, cl_event &OutEvent) {
   // TODO: Handle images.
 
   // Adjust sizes of 1 dimensions as OpenCL expects size in bytes.
@@ -250,9 +258,13 @@ void copyD2D(SYCLMemObjT *SYCLMemObj, cl_mem SrcMem, QueueImplPtr SrcQueue,
   SrcSize[0] *= SrcElemSize;
   DstSize[0] *= DstElemSize;
 
+  cl_command_queue CLQueue = UseExclusiveQueue
+                                 ? SrcQueue->getExclusiveQueueHandleRef()
+                                 : SrcQueue->getHandleRef();
+
   if (1 == DimDst && 1 == DimSrc) {
     CHECK_OCL_CODE(clEnqueueCopyBuffer(
-        SrcQueue->getHandleRef(), SrcMem, DstMem, SrcOffset[0], DstOffset[0],
+        CLQueue, SrcMem, DstMem, SrcOffset[0], DstOffset[0],
         SrcAccessRange[0], DepEvents.size(), &DepEvents[0], &OutEvent));
   } else {
     size_t BufferRowPitch = (1 == DimSrc) ? 0 : SrcSize[0];
@@ -262,7 +274,7 @@ void copyD2D(SYCLMemObjT *SYCLMemObj, cl_mem SrcMem, QueueImplPtr SrcQueue,
     size_t HostSlicePitch = (3 == DimDst) ? DstSize[0] * DstSize[1] : 0;
 
     CHECK_OCL_CODE(clEnqueueCopyBufferRect(
-        SrcQueue->getHandleRef(), SrcMem, DstMem, &SrcOffset[0], &DstOffset[0],
+        CLQueue, SrcMem, DstMem, &SrcOffset[0], &DstOffset[0],
         &SrcAccessRange[0], BufferRowPitch, BufferSlicePitch, HostRowPitch,
         HostSlicePitch, DepEvents.size(), &DepEvents[0], &OutEvent));
   }
@@ -275,7 +287,8 @@ static void copyH2H(SYCLMemObjT *SYCLMemObj, char *SrcMem,
                     char *DstMem, QueueImplPtr TgtQueue, unsigned int DimDst,
                     sycl::range<3> DstSize, sycl::range<3> DstAccessRange,
                     sycl::id<3> DstOffset, unsigned int DstElemSize,
-                    std::vector<cl_event> DepEvents, cl_event &OutEvent) {
+                    std::vector<cl_event> DepEvents, bool UseExclusiveQueue,
+                    cl_event &OutEvent) {
   if ((DimSrc != 1 || DimDst != 1) &&
       (SrcOffset != id<3>{0, 0, 0} || DstOffset != id<3>{0, 0, 0} ||
        SrcSize != SrcAccessRange || DstSize != DstAccessRange)) {
@@ -302,31 +315,32 @@ void MemoryManager::copy(SYCLMemObjT *SYCLMemObj, void *SrcMem,
                          unsigned int DimDst, sycl::range<3> DstSize,
                          sycl::range<3> DstAccessRange, sycl::id<3> DstOffset,
                          unsigned int DstElemSize,
-                         std::vector<cl_event> DepEvents, cl_event &OutEvent) {
+                         std::vector<cl_event> DepEvents,
+                         bool UseExclusiveQueue, cl_event &OutEvent) {
 
   if (SrcQueue->is_host()) {
     if (TgtQueue->is_host())
       copyH2H(SYCLMemObj, (char *)SrcMem, std::move(SrcQueue), DimSrc, SrcSize,
               SrcAccessRange, SrcOffset, SrcElemSize, (char *)DstMem,
               std::move(TgtQueue), DimDst, DstSize, DstAccessRange, DstOffset,
-              DstElemSize, std::move(DepEvents), OutEvent);
+              DstElemSize, std::move(DepEvents), UseExclusiveQueue, OutEvent);
 
     else
       copyH2D(SYCLMemObj, (char *)SrcMem, std::move(SrcQueue), DimSrc, SrcSize,
               SrcAccessRange, SrcOffset, SrcElemSize, (cl_mem)DstMem,
               std::move(TgtQueue), DimDst, DstSize, DstAccessRange, DstOffset,
-              DstElemSize, std::move(DepEvents), OutEvent);
+              DstElemSize, std::move(DepEvents), UseExclusiveQueue, OutEvent);
   } else {
     if (TgtQueue->is_host())
       copyD2H(SYCLMemObj, (cl_mem)SrcMem, std::move(SrcQueue), DimSrc, SrcSize,
               SrcAccessRange, SrcOffset, SrcElemSize, (char *)DstMem,
               std::move(TgtQueue), DimDst, DstSize, DstAccessRange, DstOffset,
-              DstElemSize, std::move(DepEvents), OutEvent);
+              DstElemSize, std::move(DepEvents), UseExclusiveQueue, OutEvent);
     else
       copyD2D(SYCLMemObj, (cl_mem)SrcMem, std::move(SrcQueue), DimSrc, SrcSize,
               SrcAccessRange, SrcOffset, SrcElemSize, (cl_mem)DstMem,
               std::move(TgtQueue), DimDst, DstSize, DstAccessRange, DstOffset,
-              DstElemSize, std::move(DepEvents), OutEvent);
+              DstElemSize, std::move(DepEvents), UseExclusiveQueue, OutEvent);
   }
 }
 
@@ -400,10 +414,13 @@ void *MemoryManager::map(SYCLMemObjT *SYCLMemObj, void *Mem, QueueImplPtr Queue,
 
 void MemoryManager::unmap(SYCLMemObjT *SYCLMemObj, void *Mem,
                           QueueImplPtr Queue, void *MappedPtr,
-                          std::vector<cl_event> DepEvents, cl_event &OutEvent) {
+                          std::vector<cl_event> DepEvents,
+                          bool UseExclusiveQueue, cl_event &OutEvent) {
   cl_int Error = CL_SUCCESS;
   Error = clEnqueueUnmapMemObject(
-      Queue->getHandleRef(), (cl_mem)Mem, MappedPtr, DepEvents.size(),
+      UseExclusiveQueue ? Queue->getExclusiveQueueHandleRef()
+                        : Queue->getHandleRef(),
+      (cl_mem)Mem, MappedPtr, DepEvents.size(),
       DepEvents.empty() ? nullptr : &DepEvents[0], &OutEvent);
   CHECK_OCL_CODE(Error);
 }
