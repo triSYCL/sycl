@@ -26,6 +26,10 @@ around being the middle man between `xocc` and the SYCL device
 compiler and runtime for the moment, they are not the simple whims of
 the insane! Hopefully...
 
+## Getting started guide using Ubuntu 19.04, SDx 2019.1 and Alveo U200
+
+Look at [getting started with an Alveo U200](GettingStartedAlveo.md).
+
 ## Software requirements
 
 Installing Xilinx FPGA compatible software stack:
@@ -176,10 +180,17 @@ being as they do not get packaged with the regular OpenCL include directory for
 now. The default install location for this on Debian/Ubuntu is: `/opt/xilinx/xrt/include/`
 
 ## Tested with
+
 * Ubuntu 18.10
 * XRT 2018.3
 * SDx 2018.3
 * Alveo U250 Platform: xilinx_u250_xdma_201830_1
+
+* Ubuntu 19.04
+* XRT 2019.1
+* SDx 2019.1
+* Alveo U200 Platform: xilinx_u200_xdma_201830_2
+
 
 ## Extra Notes:
 * The Driver ToolChain, currently makes some assumptions about the `SDx` 
