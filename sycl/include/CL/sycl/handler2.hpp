@@ -932,6 +932,17 @@ public:
   copy(accessor<T_Src, Dims, AccessMode, AccessTarget, IsPlaceholder> Src,
        T_Dst *Dst) {
     if (MIsHost) {
+     // This makes sure we don't compile this on the device, it will kill one of
+     // the xocc hw_emu passes as it's passing a raw pointer to a kernel with no
+     // address space qualifier because we're not wrapping it in a buffer and
+     // using an accessor.
+     // We don't actually care about this parallel_for on device it's a pure
+     // host parallel_for, the actualy H2D/D2H copy is done via OpenCL calls
+     // so this is a 'quick fix' for us. At least until the below TODO is
+     // implemented and it's pushed down to the memory manager. The alternative
+     // would be to just wrap things in a buffer like the original handler but
+     // that seems like it could be more error prone.
+#if (!defined(__SYCL_DEVICE_ONLY__) && !defined(__SYCL_XILINX_ONLY__))
       // TODO: Temporary implementation for host. Should be handled by memory
       // manger.
       range<Dims> Range = Src.get_range();
@@ -943,7 +954,7 @@ public:
           LinearIndex += Range[I] * Index[I];
         ((T_Src *)Dst)[LinearIndex] = Src[Index];
       });
-
+#endif
       return;
     }
     MCGType = detail::CG::COPY_ACC_TO_PTR;
@@ -970,6 +981,17 @@ public:
        accessor<T_Dst, Dims, AccessMode, AccessTarget, IsPlaceholder> Dst) {
 
     if (MIsHost) {
+     // This makes sure we don't compile this on the device, it will kill one of
+     // the xocc hw_emu passes as it's passing a raw pointer to a kernel with no
+     // address space qualifier because we're not wrapping it in a buffer and
+     // using an accessor.
+     // We don't actually care about this parallel_for on device it's a pure
+     // host parallel_for, the actualy H2D/D2H copy is done via OpenCL calls
+     // so this is a 'quick fix' for us. At least until the below TODO is
+     // implemented and it's pushed down to the memory manager. The alternative
+     // would be to just wrap things in a buffer like the original handler but
+     // that seems like it could be more error prone.
+#if (!defined(__SYCL_DEVICE_ONLY__) && !defined(__SYCL_XILINX_ONLY__))
       // TODO: Temporary implementation for host. Should be handled by memory
       // manger.
       range<Dims> Range = Dst.get_range();
@@ -982,7 +1004,7 @@ public:
 
         Dst[Index] = ((T_Dst *)Src)[LinearIndex];
       });
-
+#endif
       return;
     }
     MCGType = detail::CG::COPY_PTR_TO_ACC;
@@ -1023,6 +1045,17 @@ public:
            Dst) {
 
     if (MIsHost) {
+     // This makes sure we don't compile this on the device, it will kill one of
+     // the xocc hw_emu passes as it's passing a raw pointer to a kernel with no
+     // address space qualifier because we're not wrapping it in a buffer and
+     // using an accessor.
+     // We don't actually care about this parallel_for on device it's a pure
+     // host parallel_for, the actualy H2D/D2H copy is done via OpenCL calls
+     // so this is a 'quick fix' for us. At least until the below TODO is
+     // implemented and it's pushed down to the memory manager. The alternative
+     // would be to just wrap things in a buffer like the original handler but
+     // that seems like it could be more error prone.
+#if (!defined(__SYCL_DEVICE_ONLY__) && !defined(__SYCL_XILINX_ONLY__))
       range<Dims_Src> Range = Dst.get_range();
       parallel_for< class __copyAcc2Acc< T_Src, Dims_Src, AccessMode_Src,
                                          AccessTarget_Src, T_Dst, Dims_Dst,
@@ -1032,7 +1065,7 @@ public:
                                          (Range, [=](id<Dims_Src> Index) {
         Dst[Index] = Src[Index];
       });
-
+#endif
       return;
     }
     MCGType = detail::CG::COPY_ACC_TO_ACC;
@@ -1098,6 +1131,11 @@ public:
       *PatternPtr = Pattern;
     } else {
 
+   // This makes sure we don't compile this on the device, I've not tested this
+   // one but... I'd rather not compile it on the device if it's not required
+   // and it will eventually be implemented in a host centric way as described
+   // by the TODO, similar to the reasoning behind the handler.copy #IF blocks
+#if (!defined(__SYCL_DEVICE_ONLY__) && !defined(__SYCL_XILINX_ONLY__))
       // TODO: Temporary implementation for host. Should be handled by memory
       // manger.
       range<Dims> Range = Dst.get_range();
@@ -1105,6 +1143,7 @@ public:
                                 IsPlaceholder>>(Range, [=](id<Dims> Index) {
         Dst[Index] = Pattern;
       });
+#endif
     }
   }
 };
