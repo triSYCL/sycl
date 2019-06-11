@@ -99,7 +99,6 @@ int main() {
       accessor<int, 2, access::mode::read, access::target::global_buffer>
           accessorFrom(idc, cgh, range<2>(Size, Size));
       cgh.single_task<noop>([=](){
-          printf("don't care force boot device \n");
       });
     });
     q.wait();
