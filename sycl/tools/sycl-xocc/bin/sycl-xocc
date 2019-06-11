@@ -157,7 +157,6 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
       --save-temps -c -k "$index" -o "$TEMPORARY_DIR/$index.xo" \
       "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
       LINKER_LIST="$TEMPORARY_DIR/$index.xo $LINKER_LIST"
-
   fi
   done
 
