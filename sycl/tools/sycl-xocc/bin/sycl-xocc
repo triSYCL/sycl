@@ -37,6 +37,9 @@
 # the environment variables are a quick workaround to swap boards.
 usage() { echo xocc_compile: error: $2 >&2; exit $1; }
 
+# Make this a parameter passed in from Clang at some point
+export VERBOSE=1
+
 if [[ -z "$1" ]]; then
   usage 1 "no sdx bin directory containing xocc"
 fi
@@ -140,6 +143,16 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   LINKER_LIST=""
   for index in "${KERNEL_NAME_ARRAY[@]}"; do
   if [[ -n "$index" ]]; then
+    if [[ ! -z "$VERBOSE" ]]; then
+      echo "Invoking xocc Kernel Compilation"
+      echo "xocc: $XOCC"
+      echo "--target: $XCL_EMULATION_MODE"
+      echo "--platform: $XILINX_PLATFORM"
+      echo "Compiling kernel: $index"
+      echo "Outputting file to: $TEMPORARY_DIR/$index.xo"
+      echo "Input file is: $TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
+    fi
+
     $XOCC --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM \
       --save-temps -c -k "$index" -o "$TEMPORARY_DIR/$index.xo" \
       "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
