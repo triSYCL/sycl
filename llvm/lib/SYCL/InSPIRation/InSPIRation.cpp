@@ -60,6 +60,7 @@ namespace {
 // matches __spirv_ocl_ which is the transformed namespace of certain builtins
 // in the cl::__spirv namespace after translation by the reflower (e.g. math
 // functions like sqrt)
+static const std::regex matchSPIROCL {R"((_Z\d+__spir_ocl_))"};
 static const std::regex matchSPIRVOCL {R"((_Z\d+__spirv_ocl_))"};
 static const std::regex matchSPIRVOCLS {R"((_Z\d+__spirv_ocl_s_))"};
 static const std::regex matchSPIRVOCLU {R"((_Z\d+__spirv_ocl_u_))"};
@@ -80,9 +81,10 @@ static const std::regex matchSomeNaturalInteger {R"(\d+)"};
 // This is to give clarity to why we negate a value from the Z mangle component
 // rather than having a magical number, we have the size of the string we've
 // removed from the mangling.
-static const std::string SPIRVOCL("__spirv_ocl_");
-static const std::string SPIRVOCLS("__spirv_ocl_s_");
-static const std::string SPIRVOCLU("__spirv_ocl_u_");
+static const std::string SPIROCL {"__spir_ocl_"};
+static const std::string SPIRVOCL{"__spirv_ocl_"};
+static const std::string SPIRVOCLS{"__spirv_ocl_s_"};
+static const std::string SPIRVOCLU{"__spirv_ocl_u_"};
 
 /// Transform the SYCL kernel functions into xocc SPIR-compatible kernels
 struct InSPIRation : public ModulePass {
@@ -91,14 +93,19 @@ struct InSPIRation : public ModulePass {
 
   InSPIRation() : ModulePass(ID) {}
 
-  /// This function works assuming the built-ins inside of the cl::__spirv
-  /// namespace undergo the transformation in the reflower to use the mangling
-  /// __spirv_ocl_ in place of the regular namespace mangling. It also works
-  /// assuming that the function contained inside the cl::__spirv namespace are
-  /// named the same as an OpenCL/SPIR built-in e.g. it's still named sqrt with
-  /// a valid SPIR/OpenCL overload.
-  void renameSPIRVIntrinsicToSPIR(Function &F, const std::regex Match,
-                                  const std::string Namespace) {
+  /// This function currently works by checking for certain prefixes, and
+  /// removing them from the mangled name, this currently is used for
+  /// get_global_id etc. (as we forcefully prefix it with __spir_ocl_), and
+  /// the math builtins which are prefixed with __spirv_ocl_. An example is:
+  ///   Z24__spir_ocl_get_global_idj - > Z13get_global_idj
+
+  /// Note: running this call on real SPIRV builtins is unlikely to yield a
+  /// working SPIR builtin as they 1) May not be named the same/have a SPIR
+  /// equivalent 2) Are not necessarily function calls, but possibly a magic
+  /// variable like __spirv_BuiltInGlobalSize, something more complex would be
+  /// required.
+  void removePrefixFromMangling(Function &F, const std::regex Match,
+                                const std::string Namespace) {
     const auto funcName = F.getName().str();
 
     auto regexName = std::regex_replace(funcName,
@@ -111,11 +118,12 @@ struct InSPIRation : public ModulePass {
 
         // The poor man's mangling to a spir builtin, we know that the function
         // type itself is fine, we just need to work out the _Z mangling as spir
-        // built-ins don't sit inside a namespace. All _Z is in this case is the
-        // number of characters in the functions name which we can work out by
-        // removing the number of characters in the Namespace e.g.
-        //__spirv_ocl_ (12 characters) from the original mangled names _Z value.
-        // SPIR manglings for reference:
+        // built-ins are not prefixed with __spirv_ocl_ or __spir_ocl_. All
+        // _Z is in this case is the number of characters in the functions name
+        // which we can work out by removing the number of characters in the
+        // prefix e.g. __spirv_ocl_ (12 characters)/__spir_ocl_ (11 characters)
+        // or from the original mangled names _Z value SPIR manglings for
+        // reference:
         // https://github.com/KhronosGroup/SPIR-Tools/wiki/SPIR-2.0-built-in-functions
         F.setName("_Z" + std::to_string(zVal - Namespace.size())
                  + regexName);
@@ -391,18 +399,18 @@ struct InSPIRation : public ModulePass {
     for (auto F : declarations) {
       // aims to catch things preceded by a namespace of the style:
       // _Z16__spirv_ocl_ and use the end section as a SPIR call
+      // _Z24__spir_ocl_
       // _Z18__spirv_ocl_u_
       // _Z18__spirv_ocl_s_
 
       // This seems like a lazy brute force way to do things.
       // Perhaps there is a more elegant solution that can be implemented in the
       // future. I don't believe too much effort should be put into this until
-      // the decision on the upstream reflower is made though.
-      // It will check all of the manglings before settling on the base
-      // __spirv_ocl_ mangle
-      renameSPIRVIntrinsicToSPIR(*F, matchSPIRVOCLU, SPIRVOCLU);
-      renameSPIRVIntrinsicToSPIR(*F, matchSPIRVOCLS, SPIRVOCLS);
-      renameSPIRVIntrinsicToSPIR(*F, matchSPIRVOCL,  SPIRVOCL);
+      // the builtin implementation stabilizes
+      removePrefixFromMangling(*F, matchSPIRVOCLU, SPIRVOCLU);
+      removePrefixFromMangling(*F, matchSPIRVOCLS, SPIRVOCLS);
+      removePrefixFromMangling(*F, matchSPIRVOCL, SPIRVOCL);
+      removePrefixFromMangling(*F, matchSPIROCL, SPIROCL);
     }
 
     setSPIRVersion(M);

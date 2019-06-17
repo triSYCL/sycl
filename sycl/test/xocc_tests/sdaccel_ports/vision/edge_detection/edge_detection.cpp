@@ -64,14 +64,8 @@ int main(int argc, char* argv[]) {
   std::cout << "Calculating Max Energy... \n";
 
   short iMax = 0;
-  // Work around for bug in the main SYCL implementation relating to unusable
-  // std lib functions when compiling for device (device doesn't care about the
-  // host components but still has to compile them)
-  // Issue: https://github.com/intel/llvm/issues/15
-#ifndef __SYCL_DEVICE_ONLY__
   iMax = *std::max_element(input.begin<uchar>(), input.end<uchar>(),
                             [](auto i, auto j){ return i < j; });
-#endif
 
   std::cout << "inputBits = " << ceil(log2(iMax)) << " coefMax = 2 \n";
   std::cout << "Max Energy = " << ceil(log2((long long)iMax * 2 * 3 * 3)) + 1
@@ -159,14 +153,8 @@ int main(int argc, char* argv[]) {
   cv::Mat output(height, width, CV_8UC1, pixel_rb.get_pointer());
 
   short oMax = 0;
-// Work around for bug in the main SYCL implementation relating to unusable
-// std lib functions when compiling for device (device doesn't care about the
-// host components but still has to compile them)
-// Issue: https://github.com/intel/llvm/issues/15
-#ifndef __SYCL_DEVICE_ONLY__
   oMax = *std::max_element(output.begin<uchar>(), output.end<uchar>(),
                             [=](auto i, auto j){ return i < j; });
-#endif
 
   std::cout << "outputBits = " << ceil(log2(oMax)) << "\n";
 
