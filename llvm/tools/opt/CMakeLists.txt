@@ -26,6 +26,7 @@ set(LLVM_LINK_COMPONENTS
   InSPIRation
   KernelPropGen
   XOCCIRDowngrader
+  ChessMassage
   )
 
 # Support plugins.

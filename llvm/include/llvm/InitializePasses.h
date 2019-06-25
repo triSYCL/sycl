@@ -423,6 +423,7 @@ void initializeASFixerPass(PassRegistry&);
 void initializeInSPIRationPass(PassRegistry&);
 void initializeKernelPropGenPass(PassRegistry&);
 void initializeXOCCIRDowngraderPass(PassRegistry&);
+void initializeChessMassagePass(PassRegistry&);
 
 } // end namespace llvm
 

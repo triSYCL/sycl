@@ -535,6 +535,7 @@ int main(int argc, char **argv) {
   initializeExpandReductionsPass(Registry);
   initializeWasmEHPreparePass(Registry);
   initializeWriteBitcodePassPass(Registry);
+  initializeHardwareLoopsPass(Registry);
 
   // SYCL related passes, there may come a time where it's better to register
   // these as a module rather than separate passes
@@ -543,7 +544,7 @@ int main(int argc, char **argv) {
   initializeInSPIRationPass(Registry);
   initializeKernelPropGenPass(Registry);
   initializeXOCCIRDowngraderPass(Registry);
-  initializeHardwareLoopsPass(Registry);
+  initializeChessMassagePass(Registry);
 
 #ifdef LINK_POLLY_INTO_TOOLS
   polly::initializePollyPasses(Registry);
