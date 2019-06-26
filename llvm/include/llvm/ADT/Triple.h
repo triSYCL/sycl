@@ -504,11 +504,11 @@ public:
   }
 
   bool isXilinxSYCLDevice() const {
-    return (getArch() == Triple::fpga64
-        || getArch() == Triple::fpga32
-        || getArch() == Triple::aie32)
-        && getVendor() == Triple::Xilinx
-        && isSYCLDeviceEnvironment();
+    return (getArch() == Triple::fpga64 ||
+            getArch() == Triple::fpga32 ||
+            getArch() == Triple::aie32) &&
+            getVendor() == Triple::Xilinx &&
+            isSYCLDeviceEnvironment();
   }
 
   bool isXilinxFPGA() const {

@@ -43,10 +43,10 @@ ChessInstallationDetector::ChessInstallationDetector(
 ///////////////////////////////////////////////////////////////////////////////
 
 void SYCL::LinkerChess::ConstructJob(Compilation &C, const JobAction &JA,
-                                   const InputInfo &Output,
-                                   const InputInfoList &Inputs,
-                                   const ArgList &Args,
-                                   const char *LinkingOutput) const {
+                                     const InputInfo &Output,
+                                     const InputInfoList &Inputs,
+                                     const ArgList &Args,
+                                     const char *LinkingOutput) const {
   constructSYCLChessCommand(C, JA, Output, Inputs, Args);
 }
 
@@ -69,7 +69,7 @@ void SYCL::LinkerChess::constructSYCLChessCommand(
 ///////////////////////////////////////////////////////////////////////////////
 
 ChessToolChain::ChessToolChain(const Driver &D, const llvm::Triple &Triple,
-                              const ToolChain &HostTC, const ArgList &Args)
+                               const ToolChain &HostTC, const ArgList &Args)
     : ToolChain(D, Triple, Args), HostTC(HostTC),
       ChessInstallation(D, HostTC.getTriple(), Args)
 {
@@ -133,11 +133,11 @@ ChessToolChain::GetCXXStdlibType(const ArgList &Args) const {
 }
 
 void ChessToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
-                                              ArgStringList &CC1Args) const {
+                                               ArgStringList &CC1Args) const {
   HostTC.AddClangSystemIncludeArgs(DriverArgs, CC1Args);
 }
 
 void ChessToolChain::AddClangCXXStdlibIncludeArgs(const ArgList &Args,
-                                                 ArgStringList &CC1Args) const {
+                                                  ArgStringList &CC1Args) const {
   HostTC.AddClangCXXStdlibIncludeArgs(Args, CC1Args);
 }

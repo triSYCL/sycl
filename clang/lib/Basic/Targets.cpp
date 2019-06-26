@@ -557,7 +557,7 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
   case llvm::Triple::aie32: {
     // Triple example: aie32-xilinx-unknown-sycldevice
     if (Triple.getVendor() == llvm::Triple::Xilinx
-     && Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
+      && Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
        switch (os) {
        case llvm::Triple::Linux:
          return new LinuxTargetInfo<SPIR32SYCLDeviceTargetInfo>(Triple, Opts);
@@ -571,7 +571,7 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
   case llvm::Triple::fpga32: {
     // Triple example: fpga32-xilinx-unknown-sycldevice
     if (Triple.getVendor() == llvm::Triple::Xilinx
-     && Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
+      && Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
        switch (os) {
        case llvm::Triple::Linux:
          return new LinuxTargetInfo<SPIR32SYCLDeviceTargetInfo>(Triple, Opts);
@@ -585,7 +585,7 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
   case llvm::Triple::fpga64: {
     // Triple example: fpga64-xilinx-unknown-sycldevice
     if (Triple.getVendor() == llvm::Triple::Xilinx
-     && Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
+      && Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
        switch (os) {
        case llvm::Triple::Linux:
          return new LinuxTargetInfo<SPIR64SYCLDeviceTargetInfo>(Triple, Opts);
