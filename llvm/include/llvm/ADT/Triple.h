@@ -45,6 +45,7 @@ public:
   enum ArchType {
     UnknownArch,
 
+    aie32,          // Xilinx AI Engine 32-bit
     arm,            // ARM (little endian): arm, armv.*, xscale
     armeb,          // ARM (big endian): armeb
     aarch64,        // AArch64 (little endian): aarch64
@@ -504,7 +505,8 @@ public:
 
   bool isXilinxSYCLDevice() const {
     return (getArch() == Triple::fpga64
-        || getArch() == Triple::fpga32)
+        || getArch() == Triple::fpga32
+        || getArch() == Triple::aie32)
         && getVendor() == Triple::Xilinx
         && isSYCLDeviceEnvironment();
   }
@@ -517,6 +519,11 @@ public:
 
   bool isMacCatalystEnvironment() const {
     return getEnvironment() == Triple::MacABI;
+  }
+
+  bool isXilinxAIE() const {
+    return getArch() == Triple::aie32
+        && getVendor() == Triple::Xilinx;
   }
 
   bool isOSNetBSD() const {

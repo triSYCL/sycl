@@ -12,6 +12,7 @@
 #include "ToolChains/AVR.h"
 #include "ToolChains/Ananas.h"
 #include "ToolChains/BareMetal.h"
+#include "ToolChains/Chess.h"
 #include "ToolChains/Clang.h"
 #include "ToolChains/CloudABI.h"
 #include "ToolChains/Contiki.h"
@@ -5724,6 +5725,10 @@ const ToolChain &Driver::getOffloadingDeviceToolChain(const ArgList &Args,
           case llvm::Triple::fpga32:
           case llvm::Triple::fpga64:
             TC = std::make_unique<toolchains::XOCCToolChain>(
+              *this, Target, HostTC, Args);
+            break;
+          case llvm::Triple::aie32:
+            TC = llvm::make_unique<toolchains::ChessToolChain>(
               *this, Target, HostTC, Args);
             break;
           default:

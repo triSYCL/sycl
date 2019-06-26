@@ -34,6 +34,7 @@ add_clang_library(clangDriver
   ToolChains/AMDGPU.cpp
   ToolChains/AVR.cpp
   ToolChains/BareMetal.cpp
+  ToolChains/Chess.cpp
   ToolChains/Clang.cpp
   ToolChains/CloudABI.cpp
   ToolChains/CommonArgs.cpp

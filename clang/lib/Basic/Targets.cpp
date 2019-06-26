@@ -554,6 +554,19 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
       return new X86_64TargetInfo(Triple, Opts);
     }
 
+  case llvm::Triple::aie32: {
+    // Triple example: aie32-xilinx-unknown-sycldevice
+    if (Triple.getVendor() == llvm::Triple::Xilinx
+     && Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
+       switch (os) {
+       case llvm::Triple::Linux:
+         return new LinuxTargetInfo<SPIR32SYCLDeviceTargetInfo>(Triple, Opts);
+       default:
+         return new SPIR32SYCLDeviceTargetInfo(Triple, Opts);
+       }
+     }
+    return nullptr;
+  }
 
   case llvm::Triple::fpga32: {
     // Triple example: fpga32-xilinx-unknown-sycldevice
