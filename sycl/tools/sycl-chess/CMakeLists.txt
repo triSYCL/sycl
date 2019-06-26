@@ -35,3 +35,4 @@ endforeach()
 
 add_custom_target(sycl-chess ALL DEPENDS ${Depends})
 add_custom_target(chess-clang ALL DEPENDS ${Depends})
+
