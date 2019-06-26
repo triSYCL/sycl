@@ -799,7 +799,8 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
               !(TT.getArch() == llvm::Triple::spir ||
                 TT.getArch() == llvm::Triple::spir64 ||
                 TT.getArch() == llvm::Triple::fpga32 ||
-                TT.getArch() == llvm::Triple::fpga64))
+                TT.getArch() == llvm::Triple::fpga64 ||
+                TT.getArch() == llvm::Triple::aie32))
             Diag(clang::diag::err_drv_invalid_sycl_target) << Val;
           else {
             const ToolChain *HostTC =
