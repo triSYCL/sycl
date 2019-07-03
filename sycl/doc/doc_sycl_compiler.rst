@@ -33,7 +33,7 @@ Host compilation
 
 The host program compilation workflow is shown on the right-side of `Figure 1`_.
  - 8) The ``.h`` file produced in this step will contain information about the kernel in order to allow the host program to call them.
- - 9) This compilation will ignore all the kernel code to create the Host program described by the source, the ``.h`` generated previously allow the program to call the kernel which have been ignored.
+ - 9) This compilation will skip all the kernel code to create the host program described by the source, the ``.h`` generated previously allow the program to call the kernels which have been out-lined.
 
 The executable
 ==============
