@@ -39,7 +39,7 @@ uint32_t PlatformUtil::getMaxClockFrequency() {
   throw runtime_error(
       "max_clock_frequency parameter is not supported for host device");
 
-#if !defined(__arm__) || !defined(__aarch64__)
+#if defined(__arm__) || defined(__aarch64__)
   throw runtime_error(
       "max_clock_frequency is not supported for ARM architectures");
 #endif
@@ -76,7 +76,7 @@ uint32_t PlatformUtil::getMaxClockFrequency() {
 }
 
 uint32_t PlatformUtil::getMemCacheLineSize() {
-#if !defined(__arm__) || !defined(__aarch64__)
+#if defined(__arm__) || defined(__aarch64__)
   throw runtime_error(
       "global_mem_cache_line_size is not supported for ARM architectures");
 #endif
@@ -87,7 +87,7 @@ uint32_t PlatformUtil::getMemCacheLineSize() {
 }
 
 uint64_t PlatformUtil::getMemCacheSize() {
-#if !defined(__arm__) || !defined(__aarch64__)
+#if defined(__arm__) || defined(__aarch64__)
   throw runtime_error(
       "global_mem_cache_size is not supported for ARM architectures");
 #endif
@@ -98,7 +98,7 @@ uint64_t PlatformUtil::getMemCacheSize() {
 }
 
 uint32_t PlatformUtil::getNativeVectorWidth(PlatformUtil::TypeIndex TIndex) {
-#if !defined(__arm__) || !defined(__aarch64__)
+#if defined(__arm__) || defined(__aarch64__)
   throw runtime_error(
       "native_vector_width_* is not supported for ARM architectures");
 #endif
