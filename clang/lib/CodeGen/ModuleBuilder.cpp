@@ -284,7 +284,8 @@ namespace {
         return;
 
       // No VTable usage is legal in SYCL, so don't bother marking them used.
-      if (Ctx->getLangOpts().SYCLIsDevice)
+      if (!Ctx->getLangOpts().SYCLAllowVirtual &&
+          Ctx->getLangOpts().SYCLIsDevice)
         return;
 
       Builder->EmitVTable(RD);

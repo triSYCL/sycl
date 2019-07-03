@@ -867,6 +867,9 @@ def fsycl_int_header_EQ : Joined<["-"], "fsycl-int-header=">,
 def fsycl_allow_func_ptr : Flag<["-"], "fsycl-allow-func-ptr">,
   HelpText<"Allow function pointers in SYCL device.">;
 def fno_sycl_allow_func_ptr : Flag<["-"], "fno-sycl-allow-func-ptr">;
+def fsycl_allow_virtual : Flag<["-"], "fsycl-allow-virtual">,
+  HelpText<"Allow virtual functions and types in SYCL device.">;
+def fno_sycl_allow_virtual : Flag<["-"], "fno-sycl-allow-virtual">;
 
 } // let Flags = [CC1Option]
 
