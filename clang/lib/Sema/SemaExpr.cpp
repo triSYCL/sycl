@@ -3206,6 +3206,67 @@ ExprResult Sema::BuildPredefinedExpr(SourceLocation Loc,
   return PredefinedExpr::Create(Context, Loc, ResTy, IK, SL);
 }
 
+ExprResult Sema::BuildUniqueStableName(SourceLocation OpLoc,
+                                       TypeSourceInfo *Operand) {
+  QualType ResultTy;
+  StringLiteral *SL = nullptr;
+  if (Operand->getType()->isDependentType()) {
+    ResultTy = Context.DependentTy;
+  } else {
+    std::string Str = PredefinedExpr::ComputeName(
+        Context, PredefinedExpr::UniqueStableNameType, Operand->getType());
+    llvm::APInt Length(32, Str.length() + 1);
+    ResultTy = Context.adjustStringLiteralBaseType(Context.CharTy.withConst());
+    ResultTy = Context.getConstantArrayType(ResultTy, Length, ArrayType::Normal,
+                                            /*IndexTypeQuals*/ 0);
+    SL = StringLiteral::Create(Context, Str, StringLiteral::Ascii,
+                               /*Pascal*/ false, ResultTy, OpLoc);
+  }
+
+  return PredefinedExpr::Create(Context, OpLoc, ResultTy,
+                                PredefinedExpr::UniqueStableNameType, SL,
+                                Operand);
+}
+
+ExprResult Sema::BuildUniqueStableName(SourceLocation OpLoc,
+                                       Expr *E) {
+  QualType ResultTy;
+  StringLiteral *SL = nullptr;
+  if (E->getType()->isDependentType()) {
+    ResultTy = Context.DependentTy;
+  } else {
+    std::string Str = PredefinedExpr::ComputeName(Context,
+        PredefinedExpr::UniqueStableNameExpr, E->getType());
+    llvm::APInt Length(32, Str.length()  + 1);
+    ResultTy = Context.adjustStringLiteralBaseType(Context.CharTy.withConst());
+    ResultTy = Context.getConstantArrayType(ResultTy, Length, ArrayType::Normal,
+                                           /*IndexTypeQuals*/ 0);
+    SL = StringLiteral::Create(Context, Str, StringLiteral::Ascii,
+                               /*Pascal*/ false, ResultTy, OpLoc);
+  }
+
+  return PredefinedExpr::Create(Context, OpLoc, ResultTy,
+                                PredefinedExpr::UniqueStableNameExpr, SL, E);
+}
+
+ExprResult Sema::ActOnUniqueStableNameExpr(SourceLocation OpLoc,
+                                           SourceLocation L, SourceLocation R,
+                                           ParsedType Ty) {
+  TypeSourceInfo *TInfo = nullptr;
+  QualType T = GetTypeFromParser(Ty, &TInfo);
+
+  if (T.isNull()) return ExprError();
+  if (!TInfo) TInfo = Context.getTrivialTypeSourceInfo(T, OpLoc);
+
+  return BuildUniqueStableName(OpLoc, TInfo);
+}
+
+ExprResult Sema::ActOnUniqueStableNameExpr(SourceLocation OpLoc,
+                                           SourceLocation L, SourceLocation R,
+                                           Expr *E) {
+  return BuildUniqueStableName(OpLoc, E);
+}
+
 ExprResult Sema::ActOnPredefinedExpr(SourceLocation Loc, tok::TokenKind Kind) {
   PredefinedExpr::IdentKind IK;
 
@@ -13046,7 +13107,7 @@ ExprResult Sema::CreateBuiltinUnaryOp(SourceLocation OpLoc,
   bool CanOverflow = false;
 
   bool ConvertHalfVec = false;
-  if (getLangOpts().OpenCL) {
+  if (getLangOpts().OpenCL || getLangOpts().SYCLIsDevice) {
     QualType Ty = InputExpr->getType();
     // The only legal unary operation for atomics is '&'.
     if ((Opc != UO_AddrOf && Ty->isAtomicType()) ||

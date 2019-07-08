@@ -102,6 +102,16 @@
 
 /// ###########################################################################
 
+/// Check the compilation flow to verify that the integrated header is filtered
+// RUN: %clang -target x86_64-unknown-linux-gnu -fsycl -c %s -### 2>&1 \
+// RUN:  | FileCheck %s -check-prefix=CHK-INT-HEADER
+// CHK-INT-HEADER: clang{{.*}} "-fsycl-is-device" {{.*}} "-o" "[[OUTPUT1:.+\.o]]"
+// CHK-INT-HEADER: clang{{.*}} "-triple" "spir64-unknown-linux-sycldevice" {{.*}} "-fsycl-int-header=[[INPUT1:.+\.h]]"
+// CHK-INT-HEADER: clang{{.*}} "-triple" "x86_64-unknown-linux-gnu" {{.*}} "-o" "[[OUTPUT2:.+\.o]]" {{.*}} "-include" "[[INPUT1]]" "-dependency-filter" "[[INPUT1]]"
+// CHK-INT-HEADER: clang-offload-bundler{{.*}} "-type=o" "-targets=sycl-spir64-unknown-linux-sycldevice,host-x86_64-unknown-linux-gnu" {{.*}} "-inputs=[[OUTPUT1]],[[OUTPUT2]]"
+
+/// ###########################################################################
+
 /// Check the phases also add a library to make sure it is treated as input by
 /// the device.
 // RUN:   %clang -ccc-print-phases -target x86_64-unknown-linux-gnu -lsomelib -fsycl -fsycl-targets=spir64-unknown-linux-sycldevice %s 2>&1 \
@@ -279,6 +289,32 @@
 // CHK-LINK-TARGETS: 4: assembler, {3}, object, (device-sycl)
 // CHK-LINK-TARGETS: 5: linker, {4}, image, (device-sycl)
 // CHK-LINK-TARGETS: 6: offload, "device-sycl (spir64-unknown-linux-sycldevice)" {5}, image
+
+/// ###########################################################################
+
+/// Check -fsycl-link behaviors unbundle
+// RUN:   touch %t.o
+// RUN:   %clang -### -ccc-print-phases -target x86_64-unknown-linux-gnu -fsycl -o %t.out -fsycl-link %t.o 2>&1 \
+// RUN:   | FileCheck -check-prefix=CHK-LINK-UB %s
+// CHK-LINK-UB: 0: input, "[[INPUT:.+\.o]]", object
+// CHK-LINK-UB: 1: clang-offload-unbundler, {0}, object
+// CHK-LINK-UB: 2: linker, {1}, image, (device-sycl)
+// CHK-LINK-UB: 3: clang-offload-wrapper, {2}, object, (device-sycl)
+// CHK-LINK-UB: 4: offload, "device-sycl (spir64-unknown-linux-sycldevice)" {3}, object
+
+/// ###########################################################################
+
+/// Check -fsycl-link behaviors from source
+// RUN:   %clang -### -ccc-print-phases -target x86_64-unknown-linux-gnu -fsycl -o %t.out -fsycl-link %s 2>&1 \
+// RUN:   | FileCheck -check-prefix=CHK-LINK %s
+// CHK-LINK: 0: input, "[[INPUT:.+\.c]]", c, (device-sycl)
+// CHK-LINK: 1: preprocessor, {0}, cpp-output, (device-sycl)
+// CHK-LINK: 2: compiler, {1}, ir, (device-sycl)
+// CHK-LINK: 3: backend, {2}, assembler, (device-sycl)
+// CHK-LINK: 4: assembler, {3}, object, (device-sycl)
+// CHK-LINK: 5: linker, {4}, image, (device-sycl)
+// CHK-LINK: 6: clang-offload-wrapper, {5}, object, (device-sycl)
+// CHK-LINK: 7: offload, "device-sycl (spir64-unknown-linux-sycldevice)" {6}, object
 
 /// ###########################################################################
 

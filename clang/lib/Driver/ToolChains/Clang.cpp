@@ -1168,16 +1168,6 @@ void Clang::AddPreprocessingOptions(Compilation &C, const JobAction &JA,
   if (JA.isOffloading(Action::OFK_Cuda))
     getToolChain().AddCudaIncludeArgs(Args, CmdArgs);
 
-  // Add include directories for SYCL
-  if (!Args.hasArg(options::OPT_nobuiltininc) &&
-      getToolChain().getTriple().isSYCLDeviceEnvironment()) {
-    SmallString<128> P(D.ResourceDir);
-    llvm::sys::path::append(P, "include");
-    llvm::sys::path::append(P, "sycl_wrappers");
-    CmdArgs.push_back("-internal-isystem");
-    CmdArgs.push_back(Args.MakeArgString(P));
-  }
-
   // If we are offloading to a target via OpenMP we need to include the
   // openmp_wrappers folder which contains alternative system headers.
   if (JA.isDeviceOffloading(Action::OFK_OpenMP) &&
@@ -5383,6 +5373,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     // Inputs[1].  Include the header with -include
     if (!IsSYCLOffloadDevice && SYCLDeviceInput) {
       CmdArgs.push_back("-include");
+      CmdArgs.push_back(SYCLDeviceInput->getFilename());
+      // When creating dependency information, filter out the generated
+      // header file.
+      CmdArgs.push_back("-dependency-filter");
       CmdArgs.push_back(SYCLDeviceInput->getFilename());
     }
     if (IsSYCLOffloadDevice && JA.getType() == types::TY_SYCL_Header) {

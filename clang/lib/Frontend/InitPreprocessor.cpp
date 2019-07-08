@@ -1069,6 +1069,9 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
     if (LangOpts.SYCLXOCCDevice) {
       Builder.defineMacro("__SYCL_SPIR_DEVICE__");
     }
+
+    if (!getenv("DISABLE_INFER_AS"))
+      Builder.defineMacro("__SYCL_ENABLE_INFER_AS__", "1");
   }
 
   // These are defined for both the host and device compilation phases when it's
@@ -1077,9 +1080,9 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
   // be a good long term solution, it will probably cause some conflicts when
   // compiling for multiple targets, what if I want to compile for both an Intel
   // and Xilinx platform? Will they mesh well on the host?
-  if (LangOpts.SYCLXOCCDevice) {
+  if (LangOpts.SYCLXOCCDevice)
     Builder.defineMacro("__SYCL_XILINX_ONLY__");
-  }
+
 
   // OpenCL definitions.
   if (LangOpts.OpenCL) {

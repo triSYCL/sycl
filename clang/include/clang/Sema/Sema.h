@@ -301,7 +301,8 @@ public:
     kind_accessor = kind_first,
     kind_std_layout,
     kind_sampler,
-    kind_last = kind_sampler
+    kind_pointer,
+    kind_last = kind_pointer
   };
 
 public:
@@ -4465,6 +4466,14 @@ public:
                                  PredefinedExpr::IdentKind IK);
   ExprResult ActOnPredefinedExpr(SourceLocation Loc, tok::TokenKind Kind);
   ExprResult ActOnIntegerConstant(SourceLocation Loc, uint64_t Val);
+
+  ExprResult BuildUniqueStableName(SourceLocation OpLoc,
+                                   TypeSourceInfo *Operand);
+  ExprResult BuildUniqueStableName(SourceLocation OpLoc, Expr *E);
+  ExprResult ActOnUniqueStableNameExpr(SourceLocation OpLoc, SourceLocation L,
+                                       SourceLocation R, ParsedType Ty);
+  ExprResult ActOnUniqueStableNameExpr(SourceLocation OpLoc, SourceLocation L,
+                                       SourceLocation R, Expr *Operand);
 
   bool CheckLoopHintExpr(Expr *E, SourceLocation Loc);
 
@@ -11266,7 +11275,7 @@ public:
     return *SyclIntHeader.get();
   }
 
-  void ConstructSYCLKernel(FunctionDecl *KernelCallerFunc);
+  void ConstructOpenCLKernel(FunctionDecl *KernelCallerFunc);
   void MarkDevice(void);
 };
 

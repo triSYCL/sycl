@@ -82,7 +82,7 @@ else()
   add_custom_target(ocl-icd DEPENDS ${OpenCL_LIBRARIES} COMMENT "Copying OpenCL ICD Loader ...")
 endif()
 
-set(SYCL_INCLUDE "${CMAKE_CURRENT_BINARY_DIR}/include/")
+set(SYCL_INCLUDE "${CMAKE_CURRENT_SOURCE_DIR}/include/")
 set(OPENCL_INCLUDE "${OpenCL_INCLUDE_DIRS}")
 
 # Try to find and include XRT OpenCL in the build components to allow access to
@@ -166,18 +166,20 @@ set(LLVM_TOOLS_DIR "${LLVM_BINARY_DIR}/bin/")
 add_library("${SYCLLibrary}" SHARED
   "${includeRootPath}/CL/sycl.hpp"
   "${sourceRootPath}/detail/builtins.cpp"
-  "${sourceRootPath}/detail/cnri.cpp"
+  "${sourceRootPath}/detail/pi.cpp"
+  "${sourceRootPath}/detail/pi_opencl.cpp"
   "${sourceRootPath}/detail/common.cpp"
   "${sourceRootPath}/detail/context_impl.cpp"
+  "${sourceRootPath}/detail/device_impl.cpp"
   "${sourceRootPath}/detail/device_info.cpp"
   "${sourceRootPath}/detail/event_impl.cpp"
   "${sourceRootPath}/detail/force_device.cpp"
   "${sourceRootPath}/detail/helpers.cpp"
+  "${sourceRootPath}/detail/image_impl.cpp"
   "${sourceRootPath}/detail/kernel_impl.cpp"
   "${sourceRootPath}/detail/kernel_info.cpp"
   "${sourceRootPath}/detail/memory_manager.cpp"
-  "${sourceRootPath}/detail/platform_host.cpp"
-  "${sourceRootPath}/detail/platform_opencl.cpp"
+  "${sourceRootPath}/detail/platform_impl.cpp"
   "${sourceRootPath}/detail/platform_info.cpp"
   "${sourceRootPath}/detail/program_impl.cpp"
   "${sourceRootPath}/detail/program_manager/program_manager.cpp"
@@ -185,13 +187,11 @@ add_library("${SYCLLibrary}" SHARED
   "${sourceRootPath}/detail/os_util.cpp"
   "${sourceRootPath}/detail/platform_util.cpp"
   "${sourceRootPath}/detail/sampler_impl.cpp"
+  "${sourceRootPath}/detail/stream_impl.cpp"
   "${sourceRootPath}/detail/scheduler/commands.cpp"
-  "${sourceRootPath}/detail/scheduler/commands2.cpp"
-  "${sourceRootPath}/detail/scheduler/printers.cpp"
   "${sourceRootPath}/detail/scheduler/scheduler.cpp"
   "${sourceRootPath}/detail/scheduler/graph_processor.cpp"
   "${sourceRootPath}/detail/scheduler/graph_builder.cpp"
-  "${sourceRootPath}/detail/scheduler/scheduler2.cpp"
   "${sourceRootPath}/detail/util.cpp"
   "${sourceRootPath}/context.cpp"
   "${sourceRootPath}/device.cpp"
@@ -203,6 +203,7 @@ add_library("${SYCLLibrary}" SHARED
   "${sourceRootPath}/platform.cpp"
   "${sourceRootPath}/queue.cpp"
   "${sourceRootPath}/sampler.cpp"
+  "${sourceRootPath}/stream.cpp"
   "${sourceRootPath}/spirv_ops.cpp"
 )
 

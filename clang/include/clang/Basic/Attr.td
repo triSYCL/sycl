@@ -1397,7 +1397,7 @@ def Mode : Attr {
   let PragmaAttributeSupport = 0;
 }
 
-def IntelFPGAIVDep : Attr {
+def SYCLIntelFPGAIVDep : Attr {
   let Spellings = [CXX11<"intelfpga","ivdep">];
   let Args = [IntArgument<"Safelen">];
   let LangOpts = [SYCL];
@@ -1406,10 +1406,10 @@ def IntelFPGAIVDep : Attr {
       return "ivdep";
     }
   }];
-  let Documentation = [IntelFPGAIVDepAttrDocs];
+  let Documentation = [SYCLIntelFPGAIVDepAttrDocs];
 }
 
-def IntelFPGAII : Attr {
+def SYCLIntelFPGAII : Attr {
   let Spellings = [CXX11<"intelfpga","ii">];
   let Args = [IntArgument<"Interval">];
   let LangOpts = [SYCL];
@@ -1418,10 +1418,10 @@ def IntelFPGAII : Attr {
       return "ii";
     }
   }];
-  let Documentation = [IntelFPGAIIAttrDocs];
+  let Documentation = [SYCLIntelFPGAIIAttrDocs];
 }
 
-def IntelFPGAMaxConcurrency : Attr {
+def SYCLIntelFPGAMaxConcurrency : Attr {
   let Spellings = [CXX11<"intelfpga","max_concurrency">];
   let Args = [IntArgument<"NThreads">];
   let LangOpts = [SYCL];
@@ -1430,7 +1430,7 @@ def IntelFPGAMaxConcurrency : Attr {
       return "max_concurrency";
     }
   }];
-  let Documentation = [IntelFPGAMaxConcurrencyAttrDocs];
+  let Documentation = [SYCLIntelFPGAMaxConcurrencyAttrDocs];
 }
 
 def IntelFPGALocalNonConstVar : SubsetSubject<Var,
@@ -1558,6 +1558,41 @@ def IntelFPGAMaxPrivateCopies : InheritableAttr {
       return 1024*1024;
     }
   }];
+}
+
+// Two string arguments.
+def IntelFPGAMerge : Attr {
+  let Spellings = [CXX11<"intelfpga","merge">];
+  let Args = [StringArgument<"Name">, StringArgument<"Direction">];
+  let Subjects = SubjectList<[IntelFPGAConstVar, IntelFPGALocalOrStaticVar,
+                              Field], ErrorDiag>;
+  let LangOpts = [SYCL];
+  let Documentation = [IntelFPGAMergeAttrDocs];
+}
+
+def IntelFPGAMaxReplicates : Attr {
+  let Spellings = [CXX11<"intelfpga","max_replicates">];
+  let Args = [ExprArgument<"Value">];
+  let Subjects = SubjectList<[IntelFPGAConstVar, IntelFPGALocalStaticSlaveMemVar,
+                              Field], ErrorDiag>;
+  let LangOpts = [SYCL];
+  let Documentation = [IntelFPGAMaxReplicatesAttrDocs];
+  let AdditionalMembers = [{
+    static unsigned getMinValue() {
+      return 1;
+    }
+    static unsigned getMaxValue() {
+      return 1024*1024;
+    }
+  }];
+}
+
+def IntelFPGASimpleDualPort : Attr {
+  let Spellings = [CXX11<"intelfpga","simple_dual_port">];
+  let Subjects = SubjectList<[IntelFPGAConstVar, IntelFPGALocalStaticSlaveMemVar,
+                              Field], ErrorDiag>;
+  let LangOpts = [SYCL];
+  let Documentation = [IntelFPGASimpleDualPortAttrDocs];
 }
 
 def Naked : InheritableAttr {
