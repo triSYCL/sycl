@@ -8,6 +8,8 @@
 
 #pragma once
 
+// TODO: This and spirv_vars will probably need refined a little when the issue:
+// https://github.com/intel/llvm/issues/253 has been discussed a little more.
 #ifdef __SYCL_DEVICE_ONLY__
 // This is intended as a drop in replacement for SPIRV vars on SPIR devices.
 // Although the __spirv_BuiltInSubgroupSize builtins at the end of the file
@@ -67,12 +69,16 @@ constexpr size_t MapTo(SYCLBuiltinTypes builtin, int ID) {
     return MapTo(SYCLBuiltinTypes::SYCLBuiltin##POSTFIX, ID);               \
   }
 
+namespace __spir {
+
 DEFINE_SYCL_SPIR_CONVERTER(GlobalSize);
 DEFINE_SYCL_SPIR_CONVERTER(GlobalInvocationId)
 DEFINE_SYCL_SPIR_CONVERTER(WorkgroupSize)
 DEFINE_SYCL_SPIR_CONVERTER(LocalInvocationId)
 DEFINE_SYCL_SPIR_CONVERTER(WorkgroupId)
 DEFINE_SYCL_SPIR_CONVERTER(GlobalOffset)
+
+}
 
 #undef DEFINE_SYCL_SPIR_CONVERTER
 
@@ -85,5 +91,44 @@ extern "C" const __constant uint32_t __spirv_BuiltInNumSubgroups;
 extern "C" const __constant uint32_t __spirv_BuiltInNumEnqueuedSubgroups;
 extern "C" const __constant uint32_t __spirv_BuiltInSubgroupId;
 extern "C" const __constant uint32_t __spirv_BuiltInSubgroupLocalInvocationId;
+
+#define DEFINE_INIT_SIZES(POSTFIX)                                             \
+                                                                               \
+  template <int Dim, class DstT> struct InitSizesST##POSTFIX;                  \
+                                                                               \
+  template <class DstT> struct InitSizesST##POSTFIX<1, DstT> {                 \
+    static void initSize(DstT &Dst) {                                          \
+      Dst[0] = get##POSTFIX<0>();                                              \
+    }                                                                          \
+  };                                                                           \
+                                                                               \
+  template <class DstT> struct InitSizesST##POSTFIX<2, DstT> {                 \
+    static void initSize(DstT &Dst) {                                          \
+      Dst[1] = get##POSTFIX<1>();                                              \
+      InitSizesST##POSTFIX<1, DstT>::initSize(Dst);                            \
+    }                                                                          \
+  };                                                                           \
+                                                                               \
+  template <class DstT> struct InitSizesST##POSTFIX<3, DstT> {                 \
+    static void initSize(DstT &Dst) {                                          \
+      Dst[2] = get##POSTFIX<2>();                                              \
+      InitSizesST##POSTFIX<2, DstT>::initSize(Dst);                            \
+    }                                                                          \
+  };                                                                           \
+                                                                               \
+  template <int Dims, class DstT> static void init##POSTFIX(DstT &Dst) {       \
+    InitSizesST##POSTFIX<Dims, DstT>::initSize(Dst);                           \
+  }
+
+namespace __spir {
+
+DEFINE_INIT_SIZES(GlobalSize);
+DEFINE_INIT_SIZES(GlobalInvocationId)
+DEFINE_INIT_SIZES(WorkgroupSize)
+DEFINE_INIT_SIZES(LocalInvocationId)
+DEFINE_INIT_SIZES(WorkgroupId)
+DEFINE_INIT_SIZES(GlobalOffset)
+
+} // namespace __spir
 
 #endif // __SYCL_DEVICE_ONLY__
