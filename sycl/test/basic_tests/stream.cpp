@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++11 -fsycl -lstdc++ %s -o %t.out -lOpenCL -lsycl
+// RUN: %clang -std=c++17 -fsycl -lstdc++ %s -o %t.out -lOpenCL -lsycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out | FileCheck %s
 // TEMPORARY_DISABLED_RUNx: %CPU_RUN_PLACEHOLDER %t.out %CPU_CHECK_PLACEHOLDER
 // RUN: %GPU_RUN_PLACEHOLDER %t.out %GPU_CHECK_PLACEHOLDER
