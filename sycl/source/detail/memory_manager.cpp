@@ -396,29 +396,19 @@ void *MemoryManager::map(SYCLMemObjT *SYCLMemObj, void *Mem, QueueImplPtr Queue,
   AccessOffset[0] *= ElementSize;
   AccessRange[0] *= ElementSize;
 
-<<<<<<< HEAD
-  cl_int Error = CL_SUCCESS;
-  void *MappedPtr = clEnqueueMapBuffer(
-      Queue->getHandleRef(), (cl_mem)Mem, CL_FALSE, Flags, AccessOffset[0],
-      AccessRange[0], DepEvents.size(),
-      DepEvents.empty() ? nullptr : &DepEvents[0], &OutEvent, &Error);
-  CHECK_OCL_CODE(Error);
-
-  // XRT doesn't really seem to play well with Dependent Events in
-  // clEnqueueUnmapMemObject at the moment. I have opened an issue:
-  // https://github.com/Xilinx/XRT/issues/1425 to get some clarification on it.
-  Error = clWaitForEvents(1, &OutEvent);
-  CHECK_OCL_CODE(Error);
-  OutEvent = nullptr;
-
-=======
   RT::PiResult Error = PI_SUCCESS;
   void *MappedPtr;
   PI_CALL((MappedPtr = RT::piEnqueueMemMap(
       Queue->getHandleRef(), pi_cast<RT::PiMem>(Mem), CL_FALSE, Flags,
       AccessOffset[0], AccessRange[0], DepEvents.size(),
       DepEvents.empty() ? nullptr : &DepEvents[0], &OutEvent, &Error), Error));
->>>>>>> e0e7a7f62680f9ac0e4f8a729f04d9c676ddc4e0
+
+  // XRT doesn't really seem to play well with Dependent Events in
+  // clEnqueueUnmapMemObject at the moment. I have opened an issue:
+  // https://github.com/Xilinx/XRT/issues/1425 to get some clarification on it.
+  PI_CALL(RT::piEventsWait(1, &OutEvent));
+  OutEvent = nullptr;
+
   return MappedPtr;
 }
 
