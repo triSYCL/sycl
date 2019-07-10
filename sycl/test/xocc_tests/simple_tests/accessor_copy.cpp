@@ -96,9 +96,10 @@ int main() {
     // buffer associated with m_axi_gmem
     buffer<int, 2> idc((int *)Data, range<2>(Size, Size));
     q.submit([&](handler &cgh) {
-      accessor<int, 2, access::mode::read, access::target::global_buffer>
+      accessor<int, 2, access::mode::write, access::target::global_buffer>
           accessorFrom(idc, cgh, range<2>(Size, Size));
       cgh.single_task<noop>([=](){
+        accessorFrom[0][0] = 1;
       });
     });
     q.wait();
