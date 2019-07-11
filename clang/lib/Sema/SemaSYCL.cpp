@@ -102,7 +102,7 @@ public:
       }
 
       if (const CXXMethodDecl *Method = dyn_cast<CXXMethodDecl>(Callee))
-        if (Method->isVirtual())
+        if (!SemaRef.getLangOpts().SYCLAllowVirtual && Method->isVirtual())
           SemaRef.Diag(e->getExprLoc(), diag::err_sycl_restrict)
               << KernelCallVirtualFunction;
 
@@ -360,7 +360,7 @@ private:
       if (!CRD->hasDefinition())
         return true;
 
-      if (CRD->isPolymorphic()) {
+      if (!SemaRef.getLangOpts().SYCLAllowVirtual && CRD->isPolymorphic()) {
         SemaRef.Diag(CRD->getLocation(), diag::err_sycl_virtual_types);
         SemaRef.Diag(Loc.getBegin(), diag::note_sycl_used_here);
         return false;

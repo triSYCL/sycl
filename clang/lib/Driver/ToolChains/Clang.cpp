@@ -3597,6 +3597,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                      options::OPT_fno_sycl_allow_func_ptr, false)) {
       CmdArgs.push_back("-fsycl-allow-func-ptr");
     }
+
+    if (Args.hasFlag(options::OPT_fsycl_allow_virtual,
+                     options::OPT_fno_sycl_allow_virtual, false)) {
+      CmdArgs.push_back("-fsycl-allow-virtual");
+    }
   }
 
   // \todo Extend this to use getOffloadToolChains<Action::OFK_SYCL> and loop

@@ -2877,6 +2877,9 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   Opts.SYCLIsDevice   = Args.hasArg(options::OPT_fsycl_is_device);
   Opts.SYCLAllowFuncPtr = Args.hasFlag(options::OPT_fsycl_allow_func_ptr,
                                   options::OPT_fno_sycl_allow_func_ptr, false);
+  Opts.SYCLAllowVirtual = Args.hasFlag(options::OPT_fsycl_allow_virtual,
+                                       options::OPT_fno_sycl_allow_virtual,
+                                       false);
 
   // Set the flag to prevent the implementation from emitting device exception
   // handling code for those requiring so.
