@@ -59,15 +59,15 @@ int main() {
     auto wb = ob.get_access<access::mode::write>(cgh);
 
     cgh.single_task<kernel_1>([=]() {
-      wb[0] += 1;
+      wb[0] = 1;
     });
   });
 
-  q.wait();
-
-  auto rb = ob.get_access<access::mode::read>();
-  assert(rb[0] == 1 && "kernel execution or assignment error");
-  printf("%d \n", rb[0]);
+  {
+    auto rb = ob.get_access<access::mode::read>();
+    assert(rb[0] == 1 && "kernel execution or assignment error");
+    printf("%d \n", rb[0]);
+  }
 
   q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::write>(cgh);
@@ -77,11 +77,11 @@ int main() {
     });
   });
 
-  q.wait();
-
-  rb = ob.get_access<access::mode::read>();
-  assert(rb[0] == 3 && "kernel execution or assignment error");
-  printf("%d \n", rb[0]);
+  {
+    auto rb = ob.get_access<access::mode::read>();
+    assert(rb[0] == 3 && "kernel execution or assignment error");
+    printf("%d \n", rb[0]);
+  }
 
   q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::write>(cgh);
@@ -91,11 +91,11 @@ int main() {
     });
   });
 
-  q.wait();
-
-  rb = ob.get_access<access::mode::read>();
-  assert(rb[0] == 6 && "kernel execution or assignment error");
-  printf("%d \n", rb[0]);
+  {
+    auto rb = ob.get_access<access::mode::read>();
+    assert(rb[0] == 6 && "kernel execution or assignment error");
+    printf("%d \n", rb[0]);
+  }
 
   q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::write>(cgh);
@@ -109,11 +109,11 @@ int main() {
     });
   });
 
-  q.wait();
-
-  rb = ob.get_access<access::mode::read>();
-  assert(rb[0] == 10 && "kernel execution or assignment error");
-  printf("%d \n", rb[0]);
+  {
+    auto rb = ob.get_access<access::mode::read>();
+    assert(rb[0] == 10 && "kernel execution or assignment error");
+    printf("%d \n", rb[0]);
+  }
 
   q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::write>(cgh);
@@ -122,11 +122,11 @@ int main() {
     });
   });
 
-  q.wait();
-
-  rb = ob.get_access<access::mode::read>();
-  assert(rb[0] == 15 && "kernel execution or assignment error");
-  printf("%d \n", rb[0]);
+  {
+    auto rb = ob.get_access<access::mode::read>();
+    assert(rb[0] == 15 && "kernel execution or assignment error");
+    printf("%d \n", rb[0]);
+  }
 
   q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::write>(cgh);
@@ -135,9 +135,11 @@ int main() {
     });
   });
 
-  rb = ob.get_access<access::mode::read>();
-  assert(rb[0] == 21 && "kernel execution or assignment error");
-  printf("%d \n", rb[0]);
+  {
+    auto rb = ob.get_access<access::mode::read>();
+    assert(rb[0] == 21 && "kernel execution or assignment error");
+    printf("%d \n", rb[0]);
+  }
 
   return 0;
 }
