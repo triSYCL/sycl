@@ -142,12 +142,13 @@ void *MemoryManager::allocateMemBuffer(ContextImplPtr TargetContext,
   if (TargetContext->get_platform().get_info<info::platform::vendor>()
       == "Xilinx") {
     /// \TODO: Create PI wrapper for this Xilinx OpenCL extension stuff or work
-    /// out a better way to enforce buffer DDR bank assignments.
+    /// out a better way to enforce buffer DDR bank assignments, lazy rather
+    /// than eager buffer creation?
     cl_mem_ext_ptr_t mext = {0};
     mext.banks = 0 | XCL_MEM_TOPOLOGY;
     mext.host_ptr = UserPtr;
     PI_CALL((NewMem = RT::piMemCreate(TargetContext->getHandleRef(),
-        CreationFlags | CL_MEM_EXT_PTR_XILINX, Size, UserPtr, &Error), Error));
+        CreationFlags | CL_MEM_EXT_PTR_XILINX, Size, &mext, &Error), Error));
   } else {
     PI_CALL((NewMem = RT::piMemCreate(TargetContext->getHandleRef(),
         CreationFlags, Size, UserPtr, &Error), Error));
