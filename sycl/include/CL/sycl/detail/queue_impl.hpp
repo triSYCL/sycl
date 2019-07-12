@@ -147,7 +147,7 @@ public:
   // still exists.. it seems to be a part of the CMake build process.
   // In either case this may not matter when the PI Interface is fully
   // integrated so perhaps worth revisiting if this remains an issue then.
-#ifdef CL_VERSION_2_0 && !defined(__SYCL_XILINX_ONLY__)
+#if defined(CL_VERSION_2_0) && !defined(__SYCL_XILINX_ONLY__)
     cl_queue_properties CreationFlagProperties[] = {
         CL_QUEUE_PROPERTIES, CreationFlags, 0};
     PI_CALL((Queue = RT::piQueueCreate(
