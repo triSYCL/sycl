@@ -27,15 +27,15 @@ int main() {
 
   {
     auto Buffer =
-        buffer<point<int>, 1>(Data, range<1>(Size), {property::buffer::use_host_ptr()});
+      buffer<point<int>, 1>(Data, range<1>(Size),
+        {property::buffer::use_host_ptr()});
     Buffer.set_final_data(nullptr);
     selector_defines::CompiledForDeviceSelector selector;
     queue Queue {selector};
     Queue.submit([&](handler &Cgh) {
       accessor<point<int>, 1, access::mode::write, access::target::global_buffer>
           Accessor(Buffer, Cgh, range<1>(Size));
-              Cgh.parallel_for<ice_kernel>(range<1>{Size},
-                                         [=](id<1> Index) {
+              Cgh.parallel_for<ice_kernel>(range<1>{Size}, [=](id<1> Index) {
                 Accessor[Index] = Index.get(0); // XOCC ICED
        });
     });

@@ -19,9 +19,11 @@
 # functionality. They're also important, but larger breaking issues are more
 # likely to show in one of the above tests.
 #
-# Most of the tests will assert and stop the shell running right now. These
-# could perhaps be changed to something like a throw that's caught and prints an
-# error message.. which would perhaps be more user friendly.
+# Currently most of the tests will assert when they fail which will stop this
+# test shell script running as it sends a SIGABRT. These tests could perhaps be
+# changed to something like a SYCL runtime throw that's caught and prints an
+# error message. This would perhaps be more user friendly and make this script
+# more useful long term.
 #
 # This script won't compare the results or give you feedback on the end result
 # of the tests. It will spit the output into a file which you'll unfortunately
@@ -34,7 +36,7 @@
 # Example invocation:
 # ./run_tests.sh /my/clang/build/bin optional_output_file.txt
 #
-# Note: You will of course have to have your enviornment setup to compile for
+# Note: You will of course have to have your environment setup to compile for
 # Xilinx FPGA, e.g. XILINX_XRT set and a useable version of SDAccel with all the
 # environment it requires to compile one of our tests.
 #
@@ -107,9 +109,10 @@ run_test () {
   $CLANG_BIN/clang++ "${USED_DEFAULT_ARGS[@]}" "${COMPILATION_ARG_ARR_REF[@]}" \
     "$2/$1.cpp" -o "$2/$1.$XCL_EMULATION_MODE" >> $TEST_OUTPUT_FILE 2>&1
 
-  # The default is not to run for HW, to run tests for hw remove the if block,
-  # unset XCL_EMULATION_MODE and it should make an attempt to execute the test
-  # although you will of course require the correct piece of hardware
+  # The default is not to run for hardware (hw), to run tests for hardware
+  # remove the if block, unset XCL_EMULATION_MODE and it should make an attempt
+  # to execute the test although you will of course require the correct piece of
+  # hardware
   if [[ $3 != "hw" ]]; then
     echo "" >>  $TEST_OUTPUT_FILE
     echo "" >>  $TEST_OUTPUT_FILE

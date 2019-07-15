@@ -27,7 +27,7 @@ int main(int argc, char *argv[]){
   auto event = q.submit([&](handler &cgh) {
       auto a_rw = a.get_access<access::mode::read_write>(cgh);
 
-      cgh.single_task<class array_add>([=]() {
+      cgh.single_task<class array_add>([=] {
           // Will not work for hw_emu, this will break compilation
           // The current guess is that this seems to be because of the
           // `const auto i` argument having its address space
