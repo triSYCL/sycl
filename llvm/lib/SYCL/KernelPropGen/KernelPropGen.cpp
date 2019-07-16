@@ -69,11 +69,12 @@ struct KernelPropGen : public ModulePass {
   bool runOnModule(Module &M) override {
     SmallString<256> TDir;
     llvm::sys::path::system_temp_directory(true, TDir);
-    std::string file = "KernelProperties_" + M.getSourceFileName();
+    // Make sure to rip off the directories for the filename
+    llvm::Twine file = "KernelProperties_" +
+      llvm::sys::path::filename(M.getSourceFileName());
     llvm::sys::path::append(TDir, file);
     llvm::sys::path::replace_extension(TDir, "bash",
       llvm::sys::path::Style::native);
-
     llvm::raw_fd_ostream O(GetWriteStreamID(TDir.str()),
                             true /*close in destructor*/);
 

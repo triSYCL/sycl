@@ -103,7 +103,7 @@ else
   fi
 fi
 
-# excluding file extension e.g. .cpp
+# excluding file extension e.g. .cpp and path
 SOURCE_FILE_NAME="$3"
 # input file name including extensions and path
 INPUT_FILE_NAME="$4"

@@ -10,7 +10,18 @@
 
 #include <CL/__spirv/spirv_ops.hpp>
 #include <CL/__spirv/spirv_types.hpp>
+#ifdef __SYCL_SPIR_DEVICE__
+#include <CL/__spir/spir_vars.hpp>
+#ifdef __SYCL_DEVICE_ONLY__
+namespace __device_builtin = __spir;
+#endif
+#else
 #include <CL/__spirv/spirv_vars.hpp>
+#ifdef __SYCL_DEVICE_ONLY__
+namespace __device_builtin = __spirv;
+#endif
+#endif
+
 #include <CL/sycl/detail/common.hpp>
 #include <CL/sycl/detail/helpers.hpp>
 #include <CL/sycl/device_event.hpp>
@@ -94,10 +105,10 @@ public:
     id<dimensions> GlobalId;
     id<dimensions> LocalId;
 
-    __spirv::initGlobalSize<dimensions>(GlobalSize);
-    __spirv::initWorkgroupSize<dimensions>(LocalSize);
-    __spirv::initGlobalInvocationId<dimensions>(GlobalId);
-    __spirv::initLocalInvocationId<dimensions>(LocalId);
+    __device_builtin::initGlobalSize<dimensions>(GlobalSize);
+    __device_builtin::initWorkgroupSize<dimensions>(LocalSize);
+    __device_builtin::initGlobalInvocationId<dimensions>(GlobalId);
+    __device_builtin::initLocalInvocationId<dimensions>(LocalId);
 
     // no 'iterate' in the device code variant, because
     // (1) this code is already invoked by each work item as a part of the
@@ -145,10 +156,10 @@ public:
     id<dimensions> GlobalId;
     id<dimensions> LocalId;
 
-    __spirv::initGlobalSize<dimensions>(GlobalSize);
-    __spirv::initWorkgroupSize<dimensions>(LocalSize);
-    __spirv::initGlobalInvocationId<dimensions>(GlobalId);
-    __spirv::initLocalInvocationId<dimensions>(LocalId);
+    __device_builtin::initGlobalSize<dimensions>(GlobalSize);
+    __device_builtin::initWorkgroupSize<dimensions>(LocalSize);
+    __device_builtin::initGlobalInvocationId<dimensions>(GlobalId);
+    __device_builtin::initLocalInvocationId<dimensions>(LocalId);
 
     item<dimensions, false> GlobalItem =
         detail::Builder::createItem<dimensions, false>(GlobalSize, GlobalId);

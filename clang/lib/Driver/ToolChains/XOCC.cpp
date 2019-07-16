@@ -89,7 +89,8 @@ void SYCL::LinkerXOCC::constructSYCLXOCCCommand(
 
   // Script Arg $3, the original source file name minus the file extension
   // (.h/.cpp etc)
-  SmallString<256> SrcName = StringRef(Inputs[0].getBaseInput());
+  SmallString<256> SrcName =
+    llvm::sys::path::filename(Inputs[0].getBaseInput());
   llvm::sys::path::replace_extension(SrcName, "");
   CmdArgs.push_back(Args.MakeArgString(SrcName));
 

@@ -12,8 +12,14 @@
 
 #ifdef __SYCL_SPIR_DEVICE__
 #include <CL/__spir/spir_vars.hpp>
+#ifdef __SYCL_DEVICE_ONLY__
+namespace __device_builtin = __spir;
+#endif
 #else
 #include <CL/__spirv/spirv_vars.hpp>
+#ifdef __SYCL_DEVICE_ONLY__
+namespace __device_builtin = __spirv;
+#endif
 #endif
 
 #include <CL/sycl/access/access.hpp>
@@ -549,7 +555,7 @@ public:
                               KernelType>::type KernelFunc) {
     id<dimensions> global_id;
 
-    __spirv::initGlobalInvocationId<dimensions>(global_id);
+    __device_builtin::initGlobalInvocationId<dimensions>(global_id);
 
     KernelFunc(global_id);
   }
@@ -563,8 +569,8 @@ public:
     id<dimensions> global_id;
     range<dimensions> global_size;
 
-    __spirv::initGlobalInvocationId<dimensions>(global_id);
-    __spirv::initGlobalSize<dimensions>(global_size);
+    __device_builtin::initGlobalInvocationId<dimensions>(global_id);
+    __device_builtin::initGlobalSize<dimensions>(global_size);
 
     item<dimensions, false> Item =
         detail::Builder::createItem<dimensions, false>(global_size, global_id);
@@ -584,12 +590,12 @@ public:
     id<dimensions> local_id;
     id<dimensions> global_offset;
 
-    __spirv::initGlobalSize<dimensions>(global_size);
-    __spirv::initWorkgroupSize<dimensions>(local_size);
-    __spirv::initWorkgroupId<dimensions>(group_id);
-    __spirv::initGlobalInvocationId<dimensions>(global_id);
-    __spirv::initLocalInvocationId<dimensions>(local_id);
-    __spirv::initGlobalOffset<dimensions>(global_offset);
+    __device_builtin::initGlobalSize<dimensions>(global_size);
+    __device_builtin::initWorkgroupSize<dimensions>(local_size);
+    __device_builtin::initWorkgroupId<dimensions>(group_id);
+    __device_builtin::initGlobalInvocationId<dimensions>(global_id);
+    __device_builtin::initLocalInvocationId<dimensions>(local_id);
+    __device_builtin::initGlobalOffset<dimensions>(global_offset);
 
     group<dimensions> Group = detail::Builder::createGroup<dimensions>(
         global_size, local_size, group_id);
@@ -712,9 +718,9 @@ public:
     range<Dims> LocalSize;
     id<Dims> GroupId;
 
-    __spirv::initGlobalSize<Dims>(GlobalSize);
-    __spirv::initWorkgroupSize<Dims>(LocalSize);
-    __spirv::initWorkgroupId<Dims>(GroupId);
+    __device_builtin::initGlobalSize<Dims>(GlobalSize);
+    __device_builtin::initWorkgroupSize<Dims>(LocalSize);
+    __device_builtin::initWorkgroupId<Dims>(GroupId);
 
     group<Dims> G =
         detail::Builder::createGroup<Dims>(GlobalSize, LocalSize, GroupId);

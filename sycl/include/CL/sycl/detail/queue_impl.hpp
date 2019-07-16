@@ -139,7 +139,15 @@ public:
     RT::PiQueue Queue;
     RT::PiContext Context = detail::getSyclObjImpl(m_Context)->getHandleRef();
     RT::PiDevice Device = detail::getSyclObjImpl(m_Device)->getHandleRef();
-#ifdef CL_VERSION_2_0
+  // NOTE: This is the one location CL_VERSION_2_0 is used at the moment
+  // and the CL_VERSION_2_0 seems to come from space, it's not defined by Clang
+  // it defaults to CL_VERSION_2_0 via one of the CL headers even if we undefine
+  // CL_VERSION_2_0 inside of Clangs InitPreprocessor and define CL_VERSION_1_2
+  // instead inside (when it's a Xilinx device) this CL_VERSION_2_0 variable
+  // still exists.. it seems to be a part of the CMake build process.
+  // In either case this may not matter when the PI Interface is fully
+  // integrated so perhaps worth revisiting if this remains an issue then.
+#if defined(CL_VERSION_2_0) && !defined(__SYCL_XILINX_ONLY__)
     cl_queue_properties CreationFlagProperties[] = {
         CL_QUEUE_PROPERTIES, CreationFlags, 0};
     PI_CALL((Queue = RT::piQueueCreate(
@@ -150,6 +158,7 @@ public:
     // TODO catch an exception and put it to list of asynchronous exceptions
     PI_CHECK(Error);
 #endif
+
     // Tf creating out-of-order queue failed and this property is not
     // supported(for example, on FPGA), it will return
     // CL_INVALID_QUEUE_PROPERTIES and will try to create in-order queue.
