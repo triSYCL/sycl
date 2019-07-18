@@ -20,6 +20,17 @@ namespace cl {
 namespace sycl {
 namespace detail {
 
+bool is_compact_transfer(const sycl::range<3> & SrcSize,
+                         const sycl::range<3> & DstSize,
+                         const sycl::range<3> & SrcAccessRange,
+                         const sycl::range<3> & DstAccessRange,
+                         const sycl::id<3> & SrcOffset,
+                         const sycl::id<3> & DstOffset){
+  return (SrcOffset == sycl::id<3> { 0, 0, 0 }) && (SrcSize == DstAccessRange)
+    && (SrcSize == DstSize) && (SrcSize == SrcAccessRange)
+    && (SrcOffset == DstOffset);
+}
+
 static void waitForEvents(const std::vector<RT::PiEvent> &Events) {
   if (!Events.empty())
     PI_CALL(RT::piEventsWait(Events.size(), &Events[0]));
@@ -189,6 +200,14 @@ void copyH2D(SYCLMemObjT *SYCLMemObj, char *SrcMem, QueueImplPtr SrcQueue,
         /*blocking_write=*/CL_FALSE, DstOffset[0], DstAccessRange[0],
         SrcMem + DstOffset[0], DepEvents.size(), &DepEvents[0], &OutEvent));
   } else {
+    if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
+                            SrcOffset, DstOffset)) {
+      PI_CALL(RT::piEnqueueMemWrite(
+          Queue, DstMem, /*blocking_write=*/CL_FALSE,
+          DstOffset[0], DstAccessRange[0]*DstAccessRange[1]*DstAccessRange[2],
+          SrcMem + DstOffset[0], DepEvents.size(), &DepEvents[0], &OutEvent));
+      return;
+    }
     size_t BufferRowPitch = (1 == DimSrc) ? 0 : SrcSize[0];
     size_t BufferSlicePitch = (3 == DimSrc) ? SrcSize[0] * SrcSize[1] : 0;
 
@@ -230,6 +249,14 @@ void copyD2H(SYCLMemObjT *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
         /*blocking_read=*/CL_FALSE, DstOffset[0], DstAccessRange[0],
         DstMem + DstOffset[0], DepEvents.size(), &DepEvents[0], &OutEvent));
   } else {
+    if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
+                            SrcOffset, DstOffset)) {
+      PI_CALL(RT::piEnqueueMemRead(
+        Queue, SrcMem,/*blocking_read=*/CL_FALSE, DstOffset[0],
+        DstAccessRange[0]*DstAccessRange[1]*DstAccessRange[2],
+        DstMem + DstOffset[0], DepEvents.size(), &DepEvents[0], &OutEvent));
+      return;
+    }
     size_t BufferRowPitch = (1 == DimSrc) ? 0 : SrcSize[0];
     size_t BufferSlicePitch = (3 == DimSrc) ? SrcSize[0] * SrcSize[1] : 0;
 
@@ -269,6 +296,14 @@ void copyD2D(SYCLMemObjT *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
         Queue, SrcMem, DstMem, SrcOffset[0], DstOffset[0],
         SrcAccessRange[0], DepEvents.size(), &DepEvents[0], &OutEvent));
   } else {
+    if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
+                            SrcOffset, DstOffset)) {
+      PI_CALL(RT::piEnqueueMemCopy(
+        Queue, SrcMem, DstMem, SrcOffset[0], DstOffset[0],
+        SrcAccessRange[0]*SrcAccessRange[1]*SrcAccessRange[2],
+        DepEvents.size(), &DepEvents[0], &OutEvent));
+      return;
+    }
     size_t BufferRowPitch = (1 == DimSrc) ? 0 : SrcSize[0];
     size_t BufferSlicePitch = (3 == DimSrc) ? SrcSize[0] * SrcSize[1] : 0;
 
