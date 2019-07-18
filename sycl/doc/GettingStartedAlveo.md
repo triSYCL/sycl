@@ -304,12 +304,12 @@ cd $SYCL_HOME/build
 cmake -DCMAKE_BUILD_TYPE=Release \
   -DLLVM_CXX_STD="c++17" \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-  -DOpenCL_INCLUDE_DIR=$OPENCL_HEADERS \
-  -DLLVM_ENABLE_PROJECTS="clang" \
+  -DLLVM_EXTERNAL_PROJECTS="llvm-spirv;sycl" \
   -DLLVM_EXTERNAL_SYCL_SOURCE_DIR=$SYCL_HOME/sycl \
   -DLLVM_EXTERNAL_LLVM_SPIRV_SOURCE_DIR=$SYCL_HOME/llvm-spirv \
+  -DLLVM_ENABLE_PROJECTS="clang;llvm-spirv;sycl" \
   -DLLVM_LINK_LLVM_DYLIB:BOOL=ON \
-  -DLLVM_TOOL_SYCL_BUILD=ON -DLLVM_TOOL_LLVM_SPIRV_BUILD=ON $SYCL_HOME/llvm
+  $SYCL_HOME/llvm
 make -j`nproc` check-all
 ```
 
@@ -330,6 +330,9 @@ export XILINX_XRT=/opt/xilinx/xrt
 SYCL_HOME=/var/tmp/rkeryell/SYCL/sycl
 SYCL_BIN_DIR=$SYCL_HOME/build/bin
 export LD_LIBRARY_PATH=$XILINX_XRT/lib:$SYCL_HOME/build/lib:$LD_LIBRARY_PATH
+# Workaround a current address space issues in the SYCL compiler
+# https://github.com/triSYCL/sycl/pull/51
+export DISABLE_INFER_AS=1
 ```
 
 You can compile an application either for real FPGA execution,
