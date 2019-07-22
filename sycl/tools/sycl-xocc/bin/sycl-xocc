@@ -72,14 +72,19 @@ else
   # Hardcoded path from the bin directory that xocc is stored in, works for now
   # but a future TODO might be to allow this to be optionally specified as an
   # ENV variable
-  XOCC_LIB_SPIR="$SDX_BIN_PATH_DIR/../lnx64/lib/libspir64-39-hls.bc"
+  SDX_LIB_SPIR="$SDX_BIN_PATH_DIR/../lnx64/lib/libspir64-39-hls.bc"
   if [[ ! -f "$XOCC_LIB_SPIR" ]]; then
     usage 9 "could not find SDx's libspir64-39-hls.bc"
   fi
 
-  XOCC="$SDX_BIN_PATH_DIR/xocc"
-  if [[ ! -f "$XOCC" ]]; then
-    usage 10 "could not find xocc executable in $SDX_BIN_PATH_DIR"
+  SDX="$SDX_BIN_PATH_DIR/v++"
+  if [[ ! -f "$SDX" ]]; then
+    echo "[INFO] Could not find vpp executable in $SDX_BIN_PATH_DIR"
+    echo "[INFO] Try with xocc..."
+    SDX="$SDX_BIN_PATH_DIR/xocc"
+    if [[ ! -f "$SDX" ]]; then
+      usage 10 "could not find xocc or v++ in $SDX_BIN_PATH_DIR"
+    fi
   fi
 fi
 
@@ -122,7 +127,7 @@ $OPT -asfix -O3 -globaldce -inSPIRation -globaldce -kernelPropGen \
 
 # Link our XOCC SPIR binaries in
 $LLVM_LINK "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.bc" \
-  $XOCC_LIB_SPIR -o "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
+  $SDX_LIB_SPIR -o "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
 
 # Using the LLVM Linker will add more incompatible IR so run the downgrader in
 # a second pass afterwards, rather than once before in the first opt pass
@@ -145,7 +150,7 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   if [[ -n "$index" ]]; then
     if [[ ! -z "$VERBOSE" ]]; then
       echo "Invoking xocc Kernel Compilation"
-      echo "xocc: $XOCC"
+      echo "xocc: $SDX"
       echo "--target: $XCL_EMULATION_MODE"
       echo "--platform: $XILINX_PLATFORM"
       echo "Compiling kernel: $index"
@@ -153,7 +158,7 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
       echo "Input file is: $TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
     fi
 
-    $XOCC --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM \
+    $SDX --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM \
       --save-temps -c -k "$index" -o "$TEMPORARY_DIR/$index.xo" \
       "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
       LINKER_LIST="$TEMPORARY_DIR/$index.xo $LINKER_LIST"
@@ -164,7 +169,7 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   # can compile for hw_emu with it on or if it outputs clearer diagnostics so
   # we can track down the problem (when I tested this it seems that the call
   # to log the error was possibly broken)
-  $XOCC --xp param:compiler.hlsDataflowStrictMode=off $DDR_BANK_ARGS \
+  $SDX --xp param:compiler.hlsDataflowStrictMode=off $DDR_BANK_ARGS \
     --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM  -l \
     --save-temps -o "$OUTPUT_FILE_NAME" $LINKER_LIST
 
