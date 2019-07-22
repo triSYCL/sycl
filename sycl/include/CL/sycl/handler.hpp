@@ -179,6 +179,8 @@ class handler {
   // Storage for a lambda or function object.
   std::unique_ptr<detail::HostKernelBase> MHostKernel;
   detail::OSModuleHandle MOSModuleHandle;
+  // The list of events that order this operation
+  std::vector<detail::EventImplPtr> MEvents;
 
   bool MIsHost = false;
 
@@ -212,8 +214,10 @@ private:
         // The first 11 bits of Size encodes the accessor target.
         const access::target AccTarget =
             static_cast<access::target>(Size & 0x7ff);
-        if (AccTarget == access::target::global_buffer ||
-            AccTarget == access::target::constant_buffer) {
+        if ((AccTarget == access::target::global_buffer ||
+             AccTarget == access::target::constant_buffer) ||
+            (AccTarget == access::target::image ||
+             AccTarget == access::target::image_array)) {
           detail::AccessorBaseHost *AccBase =
               static_cast<detail::AccessorBaseHost *>(Ptr);
           Ptr = detail::getSyclObjImpl(*AccBase).get();
@@ -312,9 +316,17 @@ private:
         break;
       }
       case access::target::image:
-      case access::target::host_buffer:
-      case access::target::host_image:
       case access::target::image_array: {
+        detail::Requirement *AccImpl = static_cast<detail::Requirement *>(Ptr);
+        MArgs.emplace_back(Kind, AccImpl, Size, Index + IndexShift);
+        if (!IsKernelCreatedFromSource) {
+          // TODO Handle additional kernel arguments for image class
+          // if the compiler front-end adds them.
+        }
+        break;
+      }
+      case access::target::host_image:
+      case access::target::host_buffer: {
         throw cl::sycl::invalid_parameter_error(
             "Unsupported accessor target case.");
         break;
@@ -356,8 +368,8 @@ private:
           std::move(MNDRDesc), std::move(MHostKernel), std::move(MSyclKernel),
           std::move(MArgsStorage), std::move(MAccStorage),
           std::move(MSharedPtrStorage), std::move(MRequirements),
-          std::move(MArgs), std::move(MKernelName), std::move(MOSModuleHandle),
-          std::move(MStreamStorage)));
+          std::move(MEvents), std::move(MArgs), std::move(MKernelName),
+          std::move(MOSModuleHandle), std::move(MStreamStorage)));
       break;
     case detail::CG::COPY_ACC_TO_PTR:
     case detail::CG::COPY_PTR_TO_ACC:
@@ -365,18 +377,19 @@ private:
       CommandGroup.reset(new detail::CGCopy(
           MCGType, MSrcPtr, MDstPtr, std::move(MArgsStorage),
           std::move(MAccStorage), std::move(MSharedPtrStorage),
-          std::move(MRequirements)));
+          std::move(MRequirements), std::move(MEvents)));
       break;
     case detail::CG::FILL:
       CommandGroup.reset(new detail::CGFill(
           std::move(MPattern), MDstPtr, std::move(MArgsStorage),
           std::move(MAccStorage), std::move(MSharedPtrStorage),
-          std::move(MRequirements)));
+          std::move(MRequirements), std::move(MEvents)));
       break;
     case detail::CG::UPDATE_HOST:
       CommandGroup.reset(new detail::CGUpdateHost(
           MDstPtr, std::move(MArgsStorage), std::move(MAccStorage),
-          std::move(MSharedPtrStorage), std::move(MRequirements)));
+          std::move(MSharedPtrStorage), std::move(MRequirements),
+          std::move(MEvents)));
       break;
     default:
       throw runtime_error("Unhandled type of command group");
@@ -528,6 +541,17 @@ public:
     MAssociatedAccesors.emplace_back(detail::kernel_param_kind_t::kind_accessor,
                                      Req, static_cast<int>(AccTarget),
                                      /*index*/ 0);
+  }
+
+  // This method registers event dependencies on this command group.
+  void depends_on(event e) {
+    MEvents.push_back(std::move(detail::getSyclObjImpl(e)));
+  }
+
+  void depends_on(std::vector<event> Events) {
+    for (event e : Events) {
+      depends_on(e);
+    }
   }
 
   // OpenCL interoperability interface
@@ -913,16 +937,29 @@ public:
   }
 
   // Explicit copy operations API
+  constexpr static bool isConstOrGlobal(access::target AccessTarget) {
+    return AccessTarget == access::target::global_buffer ||
+           AccessTarget == access::target::constant_buffer;
+  }
+
+  constexpr static bool isImageOrImageArray(access::target AccessTarget) {
+    return AccessTarget == access::target::image ||
+           AccessTarget == access::target::image_array;
+  }
+
+  constexpr static bool
+  isValidTargetForExplicitOp(access::target AccessTarget) {
+    return isConstOrGlobal(AccessTarget) || isImageOrImageArray(AccessTarget);
+  }
 
   // copy memory pointed by accessor to host memory pointed by shared_ptr
   template <typename T_Src, typename T_Dst, int Dims, access::mode AccessMode,
             access::target AccessTarget,
             access::placeholder IsPlaceholder = access::placeholder::false_t>
-  typename std::enable_if<(AccessTarget == access::target::global_buffer ||
-                           AccessTarget == access::target::constant_buffer),
-                          void>::type
-  copy(accessor<T_Src, Dims, AccessMode, AccessTarget, IsPlaceholder> Src,
-       shared_ptr_class<T_Dst> Dst) {
+  void copy(accessor<T_Src, Dims, AccessMode, AccessTarget, IsPlaceholder> Src,
+            shared_ptr_class<T_Dst> Dst) {
+    static_assert(isValidTargetForExplicitOp(AccessTarget),
+                  "Invalid accessor target for the copy method.");
     // Make sure data shared_ptr points to is not released until we finish
     // work with it.
     MSharedPtrStorage.push_back(Dst);
@@ -934,11 +971,11 @@ public:
   template <typename T_Src, typename T_Dst, int Dims, access::mode AccessMode,
             access::target AccessTarget,
             access::placeholder IsPlaceholder = access::placeholder::false_t>
-  typename std::enable_if<(AccessTarget == access::target::global_buffer ||
-                           AccessTarget == access::target::constant_buffer),
-                          void>::type
+  void
   copy(shared_ptr_class<T_Src> Src,
        accessor<T_Dst, Dims, AccessMode, AccessTarget, IsPlaceholder> Dst) {
+    static_assert(isValidTargetForExplicitOp(AccessTarget),
+                  "Invalid accessor target for the copy method.");
     // Make sure data shared_ptr points to is not released until we finish
     // work with it.
     MSharedPtrStorage.push_back(Src);
@@ -950,11 +987,10 @@ public:
   template <typename T_Src, typename T_Dst, int Dims, access::mode AccessMode,
             access::target AccessTarget,
             access::placeholder IsPlaceholder = access::placeholder::false_t>
-  typename std::enable_if<(AccessTarget == access::target::global_buffer ||
-                           AccessTarget == access::target::constant_buffer),
-                          void>::type
-  copy(accessor<T_Src, Dims, AccessMode, AccessTarget, IsPlaceholder> Src,
-       T_Dst *Dst) {
+  void copy(accessor<T_Src, Dims, AccessMode, AccessTarget, IsPlaceholder> Src,
+            T_Dst *Dst) {
+    static_assert(isValidTargetForExplicitOp(AccessTarget),
+                  "Invalid accessor target for the copy method.");
 #ifndef __SYCL_DEVICE_ONLY__
     if (MIsHost) {
       // TODO: Temporary implementation for host. Should be handled by memory
@@ -989,12 +1025,11 @@ public:
   template <typename T_Src, typename T_Dst, int Dims, access::mode AccessMode,
             access::target AccessTarget,
             access::placeholder IsPlaceholder = access::placeholder::false_t>
-  typename std::enable_if<(AccessTarget == access::target::global_buffer ||
-                           AccessTarget == access::target::constant_buffer),
-                          void>::type
+  void
   copy(const T_Src *Src,
        accessor<T_Dst, Dims, AccessMode, AccessTarget, IsPlaceholder> Dst) {
-
+    static_assert(isValidTargetForExplicitOp(AccessTarget),
+                  "Invalid accessor target for the copy method.");
 #ifndef __SYCL_DEVICE_ONLY__
     if (MIsHost) {
       // TODO: Temporary implementation for host. Should be handled by memory
@@ -1025,12 +1060,6 @@ public:
     MAccStorage.push_back(std::move(AccImpl));
   }
 
-  template <access::target AccessTarget>
-  constexpr static bool isConstOrGlobal() {
-    return AccessTarget == access::target::global_buffer ||
-           AccessTarget == access::target::constant_buffer;
-  }
-
   // copy memory pointed by accessor to the memory pointed by another accessor
   template <
       typename T_Src, int Dims_Src, access::mode AccessMode_Src,
@@ -1038,17 +1067,16 @@ public:
       access::mode AccessMode_Dst, access::target AccessTarget_Dst,
       access::placeholder IsPlaceholder_Src = access::placeholder::false_t,
       access::placeholder IsPlaceholder_Dst = access::placeholder::false_t>
-
-  typename std::enable_if<(isConstOrGlobal<AccessTarget_Src>() ||
-                           isConstOrGlobal<AccessTarget_Dst>()),
-                          void>::type
-  copy(accessor<T_Src, Dims_Src, AccessMode_Src, AccessTarget_Src,
-                IsPlaceholder_Src>
-           Src,
-       accessor<T_Dst, Dims_Dst, AccessMode_Dst, AccessTarget_Dst,
-                IsPlaceholder_Dst>
-           Dst) {
-
+  void copy(accessor<T_Src, Dims_Src, AccessMode_Src, AccessTarget_Src,
+                     IsPlaceholder_Src>
+                Src,
+            accessor<T_Dst, Dims_Dst, AccessMode_Dst, AccessTarget_Dst,
+                     IsPlaceholder_Dst>
+                Dst) {
+    static_assert(isValidTargetForExplicitOp(AccessTarget_Src),
+                  "Invalid source accessor target for the copy method.");
+    static_assert(isValidTargetForExplicitOp(AccessTarget_Dst),
+                  "Invalid destination accessor target for the copy method.");
 #ifndef __SYCL_DEVICE_ONLY__
     if (MIsHost) {
       range<Dims_Src> Range = Dst.get_range();
@@ -1085,10 +1113,10 @@ public:
   template <typename T, int Dims, access::mode AccessMode,
             access::target AccessTarget,
             access::placeholder IsPlaceholder = access::placeholder::false_t>
-  typename std::enable_if<(AccessTarget == access::target::global_buffer ||
-                           AccessTarget == access::target::constant_buffer),
-                          void>::type
+  void
   update_host(accessor<T, Dims, AccessMode, AccessTarget, IsPlaceholder> Acc) {
+    static_assert(isValidTargetForExplicitOp(AccessTarget),
+                  "Invalid accessor target for the update_host method.");
     MCGType = detail::CG::UPDATE_HOST;
 
     detail::AccessorBaseHost *AccBase = (detail::AccessorBaseHost *)&Acc;
@@ -1106,13 +1134,13 @@ public:
   template <typename T, int Dims, access::mode AccessMode,
             access::target AccessTarget,
             access::placeholder IsPlaceholder = access::placeholder::false_t>
-  typename std::enable_if<(AccessTarget == access::target::global_buffer ||
-                           AccessTarget == access::target::constant_buffer),
-                          void>::type
-  fill(accessor<T, Dims, AccessMode, AccessTarget, IsPlaceholder> Dst,
-       const T &Pattern) {
+  void fill(accessor<T, Dims, AccessMode, AccessTarget, IsPlaceholder> Dst,
+            const T &Pattern) {
     // TODO add check:T must be an integral scalar value or a SYCL vector type
-    if (!MIsHost && Dims == 1) {
+    static_assert(isValidTargetForExplicitOp(AccessTarget),
+                  "Invalid accessor target for the fill method.");
+    if (!MIsHost && (((Dims == 1) && isConstOrGlobal(AccessTarget)) ||
+                     isImageOrImageArray(AccessTarget))) {
       MCGType = detail::CG::FILL;
 
       detail::AccessorBaseHost *AccBase = (detail::AccessorBaseHost *)&Dst;

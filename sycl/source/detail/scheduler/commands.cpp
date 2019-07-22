@@ -8,6 +8,7 @@
 
 #include "CL/sycl/access/access.hpp"
 #include <CL/cl.h>
+#include <CL/sycl/detail/clusm.hpp>
 #include <CL/sycl/detail/event_impl.hpp>
 #include <CL/sycl/detail/kernel_desc.hpp>
 #include <CL/sycl/detail/kernel_info.hpp>
@@ -27,7 +28,7 @@ namespace detail {
 
 void EventCompletionClbk(RT::PiEvent, pi_int32, void *data) {
   // TODO: Handle return values. Store errors to async handler.
-  PI_CALL(RT::piEventSetStatus(pi_cast<RT::PiEvent>(data), CL_COMPLETE));
+  PI_CALL(RT::piEventSetStatus(pi::pi_cast<RT::PiEvent>(data), CL_COMPLETE));
 }
 
 // Method prepares PI event's from list sycl::event's
@@ -273,8 +274,8 @@ cl_int MemCpyCommandHost::enqueueImp() {
 // for xocc we always apply the reqd_work_group_size attribute to single_task
 // we must make sure we define a local work group size when we can justify the
 // kernel is a single task.
-static void adjustNDRangePerKernel(NDRDescT &NDR, cl_kernel Kernel,
-                                   cl_device_id Device) {
+static void adjustNDRangePerKernel(NDRDescT &NDR, RT::PiKernel Kernel,
+                                   RT::PiDevice Device) {
   // If work group size is 0 global size is 1, local size is 0 and
   // dimensions are 1, for all intents and purposes we can consider it a
   // single_task and pass 1 instead of nullptr. The precedence for this
@@ -290,7 +291,7 @@ static void adjustNDRangePerKernel(NDRDescT &NDR, cl_kernel Kernel,
   // get the information from the get_kernel_work_group_info_cl function.
   if (NDR.NumWorkGroups[0] == 0 && NDR.Dims == 1 && NDR.GlobalSize[0] == 1 &&
       NDR.LocalSize[0] == 0)
-        NDR.LocalSize[0] = 1;
+    NDR.LocalSize[0] = 1;
 
   if (NDR.GlobalSize[0] != 0)
     return; // GlobalSize is set - no need to adjust
@@ -419,6 +420,7 @@ cl_int ExecCGCommand::enqueueImp() {
       Kernel = detail::ProgramManager::getInstance().getOrCreateKernel(
           ExecKernel->MOSModuleHandle, Context, ExecKernel->MKernelName);
 
+    bool usesUSM = false;
     for (ArgDesc &Arg : ExecKernel->MArgs) {
       switch (Arg.MType) {
       case kernel_param_kind_t::kind_accessor: {
@@ -443,11 +445,58 @@ cl_int ExecCGCommand::enqueueImp() {
             Kernel, Arg.MIndex, sizeof(cl_sampler), &Sampler));
         break;
       }
+      case kernel_param_kind_t::kind_pointer:  {
+        // TODO: Change to PI
+        usesUSM = true;
+        auto PtrToPtr = reinterpret_cast<intptr_t*>(Arg.MPtr);
+        auto DerefPtr = reinterpret_cast<void*>(*PtrToPtr);
+        auto theKernel = pi::pi_cast<cl_kernel>(Kernel);
+        CHECK_OCL_CODE(clSetKernelArgMemPointerINTEL(theKernel, Arg.MIndex, DerefPtr));
+        break;
+      }
       default:
         assert(!"Unhandled");
       }
     }
-    adjustNDRangePerKernel(NDRDesc, Kernel, MQueue->get_device().get());
+
+    adjustNDRangePerKernel(NDRDesc, Kernel,
+                           detail::getSyclObjImpl(
+                               MQueue->get_device())->getHandleRef());
+
+    // TODO: Replace CL with PI
+    auto clusm = GetCLUSM();
+    if (usesUSM && clusm) {
+      cl_bool t = CL_TRUE;
+      auto theKernel = pi::pi_cast<cl_kernel>(Kernel);
+      // Enable USM Indirect Access for Kernels
+      if (clusm->useCLUSM()) {
+        CHECK_OCL_CODE(clusm->setKernelExecInfo(
+            theKernel, CL_KERNEL_EXEC_INFO_INDIRECT_HOST_ACCESS_INTEL,
+            sizeof(cl_bool), &t));
+        CHECK_OCL_CODE(clusm->setKernelExecInfo(
+            theKernel, CL_KERNEL_EXEC_INFO_INDIRECT_DEVICE_ACCESS_INTEL,
+            sizeof(cl_bool), &t));
+        CHECK_OCL_CODE(clusm->setKernelExecInfo(
+            theKernel, CL_KERNEL_EXEC_INFO_INDIRECT_SHARED_ACCESS_INTEL,
+            sizeof(cl_bool), &t));
+
+        // This passes all the allocations we've tracked as SVM Pointers
+        CHECK_OCL_CODE(clusm->setKernelIndirectUSMExecInfo(
+            pi::pi_cast<cl_command_queue>(MQueue->getHandleRef()), theKernel));
+      } else if (clusm->isInitialized()) {
+        // Sanity check that nothing went wrong setting up clusm
+        CHECK_OCL_CODE(clSetKernelExecInfo(
+            theKernel, CL_KERNEL_EXEC_INFO_INDIRECT_HOST_ACCESS_INTEL,
+            sizeof(cl_bool), &t));
+        CHECK_OCL_CODE(clSetKernelExecInfo(
+            theKernel, CL_KERNEL_EXEC_INFO_INDIRECT_DEVICE_ACCESS_INTEL,
+            sizeof(cl_bool), &t));
+        CHECK_OCL_CODE(clSetKernelExecInfo(
+            theKernel, CL_KERNEL_EXEC_INFO_INDIRECT_SHARED_ACCESS_INTEL,
+            sizeof(cl_bool), &t));
+      }
+    }
+
     PI_CALL(RT::piEnqueueKernelLaunch(
         MQueue->getHandleRef(), Kernel, NDRDesc.Dims, &NDRDesc.GlobalOffset[0],
         &NDRDesc.GlobalSize[0],

@@ -149,8 +149,8 @@ using rel_t = typename std::conditional<
 template <typename T> class GetOp {
 public:
   using DataT = T;
-  DataT getValue(size_t Index) const;
-  DataT operator()(DataT LHS, DataT Rhs);
+  DataT getValue(size_t Index) const { return 0; }
+  DataT operator()(DataT LHS, DataT Rhs) { return 0; }
 };
 
 // Special type for working SwizzleOp with scalars, stores a scalar and gives
@@ -724,7 +724,9 @@ public:
 #ifdef __SYCL_RELLOGOP
 #error "Undefine __SYCL_RELLOGOP macro"
 #endif
-#ifdef __SYCL_USE_EXT_VECTOR_TYPE__
+// Use __SYCL_DEVICE_ONLY__ macro because cast to OpenCL vector type is defined
+// by SYCL device compiler only.
+#ifdef __SYCL_DEVICE_ONLY__
 #define __SYCL_RELLOGOP(RELLOGOP)                                              \
   vec<rel_t, NumElements> operator RELLOGOP(const vec &Rhs) const {            \
     return vec<rel_t, NumElements>{m_Data RELLOGOP vector_t(Rhs)};             \
@@ -785,22 +787,38 @@ public:
   __SYCL_UOP(--, -=)
 #undef __SYCL_UOP
 
+  // Available only when: dataT != cl_float && dataT != cl_double
+  // && dataT != cl_half
   template <typename T = DataT>
   typename std::enable_if<std::is_integral<T>::value, vec>::type
   operator~() const {
+// Use __SYCL_DEVICE_ONLY__ macro because cast to OpenCL vector type is defined
+// by SYCL device compiler only.
+#ifdef __SYCL_DEVICE_ONLY__
+    return vec{
+      (typename vec::DataType)~m_Data};
+#else
     vec Ret;
     for (size_t I = 0; I < NumElements; ++I) {
       Ret.setValue(I, ~getValue(I));
     }
     return Ret;
+#endif
   }
 
   vec<rel_t, NumElements> operator!() const {
+// Use __SYCL_DEVICE_ONLY__ macro because cast to OpenCL vector type is defined
+// by SYCL device compiler only.
+#ifdef __SYCL_DEVICE_ONLY__
+    return vec<rel_t, NumElements>{
+      (typename vec<rel_t, NumElements>::DataType)!m_Data};
+#else
     vec<rel_t, NumElements> Ret;
     for (size_t I = 0; I < NumElements; ++I) {
       Ret.setValue(I, !getValue(I));
     }
     return Ret;
+#endif
   }
 
   // OP is: &&, ||
@@ -1766,11 +1784,24 @@ using cl_schar16 = cl_char16;
 #define GET_SCALAR_CL_TYPE(target) cl_##target
 #endif // __SYCL_USE_EXT_VECTOR_TYPE__
 
+// On the host side we cannot use OpenCL cl_half# types as an underlying type
+// for vec because they are actually defined as an integer type under the hood.
+// As a result half values will be converted to the integer and passed as a
+// kernel argument which is expected to be floating point number.
 #ifndef __SYCL_DEVICE_ONLY__
-#define GET_CL_HALF_TYPE(target, num) cl_##target##num
-#else
-#define GET_CL_HALF_TYPE(target, num) __##target##num##_vec_t
+template <int NumElements, typename CLType> struct alignas(CLType) half_vec {
+  std::array<half, NumElements> s;
+};
+
+typedef half __half_t;
+typedef half_vec<2, cl_half2> __half2_vec_t;
+typedef half_vec<3, cl_half3> __half3_vec_t;
+typedef half_vec<4, cl_half4> __half4_vec_t;
+typedef half_vec<8, cl_half8> __half8_vec_t;
+typedef half_vec<16, cl_half16> __half16_vec_t;
 #endif
+
+#define GET_CL_HALF_TYPE(target, num) __##target##num##_vec_t
 
 namespace cl {
 namespace sycl {

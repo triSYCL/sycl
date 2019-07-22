@@ -9,6 +9,7 @@
 #include <CL/sycl/detail/common.hpp>
 #include <CL/sycl/detail/context_impl.hpp>
 #include <CL/sycl/detail/context_info.hpp>
+#include <CL/sycl/detail/clusm.hpp>
 #include <CL/sycl/device.hpp>
 #include <CL/sycl/exception.hpp>
 #include <CL/sycl/info/info_desc.hpp>
@@ -32,17 +33,23 @@ context_impl::context_impl(const vector_class<cl::sycl::device> Devices,
   for (const auto &D : m_Devices) {
     DeviceIds.push_back(getSyclObjImpl(D)->getHandleRef());
   }
+
   RT::PiResult Err;
   PI_CALL((m_Context =
       RT::piContextCreate(0, DeviceIds.size(), DeviceIds.data(), 0, 0, &Err),
       Err));
+
+  if (usm::CLUSM* clusm = GetCLUSM()) {
+    cl_platform_id id = m_Platform.get();
+    clusm->initExtensions(id);
+  }
 }
 
 context_impl::context_impl(cl_context ClContext, async_handler AsyncHandler)
     : m_AsyncHandler(AsyncHandler), m_Devices(),
       m_Platform(), m_OpenCLInterop(true), m_HostContext(false) {
 
-  m_Context = pi_cast<RT::PiContext>(ClContext);
+  m_Context = pi::pi_cast<RT::PiContext>(ClContext);
   vector_class<RT::PiDevice> DeviceIds;
   size_t DevicesNum = 0;
   // TODO catch an exception and put it to list of asynchronous exceptions
@@ -69,7 +76,7 @@ cl_context context_impl::get() const {
   if (m_OpenCLInterop) {
     // TODO catch an exception and put it to list of asynchronous exceptions
     PI_CALL(RT::piContextRetain(m_Context));
-    return pi_cast<cl_context>(m_Context);
+    return pi::pi_cast<cl_context>(m_Context);
   }
   throw invalid_object_error(
       "This instance of event doesn't support OpenCL interoperability.");

@@ -1,5 +1,4 @@
-// RUN: %clang -std=c++17 --sycl %s -c -o %T/kernel.spv
-// RUN: %clang -std=c++17 -g %s -o %t.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clang -std=c++17 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
 // RUN: %t.out
 
 //==--------------- id.cpp - SYCL id test ----------------------------------==//

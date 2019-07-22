@@ -21,7 +21,7 @@ sampler_impl::sampler_impl(coordinate_normalization_mode normalizationMode,
 
 sampler_impl::sampler_impl(cl_sampler clSampler, const context &syclContext) {
 
-  RT::PiSampler Sampler = pi_cast<RT::PiSampler>(clSampler);
+  RT::PiSampler Sampler = pi::pi_cast<RT::PiSampler>(clSampler);
   m_contextToSampler[syclContext] = Sampler;
   PI_CALL(RT::piSamplerRetain(Sampler));
   PI_CALL(RT::piSamplerGetInfo(Sampler, CL_SAMPLER_NORMALIZED_COORDS,
@@ -60,7 +60,7 @@ RT::PiSampler sampler_impl::getOrCreateSampler(const context &Context) {
       getSyclObjImpl(Context)->getHandleRef(), sprops, &errcode_ret),
       errcode_ret));
 #else
-  // TODO: do we reall need this old interface into PI and here?
+  // TODO: do we really need this old interface into PI and here?
   cl_int cl_errcode_ret;
   m_contextToSampler[Context] =
       clCreateSampler(getSyclObjImpl(Context)->getHandleRef(),

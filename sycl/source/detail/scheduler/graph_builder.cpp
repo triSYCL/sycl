@@ -33,7 +33,7 @@ static bool doOverlap(const Requirement *LHS, const Requirement *RHS) {
 
 // Returns record for the memory objects passed, nullptr if doesn't exist.
 Scheduler::GraphBuilder::MemObjRecord *
-Scheduler::GraphBuilder::getMemObjRecord(SYCLMemObjT *MemObject) {
+Scheduler::GraphBuilder::getMemObjRecord(SYCLMemObjI *MemObject) {
   const auto It = std::find_if(MMemObjRecords.begin(), MMemObjRecords.end(),
                                [MemObject](const MemObjRecord &Record) {
                                  return Record.MMemObj == MemObject;
@@ -46,7 +46,7 @@ Scheduler::GraphBuilder::getMemObjRecord(SYCLMemObjT *MemObject) {
 Scheduler::GraphBuilder::MemObjRecord *
 Scheduler::GraphBuilder::getOrInsertMemObjRecord(const QueueImplPtr &Queue,
                                                  Requirement *Req) {
-  SYCLMemObjT *MemObject = Req->MSYCLMemObj;
+  SYCLMemObjI *MemObject = Req->MSYCLMemObj;
   Scheduler::GraphBuilder::MemObjRecord *Record = getMemObjRecord(MemObject);
   if (nullptr != Record)
     return Record;
@@ -142,7 +142,7 @@ Scheduler::GraphBuilder::insertMemCpyCmd(MemObjRecord *Record, Requirement *Req,
 Command *Scheduler::GraphBuilder::addCopyBack(Requirement *Req) {
 
   QueueImplPtr HostQueue = Scheduler::getInstance().getDefaultHostQueue();
-  SYCLMemObjT *MemObj = Req->MSYCLMemObj;
+  SYCLMemObjI *MemObj = Req->MSYCLMemObj;
   Scheduler::GraphBuilder::MemObjRecord *Record = getMemObjRecord(MemObj);
 
   // Do nothing if there were no or only read operations with the memory object.
@@ -483,6 +483,7 @@ Command *
 Scheduler::GraphBuilder::addCG(std::unique_ptr<detail::CG> CommandGroup,
                                QueueImplPtr Queue) {
   std::vector<Requirement *> Reqs = CommandGroup->getRequirements();
+  std::vector<detail::EventImplPtr> Events = CommandGroup->getEvents();
   std::unique_ptr<ExecCGCommand> NewCmd(
       new ExecCGCommand(std::move(CommandGroup), Queue));
   if (!NewCmd)
@@ -523,6 +524,11 @@ Scheduler::GraphBuilder::addCG(std::unique_ptr<detail::CG> CommandGroup,
     AddNodeToLeafs(Record, NewCmd.get(), Req);
   }
 
+  // Register all the events as dependencies
+  for (detail::EventImplPtr e : Events) {
+    NewCmd->addDep(e);
+  }
+
   return NewCmd.release();
 }
 
@@ -530,7 +536,7 @@ void Scheduler::GraphBuilder::cleanupCommands(bool CleanupReleaseCommands) {
   // TODO: Implement.
 }
 
-void Scheduler::GraphBuilder::removeRecordForMemObj(SYCLMemObjT *MemObject) {
+void Scheduler::GraphBuilder::removeRecordForMemObj(SYCLMemObjI *MemObject) {
   const auto It = std::find_if(MMemObjRecords.begin(), MMemObjRecords.end(),
                                [MemObject](const MemObjRecord &Record) {
                                  return Record.MMemObj == MemObject;
