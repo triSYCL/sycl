@@ -149,8 +149,7 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   for index in "${KERNEL_NAME_ARRAY[@]}"; do
   if [[ -n "$index" ]]; then
     if [[ ! -z "$VERBOSE" ]]; then
-      echo "Invoking sdx Kernel Compilation"
-      echo "sdx: $SDX"
+      echo "Invoking Kernel Compilation with $SDX"
       echo "--target: $XCL_EMULATION_MODE"
       echo "--platform: $XILINX_PLATFORM"
       echo "Compiling kernel: $index"
