@@ -45,14 +45,10 @@ struct XOCCIRDowngrader : public ModulePass {
   /// up it can be removed
   void removeImmarg(Module &M) {
     for (auto &F : M.functions()) {
-      int i = 0;
       for (auto &P : F.args()) {
-          if (P.hasAttribute(llvm::Attribute::ImmArg)
-              || F.hasParamAttribute(i, llvm::Attribute::ImmArg)) {
+          if (P.hasAttribute(llvm::Attribute::ImmArg)) {
               P.removeAttr(llvm::Attribute::ImmArg);
-              F.removeParamAttr(i, llvm::Attribute::ImmArg);
           }
-          ++i;
       }
     }
   }
