@@ -379,11 +379,11 @@ pi_result piContextRelease(pi_context context);
 //
 // Queue
 //
-pi_queue piQueueCreate( // TODO: change interface to return error code instead
-  pi_context              context,
-  pi_device               device,
-  const cl_queue_properties *    properties, // TODO: untie from OpenCL
-  pi_result *             result);
+pi_result piQueueCreate(
+  pi_context                  context,
+  pi_device                   device,
+  cl_command_queue_properties properties, // TODO: untie from OpenCL
+  pi_queue *                  queue);
 
 pi_result piQueueGetInfo(
   pi_queue            command_queue,
