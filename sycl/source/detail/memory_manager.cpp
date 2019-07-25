@@ -251,7 +251,7 @@ void copyH2D(SYCLMemObjI *SYCLMemObj, char *SrcMem, QueueImplPtr SrcQueue,
     } else {
       if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
                               SrcOffset, DstOffset)) {
-        PI_CALL(RT::piEnqueueMemWrite(
+        PI_CALL(RT::piEnqueueMemBufferWrite(
             Queue, DstMem, /*blocking_write=*/CL_FALSE,
             DstOffset[0], DstAccessRange[0]*DstAccessRange[1]*DstAccessRange[2],
             SrcMem + DstOffset[0], DepEvents.size(), &DepEvents[0], &OutEvent));
@@ -310,7 +310,7 @@ void copyD2H(SYCLMemObjI *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
     } else {
       if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
                              SrcOffset, DstOffset)) {
-        PI_CALL(RT::piEnqueueMemRead(
+        PI_CALL(RT::piEnqueueMemBufferRead(
             Queue, SrcMem,/*blocking_read=*/CL_FALSE, DstOffset[0],
             DstAccessRange[0]*DstAccessRange[1]*DstAccessRange[2],
             DstMem + DstOffset[0], DepEvents.size(), &DepEvents[0], &OutEvent));
@@ -365,7 +365,7 @@ void copyD2D(SYCLMemObjI *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
     } else {
       if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
                               SrcOffset, DstOffset)) {
-        PI_CALL(RT::piEnqueueMemCopy(
+        PI_CALL(RT::piEnqueueMemBufferCopy(
             Queue, SrcMem, DstMem, SrcOffset[0], DstOffset[0],
             SrcAccessRange[0]*SrcAccessRange[1]*SrcAccessRange[2],
             DepEvents.size(), &DepEvents[0], &OutEvent));
