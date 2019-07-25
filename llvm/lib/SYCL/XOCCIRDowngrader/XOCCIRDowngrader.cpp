@@ -127,8 +127,18 @@ struct XOCCIRDowngrader : public ModulePass {
     }
   }
 
+  /// Removes nofree bitcode function attribute that is applied to
+  /// functions to indicate that they do not deallocate memory.
+  /// It was added in LLVM-9 (D49165), so as xocc catches up it can be removed
+  void removeNoFree(Module &M) {
+    for (auto &F : M.functions()) {
+      F.removeFnAttr(llvm::Attribute::NoFree);
+    }
+  }
+
   bool runOnModule(Module &M) override {
     removeImmarg(M);
+    removeNoFree(M);
     resetByVal(M);
     renameBasicBlocks(M);
 
