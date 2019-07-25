@@ -227,6 +227,7 @@ LANGOPT(SYCLIsDevice      , 1, 0, "Generate code for SYCL device")
 LANGOPT(SYCLIsHost        , 1, 0, "SYCL host compilation")
 LANGOPT(SYCLAllowFuncPtr  , 1, 0, "Allow function pointers in SYCL device code")
 LANGOPT(SYCLAllowVirtual  , 1, 0, "Allow virtual functions and types in SYCL device code")
+LANGOPT(SYCLAllowVariadicFunc  , 1, 0, "Allow variadic functions in SYCL device code")
 
 LANGOPT(SizedDeallocation , 1, 0, "sized deallocation")
 LANGOPT(AlignedAllocation , 1, 0, "aligned allocation")
