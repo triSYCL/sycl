@@ -35,7 +35,25 @@ XOCCInstallationDetector::XOCCInstallationDetector(
   // This might only work on Linux systems.
   // Rather than just checking the environment variables you could also add an
   // optional path variable for users to use.
-  if (llvm::ErrorOr<std::string> xocc = findProgramByName("xocc")) {
+  if (llvm::ErrorOr<std::string> vpp = findProgramByName("v++")) {
+    SmallString<256> vppsAbsolutePath;
+    fs::real_path(*vpp, vppsAbsolutePath);
+
+    BinaryPath = vppsAbsolutePath.str();
+
+    StringRef vppDir = path::parent_path(vppsAbsolutePath);
+
+    if (path::filename(vppDir) == "bin")
+      BinPath = vppDir;
+
+    // TODO: Check if this assumption is correct in all installations and give
+    // environment variable specifier option or an argument to the Driver
+    SDXPath = path::parent_path(vppDir);
+    LibPath = SDXPath + "/lnx64/lib";
+
+    // TODO: slightly stricter IsValid test.. check all strings aren't empty
+    IsValid = true;
+  } else if (llvm::ErrorOr<std::string> xocc = findProgramByName("xocc")) {
     SmallString<256> xoccsAbsolutePath;
     fs::real_path(*xocc, xoccsAbsolutePath);
 
