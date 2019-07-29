@@ -27,7 +27,8 @@ int main(int argc, char* argv[]) {
   cv::VideoCapture cap;
   // If opencv don't find a webcam the program exit here
   if (!cap.open(0)) {
-    return 0;
+    std::cerr << "Unable to connect to the webcam" << std::endl;
+    return 1;
   }
 
   // set the size of picture taken by the webcam
@@ -69,7 +70,6 @@ int main(int argc, char* argv[]) {
           <char, 9,xilinx::partition::complete<0>> gY
           { {1, 2, 1, 0, 0, 0, -1, -2, -1} };
 
-      int magX, magY, gI, pIndex;
       for (size_t x = 1; x < width - 1; ++x) {
         for (size_t y = 1; y < height - 1; ++y) {
           int magX = 0; magY = 0;
@@ -78,7 +78,7 @@ int main(int argc, char* argv[]) {
             for(size_t k = 0; k < 3; ++k) {
               for(size_t l = 0; l < 3; ++l) {
                 int pIndex = (x + k - 1) + (y + l - 1) * width;
-                gI = k * 3 + l;
+                size_t gI = k * 3 + l;
                 magX += gX[gI] * pixel_rb[pIndex];
                 magY += gY[gI] * pixel_rb[pIndex];
               }

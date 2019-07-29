@@ -27,8 +27,8 @@ file `GettingStartedAlveo <https://github.com/triSYCL/sycl/blob/sycl/unified/mas
 Once this is done you can compile using the following command :
 
 ```
-$SYCL_BIN_DIR/clang++ -std=c++2a -fsycl
--fsycl-targets=fpga64-xilinx-unknown-sycldevice
-edge_detection.cpp -o a.out -lOpenCL -I/opt/xilinx/xrt/include
-`pkg-config --libs opencv
+$SYCL_BIN_DIR/clang++ -std=c++2a -fsycl \
+-fsycl-targets=fpga64-xilinx-unknown-sycldevice \
+edge_detection.cpp -o a.out -lOpenCL -I/opt/xilinx/xrt/include \
+`pkg-config --libs opencv`
 ```
