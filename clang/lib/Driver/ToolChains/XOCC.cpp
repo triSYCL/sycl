@@ -35,42 +35,33 @@ XOCCInstallationDetector::XOCCInstallationDetector(
   // This might only work on Linux systems.
   // Rather than just checking the environment variables you could also add an
   // optional path variable for users to use.
-  if (llvm::ErrorOr<std::string> vpp = findProgramByName("v++")) {
-    SmallString<256> vppsAbsolutePath;
-    fs::real_path(*vpp, vppsAbsolutePath);
+  auto search_program = [&] (auto programName) {
+    llvm::ErrorOr<std::string> program = findProgramByName(programName);
+    if (program) {
+      SmallString<256> vppsAbsolutePath;
+      fs::real_path(*program, programsAbsolutePath);
 
-    BinaryPath = vppsAbsolutePath.str();
+      BinaryPath = programsAbsolutePath.str();
 
-    StringRef vppDir = path::parent_path(vppsAbsolutePath);
+      StringRef programDir = path::parent_path(programsAbsolutePath);
 
-    if (path::filename(vppDir) == "bin")
-      BinPath = vppDir;
+      if (path::filename(programDir) == "bin")
+        BinPath = programDir;
 
-    // TODO: Check if this assumption is correct in all installations and give
-    // environment variable specifier option or an argument to the Driver
-    SDXPath = path::parent_path(vppDir);
-    LibPath = SDXPath + "/lnx64/lib";
+      // TODO: Check if this assumption is correct in all installations and give
+      // environment variable specifier option or an argument to the Driver
+      SDXPath = path::parent_path(programDir);
+      LibPath = SDXPath + "/lnx64/lib";
 
-    // TODO: slightly stricter IsValid test.. check all strings aren't empty
-    IsValid = true;
-  } else if (llvm::ErrorOr<std::string> xocc = findProgramByName("xocc")) {
-    SmallString<256> xoccsAbsolutePath;
-    fs::real_path(*xocc, xoccsAbsolutePath);
+      // TODO: slightly stricter IsValid test.. check all strings aren't empty
+      IsValid = true;
+    }
+    return program;
+  };
 
-    BinaryPath = xoccsAbsolutePath.str();
-
-    StringRef xoccDir = path::parent_path(xoccsAbsolutePath);
-
-    if (path::filename(xoccDir) == "bin")
-      BinPath = xoccDir;
-
-    // TODO: Check if this assumption is correct in all installations and give
-    // environment variable specifier option or an argument to the Driver
-    SDXPath = path::parent_path(xoccDir);
-    LibPath = SDXPath + "/lnx64/lib";
-
-    // TODO: slightly stricter IsValid test.. check all strings aren't empty
-    IsValid = true;
+  if (search_program("xocc")) {}
+  else {
+    search_program("v++");
   }
 }
 

@@ -1,16 +1,16 @@
 #!/bin/bash
 # This is an extra layer of abstraction on top of the shell invocing the
-# SDX compiler. As SPIR/LLVM-IR is a second class citizen in SDX for the
+# SDx compiler. As SPIR/LLVM-IR is a second class citizen in SDx for the
 # moment it has some little niggling details that need worked on and the idea
 # is that this script will work around those with some aid from Clang/LLVM.
 #
-# One of the main examples is that SDX can only compile one kernel from LLVM-BC
+# One of the main examples is that SDx can only compile one kernel from LLVM-BC
 # at a time and it requires the kernels name (also required for kernel specific
 # optimizations). This poses a problem as there can be multiple kernels in a
-# file. And when making a normal naked sdx -c command in the driver
+# file. And when making a normal naked SDx -c command in the driver
 # you won't have the neccesarry information as the command is generated before
 # the file's have even started to be compiled (Perhaps there is that I am
-# unaware of). So no kernel names and no idea how many sdx commands you'd need
+# unaware of). So no kernel names and no idea how many SDx commands you'd need
 # to generate per file (no idea how many kernels are in a file).
 #
 # This works around that by using an opt (kernelNameGen) pass that generates
@@ -20,8 +20,8 @@
 # kernel.
 #
 # Arguments:
-# $1 == sdx's SDx bin directory where the real shell invocation that invokes
-#       the sdx compiler resides
+# $1 == SDx's SDx bin directory where the real shell invocation that invokes
+#       the SDx compiler resides
 # $2 == path to the clang driver that's executing the shell script (e.g.
 #        your compiled Clang's build/bin)
 # $3 == The name of the source file without file extensions or temporary
@@ -35,13 +35,13 @@
 
 # TODO: Pass an argument through the driver to set options like XILINX_PLATFORM,
 # the environment variables are a quick workaround to swap boards.
-usage() { echo sdx_compile: error: $2 >&2; exit $1; }
+usage() { echo sycl-xocc: error: $2 >&2; exit $1; }
 
 # Make this a parameter passed in from Clang at some point
 export VERBOSE=1
 
 if [[ -z "$1" ]]; then
-  usage 1 "no sdx bin directory"
+  usage 1 "no SDx bin directory"
 fi
 
 if [[ -z "$2" ]]; then
@@ -125,7 +125,7 @@ OUTPUT_FILE_NAME="$6"
 $OPT -asfix -O3 -globaldce -inSPIRation -globaldce -kernelPropGen \
   "$INPUT_FILE_NAME" -o "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.bc"
 
-# Link our SDX SPIR binaries in
+# Link our SDx SPIR binaries in
 $LLVM_LINK "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.bc" \
   $SDX_LIB_SPIR -o "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
 
