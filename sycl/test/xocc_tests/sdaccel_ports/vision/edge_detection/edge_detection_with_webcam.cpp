@@ -25,71 +25,68 @@ int main(int argc, char* argv[]) {
   constexpr auto area = height * width;
 
   cv::VideoCapture cap;
-  // set buffer to 1 frame
-  cap.set(cv::CAP_PROP_BUFFERSIZE, 1);
-  if(!cap.open(0))
+  // If opencv don't find a webcam the program exit here
+  if (!cap.open(0)) {
     return 0;
+  }
 
   // set the size of picture taken by the webcam
   cap.set(cv::CAP_PROP_FRAME_WIDTH, width);
   cap.set(cv::CAP_PROP_FRAME_HEIGHT, height);
 
   selector_defines::CompiledForDeviceSelector selector;
-  queue q {selector, property::queue::enable_profiling()};
+  queue q { selector, property::queue::enable_profiling {} };
 
-  // This infinite loop take a picture from the camera
-  // apply the edge detection filter with the FPGA kernel
-  // display the input and the output in separated windows
-  for(;;){
+  // This infinite loop takes a picture from the camera
+  // applies the edge detection filter with the FPGA kernel
+  // and displays the input and the output in separated windows
+  for (;;) {
     cv::Mat inputColor;
-    // take the picture frim camera
+    // take the picture from the camera
     cap >> inputColor;
 
     cv::imshow("inputColor", inputColor);
     cv::Mat inputRaw, input;
-    cv::cvtColor(inputColor, inputRaw, CV_BGR2GRAY);
     // convert the colored picture into grey
+    cv::cvtColor(inputColor, inputRaw, CV_BGR2GRAY);
     inputRaw.convertTo(input, CV_8UC1);
 
     buffer<uchar> ib{input.begin<uchar>(), input.end<uchar>()};
     buffer<uchar> ob{range<1>{area}};
 
     // The loop break when pressing the Esc key
-    if( cv::waitKey(10) == 27 ) break;
-
-    cv::imshow("input", input);
+    if (cv::waitKey(10) == 27) break;
 
     auto event = q.submit([&](handler &cgh) {
       auto pixel_rb = ib.get_access<access::mode::read>(cgh);
       auto pixel_wb = ob.get_access<access::mode::write>(cgh);
 
       cgh.single_task<xilinx::reqd_work_group_size<1, 1, 1, krnl_sobel>>([=] {
-        auto gX = xilinx::partition_array
-          <char, 9,xilinx::partition::complete<0>>
-          ({-1, 0, 1, -2, 0, 2, -1, 0, 1});
-
-        auto gY = xilinx::partition_array
-          <char, 9,xilinx::partition::complete<0>>
-          ({1, 2, 1, 0, 0, 0, -1, -2, -1});
+        xilinx::partition_array
+          <char, 9,xilinx::partition::complete<0>> gX
+          { {-1, 0, 1, -2, 0, 2, -1, 0, 1} };
+        xilinx::partition_array
+          <char, 9,xilinx::partition::complete<0>> gY
+          { {1, 2, 1, 0, 0, 0, -1, -2, -1} };
 
       int magX, magY, gI, pIndex;
       for (size_t x = 1; x < width - 1; ++x) {
         for (size_t y = 1; y < height - 1; ++y) {
-          magX = 0; magY = 0;
+          int magX = 0; magY = 0;
 
           xilinx::pipeline([&] {
             for(size_t k = 0; k < 3; ++k) {
               for(size_t l = 0; l < 3; ++l) {
+                int pIndex = (x + k - 1) + (y + l - 1) * width;
                 gI = k * 3 + l;
-                pIndex = (x + k - 1) + (y + l - 1) * width;
                 magX += gX[gI] * pixel_rb[pIndex];
                 magY += gY[gI] * pixel_rb[pIndex];
               }
             }
           });
 
-          pixel_wb[x + y * width] = cl::sycl::min((int)(cl::sycl::abs(magX)
-                                                  + cl::sycl::abs(magY)), 0xFF);
+          pixel_wb[x + y * width] = cl::sycl::min((cl::sycl::abs(magX) +
+                                                   cl::sycl::abs(magY)), 0xFF);
         }
       }
     });
