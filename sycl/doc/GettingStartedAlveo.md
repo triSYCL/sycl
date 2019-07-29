@@ -297,7 +297,6 @@ that should expose some OpenCL device parameters for the FPGA board.
 git clone --branch sycl/unified/master git@github.com:triSYCL/sycl.git
 cd sycl
 SYCL_HOME=`pwd`
-OPENCL_HEADERS=/usr/include
 export XILINX_XRT=/opt/xilinx/xrt
 mkdir $SYCL_HOME/build
 cd $SYCL_HOME/build
