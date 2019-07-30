@@ -1783,7 +1783,7 @@ def fsycl_link : Flag<["-"], "fsycl-link">, Alias<fsycl_link_EQ>,
 def fsycl_header_only_library : Flag<["-"], "fsycl-header-only-library">,
   Group<f_Group>, Flags<[CC1Option, NoArgumentUnused]>,
   HelpText<"Tells the SYCL host compilation not to implicitly add -lsycl and "
-           "look for a SYCL library as we want to use a header only runtime "
+           "look for a SYCL library as we will use a header only runtime "
            "library.">;
 def fsycl_unnamed_lambda : Flag<["-"], "fsycl-unnamed-lambda">,
   Flags<[CC1Option, CoreOption]>, HelpText<"Allow unnamed SYCL lambda kernels">;
