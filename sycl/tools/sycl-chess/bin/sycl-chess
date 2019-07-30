@@ -1,2 +1,107 @@
 #!/bin/bash
-# Placeholder script
+#
+# TODO: A lovely description when this is working to a reasonable level of
+# stability
+#
+# Arguments:
+# $1 == Cardanos bin directory where the xilinx wrapper scripts to chess tools
+#       (xchess*) reside amongst other things
+# $2 == path to the clang driver that's executing the shell script (e.g.
+#        your compiled Clang's build/bin)
+# $3 == The name of the source file without file extensions or temporary
+#       manglings, mostly used to generate some intermediate file names
+# $4 == The initial input file name, currently a .o file that's actually a .bc
+#       file in disguise
+# $5 == The systems temporary directory where we'll deposit some intermediate
+#       files
+# $6 == The name we wish to give our final output .xcl binary, important that it
+#       is consistent with what the driver expects it to be.
+
+usage() { echo sycl-chess: error: $2 >&2; exit $1; }
+
+if [[ -z "$1" ]]; then
+  usage 1 "no Cardano bin directory containing xchesscc"
+fi
+
+if [[ -z "$2" ]]; then
+  usage 2 "no driver path specified"
+fi
+
+if [[ -z "$3" ]]; then
+  usage 3 "no source file name"
+fi
+
+if [[ -z "$4" ]]; then
+  usage 4 "no input file name"
+fi
+
+if [[ -z "$5" ]]; then
+  usage 5 "no temporary directory specified"
+fi
+
+if [[ -z "$6" ]]; then
+  usage 6 "no final output file specified"
+fi
+
+# Setup Cardano related env variables
+CARDANO_BIN_PATH_DIR="$1"
+if [[ ! -d "$CARDANO_BIN_PATH_DIR" ]]; then
+  usage 7 "path to Cardano bin directory is not a valid directory"
+else
+  XCHESSCC="$CARDANO_BIN_PATH_DIR/xchesscc"
+  if [[ ! -f "$XCHESSCC" ]]; then
+    usage 8 "could not find Cardanos xchesscc in $CARDANO_BIN_PATH_DIR"
+  fi
+
+  CARDANO_LIB_DIR="$CARDANO_BIN_PATH_DIR/../data/cervino/lib/"
+  if [[ ! -d "$CARDANO_LIB_DIR" ]]; then
+    usage 9 "cardano lib directory not found"
+  fi
+fi
+
+# Setup Clang/LLVM related env variables
+DRIVER_PATH_DIR="$2"
+if [[ ! -d "$DRIVER_PATH_DIR" ]]; then
+  usage 10 "path to driver directory is not a valid directory"
+else
+  OPT="$DRIVER_PATH_DIR/opt"
+  if [[ ! -f "$OPT" ]]; then
+    usage 11 "no llvm opt executable found in $DRIVER_PATH_DIR"
+  fi
+fi
+
+# excluding file extension e.g. .cpp
+SOURCE_FILE_NAME="$3"
+# input file name including extensions and path
+INPUT_FILE_NAME="$4"
+# Should point to whatever Clang has decided is the temporary directory
+TEMPORARY_DIR="$5"
+# output file name including extensions and path
+OUTPUT_FILE_NAME="$6"
+
+if [[ ! -d "$TEMPORARY_DIR" ]]; then
+  usage 12 "the path given for the temporary directory is an invalid directory"
+fi
+
+# Push chess scripts to the front of the path, they're placed inside of a
+# chesswrapper folder so we don't have to add the bin to the path. Doing that
+# may run the risk of breaking chess tools in weird ways (e.g. finding the
+# incorrect assembler).
+export PATH=$DRIVER_PATH_DIR/chesswrapper:$PATH
+
+# -O3 causes over optimization with a simple hello_world.cpp and we end up
+# with a trap...
+# Run Opt pass to convert our IR into something the chess toolchain can support
+$OPT -S -ChessMassage "$INPUT_FILE_NAME" \
+  -o "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
+
+$XCHESSCC +P $(nproc) -p me -P $CARDANO_LIB_DIR -d -f -c \
+  -o "$OUTPUT_FILE_NAME" \
+  "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
+
+# This is temporay and so people can get access to the compiled ELF kernel
+# binary output from the chess tools. This is the file that will be used for
+# testing for now. This will be removed once the concept of a program manager
+# for loading offloaded and wrapped binaries exists inside of ACAP++ or the fix
+# for--save-temps from upstream is pulled in.
+cp "$OUTPUT_FILE_NAME" "${OUTPUT_FILE_NAME}_cp"
