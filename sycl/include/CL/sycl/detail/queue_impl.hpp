@@ -144,7 +144,7 @@ public:
                                              pi::pi_cast<pi_queue *>(&Queue)));
 
     // If creating out-of-order queue failed and this property is not
-    // supported(for example, on FPGA), it will return
+    // supported (for example, on FPGA), it will return
     // CL_INVALID_QUEUE_PROPERTIES and will try to create in-order queue.
     if (m_SupportOOO && Error == CL_INVALID_QUEUE_PROPERTIES) {
       m_SupportOOO = false;

@@ -72,6 +72,7 @@ else
   # Hardcoded path from the bin directory that xocc is stored in, works for now
   # but a future TODO might be to allow this to be optionally specified as an
   # ENV variable
+
   SDX_LIB_SPIR="$SDX_BIN_PATH_DIR/../lnx64/lib/libspir64-39-hls.bc"
   # It says 3.9, but trust us this is Clang/LLVM 7..
   SDX_CLANG_LLVM_BIN="$SDX_BIN_PATH_DIR/../lnx64/tools/clang-3.9-csynth/bin"
@@ -135,8 +136,9 @@ $LLVM_LINK "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.bc" \
 # a second pass afterwards, rather than once before in the first opt pass
 # and then again after linking.
 #
-# We also only wish to emit LLVM IR and not bitcode as we currently use the
-# llvm assembler packaged with xocc to generate our final bitcode file.
+# We also only wish to emit LLVM IR assembly language format and not bitcode
+# format as we currently use the llvm assembler packaged with xocc to generate
+# our final bitcode file.
 $OPT -S -O3 -xoccIRDowngrader \
   "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc" -o \
   "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"

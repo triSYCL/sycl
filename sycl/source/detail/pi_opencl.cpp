@@ -82,9 +82,8 @@ pi_result OCL(piQueueCreate)(pi_context context, pi_device device,
                              cl_command_queue_properties properties,
                              pi_queue *queue) {
   size_t devVerSize;
-  cl_int ret_err;
-  ret_err = clGetDeviceInfo(pi_cast<cl_device_id>(device), CL_DEVICE_VERSION, 0,
-                            NULL, &devVerSize);
+  cl_int ret_err = clGetDeviceInfo(pi_cast<cl_device_id>(device),
+                                   CL_DEVICE_VERSION, 0, NULL, &devVerSize);
 
   if (ret_err != CL_SUCCESS)
     return pi_cast<pi_result>(ret_err);

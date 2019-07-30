@@ -62,20 +62,20 @@ struct XOCCIRDowngrader : public ModulePass {
   /// Clang/LLVM 9.
   ///
   /// This LLVM patch primarily added byval <Type> syntax in the IR. And a new
-  /// Attrbiute type, which is not to be confused with anything related to the
+  /// attrbiute type, which is not to be confused with anything related to the
   /// type system. It basically just states the attribute is carrying around
   /// some Type/Value information rather than string/int/enum and gives it
   /// somewhere to store it.
   ///
-  /// However Now the bitcode writer will write out some different bitcode for
+  /// However now the bitcode writer will write out some different bitcode for
   /// byval that is unreadable by xocc and the bitcode reader upgrades any byval
   /// attributes to the new byval <Type> syntax. The way we currently work
   /// around this is:
   /// 1) Delete the ByVal attribute, erasing any byval <Type> syntax in the IR
   /// and then re-adding the old byval with no <Type> Syntax.
   /// 2) In the SYCL xocc script when we run this pass with opt we make sure we
-  /// emit LLVM IR and not bitcode after this pass so that it doesn't run through
-  /// the bitcode writer.
+  /// emit LLVM IR assembly language format and not bitcode format after this
+  /// pass so that it doesn't run through the bitcode writer.
   /// 3) Inside the script we run it through an earlier LLVM assembler to create
   /// our bitcode, in this case the one packaged with xocc as it's easily
   /// accessible and we don't wish to carry around our own precompiled
