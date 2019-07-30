@@ -22,8 +22,6 @@ private:
   bool IsValid = false;
   std::string BinPath;
   std::string BinaryPath;
-  std::string ChessPath;
-  std::string LibPath;
 
 public:
   ChessInstallationDetector(const Driver &D, const llvm::Triple &HostTriple,
@@ -37,12 +35,6 @@ public:
 
   /// Get the detected path to cardanos's bin directory.
   StringRef getBinPath() const { return BinPath; }
-
-  /// Get the path to Chess compilers root
-  StringRef getChessPath() const { return ChessPath; }
-
-  /// Get the detected path to the Chess compilers ME libraries.
-  StringRef getLibPath() const { return LibPath; }
 
 };
 

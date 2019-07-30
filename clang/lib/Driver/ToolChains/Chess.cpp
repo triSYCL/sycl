@@ -32,10 +32,23 @@ ChessInstallationDetector::ChessInstallationDetector(
     const Driver &D, const llvm::Triple &HostTriple,
     const llvm::opt::ArgList &Args)
     : D(D) {
+    // This is the Xilinx wrapper for the real chesscc, this resides inside of
+    // Cardano's bin directory. The real chesscc resides in Cardanos:
+    // /tps/lnx64/target/bin/LNa64bin/ directory
+    if (llvm::ErrorOr<std::string> xchesscc = findProgramByName("xchesscc")) {
+      SmallString<256> xchessccAbsolutePath;
+      fs::real_path(*xchesscc, xchessccAbsolutePath);
 
-  /// TODO: Create Chess/Xilinx Cardano Installation Detection Algorithm
-  /// look at XOCCInstallationDetector for a general idea.
+      BinaryPath = xchessccAbsolutePath.str();
 
+      StringRef xchessccDir = path::parent_path(xchessccAbsolutePath);
+
+      if (path::filename(xchessccDir) == "bin")
+          BinPath = xchessccDir;
+
+      // TODO: slightly stricter IsValid test.. check all strings aren't empty
+      IsValid = true;
+    }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -55,13 +68,47 @@ void SYCL::LinkerChess::constructSYCLChessCommand(
     const InputInfoList &Inputs, const llvm::opt::ArgList &Args) const {
   const auto &TC =
     static_cast<const toolchains::ChessToolChain &>(getToolChain());
-  /// TODO: Create sycl-chess script invocation with all the required arguments
-  /// and then add the invocation command to the compilation. Look at LinkerXOCC
-  /// command for an idea.
 
-  //ArgStringList CmdArgs;
-  //C.addCommand(llvm::make_unique<Command>(JA, *this,
-  //             Exec, CmdArgs, Inputs));
+  ArgStringList CmdArgs;
+
+  // Script Arg $1, directory of cardano bin (where xchesscc resides)
+  CmdArgs.push_back(Args.MakeArgString(TC.ChessInstallation.getBinPath()));
+
+  // Script Arg $2, directory of the Clang driver, where the sycl-chesscc script
+  // opt binary and llvm-linker binary should be contained among other things
+  CmdArgs.push_back(Args.MakeArgString(C.getDriver().Dir));
+
+  // Script Arg $3, the original source file name minus the file extension
+  // (.h/.cpp etc)
+  SmallString<256> SrcName =
+    llvm::sys::path::filename(Inputs[0].getBaseInput());
+  llvm::sys::path::replace_extension(SrcName, "");
+  CmdArgs.push_back(Args.MakeArgString(SrcName));
+
+  // Script Arg $4, input file name, distinct from Arg $3 as this is the .o
+  // (it's actually a .bc file in disguise at the moment) input file with a
+  // mangled temporary name
+  CmdArgs.push_back(Args.MakeArgString(Inputs[0].getFilename()));
+
+  // Script Arg $5, temporary directory path, used to dump a lot of intermediate
+  // files that no one needs to know about unless they're debugging
+  SmallString<256> TmpDir;
+  llvm::sys::path::system_temp_directory(true, TmpDir);
+  CmdArgs.push_back(Args.MakeArgString(TmpDir));
+
+  // Script Arg $6, the name of the final output elf binary file after
+  // compilation and linking is complete
+  CmdArgs.push_back(Output.getFilename());
+
+  // Path to sycl-chess script
+  SmallString<128> ExecPath(C.getDriver().Dir);
+  path::append(ExecPath, "sycl-chess");
+  const char *Exec = C.getArgs().MakeArgString(ExecPath);
+
+  // Generate our command to sycl-chess using the arguments we've made
+  // Note: Inputs that the shell script doesn't use should be ignored
+  C.addCommand(llvm::make_unique<Command>(JA, *this,
+               Exec, CmdArgs, Inputs));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -73,8 +120,6 @@ ChessToolChain::ChessToolChain(const Driver &D, const llvm::Triple &Triple,
     : ToolChain(D, Triple, Args), HostTC(HostTC),
       ChessInstallation(D, HostTC.getTriple(), Args)
 {
-  llvm::errs() << "Chess Tool Chain Selected \n";
-
   if (ChessInstallation.isValid())
     getProgramPaths().push_back(ChessInstallation.getBinPath());
 
