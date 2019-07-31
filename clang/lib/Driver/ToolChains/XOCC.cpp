@@ -35,10 +35,10 @@ XOCCInstallationDetector::XOCCInstallationDetector(
   // This might only work on Linux systems.
   // Rather than just checking the environment variables you could also add an
   // optional path variable for users to use.
-  auto search_program = [&] (auto programName) {
+  auto search_and_set_up_program = [&] (const char * programName) {
     llvm::ErrorOr<std::string> program = findProgramByName(programName);
     if (program) {
-      SmallString<256> vppsAbsolutePath;
+      SmallString<256> programsAbsolutePath;
       fs::real_path(*program, programsAbsolutePath);
 
       BinaryPath = programsAbsolutePath.str();
@@ -53,16 +53,14 @@ XOCCInstallationDetector::XOCCInstallationDetector(
       SDXPath = path::parent_path(programDir);
       LibPath = SDXPath + "/lnx64/lib";
 
-      // TODO: slightly stricter IsValid test.. check all strings aren't empty
+      // TODO: slightly stricter IsValid test... check all strings aren't empty
       IsValid = true;
     }
     return program;
   };
 
-  if (search_program("xocc")) {}
-  else {
-    search_program("v++");
-  }
+  if (!search_and_set_up_program("v++"))
+    search_and_set_up_program("xocc");
 }
 
 ///////////////////////////////////////////////////////////////////////////////

@@ -35,7 +35,7 @@
 
 # TODO: Pass an argument through the driver to set options like XILINX_PLATFORM,
 # the environment variables are a quick workaround to swap boards.
-usage() { echo sycl-xocc: error: $2 >&2; exit $1; }
+usage() { echo $0: error: $2 >&2; exit $1; }
 
 # Make this a parameter passed in from Clang at some point
 export VERBOSE=1
