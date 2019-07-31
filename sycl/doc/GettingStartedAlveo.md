@@ -1,6 +1,9 @@
 Getting started with SYCL with a Xilinx FPGA U200 Alveo board and Ubuntu 19.04
 ==============================================================================
 
+Disclaimer: nothing here is supported and this is all about a research
+project.
+
 We assume that you have the latest Ubuntu 19.04 version installed on
 an `x86_64` machine.
 
@@ -41,49 +44,11 @@ latest BIOS version, put it on a FAT32-formatted USB stick and go
 into the BIOS setup at boot time to ask for the explicit
 update. Often, there is no need to build a bootable USB stick.
 
-### Use the right Linux kernel
-
-To run on some real hardware, we need a Linux kernel supported by the
-very picky XRT Linux kernel driver, according to
-https://github.com/Xilinx/XRT/issues/1384
-
-So, create a `/etc/apt/sources.list.d/xrt-bionic.list` file with this content:
-```
-# Add old packages from Ubuntu 18.04 to have XRT kernel driver compiling
-deb http://us.archive.ubuntu.com/ubuntu/ bionic main restricted
-```
-
-Then install the latest supported kernel by XRT
-```bash
-sudo apt update
-sudo apt install linux-image-4.15.0-50-generic \
-  linux-modules-4.15.0-50-generic \
-  linux-modules-extra-4.15.0-50-generic \
-  linux-headers-4.15.0-50 linux-headers-4.15.0-50-generic
-```
-
-Edit `/etc/default/grub` to pick the last manual boot kernel choice as
-default:
-```
-#GRUB_DEFAULT=0
-GRUB_SAVEDEFAULT=true
-GRUB_DEFAULT=saved
-```
-
-Update the boot configuration
-```bash
-sudo update-grub
-```
-
-Reboot the machine by manually picking the Linux kernel 4.15 in the
-"Advanced Options for Ubuntu" Grub menu. Next time it should also
-reboot with this version if you do not change anything.
-
 
 ## Installing the Xilinx runtime
 
 ```bash
-# Get the Xilinx runtime
+# Get the Xilinx runtime. You might try the master branch instead...
 git clone --branch 2019.1 git@github.com:Xilinx/XRT.git
 cd XRT/build
 # Install the required packages
@@ -96,7 +61,7 @@ sudo apt install --reinstall ./Release/xrt_201910.2.2.0_19.04-xrt.deb
 ```
 
 It will install the user-mode XRT runtime and at least compile and
-install the Xilinx device driver modules for the Linux 4.15 kernel,
+install the Xilinx device driver modules for the current running kernel,
 even if it fails for the other kernels installed on the machine. If
 you do not plan to run on the real FPGA board but only use software or
 hardware emulation instead, it does not matter if the kernel device
@@ -297,7 +262,6 @@ that should expose some OpenCL device parameters for the FPGA board.
 git clone --branch sycl/unified/master git@github.com:triSYCL/sycl.git
 cd sycl
 SYCL_HOME=`pwd`
-OPENCL_HEADERS=/usr/include
 export XILINX_XRT=/opt/xilinx/xrt
 mkdir $SYCL_HOME/build
 cd $SYCL_HOME/build
@@ -408,6 +372,9 @@ unset XCL_EMULATION_MODE
 ./edge_detection data/input/eiffel.bmp
 ```
 and then look at the `input.bmp` and `output.bmp` images.
+
+There is another application using a webcam instead, if you have one
+on your machine.
 
 
 ## Cleaning up some buffer allocation
