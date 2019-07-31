@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# TODO: A lovely description when this is working to a reasonable level of
+# TODO: A lovely 💞 description when this is working to a reasonable level of
 # stability
 #
 # Arguments:
@@ -103,5 +103,5 @@ $XCHESSCC +P $(nproc) -p me -P $CARDANO_LIB_DIR -d -f -c \
 # binary output from the chess tools. This is the file that will be used for
 # testing for now. This will be removed once the concept of a program manager
 # for loading offloaded and wrapped binaries exists inside of ACAP++ or the fix
-# for--save-temps from upstream is pulled in.
+# for --save-temps from upstream is pulled in.
 cp "$OUTPUT_FILE_NAME" "${OUTPUT_FILE_NAME}_cp"

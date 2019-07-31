@@ -36,8 +36,13 @@ for var in "$@"
 do
   if [ $var = "-xc++" ]; then
     echo ""
-    echo "-xc++";
+    echo "chess-clang script: removed '-xc++' argument from chess-clang
+          invocation";
     echo ""
+  # Force using C++2a instead of C++11, it should be irrelevant when passing
+  # LLVM IR but it will remain for now so that if someone wishes to compile some
+  # modern C++ with xchescc for AI Engine they can do so. It also helps to show
+  # how you can manipulate the chess-clang arguments at the moment.
   elif [ $var = "-std=c++11" ]; then
     ArgsArr+=( "-std=c++2a" )
   else

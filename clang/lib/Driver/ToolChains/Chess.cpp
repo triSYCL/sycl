@@ -33,7 +33,7 @@ ChessInstallationDetector::ChessInstallationDetector(
     const llvm::opt::ArgList &Args)
     : D(D) {
     // This is the Xilinx wrapper for the real chesscc, this resides inside of
-    // Cardano's bin directory. The real chesscc resides in Cardanos:
+    // Cardano's bin directory. The real chesscc resides in Cardano's
     // /tps/lnx64/target/bin/LNa64bin/ directory
     if (llvm::ErrorOr<std::string> xchesscc = findProgramByName("xchesscc")) {
       SmallString<256> xchessccAbsolutePath;
@@ -44,9 +44,9 @@ ChessInstallationDetector::ChessInstallationDetector(
       StringRef xchessccDir = path::parent_path(xchessccAbsolutePath);
 
       if (path::filename(xchessccDir) == "bin")
-          BinPath = xchessccDir;
+        BinPath = xchessccDir;
 
-      // TODO: slightly stricter IsValid test.. check all strings aren't empty
+      // TODO: slightly stricter IsValid test, check all strings aren't empty
       IsValid = true;
     }
 }
