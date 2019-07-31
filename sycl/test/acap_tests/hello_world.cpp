@@ -43,7 +43,7 @@
 #include <iostream>
 // This is ACAP SYCL, not the Intel-triSYCL SYCL implementation. Full merging of
 // the implementations is a little too complex for the timescale we have
-#include <sycl.hpp>
+#include <SYCL/sycl.hpp>
 
 using namespace sycl::vendor::xilinx;
 
