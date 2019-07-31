@@ -6,7 +6,7 @@
 #include <string>
 
 #include <CL/sycl.hpp>
-#include "device_selectors.hpp"
+#include "../../../utilities/device_selectors.hpp"
 
 // OpenCV Includes
 #include <opencv2/opencv.hpp>
@@ -72,21 +72,22 @@ int main(int argc, char* argv[]) {
 
       for (size_t x = 1; x < width - 1; ++x) {
         for (size_t y = 1; y < height - 1; ++y) {
-          int magX = 0; magY = 0;
+          int magX = 0, magY = 0;
 
           xilinx::pipeline([&] {
-            for(size_t k = 0; k < 3; ++k) {
-              for(size_t l = 0; l < 3; ++l) {
+            for (size_t k = 0; k < 3; ++k) {
+              for (size_t l = 0; l < 3; ++l) {
                 int pIndex = (x + k - 1) + (y + l - 1) * width;
-                size_t gI = k * 3 + l;
+                auto gI = k * 3 + l;
                 magX += gX[gI] * pixel_rb[pIndex];
                 magY += gY[gI] * pixel_rb[pIndex];
               }
             }
           });
 
-          pixel_wb[x + y * width] = cl::sycl::min((cl::sycl::abs(magX) +
-                                                   cl::sycl::abs(magY)), 0xFF);
+          pixel_wb[x + y * width] = cl::sycl::min(static_cast<int>(
+                                    cl::sycl::abs(magX)+cl::sycl::abs(magY)),
+                                    0xFF);
         }
       }
     });
