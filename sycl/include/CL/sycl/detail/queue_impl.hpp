@@ -125,28 +125,26 @@ public:
   }
 
   RT::PiQueue createQueue() {
-    cl_command_queue_properties CreationFlags = 0;
+    RT::PiQueueProperties CreationFlags = 0;
 
     if (m_SupportOOO) {
-      CreationFlags = CL_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE;
+      CreationFlags = PI_QUEUE_OUT_OF_ORDER_EXEC_MODE_ENABLE;
     }
 
     if (m_PropList.has_property<property::queue::enable_profiling>()) {
-      CreationFlags |= CL_QUEUE_PROFILING_ENABLE;
+      CreationFlags |= PI_QUEUE_PROFILING_ENABLE;
     }
 
-    RT::PiResult Error = PI_SUCCESS;
     RT::PiQueue Queue;
     RT::PiContext Context = detail::getSyclObjImpl(m_Context)->getHandleRef();
     RT::PiDevice Device = detail::getSyclObjImpl(m_Device)->getHandleRef();
-
-    Error = PI_CALL_RESULT(RT::piQueueCreate(Context, Device, CreationFlags,
-                                             pi::pi_cast<pi_queue *>(&Queue)));
+    RT::PiResult Error = PI_CALL_RESULT(RT::piQueueCreate(Context, Device,
+        CreationFlags, &Queue));
 
     // If creating out-of-order queue failed and this property is not
     // supported (for example, on FPGA), it will return
     // CL_INVALID_QUEUE_PROPERTIES and will try to create in-order queue.
-    if (m_SupportOOO && Error == CL_INVALID_QUEUE_PROPERTIES) {
+    if (m_SupportOOO && Error == PI_INVALID_QUEUE_PROPERTIES) {
       m_SupportOOO = false;
       Queue = createQueue();
     } else {

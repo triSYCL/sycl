@@ -62,7 +62,7 @@ struct XOCCIRDowngrader : public ModulePass {
   /// Clang/LLVM 9.
   ///
   /// This LLVM patch primarily added byval <Type> syntax in the IR. And a new
-  /// attrbiute type, which is not to be confused with anything related to the
+  /// attribute type, which is not to be confused with anything related to the
   /// type system. It basically just states the attribute is carrying around
   /// some Type/Value information rather than string/int/enum and gives it
   /// somewhere to store it.
