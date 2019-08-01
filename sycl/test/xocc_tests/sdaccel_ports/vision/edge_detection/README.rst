@@ -23,7 +23,7 @@ Compilation
 -----------
 
 To compile this you need to setup your environment like described in the
-file `GettingStartedAlveo <https://github.com/triSYCL/sycl/blob/sycl/unified/master/sycl/doc/GettingStartedAlveo.md>`_.
+file `GettingStartedAlveo <../../../../../../sycl/doc/GettingStartedAlveo.md>`_.
 Once this is done you can compile using the following command :
 
 ```
