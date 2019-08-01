@@ -1,16 +1,16 @@
 #!/bin/bash
 # This is an extra layer of abstraction on top of the shell invocing the
-# XOCC compiler. As SPIR/LLVM-IR is a second class citizen in XOCC for the
+# SDx compiler. As SPIR/LLVM-IR is a second class citizen in SDx for the
 # moment it has some little niggling details that need worked on and the idea
 # is that this script will work around those with some aid from Clang/LLVM.
 #
-# One of the main examples is that XOCC can only compile one kernel from LLVM-BC
+# One of the main examples is that SDx can only compile one kernel from LLVM-BC
 # at a time and it requires the kernels name (also required for kernel specific
 # optimizations). This poses a problem as there can be multiple kernels in a
-# file. And when making a normal naked xocc -c command in the driver
+# file. And when making a normal naked SDx -c command in the driver
 # you won't have the neccesarry information as the command is generated before
 # the file's have even started to be compiled (Perhaps there is that I am
-# unaware of). So no kernel names and no idea how many xocc commands you'd need
+# unaware of). So no kernel names and no idea how many SDx commands you'd need
 # to generate per file (no idea how many kernels are in a file).
 #
 # This works around that by using an opt (kernelNameGen) pass that generates
@@ -20,8 +20,8 @@
 # kernel.
 #
 # Arguments:
-# $1 == xocc's SDx bin directory where the real shell invocation that invokes
-#       the xocc compiler resides
+# $1 == SDx's SDx bin directory where the real shell invocation that invokes
+#       the SDx compiler resides
 # $2 == path to the clang driver that's executing the shell script (e.g.
 #        your compiled Clang's build/bin)
 # $3 == The name of the source file without file extensions or temporary
@@ -35,13 +35,13 @@
 
 # TODO: Pass an argument through the driver to set options like XILINX_PLATFORM,
 # the environment variables are a quick workaround to swap boards.
-usage() { echo xocc_compile: error: $2 >&2; exit $1; }
+usage() { echo $0: error: $2 >&2; exit $1; }
 
 # Make this a parameter passed in from Clang at some point
 export VERBOSE=1
 
 if [[ -z "$1" ]]; then
-  usage 1 "no sdx bin directory containing xocc"
+  usage 1 "no SDx bin directory"
 fi
 
 if [[ -z "$2" ]]; then
@@ -69,17 +69,22 @@ SDX_BIN_PATH_DIR="$1"
 if [[ ! -d "$SDX_BIN_PATH_DIR" ]]; then
   usage 8 "path to SDx bin directory is not a valid directory"
 else
-  # Hardcoded path from the bin directory that xocc is stored in, works for now
-  # but a future TODO might be to allow this to be optionally specified as an
-  # ENV variable
-  XOCC_LIB_SPIR="$SDX_BIN_PATH_DIR/../lnx64/lib/libspir64-39-hls.bc"
-  if [[ ! -f "$XOCC_LIB_SPIR" ]]; then
+  # Hardcoded path from the bin directory that xocc or v++ is stored in,
+  # works for nowbut a future TODO might be to allow this to be optionally
+  # specified as an ENV variable
+  SDX_LIB_SPIR="$SDX_BIN_PATH_DIR/../lnx64/lib/libspir64-39-hls.bc"
+  if [[ ! -f "$SDX_LIB_SPIR" ]]; then
     usage 9 "could not find SDx's libspir64-39-hls.bc"
   fi
 
-  XOCC="$SDX_BIN_PATH_DIR/xocc"
-  if [[ ! -f "$XOCC" ]]; then
-    usage 10 "could not find xocc executable in $SDX_BIN_PATH_DIR"
+  SDX="$SDX_BIN_PATH_DIR/v++"
+  if [[ ! -f "$SDX" ]]; then
+    echo "[INFO] Could not find v++ executable in $SDX_BIN_PATH_DIR"
+    echo "[INFO] Try with xocc..."
+    SDX="$SDX_BIN_PATH_DIR/xocc"
+    if [[ ! -f "$SDX" ]]; then
+      usage 10 "could not find xocc or v++ in $SDX_BIN_PATH_DIR"
+    fi
   fi
 fi
 
@@ -120,9 +125,9 @@ OUTPUT_FILE_NAME="$6"
 $OPT -asfix -O3 -globaldce -inSPIRation -globaldce -kernelPropGen \
   "$INPUT_FILE_NAME" -o "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.bc"
 
-# Link our XOCC SPIR binaries in
+# Link our SDx SPIR binaries in
 $LLVM_LINK "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.bc" \
-  $XOCC_LIB_SPIR -o "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
+  $SDX_LIB_SPIR -o "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
 
 # Using the LLVM Linker will add more incompatible IR so run the downgrader in
 # a second pass afterwards, rather than once before in the first opt pass
@@ -144,8 +149,7 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   for index in "${KERNEL_NAME_ARRAY[@]}"; do
   if [[ -n "$index" ]]; then
     if [[ ! -z "$VERBOSE" ]]; then
-      echo "Invoking xocc Kernel Compilation"
-      echo "xocc: $XOCC"
+      echo "Invoking Kernel Compilation with $SDX"
       echo "--target: $XCL_EMULATION_MODE"
       echo "--platform: $XILINX_PLATFORM"
       echo "Compiling kernel: $index"
@@ -153,7 +157,7 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
       echo "Input file is: $TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
     fi
 
-    $XOCC --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM \
+    $SDX --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM \
       --save-temps -c -k "$index" -o "$TEMPORARY_DIR/$index.xo" \
       "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
       LINKER_LIST="$TEMPORARY_DIR/$index.xo $LINKER_LIST"
@@ -164,7 +168,7 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   # can compile for hw_emu with it on or if it outputs clearer diagnostics so
   # we can track down the problem (when I tested this it seems that the call
   # to log the error was possibly broken)
-  $XOCC --xp param:compiler.hlsDataflowStrictMode=off $DDR_BANK_ARGS \
+  $SDX --xp param:compiler.hlsDataflowStrictMode=off $DDR_BANK_ARGS \
     --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM  -l \
     --save-temps -o "$OUTPUT_FILE_NAME" $LINKER_LIST
 

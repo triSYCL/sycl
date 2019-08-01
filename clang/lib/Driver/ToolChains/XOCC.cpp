@@ -35,25 +35,32 @@ XOCCInstallationDetector::XOCCInstallationDetector(
   // This might only work on Linux systems.
   // Rather than just checking the environment variables you could also add an
   // optional path variable for users to use.
-  if (llvm::ErrorOr<std::string> xocc = findProgramByName("xocc")) {
-    SmallString<256> xoccsAbsolutePath;
-    fs::real_path(*xocc, xoccsAbsolutePath);
+  auto search_and_set_up_program = [&] (const char * programName) {
+    llvm::ErrorOr<std::string> program = findProgramByName(programName);
+    if (program) {
+      SmallString<256> programsAbsolutePath;
+      fs::real_path(*program, programsAbsolutePath);
 
-    BinaryPath = xoccsAbsolutePath.str();
+      BinaryPath = programsAbsolutePath.str();
 
-    StringRef xoccDir = path::parent_path(xoccsAbsolutePath);
+      StringRef programDir = path::parent_path(programsAbsolutePath);
 
-    if (path::filename(xoccDir) == "bin")
-      BinPath = xoccDir;
+      if (path::filename(programDir) == "bin")
+        BinPath = programDir;
 
-    // TODO: Check if this assumption is correct in all installations and give
-    // environment variable specifier option or an argument to the Driver
-    SDXPath = path::parent_path(xoccDir);
-    LibPath = SDXPath + "/lnx64/lib";
+      // TODO: Check if this assumption is correct in all installations and give
+      // environment variable specifier option or an argument to the Driver
+      SDXPath = path::parent_path(programDir);
+      LibPath = SDXPath + "/lnx64/lib";
 
-    // TODO: slightly stricter IsValid test.. check all strings aren't empty
-    IsValid = true;
-  }
+      // TODO: slightly stricter IsValid test... check all strings aren't empty
+      IsValid = true;
+    }
+    return program;
+  };
+
+  if (!search_and_set_up_program("v++"))
+    search_and_set_up_program("xocc");
 }
 
 ///////////////////////////////////////////////////////////////////////////////
