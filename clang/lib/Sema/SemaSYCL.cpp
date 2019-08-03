@@ -358,7 +358,8 @@ private:
         }
       }
     } else if (const auto *FPTy = dyn_cast<FunctionProtoType>(Ty)) {
-      if (FPTy->isVariadic() && SemaRef.getLangOpts().SYCLIsDevice)
+      if (FPTy->isVariadic() && (!SemaRef.getLangOpts().SYCLAllowVariadicFunc &&
+          SemaRef.getLangOpts().SYCLIsDevice))
         SemaRef.SYCLDiagIfDeviceCode(Loc.getBegin(), diag::err_sycl_restrict)
             << Sema::KernelCallVariadicFunction;
       for (const auto &ParamTy : FPTy->param_types())

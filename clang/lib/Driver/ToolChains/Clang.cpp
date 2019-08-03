@@ -3576,6 +3576,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                      options::OPT_fno_sycl_allow_virtual, false)) {
       CmdArgs.push_back("-fsycl-allow-virtual");
     }
+
+    if (Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
+                     options::OPT_fno_sycl_allow_variadic_func, false)) {
+      CmdArgs.push_back("-fsycl-allow-variadic-func");
+    }
   }
 
   // \todo Extend this to use getOffloadToolChains<Action::OFK_SYCL> and loop

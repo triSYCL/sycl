@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++11 -fsycl %s -o %t1.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clang -std=c++17 -fsycl %s -o %t1.out -lstdc++ -lOpenCL -lsycl
 // RUN: %CPU_RUN_PLACEHOLDER %t1.out
 //==------------------- smemll.cpp - Shared Memory Linked List test --------==//
 //

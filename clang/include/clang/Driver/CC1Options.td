@@ -898,6 +898,9 @@ def fno_sycl_allow_func_ptr : Flag<["-"], "fno-sycl-allow-func-ptr">;
 def fsycl_allow_virtual : Flag<["-"], "fsycl-allow-virtual">,
   HelpText<"Allow virtual functions and types in SYCL device.">;
 def fno_sycl_allow_virtual : Flag<["-"], "fno-sycl-allow-virtual">;
+def fsycl_allow_variadic_func : Flag<["-"], "fsycl-allow-variadic-func">,
+  HelpText<"Allow variadic functions in SYCL device.">;
+def fno_sycl_allow_variadic_func : Flag<["-"], "fno-sycl-allow-variadic-func">;
 
 } // let Flags = [CC1Option]
 

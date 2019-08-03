@@ -2982,6 +2982,17 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   Opts.SYCLAllowVirtual = Args.hasFlag(options::OPT_fsycl_allow_virtual,
                                        options::OPT_fno_sycl_allow_virtual,
                                        false);
+  // Variadic functions are on by default for XOCC compilation and off by default
+  // for anything else..For example you have to specify that you wish variadics
+  // off for xocc if you wish to emit diagnostics for them and you have to
+  // specify if you wish no diagnostics for other devices.
+  Opts.SYCLAllowVariadicFunc = Opts.SYCLXOCCDevice ?
+    Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
+                 options::OPT_fno_sycl_allow_variadic_func) :
+    Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
+                 options::OPT_fno_sycl_allow_variadic_func,
+                 false);
+
 
   // Set CUDA mode for OpenMP target NVPTX if specified in options
   Opts.OpenMPCUDAMode = Opts.OpenMPIsDevice && T.isNVPTX() &&
