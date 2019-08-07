@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++17 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out -lOpenCL
 
 #include <CL/sycl.hpp>
 #include <CL/sycl/detail/common.hpp>
@@ -169,7 +169,7 @@ int main() {
       s::access::address_space::global_space>>,
     s::multi_ptr<s::vec<s::cl_int, 2>,
       s::access::address_space::global_space>>::value, "");
-  
+
   static_assert(
     std::is_same<d::SelectMatchingOpenCLType_t<s::longlong>,
     s::cl_long>::value, "");

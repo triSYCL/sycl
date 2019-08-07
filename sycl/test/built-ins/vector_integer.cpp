@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++17 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out -lOpenCL
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
@@ -125,7 +125,7 @@ int main() {
     assert(r1 == 5);
     assert(r2 == 3);
   }
-  
+
   // min
   {
     s::cl_int2 r{ 0 };

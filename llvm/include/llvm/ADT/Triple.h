@@ -97,6 +97,9 @@ public:
     wasm64,         // WebAssembly with 64-bit pointers
     renderscript32, // 32-bit RenderScript
     renderscript64, // 64-bit RenderScript
+    fpga_aoco,      // Intel FPGA: unlinked object file
+    fpga_aocr,      // Intel FPGA: linked early image
+    fpga_aocx,      // Intel FPGA: linked image
     LastArchType = renderscript64
   };
   enum SubArchType {
@@ -147,6 +150,7 @@ public:
     Freescale,
     IBM,
     ImaginationTechnologies,
+    Intel,
     MipsTechnologies,
     NVIDIA,
     CSR,

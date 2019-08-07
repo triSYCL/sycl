@@ -1,7 +1,7 @@
-// RUN: %clang -std=c++17 -fsycl -fsycl-targets=spir64-unknown-linux-sycldevice -c %s -o %t.o
-// RUN: %clang -std=c++17 -fsycl -fsycl-link-targets=spir64-unknown-linux-sycldevice %t.o -o %t.spv
+// RUN: %clangxx -std=c++17 -fsycl -fsycl-targets=spir64-unknown-linux-sycldevice -c %s -o %t.o
+// RUN: %clangxx -std=c++17 -fsycl -fsycl-link-targets=spir64-unknown-linux-sycldevice %t.o -o %t.spv
 // RUN: llvm-spirv -r %t.spv -o %t.bc
-// RUN: %clang -std=c++17 -fsycl -fsycl-add-targets=binary:%t.bc %t.o -o %t.out -lOpenCL -lsycl -lstdc++
+// RUN: %clangxx -std=c++17 -fsycl -fsycl-add-targets=binary:%t.bc %t.o -o %t.out -lOpenCL
 //
 // Only CPU supports LLVM IR bitcode as a binary
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
@@ -39,7 +39,7 @@ void simple_vadd(const std::array<T, N>& VA, const std::array<T, N>& VB,
         }
       }
     });
-  
+
   cl::sycl::range<1> numOfItems{N};
   cl::sycl::buffer<T, 1> bufferA(VA.data(), numOfItems);
   cl::sycl::buffer<T, 1> bufferB(VB.data(), numOfItems);

@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++17 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out -lOpenCL
 // RUN: %t.out
 //==--------------- nd_range.cpp - SYCL nd_range test ----------------------==//
 //

@@ -71,7 +71,7 @@ if( NOT OpenCL_LIBRARIES )
     BINARY_DIR        "${CMAKE_CURRENT_BINARY_DIR}/icd_build"
     CONFIGURE_COMMAND ${CMAKE_COMMAND} "${CMAKE_CURRENT_BINARY_DIR}/OpenCL/icd" -DCMAKE_INSTALL_PREFIX=${LLVM_BINARY_DIR}
     BUILD_COMMAND     make C_INCLUDE_PATH=${CMAKE_CURRENT_BINARY_DIR}/OpenCL/inc
-    INSTALL_COMMAND   make install 
+    INSTALL_COMMAND   make install
     STEP_TARGETS      configure,build,install
     DEPENDS           ocl-headers
   )
@@ -156,13 +156,17 @@ add_custom_target( sycl-toolchain
           clang-offload-bundler
           llc
           llvm-as
+          llvm-ar
           llvm-dis
+          llvm-no-spir-kernel
           llvm-spirv
           llvm-link
           sycl-xocc
+          llvm-objcopy
           opt
   COMMENT "Building SYCL compiler toolchain..."
 )
 
 add_subdirectory( test )
+add_subdirectory( unittests )
 add_subdirectory( tools )

@@ -1,6 +1,6 @@
-// RUN: %clang -std=c++17 %s -o %t1.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clangxx -std=c++17 %s -o %t1.out -lOpenCL -lsycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t1.out
-// RUN: %clang -std=c++17 -fsycl %s -o %t2.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t2.out -lOpenCL
 // RUN: env SYCL_DEVICE_TYPE=HOST %t2.out
 // RUN: %CPU_RUN_PLACEHOLDER %t2.out
 // RUN: %GPU_RUN_PLACEHOLDER %t2.out
@@ -634,6 +634,13 @@ int main() {
       for (int i = 0; i < 10; i++)
         assert(data1[i] == 0);
     }
+  }
+
+  {
+    int data[10];
+    void *voidPtr = (void *)data;
+    buffer<int, 1> b(range<1>(10));
+    b.set_final_data(voidPtr);
   }
 
   // TODO tests with mutex property

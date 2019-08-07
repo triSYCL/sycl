@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++17 -fsycl %s -o %t.run -lOpenCL -lsycl -lstdc++
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t.run -lOpenCL
 // RUN: %GPU_RUN_PLACEHOLDER %t.run
 // RUN: %CPU_RUN_PLACEHOLDER %t.run
 // RUN: %ACC_RUN_PLACEHOLDER %t.run
@@ -17,7 +17,7 @@
 using namespace cl::sycl;
 
 // Define the number of work items to enqueue.
-const int nElems = 1024*1024u;
+const int nElems = 128*1024u;
 const int workGroupSize = 16;
 
 // Check the result is correct.

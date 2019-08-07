@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++17 -fsycl %s -o %t1.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t1.out -lOpenCL
 // RUN: %CPU_RUN_PLACEHOLDER %t1.out
 //==---- allocator_vector.cpp - Allocator Container test -------------------==//
 //
@@ -24,7 +24,8 @@ int main() {
 
   usm_allocator<int, usm::alloc::host> alloc(&ctxt, &dev);
 
-  std::vector<int, decltype(alloc)> vec(N, alloc);
+  std::vector<int, decltype(alloc)> vec(alloc);
+  vec.reserve(N);
 
   for (int i = 0; i < N; i++) {
     vec[i] = i;

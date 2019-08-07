@@ -220,6 +220,24 @@ void *MemoryManager::allocateMemImage(
                              Format);
 }
 
+void *MemoryManager::createSubBuffer(RT::PiMem ParentMem, size_t ElemSize,
+                                     id<3> Offset, range<3> Range,
+                                     std::vector<RT::PiEvent> DepEvents,
+                                     RT::PiEvent &OutEvent) {
+  waitForEvents(DepEvents);
+  OutEvent = nullptr;
+
+  RT::PiResult Error = PI_SUCCESS;
+  // TODO replace with pi_buffer_region
+  cl_buffer_region Region{Offset[0] * ElemSize, Range[0] * ElemSize};
+  RT::PiMem NewMem;
+  PI_CALL((NewMem = RT::piSubBufCreate(ParentMem, PI_MEM_FLAGS_ACCESS_RW,
+                                       PI_BUFFER_CREATE_TYPE_REGION, &Region,
+                                       &Error),
+           Error));
+  return NewMem;
+}
+
 void copyH2D(SYCLMemObjI *SYCLMemObj, char *SrcMem, QueueImplPtr SrcQueue,
              unsigned int DimSrc, sycl::range<3> SrcSize,
              sycl::range<3> SrcAccessRange, sycl::id<3> SrcOffset,
@@ -466,8 +484,8 @@ void MemoryManager::fill(SYCLMemObjI *SYCLMemObj, void *Mem, QueueImplPtr Queue,
     if (Dim == 1) {
       PI_CALL(RT::piEnqueueMemBufferFill(
           Queue->getHandleRef(), pi::pi_cast<RT::PiMem>(Mem), Pattern,
-          PatternSize, Offset[0], Range[0] * ElementSize, DepEvents.size(),
-          &DepEvents[0], &OutEvent));
+          PatternSize, Offset[0] * ElementSize, Range[0] * ElementSize,
+          DepEvents.size(), &DepEvents[0], &OutEvent));
       return;
     }
     assert(!"Not supported configuration of fill requested");

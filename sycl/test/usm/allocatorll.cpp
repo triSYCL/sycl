@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++17 -fsycl %s -o %t1.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t1.out -lOpenCL
 // RUN: %CPU_RUN_PLACEHOLDER %t1.out
 //==---- allocatorll.cpp - Device Memory Linked List Allocator test --------==//
 //
@@ -32,7 +32,7 @@ int main() {
   Node *d_head = nullptr;
   Node *d_cur = nullptr;
   Node h_cur;
-  
+
   d_head = alloc.allocate(1);
   d_cur = d_head;
 

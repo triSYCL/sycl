@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++17 -fsycl %s -o %t1.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t1.out -lOpenCL
 // RUN: %CPU_RUN_PLACEHOLDER %t1.out
 //==---- smemllaligned.cpp - Aligned Shared Memory Linked List test --------==//
 //

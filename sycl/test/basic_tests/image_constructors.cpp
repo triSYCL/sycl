@@ -1,6 +1,6 @@
-// RUN: %clang -std=c++17 %s -o %t1.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clangxx -std=c++17 %s -o %t1.out -lOpenCL -lsycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t1.out
-// RUN: %clang -std=c++17 -fsycl %s -o %t2.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t2.out -lOpenCL
 // RUN: env SYCL_DEVICE_TYPE=HOST %t2.out
 // RUN: %CPU_RUN_PLACEHOLDER %t2.out
 // RUN: %GPU_RUN_PLACEHOLDER %t2.out
@@ -356,15 +356,15 @@ int main() {
   for (int i = 0; i < 48; i++)
     imageHostPtr[i] = i; // Maximum number of elements.
 
-  // Ranges 
+  // Ranges
   cl::sycl::range<1> r1(3);
   cl::sycl::range<2> r2(3, 2);
   cl::sycl::range<3> r3(3, 2, 4);
-  
+
   // Pitches
   cl::sycl::range<1> pitch2(6); // range is 3; elementSize = 2.
   cl::sycl::range<2> pitch3(6, 12); // range is 3,2; elementSize = 2.
-  
+
   // Constructors without Pitch
   test_constructors<1>(r1, imageHostPtr);
   test_constructors<2>(r2, imageHostPtr);

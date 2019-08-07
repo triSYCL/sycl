@@ -1,8 +1,10 @@
-// RUN: %clang -std=c++17 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out -lOpenCL
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
+// RUN: %clangxx -fsycl %s -o %t.ext.out -lOpenCL -fsycl-unnamed-lambda
+// RUN: %CPU_RUN_PLACEHOLDER %t.ext.out
 
 //==-- kernel_name_class.cpp - SYCL kernel naming variants test ------------==//
 //

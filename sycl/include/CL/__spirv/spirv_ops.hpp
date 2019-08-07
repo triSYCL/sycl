@@ -13,6 +13,20 @@
 #include <type_traits>
 
 #ifdef __SYCL_DEVICE_ONLY__
+
+template <typename ImageT, typename CoordT, typename ValT>
+extern void __spirv_ImageWrite(ImageT, CoordT, ValT);
+
+template <class ReTTT, typename ImageT, typename TempArgT>
+extern ReTTT __spirv_ImageRead(ImageT, TempArgT);
+
+template <typename ImageT, typename SampledType>
+extern SampledType __spirv_SampledImage(ImageT, __ocl_sampler_t);
+
+template <typename SampledType, typename TempRetT, typename TempArgT>
+extern TempRetT __spirv_ImageSampleExplicitLod(SampledType, TempArgT, int,
+                                               float);
+
 template <typename dataT>
 extern __ocl_event_t
 __spirv_GroupAsyncCopy(__spv::Scope Execution, __attribute__((ocl_local)) dataT *Dest,
@@ -190,13 +204,13 @@ template <typename dataT>
 extern int32_t __spirv_WritePipe(WPipeTy<dataT> Pipe, dataT *Data,
                                  int32_t Size, int32_t Alignment) noexcept;
 template <typename dataT>
-extern int32_t __spirv_ReadPipeBlockingINTEL(RPipeTy<dataT> Pipe, dataT *Data,
-                                             int32_t Size,
-                                             int32_t Alignment) noexcept;
+extern void __spirv_ReadPipeBlockingINTEL(RPipeTy<dataT> Pipe, dataT *Data,
+                                          int32_t Size,
+                                          int32_t Alignment) noexcept;
 template <typename dataT>
-extern int32_t __spirv_WritePipeBlockingINTEL(WPipeTy<dataT> Pipe, dataT *Data,
-                                              int32_t Size,
-                                              int32_t Alignment) noexcept;
+extern void __spirv_WritePipeBlockingINTEL(WPipeTy<dataT> Pipe, dataT *Data,
+                                           int32_t Size,
+                                           int32_t Alignment) noexcept;
 template <typename dataT>
 extern RPipeTy<dataT> __spirv_CreatePipeFromPipeStorage_read(
     const ConstantPipeStorage *Storage) noexcept;
