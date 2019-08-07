@@ -519,6 +519,7 @@ public:
 
   bool isMacCatalystEnvironment() const {
     return getEnvironment() == Triple::MacABI;
+  }
 
   bool isXilinxAIE() const {
     return getArch() == Triple::aie32
