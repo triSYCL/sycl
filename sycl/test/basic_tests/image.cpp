@@ -1,4 +1,4 @@
-// RUN: %clangxx -fsycl %s -o %t.out -lOpenCL
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out -lOpenCL
 // RUNx: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUNx: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out

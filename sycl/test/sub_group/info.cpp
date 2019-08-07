@@ -20,22 +20,6 @@ int main() {
   queue Queue;
   device Device = Queue.get_device();
 
-<<<<<<< HEAD
-    /* Basic sub-group functionality is supported as part of cl_khr_subgrou
-     * extension or as core OpenCL 2.1 feature. */
-    if (!core_sg_supported(Device)) {
-      std::cout << "Skipping test\n";
-      return 0;
-    }
-    try {
-      size_t max_sg_num = get_sg_size(Device);
-      size_t max_wg_size = Device.get_info<info::device::max_work_group_size>();
-      program Prog(Queue.get_context());
-      /* TODO: replace with pure SYCL code when fixed problem with consumption
-       * kernels defined using program objects on GPU device
-      Prog.build_with_kernel_type<kernel_sg>();
-      kernel Kernel = Prog.get_kernel<kernel_sg>();
-=======
   /* Basic sub-group functionality is supported as part of cl_khr_subgroups
    * extension or as core OpenCL 2.1 feature. */
   if (!core_sg_supported(Device)) {
@@ -49,7 +33,6 @@ int main() {
    * extention is supported by device*/
   if (Device.has_extension("cl_intel_required_subgroup_size"))
     Device.get_info<info::device::sub_group_sizes>();
->>>>>>> ecedb434dc40104b01b4608c870f4f78e6d97b5f
 
   try {
     size_t max_sg_num = get_sg_size(Device);

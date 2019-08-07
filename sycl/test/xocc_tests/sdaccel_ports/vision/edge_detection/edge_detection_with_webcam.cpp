@@ -1,3 +1,5 @@
+// RUN: true
+
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>

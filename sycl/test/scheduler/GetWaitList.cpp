@@ -1,4 +1,4 @@
-// RUN: %clangxx -fsycl %s -o %t.out -lOpenCL
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out -lOpenCL
 // RUN: %t.out
 //==------------------- GetWaitList.cpp ----------------------------==//
 //
