@@ -92,7 +92,7 @@ export PATH=$DRIVER_PATH_DIR/chesswrapper:$PATH
 # -O3 causes over optimization with a simple hello_world.cpp and we end up
 # with a trap...
 # Run Opt pass to convert our IR into something the chess toolchain can support
-$OPT -S -ChessMassage "$INPUT_FILE_NAME" \
+$OPT -S -O3 -instnamer -xoccIRDowngrader -ChessMassage "$INPUT_FILE_NAME" \
   -o "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
 
 $XCHESSCC +P $(nproc) -p me -P $CARDANO_LIB_DIR -d -f -c \

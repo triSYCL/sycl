@@ -3075,7 +3075,7 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   // for anything else..For example you have to specify that you wish variadics
   // off for xocc if you wish to emit diagnostics for them and you have to
   // specify if you wish no diagnostics for other devices.
-  Opts.SYCLAllowVariadicFunc = Opts.SYCLXOCCDevice ?
+  Opts.SYCLAllowVariadicFunc = (Opts.SYCLXOCCDevice || T.isXilinxAIE()) ?
     Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
                  options::OPT_fno_sycl_allow_variadic_func) :
     Args.hasFlag(options::OPT_fsycl_allow_variadic_func,

@@ -231,6 +231,7 @@ void CodeGenModule::createSYCLRuntime() {
   case llvm::Triple::spir64:
   case llvm::Triple::fpga32:
   case llvm::Triple::fpga64:
+  case llvm::Triple::aie32:
     SYCLRuntime.reset(new CGSYCLRuntime(*this));
     break;
   default:
