@@ -760,6 +760,24 @@ static CompoundStmt *CreateOpenCLKernelBody(Sema &S,
     llvm::SmallVector<Expr *, 16> InitExprs;
     InitializedEntity VarEntity =
         InitializedEntity::InitializeVariable(KernelObjClone);
+    // Use Default Initialization because passing a million arguments for each
+    // functor is a little too complex for now.
+    // The base class aggergate initializaiton/code gen is done before Fields
+    // which is why this is precedes it.
+    for (const auto Base : LC->bases()) {
+      // Parent should probably point to whatever this base classes parent is,
+      // I know it has a parent i.e. tile_base so it should probably be that..
+      InitializedEntity Entity =
+          InitializedEntity::InitializeBase(S.Context, &Base,
+            /*IsInheritedVirtualBase*/false/*,Parent=nullptr*/);
+
+      InitializationKind InitKind =
+          InitializationKind::CreateDefault(SourceLocation());
+      InitializationSequence InitSeq(S, Entity, InitKind, None);
+      ExprResult BaseInit = InitSeq.Perform(S, Entity, InitKind, None);
+      InitExprs.push_back(BaseInit.get());
+    }
+
     for (auto Field : LC->fields()) {
       // Creates Expression for special SYCL object: accessor or sampler.
       // All special SYCL objects must have __init method, here we use it to
