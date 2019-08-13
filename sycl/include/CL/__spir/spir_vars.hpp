@@ -25,11 +25,13 @@ size_t __spir_ocl_get_global_id(uint dimindx);
 size_t __spir_ocl_get_local_id(uint dimindx);
 size_t __spir_ocl_get_global_offset(uint dimindx);
 size_t __spir_ocl_get_group_id(uint dimindx);
+size_t __spir_ocl_get_num_groups(uint dimindx);
 
 enum class SYCLBuiltinTypes {
    SYCLBuiltinGlobalSize,
    SYCLBuiltinGlobalInvocationId,
    SYCLBuiltinWorkgroupSize,
+   SYCLBuiltinNumWorkgroups,
    SYCLBuiltinLocalInvocationId,
    SYCLBuiltinWorkgroupId,
    SYCLBuiltinGlobalOffset
@@ -51,6 +53,9 @@ constexpr size_t MapTo(SYCLBuiltinTypes builtin, int ID) {
     break;
     case SYCLBuiltinTypes::SYCLBuiltinWorkgroupSize:
       return __spir_ocl_get_local_size(ID);
+    break;
+    case SYCLBuiltinTypes::SYCLBuiltinNumWorkgroups:
+      return __spir_ocl_get_num_groups(ID);
     break;
     case SYCLBuiltinTypes::SYCLBuiltinLocalInvocationId:
       return __spir_ocl_get_local_id(ID);
@@ -74,6 +79,7 @@ namespace __spir {
 DEFINE_SYCL_SPIR_CONVERTER(GlobalSize);
 DEFINE_SYCL_SPIR_CONVERTER(GlobalInvocationId)
 DEFINE_SYCL_SPIR_CONVERTER(WorkgroupSize)
+DEFINE_SYCL_SPIR_CONVERTER(NumWorkgroups)
 DEFINE_SYCL_SPIR_CONVERTER(LocalInvocationId)
 DEFINE_SYCL_SPIR_CONVERTER(WorkgroupId)
 DEFINE_SYCL_SPIR_CONVERTER(GlobalOffset)
@@ -85,12 +91,12 @@ DEFINE_SYCL_SPIR_CONVERTER(GlobalOffset)
 // SPIRV intrinsics/builtins that we currently don't map for yet (unsure if
 // they have equivalent SPIR or HLS mappings).
 // TODO: Look into these to see if we have equivalents
-extern "C" const __constant uint32_t __spirv_BuiltInSubgroupSize;
-extern "C" const __constant uint32_t __spirv_BuiltInSubgroupMaxSize;
-extern "C" const __constant uint32_t __spirv_BuiltInNumSubgroups;
-extern "C" const __constant uint32_t __spirv_BuiltInNumEnqueuedSubgroups;
-extern "C" const __constant uint32_t __spirv_BuiltInSubgroupId;
-extern "C" const __constant uint32_t __spirv_BuiltInSubgroupLocalInvocationId;
+extern "C" const __attribute__((ocl_constant)) uint32_t __spirv_BuiltInSubgroupSize;
+extern "C" const __attribute__((ocl_constant)) uint32_t __spirv_BuiltInSubgroupMaxSize;
+extern "C" const __attribute__((ocl_constant)) uint32_t __spirv_BuiltInNumSubgroups;
+extern "C" const __attribute__((ocl_constant)) uint32_t __spirv_BuiltInNumEnqueuedSubgroups;
+extern "C" const __attribute__((ocl_constant)) uint32_t __spirv_BuiltInSubgroupId;
+extern "C" const __attribute__((ocl_constant)) uint32_t __spirv_BuiltInSubgroupLocalInvocationId;
 
 #define DEFINE_INIT_SIZES(POSTFIX)                                             \
                                                                                \
@@ -119,6 +125,7 @@ namespace __spir {
 DEFINE_INIT_SIZES(GlobalSize);
 DEFINE_INIT_SIZES(GlobalInvocationId)
 DEFINE_INIT_SIZES(WorkgroupSize)
+DEFINE_INIT_SIZES(NumWorkgroups)
 DEFINE_INIT_SIZES(LocalInvocationId)
 DEFINE_INIT_SIZES(WorkgroupId)
 DEFINE_INIT_SIZES(GlobalOffset)
