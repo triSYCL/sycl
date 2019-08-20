@@ -3059,11 +3059,15 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   }
 
   // SYCLXOCCDevice forces things like:
-  // 1) The InitPreprocessor to define some Xilinx related macros which force
-  //    alternate paths in the SYCL runtime
-  // 2) The assembler stage of clang to emit llvm ir (-emit-llvm) rather than
-  //     assembly (-S)
+  //  1) The InitPreprocessor to define some Xilinx related macros which force
+  //     alternate paths in the SYCL runtime
   Opts.SYCLXOCCDevice = Args.hasArg(options::OPT_fsycl_xocc);
+  // SYCLAIEDevice forces things like (doesn't require a flag as it currently
+  //  imposes no modifications to the host compilation like XOCC, which requires
+  //  the host compilation to have certain defines enabled):
+  //    1) SemaSYCL to output a Tile Main function as an entry point that we can
+  //       link to the kernel
+  Opts.SYCLAIEDevice = T.isXilinxAIE();
   Opts.SYCLIsDevice   = Args.hasArg(options::OPT_fsycl_is_device);
   Opts.SYCLIsHost   = Args.hasArg(options::OPT_fsycl_is_host);
   Opts.SYCLAllowFuncPtr = Args.hasFlag(options::OPT_fsycl_allow_func_ptr,
