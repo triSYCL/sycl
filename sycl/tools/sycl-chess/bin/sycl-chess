@@ -87,7 +87,7 @@ fi
 # chesswrapper folder so we don't have to add the bin to the path. Doing that
 # may run the risk of breaking chess tools in weird ways (e.g. finding the
 # incorrect assembler).
-export PATH=$DRIVER_PATH_DIR/chesswrapper:$PATH
+export PATH=$DRIVER_PATH_DIR/chesswrappers:$PATH
 
 # -O3 causes over optimization with a simple hello_world.cpp and we end up
 # with a trap...
@@ -126,6 +126,7 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
       -o "$TEMPORARY_DIR/${index}.main.o" "$TEMPORARY_DIR/${index}.cpp"
 
     $XCHESSCC +P $(nproc) -p me -P $CARDANO_LIB_DIR -d -f \
+      +l$DRIVER_PATH_DIR/chesswrappers/linker_script.bcf \
       -o "$TEMPORARY_DIR/${index}.elf.o" \
       "$TEMPORARY_DIR/${index}.main.o" "$OUTPUT_FILE_NAME"
     fi

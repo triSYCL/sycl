@@ -1,0 +1,32 @@
+// ME Tile has access to 128 KBs of memory (32kbs is its own), partitioned into
+// 4 32 kb (bytes) blocks this can also be partitioned eveen further into 8 for
+// even/odd banks of 16kb
+//
+// The max program size is 16kbs (so the AIE elf binary cannot be larger)
+//
+// Addresses in Hex:
+// 0x00020000 – 0x00027FFF = 32 kbs of memory, South Memory
+// 0x00028000 – 0x0002FFFF = 32 kbs of memory, West Memory
+// 0x00030000 – 0x00037FFF = 32 kbs of memory, North Memory
+// 0x00038000 – 0x0003FFFF = 32 kbs of memory, East Memory
+//
+// Decimal Conversion:
+// 131072 - 163839 = 32767 bytes of memory, South Memory
+// 163840 – 196607 = 32767 bytes of memory, West Memory
+// 196608 – 229375 = 32767 bytes of memory, North Memory
+// 229376 – 262143 = 32767 bytes of memory, East Memory
+  _reserved DMb 0x0 0x20000 // memory reserved for the program, seems a little
+                            // larger than 16kb
+
+  _entry_point _main_init
+  _symbol      _main _after _main_init
+  _symbol      _main_init 0
+  _stack DM_stack 0x30400  0x400 //stack for core
+
+  _reserved DMb 0x20000 0x8000 // reserving 32kbs of south memory
+  _reserved DMb 0x28000 0x8000 // reserving 32kbs of west memory
+  //_reserved DMb 0x30000 0x8000 // north
+  _reserved DMb 0x30800 0x7800 // starts at 198656, 2047 bytes unreserved for north?
+  _reserved DMb 0x38000 0x8000 // east
+  _reserved DMb 0x40000 0xc0000 // And everything else the core can't see
+
