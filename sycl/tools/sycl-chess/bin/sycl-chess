@@ -129,6 +129,11 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
       +l$DRIVER_PATH_DIR/chesswrappers/linker_script.bcf \
       -o "$TEMPORARY_DIR/${index}.elf.o" \
       "$TEMPORARY_DIR/${index}.main.o" "$OUTPUT_FILE_NAME"
+
+    # We only use 1 of the compiled elfs (the final one) at the moment while we
+    # work on the offloading model, by sideaffect the kernel is homogeneous and
+    # won't have any compile time variation via templates or constexpr
+    cp "$TEMPORARY_DIR/${index}.elf.o" "$OUTPUT_FILE_NAME"
     fi
   done
 fi
