@@ -1090,7 +1090,7 @@ static void buildArgTys(ASTContext &Context, CXXRecordDecl *KernelObj,
 //    ::trisycl::vendor::xilinx::acap::aie::layout::size<2, 2>,
 //      ::prog, ::trisycl::vendor::xilinx::acap::aie::memory>, 1, 1>
 // ->
-// progtrisyclvendorxilinxacapaiearraytrisyclvendorxilinxacapaielayoutsize22...
+// progtrisyclvendorxilinxacapaiearraytrisyclvendorxilinxacapaielayoutsize2_2_...
 //
 // TODO Come up with a better naming convention, the problem is it needs to be:
 // 1) a) An unmangled function name so it can link to the main file
@@ -1117,8 +1117,13 @@ static std::string AIENameGen(std::string S) {
   for (auto Pos = S.find(S3); Pos != StringRef::npos; Pos = S.find(S3, Pos))
     S.erase(Pos, sizeof(S3) - 1);
 
+  // Simplest way to make sure AIE tile number naming isn't off in cases like
+  // tile positions of 11, 1 vs 1, 11 when flatening the name is to replace all
+  // commas by an _ so we get 1_11, 11_1. Currently this will add _ for any
+  // comma making the name a little longer than neccessary but it's easy to
+  // fix this if it poses problems.
   for (auto Pos = S.find(S4); Pos != StringRef::npos; Pos = S.find(S4, Pos))
-    S.erase(Pos, sizeof(S4) - 1);
+    S.replace(Pos, sizeof(S4) - 1, "_");
 
   for (auto Pos = S.find(S5); Pos != StringRef::npos; Pos = S.find(S5, Pos))
     S.erase(Pos, sizeof(S5) - 1);
