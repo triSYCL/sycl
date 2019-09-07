@@ -7,3 +7,5 @@ add_llvm_library(LLVMXOCCIRDowngrader
   DEPENDS
   intrinsics_gen
 )
+
+target_link_libraries(LLVMXOCCIRDowngrader LLVMCore LLVMSupport)
