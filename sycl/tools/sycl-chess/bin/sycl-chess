@@ -44,40 +44,40 @@ if [[ -z "$6" ]]; then
 fi
 
 # Setup Cardano related env variables
-CARDANO_BIN_PATH_DIR="$1"
+export CARDANO_BIN_PATH_DIR="$1"
 if [[ ! -d "$CARDANO_BIN_PATH_DIR" ]]; then
   usage 7 "path to Cardano bin directory is not a valid directory"
 else
-  XCHESSCC="$CARDANO_BIN_PATH_DIR/xchesscc"
+  export XCHESSCC="$CARDANO_BIN_PATH_DIR/xchesscc"
   if [[ ! -f "$XCHESSCC" ]]; then
     usage 8 "could not find Cardanos xchesscc in $CARDANO_BIN_PATH_DIR"
   fi
 
-  CARDANO_LIB_DIR="$CARDANO_BIN_PATH_DIR/../data/cervino/lib/"
+  export CARDANO_LIB_DIR="$CARDANO_BIN_PATH_DIR/../data/cervino/lib/"
   if [[ ! -d "$CARDANO_LIB_DIR" ]]; then
     usage 9 "cardano lib directory not found"
   fi
 fi
 
 # Setup Clang/LLVM related env variables
-DRIVER_PATH_DIR="$2"
+export DRIVER_PATH_DIR="$2"
 if [[ ! -d "$DRIVER_PATH_DIR" ]]; then
   usage 10 "path to driver directory is not a valid directory"
 else
-  OPT="$DRIVER_PATH_DIR/opt"
+  export OPT="$DRIVER_PATH_DIR/opt"
   if [[ ! -f "$OPT" ]]; then
     usage 11 "no llvm opt executable found in $DRIVER_PATH_DIR"
   fi
 fi
 
 # excluding file extension e.g. .cpp
-SOURCE_FILE_NAME="$3"
+export SOURCE_FILE_NAME="$3"
 # input file name including extensions and path
-INPUT_FILE_NAME="$4"
+export INPUT_FILE_NAME="$4"
 # Should point to whatever Clang has decided is the temporary directory
-TEMPORARY_DIR="$5"
+export TEMPORARY_DIR="$5"
 # output file name including extensions and path
-OUTPUT_FILE_NAME="$6"
+export OUTPUT_FILE_NAME="$6"
 
 if [[ ! -d "$TEMPORARY_DIR" ]]; then
   usage 12 "the path given for the temporary directory is an invalid directory"
@@ -107,43 +107,71 @@ $XCHESSCC +P $(nproc) -p me -P $CARDANO_LIB_DIR -d -f -c \
   -o "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
   "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
 
-# FIXME/TODO: A Little bit of a problem right now, as the driver and script
-# expects only a single output to offload rather than several distinct tiles..
-# May require some rewiring of the driver phases for AIE to bundle properly..
-# The elf binary that's offloaded just now is an elf binary with no main but all
-# of the kernels.
+# A function we can fork into child processes to achieve some form of
+# parallelism at a higher level than chess itself provides with it's own
+# paralleism via +P.
+# This is the reason everything is lazily exported as we invoke this via xargs
+# and wish to import/inject this scripts environment into its subprocess
+# invocations
+#
+# This is the biggest slowdown in the compilation pipeline right now.
+# TODO: The next simplest speedup is to swap to Peano which is several times
+# quicker after that if it's still slow or if we do not wish to/cannot swap to
+# Peano eventually working out duplicate kernels and removing them is the next
+# step. Even if templated most sane kernel code is unlikely to have 400
+# variations, if it does then may the implementer fall apon the sword of their
+# own making!
+chess_kernel_compile () {
+    $XCHESSCC -p me -P $CARDANO_LIB_DIR -d -f -c \
+      -o "$TEMPORARY_DIR/$0.main.o" "$TEMPORARY_DIR/$0.cpp"
 
-# Compile and link all Tile : Kernel mains, currently should be 1 main per tile
-# and hopefully LTO will optimize out the unrequired kernels
+    $XCHESSCC -p me -P $CARDANO_LIB_DIR -d -f \
+      +l$DRIVER_PATH_DIR/chesswrappers/linker_script.bcf \
+      -o "$TEMPORARY_DIR/$0.elf.o" \
+      "$TEMPORARY_DIR/$0.main.o" \
+      "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o"
+}
+
+# export the bash function so xargs can use it
+export -f chess_kernel_compile
+
+# For the number of arguments/items in KERNEL_NAME_ARRAY invoke xargs for each
+# only consume 1 argument per invocation which is passed in as the $0'th
+# variable and invoke it at maximum for the number of available cores on the
+# system
+if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
+  echo "${KERNEL_NAME_ARRAY[@]}" | xargs -n1 -P$(nproc) \
+    bash -c 'chess_kernel_compile "$@"'
+fi
+
+# Wait on all our spawned compilations to complete
+wait
+
+# Cat all metadata + images to file, essentially defining our own temporary
+# packing format, perhaps not robust but does the job for just now
+# Not parallelized in the compilation function as we want the file to be
+# sequential or at least in the basic order defined in the loop. Don't want
+# data races making the file format non-deterministic.
 if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   LINKER_LIST=""
   for index in "${KERNEL_NAME_ARRAY[@]}"; do
     if [[ -n "$index" ]]; then
-      echo "Linking Kernel: $index"
-      echo "Tile Main File: $TEMPORARY_DIR/${index}.cpp"
-
-    $XCHESSCC +P $(nproc) -p me -P $CARDANO_LIB_DIR -d -f -c \
-      -o "$TEMPORARY_DIR/${index}.main.o" "$TEMPORARY_DIR/${index}.cpp"
-
-    $XCHESSCC +P $(nproc) -p me -P $CARDANO_LIB_DIR -d -f \
-      +l$DRIVER_PATH_DIR/chesswrappers/linker_script.bcf \
-      -o "$TEMPORARY_DIR/${index}.elf.o" \
-      "$TEMPORARY_DIR/${index}.main.o" \
-      "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o"
-
-
-    # Cat all metadata + images to file, essentially defining our own temporary
-    # packing format.
-
-    # Name of elf function that we will synch with integration header to
-    # retrieve our binary, will be packaged as part of the image data.
-    # Also used by wrapper to identify the image to package after its loaded
-    # into memory
-    echo "${index}" >> "$OUTPUT_FILE_NAME"
-    # Size of file in bytes
-    echo "`ls -lrt "$TEMPORARY_DIR/${index}.elf.o" | nawk '{print $5}'`" \
-      >> "$OUTPUT_FILE_NAME"
-    cat $TEMPORARY_DIR/${index}.elf.o >> "$OUTPUT_FILE_NAME"
+      # Name of elf kernel function that we will synch with integration header to
+      # retrieve our binary, will be packaged as part of the image data.
+      # Also used by wrapper to identify the image to package after its loaded
+      # into memory
+      echo "${index}" >> "$OUTPUT_FILE_NAME"
+      # Size of file in bytes
+      echo "`ls -lrt "$TEMPORARY_DIR/${index}.elf.o" | nawk '{print $5}'`" \
+        >> "$OUTPUT_FILE_NAME"
+      cat $TEMPORARY_DIR/${index}.elf.o >> "$OUTPUT_FILE_NAME"
     fi
   done
 fi
+
+cp "$OUTPUT_FILE_NAME"  "$TEMPORARY_DIR/aie_images"
+
+# Delete all temporary files generated by Chess and other tools, the clang
+# compiler doesn't know what we generate in here so it has to be manually
+# tracked and removed
+
