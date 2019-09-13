@@ -104,7 +104,7 @@ source "$TEMPORARY_DIR/KernelProperties_${SOURCE_FILE_NAME}.bash"
 
 # AI Engine .o file containing all kernels for the module
 $XCHESSCC +P $(nproc) -p me -P $CARDANO_LIB_DIR -d -f -c \
-  -o "$OUTPUT_FILE_NAME" \
+  -o "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
   "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
 
 # FIXME/TODO: A Little bit of a problem right now, as the driver and script
@@ -128,12 +128,22 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
     $XCHESSCC +P $(nproc) -p me -P $CARDANO_LIB_DIR -d -f \
       +l$DRIVER_PATH_DIR/chesswrappers/linker_script.bcf \
       -o "$TEMPORARY_DIR/${index}.elf.o" \
-      "$TEMPORARY_DIR/${index}.main.o" "$OUTPUT_FILE_NAME"
+      "$TEMPORARY_DIR/${index}.main.o" \
+      "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o"
 
-    # We only use 1 of the compiled elfs (the final one) at the moment while we
-    # work on the offloading model, by sideaffect the kernel is homogeneous and
-    # won't have any compile time variation via templates or constexpr
-    cp "$TEMPORARY_DIR/${index}.elf.o" "$OUTPUT_FILE_NAME"
+
+    # Cat all metadata + images to file, essentially defining our own temporary
+    # packing format.
+
+    # Name of elf function that we will synch with integration header to
+    # retrieve our binary, will be packaged as part of the image data.
+    # Also used by wrapper to identify the image to package after its loaded
+    # into memory
+    echo "${index}" >> "$OUTPUT_FILE_NAME"
+    # Size of file in bytes
+    echo "`ls -lrt "$TEMPORARY_DIR/${index}.elf.o" | nawk '{print $5}'`" \
+      >> "$OUTPUT_FILE_NAME"
+    cat $TEMPORARY_DIR/${index}.elf.o >> "$OUTPUT_FILE_NAME"
     fi
   done
 fi
