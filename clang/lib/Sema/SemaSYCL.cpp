@@ -1177,13 +1177,17 @@ static std::string RemoveGlobalFromType(std::string S) {
 // emit the files at the end of the module
 // TODO Also clean it up in general, break it into reuseable lambdas etc. a lot
 // of repitiion/readabillity issues
+// TODO Fix double generation of main file, SYCL passes through here twice and
+// generates two sets of main files, they overwrite each other which is fine.
+// However, the second set happens after the script so it makes it impossible
+// to automate the deletion from the script. Also a waste of processing time
+// when you need to generate 400 main files a second time around.
 static void populateMainEntryPoint(const StringRef Name,
                                    const FunctionDecl *KernelFunction) {
   SmallString<256> TmpDir;
   llvm::sys::path::system_temp_directory(true, TmpDir);
   auto MainFileName = std::string(TmpDir.str()) + "/" + Name.str() + ".cpp";
 
-  llvm::errs() << "TmpFile: " << MainFileName << "\n";
   int MainNameFD = 0;
   std::error_code EC =
       llvm::sys::fs::openFileForWrite(MainFileName, MainNameFD);
