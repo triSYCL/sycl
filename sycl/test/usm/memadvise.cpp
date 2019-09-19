@@ -1,4 +1,4 @@
-// RUN: %clangxx -fsycl %s -o %t1.out
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t1.out
 // RUN: %CPU_RUN_PLACEHOLDER %t1.out
 // RUN: %GPU_RUN_PLACEHOLDER %t1.out
 

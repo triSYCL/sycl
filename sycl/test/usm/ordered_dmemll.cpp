@@ -1,4 +1,4 @@
-// RUN: %clangxx -fsycl %s -o %t1.out -lOpenCL
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t1.out -lOpenCL
 // RUN: %CPU_RUN_PLACEHOLDER %t1.out
 // RUN: %GPU_RUN_PLACEHOLDER %t1.out
 
@@ -103,7 +103,7 @@ int main() {
   }
 
   bool result = true;
-  cl_command_queue cq = q.get(); 
+  cl_command_queue cq = q.get();
   bool expected_result = dev.is_host() ? true : getQueueOrder(cq);
   if (expected_result != result) {
     std::cout << "Resulting queue order is OOO but expected order is inorder"

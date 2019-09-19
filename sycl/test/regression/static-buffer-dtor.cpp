@@ -9,7 +9,7 @@
 // destructors that run as part of program shutdown, after the runtime itself
 // would start shutting down.
 //===----------------------------------------------------------------------===//
-// RUN: %clangxx -fsycl %s -o %t.out
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.out

@@ -1,4 +1,4 @@
-// RUN: %clangxx -fsycl %s -o %t.out
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
 #include <CL/sycl.hpp>
 using namespace cl::sycl;
