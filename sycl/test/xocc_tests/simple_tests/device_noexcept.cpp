@@ -4,13 +4,13 @@
   This tests that the device is not generating exception related IR like
   personality functions and landing pads.
 
-  A side effect of using noexcept on the lambda and invoke function in this case
-  appears to be generation of exception related IR on the device when exceptions
-  are not appropriately switched off or handled in the compiler.
+  A previous side effect of using noexcept on the lambda and invoke function in
+  this case was the generation of exception related IR on the device when
+  exceptions were not appropriately switched off or handled in the compiler.
 
-  The device should be compiled with no exception related code, exception related
-  IR can lead to choking of the LLVM-SPIRV translator or the xocc backend in
-  some cases.
+  The device should be compiled with no exception related code, exception
+  related IR can lead to choking of the LLVM-SPIRV translator or the xocc
+  backend in some cases.
 
   If this test case is broken, the test will most likely ICE and you'll know
   about it the hard-way unfortunately!
