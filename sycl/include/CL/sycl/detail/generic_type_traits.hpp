@@ -160,7 +160,7 @@ using is_charn = typename is_contained<
 // scharn: schar2, schar3, schar4, schar8, schar16
 template <typename T>
 using is_scharn = typename is_contained<
-    T, type_list<cl_schar2, cl_schar3, cl_schar4, cl_schar8, cl_schar16>>::type;
+    T, type_list<schar2, schar3, schar4, schar8, schar16>>::type;
 
 // ucharn: uchar2, uchar3, uchar4, uchar8, uchar16
 template <typename T>
@@ -170,7 +170,7 @@ using is_ucharn = typename is_contained<
 // igenchar: signed char, scharn
 template <typename T>
 using is_igenchar =
-    std::integral_constant<bool, is_contained<T, type_list<cl_schar>>::value ||
+    std::integral_constant<bool, is_contained<T, type_list<schar>>::value ||
                                      is_scharn<T>::value>;
 
 // ugenchar: unsigned char, ucharn
@@ -233,23 +233,23 @@ using is_genint =
 // ulongn: ulong2, ulong3, ulong4, ulong8,ulong16
 template <typename T>
 using is_ulongn = typename is_contained<
-    T, type_list<cl_ulong2, cl_ulong3, cl_ulong4, cl_ulong8, cl_ulong16>>::type;
+    T, type_list<ulong2, ulong3, ulong4, ulong8, ulong16>>::type;
 
 // ugenlong: unsigned long int, ulongn
 template <typename T>
 using is_ugenlong =
-    std::integral_constant<bool, is_contained<T, type_list<cl_ulong>>::value ||
+    std::integral_constant<bool, is_contained<T, type_list<ulong>>::value ||
                                      is_ulongn<T>::value>;
 
 // longn: long2, long3, long4, long8, long16
 template <typename T>
 using is_longn = typename is_contained<
-    T, type_list<cl_long2, cl_long3, cl_long4, cl_long8, cl_long16>>::type;
+    T, type_list<long2, long3, long4, long8, long16>>::type;
 
 // genlong: long int, longn
 template <typename T>
 using is_genlong =
-    std::integral_constant<bool, is_contained<T, type_list<cl_long>>::value ||
+    std::integral_constant<bool, is_contained<T, type_list<long>>::value ||
                                      is_longn<T>::value>;
 
 // ulonglongn: ulonglong2, ulonglong3, ulonglong4,ulonglong8, ulonglong16
@@ -313,7 +313,7 @@ using is_ugeninteger = std::integral_constant<
 // int
 template <typename T>
 using is_sgeninteger = typename is_contained<
-    T, type_list<cl_char, cl_schar, cl_uchar, cl_short, cl_ushort, cl_int,
+    T, type_list<cl_char, schar, cl_uchar, cl_short, cl_ushort, cl_int,
                  cl_uint, cl_long, cl_ulong, longlong, ulonglong>>::type;
 
 // vgeninteger: charn, scharn, ucharn, shortn, ushortn, intn, uintn, longn,
@@ -329,7 +329,7 @@ using is_vgeninteger = std::integral_constant<
 // sigeninteger: char, signed char, short, int, long int, , long long int
 template <typename T>
 using is_sigeninteger = typename is_contained<
-    T, type_list<cl_char, cl_schar, cl_short, cl_int, cl_long, longlong>>::type;
+    T, type_list<cl_char, schar, cl_short, cl_int, cl_long, longlong>>::type;
 
 // sugeninteger: unsigned char, unsigned short,  unsigned int, unsigned long
 // int, unsigned long long int
@@ -441,7 +441,8 @@ template <class P, typename T>
 using is_MultiPtrOfGLR =
     std::integral_constant<bool, std::is_same<P, global_ptr<T>>::value ||
                                      std::is_same<P, local_ptr<T>>::value ||
-                                     std::is_same<P, private_ptr<T>>::value>;
+                                     std::is_same<P, private_ptr<T>>::value ||
+                                     std::is_same<P, T*>::value>;
 
 // genintptr All permutations of multi_ptr<dataT, addressSpace> where dataT is
 // all types within genint and addressSpace is
@@ -829,7 +830,8 @@ template <typename T> class TryToGetPointerT {
 
 public:
   using type = decltype(check(T()));
-  static constexpr bool value = !std::is_same<T, type>::value;
+  static constexpr bool value = std::is_pointer<T>::value ||
+                                !std::is_same<T, type>::value;
 };
 
 // Try to get element_type, otherwise T
@@ -861,6 +863,8 @@ template <typename T> class TryToGetPointerVecT {
       typename TryToGetVectorT<typename TryToGetElementType<A>::type>::type,
       A::address_space>::type *
   check(const A &);
+  template <typename A>
+  static typename TryToGetVectorT<A>::type * check(const A *);
 
 public:
   using type = decltype(check(T()));
@@ -872,6 +876,13 @@ typename TryToGetPointerVecT<T>::type TryToGetPointer(T &t) {
   // TODO find the better way to get the pointer to underlying data from vec
   // class
   return reinterpret_cast<typename TryToGetPointerVecT<T>::type>(t.get());
+}
+
+template <typename T>
+typename TryToGetPointerVecT<T *>::type TryToGetPointer(T *t) {
+  // TODO find the better way to get the pointer to underlying data from vec
+  // class
+  return reinterpret_cast<typename TryToGetPointerVecT<T *>::type>(t);
 }
 
 template <typename T, typename = typename std::enable_if<
@@ -948,7 +959,8 @@ struct select_cl_mptr_or_vector_or_scalar;
 
 template <typename T>
 struct select_cl_mptr_or_vector_or_scalar<
-  T, typename std::enable_if<is_genptr<T>::value>::type> {
+  T, typename std::enable_if<is_genptr<T>::value &&
+                             !std::is_pointer<T>::value>::type> {
   using type = multi_ptr<
     typename select_cl_vector_or_scalar<typename T::element_type>::type,
     T::address_space>;
@@ -956,7 +968,8 @@ struct select_cl_mptr_or_vector_or_scalar<
 
 template <typename T>
 struct select_cl_mptr_or_vector_or_scalar<
-  T, typename std::enable_if<!is_genptr<T>::value>::type> {
+  T, typename std::enable_if<!is_genptr<T>::value ||
+                             std::is_pointer<T>::value>::type> {
   using type = typename select_cl_vector_or_scalar<T>::type;
 };
 

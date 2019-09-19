@@ -2066,7 +2066,10 @@ bool Sema::CheckAttrNoArgs(const ParsedAttr &Attrs) {
 
 bool Sema::CheckAttrTarget(const ParsedAttr &AL) {
   // Check whether the attribute is valid on the current target.
-  if (!AL.existsInTarget(Context.getTargetInfo())) {
+  const TargetInfo *Aux = Context.getAuxTargetInfo();
+  if (!(AL.existsInTarget(Context.getTargetInfo()) ||
+        (Context.getLangOpts().SYCLIsDevice &&
+         Aux && AL.existsInTarget(*Aux)))) {
     Diag(AL.getLoc(), diag::warn_unknown_attribute_ignored) << AL;
     AL.setInvalid();
     return true;
@@ -4412,6 +4415,27 @@ static void handleOptimizeNoneAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
   if (OptimizeNoneAttr *Optnone = S.mergeOptimizeNoneAttr(
           D, AL.getRange(), AL.getAttributeSpellingListIndex()))
     D->addAttr(Optnone);
+}
+
+static void handleSYCLDeviceIndirectlyCallableAttr(Sema &S, Decl *D,
+                                                   const ParsedAttr &AL) {
+  auto *FD = cast<FunctionDecl>(D);
+  if (!FD->isExternallyVisible()) {
+    S.Diag(AL.getLoc(),
+           diag::err_sycl_device_indirectly_callable_cannot_be_applied_here)
+        << 0 /* static function or anonymous namespace */;
+    return;
+  }
+  if (isa<CXXMethodDecl>(FD)) {
+    S.Diag(AL.getLoc(),
+           diag::err_sycl_device_indirectly_callable_cannot_be_applied_here)
+        << 1 /* class member function */;
+    return;
+  }
+
+  S.addSyclDeviceDecl(D);
+  D->addAttr(SYCLDeviceAttr::CreateImplicit(S.Context));
+  handleSimpleAttribute<SYCLDeviceIndirectlyCallableAttr>(S, D, AL);
 }
 
 static void handleConstantAttr(Sema &S, Decl *D, const ParsedAttr &AL) {
@@ -6914,8 +6938,11 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
   // Unknown attributes are automatically warned on. Target-specific attributes
   // which do not apply to the current target architecture are treated as
   // though they were unknown attributes.
+  const TargetInfo *Aux = S.Context.getAuxTargetInfo();
   if (AL.getKind() == ParsedAttr::UnknownAttribute ||
-      !AL.existsInTarget(S.Context.getTargetInfo())) {
+      !(AL.existsInTarget(S.Context.getTargetInfo()) ||
+        (S.Context.getLangOpts().SYCLIsDevice &&
+         Aux && AL.existsInTarget(*Aux)))) {
     S.Diag(AL.getLoc(),
            AL.isDeclspecAttribute()
                ? (unsigned)diag::warn_unhandled_ms_attribute_ignored
@@ -7088,6 +7115,9 @@ static void ProcessDeclAttribute(Sema &S, Scope *scope, Decl *D,
     break;
   case ParsedAttr::AT_SYCLKernel:
     handleSimpleAttribute<SYCLKernelAttr>(S, D, AL);
+    break;
+  case ParsedAttr::AT_SYCLDeviceIndirectlyCallable:
+    handleSYCLDeviceIndirectlyCallableAttr(S, D, AL);
     break;
   case ParsedAttr::AT_Format:
     handleFormatAttr(S, D, AL);

@@ -1,6 +1,6 @@
-// RUN: %clangxx -std=c++17 %s -o %t1.out -lOpenCL -lsycl
+// RUN: %clangxx -std=c++17 %s -o %t1.out -lsycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t1.out
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t2.out -lOpenCL
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t2.out
 // RUN: env SYCL_DEVICE_TYPE=HOST %t2.out
 // RUN: %CPU_RUN_PLACEHOLDER %t2.out
 // RUN: %GPU_RUN_PLACEHOLDER %t2.out

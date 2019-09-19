@@ -1,4 +1,5 @@
 set(LLVM_BUILD_LIBRARY_DIRS "${LLVM_BINARY_DIR}/lib/")
+set(LLVM_BUILD_BINARY_DIRS "${LLVM_BINARY_DIR}/bin/")
 set(LLVM_TOOLS_DIR "${LLVM_BINARY_DIR}/bin/")
 set(CLANG_IN_BUILD "${LLVM_BINARY_DIR}/bin/clang")
 set(CLANGXX_IN_BUILD "${LLVM_BINARY_DIR}/bin/clang++")
@@ -19,6 +20,6 @@ configure_lit_site_cfg(
 add_lit_testsuite(check-sycl "Running the SYCL regression tests"
   ${CMAKE_CURRENT_BINARY_DIR}
   ARGS ${RT_TEST_ARGS}
-  DEPENDS sycl-toolchain FileCheck get_device_count_by_type
+  DEPENDS sycl-toolchain FileCheck get_device_count_by_type llvm-config
   )
 set_target_properties(check-sycl PROPERTIES FOLDER "SYCL tests")

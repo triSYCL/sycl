@@ -1,5 +1,6 @@
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t1.out -lOpenCL
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t1.out
 // RUN: %CPU_RUN_PLACEHOLDER %t1.out
+// RUN: %GPU_RUN_PLACEHOLDER %t1.out
 
 //==-- allocator_vector_fail.cpp - Device Memory Allocator fail test -------==//
 //
@@ -24,7 +25,7 @@ int main() {
     auto dev = q.get_device();
     auto ctxt = q.get_context();
 
-    usm_allocator<int, usm::alloc::device> alloc(&ctxt, &dev);
+    usm_allocator<int, usm::alloc::device> alloc(ctxt, dev);
     std::vector<int, decltype(alloc)> vec(alloc);
 
     // This statement should throw an exception since

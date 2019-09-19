@@ -81,7 +81,8 @@ typedef enum {
   PI_DEVICE_INFO_TYPE           = CL_DEVICE_TYPE,
   PI_DEVICE_INFO_PARENT         = CL_DEVICE_PARENT_DEVICE,
   PI_DEVICE_INFO_PLATFORM       = CL_DEVICE_PLATFORM,
-  PI_DEVICE_INFO_PARTITION_TYPE = CL_DEVICE_PARTITION_TYPE
+  PI_DEVICE_INFO_PARTITION_TYPE = CL_DEVICE_PARTITION_TYPE,
+  PI_DEVICE_INFO_NAME           = CL_DEVICE_NAME
 } _pi_device_info;
 
 // TODO: populate
@@ -155,6 +156,34 @@ typedef enum {
   PI_BUFFER_CREATE_TYPE_REGION = CL_BUFFER_CREATE_TYPE_REGION
 } _pi_buffer_create_type;
 
+typedef pi_bitfield pi_sampler_properties;
+const pi_bool PI_TRUE = CL_TRUE;
+const pi_bool PI_FALSE = CL_FALSE;
+
+typedef enum {
+ PI_SAMPLER_INFO_REFERENCE_COUNT   = CL_SAMPLER_REFERENCE_COUNT,
+ PI_SAMPLER_INFO_CONTEXT           = CL_SAMPLER_CONTEXT,
+ PI_SAMPLER_INFO_NORMALIZED_COORDS = CL_SAMPLER_NORMALIZED_COORDS,
+ PI_SAMPLER_INFO_ADDRESSING_MODE   = CL_SAMPLER_ADDRESSING_MODE,
+ PI_SAMPLER_INFO_FILTER_MODE       = CL_SAMPLER_FILTER_MODE,
+ PI_SAMPLER_INFO_MIP_FILTER_MODE   = CL_SAMPLER_MIP_FILTER_MODE,
+ PI_SAMPLER_INFO_LOD_MIN           = CL_SAMPLER_LOD_MIN,
+ PI_SAMPLER_INFO_LOD_MAX           = CL_SAMPLER_LOD_MAX
+} _pi_sampler_info;
+
+typedef enum {
+  PI_SAMPLER_ADDRESSING_MODE_MIRRORED_REPEAT = CL_ADDRESS_MIRRORED_REPEAT,
+  PI_SAMPLER_ADDRESSING_MODE_REPEAT          = CL_ADDRESS_REPEAT,
+  PI_SAMPLER_ADDRESSING_MODE_CLAMP_TO_EDGE   = CL_ADDRESS_CLAMP_TO_EDGE,
+  PI_SAMPLER_ADDRESSING_MODE_CLAMP           = CL_ADDRESS_CLAMP,
+  PI_SAMPLER_ADDRESSING_MODE_NONE            = CL_ADDRESS_NONE
+} _pi_sampler_addressing_mode;
+
+typedef enum {
+  PI_SAMPLER_FILTER_MODE_NEAREST = CL_FILTER_NEAREST,
+  PI_SAMPLER_FILTER_MODE_LINEAR  = CL_FILTER_LINEAR,
+} _pi_sampler_filter_mode;
+
 // NOTE: this is made 64-bit to match the size of cl_mem_flags to
 // make the translation to OpenCL transparent.
 // TODO: populate
@@ -187,6 +216,9 @@ typedef _pi_mem_type                pi_mem_type;
 typedef _pi_image_channel_order     pi_image_channel_order;
 typedef _pi_image_channel_type      pi_image_channel_type;
 typedef _pi_buffer_create_type      pi_buffer_create_type;
+typedef _pi_sampler_addressing_mode pi_sampler_addressing_mode;
+typedef _pi_sampler_filter_mode     pi_sampler_filter_mode;
+typedef _pi_sampler_info            pi_sampler_info;
 
 // Opaque data type for compatibility with OpenMP.
 typedef void * _pi_offload_entry;
@@ -631,12 +663,12 @@ pi_result piEventRelease(pi_event event);
 //
 pi_result piSamplerCreate(
   pi_context                     context,
-  const cl_sampler_properties *  sampler_properties, // TODO: untie from OpenCL
+  const pi_sampler_properties *  sampler_properties,
   pi_sampler *                   result_sampler);
 
 pi_result piSamplerGetInfo(
   pi_sampler         sampler,
-  cl_sampler_info    param_name, // TODO: untie from OpenCL
+  pi_sampler_info    param_name,
   size_t             param_value_size,
   void *             param_value,
   size_t *           param_value_size_ret);
@@ -658,6 +690,18 @@ pi_result piEnqueueKernelLaunch(
   pi_uint32         num_events_in_wait_list,
   const pi_event *  event_wait_list,
   pi_event *        event);
+
+pi_result piEnqueueNativeKernel(
+  pi_queue         queue,
+  void             (*user_func)(void *),
+  void *           args,
+  size_t           cb_args,
+  pi_uint32        num_mem_objects,
+  const pi_mem *   mem_list,
+  const void **    args_mem_loc,
+  pi_uint32        num_events_in_wait_list,
+  const pi_event * event_wait_list,
+  pi_event *       event);
 
 pi_result piEnqueueEventsWait(
   pi_queue          command_queue,

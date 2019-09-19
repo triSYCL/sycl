@@ -1,5 +1,7 @@
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t1.out -lOpenCL
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t1.out
 // RUN: %CPU_RUN_PLACEHOLDER %t1.out
+// RUN: %GPU_RUN_PLACEHOLDER %t1.out
+
 //==---- allocatorll.cpp - Device Memory Linked List Allocator test --------==//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -27,7 +29,7 @@ int main() {
   auto dev = q.get_device();
   auto ctxt = q.get_context();
 
-  usm_allocator<Node, usm::alloc::device> alloc(&ctxt, &dev);
+  usm_allocator<Node, usm::alloc::device> alloc(ctxt, dev);
 
   Node *d_head = nullptr;
   Node *d_cur = nullptr;

@@ -6,11 +6,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out -lOpenCL
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
+// TODO: SYCL specific fail - analyze and enable on Windows
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
-// TODO temporarily disable GPU until regression in Intel Gen driver fixed.
-// R.U.N: %GPU_RUN_PLACEHOLDER %t.out
+// RUN: %GPU_RUN_ON_LINUX_PLACEHOLDER %t.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
 
 // This test checks hierarchical parallelism invocation APIs, but without any
@@ -113,7 +113,7 @@ int main() {
   constexpr int N_ITER = 2;
 
   constexpr size_t range_length = N_WG * WG_SIZE_PHYSICAL;
-  std::unique_ptr<int> data(new int[range_length]);
+  std::unique_ptr<int[]> data(new int[range_length]);
   int *ptr = data.get();
   bool passed = true;
 
@@ -231,7 +231,7 @@ int main() {
       const int WG_LINEAR_SIZE = WG_X_SIZE * WG_Y_SIZE;
       const int range_length = N_WG * WG_LINEAR_SIZE;
 
-      std::unique_ptr<int> data(new int[range_length]);
+      std::unique_ptr<int[]> data(new int[range_length]);
       int *ptr = data.get();
 
       std::memset(ptr, 0, range_length * sizeof(ptr[0]));

@@ -93,49 +93,43 @@ void Scheduler::GraphBuilder::printGraphAsDot(const char *ModeName) {
 
   std::set<Command *> Visited;
 
-  for (MemObjRecord &Record : MMemObjRecords)
-    for (Command *AllocaCmd : Record.MAllocaCommands)
+  for (SYCLMemObjI *MemObject : MMemObjs)
+    for (Command *AllocaCmd : MemObject->MRecord->MAllocaCommands)
       printDotRecursive(Stream, Visited, AllocaCmd);
 
   Stream << "}" << std::endl;
 }
 
 // Returns record for the memory objects passed, nullptr if doesn't exist.
-Scheduler::GraphBuilder::MemObjRecord *
+MemObjRecord *
 Scheduler::GraphBuilder::getMemObjRecord(SYCLMemObjI *MemObject) {
-  const auto It = std::find_if(MMemObjRecords.begin(), MMemObjRecords.end(),
-                               [MemObject](const MemObjRecord &Record) {
-                                 return Record.MMemObj == MemObject;
-                               });
-  return (MMemObjRecords.end() != It) ? &*It : nullptr;
+  return MemObject->MRecord.get();
 }
 
 // Returns record for the memory object requirement refers to, if doesn't
 // exist, creates new one.
-Scheduler::GraphBuilder::MemObjRecord *
+MemObjRecord *
 Scheduler::GraphBuilder::getOrInsertMemObjRecord(const QueueImplPtr &Queue,
                                                  Requirement *Req) {
   SYCLMemObjI *MemObject = Req->MSYCLMemObj;
-  Scheduler::GraphBuilder::MemObjRecord *Record = getMemObjRecord(MemObject);
+  MemObjRecord *Record = getMemObjRecord(MemObject);
 
   if (nullptr != Record)
     return Record;
 
-  MemObjRecord NewRecord{
-    MemObject,
-    /*MWriteLeafs*/ {},
-    /*MReadLeafs*/ {},
+  MemObject->MRecord.reset(new MemObjRecord{
     /*MAllocaCommands*/ {},
-    /*MMemModified*/ false};
+    /*MReadLeafs*/ {},
+    /*MWriteLeafs*/ {},
+    /*MMemModified*/ false});
 
-  MMemObjRecords.push_back(std::move(NewRecord));
-  return &MMemObjRecords.back();
+  MMemObjs.push_back(MemObject);
+  return MemObject->MRecord.get();
 }
 
 // Helper function which removes all values in Cmds from Leafs
 void Scheduler::GraphBuilder::UpdateLeafs(
-    const std::set<Command *> &Cmds,
-    Scheduler::GraphBuilder::MemObjRecord *Record, Requirement *Req) {
+    const std::set<Command *> &Cmds, MemObjRecord *Record, Requirement *Req) {
 
   const bool ReadOnlyReq = Req->MAccessMode == access::mode::read;
   if (ReadOnlyReq)
@@ -153,8 +147,7 @@ void Scheduler::GraphBuilder::UpdateLeafs(
 }
 
 void Scheduler::GraphBuilder::AddNodeToLeafs(
-    Scheduler::GraphBuilder::MemObjRecord *Record, Command *Cmd,
-    Requirement *Req) {
+    MemObjRecord *Record, Command *Cmd, Requirement *Req) {
   if (Req->MAccessMode == access::mode::read)
     Record->MReadLeafs.push_back(Cmd);
   else
@@ -186,7 +179,8 @@ Scheduler::GraphBuilder::insertMemCpyCmd(MemObjRecord *Record, Requirement *Req,
     Deps.insert(AllocaCmdDst);
   }
 
-  AllocaCommandBase *AllocaCmdSrc = findAllocaForReq(Record, Req, SrcQueue);
+  AllocaCommandBase *AllocaCmdSrc =
+      getOrCreateAllocaForReq(Record, Req, SrcQueue, true);
 
   // Full copy of buffer is needed to avoid loss of data that may be caused
   // by copying specific range form host to device and backwards.
@@ -209,7 +203,7 @@ Command *Scheduler::GraphBuilder::addCopyBack(Requirement *Req) {
 
   QueueImplPtr HostQueue = Scheduler::getInstance().getDefaultHostQueue();
   SYCLMemObjI *MemObj = Req->MSYCLMemObj;
-  Scheduler::GraphBuilder::MemObjRecord *Record = getMemObjRecord(MemObj);
+  MemObjRecord *Record = getMemObjRecord(MemObj);
   if (Record && MPrintOptionsArray[BeforeAddCopyBack])
     printGraphAsDot("before_addCopyBack");
 
@@ -583,7 +577,7 @@ AllocaCommandBase *Scheduler::GraphBuilder::getOrCreateAllocaForReq(
 
 // The function sets MemModified flag in record if requirement has write access.
 void Scheduler::GraphBuilder::markModifiedIfWrite(
-    GraphBuilder::MemObjRecord *Record, Requirement *Req) {
+    MemObjRecord *Record, Requirement *Req) {
   switch (Req->MAccessMode) {
   case access::mode::write:
   case access::mode::read_write:
@@ -599,8 +593,8 @@ void Scheduler::GraphBuilder::markModifiedIfWrite(
 Command *
 Scheduler::GraphBuilder::addCG(std::unique_ptr<detail::CG> CommandGroup,
                                QueueImplPtr Queue) {
-  std::vector<Requirement *> Reqs = CommandGroup->getRequirements();
-  std::vector<detail::EventImplPtr> Events = CommandGroup->getEvents();
+  const std::vector<Requirement *> &Reqs = CommandGroup->MRequirements;
+  const std::vector<detail::EventImplPtr> &Events = CommandGroup->MEvents;
   std::unique_ptr<ExecCGCommand> NewCmd(
       new ExecCGCommand(std::move(CommandGroup), Queue));
   if (!NewCmd)
@@ -704,11 +698,13 @@ void Scheduler::GraphBuilder::cleanupCommands(bool CleanupReleaseCommands) {
 }
 
 void Scheduler::GraphBuilder::removeRecordForMemObj(SYCLMemObjI *MemObject) {
-  const auto It = std::find_if(MMemObjRecords.begin(), MMemObjRecords.end(),
-                               [MemObject](const MemObjRecord &Record) {
-                                 return Record.MMemObj == MemObject;
-                               });
-  MMemObjRecords.erase(It);
+  const auto It = std::find_if(MMemObjs.begin(), MMemObjs.end(),
+                                 [MemObject](const SYCLMemObjI *Obj) {
+                                   return Obj == MemObject;
+                                 });
+  if (It != MMemObjs.end())
+    MMemObjs.erase(It);
+  MemObject->MRecord.reset(nullptr);
 }
 
 } // namespace detail

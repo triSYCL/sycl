@@ -12,6 +12,7 @@
 #include "builtins_helper.hpp"
 
 #include <algorithm>
+#include <type_traits>
 
 namespace s = cl::sycl;
 namespace d = s::detail;
@@ -20,7 +21,11 @@ namespace cl {
 namespace __host_std {
 namespace {
 
-template <typename T> inline T __abs_diff(T x, T y) { return std::abs(x - y); }
+template <typename T> inline T __abs_diff(T x, T y) {
+  static_assert(std::is_integral<T>::value,
+                "Only integral types are supported");
+  return (x > y) ? (x - y) : (y - x);
+}
 
 template <typename T> inline T __u_add_sat(T x, T y) {
   return (x < (d::max_v<T>() - y) ? x + y : d::max_v<T>());
@@ -55,6 +60,15 @@ template <typename T> inline constexpr T __clz_impl(T x, T m, T n = 0) {
 template <typename T> inline constexpr T __clz(T x) {
   using UT = typename std::make_unsigned<T>::type;
   return (x == T(0)) ? sizeof(T) * 8 : __clz_impl<UT>(x, d::msbMask<UT>(x));
+}
+
+template <typename T> inline constexpr T __ctz_impl(T x, T m, T n = 0) {
+  return (x & m) ? n : __ctz_impl(x, T(m << 1), ++n);
+}
+
+template <typename T> inline constexpr T __ctz(T x) {
+  using UT = typename std::make_unsigned<T>::type;
+  return (x == T(0)) ? sizeof(T) * 8 : __ctz_impl<UT>(x, 1);
 }
 
 template <typename T> T __mul_hi(T a, T b) {
@@ -140,7 +154,12 @@ template <typename T> inline T __u_long_mad_sat(T a, T b, T c) {
 
 template <typename T> inline T __rotate(T x, T n) {
   using UT = typename std::make_unsigned<T>::type;
-  return (x << n) | (UT(x) >> ((sizeof(x) * 8) - n));
+  // Shrink the shift width so that it's in the range [0, num_bits(T)). Cast
+  // everything to unsigned to avoid type conversion issues.
+  constexpr UT size = sizeof(x) * 8;
+  UT xu = UT(x);
+  UT nu = UT(n) & (size - 1);
+  return (xu << nu) | (xu >> (size - nu));
 }
 
 template <typename T> inline T __u_sub_sat(T x, T y) {
@@ -198,10 +217,18 @@ MAKE_1V(s_abs, s::cl_uint, s::cl_int)
 MAKE_1V(s_abs, s::cl_ulong, s::cl_long)
 
 // u_abs_diff
-cl_uchar u_abs_diff(s::cl_uchar x, s::cl_uchar y) __NOEXC { return x - y; }
-cl_ushort u_abs_diff(s::cl_ushort x, s::cl_ushort y) __NOEXC { return x - y; }
-cl_uint u_abs_diff(s::cl_uint x, s::cl_uint y) __NOEXC { return x - y; }
-cl_ulong u_abs_diff(s::cl_ulong x, s::cl_ulong y) __NOEXC { return x - y; }
+cl_uchar u_abs_diff(s::cl_uchar x, s::cl_uchar y) __NOEXC {
+  return __abs_diff(x, y);
+}
+cl_ushort u_abs_diff(s::cl_ushort x, s::cl_ushort y) __NOEXC {
+  return __abs_diff(x, y);
+}
+cl_uint u_abs_diff(s::cl_uint x, s::cl_uint y) __NOEXC {
+  return __abs_diff(x, y);
+}
+cl_ulong u_abs_diff(s::cl_ulong x, s::cl_ulong y) __NOEXC {
+  return __abs_diff(x, y);
+}
 
 MAKE_1V_2V(u_abs_diff, s::cl_uchar, s::cl_uchar, s::cl_uchar)
 MAKE_1V_2V(u_abs_diff, s::cl_ushort, s::cl_ushort, s::cl_ushort)
@@ -369,6 +396,24 @@ MAKE_1V(clz, s::cl_uint, s::cl_uint)
 MAKE_1V(clz, s::cl_int, s::cl_int)
 MAKE_1V(clz, s::cl_ulong, s::cl_ulong)
 MAKE_1V(clz, s::cl_long, s::cl_long)
+
+// ctz
+s::cl_uchar ctz(s::cl_uchar x) __NOEXC { return __ctz(x); }
+s::cl_char ctz(s::cl_char x) __NOEXC { return __ctz(x); }
+s::cl_ushort ctz(s::cl_ushort x) __NOEXC { return __ctz(x); }
+s::cl_short ctz(s::cl_short x) __NOEXC { return __ctz(x); }
+s::cl_uint ctz(s::cl_uint x) __NOEXC { return __ctz(x); }
+s::cl_int ctz(s::cl_int x) __NOEXC { return __ctz(x); }
+s::cl_ulong ctz(s::cl_ulong x) __NOEXC { return __ctz(x); }
+s::cl_long ctz(s::cl_long x) __NOEXC { return __ctz(x); }
+MAKE_1V(ctz, s::cl_uchar, s::cl_uchar)
+MAKE_1V(ctz, s::cl_char, s::cl_char)
+MAKE_1V(ctz, s::cl_ushort, s::cl_ushort)
+MAKE_1V(ctz, s::cl_short, s::cl_short)
+MAKE_1V(ctz, s::cl_uint, s::cl_uint)
+MAKE_1V(ctz, s::cl_int, s::cl_int)
+MAKE_1V(ctz, s::cl_ulong, s::cl_ulong)
+MAKE_1V(ctz, s::cl_long, s::cl_long)
 
 // s_mul_hi
 cl_char s_mul_hi(cl_char a, cl_char b) { return __mul_hi(a, b); }

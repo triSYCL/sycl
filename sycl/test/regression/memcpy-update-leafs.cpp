@@ -1,4 +1,4 @@
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out -lOpenCL
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
 // RUN: env SYCL_PI_TRACE=1 %CPU_RUN_PLACEHOLDER %t.out 2>&1 %CPU_CHECK_PLACEHOLDER
 
  //==----------- memcpy-update-leafs.cpp - SYCL regression test  -----------==//
@@ -40,5 +40,5 @@ int main() {
 
 // CHECK: PI ---> RT::piEnqueueMemBufferWrite( Queue, DstMem, CL_FALSE, DstOffset[0], DstAccessRange[0], SrcMem + DstOffset[0], DepEvents.size(), &DepEvents[0], &OutEvent)
 // CHECK-NOT: PI ---> RT::piEnqueueMemBufferWrite( Queue, DstMem, CL_FALSE, DstOffset[0], DstAccessRange[0], SrcMem + DstOffset[0], DepEvents.size(), &DepEvents[0], &OutEvent)
-// CHECK-NOT: PI ---> (MappedPtr = RT::piEnqueueMemBufferMap( Queue->getHandleRef(), pi::pi_cast<RT::PiMem>(Mem), CL_FALSE, Flags, AccessOffset[0], AccessRange[0], DepEvents.size(), DepEvents.empty() ? nullptr : &DepEvents[0], &OutEvent, &Error), Error)
-// CHECK-NOT: PI ---> RT::piEnqueueMemUnmap( UseExclusiveQueue ? Queue->getExclusiveQueueHandleRef() : Queue->getHandleRef(), pi::pi_cast<RT::PiMem>(Mem), MappedPtr, DepEvents.size(), DepEvents.empty() ? nullptr : &DepEvents[0], &OutEvent)
+// CHECK-NOT: PI ---> (MappedPtr = RT::piEnqueueMemBufferMap( Queue->getHandleRef(), pi::cast<RT::PiMem>(Mem), CL_FALSE, Flags, AccessOffset[0], AccessRange[0], DepEvents.size(), DepEvents.empty() ? nullptr : &DepEvents[0], &OutEvent, &Error), Error)
+// CHECK-NOT: PI ---> RT::piEnqueueMemUnmap( UseExclusiveQueue ? Queue->getExclusiveQueueHandleRef() : Queue->getHandleRef(), pi::cast<RT::PiMem>(Mem), MappedPtr, DepEvents.size(), DepEvents.empty() ? nullptr : &DepEvents[0], &OutEvent)

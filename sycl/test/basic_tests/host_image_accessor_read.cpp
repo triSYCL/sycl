@@ -1,4 +1,4 @@
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out -lOpenCL
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 //==---- host_image_accessor_read.cpp - SYCL host image accessor check ----==//
 //
@@ -60,7 +60,7 @@ int foo(float *image_data) {
     assert((float)Ret_data.z() == 122);
     assert((float)Ret_data.w() == 123);
 
-    // Test Out-of-bounds access for clamp_to_edge Addressing Mode. 
+    // Test Out-of-bounds access for clamp_to_edge Addressing Mode.
     auto Sampler2 = cl::sycl::sampler(
         cl::sycl::coordinate_normalization_mode::unnormalized,
         cl::sycl::addressing_mode::clamp_to_edge, cl::sycl::filtering_mode::nearest);

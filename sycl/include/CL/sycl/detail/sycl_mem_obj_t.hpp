@@ -84,7 +84,7 @@ public:
           "Creation of interoperability memory object using host context is "
           "not allowed");
 
-    RT::PiMem Mem = pi::pi_cast<RT::PiMem>(MInteropMemObject);
+    RT::PiMem Mem = pi::cast<RT::PiMem>(MInteropMemObject);
     RT::PiContext Context = nullptr;
     PI_CALL(RT::piMemGetInfo(Mem, CL_MEM_CONTEXT, sizeof(Context), &Context,
                              nullptr));
@@ -120,7 +120,8 @@ public:
   }
 
   void releaseHostMem(void *Ptr) override {
-    MAllocator.deallocate(allocator_pointer_t<AllocatorT>(Ptr), get_size());
+    if (Ptr)
+      MAllocator.deallocate(allocator_pointer_t<AllocatorT>(Ptr), get_size());
   }
 
   void releaseMem(ContextImplPtr Context, void *MemAllocation) override {
@@ -217,11 +218,14 @@ public:
     if ((MUploadDataFunctor != nullptr) && MNeedWriteBack)
       MUploadDataFunctor();
 
-    Scheduler::getInstance().removeMemoryObject(this);
+    // If we're attached to a memory record, process the deletion of the memory
+    // record. We may get detached before we do this.
+    if (MRecord)
+      Scheduler::getInstance().removeMemoryObject(this);
     releaseHostMem(MShadowCopy);
 
     if (MOpenCLInterop)
-      PI_CALL(RT::piMemRelease(pi::pi_cast<RT::PiMem>(MInteropMemObject)));
+      PI_CALL(RT::piMemRelease(pi::cast<RT::PiMem>(MInteropMemObject)));
   }
 
   bool useHostPtr() {
@@ -230,7 +234,8 @@ public:
   }
 
   bool canReuseHostPtr(void *HostPtr, const size_t RequiredAlign) {
-    bool Aligned = (reinterpret_cast<std::uintptr_t>(HostPtr) % RequiredAlign) == 0;
+    bool Aligned =
+        (reinterpret_cast<std::uintptr_t>(HostPtr) % RequiredAlign) == 0;
     return Aligned || useHostPtr();
   }
 

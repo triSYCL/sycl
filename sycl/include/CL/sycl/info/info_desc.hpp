@@ -172,8 +172,13 @@ enum class execution_capability : unsigned int {
   exec_native_kernel
 };
 
-// A.4 Queue information desctiptors
+// A.4 Queue information descriptors
 enum class queue : cl_command_queue_info {
+  context = CL_QUEUE_CONTEXT,
+  device = CL_QUEUE_DEVICE,
+  reference_count = CL_QUEUE_REFERENCE_COUNT
+};
+enum class ordered_queue : cl_command_queue_info {
   context = CL_QUEUE_CONTEXT,
   device = CL_QUEUE_DEVICE,
   reference_count = CL_QUEUE_REFERENCE_COUNT
@@ -203,7 +208,8 @@ enum class kernel_sub_group : cl_kernel_sub_group_info {
   sub_group_count_for_ndrange = CL_KERNEL_SUB_GROUP_COUNT_FOR_NDRANGE,
   local_size_for_sub_group_count = CL_KERNEL_LOCAL_SIZE_FOR_SUB_GROUP_COUNT,
   max_num_sub_groups = CL_KERNEL_MAX_NUM_SUB_GROUPS,
-  compile_num_sub_groups = CL_KERNEL_COMPILE_NUM_SUB_GROUPS
+  compile_num_sub_groups = CL_KERNEL_COMPILE_NUM_SUB_GROUPS,
+  compile_sub_group_size = CL_KERNEL_COMPILE_SUB_GROUP_SIZE_INTEL
 };
 
 // A.6 Program information desctiptors
@@ -364,6 +370,7 @@ PARAM_TRAITS_SPEC_WITH_INPUT(kernel_sub_group, local_size_for_sub_group_count,
                              cl::sycl::range<3>, size_t)
 PARAM_TRAITS_SPEC(kernel_sub_group, max_num_sub_groups, size_t)
 PARAM_TRAITS_SPEC(kernel_sub_group, compile_num_sub_groups, size_t)
+PARAM_TRAITS_SPEC(kernel_sub_group, compile_sub_group_size, size_t)
 
 PARAM_TRAITS_SPEC(platform, profile, string_class)
 PARAM_TRAITS_SPEC(platform, version, string_class)

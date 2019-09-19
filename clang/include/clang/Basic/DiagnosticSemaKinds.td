@@ -9793,6 +9793,7 @@ def err_sycl_restrict : Error<
   "|allocate storage"
   "|use inline assembly"
   "|have a class with a virtual function table"
+  "|call a dllimport function"
   "|call a variadic function}0">;
 def err_sycl_virtual_types : Error<
   "No class with a vtable can be used in a SYCL kernel or any code included in the kernel">;
@@ -9802,6 +9803,10 @@ def err_sycl_non_std_layout_type : Error<
   "kernel parameter has non-standard layout class/struct type">;
 def err_conflicting_sycl_kernel_attributes : Error<
   "conflicting attributes applied to a SYCL kernel">;
+def err_sycl_device_indirectly_callable_cannot_be_applied_here
+    : Error<"device_indirectly_callable attribute cannot be applied to a "
+            "%select{static function or function in an anonymous namespace"
+            "|class member function}0">;
 
 def err_bit_cast_non_trivially_copyable : Error<
   "__builtin_bit_cast %select{source|destination}0 type must be trivially copyable">;

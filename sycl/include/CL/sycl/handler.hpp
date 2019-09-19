@@ -10,22 +10,11 @@
 
 #pragma once
 
-#ifdef __SYCL_SPIR_DEVICE__
-#include <CL/__spir/spir_vars.hpp>
-#ifdef __SYCL_DEVICE_ONLY__
-namespace __device_builtin = __spir;
-#endif
-#else
-#include <CL/__spirv/spirv_vars.hpp>
-#ifdef __SYCL_DEVICE_ONLY__
-namespace __device_builtin = __spirv;
-#endif
-#endif
-
 #include <CL/sycl/access/access.hpp>
 #include <CL/sycl/context.hpp>
 #include <CL/sycl/detail/cg.hpp>
 #include <CL/sycl/detail/common.hpp>
+#include <CL/sycl/detail/helpers.hpp>
 #include <CL/sycl/detail/kernel_desc.hpp>
 #include <CL/sycl/detail/os_util.hpp>
 #include <CL/sycl/detail/scheduler/scheduler.hpp>
@@ -172,11 +161,13 @@ class handler {
   // Storage for a sycl::kernel object.
   std::shared_ptr<detail::kernel_impl> MSyclKernel;
   // Type of the command group, e.g. kernel, fill.
-  detail::CG::CGTYPE MCGType;
+  detail::CG::CGTYPE MCGType = detail::CG::NONE;
   // Pointer to the source host memory or accessor(depending on command type).
   void *MSrcPtr = nullptr;
   // Pointer to the dest host memory or accessor(depends on command type).
   void *MDstPtr = nullptr;
+  // Length to copy or fill (for USM operations).
+  size_t MLength = 0;
   // Pattern that is used to fill memory object in case command type is fill.
   std::vector<char> MPattern;
   // Storage for a lambda or function object.
@@ -368,12 +359,13 @@ private:
     std::unique_ptr<detail::CG> CommandGroup;
     switch (MCGType) {
     case detail::CG::KERNEL:
+    case detail::CG::RUN_ON_HOST_INTEL:
       CommandGroup.reset(new detail::CGExecKernel(
           std::move(MNDRDesc), std::move(MHostKernel), std::move(MSyclKernel),
           std::move(MArgsStorage), std::move(MAccStorage),
           std::move(MSharedPtrStorage), std::move(MRequirements),
           std::move(MEvents), std::move(MArgs), std::move(MKernelName),
-          std::move(MOSModuleHandle), std::move(MStreamStorage)));
+          std::move(MOSModuleHandle), std::move(MStreamStorage), MCGType));
       break;
     case detail::CG::COPY_ACC_TO_PTR:
     case detail::CG::COPY_PTR_TO_ACC:
@@ -395,6 +387,21 @@ private:
           std::move(MSharedPtrStorage), std::move(MRequirements),
           std::move(MEvents)));
       break;
+    case detail::CG::COPY_USM:
+      CommandGroup.reset(new detail::CGCopyUSM(
+          MSrcPtr, MDstPtr, MLength, std::move(MArgsStorage),
+          std::move(MAccStorage), std::move(MSharedPtrStorage),
+          std::move(MRequirements), std::move(MEvents)));
+      break;
+    case detail::CG::FILL_USM:
+      CommandGroup.reset(new detail::CGFillUSM(
+          std::move(MPattern), MDstPtr, MLength, std::move(MArgsStorage),
+          std::move(MAccStorage), std::move(MSharedPtrStorage),
+          std::move(MRequirements), std::move(MEvents)));
+      break;
+    case detail::CG::NONE:
+      throw runtime_error("Command group submitted without a kernel or a "
+                          "explicit memory operation.");
     default:
       throw runtime_error("Unhandled type of command group");
     }
@@ -478,8 +485,14 @@ private:
 
   template <typename T> void setArgHelper(int ArgIndex, T &&Arg) {
     void *StoredArg = (void *)storePlainArg(Arg);
-    MArgs.emplace_back(detail::kernel_param_kind_t::kind_std_layout, StoredArg,
-                       sizeof(T), ArgIndex);
+
+    if (!std::is_same<cl_mem, T>::value && std::is_pointer<T>::value) {
+      MArgs.emplace_back(detail::kernel_param_kind_t::kind_pointer, StoredArg,
+                         sizeof(T), ArgIndex);
+    } else {
+      MArgs.emplace_back(detail::kernel_param_kind_t::kind_std_layout,
+                         StoredArg, sizeof(T), ArgIndex);
+    }
   }
 
   void setArgHelper(int ArgIndex, sampler &&Arg) {
@@ -561,6 +574,23 @@ public:
   }
 
 #ifdef __SYCL_DEVICE_ONLY__
+
+  template <typename KernelT, typename IndexerT>
+  using EnableIfIndexer = detail::enable_if_t<
+      std::is_same<detail::lambda_arg_type<KernelT>, IndexerT>::value>;
+
+  template <typename KernelT, int Dims>
+  using EnableIfId = EnableIfIndexer<KernelT, id<Dims>>;
+
+  template <typename KernelT, int Dims>
+  using EnableIfItemWithOffset = EnableIfIndexer<KernelT, item<Dims, true>>;
+
+  template <typename KernelT, int Dims>
+  using EnableIfItemWithoutOffset = EnableIfIndexer<KernelT, item<Dims, false>>;
+
+  template <typename KernelT, int Dims>
+  using EnableIfNDItem = EnableIfIndexer<KernelT, nd_item<Dims>>;
+
   // NOTE: the name of this function - "kernel_single_task" - is used by the
   // Front End to determine kernel invocation kind.
   template <typename KernelName, typename KernelType>
@@ -568,69 +598,40 @@ public:
     KernelFunc();
   }
 
-  template <typename KernelName, typename KernelType, int dimensions>
-  __attribute__((sycl_kernel)) void kernel_parallel_for(
-      typename std::enable_if<std::is_same<detail::lambda_arg_type<KernelType>,
-                                           id<dimensions>>::value &&
-                                  (dimensions > 0 && dimensions < 4),
-                              KernelType>::type KernelFunc) {
-    id<dimensions> global_id{
-        __device_builtin::initGlobalInvocationId<dimensions, id<dimensions>>()};
-
-    KernelFunc(global_id);
-  }
-
-  // NOTE: the name of this function - "kernel_parallel_for" - is used by the
+  // NOTE: the name of these functions - "kernel_parallel_for" - are used by the
   // Front End to determine kernel invocation kind.
-  template <typename KernelName, typename KernelType, int dimensions>
-  __attribute__((sycl_kernel)) void kernel_parallel_for(
-      typename std::enable_if<std::is_same<detail::lambda_arg_type<KernelType>,
-                                           item<dimensions>>::value &&
-                                  (dimensions > 0 && dimensions < 4),
-                              KernelType>::type KernelFunc) {
-    id<dimensions> global_id{
-        __device_builtin::initGlobalInvocationId<dimensions, id<dimensions>>()};
-    range<dimensions> global_size{
-        __device_builtin::initGlobalSize<dimensions, range<dimensions>>()};
-
-    item<dimensions, false> Item =
-        detail::Builder::createItem<dimensions, false>(global_size, global_id);
-    KernelFunc(Item);
+  template <typename KernelName, typename KernelType, int Dims>
+  __attribute__((sycl_kernel)) EnableIfId<KernelType, Dims>
+  kernel_parallel_for(KernelType KernelFunc) {
+    KernelFunc(detail::Builder::getId<Dims>());
   }
 
-  template <typename KernelName, typename KernelType, int dimensions>
-  __attribute__((sycl_kernel)) void kernel_parallel_for(
-      typename std::enable_if<std::is_same<detail::lambda_arg_type<KernelType>,
-                                           nd_item<dimensions>>::value &&
-                                  (dimensions > 0 && dimensions < 4),
-                              KernelType>::type KernelFunc) {
-    range<dimensions> global_size{
-        __device_builtin::initGlobalSize<dimensions, range<dimensions>>()};
-    range<dimensions> local_size{
-        __device_builtin::initWorkgroupSize<dimensions, range<dimensions>>()};
-    range<dimensions> group_range{
-        __device_builtin::initNumWorkgroups<dimensions, range<dimensions>>()};
-    id<dimensions> group_id{
-        __device_builtin::initWorkgroupId<dimensions, id<dimensions>>()};
-    id<dimensions> global_id{
-        __device_builtin::initGlobalInvocationId<dimensions, id<dimensions>>()};
-    id<dimensions> local_id{
-        __device_builtin::initLocalInvocationId<dimensions, id<dimensions>>()};
-    id<dimensions> global_offset{
-        __device_builtin::initGlobalOffset<dimensions, id<dimensions>>()};
-
-    group<dimensions> Group = detail::Builder::createGroup<dimensions>(
-        global_size, local_size, group_range, group_id);
-    item<dimensions, true> globalItem =
-        detail::Builder::createItem<dimensions, true>(global_size, global_id,
-                                                      global_offset);
-    item<dimensions, false> localItem =
-        detail::Builder::createItem<dimensions, false>(local_size, local_id);
-    nd_item<dimensions> Nd_item =
-        detail::Builder::createNDItem<dimensions>(globalItem, localItem, Group);
-
-    KernelFunc(Nd_item);
+  template <typename KernelName, typename KernelType, int Dims>
+  __attribute__((sycl_kernel)) EnableIfItemWithoutOffset<KernelType, Dims>
+  kernel_parallel_for(KernelType KernelFunc) {
+    KernelFunc(detail::Builder::getItem<Dims, false>());
   }
+
+  template <typename KernelName, typename KernelType, int Dims>
+  __attribute__((sycl_kernel)) EnableIfItemWithOffset<KernelType, Dims>
+  kernel_parallel_for(KernelType KernelFunc) {
+    KernelFunc(detail::Builder::getItem<Dims, true>());
+  }
+
+  template <typename KernelName, typename KernelType, int Dims>
+  __attribute__((sycl_kernel)) EnableIfNDItem<KernelType, Dims>
+  kernel_parallel_for(KernelType KernelFunc) {
+    KernelFunc(detail::Builder::getNDItem<Dims>());
+  }
+
+  // NOTE: the name of this function - "kernel_parallel_for_work_group" - is
+  // used by the Front End to determine kernel invocation kind.
+  template <typename KernelName, typename KernelType, int Dims>
+  __attribute__((sycl_kernel)) void
+  kernel_parallel_for_work_group(KernelType KernelFunc) {
+    KernelFunc(detail::Builder::getGroup<Dims>());
+  }
+
 #endif
 
   // The method stores lambda to the template-free object and initializes
@@ -689,6 +690,16 @@ public:
 #endif
   }
 
+  // Similar to single_task, but passed lambda will be executed on host.
+  template <typename FuncT> void run_on_host_intel(FuncT Func) {
+    MNDRDesc.set(range<1>{1});
+
+    MArgs = std::move(MAssociatedAccesors);
+    MHostKernel.reset(
+        new detail::HostKernel<FuncT, void, 1>(std::move(Func)));
+    MCGType = detail::CG::RUN_ON_HOST_INTEL;
+  }
+
   // parallel_for version with a kernel represented as a lambda + range and
   // offset that specify global size and global offset correspondingly.
   template <typename KernelName = csd::auto_name, typename KernelType, int Dims>
@@ -730,24 +741,6 @@ public:
     MCGType = detail::CG::KERNEL;
 #endif // __SYCL_DEVICE_ONLY__
   }
-
-#ifdef __SYCL_DEVICE_ONLY__
-  // NOTE: the name of this function - "kernel_parallel_for_work_group" - is
-  // used by the Front End to determine kernel invocation kind.
-  template <typename KernelName, typename KernelType, int Dims>
-  __attribute__((sycl_kernel)) void
-  kernel_parallel_for_work_group(KernelType KernelFunc) {
-
-    range<Dims> GlobalSize{__device_builtin::initGlobalSize<Dims, range<Dims>>()};
-    range<Dims> LocalSize{__device_builtin::initWorkgroupSize<Dims, range<Dims>>()};
-    range<Dims> GroupRange{__device_builtin::initNumWorkgroups<Dims, range<Dims>>()};
-    id<Dims> GroupId{__device_builtin::initWorkgroupId<Dims, id<Dims>>()};
-
-    group<Dims> G = detail::Builder::createGroup<Dims>(GlobalSize, LocalSize,
-                                                       GroupRange, GroupId);
-    KernelFunc(G);
-  }
-#endif // __SYCL_DEVICE_ONLY__
 
   template <typename KernelName = csd::auto_name, typename KernelType, int Dims>
   void parallel_for_work_group(range<Dims> NumWorkGroups,
@@ -1160,6 +1153,22 @@ public:
         Dst[Index] = Pattern;
       });
     }
+  }
+
+  // Copy memory from the source to the destination.
+  void memcpy(void* Dest, const void* Src, size_t Count) {
+    MSrcPtr = const_cast<void *>(Src);
+    MDstPtr = Dest;
+    MLength = Count;
+    MCGType = detail::CG::COPY_USM;
+  }
+
+  // Fill the memory pointed to by the destination with the given bytes.
+  void memset(void *Dest, int Value, size_t Count) {
+    MDstPtr = Dest;
+    MPattern.push_back((char)Value);
+    MLength = Count;
+    MCGType = detail::CG::FILL_USM;
   }
 };
 } // namespace sycl

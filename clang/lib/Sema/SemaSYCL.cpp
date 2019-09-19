@@ -83,6 +83,106 @@ static CXXRecordDecl *getKernelObjectType(FunctionDecl *Caller) {
   return (*Caller->param_begin())->getType()->getAsCXXRecordDecl();
 }
 
+// This information is from Section 4.13 of the SYCL spec
+// https://www.khronos.org/registry/SYCL/specs/sycl-1.2.1.pdf
+// This function returns false if the math lib function
+// corresponding to the input builtin is not supported
+// for SYCL
+static bool IsSyclMathFunc(unsigned BuiltinID) {
+  switch (BuiltinID) {
+  case Builtin::BIlround:
+  case Builtin::BI__builtin_lround:
+  case Builtin::BIceill:
+  case Builtin::BI__builtin_ceill:
+  case Builtin::BIcopysignl:
+  case Builtin::BI__builtin_copysignl:
+  case Builtin::BIcosl:
+  case Builtin::BI__builtin_cosl:
+  case Builtin::BIexpl:
+  case Builtin::BI__builtin_expl:
+  case Builtin::BIexp2l:
+  case Builtin::BI__builtin_exp2l:
+  case Builtin::BIfabsl:
+  case Builtin::BI__builtin_fabsl:
+  case Builtin::BIfloorl:
+  case Builtin::BI__builtin_floorl:
+  case Builtin::BIfmal:
+  case Builtin::BI__builtin_fmal:
+  case Builtin::BIfmaxl:
+  case Builtin::BI__builtin_fmaxl:
+  case Builtin::BIfminl:
+  case Builtin::BI__builtin_fminl:
+  case Builtin::BIfmodl:
+  case Builtin::BI__builtin_fmodl:
+  case Builtin::BIlogl:
+  case Builtin::BI__builtin_logl:
+  case Builtin::BIlog10l:
+  case Builtin::BI__builtin_log10l:
+  case Builtin::BIlog2l:
+  case Builtin::BI__builtin_log2l:
+  case Builtin::BIpowl:
+  case Builtin::BI__builtin_powl:
+  case Builtin::BIrintl:
+  case Builtin::BI__builtin_rintl:
+  case Builtin::BIroundl:
+  case Builtin::BI__builtin_roundl:
+  case Builtin::BIsinl:
+  case Builtin::BI__builtin_sinl:
+  case Builtin::BIsqrtl:
+  case Builtin::BI__builtin_sqrtl:
+  case Builtin::BItruncl:
+  case Builtin::BI__builtin_truncl:
+  case Builtin::BIlroundl:
+  case Builtin::BI__builtin_lroundl:
+  case Builtin::BIceilf:
+  case Builtin::BI__builtin_ceilf:
+  case Builtin::BIcopysignf:
+  case Builtin::BI__builtin_copysignf:
+  case Builtin::BIcosf:
+  case Builtin::BI__builtin_cosf:
+  case Builtin::BIexpf:
+  case Builtin::BI__builtin_expf:
+  case Builtin::BIexp2f:
+  case Builtin::BI__builtin_exp2f:
+  case Builtin::BIfabsf:
+  case Builtin::BI__builtin_fabsf:
+  case Builtin::BIfloorf:
+  case Builtin::BI__builtin_floorf:
+  case Builtin::BIfmaf:
+  case Builtin::BI__builtin_fmaf:
+  case Builtin::BIfmaxf:
+  case Builtin::BI__builtin_fmaxf:
+  case Builtin::BIfminf:
+  case Builtin::BI__builtin_fminf:
+  case Builtin::BIfmodf:
+  case Builtin::BI__builtin_fmodf:
+  case Builtin::BIlogf:
+  case Builtin::BI__builtin_logf:
+  case Builtin::BIlog10f:
+  case Builtin::BI__builtin_log10f:
+  case Builtin::BIlog2f:
+  case Builtin::BI__builtin_log2f:
+  case Builtin::BIpowf:
+  case Builtin::BI__builtin_powf:
+  case Builtin::BIrintf:
+  case Builtin::BI__builtin_rintf:
+  case Builtin::BIroundf:
+  case Builtin::BI__builtin_roundf:
+  case Builtin::BIsinf:
+  case Builtin::BI__builtin_sinf:
+  case Builtin::BIsqrtf:
+  case Builtin::BI__builtin_sqrtf:
+  case Builtin::BItruncf:
+  case Builtin::BI__builtin_truncf:
+  case Builtin::BIlroundf:
+  case Builtin::BI__builtin_lroundf:
+    return false;
+  default:
+    break;
+  }
+  return true;
+}
+
 class MarkDeviceFunction : public RecursiveASTVisitor<MarkDeviceFunction> {
 public:
   MarkDeviceFunction(Sema &S)
@@ -119,7 +219,28 @@ public:
           SemaRef.addSyclDeviceDecl(Def);
         }
       }
-    } else if (!SemaRef.getLangOpts().SYCLAllowFuncPtr &&
+      if (auto const *FD = dyn_cast<FunctionDecl>(Callee)) {
+        //FIXME: We need check all target specified attributes for error if that
+        //function with attribute can not be called from sycl kernel.  The info
+        //is in ParsedAttr. We don't have to map from Attr to ParsedAttr
+        //currently. Erich is currently working on that in LLVM, once that is
+        //committed we need to change this".
+        if (FD->hasAttr<DLLImportAttr>()) {
+          SemaRef.Diag(e->getExprLoc(), diag::err_sycl_restrict)
+            << Sema::KernelCallDllimportFunction;
+          SemaRef.Diag(FD->getLocation(), diag::note_callee_decl) << FD;
+        }
+      }
+      // Specifically check if the math library function corresponding to this
+      // builtin is supported for SYCL
+      unsigned BuiltinID = (Callee ? Callee->getBuiltinID() : 0);
+      if (BuiltinID && !IsSyclMathFunc(BuiltinID)) {
+        StringRef Name = SemaRef.Context.BuiltinInfo.getName(BuiltinID);
+        SemaRef.Diag(e->getExprLoc(),
+                     diag::err_builtin_target_unsupported)
+            << Name << "SYCL device";
+      }
+    } else if ((!SemaRef.getLangOpts().SYCLAllowFuncPtr) &&
                !e->isTypeDependent())
       SemaRef.Diag(e->getExprLoc(), diag::err_sycl_restrict)
           << Sema::KernelCallFunctionPointer;
@@ -197,9 +318,12 @@ public:
         SemaRef.Diag(E->getExprLoc(), diag::err_sycl_restrict)
             << Sema::KernelNonConstStaticDataVariable;
       else if (!IsConst && VD->hasGlobalStorage() && !VD->isStaticLocal() &&
-          !VD->isStaticDataMember() && !isa<ParmVarDecl>(VD))
+          !VD->isStaticDataMember() && !isa<ParmVarDecl>(VD)) {
+        if (VD->getTLSKind() != VarDecl::TLS_None)
+          SemaRef.Diag(E->getLocation(), diag::err_thread_unsupported);
         SemaRef.Diag(E->getLocation(), diag::err_sycl_restrict)
             << Sema::KernelGlobalVariable;
+      }
       if (!VD->isLocalVarDeclOrParm() && VD->hasGlobalStorage()) {
         VD->addAttr(SYCLDeviceAttr::CreateImplicit(SemaRef.Context));
         SemaRef.addSyclDeviceDecl(VD);
@@ -1301,6 +1425,7 @@ void SYCLIntegrationHeader::emitFwdDecl(raw_ostream &O, const Decl *D) {
   // print declaration into a string:
   PrintingPolicy P(D->getASTContext().getLangOpts());
   P.adjustForCPlusPlusFwdDecl();
+  P.SuppressTypedefs = true;
   std::string S;
   llvm::raw_string_ostream SO(S);
   D->print(SO, P);
@@ -1384,8 +1509,28 @@ void SYCLIntegrationHeader::emitForwardClassDecls(
         }
         break;
       }
-      case TemplateArgument::ArgKind::Template:
-        llvm_unreachable("template template arguments not supported");
+      case TemplateArgument::ArgKind::Template: {
+        // recursion is not required, since the maximum possible nesting level
+        // equals two for template argument
+        //
+        // for example:
+        //   template <typename T> class Bar;
+        //   template <template <typename> class> class Baz;
+        //   template <template <template <typename> class> class T> 
+        //   class Foo;
+        //
+        // The Baz is a template class. The Baz<Bar> is a class. The class Foo
+        // should be specialized with template class, not a class. The correct
+        // specialization of template class Foo is Foo<Baz>. The incorrect 
+        // specialization of template class Foo is Foo<Baz<Bar>>. In this case
+        // template class Foo specialized by class Baz<Bar>, not a template 
+        // class template <template <typename> class> class T as it should.
+        TemplateDecl *TD = Arg.getAsTemplate().getAsTemplateDecl();
+        if (Printed.insert(TD).second) {
+          emitFwdDecl(O, TD);
+        }
+        break;
+      }
       default:
         break; // nop
       }
@@ -1493,8 +1638,11 @@ void SYCLIntegrationHeader::emit(raw_ostream &O) {
         O << "', '" << c;
       O << "'> {\n";
     } else {
+      LangOptions LO;
+      PrintingPolicy P(LO);
+      P.SuppressTypedefs = true;
       O << "template <> struct KernelInfo<"
-        << eraseAnonNamespace(K.NameType.getAsString()) << "> {\n";
+        << eraseAnonNamespace(K.NameType.getAsString(P)) << "> {\n";
     }
     O << "  DLL_LOCAL\n";
     O << "  static constexpr const char* getName() { return \"" << K.Name

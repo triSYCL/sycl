@@ -6,11 +6,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out -lOpenCL
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
+// TODO: SYCL specific fail - analyze and enable on Windows
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
-// TODO temporarily disable GPU until regression in Intel Gen driver fixed.
-// R.U.N: %GPU_RUN_PLACEHOLDER %t.out
+// RUN: %GPU_RUN_ON_LINUX_PLACEHOLDER %t.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
 
 // This test checks correctness of hierarchical kernel execution when there is
@@ -39,7 +39,7 @@ static bool testWgScope(queue &Q) {
   const int VAL2 = 1000;
   const int GROUP_ID_SPLIT = 2;
 
-  std::unique_ptr<int> Data(new int[RangeLength]);
+  std::unique_ptr<int[]> Data(new int[RangeLength]);
   int *Ptr = Data.get();
   std::memset(Ptr, 0, RangeLength * sizeof(Ptr[0]));
 
@@ -203,7 +203,7 @@ bool testPrivateMemory(queue &Q) {
   constexpr int C1 = 5;
   constexpr int C2 = 1;
 
-  std::unique_ptr<int> Data(new int[RangeLength]);
+  std::unique_ptr<int[]> Data(new int[RangeLength]);
   int *Ptr = Data.get();
 
   std::memset(Ptr, 0, RangeLength * sizeof(Ptr[0]));

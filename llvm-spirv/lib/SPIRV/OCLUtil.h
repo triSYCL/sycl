@@ -358,7 +358,7 @@ template <typename T> std::string getFullPath(const T *Scope) {
   if (sys::path::is_absolute(Filename))
     return Filename;
   SmallString<16> DirName = Scope->getDirectory();
-  sys::path::append(DirName, Filename);
+  sys::path::append(DirName, sys::path::Style::posix, Filename);
   return DirName.str().str();
 }
 
@@ -427,6 +427,13 @@ bool isSamplerTy(Type *Ty);
 // If so, it applies ContractionOff ExecutionMode to the kernel.
 void checkFpContract(BinaryOperator *B, SPIRVBasicBlock *BB);
 
+template <typename T> std::string toString(const T *Object) {
+  std::string S;
+  llvm::raw_string_ostream RSOS(S);
+  Object->print(RSOS);
+  RSOS.flush();
+  return S;
+}
 } // namespace OCLUtil
 
 ///////////////////////////////////////////////////////////////////////////////

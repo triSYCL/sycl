@@ -60,11 +60,12 @@ public:
   void addImages(pi_device_binaries DeviceImages);
   void debugDumpBinaryImages() const;
   void debugDumpBinaryImage(const DeviceImage *Img) const;
+  static string_class getProgramBuildLog(const RT::PiProgram &Program);
 
 private:
   RT::PiProgram loadProgram(OSModuleHandle M, const context &Context,
                             DeviceImage **I = nullptr);
-  void build(RT::PiProgram &Program, const string_class &Options = "",
+  void build(RT::PiProgram Program, const string_class &Options = "",
              std::vector<RT::PiDevice> Devices = std::vector<RT::PiDevice>());
 
   ProgramManager() = default;

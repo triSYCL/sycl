@@ -198,8 +198,7 @@ public:
 
   template <class ArgT = KernelArgType>
   typename std::enable_if<
-      (std::is_same<ArgT, item<Dims, /*Offset=*/false>>::value ||
-       std::is_same<ArgT, item<Dims, /*Offset=*/true>>::value)>::type
+      std::is_same<ArgT, item<Dims, /*Offset=*/false>>::value>::type
   runOnHost(const NDRDescT &NDRDesc) {
     size_t XYZ[3] = {0};
     sycl::id<Dims> ID;
@@ -224,15 +223,42 @@ public:
   }
 
   template <class ArgT = KernelArgType>
+  typename std::enable_if<
+      std::is_same<ArgT, item<Dims, /*Offset=*/true>>::value>::type
+  runOnHost(const NDRDescT &NDRDesc) {
+    sycl::range<Dims> Range;
+    sycl::id<Dims> Offset;
+    for (int I = 0; I < Dims; ++I) {
+      Range[I] = NDRDesc.GlobalSize[I];
+      Offset[I] = NDRDesc.GlobalOffset[I];
+    }
+    size_t XYZ[3] = {0};
+    sycl::id<Dims> ID;
+    for (; XYZ[2] < NDRDesc.GlobalSize[2]; ++XYZ[2]) {
+      XYZ[1] = 0;
+      for (; XYZ[1] < NDRDesc.GlobalSize[1]; ++XYZ[1]) {
+        XYZ[0] = 0;
+        for (; XYZ[0] < NDRDesc.GlobalSize[0]; ++XYZ[0]) {
+          for (int I = 0; I < Dims; ++I)
+            ID[I] = XYZ[I] + Offset[I];
+
+          sycl::item<Dims, /*Offset=*/true> Item =
+              IDBuilder::createItem<Dims, true>(Range, ID, Offset);
+          MKernel(Item);
+        }
+      }
+    }
+  }
+
+  template <class ArgT = KernelArgType>
   typename std::enable_if<std::is_same<ArgT, nd_item<Dims>>::value>::type
   runOnHost(const NDRDescT &NDRDesc) {
-    // TODO add offset logic
-
     sycl::range<Dims> GroupSize;
     for (int I = 0; I < Dims; ++I) {
+      if (NDRDesc.LocalSize[I] == 0 ||
+          NDRDesc.GlobalSize[I] % NDRDesc.LocalSize[I] != 0)
+        throw sycl::runtime_error("Invalid local size for global size");
       GroupSize[I] = NDRDesc.GlobalSize[I] / NDRDesc.LocalSize[I];
-      assert((NDRDesc.GlobalSize[I] % NDRDesc.LocalSize[I] == 0) &&
-             "SYCL requires the global size to be a multiple of local");
     }
 
     sycl::range<Dims> GlobalSize;
@@ -249,7 +275,7 @@ public:
           GlobalSize, LocalSize, GroupSize, GroupID);
 
       detail::NDLoop<Dims>::iterate(LocalSize, [&](const id<Dims> &LocalID) {
-        id<Dims> GlobalID = GroupID * LocalSize + LocalID;
+        id<Dims> GlobalID = GroupID * LocalSize + LocalID + GlobalOffset;
         const sycl::item<Dims, /*Offset=*/true> GlobalItem =
             IDBuilder::createItem<Dims, true>(GlobalSize, GlobalID,
                                               GlobalOffset);
@@ -268,8 +294,10 @@ public:
     sycl::range<Dims> NGroups;
 
     for (int I = 0; I < Dims; ++I) {
+      if (NDRDesc.LocalSize[I] == 0 ||
+          NDRDesc.GlobalSize[I] % NDRDesc.LocalSize[I] != 0)
+        throw sycl::runtime_error("Invalid local size for global size");
       NGroups[I] = NDRDesc.GlobalSize[I] / NDRDesc.LocalSize[I];
-      assert(NDRDesc.GlobalSize[I] % NDRDesc.LocalSize[I] == 0);
     }
     sycl::range<Dims> GlobalSize;
     sycl::range<Dims> LocalSize;
@@ -294,12 +322,16 @@ class CG {
 public:
   // Type of the command group.
   enum CGTYPE {
+    NONE,
     KERNEL,
     COPY_ACC_TO_PTR,
     COPY_PTR_TO_ACC,
     COPY_ACC_TO_ACC,
     FILL,
-    UPDATE_HOST
+    UPDATE_HOST,
+    RUN_ON_HOST_INTEL,
+    COPY_USM,
+    FILL_USM
   };
 
   CG(CGTYPE Type, std::vector<std::vector<char>> ArgsStorage,
@@ -314,11 +346,9 @@ public:
 
   CG(CG &&CommandGroup) = default;
 
-  std::vector<Requirement *> getRequirements() const { return MRequirements; }
-
-  std::vector<detail::EventImplPtr> getEvents() const { return MEvents; }
-
   CGTYPE getType() { return MType; }
+
+  virtual ~CG() = default;
 
 private:
   CGTYPE MType;
@@ -330,6 +360,8 @@ private:
   std::vector<detail::AccessorImplPtr> MAccStorage;
   // Storage for shared_ptrs.
   std::vector<std::shared_ptr<const void>> MSharedPtrStorage;
+
+public:
   // List of requirements that specify which memory is needed for the command
   // group to be executed.
   std::vector<Requirement *> MRequirements;
@@ -357,14 +389,27 @@ public:
                std::vector<detail::EventImplPtr> Events,
                std::vector<ArgDesc> Args, std::string KernelName,
                detail::OSModuleHandle OSModuleHandle,
-               std::vector<std::shared_ptr<detail::stream_impl>> Streams)
-      : CG(KERNEL, std::move(ArgsStorage), std::move(AccStorage),
+               std::vector<std::shared_ptr<detail::stream_impl>> Streams,
+               CGTYPE Type)
+      : CG(Type, std::move(ArgsStorage), std::move(AccStorage),
            std::move(SharedPtrStorage), std::move(Requirements),
            std::move(Events)),
         MNDRDesc(std::move(NDRDesc)), MHostKernel(std::move(HKernel)),
         MSyclKernel(std::move(SyclKernel)), MArgs(std::move(Args)),
         MKernelName(std::move(KernelName)), MOSModuleHandle(OSModuleHandle),
-        MStreams(std::move(Streams)) {}
+        MStreams(std::move(Streams)) {
+    assert((getType() == RUN_ON_HOST_INTEL || getType() == KERNEL) &&
+           "Wrong type of exec kernel CG.");
+
+    if (MNDRDesc.LocalSize.size() > 0) {
+      range<3> Excess = (MNDRDesc.GlobalSize % MNDRDesc.LocalSize);
+      for (int I = 0; I < 3; I++) {
+        if (Excess[I] != 0)
+          throw nd_range_error("Global size is not a multiple of local size",
+              CL_INVALID_WORK_GROUP_SIZE);
+      }
+    }
+  }
 
   std::vector<ArgDesc> getArguments() const { return MArgs; }
   std::string getKernelName() const { return MKernelName; }
@@ -428,6 +473,51 @@ public:
         MPtr((Requirement *)Ptr) {}
 
   Requirement *getReqToUpdate() { return MPtr; }
+};
+
+// The class which represents "copy" command group for USM pointers.
+class CGCopyUSM : public CG {
+  void *MSrc;
+  void *MDst;
+  size_t MLength;
+
+public:
+  CGCopyUSM(void *Src, void *Dst, size_t Length,
+            std::vector<std::vector<char>> ArgsStorage,
+            std::vector<detail::AccessorImplPtr> AccStorage,
+            std::vector<std::shared_ptr<const void>> SharedPtrStorage,
+            std::vector<Requirement *> Requirements,
+            std::vector<detail::EventImplPtr> Events)
+      : CG(COPY_USM, std::move(ArgsStorage), std::move(AccStorage),
+           std::move(SharedPtrStorage), std::move(Requirements),
+           std::move(Events)),
+        MSrc(Src), MDst(Dst), MLength(Length) {}
+
+  void *getSrc() { return MSrc; }
+  void *getDst() { return MDst; }
+  size_t getLength() { return MLength; }
+};
+
+// The class which represents "fill" command group for USM pointers.
+class CGFillUSM : public CG {
+  std::vector<char> MPattern;
+  void *MDst;
+  size_t MLength;
+
+public:
+  CGFillUSM(std::vector<char> Pattern, void *DstPtr, size_t Length,
+            std::vector<std::vector<char>> ArgsStorage,
+            std::vector<detail::AccessorImplPtr> AccStorage,
+            std::vector<std::shared_ptr<const void>> SharedPtrStorage,
+            std::vector<Requirement *> Requirements,
+            std::vector<detail::EventImplPtr> Events)
+      : CG(FILL_USM, std::move(ArgsStorage), std::move(AccStorage),
+           std::move(SharedPtrStorage), std::move(Requirements),
+           std::move(Events)),
+        MPattern(std::move(Pattern)), MDst(DstPtr), MLength(Length) {}
+  void *getDst() { return MDst; }
+  size_t getLength() { return MLength; }
+  int getFill() { return MPattern[0]; }
 };
 
 } // namespace detail

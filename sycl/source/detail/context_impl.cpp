@@ -40,17 +40,14 @@ context_impl::context_impl(const vector_class<cl::sycl::device> Devices,
       RT::piContextCreate(0, DeviceIds.size(), DeviceIds.data(), 0, 0, &Err),
       Err));
 
-  if (usm::CLUSM* clusm = GetCLUSM()) {
-    cl_platform_id id = m_Platform.get();
-    clusm->initExtensions(id);
-  }
+  m_USMDispatch.reset(new usm::USMDispatcher(m_Platform.get(), DeviceIds));
 }
 
 context_impl::context_impl(cl_context ClContext, async_handler AsyncHandler)
     : m_AsyncHandler(AsyncHandler), m_Devices(),
       m_Platform(), m_OpenCLInterop(true), m_HostContext(false) {
 
-  m_Context = pi::pi_cast<RT::PiContext>(ClContext);
+  m_Context = pi::cast<RT::PiContext>(ClContext);
   vector_class<RT::PiDevice> DeviceIds;
   size_t DevicesNum = 0;
   // TODO catch an exception and put it to list of asynchronous exceptions
@@ -77,10 +74,10 @@ cl_context context_impl::get() const {
   if (m_OpenCLInterop) {
     // TODO catch an exception and put it to list of asynchronous exceptions
     PI_CALL(RT::piContextRetain(m_Context));
-    return pi::pi_cast<cl_context>(m_Context);
+    return pi::cast<cl_context>(m_Context);
   }
   throw invalid_object_error(
-      "This instance of event doesn't support OpenCL interoperability.");
+      "This instance of context doesn't support OpenCL interoperability.");
 }
 
 bool context_impl::is_host() const { return m_HostContext || !m_OpenCLInterop; }
@@ -125,6 +122,10 @@ context_impl::get_info<info::context::devices>() const {
 
 RT::PiContext &context_impl::getHandleRef() { return m_Context; }
 const RT::PiContext &context_impl::getHandleRef() const { return m_Context; }
+
+std::shared_ptr<usm::USMDispatcher> context_impl::getUSMDispatch() const {
+  return m_USMDispatch;
+}
 
 } // namespace detail
 } // namespace sycl

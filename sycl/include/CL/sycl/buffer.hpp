@@ -139,7 +139,7 @@ public:
 
     size_t BufSize = 0;
     PI_CALL(detail::RT::piMemGetInfo(
-        detail::pi::pi_cast<detail::RT::PiMem>(MemObject), CL_MEM_SIZE,
+        detail::pi::cast<detail::RT::PiMem>(MemObject), CL_MEM_SIZE,
         sizeof(size_t), &BufSize, nullptr));
 
     Range[0] = BufSize / sizeof(T);
@@ -222,15 +222,43 @@ public:
   bool is_sub_buffer() const { return IsSubBuffer; }
 
   template <typename ReinterpretT, int ReinterpretDim>
-  buffer<ReinterpretT, ReinterpretDim, AllocatorT>
+  typename std::enable_if<
+      ReinterpretDim == dimensions,
+      buffer<ReinterpretT, ReinterpretDim, AllocatorT>>::type
   reinterpret(range<ReinterpretDim> reinterpretRange) const {
     if (sizeof(ReinterpretT) * reinterpretRange.size() != get_size())
       throw cl::sycl::invalid_object_error(
           "Total size in bytes represented by the type and range of the "
           "reinterpreted SYCL buffer does not equal the total size in bytes "
           "represented by the type and range of this SYCL buffer");
-    return buffer<ReinterpretT, ReinterpretDim, AllocatorT>(impl,
-                                                            reinterpretRange);
+
+    // This is not the best approach since for now it works only for
+    // 1D subbuffers. Other cases are not supported for now.
+    id<ReinterpretDim> NewOffset{};
+    NewOffset[ReinterpretDim - 1] =
+        Offset[dimensions - 1] * sizeof(T) / sizeof(ReinterpretT);
+
+    return buffer<ReinterpretT, ReinterpretDim, AllocatorT>(
+        impl, reinterpretRange, MemRange, NewOffset, IsSubBuffer);
+  }
+
+  template <typename ReinterpretT, int ReinterpretDim>
+  typename std::enable_if<
+      ReinterpretDim != dimensions,
+      buffer<ReinterpretT, ReinterpretDim, AllocatorT>>::type
+  reinterpret(range<ReinterpretDim> reinterpretRange) const {
+    if (sizeof(ReinterpretT) * reinterpretRange.size() != get_size())
+      throw cl::sycl::invalid_object_error(
+          "Total size in bytes represented by the type and range of the "
+          "reinterpreted SYCL buffer does not equal the total size in bytes "
+          "represented by the type and range of this SYCL buffer");
+
+    id<ReinterpretDim> NewOffset{};
+    NewOffset[ReinterpretDim - 1] =
+        Offset[dimensions - 1] * sizeof(T) / sizeof(ReinterpretT);
+
+    return buffer<ReinterpretT, ReinterpretDim, AllocatorT>(
+        impl, reinterpretRange, reinterpretRange, NewOffset, IsSubBuffer);
   }
 
   template <typename propertyT> bool has_property() const {
@@ -260,8 +288,11 @@ private:
 
   // Reinterpret contructor
   buffer(shared_ptr_class<detail::buffer_impl<AllocatorT>> Impl,
-         range<dimensions> reinterpretRange)
-      : impl(Impl), Range(reinterpretRange), MemRange(reinterpretRange) {};
+         range<dimensions> reinterpretRange,
+         range<dimensions> reinterpretMemRange,
+         id<dimensions> reinterpretOffset, bool isSubBuffer)
+      : impl(Impl), Range(reinterpretRange), MemRange(reinterpretMemRange),
+        IsSubBuffer(isSubBuffer), Offset(reinterpretOffset){};
 };
 } // namespace sycl
 } // namespace cl

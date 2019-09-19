@@ -1,4 +1,4 @@
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out -lOpenCL
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
 //
 // Profiling info is not supported on host device so far.
 //

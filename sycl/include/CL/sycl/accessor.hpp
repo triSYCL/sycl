@@ -651,6 +651,12 @@ class accessor :
                  AccessTarget == access::target::host_buffer),
                 "Expected buffer type");
 
+  static_assert((AccessTarget == access::target::global_buffer ||
+                 AccessTarget == access::target::host_buffer) ||
+                (AccessTarget == access::target::constant_buffer &&
+                 AccessMode == access::mode::read),
+                "Access mode can be only read for constant buffers");
+
   using AccessorCommonT = detail::accessor_common<DataT, Dimensions, AccessMode,
                                                   AccessTarget, IsPlaceholder>;
 
@@ -741,11 +747,11 @@ public:
   using reference = DataT &;
   using const_reference = const DataT &;
 
-  template <int Dims = Dimensions>
-  accessor(
-      detail::enable_if_t<Dims == 0 && ((!IsPlaceH && IsHostBuf) ||
-                                (IsPlaceH && (IsGlobalBuf || IsConstantBuf))),
-                  buffer<DataT, 1>> &BufferRef)
+  template <int Dims = Dimensions, typename AllocatorT,
+            typename detail::enable_if_t<
+                Dims == 0 && ((!IsPlaceH && IsHostBuf) ||
+                (IsPlaceH && (IsGlobalBuf || IsConstantBuf)))>* = nullptr>
+  accessor(buffer<DataT, 1, AllocatorT> &BufferRef)
 #ifdef __SYCL_DEVICE_ONLY__
       : impl(id<AdjustedDim>(), BufferRef.get_range(), BufferRef.MemRange) {
 #else
@@ -762,11 +768,11 @@ public:
 #endif
   }
 
-  template <int Dims = Dimensions>
-  accessor(
-      buffer<DataT, 1> &BufferRef,
-      detail::enable_if_t<Dims == 0 && (!IsPlaceH && (IsGlobalBuf || IsConstantBuf)),
-                  handler> &CommandGroupHandler)
+  template <int Dims = Dimensions, typename AllocatorT>
+  accessor(buffer<DataT, 1, AllocatorT> &BufferRef,
+           detail::enable_if_t<Dims == 0 &&
+                               (!IsPlaceH && (IsGlobalBuf || IsConstantBuf)),
+                               handler> &CommandGroupHandler)
 #ifdef __SYCL_DEVICE_ONLY__
       : impl(id<AdjustedDim>(), BufferRef.get_range(), BufferRef.MemRange) {
   }
@@ -781,11 +787,12 @@ public:
   }
 #endif
 
-  template <int Dims = Dimensions,
-            typename = detail::enable_if_t<
+  template <int Dims = Dimensions, typename AllocatorT,
+            typename detail::enable_if_t<
                 (Dims > 0) && ((!IsPlaceH && IsHostBuf) ||
-                               (IsPlaceH && (IsGlobalBuf || IsConstantBuf)))>>
-  accessor(buffer<DataT, Dimensions> &BufferRef)
+                               (IsPlaceH && (IsGlobalBuf || IsConstantBuf)))>
+                * = nullptr>
+  accessor(buffer<DataT, Dimensions, AllocatorT> &BufferRef)
 #ifdef __SYCL_DEVICE_ONLY__
       : impl(id<Dimensions>(), BufferRef.get_range(), BufferRef.MemRange) {
   }
@@ -803,10 +810,11 @@ public:
   }
 #endif
 
-  template <int Dims = Dimensions,
+  template <int Dims = Dimensions, typename AllocatorT,
             typename = detail::enable_if_t<
                 (Dims > 0) && (!IsPlaceH && (IsGlobalBuf || IsConstantBuf))>>
-  accessor(buffer<DataT, Dimensions> &BufferRef, handler &CommandGroupHandler)
+  accessor(buffer<DataT, Dimensions, AllocatorT> &BufferRef,
+           handler &CommandGroupHandler)
 #ifdef __SYCL_DEVICE_ONLY__
       : impl(id<AdjustedDim>(), BufferRef.get_range(), BufferRef.MemRange) {
   }
@@ -821,12 +829,12 @@ public:
   }
 #endif
 
-  template <int Dims = Dimensions,
+  template <int Dims = Dimensions, typename AllocatorT,
             typename = detail::enable_if_t<
                 (Dims > 0) && ((!IsPlaceH && IsHostBuf) ||
                                (IsPlaceH && (IsGlobalBuf || IsConstantBuf)))>>
-  accessor(buffer<DataT, Dimensions> &BufferRef, range<Dimensions> AccessRange,
-           id<Dimensions> AccessOffset = {})
+  accessor(buffer<DataT, Dimensions, AllocatorT> &BufferRef,
+           range<Dimensions> AccessRange, id<Dimensions> AccessOffset = {})
 #ifdef __SYCL_DEVICE_ONLY__
       : impl(AccessOffset, AccessRange, BufferRef.MemRange) {
   }
@@ -843,11 +851,12 @@ public:
   }
 #endif
 
-  template <int Dims = Dimensions,
+  template <int Dims = Dimensions, typename AllocatorT,
             typename = detail::enable_if_t<
                 (Dims > 0) && (!IsPlaceH && (IsGlobalBuf || IsConstantBuf))>>
-  accessor(buffer<DataT, Dimensions> &BufferRef, handler &CommandGroupHandler,
-           range<Dimensions> AccessRange, id<Dimensions> AccessOffset = {})
+  accessor(buffer<DataT, Dimensions, AllocatorT> &BufferRef,
+           handler &CommandGroupHandler, range<Dimensions> AccessRange,
+           id<Dimensions> AccessOffset = {})
 #ifdef __SYCL_DEVICE_ONLY__
       : impl(AccessOffset, AccessRange, BufferRef.MemRange) {
   }

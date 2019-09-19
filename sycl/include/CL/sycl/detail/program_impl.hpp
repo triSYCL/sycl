@@ -169,7 +169,7 @@ public:
       throw invalid_object_error("This instance of program is a host instance");
     }
     PI_CALL(RT::piProgramRetain(Program));
-    return pi::pi_cast<cl_program>(Program);
+    return pi::cast<cl_program>(Program);
   }
 
   bool is_host() const { return Context.is_host(); }
@@ -361,8 +361,8 @@ private:
         0, nullptr, nullptr, nullptr, nullptr));
 
     if (Err != PI_SUCCESS) {
-      // TODO make the exception message more descriptive
-      throw compile_program_error("Program compilation error");
+      throw compile_program_error("Program compilation error:\n" +
+                                  ProgramManager::getProgramBuildLog(Program));
     }
     CompileOptions = Options;
     BuildOptions = Options;
@@ -377,8 +377,8 @@ private:
         nullptr, nullptr));
 
     if (Err != PI_SUCCESS) {
-      // TODO make the exception message more descriptive
-      throw compile_program_error("Program build error");
+      throw compile_program_error("Program build error:\n" +
+                                  ProgramManager::getProgramBuildLog(Program));
     }
     BuildOptions = Options;
   }

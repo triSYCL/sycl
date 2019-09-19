@@ -440,6 +440,9 @@ public:
   /// \param ShowHidden - Show hidden options.
   void PrintHelp(bool ShowHidden) const;
 
+  /// PrintSYCLToolHelp - Print help text from offline compiler tools.
+  void PrintSYCLToolHelp(const Compilation &C) const;
+
   /// PrintVersion - Print the driver version.
   void PrintVersion(const Compilation &C, raw_ostream &OS) const;
 
@@ -618,6 +621,9 @@ public:
 /// \return True if the last defined optimization level is -Ofast.
 /// And False otherwise.
 bool isOptimizationLevelFast(const llvm::opt::ArgList &Args);
+
+/// \return True if the filename has a valid object file extension.
+bool isObjectFile(std::string FileName);
 
 } // end namespace driver
 } // end namespace clang

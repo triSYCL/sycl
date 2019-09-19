@@ -48,7 +48,8 @@
 // CK-HELP: {{.*}}o {{.*}}- object
 // CK-HELP: {{.*}}gch {{.*}}- precompiled-header
 // CK-HELP: {{.*}}ast {{.*}}- clang AST file
-// CK-HELP: {{.*}}ao {{.*}}- archive; output file is a list of unbundled objects
+// CK-HELP: {{.*}}ao {{.*}}- archive with one object; output is an unbundled object
+// CK-HELP: {{.*}}aoo {{.*}}- archive; output file is a list of unbundled objects
 // CK-HELP: {{.*}}-unbundle {{.*}}- Unbundle bundled file into several output files.
 
 //
@@ -169,14 +170,20 @@
 // RUN: diff %t.i %t.res.i
 // RUN: diff %t.tgt1 %t.res.tgt1
 // RUN: diff %t.tgt2 %t.res.tgt2
+// RUN: clang-offload-bundler -type=i -targets=openmp-powerpc64le-ibm-linux-gnu -outputs=%t.res.tgt1 -inputs=%t.bundle3.i -unbundle
+// RUN: diff %t.tgt1 %t.res.tgt1
 // RUN: clang-offload-bundler -type=ii -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.ii,%t.res.tgt1,%t.res.tgt2 -inputs=%t.bundle3.ii -unbundle
 // RUN: diff %t.ii %t.res.ii
 // RUN: diff %t.tgt1 %t.res.tgt1
+// RUN: diff %t.tgt2 %t.res.tgt2
+// RUN: clang-offload-bundler -type=ii -targets=openmp-x86_64-pc-linux-gnu -outputs=%t.res.tgt2 -inputs=%t.bundle3.ii -unbundle
 // RUN: diff %t.tgt2 %t.res.tgt2
 // RUN: clang-offload-bundler -type=ll -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.ll,%t.res.tgt1,%t.res.tgt2 -inputs=%t.bundle3.ll -unbundle
 // RUN: diff %t.ll %t.res.ll
 // RUN: diff %t.tgt1 %t.res.tgt1
 // RUN: diff %t.tgt2 %t.res.tgt2
+// RUN: clang-offload-bundler -type=ll -targets=openmp-powerpc64le-ibm-linux-gnu -outputs=%t.res.tgt1 -inputs=%t.bundle3.ll -unbundle
+// RUN: diff %t.tgt1 %t.res.tgt1
 // RUN: clang-offload-bundler -type=s -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.s,%t.res.tgt1,%t.res.tgt2 -inputs=%t.bundle3.s -unbundle
 // RUN: diff %t.s %t.res.s
 // RUN: diff %t.tgt1 %t.res.tgt1
@@ -184,6 +191,8 @@
 // RUN: clang-offload-bundler -type=s -targets=openmp-powerpc64le-ibm-linux-gnu,host-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.tgt1,%t.res.s,%t.res.tgt2 -inputs=%t.bundle3.s -unbundle
 // RUN: diff %t.s %t.res.s
 // RUN: diff %t.tgt1 %t.res.tgt1
+// RUN: diff %t.tgt2 %t.res.tgt2
+// RUN: clang-offload-bundler -type=s -targets=openmp-x86_64-pc-linux-gnu -outputs=%t.res.tgt2 -inputs=%t.bundle3.s -unbundle
 // RUN: diff %t.tgt2 %t.res.tgt2
 
 // Check if we can unbundle a file with no magic strings.
@@ -196,6 +205,10 @@
 // RUN: diff %t.empty %t.res.tgt1
 // RUN: diff %t.empty %t.res.tgt2
 
+// Check that bindler prints an error if given host bundle does not exist in the fat binary.
+// RUN: not clang-offload-bundler -type=s -targets=host-x86_64-xxx-linux-gnu,openmp-powerpc64le-ibm-linux-gnu -outputs=%t.res.s,%t.res.tgt1 -inputs=%t.bundle3.s -unbundle 2>&1 | FileCheck %s --check-prefix CK-NO-HOST-BUNDLE
+// CK-NO-HOST-BUNDLE: error: Can't find bundle for the host target
+
 //
 // Check binary bundle/unbundle. The content that we have before bundling must be the same we have after unbundling.
 //
@@ -207,9 +220,13 @@
 // RUN: diff %t.bc %t.res.bc
 // RUN: diff %t.tgt1 %t.res.tgt1
 // RUN: diff %t.tgt2 %t.res.tgt2
+// RUN: clang-offload-bundler -type=bc -targets=openmp-powerpc64le-ibm-linux-gnu -outputs=%t.res.tgt1 -inputs=%t.bundle3.bc -unbundle
+// RUN: diff %t.tgt1 %t.res.tgt1
 // RUN: clang-offload-bundler -type=gch -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.gch,%t.res.tgt1,%t.res.tgt2 -inputs=%t.bundle3.gch -unbundle
 // RUN: diff %t.ast %t.res.gch
 // RUN: diff %t.tgt1 %t.res.tgt1
+// RUN: diff %t.tgt2 %t.res.tgt2
+// RUN: clang-offload-bundler -type=gch -targets=openmp-x86_64-pc-linux-gnu -outputs=%t.res.tgt2 -inputs=%t.bundle3.gch -unbundle
 // RUN: diff %t.tgt2 %t.res.tgt2
 // RUN: clang-offload-bundler -type=ast -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.ast,%t.res.tgt1,%t.res.tgt2 -inputs=%t.bundle3.ast -unbundle
 // RUN: diff %t.ast %t.res.ast
@@ -223,6 +240,8 @@
 // RUN: diff %t.ast %t.res.ast
 // RUN: diff %t.tgt1 %t.res.tgt1
 // RUN: diff %t.tgt2 %t.res.tgt2
+// RUN: clang-offload-bundler -type=ast -targets=openmp-powerpc64le-ibm-linux-gnu -outputs=%t.res.tgt1 -inputs=%t.bundle3.ast -unbundle
+// RUN: diff %t.tgt1 %t.res.tgt1
 
 // Check if we can unbundle a file with no magic strings.
 // RUN: clang-offload-bundler -type=bc -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.bc,%t.res.tgt1,%t.res.tgt2 -inputs=%t.bc -unbundle
@@ -233,6 +252,11 @@
 // RUN: diff %t.bc %t.res.bc
 // RUN: diff %t.empty %t.res.tgt1
 // RUN: diff %t.empty %t.res.tgt2
+
+// Check that we do not have to unbundle all available bundles from the fat binary.
+// RUN: clang-offload-bundler -type=ast -targets=host-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.ast,%t.res.tgt2 -inputs=%t.bundle3.unordered.ast -unbundle
+// RUN: diff %t.ast %t.res.ast
+// RUN: diff %t.tgt2 %t.res.tgt2
 
 //
 // Check object bundle/unbundle. The content should be bundled into an ELF
@@ -254,6 +278,8 @@
 // RUN: diff %t.2.o %t.res.o
 // RUN: diff %t.tgt1 %t.res.tgt1
 // RUN: diff %t.tgt2 %t.res.tgt2
+// RUN: clang-offload-bundler -type=o -targets=openmp-powerpc64le-ibm-linux-gnu -outputs=%t.res.tgt1 -inputs=%t.2.o -unbundle
+// RUN: diff %t.tgt1 %t.res.tgt1
 
 // Check if we can unbundle a file with no magic strings.
 // RUN: clang-offload-bundler -type=o -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.res.o,%t.res.tgt1,%t.res.tgt2 -inputs=%t.o -unbundle
@@ -278,16 +304,34 @@
 //
 // Check archive bundle.
 //
-// RUN: llvm-ar crv %t.a %t.2.o
-// RUN: clang-offload-bundler -type=ao -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.host.lst,%t.tgt1.lst,%t.tgt2.lst -inputs=%t.a -unbundle
+
+// Check file-list mode.
+// RUN: echo 'Invalid object' > %t.invalid.o
+// RUN: rm -f %t.a
+// RUN: llvm-ar crv %t.a %t.2.o %t.invalid.o
+// RUN: clang-offload-bundler -type=aoo -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.host.lst,%t.tgt1.lst,%t.tgt2.lst -inputs=%t.a -unbundle
 // RUN: wc -l %t.host.lst | FileCheck %s --check-prefix=CHECK-AR-FILE-LIST
 // RUN: wc -l %t.tgt1.lst | FileCheck %s --check-prefix=CHECK-AR-FILE-LIST
 // RUN: wc -l %t.tgt2.lst | FileCheck %s --check-prefix=CHECK-AR-FILE-LIST
 // RUN: diff %t.2.o `cat %t.host.lst`
 // RUN: diff %t.tgt1 `cat %t.tgt1.lst`
-// RUN: diff %t.tgt1 `cat %t.tgt1.lst`
+// RUN: diff %t.tgt2 `cat %t.tgt2.lst`
 
 // CHECK-AR-FILE-LIST: 1
+
+// Check single-file mode.
+// RUN: clang-offload-bundler -type=ao -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.host.out,%t.tgt1.out,%t.tgt2.out -inputs=%t.a -unbundle
+// RUN: diff %t.2.o %t.host.out
+// RUN: diff %t.tgt1 %t.tgt1.out
+// RUN: diff %t.tgt2 %t.tgt2.out
+
+// Check that bundler does not accept multi-file archive in single-file mode.
+// RUN: cp  %t.2.o  %t.3.o
+// RUN: llvm-ar crv %t.a %t.2.o  %t.3.o %t.invalid.o
+// RUN: not clang-offload-bundler -type=ao -targets=host-powerpc64le-ibm-linux-gnu,openmp-powerpc64le-ibm-linux-gnu,openmp-x86_64-pc-linux-gnu -outputs=%t.host.out,%t.tgt1.out,%t.tgt2.out -inputs=%t.a -unbundle 2>&1 \
+// RUN:   | FileCheck %s --check-prefix CHECK-MULTI-FILE-AR-ERROR
+
+// CHECK-MULTI-FILE-AR-ERROR: 'ao' file type is requested, but the archive contains multiple device objects; use 'aoo' instead
 
 #ifdef EMULATE_FAT_OBJ
 #define BUNDLE_SECTION_PREFIX "__CLANG_OFFLOAD_BUNDLE__"
@@ -318,3 +362,5 @@ void test_func(void) {
   ++A;
 }
 
+// TODO: SYCL specific fail - analyze and enable
+// XFAIL: windows-msvc

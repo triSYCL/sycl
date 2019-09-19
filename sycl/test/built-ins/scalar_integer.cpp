@@ -1,4 +1,4 @@
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out -lOpenCL
+// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
@@ -140,6 +140,22 @@ int main() {
     assert(r == 4);
   }
 
+  // abs_diff(uchar)
+  {
+    s::cl_uchar r{ 0 };
+    {
+      s::buffer<s::cl_uchar, 1> BufR(&r, s::range<1>(1));
+      s::queue myQueue;
+      myQueue.submit([&](s::handler &cgh) {
+        auto AccR = BufR.get_access<s::access::mode::write>(cgh);
+        cgh.single_task<class abs_diffUC1UC1>([=]() {
+          AccR[0] = s::abs_diff(s::uchar{ 3 }, s::uchar{ 250 });
+        });
+      });
+    }
+    assert(r == 247);
+  }
+
   // add_sat
   {
     s::cl_int r{ 0 };
@@ -220,6 +236,22 @@ int main() {
     assert(r == 4);
   }
 
+  // ctz
+  {
+    s::cl_int r{ 0 };
+    {
+      s::buffer<s::cl_int, 1> BufR(&r, s::range<1>(1));
+      s::queue myQueue;
+      myQueue.submit([&](s::handler &cgh) {
+        auto AccR = BufR.get_access<s::access::mode::write>(cgh);
+        cgh.single_task<class ctzSI1>([=]() {
+          AccR[0] = s::intel::ctz(s::cl_int{ 0x7FFFFFF0 });
+        });
+      });
+    }
+    assert(r == 4);
+  }
+
   // mad_hi
   {
     s::cl_int r{ 0 };
@@ -287,6 +319,22 @@ int main() {
     assert(r == 0x00000111);
   }
 
+  // rotate (with large rotate size)
+  {
+    s::cl_char r{ 0 };
+    {
+      s::buffer<s::cl_char, 1> BufR(&r, s::range<1>(1));
+      s::queue myQueue;
+      myQueue.submit([&](s::handler &cgh) {
+        auto AccR = BufR.get_access<s::access::mode::write>(cgh);
+        cgh.single_task<class rotateSI1SI2>([=]() {
+          AccR[0] = s::rotate(static_cast<s::cl_char>((unsigned char)0xe0),
+              s::cl_char{ 50 });
+        });
+      });
+    }
+    assert((unsigned char)r == 0x83);
+  }
   // sub_sat
   {
     s::cl_int r{ 0 };

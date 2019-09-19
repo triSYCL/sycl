@@ -880,7 +880,7 @@ public:
   }
 
   SPIRVExtSet getRequiredExtensions() const override {
-    return getSet(SPV_INTEL_fpga_reg);
+    return getSet(ExtensionID::SPV_INTEL_fpga_reg);
   }
 
 protected:
@@ -1372,7 +1372,7 @@ public:
   }
 
   SPIRVExtSet getRequiredExtensions() const override {
-    return getSet(SPV_INTEL_unstructured_loop_controls);
+    return getSet(ExtensionID::SPV_INTEL_unstructured_loop_controls);
   }
 
   void setWordCount(SPIRVWord TheWordCount) override {
@@ -1449,6 +1449,53 @@ public:
 
 protected:
   SPIRVId FunctionId;
+};
+
+class SPIRVFunctionPointerCallINTEL
+    : public SPIRVFunctionCallGeneric<OpFunctionPointerCallINTEL, 4> {
+public:
+  SPIRVFunctionPointerCallINTEL(SPIRVId TheId, SPIRVValue *TheCalledValue,
+                                SPIRVType *TheReturnType,
+                                const std::vector<SPIRVWord> &TheArgs,
+                                SPIRVBasicBlock *BB);
+  SPIRVFunctionPointerCallINTEL() : CalledValueId(SPIRVID_INVALID) {}
+  SPIRVValue *getCalledValue() const { return get<SPIRVValue>(CalledValueId); }
+  _SPIRV_DEF_ENCDEC4(Type, Id, CalledValueId, Args)
+  void validate() const override;
+  bool isOperandLiteral(unsigned Index) const override { return false; }
+  SPIRVExtSet getRequiredExtensions() const override {
+    return getSet(ExtensionID::SPV_INTEL_function_pointers);
+  }
+  SPIRVCapVec getRequiredCapability() const override {
+    return getVec(CapabilityFunctionPointersINTEL);
+  }
+
+protected:
+  SPIRVId CalledValueId;
+};
+
+class SPIRVFunctionPointerINTEL : public SPIRVInstruction {
+  const static Op OC = OpFunctionPointerINTEL;
+  const static SPIRVWord FixedWordCount = 4;
+
+public:
+  SPIRVFunctionPointerINTEL(SPIRVId TheId, SPIRVType *TheType,
+                            SPIRVFunction *TheFunction, SPIRVBasicBlock *BB);
+  SPIRVFunctionPointerINTEL()
+      : SPIRVInstruction(OC), TheFunction(SPIRVID_INVALID) {}
+  SPIRVFunction *getFunction() const { return get<SPIRVFunction>(TheFunction); }
+  _SPIRV_DEF_ENCDEC3(Type, Id, TheFunction)
+  void validate() const override;
+  bool isOperandLiteral(unsigned Index) const override { return false; }
+  SPIRVExtSet getRequiredExtensions() const override {
+    return getSet(ExtensionID::SPV_INTEL_function_pointers);
+  }
+  SPIRVCapVec getRequiredCapability() const override {
+    return getVec(CapabilityFunctionPointersINTEL);
+  }
+
+protected:
+  SPIRVId TheFunction;
 };
 
 class SPIRVExtInst : public SPIRVFunctionCallGeneric<OpExtInst, 5> {
@@ -2171,7 +2218,7 @@ protected:
   }
 
   SPIRVExtSet getRequiredExtensions() const override {
-    return getSet(SPV_INTEL_blocking_pipes);
+    return getSet(ExtensionID::SPV_INTEL_blocking_pipes);
   }
 };
 
@@ -2341,7 +2388,7 @@ protected:
   }
 
   SPIRVExtSet getRequiredExtensions() const override {
-    return getSet(SPV_INTEL_device_side_avc_motion_estimation);
+    return getSet(ExtensionID::SPV_INTEL_device_side_avc_motion_estimation);
   }
 };
 

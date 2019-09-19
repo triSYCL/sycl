@@ -20,7 +20,7 @@ namespace cl {
 namespace sycl {
 namespace detail {
 
-void Scheduler::waitForRecordToFinish(GraphBuilder::MemObjRecord *Record) {
+void Scheduler::waitForRecordToFinish(MemObjRecord *Record) {
   for (Command *Cmd : Record->MReadLeafs) {
     Command *FailedCommand = GraphProcessor::enqueueCommand(Cmd);
     if (FailedCommand) {
@@ -79,6 +79,7 @@ EventImplPtr Scheduler::addCG(std::unique_ptr<detail::CG> CommandGroup,
 }
 
 EventImplPtr Scheduler::addCopyBack(Requirement *Req) {
+  std::lock_guard<std::mutex> lock(MGraphLock);
   Command *NewCmd = MGraphBuilder.addCopyBack(Req);
   // Command was not creted because there were no operations with
   // buffer.
@@ -91,17 +92,18 @@ EventImplPtr Scheduler::addCopyBack(Requirement *Req) {
   return NewCmd->getEvent();
 }
 
-Scheduler::~Scheduler() {
-  // TODO: Make running wait and release on destruction configurable?
-  // TODO: Process release commands only?
-  //std::lock_guard<std::mutex> lock(MGraphLock);
-  //for (GraphBuilder::MemObjRecord &Record : MGraphBuilder.MMemObjRecords)
-    //waitForRecordToFinish(&Record);
-  //MGraphBuilder.cleanupCommands([>CleanupReleaseCommands = <] true);
-}
+#ifdef __GNUC__
+// The init_priority here causes the constructor for scheduler to run relatively
+// early, and therefore the destructor to run relatively late (after anything
+// else that has no priority set, or has a priority higher than 2000).
+Scheduler Scheduler::instance __attribute__((init_priority(2000)));
+#else
+#pragma warning(disable:4073)
+#pragma init_seg(lib)
+Scheduler Scheduler::instance;
+#endif
 
 Scheduler &Scheduler::getInstance() {
-  static Scheduler instance;
   return instance;
 }
 
@@ -118,7 +120,7 @@ void Scheduler::waitForEvent(EventImplPtr Event) {
 void Scheduler::removeMemoryObject(detail::SYCLMemObjI *MemObj) {
   std::lock_guard<std::mutex> lock(MGraphLock);
 
-  GraphBuilder::MemObjRecord *Record = MGraphBuilder.getMemObjRecord(MemObj);
+  MemObjRecord *Record = MGraphBuilder.getMemObjRecord(MemObj);
   if (!Record)
     // No operations were performed on the mem object
     return;
@@ -144,8 +146,8 @@ EventImplPtr Scheduler::addHostAccessor(Requirement *Req) {
 
 Scheduler::Scheduler() {
   sycl::device HostDevice;
-  DefaultHostQueue = QueueImplPtr(
-      new queue_impl(HostDevice, /*AsyncHandler=*/{}, /*PropList=*/{}));
+  DefaultHostQueue = QueueImplPtr(new queue_impl(
+      HostDevice, /*AsyncHandler=*/{}, QueueOrder::Ordered, /*PropList=*/{}));
 }
 
 } // namespace detail
