@@ -8,8 +8,19 @@
 
 #pragma once
 
-#include <CL/__spirv/spirv_types.hpp>
+#ifdef __SYCL_SPIR_DEVICE__
+#include <CL/__spir/spir_vars.hpp>
+#ifdef __SYCL_DEVICE_ONLY__
+namespace __device_builtin = __spir;
+#endif
+#else
 #include <CL/__spirv/spirv_vars.hpp>
+#ifdef __SYCL_DEVICE_ONLY__
+namespace __device_builtin = __spirv;
+#endif
+#endif
+
+#include <CL/__spirv/spirv_types.hpp>
 #include <CL/sycl/access/access.hpp>
 #include <CL/sycl/detail/common.hpp>
 #include <CL/sycl/detail/pi.hpp>
@@ -106,15 +117,15 @@ public:
 
   template <int Dims> static const id<Dims> getId() {
     static_assert(is_valid_dimensions<Dims>::value, "invalid dimensions");
-    return __spirv::initGlobalInvocationId<Dims, id<Dims>>();
+    return __device_builtin::initGlobalInvocationId<Dims, id<Dims>>();
   }
 
   template <int Dims> static const group<Dims> getGroup() {
     static_assert(is_valid_dimensions<Dims>::value, "invalid dimensions");
-    range<Dims> GlobalSize{__spirv::initGlobalSize<Dims, range<Dims>>()};
-    range<Dims> LocalSize{__spirv::initWorkgroupSize<Dims, range<Dims>>()};
-    range<Dims> GroupRange{__spirv::initNumWorkgroups<Dims, range<Dims>>()};
-    id<Dims> GroupId{__spirv::initWorkgroupId<Dims, id<Dims>>()};
+    range<Dims> GlobalSize{__device_builtin::initGlobalSize<Dims, range<Dims>>()};
+    range<Dims> LocalSize{__device_builtin::initWorkgroupSize<Dims, range<Dims>>()};
+    range<Dims> GroupRange{__device_builtin::initNumWorkgroups<Dims, range<Dims>>()};
+    id<Dims> GroupId{__device_builtin::initWorkgroupId<Dims, id<Dims>>()};
     return createGroup<Dims>(GlobalSize, LocalSize, GroupRange, GroupId);
   }
 
@@ -122,9 +133,9 @@ public:
   static detail::enable_if_t<WithOffset, const item<Dims, WithOffset>>
   getItem() {
     static_assert(is_valid_dimensions<Dims>::value, "invalid dimensions");
-    id<Dims> GlobalId{__spirv::initGlobalInvocationId<Dims, id<Dims>>()};
-    range<Dims> GlobalSize{__spirv::initGlobalSize<Dims, range<Dims>>()};
-    id<Dims> GlobalOffset{__spirv::initGlobalOffset<Dims, id<Dims>>()};
+    id<Dims> GlobalId{__device_builtin::initGlobalInvocationId<Dims, id<Dims>>()};
+    range<Dims> GlobalSize{__device_builtin::initGlobalSize<Dims, range<Dims>>()};
+    id<Dims> GlobalOffset{__device_builtin::initGlobalOffset<Dims, id<Dims>>()};
     return createItem<Dims, true>(GlobalSize, GlobalId, GlobalOffset);
   }
 
@@ -132,20 +143,20 @@ public:
   static detail::enable_if_t<!WithOffset, const item<Dims, WithOffset>>
   getItem() {
     static_assert(is_valid_dimensions<Dims>::value, "invalid dimensions");
-    id<Dims> GlobalId{__spirv::initGlobalInvocationId<Dims, id<Dims>>()};
-    range<Dims> GlobalSize{__spirv::initGlobalSize<Dims, range<Dims>>()};
+    id<Dims> GlobalId{__device_builtin::initGlobalInvocationId<Dims, id<Dims>>()};
+    range<Dims> GlobalSize{__device_builtin::initGlobalSize<Dims, range<Dims>>()};
     return createItem<Dims, false>(GlobalSize, GlobalId);
   }
 
   template <int Dims> static const nd_item<Dims> getNDItem() {
     static_assert(is_valid_dimensions<Dims>::value, "invalid dimensions");
-    range<Dims> GlobalSize{__spirv::initGlobalSize<Dims, range<Dims>>()};
-    range<Dims> LocalSize{__spirv::initWorkgroupSize<Dims, range<Dims>>()};
-    range<Dims> GroupRange{__spirv::initNumWorkgroups<Dims, range<Dims>>()};
-    id<Dims> GroupId{__spirv::initWorkgroupId<Dims, id<Dims>>()};
-    id<Dims> GlobalId{__spirv::initGlobalInvocationId<Dims, id<Dims>>()};
-    id<Dims> LocalId{__spirv::initLocalInvocationId<Dims, id<Dims>>()};
-    id<Dims> GlobalOffset{__spirv::initGlobalOffset<Dims, id<Dims>>()};
+    range<Dims> GlobalSize{__device_builtin::initGlobalSize<Dims, range<Dims>>()};
+    range<Dims> LocalSize{__device_builtin::initWorkgroupSize<Dims, range<Dims>>()};
+    range<Dims> GroupRange{__device_builtin::initNumWorkgroups<Dims, range<Dims>>()};
+    id<Dims> GroupId{__device_builtin::initWorkgroupId<Dims, id<Dims>>()};
+    id<Dims> GlobalId{__device_builtin::initGlobalInvocationId<Dims, id<Dims>>()};
+    id<Dims> LocalId{__device_builtin::initLocalInvocationId<Dims, id<Dims>>()};
+    id<Dims> GlobalOffset{__device_builtin::initGlobalOffset<Dims, id<Dims>>()};
     group<Dims> Group =
         createGroup<Dims>(GlobalSize, LocalSize, GroupRange, GroupId);
     item<Dims, true> GlobalItem =
