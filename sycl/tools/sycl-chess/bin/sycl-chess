@@ -106,7 +106,7 @@ export -f xchesscc_wrapper
 # output files into the work directory you supply... it seems to just dump a
 # ton of other temporary files there! Useful for debugging perhaps, but not
 # useful to keep a sane temporary directory when compiling for 400 tiles
-export SOURCE_TEMPORARY_DIR="$CLANG_TEMPORARY_DIR/${SOURCE_FILE_NAME}_SYCLChessTmp"
+export SOURCE_TEMPORARY_DIR="$PWD/${SOURCE_FILE_NAME}_SYCLChessTmp"
 
 if [ ! -d "$SOURCE_TEMPORARY_DIR" ]; then
   mkdir $SOURCE_TEMPORARY_DIR
