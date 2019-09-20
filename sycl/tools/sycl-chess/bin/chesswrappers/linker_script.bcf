@@ -60,12 +60,12 @@
   _entry_point _main_init
   _symbol      _main _after _main_init
   _symbol      _main_init 0
-  _stack DM_stack 0x30400  0x400 //stack for core
+  _stack DM_stack 0x30100  0x200 //stack for core
 
   _reserved DMb 0x20000 0x8000 // reserving 32kbs of south memory
   _reserved DMb 0x28000 0x8000 // reserving 32kbs of west memory
   //_reserved DMb 0x30000 0x8000 // north
-  _reserved DMb 0x30800 0x7800
+  _reserved DMb 0x30300 0x7d00
   _reserved DMb 0x38000 0x8000 // east
   _reserved DMb 0x40000 0xc0000 // And everything else the core can't see
 
