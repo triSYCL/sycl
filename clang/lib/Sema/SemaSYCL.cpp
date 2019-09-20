@@ -973,7 +973,7 @@ static void populateMainEntryPoint(const StringRef Name,
   Out << "\n";
 
   Out << "// SYCL Tile Address Register \n";
-  Out << "uint32_t args[256];" << "\n";
+  Out << "uint32_t args[64];" << "\n";
   Out << "int main(void) {" << "\n";
 
   // Assign arg registers to parameters
