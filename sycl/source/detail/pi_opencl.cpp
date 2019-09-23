@@ -242,7 +242,7 @@ pi_result OCL(piSamplerCreate)(pi_context context,
 
 // Forward calls to OpenCL RT.
 #define _PI_CL(pi_api, ocl_api)                     \
-const decltype(::pi_api) * pi_api##OclPtr =         \
+decltype(::pi_api) * pi_api##OclPtr =               \
     detail::pi::cast<decltype(&::pi_api)>(&ocl_api);
 
 // Platform
@@ -267,13 +267,13 @@ _PI_CL(piQueueFinish,       clFinish)
 _PI_CL(piQueueRetain,       clRetainCommandQueue)
 _PI_CL(piQueueRelease,      clReleaseCommandQueue)
 // Memory
-_PI_CL(piMemBufferCreate,   clCreateBuffer)
-_PI_CL(piMemImageCreate,    clCreateImage)
-_PI_CL(piMemGetInfo,        clGetMemObjectInfo)
-_PI_CL(piMemImageGetInfo,   clGetImageInfo)
-_PI_CL(piMemRetain,         clRetainMemObject)
-_PI_CL(piMemRelease,        clReleaseMemObject)
-_PI_CL(piSubBufCreate,      clCreateSubBuffer)
+_PI_CL(piMemBufferCreate,    clCreateBuffer)
+_PI_CL(piMemImageCreate,     clCreateImage)
+_PI_CL(piMemGetInfo,         clGetMemObjectInfo)
+_PI_CL(piMemImageGetInfo,    clGetImageInfo)
+_PI_CL(piMemRetain,          clRetainMemObject)
+_PI_CL(piMemRelease,         clReleaseMemObject)
+_PI_CL(piMemBufferPartition, clCreateSubBuffer)
 // Program
 _PI_CL(piProgramCreate,             OCL(piProgramCreate))
 _PI_CL(piclProgramCreateWithSource, clCreateProgramWithSource)

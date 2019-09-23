@@ -49,7 +49,7 @@ const char *SYCL::Linker::constructLLVMSpirvCommand(Compilation &C,
   SmallString<128> LLVMSpirvPath(C.getDriver().Dir);
   llvm::sys::path::append(LLVMSpirvPath, "llvm-spirv");
   const char *LLVMSpirv = C.getArgs().MakeArgString(LLVMSpirvPath);
-  C.addCommand(llvm::make_unique<Command>(JA, *this, LLVMSpirv, CmdArgs, None));
+  C.addCommand(std::make_unique<Command>(JA, *this, LLVMSpirv, CmdArgs, None));
   return OutputFileName;
 }
 
@@ -96,7 +96,7 @@ const char *SYCL::Linker::constructLLVMLinkCommand(Compilation &C,
   SmallString<128> ExecPath(C.getDriver().Dir);
   llvm::sys::path::append(ExecPath, "llvm-link");
   const char *Exec = C.getArgs().MakeArgString(ExecPath);
-  C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, None));
+  C.addCommand(std::make_unique<Command>(JA, *this, Exec, CmdArgs, None));
   return OutputFileName;
 }
 
@@ -109,7 +109,7 @@ void SYCL::Linker::constructLlcCommand(Compilation &C, const JobAction &JA,
   SmallString<128> LlcPath(C.getDriver().Dir);
   llvm::sys::path::append(LlcPath, "llc");
   const char *Llc = C.getArgs().MakeArgString(LlcPath);
-  C.addCommand(llvm::make_unique<Command>(JA, *this, Llc, LlcArgs, None));
+  C.addCommand(std::make_unique<Command>(JA, *this, Llc, LlcArgs, None));
 }
 
 // For SYCL the inputs of the linker job are SPIR-V binaries and output is
@@ -297,9 +297,8 @@ void SYCL::fpga::BackendCompiler::ConstructJob(Compilation &C,
           continue;
         if (types::isSrcFile(Ty) || Ty == types::TY_Object) {
           llvm::sys::path::replace_extension(FN, "d");
-          if (llvm::sys::fs::exists(FN))
-            FPGADepFiles.push_back(InputInfo(types::TY_Dependencies,
-                  Args.MakeArgString(FN), Args.MakeArgString(FN)));
+          FPGADepFiles.push_back(InputInfo(types::TY_Dependencies,
+              Args.MakeArgString(FN), Args.MakeArgString(FN)));
         }
       }
     }
@@ -352,7 +351,7 @@ void SYCL::fpga::BackendCompiler::ConstructJob(Compilation &C,
 
   SmallString<128> ExecPath(getToolChain().GetProgramPath("aoc"));
   const char *Exec = C.getArgs().MakeArgString(ExecPath);
-  C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, None));
+  C.addCommand(std::make_unique<Command>(JA, *this, Exec, CmdArgs, None));
 }
 
 void SYCL::gen::BackendCompiler::ConstructJob(Compilation &C,
@@ -375,7 +374,7 @@ void SYCL::gen::BackendCompiler::ConstructJob(Compilation &C,
   TranslateSYCLTargetArgs(C, Args, getToolChain(), CmdArgs);
   SmallString<128> ExecPath(getToolChain().GetProgramPath("ocloc"));
   const char *Exec = C.getArgs().MakeArgString(ExecPath);
-  C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, None));
+  C.addCommand(std::make_unique<Command>(JA, *this, Exec, CmdArgs, None));
 }
 
 void SYCL::x86_64::BackendCompiler::ConstructJob(Compilation &C,
@@ -393,7 +392,7 @@ void SYCL::x86_64::BackendCompiler::ConstructJob(Compilation &C,
   TranslateSYCLTargetArgs(C, Args, getToolChain(), CmdArgs);
   SmallString<128> ExecPath(getToolChain().GetProgramPath("ioc64"));
   const char *Exec = C.getArgs().MakeArgString(ExecPath);
-  C.addCommand(llvm::make_unique<Command>(JA, *this, Exec, CmdArgs, None));
+  C.addCommand(std::make_unique<Command>(JA, *this, Exec, CmdArgs, None));
 }
 
 SYCLToolChain::SYCLToolChain(const Driver &D, const llvm::Triple &Triple,
