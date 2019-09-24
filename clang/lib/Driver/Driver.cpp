@@ -5723,7 +5723,7 @@ const ToolChain &Driver::getOffloadingDeviceToolChain(const ArgList &Args,
             break;
           case llvm::Triple::fpga32:
           case llvm::Triple::fpga64:
-            TC = llvm::make_unique<toolchains::XOCCToolChain>(
+            TC = std::make_unique<toolchains::XOCCToolChain>(
               *this, Target, HostTC, Args);
             break;
           default:
