@@ -53,6 +53,27 @@ struct XOCCIRDowngrader : public ModulePass {
     }
   }
 
+  /// Removes WillReturn LLVM bitcode attribute from llvm/Doc/LangRef:
+  ///
+  /// "This function attribute indicates that a call of this function will
+  ///  either exhibit undefined behavior or comes back and continues execution
+  ///  at a point in the existing call stack that includes the current
+  ///  invocation.
+  ///  Annotated functions may still raise an exception, i.a., ``nounwind``
+  ///  is not implied.
+  ///  If an invocation of an annotated function does not return control back
+  ///  to a point in the call stack, the behavior is undefined."
+  ///
+  /// Added in LLVM-10: rL364555 + D62801, this removal can be reverted as the
+  /// xocc backend catches up. It seems unlikely removal will cause any problems
+  /// as it appears to be an attribute that helps carry information to
+  /// backends/other passes for further transformations.
+  void removeWillReturn(Module &M) {
+    for (auto &F : M.functions())
+      if (F.hasFnAttribute(llvm::Attribute::WillReturn))
+        F.removeFnAttr(llvm::Attribute::WillReturn);
+  }
+
   /// Removes byval bitcode function parameter attribute that is applied to
   /// pointer arguments of functions to state that they should technically be
   /// passed by value.
@@ -134,8 +155,10 @@ struct XOCCIRDowngrader : public ModulePass {
 
   bool runOnModule(Module &M) override {
     removeImmarg(M);
+    removeWillReturn(M);
     removeNoFree(M);
     resetByVal(M);
+    // possibly removable by using instnamer pass in its place
     renameBasicBlocks(M);
 
     // The module probably changed
