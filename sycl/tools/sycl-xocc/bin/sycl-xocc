@@ -193,12 +193,26 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   # useful debug information from the final generated xcl binary into the temp
   # directory. E.g. what args are bound to which banks, overall kernel signature
   # etc.
-  if [ ! -z "$XILINX_XRT" ]; then
+  if [ ! -z "$XILINX_XRT" ] && [ ! -z "$VERBOSE" ]; then
     $XILINX_XRT/bin/xclbinutil --info --input "$OUTPUT_FILE_NAME" \
       &> "$OUTPUT_FILE_NAME.xclbinutil.dump"
   fi
 fi
 
-# TODO: Cleanup temporary files we allocated in the systems tmp directory and
-# when --save-temps is fixed for SYCL compilation optionally keep them as they
-# are quite useful when debugging
+# Important these are cleaned all the time or they can kill compilation if
+# swapping between sw_emu, hw_emu and hw or even between different versions of
+# SDAccel. Explicitly comment this out if you need the .xo's
+if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
+  for index in "${KERNEL_NAME_ARRAY[@]}"; do
+  if [[ -n "$index" ]]; then
+    rm "$TEMPORARY_DIR/$index.xo"
+  fi
+  done
+fi
+
+if [[ ! -z "$VERBOSE" ]]; then
+  rm "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
+  rm "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.bc"
+  rm "$TEMPORARY_DIR/KernelProperties_${SOURCE_FILE_NAME}.bash"
+fi
+
