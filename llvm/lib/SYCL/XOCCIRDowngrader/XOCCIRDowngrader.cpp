@@ -158,7 +158,6 @@ struct XOCCIRDowngrader : public ModulePass {
     removeWillReturn(M);
     removeNoFree(M);
     resetByVal(M);
-    // possibly removable by using instnamer pass in its place
     renameBasicBlocks(M);
 
     // The module probably changed
