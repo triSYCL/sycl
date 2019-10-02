@@ -369,21 +369,31 @@ struct InSPIRation : public ModulePass {
         /// spir input, probably not required.
         } else if (isTransitiveNonIntrinsicFunc(F)
                     && !F.isDeclaration()) {
-          // After kernels code selection, there are only two kinds of functions
-          // left: funcions called by kernels or LLVM intrinsic functions.
-          // For functions called in SYCL kernels, put SPIR calling convention.
-          kernelCallFuncSPIRify(F);
+        // After kernels code selection, there are only two kinds of functions
+        // left: funcions called by kernels or LLVM intrinsic functions.
+        // For functions called in SYCL kernels, put SPIR calling convention.
+        kernelCallFuncSPIRify(F);
 
-          // Modify the name of funcions called by SYCL kernel since function
-          // names with $ sign would choke Xilinx xocc.
-          // And in Xilinx xocc, there are passes splitting a function to new
-          // functions. These new function names will come from some of the
-          // basic block names in the original function.
-          // So function and basic block names need to be modified to avoid
-          // containing $ sign
+        // Modify the name of funcions called by SYCL kernel since function
+        // names with $ sign would choke Xilinx xocc.
+        // And in Xilinx xocc, there are passes splitting a function to new
+        // functions. These new function names will come from some of the
+        // basic block names in the original function.
+        // So function and basic block names need to be modified to avoid
+        // containing $ sign
 
-          // Rename function name
-          F.setName("sycl_func_" + Twine{funcCount++});
+        // Rename function name
+        F.setName("sycl_func_" + Twine{funcCount++});
+
+        // While functions do come "named" it's in the form %0, %1 and XOCC
+        // doesn't like this for the moment. XOCC demands function arguments
+        // be either unnamed or named non-numerically. This is a separate
+        // issue from the reason we name kernel arguments (which is more
+        // related to HLS needing names to generate XML).
+        //
+        // It doesn't require application to the SPIR intrinsics as we're
+        // linking against the HLS SPIR library, which is already conform-ant.
+        giveNameToArguments(F);
       } else if (isTransitiveNonIntrinsicFunc(F)
                   && F.isDeclaration()) {
         // push back intrinsics to make sure we handle naming after changing the
@@ -419,7 +429,13 @@ struct InSPIRation : public ModulePass {
 
     setSPIRTriple(M);
 
+    /// TODO: Set appropriate layout so the linker doesn't always complain, this
+    /// change may be better/more easily applied as something in the Frontend as
+    /// we'd be lying about the layout if we didn't enforce it accurately in
+    /// this pass. Which is potentially a good way to come across some weird
+    /// runtime bugs.
     //setSPIRLayout(M);
+
     removeOldMetadata(M);
 
     // The module probably changed
