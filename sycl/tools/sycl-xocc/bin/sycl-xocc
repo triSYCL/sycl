@@ -125,7 +125,12 @@ fi
 # output file name including extensions and path
 OUTPUT_FILE_NAME="$6"
 
-$OPT -asfix -O3 -globaldce -inSPIRation -globaldce -kernelPropGen \
+# -flat-address-space defines the generic address space we wish to deduce to
+# something concrete, used by the infer-address-spaces pass which is slightly
+# modified from the upstream implementation to take this argument to avoid
+# adding a new LLVM Target that will largelly be unused right now..
+$OPT -asfix -globaldce -O3 -globaldce --infer-address-spaces \
+  -flat-address-space=4 -globaldce -inSPIRation -globaldce -kernelPropGen \
   "$INPUT_FILE_NAME" -o "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.bc"
 
 # Link our SDx SPIR binaries in
