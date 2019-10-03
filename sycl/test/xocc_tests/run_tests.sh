@@ -145,6 +145,7 @@ test_list () {
   run_test "vector_math" "simple_tests" "$1"
   run_test "simple_struct" "simple_tests" "$1"
   run_test "ternary_compare" "simple_tests" "$1"
+  run_test "kernel_uint_name" "simple_tests" "$1"
 
   emconfigutil -f $XILINX_PLATFORM --od sdaccel_ports/vision/edge_detection
 
