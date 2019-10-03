@@ -2,9 +2,15 @@
 #include <CL/sycl.hpp>
 #include "../utilities/device_selectors.hpp"
 
-// Test case that will trigger an ICE in XOCC's aggressive dead code elimination
-// pass. Seems to be address space cast related based on the Accessor[Index]
-// trying to access some "external" struct data/not the same address space
+// A regression test case that used to trigger an ICE in XOCC's aggressive dead
+// code elimination pass. It was originally related an address space cast based
+// on the Accessor[Index] trying to access some "external" struct data/not in
+// the same address space. The problem was fixed by some tweaks inside of the
+// accessor class and a transition towards the InferAddressSpaces pass.
+//
+// This example now simply assigns the index value to each element of the
+// strucutre via copy constructor and then checks if the values were properly
+// assigned via the overloaded equality operator on the host.
 using namespace cl::sycl;
 
 template <typename T>
@@ -22,6 +28,9 @@ struct point {
 class ice_kernel;
 
 int main() {
+  selector_defines::CompiledForDeviceSelector selector;
+  queue Queue {selector};
+
   const size_t Size = 10;
   point<int> Data[Size] = {0};
 
@@ -29,14 +38,11 @@ int main() {
     auto Buffer =
       buffer<point<int>, 1>(Data, range<1>(Size),
         {property::buffer::use_host_ptr()});
-    Buffer.set_final_data(nullptr);
-    selector_defines::CompiledForDeviceSelector selector;
-    queue Queue {selector};
     Queue.submit([&](handler &Cgh) {
       accessor<point<int>, 1, access::mode::write, access::target::global_buffer>
           Accessor(Buffer, Cgh, range<1>(Size));
               Cgh.parallel_for<ice_kernel>(range<1>{Size}, [=](id<1> Index) {
-                Accessor[Index] = Index.get(0); // XOCC ICED
+                Accessor[Index] = Index.get(0);
        });
     });
   }
