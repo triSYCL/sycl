@@ -18,8 +18,9 @@
 #include "llvm/SYCL/XOCCIRDowngrader.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Attributes.h"
-#include "llvm/IR/Module.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
@@ -123,10 +124,24 @@ struct XOCCIRDowngrader : public ModulePass {
   void resetByVal(Module &M) {
     for (auto &F : M.functions()) {
       for (auto &P : F.args()) {
-          if (P.hasAttribute(llvm::Attribute::ByVal)) {
-              P.removeAttr(llvm::Attribute::ByVal);
-              P.addAttr(llvm::Attribute::ByVal);
+         if (P.hasAttribute(llvm::Attribute::ByVal)) {
+             P.removeAttr(llvm::Attribute::ByVal);
+             P.addAttr(llvm::Attribute::ByVal);
+         }
+      }
+
+      // These appear on Call/Invoke Instructions as well
+      for (auto &BB : F) {
+        for (auto &I : BB) {
+          if (CallBase *CB = dyn_cast<CallBase>(&I)) {
+            for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
+              if (CB->paramHasAttr(i, llvm::Attribute::ByVal)) {
+                CB->removeParamAttr(i, llvm::Attribute::ByVal);
+                CB->addParamAttr(i, llvm::Attribute::ByVal);
+              }
+            }
           }
+        }
       }
     }
   }
