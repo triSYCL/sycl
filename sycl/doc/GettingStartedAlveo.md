@@ -294,9 +294,6 @@ export XILINX_XRT=/opt/xilinx/xrt
 SYCL_HOME=/var/tmp/rkeryell/SYCL/sycl
 SYCL_BIN_DIR=$SYCL_HOME/build/bin
 export LD_LIBRARY_PATH=$XILINX_XRT/lib:$SYCL_HOME/build/lib:$LD_LIBRARY_PATH
-# Workaround a current address space issues in the SYCL compiler
-# https://github.com/triSYCL/sycl/pull/51
-export DISABLE_INFER_AS=1
 ```
 
 You can compile an application either for real FPGA execution,
