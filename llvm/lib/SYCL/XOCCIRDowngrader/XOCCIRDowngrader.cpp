@@ -19,6 +19,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
@@ -131,18 +132,15 @@ struct XOCCIRDowngrader : public ModulePass {
       }
 
       // These appear on Call/Invoke Instructions as well
-      for (auto &BB : F) {
-        for (auto &I : BB) {
-          if (CallBase *CB = dyn_cast<CallBase>(&I)) {
-            for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
-              if (CB->paramHasAttr(i, llvm::Attribute::ByVal)) {
-                CB->removeParamAttr(i, llvm::Attribute::ByVal);
-                CB->addParamAttr(i, llvm::Attribute::ByVal);
-              }
+      for (auto &I : instructions(F))
+        if (CallBase *CB = dyn_cast<CallBase>(&I)) {
+          for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
+            if (CB->paramHasAttr(i, llvm::Attribute::ByVal)) {
+              CB->removeParamAttr(i, llvm::Attribute::ByVal);
+              CB->addParamAttr(i, llvm::Attribute::ByVal);
             }
           }
         }
-      }
     }
   }
 

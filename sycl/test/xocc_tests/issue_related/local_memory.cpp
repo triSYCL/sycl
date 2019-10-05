@@ -49,9 +49,6 @@ int main() {
 
    cgh.parallel_for<simple_local>(nd_range<1>(range<1>(sz), range<1>(sz / 2)),
       [=](nd_item<1> item) {
-        printf("get_local_id: %d \n", item.get_local_id()[0]);
-        printf("get_global_id: %d \n", item.get_global_id()[0]);
-
         local_mem[item.get_local_id()[0]] += item.get_local_id()[0];
         acc_g[item.get_global_id()[0]] = local_mem[item.get_local_id()[0]];
       });

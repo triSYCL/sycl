@@ -25,13 +25,13 @@
 #include "llvm/Demangle/Demangle.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/CallingConv.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -380,10 +380,10 @@ struct InSPIRation : public ModulePass {
   /// leakage however, but should result in more overall address space
   /// consistency/stability due to the addition of more concrete address spaces.
   void handleSpecArrayPartition(CallInst *CI) {
-    for (unsigned int i = 0; i < CI->getNumOperands(); ++i) {
-      if (CI->getOperand(i)->getType()->isPointerTy()) {
-        if (auto *ASC = dyn_cast<AddrSpaceCastInst>(CI->getOperand(i))) {
-          if (ASC->getDestAddressSpace() == /*Generic Address Space*/4) {
+    for (auto &Op : CI->operands()) {
+      if (Op->getType()->isPointerTy()) {
+        if (auto *ASC = dyn_cast<AddrSpaceCastInst>(Op)) {
+          if (ASC->getDestAddressSpace() == /*Generic AS*/ 4) {
             ASC->replaceAllUsesWith(ASC->getPointerOperand());
             ASC->eraseFromParent();
           }
@@ -404,8 +404,8 @@ struct InSPIRation : public ModulePass {
   /// InferAddressSpaces pass and teach it to deal with these SSDM calls as
   /// Intrinsics.
   void ssdmAddressSpaceFix(Function &F) {
-    for (inst_iterator I = inst_begin(F), E = inst_end(F); I != E; ++I)
-      if (auto *Call = dyn_cast<CallInst>(&*I))
+    for (auto &I : instructions(F))
+      if (auto *Call = dyn_cast<CallInst>(&I))
         if (auto Func = dyn_cast<Function>(Call->getCalledFunction()))
           if (Func->getName() == "_ssdm_SpecArrayPartition")
             handleSpecArrayPartition(Call);
@@ -451,7 +451,7 @@ struct InSPIRation : public ModulePass {
         /// function to be sycl_func_x, if xocc ever gets a little friendlier to
         /// spir input, probably not required.
         } else if (isTransitiveNonIntrinsicFunc(F)
-                    && !F.isDeclaration()) {
+                   && !F.isDeclaration()) {
         // After kernels code selection, there are only two kinds of functions
         // left: funcions called by kernels or LLVM intrinsic functions.
         // For functions called in SYCL kernels, put SPIR calling convention.
@@ -475,11 +475,11 @@ struct InSPIRation : public ModulePass {
         // related to HLS needing names to generate XML).
         //
         // It doesn't require application to the SPIR intrinsics as we're
-        // linking against the HLS SPIR library, which is already conform-ant.
+        // linking against the HLS SPIR library, which is already conformant.
         giveNameToArguments(F);
         ssdmAddressSpaceFix(F);
       } else if (isTransitiveNonIntrinsicFunc(F)
-                  && F.isDeclaration()) {
+                 && F.isDeclaration()) {
         // push back intrinsics to make sure we handle naming after changing the
         // name of all functions to sycl_func.
         // Note: if we do not rename all the functions to sycl_func_N, a more

@@ -53,17 +53,12 @@ auto main() -> int
     auto s_buf = cl::sycl::buffer<std::size_t, 3>{
                     cl::sycl::range<3>{42, 42, 42}};
 
-    q.submit([&](cl::sycl::handler& cgh)
-    {
+    q.submit([&](cl::sycl::handler& cgh) {
         auto s = s_buf.get_access<cl::sycl::access::mode::read_write>(cgh);
 
-        cgh.single_task<burst_test>([=]()
-        {
-            printf("I enter Kernel \n");
+        cgh.single_task<burst_test>([=]() {
             loop(s);
-            printf("I exit Kernel \n");
         });
-
     });
     q.wait();
 
