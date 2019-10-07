@@ -19,13 +19,13 @@
 //  error)
 
 // These are converted to SPIR builtins by the inSPIRation pass.
-size_t __spir_ocl_get_global_size(uint dimindx);
-size_t __spir_ocl_get_local_size(uint dimindx);
-size_t __spir_ocl_get_global_id(uint dimindx);
-size_t __spir_ocl_get_local_id(uint dimindx);
-size_t __spir_ocl_get_global_offset(uint dimindx);
-size_t __spir_ocl_get_group_id(uint dimindx);
-size_t __spir_ocl_get_num_groups(uint dimindx);
+size_t __spir_ocl_get_global_size(unsigned int dimindx);
+size_t __spir_ocl_get_local_size(unsigned int dimindx);
+size_t __spir_ocl_get_global_id(unsigned int dimindx);
+size_t __spir_ocl_get_local_id(unsigned int dimindx);
+size_t __spir_ocl_get_global_offset(unsigned int dimindx);
+size_t __spir_ocl_get_group_id(unsigned int dimindx);
+size_t __spir_ocl_get_num_groups(unsigned int dimindx);
 
 enum class SYCLBuiltinTypes {
    SYCLBuiltinGlobalSize,

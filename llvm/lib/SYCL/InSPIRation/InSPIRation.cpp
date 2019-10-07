@@ -25,12 +25,13 @@
 #include "llvm/Demangle/Demangle.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/CallingConv.h"
+#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -337,6 +338,79 @@ struct InSPIRation : public ModulePass {
     }
   }
 
+  /// This currently looks through the arguments passed to the SSDM intrinsic
+  /// call and checks the instruction to see if it is an address space cast to
+  /// a generic, if it is, it will take the concrete segment of the cast and
+  /// replace the operand with it. It looks like the below example:
+  ///
+  /// Before:
+  /// %10 = getelementptr inbounds %"struct._ZTSN2cl4sycl6xilinx15partition_
+  ///   arrayIcLm9ENS1_9partition8completeILm0EEEEE.cl::sycl::xilinx::partition_
+  ///   array", %"struct._ZTSN2cl4sycl6xilinx15partition_arrayIcLm9ENS1_9
+  ///   partition8completeILm0EEEEE.cl::sycl::xilinx::partition_array"* %1,
+  ///   i64 0, i32 0, i64 0
+  /// %11 = addrspacecast i8* %10 to i8 addrspace(4)*
+  /// call spir_func void (...) @_ssdm_SpecArrayPartition(i8 addrspace(4)* %11,
+  ///   i64 0, i8* getelementptr inbounds ([9 x i8], [9 x i8]* @.str, i64 0,
+  ///   i64 0), i32 0, i8* getelementptr inbounds ([1 x i8], [1 x i8]* @.str.2,
+  ///   i64 0, i64 0)) #4
+  ///
+  /// After:
+  /// %10 = getelementptr inbounds %"struct._ZTSN2cl4sycl6xilinx15partition_
+  ///   arrayIcLm9ENS1_9partition8completeILm0EEEEE.cl::sycl::xilinx::partition
+  ///   _array", %"struct._ZTSN2cl4sycl6xilinx15partition_arrayIcLm9ENS1_9
+  ///   partition8completeILm0EEEEE.cl::sycl::xilinx::partition_array"* %1,
+  ///   i64 0, i32 0, i64 0
+  ///  call spir_func void (...) @_ssdm_SpecArrayPartition(i8* %10, i64 0,
+  ///   i8* getelementptr inbounds ([9 x i8], [9 x i8]* @.str, i64 0, i64 0),
+  ///   i32 0, i8* getelementptr inbounds ([1 x i8], [1 x i8]* @.str.2, i64 0,
+  ///   i64 0)) #4
+  ///
+  /// It's simply collapsing away the cast right now, this doesn't consider the
+  /// possibility of interactions with other possible address space casts that
+  /// depend on it (we simply replace all uses with the non-geneirc variant).
+  /// For now we hope that these are erased or eliminated by either of the AS
+  /// Fixer passes or DCE passes.
+  ///
+  /// Note: Unsure how robust this is with the small sample size we currently
+  /// have to test against. So it's a WIP. If the situation becomes untenable
+  /// we can likely revert the accessor class back to it's prior form by
+  /// reverting this pull: https://github.com/intel/llvm/pull/348 (commit:
+  /// 609999c4e1aeca05aff010ce5e2eb08dde08fd69). This may cause address space
+  /// leakage however, but should result in more overall address space
+  /// consistency/stability due to the addition of more concrete address spaces.
+  void handleSpecArrayPartition(CallInst *CI) {
+    for (auto &Op : CI->operands()) {
+      if (Op->getType()->isPointerTy()) {
+        if (auto *ASC = dyn_cast<AddrSpaceCastInst>(Op)) {
+          if (ASC->getDestAddressSpace() == /*Generic AS*/ 4) {
+            ASC->replaceAllUsesWith(ASC->getPointerOperand());
+            ASC->eraseFromParent();
+          }
+        }
+      }
+    }
+  }
+
+  /// SSDM intrinsics are black boxes, the InferAddressSpace pass will not touch
+  /// them (this is in part due to the fact it doesn't deal with Calls and in
+  /// part because SSDMs are declared with no implementation and no arguments),
+  /// this will result in left over generic casts. This function is here
+  /// to deal with the cases of the left over generics caused by SSDM intrinsics
+  /// as if they're left in the compilation will fail.
+  ///
+  /// In the future if we ever define an LLVM target backend similar to AMDGPU
+  /// and we end up with a lot of these edge cases we could move this to the
+  /// InferAddressSpaces pass and teach it to deal with these SSDM calls as
+  /// Intrinsics.
+  void ssdmAddressSpaceFix(Function &F) {
+    for (auto &I : instructions(F))
+      if (auto *Call = dyn_cast<CallInst>(&I))
+        if (auto Func = dyn_cast<Function>(Call->getCalledFunction()))
+          if (Func->getName() == "_ssdm_SpecArrayPartition")
+            handleSpecArrayPartition(Call);
+  }
+
   // Hopeful list/probably impractical asks for xocc:
   // 1) Make XML generator/reader a little kinder towards arguments with no
   //   names if possible
@@ -345,7 +419,15 @@ struct InSPIRation : public ModulePass {
   // 3) Be a little more name mangle friendly when reading in input e.g.
   //    accept: $_
 
-  /// Visit all the functions of the module
+  /// This pass should ideally be run after all your optimization passes,
+  /// including anything aimed at fixing address spaces or simplifying
+  /// load/stores. This is mainly as we would like to make the SSDM address
+  /// space fixers job as simple as possible (if it gets overly complex or there
+  /// needs to be some reorganization of passes detach it into a separate pass).
+  ///
+  /// However, it should be run prior to KernelPropGen as that
+  /// pass relies on the kernel names generated here for now to fuel the driver
+  /// script.
   bool runOnModule(Module &M) override {
     // funcCount is for naming new name for each function called in kernel
     int funcCount = 0;
@@ -358,6 +440,7 @@ struct InSPIRation : public ModulePass {
           applyKernelProperties(F);
           setUniqueName(F);
           giveNameToArguments(F);
+          ssdmAddressSpaceFix(F);
 
         /// \todo Possible: We don't modify declarations right now as this will
         /// destroy the names of SPIR/CL intrinsics as they aren't actually
@@ -368,24 +451,35 @@ struct InSPIRation : public ModulePass {
         /// function to be sycl_func_x, if xocc ever gets a little friendlier to
         /// spir input, probably not required.
         } else if (isTransitiveNonIntrinsicFunc(F)
-                    && !F.isDeclaration()) {
-          // After kernels code selection, there are only two kinds of functions
-          // left: funcions called by kernels or LLVM intrinsic functions.
-          // For functions called in SYCL kernels, put SPIR calling convention.
-          kernelCallFuncSPIRify(F);
+                   && !F.isDeclaration()) {
+        // After kernels code selection, there are only two kinds of functions
+        // left: funcions called by kernels or LLVM intrinsic functions.
+        // For functions called in SYCL kernels, put SPIR calling convention.
+        kernelCallFuncSPIRify(F);
 
-          // Modify the name of funcions called by SYCL kernel since function
-          // names with $ sign would choke Xilinx xocc.
-          // And in Xilinx xocc, there are passes splitting a function to new
-          // functions. These new function names will come from some of the
-          // basic block names in the original function.
-          // So function and basic block names need to be modified to avoid
-          // containing $ sign
+        // Modify the name of funcions called by SYCL kernel since function
+        // names with $ sign would choke Xilinx xocc.
+        // And in Xilinx xocc, there are passes splitting a function to new
+        // functions. These new function names will come from some of the
+        // basic block names in the original function.
+        // So function and basic block names need to be modified to avoid
+        // containing $ sign
 
-          // Rename function name
-          F.setName("sycl_func_" + Twine{funcCount++});
+        // Rename function name
+        F.setName("sycl_func_" + Twine{funcCount++});
+
+        // While functions do come "named" it's in the form %0, %1 and XOCC
+        // doesn't like this for the moment. XOCC demands function arguments
+        // be either unnamed or named non-numerically. This is a separate
+        // issue from the reason we name kernel arguments (which is more
+        // related to HLS needing names to generate XML).
+        //
+        // It doesn't require application to the SPIR intrinsics as we're
+        // linking against the HLS SPIR library, which is already conformant.
+        giveNameToArguments(F);
+        ssdmAddressSpaceFix(F);
       } else if (isTransitiveNonIntrinsicFunc(F)
-                  && F.isDeclaration()) {
+                 && F.isDeclaration()) {
         // push back intrinsics to make sure we handle naming after changing the
         // name of all functions to sycl_func.
         // Note: if we do not rename all the functions to sycl_func_N, a more
@@ -419,7 +513,13 @@ struct InSPIRation : public ModulePass {
 
     setSPIRTriple(M);
 
+    /// TODO: Set appropriate layout so the linker doesn't always complain, this
+    /// change may be better/more easily applied as something in the Frontend as
+    /// we'd be lying about the layout if we didn't enforce it accurately in
+    /// this pass. Which is potentially a good way to come across some weird
+    /// runtime bugs.
     //setSPIRLayout(M);
+
     removeOldMetadata(M);
 
     // The module probably changed

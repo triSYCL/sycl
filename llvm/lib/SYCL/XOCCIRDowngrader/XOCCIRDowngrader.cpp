@@ -18,8 +18,10 @@
 #include "llvm/SYCL/XOCCIRDowngrader.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Attributes.h"
-#include "llvm/IR/Module.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/InstIterator.h"
+#include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
@@ -51,6 +53,27 @@ struct XOCCIRDowngrader : public ModulePass {
           }
       }
     }
+  }
+
+  /// Removes WillReturn LLVM bitcode attribute from llvm/Doc/LangRef:
+  ///
+  /// "This function attribute indicates that a call of this function will
+  ///  either exhibit undefined behavior or comes back and continues execution
+  ///  at a point in the existing call stack that includes the current
+  ///  invocation.
+  ///  Annotated functions may still raise an exception, i.a., ``nounwind``
+  ///  is not implied.
+  ///  If an invocation of an annotated function does not return control back
+  ///  to a point in the call stack, the behavior is undefined."
+  ///
+  /// Added in LLVM-10: rL364555 + D62801, this removal can be reverted as the
+  /// xocc backend catches up. It seems unlikely removal will cause any problems
+  /// as it appears to be an attribute that helps carry information to
+  /// backends/other passes for further transformations.
+  void removeWillReturn(Module &M) {
+    for (auto &F : M.functions())
+      if (F.hasFnAttribute(llvm::Attribute::WillReturn))
+        F.removeFnAttr(llvm::Attribute::WillReturn);
   }
 
   /// Removes byval bitcode function parameter attribute that is applied to
@@ -102,11 +125,22 @@ struct XOCCIRDowngrader : public ModulePass {
   void resetByVal(Module &M) {
     for (auto &F : M.functions()) {
       for (auto &P : F.args()) {
-          if (P.hasAttribute(llvm::Attribute::ByVal)) {
-              P.removeAttr(llvm::Attribute::ByVal);
-              P.addAttr(llvm::Attribute::ByVal);
-          }
+         if (P.hasAttribute(llvm::Attribute::ByVal)) {
+             P.removeAttr(llvm::Attribute::ByVal);
+             P.addAttr(llvm::Attribute::ByVal);
+         }
       }
+
+      // These appear on Call/Invoke Instructions as well
+      for (auto &I : instructions(F))
+        if (CallBase *CB = dyn_cast<CallBase>(&I)) {
+          for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
+            if (CB->paramHasAttr(i, llvm::Attribute::ByVal)) {
+              CB->removeParamAttr(i, llvm::Attribute::ByVal);
+              CB->addParamAttr(i, llvm::Attribute::ByVal);
+            }
+          }
+        }
     }
   }
 
@@ -134,6 +168,7 @@ struct XOCCIRDowngrader : public ModulePass {
 
   bool runOnModule(Module &M) override {
     removeImmarg(M);
+    removeWillReturn(M);
     removeNoFree(M);
     resetByVal(M);
     renameBasicBlocks(M);

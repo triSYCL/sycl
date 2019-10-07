@@ -135,6 +135,14 @@ using namespace llvm;
 static const unsigned UninitializedAddressSpace =
     std::numeric_limits<unsigned>::max();
 
+static cl::opt<unsigned> OptFlatAddrSpace(
+    "flat-address-space", cl::init(UninitializedAddressSpace), cl::Hidden,
+    cl::desc("The flat address space you wish to deduce concrete address "
+             "spaces for via inference rules. To refine the inference rules "
+             "further you should define an LLVM Target NOTE: The Targets "
+             "TargetTransformInformation FlatAddressSpace will overwrite this "
+             "option."));
+
 namespace {
 
 using ValueToAddrSpaceMapTy = DenseMap<const Value *, unsigned>;
@@ -627,7 +635,9 @@ bool InferAddressSpaces::runOnFunction(Function &F) {
   TTI = &getAnalysis<TargetTransformInfoWrapperPass>().getTTI(F);
 
   if (FlatAddrSpace == UninitializedAddressSpace) {
-    FlatAddrSpace = TTI->getFlatAddressSpace();
+    FlatAddrSpace = (TTI->getFlatAddressSpace() != UninitializedAddressSpace) ?
+                     TTI->getFlatAddressSpace() : OptFlatAddrSpace;
+
     if (FlatAddrSpace == UninitializedAddressSpace)
       return false;
   }

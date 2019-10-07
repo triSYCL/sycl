@@ -1,9 +1,13 @@
 // RUN: true
 //
-// Existing issue where integration header appears to lose some type information
-// or more likely it just is never defined for host execution.
-// It doesn't appear to be a problem specific to the Xilinx implementation,
-// it seems like a shared problem.
+// Regression test, based on https://github.com/triSYCL/sycl/issues/64
+// submitted by j-stephan.
+//
+// This was an existing issue where integration header appeared to lose some
+// type information for std types like uint32_t. It was a problem shared across
+// Intel/Xilinx Implementations and is now fixed in at least this particular
+// instance.
+
 #include <cstdint>
 #include <CL/sycl.hpp>
 
@@ -38,5 +42,9 @@ auto main() -> int
         cgh.single_task<foo<42>>(kernel);
     });
 
-    queue.wait();
+    auto rb = buf.get_access<cl::sycl::access::mode::read>();
+
+    for (int i = 0; i < buf.get_count(); ++i) {
+      assert(rb[i] == 42 && " execution of kernel is invalid");
+    }
 }
