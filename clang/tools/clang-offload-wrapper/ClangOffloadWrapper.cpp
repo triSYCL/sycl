@@ -307,8 +307,8 @@ private:
         // Piggybacking off of Opts to link binary <-> tile invocation
         // cannot use Tgt as we use it to represent the Tgt triple inside the
         // ClangOffloadWrapper
-        Pack->emplace_back(llvm::make_unique<Image>(ImgName, Manif, Tgt, Fmt,
-                                                    /*Opts*/ImgName));
+        Pack->emplace_back(std::make_unique<Image>(ImgName, Manif, Tgt, Fmt,
+                                                   /*Opts*/ImgName));
         I = 0;
       }
     }

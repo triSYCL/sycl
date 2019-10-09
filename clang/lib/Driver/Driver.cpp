@@ -5729,11 +5729,7 @@ const ToolChain &Driver::getOffloadingDeviceToolChain(const ArgList &Args,
               *this, Target, HostTC, Args);
             break;
           case llvm::Triple::aie32:
-            TC = llvm::make_unique<toolchains::ChessToolChain>(
-              *this, Target, HostTC, Args);
-            break;
-          case llvm::Triple::aie32:
-            TC = llvm::make_unique<toolchains::ChessToolChain>(
+            TC = std::make_unique<toolchains::ChessToolChain>(
               *this, Target, HostTC, Args);
             break;
           default:

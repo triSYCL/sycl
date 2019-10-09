@@ -106,7 +106,7 @@ void SYCL::LinkerChess::constructSYCLChessCommand(
 
   // Generate our command to sycl-chess using the arguments we've made
   // Note: Inputs that the shell script doesn't use should be ignored
-  C.addCommand(llvm::make_unique<Command>(JA, *this,
+  C.addCommand(std::make_unique<Command>(JA, *this,
                Exec, CmdArgs, Inputs));
 }
 
