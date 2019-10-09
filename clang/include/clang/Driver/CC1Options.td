@@ -886,7 +886,12 @@ def fopenmp_host_ir_file_path : Separate<["-"], "fopenmp-host-ir-file-path">,
 
 def fsycl_xocc : Flag<["-"], "fsycl-xocc">,
   HelpText<"Indicates that the compiler is using the Xilinx xocc backend, "
-           "allowing optional xocc requirements, e.g. compiler defines">;
+           "allowing optional xocc requirements, e.g. compiler defines "
+           "to be defined for both the host and device compilations">;
+def fsycl_aie : Flag<["-"], "fsycl-aie">,
+  HelpText<"Indicates that the compiler is using the Xilinx AIE backend, "
+           "allowing optional AIE requirements, e.g. compiler defines "
+           "to be defined for both the host and device compilations">;
 def fsycl_is_device : Flag<["-"], "fsycl-is-device">,
   HelpText<"Generate code for SYCL device.">;
 def fsycl_is_host : Flag<["-"], "fsycl-is-host">,

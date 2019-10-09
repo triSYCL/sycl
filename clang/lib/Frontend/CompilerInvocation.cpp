@@ -3067,7 +3067,7 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   //  the host compilation to have certain defines enabled):
   //    1) SemaSYCL to output a Tile Main function as an entry point that we can
   //       link to the kernel
-  Opts.SYCLAIEDevice = T.isXilinxAIE();
+  Opts.SYCLAIEDevice = Args.hasArg(options::OPT_fsycl_aie);
   Opts.SYCLIsDevice   = Args.hasArg(options::OPT_fsycl_is_device);
   Opts.SYCLIsHost   = Args.hasArg(options::OPT_fsycl_is_host);
   Opts.SYCLAllowFuncPtr = Args.hasFlag(options::OPT_fsycl_allow_func_ptr,
