@@ -3674,7 +3674,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // over to check for the Xilinx triple or even better make this reliant on the
   // triple of the thing currently being compiled. To do this we would need to
   // remove the reliance on a host side definition (__SYCL_XILINX_ONLY__) &&
-  // (__SYCL_AIE_DEVICE__) inside of InitPreprocessor.cpp
+  // (__SYCL_XILINX_AIE__) inside of InitPreprocessor.cpp
   //
   // Perhaps we could also pass the Xilinx FPGA/AIE device triple as an
   // auxiliary triple to the host compilation instead and it would also fulfil
