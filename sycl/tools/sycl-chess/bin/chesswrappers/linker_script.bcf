@@ -1,14 +1,14 @@
-// ME Tile has access to 128 KBs of memory (32kbs is its own), partitioned into
-// 4 32 kb (bytes) blocks this can also be partitioned eveen further into 8 for
-// even/odd banks of 16kb
+// ME Tile has access to 128 KBs of memory (32 KiBs are its own), partitioned
+// into 4 32 KiB blocks this can also be partitioned eveen further into 8 for
+// even/odd banks of 16 KiB
 //
-// The max program size is 16kbs (so the AIE elf binary cannot be larger)
+// The max program size is 16 KiBs (so the AIE ELF binary cannot be larger)
 //
 // Addresses in Hex:
-// 0x00020000 – 0x00027FFF = 32 kbs of memory, South Memory
-// 0x00028000 – 0x0002FFFF = 32 kbs of memory, West Memory
-// 0x00030000 – 0x00037FFF = 32 kbs of memory, North Memory
-// 0x00038000 – 0x0003FFFF = 32 kbs of memory, East Memory
+// 0x00020000 – 0x00027FFF = 32 KiBs of memory, South Memory
+// 0x00028000 – 0x0002FFFF = 32 KiBs of memory, West Memory
+// 0x00030000 – 0x00037FFF = 32 KiBs of memory, North Memory
+// 0x00038000 – 0x0003FFFF = 32 KiBs of memory, East Memory
 //
 // Decimal Conversion:
 // 131072 - 163839 = 32767 bytes of memory, South Memory
@@ -18,7 +18,7 @@
 //
 // Linker Script Gen:
 // 1) This current .bcf linker script only uses north memory
-// 2) 0x400 is for the stack and it's in the north memory'
+// 2) 0x400 is for the stack and it's in the north memory
 // 3) Another 0x400 is for the arguments inside of main that are used to copy
 //    across data
 // 4) The first 0x20000 is for the program, do not remove the offset

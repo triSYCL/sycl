@@ -157,10 +157,10 @@ chess_kernel_compile () {
 # export the bash function so xargs can use it
 export -f chess_kernel_compile
 
-# For the number of arguments/items in KERNEL_NAME_ARRAY invoke xargs for each
-# only consume 1 argument per invocation which is passed in as the $0'th
-# variable and invoke it at maximum for the number of available cores on the
-# system
+# For the number of arguments in KERNEL_NAME_ARRAY, invoke xargs for each
+# and only consume 1 argument per invocation. This is passed in as the $0'th
+# variable. We invoke xargs for the maximum number of cores available on the
+# system.
 if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   echo "${KERNEL_NAME_ARRAY[@]}" | xargs -n1 -P$(nproc) \
     bash -c 'chess_kernel_compile "$@"'
@@ -169,19 +169,21 @@ fi
 # Wait on all our spawned compilations to complete
 wait
 
-# Cat all metadata + images to file, essentially defining our own temporary
-# packing format, perhaps not robust but does the job for just now
-# Not parallelized in the compilation function as we want the file to be
-# sequential or at least in the basic order defined in the loop. Don't want
+# Cat all the metadata and images into a file (essentially defining our own
+# temporary packing format). This is perhaps not robust but it does the job for
+# the moment.
+# This is not parallelized in the compilation function as we want the file to be
+# sequential or at least in the basic order defined in the loop. We do not want
 # data races making the file format non-deterministic.
 if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   LINKER_LIST=""
   for index in "${KERNEL_NAME_ARRAY[@]}"; do
     if [[ -n "$index" ]]; then
-      # Name of elf kernel function that we will synch with integration header to
-      # retrieve our binary, will be packaged as part of the image data.
-      # Also used by wrapper to identify the image to package after its loaded
-      # into memory
+      # Name of ELF binary and kernel function that we will synch with
+      # integration header to retrieve our binary, it will be packaged as part
+      # of the final image data.
+      # The name is also used by the Offload Wrapper to identify the image to
+      # wrap into the host binary after its loaded into memory.
       echo "${index}" >> "$OUTPUT_FILE_NAME"
       # Size of file in bytes
       echo "`ls -lrt "$SOURCE_TEMPORARY_DIR/${index}.elf.o" | nawk '{print $5}'`" \
@@ -192,9 +194,9 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
 fi
 
 # Dump a copy of the file containing all of the AIE binaries into another file
-# so that we can introspect and in theory skip the AOC stage above if
-# we want to by altering the script a little to comment out the compilation
-# steps and inverting the copy to copy the aie_images file to the output file.
+# so that we can introspect and in theory skip the AOC stage above, if
+# we want to, by altering the script a little to comment out the compilation
+# steps and inverting the copy, to copy the aie_images file to the output file.
 # Useful for debugging the host <-> device side mapping and or offloading
 # stages. Dumped in the basic temporary directory clang passes because we
 # flatline all of the directory we use to output intermediate files.
@@ -204,4 +206,3 @@ cp "$OUTPUT_FILE_NAME"  "$CLANG_TEMPORARY_DIR/aie_images"
 # compiler doesn't know what we generate in here so it has to be manually
 # tracked and removed
 rm -rf $SOURCE_TEMPORARY_DIR
-

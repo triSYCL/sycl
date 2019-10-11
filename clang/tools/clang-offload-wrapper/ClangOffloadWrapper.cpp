@@ -279,9 +279,10 @@ public:
 
 private:
   void UnpackAIEImages(std::unique_ptr<SameKindPack> &Pack,
-                       const OffloadKind Kind, const llvm::StringRef File,
-                       const llvm::StringRef Manif, const llvm::StringRef Tgt,
-                       const BinaryImageFormat Fmt, const llvm::StringRef Opts){
+                       const OffloadKind Kind, const llvm::StringRef &File,
+                       const llvm::StringRef &Manif, const llvm::StringRef &Tgt,
+                       const BinaryImageFormat Fmt,
+                       const llvm::StringRef &Opts) {
     auto PackagedImgs = loadFile(File);
     std::istringstream ImgStream;
     ImgStream.str(std::string(PackagedImgs->getBufferStart(),
@@ -292,17 +293,16 @@ private:
     // Line 2: Size of Image
     // Line 3 to (Size of Image): Elf binary data
     int I = 0;
-    int ImageSize = 0;
     std::string ImgName;
     for (std::string Line; std::getline(ImgStream, Line);) {
       if (I == 0) {
         ImgName = Line;
         I++;
       } else {
-        ImageSize = std::stoi(Line);
-        std::string Img(ImageSize, '\0');
-        ImgStream.read(&Img.front(), ImageSize);
-        AutoGcBufs.emplace_back(MemoryBuffer::getMemBufferCopy(Img, ImgName));
+        std::vector<char> Img(std::stoi(Line));
+        ImgStream.read(Img.data(), Img.size());
+        AutoGcBufs.emplace_back(MemoryBuffer::getMemBufferCopy(
+            llvm::StringRef(Img.data(), Img.size()), ImgName));
 
         // Piggybacking off of Opts to link binary <-> tile invocation
         // cannot use Tgt as we use it to represent the Tgt triple inside the
@@ -434,14 +434,14 @@ private:
   // of the Wrappers lifetime
   MemoryBuffer *getMemBuffFromGcBufs(llvm::StringRef Name) {
     MemoryBuffer* MemBuff;
-    for (auto iter = AutoGcBufs.begin(); iter != AutoGcBufs.end(); iter++) {
-      if (iter->get()->getBufferIdentifier() == Name) {
-        MemBuff = iter->get();
+    for (auto &GcBuf : AutoGcBufs) {
+      if (GcBuf->getBufferIdentifier() == Name) {
+        MemBuff = GcBuf.get();
         return MemBuff;
        }
     }
 
-    // At the moment this is only called for AIE, we expect the buffer to exist
+    // At the moment this is only called for AIE, we expect the buffer to exist,
     // if it doesn't then there is a problem so error out early.
     errs() << "error: missing memory buffer from map " << Name << "\n";
     exit(1);

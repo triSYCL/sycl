@@ -762,11 +762,11 @@ static CompoundStmt *CreateOpenCLKernelBody(Sema &S,
         InitializedEntity::InitializeVariable(KernelObjClone);
     // Use Default Initialization because passing a million arguments for each
     // functor is a little too complex for now.
-    // The base class aggergate initializaiton/code gen is done before Fields
-    // which is why this is precedes it.
+    // The base class aggregate initialization/code gen is done before Fields
+    // which is why this precedes it.
     for (const auto Base : LC->bases()) {
       // Parent should probably point to whatever this base classes parent is,
-      // I know it has a parent i.e. tile_base so it should probably be that..
+      // I know it has a parent i.e. tile_base so it should probably be that.
       InitializedEntity Entity =
           InitializedEntity::InitializeBase(S.Context, &Base,
             /*IsInheritedVirtualBase*/false/*,Parent=nullptr*/);
@@ -1102,31 +1102,14 @@ static void buildArgTys(ASTContext &Context, CXXRecordDecl *KernelObj,
 // 2) Something the main file for the specific tile can be named with so it's
 //    possible for the script to identify and link against
 static std::string AIENameGen(std::string S) {
-  const char S1[] = "::";
-  const char S2[] = "<";
-  const char S3[] = ">";
-  const char S4[] = ",";
-  const char S5[] = " ";
-
-  for (auto Pos = S.find(S1); Pos != StringRef::npos; Pos = S.find(S1, Pos))
-    S.erase(Pos, sizeof(S1) - 1);
-
-  for (auto Pos = S.find(S2); Pos != StringRef::npos; Pos = S.find(S2, Pos))
-    S.erase(Pos, sizeof(S2) - 1);
-
-  for (auto Pos = S.find(S3); Pos != StringRef::npos; Pos = S.find(S3, Pos))
-    S.erase(Pos, sizeof(S3) - 1);
-
-  // Simplest way to make sure AIE tile number naming isn't off in cases like
-  // tile positions of 11, 1 vs 1, 11 when flatening the name is to replace all
-  // commas by an _ so we get 1_11, 11_1. Currently this will add _ for any
-  // comma making the name a little longer than neccessary but it's easy to
-  // fix this if it poses problems.
-  for (auto Pos = S.find(S4); Pos != StringRef::npos; Pos = S.find(S4, Pos))
-    S.replace(Pos, sizeof(S4) - 1, "_");
-
-  for (auto Pos = S.find(S5); Pos != StringRef::npos; Pos = S.find(S5, Pos))
-    S.erase(Pos, sizeof(S5) - 1);
+  // Delete all <, >, :: and white space and replace all commas with underscores
+  // to make sure tile naming isn't off in cases like the following where
+  // several position numbers are similar: Tile 11, 1 vs Tile 1, 11
+  // If we just remove all commas we get 111 for both names, if we replace with
+  // an underscore we get: 1_11, 11_1.
+  for(StringRef s : { "::", "<", ">", ",", " " } )
+    for (auto Pos = S.find(s); Pos != StringRef::npos; Pos = S.find(s, Pos))
+      (s == ",") ? S.replace(Pos, s.size(), "_") : S.erase(Pos, s.size());
 
   return S;
 }
@@ -1154,10 +1137,10 @@ static std::string RemoveGlobalFromType(std::string S) {
 }
 
 // Creates the contents of a SYCL main file which wraps a kernel function and
-// it's parameters and invokes it. The idea for now is that creating a high
+// its parameters and invokes it. The idea for now is that creating a high
 // level main file gives easier access to kernel information and a higher level
-// way to alter the entry point. Writing it as an llvm pass is probably possible
-// but harder to make modifications to..
+// way to alter the entry point. Writing it as an LLVM pass is probably possible
+// but harder to make modifications to.
 //
 // Used for the AI Engine Tile entry point as it doesn't follow standard OpenCL
 // kernel entry points.
@@ -1175,8 +1158,8 @@ static std::string RemoveGlobalFromType(std::string S) {
 // TODO If it's decide this direction is fine refactor this to perhaps behave
 // more like the Integrated Header as we can keep some form of Module state and
 // emit the files at the end of the module
-// TODO Also clean it up in general, break it into reuseable lambdas etc. a lot
-// of repitiion/readabillity issues
+// TODO Also clean it up in general, break it into reusable lambdas etc. a lot
+// of repetition/readability issues
 // TODO Fix double generation of main file, SYCL passes through here twice and
 // generates two sets of main files, they overwrite each other which is fine.
 // However, the second set happens after the script so it makes it impossible
@@ -1436,7 +1419,7 @@ void Sema::ConstructOpenCLKernel(FunctionDecl *KernelCallerFunc) {
   FunctionDecl *OpenCLKernel =
       CreateOpenCLKernelDeclaration(getASTContext(), Name, ParamDescs);
 
-  // Generate Main prior to header gen incase we need to pass across any
+  // Generate Main prior to header gen in-case we need to pass across any
   // information to the header.
   if (getLangOpts().SYCLAIEDevice)
     populateMainEntryPoint(Name, OpenCLKernel);
