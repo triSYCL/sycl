@@ -1100,6 +1100,8 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
   if (LangOpts.SYCLXOCCDevice)
     Builder.defineMacro("__SYCL_XILINX_ONLY__");
 
+  if (LangOpts.SYCLAIEDevice)
+    Builder.defineMacro("__SYCL_XILINX_AIE__");
 
   // OpenCL definitions.
   if (LangOpts.OpenCL) {

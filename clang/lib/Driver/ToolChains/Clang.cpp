@@ -3670,16 +3670,25 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-sycl-std=1.2.1");
   }
 
-  // \todo Extend this to use getOffloadToolChains<Action::OFK_SYCL> and loop
+  // TODO: Extend this to use getOffloadToolChains<Action::OFK_SYCL> and loop
   // over to check for the Xilinx triple or even better make this reliant on the
   // triple of the thing currently being compiled. To do this we would need to
-  // remove the reliance on a host side definition (__SYCL_XILINX_ONLY__)
-  // inside of InitPreprocessor.cpp
+  // remove the reliance on a host side definition (__SYCL_XILINX_ONLY__) &&
+  // (__SYCL_XILINX_AIE__) inside of InitPreprocessor.cpp
+  //
+  // Perhaps we could also pass the Xilinx FPGA/AIE device triple as an
+  // auxiliary triple to the host compilation instead and it would also fulfil
+  // the same purpose, but this is perhaps not very extendible for multi-target
+  // compilation.
   if (IsSYCL
       && C.getSingleOffloadToolChain<Action::OFK_SYCL>()
           ->getTriple().isXilinxFPGA())
     CmdArgs.push_back("-fsycl-xocc");
 
+  if (IsSYCL
+      && C.getSingleOffloadToolChain<Action::OFK_SYCL>()
+          ->getTriple().isXilinxAIE())
+    CmdArgs.push_back("-fsycl-aie");
 
   if (IsOpenMPDevice) {
     // We have to pass the triple of the host if compiling for an OpenMP device.
@@ -6763,6 +6772,17 @@ void OffloadWrapper::ConstructJob(Compilation &C, const JobAction &JA,
     TT.setEnvironment(llvm::Triple::SYCLDevice);
     SmallString<128> TargetTripleOpt("-target=");
     TargetTripleOpt += TT.str();
+    WrapperArgs.push_back(C.getArgs().MakeArgString(TargetTripleOpt));
+  }
+
+  // Intel do something similar upstream at the moment for AoT FPGAs
+  // We're using this to indicate to the wrapper that the file being passed to
+  // it for offload wrapping needs to be handled specially. i.e unbundle and
+  // wrap into multiple images. As currently we concatenate all images into one
+  // from our script and fire it along the pipeline.
+  if (getToolChain().getTriple().isXilinxAIE()) {
+    SmallString<128> TargetTripleOpt("-target=");
+    TargetTripleOpt += getToolChain().getTriple().str();
     WrapperArgs.push_back(C.getArgs().MakeArgString(TargetTripleOpt));
   }
 

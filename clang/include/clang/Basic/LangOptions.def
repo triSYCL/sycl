@@ -225,7 +225,8 @@ LANGOPT(CUDAHostDeviceConstexpr, 1, 1, "treating unattributed constexpr function
 LANGOPT(CUDADeviceApproxTranscendentals, 1, 0, "using approximate transcendental functions")
 LANGOPT(GPURelocatableDeviceCode, 1, 0, "generate relocatable device code")
 
-LANGOPT(SYCLXOCCDevice    , 1, 0, "Generate SPIR compliant bitcode for XOCC consumption")
+LANGOPT(SYCLXOCCDevice    , 1, 0, "Indicate compiling for XOCC device")
+LANGOPT(SYCLAIEDevice     , 1, 0, "Indicate compiling for AIE device")
 LANGOPT(SYCLIsDevice      , 1, 0, "Generate code for SYCL device")
 LANGOPT(SYCLIsHost        , 1, 0, "SYCL host compilation")
 LANGOPT(SYCLAllowFuncPtr  , 1, 0, "Allow function pointers in SYCL device code")

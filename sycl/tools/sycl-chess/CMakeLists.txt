@@ -19,19 +19,19 @@ endforeach()
 # \TODO: Might be able to refactor this into a single foreach
 set(ChessWrapperFiles
       chesswrappers/chess-clang
+      chesswrappers/linker_script.bcf
   )
 
 foreach(ChessWrapper ${ChessWrapperFiles})
   add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/bin/${ChessWrapper}
                      COMMAND ${CMAKE_COMMAND} -E make_directory
-                       ${CMAKE_BINARY_DIR}/bin/chesswrapper
+                       ${CMAKE_BINARY_DIR}/bin/chesswrappers
                      COMMAND ${CMAKE_COMMAND} -E copy
                        ${CMAKE_CURRENT_SOURCE_DIR}/bin/${ChessWrapper}
-                       ${CMAKE_BINARY_DIR}/bin/chesswrapper/
+                       ${CMAKE_BINARY_DIR}/bin/chesswrappers/
                      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bin/${ChessWrapper})
   list(APPEND Depends ${CMAKE_BINARY_DIR}/bin/${ChessWrapper})
-  install(PROGRAMS bin/${ChessWrapper} DESTINATION bin/chesswrapper)
+  install(PROGRAMS bin/${ChessWrapper} DESTINATION bin/chesswrappers)
 endforeach()
 
 add_custom_target(sycl-chess ALL DEPENDS ${Depends})
-add_custom_target(chess-clang ALL DEPENDS ${Depends})

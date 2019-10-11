@@ -7,3 +7,5 @@ add_llvm_library(LLVMChessMassage
   DEPENDS
   intrinsics_gen
 )
+
+target_link_libraries(LLVMChessMassage LLVMCore LLVMSupport)

@@ -538,13 +538,14 @@ int main(int argc, char **argv) {
   initializeHardwareLoopsPass(Registry);
 
   // SYCL related passes, there may come a time where it's better to register
-  // these as a module rather than separate passes
-  // (e.g. initializeTransformUtils(Registry) etc. above)
+  // these as a module rather than separate passes (e.g.
+  // initializeTransformUtils(Registry) etc. above)
   initializeASFixerPass(Registry);
   initializeInSPIRationPass(Registry);
   initializeKernelPropGenPass(Registry);
   initializeXOCCIRDowngraderPass(Registry);
   initializeChessMassagePass(Registry);
+  initializeHardwareLoopsPass(Registry);
 
 #ifdef LINK_POLLY_INTO_TOOLS
   polly::initializePollyPasses(Registry);

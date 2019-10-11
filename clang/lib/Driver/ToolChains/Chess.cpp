@@ -68,7 +68,6 @@ void SYCL::LinkerChess::constructSYCLChessCommand(
     const InputInfoList &Inputs, const llvm::opt::ArgList &Args) const {
   const auto &TC =
     static_cast<const toolchains::ChessToolChain &>(getToolChain());
-
   ArgStringList CmdArgs;
 
   // Script Arg $1, directory of cardano bin (where xchesscc resides)
@@ -107,7 +106,7 @@ void SYCL::LinkerChess::constructSYCLChessCommand(
 
   // Generate our command to sycl-chess using the arguments we've made
   // Note: Inputs that the shell script doesn't use should be ignored
-  C.addCommand(llvm::make_unique<Command>(JA, *this,
+  C.addCommand(std::make_unique<Command>(JA, *this,
                Exec, CmdArgs, Inputs));
 }
 
@@ -118,8 +117,7 @@ void SYCL::LinkerChess::constructSYCLChessCommand(
 ChessToolChain::ChessToolChain(const Driver &D, const llvm::Triple &Triple,
                                const ToolChain &HostTC, const ArgList &Args)
     : ToolChain(D, Triple, Args), HostTC(HostTC),
-      ChessInstallation(D, HostTC.getTriple(), Args)
-{
+      ChessInstallation(D, HostTC.getTriple(), Args) {
   if (ChessInstallation.isValid())
     getProgramPaths().push_back(ChessInstallation.getBinPath());
 
@@ -183,6 +181,7 @@ void ChessToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
 }
 
 void ChessToolChain::AddClangCXXStdlibIncludeArgs(const ArgList &Args,
-                                                  ArgStringList &CC1Args) const {
+                                                  ArgStringList &CC1Args) const
+{
   HostTC.AddClangCXXStdlibIncludeArgs(Args, CC1Args);
 }

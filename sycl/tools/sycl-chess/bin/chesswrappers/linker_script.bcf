@@ -1,0 +1,71 @@
+// ME Tile has access to 128 KBs of memory (32 KiBs are its own), partitioned
+// into 4 32 KiB blocks this can also be partitioned eveen further into 8 for
+// even/odd banks of 16 KiB
+//
+// The max program size is 16 KiBs (so the AIE ELF binary cannot be larger)
+//
+// Addresses in Hex:
+// 0x00020000 – 0x00027FFF = 32 KiBs of memory, South Memory
+// 0x00028000 – 0x0002FFFF = 32 KiBs of memory, West Memory
+// 0x00030000 – 0x00037FFF = 32 KiBs of memory, North Memory
+// 0x00038000 – 0x0003FFFF = 32 KiBs of memory, East Memory
+//
+// Decimal Conversion:
+// 131072 - 163839 = 32767 bytes of memory, South Memory
+// 163840 – 196607 = 32767 bytes of memory, West Memory
+// 196608 – 229375 = 32767 bytes of memory, North Memory
+// 229376 – 262143 = 32767 bytes of memory, East Memory
+//
+// Linker Script Gen:
+// 1) This current .bcf linker script only uses north memory
+// 2) 0x400 is for the stack and it's in the north memory
+// 3) Another 0x400 is for the arguments inside of main that are used to copy
+//    across data
+// 4) The first 0x20000 is for the program, do not remove the offset
+//    or your program will not function and there is a strong chance you'll
+//    force a kernel panic when moving data or at the very least lock up the
+//    application
+// 5) The rest is the east/north/south/west memory location and the main
+//    initilization symbols
+//
+// This script only works with north memory for now, it's feasible to change it
+// for any other memory location if you wish. But know that if you keep using
+// north memory the top row of tiles are in theory unusable as it has nowhere to
+// 1) store data you write across
+// 2) store the auto generated main files arg array which is used to pass
+//    arguments to the kernel
+//
+// If in doubt ask Hyun Kwon about this as he engineered the concepts behind it!
+//
+// -----------------------------------------------------------------------------
+//
+// Future TODO: Make this .bcf file and the host -> device allocation
+// functionallity more generic, ideally tiles should use their own memory
+// not another tiles memory as we would like all tiles to be useable.
+// This minimally requires 2 bcf files that will alternate based on the
+// tiles position in the array. As some tiles have their own memory on the east
+// and others on the west, based on the checker board pattern of the AIE array.
+//
+// The host -> device + host <- device transfers done by the host will probably
+// also need tweaking based on the tiles position in the array. But this depends
+// how we are encapsulating the transfers at that point (at time of writing we
+// are using explicit read/write operations but perhaps AXI streaming is
+// different and more generic/friendly).
+
+  _reserved DMb 0x0 0x20000 // memory reserved for the program, seems a little
+                            // larger than 16kb which is what is truly reserved
+                            // for a tile program according to the specification
+                            // we're all unsure what the other 96kbs is for..
+
+  _entry_point _main_init
+  _symbol      _main _after _main_init
+  _symbol      _main_init 0
+  _stack DM_stack 0x30400  0x400 //stack for core
+
+  _reserved DMb 0x20000 0x8000 // reserving 32kbs of south memory
+  _reserved DMb 0x28000 0x8000 // reserving 32kbs of west memory
+  //_reserved DMb 0x30000 0x8000 // north
+  _reserved DMb 0x30800 0x7800
+  _reserved DMb 0x38000 0x8000 // east
+  _reserved DMb 0x40000 0xc0000 // And everything else the core can't see
+

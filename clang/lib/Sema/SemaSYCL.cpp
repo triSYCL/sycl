@@ -760,6 +760,24 @@ static CompoundStmt *CreateOpenCLKernelBody(Sema &S,
     llvm::SmallVector<Expr *, 16> InitExprs;
     InitializedEntity VarEntity =
         InitializedEntity::InitializeVariable(KernelObjClone);
+    // Use Default Initialization because passing a million arguments for each
+    // functor is a little too complex for now.
+    // The base class aggregate initialization/code gen is done before Fields
+    // which is why this precedes it.
+    for (const auto Base : LC->bases()) {
+      // Parent should probably point to whatever this base classes parent is,
+      // I know it has a parent i.e. tile_base so it should probably be that.
+      InitializedEntity Entity =
+          InitializedEntity::InitializeBase(S.Context, &Base,
+            /*IsInheritedVirtualBase*/false/*,Parent=nullptr*/);
+
+      InitializationKind InitKind =
+          InitializationKind::CreateDefault(SourceLocation());
+      InitializationSequence InitSeq(S, Entity, InitKind, None);
+      ExprResult BaseInit = InitSeq.Perform(S, Entity, InitKind, None);
+      InitExprs.push_back(BaseInit.get());
+    }
+
     for (auto Field : LC->fields()) {
       // Creates Expression for special SYCL object: accessor or sampler.
       // All special SYCL objects must have __init method, here we use it to
@@ -1064,6 +1082,167 @@ static void buildArgTys(ASTContext &Context, CXXRecordDecl *KernelObj,
   }
 }
 
+
+// First pass at a name gen function currently just inefficently rips all
+// illegal function name characters from the type to make the name.
+// e.g:
+// ::prog< ::trisycl::vendor::xilinx::acap::aie::array<
+//    ::trisycl::vendor::xilinx::acap::aie::layout::size<2, 2>,
+//      ::prog, ::trisycl::vendor::xilinx::acap::aie::memory>, 1, 1>
+// ->
+// progtrisyclvendorxilinxacapaiearraytrisyclvendorxilinxacapaielayoutsize2_2_...
+//
+// TODO Come up with a better naming convention, the problem is it needs to be:
+// 1) a) An unmangled function name so it can link to the main file
+//      OR
+//    b) something the main file can be mangled to without it being some form of
+//       template instantiation as that would require some forward declaration
+//       of the template inside of main (maybe possible as it's somewhat similar
+//       to the header generation route)
+// 2) Something the main file for the specific tile can be named with so it's
+//    possible for the script to identify and link against
+static std::string AIENameGen(std::string S) {
+  // Delete all <, >, :: and white space and replace all commas with underscores
+  // to make sure tile naming isn't off in cases like the following where
+  // several position numbers are similar: Tile 11, 1 vs Tile 1, 11
+  // If we just remove all commas we get 111 for both names, if we replace with
+  // an underscore we get: 1_11, 11_1.
+  for(StringRef s : { "::", "<", ">", ",", " " } )
+    for (auto Pos = S.find(s); Pos != StringRef::npos; Pos = S.find(s, Pos))
+      (s == ",") ? S.replace(Pos, s.size(), "_") : S.erase(Pos, s.size());
+
+  return S;
+}
+
+// Just rips the __global address space from a string as these are appended to
+// Pointers inside of buildArgTys and we don't want them in our AI Engine main
+//
+// They currently degrade to no address space inside our LLVM IR because all
+// Language AS Spaces are set to the default 0 for our targets. But they still
+// pose a problem when we're trying to spit out our types as strings.
+//
+// An alternative fix to this is to just put the address space modificaiton
+// section of the code in buildArgTys inside of an if (AIEngine) block or to
+// create a temporary copy we can rip the address space qualifier off of.
+//
+// For now this keeps the change local to the generation of our main file,
+// prevents conflicts and is easy to understand.
+static std::string RemoveGlobalFromType(std::string S) {
+  const char S1[] = "__global ";
+
+  for (auto Pos = S.find(S1); Pos != StringRef::npos; Pos = S.find(S1, Pos))
+    S.erase(Pos, sizeof(S1) - 1);
+
+  return S;
+}
+
+// Creates the contents of a SYCL main file which wraps a kernel function and
+// its parameters and invokes it. The idea for now is that creating a high
+// level main file gives easier access to kernel information and a higher level
+// way to alter the entry point. Writing it as an LLVM pass is probably possible
+// but harder to make modifications to.
+//
+// Used for the AI Engine Tile entry point as it doesn't follow standard OpenCL
+// kernel entry points.
+//
+// Currently restricted to a very OpenCL-esque idea of what a tile is e.g. 1
+// Kernel Per Tile, so 1 single function inside of a main with no concept of
+// connectivity to anything else. Unsure if this is the way to go long term but
+// works for a first pass.
+//
+// TODO FIXME Hyun Kwon believes it might be possible to skip this and do some
+// runtime magic to increment the program counter and fill the parameters as we
+// need, this maybe a good thing to look into to get rid of a compiler
+// dependency and it may allow complex scheduling from the runtime. This works
+// as a simple first step for now.
+// TODO If it's decide this direction is fine refactor this to perhaps behave
+// more like the Integrated Header as we can keep some form of Module state and
+// emit the files at the end of the module
+// TODO Also clean it up in general, break it into reusable lambdas etc. a lot
+// of repetition/readability issues
+// TODO Fix double generation of main file, SYCL passes through here twice and
+// generates two sets of main files, they overwrite each other which is fine.
+// However, the second set happens after the script so it makes it impossible
+// to automate the deletion from the script. Also a waste of processing time
+// when you need to generate 400 main files a second time around.
+static void populateMainEntryPoint(const StringRef Name,
+                                   const FunctionDecl *KernelFunction) {
+  SmallString<256> TmpDir;
+  llvm::sys::path::system_temp_directory(true, TmpDir);
+  auto MainFileName = std::string(TmpDir.str()) + "/" + Name.str() + ".cpp";
+
+  int MainNameFD = 0;
+  std::error_code EC =
+      llvm::sys::fs::openFileForWrite(MainFileName, MainNameFD);
+  if (EC) {
+    llvm::errs() << "Error: " << EC.message() << "\n";
+    return;
+  }
+  llvm::raw_fd_ostream Out(MainNameFD, true /*close in destructor*/);
+
+  Out << "// This is an auto-generated SYCL AIE Processor Tile Main.\n";
+  Out << "#include <stdint.h>\n";
+
+  Out << "// SYCL generated kernel wrapper function \n";
+  // Output Kernel Wrapper Function Declaracation
+  // e.g.
+  // void f(uint16_t *input, uint8_t *output, uint32_t width, uint32_t height);
+  // FIXME: We can probably mangle this eventually if we'd like, but extern C
+  // makes life simpler for now
+  Out << "extern \"C\" void " << Name << "(";
+  // loop over parameter types
+  auto ParamCount = KernelFunction->param_size();
+  for (size_t i = 0; i < ParamCount; ++i) {
+    Out << RemoveGlobalFromType(
+      KernelFunction->getParamDecl(i)->getOriginalType().getAsString());
+    Out << " " << KernelFunction->getParamDecl(i)->getNameAsString();
+    if (i < ParamCount - 1)
+      Out << ", ";
+  }
+  Out << ");" << "\n";
+
+  // TODO: Declare Kernel objects and external arrays
+  Out << "// Declare Kernel objects and external arrays \n";
+  Out << "\n";
+
+  // TODO: Declare shared memory buffers
+  Out << "// Declare shared memory buffers \n";
+  Out << "\n";
+
+  Out << "// SYCL Tile Address Register \n";
+  Out << "uint32_t args[256];" << "\n";
+  Out << "int main(void) {" << "\n";
+
+  // Assign arg registers to parameters
+  // e.g. uint16_t *input = (uint16_t *)args[0];
+  for (size_t i = 0; i < ParamCount; ++i) {
+    Out << "  "<< RemoveGlobalFromType(
+      KernelFunction->getParamDecl(i)->getOriginalType().getAsString());
+    Out << " " << KernelFunction->getParamDecl(i)->getNameAsString();
+    Out << " = ("
+        << RemoveGlobalFromType(KernelFunction->getParamDecl(i)->
+                                  getOriginalType().getAsString())
+        << ") args[" << i << "];" << "\n";
+  }
+  Out << "\n";
+  // Kernel Invocation
+  // e.g. f(input, output, width, height);
+  Out << "  "<< Name << "(";
+  // loop over parameter types
+  for (size_t i = 0; i < ParamCount; ++i) {
+    Out << KernelFunction->getParamDecl(i)->getNameAsString();
+    if (i < ParamCount - 1)
+      Out << ", ";
+  }
+  Out << ");" << "\n";
+
+  Out << "\n";
+  Out << "  return 0;";
+  Out << "\n";
+  Out << "}";
+  Out << "\n";
+}
+
 /// Adds necessary data describing given kernel to the integration header.
 /// \param H           the integration header object
 /// \param Name        kernel name
@@ -1227,11 +1406,23 @@ void Sema::ConstructOpenCLKernel(FunctionDecl *KernelCallerFunc) {
       TemplateArgs->get(0).getAsType(), getASTContext(), true);
   std::string Name = constructKernelName(KernelNameType, getASTContext());
 
+
+  // Tile kernel name can't be a mangled type name as it'll make linking
+  // difficult, but it has to be unique so it doesn't clash with other kernels
+  // inside the module.
+  if (getLangOpts().SYCLAIEDevice)
+    Name = AIENameGen(KernelNameType.getAsString());
+
   // TODO Maybe don't emit integration header inside the Sema?
   populateIntHeader(getSyclIntegrationHeader(), Name, KernelNameType, LE);
 
   FunctionDecl *OpenCLKernel =
       CreateOpenCLKernelDeclaration(getASTContext(), Name, ParamDescs);
+
+  // Generate Main prior to header gen in-case we need to pass across any
+  // information to the header.
+  if (getLangOpts().SYCLAIEDevice)
+    populateMainEntryPoint(Name, OpenCLKernel);
 
   // Let's copy source location of a functor/lambda to emit nicer diagnostics
   OpenCLKernel->setLocation(LE->getLocation());

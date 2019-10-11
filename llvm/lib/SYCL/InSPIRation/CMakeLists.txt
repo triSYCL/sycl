@@ -7,3 +7,5 @@ add_llvm_library(LLVMInSPIRation
   DEPENDS
   intrinsics_gen
 )
+
+target_link_libraries(LLVMInSPIRation LLVMCore LLVMSupport LLVMDemangle)

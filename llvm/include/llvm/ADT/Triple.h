@@ -517,13 +517,13 @@ public:
         && getVendor() == Triple::Xilinx;
   }
 
-  bool isMacCatalystEnvironment() const {
-    return getEnvironment() == Triple::MacABI;
-  }
-
   bool isXilinxAIE() const {
     return getArch() == Triple::aie32
         && getVendor() == Triple::Xilinx;
+  }
+
+  bool isMacCatalystEnvironment() const {
+    return getEnvironment() == Triple::MacABI;
   }
 
   bool isOSNetBSD() const {

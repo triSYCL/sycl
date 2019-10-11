@@ -7,3 +7,5 @@ add_llvm_library(LLVMKernelPropGen
   DEPENDS
   intrinsics_gen
 )
+
+target_link_libraries(LLVMKernelPropGen LLVMCore LLVMSupport)
