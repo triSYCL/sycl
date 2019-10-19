@@ -116,7 +116,7 @@ mv "$CLANG_TEMPORARY_DIR/KernelProperties_${SOURCE_FILE_NAME}.bash" \
 source "$SOURCE_TEMPORARY_DIR/KernelProperties_${SOURCE_FILE_NAME}.bash"
 
 # AI Engine .o file containing all kernels for the module
-$XCHESSCC +P $(nproc) -p me -P $CARDANO_LIB_DIR -d -f -c \
+$XCHESSCC +P $(nproc) -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c \
   -o "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
   "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
 
@@ -144,10 +144,10 @@ chess_kernel_compile () {
     # in some unusual behaviour longterm
     mv "$CLANG_TEMPORARY_DIR/$0.cpp" "$SOURCE_TEMPORARY_DIR/$0.cpp"
 
-    $XCHESSCC -p me -P $CARDANO_LIB_DIR -d -f -c \
+    $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c \
       -o "$SOURCE_TEMPORARY_DIR/$0.main.o" "$SOURCE_TEMPORARY_DIR/$0.cpp"
 
-    $XCHESSCC -p me -P $CARDANO_LIB_DIR -d -f \
+    $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f \
       +l$DRIVER_PATH_DIR/chesswrappers/linker_script.bcf \
       -o "$SOURCE_TEMPORARY_DIR/$0.elf.o" \
       "$SOURCE_TEMPORARY_DIR/$0.main.o" \
