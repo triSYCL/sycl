@@ -845,6 +845,12 @@ static std::string AIENameGen(std::string S) {
     for (auto Pos = S.find(s.str()); Pos != StringRef::npos; Pos = S.find(s.str(), Pos))
       (s == ",") ? S.replace(Pos, s.size(), "_") : S.erase(Pos, s.size());
 
+  // Append the user id string. This solves conflicts between users.
+  // But the conflicts between applications within same user still remain,
+  // which is hopefully easy to work through.
+  S.append("_");
+  S.append(getenv("USER"));
+
   return S;
 }
 
