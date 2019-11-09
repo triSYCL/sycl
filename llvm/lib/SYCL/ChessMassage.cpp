@@ -24,6 +24,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Utils/FunctionComparator.h"
 
 using namespace llvm;
 
@@ -37,6 +38,36 @@ struct ChessMassage : public ModulePass {
   static char ID; // Pass identification, replacement for typeid
 
   ChessMassage() : ModulePass(ID) {}
+
+  // Re-order functions with hash values. This is taken from MergeFunctions
+  // and required to correctly identifie to which one the functions are
+  // merged into. This means, the original list is sorted as:
+  //   func1 - func2 - func3 - func4 - func5 - ...
+  // The merged one looks like:
+  //   func1 - func4 - ...
+  // And this indicates that func2 and func3 are merged into func1
+  // Note, since it's from MergeFunctions, if MergeFunctions changes in some
+  // way, it may break, ex identifying merged function incorrectly.
+  void reorderFunctions(Module &M) {
+    std::vector<std::pair<FunctionComparator::FunctionHash, Function *>>
+      HashedFuncs;
+
+    for (auto &F : M.functions()) {
+      // Collect the kernel functions
+      if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
+        HashedFuncs.push_back({FunctionComparator::functionHash(F), &F});
+      }
+    }
+
+    // Sort collected kernel functions with hash values
+    llvm::stable_sort(HashedFuncs, less_first());
+
+    // Put sorted kernel functions back to the list
+    for (auto I = HashedFuncs.begin(), IE = HashedFuncs.end(); I != IE; ++I) {
+      I->second->removeFromParent();
+      M.getFunctionList().push_back(I->second);
+    }
+  }
 
   /// Removes immarg (immutable arg) bitcode attribute that is applied to
   /// function parameters. It was added in LLVM-9 (D57825), so as xocc catches
@@ -94,6 +125,7 @@ struct ChessMassage : public ModulePass {
   }
 
   bool runOnModule(Module &M) override {
+    reorderFunctions(M);
     removeImmarg(M);
     modifySPIRCallingConv(M);
     // This causes some problems with Tale when we generate a .sfg from a kernel
