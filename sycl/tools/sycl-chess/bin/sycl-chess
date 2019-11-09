@@ -117,11 +117,24 @@ KERNELPROP="$SOURCE_TEMPORARY_DIR/KernelProperties_${SOURCE_FILE_NAME}.bash"
 # -O3 causes over optimization with a simple hello_world.cpp and we end up
 # with a trap...
 # Run Opt pass to convert our IR into something the chess toolchain can support
-$OPT -S -O3 -kernelPropGen  -instnamer -xoccIRDowngrader -ChessMassage \
-  --sycl-kernel-propgen-output $KERNELPROP "$INPUT_FILE_NAME" -o \
+# The order of opt passes matters: ChessMassage -> mergefunc ->kernelPropGen
+# Maybe passes can be renamed to describe stages better.
+$OPT -S -O3 -instnamer -xoccIRDowngrader -ChessMassage -mergefunc -kernelPropGen\
+  "$INPUT_FILE_NAME" -o \
   "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
 
 source "$KERNELPROP"
+
+# Retrieve the unmerged kernel list from chessmassage. This is used to identify
+# how functions are merged. Some brief description of idea as below
+# The original unmerged list is as:
+#   func1 - func2 - func3 - func4 - func5 - ...
+# The merged one looks like:
+#   func1 - func4 - ...
+mv "$CLANG_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}.bash" \
+   "$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}.bash"
+
+source "$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}.bash"
 
 # AI Engine .o file containing all kernels for the module
 $XCHESSCC +P $(nproc) -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c \
@@ -177,15 +190,49 @@ fi
 # Wait on all our spawned compilations to complete
 wait
 
+# Just redirect to new shorter name variables
+MERGED=("${KERNEL_NAME_ARRAY[@]}")
+UNMERGED=("${KERNEL_NAME_ARRAY_UNMERGED[@]}")
+
+# Both MEREGD and UNMERGEd arrays are sorted identically with hash values.
+# The UNMERGED array includes all kernel functions. Let's overwrite merged
+# kernel names with one that those are merged into.
+idx_merged=0;
+len_merged=${#MERGED[@]}
+for idx_unmerged in "${!UNMERGED[@]}"; do
+  # if a name exists in both, that means it's not merged. Otherwise,
+  # it's merged into the previous one in the merged list.
+  if [ "$idx_merged" -eq "$len_merged" ] ||
+     [ "${UNMERGED[idx_unmerged]}" != "${MERGED[idx_merged]}" ]; then
+    UNMERGED[idx_unmerged]=${MERGED[idx_merged-1]}
+    ((idx_unmerged++))
+    continue;
+  else
+    ((idx_merged++))
+  fi
+done
+
+# Now the UNMERGED array has names of removed kernels replaced with merged one.
+# Compare original and updated ones, and copy the compiled kernel object
+# to  replace the removed-by-merge ones. This doesn't save the file
+# size, but the compilation time
+for idx in "${!UNMERGED[@]}"; do
+  if [ "${UNMERGED[idx]}" != "${KERNEL_NAME_ARRAY_UNMERGED[idx]}" ]; then
+    cp ${SOURCE_TEMPORARY_DIR}/${UNMERGED[idx]}.elf.o \
+	    ${SOURCE_TEMPORARY_DIR}/${KERNEL_NAME_ARRAY_UNMERGED[idx]}.elf.o
+  fi
+  ((idx++))
+done
+
 # Cat all the metadata and images into a file (essentially defining our own
 # temporary packing format). This is perhaps not robust but it does the job for
 # the moment.
 # This is not parallelized in the compilation function as we want the file to be
 # sequential or at least in the basic order defined in the loop. We do not want
 # data races making the file format non-deterministic.
-if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
+if [[ ! ${#KERNEL_NAME_ARRAY_UNMERGED[@]} -eq 0 ]]; then
   LINKER_LIST=""
-  for index in "${KERNEL_NAME_ARRAY[@]}"; do
+  for index in "${KERNEL_NAME_ARRAY_UNMERGED[@]}"; do
     if [[ -n "$index" ]]; then
       # Name of ELF binary and kernel function that we will synch with
       # integration header to retrieve our binary, it will be packaged as part
