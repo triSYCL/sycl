@@ -193,6 +193,9 @@ struct KernelPropGen : public ModulePass {
     for (auto &F : M.functions()) {
       if (!hasUser(F)) {
         kernelNames += (" \"" + F.getName() + "\" ").str();
+	// Revert the linkage back to original, which was changed by
+	// ChessMassage for function merge
+	F.setLinkage(GlobalValue::WeakODRLinkage);
       }
     }
 
