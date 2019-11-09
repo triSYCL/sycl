@@ -48,9 +48,10 @@ struct ChessMassage : public ModulePass {
   // And this indicates that func2 and func3 are merged into func1
   // Note, since it's from MergeFunctions, if MergeFunctions changes in some
   // way, it may break, ex identifying merged function incorrectly.
-  void reorderFunctions(Module &M) {
+  void reorderFunctions(Module &M, llvm::raw_fd_ostream &O) {
     std::vector<std::pair<FunctionComparator::FunctionHash, Function *>>
       HashedFuncs;
+    llvm::SmallString<512> kernelNames;
 
     for (auto &F : M.functions()) {
       // Collect the kernel functions
@@ -66,6 +67,14 @@ struct ChessMassage : public ModulePass {
     for (auto I = HashedFuncs.begin(), IE = HashedFuncs.end(); I != IE; ++I) {
       I->second->removeFromParent();
       M.getFunctionList().push_back(I->second);
+      kernelNames += (" \"" + I->second->getName() + "\" ").str();
+    }
+
+    // output our list of kernel names as a bash array we can iterate over
+    if (!kernelNames.empty()) {
+       O << "# array of unmerged kernel names found in the current module\n";
+       O << "declare -a KERNEL_NAME_ARRAY_UNMERGED=(" << kernelNames.str()
+         << ")\n\n";
     }
   }
 
@@ -124,8 +133,38 @@ struct ChessMassage : public ModulePass {
       M.eraseNamedMetadata(Old);
   }
 
+  int GetWriteStreamID(StringRef Path) {
+    int FileFD = 0;
+    std::error_code EC =
+          llvm::sys::fs::openFileForWrite(Path, FileFD);
+    if (EC) {
+      llvm::errs() << "Error in KernelPropGen Pass: " << EC.message() << "\n";
+    }
+
+    return FileFD;
+  }
+
   bool runOnModule(Module &M) override {
-    reorderFunctions(M);
+    SmallString<256> TDir;
+    llvm::sys::path::system_temp_directory(true, TDir);
+    // Make sure to rip off the directories for the filename
+    llvm::Twine file = "KernelUnmergedProperties_" +
+      llvm::sys::path::filename(M.getSourceFileName());
+    llvm::sys::path::append(TDir, file);
+    llvm::sys::path::replace_extension(TDir, "bash",
+      llvm::sys::path::Style::native);
+    llvm::raw_fd_ostream O(GetWriteStreamID(TDir.str()),
+                            true /*close in destructor*/);
+
+   // Script header/comment
+    O << "# This is a generated bash script to inject environment information\n"
+         "# containing kernel properties that we need so we can compile.\n"
+         "# This script is called from the sycl-xocc and sycl-chess scripts.\n";
+
+    if (O.has_error())
+      return false;
+
+    reorderFunctions(M, O);
     removeImmarg(M);
     modifySPIRCallingConv(M);
     // This causes some problems with Tale when we generate a .sfg from a kernel
