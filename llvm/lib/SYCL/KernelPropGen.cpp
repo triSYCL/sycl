@@ -67,6 +67,15 @@ struct KernelPropGen : public ModulePass {
     return false;
   }
 
+  /// Test if a function has a user
+  /// A little hack to determine if it's kernel or not. The kernel function
+  /// doesn't have any user.
+  bool hasUser(const Function &F) {
+    if (!F.use_empty())
+      return true;
+    return false;
+  }
+
   int GetWriteStreamID(StringRef Path) {
     int FileFD = 0;
     std::error_code EC =
@@ -182,7 +191,7 @@ struct KernelPropGen : public ModulePass {
     
     llvm::SmallString<512> kernelNames;
     for (auto &F : M.functions()) {
-      if (isKernel(F)) {
+      if (!hasUser(F)) {
         kernelNames += (" \"" + F.getName() + "\" ").str();
       }
     }
