@@ -103,7 +103,7 @@ struct ChessMassage : public ModulePass {
   // So detect the kernel functions and change the linkage to mergerable one.
   // The linkage has to be recovered back to original one before compiling.
   // It can be done when generating the kernel properties in KernelPropGen
-  void modifyLinkage(Module &M) {
+  void modifyKernelLinkageToLinkOnceODR(Module &M) {
     for (auto &F : M.functions()) {
       if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
 	F.setLinkage(GlobalValue::LinkOnceODRLinkage);
@@ -180,7 +180,7 @@ struct ChessMassage : public ModulePass {
     reorderFunctions(M, O);
     removeImmarg(M);
     // This has to be done before changing the calling convention
-    modifyLinkage(M);
+    modifyKernelLinkageToLinkOnceODR(M);
     modifySPIRCallingConv(M);
     // This causes some problems with Tale when we generate a .sfg from a kernel
     // that contains this piece of IR, perhaps it's fine not to delete it
