@@ -56,7 +56,7 @@ struct ChessMassage : public ModulePass {
     for (auto &F : M.functions()) {
       // Collect the kernel functions
       if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
-        HashedFuncs.push_back({FunctionComparator::functionHash(F), &F});
+        HashedFuncs.emplace_back(FunctionComparator::functionHash(F), &F);
       }
     }
 
