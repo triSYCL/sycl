@@ -63,7 +63,7 @@ struct ChessMassage : public ModulePass {
     // Sort collected kernel functions with hash values
     llvm::stable_sort(HashedFuncs, less_first());
 
-    // Put sorted kernel functions back to the list
+    // Put sorted kernel functions back to the Modules's function list
     for (auto I = HashedFuncs.begin(), IE = HashedFuncs.end(); I != IE; ++I) {
       I->second->removeFromParent();
       M.getFunctionList().push_back(I->second);
