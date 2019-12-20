@@ -191,40 +191,6 @@ fi
 # Wait on all our spawned compilations to complete
 wait
 
-# Just redirect to new shorter name variables
-MERGED=("${KERNEL_NAME_ARRAY[@]}")
-UNMERGED=("${KERNEL_NAME_ARRAY_UNMERGED[@]}")
-
-# Both MEREGD and UNMERGEd arrays are sorted identically with hash values.
-# The UNMERGED array includes all kernel functions. Let's overwrite merged
-# kernel names with one that those are merged into.
-idx_merged=0;
-len_merged=${#MERGED[@]}
-for idx_unmerged in "${!UNMERGED[@]}"; do
-  # if a name exists in both, that means it's not merged. Otherwise,
-  # it's merged into the previous one in the merged list.
-  if [ "$idx_merged" -eq "$len_merged" ] ||
-     [ "${UNMERGED[idx_unmerged]}" != "${MERGED[idx_merged]}" ]; then
-    UNMERGED[idx_unmerged]=${MERGED[idx_merged-1]}
-    ((idx_unmerged++))
-    continue;
-  else
-    ((idx_merged++))
-  fi
-done
-
-# Now the UNMERGED array has names of removed kernels replaced with merged one.
-# Compare original and updated ones, and copy the compiled kernel object
-# to  replace the removed-by-merge ones. This doesn't save the file
-# size, but the compilation time
-for idx in "${!UNMERGED[@]}"; do
-  if [ "${UNMERGED[idx]}" != "${KERNEL_NAME_ARRAY_UNMERGED[idx]}" ]; then
-    cp ${SOURCE_TEMPORARY_DIR}/${UNMERGED[idx]}.elf.o \
-	    ${SOURCE_TEMPORARY_DIR}/${KERNEL_NAME_ARRAY_UNMERGED[idx]}.elf.o
-  fi
-  ((idx++))
-done
-
 # Cat all the metadata and images into a file (essentially defining our own
 # temporary packing format). This is perhaps not robust but it does the job for
 # the moment.
@@ -233,6 +199,16 @@ done
 # data races making the file format non-deterministic.
 if [[ ! ${#KERNEL_NAME_ARRAY_UNMERGED[@]} -eq 0 ]]; then
   LINKER_LIST=""
+  # This merged_index is index to KERNEL_NAME_ARRAY[]. It points to the kernel
+  # that duplicate kernels are merged into. In below example, kernel1 and
+  # kernel2 are merged into kernel0.
+  #   unmerged: kernel0 - kernel1 - kernel2 - kernel3
+  #   merged:   kernel0 - kernel3
+  # While iterating the unmerged kernel list below, if the corresponding elf
+  # doesn't exist, it means the kernel has been merged, hence the other kernel
+  # pointed by merged_index is used instead. When the elf exists, merged_index
+  # increments to update and point to correct merged kernel.
+  merged_index=-1;
   for index in "${KERNEL_NAME_ARRAY_UNMERGED[@]}"; do
     if [[ -n "$index" ]]; then
       # Name of ELF binary and kernel function that we will synch with
@@ -241,10 +217,21 @@ if [[ ! ${#KERNEL_NAME_ARRAY_UNMERGED[@]} -eq 0 ]]; then
       # The name is also used by the Offload Wrapper to identify the image to
       # wrap into the host binary after its loaded into memory.
       echo "${index}" >> "$OUTPUT_FILE_NAME"
+
+      # Search for the corresponding elf file. If the file doesn't exist,
+      # that means the kernel has been merged into previous matched one.
+      # This is valid because all in KERNEL_NAME_ARRAY* are identically sorted
+      # with hash values.
+      ELF="$SOURCE_TEMPORARY_DIR/${index}.elf.o"
+      if [ ! -f "$ELF" ]; then
+        ELF="$SOURCE_TEMPORARY_DIR/${KERNEL_NAME_ARRAY[$merged_index]}.elf.o"
+      else
+        ((merged_index++))
+      fi
+
       # Size of file in bytes
-      echo "`ls -lrt "$SOURCE_TEMPORARY_DIR/${index}.elf.o" | nawk '{print $5}'`" \
-        >> "$OUTPUT_FILE_NAME"
-      cat $SOURCE_TEMPORARY_DIR/${index}.elf.o >> "$OUTPUT_FILE_NAME"
+      echo "`ls -lrt "$ELF" | nawk '{print $5}'`" >> "$OUTPUT_FILE_NAME"
+      cat $ELF >> "$OUTPUT_FILE_NAME"
     fi
   done
 fi
