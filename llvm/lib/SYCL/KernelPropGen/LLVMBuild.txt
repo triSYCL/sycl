@@ -14,14 +14,8 @@
 ;
 ;===------------------------------------------------------------------------===;
 
-[common]
-subdirectories =
-  ASFixer
-  InSPIRation
-  KernelPropGen
-  XOCCIRDowngrader
-
 [component_0]
-type = Group
-name = SYCL
+type = Library
+name = KernelPropGen
 parent = Libraries
+required_libraries = Passes Core Support TransformUtils
