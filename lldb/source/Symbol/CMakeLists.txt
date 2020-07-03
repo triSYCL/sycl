@@ -7,17 +7,11 @@ endif()
 add_lldb_library(lldbSymbol
   ArmUnwindInfo.cpp
   Block.cpp
-  ClangASTContext.cpp
-  ClangASTImporter.cpp
-  ClangExternalASTSourceCallbacks.cpp
-  ClangExternalASTSourceCommon.cpp
-  ClangUtil.cpp
   CompactUnwindInfo.cpp
   CompileUnit.cpp
   CompilerDecl.cpp
   CompilerDeclContext.cpp
   CompilerType.cpp
-  CxxModuleHandler.cpp
   DWARFCallFrameInfo.cpp
   DebugMacros.cpp
   Declaration.cpp
@@ -46,19 +40,12 @@ add_lldb_library(lldbSymbol
   ${PLATFORM_SOURCES}
 
   LINK_LIBS
-    clangAST
-    clangBasic
-    clangFrontend
     lldbCore
     lldbExpression
     lldbHost
     lldbTarget
     lldbUtility
-    lldbPluginExpressionParserClang
-    lldbPluginSymbolFileDWARF
-    lldbPluginSymbolFilePDB
     lldbPluginObjCLanguage
-    lldbPluginObjCRuntime
 
   LINK_COMPONENTS
     Support

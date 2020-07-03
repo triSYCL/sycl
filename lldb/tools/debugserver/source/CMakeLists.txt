@@ -28,7 +28,7 @@ function(get_debugserver_codesign_identity result)
   if(LLDB_CODESIGN_IDENTITY)
     set(${result} ${LLDB_CODESIGN_IDENTITY} PARENT_SCOPE)
     check_certificate(${LLDB_CODESIGN_IDENTITY} available)
-    if(NOT available AND NOT LLDB_USE_SYSTEM_DEBUGSERVER)
+    if(NOT available)
       message(WARNING "LLDB_CODESIGN_IDENTITY not found: '${LLDB_CODESIGN_IDENTITY}' ${not_found_help}")
     endif()
     return()
@@ -41,9 +41,7 @@ function(get_debugserver_codesign_identity result)
     return()
   endif()
 
-  if(NOT LLDB_USE_SYSTEM_DEBUGSERVER)
-    message(WARNING "Development code sign identiy not found: 'lldb_codesign' ${not_found_help}")
-  endif()
+  message(WARNING "Development code sign identiy not found: 'lldb_codesign' ${not_found_help}")
 
   # LLVM pendant: fallback if available
   if(LLVM_CODESIGNING_IDENTITY)
@@ -57,6 +55,10 @@ function(get_debugserver_codesign_identity result)
   # Ad-hoc signing: last resort
   set(${result} "-" PARENT_SCOPE)
 endfunction()
+
+# debugserver does not depend on intrinsics_gen, or on llvm. Set the common
+# llvm dependencies in the current scope to the empty set.
+set(LLVM_COMMON_DEPENDS)
 
 set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} -stdlib=libc++ -Wl,-sectcreate,__TEXT,__info_plist,${CMAKE_CURRENT_SOURCE_DIR}/../resources/lldb-debugserver-Info.plist")
 
@@ -79,6 +81,8 @@ if (CXX_SUPPORTS_NO_EXTENDED_OFFSETOF)
 endif ()
 
 check_library_exists(compression compression_encode_buffer "" HAVE_LIBCOMPRESSION)
+
+find_library(SECURITY_LIBRARY Security)
 
 add_subdirectory(MacOSX)
 
@@ -109,8 +113,6 @@ if(APPLE)
     if(NOT BACKBOARD_LIBRARY)
       set(SKIP_TEST_DEBUGSERVER ON CACHE BOOL "" FORCE)
     endif()
-  else()
-    find_library(COCOA_LIBRARY Cocoa)
   endif()
 endif()
 
@@ -127,18 +129,34 @@ if(LLDB_USE_ENTITLEMENTS)
   endif()
 endif()
 
+if($ENV{SDKROOT} MATCHES ".Internal.sdk$")
+  message(STATUS "LLDB debugserver energy support is enabled")
+  add_definitions(-DLLDB_ENERGY)
+  set(ENERGY_LIBRARY -lpmenergy -lpmsample)
+else()
+  message(STATUS "LLDB debugserver energy support is disabled")
+endif()
+
 set(generated_mach_interfaces
   ${CMAKE_CURRENT_BINARY_DIR}/mach_exc.h
   ${CMAKE_CURRENT_BINARY_DIR}/mach_excServer.c
   ${CMAKE_CURRENT_BINARY_DIR}/mach_excUser.c
   )
+
+set(MIG_ARCH_FLAGS "")
+if (DEFINED MIG_ARCHS)
+  foreach(ARCH ${MIG_ARCHS})
+    set(MIG_ARCH_FLAGS "${MIG_ARCH_FLAGS} -arch ${ARCH}")
+  endforeach()
+endif()
+separate_arguments(MIG_ARCH_FLAGS_SEPARTED NATIVE_COMMAND "${MIG_ARCH_FLAGS}")
+
 add_custom_command(OUTPUT ${generated_mach_interfaces}
-  COMMAND mig ${CMAKE_CURRENT_SOURCE_DIR}/MacOSX/dbgnub-mig.defs
+  VERBATIM COMMAND mig ${MIG_ARCH_FLAGS_SEPARTED} -isysroot ${CMAKE_OSX_SYSROOT} ${CMAKE_CURRENT_SOURCE_DIR}/MacOSX/dbgnub-mig.defs
   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/MacOSX/dbgnub-mig.defs
   )
 
 set(DEBUGSERVER_VERS_GENERATED_FILE ${CMAKE_CURRENT_BINARY_DIR}/debugserver_vers.c)
-set_source_files_properties(${DEBUGSERVER_VERS_GENERATED_FILE} PROPERTIES GENERATED 1)
 configure_file(debugserver_vers.c.in
                ${DEBUGSERVER_VERS_GENERATED_FILE} @ONLY)
 
@@ -196,7 +214,10 @@ target_link_libraries(lldbDebugserverCommon
                       ${LOCKDOWN_LIBRARY}
                       lldbDebugserverArchSupport
                       lldbDebugserverDarwin_DarwinLog
-                      ${LIBCOMPRESSION})
+                      ${FOUNDATION_LIBRARY}
+                      ${SECURITY_LIBRARY}
+                      ${LIBCOMPRESSION}
+                      ${ENERGY_LIBRARY})
 if(HAVE_LIBCOMPRESSION)
   set_property(TARGET lldbDebugserverCommon APPEND PROPERTY
                 COMPILE_DEFINITIONS HAVE_LIBCOMPRESSION)
@@ -224,8 +245,7 @@ if (debugserver_codesign_identity AND LLDB_BUILD_FRAMEWORK AND
     set(pass_entitlements --entitlements ${entitlements})
   endif()
 
-  get_target_property(framework_build_dir liblldb LIBRARY_OUTPUT_DIRECTORY)
-  set(copy_location ${framework_build_dir}/LLDB.framework/Versions/${LLDB_FRAMEWORK_VERSION}/Resources/debugserver)
+  set(copy_location ${LLDB_FRAMEWORK_ABSOLUTE_BUILD_DIR}/LLDB.framework/Versions/${LLDB_FRAMEWORK_VERSION}/Resources/debugserver)
 
   add_custom_command(TARGET debugserver POST_BUILD
     COMMAND ${CMAKE_COMMAND} -E
@@ -260,6 +280,7 @@ if(IOS)
                       ${FOUNDATION_LIBRARY}
                       lldbDebugserverArchSupport
                       lldbDebugserverDarwin_DarwinLog
+                      ${SECURITY_LIBRARY}
                       ${LIBCOMPRESSION})
   if(HAVE_LIBCOMPRESSION)
     set_property(TARGET lldbDebugserverCommon_NonUI APPEND PROPERTY

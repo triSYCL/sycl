@@ -1,7 +1,7 @@
 ; RUN: opt -mtriple=thumbv8.1m.main -mve-tail-predication -disable-mve-tail-predication=false -mattr=+mve,+lob %s -S -o - | FileCheck %s
 
 ; CHECK-LABEL: expand_v8i16_v8i32
-; CHECK-NOT: call i32 @llvm.arm.vctp
+; CHECK-NOT: call i32 @llvm.arm.mve.vctp
 define void @expand_v8i16_v8i32(i16* noalias nocapture readonly %a, i16* noalias nocapture readonly %b, i32* noalias nocapture %c, i32 %N) {
 entry:
   %cmp8 = icmp eq i32 %N, 0
@@ -27,7 +27,10 @@ vector.body:                                      ; preds = %vector.body, %vecto
   %broadcast.splat = shufflevector <8 x i32> %broadcast.splatinsert, <8 x i32> undef, <8 x i32> zeroinitializer
   %induction = add <8 x i32> %broadcast.splat, <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
   %tmp = getelementptr inbounds i16, i16* %a, i32 %index
-  %tmp1 = icmp ule <8 x i32> %induction, %broadcast.splat11
+
+  ; %tmp1 = icmp ule <8 x i32> %induction, %broadcast.splat11
+   %tmp1 = call <8 x i1> @llvm.get.active.lane.mask.v8i1.i32(i32 %index, i32 %trip.count.minus.1)
+
   %tmp2 = bitcast i16* %tmp to <8 x i16>*
   %wide.masked.load = tail call <8 x i16> @llvm.masked.load.v8i16.p0v8i16(<8 x i16>* %tmp2, i32 4, <8 x i1> %tmp1, <8 x i16> undef)
   %tmp3 = getelementptr inbounds i16, i16* %b, i32 %index
@@ -50,8 +53,8 @@ for.cond.cleanup:                                 ; preds = %vector.body, %entry
 
 ; CHECK-LABEL: expand_v8i16_v4i32
 ; CHECK: [[ELEMS:%[^ ]+]] = phi i32 [ %N, %vector.ph ], [ [[ELEMS_REM:%[^ ]+]], %vector.body ]
+; CHECK: [[VCTP:%[^ ]+]] = call <8 x i1> @llvm.arm.mve.vctp16(i32 [[ELEMS]])
 ; CHECK: [[ELEMS_REM]] = sub i32 [[ELEMS]], 8
-; CHECK: [[VCTP:%[^ ]+]] = call <8 x i1> @llvm.arm.vctp16(i32 [[ELEMS_REM]])
 ; CHECK: tail call <8 x i16> @llvm.masked.load.v8i16.p0v8i16(<8 x i16>* {{.*}}, i32 4, <8 x i1> [[VCTP]], <8 x i16> undef)
 ; CHECK: %store.pred = icmp ule <4 x i32> %induction.store
 ; CHECK: tail call void @llvm.masked.store.v4i32.p0v4i32(<4 x i32> {{.*}}, <4 x i32>* {{.*}}, i32 4, <4 x i1> %store.pred)
@@ -84,7 +87,10 @@ vector.body:                                      ; preds = %vector.body, %vecto
   %broadcast.splat = shufflevector <8 x i32> %broadcast.splatinsert, <8 x i32> undef, <8 x i32> zeroinitializer
   %induction = add <8 x i32> %broadcast.splat, <i32 0, i32 1, i32 2, i32 3, i32 4, i32 5, i32 6, i32 7>
   %tmp = getelementptr inbounds i16, i16* %a, i32 %index
-  %tmp1 = icmp ule <8 x i32> %induction, %broadcast.splat11
+
+  ; %tmp1 = icmp ule <8 x i32> %induction, %broadcast.splat11
+  %tmp1 = call <8 x i1> @llvm.get.active.lane.mask.v8i1.i32(i32 %index, i32 %trip.count.minus.1)
+
   %tmp2 = bitcast i16* %tmp to <8 x i16>*
   %wide.masked.load = tail call <8 x i16> @llvm.masked.load.v8i16.p0v8i16(<8 x i16>* %tmp2, i32 4, <8 x i1> %tmp1, <8 x i16> undef)
   %tmp3 = getelementptr inbounds i16, i16* %b, i32 %index
@@ -117,7 +123,7 @@ for.cond.cleanup:                                 ; preds = %vector.body, %entry
 }
 
 ; CHECK-LABEL: expand_v4i32_v4i64
-; CHECK-NOT: call i32 @llvm.arm.vctp
+; CHECK-NOT: call i32 @llvm.arm.mve.vctp
 define void @expand_v4i32_v4i64(i32* noalias nocapture readonly %a, i32* noalias nocapture readonly %b, i64* noalias nocapture %c, i32 %N) {
 entry:
   %cmp8 = icmp eq i32 %N, 0
@@ -143,7 +149,10 @@ vector.body:                                      ; preds = %vector.body, %vecto
   %broadcast.splat = shufflevector <4 x i32> %broadcast.splatinsert, <4 x i32> undef, <4 x i32> zeroinitializer
   %induction = add <4 x i32> %broadcast.splat, <i32 0, i32 1, i32 2, i32 3>
   %tmp = getelementptr inbounds i32, i32* %a, i32 %index
-  %tmp1 = icmp ule <4 x i32> %induction, %broadcast.splat11
+
+  ; %tmp1 = icmp ule <4 x i32> %induction, %broadcast.splat11
+  %tmp1 = call <4 x i1> @llvm.get.active.lane.mask.v4i1.i32(i32 %index, i32 %trip.count.minus.1)
+
   %tmp2 = bitcast i32* %tmp to <4 x i32>*
   %wide.masked.load = tail call <4 x i32> @llvm.masked.load.v4i32.p0v4i32(<4 x i32>* %tmp2, i32 4, <4 x i1> %tmp1, <4 x i32> undef)
   %tmp3 = getelementptr inbounds i32, i32* %b, i32 %index
@@ -171,3 +180,5 @@ declare void @llvm.masked.store.v4i32.p0v4i32(<4 x i32>, <4 x i32>*, i32 immarg,
 declare void @llvm.masked.store.v4i64.p0v4i64(<4 x i64>, <4 x i64>*, i32 immarg, <4 x i1>)
 declare void @llvm.set.loop.iterations.i32(i32)
 declare i32 @llvm.loop.decrement.reg.i32.i32.i32(i32, i32)
+declare <4 x i1> @llvm.get.active.lane.mask.v4i1.i32(i32, i32)
+declare <8 x i1> @llvm.get.active.lane.mask.v8i1.i32(i32, i32)

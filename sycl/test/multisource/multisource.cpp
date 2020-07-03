@@ -7,19 +7,41 @@
 //===----------------------------------------------------------------------===//
 
 // Separate kernel sources and host code sources
+<<<<<<< HEAD
 // RUN: %clangxx -std=c++17 -fsycl -c -o %t.kernel.o %s -DINIT_KERNEL -DCALC_KERNEL
 // RUN: %clangxx -std=c++17 -fsycl -c -o %t.main.o %s -DMAIN_APP
 // RUN: %clangxx -std=c++17 -fsycl %t.kernel.o %t.main.o -o %t.fat
+||||||| merged common ancestors
+// RUN: %clangxx -fsycl -c -o %t.kernel.o %s -DINIT_KERNEL -DCALC_KERNEL
+// RUN: %clangxx -fsycl -c -o %t.main.o %s -DMAIN_APP
+// RUN: %clangxx -fsycl %t.kernel.o %t.main.o -o %t.fat
+=======
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -c -o %t.kernel.o %s -DINIT_KERNEL -DCALC_KERNEL
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -c -o %t.main.o %s -DMAIN_APP
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %t.kernel.o %t.main.o -o %t.fat
+>>>>>>> intel/sycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.fat
 // RUN: %CPU_RUN_PLACEHOLDER %t.fat
 // RUN: %GPU_RUN_PLACEHOLDER %t.fat
 // RUN: %ACC_RUN_PLACEHOLDER %t.fat
 
 // Multiple sources with kernel code
+<<<<<<< HEAD
 // RUN: %clangxx -std=c++17 -fsycl -c -o %t.init.o %s -DINIT_KERNEL
 // RUN: %clangxx -std=c++17 -fsycl -c -o %t.calc.o %s -DCALC_KERNEL
 // RUN: %clangxx -std=c++17 -fsycl -c -o %t.main.o %s -DMAIN_APP
 // RUN: %clangxx -std=c++17 -fsycl %t.init.o %t.calc.o %t.main.o -o %t.fat
+||||||| merged common ancestors
+// RUN: %clangxx -fsycl -c -o %t.init.o %s -DINIT_KERNEL
+// RUN: %clangxx -fsycl -c -o %t.calc.o %s -DCALC_KERNEL
+// RUN: %clangxx -fsycl -c -o %t.main.o %s -DMAIN_APP
+// RUN: %clangxx -fsycl %t.init.o %t.calc.o %t.main.o -o %t.fat
+=======
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -c -o %t.init.o %s -DINIT_KERNEL
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -c -o %t.calc.o %s -DCALC_KERNEL
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -c -o %t.main.o %s -DMAIN_APP
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %t.init.o %t.calc.o %t.main.o -o %t.fat
+>>>>>>> intel/sycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.fat
 // RUN: %CPU_RUN_PLACEHOLDER %t.fat
 // RUN: %GPU_RUN_PLACEHOLDER %t.fat

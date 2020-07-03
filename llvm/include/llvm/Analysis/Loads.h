@@ -13,13 +13,16 @@
 #ifndef LLVM_ANALYSIS_LOADS_H
 #define LLVM_ANALYSIS_LOADS_H
 
-#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/Support/CommandLine.h"
 
 namespace llvm {
 
+class AAResults;
 class DataLayout;
+class DominatorTree;
+class Instruction;
+class LoadInst;
 class Loop;
 class MDNode;
 class ScalarEvolution;
@@ -37,7 +40,8 @@ bool isDereferenceablePointer(const Value *V, Type *Ty,
 /// performs context-sensitive analysis and returns true if the pointer is
 /// dereferenceable at the specified instruction.
 bool isDereferenceableAndAlignedPointer(const Value *V, Type *Ty,
-                                        unsigned Align, const DataLayout &DL,
+                                        MaybeAlign Alignment,
+                                        const DataLayout &DL,
                                         const Instruction *CtxI = nullptr,
                                         const DominatorTree *DT = nullptr);
 
@@ -45,7 +49,7 @@ bool isDereferenceableAndAlignedPointer(const Value *V, Type *Ty,
 /// greater or equal than requested. If the context instruction is specified
 /// performs context-sensitive analysis and returns true if the pointer is
 /// dereferenceable at the specified instruction.
-bool isDereferenceableAndAlignedPointer(const Value *V, unsigned Align,
+bool isDereferenceableAndAlignedPointer(const Value *V, Align Alignment,
                                         const APInt &Size, const DataLayout &DL,
                                         const Instruction *CtxI = nullptr,
                                         const DominatorTree *DT = nullptr);
@@ -58,7 +62,7 @@ bool isDereferenceableAndAlignedPointer(const Value *V, unsigned Align,
 /// If it is not obviously safe to load from the specified pointer, we do a
 /// quick local scan of the basic block containing ScanFrom, to determine if
 /// the address is already accessed.
-bool isSafeToLoadUnconditionally(Value *V, unsigned Align, APInt &Size,
+bool isSafeToLoadUnconditionally(Value *V, Align Alignment, APInt &Size,
                                  const DataLayout &DL,
                                  Instruction *ScanFrom = nullptr,
                                  const DominatorTree *DT = nullptr);
@@ -82,7 +86,7 @@ bool isDereferenceableAndAlignedInLoop(LoadInst *LI, Loop *L,
 /// If it is not obviously safe to load from the specified pointer, we do a
 /// quick local scan of the basic block containing ScanFrom, to determine if
 /// the address is already accessed.
-bool isSafeToLoadUnconditionally(Value *V, Type *Ty, unsigned Align,
+bool isSafeToLoadUnconditionally(Value *V, Type *Ty, Align Alignment,
                                  const DataLayout &DL,
                                  Instruction *ScanFrom = nullptr,
                                  const DominatorTree *DT = nullptr);
@@ -119,7 +123,7 @@ Value *FindAvailableLoadedValue(LoadInst *Load,
                                 BasicBlock *ScanBB,
                                 BasicBlock::iterator &ScanFrom,
                                 unsigned MaxInstsToScan = DefMaxInstsToScan,
-                                AliasAnalysis *AA = nullptr,
+                                AAResults *AA = nullptr,
                                 bool *IsLoadCSE = nullptr,
                                 unsigned *NumScanedInst = nullptr);
 
@@ -142,15 +146,15 @@ Value *FindAvailableLoadedValue(LoadInst *Load,
 /// is zero, the whole block will be scanned.
 /// \param AA Optional pointer to alias analysis, to make the scan more
 /// precise.
-/// \param [out] IsLoad Whether the returned value is a load from the same
+/// \param [out] IsLoadCSE Whether the returned value is a load from the same
 /// location in memory, as opposed to the value operand of a store.
 ///
 /// \returns The found value, or nullptr if no value is found.
 Value *FindAvailablePtrLoadStore(Value *Ptr, Type *AccessTy, bool AtLeastAtomic,
                                  BasicBlock *ScanBB,
                                  BasicBlock::iterator &ScanFrom,
-                                 unsigned MaxInstsToScan, AliasAnalysis *AA,
-                                 bool *IsLoad, unsigned *NumScanedInst);
+                                 unsigned MaxInstsToScan, AAResults *AA,
+                                 bool *IsLoadCSE, unsigned *NumScanedInst);
 }
 
 #endif

@@ -67,6 +67,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils.h"
@@ -228,6 +229,27 @@ static Loop *separateNestedLoop(Loop *L, BasicBlock *Preheader,
   // Don't try to separate loops without a preheader.
   if (!Preheader)
     return nullptr;
+
+  // Treat the presence of convergent functions conservatively. The
+  // transformation is invalid if calls to certain convergent
+  // functions (like an AMDGPU barrier) get included in the resulting
+  // inner loop. But blocks meant for the inner loop will be
+  // identified later at a point where it's too late to abort the
+  // transformation. Also, the convergent attribute is not really
+  // sufficient to express the semantics of functions that are
+  // affected by this transformation. So we choose to back off if such
+  // a function call is present until a better alternative becomes
+  // available. This is similar to the conservative treatment of
+  // convergent function calls in GVNHoist and JumpThreading.
+  for (auto BB : L->blocks()) {
+    for (auto &II : *BB) {
+      if (auto CI = dyn_cast<CallBase>(&II)) {
+        if (CI->isConvergent()) {
+          return nullptr;
+        }
+      }
+    }
+  }
 
   // The header is not a landing pad; preheader insertion should ensure this.
   BasicBlock *Header = L->getHeader();
@@ -597,6 +619,7 @@ ReprocessLoop:
       if (!PreserveLCSSA || LI->replacementPreservesLCSSAForm(PN, V)) {
         PN->replaceAllUsesWith(V);
         PN->eraseFromParent();
+        Changed = true;
       }
     }
 

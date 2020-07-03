@@ -1,8 +1,18 @@
+<<<<<<< HEAD
 // RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
+||||||| merged common ancestors
+// RUN: %clangxx -fsycl %s -o %t.out
+=======
+// UNSUPPORTED: cuda
+// CUDA compilation and runtime do not yet support sub-groups.
+//
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+>>>>>>> intel/sycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
+
 //==--------------- vote.cpp - SYCL sub_group vote test --*- C++ -*---------==//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -17,9 +27,6 @@ using namespace cl::sycl;
 
 void check(queue Queue, const int G, const int L, const int D, const int R) {
   try {
-    int max_sg =
-        Queue.get_device().get_info<info::device::max_num_sub_groups>();
-    int num_sg = (L) / max_sg + ((L) % max_sg ? 1 : 0);
     range<1> GRange(G), LRange(L);
     nd_range<1> NdRange(GRange, LRange);
     buffer<int, 1> sganybuf(G);
@@ -50,12 +57,12 @@ void check(queue Queue, const int G, const int L, const int D, const int R) {
       cgh.parallel_for<class subgr>(NdRange, [=](nd_item<1> NdItem) {
         intel::sub_group SG = NdItem.get_sub_group();
         /* Set to 1 if any local ID in subgroup devided by D has remainder R */
-        if (SG.any(SG.get_local_id().get(0) % D == R)) {
+        if (any_of(SG, SG.get_local_id().get(0) % D == R)) {
           sganyacc[NdItem.get_global_id()] = 1;
         }
         /* Set to 1 if remainder of division of subgroup local ID by D is less
          * than R for all work items in subgroup */
-        if (SG.all(SG.get_local_id().get(0) % D < R)) {
+        if (all_of(SG, SG.get_local_id().get(0) % D < R)) {
           sgallacc[NdItem.get_global_id()] = 1;
         }
       });
@@ -78,8 +85,8 @@ int main() {
     std::cout << "Skipping test\n";
     return 0;
   }
-  check(Queue, 240, 80, 9, 8);
-  check(Queue, 24, 12, 9, 10);
-  check(Queue, 1024, 256, 9, 8);
+  check(Queue, 240, 80, 3, 1);
+  check(Queue, 24, 12, 3, 4);
+  check(Queue, 1024, 256, 3, 1);
   std::cout << "Test passed." << std::endl;
 }

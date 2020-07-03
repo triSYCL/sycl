@@ -25,7 +25,7 @@
 #include "llvm/Demangle/Demangle.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/CallingConv.h"
-#include "llvm/IR/CallSite.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
@@ -34,6 +34,7 @@
 #include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
 #define BOOST_NO_EXCEPTIONS
@@ -48,8 +49,10 @@
 // BOOST_NO_EXCEPTIONS enabled so we need to define our own throw_exception or
 // get a linker error.
 namespace boost {
-  void throw_exception(std::exception const & e) {}
+void throw_exception(std::exception const &e) {
+  llvm_unreachable("exception are disabled");
 }
+} // namespace boost
 
 using namespace llvm;
 

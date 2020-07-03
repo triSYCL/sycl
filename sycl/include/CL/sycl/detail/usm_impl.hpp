@@ -7,24 +7,25 @@
 // ===--------------------------------------------------------------------=== //
 #pragma once
 
-#include <CL/cl.h>
-#include <CL/cl_usm_ext.h>
+#include <CL/sycl/detail/export.hpp>
 #include <CL/sycl/usm/usm_enums.hpp>
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 namespace detail {
 namespace usm {
 
-void *alignedAlloc(size_t Alignment, size_t Bytes, const context &Ctxt,
-                   const device &Dev, cl::sycl::usm::alloc Kind);
+__SYCL_EXPORT void *alignedAlloc(size_t Alignment, size_t Bytes,
+                                 const context &Ctxt, const device &Dev,
+                                 cl::sycl::usm::alloc Kind);
 
-void *alignedAlloc(size_t Alignment, size_t Bytes, const context &Ctxt,
-                   cl::sycl::usm::alloc Kind);
+__SYCL_EXPORT void *alignedAllocHost(size_t Alignment, size_t Bytes,
+                                     const context &Ctxt,
+                                     cl::sycl::usm::alloc Kind);
 
-void free(void *Ptr, const context &Ctxt);
+__SYCL_EXPORT void free(void *Ptr, const context &Ctxt);
 
 } // namespace usm
 } // namespace detail
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

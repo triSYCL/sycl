@@ -26,7 +26,7 @@
 // HOST: [[SIZES:@.+]] = private unnamed_addr constant [3 x i64] [i64 4, i64 4, i64 4]
 // HOST: [[MAPTYPES:@.+]] = private unnamed_addr constant [3 x i64] [i64 35, i64 531, i64 531]
 // HOST: @.omp_offloading.entry_name{{.*}} = internal unnamed_addr constant [{{[0-9]+}} x i8] c"c_decl_tgt_ref_ptr\00"
-// HOST: @.omp_offloading.entry.c_decl_tgt_ref_ptr = weak constant %struct.__tgt_offload_entry { i8* bitcast (i32** @c_decl_tgt_ref_ptr to i8*), i8* getelementptr inbounds ([{{[0-9]+}} x i8], [{{[0-9]+}} x i8]* @.omp_offloading.entry_name, i32 0, i32 0), i64 8, i32 1, i32 0 }, section ".omp_offloading.entries", align 1
+// HOST: @.omp_offloading.entry.c_decl_tgt_ref_ptr = weak constant %struct.__tgt_offload_entry { i8* bitcast (i32** @c_decl_tgt_ref_ptr to i8*), i8* getelementptr inbounds ([{{[0-9]+}} x i8], [{{[0-9]+}} x i8]* @.omp_offloading.entry_name, i32 0, i32 0), i64 8, i32 1, i32 0 }, section "omp_offloading_entries", align 1
 // DEVICE-NOT: internal unnamed_addr constant [{{[0-9]+}} x i8] c"c_{{.*}}_decl_tgt_ref_ptr\00"
 // HOST: @.omp_offloading.entry_name{{.*}} = internal unnamed_addr constant [{{[0-9]+}} x i8] c"_{{.*}}d_{{.*}}_decl_tgt_ref_ptr\00"
 // HOST: @.omp_offloading.entry.[[D_PTR]] = weak constant %struct.__tgt_offload_entry { i8* bitcast (i32** @[[D_PTR]] to i8*), i8* getelementptr inbounds ([{{[0-9]+}} x i8], [{{[0-9]+}} x i8]* @.omp_offloading.entry_name{{.*}}, i32 0, i32 0
@@ -50,7 +50,7 @@ int maini1() {
   return 0;
 }
 
-// DEVICE: define weak void @__omp_offloading_{{.*}}_{{.*}}maini1{{.*}}_l42(i32* dereferenceable{{[^,]*}}
+// DEVICE: define weak void @__omp_offloading_{{.*}}_{{.*}}maini1{{.*}}_l42(i32* nonnull align {{[0-9]+}} dereferenceable{{[^,]*}}
 // DEVICE: [[C_REF:%.+]] = load i32*, i32** @c_decl_tgt_ref_ptr,
 // DEVICE: [[C:%.+]] = load i32, i32* [[C_REF]],
 // DEVICE: store i32 [[C]], i32* %
@@ -81,7 +81,7 @@ int maini1() {
 // HOST: call void @__omp_offloading_{{.*}}_{{.*}}_{{.*}}maini1{{.*}}_l42(i32* %{{[^,]+}})
 // HOST: call i32 @__tgt_target_teams(i64 -1, i8* @.__omp_offloading_{{.+}}_l47.region_id, i32 2, {{.+}})
 
-// HOST: define internal void @__omp_offloading_{{.*}}_{{.*}}maini1{{.*}}_l42(i32* dereferenceable{{.*}})
+// HOST: define internal void @__omp_offloading_{{.*}}_{{.*}}maini1{{.*}}_l42(i32* nonnull align {{[0-9]+}} dereferenceable{{.*}})
 // HOST: [[C:%.*]] = load i32, i32* @c,
 // HOST: store i32 [[C]], i32* %
 

@@ -34,6 +34,7 @@
 #include "llvm/CodeGen/ValueTypes.h"
 #include "llvm/IR/DebugLoc.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IntrinsicsMips.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -71,8 +72,8 @@ MipsSETargetLowering::MipsSETargetLowering(const MipsTargetMachine &TM,
 
   if (Subtarget.hasDSP() || Subtarget.hasMSA()) {
     // Expand all truncating stores and extending loads.
-    for (MVT VT0 : MVT::vector_valuetypes()) {
-      for (MVT VT1 : MVT::vector_valuetypes()) {
+    for (MVT VT0 : MVT::fixedlen_vector_valuetypes()) {
+      for (MVT VT1 : MVT::fixedlen_vector_valuetypes()) {
         setTruncStoreAction(VT0, VT1, Expand);
         setLoadExtAction(ISD::SEXTLOAD, VT0, VT1, Expand);
         setLoadExtAction(ISD::ZEXTLOAD, VT0, VT1, Expand);
@@ -1341,9 +1342,8 @@ static SDValue lowerDSPIntr(SDValue Op, SelectionDAG &DAG, unsigned Opc) {
   // Scan output.
   SmallVector<EVT, 2> ResTys;
 
-  for (SDNode::value_iterator I = Op->value_begin(), E = Op->value_end();
-       I != E; ++I)
-    ResTys.push_back((*I == MVT::i64) ? MVT::Untyped : *I);
+  for (EVT Ty : Op->values())
+    ResTys.push_back((Ty == MVT::i64) ? MVT::Untyped : Ty);
 
   // Create node.
   SDValue Val = DAG.getNode(Opc, DL, ResTys, Ops);
@@ -2596,7 +2596,8 @@ static SDValue lowerVECTOR_SHUFFLE_SHF(SDValue Op, EVT ResTy,
 
   SDLoc DL(Op);
   return DAG.getNode(MipsISD::SHF, DL, ResTy,
-                     DAG.getConstant(Imm, DL, MVT::i32), Op->getOperand(0));
+                     DAG.getTargetConstant(Imm, DL, MVT::i32),
+                     Op->getOperand(0));
 }
 
 /// Determine whether a range fits a regular pattern of values.

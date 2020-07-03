@@ -4,101 +4,197 @@
 #cmake_policy(SET CMP0057 NEW)
 #include(AddLLVM)
 
-add_library(sycl SHARED
-  "${sycl_inc_dir}/CL/sycl.hpp"
-  "detail/builtins_common.cpp"
-  "detail/builtins_geometric.cpp"
-  "detail/builtins_integer.cpp"
-  "detail/builtins_math.cpp"
-  "detail/builtins_relational.cpp"
-  "detail/pi.cpp"
-  "detail/pi_opencl.cpp"
-  "detail/common.cpp"
-  "detail/context_impl.cpp"
-  "detail/device_impl.cpp"
-  "detail/device_info.cpp"
-  "detail/event_impl.cpp"
-  "detail/force_device.cpp"
-  "detail/helpers.cpp"
-  "detail/image_accessor_util.cpp"
-  "detail/image_impl.cpp"
-  "detail/kernel_impl.cpp"
-  "detail/kernel_info.cpp"
-  "detail/memory_manager.cpp"
-  "detail/platform_impl.cpp"
-  "detail/platform_info.cpp"
-  "detail/program_impl.cpp"
-  "detail/program_manager/program_manager.cpp"
-  "detail/queue_impl.cpp"
-  "detail/os_util.cpp"
-  "detail/platform_util.cpp"
-  "detail/sampler_impl.cpp"
-  "detail/stream_impl.cpp"
-  "detail/scheduler/commands.cpp"
-  "detail/scheduler/scheduler.cpp"
-  "detail/scheduler/graph_processor.cpp"
-  "detail/scheduler/graph_builder.cpp"
-  "detail/usm/clusm.cpp"
-  "detail/usm/usm_dispatch.cpp"
-  "detail/usm/usm_impl.cpp"
-  "detail/util.cpp"
-  "context.cpp"
-  "device.cpp"
-  "device_selector.cpp"
-  "event.cpp"
-  "exception.cpp"
-  "exception_list.cpp"
-  "half_type.cpp"
-  "kernel.cpp"
-  "platform.cpp"
-  "queue.cpp"
-  "ordered_queue.cpp"
-  "sampler.cpp"
-  "stream.cpp"
-  "spirv_ops.cpp"
-)
+configure_file(
+  ${CMAKE_CURRENT_SOURCE_DIR}/version.rc.in
+  ${CMAKE_CURRENT_BINARY_DIR}/version.rc
+  @ONLY)
 
-add_dependencies(sycl
-  ocl-icd
-  ocl-headers
-  sycl-headers
-)
+if (SYCL_ENABLE_XPTI_TRACING)
+  if (NOT EXISTS ${LLVM_EXTERNAL_XPTI_SOURCE_DIR})
+    message (FATAL_ERROR "Undefined LLVM_EXTERNAL_XPTI_SOURCE_DIR variable: Must be set when XPTI tracing is set to ON")
+  endif()
+  include_directories(${LLVM_EXTERNAL_XPTI_SOURCE_DIR}/include)
+endif()
 
-set_target_properties(sycl PROPERTIES LINKER_LANGUAGE CXX)
+function(add_sycl_rt_library LIB_NAME)
+  # Add an optional argument so we can get the library name to
+  # link with for Windows Debug version
+  cmake_parse_arguments(ARG "" "XPTI_LIB" "COMPILE_OPTIONS;SOURCES" ${ARGN})
+
+  set(LIB_OBJ_NAME ${LIB_NAME}_object)
+
+  add_library(${LIB_OBJ_NAME} OBJECT ${ARG_SOURCES})
+  add_library(${LIB_NAME} SHARED 
+              $<TARGET_OBJECTS:${LIB_OBJ_NAME}>
+              ${CMAKE_CURRENT_BINARY_DIR}/version.rc)
+    
+  if (ARG_COMPILE_OPTIONS)
+    target_compile_options(${LIB_OBJ_NAME} PRIVATE ${ARG_COMPILE_OPTIONS})
+  endif()
+
+  #To-Do: Remove dependency on icd loader and opencl headers.
+  add_dependencies(${LIB_OBJ_NAME}
+    ocl-icd
+    ocl-headers
+    sycl-headers
+  )
+
+  set_target_properties(${LIB_NAME} PROPERTIES LINKER_LANGUAGE CXX)
+
+  if (SYCL_ENABLE_XPTI_TRACING)
+    target_compile_definitions(${LIB_OBJ_NAME} PRIVATE XPTI_ENABLE_INSTRUMENTATION XPTI_STATIC_LIBRARY)
+    target_link_libraries(${LIB_NAME} PRIVATE ${ARG_XPTI_LIB})
+  endif()
+
+  if (MSVC)
+    target_compile_definitions(${LIB_OBJ_NAME} PRIVATE __SYCL_BUILD_SYCL_DLL )
+    target_link_libraries(${LIB_NAME} PRIVATE shlwapi)
+  else()
+    target_compile_options(${LIB_OBJ_NAME} PUBLIC
+                           -fvisibility=hidden -fvisibility-inlines-hidden)
+    set(linker_script "${CMAKE_CURRENT_SOURCE_DIR}/ld-version-script.txt")
+    target_link_libraries(
+      ${LIB_NAME} PRIVATE "-Wl,--version-script=${linker_script}")
+    set_target_properties(${LIB_NAME} PROPERTIES LINK_DEPENDS ${linker_script})
+    if (SYCL_ENABLE_XPTI_TRACING)
+      target_link_libraries(${LIB_NAME} PRIVATE dl)
+    endif()
+  endif()
+
+  target_include_directories(
+      ${LIB_OBJ_NAME}
+      PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}
+        "${sycl_inc_dir}"
+        ${OpenCL_INCLUDE_DIRS}
+  )
+
+  find_package(Threads REQUIRED)
+
+  target_link_libraries(${LIB_NAME}
+      PRIVATE
+        ${OpenCL_LIBRARIES}
+        ${CMAKE_DL_LIBS}
+        ${CMAKE_THREAD_LIBS_INIT}
+      PUBLIC
+        $<$<BOOL:${SYCL_BUILD_PI_CUDA}>:pi_cuda>
+  )
+
+  target_compile_definitions(${LIB_OBJ_NAME}
+    PUBLIC
+      $<$<BOOL:${SYCL_BUILD_PI_CUDA}>:USE_PI_CUDA>)
+
+  add_common_options(${LIB_NAME})
+
+  set_target_properties(${LIB_NAME} PROPERTIES
+                        VERSION ${SYCL_VERSION_STRING}
+                        SOVERSION ${SYCL_MAJOR_VERSION})
+
+endfunction(add_sycl_rt_library)
+
+set(SYCL_SOURCES
+    "${sycl_inc_dir}/CL/sycl.hpp"
+    "backend/opencl.cpp"
+    "backend/level_zero.cpp"
+    "detail/accessor_impl.cpp"
+    "detail/buffer_impl.cpp"
+    "detail/builtins_common.cpp"
+    "detail/builtins_geometric.cpp"
+    "detail/builtins_integer.cpp"
+    "detail/builtins_math.cpp"
+    "detail/builtins_relational.cpp"
+    "detail/pi.cpp"
+    "detail/common.cpp"
+    "detail/config.cpp"
+    "detail/context_impl.cpp"
+    "detail/device_binary_image.cpp"
+    "detail/device_impl.cpp"
+    "detail/error_handling/enqueue_kernel.cpp"
+    "detail/event_impl.cpp"
+    "detail/force_device.cpp"
+    "detail/helpers.cpp"
+    "detail/handler_proxy.cpp"
+    "detail/image_accessor_util.cpp"
+    "detail/image_impl.cpp"
+    "detail/kernel_impl.cpp"
+    "detail/kernel_program_cache.cpp"
+    "detail/memory_manager.cpp"
+    "detail/platform_impl.cpp"
+    "detail/program_impl.cpp"
+    "detail/program_manager/program_manager.cpp"
+    "detail/queue_impl.cpp"
+    "detail/os_util.cpp"
+    "detail/platform_util.cpp"
+    "detail/sampler_impl.cpp"
+    "detail/stream_impl.cpp"
+    "detail/scheduler/commands.cpp"
+    "detail/scheduler/scheduler.cpp"
+    "detail/scheduler/graph_processor.cpp"
+    "detail/scheduler/graph_builder.cpp"
+    "detail/spec_constant_impl.cpp"
+    "detail/sycl_mem_obj_t.cpp"
+    "detail/usm/usm_impl.cpp"
+    "detail/util.cpp"
+    "accessor.cpp"
+    "context.cpp"
+    "device.cpp"
+    "device_selector.cpp"
+    "event.cpp"
+    "exception.cpp"
+    "exception_list.cpp"
+    "function_pointer.cpp"
+    "half_type.cpp"
+    "handler.cpp"
+    "interop_handle.cpp"
+    "interop_handler.cpp"
+    "kernel.cpp"
+    "platform.cpp"
+    "program.cpp"
+    "queue.cpp"
+    "sampler.cpp"
+    "stream.cpp"
+    "spirv_ops.cpp"
+    "$<$<PLATFORM_ID:Windows>:detail/windows_pi.cpp>"
+    "$<$<OR:$<PLATFORM_ID:Linux>,$<PLATFORM_ID:Darwin>>:detail/posix_pi.cpp>"
+)
 
 if (MSVC)
-    target_compile_definitions(sycl PRIVATE __SYCL_BUILD_SYCL_DLL )
+  # MSVC provides two incompatible build variants for its CRT: release and debug
+  # To avoid potential issues in user code we also need to provide two kinds
+  # of SYCL Runtime Library for release and debug configurations.
+  foreach(flag_var
+      CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+      CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+    string(REGEX REPLACE "/MDd" "" ${flag_var} "${${flag_var}}")
+    string(REGEX REPLACE "/MTd" "" ${flag_var} "${${flag_var}}")
+    string(REGEX REPLACE "/MD" "" ${flag_var} "${${flag_var}}")
+    string(REGEX REPLACE "/MT" "" ${flag_var} "${${flag_var}}")
+  endforeach()
+
+  if (SYCL_ENABLE_XPTI_TRACING)
+    add_sycl_rt_library(sycld XPTI_LIB xptid COMPILE_OPTIONS "/MDd" SOURCES ${SYCL_SOURCES})
+  else()
+    add_sycl_rt_library(sycld COMPILE_OPTIONS "/MDd" SOURCES ${SYCL_SOURCES})
+  endif()
+
+  set(SYCL_EXTRA_OPTS "/MD")
+
 endif()
-target_include_directories(sycl PRIVATE "${sycl_inc_dir}")
-target_link_libraries(sycl
-    PRIVATE OpenCL::Headers
-    PRIVATE ${OpenCL_LIBRARIES}
-)
-if (SYCL_USE_LIBCXX)
-    if ((CMAKE_CXX_COMPILER_ID STREQUAL "GNU") OR
-        (CMAKE_CXX_COMPILER_ID STREQUAL "Clang"))
-        target_compile_options(sycl PRIVATE -nostdinc++)
-        if ((NOT (DEFINED SYCL_LIBCXX_INCLUDE_PATH)) OR (NOT (DEFINED SYCL_LIBCXX_LIBRARY_PATH)))
-            message(FATAL_ERROR "When building with libc++ SYCL_LIBCXX_INCLUDE_PATHS and"
-                                "SYCL_LIBCXX_LIBRARY_PATH should be set")
-        endif()
-        target_include_directories(sycl PRIVATE "${SYCL_LIBCXX_INCLUDE_PATH}")
-        target_link_libraries(sycl PRIVATE "-L${SYCL_LIBCXX_LIBRARY_PATH}" -nodefaultlibs -lc++ -lc++abi -lm -lc -lgcc_s -lgcc)
-    else()
-        message(FATAL_ERROR "Build with libc++ is not yet supported for this compiler")
-    endif()
+
+if (SYCL_ENABLE_XPTI_TRACING)
+  add_sycl_rt_library(sycl XPTI_LIB xpti COMPILE_OPTIONS ${SYCL_EXTRA_OPTS}  SOURCES ${SYCL_SOURCES})
 else()
-
-# Workaround for bug in GCC version 5 and higher.
-# More information https://bugs.launchpad.net/ubuntu/+source/gcc-5/+bug/1568899
-if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND
-    CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 5.0)
-  target_link_libraries(sycl PRIVATE gcc_s gcc)
+  add_sycl_rt_library(sycl COMPILE_OPTIONS ${SYCL_EXTRA_OPTS} SOURCES ${SYCL_SOURCES})
 endif()
 
+# Enable new IN_LIST operator.
+cmake_policy(SET CMP0057 NEW)
+
+if (libdevice IN_LIST LLVM_ENABLE_PROJECTS)
+  add_dependencies(sycl libsycldevice)
 endif()
 
-install(TARGETS sycl
-    ARCHIVE DESTINATION "lib" COMPONENT sycl
-    LIBRARY DESTINATION "lib" COMPONENT sycl
+install(TARGETS ${SYCL_RT_LIBS}
+    ARCHIVE DESTINATION "lib${LLVM_LIBDIR_SUFFIX}" COMPONENT sycl
+    LIBRARY DESTINATION "lib${LLVM_LIBDIR_SUFFIX}" COMPONENT sycl
     RUNTIME DESTINATION "bin" COMPONENT sycl)

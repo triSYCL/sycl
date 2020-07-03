@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ProcessGDBRemote_h_
-#define liblldb_ProcessGDBRemote_h_
+#ifndef LLDB_SOURCE_PLUGINS_PROCESS_GDB_REMOTE_PROCESSGDBREMOTE_H
+#define LLDB_SOURCE_PLUGINS_PROCESS_GDB_REMOTE_PROCESSGDBREMOTE_H
 
 #include <atomic>
 #include <map>
@@ -24,8 +24,8 @@
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/Broadcaster.h"
 #include "lldb/Utility/ConstString.h"
+#include "lldb/Utility/GDBRemote.h"
 #include "lldb/Utility/Status.h"
-#include "lldb/Utility/StreamGDBRemote.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/StringExtractor.h"
 #include "lldb/Utility/StringList.h"
@@ -284,6 +284,7 @@ protected:
   lldb::CommandObjectSP m_command_sp;
   int64_t m_breakpoint_pc_offset;
   lldb::tid_t m_initial_tid; // The initial thread ID, given by stub on attach
+  bool m_use_g_packet_for_reading;
 
   bool m_replay_mode;
   bool m_allow_flash_writes;
@@ -311,7 +312,7 @@ protected:
   bool UpdateThreadList(ThreadList &old_thread_list,
                         ThreadList &new_thread_list) override;
 
-  Status ConnectToReplayServer(repro::Loader *loader);
+  Status ConnectToReplayServer();
 
   Status EstablishConnectionIfNeeded(const ProcessInfo &process_info);
 
@@ -376,6 +377,7 @@ protected:
   bool UpdateThreadIDList();
 
   void DidLaunchOrAttach(ArchSpec &process_arch);
+  void MaybeLoadExecutableModule();
 
   Status ConnectToDebugserver(llvm::StringRef host_port);
 
@@ -385,7 +387,7 @@ protected:
   DynamicLoader *GetDynamicLoader() override;
 
   bool GetGDBServerRegisterInfoXMLAndProcess(ArchSpec &arch_to_use,
-                                             std::string xml_filename, 
+                                             std::string xml_filename,
                                              uint32_t &cur_reg_num,
                                              uint32_t &reg_offset);
 
@@ -448,10 +450,11 @@ private:
   llvm::DenseMap<ModuleCacheKey, ModuleSpec, ModuleCacheInfo>
       m_cached_module_specs;
 
-  DISALLOW_COPY_AND_ASSIGN(ProcessGDBRemote);
+  ProcessGDBRemote(const ProcessGDBRemote &) = delete;
+  const ProcessGDBRemote &operator=(const ProcessGDBRemote &) = delete;
 };
 
 } // namespace process_gdb_remote
 } // namespace lldb_private
 
-#endif // liblldb_ProcessGDBRemote_h_
+#endif // LLDB_SOURCE_PLUGINS_PROCESS_GDB_REMOTE_PROCESSGDBREMOTE_H

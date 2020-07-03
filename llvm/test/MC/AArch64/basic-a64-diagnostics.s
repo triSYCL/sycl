@@ -167,9 +167,9 @@
         // MOV alias should not accept any fiddling
         mov x2, xsp, #123
         mov wsp, w27, #0xfff, lsl #12
-// CHECK-ERROR: error: expected compatible register or logical immediate
+// CHECK-ERROR: error: invalid operand for instruction
 // CHECK-ERROR-NEXT:         mov x2, xsp, #123
-// CHECK-ERROR-NEXT:                 ^
+// CHECK-ERROR-NEXT:                      ^
 // CHECK-ERROR-NEXT: error: invalid operand for instruction
 // CHECK-ERROR-NEXT:         mov wsp, w27, #0xfff, lsl #12
 // CHECK-ERROR-NEXT:                       ^
@@ -3375,10 +3375,12 @@
         msr spsel, #-1
         msr spsel #-1
         msr daifclr, #16
-// CHECK-ERROR: [[@LINE-4]]:22: error: {{expected|immediate must be an}} integer in range [0, 15]
-// CHECK-ERROR: [[@LINE-4]]:20: error: {{expected|immediate must be an}} integer in range [0, 15]
-// CHECK-ERROR: [[@LINE-4]]:{{9|19}}: error: {{too few operands for instruction|expected comma before next operand|unexpected token in argument list}}
-// CHECK-ERROR: [[@LINE-4]]:22: error: {{expected|immediate must be an}} integer in range [0, 15]
+        msr CurrentEL, x12
+// CHECK-ERROR: [[@LINE-5]]:22: error: {{expected|immediate must be an}} integer in range [0, 15]
+// CHECK-ERROR: [[@LINE-5]]:20: error: {{expected|immediate must be an}} integer in range [0, 15]
+// CHECK-ERROR: [[@LINE-5]]:{{9|19}}: error: {{too few operands for instruction|expected comma before next operand|unexpected token in argument list}}
+// CHECK-ERROR: [[@LINE-5]]:22: error: {{expected|immediate must be an}} integer in range [0, 15]
+// CHECK-ERROR: [[@LINE-5]]:13: error: expected writable system register or pstate
 
         sys #8, c1, c2, #7, x9
         sys #3, c16, c2, #3, x10
@@ -3581,6 +3583,7 @@
         msr ID_MMFR2_EL1, x12
         msr ID_MMFR3_EL1, x12
         msr ID_MMFR4_EL1, x12
+        msr ID_MMFR5_EL1, x12
         msr ID_ISAR0_EL1, x12
         msr ID_ISAR1_EL1, x12
         msr ID_ISAR2_EL1, x12
@@ -3678,6 +3681,9 @@
 // CHECK-ERROR-NEXT:             ^
 // CHECK-ERROR-NEXT: error: expected writable system register or pstate
 // CHECK-ERROR-NEXT:         msr ID_MMFR4_EL1, x12
+// CHECK-ERROR-NEXT:             ^
+// CHECK-ERROR-NEXT: error: expected writable system register or pstate
+// CHECK-ERROR-NEXT:         msr ID_MMFR5_EL1, x12
 // CHECK-ERROR-NEXT:             ^
 // CHECK-ERROR-NEXT: error: expected writable system register or pstate
 // CHECK-ERROR-NEXT:         msr ID_ISAR0_EL1, x12

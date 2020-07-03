@@ -151,6 +151,7 @@ define i32 @f32tou32(float %a) {
 ; MIPS32-NEXT:    addiu $3, $zero, 1
 ; MIPS32-NEXT:    c.ult.s $f12, $f0
 ; MIPS32-NEXT:    movf $3, $zero, $fcc0
+; MIPS32-NEXT:    andi $3, $3, 1
 ; MIPS32-NEXT:    movn $2, $1, $3
 ; MIPS32-NEXT:    jr $ra
 ; MIPS32-NEXT:    nop
@@ -174,9 +175,9 @@ define zeroext i16 @f32tou16(float %a) {
 ; MIPS32-NEXT:    addiu $3, $zero, 1
 ; MIPS32-NEXT:    c.ult.s $f12, $f0
 ; MIPS32-NEXT:    movf $3, $zero, $fcc0
+; MIPS32-NEXT:    andi $3, $3, 1
 ; MIPS32-NEXT:    movn $2, $1, $3
-; MIPS32-NEXT:    ori $1, $zero, 65535
-; MIPS32-NEXT:    and $2, $2, $1
+; MIPS32-NEXT:    andi $2, $2, 65535
 ; MIPS32-NEXT:    jr $ra
 ; MIPS32-NEXT:    nop
 entry:
@@ -199,9 +200,9 @@ define zeroext i8 @f32tou8(float %a) {
 ; MIPS32-NEXT:    addiu $3, $zero, 1
 ; MIPS32-NEXT:    c.ult.s $f12, $f0
 ; MIPS32-NEXT:    movf $3, $zero, $fcc0
+; MIPS32-NEXT:    andi $3, $3, 1
 ; MIPS32-NEXT:    movn $2, $1, $3
-; MIPS32-NEXT:    ori $1, $zero, 255
-; MIPS32-NEXT:    and $2, $2, $1
+; MIPS32-NEXT:    andi $2, $2, 255
 ; MIPS32-NEXT:    jr $ra
 ; MIPS32-NEXT:    nop
 entry:
@@ -234,16 +235,17 @@ define i32 @f64tou32(double %a) {
 ; FP32-NEXT:    mfc1 $1, $f0
 ; FP32-NEXT:    lui $2, 16864
 ; FP32-NEXT:    ori $3, $zero, 0
-; FP32-NEXT:    mtc1 $3, $f2
-; FP32-NEXT:    mtc1 $2, $f3
-; FP32-NEXT:    sub.d $f4, $f12, $f2
-; FP32-NEXT:    trunc.w.d $f0, $f4
-; FP32-NEXT:    mfc1 $2, $f0
+; FP32-NEXT:    mtc1 $3, $f0
+; FP32-NEXT:    mtc1 $2, $f1
+; FP32-NEXT:    sub.d $f2, $f12, $f0
+; FP32-NEXT:    trunc.w.d $f2, $f2
+; FP32-NEXT:    mfc1 $2, $f2
 ; FP32-NEXT:    lui $3, 32768
 ; FP32-NEXT:    xor $2, $2, $3
 ; FP32-NEXT:    addiu $3, $zero, 1
-; FP32-NEXT:    c.ult.d $f12, $f2
+; FP32-NEXT:    c.ult.d $f12, $f0
 ; FP32-NEXT:    movf $3, $zero, $fcc0
+; FP32-NEXT:    andi $3, $3, 1
 ; FP32-NEXT:    movn $2, $1, $3
 ; FP32-NEXT:    jr $ra
 ; FP32-NEXT:    nop
@@ -254,16 +256,17 @@ define i32 @f64tou32(double %a) {
 ; FP64-NEXT:    mfc1 $1, $f0
 ; FP64-NEXT:    lui $2, 16864
 ; FP64-NEXT:    ori $3, $zero, 0
-; FP64-NEXT:    mtc1 $3, $f1
-; FP64-NEXT:    mthc1 $2, $f1
-; FP64-NEXT:    sub.d $f2, $f12, $f1
-; FP64-NEXT:    trunc.w.d $f0, $f2
-; FP64-NEXT:    mfc1 $2, $f0
+; FP64-NEXT:    mtc1 $3, $f0
+; FP64-NEXT:    mthc1 $2, $f0
+; FP64-NEXT:    sub.d $f1, $f12, $f0
+; FP64-NEXT:    trunc.w.d $f1, $f1
+; FP64-NEXT:    mfc1 $2, $f1
 ; FP64-NEXT:    lui $3, 32768
 ; FP64-NEXT:    xor $2, $2, $3
 ; FP64-NEXT:    addiu $3, $zero, 1
-; FP64-NEXT:    c.ult.d $f12, $f1
+; FP64-NEXT:    c.ult.d $f12, $f0
 ; FP64-NEXT:    movf $3, $zero, $fcc0
+; FP64-NEXT:    andi $3, $3, 1
 ; FP64-NEXT:    movn $2, $1, $3
 ; FP64-NEXT:    jr $ra
 ; FP64-NEXT:    nop
@@ -279,19 +282,19 @@ define zeroext i16 @f64tou16(double %a) {
 ; FP32-NEXT:    mfc1 $1, $f0
 ; FP32-NEXT:    lui $2, 16864
 ; FP32-NEXT:    ori $3, $zero, 0
-; FP32-NEXT:    mtc1 $3, $f2
-; FP32-NEXT:    mtc1 $2, $f3
-; FP32-NEXT:    sub.d $f4, $f12, $f2
-; FP32-NEXT:    trunc.w.d $f0, $f4
-; FP32-NEXT:    mfc1 $2, $f0
+; FP32-NEXT:    mtc1 $3, $f0
+; FP32-NEXT:    mtc1 $2, $f1
+; FP32-NEXT:    sub.d $f2, $f12, $f0
+; FP32-NEXT:    trunc.w.d $f2, $f2
+; FP32-NEXT:    mfc1 $2, $f2
 ; FP32-NEXT:    lui $3, 32768
 ; FP32-NEXT:    xor $2, $2, $3
 ; FP32-NEXT:    addiu $3, $zero, 1
-; FP32-NEXT:    c.ult.d $f12, $f2
+; FP32-NEXT:    c.ult.d $f12, $f0
 ; FP32-NEXT:    movf $3, $zero, $fcc0
+; FP32-NEXT:    andi $3, $3, 1
 ; FP32-NEXT:    movn $2, $1, $3
-; FP32-NEXT:    ori $1, $zero, 65535
-; FP32-NEXT:    and $2, $2, $1
+; FP32-NEXT:    andi $2, $2, 65535
 ; FP32-NEXT:    jr $ra
 ; FP32-NEXT:    nop
 ;
@@ -301,19 +304,19 @@ define zeroext i16 @f64tou16(double %a) {
 ; FP64-NEXT:    mfc1 $1, $f0
 ; FP64-NEXT:    lui $2, 16864
 ; FP64-NEXT:    ori $3, $zero, 0
-; FP64-NEXT:    mtc1 $3, $f1
-; FP64-NEXT:    mthc1 $2, $f1
-; FP64-NEXT:    sub.d $f2, $f12, $f1
-; FP64-NEXT:    trunc.w.d $f0, $f2
-; FP64-NEXT:    mfc1 $2, $f0
+; FP64-NEXT:    mtc1 $3, $f0
+; FP64-NEXT:    mthc1 $2, $f0
+; FP64-NEXT:    sub.d $f1, $f12, $f0
+; FP64-NEXT:    trunc.w.d $f1, $f1
+; FP64-NEXT:    mfc1 $2, $f1
 ; FP64-NEXT:    lui $3, 32768
 ; FP64-NEXT:    xor $2, $2, $3
 ; FP64-NEXT:    addiu $3, $zero, 1
-; FP64-NEXT:    c.ult.d $f12, $f1
+; FP64-NEXT:    c.ult.d $f12, $f0
 ; FP64-NEXT:    movf $3, $zero, $fcc0
+; FP64-NEXT:    andi $3, $3, 1
 ; FP64-NEXT:    movn $2, $1, $3
-; FP64-NEXT:    ori $1, $zero, 65535
-; FP64-NEXT:    and $2, $2, $1
+; FP64-NEXT:    andi $2, $2, 65535
 ; FP64-NEXT:    jr $ra
 ; FP64-NEXT:    nop
 entry:
@@ -328,19 +331,19 @@ define zeroext i8 @f64tou8(double %a) {
 ; FP32-NEXT:    mfc1 $1, $f0
 ; FP32-NEXT:    lui $2, 16864
 ; FP32-NEXT:    ori $3, $zero, 0
-; FP32-NEXT:    mtc1 $3, $f2
-; FP32-NEXT:    mtc1 $2, $f3
-; FP32-NEXT:    sub.d $f4, $f12, $f2
-; FP32-NEXT:    trunc.w.d $f0, $f4
-; FP32-NEXT:    mfc1 $2, $f0
+; FP32-NEXT:    mtc1 $3, $f0
+; FP32-NEXT:    mtc1 $2, $f1
+; FP32-NEXT:    sub.d $f2, $f12, $f0
+; FP32-NEXT:    trunc.w.d $f2, $f2
+; FP32-NEXT:    mfc1 $2, $f2
 ; FP32-NEXT:    lui $3, 32768
 ; FP32-NEXT:    xor $2, $2, $3
 ; FP32-NEXT:    addiu $3, $zero, 1
-; FP32-NEXT:    c.ult.d $f12, $f2
+; FP32-NEXT:    c.ult.d $f12, $f0
 ; FP32-NEXT:    movf $3, $zero, $fcc0
+; FP32-NEXT:    andi $3, $3, 1
 ; FP32-NEXT:    movn $2, $1, $3
-; FP32-NEXT:    ori $1, $zero, 255
-; FP32-NEXT:    and $2, $2, $1
+; FP32-NEXT:    andi $2, $2, 255
 ; FP32-NEXT:    jr $ra
 ; FP32-NEXT:    nop
 ;
@@ -350,19 +353,19 @@ define zeroext i8 @f64tou8(double %a) {
 ; FP64-NEXT:    mfc1 $1, $f0
 ; FP64-NEXT:    lui $2, 16864
 ; FP64-NEXT:    ori $3, $zero, 0
-; FP64-NEXT:    mtc1 $3, $f1
-; FP64-NEXT:    mthc1 $2, $f1
-; FP64-NEXT:    sub.d $f2, $f12, $f1
-; FP64-NEXT:    trunc.w.d $f0, $f2
-; FP64-NEXT:    mfc1 $2, $f0
+; FP64-NEXT:    mtc1 $3, $f0
+; FP64-NEXT:    mthc1 $2, $f0
+; FP64-NEXT:    sub.d $f1, $f12, $f0
+; FP64-NEXT:    trunc.w.d $f1, $f1
+; FP64-NEXT:    mfc1 $2, $f1
 ; FP64-NEXT:    lui $3, 32768
 ; FP64-NEXT:    xor $2, $2, $3
 ; FP64-NEXT:    addiu $3, $zero, 1
-; FP64-NEXT:    c.ult.d $f12, $f1
+; FP64-NEXT:    c.ult.d $f12, $f0
 ; FP64-NEXT:    movf $3, $zero, $fcc0
+; FP64-NEXT:    andi $3, $3, 1
 ; FP64-NEXT:    movn $2, $1, $3
-; FP64-NEXT:    ori $1, $zero, 255
-; FP64-NEXT:    and $2, $2, $1
+; FP64-NEXT:    andi $2, $2, 255
 ; FP64-NEXT:    jr $ra
 ; FP64-NEXT:    nop
 entry:

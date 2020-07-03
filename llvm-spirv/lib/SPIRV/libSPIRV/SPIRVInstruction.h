@@ -538,9 +538,15 @@ protected:
     SPIRVInstruction::validate();
     if (getSrc()->isForward() || getDst()->isForward())
       return;
-    assert(getValueType(PtrId)->getPointerElementType() ==
-               getValueType(ValId) &&
-           "Inconsistent operand types");
+#ifndef NDEBUG
+    if (getValueType(PtrId)->getPointerElementType() != getValueType(ValId)) {
+      assert(getValueType(PtrId)
+                     ->getPointerElementType()
+                     ->getPointerStorageClass() ==
+                 getValueType(ValId)->getPointerStorageClass() &&
+             "Inconsistent operand types");
+    }
+#endif // NDEBUG
   }
 
 private:
@@ -1057,8 +1063,8 @@ public:
 
   SPIRVId getMergeBlock() { return MergeBlock; }
   SPIRVId getContinueTarget() { return ContinueTarget; }
-  SPIRVWord getLoopControl() { return LoopControl; }
-  std::vector<SPIRVWord> getLoopControlParameters() {
+  SPIRVWord getLoopControl() const { return LoopControl; }
+  std::vector<SPIRVWord> getLoopControlParameters() const {
     return LoopControlParameters;
   }
 
@@ -1105,7 +1111,7 @@ public:
     setHasNoId();
     setHasNoType();
   }
-  std::vector<SPIRVValue *> getPairs() { return getValues(Pairs); }
+  std::vector<SPIRVValue *> getPairs() const { return getValues(Pairs); }
   SPIRVValue *getSelect() const { return getValue(Select); }
   SPIRVBasicBlock *getDefault() const {
     return static_cast<SPIRVBasicBlock *>(getValue(Default));
@@ -1153,22 +1159,21 @@ protected:
   std::vector<SPIRVWord> Pairs;
 };
 
-class SPIRVFMod : public SPIRVInstruction {
+class SPIRVFSMod : public SPIRVInstruction {
 public:
-  static const Op OC = OpFMod;
   static const SPIRVWord FixedWordCount = 4;
-  // Complete constructor
-  SPIRVFMod(SPIRVType *TheType, SPIRVId TheId, SPIRVId TheDividend,
-            SPIRVId TheDivisor, SPIRVBasicBlock *BB)
+  SPIRVFSMod(Op OC, SPIRVType *TheType, SPIRVId TheId, SPIRVId TheDividend,
+             SPIRVId TheDivisor, SPIRVBasicBlock *BB)
       : SPIRVInstruction(5, OC, TheType, TheId, BB), Dividend(TheDividend),
         Divisor(TheDivisor) {
     validate();
     assert(BB && "Invalid BB");
   }
   // Incomplete constructor
-  SPIRVFMod()
+  SPIRVFSMod(Op OC)
       : SPIRVInstruction(OC), Dividend(SPIRVID_INVALID),
         Divisor(SPIRVID_INVALID) {}
+
   SPIRVValue *getDividend() const { return getValue(Dividend); }
   SPIRVValue *getDivisor() const { return getValue(Divisor); }
 
@@ -1193,6 +1198,28 @@ public:
 protected:
   SPIRVId Dividend;
   SPIRVId Divisor;
+};
+
+class SPIRVFMod : public SPIRVFSMod {
+public:
+  static const Op OC = OpFMod;
+  // Complete constructor
+  SPIRVFMod(SPIRVType *TheType, SPIRVId TheId, SPIRVId TheDividend,
+            SPIRVId TheDivisor, SPIRVBasicBlock *BB)
+      : SPIRVFSMod(OC, TheType, TheId, TheDividend, TheDivisor, BB) {}
+  // Incomplete constructor
+  SPIRVFMod() : SPIRVFSMod(OC) {}
+};
+
+class SPIRVSMod : public SPIRVFSMod {
+public:
+  static const Op OC = OpSMod;
+  // Complete constructor
+  SPIRVSMod(SPIRVType *TheType, SPIRVId TheId, SPIRVId TheDividend,
+            SPIRVId TheDivisor, SPIRVBasicBlock *BB)
+      : SPIRVFSMod(OC, TheType, TheId, TheDividend, TheDivisor, BB) {}
+  // Incomplete constructor
+  SPIRVSMod() : SPIRVFSMod(OC) {}
 };
 
 class SPIRVVectorTimesScalar : public SPIRVInstruction {
@@ -1248,6 +1275,292 @@ protected:
   SPIRVId Scalar;
 };
 
+class SPIRVVectorTimesMatrix : public SPIRVInstruction {
+public:
+  static const Op OC = OpVectorTimesMatrix;
+  static const SPIRVWord FixedWordCount = 4;
+
+  // Complete constructor
+  SPIRVVectorTimesMatrix(SPIRVType *TheType, SPIRVId TheId, SPIRVId TheVector,
+                         SPIRVId TheMatrix, SPIRVBasicBlock *BB)
+      : SPIRVInstruction(5, OC, TheType, TheId, BB), Vector(TheVector),
+        Matrix(TheMatrix) {
+    validate();
+    assert(BB && "Invalid BB");
+  }
+
+  // Incomplete constructor
+  SPIRVVectorTimesMatrix()
+      : SPIRVInstruction(OC), Vector(SPIRVID_INVALID), Matrix(SPIRVID_INVALID) {
+  }
+
+  SPIRVValue *getVector() const { return getValue(Vector); }
+  SPIRVValue *getMatrix() const { return getValue(Matrix); }
+
+  std::vector<SPIRVValue *> getOperands() override {
+    std::vector<SPIRVId> Operands;
+    Operands.push_back(Vector);
+    Operands.push_back(Matrix);
+    return getValues(Operands);
+  }
+
+  void setWordCount(SPIRVWord FixedWordCount) override {
+    SPIRVEntry::setWordCount(FixedWordCount);
+  }
+
+  _SPIRV_DEF_ENCDEC4(Type, Id, Vector, Matrix)
+
+  void validate() const override {
+    SPIRVInstruction::validate();
+    if (getValue(Vector)->isForward() || getValue(Matrix)->isForward())
+      return;
+
+    SPIRVType *Ty = getType()->getScalarType();
+    SPIRVType *MTy = getValueType(Matrix)->getScalarType();
+    SPIRVType *VTy = getValueType(Vector)->getScalarType();
+
+    (void)Ty;
+    (void)MTy;
+    (void)VTy;
+    assert(Ty->isTypeFloat() && "Invalid result type for OpVectorTimesMatrix");
+    assert(VTy->isTypeFloat() && "Invalid Vector type for OpVectorTimesMatrix");
+    assert(MTy->isTypeFloat() && "Invalid Matrix type for OpVectorTimesMatrix");
+
+    assert(Ty == MTy && Ty == VTy && "Mismatch float type");
+  }
+
+private:
+  SPIRVId Vector;
+  SPIRVId Matrix;
+};
+
+class SPIRVMatrixTimesScalar : public SPIRVInstruction {
+public:
+  static const Op OC = OpMatrixTimesScalar;
+  static const SPIRVWord FixedWordCount = 4;
+  // Complete constructor
+  SPIRVMatrixTimesScalar(SPIRVType *TheType, SPIRVId TheId, SPIRVId TheMatrix,
+                         SPIRVId TheScalar, SPIRVBasicBlock *BB)
+      : SPIRVInstruction(5, OC, TheType, TheId, BB), Matrix(TheMatrix),
+        Scalar(TheScalar) {
+    validate();
+    assert(BB && "Invalid BB");
+  }
+  // Incomplete constructor
+  SPIRVMatrixTimesScalar()
+      : SPIRVInstruction(OC), Matrix(SPIRVID_INVALID), Scalar(SPIRVID_INVALID) {
+  }
+  SPIRVValue *getMatrix() const { return getValue(Matrix); }
+  SPIRVValue *getScalar() const { return getValue(Scalar); }
+
+  std::vector<SPIRVValue *> getOperands() override {
+    std::vector<SPIRVId> Operands;
+    Operands.push_back(Matrix);
+    Operands.push_back(Scalar);
+    return getValues(Operands);
+  }
+
+  void setWordCount(SPIRVWord FixedWordCount) override {
+    SPIRVEntry::setWordCount(FixedWordCount);
+  }
+
+  _SPIRV_DEF_ENCDEC4(Type, Id, Matrix, Scalar)
+
+  void validate() const override {
+    SPIRVInstruction::validate();
+    if (getValue(Matrix)->isForward() || getValue(Scalar)->isForward())
+      return;
+
+    SPIRVType *Ty = getType()->getScalarType();
+    SPIRVType *MTy = getValueType(Matrix)->getScalarType();
+    SPIRVType *STy = getValueType(Scalar);
+
+    (void)Ty;
+    (void)MTy;
+    (void)STy;
+    assert(Ty && Ty->isTypeFloat() &&
+           "Invalid result type for OpMatrixTimesScalar");
+    assert(MTy && MTy->isTypeFloat() &&
+           "Invalid Matrix type for OpMatrixTimesScalar");
+    assert(STy->isTypeFloat() && "Invalid Scalar type for OpMatrixTimesScalar");
+    assert(Ty == MTy && Ty == STy && "Mismatch float type");
+  }
+
+private:
+  SPIRVId Matrix;
+  SPIRVId Scalar;
+};
+
+class SPIRVMatrixTimesVector : public SPIRVInstruction {
+public:
+  static const Op OC = OpMatrixTimesVector;
+  static const SPIRVWord FixedWordCount = 4;
+
+  // Complete constructor
+  SPIRVMatrixTimesVector(SPIRVType *TheType, SPIRVId TheId, SPIRVId TheMatrix,
+                         SPIRVId TheVector, SPIRVBasicBlock *BB)
+      : SPIRVInstruction(5, OC, TheType, TheId, BB), Matrix(TheMatrix),
+        Vector(TheVector) {
+    validate();
+    assert(BB && "Invalid BB");
+  }
+
+  // Incomplete constructor
+  SPIRVMatrixTimesVector()
+      : SPIRVInstruction(OC), Matrix(SPIRVID_INVALID), Vector(SPIRVID_INVALID) {
+  }
+
+  SPIRVValue *getMatrix() const { return getValue(Matrix); }
+
+  SPIRVValue *getVector() const { return getValue(Vector); }
+
+  std::vector<SPIRVValue *> getOperands() override {
+    std::vector<SPIRVId> Operands;
+    Operands.push_back(Matrix);
+    Operands.push_back(Vector);
+    return getValues(Operands);
+  }
+
+  void setWordCount(SPIRVWord FixedWordCount) override {
+    SPIRVEntry::setWordCount(FixedWordCount);
+  }
+
+  _SPIRV_DEF_ENCDEC4(Type, Id, Matrix, Vector)
+
+  void validate() const override {
+    SPIRVInstruction::validate();
+    if (getValue(Matrix)->isForward() || getValue(Vector)->isForward())
+      return;
+    SPIRVType *Ty = getType()->getScalarType();
+    SPIRVType *MTy = getValueType(Matrix)->getScalarType();
+    SPIRVType *VTy = getValueType(Vector)->getScalarType();
+
+    (void)Ty;
+    (void)MTy;
+    (void)VTy;
+    assert(Ty->isTypeFloat() && "Invalid result type for OpMatrixTimesVector");
+    assert(MTy->isTypeFloat() && "Invalid Matrix type for OpMatrixTimesVector");
+    assert(VTy->isTypeFloat() && "Invalid Vector type for OpMatrixTimesVector");
+
+    assert(Ty == MTy && Ty == VTy && "Mismatch float type");
+  }
+
+private:
+  SPIRVId Matrix;
+  SPIRVId Vector;
+};
+
+class SPIRVMatrixTimesMatrix : public SPIRVInstruction {
+public:
+  static const Op OC = OpMatrixTimesMatrix;
+  static const SPIRVWord FixedWordCount = 4;
+
+  // Complete constructor
+  SPIRVMatrixTimesMatrix(SPIRVType *TheType, SPIRVId TheId, SPIRVId M1,
+                         SPIRVId M2, SPIRVBasicBlock *BB)
+      : SPIRVInstruction(5, OC, TheType, TheId, BB), LeftMatrix(M1),
+        RightMatrix(M2) {
+    validate();
+    assert(BB && "Invalid BB");
+  }
+
+  // Incomplete constructor
+  SPIRVMatrixTimesMatrix()
+      : SPIRVInstruction(OC), LeftMatrix(SPIRVID_INVALID),
+        RightMatrix(SPIRVID_INVALID) {}
+
+  SPIRVValue *getLeftMatrix() const { return getValue(LeftMatrix); }
+
+  SPIRVValue *getRightMatrix() const { return getValue(RightMatrix); }
+
+  std::vector<SPIRVValue *> getOperands() override {
+    std::vector<SPIRVId> Operands;
+    Operands.push_back(LeftMatrix);
+    Operands.push_back(RightMatrix);
+    return getValues(Operands);
+  }
+
+  void setWordCount(SPIRVWord FixedWordCount) override {
+    SPIRVEntry::setWordCount(FixedWordCount);
+  }
+
+  _SPIRV_DEF_ENCDEC4(Type, Id, LeftMatrix, RightMatrix)
+
+  void validate() const override {
+    SPIRVInstruction::validate();
+    if (getValue(LeftMatrix)->isForward() || getValue(RightMatrix)->isForward())
+      return;
+
+    SPIRVType *Ty = getType()->getScalarType();
+    SPIRVType *LMTy = getValueType(LeftMatrix)->getScalarType();
+    SPIRVType *RMTy = getValueType(RightMatrix)->getScalarType();
+
+    (void)Ty;
+    (void)LMTy;
+    (void)RMTy;
+    assert(Ty->isTypeFloat() && "Invalid result type for OpMatrixTimesMatrix");
+    assert(LMTy->isTypeFloat() &&
+           "Invalid Matrix type for OpMatrixTimesMatrix");
+    assert(RMTy->isTypeFloat() &&
+           "Invalid Matrix type for OpMatrixTimesMatrix");
+
+    assert(Ty == LMTy && Ty == RMTy && "Mismatch float type");
+  }
+
+private:
+  SPIRVId LeftMatrix;
+  SPIRVId RightMatrix;
+};
+
+class SPIRVTranspose : public SPIRVInstruction {
+public:
+  static const Op OC = OpTranspose;
+  static const SPIRVWord FixedWordCount = 3;
+
+  // Complete constructor
+  SPIRVTranspose(SPIRVType *TheType, SPIRVId TheId, SPIRVId TheMatrix,
+                 SPIRVBasicBlock *BB)
+      : SPIRVInstruction(4, OC, TheType, TheId, BB), Matrix(TheMatrix) {
+    validate();
+    assert(BB && "Invalid BB");
+  }
+
+  // Incomplete constructor
+  SPIRVTranspose() : SPIRVInstruction(OC), Matrix(SPIRVID_INVALID) {}
+
+  SPIRVValue *getMatrix() const { return getValue(Matrix); }
+
+  std::vector<SPIRVValue *> getOperands() override {
+    std::vector<SPIRVId> Operands;
+    Operands.push_back(Matrix);
+    return getValues(Operands);
+  }
+
+  void setWordCount(SPIRVWord FixedWordCount) override {
+    SPIRVEntry::setWordCount(FixedWordCount);
+  }
+
+  _SPIRV_DEF_ENCDEC3(Type, Id, Matrix)
+
+  void validate() const override {
+    SPIRVInstruction::validate();
+    if (getValue(Matrix)->isForward())
+      return;
+
+    SPIRVType *Ty = getType()->getScalarType();
+    SPIRVType *MTy = getValueType(Matrix)->getScalarType();
+
+    (void)Ty;
+    (void)MTy;
+
+    assert(Ty->isTypeFloat() && "Invalid result type for OpTranspose");
+    assert(Ty == MTy && "Mismatch float type");
+  }
+
+private:
+  SPIRVId Matrix;
+};
+
 class SPIRVUnary : public SPIRVInstTemplateBase {
 protected:
   void validate() const override {
@@ -1296,6 +1609,8 @@ _SPIRV_OP(ConvertPtrToU)
 _SPIRV_OP(ConvertUToPtr)
 _SPIRV_OP(PtrCastToGeneric)
 _SPIRV_OP(GenericCastToPtr)
+_SPIRV_OP(CrossWorkgroupCastToPtrINTEL)
+_SPIRV_OP(PtrCastToCrossWorkgroupINTEL)
 _SPIRV_OP(Bitcast)
 _SPIRV_OP(SNegate)
 _SPIRV_OP(FNegate)
@@ -1361,9 +1676,9 @@ public:
     setHasNoType();
   }
 
-  SPIRVWord getLoopControl() { return LoopControl; }
+  SPIRVWord getLoopControl() const { return LoopControl; }
 
-  std::vector<SPIRVWord> getLoopControlParameters() {
+  std::vector<SPIRVWord> getLoopControlParameters() const {
     return LoopControlParameters;
   }
 
@@ -1968,7 +2283,6 @@ protected:
       return;
     assert(getValueType(Vector1) == getValueType(Vector2));
     assert(Components.size() == Type->getVectorComponentCount());
-    assert(Components.size() > 1);
   }
   SPIRVId Vector1;
   SPIRVId Vector2;
@@ -2211,6 +2525,123 @@ _SPIRV_OP(GroupCommitReadPipe, false, 6)
 _SPIRV_OP(GroupCommitWritePipe, false, 6)
 #undef _SPIRV_OP
 
+class SPIRVGroupNonUniformElectInst : public SPIRVInstTemplateBase {
+public:
+  SPIRVCapVec getRequiredCapability() const override {
+    return getVec(CapabilityGroupNonUniform);
+  }
+};
+
+#define _SPIRV_OP(x, ...)                                                      \
+  typedef SPIRVInstTemplate<SPIRVGroupNonUniformElectInst, Op##x, __VA_ARGS__> \
+      SPIRV##x;
+_SPIRV_OP(GroupNonUniformElect, true, 4)
+#undef _SPIRV_OP
+
+class SPIRVGroupNonUniformVoteInst : public SPIRVInstTemplateBase {
+public:
+  SPIRVCapVec getRequiredCapability() const override {
+    return getVec(CapabilityGroupNonUniformVote);
+  }
+};
+
+#define _SPIRV_OP(x, ...)                                                      \
+  typedef SPIRVInstTemplate<SPIRVGroupNonUniformVoteInst, Op##x, __VA_ARGS__>  \
+      SPIRV##x;
+_SPIRV_OP(GroupNonUniformAll, true, 5)
+_SPIRV_OP(GroupNonUniformAny, true, 5)
+_SPIRV_OP(GroupNonUniformAllEqual, true, 5)
+#undef _SPIRV_OP
+
+class SPIRVGroupNonUniformBallotInst : public SPIRVInstTemplateBase {
+public:
+  SPIRVCapVec getRequiredCapability() const override {
+    return getVec(CapabilityGroupNonUniformBallot);
+  }
+};
+
+#define _SPIRV_OP(x, ...)                                                      \
+  typedef SPIRVInstTemplate<SPIRVGroupNonUniformBallotInst, Op##x,             \
+                            __VA_ARGS__>                                       \
+      SPIRV##x;
+_SPIRV_OP(GroupNonUniformBroadcast, true, 6)
+_SPIRV_OP(GroupNonUniformBroadcastFirst, true, 5)
+_SPIRV_OP(GroupNonUniformBallot, true, 5)
+_SPIRV_OP(GroupNonUniformInverseBallot, true, 5)
+_SPIRV_OP(GroupNonUniformBallotBitExtract, true, 6)
+_SPIRV_OP(GroupNonUniformBallotBitCount, true, 6, false, 1)
+_SPIRV_OP(GroupNonUniformBallotFindLSB, true, 5)
+_SPIRV_OP(GroupNonUniformBallotFindMSB, true, 5)
+#undef _SPIRV_OP
+
+class SPIRVGroupNonUniformArithmeticInst : public SPIRVInstTemplateBase {
+public:
+  void setOpWords(const std::vector<SPIRVWord> &Ops) override {
+    SPIRVInstTemplateBase::setOpWords(Ops);
+    SPIRVGroupOperationKind GroupOp;
+    if (getSPIRVGroupOperation(GroupOp)) {
+      if (GroupOp == GroupOperationClusteredReduce)
+        Module->addCapability(CapabilityGroupNonUniformClustered);
+      else
+        Module->addCapability(CapabilityGroupNonUniformArithmetic);
+    } else
+      llvm_unreachable(
+          "GroupNonUniformArithmeticInst has no group operation operand!");
+  }
+};
+
+#define _SPIRV_OP(x, ...)                                                      \
+  typedef SPIRVInstTemplate<SPIRVGroupNonUniformArithmeticInst, Op##x,         \
+                            __VA_ARGS__>                                       \
+      SPIRV##x;
+_SPIRV_OP(GroupNonUniformIAdd, true, 6, true, 1)
+_SPIRV_OP(GroupNonUniformFAdd, true, 6, true, 1)
+_SPIRV_OP(GroupNonUniformIMul, true, 6, true, 1)
+_SPIRV_OP(GroupNonUniformFMul, true, 6, true, 1)
+_SPIRV_OP(GroupNonUniformSMin, true, 6, true, 1)
+_SPIRV_OP(GroupNonUniformUMin, true, 6, true, 1)
+_SPIRV_OP(GroupNonUniformFMin, true, 6, true, 1)
+_SPIRV_OP(GroupNonUniformSMax, true, 6, true, 1)
+_SPIRV_OP(GroupNonUniformUMax, true, 6, true, 1)
+_SPIRV_OP(GroupNonUniformFMax, true, 6, true, 1)
+_SPIRV_OP(GroupNonUniformBitwiseAnd, true, 6, true, 1)
+_SPIRV_OP(GroupNonUniformBitwiseOr, true, 6, true, 1)
+_SPIRV_OP(GroupNonUniformBitwiseXor, true, 6, true, 1)
+_SPIRV_OP(GroupNonUniformLogicalAnd, true, 6, true, 1)
+_SPIRV_OP(GroupNonUniformLogicalOr, true, 6, true, 1)
+_SPIRV_OP(GroupNonUniformLogicalXor, true, 6, true, 1)
+#undef _SPIRV_OP
+
+class SPIRVGroupNonUniformShuffleInst : public SPIRVInstTemplateBase {
+public:
+  SPIRVCapVec getRequiredCapability() const override {
+    return getVec(CapabilityGroupNonUniformShuffle);
+  }
+};
+
+#define _SPIRV_OP(x, ...)                                                      \
+  typedef SPIRVInstTemplate<SPIRVGroupNonUniformShuffleInst, Op##x,            \
+                            __VA_ARGS__>                                       \
+      SPIRV##x;
+_SPIRV_OP(GroupNonUniformShuffle, true, 6)
+_SPIRV_OP(GroupNonUniformShuffleXor, true, 6)
+#undef _SPIRV_OP
+
+class SPIRVGroupNonUniformShuffleRelativeInst : public SPIRVInstTemplateBase {
+public:
+  SPIRVCapVec getRequiredCapability() const override {
+    return getVec(CapabilityGroupNonUniformShuffleRelative);
+  }
+};
+
+#define _SPIRV_OP(x, ...)                                                      \
+  typedef SPIRVInstTemplate<SPIRVGroupNonUniformShuffleRelativeInst, Op##x,    \
+                            __VA_ARGS__>                                       \
+      SPIRV##x;
+_SPIRV_OP(GroupNonUniformShuffleUp, true, 6)
+_SPIRV_OP(GroupNonUniformShuffleDown, true, 6)
+#undef _SPIRV_OP
+
 class SPIRVBlockingPipesIntelInst : public SPIRVInstTemplateBase {
 protected:
   SPIRVCapVec getRequiredCapability() const override {
@@ -2314,10 +2745,68 @@ _SPIRV_OP(GenericPtrMemSemantics, true, 4, false)
 _SPIRV_OP(GenericCastToPtrExplicit, true, 5, false, 1)
 #undef _SPIRV_OP
 
+class SPIRVAssumeTrueINTEL : public SPIRVInstruction {
+public:
+  static const Op OC = OpAssumeTrueINTEL;
+  static const SPIRVWord FixedWordCount = 2;
+
+  SPIRVAssumeTrueINTEL(SPIRVId TheCondition, SPIRVBasicBlock *BB)
+      : SPIRVInstruction(FixedWordCount, OC, BB), ConditionId(TheCondition) {
+    validate();
+    setHasNoId();
+    setHasNoType();
+    assert(BB && "Invalid BB");
+  }
+
+  SPIRVAssumeTrueINTEL() : SPIRVInstruction(OC), ConditionId(SPIRVID_MAX) {
+    setHasNoId();
+    setHasNoType();
+  }
+
+  SPIRVCapVec getRequiredCapability() const override {
+    return getVec(CapabilityOptimizationHintsINTEL);
+  }
+
+  SPIRVExtSet getRequiredExtensions() const override {
+    return getSet(ExtensionID::SPV_INTEL_optimization_hints);
+  }
+
+  SPIRVValue *getCondition() const { return getValue(ConditionId); }
+
+  void setWordCount(SPIRVWord TheWordCount) override {
+    SPIRVEntry::setWordCount(TheWordCount);
+  }
+  _SPIRV_DEF_ENCDEC1(ConditionId)
+
+protected:
+  SPIRVId ConditionId;
+};
+
+class SPIRVExpectINTELInstBase : public SPIRVInstTemplateBase {
+protected:
+  SPIRVCapVec getRequiredCapability() const override {
+    return getVec(CapabilityOptimizationHintsINTEL);
+  }
+
+  SPIRVExtSet getRequiredExtensions() const override {
+    return getSet(ExtensionID::SPV_INTEL_optimization_hints);
+  }
+};
+
+#define _SPIRV_OP(x, ...)                                                      \
+  typedef SPIRVInstTemplate<SPIRVExpectINTELInstBase, Op##x, __VA_ARGS__>      \
+      SPIRV##x;
+_SPIRV_OP(ExpectINTEL, true, 5)
+#undef _SPIRV_OP
+
 class SPIRVSubgroupShuffleINTELInstBase : public SPIRVInstTemplateBase {
 protected:
   SPIRVCapVec getRequiredCapability() const override {
     return getVec(CapabilitySubgroupShuffleINTEL);
+  }
+
+  SPIRVExtSet getRequiredExtensions() const override {
+    return getSet(ExtensionID::SPV_INTEL_subgroups);
   }
 };
 
@@ -2337,6 +2826,10 @@ protected:
   SPIRVCapVec getRequiredCapability() const override {
     return getVec(CapabilitySubgroupBufferBlockIOINTEL);
   }
+
+  SPIRVExtSet getRequiredExtensions() const override {
+    return getSet(ExtensionID::SPV_INTEL_subgroups);
+  }
 };
 
 #define _SPIRV_OP(x, ...)                                                      \
@@ -2352,6 +2845,10 @@ class SPIRVSubgroupImageBlockIOINTELInstBase : public SPIRVInstTemplateBase {
 protected:
   SPIRVCapVec getRequiredCapability() const override {
     return getVec(CapabilitySubgroupImageBlockIOINTEL);
+  }
+
+  SPIRVExtSet getRequiredExtensions() const override {
+    return getSet(ExtensionID::SPV_INTEL_subgroups);
   }
 };
 
@@ -2369,6 +2866,9 @@ class SPIRVSubgroupImageMediaBlockIOINTELInstBase
 protected:
   SPIRVCapVec getRequiredCapability() const override {
     return getVec(CapabilitySubgroupImageMediaBlockIOINTEL);
+  }
+  SPIRVExtSet getRequiredExtensions() const override {
+    return getSet(ExtensionID::SPV_INTEL_media_block_io);
   }
 };
 

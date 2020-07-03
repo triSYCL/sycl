@@ -11,6 +11,10 @@ let Definition = "processgdbremote" in {
     Desc<"The file that provides the description for remote target registers.">;
   def UseSVR4: Property<"use-libraries-svr4", "Boolean">,
     Global,
+    DefaultTrue,
+    Desc<"If true, the libraries-svr4 feature will be used to get a hold of the process's loaded modules. This setting is only effective if lldb was build with xml support.">;
+  def UseGPacketForReading: Property<"use-g-packet-for-reading", "Boolean">,
+    Global,
     DefaultFalse,
-    Desc<"If true, the libraries-svr4 feature will be used to get a hold of the process's loaded modules.">;
+    Desc<"Specify if the server should use 'g' packets to read registers.">;
 }

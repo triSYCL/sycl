@@ -1,5 +1,4 @@
-// RUN: DISABLE_INFER_AS=1 %clang_cc1 -triple spir64-unknown-linux-sycldevice -std=c++11 -I %S/Inputs  -fsycl-is-device -disable-llvm-passes -emit-llvm -x c++ %s -o - | FileCheck --enable-var-scope %s --check-prefixes CHECK,CHECK-OLD
-// RUN: %clang_cc1 -triple spir64-unknown-linux-sycldevice -std=c++11 -I %S/Inputs  -fsycl-is-device -disable-llvm-passes -emit-llvm -x c++ %s -o - | FileCheck --enable-var-scope %s --check-prefixes CHECK,CHECK-NEW
+// RUN: %clang_cc1 -fsycl -fsycl-is-device -triple spir64-unknown-unknown-sycldevice -I %S/Inputs -disable-llvm-passes -emit-llvm %s -o - | FileCheck --enable-var-scope %s
 // CHECK: define spir_kernel void @{{[a-zA-Z0-9_]+}}(%opencl.sampler_t addrspace(2)* [[SAMPLER_ARG:%[a-zA-Z0-9_]+]])
 // CHECK-NEXT: entry:
 // CHECK-NEXT: [[SAMPLER_ARG]].addr = alloca %opencl.sampler_t addrspace(2)*, align 8
@@ -9,11 +8,22 @@
 // CHECK-NEXT: call void @llvm.lifetime.start.p0i8(i64 8, i8* [[BITCAST]]) #4
 // CHECK-NEXT: [[GEP:%[0-9]+]]  = getelementptr inbounds %"class.{{.*}}.anon", %"class.{{.*}}.anon"* [[ANON]], i32 0, i32 0
 // CHECK-NEXT: [[LOAD_SAMPLER_ARG:%[0-9]+]] = load %opencl.sampler_t addrspace(2)*, %opencl.sampler_t addrspace(2)** [[SAMPLER_ARG]].addr, align 8
-// CHECK-OLD-NEXT: call spir_func void @{{[a-zA-Z0-9_]+}}(%"class.{{.*}}.cl::sycl::sampler"* [[GEP]], %opencl.sampler_t addrspace(2)* [[LOAD_SAMPLER_ARG]])
-// CHECK-NEW-NEXT: [[GEPCAST:%[0-9]+]] = addrspacecast %"class{{.*}}.cl::sycl::sampler"* [[GEP]] to %"class{{.*}}.cl::sycl::sampler" addrspace(4)*
-// CHECK-NEW-NEXT: call spir_func void @{{[a-zA-Z0-9_]+}}(%"class.{{.*}}.cl::sycl::sampler" addrspace(4)* [[GEPCAST]], %opencl.sampler_t addrspace(2)* [[LOAD_SAMPLER_ARG]])
+// CHECK-NEXT: [[GEPCAST:%[0-9]+]] = addrspacecast %"class{{.*}}.cl::sycl::sampler"* [[GEP]] to %"class{{.*}}.cl::sycl::sampler" addrspace(4)*
+// CHECK-NEXT: call spir_func void @{{[a-zA-Z0-9_]+}}(%"class.{{.*}}.cl::sycl::sampler" addrspace(4)* [[GEPCAST]], %opencl.sampler_t addrspace(2)* [[LOAD_SAMPLER_ARG]])
+//
+
+// CHECK: define spir_kernel void @{{[a-zA-Z0-9_]+}}(%struct{{.*}}sampler_wrapper{{.*}} %opencl.sampler_t addrspace(2)* [[SAMPLER_ARG_WRAPPED:%[a-zA-Z0-9_]+]])
+// CHECK: [[SAMPLER_ARG_WRAPPED]].addr = alloca %opencl.sampler_t addrspace(2)*, align 8
+// CHECK: store %opencl.sampler_t addrspace(2)* [[SAMPLER_ARG_WRAPPED]], %opencl.sampler_t addrspace(2)** [[SAMPLER_ARG_WRAPPED]].addr, align 8
+// CHECK: [[LOAD_SAMPLER_ARG_WRAPPED:%[0-9]+]] = load %opencl.sampler_t addrspace(2)*, %opencl.sampler_t addrspace(2)** [[SAMPLER_ARG_WRAPPED]].addr, align 8
+// CHECK: call spir_func void @{{[a-zA-Z0-9_]+}}(%"class.{{.*}}.cl::sycl::sampler" addrspace(4)* {{.*}}, %opencl.sampler_t addrspace(2)* [[LOAD_SAMPLER_ARG_WRAPPED]])
 //
 #include "sycl.hpp"
+
+struct sampler_wrapper {
+  cl::sycl::sampler smpl;
+  int a;
+};
 
 template <typename KernelName, typename KernelType>
 __attribute__((sycl_kernel)) void kernel_single_task(KernelType kernelFunc) {
@@ -26,8 +36,10 @@ int main() {
     smplr.use();
   });
 
+  sampler_wrapper wrappedSampler = {smplr, 1};
+  kernel_single_task<class second_kernel>([=]() {
+    wrappedSampler.smpl.use();
+  });
+
   return 0;
 }
-
-// TODO: SYCL specific fail - analyze and enable
-// XFAIL: windows-msvc

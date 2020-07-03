@@ -12,6 +12,7 @@
 #include "lld/Common/Memory.h"
 #include "lld/Common/Strings.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Demangle/Demangle.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 
@@ -26,47 +27,40 @@ static_assert(sizeof(SymbolUnion) <= 48,
               "symbols should be optimized for memory usage");
 
 // Returns a symbol name for an error message.
-static std::string demangle(StringRef symName) {
+static std::string maybeDemangleSymbol(StringRef symName) {
   if (config->demangle) {
-    if (Optional<std::string> s = demangleMSVC(symName))
-      return *s;
-    if (config->mingw) {
-      StringRef demangleInput = symName;
-      std::string prefix;
-      if (demangleInput.consume_front("__imp_"))
-        prefix = "__declspec(dllimport) ";
-      if (config->machine == I386)
-        demangleInput.consume_front("_");
-      if (Optional<std::string> s = demangleItanium(demangleInput))
-        return prefix + *s;
-    }
+    std::string prefix;
+    StringRef prefixless = symName;
+    if (prefixless.consume_front("__imp_"))
+      prefix = "__declspec(dllimport) ";
+    StringRef demangleInput = prefixless;
+    if (config->machine == I386)
+      demangleInput.consume_front("_");
+    std::string demangled = demangle(std::string(demangleInput));
+    if (demangled != demangleInput)
+      return prefix + demangle(std::string(demangleInput));
+    return (prefix + prefixless).str();
   }
-  return symName;
+  return std::string(symName);
 }
-std::string toString(coff::Symbol &b) { return demangle(b.getName()); }
+std::string toString(coff::Symbol &b) {
+  return maybeDemangleSymbol(b.getName());
+}
 std::string toCOFFString(const Archive::Symbol &b) {
-  return demangle(b.getName());
+  return maybeDemangleSymbol(b.getName());
 }
 
 namespace coff {
 
-StringRef Symbol::getName() {
-  // COFF symbol names are read lazily for a performance reason.
-  // Non-external symbol names are never used by the linker except for logging
-  // or debugging. Their internal references are resolved not by name but by
-  // symbol index. And because they are not external, no one can refer them by
-  // name. Object files contain lots of non-external symbols, and creating
-  // StringRefs for them (which involves lots of strlen() on the string table)
-  // is a waste of time.
-  if (nameData == nullptr) {
-    auto *d = cast<DefinedCOFF>(this);
-    StringRef nameStr;
-    cast<ObjFile>(d->file)->getCOFFObj()->getSymbolName(d->sym, nameStr);
-    nameData = nameStr.data();
-    nameSize = nameStr.size();
-    assert(nameSize == nameStr.size() && "name length truncated");
-  }
-  return StringRef(nameData, nameSize);
+void Symbol::computeName() {
+  assert(nameData == nullptr &&
+         "should only compute the name once for DefinedCOFF symbols");
+  auto *d = cast<DefinedCOFF>(this);
+  StringRef nameStr =
+      check(cast<ObjFile>(d->file)->getCOFFObj()->getSymbolName(d->sym));
+  nameData = nameStr.data();
+  nameSize = nameStr.size();
+  assert(nameSize == nameStr.size() && "name length truncated");
 }
 
 InputFile *Symbol::getFile() {

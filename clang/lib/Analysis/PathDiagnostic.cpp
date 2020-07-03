@@ -20,6 +20,7 @@
 #include "clang/AST/ExprCXX.h"
 #include "clang/AST/OperationKinds.h"
 #include "clang/AST/ParentMap.h"
+#include "clang/AST/PrettyPrinter.h"
 #include "clang/AST/Stmt.h"
 #include "clang/AST/Type.h"
 #include "clang/Analysis/AnalysisDeclContext.h"
@@ -695,14 +696,18 @@ PathDiagnosticLocation::create(const ProgramPoint& P,
     return PathDiagnosticLocation(
         CEB->getLocationContext()->getDecl()->getSourceRange().getEnd(), SMng);
   } else if (Optional<BlockEntrance> BE = P.getAs<BlockEntrance>()) {
-    CFGElement BlockFront = BE->getBlock()->front();
-    if (auto StmtElt = BlockFront.getAs<CFGStmt>()) {
-      return PathDiagnosticLocation(StmtElt->getStmt()->getBeginLoc(), SMng);
-    } else if (auto NewAllocElt = BlockFront.getAs<CFGNewAllocator>()) {
-      return PathDiagnosticLocation(
-          NewAllocElt->getAllocatorExpr()->getBeginLoc(), SMng);
+    if (Optional<CFGElement> BlockFront = BE->getFirstElement()) {
+      if (auto StmtElt = BlockFront->getAs<CFGStmt>()) {
+        return PathDiagnosticLocation(StmtElt->getStmt()->getBeginLoc(), SMng);
+      } else if (auto NewAllocElt = BlockFront->getAs<CFGNewAllocator>()) {
+        return PathDiagnosticLocation(
+            NewAllocElt->getAllocatorExpr()->getBeginLoc(), SMng);
+      }
+      llvm_unreachable("Unexpected CFG element at front of block");
     }
-    llvm_unreachable("Unexpected CFG element at front of block");
+
+    return PathDiagnosticLocation(
+        BE->getBlock()->getTerminatorStmt()->getBeginLoc(), SMng);
   } else if (Optional<FunctionExitPoint> FE = P.getAs<FunctionExitPoint>()) {
     return PathDiagnosticLocation(FE->getStmt(), SMng,
                                   FE->getLocationContext());
@@ -905,7 +910,7 @@ static void describeClass(raw_ostream &Out, const CXXRecordDecl *D,
   Out << Prefix << '\'' << *D;
   if (const auto T = dyn_cast<ClassTemplateSpecializationDecl>(D))
     describeTemplateParameters(Out, T->getTemplateArgs().asArray(),
-                               D->getASTContext().getLangOpts(), "<", ">");
+                               D->getLangOpts(), "<", ">");
 
   Out << '\'';
 }
@@ -971,8 +976,8 @@ static bool describeCodeDecl(raw_ostream &Out, const Decl *D,
   if (const auto FD = dyn_cast<FunctionDecl>(D))
     if (const TemplateArgumentList *TAList =
                                     FD->getTemplateSpecializationArgs())
-      describeTemplateParameters(Out, TAList->asArray(),
-                                 FD->getASTContext().getLangOpts(), "<", ">");
+      describeTemplateParameters(Out, TAList->asArray(), FD->getLangOpts(), "<",
+                                 ">");
 
   Out << '\'';
   return true;

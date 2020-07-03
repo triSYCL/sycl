@@ -1,14 +1,41 @@
+// UNSUPPORTED: cuda
+// CUDA does not support SPIR-V.
+//
 // >> ---- compile src1
 // >> device compilation...
+<<<<<<< HEAD
 // RUN: %clangxx -std=c++17 --sycl -Xclang -fsycl-int-header=sycl_ihdr_a.h %s -c -o a_kernel.bc
+||||||| merged common ancestors
+// RUN: %clangxx --sycl -Xclang -fsycl-int-header=sycl_ihdr_a.h %s -c -o a_kernel.bc
+=======
+// RUN: %clangxx -fsycl-device-only -Xclang -fsycl-int-header=sycl_ihdr_a.h %s -c -o a_kernel.bc -I %sycl_include -Wno-sycl-strict
+>>>>>>> intel/sycl
 // >> host compilation...
+<<<<<<< HEAD
 // RUN: %clangxx -std=c++17 -include sycl_ihdr_a.h -g -c %s -o a.o
+||||||| merged common ancestors
+// RUN: %clangxx -include sycl_ihdr_a.h -g -c %s -o a.o
+=======
+// RUN: %clangxx -include sycl_ihdr_a.h -g -c %s -o a.o -I %sycl_include -Wno-sycl-strict
+>>>>>>> intel/sycl
 //
 // >> ---- compile src2
 // >> device compilation...
+<<<<<<< HEAD
 // RUN: %clangxx -DB_CPP=1 -std=c++17 --sycl -Xclang -fsycl-int-header=sycl_ihdr_b.h %s -c -o b_kernel.bc
+||||||| merged common ancestors
+// RUN: %clangxx -DB_CPP=1 --sycl -Xclang -fsycl-int-header=sycl_ihdr_b.h %s -c -o b_kernel.bc
+=======
+// RUN: %clangxx -DB_CPP=1 -fsycl-device-only -Xclang -fsycl-int-header=sycl_ihdr_b.h %s -c -o b_kernel.bc -I %sycl_include -Wno-sycl-strict
+>>>>>>> intel/sycl
 // >> host compilation...
+<<<<<<< HEAD
 // RUN: %clangxx -DB_CPP=1 -std=c++17 -include sycl_ihdr_b.h -g -c %s -o b.o
+||||||| merged common ancestors
+// RUN: %clangxx -DB_CPP=1 -include sycl_ihdr_b.h -g -c %s -o b.o
+=======
+// RUN: %clangxx -DB_CPP=1 -include sycl_ihdr_b.h -g -c %s -o b.o -I %sycl_include -Wno-sycl-strict
+>>>>>>> intel/sycl
 //
 // >> ---- bundle .o with .spv
 // >> run bundler
@@ -27,14 +54,14 @@
 //
 // >> ---- wrap device binary
 // >> produce .bc
-// RUN: clang-offload-wrapper -o wrapper.bc -host=x86_64 -kind=sycl app.spv
+// RUN: clang-offload-wrapper -o wrapper.bc -host=x86_64 -kind=sycl -target=spir64 app.spv
 //
 // >> compile .bc to .o
 // RUN: %clangxx -c wrapper.bc -o wrapper.o
 //
 // >> ---- link the full hetero app
 // RUN: %clangxx wrapper.o a.o b.o -o app.exe -lsycl
-// RUN: ./app.exe | FileCheck %s
+// RUN: env SYCL_BE=%sycl_be ./app.exe | FileCheck %s
 // CHECK: pass
 
 //==----------- test.cpp - Tests SYCL separate compilation -----------------==//

@@ -123,6 +123,9 @@ struct CodeGenIntrinsic {
   /// True if the intrinsic is no-return.
   bool isNoReturn;
 
+  /// True if the intrinsic is no-sync.
+  bool isNoSync;
+
   /// True if the intrinsic is will-return.
   bool isWillReturn;
 
@@ -139,17 +142,32 @@ struct CodeGenIntrinsic {
   // True if the intrinsic is marked as speculatable.
   bool isSpeculatable;
 
-  enum ArgAttribute {
+  enum ArgAttrKind {
     NoCapture,
     NoAlias,
     Returned,
     ReadOnly,
     WriteOnly,
     ReadNone,
-    ImmArg
+    ImmArg,
+    Alignment
   };
 
-  std::vector<std::pair<unsigned, ArgAttribute>> ArgumentAttributes;
+  struct ArgAttribute {
+    unsigned Index;
+    ArgAttrKind Kind;
+    uint64_t Value;
+
+    ArgAttribute(unsigned Idx, ArgAttrKind K, uint64_t V)
+        : Index(Idx), Kind(K), Value(V) {}
+
+    bool operator<(const ArgAttribute &Other) const {
+      return std::tie(Index, Kind, Value) <
+             std::tie(Other.Index, Other.Kind, Other.Value);
+    }
+  };
+
+  std::vector<ArgAttribute> ArgumentAttributes;
 
   bool hasProperty(enum SDNP Prop) const {
     return Properties & (1 << Prop);
@@ -161,6 +179,8 @@ struct CodeGenIntrinsic {
   ///
   /// Note that this requires that \p IS.ParamVTs is available.
   bool isParamAPointer(unsigned ParamIdx) const;
+
+  bool isParamImmArg(unsigned ParamIdx) const;
 
   CodeGenIntrinsic(Record *R);
 };
@@ -176,7 +196,7 @@ public:
   };
   std::vector<TargetSet> Targets;
 
-  explicit CodeGenIntrinsicTable(const RecordKeeper &RC, bool TargetOnly);
+  explicit CodeGenIntrinsicTable(const RecordKeeper &RC);
   CodeGenIntrinsicTable() = default;
 
   bool empty() const { return Intrinsics.empty(); }

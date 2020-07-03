@@ -140,6 +140,20 @@ inline bool isValid(spv::ExecutionMode V) {
   case ExecutionModeFinalizer:
   case ExecutionModeSubgroupSize:
   case ExecutionModeSubgroupsPerWorkgroup:
+  case ExecutionModeMaxWorkgroupSizeINTEL:
+  case ExecutionModeNoGlobalOffsetINTEL:
+  case ExecutionModeMaxWorkDimINTEL:
+  case ExecutionModeNumSIMDWorkitemsINTEL:
+  case ExecutionModeDenormPreserve:
+  case ExecutionModeDenormFlushToZero:
+  case ExecutionModeSignedZeroInfNanPreserve:
+  case ExecutionModeRoundingModeRTE:
+  case ExecutionModeRoundingModeRTZ:
+  case ExecutionModeRoundingModeRTPINTEL:
+  case ExecutionModeRoundingModeRTNINTEL:
+  case ExecutionModeFloatingPointModeALTINTEL:
+  case ExecutionModeFloatingPointModeIEEEINTEL:
+  case ExecutionModeSharedLocalMemorySizeINTEL:
     return true;
   default:
     return false;
@@ -160,6 +174,8 @@ inline bool isValid(spv::StorageClass V) {
   case StorageClassPushConstant:
   case StorageClassAtomicCounter:
   case StorageClassImage:
+  case StorageClassDeviceOnlyINTEL:
+  case StorageClassHostOnlyINTEL:
     return true;
   default:
     return false;
@@ -405,7 +421,14 @@ inline bool isValid(spv::Decoration V) {
   case DecorationMaxPrivateCopiesINTEL:
   case DecorationSinglepumpINTEL:
   case DecorationDoublepumpINTEL:
+  case DecorationBankBitsINTEL:
+  case DecorationForcePow2DepthINTEL:
   case DecorationReferencedIndirectlyINTEL:
+  case DecorationVectorComputeFunctionINTEL:
+  case DecorationStackCallINTEL:
+  case DecorationVectorComputeVariableINTEL:
+  case DecorationGlobalVariableOffsetINTEL:
+  case DecorationFuncParamIOKind:
     return true;
   default:
     return false;
@@ -453,6 +476,11 @@ inline bool isValid(spv::BuiltIn V) {
   case BuiltInNumEnqueuedSubgroups:
   case BuiltInSubgroupId:
   case BuiltInSubgroupLocalInvocationId:
+  case BuiltInSubgroupEqMask:
+  case BuiltInSubgroupGeMask:
+  case BuiltInSubgroupGtMask:
+  case BuiltInSubgroupLeMask:
+  case BuiltInSubgroupLtMask:
   case BuiltInVertexIndex:
   case BuiltInInstanceIndex:
     return true;
@@ -557,10 +585,30 @@ inline bool isValid(spv::Capability V) {
   case CapabilitySubgroupDispatch:
   case CapabilityNamedBarrier:
   case CapabilityPipeStorage:
+  case CapabilityGroupNonUniform:
+  case CapabilityGroupNonUniformVote:
+  case CapabilityGroupNonUniformArithmetic:
+  case CapabilityGroupNonUniformBallot:
+  case CapabilityGroupNonUniformShuffle:
+  case CapabilityGroupNonUniformShuffleRelative:
+  case CapabilityGroupNonUniformClustered:
+  case CapabilityGroupNonUniformQuad:
+  case CapabilityDenormPreserve:
+  case CapabilityDenormFlushToZero:
+  case CapabilitySignedZeroInfNanPreserve:
+  case CapabilityRoundingModeRTE:
+  case CapabilityRoundingModeRTZ:
+  case CapabilityRoundToInfinityINTEL:
+  case CapabilityFloatingPointModeINTEL:
+  case CapabilityVectorComputeINTEL:
+  case CapabilityVectorAnyINTEL:
   case CapabilityFPGAMemoryAttributesINTEL:
+  case CapabilityArbitraryPrecisionIntegersINTEL:
   case CapabilityFPGALoopControlsINTEL:
   case CapabilityBlockingPipesINTEL:
   case CapabilityUnstructuredLoopControlsINTEL:
+  case CapabilityKernelAttributesINTEL:
+  case CapabilityFPGAKernelAttributesINTEL:
     return true;
   default:
     return false;
@@ -682,6 +730,8 @@ inline bool isValid(spv::Op V) {
   case OpConvertUToPtr:
   case OpPtrCastToGeneric:
   case OpGenericCastToPtr:
+  case OpPtrCastToCrossWorkgroupINTEL:
+  case OpCrossWorkgroupCastToPtrINTEL:
   case OpGenericCastToPtrExplicit:
   case OpBitcast:
   case OpSNegate:
@@ -886,6 +936,9 @@ inline bool isValid(spv::Op V) {
   case OpSubgroupImageBlockWriteINTEL:
   case OpSubgroupImageMediaBlockReadINTEL:
   case OpSubgroupImageMediaBlockWriteINTEL:
+  case OpAsmTargetINTEL:
+  case OpAsmINTEL:
+  case OpAsmCallINTEL:
   case OpVmeImageINTEL:
   case OpTypeVmeImageINTEL:
   case OpTypeAvcImePayloadINTEL:
@@ -1052,7 +1105,13 @@ inline bool isValidLoopControlMask(SPIRVWord Mask) {
   ValidMask |= LoopControlPartialCountMask;
   ValidMask |= LoopControlDependencyInfiniteMask;
   ValidMask |= LoopControlDependencyLengthMask;
-  ValidMask |= LoopControlExtendedControlsMask;
+  ValidMask |= LoopControlInitiationIntervalINTELMask;
+  ValidMask |= LoopControlMaxConcurrencyINTELMask;
+  ValidMask |= LoopControlDependencyArrayINTELMask;
+  ValidMask |= LoopControlPipelineEnableINTELMask;
+  ValidMask |= LoopControlLoopCoalesceINTELMask;
+  ValidMask |= LoopControlMaxInterleavingINTELMask;
+  ValidMask |= LoopControlSpeculatedIterationsINTELMask;
 
   return (Mask & ~ValidMask) == 0;
 }

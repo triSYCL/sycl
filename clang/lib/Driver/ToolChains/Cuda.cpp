@@ -18,9 +18,11 @@
 #include "clang/Driver/Options.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Host.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
+#include "llvm/Support/TargetParser.h"
 #include "llvm/Support/VirtualFileSystem.h"
 #include <system_error>
 
@@ -32,37 +34,33 @@ using namespace llvm::opt;
 
 // Parses the contents of version.txt in an CUDA installation.  It should
 // contain one line of the from e.g. "CUDA Version 7.5.2".
-static CudaVersion ParseCudaVersionFile(llvm::StringRef V) {
+void CudaInstallationDetector::ParseCudaVersionFile(llvm::StringRef V) {
+  Version = CudaVersion::UNKNOWN;
   if (!V.startswith("CUDA Version "))
-    return CudaVersion::UNKNOWN;
+    return;
   V = V.substr(strlen("CUDA Version "));
-  int Major = -1, Minor = -1;
-  auto First = V.split('.');
-  auto Second = First.second.split('.');
-  if (First.first.getAsInteger(10, Major) ||
-      Second.first.getAsInteger(10, Minor))
-    return CudaVersion::UNKNOWN;
-
-  if (Major == 7 && Minor == 0) {
-    // This doesn't appear to ever happen -- version.txt doesn't exist in the
-    // CUDA 7 installs I've seen.  But no harm in checking.
-    return CudaVersion::CUDA_70;
+  SmallVector<StringRef,4> VersionParts;
+  V.split(VersionParts, '.');
+  if (VersionParts.size() < 2)
+    return;
+  DetectedVersion = join_items(".", VersionParts[0], VersionParts[1]);
+  Version = CudaStringToVersion(DetectedVersion);
+  if (Version != CudaVersion::UNKNOWN) {
+    // TODO(tra): remove the warning once we have all features of 10.2 and 11.0
+    // implemented.
+    DetectedVersionIsNotSupported = Version > CudaVersion::LATEST_SUPPORTED;
+    return;
   }
-  if (Major == 7 && Minor == 5)
-    return CudaVersion::CUDA_75;
-  if (Major == 8 && Minor == 0)
-    return CudaVersion::CUDA_80;
-  if (Major == 9 && Minor == 0)
-    return CudaVersion::CUDA_90;
-  if (Major == 9 && Minor == 1)
-    return CudaVersion::CUDA_91;
-  if (Major == 9 && Minor == 2)
-    return CudaVersion::CUDA_92;
-  if (Major == 10 && Minor == 0)
-    return CudaVersion::CUDA_100;
-  if (Major == 10 && Minor == 1)
-    return CudaVersion::CUDA_101;
-  return CudaVersion::UNKNOWN;
+
+  Version = CudaVersion::LATEST_SUPPORTED;
+  DetectedVersionIsNotSupported = true;
+}
+
+void CudaInstallationDetector::WarnIfUnsupportedVersion() {
+  if (DetectedVersionIsNotSupported)
+    D.Diag(diag::warn_drv_unknown_cuda_version)
+        << DetectedVersion
+        << CudaVersionToString(CudaVersion::LATEST_SUPPORTED);
 }
 
 CudaInstallationDetector::CudaInstallationDetector(
@@ -80,6 +78,7 @@ CudaInstallationDetector::CudaInstallationDetector(
 
   // In decreasing order so we prefer newer versions to older versions.
   std::initializer_list<const char *> Versions = {"8.0", "7.5", "7.0"};
+  auto &FS = D.getVFS();
 
   if (Args.hasArg(clang::driver::options::OPT_cuda_path_EQ)) {
     Candidates.emplace_back(
@@ -106,8 +105,9 @@ CudaInstallationDetector::CudaInstallationDetector(
 
         StringRef ptxasDir = llvm::sys::path::parent_path(ptxasAbsolutePath);
         if (llvm::sys::path::filename(ptxasDir) == "bin")
-          Candidates.emplace_back(llvm::sys::path::parent_path(ptxasDir),
-                                  /*StrictChecking=*/true);
+          Candidates.emplace_back(
+              std::string(llvm::sys::path::parent_path(ptxasDir)),
+              /*StrictChecking=*/true);
       }
     }
 
@@ -115,24 +115,24 @@ CudaInstallationDetector::CudaInstallationDetector(
     for (const char *Ver : Versions)
       Candidates.emplace_back(D.SysRoot + "/usr/local/cuda-" + Ver);
 
-    if (Distro(D.getVFS()).IsDebian() || Distro(D.getVFS()).IsUbuntu())
+    Distro Dist(FS, llvm::Triple(llvm::sys::getProcessTriple()));
+    if (Dist.IsDebian() || Dist.IsUbuntu())
       // Special case for Debian to have nvidia-cuda-toolkit work
       // out of the box. More info on http://bugs.debian.org/882505
       Candidates.emplace_back(D.SysRoot + "/usr/lib/cuda");
   }
 
-  bool NoCudaLib = Args.hasArg(options::OPT_nocudalib);
+  bool NoCudaLib = Args.hasArg(options::OPT_nogpulib);
 
   for (const auto &Candidate : Candidates) {
     InstallPath = Candidate.Path;
-    if (InstallPath.empty() || !D.getVFS().exists(InstallPath))
+    if (InstallPath.empty() || !FS.exists(InstallPath))
       continue;
 
     BinPath = InstallPath + "/bin";
     IncludePath = InstallPath + "/include";
     LibDevicePath = InstallPath + "/nvvm/libdevice";
 
-    auto &FS = D.getVFS();
     if (!(FS.exists(IncludePath) && FS.exists(BinPath)))
       continue;
     bool CheckLibDevice = (!NoCudaLib || Candidate.StrictChecking);
@@ -159,25 +159,26 @@ CudaInstallationDetector::CudaInstallationDetector(
       // version.txt isn't present.
       Version = CudaVersion::CUDA_70;
     } else {
-      Version = ParseCudaVersionFile((*VersionFile)->getBuffer());
+      ParseCudaVersionFile((*VersionFile)->getBuffer());
     }
 
     if (Version >= CudaVersion::CUDA_90) {
       // CUDA-9+ uses single libdevice file for all GPU variants.
       std::string FilePath = LibDevicePath + "/libdevice.10.bc";
       if (FS.exists(FilePath)) {
-        for (const char *GpuArchName :
-             {"sm_30", "sm_32", "sm_35", "sm_37", "sm_50", "sm_52", "sm_53",
-              "sm_60", "sm_61", "sm_62", "sm_70", "sm_72", "sm_75"}) {
-          const CudaArch GpuArch = StringToCudaArch(GpuArchName);
-          if (Version >= MinVersionForCudaArch(GpuArch) &&
-              Version <= MaxVersionForCudaArch(GpuArch))
-            LibDeviceMap[GpuArchName] = FilePath;
+        for (int Arch = (int)CudaArch::SM_30, E = (int)CudaArch::LAST; Arch < E;
+             ++Arch) {
+          CudaArch GpuArch = static_cast<CudaArch>(Arch);
+          if (!IsNVIDIAGpuArch(GpuArch))
+            continue;
+          std::string GpuArchName(CudaArchToString(GpuArch));
+          LibDeviceMap[GpuArchName] = FilePath;
         }
       }
     } else {
       std::error_code EC;
-      for (llvm::sys::fs::directory_iterator LI(LibDevicePath, EC), LE;
+      for (llvm::vfs::directory_iterator LI = FS.dir_begin(LibDevicePath, EC),
+                                         LE;
            !EC && LI != LE; LI = LI.increment(EC)) {
         StringRef FilePath = LI->path();
         StringRef FileName = llvm::sys::path::filename(FilePath);
@@ -193,27 +194,27 @@ CudaInstallationDetector::CudaInstallationDetector(
         // capability. NVCC's choice of the libdevice library version is
         // rather peculiar and depends on the CUDA version.
         if (GpuArch == "compute_20") {
-          LibDeviceMap["sm_20"] = FilePath;
-          LibDeviceMap["sm_21"] = FilePath;
-          LibDeviceMap["sm_32"] = FilePath;
+          LibDeviceMap["sm_20"] = std::string(FilePath);
+          LibDeviceMap["sm_21"] = std::string(FilePath);
+          LibDeviceMap["sm_32"] = std::string(FilePath);
         } else if (GpuArch == "compute_30") {
-          LibDeviceMap["sm_30"] = FilePath;
+          LibDeviceMap["sm_30"] = std::string(FilePath);
           if (Version < CudaVersion::CUDA_80) {
-            LibDeviceMap["sm_50"] = FilePath;
-            LibDeviceMap["sm_52"] = FilePath;
-            LibDeviceMap["sm_53"] = FilePath;
+            LibDeviceMap["sm_50"] = std::string(FilePath);
+            LibDeviceMap["sm_52"] = std::string(FilePath);
+            LibDeviceMap["sm_53"] = std::string(FilePath);
           }
-          LibDeviceMap["sm_60"] = FilePath;
-          LibDeviceMap["sm_61"] = FilePath;
-          LibDeviceMap["sm_62"] = FilePath;
+          LibDeviceMap["sm_60"] = std::string(FilePath);
+          LibDeviceMap["sm_61"] = std::string(FilePath);
+          LibDeviceMap["sm_62"] = std::string(FilePath);
         } else if (GpuArch == "compute_35") {
-          LibDeviceMap["sm_35"] = FilePath;
-          LibDeviceMap["sm_37"] = FilePath;
+          LibDeviceMap["sm_35"] = std::string(FilePath);
+          LibDeviceMap["sm_37"] = std::string(FilePath);
         } else if (GpuArch == "compute_50") {
           if (Version >= CudaVersion::CUDA_80) {
-            LibDeviceMap["sm_50"] = FilePath;
-            LibDeviceMap["sm_52"] = FilePath;
-            LibDeviceMap["sm_53"] = FilePath;
+            LibDeviceMap["sm_50"] = std::string(FilePath);
+            LibDeviceMap["sm_52"] = std::string(FilePath);
+            LibDeviceMap["sm_53"] = std::string(FilePath);
           }
         }
       }
@@ -241,7 +242,7 @@ void CudaInstallationDetector::AddCudaIncludeArgs(
     CC1Args.push_back(DriverArgs.MakeArgString(P));
   }
 
-  if (DriverArgs.hasArg(options::OPT_nocudainc))
+  if (DriverArgs.hasArg(options::OPT_nogpuinc))
     return;
 
   if (!isValid()) {
@@ -476,10 +477,9 @@ void NVPTX::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       continue;
     // We need to pass an Arch of the form "sm_XX" for cubin files and
     // "compute_XX" for ptx.
-    const char *Arch =
-        (II.getType() == types::TY_PP_Asm)
-            ? CudaVirtualArchToString(VirtualArchForCudaArch(gpu_arch))
-            : gpu_arch_str;
+    const char *Arch = (II.getType() == types::TY_PP_Asm)
+                           ? CudaArchToVirtualArchString(gpu_arch)
+                           : gpu_arch_str;
     CmdArgs.push_back(Args.MakeArgString(llvm::Twine("--image=profile=") +
                                          Arch + ",file=" + II.getFilename()));
   }
@@ -563,8 +563,6 @@ void NVPTX::OpenMPLinker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(CubinF);
   }
 
-  AddOpenMPLinkerScript(getToolChain(), C, Output, Inputs, Args, CmdArgs, JA);
-
   const char *Exec =
       Args.MakeArgString(getToolChain().GetProgramPath("nvlink"));
   C.addCommand(std::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
@@ -579,8 +577,10 @@ CudaToolChain::CudaToolChain(const Driver &D, const llvm::Triple &Triple,
                              const Action::OffloadKind OK)
     : ToolChain(D, Triple, Args), HostTC(HostTC),
       CudaInstallation(D, HostTC.getTriple(), Args), OK(OK) {
-  if (CudaInstallation.isValid())
-    getProgramPaths().push_back(CudaInstallation.getBinPath());
+  if (CudaInstallation.isValid()) {
+    CudaInstallation.WarnIfUnsupportedVersion();
+    getProgramPaths().push_back(std::string(CudaInstallation.getBinPath()));
+  }
   // Lookup binaries into the driver directory, this is used to
   // discover the clang-offload-bundler executable.
   getProgramPaths().push_back(getDriver().Dir);
@@ -597,7 +597,7 @@ std::string CudaToolChain::getInputFilename(const InputInfo &Input) const {
   // these particular file names.
   SmallString<256> Filename(ToolChain::getInputFilename(Input));
   llvm::sys::path::replace_extension(Filename, "cubin");
-  return Filename.str();
+  return std::string(Filename.str());
 }
 
 void CudaToolChain::addClangTargetOptions(
@@ -609,15 +609,12 @@ void CudaToolChain::addClangTargetOptions(
   StringRef GpuArch = DriverArgs.getLastArgValue(options::OPT_march_EQ);
   assert(!GpuArch.empty() && "Must have an explicit GPU arch.");
   assert((DeviceOffloadingKind == Action::OFK_OpenMP ||
+          DeviceOffloadingKind == Action::OFK_SYCL ||
           DeviceOffloadingKind == Action::OFK_Cuda) &&
-         "Only OpenMP or CUDA offloading kinds are supported for NVIDIA GPUs.");
+         "Only OpenMP, SYCL or CUDA offloading kinds are supported for NVIDIA GPUs.");
 
   if (DeviceOffloadingKind == Action::OFK_Cuda) {
     CC1Args.push_back("-fcuda-is-device");
-
-    if (DriverArgs.hasFlag(options::OPT_fcuda_flush_denormals_to_zero,
-                           options::OPT_fno_cuda_flush_denormals_to_zero, false))
-      CC1Args.push_back("-fcuda-flush-denormals-to-zero");
 
     if (DriverArgs.hasFlag(options::OPT_fcuda_approx_transcendentals,
                            options::OPT_fno_cuda_approx_transcendentals, false))
@@ -628,7 +625,54 @@ void CudaToolChain::addClangTargetOptions(
       CC1Args.push_back("-fgpu-rdc");
   }
 
-  if (DriverArgs.hasArg(options::OPT_nocudalib))
+  if (DeviceOffloadingKind == Action::OFK_SYCL) {
+    toolchains::SYCLToolChain::AddSYCLIncludeArgs(getDriver(), DriverArgs,
+                                                  CC1Args);
+  }
+
+  auto NoLibSpirv = DriverArgs.hasArg(options::OPT_fno_sycl_libspirv);
+  if (DeviceOffloadingKind == Action::OFK_SYCL && !NoLibSpirv) {
+    std::string LibSpirvFile;
+
+    if (DriverArgs.hasArg(clang::driver::options::OPT_fsycl_libspirv_path_EQ)) {
+      auto ProvidedPath =
+        DriverArgs.getLastArgValue(clang::driver::options::OPT_fsycl_libspirv_path_EQ).str();
+      if (llvm::sys::fs::exists(ProvidedPath))
+        LibSpirvFile = ProvidedPath;
+    } else {
+      SmallVector<StringRef, 8> LibraryPaths;
+
+      // Expected path w/out install.
+      SmallString<256> WithoutInstallPath(getDriver().ResourceDir);
+      llvm::sys::path::append(WithoutInstallPath, Twine("../../clc"));
+      LibraryPaths.emplace_back(WithoutInstallPath.c_str());
+
+      // Expected path w/ install.
+      SmallString<256> WithInstallPath(getDriver().ResourceDir);
+      llvm::sys::path::append(WithInstallPath, Twine("../../../share/clc"));
+      LibraryPaths.emplace_back(WithInstallPath.c_str());
+
+      std::string LibSpirvTargetName = "libspirv-nvptx64--nvidiacl.bc";
+      for (StringRef LibraryPath : LibraryPaths) {
+        SmallString<128> LibSpirvTargetFile(LibraryPath);
+        llvm::sys::path::append(LibSpirvTargetFile, LibSpirvTargetName);
+        if (llvm::sys::fs::exists(LibSpirvTargetFile)) {
+          LibSpirvFile = std::string(LibSpirvTargetFile.str());
+          break;
+        }
+      }
+    }
+
+    if (LibSpirvFile.empty()) {
+      getDriver().Diag(diag::err_drv_no_sycl_libspirv);
+      return;
+    }
+
+    CC1Args.push_back("-mlink-builtin-bitcode");
+    CC1Args.push_back(DriverArgs.MakeArgString(LibSpirvFile));
+  }
+
+  if (DriverArgs.hasArg(options::OPT_nogpulib))
     return;
 
   std::string LibDeviceFile = CudaInstallation.getLibDeviceFile(GpuArch);
@@ -649,24 +693,30 @@ void CudaToolChain::addClangTargetOptions(
   // by new PTX version, so we need to raise PTX level to enable them in NVPTX
   // back-end.
   const char *PtxFeature = nullptr;
-  switch(CudaInstallation.version()) {
-    case CudaVersion::CUDA_101:
-      PtxFeature = "+ptx64";
-      break;
-    case CudaVersion::CUDA_100:
-      PtxFeature = "+ptx63";
-      break;
-    case CudaVersion::CUDA_92:
-      PtxFeature = "+ptx61";
-      break;
-    case CudaVersion::CUDA_91:
-      PtxFeature = "+ptx61";
-      break;
-    case CudaVersion::CUDA_90:
-      PtxFeature = "+ptx60";
-      break;
-    default:
-      PtxFeature = "+ptx42";
+  switch (CudaInstallation.version()) {
+  case CudaVersion::CUDA_110:
+    PtxFeature = "+ptx70";
+    break;
+  case CudaVersion::CUDA_102:
+    PtxFeature = "+ptx65";
+    break;
+  case CudaVersion::CUDA_101:
+    PtxFeature = "+ptx64";
+    break;
+  case CudaVersion::CUDA_100:
+    PtxFeature = "+ptx63";
+    break;
+  case CudaVersion::CUDA_92:
+    PtxFeature = "+ptx61";
+    break;
+  case CudaVersion::CUDA_91:
+    PtxFeature = "+ptx61";
+    break;
+  case CudaVersion::CUDA_90:
+    PtxFeature = "+ptx60";
+    break;
+  default:
+    PtxFeature = "+ptx42";
   }
   CC1Args.append({"-target-feature", PtxFeature});
   if (DriverArgs.hasFlag(options::OPT_fcuda_short_ptr,
@@ -719,6 +769,21 @@ void CudaToolChain::addClangTargetOptions(
   }
 }
 
+llvm::DenormalMode CudaToolChain::getDefaultDenormalModeForType(
+    const llvm::opt::ArgList &DriverArgs, const JobAction &JA,
+    const llvm::fltSemantics *FPType) const {
+  if (JA.getOffloadingDeviceKind() == Action::OFK_Cuda) {
+    if (FPType && FPType == &llvm::APFloat::IEEEsingle() &&
+        DriverArgs.hasFlag(options::OPT_fcuda_flush_denormals_to_zero,
+                           options::OPT_fno_cuda_flush_denormals_to_zero,
+                           false))
+      return llvm::DenormalMode::getPreserveSign();
+  }
+
+  assert(JA.getOffloadingDeviceKind() != Action::OFK_Host);
+  return llvm::DenormalMode::getIEEE();
+}
+
 bool CudaToolChain::supportsDebugInfoOption(const llvm::opt::Arg *A) const {
   const Option &O = A->getOption();
   return (O.matches(options::OPT_gN_Group) &&
@@ -749,7 +814,7 @@ void CudaToolChain::adjustDebugInfoKind(
 void CudaToolChain::AddCudaIncludeArgs(const ArgList &DriverArgs,
                                        ArgStringList &CC1Args) const {
   // Check our CUDA version if we're going to include the CUDA headers.
-  if (!DriverArgs.hasArg(options::OPT_nocudainc) &&
+  if (!DriverArgs.hasArg(options::OPT_nogpuinc) &&
       !DriverArgs.hasArg(options::OPT_no_cuda_version_check)) {
     StringRef Arch = DriverArgs.getLastArgValue(options::OPT_march_EQ);
     assert(!Arch.empty() && "Must have an explicit GPU arch.");
@@ -794,36 +859,6 @@ CudaToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
   }
 
   for (Arg *A : Args) {
-    if (A->getOption().matches(options::OPT_Xarch__)) {
-      // Skip this argument unless the architecture matches BoundArch
-      if (BoundArch.empty() || A->getValue(0) != BoundArch)
-        continue;
-
-      unsigned Index = Args.getBaseArgs().MakeIndex(A->getValue(1));
-      unsigned Prev = Index;
-      std::unique_ptr<Arg> XarchArg(Opts.ParseOneArg(Args, Index));
-
-      // If the argument parsing failed or more than one argument was
-      // consumed, the -Xarch_ argument's parameter tried to consume
-      // extra arguments. Emit an error and ignore.
-      //
-      // We also want to disallow any options which would alter the
-      // driver behavior; that isn't going to work in our model. We
-      // use isDriverOption() as an approximation, although things
-      // like -O4 are going to slip through.
-      if (!XarchArg || Index > Prev + 1) {
-        getDriver().Diag(diag::err_drv_invalid_Xarch_argument_with_args)
-            << A->getAsString(Args);
-        continue;
-      } else if (XarchArg->getOption().hasFlag(options::DriverOption)) {
-        getDriver().Diag(diag::err_drv_invalid_Xarch_argument_isdriver)
-            << A->getAsString(Args);
-        continue;
-      }
-      XarchArg->setBaseArg(A);
-      A = XarchArg.release();
-      DAL->AddSynthesizedArg(A);
-    }
     DAL->append(A);
   }
 
@@ -841,7 +876,20 @@ Tool *CudaToolChain::buildAssembler() const {
 Tool *CudaToolChain::buildLinker() const {
   if (OK == Action::OFK_OpenMP)
     return new tools::NVPTX::OpenMPLinker(*this);
+  if (OK == Action::OFK_SYCL)
+    return new tools::NVPTX::SYCLLinker(*this);
   return new tools::NVPTX::Linker(*this);
+}
+
+Tool *CudaToolChain::SelectTool(const JobAction &JA) const {
+  if (OK == Action::OFK_SYCL) {
+    if (JA.getKind() == Action::LinkJobClass &&
+        JA.getType() == types::TY_LLVM_BC) {
+      return static_cast<tools::NVPTX::SYCLLinker *>(ToolChain::SelectTool(JA))
+          ->GetSYCLToolChainLinker();
+    }
+  }
+  return ToolChain::SelectTool(JA);
 }
 
 void CudaToolChain::addClangWarningOptions(ArgStringList &CC1Args) const {
@@ -855,6 +903,10 @@ CudaToolChain::GetCXXStdlibType(const ArgList &Args) const {
 
 void CudaToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
                                               ArgStringList &CC1Args) const {
+  if (DriverArgs.hasArg(options::OPT_fsycl)) {
+    toolchains::SYCLToolChain::AddSYCLIncludeArgs(getDriver(), DriverArgs,
+                                                  CC1Args);
+  }
   HostTC.AddClangSystemIncludeArgs(DriverArgs, CC1Args);
 }
 

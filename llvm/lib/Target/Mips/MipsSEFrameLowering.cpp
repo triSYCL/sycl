@@ -434,8 +434,8 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF,
   TII.adjustStackPtr(SP, -StackSize, MBB, MBBI);
 
   // emit ".cfi_def_cfa_offset StackSize"
-  unsigned CFIIndex = MF.addFrameInst(
-      MCCFIInstruction::createDefCfaOffset(nullptr, -StackSize));
+  unsigned CFIIndex =
+      MF.addFrameInst(MCCFIInstruction::cfiDefCfaOffset(nullptr, StackSize));
   BuildMI(MBB, MBBI, dl, TII.get(TargetOpcode::CFI_INSTRUCTION))
       .addCFIIndex(CFIIndex);
 
@@ -539,11 +539,11 @@ void MipsSEFrameLowering::emitPrologue(MachineFunction &MF,
       // addiu $Reg, $zero, -MaxAlignment
       // andi $sp, $sp, $Reg
       Register VR = MF.getRegInfo().createVirtualRegister(RC);
-      assert(isInt<16>(MFI.getMaxAlignment()) &&
+      assert((Log2(MFI.getMaxAlign()) < 16) &&
              "Function's alignment size requirement is not supported.");
-      int MaxAlign = -(int)MFI.getMaxAlignment();
+      int64_t MaxAlign = -(int64_t)MFI.getMaxAlign().value();
 
-      BuildMI(MBB, MBBI, dl, TII.get(ADDiu), VR).addReg(ZERO) .addImm(MaxAlign);
+      BuildMI(MBB, MBBI, dl, TII.get(ADDiu), VR).addReg(ZERO).addImm(MaxAlign);
       BuildMI(MBB, MBBI, dl, TII.get(AND), SP).addReg(SP).addReg(VR);
 
       if (hasBP(MF)) {
@@ -776,7 +776,7 @@ void MipsSEFrameLowering::emitInterruptEpilogueStub(
 
 int MipsSEFrameLowering::getFrameIndexReference(const MachineFunction &MF,
                                                 int FI,
-                                                unsigned &FrameReg) const {
+                                                Register &FrameReg) const {
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   MipsABIInfo ABI = STI.getABI();
 
@@ -789,11 +789,9 @@ int MipsSEFrameLowering::getFrameIndexReference(const MachineFunction &MF,
          getOffsetOfLocalArea() + MFI.getOffsetAdjustment();
 }
 
-bool MipsSEFrameLowering::
-spillCalleeSavedRegisters(MachineBasicBlock &MBB,
-                          MachineBasicBlock::iterator MI,
-                          const std::vector<CalleeSavedInfo> &CSI,
-                          const TargetRegisterInfo *TRI) const {
+bool MipsSEFrameLowering::spillCalleeSavedRegisters(
+    MachineBasicBlock &MBB, MachineBasicBlock::iterator MI,
+    ArrayRef<CalleeSavedInfo> CSI, const TargetRegisterInfo *TRI) const {
   MachineFunction *MF = MBB.getParent();
   const TargetInstrInfo &TII = *STI.getInstrInfo();
 
@@ -865,12 +863,15 @@ void MipsSEFrameLowering::determineCalleeSaves(MachineFunction &MF,
   const TargetRegisterInfo *TRI = MF.getSubtarget().getRegisterInfo();
   MipsFunctionInfo *MipsFI = MF.getInfo<MipsFunctionInfo>();
   MipsABIInfo ABI = STI.getABI();
+  unsigned RA = ABI.IsN64() ? Mips::RA_64 : Mips::RA;
   unsigned FP = ABI.GetFramePtr();
   unsigned BP = ABI.IsN64() ? Mips::S7_64 : Mips::S7;
 
-  // Mark $fp as used if function has dedicated frame pointer.
-  if (hasFP(MF))
+  // Mark $ra and $fp as used if function has dedicated frame pointer.
+  if (hasFP(MF)) {
+    setAliasRegs(MF, SavedRegs, RA);
     setAliasRegs(MF, SavedRegs, FP);
+  }
   // Mark $s7 as used if function has dedicated base pointer.
   if (hasBP(MF))
     setAliasRegs(MF, SavedRegs, BP);

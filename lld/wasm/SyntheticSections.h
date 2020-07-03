@@ -141,17 +141,6 @@ public:
 protected:
 };
 
-class MemorySection : public SyntheticSection {
-public:
-  MemorySection() : SyntheticSection(llvm::wasm::WASM_SEC_MEMORY) {}
-
-  bool isNeeded() const override { return !config->importMemory; }
-  void writeBody() override;
-
-  uint32_t numMemoryPages = 0;
-  uint32_t maxMemoryPages = 0;
-};
-
 class TableSection : public SyntheticSection {
 public:
   TableSection() : SyntheticSection(llvm::wasm::WASM_SEC_TABLE) {}
@@ -171,21 +160,15 @@ public:
   void writeBody() override;
 };
 
-class GlobalSection : public SyntheticSection {
+class MemorySection : public SyntheticSection {
 public:
-  GlobalSection() : SyntheticSection(llvm::wasm::WASM_SEC_GLOBAL) {}
-  uint32_t numGlobals() const {
-    return inputGlobals.size() + definedFakeGlobals.size() + gotSymbols.size();
-  }
-  bool isNeeded() const override { return numGlobals() > 0; }
-  void assignIndexes() override;
-  void writeBody() override;
-  void addGlobal(InputGlobal *global);
-  void addDummyGOTEntry(Symbol *sym);
+  MemorySection() : SyntheticSection(llvm::wasm::WASM_SEC_MEMORY) {}
 
-  std::vector<const DefinedData *> definedFakeGlobals;
-  std::vector<InputGlobal *> inputGlobals;
-  std::vector<Symbol *> gotSymbols;
+  bool isNeeded() const override { return !config->importMemory; }
+  void writeBody() override;
+
+  uint32_t numMemoryPages = 0;
+  uint32_t maxMemoryPages = 0;
 };
 
 // The event section contains a list of declared wasm events associated with the
@@ -208,6 +191,29 @@ public:
   std::vector<InputEvent *> inputEvents;
 };
 
+class GlobalSection : public SyntheticSection {
+public:
+  GlobalSection() : SyntheticSection(llvm::wasm::WASM_SEC_GLOBAL) {}
+  uint32_t numGlobals() const {
+    assert(isSealed);
+    return inputGlobals.size() + dataAddressGlobals.size() +
+           staticGotSymbols.size();
+  }
+  bool isNeeded() const override { return numGlobals() > 0; }
+  void assignIndexes() override;
+  void writeBody() override;
+  void addGlobal(InputGlobal *global);
+  void addDataAddressGlobal(DefinedData *global);
+  void addStaticGOTEntry(Symbol *sym);
+
+  std::vector<const DefinedData *> dataAddressGlobals;
+
+protected:
+  bool isSealed = false;
+  std::vector<InputGlobal *> inputGlobals;
+  std::vector<Symbol *> staticGotSymbols;
+};
+
 class ExportSection : public SyntheticSection {
 public:
   ExportSection() : SyntheticSection(llvm::wasm::WASM_SEC_EXPORT) {}
@@ -219,14 +225,14 @@ public:
 
 class StartSection : public SyntheticSection {
 public:
-  StartSection(uint32_t numSegments)
-      : SyntheticSection(llvm::wasm::WASM_SEC_START), numSegments(numSegments) {
-  }
+  StartSection(bool hasInitializedSegments)
+      : SyntheticSection(llvm::wasm::WASM_SEC_START),
+        hasInitializedSegments(hasInitializedSegments) {}
   bool isNeeded() const override;
   void writeBody() override;
 
 protected:
-  uint32_t numSegments;
+  bool hasInitializedSegments;
 };
 
 class ElemSection : public SyntheticSection {
@@ -244,9 +250,7 @@ protected:
 
 class DataCountSection : public SyntheticSection {
 public:
-  DataCountSection(uint32_t numSegments)
-      : SyntheticSection(llvm::wasm::WASM_SEC_DATACOUNT),
-        numSegments(numSegments) {}
+  DataCountSection(ArrayRef<OutputSegment *> segments);
   bool isNeeded() const override;
   void writeBody() override;
 
@@ -320,7 +324,8 @@ public:
 class RelocSection : public SyntheticSection {
 public:
   RelocSection(StringRef name, OutputSection *sec)
-      : SyntheticSection(llvm::wasm::WASM_SEC_CUSTOM, name), sec(sec) {}
+      : SyntheticSection(llvm::wasm::WASM_SEC_CUSTOM, std::string(name)),
+        sec(sec) {}
   void writeBody() override;
   bool isNeeded() const override { return sec->getNumRelocations() > 0; };
 

@@ -1,4 +1,4 @@
-//===-- CommandObjectMemory.cpp ---------------------------------*- C++ -*-===//
+//===-- CommandObjectMemory.cpp -------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -7,15 +7,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "CommandObjectMemory.h"
-#include "lldb/Core/Debugger.h"
 #include "lldb/Core/DumpDataExtractor.h"
-#include "lldb/Core/Module.h"
 #include "lldb/Core/Section.h"
 #include "lldb/Core/ValueObjectMemory.h"
-#include "lldb/DataFormatters/ValueObjectPrinter.h"
 #include "lldb/Expression/ExpressionVariable.h"
 #include "lldb/Host/OptionParser.h"
-#include "lldb/Interpreter/CommandInterpreter.h"
 #include "lldb/Interpreter/CommandReturnObject.h"
 #include "lldb/Interpreter/OptionArgParser.h"
 #include "lldb/Interpreter/OptionGroupFormat.h"
@@ -38,7 +34,6 @@
 #include "lldb/Utility/DataBufferLLVM.h"
 #include "lldb/Utility/StreamString.h"
 
-#include "lldb/lldb-private.h"
 
 #include <cinttypes>
 #include <memory>
@@ -765,26 +760,27 @@ protected:
     m_prev_varobj_options = m_varobj_options;
     m_prev_compiler_type = compiler_type;
 
-    StreamFile outfile_stream;
-    Stream *output_stream = nullptr;
+    std::unique_ptr<Stream> output_stream_storage;
+    Stream *output_stream_p = nullptr;
     const FileSpec &outfile_spec =
         m_outfile_options.GetFile().GetCurrentValue();
 
     std::string path = outfile_spec.GetPath();
     if (outfile_spec) {
 
-      uint32_t open_options =
-          File::eOpenOptionWrite | File::eOpenOptionCanCreate;
+      auto open_options = File::eOpenOptionWrite | File::eOpenOptionCanCreate;
       const bool append = m_outfile_options.GetAppend().GetCurrentValue();
       if (append)
         open_options |= File::eOpenOptionAppend;
 
-      Status error = FileSystem::Instance().Open(outfile_stream.GetFile(),
-                                                 outfile_spec, open_options);
-      if (error.Success()) {
+      auto outfile = FileSystem::Instance().Open(outfile_spec, open_options);
+
+      if (outfile) {
+        auto outfile_stream_up =
+            std::make_unique<StreamFile>(std::move(outfile.get()));
         if (m_memory_options.m_output_as_binary) {
           const size_t bytes_written =
-              outfile_stream.Write(data_sp->GetBytes(), bytes_read);
+              outfile_stream_up->Write(data_sp->GetBytes(), bytes_read);
           if (bytes_written > 0) {
             result.GetOutputStream().Printf(
                 "%zi bytes %s to '%s'\n", bytes_written,
@@ -800,16 +796,19 @@ protected:
         } else {
           // We are going to write ASCII to the file just point the
           // output_stream to our outfile_stream...
-          output_stream = &outfile_stream;
+          output_stream_storage = std::move(outfile_stream_up);
+          output_stream_p = output_stream_storage.get();
         }
       } else {
-        result.AppendErrorWithFormat("Failed to open file '%s' for %s.\n",
+        result.AppendErrorWithFormat("Failed to open file '%s' for %s:\n",
                                      path.c_str(), append ? "append" : "write");
+
+        result.AppendError(llvm::toString(outfile.takeError()));
         result.SetStatus(eReturnStatusFailed);
         return false;
       }
     } else {
-      output_stream = &result.GetOutputStream();
+      output_stream_p = &result.GetOutputStream();
     }
 
     ExecutionContextScope *exe_scope = m_exe_ctx.GetBestExecutionContextScope();
@@ -829,7 +828,7 @@ protected:
           DumpValueObjectOptions options(m_varobj_options.GetAsDumpOptions(
               eLanguageRuntimeDescriptionDisplayVerbosityFull, format));
 
-          valobj_sp->Dump(*output_stream, options);
+          valobj_sp->Dump(*output_stream_p, options);
         } else {
           result.AppendErrorWithFormat(
               "failed to create a value object for: (%s) %s\n",
@@ -869,13 +868,13 @@ protected:
       }
     }
 
-    assert(output_stream);
+    assert(output_stream_p);
     size_t bytes_dumped = DumpDataExtractor(
-        data, output_stream, 0, format, item_byte_size, item_count,
+        data, output_stream_p, 0, format, item_byte_size, item_count,
         num_per_line / target->GetArchitecture().GetDataByteSize(), addr, 0, 0,
         exe_scope);
     m_next_addr = addr + bytes_dumped;
-    output_stream->EOL();
+    output_stream_p->EOL();
     return true;
   }
 
@@ -1436,8 +1435,7 @@ protected:
       case eFormatBytes:
       case eFormatHex:
       case eFormatHexUppercase:
-      case eFormatPointer:
-      {
+      case eFormatPointer: {
         // Decode hex bytes
         // Be careful, getAsInteger with a radix of 16 rejects "0xab" so we
         // have to special case that:
@@ -1593,13 +1591,14 @@ protected:
 class CommandObjectMemoryHistory : public CommandObjectParsed {
 public:
   CommandObjectMemoryHistory(CommandInterpreter &interpreter)
-      : CommandObjectParsed(
-            interpreter, "memory history", "Print recorded stack traces for "
-                                           "allocation/deallocation events "
-                                           "associated with an address.",
-            nullptr,
-            eCommandRequiresTarget | eCommandRequiresProcess |
-                eCommandProcessMustBePaused | eCommandProcessMustBeLaunched) {
+      : CommandObjectParsed(interpreter, "memory history",
+                            "Print recorded stack traces for "
+                            "allocation/deallocation events "
+                            "associated with an address.",
+                            nullptr,
+                            eCommandRequiresTarget | eCommandRequiresProcess |
+                                eCommandProcessMustBePaused |
+                                eCommandProcessMustBeLaunched) {
     CommandArgumentEntry arg1;
     CommandArgumentData addr_arg;
 
@@ -1726,15 +1725,12 @@ protected:
               section_name = section_sp->GetName();
             }
           }
-          result.AppendMessageWithFormat(
-              "[0x%16.16" PRIx64 "-0x%16.16" PRIx64 ") %c%c%c%s%s%s%s\n",
+          result.AppendMessageWithFormatv(
+              "[{0:x16}-{1:x16}) {2:r}{3:w}{4:x}{5}{6}{7}{8}\n",
               range_info.GetRange().GetRangeBase(),
-              range_info.GetRange().GetRangeEnd(),
-              range_info.GetReadable() ? 'r' : '-',
-              range_info.GetWritable() ? 'w' : '-',
-              range_info.GetExecutable() ? 'x' : '-',
-              name ? " " : "", name.AsCString(""),
-              section_name ? " " : "", section_name.AsCString(""));
+              range_info.GetRange().GetRangeEnd(), range_info.GetReadable(),
+              range_info.GetWritable(), range_info.GetExecutable(),
+              name ? " " : "", name, section_name ? " " : "", section_name);
           m_prev_end_addr = range_info.GetRange().GetRangeEnd();
           result.SetStatus(eReturnStatusSuccessFinishResult);
         } else {

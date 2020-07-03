@@ -4,23 +4,29 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 add_subdirectory( sycl-xocc )
 
+add_subdirectory(sycl-ls)
+
+# TODO: move each tool in its own sub-directory
 add_executable(get_device_count_by_type get_device_count_by_type.cpp)
-add_dependencies(get_device_count_by_type ocl-headers ocl-icd)
+add_dependencies(get_device_count_by_type ocl-headers ocl-icd l0-loader)
+
+if(MSVC)
+  set(L0_LIBRARY
+    "${LLVM_LIBRARY_OUTPUT_INTDIR}/${CMAKE_STATIC_LIBRARY_PREFIX}ze_loader${CMAKE_STATIC_LIBRARY_SUFFIX}")
+else()
+  set(L0_LIBRARY
+    "${LLVM_LIBRARY_OUTPUT_INTDIR}/${CMAKE_SHARED_LIBRARY_PREFIX}ze_loader${CMAKE_SHARED_LIBRARY_SUFFIX}")
+endif()
+
 target_link_libraries(get_device_count_by_type
-    PRIVATE OpenCL::Headers
-    PRIVATE ${OpenCL_LIBRARIES}
+  PRIVATE
+    OpenCL::Headers
+    L0Loader::Headers
+    ${OpenCL_LIBRARIES}
+    ${L0_LIBRARY}
+    $<$<BOOL:${SYCL_BUILD_PI_CUDA}>:cudadrv>
 )
-
-add_executable(sycl-check sycl-check.cpp)
-add_dependencies(sycl-check sycl)
-target_include_directories(sycl-check PRIVATE "${sycl_inc_dir}")
-target_link_libraries(sycl-check
-    PRIVATE sycl
-    PRIVATE OpenCL::Headers
-    PRIVATE ${OpenCL_LIBRARIES})
-
-#Minimum supported version of Intel's OCL GPU and CPU devices
-target_compile_definitions(sycl-check
-     PRIVATE  MIN_INTEL_OCL_GPU_VERSION=\"18.47.11882\"
-     PRIVATE  MIN_INTEL_OCL_CPU_VERSION=\"18.1.0.0901\",\"7.6.0.1202\"
+target_compile_definitions(get_device_count_by_type
+  PRIVATE
+    $<$<BOOL:${SYCL_BUILD_PI_CUDA}>:USE_PI_CUDA>
 )

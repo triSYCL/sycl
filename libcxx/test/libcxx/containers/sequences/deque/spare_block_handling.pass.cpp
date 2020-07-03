@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03
+// UNSUPPORTED: c++03
 
 // <deque>
 
@@ -280,5 +280,3 @@ TEST_CASE(pop_front_push_back) {
 }
 
 TEST_SUITE_END()
-
-

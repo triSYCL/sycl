@@ -9,6 +9,7 @@
 #define LLVM_MC_MCSYMBOLXCOFF_H
 
 #include "llvm/ADT/Optional.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/XCOFF.h"
 #include "llvm/MC/MCSymbol.h"
 
@@ -35,22 +36,31 @@ public:
     return StorageClass.getValue();
   }
 
-  void setContainingCsect(const MCSectionXCOFF *C) {
-    assert((!ContainingCsect || ContainingCsect == C) &&
-           "Trying to set a containing csect that doesn't match the one that"
-           "this symbol is already mapped to.");
-    ContainingCsect = C;
+  StringRef getUnqualifiedName() const {
+    const StringRef name = getName();
+    if (name.back() == ']') {
+      StringRef lhs, rhs;
+      std::tie(lhs, rhs) = name.rsplit('[');
+      assert(!rhs.empty() && "Invalid SMC format in XCOFF symbol.");
+      return lhs;
+    }
+    return name;
   }
 
-  const MCSectionXCOFF *getContainingCsect() const {
-    assert(ContainingCsect &&
-           "Trying to get containing csect but none was set.");
-    return ContainingCsect;
-  }
+  bool hasRepresentedCsectSet() const { return RepresentedCsect != nullptr; }
+
+  MCSectionXCOFF *getRepresentedCsect() const;
+
+  void setRepresentedCsect(MCSectionXCOFF *C);
+
+  void setVisibilityType(XCOFF::VisibilityType SVT) { VisibilityType = SVT; };
+
+  XCOFF::VisibilityType getVisibilityType() const { return VisibilityType; }
 
 private:
   Optional<XCOFF::StorageClass> StorageClass;
-  const MCSectionXCOFF *ContainingCsect = nullptr;
+  MCSectionXCOFF *RepresentedCsect = nullptr;
+  XCOFF::VisibilityType VisibilityType = XCOFF::SYM_V_UNSPECIFIED;
 };
 
 } // end namespace llvm

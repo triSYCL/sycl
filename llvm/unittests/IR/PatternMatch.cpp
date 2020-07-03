@@ -182,6 +182,29 @@ TEST_F(PatternMatchTest, SpecificIntUGT) {
           .match(NegOne));
 }
 
+TEST_F(PatternMatchTest, SignbitZeroChecks) {
+  Type *IntTy = IRB.getInt32Ty();
+
+  Value *Zero = ConstantInt::get(IntTy, 0);
+  Value *One = ConstantInt::get(IntTy, 1);
+  Value *NegOne = ConstantInt::get(IntTy, -1);
+
+  EXPECT_TRUE(m_Negative().match(NegOne));
+  EXPECT_FALSE(m_NonNegative().match(NegOne));
+  EXPECT_FALSE(m_StrictlyPositive().match(NegOne));
+  EXPECT_TRUE(m_NonPositive().match(NegOne));
+
+  EXPECT_FALSE(m_Negative().match(Zero));
+  EXPECT_TRUE(m_NonNegative().match(Zero));
+  EXPECT_FALSE(m_StrictlyPositive().match(Zero));
+  EXPECT_TRUE(m_NonPositive().match(Zero));
+
+  EXPECT_FALSE(m_Negative().match(One));
+  EXPECT_TRUE(m_NonNegative().match(One));
+  EXPECT_TRUE(m_StrictlyPositive().match(One));
+  EXPECT_FALSE(m_NonPositive().match(One));
+}
+
 TEST_F(PatternMatchTest, SpecificIntUGE) {
   Type *IntTy = IRB.getInt32Ty();
   unsigned BitWidth = IntTy->getScalarSizeInBits();
@@ -469,6 +492,42 @@ TEST_F(PatternMatchTest, Unless) {
 
   EXPECT_FALSE(m_Unless(m_c_Add(m_One(), m_Zero())).match(X));
   EXPECT_FALSE(m_Unless(m_c_Add(m_Zero(), m_One())).match(X));
+}
+
+TEST_F(PatternMatchTest, ZExtSExtSelf) {
+  LLVMContext &Ctx = IRB.getContext();
+
+  Value *One32 = IRB.getInt32(1);
+  Value *One64Z = IRB.CreateZExt(One32, IntegerType::getInt64Ty(Ctx));
+  Value *One64S = IRB.CreateSExt(One32, IntegerType::getInt64Ty(Ctx));
+
+  EXPECT_TRUE(m_One().match(One32));
+  EXPECT_FALSE(m_One().match(One64Z));
+  EXPECT_FALSE(m_One().match(One64S));
+
+  EXPECT_FALSE(m_ZExt(m_One()).match(One32));
+  EXPECT_TRUE(m_ZExt(m_One()).match(One64Z));
+  EXPECT_FALSE(m_ZExt(m_One()).match(One64S));
+
+  EXPECT_FALSE(m_SExt(m_One()).match(One32));
+  EXPECT_FALSE(m_SExt(m_One()).match(One64Z));
+  EXPECT_TRUE(m_SExt(m_One()).match(One64S));
+
+  EXPECT_TRUE(m_ZExtOrSelf(m_One()).match(One32));
+  EXPECT_TRUE(m_ZExtOrSelf(m_One()).match(One64Z));
+  EXPECT_FALSE(m_ZExtOrSelf(m_One()).match(One64S));
+
+  EXPECT_TRUE(m_SExtOrSelf(m_One()).match(One32));
+  EXPECT_FALSE(m_SExtOrSelf(m_One()).match(One64Z));
+  EXPECT_TRUE(m_SExtOrSelf(m_One()).match(One64S));
+
+  EXPECT_FALSE(m_ZExtOrSExt(m_One()).match(One32));
+  EXPECT_TRUE(m_ZExtOrSExt(m_One()).match(One64Z));
+  EXPECT_TRUE(m_ZExtOrSExt(m_One()).match(One64S));
+
+  EXPECT_TRUE(m_ZExtOrSExtOrSelf(m_One()).match(One32));
+  EXPECT_TRUE(m_ZExtOrSExtOrSelf(m_One()).match(One64Z));
+  EXPECT_TRUE(m_ZExtOrSExtOrSelf(m_One()).match(One64S));
 }
 
 TEST_F(PatternMatchTest, Power2) {
@@ -869,9 +928,9 @@ TEST_F(PatternMatchTest, VectorOps) {
   //
   //   SP1 = VectorSplat(2, i8 2)
   //   SP2 = VectorSplat(2, i8 %Val)
-  Type *VecTy = VectorType::get(IRB.getInt8Ty(), 2);
+  Type *VecTy = FixedVectorType::get(IRB.getInt8Ty(), 2);
   Type *i32 = IRB.getInt32Ty();
-  Type *i32VecTy = VectorType::get(i32, 2);
+  Type *i32VecTy = FixedVectorType::get(i32, 2);
 
   Value *Val = IRB.CreateAdd(IRB.getInt8(0), IRB.getInt8(1));
   Value *Val2 = IRB.CreateAdd(Val, IRB.getInt8(3));
@@ -903,66 +962,66 @@ TEST_F(PatternMatchTest, VectorOps) {
   Value *A = nullptr, *B = nullptr, *C = nullptr;
 
   // Test matching insertelement
-  EXPECT_TRUE(match(VI1, m_InsertElement(m_Value(), m_Value(), m_Value())));
+  EXPECT_TRUE(match(VI1, m_InsertElt(m_Value(), m_Value(), m_Value())));
   EXPECT_TRUE(
-      match(VI1, m_InsertElement(m_Undef(), m_ConstantInt(), m_ConstantInt())));
+      match(VI1, m_InsertElt(m_Undef(), m_ConstantInt(), m_ConstantInt())));
   EXPECT_TRUE(
-      match(VI1, m_InsertElement(m_Undef(), m_ConstantInt(), m_Zero())));
+      match(VI1, m_InsertElt(m_Undef(), m_ConstantInt(), m_Zero())));
   EXPECT_TRUE(
-      match(VI1, m_InsertElement(m_Undef(), m_SpecificInt(1), m_Zero())));
-  EXPECT_TRUE(match(VI2, m_InsertElement(m_Value(), m_Value(), m_Value())));
+      match(VI1, m_InsertElt(m_Undef(), m_SpecificInt(1), m_Zero())));
+  EXPECT_TRUE(match(VI2, m_InsertElt(m_Value(), m_Value(), m_Value())));
   EXPECT_FALSE(
-      match(VI2, m_InsertElement(m_Value(), m_Value(), m_ConstantInt())));
+      match(VI2, m_InsertElt(m_Value(), m_Value(), m_ConstantInt())));
   EXPECT_FALSE(
-      match(VI2, m_InsertElement(m_Value(), m_ConstantInt(), m_Value())));
-  EXPECT_FALSE(match(VI2, m_InsertElement(m_Constant(), m_Value(), m_Value())));
-  EXPECT_TRUE(match(VI3, m_InsertElement(m_Value(A), m_Value(B), m_Value(C))));
+      match(VI2, m_InsertElt(m_Value(), m_ConstantInt(), m_Value())));
+  EXPECT_FALSE(match(VI2, m_InsertElt(m_Constant(), m_Value(), m_Value())));
+  EXPECT_TRUE(match(VI3, m_InsertElt(m_Value(A), m_Value(B), m_Value(C))));
   EXPECT_TRUE(A == VI1);
   EXPECT_TRUE(B == Val2);
   EXPECT_TRUE(isa<ConstantInt>(C));
   A = B = C = nullptr; // reset
 
   // Test matching extractelement
-  EXPECT_TRUE(match(EX1, m_ExtractElement(m_Value(A), m_Value(B))));
+  EXPECT_TRUE(match(EX1, m_ExtractElt(m_Value(A), m_Value(B))));
   EXPECT_TRUE(A == VI4);
   EXPECT_TRUE(B == Val);
   A = B = C = nullptr; // reset
-  EXPECT_FALSE(match(EX1, m_ExtractElement(m_Value(), m_ConstantInt())));
-  EXPECT_TRUE(match(EX2, m_ExtractElement(m_Value(), m_ConstantInt())));
-  EXPECT_TRUE(match(EX3, m_ExtractElement(m_Constant(), m_ConstantInt())));
+  EXPECT_FALSE(match(EX1, m_ExtractElt(m_Value(), m_ConstantInt())));
+  EXPECT_TRUE(match(EX2, m_ExtractElt(m_Value(), m_ConstantInt())));
+  EXPECT_TRUE(match(EX3, m_ExtractElt(m_Constant(), m_ConstantInt())));
 
   // Test matching shufflevector
-  EXPECT_TRUE(match(SI1, m_ShuffleVector(m_Value(), m_Undef(), m_Zero())));
-  EXPECT_TRUE(match(SI2, m_ShuffleVector(m_Value(A), m_Value(B), m_Value(C))));
+  ArrayRef<int> Mask;
+  EXPECT_TRUE(match(SI1, m_Shuffle(m_Value(), m_Undef(), m_ZeroMask())));
+  EXPECT_TRUE(match(SI2, m_Shuffle(m_Value(A), m_Value(B), m_Mask(Mask))));
   EXPECT_TRUE(A == VI3);
   EXPECT_TRUE(B == VI4);
-  EXPECT_TRUE(C == IdxVec);
   A = B = C = nullptr; // reset
 
   // Test matching the vector splat pattern
   EXPECT_TRUE(match(
       SI1,
-      m_ShuffleVector(m_InsertElement(m_Undef(), m_SpecificInt(1), m_Zero()),
-                      m_Undef(), m_Zero())));
+      m_Shuffle(m_InsertElt(m_Undef(), m_SpecificInt(1), m_Zero()),
+                m_Undef(), m_ZeroMask())));
   EXPECT_FALSE(match(
-      SI3, m_ShuffleVector(m_InsertElement(m_Undef(), m_Value(), m_Zero()),
-                           m_Undef(), m_Zero())));
+      SI3, m_Shuffle(m_InsertElt(m_Undef(), m_Value(), m_Zero()),
+                     m_Undef(), m_ZeroMask())));
   EXPECT_FALSE(match(
-      SI4, m_ShuffleVector(m_InsertElement(m_Undef(), m_Value(), m_Zero()),
-                           m_Undef(), m_Zero())));
+      SI4, m_Shuffle(m_InsertElt(m_Undef(), m_Value(), m_Zero()),
+                     m_Undef(), m_ZeroMask())));
   EXPECT_TRUE(match(
       SP1,
-      m_ShuffleVector(m_InsertElement(m_Undef(), m_SpecificInt(2), m_Zero()),
-                      m_Undef(), m_Zero())));
+      m_Shuffle(m_InsertElt(m_Undef(), m_SpecificInt(2), m_Zero()),
+                m_Undef(), m_ZeroMask())));
   EXPECT_TRUE(match(
-      SP2, m_ShuffleVector(m_InsertElement(m_Undef(), m_Value(A), m_Zero()),
-                           m_Undef(), m_Zero())));
+      SP2, m_Shuffle(m_InsertElt(m_Undef(), m_Value(A), m_Zero()),
+                     m_Undef(), m_ZeroMask())));
   EXPECT_TRUE(A == Val);
 }
 
 TEST_F(PatternMatchTest, VectorUndefInt) {
   Type *ScalarTy = IRB.getInt8Ty();
-  Type *VectorTy = VectorType::get(ScalarTy, 4);
+  Type *VectorTy = FixedVectorType::get(ScalarTy, 4);
   Constant *ScalarUndef = UndefValue::get(ScalarTy);
   Constant *VectorUndef = UndefValue::get(VectorTy);
   Constant *ScalarZero = Constant::getNullValue(ScalarTy);
@@ -986,15 +1045,54 @@ TEST_F(PatternMatchTest, VectorUndefInt) {
   EXPECT_TRUE(match(ScalarZero, m_Zero()));
   EXPECT_TRUE(match(VectorZero, m_Zero()));
   EXPECT_TRUE(match(VectorZeroUndef, m_Zero()));
+
+  const APInt *C;
+  // Regardless of whether undefs are allowed,
+  // a fully undef constant does not match.
+  EXPECT_FALSE(match(ScalarUndef, m_APInt(C)));
+  EXPECT_FALSE(match(ScalarUndef, m_APIntForbidUndef(C)));
+  EXPECT_FALSE(match(ScalarUndef, m_APIntAllowUndef(C)));
+  EXPECT_FALSE(match(VectorUndef, m_APInt(C)));
+  EXPECT_FALSE(match(VectorUndef, m_APIntForbidUndef(C)));
+  EXPECT_FALSE(match(VectorUndef, m_APIntAllowUndef(C)));
+
+  // We can always match simple constants and simple splats.
+  C = nullptr;
+  EXPECT_TRUE(match(ScalarZero, m_APInt(C)));
+  EXPECT_TRUE(C->isNullValue());
+  C = nullptr;
+  EXPECT_TRUE(match(ScalarZero, m_APIntForbidUndef(C)));
+  EXPECT_TRUE(C->isNullValue());
+  C = nullptr;
+  EXPECT_TRUE(match(ScalarZero, m_APIntAllowUndef(C)));
+  EXPECT_TRUE(C->isNullValue());
+  C = nullptr;
+  EXPECT_TRUE(match(VectorZero, m_APInt(C)));
+  EXPECT_TRUE(C->isNullValue());
+  C = nullptr;
+  EXPECT_TRUE(match(VectorZero, m_APIntForbidUndef(C)));
+  EXPECT_TRUE(C->isNullValue());
+  C = nullptr;
+  EXPECT_TRUE(match(VectorZero, m_APIntAllowUndef(C)));
+  EXPECT_TRUE(C->isNullValue());
+
+  // Whether splats with undef can be matched depends on the matcher.
+  EXPECT_FALSE(match(VectorZeroUndef, m_APInt(C)));
+  EXPECT_FALSE(match(VectorZeroUndef, m_APIntForbidUndef(C)));
+  C = nullptr;
+  EXPECT_TRUE(match(VectorZeroUndef, m_APIntAllowUndef(C)));
+  EXPECT_TRUE(C->isNullValue());
 }
 
 TEST_F(PatternMatchTest, VectorUndefFloat) {
   Type *ScalarTy = IRB.getFloatTy();
-  Type *VectorTy = VectorType::get(ScalarTy, 4);
+  Type *VectorTy = FixedVectorType::get(ScalarTy, 4);
   Constant *ScalarUndef = UndefValue::get(ScalarTy);
   Constant *VectorUndef = UndefValue::get(VectorTy);
   Constant *ScalarZero = Constant::getNullValue(ScalarTy);
   Constant *VectorZero = Constant::getNullValue(VectorTy);
+  Constant *ScalarPosInf = ConstantFP::getInfinity(ScalarTy, false);
+  Constant *ScalarNegInf = ConstantFP::getInfinity(ScalarTy, true);
 
   SmallVector<Constant *, 4> Elems;
   Elems.push_back(ScalarUndef);
@@ -1002,6 +1100,13 @@ TEST_F(PatternMatchTest, VectorUndefFloat) {
   Elems.push_back(ScalarUndef);
   Elems.push_back(ScalarZero);
   Constant *VectorZeroUndef = ConstantVector::get(Elems);
+
+  SmallVector<Constant *, 4> InfElems;
+  InfElems.push_back(ScalarPosInf);
+  InfElems.push_back(ScalarNegInf);
+  InfElems.push_back(ScalarUndef);
+  InfElems.push_back(ScalarPosInf);
+  Constant *VectorInfUndef = ConstantVector::get(InfElems);
 
   EXPECT_TRUE(match(ScalarUndef, m_Undef()));
   EXPECT_TRUE(match(VectorUndef, m_Undef()));
@@ -1014,6 +1119,50 @@ TEST_F(PatternMatchTest, VectorUndefFloat) {
   EXPECT_TRUE(match(ScalarZero, m_AnyZeroFP()));
   EXPECT_TRUE(match(VectorZero, m_AnyZeroFP()));
   EXPECT_TRUE(match(VectorZeroUndef, m_AnyZeroFP()));
+
+  EXPECT_FALSE(match(ScalarUndef, m_Inf()));
+  EXPECT_FALSE(match(VectorUndef, m_Inf()));
+  EXPECT_FALSE(match(VectorZeroUndef, m_Inf()));
+  EXPECT_TRUE(match(ScalarPosInf, m_Inf()));
+  EXPECT_TRUE(match(ScalarNegInf, m_Inf()));
+  EXPECT_TRUE(match(VectorInfUndef, m_Inf()));
+
+  const APFloat *C;
+  // Regardless of whether undefs are allowed,
+  // a fully undef constant does not match.
+  EXPECT_FALSE(match(ScalarUndef, m_APFloat(C)));
+  EXPECT_FALSE(match(ScalarUndef, m_APFloatForbidUndef(C)));
+  EXPECT_FALSE(match(ScalarUndef, m_APFloatAllowUndef(C)));
+  EXPECT_FALSE(match(VectorUndef, m_APFloat(C)));
+  EXPECT_FALSE(match(VectorUndef, m_APFloatForbidUndef(C)));
+  EXPECT_FALSE(match(VectorUndef, m_APFloatAllowUndef(C)));
+
+  // We can always match simple constants and simple splats.
+  C = nullptr;
+  EXPECT_TRUE(match(ScalarZero, m_APFloat(C)));
+  EXPECT_TRUE(C->isZero());
+  C = nullptr;
+  EXPECT_TRUE(match(ScalarZero, m_APFloatForbidUndef(C)));
+  EXPECT_TRUE(C->isZero());
+  C = nullptr;
+  EXPECT_TRUE(match(ScalarZero, m_APFloatAllowUndef(C)));
+  EXPECT_TRUE(C->isZero());
+  C = nullptr;
+  EXPECT_TRUE(match(VectorZero, m_APFloat(C)));
+  EXPECT_TRUE(C->isZero());
+  C = nullptr;
+  EXPECT_TRUE(match(VectorZero, m_APFloatForbidUndef(C)));
+  EXPECT_TRUE(C->isZero());
+  C = nullptr;
+  EXPECT_TRUE(match(VectorZero, m_APFloatAllowUndef(C)));
+  EXPECT_TRUE(C->isZero());
+
+  // Whether splats with undef can be matched depends on the matcher.
+  EXPECT_FALSE(match(VectorZeroUndef, m_APFloat(C)));
+  EXPECT_FALSE(match(VectorZeroUndef, m_APFloatForbidUndef(C)));
+  C = nullptr;
+  EXPECT_TRUE(match(VectorZeroUndef, m_APFloatAllowUndef(C)));
+  EXPECT_TRUE(C->isZero());
 }
 
 TEST_F(PatternMatchTest, FloatingPointFNeg) {
@@ -1045,6 +1194,137 @@ TEST_F(PatternMatchTest, FloatingPointFNeg) {
   EXPECT_FALSE(match(V3, m_FNeg(m_Value(Match))));
 }
 
+TEST_F(PatternMatchTest, CondBranchTest) {
+  BasicBlock *TrueBB = BasicBlock::Create(Ctx, "TrueBB", F);
+  BasicBlock *FalseBB = BasicBlock::Create(Ctx, "FalseBB", F);
+  Value *Br1 = IRB.CreateCondBr(IRB.getTrue(), TrueBB, FalseBB);
+
+  EXPECT_TRUE(match(Br1, m_Br(m_Value(), m_BasicBlock(), m_BasicBlock())));
+
+  BasicBlock *A, *B;
+  EXPECT_TRUE(match(Br1, m_Br(m_Value(), m_BasicBlock(A), m_BasicBlock(B))));
+  EXPECT_EQ(TrueBB, A);
+  EXPECT_EQ(FalseBB, B);
+
+  EXPECT_FALSE(
+      match(Br1, m_Br(m_Value(), m_SpecificBB(FalseBB), m_BasicBlock())));
+  EXPECT_FALSE(
+      match(Br1, m_Br(m_Value(), m_BasicBlock(), m_SpecificBB(TrueBB))));
+  EXPECT_FALSE(
+      match(Br1, m_Br(m_Value(), m_SpecificBB(FalseBB), m_BasicBlock(TrueBB))));
+  EXPECT_TRUE(
+      match(Br1, m_Br(m_Value(), m_SpecificBB(TrueBB), m_BasicBlock(FalseBB))));
+
+  // Check we can use m_Deferred with branches.
+  EXPECT_FALSE(match(Br1, m_Br(m_Value(), m_BasicBlock(A), m_Deferred(A))));
+  Value *Br2 = IRB.CreateCondBr(IRB.getTrue(), TrueBB, TrueBB);
+  A = nullptr;
+  EXPECT_TRUE(match(Br2, m_Br(m_Value(), m_BasicBlock(A), m_Deferred(A))));
+}
+
+TEST_F(PatternMatchTest, WithOverflowInst) {
+  Value *Add = IRB.CreateBinaryIntrinsic(Intrinsic::uadd_with_overflow,
+                                         IRB.getInt32(0), IRB.getInt32(0));
+  Value *Add0 = IRB.CreateExtractValue(Add, 0);
+  Value *Add1 = IRB.CreateExtractValue(Add, 1);
+
+  EXPECT_TRUE(match(Add0, m_ExtractValue<0>(m_Value())));
+  EXPECT_FALSE(match(Add0, m_ExtractValue<1>(m_Value())));
+  EXPECT_FALSE(match(Add1, m_ExtractValue<0>(m_Value())));
+  EXPECT_TRUE(match(Add1, m_ExtractValue<1>(m_Value())));
+  EXPECT_FALSE(match(Add, m_ExtractValue<1>(m_Value())));
+  EXPECT_FALSE(match(Add, m_ExtractValue<1>(m_Value())));
+
+  WithOverflowInst *WOI;
+  EXPECT_FALSE(match(Add0, m_WithOverflowInst(WOI)));
+  EXPECT_FALSE(match(Add1, m_WithOverflowInst(WOI)));
+  EXPECT_TRUE(match(Add, m_WithOverflowInst(WOI)));
+
+  EXPECT_TRUE(match(Add0, m_ExtractValue<0>(m_WithOverflowInst(WOI))));
+  EXPECT_EQ(Add, WOI);
+  EXPECT_TRUE(match(Add1, m_ExtractValue<1>(m_WithOverflowInst(WOI))));
+  EXPECT_EQ(Add, WOI);
+}
+
+TEST_F(PatternMatchTest, IntrinsicMatcher) {
+  Value *Name = IRB.CreateAlloca(IRB.getInt8Ty());
+  Value *Hash = IRB.getInt64(0);
+  Value *Num = IRB.getInt32(1);
+  Value *Index = IRB.getInt32(2);
+  Value *Step = IRB.getInt64(3);
+
+  Value *Ops[] = {Name, Hash, Num, Index, Step};
+  Module *M = BB->getParent()->getParent();
+  Function *TheFn =
+      Intrinsic::getDeclaration(M, Intrinsic::instrprof_increment_step);
+
+  Value *Intrinsic5 = CallInst::Create(TheFn, Ops, "", BB);
+
+  // Match without capturing.
+  EXPECT_TRUE(match(
+      Intrinsic5, m_Intrinsic<Intrinsic::instrprof_increment_step>(
+                      m_Value(), m_Value(), m_Value(), m_Value(), m_Value())));
+  EXPECT_FALSE(match(
+      Intrinsic5, m_Intrinsic<Intrinsic::memmove>(
+                      m_Value(), m_Value(), m_Value(), m_Value(), m_Value())));
+
+  // Match with capturing.
+  Value *Arg1 = nullptr;
+  Value *Arg2 = nullptr;
+  Value *Arg3 = nullptr;
+  Value *Arg4 = nullptr;
+  Value *Arg5 = nullptr;
+  EXPECT_TRUE(
+      match(Intrinsic5, m_Intrinsic<Intrinsic::instrprof_increment_step>(
+                            m_Value(Arg1), m_Value(Arg2), m_Value(Arg3),
+                            m_Value(Arg4), m_Value(Arg5))));
+  EXPECT_EQ(Arg1, Name);
+  EXPECT_EQ(Arg2, Hash);
+  EXPECT_EQ(Arg3, Num);
+  EXPECT_EQ(Arg4, Index);
+  EXPECT_EQ(Arg5, Step);
+
+  // Match specific second argument.
+  EXPECT_TRUE(
+      match(Intrinsic5,
+            m_Intrinsic<Intrinsic::instrprof_increment_step>(
+                m_Value(), m_SpecificInt(0), m_Value(), m_Value(), m_Value())));
+  EXPECT_FALSE(
+      match(Intrinsic5, m_Intrinsic<Intrinsic::instrprof_increment_step>(
+                            m_Value(), m_SpecificInt(10), m_Value(), m_Value(),
+                            m_Value())));
+
+  // Match specific third argument.
+  EXPECT_TRUE(
+      match(Intrinsic5,
+            m_Intrinsic<Intrinsic::instrprof_increment_step>(
+                m_Value(), m_Value(), m_SpecificInt(1), m_Value(), m_Value())));
+  EXPECT_FALSE(
+      match(Intrinsic5, m_Intrinsic<Intrinsic::instrprof_increment_step>(
+                            m_Value(), m_Value(), m_SpecificInt(10), m_Value(),
+                            m_Value())));
+
+  // Match specific fourth argument.
+  EXPECT_TRUE(
+      match(Intrinsic5,
+            m_Intrinsic<Intrinsic::instrprof_increment_step>(
+                m_Value(), m_Value(), m_Value(), m_SpecificInt(2), m_Value())));
+  EXPECT_FALSE(
+      match(Intrinsic5, m_Intrinsic<Intrinsic::instrprof_increment_step>(
+                            m_Value(), m_Value(), m_Value(), m_SpecificInt(10),
+                            m_Value())));
+
+  // Match specific fifth argument.
+  EXPECT_TRUE(
+      match(Intrinsic5,
+            m_Intrinsic<Intrinsic::instrprof_increment_step>(
+                m_Value(), m_Value(), m_Value(), m_Value(), m_SpecificInt(3))));
+  EXPECT_FALSE(
+      match(Intrinsic5, m_Intrinsic<Intrinsic::instrprof_increment_step>(
+                            m_Value(), m_Value(), m_Value(), m_Value(),
+                            m_SpecificInt(10))));
+}
+
 template <typename T> struct MutableConstTest : PatternMatchTest { };
 
 typedef ::testing::Types<std::tuple<Value*, Instruction*>,
@@ -1055,8 +1335,8 @@ TYPED_TEST_CASE(MutableConstTest, MutableConstTestTypes);
 TYPED_TEST(MutableConstTest, ICmp) {
   auto &IRB = PatternMatchTest::IRB;
 
-  typedef typename std::tuple_element<0, TypeParam>::type ValueType;
-  typedef typename std::tuple_element<1, TypeParam>::type InstructionType;
+  typedef std::tuple_element_t<0, TypeParam> ValueType;
+  typedef std::tuple_element_t<1, TypeParam> InstructionType;
 
   Value *L = IRB.getInt32(1);
   Value *R = IRB.getInt32(2);

@@ -1,7 +1,14 @@
+<<<<<<< HEAD
 // RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
+||||||| merged common ancestors
+// RUN: %clangxx -fsycl %s -o %t.out
+=======
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+>>>>>>> intel/sycl
 //
 // Profiling info is not supported on host device so far.
 //
+// RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
@@ -14,6 +21,7 @@
 //===----------------------------------------------------------------------===//
 
 #include <CL/sycl.hpp>
+#include <cassert>
 
 using namespace cl;
 
@@ -25,7 +33,15 @@ int main() {
     CGH.single_task<class EmptyKernel>([=]() {});
   });
 
-  Event.get_profiling_info<sycl::info::event_profiling::command_start>();
+  auto Submit =
+      Event.get_profiling_info<sycl::info::event_profiling::command_submit>();
+  auto Start =
+      Event.get_profiling_info<sycl::info::event_profiling::command_start>();
+  auto End =
+      Event.get_profiling_info<sycl::info::event_profiling::command_end>();
+
+  assert(Submit <= Start);
+  assert(Start <= End);
 
   bool Fail = sycl::info::event_command_status::complete !=
               Event.get_info<sycl::info::event::command_execution_status>();

@@ -184,6 +184,7 @@
 // RUN: %clang -march=pentium2 -m32 -E -dM %s -o - 2>&1 \
 // RUN:     -target i386-unknown-linux \
 // RUN:   | FileCheck -match-full-lines %s -check-prefix=CHECK_PENTIUM2_M32
+// CHECK_PENTIUM2_M32: #define __FXSR__ 1
 // CHECK_PENTIUM2_M32: #define __MMX__ 1
 // CHECK_PENTIUM2_M32: #define __i386 1
 // CHECK_PENTIUM2_M32: #define __i386__ 1
@@ -1801,15 +1802,16 @@
 // RUN:     -target i386-unknown-linux \
 // RUN:   | FileCheck %s -check-prefix=CHECK_TRM_M32
 // CHECK_TRM_M32: #define __AES__ 1
-// CHECK_TRM_M32: #define __CLDEMOTE__ 1
+// CHECK_TRM_M32-NOT: #define __CLDEMOTE__ 1
 // CHECK_TRM_M32: #define __CLFLUSHOPT__ 1
+// CHECK_TRM_M32: #define __CLWB__ 1
 // CHECK_TRM_M32: #define __FSGSBASE__ 1
 // CHECK_TRM_M32: #define __FXSR__ 1
 // CHECK_TRM_M32: #define __GFNI__ 1
 // CHECK_TRM_M32: #define __MMX__ 1
 // CHECK_TRM_M32: #define __MOVBE__ 1
-// CHECK_TRM_M32: #define __MOVDIR64B__ 1
-// CHECK_TRM_M32: #define __MOVDIRI__ 1
+// CHECK_TRM_M32-NOT: #define __MOVDIR64B__ 1
+// CHECK_TRM_M32-NOT: #define __MOVDIRI__ 1
 // CHECK_TRM_M32: #define __PCLMUL__ 1
 // CHECK_TRM_M32: #define __POPCNT__ 1
 // CHECK_TRM_M32: #define __PRFCHW__ 1
@@ -1826,7 +1828,7 @@
 // CHECK_TRM_M32: #define __SSE_MATH__ 1
 // CHECK_TRM_M32: #define __SSE__ 1
 // CHECK_TRM_M32: #define __SSSE3__ 1
-// CHECK_TRM_M32: #define __WAITPKG__ 1
+// CHECK_TRM_M32-NOT: #define __WAITPKG__ 1
 // CHECK_TRM_M32: #define __XSAVEC__ 1
 // CHECK_TRM_M32: #define __XSAVEOPT__ 1
 // CHECK_TRM_M32: #define __XSAVES__ 1
@@ -1842,15 +1844,16 @@
 // RUN:     -target i386-unknown-linux \
 // RUN:   | FileCheck %s -check-prefix=CHECK_TRM_M64
 // CHECK_TRM_M64: #define __AES__ 1
-// CHECK_TRM_M64: #define __CLDEMOTE__ 1
+// CHECK_TRM_M64-NOT: #define __CLDEMOTE__ 1
 // CHECK_TRM_M64: #define __CLFLUSHOPT__ 1
+// CHECK_TRM_M64: #define __CLWB__ 1
 // CHECK_TRM_M64: #define __FSGSBASE__ 1
 // CHECK_TRM_M64: #define __FXSR__ 1
 // CHECK_TRM_M64: #define __GFNI__ 1
 // CHECK_TRM_M64: #define __MMX__ 1
 // CHECK_TRM_M64: #define __MOVBE__ 1
-// CHECK_TRM_M64: #define __MOVDIR64B__ 1
-// CHECK_TRM_M64: #define __MOVDIRI__ 1
+// CHECK_TRM_M64-NOT: #define __MOVDIR64B__ 1
+// CHECK_TRM_M64-NOT: #define __MOVDIRI__ 1
 // CHECK_TRM_M64: #define __PCLMUL__ 1
 // CHECK_TRM_M64: #define __POPCNT__ 1
 // CHECK_TRM_M64: #define __PRFCHW__ 1
@@ -1866,7 +1869,7 @@
 // CHECK_TRM_M64: #define __SSE4_2__ 1
 // CHECK_TRM_M64: #define __SSE__ 1
 // CHECK_TRM_M64: #define __SSSE3__ 1
-// CHECK_TRM_M64: #define __WAITPKG__ 1
+// CHECK_TRM_M64-NOT: #define __WAITPKG__ 1
 // CHECK_TRM_M64: #define __XSAVEC__ 1
 // CHECK_TRM_M64: #define __XSAVEOPT__ 1
 // CHECK_TRM_M64: #define __XSAVES__ 1
@@ -2376,6 +2379,7 @@
 // CHECK_AMDFAM10_M32: #define __LZCNT__ 1
 // CHECK_AMDFAM10_M32: #define __MMX__ 1
 // CHECK_AMDFAM10_M32: #define __POPCNT__ 1
+// CHECK_AMDFAM10_M32: #define __PRFCHW__ 1
 // CHECK_AMDFAM10_M32: #define __SSE2_MATH__ 1
 // CHECK_AMDFAM10_M32: #define __SSE2__ 1
 // CHECK_AMDFAM10_M32: #define __SSE3__ 1
@@ -2393,9 +2397,11 @@
 // RUN:   | FileCheck -match-full-lines %s -check-prefix=CHECK_AMDFAM10_M64
 // CHECK_AMDFAM10_M64: #define __3dNOW_A__ 1
 // CHECK_AMDFAM10_M64: #define __3dNOW__ 1
+// CHECK_AMDFAM10_M64: #define __GCC_HAVE_SYNC_COMPARE_AND_SWAP_16 1
 // CHECK_AMDFAM10_M64: #define __LZCNT__ 1
 // CHECK_AMDFAM10_M64: #define __MMX__ 1
 // CHECK_AMDFAM10_M64: #define __POPCNT__ 1
+// CHECK_AMDFAM10_M64: #define __PRFCHW__ 1
 // CHECK_AMDFAM10_M64: #define __SSE2_MATH__ 1
 // CHECK_AMDFAM10_M64: #define __SSE2__ 1
 // CHECK_AMDFAM10_M64: #define __SSE3__ 1
@@ -2747,9 +2753,11 @@
 // CHECK_BDVER4_M32: #define __LWP__ 1
 // CHECK_BDVER4_M32: #define __LZCNT__ 1
 // CHECK_BDVER4_M32: #define __MMX__ 1
+// CHECK_BDVER4_M32: #define __MOVBE__ 1
 // CHECK_BDVER4_M32: #define __PCLMUL__ 1
 // CHECK_BDVER4_M32: #define __POPCNT__ 1
 // CHECK_BDVER4_M32: #define __PRFCHW__ 1
+// CHECK_BDVER4_M32: #define __RDRND__ 1
 // CHECK_BDVER4_M32: #define __SSE2_MATH__ 1
 // CHECK_BDVER4_M32: #define __SSE2__ 1
 // CHECK_BDVER4_M32: #define __SSE3__ 1
@@ -2785,9 +2793,11 @@
 // CHECK_BDVER4_M64: #define __LWP__ 1
 // CHECK_BDVER4_M64: #define __LZCNT__ 1
 // CHECK_BDVER4_M64: #define __MMX__ 1
+// CHECK_BDVER4_M64: #define __MOVBE__ 1
 // CHECK_BDVER4_M64: #define __PCLMUL__ 1
 // CHECK_BDVER4_M64: #define __POPCNT__ 1
 // CHECK_BDVER4_M64: #define __PRFCHW__ 1
+// CHECK_BDVER4_M64: #define __RDRND__ 1
 // CHECK_BDVER4_M64: #define __SSE2_MATH__ 1
 // CHECK_BDVER4_M64: #define __SSE2__ 1
 // CHECK_BDVER4_M64: #define __SSE3__ 1
@@ -3240,6 +3250,9 @@
 // CHECK_SYSTEMZ_ARCH12: #define __zarch__ 1
 
 // RUN: %clang -march=arch13 -E -dM %s -o - 2>&1 \
+// RUN:     -target s390x-unknown-linux \
+// RUN:   | FileCheck -match-full-lines %s -check-prefix=CHECK_SYSTEMZ_ARCH13
+// RUN: %clang -march=z15 -E -dM %s -o - 2>&1 \
 // RUN:     -target s390x-unknown-linux \
 // RUN:   | FileCheck -match-full-lines %s -check-prefix=CHECK_SYSTEMZ_ARCH13
 // CHECK_SYSTEMZ_ARCH13: #define __ARCH__ 13

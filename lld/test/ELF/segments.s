@@ -3,8 +3,8 @@
 
 # RUN: ld.lld %t -o %t1
 # RUN: llvm-readobj --program-headers %t1 | FileCheck --check-prefix=ROSEGMENT %s
-# RUN: ld.lld --omagic --no-omagic %t -o %t1
-# RUN: llvm-readobj --program-headers %t1 | FileCheck --check-prefix=ROSEGMENT %s
+# RUN: ld.lld --no-rosegment --rosegment %t -o - | cmp - %t1
+# RUN: ld.lld --omagic --no-omagic %t -o - | cmp - %t1
 
 # ROSEGMENT:      ProgramHeader {
 # ROSEGMENT:        Type: PT_LOAD
@@ -20,7 +20,7 @@
 # ROSEGMENT-NEXT:  }
 # ROSEGMENT-NEXT:  ProgramHeader {
 # ROSEGMENT-NEXT:    Type: PT_LOAD
-# ROSEGMENT-NEXT:    Offset: 0x1000
+# ROSEGMENT-NEXT:    Offset: 0x15C
 # ROSEGMENT-NEXT:    VirtualAddress:
 # ROSEGMENT-NEXT:    PhysicalAddress:
 # ROSEGMENT-NEXT:    FileSize:
@@ -33,7 +33,7 @@
 # ROSEGMENT-NEXT:  }
 # ROSEGMENT-NEXT:  ProgramHeader {
 # ROSEGMENT-NEXT:    Type: PT_LOAD
-# ROSEGMENT-NEXT:    Offset: 0x2000
+# ROSEGMENT-NEXT:    Offset: 0x15E
 # ROSEGMENT-NEXT:    VirtualAddress:
 # ROSEGMENT-NEXT:    PhysicalAddress:
 # ROSEGMENT-NEXT:    FileSize: 1
@@ -45,7 +45,7 @@
 # ROSEGMENT-NEXT:    Alignment: 4096
 # ROSEGMENT-NEXT:  }
 
-# RUN: ld.lld -no-rosegment %t -o %t2
+# RUN: ld.lld --no-rosegment %t -o %t2
 # RUN: llvm-readobj --program-headers %t2 | FileCheck --check-prefix=NOROSEGMENT %s
 
 # NOROSEGMENT:     ProgramHeader {
@@ -63,7 +63,7 @@
 # NOROSEGMENT-NEXT: }
 # NOROSEGMENT-NEXT: ProgramHeader {
 # NOROSEGMENT-NEXT:   Type: PT_LOAD
-# NOROSEGMENT-NEXT:   Offset: 0x1000
+# NOROSEGMENT-NEXT:   Offset: 0x126
 # NOROSEGMENT-NEXT:   VirtualAddress:
 # NOROSEGMENT-NEXT:   PhysicalAddress:
 # NOROSEGMENT-NEXT:   FileSize:

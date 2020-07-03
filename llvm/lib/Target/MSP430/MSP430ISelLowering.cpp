@@ -37,6 +37,11 @@ using namespace llvm;
 
 #define DEBUG_TYPE "msp430-lower"
 
+static cl::opt<bool>MSP430NoLegalImmediate(
+  "msp430-no-legal-immediate", cl::Hidden,
+  cl::desc("Enable non legal immediates (for testing purposes only)"),
+  cl::init(false));
+
 MSP430TargetLowering::MSP430TargetLowering(const TargetMachine &TM,
                                            const MSP430Subtarget &STI)
     : TargetLowering(TM) {
@@ -327,8 +332,8 @@ MSP430TargetLowering::MSP430TargetLowering(const TargetMachine &TM,
   setLibcallCallingConv(RTLIB::OGT_F64, CallingConv::MSP430_BUILTIN);
   // TODO: __mspabi_srall, __mspabi_srlll, __mspabi_sllll
 
-  setMinFunctionAlignment(llvm::Align(2));
-  setPrefFunctionAlignment(llvm::Align(2));
+  setMinFunctionAlignment(Align(2));
+  setPrefFunctionAlignment(Align(2));
 }
 
 SDValue MSP430TargetLowering::LowerOperation(SDValue Op,
@@ -351,6 +356,20 @@ SDValue MSP430TargetLowering::LowerOperation(SDValue Op,
   default:
     llvm_unreachable("unimplemented operand");
   }
+}
+
+// Define non profitable transforms into shifts
+bool MSP430TargetLowering::shouldAvoidTransformToShift(EVT VT,
+                                                       unsigned Amount) const {
+  return !(Amount == 8 || Amount == 9 || Amount<=2);
+}
+
+// Implemented to verify test case assertions in
+// tests/codegen/msp430/shift-amount-threshold-b.ll
+bool MSP430TargetLowering::isLegalICmpImmediate(int64_t Immed) const {
+  if (MSP430NoLegalImmediate)
+    return Immed >= -32 && Immed < 32;
+  return TargetLowering::isLegalICmpImmediate(Immed);
 }
 
 //===----------------------------------------------------------------------===//
@@ -495,7 +514,7 @@ static void AnalyzeArguments(CCState &State,
 
     // Handle byval arguments
     if (ArgFlags.isByVal()) {
-      State.HandleByVal(ValNo++, ArgVT, LocVT, LocInfo, 2, 2, ArgFlags);
+      State.HandleByVal(ValNo++, ArgVT, LocVT, LocInfo, 2, Align(2), ArgFlags);
       continue;
     }
 
@@ -844,13 +863,11 @@ SDValue MSP430TargetLowering::LowerCCCCallTo(
 
       if (Flags.isByVal()) {
         SDValue SizeNode = DAG.getConstant(Flags.getByValSize(), dl, MVT::i16);
-        MemOp = DAG.getMemcpy(Chain, dl, PtrOff, Arg, SizeNode,
-                              Flags.getByValAlign(),
-                              /*isVolatile*/false,
-                              /*AlwaysInline=*/true,
-                              /*isTailCall=*/false,
-                              MachinePointerInfo(),
-                              MachinePointerInfo());
+        MemOp = DAG.getMemcpy(
+            Chain, dl, PtrOff, Arg, SizeNode, Flags.getNonZeroByValAlign(),
+            /*isVolatile*/ false,
+            /*AlwaysInline=*/true,
+            /*isTailCall=*/false, MachinePointerInfo(), MachinePointerInfo());
       } else {
         MemOp = DAG.getStore(Chain, dl, Arg, PtrOff, MachinePointerInfo());
       }
@@ -1283,7 +1300,7 @@ SDValue MSP430TargetLowering::LowerFRAMEADDR(SDValue Op,
   SDLoc dl(Op);  // FIXME probably not meaningful
   unsigned Depth = cast<ConstantSDNode>(Op.getOperand(0))->getZExtValue();
   SDValue FrameAddr = DAG.getCopyFromReg(DAG.getEntryNode(), dl,
-                                         MSP430::FP, VT);
+                                         MSP430::R4, VT);
   while (Depth--)
     FrameAddr = DAG.getLoad(VT, dl, DAG.getEntryNode(), FrameAddr,
                             MachinePointerInfo());

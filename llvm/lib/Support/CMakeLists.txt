@@ -26,7 +26,7 @@ elseif( CMAKE_HOST_UNIX )
       set(system_libs ${system_libs} ${TERMINFO_LIBS})
     endif()
   endif()
-  if( LLVM_ENABLE_THREADS AND HAVE_LIBATOMIC )
+  if( LLVM_ENABLE_THREADS AND (HAVE_LIBATOMIC OR HAVE_CXX_LIBATOMICS64) )
     set(system_libs ${system_libs} atomic)
   endif()
   set(system_libs ${system_libs} ${LLVM_PTHREAD_LIB})
@@ -51,7 +51,7 @@ else()
   set(Z3_LINK_FILES "")
 endif()
 
-add_llvm_library(LLVMSupport
+add_llvm_component_library(LLVMSupport
   AArch64TargetParser.cpp
   ABIBreak.cpp
   ARMTargetParser.cpp
@@ -87,8 +87,11 @@ add_llvm_library(LLVMSupport
   DeltaAlgorithm.cpp
   DAGDeltaAlgorithm.cpp
   DJB.cpp
+  ELFAttributeParser.cpp
+  ELFAttributes.cpp
   Error.cpp
   ErrorHandling.cpp
+  ExtensibleRTTI.cpp
   FileCheck.cpp
   FileCollector.cpp
   FileUtilities.cpp
@@ -103,7 +106,6 @@ add_llvm_library(LLVMSupport
   IntEqClasses.cpp
   IntervalMap.cpp
   ItaniumManglingCanonicalizer.cpp
-  JamCRC.cpp
   JSON.cpp
   KnownBits.cpp
   LEB128.cpp
@@ -113,20 +115,25 @@ add_llvm_library(LLVMSupport
   LowLevelType.cpp
   ManagedStatic.cpp
   MathExtras.cpp
+  MemAlloc.cpp
   MemoryBuffer.cpp
   MD5.cpp
   NativeFormatting.cpp
+  OptimizedStructLayout.cpp
   Optional.cpp
-  Options.cpp
   Parallel.cpp
   PluginLoader.cpp
   PrettyStackTrace.cpp
+  PropertySetIO.cpp
   RandomNumberGenerator.cpp
   Regex.cpp
+  RISCVAttributes.cpp
+  RISCVAttributeParser.cpp
   ScaledNumber.cpp
   ScopedPrinter.cpp
   SHA1.cpp
   Signposts.cpp
+  SimpleTable.cpp
   SmallPtrSet.cpp
   SmallVector.cpp
   SourceMgr.cpp
@@ -134,9 +141,9 @@ add_llvm_library(LLVMSupport
   Statistic.cpp
   StringExtras.cpp
   StringMap.cpp
-  StringPool.cpp
   StringSaver.cpp
   StringRef.cpp
+  SuffixTree.cpp
   SymbolRemappingReader.cpp
   SystemUtils.cpp
   TarWriter.cpp
@@ -153,6 +160,7 @@ add_llvm_library(LLVMSupport
   VersionTuple.cpp
   VirtualFileSystem.cpp
   WithColor.cpp
+  X86TargetParser.cpp
   YAMLParser.cpp
   YAMLTraits.cpp
   raw_os_ostream.cpp

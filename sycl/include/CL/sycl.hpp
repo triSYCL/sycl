@@ -10,6 +10,7 @@
 
 #include <CL/sycl/accessor.hpp>
 #include <CL/sycl/atomic.hpp>
+#include <CL/sycl/backend.hpp>
 #include <CL/sycl/buffer.hpp>
 #include <CL/sycl/builtins.hpp>
 #include <CL/sycl/context.hpp>
@@ -21,6 +22,11 @@
 #include <CL/sycl/handler.hpp>
 #include <CL/sycl/id.hpp>
 #include <CL/sycl/image.hpp>
+#include <CL/sycl/intel/atomic.hpp>
+#include <CL/sycl/intel/builtins.hpp>
+#include <CL/sycl/intel/function_pointer.hpp>
+#include <CL/sycl/intel/group_algorithm.hpp>
+#include <CL/sycl/intel/reduction.hpp>
 #include <CL/sycl/intel/sub_group.hpp>
 #include <CL/sycl/item.hpp>
 #include <CL/sycl/kernel.hpp>
@@ -32,7 +38,6 @@
 #include <CL/sycl/pointers.hpp>
 #include <CL/sycl/program.hpp>
 #include <CL/sycl/queue.hpp>
-#include <CL/sycl/ordered_queue.hpp>
 #include <CL/sycl/range.hpp>
 #include <CL/sycl/sampler.hpp>
 #include <CL/sycl/stream.hpp>

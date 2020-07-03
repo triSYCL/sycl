@@ -1,4 +1,10 @@
+<<<<<<< HEAD
 // RUN: %clangxx -I %sycl_include -std=c++17 -fsyntax-only -Xclang -verify -DCL_TARGET_OPENCL_VERSION=220 %s
+||||||| merged common ancestors
+// RUN: %clangxx -I %sycl_include -fsyntax-only -Xclang -verify -DCL_TARGET_OPENCL_VERSION=220 %s
+=======
+// RUN: %clangxx -fsyntax-only -Xclang -verify -DCL_TARGET_OPENCL_VERSION=220 %s -I %sycl_include -Xclang -verify-ignore-unexpected=note,warning
+>>>>>>> intel/sycl
 // expected-no-diagnostics
 //
 //==-- unable-to-redeclare-device.cpp --------------------------------------==//

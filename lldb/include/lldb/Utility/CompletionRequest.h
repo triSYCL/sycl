@@ -17,16 +17,21 @@
 
 namespace lldb_private {
 enum class CompletionMode {
-  // The current token has been completed.
+  /// The current token has been completed. The client should indicate this
+  /// to the user (usually this is done by adding a trailing space behind the
+  /// token).
+  /// Example: "command sub" -> "command subcommand " (note the trailing space).
   Normal,
-  // The current token has been partially completed. This means that we found
-  // a completion, but that the completed token is still incomplete. Examples
-  // for this are file paths, where we want to complete "/bi" to "/bin/", but
-  // the file path token is still incomplete after the completion. Clients
-  // should not indicate to the user that this is a full completion (e.g. by
-  // not inserting the usual trailing space after a successful completion).
+  /// The current token has been partially completed. This means that we found
+  /// a completion, but that the token is still incomplete. Examples
+  /// for this are file paths, where we want to complete "/bi" to "/bin/", but
+  /// the file path token is still incomplete after the completion. Clients
+  /// should not indicate to the user that this is a full completion (e.g. by
+  /// not inserting the usual trailing space after a successful completion).
+  /// Example: "file /us" -> "file /usr/" (note the missing trailing space).
   Partial,
-  // The full line has been rewritten by the completion.
+  /// The full line has been rewritten by the completion.
+  /// Example: "alias name" -> "other_command full_name".
   RewriteLine,
 };
 
@@ -35,7 +40,12 @@ public:
   /// A single completion and all associated data.
   class Completion {
 
+    /// The actual text that should be completed. The meaning of this text
+    /// is defined by the CompletionMode.
+    /// \see m_mode
     std::string m_completion;
+    /// The description that should be displayed to the user alongside the
+    /// completion text.
     std::string m_descripton;
     CompletionMode m_mode;
 
@@ -53,9 +63,12 @@ public:
   };
 
 private:
+  /// List of found completions.
   std::vector<Completion> m_results;
 
-  /// List of added completions so far. Used to filter out duplicates.
+  /// A set of the unique keys of all found completions so far. Used to filter
+  /// out duplicates.
+  /// \see CompletionResult::Completion::GetUniqueKey
   llvm::StringSet<> m_added_values;
 
 public:
@@ -102,10 +115,19 @@ public:
   CompletionRequest(llvm::StringRef command_line, unsigned raw_cursor_pos,
                     CompletionResult &result);
 
-  llvm::StringRef GetRawLine() const { return m_command; }
-  llvm::StringRef GetRawLineUntilCursor() const {
-    return m_command.substr(0, m_cursor_index);
+  /// Returns the raw user input used to create this CompletionRequest cut off
+  /// at the cursor position. The cursor will be at the end of the raw line.
+  llvm::StringRef GetRawLine() const {
+    return m_command.substr(0, GetRawCursorPos());
   }
+
+  /// Returns the full raw user input used to create this CompletionRequest.
+  /// This string is not cut off at the cursor position and will include
+  /// characters behind the cursor position.
+  ///
+  /// You should most likely *not* use this function unless the characters
+  /// behind the cursor position influence the completion.
+  llvm::StringRef GetRawLineWithUnusedSuffix() const { return m_command; }
 
   unsigned GetRawCursorPos() const { return m_raw_cursor_pos; }
 
@@ -113,30 +135,57 @@ public:
 
   Args &GetParsedLine() { return m_parsed_line; }
 
-  const Args &GetPartialParsedLine() const { return m_partial_parsed_line; }
-
   const Args::ArgEntry &GetParsedArg() {
     return GetParsedLine()[GetCursorIndex()];
   }
 
-  void SetCursorIndex(int i) { m_cursor_index = i; }
-  int GetCursorIndex() const { return m_cursor_index; }
+  /// Drops the first argument from the argument list.
+  void ShiftArguments() {
+    m_cursor_index--;
+    m_parsed_line.Shift();
+  }
 
-  void SetCursorCharPosition(int pos) { m_cursor_char_position = pos; }
-  int GetCursorCharPosition() const { return m_cursor_char_position; }
+  /// Adds an empty argument at the end of the argument list and moves
+  /// the cursor to this new argument.
+  void AppendEmptyArgument() {
+    m_parsed_line.AppendArgument(llvm::StringRef());
+    m_cursor_index++;
+    m_cursor_char_position = 0;
+  }
+
+  size_t GetCursorIndex() const { return m_cursor_index; }
 
   /// Adds a possible completion string. If the completion was already
   /// suggested before, it will not be added to the list of results. A copy of
   /// the suggested completion is stored, so the given string can be free'd
   /// afterwards.
   ///
-  /// \param match The suggested completion.
-  /// \param match An optional description of the completion string. The
+  /// \param completion The suggested completion.
+  /// \param description An optional description of the completion string. The
   ///     description will be displayed to the user alongside the completion.
+  /// \param mode The CompletionMode for this completion.
   void AddCompletion(llvm::StringRef completion,
                      llvm::StringRef description = "",
                      CompletionMode mode = CompletionMode::Normal) {
     m_result.AddResult(completion, description, mode);
+  }
+
+  /// Adds a possible completion string if the completion would complete the
+  /// current argument.
+  ///
+  /// \param completion The suggested completion.
+  /// \param description An optional description of the completion string. The
+  ///     description will be displayed to the user alongside the completion.
+  template <CompletionMode M = CompletionMode::Normal>
+  void TryCompleteCurrentArg(llvm::StringRef completion,
+                             llvm::StringRef description = "") {
+    // Trying to rewrite the whole line while checking for the current
+    // argument never makes sense. Completion modes are always hardcoded, so
+    // this can be a static_assert.
+    static_assert(M != CompletionMode::RewriteLine,
+                  "Shouldn't rewrite line with this function");
+    if (completion.startswith(GetCursorArgumentPrefix()))
+      AddCompletion(completion, description, M);
   }
 
   /// Adds multiple possible completion strings.
@@ -154,7 +203,7 @@ public:
   /// The number of completions and descriptions must be identical.
   ///
   /// \param completions The list of completions.
-  /// \param completions The list of descriptions.
+  /// \param descriptions The list of descriptions.
   ///
   /// \see AddCompletion
   void AddCompletions(const StringList &completions,
@@ -165,12 +214,8 @@ public:
                     descriptions.GetStringAtIndex(i));
   }
 
-  llvm::StringRef GetCursorArgument() const {
-    return GetParsedLine().GetArgumentAtIndex(GetCursorIndex());
-  }
-
   llvm::StringRef GetCursorArgumentPrefix() const {
-    return GetCursorArgument().substr(0, GetCursorCharPosition());
+    return GetParsedLine().GetArgumentAtIndex(GetCursorIndex());
   }
 
 private:
@@ -180,12 +225,10 @@ private:
   unsigned m_raw_cursor_pos;
   /// The command line parsed as arguments.
   Args m_parsed_line;
-  /// The command line until the cursor position parsed as arguments.
-  Args m_partial_parsed_line;
   /// The index of the argument in which the completion cursor is.
-  int m_cursor_index;
+  size_t m_cursor_index;
   /// The cursor position in the argument indexed by m_cursor_index.
-  int m_cursor_char_position;
+  size_t m_cursor_char_position;
 
   /// The result this request is supposed to fill out.
   /// We keep this object private to ensure that no backend can in any way

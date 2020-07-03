@@ -230,17 +230,16 @@ bool CGPassManager::RefreshCallGraph(const CallGraphSCC &CurSCC, CallGraph &CG,
       // If this call site is null, then the function pass deleted the call
       // entirely and the WeakTrackingVH nulled it out.
       auto *Call = dyn_cast_or_null<CallBase>(I->first);
-      if (!I->first ||
+      if (!Call ||
           // If we've already seen this call site, then the FunctionPass RAUW'd
           // one call with another, which resulted in two "uses" in the edge
           // list of the same call.
-          Calls.count(I->first) ||
+          Calls.count(Call) ||
 
           // If the call edge is not from a call or invoke, or it is a
           // instrinsic call, then the function pass RAUW'd a call with
           // another value. This can happen when constant folding happens
           // of well known functions etc.
-          !Call ||
           (Call->getCalledFunction() &&
            Call->getCalledFunction()->isIntrinsic() &&
            Intrinsic::isLeaf(Call->getCalledFunction()->getIntrinsicID()))) {
@@ -267,14 +266,13 @@ bool CGPassManager::RefreshCallGraph(const CallGraphSCC &CurSCC, CallGraph &CG,
         continue;
       }
 
-      assert(!Calls.count(I->first) &&
-             "Call site occurs in node multiple times");
+      assert(!Calls.count(Call) && "Call site occurs in node multiple times");
 
       if (Call) {
         Function *Callee = Call->getCalledFunction();
         // Ignore intrinsics because they're not really function calls.
         if (!Callee || !(Callee->isIntrinsic()))
-          Calls.insert(std::make_pair(I->first, I->second));
+          Calls.insert(std::make_pair(Call, I->second));
       }
       ++I;
     }
@@ -549,7 +547,10 @@ void CallGraphSCC::ReplaceNode(CallGraphNode *Old, CallGraphNode *New) {
   for (unsigned i = 0; ; ++i) {
     assert(i != Nodes.size() && "Node not in SCC");
     if (Nodes[i] != Old) continue;
-    Nodes[i] = New;
+    if (New)
+      Nodes[i] = New;
+    else
+      Nodes.erase(Nodes.begin() + i);
     break;
   }
 
@@ -557,6 +558,10 @@ void CallGraphSCC::ReplaceNode(CallGraphNode *Old, CallGraphNode *New) {
   // pointers to the old CallGraphNode.
   scc_iterator<CallGraph*> *CGI = (scc_iterator<CallGraph*>*)Context;
   CGI->ReplaceNode(Old, New);
+}
+
+void CallGraphSCC::DeleteNode(CallGraphNode *Old) {
+  ReplaceNode(Old, /*New=*/nullptr);
 }
 
 //===----------------------------------------------------------------------===//

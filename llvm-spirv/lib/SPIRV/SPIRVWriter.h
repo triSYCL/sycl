@@ -85,6 +85,9 @@ public:
 
   SPIRVValue *getTranslatedValue(const Value *) const;
 
+  spv::LoopControlMask getLoopControl(const BranchInst *Branch,
+                                      std::vector<SPIRVWord> &Parameters);
+
   // Translation functions
   bool transAddressingMode();
   bool transAlign(Value *V, SPIRVValue *BV);
@@ -97,9 +100,12 @@ public:
   SPIRVValue *transCallInst(CallInst *Call, SPIRVBasicBlock *BB);
   SPIRVValue *transDirectCallInst(CallInst *Call, SPIRVBasicBlock *BB);
   SPIRVValue *transIndirectCallInst(CallInst *Call, SPIRVBasicBlock *BB);
+  SPIRVValue *transAsmINTEL(InlineAsm *Asm);
+  SPIRVValue *transAsmCallINTEL(CallInst *Call, SPIRVBasicBlock *BB);
   bool transDecoration(Value *V, SPIRVValue *BV);
   SPIRVWord transFunctionControlMask(Function *);
   SPIRVFunction *transFunctionDecl(Function *F);
+  void transVectorComputeMetadata(Function *F);
   bool transGlobalVariables();
 
   Op transBoolOpCode(SPIRVValue *Opn, Op OC);
@@ -107,14 +113,18 @@ public:
   // Returns true if succeeds.
   bool translate();
   bool transExecutionMode();
+  void transFPContract();
   SPIRVValue *transConstant(Value *V);
   SPIRVValue *transValue(Value *V, SPIRVBasicBlock *BB,
                          bool CreateForward = true);
+  void transGlobalAnnotation(GlobalVariable *V);
   SPIRVValue *transValueWithoutDecoration(Value *V, SPIRVBasicBlock *BB,
                                           bool CreateForward = true);
+  void transGlobalIOPipeStorage(GlobalVariable *V, MDNode *IO);
 
   typedef DenseMap<Type *, SPIRVType *> LLVMToSPIRVTypeMap;
   typedef DenseMap<Value *, SPIRVValue *> LLVMToSPIRVValueMap;
+  typedef DenseMap<MDNode *, SPIRVId> LLVMToSPIRVMetadataMap;
 
 private:
   Module *M;
@@ -122,16 +132,23 @@ private:
   SPIRVModule *BM;
   LLVMToSPIRVTypeMap TypeMap;
   LLVMToSPIRVValueMap ValueMap;
+  LLVMToSPIRVMetadataMap IndexGroupArrayMap;
   SPIRVWord SrcLang;
   SPIRVWord SrcLangVer;
   std::unique_ptr<LLVMToSPIRVDbgTran> DbgTran;
   std::unique_ptr<CallGraph> CG;
 
+  enum class FPContract { UNDEF, DISABLED, ENABLED };
+  DenseMap<Function *, FPContract> FPContractMap;
+  FPContract getFPContract(Function *F);
+  bool joinFPContract(Function *F, FPContract C);
+  void fpContractUpdateRecursive(Function *F, FPContract FPC);
+
   SPIRVType *mapType(Type *T, SPIRVType *BT);
   SPIRVValue *mapValue(Value *V, SPIRVValue *BV);
   SPIRVType *getSPIRVType(Type *T) { return TypeMap[T]; }
   SPIRVErrorLog &getErrorLog() { return BM->getErrorLog(); }
-  llvm::IntegerType *getSizetType();
+  llvm::IntegerType *getSizetType(unsigned AS = 0);
   std::vector<SPIRVValue *> transValue(const std::vector<Value *> &Values,
                                        SPIRVBasicBlock *BB);
   std::vector<SPIRVWord> transValue(const std::vector<Value *> &Values,
@@ -156,11 +173,12 @@ private:
                                SPIRVExtInstSetKind *BuiltinSet = nullptr,
                                SPIRVWord *EntryPoint = nullptr,
                                SmallVectorImpl<std::string> *Dec = nullptr);
-  bool oclIsKernel(Function *F);
-  bool transOCLKernelMetadata();
-  SPIRVInstruction *transBuiltinToInst(const std::string &DemangledName,
-                                       const std::string &MangledName,
-                                       CallInst *CI, SPIRVBasicBlock *BB);
+  bool isKernel(Function *F);
+  bool transMetadata();
+  bool transOCLMetadata();
+  SPIRVInstruction *transBuiltinToInst(StringRef DemangledName, CallInst *CI,
+                                       SPIRVBasicBlock *BB);
+  SPIRVValue *transBuiltinToConstant(StringRef DemangledName, CallInst *CI);
   SPIRVInstruction *transBuiltinToInstWithoutDecoration(Op OC, CallInst *CI,
                                                         SPIRVBasicBlock *BB);
   void mutateFuncArgType(const std::map<unsigned, Type *> &ChangedType,

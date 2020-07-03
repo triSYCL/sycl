@@ -1,4 +1,13 @@
+<<<<<<< HEAD
 // RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
+||||||| merged common ancestors
+// RUN: %clangxx -fsycl %s -o %t.out
+=======
+// UNSUPPORTED: cuda
+// CUDA cannot support SYCL 1.2.1 images.
+//
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+>>>>>>> intel/sycl
 // RUNx: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUNx: %GPU_RUN_PLACEHOLDER %t.out
@@ -32,7 +41,7 @@ int main() {
     READ_I = 0,
     READ_SAMPLER_F = 0,
     READ_SAMPLER_I = 0,
-    GET_SIZE,
+    GET_RANGE,
     GET_COUNT,
     WRITE1,
     WRITE2,
@@ -96,11 +105,11 @@ int main() {
           ResAcc[READ_SAMPLER_F] |= sycl::any(sycl::isnotequal(Val, ValRef));
         }
 
-        // Check that the size and count of 1D image in 1D image array == width
+        // Check that the range and count of 1D image in 1D image array == width
         // of 2d image.
 
-        ResAcc[GET_SIZE] |= (ImgAcc.get_size() / ImgSize[1]) !=
-                            ImgArrayAcc[CoordI.y()].get_size();
+        ResAcc[GET_RANGE] |= sycl::range<1>(ImgAcc.get_range()[0]) !=
+                             ImgArrayAcc[CoordI.y()].get_range();
 
         ResAcc[GET_COUNT] |= (ImgAcc.get_count() / ImgSize[1]) !=
                              ImgArrayAcc[CoordI.y()].get_count();

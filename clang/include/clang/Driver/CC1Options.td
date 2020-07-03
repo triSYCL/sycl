@@ -23,7 +23,9 @@ def target_cpu : Separate<["-"], "target-cpu">,
 def target_feature : Separate<["-"], "target-feature">,
   HelpText<"Target specific attributes">;
 def triple : Separate<["-"], "triple">,
-  HelpText<"Specify target triple (e.g. i686-apple-darwin9)">;
+  HelpText<"Specify target triple (e.g. i686-apple-darwin9)">,
+  MarshallingInfoString<"TargetOpts->Triple", "llvm::Triple::normalize(llvm::sys::getDefaultTargetTriple())", "std::string">,
+  AlwaysEmit, Normalizer<"normalizeTriple">, DenormalizeString;
 def target_abi : Separate<["-"], "target-abi">,
   HelpText<"Target a particular ABI type">;
 def target_sdk_version_EQ : Joined<["-"], "target-sdk-version=">,
@@ -212,7 +214,11 @@ def msave_temp_labels : Flag<["-"], "msave-temp-labels">,
            "Note this may change .s semantics and shouldn't generally be used "
            "on compiler-generated code.">;
 def mrelocation_model : Separate<["-"], "mrelocation-model">,
-  HelpText<"The relocation model to use">, Values<"static,pic,ropi,rwpi,ropi-rwpi,dynamic-no-pic">;
+  HelpText<"The relocation model to use">, Values<"static,pic,ropi,rwpi,ropi-rwpi,dynamic-no-pic">,
+  NormalizedValuesScope<"llvm::Reloc">,
+  NormalizedValues<["Static", "PIC_", "ROPI", "RWPI", "ROPI_RWPI", "DynamicNoPIC"]>,
+  MarshallingInfoString<"CodeGenOpts.RelocationModel", "PIC_", "Model">,
+  AutoNormalizeEnum;
 def fno_math_builtin : Flag<["-"], "fno-math-builtin">,
   HelpText<"Disable implicit builtin knowledge of math functions">;
 }
@@ -262,12 +268,6 @@ def coverage_notes_file : Separate<["-"], "coverage-notes-file">,
   HelpText<"Emit coverage notes to this filename.">;
 def coverage_notes_file_EQ : Joined<["-"], "coverage-notes-file=">,
   Alias<coverage_notes_file>;
-def coverage_cfg_checksum : Flag<["-"], "coverage-cfg-checksum">,
-  HelpText<"Emit CFG checksum for functions in .gcno files.">;
-def coverage_no_function_names_in_data : Flag<["-"], "coverage-no-function-names-in-data">,
-  HelpText<"Emit function names in .gcda files.">;
-def coverage_exit_block_before_body : Flag<["-"], "coverage-exit-block-before-body">,
-  HelpText<"Emit the exit block before the body blocks in .gcno files.">;
 def coverage_version_EQ : Joined<["-"], "coverage-version=">,
   HelpText<"Four-byte version string for gcov files.">;
 def test_coverage : Flag<["-"], "test-coverage">,
@@ -282,10 +282,6 @@ def no_struct_path_tbaa : Flag<["-"], "no-struct-path-tbaa">,
   HelpText<"Turn off struct-path aware Type Based Alias Analysis">;
 def new_struct_path_tbaa : Flag<["-"], "new-struct-path-tbaa">,
   HelpText<"Enable enhanced struct-path aware Type Based Alias Analysis">;
-def masm_verbose : Flag<["-"], "masm-verbose">,
-  HelpText<"Generate verbose assembly output">;
-def mcode_model : Separate<["-"], "mcode-model">,
-  HelpText<"The code model to use">, Values<"tiny,small,kernel,medium,large">;
 def mdebug_pass : Separate<["-"], "mdebug-pass">,
   HelpText<"Enable additional debug output">;
 def mframe_pointer_EQ : Joined<["-"], "mframe-pointer=">,
@@ -315,6 +311,8 @@ def mno_zero_initialized_in_bss : Flag<["-"], "mno-zero-initialized-in-bss">,
   HelpText<"Do not put zero initialized data in the BSS">;
 def mregparm : Separate<["-"], "mregparm">,
   HelpText<"Limit the number of registers available for integer arguments">;
+def msmall_data_limit : Separate<["-"], "msmall-data-limit">,
+  HelpText<"Put global and static data smaller than the limit into a special section">;
 def munwind_tables : Flag<["-"], "munwind-tables">,
   HelpText<"Generate unwinding tables for all functions">;
 def mconstructor_aliases : Flag<["-"], "mconstructor-aliases">,
@@ -357,6 +355,9 @@ def fsanitize_coverage_8bit_counters
 def fsanitize_coverage_inline_8bit_counters
     : Flag<["-"], "fsanitize-coverage-inline-8bit-counters">,
       HelpText<"Enable inline 8-bit counters in sanitizer coverage">;
+def fsanitize_coverage_inline_bool_flag
+    : Flag<["-"], "fsanitize-coverage-inline-bool-flag">,
+      HelpText<"Enable inline bool flag in sanitizer coverage">;
 def fsanitize_coverage_pc_table
     : Flag<["-"], "fsanitize-coverage-pc-table">,
       HelpText<"Create a table of coverage-instrumented PCs">;
@@ -372,6 +373,9 @@ def fsanitize_coverage_no_prune
 def fsanitize_coverage_stack_depth
     : Flag<["-"], "fsanitize-coverage-stack-depth">,
       HelpText<"Enable max stack depth tracing">;
+def fpatchable_function_entry_offset_EQ
+    : Joined<["-"], "fpatchable-function-entry-offset=">, MetaVarName<"<M>">,
+      HelpText<"Generate M NOPs before function entry">;
 def fprofile_instrument_EQ : Joined<["-"], "fprofile-instrument=">,
     HelpText<"Enable PGO instrumentation. The accepted value is clang, llvm, "
              "or none">, Values<"none,clang,llvm">;
@@ -387,10 +391,6 @@ def flto_visibility_public_std:
 def flto_unit: Flag<["-"], "flto-unit">,
     HelpText<"Emit IR to support LTO unit features (CFI, whole program vtable opt)">;
 def fno_lto_unit: Flag<["-"], "fno-lto-unit">;
-def fthin_link_bitcode_EQ : Joined<["-"], "fthin-link-bitcode=">,
-    HelpText<"Write minimized bitcode to <file> for the ThinLTO thin link only">;
-def femit_debug_entry_values : Flag<["-"], "femit-debug-entry-values">,
-    HelpText<"Enables debug info about call site parameter's entry values">;
 def fdebug_pass_manager : Flag<["-"], "fdebug-pass-manager">,
     HelpText<"Prints debug information for the new pass manager">;
 def fno_debug_pass_manager : Flag<["-"], "fno-debug-pass-manager">,
@@ -402,6 +402,13 @@ def msign_return_address_key_EQ : Joined<["-"], "msign-return-address-key=">,
     Values<"a_key,b_key">;
 def mbranch_target_enforce : Flag<["-"], "mbranch-target-enforce">;
 def fno_dllexport_inlines : Flag<["-"], "fno-dllexport-inlines">;
+def cfguard_no_checks : Flag<["-"], "cfguard-no-checks">,
+    HelpText<"Emit Windows Control Flow Guard tables only (no checks)">;
+def cfguard : Flag<["-"], "cfguard">,
+    HelpText<"Emit Windows Control Flow Guard tables and checks">;
+
+def fdenormal_fp_math_f32_EQ : Joined<["-"], "fdenormal-fp-math-f32=">,
+   Group<f_Group>;
 
 //===----------------------------------------------------------------------===//
 // Dependency Output Options
@@ -449,8 +456,6 @@ def fspell_checking_limit : Separate<["-"], "fspell-checking-limit">, MetaVarNam
 def fcaret_diagnostics_max_lines :
   Separate<["-"], "fcaret-diagnostics-max-lines">, MetaVarName<"<N>">,
   HelpText<"Set the maximum number of source lines to show in a caret diagnostic">;
-def fmessage_length : Separate<["-"], "fmessage-length">, MetaVarName<"<N>">,
-  HelpText<"Format message diagnostics so that they fit within N columns or fewer, when possible.">;
 def verify_EQ : CommaJoined<["-"], "verify=">,
   MetaVarName<"<prefixes>">,
   HelpText<"Verify diagnostic output using comment directives that start with"
@@ -476,6 +481,10 @@ def cc1as : Flag<["-"], "cc1as">;
 def ast_merge : Separate<["-"], "ast-merge">,
   MetaVarName<"<ast file>">,
   HelpText<"Merge the given AST file into the translation unit being compiled.">;
+def aux_target_cpu : Separate<["-"], "aux-target-cpu">,
+  HelpText<"Target a specific auxiliary cpu type">;
+def aux_target_feature : Separate<["-"], "aux-target-feature">,
+  HelpText<"Target specific auxiliary attributes">;
 def aux_triple : Separate<["-"], "aux-triple">,
   HelpText<"Auxiliary target triple.">;
 def code_completion_at : Separate<["-"], "code-completion-at">,
@@ -553,7 +562,19 @@ def ftest_module_file_extension_EQ :
   HelpText<"introduce a module file extension for testing purposes. "
            "The argument is parsed as blockname:major:minor:hashed:user info">;
 def fconcepts_ts : Flag<["-"], "fconcepts-ts">,
-  HelpText<"Enable C++ Extensions for Concepts.">;
+  HelpText<"Enable C++ Extensions for Concepts. (deprecated - use -std=c++2a)">;
+def fno_concept_satisfaction_caching : Flag<["-"],
+                                            "fno-concept-satisfaction-caching">,
+  HelpText<"Disable satisfaction caching for C++2a Concepts.">;
+
+def frecovery_ast : Flag<["-"], "frecovery-ast">,
+  HelpText<"Preserve expressions in AST rather than dropping them when "
+           "encountering semantic errors">;
+def fno_recovery_ast : Flag<["-"], "fno-recovery-ast">;
+def frecovery_ast_type : Flag<["-"], "frecovery-ast-type">,
+  HelpText<"Preserve the type for recovery expressions when possible "
+          "(experimental)">;
+def fno_recovery_ast_type : Flag<["-"], "fno-recovery-ast-type">;
 
 let Group = Action_Group in {
 
@@ -590,6 +611,8 @@ def ast_dump_all : Flag<["-"], "ast-dump-all">,
 def ast_dump_all_EQ : Joined<["-"], "ast-dump-all=">,
   HelpText<"Build ASTs and then debug dump them in the specified format, "
            "forcing deserialization. Supported formats include: default, json">;
+def ast_dump_decl_types : Flag<["-"], "ast-dump-decl-types">,
+  HelpText<"Include declaration types in AST dumps">;
 def templight_dump : Flag<["-"], "templight-dump">,
   HelpText<"Dump templight information to stdout">;
 def ast_dump_lookups : Flag<["-"], "ast-dump-lookups">,
@@ -691,7 +714,7 @@ let Flags = [CC1Option, CC1AsOption, NoDriverOption] in {
 def version : Flag<["-"], "version">,
   HelpText<"Print the compiler version">;
 def main_file_name : Separate<["-"], "main-file-name">,
-  HelpText<"Main file name to use for debug info">;
+  HelpText<"Main file name to use for debug info and source if missing">;
 def split_dwarf_output : Separate<["-"], "split-dwarf-output">,
   HelpText<"File name to use for split dwarf debug info output">;
 
@@ -794,6 +817,8 @@ def finclude_default_header : Flag<["-"], "finclude-default-header">,
   HelpText<"Include default header file for OpenCL">;
 def fdeclare_opencl_builtins : Flag<["-"], "fdeclare-opencl-builtins">,
   HelpText<"Add OpenCL builtin function declarations (experimental)">;
+def fdeclare_spirv_builtins : Flag<["-"], "fdeclare-spirv-builtins">,
+  HelpText<"Add SPIR-V builtin function declarations (experimental)">;
 def fpreserve_vec3_type : Flag<["-"], "fpreserve-vec3-type">,
   HelpText<"Preserve 3-component vector type">;
 def fwchar_type_EQ : Joined<["-"], "fwchar-type=">,
@@ -802,6 +827,9 @@ def fsigned_wchar : Flag<["-"], "fsigned-wchar">,
   HelpText<"Use a signed type for wchar_t">;
 def fno_signed_wchar : Flag<["-"], "fno-signed-wchar">,
   HelpText<"Use an unsigned type for wchar_t">;
+def fcompatibility_qualified_id_block_param_type_checking : Flag<["-"], "fcompatibility-qualified-id-block-type-checking">,
+  HelpText<"Allow using blocks with parameters of more specific type than "
+           "the type system guarantees when a parameter is qualified id">;
 
 // FIXME: Remove these entirely once functionality/tests have been excised.
 def fobjc_gc_only : Flag<["-"], "fobjc-gc-only">, Group<f_Group>,
@@ -819,6 +847,10 @@ def fdisable_module_hash : Flag<["-"], "fdisable-module-hash">,
   HelpText<"Disable the module hash">;
 def fmodules_hash_content : Flag<["-"], "fmodules-hash-content">,
   HelpText<"Enable hashing the content of a module file">;
+def fmodules_strict_context_hash : Flag<["-"], "fmodules-strict-context-hash">,
+  HelpText<"Enable hashing of all compiler options that could impact the "
+           "semantics of a module in an implicit build">,
+  MarshallingInfoFlag<"HeaderSearchOpts->ModulesStrictContextHash", "false">;
 def c_isystem : JoinedOrSeparate<["-"], "c-isystem">, MetaVarName<"<directory>">,
   HelpText<"Add directory to the C SYSTEM include search path">;
 def objc_isystem : JoinedOrSeparate<["-"], "objc-isystem">,
@@ -850,6 +882,10 @@ def preamble_bytes_EQ : Joined<["-"], "preamble-bytes=">,
            "covering the first N bytes of the main file">;
 def detailed_preprocessing_record : Flag<["-"], "detailed-preprocessing-record">,
   HelpText<"include a detailed record of preprocessing actions">;
+def setup_static_analyzer : Flag<["-"], "setup-static-analyzer">,
+  HelpText<"Set up preprocessor for static analyzer (done automatically when static analyzer is run).">;
+def disable_pragma_debug_crash : Flag<["-"], "disable-pragma-debug-crash">,
+  HelpText<"Disable any #pragma clang __debug that can lead to crashing behavior. This is meant for testing.">;
 
 //===----------------------------------------------------------------------===//
 // OpenCL Options
@@ -895,6 +931,8 @@ def fsycl_int_header : Separate<["-"], "fsycl-int-header">,
   HelpText<"Generate SYCL integration header into this file.">;
 def fsycl_int_header_EQ : Joined<["-"], "fsycl-int-header=">,
   Alias<fsycl_int_header>;
+def fsycl_std_layout_kernel_params: Flag<["-"], "fsycl-std-layout-kernel-params">,
+  HelpText<"Enable standard layout requirement for SYCL kernel parameters.">;
 def fsycl_allow_func_ptr : Flag<["-"], "fsycl-allow-func-ptr">,
   HelpText<"Allow function pointers in SYCL device.">;
 def fno_sycl_allow_func_ptr : Flag<["-"], "fno-sycl-allow-func-ptr">;
@@ -904,6 +942,8 @@ def fno_sycl_allow_virtual : Flag<["-"], "fno-sycl-allow-virtual">;
 def fsycl_allow_variadic_func : Flag<["-"], "fsycl-allow-variadic-func">,
   HelpText<"Allow variadic functions in SYCL device.">;
 def fno_sycl_allow_variadic_func : Flag<["-"], "fno-sycl-allow-variadic-func">;
+def fsycl_enable_optimizations: Flag<["-"], "fsycl-enable-optimizations">,
+  HelpText<"Experimental flag enabling standard optimization in the front-end.">;
 
 } // let Flags = [CC1Option]
 

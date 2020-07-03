@@ -10,10 +10,11 @@
 
 #include <CL/__spirv/spirv_types.hpp>
 #include <CL/sycl/context.hpp>
+#include <CL/sycl/detail/export.hpp>
 
 #include <unordered_map>
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 
 enum class addressing_mode : unsigned int;
@@ -21,7 +22,7 @@ enum class filtering_mode : unsigned int;
 enum class coordinate_normalization_mode : unsigned int;
 
 namespace detail {
-class sampler_impl {
+class __SYCL_EXPORT sampler_impl {
 public:
 #ifdef __SYCL_DEVICE_ONLY__
   __ocl_sampler_t m_Sampler;
@@ -59,4 +60,4 @@ public:
 
 } // namespace detail
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

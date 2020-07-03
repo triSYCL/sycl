@@ -9,16 +9,16 @@
 #ifndef LLVM_CLANG_TOOLS_EXTRA_CLANGD_INDEX_BACKGROUND_H
 #define LLVM_CLANG_TOOLS_EXTRA_CLANGD_INDEX_BACKGROUND_H
 
-#include "Context.h"
-#include "FSProvider.h"
 #include "GlobalCompilationDatabase.h"
-#include "Path.h"
 #include "SourceCode.h"
-#include "Threading.h"
 #include "index/BackgroundRebuild.h"
 #include "index/FileIndex.h"
 #include "index/Index.h"
 #include "index/Serialization.h"
+#include "support/Context.h"
+#include "support/Path.h"
+#include "support/Threading.h"
+#include "support/ThreadsafeFS.h"
 #include "clang/Tooling/CompilationDatabase.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/Threading.h"
@@ -78,6 +78,17 @@ public:
     bool operator<(const Task &O) const { return QueuePri < O.QueuePri; }
   };
 
+  // Describes the number of tasks processed by the queue.
+  struct Stats {
+    unsigned Enqueued = 0;  // Total number of tasks ever enqueued.
+    unsigned Active = 0;    // Tasks being currently processed by a worker.
+    unsigned Completed = 0; // Tasks that have been finished.
+    unsigned LastIdle = 0;  // Number of completed tasks when last empty.
+  };
+
+  BackgroundQueue(std::function<void(Stats)> OnProgress = nullptr)
+      : OnProgress(OnProgress) {}
+
   // Add tasks to the queue.
   void push(Task);
   void append(std::vector<Task>);
@@ -100,12 +111,15 @@ public:
   blockUntilIdleForTest(llvm::Optional<double> TimeoutSeconds);
 
 private:
+  void notifyProgress() const; // Requires lock Mu
+
   std::mutex Mu;
-  unsigned NumActiveTasks = 0; // Only idle when queue is empty *and* no tasks.
+  Stats Stat;
   std::condition_variable CV;
   bool ShouldStop = false;
   std::vector<Task> Queue; // max-heap
   llvm::StringMap<unsigned> Boosts;
+  std::function<void(Stats)> OnProgress;
 };
 
 // Builds an in-memory index by by running the static indexer action over
@@ -118,10 +132,13 @@ public:
   /// rebuilt periodically (one per \p BuildIndexPeriodMs); otherwise, index is
   /// rebuilt for each indexed file.
   BackgroundIndex(
-      Context BackgroundContext, const FileSystemProvider &,
+      Context BackgroundContext, const ThreadsafeFS &,
       const GlobalCompilationDatabase &CDB,
       BackgroundIndexStorage::Factory IndexStorageFactory,
-      size_t ThreadPoolSize = llvm::heavyweight_hardware_concurrency());
+      // Arbitrary value to ensure some concurrency in tests.
+      // In production an explicit value is passed.
+      size_t ThreadPoolSize = 4,
+      std::function<void(BackgroundQueue::Stats)> OnProgress = nullptr);
   ~BackgroundIndex(); // Blocks while the current task finishes.
 
   // Enqueue translation units for indexing.
@@ -163,7 +180,7 @@ private:
               bool HadErrors);
 
   // configuration
-  const FileSystemProvider &FSProvider;
+  const ThreadsafeFS &TFS;
   const GlobalCompilationDatabase &CDB;
   Context BackgroundContext;
 

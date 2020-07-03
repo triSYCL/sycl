@@ -13,8 +13,19 @@ define i32 @main(i32 %argc, i8** %argv) {
   ret i32 0
 }
 
+define i32 @dead_aligned_alloc(i32 %size, i32 %alignment, i8 %value) {
+; CHECK-LABEL: @dead_aligned_alloc(
+; CHECK-NEXT:    ret i32 0
+;
+  %aligned_allocation = tail call i8* @aligned_alloc(i32 %alignment, i32 %size)
+  store i8 %value, i8* %aligned_allocation
+  tail call void @free(i8* %aligned_allocation)
+  ret i32 0
+}
+
 declare noalias i8* @calloc(i32, i32) nounwind
 declare noalias i8* @malloc(i32)
+declare noalias i8* @aligned_alloc(i32, i32)
 declare void @free(i8*)
 
 define i1 @foo() {
@@ -72,8 +83,8 @@ define void @test5(i8* %ptr, i8** %esc) {
 ; CHECK-NEXT:    [[E:%.*]] = call dereferenceable_or_null(700) i8* @malloc(i32 700)
 ; CHECK-NEXT:    [[F:%.*]] = call dereferenceable_or_null(700) i8* @malloc(i32 700)
 ; CHECK-NEXT:    [[G:%.*]] = call dereferenceable_or_null(700) i8* @malloc(i32 700)
-; CHECK-NEXT:    call void @llvm.memcpy.p0i8.p0i8.i32(i8* align 1 dereferenceable(32) [[PTR:%.*]], i8* align 1 dereferenceable(32) [[A]], i32 32, i1 false)
-; CHECK-NEXT:    call void @llvm.memmove.p0i8.p0i8.i32(i8* align 1 dereferenceable(32) [[PTR]], i8* align 1 dereferenceable(32) [[B]], i32 32, i1 false)
+; CHECK-NEXT:    call void @llvm.memcpy.p0i8.p0i8.i32(i8* nonnull align 1 dereferenceable(32) [[PTR:%.*]], i8* nonnull align 1 dereferenceable(32) [[A]], i32 32, i1 false)
+; CHECK-NEXT:    call void @llvm.memmove.p0i8.p0i8.i32(i8* nonnull align 1 dereferenceable(32) [[PTR]], i8* nonnull align 1 dereferenceable(32) [[B]], i32 32, i1 false)
 ; CHECK-NEXT:    store i8* [[C]], i8** [[ESC:%.*]], align 8
 ; CHECK-NEXT:    call void @llvm.memcpy.p0i8.p0i8.i32(i8* [[D]], i8* [[PTR]], i32 32, i1 true)
 ; CHECK-NEXT:    call void @llvm.memmove.p0i8.p0i8.i32(i8* [[E]], i8* [[PTR]], i32 32, i1 true)
@@ -123,6 +134,31 @@ entry:
 
 if.then:                                          ; preds = %entry
   tail call void @free(i8* %foo)
+  br label %if.end
+
+if.end:                                           ; preds = %entry, %if.then
+  ret void
+}
+
+; Same optimization with even a builtin 'operator delete' would be
+; incorrect in general.
+; 'if (p) delete p;' cannot result in a call to 'operator delete(0)'.
+define void @test6a(i8* %foo) minsize {
+; CHECK-LABEL: @test6a(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[TOBOOL:%.*]] = icmp eq i8* [[FOO:%.*]], null
+; CHECK-NEXT:    br i1 [[TOBOOL]], label [[IF_END:%.*]], label [[IF_THEN:%.*]]
+; CHECK:       if.then:
+; CHECK-NEXT:    tail call void @_ZdlPv(i8* [[FOO]])
+; CHECK-NEXT:    br label [[IF_END]]
+; CHECK:       if.end:
+; CHECK-NEXT:    ret void
+entry:
+  %tobool = icmp eq i8* %foo, null
+  br i1 %tobool, label %if.end, label %if.then
+
+if.then:                                          ; preds = %entry
+  tail call void @_ZdlPv(i8* %foo) builtin
   br label %if.end
 
 if.end:                                           ; preds = %entry, %if.then
@@ -231,7 +267,14 @@ declare void @_ZdaPvSt11align_val_t(i8*, i64) nobuiltin
 declare void @_ZdlPvSt11align_val_tRKSt9nothrow_t(i8*, i64, i8*) nobuiltin
 ; delete[](void*, align_val_t, nothrow)
 declare void @_ZdaPvSt11align_val_tRKSt9nothrow_t(i8*, i64, i8*) nobuiltin
-
+; delete(void*, unsigned int, align_val_t)
+declare void @_ZdlPvjSt11align_val_t(i8*, i32, i32) nobuiltin
+; delete(void*, unsigned long, align_val_t)
+declare void @_ZdlPvmSt11align_val_t(i8*, i64, i64) nobuiltin
+; delete[](void*, unsigned int, align_val_t)
+declare void @_ZdaPvjSt11align_val_t(i8*, i32, i32) nobuiltin
+; delete[](void*, unsigned long, align_val_t)
+declare void @_ZdaPvmSt11align_val_t(i8*, i64, i64) nobuiltin
 
 define void @test8() {
 ; CHECK-LABEL: @test8(
@@ -266,6 +309,14 @@ define void @test8() {
   call void @_ZdlPvSt11align_val_tRKSt9nothrow_t(i8* %nwjat, i64 8, i8* %nt) builtin
   %najat = call i8* @_ZnajSt11align_val_tRKSt9nothrow_t(i32 32, i32 8, i8* %nt) builtin
   call void @_ZdaPvSt11align_val_tRKSt9nothrow_t(i8* %najat, i64 8, i8* %nt) builtin
+  %nwa2 = call i8* @_ZnwmSt11align_val_t(i64 32, i64 8) builtin
+  call void @_ZdlPvmSt11align_val_t(i8* %nwa2, i64 32, i64 8) builtin
+  %nwja2 = call i8* @_ZnwjSt11align_val_t(i32 32, i32 8) builtin
+  call void @_ZdlPvjSt11align_val_t(i8* %nwa2, i32 32, i32 8) builtin
+  %naa2 = call i8* @_ZnamSt11align_val_t(i64 32, i64 8) builtin
+  call void @_ZdaPvmSt11align_val_t(i8* %naa2, i64 32, i64 8) builtin
+  %naja2 = call i8* @_ZnajSt11align_val_t(i32 32, i32 8) builtin
+  call void @_ZdaPvjSt11align_val_t(i8* %naja2, i32 32, i32 8) builtin
   ret void
 }
 
@@ -292,7 +343,7 @@ define void @test10()  {
 
 define void @test11() {
 ; CHECK-LABEL: @test11(
-; CHECK-NEXT:    [[CALL:%.*]] = call dereferenceable(8) i8* @_Znwm(i64 8) #5
+; CHECK-NEXT:    [[CALL:%.*]] = call dereferenceable(8) i8* @_Znwm(i64 8) #6
 ; CHECK-NEXT:    call void @_ZdlPv(i8* nonnull [[CALL]])
 ; CHECK-NEXT:    ret void
 ;

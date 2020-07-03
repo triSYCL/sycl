@@ -45,6 +45,10 @@ class Instruction : public User,
   BasicBlock *Parent;
   DebugLoc DbgLoc;                         // 'dbg' Metadata cache.
 
+  /// Relative order of this instruction in its parent basic block. Used for
+  /// O(1) local dominance checks between instructions.
+  mutable unsigned Order = 0;
+
   enum {
     /// This is a bit stored in the SubClassData field which indicates whether
     /// this instruction has metadata attached to it or not.
@@ -117,6 +121,13 @@ public:
   /// the basic block that MovePos lives in, right after MovePos.
   void moveAfter(Instruction *MovePos);
 
+  /// Given an instruction Other in the same basic block as this instruction,
+  /// return true if this instruction comes before Other. In this worst case,
+  /// this takes linear time in the number of instructions in the block. The
+  /// results are cached, so in common cases when the block remains unmodified,
+  /// it takes constant time.
+  bool comesBefore(const Instruction *Other) const;
+
   //===--------------------------------------------------------------------===//
   // Subclass classification.
   //===--------------------------------------------------------------------===//
@@ -129,7 +140,7 @@ public:
   bool isUnaryOp() const { return isUnaryOp(getOpcode()); }
   bool isBinaryOp() const { return isBinaryOp(getOpcode()); }
   bool isIntDivRem() const { return isIntDivRem(getOpcode()); }
-  bool isShift() { return isShift(getOpcode()); }
+  bool isShift() const { return isShift(getOpcode()); }
   bool isCast() const { return isCast(getOpcode()); }
   bool isFuncletPad() const { return isFuncletPad(getOpcode()); }
   bool isExceptionalTerminator() const {
@@ -321,9 +332,6 @@ public:
   /// Returns false if no metadata was found.
   bool extractProfTotalWeight(uint64_t &TotalVal) const;
 
-  /// Sets the branch_weights metadata to \p W for CallInst.
-  void setProfWeight(uint64_t W);
-
   /// Set the debug location information for this instruction.
   void setDebugLoc(DebugLoc Loc) { DbgLoc = std::move(Loc); }
 
@@ -384,6 +392,11 @@ public:
   /// an operator which supports this flag. See LangRef.html for the meaning of
   /// this flag.
   void setHasAllowReciprocal(bool B);
+
+  /// Set or clear the allow-contract flag on this instruction, which must be
+  /// an operator which supports this flag. See LangRef.html for the meaning of
+  /// this flag.
+  void setHasAllowContract(bool B);
 
   /// Set or clear the approximate-math-functions flag on this instruction,
   /// which must be an operator which supports this flag. See LangRef.html for
@@ -738,6 +751,7 @@ public:
 
 private:
   friend class SymbolTableListTraits<Instruction>;
+  friend class BasicBlock; // For renumbering.
 
   // Shadow Value::setValueSubclassData with a private forwarding method so that
   // subclasses cannot accidentally use it.

@@ -6,14 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
+// UNSUPPORTED: c++03, c++11, c++14
 // UNSUPPORTED: libcpp-no-deduction-guides
 // UNSUPPORTED: apple-clang-9
 
 // GCC's implementation of class template deduction is still immature and runs
 // into issues with libc++. However GCC accepts this code when compiling
 // against libstdc++.
-// XFAIL: gcc
+// XFAIL: gcc-5, gcc-6, gcc-7
 
 // <tuple>
 

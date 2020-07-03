@@ -1,4 +1,10 @@
+<<<<<<< HEAD
 // RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
+||||||| merged common ancestors
+// RUN: %clangxx -fsycl %s -o %t.out
+=======
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+>>>>>>> intel/sycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
@@ -193,10 +199,7 @@ inline bool bitwise_comparison_fp32(const half val, const uint32_t exp) {
 }
 
 int main() {
-  // We assert that the length is 1 because we use env to select the device
-  assert(device::get_devices().size() == 1);
-
-  auto dev = device::get_devices()[0];
+  device dev{default_selector()};
   if (!dev.is_host() && !dev.has_extension("cl_khr_fp16")) {
     std::cout << "This device doesn't support the extension cl_khr_fp16"
               << std::endl;
@@ -210,7 +213,7 @@ int main() {
   buffer<half, 1> a{vec_a.data(), r};
   buffer<half, 1> b{vec_b.data(), r};
 
-  queue q;
+  queue q {dev};
 
   verify_add(q, a, b, r, 7.0);
   verify_min(q, a, b, r, 3.0);
@@ -233,6 +236,8 @@ int main() {
   assert(bitwise_comparison_fp16(0.0, 0));
   // -0
   assert(bitwise_comparison_fp16(-0.0, 32768));
+  // 1.9999f
+  assert(bitwise_comparison_fp16(1.9999f, 0x4000));
   // nan
   assert(bitwise_comparison_fp16(0.0 / 0.0, 32256));
   assert(bitwise_comparison_fp16(-0.0 / 0.0, 32256));
@@ -246,6 +251,10 @@ int main() {
   // subnormal
   assert(bitwise_comparison_fp16(9.8E-45, 0));
   assert(bitwise_comparison_fp16(-9.8E-45, 32768));
+  uint32_t subnormal_in_16 = 0x38200000;
+  // verify 0.000038146972 converts to 0.0000382
+  assert(
+      bitwise_comparison_fp16(reinterpret_cast<float &>(subnormal_in_16), 0x0280));
   // overflow
   assert(bitwise_comparison_fp16(half(55504) * 3, 31744));
   assert(bitwise_comparison_fp16(half(-55504) * 3, 64512));

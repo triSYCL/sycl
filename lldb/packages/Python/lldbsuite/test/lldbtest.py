@@ -1,7 +1,7 @@
 """
 LLDB module which provides the abstract base class of lldb test case.
 
-The concrete subclass can override lldbtest.TesBase in order to inherit the
+The concrete subclass can override lldbtest.TestBase in order to inherit the
 common behavior for unitest.TestCase.setUp/tearDown implemented in this file.
 
 The subclass should override the attribute mydir in order for the python runtime
@@ -498,12 +498,16 @@ class Base(unittest2.TestCase):
             mydir = TestBase.compute_mydir(__file__)
         '''
         # /abs/path/to/packages/group/subdir/mytest.py -> group/subdir
-        rel_prefix = test_file[len(os.environ["LLDB_TEST"]) + 1:]
+        rel_prefix = test_file[len(os.environ["LLDB_TEST_SRC"]) + 1:]
         return os.path.dirname(rel_prefix)
 
     def TraceOn(self):
         """Returns True if we are in trace mode (tracing detailed test execution)."""
         return traceAlways
+
+    def trace(self, *args,**kwargs):
+        with recording(self, self.TraceOn()) as sbuf:
+            print(*args, file=sbuf, **kwargs)
 
     @classmethod
     def setUpClass(cls):
@@ -518,14 +522,15 @@ class Base(unittest2.TestCase):
         # Save old working directory.
         cls.oldcwd = os.getcwd()
 
-        # Change current working directory if ${LLDB_TEST} is defined.
-        # See also dotest.py which sets up ${LLDB_TEST}.
-        if ("LLDB_TEST" in os.environ):
-            full_dir = os.path.join(os.environ["LLDB_TEST"],
+        # Change current working directory if ${LLDB_TEST_SRC} is defined.
+        # See also dotest.py which sets up ${LLDB_TEST_SRC}.
+        if ("LLDB_TEST_SRC" in os.environ):
+            full_dir = os.path.join(os.environ["LLDB_TEST_SRC"],
                                     cls.mydir)
             if traceAlways:
                 print("Change dir to:", full_dir, file=sys.stderr)
             os.chdir(full_dir)
+            lldb.SBReproducer.SetWorkingDirectory(full_dir)
 
         # Set platform context.
         cls.platformContext = lldbplatformutil.createPlatformContext()
@@ -642,7 +647,7 @@ class Base(unittest2.TestCase):
         lldb.remote_platform.SetWorkingDirectory(remote_test_dir)
 
         # This function removes all files from the current working directory while leaving
-        # the directories in place. The cleaup is required to reduce the disk space required
+        # the directories in place. The cleanup is required to reduce the disk space required
         # by the test suite while leaving the directories untouched is neccessary because
         # sub-directories might belong to an other test
         def clean_working_directory():
@@ -656,21 +661,27 @@ class Base(unittest2.TestCase):
 
     def getSourceDir(self):
         """Return the full path to the current test."""
-        return os.path.join(os.environ["LLDB_TEST"], self.mydir)
+        return os.path.join(os.environ["LLDB_TEST_SRC"], self.mydir)
 
     def getBuildDirBasename(self):
         return self.__class__.__module__ + "." + self.testMethodName
 
     def getBuildDir(self):
         """Return the full path to the current test."""
-        return os.path.join(os.environ["LLDB_BUILD"], self.mydir,
+        return os.path.join(configuration.test_build_dir, self.mydir,
                             self.getBuildDirBasename())
 
+    def getReproducerDir(self):
+        """Return the full path to the reproducer if enabled."""
+        if configuration.capture_path:
+            return configuration.capture_path
+        if configuration.replay_path:
+            return configuration.replay_path
+        return None
 
     def makeBuildDir(self):
         """Create the test-specific working directory, deleting any previous
         contents."""
-        # See also dotest.py which sets up ${LLDB_BUILD}.
         bdir = self.getBuildDir()
         if os.path.isdir(bdir):
             shutil.rmtree(bdir)
@@ -684,21 +695,43 @@ class Base(unittest2.TestCase):
         """Return absolute path to a file in the test's source directory."""
         return os.path.join(self.getSourceDir(), name)
 
+    def getReproducerArtifact(self, name):
+        lldbutil.mkdir_p(self.getReproducerDir())
+        return os.path.join(self.getReproducerDir(), name)
+
+    def getReproducerRemappedPath(self, path):
+        assert configuration.replay_path
+        assert os.path.isabs(path)
+        path = os.path.relpath(path, '/')
+        return os.path.join(configuration.replay_path, 'root', path)
+
     @classmethod
     def setUpCommands(cls):
         commands = [
+            # First of all, clear all settings to have clean state of global properties.
+            "settings clear -all",
+
             # Disable Spotlight lookup. The testsuite creates
             # different binaries with the same UUID, because they only
             # differ in the debug info, which is not being hashed.
             "settings set symbols.enable-external-lookup false",
 
+            # Disable fix-its by default so that incorrect expressions in tests don't
+            # pass just because Clang thinks it has a fix-it.
+            "settings set target.auto-apply-fixits false",
+
             # Testsuite runs in parallel and the host can have also other load.
             "settings set plugin.process.gdb-remote.packet-timeout 60",
 
             'settings set symbols.clang-modules-cache-path "{}"'.format(
-                configuration.module_cache_dir),
+                configuration.lldb_module_cache_dir),
             "settings set use-color false",
         ]
+
+        # Set any user-overridden settings.
+        for setting, value in configuration.settings:
+            commands.append('setting set %s %s'%(setting, value))
+
         # Make sure that a sanitizer LLDB's environment doesn't get passed on.
         if cls.platformContext and cls.platformContext.shlib_environment_var in os.environ:
             commands.append('settings set target.env-vars {}='.format(
@@ -799,11 +832,11 @@ class Base(unittest2.TestCase):
             # set environment variable names for finding shared libraries
             self.dylibPath = self.platformContext.shlib_environment_var
 
-        # Create the debugger instance if necessary.
-        try:
-            self.dbg = lldb.DBG
-        except AttributeError:
-            self.dbg = lldb.SBDebugger.Create()
+        # Create the debugger instance.
+        self.dbg = lldb.SBDebugger.Create()
+        # Copy selected platform from a global instance if it exists.
+        if lldb.selected_platform is not None:
+            self.dbg.SetSelectedPlatform(lldb.selected_platform)
 
         if not self.dbg:
             raise Exception('Invalid debugger instance')
@@ -825,8 +858,8 @@ class Base(unittest2.TestCase):
         self.darwinWithFramework = self.platformIsDarwin()
         if sys.platform.startswith("darwin"):
             # Handle the framework environment variable if it is set
-            if hasattr(lldbtest_config, 'lldbFrameworkPath'):
-                framework_path = lldbtest_config.lldbFrameworkPath
+            if hasattr(lldbtest_config, 'lldb_framework_path'):
+                framework_path = lldbtest_config.lldb_framework_path
                 # Framework dir should be the directory containing the framework
                 self.framework_dir = framework_path[:framework_path.rfind('LLDB.framework')]
             # If a framework dir was not specified assume the Xcode build
@@ -857,8 +890,10 @@ class Base(unittest2.TestCase):
         del self.subprocesses[:]
         # Ensure any forked processes are cleaned up
         for pid in self.forkedProcessPids:
-            if os.path.exists("/proc/" + str(pid)):
+            try:
                 os.kill(pid, signal.SIGTERM)
+            except OSError:
+                pass
 
     def spawnSubprocess(self, executable, args=[], install_remote=True):
         """ Creates a subprocess.Popen object with the specified executable and arguments,
@@ -930,12 +965,12 @@ class Base(unittest2.TestCase):
     # =======================================================================
 
     def setTearDownCleanup(self, dictionary=None):
-        """Register a cleanup action at tearDown() time with a dictinary"""
+        """Register a cleanup action at tearDown() time with a dictionary"""
         self.dict = dictionary
         self.doTearDownCleanup = True
 
     def addTearDownCleanup(self, dictionary):
-        """Add a cleanup action at tearDown() time with a dictinary"""
+        """Add a cleanup action at tearDown() time with a dictionary"""
         self.dicts.append(dictionary)
         self.doTearDownCleanups = True
 
@@ -1014,6 +1049,11 @@ class Base(unittest2.TestCase):
                 for dict in reversed(self.dicts):
                     self.cleanup(dictionary=dict)
 
+        # This must be the last statement, otherwise teardown hooks or other
+        # lines might depend on this still being active.
+        lldb.SBDebugger.Destroy(self.dbg)
+        del self.dbg
+
     # =========================================================
     # Various callbacks to allow introspection of test progress
     # =========================================================
@@ -1089,7 +1129,7 @@ class Base(unittest2.TestCase):
 
         <session-dir>/<arch>-<compiler>-<test-file>.<test-class>.<test-method>
         """
-        dname = os.path.join(os.environ["LLDB_TEST"],
+        dname = os.path.join(os.environ["LLDB_TEST_SRC"],
                              os.environ["LLDB_SESSION_DIRNAME"])
         if not os.path.isdir(dname):
             os.mkdir(dname)
@@ -1135,7 +1175,7 @@ class Base(unittest2.TestCase):
 
         # We are here because self.tearDown() detected that this test instance
         # either errored or failed.  The lldb.test_result singleton contains
-        # two lists (erros and failures) which get populated by the unittest
+        # two lists (errors and failures) which get populated by the unittest
         # framework.  Look over there for stack trace information.
         #
         # The lists contain 2-tuples of TestCase instances and strings holding
@@ -1169,26 +1209,10 @@ class Base(unittest2.TestCase):
                 if test is self:
                     print(traceback, file=self.session)
 
-        # put footer (timestamp/rerun instructions) into session
-        testMethod = getattr(self, self._testMethodName)
-        if getattr(testMethod, "__benchmarks_test__", False):
-            benchmarks = True
-        else:
-            benchmarks = False
-
         import datetime
         print(
             "Session info generated @",
             datetime.datetime.now().ctime(),
-            file=self.session)
-        print(
-            "To rerun this test, issue the following command from the 'test' directory:\n",
-            file=self.session)
-        print(
-            "./dotest.py %s -v %s %s" %
-            (self.getRunOptions(),
-             ('+b' if benchmarks else '-t'),
-                self.getRerunArgs()),
             file=self.session)
         self.session.close()
         del self.session
@@ -1243,6 +1267,8 @@ class Base(unittest2.TestCase):
         arch = module.getArchitecture()
         if arch == 'amd64':
             arch = 'x86_64'
+        if arch in ['armv7l', 'armv8l'] :
+            arch = 'arm'
         return arch
 
     def getLldbArchitecture(self):
@@ -1415,7 +1441,7 @@ class Base(unittest2.TestCase):
         stdflag = self.getstdFlag()
         stdlibflag = self.getstdlibFlag()
 
-        lib_dir = os.environ["LLDB_LIB_DIR"]
+        lib_dir = configuration.lldb_libs_dir
         if self.hasDarwinFramework():
             d = {'CXX_SOURCES': sources,
                  'EXE': exe_name,
@@ -1442,7 +1468,7 @@ class Base(unittest2.TestCase):
                                                  os.path.join(
                                                      os.environ["LLDB_SRC"],
                                                      "include")),
-                'LD_EXTRAS': "-L%s/../lib -llldb -Wl,-rpath,%s/../lib" % (lib_dir, lib_dir)}
+                'LD_EXTRAS': "-L%s -llldb -Wl,-rpath,%s" % (lib_dir, lib_dir)}
         if self.TraceOn():
             print(
                 "Building LLDB Driver (%s) from sources %s" %
@@ -1455,7 +1481,7 @@ class Base(unittest2.TestCase):
 
         stdflag = self.getstdFlag()
 
-        lib_dir = os.environ["LLDB_LIB_DIR"]
+        lib_dir = configuration.lldb_libs_dir
         if self.hasDarwinFramework():
             d = {'DYLIB_CXX_SOURCES': sources,
                  'DYLIB_NAME': lib_name,
@@ -1480,7 +1506,7 @@ class Base(unittest2.TestCase):
                                                     os.path.join(
                                                         os.environ["LLDB_SRC"],
                                                         "include")),
-                'LD_EXTRAS': "-shared -L%s/../lib -llldb -Wl,-rpath,%s/../lib" % (lib_dir, lib_dir)}
+                'LD_EXTRAS': "-shared -L%s -llldb -Wl,-rpath,%s" % (lib_dir, lib_dir)}
         if self.TraceOn():
             print(
                 "Building LLDB Library (%s) from sources %s" %
@@ -1938,6 +1964,15 @@ class TestBase(Base):
 
         return environment
 
+    def registerSanitizerLibrariesWithTarget(self, target):
+        runtimes = []
+        for m in target.module_iter():
+            libspec = m.GetFileSpec()
+            if "clang_rt" in libspec.GetFilename():
+                runtimes.append(os.path.join(libspec.GetDirectory(),
+                                             libspec.GetFilename()))
+        return self.registerSharedLibrariesWithTarget(target, runtimes)
+
     # utility methods that tests can use to access the current objects
     def target(self):
         if not self.dbg:
@@ -1990,16 +2025,20 @@ class TestBase(Base):
                 process = target.GetProcess()
                 if process:
                     rc = self.invoke(process, "Kill")
-                    self.assertTrue(rc.Success(), PROCESS_KILLED)
+                    assert rc.Success()
         for target in targets:
             self.dbg.DeleteTarget(target)
 
+        # Modules are not orphaned during reproducer replay because they're
+        # leaked on purpose.
+        if not configuration.is_reproducer():
+            # Assert that all targets are deleted.
+            assert self.dbg.GetNumTargets() == 0
+            # Assert that the global module cache is empty.
+            assert lldb.SBModule.GetNumberAllocatedModules() == 0
+
         # Do this last, to make sure it's in reverse order from how we setup.
         Base.tearDown(self)
-
-        # This must be the last statement, otherwise teardown hooks or other
-        # lines might depend on this still being active.
-        del self.dbg
 
     def switch_to_thread_with_stop_reason(self, stop_reason):
         """
@@ -2124,13 +2163,27 @@ class TestBase(Base):
 
         return match_object
 
-    def check_completion_with_desc(self, str_input, match_desc_pairs):
+    def check_completion_with_desc(self, str_input, match_desc_pairs, enforce_order=False):
+        """
+        Checks that when the given input is completed at the given list of
+        completions and descriptions is returned.
+        :param str_input: The input that should be completed. The completion happens at the end of the string.
+        :param match_desc_pairs: A list of pairs that indicate what completions have to be in the list of
+                                 completions returned by LLDB. The first element of the pair is the completion
+                                 string that LLDB should generate and the second element the description.
+        :param enforce_order: True iff the order in which the completions are returned by LLDB
+                              should match the order of the match_desc_pairs pairs.
+        """
         interp = self.dbg.GetCommandInterpreter()
         match_strings = lldb.SBStringList()
         description_strings = lldb.SBStringList()
         num_matches = interp.HandleCompletionWithDescriptions(str_input, len(str_input), 0, -1, match_strings, description_strings)
         self.assertEqual(len(description_strings), len(match_strings))
 
+        # The index of the last matched description in description_strings or
+        # -1 if no description has been matched yet.
+        last_found_index = -1
+        out_of_order_errors = ""
         missing_pairs = []
         for pair in match_desc_pairs:
             found_pair = False
@@ -2139,20 +2192,35 @@ class TestBase(Base):
                 description_candidate = description_strings.GetStringAtIndex(i)
                 if match_candidate == pair[0] and description_candidate == pair[1]:
                     found_pair = True
+                    if enforce_order and last_found_index > i:
+                        new_err = ("Found completion " + pair[0] + " at index " +
+                                  str(i) + " in returned completion list but " +
+                                  "should have been after completion " +
+                                  match_strings.GetStringAtIndex(last_found_index) +
+                                  " (index:" + str(last_found_index) + ")\n")
+                        out_of_order_errors += new_err
+                    last_found_index = i
                     break
             if not found_pair:
                 missing_pairs.append(pair)
 
+        error_msg = ""
+        got_failure = False
         if len(missing_pairs):
-            error_msg = "Missing pairs:\n"
+            got_failure = True
+            error_msg += "Missing pairs:\n"
             for pair in missing_pairs:
                 error_msg += " [" + pair[0] + ":" + pair[1] + "]\n"
+        if len(out_of_order_errors):
+            got_failure = True
+            error_msg += out_of_order_errors
+        if got_failure:
             error_msg += "Got the following " + str(num_matches) + " completions back:\n"
             for i in range(num_matches + 1):
                 match_candidate = match_strings.GetStringAtIndex(i)
                 description_candidate = description_strings.GetStringAtIndex(i)
-                error_msg += "[" + match_candidate + ":" + description_candidate + "]\n"
-            self.assertEqual(0, len(missing_pairs), error_msg)
+                error_msg += "[" + match_candidate + ":" + description_candidate + "] index " + str(i) + "\n"
+            self.assertFalse(got_failure, error_msg)
 
     def complete_exactly(self, str_input, patterns):
         self.complete_from_to(str_input, patterns, True)
@@ -2268,6 +2336,7 @@ FileCheck output:
             substrs=None,
             trace=False,
             error=False,
+            ordered=True,
             matching=True,
             exe=True,
             inHistory=False):
@@ -2279,6 +2348,10 @@ FileCheck output:
         message.  We expect the output from running the command to start with
         'startstr', matches the substrings contained in 'substrs', and regexp
         matches the patterns contained in 'patterns'.
+
+        When matching is true and ordered is true, which are both the default,
+        the strings in the substrs array have to appear in the command output
+        in the order in which they appear in the array.
 
         If the keyword argument error is set to True, it signifies that the API
         client is expecting the command to fail.  In this case, the error stream
@@ -2348,8 +2421,11 @@ FileCheck output:
         # Look for sub strings, if specified.
         keepgoing = matched if matching else not matched
         if substrs and keepgoing:
+            start = 0
             for substr in substrs:
-                matched = output.find(substr) != -1
+                index = output[start:].find(substr)
+                start = start + index if ordered and matching else 0
+                matched = index != -1
                 with recording(self, trace) as sbuf:
                     print("%s sub string: %s" % (heading, substr), file=sbuf)
                     print("Matched" if matched else "Not matched", file=sbuf)
@@ -2371,7 +2447,52 @@ FileCheck output:
                     break
 
         self.assertTrue(matched if matching else not matched,
-                        msg if msg else EXP_MSG(str, output, exe))
+                        msg + "\nCommand output:\n" + EXP_MSG(str, output, exe)
+                        if msg else EXP_MSG(str, output, exe))
+
+    def expect_expr(
+            self,
+            expr,
+            result_summary=None,
+            result_value=None,
+            result_type=None,
+            ):
+        """
+        Evaluates the given expression and verifies the result.
+        :param expr: The expression as a string.
+        :param result_summary: The summary that the expression should have. None if the summary should not be checked.
+        :param result_value: The value that the expression should have. None if the value should not be checked.
+        :param result_type: The type that the expression result should have. None if the type should not be checked.
+        """
+        self.assertTrue(expr.strip() == expr, "Expression contains trailing/leading whitespace: '" + expr + "'")
+
+        frame = self.frame()
+        options = lldb.SBExpressionOptions()
+
+        # Disable fix-its that tests don't pass by accident.
+        options.SetAutoApplyFixIts(False)
+
+        # Set the usual default options for normal expressions.
+        options.SetIgnoreBreakpoints(True)
+
+        if self.frame().IsValid():
+          options.SetLanguage(frame.GuessLanguage())
+          eval_result = self.frame().EvaluateExpression(expr, options)
+        else:
+          eval_result = self.target().EvaluateExpression(expr, options)
+
+        if not eval_result.GetError().Success():
+            self.assertTrue(eval_result.GetError().Success(),
+                "Unexpected failure with msg: " + eval_result.GetError().GetCString())
+
+        if result_type:
+            self.assertEqual(result_type, eval_result.GetDisplayTypeName())
+
+        if result_value:
+            self.assertEqual(result_value, eval_result.GetValue())
+
+        if result_summary:
+            self.assertEqual(result_summary, eval_result.GetSummary())
 
     def invoke(self, obj, name, trace=False):
         """Use reflection to call a method dynamically with no argument."""

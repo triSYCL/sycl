@@ -19,6 +19,7 @@
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/DebugLoc.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
@@ -65,17 +66,14 @@ class BranchRelaxation : public MachineFunctionPass {
     /// block.
     unsigned postOffset(const MachineBasicBlock &MBB) const {
       const unsigned PO = Offset + Size;
-      const llvm::Align Align = MBB.getAlignment();
-      if (Align == 1)
-        return PO;
-
-      const llvm::Align ParentAlign = MBB.getParent()->getAlignment();
-      if (Align <= ParentAlign)
-        return PO + offsetToAlignment(PO, Align);
+      const Align Alignment = MBB.getAlignment();
+      const Align ParentAlign = MBB.getParent()->getAlignment();
+      if (Alignment <= ParentAlign)
+        return alignTo(PO, Alignment);
 
       // The alignment of this MBB is larger than the function's alignment, so we
       // can't tell whether or not it will insert nops. Assume that it will.
-      return PO + Align.value() + offsetToAlignment(PO, Align);
+      return alignTo(PO, Alignment) + Alignment.value() - ParentAlign.value();
     }
   };
 
@@ -127,9 +125,7 @@ void BranchRelaxation::verify() {
 #ifndef NDEBUG
   unsigned PrevNum = MF->begin()->getNumber();
   for (MachineBasicBlock &MBB : *MF) {
-    unsigned LogAlign = MBB.getLogAlignment();
-    unsigned Num = MBB.getNumber();
-    assert(BlockInfo[Num].Offset % (1u << LogAlign) == 0);
+    const unsigned Num = MBB.getNumber();
     assert(!Num || BlockInfo[PrevNum].postOffset(MBB) <= BlockInfo[Num].Offset);
     assert(BlockInfo[Num].Size == computeBlockSize(MBB));
     PrevNum = Num;
@@ -195,10 +191,9 @@ unsigned BranchRelaxation::getInstrOffset(const MachineInstr &MI) const {
 
 void BranchRelaxation::adjustBlockOffsets(MachineBasicBlock &Start) {
   unsigned PrevNum = Start.getNumber();
-  for (auto &MBB : make_range(MachineFunction::iterator(Start), MF->end())) {
+  for (auto &MBB :
+       make_range(std::next(MachineFunction::iterator(Start)), MF->end())) {
     unsigned Num = MBB.getNumber();
-    if (!Num) // block zero is never changed from offset zero.
-      continue;
     // Get the offset and known bits at the end of the layout predecessor.
     // Include the alignment of the current block.
     BlockInfo[Num].Offset = BlockInfo[PrevNum].postOffset(MBB);
@@ -250,8 +245,7 @@ MachineBasicBlock *BranchRelaxation::splitBlockBeforeInstr(MachineInstr &MI,
 
   // Cleanup potential unconditional branch to successor block.
   // Note that updateTerminator may change the size of the blocks.
-  NewBB->updateTerminator();
-  OrigBB->updateTerminator();
+  OrigBB->updateTerminator(NewBB);
 
   // Figure out how large the OrigBB is.  As the first half of the original
   // block, it cannot contain a tablejump.  The size includes

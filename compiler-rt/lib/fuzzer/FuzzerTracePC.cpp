@@ -67,45 +67,6 @@ void TracePC::HandleInline8bitCountersInit(uint8_t *Start, uint8_t *Stop) {
   NumInline8bitCounters += M.Size();
 }
 
-// Mark all full page counter regions as PROT_NONE and set Enabled=false.
-// The first time the instrumented code hits such a protected/disabled
-// counter region we should catch a SEGV and call UnprotectLazyCounters,
-// which will mark the page as PROT_READ|PROT_WRITE and set Enabled=true.
-//
-// Whenever other functions iterate over the counters they should ignore
-// regions with Enabled=false.
-void TracePC::ProtectLazyCounters() {
-  size_t NumPagesProtected = 0;
-  IterateCounterRegions([&](Module::Region &R) {
-    if (!R.OneFullPage) return;
-    if (Mprotect(R.Start, R.Stop - R.Start, false)) {
-      R.Enabled = false;
-      NumPagesProtected++;
-    }
-  });
-  if (NumPagesProtected)
-    Printf("INFO: %zd pages of counters where protected;"
-           " libFuzzer's SEGV handler must be installed\n",
-           NumPagesProtected);
-}
-
-bool TracePC::UnprotectLazyCounters(void *CounterPtr) {
-  // Printf("UnprotectLazyCounters: %p\n", CounterPtr);
-  if (!CounterPtr)
-    return false;
-  bool Done = false;
-  uint8_t *Addr = reinterpret_cast<uint8_t *>(CounterPtr);
-  IterateCounterRegions([&](Module::Region &R) {
-    if (!R.OneFullPage || R.Enabled || Done) return;
-    if (Addr >= R.Start && Addr < R.Stop)
-      if (Mprotect(R.Start, R.Stop - R.Start, true)) {
-        R.Enabled = true;
-        Done = true;
-      }
-  });
-  return Done;
-}
-
 void TracePC::HandlePCsInit(const uintptr_t *Start, const uintptr_t *Stop) {
   const PCTableEntry *B = reinterpret_cast<const PCTableEntry *>(Start);
   const PCTableEntry *E = reinterpret_cast<const PCTableEntry *>(Stop);
@@ -279,7 +240,9 @@ void TracePC::IterateCoveredFunctions(CallBack CB) {
 void TracePC::SetFocusFunction(const std::string &FuncName) {
   // This function should be called once.
   assert(!FocusFunctionCounterPtr);
-  if (FuncName.empty())
+  // "auto" is not a valid function name. If this function is called with "auto"
+  // that means the auto focus functionality failed.
+  if (FuncName.empty() || FuncName == "auto")
     return;
   for (size_t M = 0; M < NumModules; M++) {
     auto &PCTE = ModulePCTable[M];
@@ -295,6 +258,10 @@ void TracePC::SetFocusFunction(const std::string &FuncName) {
       return;
     }
   }
+
+  Printf("ERROR: Failed to set focus function. Make sure the function name is "
+         "valid (%s) and symbolization is enabled.\n", FuncName.c_str());
+  exit(1);
 }
 
 bool TracePC::ObservedFocusFunction() {

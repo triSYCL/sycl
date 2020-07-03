@@ -11,9 +11,10 @@
 #include <CL/__spirv/spirv_types.hpp>
 #include <CL/sycl/access/access.hpp>
 #include <CL/sycl/detail/common.hpp>
+#include <CL/sycl/detail/export.hpp>
 #include <CL/sycl/detail/sampler_impl.hpp>
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 enum class addressing_mode : unsigned int {
   mirrored_repeat = CL_ADDRESS_MIRRORED_REPEAT,
@@ -39,7 +40,12 @@ template <typename DataT, int Dimensions, access::mode AccessMode,
 class image_accessor;
 }
 
-class sampler {
+/// Encapsulates a configuration for sampling an image accessor.
+///
+/// \sa sycl_api_acc
+///
+/// \ingroup sycl_api
+class __SYCL_EXPORT sampler {
 public:
   sampler(coordinate_normalization_mode normalizationMode,
           addressing_mode addressingMode, filtering_mode filteringMode);
@@ -84,12 +90,13 @@ private:
   friend class detail::image_accessor;
 };
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)
 
 namespace std {
 template <> struct hash<cl::sycl::sampler> {
   size_t operator()(const cl::sycl::sampler &s) const {
 #ifdef __SYCL_DEVICE_ONLY__
+    (void)s;
     return 0;
 #else
     return hash<std::shared_ptr<cl::sycl::detail::sampler_impl>>()(

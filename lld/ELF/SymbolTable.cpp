@@ -26,7 +26,6 @@
 using namespace llvm;
 using namespace llvm::object;
 using namespace llvm::ELF;
-
 using namespace lld;
 using namespace lld::elf;
 
@@ -41,12 +40,18 @@ void SymbolTable::wrap(Symbol *sym, Symbol *real, Symbol *wrap) {
   idx2 = idx1;
   idx1 = idx3;
 
-  // Now renaming is complete. No one refers Real symbol. We could leave
-  // Real as-is, but if Real is written to the symbol table, that may
-  // contain irrelevant values. So, we copy all values from Sym to Real.
-  StringRef s = real->getName();
+  if (real->exportDynamic)
+    sym->exportDynamic = true;
+
+  // Now renaming is complete, and no one refers to real. We drop real from
+  // .symtab and .dynsym. If real is undefined, it is important that we don't
+  // leave it in .dynsym, because otherwise it might lead to an undefined symbol
+  // error in a subsequent link. If real is defined, we could emit real as an
+  // alias for sym, but that could degrade the user experience of some tools
+  // that can print out only one symbol for each location: sym is a preferred
+  // name than real, but they might print out real instead.
   memcpy(real, sym, sizeof(SymbolUnion));
-  real->setName(s);
+  real->isUsedInRegularObj = false;
 }
 
 // Find an existing symbol or create a new one.
@@ -104,6 +109,13 @@ Symbol *SymbolTable::find(StringRef name) {
   return sym;
 }
 
+// A version script/dynamic list is only meaningful for a Defined symbol.
+// A CommonSymbol will be converted to a Defined in replaceCommonSymbols().
+// A lazy symbol may be made Defined if an LTO libcall fetches it.
+static bool canBeVersioned(const Symbol &sym) {
+  return sym.isDefined() || sym.isCommon() || sym.isLazy();
+}
+
 // Initialize demangledSyms with a map from demangled symbols to symbol
 // objects. Used to handle "extern C++" directive in version scripts.
 //
@@ -120,14 +132,9 @@ Symbol *SymbolTable::find(StringRef name) {
 StringMap<std::vector<Symbol *>> &SymbolTable::getDemangledSyms() {
   if (!demangledSyms) {
     demangledSyms.emplace();
-    for (Symbol *sym : symVector) {
-      if (!sym->isDefined() && !sym->isCommon())
-        continue;
-      if (Optional<std::string> s = demangleItanium(sym->getName()))
-        (*demangledSyms)[*s].push_back(sym);
-      else
-        (*demangledSyms)[sym->getName()].push_back(sym);
-    }
+    for (Symbol *sym : symVector)
+      if (canBeVersioned(*sym))
+        (*demangledSyms)[demangleItanium(sym->getName())].push_back(sym);
   }
   return *demangledSyms;
 }
@@ -135,15 +142,15 @@ StringMap<std::vector<Symbol *>> &SymbolTable::getDemangledSyms() {
 std::vector<Symbol *> SymbolTable::findByVersion(SymbolVersion ver) {
   if (ver.isExternCpp)
     return getDemangledSyms().lookup(ver.name);
-  if (Symbol *b = find(ver.name))
-    if (b->isDefined() || b->isCommon())
-      return {b};
+  if (Symbol *sym = find(ver.name))
+    if (canBeVersioned(*sym))
+      return {sym};
   return {};
 }
 
 std::vector<Symbol *> SymbolTable::findAllByVersion(SymbolVersion ver) {
   std::vector<Symbol *> res;
-  StringMatcher m(ver.name);
+  SingleStringMatcher m(ver.name);
 
   if (ver.isExternCpp) {
     for (auto &p : getDemangledSyms())
@@ -153,7 +160,7 @@ std::vector<Symbol *> SymbolTable::findAllByVersion(SymbolVersion ver) {
   }
 
   for (Symbol *sym : symVector)
-    if ((sym->isDefined() || sym->isCommon()) && m.match(sym->getName()))
+    if (canBeVersioned(*sym) && m.match(sym->getName()))
       res.push_back(sym);
   return res;
 }
@@ -219,7 +226,7 @@ void SymbolTable::assignExactVersion(SymbolVersion ver, uint16_t versionId,
 }
 
 void SymbolTable::assignWildcardVersion(SymbolVersion ver, uint16_t versionId) {
-  // Exact matching takes precendence over fuzzy matching,
+  // Exact matching takes precedence over fuzzy matching,
   // so we set a version to a symbol only if no version has been assigned
   // to the symbol. This behavior is compatible with GNU.
   for (Symbol *sym : findAllByVersion(ver))

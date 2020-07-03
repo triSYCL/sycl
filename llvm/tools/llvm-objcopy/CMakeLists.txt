@@ -9,6 +9,10 @@ set(LLVM_TARGET_DEFINITIONS ObjcopyOpts.td)
 tablegen(LLVM ObjcopyOpts.inc -gen-opt-parser-defs)
 add_public_tablegen_target(ObjcopyOptsTableGen)
 
+set(LLVM_TARGET_DEFINITIONS InstallNameToolOpts.td)
+tablegen(LLVM InstallNameToolOpts.inc -gen-opt-parser-defs)
+add_public_tablegen_target(InstallNameToolOptsTableGen)
+
 set(LLVM_TARGET_DEFINITIONS StripOpts.td)
 tablegen(LLVM StripOpts.inc -gen-opt-parser-defs)
 add_public_tablegen_target(StripOptsTableGen)
@@ -21,6 +25,7 @@ add_llvm_tool(llvm-objcopy
   COFF/Object.cpp
   COFF/Reader.cpp
   COFF/Writer.cpp
+  ELF/ELFConfig.cpp
   ELF/ELFObjcopy.cpp
   ELF/Object.cpp
   MachO/MachOObjcopy.cpp
@@ -28,11 +33,17 @@ add_llvm_tool(llvm-objcopy
   MachO/MachOWriter.cpp
   MachO/MachOLayoutBuilder.cpp
   MachO/Object.cpp
+  wasm/Object.cpp
+  wasm/Reader.cpp
+  wasm/Writer.cpp
+  wasm/WasmObjcopy.cpp
   DEPENDS
   ObjcopyOptsTableGen
+  InstallNameToolOptsTableGen
   StripOptsTableGen
   )
 
+add_llvm_tool_symlink(llvm-install-name-tool llvm-objcopy)
 add_llvm_tool_symlink(llvm-strip llvm-objcopy)
 
 if(LLVM_INSTALL_BINUTILS_SYMLINKS)

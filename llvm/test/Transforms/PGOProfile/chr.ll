@@ -468,15 +468,14 @@ define i32 @test_chr_5(i32* %i, i32 %sum0) !prof !14 {
 ; CHECK-NEXT:    [[SUM2_NONCHR:%.*]] = select i1 [[TMP11]], i32 [[SUM1_NONCHR]], i32 [[TMP12]], !prof !16
 ; CHECK-NEXT:    [[TMP13:%.*]] = and i32 [[TMP0]], 4
 ; CHECK-NEXT:    [[TMP14:%.*]] = icmp eq i32 [[TMP13]], 0
-; CHECK-NEXT:    br i1 [[TMP14]], label [[BB3]], label [[BB1_NONCHR:%.*]], !prof !16
-; CHECK:       bb1.nonchr:
 ; CHECK-NEXT:    [[TMP15:%.*]] = and i32 [[TMP0]], 8
 ; CHECK-NEXT:    [[TMP16:%.*]] = icmp eq i32 [[TMP15]], 0
-; CHECK-NEXT:    [[SUM4_NONCHR_V:%.*]] = select i1 [[TMP16]], i32 44, i32 88, !prof !16
+; CHECK-NEXT:    [[SUM4_NONCHR_V:%.*]] = select i1 [[TMP16]], i32 44, i32 88
 ; CHECK-NEXT:    [[SUM4_NONCHR:%.*]] = add i32 [[SUM2_NONCHR]], [[SUM4_NONCHR_V]]
+; CHECK-NEXT:    [[SUM5_NONCHR:%.*]] = select i1 [[TMP14]], i32 [[SUM2_NONCHR]], i32 [[SUM4_NONCHR]], !prof !16
 ; CHECK-NEXT:    br label [[BB3]]
 ; CHECK:       bb3:
-; CHECK-NEXT:    [[SUM6:%.*]] = phi i32 [ [[TMP4]], [[BB0]] ], [ [[SUM0]], [[ENTRY_SPLIT_NONCHR]] ], [ [[SUM2_NONCHR]], [[BB0_NONCHR]] ], [ [[SUM4_NONCHR]], [[BB1_NONCHR]] ]
+; CHECK-NEXT:    [[SUM6:%.*]] = phi i32 [ [[TMP4]], [[BB0]] ], [ [[SUM0]], [[ENTRY_SPLIT_NONCHR]] ], [ [[SUM5_NONCHR]], [[BB0_NONCHR]] ]
 ; CHECK-NEXT:    ret i32 [[SUM6]]
 ;
 entry:
@@ -569,15 +568,14 @@ define i32 @test_chr_5_1(i32* %i, i32 %sum0) !prof !14 {
 ; CHECK-NEXT:    [[SUM2_NONCHR:%.*]] = select i1 [[TMP14]], i32 [[SUM1_NONCHR]], i32 [[TMP15]], !prof !16
 ; CHECK-NEXT:    [[TMP16:%.*]] = and i32 [[SUM0]], 4
 ; CHECK-NEXT:    [[TMP17:%.*]] = icmp eq i32 [[TMP16]], 0
-; CHECK-NEXT:    br i1 [[TMP17]], label [[BB3]], label [[BB1_NONCHR:%.*]], !prof !16
-; CHECK:       bb1.nonchr:
 ; CHECK-NEXT:    [[TMP18:%.*]] = and i32 [[TMP0]], 8
 ; CHECK-NEXT:    [[TMP19:%.*]] = icmp eq i32 [[TMP18]], 0
-; CHECK-NEXT:    [[SUM4_NONCHR_V:%.*]] = select i1 [[TMP19]], i32 44, i32 88, !prof !16
+; CHECK-NEXT:    [[SUM4_NONCHR_V:%.*]] = select i1 [[TMP19]], i32 44, i32 88
 ; CHECK-NEXT:    [[SUM4_NONCHR:%.*]] = add i32 [[SUM2_NONCHR]], [[SUM4_NONCHR_V]]
+; CHECK-NEXT:    [[SUM5_NONCHR:%.*]] = select i1 [[TMP17]], i32 [[SUM2_NONCHR]], i32 [[SUM4_NONCHR]], !prof !16
 ; CHECK-NEXT:    br label [[BB3]]
 ; CHECK:       bb3:
-; CHECK-NEXT:    [[SUM6:%.*]] = phi i32 [ [[TMP7]], [[BB0]] ], [ [[SUM0]], [[ENTRY_SPLIT_NONCHR]] ], [ [[SUM2_NONCHR]], [[BB0_NONCHR]] ], [ [[SUM4_NONCHR]], [[BB1_NONCHR]] ]
+; CHECK-NEXT:    [[SUM6:%.*]] = phi i32 [ [[TMP7]], [[BB0]] ], [ [[SUM0]], [[ENTRY_SPLIT_NONCHR]] ], [ [[SUM5_NONCHR]], [[BB0_NONCHR]] ]
 ; CHECK-NEXT:    ret i32 [[SUM6]]
 ;
 entry:
@@ -667,15 +665,14 @@ define i32 @test_chr_6(i32* %i, i32* %j, i32 %sum0) !prof !14 {
 ; CHECK-NEXT:    [[SUM2_NONCHR:%.*]] = select i1 [[V4_NONCHR]], i32 [[SUM0]], i32 [[V8_NONCHR]], !prof !16
 ; CHECK-NEXT:    [[V9_NONCHR:%.*]] = and i32 [[J0]], 4
 ; CHECK-NEXT:    [[V10_NONCHR:%.*]] = icmp eq i32 [[V9_NONCHR]], 0
-; CHECK-NEXT:    br i1 [[V10_NONCHR]], label [[BB3]], label [[BB1_NONCHR:%.*]], !prof !16
-; CHECK:       bb1.nonchr:
 ; CHECK-NEXT:    [[V11_NONCHR:%.*]] = and i32 [[I0]], 8
 ; CHECK-NEXT:    [[V12_NONCHR:%.*]] = icmp eq i32 [[V11_NONCHR]], 0
-; CHECK-NEXT:    [[SUM4_NONCHR_V:%.*]] = select i1 [[V12_NONCHR]], i32 44, i32 88, !prof !16
+; CHECK-NEXT:    [[SUM4_NONCHR_V:%.*]] = select i1 [[V12_NONCHR]], i32 44, i32 88
 ; CHECK-NEXT:    [[SUM4_NONCHR:%.*]] = add i32 [[SUM2_NONCHR]], [[SUM4_NONCHR_V]]
+; CHECK-NEXT:    [[SUM5_NONCHR:%.*]] = select i1 [[V10_NONCHR]], i32 [[SUM2_NONCHR]], i32 [[SUM4_NONCHR]], !prof !16
 ; CHECK-NEXT:    br label [[BB3]]
 ; CHECK:       bb3:
-; CHECK-NEXT:    [[SUM6:%.*]] = phi i32 [ [[V13]], [[BB0]] ], [ [[SUM0]], [[ENTRY_SPLIT_NONCHR]] ], [ [[SUM2_NONCHR]], [[BB0_NONCHR]] ], [ [[SUM4_NONCHR]], [[BB1_NONCHR]] ]
+; CHECK-NEXT:    [[SUM6:%.*]] = phi i32 [ [[V13]], [[BB0]] ], [ [[SUM0]], [[ENTRY_SPLIT_NONCHR]] ], [ [[SUM5_NONCHR]], [[BB0_NONCHR]] ]
 ; CHECK-NEXT:    ret i32 [[SUM6]]
 ;
 entry:
@@ -799,10 +796,6 @@ define i32 @test_chr_7_1(i32* %i, i32* %j, i32 %sum0) !prof !14 {
 ; CHECK-LABEL: @test_chr_7_1(
 ; CHECK-NEXT:  entry:
 ; CHECK-NEXT:    [[I0:%.*]] = load i32, i32* [[I:%.*]], align 4
-; CHECK-NEXT:    [[V3:%.*]] = and i32 [[I0]], 2
-; CHECK-NEXT:    [[V4:%.*]] = icmp eq i32 [[V3]], 0
-; CHECK-NEXT:    [[V8:%.*]] = add i32 [[SUM0:%.*]], 43
-; CHECK-NEXT:    [[SUM2:%.*]] = select i1 [[V4]], i32 [[SUM0]], i32 [[V8]], !prof !16
 ; CHECK-NEXT:    call void @foo()
 ; CHECK-NEXT:    [[J0:%.*]] = load i32, i32* [[J:%.*]], align 4
 ; CHECK-NEXT:    [[TMP0:%.*]] = and i32 [[J0]], 12
@@ -827,6 +820,10 @@ define i32 @test_chr_7_1(i32* %i, i32* %j, i32 %sum0) !prof !14 {
 ; CHECK-NEXT:    call void @foo()
 ; CHECK-NEXT:    br label [[BB3]]
 ; CHECK:       bb3:
+; CHECK-NEXT:    [[V3:%.*]] = and i32 [[I0]], 2
+; CHECK-NEXT:    [[V4:%.*]] = icmp eq i32 [[V3]], 0
+; CHECK-NEXT:    [[V8:%.*]] = add i32 [[SUM0:%.*]], 43
+; CHECK-NEXT:    [[SUM2:%.*]] = select i1 [[V4]], i32 [[SUM0]], i32 [[V8]], !prof !16
 ; CHECK-NEXT:    ret i32 [[SUM2]]
 ;
 entry:
@@ -1384,8 +1381,6 @@ define i32 @test_chr_15(i32* %i, i32* %j, i32 %sum0, i1 %pred, i32 %z) !prof !14
 ; CHECK-NEXT:    [[V4:%.*]] = icmp eq i32 [[V6]], [[J0]]
 ; CHECK-NEXT:    [[V8:%.*]] = add i32 [[SUM0:%.*]], 43
 ; CHECK-NEXT:    [[SUM2:%.*]] = select i1 [[V4]], i32 [[SUM0]], i32 [[V8]], !prof !16
-; CHECK-NEXT:    [[V5:%.*]] = icmp eq i32 [[I0]], [[SUM2]]
-; CHECK-NEXT:    [[SUM3:%.*]] = select i1 [[V5]], i32 [[SUM2]], i32 [[V8]], !prof !16
 ; CHECK-NEXT:    call void @foo()
 ; CHECK-NEXT:    [[V9:%.*]] = and i32 [[I0]], 4
 ; CHECK-NEXT:    [[V10:%.*]] = icmp eq i32 [[V9]], 0
@@ -1394,6 +1389,8 @@ define i32 @test_chr_15(i32* %i, i32* %j, i32 %sum0, i1 %pred, i32 %z) !prof !14
 ; CHECK-NEXT:    call void @foo()
 ; CHECK-NEXT:    br label [[BB3]]
 ; CHECK:       bb3:
+; CHECK-NEXT:    [[V5:%.*]] = icmp eq i32 [[I0]], [[SUM2]]
+; CHECK-NEXT:    [[SUM3:%.*]] = select i1 [[V5]], i32 [[SUM2]], i32 [[V8]], !prof !16
 ; CHECK-NEXT:    [[V11:%.*]] = add i32 [[I0]], [[SUM3]]
 ; CHECK-NEXT:    ret i32 [[V11]]
 ;
@@ -1754,15 +1751,14 @@ define i32 @test_chr_19(i32* %i, i32 %sum0) !prof !14 {
 ; CHECK-NEXT:    [[TMP8:%.*]] = icmp eq i32 [[TMP7]], 0
 ; CHECK-NEXT:    [[TMP9:%.*]] = add i32 [[SUM0]], 85
 ; CHECK-NEXT:    [[SUM2_NONCHR:%.*]] = select i1 [[TMP8]], i32 [[SUM0]], i32 [[TMP9]], !prof !16
-; CHECK-NEXT:    br i1 [[TMP8]], label [[BB3]], label [[BB1_NONCHR:%.*]], !prof !16
-; CHECK:       bb1.nonchr:
 ; CHECK-NEXT:    [[TMP10:%.*]] = and i32 [[TMP0]], 8
 ; CHECK-NEXT:    [[TMP11:%.*]] = icmp eq i32 [[TMP10]], 0
-; CHECK-NEXT:    [[SUM4_NONCHR_V:%.*]] = select i1 [[TMP11]], i32 44, i32 88, !prof !16
+; CHECK-NEXT:    [[SUM4_NONCHR_V:%.*]] = select i1 [[TMP11]], i32 44, i32 88
 ; CHECK-NEXT:    [[SUM4_NONCHR:%.*]] = add i32 [[SUM2_NONCHR]], [[SUM4_NONCHR_V]]
+; CHECK-NEXT:    [[SUM5_NONCHR:%.*]] = select i1 [[TMP8]], i32 [[SUM2_NONCHR]], i32 [[SUM4_NONCHR]], !prof !16
 ; CHECK-NEXT:    br label [[BB3]]
 ; CHECK:       bb3:
-; CHECK-NEXT:    [[SUM6:%.*]] = phi i32 [ [[TMP4]], [[BB0]] ], [ [[SUM0]], [[ENTRY_SPLIT_NONCHR]] ], [ [[SUM2_NONCHR]], [[BB0_NONCHR]] ], [ [[SUM4_NONCHR]], [[BB1_NONCHR]] ]
+; CHECK-NEXT:    [[SUM6:%.*]] = phi i32 [ [[TMP4]], [[BB0]] ], [ [[SUM0]], [[ENTRY_SPLIT_NONCHR]] ], [ [[SUM5_NONCHR]], [[BB0_NONCHR]] ]
 ; CHECK-NEXT:    ret i32 [[SUM6]]
 ;
 entry:
@@ -2008,6 +2004,14 @@ bb10:
 ; Test a case with a really long use-def chains. This test checks that it's not
 ; really slow and doesn't appear to be hanging.
 define i64 @test_chr_22(i1 %i, i64* %j, i64 %v0) !prof !14 {
+; CHECK-LABEL: @test_chr_22(
+; CHECK-NEXT:  bb0:
+; CHECK-NEXT:    [[REASS_ADD:%.*]] = shl i64 [[V0:%.*]], 1
+; CHECK-NEXT:    [[V2:%.*]] = add i64 [[REASS_ADD]], 3
+; CHECK-NEXT:    [[V299:%.*]] = mul i64 [[V2]], 7860086430977039991
+; CHECK-NEXT:    store i64 [[V299]], i64* [[J:%.*]], align 4
+; CHECK-NEXT:    ret i64 99
+;
 bb0:
   %v1 = add i64 %v0, 3
   %v2 = add i64 %v1, %v0
@@ -2321,6 +2325,12 @@ bb0:
 ; test_chr_22 in that it has nested control structures (multiple scopes) and
 ; covers additional code.
 define i64 @test_chr_23(i64 %v0) !prof !14 {
+; CHECK-LABEL: @test_chr_23(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[TMP0:%.*]] = mul i64 [[V0:%.*]], 50
+; CHECK-NEXT:    [[V10:%.*]] = icmp ne i64 [[TMP0]], -50
+; CHECK-NEXT:    ret i64 99
+;
 entry:
   %v1 = add i64 %v0, 3
   %v2 = add i64 %v1, %v1
@@ -2467,6 +2477,50 @@ end:
   ret i64 99
 }
 
+; Test to not crash upon a 0:0 branch_weight metadata.
+define void @test_chr_24(i32* %i) !prof !14 {
+; CHECK-LABEL: @test_chr_24(
+; CHECK-NEXT:  entry:
+; CHECK-NEXT:    [[TMP0:%.*]] = load i32, i32* [[I:%.*]], align 4
+; CHECK-NEXT:    [[TMP1:%.*]] = and i32 [[TMP0]], 1
+; CHECK-NEXT:    [[TMP2:%.*]] = icmp eq i32 [[TMP1]], 0
+; CHECK-NEXT:    br i1 [[TMP2]], label [[BB1:%.*]], label [[BB0:%.*]], !prof !21
+; CHECK:       bb0:
+; CHECK-NEXT:    call void @foo()
+; CHECK-NEXT:    br label [[BB1]]
+; CHECK:       bb1:
+; CHECK-NEXT:    [[TMP3:%.*]] = and i32 [[TMP0]], 2
+; CHECK-NEXT:    [[TMP4:%.*]] = icmp eq i32 [[TMP3]], 0
+; CHECK-NEXT:    br i1 [[TMP4]], label [[BB3:%.*]], label [[BB2:%.*]], !prof !21
+; CHECK:       bb2:
+; CHECK-NEXT:    call void @foo()
+; CHECK-NEXT:    br label [[BB3]]
+; CHECK:       bb3:
+; CHECK-NEXT:    ret void
+;
+entry:
+  %0 = load i32, i32* %i
+  %1 = and i32 %0, 1
+  %2 = icmp eq i32 %1, 0
+  br i1 %2, label %bb1, label %bb0, !prof !17
+
+bb0:
+  call void @foo()
+  br label %bb1
+
+bb1:
+  %3 = and i32 %0, 2
+  %4 = icmp eq i32 %3, 0
+  br i1 %4, label %bb3, label %bb2, !prof !17
+
+bb2:
+  call void @foo()
+  br label %bb3
+
+bb3:
+  ret void
+}
+
 !llvm.module.flags = !{!0}
 !0 = !{i32 1, !"ProfileSummary", !1}
 !1 = !{!2, !3, !4, !5, !6, !7, !8, !9}
@@ -2486,6 +2540,7 @@ end:
 !14 = !{!"function_entry_count", i64 100}
 !15 = !{!"branch_weights", i32 0, i32 1}
 !16 = !{!"branch_weights", i32 1, i32 1}
+!17 = !{!"branch_weights", i32 0, i32 0}
 ; CHECK: !15 = !{!"branch_weights", i32 1000, i32 0}
 ; CHECK: !16 = !{!"branch_weights", i32 0, i32 1}
 ; CHECK: !17 = !{!"branch_weights", i32 1, i32 1}

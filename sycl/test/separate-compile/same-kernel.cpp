@@ -6,13 +6,25 @@
 //
 //===----------------------------------------------------------------------===//
 // >> ---- compile src1
+<<<<<<< HEAD
 // RUN: %clangxx -std=c++17  -fsycl -c %s -o %t-same-kernel-a.o
+||||||| merged common ancestors
+// RUN: %clangxx -fsycl -c %s -o %t-same-kernel-a.o
+=======
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -c %s -o %t-same-kernel-a.o
+>>>>>>> intel/sycl
 //
 // >> ---- compile src2
+<<<<<<< HEAD
 // RUN: %clangxx -DB_CPP=1 -std=c++17  -fsycl -c %s -o %t-same-kernel-b.o
+||||||| merged common ancestors
+// RUN: %clangxx -DB_CPP=1 -fsycl -c %s -o %t-same-kernel-b.o
+=======
+// RUN: %clangxx -DB_CPP=1 -fsycl -fsycl-targets=%sycl_triple -c %s -o %t-same-kernel-b.o
+>>>>>>> intel/sycl
 //
 // >> ---- link the full hetero app
-// RUN: %clangxx %t-same-kernel-a.o %t-same-kernel-b.o -o %t-same-kernel.exe -fsycl
+// RUN: %clangxx %t-same-kernel-a.o %t-same-kernel-b.o -o %t-same-kernel.exe -fsycl -fsycl-targets=%sycl_triple
 // RUN: %CPU_RUN_PLACEHOLDER %t-same-kernel.exe
 // RUN: %GPU_RUN_PLACEHOLDER %t-same-kernel.exe
 // RUN: %ACC_RUN_PLACEHOLDER %t-same-kernel.exe

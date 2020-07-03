@@ -15,12 +15,12 @@
 #define LLVM_SUPPORT_VERSIONTUPLE_H
 
 #include "llvm/ADT/Optional.h"
-#include "llvm/ADT/StringRef.h"
-#include "llvm/Support/raw_ostream.h"
 #include <string>
 #include <tuple>
 
 namespace llvm {
+class raw_ostream;
+class StringRef;
 
 /// Represents a version number in the form major[.minor[.subminor[.build]]].
 class VersionTuple {
@@ -85,6 +85,13 @@ public:
     if (!HasBuild)
       return None;
     return Build;
+  }
+
+  /// Return a version tuple that contains only the first 3 version components.
+  VersionTuple withoutBuild() const {
+    if (HasBuild)
+      return VersionTuple(Major, Minor, Subminor);
+    return *this;
   }
 
   /// Determine if two version numbers are equivalent. If not

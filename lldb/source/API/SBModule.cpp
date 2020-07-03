@@ -1,4 +1,4 @@
-//===-- SBModule.cpp --------------------------------------------*- C++ -*-===//
+//===-- SBModule.cpp ------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -75,7 +75,7 @@ const SBModule &SBModule::operator=(const SBModule &rhs) {
   return LLDB_RECORD_RESULT(*this);
 }
 
-SBModule::~SBModule() {}
+SBModule::~SBModule() = default;
 
 bool SBModule::IsValid() const {
   LLDB_RECORD_METHOD_CONST_NO_ARGS(bool, SBModule, IsValid);
@@ -245,7 +245,7 @@ bool SBModule::GetDescription(SBStream &description) {
 
   ModuleSP module_sp(GetSP());
   if (module_sp) {
-    module_sp->GetDescription(&strm);
+    module_sp->GetDescription(strm.AsRawOstream());
   } else
     strm.PutCString("No value");
 
@@ -282,8 +282,7 @@ SBSymbolContextList SBModule::FindCompileUnits(const SBFileSpec &sb_file_spec) {
   SBSymbolContextList sb_sc_list;
   const ModuleSP module_sp(GetSP());
   if (sb_file_spec.IsValid() && module_sp) {
-    const bool append = true;
-    module_sp->FindCompileUnits(*sb_file_spec, append, *sb_sc_list);
+    module_sp->FindCompileUnits(*sb_file_spec, *sb_sc_list);
   }
   return LLDB_RECORD_RESULT(sb_sc_list);
 }
@@ -342,8 +341,9 @@ lldb::SBSymbolContextList SBModule::FindSymbols(const char *name,
     Symtab *symtab = GetUnifiedSymbolTable(module_sp);
     if (symtab) {
       std::vector<uint32_t> matching_symbol_indexes;
-      const size_t num_matches = symtab->FindAllSymbolsWithNameAndType(
-          ConstString(name), symbol_type, matching_symbol_indexes);
+      symtab->FindAllSymbolsWithNameAndType(ConstString(name), symbol_type,
+                                            matching_symbol_indexes);
+      const size_t num_matches = matching_symbol_indexes.size();
       if (num_matches) {
         SymbolContext sc;
         sc.module_sp = module_sp;
@@ -398,12 +398,11 @@ lldb::SBSymbolContextList SBModule::FindFunctions(const char *name,
   lldb::SBSymbolContextList sb_sc_list;
   ModuleSP module_sp(GetSP());
   if (name && module_sp) {
-    const bool append = true;
     const bool symbols_ok = true;
     const bool inlines_ok = true;
     FunctionNameType type = static_cast<FunctionNameType>(name_type_mask);
-    module_sp->FindFunctions(ConstString(name), nullptr, type, symbols_ok,
-                             inlines_ok, append, *sb_sc_list);
+    module_sp->FindFunctions(ConstString(name), CompilerDeclContext(), type,
+                             symbols_ok, inlines_ok, *sb_sc_list);
   }
   return LLDB_RECORD_RESULT(sb_sc_list);
 }
@@ -418,18 +417,14 @@ SBValueList SBModule::FindGlobalVariables(SBTarget &target, const char *name,
   ModuleSP module_sp(GetSP());
   if (name && module_sp) {
     VariableList variable_list;
-    const uint32_t match_count = module_sp->FindGlobalVariables(
-        ConstString(name), nullptr, max_matches, variable_list);
-
-    if (match_count > 0) {
-      for (uint32_t i = 0; i < match_count; ++i) {
-        lldb::ValueObjectSP valobj_sp;
-        TargetSP target_sp(target.GetSP());
-        valobj_sp = ValueObjectVariable::Create(
-            target_sp.get(), variable_list.GetVariableAtIndex(i));
-        if (valobj_sp)
-          sb_value_list.Append(SBValue(valobj_sp));
-      }
+    module_sp->FindGlobalVariables(ConstString(name), CompilerDeclContext(),
+                                   max_matches, variable_list);
+    for (const VariableSP &var_sp : variable_list) {
+      lldb::ValueObjectSP valobj_sp;
+      TargetSP target_sp(target.GetSP());
+      valobj_sp = ValueObjectVariable::Create(target_sp.get(), var_sp);
+      if (valobj_sp)
+        sb_value_list.Append(SBValue(valobj_sp));
     }
   }
 
@@ -503,16 +498,10 @@ lldb::SBTypeList SBModule::FindTypes(const char *type) {
     const bool exact_match = false;
     ConstString name(type);
     llvm::DenseSet<SymbolFile *> searched_symbol_files;
-    const uint32_t num_matches = module_sp->FindTypes(
-        name, exact_match, UINT32_MAX, searched_symbol_files, type_list);
+    module_sp->FindTypes(name, exact_match, UINT32_MAX, searched_symbol_files,
+                         type_list);
 
-    if (num_matches > 0) {
-      for (size_t idx = 0; idx < num_matches; idx++) {
-        TypeSP type_sp(type_list.GetTypeAtIndex(idx));
-        if (type_sp)
-          retval.Append(SBType(type_sp));
-      }
-    } else {
+    if (type_list.Empty()) {
       auto type_system_or_err =
           module_sp->GetTypeSystemForLanguage(eLanguageTypeC);
       if (auto err = type_system_or_err.takeError()) {
@@ -523,9 +512,14 @@ lldb::SBTypeList SBModule::FindTypes(const char *type) {
         if (compiler_type)
           retval.Append(SBType(compiler_type));
       }
+    } else {
+      for (size_t idx = 0; idx < type_list.GetSize(); idx++) {
+        TypeSP type_sp(type_list.GetTypeAtIndex(idx));
+        if (type_sp)
+          retval.Append(SBType(type_sp));
+      }
     }
   }
-
   return LLDB_RECORD_RESULT(retval);
 }
 
@@ -689,6 +683,13 @@ lldb::SBAddress SBModule::GetObjectFileEntryPointAddress() const {
   return LLDB_RECORD_RESULT(sb_addr);
 }
 
+uint32_t SBModule::GetNumberAllocatedModules() {
+  LLDB_RECORD_STATIC_METHOD_NO_ARGS(uint32_t, SBModule,
+                                    GetNumberAllocatedModules);
+
+  return Module::GetNumberAllocatedModules();
+}
+
 namespace lldb_private {
 namespace repro {
 
@@ -763,6 +764,8 @@ void RegisterMethods<SBModule>(Registry &R) {
                              GetObjectFileHeaderAddress, ());
   LLDB_REGISTER_METHOD_CONST(lldb::SBAddress, SBModule,
                              GetObjectFileEntryPointAddress, ());
+  LLDB_REGISTER_STATIC_METHOD(uint32_t, SBModule, GetNumberAllocatedModules,
+                              ());
 }
 
 }

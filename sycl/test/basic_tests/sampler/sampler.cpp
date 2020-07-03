@@ -1,8 +1,17 @@
+<<<<<<< HEAD
 // RUN: %clangxx -std=c++17 -fsycl %s -o %t.out -lOpenCL
+||||||| merged common ancestors
+// RUN: %clangxx -fsycl %s -o %t.out -lOpenCL
+=======
+// REQUIRES: opencl
+
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out -L %opencl_libs_dir -lOpenCL
+>>>>>>> intel/sycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
+
 //==--------------- sampler.cpp - SYCL sampler basic test ------------------==//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -18,6 +27,15 @@
 namespace sycl {
 using namespace cl::sycl;
 }
+
+struct SamplerWrapper {
+  SamplerWrapper(sycl::coordinate_normalization_mode Norm,
+                 sycl::addressing_mode Addr, sycl::filtering_mode Filter)
+      : Smpl(Norm, Addr, Filter), A(0) {}
+
+  sycl::sampler Smpl;
+  int A;
+};
 
 int main() {
   // Check constructor from enums
@@ -85,6 +103,10 @@ int main() {
   assert(C == A);
   assert(Hasher(C) != Hasher(B));
 
+  SamplerWrapper WrappedSmplr(
+      sycl::coordinate_normalization_mode::normalized,
+      sycl::addressing_mode::repeat, sycl::filtering_mode::linear);
+
   // Device sampler.
   {
     sycl::queue Queue;
@@ -92,6 +114,7 @@ int main() {
       cgh.single_task<class kernel>([=]() {
         sycl::sampler C = A;
         sycl::sampler D(C);
+        sycl::sampler E(WrappedSmplr.Smpl);
       });
     });
   }

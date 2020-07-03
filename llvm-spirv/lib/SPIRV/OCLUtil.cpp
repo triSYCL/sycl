@@ -48,7 +48,6 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Pass.h"
-#include "llvm/PassSupport.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 
@@ -150,9 +149,9 @@ BarrierLiterals getBarrierLiterals(CallInst *CI) {
   auto N = CI->getNumArgOperands();
   assert(N == 1 || N == 2);
 
-  std::string DemangledName;
+  StringRef DemangledName;
   assert(CI->getCalledFunction() && "Unexpected indirect call");
-  if (!oclIsBuiltin(CI->getCalledFunction()->getName(), &DemangledName)) {
+  if (!oclIsBuiltin(CI->getCalledFunction()->getName(), DemangledName)) {
     assert(0 &&
            "call must a builtin (work_group_barrier or sub_group_barrier)");
   }
@@ -168,9 +167,9 @@ BarrierLiterals getBarrierLiterals(CallInst *CI) {
                          Scope);
 }
 
-unsigned getExtOp(StringRef OrigName, const std::string &GivenDemangledName) {
-  std::string DemangledName = GivenDemangledName;
-  if (!oclIsBuiltin(OrigName, DemangledName.empty() ? &DemangledName : nullptr))
+unsigned getExtOp(StringRef OrigName, StringRef GivenDemangledName) {
+  std::string DemangledName{GivenDemangledName};
+  if (DemangledName.empty() || !oclIsBuiltin(OrigName, GivenDemangledName))
     return ~0U;
   LLVM_DEBUG(dbgs() << "getExtOp: demangled name: " << DemangledName << '\n');
   OCLExtOpKind EOC;
@@ -271,7 +270,7 @@ unsigned encodeVecTypeHint(Type *Ty) {
   }
   if (VectorType *VecTy = dyn_cast<VectorType>(Ty)) {
     Type *EleTy = VecTy->getElementType();
-    unsigned Size = VecTy->getVectorNumElements();
+    unsigned Size = VecTy->getNumElements();
     return Size << 16 | encodeVecTypeHint(EleTy);
   }
   llvm_unreachable("invalid type");
@@ -304,7 +303,7 @@ Type *decodeVecTypeHint(LLVMContext &C, unsigned Code) {
   }
   if (VecWidth < 1)
     return ST;
-  return VectorType::get(ST, VecWidth);
+  return FixedVectorType::get(ST, VecWidth);
 }
 
 unsigned transVecTypeHint(MDNode *Node) {
@@ -350,6 +349,10 @@ static SPIR::TypeAttributeEnum mapAddrSpaceEnums(SPIRAddressSpace Addrspace) {
     return SPIR::ATTR_LOCAL;
   case SPIRAS_Generic:
     return SPIR::ATTR_GENERIC;
+  case SPIRAS_GlobalDevice:
+    return SPIR::ATTR_GLOBAL_DEVICE;
+  case SPIRAS_GlobalHost:
+    return SPIR::ATTR_GLOBAL_HOST;
   default:
     llvm_unreachable("Invalid addrspace enum member");
   }
@@ -425,8 +428,8 @@ public:
   OCLBuiltinFuncMangleInfo(Function *F) : F(F) {}
   OCLBuiltinFuncMangleInfo(ArrayRef<Type *> ArgTypes)
       : ArgTypes(ArgTypes.vec()) {}
-  void init(const std::string &UniqName) override {
-    UnmangledName = UniqName;
+  void init(StringRef UniqName) override {
+    UnmangledName = UniqName.str();
     size_t Pos = std::string::npos;
 
     auto EraseSubstring = [](std::string &Str, std::string ToErase) {
@@ -483,6 +486,14 @@ public:
       addUnsignedArg(0);
       setEnumArg(1, SPIR::PRIMITIVE_MEMORY_ORDER);
       setEnumArg(2, SPIR::PRIMITIVE_MEMORY_SCOPE);
+    } else if (UnmangledName.find("atom_") == 0) {
+      setArgAttr(0, SPIR::ATTR_VOLATILE);
+      if (UnmangledName.find("atom_umax") == 0 ||
+          UnmangledName.find("atom_umin") == 0) {
+        addUnsignedArg(0);
+        addUnsignedArg(1);
+        UnmangledName.erase(5, 1);
+      }
     } else if (UnmangledName.find("atomic") == 0) {
       setArgAttr(0, SPIR::ATTR_VOLATILE);
       if (UnmangledName.find("atomic_umax") == 0 ||
@@ -536,6 +547,8 @@ public:
       addUnsignedArg(0);
       UnmangledName.erase(0, 1);
     } else if (UnmangledName.find("s_") == 0) {
+      if (UnmangledName == "s_upsample")
+        addUnsignedArg(1);
       UnmangledName.erase(0, 2);
     } else if (UnmangledName.find("u_") == 0) {
       addUnsignedArg(-1);
@@ -610,8 +623,10 @@ public:
       addSamplerArg(1);
     } else if (UnmangledName.find(kOCLSubgroupsAVCIntel::Prefix) !=
                std::string::npos) {
-      if (UnmangledName.find("evaluate_with_single_reference") !=
-          std::string::npos)
+      if (UnmangledName.find("evaluate_ipe") != std::string::npos)
+        addSamplerArg(1);
+      else if (UnmangledName.find("evaluate_with_single_reference") !=
+               std::string::npos)
         addSamplerArg(2);
       else if (UnmangledName.find("evaluate_with_multi_reference") !=
                std::string::npos) {
@@ -635,11 +650,19 @@ public:
       else if (UnmangledName.find("set_inter_base_multi_reference_penalty") !=
                    std::string::npos ||
                UnmangledName.find("set_inter_shape_penalty") !=
+                   std::string::npos ||
+               UnmangledName.find("set_inter_direction_penalty") !=
                    std::string::npos)
         addUnsignedArg(0);
       else if (UnmangledName.find("set_motion_vector_cost_function") !=
                std::string::npos)
         addUnsignedArgs(0, 2);
+      else if (UnmangledName.find("interlaced_field_polarity") !=
+               std::string::npos)
+        addUnsignedArg(0);
+      else if (UnmangledName.find("interlaced_field_polarities") !=
+               std::string::npos)
+        addUnsignedArgs(0, 1);
       else if (UnmangledName.find(kOCLSubgroupsAVCIntel::MCEPrefix) !=
                std::string::npos) {
         if (UnmangledName.find("get_default") != std::string::npos)
@@ -651,15 +674,38 @@ public:
         else if (UnmangledName.find("set_single_reference") !=
                  std::string::npos)
           addUnsignedArg(1);
+        else if (UnmangledName.find("set_dual_reference") != std::string::npos)
+          addUnsignedArg(2);
+        else if (UnmangledName.find("set_weighted_sad") != std::string::npos ||
+                 UnmangledName.find("set_early_search_termination_threshold") !=
+                     std::string::npos)
+          addUnsignedArg(0);
         else if (UnmangledName.find("adjust_ref_offset") != std::string::npos)
           addUnsignedArgs(1, 3);
         else if (UnmangledName.find("set_max_motion_vector_count") !=
                      std::string::npos ||
                  UnmangledName.find("get_border_reached") != std::string::npos)
           addUnsignedArg(0);
+        else if (UnmangledName.find("shape_distortions") != std::string::npos ||
+                 UnmangledName.find("shape_motion_vectors") !=
+                     std::string::npos ||
+                 UnmangledName.find("shape_reference_ids") !=
+                     std::string::npos) {
+          if (UnmangledName.find("single_reference") != std::string::npos) {
+            addUnsignedArg(1);
+            EraseSubstring(UnmangledName, "_single_reference");
+          } else if (UnmangledName.find("dual_reference") !=
+                     std::string::npos) {
+            addUnsignedArgs(1, 2);
+            EraseSubstring(UnmangledName, "_dual_reference");
+          }
+        } else if (UnmangledName.find("ref_window_size") != std::string::npos)
+          addUnsignedArg(0);
       } else if (UnmangledName.find(kOCLSubgroupsAVCIntel::SICPrefix) !=
                  std::string::npos) {
-        if (UnmangledName.find("initialize") != std::string::npos)
+        if (UnmangledName.find("initialize") != std::string::npos ||
+            UnmangledName.find("set_intra_luma_shape_penalty") !=
+                std::string::npos)
           addUnsignedArg(0);
         else if (UnmangledName.find("configure_ipe") != std::string::npos) {
           if (UnmangledName.find("_luma") != std::string::npos) {
@@ -670,7 +716,23 @@ public:
             addUnsignedArgs(7, 9);
             EraseSubstring(UnmangledName, "_chroma");
           }
-        }
+        } else if (UnmangledName.find("configure_skc") != std::string::npos)
+          addUnsignedArgs(0, 4);
+        else if (UnmangledName.find("set_skc") != std::string::npos) {
+          if (UnmangledName.find("forward_transform_enable"))
+            addUnsignedArg(0);
+        } else if (UnmangledName.find("set_block") != std::string::npos) {
+          if (UnmangledName.find("based_raw_skip_sad") != std::string::npos)
+            addUnsignedArg(0);
+        } else if (UnmangledName.find("get_motion_vector_mask") !=
+                   std::string::npos) {
+          addUnsignedArgs(0, 1);
+        } else if (UnmangledName.find("luma_mode_cost_function") !=
+                   std::string::npos)
+          addUnsignedArgs(0, 2);
+        else if (UnmangledName.find("chroma_mode_cost_function") !=
+                 std::string::npos)
+          addUnsignedArg(0);
       }
     } else if (UnmangledName == "intel_sub_group_shuffle_down" ||
                UnmangledName == "intel_sub_group_shuffle_up") {
@@ -700,11 +762,30 @@ public:
         setArgAttr(0, SPIR::ATTR_CONST);
         addUnsignedArg(0);
       }
+    } else if (UnmangledName.find("intel_sub_group_media_block_write") !=
+               std::string::npos) {
+      addUnsignedArg(3);
+    } else if (UnmangledName.find(kOCLBuiltinName::SubGroupPrefix) !=
+               std::string::npos) {
+      if (UnmangledName.find("ballot") != std::string::npos) {
+        if (UnmangledName.find("inverse") != std::string::npos ||
+            UnmangledName.find("bit_count") != std::string::npos ||
+            UnmangledName.find("inclusive_scan") != std::string::npos ||
+            UnmangledName.find("exclusive_scan") != std::string::npos ||
+            UnmangledName.find("find_lsb") != std::string::npos ||
+            UnmangledName.find("find_msb") != std::string::npos)
+          addUnsignedArg(0);
+        else if (UnmangledName.find("bit_extract") != std::string::npos) {
+          addUnsignedArgs(0, 1);
+        }
+      } else if (UnmangledName.find("shuffle") != std::string::npos ||
+                 UnmangledName.find("clustered") != std::string::npos)
+        addUnsignedArg(1);
     }
   }
   // Auxiliarry information, it is expected that it is relevant at the moment
   // the init method is called.
-  Function *F; // SPIRV decorated function
+  Function *F;                  // SPIRV decorated function
   std::vector<Type *> ArgTypes; // Arguments of OCL builtin
 };
 
@@ -777,7 +858,7 @@ bool isSamplerTy(Type *Ty) {
   return STy && STy->hasName() && STy->getName() == kSPR2TypeName::Sampler;
 }
 
-bool isPipeBI(const StringRef MangledName) {
+bool isPipeOrAddressSpaceCastBI(const StringRef MangledName) {
   return MangledName == "write_pipe_2" || MangledName == "read_pipe_2" ||
          MangledName == "write_pipe_2_bl" || MangledName == "read_pipe_2_bl" ||
          MangledName == "write_pipe_4" || MangledName == "read_pipe_4" ||
@@ -796,7 +877,9 @@ bool isPipeBI(const StringRef MangledName) {
          MangledName == "sub_group_reserve_write_pipe" ||
          MangledName == "sub_group_reserve_read_pipe" ||
          MangledName == "sub_group_commit_write_pipe" ||
-         MangledName == "sub_group_commit_read_pipe";
+         MangledName == "sub_group_commit_read_pipe" ||
+         MangledName == "to_global" || MangledName == "to_local" ||
+         MangledName == "to_private";
 }
 
 bool isEnqueueKernelBI(const StringRef MangledName) {
@@ -813,33 +896,197 @@ bool isKernelQueryBI(const StringRef MangledName) {
          MangledName == "__get_kernel_preferred_work_group_size_multiple_impl";
 }
 
-// Checks if we have the following (most common for fp contranction) pattern
-// in LLVM IR:
-// %mul = fmul float %a, %b
-// %add = fadd float %mul, %c
+// isUnfusedMulAdd checks if we have the following (most common for fp
+// contranction) pattern in LLVM IR:
+//
+//   %mul = fmul float %a, %b
+//   %add = fadd float %mul, %c
+//
 // This pattern indicates that fp contraction could have been disabled by
-// // #pragma OPENCL FP_CONTRACT OFF. Otherwise the current version of clang
-// would generate:
-// %0 = call float @llvm.fmuladd.f32(float %a, float %b, float %c)
-// TODO We need a more reliable mechanism to expres the FP_CONTRACT pragma
-// in LLVM IR. Fox example adding the 'contract' attribute to fp operations
-// by default (according the OpenCL spec fp contraction is enabled by default).
-void checkFpContract(BinaryOperator *B, SPIRVBasicBlock *BB) {
+// #pragma OPENCL FP_CONTRACT OFF. When contraction is enabled (by a pragma or
+// by clang's -ffp-contract=fast), clang would generate:
+//
+//   %0 = call float @llvm.fmuladd.f32(float %a, float %b, float %c)
+//
+// or
+//
+//   %mul = fmul contract float %a, %b
+//   %add = fadd contract float %mul, %c
+//
+// Note that optimizations may form an unfused fmuladd from fadd+load or
+// fadd+call, so this check is quite restrictive (see the comment below).
+//
+bool isUnfusedMulAdd(BinaryOperator *B) {
   if (B->getOpcode() != Instruction::FAdd &&
       B->getOpcode() != Instruction::FSub)
-    return;
-  // Ok, this is fadd or fsub. Now check its operands.
-  for (auto *Op : B->operand_values()) {
-    if (auto *I = dyn_cast<Instruction>(Op)) {
-      if (I->getOpcode() == Instruction::FMul) {
-        SPIRVFunction *BF = BB->getParent();
-        BF->setUncontractedFMulAddFound();
-        break;
-      }
-    }
+    return false;
+
+  if (B->hasAllowContract()) {
+    // If this fadd or fsub itself has a contract flag, the operation can be
+    // contracted regardless of the operands.
+    return false;
   }
+
+  // Otherwise, we cannot easily tell if the operation can be a candidate for
+  // contraction or not. Consider the following cases:
+  //
+  //   %mul = alloca float
+  //   %t1 = fmul float %a, %b
+  //   store float* %mul, float %t
+  //   %t2 = load %mul
+  //   %r = fadd float %t2, %c
+  //
+  // LLVM IR does not allow %r to be contracted. However, after an optimization
+  // it becomes a candidate for contraction if ContractionOFF is not set in
+  // SPIR-V:
+  //
+  //   %t1 = fmul float %a, %b
+  //   %r = fadd float %t1, %c
+  //
+  // To be on a safe side, we disallow everything that is even remotely similar
+  // to fmul + fadd.
+  return true;
+}
+
+std::string getIntelSubgroupBlockDataPostfix(unsigned ElementBitSize,
+                                             unsigned VectorNumElements) {
+  std::ostringstream OSS;
+  switch (ElementBitSize) {
+  case 8:
+    OSS << "_uc";
+    break;
+  case 16:
+    OSS << "_us";
+    break;
+  case 32:
+    // Intentionally does nothing since _ui variant is only an alias.
+    break;
+  case 64:
+    OSS << "_ul";
+    break;
+  default:
+    llvm_unreachable(
+        "Incorrect data bitsize for intel_subgroup_block builtins");
+  }
+  switch (VectorNumElements) {
+  case 1:
+    break;
+  case 2:
+  case 4:
+  case 8:
+    OSS << VectorNumElements;
+    break;
+  case 16:
+    assert(ElementBitSize == 8 &&
+           "16 elements vector allowed only for char builtins");
+    OSS << VectorNumElements;
+    break;
+  default:
+    llvm_unreachable(
+        "Incorrect vector length for intel_subgroup_block builtins");
+  }
+  return OSS.str();
 }
 } // namespace OCLUtil
+
+Value *SPIRV::transOCLMemScopeIntoSPIRVScope(Value *MemScope,
+                                             Optional<int> DefaultCase,
+                                             Instruction *InsertBefore) {
+  if (auto *C = dyn_cast<ConstantInt>(MemScope)) {
+    return ConstantInt::get(
+        C->getType(), map<Scope>(static_cast<OCLScopeKind>(C->getZExtValue())));
+  }
+
+  // If memory_scope is not a constant, then we have to insert dynamic mapping:
+  return getOrCreateSwitchFunc(kSPIRVName::TranslateOCLMemScope, MemScope,
+                               OCLMemScopeMap::getMap(), /* IsReverse */ false,
+                               DefaultCase, InsertBefore);
+}
+
+Value *SPIRV::transOCLMemOrderIntoSPIRVMemorySemantics(
+    Value *MemOrder, Optional<int> DefaultCase, Instruction *InsertBefore) {
+  if (auto *C = dyn_cast<ConstantInt>(MemOrder)) {
+    return ConstantInt::get(
+        C->getType(), mapOCLMemSemanticToSPIRV(
+                          0, static_cast<OCLMemOrderKind>(C->getZExtValue())));
+  }
+
+  return getOrCreateSwitchFunc(kSPIRVName::TranslateOCLMemOrder, MemOrder,
+                               OCLMemOrderMap::getMap(), /* IsReverse */ false,
+                               DefaultCase, InsertBefore);
+}
+
+Value *
+SPIRV::transSPIRVMemoryScopeIntoOCLMemoryScope(Value *MemScope,
+                                               Instruction *InsertBefore) {
+  if (auto *C = dyn_cast<ConstantInt>(MemScope)) {
+    return ConstantInt::get(C->getType(), rmap<OCLScopeKind>(static_cast<Scope>(
+                                              C->getZExtValue())));
+  }
+
+  if (auto *CI = dyn_cast<CallInst>(MemScope)) {
+    Function *F = CI->getCalledFunction();
+    if (F && F->getName().equals(kSPIRVName::TranslateOCLMemScope)) {
+      // In case the SPIR-V module was created from an OpenCL program by
+      // *this* SPIR-V generator, we know that the value passed to
+      // __translate_ocl_memory_scope is what we should pass to the
+      // OpenCL builtin now.
+      return CI->getArgOperand(0);
+    }
+  }
+
+  return getOrCreateSwitchFunc(kSPIRVName::TranslateSPIRVMemScope, MemScope,
+                               OCLMemScopeMap::getRMap(),
+                               /* IsReverse */ true, None, InsertBefore);
+}
+
+Value *
+SPIRV::transSPIRVMemorySemanticsIntoOCLMemoryOrder(Value *MemorySemantics,
+                                                   Instruction *InsertBefore) {
+  if (auto *C = dyn_cast<ConstantInt>(MemorySemantics)) {
+    return ConstantInt::get(C->getType(),
+                            mapSPIRVMemSemanticToOCL(C->getZExtValue()).second);
+  }
+
+  if (auto *CI = dyn_cast<CallInst>(MemorySemantics)) {
+    Function *F = CI->getCalledFunction();
+    if (F && F->getName().equals(kSPIRVName::TranslateOCLMemOrder)) {
+      // In case the SPIR-V module was created from an OpenCL program by
+      // *this* SPIR-V generator, we know that the value passed to
+      // __translate_ocl_memory_order is what we should pass to the
+      // OpenCL builtin now.
+      return CI->getArgOperand(0);
+    }
+  }
+
+  // SPIR-V MemorySemantics contains both OCL mem_fence_flags and mem_order and
+  // therefore, we need to apply mask
+  int Mask = MemorySemanticsMaskNone | MemorySemanticsAcquireMask |
+             MemorySemanticsReleaseMask | MemorySemanticsAcquireReleaseMask |
+             MemorySemanticsSequentiallyConsistentMask;
+  return getOrCreateSwitchFunc(kSPIRVName::TranslateSPIRVMemOrder,
+                               MemorySemantics, OCLMemOrderMap::getRMap(),
+                               /* IsReverse */ true, None, InsertBefore, Mask);
+}
+
+Value *SPIRV::transSPIRVMemorySemanticsIntoOCLMemFenceFlags(
+    Value *MemorySemantics, Instruction *InsertBefore) {
+  if (auto *C = dyn_cast<ConstantInt>(MemorySemantics)) {
+    return ConstantInt::get(C->getType(),
+                            mapSPIRVMemSemanticToOCL(C->getZExtValue()).first);
+  }
+
+  // TODO: any possible optimizations?
+  // SPIR-V MemorySemantics contains both OCL mem_fence_flags and mem_order and
+  // therefore, we need to apply mask
+  int Mask = MemorySemanticsWorkgroupMemoryMask |
+             MemorySemanticsCrossWorkgroupMemoryMask |
+             MemorySemanticsImageMemoryMask;
+  return getOrCreateSwitchFunc(kSPIRVName::TranslateSPIRVMemFence,
+                               MemorySemantics,
+                               OCLMemFenceExtendedMap::getRMap(),
+                               /* IsReverse */ true, None, InsertBefore, Mask);
+}
 
 void llvm::mangleOpenClBuiltin(const std::string &UniqName,
                                ArrayRef<Type *> ArgTypes,

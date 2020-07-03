@@ -23,10 +23,12 @@
 #include "llvm/Support/Errc.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Format.h"
+#include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/ThreadPool.h"
+#include "llvm/Support/Threading.h"
 #include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -69,18 +71,18 @@ static void exitWithError(Error E, StringRef Whence = "") {
       instrprof_error instrError = IPE.get();
       StringRef Hint = "";
       if (instrError == instrprof_error::unrecognized_format) {
-        // Hint for common error of forgetting -sample for sample profiles.
-        Hint = "Perhaps you forgot to use the -sample option?";
+        // Hint for common error of forgetting --sample for sample profiles.
+        Hint = "Perhaps you forgot to use the --sample option?";
       }
-      exitWithError(IPE.message(), Whence, Hint);
+      exitWithError(IPE.message(), std::string(Whence), std::string(Hint));
     });
   }
 
-  exitWithError(toString(std::move(E)), Whence);
+  exitWithError(toString(std::move(E)), std::string(Whence));
 }
 
 static void exitWithErrorCode(std::error_code EC, StringRef Whence = "") {
-  exitWithError(EC.message(), Whence);
+  exitWithError(EC.message(), std::string(Whence));
 }
 
 namespace {
@@ -93,7 +95,7 @@ static void warnOrExitGivenError(FailureMode FailMode, std::error_code EC,
   if (FailMode == failIfAnyAreInvalid)
     exitWithErrorCode(EC, Whence);
   else
-    warn(EC.message(), Whence);
+    warn(EC.message(), std::string(Whence));
 }
 
 static void handleMergeWriterError(Error E, StringRef WhenceFile = "",
@@ -306,8 +308,11 @@ static void mergeInstrProfile(const WeightedFileVector &Inputs,
 
   // If NumThreads is not specified, auto-detect a good default.
   if (NumThreads == 0)
-    NumThreads =
-        std::min(hardware_concurrency(), unsigned((Inputs.size() + 1) / 2));
+    NumThreads = std::min(hardware_concurrency().compute_thread_count(),
+                          unsigned((Inputs.size() + 1) / 2));
+  // FIXME: There's a bug here, where setting NumThreads = Inputs.size() fails
+  // the merge_empty_profile.test because the InstrProfWriter.ProfileKind isn't
+  // merged, thus the emitted file ends up with a PF_Unknown kind.
 
   // Initialize the writer contexts.
   SmallVector<std::unique_ptr<WriterContext>, 4> Contexts;
@@ -319,7 +324,7 @@ static void mergeInstrProfile(const WeightedFileVector &Inputs,
     for (const auto &Input : Inputs)
       loadInput(Input, Remapper, Contexts[0].get());
   } else {
-    ThreadPool Pool(NumThreads);
+    ThreadPool Pool(hardware_concurrency(NumThreads));
 
     // Load the inputs in parallel (N/NumThreads serial steps).
     unsigned Ctx = 0;
@@ -400,7 +405,8 @@ remapSamples(const sampleprof::FunctionSamples &Samples,
     for (const auto &Callsite : CallsiteSamples.second) {
       sampleprof::FunctionSamples Remapped =
           remapSamples(Callsite.second, Remapper, Error);
-      MergeResult(Error, Target[Remapped.getName()].merge(Remapped));
+      MergeResult(Error,
+                  Target[std::string(Remapped.getName())].merge(Remapped));
     }
   }
   return Result;
@@ -439,12 +445,44 @@ static void populateProfileSymbolList(MemoryBuffer *Buffer,
     PSL.add(symbol);
 }
 
-static void mergeSampleProfile(const WeightedFileVector &Inputs,
-                               SymbolRemapper *Remapper,
-                               StringRef OutputFilename,
-                               ProfileFormat OutputFormat,
-                               StringRef ProfileSymbolListFile,
-                               bool CompressProfSymList, FailureMode FailMode) {
+static void handleExtBinaryWriter(sampleprof::SampleProfileWriter &Writer,
+                                  ProfileFormat OutputFormat,
+                                  MemoryBuffer *Buffer,
+                                  sampleprof::ProfileSymbolList &WriterList,
+                                  bool CompressAllSections, bool UseMD5,
+                                  bool GenPartialProfile) {
+  populateProfileSymbolList(Buffer, WriterList);
+  if (WriterList.size() > 0 && OutputFormat != PF_Ext_Binary)
+    warn("Profile Symbol list is not empty but the output format is not "
+         "ExtBinary format. The list will be lost in the output. ");
+
+  Writer.setProfileSymbolList(&WriterList);
+
+  if (CompressAllSections) {
+    if (OutputFormat != PF_Ext_Binary)
+      warn("-compress-all-section is ignored. Specify -extbinary to enable it");
+    else
+      Writer.setToCompressAllSections();
+  }
+  if (UseMD5) {
+    if (OutputFormat != PF_Ext_Binary)
+      warn("-use-md5 is ignored. Specify -extbinary to enable it");
+    else
+      Writer.setUseMD5();
+  }
+  if (GenPartialProfile) {
+    if (OutputFormat != PF_Ext_Binary)
+      warn("-gen-partial-profile is ignored. Specify -extbinary to enable it");
+    else
+      Writer.setPartialProfile();
+  }
+}
+
+static void
+mergeSampleProfile(const WeightedFileVector &Inputs, SymbolRemapper *Remapper,
+                   StringRef OutputFilename, ProfileFormat OutputFormat,
+                   StringRef ProfileSymbolListFile, bool CompressAllSections,
+                   bool UseMD5, bool GenPartialProfile, FailureMode FailMode) {
   using namespace sampleprof;
   StringMap<FunctionSamples> ProfileMap;
   SmallVector<std::unique_ptr<sampleprof::SampleProfileReader>, 5> Readers;
@@ -496,17 +534,12 @@ static void mergeSampleProfile(const WeightedFileVector &Inputs,
   if (std::error_code EC = WriterOrErr.getError())
     exitWithErrorCode(EC, OutputFilename);
 
+  auto Writer = std::move(WriterOrErr.get());
   // WriterList will have StringRef refering to string in Buffer.
   // Make sure Buffer lives as long as WriterList.
   auto Buffer = getInputFileBuf(ProfileSymbolListFile);
-  populateProfileSymbolList(Buffer.get(), WriterList);
-  WriterList.setToCompress(CompressProfSymList);
-  if (WriterList.size() > 0 && OutputFormat != PF_Ext_Binary)
-    warn("Profile Symbol list is not empty but the output format is not "
-         "ExtBinary format. The list will be lost in the output. ");
-
-  auto Writer = std::move(WriterOrErr.get());
-  Writer->setProfileSymbolList(&WriterList);
+  handleExtBinaryWriter(*Writer, OutputFormat, Buffer.get(), WriterList,
+                        CompressAllSections, UseMD5, GenPartialProfile);
   Writer->write(ProfileMap);
 }
 
@@ -518,7 +551,7 @@ static WeightedFile parseWeightedFile(const StringRef &WeightedFilename) {
   if (WeightStr.getAsInteger(10, Weight) || Weight < 1)
     exitWithError("Input weight must be a positive integer.");
 
-  return {FileName, Weight};
+  return {std::string(FileName), Weight};
 }
 
 static void addWeightedInput(WeightedFileVector &WNI, const WeightedFile &WF) {
@@ -527,7 +560,7 @@ static void addWeightedInput(WeightedFileVector &WNI, const WeightedFile &WF) {
 
   // If it's STDIN just pass it on.
   if (Filename == "-") {
-    WNI.push_back({Filename, Weight});
+    WNI.push_back({std::string(Filename), Weight});
     return;
   }
 
@@ -538,7 +571,7 @@ static void addWeightedInput(WeightedFileVector &WNI, const WeightedFile &WF) {
                       Filename);
   // If it's a source file, collect it.
   if (llvm::sys::fs::is_regular_file(Status)) {
-    WNI.push_back({Filename, Weight});
+    WNI.push_back({std::string(Filename), Weight});
     return;
   }
 
@@ -570,7 +603,7 @@ static void parseInputFilenamesFile(MemoryBuffer *Buffer,
       continue;
     // If there's no comma, it's an unweighted profile.
     else if (SanitizedEntry.find(',') == StringRef::npos)
-      addWeightedInput(WFV, {SanitizedEntry, 1});
+      addWeightedInput(WFV, {std::string(SanitizedEntry), 1});
     else
       addWeightedInput(WFV, parseWeightedFile(SanitizedEntry));
   }
@@ -630,15 +663,23 @@ static int merge_main(int argc, const char *argv[]) {
       "prof-sym-list", cl::init(""),
       cl::desc("Path to file containing the list of function symbols "
                "used to populate profile symbol list"));
-  cl::opt<bool> CompressProfSymList(
-      "compress-prof-sym-list", cl::init(false), cl::Hidden,
-      cl::desc("Compress profile symbol list before write it into profile. "));
+  cl::opt<bool> CompressAllSections(
+      "compress-all-sections", cl::init(false), cl::Hidden,
+      cl::desc("Compress all sections when writing the profile (only "
+               "meaningful for -extbinary)"));
+  cl::opt<bool> UseMD5(
+      "use-md5", cl::init(false), cl::Hidden,
+      cl::desc("Choose to use MD5 to represent string in name table (only "
+               "meaningful for -extbinary)"));
+  cl::opt<bool> GenPartialProfile(
+      "gen-partial-profile", cl::init(false), cl::Hidden,
+      cl::desc("Generate a partial profile (only meaningful for -extbinary)"));
 
   cl::ParseCommandLineOptions(argc, argv, "LLVM profile data merger\n");
 
   WeightedFileVector WeightedInputs;
   for (StringRef Filename : InputFilenames)
-    addWeightedInput(WeightedInputs, {Filename, 1});
+    addWeightedInput(WeightedInputs, {std::string(Filename), 1});
   for (StringRef WeightedFilename : WeightedInputFilenames)
     addWeightedInput(WeightedInputs, parseWeightedFile(WeightedFilename));
 
@@ -666,8 +707,8 @@ static int merge_main(int argc, const char *argv[]) {
                       OutputFormat, OutputSparse, NumThreads, FailureMode);
   else
     mergeSampleProfile(WeightedInputs, Remapper.get(), OutputFilename,
-                       OutputFormat, ProfileSymbolListFile,
-                       CompressProfSymList, FailureMode);
+                       OutputFormat, ProfileSymbolListFile, CompressAllSections,
+                       UseMD5, GenPartialProfile, FailureMode);
 
   return 0;
 }
@@ -682,7 +723,7 @@ static void overlapInstrProfile(const std::string &BaseFilename,
   WriterContext Context(false, ErrorLock, WriterErrorCodes);
   WeightedFile WeightedInput{BaseFilename, 1};
   OverlapStats Overlap;
-  Error E = Overlap.accumuateCounts(BaseFilename, TestFilename, IsCS);
+  Error E = Overlap.accumulateCounts(BaseFilename, TestFilename, IsCS);
   if (E)
     exitWithError(std::move(E), "Error in getting profile count sums");
   if (Overlap.Base.CountSum < 1.0f) {
@@ -969,23 +1010,161 @@ static int showInstrProfile(const std::string &Filename, bool ShowCounts,
   }
 
   if (ShowDetailedSummary) {
-    OS << "Detailed summary:\n";
     OS << "Total number of blocks: " << PS->getNumCounts() << "\n";
     OS << "Total count: " << PS->getTotalCount() << "\n";
-    for (auto Entry : PS->getDetailedSummary()) {
-      OS << Entry.NumCounts << " blocks with count >= " << Entry.MinCount
-         << " account for "
-         << format("%0.6g", (float)Entry.Cutoff / ProfileSummary::Scale * 100)
-         << " percentage of the total counts.\n";
-    }
+    PS->printDetailedSummary(OS);
   }
   return 0;
 }
 
+static void showSectionInfo(sampleprof::SampleProfileReader *Reader,
+                            raw_fd_ostream &OS) {
+  if (!Reader->dumpSectionInfo(OS)) {
+    WithColor::warning() << "-show-sec-info-only is only supported for "
+                         << "sample profile in extbinary format and is "
+                         << "ignored for other formats.\n";
+    return;
+  }
+}
+
+namespace {
+struct HotFuncInfo {
+  StringRef FuncName;
+  uint64_t TotalCount;
+  double TotalCountPercent;
+  uint64_t MaxCount;
+  uint64_t EntryCount;
+
+  HotFuncInfo()
+      : FuncName(), TotalCount(0), TotalCountPercent(0.0f), MaxCount(0),
+        EntryCount(0) {}
+
+  HotFuncInfo(StringRef FN, uint64_t TS, double TSP, uint64_t MS, uint64_t ES)
+      : FuncName(FN), TotalCount(TS), TotalCountPercent(TSP), MaxCount(MS),
+        EntryCount(ES) {}
+};
+} // namespace
+
+// Print out detailed information about hot functions in PrintValues vector.
+// Users specify titles and offset of every columns through ColumnTitle and
+// ColumnOffset. The size of ColumnTitle and ColumnOffset need to be the same
+// and at least 4. Besides, users can optionally give a HotFuncMetric string to
+// print out or let it be an empty string.
+static void dumpHotFunctionList(const std::vector<std::string> &ColumnTitle,
+                                const std::vector<int> &ColumnOffset,
+                                const std::vector<HotFuncInfo> &PrintValues,
+                                uint64_t HotFuncCount, uint64_t TotalFuncCount,
+                                uint64_t HotProfCount, uint64_t TotalProfCount,
+                                const std::string &HotFuncMetric,
+                                raw_fd_ostream &OS) {
+  assert(ColumnOffset.size() == ColumnTitle.size());
+  assert(ColumnTitle.size() >= 4);
+  assert(TotalFuncCount > 0);
+  double TotalProfPercent = 0;
+  if (TotalProfCount > 0)
+    TotalProfPercent = ((double)HotProfCount) / TotalProfCount * 100;
+
+  formatted_raw_ostream FOS(OS);
+  FOS << HotFuncCount << " out of " << TotalFuncCount
+      << " functions with profile ("
+      << format("%.2f%%", (((double)HotFuncCount) / TotalFuncCount * 100))
+      << ") are considered hot functions";
+  if (!HotFuncMetric.empty())
+    FOS << " (" << HotFuncMetric << ")";
+  FOS << ".\n";
+  FOS << HotProfCount << " out of " << TotalProfCount << " profile counts ("
+      << format("%.2f%%", TotalProfPercent) << ") are from hot functions.\n";
+
+  for (size_t I = 0; I < ColumnTitle.size(); ++I) {
+    FOS.PadToColumn(ColumnOffset[I]);
+    FOS << ColumnTitle[I];
+  }
+  FOS << "\n";
+
+  for (const HotFuncInfo &R : PrintValues) {
+    FOS.PadToColumn(ColumnOffset[0]);
+    FOS << R.TotalCount << " (" << format("%.2f%%", R.TotalCountPercent) << ")";
+    FOS.PadToColumn(ColumnOffset[1]);
+    FOS << R.MaxCount;
+    FOS.PadToColumn(ColumnOffset[2]);
+    FOS << R.EntryCount;
+    FOS.PadToColumn(ColumnOffset[3]);
+    FOS << R.FuncName << "\n";
+  }
+  return;
+}
+
+static int
+showHotFunctionList(const StringMap<sampleprof::FunctionSamples> &Profiles,
+                    ProfileSummary &PS, raw_fd_ostream &OS) {
+  using namespace sampleprof;
+
+  const uint32_t HotFuncCutoff = 990000;
+  auto &SummaryVector = PS.getDetailedSummary();
+  uint64_t MinCountThreshold = 0;
+  for (const ProfileSummaryEntry &SummaryEntry : SummaryVector) {
+    if (SummaryEntry.Cutoff == HotFuncCutoff) {
+      MinCountThreshold = SummaryEntry.MinCount;
+      break;
+    }
+  }
+  assert(MinCountThreshold != 0);
+
+  // Traverse all functions in the profile and keep only hot functions.
+  // The following loop also calculates the sum of total samples of all
+  // functions.
+  std::multimap<uint64_t, std::pair<const FunctionSamples *, const uint64_t>,
+                std::greater<uint64_t>>
+      HotFunc;
+  uint64_t ProfileTotalSample = 0;
+  uint64_t HotFuncSample = 0;
+  uint64_t HotFuncCount = 0;
+  uint64_t MaxCount = 0;
+  for (const auto &I : Profiles) {
+    const FunctionSamples &FuncProf = I.second;
+    ProfileTotalSample += FuncProf.getTotalSamples();
+    MaxCount = FuncProf.getMaxCountInside();
+
+    // MinCountThreshold is a block/line threshold computed for a given cutoff.
+    // We intentionally compare the maximum sample count in a function with this
+    // threshold to get an approximate threshold for hot functions.
+    if (MaxCount >= MinCountThreshold) {
+      HotFunc.emplace(FuncProf.getTotalSamples(),
+                      std::make_pair(&(I.second), MaxCount));
+      HotFuncSample += FuncProf.getTotalSamples();
+      ++HotFuncCount;
+    }
+  }
+
+  std::vector<std::string> ColumnTitle{"Total sample (%)", "Max sample",
+                                       "Entry sample", "Function name"};
+  std::vector<int> ColumnOffset{0, 24, 42, 58};
+  std::string Metric =
+      std::string("max sample >= ") + std::to_string(MinCountThreshold);
+  std::vector<HotFuncInfo> PrintValues;
+  for (const auto &FuncPair : HotFunc) {
+    const FunctionSamples &Func = *FuncPair.second.first;
+    double TotalSamplePercent =
+        (ProfileTotalSample > 0)
+            ? (Func.getTotalSamples() * 100.0) / ProfileTotalSample
+            : 0;
+    PrintValues.emplace_back(HotFuncInfo(
+        Func.getFuncName(), Func.getTotalSamples(), TotalSamplePercent,
+        FuncPair.second.second, Func.getEntrySamples()));
+  }
+  dumpHotFunctionList(ColumnTitle, ColumnOffset, PrintValues, HotFuncCount,
+                      Profiles.size(), HotFuncSample, ProfileTotalSample,
+                      Metric, OS);
+
+  return 0;
+}
+
 static int showSampleProfile(const std::string &Filename, bool ShowCounts,
-                             bool ShowAllFunctions,
+                             bool ShowAllFunctions, bool ShowDetailedSummary,
                              const std::string &ShowFunction,
-                             bool ShowProfileSymbolList, raw_fd_ostream &OS) {
+                             bool ShowProfileSymbolList,
+                             bool ShowSectionInfoOnly, bool ShowHotFuncList,
+                             raw_fd_ostream &OS) {
   using namespace sampleprof;
   LLVMContext Context;
   auto ReaderOrErr = SampleProfileReader::create(Filename, Context);
@@ -993,6 +1172,12 @@ static int showSampleProfile(const std::string &Filename, bool ShowCounts,
     exitWithErrorCode(EC, Filename);
 
   auto Reader = std::move(ReaderOrErr.get());
+
+  if (ShowSectionInfoOnly) {
+    showSectionInfo(Reader.get(), OS);
+    return 0;
+  }
+
   if (std::error_code EC = Reader->read())
     exitWithErrorCode(EC, Filename);
 
@@ -1006,6 +1191,15 @@ static int showSampleProfile(const std::string &Filename, bool ShowCounts,
         Reader->getProfileSymbolList();
     ReaderList->dump(OS);
   }
+
+  if (ShowDetailedSummary) {
+    auto &PS = Reader->getSummary();
+    PS.printSummary(OS);
+    PS.printDetailedSummary(OS);
+  }
+
+  if (ShowHotFuncList)
+    showHotFunctionList(Reader->getProfiles(), Reader->getSummary(), OS);
 
   return 0;
 }
@@ -1033,6 +1227,9 @@ static int show_main(int argc, const char *argv[]) {
       cl::desc(
           "Cutoff percentages (times 10000) for generating detailed summary"),
       cl::value_desc("800000,901000,999999"));
+  cl::opt<bool> ShowHotFuncList(
+      "hot-func-list", cl::init(false),
+      cl::desc("Show profile summary of a list of hot functions"));
   cl::opt<bool> ShowAllFunctions("all-functions", cl::init(false),
                                  cl::desc("Details for every function"));
   cl::opt<bool> ShowCS("showcs", cl::init(false),
@@ -1062,6 +1259,11 @@ static int show_main(int argc, const char *argv[]) {
   cl::opt<bool> ShowProfileSymbolList(
       "show-prof-sym-list", cl::init(false),
       cl::desc("Show profile symbol list if it exists in the profile. "));
+  cl::opt<bool> ShowSectionInfoOnly(
+      "show-sec-info-only", cl::init(false),
+      cl::desc("Show the information of each section in the sample profile. "
+               "The flag is only usable when the sample profile is in "
+               "extbinary format"));
 
   cl::ParseCommandLineOptions(argc, argv, "LLVM profile data summary\n");
 
@@ -1090,7 +1292,9 @@ static int show_main(int argc, const char *argv[]) {
                             OnlyListBelow, ShowFunction, TextFormat, OS);
   else
     return showSampleProfile(Filename, ShowCounts, ShowAllFunctions,
-                             ShowFunction, ShowProfileSymbolList, OS);
+                             ShowDetailedSummary, ShowFunction,
+                             ShowProfileSymbolList, ShowSectionInfoOnly,
+                             ShowHotFuncList, OS);
 }
 
 int main(int argc, const char *argv[]) {

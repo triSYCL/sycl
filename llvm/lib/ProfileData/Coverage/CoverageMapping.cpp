@@ -194,6 +194,15 @@ void FunctionRecordIterator::skipOtherFiles() {
     *this = FunctionRecordIterator();
 }
 
+ArrayRef<unsigned> CoverageMapping::getImpreciseRecordIndicesForFilename(
+    StringRef Filename) const {
+  size_t FilenameHash = hash_value(Filename);
+  auto RecordIt = FilenameHash2RecordIndices.find(FilenameHash);
+  if (RecordIt == FilenameHash2RecordIndices.end())
+    return {};
+  return RecordIt->second;
+}
+
 Error CoverageMapping::loadFunctionRecord(
     const CoverageMappingRecord &Record,
     IndexedInstrProfReader &ProfileReader) {
@@ -213,7 +222,8 @@ Error CoverageMapping::loadFunctionRecord(
                                                 Record.FunctionHash, Counts)) {
     instrprof_error IPE = InstrProfError::take(std::move(E));
     if (IPE == instrprof_error::hash_mismatch) {
-      FuncHashMismatches.emplace_back(Record.FunctionName, Record.FunctionHash);
+      FuncHashMismatches.emplace_back(std::string(Record.FunctionName),
+                                      Record.FunctionHash);
       return Error::success();
     } else if (IPE != instrprof_error::unknown_function)
       return make_error<InstrProfError>(IPE);
@@ -249,6 +259,20 @@ Error CoverageMapping::loadFunctionRecord(
     return Error::success();
 
   Functions.push_back(std::move(Function));
+
+  // Performance optimization: keep track of the indices of the function records
+  // which correspond to each filename. This can be used to substantially speed
+  // up queries for coverage info in a file.
+  unsigned RecordIndex = Functions.size() - 1;
+  for (StringRef Filename : Record.Filenames) {
+    auto &RecordIndices = FilenameHash2RecordIndices[hash_value(Filename)];
+    // Note that there may be duplicates in the filename set for a function
+    // record, because of e.g. macro expansions in the function in which both
+    // the macro and the function are defined in the same file.
+    if (RecordIndices.empty() || RecordIndices.back() != RecordIndex)
+      RecordIndices.push_back(RecordIndex);
+  }
+
   return Error::success();
 }
 
@@ -626,7 +650,12 @@ CoverageData CoverageMapping::getCoverageForFile(StringRef Filename) const {
   CoverageData FileCoverage(Filename);
   std::vector<CountedRegion> Regions;
 
-  for (const auto &Function : Functions) {
+  // Look up the function records in the given file. Due to hash collisions on
+  // the filename, we may get back some records that are not in the file.
+  ArrayRef<unsigned> RecordIndices =
+      getImpreciseRecordIndicesForFilename(Filename);
+  for (unsigned RecordIndex : RecordIndices) {
+    const FunctionRecord &Function = Functions[RecordIndex];
     auto MainFileID = findMainViewFileID(Filename, Function);
     auto FileIDs = gatherFileIDs(Filename, Function);
     for (const auto &CR : Function.CountedRegions)
@@ -646,7 +675,12 @@ CoverageData CoverageMapping::getCoverageForFile(StringRef Filename) const {
 std::vector<InstantiationGroup>
 CoverageMapping::getInstantiationGroups(StringRef Filename) const {
   FunctionInstantiationSetCollector InstantiationSetCollector;
-  for (const auto &Function : Functions) {
+  // Look up the function records in the given file. Due to hash collisions on
+  // the filename, we may get back some records that are not in the file.
+  ArrayRef<unsigned> RecordIndices =
+      getImpreciseRecordIndicesForFilename(Filename);
+  for (unsigned RecordIndex : RecordIndices) {
+    const FunctionRecord &Function = Functions[RecordIndex];
     auto MainFileID = findMainViewFileID(Filename, Function);
     if (!MainFileID)
       continue;
@@ -771,6 +805,8 @@ static std::string getCoverageMapErrString(coveragemap_error Err) {
     return "Truncated coverage data";
   case coveragemap_error::malformed:
     return "Malformed coverage data";
+  case coveragemap_error::decompression_failed:
+    return "Failed to decompress coverage data (zlib)";
   }
   llvm_unreachable("A value of coveragemap_error has no message.");
 }

@@ -51,6 +51,7 @@
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Bitcode/BitcodeWriter.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/IntrinsicInst.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -142,7 +143,7 @@ std::string mapLLVMTypeToOCLType(const Type *Ty, bool Signed) {
   }
   if (auto VecTy = dyn_cast<VectorType>(Ty)) {
     Type *EleTy = VecTy->getElementType();
-    unsigned Size = VecTy->getVectorNumElements();
+    unsigned Size = VecTy->getNumElements();
     std::stringstream Ss;
     Ss << mapLLVMTypeToOCLType(EleTy, Signed) << Size;
     return Ss.str();
@@ -285,7 +286,7 @@ bool isSPIRVType(llvm::Type *Ty, StringRef BaseTyName, StringRef *Postfix) {
 Function *getOrCreateFunction(Module *M, Type *RetTy, ArrayRef<Type *> ArgTypes,
                               StringRef Name, BuiltinFuncMangleInfo *Mangle,
                               AttributeList *Attrs, bool TakeName) {
-  std::string MangledName = Name;
+  std::string MangledName{Name};
   bool IsVarArg = false;
   if (Mangle) {
     MangledName = mangleBuiltin(Name, ArgTypes, Mangle);
@@ -350,7 +351,7 @@ std::string decorateSPIRVFunction(const std::string &S) {
   return std::string(kSPIRVName::Prefix) + S + kSPIRVName::Postfix;
 }
 
-std::string undecorateSPIRVFunction(const std::string &S) {
+StringRef undecorateSPIRVFunction(StringRef S) {
   assert(S.find(kSPIRVName::Prefix) == 0);
   const size_t Start = strlen(kSPIRVName::Prefix);
   auto End = S.rfind(kSPIRVName::Postfix);
@@ -437,11 +438,11 @@ std::string getPostfixForReturnType(const Type *PRetTy, bool IsSigned) {
          mapLLVMTypeToOCLType(PRetTy, IsSigned);
 }
 
-Op getSPIRVFuncOC(const std::string &S, SmallVectorImpl<std::string> *Dec) {
+Op getSPIRVFuncOC(StringRef S, SmallVectorImpl<std::string> *Dec) {
   Op OC;
   SmallVector<StringRef, 2> Postfix;
-  std::string Name;
-  if (!oclIsBuiltin(S, &Name))
+  StringRef Name;
+  if (!oclIsBuiltin(S, Name))
     Name = S;
   StringRef R(Name);
   R = dePrefixSPIRVName(R, Postfix);
@@ -461,36 +462,36 @@ bool getSPIRVBuiltin(const std::string &OrigName, spv::BuiltIn &B) {
   return getByName(R.str(), B);
 }
 
-// Enqueue kernel, kernel query and pipe built-ins are not mangled
-bool isNonMangledOCLBuiltin(const StringRef &Name) {
+// Enqueue kernel, kernel query, pipe and address space cast built-ins
+// are not mangled.
+bool isNonMangledOCLBuiltin(StringRef Name) {
   if (!Name.startswith("__"))
     return false;
 
   return isEnqueueKernelBI(Name) || isKernelQueryBI(Name) ||
-         isPipeBI(Name.drop_front(2));
+         isPipeOrAddressSpaceCastBI(Name.drop_front(2));
 }
 
-bool oclIsBuiltin(const StringRef &Name, std::string *DemangledName,
-                  bool IsCpp) {
+// Demangled name is a substring of the name. The DemangledName is updated only
+// if true is returned
+bool oclIsBuiltin(StringRef Name, StringRef &DemangledName, bool IsCpp) {
   if (Name == "printf") {
-    if (DemangledName)
-      *DemangledName = Name;
+    DemangledName = Name;
     return true;
   }
   if (isNonMangledOCLBuiltin(Name)) {
-    if (DemangledName)
-      *DemangledName = Name.drop_front(2);
+    DemangledName = Name.drop_front(2);
     return true;
   }
   if (!Name.startswith("_Z"))
     return false;
-  if (!DemangledName)
-    return true;
   // OpenCL C++ built-ins are declared in cl namespace.
   // TODO: consider using 'St' abbriviation for cl namespace mangling.
   // Similar to ::std:: in C++.
   if (IsCpp) {
     if (!Name.startswith("_ZN"))
+      // Attempt to demangle as C. This is useful for "extern C" functions
+      // that have manually mangled names.
       return false;
     // Skip CV and ref qualifiers.
     size_t NameSpaceStart = Name.find_first_not_of("rVKRO", 3);
@@ -502,14 +503,14 @@ bool oclIsBuiltin(const StringRef &Name, std::string *DemangledName,
     size_t Len = 0;
     Name.substr(DemangledNameLenStart, Start - DemangledNameLenStart)
         .getAsInteger(10, Len);
-    *DemangledName = Name.substr(Start, Len);
+    DemangledName = Name.substr(Start, Len);
   } else {
     size_t Start = Name.find_first_not_of("0123456789", 2);
     size_t Len = 0;
     Name.substr(2, Start - 2).getAsInteger(10, Len);
-    *DemangledName = Name.substr(Start, Len);
+    DemangledName = Name.substr(Start, Len);
   }
-  return true;
+  return DemangledName.size() != 0;
 }
 
 // Check if a mangled type Name is unsigned
@@ -548,8 +549,8 @@ void eraseSubstitutionFromMangledName(std::string &MangledName) {
   }
 }
 
-ParamType lastFuncParamType(const std::string &MangledName) {
-  auto Copy = MangledName;
+ParamType lastFuncParamType(StringRef MangledName) {
+  std::string Copy(MangledName);
   eraseSubstitutionFromMangledName(Copy);
   char Mangled = Copy.back();
   std::string Mangled2 = Copy.substr(Copy.size() - 2);
@@ -566,7 +567,7 @@ ParamType lastFuncParamType(const std::string &MangledName) {
 }
 
 // Check if the last argument is signed
-bool isLastFuncParamSigned(const std::string &MangledName) {
+bool isLastFuncParamSigned(StringRef MangledName) {
   return lastFuncParamType(MangledName) == ParamType::SIGNED;
 }
 
@@ -622,7 +623,7 @@ CallInst *mutateCallInst(
   auto NewName = ArgMutate(CI, Args);
   std::string InstName;
   if (!CI->getType()->isVoidTy() && CI->hasName()) {
-    InstName = CI->getName();
+    InstName = CI->getName().str();
     CI->setName(InstName + ".old");
   }
   auto NewCI = addCallInst(M, NewName, CI->getType(), Args, Attrs, CI, Mangle,
@@ -645,13 +646,13 @@ Instruction *mutateCallInst(
   auto Args = getArguments(CI);
   Type *RetTy = CI->getType();
   auto NewName = ArgMutate(CI, Args, RetTy);
-  std::string InstName;
+  StringRef InstName;
   if (CI->hasName()) {
     InstName = CI->getName();
     CI->setName(InstName + ".old");
   }
   auto NewCI = addCallInst(M, NewName, RetTy, Args, Attrs, CI, Mangle,
-                           InstName + ".tmp", TakeFuncName);
+                           std::string(InstName) + ".tmp", TakeFuncName);
   auto NewI = RetMutate(NewCI);
   NewI->takeName(CI);
   NewI->setDebugLoc(CI->getDebugLoc());
@@ -742,10 +743,10 @@ void makeVector(Instruction *InsPos, std::vector<Value *> &Ops,
 void expandVector(Instruction *InsPos, std::vector<Value *> &Ops,
                   size_t VecPos) {
   auto Vec = Ops[VecPos];
-  auto VT = Vec->getType();
-  if (!VT->isVectorTy())
+  auto *VT = dyn_cast<VectorType>(Vec->getType());
+  if (!VT)
     return;
-  size_t N = VT->getVectorNumElements();
+  size_t N = VT->getNumElements();
   IRBuilder<> Builder(InsPos);
   for (size_t I = 0; I != N; ++I)
     Ops.insert(Ops.begin() + VecPos + I,
@@ -850,18 +851,21 @@ int getMDOperandAsInt(MDNode *N, unsigned I) {
   return mdconst::dyn_extract<ConstantInt>(N->getOperand(I))->getZExtValue();
 }
 
-std::string getMDOperandAsString(MDNode *N, unsigned I) {
+// Additional helper function to be reused by getMDOperandAs* helpers
+Metadata *getMDOperandOrNull(MDNode *N, unsigned I) {
   if (!N)
-    return "";
+    return nullptr;
+  return N->getOperand(I);
+}
 
-  Metadata *Op = N->getOperand(I);
-  if (!Op)
-    return "";
-
-  if (MDString *Str = dyn_cast<MDString>(Op)) {
+std::string getMDOperandAsString(MDNode *N, unsigned I) {
+  if (auto *Str = dyn_cast_or_null<MDString>(getMDOperandOrNull(N, I)))
     return Str->getString().str();
-  }
   return "";
+}
+
+MDNode *getMDOperandAsMDNode(MDNode *N, unsigned I) {
+  return dyn_cast_or_null<MDNode>(getMDOperandOrNull(N, I));
 }
 
 Type *getMDOperandAsType(MDNode *N, unsigned I) {
@@ -907,11 +911,10 @@ ConstantInt *mapSInt(Module *M, ConstantInt *I, std::function<int(int)> F) {
   return ConstantInt::get(I->getType(), F(I->getSExtValue()), true);
 }
 
-bool isDecoratedSPIRVFunc(const Function *F, std::string *UndecoratedName) {
+bool isDecoratedSPIRVFunc(const Function *F, StringRef &UndecoratedName) {
   if (!F->hasName() || !F->getName().startswith(kSPIRVName::Prefix))
     return false;
-  if (UndecoratedName)
-    *UndecoratedName = undecorateSPIRVFunction(F->getName());
+  UndecoratedName = undecorateSPIRVFunction(F->getName());
   return true;
 }
 
@@ -1047,10 +1050,9 @@ static SPIR::RefParamType transTypeDesc(Type *Ty,
     return SPIR::RefParamType(new SPIR::PrimitiveType(SPIR::PRIMITIVE_FLOAT));
   if (Ty->isDoubleTy())
     return SPIR::RefParamType(new SPIR::PrimitiveType(SPIR::PRIMITIVE_DOUBLE));
-  if (Ty->isVectorTy()) {
-    return SPIR::RefParamType(
-        new SPIR::VectorType(transTypeDesc(Ty->getVectorElementType(), Info),
-                             Ty->getVectorNumElements()));
+  if (auto *VecTy = dyn_cast<VectorType>(Ty)) {
+    return SPIR::RefParamType(new SPIR::VectorType(
+        transTypeDesc(VecTy->getElementType(), Info), VecTy->getNumElements()));
   }
   if (Ty->isArrayTy()) {
     return transTypeDesc(PointerType::get(Ty->getArrayElementType(), 0), Info);
@@ -1077,7 +1079,7 @@ static SPIR::RefParamType transTypeDesc(Type *Ty,
       OS << reinterpret_cast<size_t>(Ty);
       Name = Tmp = std::string("struct_") + OS.str();
     }
-    return SPIR::RefParamType(new SPIR::UserDefinedType(Name));
+    return SPIR::RefParamType(new SPIR::UserDefinedType(Name.str()));
   }
 
   if (Ty->isPointerTy()) {
@@ -1151,15 +1153,12 @@ static SPIR::RefParamType transTypeDesc(Type *Ty,
 Value *getScalarOrArray(Value *V, unsigned Size, Instruction *Pos) {
   if (!V->getType()->isPointerTy())
     return V;
-  assert((isa<ConstantExpr>(V) || isa<GetElementPtrInst>(V)) &&
-         "unexpected value type");
-  auto GEP = cast<User>(V);
+  auto GEP = cast<GEPOperator>(V);
   assert(GEP->getNumOperands() == 3 && "must be a GEP from an array");
-  auto P = GEP->getOperand(0);
-  assert(P->getType()->getPointerElementType()->getArrayNumElements() == Size);
+  assert(GEP->getSourceElementType()->getArrayNumElements() == Size);
   assert(dyn_cast<ConstantInt>(GEP->getOperand(1))->getZExtValue() == 0);
   assert(dyn_cast<ConstantInt>(GEP->getOperand(2))->getZExtValue() == 0);
-  return new LoadInst(P, "", Pos);
+  return new LoadInst(GEP->getSourceElementType(), GEP->getOperand(0), "", Pos);
 }
 
 Constant *getScalarOrVectorConstantInt(Type *T, uint64_t V, bool IsSigned) {
@@ -1167,8 +1166,8 @@ Constant *getScalarOrVectorConstantInt(Type *T, uint64_t V, bool IsSigned) {
     return ConstantInt::get(IT, V);
   if (auto VT = dyn_cast<VectorType>(T)) {
     std::vector<Constant *> EV(
-        VT->getVectorNumElements(),
-        getScalarOrVectorConstantInt(VT->getVectorElementType(), V, IsSigned));
+        VT->getNumElements(),
+        getScalarOrVectorConstantInt(VT->getElementType(), V, IsSigned));
     return ConstantVector::get(EV);
   }
   llvm_unreachable("Invalid type");
@@ -1303,18 +1302,18 @@ Type *getLLVMTypeForSPIRVImageSampledTypePostfix(StringRef Postfix,
 }
 
 std::string getImageBaseTypeName(StringRef Name) {
-  std::string ImageTyName = Name;
 
   SmallVector<StringRef, 4> SubStrs;
   const char Delims[] = {kSPR2TypeName::Delimiter, 0};
   Name.split(SubStrs, Delims);
   if (Name.startswith(kSPR2TypeName::OCLPrefix)) {
-    ImageTyName = SubStrs[1].str();
+    Name = SubStrs[1];
   } else {
-    ImageTyName = SubStrs[0].str();
+    Name = SubStrs[0];
   }
 
-  if (hasAccessQualifiedName(ImageTyName))
+  std::string ImageTyName{Name};
+  if (hasAccessQualifiedName(Name))
     ImageTyName.erase(ImageTyName.size() - 5, 3);
 
   return ImageTyName;
@@ -1335,8 +1334,9 @@ std::string mapOCLTypeNameToSPIRV(StringRef Name, StringRef Acc) {
                       << ", " << Desc.Format << ")\n");
 
     BaseTy = kSPIRVTypeName::Image;
-    OS << getSPIRVImageTypePostfixes(kSPIRVImageSampledTypeName::Void, Desc,
-                                     SPIRSPIRVAccessQualifierMap::map(Acc));
+    OS << getSPIRVImageTypePostfixes(
+        kSPIRVImageSampledTypeName::Void, Desc,
+        SPIRSPIRVAccessQualifierMap::map(Acc.str()));
   } else {
     LLVM_DEBUG(dbgs() << "Mapping of " << Name << " is not implemented\n");
     llvm_unreachable("Not implemented");
@@ -1391,10 +1391,12 @@ bool eraseUselessFunctions(Module *M) {
 }
 
 // The mangling algorithm follows OpenCL pipe built-ins clang 3.8 CodeGen rules.
-static SPIR::MangleError manglePipeBuiltin(const SPIR::FunctionDescriptor &Fd,
-                                           std::string &MangledName) {
-  assert(OCLUtil::isPipeBI(Fd.Name) &&
-         "Method is expected to be called only for pipe builtins!");
+static SPIR::MangleError
+manglePipeOrAddressSpaceCastBuiltin(const SPIR::FunctionDescriptor &Fd,
+                                    std::string &MangledName) {
+  assert(OCLUtil::isPipeOrAddressSpaceCastBI(Fd.Name) &&
+         "Method is expected to be called only for pipe and address space cast "
+         "builtins!");
   if (Fd.isNull()) {
     MangledName.assign(SPIR::FunctionDescriptor::nullString());
     return SPIR::MANGLE_NULL_FUNC_DESCRIPTOR;
@@ -1403,11 +1405,10 @@ static SPIR::MangleError manglePipeBuiltin(const SPIR::FunctionDescriptor &Fd,
   return SPIR::MANGLE_SUCCESS;
 }
 
-std::string mangleBuiltin(const std::string &UniqName,
-                          ArrayRef<Type *> ArgTypes,
+std::string mangleBuiltin(StringRef UniqName, ArrayRef<Type *> ArgTypes,
                           BuiltinFuncMangleInfo *BtnInfo) {
   if (!BtnInfo)
-    return UniqName;
+    return std::string(UniqName);
   BtnInfo->init(UniqName);
   std::string MangledName;
   LLVM_DEBUG(dbgs() << "[mangle] " << UniqName << " => ");
@@ -1443,8 +1444,8 @@ std::string mangleBuiltin(const std::string &UniqName,
   SPIR::NameMangler Mangler(SPIR::SPIR20);
   Mangler.mangle(FD, MangledName);
 #else
-  if (OCLUtil::isPipeBI(BtnInfo->getUnmangledName())) {
-    manglePipeBuiltin(FD, MangledName);
+  if (OCLUtil::isPipeOrAddressSpaceCastBI(BtnInfo->getUnmangledName())) {
+    manglePipeOrAddressSpaceCastBuiltin(FD, MangledName);
   } else {
     SPIR::NameMangler Mangler(SPIR::SPIR20);
     Mangler.mangle(FD, MangledName);
@@ -1479,7 +1480,7 @@ StringRef getAccessQualifier(StringRef TyName) {
 Type *getSPIRVImageTypeFromOCL(Module *M, Type *ImageTy) {
   assert(isOCLImageType(ImageTy) && "Unsupported type");
   auto ImageTypeName = ImageTy->getPointerElementType()->getStructName();
-  std::string Acc = kAccessQualName::ReadOnly;
+  StringRef Acc = kAccessQualName::ReadOnly;
   if (hasAccessQualifiedName(ImageTypeName))
     Acc = getAccessQualifier(ImageTypeName);
   return getOrCreateOpaquePtrType(M, mapOCLTypeNameToSPIRV(ImageTypeName, Acc));
@@ -1498,72 +1499,42 @@ llvm::Constant *getOCLNullClkEventPtr(Module *M) {
   return Constant::getNullValue(getOCLClkEventPtrType(M));
 }
 
-bool hasLoopUnrollMetadata(const Module *M) {
+bool hasLoopMetadata(const Module *M) {
   for (const Function &F : *M)
     for (const BasicBlock &BB : F) {
       const Instruction *Term = BB.getTerminator();
-      if (!Term)
-        continue;
-      if (const MDNode *MD = Term->getMetadata("llvm.loop"))
-        for (const MDOperand &MDOp : MD->operands())
-          if (getMDOperandAsString(dyn_cast<MDNode>(MDOp), 0)
-                  .find("llvm.loop.unroll.") == 0)
-            return true;
+      if (Term && Term->getMetadata("llvm.loop"))
+        return true;
     }
   return false;
 }
 
-spv::LoopControlMask getLoopControl(const BranchInst *Branch,
-                                    std::vector<SPIRVWord> &Parameters) {
-  if (!Branch)
-    return spv::LoopControlMaskNone;
-  MDNode *LoopMD = Branch->getMetadata("llvm.loop");
-  if (!LoopMD)
-    return spv::LoopControlMaskNone;
-
-  size_t LoopControl = spv::LoopControlMaskNone;
-  for (const MDOperand &MDOp : LoopMD->operands()) {
-    if (MDNode *Node = dyn_cast<MDNode>(MDOp)) {
-      std::string S = getMDOperandAsString(Node, 0);
-      // Set the loop control bits. Parameters are set in the order described
-      // in 3.23 SPIR-V Spec. rev. 1.4:
-      // Bits that are set can indicate whether an additional operand follows,
-      // as described by the table. If there are multiple following operands
-      // indicated, they are ordered: Those indicated by smaller-numbered bits
-      // appear first.
-      if (S == "llvm.loop.unroll.disable")
-        LoopControl |= spv::LoopControlDontUnrollMask;
-      else if (S == "llvm.loop.unroll.full" || S == "llvm.loop.unroll.enable")
-        LoopControl |= spv::LoopControlUnrollMask;
-      if (S == "llvm.loop.ivdep.enable")
-        LoopControl |= spv::LoopControlDependencyInfiniteMask;
-      if (S == "llvm.loop.ivdep.safelen") {
-        size_t I = getMDOperandAsInt(Node, 1);
-        Parameters.push_back(I);
-        LoopControl |= spv::LoopControlDependencyLengthMask;
-      }
-      // PartialCount must not be used with the DontUnroll bit
-      if (S == "llvm.loop.unroll.count" &&
-          !(LoopControl & LoopControlDontUnrollMask)) {
-        size_t I = getMDOperandAsInt(Node, 1);
-        Parameters.push_back(I);
-        LoopControl |= spv::LoopControlPartialCountMask;
-      }
-      if (S == "llvm.loop.ii.count") {
-        Parameters.push_back(InitiationIntervalINTEL);
-        size_t I = getMDOperandAsInt(Node, 1);
-        Parameters.push_back(I);
-        LoopControl |= spv::LoopControlExtendedControlsMask;
-      }
-      if (S == "llvm.loop.max_concurrency.count") {
-        Parameters.push_back(MaxConcurrencyINTEL);
-        size_t I = getMDOperandAsInt(Node, 1);
-        Parameters.push_back(I);
-        LoopControl |= spv::LoopControlExtendedControlsMask;
-      }
+// Returns true if type(s) and number of elements (if vector) is valid
+bool checkTypeForSPIRVExtendedInstLowering(IntrinsicInst *II, SPIRVModule *BM) {
+  switch (II->getIntrinsicID()) {
+  case Intrinsic::fabs:
+  case Intrinsic::ceil: {
+    Type *Ty = II->getType();
+    if (II->getArgOperand(0)->getType() != Ty)
+      return false;
+    int NumElems = 1;
+    if (auto *VecTy = dyn_cast<VectorType>(Ty)) {
+      NumElems = VecTy->getNumElements();
+      Ty = VecTy->getElementType();
     }
+    if ((!Ty->isFloatTy() && !Ty->isDoubleTy()) ||
+        ((NumElems > 4) && (NumElems != 8) && (NumElems != 16))) {
+      BM->getErrorLog().checkError(false, SPIRVEC_InvalidFunctionCall,
+                                   II->getCalledOperand()->getName().str(), "",
+                                   __FILE__, __LINE__);
+      return false;
+    }
+    break;
   }
-  return static_cast<spv::LoopControlMask>(LoopControl);
+  default:
+    break;
+  }
+  return true;
 }
 
 } // namespace SPIRV

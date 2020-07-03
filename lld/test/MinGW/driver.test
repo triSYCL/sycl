@@ -189,6 +189,9 @@ UNDEFINED: -includeoptional:_foo -includeoptional:_bar -includeoptional:_baz -in
 RUN: ld.lld -### -m i386pep foo.o -Llibpath | FileCheck -check-prefix LIBPATH %s
 LIBPATH: -libpath:libpath
 
+RUN: ld.lld -### -m i386pep foo.o --reproduce=foo.tar | FileCheck -check-prefix REPRO %s
+REPRO: -reproduce:foo.tar
+
 RUN: ld.lld -### -m i386pep foo.o --no-insert-timestamp | FileCheck -check-prefix NOTIMESTAMP %s
 RUN: ld.lld -### -m i386pep foo.o --insert-timestamp --no-insert-timestamp | FileCheck -check-prefix NOTIMESTAMP %s
 NOTIMESTAMP: -timestamp:0
@@ -211,3 +214,33 @@ HELP: --enable-auto-import
 RUN: ld.lld -### -m i386pep foo.o -delayload user32.dll --delayload shell32.dll | FileCheck -check-prefix DELAYLOAD %s
 RUN: ld.lld -### -m i386pep foo.o -delayload=user32.dll --delayload=shell32.dll | FileCheck -check-prefix DELAYLOAD %s
 DELAYLOAD: -delayload:user32.dll -delayload:shell32.dll
+
+RUN: not ld.lld -m i386pep -entry 2>&1 | FileCheck -check-prefix MISSING_ARG %s
+MISSING_ARG: error: -entry: missing argument
+
+RUN: not ld.lld -m i386pep --foo 2>&1 | FileCheck -check-prefix UNKNOWN_ARG %s
+UNKNOWN_ARG: error: unknown argument: --foo
+
+RUN: not ld.lld -m i386pep 2>&1 | FileCheck -check-prefix NO_INPUT_FILES %s
+NO_INPUT_FILES: error: no input files
+
+RUN: ld.lld -### -m i386pep foo.o | FileCheck -check-prefix ENABLE_AUTO_IMPORT %s
+RUN: ld.lld -### -m i386pep foo.o --disable-auto-import --enable-auto-import | FileCheck -check-prefix ENABLE_AUTO_IMPORT %s
+RUN: ld.lld -### -m i386pep foo.o -enable-auto-import | FileCheck -check-prefix ENABLE_AUTO_IMPORT %s
+ENABLE_AUTO_IMPORT: -auto-import{{ }}
+
+RUN: ld.lld -### -m i386pep foo.o --disable-auto-import | FileCheck -check-prefix DISABLE_AUTO_IMPORT %s
+RUN: ld.lld -### -m i386pep foo.o -disable-auto-import | FileCheck -check-prefix DISABLE_AUTO_IMPORT %s
+DISABLE_AUTO_IMPORT: -auto-import:no
+
+RUN: ld.lld -### -m i386pep foo.o | FileCheck -check-prefix ENABLE_RUNTIME_PSEUDO_RELOC %s
+RUN: ld.lld -### -m i386pep foo.o --disable-runtime-pseudo-reloc --enable-runtime-pseudo-reloc | FileCheck -check-prefix ENABLE_RUNTIME_PSEUDO_RELOC %s
+RUN: ld.lld -### -m i386pep foo.o -enable-runtime-pseudo-reloc | FileCheck -check-prefix ENABLE_RUNTIME_PSEUDO_RELOC %s
+ENABLE_RUNTIME_PSEUDO_RELOC: -runtime-pseudo-reloc{{ }}
+
+RUN: ld.lld -### -m i386pep foo.o --disable-runtime-pseudo-reloc | FileCheck -check-prefix DISABLE_RUNTIME_PSEUDO_RELOC %s
+RUN: ld.lld -### -m i386pep foo.o -disable-runtime-pseudo-reloc | FileCheck -check-prefix DISABLE_RUNTIME_PSEUDO_RELOC %s
+DISABLE_RUNTIME_PSEUDO_RELOC: -runtime-pseudo-reloc:no
+
+RUN: ld.lld -### foo.o -m i386pe --thinlto-cache-dir=_foo | FileCheck -check-prefix=THINLTO_CACHEDIR %s
+THINLTO_CACHEDIR: -lldltocache:_foo

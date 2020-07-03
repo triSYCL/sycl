@@ -588,6 +588,9 @@ NOINLINE void TouchStackFunc() {
     A[i] = i*i;
 }
 
+// Disabled due to rdar://problem/62141412
+#if !(defined(__APPLE__) && defined(__i386__))
+
 // Test that we handle longjmp and do not report false positives on stack.
 TEST(AddressSanitizer, LongJmpTest) {
   static jmp_buf buf;
@@ -597,6 +600,7 @@ TEST(AddressSanitizer, LongJmpTest) {
     TouchStackFunc();
   }
 }
+#endif
 
 #if !defined(_WIN32)  // Only basic longjmp is available on Windows.
 NOINLINE void UnderscopeLongJmpFunc1(jmp_buf buf) {
@@ -658,6 +662,8 @@ TEST(AddressSanitizer, UnderscopeLongJmpTest) {
   }
 }
 
+// Disabled due to rdar://problem/62141412
+#if !(defined(__APPLE__) && defined(__i386__))
 TEST(AddressSanitizer, SigLongJmpTest) {
   static sigjmp_buf buf;
   if (!sigsetjmp(buf, 1)) {
@@ -666,6 +672,8 @@ TEST(AddressSanitizer, SigLongJmpTest) {
     TouchStackFunc();
   }
 }
+#endif
+
 #endif
 
 // FIXME: Why does clang-cl define __EXCEPTIONS?
@@ -739,7 +747,7 @@ TEST(AddressSanitizer, Store128Test) {
 #endif
 
 // FIXME: All tests that use this function should be turned into lit tests.
-string RightOOBErrorMessage(int oob_distance, bool is_write) {
+std::string RightOOBErrorMessage(int oob_distance, bool is_write) {
   assert(oob_distance >= 0);
   char expected_str[100];
   sprintf(expected_str, ASAN_PCRE_DOTALL
@@ -751,19 +759,19 @@ string RightOOBErrorMessage(int oob_distance, bool is_write) {
           is_write ? "WRITE" : "READ",
 #endif
           oob_distance);
-  return string(expected_str);
+  return std::string(expected_str);
 }
 
-string RightOOBWriteMessage(int oob_distance) {
+std::string RightOOBWriteMessage(int oob_distance) {
   return RightOOBErrorMessage(oob_distance, /*is_write*/true);
 }
 
-string RightOOBReadMessage(int oob_distance) {
+std::string RightOOBReadMessage(int oob_distance) {
   return RightOOBErrorMessage(oob_distance, /*is_write*/false);
 }
 
 // FIXME: All tests that use this function should be turned into lit tests.
-string LeftOOBErrorMessage(int oob_distance, bool is_write) {
+std::string LeftOOBErrorMessage(int oob_distance, bool is_write) {
   assert(oob_distance > 0);
   char expected_str[100];
   sprintf(expected_str,
@@ -775,22 +783,22 @@ string LeftOOBErrorMessage(int oob_distance, bool is_write) {
           is_write ? "WRITE" : "READ",
 #endif
           oob_distance);
-  return string(expected_str);
+  return std::string(expected_str);
 }
 
-string LeftOOBWriteMessage(int oob_distance) {
+std::string LeftOOBWriteMessage(int oob_distance) {
   return LeftOOBErrorMessage(oob_distance, /*is_write*/true);
 }
 
-string LeftOOBReadMessage(int oob_distance) {
+std::string LeftOOBReadMessage(int oob_distance) {
   return LeftOOBErrorMessage(oob_distance, /*is_write*/false);
 }
 
-string LeftOOBAccessMessage(int oob_distance) {
+std::string LeftOOBAccessMessage(int oob_distance) {
   assert(oob_distance > 0);
   char expected_str[100];
   sprintf(expected_str, "located %d bytes to the left", oob_distance);
-  return string(expected_str);
+  return std::string(expected_str);
 }
 
 char* MallocAndMemsetString(size_t size, char ch) {
@@ -1157,9 +1165,13 @@ TEST(AddressSanitizer, DISABLED_StressStackReuseAndExceptionsTest) {
 
 #if !defined(_WIN32)
 TEST(AddressSanitizer, MlockTest) {
+#if !defined(__ANDROID__) || __ANDROID_API__ >= 17
   EXPECT_EQ(0, mlockall(MCL_CURRENT));
+#endif
   EXPECT_EQ(0, mlock((void*)0x12345, 0x5678));
+#if !defined(__ANDROID__) || __ANDROID_API__ >= 17
   EXPECT_EQ(0, munlockall());
+#endif
   EXPECT_EQ(0, munlock((void*)0x987, 0x654));
 }
 #endif
@@ -1195,11 +1207,11 @@ TEST(AddressSanitizer, AttributeNoSanitizeAddressTest) {
 #if !defined(__ANDROID__) && \
     !defined(__APPLE__) && \
     !defined(_WIN32)
-static string MismatchStr(const string &str) {
-  return string("AddressSanitizer: alloc-dealloc-mismatch \\(") + str;
+static std::string MismatchStr(const std::string &str) {
+  return std::string("AddressSanitizer: alloc-dealloc-mismatch \\(") + str;
 }
 
-static string MismatchOrNewDeleteTypeStr(const string &mismatch_str) {
+static std::string MismatchOrNewDeleteTypeStr(const std::string &mismatch_str) {
   return "(" + MismatchStr(mismatch_str) +
          ")|(AddressSanitizer: new-delete-type-mismatch)";
 }

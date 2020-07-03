@@ -1,5 +1,4 @@
-//===-- ProcessFreeBSD.cpp ----------------------------------------*- C++
-//-*-===//
+//===-- ProcessFreeBSD.cpp ------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -56,6 +55,8 @@
 
 using namespace lldb;
 using namespace lldb_private;
+
+LLDB_PLUGIN_DEFINE(ProcessFreeBSD)
 
 namespace {
 UnixSignalsSP &GetFreeBSDSignals() {
@@ -379,7 +380,8 @@ Status ProcessFreeBSD::DoLaunch(Module *module,
   FileSpec stdout_file_spec{};
   FileSpec stderr_file_spec{};
 
-  const FileSpec dbg_pts_file_spec{launch_info.GetPTY().GetSlaveName(NULL, 0)};
+  const FileSpec dbg_pts_file_spec{
+      launch_info.GetPTY().GetSecondaryName(NULL, 0)};
 
   file_action = launch_info.GetFileActionForFD(STDIN_FILENO);
   stdin_file_spec =
@@ -977,7 +979,7 @@ Status ProcessFreeBSD::SetSoftwareSingleStepBreakpoint(lldb::tid_t tid,
   Breakpoint *const sw_step_break =
       m_process->GetTarget().CreateBreakpoint(addr, true, false).get();
   sw_step_break->SetCallback(SingleStepBreakpointHit, this, true);
-  sw_step_break->SetBreakpointKind("software-signle-step");
+  sw_step_break->SetBreakpointKind("software-single-step");
 
   LLDB_LOGF(log, "ProcessFreeBSD::%s addr = 0x%" PRIx64 " -- SUCCESS",
             __FUNCTION__, addr);

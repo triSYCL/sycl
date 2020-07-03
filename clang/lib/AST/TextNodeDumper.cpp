@@ -15,6 +15,10 @@
 #include "clang/AST/DeclOpenMP.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/LocInfoType.h"
+#include "clang/Basic/Module.h"
+#include "clang/Basic/SourceManager.h"
+#include "clang/Basic/Specifiers.h"
+#include "clang/Basic/TypeTraits.h"
 
 using namespace clang;
 
@@ -121,11 +125,13 @@ void TextNodeDumper::Visit(const Stmt *Node) {
   dumpPointer(Node);
   dumpSourceRange(Node->getSourceRange());
 
-  if (Node->isOMPStructuredBlock())
-    OS << " openmp_structured_block";
-
   if (const auto *E = dyn_cast<Expr>(Node)) {
     dumpType(E->getType());
+
+    if (E->containsErrors()) {
+      ColorScope Color(OS, ShowColors, ErrorsColor);
+      OS << " contains-errors";
+    }
 
     {
       ColorScope Color(OS, ShowColors, ValueKindColor);
@@ -157,6 +163,9 @@ void TextNodeDumper::Visit(const Stmt *Node) {
         break;
       case OK_VectorComponent:
         OS << " vectorcomponent";
+        break;
+      case OK_MatrixComponent:
+        OS << " matrixcomponent";
         break;
       }
     }
@@ -193,6 +202,11 @@ void TextNodeDumper::Visit(const Type *T) {
   if (SingleStepDesugar != QualType(T, 0))
     OS << " sugar";
 
+  if (T->containsErrors()) {
+    ColorScope Color(OS, ShowColors, ErrorsColor);
+    OS << " contains-errors";
+  }
+
   if (T->isDependentType())
     OS << " dependent";
   else if (T->isInstantiationDependentType())
@@ -223,7 +237,6 @@ void TextNodeDumper::Visit(const Decl *D) {
     return;
   }
 
-  Context = &D->getASTContext();
   {
     ColorScope Color(OS, ShowColors, DeclKindNameColor);
     OS << D->getDeclKindName() << "Decl";
@@ -244,7 +257,7 @@ void TextNodeDumper::Visit(const Decl *D) {
              const_cast<NamedDecl *>(ND)))
       AddChild([=] { OS << "also in " << M->getFullModuleName(); });
   if (const NamedDecl *ND = dyn_cast<NamedDecl>(D))
-    if (ND->isHidden())
+    if (!ND->isUnconditionallyVisible())
       OS << " hidden";
   if (D->isImplicit())
     OS << " implicit";
@@ -311,7 +324,7 @@ void TextNodeDumper::Visit(const OMPClause *C) {
   }
   {
     ColorScope Color(OS, ShowColors, AttrColor);
-    StringRef ClauseName(getOpenMPClauseName(C->getClauseKind()));
+    StringRef ClauseName(llvm::omp::getOpenMPClauseName(C->getClauseKind()));
     OS << "OMP" << ClauseName.substr(/*Start=*/0, /*N=*/1).upper()
        << ClauseName.drop_front() << "Clause";
   }
@@ -433,19 +446,27 @@ void TextNodeDumper::dumpName(const NamedDecl *ND) {
 }
 
 void TextNodeDumper::dumpAccessSpecifier(AccessSpecifier AS) {
-  switch (AS) {
-  case AS_none:
-    break;
-  case AS_public:
-    OS << "public";
-    break;
-  case AS_protected:
-    OS << "protected";
-    break;
-  case AS_private:
-    OS << "private";
-    break;
-  }
+  const auto AccessSpelling = getAccessSpelling(AS);
+  if (AccessSpelling.empty())
+    return;
+  OS << AccessSpelling;
+}
+
+void TextNodeDumper::dumpCleanupObject(
+    const ExprWithCleanups::CleanupObject &C) {
+  if (auto *BD = C.dyn_cast<BlockDecl *>())
+    dumpDeclRef(BD, "cleanup");
+  else if (auto *CLE = C.dyn_cast<CompoundLiteralExpr *>())
+    AddChild([=] {
+      OS << "cleanup ";
+      {
+        ColorScope Color(OS, ShowColors, StmtColor);
+        OS << CLE->getStmtClassName();
+      }
+      dumpPointer(CLE);
+    });
+  else
+    llvm_unreachable("unexpected cleanup type");
 }
 
 void TextNodeDumper::dumpDeclRef(const Decl *D, StringRef Label) {
@@ -489,6 +510,9 @@ void TextNodeDumper::visitInlineCommandComment(
     break;
   case comments::InlineCommandComment::RenderEmphasized:
     OS << " RenderEmphasized";
+    break;
+  case comments::InlineCommandComment::RenderAnchor:
+    OS << " RenderAnchor";
     break;
   }
 
@@ -637,8 +661,8 @@ static void dumpBasePath(raw_ostream &OS, const CastExpr *Node) {
     if (!First)
       OS << " -> ";
 
-    const CXXRecordDecl *RD =
-        cast<CXXRecordDecl>(Base->getType()->getAs<RecordType>()->getDecl());
+    const auto *RD =
+        cast<CXXRecordDecl>(Base->getType()->castAs<RecordType>()->getDecl());
 
     if (Base->isVirtual())
       OS << "virtual ";
@@ -688,13 +712,21 @@ void TextNodeDumper::VisitConstantExpr(const ConstantExpr *Node) {
   if (Node->getResultAPValueKind() != APValue::None) {
     ColorScope Color(OS, ShowColors, ValueColor);
     OS << " ";
-    Node->getAPValueResult().printPretty(OS, *Context, Node->getType());
+    Node->getAPValueResult().dump(OS);
   }
 }
 
 void TextNodeDumper::VisitCallExpr(const CallExpr *Node) {
   if (Node->usesADL())
     OS << " adl";
+}
+
+void TextNodeDumper::VisitCXXOperatorCallExpr(const CXXOperatorCallExpr *Node) {
+  const char *OperatorSpelling = clang::getOperatorSpelling(Node->getOperator());
+  if (OperatorSpelling)
+    OS << " '" << OperatorSpelling << "'";
+
+  VisitCallExpr(Node);
 }
 
 void TextNodeDumper::VisitCastExpr(const CastExpr *Node) {
@@ -807,23 +839,8 @@ void TextNodeDumper::VisitUnaryOperator(const UnaryOperator *Node) {
 
 void TextNodeDumper::VisitUnaryExprOrTypeTraitExpr(
     const UnaryExprOrTypeTraitExpr *Node) {
-  switch (Node->getKind()) {
-  case UETT_SizeOf:
-    OS << " sizeof";
-    break;
-  case UETT_AlignOf:
-    OS << " alignof";
-    break;
-  case UETT_VecStep:
-    OS << " vec_step";
-    break;
-  case UETT_OpenMPRequiredSimdAlign:
-    OS << " __builtin_omp_required_simd_align";
-    break;
-  case UETT_PreferredAlignOf:
-    OS << " __alignof";
-    break;
-  }
+  OS << " " << getTraitSpelling(Node->getKind());
+
   if (Node->isArgumentType())
     dumpType(Node->getArgumentType());
 }
@@ -937,6 +954,18 @@ void TextNodeDumper::VisitCXXDeleteExpr(const CXXDeleteExpr *Node) {
   }
 }
 
+void TextNodeDumper::VisitTypeTraitExpr(const TypeTraitExpr *Node) {
+  OS << " " << getTraitSpelling(Node->getTrait());
+}
+
+void TextNodeDumper::VisitArrayTypeTraitExpr(const ArrayTypeTraitExpr *Node) {
+  OS << " " << getTraitSpelling(Node->getTrait());
+}
+
+void TextNodeDumper::VisitExpressionTraitExpr(const ExpressionTraitExpr *Node) {
+  OS << " " << getTraitSpelling(Node->getTrait());
+}
+
 void TextNodeDumper::VisitMaterializeTemporaryExpr(
     const MaterializeTemporaryExpr *Node) {
   if (const ValueDecl *VD = Node->getExtendingDecl()) {
@@ -947,7 +976,7 @@ void TextNodeDumper::VisitMaterializeTemporaryExpr(
 
 void TextNodeDumper::VisitExprWithCleanups(const ExprWithCleanups *Node) {
   for (unsigned i = 0, e = Node->getNumObjects(); i != e; ++i)
-    dumpDeclRef(Node->getObject(i), "cleanup");
+    dumpCleanupObject(Node->getObject(i));
 }
 
 void TextNodeDumper::VisitSizeOfPackExpr(const SizeOfPackExpr *Node) {
@@ -1061,6 +1090,23 @@ void TextNodeDumper::VisitObjCSubscriptRefExpr(
 
 void TextNodeDumper::VisitObjCBoolLiteralExpr(const ObjCBoolLiteralExpr *Node) {
   OS << " " << (Node->getValue() ? "__objc_yes" : "__objc_no");
+}
+
+void TextNodeDumper::VisitOMPIteratorExpr(const OMPIteratorExpr *Node) {
+  OS << " ";
+  for (unsigned I = 0, E = Node->numOfIterators(); I < E; ++I) {
+    Visit(Node->getIteratorDecl(I));
+    OS << " = ";
+    const OMPIteratorExpr::IteratorRange Range = Node->getIteratorRange(I);
+    OS << " begin ";
+    Visit(Range.Begin);
+    OS << " end ";
+    Visit(Range.End);
+    if (Range.Step) {
+      OS << " step ";
+      Visit(Range.Step);
+    }
+  }
 }
 
 void TextNodeDumper::VisitRValueReferenceType(const ReferenceType *T) {
@@ -1199,6 +1245,11 @@ void TextNodeDumper::VisitAutoType(const AutoType *T) {
     OS << " decltype(auto)";
   if (!T->isDeduced())
     OS << " undeduced";
+  if (T->isConstrained()) {
+    dumpDeclRef(T->getTypeConstraintConcept());
+    for (const auto &Arg : T->getTypeConstraintArguments())
+      VisitTemplateArgument(Arg);
+  }
 }
 
 void TextNodeDumper::VisitTemplateSpecializationType(
@@ -1339,6 +1390,17 @@ void TextNodeDumper::VisitFunctionDecl(const FunctionDecl *D) {
     OS << " <<<NULL params x " << D->getNumParams() << ">>>";
 }
 
+void TextNodeDumper::VisitLifetimeExtendedTemporaryDecl(
+    const LifetimeExtendedTemporaryDecl *D) {
+  OS << " extended by ";
+  dumpBareDeclRef(D->getExtendingDecl());
+  OS << " mangling ";
+  {
+    ColorScope Color(OS, ShowColors, ValueColor);
+    OS << D->getManglingNumber();
+  }
+}
+
 void TextNodeDumper::VisitFieldDecl(const FieldDecl *D) {
   dumpName(D);
   dumpType(D->getType());
@@ -1385,6 +1447,8 @@ void TextNodeDumper::VisitVarDecl(const VarDecl *D) {
       break;
     }
   }
+  if (D->needsDestruction(D->getASTContext()))
+    OS << " destroyed";
   if (D->isParameterPack())
     OS << " pack";
 }
@@ -1476,7 +1540,8 @@ void TextNodeDumper::VisitOMPRequiresDecl(const OMPRequiresDecl *D) {
       }
       {
         ColorScope Color(OS, ShowColors, AttrColor);
-        StringRef ClauseName(getOpenMPClauseName(C->getClauseKind()));
+        StringRef ClauseName(
+            llvm::omp::getOpenMPClauseName(C->getClauseKind()));
         OS << "OMP" << ClauseName.substr(/*Start=*/0, /*N=*/1).upper()
            << ClauseName.drop_front() << "Clause";
       }
@@ -1609,6 +1674,7 @@ void TextNodeDumper::VisitCXXRecordDecl(const CXXRecordDecl *D) {
         ColorScope Color(OS, ShowColors, DeclKindNameColor);
         OS << "CopyAssignment";
       }
+      FLAG(hasSimpleCopyAssignment, simple);
       FLAG(hasTrivialCopyAssignment, trivial);
       FLAG(hasNonTrivialCopyAssignment, non_trivial);
       FLAG(hasCopyAssignmentWithConstParam, has_const_param);
@@ -1642,6 +1708,7 @@ void TextNodeDumper::VisitCXXRecordDecl(const CXXRecordDecl *D) {
       FLAG(hasTrivialDestructor, trivial);
       FLAG(hasNonTrivialDestructor, non_trivial);
       FLAG(hasUserDeclaredDestructor, user_declared);
+      FLAG(hasConstexprDestructor, constexpr);
       FLAG(needsImplicitDestructor, needs_implicit);
       FLAG(needsOverloadResolutionForDestructor, needs_overload_resolution);
       if (!D->needsOverloadResolutionForDestructor())
@@ -1678,7 +1745,16 @@ void TextNodeDumper::VisitBuiltinTemplateDecl(const BuiltinTemplateDecl *D) {
 }
 
 void TextNodeDumper::VisitTemplateTypeParmDecl(const TemplateTypeParmDecl *D) {
-  if (D->wasDeclaredWithTypename())
+  if (const auto *TC = D->getTypeConstraint()) {
+    OS << " ";
+    dumpBareDeclRef(TC->getNamedConcept());
+    if (TC->getNamedConcept() != TC->getFoundDecl()) {
+      OS << " (";
+      dumpBareDeclRef(TC->getFoundDecl());
+      OS << ")";
+    }
+    Visit(TC->getImmediatelyDeclaredConstraint());
+  } else if (D->wasDeclaredWithTypename())
     OS << " typename";
   else
     OS << " class";
@@ -1889,33 +1965,35 @@ void TextNodeDumper::VisitObjCPropertyDecl(const ObjCPropertyDecl *D) {
   else if (D->getPropertyImplementation() == ObjCPropertyDecl::Optional)
     OS << " optional";
 
-  ObjCPropertyDecl::PropertyAttributeKind Attrs = D->getPropertyAttributes();
-  if (Attrs != ObjCPropertyDecl::OBJC_PR_noattr) {
-    if (Attrs & ObjCPropertyDecl::OBJC_PR_readonly)
+  ObjCPropertyAttribute::Kind Attrs = D->getPropertyAttributes();
+  if (Attrs != ObjCPropertyAttribute::kind_noattr) {
+    if (Attrs & ObjCPropertyAttribute::kind_readonly)
       OS << " readonly";
-    if (Attrs & ObjCPropertyDecl::OBJC_PR_assign)
+    if (Attrs & ObjCPropertyAttribute::kind_assign)
       OS << " assign";
-    if (Attrs & ObjCPropertyDecl::OBJC_PR_readwrite)
+    if (Attrs & ObjCPropertyAttribute::kind_readwrite)
       OS << " readwrite";
-    if (Attrs & ObjCPropertyDecl::OBJC_PR_retain)
+    if (Attrs & ObjCPropertyAttribute::kind_retain)
       OS << " retain";
-    if (Attrs & ObjCPropertyDecl::OBJC_PR_copy)
+    if (Attrs & ObjCPropertyAttribute::kind_copy)
       OS << " copy";
-    if (Attrs & ObjCPropertyDecl::OBJC_PR_nonatomic)
+    if (Attrs & ObjCPropertyAttribute::kind_nonatomic)
       OS << " nonatomic";
-    if (Attrs & ObjCPropertyDecl::OBJC_PR_atomic)
+    if (Attrs & ObjCPropertyAttribute::kind_atomic)
       OS << " atomic";
-    if (Attrs & ObjCPropertyDecl::OBJC_PR_weak)
+    if (Attrs & ObjCPropertyAttribute::kind_weak)
       OS << " weak";
-    if (Attrs & ObjCPropertyDecl::OBJC_PR_strong)
+    if (Attrs & ObjCPropertyAttribute::kind_strong)
       OS << " strong";
-    if (Attrs & ObjCPropertyDecl::OBJC_PR_unsafe_unretained)
+    if (Attrs & ObjCPropertyAttribute::kind_unsafe_unretained)
       OS << " unsafe_unretained";
-    if (Attrs & ObjCPropertyDecl::OBJC_PR_class)
+    if (Attrs & ObjCPropertyAttribute::kind_class)
       OS << " class";
-    if (Attrs & ObjCPropertyDecl::OBJC_PR_getter)
+    if (Attrs & ObjCPropertyAttribute::kind_direct)
+      OS << " direct";
+    if (Attrs & ObjCPropertyAttribute::kind_getter)
       dumpDeclRef(D->getGetterMethodDecl(), "getter");
-    if (Attrs & ObjCPropertyDecl::OBJC_PR_setter)
+    if (Attrs & ObjCPropertyAttribute::kind_setter)
       dumpDeclRef(D->getSetterMethodDecl(), "setter");
   }
 }

@@ -10,13 +10,18 @@
 #define LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_AMDGPU_H
 
 #include "Gnu.h"
+#include "ROCm.h"
 #include "clang/Driver/Options.h"
 #include "clang/Driver/Tool.h"
 #include "clang/Driver/ToolChain.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/Support/TargetParser.h"
+
 #include <map>
 
 namespace clang {
 namespace driver {
+
 namespace tools {
 namespace amdgpu {
 
@@ -40,11 +45,9 @@ void getAMDGPUTargetFeatures(const Driver &D, const llvm::opt::ArgList &Args,
 namespace toolchains {
 
 class LLVM_LIBRARY_VISIBILITY AMDGPUToolChain : public Generic_ELF {
-
-private:
+protected:
   const std::map<options::ID, const StringRef> OptionsDefault;
 
-protected:
   Tool *buildLinker() const override;
   const StringRef getOptionDefault(options::ID OptID) const {
     auto opt = OptionsDefault.find(OptID);
@@ -55,7 +58,7 @@ protected:
 public:
   AMDGPUToolChain(const Driver &D, const llvm::Triple &Triple,
                   const llvm::opt::ArgList &Args);
-  unsigned GetDefaultDwarfVersion() const override { return 5; }
+  unsigned GetDefaultDwarfVersion() const override { return 4; }
   bool IsIntegratedAssemblerDefault() const override { return true; }
   bool IsMathErrnoDefault() const override { return false; }
 
@@ -66,6 +69,37 @@ public:
   void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
                              llvm::opt::ArgStringList &CC1Args,
                              Action::OffloadKind DeviceOffloadKind) const override;
+
+  /// Return whether denormals should be flushed, and treated as 0 by default
+  /// for the subtarget.
+  static bool getDefaultDenormsAreZeroForTarget(llvm::AMDGPU::GPUKind GPUKind);
+
+  llvm::DenormalMode getDefaultDenormalModeForType(
+      const llvm::opt::ArgList &DriverArgs, const JobAction &JA,
+      const llvm::fltSemantics *FPType = nullptr) const override;
+
+  static bool isWave64(const llvm::opt::ArgList &DriverArgs,
+                       llvm::AMDGPU::GPUKind Kind);
+  /// Needed for using lto.
+  bool HasNativeLLVMSupport() const override {
+    return true;
+  }
+
+  /// Needed for translating LTO options.
+  const char *getDefaultLinker() const override { return "ld.lld"; }
+};
+
+class LLVM_LIBRARY_VISIBILITY ROCMToolChain : public AMDGPUToolChain {
+protected:
+  RocmInstallationDetector RocmInstallation;
+
+public:
+  ROCMToolChain(const Driver &D, const llvm::Triple &Triple,
+                const llvm::opt::ArgList &Args);
+  void
+  addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
+                        llvm::opt::ArgStringList &CC1Args,
+                        Action::OffloadKind DeviceOffloadKind) const override;
 };
 
 } // end namespace toolchains

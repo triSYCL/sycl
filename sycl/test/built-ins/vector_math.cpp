@@ -1,4 +1,10 @@
+<<<<<<< HEAD
 // RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
+||||||| merged common ancestors
+// RUN: %clangxx -fsycl %s -o %t.out
+=======
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+>>>>>>> intel/sycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
@@ -201,48 +207,6 @@ int main() {
     assert(r2 > 0.1024f && r2 < 0.1026f);   // ~0.102583
     assert(i1 == 1);                        // tgamma of 10 is ~362880.0
     assert(i2 == -1); // tgamma of -2.4 is ~-1.1080299470333461
-  }
-
-  // nan (ulong)
-  {
-    // Result type depends on the ulong type size which varies across targets.
-    // It is a 64-bit type on Linux and 32-bit on Windows.
-    using res_scalar_t = std::conditional<sizeof(s::ulong) == sizeof(float),
-                                          s::cl_float, s::cl_double>::type;
-    using res_vector_t = s::vec<res_scalar_t, 2>;
-
-    res_vector_t r{ 0 };
-    {
-      s::buffer<res_vector_t, 1> BufR(&r, s::range<1>(1));
-      s::queue myQueue;
-      myQueue.submit([&](s::handler &cgh) {
-        auto AccR = BufR.get_access<s::access::mode::write>(cgh);
-        s::ulong2 in{1, 1};
-        cgh.single_task<class nanISUL2>([=]() { AccR[0] = s::nan(in); });
-      });
-    }
-    res_scalar_t x = r.x();
-    res_scalar_t y = r.y();
-    assert(std::isnan(x));
-    assert(std::isnan(y));
-  }
-
-  // nan (ulonglong)
-  {
-    s::cl_double2 r{ 0 };
-    {
-      s::buffer<s::cl_double2, 1> BufR(&r, s::range<1>(1));
-      s::queue myQueue;
-      myQueue.submit([&](s::handler &cgh) {
-        auto AccR = BufR.get_access<s::access::mode::write>(cgh);
-        s::ulonglong2 in{1ULL, 1ULL};
-        cgh.single_task<class nanISULL2>([=]() { AccR[0] = s::nan(in); });
-      });
-    }
-    s::cl_double x = r.x();
-    s::cl_double y = r.y();
-    assert(std::isnan(x));
-    assert(std::isnan(y));
   }
 
   return 0;

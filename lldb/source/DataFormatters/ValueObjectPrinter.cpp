@@ -1,4 +1,4 @@
-//===-- ValueObjectPrinter.cpp -----------------------------------*- C++-*-===//
+//===-- ValueObjectPrinter.cpp --------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -75,8 +75,6 @@ bool ValueObjectPrinter::PrintValueObject() {
     return false;
 
   if (ShouldPrintValueObject()) {
-    PrintValidationMarkerIfNeeded();
-
     PrintLocationIfNeeded();
     m_stream->Indent();
 
@@ -93,8 +91,6 @@ bool ValueObjectPrinter::PrintValueObject() {
     PrintChildrenIfNeeded(value_printed, summary_printed);
   else
     m_stream->EOL();
-
-  PrintValidationErrorIfNeeded();
 
   return true;
 }
@@ -155,11 +151,11 @@ const char *ValueObjectPrinter::GetDescriptionForDisplay() {
   return str;
 }
 
-const char *ValueObjectPrinter::GetRootNameForDisplay(const char *if_fail) {
+const char *ValueObjectPrinter::GetRootNameForDisplay() {
   const char *root_valobj_name = m_options.m_root_valobj_name.empty()
                                      ? m_valobj->GetName().AsCString()
                                      : m_options.m_root_valobj_name.c_str();
-  return root_valobj_name ? root_valobj_name : if_fail;
+  return root_valobj_name ? root_valobj_name : "";
 }
 
 bool ValueObjectPrinter::ShouldPrintValueObject() {
@@ -243,17 +239,14 @@ void ValueObjectPrinter::PrintDecl() {
     // type if there is one to print
     ConstString type_name;
     if (m_compiler_type.IsValid()) {
-      if (m_options.m_use_type_display_name)
-        type_name = m_valobj->GetDisplayTypeName();
-      else
-        type_name = m_valobj->GetQualifiedTypeName();
+      type_name = m_options.m_use_type_display_name
+                      ? m_valobj->GetDisplayTypeName()
+                      : m_valobj->GetQualifiedTypeName();
     } else {
       // only show an invalid type name if the user explicitly triggered
       // show_type
       if (m_options.m_show_types)
         type_name = ConstString("<invalid type>");
-      else
-        type_name.Clear();
     }
 
     if (type_name) {
@@ -264,21 +257,17 @@ void ValueObjectPrinter::PrintDecl() {
           type_name_str.erase(iter, 2);
         }
       }
-      typeName.Printf("%s", type_name_str.c_str());
+      typeName << type_name_str.c_str();
     }
   }
 
   StreamString varName;
 
-  if (m_options.m_flat_output) {
-    // If we are showing types, also qualify the C++ base classes
-    const bool qualify_cxx_base_classes = show_type;
-    if (!m_options.m_hide_name) {
-      m_valobj->GetExpressionPath(varName, qualify_cxx_base_classes);
-    }
-  } else if (!m_options.m_hide_name) {
-    const char *name_cstr = GetRootNameForDisplay("");
-    varName.Printf("%s", name_cstr);
+  if (!m_options.m_hide_name) {
+    if (m_options.m_flat_output)
+      m_valobj->GetExpressionPath(varName);
+    else
+      varName << GetRootNameForDisplay();
   }
 
   bool decl_printed = false;
@@ -454,9 +443,9 @@ bool ValueObjectPrinter::PrintObjectDescriptionIfNeeded(bool value_printed,
         // If the description already ends with a \n don't add another one.
         size_t object_end = strlen(object_desc) - 1;
         if (object_desc[object_end] == '\n')
-            m_stream->Printf("%s", object_desc);
+          m_stream->Printf("%s", object_desc);
         else
-            m_stream->Printf("%s\n", object_desc);
+          m_stream->Printf("%s\n", object_desc);
         return true;
       } else if (!value_printed && !summary_printed)
         return true;
@@ -789,38 +778,4 @@ void ValueObjectPrinter::PrintChildrenIfNeeded(bool value_printed,
     m_stream->PutCString("{...}\n");
   } else
     m_stream->EOL();
-}
-
-bool ValueObjectPrinter::ShouldPrintValidation() {
-  return m_options.m_run_validator;
-}
-
-bool ValueObjectPrinter::PrintValidationMarkerIfNeeded() {
-  if (!ShouldPrintValidation())
-    return false;
-
-  m_validation = m_valobj->GetValidationStatus();
-
-  if (TypeValidatorResult::Failure == m_validation.first) {
-    m_stream->Printf("! ");
-    return true;
-  }
-
-  return false;
-}
-
-bool ValueObjectPrinter::PrintValidationErrorIfNeeded() {
-  if (!ShouldPrintValidation())
-    return false;
-
-  if (TypeValidatorResult::Success == m_validation.first)
-    return false;
-
-  if (m_validation.second.empty())
-    m_validation.second.assign("unknown error");
-
-  m_stream->Printf(" ! validation error: %s", m_validation.second.c_str());
-  m_stream->EOL();
-
-  return true;
 }

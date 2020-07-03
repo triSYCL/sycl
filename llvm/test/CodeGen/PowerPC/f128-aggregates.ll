@@ -11,7 +11,7 @@
 %struct.With9fp128params = type { fp128, fp128, fp128, fp128, fp128, fp128,
                                   fp128, fp128, fp128 }
 
-@a1 = common local_unnamed_addr global [3 x fp128] zeroinitializer, align 16
+@a1 = local_unnamed_addr global [3 x fp128] zeroinitializer, align 16
 
 ; Function Attrs: norecurse nounwind readonly
 define fp128 @testArray_01(fp128* nocapture readonly %sa) {
@@ -343,7 +343,7 @@ define fp128 @sum_float128(i32 signext %count, ...) {
 ; CHECK-DAG:     std r7, 64(r1)
 ; CHECK-DAG:     std r6, 56(r1)
 ; CHECK-DAG:     std r4, 40(r1)
-; CHECK-DAG:     cmpwi cr0, r3, 1
+; CHECK-DAG:     cmpwi r3, 1
 ; CHECK-DAG:     std r5, 48(r1)
 ; CHECK-DAG:     addis [[REG:r[0-9]+]], r2, .LCPI17_0@toc@ha
 ; CHECK-DAG:     addi [[REG1:r[0-9]+]], [[REG]], .LCPI17_0@toc@l
@@ -353,10 +353,10 @@ define fp128 @sum_float128(i32 signext %count, ...) {
 ; CHECK-NEXT:    addi r3, r1, 40
 ; CHECK-NEXT:    lxvx v3, 0, r3
 ; CHECK-NEXT:    xsaddqp v2, v3, v2
-; CHECK-NEXT:    addi [[REG2:r[0-9]+]], r1, 72
-; CHECK-NEXT:    std [[REG2]], -8(r1)
 ; CHECK-NEXT:    lxv v3, 16(r3)
 ; CHECK-NEXT:    xsaddqp v2, v2, v3
+; CHECK-NEXT:    addi [[REG2:r[0-9]+]], r1, 72
+; CHECK-NEXT:    std [[REG2]], -8(r1)
 ; CHECK-NEXT:    blr
 entry:
   %ap = alloca i8*, align 8

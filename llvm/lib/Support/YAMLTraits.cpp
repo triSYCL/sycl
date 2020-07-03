@@ -87,7 +87,6 @@ bool Input::setCurrentDocument() {
   if (DocIterator != Strm->end()) {
     Node *N = DocIterator->getRoot();
     if (!N) {
-      assert(Strm->failed() && "Root is NULL iff parsing failed");
       EC = make_error_code(errc::invalid_argument);
       return false;
     }
@@ -167,6 +166,8 @@ bool Input::preflightKey(const char *Key, bool Required, bool, bool &UseDefault,
   if (!MN) {
     if (Required || !isa<EmptyHNode>(CurrentNode))
       setError(CurrentNode, "not a mapping");
+    else
+      UseDefault = true;
     return false;
   }
   MN->ValidKeys.push_back(Key);
@@ -394,7 +395,7 @@ std::unique_ptr<Input::HNode> Input::createHNodes(Node *N) {
     auto mapHNode = std::make_unique<MapHNode>(N);
     for (KeyValueNode &KVN : *Map) {
       Node *KeyNode = KVN.getKey();
-      ScalarNode *Key = dyn_cast<ScalarNode>(KeyNode);
+      ScalarNode *Key = dyn_cast_or_null<ScalarNode>(KeyNode);
       Node *Value = KVN.getValue();
       if (!Key || !Value) {
         if (!Key)
@@ -739,7 +740,7 @@ bool Output::canElideEmptySequence() {
   // the whole key/value can be not written.  But, that produces wrong yaml
   // if the key/value is the only thing in the map and the map is used in
   // a sequence.  This detects if the this sequence is the first key/value
-  // in map that itself is embedded in a sequnce.
+  // in map that itself is embedded in a sequence.
   if (StateStack.size() < 2)
     return true;
   if (StateStack.back() != inMapFirstKey)

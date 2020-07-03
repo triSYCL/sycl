@@ -26,15 +26,16 @@ from datetime import date
 
 # Add any Sphinx extension module names here, as strings. They can be extensions
 # coming with Sphinx (named 'sphinx.ext.*') or your custom ones.
-extensions = ['sphinx.ext.intersphinx', 'sphinx.ext.todo']
+extensions = ['sphinx.ext.intersphinx', 'sphinx.ext.todo', 'recommonmark']
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
 
 # The suffix of source filenames.
-source_suffix = ['.rst', '.md']
-
-source_parsers = {'.md': 'recommonmark.parser.CommonMarkParser'}
+source_suffix = {
+    '.rst': 'restructuredtext',
+    '.md': 'markdown',
+}
 
 # The encoding of source files.
 #source_encoding = 'utf-8-sig'
@@ -99,7 +100,7 @@ html_theme = 'llvm-theme'
 # Theme options are theme-specific and customize the look and feel of a theme
 # further.  For a list of options available for each theme, see the
 # documentation.
-html_theme_options = { "nosidebar": True }
+html_theme_options = { "nosidebar": False }
 
 # Add any paths that contain custom themes here, relative to this directory.
 html_theme_path = ["_themes"]
@@ -134,7 +135,14 @@ html_last_updated_fmt = '%Y-%m-%d'
 #html_use_smartypants = True
 
 # Custom sidebar templates, maps document names to template names.
-html_sidebars = {'index': 'indexsidebar.html'}
+
+html_sidebars = {
+    '**': [
+        'indexsidebar.html',
+        'sourcelink.html',
+        'searchbox.html',
+    ]
+}
 
 # Additional templates that should be rendered to pages, maps page names to
 # template names.

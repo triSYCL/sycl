@@ -36,6 +36,7 @@
 //  a -> __builtin_va_list
 //  A -> "reference" to __builtin_va_list
 //  V -> Vector, followed by the number of elements and the base type.
+//  q -> Scalable vector, followed by the number of elements and the base type.
 //  E -> ext_vector, followed by the number of elements and the base type.
 //  X -> _Complex, followed by the base type.
 //  Y -> ptrdiff_t
@@ -64,6 +65,7 @@
 // & -> reference (optionally followed by an address space number)
 // C -> const
 // D -> volatile
+// R -> restrict
 
 // The third value provided to the macro specifies information about attributes
 // of the function.  These must be kept in sync with the predicates in the
@@ -322,6 +324,9 @@ BUILTIN(__builtin_truncf, "ff", "Fnc")
 BUILTIN(__builtin_truncl, "LdLd", "Fnc")
 BUILTIN(__builtin_truncf16, "hh", "Fnc")
 
+// Access to floating point environment
+BUILTIN(__builtin_flt_rounds, "i", "n")
+
 // C99 complex builtins
 BUILTIN(__builtin_cabs, "dXd", "Fne")
 BUILTIN(__builtin_cabsf, "fXf", "Fne")
@@ -391,23 +396,23 @@ BUILTIN(__builtin_ctanhf, "XfXf", "Fne")
 BUILTIN(__builtin_ctanhl, "XLdXLd", "Fne")
 
 // FP Comparisons.
-BUILTIN(__builtin_isgreater     , "i.", "Fnc")
-BUILTIN(__builtin_isgreaterequal, "i.", "Fnc")
-BUILTIN(__builtin_isless        , "i.", "Fnc")
-BUILTIN(__builtin_islessequal   , "i.", "Fnc")
-BUILTIN(__builtin_islessgreater , "i.", "Fnc")
-BUILTIN(__builtin_isunordered   , "i.", "Fnc")
+BUILTIN(__builtin_isgreater     , "i.", "Fnct")
+BUILTIN(__builtin_isgreaterequal, "i.", "Fnct")
+BUILTIN(__builtin_isless        , "i.", "Fnct")
+BUILTIN(__builtin_islessequal   , "i.", "Fnct")
+BUILTIN(__builtin_islessgreater , "i.", "Fnct")
+BUILTIN(__builtin_isunordered   , "i.", "Fnct")
 
 // Unary FP classification
-BUILTIN(__builtin_fpclassify, "iiiiii.", "Fnc")
-BUILTIN(__builtin_isfinite,   "i.", "Fnc")
-BUILTIN(__builtin_isinf,      "i.", "Fnc")
-BUILTIN(__builtin_isinf_sign, "i.", "Fnc")
-BUILTIN(__builtin_isnan,      "i.", "Fnc")
-BUILTIN(__builtin_isnormal,   "i.", "Fnc")
+BUILTIN(__builtin_fpclassify, "iiiiii.", "Fnct")
+BUILTIN(__builtin_isfinite,   "i.", "Fnct")
+BUILTIN(__builtin_isinf,      "i.", "Fnct")
+BUILTIN(__builtin_isinf_sign, "i.", "Fnct")
+BUILTIN(__builtin_isnan,      "i.", "Fnct")
+BUILTIN(__builtin_isnormal,   "i.", "Fnct")
 
 // FP signbit builtins
-BUILTIN(__builtin_signbit, "i.", "Fnc")
+BUILTIN(__builtin_signbit, "i.", "Fnct")
 BUILTIN(__builtin_signbitf, "if", "Fnc")
 BUILTIN(__builtin_signbitl, "iLd", "Fnc")
 
@@ -461,7 +466,7 @@ BUILTIN(__builtin_rotateleft64, "UWiUWiUWi", "nc")
 BUILTIN(__builtin_rotateright8, "UcUcUc", "nc")
 BUILTIN(__builtin_rotateright16, "UsUsUs", "nc")
 BUILTIN(__builtin_rotateright32, "UZiUZiUZi", "nc")
-BUILTIN(__builtin_rotateright64, "UWiUWiWi", "nc")
+BUILTIN(__builtin_rotateright64, "UWiUWiUWi", "nc")
 
 // Random GCC builtins
 BUILTIN(__builtin_constant_p, "i.", "nctu")
@@ -471,7 +476,7 @@ BUILTIN(__builtin___NSStringMakeConstantString, "FC*cC*", "nc")
 BUILTIN(__builtin_va_start, "vA.", "nt")
 BUILTIN(__builtin_va_end, "vA", "n")
 BUILTIN(__builtin_va_copy, "vAA", "n")
-BUILTIN(__builtin_stdarg_start, "vA.", "n")
+BUILTIN(__builtin_stdarg_start, "vA.", "nt")
 BUILTIN(__builtin_assume_aligned, "v*vC*z.", "nc")
 BUILTIN(__builtin_bcmp, "ivC*vC*z", "Fn")
 BUILTIN(__builtin_bcopy, "vv*v*z", "n")
@@ -480,6 +485,7 @@ BUILTIN(__builtin_fprintf, "iP*cC*.", "Fp:1:")
 BUILTIN(__builtin_memchr, "v*vC*iz", "nF")
 BUILTIN(__builtin_memcmp, "ivC*vC*z", "nF")
 BUILTIN(__builtin_memcpy, "v*v*vC*z", "nF")
+BUILTIN(__builtin_memcpy_inline, "vv*vC*Iz", "nt")
 BUILTIN(__builtin_memmove, "v*v*vC*z", "nF")
 BUILTIN(__builtin_mempcpy, "v*v*vC*z", "nF")
 BUILTIN(__builtin_memset, "v*v*iz", "nF")
@@ -515,7 +521,6 @@ BUILTIN(__builtin_return_address, "v*IUi", "n")
 BUILTIN(__builtin_extract_return_addr, "v*v*", "n")
 BUILTIN(__builtin_frame_address, "v*IUi", "n")
 BUILTIN(__builtin___clear_cache, "vc*c*", "n")
-BUILTIN(__builtin_flt_rounds, "i", "nc")
 BUILTIN(__builtin_setjmp, "iv**", "j")
 BUILTIN(__builtin_longjmp, "vv**i", "r")
 BUILTIN(__builtin_unwind_init, "v", "")
@@ -562,6 +567,7 @@ BUILTIN(__builtin___vprintf_chk, "iicC*a", "FP:1:")
 
 BUILTIN(__builtin_unpredictable, "LiLi"   , "nc")
 BUILTIN(__builtin_expect, "LiLiLi"   , "nc")
+BUILTIN(__builtin_expect_with_probability, "LiLiLid", "nc")
 BUILTIN(__builtin_prefetch, "vvC*.", "nc")
 BUILTIN(__builtin_readcyclecounter, "ULLi", "n")
 BUILTIN(__builtin_trap, "v", "nr")
@@ -572,6 +578,10 @@ BUILTIN(__builtin_convertvector, "v."   , "nct")
 BUILTIN(__builtin_alloca, "v*z"   , "Fn")
 BUILTIN(__builtin_alloca_with_align, "v*zIz", "Fn")
 BUILTIN(__builtin_call_with_static_chain, "v.", "nt")
+
+BUILTIN(__builtin_matrix_transpose, "v.", "nFt")
+BUILTIN(__builtin_matrix_column_major_load, "v.", "nFt")
+BUILTIN(__builtin_matrix_column_major_store, "v.", "nFt")
 
 // "Overloaded" Atomic operator builtins.  These are overloaded to support data
 // types of i8, i16, i32, i64, and i128.  The front-end sees calls to the
@@ -718,9 +728,11 @@ ATOMIC_BUILTIN(__c11_atomic_fetch_sub, "v.", "t")
 ATOMIC_BUILTIN(__c11_atomic_fetch_and, "v.", "t")
 ATOMIC_BUILTIN(__c11_atomic_fetch_or, "v.", "t")
 ATOMIC_BUILTIN(__c11_atomic_fetch_xor, "v.", "t")
+ATOMIC_BUILTIN(__c11_atomic_fetch_max, "v.", "t")
+ATOMIC_BUILTIN(__c11_atomic_fetch_min, "v.", "t")
 BUILTIN(__c11_atomic_thread_fence, "vi", "n")
 BUILTIN(__c11_atomic_signal_fence, "vi", "n")
-BUILTIN(__c11_atomic_is_lock_free, "iz", "n")
+BUILTIN(__c11_atomic_is_lock_free, "bz", "n")
 
 // GNU atomic builtins.
 ATOMIC_BUILTIN(__atomic_load, "v.", "t")
@@ -742,13 +754,15 @@ ATOMIC_BUILTIN(__atomic_sub_fetch, "v.", "t")
 ATOMIC_BUILTIN(__atomic_and_fetch, "v.", "t")
 ATOMIC_BUILTIN(__atomic_or_fetch, "v.", "t")
 ATOMIC_BUILTIN(__atomic_xor_fetch, "v.", "t")
+ATOMIC_BUILTIN(__atomic_max_fetch, "v.", "t")
+ATOMIC_BUILTIN(__atomic_min_fetch, "v.", "t")
 ATOMIC_BUILTIN(__atomic_nand_fetch, "v.", "t")
 BUILTIN(__atomic_test_and_set, "bvD*i", "n")
 BUILTIN(__atomic_clear, "vvD*i", "n")
 BUILTIN(__atomic_thread_fence, "vi", "n")
 BUILTIN(__atomic_signal_fence, "vi", "n")
-BUILTIN(__atomic_always_lock_free, "izvCD*", "n")
-BUILTIN(__atomic_is_lock_free, "izvCD*", "n")
+BUILTIN(__atomic_always_lock_free, "bzvCD*", "n")
+BUILTIN(__atomic_is_lock_free, "bzvCD*", "n")
 
 // OpenCL 2.0 atomic builtins.
 ATOMIC_BUILTIN(__opencl_atomic_init, "v.", "t")
@@ -783,6 +797,9 @@ BUILTIN(__sync_fetch_and_umax, "UiUiD*Ui", "n")
 BUILTIN(__builtin_abort, "v", "Fnr")
 BUILTIN(__builtin_index, "c*cC*i", "Fn")
 BUILTIN(__builtin_rindex, "c*cC*i", "Fn")
+
+// ignored glibc builtin, see https://sourceware.org/bugzilla/show_bug.cgi?id=25399
+BUILTIN(__warn_memset_zero_len, "v", "nU")
 
 // Microsoft builtins.  These are only active with -fms-extensions.
 LANGBUILTIN(_alloca,          "v*z", "n", ALL_MS_LANGUAGES)
@@ -979,6 +996,8 @@ LIBBUILTIN(longjmp, "vJi",        "fr",    "setjmp.h", ALL_LANGUAGES)
 // when these functions are used in non-GNU mode. PR16138.
 LIBBUILTIN(alloca, "v*z",         "f",     "stdlib.h", ALL_GNU_LANGUAGES)
 // POSIX string.h
+LIBBUILTIN(memccpy, "v*v*vC*iz",  "f",     "string.h", ALL_GNU_LANGUAGES)
+LIBBUILTIN(mempcpy, "v*v*vC*z",   "f",     "string.h", ALL_GNU_LANGUAGES)
 LIBBUILTIN(stpcpy, "c*c*cC*",     "f",     "string.h", ALL_GNU_LANGUAGES)
 LIBBUILTIN(stpncpy, "c*c*cC*z",   "f",     "string.h", ALL_GNU_LANGUAGES)
 LIBBUILTIN(strdup, "c*cC*",       "f",     "string.h", ALL_GNU_LANGUAGES)
@@ -1005,9 +1024,7 @@ LIBBUILTIN(pthread_create, "",  "fC<2,3>", "pthread.h", ALL_GNU_LANGUAGES)
 LIBBUILTIN(_setjmp, "iJ",         "fj",   "setjmp.h", ALL_LANGUAGES)
 LIBBUILTIN(__sigsetjmp, "iSJi",   "fj",   "setjmp.h", ALL_LANGUAGES)
 LIBBUILTIN(sigsetjmp, "iSJi",     "fj",   "setjmp.h", ALL_LANGUAGES)
-LIBBUILTIN(setjmp_syscall, "iJ",  "fj",   "setjmp.h", ALL_LANGUAGES)
 LIBBUILTIN(savectx, "iJ",         "fj",   "setjmp.h", ALL_LANGUAGES)
-LIBBUILTIN(qsetjmp, "iJ",         "fj",   "setjmp.h", ALL_LANGUAGES)
 LIBBUILTIN(getcontext, "iK*",     "fj",   "setjmp.h", ALL_LANGUAGES)
 
 LIBBUILTIN(_longjmp, "vJi",       "fr",    "setjmp.h", ALL_GNU_LANGUAGES)
@@ -1470,7 +1487,12 @@ BUILTIN(__builtin_operator_new, "v*z", "tc")
 BUILTIN(__builtin_operator_delete, "vv*", "tn")
 BUILTIN(__builtin_char_memchr, "c*cC*iz", "n")
 BUILTIN(__builtin_dump_struct, "ivC*v*", "tn")
-BUILTIN(__builtin_preserve_access_index, "vC*vC*", "nU")
+BUILTIN(__builtin_preserve_access_index, "v.", "t")
+
+// Alignment builtins (uses custom parsing to support pointers and integers)
+BUILTIN(__builtin_is_aligned, "bvC*z", "nct")
+BUILTIN(__builtin_align_up, "v*vC*z", "nct")
+BUILTIN(__builtin_align_down, "v*vC*z", "nct")
 
 // Safestack builtins
 BUILTIN(__builtin___get_unsafe_stack_start, "v*", "Fn")
@@ -1565,6 +1587,7 @@ BUILTIN(__builtin_ms_va_copy, "vc*&c*&", "n")
 
 // Builtins for Intel FPGA
 BUILTIN(__builtin_intel_fpga_reg, "v.", "nt")
+BUILTIN(__builtin_intel_fpga_mem, "v.", "nt")
 
 #undef BUILTIN
 #undef LIBBUILTIN

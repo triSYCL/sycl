@@ -41,6 +41,11 @@ class CCIf<string predicate, CCAction A> : CCPredicateAction<A> {
 class CCIfByVal<CCAction A> : CCIf<"ArgFlags.isByVal()", A> {
 }
 
+/// CCIfPreallocated - If the current argument has Preallocated parameter attribute,
+/// apply Action A.
+class CCIfPreallocated<CCAction A> : CCIf<"ArgFlags.isPreallocated()", A> {
+}
+
 /// CCIfSwiftSelf - If the current argument has swiftself parameter attribute,
 /// apply Action A.
 class CCIfSwiftSelf<CCAction A> : CCIf<"ArgFlags.isSwiftSelf()", A> {
@@ -49,6 +54,11 @@ class CCIfSwiftSelf<CCAction A> : CCIf<"ArgFlags.isSwiftSelf()", A> {
 /// CCIfSwiftError - If the current argument has swifterror parameter attribute,
 /// apply Action A.
 class CCIfSwiftError<CCAction A> : CCIf<"ArgFlags.isSwiftError()", A> {
+}
+
+/// CCIfCFGuardTarget - If the current argument has cfguardtarget parameter
+/// attribute, apply Action A.
+class CCIfCFGuardTarget<CCAction A> : CCIf<"ArgFlags.isCFGuardTarget()", A> {
 }
 
 /// CCIfConsecutiveRegs - If the current argument has InConsecutiveRegs

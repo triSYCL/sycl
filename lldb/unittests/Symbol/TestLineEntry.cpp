@@ -1,4 +1,4 @@
-//===-- TestLineEntry.cpp ------------------------------*- C++ -*-===//
+//===-- TestLineEntry.cpp -------------------------------------------------===//
 //
 //
 //                     The LLVM Compiler Infrastructure
@@ -14,15 +14,15 @@
 #include "Plugins/ObjectFile/Mach-O/ObjectFileMachO.h"
 #include "Plugins/SymbolFile/DWARF/DWARFASTParserClang.h"
 #include "Plugins/SymbolFile/DWARF/SymbolFileDWARF.h"
+#include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
+#include "TestingSupport/SubsystemRAII.h"
 #include "TestingSupport/TestUtilities.h"
-#include "lldb/Symbol/ClangASTContext.h"
 
 #include "lldb/Core/Module.h"
 #include "lldb/Host/FileSystem.h"
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Symbol/CompileUnit.h"
 #include "lldb/Symbol/SymbolContext.h"
-#include "lldb/Utility/StreamString.h"
 
 #include "llvm/Support/FileUtilities.h"
 #include "llvm/Support/Program.h"
@@ -32,16 +32,12 @@ using namespace lldb_private;
 using namespace lldb;
 
 class LineEntryTest : public testing::Test {
+  SubsystemRAII<FileSystem, HostInfo, ObjectFileMachO, SymbolFileDWARF,
+                TypeSystemClang>
+      subsystem;
+
 public:
   void SetUp() override;
-
-  void TearDown() override {
-    ClangASTContext::Terminate();
-    SymbolFileDWARF::Terminate();
-    ObjectFileMachO::Terminate();
-    HostInfo::Terminate();
-    FileSystem::Terminate();
-  }
 
 protected:
   llvm::Expected<LineEntry> GetLineEntryForLine(uint32_t line);
@@ -50,11 +46,6 @@ protected:
 };
 
 void LineEntryTest::SetUp() {
-  FileSystem::Initialize();
-  HostInfo::Initialize();
-  ObjectFileMachO::Initialize();
-  SymbolFileDWARF::Initialize();
-  ClangASTContext::Initialize();
   auto ExpectedFile = TestFile::fromYamlFile("inlined-functions.yaml");
   ASSERT_THAT_EXPECTED(ExpectedFile, llvm::Succeeded());
   m_file.emplace(std::move(*ExpectedFile));

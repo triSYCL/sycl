@@ -8,33 +8,36 @@
 
 #pragma once
 
-#include <CL/sycl/context.hpp>
 #include <CL/sycl/detail/common.hpp>
-#include <CL/sycl/detail/memory_manager.hpp>
-#include <CL/sycl/detail/scheduler/scheduler.hpp>
+#include <CL/sycl/detail/export.hpp>
+#include <CL/sycl/detail/sycl_mem_obj_allocator.hpp>
 #include <CL/sycl/detail/sycl_mem_obj_i.hpp>
 #include <CL/sycl/detail/type_traits.hpp>
 #include <CL/sycl/event.hpp>
 #include <CL/sycl/property_list.hpp>
 #include <CL/sycl/stl.hpp>
 
+#include <cstring>
 #include <type_traits>
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 namespace detail {
 
 // Forward declarations
 class context_impl;
 class event_impl;
+class plugin;
 
 using ContextImplPtr = shared_ptr_class<context_impl>;
 using EventImplPtr = shared_ptr_class<event_impl>;
 
-using sycl_memory_object_allocator = detail::aligned_allocator<char>;
+template <typename T>
+class aligned_allocator;
+using sycl_memory_object_allocator = aligned_allocator<char>;
 
 // The class serves as a base for all SYCL memory objects.
-template <typename AllocatorT> class SYCLMemObjT : public SYCLMemObjI {
+class __SYCL_EXPORT SYCLMemObjT : public SYCLMemObjI {
 
   // The check for output iterator is commented out as it blocks set_final_data
   // with void * argument to be used.
@@ -58,124 +61,111 @@ template <typename AllocatorT> class SYCLMemObjT : public SYCLMemObjI {
 
 public:
   SYCLMemObjT(const size_t SizeInBytes, const property_list &Props,
-              AllocatorT Allocator)
-      : MAllocator(Allocator), MProps(Props), MInteropEvent(nullptr),
+              unique_ptr_class<SYCLMemObjAllocator> Allocator)
+      : MAllocator(std::move(Allocator)), MProps(Props), MInteropEvent(nullptr),
         MInteropContext(nullptr), MInteropMemObject(nullptr),
         MOpenCLInterop(false), MHostPtrReadOnly(false), MNeedWriteBack(true),
         MSizeInBytes(SizeInBytes), MUserPtr(nullptr), MShadowCopy(nullptr),
         MUploadDataFunctor(nullptr), MSharedPtrStorage(nullptr) {}
 
-  SYCLMemObjT(const property_list &Props, AllocatorT Allocator)
-      : SYCLMemObjT(/*SizeInBytes*/ 0, Props, Allocator) {}
-
-  SYCLMemObjT(const property_list &Props) : SYCLMemObjT(Props, AllocatorT()) {}
-
-  SYCLMemObjT(cl_mem MemObject, const context &SyclContext,
-              const size_t SizeInBytes, event AvailableEvent)
-      : MAllocator(), MProps(),
-        MInteropEvent(detail::getSyclObjImpl(std::move(AvailableEvent))),
-        MInteropContext(detail::getSyclObjImpl(SyclContext)),
-        MInteropMemObject(MemObject), MOpenCLInterop(true),
-        MHostPtrReadOnly(false), MNeedWriteBack(true),
-        MSizeInBytes(SizeInBytes), MUserPtr(nullptr), MShadowCopy(nullptr),
-        MUploadDataFunctor(nullptr), MSharedPtrStorage(nullptr) {
-    if (MInteropContext->is_host())
-      throw cl::sycl::invalid_parameter_error(
-          "Creation of interoperability memory object using host context is "
-          "not allowed");
-
-    RT::PiMem Mem = pi::cast<RT::PiMem>(MInteropMemObject);
-    RT::PiContext Context = nullptr;
-    PI_CALL(RT::piMemGetInfo(Mem, CL_MEM_CONTEXT, sizeof(Context), &Context,
-                             nullptr));
-
-    if (MInteropContext->getHandleRef() != Context)
-      throw cl::sycl::invalid_parameter_error(
-          "Input context must be the same as the context of cl_mem");
-    PI_CALL(RT::piMemRetain(Mem));
-  }
+  SYCLMemObjT(const property_list &Props,
+              unique_ptr_class<SYCLMemObjAllocator> Allocator)
+      : SYCLMemObjT(/*SizeInBytes*/ 0, Props, std::move(Allocator)) {}
 
   SYCLMemObjT(cl_mem MemObject, const context &SyclContext,
-              event AvailableEvent)
-      : SYCLMemObjT(MemObject, SyclContext, /*SizeInBytes*/ 0, AvailableEvent) {
+              const size_t SizeInBytes, event AvailableEvent,
+              unique_ptr_class<SYCLMemObjAllocator> Allocator);
+
+  SYCLMemObjT(cl_mem MemObject, const context &SyclContext,
+              event AvailableEvent,
+              unique_ptr_class<SYCLMemObjAllocator> Allocator)
+      : SYCLMemObjT(MemObject, SyclContext, /*SizeInBytes*/ 0, AvailableEvent,
+                    std::move(Allocator)) {}
+
+  virtual ~SYCLMemObjT() = default;
+
+  const plugin &getPlugin() const;
+
+  DLL_LOCAL size_t getSize() const override { return MSizeInBytes; }
+  DLL_LOCAL size_t get_count() const {
+    size_t AllocatorValueSize = MAllocator->getValueSize();
+    return (getSize() + AllocatorValueSize - 1) / AllocatorValueSize;
   }
 
-  size_t get_size() const { return MSizeInBytes; }
-
-  template <typename propertyT> bool has_property() const {
+  template <typename propertyT> DLL_LOCAL bool has_property() const {
     return MProps.has_property<propertyT>();
   }
 
-  template <typename propertyT> propertyT get_property() const {
+  template <typename propertyT> DLL_LOCAL propertyT get_property() const {
     return MProps.get_property<propertyT>();
   }
 
-  AllocatorT get_allocator() const { return MAllocator; }
-
-  void *allocateHostMem() override {
-    size_t AllocatorValueSize = sizeof(allocator_value_type_t<AllocatorT>);
-    size_t AllocationSize = get_size() / AllocatorValueSize;
-    AllocationSize += (get_size() % AllocatorValueSize) ? 1 : 0;
-    return MAllocator.allocate(AllocationSize);
+  template <typename AllocatorT> DLL_LOCAL AllocatorT get_allocator() const {
+    return MAllocator->getAllocator<AllocatorT>();
   }
 
-  void releaseHostMem(void *Ptr) override {
+  DLL_LOCAL void *allocateHostMem() override {
+    return MAllocator->allocate(get_count());
+  }
+
+  DLL_LOCAL void releaseHostMem(void *Ptr) override {
     if (Ptr)
-      MAllocator.deallocate(allocator_pointer_t<AllocatorT>(Ptr), get_size());
+      MAllocator->deallocate(Ptr, get_count());
   }
 
-  void releaseMem(ContextImplPtr Context, void *MemAllocation) override {
-    void *Ptr = getUserPtr();
-    return MemoryManager::releaseMemObj(Context, this, MemAllocation, Ptr);
-  }
+  void releaseMem(ContextImplPtr Context, void *MemAllocation) override;
 
-  void *getUserPtr() const {
+  DLL_LOCAL void *getUserPtr() const {
     return MOpenCLInterop ? static_cast<void *>(MInteropMemObject) : MUserPtr;
   }
 
-  void set_write_back(bool NeedWriteBack) { MNeedWriteBack = NeedWriteBack; }
+  DLL_LOCAL void set_write_back(bool NeedWriteBack) {
+    MNeedWriteBack = NeedWriteBack;
+  }
 
-  void set_final_data(std::nullptr_t) { MUploadDataFunctor = nullptr; }
+  DLL_LOCAL void set_final_data(std::nullptr_t) {
+    MUploadDataFunctor = nullptr;
+  }
 
   template <template <typename T> class PtrT, typename T>
-  enable_if_t<std::is_convertible<PtrT<T>, weak_ptr_class<T>>::value>
+  DLL_LOCAL enable_if_t<std::is_convertible<PtrT<T>, weak_ptr_class<T>>::value>
   set_final_data(PtrT<T> FinalData) {
     weak_ptr_class<T> TempFinalData(FinalData);
     set_final_data(TempFinalData);
   }
 
-  template <typename T> void set_final_data(weak_ptr_class<T> FinalData) {
+  template <typename T>
+  DLL_LOCAL void set_final_data(weak_ptr_class<T> FinalData) {
     MUploadDataFunctor = [this, FinalData]() {
       if (shared_ptr_class<T> LockedFinalData = FinalData.lock()) {
-        EventImplPtr Event = updateHostMemory(LockedFinalData.get());
-        if (Event)
-          Event->wait(Event);
+        updateHostMemory(LockedFinalData.get());
       }
     };
   }
 
-  void set_final_data_from_storage() {
+  DLL_LOCAL void set_final_data_from_storage() {
     MUploadDataFunctor = [this]() {
       if (!MSharedPtrStorage.unique()) {
         void *FinalData = const_cast<void *>(MSharedPtrStorage.get());
-        EventImplPtr Event = updateHostMemory(FinalData);
-        if (Event)
-          Event->wait(Event);
+        updateHostMemory(FinalData);
       }
     };
   }
 
   template <typename Destination>
-  EnableIfOutputPointerT<Destination> set_final_data(Destination FinalData) {
-    MUploadDataFunctor = [this, FinalData]() {
-      EventImplPtr Event = updateHostMemory(FinalData);
-      if (Event)
-        Event->wait(Event);
-    };
+  DLL_LOCAL EnableIfOutputPointerT<Destination>
+  set_final_data(Destination FinalData) {
+    if (!FinalData)
+      MUploadDataFunctor = nullptr;
+    else
+      MUploadDataFunctor = [this, FinalData]() {
+        updateHostMemory(FinalData);
+      };
   }
 
   template <typename Destination>
-  EnableIfOutputIteratorT<Destination> set_final_data(Destination FinalData) {
+  DLL_LOCAL EnableIfOutputIteratorT<Destination>
+  set_final_data(Destination FinalData) {
     MUploadDataFunctor = [this, FinalData]() {
       using DestinationValueT = iterator_value_type_t<Destination>;
       // TODO if Destination is ContiguousIterator then don't create
@@ -183,63 +173,35 @@ public:
       // continuous data.
       const size_t Size = MSizeInBytes / sizeof(DestinationValueT);
       vector_class<DestinationValueT> ContiguousStorage(Size);
-      EventImplPtr Event = updateHostMemory(ContiguousStorage.data());
-      if (Event) {
-        Event->wait(Event);
-        std::copy(ContiguousStorage.cbegin(), ContiguousStorage.cend(),
-                  FinalData);
-      }
+      updateHostMemory(ContiguousStorage.data());
+      std::copy(ContiguousStorage.cbegin(), ContiguousStorage.cend(),
+                FinalData);
     };
   }
 
-  EventImplPtr updateHostMemory(void *const Ptr) {
-    const id<3> Offset{0, 0, 0};
-    const range<3> AccessRange{MSizeInBytes, 1, 1};
-    const range<3> MemoryRange{MSizeInBytes, 1, 1};
-    const access::mode AccessMode = access::mode::read;
-    SYCLMemObjI *SYCLMemObject = this;
-    const int Dims = 1;
-    const int ElemSize = 1;
-
-    Requirement Req(Offset, AccessRange, MemoryRange, AccessMode, SYCLMemObject,
-                    Dims, ElemSize);
-    Req.MData = Ptr;
-
-    EventImplPtr Event = Scheduler::getInstance().addCopyBack(&Req);
-    return Event;
-  }
+protected:
+  void updateHostMemory(void *const Ptr);
 
   // Update host with the latest data + notify scheduler that the memory object
   // is going to die. After this method is finished no further operations with
   // the memory object is allowed. This method is executed from child's
   // destructor. This cannot be done in SYCLMemObjT's destructor as child's
   // members must be alive.
-  void updateHostMemory() {
-    if ((MUploadDataFunctor != nullptr) && MNeedWriteBack)
-      MUploadDataFunctor();
+  void updateHostMemory();
 
-    // If we're attached to a memory record, process the deletion of the memory
-    // record. We may get detached before we do this.
-    if (MRecord)
-      Scheduler::getInstance().removeMemoryObject(this);
-    releaseHostMem(MShadowCopy);
-
-    if (MOpenCLInterop)
-      PI_CALL(RT::piMemRelease(pi::cast<RT::PiMem>(MInteropMemObject)));
-  }
-
-  bool useHostPtr() {
+public:
+  DLL_LOCAL bool useHostPtr() {
     return has_property<property::buffer::use_host_ptr>() ||
            has_property<property::image::use_host_ptr>();
   }
 
-  bool canReuseHostPtr(void *HostPtr, const size_t RequiredAlign) {
+  DLL_LOCAL bool canReuseHostPtr(void *HostPtr, const size_t RequiredAlign) {
     bool Aligned =
         (reinterpret_cast<std::uintptr_t>(HostPtr) % RequiredAlign) == 0;
     return Aligned || useHostPtr();
   }
 
-  void handleHostData(void *HostPtr, const size_t RequiredAlign) {
+  DLL_LOCAL void handleHostData(void *HostPtr, const size_t RequiredAlign) {
     if (!MHostPtrReadOnly)
       set_final_data(reinterpret_cast<char *>(HostPtr));
 
@@ -253,14 +215,15 @@ public:
     }
   }
 
-  void handleHostData(const void *HostPtr, const size_t RequiredAlign) {
+  DLL_LOCAL void handleHostData(const void *HostPtr,
+                                const size_t RequiredAlign) {
     MHostPtrReadOnly = true;
     handleHostData(const_cast<void *>(HostPtr), RequiredAlign);
   }
 
   template <typename T>
-  void handleHostData(const shared_ptr_class<T> &HostPtr,
-                      const size_t RequiredAlign) {
+  DLL_LOCAL void handleHostData(const shared_ptr_class<T> &HostPtr,
+                                const size_t RequiredAlign) {
     MSharedPtrStorage = HostPtr;
     MHostPtrReadOnly = std::is_const<T>::value;
     if (HostPtr) {
@@ -279,14 +242,15 @@ public:
   }
 
   template <class InputIterator>
-  void handleHostData(InputIterator First, InputIterator Last,
-                      const size_t RequiredAlign) {
+  DLL_LOCAL void handleHostData(InputIterator First, InputIterator Last,
+                                const size_t RequiredAlign) {
     MHostPtrReadOnly = iterator_to_const_type_t<InputIterator>::value;
     setAlign(RequiredAlign);
     if (useHostPtr())
-      throw invalid_parameter_error(
+      throw runtime_error(
           "Buffer constructor from a pair of iterator values does not support "
-          "use_host_ptr property.");
+          "use_host_ptr property.",
+          PI_INVALID_OPERATION);
 
     setAlign(RequiredAlign);
     MShadowCopy = allocateHostMem();
@@ -302,19 +266,28 @@ public:
               static_cast<IteratorPointerToNonConstValueType>(MUserPtr));
   }
 
-  template <typename T = AllocatorT>
-  EnableIfNonDefaultAllocator<T> setAlign(size_t RequiredAlign) {
-    // Do nothing in case of user's allocator.
+  DLL_LOCAL void setAlign(size_t RequiredAlign) {
+    MAllocator->setAlignment(RequiredAlign);
   }
 
-  template <typename T = AllocatorT>
-  EnableIfDefaultAllocator<T> setAlign(size_t RequiredAlign) {
-    MAllocator.setAlignment(std::max<size_t>(RequiredAlign, 64));
+  static size_t getBufSizeForContext(const ContextImplPtr &Context,
+                                     cl_mem MemObject);
+
+  DLL_LOCAL void *allocateMem(ContextImplPtr Context, bool InitFromUserData,
+                              void *HostPtr,
+                              RT::PiEvent &InteropEvent) override {
+    (void)Context;
+    (void)InitFromUserData;
+    (void)HostPtr;
+    (void)InteropEvent;
+    throw runtime_error("Not implemented", PI_INVALID_OPERATION);
   }
+
+  DLL_LOCAL MemObjType getType() const override { return UNDEFINED; }
 
 protected:
   // Allocator used for allocation memory on host.
-  AllocatorT MAllocator;
+  unique_ptr_class<SYCLMemObjAllocator> MAllocator;
   // Properties passed by user.
   property_list MProps;
   // Event passed by user to interoperability constructor.
@@ -339,7 +312,7 @@ protected:
   // Copy of memory passed by user to constructor.
   void *MShadowCopy;
   // Function which update host with final data on memory object destruction.
-  std::function<void(void)> MUploadDataFunctor;
+  function_class<void(void)> MUploadDataFunctor;
   // Field which holds user's shared_ptr in case of memory object is created
   // using constructor with shared_ptr.
   shared_ptr_class<const void> MSharedPtrStorage;
@@ -347,4 +320,4 @@ protected:
 
 } // namespace detail
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

@@ -1,4 +1,4 @@
-//===-- FunctionCaller.cpp ---------------------------------------*- C++-*-===//
+//===-- FunctionCaller.cpp ------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -29,14 +29,16 @@
 
 using namespace lldb_private;
 
+char FunctionCaller::ID;
+
 // FunctionCaller constructor
 FunctionCaller::FunctionCaller(ExecutionContextScope &exe_scope,
                                const CompilerType &return_type,
                                const Address &functionAddress,
                                const ValueList &arg_value_list,
                                const char *name)
-    : Expression(exe_scope, eKindFunctionCaller), m_execution_unit_sp(),
-      m_parser(), m_jit_module_wp(), m_name(name ? name : "<unknown>"),
+    : Expression(exe_scope), m_execution_unit_sp(), m_parser(),
+      m_jit_module_wp(), m_name(name ? name : "<unknown>"),
       m_function_ptr(nullptr), m_function_addr(functionAddress),
       m_function_return_type(return_type),
       m_wrapper_function_name("__lldb_caller_function"),
@@ -362,8 +364,9 @@ lldb::ExpressionResults FunctionCaller::ExecuteFunction(
     if (return_value != lldb::eExpressionCompleted) {
       LLDB_LOGF(log,
                 "== [FunctionCaller::ExecuteFunction] Execution of \"%s\" "
-                "completed abnormally ==",
-                m_name.c_str());
+                "completed abnormally: %s ==",
+                m_name.c_str(),
+                Process::ExecutionResultAsCString(return_value));
     } else {
       LLDB_LOGF(log,
                 "== [FunctionCaller::ExecuteFunction] Execution of \"%s\" "

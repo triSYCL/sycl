@@ -1,3 +1,5 @@
+add_subdirectory(support)
+
 # Configure the Features.inc file.
 if (NOT DEFINED CLANGD_BUILD_XPC)
   if(${CMAKE_SYSTEM_NAME} MATCHES "Darwin")
@@ -22,27 +24,19 @@ configure_file(
 set(LLVM_LINK_COMPONENTS
   Support
   AllTargetsInfos
+  FrontendOpenMP
   )
-
-if(CLANG_BUILT_STANDALONE)
-  # needed to get HAVE_CXX_ATOMICS64_WITHOUT_LIB defined
-  include(CheckAtomic)
-endif()
-
-set(CLANGD_ATOMIC_LIB "")
-if(NOT HAVE_CXX_ATOMICS64_WITHOUT_LIB)
-  list(APPEND CLANGD_ATOMIC_LIB "atomic")
-endif()
 
 add_clang_library(clangDaemon
   AST.cpp
-  Cancellation.cpp
   ClangdLSPServer.cpp
   ClangdServer.cpp
   CodeComplete.cpp
   CodeCompletionStrings.cpp
+  CollectMacros.cpp
+  CompileCommands.cpp
   Compiler.cpp
-  Context.cpp
+  ConfigYAML.cpp
   Diagnostics.cpp
   DraftStore.cpp
   ExpectedTypes.cpp
@@ -51,14 +45,14 @@ add_clang_library(clangDaemon
   FileDistance.cpp
   Format.cpp
   FS.cpp
-  FSProvider.cpp
-  FormattedString.cpp
   FuzzyMatch.cpp
   GlobalCompilationDatabase.cpp
   Headers.cpp
+  HeaderSourceSwitch.cpp
+  Hover.cpp
   IncludeFixer.cpp
   JSONTransport.cpp
-  Logger.cpp
+  PathMapping.cpp
   Protocol.cpp
   Quality.cpp
   ParsedAST.cpp
@@ -66,10 +60,9 @@ add_clang_library(clangDaemon
   RIFF.cpp
   Selection.cpp
   SemanticHighlighting.cpp
+  SemanticSelection.cpp
   SourceCode.cpp
   QueryDriverDatabase.cpp
-  Threading.cpp
-  Trace.cpp
   TUScheduler.cpp
   URI.cpp
   XRefs.cpp
@@ -104,6 +97,17 @@ add_clang_library(clangDaemon
   refactor/Tweak.cpp
 
   LINK_LIBS
+  clangdSupport
+  clangTidy
+  ${LLVM_PTHREAD_LIB}
+  ${ALL_CLANG_TIDY_CHECKS}
+
+  DEPENDS
+  omp_gen
+  )
+
+clang_target_link_libraries(clangDaemon
+  PRIVATE
   clangAST
   clangASTMatchers
   clangBasic
@@ -114,33 +118,11 @@ add_clang_library(clangDaemon
   clangLex
   clangSema
   clangSerialization
-  clangTidy
-  clangTidyAndroidModule
-  clangTidyAbseilModule
-  clangTidyBoostModule
-  clangTidyBugproneModule
-  clangTidyCERTModule
-  clangTidyCppCoreGuidelinesModule
-  clangTidyFuchsiaModule
-  clangTidyGoogleModule
-  clangTidyHICPPModule
-  clangTidyLinuxKernelModule
-  clangTidyLLVMModule
-  clangTidyMiscModule
-  clangTidyModernizeModule
-  clangTidyObjCModule
-  clangTidyOpenMPModule
-  clangTidyPerformanceModule
-  clangTidyPortabilityModule
-  clangTidyReadabilityModule
-  clangTidyZirconModule
   clangTooling
   clangToolingCore
   clangToolingInclusions
   clangToolingRefactoring
   clangToolingSyntax
-  ${LLVM_PTHREAD_LIB}
-  ${CLANGD_ATOMIC_LIB}
   )
 
 add_subdirectory(refactor/tweaks)
@@ -150,7 +132,6 @@ if (${CMAKE_SYSTEM_NAME} STREQUAL "Linux")
 endif()
 add_subdirectory(tool)
 add_subdirectory(indexer)
-add_subdirectory(index/dex/dexp)
 
 if (LLVM_INCLUDE_BENCHMARKS)
   add_subdirectory(benchmarks)
@@ -163,3 +144,13 @@ if(CLANG_INCLUDE_TESTS)
 add_subdirectory(test)
 add_subdirectory(unittests)
 endif()
+
+# FIXME(kirillbobyrev): Document this in the LLVM docs once remote index is stable.
+option(CLANGD_ENABLE_REMOTE "Use gRPC library to enable remote index support for Clangd" OFF)
+set(GRPC_INSTALL_PATH "" CACHE PATH "Path to gRPC library manual installation.")
+
+if (CLANGD_ENABLE_REMOTE)
+  include(FindGRPC)
+endif()
+add_subdirectory(index/remote)
+add_subdirectory(index/dex/dexp)

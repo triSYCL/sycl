@@ -19,6 +19,8 @@
 
 namespace llvm {
 
+class VersionTuple;
+
 /// Triple - Helper class for working with autoconf configuration names. For
 /// historical reasons, we also call these 'triples' (they used to contain
 /// exactly three fields).
@@ -54,8 +56,6 @@ public:
     avr,            // AVR: Atmel AVR microcontroller
     bpfel,          // eBPF or extended BPF or 64-bit BPF (little endian)
     bpfeb,          // eBPF or extended BPF or 64-bit BPF (big endian)
-    fpga32,         // 32-bit FPGA
-    fpga64,         // 64-bit FPGA
     hexagon,        // Hexagon: hexagon
     mips,           // MIPS: mips, mipsallegrex, mipsr6
     mipsel,         // MIPSEL: mipsel, mipsallegrexe, mipsr6el
@@ -100,11 +100,16 @@ public:
     fpga_aoco,      // Intel FPGA: unlinked object file
     fpga_aocr,      // Intel FPGA: linked early image
     fpga_aocx,      // Intel FPGA: linked image
-    LastArchType = renderscript64
+    fpga_dep,       // Intel FPGA: dependency file
+    fpga32,         // 32-bit FPGA
+    fpga64,         // 64-bit FPGA
+    ve,             // NEC SX-Aurora Vector Engine
+    LastArchType = ve
   };
   enum SubArchType {
     NoSubArch,
 
+    ARMSubArch_v8_6a,
     ARMSubArch_v8_5a,
     ARMSubArch_v8_4a,
     ARMSubArch_v8_3a,
@@ -137,7 +142,9 @@ public:
 
     SPIRSubArch_fpga,
     SPIRSubArch_gen,
-    SPIRSubArch_x86_64
+    SPIRSubArch_x86_64,
+
+    PPCSubArch_spe
   };
   enum VendorType {
     UnknownVendor,
@@ -214,8 +221,6 @@ public:
     CODE16,
     EABI,
     EABIHF,
-    ELFv1,
-    ELFv2,
     Android,
     Musl,
     MuslEABI,
@@ -448,17 +453,7 @@ public:
   /// compatibility, which handles supporting skewed version numbering schemes
   /// used by the "darwin" triples.
   bool isMacOSXVersionLT(unsigned Major, unsigned Minor = 0,
-                         unsigned Micro = 0) const {
-    assert(isMacOSX() && "Not an OS X triple!");
-
-    // If this is OS X, expect a sane version number.
-    if (getOS() == Triple::MacOSX)
-      return isOSVersionLT(Major, Minor, Micro);
-
-    // Otherwise, compare to the "Darwin" number.
-    assert(Major == 10 && "Unexpected major version");
-    return isOSVersionLT(Minor + 4, Micro, 0);
-  }
+                         unsigned Micro = 0) const;
 
   /// isMacOSX - Is this a Mac OS X triple. For legacy reasons, we support both
   /// "darwin" and "osx" as OS X triples.
@@ -489,7 +484,7 @@ public:
     return getSubArch() == Triple::ARMSubArch_v7k;
   }
 
-  /// isOSDarwin - Is this a "Darwin" OS (OS X, iOS, or watchOS).
+  /// isOSDarwin - Is this a "Darwin" OS (macOS, iOS, tvOS or watchOS).
   bool isOSDarwin() const {
     return isMacOSX() || isiOS() || isWatchOS();
   }
@@ -719,6 +714,13 @@ public:
     return getArch() == Triple::nvptx || getArch() == Triple::nvptx64;
   }
 
+  /// Tests whether the target is AMDGCN
+  bool isAMDGCN() const { return getArch() == Triple::amdgcn; }
+
+  bool isAMDGPU() const {
+    return getArch() == Triple::r600 || getArch() == Triple::amdgcn;
+  }
+
   /// Tests whether the target is Thumb (little and big endian).
   bool isThumb() const {
     return getArch() == Triple::thumb || getArch() == Triple::thumbeb;
@@ -759,9 +761,29 @@ public:
     return getArch() == Triple::riscv32 || getArch() == Triple::riscv64;
   }
 
+  /// Tests whether the target is SystemZ.
+  bool isSystemZ() const {
+    return getArch() == Triple::systemz;
+  }
+
+  /// Tests whether the target is x86 (32- or 64-bit).
+  bool isX86() const {
+    return getArch() == Triple::x86 || getArch() == Triple::x86_64;
+  }
+
+  /// Tests whether the target is VE
+  bool isVE() const {
+    return getArch() == Triple::ve;
+  }
+
+  /// Tests whether the target is wasm (32- and 64-bit).
+  bool isWasm() const {
+    return getArch() == Triple::wasm32 || getArch() == Triple::wasm64;
+  }
+
   /// Tests whether the target supports comdat
   bool supportsCOMDAT() const {
-    return !isOSBinFormatMachO();
+    return !(isOSBinFormatMachO() || isOSBinFormatXCOFF());
   }
 
   /// Tests whether the target uses emulated TLS as default.
@@ -902,6 +924,10 @@ public:
   static ArchType getArchTypeForLLVMName(StringRef Str);
 
   /// @}
+
+  /// Returns a canonicalized OS version number for the specified OS.
+  static VersionTuple getCanonicalVersionForOS(OSType OSKind,
+                                               const VersionTuple &Version);
 };
 
 } // End llvm namespace

@@ -7,9 +7,11 @@
 //===----------------------------------------------------------------------===//
 
 #include <CL/sycl/detail/stream_impl.hpp>
+#include <detail/scheduler/scheduler.hpp>
+
 #include <cstdio>
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 namespace detail {
 
@@ -23,7 +25,9 @@ stream_impl::stream_impl(size_t BufferSize, size_t MaxStatementSize,
       // 2. Offset is properly initialized.
       Data(BufferSize + OffsetSize + 1, 0),
       Buf(Data.data(), range<1>(BufferSize + OffsetSize + 1),
-          {property::buffer::use_host_ptr()}) {}
+          {property::buffer::use_host_ptr()}),
+
+      FlushBuf(range<1>(MaxStatementSize)) {}
 
 size_t stream_impl::get_size() const { return BufferSize_; }
 
@@ -36,8 +40,9 @@ void stream_impl::flush() {
       range<1>(BufferSize_), id<1>(OffsetSize));
 
   printf("%s", HostAcc.get_pointer());
+  fflush(stdout);
 }
 } // namespace detail
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)
 

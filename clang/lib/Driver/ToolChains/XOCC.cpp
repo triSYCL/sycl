@@ -41,16 +41,16 @@ XOCCInstallationDetector::XOCCInstallationDetector(
       SmallString<256> programsAbsolutePath;
       fs::real_path(*program, programsAbsolutePath);
 
-      BinaryPath = programsAbsolutePath.str();
+      BinaryPath = programsAbsolutePath.str().str();
 
       StringRef programDir = path::parent_path(programsAbsolutePath);
 
       if (path::filename(programDir) == "bin")
-        BinPath = programDir;
+        BinPath = programDir.str();
 
       // TODO: Check if this assumption is correct in all installations and give
       // environment variable specifier option or an argument to the Driver
-      SDXPath = path::parent_path(programDir);
+      SDXPath = path::parent_path(programDir).str();
       LibPath = SDXPath + "/lnx64/lib";
 
       // TODO: slightly stricter IsValid test... check all strings aren't empty
@@ -140,7 +140,7 @@ XOCCToolChain::XOCCToolChain(const Driver &D, const llvm::Triple &Triple,
 {
 
   if (XOCCInstallation.isValid())
-    getProgramPaths().push_back(XOCCInstallation.getBinPath());
+    getProgramPaths().push_back(XOCCInstallation.getBinPath().str());
 
   // Lookup binaries into the driver directory, this is used to
   // discover the clang-offload-bundler executable.

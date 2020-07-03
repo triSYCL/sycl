@@ -33,7 +33,7 @@ combined with other commands:
 
   Disassemble all sections found in the input files.
   
-.. option:: --disassemble-functions=<symbol1[,symbol2,...]>
+.. option:: --disassemble-symbols=<symbol1[,symbol2,...]>
 
   Disassemble only the specified symbols. Takes demangled symbol names when
   :option:`--demangle` is specified, otherwise takes mangled symbol names.
@@ -85,13 +85,18 @@ combined with other commands:
 
   Display the symbol table.
 
+.. option:: -T, --dynamic-syms
+
+  Display the contents of the dynamic symbol table.
+
 .. option:: -u, --unwind-info
 
   Display the unwind info of the input(s).
 
 .. option:: --version
 
-  Display the version of this program. Does not stack with other commands.
+  Display the version of the :program:`llvm-objdump` executable. Does not stack
+  with other commands.
 
 .. option:: -x, --all-headers
 
@@ -320,10 +325,17 @@ MACH-O ONLY OPTIONS AND COMMANDS
 
   Display weak binding information.
 
+XCOFF ONLY OPTIONS AND COMMANDS
+---------------------------------
+
+.. option:: --symbol-description
+
+  Add symbol description to disassembly output.
+
 BUGS
 ----
 
-To report bugs, please visit <http://llvm.org/bugs/>.
+To report bugs, please visit <https://bugs.llvm.org/>.
 
 SEE ALSO
 --------

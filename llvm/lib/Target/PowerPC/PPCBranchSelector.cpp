@@ -31,6 +31,9 @@ using namespace llvm;
 #define DEBUG_TYPE "ppc-branch-select"
 
 STATISTIC(NumExpanded, "Number of branches expanded to long format");
+STATISTIC(NumPrefixed, "Number of prefixed instructions");
+STATISTIC(NumPrefixedAligned,
+          "Number of prefixed instructions that have been aligned");
 
 namespace {
   struct PPCBSel : public MachineFunctionPass {
@@ -81,20 +84,20 @@ FunctionPass *llvm::createPPCBranchSelectionPass() {
 /// original Offset.
 unsigned PPCBSel::GetAlignmentAdjustment(MachineBasicBlock &MBB,
                                          unsigned Offset) {
-  const llvm::Align Align = MBB.getAlignment();
-  if (Align == 1)
+  const Align Alignment = MBB.getAlignment();
+  if (Alignment == Align(1))
     return 0;
 
-  const llvm::Align ParentAlign = MBB.getParent()->getAlignment();
+  const Align ParentAlign = MBB.getParent()->getAlignment();
 
-  if (Align <= ParentAlign)
-    return offsetToAlignment(Offset, Align);
+  if (Alignment <= ParentAlign)
+    return offsetToAlignment(Offset, Alignment);
 
   // The alignment of this MBB is larger than the function's alignment, so we
   // can't tell whether or not it will insert nops. Assume that it will.
   if (FirstImpreciseBlock < 0)
     FirstImpreciseBlock = MBB.getNumber();
-  return Align.value() + offsetToAlignment(Offset, Align);
+  return Alignment.value() + offsetToAlignment(Offset, Alignment);
 }
 
 /// We need to be careful about the offset of the first block in the function
@@ -134,10 +137,38 @@ unsigned PPCBSel::ComputeBlockSizes(MachineFunction &Fn) {
     }
 
     unsigned BlockSize = 0;
+    unsigned UnalignedBytesRemaining = 0;
     for (MachineInstr &MI : *MBB) {
-      BlockSize += TII->getInstSizeInBytes(MI);
+      unsigned MINumBytes = TII->getInstSizeInBytes(MI);
       if (MI.isInlineAsm() && (FirstImpreciseBlock < 0))
         FirstImpreciseBlock = MBB->getNumber();
+      if (TII->isPrefixed(MI.getOpcode())) {
+        NumPrefixed++;
+
+        // All 8 byte instructions may require alignment. Each 8 byte
+        // instruction may be aligned by another 4 bytes.
+        // This means that an 8 byte instruction may require 12 bytes
+        // (8 for the instruction itself and 4 for the alignment nop).
+        // This will happen if an 8 byte instruction can be aligned to 64 bytes
+        // by only adding a 4 byte nop.
+        // We don't know the alignment at this point in the code so we have to
+        // adopt a more pessimistic approach. If an instruction may need
+        // alignment we assume that it does need alignment and add 4 bytes to
+        // it. As a result we may end up with more long branches than before
+        // but we are in the safe position where if we need a long branch we
+        // have one.
+        // The if statement checks to make sure that two 8 byte instructions
+        // are at least 64 bytes away from each other. It is not possible for
+        // two instructions that both need alignment to be within 64 bytes of
+        // each other.
+        if (!UnalignedBytesRemaining) {
+          BlockSize += 4;
+          UnalignedBytesRemaining = 60;
+          NumPrefixedAligned++;
+        }
+      }
+      UnalignedBytesRemaining -= std::min(UnalignedBytesRemaining, MINumBytes);
+      BlockSize += MINumBytes;
     }
 
     BlockSizes[MBB->getNumber()].first = BlockSize;
@@ -178,21 +209,20 @@ int PPCBSel::computeBranchSize(MachineFunction &Fn,
                                const MachineBasicBlock *Dest,
                                unsigned BrOffset) {
   int BranchSize;
-  unsigned MaxLogAlign = 2;
+  Align MaxAlign = Align(4);
   bool NeedExtraAdjustment = false;
   if (Dest->getNumber() <= Src->getNumber()) {
     // If this is a backwards branch, the delta is the offset from the
     // start of this block to this branch, plus the sizes of all blocks
     // from this block to the dest.
     BranchSize = BrOffset;
-    MaxLogAlign = std::max(MaxLogAlign, Src->getLogAlignment());
+    MaxAlign = std::max(MaxAlign, Src->getAlignment());
 
     int DestBlock = Dest->getNumber();
     BranchSize += BlockSizes[DestBlock].first;
     for (unsigned i = DestBlock+1, e = Src->getNumber(); i < e; ++i) {
       BranchSize += BlockSizes[i].first;
-      MaxLogAlign =
-          std::max(MaxLogAlign, Fn.getBlockNumbered(i)->getLogAlignment());
+      MaxAlign = std::max(MaxAlign, Fn.getBlockNumbered(i)->getAlignment());
     }
 
     NeedExtraAdjustment = (FirstImpreciseBlock >= 0) &&
@@ -203,11 +233,10 @@ int PPCBSel::computeBranchSize(MachineFunction &Fn,
     unsigned StartBlock = Src->getNumber();
     BranchSize = BlockSizes[StartBlock].first - BrOffset;
 
-    MaxLogAlign = std::max(MaxLogAlign, Dest->getLogAlignment());
+    MaxAlign = std::max(MaxAlign, Dest->getAlignment());
     for (unsigned i = StartBlock+1, e = Dest->getNumber(); i != e; ++i) {
       BranchSize += BlockSizes[i].first;
-      MaxLogAlign =
-          std::max(MaxLogAlign, Fn.getBlockNumbered(i)->getLogAlignment());
+      MaxAlign = std::max(MaxAlign, Fn.getBlockNumbered(i)->getAlignment());
     }
 
     NeedExtraAdjustment = (FirstImpreciseBlock >= 0) &&
@@ -257,7 +286,7 @@ int PPCBSel::computeBranchSize(MachineFunction &Fn,
   // The computed offset is at most ((1 << alignment) - 4) bytes smaller
   // than actual offset. So we add this number to the offset for safety.
   if (NeedExtraAdjustment)
-    BranchSize += (1 << MaxLogAlign) - 4;
+    BranchSize += MaxAlign.value() - 4;
 
   return BranchSize;
 }

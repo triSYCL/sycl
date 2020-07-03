@@ -47,11 +47,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "AST.h"
-#include "Logger.h"
 #include "ParsedAST.h"
 #include "Selection.h"
 #include "SourceCode.h"
 #include "refactor/Tweak.h"
+#include "support/Logger.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclTemplate.h"
@@ -104,6 +104,11 @@ bool isRootStmt(const Node *N) {
 }
 
 // Returns the (unselected) parent of all RootStmts given the commonAncestor.
+// Returns null if:
+// 1. any node is partially selected
+// 2. If all completely selected nodes don't have the same common parent
+// 3. Any child of Parent isn't a RootStmt.
+// Returns null if any child is not a RootStmt.
 // We only support extraction of RootStmts since it allows us to extract without
 // having to change the selection range. Also, this means that any scope that
 // begins in selection range, ends in selection range and any scope that begins
@@ -111,28 +116,30 @@ bool isRootStmt(const Node *N) {
 const Node *getParentOfRootStmts(const Node *CommonAnc) {
   if (!CommonAnc)
     return nullptr;
+  const Node *Parent = nullptr;
   switch (CommonAnc->Selected) {
   case SelectionTree::Selection::Unselected:
+    // Typically a block, with the { and } unselected, could also be ForStmt etc
     // Ensure all Children are RootStmts.
-    return llvm::all_of(CommonAnc->Children, isRootStmt) ? CommonAnc : nullptr;
+    Parent = CommonAnc;
+    break;
   case SelectionTree::Selection::Partial:
-    // Treat Partially selected VarDecl as completely selected since
-    // SelectionTree doesn't always select VarDecls correctly.
-    // FIXME: Remove this after D66872 is upstream)
-    if (!CommonAnc->ASTNode.get<VarDecl>())
-      return nullptr;
-    LLVM_FALLTHROUGH;
+    // Only a fully-selected single statement can be selected.
+    return nullptr;
   case SelectionTree::Selection::Complete:
     // If the Common Ancestor is completely selected, then it's a root statement
     // and its parent will be unselected.
-    const Node *Parent = CommonAnc->Parent;
+    Parent = CommonAnc->Parent;
     // If parent is a DeclStmt, even though it's unselected, we consider it a
     // root statement and return its parent. This is done because the VarDecls
     // claim the entire selection range of the Declaration and DeclStmt is
     // always unselected.
-    return Parent->ASTNode.get<DeclStmt>() ? Parent->Parent : Parent;
+    if (Parent->ASTNode.get<DeclStmt>())
+      Parent = Parent->Parent;
+    break;
   }
-  llvm_unreachable("Unhandled SelectionTree::Selection enum");
+  // Ensure all Children are RootStmts.
+  return llvm::all_of(Parent->Children, isRootStmt) ? Parent : nullptr;
 }
 
 // The ExtractionZone class forms a view of the code wrt Zone.
@@ -157,6 +164,22 @@ struct ExtractionZone {
 private:
   llvm::DenseSet<const Stmt *> RootStmts;
 };
+
+// Whether the code in the extraction zone is guaranteed to return, assuming
+// no broken control flow (unbound break/continue).
+// This is a very naive check (does it end with a return stmt).
+// Doing some rudimentary control flow analysis would cover more cases.
+bool alwaysReturns(const ExtractionZone &EZ) {
+  const Stmt *Last = EZ.getLastRootStmt()->ASTNode.get<Stmt>();
+  // Unwrap enclosing (unconditional) compound statement.
+  while (const auto *CS = llvm::dyn_cast<CompoundStmt>(Last)) {
+    if (CS->body_empty())
+      return false;
+    else
+      Last = CS->body_back();
+  }
+  return llvm::isa<ReturnStmt>(Last);
+}
 
 bool ExtractionZone::isRootStmt(const Stmt *S) const {
   return RootStmts.find(S) != RootStmts.end();
@@ -218,10 +241,24 @@ computeEnclosingFuncRange(const FunctionDecl *EnclosingFunction,
   return toHalfOpenFileRange(SM, LangOpts, EnclosingFunction->getSourceRange());
 }
 
+// returns true if Child can be a single RootStmt being extracted from
+// EnclosingFunc.
+bool validSingleChild(const Node *Child, const FunctionDecl *EnclosingFunc) {
+  // Don't extract expressions.
+  // FIXME: We should extract expressions that are "statements" i.e. not
+  // subexpressions
+  if (Child->ASTNode.get<Expr>())
+    return false;
+  // Extracting the body of EnclosingFunc would remove it's definition.
+  assert(EnclosingFunc->hasBody() &&
+         "We should always be extracting from a function body.");
+  if (Child->ASTNode.get<Stmt>() == EnclosingFunc->getBody())
+    return false;
+  return true;
+}
+
 // FIXME: Check we're not extracting from the initializer/condition of a control
 // flow structure.
-// FIXME: Check that we don't extract the compound statement of the
-// enclosingFunction.
 llvm::Optional<ExtractionZone> findExtractionZone(const Node *CommonAnc,
                                                   const SourceManager &SM,
                                                   const LangOptions &LangOpts) {
@@ -229,14 +266,13 @@ llvm::Optional<ExtractionZone> findExtractionZone(const Node *CommonAnc,
   ExtZone.Parent = getParentOfRootStmts(CommonAnc);
   if (!ExtZone.Parent || ExtZone.Parent->Children.empty())
     return llvm::None;
-  // Don't extract expressions.
-  // FIXME: We should extract expressions that are "statements" i.e. not
-  // subexpressions
-  if (ExtZone.Parent->Children.size() == 1 &&
-      ExtZone.getLastRootStmt()->ASTNode.get<Expr>())
-    return llvm::None;
   ExtZone.EnclosingFunction = findEnclosingFunction(ExtZone.Parent);
   if (!ExtZone.EnclosingFunction)
+    return llvm::None;
+  // When there is a single RootStmt, we must check if it's valid for
+  // extraction.
+  if (ExtZone.Parent->Children.size() == 1 &&
+      !validSingleChild(ExtZone.getLastRootStmt(), ExtZone.EnclosingFunction))
     return llvm::None;
   if (auto FuncRange =
           computeEnclosingFuncRange(ExtZone.EnclosingFunction, SM, LangOpts))
@@ -263,11 +299,12 @@ struct NewFunction {
     }
   };
   std::string Name = "extracted";
-  std::string ReturnType;
+  QualType ReturnType;
   std::vector<Parameter> Parameters;
   SourceRange BodyRange;
   SourceLocation InsertionPoint;
   const DeclContext *EnclosingFuncContext;
+  bool CallerReturnsValue = false;
   // Decides whether the extracted function body and the function call need a
   // semicolon after extraction.
   tooling::ExtractionSemicolonPolicy SemicolonPolicy;
@@ -310,13 +347,16 @@ std::string NewFunction::renderParametersForCall() const {
 }
 
 std::string NewFunction::renderCall() const {
-  return Name + "(" + renderParametersForCall() + ")" +
-         (SemicolonPolicy.isNeededInOriginalFunction() ? ";" : "");
+  return std::string(
+      llvm::formatv("{0}{1}({2}){3}", CallerReturnsValue ? "return " : "", Name,
+                    renderParametersForCall(),
+                    (SemicolonPolicy.isNeededInOriginalFunction() ? ";" : "")));
 }
 
 std::string NewFunction::renderDefinition(const SourceManager &SM) const {
-  return ReturnType + " " + Name + "(" + renderParametersForDefinition() + ")" +
-         " {\n" + getFuncBody(SM) + "\n}\n";
+  return std::string(llvm::formatv(
+      "{0} {1}({2}) {\n{3}\n}\n", printType(ReturnType, *EnclosingFuncContext),
+      Name, renderParametersForDefinition(), getFuncBody(SM)));
 }
 
 std::string NewFunction::getFuncBody(const SourceManager &SM) const {
@@ -350,8 +390,8 @@ struct CapturedZoneInfo {
   };
   // Maps Decls to their DeclInfo
   llvm::DenseMap<const Decl *, DeclInformation> DeclInfoMap;
-  // True if there is a return statement in zone.
-  bool HasReturnStmt = false;
+  bool HasReturnStmt = false; // Are there any return statements in the zone?
+  bool AlwaysReturns = false; // Does the zone always return?
   // Control flow is broken if we are extracting a break/continue without a
   // corresponding parent loop/switch
   bool BrokenControlFlow = false;
@@ -457,7 +497,7 @@ CapturedZoneInfo captureZoneInfo(const ExtractionZone &ExtZone) {
     }
 
     bool VisitDeclRefExpr(DeclRefExpr *DRE) {
-      // Find the corresponding Decl and mark it's occurence.
+      // Find the corresponding Decl and mark it's occurrence.
       const Decl *D = DRE->getDecl();
       auto *DeclInfo = Info.getDeclInfoFor(D);
       // If no Decl was found, the Decl must be outside the enclosingFunc.
@@ -499,7 +539,9 @@ CapturedZoneInfo captureZoneInfo(const ExtractionZone &ExtZone) {
     unsigned CurNumberOfSwitch = 0;
   };
   ExtractionZoneVisitor Visitor(ExtZone);
-  return std::move(Visitor.Info);
+  CapturedZoneInfo Result = std::move(Visitor.Info);
+  Result.AlwaysReturns = alwaysReturns(ExtZone);
+  return Result;
 }
 
 // Adds parameters to ExtractedFunc.
@@ -536,8 +578,9 @@ bool createParameters(NewFunction &ExtractedFunc,
     // pointers, etc by reference.
     bool IsPassedByReference = true;
     // We use the index of declaration as the ordering priority for parameters.
-    ExtractedFunc.Parameters.push_back(
-        {VD->getName(), TypeInfo, IsPassedByReference, DeclInfo.DeclIndex});
+    ExtractedFunc.Parameters.push_back({std::string(VD->getName()), TypeInfo,
+                                        IsPassedByReference,
+                                        DeclInfo.DeclIndex});
   }
   llvm::sort(ExtractedFunc.Parameters);
   return true;
@@ -562,13 +605,26 @@ getSemicolonPolicy(ExtractionZone &ExtZone, const SourceManager &SM,
 
 // Generate return type for ExtractedFunc. Return false if unable to do so.
 bool generateReturnProperties(NewFunction &ExtractedFunc,
+                              const FunctionDecl &EnclosingFunc,
                               const CapturedZoneInfo &CapturedInfo) {
-
-  // FIXME: Use Existing Return statements (if present)
+  // If the selected code always returns, we preserve those return statements.
+  // The return type should be the same as the enclosing function.
+  // (Others are possible if there are conversions, but this seems clearest).
+  if (CapturedInfo.HasReturnStmt) {
+    // If the return is conditional, neither replacing the code with
+    // `extracted()` nor `return extracted()` is correct.
+    if (!CapturedInfo.AlwaysReturns)
+      return false;
+    QualType Ret = EnclosingFunc.getReturnType();
+    // Once we support members, it'd be nice to support e.g. extracting a method
+    // of Foo<T> that returns T. But it's not clear when that's safe.
+    if (Ret->isDependentType())
+      return false;
+    ExtractedFunc.ReturnType = Ret;
+    return true;
+  }
   // FIXME: Generate new return statement if needed.
-  if (CapturedInfo.HasReturnStmt)
-    return false;
-  ExtractedFunc.ReturnType = "void";
+  ExtractedFunc.ReturnType = EnclosingFunc.getParentASTContext().VoidTy;
   return true;
 }
 
@@ -588,8 +644,10 @@ llvm::Expected<NewFunction> getExtractedFunction(ExtractionZone &ExtZone,
   ExtractedFunc.InsertionPoint = ExtZone.getInsertionPoint();
   ExtractedFunc.EnclosingFuncContext =
       ExtZone.EnclosingFunction->getDeclContext();
+  ExtractedFunc.CallerReturnsValue = CapturedInfo.AlwaysReturns;
   if (!createParameters(ExtractedFunc, CapturedInfo) ||
-      !generateReturnProperties(ExtractedFunc, CapturedInfo))
+      !generateReturnProperties(ExtractedFunc, *ExtZone.EnclosingFunction,
+                                CapturedInfo))
     return llvm::createStringError(llvm::inconvertibleErrorCode(),
                                    +"Too complex to extract.");
   return ExtractedFunc;
@@ -624,8 +682,8 @@ tooling::Replacement createFunctionDefinition(const NewFunction &ExtractedFunc,
 
 bool ExtractFunction::prepare(const Selection &Inputs) {
   const Node *CommonAnc = Inputs.ASTSelection.commonAncestor();
-  const SourceManager &SM = Inputs.AST.getSourceManager();
-  const LangOptions &LangOpts = Inputs.AST.getASTContext().getLangOpts();
+  const SourceManager &SM = Inputs.AST->getSourceManager();
+  const LangOptions &LangOpts = Inputs.AST->getLangOpts();
   if (auto MaybeExtZone = findExtractionZone(CommonAnc, SM, LangOpts)) {
     ExtZone = std::move(*MaybeExtZone);
     return true;
@@ -634,8 +692,8 @@ bool ExtractFunction::prepare(const Selection &Inputs) {
 }
 
 Expected<Tweak::Effect> ExtractFunction::apply(const Selection &Inputs) {
-  const SourceManager &SM = Inputs.AST.getSourceManager();
-  const LangOptions &LangOpts = Inputs.AST.getASTContext().getLangOpts();
+  const SourceManager &SM = Inputs.AST->getSourceManager();
+  const LangOptions &LangOpts = Inputs.AST->getLangOpts();
   auto ExtractedFunc = getExtractedFunction(ExtZone, SM, LangOpts);
   // FIXME: Add more types of errors.
   if (!ExtractedFunc)

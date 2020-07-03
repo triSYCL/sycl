@@ -156,8 +156,9 @@ def _SLASH_Qvec : CLFlag<"Qvec">,
 def _SLASH_Qvec_ : CLFlag<"Qvec-">,
   HelpText<"Disable the loop vectorization passes">, Alias<fno_vectorize>;
 def _SLASH_showIncludes : CLFlag<"showIncludes">,
-  HelpText<"Print info about included files to stderr">,
-  Alias<show_includes>;
+  HelpText<"Print info about included files to stderr">;
+def _SLASH_showIncludes_user : CLFlag<"showIncludes:user">,
+  HelpText<"Like /showIncludes but omit system headers">;
 def _SLASH_showFilenames : CLFlag<"showFilenames">,
   HelpText<"Print the name of each compiled file">;
 def _SLASH_showFilenames_ : CLFlag<"showFilenames-">,
@@ -401,6 +402,9 @@ def _SLASH_Zc_inline : CLIgnoredFlag<"Zc:inline">;
 def _SLASH_Zc_rvalueCast : CLIgnoredFlag<"Zc:rvalueCast">;
 def _SLASH_Zc_ternary : CLIgnoredFlag<"Zc:ternary">;
 def _SLASH_Zc_wchar_t : CLIgnoredFlag<"Zc:wchar_t">;
+def _SLASH_ZH_MD5 : CLIgnoredFlag<"ZH:MD5">;
+def _SLASH_ZH_SHA1 : CLIgnoredFlag<"ZH:SHA1">;
+def _SLASH_ZH_SHA_256 : CLIgnoredFlag<"ZH:SHA_256">;
 def _SLASH_Zm : CLIgnoredJoined<"Zm">;
 def _SLASH_Zo : CLIgnoredFlag<"Zo">;
 def _SLASH_Zo_ : CLIgnoredFlag<"Zo-">;
@@ -443,11 +447,14 @@ def _SLASH_LN : CLFlag<"LN">;
 def _SLASH_MP : CLJoined<"MP">;
 def _SLASH_Qfast_transcendentals : CLFlag<"Qfast_transcendentals">;
 def _SLASH_QIfist : CLFlag<"QIfist">;
+def _SLASH_QIntel_jcc_erratum : CLFlag<"QIntel-jcc-erratum">;
 def _SLASH_Qimprecise_fwaits : CLFlag<"Qimprecise_fwaits">;
 def _SLASH_Qpar : CLFlag<"Qpar">;
 def _SLASH_Qpar_report : CLJoined<"Qpar-report">;
 def _SLASH_Qsafe_fp_loads : CLFlag<"Qsafe_fp_loads">;
 def _SLASH_Qspectre : CLFlag<"Qspectre">;
+def _SLASH_Qspectre_load : CLFlag<"Qspectre-load">;
+def _SLASH_Qspectre_load_cf : CLFlag<"Qspectre-load-cf">;
 def _SLASH_Qvec_report : CLJoined<"Qvec-report">;
 def _SLASH_u : CLFlag<"u">;
 def _SLASH_V : CLFlag<"V">;

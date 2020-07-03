@@ -35,9 +35,11 @@ namespace ISD {
     unsigned IsReturned : 1; ///< Always returned
     unsigned IsSplit : 1;
     unsigned IsInAlloca : 1;   ///< Passed with inalloca
+    unsigned IsPreallocated : 1; ///< ByVal without the copy
     unsigned IsSplitEnd : 1;   ///< Last part of a split
     unsigned IsSwiftSelf : 1;  ///< Swift self parameter
     unsigned IsSwiftError : 1; ///< Swift error parameter
+    unsigned IsCFGuardTarget : 1; ///< Control Flow Guard target
     unsigned IsHva : 1;        ///< HVA field for
     unsigned IsHvaStart : 1;   ///< HVA structure start
     unsigned IsSecArgPass : 1; ///< Second argument
@@ -55,9 +57,9 @@ namespace ISD {
   public:
     ArgFlagsTy()
         : IsZExt(0), IsSExt(0), IsInReg(0), IsSRet(0), IsByVal(0), IsNest(0),
-          IsReturned(0), IsSplit(0), IsInAlloca(0), IsSplitEnd(0),
-          IsSwiftSelf(0), IsSwiftError(0), IsHva(0), IsHvaStart(0),
-          IsSecArgPass(0), ByValAlign(0), OrigAlign(0),
+          IsReturned(0), IsSplit(0), IsInAlloca(0), IsPreallocated(0),
+          IsSplitEnd(0), IsSwiftSelf(0), IsSwiftError(0), IsCFGuardTarget(0),
+          IsHva(0), IsHvaStart(0), IsSecArgPass(0), ByValAlign(0), OrigAlign(0),
           IsInConsecutiveRegsLast(0), IsInConsecutiveRegs(0),
           IsCopyElisionCandidate(0), IsPointer(0), ByValSize(0),
           PointerAddrSpace(0) {
@@ -82,11 +84,17 @@ namespace ISD {
     bool isInAlloca() const { return IsInAlloca; }
     void setInAlloca() { IsInAlloca = 1; }
 
+    bool isPreallocated() const { return IsPreallocated; }
+    void setPreallocated() { IsPreallocated = 1; }
+
     bool isSwiftSelf() const { return IsSwiftSelf; }
     void setSwiftSelf() { IsSwiftSelf = 1; }
 
     bool isSwiftError() const { return IsSwiftError; }
     void setSwiftError() { IsSwiftError = 1; }
+
+    bool isCFGuardTarget() const { return IsCFGuardTarget; }
+    void setCFGuardTarget() { IsCFGuardTarget = 1; }
 
     bool isHva() const { return IsHva; }
     void setHva() { IsHva = 1; }
@@ -121,22 +129,32 @@ namespace ISD {
     bool isPointer()  const { return IsPointer; }
     void setPointer() { IsPointer = 1; }
 
-    unsigned getByValAlign() const {
+    LLVM_ATTRIBUTE_DEPRECATED(unsigned getByValAlign() const,
+                              "Use getNonZeroByValAlign() instead") {
       MaybeAlign A = decodeMaybeAlign(ByValAlign);
       return A ? A->value() : 0;
     }
-    void setByValAlign(unsigned A) {
-      ByValAlign = encode(llvm::Align(A));
-      assert(getByValAlign() == A && "bitfield overflow");
+    Align getNonZeroByValAlign() const {
+      MaybeAlign A = decodeMaybeAlign(ByValAlign);
+      assert(A && "ByValAlign must be defined");
+      return *A;
+    }
+    void setByValAlign(Align A) {
+      ByValAlign = encode(A);
+      assert(getNonZeroByValAlign() == A && "bitfield overflow");
     }
 
-    unsigned getOrigAlign() const {
+    LLVM_ATTRIBUTE_DEPRECATED(unsigned getOrigAlign() const,
+                              "Use getNonZeroOrigAlign() instead") {
       MaybeAlign A = decodeMaybeAlign(OrigAlign);
       return A ? A->value() : 0;
     }
-    void setOrigAlign(unsigned A) {
-      OrigAlign = encode(llvm::Align(A));
-      assert(getOrigAlign() == A && "bitfield overflow");
+    Align getNonZeroOrigAlign() const {
+      return decodeMaybeAlign(OrigAlign).valueOrOne();
+    }
+    void setOrigAlign(Align A) {
+      OrigAlign = encode(A);
+      assert(getNonZeroOrigAlign() == A && "bitfield overflow");
     }
 
     unsigned getByValSize() const { return ByValSize; }

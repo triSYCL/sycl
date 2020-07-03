@@ -15,6 +15,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -126,7 +127,8 @@ void BlockExtractor::loadFile() {
                        /*KeepEmpty=*/false);
     if (BBNames.empty())
       report_fatal_error("Missing bbs name");
-    BlocksByName.push_back({LineSplit[0], {BBNames.begin(), BBNames.end()}});
+    BlocksByName.push_back(
+        {std::string(LineSplit[0]), {BBNames.begin(), BBNames.end()}});
   }
 }
 
@@ -206,7 +208,8 @@ bool BlockExtractor::runOnModule(Module &M) {
       ++NumExtracted;
       Changed = true;
     }
-    Function *F = CodeExtractor(BlocksToExtractVec).extractCodeRegion();
+    CodeExtractorAnalysisCache CEAC(*BBs[0]->getParent());
+    Function *F = CodeExtractor(BlocksToExtractVec).extractCodeRegion(CEAC);
     if (F)
       LLVM_DEBUG(dbgs() << "Extracted group '" << (*BBs.begin())->getName()
                         << "' in: " << F->getName() << '\n');

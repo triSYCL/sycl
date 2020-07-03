@@ -16,6 +16,8 @@
 
 #include "llvm/ADT/StringMap.h"
 #include "llvm/CodeGen/DebugHandlerBase.h"
+#include "llvm/CodeGen/MachineInstr.h"
+#include <set>
 #include <unordered_map>
 #include "BTF.h"
 
@@ -24,6 +26,7 @@ namespace llvm {
 class AsmPrinter;
 class BTFDebug;
 class DIType;
+class GlobalVariable;
 class MCStreamer;
 class MCSymbol;
 class MachineFunction;
@@ -151,7 +154,7 @@ class BTFTypeFunc : public BTFTypeBase {
   StringRef Name;
 
 public:
-  BTFTypeFunc(StringRef FuncName, uint32_t ProtoTypeId);
+  BTFTypeFunc(StringRef FuncName, uint32_t ProtoTypeId, uint32_t Scope);
   uint32_t getSize() { return BTFTypeBase::getSize(); }
   void completeType(BTFDebug &BDebug);
   void emitType(MCStreamer &OS);
@@ -195,7 +198,7 @@ class BTFStringTable {
   /// A mapping from string table offset to the index
   /// of the Table. It is used to avoid putting
   /// duplicated strings in the table.
-  std::unordered_map<uint32_t, uint32_t> OffsetToIdMap;
+  std::map<uint32_t, uint32_t> OffsetToIdMap;
   /// A vector of strings to represent the string table.
   std::vector<std::string> Table;
 
@@ -223,17 +226,12 @@ struct BTFLineInfo {
   uint32_t ColumnNum;   ///< the column number
 };
 
-/// Represent one offset relocation.
-struct BTFOffsetReloc {
+/// Represent one field relocation.
+struct BTFFieldReloc {
   const MCSymbol *Label;  ///< MCSymbol identifying insn for the reloc
   uint32_t TypeID;        ///< Type ID
   uint32_t OffsetNameOff; ///< The string to traverse types
-};
-
-/// Represent one extern relocation.
-struct BTFExternReloc {
-  const MCSymbol *Label;  ///< MCSymbol identifying insn for the reloc
-  uint32_t ExternNameOff; ///< The extern variable name
+  uint32_t RelocKind;     ///< What to patch the instruction
 };
 
 /// Collect and emit BTF information.
@@ -249,14 +247,14 @@ class BTFDebug : public DebugHandlerBase {
   std::unordered_map<const DIType *, uint32_t> DIToIdMap;
   std::map<uint32_t, std::vector<BTFFuncInfo>> FuncInfoTable;
   std::map<uint32_t, std::vector<BTFLineInfo>> LineInfoTable;
-  std::map<uint32_t, std::vector<BTFOffsetReloc>> OffsetRelocTable;
-  std::map<uint32_t, std::vector<BTFExternReloc>> ExternRelocTable;
+  std::map<uint32_t, std::vector<BTFFieldReloc>> FieldRelocTable;
   StringMap<std::vector<std::string>> FileContent;
   std::map<std::string, std::unique_ptr<BTFKindDataSec>> DataSecEntries;
   std::vector<BTFTypeStruct *> StructTypes;
-  std::map<std::string, int64_t> AccessOffsets;
+  std::map<const GlobalVariable *, uint32_t> PatchImms;
   std::map<StringRef, std::pair<bool, std::vector<BTFTypeDerived *>>>
       FixupDerivedTypes;
+  std::set<const Function *>ProtoFunctions;
 
   /// Add types to TypeEntries.
   /// @{
@@ -299,15 +297,18 @@ class BTFDebug : public DebugHandlerBase {
   /// Generate types and variables for globals.
   void processGlobals(bool ProcessingMapDef);
 
-  /// Generate one offset relocation record.
-  void generateOffsetReloc(const MachineInstr *MI, const MCSymbol *ORSym,
-                           DIType *RootTy, StringRef AccessPattern);
+  /// Generate types for function prototypes.
+  void processFuncPrototypes(const Function *);
 
-  /// Populating unprocessed struct type.
-  unsigned populateStructType(const DIType *Ty);
+  /// Generate one field relocation record.
+  void generatePatchImmReloc(const MCSymbol *ORSym, uint32_t RootId,
+                             const GlobalVariable *, bool IsAma);
 
-  /// Process LD_imm64 instructions.
-  void processLDimm64(const MachineInstr *MI);
+  /// Populating unprocessed type on demand.
+  unsigned populateType(const DIType *Ty);
+
+  /// Process relocation instructions.
+  void processReloc(const MachineOperand &MO);
 
   /// Emit common header of .BTF and .BTF.ext sections.
   void emitCommonHeader();

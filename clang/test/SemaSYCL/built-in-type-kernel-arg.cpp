@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -I %S/Inputs -fsycl-is-device -ast-dump %s | FileCheck %s
+// RUN: %clang_cc1 -I %S/Inputs -fsycl -fsycl-is-device -ast-dump %s | FileCheck %s
 
 // This test checks that compiler generates correct initialization for arguments
 // that have struct or built-in type inside the OpenCL kernel
@@ -83,11 +83,9 @@ int main() {
 
 // Check that lambda fields of pointer types are initialized
 // CHECK: InitListExpr
-// CHECK-NEXT: ImplicitCastExpr {{.*}} 'int *' <LValueToRValue>
-// CHECK-NEXT: ImplicitCastExpr {{.*}} 'int *' lvalue <AddressSpaceConversion>
+// CHECK-NEXT: ImplicitCastExpr {{.*}} 'int *' <AddressSpaceConversion>
 // CHECK-NEXT: DeclRefExpr {{.*}} '__global int *' lvalue ParmVar {{.*}} '_arg_' '__global int *'
-// CHECK-NEXT: ImplicitCastExpr {{.*}} 'int *' <LValueToRValue>
-// CHECK-NEXT: ImplicitCastExpr {{.*}} 'int *' lvalue <AddressSpaceConversion>
+// CHECK-NEXT: ImplicitCastExpr {{.*}} 'int *' <AddressSpaceConversion>
 // CHECK-NEXT: DeclRefExpr {{.*}} '__global int *' lvalue ParmVar {{.*}} '_arg_' '__global int *'
 
 // Check kernel parameters

@@ -375,8 +375,7 @@ DWARF:
         - Attribute:       DW_AT_type
           Form:            DW_FORM_ref4
   debug_aranges:   
-    - Length:          
-        TotalLength:     44
+    - Length:          44
       Version:         2
       CuOffset:        0
       AddrSize:        8
@@ -455,8 +454,7 @@ DWARF:
         - AbbrCode:        0x00000000
           Values:          
   debug_line:      
-    - Length:          
-        TotalLength:     65
+    - Length:          65
       Version:         2
       PrologueLength:  36
       MinInstLength:   1
@@ -532,8 +530,7 @@ DWARF:
 #CHECK:             - Value:           0x0000000100000F50
 #CHECK:             - Value:           0x0000000000000034
 #CHECK:             - Value:           0x0000000000000001
-#CHECK:               BlockData:       
-#CHECK:                 - 0x56
+#CHECK:               BlockData:       [ 0x56 ]
 #CHECK:             - Value:           0x0000000000000076
 #CHECK:             - Value:           0x0000000000000001
 #CHECK:             - Value:           0x0000000000000003
@@ -543,9 +540,7 @@ DWARF:
 #CHECK:         - AbbrCode:        0x00000003
 #CHECK:           Values:          
 #CHECK:             - Value:           0x0000000000000002
-#CHECK:               BlockData:       
-#CHECK:                 - 0x91
-#CHECK:                 - 0x78
+#CHECK:               BlockData:       [ 0x91, 0x78 ]
 #CHECK:             - Value:           0x000000000000007B
 #CHECK:             - Value:           0x0000000000000001
 #CHECK:             - Value:           0x0000000000000003
@@ -553,9 +548,7 @@ DWARF:
 #CHECK:         - AbbrCode:        0x00000003
 #CHECK:           Values:          
 #CHECK:             - Value:           0x0000000000000002
-#CHECK:               BlockData:       
-#CHECK:                 - 0x91
-#CHECK:                 - 0x70
+#CHECK:               BlockData:       [ 0x91, 0x70 ]
 #CHECK:             - Value:           0x0000000000000080
 #CHECK:             - Value:           0x0000000000000001
 #CHECK:             - Value:           0x0000000000000003

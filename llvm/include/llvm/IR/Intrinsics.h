@@ -18,6 +18,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/None.h"
 #include "llvm/ADT/Optional.h"
+#include "llvm/Support/TypeSize.h"
 #include <string>
 
 namespace llvm {
@@ -33,14 +34,17 @@ class AttributeList;
 /// function known by LLVM. The enum values are returned by
 /// Function::getIntrinsicID().
 namespace Intrinsic {
-  enum ID : unsigned {
-    not_intrinsic = 0,   // Must be zero
+  // Intrinsic ID type. This is an opaque typedef to facilitate splitting up
+  // the enum into target-specific enums.
+  typedef unsigned ID;
 
-    // Get the intrinsic enums generated from Intrinsics.td
+  enum IndependentIntrinsics : unsigned {
+    not_intrinsic = 0, // Must be zero
+
+  // Get the intrinsic enums generated from Intrinsics.td
 #define GET_INTRINSIC_ENUM_VALUES
 #include "llvm/IR/IntrinsicEnums.inc"
 #undef GET_INTRINSIC_ENUM_VALUES
-    , num_intrinsics
   };
 
   /// Return the LLVM name for an intrinsic, such as "llvm.ppc.altivec.lvx".
@@ -96,20 +100,41 @@ namespace Intrinsic {
   /// intrinsic. This is returned by getIntrinsicInfoTableEntries.
   struct IITDescriptor {
     enum IITDescriptorKind {
-      Void, VarArg, MMX, Token, Metadata, Half, Float, Double, Quad,
-      Integer, Vector, Pointer, Struct,
-      Argument, ExtendArgument, TruncArgument, HalfVecArgument,
-      SameVecWidthArgument, PtrToArgument, PtrToElt, VecOfAnyPtrsToElt,
-      VecElementArgument, ScalableVecArgument
+      Void,
+      VarArg,
+      MMX,
+      Token,
+      Metadata,
+      Half,
+      BFloat,
+      Float,
+      Double,
+      Quad,
+      Integer,
+      Vector,
+      Pointer,
+      Struct,
+      Argument,
+      ExtendArgument,
+      TruncArgument,
+      HalfVecArgument,
+      SameVecWidthArgument,
+      PtrToArgument,
+      PtrToElt,
+      VecOfAnyPtrsToElt,
+      VecElementArgument,
+      Subdivide2Argument,
+      Subdivide4Argument,
+      VecOfBitcastsToInt
     } Kind;
 
     union {
       unsigned Integer_Width;
       unsigned Float_Width;
-      unsigned Vector_Width;
       unsigned Pointer_AddressSpace;
       unsigned Struct_NumElements;
       unsigned Argument_Info;
+      ElementCount Vector_Width;
     };
 
     enum ArgKind {
@@ -125,14 +150,17 @@ namespace Intrinsic {
       assert(Kind == Argument || Kind == ExtendArgument ||
              Kind == TruncArgument || Kind == HalfVecArgument ||
              Kind == SameVecWidthArgument || Kind == PtrToArgument ||
-             Kind == PtrToElt || Kind == VecElementArgument);
+             Kind == PtrToElt || Kind == VecElementArgument ||
+             Kind == Subdivide2Argument || Kind == Subdivide4Argument ||
+             Kind == VecOfBitcastsToInt);
       return Argument_Info >> 3;
     }
     ArgKind getArgumentKind() const {
       assert(Kind == Argument || Kind == ExtendArgument ||
              Kind == TruncArgument || Kind == HalfVecArgument ||
              Kind == SameVecWidthArgument || Kind == PtrToArgument ||
-             Kind == VecElementArgument);
+             Kind == VecElementArgument || Kind == Subdivide2Argument ||
+             Kind == Subdivide4Argument || Kind == VecOfBitcastsToInt);
       return (ArgKind)(Argument_Info & 7);
     }
 
@@ -156,6 +184,14 @@ namespace Intrinsic {
                              unsigned short Lo) {
       unsigned Field = Hi << 16 | Lo;
       IITDescriptor Result = {K, {Field}};
+      return Result;
+    }
+
+    static IITDescriptor getVector(unsigned Width, bool IsScalable) {
+      IITDescriptor Result;
+      Result.Kind = Vector;
+      Result.Vector_Width.Min = Width;
+      Result.Vector_Width.Scalable = IsScalable;
       return Result;
     }
   };

@@ -13,13 +13,18 @@
 #include <CL/sycl/item.hpp>
 #include <CL/sycl/range.hpp>
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 
 namespace detail {
 class Builder;
 }
 
+/// Identifies an instance of a group::parallel_for_work_item function object
+/// executing at each point in a local range passed to a parallel_for_work_item
+/// call or to the corresponding parallel_for_work_group call.
+///
+/// \ingroup sycl_api
 template <int dimensions> class h_item {
 public:
   h_item() = delete;
@@ -130,4 +135,4 @@ private:
 };
 
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

@@ -32,7 +32,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file implements adaptation of OCL types for SPIRV.
+// This file implements adaptation of OCL types for SPIR-V.
 //
 // It first maps kernel arguments of OCL opaque types to SPIR-V type, then
 // propagates the mapping to the uses of the kernel arguments.
@@ -45,7 +45,6 @@
 #include "SPIRVInternal.h"
 
 #include "llvm/Pass.h"
-#include "llvm/PassSupport.h"
 #include "llvm/Support/Debug.h"
 
 #include <iterator>
@@ -208,8 +207,8 @@ void OCLTypeToSPIRV::adaptArgumentsBySamplerUse(Module &M) {
     if (!F.empty()) // not decl
       continue;
     auto MangledName = F.getName();
-    std::string DemangledName;
-    if (!oclIsBuiltin(MangledName, &DemangledName, false))
+    StringRef DemangledName;
+    if (!oclIsBuiltin(MangledName, DemangledName, false))
       continue;
     if (DemangledName.find(kSPIRVName::SampledImage) == std::string::npos)
       continue;
@@ -285,7 +284,7 @@ void OCLTypeToSPIRV::adaptArgumentsByMetadata(Function *F) {
 // OCL sampler type is represented as i32 in LLVM, however in SPIRV it is
 // represented as OpTypeSampler. Also LLVM uses the same pipe type to
 // represent pipe types with different underlying data types, however
-// in SPIRV they are different types. OCL image and pipie types do not
+// in SPIRV they are different types. OCL image and pipe types do not
 // encode access qualifier, which is part of SPIRV types for image and pipe.
 //
 // The function types in LLVM need to be regularized before translating

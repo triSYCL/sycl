@@ -1,4 +1,4 @@
-//===-- ScalarTest.cpp ------------------------------------------*- C++ -*-===//
+//===-- ScalarTest.cpp ----------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -16,7 +16,9 @@
 #include "llvm/Testing/Support/Error.h"
 
 using namespace lldb_private;
-using namespace llvm;
+using llvm::APInt;
+using llvm::Failed;
+using llvm::Succeeded;
 
 template <typename T>
 bool checkInequality(T c1, T c2) {
@@ -76,6 +78,7 @@ TEST(ScalarTest, RightShiftOperator) {
 }
 
 TEST(ScalarTest, GetBytes) {
+  uint8_t Storage[256];
   int a = 0x01020304;
   long long b = 0x0102030405060708LL;
   float c = 1234567.89e32f;
@@ -97,14 +100,20 @@ TEST(ScalarTest, GetBytes) {
                        sizeof(void *));
   Status f_error =
       f_scalar.SetValueFromData(f_data, lldb::eEncodingUint, sizeof(f));
-  ASSERT_EQ(0, memcmp(&a, a_scalar.GetBytes(), sizeof(a)));
-  ASSERT_EQ(0, memcmp(&b, b_scalar.GetBytes(), sizeof(b)));
-  ASSERT_EQ(0, memcmp(&c, c_scalar.GetBytes(), sizeof(c)));
-  ASSERT_EQ(0, memcmp(&d, d_scalar.GetBytes(), sizeof(d)));
+  a_scalar.GetBytes(Storage);
+  ASSERT_EQ(0, memcmp(&a, Storage, sizeof(a)));
+  b_scalar.GetBytes(Storage);
+  ASSERT_EQ(0, memcmp(&b, Storage, sizeof(b)));
+  c_scalar.GetBytes(Storage);
+  ASSERT_EQ(0, memcmp(&c, Storage, sizeof(c)));
+  d_scalar.GetBytes(Storage);
+  ASSERT_EQ(0, memcmp(&d, Storage, sizeof(d)));
   ASSERT_EQ(0, e_error.Fail());
-  ASSERT_EQ(0, memcmp(e, e_scalar.GetBytes(), sizeof(e)));
+  e_scalar.GetBytes(Storage);
+  ASSERT_EQ(0, memcmp(e, Storage, sizeof(e)));
   ASSERT_EQ(0, f_error.Fail());
-  ASSERT_EQ(0, memcmp(f, f_scalar.GetBytes(), sizeof(f)));
+  f_scalar.GetBytes(Storage);
+  ASSERT_EQ(0, memcmp(f, Storage, sizeof(f)));
 }
 
 TEST(ScalarTest, CastOperations) {
@@ -135,27 +144,27 @@ TEST(ScalarTest, ExtractBitfield) {
   long long b1 = 0xff1f2f3f4f5f6f7fLL;
   Scalar s_scalar(a1);
   ASSERT_TRUE(s_scalar.ExtractBitfield(0, 0));
-  ASSERT_EQ(0, memcmp(&a1, s_scalar.GetBytes(), sizeof(a1)));
+  EXPECT_EQ(s_scalar, a1);
   ASSERT_TRUE(s_scalar.ExtractBitfield(len, 0));
-  ASSERT_EQ(0, memcmp(&a1, s_scalar.GetBytes(), sizeof(a1)));
+  EXPECT_EQ(s_scalar, a1);
   ASSERT_TRUE(s_scalar.ExtractBitfield(len - 4, 4));
-  ASSERT_EQ(0, memcmp(&b1, s_scalar.GetBytes(), sizeof(b1)));
+  EXPECT_EQ(s_scalar, b1);
 
   unsigned long long a2 = 0xf1f2f3f4f5f6f7f8ULL;
   unsigned long long b2 = 0x0f1f2f3f4f5f6f7fULL;
   Scalar u_scalar(a2);
   ASSERT_TRUE(u_scalar.ExtractBitfield(0, 0));
-  ASSERT_EQ(0, memcmp(&a2, u_scalar.GetBytes(), sizeof(a2)));
+  EXPECT_EQ(u_scalar, a2);
   ASSERT_TRUE(u_scalar.ExtractBitfield(len, 0));
-  ASSERT_EQ(0, memcmp(&a2, u_scalar.GetBytes(), sizeof(a2)));
+  EXPECT_EQ(u_scalar, a2);
   ASSERT_TRUE(u_scalar.ExtractBitfield(len - 4, 4));
-  ASSERT_EQ(0, memcmp(&b2, u_scalar.GetBytes(), sizeof(b2)));
+  EXPECT_EQ(u_scalar, b2);
 }
 
 template <typename T> static std::string ScalarGetValue(T value) {
   StreamString stream;
   Scalar(value).GetValue(&stream, false);
-  return stream.GetString();
+  return std::string(stream.GetString());
 }
 
 TEST(ScalarTest, GetValue) {
@@ -184,6 +193,16 @@ TEST(ScalarTest, GetValue) {
             ScalarGetValue<unsigned long long>(1234567890123ULL));
   EXPECT_EQ(std::to_string(std::numeric_limits<unsigned long long>::max()),
             ScalarGetValue(std::numeric_limits<unsigned long long>::max()));
+}
+
+TEST(ScalarTest, LongLongAssigmentOperator) {
+  Scalar ull;
+  ull = std::numeric_limits<unsigned long long>::max();
+  EXPECT_EQ(std::numeric_limits<unsigned long long>::max(), ull.ULongLong());
+
+  Scalar sll;
+  sll = std::numeric_limits<signed long long>::max();
+  EXPECT_EQ(std::numeric_limits<signed long long>::max(), sll.SLongLong());
 }
 
 TEST(ScalarTest, Division) {
@@ -300,4 +319,16 @@ TEST(ScalarTest, Scalar_512) {
   ASSERT_TRUE(S.MakeSigned());
   EXPECT_EQ(S.GetType(), Scalar::e_sint512);
   EXPECT_EQ(S.GetByteSize(), 64U);
+}
+
+TEST(ScalarTest, TruncOrExtendTo) {
+  Scalar S(0xffff);
+  S.TruncOrExtendTo(12, true);
+  EXPECT_EQ(S.ULong(), 0xfffu);
+  S.TruncOrExtendTo(20, true);
+  EXPECT_EQ(S.ULong(), 0xfffffu);
+  S.TruncOrExtendTo(24, false);
+  EXPECT_EQ(S.ULong(), 0x0fffffu);
+  S.TruncOrExtendTo(16, false);
+  EXPECT_EQ(S.ULong(), 0xffffu);
 }

@@ -1,11 +1,11 @@
-// RUN: %clang -I %S/Inputs --sycl -Xclang -fsycl-int-header=%t.h %s -c -o %T/kernel.spv
+// RUN: %clang -I %S/Inputs -fsycl-device-only -Xclang -fsycl-int-header=%t.h %s -c -o %T/kernel.spv
 // RUN: FileCheck -input-file=%t.h %s
 //
 // CHECK: #include <CL/sycl/detail/kernel_desc.hpp>
 
 // CHECK: class wrapped_access;
 
-// CHECK: namespace cl {
+// CHECK: __SYCL_INLINE_NAMESPACE(cl) {
 // CHECK-NEXT: namespace sycl {
 // CHECK-NEXT: namespace detail {
 

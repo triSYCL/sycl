@@ -49,6 +49,9 @@ static cl::list<std::string>
 MacroNames("D", cl::desc("Name of the macro to be defined"),
             cl::value_desc("macro name"), cl::Prefix);
 
+static cl::opt<bool>
+WriteIfChanged("write-if-changed", cl::desc("Only write output if it changed"));
+
 static int reportError(const char *ProgName, Twine Msg) {
   errs() << ProgName << ": " << Msg;
   errs().flush();
@@ -70,14 +73,14 @@ static int createDependencyFile(const TGParser &Parser, const char *argv0) {
                                   EC.message() + "\n");
   DepOut.os() << OutputFilename << ":";
   for (const auto &Dep : Parser.getDependencies()) {
-    DepOut.os() << ' ' << Dep.first;
+    DepOut.os() << ' ' << Dep;
   }
   DepOut.os() << "\n";
   DepOut.keep();
   return 0;
 }
 
-int llvm::TableGenMain(char *argv0, TableGenMainFn *MainFn) {
+int llvm::TableGenMain(const char *argv0, TableGenMainFn *MainFn) {
   RecordKeeper Records;
 
   // Parse the input file.
@@ -114,12 +117,14 @@ int llvm::TableGenMain(char *argv0, TableGenMainFn *MainFn) {
       return Ret;
   }
 
-  // Only updates the real output file if there are any differences.
-  // This prevents recompilation of all the files depending on it if there
-  // aren't any.
-  if (auto ExistingOrErr = MemoryBuffer::getFile(OutputFilename))
-    if (std::move(ExistingOrErr.get())->getBuffer() == Out.str())
-      return 0;
+  if (WriteIfChanged) {
+    // Only updates the real output file if there are any differences.
+    // This prevents recompilation of all the files depending on it if there
+    // aren't any.
+    if (auto ExistingOrErr = MemoryBuffer::getFile(OutputFilename))
+      if (std::move(ExistingOrErr.get())->getBuffer() == Out.str())
+        return 0;
+  }
 
   std::error_code EC;
   ToolOutputFile OutFile(OutputFilename, EC, sys::fs::OF_None);

@@ -39,7 +39,7 @@
 #include "llvm/MC/MCObjectFileInfo.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/MC/MCSubtargetInfo.h"
-#include "llvm/MC/MCTargetOptionsCommandFlags.inc"
+#include "llvm/MC/MCTargetOptionsCommandFlags.h"
 #include "llvm/MCA/CodeEmitter.h"
 #include "llvm/MCA/Context.h"
 #include "llvm/MCA/InstrBuilder.h"
@@ -61,6 +61,8 @@
 #include "llvm/Support/WithColor.h"
 
 using namespace llvm;
+
+static mc::RegisterMCTargetOptionsFlags MOF;
 
 static cl::OptionCategory ToolOptions("Tool Options");
 static cl::OptionCategory ViewOptions("View Options");
@@ -88,6 +90,11 @@ static cl::opt<std::string>
     MCPU("mcpu",
          cl::desc("Target a specific cpu type (-mcpu=help for details)"),
          cl::value_desc("cpu-name"), cl::cat(ToolOptions), cl::init("native"));
+
+static cl::opt<std::string>
+    MATTR("mattr",
+          cl::desc("Additional target features."),
+          cl::cat(ToolOptions));
 
 static cl::opt<int>
     OutputAsmVariant("output-asm-variant",
@@ -233,7 +240,7 @@ ErrorOr<std::unique_ptr<ToolOutputFile>> getOutputStream() {
     OutputFilename = "-";
   std::error_code EC;
   auto Out =
-      std::make_unique<ToolOutputFile>(OutputFilename, EC, sys::fs::OF_None);
+      std::make_unique<ToolOutputFile>(OutputFilename, EC, sys::fs::OF_Text);
   if (!EC)
     return std::move(Out);
   return EC;
@@ -319,10 +326,10 @@ int main(int argc, char **argv) {
   processViewOptions();
 
   if (!MCPU.compare("native"))
-    MCPU = llvm::sys::getHostCPUName();
+    MCPU = std::string(llvm::sys::getHostCPUName());
 
   std::unique_ptr<MCSubtargetInfo> STI(
-      TheTarget->createMCSubtargetInfo(TripleName, MCPU, /* FeaturesStr */ ""));
+      TheTarget->createMCSubtargetInfo(TripleName, MCPU, MATTR));
   if (!STI->isCPUStringValid(MCPU))
     return 1;
 
@@ -348,7 +355,9 @@ int main(int argc, char **argv) {
   std::unique_ptr<MCRegisterInfo> MRI(TheTarget->createMCRegInfo(TripleName));
   assert(MRI && "Unable to create target register info!");
 
-  std::unique_ptr<MCAsmInfo> MAI(TheTarget->createMCAsmInfo(*MRI, TripleName));
+  MCTargetOptions MCOptions = mc::InitMCTargetOptionsFromFlags();
+  std::unique_ptr<MCAsmInfo> MAI(
+      TheTarget->createMCAsmInfo(*MRI, TripleName, MCOptions));
   assert(MAI && "Unable to create target asm info!");
 
   MCObjectFileInfo MOFI;
@@ -436,7 +445,7 @@ int main(int argc, char **argv) {
       TheTarget->createMCCodeEmitter(*MCII, *MRI, Ctx));
 
   std::unique_ptr<MCAsmBackend> MAB(TheTarget->createMCAsmBackend(
-      *STI, *MRI, InitMCTargetOptionsFromFlags()));
+      *STI, *MRI, mc::InitMCTargetOptionsFromFlags()));
 
   for (const std::unique_ptr<mca::CodeRegion> &Region : Regions) {
     // Skip empty code regions.
@@ -467,7 +476,7 @@ int main(int argc, char **argv) {
                   std::string InstructionStr;
                   raw_string_ostream SS(InstructionStr);
                   WithColor::error() << IE.Message << '\n';
-                  IP->printInst(&IE.Inst, SS, "", *STI);
+                  IP->printInst(&IE.Inst, 0, "", *STI, SS);
                   SS.flush();
                   WithColor::note()
                       << "instruction: " << InstructionStr << '\n';

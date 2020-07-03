@@ -279,7 +279,7 @@ private:
     SUnit *NewNode = newSUnit(N);
     // Update the topological ordering.
     if (NewNode->NodeNum >= NumSUnits)
-      Topo.MarkDirty();
+      Topo.AddSUnitWithoutPredecessors(NewNode);
     return NewNode;
   }
 
@@ -289,7 +289,7 @@ private:
     SUnit *NewNode = Clone(N);
     // Update the topological ordering.
     if (NewNode->NodeNum >= NumSUnits)
-      Topo.MarkDirty();
+      Topo.AddSUnitWithoutPredecessors(NewNode);
     return NewNode;
   }
 
@@ -1187,6 +1187,10 @@ SUnit *ScheduleDAGRRList::CopyAndMoveSuccessors(SUnit *SU) {
   for (SDep &Pred : SU->Preds)
     if (!Pred.isArtificial())
       AddPredQueued(NewSU, Pred);
+
+  // Make sure the clone comes after the original. (InstrEmitter assumes
+  // this ordering.)
+  AddPredQueued(NewSU, SDep(SU, SDep::Artificial));
 
   // Only copy scheduled successors. Cut them from old node's successor
   // list and move them over.

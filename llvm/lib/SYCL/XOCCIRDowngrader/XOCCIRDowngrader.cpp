@@ -181,7 +181,7 @@ struct XOCCIRDowngrader : public ModulePass {
 }
 
 namespace llvm {
-void initializeXOCCIRDowngrader(PassRegistry &Registry);
+void initializeXOCCIRDowngraderPass(PassRegistry &Registry);
 }
 
 INITIALIZE_PASS(XOCCIRDowngrader, "xoccIRDowngrader",

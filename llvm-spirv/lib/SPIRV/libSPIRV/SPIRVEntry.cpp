@@ -38,6 +38,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "SPIRVEntry.h"
+#include "SPIRVAsm.h"
 #include "SPIRVBasicBlock.h"
 #include "SPIRVDebug.h"
 #include "SPIRVDecorate.h"
@@ -194,7 +195,9 @@ void SPIRVEntry::encodeWordCountOpCode(spv_ostream &O) const {
     return;
   }
 #endif
-  getEncoder(O) << mkWord(WordCount, OpCode);
+  assert(WordCount < 65536 && "WordCount must fit into 16-bit value");
+  SPIRVWord WordCountOpCode = (WordCount << WordCountShift) | OpCode;
+  getEncoder(O) << WordCountOpCode;
 }
 // Read words from SPIRV binary and create members for SPIRVEntry.
 // The word count and op code has already been read before calling this
@@ -354,6 +357,25 @@ SPIRVEntry::getMemberDecorationStringLiteral(Decoration Kind,
   return getVecString(Loc->second->getVecLiteral());
 }
 
+std::vector<SPIRVWord>
+SPIRVEntry::getDecorationLiterals(Decoration Kind) const {
+  auto Loc = Decorates.find(Kind);
+  if (Loc == Decorates.end())
+    return {};
+
+  return (Loc->second->getVecLiteral());
+}
+
+std::vector<SPIRVWord>
+SPIRVEntry::getMemberDecorationLiterals(Decoration Kind,
+                                        SPIRVWord MemberNumber) const {
+  auto Loc = MemberDecorates.find({MemberNumber, Kind});
+  if (Loc == MemberDecorates.end())
+    return {};
+
+  return (Loc->second->getVecLiteral());
+}
+
 // Get literals of all decorations of Kind at Index.
 std::set<SPIRVWord> SPIRVEntry::getDecorate(Decoration Kind,
                                             size_t Index) const {
@@ -456,12 +478,25 @@ void SPIRVExecutionMode::decode(std::istream &I) {
   switch (ExecMode) {
   case ExecutionModeLocalSize:
   case ExecutionModeLocalSizeHint:
+  case ExecutionModeMaxWorkgroupSizeINTEL:
     WordLiterals.resize(3);
     break;
   case ExecutionModeInvocations:
   case ExecutionModeOutputVertices:
   case ExecutionModeVecTypeHint:
+  case ExecutionModeDenormPreserve:
+  case ExecutionModeDenormFlushToZero:
+  case ExecutionModeSignedZeroInfNanPreserve:
+  case ExecutionModeRoundingModeRTE:
+  case ExecutionModeRoundingModeRTZ:
+  case ExecutionModeRoundingModeRTPINTEL:
+  case ExecutionModeRoundingModeRTNINTEL:
+  case ExecutionModeFloatingPointModeALTINTEL:
+  case ExecutionModeFloatingPointModeIEEEINTEL:
+  case ExecutionModeSharedLocalMemorySizeINTEL:
   case ExecutionModeSubgroupSize:
+  case ExecutionModeMaxWorkDimINTEL:
+  case ExecutionModeNumSIMDWorkitemsINTEL:
     WordLiterals.resize(1);
     break;
   default:

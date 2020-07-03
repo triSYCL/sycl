@@ -9,16 +9,17 @@
 #pragma once
 
 #include <CL/sycl/access/access.hpp>
-#include <CL/sycl/detail/event_impl.hpp>
+#include <CL/sycl/detail/export.hpp>
 #include <CL/sycl/detail/sycl_mem_obj_i.hpp>
 #include <CL/sycl/id.hpp>
 #include <CL/sycl/range.hpp>
+#include <CL/sycl/stl.hpp>
 
-#include <memory>
-
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 namespace detail {
+
+class Command;
 
 // The class describes a requirement to access a SYCL memory object such as
 // sycl::buffer and sycl::image. For example, each accessor used in a kernel,
@@ -37,8 +38,7 @@ public:
   range<Dims> MemRange;
 
   bool operator==(const AccessorImplDevice &Rhs) const {
-    return (Offset == Rhs.Offset &&
-            AccessRange == Rhs.AccessRange &&
+    return (Offset == Rhs.Offset && AccessRange == Rhs.AccessRange &&
             MemRange == Rhs.MemRange);
   }
 };
@@ -59,24 +59,36 @@ public:
   }
 };
 
-class AccessorImplHost {
+class __SYCL_EXPORT AccessorImplHost {
 public:
   AccessorImplHost(id<3> Offset, range<3> AccessRange, range<3> MemoryRange,
                    access::mode AccessMode, detail::SYCLMemObjI *SYCLMemObject,
-                   int Dims, int ElemSize)
+                   int Dims, int ElemSize, int OffsetInBytes = 0,
+                   bool IsSubBuffer = false)
       : MOffset(Offset), MAccessRange(AccessRange), MMemoryRange(MemoryRange),
         MAccessMode(AccessMode), MSYCLMemObj(SYCLMemObject), MDims(Dims),
-        MElemSize(ElemSize) {}
+        MElemSize(ElemSize), MOffsetInBytes(OffsetInBytes),
+        MIsSubBuffer(IsSubBuffer) {}
 
-  ~AccessorImplHost() {
-    if (BlockingEvent)
-      BlockingEvent->setComplete();
-  }
+  ~AccessorImplHost();
+
   AccessorImplHost(const AccessorImplHost &Other)
       : MOffset(Other.MOffset), MAccessRange(Other.MAccessRange),
         MMemoryRange(Other.MMemoryRange), MAccessMode(Other.MAccessMode),
         MSYCLMemObj(Other.MSYCLMemObj), MDims(Other.MDims),
-        MElemSize(Other.MElemSize) {}
+        MElemSize(Other.MElemSize), MOffsetInBytes(Other.MOffsetInBytes),
+        MIsSubBuffer(Other.MIsSubBuffer) {}
+
+  // The resize method provides a way to change the size of the
+  // allocated memory and corresponding properties for the accessor.
+  // These are normally fixed for the accessor, but this capability
+  // is needed to support the stream class.
+  // Stream implementation creates an accessor with initial size for
+  // work item. But the number of work items is not available during
+  // stream construction. The resize method allows to update the accessor
+  // as the information becomes available to the handler.
+
+  void resize(size_t GlobalSize);
 
   id<3> MOffset;
   // The size of accessing region.
@@ -89,24 +101,27 @@ public:
 
   unsigned int MDims;
   unsigned int MElemSize;
+  unsigned int MOffsetInBytes;
+  bool MIsSubBuffer;
 
   void *MData = nullptr;
 
-  EventImplPtr BlockingEvent;
+  Command *MBlockedCmd = nullptr;
 
-  bool MUsedFromSourceKernel = false;
+  bool PerWI = false;
 };
 
-using AccessorImplPtr = std::shared_ptr<AccessorImplHost>;
+using AccessorImplPtr = shared_ptr_class<AccessorImplHost>;
 
 class AccessorBaseHost {
 public:
   AccessorBaseHost(id<3> Offset, range<3> AccessRange, range<3> MemoryRange,
                    access::mode AccessMode, detail::SYCLMemObjI *SYCLMemObject,
-                   int Dims, int ElemSize) {
-    impl = std::make_shared<AccessorImplHost>(Offset, AccessRange, MemoryRange,
-                                              AccessMode, SYCLMemObject,
-                                              Dims, ElemSize);
+                   int Dims, int ElemSize, int OffsetInBytes = 0,
+                   bool IsSubBuffer = false) {
+    impl = shared_ptr_class<AccessorImplHost>(new AccessorImplHost(
+        Offset, AccessRange, MemoryRange, AccessMode, SYCLMemObject, Dims,
+        ElemSize, OffsetInBytes, IsSubBuffer));
   }
 
 protected:
@@ -127,7 +142,7 @@ protected:
   AccessorImplPtr impl;
 };
 
-class LocalAccessorImplHost {
+class __SYCL_EXPORT LocalAccessorImplHost {
 public:
   LocalAccessorImplHost(sycl::range<3> Size, int Dims, int ElemSize)
       : MSize(Size), MDims(Dims), MElemSize(ElemSize),
@@ -139,10 +154,13 @@ public:
   std::vector<char> MMem;
 };
 
+using LocalAccessorImplPtr = shared_ptr_class<LocalAccessorImplHost>;
+
 class LocalAccessorBaseHost {
 public:
   LocalAccessorBaseHost(sycl::range<3> Size, int Dims, int ElemSize) {
-    impl = std::make_shared<LocalAccessorImplHost>(Size, Dims, ElemSize);
+    impl = shared_ptr_class<LocalAccessorImplHost>(
+        new LocalAccessorImplHost(Size, Dims, ElemSize));
   }
   sycl::range<3> &getSize() { return impl->MSize; }
   const sycl::range<3> &getSize() const { return impl->MSize; }
@@ -158,11 +176,64 @@ protected:
   template <class Obj>
   friend decltype(Obj::impl) getSyclObjImpl(const Obj &SyclObject);
 
-  std::shared_ptr<LocalAccessorImplHost> impl;
+  shared_ptr_class<LocalAccessorImplHost> impl;
 };
 
 using Requirement = AccessorImplHost;
 
+void __SYCL_EXPORT addHostAccessorAndWait(Requirement *Req);
+
+#if __cplusplus > 201402L
+
+template <typename MayBeTag1, typename MayBeTag2>
+constexpr access::mode deduceAccessMode() {
+  // property_list = {} is not properly detected by deduction guide,
+  // when parameter is passed without curly braces: access(buffer, noinit)
+  // thus simplest approach is to check 2 last arguments for being a tag
+  if constexpr (std::is_same<MayBeTag1,
+                             mode_tag_t<access::mode::read>>::value ||
+                std::is_same<MayBeTag2,
+                             mode_tag_t<access::mode::read>>::value) {
+    return access::mode::read;
+  }
+
+  if constexpr (std::is_same<MayBeTag1,
+                             mode_tag_t<access::mode::write>>::value ||
+                std::is_same<MayBeTag2,
+                             mode_tag_t<access::mode::write>>::value) {
+    return access::mode::write;
+  }
+
+  if constexpr (
+      std::is_same<MayBeTag1,
+                   mode_target_tag_t<access::mode::read,
+                                     access::target::constant_buffer>>::value ||
+      std::is_same<MayBeTag2,
+                   mode_target_tag_t<access::mode::read,
+                                     access::target::constant_buffer>>::value) {
+    return access::mode::read;
+  }
+
+  return access::mode::read_write;
+}
+
+template <typename MayBeTag1, typename MayBeTag2>
+constexpr access::target deduceAccessTarget(access::target defaultTarget) {
+  if constexpr (
+      std::is_same<MayBeTag1,
+                   mode_target_tag_t<access::mode::read,
+                                     access::target::constant_buffer>>::value ||
+      std::is_same<MayBeTag2,
+                   mode_target_tag_t<access::mode::read,
+                                     access::target::constant_buffer>>::value) {
+    return access::target::constant_buffer;
+  }
+
+  return defaultTarget;
+}
+
+#endif
+
 } // namespace detail
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

@@ -31,13 +31,14 @@
 #include <CL/sycl/access/access.hpp>
 #include <CL/sycl/detail/generic_type_traits.hpp>
 
+#include <CL/__spirv/spirv_ops.hpp>
+
 #define INVOKE_SPIRV_CALL_ARG1(call)                                           \
-  template <typename R, typename T1> inline R __invoke_##call(T1 ParT1) {     \
+  template <typename R, typename T1> inline R __invoke_##call(T1 ParT1) {      \
     using Ret = cl::sycl::detail::ConvertToOpenCLType_t<R>;                    \
-    extern Ret __spirv_##call(T1);                                             \
-    T1 Arg1 = ParT1;                                                          \
-    Ret RetVar = __spirv_##call(Arg1);                                        \
-    return cl::sycl::detail::convertDataToType<Ret, R>(RetVar);               \
+    T1 Arg1 = ParT1;                                                           \
+    Ret RetVar = __spirv_##call<Ret, T1>(Arg1);                                \
+    return cl::sycl::detail::convertDataToType<Ret, R>(RetVar);                \
   }
 
 // The macro defines the function __invoke_ImageXXXX,
@@ -100,7 +101,7 @@ static RetType __invoke__ImageReadSampler(ImageT Img, CoordT Coords,
   return cl::sycl::detail::convertDataToType<TempRetT, RetType>(Ret);
 }
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 namespace detail {
 
@@ -184,7 +185,7 @@ struct opencl_image_type;
 
 // Creation of dummy ocl types for host_image targets.
 // These dummy ocl types are needed by the compiler parser for the compilation
-// of host application code with SYCL_DEVICE_ONLY macro set.
+// of host application code with __SYCL_DEVICE_ONLY__ macro set.
 template <int Dimensions, access::mode AccessMode>
 struct opencl_image_type<Dimensions, AccessMode, access::target::host_image> {
   using type =
@@ -235,7 +236,7 @@ IMAGETY_DISCARD_WRITE_2_DIM_IARRAY
 
 } // namespace detail
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)
 
 #undef INVOKE_SPIRV_CALL_ARG1
 #undef IMAGETY_DEFINE

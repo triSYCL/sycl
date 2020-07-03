@@ -1,4 +1,4 @@
-add_llvm_library(LLVMXOCCIRDowngrader
+add_llvm_component_library(LLVMXOCCIRDowngrader
   XOCCIRDowngrader.cpp
 
   ADDITIONAL_HEADER_DIRS

@@ -1,8 +1,18 @@
+<<<<<<< HEAD
 // RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
+||||||| merged common ancestors
+// RUN: %clangxx -fsycl %s -o %t.out
+=======
+// UNSUPPORTED: cuda
+// CUDA compilation and runtime do not yet support sub-groups.
+//
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+>>>>>>> intel/sycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
+//
 //==----------- load_store.cpp - SYCL sub_group load/store test ------------==//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -18,7 +28,7 @@ template <typename T, int N> class sycl_subgr;
 using namespace cl::sycl;
 
 template <typename T, int N> void check(queue &Queue) {
-  const int G = 1024, L = 64;
+  const int G = 1024, L = 128;
   try {
     nd_range<1> NdRange(G, L);
     buffer<T> syclbuf(G);
@@ -33,17 +43,23 @@ template <typename T, int N> void check(queue &Queue) {
     Queue.submit([&](handler &cgh) {
       auto acc = syclbuf.template get_access<access::mode::read_write>(cgh);
       auto sgsizeacc = sgsizebuf.get_access<access::mode::read_write>(cgh);
+      accessor<T, 1, access::mode::read_write, access::target::local> LocalMem(
+          {L}, cgh);
       cgh.parallel_for<sycl_subgr<T, N>>(NdRange, [=](nd_item<1> NdItem) {
         intel::sub_group SG = NdItem.get_sub_group();
         if (SG.get_group_id().get(0) % N == 0) {
-          size_t WGSGoffset =
-              NdItem.get_group(0) * L +
+          size_t SGOffset =
               SG.get_group_id().get(0) * SG.get_max_local_range().get(0);
+          size_t WGSGoffset = NdItem.get_group(0) * L + SGOffset;
           multi_ptr<T, access::address_space::global_space> mp(
               &acc[WGSGoffset]);
+          multi_ptr<T, access::address_space::local_space> MPL(
+              &LocalMem[SGOffset]);
           // Add all values in read block
           vec<T, N> v(utils<T, N>::add_vec(SG.load<N, T>(mp)));
-          SG.store<N, T>(mp, v);
+          SG.store<N, T>(MPL, v);
+          vec<T, N> t(utils<T, N>::add_vec(SG.load<N, T>(MPL)));
+          SG.store<N, T>(mp, t);
         }
         if (NdItem.get_global_id(0) == 0)
           sgsizeacc[0] = SG.get_max_local_range()[0];
@@ -68,6 +84,7 @@ template <typename T, int N> void check(queue &Queue) {
         for (int i = 0; i < N; i++) {
           ref += (T)(j + i * sg_size) + 0.1;
         }
+        ref *= N;
       }
       /* There is no defined out-of-range behavior for these functions. */
       if ((SGid + N) * sg_size < L) {
@@ -100,16 +117,22 @@ template <typename T> void check(queue &Queue) {
     Queue.submit([&](handler &cgh) {
       auto acc = syclbuf.template get_access<access::mode::read_write>(cgh);
       auto sgsizeacc = sgsizebuf.get_access<access::mode::read_write>(cgh);
+      accessor<T, 1, access::mode::read_write, access::target::local> LocalMem(
+          {L}, cgh);
       cgh.parallel_for<sycl_subgr<T, 0>>(NdRange, [=](nd_item<1> NdItem) {
         intel::sub_group SG = NdItem.get_sub_group();
         if (NdItem.get_global_id(0) == 0)
           sgsizeacc[0] = SG.get_max_local_range()[0];
-        size_t WGSGoffset =
-            NdItem.get_group(0) * L +
+        size_t SGOffset =
             SG.get_group_id().get(0) * SG.get_max_local_range().get(0);
+        size_t WGSGoffset = NdItem.get_group(0) * L + SGOffset;
         multi_ptr<T, access::address_space::global_space> mp(&acc[WGSGoffset]);
+        multi_ptr<T, access::address_space::local_space> MPL(
+            &LocalMem[SGOffset]);
         T s = SG.load<T>(mp) + (T)SG.get_local_id().get(0);
-        SG.store<T>(mp, s);
+        SG.store<T>(MPL, s);
+        T t = SG.load<T>(MPL) + (T)SG.get_local_id().get(0);
+        SG.store<T>(mp, t);
       });
     });
     auto acc = syclbuf.template get_access<access::mode::read_write>();
@@ -128,7 +151,8 @@ template <typename T> void check(queue &Queue) {
       s += std::string(typeid(acc[j]).name()) + std::string(">[") +
            std::to_string(j) + std::string("]");
 
-      exit_if_not_equal<T>(acc[j], (T)(j + j % L % sg_size) + 0.1, s.c_str());
+      exit_if_not_equal<T>(acc[j], (T)(j + 2 * (j % L % sg_size)) + 0.1,
+                           s.c_str());
     }
 
   } catch (exception e) {
@@ -140,11 +164,14 @@ template <typename T> void check(queue &Queue) {
 int main() {
   queue Queue;
   if (!Queue.get_device().has_extension("cl_intel_subgroups") &&
-      !Queue.get_device().has_extension("cl_intel_subgroups_short")) {
+      !Queue.get_device().has_extension("cl_intel_subgroups_short") &&
+      !Queue.get_device().has_extension("cl_intel_subgroups_long")) {
     std::cout << "Skipping test\n";
     return 0;
   }
   if (Queue.get_device().has_extension("cl_intel_subgroups")) {
+    typedef bool aligned_char __attribute__((aligned(16)));
+    check<aligned_char>(Queue);
     typedef int aligned_int __attribute__((aligned(16)));
     check<aligned_int>(Queue);
     check<aligned_int, 1>(Queue);
@@ -179,6 +206,26 @@ int main() {
       check<aligned_half, 4>(Queue);
       check<aligned_half, 8>(Queue);
     }
+  }
+  if (Queue.get_device().has_extension("cl_intel_subgroups_long")) {
+    typedef long aligned_long __attribute__((aligned(16)));
+    check<aligned_long>(Queue);
+    check<aligned_long, 1>(Queue);
+    check<aligned_long, 2>(Queue);
+    check<aligned_long, 4>(Queue);
+    check<aligned_long, 8>(Queue);
+    typedef unsigned long aligned_ulong __attribute__((aligned(16)));
+    check<aligned_ulong>(Queue);
+    check<aligned_ulong, 1>(Queue);
+    check<aligned_ulong, 2>(Queue);
+    check<aligned_ulong, 4>(Queue);
+    check<aligned_ulong, 8>(Queue);
+    typedef double aligned_double __attribute__((aligned(16)));
+    check<aligned_double>(Queue);
+    check<aligned_double, 1>(Queue);
+    check<aligned_double, 2>(Queue);
+    check<aligned_double, 4>(Queue);
+    check<aligned_double, 8>(Queue);
   }
   std::cout << "Test passed." << std::endl;
   return 0;

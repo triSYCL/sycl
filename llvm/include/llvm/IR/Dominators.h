@@ -172,6 +172,8 @@ class DominatorTree : public DominatorTreeBase<BasicBlock, false> {
   /// never dominate the use.
   bool dominates(const BasicBlockEdge &BBE, const Use &U) const;
   bool dominates(const BasicBlockEdge &BBE, const BasicBlock *BB) const;
+  /// Returns true if edge \p BBE1 dominates edge \p BBE2.
+  bool dominates(const BasicBlockEdge &BBE1, const BasicBlockEdge &BBE2) const;
 
   // Ensure base class overloads are visible.
   using Base::isReachableFromEntry;
@@ -262,9 +264,7 @@ class DominatorTreeWrapperPass : public FunctionPass {
 public:
   static char ID;
 
-  DominatorTreeWrapperPass() : FunctionPass(ID) {
-    initializeDominatorTreeWrapperPassPass(*PassRegistry::getPassRegistry());
-  }
+  DominatorTreeWrapperPass();
 
   DominatorTree &getDomTree() { return DT; }
   const DominatorTree &getDomTree() const { return DT; }

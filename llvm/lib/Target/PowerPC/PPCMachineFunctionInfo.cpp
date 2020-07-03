@@ -10,10 +10,17 @@
 #include "llvm/ADT/Twine.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/MC/MCContext.h"
+#include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
+static cl::opt<bool> PPCDisableNonVolatileCR(
+    "ppc-disable-non-volatile-cr",
+    cl::desc("Disable the use of non-volatile CR register fields"),
+    cl::init(false), cl::Hidden);
 
 void PPCFunctionInfo::anchor() {}
+PPCFunctionInfo::PPCFunctionInfo(MachineFunction &MF)
+    : DisableNonVolatileCR(PPCDisableNonVolatileCR), MF(MF) {}
 
 MCSymbol *PPCFunctionInfo::getPICOffsetSymbol() const {
   const DataLayout &DL = MF.getDataLayout();
@@ -43,15 +50,15 @@ MCSymbol *PPCFunctionInfo::getTOCOffsetSymbol() const {
                                            Twine(MF.getFunctionNumber()));
 }
 
-bool PPCFunctionInfo::isLiveInSExt(unsigned VReg) const {
-  for (const std::pair<unsigned, ISD::ArgFlagsTy> &LiveIn : LiveInAttrs)
+bool PPCFunctionInfo::isLiveInSExt(Register VReg) const {
+  for (const std::pair<Register, ISD::ArgFlagsTy> &LiveIn : LiveInAttrs)
     if (LiveIn.first == VReg)
       return LiveIn.second.isSExt();
   return false;
 }
 
-bool PPCFunctionInfo::isLiveInZExt(unsigned VReg) const {
-  for (const std::pair<unsigned, ISD::ArgFlagsTy> &LiveIn : LiveInAttrs)
+bool PPCFunctionInfo::isLiveInZExt(Register VReg) const {
+  for (const std::pair<Register, ISD::ArgFlagsTy> &LiveIn : LiveInAttrs)
     if (LiveIn.first == VReg)
       return LiveIn.second.isZExt();
   return false;

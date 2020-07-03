@@ -1,4 +1,16 @@
+<<<<<<< HEAD
 // RUN: %clangxx -std=c++17 -fsycl %s -o %t1.out
+||||||| merged common ancestors
+// RUN: %clangxx -fsycl %s -o %t1.out
+=======
+// XFAIL: cuda
+// piextUSM*Alloc functions for CUDA are not behaving as described in
+// https://github.com/intel/llvm/blob/sycl/sycl/doc/extensions/USM/USM.adoc
+// https://github.com/intel/llvm/blob/sycl/sycl/doc/extensions/USM/cl_intel_unified_shared_memory.asciidoc
+//
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t1.out
+// RUN: env SYCL_DEVICE_TYPE=HOST %t1.out
+>>>>>>> intel/sycl
 // RUN: %CPU_RUN_PLACEHOLDER %t1.out
 // RUN: %GPU_RUN_PLACEHOLDER %t1.out
 
@@ -20,20 +32,23 @@ const int N = 8;
 
 class foo;
 int main() {
-  try {
-    queue q;
-    auto dev = q.get_device();
-    auto ctxt = q.get_context();
+  queue q;
+  auto dev = q.get_device();
+  auto ctxt = q.get_context();
 
-    usm_allocator<int, usm::alloc::device> alloc(ctxt, dev);
-    std::vector<int, decltype(alloc)> vec(alloc);
+  if (dev.get_info<info::device::usm_device_allocations>()) {
+    try {
+      usm_allocator<int, usm::alloc::device> alloc(ctxt, dev);
+      std::vector<int, decltype(alloc)> vec(alloc);
 
-    // This statement should throw an exception since
-    // device pointers may not be accessed on the host.
-    vec.assign(N, 42);
-  } catch (feature_not_supported) {
-    return 0;
+      // This statement should throw an exception since
+      // device pointers may not be accessed on the host.
+      vec.assign(N, 42);
+    } catch (feature_not_supported) {
+      return 0;
+    }
+
+    return -1;
   }
-
-  return -1;
+  return 0;
 }

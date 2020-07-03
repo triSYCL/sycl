@@ -68,7 +68,7 @@ public:
 
     // We need to capture an owning-string in the lambda because the lambda
     // is invoked in a deferred manner.
-    std::string LabelStr = Label;
+    std::string LabelStr(Label);
     auto DumpWithIndent = [this, DoAddChild, LabelStr](bool IsLastChild) {
       // Print out the appropriate tree structure and work out the prefix for
       // children of this node. For instance:
@@ -146,8 +146,6 @@ class TextNodeDumper
 
   const comments::CommandTraits *Traits;
 
-  const ASTContext *Context;
-
   const char *getCommandName(unsigned CommandID);
 
 public:
@@ -186,6 +184,7 @@ public:
   void dumpBareDeclRef(const Decl *D);
   void dumpName(const NamedDecl *ND);
   void dumpAccessSpecifier(AccessSpecifier AS);
+  void dumpCleanupObject(const ExprWithCleanups::CleanupObject &C);
 
   void dumpDeclRef(const Decl *D, StringRef Label = {});
 
@@ -232,6 +231,7 @@ public:
   void VisitCaseStmt(const CaseStmt *Node);
   void VisitConstantExpr(const ConstantExpr *Node);
   void VisitCallExpr(const CallExpr *Node);
+  void VisitCXXOperatorCallExpr(const CXXOperatorCallExpr *Node);
   void VisitCastExpr(const CastExpr *Node);
   void VisitImplicitCastExpr(const ImplicitCastExpr *Node);
   void VisitDeclRefExpr(const DeclRefExpr *Node);
@@ -259,6 +259,9 @@ public:
   void VisitCXXBindTemporaryExpr(const CXXBindTemporaryExpr *Node);
   void VisitCXXNewExpr(const CXXNewExpr *Node);
   void VisitCXXDeleteExpr(const CXXDeleteExpr *Node);
+  void VisitTypeTraitExpr(const TypeTraitExpr *Node);
+  void VisitArrayTypeTraitExpr(const ArrayTypeTraitExpr *Node);
+  void VisitExpressionTraitExpr(const ExpressionTraitExpr *Node);
   void VisitMaterializeTemporaryExpr(const MaterializeTemporaryExpr *Node);
   void VisitExprWithCleanups(const ExprWithCleanups *Node);
   void VisitUnresolvedLookupExpr(const UnresolvedLookupExpr *Node);
@@ -275,6 +278,7 @@ public:
   void VisitObjCSubscriptRefExpr(const ObjCSubscriptRefExpr *Node);
   void VisitObjCIvarRefExpr(const ObjCIvarRefExpr *Node);
   void VisitObjCBoolLiteralExpr(const ObjCBoolLiteralExpr *Node);
+  void VisitOMPIteratorExpr(const OMPIteratorExpr *Node);
 
   void VisitRValueReferenceType(const ReferenceType *T);
   void VisitArrayType(const ArrayType *T);
@@ -348,6 +352,8 @@ public:
   void VisitObjCPropertyImplDecl(const ObjCPropertyImplDecl *D);
   void VisitBlockDecl(const BlockDecl *D);
   void VisitConceptDecl(const ConceptDecl *D);
+  void
+  VisitLifetimeExtendedTemporaryDecl(const LifetimeExtendedTemporaryDecl *D);
 };
 
 } // namespace clang

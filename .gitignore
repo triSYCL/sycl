@@ -23,6 +23,7 @@
 
 # Nested build directory
 /build*
+!buildbot
 
 #==============================================================================#
 # Explicit files to ignore (only matches one).
@@ -34,6 +35,7 @@
 /GRTAGS
 /GSYMS
 /GTAGS
+/ID
 .gitusers
 autom4te.cache
 cscope.files
@@ -54,3 +56,8 @@ autoconf/autom4te.cache
 .vs
 # clangd index
 .clangd
+# static analyzer regression testing project files
+/clang/utils/analyzer/projects/*/CachedSource
+/clang/utils/analyzer/projects/*/PatchedSource
+/clang/utils/analyzer/projects/*/ScanBuildResults
+/clang/utils/analyzer/projects/*/RefScanBuildResults

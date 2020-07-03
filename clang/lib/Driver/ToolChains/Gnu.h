@@ -10,6 +10,7 @@
 #define LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_GNU_H
 
 #include "Cuda.h"
+#include "ROCm.h"
 #include "clang/Driver/Tool.h"
 #include "clang/Driver/ToolChain.h"
 #include <set>
@@ -76,6 +77,20 @@ private:
                               const InputInfo &Output,
                               const InputInfoList &InputFiles,
                               const llvm::opt::ArgList &Args) const;
+};
+
+class LLVM_LIBRARY_VISIBILITY StaticLibTool : public GnuTool {
+public:
+  StaticLibTool(const ToolChain &TC)
+      : GnuTool("GNU::StaticLibTool", "static-lib-linker", TC) {}
+
+  bool hasIntegratedCPP() const override { return false; }
+  bool isLinkJob() const override { return true; }
+
+  void ConstructJob(Compilation &C, const JobAction &JA,
+                    const InputInfo &Output, const InputInfoList &Inputs,
+                    const llvm::opt::ArgList &TCArgs,
+                    const char *LinkingOutput) const override;
 };
 } // end namespace gnutools
 
@@ -284,6 +299,7 @@ public:
 protected:
   GCCInstallationDetector GCCInstallation;
   CudaInstallationDetector CudaInstallation;
+  RocmInstallationDetector RocmInstallation;
 
 public:
   Generic_GCC(const Driver &D, const llvm::Triple &Triple,
@@ -306,6 +322,11 @@ protected:
   Tool *buildAssembler() const override;
   Tool *buildLinker() const override;
 
+  virtual std::string getMultiarchTriple(const Driver &D,
+                                         const llvm::Triple &TargetTriple,
+                                         StringRef SysRoot) const
+  { return TargetTriple.str(); }
+
   /// \name ToolChain Implementation Helper Functions
   /// @{
 
@@ -314,6 +335,16 @@ protected:
 
   /// Check whether the target triple's architecture is 32-bits.
   bool isTarget32Bit() const { return getTriple().isArch32Bit(); }
+
+  void PushPPaths(ToolChain::path_list &PPaths);
+  void AddMultilibPaths(const Driver &D, const std::string &SysRoot,
+                        const std::string &OSLibDir,
+                        const std::string &MultiarchTriple,
+                        path_list &Paths);
+  void AddMultiarchPaths(const Driver &D, const std::string &SysRoot,
+                         const std::string &OSLibDir, path_list &Paths);
+  void AddMultilibIncludeArgs(const llvm::opt::ArgList &DriverArgs,
+                              llvm::opt::ArgStringList &CC1Args) const;
 
   // FIXME: This should be final, but the CrossWindows toolchain does weird
   // things that can't be easily generalized.
@@ -326,6 +357,10 @@ protected:
                         llvm::opt::ArgStringList &CC1Args) const;
   virtual void
   addLibStdCxxIncludePaths(const llvm::opt::ArgList &DriverArgs,
+                           llvm::opt::ArgStringList &CC1Args) const;
+
+  bool
+  addGCCLibStdCxxIncludePaths(const llvm::opt::ArgList &DriverArgs,
                            llvm::opt::ArgStringList &CC1Args) const;
 
   bool addLibStdCXXIncludePaths(Twine Base, Twine Suffix, StringRef GCCTriple,
@@ -353,6 +388,12 @@ public:
   void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
                              llvm::opt::ArgStringList &CC1Args,
                              Action::OffloadKind DeviceOffloadKind) const override;
+
+  virtual std::string getDynamicLinker(const llvm::opt::ArgList &Args) const {
+    return {};
+  }
+
+  virtual void addExtraOpts(llvm::opt::ArgStringList &CmdArgs) const {}
 };
 
 } // end namespace toolchains

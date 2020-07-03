@@ -1,4 +1,4 @@
-add_llvm_library(LLVMKernelPropGen
+add_llvm_component_library(LLVMKernelPropGen
   KernelPropGen.cpp
 
   ADDITIONAL_HEADER_DIRS

@@ -8,18 +8,17 @@
 
 #pragma once
 
-#include <CL/cl.h>
 #include <CL/sycl/detail/common.hpp>
 #include <CL/sycl/detail/os_util.hpp>
 #include <CL/sycl/range.hpp>
 
 #include <algorithm>
-#include <cstring>
 #include <cstdlib>
+#include <cstring>
 #include <memory>
 #include <vector>
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 namespace detail {
 template <typename T> class aligned_allocator {
@@ -32,6 +31,11 @@ public:
 
 public:
   template <typename U> struct rebind { typedef aligned_allocator<U> other; };
+
+  aligned_allocator() = default;
+  ~aligned_allocator() = default;
+
+  explicit aligned_allocator(size_t Alignment) : MAlignment(Alignment) {}
 
   // Construct an object
   void construct(pointer Ptr, const_reference Val) {
@@ -48,6 +52,8 @@ public:
   pointer allocate(size_t Size) {
     size_t NumBytes = Size * sizeof(value_type);
     NumBytes = ((NumBytes - 1) | (MAlignment - 1)) + 1;
+    if (Size > NumBytes)
+      throw std::bad_alloc();
 
     pointer Result = reinterpret_cast<pointer>(
         detail::OSUtil::alignedAlloc(MAlignment, NumBytes));
@@ -57,13 +63,13 @@ public:
   }
 
   // Release allocated memory
-  void deallocate(pointer Ptr, size_t size) {
+  void deallocate(pointer Ptr, size_t) {
     if (Ptr)
       detail::OSUtil::alignedFree(Ptr);
   }
 
-  bool operator==(const aligned_allocator&) { return true; }
-  bool operator!=(const aligned_allocator& rhs) { return false; }
+  bool operator==(const aligned_allocator &) { return true; }
+  bool operator!=(const aligned_allocator &) { return false; }
 
   void setAlignment(size_t Alignment) { MAlignment = Alignment; }
 
@@ -73,4 +79,4 @@ private:
 };
 } // namespace detail
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

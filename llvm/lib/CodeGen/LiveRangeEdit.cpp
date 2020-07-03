@@ -12,6 +12,7 @@
 
 #include "llvm/CodeGen/LiveRangeEdit.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/CalcSpillWeights.h"
 #include "llvm/CodeGen/LiveIntervals.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
@@ -69,7 +70,7 @@ unsigned LiveRangeEdit::createFrom(unsigned OldReg) {
 
 bool LiveRangeEdit::checkRematerializable(VNInfo *VNI,
                                           const MachineInstr *DefMI,
-                                          AliasAnalysis *aa) {
+                                          AAResults *aa) {
   assert(DefMI && "Missing instruction");
   ScannedRemattable = true;
   if (!TII.isTriviallyReMaterializable(*DefMI, aa))
@@ -78,7 +79,7 @@ bool LiveRangeEdit::checkRematerializable(VNInfo *VNI,
   return true;
 }
 
-void LiveRangeEdit::scanRemattable(AliasAnalysis *aa) {
+void LiveRangeEdit::scanRemattable(AAResults *aa) {
   for (VNInfo *VNI : getParent().valnos) {
     if (VNI->isUnused())
       continue;
@@ -95,7 +96,7 @@ void LiveRangeEdit::scanRemattable(AliasAnalysis *aa) {
   ScannedRemattable = true;
 }
 
-bool LiveRangeEdit::anyRematerializable(AliasAnalysis *aa) {
+bool LiveRangeEdit::anyRematerializable(AAResults *aa) {
   if (!ScannedRemattable)
     scanRemattable(aa);
   return !Remattable.empty();
@@ -231,8 +232,9 @@ bool LiveRangeEdit::foldAsLoad(LiveInterval *LI,
     return false;
   LLVM_DEBUG(dbgs() << "                folded: " << *FoldMI);
   LIS.ReplaceMachineInstrInMaps(*UseMI, *FoldMI);
-  if (UseMI->isCall())
-    UseMI->getMF()->updateCallSiteInfo(UseMI, FoldMI);
+  // Update the call site info.
+  if (UseMI->shouldUpdateCallSiteInfo())
+    UseMI->getMF()->moveCallSiteInfo(UseMI, FoldMI);
   UseMI->eraseFromParent();
   DefMI->addRegisterDead(LI->reg, nullptr);
   Dead.push_back(DefMI);
@@ -258,7 +260,7 @@ bool LiveRangeEdit::useIsKill(const LiveInterval &LI,
 
 /// Find all live intervals that need to shrink, then remove the instruction.
 void LiveRangeEdit::eliminateDeadDef(MachineInstr *MI, ToShrinkSet &ToShrink,
-                                     AliasAnalysis *AA) {
+                                     AAResults *AA) {
   assert(MI->allDefsAreDead() && "Def isn't really dead");
   SlotIndex Idx = LIS.getInstructionIndex(*MI).getRegSlot();
 
@@ -391,7 +393,7 @@ void LiveRangeEdit::eliminateDeadDef(MachineInstr *MI, ToShrinkSet &ToShrink,
 
 void LiveRangeEdit::eliminateDeadDefs(SmallVectorImpl<MachineInstr *> &Dead,
                                       ArrayRef<unsigned> RegsBeingSpilled,
-                                      AliasAnalysis *AA) {
+                                      AAResults *AA) {
   ToShrinkSet ToShrink;
 
   for (;;) {
@@ -450,8 +452,7 @@ void LiveRangeEdit::eliminateDeadDefs(SmallVectorImpl<MachineInstr *> &Dead,
 // Keep track of new virtual registers created via
 // MachineRegisterInfo::createVirtualRegister.
 void
-LiveRangeEdit::MRI_NoteNewVirtualRegister(unsigned VReg)
-{
+LiveRangeEdit::MRI_NoteNewVirtualRegister(Register VReg) {
   if (VRM)
     VRM->grow();
 

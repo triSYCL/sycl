@@ -1,4 +1,11 @@
+<<<<<<< HEAD
 // RUN: %clangxx -std=c++17 -fsycl %s -o %t1.out
+||||||| merged common ancestors
+// RUN: %clangxx -fsycl %s -o %t1.out
+=======
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t1.out
+// RUN: env SYCL_DEVICE_TYPE=HOST %t1.out
+>>>>>>> intel/sycl
 // RUN: %CPU_RUN_PLACEHOLDER %t1.out
 // RUN: %GPU_RUN_PLACEHOLDER %t1.out
 
@@ -27,14 +34,16 @@ class foo;
 int main() {
   queue q;
   auto ctxt = q.get_context();
-  Node *h_head = nullptr;
-  Node *h_cur = nullptr;
+  auto dev = q.get_device();
 
-  h_head = (Node *)aligned_alloc_host(alignof(Node), sizeof(Node), ctxt);
+  if (!dev.get_info<info::device::usm_host_allocations>())
+    return 0;
+
+  Node *h_head = (Node *)aligned_alloc_host(alignof(Node), sizeof(Node), ctxt);
   if (h_head == nullptr) {
     return -1;
   }
-  h_cur = h_head;
+  Node *h_cur = h_head;
 
   for (int i = 0; i < numNodes; i++) {
     h_cur->Num = i * 2;
@@ -68,12 +77,12 @@ int main() {
   for (int i = 0; i < numNodes; i++) {
     const int want = i * 4 + 1;
     if (h_cur->Num != want) {
-      return -1;
+      return -2;
     }
     Node *old = h_cur;
     h_cur = h_cur->pNext;
     free(old, ctxt);
   }
-
+  
   return 0;
 }

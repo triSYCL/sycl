@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ObjectFileELF_h_
-#define liblldb_ObjectFileELF_h_
+#ifndef LLDB_SOURCE_PLUGINS_OBJECTFILE_ELF_OBJECTFILEELF_H
+#define LLDB_SOURCE_PLUGINS_OBJECTFILE_ELF_OBJECTFILEELF_H
 
 #include <stdint.h>
 
@@ -208,6 +208,10 @@ private:
   /// Collection of symbols from the dynamic table.
   DynamicSymbolColl m_dynamic_symbols;
 
+  /// Object file parsed from .gnu_debugdata section (\sa
+  /// GetGnuDebugDataObjectFile())
+  std::shared_ptr<ObjectFileELF> m_gnu_debug_data_object_file;
+
   /// List of file specifications corresponding to the modules (shared
   /// libraries) on which this object file depends.
   mutable std::unique_ptr<lldb_private::FileSpecList> m_filespec_up;
@@ -324,9 +328,6 @@ private:
   /// section index 0 is never valid).
   lldb::user_id_t GetSectionIndexByName(const char *name);
 
-  // Returns the ID of the first section that has the given type.
-  lldb::user_id_t GetSectionIndexByType(unsigned type);
-
   /// Returns the section header with the given id or NULL.
   const ELFSectionHeaderInfo *GetSectionHeaderByIndex(lldb::user_id_t id);
 
@@ -383,6 +384,14 @@ private:
                               lldb_private::UUID &uuid);
 
   bool AnySegmentHasPhysicalAddress();
+  
+  /// Takes the .gnu_debugdata and returns the decompressed object file that is
+  /// stored within that section.
+  ///
+  /// \returns either the decompressed object file stored within the
+  /// .gnu_debugdata section or \c nullptr if an error occured or if there's no
+  /// section with that name.
+  std::shared_ptr<ObjectFileELF> GetGnuDebugDataObjectFile();
 };
 
-#endif // liblldb_ObjectFileELF_h_
+#endif // LLDB_SOURCE_PLUGINS_OBJECTFILE_ELF_OBJECTFILEELF_H

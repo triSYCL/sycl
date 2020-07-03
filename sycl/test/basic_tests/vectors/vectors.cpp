@@ -1,4 +1,10 @@
+<<<<<<< HEAD
 // RUN: %clangxx -std=c++17  %s -o %t.out -lsycl
+||||||| merged common ancestors
+// RUN: %clangxx %s -o %t.out -lsycl
+=======
+// RUN: %clangxx %s -o %t.out -lsycl -I %sycl_include
+>>>>>>> intel/sycl
 // RUN: %t.out
 //==--------------- vectors.cpp - SYCL vectors test ------------------------==//
 //

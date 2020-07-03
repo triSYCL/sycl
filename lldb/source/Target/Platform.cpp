@@ -1,4 +1,4 @@
-//===-- Platform.cpp --------------------------------------------*- C++ -*-===//
+//===-- Platform.cpp ------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -26,6 +26,7 @@
 #include "lldb/Host/Host.h"
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Host/OptionParser.h"
+#include "lldb/Interpreter/OptionValueFileSpec.h"
 #include "lldb/Interpreter/OptionValueProperties.h"
 #include "lldb/Interpreter/Property.h"
 #include "lldb/Symbol/ObjectFile.h"
@@ -93,6 +94,7 @@ PlatformProperties::PlatformProperties() {
   module_cache_dir = FileSpec(user_home_dir.c_str());
   module_cache_dir.AppendPathComponent(".lldb");
   module_cache_dir.AppendPathComponent("module_cache");
+  SetDefaultModuleCacheDirectory(module_cache_dir);
   SetModuleCacheDirectory(module_cache_dir);
 }
 
@@ -115,6 +117,14 @@ FileSpec PlatformProperties::GetModuleCacheDirectory() const {
 bool PlatformProperties::SetModuleCacheDirectory(const FileSpec &dir_spec) {
   return m_collection_sp->SetPropertyAtIndexAsFileSpec(
       nullptr, ePropertyModuleCacheDirectory, dir_spec);
+}
+
+void PlatformProperties::SetDefaultModuleCacheDirectory(
+    const FileSpec &dir_spec) {
+  auto f_spec_opt = m_collection_sp->GetPropertyAtIndexAsOptionValueFileSpec(
+        nullptr, false, ePropertyModuleCacheDirectory);
+  assert(f_spec_opt);
+  f_spec_opt->SetDefaultValue(dir_spec);
 }
 
 /// Get the native host platform plug-in.
@@ -406,7 +416,7 @@ void Platform::GetStatus(Stream &strm) {
   if (arch.IsValid()) {
     if (!arch.GetTriple().str().empty()) {
       strm.Printf("    Triple: ");
-      arch.DumpTriple(strm);
+      arch.DumpTriple(strm.AsRawOstream());
       strm.EOL();
     }
   }
@@ -420,9 +430,6 @@ void Platform::GetStatus(Stream &strm) {
 
     strm.EOL();
   }
-
-  if (GetOSKernelDescription(s))
-    strm.Printf("    Kernel: %s\n", s.c_str());
 
   if (IsHost()) {
     strm.Printf("  Hostname: %s\n", GetHostname());
@@ -443,6 +450,9 @@ void Platform::GetStatus(Stream &strm) {
 
   if (!specific_info.empty())
     strm.Printf("Platform-specific connection: %s\n", specific_info.c_str());
+
+  if (GetOSKernelDescription(s))
+    strm.Printf("    Kernel: %s\n", s.c_str());
 }
 
 llvm::VersionTuple Platform::GetOSVersion(Process *process) {
@@ -1144,10 +1154,10 @@ Platform::DebugProcess(ProcessLaunchInfo &launch_info, Debugger &debugger,
         process_sp->SetShouldDetach(false);
 
         // If we didn't have any file actions, the pseudo terminal might have
-        // been used where the slave side was given as the file to open for
+        // been used where the secondary side was given as the file to open for
         // stdin/out/err after we have already opened the master so we can
         // read/write stdin/out/err.
-        int pty_fd = launch_info.GetPTY().ReleaseMasterFileDescriptor();
+        int pty_fd = launch_info.GetPTY().ReleasePrimaryFileDescriptor();
         if (pty_fd != PseudoTerminal::invalid_fd) {
           process_sp->SetSTDIOFileDescriptor(pty_fd);
         }
@@ -1220,21 +1230,21 @@ Status Platform::PutFile(const FileSpec &source, const FileSpec &destination,
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_PLATFORM));
   LLDB_LOGF(log, "[PutFile] Using block by block transfer....\n");
 
-  uint32_t source_open_options =
+  auto source_open_options =
       File::eOpenOptionRead | File::eOpenOptionCloseOnExec;
   namespace fs = llvm::sys::fs;
   if (fs::is_symlink_file(source.GetPath()))
     source_open_options |= File::eOpenOptionDontFollowSymlinks;
 
-  File source_file;
-  Status error = FileSystem::Instance().Open(
-      source_file, source, source_open_options, lldb::eFilePermissionsUserRW);
-  uint32_t permissions = source_file.GetPermissions(error);
+  auto source_file = FileSystem::Instance().Open(source, source_open_options,
+                                                 lldb::eFilePermissionsUserRW);
+  if (!source_file)
+    return Status(source_file.takeError());
+  Status error;
+  uint32_t permissions = source_file.get()->GetPermissions(error);
   if (permissions == 0)
     permissions = lldb::eFilePermissionsFileDefault;
 
-  if (!source_file.IsValid())
-    return Status("PutFile: unable to open source file");
   lldb::user_id_t dest_file = OpenFile(
       destination, File::eOpenOptionCanCreate | File::eOpenOptionWrite |
                        File::eOpenOptionTruncate | File::eOpenOptionCloseOnExec,
@@ -1249,7 +1259,7 @@ Status Platform::PutFile(const FileSpec &source, const FileSpec &destination,
   uint64_t offset = 0;
   for (;;) {
     size_t bytes_read = buffer_sp->GetByteSize();
-    error = source_file.Read(buffer_sp->GetBytes(), bytes_read);
+    error = source_file.get()->Read(buffer_sp->GetBytes(), bytes_read);
     if (error.Fail() || bytes_read == 0)
       break;
 
@@ -1262,7 +1272,7 @@ Status Platform::PutFile(const FileSpec &source, const FileSpec &destination,
     if (bytes_written != bytes_read) {
       // We didn't write the correct number of bytes, so adjust the file
       // position in the source file we are reading from...
-      source_file.SeekFromStart(offset);
+      source_file.get()->SeekFromStart(offset);
     }
   }
   CloseFile(dest_file, error);
@@ -1400,11 +1410,11 @@ OptionGroupPlatformRSync::SetOptionValue(uint32_t option_idx,
     break;
 
   case 'R':
-    m_rsync_opts.assign(option_arg);
+    m_rsync_opts.assign(std::string(option_arg));
     break;
 
   case 'P':
-    m_rsync_prefix.assign(option_arg);
+    m_rsync_prefix.assign(std::string(option_arg));
     break;
 
   case 'i':
@@ -1446,7 +1456,7 @@ OptionGroupPlatformSSH::SetOptionValue(uint32_t option_idx,
     break;
 
   case 'S':
-    m_ssh_opts.assign(option_arg);
+    m_ssh_opts.assign(std::string(option_arg));
     break;
 
   default:
@@ -1473,7 +1483,7 @@ lldb_private::Status OptionGroupPlatformCaching::SetOptionValue(
   char short_option = (char)GetDefinitions()[option_idx].short_option;
   switch (short_option) {
   case 'c':
-    m_cache_dir.assign(option_arg);
+    m_cache_dir.assign(std::string(option_arg));
     break;
 
   default:
@@ -1796,8 +1806,7 @@ lldb::ProcessSP Platform::ConnectProcess(llvm::StringRef connect_url,
   if (!process_sp)
     return nullptr;
 
-  error =
-      process_sp->ConnectRemote(debugger.GetOutputFile().get(), connect_url);
+  error = process_sp->ConnectRemote(&debugger.GetOutputStream(), connect_url);
   if (error.Fail())
     return nullptr;
 
@@ -1813,14 +1822,22 @@ size_t Platform::ConnectToWaitingProcesses(lldb_private::Debugger &debugger,
 size_t Platform::GetSoftwareBreakpointTrapOpcode(Target &target,
                                                  BreakpointSite *bp_site) {
   ArchSpec arch = target.GetArchitecture();
+  assert(arch.IsValid());
   const uint8_t *trap_opcode = nullptr;
   size_t trap_opcode_size = 0;
 
   switch (arch.GetMachine()) {
+  case llvm::Triple::aarch64_32:
   case llvm::Triple::aarch64: {
     static const uint8_t g_aarch64_opcode[] = {0x00, 0x00, 0x20, 0xd4};
     trap_opcode = g_aarch64_opcode;
     trap_opcode_size = sizeof(g_aarch64_opcode);
+  } break;
+
+  case llvm::Triple::arc: {
+    static const uint8_t g_hex_opcode[] = { 0xff, 0x7f };
+    trap_opcode = g_hex_opcode;
+    trap_opcode_size = sizeof(g_hex_opcode);
   } break;
 
   // TODO: support big-endian arm and thumb trap codes.
@@ -1847,6 +1864,12 @@ size_t Platform::GetSoftwareBreakpointTrapOpcode(Target &target,
       trap_opcode = g_arm_breakpoint_opcode;
       trap_opcode_size = sizeof(g_arm_breakpoint_opcode);
     }
+  } break;
+
+  case llvm::Triple::avr: {
+    static const uint8_t g_hex_opcode[] = {0x98, 0x95};
+    trap_opcode = g_hex_opcode;
+    trap_opcode_size = sizeof(g_hex_opcode);
   } break;
 
   case llvm::Triple::mips:
@@ -1896,8 +1919,7 @@ size_t Platform::GetSoftwareBreakpointTrapOpcode(Target &target,
   } break;
 
   default:
-    llvm_unreachable(
-        "Unhandled architecture in Platform::GetSoftwareBreakpointTrapOpcode");
+    return 0;
   }
 
   assert(bp_site);

@@ -28,6 +28,7 @@
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/MC/MCInstrItineraries.h"
 #include "llvm/MC/MCSchedule.h"
+#include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 #include <memory>
 #include <string>
@@ -108,6 +109,7 @@ protected:
     ARMv83a,
     ARMv84a,
     ARMv85a,
+    ARMv86a,
     ARMv8a,
     ARMv8mBaseline,
     ARMv8mMainline,
@@ -157,11 +159,13 @@ protected:
   bool HasV8_3aOps = false;
   bool HasV8_4aOps = false;
   bool HasV8_5aOps = false;
+  bool HasV8_6aOps = false;
   bool HasV8MBaselineOps = false;
   bool HasV8MMainlineOps = false;
   bool HasV8_1MMainlineOps = false;
   bool HasMVEIntegerOps = false;
   bool HasMVEFloatOps = false;
+  bool HasCDEOps = false;
 
   /// HasVFPv2, HasVFPv3, HasVFPv4, HasFPARMv8, HasNEON - Specify what
   /// floating point ISAs are supported.
@@ -180,11 +184,9 @@ protected:
   bool HasVFPv3SP = false;
   bool HasVFPv4SP = false;
   bool HasFPARMv8SP = false;
-  bool HasVFPv2D16 = false;
   bool HasVFPv3D16 = false;
   bool HasVFPv4D16 = false;
   bool HasFPARMv8D16 = false;
-  bool HasVFPv2D16SP = false;
   bool HasVFPv3D16SP = false;
   bool HasVFPv4D16SP = false;
   bool HasFPARMv8D16SP = false;
@@ -205,6 +207,10 @@ protected:
   /// whether the FP VML[AS] instructions are slow (if so, don't use them).
   bool SlowFPVMLx = false;
 
+  /// SlowFPVFMx - If the VFP4 / NEON instructions are available, indicates
+  /// whether the FP VFM[AS] instructions are slow (if so, don't use them).
+  bool SlowFPVFMx = false;
+
   /// HasVMLxForwarding - If true, NEON has special multiplier accumulator
   /// forwarding to allow mul + mla being issued back to back.
   bool HasVMLxForwarding = false;
@@ -224,9 +230,6 @@ protected:
   /// DisablePostRAScheduler - False if scheduling should happen again after
   /// register allocation.
   bool DisablePostRAScheduler = false;
-
-  /// UseAA - True if using AA during codegen (DAGCombine, MISched, etc)
-  bool UseAA = false;
 
   /// HasThumb2 - True if Thumb2 instructions are supported.
   bool HasThumb2 = false;
@@ -254,6 +257,12 @@ protected:
 
   /// HasFP16FML - True if subtarget supports half-precision FP fml operations
   bool HasFP16FML = false;
+
+  /// HasBF16 - True if subtarget supports BFloat16 floating point operations
+  bool HasBF16 = false;
+
+  /// HasMatMulInt8 - True if subtarget supports 8-bit integer matrix multiply
+  bool HasMatMulInt8 = false;
 
   /// HasD32 - True if subtarget has the full 32 double precision
   /// FP registers for VFPv3.
@@ -451,7 +460,7 @@ protected:
 
   /// stackAlignment - The minimum alignment known to hold of the stack frame on
   /// entry to the function and which must be maintained by every function.
-  unsigned stackAlignment = 4;
+  Align stackAlignment = Align(4);
 
   /// CPUString - String name of used CPU.
   std::string CPUString;
@@ -563,6 +572,7 @@ private:
   void initSubtargetFeatures(StringRef CPU, StringRef FS);
   ARMFrameLowering *initializeFrameLowering(StringRef CPU, StringRef FS);
 
+  std::bitset<8> CoprocCDE = {};
 public:
   void computeIssueWidth();
 
@@ -580,11 +590,13 @@ public:
   bool hasV8_3aOps() const { return HasV8_3aOps; }
   bool hasV8_4aOps() const { return HasV8_4aOps; }
   bool hasV8_5aOps() const { return HasV8_5aOps; }
+  bool hasV8_6aOps() const { return HasV8_6aOps; }
   bool hasV8MBaselineOps() const { return HasV8MBaselineOps; }
   bool hasV8MMainlineOps() const { return HasV8MMainlineOps; }
   bool hasV8_1MMainlineOps() const { return HasV8_1MMainlineOps; }
   bool hasMVEIntegerOps() const { return HasMVEIntegerOps; }
   bool hasMVEFloatOps() const { return HasMVEFloatOps; }
+  bool hasCDEOps() const { return HasCDEOps; }
   bool hasFPRegs() const { return HasFPRegs; }
   bool hasFPRegs16() const { return HasFPRegs16; }
   bool hasFPRegs64() const { return HasFPRegs64; }
@@ -606,7 +618,7 @@ public:
 
   bool hasARMOps() const { return !NoARM; }
 
-  bool hasVFP2Base() const { return HasVFPv2D16SP; }
+  bool hasVFP2Base() const { return HasVFPv2SP; }
   bool hasVFP3Base() const { return HasVFPv3D16SP; }
   bool hasVFP4Base() const { return HasVFPv4D16SP; }
   bool hasFPARMv8Base() const { return HasFPARMv8D16SP; }
@@ -637,6 +649,11 @@ public:
 
   bool useMulOps() const { return UseMulOps; }
   bool useFPVMLx() const { return !SlowFPVMLx; }
+  bool useFPVFMx() const {
+    return !isTargetDarwin() && hasVFP4Base() && !SlowFPVFMx;
+  }
+  bool useFPVFMx16() const { return useFPVFMx() && hasFullFP16(); }
+  bool useFPVFMx64() const { return useFPVFMx() && hasFP64(); }
   bool hasVMLxForwarding() const { return HasVMLxForwarding; }
   bool isFPBrccSlow() const { return SlowFPBrcc; }
   bool hasFP64() const { return HasFP64; }
@@ -674,16 +691,25 @@ public:
   bool hasSB() const { return HasSB; }
   bool genLongCalls() const { return GenLongCalls; }
   bool genExecuteOnly() const { return GenExecuteOnly; }
+  bool hasBaseDSP() const {
+    if (isThumb())
+      return hasDSP();
+    else
+      return hasV5TEOps();
+  }
 
   bool hasFP16() const { return HasFP16; }
   bool hasD32() const { return HasD32; }
   bool hasFullFP16() const { return HasFullFP16; }
   bool hasFP16FML() const { return HasFP16FML; }
+  bool hasBF16() const { return HasBF16; }
 
   bool hasFuseAES() const { return HasFuseAES; }
   bool hasFuseLiterals() const { return HasFuseLiterals; }
   /// Return true if the CPU supports any kind of instruction fusion.
   bool hasFusion() const { return hasFuseAES() || hasFuseLiterals(); }
+
+  bool hasMatMulInt8() const { return HasMatMulInt8; }
 
   const Triple &getTargetTriple() const { return TargetTriple; }
 
@@ -802,9 +828,15 @@ public:
   /// True for some subtargets at > -O0.
   bool enablePostRAScheduler() const override;
 
+  /// True for some subtargets at > -O0.
+  bool enablePostRAMachineScheduler() const override;
+
+  /// Check whether this subtarget wants to use subregister liveness.
+  bool enableSubRegLiveness() const override;
+
   /// Enable use of alias analysis during code generation (during MI
   /// scheduling, DAGCombine, etc.).
-  bool useAA() const override { return UseAA; }
+  bool useAA() const override { return true; }
 
   // enableAtomicExpand- True if we need to expand our atomics.
   bool enableAtomicExpand() const override;
@@ -818,7 +850,7 @@ public:
   /// getStackAlignment - Returns the minimum alignment known to hold of the
   /// stack frame on entry to the function and which must be maintained by every
   /// function for this subtarget.
-  unsigned getStackAlignment() const { return stackAlignment; }
+  Align getStackAlignment() const { return stackAlignment; }
 
   unsigned getMaxInterleaveFactor() const { return MaxInterleaveFactor; }
 

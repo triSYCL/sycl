@@ -1,5 +1,12 @@
+<<<<<<< HEAD
 // RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
+||||||| merged common ancestors
+// RUN: %clangxx -fsycl %s -o %t.out
+=======
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+>>>>>>> intel/sycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
+
 //==---- host_image_accessor_read.cpp - SYCL host image accessor check ----==//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -22,44 +29,54 @@ int foo(float *image_data) {
   {
     cl::sycl::buffer<int, 1> ResultBuf(result, cl::sycl::range<1>(2));
     cl::sycl::queue Q;
-    cl::sycl::image<3> Image_1(image_data, channelOrder, channelType, r);
+    cl::sycl::image<3> Image(image_data, channelOrder, channelType, r);
 
-    cl::sycl::range<2> pitch = Image_1.get_pitch();
+    cl::sycl::range<2> pitch = Image.get_pitch();
 
-    auto host_image_acc =
-        Image_1.template get_access<cl::sycl::float4,
+    cl::sycl::cl_int4 Coords{0, 1, 2, 0};
+    {
+      auto host_image_acc =
+          Image.template get_access<cl::sycl::float4,
                                     cl::sycl::access::mode::read>();
 
-    auto Sampler = cl::sycl::sampler(
-        cl::sycl::coordinate_normalization_mode::unnormalized,
-        cl::sycl::addressing_mode::none, cl::sycl::filtering_mode::nearest);
-    cl::sycl::cl_int4 Coords{0, 1, 2, 0};
-    // Test image read function.
-    cl::sycl::cl_float4 Ret_data = host_image_acc.read(Coords);
-    assert((float)Ret_data.x() == 85);
-    assert((float)Ret_data.y() == 86);
-    assert((float)Ret_data.z() == 87);
-    assert((float)Ret_data.w() == 88);
+      auto Sampler = cl::sycl::sampler(
+          cl::sycl::coordinate_normalization_mode::unnormalized,
+          cl::sycl::addressing_mode::none, cl::sycl::filtering_mode::nearest);
+      // Test image read function.
+      cl::sycl::cl_float4 Ret_data = host_image_acc.read(Coords);
+      assert((float)Ret_data.x() == 85);
+      assert((float)Ret_data.y() == 86);
+      assert((float)Ret_data.z() == 87);
+      assert((float)Ret_data.w() == 88);
 
-    // Test image read with sampler.
-    cl::sycl::cl_float4 Ret_data2 = host_image_acc.read(Coords, Sampler);
-    assert((float)Ret_data2.x() == 85);
-    assert((float)Ret_data2.y() == 86);
-    assert((float)Ret_data2.z() == 87);
-    assert((float)Ret_data2.w() == 88);
+      // Test image read with sampler.
+      cl::sycl::cl_float4 Ret_data2 = host_image_acc.read(Coords, Sampler);
+      assert((float)Ret_data2.x() == 85);
+      assert((float)Ret_data2.y() == 86);
+      assert((float)Ret_data2.z() == 87);
+      assert((float)Ret_data2.w() == 88);
+    }
 
-    auto host_image_acc2 =
-        Image_1.template get_access<cl::sycl::float4,
+    {
+      auto host_image_acc =
+          Image.template get_access<cl::sycl::float4,
                                     cl::sycl::access::mode::write>();
 
-    // Test image write function.
-    host_image_acc2.write(Coords, cl::sycl::cl_float4{120, 121, 122, 123});
-    Ret_data = host_image_acc.read(Coords);
-    assert((float)Ret_data.x() == 120);
-    assert((float)Ret_data.y() == 121);
-    assert((float)Ret_data.z() == 122);
-    assert((float)Ret_data.w() == 123);
+      // Test image write function.
+      host_image_acc.write(Coords, cl::sycl::cl_float4{120, 121, 122, 123});
+    }
 
+    {
+      auto host_image_acc =
+          Image.template get_access<cl::sycl::float4,
+                                    cl::sycl::access::mode::read>();
+      cl::sycl::cl_float4 Ret_data = host_image_acc.read(Coords);
+      assert((float)Ret_data.x() == 120);
+      assert((float)Ret_data.y() == 121);
+      assert((float)Ret_data.z() == 122);
+      assert((float)Ret_data.w() == 123);
+
+<<<<<<< HEAD
     // Test Out-of-bounds access for clamp_to_edge Addressing Mode.
     auto Sampler2 = cl::sycl::sampler(
         cl::sycl::coordinate_normalization_mode::unnormalized,
@@ -70,6 +87,32 @@ int foo(float *image_data) {
     assert((float)OutBnds_RetData.y() == 106);
     assert((float)OutBnds_RetData.z() == 107);
     assert((float)OutBnds_RetData.w() == 108);
+||||||| merged common ancestors
+    // Test Out-of-bounds access for clamp_to_edge Addressing Mode. 
+    auto Sampler2 = cl::sycl::sampler(
+        cl::sycl::coordinate_normalization_mode::unnormalized,
+        cl::sycl::addressing_mode::clamp_to_edge, cl::sycl::filtering_mode::nearest);
+    cl::sycl::cl_int4 OutBnds_Coords{2, 2, 3, 0};
+    cl::sycl::cl_float4 OutBnds_RetData = host_image_acc.read(OutBnds_Coords, Sampler2);
+    assert((float)OutBnds_RetData.x() == 105);
+    assert((float)OutBnds_RetData.y() == 106);
+    assert((float)OutBnds_RetData.z() == 107);
+    assert((float)OutBnds_RetData.w() == 108);
+=======
+      // Test Out-of-bounds access for clamp_to_edge Addressing Mode.
+      auto Sampler = cl::sycl::sampler(
+          cl::sycl::coordinate_normalization_mode::unnormalized,
+          cl::sycl::addressing_mode::clamp_to_edge,
+          cl::sycl::filtering_mode::nearest);
+      cl::sycl::cl_int4 OutBnds_Coords{2, 2, 3, 0};
+      cl::sycl::cl_float4 OutBnds_RetData =
+          host_image_acc.read(OutBnds_Coords, Sampler);
+      assert((float)OutBnds_RetData.x() == 105);
+      assert((float)OutBnds_RetData.y() == 106);
+      assert((float)OutBnds_RetData.z() == 107);
+      assert((float)OutBnds_RetData.w() == 108);
+    }
+>>>>>>> intel/sycl
 
   }
   return 0;

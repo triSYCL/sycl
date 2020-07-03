@@ -5,17 +5,17 @@
 # RUN: llvm-mc -filetype=obj -triple=mips-unknown-linux %s -o %t.o
 # RUN: ld.lld %t.o -o %t.exe
 # RUN: llvm-objdump -d --no-show-raw-insn %t.exe | FileCheck %s
-# RUN: llvm-readelf -s -mips-plt-got %t.exe | FileCheck -check-prefix=GOT %s
+# RUN: llvm-readelf -s -A %t.exe | FileCheck -check-prefix=GOT %s
 
 # CHECK:      Disassembly of section .text:
 # CHECK-EMPTY:
-# CHECK-NEXT: __start:
+# CHECK-NEXT: <__start>:
 # CHECK-NEXT:    lui     $2, 0
 # CHECK-NEXT:    lw      $2, -32732($2)
 # CHECK-NEXT:    lui     $2, 0
 # CHECK-NEXT:    lw      $2, -32728($2)
 #
-# CHECK:      bar:
+# CHECK:      <bar>:
 # CHECK-NEXT:    lw      $2, -32736($2)
 # CHECK-NEXT:    lw      $2, -32744($2)
 # CHECK-NEXT:    addi    $2, $2, {{.*}}

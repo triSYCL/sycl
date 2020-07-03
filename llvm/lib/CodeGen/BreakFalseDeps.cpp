@@ -19,11 +19,12 @@
 
 #include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/ReachingDefAnalysis.h"
 #include "llvm/CodeGen/RegisterClassInfo.h"
-#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
-
+#include "llvm/InitializePasses.h"
+#include "llvm/Support/Debug.h"
 
 using namespace llvm;
 
@@ -105,8 +106,17 @@ FunctionPass *llvm::createBreakFalseDeps() { return new BreakFalseDeps(); }
 
 bool BreakFalseDeps::pickBestRegisterForUndef(MachineInstr *MI, unsigned OpIdx,
   unsigned Pref) {
+
+  // We can't change tied operands.
+  if (MI->isRegTiedToDefOperand(OpIdx))
+    return false;
+
   MachineOperand &MO = MI->getOperand(OpIdx);
   assert(MO.isUndef() && "Expected undef machine operand");
+
+  // We can't change registers that aren't renamable.
+  if (!MO.isRenamable())
+    return false;
 
   Register OriginalReg = MO.getReg();
 
@@ -177,6 +187,7 @@ void BreakFalseDeps::processDefs(MachineInstr *MI) {
   assert(!MI->isDebugInstr() && "Won't process debug values");
 
   // Break dependence on undef uses. Do this before updating LiveRegs below.
+  // This can remove a false dependence with no additional instructions.
   unsigned OpNum;
   unsigned Pref = TII->getUndefRegClearance(*MI, OpNum, TRI);
   if (Pref) {
@@ -187,6 +198,11 @@ void BreakFalseDeps::processDefs(MachineInstr *MI) {
     if (!HadTrueDependency && shouldBreakDependence(MI, OpNum, Pref))
       UndefReads.push_back(std::make_pair(MI, OpNum));
   }
+
+  // The code below allows the target to create a new instruction to break the
+  // dependence. That opposes the goal of minimizing size, so bail out now.
+  if (MF->getFunction().hasMinSize())
+    return;
 
   const MCInstrDesc &MCID = MI->getDesc();
   for (unsigned i = 0,
@@ -206,6 +222,11 @@ void BreakFalseDeps::processDefs(MachineInstr *MI) {
 
 void BreakFalseDeps::processUndefReads(MachineBasicBlock *MBB) {
   if (UndefReads.empty())
+    return;
+
+  // The code below allows the target to create a new instruction to break the
+  // dependence. That opposes the goal of minimizing size, so bail out now.
+  if (MF->getFunction().hasMinSize())
     return;
 
   // Collect this block's live out register units.

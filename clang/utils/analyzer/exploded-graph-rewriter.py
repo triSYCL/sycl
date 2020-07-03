@@ -18,6 +18,7 @@ import json
 import logging
 import os
 import re
+import sys
 
 
 #===-----------------------------------------------------------------------===#
@@ -33,7 +34,7 @@ def diff_dicts(curr, prev):
 
 
 # Represents any program state trait that is a dictionary of key-value pairs.
-class GenericMap(object):
+class GenericMap:
     def __init__(self, items):
         self.generic_map = collections.OrderedDict(items)
 
@@ -46,9 +47,8 @@ class GenericMap(object):
 
 
 # A deserialized source location.
-class SourceLocation(object):
+class SourceLocation:
     def __init__(self, json_loc):
-        super(SourceLocation, self).__init__()
         logging.debug('json: %s' % json_loc)
         self.line = json_loc['line']
         self.col = json_loc['column']
@@ -62,17 +62,21 @@ class SourceLocation(object):
 
 
 # A deserialized program point.
-class ProgramPoint(object):
+class ProgramPoint:
     def __init__(self, json_pp):
-        super(ProgramPoint, self).__init__()
         self.kind = json_pp['kind']
         self.tag = json_pp['tag']
+        self.node_id = json_pp['node_id']
+        self.is_sink = bool(json_pp['is_sink'])
+        self.has_report = bool(json_pp['has_report'])
         if self.kind == 'Edge':
             self.src_id = json_pp['src_id']
             self.dst_id = json_pp['dst_id']
         elif self.kind == 'Statement':
             logging.debug(json_pp)
             self.stmt_kind = json_pp['stmt_kind']
+            self.cast_kind = json_pp['cast_kind'] \
+                if 'cast_kind' in json_pp else None
             self.stmt_point_kind = json_pp['stmt_point_kind']
             self.stmt_id = json_pp['stmt_id']
             self.pointer = json_pp['pointer']
@@ -84,9 +88,8 @@ class ProgramPoint(object):
 
 
 # A single expression acting as a key in a deserialized Environment.
-class EnvironmentBindingKey(object):
+class EnvironmentBindingKey:
     def __init__(self, json_ek):
-        super(EnvironmentBindingKey, self).__init__()
         # CXXCtorInitializer is not a Stmt!
         self.stmt_id = json_ek['stmt_id'] if 'stmt_id' in json_ek \
             else json_ek['init_id']
@@ -104,9 +107,8 @@ class EnvironmentBindingKey(object):
 
 
 # Deserialized description of a location context.
-class LocationContext(object):
+class LocationContext:
     def __init__(self, json_frame):
-        super(LocationContext, self).__init__()
         self.lctx_id = json_frame['lctx_id']
         self.caption = json_frame['location_context']
         self.decl = json_frame['calling']
@@ -125,9 +127,8 @@ class LocationContext(object):
 
 # A group of deserialized Environment bindings that correspond to a specific
 # location context.
-class EnvironmentFrame(object):
+class EnvironmentFrame:
     def __init__(self, json_frame):
-        super(EnvironmentFrame, self).__init__()
         self.location_context = LocationContext(json_frame)
         self.bindings = collections.OrderedDict(
             [(EnvironmentBindingKey(b),
@@ -144,9 +145,8 @@ class EnvironmentFrame(object):
 
 # A deserialized Environment. This class can also hold other entities that
 # are similar to Environment, such as Objects Under Construction.
-class GenericEnvironment(object):
+class GenericEnvironment:
     def __init__(self, json_e):
-        super(GenericEnvironment, self).__init__()
         self.frames = [EnvironmentFrame(f) for f in json_e]
 
     def diff_frames(self, prev):
@@ -175,9 +175,8 @@ class GenericEnvironment(object):
 
 
 # A single binding key in a deserialized RegionStore cluster.
-class StoreBindingKey(object):
+class StoreBindingKey:
     def __init__(self, json_sk):
-        super(StoreBindingKey, self).__init__()
         self.kind = json_sk['kind']
         self.offset = json_sk['offset']
 
@@ -192,9 +191,8 @@ class StoreBindingKey(object):
 
 
 # A single cluster of the deserialized RegionStore.
-class StoreCluster(object):
+class StoreCluster:
     def __init__(self, json_sc):
-        super(StoreCluster, self).__init__()
         self.base_region = json_sc['cluster']
         self.bindings = collections.OrderedDict(
             [(StoreBindingKey(b), b['value']) for b in json_sc['items']])
@@ -208,9 +206,8 @@ class StoreCluster(object):
 
 
 # A deserialized RegionStore.
-class Store(object):
+class Store:
     def __init__(self, json_s):
-        super(Store, self).__init__()
         self.ptr = json_s['pointer']
         self.clusters = collections.OrderedDict(
             [(c['pointer'], StoreCluster(c)) for c in json_s['items']])
@@ -229,9 +226,8 @@ class Store(object):
 
 # Deserialized messages from a single checker in a single program state.
 # Basically a list of raw strings.
-class CheckerLines(object):
+class CheckerLines:
     def __init__(self, json_lines):
-        super(CheckerLines, self).__init__()
         self.lines = json_lines
 
     def diff_lines(self, prev):
@@ -244,9 +240,8 @@ class CheckerLines(object):
 
 
 # Deserialized messages of all checkers, separated by checker.
-class CheckerMessages(object):
+class CheckerMessages:
     def __init__(self, json_m):
-        super(CheckerMessages, self).__init__()
         self.items = collections.OrderedDict(
             [(m['checker'], CheckerLines(m['messages'])) for m in json_m])
 
@@ -263,10 +258,19 @@ class CheckerMessages(object):
 
 
 # A deserialized program state.
-class ProgramState(object):
+class ProgramState:
     def __init__(self, state_id, json_ps):
-        super(ProgramState, self).__init__()
         logging.debug('Adding ProgramState ' + str(state_id))
+
+        if json_ps is None:
+            json_ps = {
+                'store': None,
+                'environment': None,
+                'constraints': None,
+                'dynamic_types': None,
+                'constructing_objects': None,
+                'checker_messages': None
+            }
 
         self.state_id = state_id
 
@@ -299,22 +303,19 @@ class ProgramState(object):
 # A deserialized exploded graph node. Has a default constructor because it
 # may be referenced as part of an edge before its contents are deserialized,
 # and in this moment we already need a room for predecessors and successors.
-class ExplodedNode(object):
+class ExplodedNode:
     def __init__(self):
-        super(ExplodedNode, self).__init__()
         self.predecessors = []
         self.successors = []
 
     def construct(self, node_id, json_node):
         logging.debug('Adding ' + node_id)
-        self.node_id = json_node['node_id']
-        self.ptr = json_node['pointer']
-        self.has_report = json_node['has_report']
-        self.is_sink = json_node['is_sink']
+        self.ptr = node_id[4:]
         self.points = [ProgramPoint(p) for p in json_node['program_points']]
+        self.node_id = self.points[-1].node_id
         self.state = ProgramState(json_node['state_id'],
-                                  json_node['program_state']) \
-            if json_node['program_state'] is not None else None
+                                  json_node['program_state']
+            if json_node['program_state'] is not None else None);
 
         assert self.node_name() == node_id
 
@@ -324,7 +325,7 @@ class ExplodedNode(object):
 
 # A deserialized ExplodedGraph. Constructed by consuming a .dot file
 # line-by-line.
-class ExplodedGraph(object):
+class ExplodedGraph:
     # Parse .dot files with regular expressions.
     node_re = re.compile(
         '^(Node0x[0-9a-f]*) \\[shape=record,.*label="{(.*)\\\\l}"\\];$')
@@ -332,7 +333,6 @@ class ExplodedGraph(object):
         '^(Node0x[0-9a-f]*) -> (Node0x[0-9a-f]*);$')
 
     def __init__(self):
-        super(ExplodedGraph, self).__init__()
         self.nodes = collections.defaultdict(ExplodedNode)
         self.root_id = None
         self.incomplete_line = ''
@@ -368,8 +368,7 @@ class ExplodedGraph(object):
                 self.root_id = node_id
             # Note: when writing tests you don't need to escape everything,
             # even though in a valid dot file everything is escaped.
-            node_label = result.group(2).replace('\\l', '') \
-                                        .replace('&nbsp;', '') \
+            node_label = result.group(2).replace('&nbsp;', '') \
                                         .replace('\\"', '"') \
                                         .replace('\\{', '{') \
                                         .replace('\\}', '}') \
@@ -378,6 +377,13 @@ class ExplodedGraph(object):
                                         .replace('\\<', '\\\\<') \
                                         .replace('\\>', '\\\\>') \
                                         .rstrip(',')
+            # Handle `\l` separately because a string literal can be in code
+            # like "string\\literal" with the `\l` inside.
+            # Also on Windows macros __FILE__ produces specific delimiters `\`
+            # and a directory or file may starts with the letter `l`.
+            # Find all `\l` (like `,\l`, `}\l`, `[\l`) except `\\l`,
+            # because the literal as a rule containes multiple `\` before `\l`.
+            node_label = re.sub(r'(?<!\\)\\l', '', node_label)
             logging.debug(node_label)
             json_node = json.loads(node_label)
             self.nodes[node_id].construct(node_id, json_node)
@@ -393,10 +399,9 @@ class ExplodedGraph(object):
 
 # A visitor that dumps the ExplodedGraph into a DOT file with fancy HTML-based
 # syntax highlighing.
-class DotDumpVisitor(object):
+class DotDumpVisitor:
     def __init__(self, do_diffs, dark_mode, gray_mode,
                  topo_mode, dump_dot_only):
-        super(DotDumpVisitor, self).__init__()
         self._do_diffs = do_diffs
         self._dark_mode = dark_mode
         self._gray_mode = gray_mode
@@ -412,7 +417,10 @@ class DotDumpVisitor(object):
 
     def output(self):
         assert not self._dump_dot_only
-        return ''.join(self._output)
+        if sys.version_info[0] > 2 and sys.version_info[1] >= 5:
+            return ''.join(self._output).encode()
+        else:
+            return ''.join(self._output)
 
     def _dump(self, s):
         s = s.replace('&', '&amp;') \
@@ -420,8 +428,8 @@ class DotDumpVisitor(object):
              .replace('}', '\\}') \
              .replace('\\<', '&lt;') \
              .replace('\\>', '&gt;') \
-             .replace('\\l', '<br />') \
              .replace('|', '\\|')
+        s = re.sub(r'(?<!\\)\\l', '<br />', s)
         if self._gray_mode:
             s = re.sub(r'<font color="[a-z0-9]*">', '', s)
             s = re.sub(r'</font>', '', s)
@@ -486,45 +494,60 @@ class DotDumpVisitor(object):
         else:
             color = 'forestgreen'
 
+        self._dump('<tr><td align="left">%s.</td>' % p.node_id)
+
         if p.kind == 'Statement':
             # This avoids pretty-printing huge statements such as CompoundStmt.
             # Such statements show up only at [Pre|Post]StmtPurgeDeadSymbols
             skip_pretty = 'PurgeDeadSymbols' in p.stmt_point_kind
             stmt_color = 'cyan3'
-            self._dump('<tr><td align="left" width="0">%s:</td>'
+            self._dump('<td align="left" width="0">%s:</td>'
                        '<td align="left" width="0"><font color="%s">'
                        '%s</font> </td>'
                        '<td align="left"><i>S%s</i></td>'
                        '<td align="left"><font color="%s">%s</font></td>'
                        '<td align="left">%s</td></tr>'
-                       % (self._make_sloc(p.loc), color, p.stmt_kind,
+                       % (self._make_sloc(p.loc), color,
+                          '%s (%s)' % (p.stmt_kind, p.cast_kind)
+                          if p.cast_kind is not None else p.stmt_kind,
                           p.stmt_id, stmt_color, p.stmt_point_kind,
                           self._short_pretty(p.pretty)
                           if not skip_pretty else ''))
         elif p.kind == 'Edge':
-            self._dump('<tr><td width="0"></td>'
+            self._dump('<td width="0"></td>'
                        '<td align="left" width="0">'
                        '<font color="%s">%s</font></td><td align="left">'
                        '[B%d] -\\> [B%d]</td></tr>'
                        % (color, 'BlockEdge', p.src_id, p.dst_id))
         elif p.kind == 'BlockEntrance':
-            self._dump('<tr><td width="0"></td>'
+            self._dump('<td width="0"></td>'
                        '<td align="left" width="0">'
                        '<font color="%s">%s</font></td>'
                        '<td align="left">[B%d]</td></tr>'
                        % (color, p.kind, p.block_id))
         else:
             # TODO: Print more stuff for other kinds of points.
-            self._dump('<tr><td width="0"></td>'
+            self._dump('<td width="0"></td>'
                        '<td align="left" width="0" colspan="2">'
                        '<font color="%s">%s</font></td></tr>'
                        % (color, p.kind))
 
         if p.tag is not None:
-            self._dump('<tr><td width="0"></td>'
+            self._dump('<tr><td width="0"></td><td width="0"></td>'
                        '<td colspan="3" align="left">'
                        '<b>Tag: </b> <font color="crimson">'
                        '%s</font></td></tr>' % p.tag)
+
+        if p.has_report:
+            self._dump('<tr><td width="0"></td><td width="0"></td>'
+                       '<td colspan="3" align="left">'
+                       '<font color="red"><b>Bug Report Attached'
+                       '</b></font></td></tr>')
+        if p.is_sink:
+            self._dump('<tr><td width="0"></td><td width="0"></td>'
+                       '<td colspan="3" align="left">'
+                       '<font color="cornflowerblue"><b>Sink Node'
+                       '</b></font></td></tr>')
 
     def visit_environment(self, e, prev_e=None):
         self._dump('<table border="0">')
@@ -764,7 +787,7 @@ class DotDumpVisitor(object):
 
     def visit_state(self, s, prev_s):
         self.visit_store_in_state(s, prev_s)
-        self.visit_environment_in_state('environment', 'Environment',
+        self.visit_environment_in_state('environment', 'Expressions',
                                         s, prev_s)
         self.visit_generic_map_in_state('constraints', 'Ranges',
                                         s, prev_s)
@@ -782,17 +805,10 @@ class DotDumpVisitor(object):
             self._dump('color="white",fontcolor="gray80",')
         self._dump('label=<<table border="0">')
 
-        self._dump('<tr><td bgcolor="%s"><b>Node %d (%s) - '
-                   'State %s</b></td></tr>'
-                   % ("gray20" if self._dark_mode else "gray",
-                      node.node_id, node.ptr, node.state.state_id
+        self._dump('<tr><td bgcolor="%s"><b>State %s</b></td></tr>'
+                   % ("gray20" if self._dark_mode else "gray70",
+                      node.state.state_id
                       if node.state is not None else 'Unspecified'))
-        if node.has_report:
-            self._dump('<tr><td><font color="red"><b>Bug Report Attached'
-                       '</b></font></td></tr>')
-        if node.is_sink:
-            self._dump('<tr><td><font color="cornflowerblue"><b>Sink Node'
-                       '</b></font></td></tr>')
         if not self._topo_mode:
             self._dump('<tr><td align="left" width="0">')
             if len(node.points) > 1:
@@ -871,10 +887,7 @@ class DotDumpVisitor(object):
 
 
 # BasicExplorer explores the whole graph in no particular order.
-class BasicExplorer(object):
-    def __init__(self):
-        super(BasicExplorer, self).__init__()
-
+class BasicExplorer:
     def explore(self, graph, visitor):
         visitor.visit_begin_graph(graph)
         for node in sorted(graph.nodes):
@@ -894,10 +907,7 @@ class BasicExplorer(object):
 
 # SinglePathTrimmer keeps only a single path - the leftmost path from the root.
 # Useful when the trimmed graph is still too large.
-class SinglePathTrimmer(object):
-    def __init__(self):
-        super(SinglePathTrimmer, self).__init__()
-
+class SinglePathTrimmer:
     def trim(self, graph):
         visited_nodes = set()
         node_id = graph.root_id
@@ -921,9 +931,8 @@ class SinglePathTrimmer(object):
 # TargetedTrimmer keeps paths that lead to specific nodes and discards all
 # other paths. Useful when you cannot use -trim-egraph (e.g. when debugging
 # a crash).
-class TargetedTrimmer(object):
+class TargetedTrimmer:
     def __init__(self, target_nodes):
-        super(TargetedTrimmer, self).__init__()
         self._target_nodes = target_nodes
 
     @staticmethod
