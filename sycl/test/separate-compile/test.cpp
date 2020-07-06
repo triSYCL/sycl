@@ -3,39 +3,15 @@
 //
 // >> ---- compile src1
 // >> device compilation...
-<<<<<<< HEAD
-// RUN: %clangxx -std=c++17 --sycl -Xclang -fsycl-int-header=sycl_ihdr_a.h %s -c -o a_kernel.bc
-||||||| merged common ancestors
-// RUN: %clangxx --sycl -Xclang -fsycl-int-header=sycl_ihdr_a.h %s -c -o a_kernel.bc
-=======
 // RUN: %clangxx -fsycl-device-only -Xclang -fsycl-int-header=sycl_ihdr_a.h %s -c -o a_kernel.bc -I %sycl_include -Wno-sycl-strict
->>>>>>> intel/sycl
 // >> host compilation...
-<<<<<<< HEAD
-// RUN: %clangxx -std=c++17 -include sycl_ihdr_a.h -g -c %s -o a.o
-||||||| merged common ancestors
-// RUN: %clangxx -include sycl_ihdr_a.h -g -c %s -o a.o
-=======
 // RUN: %clangxx -include sycl_ihdr_a.h -g -c %s -o a.o -I %sycl_include -Wno-sycl-strict
->>>>>>> intel/sycl
 //
 // >> ---- compile src2
 // >> device compilation...
-<<<<<<< HEAD
-// RUN: %clangxx -DB_CPP=1 -std=c++17 --sycl -Xclang -fsycl-int-header=sycl_ihdr_b.h %s -c -o b_kernel.bc
-||||||| merged common ancestors
-// RUN: %clangxx -DB_CPP=1 --sycl -Xclang -fsycl-int-header=sycl_ihdr_b.h %s -c -o b_kernel.bc
-=======
 // RUN: %clangxx -DB_CPP=1 -fsycl-device-only -Xclang -fsycl-int-header=sycl_ihdr_b.h %s -c -o b_kernel.bc -I %sycl_include -Wno-sycl-strict
->>>>>>> intel/sycl
 // >> host compilation...
-<<<<<<< HEAD
-// RUN: %clangxx -DB_CPP=1 -std=c++17 -include sycl_ihdr_b.h -g -c %s -o b.o
-||||||| merged common ancestors
-// RUN: %clangxx -DB_CPP=1 -include sycl_ihdr_b.h -g -c %s -o b.o
-=======
 // RUN: %clangxx -DB_CPP=1 -include sycl_ihdr_b.h -g -c %s -o b.o -I %sycl_include -Wno-sycl-strict
->>>>>>> intel/sycl
 //
 // >> ---- bundle .o with .spv
 // >> run bundler

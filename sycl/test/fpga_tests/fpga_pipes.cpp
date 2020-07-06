@@ -1,13 +1,7 @@
-<<<<<<< HEAD
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
-||||||| merged common ancestors
-// RUN: %clangxx -fsycl %s -o %t.out
-=======
 // RUN: %clangxx -fsycl %s -o %t.out
 //-fsycl-targets=%sycl_triple
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
->>>>>>> intel/sycl
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
 
 //==------------- fpga_pipes.cpp - SYCL FPGA pipes test --------------------==//

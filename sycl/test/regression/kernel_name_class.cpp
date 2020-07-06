@@ -1,21 +1,9 @@
-<<<<<<< HEAD
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
-||||||| merged common ancestors
-// RUN: %clangxx -fsycl %s -o %t.out
-=======
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
->>>>>>> intel/sycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
-<<<<<<< HEAD
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t.ext.out -fsycl-unnamed-lambda
-||||||| merged common ancestors
-// RUN: %clangxx -fsycl %s -o %t.ext.out -fsycl-unnamed-lambda
-=======
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.ext.out -fsycl-unnamed-lambda
->>>>>>> intel/sycl
 // RUN: %CPU_RUN_PLACEHOLDER %t.ext.out
 
 //==-- kernel_name_class.cpp - SYCL kernel naming variants test ------------==//
@@ -261,7 +249,6 @@ struct Wrapper {
       });
       ++NumTestCases;
 #endif
-
       // TPITD
       // an incomplete vatiadic template specialization class in a namespace at
       // translation unit scope with a defined class as argument declared in

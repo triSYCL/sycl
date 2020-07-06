@@ -1,10 +1,4 @@
-<<<<<<< HEAD
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
-||||||| merged common ancestors
-// RUN: %clangxx -fsycl %s -o %t.out
-=======
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -I %sycl_source_dir %s -o %t.out
->>>>>>> intel/sycl
 // RUN: %t.out
 
 //===- MultipleDevices.cpp - Test checking multi-device execution --------===//

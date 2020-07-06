@@ -43,6 +43,7 @@ subdirectories =
  Passes
  ProfileData
  Support
+ SYCL
  SYCLLowerIR
  TableGen
  TextAPI

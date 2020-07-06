@@ -1,10 +1,4 @@
-<<<<<<< HEAD
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out -fsycl-unnamed-lambda
-||||||| merged common ancestors
-// RUN: %clangxx -fsycl %s -o %t.out -fsycl-unnamed-lambda
-=======
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out -fsycl-unnamed-lambda
->>>>>>> intel/sycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out

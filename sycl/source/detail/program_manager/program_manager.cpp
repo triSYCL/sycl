@@ -428,11 +428,6 @@ std::pair<RT::PiKernel, std::mutex *>
 ProgramManager::getOrCreateKernel(OSModuleHandle M, const context &Context,
                                   const string_class &KernelName,
                                   const program_impl *Prg) {
-  if (DbgProgMgr > 0) {
-    std::cerr << ">>> ProgramManager::getOrCreateKernel(" << M << ", "
-              << getRawSyclObjImpl(Context) << ", " << uniqueName << ")\n";
-  }
-
   RT::PiProgram Program = getBuiltPIProgram(M, Context, KernelName, Prg);
   const ContextImplPtr Ctx = getSyclObjImpl(Context);
 

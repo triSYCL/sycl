@@ -15,7 +15,9 @@
 #ifndef SYCL_XILINX_FPGA_OPT_DECORATE_FUNC_HPP
 #define SYCL_XILINX_FPGA_OPT_DECORATE_FUNC_HPP
 
-namespace cl::sycl::xilinx {
+__SYCL_INLINE_NAMESPACE(cl) {
+
+namespace sycl::xilinx {
 
 /** Apply dataflow execution on functions or loops
 
@@ -51,6 +53,8 @@ template <typename T>
 void pipeline(T functor) {
   _ssdm_op_SpecPipeline(1, 1, 0, 0, "");
   functor();
+}
+
 }
 
 }

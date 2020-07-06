@@ -205,6 +205,7 @@ void *MemoryManager::allocateBufferObject(ContextImplPtr TargetContext,
   const detail::plugin &Plugin = TargetContext->getPlugin();
   Plugin.call<PiApiKind::piMemBufferCreate>(
       TargetContext->getHandleRef(), CreationFlags, Size, UserPtr, &NewMem);
+#endif
   return NewMem;
 }
 
@@ -353,10 +354,10 @@ void copyD2H(SYCLMemObjI *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
     } else {
       if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
                              SrcOffset, DstOffset)) {
-        PI_CALL(RT::piEnqueueMemBufferRead(
+        Plugin.call<PiApiKind::piEnqueueMemBufferRead>(
             Queue, SrcMem,/*blocking_read=*/CL_FALSE, DstOffset[0],
             DstAccessRange[0]*DstAccessRange[1]*DstAccessRange[2],
-            DstMem + DstOffset[0], DepEvents.size(), &DepEvents[0], &OutEvent));
+            DstMem + DstOffset[0], DepEvents.size(), &DepEvents[0], &OutEvent);
         return;
       }
 
@@ -384,7 +385,7 @@ void copyD2D(SYCLMemObjI *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
              unsigned int DimSrc, sycl::range<3> SrcSize,
              sycl::range<3> SrcAccessRange, sycl::id<3> SrcOffset,
              unsigned int SrcElemSize, RT::PiMem DstMem, QueueImplPtr,
-             unsigned int DimDst, sycl::range<3> DstSize, sycl::range<3>,
+             unsigned int DimDst, sycl::range<3> DstSize, sycl::range<3> DstAccessRange,
              sycl::id<3> DstOffset, unsigned int DstElemSize,
              std::vector<RT::PiEvent> DepEvents, RT::PiEvent &OutEvent) {
   assert(SYCLMemObj && "The SYCLMemObj is nullptr");
@@ -405,10 +406,10 @@ void copyD2D(SYCLMemObjI *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
     } else {
       if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
                               SrcOffset, DstOffset)) {
-        PI_CALL(RT::piEnqueueMemBufferCopy(
+        Plugin.call<PiApiKind::piEnqueueMemBufferCopy>(
             Queue, SrcMem, DstMem, SrcOffset[0], DstOffset[0],
-            SrcAccessRange[0]*SrcAccessRange[1]*SrcAccessRange[2],
-            DepEvents.size(), &DepEvents[0], &OutEvent));
+            SrcAccessRange[0] * SrcAccessRange[1] * SrcAccessRange[2],
+            DepEvents.size(), &DepEvents[0], &OutEvent);
         return;
       }
 
@@ -439,7 +440,7 @@ static void copyH2H(SYCLMemObjI *, char *SrcMem, QueueImplPtr,
                     unsigned int DstElemSize, std::vector<RT::PiEvent>,
                     RT::PiEvent &) {
   if ((DimSrc != 1 || DimDst != 1) &&
-      (SrcOffset != id<3>{0, 0, 0} || DstOffset != id<3>{0, 0, 0} ||
+      (SrcOffset != sycl::id<3>{0, 0, 0} || DstOffset != sycl::id<3>{0, 0, 0} ||
        SrcSize != SrcAccessRange || DstSize != DstAccessRange)) {
     throw runtime_error("Not supported configuration of memcpy requested",
                         PI_INVALID_OPERATION);

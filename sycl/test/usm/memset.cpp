@@ -14,18 +14,6 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-<<<<<<< HEAD
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t1.out
-// RUN: %CPU_RUN_PLACEHOLDER %t1.out
-// RUN: %GPU_RUN_PLACEHOLDER %t1.out
-
-||||||| merged common ancestors
-// RUN: %clangxx -fsycl %s -o %t1.out
-// RUN: %CPU_RUN_PLACEHOLDER %t1.out
-// RUN: %GPU_RUN_PLACEHOLDER %t1.out
-
-=======
->>>>>>> intel/sycl
 #include <CL/sycl.hpp>
 
 using namespace cl::sycl;

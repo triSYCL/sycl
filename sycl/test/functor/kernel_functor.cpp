@@ -1,10 +1,4 @@
-<<<<<<< HEAD
-// RUN: %clangxx -std=c++17 -fsycl -o %t.out %s
-||||||| merged common ancestors
-// RUN: %clangxx -fsycl -o %t.out %s
-=======
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -o %t.out %s
->>>>>>> intel/sycl
 // RUN: cd %T
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out

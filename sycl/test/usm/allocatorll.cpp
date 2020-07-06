@@ -1,8 +1,3 @@
-<<<<<<< HEAD
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t1.out
-||||||| merged common ancestors
-// RUN: %clangxx -fsycl %s -o %t1.out
-=======
 // XFAIL: cuda
 // piextUSM*Alloc functions for CUDA are not behaving as described in
 // https://github.com/intel/llvm/blob/sycl/sycl/doc/extensions/USM/USM.adoc
@@ -10,7 +5,6 @@
 //
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t1.out
 // RUN: env SYCL_DEVICE_TYPE=HOST %t1.out
->>>>>>> intel/sycl
 // RUN: %CPU_RUN_PLACEHOLDER %t1.out
 // RUN: %GPU_RUN_PLACEHOLDER %t1.out
 
@@ -46,19 +40,9 @@ int main() {
 
   usm_allocator<Node, usm::alloc::device> alloc(ctxt, dev);
   Node h_cur;
-<<<<<<< HEAD
-
-  d_head = alloc.allocate(1);
-  d_cur = d_head;
-||||||| merged common ancestors
-  
-  d_head = alloc.allocate(1);
-  d_cur = d_head;
-=======
 
   Node *d_head = alloc.allocate(1);
   Node *d_cur = d_head;
->>>>>>> intel/sycl
 
   for (int i = 0; i < numNodes; i++) {
     h_cur.Num = i * 2;

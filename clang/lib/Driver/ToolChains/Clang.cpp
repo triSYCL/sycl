@@ -4160,11 +4160,11 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   // triple of the thing currently being compiled. To do this we would need to
   // remove the reliance on a host side definition (__SYCL_XILINX_ONLY__)
   // inside of InitPreprocessor.cpp
-  if (IsSYCL
-      && C.getSingleOffloadToolChain<Action::OFK_SYCL>()
-          ->getTriple().isXilinxFPGA())
+  if (IsSYCL &&
+      llvm::any_of(
+          llvm::make_range(C.getOffloadToolChains<Action::OFK_SYCL>()),
+          [](auto &T) { return T.second->getTriple().isXilinxFPGA(); }))
     CmdArgs.push_back("-fsycl-xocc");
-
 
   if (IsOpenMPDevice) {
     // We have to pass the triple of the host if compiling for an OpenMP device.

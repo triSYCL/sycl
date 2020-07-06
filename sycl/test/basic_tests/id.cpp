@@ -1,10 +1,4 @@
-<<<<<<< HEAD
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
-||||||| merged common ancestors
-// RUN: %clangxx -fsycl %s -o %t.out
-=======
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
->>>>>>> intel/sycl
 // RUN: %t.out
 // RUN: %clangxx -D__SYCL_DISABLE_ID_TO_INT_CONV__ -fsycl %s -o %t_dis.out
 // RUN: %t_dis.out

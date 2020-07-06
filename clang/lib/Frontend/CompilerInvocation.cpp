@@ -2585,7 +2585,7 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
     if (const Arg *A = Args.getLastArg(OPT_sycl_std_EQ)) {
       Opts.setSYCLVersion(
           llvm::StringSwitch<LangOptions::SYCLVersionList>(A->getValue())
-              .Cases("1.2.1", "121", "sycl-1.2.1",
+              .Cases("2017", "1.2.1", "121", "sycl-1.2.1",
                      LangOptions::SYCLVersionList::sycl_1_2_1)
               .Default(LangOptions::SYCLVersionList::undefined));
 

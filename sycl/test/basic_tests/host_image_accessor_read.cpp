@@ -1,10 +1,4 @@
-<<<<<<< HEAD
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
-||||||| merged common ancestors
-// RUN: %clangxx -fsycl %s -o %t.out
-=======
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
->>>>>>> intel/sycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 
 //==---- host_image_accessor_read.cpp - SYCL host image accessor check ----==//
@@ -76,29 +70,6 @@ int foo(float *image_data) {
       assert((float)Ret_data.z() == 122);
       assert((float)Ret_data.w() == 123);
 
-<<<<<<< HEAD
-    // Test Out-of-bounds access for clamp_to_edge Addressing Mode.
-    auto Sampler2 = cl::sycl::sampler(
-        cl::sycl::coordinate_normalization_mode::unnormalized,
-        cl::sycl::addressing_mode::clamp_to_edge, cl::sycl::filtering_mode::nearest);
-    cl::sycl::cl_int4 OutBnds_Coords{2, 2, 3, 0};
-    cl::sycl::cl_float4 OutBnds_RetData = host_image_acc.read(OutBnds_Coords, Sampler2);
-    assert((float)OutBnds_RetData.x() == 105);
-    assert((float)OutBnds_RetData.y() == 106);
-    assert((float)OutBnds_RetData.z() == 107);
-    assert((float)OutBnds_RetData.w() == 108);
-||||||| merged common ancestors
-    // Test Out-of-bounds access for clamp_to_edge Addressing Mode. 
-    auto Sampler2 = cl::sycl::sampler(
-        cl::sycl::coordinate_normalization_mode::unnormalized,
-        cl::sycl::addressing_mode::clamp_to_edge, cl::sycl::filtering_mode::nearest);
-    cl::sycl::cl_int4 OutBnds_Coords{2, 2, 3, 0};
-    cl::sycl::cl_float4 OutBnds_RetData = host_image_acc.read(OutBnds_Coords, Sampler2);
-    assert((float)OutBnds_RetData.x() == 105);
-    assert((float)OutBnds_RetData.y() == 106);
-    assert((float)OutBnds_RetData.z() == 107);
-    assert((float)OutBnds_RetData.w() == 108);
-=======
       // Test Out-of-bounds access for clamp_to_edge Addressing Mode.
       auto Sampler = cl::sycl::sampler(
           cl::sycl::coordinate_normalization_mode::unnormalized,
@@ -112,7 +83,6 @@ int foo(float *image_data) {
       assert((float)OutBnds_RetData.z() == 107);
       assert((float)OutBnds_RetData.w() == 108);
     }
->>>>>>> intel/sycl
 
   }
   return 0;

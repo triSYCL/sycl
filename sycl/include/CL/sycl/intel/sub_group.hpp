@@ -10,7 +10,6 @@
 
 #include <CL/__spirv/spirv_ops.hpp>
 #include <CL/__spirv/spirv_vars.hpp>
-#endif
 
 #include <CL/sycl/access/access.hpp>
 #include <CL/sycl/detail/defines.hpp>

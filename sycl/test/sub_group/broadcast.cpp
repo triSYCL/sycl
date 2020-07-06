@@ -1,15 +1,7 @@
-<<<<<<< HEAD
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
-// RUN: %clangxx -std=c++17 -fsycl -D SG_GPU %s -o %t_gpu.out
-||||||| merged common ancestors
-// RUN: %clangxx -fsycl %s -o %t.out
-// RUN: %clangxx -fsycl -D SG_GPU %s -o %t_gpu.out
-=======
 // UNSUPPORTED: cuda
 // CUDA compilation and runtime do not yet support sub-groups.
 
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
->>>>>>> intel/sycl
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out

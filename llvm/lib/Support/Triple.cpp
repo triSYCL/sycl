@@ -463,6 +463,9 @@ static Triple::ArchType parseArch(StringRef ArchName) {
                 .StartsWith("spir64", Triple::spir64)
                 .StartsWith("spir", Triple::spir)
                 .StartsWith("kalimba", Triple::kalimba)
+                .Case("shave", Triple::shave)
+                .Case("wasm32", Triple::wasm32)
+                .Case("wasm64", Triple::wasm64)
                 .Case("lanai", Triple::lanai)
                 .Case("renderscript32", Triple::renderscript32)
                 .Case("renderscript64", Triple::renderscript64)
@@ -474,9 +477,7 @@ static Triple::ArchType parseArch(StringRef ArchName) {
                 .Case("fpga32", Triple::fpga32)
                 .Case("fpga64", Triple::fpga64)
                 .Case("ve", Triple::ve)
-                .Case("wasm32", Triple::wasm32)
                 .Default(Triple::UnknownArch);
-
   // Some architectures require special parsing logic just to compute the
   // ArchType result.
   if (AT == Triple::UnknownArch) {
