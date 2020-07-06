@@ -602,6 +602,7 @@ int main(int argc, char **argv) {
   initializeHardwareLoopsPass(Registry);
   initializeTypePromotionPass(Registry);
   initializeSYCLLowerWGScopeLegacyPassPass(Registry);
+  initializeSYCLLowerESIMDLegacyPassPass(Registry);
 
 #ifdef BUILD_EXAMPLES
   initializeExampleIRTransforms(Registry);
