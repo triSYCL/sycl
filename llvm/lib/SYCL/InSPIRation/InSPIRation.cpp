@@ -45,13 +45,20 @@
 #include <boost/container_hash/hash.hpp> // uuid_hasher
 #include <boost/uuid/uuid_generators.hpp> // sha name_gen/generator
 #include <boost/uuid/uuid_io.hpp> // uuid to_string
+#include <boost/version.hpp>
 
 // BOOST_NO_EXCEPTIONS enabled so we need to define our own throw_exception or
 // get a linker error.
 namespace boost {
+#if BOOST_VERSION < 107300
 void throw_exception(std::exception const &e) {
   llvm_unreachable("exception are disabled");
 }
+#else
+void throw_exception(std::exception const &e, boost::source_location const&) {
+  llvm_unreachable("exception are disabled");
+}
+#endif
 } // namespace boost
 
 using namespace llvm;
