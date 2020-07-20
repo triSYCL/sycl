@@ -521,7 +521,7 @@ struct InSPIRation : public ModulePass {
 
     setOpenCLVersion(M);
 
-    setSPIRTriple(M);
+    // setSPIRTriple(M);
 
     /// TODO: Set appropriate layout so the linker doesn't always complain, this
     /// change may be better/more easily applied as something in the Frontend as

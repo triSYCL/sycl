@@ -165,13 +165,13 @@ public:
     detail::workGroupBarrier();
 #ifdef __SYCL_DEVICE_ONLY__
     range<Dimensions> GlobalSize{
-        __spirv::initGlobalSize<Dimensions, range<Dimensions>>()};
+        __device_builtin::initGlobalSize<Dimensions, range<Dimensions>>()};
     range<Dimensions> LocalSize{
-        __spirv::initWorkgroupSize<Dimensions, range<Dimensions>>()};
+        __device_builtin::initWorkgroupSize<Dimensions, range<Dimensions>>()};
     id<Dimensions> GlobalId{
-        __spirv::initGlobalInvocationId<Dimensions, id<Dimensions>>()};
+        __device_builtin::initGlobalInvocationId<Dimensions, id<Dimensions>>()};
     id<Dimensions> LocalId{
-        __spirv::initLocalInvocationId<Dimensions, id<Dimensions>>()};
+        __device_builtin::initLocalInvocationId<Dimensions, id<Dimensions>>()};
 
     // no 'iterate' in the device code variant, because
     // (1) this code is already invoked by each work item as a part of the
@@ -215,13 +215,13 @@ public:
     detail::workGroupBarrier();
 #ifdef __SYCL_DEVICE_ONLY__
     range<Dimensions> GlobalSize{
-        __spirv::initGlobalSize<Dimensions, range<Dimensions>>()};
+        __device_builtin::initGlobalSize<Dimensions, range<Dimensions>>()};
     range<Dimensions> LocalSize{
-        __spirv::initWorkgroupSize<Dimensions, range<Dimensions>>()};
+        __device_builtin::initWorkgroupSize<Dimensions, range<Dimensions>>()};
     id<Dimensions> GlobalId{
-        __spirv::initGlobalInvocationId<Dimensions, id<Dimensions>>()};
+        __device_builtin::initGlobalInvocationId<Dimensions, id<Dimensions>>()};
     id<Dimensions> LocalId{
-        __spirv::initLocalInvocationId<Dimensions, id<Dimensions>>()};
+        __device_builtin::initLocalInvocationId<Dimensions, id<Dimensions>>()};
 
     item<Dimensions, false> GlobalItem =
         detail::Builder::createItem<Dimensions, false>(GlobalSize, GlobalId);

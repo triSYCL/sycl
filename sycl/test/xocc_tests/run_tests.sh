@@ -47,6 +47,8 @@
 # they wish to test regular check-all or even base host or Intel SYCL
 # functionality.
 
+set -e
+
 usage() { echo run_tests: error: $2 >&2; exit $1; }
 
 # The directory that SYCL Clang resides in
@@ -82,6 +84,12 @@ DEFAULT_INTEL_ARGS=(-std=c++2a -fsycl -lOpenCL)
 # $4 Extra Args for Compilation, supplied as a ref to array
 # $5 Extra Args for Execution, supplied as a ref to array
 run_test () {
+  tmpfile=$(mktemp /tmp/run_test.XXXXXX)
+  function finish {
+    cat $tmpfile >> $TEST_OUTPUT_FILE
+    rm "$tmpfile"
+  }
+  trap finish EXIT
   export XCL_EMULATION_MODE=$3
 
   USED_DEFAULT_ARGS=("${DEFAULT_XFPGA_ARGS[@]}")
@@ -103,66 +111,88 @@ run_test () {
     local RUNTIME_ARG_ARR_REF=""
   fi
 
-  echo "" >>  $TEST_OUTPUT_FILE
-  echo "" >>  $TEST_OUTPUT_FILE
-  echo "Compiling $2/$1.cpp" >>  $TEST_OUTPUT_FILE
-  $CLANG_BIN/clang++ "${USED_DEFAULT_ARGS[@]}" "${COMPILATION_ARG_ARR_REF[@]}" \
-    "$2/$1.cpp" -o "$2/$1.$XCL_EMULATION_MODE" >> $TEST_OUTPUT_FILE 2>&1
+  echo "" >>  $tmpfile
+  echo "" >>  $tmpfile
+  echo "Compiling $2/$1.cpp" >>  $tmpfile
+  $CLANG_BIN/clang++ -g "${USED_DEFAULT_ARGS[@]}" "${COMPILATION_ARG_ARR_REF[@]}" \
+    "$2/$1.cpp" -o "$2/$1.$XCL_EMULATION_MODE" >> $tmpfile 2>&1
 
   # The default is not to run for hardware (hw), to run tests for hardware
   # remove the if block, unset XCL_EMULATION_MODE and it should make an attempt
   # to execute the test although you will of course require the correct piece of
   # hardware
   if [[ $3 != "hw" ]]; then
-    echo "" >>  $TEST_OUTPUT_FILE
-    echo "" >>  $TEST_OUTPUT_FILE
-    echo "Executing $2/$1.cpp" >> $TEST_OUTPUT_FILE
+    echo "" >>  $tmpfile
+    echo "" >>  $tmpfile
+    echo "Executing $2/$1.cpp" >> $tmpfile
     ./"$2/$1.$XCL_EMULATION_MODE" "${RUNTIME_ARG_ARR_REF[@]}" \
-      >> $TEST_OUTPUT_FILE 2>&1
+      >> $tmpfile 2>&1
   fi
 
-  echo "" >>  $TEST_OUTPUT_FILE
-  echo "" >>  $TEST_OUTPUT_FILE
+  echo "" >>  $tmpfile
+  echo "" >>  $tmpfile
+
+  finish
 }
+
+interupt() {
+  for job in `jobs -p`
+  do
+    kill -2 $job
+    wait $job
+  done
+}
+
+trap interupt SIGINT
 
 # $1 The emulation mode you wish to compile and execute the list of tests with
 test_list () {
   emconfigutil -f $XILINX_PLATFORM --od simple_tests
 
-  run_test "accessor_copy" "simple_tests" "$1"
-  run_test "explicit_copy" "simple_tests" "$1"
-  run_test "constexpr_correct" "simple_tests" "$1"
-  run_test "id_mangle" "simple_tests" "$1"
-  run_test "integration_header_check" "simple_tests" "$1"
-  run_test "internal_defines" "simple_tests" "$1"
-  run_test "math_mangle" "simple_tests" "$1"
-  run_test "multi_parallel_for_ND_range" "simple_tests" "$1"
-  run_test "parallel_for_ND_range" "simple_tests" "$1"
-  run_test "reqd_work_group_size" "simple_tests" "$1"
+  wait_jobs() {
+    for job in `jobs -p`
+    do
+      wait $job
+    done
+  }
+  trap wait_jobs EXIT
+
+  run_test "accessor_copy" "simple_tests" "$1" &
+  run_test "explicit_copy" "simple_tests" "$1" &
+  run_test "constexpr_correct" "simple_tests" "$1" &
+  run_test "id_mangle" "simple_tests" "$1" &
+  run_test "integration_header_check" "simple_tests" "$1" &
+  run_test "internal_defines" "simple_tests" "$1" &
+  run_test "math_mangle" "simple_tests" "$1" &
+  run_test "multi_parallel_for_ND_range" "simple_tests" "$1" &
+  run_test "parallel_for_ND_range" "simple_tests" "$1" &
+  run_test "reqd_work_group_size" "simple_tests" "$1" &
 #  Note: There appears to be a race condition in hw_emu for
 #  single_task_vector_add, sometimes passes sometimes fails.
-  run_test "single_task_vector_add" "simple_tests" "$1"
-  run_test "vector_math" "simple_tests" "$1"
-  run_test "simple_struct" "simple_tests" "$1"
-  run_test "ternary_compare" "simple_tests" "$1"
-  run_test "kernel_uint_name" "simple_tests" "$1"
+  run_test "single_task_vector_add" "simple_tests" "$1" &
+  run_test "vector_math" "simple_tests" "$1" &
+  run_test "simple_struct" "simple_tests" "$1" &
+  run_test "ternary_compare" "simple_tests" "$1" &
+  run_test "kernel_uint_name" "simple_tests" "$1" &
 
   emconfigutil -f $XILINX_PLATFORM --od sdaccel_ports/vision/edge_detection
 
   # This test is a bit of a monster for time consumption when run in hw_emu,
   # if it compiles and runs the first few iterations...it's a success
-  COMPILER_ARG_ARR=(`pkg-config --libs opencv`)
+  COMPILER_ARG_ARR=(`pkg-config --libs opencv4`)
   RUNTIME_ARG_ARR=(sdaccel_ports/vision/edge_detection/data/input/eiffel.bmp)
   run_test "edge_detection" "sdaccel_ports/vision/edge_detection" "$1" \
-    COMPILER_ARG_ARR RUNTIME_ARG_ARR
+    COMPILER_ARG_ARR RUNTIME_ARG_ARR &
+  
+  wait_jobs
 }
 
 # compile and test for intel, don't want to break existing functionality.
-test_list "intel"
+# test_list "intel"
 
 # Compile and Run Tests for Software and Hardware Emulation
 test_list "sw_emu"
-test_list "hw_emu"
+# test_list "hw_emu"
 # I would advise only running this on a subset of the tests or if you have a
 # weekend to run the tests.
 # The sycl-xocc script doesn't play well with multiple parallel invocations of

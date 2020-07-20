@@ -70,8 +70,10 @@ struct KernelPropGen : public ModulePass {
     SmallString<256> TDir;
     llvm::sys::path::system_temp_directory(true, TDir);
     // Make sure to rip off the directories for the filename
-    llvm::Twine file = "KernelProperties_" +
-      llvm::sys::path::filename(M.getSourceFileName());
+    std::string TmpStr =
+        ("KernelProperties_" + llvm::sys::path::filename(M.getSourceFileName()))
+            .str();
+    llvm::Twine file = TmpStr;
     llvm::sys::path::append(TDir, file);
     llvm::sys::path::replace_extension(TDir, "bash",
       llvm::sys::path::Style::native);

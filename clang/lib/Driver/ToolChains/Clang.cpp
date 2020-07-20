@@ -3660,6 +3660,9 @@ static void RenderDebugOptions(const ToolChain &TC, const Driver &D,
                                bool EmitCodeView, ArgStringList &CmdArgs,
                                codegenoptions::DebugInfoKind &DebugInfoKind,
                                DwarfFissionKind &DwarfFission) {
+  if (T.isXilinxFPGA())
+    return;
+
   if (Args.hasFlag(options::OPT_fdebug_info_for_profiling,
                    options::OPT_fno_debug_info_for_profiling, false) &&
       checkDebugInfoOption(
@@ -4095,6 +4098,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-fsycl");
     CmdArgs.push_back("-fsycl-is-device");
     CmdArgs.push_back("-fdeclare-spirv-builtins");
+    CmdArgs.push_back("-fsycl-xocc");
 
     if (Args.hasFlag(options::OPT_fsycl_esimd, options::OPT_fno_sycl_esimd,
                      false))
@@ -4154,17 +4158,6 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-sycl-std=2017");
     }
   }
-
-  // \todo Extend this to use getOffloadToolChains<Action::OFK_SYCL> and loop
-  // over to check for the Xilinx triple or even better make this reliant on the
-  // triple of the thing currently being compiled. To do this we would need to
-  // remove the reliance on a host side definition (__SYCL_XILINX_ONLY__)
-  // inside of InitPreprocessor.cpp
-  if (IsSYCL &&
-      llvm::any_of(
-          llvm::make_range(C.getOffloadToolChains<Action::OFK_SYCL>()),
-          [](auto &T) { return T.second->getTriple().isXilinxFPGA(); }))
-    CmdArgs.push_back("-fsycl-xocc");
 
   if (IsOpenMPDevice) {
     // We have to pass the triple of the host if compiling for an OpenMP device.

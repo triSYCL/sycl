@@ -428,7 +428,10 @@ std::pair<RT::PiKernel, std::mutex *>
 ProgramManager::getOrCreateKernel(OSModuleHandle M, const context &Context,
                                   const string_class &KernelName,
                                   const program_impl *Prg) {
-  RT::PiProgram Program = getBuiltPIProgram(M, Context, KernelName, Prg);
+  std::string KName = KernelName;
+  if (Context.get_platform().get_info<info::platform::vendor>() == "Xilinx")
+    KName = getUniqueName(KernelName.c_str());
+  RT::PiProgram Program = getBuiltPIProgram(M, Context, KName, Prg);
   const ContextImplPtr Ctx = getSyclObjImpl(Context);
 
   using PiKernelT = KernelProgramCache::PiKernelT;
@@ -444,20 +447,20 @@ ProgramManager::getOrCreateKernel(OSModuleHandle M, const context &Context,
       [&Program](const Locked<KernelCacheT> &LockedCache) -> KernelByNameT & {
     return LockedCache.get()[Program];
   };
-  auto BuildF = [this, &Program, &KernelName, &Ctx] {
+  auto BuildF = [this, &Program, &KName, &Ctx] {
     PiKernelT *Result = nullptr;
 
     // TODO need some user-friendly error/exception
     // instead of currently obscure one
     const detail::plugin &Plugin = Ctx->getPlugin();
-    Plugin.call<PiApiKind::piKernelCreate>(Program, KernelName.c_str(),
+    Plugin.call<PiApiKind::piKernelCreate>(Program, KName.c_str(),
                                            &Result);
 
     return Result;
   };
 
   auto BuildResult = static_cast<KernelProgramCache::BuildResultKernel *>(
-      getOrBuild<PiKernelT, invalid_object_error>(Cache, KernelName, AcquireF,
+      getOrBuild<PiKernelT, invalid_object_error>(Cache, KName, AcquireF,
                                                   GetF, BuildF));
   return std::make_pair(BuildResult->Ptr.load(), &(BuildResult->MKernelMutex));
 }

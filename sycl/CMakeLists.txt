@@ -308,6 +308,7 @@ add_custom_target( sycl-toolchain
           llvm-spirv
           llvm-link
           sycl-xocc
+          opt
           llvm-objcopy
           sycl-post-link
           sycl-ls

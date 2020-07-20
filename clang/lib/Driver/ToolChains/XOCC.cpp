@@ -88,10 +88,12 @@ void SYCL::LinkerXOCC::constructSYCLXOCCCommand(
   ArgStringList CmdArgs;
 
   // Script Arg $1, directory of xocc binary (SDx's bin)
+  assert(!TC.XOCCInstallation.getBinPath().empty());
   CmdArgs.push_back(Args.MakeArgString(TC.XOCCInstallation.getBinPath()));
 
   // Script Arg $2, directory of the Clang driver, where the sycl-xocc script
   // opt binary and llvm-linker binary should be contained among other things
+  assert(!C.getDriver().Dir.empty());
   CmdArgs.push_back(Args.MakeArgString(C.getDriver().Dir));
 
   // Script Arg $3, the original source file name minus the file extension
@@ -99,6 +101,7 @@ void SYCL::LinkerXOCC::constructSYCLXOCCCommand(
   SmallString<256> SrcName =
     llvm::sys::path::filename(Inputs[0].getBaseInput());
   llvm::sys::path::replace_extension(SrcName, "");
+  assert(!SrcName.empty());
   CmdArgs.push_back(Args.MakeArgString(SrcName));
 
   // Script Arg $4, input file name, distinct from Arg $3 as this is the .o
@@ -106,16 +109,19 @@ void SYCL::LinkerXOCC::constructSYCLXOCCCommand(
   // mangled temporary name
   // \todo support more than one input, there may be multiple in some cases as
   // this is a "linker" stage, can refer to SYCL.cpp for an example
+  assert(Inputs[0].getFilename()[0]);
   CmdArgs.push_back(Args.MakeArgString(Inputs[0].getFilename()));
 
   // Script Arg $5, temporary directory path, used to dump a lot of intermediate
   // files that no one needs to know about unless they're debugging
   SmallString<256> TmpDir;
   llvm::sys::path::system_temp_directory(true, TmpDir);
+  assert(!TmpDir.empty());
   CmdArgs.push_back(Args.MakeArgString(TmpDir));
 
   // Script Arg $6, the name of the final output .xcl binary file after
   // compilation and linking is complete
+  assert(Output.getFilename()[0]);
   CmdArgs.push_back(Output.getFilename());
 
   // Path to sycl-xocc script

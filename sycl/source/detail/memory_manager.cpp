@@ -10,6 +10,10 @@
 #include <detail/context_impl.hpp>
 #include <detail/event_impl.hpp>
 #include <detail/queue_impl.hpp>
+#ifdef __SYCL_XILINX_ONLY__
+# include <CL/sycl/xilinx/fpga.hpp>
+# include <CL/cl_ext_xilinx.h>
+#endif
 
 #include <algorithm>
 #include <cassert>
@@ -150,6 +154,7 @@ void *MemoryManager::allocateBufferObject(ContextImplPtr TargetContext,
                                      : PI_MEM_FLAGS_HOST_PTR_USE;
 
   RT::PiMem NewMem;
+  const detail::plugin &Plugin = TargetContext->getPlugin();
 
 #if (defined(__SYCL_XILINX_ONLY__))
   // This currently enforces assignment of all buffers to DDR bank 0 via
@@ -184,7 +189,7 @@ void *MemoryManager::allocateBufferObject(ContextImplPtr TargetContext,
   // makes it difficult to pass information to the kernel) and instead have it
   // as part of the kernel name via a kernel property similar to
   // the way we handle reqd_work_group_size at the moment
-  if (TargetContext->get_platform().get_info<info::platform::vendor>() ==
+  if (TargetContext->getPlatformImpl()->get_info<info::platform::vendor>() ==
       "Xilinx") {
     /// \TODO: Create PI wrapper for this Xilinx OpenCL extension stuff or work
     /// out a better way to enforce buffer DDR bank assignments, lazy rather
@@ -192,17 +197,15 @@ void *MemoryManager::allocateBufferObject(ContextImplPtr TargetContext,
     cl_mem_ext_ptr_t mext = {0};
     mext.banks = 0 | XCL_MEM_TOPOLOGY;
     mext.host_ptr = UserPtr;
-    Plugin.call <
-        PiApiKind::piMemBufferCreate(TargetContext->getHandleRef(),
-                                     CreationFlags | CL_MEM_EXT_PTR_XILINX,
-                                     Size, &mext, &NewMem);
+    Plugin.call<PiApiKind::piMemBufferCreate>(
+        TargetContext->getHandleRef(), CreationFlags | CL_MEM_EXT_PTR_XILINX,
+        Size, &mext, &NewMem);
   } else {
-    Plugin.call < PiApiKind::piMemBufferCreate(TargetContext->getHandleRef(),
-                                               CreationFlags, Size, UserPtr,
-                                               &NewMem);
+    Plugin.call<PiApiKind::piMemBufferCreate>(
+        TargetContext->getHandleRef(), CreationFlags, Size, UserPtr, &NewMem);
   }
 #else
-  const detail::plugin &Plugin = TargetContext->getPlugin();
+#error WTF
   Plugin.call<PiApiKind::piMemBufferCreate>(
       TargetContext->getHandleRef(), CreationFlags, Size, UserPtr, &NewMem);
 #endif
