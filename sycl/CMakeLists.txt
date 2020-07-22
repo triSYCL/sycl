@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 
 project(sycl-solution)
 # Requirements
-set(CMAKE_CXX_STANDARD 14)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 option(SYCL_ENABLE_WERROR "Treat all warnings as errors in SYCL project" OFF)
@@ -184,6 +184,49 @@ install(DIRECTORY ${OPENCL_INCLUDE}/CL
   COMPONENT opencl-headers
 )
 
+# Try to find and include XRT OpenCL in the build components to allow access to
+# Xilinx OpenCL extensions in the source files when compiling the runtimes
+# libSYCL.so, this unfortunately isn't relevant when a user is compiling there
+# own files, they'll still have to add -I/opt/xilinx/xrt/include/.
+# It's only relevant to the Clang build system and the libSYCL.so file that's
+# compiled, the header files are recompiled on a per application basis as far as
+# I'm aware.
+# \todo We could enforce the download and installation of the XRT runtime
+# similarly to what's done with the OpenCL headers at the moment that makes
+# things a little easier. As it wouldn't matter if someone only wanted to build
+# to run on another platform, they would always have XRT and it's extensions
+# wouldn't break the runtime by being missing
+if (DEFINED ENV{XILINX_XRT})
+  if(EXISTS "$ENV{XILINX_XRT}/include" AND EXISTS "$ENV{XILINX_XRT}/lib")
+    message(STATUS "XILINX_XRT enabled")
+    message(STATUS "XILINX_XRT Include: $ENV{XILINX_XRT}/include")
+    #message(STATUS "XILINX_XRT Lib: $ENV{XILINX_XRT}/lib")
+
+    # Activate alternate code paths containing XRT extensions + normal SYCL code
+    # path. Rather than only compiling the normal SYCL code path. When defined
+    # by the CMake build system __SYCL_XILINX_ONLY__ is only really relevant to
+    # source files that get compiled into the libSYCL.so library. The compiler
+    # still has to internally define __SYCL_XILINX_ONLY__ when compiling user
+    # code as it's still required by the headers that get compiled.
+    # NOTE: I chose to use __SYCL_XILINX_ONLY__ for both the build define and
+    # compiler generated define to cut down on the amount of macro usage, they
+    # also at the time of creation do very similar things, this may change in
+    # the future but I think it will be unlikely. As __SYCL_XILINX_ONLY__ is
+    # mostly related to enforcing XILINX only code paths.
+    add_definitions(-D__SYCL_XILINX_ONLY__)
+
+    # Add SYSTEM infront to cheat the build system into thinking its a system
+    # include and silencing warnings from XRT when building... don't want more
+    # compiler noise that we can't control
+    include_directories(SYSTEM $ENV{XILINX_XRT}/include)
+    # link_directories(SYSTEM $ENV{XILINX_XRT}/lib)
+  else()
+    message(STATUS "Invalid XILINX_XRT no lib or include directories found")
+  endif()
+else()
+  message(STATUS "XILINX_XRT not set, xilinx cl ext disabled")
+endif()
+
 option(SYCL_BUILD_PI_CUDA
   "Enables the CUDA backend for the Plugin Interface" OFF)
 
@@ -264,6 +307,8 @@ add_custom_target( sycl-toolchain
           llvm-no-spir-kernel
           llvm-spirv
           llvm-link
+          sycl-xocc
+          opt
           llvm-objcopy
           sycl-post-link
           sycl-ls

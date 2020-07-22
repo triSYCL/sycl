@@ -47,6 +47,7 @@
 #include "ToolChains/VE.h"
 #include "ToolChains/WebAssembly.h"
 #include "ToolChains/XCore.h"
+#include "ToolChains/XOCC.h"
 #include "clang/Basic/Version.h"
 #include "clang/Config/config.h"
 #include "clang/Driver/Action.h"
@@ -632,7 +633,7 @@ Driver::OpenMPRuntimeKind Driver::getOpenMPRuntime(const ArgList &Args) const {
 
 static bool isValidSYCLTriple(llvm::Triple T) {
   // NVPTX is valid for SYCL.
-  if (T.isNVPTX())
+  if (T.isNVPTX() || T.isXilinxSYCLDevice())
     return true;
   // Check for invalid SYCL device triple values.
   // Non-SPIR arch.
@@ -689,6 +690,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
     auto OFK = Action::OFK_HIP;
     DeviceTripleStr = "amdgcn-amd-amdhsa";
     llvm::Triple HIPTriple(DeviceTripleStr);
+
     // Use the HIP and host triples as the key into
     // getOffloadingDeviceToolChain, because the device toolchain we create
     // depends on both.
@@ -3901,6 +3903,7 @@ class OffloadingActionBuilder final {
             C.MakeAction<LinkJobAction>(LinkObjects, types::TY_LLVM_BC);
         // setup some flags upfront
         auto isNVPTX = (*TC)->getTriple().isNVPTX();
+        bool isXilinxFPGA = (*TC)->getTriple().isXilinxFPGA();
 
         if (isNVPTX && DeviceCodeSplit) {
           // TODO Temporary limitation, need to support code splitting for PTX
@@ -3928,67 +3931,73 @@ class OffloadingActionBuilder final {
         types::ID PostLinkOutType = isNVPTX || !MultiFileActionDeps
                                         ? types::TY_LLVM_BC
                                         : types::TY_Tempfiletable;
-        auto *PostLinkAction = C.MakeAction<SYCLPostLinkJobAction>(
-            DeviceLinkAction, PostLinkOutType);
-        PostLinkAction->setRTSetsSpecConstants(!isAOT);
-
-        if (isNVPTX) {
-          Action *FinAction =
-              finalizeNVPTXDependences(PostLinkAction, (*TC)->getTriple());
-          WrapperInputs.push_back(FinAction);
+        if (isXilinxFPGA) {
+          WrapperInputs.push_back(DeviceLinkAction);
         } else {
-          // For SPIRV-based targets - translate to SPIRV then optionally
-          // compile ahead-of-time to native architecture
-          Action *SPIRVInput = PostLinkAction;
-          constexpr char COL_CODE[] = "Code";
+          auto *PostLinkAction = C.MakeAction<SYCLPostLinkJobAction>(
+              DeviceLinkAction, PostLinkOutType);
+          PostLinkAction->setRTSetsSpecConstants(!isAOT);
 
-          if (MultiFileActionDeps) {
-            auto *ExtractIRFilesAction = C.MakeAction<FileTableTformJobAction>(
-                PostLinkAction, types::TY_Tempfilelist);
-            // single column w/o title fits TY_Tempfilelist format
-            ExtractIRFilesAction->addExtractColumnTform(COL_CODE,
-                                                        false /*drop titles*/);
-            SPIRVInput = ExtractIRFilesAction;
-          }
-          types::ID SPIRVOutType =
-              MultiFileActionDeps ? types::TY_Tempfilelist : types::TY_SPIRV;
-          Action *BuildCodeAction =
-              C.MakeAction<SPIRVTranslatorJobAction>(SPIRVInput, SPIRVOutType);
+          if (isNVPTX) {
+            Action *FinAction =
+                finalizeNVPTXDependences(PostLinkAction, (*TC)->getTriple());
+            WrapperInputs.push_back(FinAction);
+          } else {
+            // For SPIRV-based targets - translate to SPIRV then optionally
+            // compile ahead-of-time to native architecture
+            Action *SPIRVInput = PostLinkAction;
+            constexpr char COL_CODE[] = "Code";
 
-          // After the Link, wrap the files before the final host link
-          if (isSpirvAOT) {
-            types::ID OutType = types::TY_Tempfilelist;
-            if (!DeviceCodeSplit) {
-              OutType = (TT.getSubArch() == llvm::Triple::SPIRSubArch_fpga)
-                            ? FPGAOutType
-                            : types::TY_Image;
+            if (MultiFileActionDeps) {
+              auto *ExtractIRFilesAction =
+                  C.MakeAction<FileTableTformJobAction>(PostLinkAction,
+                                                        types::TY_Tempfilelist);
+              // single column w/o title fits TY_Tempfilelist format
+              ExtractIRFilesAction->addExtractColumnTform(
+                  COL_CODE, false /*drop titles*/);
+              SPIRVInput = ExtractIRFilesAction;
             }
-            // Do the additional Ahead of Time compilation when the specific
-            // triple calls for it (provided a valid subarch).
-            ActionList BEInputs;
-            BEInputs.push_back(BuildCodeAction);
-            for (Action *A : FPGAObjectInputs) {
-              // Send any known objects through the unbundler to grab the
-              // dependency file associated.
-              ActionList AL;
-              AL.push_back(A);
-              Action *UnbundleAction = C.MakeAction<OffloadUnbundlingJobAction>(
-                  AL, types::TY_FPGA_Dependencies);
-              BEInputs.push_back(UnbundleAction);
+            types::ID SPIRVOutType =
+                MultiFileActionDeps ? types::TY_Tempfilelist : types::TY_SPIRV;
+            Action *BuildCodeAction = C.MakeAction<SPIRVTranslatorJobAction>(
+                SPIRVInput, SPIRVOutType);
+
+            // After the Link, wrap the files before the final host link
+            if (isSpirvAOT) {
+              types::ID OutType = types::TY_Tempfilelist;
+              if (!DeviceCodeSplit) {
+                OutType = (TT.getSubArch() == llvm::Triple::SPIRSubArch_fpga)
+                              ? FPGAOutType
+                              : types::TY_Image;
+              }
+              // Do the additional Ahead of Time compilation when the specific
+              // triple calls for it (provided a valid subarch).
+              ActionList BEInputs;
+              BEInputs.push_back(BuildCodeAction);
+              for (Action *A : FPGAObjectInputs) {
+                // Send any known objects through the unbundler to grab the
+                // dependency file associated.
+                ActionList AL;
+                AL.push_back(A);
+                Action *UnbundleAction =
+                    C.MakeAction<OffloadUnbundlingJobAction>(
+                        AL, types::TY_FPGA_Dependencies);
+                BEInputs.push_back(UnbundleAction);
+              }
+              for (const auto &A : DeviceLibObjects)
+                BEInputs.push_back(A);
+              BuildCodeAction =
+                  C.MakeAction<BackendCompileJobAction>(BEInputs, OutType);
             }
-            for (const auto &A : DeviceLibObjects)
-              BEInputs.push_back(A);
-            BuildCodeAction =
-                C.MakeAction<BackendCompileJobAction>(BEInputs, OutType);
+            if (MultiFileActionDeps) {
+              ActionList TformInputs{PostLinkAction, BuildCodeAction};
+              auto *ReplaceFilesAction = C.MakeAction<FileTableTformJobAction>(
+                  TformInputs, types::TY_Tempfiletable);
+              ReplaceFilesAction->addReplaceColumnTform(COL_CODE, COL_CODE);
+              BuildCodeAction = ReplaceFilesAction;
+            }
+            WrapperInputs.push_back(BuildCodeAction);
           }
-          if (MultiFileActionDeps) {
-            ActionList TformInputs{PostLinkAction, BuildCodeAction};
-            auto *ReplaceFilesAction = C.MakeAction<FileTableTformJobAction>(
-                TformInputs, types::TY_Tempfiletable);
-            ReplaceFilesAction->addReplaceColumnTform(COL_CODE, COL_CODE);
-            BuildCodeAction = ReplaceFilesAction;
-          }
-          WrapperInputs.push_back(BuildCodeAction);
         }
         // After the Link, wrap the files before the final host link
         auto *DeviceWrappingAction = C.MakeAction<OffloadWrapperJobAction>(
@@ -4857,7 +4866,7 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
     OffloadBuilder.addDeviceDependencesToHostAction(
         Current, InputArg, phases::Link, PL.back(), PL);
   };
-  for (const StringRef &LA : LinkArgs) {
+  for (const StringRef LA : LinkArgs) {
     // At this point, we will process the archives for FPGA AOCO and individual
     // archive unbundling for Windows.
     if (!isStaticArchiveFile(LA))
@@ -6576,6 +6585,11 @@ const ToolChain &Driver::getOffloadingDeviceToolChain(const ArgList &Args,
           case llvm::Triple::spir:
           case llvm::Triple::spir64:
             TC = std::make_unique<toolchains::SYCLToolChain>(
+              *this, Target, HostTC, Args);
+            break;
+          case llvm::Triple::fpga32:
+          case llvm::Triple::fpga64:
+            TC = std::make_unique<toolchains::XOCCToolChain>(
               *this, Target, HostTC, Args);
             break;
           case llvm::Triple::nvptx:

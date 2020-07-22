@@ -22,6 +22,10 @@
 #include <detail/program_impl.hpp>
 #include <detail/program_manager/program_manager.hpp>
 
+#include <boost/container_hash/hash.hpp> // uuid_hasher
+#include <boost/uuid/uuid_generators.hpp> // sha name_gen/generator
+#include <boost/uuid/uuid_io.hpp> // uuid to_string
+
 #include <algorithm>
 #include <cassert>
 #include <cstdlib>
@@ -401,16 +405,33 @@ RT::PiProgram ProgramManager::getBuiltPIProgram(OSModuleHandle M,
   return BuildResult->Ptr.load();
 }
 
+// Gets a unique name to a kernel name which is currently computed from a SHA-1
+// hash of the kernel name. This unique name is used in place of the kernels
+// mangled name inside of xocc computed binaries containing the kernels.
+//
+// This is in part due to a limitation of xocc in which it requires kernel names
+// to be passed to it when compiling kernels and it doesn't handle certain
+// characters in mangled names very well e.g. '$'.
+static std::string getUniqueName(const char *KernelName) {
+
+  boost::uuids::name_generator_latest gen{boost::uuids::ns::dns()};
+
+  boost::uuids::uuid udoc = gen(KernelName);
+
+  boost::hash<boost::uuids::uuid> uuid_hasher;
+  std::size_t uuid_hash_value = uuid_hasher(udoc);
+
+  return "xSYCL" + std::to_string(uuid_hash_value);
+}
+
 std::pair<RT::PiKernel, std::mutex *>
 ProgramManager::getOrCreateKernel(OSModuleHandle M, const context &Context,
                                   const string_class &KernelName,
                                   const program_impl *Prg) {
-  if (DbgProgMgr > 0) {
-    std::cerr << ">>> ProgramManager::getOrCreateKernel(" << M << ", "
-              << getRawSyclObjImpl(Context) << ", " << KernelName << ")\n";
-  }
-
-  RT::PiProgram Program = getBuiltPIProgram(M, Context, KernelName, Prg);
+  std::string KName = KernelName;
+  if (Context.get_platform().get_info<info::platform::vendor>() == "Xilinx")
+    KName = getUniqueName(KernelName.c_str());
+  RT::PiProgram Program = getBuiltPIProgram(M, Context, KName, Prg);
   const ContextImplPtr Ctx = getSyclObjImpl(Context);
 
   using PiKernelT = KernelProgramCache::PiKernelT;
@@ -426,20 +447,20 @@ ProgramManager::getOrCreateKernel(OSModuleHandle M, const context &Context,
       [&Program](const Locked<KernelCacheT> &LockedCache) -> KernelByNameT & {
     return LockedCache.get()[Program];
   };
-  auto BuildF = [this, &Program, &KernelName, &Ctx] {
+  auto BuildF = [this, &Program, &KName, &Ctx] {
     PiKernelT *Result = nullptr;
 
     // TODO need some user-friendly error/exception
     // instead of currently obscure one
     const detail::plugin &Plugin = Ctx->getPlugin();
-    Plugin.call<PiApiKind::piKernelCreate>(Program, KernelName.c_str(),
+    Plugin.call<PiApiKind::piKernelCreate>(Program, KName.c_str(),
                                            &Result);
 
     return Result;
   };
 
   auto BuildResult = static_cast<KernelProgramCache::BuildResultKernel *>(
-      getOrBuild<PiKernelT, invalid_object_error>(Cache, KernelName, AcquireF,
+      getOrBuild<PiKernelT, invalid_object_error>(Cache, KName, AcquireF,
                                                   GetF, BuildF));
   return std::make_pair(BuildResult->Ptr.load(), &(BuildResult->MKernelMutex));
 }

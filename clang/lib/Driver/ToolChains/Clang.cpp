@@ -3660,6 +3660,9 @@ static void RenderDebugOptions(const ToolChain &TC, const Driver &D,
                                bool EmitCodeView, ArgStringList &CmdArgs,
                                codegenoptions::DebugInfoKind &DebugInfoKind,
                                DwarfFissionKind &DwarfFission) {
+  if (T.isXilinxFPGA())
+    return;
+
   if (Args.hasFlag(options::OPT_fdebug_info_for_profiling,
                    options::OPT_fno_debug_info_for_profiling, false) &&
       checkDebugInfoOption(
@@ -4095,6 +4098,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-fsycl");
     CmdArgs.push_back("-fsycl-is-device");
     CmdArgs.push_back("-fdeclare-spirv-builtins");
+    CmdArgs.push_back("-fsycl-xocc");
 
     if (Args.hasFlag(options::OPT_fsycl_esimd, options::OPT_fno_sycl_esimd,
                      false))
@@ -4125,6 +4129,16 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     if (Args.hasFlag(options::OPT_fsycl_allow_func_ptr,
                      options::OPT_fno_sycl_allow_func_ptr, false)) {
       CmdArgs.push_back("-fsycl-allow-func-ptr");
+    }
+
+    if (Args.hasFlag(options::OPT_fsycl_allow_virtual,
+                     options::OPT_fno_sycl_allow_virtual, false)) {
+      CmdArgs.push_back("-fsycl-allow-virtual");
+    }
+
+    if (Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
+                     options::OPT_fno_sycl_allow_variadic_func, false)) {
+      CmdArgs.push_back("-fsycl-allow-variadic-func");
     }
 
     if (!SYCLStdArg) {

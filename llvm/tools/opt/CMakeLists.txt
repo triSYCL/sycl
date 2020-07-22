@@ -25,6 +25,10 @@ set(LLVM_LINK_COMPONENTS
   TransformUtils
   Vectorize
   Passes
+  ASFixer
+  InSPIRation
+  KernelPropGen
+  XOCCIRDowngrader
   )
 
 add_llvm_tool(opt

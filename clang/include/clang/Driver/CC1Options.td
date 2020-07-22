@@ -920,6 +920,9 @@ def fopenmp_host_ir_file_path : Separate<["-"], "fopenmp-host-ir-file-path">,
 // SYCL Options
 //===----------------------------------------------------------------------===//
 
+def fsycl_xocc : Flag<["-"], "fsycl-xocc">,
+  HelpText<"Indicates that the compiler is using the Xilinx xocc backend, "
+           "allowing optional xocc requirements, e.g. compiler defines">;
 def fsycl_is_device : Flag<["-"], "fsycl-is-device">,
   HelpText<"Generate code for SYCL device.">;
 def fsycl_is_host : Flag<["-"], "fsycl-is-host">,
@@ -933,6 +936,12 @@ def fsycl_std_layout_kernel_params: Flag<["-"], "fsycl-std-layout-kernel-params"
 def fsycl_allow_func_ptr : Flag<["-"], "fsycl-allow-func-ptr">,
   HelpText<"Allow function pointers in SYCL device.">;
 def fno_sycl_allow_func_ptr : Flag<["-"], "fno-sycl-allow-func-ptr">;
+def fsycl_allow_virtual : Flag<["-"], "fsycl-allow-virtual">,
+  HelpText<"Allow virtual functions and types in SYCL device.">;
+def fno_sycl_allow_virtual : Flag<["-"], "fno-sycl-allow-virtual">;
+def fsycl_allow_variadic_func : Flag<["-"], "fsycl-allow-variadic-func">,
+  HelpText<"Allow variadic functions in SYCL device.">;
+def fno_sycl_allow_variadic_func : Flag<["-"], "fno-sycl-allow-variadic-func">;
 def fsycl_enable_optimizations: Flag<["-"], "fsycl-enable-optimizations">,
   HelpText<"Experimental flag enabling standard optimization in the front-end.">;
 
