@@ -205,7 +205,6 @@ void *MemoryManager::allocateBufferObject(ContextImplPtr TargetContext,
         TargetContext->getHandleRef(), CreationFlags, Size, UserPtr, &NewMem);
   }
 #else
-#error WTF
   Plugin.call<PiApiKind::piMemBufferCreate>(
       TargetContext->getHandleRef(), CreationFlags, Size, UserPtr, &NewMem);
 #endif

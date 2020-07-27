@@ -25,7 +25,7 @@
 #include "llvm/Demangle/Demangle.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/CallingConv.h"
-#include "llvm/IR/CallSite.h"
+#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
@@ -34,6 +34,7 @@
 #include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
 #define BOOST_NO_EXCEPTIONS
@@ -44,12 +45,21 @@
 #include <boost/container_hash/hash.hpp> // uuid_hasher
 #include <boost/uuid/uuid_generators.hpp> // sha name_gen/generator
 #include <boost/uuid/uuid_io.hpp> // uuid to_string
+#include <boost/version.hpp>
 
 // BOOST_NO_EXCEPTIONS enabled so we need to define our own throw_exception or
 // get a linker error.
 namespace boost {
-  void throw_exception(std::exception const & e) {}
+#if BOOST_VERSION < 107300
+void throw_exception(std::exception const &e) {
+  llvm_unreachable("exception are disabled");
 }
+#else
+void throw_exception(std::exception const &e, boost::source_location const&) {
+  llvm_unreachable("exception are disabled");
+}
+#endif
+} // namespace boost
 
 using namespace llvm;
 
@@ -440,7 +450,7 @@ struct InSPIRation : public ModulePass {
           applyKernelProperties(F);
           setUniqueName(F);
           giveNameToArguments(F);
-          ssdmAddressSpaceFix(F);
+          // ssdmAddressSpaceFix(F);
 
         /// \todo Possible: We don't modify declarations right now as this will
         /// destroy the names of SPIR/CL intrinsics as they aren't actually
@@ -511,7 +521,7 @@ struct InSPIRation : public ModulePass {
 
     setOpenCLVersion(M);
 
-    setSPIRTriple(M);
+    // setSPIRTriple(M);
 
     /// TODO: Set appropriate layout so the linker doesn't always complain, this
     /// change may be better/more easily applied as something in the Frontend as

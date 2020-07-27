@@ -4093,12 +4093,19 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   Arg *SYCLStdArg = Args.getLastArg(options::OPT_sycl_std_EQ);
 
+  bool IsSYCLXOCC = false;
+  if (llvm::any_of(llvm::make_range(C.getOffloadToolChains<Action::OFK_SYCL>()),
+                   [](const auto &Elem) {
+                     return Elem.second->getTriple().isXilinxFPGA();
+                   }))
+    IsSYCLXOCC = true;
+
   if (UseSYCLTriple) {
     // We want to compile sycl kernels.
     CmdArgs.push_back("-fsycl");
     CmdArgs.push_back("-fsycl-is-device");
+    // if (!IsSYCLXOCC)
     CmdArgs.push_back("-fdeclare-spirv-builtins");
-    CmdArgs.push_back("-fsycl-xocc");
 
     if (Args.hasFlag(options::OPT_fsycl_esimd, options::OPT_fno_sycl_esimd,
                      false))
@@ -4150,6 +4157,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   if (IsSYCL) {
+    if (IsSYCLXOCC)
+      CmdArgs.push_back("-fsycl-xocc");
     if (SYCLStdArg) {
       SYCLStdArg->render(Args, CmdArgs);
       CmdArgs.push_back("-fsycl-std-layout-kernel-params");

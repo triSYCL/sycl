@@ -44,7 +44,7 @@ int main(int argc, char* argv[]) {
   // read in image convert to grayscale then convert to unsigned 8 bit values
   cv::Mat inputColor = cv::imread(argv[1]);
   cv::Mat inputRaw, input;
-  cv::cvtColor(inputColor, inputRaw, CV_BGR2GRAY);
+  cv::cvtColor(inputColor, inputRaw, cv::COLOR_BGR2GRAY);
   inputRaw.convertTo(input, CV_8UC1);
 
   // using fixed constexpr values stays more true to the original implementation

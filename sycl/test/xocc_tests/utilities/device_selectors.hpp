@@ -45,6 +45,7 @@ namespace selector_defines {
           Device.get_info<info::device::vendor>();
         return (DeviceVendor.find("Xilinx") != std::string::npos) ? 1 : -1;
 #else
+#error WTF
         const std::string DeviceVendor =
           Device.get_info<info::device::vendor>();
         return (DeviceVendor.find("Intel(R) Corporation") != std::string::npos)

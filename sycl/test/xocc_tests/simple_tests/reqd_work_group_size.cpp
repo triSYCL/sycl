@@ -71,9 +71,13 @@ class reqd_work_group_size_test10;
 
 // Just using this to make sure the llvm pass doesn't accidentally pick up the
 // incorrect thing
-namespace cl::sycl::xilinx {
+__SYCL_INLINE_NAMESPACE(cl) {
+
+namespace sycl::xilinx {
   template <int DimX, typename T>
   struct conflict_test {};
+}
+
 }
 
 int main() {
