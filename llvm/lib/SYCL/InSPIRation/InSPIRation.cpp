@@ -326,8 +326,7 @@ struct InSPIRation : public ModulePass {
   /// or one that comes from an existing library of SPIR functions (HLS SPIR
   /// libraries)
   bool isTransitiveNonIntrinsicFunc(const Function &F) {
-    if (F.getCallingConv() == CallingConv::SPIR_FUNC
-        && !F.isIntrinsic())
+    if (!F.isIntrinsic())
       return true;
     return false;
   }

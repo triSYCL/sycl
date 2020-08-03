@@ -132,23 +132,23 @@ run_test () {
 test_list () {
   emconfigutil -f $XILINX_PLATFORM --od simple_tests
 
-#  run_test "accessor_copy" "simple_tests" "$1"
-#  run_test "explicit_copy" "simple_tests" "$1"
-#  run_test "constexpr_correct" "simple_tests" "$1"
-#  run_test "id_mangle" "simple_tests" "$1"
-#  run_test "integration_header_check" "simple_tests" "$1"
-#  run_test "internal_defines" "simple_tests" "$1"
- run_test "math_mangle" "simple_tests" "$1"
-#  run_test "multi_parallel_for_ND_range" "simple_tests" "$1"
-#  run_test "parallel_for_ND_range" "simple_tests" "$1"
-#  run_test "reqd_work_group_size" "simple_tests" "$1"
+ run_test "accessor_copy" "simple_tests" "$1"
+ run_test "explicit_copy" "simple_tests" "$1"
+ run_test "constexpr_correct" "simple_tests" "$1"
+ run_test "id_mangle" "simple_tests" "$1"
+ run_test "integration_header_check" "simple_tests" "$1"
+ run_test "internal_defines" "simple_tests" "$1"
+ run_test "math_mangle" "simple_tests" "$1" # failed infinitloop
+ run_test "multi_parallel_for_ND_range" "simple_tests" "$1"
+ run_test "parallel_for_ND_range" "simple_tests" "$1"
+ run_test "reqd_work_group_size" "simple_tests" "$1" # failed infinitloop
 #  Note: There appears to be a race condition in hw_emu for
 #  single_task_vector_add, sometimes passes sometimes fails.
-#  run_test "single_task_vector_add" "simple_tests" "$1"
-#  run_test "vector_math" "simple_tests" "$1"
-#  run_test "simple_struct" "simple_tests" "$1"
-#  run_test "ternary_compare" "simple_tests" "$1"
-#  run_test "kernel_uint_name" "simple_tests" "$1"
+ run_test "single_task_vector_add" "simple_tests" "$1"
+ run_test "vector_math" "simple_tests" "$1" # failed infinitloop
+ run_test "simple_struct" "simple_tests" "$1"
+ run_test "ternary_compare" "simple_tests" "$1"
+ run_test "kernel_uint_name" "simple_tests" "$1"
 
   emconfigutil -f $XILINX_PLATFORM --od sdaccel_ports/vision/edge_detection
 
@@ -164,8 +164,8 @@ test_list () {
 # test_list "intel"
 
 # Compile and Run Tests for Software and Hardware Emulation
-test_list "sw_emu"
-# test_list "hw_emu"
+# test_list "sw_emu"
+test_list "hw_emu"
 # I would advise only running this on a subset of the tests or if you have a
 # weekend to run the tests.
 # The sycl-xocc script doesn't play well with multiple parallel invocations of
