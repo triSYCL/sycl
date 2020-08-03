@@ -3676,6 +3676,9 @@ static void RenderDebugOptions(const ToolChain &TC, const Driver &D,
                                bool EmitCodeView, ArgStringList &CmdArgs,
                                codegenoptions::DebugInfoKind &DebugInfoKind,
                                DwarfFissionKind &DwarfFission) {
+  if (T.isXilinxFPGA())
+    return;
+
   if (Args.hasFlag(options::OPT_fdebug_info_for_profiling,
                    options::OPT_fno_debug_info_for_profiling, false) &&
       checkDebugInfoOption(
@@ -4107,10 +4110,18 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   Arg *SYCLStdArg = Args.getLastArg(options::OPT_sycl_std_EQ);
 
+  bool IsSYCLXOCC = false;
+  if (llvm::any_of(llvm::make_range(C.getOffloadToolChains<Action::OFK_SYCL>()),
+                   [](const auto &Elem) {
+                     return Elem.second->getTriple().isXilinxFPGA();
+                   }))
+    IsSYCLXOCC = true;
+
   if (UseSYCLTriple) {
     // We want to compile sycl kernels.
     CmdArgs.push_back("-fsycl");
     CmdArgs.push_back("-fsycl-is-device");
+    // if (!IsSYCLXOCC)
     CmdArgs.push_back("-fdeclare-spirv-builtins");
 
     if (Args.hasFlag(options::OPT_fsycl_esimd, options::OPT_fno_sycl_esimd,
@@ -4144,6 +4155,16 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-fsycl-allow-func-ptr");
     }
 
+    if (Args.hasFlag(options::OPT_fsycl_allow_virtual,
+                     options::OPT_fno_sycl_allow_virtual, false)) {
+      CmdArgs.push_back("-fsycl-allow-virtual");
+    }
+
+    if (Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
+                     options::OPT_fno_sycl_allow_variadic_func, false)) {
+      CmdArgs.push_back("-fsycl-allow-variadic-func");
+    }
+
     if (!SYCLStdArg) {
       // The user had not pass SYCL version, thus we'll employ no-sycl-strict
       // to allow address-space unqualified pointers in function params/return
@@ -4153,6 +4174,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   if (IsSYCL) {
+    if (IsSYCLXOCC)
+      CmdArgs.push_back("-fsycl-xocc");
     if (SYCLStdArg) {
       SYCLStdArg->render(Args, CmdArgs);
       CmdArgs.push_back("-fsycl-std-layout-kernel-params");

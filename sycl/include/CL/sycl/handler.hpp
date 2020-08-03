@@ -28,6 +28,8 @@
 #include <CL/sycl/sampler.hpp>
 #include <CL/sycl/stl.hpp>
 
+#include <CL/sycl/xilinx/fpga/kernel_properties.hpp>
+
 #include <algorithm>
 #include <functional>
 #include <limits>
@@ -858,13 +860,15 @@ public:
     using NameT =
         typename detail::get_kernel_name_t<KernelName, KernelType>::name;
 #ifdef __SYCL_DEVICE_ONLY__
-    kernel_single_task<NameT>(KernelFunc);
+    kernel_single_task<xilinx::reqd_work_group_size<1, 1, 1,
+                       NameT>>(KernelFunc);
 #else
     // No need to check if range is out of INT_MAX limits as it's compile-time
     // known constant.
     MNDRDesc.set(range<1>{1});
 
-    StoreLambda<NameT, KernelType, /*Dims*/ 0, void>(KernelFunc);
+    StoreLambda<xilinx::reqd_work_group_size<1, 1, 1,
+                NameT>, KernelType, /*Dims*/ 0, void>(KernelFunc);
     MCGType = detail::CG::KERNEL;
 #endif
   }
@@ -1286,18 +1290,21 @@ public:
         typename detail::get_kernel_name_t<KernelName, KernelType>::name;
 #ifdef __SYCL_DEVICE_ONLY__
     (void)Kernel;
-    kernel_single_task<NameT>(KernelFunc);
+    kernel_single_task<xilinx::reqd_work_group_size<1, 1, 1,
+                       NameT>>(KernelFunc);
 #else
     // No need to check if range is out of INT_MAX limits as it's compile-time
     // known constant
     MNDRDesc.set(range<1>{1});
     MKernel = detail::getSyclObjImpl(std::move(Kernel));
     MCGType = detail::CG::KERNEL;
-    if (!MIsHost && !lambdaAndKernelHaveEqualName<NameT>()) {
+    if (!MIsHost && !lambdaAndKernelHaveEqualName<
+          xilinx::reqd_work_group_size<1, 1, 1, NameT>>()) {
       extractArgsAndReqs();
       MKernelName = getKernelName();
     } else
-      StoreLambda<NameT, KernelType, /*Dims*/ 0, void>(std::move(KernelFunc));
+      StoreLambda<xilinx::reqd_work_group_size<1, 1, 1,
+                  NameT>, KernelType, /*Dims*/ 0, void>(std::move(KernelFunc));
 #endif
   }
 

@@ -235,6 +235,8 @@ void CodeGenModule::createSYCLRuntime() {
   switch (getTriple().getArch()) {
   case llvm::Triple::spir:
   case llvm::Triple::spir64:
+  case llvm::Triple::fpga32:
+  case llvm::Triple::fpga64:
   case llvm::Triple::nvptx:
   case llvm::Triple::nvptx64:
     SYCLRuntime.reset(new CGSYCLRuntime(*this));
@@ -1447,6 +1449,16 @@ void CodeGenModule::GenOpenCLArgMetadata(llvm::Function *Fn,
         pos = baseTypeName.find("unsigned");
         if (pos != std::string::npos)
           baseTypeName.erase(pos + 1, 8);
+
+        if (CGF->Target.getTriple().isXilinxSYCLDevice()) {
+          std::unique_ptr<MangleContext> Ctx{ItaniumMangleContext::create(
+              Context, Context.getDiagnostics(), /*IsUniqueNameMangler*/ true)};
+
+          SmallString<256> Buffer;
+          llvm::raw_svector_ostream Out(Buffer);
+          Ctx->mangleTypeName(ty, Out);
+          baseTypeName = Buffer.str().str();
+        }
 
         argBaseTypeNames.push_back(
             llvm::MDString::get(VMContext, baseTypeName));

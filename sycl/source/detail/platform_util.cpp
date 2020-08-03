@@ -11,7 +11,13 @@
 #include <detail/platform_util.hpp>
 
 #if defined(SYCL_RT_OS_LINUX)
+#if defined(__arm__) || defined(__aarch64__)
+// TODO: Create ARM Query Header (or an alternative) for linux that will look
+// at /sys/devices/system/cpu/ and query it for information on the CPU. Doesn't
+// appear to be any equivalent intrinsic or helper function on ARM
+#elif defined(__i386__) || defined(__x86_64__)
 #include <cpuid.h>
+#endif
 #elif defined(SYCL_RT_OS_WINDOWS)
 #include <intrin.h>
 #endif
@@ -22,7 +28,7 @@ namespace detail {
 
 // Used by methods that duplicate OpenCL behaviour in order to get CPU info
 static void cpuid(uint32_t *CPUInfo, uint32_t Type, uint32_t SubType = 0) {
-#if defined(SYCL_RT_OS_LINUX)
+#if defined(SYCL_RT_OS_LINUX) && (defined(__x86_64__) || defined(__i386__))
   __cpuid_count(Type, SubType, CPUInfo[0], CPUInfo[1], CPUInfo[2], CPUInfo[3]);
 #elif defined(SYCL_RT_OS_WINDOWS)
   __cpuidex(reinterpret_cast<int *>(CPUInfo), Type, SubType);
@@ -65,18 +71,33 @@ uint32_t PlatformUtil::getMaxClockFrequency() {
 }
 
 uint32_t PlatformUtil::getMemCacheLineSize() {
+#if defined(__arm__) || defined(__aarch64__)
+  throw runtime_error(
+      "global_mem_cache_line_size is not supported for ARM architectures");
+#endif
+
   uint32_t CPUInfo[4];
   cpuid(CPUInfo, 0x80000006);
   return CPUInfo[2] & 0xff;
 }
 
 uint64_t PlatformUtil::getMemCacheSize() {
+#if defined(__arm__) || defined(__aarch64__)
+  throw runtime_error(
+      "global_mem_cache_size is not supported for ARM architectures");
+#endif
+
   uint32_t CPUInfo[4];
   cpuid(CPUInfo, 0x80000006);
   return static_cast<uint64_t>(CPUInfo[2] >> 16) * 1024;
 }
 
 uint32_t PlatformUtil::getNativeVectorWidth(PlatformUtil::TypeIndex TIndex) {
+#if defined(__arm__) || defined(__aarch64__)
+  throw runtime_error(
+      "native_vector_width_* is not supported for ARM architectures");
+#endif
+
   // SSE4.2 has 16 byte (XMM) registers
   static constexpr uint32_t VECTOR_WIDTH_SSE42[] = {16, 8, 4, 2, 4, 2, 0};
   // AVX supports 32 byte (YMM) registers only for floats and doubles
@@ -88,7 +109,7 @@ uint32_t PlatformUtil::getNativeVectorWidth(PlatformUtil::TypeIndex TIndex) {
 
   uint32_t Index = static_cast<uint32_t>(TIndex);
 
-#if defined(SYCL_RT_OS_LINUX)
+#if defined(SYCL_RT_OS_LINUX) && (defined(__x86_64__) || defined(__i386__))
   if (__builtin_cpu_supports("avx512f"))
     return VECTOR_WIDTH_AVX512[Index];
   if (__builtin_cpu_supports("avx2"))

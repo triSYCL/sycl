@@ -66,12 +66,13 @@ add_clang_library(clangDriver
   ToolChains/OpenBSD.cpp
   ToolChains/PS4CPU.cpp
   ToolChains/RISCVToolchain.cpp
+  ToolChains/SYCL.cpp
   ToolChains/Solaris.cpp
   ToolChains/TCE.cpp
   ToolChains/VEToolchain.cpp
   ToolChains/WebAssembly.cpp
   ToolChains/XCore.cpp
-  ToolChains/SYCL.cpp
+  ToolChains/XOCC.cpp
   ToolChains/PPCLinux.cpp
   ToolChains/InterfaceStubs.cpp
   Types.cpp

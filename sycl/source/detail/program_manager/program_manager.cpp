@@ -22,6 +22,10 @@
 #include <detail/program_manager/program_manager.hpp>
 #include <detail/spec_constant_impl.hpp>
 
+#include <boost/container_hash/hash.hpp> // uuid_hasher
+#include <boost/uuid/uuid_generators.hpp> // sha name_gen/generator
+#include <boost/uuid/uuid_io.hpp> // uuid to_string
+
 #include <algorithm>
 #include <cassert>
 #include <cstdlib>
@@ -408,15 +412,32 @@ RT::PiProgram ProgramManager::getBuiltPIProgram(OSModuleHandle M,
   return BuildResult->Ptr.load();
 }
 
+// Gets a unique name to a kernel name which is currently computed from a SHA-1
+// hash of the kernel name. This unique name is used in place of the kernels
+// mangled name inside of xocc computed binaries containing the kernels.
+//
+// This is in part due to a limitation of xocc in which it requires kernel names
+// to be passed to it when compiling kernels and it doesn't handle certain
+// characters in mangled names very well e.g. '$'.
+static std::string getUniqueName(const char *KernelName) {
+
+  boost::uuids::name_generator_latest gen{boost::uuids::ns::dns()};
+
+  boost::uuids::uuid udoc = gen(KernelName);
+
+  boost::hash<boost::uuids::uuid> uuid_hasher;
+  std::size_t uuid_hash_value = uuid_hasher(udoc);
+
+  return "xSYCL" + std::to_string(uuid_hash_value);
+}
+
 std::pair<RT::PiKernel, std::mutex *>
 ProgramManager::getOrCreateKernel(OSModuleHandle M, const context &Context,
-                                  const string_class &KernelName,
+                                  const string_class &KName,
                                   const program_impl *Prg) {
-  if (DbgProgMgr > 0) {
-    std::cerr << ">>> ProgramManager::getOrCreateKernel(" << M << ", "
-              << getRawSyclObjImpl(Context) << ", " << KernelName << ")\n";
-  }
-
+  std::string KernelName = KName;
+  if (Context.get_platform().get_info<info::platform::vendor>() == "Xilinx")
+    KernelName = getUniqueName(KName.c_str());
   RT::PiProgram Program = getBuiltPIProgram(M, Context, KernelName, Prg);
   const ContextImplPtr Ctx = getSyclObjImpl(Context);
 

@@ -538,6 +538,14 @@ int main(int argc, char **argv) {
   initializeExpandReductionsPass(Registry);
   initializeWasmEHPreparePass(Registry);
   initializeWriteBitcodePassPass(Registry);
+
+  // SYCL related passes, there may come a time where it's better to register
+  // these as a module rather than separate passes
+  // (e.g. initializeTransformUtils(Registry) etc. above)
+  initializeASFixerPass(Registry);
+  initializeInSPIRationPass(Registry);
+  initializeKernelPropGenPass(Registry);
+  initializeXOCCIRDowngraderPass(Registry);
   initializeHardwareLoopsPass(Registry);
   initializeTypePromotionPass(Registry);
   initializeSYCLLowerWGScopeLegacyPassPass(Registry);

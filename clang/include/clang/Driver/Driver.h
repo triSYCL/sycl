@@ -597,8 +597,6 @@ private:
   const ToolChain &getToolChain(const llvm::opt::ArgList &Args,
                                 const llvm::Triple &Target) const;
 
-  /// @}
-
   /// Retrieves a ToolChain for a particular device \p Target triple
   ///
   /// \param[in] HostTC is the host ToolChain paired with the device
@@ -614,6 +612,8 @@ private:
                                                 const ToolChain &HostTC,
                                                 const Action::OffloadKind
                                                 &TargetDeviceOffloadKind) const;
+
+  /// @}
 
   /// Get bitmasks for which option flags to include and exclude based on
   /// the driver mode.

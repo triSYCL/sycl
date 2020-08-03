@@ -2584,35 +2584,42 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
     Opts.SYCLUnnamedLambda = Args.hasArg(options::OPT_fsycl_unnamed_lambda);
     // -sycl-std applies to any SYCL source, not only those containing kernels,
     // but also those using the SYCL API
+    // -sycl-std applies to any SYCL source, not only those containing kernels,
+    // but also those using the SYCL API
     if (const Arg *A = Args.getLastArg(OPT_sycl_std_EQ)) {
-      Opts.SYCLVersion = llvm::StringSwitch<unsigned>(A->getValue())
-                             .Cases("2017", "1.2.1", "121", "sycl-1.2.1", 2017)
-                             .Default(0U);
+      Opts.setSYCLVersion(
+          llvm::StringSwitch<LangOptions::SYCLVersionList>(A->getValue())
+              .Cases("2017", "1.2.1", "121", "sycl-1.2.1",
+                     LangOptions::SYCLVersionList::sycl_1_2_1)
+              .Default(LangOptions::SYCLVersionList::undefined));
 
-      if (Opts.SYCLVersion == 0U) {
+      if (Opts.getSYCLVersion() == LangOptions::SYCLVersionList::undefined) {
         // User has passed an invalid value to the flag, this is an error
         Diags.Report(diag::err_drv_invalid_value)
             << A->getAsString(Args) << A->getValue();
       }
+    } else if (Args.hasArg(options::OPT_fsycl_is_device) ||
+               Args.hasArg(options::OPT_fsycl_is_host) ||
+               Args.hasArg(options::OPT_fsycl)) {
+      Opts.setSYCLVersion(LangOptions::SYCLVersionList::sycl_1_2_1);
     }
     Opts.SYCLExplicitSIMD = Args.hasArg(options::OPT_fsycl_esimd);
   }
 
-  Opts.IncludeDefaultHeader = Args.hasArg(OPT_finclude_default_header);
-  Opts.DeclareOpenCLBuiltins = Args.hasArg(OPT_fdeclare_opencl_builtins);
-  Opts.DeclareSPIRVBuiltins = Args.hasArg(OPT_fdeclare_spirv_builtins);
+    Opts.IncludeDefaultHeader = Args.hasArg(OPT_finclude_default_header);
+    Opts.DeclareOpenCLBuiltins = Args.hasArg(OPT_fdeclare_opencl_builtins);
+    Opts.DeclareSPIRVBuiltins = Args.hasArg(OPT_fdeclare_spirv_builtins);
 
-  llvm::Triple T(TargetOpts.Triple);
-  CompilerInvocation::setLangDefaults(Opts, IK, T, PPOpts, LangStd);
+    llvm::Triple T(TargetOpts.Triple);
+    CompilerInvocation::setLangDefaults(Opts, IK, T, PPOpts, LangStd);
 
-  // -cl-strict-aliasing needs to emit diagnostic in the case where CL > 1.0.
-  // This option should be deprecated for CL > 1.0 because
-  // this option was added for compatibility with OpenCL 1.0.
-  if (Args.getLastArg(OPT_cl_strict_aliasing)
-       && Opts.OpenCLVersion > 100) {
-    Diags.Report(diag::warn_option_invalid_ocl_version)
-        << Opts.getOpenCLVersionTuple().getAsString()
-        << Args.getLastArg(OPT_cl_strict_aliasing)->getAsString(Args);
+    // -cl-strict-aliasing needs to emit diagnostic in the case where CL > 1.0.
+    // This option should be deprecated for CL > 1.0 because
+    // this option was added for compatibility with OpenCL 1.0.
+    if (Args.getLastArg(OPT_cl_strict_aliasing) && Opts.OpenCLVersion > 100) {
+      Diags.Report(diag::warn_option_invalid_ocl_version)
+          << Opts.getOpenCLVersionTuple().getAsString()
+          << Args.getLastArg(OPT_cl_strict_aliasing)->getAsString(Args);
   }
 
   // We abuse '-f[no-]gnu-keywords' to force overriding all GNU-extension
@@ -3215,6 +3222,31 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
       Diags.Report(diag::err_drv_omp_host_ir_file_not_found)
           << Opts.OMPHostIRFile;
   }
+
+  // SYCLXOCCDevice forces things like:
+  // 1) The InitPreprocessor to define some Xilinx related macros which force
+  //    alternate paths in the SYCL runtime
+  // 2) The assembler stage of clang to emit llvm ir (-emit-llvm) rather than
+  //     assembly (-S)
+  Opts.SYCLXOCCDevice = Args.hasArg(options::OPT_fsycl_xocc);
+  Opts.SYCLIsDevice   = Args.hasArg(options::OPT_fsycl_is_device);
+  Opts.SYCLIsHost   = Args.hasArg(options::OPT_fsycl_is_host);
+  Opts.SYCLAllowFuncPtr = Args.hasFlag(options::OPT_fsycl_allow_func_ptr,
+                                  options::OPT_fno_sycl_allow_func_ptr, false);
+  Opts.SYCLAllowVirtual = Args.hasFlag(options::OPT_fsycl_allow_virtual,
+                                       options::OPT_fno_sycl_allow_virtual,
+                                       false);
+  // Variadic functions are on by default for XOCC compilation and off by default
+  // for anything else..For example you have to specify that you wish variadics
+  // off for xocc if you wish to emit diagnostics for them and you have to
+  // specify if you wish no diagnostics for other devices.
+  Opts.SYCLAllowVariadicFunc = Opts.SYCLXOCCDevice ?
+    Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
+                 options::OPT_fno_sycl_allow_variadic_func) :
+    Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
+                 options::OPT_fno_sycl_allow_variadic_func,
+                 false);
+  Opts.SYCLUnnamedLambda = Args.hasArg(options::OPT_fsycl_unnamed_lambda);
 
   // Set CUDA mode for OpenMP target NVPTX/AMDGCN if specified in options
   Opts.OpenMPCUDAMode = Opts.OpenMPIsDevice && (T.isNVPTX() || T.isAMDGCN()) &&

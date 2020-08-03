@@ -1587,7 +1587,9 @@ void ExecCGCommand::printDot(std::ostream &Stream) const {
   }
 }
 
-// SYCL has a parallel_for_work_group variant where the only NDRange
+// This function currently handles 2 use cases:
+//
+// 1) SYCL has a parallel_for_work_group variant where the only NDRange
 // characteristics set by a user is the number of work groups. This does not map
 // to the OpenCL clEnqueueNDRangeAPI, which requires global work size to be set
 // as well. This function determines local work size based on the device
@@ -1598,8 +1600,31 @@ void ExecCGCommand::printDot(std::ostream &Stream) const {
 // number of work - groups, such that the size of each group is chosen by the
 // runtime, or by the number of work - groups and number of work - items for
 // users who need more control.
+//
+// 2) if you pass a nullptr when the reqd_work_group_size attribute is on AoT
+// compiled kernel, it is an OpenCL runtime error, since when we're compiling
+// for xocc we always apply the reqd_work_group_size attribute to single_task
+// we must make sure we define a local work group size when we can justify the
+// kernel is a single task.
 static void adjustNDRangePerKernel(NDRDescT &NDR, RT::PiKernel Kernel,
                                    const device_impl &DeviceImpl) {
+  // If work group size is 0 global size is 1, local size is 0 and
+  // dimensions are 1, for all intents and purposes we can consider it a
+  // single_task and pass 1 instead of nullptr. The precedence for this
+  // assumption is in the handler.hpp single_task call where MNDRDesc is
+  // hardcoded to a be: range<1>({1}). Even if it turns out to be a 1D
+  // parallel_for with no local size defined it really doesn't matter as the
+  // OpenCL runtime can only automatically make a decision to set the local size
+  // to 1 or 0. The affect of passing nullptr to clEnqueueNDRangeKernel is the
+  // OpenCL runtime chosing the 'optimal' local work group size
+  // (implementation defined).
+  // NOTE: If you really wanted to enforce the reqd_work_group_size to overwrite
+  // the local work group size at all times/in other cases, you could in theory
+  // get the information from the get_kernel_work_group_info_cl function.
+  if (NDR.NumWorkGroups[0] == 0 && NDR.Dims == 1 && NDR.GlobalSize[0] == 1 &&
+      NDR.LocalSize[0] == 0)
+    NDR.LocalSize[0] = 1;
+
   if (NDR.GlobalSize[0] != 0)
     return; // GlobalSize is set - no need to adjust
   // check the prerequisites:

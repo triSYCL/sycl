@@ -36,11 +36,12 @@ StringRef Triple::getArchTypeName(ArchType Kind) {
   case avr:            return "avr";
   case bpfeb:          return "bpfeb";
   case bpfel:          return "bpfel";
+  case fpga32:         return "fpga32";
+  case fpga64:         return "fpga64";
   case fpga_aoco:      return "fpga_aoco";
   case fpga_aocr:      return "fpga_aocr";
   case fpga_aocx:      return "fpga_aocx";
-  case fpga_dep:
-    return "fpga_dep";
+  case fpga_dep:       return "fpga_dep";
   case hexagon:        return "hexagon";
   case hsail64:        return "hsail64";
   case hsail:          return "hsail";
@@ -183,6 +184,7 @@ StringRef Triple::getVendorTypeName(VendorType Kind) {
   case Myriad: return "myriad";
   case NVIDIA: return "nvidia";
   case OpenEmbedded: return "oe";
+  case Xilinx: return "xilinx";
   case PC: return "pc";
   case SCEI: return "scei";
   case SUSE: return "suse";
@@ -281,64 +283,65 @@ static Triple::ArchType parseBPFArch(StringRef ArchName) {
 Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
   Triple::ArchType BPFArch(parseBPFArch(Name));
   return StringSwitch<Triple::ArchType>(Name)
-      .Case("aarch64", aarch64)
-      .Case("aarch64_be", aarch64_be)
-      .Case("aarch64_32", aarch64_32)
-      .Case("arc", arc)
-      .Case("arm64", aarch64) // "arm64" is an alias for "aarch64"
-      .Case("arm64_32", aarch64_32)
-      .Case("arm", arm)
-      .Case("armeb", armeb)
-      .Case("avr", avr)
-      .StartsWith("bpf", BPFArch)
-      .Case("mips", mips)
-      .Case("mipsel", mipsel)
-      .Case("mips64", mips64)
-      .Case("mips64el", mips64el)
-      .Case("msp430", msp430)
-      .Case("ppc64", ppc64)
-      .Case("ppc32", ppc)
-      .Case("ppc", ppc)
-      .Case("ppc64le", ppc64le)
-      .Case("r600", r600)
-      .Case("amdgcn", amdgcn)
-      .Case("riscv32", riscv32)
-      .Case("riscv64", riscv64)
-      .Case("hexagon", hexagon)
-      .Case("sparc", sparc)
-      .Case("sparcel", sparcel)
-      .Case("sparcv9", sparcv9)
-      .Case("systemz", systemz)
-      .Case("tce", tce)
-      .Case("tcele", tcele)
-      .Case("thumb", thumb)
-      .Case("thumbeb", thumbeb)
-      .Case("x86", x86)
-      .Case("x86-64", x86_64)
-      .Case("xcore", xcore)
-      .Case("nvptx", nvptx)
-      .Case("nvptx64", nvptx64)
-      .Case("le32", le32)
-      .Case("le64", le64)
-      .Case("amdil", amdil)
-      .Case("amdil64", amdil64)
-      .Case("hsail", hsail)
-      .Case("hsail64", hsail64)
-      .StartsWith("spir64", spir64)
-      .StartsWith("spir", spir)
-      .Case("kalimba", kalimba)
-      .Case("lanai", lanai)
-      .Case("shave", shave)
-      .Case("wasm32", wasm32)
-      .Case("wasm64", wasm64)
-      .Case("renderscript32", renderscript32)
-      .Case("renderscript64", renderscript64)
-      .Case("fpga_aoco", fpga_aoco)
-      .Case("fpga_aocr", fpga_aocr)
-      .Case("fpga_aocx", fpga_aocx)
-      .Case("fpga_dep", fpga_dep)
-      .Case("ve", ve)
-      .Default(UnknownArch);
+    .Case("aarch64", aarch64)
+    .Case("aarch64_be", aarch64_be)
+    .Case("aarch64_32", aarch64_32)
+    .Case("arc", arc)
+    .Case("arm64", aarch64) // "arm64" is an alias for "aarch64"
+    .Case("arm64_32", aarch64_32)
+    .Case("arm", arm)
+    .Case("armeb", armeb)
+    .Case("avr", avr)
+    .StartsWith("bpf", BPFArch)
+    .Case("mips", mips)
+    .Case("mipsel", mipsel)
+    .Case("mips64", mips64)
+    .Case("mips64el", mips64el)
+    .Case("msp430", msp430)
+    .Case("ppc64", ppc64)
+    .Case("ppc32", ppc)
+    .Case("ppc", ppc)
+    .Case("ppc64le", ppc64le)
+    .Case("r600", r600)
+    .Case("amdgcn", amdgcn)
+    .Case("riscv32", riscv32)
+    .Case("riscv64", riscv64)
+    .Case("hexagon", hexagon)
+    .Case("sparc", sparc)
+    .Case("sparcel", sparcel)
+    .Case("sparcv9", sparcv9)
+    .Case("systemz", systemz)
+    .Case("tce", tce)
+    .Case("tcele", tcele)
+    .Case("thumb", thumb)
+    .Case("thumbeb", thumbeb)
+    .Case("x86", x86)
+    .Case("x86-64", x86_64)
+    .Case("xcore", xcore)
+    .Case("nvptx", nvptx)
+    .Case("nvptx64", nvptx64)
+    .Case("le32", le32)
+    .Case("le64", le64)
+    .Case("amdil", amdil)
+    .Case("amdil64", amdil64)
+    .Case("hsail", hsail)
+    .Case("hsail64", hsail64)
+    .StartsWith("spir64", spir64)
+    .StartsWith("spir", spir)
+    .Case("kalimba", kalimba)
+    .Case("lanai", lanai)
+    .Case("shave", shave)
+    .Case("wasm32", wasm32)
+    .Case("wasm64", wasm64)
+    .Case("renderscript32", renderscript32)
+    .Case("renderscript64", renderscript64)
+    .Case("fpga32", fpga32)
+    .Case("fpga64", fpga64)
+    .Case("fpga_aoco", fpga_aoco)
+    .Case("fpga_aocr", fpga_aocr)
+    .Case("fpga_aocx", fpga_aocx)
+    .Case("ve", ve)
+    .Default(UnknownArch);
 }
 
 static Triple::ArchType parseARMArch(StringRef ArchName) {
@@ -460,6 +463,9 @@ static Triple::ArchType parseArch(StringRef ArchName) {
                 .StartsWith("spir64", Triple::spir64)
                 .StartsWith("spir", Triple::spir)
                 .StartsWith("kalimba", Triple::kalimba)
+                .Case("shave", Triple::shave)
+                .Case("wasm32", Triple::wasm32)
+                .Case("wasm64", Triple::wasm64)
                 .Case("lanai", Triple::lanai)
                 .Case("renderscript32", Triple::renderscript32)
                 .Case("renderscript64", Triple::renderscript64)
@@ -468,11 +474,10 @@ static Triple::ArchType parseArch(StringRef ArchName) {
                 .Case("fpga_aocx", Triple::fpga_aocx)
                 .Case("fpga_dep", Triple::fpga_dep)
                 .Case("shave", Triple::shave)
+                .Case("fpga32", Triple::fpga32)
+                .Case("fpga64", Triple::fpga64)
                 .Case("ve", Triple::ve)
-                .Case("wasm32", Triple::wasm32)
-                .Case("wasm64", Triple::wasm64)
                 .Default(Triple::UnknownArch);
-
   // Some architectures require special parsing logic just to compute the
   // ArchType result.
   if (AT == Triple::UnknownArch) {
@@ -504,6 +509,7 @@ static Triple::VendorType parseVendor(StringRef VendorName) {
     .Case("mesa", Triple::Mesa)
     .Case("suse", Triple::SUSE)
     .Case("oe", Triple::OpenEmbedded)
+    .Case("xilinx", Triple::Xilinx)
     .Case("intel", Triple::Intel)
     .Default(Triple::UnknownVendor);
 }
@@ -715,6 +721,8 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
   case Triple::avr:
   case Triple::bpfeb:
   case Triple::bpfel:
+  case Triple::fpga32:
+  case Triple::fpga64:
   case Triple::fpga_aoco:
   case Triple::fpga_aocr:
   case Triple::fpga_aocx:
@@ -1288,6 +1296,7 @@ static unsigned getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
   case llvm::Triple::arc:
   case llvm::Triple::arm:
   case llvm::Triple::armeb:
+  case llvm::Triple::fpga32:
   case llvm::Triple::fpga_aoco:
   case llvm::Triple::fpga_aocr:
   case llvm::Triple::fpga_aocx:
@@ -1317,6 +1326,7 @@ static unsigned getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
   case llvm::Triple::xcore:
     return 32;
 
+
   case llvm::Triple::aarch64:
   case llvm::Triple::aarch64_be:
   case llvm::Triple::amdgcn:
@@ -1330,13 +1340,14 @@ static unsigned getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
   case llvm::Triple::nvptx64:
   case llvm::Triple::ppc64:
   case llvm::Triple::ppc64le:
-  case llvm::Triple::renderscript64:
   case llvm::Triple::riscv64:
   case llvm::Triple::sparcv9:
   case llvm::Triple::spir64:
   case llvm::Triple::systemz:
   case llvm::Triple::ve:
   case llvm::Triple::wasm64:
+  case llvm::Triple::renderscript64:
+  case llvm::Triple::fpga64:
   case llvm::Triple::x86_64:
     return 64;
   }
@@ -1375,6 +1386,7 @@ Triple Triple::get32BitArchVariant() const {
   case Triple::arc:
   case Triple::arm:
   case Triple::armeb:
+  case Triple::fpga32:
   case Triple::fpga_aoco:
   case Triple::fpga_aocr:
   case Triple::fpga_aocx:
@@ -1419,6 +1431,7 @@ Triple Triple::get32BitArchVariant() const {
   case Triple::sparcv9:        T.setArch(Triple::sparc);   break;
   case Triple::spir64:         T.setArch(Triple::spir);    break;
   case Triple::wasm64:         T.setArch(Triple::wasm32);  break;
+  case Triple::fpga64:         T.setArch(Triple::fpga32);    break;
   case Triple::x86_64:         T.setArch(Triple::x86);     break;
   }
   return T;
@@ -1467,6 +1480,7 @@ Triple Triple::get64BitArchVariant() const {
   case Triple::systemz:
   case Triple::ve:
   case Triple::wasm64:
+  case Triple::fpga64:
   case Triple::x86_64:
     // Already 64-bit.
     break;
@@ -1488,6 +1502,7 @@ Triple Triple::get64BitArchVariant() const {
   case Triple::thumb:           T.setArch(Triple::aarch64);    break;
   case Triple::thumbeb:         T.setArch(Triple::aarch64_be); break;
   case Triple::wasm32:          T.setArch(Triple::wasm64);     break;
+  case Triple::fpga32:          T.setArch(Triple::fpga64);     break;
   case Triple::x86:             T.setArch(Triple::x86_64);     break;
   }
   return T;
@@ -1526,6 +1541,8 @@ Triple Triple::getBigEndianArchVariant() const {
   case Triple::x86:
   case Triple::x86_64:
   case Triple::xcore:
+  case Triple::fpga32:
+  case Triple::fpga64:
   case Triple::ve:
 
   // ARM is intentionally unsupported here, changing the architecture would
@@ -1619,6 +1636,8 @@ bool Triple::isLittleEndian() const {
   case Triple::x86:
   case Triple::x86_64:
   case Triple::xcore:
+  case Triple::fpga32:
+  case Triple::fpga64:
     return true;
   default:
     return false;

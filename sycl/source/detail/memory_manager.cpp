@@ -10,6 +10,10 @@
 #include <detail/context_impl.hpp>
 #include <detail/event_impl.hpp>
 #include <detail/queue_impl.hpp>
+#ifdef __SYCL_XILINX_ONLY__
+# include <CL/sycl/xilinx/fpga.hpp>
+# include <CL/cl_ext_xilinx.h>
+#endif
 
 #include <algorithm>
 #include <cassert>
@@ -19,6 +23,17 @@
 __SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 namespace detail {
+
+bool is_compact_transfer(const sycl::range<3> & SrcSize,
+                         const sycl::range<3> & DstSize,
+                         const sycl::range<3> & SrcAccessRange,
+                         const sycl::range<3> & DstAccessRange,
+                         const sycl::id<3> & SrcOffset,
+                         const sycl::id<3> & DstOffset){
+  return (SrcOffset == sycl::id<3> { 0, 0, 0 }) && (SrcSize == DstAccessRange)
+    && (SrcSize == DstSize) && (SrcSize == SrcAccessRange)
+    && (SrcOffset == DstOffset);
+}
 
 static void waitForEvents(const std::vector<EventImplPtr> &Events) {
   // Assuming all events will be on the same device or
@@ -176,8 +191,59 @@ MemoryManager::allocateBufferObject(ContextImplPtr TargetContext, void *UserPtr,
 
   RT::PiMem NewMem = nullptr;
   const detail::plugin &Plugin = TargetContext->getPlugin();
+
+#if (defined(__SYCL_XILINX_ONLY__))
+  // This currently enforces assignment of all buffers to DDR bank 0 via
+  // Xilinx OpenCL extensions, which we also enforce when compiling the
+  // kernels via xocc (0 is usually the default inferred space, but some get
+  // inferred to bank 1, notably Alveo U200 boards). XRT seems to have slowly
+  // gotten stricter with these assignments when compiling for hw_emu, so it's
+  // something we have to do to conform for the moment (but generally a good
+  // thing to conform as it means closer alignment to actual hardware
+  // compilation).
+  // \todo A way to allow users to specify DDR bank assignments at a
+  // SYCL level should be the end goal here, assign a DDR bank to kernel/CU
+  // mapping via an accessor or buffer. The hard part of this is that the
+  // compiler will need access to this information when compiling the kernels,
+  // pushing this data through in a "C++ way" without modifying the SYCL
+  // compiler will be difficult (tying this information up as an extra component
+  // of the accessor's could be the ideal route in this case).
+  // \todo Alternatively the cl_mem_ext_ptr_t assignment of DDR banks seems to
+  // be legacy in 2019.1, it may be possible to assign buffers to kernel
+  // arguments in just the runtime and bypass the requirements for specifying
+  // appropriate DDR banks, if that makes things easier, this can be done via
+  // the alternate union form of cl_mem_ext_ptr_t:
+  // struct { // interpreted kernel arg assignment
+  //   unsigned int argidx;  // Top 8 bits reserved for XCL_MEM_EXT flags
+  //   void *host_ptr_;      // use as host_ptr
+  //   cl_kernel kernel;
+  // };
+  // This hasn't been tested but may be an alternative to assigning DDR banks
+  // per buffer. However, being able to specify DDR bank assignments to a
+  // kernel, is still very useful, but if this method works, perhaps we can
+  // detach the idea of assigning DDR banks via the buffer/accessor (which
+  // makes it difficult to pass information to the kernel) and instead have it
+  // as part of the kernel name via a kernel property similar to
+  // the way we handle reqd_work_group_size at the moment
+  if (TargetContext->getPlatformImpl()->get_info<info::platform::vendor>() ==
+      "Xilinx") {
+    /// \TODO: Create PI wrapper for this Xilinx OpenCL extension stuff or work
+    /// out a better way to enforce buffer DDR bank assignments, lazy rather
+    /// than eager buffer creation?
+    cl_mem_ext_ptr_t mext = {0};
+    mext.banks = 0 | XCL_MEM_TOPOLOGY;
+    mext.host_ptr = UserPtr;
+    Plugin.call<PiApiKind::piMemBufferCreate>(
+        TargetContext->getHandleRef(), CreationFlags | CL_MEM_EXT_PTR_XILINX,
+        Size, &mext, &NewMem);
+  } else {
+    Plugin.call<PiApiKind::piMemBufferCreate>(
+        TargetContext->getHandleRef(), CreationFlags, Size, UserPtr, &NewMem);
+  }
+#else
   Plugin.call<PiApiKind::piMemBufferCreate>(
       TargetContext->getHandleRef(), CreationFlags, Size, UserPtr, &NewMem);
+#endif
   return NewMem;
 }
 
@@ -272,6 +338,15 @@ void copyH2D(SYCLMemObjI *SYCLMemObj, char *SrcMem, QueueImplPtr,
           /*blocking_write=*/CL_FALSE, DstOffset[0], DstAccessRange[0],
           SrcMem + SrcOffset[0], DepEvents.size(), &DepEvents[0], &OutEvent);
     } else {
+      if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
+                              SrcOffset, DstOffset)) {
+        Plugin.call<PiApiKind::piEnqueueMemBufferWrite>(
+            Queue, DstMem, /*blocking_write=*/CL_FALSE,
+            DstOffset[0], DstAccessRange[0]*DstAccessRange[1]*DstAccessRange[2],
+            SrcMem + DstOffset[0], DepEvents.size(), &DepEvents[0], &OutEvent);
+        return;
+      }
+
       size_t BufferRowPitch = (1 == DimDst) ? 0 : DstSize[0];
       size_t BufferSlicePitch = (3 == DimDst) ? DstSize[0] * DstSize[1] : 0;
       size_t HostRowPitch = (1 == DimSrc) ? 0 : SrcSize[0];
@@ -320,6 +395,15 @@ void copyD2H(SYCLMemObjI *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
           /*blocking_read=*/CL_FALSE, SrcOffset[0], SrcAccessRange[0],
           DstMem + DstOffset[0], DepEvents.size(), &DepEvents[0], &OutEvent);
     } else {
+      if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
+                             SrcOffset, DstOffset)) {
+        Plugin.call<PiApiKind::piEnqueueMemBufferRead>(
+            Queue, SrcMem,/*blocking_read=*/CL_FALSE, DstOffset[0],
+            DstAccessRange[0]*DstAccessRange[1]*DstAccessRange[2],
+            DstMem + DstOffset[0], DepEvents.size(), &DepEvents[0], &OutEvent);
+        return;
+      }
+
       size_t BufferRowPitch = (1 == DimSrc) ? 0 : SrcSize[0];
       size_t BufferSlicePitch = (3 == DimSrc) ? SrcSize[0] * SrcSize[1] : 0;
 
@@ -344,7 +428,7 @@ void copyD2D(SYCLMemObjI *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
              unsigned int DimSrc, sycl::range<3> SrcSize,
              sycl::range<3> SrcAccessRange, sycl::id<3> SrcOffset,
              unsigned int SrcElemSize, RT::PiMem DstMem, QueueImplPtr,
-             unsigned int DimDst, sycl::range<3> DstSize, sycl::range<3>,
+             unsigned int DimDst, sycl::range<3> DstSize, sycl::range<3> DstAccessRange,
              sycl::id<3> DstOffset, unsigned int DstElemSize,
              std::vector<RT::PiEvent> DepEvents, RT::PiEvent &OutEvent) {
   assert(SYCLMemObj && "The SYCLMemObj is nullptr");
@@ -363,6 +447,15 @@ void copyD2D(SYCLMemObjI *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
           Queue, SrcMem, DstMem, SrcOffset[0], DstOffset[0], SrcAccessRange[0],
           DepEvents.size(), &DepEvents[0], &OutEvent);
     } else {
+      if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
+                              SrcOffset, DstOffset)) {
+        Plugin.call<PiApiKind::piEnqueueMemBufferCopy>(
+            Queue, SrcMem, DstMem, SrcOffset[0], DstOffset[0],
+            SrcAccessRange[0] * SrcAccessRange[1] * SrcAccessRange[2],
+            DepEvents.size(), &DepEvents[0], &OutEvent);
+        return;
+      }
+
       size_t SrcRowPitch = (1 == DimSrc) ? 0 : SrcSize[0];
       size_t SrcSlicePitch =
           (DimSrc > 1) ? SrcSize[0] * SrcSize[1] : SrcSize[0];
@@ -392,7 +485,7 @@ static void copyH2H(SYCLMemObjI *, char *SrcMem, QueueImplPtr,
                     unsigned int DstElemSize, std::vector<RT::PiEvent>,
                     RT::PiEvent &) {
   if ((DimSrc != 1 || DimDst != 1) &&
-      (SrcOffset != id<3>{0, 0, 0} || DstOffset != id<3>{0, 0, 0} ||
+      (SrcOffset != sycl::id<3>{0, 0, 0} || DstOffset != sycl::id<3>{0, 0, 0} ||
        SrcSize != SrcAccessRange || DstSize != DstAccessRange)) {
     throw runtime_error("Not supported configuration of memcpy requested",
                         PI_INVALID_OPERATION);
