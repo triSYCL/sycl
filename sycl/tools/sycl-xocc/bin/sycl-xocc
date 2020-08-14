@@ -34,6 +34,7 @@
 #       is consistent with what the driver expects it to be.
 
 set -e # stop on error
+CWD=$(pwd)
 
 # TODO: Pass an argument through the driver to set options like XILINX_PLATFORM,
 # the environment variables are a quick workaround to swap boards.
@@ -197,6 +198,11 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
     wait $job
   done
 
+  LINKER_WD=${TMP_PATH}_${SOURCE_FILE_NAME}_linker
+  rm -rf $LINKER_WD
+  mkdir -p $LINKER_WD
+  cd $LINKER_WD
+
   # \todo Revisit removal of hlsDataflowStrictMode in the future to see if we
   # can compile for hw_emu with it on or if it outputs clearer diagnostics so
   # we can track down the problem (when I tested this it seems that the call
@@ -204,6 +210,9 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   $SDX --xp param:compiler.hlsDataflowStrictMode=off $DDR_BANK_ARGS \
     --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM  -l \
     --save-temps -o "$OUTPUT_FILE_NAME" $LINKER_LIST
+  
+  cd $CWD
+  cp -r $LINKER_WD/* .
 
   # This step is unconnected to the generation of the final xcl binary, it dumps
   # useful debug information from the final generated xcl binary into the temp
