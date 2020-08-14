@@ -1450,16 +1450,6 @@ void CodeGenModule::GenOpenCLArgMetadata(llvm::Function *Fn,
         if (pos != std::string::npos)
           baseTypeName.erase(pos + 1, 8);
 
-        if (CGF->Target.getTriple().isXilinxSYCLDevice()) {
-          std::unique_ptr<MangleContext> Ctx{ItaniumMangleContext::create(
-              Context, Context.getDiagnostics(), /*IsUniqueNameMangler*/ true)};
-
-          SmallString<256> Buffer;
-          llvm::raw_svector_ostream Out(Buffer);
-          Ctx->mangleTypeName(ty, Out);
-          baseTypeName = Buffer.str().str();
-        }
-
         argBaseTypeNames.push_back(
             llvm::MDString::get(VMContext, baseTypeName));
 
@@ -1513,6 +1503,16 @@ void CodeGenModule::GenOpenCLArgMetadata(llvm::Function *Fn,
         if (ty->isImageType()) {
           removeImageAccessQualifier(typeName);
           removeImageAccessQualifier(baseTypeName);
+        }
+
+        if (CGF->Target.getTriple().isXilinxSYCLDevice()) {
+          std::unique_ptr<MangleContext> Ctx{ItaniumMangleContext::create(
+              Context, Context.getDiagnostics(), /*IsUniqueNameMangler*/ true)};
+
+          SmallString<256> Buffer;
+          llvm::raw_svector_ostream Out(Buffer);
+          Ctx->mangleTypeName(ty, Out);
+          typeName = Buffer.str().str();
         }
 
         argTypeNames.push_back(llvm::MDString::get(VMContext, typeName));

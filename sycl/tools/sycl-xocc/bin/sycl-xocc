@@ -33,7 +33,7 @@
 # $6 == The name we wish to give our final output .xcl binary, important that it
 #       is consistent with what the driver expects it to be.
 
-# set -x
+set -e # stop on error
 
 # TODO: Pass an argument through the driver to set options like XILINX_PLATFORM,
 # the environment variables are a quick workaround to swap boards.
@@ -169,6 +169,8 @@ $SDX_CLANG_LLVM_BIN/llvm-as \
 source "${TMP_PATH}_KernelProperties_${SOURCE_FILE_NAME}.bash"
 
 if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
+
+  echo "Building ${#KERNEL_NAME_ARRAY[@]} Kernels..."
   # Compile all Kernels in the source file to seperate .xo ("object") files
   # and add them to the list of kernels to be linked
   LINKER_LIST=""
@@ -185,9 +187,14 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
 
     $SDX --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM \
       --save-temps -c -k "$index" -o "${TMP_PATH}_$index.xo" \
-      "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
+      "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc" &
       LINKER_LIST="${TMP_PATH}_$index.xo $LINKER_LIST"
   fi
+  done
+
+  for job in `jobs -p`
+  do
+    wait $job
   done
 
   # \todo Revisit removal of hlsDataflowStrictMode in the future to see if we
