@@ -90,6 +90,15 @@ add_lit_testsuite(check-sycl-level-zero "Running the SYCL regression tests for L
   )
 set_target_properties(check-sycl-level-zero PROPERTIES FOLDER "SYCL tests")
 
+add_lit_testsuite(check-sycl-xocc-only "Running the SYCL regression tests for sycl-xocc"
+  ${CMAKE_CURRENT_BINARY_DIR}
+  ARGS ${RT_TEST_ARGS}
+  PARAMS "XOCC=only"
+  DEPENDS ${SYCL_TEST_DEPS}
+  EXCLUDE_FROM_CHECK_ALL
+  )
+set_target_properties(check-sycl-xocc-only PROPERTIES FOLDER "SYCL tests")
+
 add_custom_target(check-sycl)
 add_dependencies(check-sycl check-sycl-opencl check-sycl-level-zero)
 set_target_properties(check-sycl PROPERTIES FOLDER "SYCL tests")

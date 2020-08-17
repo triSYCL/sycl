@@ -1,4 +1,9 @@
-// RUN: true
+// REQUIRES: xocc
+
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+
+// RUN: %ACC_RUN_PLACEHOLDER %t.out
+
 //
 // Regression test, based on https://github.com/triSYCL/sycl/issues/64
 // submitted by j-stephan.

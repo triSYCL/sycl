@@ -1,4 +1,9 @@
-// RUN: true
+// REQUIRES: xocc
+
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+
+// RUN: %ACC_RUN_PLACEHOLDER %t.out
+
 
 /*
   The aim of this test is to check that multidimensional kernels are executing

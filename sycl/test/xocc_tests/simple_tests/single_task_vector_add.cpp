@@ -1,4 +1,9 @@
-// RUN: true
+// REQUIRES: xocc
+
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+
+// RUN: %ACC_RUN_PLACEHOLDER %t.out
+
 
 /*
    A simple typical FPGA-like kernel adding 2 vectors

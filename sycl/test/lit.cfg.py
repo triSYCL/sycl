@@ -27,7 +27,7 @@ config.test_format = lit.formats.ShTest()
 config.suffixes = ['.c', '.cpp', '.dump'] #add .spv. Currently not clear what to do with those
 
 # feature tests are considered not so lightweight, so, they are excluded by default
-config.excludes = ['Inputs', 'feature-tests']
+config.excludes = ['Inputs', 'feature-tests', 'disabled']
 
 # test_source_root: The root path where tests are located.
 config.test_source_root = os.path.dirname(__file__)
@@ -76,6 +76,9 @@ llvm_config.add_tool_substitutions(['llvm-spirv'], [config.sycl_tools_dir])
 backend=lit_config.params.get('SYCL_BE', "PI_OPENCL")
 lit_config.note("Backend (SYCL_BE): {}".format(backend))
 config.substitutions.append( ('%sycl_be', backend) )
+
+xocc=lit_config.params.get('XOCC', "off")
+lit_config.note("XOCC={}".format(xocc))
 
 get_device_count_by_type_path = os.path.join(config.llvm_tools_dir, "get_device_count_by_type")
 
@@ -184,6 +187,13 @@ if getDeviceCount("accelerator")[0] and platform.system() == "Linux":
     config.available_features.add('accelerator')
 else:
     lit_config.warning("Accelerator device not found")
+
+if xocc != "off":
+    xrt_lock="/tmp/xrt.lock"
+    acc_run_substitute+= "setsid flock -x " + xrt_lock + " "
+    if os.path.exists(xrt_lock):
+        os.remove(xrt_lock)
+
 config.substitutions.append( ('%ACC_RUN_PLACEHOLDER',  acc_run_substitute) )
 config.substitutions.append( ('%ACC_CHECK_PLACEHOLDER',  acc_check_substitute) )
 
@@ -193,6 +203,8 @@ if not cuda and not level_zero and found_at_least_one_device:
 
 if cuda:
     config.substitutions.append( ('%sycl_triple',  "nvptx64-nvidia-cuda-sycldevice" ) )
+elif xocc != "off":
+    config.substitutions.append( ('%sycl_triple',  "fpga64-xilinx-unknown-sycldevice" ) )
 else:
     config.substitutions.append( ('%sycl_triple',  "spir64-unknown-linux-sycldevice" ) )
 
@@ -213,6 +225,22 @@ for aot_tool in aot_tools:
         config.available_features.add(aot_tool)
     else:
         lit_config.warning("Couldn't find pre-installed AOT device compiler " + aot_tool)
+
+if xocc != "off":
+    required_env = ['HOME', 'USER', 'XILINX_VIVADO', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'XILINX_VITIS', 'XCL_EMULATION_MODE', 'EMCONFIG_PATH']
+    has_error=False
+    config.available_features.add("xocc")
+    for env in required_env:
+        if env not in os.environ:
+            lit_config.note("missing environnement variable: {}".format(env))
+            has_error=True
+    if has_error:
+        lit_config.error("Can't configure tests for XOCC")
+    lit_config.note("XOCC target: {}".format(os.environ["XCL_EMULATION_MODE"]))
+    llvm_config.with_system_environment(required_env)
+    if xocc == "only":
+        config.name = 'SYCL-XOCC'
+        config.test_source_root = config.test_source_root + "/xocc_tests"
 
 # Set timeout for test = 10 mins
 try:
