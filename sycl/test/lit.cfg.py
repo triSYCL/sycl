@@ -236,7 +236,8 @@ if xocc != "off":
             has_error=True
     if has_error:
         lit_config.error("Can't configure tests for XOCC")
-    lit_config.note("XOCC target: {}".format(os.environ["XCL_EMULATION_MODE"]))
+    else:
+        lit_config.note("XOCC target: {}".format(os.environ["XCL_EMULATION_MODE"]))
     llvm_config.with_system_environment(required_env)
     if xocc == "only":
         config.name = 'SYCL-XOCC'

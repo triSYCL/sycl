@@ -49,6 +49,4 @@
 #include <CL/sycl/types.hpp>
 #include <CL/sycl/usm.hpp>
 #include <CL/sycl/version.hpp>
-
 #include <CL/sycl/xilinx/fpga.hpp>
-

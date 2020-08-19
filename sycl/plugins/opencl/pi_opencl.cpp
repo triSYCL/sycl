@@ -246,7 +246,6 @@ pi_result piextDeviceSelectBinary(pi_device device, pi_device_binary *images,
   case CL_DEVICE_TYPE_ACCELERATOR: // OpenCL 64-bit FPGA
     image_target = PI_DEVICE_BINARY_TARGET_XILINX_FPGA;
     // image_target = PI_DEVICE_BINARY_TARGET_SPIRV64_FPGA;
-
     break;
   default:
     // Otherwise, we'll attempt to find and JIT-compile
