@@ -3676,6 +3676,10 @@ static void RenderDebugOptions(const ToolChain &TC, const Driver &D,
                                bool EmitCodeView, ArgStringList &CmdArgs,
                                codegenoptions::DebugInfoKind &DebugInfoKind,
                                DwarfFissionKind &DwarfFission) {
+  
+  /// The XOCC backend currently doesn't deal properly with some debug metadata.
+  /// and there is currently no support for any debugability of device code.
+  /// so we disable emition of debug info for device code.
   if (T.isXilinxFPGA())
     return;
 
@@ -4121,7 +4125,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     // We want to compile sycl kernels.
     CmdArgs.push_back("-fsycl");
     CmdArgs.push_back("-fsycl-is-device");
-    // if (!IsSYCLXOCC)
+
+    /// -fdeclare-spirv-builtins should be disabled when building for XOCC since
+    /// we clang emits spir and not spirv. but the InSPIRation pass will
+    /// translate spirv builtins into function of the hls runtime.
     CmdArgs.push_back("-fdeclare-spirv-builtins");
 
     if (Args.hasFlag(options::OPT_fsycl_esimd, options::OPT_fno_sycl_esimd,

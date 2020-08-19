@@ -710,7 +710,6 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
     auto OFK = Action::OFK_HIP;
     DeviceTripleStr = "amdgcn-amd-amdhsa";
     llvm::Triple HIPTriple(DeviceTripleStr);
-
     // Use the HIP and host triples as the key into
     // getOffloadingDeviceToolChain, because the device toolchain we create
     // depends on both.

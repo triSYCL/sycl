@@ -2584,8 +2584,6 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
     Opts.SYCLUnnamedLambda = Args.hasArg(options::OPT_fsycl_unnamed_lambda);
     // -sycl-std applies to any SYCL source, not only those containing kernels,
     // but also those using the SYCL API
-    // -sycl-std applies to any SYCL source, not only those containing kernels,
-    // but also those using the SYCL API
     if (const Arg *A = Args.getLastArg(OPT_sycl_std_EQ)) {
       Opts.setSYCLVersion(
           llvm::StringSwitch<LangOptions::SYCLVersionList>(A->getValue())
@@ -2606,20 +2604,21 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
     Opts.SYCLExplicitSIMD = Args.hasArg(options::OPT_fsycl_esimd);
   }
 
-    Opts.IncludeDefaultHeader = Args.hasArg(OPT_finclude_default_header);
-    Opts.DeclareOpenCLBuiltins = Args.hasArg(OPT_fdeclare_opencl_builtins);
-    Opts.DeclareSPIRVBuiltins = Args.hasArg(OPT_fdeclare_spirv_builtins);
+  Opts.IncludeDefaultHeader = Args.hasArg(OPT_finclude_default_header);
+  Opts.DeclareOpenCLBuiltins = Args.hasArg(OPT_fdeclare_opencl_builtins);
+  Opts.DeclareSPIRVBuiltins = Args.hasArg(OPT_fdeclare_spirv_builtins);
 
-    llvm::Triple T(TargetOpts.Triple);
-    CompilerInvocation::setLangDefaults(Opts, IK, T, PPOpts, LangStd);
+  llvm::Triple T(TargetOpts.Triple);
+  CompilerInvocation::setLangDefaults(Opts, IK, T, PPOpts, LangStd);
 
-    // -cl-strict-aliasing needs to emit diagnostic in the case where CL > 1.0.
-    // This option should be deprecated for CL > 1.0 because
-    // this option was added for compatibility with OpenCL 1.0.
-    if (Args.getLastArg(OPT_cl_strict_aliasing) && Opts.OpenCLVersion > 100) {
-      Diags.Report(diag::warn_option_invalid_ocl_version)
-          << Opts.getOpenCLVersionTuple().getAsString()
-          << Args.getLastArg(OPT_cl_strict_aliasing)->getAsString(Args);
+  // -cl-strict-aliasing needs to emit diagnostic in the case where CL > 1.0.
+  // This option should be deprecated for CL > 1.0 because
+  // this option was added for compatibility with OpenCL 1.0.
+  if (Args.getLastArg(OPT_cl_strict_aliasing)
+       && Opts.OpenCLVersion > 100) {
+    Diags.Report(diag::warn_option_invalid_ocl_version)
+        << Opts.getOpenCLVersionTuple().getAsString()
+        << Args.getLastArg(OPT_cl_strict_aliasing)->getAsString(Args);
   }
 
   // We abuse '-f[no-]gnu-keywords' to force overriding all GNU-extension

@@ -41,7 +41,8 @@ StringRef Triple::getArchTypeName(ArchType Kind) {
   case fpga_aoco:      return "fpga_aoco";
   case fpga_aocr:      return "fpga_aocr";
   case fpga_aocx:      return "fpga_aocx";
-  case fpga_dep:       return "fpga_dep";
+  case fpga_dep:
+    return "fpga_dep";
   case hexagon:        return "hexagon";
   case hsail64:        return "hsail64";
   case hsail:          return "hsail";

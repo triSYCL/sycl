@@ -1505,6 +1505,9 @@ void CodeGenModule::GenOpenCLArgMetadata(llvm::Function *Fn,
           removeImageAccessQualifier(baseTypeName);
         }
 
+        /// When using XOCC in hw_emu mode this metadata is stored in an XML
+        /// file so we need to remove '<' and '>' because they aren't parsed
+        /// correctly
         if (CGF->Target.getTriple().isXilinxSYCLDevice()) {
           std::unique_ptr<MangleContext> Ctx{ItaniumMangleContext::create(
               Context, Context.getDiagnostics(), /*IsUniqueNameMangler*/ true)};
