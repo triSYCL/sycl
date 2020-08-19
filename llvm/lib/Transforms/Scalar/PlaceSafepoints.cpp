@@ -47,6 +47,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 
 #include "llvm/ADT/SetVector.h"
@@ -188,7 +189,8 @@ static bool needsStatepoint(CallBase *Call, const TargetLibraryInfo &TLI) {
       return false;
   }
 
-  return !(isStatepoint(Call) || isGCRelocate(Call) || isGCResult(Call));
+  return !(isa<GCStatepointInst>(Call) || isa<GCRelocateInst>(Call) ||
+           isa<GCResultInst>(Call));
 }
 
 /// Returns true if this loop is known to contain a call safepoint which
@@ -649,7 +651,7 @@ InsertSafepointPoll(Instruction *InsertBefore,
 
   // Do the actual inlining
   InlineFunctionInfo IFI;
-  bool InlineStatus = InlineFunction(PollCall, IFI);
+  bool InlineStatus = InlineFunction(*PollCall, IFI).isSuccess();
   assert(InlineStatus && "inline must succeed");
   (void)InlineStatus; // suppress warning in release-asserts
 

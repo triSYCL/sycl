@@ -70,6 +70,9 @@ void CSEMIRBuilder::profileDstOp(const DstOp &Op,
 void CSEMIRBuilder::profileSrcOp(const SrcOp &Op,
                                  GISelInstProfileBuilder &B) const {
   switch (Op.getSrcOpKind()) {
+  case SrcOp::SrcType::Ty_Imm:
+    B.addNodeIDImmediate(static_cast<int64_t>(Op.getImm()));
+    break;
   case SrcOp::SrcType::Ty_Predicate:
     B.addNodeIDImmediate(static_cast<int64_t>(Op.getPredicate()));
     break;
@@ -129,7 +132,7 @@ CSEMIRBuilder::generateCopiesIfRequired(ArrayRef<DstOp> DstOps,
   if (DstOps.size() == 1) {
     const DstOp &Op = DstOps[0];
     if (Op.getDstOpKind() == DstOp::DstType::Ty_Reg)
-      return buildCopy(Op.getReg(), MIB->getOperand(0).getReg());
+      return buildCopy(Op.getReg(), MIB.getReg(0));
   }
   return MIB;
 }

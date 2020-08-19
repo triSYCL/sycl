@@ -15,6 +15,7 @@
 #include <regex>
 #include <string>
 
+#include "llvm/IR/Instructions.h"
 #include "llvm/SYCL/XOCCIRDowngrader.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Attributes.h"
@@ -166,12 +167,45 @@ struct XOCCIRDowngrader : public ModulePass {
     }
   }
 
+  /// Remove Freeze instruction because xocc can't deal with them.
+  void removeFreezeInst(Module& M) {
+    SmallVector<Instruction*, 16> ToRemove;
+    for (auto& F : M.functions())
+      for (auto& I : instructions(F))
+        if (auto* Freeze = dyn_cast<FreezeInst>(&I)) {
+          Freeze->replaceAllUsesWith(Freeze->getOperand(0));
+          ToRemove.push_back(Freeze);
+        }
+    for (auto* I : ToRemove)
+      I->eraseFromParent();
+  }
+
+  void removeFNegInst(Module& M) {
+    SmallVector<Instruction*, 16> ToRemove;
+    for (auto &F : M.functions())
+      for (auto &I : instructions(F))
+        if (auto *U = dyn_cast<UnaryOperator>(&I))
+          if (U->getOpcode() == Instruction::FNeg) {
+            Instruction* Sub = BinaryOperator::Create(BinaryOperator::FSub,
+                                   ConstantFP::getZeroValueForNegation(
+                                       U->getOperand(0)->getType()),
+                                   U->getOperand(0));
+            U->replaceAllUsesWith(Sub);
+            Sub->insertBefore(U);
+            ToRemove.push_back(U);
+          }
+    for (auto *I : ToRemove)
+      I->eraseFromParent();
+  }
+
   bool runOnModule(Module &M) override {
     removeImmarg(M);
     removeWillReturn(M);
     removeNoFree(M);
     resetByVal(M);
     renameBasicBlocks(M);
+    removeFreezeInst(M);
+    removeFNegInst(M);
 
     // The module probably changed
     return true;
@@ -181,7 +215,7 @@ struct XOCCIRDowngrader : public ModulePass {
 }
 
 namespace llvm {
-void initializeXOCCIRDowngrader(PassRegistry &Registry);
+void initializeXOCCIRDowngraderPass(PassRegistry &Registry);
 }
 
 INITIALIZE_PASS(XOCCIRDowngrader, "xoccIRDowngrader",

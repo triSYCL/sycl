@@ -31,7 +31,10 @@ class GdbRemoteTestCaseBase(TestBase):
 
     NO_DEBUG_INFO_TESTCASE = True
 
-    _TIMEOUT_SECONDS = 120
+    # Default time out in seconds. The timeout is increased tenfold under Asan.
+    DEFAULT_TIMEOUT =  10 * (10 if ('ASAN_OPTIONS' in os.environ) else 1)
+    # Default sleep time in seconds. The sleep time is doubled under Asan.
+    DEFAULT_SLEEP   =  5  * (2  if ('ASAN_OPTIONS' in os.environ) else 1)
 
     _GDBREMOTE_KILL_PACKET = "$k#6b"
 
@@ -201,10 +204,10 @@ class GdbRemoteTestCaseBase(TestBase):
 
         return (named_pipe_path, named_pipe, named_pipe_fd)
 
-    def get_stub_port_from_named_socket(self, read_timeout_seconds=5):
+    def get_stub_port_from_named_socket(self):
         # Wait for something to read with a max timeout.
         (ready_readers, _, _) = select.select(
-            [self.named_pipe_fd], [], [], read_timeout_seconds)
+            [self.named_pipe_fd], [], [], self.DEFAULT_TIMEOUT)
         self.assertIsNotNone(
             ready_readers,
             "write side of pipe has not written anything - stub isn't writing to pipe.")
@@ -399,7 +402,6 @@ class GdbRemoteTestCaseBase(TestBase):
             self.debug_monitor_exe,
             commandline_args,
             install_remote=False)
-        self.addTearDownHook(self.cleanupSubprocesses)
         self.assertIsNotNone(server)
 
         # If we're receiving the stub's listening port from the named pipe, do
@@ -414,15 +416,6 @@ class GdbRemoteTestCaseBase(TestBase):
             # Create the stub.
             server = self.launch_debug_monitor(attach_pid=attach_pid)
             self.assertIsNotNone(server)
-
-            def shutdown_debug_monitor():
-                try:
-                    server.terminate()
-                except:
-                    logger.warning(
-                        "failed to terminate server for debug monitor: {}; ignoring".format(
-                            sys.exc_info()[0]))
-            self.addTearDownHook(shutdown_debug_monitor)
 
             # Schedule debug monitor to be shut down during teardown.
             logger = self.logger
@@ -441,15 +434,6 @@ class GdbRemoteTestCaseBase(TestBase):
 
             # Schedule debug monitor to be shut down during teardown.
             logger = self.logger
-
-            def shutdown_debug_monitor():
-                try:
-                    server.terminate()
-                except:
-                    logger.warning(
-                        "failed to terminate server for debug monitor: {}; ignoring".format(
-                            sys.exc_info()[0]))
-            self.addTearDownHook(shutdown_debug_monitor)
 
             connect_attemps = 0
             MAX_CONNECT_ATTEMPTS = 10
@@ -503,17 +487,7 @@ class GdbRemoteTestCaseBase(TestBase):
         if sleep_seconds:
             args.append("sleep:%d" % sleep_seconds)
 
-        inferior = self.spawnSubprocess(exe_path, args)
-
-        def shutdown_process_for_attach():
-            try:
-                inferior.terminate()
-            except:
-                logger.warning(
-                    "failed to terminate inferior process for attach: {}; ignoring".format(
-                        sys.exc_info()[0]))
-        self.addTearDownHook(shutdown_process_for_attach)
-        return inferior
+        return self.spawnSubprocess(exe_path, args)
 
     def prep_debug_monitor_and_inferior(
             self,
@@ -594,14 +568,14 @@ class GdbRemoteTestCaseBase(TestBase):
     def expect_socket_recv(
             self,
             sock,
-            expected_content_regex,
-            timeout_seconds):
+            expected_content_regex
+            ):
         response = ""
-        timeout_time = time.time() + timeout_seconds
+        timeout_time = time.time() + self.DEFAULT_TIMEOUT
 
         while not expected_content_regex.match(
                 response) and time.time() < timeout_time:
-            can_read, _, _ = select.select([sock], [], [], timeout_seconds)
+            can_read, _, _ = select.select([sock], [], [], self.DEFAULT_TIMEOUT)
             if can_read and sock in can_read:
                 recv_bytes = sock.recv(4096)
                 if recv_bytes:
@@ -609,21 +583,21 @@ class GdbRemoteTestCaseBase(TestBase):
 
         self.assertTrue(expected_content_regex.match(response))
 
-    def expect_socket_send(self, sock, content, timeout_seconds):
+    def expect_socket_send(self, sock, content):
         request_bytes_remaining = content
-        timeout_time = time.time() + timeout_seconds
+        timeout_time = time.time() + self.DEFAULT_TIMEOUT
 
         while len(request_bytes_remaining) > 0 and time.time() < timeout_time:
-            _, can_write, _ = select.select([], [sock], [], timeout_seconds)
+            _, can_write, _ = select.select([], [sock], [], self.DEFAULT_TIMEOUT)
             if can_write and sock in can_write:
                 written_byte_count = sock.send(request_bytes_remaining.encode())
                 request_bytes_remaining = request_bytes_remaining[
                     written_byte_count:]
         self.assertEqual(len(request_bytes_remaining), 0)
 
-    def do_handshake(self, stub_socket, timeout_seconds=5):
+    def do_handshake(self, stub_socket):
         # Write the ack.
-        self.expect_socket_send(stub_socket, "+", timeout_seconds)
+        self.expect_socket_send(stub_socket, "+")
 
         # Send the start no ack mode packet.
         NO_ACK_MODE_REQUEST = "$QStartNoAckMode#b0"
@@ -632,10 +606,10 @@ class GdbRemoteTestCaseBase(TestBase):
 
         # Receive the ack and "OK"
         self.expect_socket_recv(stub_socket, re.compile(
-            r"^\+\$OK#[0-9a-fA-F]{2}$"), timeout_seconds)
+            r"^\+\$OK#[0-9a-fA-F]{2}$"))
 
         # Send the final ack.
-        self.expect_socket_send(stub_socket, "+", timeout_seconds)
+        self.expect_socket_send(stub_socket, "+")
 
     def add_no_ack_remote_stream(self):
         self.test_sequence.add_log_lines(
@@ -723,15 +697,13 @@ class GdbRemoteTestCaseBase(TestBase):
         return [parse_reg_info_response(reg_info_response)
                 for reg_info_response in reg_info_responses]
 
-    def expect_gdbremote_sequence(self, timeout_seconds=None):
-        if not timeout_seconds:
-            timeout_seconds = self._TIMEOUT_SECONDS
+    def expect_gdbremote_sequence(self):
         return expect_lldb_gdbserver_replay(
             self,
             self.sock,
             self.test_sequence,
             self._pump_queues,
-            timeout_seconds,
+            self.DEFAULT_TIMEOUT,
             self.logger)
 
     _KNOWN_REGINFO_KEYS = [
@@ -879,9 +851,9 @@ class GdbRemoteTestCaseBase(TestBase):
             thread_ids.extend(new_thread_infos)
         return thread_ids
 
-    def wait_for_thread_count(self, thread_count, timeout_seconds=3):
+    def wait_for_thread_count(self, thread_count):
         start_time = time.time()
-        timeout_time = start_time + timeout_seconds
+        timeout_time = start_time + self.DEFAULT_TIMEOUT
 
         actual_thread_count = 0
         while actual_thread_count < thread_count:
@@ -899,7 +871,7 @@ class GdbRemoteTestCaseBase(TestBase):
             if time.time() > timeout_time:
                 raise Exception(
                     'timed out after {} seconds while waiting for theads: waiting for at least {} threads, found {}'.format(
-                        timeout_seconds, thread_count, actual_thread_count))
+                        self.DEFAULT_TIMEOUT, thread_count, actual_thread_count))
 
         return threads
 
@@ -1565,7 +1537,7 @@ class GdbRemoteTestCaseBase(TestBase):
         g_c2_address = int(context.get("g_c2_address"), 16)
 
         # Set a breakpoint at the given address.
-        if self.getArchitecture() == "arm":
+        if self.getArchitecture().startswith("arm"):
             # TODO: Handle case when setting breakpoint in thumb code
             BREAKPOINT_KIND = 4
         else:
@@ -1629,7 +1601,17 @@ class GdbRemoteTestCaseBase(TestBase):
         # variable value
         if re.match("s390x", arch):
             expected_step_count = 2
+        # ARM64 requires "4" instructions: 2 to compute the address (adrp, add),
+        # one to materialize the constant (mov) and the store
+        if re.match("arm64", arch):
+            expected_step_count = 4
+
         self.assertEqual(step_count, expected_step_count)
+
+        # ARM64: Once addresses and constants are materialized, only one
+        # instruction is needed.
+        if re.match("arm64", arch):
+            expected_step_count = 1
 
         # Verify we hit the next state.
         args["expected_g_c1"] = "0"

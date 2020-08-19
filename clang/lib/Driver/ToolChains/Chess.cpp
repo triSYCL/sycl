@@ -39,12 +39,12 @@ ChessInstallationDetector::ChessInstallationDetector(
       SmallString<256> xchessccAbsolutePath;
       fs::real_path(*xchesscc, xchessccAbsolutePath);
 
-      BinaryPath = xchessccAbsolutePath.str();
+      BinaryPath = xchessccAbsolutePath.str().str();
 
       StringRef xchessccDir = path::parent_path(xchessccAbsolutePath);
 
       if (path::filename(xchessccDir) == "bin")
-        BinPath = xchessccDir;
+        BinPath = xchessccDir.str();
 
       // TODO: slightly stricter IsValid test, check all strings aren't empty
       IsValid = true;
@@ -106,8 +106,8 @@ void SYCL::LinkerChess::constructSYCLChessCommand(
 
   // Generate our command to sycl-chess using the arguments we've made
   // Note: Inputs that the shell script doesn't use should be ignored
-  C.addCommand(std::make_unique<Command>(JA, *this,
-               Exec, CmdArgs, Inputs));
+  C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
+                                         Exec, CmdArgs, Inputs));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -119,7 +119,7 @@ ChessToolChain::ChessToolChain(const Driver &D, const llvm::Triple &Triple,
     : ToolChain(D, Triple, Args), HostTC(HostTC),
       ChessInstallation(D, HostTC.getTriple(), Args) {
   if (ChessInstallation.isValid())
-    getProgramPaths().push_back(ChessInstallation.getBinPath());
+    getProgramPaths().push_back(ChessInstallation.getBinPath().str());
 
   // Lookup binaries into the driver directory, this is used to
   // discover the clang-offload-bundler executable.

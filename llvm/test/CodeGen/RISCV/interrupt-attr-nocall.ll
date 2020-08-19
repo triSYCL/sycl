@@ -213,11 +213,11 @@ define void @foo_float() nounwind #0 {
 ; CHECK-RV32IF-NEXT:    sw a0, 12(sp)
 ; CHECK-RV32IF-NEXT:    fsw ft0, 8(sp)
 ; CHECK-RV32IF-NEXT:    fsw ft1, 4(sp)
-; CHECK-RV32IF-NEXT:    lui a0, %hi(f)
-; CHECK-RV32IF-NEXT:    flw ft0, %lo(f)(a0)
 ; CHECK-RV32IF-NEXT:    lui a0, %hi(e)
-; CHECK-RV32IF-NEXT:    flw ft1, %lo(e)(a0)
-; CHECK-RV32IF-NEXT:    fadd.s ft0, ft1, ft0
+; CHECK-RV32IF-NEXT:    flw ft0, %lo(e)(a0)
+; CHECK-RV32IF-NEXT:    lui a0, %hi(f)
+; CHECK-RV32IF-NEXT:    flw ft1, %lo(f)(a0)
+; CHECK-RV32IF-NEXT:    fadd.s ft0, ft0, ft1
 ; CHECK-RV32IF-NEXT:    lui a0, %hi(d)
 ; CHECK-RV32IF-NEXT:    fsw ft0, %lo(d)(a0)
 ; CHECK-RV32IF-NEXT:    flw ft1, 4(sp)
@@ -232,11 +232,11 @@ define void @foo_float() nounwind #0 {
 ; CHECK-RV32IFD-NEXT:    sw a0, 28(sp)
 ; CHECK-RV32IFD-NEXT:    fsd ft0, 16(sp)
 ; CHECK-RV32IFD-NEXT:    fsd ft1, 8(sp)
-; CHECK-RV32IFD-NEXT:    lui a0, %hi(f)
-; CHECK-RV32IFD-NEXT:    flw ft0, %lo(f)(a0)
 ; CHECK-RV32IFD-NEXT:    lui a0, %hi(e)
-; CHECK-RV32IFD-NEXT:    flw ft1, %lo(e)(a0)
-; CHECK-RV32IFD-NEXT:    fadd.s ft0, ft1, ft0
+; CHECK-RV32IFD-NEXT:    flw ft0, %lo(e)(a0)
+; CHECK-RV32IFD-NEXT:    lui a0, %hi(f)
+; CHECK-RV32IFD-NEXT:    flw ft1, %lo(f)(a0)
+; CHECK-RV32IFD-NEXT:    fadd.s ft0, ft0, ft1
 ; CHECK-RV32IFD-NEXT:    lui a0, %hi(d)
 ; CHECK-RV32IFD-NEXT:    fsw ft0, %lo(d)(a0)
 ; CHECK-RV32IFD-NEXT:    fld ft1, 8(sp)
@@ -312,11 +312,11 @@ define void @foo_fp_float() nounwind #1 {
 ; CHECK-RV32IF-NEXT:    fsw ft0, 16(sp)
 ; CHECK-RV32IF-NEXT:    fsw ft1, 12(sp)
 ; CHECK-RV32IF-NEXT:    addi s0, sp, 32
-; CHECK-RV32IF-NEXT:    lui a0, %hi(f)
-; CHECK-RV32IF-NEXT:    flw ft0, %lo(f)(a0)
 ; CHECK-RV32IF-NEXT:    lui a0, %hi(e)
-; CHECK-RV32IF-NEXT:    flw ft1, %lo(e)(a0)
-; CHECK-RV32IF-NEXT:    fadd.s ft0, ft1, ft0
+; CHECK-RV32IF-NEXT:    flw ft0, %lo(e)(a0)
+; CHECK-RV32IF-NEXT:    lui a0, %hi(f)
+; CHECK-RV32IF-NEXT:    flw ft1, %lo(f)(a0)
+; CHECK-RV32IF-NEXT:    fadd.s ft0, ft0, ft1
 ; CHECK-RV32IF-NEXT:    lui a0, %hi(d)
 ; CHECK-RV32IF-NEXT:    fsw ft0, %lo(d)(a0)
 ; CHECK-RV32IF-NEXT:    flw ft1, 12(sp)
@@ -336,11 +336,11 @@ define void @foo_fp_float() nounwind #1 {
 ; CHECK-RV32IFD-NEXT:    fsd ft0, 8(sp)
 ; CHECK-RV32IFD-NEXT:    fsd ft1, 0(sp)
 ; CHECK-RV32IFD-NEXT:    addi s0, sp, 32
-; CHECK-RV32IFD-NEXT:    lui a0, %hi(f)
-; CHECK-RV32IFD-NEXT:    flw ft0, %lo(f)(a0)
 ; CHECK-RV32IFD-NEXT:    lui a0, %hi(e)
-; CHECK-RV32IFD-NEXT:    flw ft1, %lo(e)(a0)
-; CHECK-RV32IFD-NEXT:    fadd.s ft0, ft1, ft0
+; CHECK-RV32IFD-NEXT:    flw ft0, %lo(e)(a0)
+; CHECK-RV32IFD-NEXT:    lui a0, %hi(f)
+; CHECK-RV32IFD-NEXT:    flw ft1, %lo(f)(a0)
+; CHECK-RV32IFD-NEXT:    fadd.s ft0, ft0, ft1
 ; CHECK-RV32IFD-NEXT:    lui a0, %hi(d)
 ; CHECK-RV32IFD-NEXT:    fsw ft0, %lo(d)(a0)
 ; CHECK-RV32IFD-NEXT:    fld ft1, 0(sp)
@@ -383,16 +383,13 @@ define void @foo_double() nounwind #0 {
 ; CHECK-RV32-NEXT:    sw t6, 0(sp)
 ; CHECK-RV32-NEXT:    lui a1, %hi(h)
 ; CHECK-RV32-NEXT:    lw a0, %lo(h)(a1)
-; CHECK-RV32-NEXT:    addi a1, a1, %lo(h)
-; CHECK-RV32-NEXT:    lw a1, 4(a1)
+; CHECK-RV32-NEXT:    lw a1, %lo(h+4)(a1)
 ; CHECK-RV32-NEXT:    lui a3, %hi(i)
 ; CHECK-RV32-NEXT:    lw a2, %lo(i)(a3)
-; CHECK-RV32-NEXT:    addi a3, a3, %lo(i)
-; CHECK-RV32-NEXT:    lw a3, 4(a3)
+; CHECK-RV32-NEXT:    lw a3, %lo(i+4)(a3)
 ; CHECK-RV32-NEXT:    call __adddf3
 ; CHECK-RV32-NEXT:    lui a2, %hi(g)
-; CHECK-RV32-NEXT:    addi a3, a2, %lo(g)
-; CHECK-RV32-NEXT:    sw a1, 4(a3)
+; CHECK-RV32-NEXT:    sw a1, %lo(g+4)(a2)
 ; CHECK-RV32-NEXT:    sw a0, %lo(g)(a2)
 ; CHECK-RV32-NEXT:    lw t6, 0(sp)
 ; CHECK-RV32-NEXT:    lw t5, 4(sp)
@@ -466,16 +463,13 @@ define void @foo_double() nounwind #0 {
 ; CHECK-RV32IF-NEXT:    fsw fs11, 0(sp)
 ; CHECK-RV32IF-NEXT:    lui a1, %hi(h)
 ; CHECK-RV32IF-NEXT:    lw a0, %lo(h)(a1)
-; CHECK-RV32IF-NEXT:    addi a1, a1, %lo(h)
-; CHECK-RV32IF-NEXT:    lw a1, 4(a1)
+; CHECK-RV32IF-NEXT:    lw a1, %lo(h+4)(a1)
 ; CHECK-RV32IF-NEXT:    lui a3, %hi(i)
 ; CHECK-RV32IF-NEXT:    lw a2, %lo(i)(a3)
-; CHECK-RV32IF-NEXT:    addi a3, a3, %lo(i)
-; CHECK-RV32IF-NEXT:    lw a3, 4(a3)
+; CHECK-RV32IF-NEXT:    lw a3, %lo(i+4)(a3)
 ; CHECK-RV32IF-NEXT:    call __adddf3
 ; CHECK-RV32IF-NEXT:    lui a2, %hi(g)
-; CHECK-RV32IF-NEXT:    addi a3, a2, %lo(g)
-; CHECK-RV32IF-NEXT:    sw a1, 4(a3)
+; CHECK-RV32IF-NEXT:    sw a1, %lo(g+4)(a2)
 ; CHECK-RV32IF-NEXT:    sw a0, %lo(g)(a2)
 ; CHECK-RV32IF-NEXT:    flw fs11, 0(sp)
 ; CHECK-RV32IF-NEXT:    flw fs10, 4(sp)
@@ -534,11 +528,11 @@ define void @foo_double() nounwind #0 {
 ; CHECK-RV32IFD-NEXT:    sw a0, 28(sp)
 ; CHECK-RV32IFD-NEXT:    fsd ft0, 16(sp)
 ; CHECK-RV32IFD-NEXT:    fsd ft1, 8(sp)
-; CHECK-RV32IFD-NEXT:    lui a0, %hi(i)
-; CHECK-RV32IFD-NEXT:    fld ft0, %lo(i)(a0)
 ; CHECK-RV32IFD-NEXT:    lui a0, %hi(h)
-; CHECK-RV32IFD-NEXT:    fld ft1, %lo(h)(a0)
-; CHECK-RV32IFD-NEXT:    fadd.d ft0, ft1, ft0
+; CHECK-RV32IFD-NEXT:    fld ft0, %lo(h)(a0)
+; CHECK-RV32IFD-NEXT:    lui a0, %hi(i)
+; CHECK-RV32IFD-NEXT:    fld ft1, %lo(i)(a0)
+; CHECK-RV32IFD-NEXT:    fadd.d ft0, ft0, ft1
 ; CHECK-RV32IFD-NEXT:    lui a0, %hi(g)
 ; CHECK-RV32IFD-NEXT:    fsd ft0, %lo(g)(a0)
 ; CHECK-RV32IFD-NEXT:    fld ft1, 8(sp)
@@ -580,16 +574,13 @@ define void @foo_fp_double() nounwind #1 {
 ; CHECK-RV32-NEXT:    addi s0, sp, 80
 ; CHECK-RV32-NEXT:    lui a1, %hi(h)
 ; CHECK-RV32-NEXT:    lw a0, %lo(h)(a1)
-; CHECK-RV32-NEXT:    addi a1, a1, %lo(h)
-; CHECK-RV32-NEXT:    lw a1, 4(a1)
+; CHECK-RV32-NEXT:    lw a1, %lo(h+4)(a1)
 ; CHECK-RV32-NEXT:    lui a3, %hi(i)
 ; CHECK-RV32-NEXT:    lw a2, %lo(i)(a3)
-; CHECK-RV32-NEXT:    addi a3, a3, %lo(i)
-; CHECK-RV32-NEXT:    lw a3, 4(a3)
+; CHECK-RV32-NEXT:    lw a3, %lo(i+4)(a3)
 ; CHECK-RV32-NEXT:    call __adddf3
 ; CHECK-RV32-NEXT:    lui a2, %hi(g)
-; CHECK-RV32-NEXT:    addi a3, a2, %lo(g)
-; CHECK-RV32-NEXT:    sw a1, 4(a3)
+; CHECK-RV32-NEXT:    sw a1, %lo(g+4)(a2)
 ; CHECK-RV32-NEXT:    sw a0, %lo(g)(a2)
 ; CHECK-RV32-NEXT:    lw t6, 12(sp)
 ; CHECK-RV32-NEXT:    lw t5, 16(sp)
@@ -666,16 +657,13 @@ define void @foo_fp_double() nounwind #1 {
 ; CHECK-RV32IF-NEXT:    addi s0, sp, 208
 ; CHECK-RV32IF-NEXT:    lui a1, %hi(h)
 ; CHECK-RV32IF-NEXT:    lw a0, %lo(h)(a1)
-; CHECK-RV32IF-NEXT:    addi a1, a1, %lo(h)
-; CHECK-RV32IF-NEXT:    lw a1, 4(a1)
+; CHECK-RV32IF-NEXT:    lw a1, %lo(h+4)(a1)
 ; CHECK-RV32IF-NEXT:    lui a3, %hi(i)
 ; CHECK-RV32IF-NEXT:    lw a2, %lo(i)(a3)
-; CHECK-RV32IF-NEXT:    addi a3, a3, %lo(i)
-; CHECK-RV32IF-NEXT:    lw a3, 4(a3)
+; CHECK-RV32IF-NEXT:    lw a3, %lo(i+4)(a3)
 ; CHECK-RV32IF-NEXT:    call __adddf3
 ; CHECK-RV32IF-NEXT:    lui a2, %hi(g)
-; CHECK-RV32IF-NEXT:    addi a3, a2, %lo(g)
-; CHECK-RV32IF-NEXT:    sw a1, 4(a3)
+; CHECK-RV32IF-NEXT:    sw a1, %lo(g+4)(a2)
 ; CHECK-RV32IF-NEXT:    sw a0, %lo(g)(a2)
 ; CHECK-RV32IF-NEXT:    flw fs11, 12(sp)
 ; CHECK-RV32IF-NEXT:    flw fs10, 16(sp)
@@ -738,11 +726,11 @@ define void @foo_fp_double() nounwind #1 {
 ; CHECK-RV32IFD-NEXT:    fsd ft0, 8(sp)
 ; CHECK-RV32IFD-NEXT:    fsd ft1, 0(sp)
 ; CHECK-RV32IFD-NEXT:    addi s0, sp, 32
-; CHECK-RV32IFD-NEXT:    lui a0, %hi(i)
-; CHECK-RV32IFD-NEXT:    fld ft0, %lo(i)(a0)
 ; CHECK-RV32IFD-NEXT:    lui a0, %hi(h)
-; CHECK-RV32IFD-NEXT:    fld ft1, %lo(h)(a0)
-; CHECK-RV32IFD-NEXT:    fadd.d ft0, ft1, ft0
+; CHECK-RV32IFD-NEXT:    fld ft0, %lo(h)(a0)
+; CHECK-RV32IFD-NEXT:    lui a0, %hi(i)
+; CHECK-RV32IFD-NEXT:    fld ft1, %lo(i)(a0)
+; CHECK-RV32IFD-NEXT:    fadd.d ft0, ft0, ft1
 ; CHECK-RV32IFD-NEXT:    lui a0, %hi(g)
 ; CHECK-RV32IFD-NEXT:    fsd ft0, %lo(g)(a0)
 ; CHECK-RV32IFD-NEXT:    fld ft1, 0(sp)
@@ -760,4 +748,4 @@ define void @foo_fp_double() nounwind #1 {
 }
 
 attributes #0 = { "interrupt"="machine" }
-attributes #1 = { "interrupt"="machine" "no-frame-pointer-elim"="true" }
+attributes #1 = { "interrupt"="machine" "frame-pointer"="all" }

@@ -4,7 +4,5 @@ executable("lli-child-target") {
     "//llvm/lib/ExecutionEngine/RuntimeDyld",
     "//llvm/lib/Support",
   ]
-  sources = [
-    "ChildTarget.cpp",
-  ]
+  sources = [ "ChildTarget.cpp" ]
 }

@@ -15,6 +15,8 @@
 
 #include "llvm/BinaryFormat/XCOFF.h"
 #include "llvm/Object/ObjectFile.h"
+#include "llvm/Support/Endian.h"
+#include <limits>
 
 namespace llvm {
 namespace object {
@@ -47,7 +49,26 @@ struct XCOFFFileHeader64 {
   support::ubig32_t NumberOfSymTableEntries;
 };
 
-struct XCOFFSectionHeader32 {
+template <typename T> struct XCOFFSectionHeader {
+  // Least significant 3 bits are reserved.
+  static constexpr unsigned SectionFlagsReservedMask = 0x7;
+
+  // The low order 16 bits of section flags denotes the section type.
+  static constexpr unsigned SectionFlagsTypeMask = 0xffffu;
+
+public:
+  StringRef getName() const;
+  uint16_t getSectionType() const;
+  bool isReservedSectionType() const;
+};
+
+// Explicit extern template declarations.
+struct XCOFFSectionHeader32;
+struct XCOFFSectionHeader64;
+extern template struct XCOFFSectionHeader<XCOFFSectionHeader32>;
+extern template struct XCOFFSectionHeader<XCOFFSectionHeader64>;
+
+struct XCOFFSectionHeader32 : XCOFFSectionHeader<XCOFFSectionHeader32> {
   char Name[XCOFF::NameSize];
   support::ubig32_t PhysicalAddress;
   support::ubig32_t VirtualAddress;
@@ -58,11 +79,9 @@ struct XCOFFSectionHeader32 {
   support::ubig16_t NumberOfRelocations;
   support::ubig16_t NumberOfLineNumbers;
   support::big32_t Flags;
-
-  StringRef getName() const;
 };
 
-struct XCOFFSectionHeader64 {
+struct XCOFFSectionHeader64 : XCOFFSectionHeader<XCOFFSectionHeader64> {
   char Name[XCOFF::NameSize];
   support::ubig64_t PhysicalAddress;
   support::ubig64_t VirtualAddress;
@@ -74,8 +93,6 @@ struct XCOFFSectionHeader64 {
   support::ubig32_t NumberOfLineNumbers;
   support::big32_t Flags;
   char Padding[4];
-
-  StringRef getName() const;
 };
 
 struct XCOFFSymbolEntry {
@@ -113,13 +130,33 @@ struct XCOFFStringTable {
 };
 
 struct XCOFFCsectAuxEnt32 {
-  support::ubig32_t SectionLen;
+  static constexpr uint8_t SymbolTypeMask = 0x07;
+  static constexpr uint8_t SymbolAlignmentMask = 0xF8;
+  static constexpr size_t SymbolAlignmentBitOffset = 3;
+
+  support::ubig32_t
+      SectionOrLength; // If the symbol type is XTY_SD or XTY_CM, the csect
+                       // length.
+                       // If the symbol type is XTY_LD, the symbol table
+                       // index of the containing csect.
+                       // If the symbol type is XTY_ER, 0.
   support::ubig32_t ParameterHashIndex;
   support::ubig16_t TypeChkSectNum;
   uint8_t SymbolAlignmentAndType;
   XCOFF::StorageMappingClass StorageMappingClass;
   support::ubig32_t StabInfoIndex;
   support::ubig16_t StabSectNum;
+
+  uint16_t getAlignmentLog2() const {
+    return (SymbolAlignmentAndType & SymbolAlignmentMask) >>
+           SymbolAlignmentBitOffset;
+  }
+
+  uint8_t getSymbolType() const {
+    return SymbolAlignmentAndType & SymbolTypeMask;
+  }
+
+  bool isLabel() const { return getSymbolType() == XCOFF::XTY_LD; }
 };
 
 struct XCOFFFileAuxEnt {
@@ -142,6 +179,38 @@ struct XCOFFSectAuxEntForStat {
   support::ubig16_t NumberOfRelocEnt;
   support::ubig16_t NumberOfLineNum;
   uint8_t Pad[10];
+};
+
+struct XCOFFRelocation32 {
+  // Masks for packing/unpacking the r_rsize field of relocations.
+
+  // The msb is used to indicate if the bits being relocated are signed or
+  // unsigned.
+  static constexpr uint8_t XR_SIGN_INDICATOR_MASK = 0x80;
+
+  // The 2nd msb is used to indicate that the binder has replaced/modified the
+  // original instruction.
+  static constexpr uint8_t XR_FIXUP_INDICATOR_MASK = 0x40;
+
+  // The remaining bits specify the bit length of the relocatable reference
+  // minus one.
+  static constexpr uint8_t XR_BIASED_LENGTH_MASK = 0x3f;
+
+public:
+  support::ubig32_t VirtualAddress;
+  support::ubig32_t SymbolIndex;
+
+  // Packed field, see XR_* masks for details of packing.
+  uint8_t Info;
+
+  XCOFF::RelocationType Type;
+
+public:
+  bool isRelocationSigned() const;
+  bool isFixupIndicated() const;
+
+  // Returns the number of bits being relocated.
+  uint8_t getRelocatedLength() const;
 };
 
 class XCOFFObjectFile : public ObjectFile {
@@ -195,9 +264,12 @@ private:
   void checkSectionAddress(uintptr_t Addr, uintptr_t TableAddr) const;
 
 public:
+  static constexpr uint64_t InvalidRelocOffset =
+      std::numeric_limits<uint64_t>::max();
+
   // Interface inherited from base classes.
   void moveSymbolNext(DataRefImpl &Symb) const override;
-  uint32_t getSymbolFlags(DataRefImpl Symb) const override;
+  Expected<uint32_t> getSymbolFlags(DataRefImpl Symb) const override;
   basic_symbol_iterator symbol_begin() const override;
   basic_symbol_iterator symbol_end() const override;
 
@@ -226,6 +298,10 @@ public:
   relocation_iterator section_rel_end(DataRefImpl Sec) const override;
 
   void moveRelocationNext(DataRefImpl &Rel) const override;
+
+  /// \returns the relocation offset with the base address of the containing
+  /// section as zero, or InvalidRelocOffset on errors (such as a relocation
+  /// that does not refer to an address in any section).
   uint64_t getRelocationOffset(DataRefImpl Rel) const override;
   symbol_iterator getRelocationSymbol(DataRefImpl Rel) const override;
   uint64_t getRelocationType(DataRefImpl Rel) const override;
@@ -273,6 +349,7 @@ public:
 
   uint32_t getNumberOfSymbolTableEntries64() const;
   uint32_t getSymbolIndex(uintptr_t SymEntPtr) const;
+  Expected<StringRef> getSymbolNameByIndex(uint32_t SymbolTableIndex) const;
 
   Expected<StringRef> getCFileName(const XCOFFFileAuxEnt *CFileEntPtr) const;
   uint16_t getOptionalHeaderSize() const;
@@ -286,6 +363,13 @@ public:
   Expected<DataRefImpl> getSectionByNum(int16_t Num) const;
 
   void checkSymbolEntryPointer(uintptr_t SymbolEntPtr) const;
+
+  // Relocation-related interfaces.
+  Expected<uint32_t>
+  getLogicalNumberOfRelocationEntries(const XCOFFSectionHeader32 &Sec) const;
+
+  Expected<ArrayRef<XCOFFRelocation32>>
+  relocations(const XCOFFSectionHeader32 &) const;
 }; // XCOFFObjectFile
 
 class XCOFFSymbolRef {

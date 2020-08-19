@@ -152,9 +152,20 @@ public:
     case DecorationMaxReplicatesINTEL:
     case DecorationSimpleDualPortINTEL:
     case DecorationMergeINTEL:
+    case DecorationBankBitsINTEL:
+    case DecorationForcePow2DepthINTEL:
       return getSet(ExtensionID::SPV_INTEL_fpga_memory_attributes);
+    case DecorationBurstCoalesceINTEL:
+    case DecorationCacheSizeINTEL:
+    case DecorationDontStaticallyCoalesceINTEL:
+    case DecorationPrefetchINTEL:
+      return getSet(ExtensionID::SPV_INTEL_fpga_memory_accesses);
     case DecorationReferencedIndirectlyINTEL:
       return getSet(ExtensionID::SPV_INTEL_function_pointers);
+    case DecorationIOPipeStorageINTEL:
+      return getSet(ExtensionID::SPV_INTEL_io_pipes);
+    case DecorationBufferLocationINTEL:
+      return getSet(ExtensionID::SPV_INTEL_fpga_buffer_location);
     default:
       return SPIRVExtSet();
     }
@@ -248,7 +259,18 @@ public:
     case DecorationMaxReplicatesINTEL:
     case DecorationSimpleDualPortINTEL:
     case DecorationMergeINTEL:
+    case DecorationBankBitsINTEL:
+    case DecorationForcePow2DepthINTEL:
       return getSet(ExtensionID::SPV_INTEL_fpga_memory_attributes);
+    case DecorationBurstCoalesceINTEL:
+    case DecorationCacheSizeINTEL:
+    case DecorationDontStaticallyCoalesceINTEL:
+    case DecorationPrefetchINTEL:
+      return getSet(ExtensionID::SPV_INTEL_fpga_memory_accesses);
+    case DecorationIOPipeStorageINTEL:
+      return getSet(ExtensionID::SPV_INTEL_io_pipes);
+    case DecorationBufferLocationINTEL:
+      return getSet(ExtensionID::SPV_INTEL_fpga_buffer_location);
     default:
       return SPIRVExtSet();
     }
@@ -405,6 +427,15 @@ public:
       : SPIRVDecorateStrAttrBase(TheTarget, AnnotateString) {}
 };
 
+class SPIRVDecorateFuncParamDescAttr
+    : public SPIRVDecorateStrAttrBase<DecorationFuncParamDescINTEL> {
+public:
+  //  Complete constructor for UserSemantic decoration
+  SPIRVDecorateFuncParamDescAttr(SPIRVEntry *TheTarget,
+                                 const std::string &AnnotateString)
+      : SPIRVDecorateStrAttrBase(TheTarget, AnnotateString) {}
+};
+
 class SPIRVDecorateMergeINTELAttr : public SPIRVDecorate {
 public:
   // Complete constructor for MergeINTEL decoration
@@ -445,6 +476,17 @@ public:
     } else
 #endif
       Decoder >> Literals;
+  }
+};
+
+class SPIRVDecorateBankBitsINTELAttr : public SPIRVDecorate {
+public:
+  // Complete constructor for BankBitsINTEL decoration
+  SPIRVDecorateBankBitsINTELAttr(SPIRVEntry *TheTarget,
+                                 const std::vector<SPIRVWord> &TheBits)
+      : SPIRVDecorate(DecorationBankBitsINTEL, TheTarget) {
+    Literals = TheBits;
+    WordCount += Literals.size();
   }
 };
 
@@ -496,6 +538,18 @@ public:
       Literals.push_back(I);
     for (auto &I : getVec(Direction))
       Literals.push_back(I);
+    WordCount += Literals.size();
+  }
+};
+
+class SPIRVMemberDecorateBankBitsINTELAttr : public SPIRVMemberDecorate {
+public:
+  // Complete constructor for BankBitsINTEL decoration
+  SPIRVMemberDecorateBankBitsINTELAttr(SPIRVEntry *TheTarget,
+                                       SPIRVWord MemberNumber,
+                                       const std::vector<SPIRVWord> &TheBits)
+      : SPIRVMemberDecorate(DecorationBankBitsINTEL, MemberNumber, TheTarget) {
+    Literals = TheBits;
     WordCount += Literals.size();
   }
 };

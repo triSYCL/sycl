@@ -36,6 +36,7 @@
 #include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/InitializePasses.h"
 
 namespace llvm {
 
@@ -273,9 +274,10 @@ public:
 
   void MarkVirtRegAliveInBlock(VarInfo& VRInfo, MachineBasicBlock* DefBlock,
                                MachineBasicBlock *BB);
-  void MarkVirtRegAliveInBlock(VarInfo& VRInfo, MachineBasicBlock* DefBlock,
+  void MarkVirtRegAliveInBlock(VarInfo &VRInfo, MachineBasicBlock *DefBlock,
                                MachineBasicBlock *BB,
-                               std::vector<MachineBasicBlock*> &WorkList);
+                               SmallVectorImpl<MachineBasicBlock *> &WorkList);
+
   void HandleVirtRegDef(unsigned reg, MachineInstr &MI);
   void HandleVirtRegUse(unsigned reg, MachineBasicBlock *MBB, MachineInstr &MI);
 
@@ -295,6 +297,11 @@ public:
   void addNewBlock(MachineBasicBlock *BB,
                    MachineBasicBlock *DomBB,
                    MachineBasicBlock *SuccBB);
+
+  void addNewBlock(MachineBasicBlock *BB,
+                   MachineBasicBlock *DomBB,
+                   MachineBasicBlock *SuccBB,
+                   std::vector<SparseBitVector<>> &LiveInSets);
 
   /// isPHIJoin - Return true if Reg is a phi join register.
   bool isPHIJoin(unsigned Reg) { return PHIJoins.test(Reg); }

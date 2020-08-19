@@ -131,6 +131,21 @@ std::unique_ptr<ASTConsumer> index::createIndexingASTConsumer(
                                             ShouldSkipFunctionBody);
 }
 
+std::unique_ptr<ASTConsumer> clang::index::createIndexingASTConsumer(
+    std::shared_ptr<IndexDataConsumer> DataConsumer,
+    const IndexingOptions &Opts, std::shared_ptr<Preprocessor> PP) {
+  std::function<bool(const Decl *)> ShouldSkipFunctionBody = [](const Decl *) {
+    return false;
+  };
+  if (Opts.ShouldTraverseDecl)
+    ShouldSkipFunctionBody =
+        [ShouldTraverseDecl(Opts.ShouldTraverseDecl)](const Decl *D) {
+          return !ShouldTraverseDecl(D);
+        };
+  return createIndexingASTConsumer(std::move(DataConsumer), Opts, std::move(PP),
+                                   std::move(ShouldSkipFunctionBody));
+}
+
 std::unique_ptr<FrontendAction>
 index::createIndexingAction(std::shared_ptr<IndexDataConsumer> DataConsumer,
                             const IndexingOptions &Opts) {
@@ -151,7 +166,7 @@ static void indexPreprocessorMacros(const Preprocessor &PP,
                                     IndexDataConsumer &DataConsumer) {
   for (const auto &M : PP.macros())
     if (MacroDirective *MD = M.second.getLatest())
-      DataConsumer.handleMacroOccurence(
+      DataConsumer.handleMacroOccurrence(
           M.first, MD->getMacroInfo(),
           static_cast<unsigned>(index::SymbolRole::Definition),
           MD->getLocation());

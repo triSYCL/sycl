@@ -11,9 +11,14 @@
 #include <CL/__spirv/spirv_ops.hpp>
 #include <CL/__spirv/spirv_types.hpp>
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 
+/// Encapsulates a single SYCL device event which is available only within SYCL
+/// kernel functions and can be used to wait for asynchronous operations within
+/// a kernel function to complete.
+///
+/// \ingroup sycl_api
 class device_event {
 private:
   __ocl_event_t *m_Event;
@@ -32,4 +37,4 @@ public:
 };
 
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

@@ -161,6 +161,17 @@ float VirtRegAuxInfo::weightCalcHelper(LiveInterval &li, SlotIndex *start,
 
   std::pair<unsigned, unsigned> TargetHint = mri.getRegAllocationHint(li.reg);
 
+  if (li.isSpillable() && VRM) {
+    Register Reg = li.reg;
+    Register Original = VRM->getOriginal(Reg);
+    const LiveInterval &OrigInt = LIS.getInterval(Original);
+    // li comes from a split of OrigInt. If OrigInt was marked
+    // as not spillable, make sure the new interval is marked
+    // as not spillable as well.
+    if (!OrigInt.isSpillable())
+      li.markNotSpillable();
+  }
+
   // Don't recompute spill weight for an unspillable register.
   bool Spillable = li.isSpillable();
 
@@ -203,9 +214,10 @@ float VirtRegAuxInfo::weightCalcHelper(LiveInterval &li, SlotIndex *start,
   };
   std::set<CopyHint> CopyHints;
 
-  for (MachineRegisterInfo::reg_instr_iterator
-       I = mri.reg_instr_begin(li.reg), E = mri.reg_instr_end();
-       I != E; ) {
+  for (MachineRegisterInfo::reg_instr_nodbg_iterator
+           I = mri.reg_instr_nodbg_begin(li.reg),
+           E = mri.reg_instr_nodbg_end();
+       I != E;) {
     MachineInstr *mi = &*(I++);
 
     // For local split artifacts, we are interested only in instructions between
@@ -215,7 +227,7 @@ float VirtRegAuxInfo::weightCalcHelper(LiveInterval &li, SlotIndex *start,
       continue;
 
     numInstr++;
-    if (mi->isIdentityCopy() || mi->isImplicitDef() || mi->isDebugInstr())
+    if (mi->isIdentityCopy() || mi->isImplicitDef())
       continue;
     if (!visited.insert(mi).second)
       continue;

@@ -1,5 +1,7 @@
-; RUN: opt < %s -asan -asan-module -asan-globals-live-support=1 -S | FileCheck %s
-; RUN: opt < %s -asan -asan-module -asan-globals-live-support=1 -asan-mapping-scale=5 -S | FileCheck %s
+; RUN: opt < %s -asan -asan-module -enable-new-pm=0 -asan-globals-live-support=1 -S | FileCheck %s
+; RUN: opt < %s -passes='asan-pipeline' -asan-globals-live-support=1 -S | FileCheck %s
+; RUN: opt < %s -asan -asan-module -enable-new-pm=0 -asan-globals-live-support=1 -asan-mapping-scale=5 -S | FileCheck %s
+; RUN: opt < %s -passes='asan-pipeline' -asan-globals-live-support=1 -asan-mapping-scale=5 -S | FileCheck %s
 
 target datalayout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"
 target triple = "x86_64-unknown-linux-gnu"
@@ -55,7 +57,7 @@ entry:
 }
 
 attributes #0 = { nounwind sanitize_address }
-attributes #1 = { nounwind sanitize_address "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "no-realign-stack" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
+attributes #1 = { nounwind sanitize_address "less-precise-fpmad"="false" "frame-pointer"="none" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "no-realign-stack" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
 
 !llvm.asan.globals = !{!0, !1, !2, !3, !4}
 !llvm.ident = !{!5}

@@ -20,12 +20,12 @@
 #if (defined(__SYCL_DEVICE_ONLY__) && defined(__SYCL_XILINX_ONLY__))
 extern "C" {
   /// SSDM Intrinsics: dataflow operation
-  void _ssdm_op_SpecDataflowPipeline(...)
+  SYCL_EXTERNAL void _ssdm_op_SpecDataflowPipeline(...)
     __attribute__ ((nothrow, noinline, weak));
   /// SSDM Intrinsics: pipeline operation
-  void _ssdm_op_SpecPipeline(...) __attribute__ ((nothrow, noinline, weak));
+  SYCL_EXTERNAL void _ssdm_op_SpecPipeline(...) __attribute__ ((nothrow, noinline, weak));
   /// SSDM Intrinsics: array partition operation
-  void _ssdm_SpecArrayPartition(...) __attribute__ ((nothrow, noinline, weak));
+  SYCL_EXTERNAL void _ssdm_SpecArrayPartition(...) __attribute__ ((nothrow, noinline, weak));
 }
 #else
 /* If not on device, just ignore the intrinsics as defining them as

@@ -12,13 +12,20 @@
 #include <stdexcept>
 #include <type_traits>
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 template <int dimensions> class id;
+
+/// Defines the iteration domain of either a single work-group in a parallel
+/// dispatch, or the overall dimensions of the dispatch.
+///
+/// \ingroup sycl_api
 template <int dimensions = 1> class range : public detail::array<dimensions> {
   static_assert(dimensions >= 1 && dimensions <= 3,
-                "range can only be 1, 2, or 3 dimentional.");
+                "range can only be 1, 2, or 3 dimensional.");
   using base = detail::array<dimensions>;
+  template <typename N, typename T>
+  using IntegralType = detail::enable_if_t<std::is_integral<N>::value, T>;
 
 public:
   /* The following constructor is only available in the range class
@@ -70,15 +77,17 @@ public:
     }                                                                          \
     return result;                                                             \
   }                                                                            \
-  range<dimensions> operator op(const size_t &rhs) const {                     \
+  template <typename T>                                                        \
+  IntegralType<T, range<dimensions>> operator op(const T &rhs) const {         \
     range<dimensions> result(*this);                                           \
     for (int i = 0; i < dimensions; ++i) {                                     \
       result.common_array[i] = this->common_array[i] op rhs;                   \
     }                                                                          \
     return result;                                                             \
   }                                                                            \
-  friend range<dimensions> operator op(const size_t &lhs,                      \
-                                       const range<dimensions> &rhs) {         \
+  template <typename T>                                                        \
+  friend IntegralType<T, range<dimensions>> operator op(                       \
+      const T &lhs, const range<dimensions> &rhs) {                            \
     range<dimensions> result(rhs);                                             \
     for (int i = 0; i < dimensions; ++i) {                                     \
       result.common_array[i] = lhs op rhs.common_array[i];                     \
@@ -134,5 +143,11 @@ public:
 #undef __SYCL_GEN_OPT
 };
 
+#ifdef __cpp_deduction_guides
+range(size_t)->range<1>;
+range(size_t, size_t)->range<2>;
+range(size_t, size_t, size_t)->range<3>;
+#endif
+
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

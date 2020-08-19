@@ -18,6 +18,7 @@
 #include "clang/Basic/CharInfo.h"
 #include "clang/Basic/Diagnostic.h"
 #include "clang/Lex/LexDiagnostic.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/Support/MemoryBuffer.h"
 
@@ -185,17 +186,6 @@ static void skipRawString(const char *&First, const char *const End) {
   }
 }
 
-static void skipString(const char *&First, const char *const End) {
-  assert(*First == '\'' || *First == '"' || *First == '<');
-  const char Terminator = *First == '<' ? '>' : *First;
-  for (++First; First != End && *First != Terminator; ++First)
-    if (*First == '\\')
-      if (++First == End)
-        return;
-  if (First != End)
-    ++First; // Finish off the string.
-}
-
 // Returns the length of EOL, either 0 (no end-of-line), 1 (\n) or 2 (\r\n)
 static unsigned isEOL(const char *First, const char *const End) {
   if (First == End)
@@ -204,6 +194,35 @@ static unsigned isEOL(const char *First, const char *const End) {
       isVerticalWhitespace(First[1]) && First[0] != First[1])
     return 2;
   return !!isVerticalWhitespace(First[0]);
+}
+
+static void skipString(const char *&First, const char *const End) {
+  assert(*First == '\'' || *First == '"' || *First == '<');
+  const char Terminator = *First == '<' ? '>' : *First;
+  for (++First; First != End && *First != Terminator; ++First) {
+    // String and character literals don't extend past the end of the line.
+    if (isVerticalWhitespace(*First))
+      return;
+    if (*First != '\\')
+      continue;
+    // Skip past backslash to the next character. This ensures that the
+    // character right after it is skipped as well, which matters if it's
+    // the terminator.
+    if (++First == End)
+      return;
+    if (!isWhitespace(*First))
+      continue;
+    // Whitespace after the backslash might indicate a line continuation.
+    const char *FirstAfterBackslashPastSpace = First;
+    skipOverSpaces(FirstAfterBackslashPastSpace, End);
+    if (unsigned NLSize = isEOL(FirstAfterBackslashPastSpace, End)) {
+      // Advance the character pointer to the next line for the next
+      // iteration.
+      First = FirstAfterBackslashPastSpace + NLSize - 1;
+    }
+  }
+  if (First != End)
+    ++First; // Finish off the string.
 }
 
 // Returns the length of the skipped newline
@@ -244,11 +263,20 @@ static void skipToNewlineRaw(const char *&First, const char *const End) {
   }
 }
 
-static const char *reverseOverSpaces(const char *First, const char *Last) {
+static const char *findLastNonSpace(const char *First, const char *Last) {
   assert(First <= Last);
   while (First != Last && isHorizontalWhitespace(Last[-1]))
     --Last;
   return Last;
+}
+
+static const char *findFirstTrailingSpace(const char *First,
+                                          const char *Last) {
+  const char *LastNonSpace = findLastNonSpace(First, Last);
+  if (Last == LastNonSpace)
+    return Last;
+  assert(isHorizontalWhitespace(LastNonSpace[0]));
+  return LastNonSpace + 1;
 }
 
 static void skipLineComment(const char *&First, const char *const End) {
@@ -382,7 +410,7 @@ void Minimizer::printToNewline(const char *&First, const char *const End) {
       }
 
       // Deal with "//..." and "/*...*/".
-      append(First, reverseOverSpaces(First, Last));
+      append(First, findFirstTrailingSpace(First, Last));
       First = Last;
 
       if (Last[1] == '/') {
@@ -397,15 +425,20 @@ void Minimizer::printToNewline(const char *&First, const char *const End) {
     } while (Last != End && !isVerticalWhitespace(*Last));
 
     // Print out the string.
-    if (Last == End || Last == First || Last[-1] != '\\') {
-      append(First, reverseOverSpaces(First, Last));
+    const char *LastBeforeTrailingSpace = findLastNonSpace(First, Last);
+    if (Last == End || LastBeforeTrailingSpace == First ||
+        LastBeforeTrailingSpace[-1] != '\\') {
+      append(First, LastBeforeTrailingSpace);
       First = Last;
       skipNewline(First, End);
       return;
     }
 
-    // Print up to the backslash, backing up over spaces.
-    append(First, reverseOverSpaces(First, Last - 1));
+    // Print up to the backslash, backing up over spaces. Preserve at least one
+    // space, as the space matters when tokens are separated by a line
+    // continuation.
+    append(First, findFirstTrailingSpace(
+                      First, LastBeforeTrailingSpace - 1));
 
     First = Last;
     skipNewline(First, End);
@@ -731,12 +764,13 @@ bool Minimizer::lexEndif(const char *&First, const char *const End) {
   if (top() == pp_else)
     popToken();
 
-  // Strip out "#elif" if they're empty.
-  while (top() == pp_elif)
-    popToken();
-
-  // If "#if" is empty, strip it and skip the "#endif".
-  if (top() == pp_if || top() == pp_ifdef || top() == pp_ifndef) {
+  // If "#ifdef" is empty, strip it and skip the "#endif".
+  //
+  // FIXME: Once/if Clang starts disallowing __has_include in macro expansions,
+  // we can skip empty `#if` and `#elif` blocks as well after scanning for a
+  // literal __has_include in the condition.  Even without that rule we could
+  // drop the tokens if we scan for identifiers in the condition and find none.
+  if (top() == pp_ifdef || top() == pp_ifndef) {
     popToken();
     skipLine(First, End);
     return false;

@@ -22,6 +22,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Target/TargetMachine.h"
 
 #define DEBUG_TYPE "call-lowering"
 
@@ -29,44 +30,50 @@ using namespace llvm;
 
 void CallLowering::anchor() {}
 
-bool CallLowering::lowerCall(MachineIRBuilder &MIRBuilder, ImmutableCallSite CS,
+bool CallLowering::lowerCall(MachineIRBuilder &MIRBuilder, const CallBase &CB,
                              ArrayRef<Register> ResRegs,
                              ArrayRef<ArrayRef<Register>> ArgRegs,
                              Register SwiftErrorVReg,
                              std::function<unsigned()> GetCalleeReg) const {
   CallLoweringInfo Info;
-  auto &DL = CS.getParent()->getParent()->getParent()->getDataLayout();
+  const DataLayout &DL = MIRBuilder.getDataLayout();
 
   // First step is to marshall all the function's parameters into the correct
   // physregs and memory locations. Gather the sequence of argument types that
   // we'll pass to the assigner function.
   unsigned i = 0;
-  unsigned NumFixedArgs = CS.getFunctionType()->getNumParams();
-  for (auto &Arg : CS.args()) {
+  unsigned NumFixedArgs = CB.getFunctionType()->getNumParams();
+  for (auto &Arg : CB.args()) {
     ArgInfo OrigArg{ArgRegs[i], Arg->getType(), ISD::ArgFlagsTy{},
                     i < NumFixedArgs};
-    setArgFlags(OrigArg, i + AttributeList::FirstArgIndex, DL, CS);
+    setArgFlags(OrigArg, i + AttributeList::FirstArgIndex, DL, CB);
     Info.OrigArgs.push_back(OrigArg);
     ++i;
   }
 
-  if (const Function *F = CS.getCalledFunction())
+  // Try looking through a bitcast from one function type to another.
+  // Commonly happens with calls to objc_msgSend().
+  const Value *CalleeV = CB.getCalledOperand()->stripPointerCasts();
+  if (const Function *F = dyn_cast<Function>(CalleeV))
     Info.Callee = MachineOperand::CreateGA(F, 0);
   else
     Info.Callee = MachineOperand::CreateReg(GetCalleeReg(), false);
 
-  Info.OrigRet = ArgInfo{ResRegs, CS.getType(), ISD::ArgFlagsTy{}};
+  Info.OrigRet = ArgInfo{ResRegs, CB.getType(), ISD::ArgFlagsTy{}};
   if (!Info.OrigRet.Ty->isVoidTy())
-    setArgFlags(Info.OrigRet, AttributeList::ReturnIndex, DL, CS);
+    setArgFlags(Info.OrigRet, AttributeList::ReturnIndex, DL, CB);
 
-  Info.KnownCallees =
-      CS.getInstruction()->getMetadata(LLVMContext::MD_callees);
-  Info.CallConv = CS.getCallingConv();
+  MachineFunction &MF = MIRBuilder.getMF();
+  Info.KnownCallees = CB.getMetadata(LLVMContext::MD_callees);
+  Info.CallConv = CB.getCallingConv();
   Info.SwiftErrorVReg = SwiftErrorVReg;
-  Info.IsMustTailCall = CS.isMustTailCall();
-  Info.IsTailCall = CS.isTailCall() &&
-                    isInTailCallPosition(CS, MIRBuilder.getMF().getTarget());
-  Info.IsVarArg = CS.getFunctionType()->isVarArg();
+  Info.IsMustTailCall = CB.isMustTailCall();
+  Info.IsTailCall =
+      CB.isTailCall() && isInTailCallPosition(CB, MF.getTarget()) &&
+      (MF.getFunction()
+           .getFnAttribute("disable-tail-calls")
+           .getValueAsString() != "true");
+  Info.IsVarArg = CB.getFunctionType()->isVarArg();
   return lowerCall(MIRBuilder, Info);
 }
 
@@ -90,10 +97,12 @@ void CallLowering::setArgFlags(CallLowering::ArgInfo &Arg, unsigned OpIdx,
     Flags.setSwiftError();
   if (Attrs.hasAttribute(OpIdx, Attribute::ByVal))
     Flags.setByVal();
+  if (Attrs.hasAttribute(OpIdx, Attribute::Preallocated))
+    Flags.setPreallocated();
   if (Attrs.hasAttribute(OpIdx, Attribute::InAlloca))
     Flags.setInAlloca();
 
-  if (Flags.isByVal() || Flags.isInAlloca()) {
+  if (Flags.isByVal() || Flags.isInAlloca() || Flags.isPreallocated()) {
     Type *ElementTy = cast<PointerType>(Arg.Ty)->getElementType();
 
     auto Ty = Attrs.getAttribute(OpIdx, Attribute::ByVal).getValueAsType();
@@ -101,16 +110,16 @@ void CallLowering::setArgFlags(CallLowering::ArgInfo &Arg, unsigned OpIdx,
 
     // For ByVal, alignment should be passed from FE.  BE will guess if
     // this info is not there but there are cases it cannot get right.
-    unsigned FrameAlign;
-    if (FuncInfo.getParamAlignment(OpIdx - 2))
-      FrameAlign = FuncInfo.getParamAlignment(OpIdx - 2);
+    Align FrameAlign;
+    if (auto ParamAlign = FuncInfo.getParamAlign(OpIdx - 2))
+      FrameAlign = *ParamAlign;
     else
-      FrameAlign = getTLI()->getByValTypeAlignment(ElementTy, DL);
+      FrameAlign = Align(getTLI()->getByValTypeAlignment(ElementTy, DL));
     Flags.setByValAlign(FrameAlign);
   }
   if (Attrs.hasAttribute(OpIdx, Attribute::Nest))
     Flags.setNest();
-  Flags.setOrigAlign(DL.getABITypeAlignment(Arg.Ty));
+  Flags.setOrigAlign(DL.getABITypeAlign(Arg.Ty));
 }
 
 template void
@@ -119,9 +128,9 @@ CallLowering::setArgFlags<Function>(CallLowering::ArgInfo &Arg, unsigned OpIdx,
                                     const Function &FuncInfo) const;
 
 template void
-CallLowering::setArgFlags<CallInst>(CallLowering::ArgInfo &Arg, unsigned OpIdx,
+CallLowering::setArgFlags<CallBase>(CallLowering::ArgInfo &Arg, unsigned OpIdx,
                                     const DataLayout &DL,
-                                    const CallInst &FuncInfo) const;
+                                    const CallBase &FuncInfo) const;
 
 Register CallLowering::packRegs(ArrayRef<Register> SrcRegs, Type *PackedTy,
                                 MachineIRBuilder &MIRBuilder) const {
@@ -153,7 +162,7 @@ void CallLowering::unpackRegs(ArrayRef<Register> DstRegs, Register SrcReg,
                               MachineIRBuilder &MIRBuilder) const {
   assert(DstRegs.size() > 1 && "Nothing to unpack");
 
-  const DataLayout &DL = MIRBuilder.getMF().getDataLayout();
+  const DataLayout &DL = MIRBuilder.getDataLayout();
 
   SmallVector<LLT, 8> LLTs;
   SmallVector<uint64_t, 8> Offsets;
@@ -185,11 +194,11 @@ bool CallLowering::handleAssignments(CCState &CCInfo,
 
   unsigned NumArgs = Args.size();
   for (unsigned i = 0; i != NumArgs; ++i) {
-    MVT CurVT = MVT::getVT(Args[i].Ty);
-    if (Handler.assignArg(i, CurVT, CurVT, CCValAssign::Full, Args[i],
-                          Args[i].Flags[0], CCInfo)) {
-      if (!CurVT.isValid())
-        return false;
+    EVT CurVT = EVT::getEVT(Args[i].Ty);
+    if (!CurVT.isSimple() ||
+        Handler.assignArg(i, CurVT.getSimpleVT(), CurVT.getSimpleVT(),
+                          CCValAssign::Full, Args[i], Args[i].Flags[0],
+                          CCInfo)) {
       MVT NewVT = TLI->getRegisterTypeForCallingConv(
           F.getContext(), F.getCallingConv(), EVT(CurVT));
 
@@ -198,14 +207,12 @@ bool CallLowering::handleAssignments(CCState &CCInfo,
       unsigned NumParts = TLI->getNumRegistersForCallingConv(
           F.getContext(), F.getCallingConv(), CurVT);
       if (NumParts > 1) {
-        if (CurVT.isVector())
-          return false;
         // For now only handle exact splits.
         if (NewVT.getSizeInBits() * NumParts != CurVT.getSizeInBits())
           return false;
       }
 
-      // For incoming arguments (return values), we could have values in
+      // For incoming arguments (physregs to vregs), we could have values in
       // physregs (or memlocs) which we want to extract and copy to vregs.
       // During this, we might have to deal with the LLT being split across
       // multiple regs, so we have to record this information for later.
@@ -221,7 +228,7 @@ bool CallLowering::handleAssignments(CCState &CCInfo,
             return false;
         } else {
           // We're handling an incoming arg which is split over multiple regs.
-          // E.g. returning an s128 on AArch64.
+          // E.g. passing an s128 on AArch64.
           ISD::ArgFlagsTy OrigFlags = Args[i].Flags[0];
           Args[i].OrigRegs.push_back(Args[i].Regs[0]);
           Args[i].Regs.clear();
@@ -237,7 +244,7 @@ bool CallLowering::handleAssignments(CCState &CCInfo,
             if (Part == 0) {
               Flags.setSplit();
             } else {
-              Flags.setOrigAlign(1);
+              Flags.setOrigAlign(Align(1));
               if (Part == NumParts - 1)
                 Flags.setSplitEnd();
             }
@@ -270,7 +277,7 @@ bool CallLowering::handleAssignments(CCState &CCInfo,
           if (PartIdx == 0) {
             Flags.setSplit();
           } else {
-            Flags.setOrigAlign(1);
+            Flags.setOrigAlign(Align(1));
             if (PartIdx == NumParts - 1)
               Flags.setSplitEnd();
           }
@@ -291,98 +298,112 @@ bool CallLowering::handleAssignments(CCState &CCInfo,
     assert(VA.getValNo() == i && "Location doesn't correspond to current arg");
 
     if (VA.needsCustom()) {
-      j += Handler.assignCustomValue(Args[i], makeArrayRef(ArgLocs).slice(j));
+      unsigned NumArgRegs =
+          Handler.assignCustomValue(Args[i], makeArrayRef(ArgLocs).slice(j));
+      if (!NumArgRegs)
+        return false;
+      j += NumArgRegs;
       continue;
     }
 
     // FIXME: Pack registers if we have more than one.
     Register ArgReg = Args[i].Regs[0];
 
-    MVT OrigVT = MVT::getVT(Args[i].Ty);
-    MVT VAVT = VA.getValVT();
-    if (VA.isRegLoc()) {
-      if (Handler.isIncomingArgumentHandler() && VAVT != OrigVT) {
-        if (VAVT.getSizeInBits() < OrigVT.getSizeInBits()) {
-          // Expected to be multiple regs for a single incoming arg.
-          unsigned NumArgRegs = Args[i].Regs.size();
-          if (NumArgRegs < 2)
-            return false;
+    EVT OrigVT = EVT::getEVT(Args[i].Ty);
+    EVT VAVT = VA.getValVT();
+    const LLT OrigTy = getLLTForType(*Args[i].Ty, DL);
 
-          assert((j + (NumArgRegs - 1)) < ArgLocs.size() &&
-                 "Too many regs for number of args");
-          for (unsigned Part = 0; Part < NumArgRegs; ++Part) {
-            // There should be Regs.size() ArgLocs per argument.
-            VA = ArgLocs[j + Part];
-            Handler.assignValueToReg(Args[i].Regs[Part], VA.getLocReg(), VA);
-          }
-          j += NumArgRegs - 1;
-          // Merge the split registers into the expected larger result vreg
-          // of the original call.
-          MIRBuilder.buildMerge(Args[i].OrigRegs[0], Args[i].Regs);
-          continue;
-        }
-        const LLT VATy(VAVT);
-        Register NewReg =
-            MIRBuilder.getMRI()->createGenericVirtualRegister(VATy);
-        Handler.assignValueToReg(NewReg, VA.getLocReg(), VA);
-        // If it's a vector type, we either need to truncate the elements
-        // or do an unmerge to get the lower block of elements.
-        if (VATy.isVector() &&
-            VATy.getNumElements() > OrigVT.getVectorNumElements()) {
-          const LLT OrigTy(OrigVT);
-          // Just handle the case where the VA type is 2 * original type.
-          if (VATy.getNumElements() != OrigVT.getVectorNumElements() * 2) {
-            LLVM_DEBUG(dbgs()
-                       << "Incoming promoted vector arg has too many elts");
-            return false;
-          }
-          auto Unmerge = MIRBuilder.buildUnmerge({OrigTy, OrigTy}, {NewReg});
-          MIRBuilder.buildCopy(ArgReg, Unmerge.getReg(0));
-        } else {
-          MIRBuilder.buildTrunc(ArgReg, {NewReg}).getReg(0);
-        }
-      } else if (!Handler.isIncomingArgumentHandler()) {
-        assert((j + (Args[i].Regs.size() - 1)) < ArgLocs.size() &&
-               "Too many regs for number of args");
-        // This is an outgoing argument that might have been split.
-        for (unsigned Part = 0; Part < Args[i].Regs.size(); ++Part) {
-          // There should be Regs.size() ArgLocs per argument.
-          VA = ArgLocs[j + Part];
-          Handler.assignValueToReg(Args[i].Regs[Part], VA.getLocReg(), VA);
-        }
-        j += Args[i].Regs.size() - 1;
-      } else {
-        Handler.assignValueToReg(ArgReg, VA.getLocReg(), VA);
-      }
-    } else if (VA.isMemLoc()) {
-      // Don't currently support loading/storing a type that needs to be split
-      // to the stack. Should be easy, just not implemented yet.
-      if (Args[i].Regs.size() > 1) {
-        LLVM_DEBUG(
+    // Expected to be multiple regs for a single incoming arg.
+    // There should be Regs.size() ArgLocs per argument.
+    unsigned NumArgRegs = Args[i].Regs.size();
+
+    assert((j + (NumArgRegs - 1)) < ArgLocs.size() &&
+           "Too many regs for number of args");
+    for (unsigned Part = 0; Part < NumArgRegs; ++Part) {
+      // There should be Regs.size() ArgLocs per argument.
+      VA = ArgLocs[j + Part];
+      if (VA.isMemLoc()) {
+        // Don't currently support loading/storing a type that needs to be split
+        // to the stack. Should be easy, just not implemented yet.
+        if (NumArgRegs > 1) {
+          LLVM_DEBUG(
             dbgs()
-            << "Load/store a split arg to/from the stack not implemented yet");
-        return false;
+            << "Load/store a split arg to/from the stack not implemented yet\n");
+          return false;
+        }
+
+        // FIXME: Use correct address space for pointer size
+        EVT LocVT = VA.getValVT();
+        unsigned MemSize = LocVT == MVT::iPTR ? DL.getPointerSize()
+                                              : LocVT.getStoreSize();
+        unsigned Offset = VA.getLocMemOffset();
+        MachinePointerInfo MPO;
+        Register StackAddr = Handler.getStackAddress(MemSize, Offset, MPO);
+        Handler.assignValueToAddress(Args[i], StackAddr,
+                                     MemSize, MPO, VA);
+        continue;
       }
-      MVT VT = MVT::getVT(Args[i].Ty);
-      unsigned Size = VT == MVT::iPTR ? DL.getPointerSize()
-                                      : alignTo(VT.getSizeInBits(), 8) / 8;
-      unsigned Offset = VA.getLocMemOffset();
-      MachinePointerInfo MPO;
-      Register StackAddr = Handler.getStackAddress(Size, Offset, MPO);
-      Handler.assignValueToAddress(ArgReg, StackAddr, Size, MPO, VA);
-    } else {
-      // FIXME: Support byvals and other weirdness
-      return false;
+
+      assert(VA.isRegLoc() && "custom loc should have been handled already");
+
+      if (OrigVT.getSizeInBits() >= VAVT.getSizeInBits() ||
+          !Handler.isIncomingArgumentHandler()) {
+        // This is an argument that might have been split. There should be
+        // Regs.size() ArgLocs per argument.
+
+        // Insert the argument copies. If VAVT < OrigVT, we'll insert the merge
+        // to the original register after handling all of the parts.
+        Handler.assignValueToReg(Args[i].Regs[Part], VA.getLocReg(), VA);
+        continue;
+      }
+
+      // This ArgLoc covers multiple pieces, so we need to split it.
+      const LLT VATy(VAVT.getSimpleVT());
+      Register NewReg =
+        MIRBuilder.getMRI()->createGenericVirtualRegister(VATy);
+      Handler.assignValueToReg(NewReg, VA.getLocReg(), VA);
+      // If it's a vector type, we either need to truncate the elements
+      // or do an unmerge to get the lower block of elements.
+      if (VATy.isVector() &&
+          VATy.getNumElements() > OrigVT.getVectorNumElements()) {
+        // Just handle the case where the VA type is 2 * original type.
+        if (VATy.getNumElements() != OrigVT.getVectorNumElements() * 2) {
+          LLVM_DEBUG(dbgs()
+                     << "Incoming promoted vector arg has too many elts");
+          return false;
+        }
+        auto Unmerge = MIRBuilder.buildUnmerge({OrigTy, OrigTy}, {NewReg});
+        MIRBuilder.buildCopy(ArgReg, Unmerge.getReg(0));
+      } else {
+        MIRBuilder.buildTrunc(ArgReg, {NewReg}).getReg(0);
+      }
     }
+
+    // Now that all pieces have been handled, re-pack any arguments into any
+    // wider, original registers.
+    if (Handler.isIncomingArgumentHandler()) {
+      if (VAVT.getSizeInBits() < OrigVT.getSizeInBits()) {
+        assert(NumArgRegs >= 2);
+
+        // Merge the split registers into the expected larger result vreg
+        // of the original call.
+        MIRBuilder.buildMerge(Args[i].OrigRegs[0], Args[i].Regs);
+      }
+    }
+
+    j += NumArgRegs - 1;
   }
+
   return true;
 }
 
 bool CallLowering::analyzeArgInfo(CCState &CCState,
-                                     SmallVectorImpl<ArgInfo> &Args,
-                                     CCAssignFn &Fn) const {
+                                  SmallVectorImpl<ArgInfo> &Args,
+                                  CCAssignFn &AssignFnFixed,
+                                  CCAssignFn &AssignFnVarArg) const {
   for (unsigned i = 0, e = Args.size(); i < e; ++i) {
     MVT VT = MVT::getVT(Args[i].Ty);
+    CCAssignFn &Fn = Args[i].IsFixed ? AssignFnFixed : AssignFnVarArg;
     if (Fn(i, VT, VT, CCValAssign::Full, Args[i].Flags[0], CCState)) {
       // Bail out on anything we can't handle.
       LLVM_DEBUG(dbgs() << "Cannot analyze " << EVT(VT).getEVTString()
@@ -396,8 +417,10 @@ bool CallLowering::analyzeArgInfo(CCState &CCState,
 bool CallLowering::resultsCompatible(CallLoweringInfo &Info,
                                      MachineFunction &MF,
                                      SmallVectorImpl<ArgInfo> &InArgs,
-                                     CCAssignFn &CalleeAssignFn,
-                                     CCAssignFn &CallerAssignFn) const {
+                                     CCAssignFn &CalleeAssignFnFixed,
+                                     CCAssignFn &CalleeAssignFnVarArg,
+                                     CCAssignFn &CallerAssignFnFixed,
+                                     CCAssignFn &CallerAssignFnVarArg) const {
   const Function &F = MF.getFunction();
   CallingConv::ID CalleeCC = Info.CallConv;
   CallingConv::ID CallerCC = F.getCallingConv();
@@ -407,12 +430,14 @@ bool CallLowering::resultsCompatible(CallLoweringInfo &Info,
 
   SmallVector<CCValAssign, 16> ArgLocs1;
   CCState CCInfo1(CalleeCC, false, MF, ArgLocs1, F.getContext());
-  if (!analyzeArgInfo(CCInfo1, InArgs, CalleeAssignFn))
+  if (!analyzeArgInfo(CCInfo1, InArgs, CalleeAssignFnFixed,
+                      CalleeAssignFnVarArg))
     return false;
 
   SmallVector<CCValAssign, 16> ArgLocs2;
   CCState CCInfo2(CallerCC, false, MF, ArgLocs2, F.getContext());
-  if (!analyzeArgInfo(CCInfo2, InArgs, CallerAssignFn))
+  if (!analyzeArgInfo(CCInfo2, InArgs, CallerAssignFnFixed,
+                      CalleeAssignFnVarArg))
     return false;
 
   // We need the argument locations to match up exactly. If there's more in
@@ -448,10 +473,19 @@ bool CallLowering::resultsCompatible(CallLoweringInfo &Info,
 }
 
 Register CallLowering::ValueHandler::extendRegister(Register ValReg,
-                                                    CCValAssign &VA) {
+                                                    CCValAssign &VA,
+                                                    unsigned MaxSizeBits) {
   LLT LocTy{VA.getLocVT()};
-  if (LocTy.getSizeInBits() == MRI.getType(ValReg).getSizeInBits())
+  LLT ValTy = MRI.getType(ValReg);
+  if (LocTy.getSizeInBits() == ValTy.getSizeInBits())
     return ValReg;
+
+  if (LocTy.isScalar() && MaxSizeBits && MaxSizeBits < LocTy.getSizeInBits()) {
+    if (MaxSizeBits <= ValTy.getSizeInBits())
+      return ValReg;
+    LocTy = LLT::scalar(MaxSizeBits);
+  }
+
   switch (VA.getLocInfo()) {
   default: break;
   case CCValAssign::Full:
@@ -461,7 +495,7 @@ Register CallLowering::ValueHandler::extendRegister(Register ValReg,
     return ValReg;
   case CCValAssign::AExt: {
     auto MIB = MIRBuilder.buildAnyExt(LocTy, ValReg);
-    return MIB->getOperand(0).getReg();
+    return MIB.getReg(0);
   }
   case CCValAssign::SExt: {
     Register NewReg = MRI.createGenericVirtualRegister(LocTy);

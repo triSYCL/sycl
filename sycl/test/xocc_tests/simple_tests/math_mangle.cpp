@@ -1,4 +1,10 @@
-// RUN: true
+// REQUIRES: xocc
+
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+
+// RUN: %ACC_RUN_PLACEHOLDER %t.out
+// RUN: %ACC_RUN_PLACEHOLDER /home/tyker/opensource/sycl/build-Release/tools/sycl/test/simple_tests/Output/math_mangle.cpp.tmp.out
+
 
 /*
   This test is similar to id_mangle.cpp in that it's mostly for testing the

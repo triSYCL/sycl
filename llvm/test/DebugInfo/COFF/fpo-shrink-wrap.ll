@@ -1,5 +1,5 @@
 ; RUN: llc -enable-shrink-wrap=true < %s | FileCheck %s --check-prefix=ASM
-; RUN: llc -enable-shrink-wrap=true -filetype=obj < %s | llvm-readobj --codeview | FileCheck %s --check-prefix=OBJ
+; RUN: llc -enable-shrink-wrap=true -filetype=obj < %s | llvm-readobj --codeview - | FileCheck %s --check-prefix=OBJ
 
 ; C source:
 ; int doSomething(int*);
@@ -40,7 +40,7 @@
 ; OBJ: SubSectionType: FrameData (0xF5)
 ; OBJ:    FrameData {
 ; OBJ:      RvaStart: 0x0
-; OBJ:      CodeSize: 0x34
+; OBJ:      CodeSize: 0x36
 ; OBJ:      PrologSize: 0x9
 ; OBJ:      FrameFunc [
 ; OBJ-NEXT:   $T0 .raSearch =
@@ -50,7 +50,7 @@
 ; OBJ:    }
 ; OBJ:    FrameData {
 ; OBJ:      RvaStart: 0x7
-; OBJ:      CodeSize: 0x2D
+; OBJ:      CodeSize: 0x2F
 ; OBJ:      PrologSize: 0x2
 ; OBJ:      FrameFunc [
 ; OBJ-NEXT:   $T0 .raSearch =
@@ -61,7 +61,7 @@
 ; OBJ:    }
 ; OBJ:    FrameData {
 ; OBJ:      RvaStart: 0x8
-; OBJ:      CodeSize: 0x2C
+; OBJ:      CodeSize: 0x2E
 ; OBJ:      PrologSize: 0x1
 ; OBJ:      FrameFunc [
 ; OBJ-NEXT:   $T0 .raSearch =
@@ -73,7 +73,7 @@
 ; OBJ:    }
 ; OBJ:    FrameData {
 ; OBJ:      RvaStart: 0x9
-; OBJ:      CodeSize: 0x2B
+; OBJ:      CodeSize: 0x2D
 ; OBJ:      PrologSize: 0x0
 ; OBJ:      FrameFunc [
 ; OBJ-NEXT:   $T0 .raSearch =
@@ -126,8 +126,8 @@ declare i32 @doSomething(i32*) local_unnamed_addr #1
 ; Function Attrs: nounwind readnone speculatable
 declare void @llvm.dbg.value(metadata, metadata, metadata) #2
 
-attributes #0 = { nounwind "correctly-rounded-divide-sqrt-fp-math"="false" "disable-tail-calls"="false" "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-infs-fp-math"="false" "no-jump-tables"="false" "no-nans-fp-math"="false" "no-signed-zeros-fp-math"="false" "no-trapping-math"="false" "stack-protector-buffer-size"="8" "target-cpu"="pentium4" "target-features"="+fxsr,+mmx,+sse,+sse2,+x87" "unsafe-fp-math"="false" "use-soft-float"="false" }
-attributes #1 = { "correctly-rounded-divide-sqrt-fp-math"="false" "disable-tail-calls"="false" "less-precise-fpmad"="false" "no-frame-pointer-elim"="false" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "no-signed-zeros-fp-math"="false" "no-trapping-math"="false" "stack-protector-buffer-size"="8" "target-cpu"="pentium4" "target-features"="+fxsr,+mmx,+sse,+sse2,+x87" "unsafe-fp-math"="false" "use-soft-float"="false" }
+attributes #0 = { nounwind "correctly-rounded-divide-sqrt-fp-math"="false" "disable-tail-calls"="false" "less-precise-fpmad"="false" "frame-pointer"="none" "no-infs-fp-math"="false" "no-jump-tables"="false" "no-nans-fp-math"="false" "no-signed-zeros-fp-math"="false" "no-trapping-math"="false" "stack-protector-buffer-size"="8" "target-cpu"="pentium4" "target-features"="+fxsr,+mmx,+sse,+sse2,+x87" "unsafe-fp-math"="false" "use-soft-float"="false" }
+attributes #1 = { "correctly-rounded-divide-sqrt-fp-math"="false" "disable-tail-calls"="false" "less-precise-fpmad"="false" "frame-pointer"="none" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "no-signed-zeros-fp-math"="false" "no-trapping-math"="false" "stack-protector-buffer-size"="8" "target-cpu"="pentium4" "target-features"="+fxsr,+mmx,+sse,+sse2,+x87" "unsafe-fp-math"="false" "use-soft-float"="false" }
 attributes #2 = { nounwind readnone speculatable }
 attributes #3 = { nounwind }
 

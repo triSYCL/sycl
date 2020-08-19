@@ -29,6 +29,8 @@ class MDNode;
 namespace clang {
 class Attr;
 class ASTContext;
+class CodeGenOptions;
+class ValueDecl;
 namespace CodeGen {
 
 /// Attributes that may be specified on loops.
@@ -60,11 +62,48 @@ struct LoopAttributes {
   /// Value for llvm.loop.interleave.count metadata.
   unsigned InterleaveCount;
 
-  /// Value for llvm.loop.ivdep.enable metadata.
-  bool SYCLIVDepEnable;
+  // SYCLIVDepInfo represents a group of arrays that have the same IVDep safelen to
+  // them. The arrays contained in it will later be referred to from the same
+  // "llvm.loop.parallel_access_indices" metadata node.
+  struct SYCLIVDepInfo {
+    unsigned SafeLen;
+    mutable llvm::SmallVector<std::pair<const ValueDecl *, llvm::MDNode *>, 4>
+        Arrays;
+    SYCLIVDepInfo(unsigned SL) : SafeLen(SL) {}
+    SYCLIVDepInfo(unsigned SL, const ValueDecl *A, llvm::MDNode *MD) : SafeLen(SL) {
+      Arrays.emplace_back(A, MD);
+    }
 
-  /// Value for llvm.loop.ivdep.safelen metadata.
-  unsigned SYCLIVDepSafelen;
+    bool hasArray(const ValueDecl *Array) const {
+      return Arrays.end() != getArrayPairItr(Array);
+    }
+
+    decltype(Arrays)::iterator getArrayPairItr(const ValueDecl *Array) {
+      return find_if(Arrays,
+                     [Array](const auto &Pair) { return Pair.first == Array; });
+    }
+
+    decltype(Arrays)::iterator getArrayPairItr(const ValueDecl *Array) const {
+      return find_if(Arrays,
+                     [Array](const auto &Pair) { return Pair.first == Array; });
+    }
+
+    void eraseArray(const ValueDecl *Array) {
+      assert(hasArray(Array) && "Precondition of EraseArray is HasArray");
+      Arrays.erase(getArrayPairItr(Array));
+    }
+
+    bool isSafeLenGreaterOrEqual(unsigned OtherSL) const {
+      return SafeLen == 0 || (OtherSL != 0 && SafeLen >= OtherSL);
+    }
+  };
+
+  // Value for llvm.loop.parallel_access_indices metadata, for the arrays that
+  // weren't put into a specific ivdep item.
+  llvm::Optional<SYCLIVDepInfo> GlobalSYCLIVDepInfo;
+  // Value for llvm.loop.parallel_access_indices metadata, for array
+  // specifications.
+  llvm::SmallVector<SYCLIVDepInfo, 4> ArraySYCLIVDepInfo;
 
   /// Value for llvm.loop.ii.count metadata.
   unsigned SYCLIInterval;
@@ -74,6 +113,27 @@ struct LoopAttributes {
 
   /// Value for llvm.loop.max_concurrency.count metadata.
   unsigned SYCLMaxConcurrencyNThreads;
+
+  /// Flag for llvm.loop.coalesce metadata.
+  bool SYCLLoopCoalesceEnable;
+
+  /// Value for llvm.loop.coalesce.count metadata.
+  unsigned SYCLLoopCoalesceNLevels;
+
+  /// Flag for llvm.loop.intel.pipelining.enable, i32 0 metadata.
+  bool SYCLLoopPipeliningDisable;
+
+  /// Flag for llvm.loop.max_interleaving.count metadata.
+  bool SYCLMaxInterleavingEnable;
+
+  /// Value for llvm.loop.max_interleaving.count metadata.
+  unsigned SYCLMaxInterleavingNInvocations;
+
+  /// Flag for llvm.loop.intel.speculated.iterations.count metadata.
+  bool SYCLSpeculatedIterationsEnable;
+
+  /// Value for llvm.loop.intel.speculated.iterations.count metadata.
+  unsigned SYCLSpeculatedIterationsNIterations;
 
   /// llvm.unroll.
   unsigned UnrollCount;
@@ -110,6 +170,9 @@ public:
 
   /// Return this loop's access group or nullptr if it does not have one.
   llvm::MDNode *getAccessGroup() const { return AccGroup; }
+
+  // Recursively adds the metadata for this Array onto this GEP.
+  void addIVDepMetadata(const ValueDecl *Array, llvm::Instruction *GEP) const;
 
   /// Create the loop's metadata. Must be called after its nested loops have
   /// been processed.
@@ -180,6 +243,8 @@ private:
   createFullUnrollMetadata(const LoopAttributes &Attrs,
                            llvm::ArrayRef<llvm::Metadata *> LoopProperties,
                            bool &HasUserTransforms);
+  void collectIVDepMetadata(const ValueDecl *Array,
+                            llvm::SmallVectorImpl<llvm::Metadata *> &MD) const;
   /// @}
 
   /// Create a LoopID for this loop, including transformation-unspecific
@@ -217,6 +282,7 @@ public:
   /// Begin a new structured loop. Stage attributes from the Attrs list.
   /// The staged attributes are applied to the loop and then cleared.
   void push(llvm::BasicBlock *Header, clang::ASTContext &Ctx,
+            const clang::CodeGenOptions &CGOpts,
             llvm::ArrayRef<const Attr *> Attrs, const llvm::DebugLoc &StartLoc,
             const llvm::DebugLoc &EndLoc);
 
@@ -271,11 +337,11 @@ public:
   /// Set the interleave count for the next loop pushed.
   void setInterleaveCount(unsigned C) { StagedAttrs.InterleaveCount = C; }
 
-  /// Set flag of ivdep for the next loop pushed.
-  void setSYCLIVDepEnable() { StagedAttrs.SYCLIVDepEnable = true; }
+  /// Add a safelen value for the next loop pushed.
+  void addSYCLIVDepInfo(llvm::LLVMContext &Ctx, unsigned SafeLen,
+                        const ValueDecl *Array);
 
-  /// Set value of safelen count for the next loop pushed.
-  void setSYCLIVDepSafelen(unsigned C) { StagedAttrs.SYCLIVDepSafelen = C; }
+  void addIVDepMetadata(const ValueDecl *Array, llvm::Instruction *GEP);
 
   /// Set value of an initiation interval for the next loop pushed.
   void setSYCLIInterval(unsigned C) { StagedAttrs.SYCLIInterval = C; }
@@ -288,6 +354,41 @@ public:
   /// Set value of threads for the next loop pushed.
   void setSYCLMaxConcurrencyNThreads(unsigned C) {
     StagedAttrs.SYCLMaxConcurrencyNThreads = C;
+  }
+
+  /// Set flag of loop_coalesce for the next loop pushed.
+  void setSYCLLoopCoalesceEnable() {
+    StagedAttrs.SYCLLoopCoalesceEnable = true;
+  }
+
+  /// Set value of coalesced levels for the next loop pushed.
+  void setSYCLLoopCoalesceNLevels(unsigned C) {
+    StagedAttrs.SYCLLoopCoalesceNLevels = C;
+  }
+
+  /// Set flag of disable_loop_pipelining for the next loop pushed.
+  void setSYCLLoopPipeliningDisable() {
+    StagedAttrs.SYCLLoopPipeliningDisable = true;
+  }
+
+  /// Set flag of max_interleaving for the next loop pushed.
+  void setSYCLMaxInterleavingEnable() {
+    StagedAttrs.SYCLMaxInterleavingEnable = true;
+  }
+
+  /// Set value of max interleaved invocations for the next loop pushed.
+  void setSYCLMaxInterleavingNInvocations(unsigned C) {
+    StagedAttrs.SYCLMaxInterleavingNInvocations = C;
+  }
+
+  /// Set flag of speculated_iterations for the next loop pushed.
+  void setSYCLSpeculatedIterationsEnable() {
+    StagedAttrs.SYCLSpeculatedIterationsEnable = true;
+  }
+
+  /// Set value of concurrent speculated iterations for the next loop pushed.
+  void setSYCLSpeculatedIterationsNIterations(unsigned C) {
+    StagedAttrs.SYCLSpeculatedIterationsNIterations = C;
   }
 
   /// Set the unroll count for the next loop pushed.

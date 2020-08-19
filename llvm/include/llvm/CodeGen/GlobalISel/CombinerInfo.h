@@ -27,11 +27,11 @@ class MachineRegisterInfo;
 class CombinerInfo {
 public:
   CombinerInfo(bool AllowIllegalOps, bool ShouldLegalizeIllegal,
-               LegalizerInfo *LInfo, bool OptEnabled, bool OptSize,
+               const LegalizerInfo *LInfo, bool OptEnabled, bool OptSize,
                bool MinSize)
       : IllegalOpsAllowed(AllowIllegalOps),
         LegalizeIllegalOps(ShouldLegalizeIllegal), LInfo(LInfo),
-        EnableOpt(OptEnabled), EnableOptSize(OptSize), EnableMinSize(OptSize) {
+        EnableOpt(OptEnabled), EnableOptSize(OptSize), EnableMinSize(MinSize) {
     assert(((AllowIllegalOps || !LegalizeIllegalOps) || LInfo) &&
            "Expecting legalizerInfo when illegalops not allowed");
   }

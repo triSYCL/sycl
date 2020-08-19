@@ -42,13 +42,13 @@
 #include "SPIRVInternal.h"
 #include "SPIRVMDBuilder.h"
 #include "SPIRVMDWalker.h"
+#include "VectorComputeUtil.h"
 
 #include "llvm/ADT/Triple.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Pass.h"
-#include "llvm/PassSupport.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 
@@ -69,6 +69,9 @@ public:
 
   bool runOnModule(Module &M) override;
   void visit(Module *M);
+  void preprocessOCLMetadata(Module *M, SPIRVMDBuilder *B, SPIRVMDWalker *W);
+  void preprocessVectorComputeMetadata(Module *M, SPIRVMDBuilder *B,
+                                       SPIRVMDWalker *W);
 
   static char ID;
 
@@ -99,48 +102,8 @@ void PreprocessMetadata::visit(Module *M) {
   SPIRVMDBuilder B(*M);
   SPIRVMDWalker W(*M);
 
-  unsigned CLVer = getOCLVersion(M, true);
-  if (CLVer != 0) { // Preprocess OpenCL-specific metadata
-    // !spirv.Source = !{!x}
-    // !{x} = !{i32 3, i32 102000}
-    B.addNamedMD(kSPIRVMD::Source)
-        .addOp()
-        .add(CLVer < kOCLVer::CL21 ? spv::SourceLanguageOpenCL_C
-                                   : spv::SourceLanguageOpenCL_CPP)
-        .add(CLVer)
-        .done();
-    if (EraseOCLMD)
-      B.eraseNamedMD(kSPIR2MD::OCLVer).eraseNamedMD(kSPIR2MD::SPIRVer);
-
-    // !spirv.MemoryModel = !{!x}
-    // !{x} = !{i32 1, i32 2}
-    Triple TT(M->getTargetTriple());
-    assert(isSupportedTriple(TT) && "Invalid triple");
-    B.addNamedMD(kSPIRVMD::MemoryModel)
-        .addOp()
-        .add(TT.isArch32Bit() ? spv::AddressingModelPhysical32
-                              : spv::AddressingModelPhysical64)
-        .add(spv::MemoryModelOpenCL)
-        .done();
-
-    // Add source extensions
-    // !spirv.SourceExtension = !{!x, !y, ...}
-    // !x = {!"cl_khr_..."}
-    // !y = {!"cl_khr_..."}
-    auto Exts = getNamedMDAsStringSet(M, kSPIR2MD::Extensions);
-    if (!Exts.empty()) {
-      auto N = B.addNamedMD(kSPIRVMD::SourceExtension);
-      for (auto &I : Exts)
-        N.addOp().add(I).done();
-    }
-    if (EraseOCLMD)
-      B.eraseNamedMD(kSPIR2MD::Extensions).eraseNamedMD(kSPIR2MD::OptFeatures);
-
-    if (EraseOCLMD)
-      B.eraseNamedMD(kSPIR2MD::FPContract);
-  }
-
-  // The rest of metadata might come not only from OpenCL
+  preprocessOCLMetadata(M, &B, &W);
+  preprocessVectorComputeMetadata(M, &B, &W);
 
   // Create metadata representing (empty so far) list
   // of OpExecutionMode instructions
@@ -196,6 +159,138 @@ void PreprocessMetadata::visit(Module *M) {
           .add(&Kernel)
           .add(spv::ExecutionModeSubgroupSize)
           .add(getMDOperandAsInt(ReqdSubgroupSize, 0))
+          .done();
+    }
+
+    // !{void (i32 addrspace(1)*)* @kernel, i32 max_work_group_size, i32 X,
+    //         i32 Y, i32 Z}
+    if (MDNode *MaxWorkgroupSizeINTEL =
+            Kernel.getMetadata(kSPIR2MD::MaxWGSize)) {
+      unsigned X, Y, Z;
+      decodeMDNode(MaxWorkgroupSizeINTEL, X, Y, Z);
+      EM.addOp()
+          .add(&Kernel)
+          .add(spv::ExecutionModeMaxWorkgroupSizeINTEL)
+          .add(X)
+          .add(Y)
+          .add(Z)
+          .done();
+    }
+
+    // !{void (i32 addrspace(1)*)* @kernel, i32 no_global_work_offset}
+    if (Kernel.getMetadata(kSPIR2MD::NoGlobalOffset)) {
+      EM.addOp().add(&Kernel).add(spv::ExecutionModeNoGlobalOffsetINTEL).done();
+    }
+
+    // !{void (i32 addrspace(1)*)* @kernel, i32 max_global_work_dim, i32 dim}
+    if (MDNode *MaxWorkDimINTEL = Kernel.getMetadata(kSPIR2MD::MaxWGDim)) {
+      EM.addOp()
+          .add(&Kernel)
+          .add(spv::ExecutionModeMaxWorkDimINTEL)
+          .add(getMDOperandAsInt(MaxWorkDimINTEL, 0))
+          .done();
+    }
+
+    // !{void (i32 addrspace(1)*)* @kernel, i32 num_simd_work_items, i32 num}
+    if (MDNode *NumSIMDWorkitemsINTEL = Kernel.getMetadata(kSPIR2MD::NumSIMD)) {
+      EM.addOp()
+          .add(&Kernel)
+          .add(spv::ExecutionModeNumSIMDWorkitemsINTEL)
+          .add(getMDOperandAsInt(NumSIMDWorkitemsINTEL, 0))
+          .done();
+    }
+  }
+}
+
+void PreprocessMetadata::preprocessOCLMetadata(Module *M, SPIRVMDBuilder *B,
+                                               SPIRVMDWalker *W) {
+  unsigned CLVer = getOCLVersion(M, true);
+  if (CLVer == 0)
+    return;
+  // Preprocess OpenCL-specific metadata
+  // !spirv.Source = !{!x}
+  // !{x} = !{i32 3, i32 102000}
+  B->addNamedMD(kSPIRVMD::Source)
+      .addOp()
+      .add(CLVer < kOCLVer::CL21 ? spv::SourceLanguageOpenCL_C
+                                 : spv::SourceLanguageOpenCL_CPP)
+      .add(CLVer)
+      .done();
+  if (EraseOCLMD)
+    B->eraseNamedMD(kSPIR2MD::OCLVer).eraseNamedMD(kSPIR2MD::SPIRVer);
+
+  // !spirv.MemoryModel = !{!x}
+  // !{x} = !{i32 1, i32 2}
+  Triple TT(M->getTargetTriple());
+  assert(isSupportedTriple(TT) && "Invalid triple");
+  B->addNamedMD(kSPIRVMD::MemoryModel)
+      .addOp()
+      .add(TT.isArch32Bit() ? spv::AddressingModelPhysical32
+                            : spv::AddressingModelPhysical64)
+      .add(spv::MemoryModelOpenCL)
+      .done();
+
+  // Add source extensions
+  // !spirv.SourceExtension = !{!x, !y, ...}
+  // !x = {!"cl_khr_..."}
+  // !y = {!"cl_khr_..."}
+  auto Exts = getNamedMDAsStringSet(M, kSPIR2MD::Extensions);
+  if (!Exts.empty()) {
+    auto N = B->addNamedMD(kSPIRVMD::SourceExtension);
+    for (auto &I : Exts)
+      N.addOp().add(I).done();
+  }
+  if (EraseOCLMD)
+    B->eraseNamedMD(kSPIR2MD::Extensions).eraseNamedMD(kSPIR2MD::OptFeatures);
+
+  if (EraseOCLMD)
+    B->eraseNamedMD(kSPIR2MD::FPContract);
+}
+
+void PreprocessMetadata::preprocessVectorComputeMetadata(Module *M,
+                                                         SPIRVMDBuilder *B,
+                                                         SPIRVMDWalker *W) {
+  using namespace VectorComputeUtil;
+
+  auto EM = B->addNamedMD(kSPIRVMD::ExecutionMode);
+
+  for (auto &F : *M) {
+    // Add VC float control execution modes
+    // RoundMode and FloatMode are always same for all types in VC
+    // While Denorm could be different for double, float and half
+    auto Attrs = F.getAttributes();
+    if (Attrs.hasFnAttribute(kVCMetadata::VCFloatControl)) {
+      SPIRVWord Mode = 0;
+      Attrs
+          .getAttribute(AttributeList::FunctionIndex,
+                        kVCMetadata::VCFloatControl)
+          .getValueAsString()
+          .getAsInteger(0, Mode);
+      spv::ExecutionMode ExecRoundMode =
+          VCRoundModeExecModeMap::map(getVCRoundMode(Mode));
+      spv::ExecutionMode ExecFloatMode =
+          VCFloatModeExecModeMap::map(getVCFloatMode(Mode));
+      VCFloatTypeSizeMap::foreach (
+          [&](VCFloatType FloatType, unsigned TargetWidth) {
+            EM.addOp().add(&F).add(ExecRoundMode).add(TargetWidth).done();
+            EM.addOp().add(&F).add(ExecFloatMode).add(TargetWidth).done();
+            EM.addOp()
+                .add(&F)
+                .add(VCDenormModeExecModeMap::map(
+                    getVCDenormPreserve(Mode, FloatType)))
+                .add(TargetWidth)
+                .done();
+          });
+    }
+    if (Attrs.hasFnAttribute(kVCMetadata::VCSLMSize)) {
+      SPIRVWord SLMSize = 0;
+      Attrs.getAttribute(AttributeList::FunctionIndex, kVCMetadata::VCSLMSize)
+          .getValueAsString()
+          .getAsInteger(0, SLMSize);
+      EM.addOp()
+          .add(&F)
+          .add(spv::ExecutionModeSharedLocalMemorySizeINTEL)
+          .add(SLMSize)
           .done();
     }
   }

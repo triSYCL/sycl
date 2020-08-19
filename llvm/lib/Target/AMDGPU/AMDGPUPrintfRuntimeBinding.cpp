@@ -30,10 +30,10 @@
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -45,19 +45,12 @@ using namespace llvm;
 
 namespace {
 class LLVM_LIBRARY_VISIBILITY AMDGPUPrintfRuntimeBinding final
-    : public ModulePass,
-      public InstVisitor<AMDGPUPrintfRuntimeBinding> {
+    : public ModulePass {
 
 public:
   static char ID;
 
   explicit AMDGPUPrintfRuntimeBinding();
-
-  void visitCallSite(CallSite CS) {
-    Function *F = CS.getCalledFunction();
-    if (F && F->hasName() && F->getName() == "printf")
-      Printfs.push_back(CS.getInstruction());
-  }
 
 private:
   bool runOnModule(Module &M) override;
@@ -80,7 +73,7 @@ private:
 
   const DataLayout *TD;
   const DominatorTree *DT;
-  SmallVector<Value *, 32> Printfs;
+  SmallVector<CallInst *, 32> Printfs;
 };
 } // namespace
 
@@ -162,9 +155,7 @@ bool AMDGPUPrintfRuntimeBinding::lowerPrintfForGpu(
   // NB: This is important for this string size to be divizable by 4
   const char NonLiteralStr[4] = "???";
 
-  for (auto P : Printfs) {
-    CallInst *CI = dyn_cast<CallInst>(P);
-
+  for (auto CI : Printfs) {
     unsigned NumOps = CI->getNumArgOperands();
 
     SmallString<16> OpConvSpecifiers;
@@ -227,10 +218,10 @@ bool AMDGPUPrintfRuntimeBinding::lowerPrintfForGpu(
         //
         if (ArgSize % DWORD_ALIGN != 0) {
           llvm::Type *ResType = llvm::Type::getInt32Ty(Ctx);
-          VectorType *LLVMVecType = llvm::dyn_cast<llvm::VectorType>(ArgType);
+          auto *LLVMVecType = llvm::dyn_cast<llvm::FixedVectorType>(ArgType);
           int NumElem = LLVMVecType ? LLVMVecType->getNumElements() : 1;
           if (LLVMVecType && NumElem > 1)
-            ResType = llvm::VectorType::get(ResType, NumElem);
+            ResType = llvm::FixedVectorType::get(ResType, NumElem);
           Builder.SetInsertPoint(CI);
           Builder.SetCurrentDebugLocation(CI->getDebugLoc());
           if (OpConvSpecifiers[ArgCount - 1] == 'x' ||
@@ -396,9 +387,7 @@ bool AMDGPUPrintfRuntimeBinding::lowerPrintfForGpu(
       Value *id_gep_cast =
           new BitCastInst(BufferIdx, idPointer, "PrintBuffIdCast", Brnch);
 
-      StoreInst *stbuff =
-          new StoreInst(ConstantInt::get(I32Ty, UniqID), id_gep_cast);
-      stbuff->insertBefore(Brnch); // to Remove unused variable warning
+      new StoreInst(ConstantInt::get(I32Ty, UniqID), id_gep_cast, Brnch);
 
       SmallVector<Value *, 2> FourthIdxList;
       ConstantInt *fourInt =
@@ -417,8 +406,7 @@ bool AMDGPUPrintfRuntimeBinding::lowerPrintfForGpu(
         Value *Arg = CI->getArgOperand(ArgCount);
         Type *ArgType = Arg->getType();
         SmallVector<Value *, 32> WhatToStore;
-        if (ArgType->isFPOrFPVectorTy() &&
-            (ArgType->getTypeID() != Type::VectorTyID)) {
+        if (ArgType->isFPOrFPVectorTy() && !isa<VectorType>(ArgType)) {
           Type *IType = (ArgType->isFloatTy()) ? Int32Ty : Int64Ty;
           if (OpConvSpecifiers[ArgCount - 1] == 'f') {
             ConstantFP *fpCons = dyn_cast<ConstantFP>(Arg);
@@ -487,18 +475,14 @@ bool AMDGPUPrintfRuntimeBinding::lowerPrintfForGpu(
             Arg = new PtrToIntInst(Arg, DstType, "PrintArgPtr", Brnch);
             WhatToStore.push_back(Arg);
           }
-        } else if (ArgType->getTypeID() == Type::VectorTyID) {
+        } else if (isa<FixedVectorType>(ArgType)) {
           Type *IType = NULL;
-          uint32_t EleCount = cast<VectorType>(ArgType)->getNumElements();
+          uint32_t EleCount = cast<FixedVectorType>(ArgType)->getNumElements();
           uint32_t EleSize = ArgType->getScalarSizeInBits();
           uint32_t TotalSize = EleCount * EleSize;
           if (EleCount == 3) {
-            IntegerType *Int32Ty = Type::getInt32Ty(ArgType->getContext());
-            Constant *Indices[4] = {
-                ConstantInt::get(Int32Ty, 0), ConstantInt::get(Int32Ty, 1),
-                ConstantInt::get(Int32Ty, 2), ConstantInt::get(Int32Ty, 2)};
-            Constant *Mask = ConstantVector::get(Indices);
-            ShuffleVectorInst *Shuffle = new ShuffleVectorInst(Arg, Arg, Mask);
+            ShuffleVectorInst *Shuffle =
+                new ShuffleVectorInst(Arg, Arg, ArrayRef<int>{0, 1, 2, 2});
             Shuffle->insertBefore(Brnch);
             Arg = Shuffle;
             ArgType = Arg->getType();
@@ -532,7 +516,7 @@ bool AMDGPUPrintfRuntimeBinding::lowerPrintfForGpu(
             break;
           }
           if (EleCount > 1) {
-            IType = dyn_cast<Type>(VectorType::get(IType, EleCount));
+            IType = FixedVectorType::get(IType, EleCount);
           }
           Arg = new BitCastInst(Arg, IType, "PrintArgVect", Brnch);
           WhatToStore.push_back(Arg);
@@ -565,10 +549,8 @@ bool AMDGPUPrintfRuntimeBinding::lowerPrintfForGpu(
   }
 
   // erase the printf calls
-  for (auto P : Printfs) {
-    CallInst *CI = dyn_cast<CallInst>(P);
+  for (auto CI : Printfs)
     CI->eraseFromParent();
-  }
 
   Printfs.clear();
   return true;
@@ -579,10 +561,28 @@ bool AMDGPUPrintfRuntimeBinding::runOnModule(Module &M) {
   if (TT.getArch() == Triple::r600)
     return false;
 
-  visit(M);
+  auto PrintfFunction = M.getFunction("printf");
+  if (!PrintfFunction)
+    return false;
+
+  for (auto &U : PrintfFunction->uses()) {
+    if (auto *CI = dyn_cast<CallInst>(U.getUser())) {
+      if (CI->isCallee(&U))
+        Printfs.push_back(CI);
+    }
+  }
 
   if (Printfs.empty())
     return false;
+
+  if (auto HostcallFunction = M.getFunction("__ockl_hostcall_internal")) {
+    for (auto &U : HostcallFunction->uses()) {
+      if (auto *CI = dyn_cast<CallInst>(U.getUser())) {
+        M.getContext().emitError(
+            CI, "Cannot use both printf and hostcall in the same module");
+      }
+    }
+  }
 
   TD = &M.getDataLayout();
   auto DTWP = getAnalysisIfAvailable<DominatorTreeWrapperPass>();

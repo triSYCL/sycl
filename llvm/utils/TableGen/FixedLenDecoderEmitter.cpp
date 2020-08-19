@@ -13,6 +13,7 @@
 
 #include "CodeGenInstruction.h"
 #include "CodeGenTarget.h"
+#include "InfoByHwMode.h"
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/CachedHashString.h"
@@ -97,9 +98,11 @@ struct DecoderTableInfo {
 struct EncodingAndInst {
   const Record *EncodingDef;
   const CodeGenInstruction *Inst;
+  StringRef HwModeName;
 
-  EncodingAndInst(const Record *EncodingDef, const CodeGenInstruction *Inst)
-      : EncodingDef(EncodingDef), Inst(Inst) {}
+  EncodingAndInst(const Record *EncodingDef, const CodeGenInstruction *Inst,
+                  StringRef HwModeName = "")
+      : EncodingDef(EncodingDef), Inst(Inst), HwModeName(HwModeName) {}
 };
 
 struct EncodingIDAndOpcode {
@@ -1055,10 +1058,9 @@ unsigned FilterChooser::getIslands(std::vector<unsigned> &StartBits,
   // 1: Water (the bit value does not affect decoding)
   // 2: Island (well-known bit value needed for decoding)
   int State = 0;
-  int64_t Val = -1;
 
   for (unsigned i = 0; i < BitWidth; ++i) {
-    Val = Value(Insn[i]);
+    int64_t Val = Value(Insn[i]);
     bool Filtered = PositionFiltered(i);
     switch (State) {
     default: llvm_unreachable("Unreachable code!");
@@ -1180,15 +1182,6 @@ unsigned FilterChooser::getDecoderIndex(DecoderSet &Decoders,
   return (unsigned)(P - Decoders.begin());
 }
 
-static void emitSinglePredicateMatch(raw_ostream &o, StringRef str,
-                                     const std::string &PredicateNamespace) {
-  if (str[0] == '!')
-    o << "!Bits[" << PredicateNamespace << "::"
-      << str.slice(1,str.size()) << "]";
-  else
-    o << "Bits[" << PredicateNamespace << "::" << str << "]";
-}
-
 bool FilterChooser::emitPredicateMatch(raw_ostream &o, unsigned &Indentation,
                                        unsigned Opc) const {
   ListInit *Predicates =
@@ -1199,21 +1192,50 @@ bool FilterChooser::emitPredicateMatch(raw_ostream &o, unsigned &Indentation,
     if (!Pred->getValue("AssemblerMatcherPredicate"))
       continue;
 
-    StringRef P = Pred->getValueAsString("AssemblerCondString");
-
-    if (P.empty())
+    if (!dyn_cast<DagInit>(Pred->getValue("AssemblerCondDag")->getValue()))
       continue;
+
+    const DagInit *D = Pred->getValueAsDag("AssemblerCondDag");
+    std::string CombineType = D->getOperator()->getAsString();
+    if (CombineType != "any_of" && CombineType != "all_of")
+      PrintFatalError(Pred->getLoc(), "Invalid AssemblerCondDag!");
+    if (D->getNumArgs() == 0)
+      PrintFatalError(Pred->getLoc(), "Invalid AssemblerCondDag!");
+    bool IsOr = CombineType == "any_of";
 
     if (!IsFirstEmission)
       o << " && ";
 
-    std::pair<StringRef, StringRef> pairs = P.split(',');
-    while (!pairs.second.empty()) {
-      emitSinglePredicateMatch(o, pairs.first, Emitter->PredicateNamespace);
-      o << " && ";
-      pairs = pairs.second.split(',');
+    if (IsOr)
+      o << "(";
+
+    bool First = true;
+    for (auto *Arg : D->getArgs()) {
+      if (!First) {
+        if (IsOr)
+          o << " || ";
+        else
+          o << " && ";
+      }
+      if (auto *NotArg = dyn_cast<DagInit>(Arg)) {
+        if (NotArg->getOperator()->getAsString() != "not" ||
+            NotArg->getNumArgs() != 1)
+          PrintFatalError(Pred->getLoc(), "Invalid AssemblerCondDag!");
+        Arg = NotArg->getArg(0);
+        o << "!";
+      }
+      if (!isa<DefInit>(Arg) ||
+          !cast<DefInit>(Arg)->getDef()->isSubClassOf("SubtargetFeature"))
+        PrintFatalError(Pred->getLoc(), "Invalid AssemblerCondDag!");
+      o << "Bits[" << Emitter->PredicateNamespace << "::" << Arg->getAsString()
+        << "]";
+
+      First = false;
     }
-    emitSinglePredicateMatch(o, pairs.first, Emitter->PredicateNamespace);
+
+    if (IsOr)
+      o << ")";
+
     IsFirstEmission = false;
   }
   return !Predicates->empty();
@@ -1227,12 +1249,8 @@ bool FilterChooser::doesOpcodeNeedPredicate(unsigned Opc) const {
     if (!Pred->getValue("AssemblerMatcherPredicate"))
       continue;
 
-    StringRef P = Pred->getValueAsString("AssemblerCondString");
-
-    if (P.empty())
-      continue;
-
-    return true;
+    if (dyn_cast<DagInit>(Pred->getValue("AssemblerCondDag")->getValue()))
+      return true;
   }
   return false;
 }
@@ -1770,7 +1788,7 @@ static std::string findOperandDecoderMethod(TypedInit *TI) {
   StringInit *String = DecoderString ?
     dyn_cast<StringInit>(DecoderString->getValue()) : nullptr;
   if (String) {
-    Decoder = String->getValue();
+    Decoder = std::string(String->getValue());
     if (!Decoder.empty())
       return Decoder;
   }
@@ -1807,7 +1825,8 @@ populateInstruction(CodeGenTarget &Target, const Record &EncodingDef,
   StringRef InstDecoder = EncodingDef.getValueAsString("DecoderMethod");
   if (InstDecoder != "") {
     bool HasCompleteInstDecoder = EncodingDef.getValueAsBit("hasCompleteDecoder");
-    InsnOperands.push_back(OperandInfo(InstDecoder, HasCompleteInstDecoder));
+    InsnOperands.push_back(
+        OperandInfo(std::string(InstDecoder), HasCompleteInstDecoder));
     Operands[Opc] = InsnOperands;
     return true;
   }
@@ -1837,8 +1856,10 @@ populateInstruction(CodeGenTarget &Target, const Record &EncodingDef,
     if (tiedTo != -1) {
       std::pair<unsigned, unsigned> SO =
         CGI.Operands.getSubOperandNumber(tiedTo);
-      TiedNames[InOutOperands[i].second] = InOutOperands[SO.first].second;
-      TiedNames[InOutOperands[SO.first].second] = InOutOperands[i].second;
+      TiedNames[std::string(InOutOperands[i].second)] =
+          std::string(InOutOperands[SO.first].second);
+      TiedNames[std::string(InOutOperands[SO.first].second)] =
+          std::string(InOutOperands[i].second);
     }
   }
 
@@ -1934,7 +1955,7 @@ populateInstruction(CodeGenTarget &Target, const Record &EncodingDef,
       StringInit *String = DecoderString ?
         dyn_cast<StringInit>(DecoderString->getValue()) : nullptr;
       if (String && String->getValue() != "")
-        Decoder = String->getValue();
+        Decoder = std::string(String->getValue());
 
       if (Decoder == "" &&
           CGI.Operands[SO.first].MIOperandInfo &&
@@ -1961,7 +1982,7 @@ populateInstruction(CodeGenTarget &Target, const Record &EncodingDef,
       String = DecoderString ?
         dyn_cast<StringInit>(DecoderString->getValue()) : nullptr;
       if (!isReg && String && String->getValue() != "")
-        Decoder = String->getValue();
+        Decoder = std::string(String->getValue());
 
       RecordVal *HasCompleteDecoderVal =
         TypeRecord->getValue("hasCompleteDecoder");
@@ -1987,16 +2008,17 @@ populateInstruction(CodeGenTarget &Target, const Record &EncodingDef,
 
   // For each operand, see if we can figure out where it is encoded.
   for (const auto &Op : InOutOperands) {
-    if (!NumberedInsnOperands[Op.second].empty()) {
+    if (!NumberedInsnOperands[std::string(Op.second)].empty()) {
       InsnOperands.insert(InsnOperands.end(),
-                          NumberedInsnOperands[Op.second].begin(),
-                          NumberedInsnOperands[Op.second].end());
+                          NumberedInsnOperands[std::string(Op.second)].begin(),
+                          NumberedInsnOperands[std::string(Op.second)].end());
       continue;
     }
-    if (!NumberedInsnOperands[TiedNames[Op.second]].empty()) {
-      if (!NumberedInsnOperandsNoTie.count(TiedNames[Op.second])) {
+    if (!NumberedInsnOperands[TiedNames[std::string(Op.second)]].empty()) {
+      if (!NumberedInsnOperandsNoTie.count(TiedNames[std::string(Op.second)])) {
         // Figure out to which (sub)operand we're tied.
-        unsigned i = CGI.Operands.getOperandNamed(TiedNames[Op.second]);
+        unsigned i =
+            CGI.Operands.getOperandNamed(TiedNames[std::string(Op.second)]);
         int tiedTo = CGI.Operands[i].getTiedRegister();
         if (tiedTo == -1) {
           i = CGI.Operands.getOperandNamed(Op.second);
@@ -2007,8 +2029,9 @@ populateInstruction(CodeGenTarget &Target, const Record &EncodingDef,
           std::pair<unsigned, unsigned> SO =
             CGI.Operands.getSubOperandNumber(tiedTo);
 
-          InsnOperands.push_back(NumberedInsnOperands[TiedNames[Op.second]]
-                                   [SO.second]);
+          InsnOperands.push_back(
+              NumberedInsnOperands[TiedNames[std::string(Op.second)]]
+                                  [SO.second]);
         }
       }
       continue;
@@ -2063,7 +2086,7 @@ populateInstruction(CodeGenTarget &Target, const Record &EncodingDef,
       }
 
       if (Var->getName() != Op.second &&
-          Var->getName() != TiedNames[Op.second]) {
+          Var->getName() != TiedNames[std::string(Op.second)]) {
         if (Base != ~0U) {
           OpInfo.addField(Base, Width, Offset);
           Base = ~0U;
@@ -2382,12 +2405,50 @@ void FixedLenDecoderEmitter::run(raw_ostream &o) {
   Target.reverseBitsForLittleEndianEncoding();
 
   // Parameterize the decoders based on namespace and instruction width.
+  std::set<StringRef> HwModeNames;
   const auto &NumberedInstructions = Target.getInstructionsByEnumValue();
   NumberedEncodings.reserve(NumberedInstructions.size());
   DenseMap<Record *, unsigned> IndexOfInstruction;
+  // First, collect all HwModes referenced by the target.
   for (const auto &NumberedInstruction : NumberedInstructions) {
     IndexOfInstruction[NumberedInstruction->TheDef] = NumberedEncodings.size();
-    NumberedEncodings.emplace_back(NumberedInstruction->TheDef, NumberedInstruction);
+
+    if (const RecordVal *RV =
+            NumberedInstruction->TheDef->getValue("EncodingInfos")) {
+      if (auto *DI = dyn_cast_or_null<DefInit>(RV->getValue())) {
+        const CodeGenHwModes &HWM = Target.getHwModes();
+        EncodingInfoByHwMode EBM(DI->getDef(), HWM);
+        for (auto &KV : EBM.Map)
+          HwModeNames.insert(HWM.getMode(KV.first).Name);
+      }
+    }
+  }
+
+  // If HwModeNames is empty, add the empty string so we always have one HwMode.
+  if (HwModeNames.empty())
+    HwModeNames.insert("");
+
+  for (const auto &NumberedInstruction : NumberedInstructions) {
+    IndexOfInstruction[NumberedInstruction->TheDef] = NumberedEncodings.size();
+
+    if (const RecordVal *RV =
+            NumberedInstruction->TheDef->getValue("EncodingInfos")) {
+      if (DefInit *DI = dyn_cast_or_null<DefInit>(RV->getValue())) {
+        const CodeGenHwModes &HWM = Target.getHwModes();
+        EncodingInfoByHwMode EBM(DI->getDef(), HWM);
+        for (auto &KV : EBM.Map) {
+          NumberedEncodings.emplace_back(KV.second, NumberedInstruction,
+                                         HWM.getMode(KV.first).Name);
+          HwModeNames.insert(HWM.getMode(KV.first).Name);
+        }
+        continue;
+      }
+    }
+    // This instruction is encoded the same on all HwModes. Emit it for all
+    // HwModes.
+    for (StringRef HwModeName : HwModeNames)
+      NumberedEncodings.emplace_back(NumberedInstruction->TheDef,
+                                     NumberedInstruction, HwModeName);
   }
   for (const auto &NumberedAlias : RK.getAllDerivedDefinitions("AdditionalEncoding"))
     NumberedEncodings.emplace_back(
@@ -2415,13 +2476,19 @@ void FixedLenDecoderEmitter::run(raw_ostream &o) {
       NumInstructions++;
     NumEncodings++;
 
-    StringRef DecoderNamespace = EncodingDef->getValueAsString("DecoderNamespace");
+    if (!Size)
+      continue;
 
-    if (Size) {
-      if (populateInstruction(Target, *EncodingDef, *Inst, i, Operands)) {
-        OpcMap[std::make_pair(DecoderNamespace, Size)].emplace_back(i, IndexOfInstruction.find(Def)->second);
-      } else
-        NumEncodingsOmitted++;
+    if (populateInstruction(Target, *EncodingDef, *Inst, i, Operands)) {
+      std::string DecoderNamespace =
+          std::string(EncodingDef->getValueAsString("DecoderNamespace"));
+      if (!NumberedEncodings[i].HwModeName.empty())
+        DecoderNamespace +=
+            std::string("_") + NumberedEncodings[i].HwModeName.str();
+      OpcMap[std::make_pair(DecoderNamespace, Size)].emplace_back(
+          i, IndexOfInstruction.find(Def)->second);
+    } else {
+      NumEncodingsOmitted++;
     }
   }
 

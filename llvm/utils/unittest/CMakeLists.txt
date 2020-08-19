@@ -43,6 +43,9 @@ endif()
 if(CXX_SUPPORTS_COVERED_SWITCH_DEFAULT_FLAG)
   add_definitions("-Wno-covered-switch-default")
 endif()
+if(CXX_SUPPORTS_SUGGEST_OVERRIDE_FLAG)
+  add_definitions("-Wno-suggest-override")
+endif()
 
 set(LLVM_REQUIRES_RTTI 1)
 add_definitions( -DGTEST_HAS_RTTI=0 )
@@ -71,3 +74,23 @@ add_llvm_library(gtest
 )
 
 add_subdirectory(UnitTestMain)
+
+# When LLVM_LINK_LLVM_DYLIB is enabled, libLLVM.so is added to the interface
+# link libraries for gtest and gtest_main.  This means that any target, like
+# unittests for example, that links against gtest will be forced to link
+# against libLLVM.so.  In some cases we may want to statically unittests if they
+# need access to symbols that are marked private in libLLVM.so.  The only
+# way we can make this work is to remove libLLVM.so from the list of interface
+# link libraries for gtest and then make gtest users responsible for explicitly
+# adding libLLVM.so to their targets link libraries if they need it.
+
+function (gtest_remove_dylib_from_link_interface target)
+  get_target_property(interface_libs ${target} INTERFACE_LINK_LIBRARIES)
+  if (interface_libs)
+    list(REMOVE_ITEM interface_libs LLVM)
+    set_target_properties(${target} PROPERTIES INTERFACE_LINK_LIBRARIES "${interface_libs}")
+  endif()
+endfunction()
+
+gtest_remove_dylib_from_link_interface(gtest)
+gtest_remove_dylib_from_link_interface(gtest_main)

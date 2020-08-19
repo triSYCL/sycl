@@ -14,20 +14,20 @@ define void @main() nounwind #0 {
 ; CHECK-NEXT:    mr 30, 3
 ; CHECK-NEXT:    bl calloc
 ; CHECK-NEXT:    nop
-; CHECK-NEXT:    clrldi 4, 30, 32
 ; CHECK-NEXT:    li 5, 0
 ; CHECK-NEXT:    addi 3, 3, -4
+; CHECK-NEXT:    li 6, 1
+; CHECK-NEXT:    clrldi 4, 30, 32
 ; CHECK-NEXT:    mtctr 4
 ; CHECK-NEXT:    mullw 4, 5, 5
-; CHECK-NEXT:    li 6, 1
 ; CHECK-NEXT:    bdz .LBB0_3
 ; CHECK-NEXT:  # %bb.1:
+; CHECK-NEXT:    addi 5, 6, 1
 ; CHECK-NEXT:    stwu 4, 4(3)
 ; CHECK-NEXT:    mullw 4, 6, 6
-; CHECK-NEXT:    addi 5, 6, 1
 ; CHECK-NEXT:    bdz .LBB0_3
 ; CHECK-NEXT:    .p2align 4
-; CHECK-NEXT:  .LBB0_2: #
+; CHECK-NEXT:  .LBB0_2:
 ; CHECK-NEXT:    stwu 4, 4(3)
 ; CHECK-NEXT:    mullw 4, 5, 5
 ; CHECK-NEXT:    addi 5, 5, 1
@@ -36,8 +36,8 @@ define void @main() nounwind #0 {
 ; CHECK-NEXT:    stwu 4, 4(3)
 ; CHECK-NEXT:    addi 1, 1, 48
 ; CHECK-NEXT:    ld 0, 16(1)
-; CHECK-NEXT:    mtlr 0
 ; CHECK-NEXT:    ld 30, -16(1) # 8-byte Folded Reload
+; CHECK-NEXT:    mtlr 0
 ; CHECK-NEXT:    blr
   %1 = tail call i64 @strtol()
   %2 = trunc i64 %1 to i32

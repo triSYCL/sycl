@@ -1,4 +1,4 @@
-//===-- DSInstructions.td - DS Instruction Defintions ---------------------===//
+//===-- DSInstructions.td - DS Instruction Definitions --------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -58,6 +58,8 @@ class DS_Real <DS_Pseudo ds> :
 
   let isPseudo = 0;
   let isCodeGenOnly = 0;
+  let DS = 1;
+  let UseNamedOperandTable = 1;
 
   // copy relevant pseudo op flags
   let SubtargetPredicate = ds.SubtargetPredicate;
@@ -80,6 +82,17 @@ class DS_Real <DS_Pseudo ds> :
 
 
 // DS Pseudo instructions
+
+class DS_0A1D_NORET<string opName, RegisterClass rc = VGPR_32>
+: DS_Pseudo<opName,
+  (outs),
+  (ins rc:$data0, offset:$offset, gds:$gds),
+  "$data0$offset$gds"> {
+
+  let has_addr = 0;
+  let has_data1 = 0;
+  let has_vdst = 0;
+}
 
 class DS_1A1D_NORET<string opName, RegisterClass rc = VGPR_32>
 : DS_Pseudo<opName,
@@ -375,7 +388,12 @@ defm DS_MAX_U32       : DS_1A1D_NORET_mc<"ds_max_u32">;
 defm DS_AND_B32       : DS_1A1D_NORET_mc<"ds_and_b32">;
 defm DS_OR_B32        : DS_1A1D_NORET_mc<"ds_or_b32">;
 defm DS_XOR_B32       : DS_1A1D_NORET_mc<"ds_xor_b32">;
+
+let SubtargetPredicate = HasLDSFPAtomics in {
 defm DS_ADD_F32       : DS_1A1D_NORET_mc<"ds_add_f32">;
+}
+
+// FIXME: Are these really present pre-gfx8?
 defm DS_MIN_F32       : DS_1A1D_NORET_mc<"ds_min_f32">;
 defm DS_MAX_F32       : DS_1A1D_NORET_mc<"ds_max_f32">;
 
@@ -394,11 +412,12 @@ def DS_WRITE_B8_D16_HI  : DS_1A1D_NORET<"ds_write_b8_d16_hi">;
 def DS_WRITE_B16_D16_HI : DS_1A1D_NORET<"ds_write_b16_d16_hi">;
 }
 
+} // End has_m0_read = 0
+
 let SubtargetPredicate = HasDSAddTid in {
-def DS_WRITE_ADDTID_B32 : DS_1A1D_NORET<"ds_write_addtid_b32">;
+def DS_WRITE_ADDTID_B32 : DS_0A1D_NORET<"ds_write_addtid_b32">;
 }
 
-} // End has_m0_read = 0
 } // End mayLoad = 0
 
 defm DS_MSKOR_B32     : DS_1A2D_NORET_mc<"ds_mskor_b32">;
@@ -429,7 +448,10 @@ defm DS_MIN_F64       : DS_1A1D_NORET_mc<"ds_min_f64", VReg_64>;
 defm DS_MAX_F64       : DS_1A1D_NORET_mc<"ds_max_f64", VReg_64>;
 
 defm DS_ADD_RTN_U32   : DS_1A1D_RET_mc<"ds_add_rtn_u32", VGPR_32, "ds_add_u32">;
+
+let SubtargetPredicate = HasLDSFPAtomics in {
 defm DS_ADD_RTN_F32   : DS_1A1D_RET_mc<"ds_add_rtn_f32", VGPR_32, "ds_add_f32">;
+}
 defm DS_SUB_RTN_U32   : DS_1A1D_RET_mc<"ds_sub_rtn_u32", VGPR_32, "ds_sub_u32">;
 defm DS_RSUB_RTN_U32  : DS_1A1D_RET_mc<"ds_rsub_rtn_u32", VGPR_32, "ds_rsub_u32">;
 defm DS_INC_RTN_U32   : DS_1A1D_RET_mc<"ds_inc_rtn_u32", VGPR_32, "ds_inc_u32">;
@@ -483,6 +505,7 @@ def DS_GWS_SEMA_P     : DS_GWS_0D<"ds_gws_sema_p">;
 def DS_GWS_BARRIER    : DS_GWS_1D<"ds_gws_barrier">;
 }
 
+let SubtargetPredicate = HasDsSrc2Insts in {
 def DS_ADD_SRC2_U32   : DS_1A<"ds_add_src2_u32">;
 def DS_SUB_SRC2_U32   : DS_1A<"ds_sub_src2_u32">;
 def DS_RSUB_SRC2_U32  : DS_1A<"ds_rsub_src2_u32">;
@@ -515,6 +538,7 @@ def DS_MAX_SRC2_F64   : DS_1A<"ds_max_src2_f64">;
 
 def DS_WRITE_SRC2_B32 : DS_1A<"ds_write_src2_b32">;
 def DS_WRITE_SRC2_B64 : DS_1A<"ds_write_src2_b64">;
+} // End SubtargetPredicate = HasDsSrc2Insts
 
 let Uses = [EXEC], mayLoad = 0, mayStore = 0, isConvergent = 1 in {
 def DS_SWIZZLE_B32 : DS_1A_RET <"ds_swizzle_b32", VGPR_32, 0, SwizzleImm>;
@@ -543,12 +567,13 @@ def DS_READ_I8_D16_HI  : DS_1A_RET_Tied<"ds_read_i8_d16_hi">;
 def DS_READ_U16_D16    : DS_1A_RET_Tied<"ds_read_u16_d16">;
 def DS_READ_U16_D16_HI : DS_1A_RET_Tied<"ds_read_u16_d16_hi">;
 }
+} // End has_m0_read = 0
 
 let SubtargetPredicate = HasDSAddTid in {
-def DS_READ_ADDTID_B32 : DS_1A_RET<"ds_read_addtid_b32">;
+def DS_READ_ADDTID_B32 : DS_0A_RET<"ds_read_addtid_b32">;
 }
-} // End has_m0_read = 0
-}
+
+} // End mayStore = 0
 
 def DS_CONSUME       : DS_0A_RET<"ds_consume">;
 def DS_APPEND        : DS_0A_RET<"ds_append">;
@@ -594,17 +619,19 @@ def DS_BPERMUTE_B32 : DS_1A1D_PERMUTE <"ds_bpermute_b32",
                                        int_amdgcn_ds_bpermute>;
 }
 
-def DS_ADD_SRC2_F32 : DS_1A<"ds_add_src2_f32">;
-
 } // let SubtargetPredicate = isGFX8Plus
+
+let SubtargetPredicate = HasLDSFPAtomics, OtherPredicates = [HasDsSrc2Insts] in {
+def DS_ADD_SRC2_F32 : DS_1A<"ds_add_src2_f32">;
+}
 
 //===----------------------------------------------------------------------===//
 // DS Patterns
 //===----------------------------------------------------------------------===//
 
 def : GCNPat <
-  (int_amdgcn_ds_swizzle i32:$src, imm:$offset16),
-  (DS_SWIZZLE_B32 $src, (as_i16imm $offset16), (i1 0))
+  (int_amdgcn_ds_swizzle i32:$src, timm:$offset16),
+  (DS_SWIZZLE_B32 VGPR_32:$src, (as_i16timm $offset16), (i1 0))
 >;
 
 class DSReadPat <DS_Pseudo inst, ValueType vt, PatFrag frag, int gds=0> : GCNPat <
@@ -710,7 +737,7 @@ defm : DSWritePat_mc <DS_WRITE_B16, i32, "truncstorei16_local">;
 defm : DSWritePat_mc <DS_WRITE_B8, i16, "truncstorei8_local">;
 defm : DSWritePat_mc <DS_WRITE_B16, i16, "store_local">;
 
-foreach vt = VGPR_32.RegTypes in {
+foreach vt = Reg32Types.types in {
 defm : DSWritePat_mc <DS_WRITE_B32, vt, "store_local">;
 }
 
@@ -718,35 +745,39 @@ defm : DSAtomicWritePat_mc <DS_WRITE_B32, i32, "atomic_store_local_32">;
 defm : DSAtomicWritePat_mc <DS_WRITE_B64, i64, "atomic_store_local_64">;
 
 let OtherPredicates = [D16PreservesUnusedBits] in {
-def : DSWritePat <DS_WRITE_B16_D16_HI, i32, store_local_hi16>;
-def : DSWritePat <DS_WRITE_B8_D16_HI, i32, truncstorei8_local_hi16>;
+def : DSWritePat <DS_WRITE_B16_D16_HI, i32, store_hi16_local>;
+def : DSWritePat <DS_WRITE_B8_D16_HI, i32, truncstorei8_hi16_local>;
 }
 
-
-class DS64Bit4ByteAlignedReadPat<DS_Pseudo inst, PatFrag frag> : GCNPat <
-  (v2i32 (frag (DS64Bit4ByteAligned i32:$ptr, i8:$offset0, i8:$offset1))),
+class DS64Bit4ByteAlignedReadPat<DS_Pseudo inst, ValueType vt, PatFrag frag> : GCNPat <
+  (vt:$value (frag (DS64Bit4ByteAligned i32:$ptr, i8:$offset0, i8:$offset1))),
   (inst $ptr, $offset0, $offset1, (i1 0))
 >;
 
-class DS64Bit4ByteAlignedWritePat<DS_Pseudo inst, PatFrag frag> : GCNPat<
-  (frag v2i32:$value, (DS64Bit4ByteAligned i32:$ptr, i8:$offset0, i8:$offset1)),
-  (inst $ptr, (i32 (EXTRACT_SUBREG $value, sub0)),
-              (i32 (EXTRACT_SUBREG $value, sub1)), $offset0, $offset1,
+class DS64Bit4ByteAlignedWritePat<DS_Pseudo inst, ValueType vt, PatFrag frag> : GCNPat<
+  (frag vt:$value, (DS64Bit4ByteAligned i32:$ptr, i8:$offset0, i8:$offset1)),
+  (inst $ptr, (i32 (EXTRACT_SUBREG VReg_64:$value, sub0)),
+              (i32 (EXTRACT_SUBREG VReg_64:$value, sub1)), $offset0, $offset1,
               (i1 0))
 >;
 
+multiclass DS64Bit4ByteAlignedPat_mc<ValueType vt> {
+  let OtherPredicates = [LDSRequiresM0Init, isGFX7Plus] in {
+    def : DS64Bit4ByteAlignedReadPat<DS_READ2_B32, vt, load_local_m0>;
+    def : DS64Bit4ByteAlignedWritePat<DS_WRITE2_B32, vt, store_local_m0>;
+  }
+
+  let OtherPredicates = [NotLDSRequiresM0Init] in {
+    def : DS64Bit4ByteAlignedReadPat<DS_READ2_B32_gfx9, vt, load_local>;
+    def : DS64Bit4ByteAlignedWritePat<DS_WRITE2_B32_gfx9, vt, store_local>;
+  }
+}
+
 // v2i32 loads are split into i32 loads on SI during lowering, due to a bug
 // related to bounds checking.
-let OtherPredicates = [LDSRequiresM0Init, isGFX7Plus] in {
-def : DS64Bit4ByteAlignedReadPat<DS_READ2_B32, load_local_m0>;
-def : DS64Bit4ByteAlignedWritePat<DS_WRITE2_B32, store_local_m0>;
+foreach vt = VReg_64.RegTypes in {
+defm : DS64Bit4ByteAlignedPat_mc<vt>;
 }
-
-let OtherPredicates = [NotLDSRequiresM0Init] in {
-def : DS64Bit4ByteAlignedReadPat<DS_READ2_B32_gfx9, load_local>;
-def : DS64Bit4ByteAlignedWritePat<DS_WRITE2_B32_gfx9, store_local>;
-}
-
 
 let AddedComplexity = 100 in {
 
@@ -811,9 +842,12 @@ defm : DSAtomicRetPat_mc<DS_MAX_RTN_I32, i32, "atomic_load_max">;
 defm : DSAtomicRetPat_mc<DS_MIN_RTN_U32, i32, "atomic_load_umin">;
 defm : DSAtomicRetPat_mc<DS_MAX_RTN_U32, i32, "atomic_load_umax">;
 defm : DSAtomicCmpXChg_mc<DS_CMPST_RTN_B32, i32, "atomic_cmp_swap">;
+
+let SubtargetPredicate = HasLDSFPAtomics in {
 defm : DSAtomicRetPat_mc<DS_MIN_RTN_F32, f32, "atomic_load_fmin">;
 defm : DSAtomicRetPat_mc<DS_MAX_RTN_F32, f32, "atomic_load_fmax">;
 defm : DSAtomicRetPat_mc<DS_ADD_RTN_F32, f32, "atomic_load_fadd">;
+}
 
 // 64-bit atomics.
 defm : DSAtomicRetPat_mc<DS_WRXCHG_RTN_B64, i64, "atomic_swap">;
@@ -1062,7 +1096,7 @@ defm DS_MAX_SRC2_F64        : DS_Real_gfx6_gfx7_gfx10<0x0d3>;
 class DS_Real_vi <bits<8> op, DS_Pseudo ds> :
   DS_Real <ds>,
   SIMCInstr <ds.Mnemonic, SIEncodingFamily.VI> {
-  let AssemblerPredicates = [isGFX8GFX9];
+  let AssemblerPredicate = isGFX8GFX9;
   let DecoderNamespace = "GFX8";
 
   // encoding

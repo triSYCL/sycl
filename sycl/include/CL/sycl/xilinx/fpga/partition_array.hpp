@@ -20,11 +20,14 @@
 #ifndef SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP
 #define SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP
 
+#include "CL/sycl/detail/defines.hpp"
+
 #include <array>
 #include <cstddef>
 #include <type_traits>
 
-namespace cl::sycl::xilinx {
+__SYCL_INLINE_NAMESPACE(cl) {
+namespace sycl::xilinx {
 
 /** Kind of array partition
 
@@ -167,17 +170,18 @@ struct partition_array {
   static constexpr auto partition_type = PartitionType::partition_type;
   /// Type of array elements
   using element_type = ValueType;
+  using iterator = ValueType*;
 
 
   /// Provide iterator
-  auto begin() { return elems; }
-  const auto begin() const { return elems; }
-  auto end() { return elems+Size; }
-  const auto end() const { return elems+Size; }
+  iterator begin() { return elems; }
+  const iterator begin() const { return elems; }
+  iterator end() { return elems+Size; }
+  const iterator end() const { return elems+Size; }
 
 
   /// Evaluate size
-  constexpr auto size() const noexcept {
+  constexpr std::size_t size() const noexcept {
     return Size;
   }
 
@@ -214,7 +218,7 @@ struct partition_array {
             // Only use this constructor for a real element-oriented
             // initializer_list we can assign, not for the case
             // partition_array<> a = { some_other_array }
-            typename = std::enable_if_t<std::is_convertible<SourceBasicType,
+            typename = detail::enable_if_t<std::is_convertible<SourceBasicType,
                                                             ValueType>::value>>
   constexpr partition_array(std::initializer_list<SourceBasicType> l)
     : partition_array { } {
@@ -227,7 +231,7 @@ struct partition_array {
 
 
   /// Provide a subscript operator
-  constexpr ValueType& operator[](std::size_t i) {
+  ValueType& operator[](std::size_t i) {
     return elems[i];
   }
 
@@ -238,11 +242,13 @@ struct partition_array {
 
 
   /// Return the partition type of the array
-  constexpr auto get_partition_type() const {
+  constexpr auto get_partition_type() const -> decltype(partition_type) {
     return partition_type;
   }
 };
 
 } // namespace cl::sycl::xilinx
+
+}
 
 #endif// SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP

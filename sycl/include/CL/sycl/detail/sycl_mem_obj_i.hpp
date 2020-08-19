@@ -8,11 +8,10 @@
 
 #pragma once
 
-#include <CL/cl.h>
 #include <CL/sycl/detail/pi.hpp>
-#include <memory>
+#include <CL/sycl/stl.hpp>
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 
 namespace detail {
@@ -21,14 +20,16 @@ class event_impl;
 class context_impl;
 struct MemObjRecord;
 
-using EventImplPtr = std::shared_ptr<detail::event_impl>;
-using ContextImplPtr = std::shared_ptr<detail::context_impl>;
+using EventImplPtr = shared_ptr_class<detail::event_impl>;
+using ContextImplPtr = shared_ptr_class<detail::context_impl>;
 
 // The class serves as an interface in the scheduler for all SYCL memory
 // objects.
 class SYCLMemObjI {
 public:
-  enum MemObjType { BUFFER, IMAGE };
+  virtual ~SYCLMemObjI() = default;
+
+  enum MemObjType { BUFFER, IMAGE, UNDEFINED };
 
   virtual MemObjType getType() const = 0;
 
@@ -38,11 +39,12 @@ public:
   // point to event that should be waited before using the memory.
   // InitFromUserData indicates that the returned memory should be intialized
   // with the data provided by user(if any). Usually it should happen on the
-  // first allocation of memory for the buffer.
+  // first allocation of memory for the memory object.
+  // Non null HostPtr requires allocation to be made with USE_HOST_PTR property.
   // Method returns a pointer to host allocation if Context is host one and
   // cl_mem obect if not.
   virtual void *allocateMem(ContextImplPtr Context, bool InitFromUserData,
-                            RT::PiEvent &InteropEvent) = 0;
+                            void *HostPtr, RT::PiEvent &InteropEvent) = 0;
 
   // Should be used for memory object created without use_host_ptr property.
   virtual void *allocateHostMem() = 0;
@@ -56,13 +58,20 @@ public:
   // Ptr must be a pointer returned by allocateHostMem.
   virtual void releaseHostMem(void *Ptr) = 0;
 
+  // Returns size of object in bytes
+  virtual size_t getSize() const = 0;
+
 protected:
   // Pointer to the record that contains the memory commands. This is managed
   // by the scheduler.
-  std::unique_ptr<MemObjRecord> MRecord;
+  // fixme replace with unique_ptr_class once it is implemented. Standard
+  // unique_ptr requires knowlege of sizeof(MemObjRecord) at compile time
+  // which is unavailable.
+  shared_ptr_class<MemObjRecord> MRecord;
   friend class Scheduler;
+  friend class ExecCGCommand;
 };
 
 } // namespace detail
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

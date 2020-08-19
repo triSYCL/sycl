@@ -1,4 +1,4 @@
-add_llvm_library(LLVMXOCCIRDowngrader
+add_llvm_component_library(LLVMXOCCIRDowngrader
   XOCCIRDowngrader.cpp
 
   ADDITIONAL_HEADER_DIRS
@@ -8,4 +8,4 @@ add_llvm_library(LLVMXOCCIRDowngrader
   intrinsics_gen
 )
 
-target_link_libraries(LLVMXOCCIRDowngrader LLVMCore LLVMSupport)
+target_link_libraries(LLVMXOCCIRDowngrader PRIVATE LLVMCore LLVMSupport)

@@ -1,4 +1,4 @@
-add_llvm_library(LLVMInSPIRation
+add_llvm_component_library(LLVMInSPIRation
   InSPIRation.cpp
 
   ADDITIONAL_HEADER_DIRS
@@ -8,4 +8,4 @@ add_llvm_library(LLVMInSPIRation
   intrinsics_gen
 )
 
-target_link_libraries(LLVMInSPIRation LLVMCore LLVMSupport LLVMDemangle)
+target_link_libraries(LLVMInSPIRation PRIVATE LLVMCore LLVMSupport LLVMDemangle)

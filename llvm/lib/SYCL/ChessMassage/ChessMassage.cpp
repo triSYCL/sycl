@@ -113,7 +113,7 @@ struct ChessMassage : public ModulePass {
 }
 
 namespace llvm {
-void initializeChessMassage(PassRegistry &Registry);
+void initializeChessMassagePass(PassRegistry &Registry);
 }
 
 INITIALIZE_PASS(ChessMassage, "ChessMassage",

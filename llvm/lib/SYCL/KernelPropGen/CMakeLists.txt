@@ -1,4 +1,4 @@
-add_llvm_library(LLVMKernelPropGen
+add_llvm_component_library(LLVMKernelPropGen
   KernelPropGen.cpp
 
   ADDITIONAL_HEADER_DIRS
@@ -8,4 +8,4 @@ add_llvm_library(LLVMKernelPropGen
   intrinsics_gen
 )
 
-target_link_libraries(LLVMKernelPropGen LLVMCore LLVMSupport)
+target_link_libraries(LLVMKernelPropGen PRIVATE LLVMCore LLVMSupport)

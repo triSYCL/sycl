@@ -7,12 +7,12 @@
 //===----------------------------------------------------------------------===//
 
 #pragma once
-#include <CL/sycl/exception.hpp>
 #include <CL/sycl/detail/type_traits.hpp>
+#include <CL/sycl/exception.hpp>
 #include <functional>
 #include <stdexcept>
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 template <int dimensions> class id;
 template <int dimensions> class range;
@@ -111,12 +111,14 @@ protected:
   ALWAYS_INLINE void check_dimension(int dimension) const {
 #ifndef __SYCL_DEVICE_ONLY__
     if (dimension >= dimensions || dimension < 0) {
-      throw cl::sycl::invalid_parameter_error("Index out of range");
+      throw cl::sycl::invalid_parameter_error("Index out of range",
+                                              PI_INVALID_VALUE);
     }
 #endif
+    (void)dimension;
   }
 };
 
 } // namespace detail
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

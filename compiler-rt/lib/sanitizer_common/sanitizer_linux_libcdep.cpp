@@ -23,6 +23,7 @@
 #include "sanitizer_flags.h"
 #include "sanitizer_freebsd.h"
 #include "sanitizer_getauxval.h"
+#include "sanitizer_glibc_version.h"
 #include "sanitizer_linux.h"
 #include "sanitizer_placement_new.h"
 #include "sanitizer_procmaps.h"
@@ -33,6 +34,10 @@
 #include <signal.h>
 #include <sys/resource.h>
 #include <syslog.h>
+
+#if !defined(ElfW)
+#define ElfW(type) Elf_##type
+#endif
 
 #if SANITIZER_FREEBSD
 #include <pthread_np.h>
@@ -49,6 +54,7 @@
 #if SANITIZER_NETBSD
 #include <sys/sysctl.h>
 #include <sys/tls.h>
+#include <lwp.h>
 #endif
 
 #if SANITIZER_SOLARIS
@@ -188,11 +194,7 @@ __attribute__((unused)) static bool GetLibcVersion(int *major, int *minor,
 static uptr g_tls_size;
 
 #ifdef __i386__
-# ifndef __GLIBC_PREREQ
-#  define CHECK_GET_TLS_STATIC_INFO_VERSION 1
-# else
-#  define CHECK_GET_TLS_STATIC_INFO_VERSION (!__GLIBC_PREREQ(2, 27))
-# endif
+# define CHECK_GET_TLS_STATIC_INFO_VERSION (!__GLIBC_PREREQ(2, 27))
 #else
 # define CHECK_GET_TLS_STATIC_INFO_VERSION 0
 #endif
@@ -402,13 +404,7 @@ uptr ThreadSelf() {
 
 #if SANITIZER_NETBSD
 static struct tls_tcb * ThreadSelfTlsTcb() {
-  struct tls_tcb * tcb;
-# ifdef __HAVE___LWP_GETTCB_FAST
-  tcb = (struct tls_tcb *)__lwp_gettcb_fast();
-# elif defined(__HAVE___LWP_GETPRIVATE_FAST)
-  tcb = (struct tls_tcb *)__lwp_getprivate_fast();
-# endif
-  return tcb;
+  return (struct tls_tcb *)_lwp_getprivate();
 }
 
 uptr ThreadSelf() {
@@ -844,6 +840,41 @@ void ReExec() {
   Die();
 }
 #endif  // !SANITIZER_OPENBSD
+
+void UnmapFromTo(uptr from, uptr to) {
+  if (to == from)
+    return;
+  CHECK(to >= from);
+  uptr res = internal_munmap(reinterpret_cast<void *>(from), to - from);
+  if (UNLIKELY(internal_iserror(res))) {
+    Report("ERROR: %s failed to unmap 0x%zx (%zd) bytes at address %p\n",
+           SanitizerToolName, to - from, to - from, (void *)from);
+    CHECK("unable to unmap" && 0);
+  }
+}
+
+uptr MapDynamicShadow(uptr shadow_size_bytes, uptr shadow_scale,
+                      uptr min_shadow_base_alignment,
+                      UNUSED uptr &high_mem_end) {
+  const uptr granularity = GetMmapGranularity();
+  const uptr alignment =
+      Max<uptr>(granularity << shadow_scale, 1ULL << min_shadow_base_alignment);
+  const uptr left_padding =
+      Max<uptr>(granularity, 1ULL << min_shadow_base_alignment);
+
+  const uptr shadow_size = RoundUpTo(shadow_size_bytes, granularity);
+  const uptr map_size = shadow_size + left_padding + alignment;
+
+  const uptr map_start = (uptr)MmapNoAccess(map_size);
+  CHECK_NE(map_start, ~(uptr)0);
+
+  const uptr shadow_start = RoundUpTo(map_start + left_padding, alignment);
+
+  UnmapFromTo(map_start, shadow_start - left_padding);
+  UnmapFromTo(shadow_start + shadow_size, map_start + map_size);
+
+  return shadow_start;
+}
 
 } // namespace __sanitizer
 

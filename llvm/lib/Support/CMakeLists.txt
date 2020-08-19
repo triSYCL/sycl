@@ -1,7 +1,7 @@
-set(system_libs)
-if ( LLVM_ENABLE_ZLIB AND HAVE_LIBZ )
-  set(system_libs ${system_libs} ${ZLIB_LIBRARIES})
+if(LLVM_ENABLE_ZLIB)
+  set(imported_libs ZLIB::ZLIB)
 endif()
+
 if( MSVC OR MINGW )
   # libuuid required for FOLDERID_Profile usage in lib/Support/Windows/Path.inc.
   # advapi32 required for CryptAcquireContextW in lib/Support/Windows/Path.inc.
@@ -26,7 +26,7 @@ elseif( CMAKE_HOST_UNIX )
       set(system_libs ${system_libs} ${TERMINFO_LIBS})
     endif()
   endif()
-  if( LLVM_ENABLE_THREADS AND HAVE_LIBATOMIC )
+  if( LLVM_ENABLE_THREADS AND (HAVE_LIBATOMIC OR HAVE_CXX_LIBATOMICS64) )
     set(system_libs ${system_libs} atomic)
   endif()
   set(system_libs ${system_libs} ${LLVM_PTHREAD_LIB})
@@ -51,7 +51,7 @@ else()
   set(Z3_LINK_FILES "")
 endif()
 
-add_llvm_library(LLVMSupport
+add_llvm_component_library(LLVMSupport
   AArch64TargetParser.cpp
   ABIBreak.cpp
   ARMTargetParser.cpp
@@ -87,8 +87,11 @@ add_llvm_library(LLVMSupport
   DeltaAlgorithm.cpp
   DAGDeltaAlgorithm.cpp
   DJB.cpp
+  ELFAttributeParser.cpp
+  ELFAttributes.cpp
   Error.cpp
   ErrorHandling.cpp
+  ExtensibleRTTI.cpp
   FileCheck.cpp
   FileCollector.cpp
   FileUtilities.cpp
@@ -103,7 +106,6 @@ add_llvm_library(LLVMSupport
   IntEqClasses.cpp
   IntervalMap.cpp
   ItaniumManglingCanonicalizer.cpp
-  JamCRC.cpp
   JSON.cpp
   KnownBits.cpp
   LEB128.cpp
@@ -113,20 +115,25 @@ add_llvm_library(LLVMSupport
   LowLevelType.cpp
   ManagedStatic.cpp
   MathExtras.cpp
+  MemAlloc.cpp
   MemoryBuffer.cpp
   MD5.cpp
   NativeFormatting.cpp
+  OptimizedStructLayout.cpp
   Optional.cpp
-  Options.cpp
   Parallel.cpp
   PluginLoader.cpp
   PrettyStackTrace.cpp
+  PropertySetIO.cpp
   RandomNumberGenerator.cpp
   Regex.cpp
+  RISCVAttributes.cpp
+  RISCVAttributeParser.cpp
   ScaledNumber.cpp
   ScopedPrinter.cpp
   SHA1.cpp
   Signposts.cpp
+  SimpleTable.cpp
   SmallPtrSet.cpp
   SmallVector.cpp
   SourceMgr.cpp
@@ -134,9 +141,9 @@ add_llvm_library(LLVMSupport
   Statistic.cpp
   StringExtras.cpp
   StringMap.cpp
-  StringPool.cpp
   StringSaver.cpp
   StringRef.cpp
+  SuffixTree.cpp
   SymbolRemappingReader.cpp
   SystemUtils.cpp
   TarWriter.cpp
@@ -153,6 +160,7 @@ add_llvm_library(LLVMSupport
   VersionTuple.cpp
   VirtualFileSystem.cpp
   WithColor.cpp
+  X86TargetParser.cpp
   YAMLParser.cpp
   YAMLTraits.cpp
   raw_os_ostream.cpp
@@ -188,10 +196,32 @@ add_llvm_library(LLVMSupport
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/ADT
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/Support
   ${Backtrace_INCLUDE_DIRS}
-  LINK_LIBS ${system_libs} ${delayload_flags} ${Z3_LINK_FILES}
+  LINK_LIBS ${system_libs} ${imported_libs} ${delayload_flags} ${Z3_LINK_FILES}
   )
 
-set_property(TARGET LLVMSupport PROPERTY LLVM_SYSTEM_LIBS "${system_libs}")
+set(llvm_system_libs ${system_libs})
+
+if(LLVM_ENABLE_ZLIB)
+  string(TOUPPER ${CMAKE_BUILD_TYPE} build_type)
+  get_property(zlib_library TARGET ZLIB::ZLIB PROPERTY LOCATION_${build_type})
+  if(NOT zlib_library)
+    get_property(zlib_library TARGET ZLIB::ZLIB PROPERTY LOCATION)
+  endif()
+  get_filename_component(zlib_library ${zlib_library} NAME)
+  if(CMAKE_STATIC_LIBRARY_PREFIX AND CMAKE_STATIC_LIBRARY_SUFFIX AND
+      zlib_library MATCHES "^${CMAKE_STATIC_LIBRARY_PREFIX}.*${CMAKE_STATIC_LIBRARY_SUFFIX}$")
+    STRING(REGEX REPLACE "^${CMAKE_STATIC_LIBRARY_PREFIX}" "" zlib_library ${zlib_library})
+    STRING(REGEX REPLACE "${CMAKE_STATIC_LIBRARY_SUFFIX}$" "" zlib_library ${zlib_library})
+  endif()
+  if(CMAKE_SHARED_LIBRARY_PREFIX AND CMAKE_SHARED_LIBRARY_SUFFIX AND
+      zlib_library MATCHES "^${CMAKE_SHARED_LIBRARY_PREFIX}.*${CMAKE_SHARED_LIBRARY_SUFFIX}$")
+    STRING(REGEX REPLACE "^${CMAKE_SHARED_LIBRARY_PREFIX}" "" zlib_library ${zlib_library})
+    STRING(REGEX REPLACE "${CMAKE_SHARED_LIBRARY_SUFFIX}$" "" zlib_library ${zlib_library})
+  endif()
+  set(llvm_system_libs ${llvm_system_libs} "${zlib_library}")
+endif()
+
+set_property(TARGET LLVMSupport PROPERTY LLVM_SYSTEM_LIBS "${llvm_system_libs}")
 
 if(LLVM_WITH_Z3)
   target_include_directories(LLVMSupport SYSTEM

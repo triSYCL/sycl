@@ -18,6 +18,7 @@
 subdirectories =
  bugpoint
  dsymutil
+ file-table-tform
  llc
  lli
  llvm-ar
@@ -35,6 +36,7 @@ subdirectories =
  llvm-ifs
  llvm-exegesis
  llvm-extract
+ llvm-foreach
  llvm-jitlistener
  llvm-jitlink
  llvm-link
@@ -56,6 +58,7 @@ subdirectories =
  llvm-split
  llvm-undname
  opt
+ sycl-post-link
  verify-uselistorder
 
 [component_0]

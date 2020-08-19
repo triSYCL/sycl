@@ -860,7 +860,7 @@ void BT::visitNonBranch(const MachineInstr &MI) {
              << " cell: " << ME.getCell(RU, Map) << "\n";
     }
     dbgs() << "Outputs:\n";
-    for (const std::pair<unsigned, RegisterCell> &P : ResMap) {
+    for (const std::pair<const unsigned, RegisterCell> &P : ResMap) {
       RegisterRef RD(P.first);
       dbgs() << "  " << printReg(P.first, &ME.TRI) << " cell: "
              << ME.getCell(RD, ResMap) << "\n";
@@ -953,6 +953,9 @@ void BT::visitBranchesFrom(const MachineInstr &BI) {
     }
     ++It;
   } while (FallsThrough && It != End);
+
+  if (B.mayHaveInlineAsmBr())
+    DefaultToAll = true;
 
   if (!DefaultToAll) {
     // Need to add all CFG successors that lead to EH landing pads.

@@ -17,7 +17,7 @@
 
 #define INSTR_PROF_VALUE_PROF_DATA
 #define INSTR_PROF_COMMON_API_IMPL
-#include "InstrProfData.inc"
+#include "profile/InstrProfData.inc"
 
 static int hasStaticCounters = 1;
 static int OutOfNodesWarnings = 0;
@@ -93,6 +93,8 @@ static int allocateValueProfileCounters(__llvm_profile_data *Data) {
   for (VKI = IPVK_First; VKI <= IPVK_Last; ++VKI)
     NumVSites += Data->NumValueSites[VKI];
 
+  if (NumVSites == 0)
+    return 0;
   ValueProfNode **Mem =
       (ValueProfNode **)calloc(NumVSites, sizeof(ValueProfNode *));
   if (!Mem)

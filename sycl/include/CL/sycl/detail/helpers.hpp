@@ -23,15 +23,17 @@ namespace __device_builtin = __spirv;
 #include <CL/__spirv/spirv_types.hpp>
 #include <CL/sycl/access/access.hpp>
 #include <CL/sycl/detail/common.hpp>
+#include <CL/sycl/detail/export.hpp>
 #include <CL/sycl/detail/pi.hpp>
 #include <CL/sycl/detail/type_traits.hpp>
 
 #include <memory>
+#include <numeric> // std::bit_cast
 #include <stdexcept>
 #include <type_traits>
 #include <vector>
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 class context;
 class event;
@@ -44,14 +46,47 @@ template <int Dims> class h_item;
 enum class memory_order;
 
 namespace detail {
+inline void memcpy(void *Dst, const void *Src, size_t Size) {
+  char *Destination = reinterpret_cast<char *>(Dst);
+  const char *Source = reinterpret_cast<const char *>(Src);
+  for (size_t I = 0; I < Size; ++I) {
+    Destination[I] = Source[I];
+  }
+}
+
+template <typename To, typename From>
+constexpr To bit_cast(const From &from) noexcept {
+  static_assert(sizeof(To) == sizeof(From),
+                "Sizes of To and From must be equal");
+  static_assert(std::is_trivially_copyable<From>::value,
+                "From must be trivially copyable");
+  static_assert(std::is_trivially_copyable<To>::value,
+                "To must be trivially copyable");
+#if __cpp_lib_bit_cast
+  return std::bit_cast<To>(from);
+#else // __cpp_lib_bit_cast
+
+#if __has_builtin(__builtin_bit_cast)
+  return __builtin_bit_cast(To, from);
+#else  // __has_builtin(__builtin_bit_cast)
+  static_assert(std::is_trivially_default_constructible<To>::value,
+                "To must be trivially default constructible");
+  To to;
+  sycl::detail::memcpy(&to, &from, sizeof(To));
+  return to;
+#endif // __has_builtin(__builtin_bit_cast)
+
+#endif // __cpp_lib_bit_cast
+}
+
 class context_impl;
 // The function returns list of events that can be passed to OpenCL API as
 // dependency list and waits for others.
-std::vector<RT::PiEvent>
+__SYCL_EXPORT std::vector<RT::PiEvent>
 getOrWaitEvents(std::vector<cl::sycl::event> DepEvents,
                 std::shared_ptr<cl::sycl::detail::context_impl> Context);
 
-void waitEvents(std::vector<cl::sycl::event> DepEvents);
+__SYCL_EXPORT void waitEvents(std::vector<cl::sycl::event> DepEvents);
 
 class Builder {
 public:
@@ -115,12 +150,12 @@ public:
   template <int N>
   using is_valid_dimensions = std::integral_constant<bool, (N > 0) && (N < 4)>;
 
-  template <int Dims> static const id<Dims> getId() {
+  template <int Dims> static const id<Dims> getElement(id<Dims> *) {
     static_assert(is_valid_dimensions<Dims>::value, "invalid dimensions");
     return __device_builtin::initGlobalInvocationId<Dims, id<Dims>>();
   }
 
-  template <int Dims> static const group<Dims> getGroup() {
+  template <int Dims> static const group<Dims> getElement(group<Dims> *) {
     static_assert(is_valid_dimensions<Dims>::value, "invalid dimensions");
     range<Dims> GlobalSize{__device_builtin::initGlobalSize<Dims, range<Dims>>()};
     range<Dims> LocalSize{__device_builtin::initWorkgroupSize<Dims, range<Dims>>()};
@@ -148,7 +183,7 @@ public:
     return createItem<Dims, false>(GlobalSize, GlobalId);
   }
 
-  template <int Dims> static const nd_item<Dims> getNDItem() {
+  template <int Dims> static const nd_item<Dims> getElement(nd_item<Dims> *) {
     static_assert(is_valid_dimensions<Dims>::value, "invalid dimensions");
     range<Dims> GlobalSize{__device_builtin::initGlobalSize<Dims, range<Dims>>()};
     range<Dims> LocalSize{__device_builtin::initWorkgroupSize<Dims, range<Dims>>()};
@@ -164,10 +199,23 @@ public:
     item<Dims, false> LocalItem = createItem<Dims, false>(LocalSize, LocalId);
     return createNDItem<Dims>(GlobalItem, LocalItem, Group);
   }
+
+  template <int Dims, bool WithOffset>
+  static auto getElement(item<Dims, WithOffset> *)
+      -> decltype(getItem<Dims, WithOffset>()) {
+    return getItem<Dims, WithOffset>();
+  }
+
+  template <int Dims>
+  static auto getNDItem()
+      -> decltype(getElement(static_cast<nd_item<Dims> *>(nullptr))) {
+    return getElement(static_cast<nd_item<Dims> *>(nullptr));
+  }
+
 #endif // __SYCL_DEVICE_ONLY__
 };
 
-inline constexpr __spv::MemorySemanticsMask
+inline constexpr __spv::MemorySemanticsMask::Flag
 getSPIRVMemorySemanticsMask(memory_order) {
   return __spv::MemorySemanticsMask::None;
 }
@@ -219,4 +267,4 @@ getSPIRVMemorySemanticsMask(const access::fence_space AccessSpace,
 
 } // namespace detail
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

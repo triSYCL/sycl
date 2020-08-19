@@ -1,4 +1,5 @@
-; RUN: opt < %s -asan -asan-module -asan-use-after-return=0 -S | FileCheck %s
+; RUN: opt < %s -asan -asan-module -enable-new-pm=0 -asan-use-after-return=0 -S | FileCheck %s
+; RUN: opt < %s -passes='asan-pipeline' -asan-use-after-return=0 -S | FileCheck %s
 
 ; Checks that llvm.dbg.declare instructions are updated 
 ; accordingly as we merge allocas.
@@ -21,12 +22,12 @@ entry:
 }
 
 ;   CHECK: define i32 @_Z3zzzi
-;   CHECK: entry:
-; Verify that llvm.dbg.declare calls are in the entry basic block.
-;   CHECK-NOT: %entry
-;   CHECK: call void @llvm.dbg.declare(metadata {{.*}}, metadata ![[ARG_ID:[0-9]+]], metadata !DIExpression(DW_OP_plus_uconst, 32))
-;   CHECK-NOT: %entry
-;   CHECK: call void @llvm.dbg.declare(metadata {{.*}}, metadata ![[VAR_ID:[0-9]+]], metadata !DIExpression(DW_OP_plus_uconst, 48))
+;   CHECK: [[MyAlloca:%.*]] = alloca i8, i64 64
+; Note: these dbg.declares used to contain `ptrtoint` operands. The instruction
+; selector would then decline to put the variable in the MachineFunction side
+; table. Check that the dbg.declares have `alloca` operands.
+;   CHECK: call void @llvm.dbg.declare(metadata i8* [[MyAlloca]], metadata ![[ARG_ID:[0-9]+]], metadata !DIExpression(DW_OP_plus_uconst, 32))
+;   CHECK: call void @llvm.dbg.declare(metadata i8* [[MyAlloca]], metadata ![[VAR_ID:[0-9]+]], metadata !DIExpression(DW_OP_plus_uconst, 48))
 
 declare void @llvm.dbg.declare(metadata, metadata, metadata) nounwind readnone
 

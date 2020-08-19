@@ -65,7 +65,8 @@ class Driver {
     GCCMode,
     GXXMode,
     CPPMode,
-    CLMode
+    CLMode,
+    FlangMode
   } Mode;
 
   enum SaveTempsMode {
@@ -180,6 +181,10 @@ public:
   /// Whether the driver should follow cl.exe like behavior.
   bool IsCLMode() const { return Mode == CLMode; }
 
+  /// Whether the driver should invoke flang for fortran inputs.
+  /// Other modes fall back to calling gcc which in turn calls gfortran.
+  bool IsFlangMode() const { return Mode == FlangMode; }
+
   /// Only print tool bindings, don't build any jobs.
   unsigned CCCPrintBindings : 1;
 
@@ -198,6 +203,13 @@ public:
 
   /// Whether the driver is generating diagnostics for debugging purposes.
   unsigned CCGenDiagnostics : 1;
+
+  /// Pointer to the ExecuteCC1Tool function, if available.
+  /// When the clangDriver lib is used through clang.exe, this provides a
+  /// shortcut for executing the -cc1 command-line directly, in the same
+  /// process.
+  typedef int (*CC1ToolFunc)(SmallVectorImpl<const char *> &ArgV);
+  CC1ToolFunc CC1Main = nullptr;
 
 private:
   /// Raw target triple.
@@ -328,9 +340,7 @@ public:
       return InstalledDir.c_str();
     return Dir.c_str();
   }
-  void setInstalledDir(StringRef Value) {
-    InstalledDir = Value;
-  }
+  void setInstalledDir(StringRef Value) { InstalledDir = std::string(Value); }
 
   bool isSaveTempsEnabled() const { return SaveTemps != SaveTempsNone; }
   bool isSaveTempsObj() const { return SaveTemps == SaveTempsObj; }
@@ -440,6 +450,10 @@ public:
   /// @name Helper Methods
   /// @{
 
+  /// MakeSYCLDeviceTriple - Returns the SYCL device triple for the
+  /// specified subarch
+  llvm::Triple MakeSYCLDeviceTriple(StringRef TargetArch = "spir64") const;
+
   /// PrintActions - Print the list of actions.
   void PrintActions(const Compilation &C) const;
 
@@ -526,6 +540,11 @@ public:
   /// GCC goes to extra lengths here to be a bit more robust.
   std::string GetTemporaryPath(StringRef Prefix, StringRef Suffix) const;
 
+  /// GetUniquePath = Return the pathname of a unique file to use
+  /// as part of compilation. The file will have the given base name (BaseName)
+  /// and extension (Ext).
+  std::string GetUniquePath(StringRef BaseName, StringRef Ext) const;
+
   /// GetTemporaryDirectory - Return the pathname of a temporary directory to
   /// use as part of compilation; the directory will have the given prefix.
   std::string GetTemporaryDirectory(StringRef Prefix) const;
@@ -536,6 +555,13 @@ public:
   /// ShouldUseClangCompiler - Should the clang compiler be used to
   /// handle this action.
   bool ShouldUseClangCompiler(const JobAction &JA) const;
+
+  /// ShouldUseFlangCompiler - Should the flang compiler be used to
+  /// handle this action.
+  bool ShouldUseFlangCompiler(const JobAction &JA) const;
+
+  /// ShouldEmitStaticLibrary - Should the linker emit a static library.
+  bool ShouldEmitStaticLibrary(const llvm::opt::ArgList &Args) const;
 
   /// Returns true if we are performing any kind of LTO.
   bool isUsingLTO() const { return LTOMode != LTOK_None; }
@@ -603,6 +629,18 @@ private:
           &CachedResults,
       Action::OffloadKind TargetDeviceOffloadKind) const;
 
+  /// Static offload library seen.
+  bool OffloadStaticLibSeen = false;
+
+  void setOffloadStaticLibSeen() { OffloadStaticLibSeen = true; }
+
+  /// Returns true if an offload static library is found.
+  bool checkForOffloadStaticLib(Compilation &C,
+                                llvm::opt::DerivedArgList &Args) const;
+
+  /// Track filename used for the FPGA dependency info.
+  mutable llvm::StringMap<const std::string> FPGATempDepFiles;
+
 public:
   /// GetReleaseVersion - Parse (([0-9]+)(.([0-9]+)(.([0-9]+)?))?)? and
   /// return the grouped values as integers. Numbers which are not
@@ -623,7 +661,22 @@ public:
   static bool GetReleaseVersion(StringRef Str,
                                 MutableArrayRef<unsigned> Digits);
   /// Compute the default -fmodule-cache-path.
-  static void getDefaultModuleCachePath(SmallVectorImpl<char> &Result);
+  /// \return True if the system provides a default cache directory.
+  static bool getDefaultModuleCachePath(SmallVectorImpl<char> &Result);
+
+  bool getOffloadStaticLibSeen() const { return OffloadStaticLibSeen; };
+
+  /// addFPGATempDepFile - Add a file to be added to the bundling step of
+  /// an FPGA object.
+  void addFPGATempDepFile(const std::string &DepName,
+                          const std::string &FileName) const {
+    FPGATempDepFiles.insert({FileName, DepName});
+  }
+  /// getFPGATempDepFile - Get a file to be added to the bundling step of
+  /// an FPGA object.
+  const std::string getFPGATempDepFile(const std::string &FileName) const {
+    return FPGATempDepFiles[FileName];
+  }
 };
 
 /// \return True if the last defined optimization level is -Ofast.
@@ -632,6 +685,12 @@ bool isOptimizationLevelFast(const llvm::opt::ArgList &Args);
 
 /// \return True if the filename has a valid object file extension.
 bool isObjectFile(std::string FileName);
+
+/// \return True if the filename has a static archive/lib extension.
+bool isStaticArchiveFile(const StringRef &FileName);
+
+/// \return True if the argument combination will end up generating remarks.
+bool willEmitRemarks(const llvm::opt::ArgList &Args);
 
 } // end namespace driver
 } // end namespace clang

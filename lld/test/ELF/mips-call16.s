@@ -4,8 +4,7 @@
 # RUN: llvm-mc -filetype=obj -triple=mips-unknown-linux %s -o %t.o
 # RUN: ld.lld %t.o -shared -o %t.so
 # RUN: llvm-objdump -d --no-show-raw-insn %t.so | FileCheck %s
-# RUN: llvm-readelf --mips-plt-got --symbols %t.so \
-# RUN:   | FileCheck -check-prefix=GOT %s
+# RUN: llvm-readelf -A --symbols %t.so | FileCheck -check-prefix=GOT %s
 
   .text
   .globl  __start
@@ -19,7 +18,7 @@ g1:
 
 # CHECK:      Disassembly of section .text:
 # CHECK-EMPTY:
-# CHECK-NEXT: __start:
+# CHECK-NEXT: <__start>:
 # CHECK-NEXT:      {{.*}}:  lw  $8, -32744
 
 # GOT: Symbol table '.symtab'

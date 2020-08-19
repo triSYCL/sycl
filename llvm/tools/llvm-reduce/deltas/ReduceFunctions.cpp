@@ -15,6 +15,7 @@
 #include "ReduceFunctions.h"
 #include "Delta.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/IR/Instructions.h"
 #include <set>
 
 using namespace llvm;
@@ -23,16 +24,13 @@ using namespace llvm;
 /// that aren't inside any of the desired Chunks.
 static void extractFunctionsFromModule(const std::vector<Chunk> &ChunksToKeep,
                                        Module *Program) {
+  Oracle O(ChunksToKeep);
+
   // Get functions inside desired chunks
   std::set<Function *> FuncsToKeep;
-  unsigned I = 0, FunctionCount = 0;
   for (auto &F : *Program)
-    if (I < ChunksToKeep.size()) {
-      if (ChunksToKeep[I].contains(++FunctionCount))
-        FuncsToKeep.insert(&F);
-      if (FunctionCount == ChunksToKeep[I].end)
-        ++I;
-    }
+    if (O.shouldKeep())
+      FuncsToKeep.insert(&F);
 
   // Delete out-of-chunk functions, and replace their calls with undef
   std::vector<Function *> FuncsToRemove;
@@ -57,11 +55,11 @@ static void extractFunctionsFromModule(const std::vector<Chunk> &ChunksToKeep,
 
 /// Counts the amount of non-declaration functions and prints their
 /// respective name & index
-static unsigned countFunctions(Module *Program) {
+static int countFunctions(Module *Program) {
   // TODO: Silence index with --quiet flag
   errs() << "----------------------------\n";
   errs() << "Function Index Reference:\n";
-  unsigned FunctionCount = 0;
+  int FunctionCount = 0;
   for (auto &F : *Program)
     errs() << "\t" << ++FunctionCount << ": " << F.getName() << "\n";
 
@@ -71,7 +69,7 @@ static unsigned countFunctions(Module *Program) {
 
 void llvm::reduceFunctionsDeltaPass(TestRunner &Test) {
   errs() << "*** Reducing Functions...\n";
-  unsigned Functions = countFunctions(Test.getProgram());
+  int Functions = countFunctions(Test.getProgram());
   runDeltaPass(Test, Functions, extractFunctionsFromModule);
   errs() << "----------------------------\n";
 }

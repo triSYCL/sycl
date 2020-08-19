@@ -19,7 +19,7 @@ fi
 COMMON_LINT_FILTER=-build/include,-build/header_guard,-legal/copyright,-whitespace/comments,-readability/casting,\
 -build/namespaces,-build/c++11,-runtime/int
 
-COMMON_LIT_TEST_LINT_FILTER=-whitespace/indent,-whitespace/line_length,-runtime/arrays
+COMMON_LIT_TEST_LINT_FILTER=-whitespace/indent,-whitespace/line_length,-runtime/arrays,-readability/braces
 
 ASAN_RTL_LINT_FILTER=${COMMON_LINT_FILTER}
 ASAN_TEST_LINT_FILTER=${COMMON_LINT_FILTER},-runtime/printf,-runtime/threadsafe_fn
@@ -55,7 +55,7 @@ run_lint() {
   FILTER=$1
   shift
   TASK_LOG=$(${MKTEMP})
-  ${CPPLINT} --filter=${FILTER} "$@" 2>$TASK_LOG
+  ${CPPLINT} --filter=${FILTER} "$@" > $TASK_LOG 2>&1
   if [ "$?" != "0" ]; then
     cat $TASK_LOG | grep -v "Done processing" | grep -v "Total errors found" \
       | grep -v "Skipping input" >> $ERROR_LOG

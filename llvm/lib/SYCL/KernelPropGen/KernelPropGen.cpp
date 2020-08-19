@@ -66,7 +66,28 @@ struct KernelPropGen : public ModulePass {
     return FileFD;
   }
 
-  void GenerateXOCCPropertyScript(llvm::raw_fd_ostream &O, Module &M) {
+  void GenerateXOCCPropertyScript(Module &M) {
+    std::string Path = std::getenv("SCYL_XOCC_TMP_PATH");
+    SmallString<256> TDir(Path.begin(), Path.end());
+    // Make sure to rip off the directories for the filename
+    std::string TmpStr =
+        ("_KernelProperties_" + llvm::sys::path::filename(M.getSourceFileName()))
+            .str();
+    llvm::Twine file = TmpStr;
+    TDir.append(file.str());
+    llvm::sys::path::replace_extension(TDir, "bash",
+      llvm::sys::path::Style::native);
+    llvm::raw_fd_ostream O(GetWriteStreamID(TDir.str()),
+                            true /*close in destructor*/);
+
+    if (O.has_error())
+      return;
+
+   // Script header/comment
+    O << "# This is a generated bash script to inject environment information\n"
+         "# containing kernel properties that we need so we can compile.\n"
+         "# This script is called from sycl-xocc.\n";
+
     llvm::SmallString<512> kernelNames;
     llvm::SmallString<512> DDRArgs;
     for (auto &F : M.functions()) {
@@ -126,7 +147,18 @@ struct KernelPropGen : public ModulePass {
     }
   }
 
-  void GenerateChessPropertyScript(llvm::raw_fd_ostream &O, Module &M) {
+  void GenerateChessPropertyScript(Module &M) {
+    SmallString<256> TDir;
+    llvm::sys::path::system_temp_directory(true, TDir);
+    // Make sure to rip off the directories for the filename
+    llvm::Twine file = "KernelProperties_" +
+      llvm::sys::path::filename(M.getSourceFileName());
+    llvm::sys::path::append(TDir, file);
+    llvm::sys::path::replace_extension(TDir, "bash",
+      llvm::sys::path::Style::native);
+    llvm::raw_fd_ostream O(GetWriteStreamID(TDir.str()),
+                            true /*close in destructor*/);
+
     llvm::SmallString<512> kernelNames;
     for (auto &F : M.functions()) {
       if (isKernel(F)) {
@@ -143,30 +175,11 @@ struct KernelPropGen : public ModulePass {
 
   /// Visit all the functions of the module
   bool runOnModule(Module &M) override {
-    SmallString<256> TDir;
-    llvm::sys::path::system_temp_directory(true, TDir);
-    // Make sure to rip off the directories for the filename
-    llvm::Twine file = "KernelProperties_" +
-      llvm::sys::path::filename(M.getSourceFileName());
-    llvm::sys::path::append(TDir, file);
-    llvm::sys::path::replace_extension(TDir, "bash",
-      llvm::sys::path::Style::native);
-    llvm::raw_fd_ostream O(GetWriteStreamID(TDir.str()),
-                            true /*close in destructor*/);
-
-   // Script header/comment
-    O << "# This is a generated bash script to inject environment information\n"
-         "# containing kernel properties that we need so we can compile.\n"
-         "# This script is called from the sycl-xocc and sycl-chess scripts.\n";
-
-    if (O.has_error())
-      return false;
-
     auto T = llvm::Triple(M.getTargetTriple());
     if (T.isXilinxAIE())
-      GenerateChessPropertyScript(O, M);
+      GenerateChessPropertyScript(M);
     else
-      GenerateXOCCPropertyScript(O, M);
+      GenerateXOCCPropertyScript(M);
 
     // The module probably changed
     return true;

@@ -1,4 +1,5 @@
-@ RUN: llvm-mc -triple armv7-linux-gnu -filetype obj -o - %s | llvm-readobj -r \
+@ RUN: llvm-mc -triple armv7-linux-gnu -filetype obj -o - %s \
+@ RUN:   | llvm-readobj -r - \
 @ RUN:   | FileCheck %s
 @ RUN: llvm-mc -triple armv7-linux-gnu -filetype asm -o - %s \
 @ RUN:   | FileCheck -check-prefix CHECK-ASM %s
@@ -25,9 +26,9 @@ tlsdescseq:
 
 @ CHECK-ASM: ldr r1, [pc, #8]
 @ CHECK-ASM: .tlsdescseq variable
-@ CHECK-ASM: add r2, pc, r1
+@ CHECK-ASM-NEXT: add r2, pc, r1
 @ CHECK-ASM: .tlsdescseq variable
-@ CHECK-ASM: ldr r3, [r1, #4]
+@ CHECK-ASM-NEXT: ldr r3, [r1, #4]
 @ CHECK-ASM: .tlsdescseq variable
-@ CHECK-ASM: blx r3
+@ CHECK-ASM-NEXT: blx r3
 

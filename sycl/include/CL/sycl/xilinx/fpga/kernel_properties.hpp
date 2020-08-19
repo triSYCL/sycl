@@ -16,11 +16,15 @@
 #ifndef SYCL_XILINX_FPGA_KERNEL_PROPERTIES_HPP
 #define SYCL_XILINX_FPGA_KERNEL_PROPERTIES_HPP
 
+#include "CL/sycl/detail/pi.h"
+#include "CL/sycl/exception.hpp"
 #include <boost/core/demangle.hpp>
 #include <iostream>
 #include <regex>
 
-namespace cl::sycl::xilinx {
+__SYCL_INLINE_NAMESPACE(cl) {
+
+namespace sycl::xilinx {
   /// This is the reqd_work_group_size property that you can wrap around SYCL
   /// kernel names (defined as classes or structs). It applies the OpenCL
   /// reqd_work_group_size attribute to the kernel that is generated.
@@ -73,11 +77,13 @@ namespace cl::sycl::xilinx {
 
        if (reqd.size() != 3)
         throw runtime_error("The reqd_work_group_size properties dimensions are"
-                            " not equal to 3");
+                            " not equal to 3", PI_INVALID_WORK_GROUP_SIZE);
     }
 
     return reqd;
   }
+}
+
 }
 
 #endif // SYCL_XILINX_FPGA_KERNEL_PROPERTIES_HPP

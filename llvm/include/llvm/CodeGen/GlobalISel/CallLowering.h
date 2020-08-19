@@ -18,7 +18,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/CodeGen/CallingConvLower.h"
 #include "llvm/CodeGen/TargetCallingConv.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MachineValueType.h"
@@ -28,6 +27,7 @@
 namespace llvm {
 
 class CCState;
+class CallBase;
 class DataLayout;
 class Function;
 class MachineIRBuilder;
@@ -61,7 +61,8 @@ public:
       if (!Regs.empty() && Flags.empty())
         this->Flags.push_back(ISD::ArgFlagsTy());
       // FIXME: We should have just one way of saying "no register".
-      assert((Ty->isVoidTy() == (Regs.empty() || Regs[0] == 0)) &&
+      assert(((Ty->isVoidTy() || Ty->isEmptyTy()) ==
+              (Regs.empty() || Regs[0] == 0)) &&
              "only void types should have no register");
     }
 
@@ -84,7 +85,7 @@ public:
 
     /// Valid if the call has a swifterror inout parameter, and contains the
     /// vreg that the swifterror should be copied into after the call.
-    Register SwiftErrorVReg = 0;
+    Register SwiftErrorVReg;
 
     MDNode *KnownCallees = nullptr;
 
@@ -95,6 +96,10 @@ public:
     /// optimization.
     bool IsTailCall = false;
 
+    /// True if the call was lowered as a tail call. This is consumed by the
+    /// legalizer. This allows the legalizer to lower libcalls as tail calls.
+    bool LoweredTailCall = false;
+
     /// True if the call is to a vararg function.
     bool IsVarArg = false;
   };
@@ -103,18 +108,21 @@ public:
   /// make these decisions: function formal arguments, call
   /// instruction args, call instruction returns and function
   /// returns. However, once a decision has been made on where an
-  /// arugment should go, exactly what happens can vary slightly. This
+  /// argument should go, exactly what happens can vary slightly. This
   /// class abstracts the differences.
   struct ValueHandler {
-    ValueHandler(MachineIRBuilder &MIRBuilder, MachineRegisterInfo &MRI,
-                 CCAssignFn *AssignFn)
-      : MIRBuilder(MIRBuilder), MRI(MRI), AssignFn(AssignFn) {}
+    ValueHandler(bool IsIncoming, MachineIRBuilder &MIRBuilder,
+                 MachineRegisterInfo &MRI, CCAssignFn *AssignFn)
+        : MIRBuilder(MIRBuilder), MRI(MRI), AssignFn(AssignFn),
+          IsIncomingArgumentHandler(IsIncoming) {}
 
     virtual ~ValueHandler() = default;
 
     /// Returns true if the handler is dealing with incoming arguments,
     /// i.e. those that move values from some physical location to vregs.
-    virtual bool isIncomingArgumentHandler() const { return false; }
+    bool isIncomingArgumentHandler() const {
+      return IsIncomingArgumentHandler;
+    }
 
     /// Materialize a VReg containing the address of the specified
     /// stack-based object. This is either based on a FrameIndex or
@@ -137,6 +145,15 @@ public:
                                       uint64_t Size, MachinePointerInfo &MPO,
                                       CCValAssign &VA) = 0;
 
+    /// An overload which takes an ArgInfo if additional information about
+    /// the arg is needed.
+    virtual void assignValueToAddress(const ArgInfo &Arg, Register Addr,
+                                      uint64_t Size, MachinePointerInfo &MPO,
+                                      CCValAssign &VA) {
+      assert(Arg.Regs.size() == 1);
+      assignValueToAddress(Arg.Regs[0], Addr, Size, MPO, VA);
+    }
+
     /// Handle custom values, which may be passed into one or more of \p VAs.
     /// \return The number of \p VAs that have been assigned after the first
     ///         one, and which should therefore be skipped from further
@@ -148,7 +165,10 @@ public:
       llvm_unreachable("Custom values not supported");
     }
 
-    Register extendRegister(Register ValReg, CCValAssign &VA);
+    /// Extend a register to the location type given in VA, capped at extending
+    /// to at most MaxSize bits. If MaxSizeBits is 0 then no maximum is set.
+    Register extendRegister(Register ValReg, CCValAssign &VA,
+                            unsigned MaxSizeBits = 0);
 
     virtual bool assignArg(unsigned ValNo, MVT ValVT, MVT LocVT,
                            CCValAssign::LocInfo LocInfo, const ArgInfo &Info,
@@ -161,7 +181,20 @@ public:
     CCAssignFn *AssignFn;
 
   private:
+    bool IsIncomingArgumentHandler;
     virtual void anchor();
+  };
+
+  struct IncomingValueHandler : public ValueHandler {
+    IncomingValueHandler(MachineIRBuilder &MIRBuilder, MachineRegisterInfo &MRI,
+                         CCAssignFn *AssignFn)
+        : ValueHandler(true, MIRBuilder, MRI, AssignFn) {}
+  };
+
+  struct OutgoingValueHandler : public ValueHandler {
+    OutgoingValueHandler(MachineIRBuilder &MIRBuilder, MachineRegisterInfo &MRI,
+                         CCAssignFn *AssignFn)
+        : ValueHandler(false, MIRBuilder, MRI, AssignFn) {}
   };
 
 protected:
@@ -216,7 +249,8 @@ protected:
   ///
   /// Used to check if arguments are suitable for tail call lowering.
   bool analyzeArgInfo(CCState &CCState, SmallVectorImpl<ArgInfo> &Args,
-                      CCAssignFn &Fn) const;
+                      CCAssignFn &AssignFnFixed,
+                      CCAssignFn &AssignFnVarArg) const;
 
   /// \returns True if the calling convention for a callee and its caller pass
   /// results in the same way. Typically used for tail call eligibility checks.
@@ -224,12 +258,18 @@ protected:
   /// \p Info is the CallLoweringInfo for the call.
   /// \p MF is the MachineFunction for the caller.
   /// \p InArgs contains the results of the call.
-  /// \p CalleeAssignFn is the CCAssignFn to be used for the callee.
-  /// \p CallerAssignFn is the CCAssignFn to be used for the caller.
+  /// \p CalleeAssignFnFixed is the CCAssignFn to be used for the callee for
+  /// fixed arguments.
+  /// \p CalleeAssignFnVarArg is similar, but for varargs.
+  /// \p CallerAssignFnFixed is the CCAssignFn to be used for the caller for
+  /// fixed arguments.
+  /// \p CallerAssignFnVarArg is similar, but for varargs.
   bool resultsCompatible(CallLoweringInfo &Info, MachineFunction &MF,
                          SmallVectorImpl<ArgInfo> &InArgs,
-                         CCAssignFn &CalleeAssignFn,
-                         CCAssignFn &CallerAssignFn) const;
+                         CCAssignFn &CalleeAssignFnFixed,
+                         CCAssignFn &CalleeAssignFnVarArg,
+                         CCAssignFn &CallerAssignFnFixed,
+                         CCAssignFn &CallerAssignFnVarArg) const;
 
 public:
   CallLowering(const TargetLowering *TLI) : TLI(TLI) {}
@@ -266,6 +306,8 @@ public:
                            ArrayRef<Register> VRegs) const {
     return false;
   }
+
+  virtual bool fallBackToDAGISel(const Function &F) const { return false; }
 
   /// This hook must be implemented to lower the incoming (formal)
   /// arguments, described by \p VRegs, for GlobalISel. Each argument
@@ -317,7 +359,7 @@ public:
   /// range of an immediate jump.
   ///
   /// \return true if the lowering succeeded, false otherwise.
-  bool lowerCall(MachineIRBuilder &MIRBuilder, ImmutableCallSite CS,
+  bool lowerCall(MachineIRBuilder &MIRBuilder, const CallBase &Call,
                  ArrayRef<Register> ResRegs,
                  ArrayRef<ArrayRef<Register>> ArgRegs, Register SwiftErrorVReg,
                  std::function<unsigned()> GetCalleeReg) const;

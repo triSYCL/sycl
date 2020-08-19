@@ -21,6 +21,7 @@ set(SANITIZER_UNITTESTS
   sanitizer_libc_test.cpp
   sanitizer_linux_test.cpp
   sanitizer_list_test.cpp
+  sanitizer_mac_test.cpp
   sanitizer_mutex_test.cpp
   sanitizer_nolibc_test.cpp
   sanitizer_posix_test.cpp
@@ -171,7 +172,7 @@ macro(add_sanitizer_tests_for_arch arch)
                                  -Wl,-no-whole-archive
                          DEPS sanitizer_nolibc_test_main.${arch}.o
                               RTSanitizerCommon.test.nolibc.${arch}
-                         LINK_FLAGS -nostdlib ${TARGET_FLAGS})
+                         LINK_FLAGS -static -nostdlib ${TARGET_FLAGS})
   endif()
 endmacro()
 
