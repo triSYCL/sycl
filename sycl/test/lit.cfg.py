@@ -227,7 +227,7 @@ for aot_tool in aot_tools:
         lit_config.warning("Couldn't find pre-installed AOT device compiler " + aot_tool)
 
 if xocc != "off":
-    required_env = ['HOME', 'USER', 'XILINX_VIVADO', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'XILINX_VITIS', 'XCL_EMULATION_MODE', 'EMCONFIG_PATH']
+    required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'XCL_EMULATION_MODE', 'EMCONFIG_PATH']
     has_error=False
     config.available_features.add("xocc")
     for env in required_env:
