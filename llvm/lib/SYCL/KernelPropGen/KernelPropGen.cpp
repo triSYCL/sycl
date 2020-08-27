@@ -24,8 +24,12 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
+
+static cl::opt<std::string> KernelPropGenOutput("sycl-kernel-propgen-output",
+                                                cl::ReallyHidden);
 
 // Put the code in an anonymous namespace to avoid polluting the global
 // namespace
@@ -65,29 +69,7 @@ struct KernelPropGen : public ModulePass {
     return FileFD;
   }
 
-  /// Visit all the functions of the module
-  bool runOnModule(Module &M) override {
-    std::string Path = std::getenv("SCYL_XOCC_TMP_PATH");
-    SmallString<256> TDir(Path.begin(), Path.end());
-    // Make sure to rip off the directories for the filename
-    std::string TmpStr =
-        ("_KernelProperties_" + llvm::sys::path::filename(M.getSourceFileName()))
-            .str();
-    llvm::Twine file = TmpStr;
-    TDir.append(file.str());
-    llvm::sys::path::replace_extension(TDir, "bash",
-      llvm::sys::path::Style::native);
-    llvm::raw_fd_ostream O(GetWriteStreamID(TDir.str()),
-                            true /*close in destructor*/);
-
-    if (O.has_error())
-      return false;
-
-   // Script header/comment
-    O << "# This is a generated bash script to inject environment information\n"
-         "# containing kernel properties that we need so we can compile.\n"
-         "# This script is called from sycl-xocc.\n";
-
+  void GenerateXOCCPropertyScript(Module &M, llvm::raw_fd_ostream &O) {
     llvm::SmallString<512> kernelNames;
     llvm::SmallString<512> DDRArgs;
     for (auto &F : M.functions()) {
@@ -145,6 +127,22 @@ struct KernelPropGen : public ModulePass {
               "# xocc linker phase\n";
        O << "DDR_BANK_ARGS=\"" << DDRArgs.str() << "\"\n";
     }
+  }
+
+  /// Visit all the functions of the module
+  bool runOnModule(Module &M) override {
+    llvm::raw_fd_ostream O(GetWriteStreamID(KernelPropGenOutput),
+                           true /*close in destructor*/);
+
+    if (O.has_error())
+      return false;
+
+    // Script header/comment
+    O << "# This is a generated bash script to inject environment information\n"
+         "# containing kernel properties that we need so we can compile.\n"
+         "# This script is called from sycl-xocc.\n";
+
+    GenerateXOCCPropertyScript(M, O);
 
     // The module probably changed
     return true;
