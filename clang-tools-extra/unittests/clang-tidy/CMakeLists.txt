@@ -1,5 +1,6 @@
 set(LLVM_LINK_COMPONENTS
-  support
+  FrontendOpenMP
+  Support
   )
 
 get_filename_component(CLANG_LINT_SOURCE_DIR
@@ -7,6 +8,7 @@ get_filename_component(CLANG_LINT_SOURCE_DIR
 include_directories(${CLANG_LINT_SOURCE_DIR})
 
 add_extra_unittest(ClangTidyTests
+  AddConstTest.cpp
   ClangTidyDiagnosticConsumerTest.cpp
   ClangTidyOptionsTest.cpp
   IncludeInserterTest.cpp
@@ -21,7 +23,7 @@ add_extra_unittest(ClangTidyTests
   TransformerClangTidyCheckTest.cpp
   )
 
-target_link_libraries(ClangTidyTests
+clang_target_link_libraries(ClangTidyTests
   PRIVATE
   clangAST
   clangASTMatchers
@@ -29,6 +31,12 @@ target_link_libraries(ClangTidyTests
   clangFrontend
   clangLex
   clangSerialization
+  clangTooling
+  clangToolingCore
+  clangTransformer
+  )
+target_link_libraries(ClangTidyTests
+  PRIVATE
   clangTidy
   clangTidyAndroidModule
   clangTidyGoogleModule
@@ -36,7 +44,4 @@ target_link_libraries(ClangTidyTests
   clangTidyObjCModule
   clangTidyReadabilityModule
   clangTidyUtils
-  clangTooling
-  clangToolingCore
-  clangToolingRefactoring
   )

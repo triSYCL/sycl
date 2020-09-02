@@ -25,7 +25,6 @@ class LitConfig(object):
                  noExecute, debug, isWindows,
                  params, config_prefix = None,
                  maxIndividualTestTime = 0,
-                 maxFailures = None,
                  parallelism_groups = {},
                  echo_all_commands = False):
         # The name of the test runner.
@@ -65,7 +64,6 @@ class LitConfig(object):
             self.valgrindArgs.extend(self.valgrindUserArgs)
 
         self.maxIndividualTestTime = maxIndividualTestTime
-        self.maxFailures = maxFailures
         self.parallelism_groups = parallelism_groups
         self.echo_all_commands = echo_all_commands
 
@@ -174,10 +172,12 @@ class LitConfig(object):
                                                kind, message))
 
     def note(self, message):
-        self._write_message('note', message)
+        if not self.quiet:
+            self._write_message('note', message)
 
     def warning(self, message):
-        self._write_message('warning', message)
+        if not self.quiet:
+            self._write_message('warning', message)
         self.numWarnings += 1
 
     def error(self, message):

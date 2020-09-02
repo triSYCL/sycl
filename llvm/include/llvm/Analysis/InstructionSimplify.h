@@ -31,28 +31,27 @@
 #ifndef LLVM_ANALYSIS_INSTRUCTIONSIMPLIFY_H
 #define LLVM_ANALYSIS_INSTRUCTIONSIMPLIFY_H
 
-#include "llvm/ADT/SetVector.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Operator.h"
-#include "llvm/IR/User.h"
 
 namespace llvm {
-class Function;
+
 template <typename T, typename... TArgs> class AnalysisManager;
 template <class T> class ArrayRef;
 class AssumptionCache;
+class BinaryOperator;
 class CallBase;
-class DominatorTree;
 class DataLayout;
-class FastMathFlags;
+class DominatorTree;
+class Function;
 struct LoopStandardAnalysisResults;
+class MDNode;
 class OptimizationRemarkEmitter;
 class Pass;
+template <class T, unsigned n> class SmallSetVector;
 class TargetLibraryInfo;
 class Type;
 class Value;
-class MDNode;
-class BinaryOperator;
 
 /// InstrInfoQuery provides an interface to query additional information for
 /// instructions like metadata or keywords like nsw, which provides conservative
@@ -142,6 +141,13 @@ Value *SimplifyFSubInst(Value *LHS, Value *RHS, FastMathFlags FMF,
 Value *SimplifyFMulInst(Value *LHS, Value *RHS, FastMathFlags FMF,
                         const SimplifyQuery &Q);
 
+/// Given operands for the multiplication of a FMA, fold the result or return
+/// null. In contrast to SimplifyFMulInst, this function will not perform
+/// simplifications whose unrounded results differ when rounded to the argument
+/// type.
+Value *SimplifyFMAFMul(Value *LHS, Value *RHS, FastMathFlags FMF,
+                       const SimplifyQuery &Q);
+
 /// Given operands for a Mul, fold the result or return null.
 Value *SimplifyMulInst(Value *LHS, Value *RHS, const SimplifyQuery &Q);
 
@@ -223,7 +229,8 @@ Value *SimplifyCastInst(unsigned CastOpc, Value *Op, Type *Ty,
                         const SimplifyQuery &Q);
 
 /// Given operands for a ShuffleVectorInst, fold the result or return null.
-Value *SimplifyShuffleVectorInst(Value *Op0, Value *Op1, Constant *Mask,
+/// See class ShuffleVectorInst for a description of the mask representation.
+Value *SimplifyShuffleVectorInst(Value *Op0, Value *Op1, ArrayRef<int> Mask,
                                  Type *RetTy, const SimplifyQuery &Q);
 
 //=== Helper functions for higher up the class hierarchy.
@@ -251,6 +258,10 @@ Value *SimplifyBinOp(unsigned Opcode, Value *LHS, Value *RHS,
 
 /// Given a callsite, fold the result or return null.
 Value *SimplifyCall(CallBase *Call, const SimplifyQuery &Q);
+
+/// Given an operand for a Freeze, see if we can fold the result.
+/// If not, this returns null.
+Value *SimplifyFreezeInst(Value *Op, const SimplifyQuery &Q);
 
 /// See if we can compute a simplified version of this instruction. If not,
 /// return null.

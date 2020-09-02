@@ -25,8 +25,10 @@ class SanitizerArgs {
   SanitizerSet RecoverableSanitizers;
   SanitizerSet TrapSanitizers;
 
-  std::vector<std::string> BlacklistFiles;
-  std::vector<std::string> ExtraDeps;
+  std::vector<std::string> UserBlacklistFiles;
+  std::vector<std::string> SystemBlacklistFiles;
+  std::vector<std::string> CoverageAllowlistFiles;
+  std::vector<std::string> CoverageBlocklistFiles;
   int CoverageFeatures = 0;
   int MsanTrackOrigins = 0;
   bool MsanUseAfterDtor = true;
@@ -72,6 +74,7 @@ class SanitizerArgs {
            !Sanitizers.has(SanitizerKind::Address) &&
            !Sanitizers.has(SanitizerKind::HWAddress);
   }
+  bool needsFuzzerInterceptors() const;
   bool needsUbsanRt() const;
   bool requiresMinimalRuntime() const { return MinimalRuntime; }
   bool needsDfsanRt() const { return Sanitizers.has(SanitizerKind::DataFlow); }

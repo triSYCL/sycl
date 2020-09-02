@@ -89,6 +89,15 @@ size_t MachOWriter::totalSize() const {
                      sizeof(uint32_t) * O.IndirectSymTable.Symbols.size());
   }
 
+  if (O.CodeSignatureCommandIndex) {
+    const MachO::linkedit_data_command &LinkEditDataCommand =
+        O.LoadCommands[*O.CodeSignatureCommandIndex]
+            .MachOLoadCommand.linkedit_data_command_data;
+    if (LinkEditDataCommand.dataoff)
+      Ends.push_back(LinkEditDataCommand.dataoff +
+                     LinkEditDataCommand.datasize);
+  }
+
   if (O.DataInCodeCommandIndex) {
     const MachO::linkedit_data_command &LinkEditDataCommand =
         O.LoadCommands[*O.DataInCodeCommandIndex]
@@ -110,12 +119,12 @@ size_t MachOWriter::totalSize() const {
   }
 
   // Otherwise, use the last section / reloction.
-  for (const auto &LC : O.LoadCommands)
-    for (const auto &S : LC.Sections) {
-      Ends.push_back(S.Offset + S.Size);
-      if (S.RelOff)
-        Ends.push_back(S.RelOff +
-                       S.NReloc * sizeof(MachO::any_relocation_info));
+  for (const LoadCommand &LC : O.LoadCommands)
+    for (const std::unique_ptr<Section> &S : LC.Sections) {
+      Ends.push_back(S->Offset + S->Size);
+      if (S->RelOff)
+        Ends.push_back(S->RelOff +
+                       S->NReloc * sizeof(MachO::any_relocation_info));
     }
 
   if (!Ends.empty())
@@ -147,7 +156,7 @@ void MachOWriter::writeHeader() {
 
 void MachOWriter::writeLoadCommands() {
   uint8_t *Begin = B.getBufferStart() + headerSize();
-  for (const auto &LC : O.LoadCommands) {
+  for (const LoadCommand &LC : O.LoadCommands) {
     // Construct a load command.
     MachO::macho_load_command MLC = LC.MachOLoadCommand;
     switch (MLC.load_command_data.cmd) {
@@ -157,8 +166,8 @@ void MachOWriter::writeLoadCommands() {
       memcpy(Begin, &MLC.segment_command_data, sizeof(MachO::segment_command));
       Begin += sizeof(MachO::segment_command);
 
-      for (const auto &Sec : LC.Sections)
-        writeSectionInLoadCommand<MachO::section>(Sec, Begin);
+      for (const std::unique_ptr<Section> &Sec : LC.Sections)
+        writeSectionInLoadCommand<MachO::section>(*Sec, Begin);
       continue;
     case MachO::LC_SEGMENT_64:
       if (IsLittleEndian != sys::IsLittleEndianHost)
@@ -167,8 +176,8 @@ void MachOWriter::writeLoadCommands() {
              sizeof(MachO::segment_command_64));
       Begin += sizeof(MachO::segment_command_64);
 
-      for (const auto &Sec : LC.Sections)
-        writeSectionInLoadCommand<MachO::section_64>(Sec, Begin);
+      for (const std::unique_ptr<Section> &Sec : LC.Sections)
+        writeSectionInLoadCommand<MachO::section_64>(*Sec, Begin);
       continue;
     }
 
@@ -180,7 +189,8 @@ void MachOWriter::writeLoadCommands() {
       MachO::swapStruct(MLC.LCStruct##_data);                                  \
     memcpy(Begin, &MLC.LCStruct##_data, sizeof(MachO::LCStruct));              \
     Begin += sizeof(MachO::LCStruct);                                          \
-    memcpy(Begin, LC.Payload.data(), LC.Payload.size());                       \
+    if (!LC.Payload.empty())                                                   \
+      memcpy(Begin, LC.Payload.data(), LC.Payload.size());                     \
     Begin += LC.Payload.size();                                                \
     break;
 
@@ -193,7 +203,8 @@ void MachOWriter::writeLoadCommands() {
         MachO::swapStruct(MLC.load_command_data);
       memcpy(Begin, &MLC.load_command_data, sizeof(MachO::load_command));
       Begin += sizeof(MachO::load_command);
-      memcpy(Begin, LC.Payload.data(), LC.Payload.size());
+      if (!LC.Payload.empty())
+        memcpy(Begin, LC.Payload.data(), LC.Payload.size());
       Begin += LC.Payload.size();
       break;
 #include "llvm/BinaryFormat/MachO.def"
@@ -227,27 +238,27 @@ void MachOWriter::writeSectionInLoadCommand(const Section &Sec, uint8_t *&Out) {
 }
 
 void MachOWriter::writeSections() {
-  for (const auto &LC : O.LoadCommands)
-    for (const auto &Sec : LC.Sections) {
-      if (Sec.isVirtualSection())
+  for (const LoadCommand &LC : O.LoadCommands)
+    for (const std::unique_ptr<Section> &Sec : LC.Sections) {
+      if (Sec->isVirtualSection())
         continue;
 
-      assert(Sec.Offset && "Section offset can not be zero");
-      assert((Sec.Size == Sec.Content.size()) && "Incorrect section size");
-      memcpy(B.getBufferStart() + Sec.Offset, Sec.Content.data(),
-             Sec.Content.size());
-      for (size_t Index = 0; Index < Sec.Relocations.size(); ++Index) {
-        auto RelocInfo = Sec.Relocations[Index];
+      assert(Sec->Offset && "Section offset can not be zero");
+      assert((Sec->Size == Sec->Content.size()) && "Incorrect section size");
+      memcpy(B.getBufferStart() + Sec->Offset, Sec->Content.data(),
+             Sec->Content.size());
+      for (size_t Index = 0; Index < Sec->Relocations.size(); ++Index) {
+        RelocationInfo RelocInfo = Sec->Relocations[Index];
         if (!RelocInfo.Scattered) {
-          auto *Info =
-              reinterpret_cast<MachO::relocation_info *>(&RelocInfo.Info);
-          Info->r_symbolnum = RelocInfo.Symbol->Index;
+          const uint32_t SymbolNum = RelocInfo.Extern
+                                         ? (*RelocInfo.Symbol)->Index
+                                         : (*RelocInfo.Sec)->Index;
+          RelocInfo.setPlainRelocationSymbolNum(SymbolNum, IsLittleEndian);
         }
-
         if (IsLittleEndian != sys::IsLittleEndianHost)
           MachO::swapStruct(
               reinterpret_cast<MachO::any_relocation_info &>(RelocInfo.Info));
-        memcpy(B.getBufferStart() + Sec.RelOff +
+        memcpy(B.getBufferStart() + Sec->RelOff +
                    Index * sizeof(MachO::any_relocation_info),
                &RelocInfo.Info, sizeof(RelocInfo.Info));
       }
@@ -369,35 +380,37 @@ void MachOWriter::writeIndirectSymbolTable() {
       O.LoadCommands[*O.DySymTabCommandIndex]
           .MachOLoadCommand.dysymtab_command_data;
 
-  char *Out = (char *)B.getBufferStart() + DySymTabCommand.indirectsymoff;
-  assert((DySymTabCommand.nindirectsyms == O.IndirectSymTable.Symbols.size()) &&
-         "Incorrect indirect symbol table size");
-  memcpy(Out, O.IndirectSymTable.Symbols.data(),
-         sizeof(uint32_t) * O.IndirectSymTable.Symbols.size());
+  uint32_t *Out =
+      (uint32_t *)(B.getBufferStart() + DySymTabCommand.indirectsymoff);
+  for (const IndirectSymbolEntry &Sym : O.IndirectSymTable.Symbols) {
+    uint32_t Entry = (Sym.Symbol) ? (*Sym.Symbol)->Index : Sym.OriginalIndex;
+    if (IsLittleEndian != sys::IsLittleEndianHost)
+      sys::swapByteOrder(Entry);
+    *Out++ = Entry;
+  }
+}
+
+void MachOWriter::writeLinkData(Optional<size_t> LCIndex, const LinkData &LD) {
+  if (!LCIndex)
+    return;
+  const MachO::linkedit_data_command &LinkEditDataCommand =
+      O.LoadCommands[*LCIndex].MachOLoadCommand.linkedit_data_command_data;
+  char *Out = (char *)B.getBufferStart() + LinkEditDataCommand.dataoff;
+  assert((LinkEditDataCommand.datasize == LD.Data.size()) &&
+         "Incorrect data size");
+  memcpy(Out, LD.Data.data(), LD.Data.size());
+}
+
+void MachOWriter::writeCodeSignatureData() {
+  return writeLinkData(O.CodeSignatureCommandIndex, O.CodeSignature);
 }
 
 void MachOWriter::writeDataInCodeData() {
-  if (!O.DataInCodeCommandIndex)
-    return;
-  const MachO::linkedit_data_command &LinkEditDataCommand =
-      O.LoadCommands[*O.DataInCodeCommandIndex]
-          .MachOLoadCommand.linkedit_data_command_data;
-  char *Out = (char *)B.getBufferStart() + LinkEditDataCommand.dataoff;
-  assert((LinkEditDataCommand.datasize == O.DataInCode.Data.size()) &&
-         "Incorrect data in code data size");
-  memcpy(Out, O.DataInCode.Data.data(), O.DataInCode.Data.size());
+  return writeLinkData(O.DataInCodeCommandIndex, O.DataInCode);
 }
 
 void MachOWriter::writeFunctionStartsData() {
-  if (!O.FunctionStartsCommandIndex)
-    return;
-  const MachO::linkedit_data_command &LinkEditDataCommand =
-      O.LoadCommands[*O.FunctionStartsCommandIndex]
-          .MachOLoadCommand.linkedit_data_command_data;
-  char *Out = (char *)B.getBufferStart() + LinkEditDataCommand.dataoff;
-  assert((LinkEditDataCommand.datasize == O.FunctionStarts.Data.size()) &&
-         "Incorrect function starts data size");
-  memcpy(Out, O.FunctionStarts.Data.data(), O.FunctionStarts.Data.size());
+  return writeLinkData(O.FunctionStartsCommandIndex, O.FunctionStarts);
 }
 
 void MachOWriter::writeTail() {
@@ -443,6 +456,16 @@ void MachOWriter::writeTail() {
     if (DySymTabCommand.indirectsymoff)
       Queue.emplace_back(DySymTabCommand.indirectsymoff,
                          &MachOWriter::writeIndirectSymbolTable);
+  }
+
+  if (O.CodeSignatureCommandIndex) {
+    const MachO::linkedit_data_command &LinkEditDataCommand =
+        O.LoadCommands[*O.CodeSignatureCommandIndex]
+            .MachOLoadCommand.linkedit_data_command_data;
+
+    if (LinkEditDataCommand.dataoff)
+      Queue.emplace_back(LinkEditDataCommand.dataoff,
+                         &MachOWriter::writeCodeSignatureData);
   }
 
   if (O.DataInCodeCommandIndex) {

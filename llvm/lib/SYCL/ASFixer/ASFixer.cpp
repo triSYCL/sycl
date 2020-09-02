@@ -14,6 +14,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/ConstantFolder.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
@@ -125,13 +126,14 @@ static Value *createTypeUserStub(Value *OldValUser, Value *NewVal) {
 
   if (auto *Alloca = dyn_cast<AllocaInst>(OldInst)) {
     return new AllocaInst(NewTy, Alloca->getType()->getAddressSpace(),
-                          Alloca->getArraySize(), "new." + Alloca->getName());
+                          Alloca->getArraySize(), "new." + Alloca->getName(),
+                          (Instruction *)nullptr);
   }
 
   if (auto *Store = dyn_cast<StoreInst>(OldInst)) {
     Value *DestPtr = UndefValue::get(PointerType::getUnqual(NewTy));
     auto SI = new StoreInst(UndefType, DestPtr, Store->isVolatile(),
-                            Store->getAlignment(), Store->getOrdering(),
+                            Store->getAlign(), Store->getOrdering(),
                             Store->getSyncScopeID());
     return SI;
   }
@@ -145,7 +147,8 @@ static Value *createTypeUserStub(Value *OldValUser, Value *NewVal) {
 
   if (auto *Load = dyn_cast<LoadInst>(OldInst)) {
     return new LoadInst(NewTy->getPointerElementType(), UndefType,
-                        Load->getName(), Load->isVolatile());
+                        Load->getName(), Load->isVolatile(),
+                        (Instruction *)nullptr);
   }
   if (auto *Select = dyn_cast<SelectInst>(OldInst)) {
     return SelectInst::Create(Select->getCondition(), UndefType, UndefType,
@@ -301,7 +304,7 @@ static void collectTypeReplacementData(Type *OldTy, Type *NewTy,
           if (!NewValUser) {
             NewValUser =
                 new StoreInst(UndefType, UndefValue::get(NewVal->getType()),
-                              Store->isVolatile(), Store->getAlignment(),
+                              Store->isVolatile(), Store->getAlign(),
                               Store->getOrdering(), Store->getSyncScopeID());
             WorkList.push(std::make_pair(OldValUser, NewValUser));
           }
@@ -461,7 +464,7 @@ static AllocaInst *createAllocaReplacement(AllocaInst *OldAlloca, Type *NewTy) {
   auto NewAlloca = new AllocaInst(
       NewTy, OldAlloca->getType()->getAddressSpace(), OldAlloca->getArraySize(),
       "new." + OldAlloca->getName(), OldAlloca);
-  NewAlloca->setAlignment(OldAlloca->getAlignment());
+  NewAlloca->setAlignment(OldAlloca->getAlign());
   return NewAlloca;
 }
 
@@ -588,7 +591,7 @@ struct ASFixer : public ModulePass {
     return Changed;
   }
 
-  virtual llvm::StringRef getPassName() const { return "ASFixer"; }
+  virtual llvm::StringRef getPassName() const override { return "ASFixer"; }
 };
 } // namespace
 

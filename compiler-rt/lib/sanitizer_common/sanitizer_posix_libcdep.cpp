@@ -44,6 +44,12 @@
 #define MAP_NORESERVE 0
 #endif
 
+#if SANITIZER_SOLARIS
+// Illumos' declaration of madvie cannot be made visible if _XOPEN_SOURCE
+// is defined as g++ does on Solaris.
+extern "C" int madvise(void *, size_t, int);
+#endif
+
 typedef void (*sa_sigaction_t)(int, siginfo_t *, void *);
 
 namespace __sanitizer {
@@ -328,7 +334,6 @@ bool MmapFixedNoReserve(uptr fixed_addr, uptr size, const char *name) {
 
 bool MmapFixedSuperNoReserve(uptr fixed_addr, uptr size, const char *name) {
 #if SANITIZER_FREEBSD
-  int flags = 0;
   if (common_flags()->no_huge_pages_for_shadow)
     return MmapFixedNoReserve(fixed_addr, size, name);
   // MAP_NORESERVE is implicit with FreeBSD
@@ -427,7 +432,8 @@ void AdjustStackSize(void *attr_) {
 #endif // !SANITIZER_GO
 
 pid_t StartSubprocess(const char *program, const char *const argv[],
-                      fd_t stdin_fd, fd_t stdout_fd, fd_t stderr_fd) {
+                      const char *const envp[], fd_t stdin_fd, fd_t stdout_fd,
+                      fd_t stderr_fd) {
   auto file_closer = at_scope_exit([&] {
     if (stdin_fd != kInvalidFd) {
       internal_close(stdin_fd);
@@ -470,7 +476,8 @@ pid_t StartSubprocess(const char *program, const char *const argv[],
 
     for (int fd = sysconf(_SC_OPEN_MAX); fd > 2; fd--) internal_close(fd);
 
-    execv(program, const_cast<char **>(&argv[0]));
+    internal_execve(program, const_cast<char **>(&argv[0]),
+                    const_cast<char *const *>(envp));
     internal__exit(1);
   }
 

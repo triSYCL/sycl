@@ -11,10 +11,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Remarks/RemarkStringTable.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Remarks/Remark.h"
 #include "llvm/Remarks/RemarkParser.h"
-#include "llvm/Support/EndianStream.h"
-#include "llvm/Support/Error.h"
+#include "llvm/Support/raw_ostream.h"
 #include <vector>
 
 using namespace llvm;
@@ -46,7 +46,6 @@ void StringTable::internalize(Remark &R) {
   if (R.Loc)
     Impl(R.Loc->SourceFilePath);
   for (Argument &Arg : R.Args) {
-    // We need to mutate elements from an ArrayRef here.
     Impl(Arg.Key);
     Impl(Arg.Val);
     if (Arg.Loc)

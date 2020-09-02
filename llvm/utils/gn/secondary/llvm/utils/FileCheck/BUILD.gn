@@ -1,8 +1,4 @@
 executable("FileCheck") {
-  deps = [
-    "//llvm/lib/Support",
-  ]
-  sources = [
-    "FileCheck.cpp",
-  ]
+  deps = [ "//llvm/lib/Support" ]
+  sources = [ "FileCheck.cpp" ]
 }

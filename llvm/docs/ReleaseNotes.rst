@@ -1,12 +1,12 @@
 =========================
-LLVM 10.0.0 Release Notes
+LLVM 12.0.0 Release Notes
 =========================
 
 .. contents::
     :local:
 
 .. warning::
-   These are in-progress notes for the upcoming LLVM 10 release.
+   These are in-progress notes for the upcoming LLVM 12 release.
    Release notes for previous releases can be found on
    `the Download Page <https://releases.llvm.org/download.html>`_.
 
@@ -15,7 +15,7 @@ Introduction
 ============
 
 This document contains the release notes for the LLVM Compiler Infrastructure,
-release 10.0.0.  Here we describe the status of LLVM, including major improvements
+release 12.0.0.  Here we describe the status of LLVM, including major improvements
 from the previous release, improvements in various subprojects of LLVM, and
 some of the current users of the code.  All LLVM releases may be downloaded
 from the `LLVM releases web site <https://llvm.org/releases/>`_.
@@ -26,7 +26,7 @@ have questions or comments, the `LLVM Developer's Mailing List
 <https://lists.llvm.org/mailman/listinfo/llvm-dev>`_ is a good place to send
 them.
 
-Note that if you are reading this file from a Subversion checkout or the main
+Note that if you are reading this file from a Git checkout or the main
 LLVM web page, this document applies to the *next* release, not the current
 one.  To see the release notes for a specific release, please see the `releases
 page <https://llvm.org/releases/>`_.
@@ -40,8 +40,8 @@ Non-comprehensive list of changes in this release
    functionality, or simply have a lot to talk about), see the `NOTE` below
    for adding a new subsection.
 
-* The ISD::FP_ROUND_INREG opcode and related code was removed from SelectionDAG.
-* Enabled MemorySSA as a loop dependency.
+* ...
+
 
 .. NOTE
    If you would like to document a larger change, then you can add a
@@ -53,15 +53,14 @@ Non-comprehensive list of changes in this release
 
    Makes programs 10x faster by doing Special New Thing.
 
+
 Changes to the LLVM IR
 ----------------------
 
-* Unnamed function arguments now get printed with their automatically
-  generated name (e.g. "i32 %0") in definitions. This may require front-ends
-  to update their tests; if so there is a script utils/add_argument_names.py
-  that correctly converted 80-90% of Clang tests. Some manual work will almost
-  certainly still be needed.
+* ...
 
+* Added the ``byref`` attribute to better represent argument passing
+  for the `amdgpu_kernel` calling convention.
 
 Changes to building LLVM
 ------------------------
@@ -69,55 +68,45 @@ Changes to building LLVM
 Changes to the ARM Backend
 --------------------------
 
- During this release ...
-
+During this release ...
 
 Changes to the MIPS Target
 --------------------------
 
- During this release ...
+During this release ...
 
 
 Changes to the PowerPC Target
 -----------------------------
 
- During this release ...
+During this release ...
 
 Changes to the X86 Target
 -------------------------
 
- During this release ...
+During this release ...
 
-* Less than 128 bit vector types, v2i32, v4i16, v2i16, v8i8, v4i8, and v2i8, are
-  now stored in the lower bits of an xmm register and the upper bits are
-  undefined. Previously the elements were spread apart with undefined bits in
-  between them.
-* v32i8 and v64i8 vectors with AVX512F enabled, but AVX512BW disabled will now
-  be passed in ZMM registers for calls and returns. Previously they were passed
-  in two YMM registers. Old behavior can be enabled by passing
-  -x86-enable-old-knl-abi
-* -mprefer-vector-width=256 is now the default behavior skylake-avx512 and later
-  Intel CPUs. This tries to limit the use of 512-bit registers which can cause a
-  decrease in CPU frequency on these CPUs. This can be re-enabled by passing
-  -mprefer-vector-width=512 to clang or passing -mattr=-prefer-256-bit to llc.
+* The 'mpx' feature was removed from the backend. It had been removed from clang
+  frontend in 10.0. Mention of the 'mpx' feature in an IR file will print a
+  message to stderr, but IR should still compile.
 
 Changes to the AMDGPU Target
 -----------------------------
 
+During this release ...
+
+* The new ``byref`` attribute is now the preferred method for
+  representing aggregate kernel arguments.
+
 Changes to the AVR Target
 -----------------------------
 
- During this release ...
-
-* Deprecated the mpx feature flag for the Intel MPX instructions. There were no
-  intrinsics for this feature. This change only this effects the results
-  returned by getHostCPUFeatures on CPUs that implement the MPX instructions.
+During this release ...
 
 Changes to the WebAssembly Target
 ---------------------------------
 
- During this release ...
-
+During this release ...
 
 Changes to the OCaml bindings
 -----------------------------
@@ -128,13 +117,30 @@ Changes to the C API
 --------------------
 
 
+Changes to the Go bindings
+--------------------------
+
+
 Changes to the DAG infrastructure
 ---------------------------------
 
-Changes to LLDB
-===============
 
-External Open Source Projects Using LLVM 10
+Changes to the Debug Info
+---------------------------------
+
+During this release ...
+
+Changes to the LLVM tools
+---------------------------------
+
+* llvm-readobj and llvm-readelf behavior has changed to report an error when
+  executed with no input files instead of reading an input from stdin.
+  Reading from stdin can still be achieved by specifying `-` as an input file.
+
+Changes to LLDB
+---------------------------------
+
+External Open Source Projects Using LLVM 12
 ===========================================
 
 * A project...
@@ -146,7 +152,7 @@ Additional Information
 A wide variety of additional information is available on the `LLVM web page
 <https://llvm.org/>`_, in particular in the `documentation
 <https://llvm.org/docs/>`_ section.  The web page also contains versions of the
-API documentation which is up-to-date with the Subversion version of the source
+API documentation which is up-to-date with the Git version of the source
 code.  You can access versions of these documents specific to this release by
 going into the ``llvm/docs/`` directory in the LLVM tree.
 

@@ -15,16 +15,16 @@
 namespace clang {
 namespace driver {
 
+class Command;
+
 namespace tools {
 namespace SYCL {
 
-// Gather command line arguments for backend compilation call
-void TranslateSYCLTargetArgs(Compilation &C,
-              const llvm::opt::ArgList &Args, const ToolChain &TC, llvm::opt::ArgStringList &CmdArgs);
-
-// Gather command line arguments for device specific link
-void TranslateSYCLLinkerArgs(Compilation &C,
-              const llvm::opt::ArgList &Args, const ToolChain &TC, llvm::opt::ArgStringList &CmdArgs);
+void constructLLVMForeachCommand(Compilation &C, const JobAction &JA,
+                                 std::unique_ptr<Command> InputCommand,
+                                 const InputInfoList &InputFiles,
+                                 const InputInfo &Output, const Tool *T,
+                                 StringRef Ext);
 
 // Runs llvm-spirv to convert spirv to bc, llvm-link, which links multiple LLVM
 // bitcode. Converts generated bc back to spirv using llvm-spirv, wraps with
@@ -51,7 +51,7 @@ private:
                              const InputInfo &Output,
                              const llvm::opt::ArgList &Args,
                              llvm::StringRef SubArchName,
-                             llvm::StringRef OutputFilePrefix, bool isBc,
+                             llvm::StringRef OutputFilePrefix,
                              const InputInfoList &InputFiles) const;
   void constructLlcCommand(Compilation &C, const JobAction &JA,
                            const InputInfo &Output,
@@ -130,6 +130,10 @@ public:
   void addClangTargetOptions(const llvm::opt::ArgList &DriverArgs,
                          llvm::opt::ArgStringList &CC1Args,
                          Action::OffloadKind DeviceOffloadKind) const override;
+  void TranslateBackendTargetArgs(const llvm::opt::ArgList &Args,
+      llvm::opt::ArgStringList &CmdArgs) const;
+  void TranslateLinkerTargetArgs(const llvm::opt::ArgList &Args,
+      llvm::opt::ArgStringList &CmdArgs) const;
 
   bool useIntegratedAs() const override { return true; }
   bool isPICDefault() const override { return false; }
@@ -138,6 +142,9 @@ public:
 
   void addClangWarningOptions(llvm::opt::ArgStringList &CC1Args) const override;
   CXXStdlibType GetCXXStdlibType(const llvm::opt::ArgList &Args) const override;
+  static void AddSYCLIncludeArgs(const clang::driver::Driver &Driver,
+                                 const llvm::opt::ArgList &DriverArgs,
+                                 llvm::opt::ArgStringList &CC1Args);
   void AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
                             llvm::opt::ArgStringList &CC1Args) const override;
   void AddClangCXXStdlibIncludeArgs(
@@ -150,6 +157,11 @@ public:
 protected:
   Tool *buildBackendCompiler() const override;
   Tool *buildLinker() const override;
+
+private:
+  void TranslateTargetOpt(const llvm::opt::ArgList &Args,
+      llvm::opt::ArgStringList &CmdArgs, llvm::opt::OptSpecifier Opt,
+      llvm::opt::OptSpecifier Opt_EQ) const;
 };
 
 } // end namespace toolchains

@@ -16,18 +16,19 @@
 #define LLVM_TOOLS_LLVMREDUCE_LLVMREDUCE_DELTA_H
 
 #include "TestRunner.h"
-#include <vector>
-#include <utility>
+#include "llvm/ADT/ScopeExit.h"
 #include <functional>
+#include <utility>
+#include <vector>
 
 namespace llvm {
 
 struct Chunk {
-  unsigned begin;
-  unsigned end;
+  int begin;
+  int end;
 
   /// Helper function to verify if a given Target-index is inside the Chunk
-  bool contains(unsigned Index) const { return Index >= begin && Index <= end; }
+  bool contains(int Index) const { return Index >= begin && Index <= end; }
 
   void print() const {
     errs() << "[" << begin;
@@ -44,6 +45,39 @@ struct Chunk {
   /// Operator used for sets
   friend bool operator<(const Chunk &C1, const Chunk &C2) {
     return std::tie(C1.begin, C1.end) < std::tie(C2.begin, C2.end);
+  }
+};
+
+/// Provides opaque interface for querying into ChunksToKeep without having to
+/// actually understand what is going on.
+class Oracle {
+  /// Out of all the features that we promised to be,
+  /// how many have we already processed? 1-based!
+  int Index = 1;
+
+  /// The actual workhorse, contains the knowledge whether or not
+  /// some particular feature should be preserved this time.
+  ArrayRef<Chunk> ChunksToKeep;
+
+public:
+  explicit Oracle(ArrayRef<Chunk> ChunksToKeep_)
+      : ChunksToKeep(ChunksToKeep_) {}
+
+  /// Should be called for each feature on which we are operating.
+  /// Name is self-explanatory - if returns true, then it should be preserved.
+  bool shouldKeep() {
+    if (ChunksToKeep.empty())
+      return false; // All further features are to be discarded.
+
+    // Does the current (front) chunk contain such a feature?
+    bool ShouldKeep = ChunksToKeep.front().contains(Index);
+    auto _ = make_scope_exit([&]() { ++Index; }); // Next time - next feature.
+
+    // Is this the last feature in the chunk?
+    if (ChunksToKeep.front().end == Index)
+      ChunksToKeep = ChunksToKeep.drop_front(); // Onto next chunk.
+
+    return ShouldKeep;
   }
 };
 
@@ -68,7 +102,7 @@ struct Chunk {
 ///
 /// Other implementations of the Delta Debugging algorithm can also be found in
 /// the CReduce, Delta, and Lithium projects.
-void runDeltaPass(TestRunner &Test, unsigned Targets,
+void runDeltaPass(TestRunner &Test, int Targets,
                   std::function<void(const std::vector<Chunk> &, Module *)>
                       ExtractChunksFromModule);
 } // namespace llvm

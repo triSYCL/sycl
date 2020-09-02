@@ -162,6 +162,10 @@ const char *InstrProfSectNamePrefix[] = {
 
 namespace llvm {
 
+cl::opt<bool> DoInstrProfNameCompression(
+    "enable-name-compression",
+    cl::desc("Enable name/filename string compression"), cl::init(true));
+
 std::string getInstrProfSectionName(InstrProfSectKind IPSK,
                                     Triple::ObjectFormatType OF,
                                     bool AddSegmentInfo) {
@@ -286,7 +290,7 @@ StringRef getFuncNameWithoutPrefix(StringRef PGOFuncName, StringRef FileName) {
 // symbol is created to hold the name. Return the legalized symbol name.
 std::string getPGOFuncNameVarName(StringRef FuncName,
                                   GlobalValue::LinkageTypes Linkage) {
-  std::string VarName = getInstrProfNameVarPrefix();
+  std::string VarName = std::string(getInstrProfNameVarPrefix());
   VarName += FuncName;
 
   if (!GlobalValue::isLocalLinkage(Linkage))
@@ -427,7 +431,7 @@ Error collectPGOFuncNameStrings(ArrayRef<GlobalVariable *> NameVars,
                                 std::string &Result, bool doCompression) {
   std::vector<std::string> NameStrs;
   for (auto *NameVar : NameVars) {
-    NameStrs.push_back(getPGOFuncNameVarInitializer(NameVar));
+    NameStrs.push_back(std::string(getPGOFuncNameVarInitializer(NameVar)));
   }
   return collectPGOFuncNameStrings(
       NameStrs, zlib::isAvailable() && doCompression, Result);
@@ -478,7 +482,7 @@ Error readPGOFuncNameStrings(StringRef NameStrings, InstrProfSymtab &Symtab) {
   return Error::success();
 }
 
-void InstrProfRecord::accumuateCounts(CountSumOrPercent &Sum) const {
+void InstrProfRecord::accumulateCounts(CountSumOrPercent &Sum) const {
   uint64_t FuncSum = 0;
   Sum.NumEntries += Counts.size();
   for (size_t F = 0, E = Counts.size(); F < E; ++F)
@@ -552,7 +556,7 @@ void InstrProfRecord::overlap(InstrProfRecord &Other, OverlapStats &Overlap,
                               uint64_t ValueCutoff) {
   // FuncLevel CountSum for other should already computed and nonzero.
   assert(FuncLevelOverlap.Test.CountSum >= 1.0f);
-  accumuateCounts(FuncLevelOverlap.Base);
+  accumulateCounts(FuncLevelOverlap.Base);
   bool Mismatch = (Counts.size() != Other.Counts.size());
 
   // Check if the value profiles mismatch.
@@ -1078,12 +1082,10 @@ bool isIRPGOFlagSet(const Module *M) {
   if (!IRInstrVar->hasInitializer())
     return false;
 
-  const Constant *InitVal = IRInstrVar->getInitializer();
+  auto *InitVal = dyn_cast_or_null<ConstantInt>(IRInstrVar->getInitializer());
   if (!InitVal)
     return false;
-
-  return (dyn_cast<ConstantInt>(InitVal)->getZExtValue() &
-          VARIANT_MASK_IR_PROF) != 0;
+  return (InitVal->getZExtValue() & VARIANT_MASK_IR_PROF) != 0;
 }
 
 // Check if we can safely rename this Comdat function.
@@ -1132,12 +1134,15 @@ void getMemOPSizeRangeFromOption(StringRef MemOPSizeRange, int64_t &RangeStart,
 
 // Create a COMDAT variable INSTR_PROF_RAW_VERSION_VAR to make the runtime
 // aware this is an ir_level profile so it can set the version flag.
-void createIRLevelProfileFlagVar(Module &M, bool IsCS) {
+void createIRLevelProfileFlagVar(Module &M, bool IsCS,
+                                 bool InstrEntryBBEnabled) {
   const StringRef VarName(INSTR_PROF_QUOTE(INSTR_PROF_RAW_VERSION_VAR));
   Type *IntTy64 = Type::getInt64Ty(M.getContext());
   uint64_t ProfileVersion = (INSTR_PROF_RAW_VERSION | VARIANT_MASK_IR_PROF);
   if (IsCS)
     ProfileVersion |= VARIANT_MASK_CSIR_PROF;
+  if (InstrEntryBBEnabled)
+    ProfileVersion |= VARIANT_MASK_INSTR_ENTRY;
   auto IRLevelVersionVariable = new GlobalVariable(
       M, IntTy64, true, GlobalValue::WeakAnyLinkage,
       Constant::getIntegerValue(IntTy64, APInt(64, ProfileVersion)), VarName);
@@ -1166,9 +1171,9 @@ void createProfileFileNameVar(Module &M, StringRef InstrProfileOutput) {
   }
 }
 
-Error OverlapStats::accumuateCounts(const std::string &BaseFilename,
-                                    const std::string &TestFilename,
-                                    bool IsCS) {
+Error OverlapStats::accumulateCounts(const std::string &BaseFilename,
+                                     const std::string &TestFilename,
+                                     bool IsCS) {
   auto getProfileSum = [IsCS](const std::string &Filename,
                               CountSumOrPercent &Sum) -> Error {
     auto ReaderOrErr = InstrProfReader::create(Filename);
@@ -1176,7 +1181,7 @@ Error OverlapStats::accumuateCounts(const std::string &BaseFilename,
       return E;
     }
     auto Reader = std::move(ReaderOrErr.get());
-    Reader->accumuateCounts(Sum, IsCS);
+    Reader->accumulateCounts(Sum, IsCS);
     return Error::success();
   };
   auto Ret = getProfileSum(BaseFilename, Base);

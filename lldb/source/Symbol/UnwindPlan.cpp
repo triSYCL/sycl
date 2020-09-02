@@ -1,4 +1,4 @@
-//===-- UnwindPlan.cpp ----------------------------------*- C++ -*-===//
+//===-- UnwindPlan.cpp ----------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -15,6 +15,7 @@
 #include "lldb/Target/Thread.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Log.h"
+#include "llvm/DebugInfo/DWARF/DWARFExpression.h"
 
 using namespace lldb;
 using namespace lldb_private;
@@ -79,13 +80,10 @@ GetByteOrderAndAddrSize(Thread *thread) {
 
 static void DumpDWARFExpr(Stream &s, llvm::ArrayRef<uint8_t> expr, Thread *thread) {
   if (auto order_and_width = GetByteOrderAndAddrSize(thread)) {
-    DataExtractor extractor(expr.data(), expr.size(), order_and_width->first,
-                            order_and_width->second);
-    if (!DWARFExpression::PrintDWARFExpression(s, extractor,
-                                               order_and_width->second,
-                                               /*dwarf_ref_size*/ 4,
-                                               /*location_expression*/ false))
-      s.PutCString("invalid-dwarf-expr");
+    llvm::DataExtractor data(expr, order_and_width->first == eByteOrderLittle,
+                             order_and_width->second);
+    llvm::DWARFExpression(data, order_and_width->second, llvm::dwarf::DWARF32)
+        .print(s.AsRawOstream(), nullptr, nullptr);
   } else
     s.PutCString("dwarf-expr");
 }
@@ -170,7 +168,8 @@ operator==(const UnwindPlan::Row::FAValue &rhs) const {
   if (m_type == rhs.m_type) {
     switch (m_type) {
     case unspecified:
-      return true;
+    case isRaSearch:
+      return m_value.ra_search_offset == rhs.m_value.ra_search_offset;
 
     case isRegisterPlusOffset:
       return m_value.reg.offset == rhs.m_value.reg.offset;
@@ -205,8 +204,11 @@ void UnwindPlan::Row::FAValue::Dump(Stream &s, const UnwindPlan *unwind_plan,
                   llvm::makeArrayRef(m_value.expr.opcodes, m_value.expr.length),
                   thread);
     break;
-  default:
+  case unspecified:
     s.PutCString("unspecified");
+    break;
+  case isRaSearch:
+    s.Printf("RaSearch@SP%+d", m_value.ra_search_offset);
     break;
   }
 }

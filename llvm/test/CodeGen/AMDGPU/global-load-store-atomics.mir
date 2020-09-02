@@ -103,7 +103,7 @@ body:             |
     %22:vgpr_32 = COPY %14.sub0
     %23:sgpr_32 = COPY %4.sub1
     %24:vgpr_32 = COPY %14.sub1
-    %17:vgpr_32, %19:sreg_64_xexec = V_ADD_I32_e64 %21, %22, 0, implicit $exec
+    %17:vgpr_32, %19:sreg_64_xexec = V_ADD_CO_U32_e64 %21, %22, 0, implicit $exec
     %25:vgpr_32 = COPY %23
     %18:vgpr_32, dead %20:sreg_64_xexec = V_ADDC_U32_e64 %25, %24, killed %19, 0, implicit $exec
     %16:vreg_64 = REG_SEQUENCE %17, %subreg.sub0, %18, %subreg.sub1
@@ -238,7 +238,7 @@ body:             |
     GLOBAL_STORE_DWORDX2 %11, %77, 0, 0, 0, 0, implicit $exec :: (volatile store 4 into `i32 addrspace(1)* undef`, addrspace 1)
     GLOBAL_ATOMIC_UMAX_X2 %11, %16, 16, 0, implicit $exec :: (volatile load store seq_cst 4, addrspace 1)
 
-    %79:sreg_128 = REG_SEQUENCE %4, %subreg.sub0, %4, %subreg.sub1, %4, %subreg.sub2, %4, %subreg.sub3
+    %79:sgpr_128 = REG_SEQUENCE %4, %subreg.sub0, %4, %subreg.sub1, %4, %subreg.sub2, %4, %subreg.sub3
     %80:vreg_128 = COPY %79
 
     %78:vreg_64 = GLOBAL_ATOMIC_CMPSWAP_X2_RTN %11, %80, 16, 0, implicit $exec :: (volatile load store seq_cst 4, addrspace 1)

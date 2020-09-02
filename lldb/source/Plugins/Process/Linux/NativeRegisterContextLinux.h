@@ -28,6 +28,9 @@ public:
   CreateHostNativeRegisterContextLinux(const ArchSpec &target_arch,
                                        NativeThreadProtocol &native_thread);
 
+  // Invalidates cached values in register context data structures
+  virtual void InvalidateAllRegisters(){}
+
 protected:
   lldb::ByteOrder GetByteOrder() const;
 
@@ -52,13 +55,17 @@ protected:
 
   virtual void *GetGPRBuffer() = 0;
 
-  virtual size_t GetGPRSize() {
+  virtual size_t GetGPRSize() const {
     return GetRegisterInfoInterface().GetGPRSize();
   }
 
   virtual void *GetFPRBuffer() = 0;
 
   virtual size_t GetFPRSize() = 0;
+
+  virtual uint32_t GetPtraceOffset(uint32_t reg_index) {
+    return GetRegisterInfoAtIndex(reg_index)->byte_offset;
+  }
 
   // The Do*** functions are executed on the privileged thread and can perform
   // ptrace

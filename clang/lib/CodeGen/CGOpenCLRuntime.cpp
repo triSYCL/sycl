@@ -37,6 +37,28 @@ llvm::Type *CGOpenCLRuntime::convertOpenCLSpecificType(const Type *T) {
   llvm::LLVMContext& Ctx = CGM.getLLVMContext();
   uint32_t AddrSpc = CGM.getContext().getTargetAddressSpace(
       CGM.getContext().getOpenCLTypeAddrSpace(T));
+
+  if (CGM.getTriple().isNVPTX()) {
+    switch (cast<BuiltinType>(T)->getKind()) {
+    default:
+      break;
+#define IMAGE_TYPE(ImgType, Id, SingletonId, Access, Suffix)                   \
+  case BuiltinType::Id:                                                        \
+    return llvm::IntegerType::getInt64Ty(CGM.getLLVMContext());
+#include "clang/Basic/OpenCLImageTypes.def"
+#define IMAGE_TYPE(ImgType, Id, SingletonId, Access, Suffix)                   \
+  case BuiltinType::Sampled##Id:                                               \
+    return llvm::StructType::get(                                              \
+        llvm::IntegerType::getInt64Ty(CGM.getLLVMContext()),                   \
+        llvm::IntegerType::getInt32Ty(CGM.getLLVMContext()));
+#define IMAGE_WRITE_TYPE(Type, Id, Ext)
+#define IMAGE_READ_WRITE_TYPE(Type, Id, Ext)
+#include "clang/Basic/OpenCLImageTypes.def"
+    case BuiltinType::OCLSampler:
+      return llvm::IntegerType::getInt32Ty(CGM.getLLVMContext());
+    }
+  }
+
   switch (cast<BuiltinType>(T)->getKind()) {
   default:
     llvm_unreachable("Unexpected opencl builtin type!");
@@ -46,6 +68,15 @@ llvm::Type *CGOpenCLRuntime::convertOpenCLSpecificType(const Type *T) {
     return llvm::PointerType::get( \
         llvm::StructType::create(Ctx, "opencl." #ImgType "_" #Suffix "_t"), \
         AddrSpc);
+#include "clang/Basic/OpenCLImageTypes.def"
+#define IMAGE_TYPE(ImgType, Id, SingletonId, Access, Suffix)                   \
+  case BuiltinType::Sampled##Id:                                               \
+    return llvm::PointerType::get(                                             \
+        llvm::StructType::create(Ctx, "spirv.SampledImage." #ImgType           \
+                                      "_" #Suffix "_t"),                       \
+        AddrSpc);
+#define IMAGE_WRITE_TYPE(Type, Id, Ext)
+#define IMAGE_READ_WRITE_TYPE(Type, Id, Ext)
 #include "clang/Basic/OpenCLImageTypes.def"
   case BuiltinType::OCLSampler:
     return getSamplerType(T);
@@ -96,7 +127,7 @@ llvm::PointerType *CGOpenCLRuntime::getSamplerType(const Type *T) {
 }
 
 llvm::Value *CGOpenCLRuntime::getPipeElemSize(const Expr *PipeArg) {
-  const PipeType *PipeTy = PipeArg->getType()->getAs<PipeType>();
+  const PipeType *PipeTy = PipeArg->getType()->castAs<PipeType>();
   // The type of the last (implicit) argument to be passed.
   llvm::Type *Int32Ty = llvm::IntegerType::getInt32Ty(CGM.getLLVMContext());
   unsigned TypeSize = CGM.getContext()
@@ -106,7 +137,7 @@ llvm::Value *CGOpenCLRuntime::getPipeElemSize(const Expr *PipeArg) {
 }
 
 llvm::Value *CGOpenCLRuntime::getPipeElemAlign(const Expr *PipeArg) {
-  const PipeType *PipeTy = PipeArg->getType()->getAs<PipeType>();
+  const PipeType *PipeTy = PipeArg->getType()->castAs<PipeType>();
   // The type of the last (implicit) argument to be passed.
   llvm::Type *Int32Ty = llvm::IntegerType::getInt32Ty(CGM.getLLVMContext());
   unsigned TypeSize = CGM.getContext()

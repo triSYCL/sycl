@@ -1,4 +1,4 @@
-//===-- SystemInitializerCommon.cpp -----------------------------*- C++ -*-===//
+//===-- SystemInitializerCommon.cpp ---------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -78,11 +78,24 @@ llvm::Error SystemInitializerCommon::Initialize() {
     } else {
       FileSystem::Initialize();
     }
+    if (llvm::Expected<std::string> cwd =
+            loader->LoadBuffer<WorkingDirectoryProvider>()) {
+      llvm::StringRef working_dir = llvm::StringRef(*cwd).rtrim();
+      if (std::error_code ec = FileSystem::Instance()
+                                   .GetVirtualFileSystem()
+                                   ->setCurrentWorkingDirectory(working_dir)) {
+        return llvm::errorCodeToError(ec);
+      }
+    } else {
+      return cwd.takeError();
+    }
   } else if (repro::Generator *g = r.GetGenerator()) {
     repro::VersionProvider &vp = g->GetOrCreate<repro::VersionProvider>();
     vp.SetVersion(lldb_private::GetVersion());
     repro::FileProvider &fp = g->GetOrCreate<repro::FileProvider>();
     FileSystem::Initialize(fp.GetFileCollector());
+    repro::WorkingDirectoryProvider &wp = g->GetOrCreate<repro::WorkingDirectoryProvider>();
+    fp.RecordInterestingDirectory(wp.GetWorkingDirectory());
   } else {
     FileSystem::Initialize();
   }

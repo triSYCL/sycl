@@ -1,4 +1,4 @@
-; RUN: opt -simplifycfg -S < %s | FileCheck %s
+; RUN: opt -simplifycfg -hoist-common-insts=true -S < %s | FileCheck %s
 ; Verify that we don't crash due an invalid !dbg location on the hoisted llvm.dbg.value
 
 define i64 @caller(i64* %ptr, i64 %flag) !dbg !10 {
@@ -8,7 +8,6 @@ init:
 
 ; CHECK:  %vala = load i64, i64* %ptr
 ; CHECK-NEXT:  call void @llvm.dbg.value(metadata i64 %vala, metadata [[MD:![0-9]*]]
-; CHECK-NEXT:  call void @llvm.dbg.value(metadata i64 %vala, metadata [[MD]]
 ; CHECK-NEXT:  %valbmasked = and i64 %vala, 1
 
 a:                                              ; preds = %init

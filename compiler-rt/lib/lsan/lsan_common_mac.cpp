@@ -193,8 +193,13 @@ void ProcessPlatformSpecificAllocations(Frontier *frontier) {
 // causes rare race conditions.
 void HandleLeaks() {}
 
-void DoStopTheWorld(StopTheWorldCallback callback, void *argument) {
+void LockStuffAndStopTheWorld(StopTheWorldCallback callback,
+                              CheckForLeaksParam *argument) {
+  LockThreadRegistry();
+  LockAllocator();
   StopTheWorld(callback, argument);
+  UnlockAllocator();
+  UnlockThreadRegistry();
 }
 
 } // namespace __lsan

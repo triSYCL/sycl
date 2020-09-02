@@ -64,10 +64,13 @@ the [sycl/test](sycl/test) directory among some other small details.
 See [LICENSE.txt](llvm/LICENSE.TXT) for details.
 
 ## Contributing
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 *Other names and brands may be claimed as the property of others.
 
-## SYCL Extension Proposal Documents
+DPC++ is an open, cross-architecture language built upon the ISO C++ and Khronos
+SYCL\* standards. DPC++ extends these standards with a number of extensions,
+which can be found in [sycl/doc/extensions](sycl/doc/extensions) directory.
 
-See [sycl/doc/extensions](sycl/doc/extensions)
+\*Other names and brands may be claimed as the property of others.

@@ -1,4 +1,4 @@
-add_llvm_library(LLVMInSPIRation
+add_llvm_component_library(LLVMInSPIRation
   InSPIRation.cpp
 
   ADDITIONAL_HEADER_DIRS

@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple x86_64-pc-linux-gnu -fsyntax-only -fsycl-is-host -verify %s -DSYCLHOST
+// RUN: %clang_cc1 -fsycl -fsycl-is-host -triple x86_64-pc-linux-gnu -fsyntax-only -verify %s -DSYCLHOST
 // RUN: %clang_cc1 -triple x86_64-pc-linux-gnu -fsyntax-only -verify %s
 
 #ifdef SYCLHOST
@@ -38,9 +38,9 @@ void foo()
   [[intelfpga::numbanks(8)]] unsigned int v_six[32];
 
   #ifndef SYCLHOST
-  // expected-warning@+2 {{'max_private_copies' attribute ignored}}
+  // expected-warning@+2 {{'private_copies' attribute ignored}}
   #endif
-  [[intelfpga::max_private_copies(8)]] unsigned int v_seven[64];
+  [[intelfpga::private_copies(8)]] unsigned int v_seven[64];
 
   #ifndef SYCLHOST
   // expected-warning@+2 {{'merge' attribute ignored}}

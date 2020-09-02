@@ -205,7 +205,6 @@ def VPTPredROperand : AsmOperandClass {
   let Name = "VPTPredR";
   let PredicateMethod = "isVPTPred";
 }
-def undef_tied_input;
 
 // Operand classes for the cluster of MC operands describing a
 // VPT-predicated MVE instruction.
@@ -408,6 +407,11 @@ class InstTemplate<AddrMode am, int sz, IndexMode im,
   // mnemonic (when not in an IT block) or preclude it (when in an IT block).
   bit thumbArithFlagSetting = 0;
 
+  bit validForTailPredication = 0;
+  bit retainsPreviousHalfElement = 0;
+  bit horizontalReduction = 0;
+  bit doubleWidthResult = 0;
+
   // If this is a pseudo instruction, mark it isCodeGenOnly.
   let isCodeGenOnly = !eq(!cast<string>(f), "Pseudo");
 
@@ -419,6 +423,10 @@ class InstTemplate<AddrMode am, int sz, IndexMode im,
   let TSFlags{14}    = canXformTo16Bit;
   let TSFlags{18-15} = D.Value;
   let TSFlags{19}    = thumbArithFlagSetting;
+  let TSFlags{20}    = validForTailPredication;
+  let TSFlags{21}    = retainsPreviousHalfElement;
+  let TSFlags{22}    = horizontalReduction;
+  let TSFlags{23}    = doubleWidthResult;
 
   let Constraints = cstr;
   let Itinerary = itin;
@@ -462,6 +470,7 @@ class AsmPseudoInst<string asm, dag iops, dag oops = (outs)>
   let isCodeGenOnly = 0; // So we get asm matcher for it.
   let AsmString = asm;
   let isPseudo = 1;
+  let hasNoSchedulingInfo = 1;
 }
 
 class ARMAsmPseudo<string asm, dag iops, dag oops = (outs)>
@@ -1118,6 +1127,9 @@ class Thumb2DSPPat<dag pattern, dag result> : Pat<pattern, result> {
 }
 class Thumb2DSPMulPat<dag pattern, dag result> : Pat<pattern, result> {
   list<Predicate> Predicates = [IsThumb2, UseMulOps, HasDSP];
+}
+class FPRegs16Pat<dag pattern, dag result> : Pat<pattern, result> {
+  list<Predicate> Predicates = [HasFPRegs16];
 }
 class FP16Pat<dag pattern, dag result> : Pat<pattern, result> {
   list<Predicate> Predicates = [HasFP16];

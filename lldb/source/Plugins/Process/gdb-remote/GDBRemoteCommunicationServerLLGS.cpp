@@ -1,4 +1,4 @@
-//===-- GDBRemoteCommunicationServerLLGS.cpp --------------------*- C++ -*-===//
+//===-- GDBRemoteCommunicationServerLLGS.cpp ------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -11,7 +11,7 @@
 #include "lldb/Host/Config.h"
 
 #include "GDBRemoteCommunicationServerLLGS.h"
-#include "lldb/Utility/StreamGDBRemote.h"
+#include "lldb/Utility/GDBRemote.h"
 
 #include <chrono>
 #include <cstring>
@@ -32,7 +32,6 @@
 #include "lldb/Utility/Args.h"
 #include "lldb/Utility/DataBuffer.h"
 #include "lldb/Utility/Endian.h"
-#include "lldb/Utility/JSON.h"
 #include "lldb/Utility/LLDBAssert.h"
 #include "lldb/Utility/Log.h"
 #include "lldb/Utility/RegisterValue.h"
@@ -40,6 +39,7 @@
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/UriParser.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/Support/JSON.h"
 #include "llvm/Support/ScopedPrinter.h"
 
 #include "ProcessGDBRemote.h"
@@ -377,6 +377,99 @@ static void AppendHexValue(StreamString &response, const uint8_t *buf,
   }
 }
 
+static llvm::StringRef GetEncodingNameOrEmpty(const RegisterInfo &reg_info) {
+  switch (reg_info.encoding) {
+  case eEncodingUint:
+    return "uint";
+  case eEncodingSint:
+    return "sint";
+  case eEncodingIEEE754:
+    return "ieee754";
+  case eEncodingVector:
+    return "vector";
+  default:
+    return "";
+  }
+}
+
+static llvm::StringRef GetFormatNameOrEmpty(const RegisterInfo &reg_info) {
+  switch (reg_info.format) {
+  case eFormatBinary:
+    return "binary";
+  case eFormatDecimal:
+    return "decimal";
+  case eFormatHex:
+    return "hex";
+  case eFormatFloat:
+    return "float";
+  case eFormatVectorOfSInt8:
+    return "vector-sint8";
+  case eFormatVectorOfUInt8:
+    return "vector-uint8";
+  case eFormatVectorOfSInt16:
+    return "vector-sint16";
+  case eFormatVectorOfUInt16:
+    return "vector-uint16";
+  case eFormatVectorOfSInt32:
+    return "vector-sint32";
+  case eFormatVectorOfUInt32:
+    return "vector-uint32";
+  case eFormatVectorOfFloat32:
+    return "vector-float32";
+  case eFormatVectorOfUInt64:
+    return "vector-uint64";
+  case eFormatVectorOfUInt128:
+    return "vector-uint128";
+  default:
+    return "";
+  };
+}
+
+static llvm::StringRef GetKindGenericOrEmpty(const RegisterInfo &reg_info) {
+  switch (reg_info.kinds[RegisterKind::eRegisterKindGeneric]) {
+  case LLDB_REGNUM_GENERIC_PC:
+    return "pc";
+  case LLDB_REGNUM_GENERIC_SP:
+    return "sp";
+  case LLDB_REGNUM_GENERIC_FP:
+    return "fp";
+  case LLDB_REGNUM_GENERIC_RA:
+    return "ra";
+  case LLDB_REGNUM_GENERIC_FLAGS:
+    return "flags";
+  case LLDB_REGNUM_GENERIC_ARG1:
+    return "arg1";
+  case LLDB_REGNUM_GENERIC_ARG2:
+    return "arg2";
+  case LLDB_REGNUM_GENERIC_ARG3:
+    return "arg3";
+  case LLDB_REGNUM_GENERIC_ARG4:
+    return "arg4";
+  case LLDB_REGNUM_GENERIC_ARG5:
+    return "arg5";
+  case LLDB_REGNUM_GENERIC_ARG6:
+    return "arg6";
+  case LLDB_REGNUM_GENERIC_ARG7:
+    return "arg7";
+  case LLDB_REGNUM_GENERIC_ARG8:
+    return "arg8";
+  default:
+    return "";
+  }
+}
+
+static void CollectRegNums(const uint32_t *reg_num, StreamString &response,
+                           bool usehex) {
+  for (int i = 0; *reg_num != LLDB_INVALID_REGNUM; ++reg_num, ++i) {
+    if (i > 0)
+      response.PutChar(',');
+    if (usehex)
+      response.Printf("%" PRIx32, *reg_num);
+    else
+      response.Printf("%" PRIu32, *reg_num);
+  }
+}
+
 static void WriteRegisterValueInHexFixedWidth(
     StreamString &response, NativeRegisterContext &reg_ctx,
     const RegisterInfo &reg_info, const RegisterValue *reg_value_p,
@@ -402,19 +495,21 @@ static void WriteRegisterValueInHexFixedWidth(
   }
 }
 
-static JSONObject::SP GetRegistersAsJSON(NativeThreadProtocol &thread) {
+static llvm::Expected<json::Object>
+GetRegistersAsJSON(NativeThreadProtocol &thread) {
   Log *log(GetLogIfAnyCategoriesSet(LIBLLDB_LOG_THREAD));
 
   NativeRegisterContext& reg_ctx = thread.GetRegisterContext();
 
-  JSONObject::SP register_object_sp = std::make_shared<JSONObject>();
+  json::Object register_object;
 
 #ifdef LLDB_JTHREADSINFO_FULL_REGISTER_SET
   // Expedite all registers in the first register set (i.e. should be GPRs)
   // that are not contained in other registers.
   const RegisterSet *reg_set_p = reg_ctx_sp->GetRegisterSet(0);
   if (!reg_set_p)
-    return nullptr;
+    return llvm::make_error<llvm::StringError>("failed to get registers",
+                                               llvm::inconvertibleErrorCode());
   for (const uint32_t *reg_num_p = reg_set_p->registers;
        *reg_num_p != LLDB_INVALID_REGNUM; ++reg_num_p) {
     uint32_t reg_num = *reg_num_p;
@@ -460,12 +555,11 @@ static JSONObject::SP GetRegistersAsJSON(NativeThreadProtocol &thread) {
     WriteRegisterValueInHexFixedWidth(stream, reg_ctx, *reg_info_p,
                                       &reg_value, lldb::eByteOrderBig);
 
-    register_object_sp->SetObject(
-        llvm::to_string(reg_num),
-        std::make_shared<JSONString>(stream.GetString()));
+    register_object.try_emplace(llvm::to_string(reg_num),
+                                stream.GetString().str());
   }
 
-  return register_object_sp;
+  return register_object;
 }
 
 static const char *GetStopReasonString(StopReason stop_reason) {
@@ -492,11 +586,11 @@ static const char *GetStopReasonString(StopReason stop_reason) {
   return nullptr;
 }
 
-static JSONArray::SP GetJSONThreadsInfo(NativeProcessProtocol &process,
-                                        bool abridged) {
+static llvm::Expected<json::Array>
+GetJSONThreadsInfo(NativeProcessProtocol &process, bool abridged) {
   Log *log(GetLogIfAnyCategoriesSet(LIBLLDB_LOG_PROCESS | LIBLLDB_LOG_THREAD));
 
-  JSONArray::SP threads_array_sp = std::make_shared<JSONArray>();
+  json::Array threads_array;
 
   // Ensure we can get info on the given thread.
   uint32_t thread_idx = 0;
@@ -510,7 +604,8 @@ static JSONArray::SP GetJSONThreadsInfo(NativeProcessProtocol &process,
     struct ThreadStopInfo tid_stop_info;
     std::string description;
     if (!thread->GetStopReason(tid_stop_info, description))
-      return nullptr;
+      return llvm::make_error<llvm::StringError>(
+          "failed to get stop reason", llvm::inconvertibleErrorCode());
 
     const int signum = tid_stop_info.details.signal.signo;
     if (log) {
@@ -522,50 +617,49 @@ static JSONArray::SP GetJSONThreadsInfo(NativeProcessProtocol &process,
                 tid_stop_info.reason, tid_stop_info.details.exception.type);
     }
 
-    JSONObject::SP thread_obj_sp = std::make_shared<JSONObject>();
-    threads_array_sp->AppendObject(thread_obj_sp);
+    json::Object thread_obj;
 
     if (!abridged) {
-      if (JSONObject::SP registers_sp = GetRegistersAsJSON(*thread))
-        thread_obj_sp->SetObject("registers", registers_sp);
+      if (llvm::Expected<json::Object> registers =
+              GetRegistersAsJSON(*thread)) {
+        thread_obj.try_emplace("registers", std::move(*registers));
+      } else {
+        return registers.takeError();
+      }
     }
 
-    thread_obj_sp->SetObject("tid", std::make_shared<JSONNumber>(tid));
+    thread_obj.try_emplace("tid", static_cast<int64_t>(tid));
+
     if (signum != 0)
-      thread_obj_sp->SetObject("signal", std::make_shared<JSONNumber>(signum));
+      thread_obj.try_emplace("signal", signum);
 
     const std::string thread_name = thread->GetName();
     if (!thread_name.empty())
-      thread_obj_sp->SetObject("name",
-                               std::make_shared<JSONString>(thread_name));
+      thread_obj.try_emplace("name", thread_name);
 
-    if (const char *stop_reason_str = GetStopReasonString(tid_stop_info.reason))
-      thread_obj_sp->SetObject("reason",
-                               std::make_shared<JSONString>(stop_reason_str));
+    const char *stop_reason = GetStopReasonString(tid_stop_info.reason);
+    if (stop_reason)
+      thread_obj.try_emplace("reason", stop_reason);
 
     if (!description.empty())
-      thread_obj_sp->SetObject("description",
-                               std::make_shared<JSONString>(description));
+      thread_obj.try_emplace("description", description);
 
     if ((tid_stop_info.reason == eStopReasonException) &&
         tid_stop_info.details.exception.type) {
-      thread_obj_sp->SetObject(
-          "metype",
-          std::make_shared<JSONNumber>(tid_stop_info.details.exception.type));
+      thread_obj.try_emplace(
+          "metype", static_cast<int64_t>(tid_stop_info.details.exception.type));
 
-      JSONArray::SP medata_array_sp = std::make_shared<JSONArray>();
+      json::Array medata_array;
       for (uint32_t i = 0; i < tid_stop_info.details.exception.data_count;
            ++i) {
-        medata_array_sp->AppendObject(std::make_shared<JSONNumber>(
-            tid_stop_info.details.exception.data[i]));
+        medata_array.push_back(
+            static_cast<int64_t>(tid_stop_info.details.exception.data[i]));
       }
-      thread_obj_sp->SetObject("medata", medata_array_sp);
+      thread_obj.try_emplace("medata", std::move(medata_array));
     }
-
-    // TODO: Expedite interesting regions of inferior memory
+    threads_array.push_back(std::move(thread_obj));
   }
-
-  return threads_array_sp;
+  return threads_array;
 }
 
 GDBRemoteCommunication::PacketResult
@@ -657,19 +751,21 @@ GDBRemoteCommunicationServerLLGS::SendStopReplyPacketForThread(
     // is hex ascii JSON that contains the thread IDs thread stop info only for
     // threads that have stop reasons. Only send this if we have more than one
     // thread otherwise this packet has all the info it needs.
-    if (thread_index > 0) {
+    if (thread_index > 1) {
       const bool threads_with_valid_stop_info_only = true;
-      JSONArray::SP threads_info_sp = GetJSONThreadsInfo(
+      llvm::Expected<json::Array> threads_info = GetJSONThreadsInfo(
           *m_debugged_process_up, threads_with_valid_stop_info_only);
-      if (threads_info_sp) {
+      if (threads_info) {
         response.PutCString("jstopinfo:");
         StreamString unescaped_response;
-        threads_info_sp->Write(unescaped_response);
+        unescaped_response.AsRawOstream() << std::move(*threads_info);
         response.PutStringAsRawHex8(unescaped_response.GetData());
         response.PutChar(';');
-      } else
-        LLDB_LOG(log, "failed to prepare a jstopinfo field for pid {0}",
-                 m_debugged_process_up->GetID());
+      } else {
+        LLDB_LOG_ERROR(log, threads_info.takeError(),
+                       "failed to prepare a jstopinfo field for pid {1}: {0}",
+                       m_debugged_process_up->GetID());
+      }
     }
 
     uint32_t i = 0;
@@ -919,9 +1015,9 @@ void GDBRemoteCommunicationServerLLGS::DataAvailableCallback() {
 }
 
 Status GDBRemoteCommunicationServerLLGS::InitializeConnection(
-    std::unique_ptr<Connection> &&connection) {
+    std::unique_ptr<Connection> connection) {
   IOObjectSP read_object_sp = connection->GetReadObject();
-  GDBRemoteCommunicationServer::SetConnection(connection.release());
+  GDBRemoteCommunicationServer::SetConnection(std::move(connection));
 
   Status error;
   m_network_handle_up = m_mainloop.RegisterReadObject(
@@ -957,7 +1053,7 @@ Status GDBRemoteCommunicationServerLLGS::SetSTDIOFileDescriptor(int fd) {
   }
 
   m_stdio_communication.SetCloseOnEOF(false);
-  m_stdio_communication.SetConnection(conn_up.release());
+  m_stdio_communication.SetConnection(std::move(conn_up));
   if (!m_stdio_communication.IsConnected()) {
     error.SetErrorString(
         "failed to set connection for inferior I/O communication");
@@ -1069,7 +1165,7 @@ GDBRemoteCommunicationServerLLGS::Handle_jTraceStart(
     return SendIllFormedResponse(packet, "jTraceStart: Ill formed packet ");
 
   options.setTraceParams(
-      static_pointer_cast<StructuredData::Dictionary>(custom_params_sp));
+      std::static_pointer_cast<StructuredData::Dictionary>(custom_params_sp));
 
   if (buffersize == std::numeric_limits<uint64_t>::max() ||
       type != lldb::TraceType::eTraceTypeProcessorTrace) {
@@ -1383,7 +1479,8 @@ GDBRemoteCommunicationServerLLGS::Handle_C(StringExtractorGDBRemote &packet) {
           packet, "unexpected content after $C{signal-number}");
   }
 
-  ResumeActionList resume_actions(StateType::eStateRunning, 0);
+  ResumeActionList resume_actions(StateType::eStateRunning,
+                                  LLDB_INVALID_SIGNAL_NUMBER);
   Status error;
 
   // We have two branches: what to do if a continue thread is specified (in
@@ -1453,7 +1550,8 @@ GDBRemoteCommunicationServerLLGS::Handle_c(StringExtractorGDBRemote &packet) {
   }
 
   // Build the ResumeActionList
-  ResumeActionList actions(StateType::eStateRunning, 0);
+  ResumeActionList actions(StateType::eStateRunning,
+                           LLDB_INVALID_SIGNAL_NUMBER);
 
   Status error = m_debugged_process_up->Resume(actions);
   if (error.Fail()) {
@@ -1520,7 +1618,7 @@ GDBRemoteCommunicationServerLLGS::Handle_vCont(
     ResumeAction thread_action;
     thread_action.tid = LLDB_INVALID_THREAD_ID;
     thread_action.state = eStateInvalid;
-    thread_action.signal = 0;
+    thread_action.signal = LLDB_INVALID_SIGNAL_NUMBER;
 
     const char action = packet.GetChar();
     switch (action) {
@@ -1694,74 +1792,18 @@ GDBRemoteCommunicationServerLLGS::Handle_qRegisterInfo(
   response.Printf("bitsize:%" PRIu32 ";offset:%" PRIu32 ";",
                   reg_info->byte_size * 8, reg_info->byte_offset);
 
-  switch (reg_info->encoding) {
-  case eEncodingUint:
-    response.PutCString("encoding:uint;");
-    break;
-  case eEncodingSint:
-    response.PutCString("encoding:sint;");
-    break;
-  case eEncodingIEEE754:
-    response.PutCString("encoding:ieee754;");
-    break;
-  case eEncodingVector:
-    response.PutCString("encoding:vector;");
-    break;
-  default:
-    break;
-  }
+  llvm::StringRef encoding = GetEncodingNameOrEmpty(*reg_info);
+  if (!encoding.empty())
+    response << "encoding:" << encoding << ';';
 
-  switch (reg_info->format) {
-  case eFormatBinary:
-    response.PutCString("format:binary;");
-    break;
-  case eFormatDecimal:
-    response.PutCString("format:decimal;");
-    break;
-  case eFormatHex:
-    response.PutCString("format:hex;");
-    break;
-  case eFormatFloat:
-    response.PutCString("format:float;");
-    break;
-  case eFormatVectorOfSInt8:
-    response.PutCString("format:vector-sint8;");
-    break;
-  case eFormatVectorOfUInt8:
-    response.PutCString("format:vector-uint8;");
-    break;
-  case eFormatVectorOfSInt16:
-    response.PutCString("format:vector-sint16;");
-    break;
-  case eFormatVectorOfUInt16:
-    response.PutCString("format:vector-uint16;");
-    break;
-  case eFormatVectorOfSInt32:
-    response.PutCString("format:vector-sint32;");
-    break;
-  case eFormatVectorOfUInt32:
-    response.PutCString("format:vector-uint32;");
-    break;
-  case eFormatVectorOfFloat32:
-    response.PutCString("format:vector-float32;");
-    break;
-  case eFormatVectorOfUInt64:
-    response.PutCString("format:vector-uint64;");
-    break;
-  case eFormatVectorOfUInt128:
-    response.PutCString("format:vector-uint128;");
-    break;
-  default:
-    break;
-  };
+  llvm::StringRef format = GetFormatNameOrEmpty(*reg_info);
+  if (!format.empty())
+    response << "format:" << format << ';';
 
   const char *const register_set_name =
       reg_context.GetRegisterSetNameForRegisterAtIndex(reg_index);
-  if (register_set_name) {
-    response.PutCString("set:");
-    response.PutCString(register_set_name);
-    response.PutChar(';');
-  }
+  if (register_set_name)
+    response << "set:" << register_set_name << ';';
 
   if (reg_info->kinds[RegisterKind::eRegisterKindEHFrame] !=
       LLDB_INVALID_REGNUM)
@@ -1772,71 +1814,19 @@ GDBRemoteCommunicationServerLLGS::Handle_qRegisterInfo(
     response.Printf("dwarf:%" PRIu32 ";",
                     reg_info->kinds[RegisterKind::eRegisterKindDWARF]);
 
-  switch (reg_info->kinds[RegisterKind::eRegisterKindGeneric]) {
-  case LLDB_REGNUM_GENERIC_PC:
-    response.PutCString("generic:pc;");
-    break;
-  case LLDB_REGNUM_GENERIC_SP:
-    response.PutCString("generic:sp;");
-    break;
-  case LLDB_REGNUM_GENERIC_FP:
-    response.PutCString("generic:fp;");
-    break;
-  case LLDB_REGNUM_GENERIC_RA:
-    response.PutCString("generic:ra;");
-    break;
-  case LLDB_REGNUM_GENERIC_FLAGS:
-    response.PutCString("generic:flags;");
-    break;
-  case LLDB_REGNUM_GENERIC_ARG1:
-    response.PutCString("generic:arg1;");
-    break;
-  case LLDB_REGNUM_GENERIC_ARG2:
-    response.PutCString("generic:arg2;");
-    break;
-  case LLDB_REGNUM_GENERIC_ARG3:
-    response.PutCString("generic:arg3;");
-    break;
-  case LLDB_REGNUM_GENERIC_ARG4:
-    response.PutCString("generic:arg4;");
-    break;
-  case LLDB_REGNUM_GENERIC_ARG5:
-    response.PutCString("generic:arg5;");
-    break;
-  case LLDB_REGNUM_GENERIC_ARG6:
-    response.PutCString("generic:arg6;");
-    break;
-  case LLDB_REGNUM_GENERIC_ARG7:
-    response.PutCString("generic:arg7;");
-    break;
-  case LLDB_REGNUM_GENERIC_ARG8:
-    response.PutCString("generic:arg8;");
-    break;
-  default:
-    break;
-  }
+  llvm::StringRef kind_generic = GetKindGenericOrEmpty(*reg_info);
+  if (!kind_generic.empty())
+    response << "generic:" << kind_generic << ';';
 
   if (reg_info->value_regs && reg_info->value_regs[0] != LLDB_INVALID_REGNUM) {
     response.PutCString("container-regs:");
-    int i = 0;
-    for (const uint32_t *reg_num = reg_info->value_regs;
-         *reg_num != LLDB_INVALID_REGNUM; ++reg_num, ++i) {
-      if (i > 0)
-        response.PutChar(',');
-      response.Printf("%" PRIx32, *reg_num);
-    }
+    CollectRegNums(reg_info->value_regs, response, true);
     response.PutChar(';');
   }
 
   if (reg_info->invalidate_regs && reg_info->invalidate_regs[0]) {
     response.PutCString("invalidate-regs:");
-    int i = 0;
-    for (const uint32_t *reg_num = reg_info->invalidate_regs;
-         *reg_num != LLDB_INVALID_REGNUM; ++reg_num, ++i) {
-      if (i > 0)
-        response.PutChar(',');
-      response.Printf("%" PRIx32, *reg_num);
-    }
+    CollectRegNums(reg_info->invalidate_regs, response, true);
     response.PutChar(';');
   }
 
@@ -2008,7 +1998,7 @@ GDBRemoteCommunicationServerLLGS::Handle_p(StringExtractorGDBRemote &packet) {
   }
 
   const uint8_t *const data =
-      reinterpret_cast<const uint8_t *>(reg_value.GetBytes());
+      static_cast<const uint8_t *>(reg_value.GetBytes());
   if (!data) {
     LLDB_LOGF(log,
               "GDBRemoteCommunicationServerLLGS::%s failed to get data "
@@ -2050,7 +2040,7 @@ GDBRemoteCommunicationServerLLGS::Handle_P(StringExtractorGDBRemote &packet) {
         packet, "P packet missing '=' char after register number");
 
   // Parse out the value.
-  uint8_t reg_bytes[32]; // big enough to support up to 256 bit ymmN register
+  uint8_t reg_bytes[RegisterValue::kMaxRegisterByteSize];
   size_t reg_size = packet.GetHexBytesAvail(reg_bytes);
 
   // Get the thread to use.
@@ -2505,7 +2495,7 @@ GDBRemoteCommunicationServerLLGS::Handle_qMemoryRegionInfo(
     ConstString name = region_info.GetName();
     if (name) {
       response.PutCString("name:");
-      response.PutStringAsRawHex8(name.AsCString());
+      response.PutStringAsRawHex8(name.GetStringRef());
       response.PutChar(';');
     }
   }
@@ -2723,7 +2713,7 @@ GDBRemoteCommunicationServerLLGS::Handle_s(StringExtractorGDBRemote &packet) {
     return SendErrorResponse(0x33);
 
   // Create the step action for the given thread.
-  ResumeAction action = {tid, eStateStepping, 0};
+  ResumeAction action = {tid, eStateStepping, LLDB_INVALID_SIGNAL_NUMBER};
 
   // Setup the actions list.
   ResumeActionList actions;
@@ -2746,16 +2736,118 @@ GDBRemoteCommunicationServerLLGS::Handle_s(StringExtractorGDBRemote &packet) {
 }
 
 llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>>
-GDBRemoteCommunicationServerLLGS::ReadXferObject(llvm::StringRef object,
-                                                 llvm::StringRef annex) {
-  if (object == "auxv") {
-    // Make sure we have a valid process.
-    if (!m_debugged_process_up ||
-        (m_debugged_process_up->GetID() == LLDB_INVALID_PROCESS_ID)) {
-      return llvm::createStringError(llvm::inconvertibleErrorCode(),
-                                     "No process available");
+GDBRemoteCommunicationServerLLGS::BuildTargetXml() {
+  // Ensure we have a thread.
+  NativeThreadProtocol *thread = m_debugged_process_up->GetThreadAtIndex(0);
+  if (!thread)
+    return llvm::createStringError(llvm::inconvertibleErrorCode(),
+                                   "No thread available");
+
+  Log *log(GetLogIfAnyCategoriesSet(LIBLLDB_LOG_PROCESS | LIBLLDB_LOG_THREAD));
+  // Get the register context for the first thread.
+  NativeRegisterContext &reg_context = thread->GetRegisterContext();
+
+  StreamString response;
+
+  response.Printf("<?xml version=\"1.0\"?>");
+  response.Printf("<target version=\"1.0\">");
+
+  response.Printf("<architecture>%s</architecture>",
+                  m_debugged_process_up->GetArchitecture()
+                      .GetTriple()
+                      .getArchName()
+                      .str()
+                      .c_str());
+
+  response.Printf("<feature>");
+
+  const int registers_count = reg_context.GetUserRegisterCount();
+  for (int reg_index = 0; reg_index < registers_count; reg_index++) {
+    const RegisterInfo *reg_info =
+        reg_context.GetRegisterInfoAtIndex(reg_index);
+
+    if (!reg_info) {
+      LLDB_LOGF(log,
+                "%s failed to get register info for register index %" PRIu32,
+                "target.xml", reg_index);
+      continue;
     }
 
+    response.Printf("<reg name=\"%s\" bitsize=\"%" PRIu32 "\" offset=\"%" PRIu32
+                    "\" regnum=\"%d\" ",
+                    reg_info->name, reg_info->byte_size * 8,
+                    reg_info->byte_offset, reg_index);
+
+    if (reg_info->alt_name && reg_info->alt_name[0])
+      response.Printf("altname=\"%s\" ", reg_info->alt_name);
+
+    llvm::StringRef encoding = GetEncodingNameOrEmpty(*reg_info);
+    if (!encoding.empty())
+      response << "encoding=\"" << encoding << "\" ";
+
+    llvm::StringRef format = GetFormatNameOrEmpty(*reg_info);
+    if (!format.empty())
+      response << "format=\"" << format << "\" ";
+
+    const char *const register_set_name =
+        reg_context.GetRegisterSetNameForRegisterAtIndex(reg_index);
+    if (register_set_name)
+      response << "group=\"" << register_set_name << "\" ";
+
+    if (reg_info->kinds[RegisterKind::eRegisterKindEHFrame] !=
+        LLDB_INVALID_REGNUM)
+      response.Printf("ehframe_regnum=\"%" PRIu32 "\" ",
+                      reg_info->kinds[RegisterKind::eRegisterKindEHFrame]);
+
+    if (reg_info->kinds[RegisterKind::eRegisterKindDWARF] !=
+        LLDB_INVALID_REGNUM)
+      response.Printf("dwarf_regnum=\"%" PRIu32 "\" ",
+                      reg_info->kinds[RegisterKind::eRegisterKindDWARF]);
+
+    llvm::StringRef kind_generic = GetKindGenericOrEmpty(*reg_info);
+    if (!kind_generic.empty())
+      response << "generic=\"" << kind_generic << "\" ";
+
+    if (reg_info->value_regs &&
+        reg_info->value_regs[0] != LLDB_INVALID_REGNUM) {
+      response.PutCString("value_regnums=\"");
+      CollectRegNums(reg_info->value_regs, response, false);
+      response.Printf("\" ");
+    }
+
+    if (reg_info->invalidate_regs && reg_info->invalidate_regs[0]) {
+      response.PutCString("invalidate_regnums=\"");
+      CollectRegNums(reg_info->invalidate_regs, response, false);
+      response.Printf("\" ");
+    }
+
+    if (reg_info->dynamic_size_dwarf_expr_bytes) {
+      const size_t dwarf_opcode_len = reg_info->dynamic_size_dwarf_len;
+      response.PutCString("dynamic_size_dwarf_expr_bytes=\"");
+      for (uint32_t i = 0; i < dwarf_opcode_len; ++i)
+        response.PutHex8(reg_info->dynamic_size_dwarf_expr_bytes[i]);
+      response.Printf("\" ");
+    }
+
+    response.Printf("/>");
+  }
+
+  response.Printf("</feature>");
+  response.Printf("</target>");
+  return MemoryBuffer::getMemBufferCopy(response.GetString(), "target.xml");
+}
+
+llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>>
+GDBRemoteCommunicationServerLLGS::ReadXferObject(llvm::StringRef object,
+                                                 llvm::StringRef annex) {
+  // Make sure we have a valid process.
+  if (!m_debugged_process_up ||
+      (m_debugged_process_up->GetID() == LLDB_INVALID_PROCESS_ID)) {
+    return llvm::createStringError(llvm::inconvertibleErrorCode(),
+                                   "No process available");
+  }
+
+  if (object == "auxv") {
     // Grab the auxv data.
     auto buffer_or_error = m_debugged_process_up->GetAuxvData();
     if (!buffer_or_error)
@@ -2780,6 +2872,9 @@ GDBRemoteCommunicationServerLLGS::ReadXferObject(llvm::StringRef object,
     response.Printf("</library-list-svr4>");
     return MemoryBuffer::getMemBufferCopy(response.GetString(), __FUNCTION__);
   }
+
+  if (object == "features" && annex == "target.xml")
+    return BuildTargetXml();
 
   return llvm::make_error<PacketUnimplementedError>(
       "Xfer object not supported");
@@ -3079,15 +3174,16 @@ GDBRemoteCommunicationServerLLGS::Handle_jThreadsInfo(
 
   StreamString response;
   const bool threads_with_valid_stop_info_only = false;
-  JSONArray::SP threads_array_sp = GetJSONThreadsInfo(
+  llvm::Expected<json::Value> threads_info = GetJSONThreadsInfo(
       *m_debugged_process_up, threads_with_valid_stop_info_only);
-  if (!threads_array_sp) {
-    LLDB_LOG(log, "failed to prepare a packet for pid {0}",
-             m_debugged_process_up->GetID());
+  if (!threads_info) {
+    LLDB_LOG_ERROR(log, threads_info.takeError(),
+                   "failed to prepare a packet for pid {1}: {0}",
+                   m_debugged_process_up->GetID());
     return SendErrorResponse(52);
   }
 
-  threads_array_sp->Write(response);
+  response.AsRawOstream() << *threads_info;
   StreamGDBRemote escaped_response;
   escaped_response.PutEscapedBytes(response.GetData(), response.GetSize());
   return SendPacketNoLock(escaped_response.GetString());

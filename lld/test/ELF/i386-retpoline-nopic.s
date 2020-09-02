@@ -6,16 +6,20 @@
 // RUN: ld.lld %t1.o %t2.so -o %t.exe -z retpolineplt
 // RUN: llvm-objdump -d -s --no-show-raw-insn %t.exe | FileCheck %s
 
+// CHECK:      Contents of section .got.plt:
+// CHECK-NEXT: 40224000 00000000 00000000 10124000
+// CHECK-NEXT: 30124000
+
 // CHECK:      Disassembly of section .plt:
 // CHECK-EMPTY:
-// CHECK-NEXT: .plt:
+// CHECK-NEXT: <.plt>:
 // CHECK-NEXT: 4011d0:       pushl   4207276
 // CHECK-NEXT: 4011d6:       pushl   %eax
 // CHECK-NEXT: 4011d7:       movl    4207280, %eax
-// CHECK-NEXT: 4011dc:       calll   15 <.plt+0x20>
+// CHECK-NEXT: 4011dc:       calll   0x4011f0 <.plt+0x20>
 // CHECK-NEXT: 4011e1:       pause
 // CHECK-NEXT: 4011e3:       lfence
-// CHECK-NEXT: 4011e6:       jmp     -7 <.plt+0x11>
+// CHECK-NEXT: 4011e6:       jmp     0x4011e1 <.plt+0x11>
 // CHECK-NEXT: 4011e8:       int3
 // CHECK-NEXT: 4011e9:       int3
 // CHECK-NEXT: 4011ea:       int3
@@ -33,10 +37,10 @@
 // CHECK-NEXT: 4011ff:       int3
 // CHECK-NEXT: 401200:       pushl   %eax
 // CHECK-NEXT: 401201:       movl    4207284, %eax
-// CHECK-NEXT: 401206:       calll   -27 <.plt+0x20>
-// CHECK-NEXT: 40120b:       jmp     -47 <.plt+0x11>
+// CHECK-NEXT: 401206:       calll   0x4011f0 <.plt+0x20>
+// CHECK-NEXT: 40120b:       jmp     0x4011e1 <.plt+0x11>
 // CHECK-NEXT: 401210:       pushl   $0
-// CHECK-NEXT: 401215:       jmp     -74 <.plt>
+// CHECK-NEXT: 401215:       jmp     0x4011d0 <.plt>
 // CHECK-NEXT: 40121a:       int3
 // CHECK-NEXT: 40121b:       int3
 // CHECK-NEXT: 40121c:       int3
@@ -45,20 +49,16 @@
 // CHECK-NEXT: 40121f:       int3
 // CHECK-NEXT: 401220:       pushl   %eax
 // CHECK-NEXT: 401221:       movl    4207288, %eax
-// CHECK-NEXT: 401226:       calll   -59 <.plt+0x20>
-// CHECK-NEXT: 40122b:       jmp     -79 <.plt+0x11>
+// CHECK-NEXT: 401226:       calll   0x4011f0 <.plt+0x20>
+// CHECK-NEXT: 40122b:       jmp     0x4011e1 <.plt+0x11>
 // CHECK-NEXT: 401230:       pushl   $8
-// CHECK-NEXT: 401235:       jmp     -106 <.plt>
+// CHECK-NEXT: 401235:       jmp     0x4011d0 <.plt>
 // CHECK-NEXT: 40123a:       int3
 // CHECK-NEXT: 40123b:       int3
 // CHECK-NEXT: 40123c:       int3
 // CHECK-NEXT: 40123d:       int3
 // CHECK-NEXT: 40123e:       int3
 // CHECK-NEXT: 40123f:       int3
-
-// CHECK:      Contents of section .got.plt:
-// CHECK-NEXT: 40224000 00000000 00000000 10124000
-// CHECK-NEXT: 30124000
 
 .global _start
 _start:

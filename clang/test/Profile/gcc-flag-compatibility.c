@@ -15,7 +15,7 @@
 // Check that -fprofile-generate=/path/to generates /path/to/default.profraw
 // RUN: %clang %s -c -S -o - -emit-llvm -fprofile-generate=/path/to -fno-experimental-new-pass-manager | FileCheck -check-prefixes=PROFILE-GEN,PROFILE-GEN-EQ %s
 // RxUN: %clang %s -c -S -o - -emit-llvm -fprofile-generate=/path/to -fexperimental-new-pass-manager | FileCheck -check-prefixes=PROFILE-GEN,PROFILE-GEN-EQ %s
-// PROFILE-GEN-EQ: constant [{{.*}} x i8] c"/path/to{{/|\\5C}}{{.*}}\00"
+// PROFILE-GEN-EQ: constant [{{.*}} x i8] c"/path/to{{/|\\\\}}{{.*}}\00"
 
 // Check that -fprofile-use=some/path reads some/path/default.profdata
 // This uses Clang FE format profile.
@@ -47,6 +47,10 @@
 // RUN: rm -rf %t.dir
 // RUN: mkdir -p %t.dir/some/path
 // RUN: llvm-profdata merge %S/Inputs/gcc-flag-compatibility_IR.proftext -o %t.dir/some/path/file.prof
+// RUN: %clang %s -o - -emit-llvm -S -fprofile-use=%t.dir/some/path/file.prof -fno-experimental-new-pass-manager | FileCheck -check-prefix=PROFILE-USE-IR %s
+// RUN: %clang %s -o - -emit-llvm -S -fprofile-use=%t.dir/some/path/file.prof -fexperimental-new-pass-manager | FileCheck -check-prefix=PROFILE-USE-IR %s
+//
+// RUN: llvm-profdata merge %S/Inputs/gcc-flag-compatibility_IR_entry.proftext -o %t.dir/some/path/file.prof
 // RUN: %clang %s -o - -emit-llvm -S -fprofile-use=%t.dir/some/path/file.prof -fno-experimental-new-pass-manager | FileCheck -check-prefix=PROFILE-USE-IR %s
 // RUN: %clang %s -o - -emit-llvm -S -fprofile-use=%t.dir/some/path/file.prof -fexperimental-new-pass-manager | FileCheck -check-prefix=PROFILE-USE-IR %s
 

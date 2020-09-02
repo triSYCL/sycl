@@ -15,6 +15,7 @@
 #include "RISCVTargetObjectFile.h"
 #include "RISCVTargetTransformInfo.h"
 #include "TargetInfo/RISCVTargetInfo.h"
+#include "Utils/RISCVBaseInfo.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/GlobalISel/IRTranslator.h"
@@ -25,12 +26,13 @@
 #include "llvm/CodeGen/TargetLoweringObjectFileImpl.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Support/FormattedStream.h"
 #include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetOptions.h"
 using namespace llvm;
 
-extern "C" void LLVMInitializeRISCVTarget() {
+extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeRISCVTarget() {
   RegisterTargetMachine<RISCVTargetMachine> X(getTheRISCV32Target());
   RegisterTargetMachine<RISCVTargetMachine> Y(getTheRISCV64Target());
   auto PR = PassRegistry::getPassRegistry();
@@ -63,9 +65,44 @@ RISCVTargetMachine::RISCVTargetMachine(const Target &T, const Triple &TT,
     : LLVMTargetMachine(T, computeDataLayout(TT), TT, CPU, FS, Options,
                         getEffectiveRelocModel(TT, RM),
                         getEffectiveCodeModel(CM, CodeModel::Small), OL),
-      TLOF(std::make_unique<RISCVELFTargetObjectFile>()),
-      Subtarget(TT, CPU, FS, Options.MCOptions.getABIName(), *this) {
+      TLOF(std::make_unique<RISCVELFTargetObjectFile>()) {
   initAsmInfo();
+
+  // RISC-V supports the MachineOutliner.
+  setMachineOutliner(true);
+}
+
+const RISCVSubtarget *
+RISCVTargetMachine::getSubtargetImpl(const Function &F) const {
+  Attribute CPUAttr = F.getFnAttribute("target-cpu");
+  Attribute FSAttr = F.getFnAttribute("target-features");
+
+  std::string CPU = !CPUAttr.hasAttribute(Attribute::None)
+                        ? CPUAttr.getValueAsString().str()
+                        : TargetCPU;
+  std::string FS = !FSAttr.hasAttribute(Attribute::None)
+                       ? FSAttr.getValueAsString().str()
+                       : TargetFS;
+  std::string Key = CPU + FS;
+  auto &I = SubtargetMap[Key];
+  if (!I) {
+    // This needs to be done before we create a new subtarget since any
+    // creation will depend on the TM and the code generation flags on the
+    // function that reside in TargetOptions.
+    resetTargetOptions(F);
+    auto ABIName = Options.MCOptions.getABIName();
+    if (const MDString *ModuleTargetABI = dyn_cast_or_null<MDString>(
+            F.getParent()->getModuleFlag("target-abi"))) {
+      auto TargetABI = RISCVABI::getTargetABI(ABIName);
+      if (TargetABI != RISCVABI::ABI_Unknown &&
+          ModuleTargetABI->getString() != ABIName) {
+        report_fatal_error("-target-abi option != target-abi module flag");
+      }
+      ABIName = ModuleTargetABI->getString();
+    }
+    I = std::make_unique<RISCVSubtarget>(TargetTriple, CPU, FS, ABIName, *this);
+  }
+  return I.get();
 }
 
 TargetTransformInfo
@@ -91,6 +128,7 @@ public:
   bool addGlobalInstructionSelect() override;
   void addPreEmitPass() override;
   void addPreEmitPass2() override;
+  void addPreSched2() override;
   void addPreRegAlloc() override;
 };
 }
@@ -130,13 +168,16 @@ bool RISCVPassConfig::addGlobalInstructionSelect() {
   return false;
 }
 
+void RISCVPassConfig::addPreSched2() {}
+
 void RISCVPassConfig::addPreEmitPass() { addPass(&BranchRelaxationPassID); }
 
 void RISCVPassConfig::addPreEmitPass2() {
+  addPass(createRISCVExpandPseudoPass());
   // Schedule the expansion of AMOs at the last possible moment, avoiding the
   // possibility for other passes to break the requirements for forward
   // progress in the LR/SC block.
-  addPass(createRISCVExpandPseudoPass());
+  addPass(createRISCVExpandAtomicPseudoPass());
 }
 
 void RISCVPassConfig::addPreRegAlloc() {

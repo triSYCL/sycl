@@ -74,11 +74,11 @@ protected:
 
 public:
   AttributeCommonInfo(SourceRange AttrRange)
-      : AttrRange(AttrRange), AttrKind(0), SyntaxUsed(0),
+      : AttrRange(AttrRange), ScopeLoc(), AttrKind(0), SyntaxUsed(0),
         SpellingIndex(SpellingNotCalculated) {}
 
   AttributeCommonInfo(SourceLocation AttrLoc)
-      : AttrRange(AttrLoc), AttrKind(0), SyntaxUsed(0),
+      : AttrRange(AttrLoc), ScopeLoc(), AttrKind(0), SyntaxUsed(0),
         SpellingIndex(SpellingNotCalculated) {}
 
   AttributeCommonInfo(const IdentifierInfo *AttrName,
@@ -134,6 +134,11 @@ public:
   const IdentifierInfo *getScopeName() const { return ScopeName; }
   SourceLocation getScopeLoc() const { return ScopeLoc; }
 
+  /// Gets the normalized full name, which consists of both scope and name and
+  /// with surrounding underscores removed as appropriate (e.g.
+  /// __gnu__::__attr__ will be normalized to gnu::attr).
+  std::string getNormalizedFullName() const;
+
   bool isDeclspecAttribute() const { return SyntaxUsed == AS_Declspec; }
   bool isMicrosoftAttribute() const { return SyntaxUsed == AS_Microsoft; }
 
@@ -146,6 +151,23 @@ public:
 
   bool isCXX11Attribute() const {
     return SyntaxUsed == AS_CXX11 || isAlignasAttribute();
+  }
+
+  bool isAllowedOnLambdas() const {
+    // FIXME: Eventually we want to do a list here populated via tablegen.  But
+    // we want C++ attributes to be permissible on Lambdas, and get propagated
+    // to the call operator declaration.
+    auto ParsedAttr = getParsedKind();
+    if (ParsedAttr == AT_SYCLIntelKernelArgsRestrict ||
+        (ParsedAttr == AT_ReqdWorkGroupSize && isCXX11Attribute()) ||
+        (ParsedAttr == AT_IntelReqdSubGroupSize && isCXX11Attribute()) ||
+        ParsedAttr == AT_SYCLIntelNumSimdWorkItems ||
+        ParsedAttr == AT_SYCLIntelMaxWorkGroupSize ||
+        ParsedAttr == AT_SYCLIntelMaxGlobalWorkDim ||
+        ParsedAttr == AT_SYCLIntelNoGlobalWorkOffset)
+      return true;
+
+    return false;
   }
 
   bool isC2xAttribute() const { return SyntaxUsed == AS_C2x; }

@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_SBThreadPlan_h_
-#define LLDB_SBThreadPlan_h_
+#ifndef LLDB_API_SBTHREADPLAN_H
+#define LLDB_API_SBTHREADPLAN_H
 
 #include "lldb/API/SBDefines.h"
 
@@ -27,6 +27,9 @@ public:
   SBThreadPlan(const lldb::ThreadPlanSP &lldb_object_sp);
 
   SBThreadPlan(lldb::SBThread &thread, const char *class_name);
+
+  SBThreadPlan(lldb::SBThread &thread, const char *class_name, 
+               lldb::SBStructuredData &args_data);
 
   ~SBThreadPlan();
 
@@ -100,6 +103,9 @@ public:
   SBThreadPlan QueueThreadPlanForStepScripted(const char *script_class_name);
   SBThreadPlan QueueThreadPlanForStepScripted(const char *script_class_name,
                                               SBError &error);
+  SBThreadPlan QueueThreadPlanForStepScripted(const char *script_class_name,
+                                              lldb::SBStructuredData &args_data,
+                                              SBError &error);
 
 private:
   friend class SBBreakpoint;
@@ -111,12 +117,13 @@ private:
   friend class lldb_private::QueueImpl;
   friend class SBQueueItem;
 
-  lldb_private::ThreadPlan *get();
+  lldb::ThreadPlanSP GetSP() const { return m_opaque_wp.lock(); }
+  lldb_private::ThreadPlan *get() const { return GetSP().get(); }
   void SetThreadPlan(const lldb::ThreadPlanSP &lldb_object_sp);
 
-  lldb::ThreadPlanSP m_opaque_sp;
+  lldb::ThreadPlanWP m_opaque_wp;
 };
 
 } // namespace lldb
 
-#endif // LLDB_SBThreadPlan_h_
+#endif // LLDB_API_SBTHREADPLAN_H

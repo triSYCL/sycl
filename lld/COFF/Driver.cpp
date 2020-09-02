@@ -21,12 +21,12 @@
 #include "lld/Common/ErrorHandler.h"
 #include "lld/Common/Filesystem.h"
 #include "lld/Common/Memory.h"
-#include "lld/Common/Threads.h"
 #include "lld/Common/Timer.h"
 #include "lld/Common/Version.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringSwitch.h"
 #include "llvm/BinaryFormat/Magic.h"
+#include "llvm/LTO/LTO.h"
 #include "llvm/Object/ArchiveWriter.h"
 #include "llvm/Object/COFFImportFile.h"
 #include "llvm/Object/COFFModuleDefinition.h"
@@ -34,9 +34,11 @@
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Option/Option.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/LEB128.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Support/Parallel.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Process.h"
 #include "llvm/Support/TarWriter.h"
@@ -50,7 +52,7 @@
 using namespace llvm;
 using namespace llvm::object;
 using namespace llvm::COFF;
-using namespace llvm::sys;
+using llvm::sys::Process;
 
 namespace lld {
 namespace coff {
@@ -60,14 +62,17 @@ static Timer inputFileTimer("Input File Reading", Timer::root());
 Configuration *config;
 LinkerDriver *driver;
 
-bool link(ArrayRef<const char *> args, bool canExitEarly, raw_ostream &diag) {
+bool link(ArrayRef<const char *> args, bool canExitEarly, raw_ostream &stdoutOS,
+          raw_ostream &stderrOS) {
+  lld::stdoutOS = &stdoutOS;
+  lld::stderrOS = &stderrOS;
+
   errorHandler().logName = args::getFilenameWithoutExe(args[0]);
-  errorHandler().errorOS = &diag;
   errorHandler().errorLimitExceededMsg =
       "too many errors emitted, stopping now"
       " (use /errorlimit:0 to see all errors)";
   errorHandler().exitEarly = canExitEarly;
-  enableColors(diag.has_colors());
+  stderrOS.enable_colors(stderrOS.has_colors());
 
   config = make<Configuration>();
   symtab = make<SymbolTable>();
@@ -84,6 +89,8 @@ bool link(ArrayRef<const char *> args, bool canExitEarly, raw_ostream &diag) {
   ImportFile::instances.clear();
   BitcodeFile::instances.clear();
   memset(MergeChunk::instances, 0, sizeof(MergeChunk::instances));
+  TpiSource::clear();
+
   return !errorCount();
 }
 
@@ -101,12 +108,16 @@ static std::pair<StringRef, StringRef> getOldNewOptions(opt::InputArgList &args,
   return ret;
 }
 
-// Drop directory components and replace extension with ".exe" or ".dll".
+// Drop directory components and replace extension with
+// ".exe", ".dll" or ".sys".
 static std::string getOutputPath(StringRef path) {
-  auto p = path.find_last_of("\\/");
-  StringRef s = (p == StringRef::npos) ? path : path.substr(p + 1);
-  const char* e = config->dll ? ".dll" : ".exe";
-  return (s.substr(0, s.rfind('.')) + e).str();
+  StringRef ext = ".exe";
+  if (config->dll)
+    ext = ".dll";
+  else if (config->driver)
+    ext = ".sys";
+
+  return (sys::path::stem(path) + ext).str();
 }
 
 // Returns true if S matches /crtend.?\.o$/.
@@ -209,7 +220,7 @@ void LinkerDriver::addBuffer(std::unique_ptr<MemoryBuffer> mb,
       symtab->addFile(make<ObjFile>(mbref));
     break;
   case file_magic::pdb:
-    loadTypeServerSource(mbref);
+    symtab->addFile(make<PDBInputFile>(mbref));
     break;
   case file_magic::coff_cl_gl_object:
     error(filename + ": is not a native COFF file. Recompile without /GL");
@@ -228,9 +239,9 @@ void LinkerDriver::addBuffer(std::unique_ptr<MemoryBuffer> mb,
 }
 
 void LinkerDriver::enqueuePath(StringRef path, bool wholeArchive, bool lazy) {
-  auto future =
-      std::make_shared<std::future<MBErrPair>>(createFutureForFile(path));
-  std::string pathStr = path;
+  auto future = std::make_shared<std::future<MBErrPair>>(
+      createFutureForFile(std::string(path)));
+  std::string pathStr = std::string(path);
   enqueueTask([=]() {
     auto mbOrErr = future->get();
     if (mbOrErr.second) {
@@ -242,7 +253,7 @@ void LinkerDriver::enqueuePath(StringRef path, bool wholeArchive, bool lazy) {
       // the option `/nodefaultlib` than a reference to a file in the root
       // directory.
       std::string nearest;
-      if (COFFOptTable().findNearest(pathStr, nearest) > 1)
+      if (optTable.findNearest(pathStr, nearest) > 1)
         error(msg);
       else
         error(msg + "; did you mean '" + nearest + "'");
@@ -334,11 +345,9 @@ void LinkerDriver::parseDirectives(InputFile *file) {
   ArgParser parser;
   // .drectve is always tokenized using Windows shell rules.
   // /EXPORT: option can appear too many times, processing in fastpath.
-  opt::InputArgList args;
-  std::vector<StringRef> exports;
-  std::tie(args, exports) = parser.parseDirectives(s);
+  ParsedDirectives directives = parser.parseDirectives(s);
 
-  for (StringRef e : exports) {
+  for (StringRef e : directives.exports) {
     // If a common header file contains dllexported function
     // declarations, many object files may end up with having the
     // same /EXPORT options. In order to save cost of parsing them,
@@ -357,7 +366,11 @@ void LinkerDriver::parseDirectives(InputFile *file) {
     config->exports.push_back(exp);
   }
 
-  for (auto *arg : args) {
+  // Handle /include: in bulk.
+  for (StringRef inc : directives.includes)
+    addUndefined(inc);
+
+  for (auto *arg : directives.args) {
     switch (arg->getOption().getID()) {
     case OPT_aligncomm:
       parseAligncomm(arg->getValue());
@@ -443,7 +456,7 @@ Optional<StringRef> LinkerDriver::findFile(StringRef filename) {
   }
 
   if (path.endswith_lower(".lib"))
-    visitedLibs.insert(sys::path::filename(path));
+    visitedLibs.insert(std::string(sys::path::filename(path)));
   return path;
 }
 
@@ -602,6 +615,7 @@ static std::string createResponseFile(const opt::InputArgList &args,
   for (auto *arg : args) {
     switch (arg->getOption().getID()) {
     case OPT_linkrepro:
+    case OPT_reproduce:
     case OPT_INPUT:
     case OPT_defaultlib:
     case OPT_libpath:
@@ -614,6 +628,7 @@ static std::string createResponseFile(const opt::InputArgList &args,
       break;
     case OPT_implib:
     case OPT_pdb:
+    case OPT_pdbstripped:
     case OPT_out:
       os << arg->getSpelling() << sys::path::filename(arg->getValue()) << "\n";
       break;
@@ -630,7 +645,7 @@ static std::string createResponseFile(const opt::InputArgList &args,
   for (StringRef path : filePaths)
     os << quote(relativeToRoot(path)) << "\n";
 
-  return data.str();
+  return std::string(data.str());
 }
 
 enum class DebugKind { Unknown, None, Full, FastLink, GHash, Dwarf, Symtab };
@@ -696,28 +711,28 @@ static unsigned parseDebugTypes(const opt::InputArgList &args) {
   return debugTypes;
 }
 
-static std::string getMapFile(const opt::InputArgList &args) {
-  auto *arg = args.getLastArg(OPT_lldmap, OPT_lldmap_file);
+static std::string getMapFile(const opt::InputArgList &args,
+                              opt::OptSpecifier os, opt::OptSpecifier osFile) {
+  auto *arg = args.getLastArg(os, osFile);
   if (!arg)
     return "";
-  if (arg->getOption().getID() == OPT_lldmap_file)
+  if (arg->getOption().getID() == osFile.getID())
     return arg->getValue();
 
-  assert(arg->getOption().getID() == OPT_lldmap);
+  assert(arg->getOption().getID() == os.getID());
   StringRef outFile = config->outputFile;
   return (outFile.substr(0, outFile.rfind('.')) + ".map").str();
 }
 
 static std::string getImplibPath() {
   if (!config->implib.empty())
-    return config->implib;
+    return std::string(config->implib);
   SmallString<128> out = StringRef(config->outputFile);
   sys::path::replace_extension(out, ".lib");
-  return out.str();
+  return std::string(out.str());
 }
 
-//
-// The import name is caculated as the following:
+// The import name is calculated as follows:
 //
 //        | LIBRARY w/ ext |   LIBRARY w/o ext   | no LIBRARY
 //   -----+----------------+---------------------+------------------
@@ -738,16 +753,16 @@ static std::string getImportName(bool asLib) {
                                    (config->dll || asLib) ? ".dll" : ".exe");
   }
 
-  return out.str();
+  return std::string(out.str());
 }
 
 static void createImportLibrary(bool asLib) {
   std::vector<COFFShortExport> exports;
   for (Export &e1 : config->exports) {
     COFFShortExport e2;
-    e2.Name = e1.name;
-    e2.SymbolName = e1.symbolName;
-    e2.ExtName = e1.extName;
+    e2.Name = std::string(e1.name);
+    e2.SymbolName = std::string(e1.symbolName);
+    e2.ExtName = std::string(e1.extName);
     e2.Ordinal = e1.ordinal;
     e2.Noname = e1.noname;
     e2.Data = e1.data;
@@ -808,8 +823,8 @@ static void parseModuleDefs(StringRef path) {
       mb->getMemBufferRef(), config->machine, config->mingw));
 
   if (config->outputFile.empty())
-    config->outputFile = saver.save(m.OutputFile);
-  config->importName = saver.save(m.ImportName);
+    config->outputFile = std::string(saver.save(m.OutputFile));
+  config->importName = std::string(saver.save(m.ImportName));
   if (m.ImageBase)
     config->imageBase = m.ImageBase;
   if (m.StackReserve)
@@ -835,7 +850,8 @@ static void parseModuleDefs(StringRef path) {
     // and set as "ExtName = Name". If Name has the form "OtherDll.Func",
     // it shouldn't be a normal exported function but a forward to another
     // DLL instead. This is supported by both MS and GNU linkers.
-    if (e1.ExtName != e1.Name && StringRef(e1.Name).contains('.')) {
+    if (!e1.ExtName.empty() && e1.ExtName != e1.Name &&
+        StringRef(e1.Name).contains('.')) {
       e2.name = saver.save(e1.ExtName);
       e2.forwardTo = saver.save(e1.Name);
       config->exports.push_back(e2);
@@ -894,7 +910,8 @@ static void parseOrderFile(StringRef arg) {
   // All symbols that were not present in a given order file are
   // considered to have the lowest priority 0 and are placed at
   // end of an output section.
-  for (std::string s : args::getLines(mb->getMemBufferRef())) {
+  for (StringRef arg : args::getLines(mb->getMemBufferRef())) {
+    std::string s(arg);
     if (config->machine == I386 && !isDecorated(s))
       s = "_" + s;
 
@@ -1070,13 +1087,29 @@ void LinkerDriver::maybeExportMinGWSymbols(const opt::InputArgList &args) {
   });
 }
 
-static const char *libcallRoutineNames[] = {
-#define HANDLE_LIBCALL(code, name) name,
-#include "llvm/IR/RuntimeLibcalls.def"
-#undef HANDLE_LIBCALL
-};
+// lld has a feature to create a tar file containing all input files as well as
+// all command line options, so that other people can run lld again with exactly
+// the same inputs. This feature is accessible via /linkrepro and /reproduce.
+//
+// /linkrepro and /reproduce are very similar, but /linkrepro takes a directory
+// name while /reproduce takes a full path. We have /linkrepro for compatibility
+// with Microsoft link.exe.
+Optional<std::string> getReproduceFile(const opt::InputArgList &args) {
+  if (auto *arg = args.getLastArg(OPT_reproduce))
+    return std::string(arg->getValue());
+
+  if (auto *arg = args.getLastArg(OPT_linkrepro)) {
+    SmallString<64> path = StringRef(arg->getValue());
+    sys::path::append(path, "repro.tar");
+    return std::string(path);
+  }
+
+  return None;
+}
 
 void LinkerDriver::link(ArrayRef<const char *> argsArr) {
+  ScopedTimer rootTimer(Timer::root());
+
   // Needed for LTO.
   InitializeAllTargetInfos();
   InitializeAllTargets();
@@ -1118,19 +1151,28 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
     return;
   }
 
-  lld::threadsEnabled = args.hasFlag(OPT_threads, OPT_threads_no, true);
+  // /threads: takes a positive integer and provides the default value for
+  // /opt:lldltojobs=.
+  if (auto *arg = args.getLastArg(OPT_threads)) {
+    StringRef v(arg->getValue());
+    unsigned threads = 0;
+    if (!llvm::to_integer(v, threads, 0) || threads == 0)
+      error(arg->getSpelling() + ": expected a positive integer, but got '" +
+            arg->getValue() + "'");
+    parallel::strategy = hardware_concurrency(threads);
+    config->thinLTOJobs = v.str();
+  }
 
   if (args.hasArg(OPT_show_timing))
     config->showTiming = true;
 
   config->showSummary = args.hasArg(OPT_summary);
 
-  ScopedTimer t(Timer::root());
   // Handle --version, which is an lld extension. This option is a bit odd
   // because it doesn't start with "/", but we deliberately chose "--" to
   // avoid conflict with /version and for compatibility with clang-cl.
   if (args.hasArg(OPT_dash_dash_version)) {
-    outs() << getLLDVersion() << "\n";
+    lld::outs() << getLLDVersion() << "\n";
     return;
   }
 
@@ -1138,20 +1180,20 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
   // options are handled.
   config->mingw = args.hasArg(OPT_lldmingw);
 
-  if (auto *arg = args.getLastArg(OPT_linkrepro)) {
-    const char *path = arg->getValue();
-
+  // Handle /linkrepro and /reproduce.
+  if (Optional<std::string> path = getReproduceFile(args)) {
     Expected<std::unique_ptr<TarWriter>> errOrWriter =
-        TarWriter::create(path, path::stem(path));
+        TarWriter::create(*path, sys::path::stem(*path));
+
     if (errOrWriter) {
       tar = std::move(*errOrWriter);
-      tar->append("version.txt", getLLDVersion() + "\n");
     } else {
-      error("/linkrepro: " + toString(errOrWriter.takeError()));
+      error("/linkrepro: failed to open " + *path + ": " +
+            toString(errOrWriter.takeError()));
     }
   }
 
-  if (!args.hasArg(OPT_INPUT)) {
+  if (!args.hasArg(OPT_INPUT, OPT_wholearchive_file)) {
     if (args.hasArg(OPT_deffile))
       config->noEntry = true;
     else
@@ -1176,6 +1218,8 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
         config->warnDebugInfoUnusable = false;
       else if (s == "4217")
         config->warnLocallyDefinedImported = false;
+      else if (s == "longsections")
+        config->warnLongSectionNames = false;
       // Other warning numbers are ignored.
     }
   }
@@ -1215,6 +1259,16 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
   // Handle /debugtype
   config->debugTypes = parseDebugTypes(args);
 
+  // Handle /driver[:uponly|:wdm].
+  config->driverUponly = args.hasArg(OPT_driver_uponly) ||
+                         args.hasArg(OPT_driver_uponly_wdm) ||
+                         args.hasArg(OPT_driver_wdm_uponly);
+  config->driverWdm = args.hasArg(OPT_driver_wdm) ||
+                      args.hasArg(OPT_driver_uponly_wdm) ||
+                      args.hasArg(OPT_driver_wdm_uponly);
+  config->driver =
+      config->driverUponly || config->driverWdm || args.hasArg(OPT_driver);
+
   // Handle /pdb
   bool shouldCreatePDB =
       (debug == DebugKind::Full || debug == DebugKind::GHash);
@@ -1225,10 +1279,22 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
       config->pdbAltPath = arg->getValue();
     if (args.hasArg(OPT_natvis))
       config->natvisFiles = args.getAllArgValues(OPT_natvis);
+    if (args.hasArg(OPT_pdbstream)) {
+      for (const StringRef value : args.getAllArgValues(OPT_pdbstream)) {
+        const std::pair<StringRef, StringRef> nameFile = value.split("=");
+        const StringRef name = nameFile.first;
+        const std::string file = nameFile.second.str();
+        config->namedStreams[name] = file;
+      }
+    }
 
     if (auto *arg = args.getLastArg(OPT_pdb_source_path))
       config->pdbSourcePath = arg->getValue();
   }
+
+  // Handle /pdbstripped
+  if (args.hasArg(OPT_pdbstripped))
+    warn("ignoring /pdbstripped flag, it is not yet supported");
 
   // Handle /noentry
   if (args.hasArg(OPT_noentry)) {
@@ -1375,9 +1441,9 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
           error("/opt:lldlto: invalid optimization level: " + optLevel);
       } else if (s.startswith("lldltojobs=")) {
         StringRef jobs = s.substr(11);
-        if (jobs.getAsInteger(10, config->thinLTOJobs) ||
-            config->thinLTOJobs == 0)
+        if (!get_threadpool_strategy(jobs))
           error("/opt:lldltojobs: invalid job count: " + jobs);
+        config->thinLTOJobs = jobs.str();
       } else if (s.startswith("lldltopartitions=")) {
         StringRef n = s.substr(17);
         if (n.getAsInteger(10, config->ltoPartitions) ||
@@ -1448,6 +1514,8 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
     parseNumbers(arg->getValue(), &config->align);
     if (!isPowerOf2_64(config->align))
       error("/align: not a power of two: " + StringRef(arg->getValue()));
+    if (!args.hasArg(OPT_driver))
+      warn("/align specified without /driver; image may not run");
   }
 
   // Handle /aligncomm
@@ -1506,6 +1574,7 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
                        !args.hasArg(OPT_profile));
   config->integrityCheck =
       args.hasFlag(OPT_integritycheck, OPT_integritycheck_no, false);
+  config->cetCompat = args.hasFlag(OPT_cetcompat, OPT_cetcompat_no, false);
   config->nxCompat = args.hasFlag(OPT_nxcompat, OPT_nxcompat_no, true);
   for (auto *arg : args.filtered(OPT_swaprun))
     parseSwaprun(arg->getValue());
@@ -1514,8 +1583,24 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
   config->debugDwarf = debug == DebugKind::Dwarf;
   config->debugGHashes = debug == DebugKind::GHash;
   config->debugSymtab = debug == DebugKind::Symtab;
+  config->autoImport =
+      args.hasFlag(OPT_auto_import, OPT_auto_import_no, config->mingw);
+  config->pseudoRelocs = args.hasFlag(
+      OPT_runtime_pseudo_reloc, OPT_runtime_pseudo_reloc_no, config->mingw);
 
-  config->mapFile = getMapFile(args);
+  // Don't warn about long section names, such as .debug_info, for mingw or when
+  // -debug:dwarf is requested.
+  if (config->mingw || config->debugDwarf)
+    config->warnLongSectionNames = false;
+
+  config->lldmapFile = getMapFile(args, OPT_lldmap, OPT_lldmap_file);
+  config->mapFile = getMapFile(args, OPT_map, OPT_map_file);
+
+  if (config->lldmapFile != "" && config->lldmapFile == config->mapFile) {
+    warn("/lldmap and /map have the same output file '" + config->mapFile +
+         "'.\n>>> ignoring /lldmap");
+    config->lldmapFile.clear();
+  }
 
   if (config->incremental && args.hasArg(OPT_profile)) {
     warn("ignoring '/incremental' due to '/profile' specification");
@@ -1661,7 +1746,7 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
   }
 
   // Handle generation of import library from a def file.
-  if (!args.hasArg(OPT_INPUT)) {
+  if (!args.hasArg(OPT_INPUT, OPT_wholearchive_file)) {
     fixupExports();
     createImportLibrary(/*asLib=*/true);
     return;
@@ -1684,6 +1769,9 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
       StringRef s = (config->machine == I386) ? "__DllMainCRTStartup@12"
                                               : "_DllMainCRTStartup";
       config->entry = addUndefined(s);
+    } else if (config->driverWdm) {
+      // /driver:wdm implies /entry:_NtProcessStartup
+      config->entry = addUndefined(mangle("_NtProcessStartup"));
     } else {
       // Windows specific -- If entry point name is not given, we need to
       // infer that from user-defined entry name.
@@ -1707,8 +1795,8 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
 
   // Set default image name if neither /out or /def set it.
   if (config->outputFile.empty()) {
-    config->outputFile =
-        getOutputPath((*args.filtered(OPT_INPUT).begin())->getValue());
+    config->outputFile = getOutputPath(
+        (*args.filtered(OPT_INPUT, OPT_wholearchive_file).begin())->getValue());
   }
 
   // Fail early if an output file is not writable.
@@ -1760,9 +1848,11 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
   // Needed for MSVC 2017 15.5 CRT.
   symtab->addAbsolute(mangle("__enclave_config"), 0);
 
-  if (config->mingw) {
+  if (config->pseudoRelocs) {
     symtab->addAbsolute(mangle("__RUNTIME_PSEUDO_RELOC_LIST__"), 0);
     symtab->addAbsolute(mangle("__RUNTIME_PSEUDO_RELOC_LIST_END__"), 0);
+  }
+  if (config->mingw) {
     symtab->addAbsolute(mangle("__CTOR_LIST__"), 0);
     symtab->addAbsolute(mangle("__DTOR_LIST__"), 0);
   }
@@ -1804,7 +1894,7 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
     // bitcode file in an archive member, we need to arrange to use LTO to
     // compile those archive members by adding them to the link beforehand.
     if (!BitcodeFile::instances.empty())
-      for (const char *s : libcallRoutineNames)
+      for (auto *s : lto::LTO::getRuntimeLibcallSymbols())
         symtab->addLibcall(s);
 
     // Windows specific -- if __load_config_used can be resolved, resolve it.
@@ -1820,7 +1910,8 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
     while (run());
   }
 
-  if (config->mingw) {
+  if (config->autoImport) {
+    // MinGW specific.
     // Load any further object files that might be needed for doing automatic
     // imports.
     //
@@ -1952,7 +2043,7 @@ void LinkerDriver::link(ArrayRef<const char *> argsArr) {
   writeResult();
 
   // Stop early so we can print the results.
-  Timer::root().stop();
+  rootTimer.stop();
   if (config->showTiming)
     Timer::root().print();
 }

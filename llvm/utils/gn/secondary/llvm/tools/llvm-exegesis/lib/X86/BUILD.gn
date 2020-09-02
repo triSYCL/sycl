@@ -14,8 +14,6 @@ static_library("X86") {
     # depend on this Target/X86-internal build target.
     "//llvm/lib/Target/X86/MCTargetDesc",
   ]
-  sources = [
-    "Target.cpp",
-  ]
+  sources = [ "Target.cpp" ]
   include_dirs = [ "//llvm/lib/Target/X86" ]
 }

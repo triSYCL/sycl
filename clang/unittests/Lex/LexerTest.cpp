@@ -11,9 +11,11 @@
 #include "clang/Basic/DiagnosticOptions.h"
 #include "clang/Basic/FileManager.h"
 #include "clang/Basic/LangOptions.h"
+#include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/SourceManager.h"
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/TargetOptions.h"
+#include "clang/Basic/TokenKinds.h"
 #include "clang/Lex/HeaderSearch.h"
 #include "clang/Lex/HeaderSearchOptions.h"
 #include "clang/Lex/MacroArgs.h"
@@ -21,11 +23,13 @@
 #include "clang/Lex/ModuleLoader.h"
 #include "clang/Lex/Preprocessor.h"
 #include "clang/Lex/PreprocessorOptions.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
-
-using namespace clang;
+#include <vector>
 
 namespace {
+using namespace clang;
+using testing::ElementsAre;
 
 // The test fixture.
 class LexerTest : public ::testing::Test {
@@ -94,7 +98,7 @@ protected:
                              SourceMgr, LangOpts, &Invalid);
     if (Invalid)
       return "<INVALID>";
-    return Str;
+    return std::string(Str);
   }
 
   FileSystemOptions FileMgrOpts;
@@ -535,4 +539,34 @@ TEST_F(LexerTest, CharRangeOffByOne) {
   EXPECT_EQ(Lexer::getSourceText(CR, SourceMgr, LangOpts), "MOO"); // Was "MO".
 }
 
+TEST_F(LexerTest, FindNextToken) {
+  Lex("int abcd = 0;\n"
+      "int xyz = abcd;\n");
+  std::vector<std::string> GeneratedByNextToken;
+  SourceLocation Loc =
+      SourceMgr.getLocForStartOfFile(SourceMgr.getMainFileID());
+  while (true) {
+    auto T = Lexer::findNextToken(Loc, SourceMgr, LangOpts);
+    ASSERT_TRUE(T.hasValue());
+    if (T->is(tok::eof))
+      break;
+    GeneratedByNextToken.push_back(getSourceText(*T, *T));
+    Loc = T->getLocation();
+  }
+  EXPECT_THAT(GeneratedByNextToken, ElementsAre("abcd", "=", "0", ";", "int",
+                                                "xyz", "=", "abcd", ";"));
+}
+
+TEST_F(LexerTest, CreatedFIDCountForPredefinedBuffer) {
+  TrivialModuleLoader ModLoader;
+  auto PP = CreatePP("", ModLoader);
+  while (1) {
+    Token tok;
+    PP->Lex(tok);
+    if (tok.is(tok::eof))
+      break;
+  }
+  EXPECT_EQ(SourceMgr.getNumCreatedFIDsForFileID(PP->getPredefinesFileID()),
+            1U);
+}
 } // anonymous namespace

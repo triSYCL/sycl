@@ -26,14 +26,13 @@
 #include "Symbols.h"
 #include "SyntheticSections.h"
 #include "lld/Common/Strings.h"
-#include "lld/Common/Threads.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/Support/Parallel.h"
 #include "llvm/Support/raw_ostream.h"
 
 using namespace llvm;
 using namespace llvm::object;
-
 using namespace lld;
 using namespace lld::elf;
 
@@ -214,7 +213,7 @@ void elf::writeMapFile() {
 }
 
 static void print(StringRef a, StringRef b) {
-  outs() << left_justify(a, 49) << " " << b << "\n";
+  lld::outs() << left_justify(a, 49) << " " << b << "\n";
 }
 
 // Output a cross reference table to stdout. This is for --cref.
@@ -245,7 +244,7 @@ void elf::writeCrossReferenceTable() {
   }
 
   // Print out a header.
-  outs() << "Cross Reference Table\n\n";
+  lld::outs() << "Cross Reference Table\n\n";
   print("Symbol", "File");
 
   // Print out a table.
@@ -258,4 +257,22 @@ void elf::writeCrossReferenceTable() {
       if (file != sym->file)
         print("", toString(file));
   }
+}
+
+void elf::writeArchiveStats() {
+  if (config->printArchiveStats.empty())
+    return;
+
+  std::error_code ec;
+  raw_fd_ostream os(config->printArchiveStats, ec, sys::fs::OF_None);
+  if (ec) {
+    error("--print-archive-stats=: cannot open " + config->printArchiveStats +
+          ": " + ec.message());
+    return;
+  }
+
+  os << "members\tfetched\tarchive\n";
+  for (const ArchiveFile *f : archiveFiles)
+    os << f->getMemberCount() << '\t' << f->getFetchedMemberCount() << '\t'
+       << f->getName() << '\n';
 }

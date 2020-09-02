@@ -1,4 +1,4 @@
-//===-- BreakpadRecords.cpp ----------------------------------- -*- C++ -*-===//
+//===-- BreakpadRecords.cpp -----------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -72,7 +72,7 @@ llvm::Triple::ArchType stringTo<llvm::Triple::ArchType>(llvm::StringRef Str) {
       .Case("sparc", Triple::sparc)
       .Case("sparcv9", Triple::sparcv9)
       .Case("x86", Triple::x86)
-      .Case("x86_64", Triple::x86_64)
+      .Cases("x86_64", "x86_64h", Triple::x86_64)
       .Default(Triple::UnknownArch);
 }
 
@@ -205,7 +205,7 @@ llvm::Optional<InfoRecord> InfoRecord::parse(llvm::StringRef Line) {
   // use this as the UUID. Otherwise, we should revert back to the module ID.
   UUID ID;
   if (Line.trim().empty()) {
-    if (Str.empty() || ID.SetFromStringRef(Str, Str.size() / 2) != Str.size())
+    if (Str.empty() || !ID.SetFromStringRef(Str))
       return llvm::None;
   }
   return InfoRecord(std::move(ID));

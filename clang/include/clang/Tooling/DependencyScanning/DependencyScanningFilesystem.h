@@ -56,6 +56,9 @@ public:
   /// \returns True if the entry is valid.
   bool isValid() const { return !MaybeStat || MaybeStat->isStatusKnown(); }
 
+  /// \returns True if the current entry points to a directory.
+  bool isDirectory() const { return MaybeStat && MaybeStat->isDirectory(); }
+
   /// \returns The error or the file's contents.
   llvm::ErrorOr<StringRef> getContents() const {
     if (!MaybeStat)
@@ -164,6 +167,9 @@ private:
     auto It = Cache.find(Filename);
     return It == Cache.end() ? nullptr : It->getValue();
   }
+
+  llvm::ErrorOr<const CachedFileSystemEntry *>
+  getOrCreateFileSystemEntry(const StringRef Filename);
 
   DependencyScanningFilesystemSharedCache &SharedCache;
   /// The local cache is used by the worker thread to cache file system queries

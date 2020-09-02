@@ -1,5 +1,6 @@
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -I %sycl_source_dir %s -o %t.out
 // RUN: %t.out
+
 //===- MultipleDevices.cpp - Test checking multi-device execution --------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -126,6 +127,8 @@ int main() {
     Result &= multidevice_test(MyQueue1, MyQueue2);
   } catch(cl::sycl::runtime_error &) {
     std::cout << "Skipping CPU and GPU" << std::endl;
+  } catch (cl::sycl::compile_program_error &) {
+    std::cout << "Skipping CPU and GPU" << std::endl;
   }
 
   try {
@@ -134,6 +137,8 @@ int main() {
     Result &= multidevice_test(MyQueue1, MyQueue2);
   } catch(cl::sycl::runtime_error &) {
     std::cout << "Skipping host and GPU" << std::endl;
+  } catch (cl::sycl::compile_program_error &) {
+    std::cout << "Skipping CPU and GPU" << std::endl;
   }
 
   try {
@@ -142,6 +147,8 @@ int main() {
     Result &= multidevice_test(MyQueue1, MyQueue2);
   } catch (cl::sycl::runtime_error &) {
     std::cout << "Skipping GPU and GPU" << std::endl;
+  } catch (cl::sycl::compile_program_error &) {
+    std::cout << "Skipping CPU and GPU" << std::endl;
   }
 
   return Result;

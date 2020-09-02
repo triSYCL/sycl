@@ -20,12 +20,21 @@ def L: JoinedOrSeparate<["-"], "L">, MetaVarName<"<dir>">,
   HelpText<"Add a directory to the library search path">;
 def Bdynamic: F<"Bdynamic">, HelpText<"Link against shared libraries">;
 def Bstatic: F<"Bstatic">, HelpText<"Do not link against shared libraries">;
+def disable_auto_import: F<"disable-auto-import">,
+    HelpText<"Don't automatically import data symbols from other DLLs without dllimport">;
+def disable_runtime_pseudo_reloc: F<"disable-runtime-pseudo-reloc">,
+    HelpText<"Don't do automatic imports that require runtime fixups">;
 def dynamicbase: F<"dynamicbase">, HelpText<"Enable ASLR">;
+def enable_auto_import: F<"enable-auto-import">,
+    HelpText<"Automatically import data symbols from other DLLs where needed">;
+def enable_runtime_pseudo_reloc: F<"enable-runtime-pseudo-reloc">,
+    HelpText<"Allow automatic imports that require runtime fixups">;
 defm entry: Eq<"entry", "Name of entry point symbol">, MetaVarName<"<entry>">;
 def exclude_all_symbols: F<"exclude-all-symbols">,
     HelpText<"Don't automatically export any symbols">;
 def export_all_symbols: F<"export-all-symbols">,
     HelpText<"Export all symbols even if a def file or dllexport attributes are used">;
+defm file_alignment: Eq<"file-alignment", "Set file alignment">;
 def gc_sections: F<"gc-sections">, HelpText<"Remove unused sections">;
 def help: F<"help">, HelpText<"Print option help">;
 def icf: J<"icf=">, HelpText<"Identical code folding">;
@@ -56,6 +65,7 @@ def o: JoinedOrSeparate<["-"], "o">, MetaVarName<"<path>">,
   HelpText<"Path to file to write output">;
 defm out_implib: Eq<"out-implib", "Import library name">;
 defm output_def: Eq<"output-def", "Output def file">;
+defm section_alignment: Eq<"section-alignment", "Set section alignment">;
 def shared: F<"shared">, HelpText<"Build a shared object">;
 defm subs: Eq<"subsystem", "Specify subsystem">;
 def stack: S<"stack">;
@@ -63,6 +73,7 @@ def strip_all: F<"strip-all">,
     HelpText<"Omit all symbol information from the output binary">;
 def strip_debug: F<"strip-debug">,
     HelpText<"Omit all debug information, but keep symbol information">;
+defm reproduce: Eq<"reproduce", "Write a tar file containing input files and command line options to reproduce link">;
 defm undefined: Eq<"undefined", "Include symbol in the link, if available">;
 def whole_archive: F<"whole-archive">,
     HelpText<"Include all object files for following archives">;
@@ -79,6 +90,8 @@ def appcontainer: F<"appcontainer">, HelpText<"Set the appcontainer flag in the 
 defm delayload: Eq<"delayload", "DLL to load only on demand">;
 def mllvm: S<"mllvm">;
 defm pdb: Eq<"pdb", "Output PDB debug info file, chosen implicitly if the argument is empty">;
+defm thinlto_cache_dir: EqLong<"thinlto-cache-dir",
+  "Path to ThinLTO cached object file directory">;
 def Xlink : J<"Xlink=">, MetaVarName<"<arg>">,
     HelpText<"Pass <arg> to the COFF linker">;
 
@@ -93,7 +106,6 @@ def: Joined<["-"], "O">;
 def: F<"build-id">;
 def: F<"disable-auto-image-base">;
 def: F<"enable-auto-image-base">;
-def: F<"enable-auto-import">, HelpText<"Ignored; listed for libtool compatibility">;
 def: F<"end-group">;
 def: Flag<["--"], "full-shutdown">;
 def: F<"high-entropy-va">;

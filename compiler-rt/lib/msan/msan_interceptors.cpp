@@ -765,17 +765,24 @@ INTERCEPTOR(char *, fgets_unlocked, char *s, int size, void *stream) {
 #define MSAN_MAYBE_INTERCEPT_FGETS_UNLOCKED
 #endif
 
+#define INTERCEPTOR_GETRLIMIT_BODY(func, resource, rlim)  \
+  if (msan_init_is_running)                               \
+    return REAL(getrlimit)(resource, rlim);               \
+  ENSURE_MSAN_INITED();                                   \
+  int res = REAL(func)(resource, rlim);                   \
+  if (!res)                                               \
+    __msan_unpoison(rlim, __sanitizer::struct_rlimit_sz); \
+  return res
+
 INTERCEPTOR(int, getrlimit, int resource, void *rlim) {
-  if (msan_init_is_running)
-    return REAL(getrlimit)(resource, rlim);
-  ENSURE_MSAN_INITED();
-  int res = REAL(getrlimit)(resource, rlim);
-  if (!res)
-    __msan_unpoison(rlim, __sanitizer::struct_rlimit_sz);
-  return res;
+  INTERCEPTOR_GETRLIMIT_BODY(getrlimit, resource, rlim);
 }
 
 #if !SANITIZER_FREEBSD && !SANITIZER_NETBSD
+INTERCEPTOR(int, __getrlimit, int resource, void *rlim) {
+  INTERCEPTOR_GETRLIMIT_BODY(__getrlimit, resource, rlim);
+}
+
 INTERCEPTOR(int, getrlimit64, int resource, void *rlim) {
   if (msan_init_is_running) return REAL(getrlimit64)(resource, rlim);
   ENSURE_MSAN_INITED();
@@ -806,37 +813,15 @@ INTERCEPTOR(int, prlimit64, int pid, int resource, void *new_rlimit,
   return res;
 }
 
+#define MSAN_MAYBE_INTERCEPT___GETRLIMIT INTERCEPT_FUNCTION(__getrlimit)
 #define MSAN_MAYBE_INTERCEPT_GETRLIMIT64 INTERCEPT_FUNCTION(getrlimit64)
 #define MSAN_MAYBE_INTERCEPT_PRLIMIT INTERCEPT_FUNCTION(prlimit)
 #define MSAN_MAYBE_INTERCEPT_PRLIMIT64 INTERCEPT_FUNCTION(prlimit64)
 #else
+#define MSAN_MAYBE_INTERCEPT___GETRLIMIT
 #define MSAN_MAYBE_INTERCEPT_GETRLIMIT64
 #define MSAN_MAYBE_INTERCEPT_PRLIMIT
 #define MSAN_MAYBE_INTERCEPT_PRLIMIT64
-#endif
-
-#if SANITIZER_FREEBSD
-// FreeBSD's <sys/utsname.h> define uname() as
-// static __inline int uname(struct utsname *name) {
-//   return __xuname(SYS_NMLN, (void*)name);
-// }
-INTERCEPTOR(int, __xuname, int size, void *utsname) {
-  ENSURE_MSAN_INITED();
-  int res = REAL(__xuname)(size, utsname);
-  if (!res)
-    __msan_unpoison(utsname, __sanitizer::struct_utsname_sz);
-  return res;
-}
-#define MSAN_INTERCEPT_UNAME INTERCEPT_FUNCTION(__xuname)
-#else
-INTERCEPTOR(int, uname, struct utsname *utsname) {
-  ENSURE_MSAN_INITED();
-  int res = REAL(uname)(utsname);
-  if (!res)
-    __msan_unpoison(utsname, __sanitizer::struct_utsname_sz);
-  return res;
-}
-#define MSAN_INTERCEPT_UNAME INTERCEPT_FUNCTION(uname)
 #endif
 
 INTERCEPTOR(int, gethostname, char *name, SIZE_T len) {
@@ -944,7 +929,9 @@ void __sanitizer_dtor_callback(const void *data, uptr size) {
 template <class Mmap>
 static void *mmap_interceptor(Mmap real_mmap, void *addr, SIZE_T length,
                               int prot, int flags, int fd, OFF64_T offset) {
-  if (addr && !MEM_IS_APP(addr)) {
+  SIZE_T rounded_length = RoundUpTo(length, GetPageSize());
+  void *end_addr = (char *)addr + (rounded_length - 1);
+  if (addr && (!MEM_IS_APP(addr) || !MEM_IS_APP(end_addr))) {
     if (flags & map_fixed) {
       errno = errno_EINVAL;
       return (void *)-1;
@@ -953,7 +940,18 @@ static void *mmap_interceptor(Mmap real_mmap, void *addr, SIZE_T length,
     }
   }
   void *res = real_mmap(addr, length, prot, flags, fd, offset);
-  if (res != (void *)-1) __msan_unpoison(res, RoundUpTo(length, GetPageSize()));
+  if (res != (void *)-1) {
+    void *end_res = (char *)res + (rounded_length - 1);
+    if (MEM_IS_APP(res) && MEM_IS_APP(end_res)) {
+      __msan_unpoison(res, rounded_length);
+    } else {
+      // Application has attempted to map more memory than is supported by
+      // MSAN. Act as if we ran out of memory.
+      internal_munmap(res, length);
+      errno = errno_ENOMEM;
+      return (void *)-1;
+    }
+  }
   return res;
 }
 
@@ -1061,8 +1059,9 @@ INTERCEPTOR(int, pthread_key_create, __sanitizer_pthread_key_t *key,
 }
 
 #if SANITIZER_NETBSD
-INTERCEPTOR(void, __libc_thr_keycreate, void *m, void (*dtor)(void *value)) \
-  ALIAS(WRAPPER_NAME(pthread_key_create));
+INTERCEPTOR(int, __libc_thr_keycreate, __sanitizer_pthread_key_t *m,
+            void (*dtor)(void *value))
+ALIAS(WRAPPER_NAME(pthread_key_create));
 #endif
 
 INTERCEPTOR(int, pthread_join, void *th, void **retval) {
@@ -1304,6 +1303,8 @@ int OnExit() {
     if (filename && map)                                                       \
       ForEachMappedRegion(map, __msan_unpoison);                               \
   } while (false)
+
+#define COMMON_INTERCEPTOR_NOTHING_IS_INITIALIZED (!msan_inited)
 
 #define COMMON_INTERCEPTOR_GET_TLS_RANGE(begin, end)                           \
   if (MsanThread *t = GetCurrentThread()) {                                    \
@@ -1678,10 +1679,10 @@ void InitializeInterceptors() {
   INTERCEPT_FUNCTION(socketpair);
   MSAN_MAYBE_INTERCEPT_FGETS_UNLOCKED;
   INTERCEPT_FUNCTION(getrlimit);
+  MSAN_MAYBE_INTERCEPT___GETRLIMIT;
   MSAN_MAYBE_INTERCEPT_GETRLIMIT64;
   MSAN_MAYBE_INTERCEPT_PRLIMIT;
   MSAN_MAYBE_INTERCEPT_PRLIMIT64;
-  MSAN_INTERCEPT_UNAME;
   INTERCEPT_FUNCTION(gethostname);
   MSAN_MAYBE_INTERCEPT_EPOLL_WAIT;
   MSAN_MAYBE_INTERCEPT_EPOLL_PWAIT;

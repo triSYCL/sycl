@@ -15,6 +15,8 @@
 
 using namespace clang;
 
+char MultiplexExternalSemaSource::ID;
+
 ///Constructs a new multiplexing external sema source and appends the
 /// given element to it.
 ///
@@ -170,13 +172,6 @@ Module *MultiplexExternalSemaSource::getModule(unsigned ID) {
   return nullptr;
 }
 
-bool MultiplexExternalSemaSource::DeclIsFromPCHWithObjectFile(const Decl *D) {
-  for (auto *S : Sources)
-    if (S->DeclIsFromPCHWithObjectFile(D))
-      return true;
-  return false;
-}
-
 bool MultiplexExternalSemaSource::layoutRecordType(const RecordDecl *Record,
                                                    uint64_t &Size,
                                                    uint64_t &Alignment,
@@ -271,6 +266,12 @@ void MultiplexExternalSemaSource::ReadExtVectorDecls(
                                      SmallVectorImpl<TypedefNameDecl*> &Decls) {
   for(size_t i = 0; i < Sources.size(); ++i)
     Sources[i]->ReadExtVectorDecls(Decls);
+}
+
+void MultiplexExternalSemaSource::ReadDeclsToCheckForDeferredDiags(
+    llvm::SmallVector<Decl *, 4> &Decls) {
+  for(size_t i = 0; i < Sources.size(); ++i)
+    Sources[i]->ReadDeclsToCheckForDeferredDiags(Decls);
 }
 
 void MultiplexExternalSemaSource::ReadUnusedLocalTypedefNameCandidates(

@@ -185,6 +185,9 @@ public:
     int MaxDepth;
   };
 
+  int NextScopID = 0;
+  int getNextID() { return NextScopID++; }
+
 private:
   //===--------------------------------------------------------------------===//
 
@@ -511,7 +514,7 @@ private:
   /// @param Args Argument list that gets passed to the constructor of RR.
   template <class RR, typename... Args>
   inline bool invalid(DetectionContext &Context, bool Assert,
-                      Args &&... Arguments) const;
+                      Args &&...Arguments) const;
 
 public:
   ScopDetection(Function &F, const DominatorTree &DT, ScalarEvolution &SE,
