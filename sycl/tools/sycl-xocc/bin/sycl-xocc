@@ -188,6 +188,7 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
     fi
 
     $SDX --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM \
+      --xp param:compiler.hlsDataflowStrictMode=off \
       --save-temps -c -k "$index" -o "${TMP_PATH}_$index.xo" \
       "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc" &
       LINKER_LIST="${TMP_PATH}_$index.xo $LINKER_LIST"
