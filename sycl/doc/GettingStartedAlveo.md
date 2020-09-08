@@ -319,7 +319,7 @@ cd $SYCL_HOME/sycl/test/xocc_tests/simple_tests
   # Configure the simulation environment
   emconfigutil -f $XILINX_PLATFORM --nd 1 --save-temps
   # Compile the SYCL program down to a host fat binary including device code for CPU
-  $SYCL_BIN_DIR/clang++ -std=c++2a -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
+  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
     parallel_for_ND_range.cpp -o parallel_for_ND_range \
     -lOpenCL -I/opt/xilinx/xrt/include
   # Run the software emulation
@@ -331,7 +331,7 @@ cd $SYCL_HOME/sycl/test/xocc_tests/simple_tests
   # Configure the simulation environment
   emconfigutil -f $XILINX_PLATFORM --nd 1 --save-temps
   # Compile the SYCL program down to a host fat binary including the RTL for simulation
-  $SYCL_BIN_DIR/clang++ -std=c++2a -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
+  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
     parallel_for_ND_range.cpp -o parallel_for_ND_range \
     -lOpenCL -I/opt/xilinx/xrt/include
   # Run the hardware emulation
@@ -342,7 +342,7 @@ cd $SYCL_HOME/sycl/test/xocc_tests/simple_tests
   # Instruct only the compiler about hardware execution (\todo: change this API)
   export XCL_EMULATION_MODE=hw
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
-  $SYCL_BIN_DIR/clang++ -std=c++2a -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
+  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
     parallel_for_ND_range.cpp -o parallel_for_ND_range \
     -lOpenCL -I/opt/xilinx/xrt/include
   # Unset the variable at execution time to have real execution
@@ -360,7 +360,7 @@ https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
 ```bash
 cd $SYCL_HOME/sycl/test/xocc_tests/sdaccel_ports/vision/edge_detection
 export XCL_EMULATION_MODE=hw
-$SYCL_BIN_DIR/clang++ -std=c++2a -fsycl \
+$SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
     -fsycl-targets=fpga64-xilinx-unknown-sycldevice edge_detection.cpp \
     -o edge_detection -lOpenCL `pkg-config --libs opencv` \
     -I/opt/xilinx/xrt/include

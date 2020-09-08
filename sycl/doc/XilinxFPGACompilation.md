@@ -9,24 +9,24 @@ can to the Intel implementation, but in some areas were still working on that.
 One of the significant differences of compilation for Xilinx FPGAs over the
 ordinary compiler directive is that Xilinx devices require offline compilation
 of SYCL kernels to binary before being wrapped into the end fat binary. The
-offline compilation of these kernels is done by Xilinx's `xocc` compiler rather
+offline compilation of these kernels is done by Xilinx's `v++` compiler rather
 than the SYCL device compiler itself in this case. The device compiler's job is
-to compile SYCL kernels to a format edible by `xocc`, then take the output of
-`xocc` and wrap it into the fat binary as normal.
+to compile SYCL kernels to a format edible by `v++`, then take the output of
+`v++` and wrap it into the fat binary as normal.
 
 The current Intel SYCL implementation revolves around SPIR-V while
-Xilinx's `xocc` compiler can only ingest SPIR-df as an intermediate
+Xilinx's `v++` compiler can only ingest SPIR-df as an intermediate
 representation. SPIR-df is LLVM IR with some SPIR decorations. It is
 similar to the SPIR-2.0 provisional specification but does not
 requires the LLVM IR version to be 3.4. It uses just the encoding of
 the LLVM used, which explains the `-df` as "de-facto".
 
 So a lot of our modifications revolve
-around being the middle man between `xocc` and the SYCL device
+around being the middle man between `v++` and the SYCL device
 compiler and runtime for the moment, they are not the simple whims of
 the insane! Hopefully...
 
-## Getting started guide using Ubuntu 19.04, SDx 2019.1 and Alveo U200
+## Getting started guide using Ubuntu 19.04, Vitis 2019.1 and Alveo U200
 
 Look at [getting started with an Alveo U200](GettingStartedAlveo.md).
 
@@ -39,15 +39,15 @@ Installing Xilinx FPGA compatible software stack:
       [github.com/KhronosGroup/OpenCL-Headers](https://github.com/KhronosGroup/OpenCL-Headers)
   2.  Xilinx runtime (XRT) for FPGAs: Download, build and install [XRT](https://github.com/Xilinx/XRT),
       this contains the OpenCL runtime.
-  3.  Xilinx SDx (2018.3+): Download and Install [SDx](https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/sdx-development-environments.html)
-      which contains the `xocc` compiler.
+  3.  Xilinx Vitis (2018.3+): Download and Install [Vitis](https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/sdx-development-environments.html)
+      which contains the `v++` compiler.
 
 ## Platforms
 
-It's of note that the SDx 2018.3 install comes with several platforms that do
+It's of note that the Vitis 2018.3 install comes with several platforms that do
 not work with the SYCL compiler. Instead, you'll have to use one of the newer
 boards, like the Alveo U250 (*xilinx_u250_xdma_201830_1*). This requires some
-additional installation steps as it doesn't come packaged with the SDx download.
+additional installation steps as it doesn't come packaged with the Vitis download.
 
 How to:
   1.  Download the Deployment and Development Shells from the
@@ -83,10 +83,10 @@ In addition to the required environment variables for the base SYCL
 implementation specified in [GetStartedWithSYCLCompiler.md](GetStartedWithSYCLCompiler.md);
 compilation and execution of SYCL on FPGAs requires the following:
 
-To setup SDx for access to the `xocc` compiler the following steps are required:
+To setup Vitis for access to the `v++` compiler the following steps are required:
 
 ```bash
-export XILINX_SDX=/path_to/SDx/2018.3
+export XILINX_SDX=/path_to/Vitis/2018.3
 PATH=$XILINX_SDX/bin:$XILINX_SDX/lib/lnx64.o:$PATH
 ```
 
@@ -107,7 +107,7 @@ environment (the runtime will try to do things it can't).
 The emulation mode can be set as:
 
 * `sw_emu` for software emulation, this is the simplest and quickest compilation
-  mode that `xocc` provides.
+  mode that `v++` provides.
 * `hw_emu` for hardware emulation, this more accurately represents the hardware
   your targeting and does more detailed compilation and profiling. It takes
   extra time to compile and link.
@@ -121,7 +121,7 @@ export XCL_EMULATION_MODE=sw_emu
 ```
 
 Xilinx platform description, your available platforms (device) can be found in
-SDx's platform directory. Specifying this tells both compilers the desired
+Vitis's platform directory. Specifying this tells both compilers the desired
 platform your trying to compile for and the runtime the platform it should be
 executing for.
 
@@ -143,7 +143,7 @@ emconfigutil -f $XILINX_PLATFORM --nd 1
 ## C++ Standard
 
 It's noteworthy that we've altered the SYCL runtime to be compiled using C++20,
-so we advise compiling your source code with C++20 (`-std=c++2a`). Although, most
+so we advise compiling your source code with C++20 (`-std=c++20`). Although, most
 of the runtimes current features are C++11 compatible outside of the components
 in the Xilinx vendor related directories. However, this is likely to change as
 we're interested in altering the runtime with newer C++ features.
@@ -157,7 +157,7 @@ The compiler invocation for the `single_task_vector_add.cpp` example inside
 the [simple_tests](../test/xocc_tests/simple_tests) folder looks like this:
 
 ```bash
-$SYCL_BIN_DIR/clang++ -std=c++2a -fsycl \
+$SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
   -fsycl-targets=fpga64-xilinx-unknown-sycldevice single_task_vector_add.cpp \
   -o single_task_vector_add -lOpenCL -I/opt/xilinx/xrt/include/
 ```
@@ -166,38 +166,42 @@ Be aware that compiling for FPGA is rather slow.
 
 ## Compiler invocation differences
 
-By setting the `-fsycl-targets` to `fpga64-xilinx-unknown-sycldevice` you're 
-telling  the compiler to use our XOCC Tools and compile the device side code 
-for Xilinx FPGA.
+By setting the `-fsycl-targets` to `fpga64-xilinx-unknown-sycldevice`
+you're telling the compiler to use the Vitis tools and compile the
+device side code for Xilinx FPGA.
 
-This hasn't been tested with mutliple `-fsycl-targets` yet (e.g. offloading to 
-both a Xilinx and Intel FPGA) and is unlikely to work, so it is advisable to 
-stick to compiling for a single target at the moment.
+This hasn't been tested with mutliple `-fsycl-targets` yet
+(e.g. offloading to both a Xilinx and Intel FPGA) and is unlikely to
+work, so it is advisable to stick to compiling for a single target at
+the moment.
 
-The runtime makes use of some Xilinx XRT OpenCL extensions when compiling for
-Xilinx FPGAs, as such you need to include the XRT include directory for the time
-being as they do not get packaged with the regular OpenCL include directory for 
-now. The default install location for this on Debian/Ubuntu is: `/opt/xilinx/xrt/include/`
+The runtime makes use of some Xilinx XRT OpenCL extensions when
+compiling for Xilinx FPGAs, as such you need to include the XRT
+include directory for the time being as they do not get packaged with
+the regular OpenCL include directory for now. The default install
+location for this on Debian/Ubuntu is: `/opt/xilinx/xrt/include`
 
 ## Tested with
 
 * Ubuntu 18.10
 * XRT 2018.3
-* SDx 2018.3
+* Vitis 2018.3
 * Alveo U250 Platform: xilinx_u250_xdma_201830_1
 
 * Ubuntu 19.04
 * XRT 2019.1
-* SDx 2019.1
+* Vitis 2019.1
 * Alveo U200 Platform: xilinx_u200_xdma_201830_2
 
 
 ## Extra Notes:
-* The Driver ToolChain, currently makes some assumptions about the `SDx` 
-  installation. For example, it assumes that `xocc` is inside SDx's bin folder 
-  and that the lib folder containing `SPIR` builtins that kernels are linked 
-  against are in a `/lnx64/lib` directory relative to the bin folders parent. 
-  This can be seen and altered in `XOCC.cpp` if so desired. A future, aim is 
-  to allow the user to pass arguments through the compiler to assign these if 
-  the assumptions are false. However, in the basic 2018.3 release the standard 
-  directory structure that is assumed is correct without alterations.
+* The Driver ToolChain, currently makes some assumptions about the
+  `Vitis` installation. For example, it assumes that `v++` is inside
+  Vitis's bin folder and that the lib folder containing `SPIR`
+  builtins that kernels are linked against are in a `/lnx64/lib`
+  directory relative to the bin folders parent.  This can be seen and
+  altered in `XOCC.cpp` if so desired. A future, aim is to allow the
+  user to pass arguments through the compiler to assign these if the
+  assumptions are false. However, in the basic 2018.3 release the
+  standard directory structure that is assumed is correct without
+  alterations.

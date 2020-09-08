@@ -21,10 +21,10 @@ The device's kernels compilation workflow is shown on the left-side of `Figure 1
  - 2) This step proceeds the SYCL compilation passes.
    The ``InSPIRation`` pass will transform the LLVM-IR in order to use the SPIR library later.
    The ``kernelPropGen`` pass will generate a ``.bash`` file which contains the list of the kernels
-   defined in the code. This file will be uses to compile the kernel with ``xocc``.
- - 3) The LLVM linker links the kernel with the ``xocc`` SPIR library.
- - 4) Each kernel of the list contained by the ``KernelProperties_Source.bash`` file is compiled by the ``xocc`` compiler
- - 5) The ``xocc`` linker links all the kernels in an unique file.
+   defined in the code. This file will be uses to compile the kernel with ``v++``.
+ - 3) The LLVM linker links the kernel with the ``v++`` SPIR library.
+ - 4) Each kernel of the list contained by the ``KernelProperties_Source.bash`` file is compiled by the ``v++`` compiler
+ - 5) The ``v++`` linker links all the kernels in an unique file.
  - 6) The ``clang-offload-wrapper`` will create a LLVM-IR file which contains the kernels programs in its data. This will allow the final executable to build the kernel program from this data at runtime.
  - 7) The LLVM compiler will transform the LLVM-IR in a ``.o`` file in order to be linked with the host program to create the final executable.
 
