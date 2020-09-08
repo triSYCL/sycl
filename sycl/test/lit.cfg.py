@@ -193,6 +193,9 @@ if xocc != "off":
     acc_run_substitute+= "setsid flock -x " + xrt_lock + " "
     if os.path.exists(xrt_lock):
         os.remove(xrt_lock)
+    if "XCL_EMULATION_MODE" in os.environ:
+        if os.environ["XCL_EMULATION_MODE"] == "hw":
+            acc_run_substitute="env -u XCL_EMULATION_MODE " + acc_run_substitute
 
 config.substitutions.append( ('%ACC_RUN_PLACEHOLDER',  acc_run_substitute) )
 config.substitutions.append( ('%ACC_CHECK_PLACEHOLDER',  acc_check_substitute) )
