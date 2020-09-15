@@ -85,8 +85,12 @@ get_device_count_by_type_path = os.path.join(config.llvm_tools_dir, "get_device_
 def getDeviceCount(device_type):
     is_cuda = False;
     is_level_zero = False;
+    device_count_env = os.environ.copy()
+    if "XCL_EMULATION_MODE" in os.environ:
+        if os.environ["XCL_EMULATION_MODE"] == "hw":
+            device_count_env.pop("XCL_EMULATION_MODE")
     process = subprocess.Popen([get_device_count_by_type_path, device_type, backend],
-        stdout=subprocess.PIPE)
+        stdout=subprocess.PIPE, env=device_count_env)
     (output, err) = process.communicate()
     exit_code = process.wait()
 
@@ -230,7 +234,7 @@ for aot_tool in aot_tools:
         lit_config.warning("Couldn't find pre-installed AOT device compiler " + aot_tool)
 
 if xocc != "off":
-    required_env = ['HOME', 'USER', 'XILINX_VIVADO', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'XILINX_VITIS', 'XCL_EMULATION_MODE', 'EMCONFIG_PATH']
+    required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'XCL_EMULATION_MODE', 'EMCONFIG_PATH', 'LIBRARY_PATH']
     has_error=False
     config.available_features.add("xocc")
     for env in required_env:
@@ -250,5 +254,8 @@ if xocc != "off":
 try:
     import psutil
     lit_config.maxIndividualTestTime = 600
+    if "XCL_EMULATION_MODE" in os.environ:
+        if os.environ["XCL_EMULATION_MODE"] == "hw":
+            lit_config.maxIndividualTestTime = 10800 # 3h
 except ImportError:
     pass

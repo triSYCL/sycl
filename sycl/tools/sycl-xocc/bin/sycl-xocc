@@ -34,6 +34,7 @@
 #       is consistent with what the driver expects it to be.
 
 set -e # stop on error
+set -x
 CWD=$(pwd)
 
 # TODO: Pass an argument through the driver to set options like XILINX_PLATFORM,
@@ -150,9 +151,13 @@ $LLVM_LINK "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc" \
 # We also only wish to emit LLVM IR assembly language format and not bitcode
 # format as we currently use the llvm assembler packaged with xocc to generate
 # our final bitcode file.
-$OPT -S -O3 -xoccIRDowngrader \
+$OPT -S -preparesycl -globaldce \
   "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc" -o \
-  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.simple.xpirbc"
+
+$OPT -S -xoccIRDowngrader \
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.simple.xpirbc" -o \
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc"
 
 # Generate our final bitcode file with the xocc llvm-as (Clang/LLVM 7 for now)
 # this is to work around a problem with the ByVal attribute. The bitcode that
@@ -161,8 +166,8 @@ $OPT -S -O3 -xoccIRDowngrader \
 # it by compiling the IR to BC using the llvm-as from xocc and some minor
 # massaging in the xoccIRDowngrader
 $SDX_CLANG_LLVM_BIN/llvm-as \
-  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc" -o \
-  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc" -o \
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc"
 
 # Our bash file containing kernel property environment variables is placed in
 # the systems temporary directory (or wherever the Clang driver is told is the
@@ -184,13 +189,13 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
       echo "--platform: $XILINX_PLATFORM"
       echo "Compiling kernel: $index"
       echo "Outputting file to: ${TMP_PATH}_$index.xo"
-      echo "Input file is: ${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
+      echo "Input file is: ${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc"
     fi
 
     $SDX --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM \
       --xp param:compiler.hlsDataflowStrictMode=off \
       --save-temps -c -k "$index" -o "${TMP_PATH}_$index.xo" \
-      "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc" &
+      "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc" &
       LINKER_LIST="${TMP_PATH}_$index.xo $LINKER_LIST"
   fi
   done
@@ -237,10 +242,9 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   done
 fi
 
-if [[ ! -z "$VERBOSE" ]]; then
-  rm "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
-  rm "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc"
-  rm "${TMP_PATH}_KernelProperties_${SOURCE_FILE_NAME}.bash"
-  unset SCYL_XOCC_TMP_PATH
-fi
+# if [[ ! -z "$VERBOSE" ]]; then
+#   rm -f "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked*.xpirbc"
+#   rm "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc"
+#   rm "${TMP_PATH}_KernelProperties_${SOURCE_FILE_NAME}.bash"
+# fi
 
