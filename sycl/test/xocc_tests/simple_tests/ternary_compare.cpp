@@ -36,7 +36,7 @@ auto main() -> int
     queue q {selector};
 
     auto s_buf = cl::sycl::buffer<std::size_t, 3>{
-                    cl::sycl::range<3>{42, 42, 42}};
+                    cl::sycl::range<3>{5, 5, 5}};
     {
       auto s_w = s_buf.get_access<access::mode::write>();
       for (unsigned int i = 0; i < s_w.get_range()[0]; ++i)

@@ -29,6 +29,5 @@ Once this is done you can compile using the following command :
 ```
 $SYCL_BIN_DIR/clang++ -std=c++2a -fsycl \
 -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
-edge_detection.cpp -o a.out -lOpenCL -I/opt/xilinx/xrt/include \
-`pkg-config --libs opencv`
+edge_detection.cpp -o a.out `pkg-config --libs --cflags opencv4`
 ```

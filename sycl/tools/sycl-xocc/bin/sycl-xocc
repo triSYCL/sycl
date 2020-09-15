@@ -155,7 +155,7 @@ $OPT -S -preparesycl -globaldce \
   "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc" -o \
   "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.simple.xpirbc"
 
-$OPT -S -xoccIRDowngrader \
+$OPT -S -O3 -xoccIRDowngrader \
   "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.simple.xpirbc" -o \
   "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc"
 
