@@ -29,6 +29,7 @@ set(LLVM_LINK_COMPONENTS
   InSPIRation
   KernelPropGen
   XOCCIRDowngrader
+  PrepareSYCLOpt
   )
 
 add_llvm_tool(opt

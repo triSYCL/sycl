@@ -1415,6 +1415,19 @@ void CodeGenModule::GenOpenCLArgMetadata(llvm::Function *Fn,
   // MDNode for the kernel argument names.
   SmallVector<llvm::Metadata *, 8> argNames;
 
+  auto Mangle = [&](QualType ty) {
+    /// When using XOCC in hw_emu mode this metadata is stored in an XML
+    /// file so we need to remove '<' and '>' because they aren't parsed
+    /// correctly
+    std::unique_ptr<MangleContext> Ctx{ItaniumMangleContext::create(
+        Context, Context.getDiagnostics(), /*IsUniqueNameMangler*/ true)};
+
+    SmallString<256> Buffer;
+    llvm::raw_svector_ostream Out(Buffer);
+    Ctx->mangleTypeName(ty, Out);
+    return Buffer.str().str();
+  };
+
   if (FD && CGF)
     for (unsigned i = 0, e = FD->getNumParams(); i != e; ++i) {
       const ParmVarDecl *parm = FD->getParamDecl(i);
@@ -1438,6 +1451,9 @@ void CodeGenModule::GenOpenCLArgMetadata(llvm::Function *Fn,
         if (pointeeTy.isCanonical() && pos != std::string::npos)
           typeName.erase(pos + 1, 8);
 
+        if (CGF->Target.getTriple().isXilinxSYCLDevice())
+          typeName = Mangle(pointeeTy);
+
         argTypeNames.push_back(llvm::MDString::get(VMContext, typeName));
 
         std::string baseTypeName =
@@ -1449,6 +1465,9 @@ void CodeGenModule::GenOpenCLArgMetadata(llvm::Function *Fn,
         pos = baseTypeName.find("unsigned");
         if (pos != std::string::npos)
           baseTypeName.erase(pos + 1, 8);
+
+        if (CGF->Target.getTriple().isXilinxSYCLDevice())
+          baseTypeName = Mangle(pointeeTy);
 
         argBaseTypeNames.push_back(
             llvm::MDString::get(VMContext, baseTypeName));
@@ -1505,18 +1524,8 @@ void CodeGenModule::GenOpenCLArgMetadata(llvm::Function *Fn,
           removeImageAccessQualifier(baseTypeName);
         }
 
-        /// When using XOCC in hw_emu mode this metadata is stored in an XML
-        /// file so we need to remove '<' and '>' because they aren't parsed
-        /// correctly
-        if (CGF->Target.getTriple().isXilinxSYCLDevice()) {
-          std::unique_ptr<MangleContext> Ctx{ItaniumMangleContext::create(
-              Context, Context.getDiagnostics(), /*IsUniqueNameMangler*/ true)};
-
-          SmallString<256> Buffer;
-          llvm::raw_svector_ostream Out(Buffer);
-          Ctx->mangleTypeName(ty, Out);
-          typeName = Buffer.str().str();
-        }
+        if (CGF->Target.getTriple().isXilinxSYCLDevice())
+          typeName = Mangle(ty);
 
         argTypeNames.push_back(llvm::MDString::get(VMContext, typeName));
 
@@ -1524,6 +1533,9 @@ void CodeGenModule::GenOpenCLArgMetadata(llvm::Function *Fn,
         pos = baseTypeName.find("unsigned");
         if (pos != std::string::npos)
           baseTypeName.erase(pos + 1, 8);
+
+        if (CGF->Target.getTriple().isXilinxSYCLDevice())
+          baseTypeName = Mangle(ty);
 
         argBaseTypeNames.push_back(
             llvm::MDString::get(VMContext, baseTypeName));

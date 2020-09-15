@@ -14,15 +14,8 @@
 ;
 ;===------------------------------------------------------------------------===;
 
-[common]
-subdirectories =
-  ASFixer
-  InSPIRation
-  KernelPropGen
-  XOCCIRDowngrader
-  PrepareSYCLOpt
-
 [component_0]
-type = Group
-name = SYCL
-parent = Libraries
+type = Library
+name = PrepareSYCLOpt
+parent = SYCL
+required_libraries = Core Support TransformUtils

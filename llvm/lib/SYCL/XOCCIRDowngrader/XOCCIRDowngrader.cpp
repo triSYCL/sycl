@@ -168,7 +168,10 @@ struct XOCCIRDowngrader : public ModulePass {
   }
 
   /// Remove Freeze instruction because xocc can't deal with them.
-  void removeFreezeInst(Module& M) {
+  /// This is not a safe transformation but since llvm survived with bugs cause
+  /// by absence of freeze for many years, so i guess its its good enough for a
+  /// prototype
+  void removeFreezeInst(Module &M) {
     SmallVector<Instruction*, 16> ToRemove;
     for (auto& F : M.functions())
       for (auto& I : instructions(F))

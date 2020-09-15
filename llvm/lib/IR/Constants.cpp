@@ -1663,6 +1663,9 @@ void ConstantPointerNull::destroyConstantImpl() {
 }
 
 UndefValue *UndefValue::get(Type *Ty) {
+  if (Ty->isPointerTy() && Ty->getPointerElementType()->isIntegerTy(1)) {
+    llvm::errs() << "HERE\n";
+  }
   std::unique_ptr<UndefValue> &Entry = Ty->getContext().pImpl->UVConstants[Ty];
   if (!Entry)
     Entry.reset(new UndefValue(Ty));
