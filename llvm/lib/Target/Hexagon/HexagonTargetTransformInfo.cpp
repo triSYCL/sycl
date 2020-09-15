@@ -21,6 +21,7 @@
 #include "llvm/IR/User.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Transforms/Utils/LoopPeel.h"
 #include "llvm/Transforms/Utils/UnrollLoop.h"
 
 using namespace llvm;
@@ -34,6 +35,9 @@ static cl::opt<bool> EmitLookupTables("hexagon-emit-lookup-tables",
   cl::init(true), cl::Hidden,
   cl::desc("Control lookup table emission on Hexagon target"));
 
+static cl::opt<bool> HexagonMaskedVMem("hexagon-masked-vmem", cl::init(true),
+  cl::Hidden, cl::desc("Enable loop vectorizer for HVX"));
+
 // Constant "cost factor" to make floating point operations more expensive
 // in terms of vectorization cost. This isn't the best way, but it should
 // do. Ultimately, the cost should use cycles.
@@ -44,8 +48,7 @@ bool HexagonTTIImpl::useHVX() const {
 }
 
 bool HexagonTTIImpl::isTypeForHVX(Type *VecTy) const {
-  assert(VecTy->isVectorTy());
-  if (isa<ScalableVectorType>(VecTy))
+  if (!VecTy->isVectorTy() || isa<ScalableVectorType>(VecTy))
     return false;
   // Avoid types like <2 x i32*>.
   if (!cast<VectorType>(VecTy)->getElementType()->isIntegerTy())
@@ -113,7 +116,7 @@ unsigned HexagonTTIImpl::getRegisterBitWidth(bool Vector) const {
 }
 
 unsigned HexagonTTIImpl::getMinVectorRegisterBitWidth() const {
-  return useHVX() ? ST.getVectorLength()*8 : 0;
+  return useHVX() ? ST.getVectorLength()*8 : 32;
 }
 
 unsigned HexagonTTIImpl::getMinimumVF(unsigned ElemWidth) const {
@@ -270,7 +273,9 @@ unsigned HexagonTTIImpl::getArithmeticInstrCost(
 }
 
 unsigned HexagonTTIImpl::getCastInstrCost(unsigned Opcode, Type *DstTy,
-      Type *SrcTy, TTI::TargetCostKind CostKind, const Instruction *I) {
+                                          Type *SrcTy, TTI::CastContextHint CCH,
+                                          TTI::TargetCostKind CostKind,
+                                          const Instruction *I) {
   if (SrcTy->isFPOrFPVectorTy() || DstTy->isFPOrFPVectorTy()) {
     unsigned SrcN = SrcTy->isFPOrFPVectorTy() ? getTypeNumElements(SrcTy) : 0;
     unsigned DstN = DstTy->isFPOrFPVectorTy() ? getTypeNumElements(DstTy) : 0;
@@ -303,6 +308,14 @@ unsigned HexagonTTIImpl::getVectorInstrCost(unsigned Opcode, Type *Val,
     return 2;
 
   return 1;
+}
+
+bool HexagonTTIImpl::isLegalMaskedStore(Type *DataType, Align /*Alignment*/) {
+  return HexagonMaskedVMem && isTypeForHVX(DataType);
+}
+
+bool HexagonTTIImpl::isLegalMaskedLoad(Type *DataType, Align /*Alignment*/) {
+  return HexagonMaskedVMem && isTypeForHVX(DataType);
 }
 
 /// --- Vector TTI end ---

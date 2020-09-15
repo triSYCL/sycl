@@ -7,6 +7,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang/Tooling/Transformer/RewriteRule.h"
+#include "clang/AST/ASTTypeTraits.h"
+#include "clang/AST/Stmt.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/Basic/SourceLocation.h"
@@ -28,6 +30,8 @@ using ast_matchers::internal::DynTypedMatcher;
 
 using MatchResult = MatchFinder::MatchResult;
 
+const char transformer::RootID[] = "___root___";
+
 static Expected<SmallVector<transformer::Edit, 1>>
 translateEdits(const MatchResult &Result, ArrayRef<ASTEdit> ASTEdits) {
   SmallVector<transformer::Edit, 1> Edits;
@@ -48,6 +52,7 @@ translateEdits(const MatchResult &Result, ArrayRef<ASTEdit> ASTEdits) {
     if (!Metadata)
       return Metadata.takeError();
     transformer::Edit T;
+    T.Kind = E.Kind;
     T.Range = *EditRange;
     T.Replacement = std::move(*Replacement);
     T.Metadata = std::move(*Metadata);
@@ -66,6 +71,24 @@ EditGenerator transformer::edit(ASTEdit Edit) {
   return [Edit = std::move(Edit)](const MatchResult &Result) {
     return translateEdits(Result, {Edit});
   };
+}
+
+EditGenerator
+transformer::flattenVector(SmallVector<EditGenerator, 2> Generators) {
+  if (Generators.size() == 1)
+    return std::move(Generators[0]);
+  return
+      [Gs = std::move(Generators)](
+          const MatchResult &Result) -> llvm::Expected<SmallVector<Edit, 1>> {
+        SmallVector<Edit, 1> AllEdits;
+        for (const auto &G : Gs) {
+          llvm::Expected<SmallVector<Edit, 1>> Edits = G(Result);
+          if (!Edits)
+            return Edits.takeError();
+          AllEdits.append(Edits->begin(), Edits->end());
+        }
+        return AllEdits;
+      };
 }
 
 ASTEdit transformer::changeTo(RangeSelector Target, TextGenerator Replacement) {
@@ -93,21 +116,173 @@ public:
 };
 } // namespace
 
-ASTEdit transformer::remove(RangeSelector S) {
-  return change(std::move(S), std::make_shared<SimpleTextGenerator>(""));
+static TextGenerator makeText(std::string S) {
+  return std::make_shared<SimpleTextGenerator>(std::move(S));
 }
 
-RewriteRule transformer::makeRule(ast_matchers::internal::DynTypedMatcher M,
-                                  EditGenerator Edits,
+ASTEdit transformer::remove(RangeSelector S) {
+  return change(std::move(S), makeText(""));
+}
+
+static std::string formatHeaderPath(StringRef Header, IncludeFormat Format) {
+  switch (Format) {
+  case transformer::IncludeFormat::Quoted:
+    return Header.str();
+  case transformer::IncludeFormat::Angled:
+    return ("<" + Header + ">").str();
+  }
+  llvm_unreachable("Unknown transformer::IncludeFormat enum");
+}
+
+ASTEdit transformer::addInclude(RangeSelector Target, StringRef Header,
+                                IncludeFormat Format) {
+  ASTEdit E;
+  E.Kind = EditKind::AddInclude;
+  E.TargetRange = Target;
+  E.Replacement = makeText(formatHeaderPath(Header, Format));
+  return E;
+}
+
+RewriteRule transformer::makeRule(DynTypedMatcher M, EditGenerator Edits,
                                   TextGenerator Explanation) {
-  return RewriteRule{{RewriteRule::Case{
-      std::move(M), std::move(Edits), std::move(Explanation), {}}}};
+  return RewriteRule{{RewriteRule::Case{std::move(M), std::move(Edits),
+                                        std::move(Explanation)}}};
+}
+
+namespace {
+
+/// Unconditionally binds the given node set before trying `InnerMatcher` and
+/// keeps the bound nodes on a successful match.
+template <typename T>
+class BindingsMatcher : public ast_matchers::internal::MatcherInterface<T> {
+  ast_matchers::BoundNodes Nodes;
+  const ast_matchers::internal::Matcher<T> InnerMatcher;
+
+public:
+  explicit BindingsMatcher(ast_matchers::BoundNodes Nodes,
+                           ast_matchers::internal::Matcher<T> InnerMatcher)
+      : Nodes(std::move(Nodes)), InnerMatcher(std::move(InnerMatcher)) {}
+
+  bool matches(
+      const T &Node, ast_matchers::internal::ASTMatchFinder *Finder,
+      ast_matchers::internal::BoundNodesTreeBuilder *Builder) const override {
+    ast_matchers::internal::BoundNodesTreeBuilder Result(*Builder);
+    for (const auto &N : Nodes.getMap())
+      Result.setBinding(N.first, N.second);
+    if (InnerMatcher.matches(Node, Finder, &Result)) {
+      *Builder = std::move(Result);
+      return true;
+    }
+    return false;
+  }
+};
+
+/// Matches nodes of type T that have at least one descendant node for which the
+/// given inner matcher matches.  Will match for each descendant node that
+/// matches.  Based on ForEachDescendantMatcher, but takes a dynamic matcher,
+/// instead of a static one, because it is used by RewriteRule, which carries
+/// (only top-level) dynamic matchers.
+template <typename T>
+class DynamicForEachDescendantMatcher
+    : public ast_matchers::internal::MatcherInterface<T> {
+  const DynTypedMatcher DescendantMatcher;
+
+public:
+  explicit DynamicForEachDescendantMatcher(DynTypedMatcher DescendantMatcher)
+      : DescendantMatcher(std::move(DescendantMatcher)) {}
+
+  bool matches(
+      const T &Node, ast_matchers::internal::ASTMatchFinder *Finder,
+      ast_matchers::internal::BoundNodesTreeBuilder *Builder) const override {
+    return Finder->matchesDescendantOf(
+        Node, this->DescendantMatcher, Builder,
+        ast_matchers::internal::ASTMatchFinder::BK_All);
+  }
+};
+
+template <typename T>
+ast_matchers::internal::Matcher<T>
+forEachDescendantDynamically(ast_matchers::BoundNodes Nodes,
+                             DynTypedMatcher M) {
+  return ast_matchers::internal::makeMatcher(new BindingsMatcher<T>(
+      std::move(Nodes),
+      ast_matchers::internal::makeMatcher(
+          new DynamicForEachDescendantMatcher<T>(std::move(M)))));
+}
+
+class ApplyRuleCallback : public MatchFinder::MatchCallback {
+public:
+  ApplyRuleCallback(RewriteRule Rule) : Rule(std::move(Rule)) {}
+
+  template <typename T>
+  void registerMatchers(const ast_matchers::BoundNodes &Nodes,
+                        MatchFinder *MF) {
+    for (auto &Matcher : transformer::detail::buildMatchers(Rule))
+      MF->addMatcher(forEachDescendantDynamically<T>(Nodes, Matcher), this);
+  }
+
+  void run(const MatchFinder::MatchResult &Result) override {
+    if (!Edits)
+      return;
+    transformer::RewriteRule::Case Case =
+        transformer::detail::findSelectedCase(Result, Rule);
+    auto Transformations = Case.Edits(Result);
+    if (!Transformations) {
+      Edits = Transformations.takeError();
+      return;
+    }
+    Edits->append(Transformations->begin(), Transformations->end());
+  }
+
+  RewriteRule Rule;
+
+  // Initialize to a non-error state.
+  Expected<SmallVector<Edit, 1>> Edits = SmallVector<Edit, 1>();
+};
+} // namespace
+
+template <typename T>
+static llvm::Expected<SmallVector<clang::transformer::Edit, 1>>
+rewriteDescendantsImpl(const T &Node, RewriteRule Rule,
+                       const MatchResult &Result) {
+  ApplyRuleCallback Callback(std::move(Rule));
+  MatchFinder Finder;
+  Callback.registerMatchers<T>(Result.Nodes, &Finder);
+  Finder.match(Node, *Result.Context);
+  return std::move(Callback.Edits);
+}
+
+EditGenerator transformer::rewriteDescendants(std::string NodeId,
+                                              RewriteRule Rule) {
+  // FIXME: warn or return error if `Rule` contains any `AddedIncludes`, since
+  // these will be dropped.
+  return [NodeId = std::move(NodeId),
+          Rule = std::move(Rule)](const MatchResult &Result)
+             -> llvm::Expected<SmallVector<clang::transformer::Edit, 1>> {
+    const ast_matchers::BoundNodes::IDToNodeMap &NodesMap =
+        Result.Nodes.getMap();
+    auto It = NodesMap.find(NodeId);
+    if (It == NodesMap.end())
+      return llvm::make_error<llvm::StringError>(llvm::errc::invalid_argument,
+                                                 "ID not bound: " + NodeId);
+    if (auto *Node = It->second.get<Decl>())
+      return rewriteDescendantsImpl(*Node, std::move(Rule), Result);
+    if (auto *Node = It->second.get<Stmt>())
+      return rewriteDescendantsImpl(*Node, std::move(Rule), Result);
+    if (auto *Node = It->second.get<TypeLoc>())
+      return rewriteDescendantsImpl(*Node, std::move(Rule), Result);
+
+    return llvm::make_error<llvm::StringError>(
+        llvm::errc::invalid_argument,
+        "type unsupported for recursive rewriting, ID=\"" + NodeId +
+            "\", Kind=" + It->second.getNodeKind().asStringRef());
+  };
 }
 
 void transformer::addInclude(RewriteRule &Rule, StringRef Header,
-                         IncludeFormat Format) {
+                             IncludeFormat Format) {
   for (auto &Case : Rule.Cases)
-    Case.AddedIncludes.emplace_back(Header.str(), Format);
+    Case.Edits = flatten(std::move(Case.Edits), addInclude(Header, Format));
 }
 
 #ifndef NDEBUG
@@ -180,8 +355,7 @@ transformer::detail::buildMatchers(const RewriteRule &Rule) {
         taggedMatchers("Tag", Bucket.second, TK_IgnoreUnlessSpelledInSource));
     M.setAllowBind(true);
     // `tryBind` is guaranteed to succeed, because `AllowBind` was set to true.
-    Matchers.push_back(
-        M.tryBind(RewriteRule::RootID)->withTraversalKind(TK_AsIs));
+    Matchers.push_back(M.tryBind(RootID)->withTraversalKind(TK_AsIs));
   }
   return Matchers;
 }
@@ -194,7 +368,7 @@ DynTypedMatcher transformer::detail::buildMatcher(const RewriteRule &Rule) {
 
 SourceLocation transformer::detail::getRuleMatchLoc(const MatchResult &Result) {
   auto &NodesMap = Result.Nodes.getMap();
-  auto Root = NodesMap.find(RewriteRule::RootID);
+  auto Root = NodesMap.find(RootID);
   assert(Root != NodesMap.end() && "Transformation failed: missing root node.");
   llvm::Optional<CharSourceRange> RootRange = tooling::getRangeForEdit(
       CharSourceRange::getTokenRange(Root->second.getSourceRange()),
@@ -224,7 +398,7 @@ transformer::detail::findSelectedCase(const MatchResult &Result,
   llvm_unreachable("No tag found for this rule.");
 }
 
-constexpr llvm::StringLiteral RewriteRule::RootID;
+const llvm::StringRef RewriteRule::RootID = ::clang::transformer::RootID;
 
 TextGenerator tooling::text(std::string M) {
   return std::make_shared<SimpleTextGenerator>(std::move(M));

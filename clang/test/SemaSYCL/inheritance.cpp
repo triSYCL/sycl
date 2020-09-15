@@ -1,6 +1,6 @@
-// RUN: %clang_cc1 -I %S/Inputs -fsycl -fsycl-is-device -ast-dump %s | FileCheck %s
+// RUN: %clang_cc1 -fsycl -fsycl-is-device -ast-dump %s | FileCheck %s
 
-#include <sycl.hpp>
+#include "Inputs/sycl.hpp"
 
 class second_base {
 public:
@@ -24,7 +24,7 @@ public:
 struct derived : base, second_base {
   int a;
 
-  void operator()() {
+  void operator()() const {
   }
 };
 

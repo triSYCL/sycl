@@ -423,6 +423,7 @@ public:
   }
 
   unsigned getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src,
+                            TTI::CastContextHint CCH,
                             TTI::TargetCostKind CostKind,
                             const Instruction *I) {
     switch (Opcode) {
@@ -447,12 +448,14 @@ public:
         // Identity and pointer-to-pointer casts are free.
         return 0;
       break;
-    case Instruction::Trunc:
+    case Instruction::Trunc: {
       // trunc to a native type is free (assuming the target has compare and
       // shift-right of the same width).
-      if (DL.isLegalInteger(DL.getTypeSizeInBits(Dst)))
+      TypeSize DstSize = DL.getTypeSizeInBits(Dst);
+      if (!DstSize.isScalable() && DL.isLegalInteger(DstSize.getFixedSize()))
         return 0;
       break;
+    }
     }
     return 1;
   }
@@ -654,6 +657,11 @@ public:
 
   bool useReductionIntrinsic(unsigned Opcode, Type *Ty,
                              TTI::ReductionFlags Flags) const {
+    return false;
+  }
+
+  bool preferPredicatedReductionSelect(unsigned Opcode, Type *Ty,
+                                       TTI::ReductionFlags Flags) const {
     return false;
   }
 
@@ -915,7 +923,8 @@ public:
     case Instruction::SExt:
     case Instruction::ZExt:
     case Instruction::AddrSpaceCast:
-      return TargetTTI->getCastInstrCost(Opcode, Ty, OpTy, CostKind, I);
+      return TargetTTI->getCastInstrCost(
+          Opcode, Ty, OpTy, TTI::getCastContextHint(I), CostKind, I);
     case Instruction::Store: {
       auto *SI = cast<StoreInst>(U);
       Type *ValTy = U->getOperand(0)->getType();

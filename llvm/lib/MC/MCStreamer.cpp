@@ -202,6 +202,9 @@ void MCStreamer::emitFill(uint64_t NumBytes, uint8_t FillValue) {
   emitFill(*MCConstantExpr::create(NumBytes, getContext()), FillValue);
 }
 
+void llvm::MCStreamer::emitNops(int64_t NumBytes, int64_t ControlledNopLen,
+                                llvm::SMLoc) {}
+
 /// The implementation in this class just redirects to emitFill.
 void MCStreamer::emitZeros(uint64_t NumBytes) { emitFill(NumBytes, 0); }
 
@@ -689,6 +692,8 @@ void MCStreamer::EmitWinCFIEndProc(SMLoc Loc) {
 
   MCSymbol *Label = emitCFILabel();
   CurFrame->End = Label;
+  if (!CurFrame->FuncletOrFuncEnd)
+    CurFrame->FuncletOrFuncEnd = CurFrame->End;
 }
 
 void MCStreamer::EmitWinCFIFuncletOrFuncEnd(SMLoc Loc) {

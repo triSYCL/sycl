@@ -12,6 +12,7 @@ include(CheckCCompilerFlag)
 include(CheckCXXCompilerFlag)
 include(CheckSymbolExists)
 include(CMakeDependentOption)
+include(LLVMProcessSources)
 
 if(CMAKE_LINKER MATCHES "lld-link" OR (MSVC AND (LLVM_USE_LINKER STREQUAL "lld" OR LLVM_ENABLE_LLD)))
   set(LINKER_IS_LLD_LINK TRUE)
@@ -144,6 +145,10 @@ else(WIN32)
   endif(FUCHSIA OR UNIX)
 endif(WIN32)
 
+if (CMAKE_SYSTEM_NAME MATCHES "OS390")
+  set(LLVM_HAVE_LINK_VERSION_SCRIPT 0)
+endif()
+
 set(EXEEXT ${CMAKE_EXECUTABLE_SUFFIX})
 set(LTDL_SHLIB_EXT ${CMAKE_SHARED_LIBRARY_SUFFIX})
 
@@ -207,7 +212,7 @@ endif()
 
 # Pass -Wl,-z,defs. This makes sure all symbols are defined. Otherwise a DSO
 # build might work on ELF but fail on MachO/COFF.
-if(NOT (${CMAKE_SYSTEM_NAME} MATCHES "Darwin|FreeBSD|OpenBSD|DragonFly|AIX|SunOS" OR
+if(NOT (CMAKE_SYSTEM_NAME MATCHES "Darwin|FreeBSD|OpenBSD|DragonFly|AIX|SunOS|OS390" OR
         WIN32 OR CYGWIN) AND
    NOT LLVM_USE_SANITIZER)
   set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -Wl,-z,defs")
@@ -261,7 +266,12 @@ if( LLVM_ENABLE_LLD )
   if ( LLVM_USE_LINKER )
     message(FATAL_ERROR "LLVM_ENABLE_LLD and LLVM_USE_LINKER can't be set at the same time")
   endif()
-  set(LLVM_USE_LINKER "lld")
+  # In case of MSVC cmake always invokes the linker directly, so the linker
+  # should be specified by CMAKE_LINKER cmake variable instead of by -fuse-ld
+  # compiler option.
+  if ( NOT MSVC )
+    set(LLVM_USE_LINKER "lld")
+  endif()
 endif()
 
 if( LLVM_USE_LINKER )
@@ -290,6 +300,15 @@ if( LLVM_ENABLE_PIC )
   if(CMAKE_COMPILER_IS_GNUCXX AND LLVM_NATIVE_ARCH STREQUAL "Mips" AND
          NOT Uppercase_CMAKE_BUILD_TYPE STREQUAL "DEBUG")
     add_flag_or_print_warning("-fno-shrink-wrap" FNO_SHRINK_WRAP)
+  endif()
+  # gcc with -O3 -fPIC generates TLS sequences that violate the spec on
+  # Solaris/sparcv9, causing executables created with the system linker
+  # to SEGV (GCC PR target/96607).
+  # clang with -O3 -fPIC generates code that SEGVs.
+  # Both can be worked around by compiling with -O instead.
+  if(${CMAKE_SYSTEM_NAME} STREQUAL "SunOS" AND LLVM_NATIVE_ARCH STREQUAL "Sparc")
+    llvm_replace_compiler_option(CMAKE_CXX_FLAGS_RELEASE "-O[23]" "-O")
+    llvm_replace_compiler_option(CMAKE_CXX_FLAGS_RELWITHDEBINFO "-O[23]" "-O")
   endif()
 endif()
 
@@ -416,6 +435,12 @@ if( MSVC )
 
   append("/Zc:inline" CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
 
+  # Some projects use the __cplusplus preprocessor macro to check support for
+  # a particular version of the C++ standard. When this option is not specified
+  # explicitly, macro's value is "199711L" that implies C++98 Standard.
+  # https://devblogs.microsoft.com/cppblog/msvc-now-correctly-reports-__cplusplus/
+  append("/Zc:__cplusplus" CMAKE_CXX_FLAGS)
+
   # Allow users to request PDBs in release mode. CMake offeres the
   # RelWithDebInfo configuration, but it uses different optimization settings
   # (/Ob1 vs /Ob2 or -O2 vs -O3). LLVM provides this flag so that users can get
@@ -468,6 +493,10 @@ if( MSVC )
       endif()
     endif()
   endif()
+  # By default MSVC has a 2^16 limit on the number of sections in an object file,
+  # but in many objects files need more than that. This flag is to increase the
+  # number of sections.
+  append("/bigobj" CMAKE_CXX_FLAGS)
 endif( MSVC )
 
 # Warnings-as-errors handling for GCC-compatible compilers:

@@ -199,12 +199,12 @@
 
 __SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
-namespace intel {
+namespace INTEL {
 namespace gpu {
 // Forward declare a "back-door" access class to support ESIMD.
 class AccessorPrivateProxy;
 } // namespace gpu
-} // namespace intel
+} // namespace INTEL
 } // namespace sycl
 } // __SYCL_INLINE_NAMESPACE(cl)
 
@@ -434,7 +434,7 @@ private:
 #endif
 
 private:
-  friend class sycl::intel::gpu::AccessorPrivateProxy;
+  friend class sycl::INTEL::gpu::AccessorPrivateProxy;
 
 #if defined(__SYCL_DEVICE_ONLY__) && defined(__SYCL_EXPLICIT_SIMD__)
   const OCLImageTy getNativeImageObj() const { return MImageObj; }
@@ -851,6 +851,7 @@ protected:
   void __init(ConcreteASPtrType Ptr, range<AdjustedDim> AccessRange,
               range<AdjustedDim> MemRange, id<AdjustedDim> Offset) {
     MData = Ptr;
+#pragma unroll
     for (int I = 0; I < AdjustedDim; ++I) {
       getOffset()[I] = Offset[I];
       getAccessRange()[I] = AccessRange[I];
@@ -885,7 +886,7 @@ public:
 #endif // __SYCL_DEVICE_ONLY__
 
 private:
-  friend class sycl::intel::gpu::AccessorPrivateProxy;
+  friend class sycl::INTEL::gpu::AccessorPrivateProxy;
 
 public:
   using value_type = DataT;
@@ -1388,6 +1389,7 @@ protected:
   void __init(ConcreteASPtrType Ptr, range<AdjustedDim> AccessRange,
               range<AdjustedDim>, id<AdjustedDim>) {
     MData = Ptr;
+#pragma unroll
     for (int I = 0; I < AdjustedDim; ++I)
       getSize()[I] = AccessRange[I];
   }

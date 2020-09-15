@@ -39,7 +39,7 @@ protected:
 #define GET_TARGET_REGBANK_CLASS
 #include "AMDGPUGenRegisterBank.inc"
 };
-class AMDGPURegisterBankInfo : public AMDGPUGenRegisterBankInfo {
+class AMDGPURegisterBankInfo final : public AMDGPUGenRegisterBankInfo {
 public:
   const GCNSubtarget &Subtarget;
   const SIRegisterInfo *TRI;
@@ -148,6 +148,9 @@ public:
   RegisterBankInfo::InstructionMappings
   getInstrAlternativeMappingsIntrinsicWSideEffects(
       const MachineInstr &MI, const MachineRegisterInfo &MRI) const;
+
+  unsigned getMappingType(const MachineRegisterInfo &MRI,
+                          const MachineInstr &MI) const;
 
   bool isSALUMapping(const MachineInstr &MI) const;
 

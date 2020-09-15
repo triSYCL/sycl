@@ -463,7 +463,18 @@ static bool tryAddToFoldList(SmallVectorImpl<FoldCandidate> &FoldList,
 static bool isUseSafeToFold(const SIInstrInfo *TII,
                             const MachineInstr &MI,
                             const MachineOperand &UseMO) {
-  return !UseMO.isUndef() && !TII->isSDWA(MI);
+  if (UseMO.isUndef() || TII->isSDWA(MI))
+    return false;
+
+  switch (MI.getOpcode()) {
+  case AMDGPU::V_MOV_B32_e32:
+  case AMDGPU::V_MOV_B32_e64:
+  case AMDGPU::V_MOV_B64_PSEUDO:
+    // Do not fold into an indirect mov.
+    return !MI.hasRegisterImplicitUseOperand(AMDGPU::M0);
+  }
+
+  return true;
   //return !MI.hasRegisterImplicitUseOperand(UseMO.getReg());
 }
 
@@ -528,7 +539,7 @@ static bool tryToFoldACImm(const SIInstrInfo *TII,
     return false;
 
   Register UseReg = OpToFold.getReg();
-  if (!Register::isVirtualRegister(UseReg))
+  if (!UseReg.isVirtual())
     return false;
 
   if (llvm::find_if(FoldList, [UseMI](const FoldCandidate &FC) {
@@ -587,9 +598,9 @@ void SIFoldOperands::foldOperand(
     Register RegSeqDstReg = UseMI->getOperand(0).getReg();
     unsigned RegSeqDstSubReg = UseMI->getOperand(UseOpIdx + 1).getImm();
 
-    MachineRegisterInfo::use_iterator Next;
-    for (MachineRegisterInfo::use_iterator
-           RSUse = MRI->use_begin(RegSeqDstReg), RSE = MRI->use_end();
+    MachineRegisterInfo::use_nodbg_iterator Next;
+    for (MachineRegisterInfo::use_nodbg_iterator
+           RSUse = MRI->use_nodbg_begin(RegSeqDstReg), RSE = MRI->use_nodbg_end();
          RSUse != RSE; RSUse = Next) {
       Next = std::next(RSUse);
 
@@ -643,47 +654,46 @@ void SIFoldOperands::foldOperand(
 
   if (FoldingImmLike && UseMI->isCopy()) {
     Register DestReg = UseMI->getOperand(0).getReg();
+    Register SrcReg = UseMI->getOperand(1).getReg();
+    assert(SrcReg.isVirtual());
 
-    // Don't fold into a copy to a physical register. Doing so would interfere
-    // with the register coalescer's logic which would avoid redundant
-    // initalizations.
-    if (DestReg.isPhysical())
+    const TargetRegisterClass *SrcRC = MRI->getRegClass(SrcReg);
+
+    // Don't fold into a copy to a physical register with the same class. Doing
+    // so would interfere with the register coalescer's logic which would avoid
+    // redundant initalizations.
+    if (DestReg.isPhysical() && SrcRC->contains(DestReg))
       return;
 
-    const TargetRegisterClass *DestRC =  MRI->getRegClass(DestReg);
-
-    Register SrcReg = UseMI->getOperand(1).getReg();
-    if (SrcReg.isVirtual()) { // XXX - This can be an assert?
-      const TargetRegisterClass * SrcRC = MRI->getRegClass(SrcReg);
+    const TargetRegisterClass *DestRC = TRI->getRegClassForReg(*MRI, DestReg);
+    if (!DestReg.isPhysical()) {
       if (TRI->isSGPRClass(SrcRC) && TRI->hasVectorRegisters(DestRC)) {
-        MachineRegisterInfo::use_iterator NextUse;
+        MachineRegisterInfo::use_nodbg_iterator NextUse;
         SmallVector<FoldCandidate, 4> CopyUses;
-        for (MachineRegisterInfo::use_iterator
-          Use = MRI->use_begin(DestReg), E = MRI->use_end();
-          Use != E; Use = NextUse) {
+        for (MachineRegisterInfo::use_nodbg_iterator Use = MRI->use_nodbg_begin(DestReg),
+               E = MRI->use_nodbg_end();
+             Use != E; Use = NextUse) {
           NextUse = std::next(Use);
-
           // There's no point trying to fold into an implicit operand.
           if (Use->isImplicit())
             continue;
 
-          FoldCandidate FC = FoldCandidate(Use->getParent(),
-           Use.getOperandNo(), &UseMI->getOperand(1));
+          FoldCandidate FC = FoldCandidate(Use->getParent(), Use.getOperandNo(),
+                                           &UseMI->getOperand(1));
           CopyUses.push_back(FC);
-       }
-        for (auto & F : CopyUses) {
-          foldOperand(*F.OpToFold, F.UseMI, F.UseOpNo,
-           FoldList, CopiesToReplace);
+        }
+        for (auto &F : CopyUses) {
+          foldOperand(*F.OpToFold, F.UseMI, F.UseOpNo, FoldList, CopiesToReplace);
         }
       }
-    }
 
-    if (DestRC == &AMDGPU::AGPR_32RegClass &&
-        TII->isInlineConstant(OpToFold, AMDGPU::OPERAND_REG_INLINE_C_INT32)) {
-      UseMI->setDesc(TII->get(AMDGPU::V_ACCVGPR_WRITE_B32));
-      UseMI->getOperand(1).ChangeToImmediate(OpToFold.getImm());
-      CopiesToReplace.push_back(UseMI);
-      return;
+      if (DestRC == &AMDGPU::AGPR_32RegClass &&
+          TII->isInlineConstant(OpToFold, AMDGPU::OPERAND_REG_INLINE_C_INT32)) {
+        UseMI->setDesc(TII->get(AMDGPU::V_ACCVGPR_WRITE_B32));
+        UseMI->getOperand(1).ChangeToImmediate(OpToFold.getImm());
+        CopiesToReplace.push_back(UseMI);
+        return;
+      }
     }
 
     // In order to fold immediates into copies, we need to change the
@@ -996,8 +1006,7 @@ static MachineOperand *getImmOrMaterializedImm(MachineRegisterInfo &MRI,
                                                MachineOperand &Op) {
   if (Op.isReg()) {
     // If this has a subregister, it obviously is a register source.
-    if (Op.getSubReg() != AMDGPU::NoSubRegister ||
-        !Register::isVirtualRegister(Op.getReg()))
+    if (Op.getSubReg() != AMDGPU::NoSubRegister || !Op.getReg().isVirtual())
       return &Op;
 
     MachineInstr *Def = MRI.getVRegDef(Op.getReg());
@@ -1183,9 +1192,9 @@ void SIFoldOperands::foldInstOperand(MachineInstr &MI,
     MachineOperand *NonInlineUse = nullptr;
     int NonInlineUseOpNo = -1;
 
-    MachineRegisterInfo::use_iterator NextUse;
-    for (MachineRegisterInfo::use_iterator
-           Use = MRI->use_begin(Dst.getReg()), E = MRI->use_end();
+    MachineRegisterInfo::use_nodbg_iterator NextUse;
+    for (MachineRegisterInfo::use_nodbg_iterator
+           Use = MRI->use_nodbg_begin(Dst.getReg()), E = MRI->use_nodbg_end();
          Use != E; Use = NextUse) {
       NextUse = std::next(Use);
       MachineInstr *UseMI = Use->getParent();
@@ -1207,7 +1216,7 @@ void SIFoldOperands::foldInstOperand(MachineInstr &MI,
         // instruction, e.g. and x, 0 -> 0. Make sure we re-visit the user
         // again. The same constant folded instruction could also have a second
         // use operand.
-        NextUse = MRI->use_begin(Dst.getReg());
+        NextUse = MRI->use_nodbg_begin(Dst.getReg());
         FoldList.clear();
         continue;
       }
@@ -1246,9 +1255,9 @@ void SIFoldOperands::foldInstOperand(MachineInstr &MI,
     }
   } else {
     // Folding register.
-    SmallVector <MachineRegisterInfo::use_iterator, 4> UsesToProcess;
-    for (MachineRegisterInfo::use_iterator
-           Use = MRI->use_begin(Dst.getReg()), E = MRI->use_end();
+    SmallVector <MachineRegisterInfo::use_nodbg_iterator, 4> UsesToProcess;
+    for (MachineRegisterInfo::use_nodbg_iterator
+           Use = MRI->use_nodbg_begin(Dst.getReg()), E = MRI->use_nodbg_end();
          Use != E; ++Use) {
       UsesToProcess.push_back(Use);
     }
@@ -1267,7 +1276,7 @@ void SIFoldOperands::foldInstOperand(MachineInstr &MI,
 
   for (FoldCandidate &Fold : FoldList) {
     assert(!Fold.isReg() || Fold.OpToFold);
-    if (Fold.isReg() && Register::isVirtualRegister(Fold.OpToFold->getReg())) {
+    if (Fold.isReg() && Fold.OpToFold->getReg().isVirtual()) {
       Register Reg = Fold.OpToFold->getReg();
       MachineInstr *DefMI = Fold.OpToFold->getParent();
       if (DefMI->readsRegister(AMDGPU::EXEC, TRI) &&
@@ -1562,7 +1571,7 @@ bool SIFoldOperands::runOnMachineFunction(MachineFunction &MF) {
       if (!FoldingImm && !OpToFold.isReg())
         continue;
 
-      if (OpToFold.isReg() && !Register::isVirtualRegister(OpToFold.getReg()))
+      if (OpToFold.isReg() && !OpToFold.getReg().isVirtual())
         continue;
 
       // Prevent folding operands backwards in the function. For example,
@@ -1572,7 +1581,7 @@ bool SIFoldOperands::runOnMachineFunction(MachineFunction &MF) {
       //    ...
       //    %vgpr0 = V_MOV_B32_e32 1, implicit %exec
       MachineOperand &Dst = MI.getOperand(0);
-      if (Dst.isReg() && !Register::isVirtualRegister(Dst.getReg()))
+      if (Dst.isReg() && !Dst.getReg().isVirtual())
         continue;
 
       foldInstOperand(MI, OpToFold);

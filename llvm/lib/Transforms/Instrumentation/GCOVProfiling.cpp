@@ -32,6 +32,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
+#include "llvm/Support/CRC.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/FileSystem.h"
@@ -62,6 +63,9 @@ static cl::opt<std::string> DefaultGCOVVersion("default-gcov-version",
                                                cl::init("408*"), cl::Hidden,
                                                cl::ValueRequired);
 
+static cl::opt<bool> AtomicCounter("gcov-atomic-counter", cl::Hidden,
+                                   cl::desc("Make counter updates atomic"));
+
 // Returns the number of words which will be used to represent this string.
 static unsigned wordsOfString(StringRef s) {
   // Length + NUL-terminated string + 0~3 padding NULs.
@@ -73,6 +77,7 @@ GCOVOptions GCOVOptions::getDefault() {
   Options.EmitNotes = true;
   Options.EmitData = true;
   Options.NoRedZone = false;
+  Options.Atomic = AtomicCounter;
 
   if (DefaultGCOVVersion.size() != 4) {
     llvm::report_fatal_error(std::string("Invalid -default-gcov-version: ") +
@@ -300,15 +305,16 @@ namespace {
       assert(OutEdges.empty());
     }
 
+    uint32_t Number;
+    SmallVector<GCOVBlock *, 4> OutEdges;
+
    private:
     friend class GCOVFunction;
 
     GCOVBlock(GCOVProfiler *P, uint32_t Number)
         : GCOVRecord(P), Number(Number) {}
 
-    uint32_t Number;
     StringMap<GCOVLines> LinesByFile;
-    SmallVector<GCOVBlock *, 4> OutEdges;
   };
 
   // A function has a unique identifier, a checksum (we leave as zero) and a
@@ -345,18 +351,6 @@ namespace {
 
     GCOVBlock &getReturnBlock() {
       return ReturnBlock;
-    }
-
-    std::string getEdgeDestinations() {
-      std::string EdgeDestinations;
-      raw_string_ostream EDOS(EdgeDestinations);
-      Function *F = Blocks.begin()->first->getParent();
-      for (BasicBlock &I : *F) {
-        GCOVBlock &Block = getBlock(&I);
-        for (int i = 0, e = Block.OutEdges.size(); i != e; ++i)
-          EDOS << Block.OutEdges[i]->Number;
-      }
-      return EdgeDestinations;
     }
 
     uint32_t getFuncChecksum() const {
@@ -729,7 +723,7 @@ void GCOVProfiler::emitProfileNotes() {
       continue;
     }
 
-    std::string EdgeDestinations;
+    std::vector<uint8_t> EdgeDestinations;
 
     Endian = M->getDataLayout().isLittleEndian() ? support::endianness::little
                                                  : support::endianness::big;
@@ -774,6 +768,11 @@ void GCOVProfiler::emitProfileNotes() {
         } else if (isa<ReturnInst>(TI)) {
           Block.addEdge(Func.getReturnBlock());
         }
+        for (GCOVBlock *Succ : Block.OutEdges) {
+          uint32_t Idx = Succ->Number;
+          do EdgeDestinations.push_back(Idx & 255);
+          while ((Idx >>= 8) > 0);
+        }
 
         for (auto &I : BB) {
           // Debug intrinsic locations correspond to the location of the
@@ -798,12 +797,13 @@ void GCOVProfiler::emitProfileNotes() {
         }
         Line = 0;
       }
-      EdgeDestinations += Func.getEdgeDestinations();
     }
 
     char Tmp[4];
+    JamCRC JC;
+    JC.update(EdgeDestinations);
     os = &out;
-    auto Stamp = static_cast<uint32_t>(hash_value(EdgeDestinations));
+    uint32_t Stamp = JC.getCRC();
     FileChecksums.push_back(Stamp);
     if (Endian == support::endianness::big) {
       out.write("gcno", 4);
@@ -887,9 +887,15 @@ bool GCOVProfiler::emitProfileArcs() {
 
           // Skip phis, landingpads.
           IRBuilder<> Builder(&*BB.getFirstInsertionPt());
-          Value *Count = Builder.CreateLoad(Builder.getInt64Ty(), Phi);
-          Count = Builder.CreateAdd(Count, Builder.getInt64(1));
-          Builder.CreateStore(Count, Phi);
+          if (Options.Atomic) {
+            Builder.CreateAtomicRMW(AtomicRMWInst::Add, Phi,
+                                    Builder.getInt64(1),
+                                    AtomicOrdering::Monotonic);
+          } else {
+            Value *Count = Builder.CreateLoad(Builder.getInt64Ty(), Phi);
+            Count = Builder.CreateAdd(Count, Builder.getInt64(1));
+            Builder.CreateStore(Count, Phi);
+          }
 
           Instruction *TI = BB.getTerminator();
           if (isa<ReturnInst>(TI)) {
@@ -898,9 +904,15 @@ bool GCOVProfiler::emitProfileArcs() {
             const unsigned Edge = It->second;
             Value *Counter = Builder.CreateConstInBoundsGEP2_64(
                 Counters->getValueType(), Counters, 0, Edge);
-            Value *Count = Builder.CreateLoad(Builder.getInt64Ty(), Counter);
-            Count = Builder.CreateAdd(Count, Builder.getInt64(1));
-            Builder.CreateStore(Count, Counter);
+            if (Options.Atomic) {
+              Builder.CreateAtomicRMW(AtomicRMWInst::Add, Counter,
+                                      Builder.getInt64(1),
+                                      AtomicOrdering::Monotonic);
+            } else {
+              Value *Count = Builder.CreateLoad(Builder.getInt64Ty(), Counter);
+              Count = Builder.CreateAdd(Count, Builder.getInt64(1));
+              Builder.CreateStore(Count, Counter);
+            }
           }
         }
       }

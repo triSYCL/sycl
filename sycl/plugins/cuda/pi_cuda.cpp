@@ -2267,8 +2267,70 @@ pi_result cuda_piEnqueueKernelLaunch(
   assert(command_queue != nullptr);
   assert(command_queue->get_context() == kernel->get_context());
   assert(kernel != nullptr);
+  assert(global_work_offset != nullptr);
   assert(work_dim > 0);
   assert(work_dim < 4);
+
+  // Set the number of threads per block to the number of threads per warp
+  // by default unless user has provided a better number
+  int threadsPerBlock[3] = {32, 1, 1};
+
+  {
+    size_t maxThreadsPerBlock[3] = {};
+    pi_result retError = cuda_piDeviceGetInfo(
+        command_queue->device_, PI_DEVICE_INFO_MAX_WORK_ITEM_SIZES,
+        sizeof(maxThreadsPerBlock), maxThreadsPerBlock, nullptr);
+    assert(retError == PI_SUCCESS);
+    (void)retError;
+    size_t maxWorkGroupSize = 0;
+    retError = cuda_piDeviceGetInfo(
+        command_queue->device_, PI_DEVICE_INFO_MAX_WORK_GROUP_SIZE,
+        sizeof(maxWorkGroupSize), &maxWorkGroupSize, nullptr);
+    assert(retError == PI_SUCCESS);
+
+    if (local_work_size) {
+      for (size_t i = 0; i < work_dim; i++) {
+        if (local_work_size[i] > maxThreadsPerBlock[i])
+          return PI_INVALID_WORK_ITEM_SIZE;
+        // Checks that local work sizes are a divisor of the global work sizes
+        // which includes that the local work sizes are neither larger than the
+        // global work sizes and not 0.
+        if (0u == local_work_size[i])
+          return PI_INVALID_WORK_GROUP_SIZE;
+        if (0u != (global_work_size[i] % local_work_size[i]))
+          return PI_INVALID_WORK_GROUP_SIZE;
+        threadsPerBlock[i] = static_cast<int>(local_work_size[i]);
+      }
+      if (maxWorkGroupSize < size_t(threadsPerBlock[0] * threadsPerBlock[1] *
+                                    threadsPerBlock[2])) {
+        return PI_INVALID_WORK_GROUP_SIZE;
+      }
+    } else {
+      // Determine local work sizes that result in uniform work groups.
+      // The default threadsPerBlock only require handling the first work_dim
+      // dimension.
+      threadsPerBlock[0] =
+          std::min(static_cast<int>(maxThreadsPerBlock[0]),
+                   std::min(static_cast<int>(global_work_size[0]),
+                            static_cast<int>(threadsPerBlock[0])));
+      // Find a local work group size that is a divisor of the global
+      // work group size to produce uniform work groups.
+      while (0u != (global_work_size[0] % threadsPerBlock[0])) {
+        --threadsPerBlock[0];
+      }
+      assert(
+          maxWorkGroupSize >=
+          size_t(threadsPerBlock[0] * threadsPerBlock[1] * threadsPerBlock[2]));
+    }
+  }
+
+  int blocksPerGrid[3] = {1, 1, 1};
+
+  for (size_t i = 0; i < work_dim; i++) {
+    blocksPerGrid[i] =
+        static_cast<int>(global_work_size[i] + threadsPerBlock[i] - 1) /
+        threadsPerBlock[i];
+  }
 
   pi_result retError = PI_SUCCESS;
   std::unique_ptr<_pi_event> retImplEv{nullptr};
@@ -2295,41 +2357,6 @@ pi_result cuda_piEnqueueKernelLaunch(
       }
       kernel->set_implicit_offset_arg(sizeof(cuda_implicit_offset),
                                       cuda_implicit_offset);
-    }
-
-    // Set the number of threads per block to the number of threads per warp
-    // by default unless user has provided a better number
-    int threadsPerBlock[3] = {32, 1, 1};
-
-    if (local_work_size) {
-      for (size_t i = 0; i < work_dim; i++) {
-        threadsPerBlock[i] = static_cast<int>(local_work_size[i]);
-      }
-    } else {
-      for (size_t i = 0; i < work_dim; i++) {
-        threadsPerBlock[i] = std::min(static_cast<int>(global_work_size[i]),
-                                      static_cast<int>(threadsPerBlock[i]));
-      }
-    }
-
-    size_t maxThreadsPerBlock[3] = {};
-    retError = cuda_piDeviceGetInfo(
-        command_queue->device_, PI_DEVICE_INFO_MAX_WORK_ITEM_SIZES,
-        sizeof(maxThreadsPerBlock), maxThreadsPerBlock, nullptr);
-    assert(retError == PI_SUCCESS);
-
-    for (size_t i = 0; i < work_dim; i++) {
-      if (size_t(threadsPerBlock[i]) > maxThreadsPerBlock[i]) {
-        return PI_INVALID_WORK_GROUP_SIZE;
-      }
-    }
-
-    int blocksPerGrid[3] = {1, 1, 1};
-
-    for (size_t i = 0; i < work_dim; i++) {
-      blocksPerGrid[i] =
-          static_cast<int>(global_work_size[i] + threadsPerBlock[i] - 1) /
-          threadsPerBlock[i];
     }
 
     auto argIndices = kernel->get_arg_indices();
@@ -3324,10 +3351,10 @@ pi_result cuda_piSamplerRelease(pi_sampler sampler) {
 /// If the source and/or destination is on the device, src_ptr and/or dst_ptr
 /// must be a pointer to a CUdeviceptr
 static pi_result commonEnqueueMemBufferCopyRect(
-    CUstream cu_stream, const size_t *region, const void *src_ptr,
-    const CUmemorytype_enum src_type, const size_t *src_offset,
+    CUstream cu_stream, pi_buff_rect_region region, const void *src_ptr,
+    const CUmemorytype_enum src_type, pi_buff_rect_offset src_offset,
     size_t src_row_pitch, size_t src_slice_pitch, void *dst_ptr,
-    const CUmemorytype_enum dst_type, const size_t *dst_offset,
+    const CUmemorytype_enum dst_type, pi_buff_rect_offset dst_offset,
     size_t dst_row_pitch, size_t dst_slice_pitch) {
 
   assert(region != nullptr);
@@ -3337,27 +3364,27 @@ static pi_result commonEnqueueMemBufferCopyRect(
   assert(src_type == CU_MEMORYTYPE_DEVICE || src_type == CU_MEMORYTYPE_HOST);
   assert(dst_type == CU_MEMORYTYPE_DEVICE || dst_type == CU_MEMORYTYPE_HOST);
 
-  src_row_pitch = (!src_row_pitch) ? region[0] : src_row_pitch;
-  src_slice_pitch =
-      (!src_slice_pitch) ? (region[1] * src_row_pitch) : src_slice_pitch;
-  dst_row_pitch = (!dst_row_pitch) ? region[0] : dst_row_pitch;
-  dst_slice_pitch =
-      (!dst_slice_pitch) ? (region[1] * dst_row_pitch) : dst_slice_pitch;
+  src_row_pitch = (!src_row_pitch) ? region->width_bytes : src_row_pitch;
+  src_slice_pitch = (!src_slice_pitch) ? (region->height_scalar * src_row_pitch)
+                                       : src_slice_pitch;
+  dst_row_pitch = (!dst_row_pitch) ? region->width_bytes : dst_row_pitch;
+  dst_slice_pitch = (!dst_slice_pitch) ? (region->height_scalar * dst_row_pitch)
+                                       : dst_slice_pitch;
 
   CUDA_MEMCPY3D params = {0};
 
-  params.WidthInBytes = region[0];
-  params.Height = region[1];
-  params.Depth = region[2];
+  params.WidthInBytes = region->width_bytes;
+  params.Height = region->height_scalar;
+  params.Depth = region->depth_scalar;
 
   params.srcMemoryType = src_type;
   params.srcDevice = src_type == CU_MEMORYTYPE_DEVICE
                          ? *static_cast<const CUdeviceptr *>(src_ptr)
                          : 0;
   params.srcHost = src_type == CU_MEMORYTYPE_HOST ? src_ptr : nullptr;
-  params.srcXInBytes = src_offset[0];
-  params.srcY = src_offset[1];
-  params.srcZ = src_offset[2];
+  params.srcXInBytes = src_offset->x_bytes;
+  params.srcY = src_offset->y_scalar;
+  params.srcZ = src_offset->z_scalar;
   params.srcPitch = src_row_pitch;
   params.srcHeight = src_slice_pitch / src_row_pitch;
 
@@ -3366,9 +3393,9 @@ static pi_result commonEnqueueMemBufferCopyRect(
                          ? *static_cast<CUdeviceptr *>(dst_ptr)
                          : 0;
   params.dstHost = dst_type == CU_MEMORYTYPE_HOST ? dst_ptr : nullptr;
-  params.dstXInBytes = dst_offset[0];
-  params.dstY = dst_offset[1];
-  params.dstZ = dst_offset[2];
+  params.dstXInBytes = dst_offset->x_bytes;
+  params.dstY = dst_offset->y_scalar;
+  params.dstZ = dst_offset->z_scalar;
   params.dstPitch = dst_row_pitch;
   params.dstHeight = dst_slice_pitch / dst_row_pitch;
 
@@ -3377,11 +3404,11 @@ static pi_result commonEnqueueMemBufferCopyRect(
 
 pi_result cuda_piEnqueueMemBufferReadRect(
     pi_queue command_queue, pi_mem buffer, pi_bool blocking_read,
-    const size_t *buffer_offset, const size_t *host_offset,
-    const size_t *region, size_t buffer_row_pitch, size_t buffer_slice_pitch,
-    size_t host_row_pitch, size_t host_slice_pitch, void *ptr,
-    pi_uint32 num_events_in_wait_list, const pi_event *event_wait_list,
-    pi_event *event) {
+    pi_buff_rect_offset buffer_offset, pi_buff_rect_offset host_offset,
+    pi_buff_rect_region region, size_t buffer_row_pitch,
+    size_t buffer_slice_pitch, size_t host_row_pitch, size_t host_slice_pitch,
+    void *ptr, pi_uint32 num_events_in_wait_list,
+    const pi_event *event_wait_list, pi_event *event) {
 
   assert(buffer != nullptr);
   assert(command_queue != nullptr);
@@ -3428,11 +3455,11 @@ pi_result cuda_piEnqueueMemBufferReadRect(
 
 pi_result cuda_piEnqueueMemBufferWriteRect(
     pi_queue command_queue, pi_mem buffer, pi_bool blocking_write,
-    const size_t *buffer_offset, const size_t *host_offset,
-    const size_t *region, size_t buffer_row_pitch, size_t buffer_slice_pitch,
-    size_t host_row_pitch, size_t host_slice_pitch, const void *ptr,
-    pi_uint32 num_events_in_wait_list, const pi_event *event_wait_list,
-    pi_event *event) {
+    pi_buff_rect_offset buffer_offset, pi_buff_rect_offset host_offset,
+    pi_buff_rect_region region, size_t buffer_row_pitch,
+    size_t buffer_slice_pitch, size_t host_row_pitch, size_t host_slice_pitch,
+    const void *ptr, pi_uint32 num_events_in_wait_list,
+    const pi_event *event_wait_list, pi_event *event) {
 
   assert(buffer != nullptr);
   assert(command_queue != nullptr);
@@ -3526,10 +3553,11 @@ pi_result cuda_piEnqueueMemBufferCopy(pi_queue command_queue, pi_mem src_buffer,
 
 pi_result cuda_piEnqueueMemBufferCopyRect(
     pi_queue command_queue, pi_mem src_buffer, pi_mem dst_buffer,
-    const size_t *src_origin, const size_t *dst_origin, const size_t *region,
-    size_t src_row_pitch, size_t src_slice_pitch, size_t dst_row_pitch,
-    size_t dst_slice_pitch, pi_uint32 num_events_in_wait_list,
-    const pi_event *event_wait_list, pi_event *event) {
+    pi_buff_rect_offset src_origin, pi_buff_rect_offset dst_origin,
+    pi_buff_rect_region region, size_t src_row_pitch, size_t src_slice_pitch,
+    size_t dst_row_pitch, size_t dst_slice_pitch,
+    pi_uint32 num_events_in_wait_list, const pi_event *event_wait_list,
+    pi_event *event) {
 
   assert(src_buffer != nullptr);
   assert(dst_buffer != nullptr);

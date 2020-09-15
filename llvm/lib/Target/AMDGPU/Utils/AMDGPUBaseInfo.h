@@ -368,8 +368,8 @@ struct Waitcnt {
   Waitcnt(unsigned VmCnt, unsigned ExpCnt, unsigned LgkmCnt, unsigned VsCnt)
       : VmCnt(VmCnt), ExpCnt(ExpCnt), LgkmCnt(LgkmCnt), VsCnt(VsCnt) {}
 
-  static Waitcnt allZero(const IsaVersion &Version) {
-    return Waitcnt(0, 0, 0, Version.Major >= 10 ? 0 : ~0u);
+  static Waitcnt allZero(bool HasVscnt) {
+    return Waitcnt(0, 0, 0, HasVscnt ? 0 : ~0u);
   }
   static Waitcnt allZeroExceptVsCnt() { return Waitcnt(0, 0, 0, ~0u); }
 
@@ -488,6 +488,30 @@ LLVM_READNONE
 int64_t encodeDfmtNfmt(unsigned Dfmt, unsigned Nfmt);
 
 void decodeDfmtNfmt(unsigned Format, unsigned &Dfmt, unsigned &Nfmt);
+
+int64_t getDfmt(const StringRef Name);
+
+StringRef getDfmtName(unsigned Id);
+
+int64_t getNfmt(const StringRef Name, const MCSubtargetInfo &STI);
+
+StringRef getNfmtName(unsigned Id, const MCSubtargetInfo &STI);
+
+bool isValidDfmtNfmt(unsigned Val, const MCSubtargetInfo &STI);
+
+bool isValidNfmt(unsigned Val, const MCSubtargetInfo &STI);
+
+int64_t getUnifiedFormat(const StringRef Name);
+
+StringRef getUnifiedFormatName(unsigned Id);
+
+bool isValidUnifiedFormat(unsigned Val);
+
+int64_t convertDfmtNfmt2Ufmt(unsigned Dfmt, unsigned Nfmt);
+
+bool isValidFormatEncoding(unsigned Val, const MCSubtargetInfo &STI);
+
+unsigned getDefaultFormatEncoding(const MCSubtargetInfo &STI);
 
 } // namespace MTBUFFormat
 

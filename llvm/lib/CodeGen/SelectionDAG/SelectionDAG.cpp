@@ -1380,7 +1380,9 @@ SDValue SelectionDAG::getConstantFP(const ConstantFP &V, const SDLoc &DL,
   }
 
   SDValue Result(N, 0);
-  if (VT.isVector())
+  if (VT.isScalableVector())
+    Result = getSplatVector(VT, DL, Result);
+  else if (VT.isVector())
     Result = getSplatBuildVector(VT, DL, Result);
   NewSDValueDbgMsg(Result, "Creating fp constant: ", this);
   return Result;
@@ -2023,7 +2025,12 @@ Align SelectionDAG::getReducedAlign(EVT VT, bool UseABI) {
 
 SDValue SelectionDAG::CreateStackTemporary(TypeSize Bytes, Align Alignment) {
   MachineFrameInfo &MFI = MF->getFrameInfo();
-  int FrameIdx = MFI.CreateStackObject(Bytes, Alignment, false);
+  const TargetFrameLowering *TFI = MF->getSubtarget().getFrameLowering();
+  int StackID = 0;
+  if (Bytes.isScalable())
+    StackID = TFI->getStackIDForScalableVectors();
+  int FrameIdx = MFI.CreateStackObject(Bytes, Alignment,
+                                       false, nullptr, StackID);
   return getFrameIndex(FrameIdx, TLI->getFrameIndexTy(getDataLayout()));
 }
 
@@ -2221,7 +2228,6 @@ SDValue SelectionDAG::GetDemandedBits(SDValue V, const APInt &DemandedBits,
   default:
     return TLI->SimplifyMultipleUseDemandedBits(V, DemandedBits, DemandedElts,
                                                 *this, 0);
-    break;
   case ISD::Constant: {
     const APInt &CVal = cast<ConstantSDNode>(V)->getAPIntValue();
     APInt NewVal = CVal & DemandedBits;
@@ -2247,18 +2253,6 @@ SDValue SelectionDAG::GetDemandedBits(SDValue V, const APInt &DemandedBits,
                        V.getOperand(1));
     }
     break;
-  case ISD::AND: {
-    // X & -1 -> X (ignoring bits which aren't demanded).
-    // Also handle the case where masked out bits in X are known to be zero.
-    if (ConstantSDNode *RHSC = isConstOrConstSplat(V.getOperand(1))) {
-      const APInt &AndVal = RHSC->getAPIntValue();
-      if (DemandedBits.isSubsetOf(AndVal) ||
-          DemandedBits.isSubsetOf(computeKnownBits(V.getOperand(0)).Zero |
-                                  AndVal))
-        return V.getOperand(0);
-    }
-    break;
-  }
   }
   return SDValue();
 }
@@ -2323,6 +2317,10 @@ bool SelectionDAG::isSplatValue(SDValue V, const APInt &DemandedElts,
     }
     break;
   }
+  case ISD::TRUNCATE:
+  case ISD::SIGN_EXTEND:
+  case ISD::ZERO_EXTEND:
+    return isSplatValue(V.getOperand(0), DemandedElts, UndefElts);
   }
 
   // We don't support other cases than those above for scalable vectors at
@@ -3359,14 +3357,12 @@ KnownBits SelectionDAG::computeKnownBits(SDValue Op, const APInt &DemandedElts,
   }
   case ISD::BITREVERSE: {
     Known2 = computeKnownBits(Op.getOperand(0), DemandedElts, Depth + 1);
-    Known.Zero = Known2.Zero.reverseBits();
-    Known.One = Known2.One.reverseBits();
+    Known = Known2.reverseBits();
     break;
   }
   case ISD::BSWAP: {
     Known2 = computeKnownBits(Op.getOperand(0), DemandedElts, Depth + 1);
-    Known.Zero = Known2.Zero.byteSwap();
-    Known.One = Known2.One.byteSwap();
+    Known = Known2.byteSwap();
     break;
   }
   case ISD::ABS: {
@@ -5562,6 +5558,11 @@ SDValue SelectionDAG::getNode(unsigned Opcode, const SDLoc &DL, EVT VT,
             (VT.getVectorMinNumElements() + N2C->getZExtValue()) <=
                 N1VT.getVectorMinNumElements()) &&
            "Extract subvector overflow!");
+    assert(N2C->getAPIntValue().getBitWidth() ==
+               TLI->getVectorIdxTy(getDataLayout())
+                   .getSizeInBits()
+                   .getFixedSize() &&
+           "Constant index for EXTRACT_SUBVECTOR has an invalid size");
 
     // Trivial extraction.
     if (VT == N1VT)
@@ -5940,11 +5941,20 @@ static SDValue getMemsetStringVal(EVT VT, const SDLoc &dl, SelectionDAG &DAG,
   return SDValue(nullptr, 0);
 }
 
-SDValue SelectionDAG::getMemBasePlusOffset(SDValue Base, int64_t Offset,
+SDValue SelectionDAG::getMemBasePlusOffset(SDValue Base, TypeSize Offset,
                                            const SDLoc &DL,
                                            const SDNodeFlags Flags) {
   EVT VT = Base.getValueType();
-  return getMemBasePlusOffset(Base, getConstant(Offset, DL, VT), DL, Flags);
+  SDValue Index;
+
+  if (Offset.isScalable())
+    Index = getVScale(DL, Base.getValueType(),
+                      APInt(Base.getValueSizeInBits().getFixedSize(),
+                            Offset.getKnownMinSize()));
+  else
+    Index = getConstant(Offset.getFixedSize(), DL, VT);
+
+  return getMemBasePlusOffset(Base, Index, DL, Flags);
 }
 
 SDValue SelectionDAG::getMemBasePlusOffset(SDValue Ptr, SDValue Offset,
@@ -6111,7 +6121,8 @@ static SDValue getMemcpyLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
       Value = getMemsetStringVal(VT, dl, DAG, TLI, SubSlice);
       if (Value.getNode()) {
         Store = DAG.getStore(
-            Chain, dl, Value, DAG.getMemBasePlusOffset(Dst, DstOff, dl),
+            Chain, dl, Value,
+            DAG.getMemBasePlusOffset(Dst, TypeSize::Fixed(DstOff), dl),
             DstPtrInfo.getWithOffset(DstOff), Alignment.value(), MMOFlags);
         OutChains.push_back(Store);
       }
@@ -6132,15 +6143,16 @@ static SDValue getMemcpyLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
       if (isDereferenceable)
         SrcMMOFlags |= MachineMemOperand::MODereferenceable;
 
-      Value = DAG.getExtLoad(ISD::EXTLOAD, dl, NVT, Chain,
-                             DAG.getMemBasePlusOffset(Src, SrcOff, dl),
-                             SrcPtrInfo.getWithOffset(SrcOff), VT,
-                             commonAlignment(*SrcAlign, SrcOff).value(),
-                             SrcMMOFlags);
+      Value = DAG.getExtLoad(
+          ISD::EXTLOAD, dl, NVT, Chain,
+          DAG.getMemBasePlusOffset(Src, TypeSize::Fixed(SrcOff), dl),
+          SrcPtrInfo.getWithOffset(SrcOff), VT,
+          commonAlignment(*SrcAlign, SrcOff).value(), SrcMMOFlags);
       OutLoadChains.push_back(Value.getValue(1));
 
       Store = DAG.getTruncStore(
-          Chain, dl, Value, DAG.getMemBasePlusOffset(Dst, DstOff, dl),
+          Chain, dl, Value,
+          DAG.getMemBasePlusOffset(Dst, TypeSize::Fixed(DstOff), dl),
           DstPtrInfo.getWithOffset(DstOff), VT, Alignment.value(), MMOFlags);
       OutStoreChains.push_back(Store);
     }
@@ -6262,7 +6274,8 @@ static SDValue getMemmoveLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
       SrcMMOFlags |= MachineMemOperand::MODereferenceable;
 
     Value = DAG.getLoad(
-        VT, dl, Chain, DAG.getMemBasePlusOffset(Src, SrcOff, dl),
+        VT, dl, Chain,
+        DAG.getMemBasePlusOffset(Src, TypeSize::Fixed(SrcOff), dl),
         SrcPtrInfo.getWithOffset(SrcOff), SrcAlign->value(), SrcMMOFlags);
     LoadValues.push_back(Value);
     LoadChains.push_back(Value.getValue(1));
@@ -6276,7 +6289,8 @@ static SDValue getMemmoveLoadsAndStores(SelectionDAG &DAG, const SDLoc &dl,
     SDValue Store;
 
     Store = DAG.getStore(
-        Chain, dl, LoadValues[i], DAG.getMemBasePlusOffset(Dst, DstOff, dl),
+        Chain, dl, LoadValues[i],
+        DAG.getMemBasePlusOffset(Dst, TypeSize::Fixed(DstOff), dl),
         DstPtrInfo.getWithOffset(DstOff), Alignment.value(), MMOFlags);
     OutChains.push_back(Store);
     DstOff += VTSize;
@@ -6375,7 +6389,8 @@ static SDValue getMemsetStores(SelectionDAG &DAG, const SDLoc &dl,
     }
     assert(Value.getValueType() == VT && "Value with wrong type.");
     SDValue Store = DAG.getStore(
-        Chain, dl, Value, DAG.getMemBasePlusOffset(Dst, DstOff, dl),
+        Chain, dl, Value,
+        DAG.getMemBasePlusOffset(Dst, TypeSize::Fixed(DstOff), dl),
         DstPtrInfo.getWithOffset(DstOff), Alignment.value(),
         isVol ? MachineMemOperand::MOVolatile : MachineMemOperand::MONone);
     OutChains.push_back(Store);
@@ -6390,7 +6405,7 @@ static void checkAddrSpaceIsValidForLibcall(const TargetLowering *TLI,
                                             unsigned AS) {
   // Lowering memcpy / memset / memmove intrinsics to calls is only valid if all
   // pointer operands can be losslessly bitcasted to pointers of address space 0
-  if (AS != 0 && !TLI->isNoopAddrSpaceCast(AS, 0)) {
+  if (AS != 0 && !TLI->getTargetMachine().isNoopAddrSpaceCast(AS, 0)) {
     report_fatal_error("cannot lower memory intrinsic in address space " +
                        Twine(AS));
   }
@@ -6962,7 +6977,7 @@ SDValue SelectionDAG::getLoad(ISD::MemIndexedMode AM, ISD::LoadExtType ExtType,
     assert(VT.isVector() == MemVT.isVector() &&
            "Cannot use an ext load to convert to or from a vector!");
     assert((!VT.isVector() ||
-            VT.getVectorNumElements() == MemVT.getVectorNumElements()) &&
+            VT.getVectorElementCount() == MemVT.getVectorElementCount()) &&
            "Cannot use an ext load to change the number of vector elements!");
   }
 
@@ -9059,6 +9074,10 @@ ConstantFPSDNode *llvm::isConstOrConstSplatFP(SDValue N, bool AllowUndefs) {
       return CN;
   }
 
+  if (N.getOpcode() == ISD::SPLAT_VECTOR)
+    if (ConstantFPSDNode *CN = dyn_cast<ConstantFPSDNode>(N.getOperand(0)))
+      return CN;
+
   return nullptr;
 }
 
@@ -9616,24 +9635,24 @@ std::pair<EVT, EVT>
 SelectionDAG::GetDependentSplitDestVTs(const EVT &VT, const EVT &EnvVT,
                                        bool *HiIsEmpty) const {
   EVT EltTp = VT.getVectorElementType();
-  bool IsScalable = VT.isScalableVector();
   // Examples:
   //   custom VL=8  with enveloping VL=8/8 yields 8/0 (hi empty)
   //   custom VL=9  with enveloping VL=8/8 yields 8/1
   //   custom VL=10 with enveloping VL=8/8 yields 8/2
   //   etc.
-  unsigned VTNumElts = VT.getVectorNumElements();
-  unsigned EnvNumElts = EnvVT.getVectorNumElements();
+  ElementCount VTNumElts = VT.getVectorElementCount();
+  ElementCount EnvNumElts = EnvVT.getVectorElementCount();
+  assert(VTNumElts.isScalable() == EnvNumElts.isScalable() &&
+         "Mixing fixed width and scalable vectors when enveloping a type");
   EVT LoVT, HiVT;
-  if (VTNumElts > EnvNumElts) {
+  if (VTNumElts.getKnownMinValue() > EnvNumElts.getKnownMinValue()) {
     LoVT = EnvVT;
-    HiVT = EVT::getVectorVT(*getContext(), EltTp, VTNumElts - EnvNumElts,
-                            IsScalable);
+    HiVT = EVT::getVectorVT(*getContext(), EltTp, VTNumElts - EnvNumElts);
     *HiIsEmpty = false;
   } else {
     // Flag that hi type has zero storage size, but return split envelop type
     // (this would be easier if vector types with zero elements were allowed).
-    LoVT = EVT::getVectorVT(*getContext(), EltTp, VTNumElts, IsScalable);
+    LoVT = EVT::getVectorVT(*getContext(), EltTp, VTNumElts);
     HiVT = EnvVT;
     *HiIsEmpty = true;
   }
@@ -9889,6 +9908,9 @@ SDNode *SelectionDAG::isConstantIntBuildVectorOrConstantInt(SDValue N) {
     if (GA->getOpcode() == ISD::GlobalAddress &&
         TLI->isOffsetFoldingLegal(GA))
       return GA;
+  if ((N.getOpcode() == ISD::SPLAT_VECTOR) &&
+      isa<ConstantSDNode>(N.getOperand(0)))
+    return N.getNode();
   return nullptr;
 }
 
