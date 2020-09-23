@@ -21,11 +21,11 @@
 extern "C" {
   /// SSDM Intrinsics: dataflow operation
   SYCL_EXTERNAL void _ssdm_op_SpecDataflowPipeline(...)
-    __attribute__ ((nothrow, noinline, weak));
+    __attribute__ ((nothrow, noinline, weak, willreturn, pure));
   /// SSDM Intrinsics: pipeline operation
-  SYCL_EXTERNAL void _ssdm_op_SpecPipeline(...) __attribute__ ((nothrow, noinline, weak));
+  SYCL_EXTERNAL void _ssdm_op_SpecPipeline(...) __attribute__ ((nothrow, noinline, weak, willreturn, pure));
   /// SSDM Intrinsics: array partition operation
-  SYCL_EXTERNAL void _ssdm_SpecArrayPartition(...) __attribute__ ((nothrow, noinline, weak));
+  SYCL_EXTERNAL void _ssdm_SpecArrayPartition(...) __attribute__ ((nothrow, noinline, weak, willreturn, pure));
 }
 #else
 /* If not on device, just ignore the intrinsics as defining them as

@@ -363,7 +363,7 @@ So to run an example, for example start with
   ./parallel_for_ND_range
   ```
   run the test suite
-  this takes usually 6+ hours
+  this takes usually 8+ hours
   ```bash
   export XCL_EMULATION_MODE=hw
   make -j`nrpoc` check-sycl-xocc-j4

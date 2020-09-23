@@ -653,7 +653,7 @@ Driver::OpenMPRuntimeKind Driver::getOpenMPRuntime(const ArgList &Args) const {
 
 static bool isValidSYCLTriple(llvm::Triple T) {
   // NVPTX is valid for SYCL.
-  if (T.isNVPTX() || T.isXilinxSYCLDevice())
+  if (T.isNVPTX() || T.getArch() == llvm::Triple::fpga64)
     return true;
   // Check for invalid SYCL device triple values.
   // Non-SPIR arch.
@@ -849,7 +849,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
     if (SYCLTargetsValues) {
       if (SYCLTargetsValues->getNumValues()) {
         for (StringRef Val : SYCLTargetsValues->getValues()) {
-          llvm::Triple TT(Val);
+          llvm::Triple TT(llvm::Triple::normalize(Val));
           if (!isValidSYCLTriple(TT)) {
             Diag(clang::diag::err_drv_invalid_sycl_target) << Val;
             continue;

@@ -1034,6 +1034,15 @@ std::string Triple::normalize(StringRef Str) {
     }
   }
 
+  if (Arch == fpga64) {
+    Components.resize(4);
+    if (Vendor == UnknownVendor)
+      Components[1] = "xilinx";
+    if (Environment == UnknownEnvironment)
+      Components[3] = "sycldevice";
+    Components[2] = "unknown";
+  }
+
   // Stick the corrected components back together to form the normalized string.
   return join(Components, "-");
 }

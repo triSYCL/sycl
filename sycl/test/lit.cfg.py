@@ -234,7 +234,12 @@ for aot_tool in aot_tools:
         lit_config.warning("Couldn't find pre-installed AOT device compiler " + aot_tool)
 
 if xocc != "off":
-    required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'XCL_EMULATION_MODE', 'EMCONFIG_PATH', 'LIBRARY_PATH']
+    xocc_target="hw"
+    if "XCL_EMULATION_MODE" in os.environ:
+        xocc_target = os.environ["XCL_EMULATION_MODE"]
+    llvm_config.with_environment('XCL_EMULATION_MODE', hw, append_path=False)
+    lit_config.note("XOCC target: {}".format(xocc_target))
+    required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH']
     has_error=False
     config.available_features.add("xocc")
     for env in required_env:
@@ -243,8 +248,6 @@ if xocc != "off":
             has_error=True
     if has_error:
         lit_config.error("Can't configure tests for XOCC")
-    else:
-        lit_config.note("XOCC target: {}".format(os.environ["XCL_EMULATION_MODE"]))
     llvm_config.with_system_environment(required_env)
     if xocc == "only":
         config.name = 'SYCL-XOCC'

@@ -15,6 +15,9 @@
 #ifndef SYCL_XILINX_FPGA_OPT_DECORATE_FUNC_HPP
 #define SYCL_XILINX_FPGA_OPT_DECORATE_FUNC_HPP
 
+#include "CL/sycl/xilinx/fpga/ssdm_inst.hpp"
+#include "CL/sycl/detail/defines.hpp"
+
 __SYCL_INLINE_NAMESPACE(cl) {
 
 namespace sycl::xilinx {
