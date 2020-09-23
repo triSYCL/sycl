@@ -1237,6 +1237,15 @@ public:
   }
 };
 
+/// Given a container of pairs, return a range over the first elements.
+template <typename ContainerTy> auto make_first_range(ContainerTy &&c) {
+  return llvm::map_range(
+      std::forward<ContainerTy>(c),
+      [](decltype((*std::begin(c))) elt) -> decltype((elt.first)) {
+        return elt.first;
+      });
+}
+
 /// Given a container of pairs, return a range over the second elements.
 template <typename ContainerTy> auto make_second_range(ContainerTy &&c) {
   return llvm::map_range(
@@ -1535,6 +1544,13 @@ OutputIt copy(R &&Range, OutputIt Out) {
   return std::copy(adl_begin(Range), adl_end(Range), Out);
 }
 
+/// Provide wrappers to std::move which take ranges instead of having to
+/// pass begin/end explicitly.
+template <typename R, typename OutputIt>
+OutputIt move(R &&Range, OutputIt Out) {
+  return std::move(adl_begin(Range), adl_end(Range), Out);
+}
+
 /// Wrapper function around std::find to detect if an element exists
 /// in a container.
 template <typename R, typename E>
@@ -1644,6 +1660,14 @@ bool is_splat(R &&Range) {
 template <typename Container, typename UnaryPredicate>
 void erase_if(Container &C, UnaryPredicate P) {
   C.erase(remove_if(C, P), C.end());
+}
+
+/// Wrapper function to remove a value from a container:
+///
+/// C.erase(remove(C.begin(), C.end(), V), C.end());
+template <typename Container, typename ValueType>
+void erase_value(Container &C, ValueType V) {
+  C.erase(std::remove(C.begin(), C.end(), V), C.end());
 }
 
 /// Given a sequence container Cont, replace the range [ContIt, ContEnd) with

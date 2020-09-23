@@ -62,6 +62,20 @@ def warn_misleading_indentation : Warning<
 def note_previous_statement : Note<
   "previous statement is here">;
 
+def subst_compound_token_kind : TextSubstitution<
+  "%select{%1 and |}0%2 tokens "
+  "%select{introducing statement expression|terminating statement expression|"
+  "introducing attribute|terminating attribute|"
+  "forming pointer to member type}3">;
+def warn_compound_token_split_by_macro : Warning<
+  "%sub{subst_compound_token_kind}0,1,2,3 appear in different "
+  "macro expansion contexts">, InGroup<CompoundTokenSplitByMacro>;
+def note_compound_token_split_second_token_here : Note<
+  "%select{|second }0%1 token is here">;
+def warn_compound_token_split_by_whitespace : Warning<
+  "%sub{subst_compound_token_kind}0,1,2,3 are separated by whitespace">,
+  InGroup<CompoundTokenSplitBySpace>, DefaultIgnore;
+
 def ext_thread_before : Extension<"'__thread' before '%0'">;
 def ext_keyword_as_ident : ExtWarn<
   "keyword '%0' will be made available as an identifier "
@@ -1278,6 +1292,11 @@ def warn_omp_declare_variant_string_literal_or_identifier
               "%select{set|selector|property}0; "
               "%select{set|selector|property}0 skipped">,
       InGroup<OpenMPClauses>;
+def warn_unknown_begin_declare_variant_isa_trait
+    : Warning<"isa trait '%0' is not known to the current target; verify the "
+              "spelling or consider restricting the context selector with the "
+              "'arch' selector further">,
+      InGroup<SourceUsesOpenMP>;
 def note_omp_declare_variant_ctx_options
     : Note<"context %select{set|selector|property}0 options are: %1">;
 def warn_omp_declare_variant_expected

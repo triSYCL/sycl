@@ -5,6 +5,7 @@ add_mlir_library(MLIRTestTransforms
   TestExpandTanh.cpp
   TestCallGraph.cpp
   TestConstantFold.cpp
+  TestConvertCallOp.cpp
   TestConvertGPUKernelToCubin.cpp
   TestConvertGPUKernelToHsaco.cpp
   TestDominance.cpp
@@ -32,7 +33,6 @@ add_mlir_library(MLIRTestTransforms
 
   DEPENDS
   MLIRStandardOpsIncGen
-  MLIRTestVectorTransformPatternsIncGen
 
   LINK_LIBS PUBLIC
   MLIRAffineOps
@@ -59,5 +59,3 @@ add_mlir_library(MLIRTestTransforms
 
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../Dialect/Test)
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/../Dialect/Test)
-include_directories(${CMAKE_CURRENT_SOURCE_DIR}/../DeclarativeTransforms)
-include_directories(${CMAKE_CURRENT_BINARY_DIR}/../DeclarativeTransforms)

@@ -44,7 +44,6 @@ namespace llvm {
   FunctionPass *createPPCMIPeepholePass();
   FunctionPass *createPPCBranchSelectionPass();
   FunctionPass *createPPCBranchCoalescingPass();
-  FunctionPass *createPPCQPXLoadSplatPass();
   FunctionPass *createPPCISelDag(PPCTargetMachine &TM, CodeGenOpt::Level OL);
   FunctionPass *createPPCTLSDynamicCallPass();
   FunctionPass *createPPCBoolRetToIntPass();
@@ -68,7 +67,6 @@ namespace llvm {
   void initializePPCReduceCRLogicalsPass(PassRegistry&);
   void initializePPCBSelPass(PassRegistry&);
   void initializePPCBranchCoalescingPass(PassRegistry&);
-  void initializePPCQPXLoadSplatPass(PassRegistry&);
   void initializePPCBoolRetToIntPass(PassRegistry&);
   void initializePPCExpandISELPass(PassRegistry &);
   void initializePPCPreEmitPeepholePass(PassRegistry &);
@@ -110,6 +108,24 @@ namespace llvm {
     // MO_PCREL_OPT_FLAG - If this bit is set the operand is part of a
     // PC Relative linker optimization.
     MO_PCREL_OPT_FLAG = 16,
+
+    /// MO_TLSGD_FLAG - If this bit is set the symbol reference is relative to
+    /// TLS General Dynamic model.
+    MO_TLSGD_FLAG = 32,
+
+    /// MO_TPREL_FLAG - If this bit is set the symbol reference is relative to
+    /// TLS Initial Exec model.
+    MO_TPREL_FLAG = 64,
+
+    /// MO_GOT_TLSGD_PCREL_FLAG - A combintaion of flags, if these bits are set
+    /// they should produce the relocation @got@tlsgd@pcrel.
+    /// Fix up is VK_PPC_GOT_TLSGD_PCREL
+    MO_GOT_TLSGD_PCREL_FLAG = MO_PCREL_FLAG | MO_GOT_FLAG | MO_TLSGD_FLAG,
+
+    /// MO_GOT_TPREL_PCREL_FLAG - A combintaion of flags, if these bits are set
+    /// they should produce the relocation @got@tprel@pcrel.
+    /// Fix up is VK_PPC_GOT_TPREL_PCREL
+    MO_GOT_TPREL_PCREL_FLAG = MO_GOT_FLAG | MO_TPREL_FLAG | MO_PCREL_FLAG,
 
     /// The next are not flags but distinct values.
     MO_ACCESS_MASK = 0xf00,

@@ -38,10 +38,10 @@ using tools::addMultilibFlag;
 using tools::addPathIfExists;
 
 static bool forwardToGCC(const Option &O) {
-  // Don't forward inputs from the original command line.  They are added from
-  // InputInfoList.
-  return O.getKind() != Option::InputClass &&
-         !O.hasFlag(options::DriverOption) && !O.hasFlag(options::LinkerInput);
+  // LinkerInput options have been forwarded. Don't duplicate.
+  if (O.hasFlag(options::LinkerInput))
+    return false;
+  return O.matches(options::OPT_Link_Group) || O.hasFlag(options::LinkOption);
 }
 
 // Switch CPU names not recognized by GNU assembler to a close CPU that it does
@@ -75,23 +75,6 @@ void tools::gcc::Common::ConstructJob(Compilation &C, const JobAction &JA,
       // platforms using a generic gcc, even if we are just using gcc
       // to get to the assembler.
       A->claim();
-
-      // Don't forward any -g arguments to assembly steps.
-      if (isa<AssembleJobAction>(JA) &&
-          A->getOption().matches(options::OPT_g_Group))
-        continue;
-
-      // Don't forward any -W arguments to assembly and link steps.
-      if ((isa<AssembleJobAction>(JA) || isa<LinkJobAction>(JA)) &&
-          A->getOption().matches(options::OPT_W_Group))
-        continue;
-
-      // Don't forward -mno-unaligned-access since GCC doesn't understand
-      // it and because it doesn't affect the assembly or link steps.
-      if ((isa<AssembleJobAction>(JA) || isa<LinkJobAction>(JA)) &&
-          (A->getOption().matches(options::OPT_munaligned_access) ||
-           A->getOption().matches(options::OPT_mno_unaligned_access)))
-        continue;
 
       A->render(Args, CmdArgs);
     }
@@ -390,12 +373,17 @@ void tools::gnutools::StaticLibTool::ConstructJob(
   // Silence warnings when linking C code with a C++ '-stdlib' argument.
   Args.ClaimAllArgs(options::OPT_stdlib_EQ);
 
-  // GNU ar tool command "ar <options> <output_file> <input_files>".
+  // ar tool command "llvm-ar <options> <output_file> <input_files>".
   ArgStringList CmdArgs;
   // Create and insert file members with a deterministic index.
   CmdArgs.push_back("rcsD");
   CmdArgs.push_back(Output.getFilename());
-  AddLinkerInputs(getToolChain(), Inputs, Args, CmdArgs, JA);
+
+  for (const auto &II : Inputs) {
+    if (II.isFilename()) {
+       CmdArgs.push_back(II.getFilename());
+    }
+  }
 
   // Delete old output archive file if it already exists before generating a new
   // archive file.

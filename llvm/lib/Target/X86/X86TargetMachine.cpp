@@ -56,11 +56,6 @@ static cl::opt<bool> EnableMachineCombinerPass("x86-machine-combiner",
                                cl::desc("Enable the machine combiner pass"),
                                cl::init(true), cl::Hidden);
 
-static cl::opt<bool> EnableCondBrFoldingPass("x86-condbr-folding",
-                               cl::desc("Enable the conditional branch "
-                                        "folding pass"),
-                               cl::init(false), cl::Hidden);
-
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeX86Target() {
   // Register the target.
   RegisterTargetMachine<X86TargetMachine> X(getTheX86_32Target());
@@ -84,7 +79,6 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeX86Target() {
   initializeX86SpeculativeLoadHardeningPassPass(PR);
   initializeX86SpeculativeExecutionSideEffectSuppressionPass(PR);
   initializeX86FlagsCopyLoweringPassPass(PR);
-  initializeX86CondBrFoldingPassPass(PR);
   initializeX86LoadValueInjectionLoadHardeningPassPass(PR);
   initializeX86LoadValueInjectionRetHardeningPassPass(PR);
   initializeX86OptimizeLEAPassPass(PR);
@@ -239,14 +233,15 @@ X86TargetMachine::~X86TargetMachine() = default;
 const X86Subtarget *
 X86TargetMachine::getSubtargetImpl(const Function &F) const {
   Attribute CPUAttr = F.getFnAttribute("target-cpu");
+  Attribute TuneAttr = F.getFnAttribute("tune-cpu");
   Attribute FSAttr = F.getFnAttribute("target-features");
 
-  StringRef CPU = !CPUAttr.hasAttribute(Attribute::None)
-                      ? CPUAttr.getValueAsString()
-                      : (StringRef)TargetCPU;
-  StringRef FS = !FSAttr.hasAttribute(Attribute::None)
-                     ? FSAttr.getValueAsString()
-                     : (StringRef)TargetFS;
+  StringRef CPU =
+      CPUAttr.isValid() ? CPUAttr.getValueAsString() : (StringRef)TargetCPU;
+  StringRef TuneCPU =
+      TuneAttr.isValid() ? TuneAttr.getValueAsString() : (StringRef)CPU;
+  StringRef FS =
+      FSAttr.isValid() ? FSAttr.getValueAsString() : (StringRef)TargetFS;
 
   SmallString<512> Key;
   // The additions here are ordered so that the definitely short strings are
@@ -256,8 +251,9 @@ X86TargetMachine::getSubtargetImpl(const Function &F) const {
 
   // Extract prefer-vector-width attribute.
   unsigned PreferVectorWidthOverride = 0;
-  if (F.hasFnAttribute("prefer-vector-width")) {
-    StringRef Val = F.getFnAttribute("prefer-vector-width").getValueAsString();
+  Attribute PreferVecWidthAttr = F.getFnAttribute("prefer-vector-width");
+  if (PreferVecWidthAttr.isValid()) {
+    StringRef Val = PreferVecWidthAttr.getValueAsString();
     unsigned Width;
     if (!Val.getAsInteger(0, Width)) {
       Key += "prefer-vector-width=";
@@ -268,9 +264,9 @@ X86TargetMachine::getSubtargetImpl(const Function &F) const {
 
   // Extract min-legal-vector-width attribute.
   unsigned RequiredVectorWidth = UINT32_MAX;
-  if (F.hasFnAttribute("min-legal-vector-width")) {
-    StringRef Val =
-        F.getFnAttribute("min-legal-vector-width").getValueAsString();
+  Attribute MinLegalVecWidthAttr = F.getFnAttribute("min-legal-vector-width");
+  if (MinLegalVecWidthAttr.isValid()) {
+    StringRef Val = MinLegalVecWidthAttr.getValueAsString();
     unsigned Width;
     if (!Val.getAsInteger(0, Width)) {
       Key += "min-legal-vector-width=";
@@ -281,6 +277,10 @@ X86TargetMachine::getSubtargetImpl(const Function &F) const {
 
   // Add CPU to the Key.
   Key += CPU;
+
+  // Add tune CPU to the Key.
+  Key += "tune=";
+  Key += TuneCPU;
 
   // Keep track of the start of the feature portion of the string.
   unsigned FSStart = Key.size();
@@ -310,11 +310,19 @@ X86TargetMachine::getSubtargetImpl(const Function &F) const {
     // function that reside in TargetOptions.
     resetTargetOptions(F);
     I = std::make_unique<X86Subtarget>(
-        TargetTriple, CPU, FS, *this,
+        TargetTriple, CPU, TuneCPU, FS, *this,
         MaybeAlign(Options.StackAlignmentOverride), PreferVectorWidthOverride,
         RequiredVectorWidth);
   }
   return I.get();
+}
+
+bool X86TargetMachine::isNoopAddrSpaceCast(unsigned SrcAS,
+                                           unsigned DestAS) const {
+  assert(SrcAS != DestAS && "Expected different address spaces!");
+  if (getPointerSize(SrcAS) != getPointerSize(DestAS))
+    return false;
+  return SrcAS < 256 && DestAS < 256;
 }
 
 //===----------------------------------------------------------------------===//
@@ -456,8 +464,6 @@ bool X86PassConfig::addGlobalInstructionSelect() {
 }
 
 bool X86PassConfig::addILPOpts() {
-  if (EnableCondBrFoldingPass)
-    addPass(createX86CondBrFolding());
   addPass(&EarlyIfConverterID);
   if (EnableMachineCombinerPass)
     addPass(&MachineCombinerID);

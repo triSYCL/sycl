@@ -1575,9 +1575,9 @@ private:
         continue;
       FormatToken *Tok = AnnotatedLines[i]->First->Next;
       while (Tok->Next) {
-        if (Tok->PackingKind == PPK_BinPacked)
+        if (Tok->is(PPK_BinPacked))
           HasBinPackedFunction = true;
-        if (Tok->PackingKind == PPK_OnePerLine)
+        if (Tok->is(PPK_OnePerLine))
           HasOnePerLineFunction = true;
 
         Tok = Tok->Next;
@@ -2739,6 +2739,7 @@ LangOptions getFormattingLangOpts(const FormatStyle &Style) {
   LangOpts.ObjC = 1;
   LangOpts.MicrosoftExt = 1;    // To get kw___try, kw___finally.
   LangOpts.DeclSpecKeyword = 1; // To get __declspec.
+  LangOpts.C99 = 1; // To get kw_restrict for non-underscore-prefixed restrict.
   return LangOpts;
 }
 

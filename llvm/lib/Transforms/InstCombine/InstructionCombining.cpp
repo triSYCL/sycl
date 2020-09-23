@@ -114,6 +114,9 @@ using namespace llvm::PatternMatch;
 
 #define DEBUG_TYPE "instcombine"
 
+STATISTIC(NumWorklistIterations,
+          "Number of instruction combining iterations performed");
+
 STATISTIC(NumCombined , "Number of insts combined");
 STATISTIC(NumConstProp, "Number of constant folds");
 STATISTIC(NumDeadInst , "Number of dead inst eliminated");
@@ -740,8 +743,10 @@ Value *InstCombinerImpl::SimplifyUsingDistributiveLaws(BinaryOperator &I) {
     Value *A = Op0->getOperand(0), *B = Op0->getOperand(1), *C = RHS;
     Instruction::BinaryOps InnerOpcode = Op0->getOpcode(); // op'
 
-    Value *L = SimplifyBinOp(TopLevelOpcode, A, C, SQ.getWithInstruction(&I));
-    Value *R = SimplifyBinOp(TopLevelOpcode, B, C, SQ.getWithInstruction(&I));
+    // Disable the use of undef because it's not safe to distribute undef.
+    auto SQDistributive = SQ.getWithInstruction(&I).getWithoutUndef();
+    Value *L = SimplifyBinOp(TopLevelOpcode, A, C, SQDistributive);
+    Value *R = SimplifyBinOp(TopLevelOpcode, B, C, SQDistributive);
 
     // Do "A op C" and "B op C" both simplify?
     if (L && R) {
@@ -777,8 +782,10 @@ Value *InstCombinerImpl::SimplifyUsingDistributiveLaws(BinaryOperator &I) {
     Value *A = LHS, *B = Op1->getOperand(0), *C = Op1->getOperand(1);
     Instruction::BinaryOps InnerOpcode = Op1->getOpcode(); // op'
 
-    Value *L = SimplifyBinOp(TopLevelOpcode, A, B, SQ.getWithInstruction(&I));
-    Value *R = SimplifyBinOp(TopLevelOpcode, A, C, SQ.getWithInstruction(&I));
+    // Disable the use of undef because it's not safe to distribute undef.
+    auto SQDistributive = SQ.getWithInstruction(&I).getWithoutUndef();
+    Value *L = SimplifyBinOp(TopLevelOpcode, A, B, SQDistributive);
+    Value *R = SimplifyBinOp(TopLevelOpcode, A, C, SQDistributive);
 
     // Do "A op B" and "A op C" both simplify?
     if (L && R) {
@@ -952,7 +959,8 @@ Instruction *InstCombinerImpl::FoldOpIntoSelect(Instruction &Op,
       return nullptr;
 
     // If vectors, verify that they have the same number of elements.
-    if (SrcTy && SrcTy->getNumElements() != DestTy->getNumElements())
+    if (SrcTy && cast<FixedVectorType>(SrcTy)->getNumElements() !=
+                     cast<FixedVectorType>(DestTy)->getNumElements())
       return nullptr;
   }
 
@@ -1048,7 +1056,9 @@ Instruction *InstCombinerImpl::foldOpIntoPhi(Instruction &I, PHINode *PN) {
   BasicBlock *NonConstBB = nullptr;
   for (unsigned i = 0; i != NumPHIValues; ++i) {
     Value *InVal = PN->getIncomingValue(i);
-    if (isa<Constant>(InVal) && !isa<ConstantExpr>(InVal))
+    // If I is a freeze instruction, count undef as a non-constant.
+    if (isa<Constant>(InVal) && !isa<ConstantExpr>(InVal) &&
+        (!isa<FreezeInst>(I) || isGuaranteedNotToBeUndefOrPoison(InVal)))
       continue;
 
     if (isa<PHINode>(InVal)) return nullptr;  // Itself a phi.
@@ -1139,6 +1149,15 @@ Instruction *InstCombinerImpl::foldOpIntoPhi(Instruction &I, PHINode *PN) {
     for (unsigned i = 0; i != NumPHIValues; ++i) {
       Value *InV = foldOperationIntoPhiValue(BO, PN->getIncomingValue(i),
                                              Builder);
+      NewPN->addIncoming(InV, PN->getIncomingBlock(i));
+    }
+  } else if (isa<FreezeInst>(&I)) {
+    for (unsigned i = 0; i != NumPHIValues; ++i) {
+      Value *InV;
+      if (NonConstBB == PN->getIncomingBlock(i))
+        InV = Builder.CreateFreeze(PN->getIncomingValue(i), "phi.fr");
+      else
+        InV = PN->getIncomingValue(i);
       NewPN->addIncoming(InV, PN->getIncomingBlock(i));
     }
   } else {
@@ -1588,7 +1607,7 @@ Instruction *InstCombinerImpl::foldVectorBinop(BinaryOperator &Inst) {
   Constant *C;
   if (match(&Inst,
             m_c_BinOp(m_OneUse(m_Shuffle(m_Value(V1), m_Undef(), m_Mask(Mask))),
-                      m_Constant(C))) &&
+                      m_Constant(C))) && !isa<ConstantExpr>(C) &&
       cast<FixedVectorType>(V1->getType())->getNumElements() <= NumElts) {
     assert(Inst.getType()->getScalarType() == V1->getType()->getScalarType() &&
            "Shuffle should not change scalar type");
@@ -2353,7 +2372,7 @@ Instruction *InstCombinerImpl::visitGetElementPtrInst(GetElementPtrInst &GEP) {
     // gep (bitcast [c x ty]* X to <c x ty>*), Y, Z --> gep X, Y, Z
     auto areMatchingArrayAndVecTypes = [](Type *ArrTy, Type *VecTy,
                                           const DataLayout &DL) {
-      auto *VecVTy = cast<VectorType>(VecTy);
+      auto *VecVTy = cast<FixedVectorType>(VecTy);
       return ArrTy->getArrayElementType() == VecVTy->getElementType() &&
              ArrTy->getArrayNumElements() == VecVTy->getNumElements() &&
              DL.getTypeAllocSize(ArrTy) == DL.getTypeAllocSize(VecTy);
@@ -3370,6 +3389,40 @@ Instruction *InstCombinerImpl::visitFreeze(FreezeInst &I) {
   if (Value *V = SimplifyFreezeInst(Op0, SQ.getWithInstruction(&I)))
     return replaceInstUsesWith(I, V);
 
+  // freeze (phi const, x) --> phi const, (freeze x)
+  if (auto *PN = dyn_cast<PHINode>(Op0)) {
+    if (Instruction *NV = foldOpIntoPhi(I, PN))
+      return NV;
+  }
+
+  if (match(Op0, m_Undef())) {
+    // If I is freeze(undef), see its uses and fold it to the best constant.
+    // - or: pick -1
+    // - select's condition: pick the value that leads to choosing a constant
+    // - other ops: pick 0
+    Constant *BestValue = nullptr;
+    Constant *NullValue = Constant::getNullValue(I.getType());
+    for (const auto *U : I.users()) {
+      Constant *C = NullValue;
+
+      if (match(U, m_Or(m_Value(), m_Value())))
+        C = Constant::getAllOnesValue(I.getType());
+      else if (const auto *SI = dyn_cast<SelectInst>(U)) {
+        if (SI->getCondition() == &I) {
+          APInt CondVal(1, isa<Constant>(SI->getFalseValue()) ? 0 : 1);
+          C = Constant::getIntegerValue(I.getType(), CondVal);
+        }
+      }
+
+      if (!BestValue)
+        BestValue = C;
+      else if (BestValue != C)
+        BestValue = NullValue;
+    }
+
+    return replaceInstUsesWith(I, BestValue);
+  }
+
   return nullptr;
 }
 
@@ -3598,10 +3651,14 @@ bool InstCombinerImpl::run() {
         BasicBlock *InstParent = I->getParent();
         BasicBlock::iterator InsertPos = I->getIterator();
 
-        // If we replace a PHI with something that isn't a PHI, fix up the
-        // insertion point.
-        if (!isa<PHINode>(Result) && isa<PHINode>(InsertPos))
-          InsertPos = InstParent->getFirstInsertionPt();
+        // Are we replace a PHI with something that isn't a PHI, or vice versa?
+        if (isa<PHINode>(Result) != isa<PHINode>(I)) {
+          // We need to fix up the insertion point.
+          if (isa<PHINode>(I)) // PHI -> Non-PHI
+            InsertPos = InstParent->getFirstInsertionPt();
+          else // Non-PHI -> PHI
+            InsertPos = InstParent->getFirstNonPHI()->getIterator();
+        }
 
         InstParent->getInstList().insert(InsertPos, Result);
 
@@ -3727,8 +3784,12 @@ static bool prepareICWorklistFromFunction(Function &F, const DataLayout &DL,
     if (Visited.count(&BB))
       continue;
 
-    unsigned NumDeadInstInBB = removeAllNonTerminatorAndEHPadInstructions(&BB);
-    MadeIRChange |= NumDeadInstInBB > 0;
+    unsigned NumDeadInstInBB;
+    unsigned NumDeadDbgInstInBB;
+    std::tie(NumDeadInstInBB, NumDeadDbgInstInBB) =
+        removeAllNonTerminatorAndEHPadInstructions(&BB);
+
+    MadeIRChange |= NumDeadInstInBB + NumDeadDbgInstInBB > 0;
     NumDeadInst += NumDeadInstInBB;
   }
 
@@ -3783,6 +3844,7 @@ static bool combineInstructionsOverFunction(
   // Iterate while there is work to do.
   unsigned Iteration = 0;
   while (true) {
+    ++NumWorklistIterations;
     ++Iteration;
 
     if (Iteration > InfiniteLoopDetectionThreshold) {

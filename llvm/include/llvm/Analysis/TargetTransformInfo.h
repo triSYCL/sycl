@@ -128,6 +128,11 @@ public:
 
   IntrinsicCostAttributes(Intrinsic::ID Id, const CallBase &CI,
                           unsigned Factor);
+  IntrinsicCostAttributes(Intrinsic::ID Id, const CallBase &CI,
+                          ElementCount Factor)
+      : IntrinsicCostAttributes(Id, CI, Factor.getKnownMinValue()) {
+    assert(!Factor.isScalable());
+  }
 
   IntrinsicCostAttributes(Intrinsic::ID Id, const CallBase &CI,
                           unsigned Factor, unsigned ScalarCost);
@@ -1021,10 +1026,47 @@ public:
   int getShuffleCost(ShuffleKind Kind, VectorType *Tp, int Index = 0,
                      VectorType *SubTp = nullptr) const;
 
+  /// Represents a hint about the context in which a cast is used.
+  ///
+  /// For zext/sext, the context of the cast is the operand, which must be a
+  /// load of some kind. For trunc, the context is of the cast is the single
+  /// user of the instruction, which must be a store of some kind.
+  ///
+  /// This enum allows the vectorizer to give getCastInstrCost an idea of the
+  /// type of cast it's dealing with, as not every cast is equal. For instance,
+  /// the zext of a load may be free, but the zext of an interleaving load can
+  //// be (very) expensive!
+  ///
+  /// See \c getCastContextHint to compute a CastContextHint from a cast
+  /// Instruction*. Callers can use it if they don't need to override the
+  /// context and just want it to be calculated from the instruction.
+  ///
+  /// FIXME: This handles the types of load/store that the vectorizer can
+  /// produce, which are the cases where the context instruction is most
+  /// likely to be incorrect. There are other situations where that can happen
+  /// too, which might be handled here but in the long run a more general
+  /// solution of costing multiple instructions at the same times may be better.
+  enum class CastContextHint : uint8_t {
+    None,          ///< The cast is not used with a load/store of any kind.
+    Normal,        ///< The cast is used with a normal load/store.
+    Masked,        ///< The cast is used with a masked load/store.
+    GatherScatter, ///< The cast is used with a gather/scatter.
+    Interleave,    ///< The cast is used with an interleaved load/store.
+    Reversed,      ///< The cast is used with a reversed load/store.
+  };
+
+  /// Calculates a CastContextHint from \p I.
+  /// This should be used by callers of getCastInstrCost if they wish to
+  /// determine the context from some instruction.
+  /// \returns the CastContextHint for ZExt/SExt/Trunc, None if \p I is nullptr,
+  /// or if it's another type of cast.
+  static CastContextHint getCastContextHint(const Instruction *I);
+
   /// \return The expected cost of cast instructions, such as bitcast, trunc,
   /// zext, etc. If there is an existing instruction that holds Opcode, it
   /// may be passed in the 'I' parameter.
   int getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src,
+                       TTI::CastContextHint CCH,
                        TTI::TargetCostKind CostKind = TTI::TCK_SizeAndLatency,
                        const Instruction *I = nullptr) const;
 
@@ -1246,6 +1288,20 @@ public:
   bool useReductionIntrinsic(unsigned Opcode, Type *Ty,
                              ReductionFlags Flags) const;
 
+  /// \returns True if the target prefers reductions select kept in the loop
+  /// when tail folding. i.e.
+  /// loop:
+  ///   p = phi (0, s)
+  ///   a = add (p, x)
+  ///   s = select (mask, a, p)
+  /// vecreduce.add(s)
+  ///
+  /// As opposed to the normal scheme of p = phi (0, a) which allows the select
+  /// to be pulled out of the loop. If the select(.., add, ..) can be predicated
+  /// by the target, this can lead to cleaner code generation.
+  bool preferPredicatedReductionSelect(unsigned Opcode, Type *Ty,
+                                       ReductionFlags Flags) const;
+
   /// \returns True if the target wants to expand the given reduction intrinsic
   /// into a shuffle sequence.
   bool shouldExpandReduction(const IntrinsicInst *II) const;
@@ -1454,6 +1510,7 @@ public:
   virtual int getShuffleCost(ShuffleKind Kind, VectorType *Tp, int Index,
                              VectorType *SubTp) = 0;
   virtual int getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src,
+                               CastContextHint CCH,
                                TTI::TargetCostKind CostKind,
                                const Instruction *I) = 0;
   virtual int getExtractWithExtendCost(unsigned Opcode, Type *Dst,
@@ -1535,6 +1592,8 @@ public:
                                         VectorType *VecTy) const = 0;
   virtual bool useReductionIntrinsic(unsigned Opcode, Type *Ty,
                                      ReductionFlags) const = 0;
+  virtual bool preferPredicatedReductionSelect(unsigned Opcode, Type *Ty,
+                                               ReductionFlags) const = 0;
   virtual bool shouldExpandReduction(const IntrinsicInst *II) const = 0;
   virtual unsigned getGISelRematGlobalCost() const = 0;
   virtual bool hasActiveVectorLength() const = 0;
@@ -1882,9 +1941,9 @@ public:
     return Impl.getShuffleCost(Kind, Tp, Index, SubTp);
   }
   int getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src,
-                       TTI::TargetCostKind CostKind,
+                       CastContextHint CCH, TTI::TargetCostKind CostKind,
                        const Instruction *I) override {
-    return Impl.getCastInstrCost(Opcode, Dst, Src, CostKind, I);
+    return Impl.getCastInstrCost(Opcode, Dst, Src, CCH, CostKind, I);
   }
   int getExtractWithExtendCost(unsigned Opcode, Type *Dst, VectorType *VecTy,
                                unsigned Index) override {
@@ -2034,6 +2093,10 @@ public:
   bool useReductionIntrinsic(unsigned Opcode, Type *Ty,
                              ReductionFlags Flags) const override {
     return Impl.useReductionIntrinsic(Opcode, Ty, Flags);
+  }
+  bool preferPredicatedReductionSelect(unsigned Opcode, Type *Ty,
+                                       ReductionFlags Flags) const override {
+    return Impl.preferPredicatedReductionSelect(Opcode, Ty, Flags);
   }
   bool shouldExpandReduction(const IntrinsicInst *II) const override {
     return Impl.shouldExpandReduction(II);
