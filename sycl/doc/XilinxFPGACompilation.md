@@ -1,5 +1,8 @@
 # Xilinx FPGA Compilation
 
+FIXME: most of this document needs to be reworked. Perhaps just fusing
+with GettingStartedAlveo.md document?
+
 This document aims to cover the key differences of compiling SYCL for Xilinx
 FPGAs. Things like building the compiler and library remain the same but other
 things like the compiler invocation for Xilinx FPGA compilation is a little
@@ -26,12 +29,13 @@ around being the middle man between `v++` and the SYCL device
 compiler and runtime for the moment, they are not the simple whims of
 the insane! Hopefully...
 
-## Getting started guide using Ubuntu 19.04, Vitis 2019.1 and Alveo U200
+## Getting started guide using Ubuntu 20.04, Vitis 2020.1 and Alveo U200
 
 Look at [getting started with an Alveo U200](GettingStartedAlveo.md).
 
 ## Software requirements
 
+FIXME
 Installing Xilinx FPGA compatible software stack:
   1.  OpenCL headers: On Ubuntu/Debian this can be done by installing the
       opencl-c-headers package, e.g. `apt install opencl-c-headers`.
@@ -44,6 +48,7 @@ Installing Xilinx FPGA compatible software stack:
 
 ## Platforms
 
+FIXME
 It's of note that the Vitis 2018.3 install comes with several platforms that do
 not work with the SYCL compiler. Instead, you'll have to use one of the newer
 boards, like the Alveo U250 (*xilinx_u250_xdma_201830_1*). This requires some
@@ -183,14 +188,9 @@ location for this on Debian/Ubuntu is: `/opt/xilinx/xrt/include`
 
 ## Tested with
 
-* Ubuntu 18.10
-* XRT 2018.3
-* Vitis 2018.3
-* Alveo U250 Platform: xilinx_u250_xdma_201830_1
-
-* Ubuntu 19.04
-* XRT 2019.1
-* Vitis 2019.1
+* Ubuntu 20.04
+* XRT master branch
+* Vitis 2020.1
 * Alveo U200 Platform: xilinx_u200_xdma_201830_2
 
 
