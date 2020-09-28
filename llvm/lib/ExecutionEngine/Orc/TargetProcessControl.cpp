@@ -19,35 +19,42 @@ namespace orc {
 
 TargetProcessControl::MemoryAccess::~MemoryAccess() {}
 
-TargetProcessControl::TargetProcessControl(Triple TT, unsigned PageSize)
-    : TT(std::move(TT)), PageSize(PageSize) {}
-
 TargetProcessControl::~TargetProcessControl() {}
 
-SelfTargetProcessControl::SelfTargetProcessControl(Triple TT, unsigned PageSize)
-    : TargetProcessControl(std::move(TT), PageSize) {
-  this->MemMgr = IPMM.get();
+SelfTargetProcessControl::SelfTargetProcessControl(
+    Triple TT, unsigned PageSize,
+    std::unique_ptr<jitlink::JITLinkMemoryManager> MemMgr) {
+
+  OwnedMemMgr = std::move(MemMgr);
+  if (!OwnedMemMgr)
+    OwnedMemMgr = std::make_unique<jitlink::InProcessMemoryManager>();
+
+  this->TT = std::move(TT);
+  this->PageSize = PageSize;
+  this->MemMgr = OwnedMemMgr.get();
   this->MemAccess = this;
   if (this->TT.isOSBinFormatMachO())
     GlobalManglingPrefix = '_';
 }
 
 Expected<std::unique_ptr<SelfTargetProcessControl>>
-SelfTargetProcessControl::Create() {
+SelfTargetProcessControl::Create(
+    std::unique_ptr<jitlink::JITLinkMemoryManager> MemMgr) {
   auto PageSize = sys::Process::getPageSize();
   if (!PageSize)
     return PageSize.takeError();
 
   Triple TT(sys::getProcessTriple());
 
-  return std::make_unique<SelfTargetProcessControl>(std::move(TT), *PageSize);
+  return std::make_unique<SelfTargetProcessControl>(std::move(TT), *PageSize,
+                                                    std::move(MemMgr));
 }
 
-Expected<TargetProcessControl::DynamicLibraryHandle>
-SelfTargetProcessControl::loadLibrary(const char *LibraryPath) {
+Expected<TargetProcessControl::DylibHandle>
+SelfTargetProcessControl::loadDylib(const char *DylibPath) {
   std::string ErrMsg;
   auto Dylib = std::make_unique<sys::DynamicLibrary>(
-      sys::DynamicLibrary::getPermanentLibrary(LibraryPath, &ErrMsg));
+      sys::DynamicLibrary::getPermanentLibrary(DylibPath, &ErrMsg));
   if (!Dylib->isValid())
     return make_error<StringError>(std::move(ErrMsg), inconvertibleErrorCode());
   DynamicLibraries.push_back(std::move(Dylib));

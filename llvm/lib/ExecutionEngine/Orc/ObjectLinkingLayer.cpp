@@ -71,9 +71,8 @@ public:
     }
 
     // OnResolve -- De-intern the symbols and pass the result to the linker.
-    auto OnResolve = [this, LookupContinuation = std::move(LC)](
-                         Expected<SymbolMap> Result) mutable {
-      auto Main = Layer.getExecutionSession().intern("_main");
+    auto OnResolve = [LookupContinuation =
+                          std::move(LC)](Expected<SymbolMap> Result) mutable {
       if (!Result)
         LookupContinuation->run(Result.takeError());
       else {
@@ -97,7 +96,7 @@ public:
               });
   }
 
-  void notifyResolved(LinkGraph &G) override {
+  Error notifyResolved(LinkGraph &G) override {
     auto &ES = Layer.getExecutionSession();
 
     SymbolFlagsMap ExtraSymbolsToClaim;
@@ -143,7 +142,7 @@ public:
 
     if (!ExtraSymbolsToClaim.empty())
       if (auto Err = MR.defineMaterializing(ExtraSymbolsToClaim))
-        return notifyFailed(std::move(Err));
+        return Err;
 
     {
 
@@ -169,12 +168,9 @@ public:
       }
 
       // If there were missing symbols then report the error.
-      if (!MissingSymbols.empty()) {
-        ES.reportError(make_error<MissingSymbolDefinitions>(
-            G.getName(), std::move(MissingSymbols)));
-        MR.failMaterialization();
-        return;
-      }
+      if (!MissingSymbols.empty())
+        return make_error<MissingSymbolDefinitions>(G.getName(),
+                                                    std::move(MissingSymbols));
 
       // If there are more definitions than expected, add them to the
       // ExtraSymbols vector.
@@ -186,20 +182,16 @@ public:
       }
 
       // If there were extra definitions then report the error.
-      if (!ExtraSymbols.empty()) {
-        ES.reportError(make_error<UnexpectedSymbolDefinitions>(
-            G.getName(), std::move(ExtraSymbols)));
-        MR.failMaterialization();
-        return;
-      }
+      if (!ExtraSymbols.empty())
+        return make_error<UnexpectedSymbolDefinitions>(G.getName(),
+                                                       std::move(ExtraSymbols));
     }
 
-    if (auto Err = MR.notifyResolved(InternedResult)) {
-      Layer.getExecutionSession().reportError(std::move(Err));
-      MR.failMaterialization();
-      return;
-    }
+    if (auto Err = MR.notifyResolved(InternedResult))
+      return Err;
+
     Layer.notifyLoaded(MR);
+    return Error::success();
   }
 
   void notifyFinalized(
@@ -543,8 +535,8 @@ Error ObjectLinkingLayer::removeAllModules() {
 }
 
 EHFrameRegistrationPlugin::EHFrameRegistrationPlugin(
-    EHFrameRegistrar &Registrar)
-    : Registrar(Registrar) {}
+    std::unique_ptr<EHFrameRegistrar> Registrar)
+    : Registrar(std::move(Registrar)) {}
 
 void EHFrameRegistrationPlugin::modifyPassConfig(
     MaterializationResponsibility &MR, const Triple &TT,
@@ -579,7 +571,7 @@ Error EHFrameRegistrationPlugin::notifyEmitted(
   else
     UntrackedEHFrameRanges.push_back(EHFrameRange);
 
-  return Registrar.registerEHFrames(EHFrameRange.Addr, EHFrameRange.Size);
+  return Registrar->registerEHFrames(EHFrameRange.Addr, EHFrameRange.Size);
 }
 
 Error EHFrameRegistrationPlugin::notifyRemovingModule(VModuleKey K) {
@@ -594,7 +586,7 @@ Error EHFrameRegistrationPlugin::notifyRemovingModule(VModuleKey K) {
 
   TrackedEHFrameRanges.erase(EHFrameRangeItr);
 
-  return Registrar.deregisterEHFrames(EHFrameRange.Addr, EHFrameRange.Size);
+  return Registrar->deregisterEHFrames(EHFrameRange.Addr, EHFrameRange.Size);
 }
 
 Error EHFrameRegistrationPlugin::notifyRemovingAllModules() {
@@ -615,9 +607,8 @@ Error EHFrameRegistrationPlugin::notifyRemovingAllModules() {
     auto EHFrameRange = EHFrameRanges.back();
     assert(EHFrameRange.Addr && "Untracked eh-frame range must not be null");
     EHFrameRanges.pop_back();
-    Err = joinErrors(std::move(Err),
-                     Registrar.deregisterEHFrames(EHFrameRange.Addr,
-                                                  EHFrameRange.Size));
+    Err = joinErrors(std::move(Err), Registrar->deregisterEHFrames(
+                                         EHFrameRange.Addr, EHFrameRange.Size));
   }
 
   return Err;

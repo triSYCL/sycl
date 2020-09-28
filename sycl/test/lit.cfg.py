@@ -36,13 +36,15 @@ config.test_source_root = os.path.dirname(__file__)
 config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
 
 # Propagate some variables from the host environment.
-llvm_config.with_system_environment(['PATH', 'OCL_ICD_FILENAME', 'SYCL_DEVICE_ALLOWLIST', 'SYCL_CONFIG_FILE_NAME'])
+llvm_config.with_system_environment(['PATH', 'OCL_ICD_FILENAMES', 'SYCL_DEVICE_ALLOWLIST', 'SYCL_CONFIG_FILE_NAME'])
 
 # Configure LD_LIBRARY_PATH or corresponding os-specific alternatives
 if platform.system() == "Linux":
     config.available_features.add('linux')
     llvm_config.with_system_environment('LD_LIBRARY_PATH')
     llvm_config.with_environment('LD_LIBRARY_PATH', config.sycl_libs_dir, append_path=True)
+    llvm_config.with_system_environment('CFLAGS')
+    llvm_config.with_environment('CFLAGS', config.sycl_clang_extra_flags)
 
 elif platform.system() == "Windows":
     config.available_features.add('windows')
@@ -85,8 +87,12 @@ get_device_count_by_type_path = os.path.join(config.llvm_tools_dir, "get_device_
 def getDeviceCount(device_type):
     is_cuda = False;
     is_level_zero = False;
+    device_count_env = os.environ.copy()
+    if "XCL_EMULATION_MODE" in os.environ:
+        if os.environ["XCL_EMULATION_MODE"] == "hw":
+            device_count_env.pop("XCL_EMULATION_MODE")
     process = subprocess.Popen([get_device_count_by_type_path, device_type, backend],
-        stdout=subprocess.PIPE)
+        stdout=subprocess.PIPE, env=device_count_env)
     (output, err) = process.communicate()
     exit_code = process.wait()
 
@@ -169,6 +175,10 @@ if gpu_count > 0:
     if platform.system() == "Linux":
         gpu_run_on_linux_substitute = "env SYCL_DEVICE_TYPE=GPU SYCL_BE={SYCL_BE} ".format(SYCL_BE=backend)
         gpu_check_on_linux_substitute = "| FileCheck %s"
+    # ESIMD-specific setup. Requires OpenCL for now.
+    esimd_run_substitute = " env SYCL_BE=PI_OPENCL SYCL_DEVICE_TYPE=GPU SYCL_PROGRAM_COMPILE_OPTIONS=-cmc"
+    config.substitutions.append( ('%ESIMD_RUN_PLACEHOLDER',  esimd_run_substitute) )
+    config.substitutions.append( ('%clangxx-esimd',  "clang++ -fsycl-explicit-simd" ) )
 else:
     lit_config.warning("GPU device not found")
 
@@ -179,7 +189,7 @@ config.substitutions.append( ('%GPU_CHECK_ON_LINUX_PLACEHOLDER',  gpu_check_on_l
 
 acc_run_substitute = "true"
 acc_check_substitute = ""
-if getDeviceCount("accelerator")[0] and platform.system() == "Linux":
+if getDeviceCount("accelerator")[0]:
     found_at_least_one_device = True
     lit_config.note("Found available accelerator device")
     acc_run_substitute = " env SYCL_DEVICE_TYPE=ACC "
@@ -193,6 +203,9 @@ if xocc != "off":
     acc_run_substitute+= "setsid flock -x " + xrt_lock + " "
     if os.path.exists(xrt_lock):
         os.remove(xrt_lock)
+    if "XCL_EMULATION_MODE" in os.environ:
+        if os.environ["XCL_EMULATION_MODE"] == "hw":
+            acc_run_substitute="env -u XCL_EMULATION_MODE " + acc_run_substitute
 
 config.substitutions.append( ('%ACC_RUN_PLACEHOLDER',  acc_run_substitute) )
 config.substitutions.append( ('%ACC_CHECK_PLACEHOLDER',  acc_check_substitute) )
@@ -227,7 +240,12 @@ for aot_tool in aot_tools:
         lit_config.warning("Couldn't find pre-installed AOT device compiler " + aot_tool)
 
 if xocc != "off":
-    required_env = ['HOME', 'USER', 'XILINX_VIVADO', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'XILINX_VITIS', 'XCL_EMULATION_MODE', 'EMCONFIG_PATH']
+    xocc_target="hw"
+    if "XCL_EMULATION_MODE" in os.environ:
+        xocc_target = os.environ["XCL_EMULATION_MODE"]
+    llvm_config.with_environment('XCL_EMULATION_MODE', xocc_target, append_path=False)
+    lit_config.note("XOCC target: {}".format(xocc_target))
+    required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH']
     has_error=False
     config.available_features.add("xocc")
     for env in required_env:
@@ -236,8 +254,6 @@ if xocc != "off":
             has_error=True
     if has_error:
         lit_config.error("Can't configure tests for XOCC")
-    else:
-        lit_config.note("XOCC target: {}".format(os.environ["XCL_EMULATION_MODE"]))
     llvm_config.with_system_environment(required_env)
     if xocc == "only":
         config.name = 'SYCL-XOCC'
@@ -247,5 +263,8 @@ if xocc != "off":
 try:
     import psutil
     lit_config.maxIndividualTestTime = 600
+    if "XCL_EMULATION_MODE" in os.environ:
+        if os.environ["XCL_EMULATION_MODE"] == "hw":
+            lit_config.maxIndividualTestTime = 10800 # 3h
 except ImportError:
     pass

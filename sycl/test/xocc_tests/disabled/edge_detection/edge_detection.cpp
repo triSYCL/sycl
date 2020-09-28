@@ -29,7 +29,7 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
 
-#include "../../../utilities/device_selectors.hpp"
+#include "../../utilities/device_selectors.hpp"
 
 using namespace cl::sycl;
 

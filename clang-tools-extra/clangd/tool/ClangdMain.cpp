@@ -14,6 +14,7 @@
 #include "Transport.h"
 #include "index/Background.h"
 #include "index/Serialization.h"
+#include "index/remote/Client.h"
 #include "refactor/Rename.h"
 #include "support/Path.h"
 #include "support/Shutdown.h"
@@ -290,9 +291,8 @@ opt<bool> RecoveryAST{
 opt<bool> RecoveryASTType{
     "recovery-ast-type",
     cat(Features),
-    desc("Preserve the type for recovery AST. Note that "
-         "this feature is experimental and may lead to crashes"),
-    init(false),
+    desc("Preserve the type for recovery AST."),
+    init(ClangdServer::Options().PreserveRecoveryASTType),
     Hidden,
 };
 
@@ -448,6 +448,28 @@ opt<bool> EnableConfig{
         "Configuration is documented at https://clangd.llvm.org/config.html"),
     init(true),
 };
+
+opt<bool> CollectMainFileRefs{
+    "collect-main-file-refs",
+    cat(Misc),
+    desc("Store references to main-file-only symbols in the index"),
+    init(false),
+};
+
+#if CLANGD_ENABLE_REMOTE
+opt<std::string> RemoteIndexAddress{
+    "remote-index-address",
+    cat(Features),
+    desc("Address of the remote index server"),
+};
+
+// FIXME(kirillbobyrev): Should this be the location of compile_commands.json?
+opt<std::string> ProjectRoot{
+    "project-root",
+    cat(Features),
+    desc("Path to the project root. Requires remote-index-address to be set."),
+};
+#endif
 
 /// Supports a test URI scheme with relaxed constraints for lit tests.
 /// The path in a test URI will be combined with a platform-specific fake
@@ -641,16 +663,16 @@ clangd accepts flags on the commandline, and in the CLANGD_FLAGS environment var
       // continuing.
       llvm::SmallString<128> Path(CompileCommandsDir);
       if (std::error_code EC = llvm::sys::fs::make_absolute(Path)) {
-        llvm::errs() << "Error while converting the relative path specified by "
-                        "--compile-commands-dir to an absolute path: "
-                     << EC.message() << ". The argument will be ignored.\n";
+        elog("Error while converting the relative path specified by "
+             "--compile-commands-dir to an absolute path: {0}. The argument "
+             "will be ignored.",
+             EC.message());
       } else {
         CompileCommandsDirPath = std::string(Path.str());
       }
     } else {
-      llvm::errs()
-          << "Path specified by --compile-commands-dir does not exist. The "
-             "argument will be ignored.\n";
+      elog("Path specified by --compile-commands-dir does not exist. The "
+           "argument will be ignored.");
     }
   }
 
@@ -666,7 +688,7 @@ clangd accepts flags on the commandline, and in the CLANGD_FLAGS environment var
   if (!ResourceDir.empty())
     Opts.ResourceDir = ResourceDir;
   Opts.BuildDynamicSymbolIndex = EnableIndex;
-  Opts.BackgroundIndex = EnableBackgroundIndex;
+  Opts.CollectMainFileRefs = CollectMainFileRefs;
   std::unique_ptr<SymbolIndex> StaticIdx;
   std::future<void> AsyncIndexLoad; // Block exit while loading the index.
   if (EnableIndex && !IndexFile.empty()) {
@@ -680,6 +702,24 @@ clangd accepts flags on the commandline, and in the CLANGD_FLAGS environment var
     if (Sync)
       AsyncIndexLoad.wait();
   }
+#if CLANGD_ENABLE_REMOTE
+  if (RemoteIndexAddress.empty() != ProjectRoot.empty()) {
+    llvm::errs() << "remote-index-address and project-path have to be "
+                    "specified at the same time.";
+    return 1;
+  }
+  if (!RemoteIndexAddress.empty()) {
+    if (IndexFile.empty()) {
+      log("Connecting to remote index at {0}", RemoteIndexAddress);
+      StaticIdx = remote::getClient(RemoteIndexAddress, ProjectRoot);
+      EnableBackgroundIndex = false;
+    } else {
+      elog("When enabling remote index, IndexFile should not be specified. "
+           "Only one can be used at time. Remote index will ignored.");
+    }
+  }
+#endif
+  Opts.BackgroundIndex = EnableBackgroundIndex;
   Opts.StaticIndex = StaticIdx.get();
   Opts.AsyncThreadsCount = WorkerThreadsCount;
   Opts.BuildRecoveryAST = RecoveryAST;
@@ -717,7 +757,7 @@ clangd accepts flags on the commandline, and in the CLANGD_FLAGS environment var
       elog("Couldn't determine user config file, not loading");
     }
     std::vector<const config::Provider *> ProviderPointers;
-    for (const auto& P : ProviderStack)
+    for (const auto &P : ProviderStack)
       ProviderPointers.push_back(P.get());
     Config = config::Provider::combine(std::move(ProviderPointers));
     Opts.ConfigProvider = Config.get();
@@ -774,23 +814,6 @@ clangd accepts flags on the commandline, and in the CLANGD_FLAGS environment var
         std::lock_guard<std::mutex> Lock(ClangTidyOptMu);
         // FIXME: use the FS provided to the function.
         Opts = ClangTidyOptProvider->getOptions(File);
-      }
-      if (!Opts.Checks) {
-        // If the user hasn't configured clang-tidy checks at all, including
-        // via .clang-tidy, give them a nice set of checks.
-        // (This should be what the "default" options does, but it isn't...)
-        //
-        // These default checks are chosen for:
-        //  - low false-positive rate
-        //  - providing a lot of value
-        //  - being reasonably efficient
-        Opts.Checks = llvm::join_items(
-            ",", "readability-misleading-indentation",
-            "readability-deleted-default", "bugprone-integer-division",
-            "bugprone-sizeof-expression", "bugprone-suspicious-missing-comma",
-            "bugprone-unused-raii", "bugprone-unused-return-value",
-            "misc-unused-using-decls", "misc-unused-alias-decls",
-            "misc-definitions-in-headers");
       }
       return Opts;
     };

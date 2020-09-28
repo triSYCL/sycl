@@ -21,19 +21,13 @@
 extern "C" {
   /// SSDM Intrinsics: dataflow operation
   SYCL_EXTERNAL void _ssdm_op_SpecDataflowPipeline(...)
-    __attribute__ ((nothrow, noinline, weak));
-  /// SSDM Intrinsics: pipeline operation
-  SYCL_EXTERNAL void _ssdm_op_SpecPipeline(...) __attribute__ ((nothrow, noinline, weak));
-  /// SSDM Intrinsics: array partition operation
-  SYCL_EXTERNAL void _ssdm_SpecArrayPartition(...) __attribute__ ((nothrow, noinline, weak));
+    __attribute__ ((nothrow, noinline, weak, willreturn, pure));
 }
 #else
 /* If not on device, just ignore the intrinsics as defining them as
    empty variadic macros replaced by an empty do-while to avoid some
    warning when compiling (and used in an if branch */
 #define _ssdm_op_SpecDataflowPipeline(...) do { } while (0)
-#define _ssdm_op_SpecPipeline(...) do { } while (0)
-#define _ssdm_SpecArrayPartition(...) do { } while (0)
 #endif
 
 #endif // SYCL_XILINX_FPGA_SSDM_INST_HPP

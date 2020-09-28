@@ -81,19 +81,19 @@ public:
   /// Returns the MLIR context.
   MLIRContext &getContext();
 
-  /// Returns the LLVM context.
-  llvm::LLVMContext &getLLVMContext();
 
   /// Returns the LLVM dialect.
   LLVM::LLVMDialect *getDialect() { return llvmDialect; }
 
-  /// Promote the LLVM struct representation of all MemRef descriptors to stack
-  /// and use pointers to struct to avoid the complexity of the
-  /// platform-specific C/C++ ABI lowering related to struct argument passing.
-  SmallVector<Value, 4> promoteMemRefDescriptors(Location loc,
-                                                 ValueRange opOperands,
-                                                 ValueRange operands,
-                                                 OpBuilder &builder);
+  const LowerToLLVMOptions &getOptions() const { return options; }
+
+  /// Promote the LLVM representation of all operands including promoting MemRef
+  /// descriptors to stack and use pointers to struct to avoid the complexity
+  /// of the platform-specific C/C++ ABI lowering related to struct argument
+  /// passing.
+  SmallVector<Value, 4> promoteOperands(Location loc, ValueRange opOperands,
+                                        ValueRange operands,
+                                        OpBuilder &builder);
 
   /// Promote the LLVM struct representation of one MemRef descriptor to stack
   /// and use pointer to struct to avoid the complexity of the platform-specific
@@ -104,6 +104,9 @@ public:
   /// Converts the function type to a C-compatible format, in particular using
   /// pointers to memref descriptors for arguments.
   LLVM::LLVMType convertFunctionTypeCWrapper(FunctionType type);
+
+  /// Returns the data layout to use during and after conversion.
+  const llvm::DataLayout &getDataLayout() { return options.dataLayout; }
 
   /// Gets the LLVM representation of the index type. The returned type is an
   /// integer type with the size configured for this type converter.
@@ -116,8 +119,7 @@ public:
   unsigned getPointerBitwidth(unsigned addressSpace = 0);
 
 protected:
-  /// LLVM IR module used to parse/create types.
-  llvm::Module *module;
+  /// Pointer to the LLVM dialect.
   LLVM::LLVMDialect *llvmDialect;
 
 private:
@@ -390,18 +392,10 @@ class ConvertToLLVMPattern : public ConversionPattern {
 public:
   ConvertToLLVMPattern(StringRef rootOpName, MLIRContext *context,
                        LLVMTypeConverter &typeConverter,
-                       const LowerToLLVMOptions &options =
-                           LowerToLLVMOptions::getDefaultOptions(),
                        PatternBenefit benefit = 1);
 
   /// Returns the LLVM dialect.
   LLVM::LLVMDialect &getDialect() const;
-
-  /// Returns the LLVM IR context.
-  llvm::LLVMContext &getContext() const;
-
-  /// Returns the LLVM IR module associated with the LLVM dialect.
-  llvm::Module &getModule() const;
 
   /// Gets the MLIR type wrapping the LLVM integer type whose bit width is
   /// defined by the used type converter.
@@ -437,15 +431,30 @@ public:
                              ConversionPatternRewriter &rewriter) const;
 
   Value getDataPtr(Location loc, MemRefType type, Value memRefDesc,
-                   ValueRange indices, ConversionPatternRewriter &rewriter,
-                   llvm::Module &module) const;
+                   ValueRange indices,
+                   ConversionPatternRewriter &rewriter) const;
+
+  /// Returns the type of a pointer to an element of the memref.
+  Type getElementPtrType(MemRefType type) const;
+
+  /// Determines sizes to be used in the memref descriptor.
+  void getMemRefDescriptorSizes(Location loc, MemRefType memRefType,
+                                ArrayRef<Value> dynSizes,
+                                ConversionPatternRewriter &rewriter,
+                                SmallVectorImpl<Value> &sizes) const;
+
+  /// Computes the size of type in bytes.
+  Value getSizeInBytes(Location loc, Type type,
+                       ConversionPatternRewriter &rewriter) const;
+
+  /// Computes total size in bytes of to store the given shape.
+  Value getCumulativeSizeInBytes(Location loc, Type elementType,
+                                 ArrayRef<Value> shape,
+                                 ConversionPatternRewriter &rewriter) const;
 
 protected:
   /// Reference to the type converter, with potential extensions.
   LLVMTypeConverter &typeConverter;
-
-  /// Reference to the llvm lowering options.
-  const LowerToLLVMOptions &options;
 };
 
 /// Utility class for operation conversions targeting the LLVM dialect that
@@ -454,11 +463,10 @@ template <typename OpTy>
 class ConvertOpToLLVMPattern : public ConvertToLLVMPattern {
 public:
   ConvertOpToLLVMPattern(LLVMTypeConverter &typeConverter,
-                         const LowerToLLVMOptions &options,
                          PatternBenefit benefit = 1)
       : ConvertToLLVMPattern(OpTy::getOperationName(),
                              &typeConverter.getContext(), typeConverter,
-                             options, benefit) {}
+                             benefit) {}
 };
 
 namespace LLVM {

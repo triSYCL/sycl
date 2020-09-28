@@ -122,6 +122,19 @@ private:
   skipIgnoreExecInstsTrivialSucc(MachineBasicBlock &MBB,
                                  MachineBasicBlock::iterator It) const;
 
+  /// Find the insertion point for a new conditional branch.
+  MachineBasicBlock::iterator
+  skipToUncondBrOrEnd(MachineBasicBlock &MBB,
+                      MachineBasicBlock::iterator I) const {
+    assert(I->isTerminator());
+
+    // FIXME: What if we had multiple pre-existing conditional branches?
+    MachineBasicBlock::iterator End = MBB.end();
+    while (I != End && !I->isUnconditionalBranch())
+      ++I;
+    return I;
+  }
+
   // Remove redundant SI_END_CF instructions.
   void optimizeEndCf();
 
@@ -275,6 +288,10 @@ void SILowerControlFlow::emitIf(MachineInstr &MI) {
     BuildMI(MBB, I, DL, TII->get(MovTermOpc), Exec)
     .addReg(Tmp, RegState::Kill);
 
+  // Skip ahead to the unconditional branch in case there are other terminators
+  // present.
+  I = skipToUncondBrOrEnd(MBB, I);
+
   // Insert the S_CBRANCH_EXECZ instruction which will be optimized later
   // during SIRemoveShortExecBranches.
   MachineInstr *NewBr = BuildMI(MBB, I, DL, TII->get(AMDGPU::S_CBRANCH_EXECZ))
@@ -352,6 +369,10 @@ void SILowerControlFlow::emitElse(MachineInstr &MI) {
     BuildMI(MBB, ElsePt, DL, TII->get(XorTermrOpc), Exec)
     .addReg(Exec)
     .addReg(DstReg);
+
+  // Skip ahead to the unconditional branch in case there are other terminators
+  // present.
+  ElsePt = skipToUncondBrOrEnd(MBB, ElsePt);
 
   MachineInstr *Branch =
       BuildMI(MBB, ElsePt, DL, TII->get(AMDGPU::S_CBRANCH_EXECZ))
@@ -435,8 +456,9 @@ void SILowerControlFlow::emitLoop(MachineInstr &MI) {
           .addReg(Exec)
           .add(MI.getOperand(0));
 
+  auto BranchPt = skipToUncondBrOrEnd(MBB, MI.getIterator());
   MachineInstr *Branch =
-      BuildMI(MBB, &MI, DL, TII->get(AMDGPU::S_CBRANCH_EXECNZ))
+      BuildMI(MBB, BranchPt, DL, TII->get(AMDGPU::S_CBRANCH_EXECNZ))
           .add(MI.getOperand(1));
 
   if (LIS) {
@@ -482,7 +504,7 @@ SILowerControlFlow::skipIgnoreExecInstsTrivialSucc(
 void SILowerControlFlow::emitEndCf(MachineInstr &MI) {
   MachineBasicBlock &MBB = *MI.getParent();
   MachineRegisterInfo &MRI = MBB.getParent()->getRegInfo();
-  unsigned CFMask = MI.getOperand(0).getReg();
+  Register CFMask = MI.getOperand(0).getReg();
   MachineInstr *Def = MRI.getUniqueVRegDef(CFMask);
   const DebugLoc &DL = MI.getDebugLoc();
 
@@ -519,7 +541,7 @@ void SILowerControlFlow::emitEndCf(MachineInstr &MI) {
 void SILowerControlFlow::findMaskOperands(MachineInstr &MI, unsigned OpNo,
        SmallVectorImpl<MachineOperand> &Src) const {
   MachineOperand &Op = MI.getOperand(OpNo);
-  if (!Op.isReg() || !Register::isVirtualRegister(Op.getReg())) {
+  if (!Op.isReg() || !Op.getReg().isVirtual()) {
     Src.push_back(Op);
     return;
   }
@@ -539,7 +561,7 @@ void SILowerControlFlow::findMaskOperands(MachineInstr &MI, unsigned OpNo,
 
   for (const auto &SrcOp : Def->explicit_operands())
     if (SrcOp.isReg() && SrcOp.isUse() &&
-        (Register::isVirtualRegister(SrcOp.getReg()) || SrcOp.getReg() == Exec))
+        (SrcOp.getReg().isVirtual() || SrcOp.getReg() == Exec))
       Src.push_back(SrcOp);
 }
 

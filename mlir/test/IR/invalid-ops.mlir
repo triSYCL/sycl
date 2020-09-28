@@ -10,7 +10,7 @@ func @dim(%arg : tensor<1x?xf32>) {
 
 func @rank(f32) {
 ^bb(%0: f32):
-  "std.rank"(%0): (f32)->index // expected-error {{'std.rank' op operand #0 must be tensor of any type values}}
+  "std.rank"(%0): (f32)->index // expected-error {{'std.rank' op operand #0 must be any tensor or memref type}}
   return
 }
 
@@ -1076,7 +1076,7 @@ func @invalid_prefetch_locality_hint(%i : index) {
 // incompatible memory space
 func @invalid_memref_cast() {
   %0 = alloc() : memref<2x5xf32, 0>
-  // expected-error@+1 {{operand type 'memref<2x5xf32>' and result type 'memref<*xf32>' are cast incompatible}}
+  // expected-error@+1 {{operand type 'memref<2x5xf32>' and result type 'memref<*xf32, 1>' are cast incompatible}}
   %1 = memref_cast %0 : memref<2x5xf32, 0> to memref<*xf32, 1>
   return
 }

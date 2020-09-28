@@ -13,6 +13,8 @@
 #include "clang/Driver/Driver.h"
 #include "clang/Driver/DriverDiagnostic.h"
 #include "clang/Driver/Options.h"
+#include "llvm/ADT/Triple.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Option/ArgList.h"
@@ -75,6 +77,65 @@ void SYCL::LinkerXOCC::ConstructJob(Compilation &C, const JobAction &JA,
   constructSYCLXOCCCommand(C, JA, Output, Inputs, Args);
 }
 
+static void parseTargetOpts(StringRef ArgString, const llvm::opt::ArgList &Args,
+                            llvm::opt::ArgStringList &CmdArgs) {
+  // Tokenize the string.
+  SmallVector<const char *, 8> TargetArgs;
+  llvm::BumpPtrAllocator A;
+  llvm::StringSaver S(A);
+  llvm::cl::TokenizeGNUCommandLine(ArgString, S, TargetArgs);
+  for (StringRef TA : TargetArgs)
+    CmdArgs.push_back(Args.MakeArgString(TA));
+}
+
+// Expects a specific type of option (e.g. -Xsycl-target-backend) and will
+// extract the arguments.
+void AddForwardedOptions(const llvm::opt::ArgList &Args,
+                         llvm::opt::ArgStringList &CmdArgs, OptSpecifier Opt,
+                         OptSpecifier Opt_EQ, const llvm::Triple& T, const Driver& D) {
+  for (auto *A : Args) {
+    bool OptNoTriple;
+    OptNoTriple = A->getOption().matches(Opt);
+    if (A->getOption().matches(Opt_EQ)) {
+      // Passing device args: -X<Opt>=<triple> -opt=val.
+      if (A->getValue() != T.str())
+        // Provided triple does not match current tool chain.
+        continue;
+    } else if (!OptNoTriple)
+      // Don't worry about any of the other args, we only want to pass what is
+      // passed in -X<Opt>
+      continue;
+
+    // Add the argument from -X<Opt>
+    StringRef ArgString;
+    if (OptNoTriple) {
+      // With multiple -fsycl-targets, a triple is required so we know where
+      // the options should go.
+      if (Args.getAllArgValues(options::OPT_fsycl_targets_EQ).size() != 1) {
+        D.Diag(diag::err_drv_Xsycl_target_missing_triple)
+            << A->getSpelling();
+        continue;
+      }
+      // No triple, so just add the argument.
+      ArgString = A->getValue();
+    } else
+      // Triple found, add the next argument in line.
+      ArgString = A->getValue(1);
+
+    parseTargetOpts(ArgString, Args, CmdArgs);
+    A->claim();
+  }
+}
+
+llvm::Triple SYCL::LinkerXOCC::getTargetTriple() const {
+  llvm::Triple T;
+  T.setArch(llvm::Triple::fpga64);
+  T.setVendor(llvm::Triple::Xilinx);
+  T.setEnvironment(llvm::Triple::SYCLDevice);
+  return T;
+}
+
+
 // \todo: Extend to support the possibility of more than one file being passed
 // to the linker stage
 // \todo: Add additional modifications that were added to the SYCL ToolChain
@@ -123,6 +184,11 @@ void SYCL::LinkerXOCC::constructSYCLXOCCCommand(
   // compilation and linking is complete
   assert(Output.getFilename()[0]);
   CmdArgs.push_back(Output.getFilename());
+
+  AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_backend,
+      options::OPT_Xsycl_backend_EQ, getTargetTriple(), C.getDriver());
+  AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_linker,
+      options::OPT_Xsycl_linker_EQ, getTargetTriple(), C.getDriver());
 
   // Path to sycl-xocc script
   SmallString<128> ExecPath(C.getDriver().Dir);

@@ -15,6 +15,15 @@
 #ifndef SYCL_XILINX_FPGA_OPT_DECORATE_FUNC_HPP
 #define SYCL_XILINX_FPGA_OPT_DECORATE_FUNC_HPP
 
+#include "CL/sycl/xilinx/fpga/ssdm_inst.hpp"
+#include "CL/sycl/detail/defines.hpp"
+
+#if defined(__SYCL_DEVICE_ONLY__)
+#define SYCL_DEVICE_ANNOTATE(...) __attribute__((annotate(__VA_ARGS__)))
+#else
+#define SYCL_DEVICE_ANNOTATE(...)
+#endif
+
 __SYCL_INLINE_NAMESPACE(cl) {
 
 namespace sycl::xilinx {
@@ -50,8 +59,8 @@ void dataflow(T functor) {
     pipeline way.
 */
 template <typename T>
+SYCL_DEVICE_ANNOTATE("xilinx_pipeline") __attribute__((always_inline))
 void pipeline(T functor) {
-  _ssdm_op_SpecPipeline(1, 1, 0, 0, "");
   functor();
 }
 
