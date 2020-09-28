@@ -175,13 +175,13 @@ struct partition_array {
   /// Type of array elements
   using element_type = ValueType;
   using iterator = ValueType*;
-
+  using const_iterator = const ValueType*;
 
   /// Provide iterator
   iterator begin() { return elems; }
-  const iterator begin() const { return elems; }
+  const_iterator begin() const { return elems; }
   iterator end() { return elems+Size; }
-  const iterator end() const { return elems+Size; }
+  const_iterator end() const { return elems+Size; }
 
 
   /// Evaluate size
