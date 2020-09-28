@@ -17,6 +17,7 @@
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/CodeGen/Register.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/Support/ErrorHandling.h"
 #include <algorithm>
@@ -221,34 +222,31 @@ void DwarfExpression::addUnsignedConstant(const APInt &Value) {
   }
 }
 
-void DwarfExpression::addConstantFP(const APFloat &Value) {
+void DwarfExpression::addConstantFP(const APFloat &APF, const AsmPrinter &AP) {
   assert(isImplicitLocation() || isUnknownLocation());
-  APInt RawBytes = Value.bitcastToAPInt();
-  int NumBytes = RawBytes.getBitWidth() / 8;
-  const char *Data = (const char *)RawBytes.getRawData();
-  emitOp(dwarf::DW_OP_implicit_value);
+  APInt API = APF.bitcastToAPInt();
+  int NumBytes = API.getBitWidth() / 8;
   if (NumBytes == 4 /*float*/ || NumBytes == 8 /*double*/) {
+    // FIXME: Add support for `long double`.
+    emitOp(dwarf::DW_OP_implicit_value);
     emitUnsigned(NumBytes /*Size of the block in bytes*/);
-    for (int i = 0; i < NumBytes; ++i)
-      emitData1(Data[i]);
-    return;
-  }
-  if (NumBytes == 10 /*long double*/) {
-    // long double IEEE representation uses 80 bits(10 bytes).
-    // 6 bytes are padded to make it 128 bits(16 bytes) due to
-    // addressing restrictions.
-    emitUnsigned(16 /*Size of the block in bytes*/);
-    // Emit the block of bytes.
-    for (int i = 0; i < NumBytes; ++i)
-      emitData1(Data[i]);
-    // Emit the rest as padding bytes.
-    for (int i = 0; i < 16 - NumBytes; ++i)
-      emitData1(0);
+
+    // The loop below is emitting the value starting at least significant byte,
+    // so we need to perform a byte-swap to get the byte order correct in case
+    // of a big-endian target.
+    if (AP.getDataLayout().isBigEndian())
+      API = API.byteSwap();
+
+    for (int i = 0; i < NumBytes; ++i) {
+      emitData1(API.getZExtValue() & 0xFF);
+      API = API.lshr(8);
+    }
+
     return;
   }
   LLVM_DEBUG(
       dbgs() << "Skipped DW_OP_implicit_value creation for ConstantFP of size: "
-             << RawBytes.getBitWidth() << " bits\n");
+             << API.getBitWidth() << " bits\n");
 }
 
 bool DwarfExpression::addMachineRegExpression(const TargetRegisterInfo &TRI,

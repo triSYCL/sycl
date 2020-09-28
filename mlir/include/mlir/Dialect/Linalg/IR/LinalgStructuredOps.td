@@ -153,6 +153,7 @@ def CopyOp : LinalgStructured_Op<"copy", [
   let verifier = [{ return ::verify(*this); }];
 
   let hasFolder = 1;
+  let hasCanonicalizer = 1;
 }
 
 def FillOp : LinalgStructured_Op<"fill", [NInputs<0>, NOutputs<1>]> {
@@ -178,31 +179,7 @@ def FillOp : LinalgStructured_Op<"fill", [NInputs<0>, NOutputs<1>]> {
   let verifier = [{ return ::verify(*this); }];
 
   let hasFolder = 1;
-}
-
-def DotOp : LinalgStructured_Op<"dot", [NInputs<2>, NOutputs<1>]> {
-
-  let arguments = (ins AnyStridedMemRefOfRank<1>,
-                       AnyStridedMemRefOfRank<1>,
-                       AnyStridedMemRefOfRank<0>);
-
-  let extraClassDeclaration = libraryCallName # [{
-    llvm::Optional<SmallVector<StringRef, 8>> referenceIterators() {
-      return SmallVector<StringRef, 8>{getReductionIteratorTypeName()};
-    }
-
-    // A(r_i) * B(r_i) -> C()
-    llvm::Optional<SmallVector<AffineMap, 8>> referenceIndexingMaps() {
-      MLIRContext *context = getContext();
-      auto r_i = getAffineDimExpr(0, context);
-      return SmallVector<AffineMap, 8>{
-        AffineMap::get(1, 0, {r_i}, context),
-        AffineMap::get(1, 0, {r_i}, context),
-        AffineMap::get(1, 0, {}, context)};
-    }
-  }];
-
-  let hasFolder = 1;
+  let hasCanonicalizer = 1;
 }
 
 /// A base class for pooling operation such as conv. The arguments must contain
@@ -383,6 +360,7 @@ def ConvOp : PoolingBase_Op<"conv", [NInputs<2>, NOutputs<1>]> {
   let verifier = [{ return ::verify(*this); }];
 
   let hasFolder = 1;
+  let hasCanonicalizer = 1;
 }
 
 class SingleInputPoolingBase_Op<string mnemonic>
@@ -442,6 +420,7 @@ class SingleInputPoolingBase_Op<string mnemonic>
   let verifier = [{ return ::verify(*this); }];
 
   let hasFolder = 1;
+  let hasCanonicalizer = 1;
 }
 
 def PoolingMaxOp: SingleInputPoolingBase_Op<"pooling_max"> {
@@ -468,8 +447,7 @@ def PoolingSumOp: SingleInputPoolingBase_Op<"pooling_sum"> {
 //===----------------------------------------------------------------------===//
 // Generic Linalg ops.
 //===----------------------------------------------------------------------===//
-def LinalgOperand: Type<
-  Or<[AnyRankedTensor.predicate, AnyStridedMemRef.predicate]>>;
+def LinalgOperand: AnyTypeOf<[AnyRankedTensor, AnyStridedMemRef]>;
 
 class LinalgOperandOfRank<int rank>: Type<
   And<[
@@ -499,9 +477,9 @@ class GenericOpBase<string mnemonic> : LinalgStructuredBase_Op<mnemonic,
       };
     }
 
-    unsigned getNumInputs() { return args_in().getSExtValue(); }
+    unsigned getNumInputs() { return args_in(); }
 
-    unsigned getNumOutputs() { return args_out().getSExtValue(); }
+    unsigned getNumOutputs() { return args_out(); }
 
     StringRef getLibraryCallName() {
       return library_call().hasValue() ? library_call().getValue() : "";
@@ -520,7 +498,7 @@ class GenericOpBase<string mnemonic> : LinalgStructuredBase_Op<mnemonic,
     llvm::Optional<unsigned> getSymbolSource() {
       auto ss = symbol_source();
       return ss.hasValue() ?
-        llvm::Optional<unsigned>(ss.getValue().getLimitedValue()) : llvm::None;
+        llvm::Optional<unsigned>(ss.getValue()) : llvm::None;
     }
   }];
 
@@ -684,6 +662,7 @@ def GenericOp : GenericOpBase<"generic"> {
   let verifier = [{ return ::verify(*this); }];
 
   let hasFolder = 1;
+  let hasCanonicalizer = 1;
 }
 
 /// GenericOp with Indexing (i.e. multi-for style in which the region is passed
@@ -821,6 +800,7 @@ def IndexedGenericOp : GenericOpBase<"indexed_generic"> {
   let verifier = [{ return ::verify(*this); }];
 
   let hasFolder = 1;
+  let hasCanonicalizer = 1;
 }
 
 //===----------------------------------------------------------------------===//
@@ -843,6 +823,7 @@ class LinalgNamedStructured_Op<string mnemonic, list<OpTrait> props>
   let printer = [{ return ::printNamedStructuredOp(p, *this); }];
   let verifier = [{ return ::verifyNamedStructuredOp(*this); }];
   let hasFolder = 1;
+  let hasCanonicalizer = 1;
 }
 
 // This file is auto-generated from a tc specification.

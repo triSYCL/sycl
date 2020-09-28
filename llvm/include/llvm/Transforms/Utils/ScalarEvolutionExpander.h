@@ -52,6 +52,9 @@ class SCEVExpander : public SCEVVisitor<SCEVExpander, Value *> {
   // New instructions receive a name to identify them with the current pass.
   const char *IVName;
 
+  /// Indicates whether LCSSA phis should be created for inserted values.
+  bool PreserveLCSSA;
+
   // InsertedExpressions caches Values for reuse, so must track RAUW.
   DenseMap<std::pair<const SCEV *, Instruction *>, TrackingVH<Value>>
       InsertedExpressions;
@@ -59,6 +62,11 @@ class SCEVExpander : public SCEVVisitor<SCEVExpander, Value *> {
   // InsertedValues only flags inserted instructions so needs no RAUW.
   DenseSet<AssertingVH<Value>> InsertedValues;
   DenseSet<AssertingVH<Value>> InsertedPostIncValues;
+
+  /// Keep track of the existing IR values re-used during expansion.
+  /// FIXME: Ideally re-used instructions would not be added to
+  /// InsertedValues/InsertedPostIncValues.
+  SmallPtrSet<Value *, 16> ReusedValues;
 
   /// A memoization of the "relevant" loop for a given SCEV.
   DenseMap<const SCEV *, const Loop *> RelevantLoops;
@@ -146,9 +154,10 @@ class SCEVExpander : public SCEVVisitor<SCEVExpander, Value *> {
 public:
   /// Construct a SCEVExpander in "canonical" mode.
   explicit SCEVExpander(ScalarEvolution &se, const DataLayout &DL,
-                        const char *name)
-      : SE(se), DL(DL), IVName(name), IVIncInsertLoop(nullptr),
-        IVIncInsertPos(nullptr), CanonicalMode(true), LSRMode(false),
+                        const char *name, bool PreserveLCSSA = true)
+      : SE(se), DL(DL), IVName(name), PreserveLCSSA(PreserveLCSSA),
+        IVIncInsertLoop(nullptr), IVIncInsertPos(nullptr), CanonicalMode(true),
+        LSRMode(false),
         Builder(se.getContext(), TargetFolder(DL),
                 IRBuilderCallbackInserter(
                     [this](Instruction *I) { rememberInstruction(I); })) {
@@ -173,7 +182,29 @@ public:
     InsertedExpressions.clear();
     InsertedValues.clear();
     InsertedPostIncValues.clear();
+    ReusedValues.clear();
     ChainedPhis.clear();
+  }
+
+  /// Return a vector containing all instructions inserted during expansion.
+  SmallVector<Instruction *, 32> getAllInsertedInstructions() const {
+    SmallVector<Instruction *, 32> Result;
+    for (auto &VH : InsertedValues) {
+      Value *V = VH;
+      if (ReusedValues.contains(V))
+        continue;
+      if (auto *Inst = dyn_cast<Instruction>(V))
+        Result.push_back(Inst);
+    }
+    for (auto &VH : InsertedPostIncValues) {
+      Value *V = VH;
+      if (ReusedValues.contains(V))
+        continue;
+      if (auto *Inst = dyn_cast<Instruction>(V))
+        Result.push_back(Inst);
+    }
+
+    return Result;
   }
 
   /// Return true for expressions that can't be evaluated at runtime
@@ -223,14 +254,18 @@ public:
                                const TargetTransformInfo *TTI = nullptr);
 
   /// Insert code to directly compute the specified SCEV expression into the
-  /// program.  The inserted code is inserted into the specified block.
-  Value *expandCodeFor(const SCEV *SH, Type *Ty, Instruction *I);
+  /// program.  The code is inserted into the specified block.
+  Value *expandCodeFor(const SCEV *SH, Type *Ty, Instruction *I) {
+    return expandCodeForImpl(SH, Ty, I, true);
+  }
 
   /// Insert code to directly compute the specified SCEV expression into the
-  /// program.  The inserted code is inserted into the SCEVExpander's current
+  /// program.  The code is inserted into the SCEVExpander's current
   /// insertion point. If a type is specified, the result will be expanded to
   /// have that type, with a cast if necessary.
-  Value *expandCodeFor(const SCEV *SH, Type *Ty = nullptr);
+  Value *expandCodeFor(const SCEV *SH, Type *Ty = nullptr) {
+    return expandCodeForImpl(SH, Ty, true);
+  }
 
   /// Generates a code sequence that evaluates this predicate.  The inserted
   /// instructions will be at position \p Loc.  The result will be of type i1
@@ -309,7 +344,8 @@ public:
   }
 
   /// Return true if the specified instruction was inserted by the code
-  /// rewriter.  If so, the client should not modify the instruction.
+  /// rewriter.  If so, the client should not modify the instruction. Note that
+  /// this also includes instructions re-used during expansion.
   bool isInsertedInstruction(Instruction *I) const {
     return InsertedValues.count(I) || InsertedPostIncValues.count(I);
   }
@@ -335,8 +371,27 @@ public:
   Optional<ScalarEvolution::ValueOffsetPair>
   getRelatedExistingExpansion(const SCEV *S, const Instruction *At, Loop *L);
 
+  /// Returns a suitable insert point after \p I, that dominates \p
+  /// MustDominate. Skips instructions inserted by the expander.
+  BasicBlock::iterator findInsertPointAfter(Instruction *I,
+                                            Instruction *MustDominate);
+
 private:
   LLVMContext &getContext() const { return SE.getContext(); }
+
+  /// Insert code to directly compute the specified SCEV expression into the
+  /// program. The code is inserted into the SCEVExpander's current
+  /// insertion point. If a type is specified, the result will be expanded to
+  /// have that type, with a cast if necessary. If \p Root is true, this
+  /// indicates that \p SH is the top-level expression to expand passed from
+  /// an external client call.
+  Value *expandCodeForImpl(const SCEV *SH, Type *Ty, bool Root);
+
+  /// Insert code to directly compute the specified SCEV expression into the
+  /// program. The code is inserted into the specified block. If \p
+  /// Root is true, this indicates that \p SH is the top-level expression to
+  /// expand passed from an external client call.
+  Value *expandCodeForImpl(const SCEV *SH, Type *Ty, Instruction *I, bool Root);
 
   /// Recursive helper function for isHighCostExpansion.
   bool isHighCostExpansionHelper(const SCEV *S, Loop *L, const Instruction &At,
@@ -419,6 +474,32 @@ private:
                       Instruction *Pos, PHINode *LoopPhi);
 
   void fixupInsertPoints(Instruction *I);
+
+  /// If required, create LCSSA PHIs for \p Users' operand \p OpIdx. If new
+  /// LCSSA PHIs have been created, return the LCSSA PHI available at \p User.
+  /// If no PHIs have been created, return the unchanged operand \p OpIdx.
+  Value *fixupLCSSAFormFor(Instruction *User, unsigned OpIdx);
+};
+
+/// Helper to remove instructions inserted during SCEV expansion, unless they
+/// are marked as used.
+class SCEVExpanderCleaner {
+  SCEVExpander &Expander;
+
+  DominatorTree &DT;
+
+  /// Indicates whether the result of the expansion is used. If false, the
+  /// instructions added during expansion are removed.
+  bool ResultUsed;
+
+public:
+  SCEVExpanderCleaner(SCEVExpander &Expander, DominatorTree &DT)
+      : Expander(Expander), DT(DT), ResultUsed(false) {}
+
+  ~SCEVExpanderCleaner();
+
+  /// Indicate that the result of the expansion is used.
+  void markResultUsed() { ResultUsed = true; }
 };
 } // namespace llvm
 

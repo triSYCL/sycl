@@ -39,7 +39,7 @@ public:
   void registerCallbacks(PassInstrumentationCallbacks &PIC);
 
 private:
-  bool printBeforePass(StringRef PassID, Any IR);
+  void printBeforePass(StringRef PassID, Any IR);
   void printAfterPass(StringRef PassID, Any IR);
   void printAfterPassInvalidated(StringRef PassID);
 
@@ -56,12 +56,20 @@ private:
 
 class OptNoneInstrumentation {
 public:
-  OptNoneInstrumentation(bool DebugLogging) : DebugLogging(DebugLogging) {}
+  OptNoneInstrumentation() {}
   void registerCallbacks(PassInstrumentationCallbacks &PIC);
 
 private:
   bool skip(StringRef PassID, Any IR);
+};
 
+// Debug logging for transformation and analysis passes.
+class PrintPassInstrumentation {
+public:
+  PrintPassInstrumentation(bool DebugLogging) : DebugLogging(DebugLogging) {}
+  void registerCallbacks(PassInstrumentationCallbacks &PIC);
+
+private:
   bool DebugLogging;
 };
 
@@ -69,12 +77,12 @@ private:
 /// instrumentations and manages their state (if any).
 class StandardInstrumentations {
   PrintIRInstrumentation PrintIR;
+  PrintPassInstrumentation PrintPass;
   TimePassesHandler TimePasses;
   OptNoneInstrumentation OptNone;
 
 public:
-  StandardInstrumentations(bool DebugLogging)
-      : PrintIR(), TimePasses(), OptNone(DebugLogging) {}
+  StandardInstrumentations(bool DebugLogging) : PrintPass(DebugLogging) {}
 
   void registerCallbacks(PassInstrumentationCallbacks &PIC);
 

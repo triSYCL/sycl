@@ -263,6 +263,7 @@ INFO: All cards validated successfully.
 
 ## Compile the SYCL compiler
 
+For details about LLVM's CMake configuration see https://llvm.org/docs/CMake.html
 FIXME next
 ```bash
 # Get the source code
@@ -273,15 +274,14 @@ export XILINX_XRT=/opt/xilinx/xrt
 mkdir $SYCL_HOME/build
 cd $SYCL_HOME/build
 cmake -DCMAKE_BUILD_TYPE=Release \
-  -DLLVM_CXX_STD="c++17" \
   -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+  -DLLVM_TARGETS_TO_BUILD="X86" \
   -DLLVM_EXTERNAL_PROJECTS="llvm-spirv;sycl" \
-  -DLLVM_EXTERNAL_SYCL_SOURCE_DIR=$SYCL_HOME/sycl \
-  -DLLVM_EXTERNAL_LLVM_SPIRV_SOURCE_DIR=$SYCL_HOME/llvm-spirv \
   -DLLVM_ENABLE_PROJECTS="clang;llvm-spirv;sycl" \
-  -DLLVM_LINK_LLVM_DYLIB:BOOL=ON \
+  -DBUILD_SHARED_LIBS=ON \
+  -DLLVM_ENABLE_ASSERTIONS=ON  \
   $SYCL_HOME/llvm
-make -j`nproc` check-all
+make -j`nproc` sycl-toolchain
 ```
 
 Some checks may fail but that may not be an issue.
@@ -292,14 +292,25 @@ Some checks may fail but that may not be an issue.
 The typical environment is setup with something like
 FIXME
 ```bash
-export XILINX_XRT=/opt/xilinx/xrt
+XILINX_VERSION=2020.1
+XILINX_ROOT=/opt/xilinx/
+export XILINX_SDX=$XILINX_ROOT/Vitis/$XILINX_VERSION
+export XILINX_VIVADO=$XILINX_ROOT/Vivado/$XILINX_VERSION
+PATH=$PATH:$XILINX_ROOT/xrt/bin:$XILINX_SDX/bin:$XILINX_VIVADO/bin
 # This is the platform of the target platform on the FPGA board
 export XILINX_PLATFORM=xilinx_u200_xdma_201830_2
+export XILINX_XRT=$XILINX_ROOT/xrt
 # Update to the real place the SYCL compiler working tree is:
 SYCL_HOME=/var/tmp/rkeryell/SYCL/sycl
 SYCL_BIN_DIR=$SYCL_HOME/build/bin
 PATH=$PATH:$SYCL_BIN_DIR:$XILINX_XRT/bin:/opt/xilinx/Vitis/2020.1/bin:/opt/xilinx/Vivado/2020.1/bin
 export LD_LIBRARY_PATH=$XILINX_XRT/lib:$SYCL_HOME/build/lib:$LD_LIBRARY_PATH
+# Configure the simulation environment
+# $XILINX_ROOT/xrt/ can be replaced by any directory
+export EMCONFIG_PATH=$XILINX_ROOT/xrt/
+emconfigutil -f $XILINX_PLATFORM --nd 1 --save-temps --od $EMCONFIG_PATH
+# Setup LIBRARY_PATH used in hw and hw_emu mode
+export LIBRARY_PATH=$(ldconfig -v 2>/dev/null | grep -v ^$'\t' | tr -d '\n')
 ```
 
 You can compile an application either for real FPGA execution,
@@ -318,32 +329,36 @@ The `XCL_EMULATION_MODE` environment variable selects the compilation &
 execution mode and is used by the SYCL compiler and XRT runtime.
 
 So to run an example, for example start with
-```bash
-cd $SYCL_HOME/sycl/test/xocc_tests/simple_tests
-```
 - with software emulation:
+  compile and run a single file
   ```bash
   export XCL_EMULATION_MODE=sw_emu
-  # Configure the simulation environment
-  emconfigutil -f $XILINX_PLATFORM --nd 1 --save-temps
   # Compile the SYCL program down to a host fat binary including device code for CPU
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
     parallel_for_ND_range.cpp -o parallel_for_ND_range \
-    -lOpenCL -I/opt/xilinx/xrt/include
   # Run the software emulation
   ./parallel_for_ND_range
+  ```
+  run the test suite
+  this takes usually 4-6 minutes with a good CPU
+  ```bash
+  export XCL_EMULATION_MODE=sw_emu
+  make -j`nrpoc` check-sycl-xocc-jmax
   ```
 - with hardware emulation:
   ```bash
   export XCL_EMULATION_MODE=hw_emu
-  # Configure the simulation environment
-  emconfigutil -f $XILINX_PLATFORM --nd 1 --save-temps
   # Compile the SYCL program down to a host fat binary including the RTL for simulation
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
     parallel_for_ND_range.cpp -o parallel_for_ND_range \
-    -lOpenCL -I/opt/xilinx/xrt/include
   # Run the hardware emulation
   ./parallel_for_ND_range
+  ```
+  run the test suite
+  this takes usually 15-30 minutes with a good CPU
+  ```bash
+  export XCL_EMULATION_MODE=hw_emu
+  make -j`nrpoc` check-sycl-xocc-j4
   ```
 - with real hardware execution on FPGA:
   ```bash
@@ -352,14 +367,22 @@ cd $SYCL_HOME/sycl/test/xocc_tests/simple_tests
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
     parallel_for_ND_range.cpp -o parallel_for_ND_range \
-    -lOpenCL -I/opt/xilinx/xrt/include
   # Unset the variable at execution time to have real execution
   unset XCL_EMULATION_MODE
   # Run on the real FPGA board
   ./parallel_for_ND_range
   ```
-Note that the compilation line does not change, just the environment
-variable and the use or not of `emconfigutil`.
+  run the test suite
+  this takes usually 8+ hours
+  ```bash
+  export XCL_EMULATION_MODE=hw
+  make -j`nrpoc` check-sycl-xocc-j4
+  ```
+Note that the compilation line does not change, just the environment variable.
+
+check-sycl-xocc-jmax will run the tests on as many cores as is available on the system.
+but for hw and hw_emu this usually means the system will run out of RAM even with 64G
+so check-sycl-xocc-j4 should be used, it will run only 4 tests in parallel.
 
 ### Running a bigger example on real FPGA
 
@@ -367,13 +390,11 @@ To run a SYCL translation of
 https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
 FIXME
 ```bash
-cd $SYCL_HOME/sycl/test/xocc_tests/sdaccel_ports/vision/edge_detection
-export XCL_EMULATION_MODE=hw
+cd $SYCL_HOME/sycl/test/xocc_tests/disabled/sdaccel_ports/vision/edge_detection
+export XCL_EMULATION_MODE=sw_emu
 $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
     -fsycl-targets=fpga64-xilinx-unknown-sycldevice edge_detection.cpp \
-    -o edge_detection -lOpenCL `pkg-config --libs opencv` \
-    -I/opt/xilinx/xrt/include
-unset XCL_EMULATION_MODE
+    -o edge_detection `pkg-config --libs --cflags opencv4`
 # Execute on one of the images
 ./edge_detection data/input/eiffel.bmp
 ```

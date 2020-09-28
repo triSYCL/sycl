@@ -438,6 +438,16 @@ std::string getPostfixForReturnType(const Type *PRetTy, bool IsSigned) {
          mapLLVMTypeToOCLType(PRetTy, IsSigned);
 }
 
+// Enqueue kernel, kernel query, pipe and address space cast built-ins
+// are not mangled.
+bool isNonMangledOCLBuiltin(StringRef Name) {
+  if (!Name.startswith("__"))
+    return false;
+
+  return isEnqueueKernelBI(Name) || isKernelQueryBI(Name) ||
+         isPipeOrAddressSpaceCastBI(Name.drop_front(2));
+}
+
 Op getSPIRVFuncOC(StringRef S, SmallVectorImpl<std::string> *Dec) {
   Op OC;
   SmallVector<StringRef, 2> Postfix;
@@ -445,9 +455,10 @@ Op getSPIRVFuncOC(StringRef S, SmallVectorImpl<std::string> *Dec) {
   if (!oclIsBuiltin(S, Name))
     Name = S;
   StringRef R(Name);
-  R = dePrefixSPIRVName(R, Postfix);
-  if (!getByName(R.str(), OC))
+  if ((!Name.startswith(kSPIRVName::Prefix) && !isNonMangledOCLBuiltin(S)) ||
+      !getByName(dePrefixSPIRVName(R, Postfix).str(), OC)) {
     return OpNop;
+  }
   if (Dec)
     for (auto &I : Postfix)
       Dec->push_back(I.str());
@@ -460,16 +471,6 @@ bool getSPIRVBuiltin(const std::string &OrigName, spv::BuiltIn &B) {
   R = dePrefixSPIRVName(R, Postfix);
   assert(Postfix.empty() && "Invalid SPIR-V builtin Name");
   return getByName(R.str(), B);
-}
-
-// Enqueue kernel, kernel query, pipe and address space cast built-ins
-// are not mangled.
-bool isNonMangledOCLBuiltin(StringRef Name) {
-  if (!Name.startswith("__"))
-    return false;
-
-  return isEnqueueKernelBI(Name) || isKernelQueryBI(Name) ||
-         isPipeOrAddressSpaceCastBI(Name.drop_front(2));
 }
 
 // Demangled name is a substring of the name. The DemangledName is updated only
@@ -910,7 +911,7 @@ ConstantInt *mapSInt(Module *M, ConstantInt *I, std::function<int(int)> F) {
 bool isDecoratedSPIRVFunc(const Function *F, StringRef &UndecoratedName) {
   if (!F->hasName() || !F->getName().startswith(kSPIRVName::Prefix))
     return false;
-  UndecoratedName = undecorateSPIRVFunction(F->getName());
+  UndecoratedName = F->getName();
   return true;
 }
 
@@ -1454,22 +1455,44 @@ std::string mangleBuiltin(StringRef UniqName, ArrayRef<Type *> ArgTypes,
 
 /// Check if access qualifier is encoded in the type Name.
 bool hasAccessQualifiedName(StringRef TyName) {
-  if (TyName.endswith("_ro_t") || TyName.endswith("_wo_t") ||
-      TyName.endswith("_rw_t"))
-    return true;
-  return false;
+  if (TyName.size() < 5)
+    return false;
+  auto Acc = TyName.substr(TyName.size() - 5, 3);
+  return llvm::StringSwitch<bool>(Acc)
+      .Case(kAccessQualPostfix::ReadOnly, true)
+      .Case(kAccessQualPostfix::WriteOnly, true)
+      .Case(kAccessQualPostfix::ReadWrite, true)
+      .Default(false);
+}
+
+SPIRVAccessQualifierKind getAccessQualifier(StringRef TyName) {
+  return SPIRSPIRVAccessQualifierMap::map(
+      getAccessQualifierFullName(TyName).str());
+}
+
+StringRef getAccessQualifierPostfix(SPIRVAccessQualifierKind Access) {
+  switch (Access) {
+  case AccessQualifierReadOnly:
+    return kAccessQualPostfix::ReadOnly;
+  case AccessQualifierWriteOnly:
+    return kAccessQualPostfix::WriteOnly;
+  case AccessQualifierReadWrite:
+    return kAccessQualPostfix::ReadWrite;
+  default:
+    assert(false && "Unrecognized access qualifier!");
+    return kAccessQualPostfix::ReadWrite;
+  }
 }
 
 /// Get access qualifier from the type Name.
-StringRef getAccessQualifier(StringRef TyName) {
+StringRef getAccessQualifierFullName(StringRef TyName) {
   assert(hasAccessQualifiedName(TyName) &&
          "Type is not qualified with access.");
-  auto Acc = TyName.substr(TyName.size() - 4, 2);
+  auto Acc = TyName.substr(TyName.size() - 5, 3);
   return llvm::StringSwitch<StringRef>(Acc)
-      .Case("ro", "read_only")
-      .Case("wo", "write_only")
-      .Case("rw", "read_write")
-      .Default("");
+      .Case(kAccessQualPostfix::ReadOnly, kAccessQualName::ReadOnly)
+      .Case(kAccessQualPostfix::WriteOnly, kAccessQualName::WriteOnly)
+      .Case(kAccessQualPostfix::ReadWrite, kAccessQualName::ReadWrite);
 }
 
 /// Translates OpenCL image type names to SPIR-V.
@@ -1478,7 +1501,7 @@ Type *getSPIRVImageTypeFromOCL(Module *M, Type *ImageTy) {
   auto ImageTypeName = ImageTy->getPointerElementType()->getStructName();
   StringRef Acc = kAccessQualName::ReadOnly;
   if (hasAccessQualifiedName(ImageTypeName))
-    Acc = getAccessQualifier(ImageTypeName);
+    Acc = getAccessQualifierFullName(ImageTypeName);
   return getOrCreateOpaquePtrType(M, mapOCLTypeNameToSPIRV(ImageTypeName, Acc));
 }
 
@@ -1509,7 +1532,8 @@ bool hasLoopMetadata(const Module *M) {
 bool checkTypeForSPIRVExtendedInstLowering(IntrinsicInst *II, SPIRVModule *BM) {
   switch (II->getIntrinsicID()) {
   case Intrinsic::fabs:
-  case Intrinsic::ceil: {
+  case Intrinsic::ceil:
+  case Intrinsic::maxnum: {
     Type *Ty = II->getType();
     if (II->getArgOperand(0)->getType() != Ty)
       return false;

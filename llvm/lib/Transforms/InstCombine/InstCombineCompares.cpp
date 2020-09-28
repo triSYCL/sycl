@@ -898,7 +898,7 @@ Instruction *InstCombinerImpl::foldGEPICmp(GEPOperator *GEPLHS, Value *RHS,
     // For vectors, we apply the same reasoning on a per-lane basis.
     auto *Base = GEPLHS->getPointerOperand();
     if (GEPLHS->getType()->isVectorTy() && Base->getType()->isPointerTy()) {
-      int NumElts = cast<VectorType>(GEPLHS->getType())->getNumElements();
+      int NumElts = cast<FixedVectorType>(GEPLHS->getType())->getNumElements();
       Base = Builder.CreateVectorSplat(NumElts, Base);
     }
     return new ICmpInst(Cond, Base,
@@ -1886,7 +1886,8 @@ Instruction *InstCombinerImpl::foldICmpAndConstant(ICmpInst &Cmp,
     if (ExactLogBase2 != -1 && DL.isLegalInteger(ExactLogBase2 + 1)) {
       Type *NTy = IntegerType::get(Cmp.getContext(), ExactLogBase2 + 1);
       if (auto *AndVTy = dyn_cast<VectorType>(And->getType()))
-        NTy = FixedVectorType::get(NTy, AndVTy->getNumElements());
+        NTy = FixedVectorType::get(
+            NTy, cast<FixedVectorType>(AndVTy)->getNumElements());
       Value *Trunc = Builder.CreateTrunc(X, NTy);
       auto NewPred = Cmp.getPredicate() == CmpInst::ICMP_EQ ? CmpInst::ICMP_SGE
                                                             : CmpInst::ICMP_SLT;
@@ -1979,6 +1980,21 @@ Instruction *InstCombinerImpl::foldICmpMulConstant(ICmpInst &Cmp,
       Pred = ICmpInst::getSwappedPredicate(Pred);
     return new ICmpInst(Pred, Mul->getOperand(0),
                         Constant::getNullValue(Mul->getType()));
+  }
+
+  // If the multiply does not wrap, try to divide the compare constant by the
+  // multiplication factor.
+  if (Cmp.isEquality() && !MulC->isNullValue()) {
+    // (mul nsw X, MulC) == C --> X == C /s MulC
+    if (Mul->hasNoSignedWrap() && C.srem(*MulC).isNullValue()) {
+      Constant *NewC = ConstantInt::get(Mul->getType(), C.sdiv(*MulC));
+      return new ICmpInst(Pred, Mul->getOperand(0), NewC);
+    }
+    // (mul nuw X, MulC) == C --> X == C /u MulC
+    if (Mul->hasNoUnsignedWrap() && C.urem(*MulC).isNullValue()) {
+      Constant *NewC = ConstantInt::get(Mul->getType(), C.udiv(*MulC));
+      return new ICmpInst(Pred, Mul->getOperand(0), NewC);
+    }
   }
 
   return nullptr;
@@ -2177,7 +2193,8 @@ Instruction *InstCombinerImpl::foldICmpShlConstant(ICmpInst &Cmp,
       DL.isLegalInteger(TypeBits - Amt)) {
     Type *TruncTy = IntegerType::get(Cmp.getContext(), TypeBits - Amt);
     if (auto *ShVTy = dyn_cast<VectorType>(ShType))
-      TruncTy = FixedVectorType::get(TruncTy, ShVTy->getNumElements());
+      TruncTy = FixedVectorType::get(
+          TruncTy, cast<FixedVectorType>(ShVTy)->getNumElements());
     Constant *NewC =
         ConstantInt::get(TruncTy, C.ashr(*ShiftAmt).trunc(TypeBits - Amt));
     return new ICmpInst(Pred, Builder.CreateTrunc(X, TruncTy), NewC);
@@ -2811,7 +2828,8 @@ static Instruction *foldICmpBitCast(ICmpInst &Cmp,
 
           Type *NewType = Builder.getIntNTy(XType->getScalarSizeInBits());
           if (auto *XVTy = dyn_cast<VectorType>(XType))
-            NewType = FixedVectorType::get(NewType, XVTy->getNumElements());
+            NewType = FixedVectorType::get(
+                NewType, cast<FixedVectorType>(XVTy)->getNumElements());
           Value *NewBitcast = Builder.CreateBitCast(X, NewType);
           if (TrueIfSigned)
             return new ICmpInst(ICmpInst::ICMP_SLT, NewBitcast,
@@ -3051,17 +3069,6 @@ Instruction *InstCombinerImpl::foldICmpBinOpEqualityWithConstant(
     }
     break;
   }
-  case Instruction::Mul:
-    if (C.isNullValue() && BO->hasNoSignedWrap()) {
-      const APInt *BOC;
-      if (match(BOp1, m_APInt(BOC)) && !BOC->isNullValue()) {
-        // The trivial case (mul X, 0) is handled by InstSimplify.
-        // General case : (mul X, C) != 0 iff X != 0
-        //                (mul X, C) == 0 iff X == 0
-        return new ICmpInst(Pred, BOp0, Constant::getNullValue(RHS->getType()));
-      }
-    }
-    break;
   case Instruction::UDiv:
     if (C.isNullValue()) {
       // (icmp eq/ne (udiv A, B), 0) -> (icmp ugt/ule i32 B, A)
@@ -3387,7 +3394,7 @@ static Value *foldICmpWithLowBitMaskedVal(ICmpInst &I,
   Type *OpTy = M->getType();
   auto *VecC = dyn_cast<Constant>(M);
   if (OpTy->isVectorTy() && VecC && VecC->containsUndefElement()) {
-    auto *OpVTy = cast<VectorType>(OpTy);
+    auto *OpVTy = cast<FixedVectorType>(OpTy);
     Constant *SafeReplacementConstant = nullptr;
     for (unsigned i = 0, e = OpVTy->getNumElements(); i != e; ++i) {
       if (!isa<UndefValue>(VecC->getAggregateElement(i))) {
@@ -3715,6 +3722,22 @@ Value *InstCombinerImpl::foldUnsignedMultiplicationOverflowCheck(ICmpInst &I) {
   return Res;
 }
 
+static Instruction *foldICmpXNegX(ICmpInst &I) {
+  CmpInst::Predicate Pred;
+  Value *X;
+  if (!match(&I, m_c_ICmp(Pred, m_NSWNeg(m_Value(X)), m_Deferred(X))))
+    return nullptr;
+
+  if (ICmpInst::isSigned(Pred))
+    Pred = ICmpInst::getSwappedPredicate(Pred);
+  else if (ICmpInst::isUnsigned(Pred))
+    Pred = ICmpInst::getSignedPredicate(Pred);
+  // else for equality-comparisons just keep the predicate.
+
+  return ICmpInst::Create(Instruction::ICmp, Pred, X,
+                          Constant::getNullValue(X->getType()), I.getName());
+}
+
 /// Try to fold icmp (binop), X or icmp X, (binop).
 /// TODO: A large part of this logic is duplicated in InstSimplify's
 /// simplifyICmpWithBinOp(). We should be able to share that and avoid the code
@@ -3729,6 +3752,9 @@ Instruction *InstCombinerImpl::foldICmpBinOp(ICmpInst &I,
   BinaryOperator *BO1 = dyn_cast<BinaryOperator>(Op1);
   if (!BO0 && !BO1)
     return nullptr;
+
+  if (Instruction *NewICmp = foldICmpXNegX(I))
+    return NewICmp;
 
   const CmpInst::Predicate Pred = I.getPredicate();
   Value *X;
@@ -5218,7 +5244,7 @@ InstCombiner::getFlippedStrictnessPredicateAndConstant(CmpInst::Predicate Pred,
     if (!ConstantIsOk(CI))
       return llvm::None;
   } else if (auto *VTy = dyn_cast<VectorType>(Type)) {
-    unsigned NumElts = VTy->getNumElements();
+    unsigned NumElts = cast<FixedVectorType>(VTy)->getNumElements();
     for (unsigned i = 0; i != NumElts; ++i) {
       Constant *Elt = C->getAggregateElement(i);
       if (!Elt)
@@ -5283,7 +5309,7 @@ static ICmpInst *canonicalizeCmpWithConstant(ICmpInst &I) {
 
 /// If we have a comparison with a non-canonical predicate, if we can update
 /// all the users, invert the predicate and adjust all the users.
-static CmpInst *canonicalizeICmpPredicate(CmpInst &I) {
+CmpInst *InstCombinerImpl::canonicalizeICmpPredicate(CmpInst &I) {
   // Is the predicate already canonical?
   CmpInst::Predicate Pred = I.getPredicate();
   if (InstCombiner::isCanonicalPredicate(Pred))
@@ -5311,7 +5337,7 @@ static CmpInst *canonicalizeICmpPredicate(CmpInst &I) {
       cast<BranchInst>(U)->swapSuccessors(); // swaps prof metadata too
       break;
     case Instruction::Xor:
-      U->replaceAllUsesWith(&I);
+      replaceInstUsesWith(cast<Instruction>(*U), &I);
       break;
     default:
       llvm_unreachable("Got unexpected user - out of sync with "
@@ -5643,10 +5669,10 @@ Instruction *InstCombinerImpl::visitICmpInst(ICmpInst &I) {
   // Try to optimize equality comparisons against alloca-based pointers.
   if (Op0->getType()->isPointerTy() && I.isEquality()) {
     assert(Op1->getType()->isPointerTy() && "Comparing pointer with non-pointer?");
-    if (auto *Alloca = dyn_cast<AllocaInst>(GetUnderlyingObject(Op0, DL)))
+    if (auto *Alloca = dyn_cast<AllocaInst>(getUnderlyingObject(Op0)))
       if (Instruction *New = foldAllocaCmp(I, Alloca, Op1))
         return New;
-    if (auto *Alloca = dyn_cast<AllocaInst>(GetUnderlyingObject(Op1, DL)))
+    if (auto *Alloca = dyn_cast<AllocaInst>(getUnderlyingObject(Op1)))
       if (Instruction *New = foldAllocaCmp(I, Alloca, Op0))
         return New;
   }

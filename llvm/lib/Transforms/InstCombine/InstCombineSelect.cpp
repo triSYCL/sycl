@@ -305,8 +305,8 @@ Instruction *InstCombinerImpl::foldSelectOpOp(SelectInst &SI, Instruction *TI,
     if (auto *CondVTy = dyn_cast<VectorType>(CondTy)) {
       if (!FIOpndTy->isVectorTy())
         return nullptr;
-      if (CondVTy->getNumElements() !=
-          cast<VectorType>(FIOpndTy)->getNumElements())
+      if (cast<FixedVectorType>(CondVTy)->getNumElements() !=
+          cast<FixedVectorType>(FIOpndTy)->getNumElements())
         return nullptr;
 
       // TODO: If the backend knew how to deal with casts better, we could
@@ -1971,7 +1971,8 @@ static Instruction *canonicalizeSelectToShuffle(SelectInst &SI) {
   if (!CondVal->getType()->isVectorTy() || !match(CondVal, m_Constant(CondC)))
     return nullptr;
 
-  unsigned NumElts = cast<VectorType>(CondVal->getType())->getNumElements();
+  unsigned NumElts =
+      cast<FixedVectorType>(CondVal->getType())->getNumElements();
   SmallVector<int, 16> Mask;
   Mask.reserve(NumElts);
   for (unsigned i = 0; i != NumElts; ++i) {
@@ -2017,8 +2018,8 @@ static Instruction *canonicalizeScalarSelectOfVecs(SelectInst &Sel,
   // select (extelt V, Index), T, F --> select (splat V, Index), T, F
   // Splatting the extracted condition reduces code (we could directly create a
   // splat shuffle of the source vector to eliminate the intermediate step).
-  unsigned NumElts = Ty->getNumElements();
-  return IC.replaceOperand(Sel, 0, IC.Builder.CreateVectorSplat(NumElts, Cond));
+  return IC.replaceOperand(
+      Sel, 0, IC.Builder.CreateVectorSplat(Ty->getElementCount(), Cond));
 }
 
 /// Reuse bitcasted operands between a compare and select:
@@ -2526,6 +2527,32 @@ static Instruction *foldSelectToPhi(SelectInst &Sel, const DominatorTree &DT,
   return nullptr;
 }
 
+static Value *foldSelectWithFrozenICmp(SelectInst &Sel, InstCombiner::BuilderTy &Builder) {
+  FreezeInst *FI = dyn_cast<FreezeInst>(Sel.getCondition());
+  if (!FI)
+    return nullptr;
+
+  Value *Cond = FI->getOperand(0);
+  Value *TrueVal = Sel.getTrueValue(), *FalseVal = Sel.getFalseValue();
+
+  //   select (freeze(x == y)), x, y --> y
+  //   select (freeze(x != y)), x, y --> x
+  // The freeze should be only used by this select. Otherwise, remaining uses of
+  // the freeze can observe a contradictory value.
+  //   c = freeze(x == y)   ; Let's assume that y = poison & x = 42; c is 0 or 1
+  //   a = select c, x, y   ;
+  //   f(a, c)              ; f(poison, 1) cannot happen, but if a is folded
+  //                        ; to y, this can happen.
+  CmpInst::Predicate Pred;
+  if (FI->hasOneUse() &&
+      match(Cond, m_c_ICmp(Pred, m_Specific(TrueVal), m_Specific(FalseVal))) &&
+      (Pred == ICmpInst::ICMP_EQ || Pred == ICmpInst::ICMP_NE)) {
+    return Pred == ICmpInst::ICMP_EQ ? FalseVal : TrueVal;
+  }
+
+  return nullptr;
+}
+
 Instruction *InstCombinerImpl::visitSelectInst(SelectInst &SI) {
   Value *CondVal = SI.getCondition();
   Value *TrueVal = SI.getTrueValue();
@@ -2849,8 +2876,9 @@ Instruction *InstCombinerImpl::visitSelectInst(SelectInst &SI) {
         return replaceOperand(SI, 1, TrueSI->getTrueValue());
       }
       // select(C0, select(C1, a, b), b) -> select(C0&C1, a, b)
-      // We choose this as normal form to enable folding on the And and shortening
-      // paths for the values (this helps GetUnderlyingObjects() for example).
+      // We choose this as normal form to enable folding on the And and
+      // shortening paths for the values (this helps getUnderlyingObjects() for
+      // example).
       if (TrueSI->getFalseValue() == FalseVal && TrueSI->hasOneUse()) {
         Value *And = Builder.CreateAnd(CondVal, TrueSI->getCondition());
         replaceOperand(SI, 0, And);
@@ -2975,6 +3003,9 @@ Instruction *InstCombinerImpl::visitSelectInst(SelectInst &SI) {
 
   if (Instruction *PN = foldSelectToPhi(SI, DT, Builder))
     return replaceInstUsesWith(SI, PN);
+
+  if (Value *Fr = foldSelectWithFrozenICmp(SI, Builder))
+    return replaceInstUsesWith(SI, Fr);
 
   return nullptr;
 }

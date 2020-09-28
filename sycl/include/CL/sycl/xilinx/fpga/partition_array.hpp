@@ -21,6 +21,7 @@
 #define SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP
 
 #include "CL/sycl/detail/defines.hpp"
+#include "CL/sycl/xilinx/fpga/opt_decorate_func.hpp"
 
 #include <array>
 #include <cstddef>
@@ -39,13 +40,19 @@ namespace partition {
 
       none represents non partitioned standard array.
   */
-  enum class type {
+  namespace type {
+  enum type : int {
     cyclic,
     block,
     complete,
     none
   };
+  }
 
+  /// This fuction is currently empty but the LowerSYCLMetaData Pass will fill
+  /// it with the required IR.
+  SYCL_DEVICE_ANNOTATE("xilinx_partition_array") __attribute__((always_inline))
+  inline void xilinx_partition_array(void*, int, int, int) {}
 
   /** Represent a cyclic partition.
 
@@ -171,13 +178,13 @@ struct partition_array {
   /// Type of array elements
   using element_type = ValueType;
   using iterator = ValueType*;
-
+  using const_iterator = const ValueType*;
 
   /// Provide iterator
   iterator begin() { return elems; }
-  const iterator begin() const { return elems; }
+  const_iterator begin() const { return elems; }
   iterator end() { return elems+Size; }
-  const iterator end() const { return elems+Size; }
+  const_iterator end() const { return elems+Size; }
 
 
   /// Evaluate size
@@ -185,23 +192,22 @@ struct partition_array {
     return Size;
   }
 
-
   /// Construct an array
   partition_array() {
     // Add the intrinsic according expressing to the target compiler the
     // partitioning to use
     if constexpr (partition_type == partition::type::cyclic)
-      _ssdm_SpecArrayPartition(&(*this)[0], PartitionType::partition_dim,
-                               "CYCLIC", PartitionType::physical_mem_num, "");
+      partition::xilinx_partition_array(&(*this)[0], partition_type,
+                                        PartitionType::physical_mem_num,
+                                        PartitionType::partition_dim);
     if constexpr (partition_type == partition::type::block)
-      _ssdm_SpecArrayPartition(&(*this)[0], PartitionType::partition_dim,
-                               "BLOCK", PartitionType::ele_in_each_physical_mem,
-                               "");
+      partition::xilinx_partition_array(&(*this)[0], partition_type,
+                                        PartitionType::ele_in_each_physical_mem,
+                                        PartitionType::partition_dim);
     if constexpr (partition_type == partition::type::complete)
-      _ssdm_SpecArrayPartition(&(*this)[0], PartitionType::partition_dim,
-                               "COMPLETE", 0, "");
+      partition::xilinx_partition_array(&(*this)[0], partition_type, 0,
+                                        PartitionType::partition_dim);
   }
-
 
   /// A constructor from some container
   template <typename SomeContainer>

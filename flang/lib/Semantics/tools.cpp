@@ -179,10 +179,21 @@ bool DoesScopeContain(const Scope *maybeAncestor, const Symbol &symbol) {
   return DoesScopeContain(maybeAncestor, symbol.owner());
 }
 
+static const Symbol &FollowHostAssoc(const Symbol &symbol) {
+  for (const Symbol *s{&symbol};;) {
+    const auto *details{s->detailsIf<HostAssocDetails>()};
+    if (!details) {
+      return *s;
+    }
+    s = &details->symbol();
+  }
+}
+
 bool IsHostAssociated(const Symbol &symbol, const Scope &scope) {
   const Scope *subprogram{FindProgramUnitContaining(scope)};
   return subprogram &&
-      DoesScopeContain(FindProgramUnitContaining(symbol), *subprogram);
+      DoesScopeContain(
+          FindProgramUnitContaining(FollowHostAssoc(symbol)), *subprogram);
 }
 
 bool IsInStmtFunction(const Symbol &symbol) {
@@ -954,8 +965,7 @@ SymbolVector OrderParameterDeclarations(const Symbol &typeSymbol) {
 const DeclTypeSpec &FindOrInstantiateDerivedType(Scope &scope,
     DerivedTypeSpec &&spec, SemanticsContext &semanticsContext,
     DeclTypeSpec::Category category) {
-  spec.CookParameters(semanticsContext.foldingContext());
-  spec.EvaluateParameters(semanticsContext.foldingContext());
+  spec.EvaluateParameters(semanticsContext);
   if (const DeclTypeSpec *
       type{scope.FindInstantiatedDerivedType(spec, category)}) {
     return *type;
@@ -1292,6 +1302,11 @@ bool HasAlternateReturns(const Symbol &subprogram) {
     }
   }
   return false;
+}
+
+bool InCommonBlock(const Symbol &symbol) {
+  const auto *details{symbol.detailsIf<ObjectEntityDetails>()};
+  return details && details->commonBlock();
 }
 
 } // namespace Fortran::semantics
