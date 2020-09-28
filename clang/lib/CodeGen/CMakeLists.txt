@@ -25,6 +25,7 @@ set(LLVM_LINK_COMPONENTS
   SYCLLowerIR
   Target
   TransformUtils
+  SYCL
   )
 
 

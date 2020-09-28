@@ -243,7 +243,7 @@ if xocc != "off":
     xocc_target="hw"
     if "XCL_EMULATION_MODE" in os.environ:
         xocc_target = os.environ["XCL_EMULATION_MODE"]
-    llvm_config.with_environment('XCL_EMULATION_MODE', hw, append_path=False)
+    llvm_config.with_environment('XCL_EMULATION_MODE', xocc_target, append_path=False)
     lit_config.note("XOCC target: {}".format(xocc_target))
     required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH']
     has_error=False

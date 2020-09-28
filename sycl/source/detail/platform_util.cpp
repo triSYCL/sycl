@@ -133,9 +133,7 @@ uint32_t PlatformUtil::getNativeVectorWidth(PlatformUtil::TypeIndex TIndex) {
   static constexpr uint32_t VECTOR_WIDTH_AVX2[] = {32, 16, 8, 4, 8, 4, 0};
   // AVX512 has 64 byte (ZMM) registers
   static constexpr uint32_t VECTOR_WIDTH_AVX512[] = {64, 32, 16, 8, 16, 8, 0};
-
-  uint32_t Index = static_cast<uint32_t>(TIndex);
-
+#endif
 #if defined(SYCL_RT_OS_LINUX) && (defined(__x86_64__) || defined(__i386__))
 #if defined(SYCL_RT_OS_LINUX)
   if (__builtin_cpu_supports("avx512f"))

@@ -3880,6 +3880,8 @@ class OffloadingActionBuilder final {
 
     void addSYCLDeviceLibs(const ToolChain *TC, ActionList &DeviceLinkObjects,
                            bool isSpirvAOT, bool isMSVCEnv) {
+      if (TC->getTriple().isXilinxSYCLDevice())
+        return;
       enum SYCLDeviceLibType {
         sycl_devicelib_wrapper,
         sycl_devicelib_fallback

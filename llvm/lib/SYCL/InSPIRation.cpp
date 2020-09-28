@@ -18,6 +18,7 @@
 #include <regex>
 #include <string>
 
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/SYCL/InSPIRation.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
@@ -389,12 +390,12 @@ struct InSPIRation : public ModulePass {
   /// leakage however, but should result in more overall address space
   /// consistency/stability due to the addition of more concrete address spaces.
   void handleSpecArrayPartition(CallInst *CI) {
-    for (auto &Op : CI->operands()) {
+    for (Use &Op : CI->operands()) {
       if (Op->getType()->isPointerTy()) {
         if (auto *ASC = dyn_cast<AddrSpaceCastInst>(Op)) {
           if (ASC->getDestAddressSpace() == /*Generic AS*/ 4) {
-            ASC->replaceAllUsesWith(ASC->getPointerOperand());
-            ASC->eraseFromParent();
+            Op.set(nullptr);
+            Op.set(ASC->getPointerOperand());
           }
         }
       }
@@ -415,8 +416,7 @@ struct InSPIRation : public ModulePass {
   void ssdmAddressSpaceFix(Function &F) {
     for (auto &I : instructions(F))
       if (auto *Call = dyn_cast<CallInst>(&I))
-        if (auto Func = dyn_cast<Function>(Call->getCalledFunction()))
-          if (Func->getName() == "_ssdm_SpecArrayPartition")
+        if (Call->getIntrinsicID() == Intrinsic::sideeffect)
             handleSpecArrayPartition(Call);
   }
 

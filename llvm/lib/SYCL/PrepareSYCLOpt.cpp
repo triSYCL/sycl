@@ -30,11 +30,14 @@ struct PrepareSYCLOpt : public ModulePass {
 
   PrepareSYCLOpt() : ModulePass(ID) {}
 
-  void turnNonKernelsIntoInternals(Module& M) {
-    for (Function &F : M.functions()) {
-      if (F.getName().startswith("xSYCL") || F.isDeclaration())
+  void turnNonKernelsIntoPrivate(Module &M) {
+    for (GlobalObject &G : M.global_objects()) {
+      if (auto *F = dyn_cast<Function>(&G))
+        if (F->getName().startswith("xSYCL"))
+          continue;
+      if (G.isDeclaration())
         continue;
-      F.setLinkage(llvm::GlobalValue::InternalLinkage);
+      G.setLinkage(llvm::GlobalValue::PrivateLinkage);
     }
   }
 
@@ -53,7 +56,7 @@ struct PrepareSYCLOpt : public ModulePass {
   }
 
   bool runOnModule(Module &M) override {
-    turnNonKernelsIntoInternals(M);
+    turnNonKernelsIntoPrivate(M);
     setCallingConventions(M);
     return true;
   }

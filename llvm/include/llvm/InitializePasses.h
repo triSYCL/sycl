@@ -452,6 +452,7 @@ void initializeInSPIRationPass(PassRegistry&);
 void initializeKernelPropGenPass(PassRegistry&);
 void initializeXOCCIRDowngraderPass(PassRegistry&);
 void initializePrepareSYCLOptPass(PassRegistry&);
+void initializeLowerSYCLMetaDataPass(PassRegistry&);
 
 } // end namespace llvm
 

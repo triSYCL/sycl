@@ -53,8 +53,8 @@ void dataflow(T functor) {
     pipeline way.
 */
 template <typename T>
+__attribute__((annotate("xilinx_pipeline"))) __attribute__((always_inline))
 void pipeline(T functor) {
-  _ssdm_op_SpecPipeline(1, 1, 0, 0, "");
   functor();
 }
 

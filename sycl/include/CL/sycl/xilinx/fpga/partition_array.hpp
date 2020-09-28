@@ -39,13 +39,17 @@ namespace partition {
 
       none represents non partitioned standard array.
   */
-  enum class type {
+  namespace type {
+  enum type : int {
     cyclic,
     block,
     complete,
     none
   };
+  }
 
+  __attribute__((annotate("xilinx_partition_array"))) __attribute__((always_inline))
+  inline void xilinx_partition_array(void*, int, int, int) {}
 
   /** Represent a cyclic partition.
 
@@ -185,23 +189,22 @@ struct partition_array {
     return Size;
   }
 
-
   /// Construct an array
   partition_array() {
     // Add the intrinsic according expressing to the target compiler the
     // partitioning to use
     if constexpr (partition_type == partition::type::cyclic)
-      _ssdm_SpecArrayPartition(&(*this)[0], PartitionType::partition_dim,
-                               "CYCLIC", PartitionType::physical_mem_num, "");
+      partition::xilinx_partition_array(&(*this)[0], partition_type,
+                                        PartitionType::physical_mem_num,
+                                        PartitionType::partition_dim);
     if constexpr (partition_type == partition::type::block)
-      _ssdm_SpecArrayPartition(&(*this)[0], PartitionType::partition_dim,
-                               "BLOCK", PartitionType::ele_in_each_physical_mem,
-                               "");
+      partition::xilinx_partition_array(&(*this)[0], partition_type,
+                                        PartitionType::ele_in_each_physical_mem,
+                                        PartitionType::partition_dim);
     if constexpr (partition_type == partition::type::complete)
-      _ssdm_SpecArrayPartition(&(*this)[0], PartitionType::partition_dim,
-                               "COMPLETE", 0, "");
+      partition::xilinx_partition_array(&(*this)[0], partition_type, 0,
+                                        PartitionType::partition_dim);
   }
-
 
   /// A constructor from some container
   template <typename SomeContainer>

@@ -133,6 +133,8 @@ shift 6
 
 KERNELPROP="${TMP_PATH}_KernelProperties_${SOURCE_FILE_NAME}.bash"
 
+cp "$INPUT_FILE_NAME" "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels.bc"
+
 # -flat-address-space defines the generic address space we wish to deduce to
 # something concrete, used by the infer-address-spaces pass which is slightly
 # modified from the upstream implementation to take this argument to avoid

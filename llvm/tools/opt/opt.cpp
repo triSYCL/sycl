@@ -589,6 +589,7 @@ int main(int argc, char **argv) {
   initializeKernelPropGenPass(Registry);
   initializeXOCCIRDowngraderPass(Registry);
   initializePrepareSYCLOptPass(Registry);
+  initializeLowerSYCLMetaDataPass(Registry);
   initializeHardwareLoopsPass(Registry);
   initializeTypePromotionPass(Registry);
   initializeSYCLLowerWGScopeLegacyPassPass(Registry);
