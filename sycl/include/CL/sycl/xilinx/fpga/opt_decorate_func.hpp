@@ -18,6 +18,12 @@
 #include "CL/sycl/xilinx/fpga/ssdm_inst.hpp"
 #include "CL/sycl/detail/defines.hpp"
 
+#if defined(__SYCL_DEVICE_ONLY__)
+#define SYCL_DEVICE_ANNOTATE(...) __attribute__((annotate(__VA_ARGS__)))
+#else
+#define SYCL_DEVICE_ANNOTATE(...)
+#endif
+
 __SYCL_INLINE_NAMESPACE(cl) {
 
 namespace sycl::xilinx {
@@ -53,7 +59,7 @@ void dataflow(T functor) {
     pipeline way.
 */
 template <typename T>
-__attribute__((annotate("xilinx_pipeline"))) __attribute__((always_inline))
+SYCL_DEVICE_ANNOTATE("xilinx_pipeline") __attribute__((always_inline))
 void pipeline(T functor) {
   functor();
 }

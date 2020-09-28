@@ -21,6 +21,7 @@
 #define SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP
 
 #include "CL/sycl/detail/defines.hpp"
+#include "CL/sycl/xilinx/fpga/opt_decorate_func.hpp"
 
 #include <array>
 #include <cstddef>
@@ -48,7 +49,9 @@ namespace partition {
   };
   }
 
-  __attribute__((annotate("xilinx_partition_array"))) __attribute__((always_inline))
+  /// This fuction is currently empty but the LowerSYCLMetaData Pass will fill
+  /// it with the required IR.
+  SYCL_DEVICE_ANNOTATE("xilinx_partition_array") __attribute__((always_inline))
   inline void xilinx_partition_array(void*, int, int, int) {}
 
   /** Represent a cyclic partition.
