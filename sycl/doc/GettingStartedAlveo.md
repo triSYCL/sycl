@@ -372,22 +372,25 @@ change, only the environment ``XCL_EMULATION_MODE`` variable.
 
 - Run the test suite with software emulation:
   ```bash
+  cd $SYCL_HOME/llvm/build
   export XCL_EMULATION_MODE=sw_emu
-  make -j`nproc` check-sycl-xocc-jmax
+  cmake --build . --parallel `nproc` --target check-sycl-xocc-jmax
   ```
   This takes usually 4-6 minutes with a good CPU.
 
 - Run the test suite with hardware emulation:
   ```bash
+  cd $SYCL_HOME/llvm/build
   export XCL_EMULATION_MODE=hw_emu
-  make -j`nproc` check-sycl-xocc-j4
+  cmake --build . --parallel `nproc` --target check-sycl-xocc-j4
   ```
   This takes usually 15-30 minutes with a good CPU.
 
 - run the test suite with real hardware execution on FPGA:
   ```bash
+  cd $SYCL_HOME/llvm/build
   export XCL_EMULATION_MODE=hw
-  make -j`nproc` check-sycl-xocc-j4
+  cmake --build . --parallel `nproc` --target check-sycl-xocc-j4
   ```
   This takes usually 8+ hours.
 
