@@ -56,8 +56,8 @@ cd XRT/build
 sudo ../src/runtime_src/tools/scripts/xrtdeps.sh
 # Compile the Xilinx runtime
 ./build.sh
-# Install the runtime and compile/install the Linux kernel drivers
-# (adapt to the real name if different)
+# Install the runtime into /opt/xilinx/xrt and compile/install
+# the Linux kernel drivers (adapt to the real name if different)
 sudo apt install --reinstall ./Release/xrt_202020.2.8.0_20.04-amd64-xrt.deb
 ```
 
@@ -75,8 +75,8 @@ cd Debug
 # You need to make explicitly the Debug package because it is not made
 # by default
 make package
-# Install the runtime and compile/install the Linux kernel drivers
-# (adapt to the real name if different)
+# Install the runtime into /opt/xilinx/xrt and compile/install
+# the Linux kernel drivers (adapt to the real name if different)
 sudo apt install --reinstall ./xrt_202020.2.8.0_20.04-amd64-xrt.deb
 ```
 
@@ -221,8 +221,8 @@ Cold reboot machine to load the new image on card(s).
 
 Unfortunately you need to "cold reboot" the machine to have the new
 target platform loaded inside the FPGA, which means to really
-power-off the machine so the new PCIe interface of the card can
-actually be rediscovered by the host machine (everything is
+power-off the machine so the new instantiated PCIe interface of the
+card can actually be rediscovered by the host machine (everything is
 configurable with an FPGA!).
 
 Then after rebooting, you can check with a pre-compiled FPGA program
@@ -281,25 +281,26 @@ python $SYCL_HOME/llvm/buildbot/compile.py
 The typical environment is setup with something like
 FIXME
 ```bash
+# The place where SYCL has been compiled:
+SYCL_HOME=~/sycl_workspace
 XILINX_VERSION=2020.1
-XILINX_ROOT=/opt/xilinx/
-export XILINX_SDX=$XILINX_ROOT/Vitis/$XILINX_VERSION
-export XILINX_VIVADO=$XILINX_ROOT/Vivado/$XILINX_VERSION
-PATH=$PATH:$XILINX_ROOT/xrt/bin:$XILINX_SDX/bin:$XILINX_VIVADO/bin
-# This is the platform of the target platform on the FPGA board
+# The target platform for the FPGA board model
 export XILINX_PLATFORM=xilinx_u200_xdma_201830_2
+# Where all the Xilinx tools are
+XILINX_ROOT=/opt/xilinx
 export XILINX_XRT=$XILINX_ROOT/xrt
+export XILINX_VITIS=$XILINX_ROOT/Vitis/$XILINX_VERSION
+# For some tests? FIXME
+export XILINX_SDX=$XILINX_VITIS
+export XILINX_VIVADO=$XILINX_ROOT/Vivado/$XILINX_VERSION
+PATH=$PATH:$XILINX_XRT/bin:$XILINX_SDX/bin:$XILINX_VIVADO/bin
 # Update to the real place the SYCL compiler working tree is:
-SYCL_HOME=/var/tmp/rkeryell/SYCL/sycl
-SYCL_BIN_DIR=$SYCL_HOME/build/bin
+SYCL_BIN_DIR=$SYCL_HOME/llvm/bin
 PATH=$PATH:$SYCL_BIN_DIR:$XILINX_XRT/bin:/opt/xilinx/Vitis/2020.1/bin:/opt/xilinx/Vivado/2020.1/bin
-export LD_LIBRARY_PATH=$XILINX_XRT/lib:$SYCL_HOME/build/lib:$LD_LIBRARY_PATH
-# Configure the simulation environment
-# $XILINX_ROOT/xrt/ can be replaced by any directory
-export EMCONFIG_PATH=$XILINX_ROOT/xrt/
-emconfigutil -f $XILINX_PLATFORM --nd 1 --save-temps --od $EMCONFIG_PATH
+export LD_LIBRARY_PATH=$XILINX_XRT/lib:$SYCL_HOME/llvm/build/lib:$LD_LIBRARY_PATH
 # Setup LIBRARY_PATH used in hw and hw_emu mode
-export LIBRARY_PATH=$(ldconfig -v 2>/dev/null | grep -v ^$'\t' | tr -d '\n')
+# Ask ldconfig about the list of system library directories
+export LIBRARY_PATH=$(ldconfig --verbose 2>/dev/null | grep ':$' | tr -d '\n')
 ```
 
 You can compile an application either for real FPGA execution,
