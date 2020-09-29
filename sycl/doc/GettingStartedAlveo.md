@@ -264,30 +264,19 @@ INFO: All cards validated successfully.
 ## Compile the SYCL compiler
 
 For details about LLVM's CMake configuration see https://llvm.org/docs/CMake.html
-FIXME next
-```bash
-# Get the source code
-git clone --branch sycl/unified/master git@github.com:triSYCL/sycl.git
-cd sycl
-SYCL_HOME=`pwd`
-export XILINX_XRT=/opt/xilinx/xrt
-mkdir $SYCL_HOME/build
-cd $SYCL_HOME/build
-cmake -DCMAKE_BUILD_TYPE=Release \
-  -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
-  -DLLVM_TARGETS_TO_BUILD="X86" \
-  -DLLVM_EXTERNAL_PROJECTS="llvm-spirv;sycl" \
-  -DLLVM_ENABLE_PROJECTS="clang;llvm-spirv;sycl" \
-  -DBUILD_SHARED_LIBS=ON \
-  -DLLVM_ENABLE_ASSERTIONS=ON  \
-  $SYCL_HOME/llvm
-make -j`nproc` sycl-toolchain
+but it is possible to use the simpler Python scripts to build the SYCL
+environment:
+```
+# Pick some place where SYCL has to be compiled:
+SYCL_HOME=~/sycl_workspace
+mkdir $SYCL_HOME
+cd $SYCL_HOME
+git clone --branch sycl/unified/master git@github.com:triSYCL/sycl.git llvm
+python $SYCL_HOME/llvm/buildbot/configure.py
+python $SYCL_HOME/llvm/buildbot/compile.py
 ```
 
-Some checks may fail but that may not be an issue.
-
-
-## Compiling and running an application
+## Compiling and running a SYCL application
 
 The typical environment is setup with something like
 FIXME
