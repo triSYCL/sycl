@@ -325,9 +325,10 @@ using what is available on the system.
 The `XCL_EMULATION_MODE` environment variable selects the compilation &
 execution mode and is used by the SYCL compiler and XRT runtime.
 
-So to run an example, for example start with
+### Small examples
+
+To run an example from the provided examples:
 - with software emulation:
-  compile and run a single file
   ```bash
   cd $SYCL_HOME/llvm/sycl/test/xocc_tests/simple_tests
   # Instruct the compiler and runtime to use FPGA software emulation
@@ -338,12 +339,7 @@ So to run an example, for example start with
   # Run the software emulation
   ./parallel_for_ND_range
   ```
-  run the test suite
-  this takes usually 4-6 minutes with a good CPU
-  ```bash
-  export XCL_EMULATION_MODE=sw_emu
-  make -j`nrpoc` check-sycl-xocc-jmax
-  ```
+
 - with hardware emulation:
   ```bash
   # Instruct the compiler and runtime to use FPGA hardware emulation
@@ -354,12 +350,7 @@ So to run an example, for example start with
   # Run the hardware emulation
   ./parallel_for_ND_range
   ```
-  run the test suite
-  this takes usually 15-30 minutes with a good CPU
-  ```bash
-  export XCL_EMULATION_MODE=hw_emu
-  make -j`nrpoc` check-sycl-xocc-j4
-  ```
+
 - with real hardware execution on FPGA:
   ```bash
   # Instruct the compiler and runtime to use real FPGA hardware execution
@@ -372,17 +363,40 @@ So to run an example, for example start with
   # Run on the real FPGA board
   ./parallel_for_ND_range
   ```
-  run the test suite
-  this takes usually 8+ hours
+
+Note that in the previous examples, the compilation line does not
+change, only the environment ``XCL_EMULATION_MODE`` variable.
+
+
+### Running the test suite
+
+- Run the test suite with software emulation:
+  ```bash
+  export XCL_EMULATION_MODE=sw_emu
+  make -j`nproc` check-sycl-xocc-jmax
+  ```
+  This takes usually 4-6 minutes with a good CPU.
+
+- Run the test suite with hardware emulation:
+  ```bash
+  export XCL_EMULATION_MODE=hw_emu
+  make -j`nproc` check-sycl-xocc-j4
+  ```
+  This takes usually 15-30 minutes with a good CPU.
+
+- run the test suite with real hardware execution on FPGA:
   ```bash
   export XCL_EMULATION_MODE=hw
-  make -j`nrpoc` check-sycl-xocc-j4
+  make -j`nproc` check-sycl-xocc-j4
   ```
-Note that the compilation line does not change, just the environment variable.
+  This takes usually 8+ hours.
 
-check-sycl-xocc-jmax will run the tests on as many cores as is available on the system.
-but for hw and hw_emu this usually means the system will run out of RAM even with 64G
-so check-sycl-xocc-j4 should be used, it will run only 4 tests in parallel.
+`check-sycl-xocc-jmax` will run the tests on as many cores as is
+available on the system. But for `hw` and `hw_emu` execution mode,
+this usually means the system will run out of RAM even with 64G so
+`check-sycl-xocc-j` should be used to run only 4 tests in
+parallel.
+
 
 ### Running a bigger example on real FPGA
 
@@ -390,7 +404,8 @@ To run a SYCL translation of
 https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
 ```bash
 cd $SYCL_HOME/llvm/sycl/test/xocc_tests/disabled/edge_detection
-export XCL_EMULATION_MODE=sw_emu
+# Instruct the compiler and runtime to use real FPGA hardware execution
+export XCL_EMULATION_MODE=hw
 $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
     -fsycl-targets=fpga64-xilinx-unknown-sycldevice edge_detection.cpp \
     -o edge_detection `pkg-config --libs --cflags opencv4`
