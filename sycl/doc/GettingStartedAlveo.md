@@ -388,9 +388,8 @@ so check-sycl-xocc-j4 should be used, it will run only 4 tests in parallel.
 
 To run a SYCL translation of
 https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
-FIXME
 ```bash
-cd $SYCL_HOME/sycl/test/xocc_tests/disabled/sdaccel_ports/vision/edge_detection
+cd $SYCL_HOME/llvm/sycl/test/xocc_tests/disabled/edge_detection
 export XCL_EMULATION_MODE=sw_emu
 $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
     -fsycl-targets=fpga64-xilinx-unknown-sycldevice edge_detection.cpp \
