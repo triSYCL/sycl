@@ -322,10 +322,13 @@ So to run an example, for example start with
 - with software emulation:
   compile and run a single file
   ```bash
+  cd $SYCL_HOME/llvm/sycl/test/xocc_tests/simple_tests
   export XCL_EMULATION_MODE=sw_emu
   # Compile the SYCL program down to a host fat binary including device code for CPU
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
-    parallel_for_ND_range.cpp -o parallel_for_ND_range \
+    parallel_for_ND_range.cpp -o parallel_for_ND_range
+  # Configure the simulation environment here if not done already
+  emconfigutil --platform $XILINX_PLATFORM --save-temps
   # Run the software emulation
   ./parallel_for_ND_range
   ```
@@ -340,7 +343,9 @@ So to run an example, for example start with
   export XCL_EMULATION_MODE=hw_emu
   # Compile the SYCL program down to a host fat binary including the RTL for simulation
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
-    parallel_for_ND_range.cpp -o parallel_for_ND_range \
+    parallel_for_ND_range.cpp -o parallel_for_ND_range
+  # Configure the simulation environment here if not done already
+  emconfigutil --platform $XILINX_PLATFORM --save-temps
   # Run the hardware emulation
   ./parallel_for_ND_range
   ```
