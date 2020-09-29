@@ -301,14 +301,21 @@ export LD_LIBRARY_PATH=$XILINX_XRT/lib:$SYCL_HOME/llvm/build/lib:$LD_LIBRARY_PAT
 # Setup LIBRARY_PATH used in hw and hw_emu mode
 # Ask ldconfig about the list of system library directories
 export LIBRARY_PATH=$(ldconfig --verbose 2>/dev/null | grep ':$' | tr -d '\n')
+# Setup device to be used in simulation mode.
+# Instead of running emconfigutil all over the place with
+emconfig.json everywhere, put once at a common place:
+export EMCONFIG_PATH=~/.Xilinx
+emconfigutil --platform $XILINX_PLATFORM --od $EMCONFIG_PATH --save-temps
 ```
 
 You can compile an application either for real FPGA execution,
 software emulation (the SYCL device code is executed by the XRT
 runtime on CPU) or hardware emulation (the SYCL device code is
-synthesized into RTL Verilog and run by an RTL simulator). Note that
-the software and hardware emulation might not work for some system
-incompatibility reasons because Vitis comes with a lot of
+synthesized into RTL Verilog and run by an RTL simulator such as
+`xsim`).
+
+Note that the software and hardware emulation might not work for some
+system incompatibility reasons because Vitis comes with a lot of
 system-specific assumptions with a lot of old compilers and libraries
 instead of just using the ones from the system and the mix-and-match
 might be wrong on your current system... But the hardware execution
@@ -323,12 +330,11 @@ So to run an example, for example start with
   compile and run a single file
   ```bash
   cd $SYCL_HOME/llvm/sycl/test/xocc_tests/simple_tests
+  # Instruct the compiler and runtime to use FPGA software emulation
   export XCL_EMULATION_MODE=sw_emu
   # Compile the SYCL program down to a host fat binary including device code for CPU
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
     parallel_for_ND_range.cpp -o parallel_for_ND_range
-  # Configure the simulation environment here if not done already
-  emconfigutil --platform $XILINX_PLATFORM --save-temps
   # Run the software emulation
   ./parallel_for_ND_range
   ```
@@ -340,12 +346,11 @@ So to run an example, for example start with
   ```
 - with hardware emulation:
   ```bash
+  # Instruct the compiler and runtime to use FPGA hardware emulation
   export XCL_EMULATION_MODE=hw_emu
   # Compile the SYCL program down to a host fat binary including the RTL for simulation
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
     parallel_for_ND_range.cpp -o parallel_for_ND_range
-  # Configure the simulation environment here if not done already
-  emconfigutil --platform $XILINX_PLATFORM --save-temps
   # Run the hardware emulation
   ./parallel_for_ND_range
   ```
@@ -357,11 +362,11 @@ So to run an example, for example start with
   ```
 - with real hardware execution on FPGA:
   ```bash
-  # Instruct only the compiler about hardware execution (\todo: change this API)
+  # Instruct the compiler and runtime to use real FPGA hardware execution
   export XCL_EMULATION_MODE=hw
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
-    parallel_for_ND_range.cpp -o parallel_for_ND_range \
+    parallel_for_ND_range.cpp -o parallel_for_ND_range
   # Unset the variable at execution time to have real execution
   unset XCL_EMULATION_MODE
   # Run on the real FPGA board
