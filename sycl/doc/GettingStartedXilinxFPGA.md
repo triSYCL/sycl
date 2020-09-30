@@ -460,3 +460,48 @@ executing:
 sudo rmmod xocl
 sudo modprobe xocl
 ```
+
+## Xilinx FPGA SYCL compiler architecture
+
+[Architecture of the Xilinx SYCL
+compiler](Xilinx_sycl_compiler_architecture.rst) describes the
+compiler architecture.
+
+This document aims to cover the key differences of compiling SYCL for Xilinx
+FPGAs. Things like building the compiler and library remain the same but other
+things like the compiler invocation for Xilinx FPGA compilation is a little
+different. As a general rule of thumb we're trying to keep things as close as we
+can to the Intel implementation, but in some areas were still working on that.
+
+One of the significant differences of compilation for Xilinx FPGAs over the
+ordinary compiler directive is that Xilinx devices require offline compilation
+of SYCL kernels to binary before being wrapped into the end fat binary. The
+offline compilation of these kernels is done by Xilinx's `v++` compiler rather
+than the SYCL device compiler itself in this case. The device compiler's job is
+to compile SYCL kernels to a format edible by `v++`, then take the output of
+`v++` and wrap it into the fat binary as normal.
+
+The current Intel SYCL implementation revolves around SPIR-V while
+Xilinx's `v++` compiler can only ingest SPIR-df as an intermediate
+representation. SPIR-df is LLVM IR with some SPIR decorations. It is
+similar to the SPIR-2.0 provisional specification but does not
+requires the LLVM IR version to be 3.4. It uses just the encoding of
+the LLVM used, which explains the `-df` as "de-facto".
+
+So a lot of our modifications revolve
+around being the middle man between `v++` and the SYCL device
+compiler and runtime for the moment, they are not the simple whims of
+the insane! Hopefully...
+
+
+### Extra Notes:
+* The Driver ToolChain, currently makes some assumptions about the
+  `Vitis` installation. For example, it assumes that `v++` is inside
+  Vitis's bin folder and that the lib folder containing `SPIR`
+  builtins that kernels are linked against are in a `/lnx64/lib`
+  directory relative to the bin folders parent.  This can be seen and
+  altered in `XOCC.cpp` if so desired. A future, aim is to allow the
+  user to pass arguments through the compiler to assign these if the
+  assumptions are false. However, in the basic 2018.3 release the
+  standard directory structure that is assumed is correct without
+  alterations.

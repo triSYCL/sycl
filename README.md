@@ -33,7 +33,7 @@ device-driver https://github.com/Xilinx/XRT
 
 This is a fork of the Intel SYCL upstreaming effort
 ([https://github.com/intel/llvm/tree/sycl](https://github.com/intel/llvm/tree/sycl))
-with some alterations made to allow SYCL compilation for Xilinx FPGA's. However,
+with some alterations made to allow SYCL compilation for Xilinx FPGA. However,
 the alterations made shouldn't affect previous targets supported by
 the Intel tool, so in theory it should be possible to use different
 accelerators from different vendors at the same time, including for
@@ -46,6 +46,9 @@ example an Intel FPGA and a Xilinx FPGA.
 - The unchanged get started guide for the SYCL compiler
   [GetStartedGuide.md](sycl/doc/GetStartedGuide.md)
 - Xilinx FPGA Tests Documentation - [Tests.md](sycl/doc/Tests.md)
+  covers a few details about the the
+  additional [xocc_tests](sycl/test/xocc_tests) directory we added to
+  the [sycl/test](sycl/test) directory among some other small details.
 
 The [Build DPC++ toolchain](sycl/doc/GetStartedGuide.md#build-dpc-toolchain) from the
 Intel oneAPI DPC++ SYCL project is a good starting point to get to
@@ -60,13 +63,6 @@ and used in conjunction with the normal compiler commands as demonstrated.
 However, the software requirements for Xilinx FPGA compilation and the compiler
 invocation are not the same and are documented elsewhere.
 
-The [XilinxFPGACompilation.md](sycl/doc/XilinxFPGACompilation.md) documents the
-required software and the main differences when compiling an example for Xilinx
-FPGA when using the branch or some variation of it.
-
-The [Tests.md](sycl/doc/Tests.md) covers a few details about the the
-additional [xocc_tests](sycl/test/xocc_tests) directory we added to
-the [sycl/test](sycl/test) directory among some other small details.
 
 ## License
 See [LICENSE.txt](llvm/LICENSE.TXT) for details.
