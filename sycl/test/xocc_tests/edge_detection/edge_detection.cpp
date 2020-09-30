@@ -1,4 +1,12 @@
-// RUN: true
+// REQUIRES: xocc && opencv4
+
+// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple -o %t.out %s %opencv4_flags
+// RUN: %run_if_hw %ACC_RUN_PLACEHOLDER %t.out %S/data/input/eiffel.bmp
+// RUN: %run_if_hw %ACC_RUN_PLACEHOLDER %t.out %S/data/input/lola.bmp
+// RUN: %run_if_hw %ACC_RUN_PLACEHOLDER %t.out %S/data/input/vase.bmp
+// RUN: %run_if_sw_emu %ACC_RUN_PLACEHOLDER %t.out %S/data/input/eiffel.bmp
+// RUN: %run_if_sw_emu %ACC_RUN_PLACEHOLDER %t.out %S/data/input/lola.bmp
+// RUN: %run_if_sw_emu %ACC_RUN_PLACEHOLDER %t.out %S/data/input/vase.bmp
 
 /*
   Attempt at translating SDAccel Examples edge_detection example to SYCL
@@ -29,7 +37,7 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
 
-#include "../../utilities/device_selectors.hpp"
+#include "../utilities/device_selectors.hpp"
 
 using namespace cl::sycl;
 
@@ -50,9 +58,9 @@ int main(int argc, char* argv[]) {
   // using fixed constexpr values stays more true to the original implementation
   // however you can in theory just use input.rows/cols to support a wider range
   // of image sizes.
-  constexpr auto height = 1895; // input.rows;
-  constexpr auto width = 1024; // input.cols;
-  constexpr auto area = height * width;
+  const size_t height = input.rows;
+  const size_t width = input.cols;
+  const size_t area = height * width;
 
   selector_defines::CompiledForDeviceSelector selector;
   queue q {selector, property::queue::enable_profiling()};
@@ -71,6 +79,7 @@ int main(int argc, char* argv[]) {
   std::cout << "Max Energy = " << ceil(log2((long long)iMax * 2 * 3 * 3)) + 1
             << " Bits \n";
   std::cout << "Image Dimensions: " << input.size() << "\n";
+  std::cout << "Used Size: " << height << "x" << width << " = " << area << "\n";
 
   // mapping the enqueueTask call to a single_task, interested in seeing if a
   // parallel_for without a fixed 1-1-1 mapping is workable on an FPGA though..
@@ -92,10 +101,10 @@ int main(int argc, char* argv[]) {
     // to parallel_fors with local sizes
      [=]() {
       auto gX = xilinx::partition_array<char, 9,
-                xilinx::partition::complete<0>>({-1, 0, 1, -2, 0, 2, -1, 0, 1});
+                xilinx::partition::complete<1>>({-1, 0, 1, -2, 0, 2, -1, 0, 1});
 
       auto gY = xilinx::partition_array<char, 9,
-                xilinx::partition::complete<0>>({1, 2, 1, 0, 0, 0, -1, -2, -1});
+                xilinx::partition::complete<1>>({1, 2, 1, 0, 0, 0, -1, -2, -1});
 
       int magX, magY, gI, pIndex;
 

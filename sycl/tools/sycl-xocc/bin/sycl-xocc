@@ -229,7 +229,7 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
     --save-temps -o "$OUTPUT_FILE_NAME" $LINKER_LIST $@ 
   
   cd $CWD
-  cp -r $LINKER_WD/* .
+  cp -rf $LINKER_WD/* .
 
   # This step is unconnected to the generation of the final xcl binary, it dumps
   # useful debug information from the final generated xcl binary into the temp

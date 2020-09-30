@@ -348,78 +348,6 @@ struct InSPIRation : public ModulePass {
     }
   }
 
-  /// This currently looks through the arguments passed to the SSDM intrinsic
-  /// call and checks the instruction to see if it is an address space cast to
-  /// a generic, if it is, it will take the concrete segment of the cast and
-  /// replace the operand with it. It looks like the below example:
-  ///
-  /// Before:
-  /// %10 = getelementptr inbounds %"struct._ZTSN2cl4sycl6xilinx15partition_
-  ///   arrayIcLm9ENS1_9partition8completeILm0EEEEE.cl::sycl::xilinx::partition_
-  ///   array", %"struct._ZTSN2cl4sycl6xilinx15partition_arrayIcLm9ENS1_9
-  ///   partition8completeILm0EEEEE.cl::sycl::xilinx::partition_array"* %1,
-  ///   i64 0, i32 0, i64 0
-  /// %11 = addrspacecast i8* %10 to i8 addrspace(4)*
-  /// call spir_func void (...) @_ssdm_SpecArrayPartition(i8 addrspace(4)* %11,
-  ///   i64 0, i8* getelementptr inbounds ([9 x i8], [9 x i8]* @.str, i64 0,
-  ///   i64 0), i32 0, i8* getelementptr inbounds ([1 x i8], [1 x i8]* @.str.2,
-  ///   i64 0, i64 0)) #4
-  ///
-  /// After:
-  /// %10 = getelementptr inbounds %"struct._ZTSN2cl4sycl6xilinx15partition_
-  ///   arrayIcLm9ENS1_9partition8completeILm0EEEEE.cl::sycl::xilinx::partition
-  ///   _array", %"struct._ZTSN2cl4sycl6xilinx15partition_arrayIcLm9ENS1_9
-  ///   partition8completeILm0EEEEE.cl::sycl::xilinx::partition_array"* %1,
-  ///   i64 0, i32 0, i64 0
-  ///  call spir_func void (...) @_ssdm_SpecArrayPartition(i8* %10, i64 0,
-  ///   i8* getelementptr inbounds ([9 x i8], [9 x i8]* @.str, i64 0, i64 0),
-  ///   i32 0, i8* getelementptr inbounds ([1 x i8], [1 x i8]* @.str.2, i64 0,
-  ///   i64 0)) #4
-  ///
-  /// It's simply collapsing away the cast right now, this doesn't consider the
-  /// possibility of interactions with other possible address space casts that
-  /// depend on it (we simply replace all uses with the non-geneirc variant).
-  /// For now we hope that these are erased or eliminated by either of the AS
-  /// Fixer passes or DCE passes.
-  ///
-  /// Note: Unsure how robust this is with the small sample size we currently
-  /// have to test against. So it's a WIP. If the situation becomes untenable
-  /// we can likely revert the accessor class back to it's prior form by
-  /// reverting this pull: https://github.com/intel/llvm/pull/348 (commit:
-  /// 609999c4e1aeca05aff010ce5e2eb08dde08fd69). This may cause address space
-  /// leakage however, but should result in more overall address space
-  /// consistency/stability due to the addition of more concrete address spaces.
-  void handleSpecArrayPartition(CallInst *CI) {
-    for (Use &Op : CI->operands()) {
-      if (Op->getType()->isPointerTy()) {
-        if (auto *ASC = dyn_cast<AddrSpaceCastInst>(Op)) {
-          if (ASC->getDestAddressSpace() == /*Generic AS*/ 4) {
-            Op.set(nullptr);
-            Op.set(ASC->getPointerOperand());
-          }
-        }
-      }
-    }
-  }
-
-  /// SSDM intrinsics are black boxes, the InferAddressSpace pass will not touch
-  /// them (this is in part due to the fact it doesn't deal with Calls and in
-  /// part because SSDMs are declared with no implementation and no arguments),
-  /// this will result in left over generic casts. This function is here
-  /// to deal with the cases of the left over generics caused by SSDM intrinsics
-  /// as if they're left in the compilation will fail.
-  ///
-  /// In the future if we ever define an LLVM target backend similar to AMDGPU
-  /// and we end up with a lot of these edge cases we could move this to the
-  /// InferAddressSpaces pass and teach it to deal with these SSDM calls as
-  /// Intrinsics.
-  void ssdmAddressSpaceFix(Function &F) {
-    for (auto &I : instructions(F))
-      if (auto *Call = dyn_cast<CallInst>(&I))
-        if (Call->getIntrinsicID() == Intrinsic::sideeffect)
-            handleSpecArrayPartition(Call);
-  }
-
   // Hopeful list/probably impractical asks for xocc:
   // 1) Make XML generator/reader a little kinder towards arguments with no
   //   names if possible
@@ -486,7 +414,6 @@ struct InSPIRation : public ModulePass {
         // It doesn't require application to the SPIR intrinsics as we're
         // linking against the HLS SPIR library, which is already conformant.
         giveNameToArguments(F);
-        ssdmAddressSpaceFix(F);
       } else if (isTransitiveNonIntrinsicFunc(F)
                  && F.isDeclaration()) {
         // push back intrinsics to make sure we handle naming after changing the

@@ -66,10 +66,10 @@ int main(int argc, char* argv[]) {
 
       cgh.single_task<xilinx::reqd_work_group_size<1, 1, 1, krnl_sobel>>([=] {
         xilinx::partition_array
-          <char, 9,xilinx::partition::complete<0>> gX
+          <char, 9,xilinx::partition::complete<1>> gX
           { {-1, 0, 1, -2, 0, 2, -1, 0, 1} };
         xilinx::partition_array
-          <char, 9,xilinx::partition::complete<0>> gY
+          <char, 9,xilinx::partition::complete<1>> gY
           { {1, 2, 1, 0, 0, 0, -1, -2, -1} };
 
       for (size_t x = 1; x < width - 1; ++x) {
