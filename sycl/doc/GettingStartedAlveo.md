@@ -130,18 +130,6 @@ distributions like Ubuntu 20.04, use the batch-mode version:
 ```
 and select `Vitis`.
 
-FIXME
-Ask for a 30 day trial license for example. It puts some information
-into your `~/.Xilinx`.
-
-FIXME
-Vitis comes with some old useless pieces of XRT to
-generate/instrospect the bitstream containers and still wants to use
-them... So we need to patch SDx to use the right XRT by executing:
-```bash
-sudo ln -s $XILINX_XRT /opt/xilinx/SDx/2019.1/xrt/xrt-2.1.0-ubuntu19.04
-```
-
 
 ## Install the target platform for the FPGA board
 
