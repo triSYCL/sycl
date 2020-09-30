@@ -1,13 +1,13 @@
-=============================
-Architecture of SYCL compiler
-=============================
+========================================
+Architecture of the Xilinx SYCL compiler
+========================================
 
 .. section-numbering::
 
 The SYCL compilation workflow is composed by 2 parts, the Host and the Device programs. Despite there is only one source file and one executable, these two compilations are completely different.
 
 
-.. figure:: images/SYCL_compile_architecture.svg
+.. figure:: images/Xilinx_SYCL_compile_architecture.svg
    :width: 100%
    :alt: Low-level compilation workflow in SYCL
    :name: Figure 1
