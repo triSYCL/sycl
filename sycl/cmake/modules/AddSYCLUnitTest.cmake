@@ -37,10 +37,11 @@ macro(add_sycl_unittest test_dirname link_variant)
       ${SYCL_SOURCE_DIR}/unittests/
     )
   # LLVM gtest uses LLVM utilities that require C++-14
+  # but Xilinx is using some extensions relying on C++20
   # CXX_STANDARD_REQUIRED makes CXX_STANDARD a hard requirement.
   set_target_properties(${test_dirname}
     PROPERTIES
-      CXX_STANDARD 14
+      CXX_STANDARD 20
       CXX_STANDARD_REQUIRED ON
     )
 endmacro()
