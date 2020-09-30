@@ -216,33 +216,43 @@ configurable with an FPGA!).
 Then after rebooting, you can check with a pre-compiled FPGA program
 provided by the target platform that the board is working correctly
 with:
-FIXME
 ```bash
 sudo /opt/xilinx/xrt/bin/xbutil validate
 INFO: Found 1 cards
 
-INFO: Validating card[0]: xilinx_u200_xdma_201830_1
-INFO: Checking PCIE link status: PASSED
-INFO: Starting verify kernel test: 
-INFO: verify kernel test PASSED
-INFO: Starting DMA test
-Host -> PCIe -> FPGA write bandwidth = 11127.5 MB/s
-Host <- PCIe <- FPGA read bandwidth = 12147.9 MB/s
-INFO: DMA test PASSED
-INFO: Starting DDR bandwidth test: ..........
-Maximum throughput: 47665.777344 MB/s
-INFO: DDR bandwidth test PASSED
-INFO: Starting P2P test
+INFO: Validating card[0]: xilinx_u200_xdma_201830_2
+INFO: == Starting Kernel version check: 
+INFO: == Kernel version check PASSED
+INFO: == Starting AUX power connector check: 
+INFO: == AUX power connector check PASSED
+INFO: == Starting PCIE link check: 
+INFO: == PCIE link check PASSED
+INFO: == Starting SC firmware version check: 
+INFO: == SC firmware version check PASSED
+INFO: == Starting verify kernel test: 
+INFO: == verify kernel test PASSED
+INFO: == Starting DMA test: 
+Host -> PCIe -> FPGA write bandwidth = 9041.323883 MB/s
+Host <- PCIe <- FPGA read bandwidth = 11586.036789 MB/s
+INFO: == DMA test PASSED
+INFO: == Starting device memory bandwidth test: 
+...........
+Maximum throughput: 47652 MB/s
+INFO: == device memory bandwidth test PASSED
+INFO: == Starting PCIE peer-to-peer test: 
 P2P BAR is not enabled. Skipping validation
-INFO: P2P test PASSED
-INFO: Starting M2M test
-bank0 -> bank1 M2M bandwidth: 12089.7 MB/s	
-bank0 -> bank2 M2M bandwidth: 12064.7 MB/s	
-bank0 -> bank3 M2M bandwidth: 12084 MB/s	
-bank1 -> bank2 M2M bandwidth: 12064.1 MB/s	
-bank1 -> bank3 M2M bandwidth: 12066.9 MB/s	
-bank2 -> bank3 M2M bandwidth: 12125.8 MB/s	
-INFO: M2M test PASSED
+INFO: == PCIE peer-to-peer test SKIPPED
+INFO: == Starting memory-to-memory DMA test: 
+bank0 -> bank1 M2M bandwidth: 11658.6 MB/s	
+bank0 -> bank2 M2M bandwidth: 11780.4 MB/s	
+bank0 -> bank3 M2M bandwidth: 11757.1 MB/s	
+bank1 -> bank2 M2M bandwidth: 11781.5 MB/s	
+bank1 -> bank3 M2M bandwidth: 11734.5 MB/s	
+bank2 -> bank3 M2M bandwidth: 11709.8 MB/s	
+INFO: == memory-to-memory DMA test PASSED
+INFO: == Starting host memory bandwidth test: 
+Host_mem is not available. Skipping validation
+INFO: == host memory bandwidth test SKIPPED
 INFO: Card[0] validated successfully.
 
 INFO: All cards validated successfully.
