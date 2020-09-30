@@ -31,7 +31,7 @@ the insane! Hopefully...
 
 ## Getting started guide using Ubuntu 20.04, Vitis 2020.1 and Alveo U200
 
-Look at [getting started with an Alveo U200](GettingStartedAlveo.md).
+Look at [getting started with an Alveo U200](GettingStartedXilinxFPGA.md).
 
 ## Software requirements
 

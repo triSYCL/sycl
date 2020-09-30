@@ -41,10 +41,10 @@ example an Intel FPGA and a Xilinx FPGA.
 
 ## SYCL Related Documentation
 
-- Basic get started guide for the SYCL compiler
-  [GetStartedGuide.md](sycl/doc/GetStartedGuide.md)
 - Xilinx FPGA get started guide for the SYCL compiler
-  [XilinxFPGACompilation.md](sycl/doc/XilinxFPGACompilation.md)
+  [GettingStartedXilinxFPGA.md](sycl/doc/GettingStartedXilinxFPGA.md)
+- The unchanged get started guide for the SYCL compiler
+  [GetStartedGuide.md](sycl/doc/GetStartedGuide.md)
 - Xilinx FPGA Tests Documentation - [Tests.md](sycl/doc/Tests.md)
 
 The [Build DPC++ toolchain](sycl/doc/GetStartedGuide.md#build-dpc-toolchain) from the
