@@ -1,4 +1,4 @@
-# Experimental melting pot of Intel oneAPI DPC++ SYCL* up-stream candidate and triSYCL
+# SYCL for Vitis 2020.1: experimental melting pot with Intel oneAPI DPC++ SYCL and triSYCL for Xilinx FPGA
 
 ## Introduction
 
@@ -8,11 +8,11 @@ current open-source implementations of the SYCL standard
 provide a strong modern single-source C++ solution for heterogeneous
 computing based on Clang*/LLVM*.
 
-All this is an experimental WIP open-source research project but might
-be interesting for anyone versed into system-wide modern C++20 and
-heterogeneous computing involving FPGA, GPU, DSP, other accelerators
-or just CPU from various vendors at the same time from the same
-program.
+All this is an experimental work-in-progress open-source research
+project but might be interesting for anyone versed into system-wide
+modern C++20 and heterogeneous computing involving FPGA, GPU, DSP,
+other accelerators or just CPU from various vendors at the same time
+in the same program.
 
 ## What is SYCL
 
@@ -36,20 +36,25 @@ This is a fork of the Intel SYCL upstreaming effort
 with some alterations made to allow SYCL compilation for Xilinx FPGA's. However,
 the alterations made shouldn't affect previous targets supported by
 the Intel tool, so in theory it should be possible to use different
-accelerators from different vendors at the same time.
+accelerators from different vendors at the same time, including for
+example an Intel FPGA and a Xilinx FPGA.
 
 ## SYCL Related Documentation
 
-- Basic get started guide for the SYCL compiler - [
-GetStartedGuide.md](sycl/doc/GetStartedGuide.md)
-- Xilinx FPGA get started guide for the SYCL compiler - [XilinxFPGACompilation.md](sycl/doc/XilinxFPGACompilation.md)
+- Basic get started guide for the SYCL compiler
+  [GetStartedGuide.md](sycl/doc/GetStartedGuide.md)
+- Xilinx FPGA get started guide for the SYCL compiler
+  [XilinxFPGACompilation.md](sycl/doc/XilinxFPGACompilation.md)
 - Xilinx FPGA Tests Documentation - [Tests.md](sycl/doc/Tests.md)
 
-The [Build DPC++ toolchain](sycl/doc/GetStartedGuide.md#build-dpc-toolchain)
-from the Intel SYCL project is a good starting point to get to grips with
-building the compiler and what a basic SYCL example looks like. It also
-showcases the requirements to get the project and examples running with the
-Intel OpenCL runtime or other back-ends.
+The [Build DPC++ toolchain](sycl/doc/GetStartedGuide.md#build-dpc-toolchain) from the
+Intel oneAPI DPC++ SYCL project is a good starting point to get to
+grips with building the compiler and what a basic SYCL example looks
+like.
+
+It also showcases the requirements to get the project and examples
+running with the Intel OpenCL runtime or other back-ends.
+
 This fork of the project can be compiled the same way
 and used in conjunction with the normal compiler commands as demonstrated.
 However, the software requirements for Xilinx FPGA compilation and the compiler
