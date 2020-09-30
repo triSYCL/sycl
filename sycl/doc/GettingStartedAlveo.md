@@ -265,7 +265,7 @@ For details about LLVM's CMake configuration see https://llvm.org/docs/CMake.htm
 but it is possible to use the simpler Python scripts to build the SYCL
 environment:
 ```
-# Pick some place where SYCL has to be compiled:
+# Pick some place where SYCL has to be compiled, such as:
 SYCL_HOME=~/sycl_workspace
 mkdir $SYCL_HOME
 cd $SYCL_HOME
@@ -277,7 +277,6 @@ python $SYCL_HOME/llvm/buildbot/compile.py
 ## Compiling and running a SYCL application
 
 The typical environment is setup with something like
-FIXME
 ```bash
 # The place where SYCL has been compiled:
 SYCL_HOME=~/sycl_workspace
@@ -286,22 +285,22 @@ XILINX_VERSION=2020.1
 export XILINX_PLATFORM=xilinx_u200_xdma_201830_2
 # Where all the Xilinx tools are
 XILINX_ROOT=/opt/xilinx
+# Where the SYCL compiler binaries are:
+SYCL_BIN_DIR=$SYCL_HOME/llvm/build/bin
 export XILINX_XRT=$XILINX_ROOT/xrt
 export XILINX_VITIS=$XILINX_ROOT/Vitis/$XILINX_VERSION
 # For some tests? FIXME
 export XILINX_SDX=$XILINX_VITIS
 export XILINX_VIVADO=$XILINX_ROOT/Vivado/$XILINX_VERSION
-PATH=$PATH:$XILINX_XRT/bin:$XILINX_SDX/bin:$XILINX_VIVADO/bin
-# Update to the real place the SYCL compiler working tree is:
-SYCL_BIN_DIR=$SYCL_HOME/llvm/bin
-PATH=$PATH:$SYCL_BIN_DIR:$XILINX_XRT/bin:/opt/xilinx/Vitis/2020.1/bin:/opt/xilinx/Vivado/2020.1/bin
-export LD_LIBRARY_PATH=$XILINX_XRT/lib:$SYCL_HOME/llvm/build/lib:$LD_LIBRARY_PATH
+# Add the various tools in the PATH
+PATH=$PATH:$SYCL_BIN_DIR:$XILINX_XRT/bin:$XILINX_SDX/bin:$XILINX_VIVADO/bin
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$XILINX_XRT/lib:$SYCL_HOME/llvm/build/lib
 # Setup LIBRARY_PATH used in hw and hw_emu mode
 # Ask ldconfig about the list of system library directories
 export LIBRARY_PATH=$(ldconfig --verbose 2>/dev/null | grep ':$' | tr -d '\n')
 # Setup device to be used in simulation mode.
 # Instead of running emconfigutil all over the place with
-emconfig.json everywhere, put once at a common place:
+# emconfig.json everywhere, put once at a common place:
 export EMCONFIG_PATH=~/.Xilinx
 emconfigutil --platform $XILINX_PLATFORM --od $EMCONFIG_PATH --save-temps
 ```
@@ -351,12 +350,12 @@ To run an example from the provided examples:
 
 - with real hardware execution on FPGA:
   ```bash
-  # Instruct the compiler and runtime to use real FPGA hardware execution
+  # Instruct the compiler to use real FPGA hardware execution
   export XCL_EMULATION_MODE=hw
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
     parallel_for_ND_range.cpp -o parallel_for_ND_range
-  # Unset the variable at execution time to have real execution
+  # Do not forget about unset the variable for real execution
   unset XCL_EMULATION_MODE
   # Run on the real FPGA board
   ./parallel_for_ND_range
@@ -395,7 +394,7 @@ change, only the environment ``XCL_EMULATION_MODE`` variable.
 `check-sycl-xocc-jmax` will run the tests on as many cores as is
 available on the system. But for `hw` and `hw_emu` execution mode,
 this usually means the system will run out of RAM even with 64G so
-`check-sycl-xocc-j` should be used to run only 4 tests in
+`check-sycl-xocc-j4` should be used to run only 4 tests in
 parallel.
 
 
