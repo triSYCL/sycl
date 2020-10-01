@@ -1,4 +1,8 @@
-// RUN: true
+// REQUIRES: xocc
+
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+// RUN: %ACC_RUN_PLACEHOLDER %t.out
+
 
 /*
   The main point of the test is to check if you can name SYCL kernels in

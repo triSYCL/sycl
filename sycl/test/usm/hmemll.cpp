@@ -1,5 +1,13 @@
-// RUN: %clang -std=c++17 -fsycl %s -o %t1.out -lstdc++ -lOpenCL -lsycl
+// XFAIL: cuda
+// piextUSM*Alloc functions for CUDA are not behaving as described in
+// https://github.com/intel/llvm/blob/sycl/sycl/doc/extensions/USM/USM.adoc
+// https://github.com/intel/llvm/blob/sycl/sycl/doc/extensions/USM/cl_intel_unified_shared_memory.asciidoc
+//
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t1.out
+// RUN: env SYCL_DEVICE_TYPE=HOST %t1.out
 // RUN: %CPU_RUN_PLACEHOLDER %t1.out
+// RUN: %GPU_RUN_PLACEHOLDER %t1.out
+
 //==------------------- hmemll.cpp - Host Memory Linked List test ----------==//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -25,14 +33,16 @@ class foo;
 int main() {
   queue q;
   auto ctxt = q.get_context();
-  Node *h_head = nullptr;
-  Node *h_cur = nullptr;
+  auto dev = q.get_device();
 
-  h_head = (Node *)malloc_host(sizeof(Node), ctxt);
+  if (!dev.get_info<info::device::usm_host_allocations>())
+    return 0;
+
+  Node *h_head = (Node *)malloc_host(sizeof(Node), ctxt);
   if (h_head == nullptr) {
     return -1;
   }
-  h_cur = h_head;
+  Node *h_cur = h_head;
 
   for (int i = 0; i < numNodes; i++) {
     h_cur->Num = i * 2;
@@ -65,7 +75,7 @@ int main() {
   for (int i = 0; i < numNodes; i++) {
     const int want = i * 4 + 1;
     if (h_cur->Num != want) {
-      return -1;
+      return -2;
     }
     Node *old = h_cur;
     h_cur = h_cur->pNext;

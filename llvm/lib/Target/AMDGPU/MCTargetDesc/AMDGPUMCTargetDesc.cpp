@@ -61,15 +61,21 @@ static MCRegisterInfo *createAMDGPUMCRegisterInfo(const Triple &TT) {
   if (TT.getArch() == Triple::r600)
     InitR600MCRegisterInfo(X, 0);
   else
-    InitAMDGPUMCRegisterInfo(X, 0);
+    InitAMDGPUMCRegisterInfo(X, AMDGPU::PC_REG);
+  return X;
+}
+
+MCRegisterInfo *llvm::createGCNMCRegisterInfo(AMDGPUDwarfFlavour DwarfFlavour) {
+  MCRegisterInfo *X = new MCRegisterInfo();
+  InitAMDGPUMCRegisterInfo(X, AMDGPU::PC_REG, DwarfFlavour);
   return X;
 }
 
 static MCSubtargetInfo *
 createAMDGPUMCSubtargetInfo(const Triple &TT, StringRef CPU, StringRef FS) {
   if (TT.getArch() == Triple::r600)
-    return createR600MCSubtargetInfoImpl(TT, CPU, FS);
-  return createAMDGPUMCSubtargetInfoImpl(TT, CPU, FS);
+    return createR600MCSubtargetInfoImpl(TT, CPU, /*TuneCPU*/ CPU, FS);
+  return createAMDGPUMCSubtargetInfoImpl(TT, CPU, /*TuneCPU*/ CPU, FS);
 }
 
 static MCInstPrinter *createAMDGPUMCInstPrinter(const Triple &T,
@@ -134,7 +140,7 @@ static MCInstrAnalysis *createAMDGPUMCInstrAnalysis(const MCInstrInfo *Info) {
   return new AMDGPUMCInstrAnalysis(Info);
 }
 
-extern "C" void LLVMInitializeAMDGPUTargetMC() {
+extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAMDGPUTargetMC() {
 
   TargetRegistry::RegisterMCInstrInfo(getTheGCNTarget(), createAMDGPUMCInstrInfo);
   TargetRegistry::RegisterMCInstrInfo(getTheAMDGPUTarget(), createR600MCInstrInfo);

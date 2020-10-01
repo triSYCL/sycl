@@ -16,6 +16,7 @@
 
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/TableGen/Record.h"
@@ -58,7 +59,7 @@ struct CodeGenSchedRW {
       HasVariants(false), IsVariadic(false), IsSequence(false) {}
   CodeGenSchedRW(unsigned Idx, Record *Def)
     : Index(Idx), TheDef(Def), IsAlias(false), IsVariadic(false) {
-    Name = Def->getName();
+    Name = std::string(Def->getName());
     IsRead = Def->isSubClassOf("SchedRead");
     HasVariants = Def->isSubClassOf("SchedVariant");
     if (HasVariants)
@@ -358,8 +359,7 @@ public:
   OpcodeGroup(OpcodeGroup &&Other) = default;
 
   void addOpcode(const Record *Opcode) {
-    assert(std::find(Opcodes.begin(), Opcodes.end(), Opcode) == Opcodes.end() &&
-           "Opcode already in set!");
+    assert(!llvm::is_contained(Opcodes, Opcode) && "Opcode already in set!");
     Opcodes.push_back(Opcode);
   }
 

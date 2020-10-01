@@ -54,13 +54,6 @@ class FPR<bits<5> num, string n> : PPCReg<n> {
   let HWEncoding{4-0} = num;
 }
 
-// QFPR - One of the 32 256-bit floating-point vector registers (used for QPX)
-class QFPR<FPR SubReg, string n> : PPCReg<n> {
-  let HWEncoding = SubReg.HWEncoding;
-  let SubRegs = [SubReg];
-  let SubRegIndices = [sub_64];
-}
-
 // VF - One of the 32 64-bit floating-point subregisters of the vector
 // registers (used by VSX).
 class VF<bits<5> num, string n> : PPCReg<n> {
@@ -132,12 +125,6 @@ foreach Index = 0-31 in {
                  DwarfRegNum<[!add(Index, 77), !add(Index, 77)]>;
 }
 
-// QPX Floating-point registers
-foreach Index = 0-31 in {
-  def QF#Index : QFPR<!cast<FPR>("F"#Index), "q"#Index>,
-                 DwarfRegNum<[!add(Index, 32), !add(Index, 32)]>;
-}
-
 // Vector registers
 foreach Index = 0-31 in {
   def V#Index : VR<!cast<VF>("VF"#Index), "v"#Index>,
@@ -156,7 +143,7 @@ foreach Index = 32-63 in {
   def VSX#Index : VSXReg<Index, "vs"#Index>;
 }
 
-// The reprsentation of r0 when treated as the constant 0.
+// The representation of r0 when treated as the constant 0.
 def ZERO  : GPR<0, "0">,    DwarfRegAlias<R0>;
 def ZERO8 : GP8<ZERO, "0">, DwarfRegAlias<X0>;
 
@@ -253,15 +240,14 @@ def RM: PPCReg<"**ROUNDING MODE**">;
 /// Register classes
 // Allocate volatiles first
 // then nonvolatiles in reverse order since stmw/lmw save from rN to r31
-def GPRC : RegisterClass<"PPC", [i32], 32, (add (sequence "R%u", 2, 12),
-                                                (sequence "R%u", 30, 13),
-                                                R31, R0, R1, FP, BP)> {
+def GPRC : RegisterClass<"PPC", [i32,f32], 32, (add (sequence "R%u", 2, 12),
+                                                    (sequence "R%u", 30, 13),
+                                                    R31, R0, R1, FP, BP)> {
   // On non-Darwin PPC64 systems, R2 can be allocated, but must be restored, so
   // put it at the end of the list.
   let AltOrders = [(add (sub GPRC, R2), R2)];
   let AltOrderSelect = [{
-    const PPCSubtarget &S = MF.getSubtarget<PPCSubtarget>();
-    return S.isPPC64() && S.isSVR4ABI();
+    return MF.getSubtarget<PPCSubtarget>().is64BitELFABI();
   }];
 }
 
@@ -272,21 +258,19 @@ def G8RC : RegisterClass<"PPC", [i64], 64, (add (sequence "X%u", 2, 12),
   // put it at the end of the list.
   let AltOrders = [(add (sub G8RC, X2), X2)];
   let AltOrderSelect = [{
-    const PPCSubtarget &S = MF.getSubtarget<PPCSubtarget>();
-    return S.isPPC64() && S.isSVR4ABI();
+    return MF.getSubtarget<PPCSubtarget>().is64BitELFABI();
   }];
 }
 
 // For some instructions r0 is special (representing the value 0 instead of
 // the value in the r0 register), and we use these register subclasses to
 // prevent r0 from being allocated for use by those instructions.
-def GPRC_NOR0 : RegisterClass<"PPC", [i32], 32, (add (sub GPRC, R0), ZERO)> {
+def GPRC_NOR0 : RegisterClass<"PPC", [i32,f32], 32, (add (sub GPRC, R0), ZERO)> {
   // On non-Darwin PPC64 systems, R2 can be allocated, but must be restored, so
   // put it at the end of the list.
   let AltOrders = [(add (sub GPRC_NOR0, R2), R2)];
   let AltOrderSelect = [{
-    const PPCSubtarget &S = MF.getSubtarget<PPCSubtarget>();
-    return S.isPPC64() && S.isSVR4ABI();
+    return MF.getSubtarget<PPCSubtarget>().is64BitELFABI();
   }];
 }
 
@@ -295,16 +279,13 @@ def G8RC_NOX0 : RegisterClass<"PPC", [i64], 64, (add (sub G8RC, X0), ZERO8)> {
   // put it at the end of the list.
   let AltOrders = [(add (sub G8RC_NOX0, X2), X2)];
   let AltOrderSelect = [{
-    const PPCSubtarget &S = MF.getSubtarget<PPCSubtarget>();
-    return S.isPPC64() && S.isSVR4ABI();
+    return MF.getSubtarget<PPCSubtarget>().is64BitELFABI();
   }];
 }
 
 def SPERC : RegisterClass<"PPC", [f64], 64, (add (sequence "S%u", 2, 12),
                                                 (sequence "S%u", 30, 13),
                                                 S31, S0, S1)>;
-
-def SPE4RC : RegisterClass<"PPC", [f32], 32, (add GPRC)>;
 
 // Allocate volatiles first, then non-volatiles in reverse order. With the SVR4
 // ABI the size of the Floating-point register save area is determined by the
@@ -349,16 +330,6 @@ def SPILLTOVSRRC : RegisterClass<"PPC", [i64, f64], 64, (add G8RC, (sub VSFRC,
 // Register class for single precision scalars in VSX registers
 def VSSRC : RegisterClass<"PPC", [f32], 32, (add VSFRC)>;
 
-// For QPX
-def QFRC : RegisterClass<"PPC", [v4f64], 256, (add (sequence "QF%u", 0, 13),
-                                                (sequence "QF%u", 31, 14))>;
-def QSRC : RegisterClass<"PPC", [v4f32], 128, (add QFRC)>;
-def QBRC : RegisterClass<"PPC", [v4i1], 256, (add QFRC)> {
-  // These are actually stored as floating-point values where a positive
-  // number is true and anything else (including NaN) is false.
-  let Size = 256;
-}
-
 def CRBITRC : RegisterClass<"PPC", [i1], 32,
   (add CR2LT, CR2GT, CR2EQ, CR2UN,
        CR3LT, CR3GT, CR3EQ, CR3UN,
@@ -369,11 +340,23 @@ def CRBITRC : RegisterClass<"PPC", [i1], 32,
        CR1LT, CR1GT, CR1EQ, CR1UN,
        CR0LT, CR0GT, CR0EQ, CR0UN)> {
   let Size = 32;
+  let AltOrders = [(sub CRBITRC, CR2LT, CR2GT, CR2EQ, CR2UN, CR3LT, CR3GT,
+                        CR3EQ, CR3UN, CR4LT, CR4GT, CR4EQ, CR4UN)];
+  let AltOrderSelect = [{
+    return MF.getSubtarget<PPCSubtarget>().isELFv2ABI() &&
+           MF.getInfo<PPCFunctionInfo>()->isNonVolatileCRDisabled();
+  }];
 }
 
-def CRRC : RegisterClass<"PPC", [i32], 32, (add CR0, CR1, CR5, CR6,
-                                                CR7, CR2, CR3, CR4)>;
-
+def CRRC : RegisterClass<"PPC", [i32], 32,
+  (add CR0, CR1, CR5, CR6,
+       CR7, CR2, CR3, CR4)> {
+  let AltOrders = [(sub CRRC, CR2, CR3, CR4)];
+  let AltOrderSelect = [{
+    return MF.getSubtarget<PPCSubtarget>().isELFv2ABI() &&
+           MF.getInfo<PPCFunctionInfo>()->isNonVolatileCRDisabled();
+  }];
+}
 // The CTR registers are not allocatable because they're used by the
 // decrement-and-branch instructions, and thus need to stay live across
 // multiple basic blocks.

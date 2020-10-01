@@ -128,8 +128,8 @@ class SubtargetEmitter {
 
 public:
   SubtargetEmitter(RecordKeeper &R, CodeGenTarget &TGT)
-    : TGT(TGT), Records(R), SchedModels(TGT.getSchedModels()),
-      Target(TGT.getName()) {}
+      : TGT(TGT), Records(R), SchedModels(TGT.getSchedModels()),
+        Target(TGT.getName()) {}
 
   void run(raw_ostream &o);
 };
@@ -267,12 +267,15 @@ SubtargetEmitter::CPUKeyValues(raw_ostream &OS,
   for (Record *Processor : ProcessorList) {
     StringRef Name = Processor->getValueAsString("Name");
     RecVec FeatureList = Processor->getValueAsListOfDefs("Features");
+    RecVec TuneFeatureList = Processor->getValueAsListOfDefs("TuneFeatures");
 
     // Emit as { "cpu", "description", 0, { f1 , f2 , ... fn } },
     OS << " { "
        << "\"" << Name << "\", ";
 
     printFeatureMask(OS, FeatureList, FeatureMap);
+    OS << ", ";
+    printFeatureMask(OS, TuneFeatureList, FeatureMap);
 
     // Emit the scheduler model pointer.
     const std::string &ProcModelName =
@@ -396,8 +399,8 @@ EmitStageAndOperandCycleData(raw_ostream &OS,
        << "namespace " << Name << "FU {\n";
 
     for (unsigned j = 0, FUN = FUs.size(); j < FUN; ++j)
-      OS << "  const unsigned " << FUs[j]->getName()
-         << " = 1 << " << j << ";\n";
+      OS << "  const InstrStage::FuncUnits " << FUs[j]->getName()
+         << " = 1ULL << " << j << ";\n";
 
     OS << "} // end namespace " << Name << "FU\n";
 
@@ -460,7 +463,8 @@ EmitStageAndOperandCycleData(raw_ostream &OS,
       std::string ItinStageString;
       unsigned NStages = 0;
       if (ItinData)
-        FormItineraryStageString(Name, ItinData, ItinStageString, NStages);
+        FormItineraryStageString(std::string(Name), ItinData, ItinStageString,
+                                 NStages);
 
       // Get string and operand cycle count
       std::string ItinOperandCycleString;
@@ -470,7 +474,7 @@ EmitStageAndOperandCycleData(raw_ostream &OS,
         FormItineraryOperandCycleString(ItinData, ItinOperandCycleString,
                                         NOperandCycles);
 
-        FormItineraryBypassString(Name, ItinData, ItinBypassString,
+        FormItineraryBypassString(std::string(Name), ItinData, ItinBypassString,
                                   NOperandCycles);
       }
 
@@ -1057,6 +1061,7 @@ void SubtargetEmitter::GenSchedClassTables(const CodeGenProcModel &ProcModel,
         LLVM_DEBUG(dbgs() << ProcModel.ModelName
                           << " does not have resources for class " << SC.Name
                           << '\n');
+        SCDesc.NumMicroOps = MCSchedClassDesc::InvalidNumMicroOps;
       }
     }
     // Sum resources across all operand writes.
@@ -1690,7 +1695,8 @@ void SubtargetEmitter::ParseFeaturesFunction(raw_ostream &OS,
      << "// subtarget options.\n"
      << "void llvm::";
   OS << Target;
-  OS << "Subtarget::ParseSubtargetFeatures(StringRef CPU, StringRef FS) {\n"
+  OS << "Subtarget::ParseSubtargetFeatures(StringRef CPU, StringRef TuneCPU, "
+     << "StringRef FS) {\n"
      << "  LLVM_DEBUG(dbgs() << \"\\nFeatures:\" << FS);\n"
      << "  LLVM_DEBUG(dbgs() << \"\\nCPU:\" << CPU << \"\\n\\n\");\n";
 
@@ -1699,7 +1705,7 @@ void SubtargetEmitter::ParseFeaturesFunction(raw_ostream &OS,
     return;
   }
 
-  OS << "  InitMCProcessorInfo(CPU, FS);\n"
+  OS << "  InitMCProcessorInfo(CPU, TuneCPU, FS);\n"
      << "  const FeatureBitset& Bits = getFeatureBits();\n";
 
   for (Record *R : Features) {
@@ -1728,25 +1734,29 @@ void SubtargetEmitter::emitGenMCSubtargetInfo(raw_ostream &OS) {
      << "    const MCInst *MI, unsigned CPUID) {\n";
   emitSchedModelHelpersImpl(OS, /* OnlyExpandMCPredicates */ true);
   OS << "}\n";
-  OS << "} // end of namespace " << Target << "_MC\n\n";
+  OS << "} // end namespace " << Target << "_MC\n\n";
 
   OS << "struct " << Target
      << "GenMCSubtargetInfo : public MCSubtargetInfo {\n";
-  OS << "  " << Target << "GenMCSubtargetInfo(const Triple &TT, \n"
-     << "    StringRef CPU, StringRef FS, ArrayRef<SubtargetFeatureKV> PF,\n"
+  OS << "  " << Target << "GenMCSubtargetInfo(const Triple &TT,\n"
+     << "    StringRef CPU, StringRef TuneCPU, StringRef FS,\n"
+     << "    ArrayRef<SubtargetFeatureKV> PF,\n"
      << "    ArrayRef<SubtargetSubTypeKV> PD,\n"
      << "    const MCWriteProcResEntry *WPR,\n"
      << "    const MCWriteLatencyEntry *WL,\n"
      << "    const MCReadAdvanceEntry *RA, const InstrStage *IS,\n"
      << "    const unsigned *OC, const unsigned *FP) :\n"
-     << "      MCSubtargetInfo(TT, CPU, FS, PF, PD,\n"
+     << "      MCSubtargetInfo(TT, CPU, TuneCPU, FS, PF, PD,\n"
      << "                      WPR, WL, RA, IS, OC, FP) { }\n\n"
      << "  unsigned resolveVariantSchedClass(unsigned SchedClass,\n"
      << "      const MCInst *MI, unsigned CPUID) const override {\n"
      << "    return " << Target << "_MC"
      << "::resolveVariantSchedClassImpl(SchedClass, MI, CPUID); \n";
   OS << "  }\n";
+  if (TGT.getHwModes().getNumModeIds() > 1)
+    OS << "  unsigned getHwMode() const override;\n";
   OS << "};\n";
+  EmitHwModeCheck(Target + "GenMCSubtargetInfo", OS);
 }
 
 void SubtargetEmitter::EmitMCInstrAnalysisPredicateFunctions(raw_ostream &OS) {
@@ -1812,8 +1822,9 @@ void SubtargetEmitter::run(raw_ostream &OS) {
 
   OS << "\nstatic inline MCSubtargetInfo *create" << Target
      << "MCSubtargetInfoImpl("
-     << "const Triple &TT, StringRef CPU, StringRef FS) {\n";
-  OS << "  return new " << Target << "GenMCSubtargetInfo(TT, CPU, FS, ";
+     << "const Triple &TT, StringRef CPU, StringRef TuneCPU, StringRef FS) {\n";
+  OS << "  return new " << Target
+     << "GenMCSubtargetInfo(TT, CPU, TuneCPU, FS, ";
   if (NumFeatures)
     OS << Target << "FeatureKV, ";
   else
@@ -1858,10 +1869,10 @@ void SubtargetEmitter::run(raw_ostream &OS) {
   OS << "namespace " << Target << "_MC {\n"
      << "unsigned resolveVariantSchedClassImpl(unsigned SchedClass,"
      << " const MCInst *MI, unsigned CPUID);\n"
-     << "}\n\n";
+     << "} // end namespace " << Target << "_MC\n\n";
   OS << "struct " << ClassName << " : public TargetSubtargetInfo {\n"
      << "  explicit " << ClassName << "(const Triple &TT, StringRef CPU, "
-     << "StringRef FS);\n"
+     << "StringRef TuneCPU, StringRef FS);\n"
      << "public:\n"
      << "  unsigned resolveSchedClass(unsigned SchedClass, "
      << " const MachineInstr *DefMI,"
@@ -1904,8 +1915,8 @@ void SubtargetEmitter::run(raw_ostream &OS) {
   }
 
   OS << ClassName << "::" << ClassName << "(const Triple &TT, StringRef CPU, "
-     << "StringRef FS)\n"
-     << "  : TargetSubtargetInfo(TT, CPU, FS, ";
+     << "StringRef TuneCPU, StringRef FS)\n"
+     << "  : TargetSubtargetInfo(TT, CPU, TuneCPU, FS, ";
   if (NumFeatures)
     OS << "makeArrayRef(" << Target << "FeatureKV, " << NumFeatures << "), ";
   else

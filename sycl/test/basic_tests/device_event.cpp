@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++17 -fsycl %s -o %t.run -lOpenCL -lsycl -lstdc++
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.run
 // RUN: %GPU_RUN_PLACEHOLDER %t.run
 // RUN: %CPU_RUN_PLACEHOLDER %t.run
 // RUN: %ACC_RUN_PLACEHOLDER %t.run
@@ -17,7 +17,7 @@
 using namespace cl::sycl;
 
 // Define the number of work items to enqueue.
-const int nElems = 1024*1024u;
+const int nElems = 128*1024u;
 const int workGroupSize = 16;
 
 // Check the result is correct.
@@ -95,7 +95,8 @@ int test_strideN(size_t stride) {
         // that are not supposed to happen, but who knows..., c) to see those
         // values at the end if something goes wrong during the ASYNC MEM COPY.
         out_ptr[item.get_global_id()[0]] = item.get_global_id()[0] + 700;
-
+        // Just a check of get_range() API.
+        local_acc.get_range();
         item.barrier();
 
         // Copy from local memory to global memory.

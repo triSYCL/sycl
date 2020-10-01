@@ -9,11 +9,12 @@ include(CheckSymbolExists)
 include(CheckFunctionExists)
 include(CheckStructHasMember)
 include(CheckCCompilerFlag)
+include(CMakePushCheckState)
 
 include(CheckCompilerVersion)
 include(HandleLLVMStdlib)
 
-if( UNIX AND NOT (BEOS OR HAIKU) )
+if( UNIX AND NOT (APPLE OR BEOS OR HAIKU) )
   # Used by check_symbol_exists:
   list(APPEND CMAKE_REQUIRED_LIBRARIES "m")
 endif()
@@ -28,6 +29,12 @@ endif()
 if (UNIX AND ${CMAKE_SYSTEM_NAME} MATCHES "AIX")
           list(APPEND CMAKE_REQUIRED_DEFINITIONS "-D_XOPEN_SOURCE=700")
           list(APPEND CMAKE_REQUIRED_DEFINITIONS "-D_LARGE_FILE_API")
+endif()
+
+# Do checks with _FILE_OFFSET_BITS=64 on Solaris, because we will build
+# with those too.
+if (UNIX AND ${CMAKE_SYSTEM_NAME} MATCHES "SunOS")
+          list(APPEND CMAKE_REQUIRED_DEFINITIONS "-D_FILE_OFFSET_BITS=64")
 endif()
 
 # include checks
@@ -47,10 +54,10 @@ check_include_file(sys/resource.h HAVE_SYS_RESOURCE_H)
 check_include_file(sys/stat.h HAVE_SYS_STAT_H)
 check_include_file(sys/time.h HAVE_SYS_TIME_H)
 check_include_file(sys/types.h HAVE_SYS_TYPES_H)
+check_include_file(sysexits.h HAVE_SYSEXITS_H)
 check_include_file(termios.h HAVE_TERMIOS_H)
 check_include_file(unistd.h HAVE_UNISTD_H)
 check_include_file(valgrind/valgrind.h HAVE_VALGRIND_VALGRIND_H)
-check_include_file(zlib.h HAVE_ZLIB_H)
 check_include_file(fenv.h HAVE_FENV_H)
 check_symbol_exists(FE_ALL_EXCEPT "fenv.h" HAVE_DECL_FE_ALL_EXCEPT)
 check_symbol_exists(FE_INEXACT "fenv.h" HAVE_DECL_FE_INEXACT)
@@ -109,22 +116,30 @@ if(HAVE_LIBPTHREAD)
   set(LLVM_PTHREAD_LIB ${CMAKE_THREAD_LIBS_INIT})
 endif()
 
+if(LLVM_ENABLE_ZLIB)
+  if(LLVM_ENABLE_ZLIB STREQUAL FORCE_ON)
+    find_package(ZLIB REQUIRED)
+  elseif(NOT LLVM_USE_SANITIZER MATCHES "Memory.*")
+    find_package(ZLIB)
+  endif()
+  if(ZLIB_FOUND)
+    # Check if zlib we found is usable; for example, we may have found a 32-bit
+    # library on a 64-bit system which would result in a link-time failure.
+    cmake_push_check_state()
+    set(CMAKE_REQUIRED_INCLUDES ${ZLIB_INCLUDE_DIRS})
+    set(CMAKE_REQUIRED_LIBRARIES ${ZLIB_LIBRARY})
+    check_symbol_exists(compress2 zlib.h HAVE_ZLIB)
+    cmake_pop_check_state()
+    if(LLVM_ENABLE_ZLIB STREQUAL FORCE_ON AND NOT HAVE_ZLIB)
+      message(FATAL_ERROR "Failed to configure zlib")
+    endif()
+  endif()
+  set(LLVM_ENABLE_ZLIB "${HAVE_ZLIB}")
+endif()
+
 # Don't look for these libraries if we're using MSan, since uninstrumented third
 # party code may call MSan interceptors like strlen, leading to false positives.
 if(NOT LLVM_USE_SANITIZER MATCHES "Memory.*")
-  set(HAVE_LIBZ 0)
-  if(LLVM_ENABLE_ZLIB)
-    foreach(library z zlib_static zlib)
-      string(TOUPPER ${library} library_suffix)
-      check_library_exists(${library} compress2 "" HAVE_LIBZ_${library_suffix})
-      if(HAVE_LIBZ_${library_suffix})
-        set(HAVE_LIBZ 1)
-        set(ZLIB_LIBRARIES "${library}")
-        break()
-      endif()
-    endforeach()
-  endif()
-
   # Don't look for these libraries on Windows.
   if (NOT PURE_WINDOWS)
     # Skip libedit if using ASan as it contains memory leaks.
@@ -133,19 +148,18 @@ if(NOT LLVM_USE_SANITIZER MATCHES "Memory.*")
     else()
       set(HAVE_LIBEDIT 0)
     endif()
-    if(LLVM_ENABLE_TERMINFO)
-      set(HAVE_TERMINFO 0)
-      foreach(library terminfo tinfo curses ncurses ncursesw)
-        string(TOUPPER ${library} library_suffix)
-        check_library_exists(${library} setupterm "" HAVE_TERMINFO_${library_suffix})
-        if(HAVE_TERMINFO_${library_suffix})
-          set(HAVE_TERMINFO 1)
-          set(TERMINFO_LIBS "${library}")
-          break()
-        endif()
-      endforeach()
+    if(LLVM_ENABLE_TERMINFO STREQUAL FORCE_ON)
+      set(MAYBE_REQUIRED REQUIRED)
     else()
-      set(HAVE_TERMINFO 0)
+      set(MAYBE_REQUIRED)
+    endif()
+    if(LLVM_ENABLE_TERMINFO)
+      find_library(TERMINFO_LIB NAMES terminfo tinfo curses ncurses ncursesw ${MAYBE_REQUIRED})
+    endif()
+    if(TERMINFO_LIB)
+      set(LLVM_ENABLE_TERMINFO 1)
+    else()
+      set(LLVM_ENABLE_TERMINFO 0)
     endif()
 
     find_library(ICONV_LIBRARY_PATH NAMES iconv libiconv libiconv-2 c)
@@ -160,10 +174,13 @@ if(NOT LLVM_USE_SANITIZER MATCHES "Memory.*")
         else()
           include_directories(${LIBXML2_INCLUDE_DIR})
         endif()
-        set(LIBXML2_LIBS "xml2")
       endif()
     endif()
+  else()
+    set(LLVM_ENABLE_TERMINFO 0)
   endif()
+else()
+  set(LLVM_ENABLE_TERMINFO 0)
 endif()
 
 if (LLVM_ENABLE_LIBXML2 STREQUAL "FORCE_ON" AND NOT LLVM_LIBXML2_ENABLED)
@@ -265,8 +282,6 @@ if( LLVM_USING_GLIBC )
   list(APPEND CMAKE_REQUIRED_DEFINITIONS "-D_GNU_SOURCE")
 endif()
 # This check requires _GNU_SOURCE
-check_symbol_exists(sched_getaffinity sched.h HAVE_SCHED_GETAFFINITY)
-check_symbol_exists(CPU_COUNT sched.h HAVE_CPU_COUNT)
 if (NOT PURE_WINDOWS)
   if (LLVM_PTHREAD_LIB)
     list(APPEND CMAKE_REQUIRED_LIBRARIES ${LLVM_PTHREAD_LIB})
@@ -468,7 +483,8 @@ if( MSVC )
   set(strdup "_strdup")
 
   # See if the DIA SDK is available and usable.
-  set(MSVC_DIA_SDK_DIR "$ENV{VSINSTALLDIR}DIA SDK")
+  set(MSVC_DIA_SDK_DIR "$ENV{VSINSTALLDIR}DIA SDK" CACHE PATH
+      "Path to the DIA SDK")
 
   # Due to a bug in MSVC 2013's installation software, it is possible
   # for MSVC 2013 to write the DIA SDK into the Visual Studio 2012
@@ -477,7 +493,7 @@ if( MSVC )
   # though that we should handle it.  We do so by simply checking that
   # the DIA SDK folder exists.  Should this happen you will need to
   # uninstall VS 2012 and then re-install VS 2013.
-  if (IS_DIRECTORY ${MSVC_DIA_SDK_DIR})
+  if (IS_DIRECTORY "${MSVC_DIA_SDK_DIR}")
     set(HAVE_DIA_SDK 1)
   else()
     set(HAVE_DIA_SDK 0)
@@ -507,13 +523,6 @@ if( LLVM_ENABLE_THREADS )
   message(STATUS "Threads enabled.")
 else( LLVM_ENABLE_THREADS )
   message(STATUS "Threads disabled.")
-endif()
-
-if (LLVM_ENABLE_ZLIB )
-  # Check if zlib is available in the system.
-  if ( NOT HAVE_ZLIB_H OR NOT HAVE_LIBZ )
-    set(LLVM_ENABLE_ZLIB 0)
-  endif()
 endif()
 
 if (LLVM_ENABLE_DOXYGEN)
@@ -631,7 +640,7 @@ function(find_python_module module)
     return()
   endif()
 
-  execute_process(COMMAND "${PYTHON_EXECUTABLE}" "-c" "import ${module}"
+  execute_process(COMMAND "${Python3_EXECUTABLE}" "-c" "import ${module}"
     RESULT_VARIABLE status
     ERROR_QUIET)
 

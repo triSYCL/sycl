@@ -119,6 +119,18 @@ void SPIRVFunctionCall::validate() const {
   SPIRVFunctionCallGeneric::validate();
 }
 
+SPIRVFunctionPointerCallINTEL::SPIRVFunctionPointerCallINTEL(
+    SPIRVId TheId, SPIRVValue *TheCalledValue, SPIRVType *TheReturnType,
+    const std::vector<SPIRVWord> &TheArgs, SPIRVBasicBlock *BB)
+    : SPIRVFunctionCallGeneric(TheReturnType, TheId, TheArgs, BB),
+      CalledValueId(TheCalledValue->getId()) {
+  validate();
+}
+
+void SPIRVFunctionPointerCallINTEL::validate() const {
+  SPIRVFunctionCallGeneric::validate();
+}
+
 // ToDo: Each instruction should implement this function
 std::vector<SPIRVValue *> SPIRVInstruction::getOperands() {
   std::vector<SPIRVValue *> Empty;
@@ -158,6 +170,8 @@ bool isSpecConstantOpAllowedOp(Op OC) {
       OpConvertUToPtr,
       OpGenericCastToPtr,
       OpPtrCastToGeneric,
+      OpCrossWorkgroupCastToPtrINTEL,
+      OpPtrCastToCrossWorkgroupINTEL,
       OpBitcast,
       OpQuantizeToF16,
       OpSNegate,

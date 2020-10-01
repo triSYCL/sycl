@@ -231,12 +231,10 @@ static void diagnoseInstanceReference(Sema &SemaRef,
 }
 
 /// Builds an expression which might be an implicit member expression.
-ExprResult
-Sema::BuildPossibleImplicitMemberExpr(const CXXScopeSpec &SS,
-                                      SourceLocation TemplateKWLoc,
-                                      LookupResult &R,
-                                const TemplateArgumentListInfo *TemplateArgs,
-                                      const Scope *S) {
+ExprResult Sema::BuildPossibleImplicitMemberExpr(
+    const CXXScopeSpec &SS, SourceLocation TemplateKWLoc, LookupResult &R,
+    const TemplateArgumentListInfo *TemplateArgs, const Scope *S,
+    UnresolvedLookupExpr *AsULE) {
   switch (ClassifyImplicitMemberAccess(*this, R)) {
   case IMA_Instance:
     return BuildImplicitMemberExpr(SS, TemplateKWLoc, R, TemplateArgs, true, S);
@@ -257,7 +255,7 @@ Sema::BuildPossibleImplicitMemberExpr(const CXXScopeSpec &SS,
   case IMA_Unresolved_StaticContext:
     if (TemplateArgs || TemplateKWLoc.isValid())
       return BuildTemplateIdExpr(SS, TemplateKWLoc, R, false, TemplateArgs);
-    return BuildDeclarationNameExpr(SS, R, false);
+    return AsULE ? AsULE : BuildDeclarationNameExpr(SS, R, false);
 
   case IMA_Error_StaticContext:
   case IMA_Error_Unrelated:
@@ -629,7 +627,7 @@ public:
   }
 
   std::unique_ptr<CorrectionCandidateCallback> clone() override {
-    return llvm::make_unique<RecordMemberExprValidatorCCC>(*this);
+    return std::make_unique<RecordMemberExprValidatorCCC>(*this);
   }
 
 private:
@@ -919,6 +917,18 @@ MemberExpr *Sema::BuildMemberExpr(
                          VK, OK, getNonOdrUseReasonInCurrentContext(Member));
   E->setHadMultipleCandidates(HadMultipleCandidates);
   MarkMemberReferenced(E);
+
+  // C++ [except.spec]p17:
+  //   An exception-specification is considered to be needed when:
+  //   - in an expression the function is the unique lookup result or the
+  //     selected member of a set of overloaded functions
+  if (auto *FPT = Ty->getAs<FunctionProtoType>()) {
+    if (isUnresolvedExceptionSpec(FPT->getExceptionSpecType())) {
+      if (auto *NewFPT = ResolveExceptionSpec(MemberNameInfo.getLoc(), FPT))
+        E->setType(Context.getQualifiedType(NewFPT, Ty.getQualifiers()));
+    }
+  }
+
   return E;
 }
 
@@ -932,28 +942,6 @@ static bool IsInFnTryBlockHandler(const Scope *S) {
       return (S->getFlags() & Scope::TryScope) != Scope::TryScope;
   }
   return false;
-}
-
-static VarDecl *
-getVarTemplateSpecialization(Sema &S, VarTemplateDecl *VarTempl,
-                      const TemplateArgumentListInfo *TemplateArgs,
-                      const DeclarationNameInfo &MemberNameInfo,
-                      SourceLocation TemplateKWLoc) {
-  if (!TemplateArgs) {
-    S.diagnoseMissingTemplateArguments(TemplateName(VarTempl),
-                                       MemberNameInfo.getBeginLoc());
-    return nullptr;
-  }
-
-  DeclResult VDecl = S.CheckVarTemplateId(
-      VarTempl, TemplateKWLoc, MemberNameInfo.getLoc(), *TemplateArgs);
-  if (VDecl.isInvalid())
-    return nullptr;
-  VarDecl *Var = cast<VarDecl>(VDecl.get());
-  if (!Var->getTemplateSpecializationKind())
-    Var->setTemplateSpecializationKind(TSK_ImplicitInstantiation,
-                                       MemberNameInfo.getLoc());
-  return Var;
 }
 
 ExprResult
@@ -1006,7 +994,7 @@ Sema::BuildMemberReferenceExpr(Expr *BaseExpr, QualType BaseExprType,
     // Rederive where we looked up.
     DeclContext *DC = (SS.isSet()
                        ? computeDeclContext(SS, false)
-                       : BaseType->getAs<RecordType>()->getDecl());
+                       : BaseType->castAs<RecordType>()->getDecl());
 
     if (ExtraArgs) {
       ExprResult RetryExpr;
@@ -1087,19 +1075,11 @@ Sema::BuildMemberReferenceExpr(Expr *BaseExpr, QualType BaseExprType,
   if (!BaseExpr) {
     // If this is not an instance member, convert to a non-member access.
     if (!MemberDecl->isCXXInstanceMember()) {
-      // If this is a variable template, get the instantiated variable
-      // declaration corresponding to the supplied template arguments
-      // (while emitting diagnostics as necessary) that will be referenced
-      // by this expression.
-      assert((!TemplateArgs || isa<VarTemplateDecl>(MemberDecl)) &&
-             "How did we get template arguments here sans a variable template");
-      if (isa<VarTemplateDecl>(MemberDecl)) {
-        MemberDecl = getVarTemplateSpecialization(
-            *this, cast<VarTemplateDecl>(MemberDecl), TemplateArgs,
-            R.getLookupNameInfo(), TemplateKWLoc);
-        if (!MemberDecl)
-          return ExprError();
-      }
+      // We might have a variable template specialization (or maybe one day a
+      // member concept-id).
+      if (TemplateArgs || TemplateKWLoc.isValid())
+        return BuildTemplateIdExpr(SS, TemplateKWLoc, R, /*ADL*/false, TemplateArgs);
+
       return BuildDeclarationNameExpr(SS, R.getLookupNameInfo(), MemberDecl,
                                       FoundDecl, TemplateArgs);
     }
@@ -1158,14 +1138,32 @@ Sema::BuildMemberReferenceExpr(Expr *BaseExpr, QualType BaseExprType,
                            MemberNameInfo, Enum->getType(), VK_RValue,
                            OK_Ordinary);
   }
+
   if (VarTemplateDecl *VarTempl = dyn_cast<VarTemplateDecl>(MemberDecl)) {
-    if (VarDecl *Var = getVarTemplateSpecialization(
-            *this, VarTempl, TemplateArgs, MemberNameInfo, TemplateKWLoc))
-      return BuildMemberExpr(
-          BaseExpr, IsArrow, OpLoc, &SS, TemplateKWLoc, Var, FoundDecl,
-          /*HadMultipleCandidates=*/false, MemberNameInfo,
-          Var->getType().getNonReferenceType(), VK_LValue, OK_Ordinary);
-    return ExprError();
+    if (!TemplateArgs) {
+      diagnoseMissingTemplateArguments(TemplateName(VarTempl), MemberLoc);
+      return ExprError();
+    }
+
+    DeclResult VDecl = CheckVarTemplateId(VarTempl, TemplateKWLoc,
+                                          MemberNameInfo.getLoc(), *TemplateArgs);
+    if (VDecl.isInvalid())
+      return ExprError();
+
+    // Non-dependent member, but dependent template arguments.
+    if (!VDecl.get())
+      return ActOnDependentMemberExpr(
+          BaseExpr, BaseExpr->getType(), IsArrow, OpLoc, SS, TemplateKWLoc,
+          FirstQualifierInScope, MemberNameInfo, TemplateArgs);
+
+    VarDecl *Var = cast<VarDecl>(VDecl.get());
+    if (!Var->getTemplateSpecializationKind())
+      Var->setTemplateSpecializationKind(TSK_ImplicitInstantiation, MemberLoc);
+
+    return BuildMemberExpr(
+        BaseExpr, IsArrow, OpLoc, &SS, TemplateKWLoc, Var, FoundDecl,
+        /*HadMultipleCandidates=*/false, MemberNameInfo,
+        Var->getType().getNonReferenceType(), VK_LValue, OK_Ordinary);
   }
 
   // We found something that we didn't expect. Complain.
@@ -1842,7 +1840,6 @@ Sema::BuildImplicitMemberExpr(const CXXScopeSpec &SS,
 
   // If this is known to be an instance access, go ahead and build an
   // implicit 'this' expression now.
-  // 'this' expression now.
   QualType ThisTy = getCurrentThisType();
   assert(!ThisTy.isNull() && "didn't correctly pre-flight capture of 'this'");
 

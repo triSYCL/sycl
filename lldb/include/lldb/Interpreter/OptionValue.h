@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_OptionValue_h_
-#define liblldb_OptionValue_h_
+#ifndef LLDB_INTERPRETER_OPTIONVALUE_H
+#define LLDB_INTERPRETER_OPTIONVALUE_H
 
 #include "lldb/Core/FormatEntity.h"
 #include "lldb/Utility/CompletionRequest.h"
@@ -31,6 +31,7 @@ public:
     eTypeChar,
     eTypeDictionary,
     eTypeEnum,
+    eTypeFileLineColumn,
     eTypeFileSpec,
     eTypeFileSpecList,
     eTypeFormat,
@@ -58,12 +59,7 @@ public:
     eDumpGroupExport = (eDumpOptionCommand | eDumpOptionName | eDumpOptionValue)
   };
 
-  OptionValue()
-      : m_callback(nullptr), m_baton(nullptr), m_value_was_set(false) {}
-
-  OptionValue(const OptionValue &rhs)
-      : m_callback(rhs.m_callback), m_baton(rhs.m_baton),
-        m_value_was_set(rhs.m_value_was_set) {}
+  OptionValue() : m_value_was_set(false) {}
 
   virtual ~OptionValue() = default;
 
@@ -89,12 +85,12 @@ public:
   SetValueFromString(llvm::StringRef value,
                      VarSetOperationType op = eVarSetOperationAssign);
 
-  virtual bool Clear() = 0;
+  virtual void Clear() = 0;
 
   virtual lldb::OptionValueSP DeepCopy() const = 0;
 
-  virtual size_t AutoComplete(CommandInterpreter &interpreter,
-                              CompletionRequest &request);
+  virtual void AutoComplete(CommandInterpreter &interpreter,
+                            CompletionRequest &request);
 
   // Subclasses can override these functions
   virtual lldb::OptionValueSP GetSubValue(const ExecutionContext *exe_ctx,
@@ -140,6 +136,8 @@ public:
       return eTypeDictionary;
     case 1u << eTypeEnum:
       return eTypeEnum;
+    case 1u << eTypeFileLineColumn:
+      return eTypeFileLineColumn;
     case 1u << eTypeFileSpec:
       return eTypeFileSpec;
     case 1u << eTypeFileSpecList:
@@ -308,22 +306,19 @@ public:
     m_parent_wp = parent_sp;
   }
 
-  void SetValueChangedCallback(OptionValueChangedCallback callback,
-                               void *baton) {
-    assert(m_callback == nullptr);
-    m_callback = callback;
-    m_baton = baton;
+  void SetValueChangedCallback(std::function<void()> callback) {
+    assert(!m_callback);
+    m_callback = std::move(callback);
   }
 
   void NotifyValueChanged() {
     if (m_callback)
-      m_callback(m_baton, this);
+      m_callback();
   }
 
 protected:
   lldb::OptionValueWP m_parent_wp;
-  OptionValueChangedCallback m_callback;
-  void *m_baton;
+  std::function<void()> m_callback;
   bool m_value_was_set; // This can be used to see if a value has been set
                         // by a call to SetValueFromCString(). It is often
                         // handy to know if an option value was set from the
@@ -334,4 +329,4 @@ protected:
 
 } // namespace lldb_private
 
-#endif // liblldb_OptionValue_h_
+#endif // LLDB_INTERPRETER_OPTIONVALUE_H

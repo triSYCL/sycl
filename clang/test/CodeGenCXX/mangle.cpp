@@ -280,13 +280,13 @@ struct Ops {
   void *v;
 };
 
-// CHECK-LABEL: define dereferenceable({{[0-9]+}}) %struct.Ops* @_ZN3OpsplERKS_
+// CHECK-LABEL: define nonnull align {{[0-9]+}} dereferenceable({{[0-9]+}}) %struct.Ops* @_ZN3OpsplERKS_
 Ops& Ops::operator+(const Ops&) { return *this; }
-// CHECK-LABEL: define dereferenceable({{[0-9]+}}) %struct.Ops* @_ZN3OpsmiERKS_
+// CHECK-LABEL: define nonnull align {{[0-9]+}} dereferenceable({{[0-9]+}}) %struct.Ops* @_ZN3OpsmiERKS_
 Ops& Ops::operator-(const Ops&) { return *this; }
-// CHECK-LABEL: define dereferenceable({{[0-9]+}}) %struct.Ops* @_ZN3OpsanERKS_
+// CHECK-LABEL: define nonnull align {{[0-9]+}} dereferenceable({{[0-9]+}}) %struct.Ops* @_ZN3OpsanERKS_
 Ops& Ops::operator&(const Ops&) { return *this; }
-// CHECK-LABEL: define dereferenceable({{[0-9]+}}) %struct.Ops* @_ZN3OpsmlERKS_
+// CHECK-LABEL: define nonnull align {{[0-9]+}} dereferenceable({{[0-9]+}}) %struct.Ops* @_ZN3OpsmlERKS_
 Ops& Ops::operator*(const Ops&) { return *this; }
 
 // PR5861
@@ -960,7 +960,7 @@ namespace test45 {
   template <typename T>
   void f(enum T::e *) {}
   template void f<S>(S::e *);
-  // CHECK-LABEL: define weak_odr void @_ZN6test451fINS_1SEEEvPTeNT_1eE(i32*)
+  // CHECK-LABEL: define weak_odr void @_ZN6test451fINS_1SEEEvPTeNT_1eE(i32* %0)
 }
 
 namespace test46 {
@@ -970,7 +970,7 @@ namespace test46 {
   template <typename T>
   void f(struct T::s *) {}
   template void f<S>(S::s *);
-  // CHECK-LABEL: define weak_odr void @_ZN6test461fINS_1SEEEvPTsNT_1sE(%"struct.test46::S::s"*)
+  // CHECK-LABEL: define weak_odr void @_ZN6test461fINS_1SEEEvPTsNT_1sE(%"struct.test46::S::s"* %0)
 }
 
 namespace test47 {
@@ -980,7 +980,7 @@ namespace test47 {
   template <typename T>
   void f(class T::c *) {}
   template void f<S>(S::c *);
-  // CHECK-LABEL: define weak_odr void @_ZN6test471fINS_1SEEEvPTsNT_1cE(%"class.test47::S::c"*)
+  // CHECK-LABEL: define weak_odr void @_ZN6test471fINS_1SEEEvPTsNT_1cE(%"class.test47::S::c"* %0)
 }
 
 namespace test48 {
@@ -990,7 +990,7 @@ namespace test48 {
   template <typename T>
   void f(union T::u *) {}
   template void f<S>(S::u *);
-  // CHECK-LABEL: define weak_odr void @_ZN6test481fINS_1SEEEvPTuNT_1uE(%"union.test48::S::u"*)
+  // CHECK-LABEL: define weak_odr void @_ZN6test481fINS_1SEEEvPTuNT_1uE(%"union.test48::S::u"* %0)
 }
 
 namespace test49 {
@@ -1137,4 +1137,21 @@ namespace test58 {
   };
   // CHECK-LABEL: @_ZN6test581AC1INS_5StateEEET_MNS_8identityIS3_E4typeEFbvE
   void fn1() { A(a, &State::m_fn1); }
+}
+
+namespace test59 {
+  // verify no crash.
+  template<typename T>
+  void f(T g) {
+    auto [e] = g;
+    [](decltype(e)) {};
+  }
+}
+
+namespace test60 {
+  struct X { int i, j; };
+  auto [a,b] = X{1,2};
+  template<typename T> void f(decltype(a + T())) {}
+  // CHECK-LABEL: @_ZN6test601fIiEEvDTplL_ZNS_1aEEcvT__EE
+  template void f<int>(int);
 }

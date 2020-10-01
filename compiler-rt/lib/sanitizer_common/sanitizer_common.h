@@ -100,6 +100,8 @@ void UnmapOrDie(void *addr, uptr size);
 void *MmapOrDieOnFatalError(uptr size, const char *mem_type);
 bool MmapFixedNoReserve(uptr fixed_addr, uptr size, const char *name = nullptr)
      WARN_UNUSED_RESULT;
+bool MmapFixedSuperNoReserve(uptr fixed_addr, uptr size,
+                             const char *name = nullptr) WARN_UNUSED_RESULT;
 void *MmapNoReserveOrDie(uptr size, const char *mem_type);
 void *MmapFixedOrDie(uptr fixed_addr, uptr size, const char *name = nullptr);
 // Behaves just like MmapFixedOrDie, but tolerates out of memory condition, in
@@ -119,6 +121,31 @@ bool MprotectReadOnly(uptr addr, uptr size);
 
 void MprotectMallocZones(void *addr, int prot);
 
+#if SANITIZER_LINUX
+// Unmap memory. Currently only used on Linux.
+void UnmapFromTo(uptr from, uptr to);
+#endif
+
+// Maps shadow_size_bytes of shadow memory and returns shadow address. It will
+// be aligned to the mmap granularity * 2^shadow_scale, or to
+// 2^min_shadow_base_alignment if that is larger. The returned address will
+// have max(2^min_shadow_base_alignment, mmap granularity) on the left, and
+// shadow_size_bytes bytes on the right, which on linux is mapped no access.
+// The high_mem_end may be updated if the original shadow size doesn't fit.
+uptr MapDynamicShadow(uptr shadow_size_bytes, uptr shadow_scale,
+                      uptr min_shadow_base_alignment, uptr &high_mem_end);
+
+// Reserve memory range [beg, end]. If madvise_shadow is true then apply
+// madvise (e.g. hugepages, core dumping) requested by options.
+void ReserveShadowMemoryRange(uptr beg, uptr end, const char *name,
+                              bool madvise_shadow = true);
+
+// Protect size bytes of memory starting at addr. Also try to protect
+// several pages at the start of the address space as specified by
+// zero_base_shadow_start, at most up to the size or zero_base_max_shadow_start.
+void ProtectGap(uptr addr, uptr size, uptr zero_base_shadow_start,
+                uptr zero_base_max_shadow_start);
+
 // Find an available address space.
 uptr FindAvailableMemoryRange(uptr size, uptr alignment, uptr left_padding,
                               uptr *largest_gap_found, uptr *max_occupied_addr);
@@ -131,7 +158,7 @@ void ReleaseMemoryPagesToOS(uptr beg, uptr end);
 void IncreaseTotalMmap(uptr size);
 void DecreaseTotalMmap(uptr size);
 uptr GetRSS();
-bool NoHugePagesInRegion(uptr addr, uptr length);
+void SetShadowRegionHugePageMode(uptr addr, uptr length);
 bool DontDumpShadowMemory(uptr addr, uptr length);
 // Check if the built VMA size matches the runtime one.
 void CheckVMASize();
@@ -141,6 +168,7 @@ void RunFreeHooks(const void *ptr);
 class ReservedAddressRange {
  public:
   uptr Init(uptr size, const char *name = nullptr, uptr fixed_addr = 0);
+  uptr InitAligned(uptr size, uptr align, const char *name = nullptr);
   uptr Map(uptr fixed_addr, uptr size, const char *name = nullptr);
   uptr MapOrDie(uptr fixed_addr, uptr size, const char *name = nullptr);
   void Unmap(uptr addr, uptr size);
@@ -337,18 +365,18 @@ void ReportMmapWriteExec(int prot);
 // Math
 #if SANITIZER_WINDOWS && !defined(__clang__) && !defined(__GNUC__)
 extern "C" {
-unsigned char _BitScanForward(unsigned long *index, unsigned long mask);  // NOLINT
-unsigned char _BitScanReverse(unsigned long *index, unsigned long mask);  // NOLINT
+unsigned char _BitScanForward(unsigned long *index, unsigned long mask);
+unsigned char _BitScanReverse(unsigned long *index, unsigned long mask);
 #if defined(_WIN64)
-unsigned char _BitScanForward64(unsigned long *index, unsigned __int64 mask);  // NOLINT
-unsigned char _BitScanReverse64(unsigned long *index, unsigned __int64 mask);  // NOLINT
+unsigned char _BitScanForward64(unsigned long *index, unsigned __int64 mask);
+unsigned char _BitScanReverse64(unsigned long *index, unsigned __int64 mask);
 #endif
 }
 #endif
 
 INLINE uptr MostSignificantSetBitIndex(uptr x) {
   CHECK_NE(x, 0U);
-  unsigned long up;  // NOLINT
+  unsigned long up;
 #if !SANITIZER_WINDOWS || defined(__clang__) || defined(__GNUC__)
 # ifdef _WIN64
   up = SANITIZER_WORDSIZE - 1 - __builtin_clzll(x);
@@ -365,7 +393,7 @@ INLINE uptr MostSignificantSetBitIndex(uptr x) {
 
 INLINE uptr LeastSignificantSetBitIndex(uptr x) {
   CHECK_NE(x, 0U);
-  unsigned long up;  // NOLINT
+  unsigned long up;
 #if !SANITIZER_WINDOWS || defined(__clang__) || defined(__GNUC__)
 # ifdef _WIN64
   up = __builtin_ctzll(x);
@@ -550,7 +578,7 @@ bool operator!=(const InternalMmapVectorNoCtor<T> &lhs,
 template<typename T>
 class InternalMmapVector : public InternalMmapVectorNoCtor<T> {
  public:
-  InternalMmapVector() { InternalMmapVectorNoCtor<T>::Initialize(1); }
+  InternalMmapVector() { InternalMmapVectorNoCtor<T>::Initialize(0); }
   explicit InternalMmapVector(uptr cnt) {
     InternalMmapVectorNoCtor<T>::Initialize(cnt);
     this->resize(cnt);
@@ -669,7 +697,7 @@ bool ReadFileToBuffer(const char *file_name, char **buff, uptr *buff_size,
                       error_t *errno_p = nullptr);
 
 // When adding a new architecture, don't forget to also update
-// script/asan_symbolize.py and sanitizer_symbolizer_libcdep.cc.
+// script/asan_symbolize.py and sanitizer_symbolizer_libcdep.cpp.
 inline const char *ModuleArchToString(ModuleArch arch) {
   switch (arch) {
     case kModuleArchUnknown:
@@ -853,7 +881,7 @@ INLINE uptr GetPthreadDestructorIterations() {
 #endif
 }
 
-void *internal_start_thread(void(*func)(void*), void *arg);
+void *internal_start_thread(void *(*func)(void*), void *arg);
 void internal_join_thread(void *th);
 void MaybeStartBackgroudThread();
 
@@ -879,6 +907,11 @@ struct SignalContext {
   bool is_memory_access;
   enum WriteFlag { UNKNOWN, READ, WRITE } write_flag;
 
+  // In some cases the kernel cannot provide the true faulting address; `addr`
+  // will be zero then.  This field allows to distinguish between these cases
+  // and dereferences of null.
+  bool is_true_faulting_addr;
+
   // VS2013 doesn't implement unrestricted unions, so we need a trivial default
   // constructor
   SignalContext() = default;
@@ -891,7 +924,8 @@ struct SignalContext {
         context(context),
         addr(GetAddress()),
         is_memory_access(IsMemoryAccess()),
-        write_flag(GetWriteFlag()) {
+        write_flag(GetWriteFlag()),
+        is_true_faulting_addr(IsTrueFaultingAddress()) {
     InitPcSpBp();
   }
 
@@ -912,6 +946,7 @@ struct SignalContext {
   uptr GetAddress() const;
   WriteFlag GetWriteFlag() const;
   bool IsMemoryAccess() const;
+  bool IsTrueFaultingAddress() const;
 };
 
 void InitializePlatformEarly();
@@ -968,10 +1003,24 @@ INLINE u32 GetNumberOfCPUsCached() {
   return NumberOfCPUsCached;
 }
 
+template <typename T>
+class ArrayRef {
+ public:
+  ArrayRef() {}
+  ArrayRef(T *begin, T *end) : begin_(begin), end_(end) {}
+
+  T *begin() { return begin_; }
+  T *end() { return end_; }
+
+ private:
+  T *begin_ = nullptr;
+  T *end_ = nullptr;
+};
+
 }  // namespace __sanitizer
 
 inline void *operator new(__sanitizer::operator_new_size_type size,
-                          __sanitizer::LowLevelAllocator &alloc) {
+                          __sanitizer::LowLevelAllocator &alloc) {  // NOLINT
   return alloc.Allocate(size);
 }
 

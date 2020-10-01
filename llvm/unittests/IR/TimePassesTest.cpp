@@ -127,15 +127,15 @@ TEST(TimePassesTest, CustomOut) {
 
   // Setup time-passes handler and redirect output to the stream.
   std::unique_ptr<TimePassesHandler> TimePasses =
-      llvm::make_unique<TimePassesHandler>(true);
+      std::make_unique<TimePassesHandler>(true);
   TimePasses->setOutStream(ReportStream);
   TimePasses->registerCallbacks(PIC);
 
   // Pretending that passes are running to trigger the timers.
   PI.runBeforePass(Pass1, M);
   PI.runBeforePass(Pass2, M);
-  PI.runAfterPass(Pass2, M);
-  PI.runAfterPass(Pass1, M);
+  PI.runAfterPass(Pass2, M, PreservedAnalyses::all());
+  PI.runAfterPass(Pass1, M, PreservedAnalyses::all());
 
   // Generating report.
   TimePasses->print();
@@ -154,7 +154,7 @@ TEST(TimePassesTest, CustomOut) {
 
   // Now trigger just a single pass to populate timers again.
   PI.runBeforePass(Pass2, M);
-  PI.runAfterPass(Pass2, M);
+  PI.runAfterPass(Pass2, M, PreservedAnalyses::all());
 
   // Generate report by deleting the handler.
   TimePasses.reset();

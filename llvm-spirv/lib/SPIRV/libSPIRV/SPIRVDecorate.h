@@ -57,10 +57,14 @@ public:
   // Complete constructor for decorations with one word literal
   SPIRVDecorateGeneric(Op OC, SPIRVWord WC, Decoration TheDec,
                        SPIRVEntry *TheTarget, SPIRVWord V);
+  // Complete constructor for decorations with two word literals
+  SPIRVDecorateGeneric(Op OC, SPIRVWord WC, Decoration TheDec,
+                       SPIRVEntry *TheTarget, SPIRVWord V1, SPIRVWord V2);
   // Incomplete constructor
   SPIRVDecorateGeneric(Op OC);
 
   SPIRVWord getLiteral(size_t) const;
+  std::vector<SPIRVWord> getVecLiteral() const;
   Decoration getDecorateKind() const;
   size_t getLiteralCount() const;
   /// Compare for kind and literal only.
@@ -84,15 +88,15 @@ public:
     switch (Dec) {
     case DecorationSpecId:
       if (getModule()->hasCapability(CapabilityKernel))
-        return SPIRV_1_1;
+        return static_cast<SPIRVWord>(VersionNumber::SPIRV_1_1);
       else
-        return SPIRV_1_0;
+        return static_cast<SPIRVWord>(VersionNumber::SPIRV_1_0);
 
     case DecorationMaxByteOffset:
-      return SPIRV_1_1;
+      return static_cast<SPIRVWord>(VersionNumber::SPIRV_1_1);
 
     default:
-      return SPIRV_1_0;
+      return static_cast<SPIRVWord>(VersionNumber::SPIRV_1_0);
     }
   }
 
@@ -133,14 +137,18 @@ public:
   // Complete constructor for decorations with one word literal
   SPIRVDecorate(Decoration TheDec, SPIRVEntry *TheTarget, SPIRVWord V)
       : SPIRVDecorateGeneric(OC, 4, TheDec, TheTarget, V) {}
+  // Complete constructor for decorations with two word literals
+  SPIRVDecorate(Decoration TheDec, SPIRVEntry *TheTarget, SPIRVWord V1,
+                SPIRVWord V2)
+      : SPIRVDecorateGeneric(OC, 5, TheDec, TheTarget, V1, V2) {}
   // Incomplete constructor
   SPIRVDecorate() : SPIRVDecorateGeneric(OC) {}
 
-  SPIRVExtSet getRequiredExtensions() const override {
+  llvm::Optional<ExtensionID> getRequiredExtension() const override {
     switch (Dec) {
     case DecorationNoSignedWrap:
     case DecorationNoUnsignedWrap:
-      return getSet(SPV_KHR_no_integer_wrap_decoration);
+      return ExtensionID::SPV_KHR_no_integer_wrap_decoration;
     case DecorationRegisterINTEL:
     case DecorationMemoryINTEL:
     case DecorationNumbanksINTEL:
@@ -151,9 +159,26 @@ public:
     case DecorationMaxReplicatesINTEL:
     case DecorationSimpleDualPortINTEL:
     case DecorationMergeINTEL:
-      return getSet(SPV_INTEL_fpga_memory_attributes);
+    case DecorationBankBitsINTEL:
+    case DecorationForcePow2DepthINTEL:
+      return ExtensionID::SPV_INTEL_fpga_memory_attributes;
+    case DecorationBurstCoalesceINTEL:
+    case DecorationCacheSizeINTEL:
+    case DecorationDontStaticallyCoalesceINTEL:
+    case DecorationPrefetchINTEL:
+      return ExtensionID::SPV_INTEL_fpga_memory_accesses;
+    case DecorationReferencedIndirectlyINTEL:
+      return ExtensionID::SPV_INTEL_function_pointers;
+    case DecorationIOPipeStorageINTEL:
+      return ExtensionID::SPV_INTEL_io_pipes;
+    case DecorationBufferLocationINTEL:
+      return ExtensionID::SPV_INTEL_fpga_buffer_location;
+    case DecorationFunctionFloatingPointModeINTEL:
+    case DecorationFunctionRoundingModeINTEL:
+    case DecorationFunctionDenormModeINTEL:
+      return ExtensionID::SPV_INTEL_float_controls2;
     default:
-      return SPIRVExtSet();
+      return {};
     }
   }
 
@@ -233,7 +258,7 @@ public:
   SPIRVMemberDecorate()
       : SPIRVDecorateGeneric(OC), MemberNumber(SPIRVWORD_MAX) {}
 
-  SPIRVExtSet getRequiredExtensions() const override {
+  llvm::Optional<ExtensionID> getRequiredExtension() const override {
     switch (Dec) {
     case DecorationRegisterINTEL:
     case DecorationMemoryINTEL:
@@ -245,9 +270,20 @@ public:
     case DecorationMaxReplicatesINTEL:
     case DecorationSimpleDualPortINTEL:
     case DecorationMergeINTEL:
-      return getSet(SPV_INTEL_fpga_memory_attributes);
+    case DecorationBankBitsINTEL:
+    case DecorationForcePow2DepthINTEL:
+      return ExtensionID::SPV_INTEL_fpga_memory_attributes;
+    case DecorationBurstCoalesceINTEL:
+    case DecorationCacheSizeINTEL:
+    case DecorationDontStaticallyCoalesceINTEL:
+    case DecorationPrefetchINTEL:
+      return ExtensionID::SPV_INTEL_fpga_memory_accesses;
+    case DecorationIOPipeStorageINTEL:
+      return ExtensionID::SPV_INTEL_io_pipes;
+    case DecorationBufferLocationINTEL:
+      return ExtensionID::SPV_INTEL_fpga_buffer_location;
     default:
-      return SPIRVExtSet();
+      return {};
     }
   }
 
@@ -402,6 +438,15 @@ public:
       : SPIRVDecorateStrAttrBase(TheTarget, AnnotateString) {}
 };
 
+class SPIRVDecorateFuncParamDescAttr
+    : public SPIRVDecorateStrAttrBase<DecorationFuncParamDescINTEL> {
+public:
+  //  Complete constructor for UserSemantic decoration
+  SPIRVDecorateFuncParamDescAttr(SPIRVEntry *TheTarget,
+                                 const std::string &AnnotateString)
+      : SPIRVDecorateStrAttrBase(TheTarget, AnnotateString) {}
+};
+
 class SPIRVDecorateMergeINTELAttr : public SPIRVDecorate {
 public:
   // Complete constructor for MergeINTEL decoration
@@ -442,6 +487,17 @@ public:
     } else
 #endif
       Decoder >> Literals;
+  }
+};
+
+class SPIRVDecorateBankBitsINTELAttr : public SPIRVDecorate {
+public:
+  // Complete constructor for BankBitsINTEL decoration
+  SPIRVDecorateBankBitsINTELAttr(SPIRVEntry *TheTarget,
+                                 const std::vector<SPIRVWord> &TheBits)
+      : SPIRVDecorate(DecorationBankBitsINTEL, TheTarget) {
+    Literals = TheBits;
+    WordCount += Literals.size();
   }
 };
 
@@ -495,6 +551,63 @@ public:
       Literals.push_back(I);
     WordCount += Literals.size();
   }
+};
+
+class SPIRVMemberDecorateBankBitsINTELAttr : public SPIRVMemberDecorate {
+public:
+  // Complete constructor for BankBitsINTEL decoration
+  SPIRVMemberDecorateBankBitsINTELAttr(SPIRVEntry *TheTarget,
+                                       SPIRVWord MemberNumber,
+                                       const std::vector<SPIRVWord> &TheBits)
+      : SPIRVMemberDecorate(DecorationBankBitsINTEL, MemberNumber, TheTarget) {
+    Literals = TheBits;
+    WordCount += Literals.size();
+  }
+};
+
+class SPIRVDecorateFunctionRoundingModeINTEL : public SPIRVDecorate {
+public:
+  // Complete constructor for SPIRVDecorateFunctionRoundingModeINTEL
+  SPIRVDecorateFunctionRoundingModeINTEL(SPIRVEntry *TheTarget,
+                                         SPIRVWord TargetWidth,
+                                         spv::FPRoundingMode FloatControl)
+      : SPIRVDecorate(spv::DecorationFunctionRoundingModeINTEL, TheTarget,
+                      TargetWidth, static_cast<SPIRVWord>(FloatControl)){};
+
+  SPIRVWord getTargetWidth() const { return Literals.at(0); };
+  spv::FPRoundingMode getRoundingMode() const {
+    return static_cast<spv::FPRoundingMode>(Literals.at(1));
+  };
+};
+
+class SPIRVDecorateFunctionDenormModeINTEL : public SPIRVDecorate {
+public:
+  // Complete constructor for SPIRVDecorateFunctionDenormModeINTEL
+  SPIRVDecorateFunctionDenormModeINTEL(SPIRVEntry *TheTarget,
+                                       SPIRVWord TargetWidth,
+                                       spv::FPDenormMode FloatControl)
+      : SPIRVDecorate(spv::DecorationFunctionDenormModeINTEL, TheTarget,
+                      TargetWidth, static_cast<SPIRVWord>(FloatControl)){};
+
+  SPIRVWord getTargetWidth() const { return Literals.at(0); };
+  spv::FPDenormMode getDenormMode() const {
+    return static_cast<spv::FPDenormMode>(Literals.at(1));
+  };
+};
+
+class SPIRVDecorateFunctionFloatingPointModeINTEL : public SPIRVDecorate {
+public:
+  // Complete constructor for SPIRVDecorateFunctionOperationModeINTEL
+  SPIRVDecorateFunctionFloatingPointModeINTEL(SPIRVEntry *TheTarget,
+                                              SPIRVWord TargetWidth,
+                                              spv::FPOperationMode FloatControl)
+      : SPIRVDecorate(spv::DecorationFunctionFloatingPointModeINTEL, TheTarget,
+                      TargetWidth, static_cast<SPIRVWord>(FloatControl)){};
+
+  SPIRVWord getTargetWidth() const { return Literals.at(0); };
+  spv::FPOperationMode getOperationMode() const {
+    return static_cast<spv::FPOperationMode>(Literals.at(1));
+  };
 };
 
 } // namespace SPIRV

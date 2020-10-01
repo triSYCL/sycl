@@ -37,6 +37,7 @@
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
@@ -184,7 +185,7 @@ ScopedNoAliasAAResult ScopedNoAliasAA::run(Function &F,
 
 char ScopedNoAliasAAWrapperPass::ID = 0;
 
-INITIALIZE_PASS(ScopedNoAliasAAWrapperPass, "scoped-noalias",
+INITIALIZE_PASS(ScopedNoAliasAAWrapperPass, "scoped-noalias-aa",
                 "Scoped NoAlias Alias Analysis", false, true)
 
 ImmutablePass *llvm::createScopedNoAliasAAWrapperPass() {

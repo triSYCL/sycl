@@ -36,6 +36,23 @@ def push_dynamic_library_lookup_path(config, new_path):
     (new_path, config.environment.get(dynamic_library_lookup_var, '')))
   config.environment[dynamic_library_lookup_var] = new_ld_library_path
 
+  if platform.system() == 'FreeBSD':
+    dynamic_library_lookup_var = 'LD_32_LIBRARY_PATH'
+    new_ld_32_library_path = os.path.pathsep.join(
+      (new_path, config.environment.get(dynamic_library_lookup_var, '')))
+    config.environment[dynamic_library_lookup_var] = new_ld_32_library_path
+
+  if platform.system() == 'SunOS':
+    dynamic_library_lookup_var = 'LD_LIBRARY_PATH_32'
+    new_ld_library_path_32 = os.path.pathsep.join(
+      (new_path, config.environment.get(dynamic_library_lookup_var, '')))
+    config.environment[dynamic_library_lookup_var] = new_ld_library_path_32
+
+    dynamic_library_lookup_var = 'LD_LIBRARY_PATH_64'
+    new_ld_library_path_64 = os.path.pathsep.join(
+      (new_path, config.environment.get(dynamic_library_lookup_var, '')))
+    config.environment[dynamic_library_lookup_var] = new_ld_library_path_64
+
 # Setup config name.
 config.name = 'AddressSanitizer' + config.name_suffix
 
@@ -85,9 +102,12 @@ clang_asan_static_cxxflags = config.cxx_mode_flags + clang_asan_static_cflags
 asan_dynamic_flags = []
 if config.asan_dynamic:
   asan_dynamic_flags = ["-shared-libasan"]
-  # On Windows, we need to simulate "clang-cl /MD" on the clang driver side.
   if platform.system() == 'Windows':
+    # On Windows, we need to simulate "clang-cl /MD" on the clang driver side.
     asan_dynamic_flags += ["-D_MT", "-D_DLL", "-Wl,-nodefaultlib:libcmt,-defaultlib:msvcrt,-defaultlib:oldnames"]
+  elif platform.system() == 'FreeBSD':
+    # On FreeBSD, we need to add -pthread to ensure pthread functions are available.
+    asan_dynamic_flags += ['-pthread']
   config.available_features.add("asan-dynamic-runtime")
 else:
   config.available_features.add("asan-static-runtime")
@@ -111,7 +131,7 @@ config.substitutions.append( ("%clangxx ", build_invocation(target_cxxflags)) )
 config.substitutions.append( ("%clang_asan ", build_invocation(clang_asan_cflags)) )
 config.substitutions.append( ("%clangxx_asan ", build_invocation(clang_asan_cxxflags)) )
 if config.asan_dynamic:
-  if config.host_os in ['Linux', 'NetBSD', 'SunOS']:
+  if config.host_os in ['Linux', 'FreeBSD', 'NetBSD', 'SunOS']:
     shared_libasan_path = os.path.join(config.compiler_rt_libdir, "libclang_rt.asan{}.so".format(config.target_suffix))
   elif config.host_os == 'Darwin':
     shared_libasan_path = os.path.join(config.compiler_rt_libdir, 'libclang_rt.asan_{}_dynamic.dylib'.format(config.apple_platform))
@@ -191,7 +211,8 @@ if re.search('mthumb', config.target_cflags) is None:
 # Turn on leak detection on 64-bit Linux.
 leak_detection_linux = (config.host_os == 'Linux') and (not config.android) and (config.target_arch == 'x86_64' or config.target_arch == 'i386')
 leak_detection_mac = (config.host_os == 'Darwin') and (config.target_arch == 'x86_64')
-if leak_detection_linux or leak_detection_mac:
+leak_detection_netbsd = (config.host_os == 'NetBSD') and (config.target_arch in ['x86_64', 'i386'])
+if leak_detection_linux or leak_detection_mac or leak_detection_netbsd:
   config.available_features.add('leak-detection')
 
 # Set LD_LIBRARY_PATH to pick dynamic runtime up properly.
@@ -210,7 +231,7 @@ if config.host_os == 'Windows' and config.asan_dynamic:
                                              os.environ.get('PATH', '')])
 
 # Default test suffixes.
-config.suffixes = ['.c', '.cc', '.cpp']
+config.suffixes = ['.c', '.cpp']
 
 if config.host_os == 'Darwin':
   config.suffixes.append('.mm')
@@ -230,3 +251,6 @@ if config.host_os not in ['Linux', 'Darwin', 'FreeBSD', 'SunOS', 'Windows', 'Net
 
 if not config.parallelism_group:
   config.parallelism_group = 'shadow-memory'
+
+if config.host_os == 'NetBSD':
+  config.substitutions.insert(0, ('%run', config.netbsd_noaslr_prefix))

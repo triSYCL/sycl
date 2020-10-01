@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++17 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -I %sycl_source_dir %s -o %t.out
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out

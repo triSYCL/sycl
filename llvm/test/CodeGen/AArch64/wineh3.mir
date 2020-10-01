@@ -1,5 +1,5 @@
 # RUN: llc -o - %s -mtriple=aarch64-windows -start-after=prologepilog \
-# RUN:    -filetype=obj | llvm-readobj --unwind | FileCheck %s
+# RUN:    -filetype=obj | llvm-readobj --unwind - | FileCheck %s
 # Test that the register pairing of both general purpose and floating point
 # registers is correctly saved in the .xdata section, as well as the pre/post
 # increment of floating point register pairs.
@@ -41,7 +41,7 @@
 ...
 ---
 name:            test
-alignment:       2
+alignment:       4
 exposesReturnsTwice: false
 legalized:       false
 regBankSelected: false

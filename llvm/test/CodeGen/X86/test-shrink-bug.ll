@@ -69,11 +69,9 @@ define void @fail(i16 %a, <2 x i8> %b) {
 ; CHECK-X64-NEXT:    testl $263, %edi # imm = 0x107
 ; CHECK-X64-NEXT:    je .LBB1_3
 ; CHECK-X64-NEXT:  # %bb.1:
-; CHECK-X64-NEXT:    pand {{.*}}(%rip), %xmm0
-; CHECK-X64-NEXT:    pcmpeqd {{.*}}(%rip), %xmm0
-; CHECK-X64-NEXT:    pshufd {{.*#+}} xmm1 = xmm0[1,0,3,2]
-; CHECK-X64-NEXT:    pand %xmm0, %xmm1
-; CHECK-X64-NEXT:    pextrw $4, %xmm1, %eax
+; CHECK-X64-NEXT:    pcmpeqb {{.*}}(%rip), %xmm0
+; CHECK-X64-NEXT:    pslldq {{.*#+}} xmm0 = zero,zero,zero,zero,zero,zero,zero,xmm0[0,1,2,3,4,5,6,7,8]
+; CHECK-X64-NEXT:    pextrw $4, %xmm0, %eax
 ; CHECK-X64-NEXT:    testb $1, %al
 ; CHECK-X64-NEXT:    jne .LBB1_3
 ; CHECK-X64-NEXT:  # %bb.2: # %no

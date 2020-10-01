@@ -156,6 +156,20 @@ RNBRunLoopMode RNBRunLoopGetStartModeFromRemote(RNBRemote *remote) {
   return eRNBRunLoopModeExit;
 }
 
+// Check the name to see if it ends with .app
+static bool is_dot_app (const char *app_name) {
+  size_t len = strlen(app_name);
+  if (len < 4)
+    return false;
+  
+  if (app_name[len - 4] == '.' &&
+      app_name[len - 3] == 'a' && 
+      app_name[len - 2] == 'p' &&
+      app_name[len - 1] == 'p')
+    return true;
+  return false;
+}
+
 // This run loop mode will wait for the process to launch and hit its
 // entry point. It will currently ignore all events except for the
 // process state changed event, where it watches for the process stopped
@@ -198,19 +212,21 @@ RNBRunLoopMode RNBRunLoopLaunchInferior(RNBRemote *remote,
     // Our default launch method is posix spawn
     launch_flavor = eLaunchFlavorPosixSpawn;
 
+    const bool dot_app = is_dot_app(inferior_argv[0]);
+    (void)dot_app;
 #if defined WITH_FBS
     // Check if we have an app bundle, if so launch using BackBoard Services.
-    if (strstr(inferior_argv[0], ".app")) {
+    if (dot_app) {
       launch_flavor = eLaunchFlavorFBS;
     }
 #elif defined WITH_BKS
     // Check if we have an app bundle, if so launch using BackBoard Services.
-    if (strstr(inferior_argv[0], ".app")) {
+    if (dot_app) {
       launch_flavor = eLaunchFlavorBKS;
     }
 #elif defined WITH_SPRINGBOARD
     // Check if we have an app bundle, if so launch using SpringBoard.
-    if (strstr(inferior_argv[0], ".app")) {
+    if (dot_app) {
       launch_flavor = eLaunchFlavorSpringBoard;
     }
 #endif
@@ -789,6 +805,12 @@ void FileLogCallback(void *baton, uint32_t flags, const char *format,
   ::fflush((FILE *)baton);
 }
 
+void show_version_and_exit(int exit_code) {
+  printf("%s-%s for %s.\n", DEBUGSERVER_PROGRAM_NAME, DEBUGSERVER_VERSION_STR,
+         RNB_ARCH);
+  exit(exit_code);
+}
+
 void show_usage_and_exit(int exit_code) {
   RNBLogSTDERR(
       "Usage:\n  %s host:port [program-name program-arg1 program-arg2 ...]\n",
@@ -811,6 +833,7 @@ static struct option g_long_options[] = {
     {"debug", no_argument, NULL, 'g'},
     {"kill-on-error", no_argument, NULL, 'K'},
     {"verbose", no_argument, NULL, 'v'},
+    {"version", no_argument, NULL, 'V'},
     {"lockdown", no_argument, &g_lockdown_opt, 1}, // short option "-k"
     {"applist", no_argument, &g_applist_opt, 1},   // short option "-t"
     {"log-file", required_argument, NULL, 'l'},
@@ -870,6 +893,8 @@ static struct option g_long_options[] = {
            // current environment variables to the child process ("./debugserver
            // -F localhost:1234 -- /bin/ls"
     {NULL, 0, NULL, 0}};
+
+int communication_fd = -1;
 
 // main
 int main(int argc, char *argv[]) {
@@ -937,7 +962,6 @@ int main(int argc, char *argv[]) {
   int ch;
   int long_option_index = 0;
   int debug = 0;
-  int communication_fd = -1;
   std::string compile_options;
   std::string waitfor_pid_name; // Wait for a process that starts with this name
   std::string attach_pid_name;
@@ -1171,6 +1195,10 @@ int main(int argc, char *argv[]) {
       break;
     case 'v':
       DNBLogSetVerbose(1);
+      break;
+
+    case 'V':
+      show_version_and_exit(0);
       break;
 
     case 's':
@@ -1487,17 +1515,17 @@ int main(int argc, char *argv[]) {
 
 #if defined WITH_FBS
           // Check if we have an app bundle, if so launch using SpringBoard.
-          if (waitfor_pid_name.find(".app") != std::string::npos) {
+          if (is_dot_app(waitfor_pid_name.c_str())) {
             launch_flavor = eLaunchFlavorFBS;
           }
 #elif defined WITH_BKS
           // Check if we have an app bundle, if so launch using SpringBoard.
-          if (waitfor_pid_name.find(".app") != std::string::npos) {
+          if (is_dot_app(waitfor_pid_name.c_str())) {
             launch_flavor = eLaunchFlavorBKS;
           }
 #elif defined WITH_SPRINGBOARD
           // Check if we have an app bundle, if so launch using SpringBoard.
-          if (waitfor_pid_name.find(".app") != std::string::npos) {
+          if (is_dot_app(waitfor_pid_name.c_str())) {
             launch_flavor = eLaunchFlavorSpringBoard;
           }
 #endif

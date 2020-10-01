@@ -1,11 +1,11 @@
-// RUN: llvm-mc -filetype=obj -triple i386-pc-linux-gnu %s -relax-relocations=false -o - | llvm-readobj -r  | FileCheck  %s --check-prefix=CHECK --check-prefix=I386
-// RUN: llvm-mc -filetype=obj -triple i386-pc-elfiamcu %s -relax-relocations=false  -o - | llvm-readobj -r  | FileCheck  %s --check-prefix=CHECK --check-prefix=IAMCU
+// RUN: llvm-mc -filetype=obj -triple i386-pc-linux-gnu %s -relax-relocations=false -o - | llvm-readobj -r  - | FileCheck  %s --check-prefix=CHECK --check-prefix=I386
+// RUN: llvm-mc -filetype=obj -triple i386-pc-elfiamcu %s -relax-relocations=false  -o - | llvm-readobj -r  - | FileCheck  %s --check-prefix=CHECK --check-prefix=IAMCU
 
 // Test that we produce the correct relocation types and that the relocations
 // correctly point to the section or the symbol.
 
-// IAMCU: Format: ELF32-iamcu
-// I386: Format: ELF32-i386
+// IAMCU: Format: elf32-iamcu
+// I386: Format: elf32-i386
 // CHECK:      Relocations [
 // CHECK-NEXT:   Section {{.*}} .rel.text {
 // CHECK-NEXT:     0x2          R_386_GOTOFF     .Lfoo 0x0

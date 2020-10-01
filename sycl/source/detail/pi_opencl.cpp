@@ -23,17 +23,17 @@ pi_result OCL(piPlatformsGet)(pi_uint32      num_entries,
                               pi_platform *  platforms,
                               pi_uint32 *    num_platforms) {
   cl_int result =
-    clGetPlatformIDs(pi_cast<cl_uint>           (num_entries),
-                     pi_cast<cl_platform_id *>  (platforms),
-                     pi_cast<cl_uint *>         (num_platforms));
+    clGetPlatformIDs(cast<cl_uint>           (num_entries),
+                     cast<cl_platform_id *>  (platforms),
+                     cast<cl_uint *>         (num_platforms));
 
   // Absorb the CL_PLATFORM_NOT_FOUND_KHR and just return 0 in num_platforms
   if (result == CL_PLATFORM_NOT_FOUND_KHR) {
-    piAssert(num_platforms != 0);
+    assertion(num_platforms != 0);
     *num_platforms = 0;
     result = PI_SUCCESS;
   }
-  return pi_cast<pi_result>(result);
+  return cast<pi_result>(result);
 }
 
 
@@ -44,19 +44,19 @@ pi_result OCL(piDevicesGet)(pi_platform      platform,
                             pi_device *      devices,
                             pi_uint32 *      num_devices) {
   cl_int result =
-    clGetDeviceIDs(pi_cast<cl_platform_id> (platform),
-                   pi_cast<cl_device_type> (device_type),
-                   pi_cast<cl_uint>        (num_entries),
-                   pi_cast<cl_device_id *> (devices),
-                   pi_cast<cl_uint *>      (num_devices));
+    clGetDeviceIDs(cast<cl_platform_id> (platform),
+                   cast<cl_device_type> (device_type),
+                   cast<cl_uint>        (num_entries),
+                   cast<cl_device_id *> (devices),
+                   cast<cl_uint *>      (num_devices));
 
   // Absorb the CL_DEVICE_NOT_FOUND and just return 0 in num_devices
   if (result == CL_DEVICE_NOT_FOUND) {
-    piAssert(num_devices != 0);
+    assertion(num_devices != 0);
     *num_devices = 0;
     result = PI_SUCCESS;
   }
-  return pi_cast<pi_result>(result);
+  return cast<pi_result>(result);
 }
 
 pi_result OCL(piextDeviceSelectBinary)(
@@ -83,13 +83,13 @@ pi_result OCL(piQueueCreate)(pi_context context, pi_device device,
   PI_ASSERT(queue, "piQueueCreate failed, queue argument is null");
 
   cl_platform_id curPlatform;
-  cl_int ret_err = clGetDeviceInfo(pi_cast<cl_device_id>(device),
+  cl_int ret_err = clGetDeviceInfo(cast<cl_device_id>(device),
                                    CL_DEVICE_PLATFORM, sizeof(cl_platform_id),
                                    &curPlatform, NULL);
 
   if (ret_err != CL_SUCCESS) {
     *queue = nullptr;
-    return pi_cast<pi_result>(ret_err);
+    return cast<pi_result>(ret_err);
   }
 
   size_t platVerSize;
@@ -98,7 +98,7 @@ pi_result OCL(piQueueCreate)(pi_context context, pi_device device,
 
   if (ret_err != CL_SUCCESS) {
     *queue = nullptr;
-    return pi_cast<pi_result>(ret_err);
+    return cast<pi_result>(ret_err);
   }
 
   std::string platVer(platVerSize, '\0');
@@ -107,48 +107,45 @@ pi_result OCL(piQueueCreate)(pi_context context, pi_device device,
 
   if (ret_err != CL_SUCCESS) {
     *queue = nullptr;
-    return pi_cast<pi_result>(ret_err);
+    return cast<pi_result>(ret_err);
   }
 
   if (platVer.find("OpenCL 1.0") != std::string::npos ||
       platVer.find("OpenCL 1.1") != std::string::npos ||
       platVer.find("OpenCL 1.2") != std::string::npos) {
-    *queue = pi_cast<pi_queue>(clCreateCommandQueue(
-        pi_cast<cl_context>(context), pi_cast<cl_device_id>(device),
-        pi_cast<cl_command_queue_properties>(properties), &ret_err));
-    return pi_cast<pi_result>(ret_err);
+    *queue = cast<pi_queue>(clCreateCommandQueue(
+        cast<cl_context>(context), cast<cl_device_id>(device),
+        cast<cl_command_queue_properties>(properties), &ret_err));
+    return cast<pi_result>(ret_err);
   }
 
   cl_queue_properties CreationFlagProperties[] = {
-        CL_QUEUE_PROPERTIES, pi_cast<cl_command_queue_properties>(properties), 0
+        CL_QUEUE_PROPERTIES, cast<cl_command_queue_properties>(properties), 0
       };
-  *queue = pi_cast<pi_queue>(clCreateCommandQueueWithProperties(
-                              pi_cast<cl_context>(context),
-                              pi_cast<cl_device_id>(device),
+  *queue = cast<pi_queue>(clCreateCommandQueueWithProperties(
+                              cast<cl_context>(context),
+                              cast<cl_device_id>(device),
                               CreationFlagProperties, &ret_err));
-  return pi_cast<pi_result>(ret_err);
+  return cast<pi_result>(ret_err);
 }
 
-pi_program OCL(piProgramCreate)(pi_context context, const void *il,
-                                size_t length, pi_result *err) {
-
+pi_result OCL(piProgramCreate)(pi_context context, const void *il,
+                               size_t length, pi_program *res_program) {
   size_t deviceCount;
-  cl_program resProgram;
 
-  cl_int ret_err = clGetContextInfo(pi_cast<cl_context>(context),
+  cl_int ret_err = clGetContextInfo(cast<cl_context>(context),
                                     CL_CONTEXT_DEVICES, 0, NULL, &deviceCount);
 
-  std::vector<cl_device_id> devicesInCtx;
-  devicesInCtx.reserve(deviceCount);
+  std::vector<cl_device_id> devicesInCtx(deviceCount);
 
-  ret_err = clGetContextInfo(pi_cast<cl_context>(context), CL_CONTEXT_DEVICES,
+  ret_err = clGetContextInfo(cast<cl_context>(context), CL_CONTEXT_DEVICES,
                              deviceCount * sizeof(cl_device_id),
                              devicesInCtx.data(), NULL);
 
   if (ret_err != CL_SUCCESS || deviceCount < 1) {
-    if (err != nullptr)
-      *err = pi_cast<pi_result>(CL_INVALID_CONTEXT);
-    return pi_cast<pi_program>(resProgram);
+    if (res_program != nullptr)
+      *res_program = nullptr;
+    return cast<pi_result>(CL_INVALID_CONTEXT);
   }
 
   cl_platform_id curPlatform;
@@ -156,9 +153,9 @@ pi_program OCL(piProgramCreate)(pi_context context, const void *il,
                             sizeof(cl_platform_id), &curPlatform, NULL);
 
   if (ret_err != CL_SUCCESS) {
-    if (err != nullptr)
-      *err = pi_cast<pi_result>(CL_INVALID_CONTEXT);
-    return pi_cast<pi_program>(resProgram);
+    if (res_program != nullptr)
+      *res_program = nullptr;
+    return cast<pi_result>(CL_INVALID_CONTEXT);
   }
 
   size_t devVerSize;
@@ -169,18 +166,20 @@ pi_program OCL(piProgramCreate)(pi_context context, const void *il,
                               &devVer.front(), NULL);
 
   if (ret_err != CL_SUCCESS) {
-    if (err != nullptr)
-      *err = pi_cast<pi_result>(CL_INVALID_CONTEXT);
-    return pi_cast<pi_program>(resProgram);
+    if (res_program != nullptr)
+      *res_program = nullptr;
+    return cast<pi_result>(CL_INVALID_CONTEXT);
   }
 
+  pi_result err = PI_SUCCESS;
   if (devVer.find("OpenCL 1.0") == std::string::npos &&
       devVer.find("OpenCL 1.1") == std::string::npos &&
       devVer.find("OpenCL 1.2") == std::string::npos &&
       devVer.find("OpenCL 2.0") == std::string::npos) {
-    resProgram = clCreateProgramWithIL(pi_cast<cl_context>(context), il, length,
-                                       pi_cast<cl_int *>(err));
-    return pi_cast<pi_program>(resProgram);
+    if (res_program != nullptr)
+      *res_program = cast<pi_program>(clCreateProgramWithIL(
+          cast<cl_context>(context), il, length, cast<cl_int *>(&err)));
+    return err;
   }
 
   size_t extSize;
@@ -192,9 +191,9 @@ pi_program OCL(piProgramCreate)(pi_context context, const void *il,
 
   if (ret_err != CL_SUCCESS ||
       extStr.find("cl_khr_il_program") == std::string::npos) {
-    if (err != nullptr)
-      *err = pi_cast<pi_result>(CL_INVALID_CONTEXT);
-    return pi_cast<pi_program>(resProgram);
+    if (res_program != nullptr)
+      *res_program = nullptr;
+    return cast<pi_result>(CL_INVALID_CONTEXT);
   }
 
   using apiFuncT =
@@ -203,17 +202,48 @@ pi_program OCL(piProgramCreate)(pi_context context, const void *il,
       reinterpret_cast<apiFuncT>(clGetExtensionFunctionAddressForPlatform(
           curPlatform, "clCreateProgramWithILKHR"));
 
-  assert(funcPtr != nullptr);
-  resProgram = funcPtr(pi_cast<cl_context>(context), il, length,
-                         pi_cast<cl_int *>(err));
+  assertion(funcPtr != nullptr);
+  if (res_program != nullptr)
+    *res_program = cast<pi_program>(funcPtr(
+        cast<cl_context>(context), il, length, cast<cl_int *>(&err)));
 
-  return pi_cast<pi_program>(resProgram);
+  return err;
+}
+
+pi_result OCL(piSamplerCreate)(pi_context context,
+                               const pi_sampler_properties *sampler_properties,
+                               pi_sampler *result_sampler) {
+  // Initialize properties according to OpenCL 2.1 spec.
+  pi_result error_code;
+  pi_bool normalizedCoords = PI_TRUE;
+  pi_sampler_addressing_mode addressingMode = PI_SAMPLER_ADDRESSING_MODE_CLAMP;
+  pi_sampler_filter_mode filterMode = PI_SAMPLER_FILTER_MODE_NEAREST;
+
+  // Unpack sampler properties
+  for (std::size_t i = 0; sampler_properties && sampler_properties[i] != 0;
+       ++i) {
+    if (sampler_properties[i] == PI_SAMPLER_INFO_NORMALIZED_COORDS) {
+      normalizedCoords = static_cast<pi_bool>(sampler_properties[++i]);
+    } else if (sampler_properties[i] == PI_SAMPLER_INFO_ADDRESSING_MODE) {
+      addressingMode = static_cast<pi_sampler_addressing_mode>(sampler_properties[++i]);
+    } else if (sampler_properties[i] == PI_SAMPLER_INFO_FILTER_MODE) {
+      filterMode = static_cast<pi_sampler_filter_mode>(sampler_properties[++i]);
+    } else {
+      PI_ASSERT(false, "Cannot recognize sampler property");
+    }
+  }
+
+  // Always call OpenCL 1.0 API
+  *result_sampler = cast<pi_sampler>(clCreateSampler(cast<cl_context>(context),
+                                  normalizedCoords, addressingMode, filterMode,
+                                  cast<cl_int *>(&error_code)));
+  return error_code;
 }
 
 // Forward calls to OpenCL RT.
 #define _PI_CL(pi_api, ocl_api)                     \
-const decltype(::pi_api) * pi_api##OclPtr =         \
-    detail::pi::pi_cast<decltype(&::pi_api)>(&ocl_api);
+decltype(::pi_api) * pi_api##OclPtr =               \
+    detail::pi::cast<decltype(&::pi_api)>(&ocl_api);
 
 // Platform
 _PI_CL(piPlatformsGet,       OCL(piPlatformsGet))
@@ -237,12 +267,13 @@ _PI_CL(piQueueFinish,       clFinish)
 _PI_CL(piQueueRetain,       clRetainCommandQueue)
 _PI_CL(piQueueRelease,      clReleaseCommandQueue)
 // Memory
-_PI_CL(piMemBufferCreate,   clCreateBuffer)
-_PI_CL(piMemImageCreate,    clCreateImage)
-_PI_CL(piMemGetInfo,        clGetMemObjectInfo)
-_PI_CL(piMemImageGetInfo,   clGetImageInfo)
-_PI_CL(piMemRetain,         clRetainMemObject)
-_PI_CL(piMemRelease,        clReleaseMemObject)
+_PI_CL(piMemBufferCreate,    clCreateBuffer)
+_PI_CL(piMemImageCreate,     clCreateImage)
+_PI_CL(piMemGetInfo,         clGetMemObjectInfo)
+_PI_CL(piMemImageGetInfo,    clGetImageInfo)
+_PI_CL(piMemRetain,          clRetainMemObject)
+_PI_CL(piMemRelease,         clReleaseMemObject)
+_PI_CL(piMemBufferPartition, clCreateSubBuffer)
 // Program
 _PI_CL(piProgramCreate,             OCL(piProgramCreate))
 _PI_CL(piclProgramCreateWithSource, clCreateProgramWithSource)
@@ -272,12 +303,13 @@ _PI_CL(piEventSetStatus,        clSetUserEventStatus)
 _PI_CL(piEventRetain,           clRetainEvent)
 _PI_CL(piEventRelease,          clReleaseEvent)
 // Sampler
-_PI_CL(piSamplerCreate,         clCreateSamplerWithProperties)
+_PI_CL(piSamplerCreate,         OCL(piSamplerCreate))
 _PI_CL(piSamplerGetInfo,        clGetSamplerInfo)
 _PI_CL(piSamplerRetain,         clRetainSampler)
 _PI_CL(piSamplerRelease,        clReleaseSampler)
 // Queue commands
 _PI_CL(piEnqueueKernelLaunch,        clEnqueueNDRangeKernel)
+_PI_CL(piEnqueueNativeKernel,        clEnqueueNativeKernel)
 _PI_CL(piEnqueueEventsWait,          clEnqueueMarkerWithWaitList)
 _PI_CL(piEnqueueMemBufferRead,       clEnqueueReadBuffer)
 _PI_CL(piEnqueueMemBufferReadRect,   clEnqueueReadBufferRect)

@@ -26,6 +26,7 @@
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/AssumeBundleQueries.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/CFG.h"
@@ -42,7 +43,6 @@
 #include "llvm/Config/llvm-config.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DataLayout.h"
@@ -64,12 +64,15 @@
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Use.h"
 #include "llvm/IR/Value.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Utils.h"
+#include "llvm/Transforms/Utils/AssumeBundleBuilder.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 #include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
@@ -95,24 +98,34 @@ STATISTIC(NumGVNSimpl,  "Number of instructions simplified");
 STATISTIC(NumGVNEqProp, "Number of equalities propagated");
 STATISTIC(NumPRELoad,   "Number of loads PRE'd");
 
-static cl::opt<bool> EnablePRE("enable-pre",
-                               cl::init(true), cl::Hidden);
-static cl::opt<bool> EnableLoadPRE("enable-load-pre", cl::init(true));
-static cl::opt<bool> EnableMemDep("enable-gvn-memdep", cl::init(true));
+STATISTIC(IsValueFullyAvailableInBlockNumSpeculationsMax,
+          "Number of blocks speculated as available in "
+          "IsValueFullyAvailableInBlock(), max");
+STATISTIC(MaxBBSpeculationCutoffReachedTimes,
+          "Number of times we we reached gvn-max-block-speculations cut-off "
+          "preventing further exploration");
 
-// Maximum allowed recursion depth.
-static cl::opt<uint32_t>
-MaxRecurseDepth("gvn-max-recurse-depth", cl::Hidden, cl::init(1000), cl::ZeroOrMore,
-                cl::desc("Max recurse depth in GVN (default = 1000)"));
+static cl::opt<bool> GVNEnablePRE("enable-pre", cl::init(true), cl::Hidden);
+static cl::opt<bool> GVNEnableLoadPRE("enable-load-pre", cl::init(true));
+static cl::opt<bool> GVNEnableLoadInLoopPRE("enable-load-in-loop-pre",
+                                            cl::init(true));
+static cl::opt<bool> GVNEnableMemDep("enable-gvn-memdep", cl::init(true));
 
 static cl::opt<uint32_t> MaxNumDeps(
     "gvn-max-num-deps", cl::Hidden, cl::init(100), cl::ZeroOrMore,
     cl::desc("Max number of dependences to attempt Load PRE (default = 100)"));
 
+// This is based on IsValueFullyAvailableInBlockNumSpeculationsMax stat.
+static cl::opt<uint32_t> MaxBBSpeculations(
+    "gvn-max-block-speculations", cl::Hidden, cl::init(600), cl::ZeroOrMore,
+    cl::desc("Max number of blocks we're willing to speculate on (and recurse "
+             "into) when deducing if a value is fully available or not in GVN "
+             "(default = 600)"));
+
 struct llvm::GVN::Expression {
   uint32_t opcode;
-  Type *type;
   bool commutative = false;
+  Type *type = nullptr;
   SmallVector<uint32_t, 4> varargs;
 
   Expression(uint32_t o = ~2U) : opcode(o) {}
@@ -172,7 +185,7 @@ struct llvm::gvn::AvailableValue {
   PointerIntPair<Value *, 2, ValType> Val;
 
   /// Offset - The byte offset in Val that is interesting for the load query.
-  unsigned Offset;
+  unsigned Offset = 0;
 
   static AvailableValue get(Value *V, unsigned Offset = 0) {
     AvailableValue Res;
@@ -236,7 +249,7 @@ struct llvm::gvn::AvailableValue {
 /// the associated BasicBlock.
 struct llvm::gvn::AvailableValueInBlock {
   /// BB - The basic block in question.
-  BasicBlock *BB;
+  BasicBlock *BB = nullptr;
 
   /// AV - The actual available value
   AvailableValue AV;
@@ -278,15 +291,17 @@ GVN::Expression GVN::ValueTable::createExpr(Instruction *I) {
   if (I->isCommutative()) {
     // Ensure that commutative instructions that only differ by a permutation
     // of their operands get the same value number by sorting the operand value
-    // numbers.  Since all commutative instructions have two operands it is more
+    // numbers.  Since commutative operands are the 1st two operands it is more
     // efficient to sort by hand rather than using, say, std::sort.
-    assert(I->getNumOperands() == 2 && "Unsupported commutative instruction!");
+    assert(((isa<BinaryOperator>(I) && I->getNumOperands() == 2) ||
+            (isa<IntrinsicInst>(I) && I->getNumOperands() == 3))
+            && "Unsupported commutative instruction!");
     if (e.varargs[0] > e.varargs[1])
       std::swap(e.varargs[0], e.varargs[1]);
     e.commutative = true;
   }
 
-  if (CmpInst *C = dyn_cast<CmpInst>(I)) {
+  if (auto *C = dyn_cast<CmpInst>(I)) {
     // Sort the operand value numbers so x<y and y>x get the same value number.
     CmpInst::Predicate Predicate = C->getPredicate();
     if (e.varargs[0] > e.varargs[1]) {
@@ -295,10 +310,11 @@ GVN::Expression GVN::ValueTable::createExpr(Instruction *I) {
     }
     e.opcode = (C->getOpcode() << 8) | Predicate;
     e.commutative = true;
-  } else if (InsertValueInst *E = dyn_cast<InsertValueInst>(I)) {
-    for (InsertValueInst::idx_iterator II = E->idx_begin(), IE = E->idx_end();
-         II != IE; ++II)
-      e.varargs.push_back(*II);
+  } else if (auto *E = dyn_cast<InsertValueInst>(I)) {
+    e.varargs.append(E->idx_begin(), E->idx_end());
+  } else if (auto *SVI = dyn_cast<ShuffleVectorInst>(I)) {
+    ArrayRef<int> ShuffleMask = SVI->getShuffleMask();
+    e.varargs.append(ShuffleMask.begin(), ShuffleMask.end());
   }
 
   return e;
@@ -363,6 +379,7 @@ GVN::ValueTable::ValueTable() = default;
 GVN::ValueTable::ValueTable(const ValueTable &) = default;
 GVN::ValueTable::ValueTable(ValueTable &&) = default;
 GVN::ValueTable::~ValueTable() = default;
+GVN::ValueTable &GVN::ValueTable::operator=(const GVN::ValueTable &Arg) = default;
 
 /// add - Insert a value into the table with a specified value number.
 void GVN::ValueTable::add(Value *V, uint32_t num) {
@@ -527,6 +544,7 @@ uint32_t GVN::ValueTable::lookupOrAdd(Value *V) {
     case Instruction::AddrSpaceCast:
     case Instruction::BitCast:
     case Instruction::Select:
+    case Instruction::Freeze:
     case Instruction::ExtractElement:
     case Instruction::InsertElement:
     case Instruction::ShuffleVector:
@@ -607,6 +625,22 @@ void GVN::ValueTable::verifyRemoved(const Value *V) const {
 //                                GVN Pass
 //===----------------------------------------------------------------------===//
 
+bool GVN::isPREEnabled() const {
+  return Options.AllowPRE.getValueOr(GVNEnablePRE);
+}
+
+bool GVN::isLoadPREEnabled() const {
+  return Options.AllowLoadPRE.getValueOr(GVNEnableLoadPRE);
+}
+
+bool GVN::isLoadInLoopPREEnabled() const {
+  return Options.AllowLoadInLoopPRE.getValueOr(GVNEnableLoadInLoopPRE);
+}
+
+bool GVN::isMemDepEnabled() const {
+  return Options.AllowMemDep.getValueOr(GVNEnableMemDep);
+}
+
 PreservedAnalyses GVN::run(Function &F, FunctionAnalysisManager &AM) {
   // FIXME: The order of evaluation of these 'getResult' calls is very
   // significant! Re-ordering these variables will cause GVN when run alone to
@@ -616,16 +650,19 @@ PreservedAnalyses GVN::run(Function &F, FunctionAnalysisManager &AM) {
   auto &DT = AM.getResult<DominatorTreeAnalysis>(F);
   auto &TLI = AM.getResult<TargetLibraryAnalysis>(F);
   auto &AA = AM.getResult<AAManager>(F);
-  auto &MemDep = AM.getResult<MemoryDependenceAnalysis>(F);
+  auto *MemDep =
+      isMemDepEnabled() ? &AM.getResult<MemoryDependenceAnalysis>(F) : nullptr;
   auto *LI = AM.getCachedResult<LoopAnalysis>(F);
   auto &ORE = AM.getResult<OptimizationRemarkEmitterAnalysis>(F);
-  bool Changed = runImpl(F, AC, DT, TLI, AA, &MemDep, LI, &ORE);
+  bool Changed = runImpl(F, AC, DT, TLI, AA, MemDep, LI, &ORE);
   if (!Changed)
     return PreservedAnalyses::all();
   PreservedAnalyses PA;
   PA.preserve<DominatorTreeAnalysis>();
   PA.preserve<GlobalsAA>();
   PA.preserve<TargetLibraryAnalysis>();
+  if (LI)
+    PA.preserve<LoopAnalysis>();
   return PA;
 }
 
@@ -641,6 +678,18 @@ LLVM_DUMP_METHOD void GVN::dump(DenseMap<uint32_t, Value*>& d) const {
 }
 #endif
 
+enum class AvailabilityState : char {
+  /// We know the block *is not* fully available. This is a fixpoint.
+  Unavailable = 0,
+  /// We know the block *is* fully available. This is a fixpoint.
+  Available = 1,
+  /// We do not know whether the block is fully available or not,
+  /// but we are currently speculating that it will be.
+  /// If it would have turned out that the block was, in fact, not fully
+  /// available, this would have been cleaned up into an Unavailable.
+  SpeculativelyAvailable = 2,
+};
+
 /// Return true if we can prove that the value
 /// we're analyzing is fully available in the specified block.  As we go, keep
 /// track of which blocks we know are fully alive in FullyAvailableBlocks.  This
@@ -649,76 +698,118 @@ LLVM_DUMP_METHOD void GVN::dump(DenseMap<uint32_t, Value*>& d) const {
 ///   1) we know the block *is* fully available.
 ///   2) we do not know whether the block is fully available or not, but we are
 ///      currently speculating that it will be.
-///   3) we are speculating for this block and have used that to speculate for
-///      other blocks.
-static bool IsValueFullyAvailableInBlock(BasicBlock *BB,
-                            DenseMap<BasicBlock*, char> &FullyAvailableBlocks,
-                            uint32_t RecurseDepth) {
-  if (RecurseDepth > MaxRecurseDepth)
-    return false;
+static bool IsValueFullyAvailableInBlock(
+    BasicBlock *BB,
+    DenseMap<BasicBlock *, AvailabilityState> &FullyAvailableBlocks) {
+  SmallVector<BasicBlock *, 32> Worklist;
+  Optional<BasicBlock *> UnavailableBB;
 
-  // Optimistically assume that the block is fully available and check to see
-  // if we already know about this block in one lookup.
-  std::pair<DenseMap<BasicBlock*, char>::iterator, bool> IV =
-    FullyAvailableBlocks.insert(std::make_pair(BB, 2));
+  // The number of times we didn't find an entry for a block in a map and
+  // optimistically inserted an entry marking block as speculatively available.
+  unsigned NumNewNewSpeculativelyAvailableBBs = 0;
 
-  // If the entry already existed for this block, return the precomputed value.
-  if (!IV.second) {
-    // If this is a speculative "available" value, mark it as being used for
-    // speculation of other blocks.
-    if (IV.first->second == 2)
-      IV.first->second = 3;
-    return IV.first->second != 0;
+#ifndef NDEBUG
+  SmallSet<BasicBlock *, 32> NewSpeculativelyAvailableBBs;
+  SmallVector<BasicBlock *, 32> AvailableBBs;
+#endif
+
+  Worklist.emplace_back(BB);
+  while (!Worklist.empty()) {
+    BasicBlock *CurrBB = Worklist.pop_back_val(); // LIFO - depth-first!
+    // Optimistically assume that the block is Speculatively Available and check
+    // to see if we already know about this block in one lookup.
+    std::pair<DenseMap<BasicBlock *, AvailabilityState>::iterator, bool> IV =
+        FullyAvailableBlocks.try_emplace(
+            CurrBB, AvailabilityState::SpeculativelyAvailable);
+    AvailabilityState &State = IV.first->second;
+
+    // Did the entry already exist for this block?
+    if (!IV.second) {
+      if (State == AvailabilityState::Unavailable) {
+        UnavailableBB = CurrBB;
+        break; // Backpropagate unavailability info.
+      }
+
+#ifndef NDEBUG
+      AvailableBBs.emplace_back(CurrBB);
+#endif
+      continue; // Don't recurse further, but continue processing worklist.
+    }
+
+    // No entry found for block.
+    ++NumNewNewSpeculativelyAvailableBBs;
+    bool OutOfBudget = NumNewNewSpeculativelyAvailableBBs > MaxBBSpeculations;
+
+    // If we have exhausted our budget, mark this block as unavailable.
+    // Also, if this block has no predecessors, the value isn't live-in here.
+    if (OutOfBudget || pred_empty(CurrBB)) {
+      MaxBBSpeculationCutoffReachedTimes += (int)OutOfBudget;
+      State = AvailabilityState::Unavailable;
+      UnavailableBB = CurrBB;
+      break; // Backpropagate unavailability info.
+    }
+
+    // Tentatively consider this block as speculatively available.
+#ifndef NDEBUG
+    NewSpeculativelyAvailableBBs.insert(CurrBB);
+#endif
+    // And further recurse into block's predecessors, in depth-first order!
+    Worklist.append(pred_begin(CurrBB), pred_end(CurrBB));
   }
 
-  // Otherwise, see if it is fully available in all predecessors.
-  pred_iterator PI = pred_begin(BB), PE = pred_end(BB);
+#if LLVM_ENABLE_STATS
+  IsValueFullyAvailableInBlockNumSpeculationsMax.updateMax(
+      NumNewNewSpeculativelyAvailableBBs);
+#endif
 
-  // If this block has no predecessors, it isn't live-in here.
-  if (PI == PE)
-    goto SpeculationFailure;
+  // If the block isn't marked as fixpoint yet
+  // (the Unavailable and Available states are fixpoints)
+  auto MarkAsFixpointAndEnqueueSuccessors =
+      [&](BasicBlock *BB, AvailabilityState FixpointState) {
+        auto It = FullyAvailableBlocks.find(BB);
+        if (It == FullyAvailableBlocks.end())
+          return; // Never queried this block, leave as-is.
+        switch (AvailabilityState &State = It->second) {
+        case AvailabilityState::Unavailable:
+        case AvailabilityState::Available:
+          return; // Don't backpropagate further, continue processing worklist.
+        case AvailabilityState::SpeculativelyAvailable: // Fix it!
+          State = FixpointState;
+#ifndef NDEBUG
+          assert(NewSpeculativelyAvailableBBs.erase(BB) &&
+                 "Found a speculatively available successor leftover?");
+#endif
+          // Queue successors for further processing.
+          Worklist.append(succ_begin(BB), succ_end(BB));
+          return;
+        }
+      };
 
-  for (; PI != PE; ++PI)
-    // If the value isn't fully available in one of our predecessors, then it
-    // isn't fully available in this block either.  Undo our previous
-    // optimistic assumption and bail out.
-    if (!IsValueFullyAvailableInBlock(*PI, FullyAvailableBlocks,RecurseDepth+1))
-      goto SpeculationFailure;
-
-  return true;
-
-// If we get here, we found out that this is not, after
-// all, a fully-available block.  We have a problem if we speculated on this and
-// used the speculation to mark other blocks as available.
-SpeculationFailure:
-  char &BBVal = FullyAvailableBlocks[BB];
-
-  // If we didn't speculate on this, just return with it set to false.
-  if (BBVal == 2) {
-    BBVal = 0;
-    return false;
+  if (UnavailableBB) {
+    // Okay, we have encountered an unavailable block.
+    // Mark speculatively available blocks reachable from UnavailableBB as
+    // unavailable as well. Paths are terminated when they reach blocks not in
+    // FullyAvailableBlocks or they are not marked as speculatively available.
+    Worklist.clear();
+    Worklist.append(succ_begin(*UnavailableBB), succ_end(*UnavailableBB));
+    while (!Worklist.empty())
+      MarkAsFixpointAndEnqueueSuccessors(Worklist.pop_back_val(),
+                                         AvailabilityState::Unavailable);
   }
 
-  // If we did speculate on this value, we could have blocks set to 1 that are
-  // incorrect.  Walk the (transitive) successors of this block and mark them as
-  // 0 if set to one.
-  SmallVector<BasicBlock*, 32> BBWorklist;
-  BBWorklist.push_back(BB);
+#ifndef NDEBUG
+  Worklist.clear();
+  for (BasicBlock *AvailableBB : AvailableBBs)
+    Worklist.append(succ_begin(AvailableBB), succ_end(AvailableBB));
+  while (!Worklist.empty())
+    MarkAsFixpointAndEnqueueSuccessors(Worklist.pop_back_val(),
+                                       AvailabilityState::Available);
 
-  do {
-    BasicBlock *Entry = BBWorklist.pop_back_val();
-    // Note that this sets blocks to 0 (unavailable) if they happen to not
-    // already be in FullyAvailableBlocks.  This is safe.
-    char &EntryVal = FullyAvailableBlocks[Entry];
-    if (EntryVal == 0) continue;  // Already unavailable.
+  assert(NewSpeculativelyAvailableBBs.empty() &&
+         "Must have fixed all the new speculatively available blocks.");
+#endif
 
-    // Mark as unavailable.
-    EntryVal = 0;
-
-    BBWorklist.append(succ_begin(Entry), succ_end(Entry));
-  } while (!BBWorklist.empty());
-
-  return false;
+  return !UnavailableBB;
 }
 
 /// Given a set of loads specified by ValuesPerBlock,
@@ -922,6 +1013,7 @@ bool GVN::AnalyzeLoadAvailability(LoadInst *LI, MemDepResult DepInfo,
 
   // Loading the allocation -> undef.
   if (isa<AllocaInst>(DepInst) || isMallocLikeFn(DepInst, TLI) ||
+      isAlignedAllocLikeFn(DepInst, TLI) ||
       // Loading immediately after lifetime begin -> undef.
       isLifetimeStart(DepInst)) {
     Res = AvailableValue::get(UndefValue::get(LI->getType()));
@@ -1080,11 +1172,11 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
   // Check to see how many predecessors have the loaded value fully
   // available.
   MapVector<BasicBlock *, Value *> PredLoads;
-  DenseMap<BasicBlock*, char> FullyAvailableBlocks;
+  DenseMap<BasicBlock *, AvailabilityState> FullyAvailableBlocks;
   for (const AvailableValueInBlock &AV : ValuesPerBlock)
-    FullyAvailableBlocks[AV.BB] = true;
+    FullyAvailableBlocks[AV.BB] = AvailabilityState::Available;
   for (BasicBlock *UnavailableBB : UnavailableBlocks)
-    FullyAvailableBlocks[UnavailableBB] = false;
+    FullyAvailableBlocks[UnavailableBB] = AvailabilityState::Unavailable;
 
   SmallVector<BasicBlock *, 4> CriticalEdgePred;
   for (BasicBlock *Pred : predecessors(LoadBB)) {
@@ -1097,7 +1189,7 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
       return false;
     }
 
-    if (IsValueFullyAvailableInBlock(Pred, FullyAvailableBlocks, 0)) {
+    if (IsValueFullyAvailableInBlock(Pred, FullyAvailableBlocks)) {
       continue;
     }
 
@@ -1161,15 +1253,30 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
 
     // Do PHI translation to get its value in the predecessor if necessary.  The
     // returned pointer (if non-null) is guaranteed to dominate UnavailablePred.
+    // We do the translation for each edge we skipped by going from LI's block
+    // to LoadBB, otherwise we might miss pieces needing translation.
 
     // If all preds have a single successor, then we know it is safe to insert
     // the load on the pred (?!?), so we can insert code to materialize the
     // pointer if it is not available.
-    PHITransAddr Address(LI->getPointerOperand(), DL, AC);
-    Value *LoadPtr = nullptr;
-    LoadPtr = Address.PHITranslateWithInsertion(LoadBB, UnavailablePred,
-                                                *DT, NewInsts);
+    Value *LoadPtr = LI->getPointerOperand();
+    BasicBlock *Cur = LI->getParent();
+    while (Cur != LoadBB) {
+      PHITransAddr Address(LoadPtr, DL, AC);
+      LoadPtr = Address.PHITranslateWithInsertion(
+          Cur, Cur->getSinglePredecessor(), *DT, NewInsts);
+      if (!LoadPtr) {
+        CanDoPRE = false;
+        break;
+      }
+      Cur = Cur->getSinglePredecessor();
+    }
 
+    if (LoadPtr) {
+      PHITransAddr Address(LoadPtr, DL, AC);
+      LoadPtr = Address.PHITranslateWithInsertion(LoadBB, UnavailablePred, *DT,
+                                                  NewInsts);
+    }
     // If we couldn't find or insert a computation of this phi translated value,
     // we fail PRE.
     if (!LoadPtr) {
@@ -1184,8 +1291,12 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
 
   if (!CanDoPRE) {
     while (!NewInsts.empty()) {
-      Instruction *I = NewInsts.pop_back_val();
-      markInstructionForDeletion(I);
+      // Erase instructions generated by the failed PHI translation before
+      // trying to number them. PHI translation might insert instructions
+      // in basic blocks other than the current one, and we delete them
+      // directly, as markInstructionForDeletion only allows removing from the
+      // current basic block.
+      NewInsts.pop_back_val()->eraseFromParent();
     }
     // HINT: Don't revert the edge-splitting as following transformation may
     // also need to split these critical edges.
@@ -1219,10 +1330,10 @@ bool GVN::PerformLoadPRE(LoadInst *LI, AvailValInBlkVect &ValuesPerBlock,
     BasicBlock *UnavailablePred = PredLoad.first;
     Value *LoadPtr = PredLoad.second;
 
-    auto *NewLoad =
-        new LoadInst(LI->getType(), LoadPtr, LI->getName() + ".pre",
-                     LI->isVolatile(), LI->getAlignment(), LI->getOrdering(),
-                     LI->getSyncScopeID(), UnavailablePred->getTerminator());
+    auto *NewLoad = new LoadInst(
+        LI->getType(), LoadPtr, LI->getName() + ".pre", LI->isVolatile(),
+        LI->getAlign(), LI->getOrdering(), LI->getSyncScopeID(),
+        UnavailablePred->getTerminator());
     NewLoad->setDebugLoc(LI->getDebugLoc());
 
     // Transfer the old load's AA tags to the new load.
@@ -1359,10 +1470,74 @@ bool GVN::processNonLocalLoad(LoadInst *LI) {
   }
 
   // Step 4: Eliminate partial redundancy.
-  if (!EnablePRE || !EnableLoadPRE)
+  if (!isPREEnabled() || !isLoadPREEnabled())
+    return false;
+  if (!isLoadInLoopPREEnabled() && this->LI &&
+      this->LI->getLoopFor(LI->getParent()))
     return false;
 
   return PerformLoadPRE(LI, ValuesPerBlock, UnavailableBlocks);
+}
+
+static bool impliesEquivalanceIfTrue(CmpInst* Cmp) {
+  if (Cmp->getPredicate() == CmpInst::Predicate::ICMP_EQ)
+    return true;
+
+  // Floating point comparisons can be equal, but not equivalent.  Cases:
+  // NaNs for unordered operators
+  // +0.0 vs 0.0 for all operators
+  if (Cmp->getPredicate() == CmpInst::Predicate::FCMP_OEQ ||
+      (Cmp->getPredicate() == CmpInst::Predicate::FCMP_UEQ &&
+       Cmp->getFastMathFlags().noNaNs())) {
+      Value *LHS = Cmp->getOperand(0);
+      Value *RHS = Cmp->getOperand(1);
+      // If we can prove either side non-zero, then equality must imply
+      // equivalence.
+      // FIXME: We should do this optimization if 'no signed zeros' is
+      // applicable via an instruction-level fast-math-flag or some other
+      // indicator that relaxed FP semantics are being used.
+      if (isa<ConstantFP>(LHS) && !cast<ConstantFP>(LHS)->isZero())
+        return true;
+      if (isa<ConstantFP>(RHS) && !cast<ConstantFP>(RHS)->isZero())
+        return true;;
+      // TODO: Handle vector floating point constants
+  }
+  return false;
+}
+
+static bool impliesEquivalanceIfFalse(CmpInst* Cmp) {
+  if (Cmp->getPredicate() == CmpInst::Predicate::ICMP_NE)
+    return true;
+
+  // Floating point comparisons can be equal, but not equivelent.  Cases:
+  // NaNs for unordered operators
+  // +0.0 vs 0.0 for all operators
+  if ((Cmp->getPredicate() == CmpInst::Predicate::FCMP_ONE &&
+       Cmp->getFastMathFlags().noNaNs()) ||
+      Cmp->getPredicate() == CmpInst::Predicate::FCMP_UNE) {
+      Value *LHS = Cmp->getOperand(0);
+      Value *RHS = Cmp->getOperand(1);
+      // If we can prove either side non-zero, then equality must imply
+      // equivalence.
+      // FIXME: We should do this optimization if 'no signed zeros' is
+      // applicable via an instruction-level fast-math-flag or some other
+      // indicator that relaxed FP semantics are being used.
+      if (isa<ConstantFP>(LHS) && !cast<ConstantFP>(LHS)->isZero())
+        return true;
+      if (isa<ConstantFP>(RHS) && !cast<ConstantFP>(RHS)->isZero())
+        return true;;
+      // TODO: Handle vector floating point constants
+  }
+  return false;
+}
+
+
+static bool hasUsersIn(Value *V, BasicBlock *BB) {
+  for (User *U : V->users())
+    if (isa<Instruction>(U) &&
+        cast<Instruction>(U)->getParent() == BB)
+      return true;
+  return false;
 }
 
 bool GVN::processAssumeIntrinsic(IntrinsicInst *IntrinsicI) {
@@ -1380,7 +1555,8 @@ bool GVN::processAssumeIntrinsic(IntrinsicInst *IntrinsicI) {
                     Constant::getNullValue(Int8Ty->getPointerTo()),
                     IntrinsicI);
     }
-    markInstructionForDeletion(IntrinsicI);
+    if (isAssumeWithEmptyBundle(*IntrinsicI))
+      markInstructionForDeletion(IntrinsicI);
     return false;
   } else if (isa<Constant>(V)) {
     // If it's not false, and constant, it must evaluate to true. This means our
@@ -1403,26 +1579,65 @@ bool GVN::processAssumeIntrinsic(IntrinsicInst *IntrinsicI) {
   // We can replace assume value with true, which covers cases like this:
   // call void @llvm.assume(i1 %cmp)
   // br i1 %cmp, label %bb1, label %bb2 ; will change %cmp to true
-  ReplaceWithConstMap[V] = True;
+  ReplaceOperandsWithMap[V] = True;
 
-  // If one of *cmp *eq operand is const, adding it to map will cover this:
+  // If we find an equality fact, canonicalize all dominated uses in this block
+  // to one of the two values.  We heuristically choice the "oldest" of the
+  // two where age is determined by value number. (Note that propagateEquality
+  // above handles the cross block case.)
+  //
+  // Key case to cover are:
+  // 1)
   // %cmp = fcmp oeq float 3.000000e+00, %0 ; const on lhs could happen
   // call void @llvm.assume(i1 %cmp)
   // ret float %0 ; will change it to ret float 3.000000e+00
+  // 2)
+  // %load = load float, float* %addr
+  // %cmp = fcmp oeq float %load, %0
+  // call void @llvm.assume(i1 %cmp)
+  // ret float %load ; will change it to ret float %0
   if (auto *CmpI = dyn_cast<CmpInst>(V)) {
-    if (CmpI->getPredicate() == CmpInst::Predicate::ICMP_EQ ||
-        CmpI->getPredicate() == CmpInst::Predicate::FCMP_OEQ ||
-        (CmpI->getPredicate() == CmpInst::Predicate::FCMP_UEQ &&
-         CmpI->getFastMathFlags().noNaNs())) {
+    if (impliesEquivalanceIfTrue(CmpI)) {
       Value *CmpLHS = CmpI->getOperand(0);
       Value *CmpRHS = CmpI->getOperand(1);
-      if (isa<Constant>(CmpLHS))
+      // Heuristically pick the better replacement -- the choice of heuristic
+      // isn't terribly important here, but the fact we canonicalize on some
+      // replacement is for exposing other simplifications.
+      // TODO: pull this out as a helper function and reuse w/existing
+      // (slightly different) logic.
+      if (isa<Constant>(CmpLHS) && !isa<Constant>(CmpRHS))
         std::swap(CmpLHS, CmpRHS);
-      auto *RHSConst = dyn_cast<Constant>(CmpRHS);
+      if (!isa<Instruction>(CmpLHS) && isa<Instruction>(CmpRHS))
+        std::swap(CmpLHS, CmpRHS);
+      if ((isa<Argument>(CmpLHS) && isa<Argument>(CmpRHS)) ||
+          (isa<Instruction>(CmpLHS) && isa<Instruction>(CmpRHS))) {
+        // Move the 'oldest' value to the right-hand side, using the value
+        // number as a proxy for age.
+        uint32_t LVN = VN.lookupOrAdd(CmpLHS);
+        uint32_t RVN = VN.lookupOrAdd(CmpRHS);
+        if (LVN < RVN)
+          std::swap(CmpLHS, CmpRHS);
+      }
 
-      // If only one operand is constant.
-      if (RHSConst != nullptr && !isa<Constant>(CmpLHS))
-        ReplaceWithConstMap[CmpLHS] = RHSConst;
+      // Handle degenerate case where we either haven't pruned a dead path or a
+      // removed a trivial assume yet.
+      if (isa<Constant>(CmpLHS) && isa<Constant>(CmpRHS))
+        return Changed;
+
+      LLVM_DEBUG(dbgs() << "Replacing dominated uses of "
+                 << *CmpLHS << " with "
+                 << *CmpRHS << " in block "
+                 << IntrinsicI->getParent()->getName() << "\n");
+
+
+      // Setup the replacement map - this handles uses within the same block
+      if (hasUsersIn(CmpLHS, IntrinsicI->getParent()))
+        ReplaceOperandsWithMap[CmpLHS] = CmpRHS;
+
+      // NOTE: The non-block local cases are handled by the call to
+      // propagateEquality above; this block is just about handling the block
+      // local cases.  TODO: There's a bunch of logic in propagateEqualiy which
+      // isn't duplicated for the block local case, can we share it somehow?
     }
   }
   return Changed;
@@ -1522,6 +1737,41 @@ uint32_t GVN::ValueTable::phiTranslate(const BasicBlock *Pred,
   return NewNum;
 }
 
+// Return true if the value number \p Num and NewNum have equal value.
+// Return false if the result is unknown.
+bool GVN::ValueTable::areCallValsEqual(uint32_t Num, uint32_t NewNum,
+                                       const BasicBlock *Pred,
+                                       const BasicBlock *PhiBlock, GVN &Gvn) {
+  CallInst *Call = nullptr;
+  LeaderTableEntry *Vals = &Gvn.LeaderTable[Num];
+  while (Vals) {
+    Call = dyn_cast<CallInst>(Vals->Val);
+    if (Call && Call->getParent() == PhiBlock)
+      break;
+    Vals = Vals->Next;
+  }
+
+  if (AA->doesNotAccessMemory(Call))
+    return true;
+
+  if (!MD || !AA->onlyReadsMemory(Call))
+    return false;
+
+  MemDepResult local_dep = MD->getDependency(Call);
+  if (!local_dep.isNonLocal())
+    return false;
+
+  const MemoryDependenceResults::NonLocalDepInfo &deps =
+      MD->getNonLocalCallDependency(Call);
+
+  // Check to see if the Call has no function local clobber.
+  for (unsigned i = 0; i < deps.size(); i++) {
+    if (deps[i].getResult().isNonFuncLocal())
+      return true;
+  }
+  return false;
+}
+
 /// Translate value number \p Num using phis, so that it has the values of
 /// the phis in BB.
 uint32_t GVN::ValueTable::phiTranslateImpl(const BasicBlock *Pred,
@@ -1551,13 +1801,16 @@ uint32_t GVN::ValueTable::phiTranslateImpl(const BasicBlock *Pred,
     // instead of value numbers. Those index numbers should not be
     // translated.
     if ((i > 1 && Exp.opcode == Instruction::InsertValue) ||
-        (i > 0 && Exp.opcode == Instruction::ExtractValue))
+        (i > 0 && Exp.opcode == Instruction::ExtractValue) ||
+        (i > 1 && Exp.opcode == Instruction::ShuffleVector))
       continue;
     Exp.varargs[i] = phiTranslate(Pred, PhiBlock, Exp.varargs[i], Gvn);
   }
 
   if (Exp.commutative) {
-    assert(Exp.varargs.size() == 2 && "Unsupported commutative expression!");
+    assert((Exp.varargs.size() == 2 ||
+            (Exp.opcode == Instruction::Call && Exp.varargs.size() == 3))
+            && "Unsupported commutative instruction!");
     if (Exp.varargs[0] > Exp.varargs[1]) {
       std::swap(Exp.varargs[0], Exp.varargs[1]);
       uint32_t Opcode = Exp.opcode >> 8;
@@ -1568,8 +1821,11 @@ uint32_t GVN::ValueTable::phiTranslateImpl(const BasicBlock *Pred,
     }
   }
 
-  if (uint32_t NewNum = expressionNumbering[Exp])
+  if (uint32_t NewNum = expressionNumbering[Exp]) {
+    if (Exp.opcode == Instruction::Call && NewNum != Num)
+      return areCallValsEqual(Num, NewNum, Pred, PhiBlock, Gvn) ? NewNum : Num;
     return NewNum;
+  }
   return Num;
 }
 
@@ -1637,16 +1893,12 @@ void GVN::assignBlockRPONumber(Function &F) {
   InvalidBlockRPONumbers = false;
 }
 
-// Tries to replace instruction with const, using information from
-// ReplaceWithConstMap.
-bool GVN::replaceOperandsWithConsts(Instruction *Instr) const {
+bool GVN::replaceOperandsForInBlockEquality(Instruction *Instr) const {
   bool Changed = false;
   for (unsigned OpNum = 0; OpNum < Instr->getNumOperands(); ++OpNum) {
     Value *Operand = Instr->getOperand(OpNum);
-    auto it = ReplaceWithConstMap.find(Operand);
-    if (it != ReplaceWithConstMap.end()) {
-      assert(!isa<Constant>(Operand) &&
-             "Replacing constants with constants is invalid");
+    auto it = ReplaceOperandsWithMap.find(Operand);
+    if (it != ReplaceOperandsWithMap.end()) {
       LLVM_DEBUG(dbgs() << "GVN replacing: " << *Operand << " with "
                         << *it->second << " in instruction " << *Instr << '\n');
       Instr->setOperand(OpNum, it->second);
@@ -1763,26 +2015,11 @@ bool GVN::propagateEquality(Value *LHS, Value *RHS, const BasicBlockEdge &Root,
       Value *Op0 = Cmp->getOperand(0), *Op1 = Cmp->getOperand(1);
 
       // If "A == B" is known true, or "A != B" is known false, then replace
-      // A with B everywhere in the scope.
-      if ((isKnownTrue && Cmp->getPredicate() == CmpInst::ICMP_EQ) ||
-          (isKnownFalse && Cmp->getPredicate() == CmpInst::ICMP_NE))
+      // A with B everywhere in the scope.  For floating point operations, we
+      // have to be careful since equality does not always imply equivalance.
+      if ((isKnownTrue && impliesEquivalanceIfTrue(Cmp)) ||
+          (isKnownFalse && impliesEquivalanceIfFalse(Cmp)))
         Worklist.push_back(std::make_pair(Op0, Op1));
-
-      // Handle the floating point versions of equality comparisons too.
-      if ((isKnownTrue && Cmp->getPredicate() == CmpInst::FCMP_OEQ) ||
-          (isKnownFalse && Cmp->getPredicate() == CmpInst::FCMP_UNE)) {
-
-        // Floating point -0.0 and 0.0 compare equal, so we can only
-        // propagate values if we know that we have a constant and that
-        // its value is non-zero.
-
-        // FIXME: We should do this optimization if 'no signed zeros' is
-        // applicable via an instruction-level fast-math-flag or some other
-        // indicator that relaxed FP semantics are being used.
-
-        if (isa<ConstantFP>(Op1) && !cast<ConstantFP>(Op1)->isZero())
-          Worklist.push_back(std::make_pair(Op0, Op1));
-      }
 
       // If "A >= B" is known true, replace "A < B" with false everywhere.
       CmpInst::Predicate NotPred = Cmp->getInversePredicate();
@@ -1974,8 +2211,9 @@ bool GVN::runImpl(Function &F, AssumptionCache &RunAC, DominatorTree &RunDT,
   TLI = &RunTLI;
   VN.setAliasAnalysis(&RunAA);
   MD = RunMD;
-  ImplicitControlFlowTracking ImplicitCFT(DT);
+  ImplicitControlFlowTracking ImplicitCFT;
   ICF = &ImplicitCFT;
+  this->LI = LI;
   VN.setMemDep(MD);
   ORE = RunORE;
   InvalidBlockRPONumbers = true;
@@ -2004,7 +2242,7 @@ bool GVN::runImpl(Function &F, AssumptionCache &RunAC, DominatorTree &RunDT,
     ++Iteration;
   }
 
-  if (EnablePRE) {
+  if (isPREEnabled()) {
     // Fabricate val-num for dead-code in order to suppress assertion in
     // performPRE().
     assignValNumForDeadCode();
@@ -2037,13 +2275,13 @@ bool GVN::processBlock(BasicBlock *BB) {
     return false;
 
   // Clearing map before every BB because it can be used only for single BB.
-  ReplaceWithConstMap.clear();
+  ReplaceOperandsWithMap.clear();
   bool ChangedFunction = false;
 
   for (BasicBlock::iterator BI = BB->begin(), BE = BB->end();
        BI != BE;) {
-    if (!ReplaceWithConstMap.empty())
-      ChangedFunction |= replaceOperandsWithConsts(&*BI);
+    if (!ReplaceOperandsWithMap.empty())
+      ChangedFunction |= replaceOperandsForInBlockEquality(&*BI);
     ChangedFunction |= processInstruction(&*BI);
 
     if (InstrsToErase.empty()) {
@@ -2062,6 +2300,7 @@ bool GVN::processBlock(BasicBlock *BB) {
     for (auto *I : InstrsToErase) {
       assert(I->getParent() == BB && "Removing instruction from wrong block?");
       LLVM_DEBUG(dbgs() << "GVN removed: " << *I << '\n');
+      salvageKnowledge(I, AC);
       salvageDebugInfo(*I);
       if (MD) MD->removeInstruction(I);
       LLVM_DEBUG(verifyRemoved(I));
@@ -2334,8 +2573,11 @@ bool GVN::performPRE(Function &F) {
 /// Split the critical edge connecting the given two blocks, and return
 /// the block inserted to the critical edge.
 BasicBlock *GVN::splitCriticalEdges(BasicBlock *Pred, BasicBlock *Succ) {
-  BasicBlock *BB =
-      SplitCriticalEdge(Pred, Succ, CriticalEdgeSplittingOptions(DT));
+  // GVN does not require loop-simplify, do not try to preserve it if it is not
+  // possible.
+  BasicBlock *BB = SplitCriticalEdge(
+      Pred, Succ,
+      CriticalEdgeSplittingOptions(DT, LI).unsetPreserveLoopSimplify());
   if (MD)
     MD->invalidateCachedPredecessors();
   InvalidBlockRPONumbers = true;
@@ -2350,7 +2592,7 @@ bool GVN::splitCriticalEdges() {
   do {
     std::pair<Instruction *, unsigned> Edge = toSplit.pop_back_val();
     SplitCriticalEdge(Edge.first, Edge.second,
-                      CriticalEdgeSplittingOptions(DT));
+                      CriticalEdgeSplittingOptions(DT, LI));
   } while (!toSplit.empty());
   if (MD) MD->invalidateCachedPredecessors();
   InvalidBlockRPONumbers = true;
@@ -2456,18 +2698,26 @@ void GVN::addDeadBlock(BasicBlock *BB) {
     if (DeadBlocks.count(B))
       continue;
 
+    // First, split the critical edges. This might also create additional blocks
+    // to preserve LoopSimplify form and adjust edges accordingly.
     SmallVector<BasicBlock *, 4> Preds(pred_begin(B), pred_end(B));
     for (BasicBlock *P : Preds) {
       if (!DeadBlocks.count(P))
         continue;
 
-      if (isCriticalEdge(P->getTerminator(), GetSuccessorNumber(P, B))) {
+      if (llvm::any_of(successors(P),
+                       [B](BasicBlock *Succ) { return Succ == B; }) &&
+          isCriticalEdge(P->getTerminator(), B)) {
         if (BasicBlock *S = splitCriticalEdges(P, B))
           DeadBlocks.insert(P = S);
       }
+    }
 
-      for (BasicBlock::iterator II = B->begin(); isa<PHINode>(II); ++II) {
-        PHINode &Phi = cast<PHINode>(*II);
+    // Now undef the incoming values from the dead predecessors.
+    for (BasicBlock *P : predecessors(B)) {
+      if (!DeadBlocks.count(P))
+        continue;
+      for (PHINode &Phi : B->phis()) {
         Phi.setIncomingValueForBlock(P, UndefValue::get(Phi.getType()));
         if (MD)
           MD->invalidateCachedPointerInfo(&Phi);
@@ -2530,8 +2780,8 @@ class llvm::gvn::GVNLegacyPass : public FunctionPass {
 public:
   static char ID; // Pass identification, replacement for typeid
 
-  explicit GVNLegacyPass(bool NoMemDepAnalysis = !EnableMemDep)
-      : FunctionPass(ID), NoMemDepAnalysis(NoMemDepAnalysis) {
+  explicit GVNLegacyPass(bool NoMemDepAnalysis = !GVNEnableMemDep)
+      : FunctionPass(ID), Impl(GVNOptions().setMemDep(!NoMemDepAnalysis)) {
     initializeGVNLegacyPassPass(*PassRegistry::getPassRegistry());
   }
 
@@ -2544,10 +2794,11 @@ public:
     return Impl.runImpl(
         F, getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F),
         getAnalysis<DominatorTreeWrapperPass>().getDomTree(),
-        getAnalysis<TargetLibraryInfoWrapperPass>().getTLI(),
+        getAnalysis<TargetLibraryInfoWrapperPass>().getTLI(F),
         getAnalysis<AAResultsWrapperPass>().getAAResults(),
-        NoMemDepAnalysis ? nullptr
-                : &getAnalysis<MemoryDependenceWrapperPass>().getMemDep(),
+        Impl.isMemDepEnabled()
+            ? &getAnalysis<MemoryDependenceWrapperPass>().getMemDep()
+            : nullptr,
         LIWP ? &LIWP->getLoopInfo() : nullptr,
         &getAnalysis<OptimizationRemarkEmitterWrapperPass>().getORE());
   }
@@ -2556,18 +2807,19 @@ public:
     AU.addRequired<AssumptionCacheTracker>();
     AU.addRequired<DominatorTreeWrapperPass>();
     AU.addRequired<TargetLibraryInfoWrapperPass>();
-    if (!NoMemDepAnalysis)
+    AU.addRequired<LoopInfoWrapperPass>();
+    if (Impl.isMemDepEnabled())
       AU.addRequired<MemoryDependenceWrapperPass>();
     AU.addRequired<AAResultsWrapperPass>();
 
     AU.addPreserved<DominatorTreeWrapperPass>();
     AU.addPreserved<GlobalsAAWrapperPass>();
     AU.addPreserved<TargetLibraryInfoWrapperPass>();
+    AU.addPreserved<LoopInfoWrapperPass>();
     AU.addRequired<OptimizationRemarkEmitterWrapperPass>();
   }
 
 private:
-  bool NoMemDepAnalysis;
   GVN Impl;
 };
 

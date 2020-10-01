@@ -50,7 +50,8 @@ def execute_command(cmd, cwd=None):
         'stdin': subprocess.PIPE,
         'stdout': subprocess.PIPE,
         'stderr': subprocess.PIPE,
-        'cwd': cwd
+        'cwd': cwd,
+        'universal_newlines': True
     }
     p = subprocess.Popen(cmd, **kwargs)
     out, err = p.communicate()
@@ -92,7 +93,7 @@ def main():
     parser.add_argument(
         '-L', dest='search_paths',
         help='Paths to search for the libraries along', action='append',
-        nargs=1)
+        nargs=1, default=[])
     parser.add_argument(
         '--ar', dest='ar_exe', required=False,
         help='The ar executable to use, finds \'ar\' in the path if not given',
@@ -142,7 +143,7 @@ def main():
 
     if args.use_libtool:
         files = [f for f in files if not f.startswith('__.SYMDEF')]
-        execute_command_verbose([libtool_exe, '-static', '-o', args.output] + files,
+        execute_command_verbose([libtool_exe, '-static', '-o', args.output, '-s'] + files,
                                 cwd=temp_directory_root, verbose=args.verbose)
     else:
         execute_command_verbose([ar_exe, 'rcs', args.output] + files,

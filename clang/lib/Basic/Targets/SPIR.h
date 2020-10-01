@@ -16,7 +16,9 @@
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/TargetOptions.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/Support/Compiler.h"
+#include "OSTargets.h"
 
 namespace clang {
 namespace targets {
@@ -28,14 +30,14 @@ static const unsigned SPIRAddrSpaceMap[] = {
     2, // opencl_constant
     0, // opencl_private
     4, // opencl_generic
+    5, // opencl_global_device
+    6, // opencl_global_host
     0, // cuda_device
     0, // cuda_constant
     0, // cuda_shared
-    1, // sycl_global
-    3, // sycl_local
-    2, // sycl_constant
-    0, // sycl_private
-    4, // sycl_generic
+    0, // ptr32_sptr
+    0, // ptr32_uptr
+    0  // ptr64
 };
 
 static const unsigned SYCLAddrSpaceMap[] = {
@@ -45,14 +47,14 @@ static const unsigned SYCLAddrSpaceMap[] = {
     2, // opencl_constant
     0, // opencl_private
     4, // opencl_generic
+    5, // opencl_global_device
+    6, // opencl_global_host
     0, // cuda_device
     0, // cuda_constant
     0, // cuda_shared
-    1, // sycl_global
-    3, // sycl_local
-    2, // sycl_constant
-    0, // sycl_private
-    4, // sycl_generic
+    0, // ptr32_sptr
+    0, // ptr32_uptr
+    0  // ptr64
 };
 
 class LLVM_LIBRARY_VISIBILITY SPIRTargetInfo : public TargetInfo {
@@ -62,12 +64,9 @@ public:
     TLSSupported = false;
     VLASupported = false;
     LongWidth = LongAlign = 64;
-    if (Triple.getEnvironment() == llvm::Triple::SYCLDevice &&
-        !getenv("DISABLE_INFER_AS")) {
-      AddrSpaceMap = &SYCLAddrSpaceMap;
-    } else {
-      AddrSpaceMap = &SPIRAddrSpaceMap;
-    }
+    AddrSpaceMap = (Triple.getEnvironment() == llvm::Triple::SYCLDevice)
+                       ? &SYCLAddrSpaceMap
+                       : &SPIRAddrSpaceMap;
     UseAddrSpaceMapMangling = true;
     HasLegalHalfType = true;
     HasFloat16 = true;
@@ -111,7 +110,7 @@ public:
                                                             : CCCR_Warning;
   }
 
-  CallingConv getDefaultCallingConv(CallingConvMethodType MT) const override {
+  CallingConv getDefaultCallingConv() const override {
     return CC_SpirFunction;
   }
 
@@ -120,6 +119,8 @@ public:
     // for SPIR since it is a generic target.
     getSupportedOpenCLOpts().supportAll();
   }
+
+  bool hasExtIntType() const override { return true; }
 };
 class LLVM_LIBRARY_VISIBILITY SPIR32TargetInfo : public SPIRTargetInfo {
 public:
@@ -128,8 +129,9 @@ public:
     PointerWidth = PointerAlign = 32;
     SizeType = TargetInfo::UnsignedInt;
     PtrDiffType = IntPtrType = TargetInfo::SignedInt;
-    resetDataLayout("e-p:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-"
-                    "v96:128-v192:256-v256:256-v512:512-v1024:1024");
+    resetDataLayout(
+        "e-p:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-"
+        "v96:128-v192:256-v256:256-v512:512-v1024:1024-n8:16:32:64");
   }
 
   void getTargetDefines(const LangOptions &Opts,
@@ -143,8 +145,10 @@ public:
     PointerWidth = PointerAlign = 64;
     SizeType = TargetInfo::UnsignedLong;
     PtrDiffType = IntPtrType = TargetInfo::SignedLong;
-    resetDataLayout("e-i64:64-v16:16-v24:32-v32:32-v48:64-"
-                    "v96:128-v192:256-v256:256-v512:512-v1024:1024");
+
+    resetDataLayout(
+        "e-i64:64-v16:16-v24:32-v32:32-v48:64-"
+        "v96:128-v192:256-v256:256-v512:512-v1024:1024-n8:16:32:64");
   }
 
   void getTargetDefines(const LangOptions &Opts,
@@ -162,10 +166,6 @@ public:
     // to parse host code. So we allow compilation of exception_ptr but
     // if exceptions are used in device code we should emit a diagnostic.
     MaxAtomicInlineWidth = 32;
-    // This is workaround for mutex class.
-    // I'm not sure about this hack but I guess that mutex_class is same
-    // problem.
-    TLSSupported = true;
   }
 };
 
@@ -180,13 +180,99 @@ public:
     // to parse host code. So we allow compilation of exception_ptr but
     // if exceptions are used in device code we should emit a diagnostic.
     MaxAtomicInlineWidth = 64;
-    // This is workaround for mutex class.
-    // I'm not sure about this hack but I guess that mutex_class is same
-    // problem.
-    TLSSupported = true;
   }
 };
 
+// x86-32 SPIR Windows target
+class LLVM_LIBRARY_VISIBILITY WindowsX86_32SPIRTargetInfo
+    : public WindowsTargetInfo<SPIR32SYCLDeviceTargetInfo> {
+public:
+  WindowsX86_32SPIRTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
+      : WindowsTargetInfo<SPIR32SYCLDeviceTargetInfo>(Triple, Opts) {
+    DoubleAlign = LongLongAlign = 64;
+    WCharType = UnsignedShort;
+  }
+
+  BuiltinVaListKind getBuiltinVaListKind() const override {
+    return TargetInfo::CharPtrBuiltinVaList;
+  }
+
+  CallingConvCheckResult checkCallingConvention(CallingConv CC) const override {
+    if (CC == CC_X86VectorCall)
+      // Permit CC_X86VectorCall which is used in Microsoft headers
+      return CCCR_OK;
+    return (CC == CC_SpirFunction || CC == CC_OpenCLKernel) ? CCCR_OK
+                                    : CCCR_Warning;
+  }
+};
+
+// x86-32 SPIR Windows Visual Studio target
+class LLVM_LIBRARY_VISIBILITY MicrosoftX86_32SPIRTargetInfo
+    : public WindowsX86_32SPIRTargetInfo {
+public:
+  MicrosoftX86_32SPIRTargetInfo(const llvm::Triple &Triple,
+                            const TargetOptions &Opts)
+      : WindowsX86_32SPIRTargetInfo(Triple, Opts) {
+    assert(DataLayout->getPointerSizeInBits() == 32);
+  }
+
+  void getTargetDefines(const LangOptions &Opts,
+                        MacroBuilder &Builder) const override {
+    WindowsX86_32SPIRTargetInfo::getTargetDefines(Opts, Builder);
+    // The value of the following reflects processor type.
+    // 300=386, 400=486, 500=Pentium, 600=Blend (default)
+    // We lost the original triple, so we use the default.
+    // TBD should we keep these lines?  Copied from X86.h.
+    Builder.defineMacro("_M_IX86", "600");
+  }
+};
+
+// x86-64 SPIR64 Windows target
+class LLVM_LIBRARY_VISIBILITY WindowsX86_64_SPIR64TargetInfo
+    : public WindowsTargetInfo<SPIR64SYCLDeviceTargetInfo> {
+public:
+  WindowsX86_64_SPIR64TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
+      : WindowsTargetInfo<SPIR64SYCLDeviceTargetInfo>(Triple, Opts) {
+    LongWidth = LongAlign = 32;
+    DoubleAlign = LongLongAlign = 64;
+    IntMaxType = SignedLongLong;
+    Int64Type = SignedLongLong;
+    SizeType = UnsignedLongLong;
+    PtrDiffType = SignedLongLong;
+    IntPtrType = SignedLongLong;
+    WCharType = UnsignedShort;
+  }
+
+  BuiltinVaListKind getBuiltinVaListKind() const override {
+    return TargetInfo::CharPtrBuiltinVaList;
+  }
+
+  CallingConvCheckResult checkCallingConvention(CallingConv CC) const override {
+    if (CC == CC_X86VectorCall)
+      // Permit CC_X86VectorCall which is used in Microsoft headers
+      return CCCR_OK;
+    return (CC == CC_SpirFunction || CC == CC_OpenCLKernel) ? CCCR_OK
+                                    : CCCR_Warning;
+  }
+};
+
+// x86-64 SPIR64 Windows Visual Studio target
+class LLVM_LIBRARY_VISIBILITY MicrosoftX86_64_SPIR64TargetInfo
+    : public WindowsX86_64_SPIR64TargetInfo {
+public:
+  MicrosoftX86_64_SPIR64TargetInfo(const llvm::Triple &Triple,
+                            const TargetOptions &Opts)
+      : WindowsX86_64_SPIR64TargetInfo(Triple, Opts) {
+    assert(DataLayout->getPointerSizeInBits() == 64);
+  }
+
+  void getTargetDefines(const LangOptions &Opts,
+                        MacroBuilder &Builder) const override {
+    WindowsX86_64_SPIR64TargetInfo::getTargetDefines(Opts, Builder);
+    Builder.defineMacro("_M_X64", "100");
+    Builder.defineMacro("_M_AMD64", "100");
+  }
+};
 } // namespace targets
 } // namespace clang
 #endif // LLVM_CLANG_LIB_BASIC_TARGETS_SPIR_H

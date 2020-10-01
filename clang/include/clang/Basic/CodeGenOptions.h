@@ -16,6 +16,7 @@
 #include "clang/Basic/DebugInfoOptions.h"
 #include "clang/Basic/Sanitizers.h"
 #include "clang/Basic/XRayInstr.h"
+#include "llvm/ADT/FloatingPointMode.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/Regex.h"
 #include "llvm/Target/TargetOptions.h"
@@ -109,58 +110,15 @@ public:
     Embed_Marker    // Embed a marker as a placeholder for bitcode.
   };
 
-  enum SignReturnAddressScope {
-    None,    // No signing for any function
-    NonLeaf, // Sign the return address of functions that spill LR
-    All      // Sign the return address of all functions
+  enum class FramePointerKind {
+    None,        // Omit all frame pointers.
+    NonLeaf,     // Keep non-leaf frame pointers.
+    All,         // Keep all frame pointers.
   };
 
-  enum SignReturnAddressKeyValue { AKey, BKey };
+  using DebugPrefixMapTy = std::map<std::string, std::string>;
 
-  /// The code model to use (-mcmodel).
-  std::string CodeModel;
-
-  /// The filename with path we use for coverage data files. The runtime
-  /// allows further manipulation with the GCOV_PREFIX and GCOV_PREFIX_STRIP
-  /// environment variables.
-  std::string CoverageDataFile;
-
-  /// The filename with path we use for coverage notes files.
-  std::string CoverageNotesFile;
-
-  /// Regexes separated by a semi-colon to filter the files to instrument.
-  std::string ProfileFilterFiles;
-
-  /// Regexes separated by a semi-colon to filter the files to not instrument.
-  std::string ProfileExcludeFiles;
-
-  /// The version string to put into coverage files.
-  char CoverageVersion[4];
-
-  /// Enable additional debugging information.
-  std::string DebugPass;
-
-  /// The string to embed in debug information as the current working directory.
-  std::string DebugCompilationDir;
-
-  /// The string to embed in the debug information for the compile unit, if
-  /// non-empty.
-  std::string DwarfDebugFlags;
-
-  /// The string containing the commandline for the llvm.commandline metadata,
-  /// if non-empty.
-  std::string RecordCommandLine;
-
-  std::map<std::string, std::string> DebugPrefixMap;
-
-  /// The ABI to use for passing floating point arguments.
-  std::string FloatABI;
-
-  /// The floating-point denormal mode to use.
-  std::string FPDenormalMode;
-
-  /// The float precision limit to use, if non-empty.
-  std::string LimitFloatPrecision;
+  using CoverageVersionTy = char[4];
 
   struct BitcodeFileToLink {
     /// The filename of the bitcode file to link in.
@@ -175,141 +133,14 @@ public:
     unsigned LinkFlags = 0;
   };
 
-  /// The files specified here are linked in to the module before optimizations.
-  std::vector<BitcodeFileToLink> LinkBitcodeFiles;
-
-  /// The user provided name for the "main file", if non-empty. This is useful
-  /// in situations where the input file name does not match the original input
-  /// file, for example with -save-temps.
-  std::string MainFileName;
-
-  /// The name for the split debug info file used for the DW_AT_[GNU_]dwo_name
-  /// attribute in the skeleton CU.
-  std::string SplitDwarfFile;
-
-  /// Output filename for the split debug info, not used in the skeleton CU.
-  std::string SplitDwarfOutput;
-
-  /// The name of the relocation model to use.
-  llvm::Reloc::Model RelocationModel;
-
-  /// The thread model to use
-  std::string ThreadModel;
-
-  /// If not an empty string, trap intrinsics are lowered to calls to this
-  /// function instead of to trap instructions.
-  std::string TrapFuncName;
-
-  /// A list of dependent libraries.
-  std::vector<std::string> DependentLibraries;
-
-  /// A list of linker options to embed in the object file.
-  std::vector<std::string> LinkerOptions;
-
-  /// Name of the profile file to use as output for -fprofile-instr-generate,
-  /// -fprofile-generate, and -fcs-profile-generate.
-  std::string InstrProfileOutput;
-
-  /// Name of the profile file to use with -fprofile-sample-use.
-  std::string SampleProfileFile;
-
-  /// Name of the profile file to use as input for -fprofile-instr-use
-  std::string ProfileInstrumentUsePath;
-
-  /// Name of the profile remapping file to apply to the profile data supplied
-  /// by -fprofile-sample-use or -fprofile-instr-use.
-  std::string ProfileRemappingFile;
-
-  /// Name of the function summary index file to use for ThinLTO function
-  /// importing.
-  std::string ThinLTOIndexFile;
-
-  /// Name of a file that can optionally be written with minimized bitcode
-  /// to be used as input for the ThinLTO thin link step, which only needs
-  /// the summary and module symbol table (and not, e.g. any debug metadata).
-  std::string ThinLinkBitcodeFile;
-
-  /// Prefix to use for -save-temps output.
-  std::string SaveTempsFilePrefix;
-
-  /// Name of file passed with -fcuda-include-gpubinary option to forward to
-  /// CUDA runtime back-end for incorporating them into host-side object file.
-  std::string CudaGpuBinaryFileName;
-
-  /// The name of the file to which the backend should save YAML optimization
-  /// records.
-  std::string OptRecordFile;
-
-  /// The regex that filters the passes that should be saved to the optimization
-  /// records.
-  std::string OptRecordPasses;
-
-  /// The format used for serializing remarks (default: YAML)
-  std::string OptRecordFormat;
-
-  /// The name of the partition that symbols are assigned to, specified with
-  /// -fsymbol-partition (see https://lld.llvm.org/Partitions.html).
-  std::string SymbolPartition;
-
-  /// Regular expression to select optimizations for which we should enable
-  /// optimization remarks. Transformation passes whose name matches this
-  /// expression (and support this feature), will emit a diagnostic
-  /// whenever they perform a transformation. This is enabled by the
-  /// -Rpass=regexp flag.
-  std::shared_ptr<llvm::Regex> OptimizationRemarkPattern;
-
-  /// Regular expression to select optimizations for which we should enable
-  /// missed optimization remarks. Transformation passes whose name matches this
-  /// expression (and support this feature), will emit a diagnostic
-  /// whenever they tried but failed to perform a transformation. This is
-  /// enabled by the -Rpass-missed=regexp flag.
-  std::shared_ptr<llvm::Regex> OptimizationRemarkMissedPattern;
-
-  /// Regular expression to select optimizations for which we should enable
-  /// optimization analyses. Transformation passes whose name matches this
-  /// expression (and support this feature), will emit a diagnostic
-  /// whenever they want to explain why they decided to apply or not apply
-  /// a given transformation. This is enabled by the -Rpass-analysis=regexp
-  /// flag.
-  std::shared_ptr<llvm::Regex> OptimizationRemarkAnalysisPattern;
-
-  /// Set of files defining the rules for the symbol rewriting.
-  std::vector<std::string> RewriteMapFiles;
-
-  /// Set of sanitizer checks that are non-fatal (i.e. execution should be
-  /// continued when possible).
-  SanitizerSet SanitizeRecover;
-
-  /// Set of sanitizer checks that trap rather than diagnose.
-  SanitizerSet SanitizeTrap;
-
-  /// List of backend command-line options for -fembed-bitcode.
-  std::vector<uint8_t> CmdArgs;
-
-  /// A list of all -fno-builtin-* function names (e.g., memset).
-  std::vector<std::string> NoBuiltinFuncs;
-
-  std::vector<std::string> Reciprocals;
-
-  /// The preferred width for auto-vectorization transforms. This is intended to
-  /// override default transforms based on the width of the architected vector
-  /// registers.
-  std::string PreferVectorWidth;
-
-  /// Set of XRay instrumentation kinds to emit.
-  XRayInstrSet XRayInstrumentationBundle;
-
-  std::vector<std::string> DefaultFunctionAttrs;
-
-  /// List of dynamic shared object files to be loaded as pass plugins.
-  std::vector<std::string> PassPlugins;
 
 public:
   // Define accessors/mutators for code generation options of enumeration type.
 #define CODEGENOPT(Name, Bits, Default)
-#define ENUM_CODEGENOPT(Name, Type, Bits, Default) \
-  Type get##Name() const { return static_cast<Type>(Name); } \
+#define ENUM_CODEGENOPT(Name, Type, Bits, Default)                             \
+  Type get##Name() const { return static_cast<Type>(Name); }                   \
   void set##Name(Type Value) { Name = static_cast<unsigned>(Value); }
+#define TYPED_CODEGENOPT(Type, Name, Description) Type Name;
 #include "clang/Basic/CodeGenOptions.def"
 
   CodeGenOptions();
@@ -350,6 +181,16 @@ public:
 
   /// Check if CSIR profile use is on.
   bool hasProfileCSIRUse() const { return getProfileUse() == ProfileCSIRInstr; }
+
+  /// Check if type and variable info should be emitted.
+  bool hasReducedDebugInfo() const {
+    return getDebugInfo() >= codegenoptions::DebugInfoConstructor;
+  }
+
+  /// Check if maybe unused type info should be emitted.
+  bool hasMaybeUnusedDebugInfo() const {
+    return getDebugInfo() >= codegenoptions::UnusedTypeInfo;
+  }
 };
 
 }  // end namespace clang

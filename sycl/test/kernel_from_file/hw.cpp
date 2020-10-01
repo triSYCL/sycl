@@ -1,8 +1,13 @@
-// RUN: %clang -std=c++17 --sycl -fno-sycl-use-bitcode -Xclang -fsycl-int-header=%t.h -c %s -o %t.spv
-// RUN: %clang -std=c++17 -include %t.h -g %s -o %t.out -lOpenCL -lsycl -lstdc++
-// RUN: env SYCL_USE_KERNEL_SPV=%t.spv %t.out | FileCheck %s
+// UNSUPPORTED: cuda
+// CUDA does not support SPIR-V.
+
+//-fsycl-targets=%sycl_triple
+// RUN: %clangxx -fsycl-device-only -fno-sycl-use-bitcode -Xclang -fsycl-int-header=%t.h -c %s -o %t.spv -I %sycl_include -Xclang -verify-ignore-unexpected=note,warning -Wno-sycl-strict
+// RUN: %clangxx -include %t.h -g %s -o %t.out -lsycl -I %sycl_include -Xclang -verify-ignore-unexpected=note,warning
+// RUN: env SYCL_BE=%sycl_be SYCL_USE_KERNEL_SPV=%t.spv %t.out | FileCheck %s
 // CHECK: Passed
 
+// TODO: InvalidTargetTriple: Expects spir-unknown-unknown or spir64-unknown-unknown. Actual target triple is x86_64-unknown-linux-gnu
 
 #include <CL/sycl.hpp>
 #include <iostream>

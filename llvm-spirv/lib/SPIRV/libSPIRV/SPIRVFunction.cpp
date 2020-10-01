@@ -136,12 +136,17 @@ bool SPIRVFunction::decodeBB(SPIRVDecoder &Decoder) {
       break;
     }
 
-    if (Decoder.OpCode == OpLine) {
-      Module->add(Decoder.getEntry());
+    if (Decoder.OpCode == OpNoLine || Decoder.OpCode == OpNop) {
       continue;
     }
 
     SPIRVEntry *Entry = Decoder.getEntry();
+
+    if (Decoder.OpCode == OpLine) {
+      Module->add(Entry);
+      continue;
+    }
+
     if (!Module->getErrorLog().checkError(Entry->isImplemented(),
                                           SPIRVEC_UnimplementedOpCode,
                                           std::to_string(Entry->getOpCode()))) {
@@ -155,9 +160,12 @@ bool SPIRVFunction::decodeBB(SPIRVDecoder &Decoder) {
     if (Inst->getOpCode() == OpUndef) {
       Module->add(Inst);
     } else {
-      if (Inst->isExtInst(SPIRVEIS_Debug, SPIRVDebug::Scope)) {
+      if (Inst->isExtInst(SPIRVEIS_Debug, SPIRVDebug::Scope) ||
+          Inst->isExtInst(SPIRVEIS_OpenCL_DebugInfo_100, SPIRVDebug::Scope)) {
         DebugScope = Inst;
-      } else if (Inst->isExtInst(SPIRVEIS_Debug, SPIRVDebug::NoScope)) {
+      } else if (Inst->isExtInst(SPIRVEIS_Debug, SPIRVDebug::NoScope) ||
+                 Inst->isExtInst(SPIRVEIS_OpenCL_DebugInfo_100,
+                                 SPIRVDebug::NoScope)) {
         DebugScope = nullptr;
       } else {
         Inst->setDebugScope(DebugScope);

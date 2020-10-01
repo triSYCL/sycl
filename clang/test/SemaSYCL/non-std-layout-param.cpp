@@ -1,4 +1,5 @@
-// RUN: %clang_cc1 -fsycl-is-device -verify -fsyntax-only -std=c++11 %s
+// RUN: %clang_cc1 -fsycl -fsycl-is-device -fsycl-std-layout-kernel-params -verify -Wno-sycl-2017-compat -fsyntax-only %s
+// RUN: %clang_cc1 -fsycl -fsycl-is-device -Wno-sycl-2017-compat -fsyntax-only %s
 
 // This test checks if compiler reports compilation error on an attempt to pass
 // non-standard layout struct object as SYCL kernel parameter.
@@ -14,15 +15,39 @@ struct C : public Base {
 };
 
 template <typename name, typename Func>
-__attribute__((sycl_kernel)) void kernel_single_task(Func kernelFunc) {
+__attribute__((sycl_kernel)) void kernel_single_task(const Func &kernelFunc) {
   kernelFunc();
 }
 
-
 void test() {
-  // expected-error@+1 {{kernel parameter has non-standard layout class/struct type}}
   C C0;
   C0.Y=0;
-  kernel_single_task<class MyKernel>([=] { (void)C0.Y; });
+  kernel_single_task<class MyKernel>([=] {
+    // expected-error@+1 {{kernel parameter has non-standard layout class/struct type 'C'}}
+    (void)C0.Y;
+  });
 }
 
+struct Kernel {
+  void operator()() const {
+    (void) c1;
+    (void) c2;
+    (void) p;
+    (void) q;
+  }
+
+  int p;
+  // expected-error@+1 {{kernel parameter has non-standard layout class/struct type 'C'}}
+  C c1;
+
+  int q;
+
+  // expected-error@+1 {{kernel parameter has non-standard layout class/struct type 'C'}}
+  C c2;
+};
+
+void test_struct_field() {
+  Kernel k{};
+
+  kernel_single_task<class kernel_object>(k);
+}

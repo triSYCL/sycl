@@ -2,7 +2,7 @@
 ; RUN: llvm-spirv %t.bc -spirv-text -o %t.txt
 ; RUN: FileCheck < %t.txt %s --check-prefix=CHECK-SPIRV
 ; RUN: llvm-spirv %t.bc -o %t.spv
-; RUN: llvm-spirv -r %t.spv -o %t.rev.bc
+; RUN: llvm-spirv -r --spirv-target-env=CL2.0 %t.spv -o %t.rev.bc
 ; RUN: llvm-dis < %t.rev.bc | FileCheck %s --check-prefix=CHECK-LLVM
 
 ; work_group_barrier with the default scope (memory_scope_work_group)
@@ -28,7 +28,7 @@
 ; CHECK-LLVM-NEXT: call spir_func void @_Z18work_group_barrierj12memory_scope(i32 4, i32 2) [[attr]]
 ; CHECK-LLVM-NEXT: call spir_func void @_Z18work_group_barrierj12memory_scope(i32 4, i32 3) [[attr]]
 
-; CHECK-LLVM: attributes [[attr]] = { noduplicate nounwind }
+; CHECK-LLVM: attributes [[attr]] = { convergent nounwind }
 
 ; Both 'CrossDevice' memory scope and 'None' memory order enums have value equal to 0.
 ; CHECK-SPIRV-DAG: 4 Constant {{[0-9]+}} [[Null:[0-9]+]] 0

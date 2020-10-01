@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03
+// UNSUPPORTED: c++03
 
 // <filesystem>
 
@@ -26,15 +26,15 @@
 // size_t hash_value(path const&) noexcept;
 
 
-#include "filesystem_include.hpp"
+#include "filesystem_include.h"
 #include <type_traits>
 #include <vector>
 #include <cassert>
 
 #include "test_macros.h"
 #include "test_iterators.h"
-#include "count_new.hpp"
-#include "filesystem_test_helper.hpp"
+#include "count_new.h"
+#include "filesystem_test_helper.h"
 #include "verbose_assert.h"
 
 struct PathCompareTest {
@@ -66,8 +66,8 @@ const PathCompareTest CompareTestCases[] =
     {"/foo/bar/", "/foo/bar", 1}, // trailing separator
     {"foo", "/foo", -1}, // if !this->has_root_directory() and p.has_root_directory(), a value less than 0.
     {"/foo", "foo", 1}, //  if this->has_root_directory() and !p.has_root_directory(), a value greater than 0.
-    {"//" LONGA "////" LONGB "/" LONGC "///" LONGD, "//" LONGA "/" LONGB "/" LONGC "/" LONGD, 0},
-    { LONGA "/" LONGB "/" LONGC, LONGA "/" LONGB "/" LONGB, 1}
+    {("//" LONGA "////" LONGB "/" LONGC "///" LONGD), ("//" LONGA "/" LONGB "/" LONGC "/" LONGD), 0},
+    {(LONGA "/" LONGB "/" LONGC), (LONGA "/" LONGB "/" LONGB), 1}
 
 };
 #undef LONGA

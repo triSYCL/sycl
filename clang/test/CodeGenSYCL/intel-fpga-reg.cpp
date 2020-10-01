@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple spir64-unknown-linux-sycldevice -std=c++11 -fsycl-is-device -disable-llvm-passes -S -emit-llvm -x c++ %s -o - | FileCheck %s
+// RUN: %clang_cc1 -fsycl -fsycl-is-device -triple spir64-unknown-unknown-sycldevice -disable-llvm-passes -emit-llvm %s -o - | FileCheck %s
 
 struct st {
   int a;
@@ -142,13 +142,8 @@ void foo() {
 // CHECK-NEXT: store i32 addrspace(4)* %[[V_AP3]], i32 addrspace(4)** %bp, align 8, !tbaa !5
 }
 
-// CHECK: declare i32 @llvm.annotation.i32(i32, i8*, i8*, i32) #4
-// CHECK: declare void @llvm.memcpy.p0i8.p0i8.i64(i8* nocapture writeonly, i8* nocapture readonly, i64, i1 immarg) #1
-// CHECK: declare i8* @llvm.ptr.annotation.p0i8(i8*, i8*, i8*, i32) #4
-// CHECK: declare i64 @llvm.annotation.i64(i64, i8*, i8*, i32) #4
-
 template <typename name, typename Func>
-__attribute__((sycl_kernel)) void kernel_single_task(Func kernelFunc) {
+__attribute__((sycl_kernel)) void kernel_single_task(const Func &kernelFunc) {
   kernelFunc();
 }
 

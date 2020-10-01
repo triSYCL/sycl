@@ -7,13 +7,13 @@ add_lldb_library(lldbCommands
   CommandObjectApropos.cpp
   CommandObjectBreakpoint.cpp
   CommandObjectBreakpointCommand.cpp
-  CommandObjectBugreport.cpp
   CommandObjectCommands.cpp
   CommandObjectDisassemble.cpp
   CommandObjectExpression.cpp
   CommandObjectFrame.cpp
   CommandObjectGUI.cpp
   CommandObjectHelp.cpp
+  CommandObjectLanguage.cpp
   CommandObjectLog.cpp
   CommandObjectMemory.cpp
   CommandObjectMultiword.cpp
@@ -21,8 +21,11 @@ add_lldb_library(lldbCommands
   CommandObjectPlugin.cpp
   CommandObjectProcess.cpp
   CommandObjectQuit.cpp
+  CommandObjectRegexCommand.cpp
   CommandObjectRegister.cpp
   CommandObjectReproducer.cpp
+  CommandObjectScript.cpp
+  CommandObjectSession.cpp
   CommandObjectSettings.cpp
   CommandObjectSource.cpp
   CommandObjectStats.cpp
@@ -32,7 +35,6 @@ add_lldb_library(lldbCommands
   CommandObjectVersion.cpp
   CommandObjectWatchpoint.cpp
   CommandObjectWatchpointCommand.cpp
-  CommandObjectLanguage.cpp
 
   LINK_LIBS
     lldbBase

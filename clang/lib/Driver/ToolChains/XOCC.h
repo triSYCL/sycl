@@ -11,6 +11,7 @@
 
 #include "clang/Driver/ToolChain.h"
 #include "clang/Driver/Tool.h"
+#include "llvm/ADT/Triple.h"
 
 namespace clang {
 namespace driver {
@@ -76,6 +77,7 @@ public:
                     const char *LinkingOutput) const override;
 
   private:
+    llvm::Triple getTargetTriple() const;
     void constructSYCLXOCCCommand(Compilation &C, const JobAction &JA,
                                   const InputInfo &Output,
                                   const InputInfoList &Inputs,

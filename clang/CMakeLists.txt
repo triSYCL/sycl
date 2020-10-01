@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.4.3)
+cmake_minimum_required(VERSION 3.13.4)
 
 if(POLICY CMP0075)
   cmake_policy(SET CMP0075 NEW)
@@ -8,6 +8,10 @@ endif()
 # standalone project, using LLVM as an external library:
 if( CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR )
   project(Clang)
+
+  set(CMAKE_CXX_STANDARD 14 CACHE STRING "C++ standard to conform to")
+  set(CMAKE_CXX_STANDARD_REQUIRED YES)
+  set(CMAKE_CXX_EXTENSIONS NO)
 
   # Rely on llvm-config.
   set(CONFIG_OUTPUT)
@@ -114,8 +118,11 @@ if( CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR )
   include(TableGen)
   include(HandleLLVMOptions)
   include(VersionFromVCS)
+  include(LLVMDistributionSupport)
 
   set(PACKAGE_VERSION "${LLVM_PACKAGE_VERSION}")
+  set(BUG_REPORT_URL "${LLVM_PACKAGE_BUGREPORT}" CACHE STRING
+    "Default URL where bug reports are to be submitted.")
 
   if (NOT DEFINED LLVM_INCLUDE_TESTS)
     set(LLVM_INCLUDE_TESTS ON)
@@ -129,17 +136,38 @@ if( CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR )
   set( CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX} )
 
   if(LLVM_INCLUDE_TESTS)
-    set(Python_ADDITIONAL_VERSIONS 2.7)
-    include(FindPythonInterp)
-    if(NOT PYTHONINTERP_FOUND)
-      message(FATAL_ERROR
-"Unable to find Python interpreter, required for builds and testing.
+    if(CMAKE_VERSION VERSION_LESS 3.12)
+      include(FindPythonInterp)
+      if(NOT PYTHONINTERP_FOUND)
+        message(FATAL_ERROR
+  "Unable to find Python interpreter, required for builds and testing.
 
-Please install Python or specify the PYTHON_EXECUTABLE CMake variable.")
-    endif()
+  Please install Python or specify the PYTHON_EXECUTABLE CMake variable.")
+      endif()
 
-    if( ${PYTHON_VERSION_STRING} VERSION_LESS 2.7 )
-      message(FATAL_ERROR "Python 2.7 or newer is required")
+      if( ${PYTHON_VERSION_STRING} VERSION_LESS 2.7 )
+        message(FATAL_ERROR "Python 2.7 or newer is required")
+      endif()
+
+      add_executable(Python3::Interpreter IMPORTED)
+      set_target_properties(Python3::Interpreter PROPERTIES
+        IMPORTED_LOCATION ${PYTHON_EXECUTABLE})
+      set(Python3_EXECUTABLE ${PYTHON_EXECUTABLE})
+    else()
+      find_package(Python3 COMPONENTS Interpreter)
+      if(NOT Python3_Interpreter_FOUND)
+        message(WARNING "Python3 not found, using python2 as a fallback")
+        find_package(Python2 COMPONENTS Interpreter REQUIRED)
+        if(Python2_VERSION VERSION_LESS 2.7)
+          message(SEND_ERROR "Python 2.7 or newer is required")
+        endif()
+
+        # Treat python2 as python3
+        add_executable(Python3::Interpreter IMPORTED)
+        set_target_properties(Python3::Interpreter PROPERTIES
+          IMPORTED_LOCATION ${Python2_EXECUTABLE})
+        set(Python3_EXECUTABLE ${Python2_EXECUTABLE})
+      endif()
     endif()
 
     # Check prebuilt llvm/utils.
@@ -226,16 +254,19 @@ set(C_INCLUDE_DIRS "" CACHE STRING
   "Colon separated list of directories clang will search for headers.")
 
 set(GCC_INSTALL_PREFIX "" CACHE PATH "Directory where gcc is installed." )
-set(DEFAULT_SYSROOT "" CACHE PATH
+set(DEFAULT_SYSROOT "" CACHE STRING
   "Default <path> to all compiler invocations for --sysroot=<path>." )
 
 set(ENABLE_LINKER_BUILD_ID OFF CACHE BOOL "pass --build-id to ld")
 
-set(ENABLE_X86_RELAX_RELOCATIONS OFF CACHE BOOL
+set(ENABLE_X86_RELAX_RELOCATIONS ON CACHE BOOL
     "enable x86 relax relocations by default")
 
 set(ENABLE_EXPERIMENTAL_NEW_PASS_MANAGER FALSE CACHE BOOL
   "Enable the experimental new pass manager by default.")
+
+set(CLANG_SPAWN_CC1 OFF CACHE BOOL
+    "Whether clang should use a new process for the CC1 invocation")
 
 # TODO: verify the values against LangStandards.def?
 set(CLANG_DEFAULT_STD_C "" CACHE STRING
@@ -302,6 +333,8 @@ if (NOT DEFINED MATCHED_ARCH OR "${CMAKE_MATCH_1}" LESS 35)
   set(CLANG_OPENMP_NVPTX_DEFAULT_ARCH "sm_35" CACHE STRING
     "Default architecture for OpenMP offloading to Nvidia GPUs." FORCE)
 endif()
+
+set(CLANG_SYSTEMZ_DEFAULT_ARCH "z10" CACHE STRING "SystemZ Default Arch")
 
 set(CLANG_VENDOR ${PACKAGE_VENDOR} CACHE STRING
   "Vendor-specific text for showing with version information.")
@@ -391,15 +424,15 @@ if (APPLE)
     RESULT_VARIABLE HAD_ERROR
     OUTPUT_VARIABLE LD_V_OUTPUT
   )
-  if (NOT HAD_ERROR)
-    if ("${LD_V_OUTPUT}" MATCHES ".*ld64-([0-9.]+).*")
-      string(REGEX REPLACE ".*ld64-([0-9.]+).*" "\\1" HOST_LINK_VERSION ${LD_V_OUTPUT})
-    elseif ("${LD_V_OUTPUT}" MATCHES "[^0-9]*([0-9.]+).*")
-      string(REGEX REPLACE "[^0-9]*([0-9.]+).*" "\\1" HOST_LINK_VERSION ${LD_V_OUTPUT})
-    endif()
-  else()
+  if (HAD_ERROR)
     message(FATAL_ERROR "${CMAKE_LINKER} failed with status ${HAD_ERROR}")
   endif()
+  if ("${LD_V_OUTPUT}" MATCHES ".*ld64-([0-9.]+).*")
+    string(REGEX REPLACE ".*ld64-([0-9.]+).*" "\\1" HOST_LINK_VERSION ${LD_V_OUTPUT})
+  elseif ("${LD_V_OUTPUT}" MATCHES "[^0-9]*([0-9.]+).*")
+    string(REGEX REPLACE "[^0-9]*([0-9.]+).*" "\\1" HOST_LINK_VERSION ${LD_V_OUTPUT})
+  endif()
+  message(STATUS "Host linker version: ${HOST_LINK_VERSION}")
 endif()
 
 include(CMakeParseArguments)
@@ -445,9 +478,15 @@ if (NOT LLVM_INSTALL_TOOLCHAIN_ONLY)
                              COMPONENT clang-headers)
   endif()
 
+  add_custom_target(bash-autocomplete DEPENDS utils/bash-autocomplete.sh)
   install(PROGRAMS utils/bash-autocomplete.sh
-    DESTINATION share/clang
-    )
+          DESTINATION share/clang
+          COMPONENT bash-autocomplete)
+  if(NOT LLVM_ENABLE_IDE)
+    add_llvm_install_targets(install-bash-autocomplete
+                             DEPENDS bash-autocomplete
+                             COMPONENT bash-autocomplete)
+  endif()
 endif()
 
 add_definitions( -D_GNU_SOURCE )
@@ -487,14 +526,17 @@ add_subdirectory(include)
 
 # All targets below may depend on all tablegen'd files.
 get_property(CLANG_TABLEGEN_TARGETS GLOBAL PROPERTY CLANG_TABLEGEN_TARGETS)
-add_custom_target(clang-tablegen-targets DEPENDS ${CLANG_TABLEGEN_TARGETS})
+add_custom_target(clang-tablegen-targets
+  DEPENDS
+  omp_gen
+  ${CLANG_TABLEGEN_TARGETS})
 set_target_properties(clang-tablegen-targets PROPERTIES FOLDER "Misc")
 list(APPEND LLVM_COMMON_DEPENDS clang-tablegen-targets)
 
 # Force target to be built as soon as possible. Clang modules builds depend
 # header-wise on it as they ship all headers from the umbrella folders. Building
 # an entire module might include header, which depends on intrinsics_gen.
-if(LLVM_ENABLE_MODULES AND NOT CLANG_BUILT_STANDALONE)
+if(LLVM_ENABLE_MODULES)
   list(APPEND LLVM_COMMON_DEPENDS intrinsics_gen)
 endif()
 
@@ -582,6 +624,7 @@ if(CLANG_LIBS)
     add_dependencies(clang-libraries ${lib})
     if(NOT LLVM_ENABLE_IDE)
       add_dependencies(install-clang-libraries install-${lib})
+      add_dependencies(install-clang-libraries-stripped install-${lib}-stripped)
     endif()
   endforeach()
 endif()
@@ -680,6 +723,7 @@ if (CLANG_ENABLE_BOOTSTRAP)
     CLANG_VERSION_MAJOR
     CLANG_VERSION_MINOR
     CLANG_VERSION_PATCHLEVEL
+    CLANG_VENDOR
     LLVM_VERSION_SUFFIX
     LLVM_BINUTILS_INCDIR
     CLANG_REPOSITORY_STRING
@@ -713,6 +757,14 @@ if (CLANG_ENABLE_BOOTSTRAP)
     -DCMAKE_C_COMPILER=${LLVM_RUNTIME_OUTPUT_INTDIR}/${C_COMPILER}
     -DCMAKE_ASM_COMPILER=${LLVM_RUNTIME_OUTPUT_INTDIR}/${C_COMPILER}
     -DCMAKE_ASM_COMPILER_ID=Clang)
+
+  # cmake requires CMAKE_LINKER to be specified if the compiler is MSVC-like,
+  # otherwise it defaults the linker to be link.exe.
+  if(BOOTSTRAP_LLVM_ENABLE_LLD)
+    if((WIN32 AND NOT BOOTSTRAP_CMAKE_SYSTEM_NAME) OR BOOTSTRAP_CMAKE_SYSTEM_NAME STREQUAL "Windows")
+      set(${CLANG_STAGE}_LINKER -DCMAKE_LINKER=${LLVM_RUNTIME_OUTPUT_INTDIR}/lld-link${CMAKE_EXECUTABLE_SUFFIX})
+    endif()
+  endif()
 
   if(BOOTSTRAP_CMAKE_SYSTEM_NAME)
     set(${CLANG_STAGE}_CONFIG -DLLVM_CONFIG_PATH=${LLVM_RUNTIME_OUTPUT_INTDIR}/llvm-config)
@@ -798,8 +850,8 @@ if (CLANG_ENABLE_BOOTSTRAP)
                 # We shouldn't need to set this here, but INSTALL_DIR doesn't
                 # seem to work, so instead I'm passing this through
                 -DCMAKE_INSTALL_PREFIX=${CMAKE_INSTALL_PREFIX}
-                ${CLANG_BOOTSTRAP_CMAKE_ARGS}
                 ${PASSTHROUGH_VARIABLES}
+                ${CLANG_BOOTSTRAP_CMAKE_ARGS}
                  -DCLANG_STAGE=${NEXT_CLANG_STAGE}
                 ${COMPILER_OPTIONS}
                 ${${CLANG_STAGE}_CONFIG}
@@ -855,6 +907,11 @@ if (LLVM_ADD_NATIVE_VISUALIZERS_TO_SOLUTION)
   add_subdirectory(utils/ClangVisualizers)
 endif()
 add_subdirectory(utils/hmaptool)
+
+if(CLANG_BUILT_STANDALONE)
+  llvm_distribution_add_targets()
+  process_llvm_pass_plugins()
+endif()
 
 configure_file(
   ${CLANG_SOURCE_DIR}/include/clang/Config/config.h.cmake

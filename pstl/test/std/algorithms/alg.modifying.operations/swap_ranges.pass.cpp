@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
+// UNSUPPORTED: c++03, c++11, c++14
 
 #include "support/pstl_test_config.h"
 
@@ -120,7 +120,7 @@ test()
     }
 }
 
-int32_t
+int
 main()
 {
     test<wrapper<uint16_t>>();

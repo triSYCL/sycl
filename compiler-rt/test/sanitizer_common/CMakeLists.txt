@@ -1,6 +1,11 @@
 set(SANITIZER_COMMON_LIT_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
 
 set(SANITIZER_COMMON_TEST_DEPS ${SANITIZER_COMMON_LIT_TEST_DEPS})
+
+if(CMAKE_HOST_UNIX)
+  list(APPEND SANITIZER_COMMON_TEST_DEPS SanitizerLintCheck)
+endif()
+
 set(SANITIZER_COMMON_TESTSUITES)
 
 # FIXME(dliew): We should switch to COMPILER_RT_SANITIZERS_TO_BUILD instead of
@@ -56,6 +61,9 @@ foreach(tool ${SUPPORTED_TOOLS})
   set(TEST_ARCH ${${tool_toupper}_SUPPORTED_ARCH})
   if(APPLE)
     darwin_filter_host_archs(${tool_toupper}_SUPPORTED_ARCH TEST_ARCH)
+  endif()
+  if(${tool} STREQUAL "asan")
+    list(REMOVE_ITEM TEST_ARCH sparc sparcv9)
   endif()
 
   # TODO(dliew): We should iterate over the different

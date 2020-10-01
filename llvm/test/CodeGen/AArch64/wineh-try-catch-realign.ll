@@ -9,17 +9,26 @@
 ; it shouldn't access the parent's frame via sp, and the prologue and
 ; epilogue should be symmetrical.
 ; CHECK-LABEL: "?catch$2@?0??a@@YAXXZ@4HA":
-; CHECK:      str     x28, [sp, #-32]!
-; CHECK-NEXT: str     x19, [sp, #8]
-; CHECK-NEXT: stp     x29, x30, [sp, #16]
-; CHECK-NEXT: add     x0, x19, #64
+; CHECK:      stp     x29, x30, [sp, #-32]!
+; CHECK-NEXT: .seh_save_fplr_x 32
+; CHECK-NEXT: str     x28, [sp, #16]
+; CHECK-NEXT: .seh_save_reg x28, 16
+; CHECK-NEXT: str     x19, [sp, #24]
+; CHECK-NEXT: .seh_save_reg x19, 24
+; CHECK-NEXT: .seh_endprologue
+; CHECK-NEXT: add     x0, x19, #0
 ; CHECK-NEXT: mov     w1, wzr
 ; CHECK-NEXT: bl      "?bb@@YAXPEAHH@Z"
 ; CHECK-NEXT: adrp    x0, .LBB0_1
 ; CHECK-NEXT: add     x0, x0, .LBB0_1
-; CHECK-NEXT: ldp     x29, x30, [sp, #16]
-; CHECK-NEXT: ldr     x19, [sp, #8]
-; CHECK-NEXT: ldr     x28, [sp], #32
+; CHECK-NEXT: .seh_startepilogue
+; CHECK-NEXT: ldr     x19, [sp, #24]
+; CHECK-NEXT: .seh_save_reg x19, 24
+; CHECK-NEXT: ldr     x28, [sp, #16]
+; CHECK-NEXT: .seh_save_reg x28, 16
+; CHECK-NEXT: ldp     x29, x30, [sp], #32
+; CHECK-NEXT: .seh_save_fplr_x 32
+; CHECK-NEXT: .seh_endepilogue
 ; CHECK-NEXT: ret
 
 

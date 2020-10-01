@@ -6,9 +6,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
+// UNSUPPORTED: c++03, c++11, c++14
 
-// XFAIL: dylib-has-no-bad_any_cast && !libcpp-no-exceptions
+// Throwing bad_any_cast is supported starting in macosx10.13
+// XFAIL: with_system_cxx_lib=macosx10.12 && !no-exceptions
+// XFAIL: with_system_cxx_lib=macosx10.11 && !no-exceptions
+// XFAIL: with_system_cxx_lib=macosx10.10 && !no-exceptions
+// XFAIL: with_system_cxx_lib=macosx10.9 && !no-exceptions
 
 // <any>
 
@@ -18,7 +22,7 @@
 #include <cassert>
 
 #include "any_helpers.h"
-#include "count_new.hpp"
+#include "count_new.h"
 #include "test_macros.h"
 
 using std::any;

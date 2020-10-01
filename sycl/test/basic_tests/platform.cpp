@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++17 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
 // RUN: %t.out
 //==--------------- platform.cpp - SYCL platform test ----------------------==//
 //

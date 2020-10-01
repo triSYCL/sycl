@@ -14,25 +14,15 @@
 #ifndef LLVM_TRANSFORMS_SCALAR_H
 #define LLVM_TRANSFORMS_SCALAR_H
 
+#include "llvm/Transforms/Utils/SimplifyCFGOptions.h"
 #include <functional>
 
 namespace llvm {
 
-class BasicBlockPass;
 class Function;
 class FunctionPass;
 class ModulePass;
 class Pass;
-class GetElementPtrInst;
-class PassInfo;
-class TargetLowering;
-class TargetMachine;
-
-//===----------------------------------------------------------------------===//
-//
-// ConstantPropagation - A worklist driven constant propagation pass
-//
-FunctionPass *createConstantPropagationPass();
 
 //===----------------------------------------------------------------------===//
 //
@@ -50,10 +40,16 @@ FunctionPass *createSCCPPass();
 //===----------------------------------------------------------------------===//
 //
 // DeadInstElimination - This pass quickly removes trivially dead instructions
-// without modifying the CFG of the function.  It is a BasicBlockPass, so it
-// runs efficiently when queued next to other BasicBlockPass's.
+// without modifying the CFG of the function.  It is a FunctionPass.
 //
 Pass *createDeadInstEliminationPass();
+
+//===----------------------------------------------------------------------===//
+//
+// RedundantDbgInstElimination - This pass removes redundant dbg intrinsics
+// without modifying the CFG of the function.  It is a FunctionPass.
+//
+Pass *createRedundantDbgInstEliminationPass();
 
 //===----------------------------------------------------------------------===//
 //
@@ -255,8 +251,7 @@ FunctionPass *createJumpThreadingPass(int Threshold = -1);
 // simplify terminator instructions, convert switches to lookup tables, etc.
 //
 FunctionPass *createCFGSimplificationPass(
-    unsigned Threshold = 1, bool ForwardSwitchCond = false,
-    bool ConvertSwitch = false, bool KeepLoops = true, bool SinkCommon = false,
+    SimplifyCFGOptions Options = SimplifyCFGOptions(),
     std::function<bool(const Function &)> Ftor = nullptr);
 
 //===----------------------------------------------------------------------===//
@@ -308,7 +303,7 @@ FunctionPass *createGVNSinkPass();
 // MergedLoadStoreMotion - This pass merges loads and stores in diamonds. Loads
 // are hoisted into the header, while stores sink into the footer.
 //
-FunctionPass *createMergedLoadStoreMotionPass();
+FunctionPass *createMergedLoadStoreMotionPass(bool SplitFooterBB = false);
 
 //===----------------------------------------------------------------------===//
 //
@@ -363,6 +358,19 @@ Pass *createLowerGuardIntrinsicPass();
 
 //===----------------------------------------------------------------------===//
 //
+// LowerMatrixIntrinsics - Lower matrix intrinsics to vector operations.
+//
+Pass *createLowerMatrixIntrinsicsPass();
+
+//===----------------------------------------------------------------------===//
+//
+// LowerMatrixIntrinsicsMinimal - Lower matrix intrinsics to vector operations
+//                               (lightweight, does not require extra analysis)
+//
+Pass *createLowerMatrixIntrinsicsMinimalPass();
+
+//===----------------------------------------------------------------------===//
+//
 // LowerWidenableCondition - Lower widenable condition to i1 true.
 //
 Pass *createLowerWidenableConditionPass();
@@ -394,6 +402,13 @@ extern char &InferAddressSpacesID;
 // LowerExpectIntrinsics - Removes llvm.expect intrinsics and creates
 // "block_weights" metadata.
 FunctionPass *createLowerExpectIntrinsicPass();
+
+//===----------------------------------------------------------------------===//
+//
+// LowerConstantIntrinsicss - Expand any remaining llvm.objectsize and
+// llvm.is.constant intrinsic calls, even for the unknown cases.
+//
+FunctionPass *createLowerConstantIntrinsicsPass();
 
 //===----------------------------------------------------------------------===//
 //
@@ -509,6 +524,13 @@ Pass *createLoopSimplifyCFGPass();
 // transformations.
 //
 Pass *createWarnMissedTransformationsPass();
+
+//===----------------------------------------------------------------------===//
+//
+// This pass does instruction simplification on each
+// instruction in a function.
+//
+FunctionPass *createInstSimplifyLegacyPass();
 } // End llvm namespace
 
 #endif

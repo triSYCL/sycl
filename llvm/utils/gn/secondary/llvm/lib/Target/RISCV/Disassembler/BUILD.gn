@@ -16,7 +16,5 @@ static_library("Disassembler") {
     "//llvm/lib/Target/RISCV/Utils",
   ]
   include_dirs = [ ".." ]
-  sources = [
-    "RISCVDisassembler.cpp",
-  ]
+  sources = [ "RISCVDisassembler.cpp" ]
 }

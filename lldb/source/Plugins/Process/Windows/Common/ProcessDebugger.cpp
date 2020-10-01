@@ -1,4 +1,4 @@
-//===-- ProcessDebugger.cpp -------------------------------------*- C++ -*-===//
+//===-- ProcessDebugger.cpp -----------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -63,6 +63,8 @@ static bool IsPageExecutable(uint32_t protect) {
 
 namespace lldb_private {
 
+ProcessDebugger::~ProcessDebugger() {}
+
 lldb::pid_t ProcessDebugger::GetDebuggedProcessId() const {
   if (m_session_data)
     return m_session_data->m_debugger->GetProcess().GetProcessId();
@@ -125,7 +127,7 @@ Status ProcessDebugger::LaunchProcess(ProcessLaunchInfo &launch_info,
     stream.Printf("ProcessDebugger unable to launch '%s'.  ProcessDebugger can "
                   "only be used for debug launches.",
                   launch_info.GetExecutableFile().GetPath().c_str());
-    std::string message = stream.GetString();
+    std::string message = stream.GetString().str();
     result.SetErrorString(message.c_str());
 
     LLDB_LOG(log, "error: {0}", message);
@@ -225,22 +227,20 @@ Status ProcessDebugger::DestroyProcess(const lldb::StateType state) {
     debugger_thread = m_session_data->m_debugger;
   }
 
-  Status error;
-  if (state != eStateExited && state != eStateDetached) {
-    LLDB_LOG(
-        log, "Shutting down process {0}.",
-        debugger_thread->GetProcess().GetNativeProcess().GetSystemHandle());
-    error = debugger_thread->StopDebugging(true);
-
-    // By the time StopDebugging returns, there is no more debugger thread, so
-    // we can be assured that no other thread will race for the session data.
-    m_session_data.reset();
-  } else {
-    error.SetErrorStringWithFormat("cannot destroy process %" PRIx64
-                                   " while state = %d",
-                                   GetDebuggedProcessId(), state);
-    LLDB_LOG(log, "error: {0}", error);
+  if (state == eStateExited || state == eStateDetached) {
+    LLDB_LOG(log, "warning: cannot destroy process {0} while state = {1}.",
+             GetDebuggedProcessId(), state);
+    return Status();
   }
+
+  LLDB_LOG(log, "Shutting down process {0}.",
+           debugger_thread->GetProcess().GetNativeProcess().GetSystemHandle());
+  auto error = debugger_thread->StopDebugging(true);
+
+  // By the time StopDebugging returns, there is no more debugger thread, so
+  // we can be assured that no other thread will race for the session data.
+  m_session_data.reset();
+
   return error;
 }
 

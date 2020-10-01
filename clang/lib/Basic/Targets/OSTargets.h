@@ -87,7 +87,7 @@ protected:
 public:
   DarwinTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
       : OSTargetInfo<Target>(Triple, Opts) {
-    // By default, no TLS, and we whitelist permitted architecture/OS
+    // By default, no TLS, and we list permitted architecture/OS
     // combinations.
     this->TLSSupported = false;
 
@@ -465,6 +465,9 @@ protected:
 public:
   OpenBSDTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
       : OSTargetInfo<Target>(Triple, Opts) {
+    this->WCharType = this->WIntType = this->SignedInt;
+    this->IntMaxType = TargetInfo::SignedLongLong;
+    this->Int64Type = TargetInfo::SignedLongLong;
     switch (Triple.getArch()) {
     case llvm::Triple::x86:
     case llvm::Triple::x86_64:
@@ -476,6 +479,8 @@ public:
     case llvm::Triple::mips64:
     case llvm::Triple::mips64el:
     case llvm::Triple::ppc:
+    case llvm::Triple::ppc64:
+    case llvm::Triple::ppc64le:
     case llvm::Triple::sparcv9:
       this->MCountName = "_mcount";
       break;
@@ -538,6 +543,7 @@ protected:
     Builder.defineMacro("__KPRINTF_ATTRIBUTE__");
     DefineStd(Builder, "unix", Opts);
     Builder.defineMacro("__ELF__");
+    Builder.defineMacro("__SCE__");
     Builder.defineMacro("__ORBIS__");
   }
 
@@ -560,6 +566,10 @@ public:
       this->NewAlign = 256;
       break;
     }
+  }
+  TargetInfo::CallingConvCheckResult
+  checkCallingConvention(CallingConv CC) const override {
+    return (CC == CC_C) ? TargetInfo::CCCR_OK : TargetInfo::CCCR_Error;
   }
 };
 
@@ -618,8 +628,11 @@ protected:
       Builder.defineMacro("_XOPEN_SOURCE", "600");
     else
       Builder.defineMacro("_XOPEN_SOURCE", "500");
-    if (Opts.CPlusPlus)
+    if (Opts.CPlusPlus) {
       Builder.defineMacro("__C99FEATURES__");
+      Builder.defineMacro("_FILE_OFFSET_BITS", "64");
+    }
+    // GCC restricts the next two to C++.
     Builder.defineMacro("_LARGEFILE_SOURCE");
     Builder.defineMacro("_LARGEFILE64_SOURCE");
     Builder.defineMacro("__EXTENSIONS__");
@@ -698,6 +711,8 @@ protected:
 public:
   AIXTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
       : OSTargetInfo<Target>(Triple, Opts) {
+    this->TheCXXABI.set(TargetCXXABI::XL);
+
     if (this->PointerWidth == 64) {
       this->WCharType = this->UnsignedInt;
     } else {
@@ -709,6 +724,57 @@ public:
   // AIX sets FLT_EVAL_METHOD to be 1.
   unsigned getFloatEvalMethod() const override { return 1; }
   bool hasInt128Type() const override { return false; }
+
+  bool defaultsToAIXPowerAlignment() const override { return true; }
+};
+
+// z/OS target
+template <typename Target>
+class LLVM_LIBRARY_VISIBILITY ZOSTargetInfo : public OSTargetInfo<Target> {
+protected:
+  void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
+                    MacroBuilder &Builder) const override {
+    // FIXME: _LONG_LONG should not be defined under -std=c89.
+    Builder.defineMacro("_LONG_LONG");
+    Builder.defineMacro("_OPEN_DEFAULT");
+    // _UNIX03_WITHDRAWN is required to build libcxx.
+    Builder.defineMacro("_UNIX03_WITHDRAWN");
+    Builder.defineMacro("__370__");
+    Builder.defineMacro("__BFP__");
+    // FIXME: __BOOL__ should not be defined under -std=c89.
+    Builder.defineMacro("__BOOL__");
+    Builder.defineMacro("__LONGNAME__");
+    Builder.defineMacro("__MVS__");
+    Builder.defineMacro("__THW_370__");
+    Builder.defineMacro("__THW_BIG_ENDIAN__");
+    Builder.defineMacro("__TOS_390__");
+    Builder.defineMacro("__TOS_MVS__");
+    Builder.defineMacro("__XPLINK__");
+
+    if (this->PointerWidth == 64)
+      Builder.defineMacro("__64BIT__");
+
+    if (Opts.CPlusPlus) {
+      Builder.defineMacro("__DLL__");
+      // _XOPEN_SOURCE=600 is required to build libcxx.
+      Builder.defineMacro("_XOPEN_SOURCE", "600");
+    }
+
+    if (Opts.GNUMode) {
+      Builder.defineMacro("_MI_BUILTIN");
+      Builder.defineMacro("_EXT");
+    }
+
+    if (Opts.CPlusPlus && Opts.WChar) {
+      // Macro __wchar_t is defined so that the wchar_t data
+      // type is not declared as a typedef in system headers.
+      Builder.defineMacro("__wchar_t");
+    }
+  }
+
+public:
+  ZOSTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
+      : OSTargetInfo<Target>(Triple, Opts) {}
 };
 
 void addWindowsDefines(const llvm::Triple &Triple, const LangOptions &Opts,
@@ -768,9 +834,11 @@ public:
     if (Triple.getArch() == llvm::Triple::arm) {
       // Handled in ARM's setABI().
     } else if (Triple.getArch() == llvm::Triple::x86) {
-      this->resetDataLayout("e-m:e-p:32:32-i64:64-n8:16:32-S128");
+      this->resetDataLayout("e-m:e-p:32:32-p270:32:32-p271:32:32-p272:64:64-"
+                            "i64:64-n8:16:32-S128");
     } else if (Triple.getArch() == llvm::Triple::x86_64) {
-      this->resetDataLayout("e-m:e-p:32:32-i64:64-n8:16:32:64-S128");
+      this->resetDataLayout("e-m:e-p:32:32-p270:32:32-p271:32:32-p272:64:64-"
+                            "i64:64-n8:16:32:64-S128");
     } else if (Triple.getArch() == llvm::Triple::mipsel) {
       // Handled on mips' setDataLayout.
     } else {
@@ -799,6 +867,7 @@ public:
   FuchsiaTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
       : OSTargetInfo<Target>(Triple, Opts) {
     this->MCountName = "__mcount";
+    this->TheCXXABI.set(TargetCXXABI::Fuchsia);
   }
 };
 
@@ -808,7 +877,7 @@ class LLVM_LIBRARY_VISIBILITY WebAssemblyOSTargetInfo
     : public OSTargetInfo<Target> {
 protected:
   void getOSDefines(const LangOptions &Opts, const llvm::Triple &Triple,
-                    MacroBuilder &Builder) const {
+                    MacroBuilder &Builder) const override {
     // A common platform macro.
     if (Opts.POSIXThreads)
       Builder.defineMacro("_REENTRANT");

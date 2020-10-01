@@ -1,5 +1,5 @@
-// RUN: %clang_cc1 -fsycl-is-device -verify -pedantic -fsyntax-only -x c++ %s
-// RUN: %clang_cc1 -verify -pedantic -fsyntax-only -x c++ %s
+// RUN: %clang_cc1 -fsycl-is-device -verify -pedantic -fsyntax-only %s
+// RUN: %clang_cc1 -verify -pedantic -fsyntax-only %s
 
 class A {
 public:
@@ -16,6 +16,7 @@ struct st {
 
 
 #ifdef __SYCL_DEVICE_ONLY__
+static_assert(__has_builtin(__builtin_intel_fpga_reg), "");
 
 struct inner {
   void (*fp)(); // expected-note {{Field with illegal type declared here}}
@@ -56,7 +57,7 @@ void foo() {
 }
 
 template <typename name, typename Func>
-__attribute__((sycl_kernel)) void kernel_single_task(Func kernelFunc) {
+__attribute__((sycl_kernel)) void kernel_single_task(const Func &kernelFunc) {
   kernelFunc();
 }
 int main() {
@@ -66,6 +67,7 @@ int main() {
 
 #else
 
+static_assert(!__has_builtin(__builtin_intel_fpga_reg), "");
 int main() {
   A a(3);
   A b = __builtin_intel_fpga_reg(a);

@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
+// UNSUPPORTED: c++03, c++11, c++14
 
 // Tests for partial_sort_copy
 #include "support/pstl_test_config.h"
@@ -55,7 +55,7 @@ struct test_one_policy
         : d_first(b1), d_last(e1), exp_first(b2), exp_last(e2)
     {
     }
-#if _PSTL_ICC_17_VC141_TEST_SIMD_LAMBDA_DEBUG_32_BROKEN ||                                                            \
+#if _PSTL_ICC_17_VC141_TEST_SIMD_LAMBDA_DEBUG_32_BROKEN ||                                                             \
     _PSTL_ICC_16_VC14_TEST_SIMD_LAMBDA_DEBUG_32_BROKEN // dummy specialization by policy type, in case of broken configuration
     template <typename InputIterator, typename Size, typename T, typename Compare>
     void
@@ -178,13 +178,18 @@ struct test_non_const
     }
 };
 
-int32_t
+int
 main()
 {
     test_partial_sort_copy<Num<float32_t>>([](Num<float32_t> x, Num<float32_t> y) { return x < y; });
     test_partial_sort_copy<int32_t>([](int32_t x, int32_t y) { return x > y; });
 
     test_algo_basic_double<int32_t>(run_for_rnd<test_non_const<int32_t>>());
+
+    test_partial_sort_copy<MemoryChecker>(
+        [](const MemoryChecker& val1, const MemoryChecker& val2){ return val1.value() < val2.value(); });
+    EXPECT_FALSE(MemoryChecker::alive_objects() < 0, "wrong effect from partial_sort_copy: number of ctors calls < num of dtors calls");
+    EXPECT_FALSE(MemoryChecker::alive_objects() > 0, "wrong effect from partial_sort_copy: number of ctors calls > num of dtors calls");
 
     std::cout << done() << std::endl;
     return 0;

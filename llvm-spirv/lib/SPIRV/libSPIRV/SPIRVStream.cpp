@@ -42,6 +42,8 @@
 #include "SPIRVNameMapEnum.h"
 #include "SPIRVOpCode.h"
 
+#include <limits> // std::numeric_limits
+
 namespace SPIRV {
 
 /// Write string with quote. Replace " with \".
@@ -235,6 +237,33 @@ SPIRVEntry *SPIRVDecoder::getEntry() {
   IS >> *Entry;
   if (Entry->isEndOfBlock() || OpCode == OpNoLine)
     M.setCurrentLine(nullptr);
+
+  if (OpExtension == OpCode) {
+    auto *OpExt = static_cast<SPIRVExtension *>(Entry);
+    ExtensionID ExtID;
+    bool ExtIsKnown = SPIRVMap<ExtensionID, std::string>::rfind(
+        OpExt->getExtensionName(), &ExtID);
+    if (!M.getErrorLog().checkError(
+            ExtIsKnown, SPIRVEC_InvalidModule,
+            "input SPIR-V module uses unknown extension '" +
+                OpExt->getExtensionName() + "'")) {
+      M.setInvalid();
+    }
+
+    if (!M.getErrorLog().checkError(
+            M.isAllowedToUseExtension(ExtID), SPIRVEC_InvalidModule,
+            "input SPIR-V module uses extension '" + OpExt->getExtensionName() +
+                "' which were disabled by --spirv-ext option")) {
+      M.setInvalid();
+    }
+  }
+
+  if (!M.getErrorLog().checkError(Entry->isImplemented(),
+                                  SPIRVEC_UnimplementedOpCode,
+                                  std::to_string(Entry->getOpCode()))) {
+    M.setInvalid();
+  }
+
   assert(!IS.bad() && !IS.fail() && "SPIRV stream fails");
   return Entry;
 }
@@ -244,6 +273,20 @@ void SPIRVDecoder::validate() const {
   assert(WordCount && "Invalid word count");
   assert(!IS.bad() && "Bad iInput stream");
 }
+
+// Skip \param n words in SPIR-V binary stream.
+// In case of SPIR-V text format always skip until the end of the line.
+void SPIRVDecoder::ignore(size_t N) {
+#ifdef _SPIRV_SUPPORT_TEXT_FMT
+  if (SPIRVUseTextFormat) {
+    IS.ignore(std::numeric_limits<std::streamsize>::max(), '\n');
+    return;
+  }
+#endif
+  IS.ignore(N * sizeof(SPIRVWord));
+}
+
+void SPIRVDecoder::ignoreInstruction() { ignore(WordCount - 1); }
 
 spv_ostream &operator<<(spv_ostream &O, const SPIRVNL &E) {
 #ifdef _SPIRV_SUPPORT_TEXT_FMT

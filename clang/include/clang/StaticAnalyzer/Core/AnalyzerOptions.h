@@ -162,120 +162,53 @@ enum UserModeKind {
 class AnalyzerOptions : public RefCountedBase<AnalyzerOptions> {
 public:
   using ConfigTable = llvm::StringMap<std::string>;
+  using CheckersAndPackagesTy = std::vector<std::pair<std::string, bool>>;
 
+  /// Retrieves the list of checkers generated from Checkers.td. This doesn't
+  /// contain statically linked but non-generated checkers and plugin checkers!
   static std::vector<StringRef>
   getRegisteredCheckers(bool IncludeExperimental = false);
+
+  /// Retrieves the list of packages generated from Checkers.td. This doesn't
+  /// contain statically linked but non-generated packages and plugin packages!
+  static std::vector<StringRef>
+  getRegisteredPackages(bool IncludeExperimental = false);
 
   /// Convenience function for printing options or checkers and their
   /// description in a formatted manner. If \p MinLineWidth is set to 0, no line
   /// breaks are introduced for the description.
   ///
-  /// Format, depending whether the option name's length is less then
-  /// \p OptionWidth:
+  /// Format, depending whether the option name's length is less than
+  /// \p EntryWidth:
   ///
   ///   <padding>EntryName<padding>Description
   ///   <---------padding--------->Description
   ///   <---------padding--------->Description
   ///
-  ///   <padding>VeryVeryLongOptionName
+  ///   <padding>VeryVeryLongEntryName
   ///   <---------padding--------->Description
   ///   <---------padding--------->Description
-  ///   ^~~~~~~~ InitialPad
-  ///   ^~~~~~~~~~~~~~~~~~~~~~~~~~ EntryWidth
+  ///   ^~~~~~~~~InitialPad
+  ///            ^~~~~~~~~~~~~~~~~~EntryWidth
   ///   ^~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~MinLineWidth
-  static void printFormattedEntry(
-      llvm::raw_ostream &Out,
-      std::pair<StringRef, StringRef> EntryDescPair,
-      size_t EntryWidth, size_t InitialPad, size_t MinLineWidth = 0);
+  static void printFormattedEntry(llvm::raw_ostream &Out,
+                                  std::pair<StringRef, StringRef> EntryDescPair,
+                                  size_t InitialPad, size_t EntryWidth,
+                                  size_t MinLineWidth = 0);
 
-
-  /// Pair of checker name and enable/disable.
-  std::vector<std::pair<std::string, bool>> CheckersControlList;
-
-  /// A key-value table of use-specified configuration values.
-  // TODO: This shouldn't be public.
-  ConfigTable Config;
-  AnalysisStores AnalysisStoreOpt = RegionStoreModel;
-  AnalysisConstraints AnalysisConstraintsOpt = RangeConstraintsModel;
-  AnalysisDiagClients AnalysisDiagOpt = PD_HTML;
-  AnalysisPurgeMode AnalysisPurgeOpt = PurgeStmt;
-
-  std::string AnalyzeSpecificFunction;
-
-  /// File path to which the exploded graph should be dumped.
-  std::string DumpExplodedGraphTo;
-
-  /// Store full compiler invocation for reproducible instructions in the
-  /// generated report.
-  std::string FullCompilerInvocation;
-
-  /// The maximum number of times the analyzer visits a block.
-  unsigned maxBlockVisitOnPath;
-
-  /// Disable all analyzer checks.
-  ///
-  /// This flag allows one to disable analyzer checks on the code processed by
-  /// the given analysis consumer. Note, the code will get parsed and the
-  /// command-line options will get checked.
-  unsigned DisableAllChecks : 1;
-
-  unsigned ShowCheckerHelp : 1;
-  unsigned ShowCheckerHelpAlpha : 1;
-  unsigned ShowCheckerHelpDeveloper : 1;
-
-  unsigned ShowCheckerOptionList : 1;
-  unsigned ShowCheckerOptionAlphaList : 1;
-  unsigned ShowCheckerOptionDeveloperList : 1;
-
-  unsigned ShowEnabledCheckerList : 1;
-  unsigned ShowConfigOptionsList : 1;
-  unsigned ShouldEmitErrorsOnInvalidConfigValue : 1;
-  unsigned AnalyzeAll : 1;
-  unsigned AnalyzerDisplayProgress : 1;
-  unsigned AnalyzeNestedBlocks : 1;
-
-  unsigned eagerlyAssumeBinOpBifurcation : 1;
-
-  unsigned TrimGraph : 1;
-  unsigned visualizeExplodedGraphWithGraphViz : 1;
-  unsigned UnoptimizedCFG : 1;
-  unsigned PrintStats : 1;
-
-  /// Do not re-analyze paths leading to exhausted nodes with a different
-  /// strategy. We get better code coverage when retry is enabled.
-  unsigned NoRetryExhausted : 1;
-
-  /// Emit analyzer warnings as errors.
-  unsigned AnalyzerWerror : 1;
-
-  /// The inlining stack depth limit.
-  // Cap the stack depth at 4 calls (5 stack frames, base + 4 calls).
-  unsigned InlineMaxStackDepth = 5;
-
-  /// The mode of function selection used during inlining.
-  AnalysisInliningMode InliningMode = NoRedundancy;
-
-  // Create a field for each -analyzer-config option.
-#define ANALYZER_OPTION_DEPENDS_ON_USER_MODE(TYPE, NAME, CMDFLAG, DESC,        \
-                                             SHALLOW_VAL, DEEP_VAL)            \
-  ANALYZER_OPTION(TYPE, NAME, CMDFLAG, DESC, SHALLOW_VAL)
-
-#define ANALYZER_OPTION(TYPE, NAME, CMDFLAG, DESC, DEFAULT_VAL)                \
-  TYPE NAME;
-
+#define ANALYZEROPT(NAME, BITS, DESCRIPTION) unsigned NAME : BITS;
+#define TYPED_ANALYZEROPT(TYPE, NAME, DESCRIPTION) TYPE NAME;
 #include "clang/StaticAnalyzer/Core/AnalyzerOptions.def"
-#undef ANALYZER_OPTION
-#undef ANALYZER_OPTION_DEPENDS_ON_USER_MODE
 
   // Create an array of all -analyzer-config command line options. Sort it in
   // the constructor.
-  std::vector<StringRef> AnalyzerConfigCmdFlags = {
+  std::vector<llvm::StringLiteral> AnalyzerConfigCmdFlags = {
 #define ANALYZER_OPTION_DEPENDS_ON_USER_MODE(TYPE, NAME, CMDFLAG, DESC,        \
                                              SHALLOW_VAL, DEEP_VAL)            \
   ANALYZER_OPTION(TYPE, NAME, CMDFLAG, DESC, SHALLOW_VAL)
 
 #define ANALYZER_OPTION(TYPE, NAME, CMDFLAG, DESC, DEFAULT_VAL)                \
-    CMDFLAG,
+  llvm::StringLiteral(CMDFLAG),
 
 #include "clang/StaticAnalyzer/Core/AnalyzerOptions.def"
 #undef ANALYZER_OPTION
@@ -283,24 +216,26 @@ public:
   };
 
   bool isUnknownAnalyzerConfig(StringRef Name) const {
-
-    assert(std::is_sorted(AnalyzerConfigCmdFlags.begin(),
-                          AnalyzerConfigCmdFlags.end()));
+    assert(llvm::is_sorted(AnalyzerConfigCmdFlags));
 
     return !std::binary_search(AnalyzerConfigCmdFlags.begin(),
                                AnalyzerConfigCmdFlags.end(), Name);
   }
 
   AnalyzerOptions()
-      : DisableAllChecks(false), ShowCheckerHelp(false),
-        ShowCheckerHelpAlpha(false), ShowCheckerHelpDeveloper(false),
-        ShowCheckerOptionList(false), ShowCheckerOptionAlphaList(false),
+      : AnalysisStoreOpt(RegionStoreModel),
+        AnalysisConstraintsOpt(RangeConstraintsModel), AnalysisDiagOpt(PD_HTML),
+        AnalysisPurgeOpt(PurgeStmt), DisableAllCheckers(false),
+        ShowCheckerHelp(false), ShowCheckerHelpAlpha(false),
+        ShowCheckerHelpDeveloper(false), ShowCheckerOptionList(false),
+        ShowCheckerOptionAlphaList(false),
         ShowCheckerOptionDeveloperList(false), ShowEnabledCheckerList(false),
         ShowConfigOptionsList(false), AnalyzeAll(false),
         AnalyzerDisplayProgress(false), AnalyzeNestedBlocks(false),
         eagerlyAssumeBinOpBifurcation(false), TrimGraph(false),
         visualizeExplodedGraphWithGraphViz(false), UnoptimizedCFG(false),
-        PrintStats(false), NoRetryExhausted(false), AnalyzerWerror(false) {
+        PrintStats(false), NoRetryExhausted(false), AnalyzerWerror(false),
+        InlineMaxStackDepth(5), InliningMode(NoRedundancy) {
     llvm::sort(AnalyzerConfigCmdFlags);
   }
 
@@ -310,7 +245,7 @@ public:
   /// If an option value is not provided, returns the given \p DefaultVal.
   /// @param [in] CheckerName The *full name* of the checker. One may retrieve
   /// this from the checker object's field \c Name, or through \c
-  /// CheckerManager::getCurrentCheckName within the checker's registry
+  /// CheckerManager::getCurrentCheckerName within the checker's registry
   /// function.
   /// Checker options are retrieved in the following format:
   /// `-analyzer-config CheckerName:OptionName=Value.
@@ -330,7 +265,7 @@ public:
   /// If an option value is not provided, returns the given \p DefaultVal.
   /// @param [in] CheckerName The *full name* of the checker. One may retrieve
   /// this from the checker object's field \c Name, or through \c
-  /// CheckerManager::getCurrentCheckName within the checker's registry
+  /// CheckerManager::getCurrentCheckerName within the checker's registry
   /// function.
   /// Checker options are retrieved in the following format:
   /// `-analyzer-config CheckerName:OptionName=Value.
@@ -350,7 +285,7 @@ public:
   /// If an option value is not provided, returns the given \p DefaultVal.
   /// @param [in] CheckerName The *full name* of the checker. One may retrieve
   /// this from the checker object's field \c Name, or through \c
-  /// CheckerManager::getCurrentCheckName within the checker's registry
+  /// CheckerManager::getCurrentCheckerName within the checker's registry
   /// function.
   /// Checker options are retrieved in the following format:
   /// `-analyzer-config CheckerName:OptionName=Value.
@@ -402,6 +337,43 @@ inline UserModeKind AnalyzerOptions::getUserMode() const {
     .Default(None);
   assert(K.hasValue() && "User mode is invalid.");
   return K.getValue();
+}
+
+inline std::vector<StringRef>
+AnalyzerOptions::getRegisteredCheckers(bool IncludeExperimental) {
+  static constexpr llvm::StringLiteral StaticAnalyzerCheckerNames[] = {
+#define GET_CHECKERS
+#define CHECKER(FULLNAME, CLASS, HELPTEXT, DOC_URI, IS_HIDDEN)                 \
+  llvm::StringLiteral(FULLNAME),
+#include "clang/StaticAnalyzer/Checkers/Checkers.inc"
+#undef CHECKER
+#undef GET_CHECKERS
+  };
+  std::vector<StringRef> Checkers;
+  for (StringRef CheckerName : StaticAnalyzerCheckerNames) {
+    if (!CheckerName.startswith("debug.") &&
+        (IncludeExperimental || !CheckerName.startswith("alpha.")))
+      Checkers.push_back(CheckerName);
+  }
+  return Checkers;
+}
+
+inline std::vector<StringRef>
+AnalyzerOptions::getRegisteredPackages(bool IncludeExperimental) {
+  static constexpr llvm::StringLiteral StaticAnalyzerPackageNames[] = {
+#define GET_PACKAGES
+#define PACKAGE(FULLNAME) llvm::StringLiteral(FULLNAME),
+#include "clang/StaticAnalyzer/Checkers/Checkers.inc"
+#undef PACKAGE
+#undef GET_PACKAGES
+  };
+  std::vector<StringRef> Packages;
+  for (StringRef PackageName : StaticAnalyzerPackageNames) {
+    if (PackageName != "debug" &&
+        (IncludeExperimental || PackageName != "alpha"))
+      Packages.push_back(PackageName);
+  }
+  return Packages;
 }
 
 } // namespace clang

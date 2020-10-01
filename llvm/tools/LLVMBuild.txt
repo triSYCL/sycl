@@ -18,6 +18,7 @@
 subdirectories =
  bugpoint
  dsymutil
+ file-table-tform
  llc
  lli
  llvm-ar
@@ -32,8 +33,10 @@ subdirectories =
  llvm-dwarfdump
  llvm-dwp
  llvm-elfabi
+ llvm-ifs
  llvm-exegesis
  llvm-extract
+ llvm-foreach
  llvm-jitlistener
  llvm-jitlink
  llvm-link
@@ -43,16 +46,19 @@ subdirectories =
  llvm-modextract
  llvm-mt
  llvm-nm
+ llvm-no-spir-kernel
  llvm-objcopy
  llvm-objdump
  llvm-pdbutil
  llvm-profdata
  llvm-rc
+ llvm-reduce
  llvm-rtdyld
  llvm-size
  llvm-split
  llvm-undname
  opt
+ sycl-post-link
  verify-uselistorder
 
 [component_0]

@@ -1,14 +1,14 @@
-// RUN: %clang_cc1 -I %S/Inputs -fsycl-is-device -ast-dump %s | FileCheck %s
+// RUN: %clang_cc1 -fsycl -fsycl-is-device -ast-dump %s | FileCheck %s
 
 // This test checks that compiler generates correct kernel wrapper arguments for
 // different accessors targets.
 
-#include <sycl.hpp>
+#include "Inputs/sycl.hpp"
 
 using namespace cl::sycl;
 
 template <typename name, typename Func>
-__attribute__((sycl_kernel)) void kernel(Func kernelFunc) {
+__attribute__((sycl_kernel)) void kernel(const Func &kernelFunc) {
   kernelFunc();
 }
 
@@ -36,6 +36,6 @@ int main() {
         constant_acc.use();
       });
 }
-// CHECK: {{.*}}use_local 'void (__local int *, cl::sycl::range<1>, cl::sycl::range<1>, cl::sycl::id<1>)'
-// CHECK: {{.*}}use_global 'void (__global int *, cl::sycl::range<1>, cl::sycl::range<1>, cl::sycl::id<1>)'
-// CHECK: {{.*}}use_constant 'void (__constant int *, cl::sycl::range<1>, cl::sycl::range<1>, cl::sycl::id<1>)'
+// CHECK: {{.*}}use_local{{.*}} 'void (__local int *, cl::sycl::range<1>, cl::sycl::range<1>, cl::sycl::id<1>)'
+// CHECK: {{.*}}use_global{{.*}} 'void (__global int *, cl::sycl::range<1>, cl::sycl::range<1>, cl::sycl::id<1>)'
+// CHECK: {{.*}}use_constant{{.*}} 'void (__constant int *, cl::sycl::range<1>, cl::sycl::range<1>, cl::sycl::id<1>)'

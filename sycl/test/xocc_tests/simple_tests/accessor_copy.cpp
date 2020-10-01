@@ -1,4 +1,7 @@
-// RUN: true
+// REQUIRES: xocc
+
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+// RUN: %ACC_RUN_PLACEHOLDER %t.out
 
 // This test is testing 2D and 3D D2D copy using the handler it's heavily based
 // on the handler_mem_op.cpp test inside basic_tests/handler. In this case we're

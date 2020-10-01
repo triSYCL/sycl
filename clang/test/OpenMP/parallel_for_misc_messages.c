@@ -142,11 +142,11 @@ void test_collapse() {
 #pragma omp parallel for collapse(4, 8)
   for (i = 0; i < 16; ++i)
     ; // expected-error {{expected 4 for loops after '#pragma omp parallel for', but found only 1}}
-// expected-error@+1 {{expression is not an integer constant expression}}
+// expected-error@+1 {{integer constant expression}}
 #pragma omp parallel for collapse(2.5)
   for (i = 0; i < 16; ++i)
     ;
-// expected-error@+1 {{expression is not an integer constant expression}}
+// expected-error@+1 {{integer constant expression}}
 #pragma omp parallel for collapse(foo())
   for (i = 0; i < 16; ++i)
     ;
@@ -162,9 +162,9 @@ void test_collapse() {
 #pragma omp parallel for collapse(5 - 5)
   for (i = 0; i < 16; ++i)
     ;
-// expected-note@+1 {{defined as firstprivate}}
+// expected-note@+1 2 {{defined as firstprivate}}
 #pragma omp parallel for collapse(2) firstprivate(i)
-  for (i = 0; i < 16; ++i)
+  for (i = 0; i < 16; ++i) // expected-error {{loop iteration variable in the associated loop of 'omp parallel for' directive may not be firstprivate, predetermined as private}}
 // expected-note@+1 {{variable with automatic storage duration is predetermined as private; perhaps you forget to enclose 'omp for' directive into a parallel or another task region?}}
     for (int j = 0; j < 16; ++j)
 // expected-error@+2 2 {{reduction variable must be shared}}

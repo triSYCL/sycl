@@ -16,6 +16,7 @@ static_library("Instrumentation") {
     "DataFlowSanitizer.cpp",
     "GCOVProfiling.cpp",
     "HWAddressSanitizer.cpp",
+    "HeapProfiler.cpp",
     "IndirectCallPromotion.cpp",
     "InstrOrderFile.cpp",
     "InstrProfiling.cpp",
@@ -26,5 +27,6 @@ static_library("Instrumentation") {
     "PoisonChecking.cpp",
     "SanitizerCoverage.cpp",
     "ThreadSanitizer.cpp",
+    "ValueProfileCollector.cpp",
   ]
 }

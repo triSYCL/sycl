@@ -27,7 +27,6 @@
 
 namespace llvm {
 
-class MachineLocation;
 class MachineOperand;
 class ConstantInt;
 class ConstantFP;
@@ -88,8 +87,6 @@ public:
   uint16_t getLanguage() const { return CUNode->getSourceLanguage(); }
   const DICompileUnit *getCUNode() const { return CUNode; }
 
-  uint16_t getDwarfVersion() const { return DD->getDwarfVersion(); }
-
   /// Return true if this compile unit has something to write out.
   bool hasContent() const { return getUnitDie().hasChildren(); }
 
@@ -126,6 +123,8 @@ public:
   /// type system, since DIEs for the type system can be shared across CUs and
   /// the mappings are kept in DwarfDebug.
   void insertDIE(const DINode *Desc, DIE *D);
+
+  void insertDIE(DIE *D);
 
   /// Add a flag that is true to the DIE.
   void addFlag(DIE &Die, dwarf::Attribute Attribute);
@@ -214,15 +213,6 @@ public:
   /// Add thrown types.
   void addThrownTypes(DIE &Die, DINodeArray ThrownTypes);
 
-  // FIXME: Should be reformulated in terms of addComplexAddress.
-  /// Start with the address based on the location provided, and generate the
-  /// DWARF information necessary to find the actual Block variable (navigating
-  /// the Block struct) based on the starting location.  Add the DWARF
-  /// information to the die.  Obsolete, please use addComplexAddress instead.
-  void addBlockByrefAddress(const DbgVariable &DV, DIE &Die,
-                            dwarf::Attribute Attribute,
-                            const MachineLocation &Location);
-
   /// Add a new type attribute to the specified entity.
   ///
   /// This takes and attribute parameter because DW_AT_friend attributes are
@@ -279,9 +269,6 @@ public:
   /// Add the DW_AT_rnglists_base attribute to the unit DIE.
   void addRnglistsBase();
 
-  /// Add the DW_AT_loclists_base attribute to the unit DIE.
-  void addLoclistsBase();
-
   virtual DwarfCompileUnit &getCU() = 0;
 
   void constructTypeDIE(DIE &Buffer, const DICompositeType *CTy);
@@ -294,10 +281,6 @@ public:
   DIE::value_iterator addSectionLabel(DIE &Die, dwarf::Attribute Attribute,
                                       const MCSymbol *Label,
                                       const MCSymbol *Sec);
-
-  /// If the \p File has an MD5 checksum, return it as an MD5Result
-  /// allocated in the MCContext.
-  Optional<MD5::MD5Result> getMD5AsBytes(const DIFile *File) const;
 
   /// Get context owner's DIE.
   DIE *createTypeDIE(const DICompositeType *Ty);
@@ -317,6 +300,7 @@ protected:
 
 private:
   void constructTypeDIE(DIE &Buffer, const DIBasicType *BTy);
+  void constructTypeDIE(DIE &Buffer, const DIStringType *BTy);
   void constructTypeDIE(DIE &Buffer, const DIDerivedType *DTy);
   void constructTypeDIE(DIE &Buffer, const DISubroutineType *CTy);
   void constructSubrangeDIE(DIE &Buffer, const DISubrange *SR, DIE *IndexTy);

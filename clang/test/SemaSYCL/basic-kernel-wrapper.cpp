@@ -1,15 +1,15 @@
-// RUN: %clang_cc1 -std=c++11 -I %S/Inputs -fsycl-is-device -ast-dump %s | FileCheck %s
+// RUN: %clang_cc1 -fsycl -fsycl-is-device -ast-dump %s | FileCheck %s
 
 // This test checks that compiler generates correct kernel wrapper for basic
 // case.
 
-#include <sycl.hpp>
+#include "Inputs/sycl.hpp"
 
 template <typename Acc>
 struct AccWrapper { Acc accessor; };
 
 template <typename name, typename Func>
-__attribute__((sycl_kernel)) void kernel(Func kernelFunc) {
+__attribute__((sycl_kernel)) void kernel(const Func &kernelFunc) {
   kernelFunc();
 }
 
@@ -23,7 +23,7 @@ int main() {
 
 // Check declaration of the kernel
 
-// CHECK: FunctionDecl {{.*}}kernel_wrapper 'void (__global int *, cl::sycl::range<1>, cl::sycl::range<1>, cl::sycl::id<1>)'
+// CHECK: FunctionDecl {{.*}}kernel_wrapper{{.*}} 'void (__global int *, cl::sycl::range<1>, cl::sycl::range<1>, cl::sycl::id<1>)'
 
 // Check parameters of the kernel
 
@@ -43,15 +43,22 @@ int main() {
 
 // CHECK: CXXMemberCallExpr {{.*}} 'void'
 // CHECK-NEXT: MemberExpr {{.*}} 'void ({{.*}}PtrType, range<1>, range<1>, id<1>)' lvalue .__init
-// CHECK-NEXT: MemberExpr {{.*}} 'cl::sycl::accessor<int, 1, cl::sycl::access::mode::read_write>':'cl::sycl::accessor<int, 1, cl::sycl::access::mode::read_write, cl::sycl::access::target::global_buffer, cl::sycl::access::placeholder::false_t>' lvalue .
+// CHECK-NEXT: MemberExpr {{.*}} 'cl::sycl::accessor<int, 1, cl::sycl::access::mode::read_write>':'cl::sycl::accessor<int, 1, cl::sycl::access::mode::read_write, cl::sycl::access::target::global_buffer, cl::sycl::access::placeholder::false_t, cl::sycl::ONEAPI::accessor_property_list<>>' lvalue .
 // CHECK-NEXT: DeclRefExpr {{.*}} '(lambda at {{.*}}basic-kernel-wrapper.cpp{{.*}})' lvalue Var
+
 // CHECK-NEXT: ImplicitCastExpr {{.*}} <LValueToRValue>
 // CHECK-NEXT: DeclRefExpr {{.*}} '__global int *' lvalue ParmVar {{.*}} '[[_arg_Mem]]' '__global int *'
-// CHECK-NEXT: ImplicitCastExpr {{.*}} 'range<1>':'cl::sycl::range<1>' <LValueToRValue>
+
+// CHECK-NEXT: CXXConstructExpr {{.*}} 'range<1>':'cl::sycl::range<1>'
+// CHECK-NEXT: ImplicitCastExpr {{.*}} 'const cl::sycl::range<1>' lvalue <NoOp>
 // CHECK-NEXT: DeclRefExpr {{.*}} 'cl::sycl::range<1>' lvalue ParmVar {{.*}} '[[_arg_AccessRange]]' 'cl::sycl::range<1>'
-// CHECK-NEXT: ImplicitCastExpr {{.*}} 'range<1>':'cl::sycl::range<1>' <LValueToRValue>
+
+// CHECK-NEXT: CXXConstructExpr {{.*}} 'range<1>':'cl::sycl::range<1>'
+// CHECK-NEXT: ImplicitCastExpr {{.*}} 'const cl::sycl::range<1>' lvalue <NoOp>
 // CHECK-NEXT: DeclRefExpr {{.*}} 'cl::sycl::range<1>' lvalue ParmVar {{.*}} '[[_arg_MemRange]]' 'cl::sycl::range<1>'
-// CHECK-NEXT: ImplicitCastExpr {{.*}} 'id<1>':'cl::sycl::id<1>' <LValueToRValue>
+
+// CHECK-NEXT: CXXConstructExpr {{.*}} 'id<1>':'cl::sycl::id<1>'
+// CHECK-NEXT: ImplicitCastExpr {{.*}} 'const cl::sycl::id<1>' lvalue <NoOp>
 // CHECK-NEXT: DeclRefExpr {{.*}} 'cl::sycl::id<1>' lvalue ParmVar {{.*}} '[[_arg_Offset]]' 'cl::sycl::id<1>'
 
 // Check that body of the kernel caller function is included into kernel
@@ -65,7 +72,6 @@ int main() {
 
 // Check kernel wrapper attributes
 
-// CHECK: SYCLDeviceAttr {{.*}} Implicit
 // CHECK: OpenCLKernelAttr {{.*}} Implicit
-// CHECK: AsmLabelAttr {{.*}} Implicit "{{.*}}kernel_wrapper"
+// CHECK: AsmLabelAttr {{.*}} Implicit "{{.*}}kernel_wrapper{{.*}}"
 // CHECK: ArtificialAttr {{.*}} Implicit

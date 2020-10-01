@@ -23,7 +23,7 @@ std::error_code coff2yaml(llvm::raw_ostream &Out,
                           const llvm::object::COFFObjectFile &Obj);
 llvm::Error elf2yaml(llvm::raw_ostream &Out,
                          const llvm::object::ObjectFile &Obj);
-std::error_code macho2yaml(llvm::raw_ostream &Out,
+llvm::Error macho2yaml(llvm::raw_ostream &Out,
                            const llvm::object::Binary &Obj);
 llvm::Error minidump2yaml(llvm::raw_ostream &Out,
                           const llvm::object::MinidumpFile &Obj);
@@ -40,6 +40,13 @@ struct Data;
 }
 }
 
-std::error_code dwarf2yaml(llvm::DWARFContext &DCtx, llvm::DWARFYAML::Data &Y);
+void dumpDebugAbbrev(llvm::DWARFContext &DCtx, llvm::DWARFYAML::Data &Y);
+llvm::Error dumpDebugARanges(llvm::DWARFContext &DCtx,
+                             llvm::DWARFYAML::Data &Y);
+void dumpDebugPubSections(llvm::DWARFContext &DCtx, llvm::DWARFYAML::Data &Y);
+void dumpDebugInfo(llvm::DWARFContext &DCtx, llvm::DWARFYAML::Data &Y);
+void dumpDebugLines(llvm::DWARFContext &DCtx, llvm::DWARFYAML::Data &Y);
+llvm::Error dumpDebugRanges(llvm::DWARFContext &DCtx, llvm::DWARFYAML::Data &Y);
+void dumpDebugStrings(llvm::DWARFContext &DCtx, llvm::DWARFYAML::Data &Y);
 
 #endif

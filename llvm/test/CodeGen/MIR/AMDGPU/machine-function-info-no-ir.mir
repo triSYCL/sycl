@@ -8,12 +8,14 @@
 # FULL-NEXT: explicitKernArgSize: 128
 # FULL-NEXT: maxKernArgAlign: 64
 # FULL-NEXT: ldsSize: 2048
+# FULL-NEXT: dynLDSAlign: 1
 # FULL-NEXT: isEntryFunction: true
 # FULL-NEXT: noSignedZerosFPMath: false
 # FULL-NEXT: memoryBound:     true
 # FULL-NEXT: waveLimiter:     true
+# FULL-NEXT: hasSpilledSGPRs: false
+# FULL-NEXT: hasSpilledVGPRs: false
 # FULL-NEXT: scratchRSrcReg:  '$sgpr8_sgpr9_sgpr10_sgpr11'
-# FULL-NEXT: scratchWaveOffsetReg:  '$sgpr12'
 # FULL-NEXT: frameOffsetReg:  '$sgpr12'
 # FULL-NEXT: stackPtrOffsetReg:  '$sgpr13'
 # FULL-NEXT: argumentInfo:
@@ -25,6 +27,11 @@
 # FULL-NEXT: mode:
 # FULL-NEXT: ieee: true
 # FULL-NEXT: dx10-clamp: true
+# FULL-NEXT: fp32-input-denormals: true
+# FULL-NEXT: fp32-output-denormals: true
+# FULL-NEXT: fp64-fp16-input-denormals: true
+# FULL-NEXT: fp64-fp16-output-denormals: true
+# FULL-NEXT:  highBitsOf32BitAddress: 0
 # FULL-NEXT: body:
 
 # SIMPLE: machineFunctionInfo:
@@ -35,7 +42,6 @@
 # SIMPLE-NEXT: memoryBound: true
 # SIMPLE-NEXT: waveLimiter: true
 # SIMPLE-NEXT: scratchRSrcReg: '$sgpr8_sgpr9_sgpr10_sgpr11'
-# SIMPLE-NEXT: scratchWaveOffsetReg:  '$sgpr12'
 # SIMPLE-NEXT: frameOffsetReg:  '$sgpr12'
 # SIMPLE-NEXT: stackPtrOffsetReg:  '$sgpr13'
 # SIMPLE-NEXT: argumentInfo:
@@ -55,7 +61,6 @@ machineFunctionInfo:
   memoryBound:     true
   waveLimiter:     true
   scratchRSrcReg:  '$sgpr8_sgpr9_sgpr10_sgpr11'
-  scratchWaveOffsetReg:  '$sgpr12'
   frameOffsetReg: '$sgpr12'
   stackPtrOffsetReg:  '$sgpr13'
   argumentInfo:
@@ -75,28 +80,34 @@ body:             |
 # ALL-LABEL: name: no_mfi
 # FULL: machineFunctionInfo:
 # FULL-NEXT: explicitKernArgSize: 0
-# FULL-NEXT: maxKernArgAlign: 0
+# FULL-NEXT: maxKernArgAlign: 1
 # FULL-NEXT: ldsSize: 0
+# FULL-NEXT: dynLDSAlign: 1
 # FULL-NEXT: isEntryFunction: false
 # FULL-NEXT: noSignedZerosFPMath: false
 # FULL-NEXT: memoryBound:     false
 # FULL-NEXT: waveLimiter:     false
+# FULL-NEXT: hasSpilledSGPRs: false
+# FULL-NEXT: hasSpilledVGPRs: false
 # FULL-NEXT: scratchRSrcReg:  '$private_rsrc_reg'
-# FULL-NEXT: scratchWaveOffsetReg:  '$scratch_wave_offset_reg'
 # FULL-NEXT: frameOffsetReg:  '$fp_reg'
 # FULL-NEXT: stackPtrOffsetReg:  '$sp_reg'
 # FULL-NEXT: argumentInfo:
 # FULL-NEXT: privateSegmentBuffer: { reg: '$sgpr0_sgpr1_sgpr2_sgpr3' }
-# FULL-NEXT: privateSegmentWaveByteOffset: { reg: '$sgpr33' }
 # FULL-NEXT: mode:
 # FULL-NEXT: ieee: true
 # FULL-NEXT: dx10-clamp: true
+# FULL-NEXT: fp32-input-denormals: true
+# FULL-NEXT: fp32-output-denormals: true
+# FULL-NEXT: fp64-fp16-input-denormals: true
+# FULL-NEXT: fp64-fp16-output-denormals: true
+# FULL-NEXT:  highBitsOf32BitAddress: 0
 # FULL-NEXT: body:
 
 # SIMPLE: machineFunctionInfo:
+# SIMPLE-NEXT: maxKernArgAlign: 1
 # SIMPLE-NEXT: argumentInfo:
 # SIMPLE-NEXT: privateSegmentBuffer: { reg: '$sgpr0_sgpr1_sgpr2_sgpr3' }
-# SIMPLE-NEXT: privateSegmentWaveByteOffset: { reg: '$sgpr33' }
 # SIMPLE-NEXT: body:
 
 name: no_mfi
@@ -110,28 +121,34 @@ body:             |
 # ALL-LABEL: name: empty_mfi
 # FULL: machineFunctionInfo:
 # FULL-NEXT: explicitKernArgSize: 0
-# FULL-NEXT: maxKernArgAlign: 0
+# FULL-NEXT: maxKernArgAlign: 1
 # FULL-NEXT: ldsSize: 0
+# FULL-NEXT: dynLDSAlign: 1
 # FULL-NEXT: isEntryFunction: false
 # FULL-NEXT: noSignedZerosFPMath: false
 # FULL-NEXT: memoryBound:     false
 # FULL-NEXT: waveLimiter:     false
+# FULL-NEXT: hasSpilledSGPRs: false
+# FULL-NEXT: hasSpilledVGPRs: false
 # FULL-NEXT: scratchRSrcReg:  '$private_rsrc_reg'
-# FULL-NEXT: scratchWaveOffsetReg:  '$scratch_wave_offset_reg'
 # FULL-NEXT: frameOffsetReg:  '$fp_reg'
 # FULL-NEXT: stackPtrOffsetReg:  '$sp_reg'
 # FULL-NEXT: argumentInfo:
 # FULL-NEXT: privateSegmentBuffer: { reg: '$sgpr0_sgpr1_sgpr2_sgpr3' }
-# FULL-NEXT: privateSegmentWaveByteOffset: { reg: '$sgpr33' }
 # FULL-NEXT: mode:
 # FULL-NEXT: ieee: true
 # FULL-NEXT: dx10-clamp: true
+# FULL-NEXT: fp32-input-denormals: true
+# FULL-NEXT: fp32-output-denormals: true
+# FULL-NEXT: fp64-fp16-input-denormals: true
+# FULL-NEXT: fp64-fp16-output-denormals: true
+# FULL-NEXT:  highBitsOf32BitAddress: 0
 # FULL-NEXT: body:
 
 # SIMPLE: machineFunctionInfo:
+# SIMPLE-NEXT: maxKernArgAlign: 1
 # SIMPLE-NEXT: argumentInfo:
 # SIMPLE-NEXT: privateSegmentBuffer: { reg: '$sgpr0_sgpr1_sgpr2_sgpr3' }
-# SIMPLE-NEXT: privateSegmentWaveByteOffset: { reg: '$sgpr33' }
 # SIMPLE-NEXT: body:
 
 name: empty_mfi
@@ -146,29 +163,35 @@ body:             |
 # ALL-LABEL: name: empty_mfi_entry_func
 # FULL: machineFunctionInfo:
 # FULL-NEXT: explicitKernArgSize: 0
-# FULL-NEXT: maxKernArgAlign: 0
+# FULL-NEXT: maxKernArgAlign: 1
 # FULL-NEXT: ldsSize: 0
+# FULL-NEXT: dynLDSAlign: 1
 # FULL-NEXT: isEntryFunction: true
 # FULL-NEXT: noSignedZerosFPMath: false
 # FULL-NEXT: memoryBound:     false
 # FULL-NEXT: waveLimiter:     false
+# FULL-NEXT: hasSpilledSGPRs: false
+# FULL-NEXT: hasSpilledVGPRs: false
 # FULL-NEXT: scratchRSrcReg:  '$private_rsrc_reg'
-# FULL-NEXT: scratchWaveOffsetReg:  '$scratch_wave_offset_reg'
 # FULL-NEXT: frameOffsetReg:  '$fp_reg'
 # FULL-NEXT: stackPtrOffsetReg:  '$sp_reg'
 # FULL-NEXT: argumentInfo:
 # FULL-NEXT: privateSegmentBuffer: { reg: '$sgpr0_sgpr1_sgpr2_sgpr3' }
-# FULL-NEXT: privateSegmentWaveByteOffset: { reg: '$sgpr33' }
 # FULL-NEXT: mode:
 # FULL-NEXT: ieee: true
 # FULL-NEXT: dx10-clamp: true
+# FULL-NEXT: fp32-input-denormals: true
+# FULL-NEXT: fp32-output-denormals: true
+# FULL-NEXT: fp64-fp16-input-denormals: true
+# FULL-NEXT: fp64-fp16-output-denormals: true
+# FULL-NEXT:  highBitsOf32BitAddress: 0
 # FULL-NEXT: body:
 
 # SIMPLE: machineFunctionInfo:
+# SIMPLE-NEXT: maxKernArgAlign: 1
 # SIMPLE-NEXT: isEntryFunction: true
 # SIMPLE-NEXT: argumentInfo:
 # SIMPLE-NEXT: privateSegmentBuffer: { reg: '$sgpr0_sgpr1_sgpr2_sgpr3' }
-# SIMPLE-NEXT: privateSegmentWaveByteOffset: { reg: '$sgpr33' }
 # SIMPLE-NEXT: body:
 
 name: empty_mfi_entry_func
@@ -184,12 +207,10 @@ body:             |
 # ALL-LABEL: name: default_regs_mfi
 
 # FULL: scratchRSrcReg:  '$private_rsrc_reg'
-# FULL-NEXT: scratchWaveOffsetReg:  '$scratch_wave_offset_reg'
 # FULL-NEXT: frameOffsetReg:  '$fp_reg'
 # FULL-NEXT: stackPtrOffsetReg:  '$sp_reg'
 
 # SIMPLE-NOT: scratchRSrcReg
-# SIMPLE-NOT: scratchWaveOffsetReg
 # SIMPLE-NOT:: stackPtrOffsetReg
 name: default_regs_mfi
 machineFunctionInfo:
@@ -207,13 +228,11 @@ body:             |
 # FULL: argumentInfo:
 # FULL-NEXT: privateSegmentBuffer: { reg: '$sgpr0_sgpr1_sgpr2_sgpr3' }
 # FULL-NEXT: flatScratchInit: { offset: 4 }
-# FULL-NEXT: privateSegmentWaveByteOffset: { reg: '$sgpr33' }
 # FULL-NEXT: workItemIDY: { reg: '$vgpr0', mask: 65280 }
 
 # SIMPLE: argumentInfo:
 # SIMPLE-NEXT: privateSegmentBuffer: { reg: '$sgpr0_sgpr1_sgpr2_sgpr3' }
 # SIMPLE-NEXT: flatScratchInit: { offset: 4 }
-# SIMPLE-NEXT: privateSegmentWaveByteOffset: { reg: '$sgpr33' }
 # SIMPLE-NEXT: workItemIDY: { reg: '$vgpr0', mask: 65280 }
 name: fake_stack_arginfo
 machineFunctionInfo:
@@ -232,11 +251,55 @@ body:             |
 # ALL: mode:
 # ALL-NEXT: ieee: false
 # ALL-NEXT: dx10-clamp: false
+# ALL-NEXT: fp32-input-denormals: false
+# ALL-NEXT: fp32-output-denormals: false
+# ALL-NEXT: fp64-fp16-input-denormals: false
+# ALL-NEXT: fp64-fp16-output-denormals: false
+
 name: parse_mode
 machineFunctionInfo:
   mode:
     ieee: false
     dx10-clamp: false
+    fp32-input-denormals: false
+    fp32-output-denormals: false
+    fp64-fp16-input-denormals: false
+    fp64-fp16-output-denormals: false
+
+body:             |
+  bb.0:
+    S_ENDPGM 0
+
+...
+
+
+---
+# ALL-LABEL: name: parse_spilled_regs
+# ALL: machineFunctionInfo:
+# ALL: hasSpilledSGPRs: true
+# ALL-NEXT: hasSpilledVGPRs: true
+
+name: parse_spilled_regs
+machineFunctionInfo:
+  hasSpilledSGPRs: true
+  hasSpilledVGPRs: true
+
+body:             |
+  bb.0:
+    S_ENDPGM 0
+
+...
+
+---
+# ALL-LABEL: name: dyn_lds_with_alignment
+
+# FULL: ldsSize: 0
+# FULL-NEXT: dynLDSAlign: 8
+
+# SIMPLE: dynLDSAlign: 8
+name: dyn_lds_with_alignment
+machineFunctionInfo:
+  dynLDSAlign: 8
 
 body:             |
   bb.0:

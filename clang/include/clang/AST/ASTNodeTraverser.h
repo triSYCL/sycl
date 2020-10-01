@@ -15,15 +15,19 @@
 #ifndef LLVM_CLANG_AST_ASTNODETRAVERSER_H
 #define LLVM_CLANG_AST_ASTNODETRAVERSER_H
 
+#include "clang/AST/ASTTypeTraits.h"
 #include "clang/AST/AttrVisitor.h"
 #include "clang/AST/CommentVisitor.h"
 #include "clang/AST/DeclVisitor.h"
 #include "clang/AST/LocInfoType.h"
 #include "clang/AST/StmtVisitor.h"
 #include "clang/AST/TemplateArgumentVisitor.h"
+#include "clang/AST/Type.h"
 #include "clang/AST/TypeVisitor.h"
 
 namespace clang {
+
+class APValue;
 
 /**
 
@@ -49,6 +53,7 @@ struct {
   void Visit(const OMPClause *C);
   void Visit(const BlockDecl::Capture &C);
   void Visit(const GenericSelectionExpr::ConstAssociation &A);
+  void Visit(const APValue &Value, QualType Ty);
 };
 */
 template <typename Derived, typename NodeDelegateType>
@@ -65,6 +70,8 @@ class ASTNodeTraverser
   /// not already been loaded.
   bool Deserialize = false;
 
+  TraversalKind Traversal = TraversalKind::TK_AsIs;
+
   NodeDelegateType &getNodeDelegate() {
     return getDerived().doGetNodeDelegate();
   }
@@ -73,6 +80,8 @@ class ASTNodeTraverser
 public:
   void setDeserialize(bool D) { Deserialize = D; }
   bool getDeserialize() const { return Deserialize; }
+
+  void SetTraversalKind(TraversalKind TK) { Traversal = TK; }
 
   void Visit(const Decl *D) {
     getNodeDelegate().AddChild([=] {
@@ -97,8 +106,23 @@ public:
     });
   }
 
-  void Visit(const Stmt *S, StringRef Label = {}) {
+  void Visit(const Stmt *Node, StringRef Label = {}) {
     getNodeDelegate().AddChild(Label, [=] {
+      const Stmt *S = Node;
+
+      if (auto *E = dyn_cast_or_null<Expr>(S)) {
+        switch (Traversal) {
+        case TK_AsIs:
+          break;
+        case TK_IgnoreImplicitCastsAndParentheses:
+          S = E->IgnoreParenImpCasts();
+          break;
+        case TK_IgnoreUnlessSpelledInSource:
+          S = E->IgnoreUnlessSpelledInSource();
+          break;
+        }
+      }
+
       getNodeDelegate().Visit(S);
 
       if (!S) {
@@ -108,9 +132,11 @@ public:
       ConstStmtVisitor<Derived>::Visit(S);
 
       // Some statements have custom mechanisms for dumping their children.
-      if (isa<DeclStmt>(S) || isa<GenericSelectionExpr>(S)) {
+      if (isa<DeclStmt>(S) || isa<GenericSelectionExpr>(S))
         return;
-      }
+
+      if (isa<LambdaExpr>(S) && Traversal == TK_IgnoreUnlessSpelledInSource)
+        return;
 
       for (const Stmt *SubStmt : S->children())
         Visit(SubStmt);
@@ -189,6 +215,10 @@ public:
     });
   }
 
+  void Visit(const APValue &Value, QualType Ty) {
+    getNodeDelegate().AddChild([=] { getNodeDelegate().Visit(Value, Ty); });
+  }
+
   void Visit(const comments::Comment *C, const comments::FullComment *FC) {
     getNodeDelegate().AddChild([=] {
       getNodeDelegate().Visit(C, FC);
@@ -205,7 +235,7 @@ public:
     });
   }
 
-  void Visit(const ast_type_traits::DynTypedNode &N) {
+  void Visit(const DynTypedNode &N) {
     // FIXME: Improve this with a switch or a visitor pattern.
     if (const auto *D = N.get<Decl>())
       Visit(D);
@@ -237,6 +267,9 @@ public:
 
     for (const auto &TP : *TPL)
       Visit(TP);
+
+    if (const Expr *RC = TPL->getRequiresClause())
+      Visit(RC);
   }
 
   void
@@ -327,8 +360,6 @@ public:
   void VisitTemplateSpecializationType(const TemplateSpecializationType *T) {
     for (const auto &Arg : *T)
       Visit(Arg);
-    if (T->isTypeAlias())
-      Visit(T->getAliasedType());
   }
   void VisitObjCObjectPointerType(const ObjCObjectPointerType *T) {
     Visit(T->getPointeeType());
@@ -357,6 +388,9 @@ public:
     if (D->param_begin())
       for (const auto *Parameter : D->parameters())
         Visit(Parameter);
+
+    if (const Expr *TRC = D->getTrailingRequiresClause())
+      Visit(TRC);
 
     if (const auto *C = dyn_cast<CXXConstructorDecl>(D))
       for (const auto *I : C->inits())
@@ -508,6 +542,8 @@ public:
   }
 
   void VisitTemplateTypeParmDecl(const TemplateTypeParmDecl *D) {
+    if (const auto *TC = D->getTypeConstraint())
+      Visit(TC->getImmediatelyDeclaredConstraint());
     if (D->hasDefaultArgument())
       Visit(D->getDefaultArgument(), SourceRange(),
             D->getDefaultArgStorage().getInheritedFrom(),
@@ -515,6 +551,8 @@ public:
   }
 
   void VisitNonTypeTemplateParmDecl(const NonTypeTemplateParmDecl *D) {
+    if (const auto *E = D->getPlaceholderTypeConstraint())
+      Visit(E);
     if (D->hasDefaultArgument())
       Visit(D->getDefaultArgument(), SourceRange(),
             D->getDefaultArgStorage().getInheritedFrom(),
@@ -532,6 +570,12 @@ public:
   void VisitConceptDecl(const ConceptDecl *D) {
     dumpTemplateParameters(D->getTemplateParameters());
     Visit(D->getConstraintExpr());
+  }
+
+  void VisitConceptSpecializationExpr(const ConceptSpecializationExpr *CSE) {
+    if (CSE->hasExplicitTemplateArgs())
+      for (const auto &ArgLoc : CSE->getTemplateArgsAsWritten()->arguments())
+        dumpTemplateArgumentLoc(ArgLoc);
   }
 
   void VisitUsingShadowDecl(const UsingShadowDecl *D) {
@@ -617,19 +661,44 @@ public:
     Visit(E->getControllingExpr());
     Visit(E->getControllingExpr()->getType()); // FIXME: remove
 
-    for (const auto &Assoc : E->associations()) {
+    for (const auto Assoc : E->associations()) {
       Visit(Assoc);
     }
   }
 
   void VisitLambdaExpr(const LambdaExpr *Node) {
-    Visit(Node->getLambdaClass());
+    if (Traversal == TK_IgnoreUnlessSpelledInSource) {
+      for (unsigned I = 0, N = Node->capture_size(); I != N; ++I) {
+        const auto *C = Node->capture_begin() + I;
+        if (!C->isExplicit())
+          continue;
+        if (Node->isInitCapture(C))
+          Visit(C->getCapturedVar());
+        else
+          Visit(Node->capture_init_begin()[I]);
+      }
+      dumpTemplateParameters(Node->getTemplateParameterList());
+      for (const auto *P : Node->getCallOperator()->parameters())
+        Visit(P);
+      Visit(Node->getBody());
+    } else {
+      return Visit(Node->getLambdaClass());
+    }
   }
 
   void VisitSizeOfPackExpr(const SizeOfPackExpr *Node) {
     if (Node->isPartiallySubstituted())
       for (const auto &A : Node->getPartialArguments())
         Visit(A);
+  }
+
+  void VisitSubstNonTypeTemplateParmExpr(const SubstNonTypeTemplateParmExpr *E) {
+    Visit(E->getParameter());
+  }
+  void VisitSubstNonTypeTemplateParmPackExpr(
+      const SubstNonTypeTemplateParmPackExpr *E) {
+    Visit(E->getParameterPack());
+    Visit(E->getArgumentPack());
   }
 
   void VisitObjCAtCatchStmt(const ObjCAtCatchStmt *Node) {
@@ -640,6 +709,11 @@ public:
   void VisitExpressionTemplateArgument(const TemplateArgument &TA) {
     Visit(TA.getAsExpr());
   }
+
+  void VisitTypeTemplateArgument(const TemplateArgument &TA) {
+    Visit(TA.getAsType());
+  }
+
   void VisitPackTemplateArgument(const TemplateArgument &TA) {
     for (const auto &TArg : TA.pack_elements())
       Visit(TArg);

@@ -35,10 +35,10 @@ ds_read_u16_d16 v5, v1
 ds_read_u16_d16_hi v5, v1
 // GFX6-8: error: instruction not supported on this GPU
 
-ds_write_addtid_b32 v5, v1
+ds_write_addtid_b32 v5
 // GFX6-8: error: instruction not supported on this GPU
 
-ds_read_addtid_b32 v5, v1
+ds_read_addtid_b32 v5
 // GFX6-8: error: instruction not supported on this GPU
 
 // GFX8+.
@@ -128,9 +128,6 @@ s_set_gpr_idx_idx s0
 // GFX6, GFX7, GFX8, GFX9.
 
 s_cbranch_join s0
-// GFX10: error: instruction not supported on this GPU
-
-s_mov_regrd_b32 s0, s1
 // GFX10: error: instruction not supported on this GPU
 
 //===----------------------------------------------------------------------===//

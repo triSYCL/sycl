@@ -1,6 +1,6 @@
-; RUN: llc -verify-machineinstrs -mtriple=powerpc64-bgq-linux -mcpu=a2 < %s
+; RUN: llc -verify-machineinstrs -mtriple=powerpc64le-unknown-linux -mcpu=a2 < %s
 target datalayout = "E-p:64:64:64-i1:8:8-i8:8:8-i16:16:16-i32:32:32-i64:64:64-f32:32:32-f64:64:64-f128:128:128-v128:128:128-n32:64"
-target triple = "powerpc64-bgq-linux"
+target triple = "powerpc64le-unknown-linux"
 
 %"class.std::__1::__assoc_sub_state" = type { %"class.std::__1::__shared_count", %"class.std::__exception_ptr::exception_ptr", %"class.std::__1::mutex", %"class.std::__1::condition_variable", i32 }
 %"class.std::__1::__shared_count" = type { i32 (...)**, i64 }
@@ -122,9 +122,9 @@ declare void @_ZNSt3__15mutex4lockEv(%"class.std::__1::mutex"*) #0
 ; Function Attrs: nounwind
 declare void @llvm.memset.p0i8.i64(i8* nocapture, i8, i64, i1) #3
 
-attributes #0 = { optsize "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
-attributes #1 = { nounwind optsize "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
-attributes #2 = { noreturn optsize "less-precise-fpmad"="false" "no-frame-pointer-elim"="true" "no-frame-pointer-elim-non-leaf" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
+attributes #0 = { optsize "less-precise-fpmad"="false" "frame-pointer"="all" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
+attributes #1 = { nounwind optsize "less-precise-fpmad"="false" "frame-pointer"="all" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
+attributes #2 = { noreturn optsize "less-precise-fpmad"="false" "frame-pointer"="all" "no-infs-fp-math"="false" "no-nans-fp-math"="false" "stack-protector-buffer-size"="8" "unsafe-fp-math"="false" "use-soft-float"="false" }
 attributes #3 = { nounwind }
 attributes #4 = { optsize }
 attributes #5 = { nounwind optsize }

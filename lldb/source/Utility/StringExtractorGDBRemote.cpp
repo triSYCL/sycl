@@ -1,4 +1,4 @@
-//===-- StringExtractorGDBRemote.cpp ----------------------------*- C++ -*-===//
+//===-- StringExtractorGDBRemote.cpp --------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -233,6 +233,8 @@ StringExtractorGDBRemote::GetServerPacketType() const {
         return eServerPacketType_qPlatform_chmod;
       if (PACKET_MATCHES("qProcessInfo"))
         return eServerPacketType_qProcessInfo;
+      if (PACKET_STARTS_WITH("qPathComplete:"))
+        return eServerPacketType_qPathComplete;
       break;
 
     case 'Q':

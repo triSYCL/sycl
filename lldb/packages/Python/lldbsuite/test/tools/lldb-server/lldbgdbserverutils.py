@@ -11,8 +11,8 @@ import re
 import six
 import socket_packet_pump
 import subprocess
-import time
 from lldbsuite.test.lldbtest import *
+from lldbsuite.test import configuration
 
 from six.moves import queue
 
@@ -89,6 +89,10 @@ def get_debugserver_exe():
     """
     if "LLDB_DEBUGSERVER_PATH" in os.environ:
         return os.environ["LLDB_DEBUGSERVER_PATH"]
+
+    if configuration.arch and configuration.arch == "x86_64" and \
+       platform.machine().startswith("arm64"):
+        return '/Library/Apple/usr/libexec/oah/debugserver'
 
     return _get_debug_monitor_from_lldb(
         lldbtest_config.lldbExec, "debugserver")
@@ -805,6 +809,9 @@ class GdbRemoteTestSequence(object):
         self.entries = []
         self.logger = logger
 
+    def __len__(self):
+        return len(self.entries)
+
     def add_log_lines(self, log_lines, remote_input_is_read):
         for line in log_lines:
             if isinstance(line, str):
@@ -924,6 +931,12 @@ def process_is_running(pid, unknown_value=True):
             "ps ax | awk '{ print $1; }'", shell=True).decode("utf-8")
         text_process_ids = output.split('\n')[1:]
         # Convert text pids to ints
+        process_ids = [int(text_pid)
+                       for text_pid in text_process_ids if text_pid != '']
+    elif platform.system() == 'Windows':
+        output = subprocess.check_output(
+            "for /f \"tokens=2 delims=,\" %F in ('tasklist /nh /fi \"PID ne 0\" /fo csv') do @echo %~F", shell=True).decode("utf-8")
+        text_process_ids = output.split('\n')[1:]
         process_ids = [int(text_pid)
                        for text_pid in text_process_ids if text_pid != '']
     # elif {your_platform_here}:

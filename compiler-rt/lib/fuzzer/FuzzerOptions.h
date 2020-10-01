@@ -44,6 +44,9 @@ struct FuzzingOptions {
   size_t MaxNumberOfRuns = -1L;
   int ReportSlowUnits = 10;
   bool OnlyASCII = false;
+  bool Entropic = false;
+  size_t EntropicFeatureFrequencyThreshold = 0xFF;
+  size_t EntropicNumberOfRarestFeatures = 100;
   std::string OutputCorpus;
   std::string ArtifactPrefix = "./";
   std::string ExactArtifactPath;
@@ -66,6 +69,7 @@ struct FuzzingOptions {
   int PurgeAllocatorIntervalSec = 1;
   int  TraceMalloc = 0;
   bool HandleAbrt = false;
+  bool HandleAlrm = false;
   bool HandleBus = false;
   bool HandleFpe = false;
   bool HandleIll = false;
@@ -75,7 +79,6 @@ struct FuzzingOptions {
   bool HandleXfsz = false;
   bool HandleUsr1 = false;
   bool HandleUsr2 = false;
-  bool LazyCounters = false;
 };
 
 }  // namespace fuzzer

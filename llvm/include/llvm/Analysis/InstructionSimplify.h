@@ -26,6 +26,10 @@
 // same call context of that function (and not split between caller and callee
 // contexts of a directly recursive call, for example).
 //
+// Additionally, these routines can't simplify to the instructions that are not
+// def-reachable, meaning we can't just scan the basic block for instructions
+// to simplify to.
+//
 //===----------------------------------------------------------------------===//
 
 #ifndef LLVM_ANALYSIS_INSTRUCTIONSIMPLIFY_H
@@ -33,25 +37,25 @@
 
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Operator.h"
-#include "llvm/IR/User.h"
 
 namespace llvm {
-class Function;
+
 template <typename T, typename... TArgs> class AnalysisManager;
 template <class T> class ArrayRef;
 class AssumptionCache;
+class BinaryOperator;
 class CallBase;
-class DominatorTree;
 class DataLayout;
-class FastMathFlags;
+class DominatorTree;
+class Function;
 struct LoopStandardAnalysisResults;
+class MDNode;
 class OptimizationRemarkEmitter;
 class Pass;
+template <class T, unsigned n> class SmallSetVector;
 class TargetLibraryInfo;
 class Type;
 class Value;
-class MDNode;
-class BinaryOperator;
 
 /// InstrInfoQuery provides an interface to query additional information for
 /// instructions like metadata or keywords like nsw, which provides conservative
@@ -98,18 +102,38 @@ struct SimplifyQuery {
   // be safely used.
   const InstrInfoQuery IIQ;
 
+  /// Controls whether simplifications are allowed to constrain the range of
+  /// possible values for uses of undef. If it is false, simplifications are not
+  /// allowed to assume a particular value for a use of undef for example.
+  bool CanUseUndef = true;
+
   SimplifyQuery(const DataLayout &DL, const Instruction *CXTI = nullptr)
       : DL(DL), CxtI(CXTI) {}
 
   SimplifyQuery(const DataLayout &DL, const TargetLibraryInfo *TLI,
                 const DominatorTree *DT = nullptr,
                 AssumptionCache *AC = nullptr,
-                const Instruction *CXTI = nullptr, bool UseInstrInfo = true)
-      : DL(DL), TLI(TLI), DT(DT), AC(AC), CxtI(CXTI), IIQ(UseInstrInfo) {}
+                const Instruction *CXTI = nullptr, bool UseInstrInfo = true,
+                bool CanUseUndef = true)
+      : DL(DL), TLI(TLI), DT(DT), AC(AC), CxtI(CXTI), IIQ(UseInstrInfo),
+        CanUseUndef(CanUseUndef) {}
   SimplifyQuery getWithInstruction(Instruction *I) const {
     SimplifyQuery Copy(*this);
     Copy.CxtI = I;
     return Copy;
+  }
+  SimplifyQuery getWithoutUndef() const {
+    SimplifyQuery Copy(*this);
+    Copy.CanUseUndef = false;
+    return Copy;
+  }
+
+  /// If CanUseUndef is true, returns whether \p V is undef.
+  /// Otherwise always return false.
+  bool isUndefValue(Value *V) const {
+    if (!CanUseUndef)
+      return false;
+    return isa<UndefValue>(V);
   }
 };
 
@@ -140,6 +164,13 @@ Value *SimplifyFSubInst(Value *LHS, Value *RHS, FastMathFlags FMF,
 /// Given operands for an FMul, fold the result or return null.
 Value *SimplifyFMulInst(Value *LHS, Value *RHS, FastMathFlags FMF,
                         const SimplifyQuery &Q);
+
+/// Given operands for the multiplication of a FMA, fold the result or return
+/// null. In contrast to SimplifyFMulInst, this function will not perform
+/// simplifications whose unrounded results differ when rounded to the argument
+/// type.
+Value *SimplifyFMAFMul(Value *LHS, Value *RHS, FastMathFlags FMF,
+                       const SimplifyQuery &Q);
 
 /// Given operands for a Mul, fold the result or return null.
 Value *SimplifyMulInst(Value *LHS, Value *RHS, const SimplifyQuery &Q);
@@ -222,7 +253,8 @@ Value *SimplifyCastInst(unsigned CastOpc, Value *Op, Type *Ty,
                         const SimplifyQuery &Q);
 
 /// Given operands for a ShuffleVectorInst, fold the result or return null.
-Value *SimplifyShuffleVectorInst(Value *Op0, Value *Op1, Constant *Mask,
+/// See class ShuffleVectorInst for a description of the mask representation.
+Value *SimplifyShuffleVectorInst(Value *Op0, Value *Op1, ArrayRef<int> Mask,
                                  Type *RetTy, const SimplifyQuery &Q);
 
 //=== Helper functions for higher up the class hierarchy.
@@ -234,24 +266,26 @@ Value *SimplifyCmpInst(unsigned Predicate, Value *LHS, Value *RHS,
 /// Given operand for a UnaryOperator, fold the result or return null.
 Value *SimplifyUnOp(unsigned Opcode, Value *Op, const SimplifyQuery &Q);
 
-/// Given operand for an FP UnaryOperator, fold the result or return null.
-/// In contrast to SimplifyUnOp, try to use FastMathFlag when folding the
-/// result. In case we don't need FastMathFlags, simply fall to SimplifyUnOp.
-Value *SimplifyFPUnOp(unsigned Opcode, Value *Op, FastMathFlags FMF,
-                      const SimplifyQuery &Q);
+/// Given operand for a UnaryOperator, fold the result or return null.
+/// Try to use FastMathFlags when folding the result.
+Value *SimplifyUnOp(unsigned Opcode, Value *Op, FastMathFlags FMF,
+                    const SimplifyQuery &Q);
 
 /// Given operands for a BinaryOperator, fold the result or return null.
 Value *SimplifyBinOp(unsigned Opcode, Value *LHS, Value *RHS,
                      const SimplifyQuery &Q);
 
-/// Given operands for an FP BinaryOperator, fold the result or return null.
-/// In contrast to SimplifyBinOp, try to use FastMathFlag when folding the
-/// result. In case we don't need FastMathFlags, simply fall to SimplifyBinOp.
-Value *SimplifyFPBinOp(unsigned Opcode, Value *LHS, Value *RHS,
-                       FastMathFlags FMF, const SimplifyQuery &Q);
+/// Given operands for a BinaryOperator, fold the result or return null.
+/// Try to use FastMathFlags when folding the result.
+Value *SimplifyBinOp(unsigned Opcode, Value *LHS, Value *RHS,
+                     FastMathFlags FMF, const SimplifyQuery &Q);
 
 /// Given a callsite, fold the result or return null.
 Value *SimplifyCall(CallBase *Call, const SimplifyQuery &Q);
+
+/// Given an operand for a Freeze, see if we can fold the result.
+/// If not, this returns null.
+Value *SimplifyFreezeInst(Value *Op, const SimplifyQuery &Q);
 
 /// See if we can compute a simplified version of this instruction. If not,
 /// return null.
@@ -263,12 +297,14 @@ Value *SimplifyInstruction(Instruction *I, const SimplifyQuery &Q,
 /// This first performs a normal RAUW of I with SimpleV. It then recursively
 /// attempts to simplify those users updated by the operation. The 'I'
 /// instruction must not be equal to the simplified value 'SimpleV'.
+/// If UnsimplifiedUsers is provided, instructions that could not be simplified
+/// are added to it.
 ///
 /// The function returns true if any simplifications were performed.
-bool replaceAndRecursivelySimplify(Instruction *I, Value *SimpleV,
-                                   const TargetLibraryInfo *TLI = nullptr,
-                                   const DominatorTree *DT = nullptr,
-                                   AssumptionCache *AC = nullptr);
+bool replaceAndRecursivelySimplify(
+    Instruction *I, Value *SimpleV, const TargetLibraryInfo *TLI = nullptr,
+    const DominatorTree *DT = nullptr, AssumptionCache *AC = nullptr,
+    SmallSetVector<Instruction *, 8> *UnsimplifiedUsers = nullptr);
 
 /// Recursively attempt to simplify an instruction.
 ///

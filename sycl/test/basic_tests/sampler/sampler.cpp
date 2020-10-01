@@ -1,8 +1,8 @@
-// RUN: %clang -std=c++17 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -fsycl-dead-args-optimization %s -o %t.out -L %opencl_libs_dir -lOpenCL
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
-// RUN: %ACC_RUN_PLACEHOLDER %t.out
+
 //==--------------- sampler.cpp - SYCL sampler basic test ------------------==//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -18,6 +18,15 @@
 namespace sycl {
 using namespace cl::sycl;
 }
+
+struct SamplerWrapper {
+  SamplerWrapper(sycl::coordinate_normalization_mode Norm,
+                 sycl::addressing_mode Addr, sycl::filtering_mode Filter)
+      : Smpl(Norm, Addr, Filter), A(0) {}
+
+  sycl::sampler Smpl;
+  int A;
+};
 
 int main() {
   // Check constructor from enums
@@ -37,35 +46,11 @@ int main() {
              B.get_coordinate_normalization_mode() &&
          A.get_filtering_mode() == B.get_filtering_mode());
 
-  // Check assigment operator
-  if (!Queue.is_host()) {
-    // OpenCL sampler
-    cl_int Err = CL_SUCCESS;
-#ifdef CL_VERSION_2_0
-    const cl_sampler_properties sprops[] = {
-        CL_SAMPLER_NORMALIZED_COORDS,
-        static_cast<cl_sampler_properties>(true),
-        CL_SAMPLER_ADDRESSING_MODE,
-        static_cast<cl_sampler_properties>(CL_ADDRESS_REPEAT),
-        CL_SAMPLER_FILTER_MODE,
-        static_cast<cl_sampler_properties>(CL_FILTER_LINEAR),
-        0};
-    cl_sampler ClSampler =
-        clCreateSamplerWithProperties(Queue.get_context().get(), sprops, &Err);
-#else
-    cl_sampler ClSampler =
-        clCreateSampler(Queue.get_context().get(), true, CL_ADDRESS_REPEAT,
-                        CL_FILTER_LINEAR, &Err);
-#endif
-    CHECK_OCL_CODE(Err);
-    B = sycl::sampler(ClSampler, Queue.get_context());
+  // Check assignment operator
+  B = sycl::sampler(sycl::coordinate_normalization_mode::normalized,
+                    sycl::addressing_mode::repeat,
+                    sycl::filtering_mode::linear);
 
-  } else {
-    // Host sampler
-    B = sycl::sampler(sycl::coordinate_normalization_mode::normalized,
-                      sycl::addressing_mode::repeat,
-                      sycl::filtering_mode::linear);
-  }
   assert(B.get_addressing_mode() == sycl::addressing_mode::repeat);
   assert(B.get_coordinate_normalization_mode() ==
          sycl::coordinate_normalization_mode::normalized);
@@ -75,12 +60,16 @@ int main() {
   sycl::hash_class<cl::sycl::sampler> Hasher;
   assert(Hasher(A) != Hasher(B));
 
-  // Check move assigment
+  // Check move assignment
   sycl::sampler C(B);
   A = std::move(B);
   assert(Hasher(C) == Hasher(A));
   assert(C == A);
   assert(Hasher(C) != Hasher(B));
+
+  SamplerWrapper WrappedSmplr(
+      sycl::coordinate_normalization_mode::normalized,
+      sycl::addressing_mode::repeat, sycl::filtering_mode::linear);
 
   // Device sampler.
   {
@@ -89,8 +78,26 @@ int main() {
       cgh.single_task<class kernel>([=]() {
         sycl::sampler C = A;
         sycl::sampler D(C);
+        sycl::sampler E(WrappedSmplr.Smpl);
       });
     });
   }
+
+  {
+    sycl::sampler Sampler(
+        sycl::coordinate_normalization_mode::unnormalized,
+        sycl::addressing_mode::clamp, sycl::filtering_mode::nearest,
+        sycl::property_list{sycl::property::buffer::use_host_ptr{}});
+
+    if (!Sampler.has_property<sycl::property::buffer::use_host_ptr>()) {
+      std::cerr << "Line " << __LINE__ << ": Property was not found"
+                << std::endl;
+      return 1;
+    }
+
+    sycl::property::buffer::use_host_ptr Prop =
+        Sampler.get_property<sycl::property::buffer::use_host_ptr>();
+  }
+
   return 0;
 }

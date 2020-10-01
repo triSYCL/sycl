@@ -10,6 +10,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Support/raw_ostream.h"
@@ -20,8 +21,8 @@ using namespace llvm::orc;
 ExitOnError ExitOnErr;
 
 ThreadSafeModule createDemoModule() {
-  auto Context = llvm::make_unique<LLVMContext>();
-  auto M = make_unique<Module>("test", *Context);
+  auto Context = std::make_unique<LLVMContext>();
+  auto M = std::make_unique<Module>("test", *Context);
 
   // Create the add1 function entry and insert this entry into module M.  The
   // function will have a return type of "int" and take an argument of "int".

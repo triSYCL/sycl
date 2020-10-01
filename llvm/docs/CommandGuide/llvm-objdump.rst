@@ -33,7 +33,7 @@ combined with other commands:
 
   Disassemble all sections found in the input files.
   
-.. option:: --disassemble-functions=<symbol1[,symbol2,...]>
+.. option:: --disassemble-symbols=<symbol1[,symbol2,...]>
 
   Disassemble only the specified symbols. Takes demangled symbol names when
   :option:`--demangle` is specified, otherwise takes mangled symbol names.
@@ -85,13 +85,18 @@ combined with other commands:
 
   Display the symbol table.
 
+.. option:: -T, --dynamic-syms
+
+  Display the contents of the dynamic symbol table.
+
 .. option:: -u, --unwind-info
 
   Display the unwind info of the input(s).
 
 .. option:: --version
 
-  Display the version of this program. Does not stack with other commands.
+  Display the version of the :program:`llvm-objdump` executable. Does not stack
+  with other commands.
 
 .. option:: -x, --all-headers
 
@@ -117,6 +122,17 @@ OPTIONS
 .. option:: -C, --demangle
 
   Demangle symbol names in the output.
+
+.. option:: --debug-vars=<format>
+
+  Print the locations (in registers or memory) of source-level variables
+  alongside disassembly. ``format`` may be ``unicode`` or ``ascii``, defaulting
+  to ``unicode`` if omitted.
+
+.. option:: --debug-vars-indent=<width>
+
+  Distance to indent the source-level variable display, relative to the start
+  of the disassembly. Defaults to 40 characters.
 
 .. option:: -j, --section=<section1[,section2,...]>
 
@@ -180,6 +196,30 @@ OPTIONS
   When printing relocations, only print the relocations patching offsets up to ``address``.
 
   When printing symbols, only print symbols with a value up to ``address``.
+
+.. option:: --symbolize-operands
+
+  When disassembling, symbolize a branch target operand to print a label instead of a real address.
+
+  When printing a PC-relative global symbol reference, print it as an offset from the leading symbol.
+
+  Only works with an X86 linked image.
+
+  Example:
+    A non-symbolized branch instruction with a local target and pc-relative memory access like
+
+  .. code-block:: none
+
+      cmp eax, dword ptr [rip + 4112]
+      jge 0x20117e <_start+0x25>
+
+  might become
+
+  .. code-block:: none
+
+     <L0>:
+       cmp eax, dword ptr <g>
+       jge	<L0>
 
 .. option:: --triple=<string>
 
@@ -320,10 +360,17 @@ MACH-O ONLY OPTIONS AND COMMANDS
 
   Display weak binding information.
 
+XCOFF ONLY OPTIONS AND COMMANDS
+---------------------------------
+
+.. option:: --symbol-description
+
+  Add symbol description to disassembly output.
+
 BUGS
 ----
 
-To report bugs, please visit <http://llvm.org/bugs/>.
+To report bugs, please visit <https://bugs.llvm.org/>.
 
 SEE ALSO
 --------

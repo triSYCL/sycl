@@ -21,7 +21,15 @@
 // CHECK-PPC64: "-cc1" "-triple" "powerpc64-pc-freebsd8"
 // CHECK-PPC64: ld{{.*}}" "--sysroot=[[SYSROOT:[^"]+]]"
 // CHECK-PPC64: "--eh-frame-hdr" "-dynamic-linker" "{{.*}}ld-elf{{.*}}" "-o" "a.out" "{{.*}}crt1.o" "{{.*}}crti.o" "{{.*}}crtbegin.o" "-L[[SYSROOT]]/usr/lib" "{{.*}}.o" "-lgcc" "--as-needed" "-lgcc_s" "--no-as-needed" "-lc" "-lgcc" "--as-needed" "-lgcc_s" "--no-as-needed" "{{.*}}crtend.o" "{{.*}}crtn.o"
-//
+
+// RUN: %clang -no-canonical-prefixes \
+// RUN:   -target powerpc64le-unknown-freebsd13 %s \
+// RUN:   --sysroot=%S/Inputs/basic_freebsd64_tree -### 2>&1 \
+// RUN:   | FileCheck --check-prefix=CHECK-PPC64LE %s
+// CHECK-PPC64LE: "-cc1" "-triple" "powerpc64le-unknown-freebsd13"
+// CHECK-PPC64LE: ld{{.*}}" "--sysroot=[[SYSROOT:[^"]+]]"
+// CHECK-PPC64LE: "--eh-frame-hdr" "-dynamic-linker" "{{.*}}ld-elf{{.*}}" "-o" "a.out" "{{.*}}crt1.o" "{{.*}}crti.o" "{{.*}}crtbegin.o" "-L[[SYSROOT]]/usr/lib" "{{.*}}.o" "-lgcc" "--as-needed" "-lgcc_s" "--no-as-needed" "-lc" "-lgcc" "--as-needed" "-lgcc_s" "--no-as-needed" "{{.*}}crtend.o" "{{.*}}crtn.o"
+
 //
 // Check that -m32 properly adjusts the toolchain flags.
 //
@@ -62,6 +70,15 @@
 // RUN: %clang -target mips64el-freebsd -mabi=n32 %s -### %s 2>&1 \
 // RUN:   | FileCheck --check-prefix=CHECK-MIPSN32EL-LD %s
 // CHECK-MIPSN32EL-LD: ld{{.*}}" {{.*}} "-m" "elf32ltsmipn32_fbsd"
+//
+// Check that RISC-V passes the correct linker emulation.
+//
+// RUN: %clang -target riscv32-freebsd %s -### %s 2>&1 \
+// RUN:   | FileCheck --check-prefix=CHECK-RV32I-LD %s
+// CHECK-RV32I-LD: ld{{.*}}" {{.*}} "-m" "elf32lriscv"
+// RUN: %clang -target riscv64-freebsd %s -### %s 2>&1 \
+// RUN:   | FileCheck --check-prefix=CHECK-RV64I-LD %s
+// CHECK-RV64I-LD: ld{{.*}}" {{.*}} "-m" "elf64lriscv"
 //
 // Check that the new linker flags are passed to FreeBSD
 // RUN: %clang -no-canonical-prefixes -target x86_64-pc-freebsd8 -m32 %s \
@@ -152,10 +169,6 @@
 // CHECK-ARM-EABIHF-NOT: as{{.*}}" "-mfpu=softvfp"
 // CHECK-ARM-EABIHF-NOT: as{{.*}}" "-matpcs"
 
-// RUN: %clang -target x86_64-pc-freebsd8 %s -### -flto 2>&1 \
-// RUN:   | FileCheck --check-prefix=CHECK-LTO %s
-// CHECK-LTO: ld{{.*}}" "-plugin{{.*}}{{[/\\]}}LLVMgold.{{dll|dylib|so}}
-
 // RUN: %clang -target sparc-unknown-freebsd8 %s -### -fpic -no-integrated-as 2>&1 \
 // RUN:   | FileCheck --check-prefix=CHECK-SPARC-PIE %s
 // CHECK-SPARC-PIE: as{{.*}}" "-KPIC
@@ -188,3 +201,7 @@
 // RUN: %clang -target sparc64-unknown-freebsd -### -c %s 2>&1 \
 // RUN:   | FileCheck -check-prefix=CHECK-IAS %s
 // CHECK-IAS-NOT: "-no-integrated-as"
+
+// RUN: %clang -target ppc64-unknown-freebsd13.0 -### -S %s 2>&1 | \
+// RUN: FileCheck -check-prefix=PPC64-MUNWIND %s
+// PPC64-MUNWIND: -munwind-table

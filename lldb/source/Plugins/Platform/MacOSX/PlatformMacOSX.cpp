@@ -1,4 +1,4 @@
-//===-- PlatformMacOSX.cpp --------------------------------------*- C++ -*-===//
+//===-- PlatformMacOSX.cpp ------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -7,16 +7,20 @@
 //===----------------------------------------------------------------------===//
 
 #include "PlatformMacOSX.h"
-#include "lldb/Host/Config.h"
-
-
-#include <sstream>
-
+#include "PlatformRemoteiOS.h"
+#if defined(__APPLE__)
+#include "PlatformAppleSimulator.h"
+#include "PlatformDarwinKernel.h"
+#include "PlatformRemoteAppleBridge.h"
+#include "PlatformRemoteAppleTV.h"
+#include "PlatformRemoteAppleWatch.h"
+#endif
 #include "lldb/Breakpoint/BreakpointLocation.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleList.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Host/Config.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Host/HostInfo.h"
 #include "lldb/Symbol/ObjectFile.h"
@@ -28,13 +32,25 @@
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/StreamString.h"
 
+#include <sstream>
+
 using namespace lldb;
 using namespace lldb_private;
+
+LLDB_PLUGIN_DEFINE(PlatformMacOSX)
 
 static uint32_t g_initialize_count = 0;
 
 void PlatformMacOSX::Initialize() {
   PlatformDarwin::Initialize();
+  PlatformRemoteiOS::Initialize();
+#if defined(__APPLE__)
+  PlatformAppleSimulator::Initialize();
+  PlatformDarwinKernel::Initialize();
+  PlatformRemoteAppleTV::Initialize();
+  PlatformRemoteAppleWatch::Initialize();
+  PlatformRemoteAppleBridge::Initialize();
+#endif
 
   if (g_initialize_count++ == 0) {
 #if defined(__APPLE__)
@@ -55,6 +71,14 @@ void PlatformMacOSX::Terminate() {
     }
   }
 
+#if defined(__APPLE__)
+  PlatformRemoteAppleBridge::Terminate();
+  PlatformRemoteAppleWatch::Terminate();
+  PlatformRemoteAppleTV::Terminate();
+  PlatformDarwinKernel::Terminate();
+  PlatformAppleSimulator::Terminate();
+#endif
+  PlatformRemoteiOS::Terminate();
   PlatformDarwin::Terminate();
 }
 
@@ -70,8 +94,8 @@ PlatformSP PlatformMacOSX::CreateInstance(bool force, const ArchSpec *arch) {
     const char *triple_cstr =
         arch ? arch->GetTriple().getTriple().c_str() : "<null>";
 
-    log->Printf("PlatformMacOSX::%s(force=%s, arch={%s,%s})", __FUNCTION__,
-                force ? "true" : "false", arch_name, triple_cstr);
+    LLDB_LOGF(log, "PlatformMacOSX::%s(force=%s, arch={%s,%s})", __FUNCTION__,
+              force ? "true" : "false", arch_name, triple_cstr);
   }
 
   // The only time we create an instance is when we are creating a remote
@@ -117,14 +141,12 @@ PlatformSP PlatformMacOSX::CreateInstance(bool force, const ArchSpec *arch) {
     }
   }
   if (create) {
-    if (log)
-      log->Printf("PlatformMacOSX::%s() creating platform", __FUNCTION__);
+    LLDB_LOGF(log, "PlatformMacOSX::%s() creating platform", __FUNCTION__);
     return PlatformSP(new PlatformMacOSX(is_host));
   }
 
-  if (log)
-    log->Printf("PlatformMacOSX::%s() aborting creation of platform",
-                __FUNCTION__);
+  LLDB_LOGF(log, "PlatformMacOSX::%s() aborting creation of platform",
+            __FUNCTION__);
 
   return PlatformSP();
 }
@@ -157,73 +179,37 @@ PlatformMacOSX::~PlatformMacOSX() {}
 
 ConstString PlatformMacOSX::GetSDKDirectory(lldb_private::Target &target) {
   ModuleSP exe_module_sp(target.GetExecutableModule());
-  if (exe_module_sp) {
-    ObjectFile *objfile = exe_module_sp->GetObjectFile();
-    if (objfile) {
-      std::string xcode_contents_path;
-      std::string default_xcode_sdk;
-      FileSpec fspec;
-      llvm::VersionTuple version = objfile->GetSDKVersion();
-      if (!version.empty()) {
-        fspec = HostInfo::GetShlibDir();
-        if (fspec) {
-          std::string path;
-          xcode_contents_path = fspec.GetPath();
-          size_t pos = xcode_contents_path.find("/Xcode.app/Contents/");
-          if (pos != std::string::npos) {
-            // LLDB.framework is inside an Xcode app bundle, we can locate the
-            // SDK from here
-            xcode_contents_path.erase(pos + strlen("/Xcode.app/Contents/"));
-          } else {
-            xcode_contents_path.clear();
-            // Use the selected Xcode
-            int status = 0;
-            int signo = 0;
-            std::string output;
-            const char *command = "xcrun -sdk macosx --show-sdk-path";
-            lldb_private::Status error = RunShellCommand(
-                command, // shell command to run
-                nullptr, // current working directory
-                &status, // Put the exit status of the process in here
-                &signo,  // Put the signal that caused the process to exit in
-                         // here
-                &output, // Get the output from the command and place it in this
-                         // string
-                std::chrono::seconds(3));
-            if (status == 0 && !output.empty()) {
-              size_t first_non_newline = output.find_last_not_of("\r\n");
-              if (first_non_newline != std::string::npos)
-                output.erase(first_non_newline + 1);
-              default_xcode_sdk = output;
+  if (!exe_module_sp)
+    return {};
 
-              pos = default_xcode_sdk.find("/Xcode.app/Contents/");
-              if (pos != std::string::npos)
-                xcode_contents_path = default_xcode_sdk.substr(
-                    0, pos + strlen("/Xcode.app/Contents/"));
-            }
-          }
-        }
+  ObjectFile *objfile = exe_module_sp->GetObjectFile();
+  if (!objfile)
+    return {};
 
-        if (!xcode_contents_path.empty()) {
-          StreamString sdk_path;
-          sdk_path.Printf("%sDeveloper/Platforms/MacOSX.platform/Developer/"
-                          "SDKs/MacOSX%u.%u.sdk",
-                          xcode_contents_path.c_str(), version.getMajor(),
-                          version.getMinor().getValue());
-          fspec.SetFile(sdk_path.GetString(), FileSpec::Style::native);
-          if (FileSystem::Instance().Exists(fspec))
-            return ConstString(sdk_path.GetString());
-        }
+  llvm::VersionTuple version = objfile->GetSDKVersion();
+  if (version.empty())
+    return {};
 
-        if (!default_xcode_sdk.empty()) {
-          fspec.SetFile(default_xcode_sdk, FileSpec::Style::native);
-          if (FileSystem::Instance().Exists(fspec))
-            return ConstString(default_xcode_sdk);
-        }
-      }
-    }
+  // First try to find an SDK that matches the given SDK version.
+  if (FileSpec fspec = HostInfo::GetXcodeContentsDirectory()) {
+    StreamString sdk_path;
+    sdk_path.Printf("%s/Developer/Platforms/MacOSX.platform/Developer/"
+                    "SDKs/MacOSX%u.%u.sdk",
+                    fspec.GetPath().c_str(), version.getMajor(),
+                    version.getMinor().getValue());
+    if (FileSystem::Instance().Exists(fspec))
+      return ConstString(sdk_path.GetString());
   }
-  return ConstString();
+
+  // Use the default SDK as a fallback.
+  FileSpec fspec(
+      HostInfo::GetXcodeSDKPath(lldb_private::XcodeSDK::GetAnyMacOS()));
+  if (fspec) {
+    if (FileSystem::Instance().Exists(fspec))
+      return ConstString(fspec.GetPath());
+  }
+
+  return {};
 }
 
 Status PlatformMacOSX::GetSymbolFile(const FileSpec &platform_file,
@@ -290,7 +276,33 @@ PlatformMacOSX::GetFileWithUUID(const lldb_private::FileSpec &platform_file,
 bool PlatformMacOSX::GetSupportedArchitectureAtIndex(uint32_t idx,
                                                      ArchSpec &arch) {
 #if defined(__arm__) || defined(__arm64__) || defined(__aarch64__)
-  return ARMGetSupportedArchitectureAtIndex(idx, arch);
+  // macOS for ARM64 support both native and translated x86_64 processes
+  if (!m_num_arm_arches || idx < m_num_arm_arches) {
+    bool res = ARMGetSupportedArchitectureAtIndex(idx, arch);
+    if (res)
+      return true;
+    if (!m_num_arm_arches)
+      m_num_arm_arches = idx;
+  }
+
+  // We can't use x86GetSupportedArchitectureAtIndex() because it uses
+  // the system architecture for some of its return values and also
+  // has a 32bits variant.
+  if (idx == m_num_arm_arches) {
+    arch.SetTriple("x86_64-apple-macosx");
+    return true;
+  } else if (idx == m_num_arm_arches + 1) {
+    arch.SetTriple("x86_64-apple-ios-macabi");
+    return true;
+  } else if (idx == m_num_arm_arches + 2) {
+    arch.SetTriple("arm64-apple-ios");
+    return true;
+  } else if (idx == m_num_arm_arches + 3) {
+    arch.SetTriple("arm64e-apple-ios");
+    return true;
+  }
+
+  return false;
 #else
   return x86GetSupportedArchitectureAtIndex(idx, arch);
 #endif

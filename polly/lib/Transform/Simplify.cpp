@@ -18,6 +18,7 @@
 #include "polly/Support/ISLTools.h"
 #include "polly/Support/VirtualInstruction.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Support/Debug.h"
 #define DEBUG_TYPE "polly-simplify"
 
@@ -28,8 +29,8 @@ namespace {
 
 #define TWO_STATISTICS(VARNAME, DESC)                                          \
   static llvm::Statistic VARNAME[2] = {                                        \
-      {DEBUG_TYPE, #VARNAME "0", DESC " (first)", {0}, {false}},               \
-      {DEBUG_TYPE, #VARNAME "1", DESC " (second)", {0}, {false}}}
+      {DEBUG_TYPE, #VARNAME "0", DESC " (first)"},                             \
+      {DEBUG_TYPE, #VARNAME "1", DESC " (second)"}}
 
 /// Number of max disjuncts we allow in removeOverwrites(). This is to avoid
 /// that the analysis of accesses in a statement is becoming too complex. Chosen
@@ -40,6 +41,8 @@ static int const SimplifyMaxDisjuncts = 4;
 TWO_STATISTICS(ScopsProcessed, "Number of SCoPs processed");
 TWO_STATISTICS(ScopsModified, "Number of SCoPs simplified");
 
+TWO_STATISTICS(TotalEmptyDomainsRemoved,
+               "Number of statement with empty domains removed in any SCoP");
 TWO_STATISTICS(TotalOverwritesRemoved, "Number of removed overwritten writes");
 TWO_STATISTICS(TotalWritesCoalesced, "Number of writes coalesced with another");
 TWO_STATISTICS(TotalRedundantWritesRemoved,
@@ -123,6 +126,9 @@ private:
   /// The last/current SCoP that is/has been processed.
   Scop *S;
 
+  /// Number of statements with empty domains removed from the SCoP.
+  int EmptyDomainsRemoved = 0;
+
   /// Number of writes that are overwritten anyway.
   int OverwritesRemoved = 0;
 
@@ -146,10 +152,35 @@ private:
 
   /// Return whether at least one simplification has been applied.
   bool isModified() const {
-    return OverwritesRemoved > 0 || WritesCoalesced > 0 ||
-           RedundantWritesRemoved > 0 || EmptyPartialAccessesRemoved > 0 ||
-           DeadAccessesRemoved > 0 || DeadInstructionsRemoved > 0 ||
-           StmtsRemoved > 0;
+    return EmptyDomainsRemoved > 0 || OverwritesRemoved > 0 ||
+           WritesCoalesced > 0 || RedundantWritesRemoved > 0 ||
+           EmptyPartialAccessesRemoved > 0 || DeadAccessesRemoved > 0 ||
+           DeadInstructionsRemoved > 0 || StmtsRemoved > 0;
+  }
+
+  /// Remove statements that are never executed due to their domains being
+  /// empty.
+  ///
+  /// In contrast to Scop::simplifySCoP, this removes based on the SCoP's
+  /// effective domain, i.e. including the SCoP's context as used by some other
+  /// simplification methods in this pass. This is necessary because the
+  /// analysis on empty domains is unreliable, e.g. remove a scalar value
+  /// definition MemoryAccesses, but not its use.
+  void removeEmptyDomainStmts() {
+    size_t NumStmtsBefore = S->getSize();
+
+    S->removeStmts([](ScopStmt &Stmt) -> bool {
+      auto EffectiveDomain =
+          Stmt.getDomain().intersect_params(Stmt.getParent()->getContext());
+      return EffectiveDomain.is_empty();
+    });
+
+    assert(NumStmtsBefore >= S->getSize());
+    EmptyDomainsRemoved = NumStmtsBefore - S->getSize();
+    LLVM_DEBUG(dbgs() << "Removed " << EmptyDomainsRemoved << " (of "
+                      << NumStmtsBefore
+                      << ") statements with empty domains \n");
+    TotalEmptyDomainsRemoved[CallNo] += EmptyDomainsRemoved;
   }
 
   /// Remove writes that are overwritten unconditionally later in the same
@@ -586,6 +617,8 @@ private:
   /// Print simplification statistics to @p OS.
   void printStatistics(llvm::raw_ostream &OS, int Indent = 0) const {
     OS.indent(Indent) << "Statistics {\n";
+    OS.indent(Indent + 4) << "Empty domains removed: " << EmptyDomainsRemoved
+                          << '\n';
     OS.indent(Indent + 4) << "Overwrites removed: " << OverwritesRemoved
                           << '\n';
     OS.indent(Indent + 4) << "Partial writes coalesced: " << WritesCoalesced
@@ -631,6 +664,9 @@ public:
     // Prepare processing of this SCoP.
     this->S = &S;
     ScopsProcessed[CallNo]++;
+
+    LLVM_DEBUG(dbgs() << "Removing statements that are never executed...\n");
+    removeEmptyDomainStmts();
 
     LLVM_DEBUG(dbgs() << "Removing partial writes that never happen...\n");
     removeEmptyPartialAccesses();
@@ -682,6 +718,7 @@ public:
   virtual void releaseMemory() override {
     S = nullptr;
 
+    EmptyDomainsRemoved = 0;
     OverwritesRemoved = 0;
     WritesCoalesced = 0;
     RedundantWritesRemoved = 0;

@@ -14,6 +14,7 @@
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/SelectionDAGISel.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IntrinsicsHexagon.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 
@@ -1198,7 +1199,7 @@ OpRef HvxSelector::vmuxs(ArrayRef<uint8_t> Bytes, OpRef Va, OpRef Vb,
                          ResultStack &Results) {
   DEBUG_WITH_TYPE("isel", {dbgs() << __func__ << '\n';});
   MVT ByteTy = getSingleVT(MVT::i8);
-  MVT BoolTy = MVT::getVectorVT(MVT::i1, 8*HwLen); // XXX
+  MVT BoolTy = MVT::getVectorVT(MVT::i1, HwLen);
   const SDLoc &dl(Results.InpNode);
   SDValue B = getVectorConstant(Bytes, dl);
   Results.push(Hexagon::V6_vd0, ByteTy, {});
@@ -1894,16 +1895,34 @@ OpRef HvxSelector::perfect(ShuffleMask SM, OpRef Va, ResultStack &Results) {
     }
   }
 
+  // From the cycles, construct the sequence of values that will
+  // then form the control values for vdealvdd/vshuffvdd, i.e.
+  // (M a1 a2)(M a3 a4 a5)... -> a1 a2 a3 a4 a5
+  // This essentially strips the M value from the cycles where
+  // it's present, and performs the insertion of M (then stripping)
+  // for cycles without M (as described in an earlier comment).
   SmallVector<unsigned,8> SwapElems;
-  if (HwLen == unsigned(VecLen))
+  // When the input is extended (i.e. single vector becomes a pair),
+  // this is done by using an "undef" vector as the second input.
+  // However, then we get
+  //   input 1: GOODBITS
+  //   input 2: ........
+  // but we need
+  //   input 1: ....BITS
+  //   input 2: ....GOOD
+  // Then at the end, this needs to be undone. To accomplish this,
+  // artificially add "LogLen-1" at both ends of the sequence.
+  if (Extend)
     SwapElems.push_back(LogLen-1);
-
   for (const CycleType &C : Cycles) {
+    // Do the transformation: (a1..an) -> (M a1..an)(M a1).
     unsigned First = (C[0] == LogLen-1) ? 1 : 0;
     SwapElems.append(C.begin()+First, C.end());
     if (First == 0)
       SwapElems.push_back(C[0]);
   }
+  if (Extend)
+    SwapElems.push_back(LogLen-1);
 
   const SDLoc &dl(Results.InpNode);
   OpRef Arg = !Extend ? Va
@@ -2200,30 +2219,30 @@ void HexagonDAGToDAGISel::SelectHVXDualOutput(SDNode *N) {
   SDNode *Result;
   switch (IID) {
   case Intrinsic::hexagon_V6_vaddcarry: {
-    SmallVector<SDValue, 3> Ops = { N->getOperand(1), N->getOperand(2),
-                                    N->getOperand(3) };
-    SDVTList VTs = CurDAG->getVTList(MVT::v16i32, MVT::v512i1);
+    std::array<SDValue, 3> Ops = {
+        {N->getOperand(1), N->getOperand(2), N->getOperand(3)}};
+    SDVTList VTs = CurDAG->getVTList(MVT::v16i32, MVT::v64i1);
     Result = CurDAG->getMachineNode(Hexagon::V6_vaddcarry, SDLoc(N), VTs, Ops);
     break;
   }
   case Intrinsic::hexagon_V6_vaddcarry_128B: {
-    SmallVector<SDValue, 3> Ops = { N->getOperand(1), N->getOperand(2),
-                                    N->getOperand(3) };
-    SDVTList VTs = CurDAG->getVTList(MVT::v32i32, MVT::v1024i1);
+    std::array<SDValue, 3> Ops = {
+        {N->getOperand(1), N->getOperand(2), N->getOperand(3)}};
+    SDVTList VTs = CurDAG->getVTList(MVT::v32i32, MVT::v128i1);
     Result = CurDAG->getMachineNode(Hexagon::V6_vaddcarry, SDLoc(N), VTs, Ops);
     break;
   }
   case Intrinsic::hexagon_V6_vsubcarry: {
-    SmallVector<SDValue, 3> Ops = { N->getOperand(1), N->getOperand(2),
-                                    N->getOperand(3) };
-    SDVTList VTs = CurDAG->getVTList(MVT::v16i32, MVT::v512i1);
+    std::array<SDValue, 3> Ops = {
+        {N->getOperand(1), N->getOperand(2), N->getOperand(3)}};
+    SDVTList VTs = CurDAG->getVTList(MVT::v16i32, MVT::v64i1);
     Result = CurDAG->getMachineNode(Hexagon::V6_vsubcarry, SDLoc(N), VTs, Ops);
     break;
   }
   case Intrinsic::hexagon_V6_vsubcarry_128B: {
-    SmallVector<SDValue, 3> Ops = { N->getOperand(1), N->getOperand(2),
-                                    N->getOperand(3) };
-    SDVTList VTs = CurDAG->getVTList(MVT::v32i32, MVT::v1024i1);
+    std::array<SDValue, 3> Ops = {
+        {N->getOperand(1), N->getOperand(2), N->getOperand(3)}};
+    SDVTList VTs = CurDAG->getVTList(MVT::v32i32, MVT::v128i1);
     Result = CurDAG->getMachineNode(Hexagon::V6_vsubcarry, SDLoc(N), VTs, Ops);
     break;
   }

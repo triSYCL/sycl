@@ -1,4 +1,9 @@
-// RUN: true
+// REQUIRES: xocc
+
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+
+// RUN: %ACC_RUN_PLACEHOLDER %t.out
+
 
 /*
   Test to see if the world will explode when using SPIR built-ins that are

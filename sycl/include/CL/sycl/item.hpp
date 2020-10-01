@@ -8,106 +8,132 @@
 
 #pragma once
 
+#include <CL/sycl/detail/defines.hpp>
+#include <CL/sycl/detail/helpers.hpp>
+#include <CL/sycl/detail/item_base.hpp>
+#include <CL/sycl/detail/type_traits.hpp>
 #include <CL/sycl/id.hpp>
 #include <CL/sycl/range.hpp>
-#include <stdexcept>
-#include <type_traits>
 
-namespace cl {
+#include <cstddef>
+
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 namespace detail {
 class Builder;
 }
 template <int dimensions> class id;
 template <int dimensions> class range;
-template <int dimensions> class h_item;
 
+/// Identifies an instance of the function object executing at each point
+/// in a range.
+///
+/// \ingroup sycl_api
 template <int dimensions = 1, bool with_offset = true> class item {
+#ifndef __SYCL_DISABLE_ITEM_TO_INT_CONV__
+  /* Helper class for conversion operator. Void type is not suitable. User
+   * cannot even try to get address of the operator __private_class(). User
+   * may try to get an address of operator void() and will get the
+   * compile-time error */
+  class __private_class;
+
+  template <bool B, typename T>
+  using EnableIfT = detail::conditional_t<B, T, __private_class>;
+#endif // __SYCL_DISABLE_ITEM_TO_INT_CONV__
 public:
   item() = delete;
 
-  id<dimensions> get_id() const { return index; }
+  id<dimensions> get_id() const { return MImpl.MIndex; }
 
-  size_t get_id(int dimension) const { return index[dimension]; }
-
-  size_t operator[](int dimension) const { return index[dimension]; }
-
-  range<dimensions> get_range() const { return extent; }
-
-  size_t get_range(int dimension) const { return extent.get(dimension); }
-
-  // only available if with_offset is true;
-  template <bool W = with_offset,
-            typename = typename std::enable_if<(W == true)>::type>
-  id<dimensions> get_offset() const {
-    return offset;
+  size_t ALWAYS_INLINE get_id(int dimension) const {
+    size_t Id = MImpl.MIndex[dimension];
+    __SYCL_ASSUME_INT(Id);
+    return Id;
   }
 
-  template <bool W = with_offset>
-  operator typename std::enable_if<W == false, item<dimensions, true>>::type()
-      const {
-    return item<dimensions, true>(extent, index, offset);
+  size_t ALWAYS_INLINE operator[](int dimension) const {
+    size_t Id = MImpl.MIndex[dimension];
+    __SYCL_ASSUME_INT(Id);
+    return Id;
   }
 
-  /* The following member function is only available in the id class
-   * specialization where: dimensions>0 and dimensions<4 */
-  template <int N = dimensions,
-            typename = typename std::enable_if<((N > 0) && (N < 4))>::type>
-  size_t get_linear_id() const {
-    if (1 == dimensions) {
-      return index[0] - offset[0];
-    }
-    if (2 == dimensions) {
-      return (index[0] - offset[0]) * extent[1] + (index[1] - offset[1]);
-    }
-    return ((index[0] - offset[0]) * extent[1] * extent[2]) +
-           ((index[1] - offset[1]) * extent[2]) + (index[2] - offset[2]);
+  range<dimensions> get_range() const { return MImpl.MExtent; }
+
+  size_t ALWAYS_INLINE get_range(int dimension) const {
+    size_t Id = MImpl.MExtent[dimension];
+    __SYCL_ASSUME_INT(Id);
+    return Id;
+  }
+#ifndef __SYCL_DISABLE_ITEM_TO_INT_CONV__
+  operator EnableIfT<dimensions == 1, std::size_t>() const { return get_id(0); }
+#endif // __SYCL_DISABLE_ITEM_TO_INT_CONV__
+  template <bool has_offset = with_offset>
+  detail::enable_if_t<has_offset, id<dimensions>> get_offset() const {
+    return MImpl.MOffset;
   }
 
-  item<dimensions, with_offset>(const item<dimensions, with_offset> &rhs) =
-      default;
-
-  item<dimensions, with_offset>(item<dimensions, with_offset> &&rhs) = default;
-
-  item<dimensions, with_offset> &
-  operator=(const item<dimensions, with_offset> &rhs) = default;
-
-  item<dimensions, with_offset> &
-  operator=(item<dimensions, with_offset> &&rhs) = default;
-
-  bool operator==(const item<dimensions, with_offset> &rhs) const {
-    return (rhs.index == this->index) && (rhs.extent == this->extent) &&
-           (rhs.offset == this->offset);
+  template <bool has_offset = with_offset>
+  detail::enable_if_t<has_offset, size_t>
+      ALWAYS_INLINE get_offset(int dimension) const {
+    size_t Id = MImpl.MOffset[dimension];
+    __SYCL_ASSUME_INT(Id);
+    return Id;
   }
 
-  bool operator!=(const item<dimensions, with_offset> &rhs) const {
-    return !((*this) == rhs);
+  template <bool has_offset = with_offset>
+  operator detail::enable_if_t<!has_offset, item<dimensions, true>>() const {
+    return detail::Builder::createItem<dimensions, true>(
+        MImpl.MExtent, MImpl.MIndex, /*Offset*/ {});
   }
+
+  size_t ALWAYS_INLINE get_linear_id() const {
+    size_t Id = MImpl.get_linear_id();
+    __SYCL_ASSUME_INT(Id);
+    return Id;
+  }
+
+  item(const item &rhs) = default;
+
+  item(item<dimensions, with_offset> &&rhs) = default;
+
+  item &operator=(const item &rhs) = default;
+
+  item &operator=(item &&rhs) = default;
+
+  bool operator==(const item &rhs) const { return rhs.MImpl == MImpl; }
+
+  bool operator!=(const item &rhs) const { return rhs.MImpl != MImpl; }
 
 protected:
-  // For call constructor inside conversion operator
-  friend class item<dimensions, false>;
-  friend class item<dimensions, true>;
-  friend class h_item<dimensions>;
+  template <bool has_offset = with_offset>
+  item(detail::enable_if_t<has_offset, const range<dimensions>> &extent,
+       const id<dimensions> &index, const id<dimensions> &offset)
+      : MImpl{extent, index, offset} {}
+
+  template <bool has_offset = with_offset>
+  item(detail::enable_if_t<!has_offset, const range<dimensions>> &extent,
+       const id<dimensions> &index)
+      : MImpl{extent, index} {}
+
   friend class detail::Builder;
 
-  template <size_t W = with_offset>
-  item(typename std::enable_if<(W == true), const range<dimensions>>::type &R,
-       const id<dimensions> &I, const id<dimensions> &O)
-      : extent(R), index(I), offset(O) {}
-
-  template <size_t W = with_offset>
-  item(typename std::enable_if<(W == false), const range<dimensions>>::type &R,
-       const id<dimensions> &I)
-      : extent(R), index(I), offset() {}
-
-  void setID(const id<dimensions> &ID) { index = ID; }
-
 private:
-  range<dimensions> extent;
-  id<dimensions> index;
-  id<dimensions> offset;
+  detail::ItemBase<dimensions, with_offset> MImpl;
 };
 
+namespace detail {
+template <int Dims> item<Dims> store_item(const item<Dims> *i) {
+  return get_or_store(i);
+}
+} // namespace detail
+
+template <int Dims> item<Dims> this_item() {
+#ifdef __SYCL_DEVICE_ONLY__
+  return detail::Builder::getElement(detail::declptr<item<Dims>>());
+#else
+  return detail::store_item<Dims>(nullptr);
+#endif
+}
+
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

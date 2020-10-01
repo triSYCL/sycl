@@ -1,4 +1,4 @@
-// RUN: %clang -std=c++17 -g %s -o %t.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clangxx %s -o %t.out -lsycl -I%sycl_include
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 //
 // CHECK: PASSED

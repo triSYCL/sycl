@@ -98,6 +98,7 @@ public:
   void setVolatile(bool IsVolatile);
   void setNoSignedWrap(bool HasNoSignedWrap);
   void setNoUnsignedWrap(bool HasNoUnsignedWrap);
+  void setFPFastMathMode(SPIRVWord FPFastMathMode);
 
   void validate() const override {
     SPIRVEntry::validate();
@@ -120,11 +121,14 @@ public:
     return Type->getRequiredCapability();
   }
 
-  SPIRVExtSet getRequiredExtensions() const override {
-    SPIRVExtSet EV;
+  llvm::Optional<ExtensionID> getRequiredExtension() const override {
+    llvm::Optional<ExtensionID> EV;
     if (!hasType())
       return EV;
-    return Type->getRequiredExtensions();
+    EV = Type->getRequiredExtension();
+    assert(Module &&
+           (!EV.hasValue() || Module->isAllowedToUseExtension(EV.getValue())));
+    return EV;
   }
 
 protected:
@@ -134,48 +138,46 @@ protected:
   SPIRVType *Type; // Value Type
 };
 
-class SPIRVConstant : public SPIRVValue {
+template <spv::Op OC> class SPIRVConstantBase : public SPIRVValue {
 public:
   // Complete constructor for integer constant
-  SPIRVConstant(SPIRVModule *M, SPIRVType *TheType, SPIRVId TheId,
-                uint64_t TheValue)
-      : SPIRVValue(M, 0, OpConstant, TheType, TheId) {
+  SPIRVConstantBase(SPIRVModule *M, SPIRVType *TheType, SPIRVId TheId,
+                    uint64_t TheValue)
+      : SPIRVValue(M, 0, OC, TheType, TheId) {
     Union.UInt64Val = TheValue;
     recalculateWordCount();
     validate();
   }
   // Complete constructor for float constant
-  SPIRVConstant(SPIRVModule *M, SPIRVType *TheType, SPIRVId TheId,
-                float TheValue)
-      : SPIRVValue(M, 0, OpConstant, TheType, TheId) {
+  SPIRVConstantBase(SPIRVModule *M, SPIRVType *TheType, SPIRVId TheId,
+                    float TheValue)
+      : SPIRVValue(M, 0, OC, TheType, TheId) {
     Union.FloatVal = TheValue;
     recalculateWordCount();
     validate();
   }
   // Complete constructor for double constant
-  SPIRVConstant(SPIRVModule *M, SPIRVType *TheType, SPIRVId TheId,
-                double TheValue)
-      : SPIRVValue(M, 0, OpConstant, TheType, TheId) {
+  SPIRVConstantBase(SPIRVModule *M, SPIRVType *TheType, SPIRVId TheId,
+                    double TheValue)
+      : SPIRVValue(M, 0, OC, TheType, TheId) {
     Union.DoubleVal = TheValue;
     recalculateWordCount();
     validate();
   }
   // Incomplete constructor
-  SPIRVConstant() : SPIRVValue(OpConstant), NumWords(0) {}
+  SPIRVConstantBase() : SPIRVValue(OC), NumWords(0) {}
   uint64_t getZExtIntValue() const { return Union.UInt64Val; }
   float getFloatValue() const { return Union.FloatVal; }
   double getDoubleValue() const { return Union.DoubleVal; }
 
 protected:
   void recalculateWordCount() {
-    NumWords = Type->getBitWidth() / 32;
-    if (NumWords < 1)
-      NumWords = 1;
+    NumWords = (Type->getBitWidth() + 31) / 32;
     WordCount = 3 + NumWords;
   }
   void validate() const override {
     SPIRVValue::validate();
-    assert(NumWords >= 1 && NumWords <= 2 && "Invalid constant size");
+    assert(NumWords >= 1 && NumWords <= 32 && "Invalid constant size");
   }
   void encode(spv_ostream &O) const override {
     getEncoder(O) << Type << Id;
@@ -197,10 +199,13 @@ protected:
     uint64_t UInt64Val;
     float FloatVal;
     double DoubleVal;
-    SPIRVWord Words[2];
+    SPIRVWord Words[32];
     UnionType() { UInt64Val = 0; }
   } Union;
 };
+
+using SPIRVConstant = SPIRVConstantBase<OpConstant>;
+using SPIRVSpecConstant = SPIRVConstantBase<OpSpecConstant>;
 
 template <Op OC> class SPIRVConstantEmpty : public SPIRVValue {
 public:
@@ -234,6 +239,8 @@ protected:
 
 typedef SPIRVConstantBool<OpConstantTrue> SPIRVConstantTrue;
 typedef SPIRVConstantBool<OpConstantFalse> SPIRVConstantFalse;
+typedef SPIRVConstantBool<OpSpecConstantTrue> SPIRVSpecConstantTrue;
+typedef SPIRVConstantBool<OpSpecConstantFalse> SPIRVSpecConstantFalse;
 
 class SPIRVConstantNull : public SPIRVConstantEmpty<OpConstantNull> {
 public:
@@ -271,18 +278,18 @@ protected:
   void validate() const override { SPIRVConstantEmpty::validate(); }
 };
 
-class SPIRVConstantComposite : public SPIRVValue {
+template <spv::Op OC> class SPIRVConstantCompositeBase : public SPIRVValue {
 public:
   // Complete constructor for composite constant
-  SPIRVConstantComposite(SPIRVModule *M, SPIRVType *TheType, SPIRVId TheId,
-                         const std::vector<SPIRVValue *> TheElements)
+  SPIRVConstantCompositeBase(SPIRVModule *M, SPIRVType *TheType, SPIRVId TheId,
+                             const std::vector<SPIRVValue *> TheElements)
       : SPIRVValue(M, TheElements.size() + 3, OpConstantComposite, TheType,
                    TheId) {
     Elements = getIds(TheElements);
     validate();
   }
   // Incomplete constructor
-  SPIRVConstantComposite() : SPIRVValue(OpConstantComposite) {}
+  SPIRVConstantCompositeBase() : SPIRVValue(OpConstantComposite) {}
   std::vector<SPIRVValue *> getElements() const { return getValues(Elements); }
   std::vector<SPIRVEntry *> getNonLiteralOperands() const override {
     std::vector<SPIRVValue *> Elements = getElements();
@@ -303,6 +310,10 @@ protected:
 
   std::vector<SPIRVId> Elements;
 };
+
+using SPIRVConstantComposite = SPIRVConstantCompositeBase<OpConstantComposite>;
+using SPIRVSpecConstantComposite =
+    SPIRVConstantCompositeBase<OpSpecConstantComposite>;
 
 class SPIRVConstantSampler : public SPIRVValue {
 public:

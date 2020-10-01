@@ -10,8 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <omptarget.h>
-
 #include "device.h"
 #include "private.h"
 #include "rtl.h"
@@ -21,9 +19,9 @@
 #include <cstdlib>
 
 EXTERN int omp_get_num_devices(void) {
-  RTLsMtx.lock();
+  RTLsMtx->lock();
   size_t Devices_size = Devices.size();
-  RTLsMtx.unlock();
+  RTLsMtx->unlock();
 
   DP("Call to omp_get_num_devices returning %zd\n", Devices_size);
 
@@ -57,8 +55,7 @@ EXTERN void *omp_target_alloc(size_t size, int device_num) {
     return NULL;
   }
 
-  DeviceTy &Device = Devices[device_num];
-  rc = Device.RTL->data_alloc(Device.RTLDeviceID, size, NULL);
+  rc = Devices[device_num].allocData(size);
   DP("omp_target_alloc returns device ptr " DPxMOD "\n", DPxPTR(rc));
   return rc;
 }
@@ -83,8 +80,7 @@ EXTERN void omp_target_free(void *device_ptr, int device_num) {
     return;
   }
 
-  DeviceTy &Device = Devices[device_num];
-  Device.RTL->data_delete(Device.RTLDeviceID, (void *)device_ptr);
+  Devices[device_num].deleteData(device_ptr);
   DP("omp_target_free deallocated device ptr\n");
 }
 
@@ -102,9 +98,9 @@ EXTERN int omp_target_is_present(void *ptr, int device_num) {
     return true;
   }
 
-  RTLsMtx.lock();
+  RTLsMtx->lock();
   size_t Devices_size = Devices.size();
-  RTLsMtx.unlock();
+  RTLsMtx->unlock();
   if (Devices_size <= (size_t)device_num) {
     DP("Call to omp_target_is_present with invalid device ID, returning "
         "false\n");
@@ -113,7 +109,15 @@ EXTERN int omp_target_is_present(void *ptr, int device_num) {
 
   DeviceTy& Device = Devices[device_num];
   bool IsLast; // not used
-  int rc = (Device.getTgtPtrBegin(ptr, 0, IsLast, false) != NULL);
+  bool IsHostPtr;
+  void *TgtPtr = Device.getTgtPtrBegin(ptr, 0, IsLast, false, IsHostPtr);
+  int rc = (TgtPtr != NULL);
+  // Under unified memory the host pointer can be returned by the
+  // getTgtPtrBegin() function which means that there is no device
+  // corresponding point for ptr. This function should return false
+  // in that situation.
+  if (RTLs->RequiresFlags & OMP_REQ_UNIFIED_SHARED_MEMORY)
+    rc = !IsHostPtr;
   DP("Call to omp_target_is_present returns %d\n", rc);
   return rc;
 }
@@ -126,18 +130,18 @@ EXTERN int omp_target_memcpy(void *dst, void *src, size_t length,
       DPxPTR(src), dst_offset, src_offset, length);
 
   if (!dst || !src || length <= 0) {
-    DP("Call to omp_target_memcpy with invalid arguments\n");
+    REPORT("Call to omp_target_memcpy with invalid arguments\n");
     return OFFLOAD_FAIL;
   }
 
   if (src_device != omp_get_initial_device() && !device_is_ready(src_device)) {
-      DP("omp_target_memcpy returns OFFLOAD_FAIL\n");
-      return OFFLOAD_FAIL;
+    REPORT("omp_target_memcpy returns OFFLOAD_FAIL\n");
+    return OFFLOAD_FAIL;
   }
 
   if (dst_device != omp_get_initial_device() && !device_is_ready(dst_device)) {
-      DP("omp_target_memcpy returns OFFLOAD_FAIL\n");
-      return OFFLOAD_FAIL;
+    REPORT("omp_target_memcpy returns OFFLOAD_FAIL\n");
+    return OFFLOAD_FAIL;
   }
 
   int rc = OFFLOAD_SUCCESS;
@@ -153,19 +157,28 @@ EXTERN int omp_target_memcpy(void *dst, void *src, size_t length,
   } else if (src_device == omp_get_initial_device()) {
     DP("copy from host to device\n");
     DeviceTy& DstDev = Devices[dst_device];
-    rc = DstDev.data_submit(dstAddr, srcAddr, length);
+    rc = DstDev.submitData(dstAddr, srcAddr, length, nullptr);
   } else if (dst_device == omp_get_initial_device()) {
     DP("copy from device to host\n");
     DeviceTy& SrcDev = Devices[src_device];
-    rc = SrcDev.data_retrieve(dstAddr, srcAddr, length);
+    rc = SrcDev.retrieveData(dstAddr, srcAddr, length, nullptr);
   } else {
     DP("copy from device to device\n");
+    DeviceTy &SrcDev = Devices[src_device];
+    DeviceTy &DstDev = Devices[dst_device];
+    // First try to use D2D memcpy which is more efficient. If fails, fall back
+    // to unefficient way.
+    if (SrcDev.isDataExchangable(DstDev)) {
+      rc = SrcDev.dataExchange(srcAddr, DstDev, dstAddr, length, nullptr);
+      if (rc == OFFLOAD_SUCCESS)
+        return OFFLOAD_SUCCESS;
+    }
+
     void *buffer = malloc(length);
-    DeviceTy& SrcDev = Devices[src_device];
-    DeviceTy& DstDev = Devices[dst_device];
-    rc = SrcDev.data_retrieve(buffer, srcAddr, length);
+    rc = SrcDev.retrieveData(buffer, srcAddr, length, nullptr);
     if (rc == OFFLOAD_SUCCESS)
-      rc = DstDev.data_submit(dstAddr, buffer, length);
+      rc = DstDev.submitData(dstAddr, buffer, length, nullptr);
+    free(buffer);
   }
 
   DP("omp_target_memcpy returns %d\n", rc);
@@ -192,7 +205,7 @@ EXTERN int omp_target_memcpy_rect(void *dst, void *src, size_t element_size,
 
   if (!dst || !src || element_size < 1 || num_dims < 1 || !volume ||
       !dst_offsets || !src_offsets || !dst_dimensions || !src_dimensions) {
-    DP("Call to omp_target_memcpy_rect with invalid arguments\n");
+    REPORT("Call to omp_target_memcpy_rect with invalid arguments\n");
     return OFFLOAD_FAIL;
   }
 
@@ -235,17 +248,17 @@ EXTERN int omp_target_associate_ptr(void *host_ptr, void *device_ptr,
       DPxPTR(host_ptr), DPxPTR(device_ptr), size, device_offset, device_num);
 
   if (!host_ptr || !device_ptr || size <= 0) {
-    DP("Call to omp_target_associate_ptr with invalid arguments\n");
+    REPORT("Call to omp_target_associate_ptr with invalid arguments\n");
     return OFFLOAD_FAIL;
   }
 
   if (device_num == omp_get_initial_device()) {
-    DP("omp_target_associate_ptr: no association possible on the host\n");
+    REPORT("omp_target_associate_ptr: no association possible on the host\n");
     return OFFLOAD_FAIL;
   }
 
   if (!device_is_ready(device_num)) {
-    DP("omp_target_associate_ptr returns OFFLOAD_FAIL\n");
+    REPORT("omp_target_associate_ptr returns OFFLOAD_FAIL\n");
     return OFFLOAD_FAIL;
   }
 
@@ -261,17 +274,18 @@ EXTERN int omp_target_disassociate_ptr(void *host_ptr, int device_num) {
       "device_num %d\n", DPxPTR(host_ptr), device_num);
 
   if (!host_ptr) {
-    DP("Call to omp_target_associate_ptr with invalid host_ptr\n");
+    REPORT("Call to omp_target_associate_ptr with invalid host_ptr\n");
     return OFFLOAD_FAIL;
   }
 
   if (device_num == omp_get_initial_device()) {
-    DP("omp_target_disassociate_ptr: no association possible on the host\n");
+    REPORT(
+        "omp_target_disassociate_ptr: no association possible on the host\n");
     return OFFLOAD_FAIL;
   }
 
   if (!device_is_ready(device_num)) {
-    DP("omp_target_disassociate_ptr returns OFFLOAD_FAIL\n");
+    REPORT("omp_target_disassociate_ptr returns OFFLOAD_FAIL\n");
     return OFFLOAD_FAIL;
   }
 

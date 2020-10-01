@@ -10,19 +10,28 @@
 #include <CL/__spirv/spirv_ops.hpp>
 #include <CL/sycl/access/access.hpp>
 #include <CL/sycl/detail/common.hpp>
+#include <CL/sycl/detail/stl_type_traits.hpp>
+#include <CL/sycl/detail/type_traits.hpp>
 #include <cassert>
 #include <cstddef>
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 // Forward declaration
 template <typename dataT, int dimensions, access::mode accessMode,
           access::target accessTarget, access::placeholder isPlaceholder>
 class accessor;
 
+/// Provides constructors for address space qualified and non address space
+/// qualified pointers to allow interoperability between plain C++ and OpenCL C.
+///
+/// \ingroup sycl_api
 template <typename ElementType, access::address_space Space> class multi_ptr {
 public:
-  using element_type = ElementType;
+  using element_type =
+      detail::conditional_t<std::is_same<ElementType, half>::value,
+                    cl::sycl::detail::half_impl::BIsRepresentationT,
+                    ElementType>;
   using difference_type = std::ptrdiff_t;
 
   // Implementation defined pointer and reference types that correspond to
@@ -40,51 +49,48 @@ public:
   multi_ptr() : m_Pointer(nullptr) {}
   multi_ptr(const multi_ptr &rhs) = default;
   multi_ptr(multi_ptr &&) = default;
-  multi_ptr(pointer_t pointer) : m_Pointer(pointer) {}
 #ifdef __SYCL_DEVICE_ONLY__
+  multi_ptr(pointer_t pointer) : m_Pointer(pointer) {}
+#endif
+
   multi_ptr(ElementType *pointer) : m_Pointer((pointer_t)(pointer)) {
     // TODO An implementation should reject an argument if the deduced
     // address space is not compatible with Space.
   }
+#if defined(RESTRICT_WRITE_ACCESS_TO_CONSTANT_PTR)
+  template <typename = typename detail::const_if_const_AS<Space, ElementType>>
+  multi_ptr(const ElementType *pointer) : m_Pointer((pointer_t)(pointer)) {}
 #endif
+
   multi_ptr(std::nullptr_t) : m_Pointer(nullptr) {}
   ~multi_ptr() = default;
 
   // Assignment and access operators
   multi_ptr &operator=(const multi_ptr &) = default;
   multi_ptr &operator=(multi_ptr &&) = default;
+
+#ifdef __SYCL_DEVICE_ONLY__
   multi_ptr &operator=(pointer_t pointer) {
     m_Pointer = pointer;
     return *this;
   }
-#ifdef __SYCL_DEVICE_ONLY__
+#endif
+
   multi_ptr &operator=(ElementType *pointer) {
     // TODO An implementation should reject an argument if the deduced
     // address space is not compatible with Space.
     m_Pointer = (pointer_t)pointer;
     return *this;
   }
-#endif
+
   multi_ptr &operator=(std::nullptr_t) {
     m_Pointer = nullptr;
     return *this;
   }
 
-#ifdef __SYCL_ENABLE_INFER_AS__
-  using ReturnPtr =
-      typename std::conditional<Space == access::address_space::constant_space,
-                                pointer_t, ElementType *>::type;
-  using ReturnRef =
-      typename std::conditional<Space == access::address_space::constant_space,
-                                reference_t, ElementType &>::type;
-  using ReturnConstRef =
-      typename std::conditional<Space == access::address_space::constant_space,
-                                const_reference_t, const ElementType &>::type;
-#else
-  using ReturnPtr = ElementType *;
-  using ReturnRef = ElementType &;
+  using ReturnPtr = detail::const_if_const_AS<Space, ElementType> *;
+  using ReturnRef = detail::const_if_const_AS<Space, ElementType> &;
   using ReturnConstRef = const ElementType &;
-#endif
 
   ReturnRef operator*() const {
     return *reinterpret_cast<ReturnPtr>(m_Pointer);
@@ -102,17 +108,18 @@ public:
     return reinterpret_cast<ReturnPtr>(m_Pointer)[index];
   }
 
-  // Only if Space == global_space
+  // Only if Space == global_space || global_device_space
   template <int dimensions, access::mode Mode,
             access::placeholder isPlaceholder,
             access::address_space _Space = Space,
             typename = typename std::enable_if<
                 _Space == Space &&
-                Space == access::address_space::global_space>::type>
+                (Space == access::address_space::global_space ||
+                 Space == access::address_space::global_device_space)>::type>
   multi_ptr(accessor<ElementType, dimensions, Mode,
                      access::target::global_buffer, isPlaceholder>
                 Accessor) {
-    m_Pointer = (pointer_t)(Accessor.get_pointer().m_Pointer);
+    m_Pointer = (pointer_t)(Accessor.get_pointer().get());
   }
 
   // Only if Space == local_space
@@ -146,14 +153,17 @@ public:
   //    2. from multi_ptr<ElementType, Space> to multi_ptr<const ElementType,
   //    Space>
 
-  // Only if Space == global_space and element type is const
-  template <
-      int dimensions, access::mode Mode, access::placeholder isPlaceholder,
-      access::address_space _Space = Space, typename ET = ElementType,
-      typename = typename std::enable_if<
-          _Space == Space && Space == access::address_space::global_space &&
-          std::is_const<ET>::value &&
-          std::is_same<ET, ElementType>::value>::type>
+  // Only if Space == global_space || global_device_space and element type is
+  // const
+  template <int dimensions, access::mode Mode,
+            access::placeholder isPlaceholder,
+            access::address_space _Space = Space, typename ET = ElementType,
+            typename = typename std::enable_if<
+                _Space == Space &&
+                (Space == access::address_space::global_space ||
+                 Space == access::address_space::global_device_space) &&
+                std::is_const<ET>::value &&
+                std::is_same<ET, ElementType>::value>::type>
   multi_ptr(accessor<typename std::remove_const<ET>::type, dimensions, Mode,
                      access::target::global_buffer, isPlaceholder>
                 Accessor)
@@ -265,6 +275,24 @@ public:
     return multi_ptr(m_Pointer - r);
   }
 
+#ifdef __ENABLE_USM_ADDR_SPACE__
+  // Explicit conversion to global_space
+  // Only available if Space == address_space::global_device_space ||
+  // Space == address_space::global_host_space
+  template <access::address_space _Space = Space,
+            typename = typename std::enable_if<
+                _Space == Space &&
+                (Space == access::address_space::global_device_space ||
+                 Space == access::address_space::global_host_space)>::type>
+  explicit
+  operator multi_ptr<ElementType, access::address_space::global_space>() const {
+    using global_pointer_t = typename detail::PtrValueType<
+        ElementType, access::address_space::global_space>::type *;
+    return multi_ptr<ElementType, access::address_space::global_space>(
+        reinterpret_cast<global_pointer_t>(m_Pointer));
+  }
+#endif // __ENABLE_USM_ADDR_SPACE__
+
   // Only if Space == global_space
   template <access::address_space _Space = Space,
             typename = typename std::enable_if<
@@ -304,6 +332,10 @@ public:
     // TODO An implementation should reject an argument if the deduced
     // address space is not compatible with Space.
   }
+#if defined(RESTRICT_WRITE_ACCESS_TO_CONSTANT_PTR)
+  template <typename = typename detail::const_if_const_AS<Space, void>>
+  multi_ptr(const void *pointer) : m_Pointer((pointer_t)(pointer)) {}
+#endif
 #endif
   multi_ptr(std::nullptr_t) : m_Pointer(nullptr) {}
   ~multi_ptr() = default;
@@ -335,12 +367,13 @@ public:
     return *this;
   }
 
-  // Only if Space == global_space
+  // Only if Space == global_space || global_device_space
   template <typename ElementType, int dimensions, access::mode Mode,
             access::address_space _Space = Space,
             typename = typename std::enable_if<
                 _Space == Space &&
-                Space == access::address_space::global_space>::type>
+                (Space == access::address_space::global_space ||
+                 Space == access::address_space::global_device_space)>::type>
   multi_ptr(
       accessor<ElementType, dimensions, Mode, access::target::global_buffer,
                access::placeholder::false_t>
@@ -370,11 +403,12 @@ public:
           Accessor)
       : multi_ptr(Accessor.get_pointer()) {}
 
+  using ReturnPtr = detail::const_if_const_AS<Space, void> *;
   // Returns the underlying OpenCL C pointer
   pointer_t get() const { return m_Pointer; }
 
   // Implicit conversion to the underlying pointer type
-  operator void*() const { return reinterpret_cast<void *>(m_Pointer); };
+  operator ReturnPtr() const { return reinterpret_cast<ReturnPtr>(m_Pointer); };
 
   // Explicit conversion to a multi_ptr<ElementType>
   template <typename ElementType>
@@ -420,6 +454,10 @@ public:
     // TODO An implementation should reject an argument if the deduced
     // address space is not compatible with Space.
   }
+#if defined(RESTRICT_WRITE_ACCESS_TO_CONSTANT_PTR)
+  template <typename = typename detail::const_if_const_AS<Space, void>>
+  multi_ptr(const void *pointer) : m_Pointer((pointer_t)(pointer)) {}
+#endif
 #endif
   multi_ptr(std::nullptr_t) : m_Pointer(nullptr) {}
   ~multi_ptr() = default;
@@ -451,12 +489,13 @@ public:
     return *this;
   }
 
-  // Only if Space == global_space
+  // Only if Space == global_space || global_device_space
   template <typename ElementType, int dimensions, access::mode Mode,
             access::address_space _Space = Space,
             typename = typename std::enable_if<
                 _Space == Space &&
-                Space == access::address_space::global_space>::type>
+                (Space == access::address_space::global_space ||
+                 Space == access::address_space::global_device_space)>::type>
   multi_ptr(
       accessor<ElementType, dimensions, Mode, access::target::global_buffer,
                access::placeholder::false_t>
@@ -505,15 +544,26 @@ public:
         static_cast<elem_pointer_t>(m_Pointer));
   }
 
-  // Implicit conversion to multi_ptr<const void, Space>
-  operator multi_ptr<const void, Space>() const {
-    using ptr_t = typename detail::PtrValueType<const void, Space>::type *;
-    return multi_ptr<const void, Space>(reinterpret_cast<ptr_t>(m_Pointer));
-  }
-
 private:
   pointer_t m_Pointer;
 };
+
+#ifdef __cpp_deduction_guides
+template <int dimensions, access::mode Mode, access::placeholder isPlaceholder,
+          class T>
+multi_ptr(
+    accessor<T, dimensions, Mode, access::target::global_buffer, isPlaceholder>)
+    ->multi_ptr<T, access::address_space::global_space>;
+template <int dimensions, access::mode Mode, access::placeholder isPlaceholder,
+          class T>
+multi_ptr(accessor<T, dimensions, Mode, access::target::constant_buffer,
+                   isPlaceholder>)
+    ->multi_ptr<T, access::address_space::constant_space>;
+template <int dimensions, access::mode Mode, access::placeholder isPlaceholder,
+          class T>
+multi_ptr(accessor<T, dimensions, Mode, access::target::local, isPlaceholder>)
+    ->multi_ptr<T, access::address_space::local_space>;
+#endif
 
 template <typename ElementType, access::address_space Space>
 multi_ptr<ElementType, Space>
@@ -529,7 +579,14 @@ template <typename ElementType, access::address_space Space>
 multi_ptr<ElementType, Space> make_ptr(ElementType *pointer) {
   return multi_ptr<ElementType, Space>(pointer);
 }
-#endif
+#if defined(RESTRICT_WRITE_ACCESS_TO_CONSTANT_PTR)
+template <typename ElementType, access::address_space Space,
+          typename = typename detail::const_if_const_AS<Space, ElementType>>
+multi_ptr<ElementType, Space> make_ptr(const ElementType *pointer) {
+  return multi_ptr<ElementType, Space>(pointer);
+}
+#endif // RESTRICT_WRITE_ACCESS_TO_CONSTANT_PTR
+#endif // // __SYCL_DEVICE_ONLY__
 
 template <typename ElementType, access::address_space Space>
 bool operator==(const multi_ptr<ElementType, Space> &lhs,
@@ -568,64 +625,64 @@ bool operator>=(const multi_ptr<ElementType, Space> &lhs,
 }
 
 template <typename ElementType, access::address_space Space>
-bool operator!=(const multi_ptr<ElementType, Space> &lhs, std::nullptr_t rhs) {
+bool operator!=(const multi_ptr<ElementType, Space> &lhs, std::nullptr_t) {
   return lhs.get() != nullptr;
 }
 
 template <typename ElementType, access::address_space Space>
-bool operator!=(std::nullptr_t lhs, const multi_ptr<ElementType, Space> &rhs) {
+bool operator!=(std::nullptr_t, const multi_ptr<ElementType, Space> &rhs) {
   return rhs.get() != nullptr;
 }
 
 template <typename ElementType, access::address_space Space>
-bool operator==(const multi_ptr<ElementType, Space> &lhs, std::nullptr_t rhs) {
+bool operator==(const multi_ptr<ElementType, Space> &lhs, std::nullptr_t) {
   return lhs.get() == nullptr;
 }
 
 template <typename ElementType, access::address_space Space>
-bool operator==(std::nullptr_t lhs, const multi_ptr<ElementType, Space> &rhs) {
+bool operator==(std::nullptr_t, const multi_ptr<ElementType, Space> &rhs) {
   return rhs.get() == nullptr;
 }
 
 template <typename ElementType, access::address_space Space>
-bool operator>(const multi_ptr<ElementType, Space> &lhs, std::nullptr_t rhs) {
+bool operator>(const multi_ptr<ElementType, Space> &lhs, std::nullptr_t) {
   return lhs.get() != nullptr;
 }
 
 template <typename ElementType, access::address_space Space>
-bool operator>(std::nullptr_t lhs, const multi_ptr<ElementType, Space> &rhs) {
+bool operator>(std::nullptr_t, const multi_ptr<ElementType, Space> &) {
   return false;
 }
 
 template <typename ElementType, access::address_space Space>
-bool operator<(const multi_ptr<ElementType, Space> &lhs, std::nullptr_t rhs) {
+bool operator<(const multi_ptr<ElementType, Space> &, std::nullptr_t) {
   return false;
 }
 
 template <typename ElementType, access::address_space Space>
-bool operator<(std::nullptr_t lhs, const multi_ptr<ElementType, Space> &rhs) {
+bool operator<(std::nullptr_t, const multi_ptr<ElementType, Space> &rhs) {
   return rhs.get() != nullptr;
 }
 
 template <typename ElementType, access::address_space Space>
-bool operator>=(const multi_ptr<ElementType, Space> &lhs, std::nullptr_t rhs) {
+bool operator>=(const multi_ptr<ElementType, Space> &, std::nullptr_t) {
   return true;
 }
 
 template <typename ElementType, access::address_space Space>
-bool operator>=(std::nullptr_t lhs, const multi_ptr<ElementType, Space> &rhs) {
+bool operator>=(std::nullptr_t, const multi_ptr<ElementType, Space> &rhs) {
   return rhs.get() == nullptr;
 }
 
 template <typename ElementType, access::address_space Space>
-bool operator<=(const multi_ptr<ElementType, Space> &lhs, std::nullptr_t rhs) {
+bool operator<=(const multi_ptr<ElementType, Space> &lhs, std::nullptr_t) {
   return lhs.get() == nullptr;
 }
 
 template <typename ElementType, access::address_space Space>
-bool operator<=(std::nullptr_t lhs, const multi_ptr<ElementType, Space> &rhs) {
+bool operator<=(std::nullptr_t, const multi_ptr<ElementType, Space> &rhs) {
   return rhs.get() == nullptr;
 }
 
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

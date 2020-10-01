@@ -74,6 +74,10 @@ inline bool isLogicalOpCode(Op OpCode) {
   return (unsigned)OpCode >= OpLogicalEqual && (unsigned)OpCode <= OpLogicalNot;
 }
 
+inline bool isUnaryPredicateOpCode(Op OpCode) {
+  return (unsigned)OpCode >= OpAny && (unsigned)OpCode <= OpSignBitSet;
+}
+
 inline bool isBitwiseOpCode(Op OpCode) {
   return (unsigned)OpCode >= OpBitwiseOr && (unsigned)OpCode <= OpBitwiseAnd;
 }
@@ -92,7 +96,9 @@ inline bool isCmpOpCode(Op OpCode) {
 
 inline bool isCvtOpCode(Op OpCode) {
   return ((unsigned)OpCode >= OpConvertFToU && (unsigned)OpCode <= OpBitcast) ||
-         OpCode == OpSatConvertSToU || OpCode == OpSatConvertUToS;
+         OpCode == OpSatConvertSToU || OpCode == OpSatConvertUToS ||
+         OpCode == OpPtrCastToCrossWorkgroupINTEL ||
+         OpCode == OpCrossWorkgroupCastToPtrINTEL;
 }
 
 inline bool isCvtToUnsignedOpCode(Op OpCode) {
@@ -127,12 +133,40 @@ inline bool hasExecScope(Op OpCode) {
 
 inline bool hasGroupOperation(Op OpCode) {
   unsigned OC = OpCode;
-  return OpGroupIAdd <= OC && OC <= OpGroupSMax;
+  return (OpGroupIAdd <= OC && OC <= OpGroupSMax) ||
+         (OpGroupNonUniformBallotBitCount == OC) ||
+         (OpGroupNonUniformIAdd <= OC && OC <= OpGroupNonUniformLogicalXor);
+}
+
+inline bool isUniformArithmeticOpCode(Op OpCode) {
+  unsigned OC = OpCode;
+  return (OpGroupIAdd <= OC && OC <= OpGroupSMax);
+}
+
+inline bool isNonUniformArithmeticOpCode(Op OpCode) {
+  unsigned OC = OpCode;
+  return (OpGroupNonUniformIAdd <= OC && OC <= OpGroupNonUniformLogicalXor);
+}
+
+inline bool isGroupLogicalOpCode(Op OpCode) {
+  unsigned OC = OpCode;
+  return OC == OpGroupNonUniformLogicalAnd ||
+         OC == OpGroupNonUniformLogicalOr || OC == OpGroupNonUniformLogicalXor;
 }
 
 inline bool isGroupOpCode(Op OpCode) {
   unsigned OC = OpCode;
   return OpGroupAll <= OC && OC <= OpGroupSMax;
+}
+
+inline bool isGroupNonUniformOpcode(Op OpCode) {
+  unsigned OC = OpCode;
+  return OpGroupNonUniformElect <= OC && OC <= OpGroupNonUniformQuadSwap;
+}
+
+inline bool isMediaBlockINTELOpcode(Op OpCode) {
+  return OpCode == OpSubgroupImageMediaBlockReadINTEL ||
+         OpCode == OpSubgroupImageMediaBlockWriteINTEL;
 }
 
 inline bool isPipeOpCode(Op OpCode) {
@@ -162,16 +196,24 @@ inline bool isSubgroupAvcINTELEvaluateOpcode(Op OpCode) {
           OC <= OpSubgroupAvcSicEvaluateWithMultiReferenceInterlacedINTEL);
 }
 
+inline bool isVCOpCode(Op OpCode) { return OpCode == OpTypeBufferSurfaceINTEL; }
+
 inline bool isTypeOpCode(Op OpCode) {
   unsigned OC = OpCode;
   return (OpTypeVoid <= OC && OC <= OpTypePipe) || OC == OpTypePipeStorage ||
-         isSubgroupAvcINTELTypeOpCode(OpCode) || OC == OpTypeVmeImageINTEL;
+         isSubgroupAvcINTELTypeOpCode(OpCode) || OC == OpTypeVmeImageINTEL ||
+         isVCOpCode(OpCode);
+}
+
+inline bool isSpecConstantOpCode(Op OpCode) {
+  unsigned OC = OpCode;
+  return OpSpecConstantTrue <= OC && OC <= OpSpecConstantOp;
 }
 
 inline bool isConstantOpCode(Op OpCode) {
   unsigned OC = OpCode;
   return (OpConstantTrue <= OC && OC <= OpSpecConstantOp) || OC == OpUndef ||
-         OC == OpConstantPipeStorage;
+         OC == OpConstantPipeStorage || OC == OpConstFunctionPointerINTEL;
 }
 
 inline bool isModuleScopeAllowedOpCode(Op OpCode) {
@@ -183,6 +225,7 @@ inline bool isIntelSubgroupOpCode(Op OpCode) {
   unsigned OC = OpCode;
   return OpSubgroupShuffleINTEL <= OC && OC <= OpSubgroupImageBlockWriteINTEL;
 }
+
 } // namespace SPIRV
 
 #endif // SPIRV_LIBSPIRV_SPIRVOPCODE_H

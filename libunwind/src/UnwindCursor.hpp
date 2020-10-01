@@ -530,6 +530,8 @@ UnwindCursor<A, R>::UnwindCursor(unw_context_t *context, A &as)
     : _addressSpace(as), _unwindInfoMissing(false) {
   static_assert((check_fit<UnwindCursor<A, R>, unw_cursor_t>::does_fit),
                 "UnwindCursor<> does not fit in unw_cursor_t");
+  static_assert((alignof(UnwindCursor<A, R>) <= alignof(unw_cursor_t)),
+                "UnwindCursor<> requires more alignment than unw_cursor_t");
   memset(&_info, 0, sizeof(_info));
   memset(&_histTable, 0, sizeof(_histTable));
   _dispContext.ContextRecord = &_msContext;
@@ -923,13 +925,16 @@ private:
 #endif
 
 #if defined(_LIBUNWIND_SUPPORT_DWARF_UNWIND)
+  bool getInfoFromFdeCie(const typename CFI_Parser<A>::FDE_Info &fdeInfo,
+                         const typename CFI_Parser<A>::CIE_Info &cieInfo,
+                         pint_t pc, uintptr_t dso_base);
   bool getInfoFromDwarfSection(pint_t pc, const UnwindInfoSections &sects,
                                             uint32_t fdeSectionOffsetHint=0);
   int stepWithDwarfFDE() {
     return DwarfInstructions<A, R>::stepWithDwarf(_addressSpace,
                                               (pint_t)this->getReg(UNW_REG_IP),
                                               (pint_t)_info.unwind_info,
-                                              _registers);
+                                              _registers, _isSignalFrame);
   }
 #endif
 
@@ -993,6 +998,12 @@ private:
 
 #if defined(_LIBUNWIND_TARGET_SPARC)
   int stepWithCompactEncoding(Registers_sparc &) { return UNW_EINVAL; }
+#endif
+
+#if defined (_LIBUNWIND_TARGET_RISCV)
+  int stepWithCompactEncoding(Registers_riscv &) {
+    return UNW_EINVAL;
+  }
 #endif
 
   bool compactSaysUseDwarf(uint32_t *offset=NULL) const {
@@ -1061,6 +1072,12 @@ private:
   bool compactSaysUseDwarf(Registers_sparc &, uint32_t *) const { return true; }
 #endif
 
+#if defined (_LIBUNWIND_TARGET_RISCV)
+  bool compactSaysUseDwarf(Registers_riscv &, uint32_t *) const {
+    return true;
+  }
+#endif
+
 #endif // defined(_LIBUNWIND_SUPPORT_COMPACT_UNWIND)
 
 #if defined(_LIBUNWIND_SUPPORT_DWARF_UNWIND)
@@ -1111,6 +1128,12 @@ private:
   }
 #endif
 
+#if defined (_LIBUNWIND_TARGET_HEXAGON)
+  compact_unwind_encoding_t dwarfEncoding(Registers_hexagon &) const {
+    return 0;
+  }
+#endif
+
 #if defined (_LIBUNWIND_TARGET_MIPS_O32)
   compact_unwind_encoding_t dwarfEncoding(Registers_mips_o32 &) const {
     return 0;
@@ -1125,6 +1148,12 @@ private:
 
 #if defined(_LIBUNWIND_TARGET_SPARC)
   compact_unwind_encoding_t dwarfEncoding(Registers_sparc &) const { return 0; }
+#endif
+
+#if defined (_LIBUNWIND_TARGET_RISCV)
+  compact_unwind_encoding_t dwarfEncoding(Registers_riscv &) const {
+    return 0;
+  }
 #endif
 
 #endif // defined(_LIBUNWIND_SUPPORT_DWARF_UNWIND)
@@ -1158,6 +1187,8 @@ UnwindCursor<A, R>::UnwindCursor(unw_context_t *context, A &as)
       _isSignalFrame(false) {
   static_assert((check_fit<UnwindCursor<A, R>, unw_cursor_t>::does_fit),
                 "UnwindCursor<> does not fit in unw_cursor_t");
+  static_assert((alignof(UnwindCursor<A, R>) <= alignof(unw_cursor_t)),
+                "UnwindCursor<> requires more alignment than unw_cursor_t");
   memset(&_info, 0, sizeof(_info));
 }
 
@@ -1222,11 +1253,6 @@ template <typename A, typename R> bool UnwindCursor<A, R>::isSignalFrame() {
 #endif // defined(_LIBUNWIND_SUPPORT_SEH_UNWIND)
 
 #if defined(_LIBUNWIND_ARM_EHABI)
-struct EHABIIndexEntry {
-  uint32_t functionOffset;
-  uint32_t data;
-};
-
 template<typename A>
 struct EHABISectionIterator {
   typedef EHABISectionIterator _Self;
@@ -1256,12 +1282,18 @@ struct EHABISectionIterator {
   _Self operator+(size_t a) { _Self out = *this; out._i += a; return out; }
   _Self operator-(size_t a) { assert(_i >= a); _Self out = *this; out._i -= a; return out; }
 
-  size_t operator-(const _Self& other) { return _i - other._i; }
+  size_t operator-(const _Self& other) const { return _i - other._i; }
 
   bool operator==(const _Self& other) const {
     assert(_addressSpace == other._addressSpace);
     assert(_sects == other._sects);
     return _i == other._i;
+  }
+
+  bool operator!=(const _Self& other) const {
+    assert(_addressSpace == other._addressSpace);
+    assert(_sects == other._sects);
+    return _i != other._i;
   }
 
   typename A::pint_t operator*() const { return functionAddress(); }
@@ -1340,7 +1372,8 @@ bool UnwindCursor<A, R>::getInfoFromEHABISection(
 
   // If the high bit is set, the exception handling table entry is inline inside
   // the index table entry on the second word (aka |indexDataAddr|). Otherwise,
-  // the table points at an offset in the exception handling table (section 5 EHABI).
+  // the table points at an offset in the exception handling table (section 5
+  // EHABI).
   pint_t exceptionTableAddr;
   uint32_t exceptionTableData;
   bool isSingleWordEHT;
@@ -1439,13 +1472,39 @@ bool UnwindCursor<A, R>::getInfoFromEHABISection(
   _info.unwind_info = exceptionTableAddr;
   _info.lsda = lsda;
   // flags is pr_cache.additional. See EHABI #7.2 for definition of bit 0.
-  _info.flags = isSingleWordEHT ? 1 : 0 | scope32 ? 0x2 : 0;  // Use enum?
+  _info.flags = (isSingleWordEHT ? 1 : 0) | (scope32 ? 0x2 : 0);  // Use enum?
 
   return true;
 }
 #endif
 
 #if defined(_LIBUNWIND_SUPPORT_DWARF_UNWIND)
+template <typename A, typename R>
+bool UnwindCursor<A, R>::getInfoFromFdeCie(
+    const typename CFI_Parser<A>::FDE_Info &fdeInfo,
+    const typename CFI_Parser<A>::CIE_Info &cieInfo, pint_t pc,
+    uintptr_t dso_base) {
+  typename CFI_Parser<A>::PrologInfo prolog;
+  if (CFI_Parser<A>::parseFDEInstructions(_addressSpace, fdeInfo, cieInfo, pc,
+                                          R::getArch(), &prolog)) {
+    // Save off parsed FDE info
+    _info.start_ip          = fdeInfo.pcStart;
+    _info.end_ip            = fdeInfo.pcEnd;
+    _info.lsda              = fdeInfo.lsda;
+    _info.handler           = cieInfo.personality;
+    // Some frameless functions need SP altered when resuming in function, so
+    // propagate spExtraArgSize.
+    _info.gp                = prolog.spExtraArgSize;
+    _info.flags             = 0;
+    _info.format            = dwarfEncoding();
+    _info.unwind_info       = fdeInfo.fdeStart;
+    _info.unwind_info_size  = static_cast<uint32_t>(fdeInfo.fdeLength);
+    _info.extra             = static_cast<unw_word_t>(dso_base);
+    return true;
+  }
+  return false;
+}
+
 template <typename A, typename R>
 bool UnwindCursor<A, R>::getInfoFromDwarfSection(pint_t pc,
                                                 const UnwindInfoSections &sects,
@@ -1486,21 +1545,7 @@ bool UnwindCursor<A, R>::getInfoFromDwarfSection(pint_t pc,
                                       &fdeInfo, &cieInfo);
   }
   if (foundFDE) {
-    typename CFI_Parser<A>::PrologInfo prolog;
-    if (CFI_Parser<A>::parseFDEInstructions(_addressSpace, fdeInfo, cieInfo, pc,
-                                            R::getArch(), &prolog)) {
-      // Save off parsed FDE info
-      _info.start_ip          = fdeInfo.pcStart;
-      _info.end_ip            = fdeInfo.pcEnd;
-      _info.lsda              = fdeInfo.lsda;
-      _info.handler           = cieInfo.personality;
-      _info.gp                = prolog.spExtraArgSize;
-      _info.flags             = 0;
-      _info.format            = dwarfEncoding();
-      _info.unwind_info       = fdeInfo.fdeStart;
-      _info.unwind_info_size  = (uint32_t)fdeInfo.fdeLength;
-      _info.extra             = (unw_word_t) sects.dso_base;
-
+    if (getInfoFromFdeCie(fdeInfo, cieInfo, pc, sects.dso_base)) {
       // Add to cache (to make next lookup faster) if we had no hint
       // and there was no index.
       if (!foundInCache && (fdeSectionOffsetHint == 0)) {
@@ -1733,12 +1778,12 @@ bool UnwindCursor<A, R>::getInfoFromCompactEncodingSection(pint_t pc,
     }
   }
 
-  // extact personality routine, if encoding says function has one
+  // extract personality routine, if encoding says function has one
   uint32_t personalityIndex = (encoding & UNWIND_PERSONALITY_MASK) >>
                               (__builtin_ctz(UNWIND_PERSONALITY_MASK));
   if (personalityIndex != 0) {
     --personalityIndex; // change 1-based to zero-based index
-    if (personalityIndex > sectionHeader.personalityArrayCount()) {
+    if (personalityIndex >= sectionHeader.personalityArrayCount()) {
       _LIBUNWIND_DEBUG_LOG("found encoding 0x%08X with personality index %d,  "
                             "but personality table has only %d entries",
                             encoding, personalityIndex,
@@ -1834,6 +1879,12 @@ void UnwindCursor<A, R>::setInfoBasedOnIPRegister(bool isReturnAddress) {
   pc &= (pint_t)~0x1;
 #endif
 
+  // Exit early if at the top of the stack.
+  if (pc == 0) {
+    _unwindInfoMissing = true;
+    return;
+  }
+
   // If the last line of a function is a "throw" the compiler sometimes
   // emits no instructions after the call to __cxa_throw.  This means
   // the return address is actually the start of the next function.
@@ -1896,58 +1947,24 @@ void UnwindCursor<A, R>::setInfoBasedOnIPRegister(bool isReturnAddress) {
   // dynamically registered for it.
   pint_t cachedFDE = DwarfFDECache<A>::findFDE(0, pc);
   if (cachedFDE != 0) {
-    CFI_Parser<LocalAddressSpace>::FDE_Info fdeInfo;
-    CFI_Parser<LocalAddressSpace>::CIE_Info cieInfo;
-    const char *msg = CFI_Parser<A>::decodeFDE(_addressSpace,
-                                                cachedFDE, &fdeInfo, &cieInfo);
-    if (msg == NULL) {
-      typename CFI_Parser<A>::PrologInfo prolog;
-      if (CFI_Parser<A>::parseFDEInstructions(_addressSpace, fdeInfo, cieInfo,
-                                              pc, R::getArch(), &prolog)) {
-        // save off parsed FDE info
-        _info.start_ip         = fdeInfo.pcStart;
-        _info.end_ip           = fdeInfo.pcEnd;
-        _info.lsda             = fdeInfo.lsda;
-        _info.handler          = cieInfo.personality;
-        _info.gp               = prolog.spExtraArgSize;
-                                  // Some frameless functions need SP
-                                  // altered when resuming in function.
-        _info.flags            = 0;
-        _info.format           = dwarfEncoding();
-        _info.unwind_info      = fdeInfo.fdeStart;
-        _info.unwind_info_size = (uint32_t)fdeInfo.fdeLength;
-        _info.extra            = 0;
+    typename CFI_Parser<A>::FDE_Info fdeInfo;
+    typename CFI_Parser<A>::CIE_Info cieInfo;
+    if (!CFI_Parser<A>::decodeFDE(_addressSpace, cachedFDE, &fdeInfo, &cieInfo))
+      if (getInfoFromFdeCie(fdeInfo, cieInfo, pc, 0))
         return;
-      }
-    }
   }
 
   // Lastly, ask AddressSpace object about platform specific ways to locate
   // other FDEs.
   pint_t fde;
   if (_addressSpace.findOtherFDE(pc, fde)) {
-    CFI_Parser<LocalAddressSpace>::FDE_Info fdeInfo;
-    CFI_Parser<LocalAddressSpace>::CIE_Info cieInfo;
+    typename CFI_Parser<A>::FDE_Info fdeInfo;
+    typename CFI_Parser<A>::CIE_Info cieInfo;
     if (!CFI_Parser<A>::decodeFDE(_addressSpace, fde, &fdeInfo, &cieInfo)) {
       // Double check this FDE is for a function that includes the pc.
-      if ((fdeInfo.pcStart <= pc) && (pc < fdeInfo.pcEnd)) {
-        typename CFI_Parser<A>::PrologInfo prolog;
-        if (CFI_Parser<A>::parseFDEInstructions(_addressSpace, fdeInfo, cieInfo,
-                                                pc, R::getArch(), &prolog)) {
-          // save off parsed FDE info
-          _info.start_ip         = fdeInfo.pcStart;
-          _info.end_ip           = fdeInfo.pcEnd;
-          _info.lsda             = fdeInfo.lsda;
-          _info.handler          = cieInfo.personality;
-          _info.gp               = prolog.spExtraArgSize;
-          _info.flags            = 0;
-          _info.format           = dwarfEncoding();
-          _info.unwind_info      = fdeInfo.fdeStart;
-          _info.unwind_info_size = (uint32_t)fdeInfo.fdeLength;
-          _info.extra            = 0;
+      if ((fdeInfo.pcStart <= pc) && (pc < fdeInfo.pcEnd))
+        if (getInfoFromFdeCie(fdeInfo, cieInfo, pc, 0))
           return;
-        }
-      }
     }
   }
 #endif // #if defined(_LIBUNWIND_SUPPORT_DWARF_UNWIND)
@@ -1991,7 +2008,10 @@ int UnwindCursor<A, R>::step() {
 
 template <typename A, typename R>
 void UnwindCursor<A, R>::getInfo(unw_proc_info_t *info) {
-  *info = _info;
+  if (_unwindInfoMissing)
+    memset(info, 0, sizeof(*info));
+  else
+    *info = _info;
 }
 
 template <typename A, typename R>

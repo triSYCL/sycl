@@ -61,7 +61,7 @@ namespace {
         return false;
       MDNode *MaxMD = nullptr;
       auto MaxVer = 0U;
-      for (const auto &VersionMD : NamedMD->operands()) {
+      for (auto VersionMD : NamedMD->operands()) {
         assert(VersionMD->getNumOperands() == 2);
         auto CMajor = mdconst::extract<ConstantInt>(VersionMD->getOperand(0));
         auto VersionMajor = CMajor->getZExtValue();
@@ -94,9 +94,9 @@ namespace {
       return false;
 
     SmallVector<Metadata *, 4> All;
-    for (const auto &MD : NamedMD->operands())
+    for (auto MD : NamedMD->operands())
       for (const auto &Op : MD->operands())
-        if (std::find(All.begin(), All.end(), Op.get()) == All.end())
+        if (!llvm::is_contained(All, Op.get()))
           All.push_back(Op.get());
 
     NamedMD->eraseFromParent();

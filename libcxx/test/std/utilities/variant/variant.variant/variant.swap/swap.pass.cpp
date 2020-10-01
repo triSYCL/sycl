@@ -7,9 +7,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
+// UNSUPPORTED: c++03, c++11, c++14
 
-// XFAIL: dylib-has-no-bad_variant_access && !libcpp-no-exceptions
+// Throwing bad_variant_access is supported starting in macosx10.13
+// XFAIL: with_system_cxx_lib=macosx10.12 && !no-exceptions
+// XFAIL: with_system_cxx_lib=macosx10.11 && !no-exceptions
+// XFAIL: with_system_cxx_lib=macosx10.10 && !no-exceptions
+// XFAIL: with_system_cxx_lib=macosx10.9 && !no-exceptions
 
 // <variant>
 
@@ -22,9 +26,9 @@
 #include <type_traits>
 #include <variant>
 
-#include "test_convertible.hpp"
+#include "test_convertible.h"
 #include "test_macros.h"
-#include "variant_test_helpers.hpp"
+#include "variant_test_helpers.h"
 
 struct NotSwappable {};
 void swap(NotSwappable &, NotSwappable &) = delete;

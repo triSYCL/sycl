@@ -24,23 +24,31 @@ namespace targets {
 // RISC-V Target
 class RISCVTargetInfo : public TargetInfo {
 protected:
-  std::string ABI;
+  std::string ABI, CPU;
   bool HasM;
   bool HasA;
   bool HasF;
   bool HasD;
   bool HasC;
+  bool HasB;
 
 public:
   RISCVTargetInfo(const llvm::Triple &Triple, const TargetOptions &)
       : TargetInfo(Triple), HasM(false), HasA(false), HasF(false),
-        HasD(false), HasC(false) {
+        HasD(false), HasC(false), HasB(false) {
     LongDoubleWidth = 128;
     LongDoubleAlign = 128;
     LongDoubleFormat = &llvm::APFloat::IEEEquad();
     SuitableAlign = 128;
     WCharType = SignedInt;
     WIntType = UnsignedInt;
+  }
+
+  bool setCPU(const std::string &Name) override {
+    if (!isValidCPUName(Name))
+      return false;
+    CPU = Name;
+    return true;
   }
 
   StringRef getABI() const override { return ABI; }
@@ -75,6 +83,8 @@ public:
 
   bool handleTargetFeatures(std::vector<std::string> &Features,
                             DiagnosticsEngine &Diags) override;
+
+  bool hasExtIntType() const override { return true; }
 };
 class LLVM_LIBRARY_VISIBILITY RISCV32TargetInfo : public RISCVTargetInfo {
 public:
@@ -87,12 +97,21 @@ public:
   }
 
   bool setABI(const std::string &Name) override {
-    // TODO: support ilp32f and ilp32d ABIs.
-    if (Name == "ilp32") {
+    if (Name == "ilp32" || Name == "ilp32f" || Name == "ilp32d") {
       ABI = Name;
       return true;
     }
     return false;
+  }
+
+  bool isValidCPUName(StringRef Name) const override;
+  void fillValidCPUList(SmallVectorImpl<StringRef> &Values) const override;
+
+  void setMaxAtomicWidth() override {
+    MaxAtomicPromoteWidth = 128;
+
+    if (HasA)
+      MaxAtomicInlineWidth = 32;
   }
 };
 class LLVM_LIBRARY_VISIBILITY RISCV64TargetInfo : public RISCVTargetInfo {
@@ -105,12 +124,21 @@ public:
   }
 
   bool setABI(const std::string &Name) override {
-    // TODO: support lp64f and lp64d ABIs.
-    if (Name == "lp64") {
+    if (Name == "lp64" || Name == "lp64f" || Name == "lp64d") {
       ABI = Name;
       return true;
     }
     return false;
+  }
+
+  bool isValidCPUName(StringRef Name) const override;
+  void fillValidCPUList(SmallVectorImpl<StringRef> &Values) const override;
+
+  void setMaxAtomicWidth() override {
+    MaxAtomicPromoteWidth = 128;
+
+    if (HasA)
+      MaxAtomicInlineWidth = 64;
   }
 };
 } // namespace targets

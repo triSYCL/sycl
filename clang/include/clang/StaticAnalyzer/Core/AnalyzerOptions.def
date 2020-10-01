@@ -6,7 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 //
-//  This file defines the analyzer options avaible with -analyzer-config.
+//  This file defines the analyzer options avaible with -analyzer-config, using
+//  the ANLAYZER_OPTION and ANALYZER_OPTION_DEPENDS_ON_USER_MODE macros.
+//  Other analyzer options use the simpler ANALYZEROPT and TYPED_ANALYZEROPT
+//  macro.
 //
 //===----------------------------------------------------------------------===//
 
@@ -29,6 +32,15 @@ define both 'ANALYZER_OPTION' and 'ANALYZER_OPTION_DEPENDS_ON_USER_MODE' macros!
 #endif
 #endif
 
+#ifndef TYPED_ANALYZEROPT
+#define TYPED_ANALYZEROPT(TYPE, NAME, DESCRIPTION)
+#endif
+
+#ifndef ANALYZEROPT
+#define ANALYZEROPT(NAME, BITS, DESCRIPTION)                                   \
+  TYPED_ANALYZEROPT(unsigned, NAME, DESCRITPTION)
+#endif
+
 #ifndef ANALYZER_OPTION
 /// Create a new analyzer option, but dont generate a method for it in
 /// AnalyzerOptions.
@@ -42,7 +54,8 @@ define both 'ANALYZER_OPTION' and 'ANALYZER_OPTION_DEPENDS_ON_USER_MODE' macros!
 ///             (-analyzer-config CMDFLAG=VALUE)
 ///   DESC - Description of the flag.
 ///   DEFAULT_VAL - The default value for CMDFLAG.
-#define ANALYZER_OPTION(TYPE, NAME, CMDFLAG, DESC, DEFAULT_VAL)
+#define ANALYZER_OPTION(TYPE, NAME, CMDFLAG, DESC, DEFAULT_VAL)                \
+  TYPED_ANALYZEROPT(TYPE, NAME, DESC)
 #endif
 
 #ifndef ANALYZER_OPTION_DEPENDS_ON_USER_MODE
@@ -62,7 +75,8 @@ define both 'ANALYZER_OPTION' and 'ANALYZER_OPTION_DEPENDS_ON_USER_MODE' macros!
 ///   DEEP_VAL - The default value for CMDFLAG, when "user-mode" was set to
 ///              "deep".
 #define ANALYZER_OPTION_DEPENDS_ON_USER_MODE(TYPE, NAME, CMDFLAG, DESC,        \
-                                             SHALLOW_VAL, DEEP_VAL)
+                                             SHALLOW_VAL, DEEP_VAL)            \
+  TYPED_ANALYZEROPT(TYPE, NAME, DESC)
 #endif
 
 //===----------------------------------------------------------------------===//
@@ -111,6 +125,12 @@ ANALYZER_OPTION(bool, ShouldIncludeRichConstructorsInCFG,
 ANALYZER_OPTION(
     bool, ShouldIncludeScopesInCFG, "cfg-scopes",
     "Whether or not scope information should be included in the CFG.", false)
+
+ANALYZER_OPTION(bool, ShouldIncludeDefaultInitForAggregates,
+                "cfg-expand-default-aggr-inits",
+                "Whether or not inline CXXDefaultInitializers for aggregate "
+                "initialization in the CFG.",
+                false)
 
 ANALYZER_OPTION(
     bool, MayInlineTemplateFunctions, "c++-template-inlining",
@@ -294,23 +314,38 @@ ANALYZER_OPTION(bool, DisplayCTUProgress, "display-ctu-progress",
 ANALYZER_OPTION(bool, ShouldTrackConditions, "track-conditions",
                 "Whether to track conditions that are a control dependency of "
                 "an already tracked variable.",
-                false)
+                true)
 
 ANALYZER_OPTION(bool, ShouldTrackConditionsDebug, "track-conditions-debug",
                 "Whether to place an event at each tracked condition.",
                 false)
 
+ANALYZER_OPTION(bool, ShouldApplyFixIts, "apply-fixits",
+                "Apply the fix-it hints to the files",
+                false)
+
+ANALYZER_OPTION(bool, ShouldDisplayCheckerNameForText, "display-checker-name",
+                "Display the checker name for textual outputs",
+                true)
+
+//===----------------------------------------------------------------------===//
+// Unsigned analyzer options.
+//===----------------------------------------------------------------------===//
+
 ANALYZER_OPTION(unsigned, CTUImportThreshold, "ctu-import-threshold",
                 "The maximal amount of translation units that is considered "
                 "for import when inlining functions during CTU analysis. "
-                "Lowering this threshold can alleviate the memory burder of "
+                "Lowering this threshold can alleviate the memory burden of "
                 "analysis with many interdependent definitions located in "
-                "various translation units.",
-                100u)
+                "various translation units. This is valid only for non C++ "
+                "source files.",
+                24u)
 
-//===----------------------------------------------------------------------===//
-// Unsinged analyzer options.
-//===----------------------------------------------------------------------===//
+ANALYZER_OPTION(unsigned, CTUImportCppThreshold, "ctu-import-cpp-threshold",
+                "The maximal amount of translation units that is considered "
+                "for import when inlining functions during CTU analysis of C++ "
+                "source files.",
+                8u)
 
 ANALYZER_OPTION(
     unsigned, AlwaysInlineSize, "ipa-always-inline-size",
@@ -364,8 +399,23 @@ ANALYZER_OPTION(StringRef, CTUDir, "ctu-dir",
                 "The directory containing the CTU related files.", "")
 
 ANALYZER_OPTION(StringRef, CTUIndexName, "ctu-index-name",
-                "the name of the file containing the CTU index of definitions.",
+                "The name of the file containing the CTU index of definitions. "
+                "The index file maps USR-names to identifiers. An identifier "
+                "can end with an '.ast' suffix, indicating the indentifier is "
+                "a path to a pch-dump. Otherwise the identifier is regarded as "
+                "path to a source file which is parsed on-demand. Relative "
+                "paths are prefixed with ctu-dir, absolute paths are used "
+                "unmodified during lookup.",
                 "externalDefMap.txt")
+
+ANALYZER_OPTION(
+    StringRef, CTUInvocationList, "ctu-invocation-list",
+    "The path to the YAML format file containing a mapping from source file "
+    "paths to command-line invocations represented as a list of arguments. "
+    "This invocation is used produce the source-file's AST in case on-demand "
+    "loading is performed. Example file-content: "
+    "{/main.cpp: [clang++, /main.cpp], other.cpp: [clang++, /other.cpp]}",
+    "invocations.yaml")
 
 ANALYZER_OPTION(
     StringRef, ModelPath, "model-path",
@@ -380,12 +430,6 @@ ANALYZER_OPTION(
     "Value: \"constructors\", \"destructors\", \"methods\".",
     "destructors")
 
-ANALYZER_OPTION_DEPENDS_ON_USER_MODE(
-    StringRef, IPAMode, "ipa",
-    "Controls the mode of inter-procedural analysis. Value: \"none\", "
-    "\"basic-inlining\", \"inlining\", \"dynamic\", \"dynamic-bifurcate\".",
-    /* SHALLOW_VAL */ "inlining", /* DEEP_VAL */ "dynamic-bifurcate")
-
 ANALYZER_OPTION(
     StringRef, ExplorationStrategy, "exploration_strategy",
     "Value: \"dfs\", \"bfs\", \"unexplored_first\", "
@@ -393,5 +437,91 @@ ANALYZER_OPTION(
     "\"bfs_block_dfs_contents\".",
     "unexplored_first_queue")
 
+ANALYZER_OPTION(
+    StringRef, RawSilencedCheckersAndPackages, "silence-checkers",
+    "A semicolon separated list of checker and package names to silence. "
+    "Silenced checkers will not emit reports, but the modeling remain enabled.",
+    "")
+
+ANALYZER_OPTION_DEPENDS_ON_USER_MODE(
+    StringRef, IPAMode, "ipa",
+    "Controls the mode of inter-procedural analysis. Value: \"none\", "
+    "\"basic-inlining\", \"inlining\", \"dynamic\", \"dynamic-bifurcate\".",
+    /* SHALLOW_VAL */ "inlining", /* DEEP_VAL */ "dynamic-bifurcate")
+
+//===----------------------------------------------------------------------===//
+// Other analyzer options.
+//===----------------------------------------------------------------------===//
+
+TYPED_ANALYZEROPT(CheckersAndPackagesTy, CheckersAndPackages,
+                  "Pairs of checker/package name and enable/disable.")
+
+TYPED_ANALYZEROPT(
+    std::vector<std::string>, SilencedCheckersAndPackages,
+    "Vector of checker/package names which will not emit warnings.")
+
+TYPED_ANALYZEROPT(ConfigTable, Config,
+                  "A key-value table of use-specified configuration values.")
+TYPED_ANALYZEROPT(AnalysisStores, AnalysisStoreOpt, "")
+TYPED_ANALYZEROPT(AnalysisConstraints, AnalysisConstraintsOpt, "")
+TYPED_ANALYZEROPT(AnalysisDiagClients, AnalysisDiagOpt, "")
+TYPED_ANALYZEROPT(AnalysisPurgeMode, AnalysisPurgeOpt, "")
+
+TYPED_ANALYZEROPT(std::string, AnalyzeSpecificFunction, "")
+
+TYPED_ANALYZEROPT(std::string, DumpExplodedGraphTo,
+                  "File path to which the exploded graph should be dumped.")
+
+TYPED_ANALYZEROPT(std::string, FullCompilerInvocation,
+                  "Store full compiler invocation for reproducible "
+                  "instructions in the generated report.")
+
+TYPED_ANALYZEROPT(unsigned, maxBlockVisitOnPath,
+                  "The maximum number of times the analyzer visits a block.")
+
+ANALYZEROPT(
+    DisableAllCheckers, 1,
+    "Disable all analyzer checkers. This flag allows one to disable analyzer "
+    "checkers on the code processed by the given analysis consumer. Note, the "
+    "code will get parsed and the command-line options will get checked.")
+
+ANALYZEROPT(ShowCheckerHelp, 1, "")
+ANALYZEROPT(ShowCheckerHelpAlpha, 1, "")
+ANALYZEROPT(ShowCheckerHelpDeveloper, 1, "")
+
+ANALYZEROPT(ShowCheckerOptionList, 1, "")
+ANALYZEROPT(ShowCheckerOptionAlphaList, 1, "")
+ANALYZEROPT(ShowCheckerOptionDeveloperList, 1, "")
+
+ANALYZEROPT(ShowEnabledCheckerList, 1, "")
+ANALYZEROPT(ShowConfigOptionsList, 1, "")
+ANALYZEROPT(ShouldEmitErrorsOnInvalidConfigValue, 1, "")
+ANALYZEROPT(AnalyzeAll, 1, "")
+ANALYZEROPT(AnalyzerDisplayProgress, 1, "")
+ANALYZEROPT(AnalyzeNestedBlocks, 1, "")
+
+ANALYZEROPT(eagerlyAssumeBinOpBifurcation, 1, "")
+
+ANALYZEROPT(TrimGraph, 1, "")
+ANALYZEROPT(visualizeExplodedGraphWithGraphViz, 1, "")
+ANALYZEROPT(UnoptimizedCFG, 1, "")
+ANALYZEROPT(PrintStats, 1, "")
+
+ANALYZEROPT(
+    NoRetryExhausted, 1,
+    "Do not re-analyze paths leading to exhausted nodes with a different "
+    "strategy. We get better code coverage when retry is enabled.")
+
+ANALYZEROPT(AnalyzerWerror, 1, "Emit analyzer warnings as errors.")
+
+TYPED_ANALYZEROPT(unsigned, InlineMaxStackDepth,
+                  "The inlining stack depth limit. Cap the stack depth at 4 "
+                  "calls (5 stack frames, base + 4 calls).")
+
+TYPED_ANALYZEROPT(AnalysisInliningMode, InliningMode,
+                  "The mode of function selection used during inlining.")
+
 #undef ANALYZER_OPTION_DEPENDS_ON_USER_MODE
 #undef ANALYZER_OPTION
+#undef TYPED_ANALYZEROPT
+#undef ANALYZEROPT

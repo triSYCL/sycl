@@ -3,11 +3,13 @@ set(LLVM_LINK_COMPONENTS
   )
 
 add_llvm_unittest(SupportTests
+  AlignmentTest.cpp
   AlignOfTest.cpp
   AllocatorTest.cpp
   AnnotationsTest.cpp
   ARMAttributeParser.cpp
   ArrayRecyclerTest.cpp
+  Base64Test.cpp
   BinaryStreamTest.cpp
   BlockFrequencyTest.cpp
   BranchProbabilityTest.cpp
@@ -26,14 +28,18 @@ add_llvm_unittest(SupportTests
   DJBTest.cpp
   EndianStreamTest.cpp
   EndianTest.cpp
+  ELFAttributeParserTest.cpp
   ErrnoTest.cpp
   ErrorOrTest.cpp
   ErrorTest.cpp
-  FileCheckTest.cpp
+  ExtensibleRTTITest.cpp
+  FileCollectorTest.cpp
   FileOutputBufferTest.cpp
+  FileUtilitiesTest.cpp
   FormatVariadicTest.cpp
   GlobPatternTest.cpp
   Host.cpp
+  IndexedAccessorTest.cpp
   ItaniumManglingCanonicalizerTest.cpp
   JSONTest.cpp
   KnownBitsTest.cpp
@@ -47,17 +53,21 @@ add_llvm_unittest(SupportTests
   MemoryBufferTest.cpp
   MemoryTest.cpp
   NativeFormatTests.cpp
+  OptimizedStructLayoutTest.cpp
   ParallelTest.cpp
   Path.cpp
   ProcessTest.cpp
   ProgramTest.cpp
+  PropertySetIOTest.cpp
   RegexTest.cpp
   ReverseIterationTest.cpp
   ReplaceFileTest.cpp
+  RISCVAttributeParserTest.cpp
   ScaledNumberTest.cpp
+  SimpleTableTest.cpp
   SourceMgrTest.cpp
   SpecialCaseListTest.cpp
-  StringPool.cpp
+  SuffixTreeTest.cpp
   SwapByteOrderTest.cpp
   SymbolRemappingReaderTest.cpp
   TarWriterTest.cpp
@@ -67,6 +77,7 @@ add_llvm_unittest(SupportTests
   ThreadPool.cpp
   Threading.cpp
   TimerTest.cpp
+  ToolOutputFileTest.cpp
   TypeNameTest.cpp
   TypeTraitsTest.cpp
   TrailingObjectsTest.cpp
@@ -74,6 +85,7 @@ add_llvm_unittest(SupportTests
   UnicodeTest.cpp
   VersionTupleTest.cpp
   VirtualFileSystemTest.cpp
+  WithColorTest.cpp
   YAMLIOTest.cpp
   YAMLParserTest.cpp
   formatted_raw_ostream_test.cpp

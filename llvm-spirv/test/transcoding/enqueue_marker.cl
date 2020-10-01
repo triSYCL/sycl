@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -triple spir-unknown-unknown -finclude-default-header -O0 -cl-std=CL2.0 -emit-llvm-bc %s -o %t.bc
+// RUN: %clang_cc1 -triple spir-unknown-unknown -fdeclare-opencl-builtins -finclude-default-header -O0 -cl-std=CL2.0 -emit-llvm-bc %s -o %t.bc
 // RUN: llvm-spirv %t.bc -spirv-text -o %t.spv.txt
 // RUN: FileCheck < %t.spv.txt %s --check-prefix=CHECK-SPIRV
 // RUN: llvm-spirv %t.bc -o %t.spv
@@ -11,6 +11,6 @@ kernel void test_enqueue_marker(global int *out) {
   clk_event_t waitlist, evt;
 
   // CHECK-SPIRV: EnqueueMarker
-  // CHECK-LLVM: _Z14enqueue_marker9ocl_queuejPK12ocl_clkeventPS0_
+  // CHECK-LLVM: _Z14enqueue_marker9ocl_queuejPU3AS4K12ocl_clkeventPU3AS4S0_
   *out = enqueue_marker(queue, 1, &waitlist, &evt);
 }

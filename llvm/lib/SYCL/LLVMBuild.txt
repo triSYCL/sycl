@@ -22,6 +22,7 @@ subdirectories =
   XOCCIRDowngrader
 
 [component_0]
-type = Group
+type = Library
 name = SYCL
 parent = Libraries
+required_libraries = Passes Core Support TransformUtils Demangle Analysis

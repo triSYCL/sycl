@@ -1,7 +1,6 @@
-// RUN: %clang -std=c++17 -fsycl %s -o %t.out -lstdc++ -lOpenCL -lsycl
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
 //
-// Profiling info is not supported on host device so far.
-//
+// RUN: env SYCL_DEVICE_TYPE=HOST %t.out
 // RUN: %CPU_RUN_PLACEHOLDER %t.out
 // RUN: %GPU_RUN_PLACEHOLDER %t.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
@@ -14,21 +13,63 @@
 //===----------------------------------------------------------------------===//
 
 #include <CL/sycl.hpp>
+#include <cassert>
 
-using namespace cl;
+using namespace cl::sycl;
+
+bool verifyProfiling(event Event) {
+  auto Submit =
+      Event.get_profiling_info<sycl::info::event_profiling::command_submit>();
+  auto Start =
+      Event.get_profiling_info<sycl::info::event_profiling::command_start>();
+  auto End =
+      Event.get_profiling_info<sycl::info::event_profiling::command_end>();
+
+  assert(Submit <= Start);
+  assert(Start <= End);
+
+  bool Pass = sycl::info::event_command_status::complete ==
+              Event.get_info<sycl::info::event::command_execution_status>();
+
+  return Pass;
+}
 
 // The test checks that get_profiling_info waits for command asccociated with
 // event to complete execution.
 int main() {
-  sycl::queue Q{sycl::property::queue::enable_profiling()};
-  sycl::event Event = Q.submit([&](sycl::handler &CGH) {
-    CGH.single_task<class EmptyKernel>([=]() {});
-  });
+  const size_t Size = 10000;
+  int Data[Size] = {0};
+  for (size_t I = 0; I < Size; ++I) {
+    Data[I] = I;
+  }
+  int Values[Size] = {0};
 
-  Event.get_profiling_info<sycl::info::event_profiling::command_start>();
+  {
+    buffer<int, 1> BufferFrom(Data, range<1>(Size));
+    buffer<int, 1> BufferTo(Values, range<1>(Size));
 
-  bool Fail = sycl::info::event_command_status::complete !=
-              Event.get_info<sycl::info::event::command_execution_status>();
+    // buffer copy
+    queue copyQueue{sycl::property::queue::enable_profiling()};
+    event copyEvent = copyQueue.submit([&](sycl::handler &Cgh) {
+      accessor<int, 1, access::mode::read, access::target::global_buffer>
+          AccessorFrom(BufferFrom, Cgh, range<1>(Size));
+      accessor<int, 1, access::mode::write, access::target::global_buffer>
+          AccessorTo(BufferTo, Cgh, range<1>(Size));
+      Cgh.copy(AccessorFrom, AccessorTo);
+    });
 
-  return Fail;
+    // kernel launch
+    queue kernelQueue{sycl::property::queue::enable_profiling()};
+    event kernelEvent = kernelQueue.submit([&](sycl::handler &CGH) {
+      CGH.single_task<class EmptyKernel>([=]() {});
+    });
+
+    assert(verifyProfiling(copyEvent) && verifyProfiling(kernelEvent));
+  }
+
+  for (size_t I = 0; I < Size; ++I) {
+    assert(Data[I] == Values[I]);
+  }
+
+  return 0;
 }

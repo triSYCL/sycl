@@ -75,6 +75,9 @@ public:
   SPIRVWord getStructMemberCount() const;
   SPIRVWord getVectorComponentCount() const;
   SPIRVType *getVectorComponentType() const;
+  SPIRVWord getMatrixColumnCount() const;
+  SPIRVType *getMatrixColumnType() const;
+  SPIRVType *getScalarType() const;
 
   bool isTypeVoid() const;
   bool isTypeArray() const;
@@ -152,20 +155,40 @@ public:
     case 16:
       CV.push_back(CapabilityInt16);
       break;
+    case 32:
+      break;
     case 64:
       CV.push_back(CapabilityInt64);
       break;
     default:
-      break;
+      if (Module->isAllowedToUseExtension(
+              ExtensionID::SPV_INTEL_arbitrary_precision_integers))
+        CV.push_back(CapabilityArbitraryPrecisionIntegersINTEL);
     }
     return CV;
+  }
+  llvm::Optional<ExtensionID> getRequiredExtension() const override {
+    switch (BitWidth) {
+    case 8:
+    case 16:
+    case 32:
+    case 64:
+      return {};
+    default:
+      return ExtensionID::SPV_INTEL_arbitrary_precision_integers;
+    }
   }
 
 protected:
   _SPIRV_DEF_ENCDEC3(Id, BitWidth, IsSigned)
   void validate() const override {
     SPIRVEntry::validate();
-    assert(BitWidth > 1 && BitWidth <= 64 && "Invalid bit width");
+    assert(BitWidth > 1 &&
+           (BitWidth <= 64 ||
+            (Module->isAllowedToUseExtension(
+                 ExtensionID::SPV_INTEL_arbitrary_precision_integers) &&
+             BitWidth <= 1024)) &&
+           "Invalid bit width");
   }
 
 private:
@@ -188,7 +211,7 @@ public:
     SPIRVCapVec CV;
     if (isTypeFloat(16)) {
       CV.push_back(CapabilityFloat16Buffer);
-      auto Extensions = getModule()->getExtension();
+      auto Extensions = getModule()->getSourceExtension();
       if (std::any_of(Extensions.begin(), Extensions.end(),
                       [](const std::string &I) { return I == "cl_khr_fp16"; }))
         CV.push_back(CapabilityFloat16);
@@ -287,8 +310,13 @@ public:
     SPIRVCapVec V(getComponentType()->getRequiredCapability());
     // Even though the capability name is "Vector16", it describes
     // usage of 8-component or 16-component vectors.
-    if (CompCount >= 8)
+    if (CompCount == 8 || CompCount == 16)
       V.push_back(CapabilityVector16);
+
+    if (Module->isAllowedToUseExtension(ExtensionID::SPV_INTEL_vector_compute))
+      if (CompCount == 1 || (CompCount > 4 && CompCount < 8) ||
+          (CompCount > 8 && CompCount < 16) || CompCount > 16)
+        V.push_back(CapabilityVectorAnyINTEL);
     return V;
   }
 
@@ -301,8 +329,13 @@ protected:
   void validate() const override {
     SPIRVEntry::validate();
     CompType->validate();
-    assert(CompCount == 2 || CompCount == 3 || CompCount == 4 ||
-           CompCount == 8 || CompCount == 16);
+#ifndef NDEBUG
+    if (!(Module->isAllowedToUseExtension(
+            ExtensionID::SPV_INTEL_vector_compute))) {
+      assert(CompCount == 2 || CompCount == 3 || CompCount == 4 ||
+             CompCount == 8 || CompCount == 16);
+    }
+#endif // !NDEBUG
   }
 
 private:
@@ -310,7 +343,48 @@ private:
   SPIRVWord CompCount; // Component Count
 };
 
-class SPIRVConstant;
+class SPIRVTypeMatrix : public SPIRVType {
+public:
+  // Complete constructor
+  SPIRVTypeMatrix(SPIRVModule *M, SPIRVId TheId, SPIRVType *TheColType,
+                  SPIRVWord TheColCount)
+      : SPIRVType(M, 4, OpTypeMatrix, TheId), ColType(TheColType),
+        ColCount(TheColCount) {
+    validate();
+  }
+  // Incomplete constructor
+  SPIRVTypeMatrix() : SPIRVType(OpTypeMatrix), ColType(nullptr), ColCount(0) {}
+
+  SPIRVType *getColumnType() const { return ColType; }
+  SPIRVWord getColumnCount() const { return ColCount; }
+
+  bool isValidIndex(SPIRVWord Index) const { return Index < ColCount; }
+
+  SPIRVCapVec getRequiredCapability() const override {
+    SPIRVCapVec V(getColumnType()->getRequiredCapability());
+    if (ColCount >= 8)
+      V.push_back(CapabilityVector16);
+    return V;
+  }
+
+  virtual std::vector<SPIRVEntry *> getNonLiteralOperands() const override {
+    return std::vector<SPIRVEntry *>(1, ColType);
+  }
+
+  void validate() const override {
+    SPIRVEntry::validate();
+    ColType->validate();
+    assert(ColCount >= 2);
+  }
+
+protected:
+  _SPIRV_DEF_ENCDEC3(Id, ColType, ColCount)
+
+private:
+  SPIRVType *ColType; // Column Type
+  SPIRVWord ColCount; // Column Count
+};
+
 class SPIRVTypeArray : public SPIRVType {
 public:
   // Complete constructor
@@ -755,6 +829,51 @@ bool isType(const T1 *Ty, unsigned Bits = 0) {
   return static_cast<const T2 *>(Ty)->getBitWidth() == Bits;
 }
 
+class SPIRVTypeBufferSurfaceINTEL : public SPIRVType {
+public:
+  const static Op OC = OpTypeBufferSurfaceINTEL;
+  const static SPIRVWord FixedWC = 2;
+  SPIRVTypeBufferSurfaceINTEL(SPIRVModule *M, SPIRVId TheId,
+                              SPIRVAccessQualifierKind TheAccess)
+      : SPIRVType(M, FixedWC + 1, OC, TheId), AccessKind(TheAccess) {
+    validate();
+  }
+  SPIRVTypeBufferSurfaceINTEL(SPIRVModule *M, SPIRVId TheId)
+      : SPIRVType(M, FixedWC, OC, TheId) {
+    validate();
+  }
+  SPIRVTypeBufferSurfaceINTEL() : SPIRVType(OC) {}
+
+  SPIRVCapVec getRequiredCapability() const override {
+    return getVec(CapabilityVectorComputeINTEL);
+  }
+
+  llvm::Optional<ExtensionID> getRequiredExtension() const override {
+    return {ExtensionID::SPV_INTEL_vector_compute};
+  }
+
+  bool hasAccessQualifier() const { return AccessKind.hasValue(); }
+  SPIRVAccessQualifierKind getAccessQualifier() const {
+    assert(hasAccessQualifier());
+    return AccessKind.getValue();
+  }
+
+protected:
+  _SPIRV_DEF_ENCDEC2(Id, AccessKind)
+  void validate() const override {
+    assert(OpCode == OC);
+    assert(WordCount == FixedWC + (AccessKind ? 1 : 0));
+  }
+  void setWordCount(SPIRVWord TheWC) override {
+    if (TheWC > FixedWC)
+      AccessKind = SPIRVAccessQualifierKind::AccessQualifierMax;
+    WordCount = TheWC;
+  }
+
+private:
+  llvm::Optional<SPIRVAccessQualifierKind> AccessKind;
+};
+
 // SPV_INTEL_device_side_avc_motion_estimation extension types
 class SPIRVTypeVmeImageINTEL : public SPIRVType {
 public:
@@ -779,8 +898,8 @@ public:
     return getVec(CapabilitySubgroupAvcMotionEstimationINTEL);
   }
 
-  SPIRVExtSet getRequiredExtensions() const override {
-    return getSet(SPV_INTEL_device_side_avc_motion_estimation);
+  llvm::Optional<ExtensionID> getRequiredExtension() const override {
+    return ExtensionID::SPV_INTEL_device_side_avc_motion_estimation;
   }
 
 protected:
@@ -834,8 +953,8 @@ public:
     return getVec(CapabilitySubgroupAvcMotionEstimationINTEL);
   }
 
-  SPIRVExtSet getRequiredExtensions() const override {
-    return getSet(SPV_INTEL_device_side_avc_motion_estimation);
+  llvm::Optional<ExtensionID> getRequiredExtension() const override {
+    return ExtensionID::SPV_INTEL_device_side_avc_motion_estimation;
   }
 
   SPIRVValue *getOperand() { return getValue(Opn); }

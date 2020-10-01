@@ -1,4 +1,4 @@
-//===-- NativeThreadLinux.cpp --------------------------------- -*- C++ -*-===//
+//===-- NativeThreadLinux.cpp ---------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -99,7 +99,7 @@ std::string NativeThreadLinux::GetName() {
   auto BufferOrError = getProcFile(process.GetID(), GetID(), "comm");
   if (!BufferOrError)
     return "";
-  return BufferOrError.get()->getBuffer().rtrim('\n');
+  return std::string(BufferOrError.get()->getBuffer().rtrim('\n'));
 }
 
 lldb::StateType NativeThreadLinux::GetState() { return m_state; }
@@ -133,9 +133,10 @@ bool NativeThreadLinux::GetStopReason(ThreadStopInfo &stop_info,
   case eStateStepping:
   case eStateDetached:
     if (log) {
-      log->Printf("NativeThreadLinux::%s tid %" PRIu64
-                  " in state %s cannot answer stop reason",
-                  __FUNCTION__, GetID(), StateAsCString(m_state));
+      LLDB_LOGF(log,
+                "NativeThreadLinux::%s tid %" PRIu64
+                " in state %s cannot answer stop reason",
+                __FUNCTION__, GetID(), StateAsCString(m_state));
     }
     return false;
   }
@@ -273,9 +274,8 @@ Status NativeThreadLinux::SingleStep(uint32_t signo) {
 void NativeThreadLinux::SetStoppedBySignal(uint32_t signo,
                                            const siginfo_t *info) {
   Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_THREAD));
-  if (log)
-    log->Printf("NativeThreadLinux::%s called with signal 0x%02" PRIx32,
-                __FUNCTION__, signo);
+  LLDB_LOGF(log, "NativeThreadLinux::%s called with signal 0x%02" PRIx32,
+            __FUNCTION__, signo);
 
   SetStopped();
 
@@ -319,6 +319,9 @@ void NativeThreadLinux::SetStopped() {
   if (m_state == StateType::eStateStepping)
     m_step_workaround.reset();
 
+  // On every stop, clear any cached register data structures
+  GetRegisterContext().InvalidateAllRegisters();
+
   const StateType new_state = StateType::eStateStopped;
   MaybeLogStateChange(new_state);
   m_state = new_state;
@@ -327,8 +330,7 @@ void NativeThreadLinux::SetStopped() {
 
 void NativeThreadLinux::SetStoppedByExec() {
   Log *log(GetLogIfAllCategoriesSet(LIBLLDB_LOG_THREAD));
-  if (log)
-    log->Printf("NativeThreadLinux::%s()", __FUNCTION__);
+  LLDB_LOGF(log, "NativeThreadLinux::%s()", __FUNCTION__);
 
   SetStopped();
 
@@ -412,19 +414,19 @@ Status NativeThreadLinux::RequestStop() {
   lldb::pid_t pid = process.GetID();
   lldb::tid_t tid = GetID();
 
-  if (log)
-    log->Printf("NativeThreadLinux::%s requesting thread stop(pid: %" PRIu64
-                ", tid: %" PRIu64 ")",
-                __FUNCTION__, pid, tid);
+  LLDB_LOGF(log,
+            "NativeThreadLinux::%s requesting thread stop(pid: %" PRIu64
+            ", tid: %" PRIu64 ")",
+            __FUNCTION__, pid, tid);
 
   Status err;
   errno = 0;
   if (::tgkill(pid, tid, SIGSTOP) != 0) {
     err.SetErrorToErrno();
-    if (log)
-      log->Printf("NativeThreadLinux::%s tgkill(%" PRIu64 ", %" PRIu64
-                  ", SIGSTOP) failed: %s",
-                  __FUNCTION__, pid, tid, err.AsCString());
+    LLDB_LOGF(log,
+              "NativeThreadLinux::%s tgkill(%" PRIu64 ", %" PRIu64
+              ", SIGSTOP) failed: %s",
+              __FUNCTION__, pid, tid, err.AsCString());
   }
 
   return err;

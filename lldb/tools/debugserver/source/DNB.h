@@ -10,8 +10,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef __DNB_h__
-#define __DNB_h__
+#ifndef LLDB_TOOLS_DEBUGSERVER_SOURCE_DNB_H
+#define LLDB_TOOLS_DEBUGSERVER_SOURCE_DNB_H
 
 #include "DNBDefs.h"
 #include "JSONGenerator.h"
@@ -20,11 +20,17 @@
 #include "MacOSX/ThreadInfo.h"
 #include <mach/thread_info.h>
 #include <string>
+#include <Availability.h>
+#include <mach/machine.h>
 
 #define DNB_EXPORT __attribute__((visibility("default")))
 
 #ifndef CPU_TYPE_ARM64
 #define CPU_TYPE_ARM64 ((cpu_type_t)12 | 0x01000000)
+#endif
+
+#ifndef CPU_TYPE_ARM64_32
+#define CPU_TYPE_ARM64_32 ((cpu_type_t)12 | 0x02000000)
 #endif
 
 typedef bool (*DNBShouldCancelCallback)(void *);
@@ -122,12 +128,12 @@ nub_bool_t DNBProcessSharedLibrariesUpdated(nub_process_t pid) DNB_EXPORT;
 nub_size_t
 DNBProcessGetSharedLibraryInfo(nub_process_t pid, nub_bool_t only_changed,
                                DNBExecutableImageInfo **image_infos) DNB_EXPORT;
-const char *DNBGetDeploymentInfo(nub_process_t pid,
-                                 const struct load_command& lc,
+const char *DNBGetDeploymentInfo(nub_process_t pid, bool is_executable,
+                                 const struct load_command &lc,
                                  uint64_t load_command_address,
-                                 uint32_t& major_version,
-                                 uint32_t& minor_version,
-                                 uint32_t& patch_version);
+                                 uint32_t &major_version,
+                                 uint32_t &minor_version,
+                                 uint32_t &patch_version);
 nub_bool_t DNBProcessSetNameToAddressCallback(nub_process_t pid,
                                               DNBCallbackNameToAddress callback,
                                               void *baton) DNB_EXPORT;
@@ -144,6 +150,7 @@ nub_size_t DNBProcessGetAvailableProfileData(nub_process_t pid, char *buf,
                                              nub_size_t buf_size) DNB_EXPORT;
 nub_size_t DNBProcessGetStopCount(nub_process_t pid) DNB_EXPORT;
 uint32_t DNBProcessGetCPUType(nub_process_t pid) DNB_EXPORT;
+size_t DNBGetAllInfos(std::vector<struct kinfo_proc> &proc_infos);
 
 // Process executable and arguments
 const char *DNBProcessGetExecutablePath(nub_process_t pid);
@@ -226,5 +233,6 @@ const char *DNBStateAsString(nub_state_t state);
 nub_bool_t DNBResolveExecutablePath(const char *path, char *resolved_path,
                                     size_t resolved_path_size);
 bool DNBGetOSVersionNumbers(uint64_t *major, uint64_t *minor, uint64_t *patch);
-
+/// \return the iOSSupportVersion of the host OS.
+std::string DNBGetMacCatalystVersionString();
 #endif

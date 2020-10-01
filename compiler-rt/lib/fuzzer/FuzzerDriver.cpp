@@ -16,6 +16,7 @@
 #include "FuzzerInternal.h"
 #include "FuzzerMerge.h"
 #include "FuzzerMutate.h"
+#include "FuzzerPlatform.h"
 #include "FuzzerRandom.h"
 #include "FuzzerTracePC.h"
 #include <algorithm>
@@ -32,7 +33,11 @@
 // binary can test for its existence.
 #if LIBFUZZER_MSVC
 extern "C" void __libfuzzer_is_present() {}
+#if defined(_M_IX86) || defined(__i386__)
+#pragma comment(linker, "/include:___libfuzzer_is_present")
+#else
 #pragma comment(linker, "/include:__libfuzzer_is_present")
+#endif
 #else
 extern "C" __attribute__((used)) void __libfuzzer_is_present() {}
 #endif  // LIBFUZZER_MSVC
@@ -195,8 +200,11 @@ static void ParseFlags(const Vector<std::string> &Args,
   }
 
   // Disable len_control by default, if LLVMFuzzerCustomMutator is used.
-  if (EF->LLVMFuzzerCustomMutator)
+  if (EF->LLVMFuzzerCustomMutator) {
     Flags.len_control = 0;
+    Printf("INFO: found LLVMFuzzerCustomMutator (%p). "
+           "Disabling -len_control by default.\n", EF->LLVMFuzzerCustomMutator);
+  }
 
   Inputs = new Vector<std::string>;
   for (size_t A = 1; A < Args.size(); A++) {
@@ -242,6 +250,13 @@ static void WorkerThread(const Command &BaseCmd, std::atomic<unsigned> *Counter,
   }
 }
 
+static void ValidateDirectoryExists(const std::string &Path) {
+  if (!Path.empty() && !IsDirectory(Path)) {
+    Printf("ERROR: The required directory \"%s\" does not exist\n", Path.c_str());
+    exit(1);
+  }
+}
+
 std::string CloneArgsWithoutX(const Vector<std::string> &Args,
                               const char *X1, const char *X2) {
   std::string Cmd;
@@ -280,7 +295,8 @@ static void RssThread(Fuzzer *F, size_t RssLimitMb) {
 }
 
 static void StartRssThread(Fuzzer *F, size_t RssLimitMb) {
-  if (!RssLimitMb) return;
+  if (!RssLimitMb)
+    return;
   std::thread T(RssThread, F, RssLimitMb);
   T.detach();
 }
@@ -302,8 +318,7 @@ static bool AllInputsAreFiles() {
   return true;
 }
 
-static std::string GetDedupTokenFromFile(const std::string &Path) {
-  auto S = FileToString(Path);
+static std::string GetDedupTokenFromCmdOutput(const std::string &S) {
   auto Beg = S.find("DEDUP_TOKEN:");
   if (Beg == std::string::npos)
     return "";
@@ -328,10 +343,9 @@ int CleanseCrashInput(const Vector<std::string> &Args,
   assert(Cmd.hasArgument(InputFilePath));
   Cmd.removeArgument(InputFilePath);
 
-  auto LogFilePath = TempPath(".txt");
-  auto TmpFilePath = TempPath(".repro");
+  auto TmpFilePath = TempPath("CleanseCrashInput", ".repro");
   Cmd.addArgument(TmpFilePath);
-  Cmd.setOutputFile(LogFilePath);
+  Cmd.setOutputFile(getDevNull());
   Cmd.combineOutAndErr();
 
   std::string CurrentFilePath = InputFilePath;
@@ -366,7 +380,6 @@ int CleanseCrashInput(const Vector<std::string> &Args,
     }
     if (!Changed) break;
   }
-  RemoveFile(LogFilePath);
   return 0;
 }
 
@@ -389,8 +402,6 @@ int MinimizeCrashInput(const Vector<std::string> &Args,
     BaseCmd.addFlag("max_total_time", "600");
   }
 
-  auto LogFilePath = TempPath(".txt");
-  BaseCmd.setOutputFile(LogFilePath);
   BaseCmd.combineOutAndErr();
 
   std::string CurrentFilePath = InputFilePath;
@@ -402,17 +413,17 @@ int MinimizeCrashInput(const Vector<std::string> &Args,
     Command Cmd(BaseCmd);
     Cmd.addArgument(CurrentFilePath);
 
-    std::string CommandLine = Cmd.toString();
-    Printf("CRASH_MIN: executing: %s\n", CommandLine.c_str());
-    int ExitCode = ExecuteCommand(Cmd);
-    if (ExitCode == 0) {
+    Printf("CRASH_MIN: executing: %s\n", Cmd.toString().c_str());
+    std::string CmdOutput;
+    bool Success = ExecuteCommand(Cmd, &CmdOutput);
+    if (Success) {
       Printf("ERROR: the input %s did not crash\n", CurrentFilePath.c_str());
       exit(1);
     }
     Printf("CRASH_MIN: '%s' (%zd bytes) caused a crash. Will try to minimize "
            "it further\n",
            CurrentFilePath.c_str(), U.size());
-    auto DedupToken1 = GetDedupTokenFromFile(LogFilePath);
+    auto DedupToken1 = GetDedupTokenFromCmdOutput(CmdOutput);
     if (!DedupToken1.empty())
       Printf("CRASH_MIN: DedupToken1: %s\n", DedupToken1.c_str());
 
@@ -422,11 +433,11 @@ int MinimizeCrashInput(const Vector<std::string> &Args,
             : Options.ArtifactPrefix + "minimized-from-" + Hash(U);
     Cmd.addFlag("minimize_crash_internal_step", "1");
     Cmd.addFlag("exact_artifact_path", ArtifactPath);
-    CommandLine = Cmd.toString();
-    Printf("CRASH_MIN: executing: %s\n", CommandLine.c_str());
-    ExitCode = ExecuteCommand(Cmd);
-    CopyFileToErr(LogFilePath);
-    if (ExitCode == 0) {
+    Printf("CRASH_MIN: executing: %s\n", Cmd.toString().c_str());
+    CmdOutput.clear();
+    Success = ExecuteCommand(Cmd, &CmdOutput);
+    Printf("%s", CmdOutput.c_str());
+    if (Success) {
       if (Flags.exact_artifact_path) {
         CurrentFilePath = Flags.exact_artifact_path;
         WriteToFile(U, CurrentFilePath);
@@ -435,7 +446,7 @@ int MinimizeCrashInput(const Vector<std::string> &Args,
              CurrentFilePath.c_str(), U.size());
       break;
     }
-    auto DedupToken2 = GetDedupTokenFromFile(LogFilePath);
+    auto DedupToken2 = GetDedupTokenFromCmdOutput(CmdOutput);
     if (!DedupToken2.empty())
       Printf("CRASH_MIN: DedupToken2: %s\n", DedupToken2.c_str());
 
@@ -452,7 +463,6 @@ int MinimizeCrashInput(const Vector<std::string> &Args,
     CurrentFilePath = ArtifactPath;
     Printf("*********************************\n");
   }
-  RemoveFile(LogFilePath);
   return 0;
 }
 
@@ -487,7 +497,7 @@ void Merge(Fuzzer *F, FuzzingOptions &Options, const Vector<std::string> &Args,
   std::sort(OldCorpus.begin(), OldCorpus.end());
   std::sort(NewCorpus.begin(), NewCorpus.end());
 
-  std::string CFPath = CFPathOrNull ? CFPathOrNull : TempPath(".txt");
+  std::string CFPath = CFPathOrNull ? CFPathOrNull : TempPath("Merge", ".txt");
   Vector<std::string> NewFiles;
   Set<uint32_t> NewFeatures, NewCov;
   CrashResistantMerge(Args, OldCorpus, NewCorpus, &NewFiles, {}, &NewFeatures,
@@ -675,13 +685,32 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
     Options.MallocLimitMb = Options.RssLimitMb;
   if (Flags.runs >= 0)
     Options.MaxNumberOfRuns = Flags.runs;
-  if (!Inputs->empty() && !Flags.minimize_crash_internal_step)
-    Options.OutputCorpus = (*Inputs)[0];
+  if (!Inputs->empty() && !Flags.minimize_crash_internal_step) {
+    // Ensure output corpus assumed to be the first arbitrary argument input
+    // is not a path to an existing file.
+    std::string OutputCorpusDir = (*Inputs)[0];
+    if (!IsFile(OutputCorpusDir)) {
+      Options.OutputCorpus = OutputCorpusDir;
+      ValidateDirectoryExists(Options.OutputCorpus);
+    }
+  }
   Options.ReportSlowUnits = Flags.report_slow_units;
-  if (Flags.artifact_prefix)
+  if (Flags.artifact_prefix) {
     Options.ArtifactPrefix = Flags.artifact_prefix;
-  if (Flags.exact_artifact_path)
+
+    // Since the prefix could be a full path to a file name prefix, assume
+    // that if the path ends with the platform's separator that a directory
+    // is desired
+    std::string ArtifactPathDir = Options.ArtifactPrefix;
+    if (!IsSeparator(ArtifactPathDir[ArtifactPathDir.length() - 1])) {
+      ArtifactPathDir = DirName(ArtifactPathDir);
+    }
+    ValidateDirectoryExists(ArtifactPathDir);
+  }
+  if (Flags.exact_artifact_path) {
     Options.ExactArtifactPath = Flags.exact_artifact_path;
+    ValidateDirectoryExists(DirName(Options.ExactArtifactPath));
+  }
   Vector<Unit> Dictionary;
   if (Flags.dict)
     if (!ParseDictionaryFile(FileToString(Flags.dict), &Dictionary))
@@ -704,13 +733,34 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
     Options.FocusFunction = Flags.focus_function;
   if (Flags.data_flow_trace)
     Options.DataFlowTrace = Flags.data_flow_trace;
-  if (Flags.features_dir)
+  if (Flags.features_dir) {
     Options.FeaturesDir = Flags.features_dir;
+    ValidateDirectoryExists(Options.FeaturesDir);
+  }
   if (Flags.collect_data_flow)
     Options.CollectDataFlow = Flags.collect_data_flow;
-  Options.LazyCounters = Flags.lazy_counters;
   if (Flags.stop_file)
     Options.StopFile = Flags.stop_file;
+  Options.Entropic = Flags.entropic;
+  Options.EntropicFeatureFrequencyThreshold =
+      (size_t)Flags.entropic_feature_frequency_threshold;
+  Options.EntropicNumberOfRarestFeatures =
+      (size_t)Flags.entropic_number_of_rarest_features;
+  if (Options.Entropic) {
+    if (!Options.FocusFunction.empty()) {
+      Printf("ERROR: The parameters `--entropic` and `--focus_function` cannot "
+             "be used together.\n");
+      exit(1);
+    }
+    Printf("INFO: Running with entropic power schedule (0x%X, %d).\n",
+           Options.EntropicFeatureFrequencyThreshold,
+           Options.EntropicNumberOfRarestFeatures);
+  }
+  struct EntropicOptions Entropic;
+  Entropic.Enabled = Options.Entropic;
+  Entropic.FeatureFrequencyThreshold =
+      Options.EntropicFeatureFrequencyThreshold;
+  Entropic.NumberOfRarestFeatures = Options.EntropicNumberOfRarestFeatures;
 
   unsigned Seed = Flags.seed;
   // Initialize Seed.
@@ -731,16 +781,21 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
 
   Random Rand(Seed);
   auto *MD = new MutationDispatcher(Rand, Options);
-  auto *Corpus = new InputCorpus(Options.OutputCorpus);
+  auto *Corpus = new InputCorpus(Options.OutputCorpus, Entropic);
   auto *F = new Fuzzer(Callback, *Corpus, *MD, Options);
 
   for (auto &U: Dictionary)
     if (U.size() <= Word::GetMaxSize())
       MD->AddWordToManualDictionary(Word(U.data(), U.size()));
 
+      // Threads are only supported by Chrome. Don't use them with emscripten
+      // for now.
+#if !LIBFUZZER_EMSCRIPTEN
   StartRssThread(F, Flags.rss_limit_mb);
+#endif // LIBFUZZER_EMSCRIPTEN
 
   Options.HandleAbrt = Flags.handle_abrt;
+  Options.HandleAlrm = !Flags.minimize_crash;
   Options.HandleBus = Flags.handle_bus;
   Options.HandleFpe = Flags.handle_fpe;
   Options.HandleIll = Flags.handle_ill;
@@ -830,6 +885,12 @@ int FuzzerDriver(int *argc, char ***argv, UserCallback Callback) {
   F->PrintFinalStats();
 
   exit(0);  // Don't let F destroy itself.
+}
+
+extern "C" ATTRIBUTE_INTERFACE int
+LLVMFuzzerRunDriver(int *argc, char ***argv,
+                    int (*UserCb)(const uint8_t *Data, size_t Size)) {
+  return FuzzerDriver(argc, argv, UserCb);
 }
 
 // Storage for global ExternalFunctions object.

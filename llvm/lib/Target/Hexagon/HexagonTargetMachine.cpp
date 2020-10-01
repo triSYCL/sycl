@@ -101,6 +101,10 @@ static cl::opt<bool> EnableInitialCFGCleanup("hexagon-initial-cfg-cleanup",
   cl::Hidden, cl::ZeroOrMore, cl::init(true),
   cl::desc("Simplify the CFG after atomic expansion pass"));
 
+static cl::opt<bool> EnableInstSimplify("hexagon-instsimplify", cl::Hidden,
+                                        cl::ZeroOrMore, cl::init(true),
+                                        cl::desc("Enable instsimplify"));
+
 /// HexagonTargetMachineModule - Note that this is used on hosts that
 /// cannot link in a library unless there are references into the
 /// library.  In particular, it seems that it is not possible to get
@@ -111,10 +115,10 @@ int HexagonTargetMachineModule = 0;
 
 static ScheduleDAGInstrs *createVLIWMachineSched(MachineSchedContext *C) {
   ScheduleDAGMILive *DAG =
-    new VLIWMachineScheduler(C, make_unique<ConvergingVLIWScheduler>());
-  DAG->addMutation(make_unique<HexagonSubtarget::UsrOverflowMutation>());
-  DAG->addMutation(make_unique<HexagonSubtarget::HVXMemLatencyMutation>());
-  DAG->addMutation(make_unique<HexagonSubtarget::CallMutation>());
+    new VLIWMachineScheduler(C, std::make_unique<ConvergingVLIWScheduler>());
+  DAG->addMutation(std::make_unique<HexagonSubtarget::UsrOverflowMutation>());
+  DAG->addMutation(std::make_unique<HexagonSubtarget::HVXMemLatencyMutation>());
+  DAG->addMutation(std::make_unique<HexagonSubtarget::CallMutation>());
   DAG->addMutation(createCopyConstrainDAGMutation(DAG->TII, DAG->TRI));
   return DAG;
 }
@@ -180,7 +184,7 @@ static Reloc::Model getEffectiveRelocModel(Optional<Reloc::Model> RM) {
   return *RM;
 }
 
-extern "C" void LLVMInitializeHexagonTarget() {
+extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeHexagonTarget() {
   // Register the target.
   RegisterTargetMachine<HexagonTargetMachine> X(getTheHexagonTarget());
 
@@ -218,7 +222,7 @@ HexagonTargetMachine::HexagonTargetMachine(const Target &T, const Triple &TT,
           TT, CPU, FS, Options, getEffectiveRelocModel(RM),
           getEffectiveCodeModel(CM, CodeModel::Small),
           (HexagonNoOpt ? CodeGenOpt::None : OL)),
-      TLOF(make_unique<HexagonTargetObjectFile>()) {
+      TLOF(std::make_unique<HexagonTargetObjectFile>()) {
   initializeHexagonExpandCondsetsPass(*PassRegistry::getPassRegistry());
   initAsmInfo();
 }
@@ -231,12 +235,18 @@ HexagonTargetMachine::getSubtargetImpl(const Function &F) const {
   Attribute FSAttr =
       FnAttrs.getAttribute(AttributeList::FunctionIndex, "target-features");
 
-  std::string CPU = !CPUAttr.hasAttribute(Attribute::None)
-                        ? CPUAttr.getValueAsString().str()
-                        : TargetCPU;
-  std::string FS = !FSAttr.hasAttribute(Attribute::None)
-                       ? FSAttr.getValueAsString().str()
-                       : TargetFS;
+  std::string CPU =
+      CPUAttr.isValid() ? CPUAttr.getValueAsString().str() : TargetCPU;
+  std::string FS =
+      FSAttr.isValid() ? FSAttr.getValueAsString().str() : TargetFS;
+  // Append the preexisting target features last, so that +mattr overrides
+  // the "unsafe-fp-math" function attribute.
+  // Creating a separate target feature is not strictly necessary, it only
+  // exists to make "unsafe-fp-math" force creating a new subtarget.
+
+  if (FnAttrs.hasFnAttribute("unsafe-fp-math") &&
+      F.getFnAttribute("unsafe-fp-math").getValueAsString() == "true")
+    FS = FS.empty() ? "+unsafe-fp" : "+unsafe-fp," + FS;
 
   auto &I = SubtargetMap[CPU + FS];
   if (!I) {
@@ -244,7 +254,7 @@ HexagonTargetMachine::getSubtargetImpl(const Function &F) const {
     // creation will depend on the TM and the code generation flags on the
     // function that reside in TargetOptions.
     resetTargetOptions(F);
-    I = llvm::make_unique<HexagonSubtarget>(TargetTriple, CPU, FS, *this);
+    I = std::make_unique<HexagonSubtarget>(TargetTriple, CPU, FS, *this);
   }
   return I.get();
 }
@@ -304,7 +314,8 @@ void HexagonPassConfig::addIRPasses() {
   bool NoOpt = (getOptLevel() == CodeGenOpt::None);
 
   if (!NoOpt) {
-    addPass(createConstantPropagationPass());
+    if (EnableInstSimplify)
+      addPass(createInstSimplifyLegacyPass());
     addPass(createDeadCodeEliminationPass());
   }
 
@@ -312,7 +323,11 @@ void HexagonPassConfig::addIRPasses() {
 
   if (!NoOpt) {
     if (EnableInitialCFGCleanup)
-      addPass(createCFGSimplificationPass(1, true, true, false, true));
+      addPass(createCFGSimplificationPass(SimplifyCFGOptions()
+                                              .forwardSwitchCondToPhi(true)
+                                              .convertSwitchToLookupTable(true)
+                                              .needCanonicalLoops(false)
+                                              .sinkCommonInsts(true)));
     if (EnableLoopPrefetch)
       addPass(createLoopDataPrefetchPass());
     if (EnableCommGEP)

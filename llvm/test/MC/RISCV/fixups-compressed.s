@@ -1,9 +1,9 @@
 # RUN: llvm-mc %s -triple riscv32 -mattr=+c -show-encoding \
 # RUN:     | FileCheck -check-prefix=CHECK-FIXUP %s
 # RUN: llvm-mc -triple riscv32 -filetype=obj -mattr=+c < %s \
-# RUN:     | llvm-objdump -d -riscv-no-aliases - | FileCheck -check-prefix=CHECK-INSTR %s
+# RUN:     | llvm-objdump -d -M no-aliases - | FileCheck --check-prefix=CHECK-INSTR %s
 # RUN: llvm-mc -filetype=obj -mattr=+c -triple=riscv32 %s \
-# RUN:     | llvm-readobj -r | FileCheck %s -check-prefix=CHECK-REL
+# RUN:     | llvm-readobj -r - | FileCheck %s -check-prefix=CHECK-REL
 
 .LBB0_2:
 # CHECK-FIXUP:   fixup A - offset: 0, value: .LBB0_2, kind: fixup_riscv_rvc_jump

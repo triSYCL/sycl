@@ -1,4 +1,8 @@
-// RUN: true
+// REQUIRES: xocc
+
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+
+// RUN: %ACC_RUN_PLACEHOLDER %t.out
 
 /*
   This test is similar to id_mangle.cpp in that it's mostly for testing the

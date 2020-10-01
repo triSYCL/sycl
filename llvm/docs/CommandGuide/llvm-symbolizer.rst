@@ -28,6 +28,12 @@ Object files can be specified together with the addresses either on standard
 input or as positional arguments on the command-line, following any "DATA" or
 "CODE" prefix.
 
+:program:`llvm-symbolizer` parses options from the environment variable
+``LLVM_SYMBOLIZER_OPTS`` after parsing options from the command line.
+``LLVM_SYMBOLIZER_OPTS`` is primarily useful for supplementing the command-line
+options when :program:`llvm-symbolizer` is invoked by another program or
+runtime.
+
 EXAMPLES
 --------
 
@@ -141,6 +147,28 @@ Example 4 - CODE and DATA prefixes:
   bar
   6295592 4
 
+Example 5 - path-style options:
+
+This example uses the same source file as above, but the source file's
+full path is /tmp/foo/test.cpp and is compiled as follows. The first case
+shows the default absolute path, the second --basenames, and the third
+shows --relativenames.
+
+.. code-block:: console
+
+  $ pwd
+  /tmp
+  $ clang -g foo/test.cpp -o test.elf
+  $ llvm-symbolizer --obj=test.elf 0x4004a0
+  main
+  /tmp/foo/test.cpp:15:0
+  $ llvm-symbolizer --obj=test.elf 0x4004a0 --basenames
+  main
+  test.cpp:15:0
+  $ llvm-symbolizer --obj=test.elf 0x4004a0 --relativenames
+  main
+  foo/test.cpp:15:0
+
 OPTIONS
 -------
 
@@ -152,8 +180,15 @@ OPTIONS
 
 .. option:: --basenames, -s
 
-  Strip directories when printing the file path.
+  Print just the file's name without any directories, instead of the
+  absolute path.
 
+.. option:: --relativenames
+
+  Print the file's path relative to the compilation directory, instead
+  of the absolute path. If the command-line to the compiler included
+  the full path, this will be the same as the default.
+  
 .. _llvm-symbolizer-opt-C:
 
 .. option:: --demangle, -C
@@ -175,7 +210,7 @@ OPTIONS
 
 .. _llvm-symbolizer-opt-f:
 
-.. option:: --functions [<none|short|linkage>], -f
+.. option:: --functions [=<none|short|linkage>], -f
 
   Specify the way function names are printed (omit function name, print short
   function name, or print full linkage name, respectively). Defaults to
@@ -185,16 +220,16 @@ OPTIONS
 
   Show help and usage for this command.
 
-.. option:: --help-list
-
-  Show help and usage for this command without grouping the options into categories.
-
 .. _llvm-symbolizer-opt-i:
 
 .. option:: --inlining, --inlines, -i
 
   If a source code location is in an inlined function, prints all the inlined
-  frames. Defaults to true.
+  frames. This is the default.
+
+.. option:: --no-inlines
+
+  Don't print inlined frames.
 
 .. option:: --no-demangle
 
@@ -221,6 +256,9 @@ OPTIONS
     topmost caller when inlined frames are not shown and :option:`--use-symbol-table`
     is on.
 
+  * Prints an address's debug-data discriminator when it is non-zero. One way to
+    produce discriminators is to compile with clang's -fdebug-info-for-profiling.
+
   .. code-block:: console
 
     $ llvm-symbolizer --obj=inlined.elf 0x4004be 0x400486 -p
@@ -229,55 +267,59 @@ OPTIONS
 
     foo() at /tmp/test.cpp:6:3
 
-    $ llvm-symbolizer --output-style=LLVM --obj=inlined.elf 0x4004be 0x400486 -p -i=0
+    $ llvm-symbolizer --output-style=LLVM --obj=inlined.elf 0x4004be 0x400486 -p --no-inlines
     main at /tmp/test.cpp:11:18
 
     foo() at /tmp/test.cpp:6:3
 
-    $ llvm-symbolizer --output-style=GNU --obj=inlined.elf 0x4004be 0x400486 -p -i=0
+    $ llvm-symbolizer --output-style=GNU --obj=inlined.elf 0x4004be 0x400486 -p --no-inlines
     baz() at /tmp/test.cpp:11
     foo() at /tmp/test.cpp:6
+
+    $ clang -g -fdebug-info-for-profiling test.cpp -o profiling.elf
+    $ llvm-symbolizer --output-style=GNU --obj=profiling.elf 0x401167 -p --no-inlines
+    main at /tmp/test.cpp:15 (discriminator 2)
 
 .. option:: --pretty-print, -p
 
   Print human readable output. If :option:`--inlining` is specified, the
   enclosing scope is prefixed by (inlined by).
 
-.. code-block:: console
+  .. code-block:: console
 
-  $ llvm-symbolizer --obj=inlined.elf 0x4004be --inlining --pretty-print
-  baz() at /tmp/test.cpp:11:18
-   (inlined by) main at /tmp/test.cpp:15:0
+    $ llvm-symbolizer --obj=inlined.elf 0x4004be --inlining --pretty-print
+    baz() at /tmp/test.cpp:11:18
+     (inlined by) main at /tmp/test.cpp:15:0
 
 .. option:: --print-address, --addresses, -a
 
   Print address before the source code location. Defaults to false.
 
-.. code-block:: console
+  .. code-block:: console
 
-  $ llvm-symbolizer --obj=inlined.elf --print-address 0x4004be
-  0x4004be
-  baz()
-  /tmp/test.cpp:11:18
-  main
-  /tmp/test.cpp:15:0
+    $ llvm-symbolizer --obj=inlined.elf --print-address 0x4004be
+    0x4004be
+    baz()
+    /tmp/test.cpp:11:18
+    main
+    /tmp/test.cpp:15:0
 
-  $ llvm-symbolizer --obj=inlined.elf 0x4004be --pretty-print --print-address
-  0x4004be: baz() at /tmp/test.cpp:11:18
-   (inlined by) main at /tmp/test.cpp:15:0
+    $ llvm-symbolizer --obj=inlined.elf 0x4004be --pretty-print --print-address
+    0x4004be: baz() at /tmp/test.cpp:11:18
+     (inlined by) main at /tmp/test.cpp:15:0
 
 .. option:: --print-source-context-lines <N>
 
   Print ``N`` lines of source context for each symbolized address.
 
-.. code-block:: console
+  .. code-block:: console
 
-  $ llvm-symbolizer --obj=test.elf 0x400490 --print-source-context-lines=2
-  baz()
-  /tmp/test.cpp:11:0
-  10  :   volatile int k = 42;
-  11 >:   return foz() + k;
-  12  : }
+    $ llvm-symbolizer --obj=test.elf 0x400490 --print-source-context-lines=2
+    baz()
+    /tmp/test.cpp:11:0
+    10  :   volatile int k = 42;
+    11 >:   return foz() + k;
+    12  : }
 
 .. _llvm-symbolizer-opt-use-symbol-table:
 
@@ -290,21 +332,21 @@ OPTIONS
 
   Print verbose line and column information.
 
-.. code-block:: console
+  .. code-block:: console
 
-  $ llvm-symbolizer --obj=inlined.elf --verbose 0x4004be
-  baz()
-    Filename: /tmp/test.cpp
-  Function start line: 9
-    Line: 11
-    Column: 18
-  main
-    Filename: /tmp/test.cpp
-  Function start line: 14
-    Line: 15
-    Column: 0
+    $ llvm-symbolizer --obj=inlined.elf --verbose 0x4004be
+    baz()
+      Filename: /tmp/test.cpp
+    Function start line: 9
+      Line: 11
+      Column: 18
+    main
+      Filename: /tmp/test.cpp
+    Function start line: 14
+      Line: 15
+      Column: 0
 
-.. option:: --version
+.. option:: --version, -v
 
   Print version information for the tool.
 
@@ -323,18 +365,18 @@ MACH-O SPECIFIC OPTIONS
   the input (see example below). If the architecture is not specified in either
   way, the address will not be symbolized. Defaults to empty string.
 
-.. code-block:: console
+  .. code-block:: console
 
-  $ cat addr.txt
-  /tmp/mach_universal_binary:i386 0x1f84
-  /tmp/mach_universal_binary:x86_64 0x100000f24
+    $ cat addr.txt
+    /tmp/mach_universal_binary:i386 0x1f84
+    /tmp/mach_universal_binary:x86_64 0x100000f24
 
-  $ llvm-symbolizer < addr.txt
-  _main
-  /tmp/source_i386.cc:8
+    $ llvm-symbolizer < addr.txt
+    _main
+    /tmp/source_i386.cc:8
 
-  _main
-  /tmp/source_x86_64.cc:8
+    _main
+    /tmp/source_x86_64.cc:8
 
 .. option:: --dsym-hint <path/to/file.dSYM>
 

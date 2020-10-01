@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
+// UNSUPPORTED: c++03, c++11, c++14
 
 // Tests for stable_partition and partition_copy
 #include "support/pstl_test_config.h"
@@ -97,7 +97,7 @@ struct test_non_const
     }
 };
 
-int32_t
+int
 main()
 {
     test<int32_t>([](const int32_t value) { return value % 2; });

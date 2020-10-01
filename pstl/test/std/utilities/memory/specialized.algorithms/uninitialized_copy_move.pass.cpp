@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-// UNSUPPORTED: c++98, c++03, c++11, c++14
+// UNSUPPORTED: c++03, c++11, c++14
 
 // Tests for uninitialized_copy, uninitialized_copy_n, uninitialized_move, uninitialized_move_n
 
@@ -124,7 +124,7 @@ test_uninitialized_copy_move_by_type()
     }
 }
 
-int32_t
+int
 main()
 {
 
@@ -133,7 +133,7 @@ main()
     test_uninitialized_copy_move_by_type<float64_t>();
 
     // for user-defined types
-#if !_PSTL_ICC_17_VC141_TEST_SIMD_LAMBDA_DEBUG_32_BROKEN && !_PSTL_ICC_16_VC14_TEST_SIMD_LAMBDA_DEBUG_32_BROKEN &&   \
+#if !_PSTL_ICC_17_VC141_TEST_SIMD_LAMBDA_DEBUG_32_BROKEN && !_PSTL_ICC_16_VC14_TEST_SIMD_LAMBDA_DEBUG_32_BROKEN &&     \
     !_PSTL_ICC_16_VC14_TEST_PAR_TBB_RT_RELEASE_64_BROKEN
     test_uninitialized_copy_move_by_type<Wrapper<int8_t>>();
 #endif

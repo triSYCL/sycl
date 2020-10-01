@@ -1,4 +1,4 @@
-add_llvm_library(LLVMObject
+add_llvm_component_library(LLVMObject
   Archive.cpp
   ArchiveWriter.cpp
   Binary.cpp
@@ -21,6 +21,9 @@ add_llvm_library(LLVMObject
   RelocationResolver.cpp
   SymbolicFile.cpp
   SymbolSize.cpp
+  TapiFile.cpp
+  TapiUniversal.cpp
+  MachOUniversalWriter.cpp
   WasmObjectFile.cpp
   WindowsMachineFlag.cpp
   WindowsResource.cpp

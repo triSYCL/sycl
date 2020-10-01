@@ -39,8 +39,17 @@ static void PrintMessage(ArrayRef<SMLoc> Loc, SourceMgr::DiagKind Kind,
                         "instantiated from multiclass");
 }
 
+void PrintNote(const Twine &Msg) { WithColor::note() << Msg << "\n"; }
+
 void PrintNote(ArrayRef<SMLoc> NoteLoc, const Twine &Msg) {
   PrintMessage(NoteLoc, SourceMgr::DK_Note, Msg);
+}
+
+void PrintFatalNote(ArrayRef<SMLoc> NoteLoc, const Twine &Msg) {
+  PrintNote(NoteLoc, Msg);
+  // The following call runs the file cleanup handlers.
+  sys::RunInterruptHandlers();
+  std::exit(1);
 }
 
 void PrintWarning(ArrayRef<SMLoc> WarningLoc, const Twine &Msg) {

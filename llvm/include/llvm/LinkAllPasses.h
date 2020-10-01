@@ -37,6 +37,8 @@
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRPrintingPasses.h"
+#include "llvm/SYCLLowerIR/LowerESIMD.h"
+#include "llvm/SYCLLowerIR/LowerWGScope.h"
 #include "llvm/Support/Valgrind.h"
 #include "llvm/Transforms/AggressiveInstCombine/AggressiveInstCombine.h"
 #include "llvm/Transforms/IPO.h"
@@ -71,6 +73,7 @@ namespace {
       (void) llvm::createAggressiveDCEPass();
       (void) llvm::createAggressiveInstCombinerPass();
       (void) llvm::createBitTrackingDCEPass();
+      (void) llvm::createOpenMPOptLegacyPass();
       (void) llvm::createArgumentPromotionPass();
       (void) llvm::createAlignmentFromAssumptionsPass();
       (void) llvm::createBasicAAWrapperPass();
@@ -88,10 +91,10 @@ namespace {
       (void) llvm::createLibCallsShrinkWrapPass();
       (void) llvm::createCalledValuePropagationPass();
       (void) llvm::createConstantMergePass();
-      (void) llvm::createConstantPropagationPass();
       (void) llvm::createControlHeightReductionLegacyPass();
       (void) llvm::createCostModelAnalysisPass();
       (void) llvm::createDeadArgEliminationPass();
+      (void) llvm::createDeadArgEliminationSYCLPass();
       (void) llvm::createDeadCodeEliminationPass();
       (void) llvm::createDeadInstEliminationPass();
       (void) llvm::createDeadStoreEliminationPass();
@@ -115,7 +118,6 @@ namespace {
       (void) llvm::createGlobalsAAWrapperPass();
       (void) llvm::createGuardWideningPass();
       (void) llvm::createLoopGuardWideningPass();
-      (void) llvm::createIPConstantPropagationPass();
       (void) llvm::createIPSCCPPass();
       (void) llvm::createInductiveRangeCheckEliminationPass();
       (void) llvm::createIndVarSimplifyPass();
@@ -140,6 +142,7 @@ namespace {
       (void) llvm::createLoopVersioningLICMPass();
       (void) llvm::createLoopIdiomPass();
       (void) llvm::createLoopRotatePass();
+      (void) llvm::createLowerConstantIntrinsicsPass();
       (void) llvm::createLowerExpectIntrinsicPass();
       (void) llvm::createLowerInvokePass();
       (void) llvm::createLowerSwitchPass();
@@ -158,6 +161,7 @@ namespace {
       (void) llvm::createPostDomOnlyViewerPass();
       (void) llvm::createPostDomViewerPass();
       (void) llvm::createReassociatePass();
+      (void) llvm::createRedundantDbgInstEliminationPass();
       (void) llvm::createRegionInfoPass();
       (void) llvm::createRegionOnlyPrinterPass();
       (void) llvm::createRegionOnlyViewerPass();
@@ -190,16 +194,20 @@ namespace {
       (void) llvm::createInstructionNamerPass();
       (void) llvm::createMetaRenamerPass();
       (void) llvm::createAttributorLegacyPass();
+      (void) llvm::createAttributorCGSCCLegacyPass();
       (void) llvm::createPostOrderFunctionAttrsLegacyPass();
       (void) llvm::createReversePostOrderFunctionAttrsPass();
       (void) llvm::createMergeFunctionsPass();
       (void) llvm::createMergeICmpsLegacyPass();
       (void) llvm::createExpandMemCmpPass();
+      (void)llvm::createSYCLLowerWGScopePass();
+      (void)llvm::createSYCLLowerESIMDPass();
+      (void)llvm::createESIMDLowerLoadStorePass();
+      (void)llvm::createESIMDLowerVecArgPass();
       std::string buf;
       llvm::raw_string_ostream os(buf);
       (void) llvm::createPrintModulePass(os);
       (void) llvm::createPrintFunctionPass(os);
-      (void) llvm::createPrintBasicBlockPass(os);
       (void) llvm::createModuleDebugInfoPrinterPass();
       (void) llvm::createPartialInliningPass();
       (void) llvm::createLintPass();
@@ -210,6 +218,7 @@ namespace {
       (void) llvm::createLoopVectorizePass();
       (void) llvm::createSLPVectorizerPass();
       (void) llvm::createLoadStoreVectorizerPass();
+      (void) llvm::createVectorCombinePass();
       (void) llvm::createPartiallyInlineLibCallsPass();
       (void) llvm::createScalarizerPass();
       (void) llvm::createSeparateConstOffsetFromGEPPass();
@@ -219,11 +228,15 @@ namespace {
       (void) llvm::createStraightLineStrengthReducePass();
       (void) llvm::createMemDerefPrinter();
       (void) llvm::createMustExecutePrinter();
+      (void) llvm::createMustBeExecutedContextPrinter();
       (void) llvm::createFloat2IntPass();
       (void) llvm::createEliminateAvailableExternallyPass();
       (void) llvm::createScalarizeMaskedMemIntrinPass();
       (void) llvm::createWarnMissedTransformationsPass();
       (void) llvm::createHardwareLoopsPass();
+      (void) llvm::createInjectTLIMappingsLegacyPass();
+      (void) llvm::createUnifyLoopExitsPass();
+      (void) llvm::createFixIrreduciblePass();
 
       (void)new llvm::IntervalPartition();
       (void)new llvm::ScalarEvolutionWrapperPass();

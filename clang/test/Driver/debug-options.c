@@ -64,10 +64,20 @@
 // RUN: %clang -### -c -g %s -target arm64-apple-tvos9.0 2>&1 \
 // RUN:             | FileCheck -check-prefix=G_STANDALONE \
 // RUN:                         -check-prefix=G_DWARF4 %s
+// RUN: %clang -### -c -fsave-optimization-record %s \
+// RUN:        -target x86_64-apple-darwin 2>&1 \
+// RUN:             | FileCheck -check-prefix=GLTO_ONLY %s
+// RUN: %clang -### -c -g -fsave-optimization-record %s \
+// RUN:        -target x86_64-apple-darwin 2>&1 \
+// RUN:             | FileCheck -check-prefix=G_STANDALONE %s
 
 // FreeBSD.
-// RUN: %clang -### -c -g %s -target x86_64-pc-freebsd10.0 2>&1 \
-// RUN:             | FileCheck -check-prefix=G_GDB %s
+// RUN: %clang -### -c -g %s -target x86_64-pc-freebsd11.0 2>&1 \
+// RUN:             | FileCheck -check-prefix=G_GDB \
+// RUN:                         -check-prefix=G_DWARF2 %s
+// RUN: %clang -### -c -g %s -target x86_64-pc-freebsd12.0 2>&1 \
+// RUN:             | FileCheck -check-prefix=G_GDB \
+// RUN:                         -check-prefix=G_DWARF4 %s
 
 // Windows.
 // RUN: %clang -### -c -g %s -target x86_64-w64-windows-gnu 2>&1 \
@@ -193,7 +203,7 @@
 // RUN: %clang -### -c %s 2>&1 | FileCheck -check-prefix=NORNGBSE %s
 // RUN: %clang -### -c -fdebug-ranges-base-address -fno-debug-ranges-base-address %s 2>&1 | FileCheck -check-prefix=NORNGBSE %s
 //
-// RUN: %clang -### -c -glldb %s 2>&1 | FileCheck -check-prefix=GPUB %s
+// RUN: %clang -### -c -glldb %s 2>&1 | FileCheck -check-prefix=NOPUB %s
 // RUN: %clang -### -c -glldb -gno-pubnames %s 2>&1 | FileCheck -check-prefix=NOPUB %s
 //
 // RUN: %clang -### -c -gdwarf-aranges %s 2>&1 | FileCheck -check-prefix=GARANGE %s
@@ -232,7 +242,7 @@
 // RUN:        | FileCheck -check-prefix=GLIO_ONLY %s
 //
 // NOG_PS4: "-cc1"
-// NOG_PS4-NOT "-dwarf-version=
+// NOG_PS4-NOT: "-dwarf-version=
 // NOG_PS4: "-generate-arange-section"
 // NOG_PS4-NOT: "-dwarf-version=
 //
@@ -324,9 +334,9 @@
 // NOFDTS-NOT: "-mllvm" "-generate-type-units"
 // NOFDTSE-NOT: error: unsupported option '-fdebug-types-section' for target 'x86_64-apple-darwin'
 //
-// CI: "-dwarf-column-info"
+// CI-NOT: "-gno-column-info"
 //
-// NOCI-NOT: "-dwarf-column-info"
+// NOCI: "-gno-column-info"
 //
 // GEXTREFS: "-dwarf-ext-refs" "-fmodule-format=obj"
 // GEXTREFS: "-debug-info-kind={{standalone|limited}}"
@@ -351,3 +361,14 @@
 // GEMBED_2:  error: invalid argument '-gembed-source' only allowed with '-gdwarf-5'
 // NOGEMBED_5-NOT:  "-gembed-source"
 // NOGEMBED_2-NOT:  error: invalid argument '-gembed-source' only allowed with '-gdwarf-5'
+//
+// RUN: %clang -### -g -fno-eliminate-unused-debug-types -c %s 2>&1 \
+// RUN:        | FileCheck -check-prefix=DEBUG_UNUSED_TYPES %s
+// DEBUG_UNUSED_TYPES: "-debug-info-kind=unused-types"
+// DEBUG_UNUSED_TYPES-NOT: "-debug-info-kind=limited"
+// RUN: %clang -### -g -feliminate-unused-debug-types -c %s 2>&1 \
+// RUN:        | FileCheck -check-prefix=NO_DEBUG_UNUSED_TYPES %s
+// RUN: %clang -### -fno-eliminate-unused-debug-types -g1 -c %s 2>&1 \
+// RUN:        | FileCheck -check-prefix=NO_DEBUG_UNUSED_TYPES %s
+// NO_DEBUG_UNUSED_TYPES: "-debug-info-kind={{limited|line-tables-only|standalone}}"
+// NO_DEBUG_UNUSED_TYPES-NOT: "-debug-info-kind=unused-types"

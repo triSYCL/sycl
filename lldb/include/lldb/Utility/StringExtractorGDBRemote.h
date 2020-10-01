@@ -31,11 +31,6 @@ public:
   StringExtractorGDBRemote(const char *cstr)
       : StringExtractor(cstr), m_validator(nullptr) {}
 
-  StringExtractorGDBRemote(const StringExtractorGDBRemote &rhs)
-      : StringExtractor(rhs), m_validator(rhs.m_validator) {}
-
-  ~StringExtractorGDBRemote() override {}
-
   bool ValidateResponse() const;
 
   void CopyResponseValidator(const StringExtractorGDBRemote &rhs);
@@ -81,6 +76,7 @@ public:
     eServerPacketType_QSetSTDERR,
     eServerPacketType_QSetWorkingDir,
     eServerPacketType_QStartNoAckMode,
+    eServerPacketType_qPathComplete,
     eServerPacketType_qPlatform_shell,
     eServerPacketType_qPlatform_mkdir,
     eServerPacketType_qPlatform_chmod,

@@ -1,5 +1,5 @@
 ; RUN: llc -mtriple=amdgcn-amd-amdhsa -mcpu=gfx803 -mattr=+code-object-v3 < %s | FileCheck --check-prefixes=ALL-ASM,OSABI-AMDHSA-ASM %s
-; RUN: llc -filetype=obj -mtriple=amdgcn-amd-amdhsa -mcpu=gfx803 -mattr=+code-object-v3 < %s | llvm-readelf --notes -relocations -sections -symbols | FileCheck --check-prefixes=ALL-ELF,OSABI-AMDHSA-ELF %s
+; RUN: llc -filetype=obj -mtriple=amdgcn-amd-amdhsa -mcpu=gfx803 -mattr=+code-object-v3 < %s | llvm-readelf --notes -relocations -sections -symbols - | FileCheck --check-prefixes=ALL-ELF,OSABI-AMDHSA-ELF %s
 
 ; ALL-ASM-LABEL: {{^}}fadd:
 
@@ -59,7 +59,7 @@
 ; OSABI-AMDHSA-ELF: {{[0-9]+}}: 0000000000000100 {{[0-9]+}} FUNC   GLOBAL PROTECTED {{[0-9]+}} fsub
 ; OSABI-AMDHSA-ELF: {{[0-9]+}}: 0000000000000040 64         OBJECT GLOBAL DEFAULT   {{[0-9]+}} fsub.kd
 
-; OSABI-AMDHSA-ELF: Displaying notes found at file offset
+; OSABI-AMDHSA-ELF: Displaying notes found in: .note
 ; OSABI-AMDHSA-ELF: AMDGPU 0x{{[0-9a-f]+}} NT_AMDGPU_METADATA (AMDGPU Metadata)
 
 define amdgpu_kernel void @fadd(

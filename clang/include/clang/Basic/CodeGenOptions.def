@@ -14,17 +14,20 @@
 //
 //===----------------------------------------------------------------------===//
 #ifndef CODEGENOPT
-#  error Define the CODEGENOPT macro to handle language options
+#error Define the CODEGENOPT macro to handle language options
 #endif
 
 #ifndef VALUE_CODEGENOPT
-#  define VALUE_CODEGENOPT(Name, Bits, Default) \
-CODEGENOPT(Name, Bits, Default)
+#define VALUE_CODEGENOPT(Name, Bits, Default) CODEGENOPT(Name, Bits, Default)
 #endif
 
 #ifndef ENUM_CODEGENOPT
-#  define ENUM_CODEGENOPT(Name, Type, Bits, Default) \
-CODEGENOPT(Name, Bits, Default)
+#define ENUM_CODEGENOPT(Name, Type, Bits, Default)                             \
+  CODEGENOPT(Name, Bits, Default)
+#endif
+
+#ifndef TYPED_CODEGENOPT
+#define TYPED_CODEGENOPT(Type, Name, Description)
 #endif
 
 CODEGENOPT(DisableIntegratedAS, 1, 0) ///< -no-integrated-as
@@ -37,17 +40,19 @@ CODEGENOPT(AssumeSaneOperatorNew , 1, 1) ///< implicit __attribute__((malloc)) o
 CODEGENOPT(Autolink          , 1, 1) ///< -fno-autolink
 CODEGENOPT(ObjCAutoRefCountExceptions , 1, 0) ///< Whether ARC should be EH-safe.
 CODEGENOPT(Backchain         , 1, 0) ///< -mbackchain
+CODEGENOPT(ControlFlowGuardNoChecks  , 1, 0) ///< -cfguard-no-checks
 CODEGENOPT(ControlFlowGuard  , 1, 0) ///< -cfguard
-CODEGENOPT(CoverageExtraChecksum, 1, 0) ///< Whether we need a second checksum for functions in GCNO files.
-CODEGENOPT(CoverageNoFunctionNamesInData, 1, 0) ///< Do not include function names in GCDA files.
-CODEGENOPT(CoverageExitBlockBeforeBody, 1, 0) ///< Whether to emit the exit block before the body blocks in GCNO files.
 CODEGENOPT(CXAAtExit         , 1, 1) ///< Use __cxa_atexit for calling destructors.
 CODEGENOPT(RegisterGlobalDtorsWithAtExit, 1, 1) ///< Use atexit or __cxa_atexit to register global destructors.
 CODEGENOPT(CXXCtorDtorAliases, 1, 0) ///< Emit complete ctors/dtors as linker
                                      ///< aliases to base ctors when possible.
 CODEGENOPT(DataSections      , 1, 0) ///< Set when -fdata-sections is enabled.
 CODEGENOPT(UniqueSectionNames, 1, 1) ///< Set for -funique-section-names.
-CODEGENOPT(DisableFPElim     , 1, 0) ///< Set when -fomit-frame-pointer is enabled.
+CODEGENOPT(UniqueBasicBlockSectionNames, 1, 1) ///< Set for -funique-basic-block-section-names,
+                                               ///< Produce unique section names with
+                                               ///< basic block sections.
+ENUM_CODEGENOPT(FramePointer, FramePointerKind, 2, FramePointerKind::None) /// frame-pointer: all,non-leaf,none
+
 CODEGENOPT(DisableFree       , 1, 0) ///< Don't free memory.
 CODEGENOPT(DiscardValueNames , 1, 0) ///< Discard Value Names from the IR (LLVMContext flag)
 CODEGENOPT(DisableGCov       , 1, 0) ///< Don't run the GCov pass, for testing.
@@ -56,12 +61,15 @@ CODEGENOPT(DisableLLVMPasses , 1, 0) ///< Don't run any LLVM IR passes to get
                                      ///< frontend.
 CODEGENOPT(DisableLifetimeMarkers, 1, 0) ///< Don't emit any lifetime markers
 CODEGENOPT(DisableO0ImplyOptNone , 1, 0) ///< Don't annonate function with optnone at O0
+CODEGENOPT(ExperimentalStrictFloatingPoint, 1, 0) ///< Enables the new, experimental
+                                                  ///< strict floating point.
 CODEGENOPT(ExperimentalNewPassManager, 1, 0) ///< Enables the new, experimental
                                              ///< pass manager.
 CODEGENOPT(DebugPassManager, 1, 0) ///< Prints debug information for the new
                                    ///< pass manager.
 CODEGENOPT(DisableRedZone    , 1, 0) ///< Set when -mno-red-zone is enabled.
-CODEGENOPT(EnableDebugEntryValues, 1, 0) ///< Emit call site parameter dbg info
+CODEGENOPT(EmitCallSiteInfo, 1, 0) ///< Emit call site info only in the case of
+                                   ///< '-g' + 'O>0' level.
 CODEGENOPT(IndirectTlsSegRefs, 1, 0) ///< Set when -mno-tls-direct-seg-refs
                                      ///< is specified.
 CODEGENOPT(DisableTailCalls  , 1, 0) ///< Do not emit tail calls.
@@ -95,6 +103,8 @@ CODEGENOPT(CFProtectionBranch , 1, 0) ///< if -fcf-protection is
 CODEGENOPT(XRayInstrumentFunctions , 1, 0) ///< Set when -fxray-instrument is
                                            ///< enabled.
 CODEGENOPT(StackSizeSection  , 1, 0) ///< Set when -fstack-size-section is enabled.
+CODEGENOPT(ForceDwarfFrameSection , 1, 0) ///< Set when -fforce-dwarf-frame is
+                                          ///< enabled.
 
 ///< Set when -fxray-always-emit-customevents is enabled.
 CODEGENOPT(XRayAlwaysEmitCustomEvents , 1, 0)
@@ -102,12 +112,25 @@ CODEGENOPT(XRayAlwaysEmitCustomEvents , 1, 0)
 ///< Set when -fxray-always-emit-typedevents is enabled.
 CODEGENOPT(XRayAlwaysEmitTypedEvents , 1, 0)
 
+///< Set when -fxray-ignore-loops is enabled.
+CODEGENOPT(XRayIgnoreLoops , 1, 0)
+
+///< Set with -fno-xray-function-index to omit the index section.
+CODEGENOPT(XRayOmitFunctionIndex , 1, 0)
+
+
 ///< Set the minimum number of instructions in a function to determine selective
 ///< XRay instrumentation.
 VALUE_CODEGENOPT(XRayInstructionThreshold , 32, 200)
 
+VALUE_CODEGENOPT(PatchableFunctionEntryCount , 32, 0) ///< Number of NOPs at function entry
+VALUE_CODEGENOPT(PatchableFunctionEntryOffset , 32, 0)
+
 CODEGENOPT(InstrumentForProfiling , 1, 0) ///< Set when -pg is enabled.
 CODEGENOPT(CallFEntry , 1, 0) ///< Set when -mfentry is enabled.
+CODEGENOPT(MNopMCount , 1, 0) ///< Set when -mnop-mcount is enabled.
+CODEGENOPT(RecordMCount , 1, 0) ///< Set when -mrecord-mcount is enabled.
+CODEGENOPT(PackedStack , 1, 0) ///< Set when -mpacked-stack is enabled.
 CODEGENOPT(LessPreciseFPMAD  , 1, 0) ///< Enable less precise MAD instructions to
                                      ///< be generated.
 CODEGENOPT(PrepareForLTO     , 1, 0) ///< Set when -flto is enabled on the
@@ -125,6 +148,7 @@ CODEGENOPT(IncrementalLinkerCompatible, 1, 0) ///< Emit an object file which can
                                               ///< linker.
 CODEGENOPT(MergeAllConstants , 1, 1) ///< Merge identical constants.
 CODEGENOPT(MergeFunctions    , 1, 0) ///< Set when -fmerge-functions is enabled.
+CODEGENOPT(HeapProf          , 1, 0) ///< Set when -fmemprof is enabled.
 CODEGENOPT(MSVolatile        , 1, 0) ///< Set when /volatile:ms is enabled.
 CODEGENOPT(NoCommon          , 1, 0) ///< Set when -fno-common or C++ is enabled.
 CODEGENOPT(NoDwarfDirectoryAsm , 1, 0) ///< Set when -fno-dwarf-directory-asm is
@@ -132,17 +156,15 @@ CODEGENOPT(NoDwarfDirectoryAsm , 1, 0) ///< Set when -fno-dwarf-directory-asm is
 CODEGENOPT(NoExecStack       , 1, 0) ///< Set when -Wa,--noexecstack is enabled.
 CODEGENOPT(FatalWarnings     , 1, 0) ///< Set when -Wa,--fatal-warnings is
                                      ///< enabled.
+CODEGENOPT(NoWarn            , 1, 0) ///< Set when -Wa,--no-warn is enabled.
 CODEGENOPT(EnableSegmentedStacks , 1, 0) ///< Set when -fsplit-stack is enabled.
+CODEGENOPT(NoInlineLineTables, 1, 0) ///< Whether debug info should contain
+                                     ///< inline line tables.
+CODEGENOPT(StackClashProtector, 1, 0) ///< Set when -fstack-clash-protection is enabled.
 CODEGENOPT(NoImplicitFloat   , 1, 0) ///< Set when -mno-implicit-float is enabled.
-CODEGENOPT(NoInfsFPMath      , 1, 0) ///< Assume FP arguments, results not +-Inf.
-CODEGENOPT(NoSignedZeros     , 1, 0) ///< Allow ignoring the signedness of FP zero
 CODEGENOPT(NullPointerIsValid , 1, 0) ///< Assume Null pointer deference is defined.
-CODEGENOPT(Reassociate       , 1, 0) ///< Allow reassociation of FP math ops
-CODEGENOPT(ReciprocalMath    , 1, 0) ///< Allow FP divisions to be reassociated.
-CODEGENOPT(NoTrappingMath    , 1, 0) ///< Set when -fno-trapping-math is enabled.
-CODEGENOPT(NoNaNsFPMath      , 1, 0) ///< Assume FP arguments, results not NaN.
-CODEGENOPT(FlushDenorm       , 1, 0) ///< Allow FP denorm numbers to be flushed to zero
 CODEGENOPT(CorrectlyRoundedDivSqrt, 1, 0) ///< -cl-fp32-correctly-rounded-divide-sqrt
+CODEGENOPT(UniqueInternalLinkageNames, 1, 0) ///< Internal Linkage symbols get unique names.
 
 /// When false, this attempts to generate code as if the result of an
 /// overflowing conversion matches the overflowing behavior of a target's native
@@ -155,8 +177,6 @@ CODEGENOPT(NoZeroInitializedInBSS , 1, 0) ///< -fno-zero-initialized-in-bss.
 ENUM_CODEGENOPT(ObjCDispatchMethod, ObjCDispatchMethodKind, 2, Legacy)
 /// Replace certain message sends with calls to ObjC runtime entrypoints
 CODEGENOPT(ObjCConvertMessagesToRuntimeCalls , 1, 1)
-CODEGENOPT(OmitLeafFramePointer , 1, 0) ///< Set when -momit-leaf-frame-pointer is
-                                        ///< enabled.
 
 VALUE_CODEGENOPT(OptimizationLevel, 2, 0) ///< The -O[0-3] option specified.
 VALUE_CODEGENOPT(OptimizeSize, 2, 0) ///< If -Os (==1) or -Oz (==2) is specified.
@@ -195,6 +215,8 @@ CODEGENOPT(SanitizeMinimalRuntime, 1, 0) ///< Use "_minimal" sanitizer runtime f
                                          ///< diagnostics.
 CODEGENOPT(SanitizeCfiICallGeneralizePointers, 1, 0) ///< Generalize pointer types in
                                                      ///< CFI icall function signatures
+CODEGENOPT(SanitizeCfiCanonicalJumpTables, 1, 0) ///< Make jump table symbols canonical
+                                                 ///< instead of creating a local jump table.
 CODEGENOPT(SanitizeCoverageType, 2, 0) ///< Type of sanitizer coverage
                                        ///< instrumentation.
 CODEGENOPT(SanitizeCoverageIndirectCalls, 1, 0) ///< Enable sanitizer coverage
@@ -214,6 +236,7 @@ CODEGENOPT(SanitizeCoverageTracePC, 1, 0) ///< Enable PC tracing
 CODEGENOPT(SanitizeCoverageTracePCGuard, 1, 0) ///< Enable PC tracing with guard
                                                ///< in sanitizer coverage.
 CODEGENOPT(SanitizeCoverageInline8bitCounters, 1, 0) ///< Use inline 8bit counters.
+CODEGENOPT(SanitizeCoverageInlineBoolFlag, 1, 0) ///< Use inline bool flag.
 CODEGENOPT(SanitizeCoveragePCTable, 1, 0) ///< Create a PC Table.
 CODEGENOPT(SanitizeCoverageNoPrune, 1, 0) ///< Disable coverage pruning.
 CODEGENOPT(SanitizeCoverageStackDepth, 1, 0) ///< Enable max stack depth tracing
@@ -226,10 +249,11 @@ CODEGENOPT(StrictEnums       , 1, 0) ///< Optimize based on strict enum definiti
 CODEGENOPT(StrictVTablePointers, 1, 0) ///< Optimize based on the strict vtable pointers
 CODEGENOPT(TimePasses        , 1, 0) ///< Set when -ftime-report is enabled.
 CODEGENOPT(TimeTrace         , 1, 0) ///< Set when -ftime-trace is enabled.
+VALUE_CODEGENOPT(TimeTraceGranularity, 32, 500) ///< Minimum time granularity (in microseconds),
+                                               ///< traced by time profiler
 CODEGENOPT(UnrollLoops       , 1, 0) ///< Control whether loops are unrolled.
 CODEGENOPT(RerollLoops       , 1, 0) ///< Control whether loops are rerolled.
 CODEGENOPT(NoUseJumpTables   , 1, 0) ///< Set when -fno-jump-tables is enabled.
-CODEGENOPT(UnsafeFPMath      , 1, 0) ///< Allow unsafe floating point optzns.
 CODEGENOPT(UnwindTables      , 1, 0) ///< Emit unwind tables.
 CODEGENOPT(VectorizeLoop     , 1, 0) ///< Run loop vectorizer.
 CODEGENOPT(VectorizeSLP      , 1, 0) ///< Run SLP vectorizer.
@@ -268,11 +292,14 @@ CODEGENOPT(DebugFwdTemplateParams, 1, 0) ///< Whether to emit complete
                                          ///< template parameter descriptions in
                                          ///< forward declarations (versus just
                                          ///< including them in the name).
-
 CODEGENOPT(EmitLLVMUseLists, 1, 0) ///< Control whether to serialize use-lists.
 
 CODEGENOPT(WholeProgramVTables, 1, 0) ///< Whether to apply whole-program
                                       ///  vtable optimization.
+
+CODEGENOPT(VirtualFunctionElimination, 1, 0) ///< Whether to apply the dead
+                                             /// virtual function elimination
+                                             /// optimization.
 
 /// Whether to use public LTO visibility for entities in std and stdext
 /// namespaces. This is enabled by clang-cl's /MT and /MTd flags.
@@ -282,11 +309,14 @@ CODEGENOPT(LTOVisibilityPublicStd, 1, 0)
 /// or 0 if unspecified.
 VALUE_CODEGENOPT(NumRegisterParameters, 32, 0)
 
+/// The threshold to put data into small data section.
+VALUE_CODEGENOPT(SmallDataLimit, 32, 0)
+
 /// The lower bound for a buffer to be considered for stack protection.
 VALUE_CODEGENOPT(SSPBufferSize, 32, 0)
 
 /// The kind of generated debug info.
-ENUM_CODEGENOPT(DebugInfo, codegenoptions::DebugInfoKind, 3, codegenoptions::NoDebugInfo)
+ENUM_CODEGENOPT(DebugInfo, codegenoptions::DebugInfoKind, 4, codegenoptions::NoDebugInfo)
 
 /// Whether to generate macro debug info.
 CODEGENOPT(MacroDebugInfo, 1, 0)
@@ -298,6 +328,9 @@ ENUM_CODEGENOPT(DebuggerTuning, llvm::DebuggerKind, 2,
 /// Dwarf version. Version zero indicates to LLVM that no DWARF should be
 /// emitted.
 VALUE_CODEGENOPT(DwarfVersion, 3, 0)
+
+/// Whether to use experimental new variable location tracking.
+CODEGENOPT(ValueTrackingVariableLocations, 1, 0)
 
 /// Whether we should emit CodeView debug information. It's possible to emit
 /// CodeView and DWARF into the same object.
@@ -314,6 +347,9 @@ ENUM_CODEGENOPT(VecLib, VectorLibrary, 2, NoLibrary)
 
 /// The default TLS model to use.
 ENUM_CODEGENOPT(DefaultTLSModel, TLSModel, 2, GeneralDynamicTLSModel)
+
+/// Bit size of immediate TLS offsets (0 == use the default).
+VALUE_CODEGENOPT(TLSSize, 8, 0)
 
 /// Number of path components to strip when emitting checks. (0 == full
 /// filename)
@@ -356,14 +392,232 @@ CODEGENOPT(ForceEmitVTables, 1, 0)
 /// Whether to emit an address-significance table into the object file.
 CODEGENOPT(Addrsig, 1, 0)
 
-ENUM_CODEGENOPT(SignReturnAddress, SignReturnAddressScope, 2, None)
-ENUM_CODEGENOPT(SignReturnAddressKey, SignReturnAddressKeyValue, 1, AKey)
-CODEGENOPT(BranchTargetEnforcement, 1, 0)
-
 /// Whether to emit unused static constants.
 CODEGENOPT(KeepStaticConsts, 1, 0)
+
+/// Whether to not follow the AAPCS that enforce at least one read before storing to a volatile bitfield
+CODEGENOPT(ForceAAPCSBitfieldLoad, 1, 0)
+
+TYPED_CODEGENOPT(
+    std::string, BBSections,
+    "This field stores one of the allowed values for the option "
+    "-fbasic-block-sections=.  The allowed values with this option are: "
+    "{\"labels\", \"all\", \"list=<file>\", \"none\"}. \"labels\":      Only "
+    "generate basic block symbols (labels) for all basic blocks, do not "
+    "generate unique sections for basic blocks. Use the machine basic block id "
+    "in the symbol name to associate profile info from virtual address to "
+    "machine basic block. \"all\" :        Generate basic block sections for "
+    "all basic blocks. \"list=<file>\": Generate basic block sections for a "
+    "subset of basic blocks. The functions and the machine basic block ids are "
+    "specified in the file. \"none\":        Disable sections/labels for basic "
+    "blocks.")
+
+TYPED_CODEGENOPT(std::string, CodeModel, "The code model to use (-mcmodel).")
+
+TYPED_CODEGENOPT(std::string, CoverageDataFile,
+                 "The filename with path we use for coverage data files. The "
+                 "runtime allows further manipulation with the GCOV_PREFIX and "
+                 "GCOV_PREFIX_STRIP environment variables. The filename with "
+                 "path we use for coverage notes files.")
+TYPED_CODEGENOPT(std::string, CoverageNotesFile, "")
+
+TYPED_CODEGENOPT(
+    std::string, ProfileFilterFiles,
+    "Regexes separated by a semi-colon to filter the files to instrument.")
+
+TYPED_CODEGENOPT(
+    std::string, ProfileExcludeFiles,
+    "Regexes separated by a semi-colon to filter the files to not instrument.")
+
+TYPED_CODEGENOPT(CoverageVersionTy, CoverageVersion,
+                 "The version string to put into coverage files.")
+
+TYPED_CODEGENOPT(std::string, DebugPass,
+                 "Enable additional debugging information.")
+
+TYPED_CODEGENOPT(std::string, DebugCompilationDir,
+                 "The string to embed in debug information as the current "
+                 "working directory.")
+
+TYPED_CODEGENOPT(std::string, DwarfDebugFlags,
+                 "The string to embed in the debug information for the compile "
+                 "unit, if non-empty.")
+
+TYPED_CODEGENOPT(std::string, RecordCommandLine,
+                 "The string containing the commandline for the "
+                 "llvm.commandline metadata, if non-empty.")
+
+TYPED_CODEGENOPT(DebugPrefixMapTy, DebugPrefixMap, "")
+
+TYPED_CODEGENOPT(std::string, FloatABI,
+                 "The ABI to use for passing floating point arguments.")
+
+TYPED_CODEGENOPT(llvm::DenormalMode, FPDenormalMode,
+                 "The floating-point denormal mode to use.")
+
+TYPED_CODEGENOPT(llvm::DenormalMode, FP32DenormalMode,
+                 "The floating-point denormal mode to use, for float.")
+
+TYPED_CODEGENOPT(std::string, LimitFloatPrecision,
+                 "The float precision limit to use, if non-empty.")
+
+TYPED_CODEGENOPT(std::vector<BitcodeFileToLink>, LinkBitcodeFiles,
+                 "The files specified here are linked in to the module before "
+                 "optimizations.")
+
+TYPED_CODEGENOPT(
+    std::string, MainFileName,
+    "The user provided name for the \"main file\", if non-empty. This is "
+    "useful in situations where the input file name does not match the "
+    "original input file, for example with -save-temps.")
+
+TYPED_CODEGENOPT(std::string, SplitDwarfFile,
+                 "The name for the split debug info file used for the "
+                 "DW_AT_[GNU_]dwo_name attribute in the skeleton CU.")
+
+TYPED_CODEGENOPT(
+    std::string, SplitDwarfOutput,
+    "Output filename for the split debug info, not used in the skeleton CU.")
+
+TYPED_CODEGENOPT(llvm::Reloc::Model, RelocationModel,
+                 "The name of the relocation model to use.")
+
+TYPED_CODEGENOPT(std::string, ThreadModel, "The thread model to use")
+
+TYPED_CODEGENOPT(std::string, TrapFuncName,
+                 "If not an empty string, trap intrinsics are lowered to calls "
+                 "to this function instead of to trap instructions.")
+
+TYPED_CODEGENOPT(std::vector<std::string>, DependentLibraries,
+                 "A list of dependent libraries.")
+
+TYPED_CODEGENOPT(std::vector<std::string>, LinkerOptions,
+                 "A list of linker options to embed in the object file.")
+
+TYPED_CODEGENOPT(
+    std::string, InstrProfileOutput,
+    "Name of the profile file to use as output for -fprofile-instr-generate, "
+    "-fprofile-generate, and -fcs-profile-generate.")
+
+TYPED_CODEGENOPT(std::string, SampleProfileFile,
+                 "Name of the profile file to use with -fprofile-sample-use.")
+
+TYPED_CODEGENOPT(
+    std::string, ProfileInstrumentUsePath,
+    "Name of the profile file to use as input for -fprofile-instr-use")
+
+TYPED_CODEGENOPT(
+    std::string, ProfileRemappingFile,
+    "Name of the profile remapping file to apply to the profile data supplied "
+    "by -fprofile-sample-use or -fprofile-instr-use.")
+
+TYPED_CODEGENOPT(std::string, ThinLTOIndexFile,
+                 "Name of the function summary index file to use for ThinLTO "
+                 "function importing.")
+
+TYPED_CODEGENOPT(
+    std::string, ThinLinkBitcodeFile,
+    "Name of a file that can optionally be written with minimized bitcode to "
+    "be used as input for the ThinLTO thin link step, which only needs the "
+    "summary and module symbol table (and not, e.g. any debug metadata).")
+
+TYPED_CODEGENOPT(std::string, SaveTempsFilePrefix,
+                 "Prefix to use for -save-temps output.")
+
+TYPED_CODEGENOPT(
+    std::string, CudaGpuBinaryFileName,
+    "Name of file passed with -fcuda-include-gpubinary option to forward to "
+    "CUDA runtime back-end for incorporating them into host-side object file.")
+
+TYPED_CODEGENOPT(std::string, OptRecordFile,
+                 "The name of the file to which the backend should save YAML "
+                 "optimization records.")
+
+TYPED_CODEGENOPT(std::string, OptRecordPasses,
+                 "The regex that filters the passes that should be saved to "
+                 "the optimization records.")
+
+TYPED_CODEGENOPT(std::string, OptRecordFormat,
+                 "The format used for serializing remarks (default: YAML)")
+
+TYPED_CODEGENOPT(
+    std::string, SymbolPartition,
+    "The name of the partition that symbols are assigned to, specified with "
+    "-fsymbol-partition (see https://lld.llvm.org/Partitions.html).")
+
+TYPED_CODEGENOPT(
+    std::shared_ptr<llvm::Regex>, OptimizationRemarkPattern,
+    "Regular expression to select optimizations for which we should enable "
+    "optimization remarks. Transformation passes whose name matches this "
+    "expression (and support this feature), will emit a diagnostic whenever "
+    "they perform a transformation. This is enabled by the -Rpass=regexp flag.")
+
+TYPED_CODEGENOPT(
+    std::shared_ptr<llvm::Regex>, OptimizationRemarkMissedPattern,
+    "Regular expression to select optimizations for which we should enable "
+    "missed optimization remarks. Transformation passes whose name matches "
+    "this expression (and support this feature), will emit a diagnostic "
+    "whenever they tried but failed to perform a transformation. This is "
+    "enabled by the -Rpass-missed=regexp flag.")
+
+TYPED_CODEGENOPT(
+    std::shared_ptr<llvm::Regex>, OptimizationRemarkAnalysisPattern,
+    "Regular expression to select optimizations for which we should enable "
+    "optimization analyses. Transformation passes whose name matches this "
+    "expression (and support this feature), will emit a diagnostic whenever "
+    "they want to explain why they decided to apply or not apply a given "
+    "transformation. This is enabled by the -Rpass-analysis=regexp flag.")
+
+TYPED_CODEGENOPT(std::vector<std::string>, RewriteMapFiles,
+                 "Set of files defining the rules for the symbol rewriting.")
+
+TYPED_CODEGENOPT(SanitizerSet, SanitizeRecover,
+                 "Set of sanitizer checks that are non-fatal (i.e. execution "
+                 "should be continued when possible).")
+
+TYPED_CODEGENOPT(SanitizerSet, SanitizeTrap,
+                 "Set of sanitizer checks that trap rather than diagnose.")
+
+TYPED_CODEGENOPT(std::vector<uint8_t>, CmdArgs,
+                 "List of backend command-line options for -fembed-bitcode.")
+
+TYPED_CODEGENOPT(std::vector<std::string>, NoBuiltinFuncs,
+                 "A list of all -fno-builtin-* function names (e.g., memset).")
+
+TYPED_CODEGENOPT(std::vector<std::string>, Reciprocals, "")
+
+TYPED_CODEGENOPT(std::string, PreferVectorWidth,
+                 "The preferred width for auto-vectorization transforms. This "
+                 "is intended to override default transforms based on the "
+                 "width of the architected vector registers.")
+
+TYPED_CODEGENOPT(XRayInstrSet, XRayInstrumentationBundle,
+                 "Set of XRay instrumentation kinds to emit.")
+
+TYPED_CODEGENOPT(std::vector<std::string>, DefaultFunctionAttrs, "")
+
+TYPED_CODEGENOPT(
+    std::vector<std::string>, PassPlugins,
+    "List of dynamic shared object files to be loaded as pass plugins.")
+
+TYPED_CODEGENOPT(
+    std::vector<std::string>, SanitizeCoverageAllowlistFiles,
+    "Path to allowlist file specifying which objects (files, functions) should "
+    "exclusively be instrumented by sanitizer coverage pass.")
+
+TYPED_CODEGENOPT(std::vector<std::string>, SanitizeCoverageBlocklistFiles,
+                 "Path to blocklist file specifying which objects (files, "
+                 "functions) listed for instrumentation by sanitizer coverage "
+                 "pass should actually not be instrumented.")
+
+TYPED_CODEGENOPT(
+    const char *, Argv0,
+    "Executable and command-line used to create a given CompilerInvocation. "
+    "Most of the time this will be the full -cc1 command.")
+
+TYPED_CODEGENOPT(ArrayRef<const char *>, CommandLineArgs, "")
 
 #undef CODEGENOPT
 #undef ENUM_CODEGENOPT
 #undef VALUE_CODEGENOPT
-
+#undef TYPED_CODEGENOPT

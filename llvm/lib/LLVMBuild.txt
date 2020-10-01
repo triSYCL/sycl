@@ -23,10 +23,14 @@ subdirectories =
  CodeGen
  DebugInfo
  Demangle
+ DWARFLinker
  ExecutionEngine
+ Extensions
+ Frontend
  FuzzMutate
  LineEditor
  Linker
+ InterfaceStub
  IR
  IRReader
  LTO
@@ -39,8 +43,9 @@ subdirectories =
  Remarks
  Passes
  ProfileData
- SYCL
  Support
+ SYCL
+ SYCLLowerIR
  TableGen
  TextAPI
  Target

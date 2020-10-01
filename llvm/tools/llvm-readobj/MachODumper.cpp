@@ -10,7 +10,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "Error.h"
 #include "ObjDumper.h"
 #include "StackMapPrinter.h"
 #include "llvm-readobj.h"
@@ -68,15 +67,9 @@ private:
 
 namespace llvm {
 
-std::error_code createMachODumper(const object::ObjectFile *Obj,
-                                  ScopedPrinter &Writer,
-                                  std::unique_ptr<ObjDumper> &Result) {
-  const MachOObjectFile *MachOObj = dyn_cast<MachOObjectFile>(Obj);
-  if (!MachOObj)
-    return readobj_error::unsupported_obj_file_format;
-
-  Result.reset(new MachODumper(MachOObj, Writer));
-  return readobj_error::success;
+std::unique_ptr<ObjDumper> createMachODumper(const object::MachOObjectFile &Obj,
+                                             ScopedPrinter &Writer) {
+  return std::make_unique<MachODumper>(&Obj, Writer);
 }
 
 } // namespace llvm
@@ -161,8 +154,9 @@ static const EnumEntry<uint32_t> MachOHeaderCpuSubtypesARM[] = {
 };
 
 static const EnumEntry<uint32_t> MachOHeaderCpuSubtypesARM64[] = {
-  LLVM_READOBJ_ENUM_ENT(MachO, CPU_SUBTYPE_ARM64_ALL),
-  LLVM_READOBJ_ENUM_ENT(MachO, CPU_SUBTYPE_ARM64E),
+    LLVM_READOBJ_ENUM_ENT(MachO, CPU_SUBTYPE_ARM64_ALL),
+    LLVM_READOBJ_ENUM_ENT(MachO, CPU_SUBTYPE_ARM64_V8),
+    LLVM_READOBJ_ENUM_ENT(MachO, CPU_SUBTYPE_ARM64E),
 };
 
 static const EnumEntry<uint32_t> MachOHeaderCpuSubtypesSPARC[] = {
@@ -212,6 +206,31 @@ static const EnumEntry<uint32_t> MachOHeaderFlags[] = {
   LLVM_READOBJ_ENUM_ENT(MachO, MH_HAS_TLV_DESCRIPTORS),
   LLVM_READOBJ_ENUM_ENT(MachO, MH_NO_HEAP_EXECUTION),
   LLVM_READOBJ_ENUM_ENT(MachO, MH_APP_EXTENSION_SAFE),
+};
+
+static const EnumEntry<unsigned> MachOSectionTypes[] = {
+  { "Regular"                        , MachO::S_REGULAR },
+  { "ZeroFill"                       , MachO::S_ZEROFILL },
+  { "CStringLiterals"                , MachO::S_CSTRING_LITERALS },
+  { "4ByteLiterals"                  , MachO::S_4BYTE_LITERALS },
+  { "8ByteLiterals"                  , MachO::S_8BYTE_LITERALS },
+  { "LiteralPointers"                , MachO::S_LITERAL_POINTERS },
+  { "NonLazySymbolPointers"          , MachO::S_NON_LAZY_SYMBOL_POINTERS },
+  { "LazySymbolPointers"             , MachO::S_LAZY_SYMBOL_POINTERS },
+  { "SymbolStubs"                    , MachO::S_SYMBOL_STUBS },
+  { "ModInitFuncPointers"            , MachO::S_MOD_INIT_FUNC_POINTERS },
+  { "ModTermFuncPointers"            , MachO::S_MOD_TERM_FUNC_POINTERS },
+  { "Coalesced"                      , MachO::S_COALESCED },
+  { "GBZeroFill"                     , MachO::S_GB_ZEROFILL },
+  { "Interposing"                    , MachO::S_INTERPOSING },
+  { "16ByteLiterals"                 , MachO::S_16BYTE_LITERALS },
+  { "DTraceDOF"                      , MachO::S_DTRACE_DOF },
+  { "LazyDylibSymbolPointers"        , MachO::S_LAZY_DYLIB_SYMBOL_POINTERS },
+  { "ThreadLocalRegular"             , MachO::S_THREAD_LOCAL_REGULAR },
+  { "ThreadLocalZerofill"            , MachO::S_THREAD_LOCAL_ZEROFILL },
+  { "ThreadLocalVariables"           , MachO::S_THREAD_LOCAL_VARIABLES },
+  { "ThreadLocalVariablePointers"    , MachO::S_THREAD_LOCAL_VARIABLE_POINTERS },
+  { "ThreadLocalInitFunctionPointers", MachO::S_THREAD_LOCAL_INIT_FUNCTION_POINTERS }
 };
 
 static const EnumEntry<unsigned> MachOSectionAttributes[] = {
@@ -440,10 +459,7 @@ void MachODumper::printSectionHeaders(const MachOObjectFile *Obj) {
     MachOSection MOSection;
     getSection(Obj, Section.getRawDataRefImpl(), MOSection);
     DataRefImpl DR = Section.getRawDataRefImpl();
-
-    StringRef Name;
-    error(Section.getName(Name));
-
+    StringRef Name = unwrapOrError(Obj->getFileName(), Section.getName());
     ArrayRef<char> RawName = Obj->getSectionRawName(DR);
     StringRef SegmentName = Obj->getSectionFinalSegmentName(DR);
     ArrayRef<char> RawSegmentName = Obj->getSectionRawFinalSegmentName(DR);
@@ -459,7 +475,7 @@ void MachODumper::printSectionHeaders(const MachOObjectFile *Obj) {
     W.printHex("RelocationOffset", MOSection.RelocationTableOffset);
     W.printNumber("RelocationCount", MOSection.NumRelocationTableEntries);
     W.printEnum("Type", MOSection.Flags & 0xFF,
-                makeArrayRef(MachOSectionAttributes));
+                makeArrayRef(MachOSectionTypes));
     W.printFlags("Attributes", MOSection.Flags >> 8,
                  makeArrayRef(MachOSectionAttributes));
     W.printHex("Reserved1", MOSection.Reserved1);
@@ -484,7 +500,8 @@ void MachODumper::printSectionHeaders(const MachOObjectFile *Obj) {
     }
 
     if (opts::SectionData && !Section.isBSS())
-      W.printBinaryBlock("SectionData", unwrapOrError(Section.getContents()));
+      W.printBinaryBlock("SectionData", unwrapOrError(Obj->getFileName(),
+                                                      Section.getContents()));
   }
 }
 
@@ -493,9 +510,7 @@ void MachODumper::printRelocations() {
 
   std::error_code EC;
   for (const SectionRef &Section : Obj->sections()) {
-    StringRef Name;
-    error(Section.getName(Name));
-
+    StringRef Name = unwrapOrError(Obj->getFileName(), Section.getName());
     bool PrintedGroup = false;
     for (const RelocationRef &Reloc : Section.relocations()) {
       if (!PrintedGroup) {
@@ -535,14 +550,13 @@ void MachODumper::printRelocation(const MachOObjectFile *Obj,
     if (Symbol != Obj->symbol_end()) {
       Expected<StringRef> TargetNameOrErr = Symbol->getName();
       if (!TargetNameOrErr)
-        error(errorToErrorCode(TargetNameOrErr.takeError()));
+        reportError(TargetNameOrErr.takeError(), Obj->getFileName());
       TargetName = *TargetNameOrErr;
     }
   } else if (!IsScattered) {
     section_iterator SecI = Obj->getRelocationSection(DR);
-    if (SecI != Obj->section_end()) {
-      error(SecI->getName(TargetName));
-    }
+    if (SecI != Obj->section_end())
+      TargetName = unwrapOrError(Obj->getFileName(), SecI->getName());
   }
   if (TargetName.empty())
     TargetName = "-";
@@ -610,10 +624,12 @@ void MachODumper::printSymbol(const SymbolRef &Symbol) {
 
   StringRef SectionName = "";
   Expected<section_iterator> SecIOrErr = Symbol.getSection();
-  error(errorToErrorCode(SecIOrErr.takeError()));
+  if (!SecIOrErr)
+    reportError(SecIOrErr.takeError(), Obj->getFileName());
+
   section_iterator SecI = *SecIOrErr;
   if (SecI != Obj->section_end())
-    error(SecI->getName(SectionName));
+    SectionName = unwrapOrError(Obj->getFileName(), SecI->getName());
 
   DictScope D(W, "Symbol");
   W.printNumber("Name", SymbolName, MOSymbol.StringIndex);
@@ -643,7 +659,11 @@ void MachODumper::printStackMap() const {
   object::SectionRef StackMapSection;
   for (auto Sec : Obj->sections()) {
     StringRef Name;
-    Sec.getName(Name);
+    if (Expected<StringRef> NameOrErr = Sec.getName())
+      Name = *NameOrErr;
+    else
+      consumeError(NameOrErr.takeError());
+
     if (Name == "__llvm_stackmaps") {
       StackMapSection = Sec;
       break;
@@ -653,7 +673,8 @@ void MachODumper::printStackMap() const {
   if (StackMapSection == object::SectionRef())
     return;
 
-  StringRef StackMapContents = unwrapOrError(StackMapSection.getContents());
+  StringRef StackMapContents =
+      unwrapOrError(Obj->getFileName(), StackMapSection.getContents());
   ArrayRef<uint8_t> StackMapContentsArray =
       arrayRefFromStringRef(StackMapContents);
 

@@ -38,6 +38,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "SPIRVEntry.h"
+#include "SPIRVAsm.h"
 #include "SPIRVBasicBlock.h"
 #include "SPIRVDebug.h"
 #include "SPIRVDecorate.h"
@@ -194,7 +195,9 @@ void SPIRVEntry::encodeWordCountOpCode(spv_ostream &O) const {
     return;
   }
 #endif
-  getEncoder(O) << mkWord(WordCount, OpCode);
+  assert(WordCount < 65536 && "WordCount must fit into 16-bit value");
+  SPIRVWord WordCountOpCode = (WordCount << WordCountShift) | OpCode;
+  getEncoder(O) << WordCountOpCode;
 }
 // Read words from SPIRV binary and create members for SPIRVEntry.
 // The word count and op code has already been read before calling this
@@ -335,30 +338,42 @@ bool SPIRVEntry::hasMemberDecorate(Decoration Kind, size_t Index,
   return true;
 }
 
-std::string SPIRVEntry::getDecorationStringLiteral(Decoration Kind) const {
-  std::vector<SPIRVWord> Literals;
+std::vector<std::string>
+SPIRVEntry::getDecorationStringLiteral(Decoration Kind) const {
   auto Loc = Decorates.find(Kind);
   if (Loc == Decorates.end())
-    return std::string();
+    return {};
 
-  for (SPIRVWord I = 0; I < Loc->second->getLiteralCount(); ++I)
-    Literals.push_back(Loc->second->getLiteral(I));
-
-  return getString(Literals.cbegin(), Literals.cend());
+  return getVecString(Loc->second->getVecLiteral());
 }
 
-std::string
+std::vector<std::string>
 SPIRVEntry::getMemberDecorationStringLiteral(Decoration Kind,
                                              SPIRVWord MemberNumber) const {
-  std::vector<SPIRVWord> Literals;
   auto Loc = MemberDecorates.find({MemberNumber, Kind});
   if (Loc == MemberDecorates.end())
-    return std::string();
+    return {};
 
-  for (SPIRVWord I = 0; I < Loc->second->getLiteralCount(); ++I)
-    Literals.push_back(Loc->second->getLiteral(I));
+  return getVecString(Loc->second->getVecLiteral());
+}
 
-  return getString(Literals.cbegin(), Literals.cend());
+std::vector<SPIRVWord>
+SPIRVEntry::getDecorationLiterals(Decoration Kind) const {
+  auto Loc = Decorates.find(Kind);
+  if (Loc == Decorates.end())
+    return {};
+
+  return (Loc->second->getVecLiteral());
+}
+
+std::vector<SPIRVWord>
+SPIRVEntry::getMemberDecorationLiterals(Decoration Kind,
+                                        SPIRVWord MemberNumber) const {
+  auto Loc = MemberDecorates.find({MemberNumber, Kind});
+  if (Loc == MemberDecorates.end())
+    return {};
+
+  return (Loc->second->getVecLiteral());
 }
 
 // Get literals of all decorations of Kind at Index.
@@ -371,6 +386,17 @@ std::set<SPIRVWord> SPIRVEntry::getDecorate(Decoration Kind,
     Value.insert(I->second->getLiteral(Index));
   }
   return Value;
+}
+
+std::vector<SPIRVDecorate const *>
+SPIRVEntry::getDecorations(Decoration Kind) const {
+  auto Range = Decorates.equal_range(Kind);
+  std::vector<SPIRVDecorate const *> Decors;
+  Decors.reserve(Decorates.count(Kind));
+  for (auto I = Range.first, E = Range.second; I != E; ++I) {
+    Decors.push_back(I->second);
+  }
+  return Decors;
 }
 
 bool SPIRVEntry::hasLinkageType() const {
@@ -463,12 +489,25 @@ void SPIRVExecutionMode::decode(std::istream &I) {
   switch (ExecMode) {
   case ExecutionModeLocalSize:
   case ExecutionModeLocalSizeHint:
+  case ExecutionModeMaxWorkgroupSizeINTEL:
     WordLiterals.resize(3);
     break;
   case ExecutionModeInvocations:
   case ExecutionModeOutputVertices:
   case ExecutionModeVecTypeHint:
+  case ExecutionModeDenormPreserve:
+  case ExecutionModeDenormFlushToZero:
+  case ExecutionModeSignedZeroInfNanPreserve:
+  case ExecutionModeRoundingModeRTE:
+  case ExecutionModeRoundingModeRTZ:
+  case ExecutionModeRoundingModeRTPINTEL:
+  case ExecutionModeRoundingModeRTNINTEL:
+  case ExecutionModeFloatingPointModeALTINTEL:
+  case ExecutionModeFloatingPointModeIEEEINTEL:
+  case ExecutionModeSharedLocalMemorySizeINTEL:
   case ExecutionModeSubgroupSize:
+  case ExecutionModeMaxWorkDimINTEL:
+  case ExecutionModeNumSIMDWorkitemsINTEL:
     WordLiterals.resize(1);
     break;
   default:

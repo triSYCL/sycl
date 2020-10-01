@@ -39,7 +39,7 @@ struct InstrProfTest : ::testing::Test {
   InstrProfWriter Writer;
   std::unique_ptr<IndexedInstrProfReader> Reader;
 
-  void SetUp() { Writer.setOutputSparse(false); }
+  void SetUp() override { Writer.setOutputSparse(false); }
 
   void readProfile(std::unique_ptr<MemoryBuffer> Profile,
                    std::unique_ptr<MemoryBuffer> Remapping = nullptr) {
@@ -51,12 +51,12 @@ struct InstrProfTest : ::testing::Test {
 };
 
 struct SparseInstrProfTest : public InstrProfTest {
-  void SetUp() { Writer.setOutputSparse(true); }
+  void SetUp() override { Writer.setOutputSparse(true); }
 };
 
 struct MaybeSparseInstrProfTest : public InstrProfTest,
                                   public ::testing::WithParamInterface<bool> {
-  void SetUp() { Writer.setOutputSparse(GetParam()); }
+  void SetUp() override { Writer.setOutputSparse(GetParam()); }
 };
 
 TEST_P(MaybeSparseInstrProfTest, write_and_read_empty_profile) {
@@ -889,7 +889,7 @@ TEST_P(MaybeSparseInstrProfTest, instr_prof_bogus_symtab_empty_func_name) {
 // Testing symtab creator interface used by value profile transformer.
 TEST_P(MaybeSparseInstrProfTest, instr_prof_symtab_module_test) {
   LLVMContext Ctx;
-  std::unique_ptr<Module> M = llvm::make_unique<Module>("MyModule.cpp", Ctx);
+  std::unique_ptr<Module> M = std::make_unique<Module>("MyModule.cpp", Ctx);
   FunctionType *FTy = FunctionType::get(Type::getVoidTy(Ctx),
                                         /*isVarArg=*/false);
   Function::Create(FTy, Function::ExternalLinkage, "Gfoo", M.get());

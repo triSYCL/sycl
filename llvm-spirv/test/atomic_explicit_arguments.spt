@@ -31,15 +31,15 @@
 
 ; RUN: llvm-spirv %s -to-binary -o %t.spv
 ; RUN: spirv-val %t.spv
-; RUN: llvm-spirv -r %t.spv -o %t.bc
+; RUN: llvm-spirv -r --spirv-target-env=CL2.0 %t.spv -o %t.bc
 ; RUN: llvm-dis < %t.bc | FileCheck %s
 
 ; CHECK: define spir_func i32 @load(i32 addrspace(4)* %obj, i32 %order, i32 %scope) #0 {
 ; CHECK: entry:
 ; CHECK:   %call1 = call spir_func i32 @__translate_spirv_memory_scope(i32 %scope)
 ; CHECK:   %call2 = call spir_func i32 @__translate_spirv_memory_order(i32 %order)
-; CHECK:   %call.old = call spir_func i32 @_Z20atomic_load_explicitPU3AS4VU7_Atomici12memory_order12memory_scope(i32 addrspace(4)* %obj, i32 %call2, i32 %call1)
-; CHECK:   ret i32 %call.old
+; CHECK:   %call = call spir_func i32 @_Z20atomic_load_explicitPU3AS4VU7_Atomici12memory_order12memory_scope(i32 addrspace(4)* %obj, i32 %call2, i32 %call1)
+; CHECK:   ret i32 %call
 ; CHECK: }
 
 ; CHECK: define private spir_func i32 @__translate_spirv_memory_scope(i32 %key) {
@@ -67,7 +67,8 @@
 
 ; CHECK: define private spir_func i32 @__translate_spirv_memory_order(i32 %key) {
 ; CHECK: entry:
-; CHECK:   switch i32 %key, label %default [
+; CHECK:   %key.masked = and i32 30, %key
+; CHECK:   switch i32 %key.masked, label %default [
 ; CHECK:     i32 0, label %case.0
 ; CHECK:     i32 2, label %case.2
 ; CHECK:     i32 4, label %case.4
