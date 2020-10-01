@@ -102,10 +102,10 @@ int main(int argc, char* argv[]) {
      [=] {
       // Partition completely the following arrays along their first dimension
       auto gX = xilinx::partition_array<char, 9,
-                xilinx::partition::complete<0>>({-1, 0, 1, -2, 0, 2, -1, 0, 1});
+                xilinx::partition::complete<1>>({-1, 0, 1, -2, 0, 2, -1, 0, 1});
 
       auto gY = xilinx::partition_array<char, 9,
-                xilinx::partition::complete<0>>({1, 2, 1, 0, 0, 0, -1, -2, -1});
+                xilinx::partition::complete<1>>({1, 2, 1, 0, 0, 0, -1, -2, -1});
 
       int magX, magY, gI, pIndex;
 

@@ -131,7 +131,6 @@ namespace partition {
   */
   template <std::size_t PDim = 1>
   struct complete {
-    static_assert(PDim >= 1, "array can't 0 dimension");
     static constexpr auto partition_dim = PDim;
     static constexpr auto partition_type = type::complete;
   };
