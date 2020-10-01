@@ -99,12 +99,13 @@ int main(int argc, char* argv[]) {
     // The reqd_work_group_size is already actually applied internally for single
     // tasks but this showcases it's usage none the less, as it can be applied
     // to parallel_fors with local sizes
-     [=]() {
+     [=] {
+      // Partition completely the following arrays along their first dimension
       auto gX = xilinx::partition_array<char, 9,
-                xilinx::partition::complete<1>>({-1, 0, 1, -2, 0, 2, -1, 0, 1});
+                xilinx::partition::complete<0>>({-1, 0, 1, -2, 0, 2, -1, 0, 1});
 
       auto gY = xilinx::partition_array<char, 9,
-                xilinx::partition::complete<1>>({1, 2, 1, 0, 0, 0, -1, -2, -1});
+                xilinx::partition::complete<0>>({1, 2, 1, 0, 0, 0, -1, -2, -1});
 
       int magX, magY, gI, pIndex;
 
