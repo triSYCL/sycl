@@ -63,3 +63,15 @@
 #else
 #define __SYCL_INLINE_CONSTEXPR static constexpr
 #endif
+
+#if defined(__SYCL_DEVICE_ONLY__)
+#define __SYCL_DEVICE_ANNOTATE(...) __attribute__((annotate(__VA_ARGS__)))
+#else
+#define __SYCL_DEVICE_ANNOTATE(...)
+#endif
+
+#if defined(__SYCL_DEVICE_ONLY__)
+#define __SYCL_DEVICE_ADDRSPACE(AS) __attribute__((address_space(AS)))
+#else
+#define __SYCL_DEVICE_ADDRSPACE(AS)
+#endif

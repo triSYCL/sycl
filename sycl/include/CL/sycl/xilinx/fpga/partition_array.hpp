@@ -51,8 +51,9 @@ namespace partition {
 
   /// This fuction is currently empty but the LowerSYCLMetaData Pass will fill
   /// it with the required IR.
-  SYCL_DEVICE_ANNOTATE("xilinx_partition_array") __attribute__((always_inline))
-  inline void xilinx_partition_array(void*, int, int, int) {}
+  template<typename Ptr>
+  __SYCL_DEVICE_ANNOTATE("xilinx_partition_array") __attribute__((always_inline))
+  inline void xilinx_partition_array(Ptr, int, int, int) {}
 
   /** Represent a cyclic partition.
 
@@ -130,6 +131,7 @@ namespace partition {
   */
   template <std::size_t PDim = 1>
   struct complete {
+    static_assert(PDim >= 1, "array can't 0 dimension");
     static constexpr auto partition_dim = PDim;
     static constexpr auto partition_type = type::complete;
   };
@@ -197,16 +199,21 @@ struct partition_array {
     // Add the intrinsic according expressing to the target compiler the
     // partitioning to use
     if constexpr (partition_type == partition::type::cyclic)
-      partition::xilinx_partition_array(&(*this)[0], partition_type,
-                                        PartitionType::physical_mem_num,
-                                        PartitionType::partition_dim);
+      partition::xilinx_partition_array(
+          (ValueType __SYCL_DEVICE_ADDRSPACE(0 /*stack*/)(*)[Size])(&elems) &
+              elems,
+          partition_type, PartitionType::physical_mem_num,
+          PartitionType::partition_dim);
     if constexpr (partition_type == partition::type::block)
-      partition::xilinx_partition_array(&(*this)[0], partition_type,
-                                        PartitionType::ele_in_each_physical_mem,
-                                        PartitionType::partition_dim);
+      partition::xilinx_partition_array(
+          (ValueType __SYCL_DEVICE_ADDRSPACE(0 /*stack*/)(*)[Size])(&elems) &
+              elems,
+          partition_type, PartitionType::ele_in_each_physical_mem,
+          PartitionType::partition_dim);
     if constexpr (partition_type == partition::type::complete)
-      partition::xilinx_partition_array(&(*this)[0], partition_type, 0,
-                                        PartitionType::partition_dim);
+      partition::xilinx_partition_array(
+          (ValueType __SYCL_DEVICE_ADDRSPACE(0 /*stack*/)(*)[Size])(&elems),
+          partition_type, 0, PartitionType::partition_dim);
   }
 
   /// A constructor from some container

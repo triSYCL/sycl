@@ -32,6 +32,8 @@ config.excludes = ['Inputs', 'feature-tests', 'disabled']
 # test_source_root: The root path where tests are located.
 config.test_source_root = os.path.dirname(__file__)
 
+timeout=600
+
 # test_exec_root: The root path where tests should be run.
 config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
 
@@ -80,7 +82,6 @@ lit_config.note("Backend (SYCL_BE): {}".format(backend))
 config.substitutions.append( ('%sycl_be', backend) )
 
 xocc=lit_config.params.get('XOCC', "off")
-lit_config.note("XOCC={}".format(xocc))
 
 get_device_count_by_type_path = os.path.join(config.llvm_tools_dir, "get_device_count_by_type")
 
@@ -248,6 +249,13 @@ if xocc != "off":
     required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH']
     has_error=False
     config.available_features.add("xocc")
+    config.available_features.add(xocc_target)
+    pkg_opencv4 = subprocess.run(["pkg-config", "--libs", "--cflags", "opencv4"], stdout=subprocess.PIPE)
+    has_opencv4 = not pkg_opencv4.returncode
+    lit_config.note("has opencv4: {}".format(has_opencv4))
+    if has_opencv4:
+        config.available_features.add("opencv4")
+        config.substitutions.append( ('%opencv4_flags', pkg_opencv4.stdout.decode('utf-8')[:-1]) )
     for env in required_env:
         if env not in os.environ:
             lit_config.note("missing environnement variable: {}".format(env))
@@ -258,13 +266,25 @@ if xocc != "off":
     if xocc == "only":
         config.name = 'SYCL-XOCC'
         config.test_source_root = config.test_source_root + "/xocc_tests"
+    run_if_hw="echo"
+    run_if_hw_emu="echo"
+    run_if_sw_emu="echo"
+    if xocc_target == "hw":
+        timeout = 10800 # 3h
+        run_if_hw=""
+    if xocc_target == "hw_emu":
+        timeout = 1800 # 30min
+        run_if_hw_emu=""
+    if xocc_target == "sw_emu":
+        run_if_sw_emu=""
+    config.substitutions.append( ('%run_if_hw', run_if_hw) )
+    config.substitutions.append( ('%run_if_hw_emu', run_if_hw_emu) )
+    config.substitutions.append( ('%run_if_sw_emu', run_if_sw_emu) )
+
 
 # Set timeout for test = 10 mins
 try:
     import psutil
-    lit_config.maxIndividualTestTime = 600
-    if "XCL_EMULATION_MODE" in os.environ:
-        if os.environ["XCL_EMULATION_MODE"] == "hw":
-            lit_config.maxIndividualTestTime = 10800 # 3h
+    lit_config.maxIndividualTestTime = timeout
 except ImportError:
     pass
