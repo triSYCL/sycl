@@ -355,7 +355,7 @@ To run an example from the provided examples:
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
     parallel_for_ND_range.cpp -o parallel_for_ND_range
-  # Do not forget about unset the variable for real execution
+  # Do not forget about unset the variable for real hardware execution
   unset XCL_EMULATION_MODE
   # Run on the real FPGA board
   ./parallel_for_ND_range
@@ -409,6 +409,8 @@ export XCL_EMULATION_MODE=hw
 $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
     -fsycl-targets=fpga64-xilinx-unknown-sycldevice edge_detection.cpp \
     -o edge_detection `pkg-config --libs --cflags opencv4`
+  # Do not forget about unset the variable for real hardware execution
+  unset XCL_EMULATION_MODE
 # Execute on one of the images
 ./edge_detection data/input/eiffel.bmp
 ```
