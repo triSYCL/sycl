@@ -403,7 +403,7 @@ parallel.
 To run a SYCL translation of
 https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
 ```bash
-cd $SYCL_HOME/llvm/sycl/test/xocc_tests/disabled/edge_detection
+cd $SYCL_HOME/llvm/sycl/test/xocc_tests/edge_detection
 # Instruct the compiler and runtime to use real FPGA hardware execution
 export XCL_EMULATION_MODE=hw
 $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
