@@ -27,7 +27,7 @@ config.test_format = lit.formats.ShTest()
 config.suffixes = ['.c', '.cpp', '.dump'] #add .spv. Currently not clear what to do with those
 
 # feature tests are considered not so lightweight, so, they are excluded by default
-config.excludes = ['Inputs', 'feature-tests', 'disabled']
+config.excludes = ['Inputs', 'feature-tests', 'disabled', '_x', '.Xil', '.run']
 
 # test_source_root: The root path where tests are located.
 config.test_source_root = os.path.dirname(__file__)
@@ -82,6 +82,9 @@ lit_config.note("Backend (SYCL_BE): {}".format(backend))
 config.substitutions.append( ('%sycl_be', backend) )
 
 xocc=lit_config.params.get('XOCC', "off")
+xocc_target = "hw"
+if "XCL_EMULATION_MODE" in os.environ:
+    xocc_target = os.environ["XCL_EMULATION_MODE"]
 
 get_device_count_by_type_path = os.path.join(config.llvm_tools_dir, "get_device_count_by_type")
 
@@ -207,6 +210,10 @@ if xocc != "off":
     if "XCL_EMULATION_MODE" in os.environ:
         if os.environ["XCL_EMULATION_MODE"] == "hw":
             acc_run_substitute="env -u XCL_EMULATION_MODE " + acc_run_substitute
+    if xocc_target != "hw_emu":
+        acc_run_substitute+= "timeout 60 "
+    else:
+        acc_run_substitute+= "timeout 300 "
 
 config.substitutions.append( ('%ACC_RUN_PLACEHOLDER',  acc_run_substitute) )
 config.substitutions.append( ('%ACC_CHECK_PLACEHOLDER',  acc_check_substitute) )
@@ -241,9 +248,6 @@ for aot_tool in aot_tools:
         lit_config.warning("Couldn't find pre-installed AOT device compiler " + aot_tool)
 
 if xocc != "off":
-    xocc_target="hw"
-    if "XCL_EMULATION_MODE" in os.environ:
-        xocc_target = os.environ["XCL_EMULATION_MODE"]
     llvm_config.with_environment('XCL_EMULATION_MODE', xocc_target, append_path=False)
     lit_config.note("XOCC target: {}".format(xocc_target))
     required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH']
