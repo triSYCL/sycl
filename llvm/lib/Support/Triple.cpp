@@ -162,6 +162,8 @@ StringRef Triple::getArchTypePrefix(ArchType Kind) {
   case fpga_aocr:
   case fpga_aocx:
   case fpga_dep:
+  case fpga32:
+  case fpga64:
     return "fpga";
 
   case ve:          return "ve";
@@ -474,8 +476,8 @@ static Triple::ArchType parseArch(StringRef ArchName) {
                 .Case("fpga_aocx", Triple::fpga_aocx)
                 .Case("fpga_dep", Triple::fpga_dep)
                 .Case("shave", Triple::shave)
-                .Case("fpga32", Triple::fpga32)
-                .Case("fpga64", Triple::fpga64)
+                .StartsWith("fpga32", Triple::fpga32)
+                .StartsWith("fpga64", Triple::fpga64)
                 .Case("ve", Triple::ve)
                 .Case("wasm32", Triple::wasm32)
                 .Case("wasm64", Triple::wasm64)
@@ -609,6 +611,18 @@ static Triple::SubArchType parseSubArch(StringRef SubArchName) {
         return Triple::SPIRSubArch_gen;
       else if (SA == "x86_64")
         return Triple::SPIRSubArch_x86_64;
+    }
+  }
+
+  if (SubArchName.startswith("fpga")) {
+    StringRef SA(SubArchName);
+    if (SA.consume_front("fpga64_") || SA.consume_front("fpga32_")) {
+      if (SubArchName.endswith("hw"))
+        return llvm::Triple::FPGASubArch_hw;
+      if (SubArchName.endswith("hw_emu"))
+        return llvm::Triple::FPGASubArch_hw_emu;
+      if (SubArchName.endswith("sw_emu"))
+        return llvm::Triple::FPGASubArch_sw_emu;
     }
   }
 

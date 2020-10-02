@@ -203,13 +203,20 @@ else:
     lit_config.warning("Accelerator device not found")
 
 if xocc != "off":
-    xrt_lock="/tmp/xrt.lock"
-    acc_run_substitute+= "setsid flock -x " + xrt_lock + " "
+    # xrt doesn't deal well with multiple executables using it concurrently (at the time of writing).
+    # The details are at https://xilinx.github.io/XRT/master/html/multiprocess.html
+    # so we wrap every use of XRT inside an file lock.
+    # We also wrap invocation of executable in an setsid to prevent
+    # a single program failure from ending all the tests.
+    xrt_lock = "/tmp/xrt.lock"
+    acc_run_substitute+= "setsid flock --exclusive " + xrt_lock + " "
     if os.path.exists(xrt_lock):
         os.remove(xrt_lock)
-    if "XCL_EMULATION_MODE" in os.environ:
-        if os.environ["XCL_EMULATION_MODE"] == "hw":
-            acc_run_substitute="env -u XCL_EMULATION_MODE " + acc_run_substitute
+    # XCL_EMULATION_MODE = hw is only valid for our SYCL driver, 
+    # for XRT XCL_EMULATION_MODE should only be used when using either hw_emu or sw_emu
+    # if xocc_target == "hw":
+    acc_run_substitute="env --unset=XCL_EMULATION_MODE " + acc_run_substitute
+    # hw_emu is very slow so it has a higher timeout.
     if xocc_target != "hw_emu":
         acc_run_substitute+= "timeout 60 "
     else:
@@ -270,6 +277,8 @@ if xocc != "off":
     if xocc == "only":
         config.name = 'SYCL-XOCC'
         config.test_source_root = config.test_source_root + "/xocc_tests"
+    # run_if_* defaults to a simple echo to print the comand instead of running it.
+    # it will be replaced by and empty string to actually run the command.
     run_if_hw="echo"
     run_if_hw_emu="echo"
     run_if_sw_emu="echo"

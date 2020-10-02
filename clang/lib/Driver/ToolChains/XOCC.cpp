@@ -14,6 +14,7 @@
 #include "clang/Driver/DriverDiagnostic.h"
 #include "clang/Driver/Options.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
@@ -77,22 +78,23 @@ void SYCL::LinkerXOCC::ConstructJob(Compilation &C, const JobAction &JA,
   constructSYCLXOCCCommand(C, JA, Output, Inputs, Args);
 }
 
-static void parseTargetOpts(StringRef ArgString, const llvm::opt::ArgList &Args,
-                            llvm::opt::ArgStringList &CmdArgs) {
-  // Tokenize the string.
-  SmallVector<const char *, 8> TargetArgs;
-  llvm::BumpPtrAllocator A;
-  llvm::StringSaver S(A);
-  llvm::cl::TokenizeGNUCommandLine(ArgString, S, TargetArgs);
-  for (StringRef TA : TargetArgs)
-    CmdArgs.push_back(Args.MakeArgString(TA));
-}
-
 // Expects a specific type of option (e.g. -Xsycl-target-backend) and will
 // extract the arguments.
 void AddForwardedOptions(const llvm::opt::ArgList &Args,
                          llvm::opt::ArgStringList &CmdArgs, OptSpecifier Opt,
                          OptSpecifier Opt_EQ, const llvm::Triple& T, const Driver& D) {
+  llvm::BumpPtrAllocator Allocator;
+  llvm::StringSaver SS(Allocator);
+
+  Opt.getID();
+  SmallVector<char, 128> TmpPath;
+  int FD;
+  std::error_code ec = fs::createTemporaryFile(llvm::Twine("sycl-xocc-args") +
+                                                   llvm::Twine(Opt.getID()),
+                                               "", FD, TmpPath);
+  assert(!ec);
+  llvm::raw_fd_ostream Os(FD, true);
+
   for (auto *A : Args) {
     bool OptNoTriple;
     OptNoTriple = A->getOption().matches(Opt);
@@ -122,19 +124,15 @@ void AddForwardedOptions(const llvm::opt::ArgList &Args,
       // Triple found, add the next argument in line.
       ArgString = A->getValue(1);
 
-    parseTargetOpts(ArgString, Args, CmdArgs);
+    // Tokenize the string.
+    SmallVector<const char *, 8> TargetArgs;
+    llvm::cl::TokenizeGNUCommandLine(ArgString, SS, TargetArgs);
+    for (StringRef TA : TargetArgs)
+      Os << Args.MakeArgString(TA) << " ";
     A->claim();
   }
+  CmdArgs.push_back(Args.MakeArgString(TmpPath));
 }
-
-llvm::Triple SYCL::LinkerXOCC::getTargetTriple() const {
-  llvm::Triple T;
-  T.setArch(llvm::Triple::fpga64);
-  T.setVendor(llvm::Triple::Xilinx);
-  T.setEnvironment(llvm::Triple::SYCLDevice);
-  return T;
-}
-
 
 // \todo: Extend to support the possibility of more than one file being passed
 // to the linker stage
@@ -185,10 +183,28 @@ void SYCL::LinkerXOCC::constructSYCLXOCCCommand(
   assert(Output.getFilename()[0]);
   CmdArgs.push_back(Output.getFilename());
 
+  // Script Arg $7
   AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_backend,
-      options::OPT_Xsycl_backend_EQ, getTargetTriple(), C.getDriver());
+      options::OPT_Xsycl_backend_EQ, TC.getTriple(), C.getDriver());
+
+  // Script Arg $8
   AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_linker,
-      options::OPT_Xsycl_linker_EQ, getTargetTriple(), C.getDriver());
+      options::OPT_Xsycl_linker_EQ, TC.getTriple(), C.getDriver());
+
+  switch (TC.getTriple().getSubArch()) {
+    case llvm::Triple::FPGASubArch_hw: CmdArgs.push_back("hw"); break;
+    case llvm::Triple::FPGASubArch_hw_emu: CmdArgs.push_back("hw_emu"); break;
+    case llvm::Triple::FPGASubArch_sw_emu: CmdArgs.push_back("sw_emu"); break;
+    // case llvm::Triple::NoSubArch: {
+    //   if (const char* Mode = std::getenv("XCL_EMULATION_MODE")) {
+    //     CmdArgs.push_back(Mode);
+    //     break;
+    //   }
+    //   CmdArgs.push_back("hw");
+    // }
+    default:
+      llvm_unreachable("invalid subarch");
+  }
 
   // Path to sycl-xocc script
   SmallString<128> ExecPath(C.getDriver().Dir);
