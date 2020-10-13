@@ -27,6 +27,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/SHA1.h"
 
 #include <array>
 #include <functional>
@@ -740,6 +741,54 @@ static target getAccessTarget(const ClassTemplateSpecializationDecl *AccTy) {
       AccTy->getTemplateArgs()[3].getAsIntegral().getExtValue());
 }
 
+/// Compute a unique name that is consumable by sycl-xocc
+static std::string computeUniqueSYCLXOCCName(StringRef Name,
+                                             StringRef Demangle) {
+  /// XOCC has a maximum of 64 character for the name of the kernel function
+  /// plus the name of one parameter.
+  /// Those characters need to be used wisely to prevent name collisions.
+  /// It is also useful to use a name that is understandable by the user,
+  /// so we add only 8 character of hash and only if needed.
+  constexpr unsigned MaxXOCCSize = 30;
+
+  std::string Result;
+  Result.reserve(Demangle.size());
+
+  for (char c : Demangle) {
+    if (!isAlphanumeric(c)) {
+      // Do not repeat _ in the cleaned-up name
+      if (!Result.empty() && Result.back() == '_')
+        continue;
+      c = '_';
+    }
+    Result.push_back(c);
+  }
+
+  /// The name alone is guaranteed to be unique, so if fits in the size, it is
+  /// enough.
+  if (Result.size() < MaxXOCCSize)
+    return Result;
+
+  /// 9 for 8 characters of hash and an '_'.
+  Result.erase(0, Result.size() - (MaxXOCCSize - 9));
+
+  /// Sadly there is only 63 valid characters in C identifiers.
+  /// So one of them A is repeated. This doesn't hurt entropy to much because
+  /// it is just 1 out of 64.
+  Result += '_' + llvm::SHA1::hashToString(
+                      llvm::ArrayRef<uint8_t>{
+                          reinterpret_cast<const uint8_t *>(Name.data()),
+                          Name.size()},
+                      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                      "abcdefghijklmnopqrstuvwxyz"
+                      "0123456789_A");
+
+  if (Result.size() > MaxXOCCSize)
+    Result.resize(MaxXOCCSize);
+
+  return Result;
+}
+
 // The first template argument to the kernel caller function is used to identify
 // the kernel itself.
 static QualType calculateKernelNameType(ASTContext &Ctx,
@@ -763,7 +812,11 @@ constructKernelName(Sema &S, FunctionDecl *KernelCallerFunc,
 
   MC.mangleTypeName(KernelNameType, Out);
 
-  return {std::string(Out.str()),
+  std::string Res = std::string(Out.str());
+  if (S.getASTContext().getTargetInfo().getTriple().isXilinxSYCLDevice())
+    Res = computeUniqueSYCLXOCCName(Res, KernelNameType.getAsString());
+
+  return {Res,
           PredefinedExpr::ComputeName(S.getASTContext(),
                                       PredefinedExpr::UniqueStableNameType,
                                       KernelNameType)};

@@ -33,7 +33,7 @@ struct PrepareSYCLOpt : public ModulePass {
   void turnNonKernelsIntoPrivate(Module &M) {
     for (GlobalObject &G : M.global_objects()) {
       if (auto *F = dyn_cast<Function>(&G))
-        if (F->getName().startswith("xSYCL"))
+        if (F->getCallingConv() == CallingConv::SPIR_KERNEL)
           continue;
       if (G.isDeclaration())
         continue;

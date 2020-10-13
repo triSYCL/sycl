@@ -307,3 +307,27 @@ std::array<uint8_t, 20> SHA1::hash(ArrayRef<uint8_t> Data) {
   memcpy(Arr.data(), S.data(), S.size());
   return Arr;
 }
+
+std::string SHA1::hashToString(ArrayRef<uint8_t> Data, StringRef Mapping) {
+  constexpr auto BitsPerChar = 6;
+  constexpr auto CombinationPerChar = 1 << BitsPerChar;
+  (void)CombinationPerChar;
+  assert(Mapping.size() >= CombinationPerChar);
+  std::array<uint8_t, 20> Hash = SHA1::hash(Data);
+  std::string Res;
+  constexpr auto OutputLength =
+      (Hash.size() * 8 + BitsPerChar - 1) / BitsPerChar;
+  Res.reserve(OutputLength);
+
+  uint16_t Value = Hash[0];
+  for (unsigned AvailableBits = 8, Elem = 1; Res.size() < OutputLength;) {
+    Res.push_back(Mapping[Value & 0b111111]);
+    AvailableBits -= BitsPerChar;
+    Value >>= BitsPerChar;
+    if (AvailableBits < BitsPerChar && Elem < Hash.size()) {
+      Value |= Hash[Elem++] << AvailableBits;
+      AvailableBits += 8;
+    }
+  }
+  return Res;
+}

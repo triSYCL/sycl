@@ -38,30 +38,6 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
-#define BOOST_NO_EXCEPTIONS
-
-/// \todo: Perhaps BOOST should appropriately be included through cmake. At the
-/// moment it's found via existing in the environment I think.. seems a little
-/// unclear at least. This goes for the run-time as well.
-#include <boost/container_hash/hash.hpp> // uuid_hasher
-#include <boost/uuid/uuid_generators.hpp> // sha name_gen/generator
-#include <boost/uuid/uuid_io.hpp> // uuid to_string
-#include <boost/version.hpp>
-
-// BOOST_NO_EXCEPTIONS enabled so we need to define our own throw_exception or
-// get a linker error.
-namespace boost {
-#if BOOST_VERSION < 107300
-void throw_exception(std::exception const &e) {
-  llvm_unreachable("exception are disabled");
-}
-#else
-void throw_exception(std::exception const &e, boost::source_location const&) {
-  llvm_unreachable("exception are disabled");
-}
-#endif
-} // namespace boost
-
 using namespace llvm;
 
 // Put the code in an anonymous namespace to avoid polluting the global
@@ -222,51 +198,6 @@ struct InSPIRation : public ModulePass {
                     llvm::MDNode::get(ctx, reqdWorkGroupSize));
   }
 
-  /// Sets a unique name to a function which is currently computed from a SHA-1
-  /// hash of the original name.
-  ///
-  /// This unique name is used for kernel names so that they can be passed to
-  /// the xocc compiler without error and then recomputed and used in the run
-  /// time (program_manager) to correctly retrieve the kernel from the binary.
-  /// This is required as xocc doesn't like certain characters in mangled names
-  /// and we need a name that can be used in the run-time and passed to the
-  /// compiler.
-  /// The hash is recomputed in the run-time from the kernel name found in the
-  /// integrated header as we currently do not wish to alter the integrated
-  /// header with an LLVM pass as it will take some alteration to the driver
-  /// and header that are not set in stone yet.
-  /// Perhaps in the future that may be the direction that is taken however.
-  void setUniqueName(Function &F) {
-    // can technically use our own "namespace" to generate the SHA-1 rather than
-    // ns::dns, it works for now for testing purposes
-    // Note: LLVM has SHA-1, but if we use LLVM SHA-1 we can't recreate it in the
-    // run-time. Perhaps it can be utilized in another way to achieve similar
-    // results though.
-    boost::uuids::name_generator_latest gen{boost::uuids::ns::dns()};
-
-    // long uuid example: 8e6761a3-f150-580f-bae8-7d8d86bfa552
-    boost::uuids::uuid uDoc = gen(F.getName().str());
-
-    // converted to a hash value example: 14050332600208107103
-    boost::hash<boost::uuids::uuid> uuidHasher;
-    std::size_t uuidHashValue = uuidHasher(uDoc);
-
-    // The uuid on it's own is too long for xocc it has a 64 character limit for
-    // the kernels name and the name of its compute unit. By default the compute
-    // unit name is the kernel name with an _N, uuid's are over 32 chars long so
-    // 32*2 + another few characters pushes it over the limit.
-    /// \todo In the middle term change this to take the lowest bits of the SHA-1
-    ///       uuid e.g. take the string, regex to remove the '-' then take the
-    ///       max characters you can fit from the end (30-31~?). Echo the changes
-    ///       to the SYCL run-time's program_manager.cpp so the modified kernel
-    ///       names are correctly computed and can be found in the binary.
-    /// \todo In the long-term come up with a better way of doing this than
-    ///       changing all the names to a SHA-1 hash. Like asking for an update
-    ///       to the xocc compiler to accept characters that appear in mangled
-    ///       names
-    F.setName("xSYCL" + std::to_string(uuidHashValue));
-  }
-
   /// Add metadata for the SPIR 2.0 version
   void setSPIRVersion(Module &M) {
     /* Get InSPIRation from SPIRTargetCodeGenInfo::emitTargetMD in
@@ -375,18 +306,16 @@ struct InSPIRation : public ModulePass {
         if (isKernel(F)) {
           kernelSPIRify(F);
           applyKernelProperties(F);
-          setUniqueName(F);
           giveNameToArguments(F);
-          // ssdmAddressSpaceFix(F);
 
-        /// \todo Possible: We don't modify declarations right now as this will
-        /// destroy the names of SPIR/CL intrinsics as they aren't actually
-        /// considered intrinsics by LLVM IR. If there is ever a need to modify
-        /// declarations in someway then the best way to do it would be to have a
-        /// comprehensive list of mangled SPIR intrinsic names and check against
-        /// it. Note: This is only relevant if we still modify the name of every
-        /// function to be sycl_func_x, if xocc ever gets a little friendlier to
-        /// spir input, probably not required.
+          /// \todo Possible: We don't modify declarations right now as this
+          /// will destroy the names of SPIR/CL intrinsics as they aren't
+          /// actually considered intrinsics by LLVM IR. If there is ever a need
+          /// to modify declarations in someway then the best way to do it would
+          /// be to have a comprehensive list of mangled SPIR intrinsic names
+          /// and check against it. Note: This is only relevant if we still
+          /// modify the name of every function to be sycl_func_x, if xocc ever
+          /// gets a little friendlier to spir input, probably not required.
         } else if (isTransitiveNonIntrinsicFunc(F)
                    && !F.isDeclaration()) {
         // After kernels code selection, there are only two kinds of functions
