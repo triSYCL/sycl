@@ -130,12 +130,12 @@ std::string Driver::GetResourcesPath(StringRef BinaryPath,
 }
 
 Driver::Driver(StringRef ClangExecutable, StringRef TargetTriple,
-               DiagnosticsEngine &Diags,
+               DiagnosticsEngine &Diags, std::string Title,
                IntrusiveRefCntPtr<llvm::vfs::FileSystem> VFS)
     : Diags(Diags), VFS(std::move(VFS)), Mode(GCCMode),
       SaveTemps(SaveTempsNone), BitcodeEmbed(EmbedNone), LTOMode(LTOK_None),
       ClangExecutable(ClangExecutable), SysRoot(DEFAULT_SYSROOT),
-      DriverTitle("clang LLVM compiler"), CCPrintOptionsFilename(nullptr),
+      DriverTitle(Title), CCPrintOptionsFilename(nullptr),
       CCPrintHeadersFilename(nullptr), CCLogDiagnosticsFilename(nullptr),
       CCCPrintBindings(false), CCPrintOptions(false), CCPrintHeaders(false),
       CCLogDiagnostics(false), CCGenDiagnostics(false),
@@ -832,14 +832,6 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
     }
     return SYCLArg;
   };
-
-  // Emit an error if c-compilation is forced in -fsycl mode
-  if (HasValidSYCLRuntime)
-    for (StringRef XValue : C.getInputArgs().getAllArgValues(options::OPT_x)) {
-      if (XValue == "c" || XValue == "c-header")
-        C.getDriver().Diag(clang::diag::err_drv_fsycl_with_c_type)
-            << "-x " << XValue;
-    }
 
   Arg *SYCLTargets = getArgRequiringSYCLRuntime(options::OPT_fsycl_targets_EQ);
   Arg *SYCLLinkTargets =
@@ -1793,6 +1785,9 @@ void Driver::PrintHelp(bool ShowHidden) const {
   if (!ShowHidden)
     ExcludedFlagsBitmask |= HelpHidden;
 
+  if (IsFlangMode())
+    IncludedFlagsBitmask |= options::FlangOption;
+
   std::string Usage = llvm::formatv("{0} [options] file...", Name).str();
   getOpts().PrintHelp(llvm::outs(), Usage.c_str(), DriverTitle.c_str(),
                       IncludedFlagsBitmask, ExcludedFlagsBitmask,
@@ -1861,9 +1856,13 @@ void Driver::PrintSYCLToolHelp(const Compilation &C) const {
 }
 
 void Driver::PrintVersion(const Compilation &C, raw_ostream &OS) const {
-  // FIXME: The following handlers should use a callback mechanism, we don't
-  // know what the client would like to do.
-  OS << getClangFullVersion() << '\n';
+  if (IsFlangMode()) {
+    OS << getClangToolFullVersion("flang-new") << '\n';
+  } else {
+    // FIXME: The following handlers should use a callback mechanism, we don't
+    // know what the client would like to do.
+    OS << getClangFullVersion() << '\n';
+  }
   const ToolChain &TC = C.getDefaultToolChain();
   OS << "Target: " << TC.getTripleString() << '\n';
 
@@ -1901,7 +1900,7 @@ void Driver::HandleAutocompletions(StringRef PassedFlags) const {
   std::vector<std::string> SuggestedCompletions;
   std::vector<std::string> Flags;
 
-  unsigned short DisableFlags =
+  unsigned int DisableFlags =
       options::NoDriverOption | options::Unsupported | options::Ignored;
 
   // Distinguish "--autocomplete=-someflag" and "--autocomplete=-someflag,"
@@ -2366,7 +2365,7 @@ bool Driver::DiagnoseInputExistence(const DerivedArgList &Args, StringRef Value,
 
   if (IsCLMode()) {
     if (!llvm::sys::path::is_absolute(Twine(Value)) &&
-        llvm::sys::Process::FindInEnvPath("LIB", Value))
+        llvm::sys::Process::FindInEnvPath("LIB", Value, ';'))
       return true;
 
     if (Args.hasArg(options::OPT__SLASH_link) && Ty == types::TY_Object) {
@@ -2409,12 +2408,13 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
   // actually use it, so we warn about unused -x arguments.
   types::ID InputType = types::TY_Nothing;
   Arg *InputTypeArg = nullptr;
+  bool IsSYCL = Args.hasFlag(options::OPT_fsycl, options::OPT_fno_sycl, false);
 
   // The last /TC or /TP option sets the input type to C or C++ globally.
   if (Arg *TCTP = Args.getLastArgNoClaim(options::OPT__SLASH_TC,
                                          options::OPT__SLASH_TP)) {
     InputTypeArg = TCTP;
-    InputType = TCTP->getOption().matches(options::OPT__SLASH_TC)
+    InputType = TCTP->getOption().matches(options::OPT__SLASH_TC) && !IsSYCL
                     ? types::TY_C
                     : types::TY_CXX;
 
@@ -2447,6 +2447,11 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
         if (InputTypeArg)
           InputTypeArg->claim();
 
+        types::ID CType = types::TY_C;
+        // For SYCL, all source file inputs are considered C++.
+        if (IsSYCL)
+          CType = types::TY_CXX;
+
         // stdin must be handled specially.
         if (memcmp(Value, "-", 2) == 0) {
           // If running with -E, treat as a C input (this changes the builtin
@@ -2457,7 +2462,7 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
           if (!Args.hasArgNoClaim(options::OPT_E) && !CCCIsCPP())
             Diag(IsCLMode() ? clang::diag::err_drv_unknown_stdin_type_clang_cl
                             : clang::diag::err_drv_unknown_stdin_type);
-          Ty = types::TY_C;
+          Ty = CType;
         } else {
           // Otherwise lookup by extension.
           // Fallback is C if invoked as C preprocessor, C++ if invoked with
@@ -2467,9 +2472,29 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
           if (const char *Ext = strrchr(Value, '.'))
             Ty = TC.LookupTypeForExtension(Ext + 1);
 
+          // For SYCL, convert C-type sources to C++-type sources.
+          if (IsSYCL) {
+            switch (Ty) {
+            case types::TY_C:
+              Ty = types::TY_CXX;
+              break;
+            case types::TY_CHeader:
+              Ty = types::TY_CXXHeader;
+              break;
+            case types::TY_PP_C:
+              Ty = types::TY_PP_CXX;
+              break;
+            case types::TY_PP_CHeader:
+              Ty = types::TY_PP_CXXHeader;
+              break;
+            default:
+              break;
+            }
+          }
+
           if (Ty == types::TY_INVALID) {
             if (CCCIsCPP())
-              Ty = types::TY_C;
+              Ty = CType;
             else if (IsCLMode() && Args.hasArgNoClaim(options::OPT_E))
               Ty = types::TY_CXX;
             else
@@ -2528,7 +2553,8 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
       if (DiagnoseInputExistence(Args, Value, types::TY_C,
                                  /*TypoCorrect=*/false)) {
         Arg *InputArg = MakeInputArg(Args, Opts, A->getValue());
-        Inputs.push_back(std::make_pair(types::TY_C, InputArg));
+        Inputs.push_back(
+            std::make_pair(IsSYCL ? types::TY_CXX : types::TY_C, InputArg));
       }
       A->claim();
     } else if (A->getOption().matches(options::OPT__SLASH_Tp)) {
@@ -2556,6 +2582,11 @@ void Driver::BuildInputs(const ToolChain &TC, DerivedArgList &Args,
         Diag(clang::diag::err_drv_unknown_language) << A->getValue();
         InputType = types::TY_Object;
       }
+      // Emit an error if c-compilation is forced in -fsycl mode
+      if (IsSYCL && (InputType == types::TY_C || InputType == types::TY_PP_C ||
+                     InputType == types::TY_CHeader))
+        Diag(clang::diag::err_drv_fsycl_with_c_type) << A->getAsString(Args);
+
     } else if (A->getOption().getID() == options::OPT_U) {
       assert(A->getNumValues() == 1 && "The /U option has one value.");
       StringRef Val = A->getValue(0);
@@ -3009,7 +3040,7 @@ class OffloadingActionBuilder final {
 
       // If we have a fat binary, add it to the list.
       if (CudaFatBinary) {
-        AddTopLevel(CudaFatBinary, CudaArch::UNKNOWN);
+        AddTopLevel(CudaFatBinary, CudaArch::UNUSED);
         CudaDeviceActions.clear();
         CudaFatBinary = nullptr;
         return;
@@ -3282,6 +3313,7 @@ class OffloadingActionBuilder final {
           parseTargetID(getHIPOffloadTargetTriple(), IdStr, &Features);
       if (!ArchStr) {
         C.getDriver().Diag(clang::diag::err_drv_bad_target_id) << IdStr;
+        C.setContainsError();
         return StringRef();
       }
       auto CanId = getCanonicalTargetID(ArchStr.getValue(), Features);
@@ -5169,14 +5201,33 @@ void Driver::BuildActions(Compilation &C, DerivedArgList &Args,
 
   // For an FPGA archive, we add the unbundling step above to take care of
   // the device side, but also unbundle here to extract the host side
-  for (const auto &LI : LinkerInputs) {
+  bool EarlyLink = false;
+  if (const Arg *A = Args.getLastArg(options::OPT_fsycl_link_EQ))
+    EarlyLink = A->getValue() == StringRef("early");
+  for (auto &LI : LinkerInputs) {
     Action *UnbundlerInput = nullptr;
+    auto wrapObject = [&] {
+      if (EarlyLink && Args.hasArg(options::OPT_fintelfpga)) {
+        // Only wrap the object with -fsycl-link=early
+        auto *BC = C.MakeAction<OffloadWrapperJobAction>(LI, types::TY_LLVM_BC);
+        auto *ASM = C.MakeAction<BackendJobAction>(BC, types::TY_PP_Asm);
+        LI = C.MakeAction<AssembleJobAction>(ASM, types::TY_Object);
+      }
+    };
     if (auto *IA = dyn_cast<InputAction>(LI)) {
       if (IA->getType() == types::TY_FPGA_AOCR ||
           IA->getType() == types::TY_FPGA_AOCX) {
         // Add to unbundler.
         UnbundlerInput = LI;
+      } else {
+        std::string FileName = IA->getInputArg().getAsString(Args);
+        if ((IA->getType() == types::TY_Object && !isObjectFile(FileName)) ||
+            IA->getInputArg().getOption().hasFlag(options::LinkerInput))
+          continue;
+        wrapObject();
       }
+    } else {
+      wrapObject();
     }
     if (UnbundlerInput && !PL.empty()) {
       if (auto *IA = dyn_cast<InputAction>(UnbundlerInput)) {
@@ -6190,8 +6241,6 @@ InputInfo Driver::BuildJobsForActionNoCache(
         OffloadingPrefix += "-wrapper";
         if (Arg *FinalOutput = C.getArgs().getLastArg(options::OPT_o))
           BaseInput = FinalOutput->getValue();
-        else
-          BaseInput = getDefaultImageName();
       }
     }
     Result = InputInfo(A, GetNamedOutputPath(C, *JA, BaseInput, BoundArch,
@@ -6281,6 +6330,17 @@ static const char *MakeCLOutputFilename(const ArgList &Args, StringRef ArgValue,
   return Args.MakeArgString(Filename.c_str());
 }
 
+static bool HasPreprocessOutput(const Action &JA) {
+  if (isa<PreprocessJobAction>(JA))
+    return true;
+  if (isa<OffloadAction>(JA) && isa<PreprocessJobAction>(JA.getInputs()[0]))
+    return true;
+  if (isa<OffloadBundlingJobAction>(JA) &&
+      HasPreprocessOutput(*(JA.getInputs()[0])))
+    return true;
+  return false;
+}
+
 const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
                                        const char *BaseInput,
                                        StringRef BoundArch, bool AtTopLevel,
@@ -6307,8 +6367,9 @@ const char *Driver::GetNamedOutputPath(Compilation &C, const JobAction &JA,
   }
 
   // Default to writing to stdout?
-  if (AtTopLevel && !CCGenDiagnostics && isa<PreprocessJobAction>(JA))
+  if (AtTopLevel && !CCGenDiagnostics && HasPreprocessOutput(JA)) {
     return "-";
+  }
 
   // Is this the assembly listing for /FA?
   if (JA.getType() == types::TY_PP_Asm &&
