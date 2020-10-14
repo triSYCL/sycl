@@ -14,13 +14,6 @@
 ;
 ;===------------------------------------------------------------------------===;
 
-[common]
-subdirectories =
-  ASFixer
-  InSPIRation
-  KernelPropGen
-  XOCCIRDowngrader
-
 [component_0]
 type = Library
 name = SYCL

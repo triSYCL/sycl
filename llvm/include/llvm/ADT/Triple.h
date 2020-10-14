@@ -102,8 +102,8 @@ public:
     fpga_aocr,      // Intel FPGA: linked early image
     fpga_aocx,      // Intel FPGA: linked image
     fpga_dep,       // Intel FPGA: dependency file
-    fpga32,         // 32-bit FPGA
-    fpga64,         // 64-bit FPGA
+    fpga32,         // 32-bit Xilinx FPGA
+    fpga64,         // 64-bit Xilinx FPGA
     ve,             // NEC SX-Aurora Vector Engine
     LastArchType = ve
   };
@@ -144,6 +144,10 @@ public:
     SPIRSubArch_fpga,
     SPIRSubArch_gen,
     SPIRSubArch_x86_64,
+
+    FPGASubArch_hw,
+    FPGASubArch_hw_emu,
+    FPGASubArch_sw_emu,
 
     PPCSubArch_spe
   };

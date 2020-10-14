@@ -257,7 +257,9 @@ pi_result piextDeviceSelectBinary(pi_device device, pi_device_binary *images,
   // Find the appropriate device image, fallback to spirv if not found
   pi_uint32 fallback = invalid_ind;
   for (pi_uint32 i = 0; i < num_images; ++i) {
-    if (strcmp(images[i]->DeviceTargetSpec, image_target) == 0) {
+    /// image_target may only contains the start of the target spec.
+    if (strncmp(images[i]->DeviceTargetSpec, image_target,
+                strlen(image_target)) == 0) {
       *selected_image_ind = i;
       return PI_SUCCESS;
     }

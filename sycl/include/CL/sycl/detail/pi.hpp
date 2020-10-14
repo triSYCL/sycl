@@ -328,6 +328,11 @@ public:
     return Bin->CompileOptions;
   }
 
+  const char* getTarget() const {
+    assert(Bin && "binary image data not set");
+    return Bin->DeviceTargetSpec;
+  }
+
   const char *getLinkOptions() const {
     assert(Bin && "binary image data not set");
     return Bin->LinkOptions;

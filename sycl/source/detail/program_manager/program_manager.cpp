@@ -883,6 +883,47 @@ createKernelArgMask(const pi::ByteArray &Bytes) {
   return Result;
 }
 
+/// This will setup environment variable for XRT to match the type of kernels
+/// being loaded.
+static void setupEnvironmentForKernels(RTDeviceBinaryImage *Img) {
+  static bool has_been_invoked = false;
+  const char* target = Img->getTarget();
+  constexpr const auto *env_var = "XCL_EMULATION_MODE";
+  if (strncmp("fpga64_", target, 7) == 0 ||
+      strncmp("fpga32_", target, 7) == 0) {
+    target += 7;
+    if (strcmp(target, "hw") == 0) {
+      if (has_been_invoked)
+        if (const char *mode = std::getenv(env_var))
+          throw sycl::platform_error(
+              std::string("all kernels are not compiled for the same "
+                          "environemnt: hw and ") +
+                  mode,
+              PI_INVALID_BINARY);
+      ::unsetenv(env_var);
+    }
+    else {
+      if (has_been_invoked) {
+        const char *mode = std::getenv(env_var);
+        if (!mode)
+          throw sycl::platform_error(
+              std::string(
+                  "all kernels are not compiled for the same environemnt: ") +
+                  target + " and hw",
+              PI_INVALID_BINARY);
+        if (strcmp(mode, target) != 0)
+          throw sycl::platform_error(
+              std::string(
+                  "all kernels are not compiled for the same environemnt: ") +
+                  target + " and " + mode,
+              PI_INVALID_BINARY);
+      }
+      ::setenv(env_var, target, true);
+    }
+    has_been_invoked = true;
+  }
+}
+
 void ProgramManager::addImages(pi_device_binaries DeviceBinary) {
   std::lock_guard<std::mutex> Guard(Sync::getGlobalLock());
 
@@ -937,6 +978,7 @@ void ProgramManager::addImages(pi_device_binaries DeviceBinary) {
     if (KSId == 0)
       KSId = getNextKernelSetId();
 
+    setupEnvironmentForKernels(Img.get());
     auto &Imgs = m_DeviceImages[KSId];
     if (!Imgs)
       Imgs.reset(new std::vector<RTDeviceBinaryImageUPtr>());

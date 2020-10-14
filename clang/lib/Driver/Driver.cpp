@@ -674,6 +674,28 @@ static bool isValidSYCLTriple(llvm::Triple T) {
   return true;
 }
 
+/// This function will add omitted information from a SYCL kernel.
+static llvm::Triple completeSYCLTriple(llvm::Triple T) {
+  if (T.getArch() == llvm::Triple::fpga64 ||
+      T.getArch() == llvm::Triple::fpga32) {
+    if (T.getEnvironment() == llvm::Triple::UnknownEnvironment)
+      T.setEnvironment(llvm::Triple::SYCLDevice);
+    if (T.getVendor() == llvm::Triple::UnknownVendor)
+      T.setVendor(llvm::Triple::Xilinx);
+    if (T.getOS() == llvm::Triple::UnknownOS)
+      T.setOS(llvm::Triple(llvm::sys::getDefaultTargetTriple()).getOS());
+    if (T.getSubArch() == llvm::Triple::NoSubArch) {
+      /// SubArch is inferred from XCL_EMULATION_MODE defaulting to hw.
+      /// This has the same behavior as XRT.
+      const char *Mode = "hw";
+      if (const char *M = std::getenv("XCL_EMULATION_MODE"))
+        Mode = M;
+      T.setArchName(std::string(T.getArchName()) + "_" + Mode);
+    }
+  }
+  return T;
+}
+
 void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
                                               InputList &Inputs) {
 
@@ -855,6 +877,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
       if (SYCLTargetsValues->getNumValues()) {
         for (StringRef Val : SYCLTargetsValues->getValues()) {
           llvm::Triple TT(llvm::Triple::normalize(Val));
+          TT = completeSYCLTriple(TT);
           if (!isValidSYCLTriple(TT)) {
             Diag(clang::diag::err_drv_invalid_sycl_target) << Val;
             continue;
@@ -4330,6 +4353,7 @@ class OffloadingActionBuilder final {
           for (const char *Val : SYCLTargets->getValues()) {
             llvm::Triple TT(Val);
             std::string NormalizedName = TT.normalize();
+            TT = completeSYCLTriple(TT);
 
             // Make sure we don't have a duplicate triple.
             auto Duplicate = FoundNormalizedTriples.find(NormalizedName);
