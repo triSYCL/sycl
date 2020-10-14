@@ -19,6 +19,7 @@
 #include <detail/config.hpp>
 #include <detail/context_impl.hpp>
 #include <detail/device_impl.hpp>
+#include <detail/global_handler.hpp>
 #include <detail/program_impl.hpp>
 #include <detail/program_manager/program_manager.hpp>
 #include <detail/spec_constant_impl.hpp>
@@ -51,9 +52,7 @@ enum BuildState { BS_InProgress, BS_Done, BS_Failed };
 static constexpr char UseSpvEnv[]("SYCL_USE_KERNEL_SPV");
 
 ProgramManager &ProgramManager::getInstance() {
-  // The singleton ProgramManager instance, uses the "magic static" idiom.
-  static ProgramManager Instance;
-  return Instance;
+  return GlobalHandler::instance().getProgramManager();
 }
 
 static RT::PiProgram createBinaryProgram(const ContextImplPtr Context,
@@ -199,7 +198,12 @@ getOrBuild(KernelProgramCache &KPCache, KeyT &&CacheKey, AcquireFT &&Acquire,
     BuildResult->Ptr.store(Desired);
 #endif
 
-    BuildResult->State.store(BS_Done);
+    {
+      // Even if shared variable is atomic, it must be modified under the mutex
+      // in order to correctly publish the modification to the waiting thread
+      std::lock_guard<std::mutex> Lock(BuildResult->MBuildResultMutex);
+      BuildResult->State.store(BS_Done);
+    }
 
     KPCache.notifyAllBuild(*BuildResult);
 
@@ -208,13 +212,19 @@ getOrBuild(KernelProgramCache &KPCache, KeyT &&CacheKey, AcquireFT &&Acquire,
     BuildResult->Error.Msg = Ex.what();
     BuildResult->Error.Code = Ex.get_cl_code();
 
-    BuildResult->State.store(BS_Failed);
+    {
+      std::lock_guard<std::mutex> Lock(BuildResult->MBuildResultMutex);
+      BuildResult->State.store(BS_Failed);
+    }
 
     KPCache.notifyAllBuild(*BuildResult);
 
     std::rethrow_exception(std::current_exception());
   } catch (...) {
-    BuildResult->State.store(BS_Failed);
+    {
+      std::lock_guard<std::mutex> Lock(BuildResult->MBuildResultMutex);
+      BuildResult->State.store(BS_Failed);
+    }
 
     KPCache.notifyAllBuild(*BuildResult);
 
@@ -222,18 +232,19 @@ getOrBuild(KernelProgramCache &KPCache, KeyT &&CacheKey, AcquireFT &&Acquire,
   }
 }
 
+// TODO replace this with a new PI API function
 static bool isDeviceBinaryTypeSupported(const context &C,
                                         RT::PiDeviceBinaryType Format) {
+  // All formats except PI_DEVICE_BINARY_TYPE_SPIRV are supported.
+  if (Format != PI_DEVICE_BINARY_TYPE_SPIRV)
+    return true;
+
   const backend ContextBackend =
       detail::getSyclObjImpl(C)->getPlugin().getBackend();
 
   // The CUDA backend cannot use SPIR-V
-  if (ContextBackend == backend::cuda && Format == PI_DEVICE_BINARY_TYPE_SPIRV)
+  if (ContextBackend == backend::cuda)
     return false;
-
-  // All formats except PI_DEVICE_BINARY_TYPE_SPIRV are supported.
-  if (Format != PI_DEVICE_BINARY_TYPE_SPIRV)
-    return true;
 
   vector_class<device> Devices = C.get_devices();
 
@@ -244,9 +255,14 @@ static bool isDeviceBinaryTypeSupported(const context &C,
   }
 
   // OpenCL 2.1 and greater require clCreateProgramWithIL
-  if ((ContextBackend == backend::opencl) &&
-      C.get_platform().get_info<info::platform::version>() >= "2.1")
-    return true;
+  if (ContextBackend == backend::opencl) {
+    std::string ver = C.get_platform().get_info<info::platform::version>();
+    if (ver.find("OpenCL 1.0") == std::string::npos &&
+        ver.find("OpenCL 1.1") == std::string::npos &&
+        ver.find("OpenCL 1.2") == std::string::npos &&
+        ver.find("OpenCL 2.0") == std::string::npos)
+      return true;
+  }
 
   for (const device &D : Devices) {
     // We need cl_khr_il_program extension to be present
@@ -375,9 +391,6 @@ RT::PiProgram ProgramManager::getBuiltPIProgram(OSModuleHandle M,
     // If device image is not SPIR-V, DeviceLibReqMask will be 0 which means
     // no fallback device library will be linked.
     uint32_t DeviceLibReqMask = 0;
-    // FIXME: disable the fallback device libraries online link as not all
-    // backend supports spv online link. Need to enable it when all backends
-    // support spv online link.
     if (Img.getFormat() == PI_DEVICE_BINARY_TYPE_SPIRV &&
         !SYCLConfig<SYCL_DEVICELIB_NO_FALLBACK>::get())
       DeviceLibReqMask = getDeviceLibReqMask(Img);
@@ -806,11 +819,11 @@ ProgramManager::ProgramPtr ProgramManager::build(
     LinkOpts = LinkOptions.c_str();
   }
 
-  // TODO: Because online linking isn't implemented yet on Level Zero, the
-  // compiler always links against the fallback device libraries.  Once
-  // online linking is supported on all backends, we should remove the line
-  // below and also change the compiler, so it no longer links the fallback
-  // code unconditionally.
+  // TODO: Currently, online linking isn't implemented yet on Level Zero.
+  // To enable device libraries and unify the behaviors on all backends,
+  // online linking is disabled temporarily, all fallback device libraries
+  // will be linked offline. When Level Zero supports online linking, we need
+  // to remove the line of code below and switch back to online linking.
   LinkDeviceLibs = false;
 
   // TODO: this is a temporary workaround for GPU tests for ESIMD compiler.

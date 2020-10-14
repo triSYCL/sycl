@@ -493,7 +493,7 @@ MLIRContext::getOrLoadDialect(StringRef dialectNamespace, TypeID dialectID,
 
   if (!dialect) {
     LLVM_DEBUG(llvm::dbgs()
-               << "Load new dialect in Context" << dialectNamespace);
+               << "Load new dialect in Context " << dialectNamespace << "\n");
 #ifndef NDEBUG
     if (impl.multiThreadedExecutionContext != 0)
       llvm::report_fatal_error(
@@ -667,6 +667,25 @@ const AbstractOperation *AbstractOperation::lookup(StringRef opName,
     return &it->second;
   return nullptr;
 }
+
+AbstractOperation::AbstractOperation(
+    StringRef name, Dialect &dialect, OperationProperties opProperties,
+    TypeID typeID,
+    ParseResult (&parseAssembly)(OpAsmParser &parser, OperationState &result),
+    void (&printAssembly)(Operation *op, OpAsmPrinter &p),
+    LogicalResult (&verifyInvariants)(Operation *op),
+    LogicalResult (&foldHook)(Operation *op, ArrayRef<Attribute> operands,
+                              SmallVectorImpl<OpFoldResult> &results),
+    void (&getCanonicalizationPatterns)(OwningRewritePatternList &results,
+                                        MLIRContext *context),
+    detail::InterfaceMap &&interfaceMap, bool (&hasTrait)(TypeID traitID))
+    : name(Identifier::get(name, dialect.getContext())), dialect(dialect),
+      typeID(typeID), parseAssembly(parseAssembly),
+      printAssembly(printAssembly), verifyInvariants(verifyInvariants),
+      foldHook(foldHook),
+      getCanonicalizationPatterns(getCanonicalizationPatterns),
+      opProperties(opProperties), interfaceMap(std::move(interfaceMap)),
+      hasRawTrait(hasTrait) {}
 
 /// Get the dialect that registered the type with the provided typeid.
 const AbstractType &AbstractType::lookup(TypeID typeID, MLIRContext *context) {
