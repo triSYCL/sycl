@@ -257,7 +257,7 @@ for aot_tool in aot_tools:
 if xocc != "off":
     llvm_config.with_environment('XCL_EMULATION_MODE', xocc_target, append_path=False)
     lit_config.note("XOCC target: {}".format(xocc_target))
-    required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH']
+    required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]
     has_error=False
     config.available_features.add("xocc")
     config.available_features.add(xocc_target)

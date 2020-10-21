@@ -93,10 +93,19 @@ else
   # ENV variable
 
   SDX_LIB_SPIR="$SDX_BIN_PATH_DIR/../lnx64/lib/libspir64-39-hls.bc"
+  if [[ ! -f "$SDX_LIB_SPIR" ]]; then
+    SDX_LIB_SPIR="$SDX_BIN_PATH_DIR/../../../Vitis_HLS/2*/lnx64/lib/libspir64-39-hls.bc"
+    if [[ ! -f "$SDX_LIB_SPIR" ]]; then
+      usage 9 "could not find SDx's libspir64-39-hls.bc"
+    fi
+  fi
   # It says 3.9, but trust us this is Clang/LLVM 7..
   SDX_CLANG_LLVM_BIN="$SDX_BIN_PATH_DIR/../lnx64/tools/clang-3.9-csynth/bin"
-  if [[ ! -f "$SDX_LIB_SPIR" ]]; then
-    usage 9 "could not find SDx's libspir64-39-hls.bc"
+  if [[ ! -f "$SDX_CLANG_LLVM_BIN/llvm-as" ]]; then
+    SDX_CLANG_LLVM_BIN="$SDX_BIN_PATH_DIR/../../../Vitis_HLS/2*/lnx64/tools/clang-3.9-csynth/bin"
+    if [[ ! -f "$SDX_CLANG_LLVM_BIN/llvm-as" ]]; then
+      usage 9 "could not find SDx's binary directory"
+    fi
   fi
 
   SDX="$SDX_BIN_PATH_DIR/v++"
