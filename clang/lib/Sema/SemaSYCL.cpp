@@ -1666,6 +1666,25 @@ public:
   }
 };
 
+static bool isSyclXilinxType(const QualType &Ty) {
+  static std::array<StringRef, 3> Namespaces = {"cl", "sycl", "xilinx"};
+  llvm::SmallVector<const DeclContext *, 8> CtxStack;
+  CtxStack.push_back(cast<DeclContext>(Ty->getAsTagDecl()));
+  while (!isa<TranslationUnitDecl>(CtxStack.back()->getParent()))
+    CtxStack.push_back(CtxStack.back()->getParent());
+  for (unsigned Idx = 0; Idx < Namespaces.size(); Idx++) {
+    auto *NS = dyn_cast<NamespaceDecl>(CtxStack.pop_back_val());
+    if (!NS)
+      return false;
+    IdentifierInfo *II = NS->getIdentifier();
+    if (!II)
+      return false;
+    if (!II->isStr(Namespaces[Idx]))
+      return false;
+  }
+  return true;
+}
+
 // A type to Create and own the FunctionDecl for the kernel.
 class SyclKernelDeclCreator : public SyclKernelFieldHandler {
   FunctionDecl *KernelDecl;
@@ -1702,6 +1721,33 @@ class SyclKernelDeclCreator : public SyclKernelFieldHandler {
     Params.push_back(NewParam);
   }
 
+  // Obtain an integer value stored in a template parameter of buffer_location
+  // property to pass it to buffer_location kernel attribute
+  void handleXilinxProperty(ParmVarDecl *Param, QualType PropTy,
+                            SourceLocation Loc) {
+    if (!isSyclXilinxType(PropTy))
+      return;
+    /// TODO: when D88645 lands update this code to use that instead.
+    ASTContext &Ctx = SemaRef.getASTContext();
+    const CXXRecordDecl *RD = PropTy->getAsCXXRecordDecl();
+    const CXXRecordDecl *PRD = cast<CXXRecordDecl>(RD->getParent());
+    std::string Args;
+    if (const auto *PropDecl = dyn_cast<ClassTemplateSpecializationDecl>(RD)) {
+      for (auto &Arg : PropDecl->getTemplateArgs().asArray()) {
+        switch (Arg.getKind()) {
+        case TemplateArgument::Integral:
+          Args += "_" + std::to_string(static_cast<int>(
+                            Arg.getAsIntegral().getExtValue()));
+          break;
+        default:
+          llvm_unreachable("unimplemented");
+        }
+      }
+    }
+    Param->addAttr(AnnotateAttr::CreateImplicit(
+        Ctx, "xilinx_" + PRD->getName().str() + Args));
+  }
+
   // Handle accessor properties. If any properties were found in
   // the accessor_property_list - add the appropriate attributes to ParmVarDecl.
   void handleAccessorPropertyList(ParmVarDecl *Param,
@@ -1722,6 +1768,7 @@ class SyclKernelDeclCreator : public SyclKernelFieldHandler {
       QualType PropTy = Prop->getAsType();
       if (Util::isSyclBufferLocationType(PropTy))
         handleBufferLocationProperty(Param, PropTy, Loc);
+      handleXilinxProperty(Param, PropTy, Loc);
     }
   }
 

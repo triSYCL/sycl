@@ -52,8 +52,8 @@ namespace partition {
   /// This fuction is currently empty but the LowerSYCLMetaData Pass will fill
   /// it with the required IR.
   template<typename Ptr>
-  __SYCL_DEVICE_ANNOTATE("xilinx_partition_array") __attribute__((always_inline))
-  inline void xilinx_partition_array(Ptr, int, int, int) {}
+  __SYCL_DEVICE_ANNOTATE("xilinx_partition_array")
+  ALWAYS_INLINE inline void xilinx_partition_array(Ptr, int, int, int) {}
 
   /** Represent a cyclic partition.
 

@@ -17,6 +17,7 @@
 
 #include "CL/sycl/xilinx/fpga/ssdm_inst.hpp"
 #include "CL/sycl/detail/defines.hpp"
+#include <utility>
 
 __SYCL_INLINE_NAMESPACE(cl) {
 
@@ -38,9 +39,11 @@ namespace sycl::xilinx {
 */
 
 template <typename T>
-void dataflow(T functor) {
+void dataflow(T&& functor) {
   _ssdm_op_SpecDataflowPipeline(-1, "");
-  functor();
+  /// the std::forward can make a difference when the operator() is l or r value
+  /// specified.
+  std::forward<T>(functor)();
 }
 
 /** Execute loops in a pipelined manner
@@ -52,12 +55,13 @@ void dataflow(T functor) {
     \param[in] f is a function with an innermost loop to be executed in a
     pipeline way.
 */
-template <typename T>
-__SYCL_DEVICE_ANNOTATE("xilinx_pipeline") __attribute__((always_inline))
-void pipeline(T functor) {
-  functor();
+template<typename T>
+__SYCL_DEVICE_ANNOTATE("xilinx_pipeline")
+ALWAYS_INLINE void pipeline(T&& functor) {
+  /// the std::forward can make a difference when the operator() is l or r value
+  /// specified.
+  std::forward<T>(functor)();
 }
-
 }
 
 }
