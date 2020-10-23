@@ -17,6 +17,7 @@
 
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/SYCL/PrepareSYCLOpt.h"
 #include "llvm/Support/Casting.h"
 
@@ -55,9 +56,26 @@ struct PrepareSYCLOpt : public ModulePass {
     }
   }
 
+  /// At this point in the pipeline Annotations intrinsic have all been
+  /// converted into what they need to be. But they can still be present and
+  /// have pointer on pointer as arguments which v++ can't deal with.
+  void removeAnnotationsIntrisic(Module &M) {
+    SmallVector<Instruction *, 16> ToRemove;
+    for (Function &F : M.functions())
+      if (F.getIntrinsicID() == Intrinsic::annotation ||
+          F.getIntrinsicID() == Intrinsic::ptr_annotation ||
+          F.getIntrinsicID() == Intrinsic::var_annotation)
+        for (User *U : F.users())
+          if (auto *I = dyn_cast<Instruction>(U))
+            ToRemove.push_back(I);
+    for (Instruction *I : ToRemove)
+      I->eraseFromParent();
+  }
+
   bool runOnModule(Module &M) override {
     turnNonKernelsIntoPrivate(M);
     setCallingConventions(M);
+    removeAnnotationsIntrisic(M);
     return true;
   }
 };
