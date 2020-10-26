@@ -218,9 +218,9 @@ if xocc != "off":
     acc_run_substitute="env --unset=XCL_EMULATION_MODE " + acc_run_substitute
     # hw_emu is very slow so it has a higher timeout.
     if xocc_target != "hw_emu":
-        acc_run_substitute+= "timeout 60 "
+        acc_run_substitute+= "timeout 30 env "
     else:
-        acc_run_substitute+= "timeout 300 "
+        acc_run_substitute+= "timeout 300 env "
 
 config.substitutions.append( ('%ACC_RUN_PLACEHOLDER',  acc_run_substitute) )
 config.substitutions.append( ('%ACC_CHECK_PLACEHOLDER',  acc_check_substitute) )
@@ -286,9 +286,10 @@ if xocc != "off":
         timeout = 10800 # 3h
         run_if_hw=""
     if xocc_target == "hw_emu":
-        timeout = 1800 # 30min
+        timeout = 3600 # 1h
         run_if_hw_emu=""
     if xocc_target == "sw_emu":
+        timeout = 1200 # 20min
         run_if_sw_emu=""
     config.substitutions.append( ('%run_if_hw', run_if_hw) )
     config.substitutions.append( ('%run_if_hw_emu', run_if_hw_emu) )

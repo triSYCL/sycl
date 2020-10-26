@@ -1,3 +1,4 @@
+// UNSUPPORTED: xocc
 // RUN: %clangxx -fsycl -c -fsycl-device-only -S -emit-llvm %s -o - | FileCheck %s
 
 // CHECK: define {{.*}}spir_kernel void @"_ZTSZZ4mainENK3$_0clERN2cl4sycl7handlerEE15kernel_function"{{.*}} !kernel_arg_buffer_location ![[MDBL:[0-9]+]]

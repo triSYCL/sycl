@@ -770,21 +770,12 @@ static std::string computeUniqueSYCLXOCCName(StringRef Name,
     Result.push_back(c);
   }
 
-<<<<<<< HEAD
   // Replace first kernel character name by a 'k' to be compatible with SPIR
   if ((Result.front() == '_' || isDigit(Result.front()))) {
     Result.front() = 'k';
     ForceHash = true;
   }
 
-||||||| constructed merge base
-=======
-  if (!Result.empty() && (Result.front() == '_' || isDigit(Result.front()))) {
-    Result.front() = 'k';
-    ForceHash = true;
-  }
-
->>>>>>> [SYCL] Fix kernel naming for hw_emu
   /// The name alone is guaranteed to be unique, so if fits in the size, it is
   /// enough.
   if (Result.size() < MaxXOCCSize && !ForceHash)
@@ -793,7 +784,6 @@ static std::string computeUniqueSYCLXOCCName(StringRef Name,
   /// 9 for 8 characters of hash and an '_'.
   Result.erase(0, Result.size() - (MaxXOCCSize - 9));
 
-<<<<<<< HEAD
   if ((Result.front() == '_' || isDigit(Result.front())))
     Result.front() = 'k';
 
@@ -810,35 +800,6 @@ static std::string computeUniqueSYCLXOCCName(StringRef Name,
       "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
       "abcdefghijklmnopqrstuvwxyz"
       "0123456789AB");
-||||||| constructed merge base
-  /// Sadly there is only 63 valid characters in C identifiers.
-  /// So one of them A is repeated. This doesn't hurt entropy to much because
-  /// it is just 1 out of 64.
-  Result += '_' + llvm::SHA1::hashToString(
-                      llvm::ArrayRef<uint8_t>{
-                          reinterpret_cast<const uint8_t *>(Name.data()),
-                          Name.size()},
-                      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                      "abcdefghijklmnopqrstuvwxyz"
-                      "0123456789_A");
-=======
-  if (!Result.empty() && (Result.front() == '_' || isDigit(Result.front())))
-    Result.front() = 'k';
-
-  if (!Result.empty() && Result.back() != '_')
-    Result.push_back('_');
-
-  /// Sadly there is only 63 valid characters in C identifiers.
-  /// So one of them A is repeated. This doesn't hurt entropy to much because
-  /// it is just 1 out of 64.
-  Result += llvm::SHA1::hashToString(
-                      llvm::ArrayRef<uint8_t>{
-                          reinterpret_cast<const uint8_t *>(Name.data()),
-                          Name.size()},
-                      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-                      "abcdefghijklmnopqrstuvwxyz"
-                      "0123456789_A");
->>>>>>> [SYCL] Fix kernel naming for hw_emu
 
   if (Result.size() > MaxXOCCSize)
     Result.resize(MaxXOCCSize);
@@ -870,12 +831,11 @@ constructKernelName(Sema &S, FunctionDecl *KernelCallerFunc,
   MC.mangleTypeName(KernelNameType, Out);
 
   std::string Res = std::string(Out.str());
+  std::string Str = PredefinedExpr::ComputeName(
+      S.getASTContext(), PredefinedExpr::UniqueStableNameType, KernelNameType);
   Res = computeUniqueSYCLXOCCName(Res, KernelNameType.getAsString());
-
-  return {Res,
-          PredefinedExpr::ComputeName(S.getASTContext(),
-                                      PredefinedExpr::UniqueStableNameType,
-                                      KernelNameType)};
+  Str = computeUniqueSYCLXOCCName(Str, KernelNameType.getAsString());
+  return {Res, Str};
 }
 
 // anonymous namespace so these don't get linkage.

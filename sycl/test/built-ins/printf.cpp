@@ -1,4 +1,5 @@
 // UNSUPPORTED: cuda
+// UNSUPPORTED: xocc
 // CUDA does not support printf.
 //
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
