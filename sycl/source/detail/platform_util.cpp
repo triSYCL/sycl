@@ -10,7 +10,7 @@
 #include <CL/sycl/exception.hpp>
 #include <detail/platform_util.hpp>
 
-#if defined(SYCL_RT_OS_LINUX)
+#if defined(__SYCL_RT_OS_LINUX)
 #include <errno.h>
 #include <unistd.h>
 #if defined(__arm__) || defined(__aarch64__)
@@ -20,7 +20,7 @@
 #elif defined(__i386__) || defined(__x86_64__)
 #include <cpuid.h>
 #endif
-#elif defined(SYCL_RT_OS_WINDOWS)
+#elif defined(__SYCL_RT_OS_WINDOWS)
 #include <intrin.h>
 #endif
 
@@ -31,9 +31,9 @@ namespace detail {
 #if defined(__x86_64__) || defined(__i386__)
 // Used by methods that duplicate OpenCL behaviour in order to get CPU info
 static void cpuid(uint32_t *CPUInfo, uint32_t Type, uint32_t SubType = 0) {
-#if defined(SYCL_RT_OS_LINUX) && (defined(__x86_64__) || defined(__i386__))
+#if defined(__SYCL_RT_OS_LINUX) && (defined(__x86_64__) || defined(__i386__))
   __cpuid_count(Type, SubType, CPUInfo[0], CPUInfo[1], CPUInfo[2], CPUInfo[3]);
-#elif defined(SYCL_RT_OS_WINDOWS)
+#elif defined(__SYCL_RT_OS_WINDOWS)
   __cpuidex(reinterpret_cast<int *>(CPUInfo), Type, SubType);
 #endif
 }
@@ -87,7 +87,7 @@ uint32_t PlatformUtil::getMemCacheLineSize() {
   uint32_t CPUInfo[4];
   cpuid(CPUInfo, 0x80000006);
   return CPUInfo[2] & 0xff;
-#elif defined(SYCL_RT_OS_LINUX) && defined(_SC_LEVEL2_DCACHE_LINESIZE)
+#elif defined(__SYCL_RT_OS_LINUX) && defined(_SC_LEVEL2_DCACHE_LINESIZE)
   long lineSize = sysconf(_SC_LEVEL2_DCACHE_LINESIZE);
   if (lineSize > 0) {
     return lineSize;
@@ -106,7 +106,7 @@ uint64_t PlatformUtil::getMemCacheSize() {
   uint32_t CPUInfo[4];
   cpuid(CPUInfo, 0x80000006);
   return static_cast<uint64_t>(CPUInfo[2] >> 16) * 1024;
-#elif defined(SYCL_RT_OS_LINUX) && defined(_SC_LEVEL2_DCACHE_SIZE)
+#elif defined(__SYCL_RT_OS_LINUX) && defined(_SC_LEVEL2_DCACHE_SIZE)
   long cacheSize = sysconf(_SC_LEVEL2_DCACHE_SIZE);
   if (cacheSize > 0) {
     return cacheSize;
@@ -134,15 +134,15 @@ uint32_t PlatformUtil::getNativeVectorWidth(PlatformUtil::TypeIndex TIndex) {
   // AVX512 has 64 byte (ZMM) registers
   static constexpr uint32_t VECTOR_WIDTH_AVX512[] = {64, 32, 16, 8, 16, 8, 0};
 #endif
-#if defined(SYCL_RT_OS_LINUX) && (defined(__x86_64__) || defined(__i386__))
-#if defined(SYCL_RT_OS_LINUX)
+#if defined(__SYCL_RT_OS_LINUX) && (defined(__x86_64__) || defined(__i386__))
+#if defined(__SYCL_RT_OS_LINUX)
   if (__builtin_cpu_supports("avx512f"))
     return VECTOR_WIDTH_AVX512[Index];
   if (__builtin_cpu_supports("avx2"))
     return VECTOR_WIDTH_AVX2[Index];
   if (__builtin_cpu_supports("avx"))
     return VECTOR_WIDTH_AVX[Index];
-#elif defined(SYCL_RT_OS_WINDOWS)
+#elif defined(__SYCL_RT_OS_WINDOWS)
 
   uint32_t Info[4];
 
@@ -190,9 +190,9 @@ void PlatformUtil::prefetch(const char *Ptr, size_t NumBytes) {
   Ptr = reinterpret_cast<const char *>(
             reinterpret_cast<size_t>(Ptr) & CacheLineMask);
   for (; Ptr < PtrEnd; Ptr += CacheLineSize) {
-#if defined(SYCL_RT_OS_LINUX)
+#if defined(__SYCL_RT_OS_LINUX)
     __builtin_prefetch(Ptr);
-#elif defined(SYCL_RT_OS_WINDOWS)
+#elif defined(__SYCL_RT_OS_WINDOWS)
     _mm_prefetch(Ptr, _MM_HINT_T0);
 #endif
   }
