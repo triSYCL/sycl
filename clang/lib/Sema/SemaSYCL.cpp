@@ -24,6 +24,7 @@
 #include "clang/Sema/Sema.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
@@ -945,7 +946,7 @@ static void populateMainEntryPoint(const StringRef Name,
       llvm::sys::fs::openFileForWrite(MainFileName, MainNameFD);
   if (EC) {
     llvm::errs() << "Error: " << EC.message() << "\n";
-    return;
+    llvm_unreachable("failed to generate main entry file");
   }
   llvm::raw_fd_ostream Out(MainNameFD, true /*close in destructor*/);
 

@@ -39,6 +39,7 @@
 set -e # stop on error
 set -x
 CWD=$(pwd)
+set -x
 
 # TODO: Pass an argument through the driver to set options like XILINX_PLATFORM,
 # the environment variables are a quick workaround to swap boards.
