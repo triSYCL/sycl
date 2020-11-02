@@ -21,6 +21,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
@@ -31,6 +32,9 @@ using namespace llvm;
 // Put the code in an anonymous namespace to avoid polluting the global
 // namespace
 namespace {
+
+cl::opt<std::string> KernelUnmergedProperties("sycl-kernel-unmerged-prop-out",
+                                              cl::ReallyHidden);
 
 /// IR conversion/downgrader pass for ACAP chess-clang
 struct ChessMassage : public ModulePass {
@@ -49,25 +53,46 @@ struct ChessMassage : public ModulePass {
   // Note, since it's from MergeFunctions, if MergeFunctions changes in some
   // way, it may break, ex identifying merged function incorrectly.
   void reorderFunctions(Module &M, llvm::raw_fd_ostream &O) {
-    std::vector<std::pair<FunctionComparator::FunctionHash, Function *>>
-      HashedFuncs;
+    std::vector<Function *> Funcs;
+    DenseMap<Function*, FunctionComparator::FunctionHash> FuncHashCache;
+    DenseMap<std::pair<Function*, Function*>, int> FuncCompareCache;
     llvm::SmallString<512> kernelNames;
 
     for (auto &F : M.functions()) {
       // Collect the kernel functions
       if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
-        HashedFuncs.emplace_back(FunctionComparator::functionHash(F), &F);
+        Funcs.emplace_back(&F);
       }
     }
 
     // Sort collected kernel functions with hash values
-    llvm::stable_sort(HashedFuncs, less_first());
+    llvm::stable_sort(Funcs, [&](Function *LHS, Function *RHS) {
+      FunctionComparator::FunctionHash& LHSHash = FuncHashCache[LHS];
+      if (!LHSHash)
+        LHSHash = FunctionComparator::functionHash(*LHS);
+      FunctionComparator::FunctionHash& RHSHash = FuncHashCache[RHS];
+      if (!RHSHash)
+        LHSHash = FunctionComparator::functionHash(*LHS);
+      if (LHSHash != RHSHash)
+        return LHSHash < RHSHash;
+      auto Lookup = FuncCompareCache.find({LHS, RHS});
+      int Compare = 0;
+      if (Lookup != FuncCompareCache.end())
+        Compare = Lookup->second;
+      else {
+        GlobalNumberState GNS;
+        Compare = FunctionComparator(LHS, RHS, &GNS).compare();
+        FuncCompareCache[{LHS, RHS}] = Compare;
+        FuncCompareCache[{RHS, LHS}] = -Compare;
+      }
+      return Compare < 0;
+    });
 
     // Put sorted kernel functions back to the Modules's function list
-    for (auto I = HashedFuncs.begin(), IE = HashedFuncs.end(); I != IE; ++I) {
-      I->second->removeFromParent();
-      M.getFunctionList().push_back(I->second);
-      kernelNames += (" \"" + I->second->getName() + "\" ").str();
+    for (auto I = Funcs.begin(), IE = Funcs.end(); I != IE; ++I) {
+      (*I)->removeFromParent();
+      M.getFunctionList().push_back((*I));
+      kernelNames += (" \"" + (*I)->getName() + "\" ").str();
     }
 
     // output our list of kernel names as a bash array we can iterate over
@@ -126,6 +151,8 @@ struct ChessMassage : public ModulePass {
         // Changing top level function defintiion/declaration, not call sites
         F.setCallingConv(CallingConv::C);
 
+        F.addFnAttr("chess_sycl_kernel");
+
         // setCallingConv on the function won't change all the call sites,
         // we must replicate the calling convention across it's Uses. Another
         // method would be to go through each basic block and check each
@@ -158,15 +185,7 @@ struct ChessMassage : public ModulePass {
   }
 
   bool runOnModule(Module &M) override {
-    SmallString<256> TDir;
-    llvm::sys::path::system_temp_directory(true, TDir);
-    // Make sure to rip off the directories for the filename
-    llvm::Twine file = "KernelUnmergedProperties_" +
-      llvm::sys::path::filename(M.getSourceFileName());
-    llvm::sys::path::append(TDir, file);
-    llvm::sys::path::replace_extension(TDir, "bash",
-      llvm::sys::path::Style::native);
-    llvm::raw_fd_ostream O(GetWriteStreamID(TDir.str()),
+    llvm::raw_fd_ostream O(GetWriteStreamID(KernelUnmergedProperties),
                             true /*close in destructor*/);
 
    // Script header/comment

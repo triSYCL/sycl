@@ -62,7 +62,8 @@ struct KernelPropGen : public ModulePass {
 
   /// Test if a function is a SPIR kernel
   bool isKernel(const Function &F) {
-    if (F.getCallingConv() == CallingConv::SPIR_KERNEL)
+    if (F.getCallingConv() == CallingConv::SPIR_KERNEL ||
+        F.hasFnAttribute("chess_sycl_kernel"))
       return true;
     return false;
   }
@@ -191,11 +192,12 @@ struct KernelPropGen : public ModulePass {
     
     llvm::SmallString<512> kernelNames;
     for (auto &F : M.functions()) {
-      if (!hasUser(F)) {
+      if (isKernel(F)) {
+        F.setLinkage(GlobalValue::WeakODRLinkage);
         kernelNames += (" \"" + F.getName() + "\" ").str();
-	// Revert the linkage back to original, which was changed by
-	// ChessMassage for function merge
-	F.setLinkage(GlobalValue::WeakODRLinkage);
+        // Revert the linkage back to original, which was changed by
+        // ChessMassage for function merge
+        F.setLinkage(GlobalValue::WeakODRLinkage);
       }
     }
 
