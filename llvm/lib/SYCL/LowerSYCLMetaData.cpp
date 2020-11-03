@@ -94,11 +94,10 @@ struct LSMDState {
         ResultMD.push_back(MDNode::get(
             Ctx, {MDString::get(Ctx, "llvm.loop.pipeline.enable"),
                    ConstantAsMetadata::get(
-                       ConstantInt::get(Type::getInt32Ty(Ctx), 1)),
+                       ConstantInt::get(Type::getInt32Ty(Ctx), -1)),
                    ConstantAsMetadata::get(
                        ConstantInt::getFalse(Type::getInt1Ty(Ctx))),
-                   ConstantAsMetadata::get(
-                       ConstantInt::get(Type::getInt8Ty(Ctx), -1))}));
+                }));
         MDNode *MDN = MDNode::getDistinct(Ctx, ResultMD);
         BB->getTerminator()->setMetadata(LLVMContext::MD_loop, MDN);
         BB->getTerminator()
@@ -161,6 +160,9 @@ struct LowerSYCLMetaData : public ModulePass {
   LowerSYCLMetaData() : ModulePass(ID) {}
   bool runOnModule(Module &M) override {
     return LSMDState(M).run();
+  }
+  virtual StringRef getPassName() const override {
+    return "LowerSYCLMetaData";
   }
 };
 }

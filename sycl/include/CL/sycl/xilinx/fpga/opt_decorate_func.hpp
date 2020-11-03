@@ -57,7 +57,7 @@ void dataflow(T&& functor) {
 */
 template<typename T>
 __SYCL_DEVICE_ANNOTATE("xilinx_pipeline")
-ALWAYS_INLINE void pipeline(T&& functor) {
+__SYCL_ALWAYS_INLINE void pipeline(T&& functor) {
   /// the std::forward can make a difference when the operator() is l or r value
   /// specified.
   std::forward<T>(functor)();

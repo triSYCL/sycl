@@ -15,6 +15,7 @@
 #include <regex>
 #include <string>
 
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
@@ -48,6 +49,8 @@ struct PrepareSYCLOpt : public ModulePass {
         assert(F.use_empty());
         continue;
       }
+      if (F.isIntrinsic())
+        continue;
       F.setCallingConv(CallingConv::SPIR_FUNC);
       for (Value* V : F.users()) {
         if (auto* Call = dyn_cast<CallBase>(V))
@@ -72,14 +75,48 @@ struct PrepareSYCLOpt : public ModulePass {
       I->eraseFromParent();
   }
 
+  /// This will change array partition such that after the O3 pipeline it
+  /// matched very closely what v++ generates.
+  /// This will change the type of the alloca referenced by the array partition
+  /// into an array. and change the argument received by xlx_array_partition
+  /// into a pointer on an array.
+  void lowerArrayPartition(Module &M) {
+    Function* Func = Intrinsic::getDeclaration(&M, Intrinsic::sideeffect);
+    for (Use& U : Func->uses()) {
+      auto* Usr = dyn_cast<CallBase>(U.getUser());
+      if (!Usr)
+        continue;
+      if (!Usr->getOperandBundle("xlx_array_partition"))
+        continue;
+      Use& Ptr = U.getUser()->getOperandUse(0);
+      Value* Obj = getUnderlyingObject(Ptr);
+      if (!isa<AllocaInst>(Obj))
+        return;
+      auto* Alloca = cast<AllocaInst>(Obj);
+      auto *Replacement =
+          new AllocaInst(Ptr->getType()->getPointerElementType(), 0,
+                         ConstantInt::get(Type::getInt32Ty(M.getContext()), 1),
+                         Align(128), "");
+      Replacement->insertAfter(Alloca);
+      Instruction* Cast = BitCastInst::Create(
+          Instruction::BitCast, Replacement, Alloca->getType());
+      Cast->insertAfter(Replacement);
+      Alloca->replaceAllUsesWith(Cast);
+      Value* Zero = ConstantInt::get(Type::getInt32Ty(M.getContext()), 0);
+      Instruction* GEP = GetElementPtrInst::Create(nullptr, Replacement, {Zero});
+      GEP->insertAfter(Cast);
+      Ptr.set(GEP);
+    }
+  }
+
   bool runOnModule(Module &M) override {
     turnNonKernelsIntoPrivate(M);
     setCallingConventions(M);
+    lowerArrayPartition(M);
     removeAnnotationsIntrisic(M);
     return true;
   }
 };
-
 }
 
 namespace llvm {

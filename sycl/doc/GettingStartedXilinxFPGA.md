@@ -472,6 +472,16 @@ sudo rmmod xocl
 sudo modprobe xocl
 ```
 
+## Xilinx Macros
+
+``__SYCL_XILINX_SW_EMU_MODE__`` will be defined when compiling device code in sw_emu mode
+
+``__SYCL_XILINX_HW_EMU_MODE__`` will be defined when compiling device code in hw_emu mode
+
+``__SYCL_XILINX_HW_MODE__`` will be defined when compiling device code in hw mode
+
+when compiling host code none of them will be defined.
+
 ## Xilinx FPGA SYCL compiler architecture
 
 [Architecture of the Xilinx SYCL

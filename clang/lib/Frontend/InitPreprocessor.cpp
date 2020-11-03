@@ -1117,8 +1117,22 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
     Builder.defineMacro("SYCL_EXTERNAL", "__attribute__((sycl_device))");
     // Defines a macro that switches on SPIR intrinsics in SYCL runtime, used
     // by Xilinx FPGA devices for the moment
-    if (LangOpts.SYCLXOCCDevice)
+    if (LangOpts.SYCLXOCCDevice) {
       Builder.defineMacro("__SYCL_SPIR_DEVICE__");
+      switch (TI.getTriple().getSubArch()) {
+      case llvm::Triple::FPGASubArch_sw_emu:
+        Builder.defineMacro("__SYCL_XILINX_SW_EMU_MODE__");
+        break;
+      case llvm::Triple::FPGASubArch_hw_emu:
+        Builder.defineMacro("__SYCL_XILINX_HW_EMU_MODE__");
+        break;
+      case llvm::Triple::FPGASubArch_hw:
+        Builder.defineMacro("__SYCL_XILINX_HW_MODE__");
+        break;
+      default:
+        break;
+      }
+    }
 
     if (TI.getTriple().isNVPTX()) {
         Builder.defineMacro("__SYCL_NVPTX__", "1");
