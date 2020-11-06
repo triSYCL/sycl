@@ -480,7 +480,9 @@ sudo modprobe xocl
 
 ``__SYCL_XILINX_HW_MODE__`` will be defined when compiling device code in hw mode
 
-when compiling host code none of them will be defined.
+when compiling host code none of the ``__SYCL_XILINX_*_MODE__`` macros will be defined.
+
+``__SYCL_HAS_XILINX_DEVICE__`` will be defined on the host if one of the specified targets is a Xilinx device or on a Xilinx device
 
 ## Xilinx FPGA SYCL compiler architecture
 

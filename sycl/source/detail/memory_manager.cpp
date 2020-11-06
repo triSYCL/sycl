@@ -187,7 +187,7 @@ MemoryManager::allocateBufferObject(ContextImplPtr TargetContext, void *UserPtr,
   RT::PiMem NewMem = nullptr;
   const detail::plugin &Plugin = TargetContext->getPlugin();
 
-#if (defined(__SYCL_XILINX_ONLY__))
+#ifdef __SYCL_XILINX_ONLY__
   // This currently enforces assignment of all buffers to DDR bank 0 via
   // Xilinx OpenCL extensions, which we also enforce when compiling the
   // kernels via xocc (0 is usually the default inferred space, but some get
@@ -231,16 +231,11 @@ MemoryManager::allocateBufferObject(ContextImplPtr TargetContext, void *UserPtr,
     Plugin.call<PiApiKind::piMemBufferCreate>(
         TargetContext->getHandleRef(), CreationFlags | CL_MEM_EXT_PTR_XILINX,
         Size, &mext, &NewMem, nullptr);
-  } else {
-  Plugin.call<PiApiKind::piMemBufferCreate>(TargetContext->getHandleRef(),
-                                            CreationFlags, Size, UserPtr,
-                                            &NewMem, nullptr);
-  }
-#else
-  Plugin.call<PiApiKind::piMemBufferCreate>(TargetContext->getHandleRef(),
-                                            CreationFlags, Size, UserPtr,
-                                            &NewMem, nullptr);
+  } else
 #endif
+    Plugin.call<PiApiKind::piMemBufferCreate>(TargetContext->getHandleRef(),
+                                              CreationFlags, Size, UserPtr,
+                                              &NewMem, nullptr);
   return NewMem;
 }
 
@@ -371,9 +366,11 @@ void copyH2D(SYCLMemObjI *SYCLMemObj, char *SrcMem, QueueImplPtr,
       if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
                               SrcOffset, DstOffset)) {
         Plugin.call<PiApiKind::piEnqueueMemBufferWrite>(
-            Queue, DstMem, /*blocking_write=*/CL_FALSE,
-            DstOffset[DstPos.YTerm], DstAccessRangeWidthBytes*DstAccessRange[DstPos.YTerm]*DstAccessRange[DstPos.ZTerm],
-            SrcMem + DstOffset[DstPos.YTerm], DepEvents.size(), &DepEvents[0], &OutEvent);
+            Queue, DstMem, /*blocking_write=*/CL_FALSE, DstOffset[DstPos.YTerm],
+            DstAccessRangeWidthBytes * DstAccessRange[DstPos.YTerm] *
+                DstAccessRange[DstPos.ZTerm],
+            SrcMem + DstOffset[DstPos.YTerm], DepEvents.size(),
+            DepEvents.size() ? &DepEvents[0] : nullptr, &OutEvent);
         return;
       }
 
@@ -457,9 +454,11 @@ void copyD2H(SYCLMemObjI *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
       if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
                              SrcOffset, DstOffset)) {
         Plugin.call<PiApiKind::piEnqueueMemBufferRead>(
-            Queue, SrcMem,/*blocking_read=*/CL_FALSE, DstOffset[0],
-            DstAccessRange[DstPos.YTerm]*DstAccessRange[DstPos.XTerm]*DstAccessRange[DstPos.ZTerm],
-            DstMem + DstOffset[DstPos.YTerm], DepEvents.size(), &DepEvents[0], &OutEvent);
+            Queue, SrcMem, /*blocking_read=*/CL_FALSE, DstOffset[0],
+            DstAccessRange[DstPos.YTerm] * DstAccessRange[DstPos.XTerm] *
+                DstAccessRange[DstPos.ZTerm],
+            DstMem + DstOffset[DstPos.YTerm], DepEvents.size(),
+            DepEvents.size() ? &DepEvents[0] : nullptr, &OutEvent);
         return;
       }
 
@@ -535,9 +534,12 @@ void copyD2D(SYCLMemObjI *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
       if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
                               SrcOffset, DstOffset)) {
         Plugin.call<PiApiKind::piEnqueueMemBufferCopy>(
-            Queue, SrcMem, DstMem, SrcOffset[SrcPos.YTerm], DstOffset[SrcPos.YTerm],
-            SrcAccessRangeWidthBytes * SrcAccessRange[SrcPos.YTerm] * SrcAccessRange[SrcPos.ZTerm],
-            DepEvents.size(), &DepEvents[0], &OutEvent);
+            Queue, SrcMem, DstMem, SrcOffset[SrcPos.YTerm],
+            DstOffset[SrcPos.YTerm],
+            SrcAccessRangeWidthBytes * SrcAccessRange[SrcPos.YTerm] *
+                SrcAccessRange[SrcPos.ZTerm],
+            DepEvents.size(), DepEvents.size() ? &DepEvents[0] : nullptr,
+            &OutEvent);
         return;
       }
 

@@ -4429,9 +4429,6 @@ def fdefault_calling_conv_EQ : Joined<["-"], "fdefault-calling-conv=">,
   HelpText<"Set default calling convention">, Values<"cdecl,fastcall,stdcall,vectorcall,regcall">;
 def finclude_default_header : Flag<["-"], "finclude-default-header">,
   HelpText<"Include default header file for OpenCL">;
-def fsycl_xocc : Flag<["-"], "fsycl-xocc">,
-  HelpText<"Indicates that the compiler is using the Xilinx xocc backend, "
-           "allowing optional xocc requirements, e.g. compiler defines">;
 def fsycl_allow_variadic_func : Flag<["-"], "fsycl-allow-variadic-func">,
   HelpText<"Allow variadic functions in SYCL device.">;
 def fno_sycl_allow_variadic_func : Flag<["-"], "fno-sycl-allow-variadic-func">;
