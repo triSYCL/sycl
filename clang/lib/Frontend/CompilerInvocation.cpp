@@ -3243,12 +3243,6 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
           << Opts.OMPHostIRFile;
   }
 
-  // SYCLXOCCDevice forces things like:
-  // 1) The InitPreprocessor to define some Xilinx related macros which force
-  //    alternate paths in the SYCL runtime
-  // 2) The assembler stage of clang to emit llvm ir (-emit-llvm) rather than
-  //     assembly (-S)
-  Opts.SYCLXOCCDevice = Args.hasArg(options::OPT_fsycl_xocc);
   Opts.SYCLIsDevice   = Args.hasArg(options::OPT_fsycl_is_device);
   Opts.SYCLIsHost   = Args.hasArg(options::OPT_fsycl_is_host);
   Opts.SYCLAllowFuncPtr = Args.hasFlag(options::OPT_fsycl_allow_func_ptr,
@@ -3260,12 +3254,12 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   // for anything else..For example you have to specify that you wish variadics
   // off for xocc if you wish to emit diagnostics for them and you have to
   // specify if you wish no diagnostics for other devices.
-  Opts.SYCLAllowVariadicFunc = Opts.SYCLXOCCDevice ?
-    Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
-                 options::OPT_fno_sycl_allow_variadic_func) :
-    Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
-                 options::OPT_fno_sycl_allow_variadic_func,
-                 false);
+  Opts.SYCLAllowVariadicFunc =
+      T.isXilinxFPGA()
+          ? Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
+                         options::OPT_fno_sycl_allow_variadic_func)
+          : Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
+                         options::OPT_fno_sycl_allow_variadic_func, false);
   Opts.SYCLUnnamedLambda = Args.hasArg(options::OPT_fsycl_unnamed_lambda);
 
   // Set CUDA mode for OpenMP target NVPTX/AMDGCN if specified in options

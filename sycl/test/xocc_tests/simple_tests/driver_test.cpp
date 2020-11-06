@@ -7,7 +7,7 @@
 // CHECK-PIPELINE_SW_EMU-NEXT:{{.*}}clang-offload-wrapper"
 // CHECK-PIPELINE_SW_EMU-NEXT:{{.*}}llc"
 // CHECK-PIPELINE_SW_EMU-NEXT:{{.*}}clang-12" "-cc1" "-triple" "fpga64_sw_emu-xilinx-linux-sycldevice" "-fsycl" "-fsycl-is-device" {{.*}} "-fsycl-int-header
-// CHECK-PIPELINE_SW_EMU-NEXT:{{.*}}clang-12" "-cc1" "-triple" "{{.*}}" "-fsycl-xocc" {{.*}} "-fsycl" "-fsycl-is-host"
+// CHECK-PIPELINE_SW_EMU-NEXT:{{.*}}clang-12" "-cc1" "-triple" "{{.*}}" {{.*}} "-fsycl" "-fsycl-is-host"
 // CHECK-PIPELINE_SW_EMU-NEXT:{{.*}}ld"
 
 // RUN: %clang -fsycl -fsycl-targets=fpga64_hw_emu -### %s 2>&1 | FileCheck -check-prefix=CHECK-PIPELINE_HW_EMU %s
@@ -17,7 +17,7 @@
 // CHECK-PIPELINE_HW_EMU-NEXT:{{.*}}clang-offload-wrapper"
 // CHECK-PIPELINE_HW_EMU-NEXT:{{.*}}llc"
 // CHECK-PIPELINE_HW_EMU-NEXT:{{.*}}clang-12" "-cc1" "-triple" "fpga64_hw_emu-xilinx-linux-sycldevice" "-fsycl" "-fsycl-is-device" {{.*}} "-fsycl-int-header
-// CHECK-PIPELINE_HW_EMU-NEXT:{{.*}}clang-12" "-cc1" "-triple" "{{.*}}" "-fsycl-xocc" {{.*}} "-fsycl" "-fsycl-is-host"
+// CHECK-PIPELINE_HW_EMU-NEXT:{{.*}}clang-12" "-cc1" "-triple" "{{.*}}" {{.*}} "-fsycl" "-fsycl-is-host"
 // CHECK-PIPELINE_HW_EMU-NEXT:{{.*}}ld"
 
 // RUN: %clang -fsycl -fsycl-targets=fpga64_hw -### %s 2>&1 | FileCheck -check-prefix=CHECK-PIPELINE_HW %s
@@ -28,5 +28,5 @@
 // CHECK-PIPELINE_HW-NEXT:{{.*}}clang-offload-wrapper"
 // CHECK-PIPELINE_HW-NEXT:{{.*}}llc"
 // CHECK-PIPELINE_HW-NEXT:{{.*}}clang-12" "-cc1" "-triple" "fpga64_hw-xilinx-linux-sycldevice" "-fsycl" "-fsycl-is-device" {{.*}} "-fsycl-int-header
-// CHECK-PIPELINE_HW-NEXT:{{.*}}clang-12" "-cc1" "-triple" "{{.*}}" "-fsycl-xocc" {{.*}} "-fsycl" "-fsycl-is-host"
+// CHECK-PIPELINE_HW-NEXT:{{.*}}clang-12" "-cc1" "-triple" "{{.*}}" {{.*}} "-fsycl" "-fsycl-is-host"
 // CHECK-PIPELINE_HW-NEXT:{{.*}}ld"

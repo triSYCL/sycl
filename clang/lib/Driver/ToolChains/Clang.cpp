@@ -4165,13 +4165,6 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   Arg *SYCLStdArg = Args.getLastArg(options::OPT_sycl_std_EQ);
 
-  bool IsSYCLXOCC = false;
-  if (llvm::any_of(llvm::make_range(C.getOffloadToolChains<Action::OFK_SYCL>()),
-                   [](const auto &Elem) {
-                     return Elem.second->getTriple().isXilinxFPGA();
-                   }))
-    IsSYCLXOCC = true;
-
   if (UseSYCLTriple) {
     // We want to compile sycl kernels.
     CmdArgs.push_back("-fsycl");
@@ -4258,8 +4251,13 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   }
 
   if (IsSYCL) {
-    if (IsSYCLXOCC)
-      CmdArgs.push_back("-fsycl-xocc");
+    if (!IsSYCLDevice &&
+        llvm::any_of(
+            llvm::make_range(C.getOffloadToolChains<Action::OFK_SYCL>()),
+            [](const auto &Elem) {
+              return Elem.second->getTriple().isXilinxFPGA();
+            }))
+      CmdArgs.push_back("-D__SYCL_HAS_XILINX_DEVICE__");
     if (SYCLStdArg) {
       SYCLStdArg->render(Args, CmdArgs);
       CmdArgs.push_back("-fsycl-std-layout-kernel-params");

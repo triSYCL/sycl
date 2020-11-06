@@ -831,8 +831,7 @@ constructKernelName(Sema &S, FunctionDecl *KernelCallerFunc,
   MC.mangleTypeName(KernelNameType, Out);
 
   std::string Res = std::string(Out.str());
-  if (S.getASTContext().getTargetInfo().getTriple().isXilinxSYCLDevice())
-    Res = computeUniqueSYCLXOCCName(Res, KernelNameType.getAsString());
+  Res = computeUniqueSYCLXOCCName(Res, KernelNameType.getAsString());
 
   return {Res,
           PredefinedExpr::ComputeName(S.getASTContext(),
