@@ -3333,17 +3333,9 @@ void Sema::ConstructOpenCLKernel(FunctionDecl *KernelCallerFunc,
       calculateKernelNameType(Context, KernelCallerFunc), KernelName,
       StableName);
 
-<<<<<<< HEAD
-  // Generate Main prior to header gen in-case we need to pass across any
-  // information to the header.
   if (getLangOpts().SYCLAIEDevice)
     populateMainEntryPoint(KernelName, KernelCallerFunc);
 
-  ConstructingOpenCLKernel = true;
-||||||| 69a159e52604
-  ConstructingOpenCLKernel = true;
-=======
->>>>>>> sycl/unified/next
   KernelObjVisitor Visitor{*this};
   Visitor.VisitRecordBases(KernelObj, kernel_decl, kernel_body, int_header);
   Visitor.VisitRecordFields(KernelObj, kernel_decl, kernel_body, int_header);

@@ -660,7 +660,8 @@ Driver::OpenMPRuntimeKind Driver::getOpenMPRuntime(const ArgList &Args) const {
 
 static bool isValidSYCLTriple(llvm::Triple T) {
   // NVPTX is valid for SYCL.
-  if (T.isNVPTX() || T.getArch() == llvm::Triple::fpga64)
+  if (T.isNVPTX() || T.getArch() == llvm::Triple::fpga64 ||
+      T.getArch() == llvm::Triple::aie32)
     return true;
   // Check for invalid SYCL device triple values.
   // Non-SPIR arch.

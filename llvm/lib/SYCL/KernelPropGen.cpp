@@ -17,6 +17,7 @@
 #include <string>
 
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
@@ -194,7 +195,7 @@ struct KernelPropGen : public ModulePass {
 
   /// Visit all the functions of the module
   bool runOnModule(Module &M) override {
-    auto T = llvm::Triple(M.getTargetTriple());
+    auto T = Triple(M.getTargetTriple());
     llvm::raw_fd_ostream O(GetWriteStreamID(KernelPropGenOutput),
                            true /*close in destructor*/);
 
