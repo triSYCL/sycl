@@ -119,6 +119,7 @@ public:
     MSVC2017 = 1910,
     MSVC2017_5 = 1912,
     MSVC2017_7 = 1914,
+    MSVC2019 = 1920,
   };
 
   enum class SYCLVersionList {
@@ -410,9 +411,6 @@ public:
     setRoundingMode(static_cast<RoundingMode>(LangOptions::FPR_ToNearest));
     setFPExceptionMode(LangOptions::FPE_Ignore);
   }
-  // Used for serializing.
-  explicit FPOptions(unsigned I) { getFromOpaqueInt(I); }
-
   explicit FPOptions(const LangOptions &LO) {
     Value = 0;
     setFPContractMode(LO.getDefaultFPContractMode());
@@ -442,8 +440,7 @@ public:
   }
 
   bool isFPConstrained() const {
-    return getRoundingMode() !=
-               static_cast<unsigned>(RoundingMode::NearestTiesToEven) ||
+    return getRoundingMode() != llvm::RoundingMode::NearestTiesToEven ||
            getFPExceptionMode() != LangOptions::FPE_Ignore ||
            getAllowFEnvAccess();
   }
@@ -455,12 +452,16 @@ public:
   static FPOptions defaultWithoutTrailingStorage(const LangOptions &LO);
 
   storage_type getAsOpaqueInt() const { return Value; }
-  void getFromOpaqueInt(storage_type value) { Value = value; }
+  static FPOptions getFromOpaqueInt(storage_type Value) {
+    FPOptions Opts;
+    Opts.Value = Value;
+    return Opts;
+  }
 
   // We can define most of the accessors automatically:
 #define OPTION(NAME, TYPE, WIDTH, PREVIOUS)                                    \
-  unsigned get##NAME() const {                                                 \
-    return static_cast<unsigned>(TYPE((Value & NAME##Mask) >> NAME##Shift));   \
+  TYPE get##NAME() const {                                                     \
+    return static_cast<TYPE>((Value & NAME##Mask) >> NAME##Shift);             \
   }                                                                            \
   void set##NAME(TYPE value) {                                                 \
     Value = (Value & ~NAME##Mask) | (storage_type(value) << NAME##Shift);      \
@@ -483,7 +484,7 @@ public:
 /// The is implemented as a value of the new FPOptions plus a mask showing which
 /// fields are actually set in it.
 class FPOptionsOverride {
-  FPOptions Options;
+  FPOptions Options = FPOptions::getFromOpaqueInt(0);
   FPOptions::storage_type OverrideMask = 0;
 
 public:
@@ -501,13 +502,10 @@ public:
       (static_cast<storage_type>(1) << FPOptions::StorageBitSize) - 1;
 
   FPOptionsOverride() {}
-  FPOptionsOverride(FPOptions::storage_type Value, FPOptions::storage_type Mask)
-      : Options(Value), OverrideMask(Mask) {}
   FPOptionsOverride(const LangOptions &LO)
       : Options(LO), OverrideMask(OverrideMaskBits) {}
-
-  // Used for serializing.
-  explicit FPOptionsOverride(storage_type I) { getFromOpaqueInt(I); }
+  FPOptionsOverride(FPOptions FPO)
+      : Options(FPO), OverrideMask(OverrideMaskBits) {}
 
   bool requiresTrailingStorage() const { return OverrideMask != 0; }
 
@@ -543,14 +541,17 @@ public:
             << FPOptions::StorageBitSize) |
            OverrideMask;
   }
-  void getFromOpaqueInt(storage_type I) {
-    OverrideMask = I & OverrideMaskBits;
-    Options.getFromOpaqueInt(I >> FPOptions::StorageBitSize);
+  static FPOptionsOverride getFromOpaqueInt(storage_type I) {
+    FPOptionsOverride Opts;
+    Opts.OverrideMask = I & OverrideMaskBits;
+    Opts.Options = FPOptions::getFromOpaqueInt(I >> FPOptions::StorageBitSize);
+    return Opts;
   }
 
   FPOptions applyOverrides(FPOptions Base) {
-    FPOptions Result((Base.getAsOpaqueInt() & ~OverrideMask) |
-                     (Options.getAsOpaqueInt() & OverrideMask));
+    FPOptions Result =
+        FPOptions::getFromOpaqueInt((Base.getAsOpaqueInt() & ~OverrideMask) |
+                                     (Options.getAsOpaqueInt() & OverrideMask));
     return Result;
   }
 
@@ -567,7 +568,7 @@ public:
   bool has##NAME##Override() const {                                           \
     return OverrideMask & FPOptions::NAME##Mask;                               \
   }                                                                            \
-  unsigned get##NAME##Override() const {                                       \
+  TYPE get##NAME##Override() const {                                           \
     assert(has##NAME##Override());                                             \
     return Options.get##NAME();                                                \
   }                                                                            \

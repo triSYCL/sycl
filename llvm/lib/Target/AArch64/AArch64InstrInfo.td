@@ -593,8 +593,8 @@ let RecomputePerFunction = 1 in {
   // Avoid generating STRQro if it is slow, unless we're optimizing for code size.
   def UseSTRQro : Predicate<"!Subtarget->isSTRQroSlow() || shouldOptForSize(MF)">;
 
-  def UseBTI : Predicate<[{ MF->getFunction().hasFnAttribute("branch-target-enforcement") }]>;
-  def NotUseBTI : Predicate<[{ !MF->getFunction().hasFnAttribute("branch-target-enforcement") }]>;
+  def UseBTI : Predicate<[{ MF->getInfo<AArch64FunctionInfo>()->branchTargetEnforcement() }]>;
+  def NotUseBTI : Predicate<[{ !MF->getInfo<AArch64FunctionInfo>()->branchTargetEnforcement() }]>;
 
   def SLSBLRMitigation : Predicate<[{ MF->getSubtarget<AArch64Subtarget>().hardenSlsBlr() }]>;
   def NoSLSBLRMitigation : Predicate<[{ !MF->getSubtarget<AArch64Subtarget>().hardenSlsBlr() }]>;
@@ -692,7 +692,8 @@ def : Pat<(AArch64LOADgot tconstpool:$addr),
 // 32-bit jump table destination is actually only 2 instructions since we can
 // use the table itself as a PC-relative base. But optimization occurs after
 // branch relaxation so be pessimistic.
-let Size = 12, Constraints = "@earlyclobber $dst,@earlyclobber $scratch" in {
+let Size = 12, Constraints = "@earlyclobber $dst,@earlyclobber $scratch",
+    isNotDuplicable = 1 in {
 def JumpTableDest32 : Pseudo<(outs GPR64:$dst, GPR64sp:$scratch),
                              (ins GPR64:$table, GPR64:$entry, i32imm:$jti), []>,
                       Sched<[]>;
@@ -798,6 +799,23 @@ def BFMLALTIdx   : SIMDBF16MLALIndex<1, "bfmlalt", int_aarch64_neon_bfmlalt>;
 def BFCVTN       : SIMD_BFCVTN;
 def BFCVTN2      : SIMD_BFCVTN2;
 def BFCVT        : BF16ToSinglePrecision<"bfcvt">;
+
+// Vector-scalar BFDOT:
+// The second source operand of the 64-bit variant of BF16DOTlane is a 128-bit
+// register (the instruction uses a single 32-bit lane from it), so the pattern
+// is a bit tricky.
+def : Pat<(v2f32 (int_aarch64_neon_bfdot
+                    (v2f32 V64:$Rd), (v4bf16 V64:$Rn),
+                    (v4bf16 (bitconvert
+                      (v2i32 (AArch64duplane32
+                        (v4i32 (bitconvert
+                          (v8bf16 (insert_subvector undef,
+                            (v4bf16 V64:$Rm),
+                            (i64 0))))),
+                        VectorIndexS:$idx)))))),
+          (BF16DOTlanev4bf16 (v2f32 V64:$Rd), (v4bf16 V64:$Rn),
+                             (SUBREG_TO_REG (i32 0), V64:$Rm, dsub),
+                             VectorIndexS:$idx)>;
 }
 
 // ARMv8.6A AArch64 matrix multiplication
@@ -994,8 +1012,8 @@ let Predicates = [HasPA] in {
   defm PAC : SignAuth<0b000, 0b010, "pac">;
   defm AUT : SignAuth<0b001, 0b011, "aut">;
 
-  def XPACI : SignAuthZero<0b100, 0b00, "xpaci">;
-  def XPACD : SignAuthZero<0b100, 0b01, "xpacd">;
+  def XPACI : ClearAuth<0, "xpaci">;
+  def XPACD : ClearAuth<1, "xpacd">;
   def PACGA : SignAuthTwoOperand<0b1100, "pacga", null_frag>;
 
   // Combined Instructions
@@ -1030,7 +1048,7 @@ let Predicates = [HasPA] in {
 }
 
 // v8.3a floating point conversion for javascript
-let Predicates = [HasJS, HasFPARMv8] in
+let Predicates = [HasJS, HasFPARMv8], Defs = [NZCV] in
 def FJCVTZS  : BaseFPToIntegerUnscaled<0b01, 0b11, 0b110, FPR64, GPR32,
                                       "fjcvtzs",
                                       [(set GPR32:$Rd,
@@ -1039,7 +1057,7 @@ def FJCVTZS  : BaseFPToIntegerUnscaled<0b01, 0b11, 0b110, FPR64, GPR32,
 } // HasJS, HasFPARMv8
 
 // v8.4 Flag manipulation instructions
-let Predicates = [HasFMI] in {
+let Predicates = [HasFMI], Defs = [NZCV], Uses = [NZCV] in {
 def CFINV : SimpleSystemI<0, (ins), "cfinv", "">, Sched<[WriteSys]> {
   let Inst{20-5} = 0b0000001000000000;
 }
@@ -3785,7 +3803,7 @@ let isTerminator = 1, hasSideEffects = 1, isBarrier = 1, hasCtrlDep = 1,
 // Floating point immediate move.
 //===----------------------------------------------------------------------===//
 
-let isReMaterializable = 1 in {
+let isReMaterializable = 1, isAsCheapAsAMove = 1 in {
 defm FMOV : FPMoveImmediate<"fmov">;
 }
 
@@ -4483,6 +4501,10 @@ def : Pat<(v1i64 (int_aarch64_neon_fcvtps (v1f64 FPR64:$Rn))),
           (FCVTPSv1i64 FPR64:$Rn)>;
 def : Pat<(v1i64 (int_aarch64_neon_fcvtpu (v1f64 FPR64:$Rn))),
           (FCVTPUv1i64 FPR64:$Rn)>;
+def : Pat<(v1i64 (int_aarch64_neon_fcvtzs (v1f64 FPR64:$Rn))),
+          (FCVTZSv1i64 FPR64:$Rn)>;
+def : Pat<(v1i64 (int_aarch64_neon_fcvtzu (v1f64 FPR64:$Rn))),
+          (FCVTZUv1i64 FPR64:$Rn)>;
 
 def : Pat<(f16 (int_aarch64_neon_frecpe (f16 FPR16:$Rn))),
           (FRECPEv1f16 FPR16:$Rn)>;
@@ -7461,6 +7483,9 @@ def : Pat<(f64 (fadd (vector_extract (v2f64 FPR128:$Rn), (i64 0)),
 def : Pat<(fadd (vector_extract (v4f32 FPR128:$Rn), (i64 0)),
                 (vector_extract (v4f32 FPR128:$Rn), (i64 1))),
           (f32 (FADDPv2i32p (EXTRACT_SUBREG FPR128:$Rn, dsub)))>;
+def : Pat<(fadd (vector_extract (v8f16 FPR128:$Rn), (i64 0)),
+                (vector_extract (v8f16 FPR128:$Rn), (i64 1))),
+          (f16 (FADDPv2i16p (EXTRACT_SUBREG FPR128:$Rn, dsub)))>;
 
 // Scalar 64-bit shifts in FPR64 registers.
 def : Pat<(i64 (int_aarch64_neon_sshl (i64 FPR64:$Rn), (i64 FPR64:$Rm))),

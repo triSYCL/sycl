@@ -882,11 +882,9 @@ ASTNodeImporter::import(const TemplateArgumentLoc &TALoc) {
         import(FromInfo.getTemplateEllipsisLoc());
     if (!ToTemplateEllipsisLocOrErr)
       return ToTemplateEllipsisLocOrErr.takeError();
-
     ToInfo = TemplateArgumentLocInfo(
-          *ToTemplateQualifierLocOrErr,
-          *ToTemplateNameLocOrErr,
-          *ToTemplateEllipsisLocOrErr);
+        Importer.getToContext(), *ToTemplateQualifierLocOrErr,
+        *ToTemplateNameLocOrErr, *ToTemplateEllipsisLocOrErr);
   }
 
   return TemplateArgumentLoc(Arg, ToInfo);
@@ -1504,7 +1502,8 @@ ASTNodeImporter::VisitPackExpansionType(const PackExpansionType *T) {
     return ToPatternOrErr.takeError();
 
   return Importer.getToContext().getPackExpansionType(*ToPatternOrErr,
-                                                      T->getNumExpansions());
+                                                      T->getNumExpansions(),
+                                                      /*ExpactPack=*/false);
 }
 
 ExpectedType ASTNodeImporter::VisitDependentTemplateSpecializationType(
@@ -1749,12 +1748,28 @@ ASTNodeImporter::ImportDeclContext(DeclContext *FromDC, bool ForceImport) {
       Decl *ImportedDecl = *ImportedOrErr;
       FieldDecl *FieldTo = dyn_cast_or_null<FieldDecl>(ImportedDecl);
       if (FieldFrom && FieldTo) {
-        const RecordType *RecordFrom = FieldFrom->getType()->getAs<RecordType>();
-        const RecordType *RecordTo = FieldTo->getType()->getAs<RecordType>();
-        if (RecordFrom && RecordTo) {
-          RecordDecl *FromRecordDecl = RecordFrom->getDecl();
-          RecordDecl *ToRecordDecl = RecordTo->getDecl();
+        RecordDecl *FromRecordDecl = nullptr;
+        RecordDecl *ToRecordDecl = nullptr;
+        // If we have a field that is an ArrayType we need to check if the array
+        // element is a RecordDecl and if so we need to import the defintion.
+        if (FieldFrom->getType()->isArrayType()) {
+          // getBaseElementTypeUnsafe(...) handles multi-dimensonal arrays for us.
+          FromRecordDecl = FieldFrom->getType()->getBaseElementTypeUnsafe()->getAsRecordDecl();
+          ToRecordDecl = FieldTo->getType()->getBaseElementTypeUnsafe()->getAsRecordDecl();
+        }
 
+        if (!FromRecordDecl || !ToRecordDecl) {
+          const RecordType *RecordFrom =
+              FieldFrom->getType()->getAs<RecordType>();
+          const RecordType *RecordTo = FieldTo->getType()->getAs<RecordType>();
+
+          if (RecordFrom && RecordTo) {
+            FromRecordDecl = RecordFrom->getDecl();
+            ToRecordDecl = RecordTo->getDecl();
+          }
+        }
+
+        if (FromRecordDecl && ToRecordDecl) {
           if (FromRecordDecl->isCompleteDefinition() &&
               !ToRecordDecl->isCompleteDefinition()) {
             Error Err = ImportDefinition(FromRecordDecl, ToRecordDecl);
@@ -1906,7 +1921,8 @@ Error ASTNodeImporter::ImportDefinition(
           else
             return ToCaptureOrErr.takeError();
         }
-        cast<CXXRecordDecl>(To)->setCaptures(ToCaptures);
+        cast<CXXRecordDecl>(To)->setCaptures(Importer.getToContext(),
+                                             ToCaptures);
       }
 
       Error Result = ImportDeclContext(From, /*ForceImport=*/true);
@@ -4764,11 +4780,10 @@ Error ASTNodeImporter::ImportDefinition(
       return ToImplOrErr.takeError();
   }
 
-  if (shouldForceImportDeclContext(Kind)) {
-    // Import all of the members of this class.
-    if (Error Err = ImportDeclContext(From, /*ForceImport=*/true))
-      return Err;
-  }
+  // Import all of the members of this class.
+  if (Error Err = ImportDeclContext(From, /*ForceImport=*/true))
+    return Err;
+
   return Error::success();
 }
 
@@ -6072,6 +6087,8 @@ ExpectedStmt ASTNodeImporter::VisitIfStmt(IfStmt *S) {
   auto ToInit = importChecked(Err, S->getInit());
   auto ToConditionVariable = importChecked(Err, S->getConditionVariable());
   auto ToCond = importChecked(Err, S->getCond());
+  auto ToLParenLoc = importChecked(Err, S->getLParenLoc());
+  auto ToRParenLoc = importChecked(Err, S->getRParenLoc());
   auto ToThen = importChecked(Err, S->getThen());
   auto ToElseLoc = importChecked(Err, S->getElseLoc());
   auto ToElse = importChecked(Err, S->getElse());
@@ -6079,8 +6096,8 @@ ExpectedStmt ASTNodeImporter::VisitIfStmt(IfStmt *S) {
     return std::move(Err);
 
   return IfStmt::Create(Importer.getToContext(), ToIfLoc, S->isConstexpr(),
-                        ToInit, ToConditionVariable, ToCond, ToThen, ToElseLoc,
-                        ToElse);
+                        ToInit, ToConditionVariable, ToCond, ToLParenLoc,
+                        ToRParenLoc, ToThen, ToElseLoc, ToElse);
 }
 
 ExpectedStmt ASTNodeImporter::VisitSwitchStmt(SwitchStmt *S) {
@@ -6089,13 +6106,16 @@ ExpectedStmt ASTNodeImporter::VisitSwitchStmt(SwitchStmt *S) {
   auto ToInit = importChecked(Err, S->getInit());
   auto ToConditionVariable = importChecked(Err, S->getConditionVariable());
   auto ToCond = importChecked(Err, S->getCond());
+  auto ToLParenLoc = importChecked(Err, S->getLParenLoc());
+  auto ToRParenLoc = importChecked(Err, S->getRParenLoc());
   auto ToBody = importChecked(Err, S->getBody());
   auto ToSwitchLoc = importChecked(Err, S->getSwitchLoc());
   if (Err)
     return std::move(Err);
 
-  auto *ToStmt = SwitchStmt::Create(Importer.getToContext(), ToInit,
-                                    ToConditionVariable, ToCond);
+  auto *ToStmt =
+      SwitchStmt::Create(Importer.getToContext(), ToInit, ToConditionVariable,
+                         ToCond, ToLParenLoc, ToRParenLoc);
   ToStmt->setBody(ToBody);
   ToStmt->setSwitchLoc(ToSwitchLoc);
 
@@ -6930,7 +6950,7 @@ ExpectedStmt ASTNodeImporter::VisitImplicitCastExpr(ImplicitCastExpr *E) {
 
   return ImplicitCastExpr::Create(
       Importer.getToContext(), *ToTypeOrErr, E->getCastKind(), *ToSubExprOrErr,
-      &(*ToBasePathOrErr), E->getValueKind());
+      &(*ToBasePathOrErr), E->getValueKind(), E->getFPFeatures());
 }
 
 ExpectedStmt ASTNodeImporter::VisitExplicitCastExpr(ExplicitCastExpr *E) {
@@ -6957,8 +6977,8 @@ ExpectedStmt ASTNodeImporter::VisitExplicitCastExpr(ExplicitCastExpr *E) {
       return ToRParenLocOrErr.takeError();
     return CStyleCastExpr::Create(
         Importer.getToContext(), ToType, E->getValueKind(), E->getCastKind(),
-        ToSubExpr, ToBasePath, ToTypeInfoAsWritten, *ToLParenLocOrErr,
-        *ToRParenLocOrErr);
+        ToSubExpr, ToBasePath, CCE->getFPFeatures(), ToTypeInfoAsWritten,
+        *ToLParenLocOrErr, *ToRParenLocOrErr);
   }
 
   case Stmt::CXXFunctionalCastExprClass: {
@@ -6971,8 +6991,8 @@ ExpectedStmt ASTNodeImporter::VisitExplicitCastExpr(ExplicitCastExpr *E) {
       return ToRParenLocOrErr.takeError();
     return CXXFunctionalCastExpr::Create(
         Importer.getToContext(), ToType, E->getValueKind(), ToTypeInfoAsWritten,
-        E->getCastKind(), ToSubExpr, ToBasePath, *ToLParenLocOrErr,
-        *ToRParenLocOrErr);
+        E->getCastKind(), ToSubExpr, ToBasePath, FCE->getFPFeatures(),
+        *ToLParenLocOrErr, *ToRParenLocOrErr);
   }
 
   case Stmt::ObjCBridgedCastExprClass: {
@@ -7815,10 +7835,11 @@ ExpectedStmt ASTNodeImporter::VisitCXXNamedCastExpr(CXXNamedCastExpr *E) {
   if (!ToBasePathOrErr)
     return ToBasePathOrErr.takeError();
 
-  if (isa<CXXStaticCastExpr>(E)) {
+  if (auto CCE = dyn_cast<CXXStaticCastExpr>(E)) {
     return CXXStaticCastExpr::Create(
         Importer.getToContext(), ToType, VK, CK, ToSubExpr, &(*ToBasePathOrErr),
-        ToTypeInfoAsWritten, ToOperatorLoc, ToRParenLoc, ToAngleBrackets);
+        ToTypeInfoAsWritten, CCE->getFPFeatures(), ToOperatorLoc, ToRParenLoc,
+        ToAngleBrackets);
   } else if (isa<CXXDynamicCastExpr>(E)) {
     return CXXDynamicCastExpr::Create(
         Importer.getToContext(), ToType, VK, CK, ToSubExpr, &(*ToBasePathOrErr),

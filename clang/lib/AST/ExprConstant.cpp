@@ -50,8 +50,8 @@
 #include "clang/AST/StmtVisitor.h"
 #include "clang/AST/TypeLoc.h"
 #include "clang/Basic/Builtins.h"
-#include "clang/Basic/FixedPoint.h"
 #include "clang/Basic/TargetInfo.h"
+#include "llvm/ADT/APFixedPoint.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallBitVector.h"
 #include "llvm/Support/Debug.h"
@@ -63,9 +63,11 @@
 #define DEBUG_TYPE "exprconstant"
 
 using namespace clang;
+using llvm::APFixedPoint;
 using llvm::APInt;
 using llvm::APSInt;
 using llvm::APFloat;
+using llvm::FixedPointSemantics;
 using llvm::Optional;
 
 namespace {
@@ -1854,8 +1856,12 @@ void CallStackFrame::describe(raw_ostream &Out) {
       Out << ", ";
 
     const ParmVarDecl *Param = *I;
-    const APValue &Arg = Arguments[ArgIndex];
-    Arg.printPretty(Out, Info.Ctx, Param->getType());
+    if (Arguments) {
+      const APValue &Arg = Arguments[ArgIndex];
+      Arg.printPretty(Out, Info.Ctx, Param->getType());
+    } else {
+      Out << "<...>";
+    }
 
     if (ArgIndex == 0 && IsMemberCall)
       Out << "->" << *Callee << '(';
@@ -1976,18 +1982,11 @@ static bool HasSameBase(const LValue &A, const LValue &B) {
     return false;
 
   if (A.getLValueBase().getOpaqueValue() !=
-      B.getLValueBase().getOpaqueValue()) {
-    const Decl *ADecl = GetLValueBaseDecl(A);
-    if (!ADecl)
-      return false;
-    const Decl *BDecl = GetLValueBaseDecl(B);
-    if (!BDecl || ADecl->getCanonicalDecl() != BDecl->getCanonicalDecl())
-      return false;
-  }
+      B.getLValueBase().getOpaqueValue())
+    return false;
 
-  return IsGlobalLValue(A.getLValueBase()) ||
-         (A.getLValueCallIndex() == B.getLValueCallIndex() &&
-          A.getLValueVersion() == B.getLValueVersion());
+  return A.getLValueCallIndex() == B.getLValueCallIndex() &&
+         A.getLValueVersion() == B.getLValueVersion();
 }
 
 static void NoteLValueLocation(EvalInfo &Info, APValue::LValueBase Base) {
@@ -2055,7 +2054,20 @@ static bool CheckLValueConstantExpression(EvalInfo &Info, SourceLocation Loc,
       Info.FFDiag(Loc, diag::note_constexpr_non_global, 1)
         << IsReferenceType << !Designator.Entries.empty()
         << !!VD << VD;
-      NoteLValueLocation(Info, Base);
+
+      auto *VarD = dyn_cast_or_null<VarDecl>(VD);
+      if (VarD && VarD->isConstexpr()) {
+        // Non-static local constexpr variables have unintuitive semantics:
+        //   constexpr int a = 1;
+        //   constexpr const int *p = &a;
+        // ... is invalid because the address of 'a' is not constant. Suggest
+        // adding a 'static' in this case.
+        Info.Note(VarD->getLocation(), diag::note_constexpr_not_static)
+            << VarD
+            << FixItHint::CreateInsertion(VarD->getBeginLoc(), "static ");
+      } else {
+        NoteLValueLocation(Info, Base);
+      }
     } else {
       Info.FFDiag(Loc);
     }
@@ -2284,6 +2296,10 @@ static bool
 CheckConstantExpression(EvalInfo &Info, SourceLocation DiagLoc, QualType Type,
                         const APValue &Value,
                         Expr::ConstExprUsage Usage = Expr::EvaluateForCodeGen) {
+  // Nothing to check for a constant expression of type 'cv void'.
+  if (Type->isVoidType())
+    return true;
+
   CheckedTemporaries CheckedTemps;
   return CheckEvaluationResult(CheckEvaluationResultKind::ConstantExpression,
                                Info, DiagLoc, Type, Value, Usage,
@@ -2399,14 +2415,61 @@ static bool HandleFloatToIntCast(EvalInfo &Info, const Expr *E,
   return true;
 }
 
+/// Get rounding mode used for evaluation of the specified expression.
+/// \param[out] DynamicRM Is set to true is the requested rounding mode is
+///                       dynamic.
+/// If rounding mode is unknown at compile time, still try to evaluate the
+/// expression. If the result is exact, it does not depend on rounding mode.
+/// So return "tonearest" mode instead of "dynamic".
+static llvm::RoundingMode getActiveRoundingMode(EvalInfo &Info, const Expr *E,
+                                                bool &DynamicRM) {
+  llvm::RoundingMode RM =
+      E->getFPFeaturesInEffect(Info.Ctx.getLangOpts()).getRoundingMode();
+  DynamicRM = (RM == llvm::RoundingMode::Dynamic);
+  if (DynamicRM)
+    RM = llvm::RoundingMode::NearestTiesToEven;
+  return RM;
+}
+
+/// Check if the given evaluation result is allowed for constant evaluation.
+static bool checkFloatingPointResult(EvalInfo &Info, const Expr *E,
+                                     APFloat::opStatus St) {
+  FPOptions FPO = E->getFPFeaturesInEffect(Info.Ctx.getLangOpts());
+  if ((St & APFloat::opInexact) &&
+      FPO.getRoundingMode() == llvm::RoundingMode::Dynamic) {
+    // Inexact result means that it depends on rounding mode. If the requested
+    // mode is dynamic, the evaluation cannot be made in compile time.
+    Info.FFDiag(E, diag::note_constexpr_dynamic_rounding);
+    return false;
+  }
+
+  if ((St & APFloat::opStatus::opInvalidOp) &&
+      FPO.getFPExceptionMode() != LangOptions::FPE_Ignore) {
+    // There is no usefully definable result.
+    Info.FFDiag(E);
+    return false;
+  }
+
+  // FIXME: if:
+  // - evaluation triggered other FP exception, and
+  // - exception mode is not "ignore", and
+  // - the expression being evaluated is not a part of global variable
+  //   initializer,
+  // the evaluation probably need to be rejected.
+  return true;
+}
+
 static bool HandleFloatToFloatCast(EvalInfo &Info, const Expr *E,
                                    QualType SrcType, QualType DestType,
                                    APFloat &Result) {
+  assert(isa<CastExpr>(E) || isa<CompoundAssignOperator>(E));
+  bool DynamicRM;
+  llvm::RoundingMode RM = getActiveRoundingMode(Info, E, DynamicRM);
+  APFloat::opStatus St;
   APFloat Value = Result;
   bool ignored;
-  Result.convert(Info.Ctx.getFloatTypeSemantics(DestType),
-                 APFloat::rmNearestTiesToEven, &ignored);
-  return true;
+  St = Result.convert(Info.Ctx.getFloatTypeSemantics(DestType), RM, &ignored);
+  return checkFloatingPointResult(Info, E, St);
 }
 
 static APSInt HandleIntToIntCast(EvalInfo &Info, const Expr *E,
@@ -2628,28 +2691,31 @@ static bool handleIntIntBinOp(EvalInfo &Info, const Expr *E, const APSInt &LHS,
 }
 
 /// Perform the given binary floating-point operation, in-place, on LHS.
-static bool handleFloatFloatBinOp(EvalInfo &Info, const Expr *E,
+static bool handleFloatFloatBinOp(EvalInfo &Info, const BinaryOperator *E,
                                   APFloat &LHS, BinaryOperatorKind Opcode,
                                   const APFloat &RHS) {
+  bool DynamicRM;
+  llvm::RoundingMode RM = getActiveRoundingMode(Info, E, DynamicRM);
+  APFloat::opStatus St;
   switch (Opcode) {
   default:
     Info.FFDiag(E);
     return false;
   case BO_Mul:
-    LHS.multiply(RHS, APFloat::rmNearestTiesToEven);
+    St = LHS.multiply(RHS, RM);
     break;
   case BO_Add:
-    LHS.add(RHS, APFloat::rmNearestTiesToEven);
+    St = LHS.add(RHS, RM);
     break;
   case BO_Sub:
-    LHS.subtract(RHS, APFloat::rmNearestTiesToEven);
+    St = LHS.subtract(RHS, RM);
     break;
   case BO_Div:
     // [expr.mul]p4:
     //   If the second operand of / or % is zero the behavior is undefined.
     if (RHS.isZero())
       Info.CCEDiag(E, diag::note_expr_divide_by_zero);
-    LHS.divide(RHS, APFloat::rmNearestTiesToEven);
+    St = LHS.divide(RHS, RM);
     break;
   }
 
@@ -2661,7 +2727,8 @@ static bool handleFloatFloatBinOp(EvalInfo &Info, const Expr *E,
     Info.CCEDiag(E, diag::note_constexpr_float_arithmetic) << LHS.isNaN();
     return Info.noteUndefinedBehavior();
   }
-  return true;
+
+  return checkFloatingPointResult(Info, E, St);
 }
 
 static bool handleLogicalOpForVector(const APInt &LHSValue,
@@ -2744,7 +2811,7 @@ static bool handleCompareOpForVector(const APValue &LHSValue,
 }
 
 // Perform binary operations for vector types, in place on the LHS.
-static bool handleVectorVectorBinOp(EvalInfo &Info, const Expr *E,
+static bool handleVectorVectorBinOp(EvalInfo &Info, const BinaryOperator *E,
                                     BinaryOperatorKind Opcode,
                                     APValue &LHSValue,
                                     const APValue &RHSValue) {
@@ -3089,7 +3156,8 @@ static bool evaluateVarDeclInit(EvalInfo &Info, const Expr *E,
 
   // If we're currently evaluating the initializer of this declaration, use that
   // in-flight value.
-  if (Info.EvaluatingDecl.dyn_cast<const ValueDecl*>() == VD) {
+  if (declaresSameEntity(Info.EvaluatingDecl.dyn_cast<const ValueDecl *>(),
+                         VD)) {
     Result = Info.EvaluatingDeclValue;
     return true;
   }
@@ -4058,7 +4126,7 @@ static bool handleAssignment(EvalInfo &Info, const Expr *E, const LValue &LVal,
 namespace {
 struct CompoundAssignSubobjectHandler {
   EvalInfo &Info;
-  const Expr *E;
+  const CompoundAssignOperator *E;
   QualType PromotedLHSType;
   BinaryOperatorKind Opcode;
   const APValue &RHS;
@@ -4178,10 +4246,12 @@ struct CompoundAssignSubobjectHandler {
 const AccessKinds CompoundAssignSubobjectHandler::AccessKind;
 
 /// Perform a compound assignment of LVal <op>= RVal.
-static bool handleCompoundAssignment(
-    EvalInfo &Info, const Expr *E,
-    const LValue &LVal, QualType LValType, QualType PromotedLValType,
-    BinaryOperatorKind Opcode, const APValue &RVal) {
+static bool handleCompoundAssignment(EvalInfo &Info,
+                                     const CompoundAssignOperator *E,
+                                     const LValue &LVal, QualType LValType,
+                                     QualType PromotedLValType,
+                                     BinaryOperatorKind Opcode,
+                                     const APValue &RVal) {
   if (LVal.Designator.Invalid)
     return false;
 
@@ -5726,6 +5796,8 @@ typedef SmallVector<APValue, 8> ArgVector;
 /// EvaluateArgs - Evaluate the arguments to a function call.
 static bool EvaluateArgs(ArrayRef<const Expr *> Args, ArgVector &ArgValues,
                          EvalInfo &Info, const FunctionDecl *Callee) {
+  ArgValues.resize(Args.size());
+
   bool Success = true;
   llvm::SmallBitVector ForbiddenNullArgs;
   if (Callee->hasAttr<NonNullAttr>()) {
@@ -5743,8 +5815,6 @@ static bool EvaluateArgs(ArrayRef<const Expr *> Args, ArgVector &ArgValues,
         }
     }
   }
-  // FIXME: This is the wrong evaluation order for an assignment operator
-  // called via operator syntax.
   for (unsigned Idx = 0; Idx < Args.size(); Idx++) {
     if (!Evaluate(ArgValues[Idx], Info, Args[Idx])) {
       // If we're checking for a potential constant expression, evaluate all
@@ -5768,17 +5838,13 @@ static bool EvaluateArgs(ArrayRef<const Expr *> Args, ArgVector &ArgValues,
 /// Evaluate a function call.
 static bool HandleFunctionCall(SourceLocation CallLoc,
                                const FunctionDecl *Callee, const LValue *This,
-                               ArrayRef<const Expr*> Args, const Stmt *Body,
-                               EvalInfo &Info, APValue &Result,
-                               const LValue *ResultSlot) {
-  ArgVector ArgValues(Args.size());
-  if (!EvaluateArgs(Args, ArgValues, Info, Callee))
-    return false;
-
+                               ArrayRef<const Expr *> Args, APValue *ArgValues,
+                               const Stmt *Body, EvalInfo &Info,
+                               APValue &Result, const LValue *ResultSlot) {
   if (!Info.CheckCallLimit(CallLoc))
     return false;
 
-  CallStackFrame Frame(Info, CallLoc, Callee, This, ArgValues.data());
+  CallStackFrame Frame(Info, CallLoc, Callee, This, ArgValues);
 
   // For a trivial copy or move assignment, perform an APValue copy. This is
   // essential for unions, where the operations performed by the assignment
@@ -6608,9 +6674,15 @@ class APValueToBufferConverter {
   }
 
   bool visitInt(const APSInt &Val, QualType Ty, CharUnits Offset) {
-    CharUnits Width = Info.Ctx.getTypeSizeInChars(Ty);
-    SmallVector<unsigned char, 8> Bytes(Width.getQuantity());
-    llvm::StoreIntToMemory(Val, &*Bytes.begin(), Width.getQuantity());
+    APSInt AdjustedVal = Val;
+    unsigned Width = AdjustedVal.getBitWidth();
+    if (Ty->isBooleanType()) {
+      Width = Info.Ctx.getTypeSize(Ty);
+      AdjustedVal = AdjustedVal.extend(Width);
+    }
+
+    SmallVector<unsigned char, 8> Bytes(Width / 8);
+    llvm::StoreIntToMemory(AdjustedVal, &*Bytes.begin(), Width / 8);
     Buffer.writeObject(Offset, Bytes);
     return true;
   }
@@ -6651,6 +6723,13 @@ class BufferToAPValueConverter {
     return None;
   }
 
+  llvm::NoneType unrepresentableValue(QualType Ty, const APSInt &Val) {
+    Info.FFDiag(BCE->getBeginLoc(),
+                diag::note_constexpr_bit_cast_unrepresentable_value)
+        << Ty << Val.toString(/*Radix=*/10);
+    return None;
+  }
+
   Optional<APValue> visit(const BuiltinType *T, CharUnits Offset,
                           const EnumType *EnumSugar = nullptr) {
     if (T->isNullPtrType()) {
@@ -6661,6 +6740,20 @@ class BufferToAPValueConverter {
     }
 
     CharUnits SizeOf = Info.Ctx.getTypeSizeInChars(T);
+
+    // Work around floating point types that contain unused padding bytes. This
+    // is really just `long double` on x86, which is the only fundamental type
+    // with padding bytes.
+    if (T->isRealFloatingType()) {
+      const llvm::fltSemantics &Semantics =
+          Info.Ctx.getFloatTypeSemantics(QualType(T, 0));
+      unsigned NumBits = llvm::APFloatBase::getSizeInBits(Semantics);
+      assert(NumBits % 8 == 0);
+      CharUnits NumBytes = CharUnits::fromQuantity(NumBits / 8);
+      if (NumBytes != SizeOf)
+        SizeOf = NumBytes;
+    }
+
     SmallVector<uint8_t, 8> Bytes;
     if (!Buffer.readObject(Offset, SizeOf, Bytes)) {
       // If this is std::byte or unsigned char, then its okay to store an
@@ -6685,6 +6778,15 @@ class BufferToAPValueConverter {
 
     if (T->isIntegralOrEnumerationType()) {
       Val.setIsSigned(T->isSignedIntegerOrEnumerationType());
+
+      unsigned IntWidth = Info.Ctx.getIntWidth(QualType(T, 0));
+      if (IntWidth != Val.getBitWidth()) {
+        APSInt Truncated = Val.trunc(IntWidth);
+        if (Truncated.extend(Val.getBitWidth()) != Val)
+          return unrepresentableValue(QualType(T, 0), Val);
+        Val = Truncated;
+      }
+
       return APValue(Val);
     }
 
@@ -7191,6 +7293,8 @@ public:
     auto Args = llvm::makeArrayRef(E->getArgs(), E->getNumArgs());
     bool HasQualifier = false;
 
+    ArgVector ArgValues;
+
     // Extract function decl and 'this' pointer from the callee.
     if (CalleeType->isSpecificBuiltinType(BuiltinType::BoundMember)) {
       const CXXMethodDecl *Member = nullptr;
@@ -7237,6 +7341,22 @@ public:
       if (!Info.Ctx.hasSameFunctionTypeIgnoringExceptionSpec(
         CalleeType->getPointeeType(), FD->getType())) {
         return Error(E);
+      }
+
+      // For an (overloaded) assignment expression, evaluate the RHS before the
+      // LHS.
+      auto *OCE = dyn_cast<CXXOperatorCallExpr>(E);
+      if (OCE && OCE->isAssignmentOp()) {
+        assert(Args.size() == 2 && "wrong number of arguments in assignment");
+        if (isa<CXXMethodDecl>(FD)) {
+          // Args[0] is the object argument.
+          if (!EvaluateArgs({Args[1]}, ArgValues, Info, FD))
+            return false;
+        } else {
+          if (!EvaluateArgs({Args[1], Args[0]}, ArgValues, Info, FD))
+            return false;
+          std::swap(ArgValues[0], ArgValues[1]);
+        }
       }
 
       // Overloaded operator calls to member functions are represented as normal
@@ -7301,6 +7421,11 @@ public:
     } else
       return Error(E);
 
+    // Evaluate the arguments now if we've not already done so.
+    if (ArgValues.empty() && !Args.empty() &&
+        !EvaluateArgs(Args, ArgValues, Info, FD))
+      return false;
+
     SmallVector<QualType, 4> CovariantAdjustmentPath;
     if (This) {
       auto *NamedMember = dyn_cast<CXXMethodDecl>(FD);
@@ -7322,6 +7447,7 @@ public:
     // Destructor calls are different enough that they have their own codepath.
     if (auto *DD = dyn_cast<CXXDestructorDecl>(FD)) {
       assert(This && "no 'this' pointer for destructor call");
+      assert(ArgValues.empty() && "unexpected destructor arguments");
       return HandleDestruction(Info, E, *This,
                                Info.Ctx.getRecordType(DD->getParent()));
     }
@@ -7330,8 +7456,8 @@ public:
     Stmt *Body = FD->getBody(Definition);
 
     if (!CheckConstexprFunction(Info, E->getExprLoc(), FD, Definition, Body) ||
-        !HandleFunctionCall(E->getExprLoc(), Definition, This, Args, Body, Info,
-                            Result, ResultSlot))
+        !HandleFunctionCall(E->getExprLoc(), Definition, This, Args,
+                            ArgValues.data(), Body, Info, Result, ResultSlot))
       return false;
 
     if (!CovariantAdjustmentPath.empty() &&
@@ -7969,16 +8095,19 @@ bool LValueExprEvaluator::VisitArraySubscriptExpr(const ArraySubscriptExpr *E) {
   if (E->getBase()->getType()->isVectorType())
     return Error(E);
 
-  bool Success = true;
-  if (!evaluatePointer(E->getBase(), Result)) {
-    if (!Info.noteFailure())
-      return false;
-    Success = false;
-  }
-
   APSInt Index;
-  if (!EvaluateInteger(E->getIdx(), Index, Info))
-    return false;
+  bool Success = true;
+
+  // C++17's rules require us to evaluate the LHS first, regardless of which
+  // side is the base.
+  for (const Expr *SubExpr : {E->getLHS(), E->getRHS()}) {
+    if (SubExpr == E->getBase() ? !evaluatePointer(SubExpr, Result)
+                                : !EvaluateInteger(SubExpr, Index, Info)) {
+      if (!Info.noteFailure())
+        return false;
+      Success = false;
+    }
+  }
 
   return Success &&
          HandleLValueArrayAdjustment(Info, E, Result, E->getType(), Index);
@@ -8023,16 +8152,18 @@ bool LValueExprEvaluator::VisitCompoundAssignOperator(
   if (!Info.getLangOpts().CPlusPlus14 && !Info.keepEvaluatingAfterFailure())
     return Error(CAO);
 
-  APValue RHS;
+  bool Success = true;
 
-  // The overall lvalue result is the result of evaluating the LHS.
-  if (!this->Visit(CAO->getLHS())) {
-    if (Info.noteFailure())
-      Evaluate(RHS, this->Info, CAO->getRHS());
-    return false;
+  // C++17 onwards require that we evaluate the RHS first.
+  APValue RHS;
+  if (!Evaluate(RHS, this->Info, CAO->getRHS())) {
+    if (!Info.noteFailure())
+      return false;
+    Success = false;
   }
 
-  if (!Evaluate(RHS, this->Info, CAO->getRHS()))
+  // The overall lvalue result is the result of evaluating the LHS.
+  if (!this->Visit(CAO->getLHS()) || !Success)
     return false;
 
   return handleCompoundAssignment(
@@ -8045,15 +8176,17 @@ bool LValueExprEvaluator::VisitBinAssign(const BinaryOperator *E) {
   if (!Info.getLangOpts().CPlusPlus14 && !Info.keepEvaluatingAfterFailure())
     return Error(E);
 
-  APValue NewVal;
+  bool Success = true;
 
-  if (!this->Visit(E->getLHS())) {
-    if (Info.noteFailure())
-      Evaluate(NewVal, this->Info, E->getRHS());
-    return false;
+  // C++17 onwards require that we evaluate the RHS first.
+  APValue NewVal;
+  if (!Evaluate(NewVal, this->Info, E->getRHS())) {
+    if (!Info.noteFailure())
+      return false;
+    Success = false;
   }
 
-  if (!Evaluate(NewVal, this->Info, E->getRHS()))
+  if (!this->Visit(E->getLHS()) || !Success)
     return false;
 
   if (Info.getLangOpts().CPlusPlus20 &&
@@ -8974,6 +9107,7 @@ bool PointerExprEvaluator::VisitCXXNewExpr(const CXXNewExpr *E) {
   const Expr *Init = E->getInitializer();
   const InitListExpr *ResizedArrayILE = nullptr;
   const CXXConstructExpr *ResizedArrayCCE = nullptr;
+  bool ValueInit = false;
 
   QualType AllocType = E->getAllocatedType();
   if (Optional<const Expr*> ArraySize = E->getArraySize()) {
@@ -9017,7 +9151,14 @@ bool PointerExprEvaluator::VisitCXXNewExpr(const CXXNewExpr *E) {
     //   -- the new-initializer is a braced-init-list and the number of
     //      array elements for which initializers are provided [...]
     //      exceeds the number of elements to initialize
-    if (Init && !isa<CXXConstructExpr>(Init)) {
+    if (!Init) {
+      // No initialization is performed.
+    } else if (isa<CXXScalarValueInitExpr>(Init) ||
+               isa<ImplicitValueInitExpr>(Init)) {
+      ValueInit = true;
+    } else if (auto *CCE = dyn_cast<CXXConstructExpr>(Init)) {
+      ResizedArrayCCE = CCE;
+    } else {
       auto *CAT = Info.Ctx.getAsConstantArrayType(Init->getType());
       assert(CAT && "unexpected type for array initializer");
 
@@ -9040,8 +9181,6 @@ bool PointerExprEvaluator::VisitCXXNewExpr(const CXXNewExpr *E) {
       // special handling for this case when we initialize.
       if (InitBound != AllocBound)
         ResizedArrayILE = cast<InitListExpr>(Init);
-    } else if (Init) {
-      ResizedArrayCCE = cast<CXXConstructExpr>(Init);
     }
 
     AllocType = Info.Ctx.getConstantArrayType(AllocType, ArrayBound, nullptr,
@@ -9102,7 +9241,11 @@ bool PointerExprEvaluator::VisitCXXNewExpr(const CXXNewExpr *E) {
       return false;
   }
 
-  if (ResizedArrayILE) {
+  if (ValueInit) {
+    ImplicitValueInitExpr VIE(AllocType);
+    if (!EvaluateInPlace(*Val, Info, Result, &VIE))
+      return false;
+  } else if (ResizedArrayILE) {
     if (!EvaluateArrayNewInitList(Info, Result, *Val, ResizedArrayILE,
                                   AllocType))
       return false;
@@ -11156,6 +11299,17 @@ bool IntExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
     return Success(AlignedVal, E);
   }
 
+  case Builtin::BI__builtin_bitreverse8:
+  case Builtin::BI__builtin_bitreverse16:
+  case Builtin::BI__builtin_bitreverse32:
+  case Builtin::BI__builtin_bitreverse64: {
+    APSInt Val;
+    if (!EvaluateInteger(E->getArg(0), Val, Info))
+      return false;
+
+    return Success(Val.reverseBits(), E);
+  }
+
   case Builtin::BI__builtin_bswap16:
   case Builtin::BI__builtin_bswap32:
   case Builtin::BI__builtin_bswap64: {
@@ -11321,6 +11475,40 @@ bool IntExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
       return false;
 
     return Success(Val.countPopulation(), E);
+  }
+
+  case Builtin::BI__builtin_rotateleft8:
+  case Builtin::BI__builtin_rotateleft16:
+  case Builtin::BI__builtin_rotateleft32:
+  case Builtin::BI__builtin_rotateleft64:
+  case Builtin::BI_rotl8: // Microsoft variants of rotate right
+  case Builtin::BI_rotl16:
+  case Builtin::BI_rotl:
+  case Builtin::BI_lrotl:
+  case Builtin::BI_rotl64: {
+    APSInt Val, Amt;
+    if (!EvaluateInteger(E->getArg(0), Val, Info) ||
+        !EvaluateInteger(E->getArg(1), Amt, Info))
+      return false;
+
+    return Success(Val.rotl(Amt.urem(Val.getBitWidth())), E);
+  }
+
+  case Builtin::BI__builtin_rotateright8:
+  case Builtin::BI__builtin_rotateright16:
+  case Builtin::BI__builtin_rotateright32:
+  case Builtin::BI__builtin_rotateright64:
+  case Builtin::BI_rotr8: // Microsoft variants of rotate right
+  case Builtin::BI_rotr16:
+  case Builtin::BI_rotr:
+  case Builtin::BI_lrotr:
+  case Builtin::BI_rotr64: {
+    APSInt Val, Amt;
+    if (!EvaluateInteger(E->getArg(0), Val, Info) ||
+        !EvaluateInteger(E->getArg(1), Amt, Info))
+      return false;
+
+    return Success(Val.rotr(Amt.urem(Val.getBitWidth())), E);
   }
 
   case Builtin::BIstrlen:
@@ -11501,8 +11689,8 @@ bool IntExprEvaluator::VisitBuiltinCallExpr(const CallExpr *E,
       return false;
 
     // For __atomic_is_lock_free(sizeof(_Atomic(T))), if the size is a power
-    // of two less than the maximum inline atomic width, we know it is
-    // lock-free.  If the size isn't a power of two, or greater than the
+    // of two less than or equal to the maximum inline atomic width, we know it
+    // is lock-free.  If the size isn't a power of two, or greater than the
     // maximum alignment where we promote atomics, we know it is not lock-free
     // (at least not in the sense of atomic_is_lock_free).  Otherwise,
     // the answer can only be determined at runtime; for example, 16-byte
@@ -13006,6 +13194,29 @@ bool FixedPointExprEvaluator::VisitBinaryOperator(const BinaryOperator *E) {
     }
     Result = LHSFX.div(RHSFX, &OpOverflow)
                   .convert(ResultFXSema, &ConversionOverflow);
+    break;
+  }
+  case BO_Shl:
+  case BO_Shr: {
+    FixedPointSemantics LHSSema = LHSFX.getSemantics();
+    llvm::APSInt RHSVal = RHSFX.getValue();
+
+    unsigned ShiftBW =
+        LHSSema.getWidth() - (unsigned)LHSSema.hasUnsignedPadding();
+    unsigned Amt = RHSVal.getLimitedValue(ShiftBW - 1);
+    // Embedded-C 4.1.6.2.2:
+    //   The right operand must be nonnegative and less than the total number
+    //   of (nonpadding) bits of the fixed-point operand ...
+    if (RHSVal.isNegative())
+      Info.CCEDiag(E, diag::note_constexpr_negative_shift) << RHSVal;
+    else if (Amt != RHSVal)
+      Info.CCEDiag(E, diag::note_constexpr_large_shift)
+          << RHSVal << E->getType() << ShiftBW;
+
+    if (E->getOpcode() == BO_Shl)
+      Result = LHSFX.shl(Amt, &OpOverflow);
+    else
+      Result = LHSFX.shr(Amt, &OpOverflow);
     break;
   }
   default:
@@ -14642,7 +14853,7 @@ static ICEDiag CheckICE(const Expr* E, const ASTContext &Ctx) {
         const VarDecl *VD;
         // Look for a declaration of this variable that has an initializer, and
         // check whether it is an ICE.
-        if (Dcl->getAnyInitializer(VD) && VD->checkInitIsICE())
+        if (Dcl->getAnyInitializer(VD) && !VD->isWeak() && VD->checkInitIsICE())
           return NoDiag();
         else
           return ICEDiag(IK_NotICE, cast<DeclRefExpr>(E)->getLocation());
@@ -15095,7 +15306,8 @@ bool Expr::isPotentialConstantExpr(const FunctionDecl *FD,
   } else {
     SourceLocation Loc = FD->getLocation();
     HandleFunctionCall(Loc, FD, (MD && MD->isInstance()) ? &This : nullptr,
-                       Args, FD->getBody(), Info, Scratch, nullptr);
+                       Args, /*ArgValues*/ nullptr, FD->getBody(), Info,
+                       Scratch, nullptr);
   }
 
   return Diags.empty();
@@ -15117,13 +15329,8 @@ bool Expr::isPotentialConstantExprUnevaluated(Expr *E,
   Info.CheckingPotentialConstantExpression = true;
 
   // Fabricate a call stack frame to give the arguments a plausible cover story.
-  ArrayRef<const Expr*> Args;
-  ArgVector ArgValues(0);
-  bool Success = EvaluateArgs(Args, ArgValues, Info, FD);
-  (void)Success;
-  assert(Success &&
-         "Failed to set up arguments for potential constant evaluation");
-  CallStackFrame Frame(Info, SourceLocation(), FD, nullptr, ArgValues.data());
+  CallStackFrame Frame(Info, SourceLocation(), FD, /*This*/ nullptr,
+                       /*ArgValues*/ nullptr);
 
   APValue ResultScratch;
   Evaluate(ResultScratch, Info, E);

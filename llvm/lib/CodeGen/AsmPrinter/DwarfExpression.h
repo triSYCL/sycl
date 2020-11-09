@@ -299,8 +299,8 @@ public:
   /// Emit an unsigned constant.
   void addUnsignedConstant(const APInt &Value);
 
-  /// Emit floating point constant.
-  void addConstantFP(const APFloat &Value);
+  /// Emit an floating point constant.
+  void addConstantFP(const APFloat &Value, const AsmPrinter &AP);
 
   /// Lock this down to become a memory location description.
   void setMemoryLocationKind() {

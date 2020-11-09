@@ -74,7 +74,8 @@ public:
   int getIntImmCost(int64_t Val);
   int getIntImmCost(const APInt &Imm, Type *Ty, TTI::TargetCostKind CostKind);
   int getIntImmCostInst(unsigned Opcode, unsigned Idx, const APInt &Imm,
-                        Type *Ty, TTI::TargetCostKind CostKind);
+                        Type *Ty, TTI::TargetCostKind CostKind,
+                        Instruction *Inst = nullptr);
   int getIntImmCostIntrin(Intrinsic::ID IID, unsigned Idx, const APInt &Imm,
                           Type *Ty, TTI::TargetCostKind CostKind);
   TTI::PopcntSupportKind getPopcntSupport(unsigned TyWidth);
@@ -114,7 +115,7 @@ public:
   unsigned getMaxInterleaveFactor(unsigned VF);
 
   int getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src,
-                       TTI::TargetCostKind CostKind,
+                       TTI::CastContextHint CCH, TTI::TargetCostKind CostKind,
                        const Instruction *I = nullptr);
 
   int getExtractWithExtendCost(unsigned Opcode, Type *Dst, VectorType *VecTy,
@@ -166,6 +167,9 @@ public:
       return false;
 
     Type *Ty = cast<ScalableVectorType>(DataType)->getElementType();
+    if (Ty->isPointerTy())
+      return true;
+
     if (Ty->isBFloatTy() || Ty->isHalfTy() ||
         Ty->isFloatTy() || Ty->isDoubleTy())
       return true;
@@ -215,15 +219,10 @@ public:
 
   bool shouldExpandReduction(const IntrinsicInst *II) const {
     switch (II->getIntrinsicID()) {
-    case Intrinsic::experimental_vector_reduce_v2_fadd:
-    case Intrinsic::experimental_vector_reduce_v2_fmul:
+    case Intrinsic::vector_reduce_fadd:
+    case Intrinsic::vector_reduce_fmul:
       // We don't have legalization support for ordered FP reductions.
       return !II->getFastMathFlags().allowReassoc();
-
-    case Intrinsic::experimental_vector_reduce_fmax:
-    case Intrinsic::experimental_vector_reduce_fmin:
-      // Lowering asserts that there are no NaNs.
-      return !II->getFastMathFlags().noNaNs();
 
     default:
       // Don't expand anything else, let legalization deal with it.

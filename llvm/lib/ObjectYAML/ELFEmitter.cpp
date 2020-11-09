@@ -245,7 +245,8 @@ template <class ELFT> class ELFState {
   void writeSectionContent(Elf_Shdr &SHeader,
                            const ELFYAML::RelrSection &Section,
                            ContiguousBlobAccumulator &CBA);
-  void writeSectionContent(Elf_Shdr &SHeader, const ELFYAML::Group &Group,
+  void writeSectionContent(Elf_Shdr &SHeader,
+                           const ELFYAML::GroupSection &Group,
                            ContiguousBlobAccumulator &CBA);
   void writeSectionContent(Elf_Shdr &SHeader,
                            const ELFYAML::SymtabShndxSection &Shndx,
@@ -258,6 +259,9 @@ template <class ELFT> class ELFState {
                            ContiguousBlobAccumulator &CBA);
   void writeSectionContent(Elf_Shdr &SHeader,
                            const ELFYAML::VerdefSection &Section,
+                           ContiguousBlobAccumulator &CBA);
+  void writeSectionContent(Elf_Shdr &SHeader,
+                           const ELFYAML::ARMIndexTableSection &Section,
                            ContiguousBlobAccumulator &CBA);
   void writeSectionContent(Elf_Shdr &SHeader,
                            const ELFYAML::MipsABIFlags &Section,
@@ -355,7 +359,7 @@ ELFState<ELFT>::ELFState(ELFYAML::Object &D, yaml::ErrorHandler EH)
   if (Doc.Symbols)
     ImplicitSections.push_back(".symtab");
   if (Doc.DWARF)
-    for (StringRef DebugSecName : Doc.DWARF->getUsedSectionNames()) {
+    for (StringRef DebugSecName : Doc.DWARF->getNonEmptySectionNames()) {
       std::string SecName = ("." + DebugSecName).str();
       ImplicitSections.push_back(StringRef(SecName).copy(StringAlloc));
     }
@@ -390,7 +394,12 @@ void ELFState<ELFT>::writeELFHeader(raw_ostream &OS, uint64_t SHOff) {
   Header.e_ident[EI_OSABI] = Doc.Header.OSABI;
   Header.e_ident[EI_ABIVERSION] = Doc.Header.ABIVersion;
   Header.e_type = Doc.Header.Type;
-  Header.e_machine = Doc.Header.Machine;
+
+  if (Doc.Header.Machine)
+    Header.e_machine = *Doc.Header.Machine;
+  else
+    Header.e_machine = EM_NONE;
+
   Header.e_version = EV_CURRENT;
   Header.e_entry = Doc.Header.Entry;
   Header.e_flags = Doc.Header.Flags;
@@ -551,6 +560,8 @@ static void overrideFields(ELFYAML::Section *From, typename ELFT::Shdr &To) {
     To.sh_offset = *From->ShOffset;
   if (From->ShSize)
     To.sh_size = *From->ShSize;
+  if (From->ShType)
+    To.sh_type = *From->ShType;
 }
 
 template <class ELFT>
@@ -687,7 +698,9 @@ void ELFState<ELFT>::initSectionHeaders(std::vector<Elf_Shdr> &SHeaders,
       writeSectionContent(SHeader, *S, CBA);
     } else if (auto S = dyn_cast<ELFYAML::RelrSection>(Sec)) {
       writeSectionContent(SHeader, *S, CBA);
-    } else if (auto S = dyn_cast<ELFYAML::Group>(Sec)) {
+    } else if (auto S = dyn_cast<ELFYAML::GroupSection>(Sec)) {
+      writeSectionContent(SHeader, *S, CBA);
+    } else if (auto S = dyn_cast<ELFYAML::ARMIndexTableSection>(Sec)) {
       writeSectionContent(SHeader, *S, CBA);
     } else if (auto S = dyn_cast<ELFYAML::MipsABIFlags>(Sec)) {
       writeSectionContent(SHeader, *S, CBA);
@@ -931,7 +944,7 @@ void ELFState<ELFT>::initStrtabSectionHeader(Elf_Shdr &SHeader, StringRef Name,
 }
 
 static bool shouldEmitDWARF(DWARFYAML::Data &DWARF, StringRef Name) {
-  SetVector<StringRef> DebugSecNames = DWARF.getUsedSectionNames();
+  SetVector<StringRef> DebugSecNames = DWARF.getNonEmptySectionNames();
   return Name.consume_front(".") && DebugSecNames.count(Name);
 }
 
@@ -947,41 +960,9 @@ Expected<uint64_t> emitDWARF(typename ELFT::Shdr &SHeader, StringRef Name,
     return 0;
 
   uint64_t BeginOffset = CBA.tell();
-  Error Err = Error::success();
-  cantFail(std::move(Err));
 
-  if (Name == ".debug_str")
-    Err = DWARFYAML::emitDebugStr(*OS, DWARF);
-  else if (Name == ".debug_aranges")
-    Err = DWARFYAML::emitDebugAranges(*OS, DWARF);
-  else if (Name == ".debug_ranges")
-    Err = DWARFYAML::emitDebugRanges(*OS, DWARF);
-  else if (Name == ".debug_line")
-    Err = DWARFYAML::emitDebugLine(*OS, DWARF);
-  else if (Name == ".debug_addr")
-    Err = DWARFYAML::emitDebugAddr(*OS, DWARF);
-  else if (Name == ".debug_abbrev")
-    Err = DWARFYAML::emitDebugAbbrev(*OS, DWARF);
-  else if (Name == ".debug_info")
-    Err = DWARFYAML::emitDebugInfo(*OS, DWARF);
-  else if (Name == ".debug_pubnames")
-    Err = DWARFYAML::emitPubSection(*OS, *DWARF.PubNames, DWARF.IsLittleEndian);
-  else if (Name == ".debug_pubtypes")
-    Err = DWARFYAML::emitPubSection(*OS, *DWARF.PubTypes, DWARF.IsLittleEndian);
-  else if (Name == ".debug_gnu_pubnames")
-    Err = DWARFYAML::emitPubSection(*OS, *DWARF.GNUPubNames,
-                                    DWARF.IsLittleEndian, /*IsGNUStyle=*/true);
-  else if (Name == ".debug_gnu_pubtypes")
-    Err = DWARFYAML::emitPubSection(*OS, *DWARF.GNUPubTypes,
-                                    DWARF.IsLittleEndian, /*IsGNUStyle=*/true);
-  else if (Name == ".debug_str_offsets")
-    Err = DWARFYAML::emitDebugStrOffsets(*OS, DWARF);
-  else if (Name == ".debug_rnglists")
-    Err = DWARFYAML::emitDebugRnglists(*OS, DWARF);
-  else
-    llvm_unreachable("unexpected emitDWARF() call");
-
-  if (Err)
+  auto EmitFunc = DWARFYAML::getDWARFEmitterByName(Name.substr(1));
+  if (Error Err = EmitFunc(*OS, DWARF))
     return std::move(Err);
 
   return CBA.tell() - BeginOffset;
@@ -1167,10 +1148,10 @@ void ELFState<ELFT>::writeSectionContent(
     SHeader.sh_info = *Section.Info;
 }
 
-static bool isMips64EL(const ELFYAML::Object &Doc) {
-  return Doc.Header.Machine == ELFYAML::ELF_EM(llvm::ELF::EM_MIPS) &&
-         Doc.Header.Class == ELFYAML::ELF_ELFCLASS(ELF::ELFCLASS64) &&
-         Doc.Header.Data == ELFYAML::ELF_ELFDATA(ELF::ELFDATA2LSB);
+static bool isMips64EL(const ELFYAML::Object &Obj) {
+  return Obj.getMachine() == llvm::ELF::EM_MIPS &&
+         Obj.Header.Class == ELFYAML::ELF_ELFCLASS(ELF::ELFCLASS64) &&
+         Obj.Header.Data == ELFYAML::ELF_ELFDATA(ELF::ELFDATA2LSB);
 }
 
 template <class ELFT>
@@ -1257,7 +1238,7 @@ void ELFState<ELFT>::writeSectionContent(
 
 template <class ELFT>
 void ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
-                                         const ELFYAML::Group &Section,
+                                         const ELFYAML::GroupSection &Section,
                                          ContiguousBlobAccumulator &CBA) {
   assert(Section.Type == llvm::ELF::SHT_GROUP &&
          "Section type is not SHT_GROUP");
@@ -1416,6 +1397,11 @@ void ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
       SN2I.lookup(".dynsym", Link))
     SHeader.sh_link = Link;
 
+  if (Section.EntSize)
+    SHeader.sh_entsize = *Section.EntSize;
+  else
+    SHeader.sh_entsize = sizeof(typename ELFT::Word);
+
   if (Section.Content || Section.Size) {
     SHeader.sh_size = writeContent(CBA, Section.Content, Section.Size);
     return;
@@ -1537,6 +1523,25 @@ void ELFState<ELFT>::writeSectionContent(Elf_Shdr &SHeader,
 
   SHeader.sh_size = Section.VerneedV->size() * sizeof(Elf_Verneed) +
                     AuxCnt * sizeof(Elf_Vernaux);
+}
+
+template <class ELFT>
+void ELFState<ELFT>::writeSectionContent(
+    Elf_Shdr &SHeader, const ELFYAML::ARMIndexTableSection &Section,
+    ContiguousBlobAccumulator &CBA) {
+  if (Section.Content || Section.Size) {
+    SHeader.sh_size = writeContent(CBA, Section.Content, Section.Size);
+    return;
+  }
+
+  if (!Section.Entries)
+    return;
+
+  for (const ELFYAML::ARMIndexTableEntry &E : *Section.Entries) {
+    CBA.write<uint32_t>(E.Offset, ELFT::TargetEndianness);
+    CBA.write<uint32_t>(E.Value, ELFT::TargetEndianness);
+  }
+  SHeader.sh_size = Section.Entries->size() * 8;
 }
 
 template <class ELFT>

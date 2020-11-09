@@ -111,6 +111,9 @@ public:
     /// on background threads. The index is stored in the project root.
     bool BackgroundIndex = false;
 
+    /// Store refs to main-file symbols in the index.
+    bool CollectMainFileRefs = false;
+
     /// If set, use this index to augment code completion results.
     SymbolIndex *StaticIndex = nullptr;
 
@@ -128,7 +131,7 @@ public:
     bool BuildRecoveryAST = true;
 
     /// If true, turn on the `-frecovery-ast-type` clang flag.
-    bool PreserveRecoveryASTType = false;
+    bool PreserveRecoveryASTType = true;
 
     /// Clangd's workspace root. Relevant for "workspace" operations not bound
     /// to a particular file.
@@ -270,9 +273,12 @@ public:
                     StringRef TriggerText, Callback<std::vector<TextEdit>> CB);
 
   /// Test the validity of a rename operation.
+  ///
+  /// If NewName is provided, it performs a name validation.
   void prepareRename(PathRef File, Position Pos,
+                     llvm::Optional<std::string> NewName,
                      const RenameOptions &RenameOpts,
-                     Callback<llvm::Optional<Range>> CB);
+                     Callback<RenameResult> CB);
 
   /// Rename all occurrences of the symbol at the \p Pos in \p File to
   /// \p NewName.
@@ -280,12 +286,12 @@ public:
   /// embedders could use this method to get all occurrences of the symbol (e.g.
   /// highlighting them in prepare stage).
   void rename(PathRef File, Position Pos, llvm::StringRef NewName,
-              const RenameOptions &Opts, Callback<FileEdits> CB);
+              const RenameOptions &Opts, Callback<RenameResult> CB);
 
   struct TweakRef {
     std::string ID;    /// ID to pass for applyTweak.
     std::string Title; /// A single-line message to show in the UI.
-    Tweak::Intent Intent;
+    llvm::StringLiteral Kind;
   };
   /// Enumerate the code tweaks available to the user at a specified point.
   void enumerateTweaks(PathRef File, Range Sel,
@@ -295,10 +301,6 @@ public:
   void applyTweak(PathRef File, Range Sel, StringRef ID,
                   Callback<Tweak::Effect> CB);
 
-  /// Only for testing purposes.
-  /// Waits until all requests to worker thread are finished and dumps AST for
-  /// \p File. \p File must be in the list of added documents.
-  void dumpAST(PathRef File, llvm::unique_function<void(std::string)> Callback);
   /// Called when an event occurs for a watched file in the workspace.
   void onFileEvent(const DidChangeWatchedFilesParams &Params);
 
@@ -316,6 +318,13 @@ public:
 
   void semanticHighlights(PathRef File,
                           Callback<std::vector<HighlightingToken>>);
+
+  /// Runs an arbitrary action that has access to the AST of the specified file.
+  /// The action will execute on one of ClangdServer's internal threads.
+  /// The AST is only valid for the duration of the callback.
+  /// As with other actions, the file must have been opened.
+  void customAction(PathRef File, llvm::StringRef Name,
+                    Callback<InputsAndAST> Action);
 
   /// Returns estimated memory usage and other statistics for each of the
   /// currently open files.

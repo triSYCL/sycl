@@ -270,6 +270,7 @@ public:
   void VisitCXXBoolLiteralExpr(const CXXBoolLiteralExpr *Node);
   void VisitCXXThisExpr(const CXXThisExpr *Node);
   void VisitCXXFunctionalCastExpr(const CXXFunctionalCastExpr *Node);
+  void VisitCXXStaticCastExpr(const CXXStaticCastExpr *Node);
   void VisitCXXUnresolvedConstructExpr(const CXXUnresolvedConstructExpr *Node);
   void VisitCXXConstructExpr(const CXXConstructExpr *Node);
   void VisitCXXBindTemporaryExpr(const CXXBindTemporaryExpr *Node);
@@ -295,6 +296,7 @@ public:
   void VisitObjCIvarRefExpr(const ObjCIvarRefExpr *Node);
   void VisitObjCBoolLiteralExpr(const ObjCBoolLiteralExpr *Node);
   void VisitOMPIteratorExpr(const OMPIteratorExpr *Node);
+  void VisitConceptSpecializationExpr(const ConceptSpecializationExpr *Node);
 
   void VisitRValueReferenceType(const ReferenceType *T);
   void VisitArrayType(const ArrayType *T);

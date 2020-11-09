@@ -141,6 +141,10 @@ static StringInitFailureKind IsStringInit(Expr *init, QualType declType,
   return IsStringInit(init, arrayType, Context);
 }
 
+bool Sema::IsStringInit(Expr *Init, const ArrayType *AT) {
+  return ::IsStringInit(Init, AT, Context) == SIF_None;
+}
+
 /// Update the type of a string literal, including any surrounding parentheses,
 /// to match the type of the object which it is initializing.
 static void updateStringLiteralType(Expr *E, QualType Ty) {
@@ -1585,10 +1589,7 @@ void InitListChecker::CheckScalarType(const InitializedEntity &Entity,
       IList->setInit(Index, ResultExpr);
     }
   }
-  if (hadError)
-    ++StructuredIndex;
-  else
-    UpdateStructuredListElement(StructuredList, StructuredIndex, ResultExpr);
+  UpdateStructuredListElement(StructuredList, StructuredIndex, ResultExpr);
   ++Index;
 }
 
@@ -1643,10 +1644,7 @@ void InitListChecker::CheckReferenceType(const InitializedEntity &Entity,
   if (!VerifyOnly && expr)
     IList->setInit(Index, expr);
 
-  if (hadError)
-    ++StructuredIndex;
-  else
-    UpdateStructuredListElement(StructuredList, StructuredIndex, expr);
+  UpdateStructuredListElement(StructuredList, StructuredIndex, expr);
   ++Index;
 }
 
@@ -1697,11 +1695,7 @@ void InitListChecker::CheckVectorType(const InitializedEntity &Entity,
           IList->setInit(Index, ResultExpr);
         }
       }
-      if (hadError)
-        ++StructuredIndex;
-      else
-        UpdateStructuredListElement(StructuredList, StructuredIndex,
-                                    ResultExpr);
+      UpdateStructuredListElement(StructuredList, StructuredIndex, ResultExpr);
       ++Index;
       return;
     }
@@ -2900,8 +2894,9 @@ InitListChecker::CheckDesignatedInitializer(const InitializedEntity &Entity,
         Expr *Init = new (Context) IntegerLiteral(
             Context, CodeUnit, PromotedCharTy, SubExpr->getExprLoc());
         if (CharTy != PromotedCharTy)
-          Init = ImplicitCastExpr::Create(Context, CharTy, CK_IntegralCast,
-                                          Init, nullptr, VK_RValue);
+          Init =
+              ImplicitCastExpr::Create(Context, CharTy, CK_IntegralCast, Init,
+                                       nullptr, VK_RValue, FPOptionsOverride());
         StructuredList->updateInit(Context, i, Init);
       }
     } else {
@@ -2922,8 +2917,9 @@ InitListChecker::CheckDesignatedInitializer(const InitializedEntity &Entity,
         Expr *Init = new (Context) IntegerLiteral(
             Context, CodeUnit, PromotedCharTy, SubExpr->getExprLoc());
         if (CharTy != PromotedCharTy)
-          Init = ImplicitCastExpr::Create(Context, CharTy, CK_IntegralCast,
-                                          Init, nullptr, VK_RValue);
+          Init =
+              ImplicitCastExpr::Create(Context, CharTy, CK_IntegralCast, Init,
+                                       nullptr, VK_RValue, FPOptionsOverride());
         StructuredList->updateInit(Context, i, Init);
       }
     }
@@ -3100,8 +3096,12 @@ void InitListChecker::UpdateStructuredListElement(InitListExpr *StructuredList,
 
   if (Expr *PrevInit = StructuredList->updateInit(SemaRef.Context,
                                                   StructuredIndex, expr)) {
-    // This initializer overwrites a previous initializer. Warn.
-    diagnoseInitOverride(PrevInit, expr->getSourceRange());
+    // This initializer overwrites a previous initializer.
+    // No need to diagnose when `expr` is nullptr because a more relevant
+    // diagnostic has already been issued and this diagnostic is potentially
+    // noise.
+    if (expr)
+      diagnoseInitOverride(PrevInit, expr->getSourceRange());
   }
 
   ++StructuredIndex;
@@ -8025,9 +8025,9 @@ ExprResult InitializationSequence::Perform(Sema &S,
               (Step->Kind == SK_CastDerivedToBaseXValue ?
                    VK_XValue :
                    VK_RValue);
-      CurInit =
-          ImplicitCastExpr::Create(S.Context, Step->Type, CK_DerivedToBase,
-                                   CurInit.get(), &BasePath, VK);
+      CurInit = ImplicitCastExpr::Create(S.Context, Step->Type,
+                                         CK_DerivedToBase, CurInit.get(),
+                                         &BasePath, VK, FPOptionsOverride());
       break;
     }
 
@@ -8156,9 +8156,9 @@ ExprResult InitializationSequence::Perform(Sema &S,
       if (CreatedObject && checkAbstractType(CurInit.get()->getType()))
         return ExprError();
 
-      CurInit = ImplicitCastExpr::Create(S.Context, CurInit.get()->getType(),
-                                         CastKind, CurInit.get(), nullptr,
-                                         CurInit.get()->getValueKind());
+      CurInit = ImplicitCastExpr::Create(
+          S.Context, CurInit.get()->getType(), CastKind, CurInit.get(), nullptr,
+          CurInit.get()->getValueKind(), S.CurFPFeatureOverrides());
 
       if (shouldBindAsTemporary(Entity))
         // The overall entity is temporary, so this expression should be
@@ -8424,7 +8424,8 @@ ExprResult InitializationSequence::Perform(Sema &S,
 
     case SK_StringInit: {
       QualType Ty = Step->Type;
-      CheckStringInit(CurInit.get(), ResultType ? *ResultType : Ty,
+      bool UpdateType = ResultType && Entity.getType()->isIncompleteArrayType();
+      CheckStringInit(CurInit.get(), UpdateType ? *ResultType : Ty,
                       S.Context.getAsArrayType(Ty), S);
       break;
     }
@@ -8499,9 +8500,9 @@ ExprResult InitializationSequence::Perform(Sema &S,
       break;
 
     case SK_ProduceObjCObject:
-      CurInit =
-          ImplicitCastExpr::Create(S.Context, Step->Type, CK_ARCProduceObject,
-                                   CurInit.get(), nullptr, VK_RValue);
+      CurInit = ImplicitCastExpr::Create(
+          S.Context, Step->Type, CK_ARCProduceObject, CurInit.get(), nullptr,
+          VK_RValue, FPOptionsOverride());
       break;
 
     case SK_StdInitializerList: {
@@ -8556,9 +8557,9 @@ ExprResult InitializationSequence::Perform(Sema &S,
           // Case 1b and 1c
           // No cast from integer to sampler is needed.
           if (!Var->hasGlobalStorage()) {
-            CurInit = ImplicitCastExpr::Create(S.Context, Step->Type,
-                                               CK_LValueToRValue, Init,
-                                               /*BasePath=*/nullptr, VK_RValue);
+            CurInit = ImplicitCastExpr::Create(
+                S.Context, Step->Type, CK_LValueToRValue, Init,
+                /*BasePath=*/nullptr, VK_RValue, FPOptionsOverride());
             break;
           }
           // Case 1a
@@ -8578,9 +8579,9 @@ ExprResult InitializationSequence::Perform(Sema &S,
                  !Entity.isDefaultMemberInitializer() &&
                  isa<DeclRefExpr>(Init)) {
         // Case 2: Member initialization from a variable.
-        CurInit =
-            ImplicitCastExpr::Create(S.Context, Step->Type, CK_LValueToRValue,
-                                     Init, /*BasePath=*/nullptr, VK_RValue);
+        CurInit = ImplicitCastExpr::Create(
+            S.Context, Step->Type, CK_LValueToRValue, Init,
+            /*BasePath=*/nullptr, VK_RValue, FPOptionsOverride());
         break;
       } else {
         // Case 3
@@ -8717,6 +8718,16 @@ static void emitBadConversionNotes(Sema &S, const InitializedEntity &entity,
     if (entity.getKind() == InitializedEntity::EK_Result)
       S.EmitRelatedResultTypeNoteForReturn(destType);
   }
+  QualType fromType = op->getType();
+  auto *fromDecl = fromType.getTypePtr()->getPointeeCXXRecordDecl();
+  auto *destDecl = destType.getTypePtr()->getPointeeCXXRecordDecl();
+  if (fromDecl && destDecl && fromDecl->getDeclKind() == Decl::CXXRecord &&
+      destDecl->getDeclKind() == Decl::CXXRecord &&
+      !fromDecl->isInvalidDecl() && !destDecl->isInvalidDecl() &&
+      !fromDecl->hasDefinition())
+    S.Diag(fromDecl->getLocation(), diag::note_forward_class_conversion)
+        << S.getASTContext().getTagDeclType(fromDecl)
+        << S.getASTContext().getTagDeclType(destDecl);
 }
 
 static void diagnoseListInit(Sema &S, const InitializedEntity &Entity,

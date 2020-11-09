@@ -62,8 +62,8 @@ STATISTIC(EmittedAlignFragments,
           "Number of emitted assembler fragments - align");
 STATISTIC(EmittedFillFragments,
           "Number of emitted assembler fragments - fill");
-STATISTIC(EmittedOrgFragments,
-          "Number of emitted assembler fragments - org");
+STATISTIC(EmittedNopsFragments, "Number of emitted assembler fragments - nops");
+STATISTIC(EmittedOrgFragments, "Number of emitted assembler fragments - org");
 STATISTIC(evaluateFixup, "Number of evaluated fixups");
 STATISTIC(FragmentLayouts, "Number of fragment layouts");
 STATISTIC(ObjectBytes, "Number of emitted object file bytes");
@@ -311,6 +311,9 @@ uint64_t MCAssembler::computeFragmentSize(const MCAsmLayout &Layout,
     }
     return Size;
   }
+
+  case MCFragment::FT_Nops:
+    return cast<MCNopsFragment>(F).getNumBytes();
 
   case MCFragment::FT_LEB:
     return cast<MCLEBFragment>(F).getContents().size();
@@ -613,6 +616,45 @@ static void writeFragment(raw_ostream &OS, const MCAssembler &Asm,
     break;
   }
 
+  case MCFragment::FT_Nops: {
+    ++stats::EmittedNopsFragments;
+    const MCNopsFragment &NF = cast<MCNopsFragment>(F);
+    int64_t NumBytes = NF.getNumBytes();
+    int64_t ControlledNopLength = NF.getControlledNopLength();
+    int64_t MaximumNopLength = Asm.getBackend().getMaximumNopSize();
+
+    assert(NumBytes > 0 && "Expected positive NOPs fragment size");
+    assert(ControlledNopLength >= 0 && "Expected non-negative NOP size");
+
+    if (ControlledNopLength > MaximumNopLength) {
+      Asm.getContext().reportError(NF.getLoc(),
+                                   "illegal NOP size " +
+                                       std::to_string(ControlledNopLength) +
+                                       ". (expected within [0, " +
+                                       std::to_string(MaximumNopLength) + "])");
+      // Clamp the NOP length as reportError does not stop the execution
+      // immediately.
+      ControlledNopLength = MaximumNopLength;
+    }
+
+    // Use maximum value if the size of each NOP is not specified
+    if (!ControlledNopLength)
+      ControlledNopLength = MaximumNopLength;
+
+    while (NumBytes) {
+      uint64_t NumBytesToEmit =
+          (uint64_t)std::min(NumBytes, ControlledNopLength);
+      assert(NumBytesToEmit && "try to emit empty NOP instruction");
+      if (!Asm.getBackend().writeNopData(OS, NumBytesToEmit)) {
+        report_fatal_error("unable to write nop sequence of the remaining " +
+                           Twine(NumBytesToEmit) + " bytes");
+        break;
+      }
+      NumBytes -= NumBytesToEmit;
+    }
+    break;
+  }
+
   case MCFragment::FT_LEB: {
     const MCLEBFragment &LF = cast<MCLEBFragment>(F);
     OS << LF.getContents();
@@ -711,6 +753,8 @@ void MCAssembler::writeSectionData(raw_ostream &OS, const MCSection *Sec,
       case MCFragment::FT_Fill:
         assert((cast<MCFillFragment>(F).getValue() == 0) &&
                "Invalid fill in virtual section!");
+        break;
+      case MCFragment::FT_Org:
         break;
       }
     }

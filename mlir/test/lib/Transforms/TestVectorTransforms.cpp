@@ -8,6 +8,9 @@
 
 #include <type_traits>
 
+#include "mlir/Dialect/Affine/IR/AffineOps.h"
+#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/SCF/SCF.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Dialect/Vector/VectorOps.h"
 #include "mlir/Dialect/Vector/VectorTransforms.h"
@@ -18,16 +21,16 @@ using namespace mlir;
 using namespace mlir::vector;
 namespace {
 
-#include "TestVectorTransformPatterns.h.inc"
-
 struct TestVectorToVectorConversion
     : public PassWrapper<TestVectorToVectorConversion, FunctionPass> {
   void runOnFunction() override {
     OwningRewritePatternList patterns;
-    auto *context = &getContext();
-    populateWithGenerated(context, &patterns);
-    populateVectorToVectorCanonicalizationPatterns(patterns, context);
-    populateVectorToVectorTransformationPatterns(patterns, context);
+    auto *ctx = &getContext();
+    patterns.insert<UnrollVectorPattern<AddFOp>>(ArrayRef<int64_t>{2, 2}, ctx);
+    patterns.insert<UnrollVectorPattern<vector::ContractionOp>>(
+        ArrayRef<int64_t>{2, 2, 2}, ctx);
+    populateVectorToVectorCanonicalizationPatterns(patterns, ctx);
+    populateVectorToVectorTransformationPatterns(patterns, ctx);
     applyPatternsAndFoldGreedily(getFunction(), patterns);
   }
 };
@@ -122,6 +125,59 @@ struct TestVectorUnrollingPatterns
   }
 };
 
+struct TestVectorDistributePatterns
+    : public PassWrapper<TestVectorDistributePatterns, FunctionPass> {
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<VectorDialect>();
+    registry.insert<AffineDialect>();
+  }
+  void runOnFunction() override {
+    MLIRContext *ctx = &getContext();
+    OwningRewritePatternList patterns;
+    FuncOp func = getFunction();
+    func.walk([&](AddFOp op) {
+      OpBuilder builder(op);
+      Optional<mlir::vector::DistributeOps> ops = distributPointwiseVectorOp(
+          builder, op.getOperation(), func.getArgument(0), 32);
+      assert(ops.hasValue());
+      SmallPtrSet<Operation *, 1> extractOp({ops->extract});
+      op.getResult().replaceAllUsesExcept(ops->insert.getResult(), extractOp);
+    });
+    patterns.insert<PointwiseExtractPattern>(ctx);
+    populateVectorToVectorTransformationPatterns(patterns, ctx);
+    applyPatternsAndFoldGreedily(getFunction(), patterns);
+  }
+};
+
+struct TestVectorTransferFullPartialSplitPatterns
+    : public PassWrapper<TestVectorTransferFullPartialSplitPatterns,
+                         FunctionPass> {
+  TestVectorTransferFullPartialSplitPatterns() = default;
+  TestVectorTransferFullPartialSplitPatterns(
+      const TestVectorTransferFullPartialSplitPatterns &pass) {}
+
+  void getDependentDialects(DialectRegistry &registry) const override {
+    registry.insert<AffineDialect, linalg::LinalgDialect, scf::SCFDialect>();
+  }
+
+  Option<bool> useLinalgOps{
+      *this, "use-linalg-copy",
+      llvm::cl::desc("Split using a unmasked vector.transfer + linalg.fill + "
+                     "linalg.copy operations."),
+      llvm::cl::init(false)};
+  void runOnFunction() override {
+    MLIRContext *ctx = &getContext();
+    OwningRewritePatternList patterns;
+    VectorTransformsOptions options;
+    if (useLinalgOps)
+      options.setVectorTransferSplit(VectorTransferSplit::LinalgCopy);
+    else
+      options.setVectorTransferSplit(VectorTransferSplit::VectorTransfer);
+    patterns.insert<VectorTransferFullPartialRewriter>(ctx, options);
+    applyPatternsAndFoldGreedily(getFunction(), patterns);
+  }
+};
+
 } // end anonymous namespace
 
 namespace mlir {
@@ -141,5 +197,14 @@ void registerTestVectorConversions() {
   PassRegistration<TestVectorUnrollingPatterns> contractionUnrollingPass(
       "test-vector-unrolling-patterns",
       "Test conversion patterns to unroll contract ops in the vector dialect");
+
+  PassRegistration<TestVectorTransferFullPartialSplitPatterns>
+      vectorTransformFullPartialPass("test-vector-transfer-full-partial-split",
+                                     "Test conversion patterns to split "
+                                     "transfer ops via scf.if + linalg ops");
+  PassRegistration<TestVectorDistributePatterns> distributePass(
+      "test-vector-distribute-patterns",
+      "Test conversion patterns to distribute vector ops in the vector "
+      "dialect");
 }
 } // namespace mlir

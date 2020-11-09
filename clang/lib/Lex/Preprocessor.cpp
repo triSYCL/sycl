@@ -969,8 +969,10 @@ void Preprocessor::Lex(Token &Result) {
   LastTokenWasAt = Result.is(tok::at);
   --LexLevel;
 
-  if (LexLevel == 0 && !Result.getFlag(Token::IsReinjected)) {
-    ++TokenCount;
+  if ((LexLevel == 0 || PreprocessToken) &&
+      !Result.getFlag(Token::IsReinjected)) {
+    if (LexLevel == 0)
+      ++TokenCount;
     if (OnToken)
       OnToken(Result);
   }
@@ -1414,6 +1416,8 @@ bool Preprocessor::HandleComment(Token &result, SourceRange Comment) {
 ModuleLoader::~ModuleLoader() = default;
 
 CommentHandler::~CommentHandler() = default;
+
+EmptylineHandler::~EmptylineHandler() = default;
 
 CodeCompletionHandler::~CodeCompletionHandler() = default;
 

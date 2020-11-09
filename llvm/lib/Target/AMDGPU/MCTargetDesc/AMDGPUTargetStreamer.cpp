@@ -98,6 +98,7 @@ StringRef AMDGPUTargetStreamer::getArchNameFromElfMach(unsigned ElfMach) {
   case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1011: AK = GK_GFX1011; break;
   case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1012: AK = GK_GFX1012; break;
   case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1030: AK = GK_GFX1030; break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1031: AK = GK_GFX1031; break;
   case ELF::EF_AMDGPU_MACH_NONE:           AK = GK_NONE;    break;
   }
 
@@ -150,6 +151,7 @@ unsigned AMDGPUTargetStreamer::getElfMach(StringRef GPU) {
   case GK_GFX1011: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1011;
   case GK_GFX1012: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1012;
   case GK_GFX1030: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1030;
+  case GK_GFX1031: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1031;
   case GK_NONE:    return ELF::EF_AMDGPU_MACH_NONE;
   }
 
@@ -166,10 +168,15 @@ AMDGPUTargetAsmStreamer::AMDGPUTargetAsmStreamer(MCStreamer &S,
 
 // A hook for emitting stuff at the end.
 // We use it for emitting the accumulated PAL metadata as directives.
+// The PAL metadata is reset after it is emitted.
 void AMDGPUTargetAsmStreamer::finish() {
   std::string S;
   getPALMetadata()->toString(S);
   OS << S;
+
+  // Reset the pal metadata so its data will not affect a compilation that
+  // reuses this object.
+  getPALMetadata()->reset();
 }
 
 void AMDGPUTargetAsmStreamer::EmitDirectiveAMDGCNTarget(StringRef Target) {
@@ -421,6 +428,7 @@ MCELFStreamer &AMDGPUTargetELFStreamer::getStreamer() {
 
 // A hook for emitting stuff at the end.
 // We use it for emitting the accumulated PAL metadata as a .note record.
+// The PAL metadata is reset after it is emitted.
 void AMDGPUTargetELFStreamer::finish() {
   std::string Blob;
   const char *Vendor = getPALMetadata()->getVendor();
@@ -430,6 +438,10 @@ void AMDGPUTargetELFStreamer::finish() {
     return;
   EmitNote(Vendor, MCConstantExpr::create(Blob.size(), getContext()), Type,
            [&](MCELFStreamer &OS) { OS.emitBytes(Blob); });
+
+  // Reset the pal metadata so its data will not affect a compilation that
+  // reuses this object.
+  getPALMetadata()->reset();
 }
 
 void AMDGPUTargetELFStreamer::EmitNote(
@@ -644,9 +656,10 @@ void AMDGPUTargetELFStreamer::EmitAmdhsaKernelDescriptor(
     KernelCodeSymbol->setVisibility(ELF::STV_PROTECTED);
 
   Streamer.emitLabel(KernelDescriptorSymbol);
-  Streamer.emitBytes(StringRef(
-      (const char*)&(KernelDescriptor),
-      offsetof(amdhsa::kernel_descriptor_t, kernel_code_entry_byte_offset)));
+  Streamer.emitInt32(KernelDescriptor.group_segment_fixed_size);
+  Streamer.emitInt32(KernelDescriptor.private_segment_fixed_size);
+  for (uint8_t Res : KernelDescriptor.reserved0)
+    Streamer.emitInt8(Res);
   // FIXME: Remove the use of VK_AMDGPU_REL64 in the expression below. The
   // expression being created is:
   //   (start of kernel code) - (start of kernel descriptor)
@@ -658,11 +671,12 @@ void AMDGPUTargetELFStreamer::EmitAmdhsaKernelDescriptor(
           KernelDescriptorSymbol, MCSymbolRefExpr::VK_None, Context),
       Context),
       sizeof(KernelDescriptor.kernel_code_entry_byte_offset));
-  Streamer.emitBytes(StringRef(
-      (const char*)&(KernelDescriptor) +
-          offsetof(amdhsa::kernel_descriptor_t, kernel_code_entry_byte_offset) +
-          sizeof(KernelDescriptor.kernel_code_entry_byte_offset),
-      sizeof(KernelDescriptor) -
-          offsetof(amdhsa::kernel_descriptor_t, kernel_code_entry_byte_offset) -
-          sizeof(KernelDescriptor.kernel_code_entry_byte_offset)));
+  for (uint8_t Res : KernelDescriptor.reserved1)
+    Streamer.emitInt8(Res);
+  Streamer.emitInt32(KernelDescriptor.compute_pgm_rsrc3);
+  Streamer.emitInt32(KernelDescriptor.compute_pgm_rsrc1);
+  Streamer.emitInt32(KernelDescriptor.compute_pgm_rsrc2);
+  Streamer.emitInt16(KernelDescriptor.kernel_code_properties);
+  for (uint8_t Res : KernelDescriptor.reserved2)
+    Streamer.emitInt8(Res);
 }

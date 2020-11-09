@@ -18,6 +18,8 @@
 
 namespace llvm {
 
+class MCCFIInstruction;
+
 class AArch64FrameLowering : public TargetFrameLowering {
 public:
   explicit AArch64FrameLowering()
@@ -65,6 +67,11 @@ public:
   bool hasFP(const MachineFunction &MF) const override;
   bool hasReservedCallFrame(const MachineFunction &MF) const override;
 
+  bool
+  assignCalleeSavedSpillSlots(MachineFunction &MF,
+                              const TargetRegisterInfo *TRI,
+                              std::vector<CalleeSavedInfo> &CSI) const override;
+
   void determineCalleeSaves(MachineFunction &MF, BitVector &SavedRegs,
                             RegScavenger *RS) const override;
 
@@ -105,6 +112,12 @@ public:
     }
   }
 
+  bool isStackIdSafeForLocalArea(unsigned StackId) const override {
+    // We don't support putting SVE objects into the pre-allocated local
+    // frame block at the moment.
+    return StackId != TargetStackID::SVEVector;
+  }
+
 private:
   bool shouldCombineCSRLocalStackBump(MachineFunction &MF,
                                       uint64_t StackBumpBytes) const;
@@ -113,6 +126,11 @@ private:
   int64_t assignSVEStackObjectOffsets(MachineFrameInfo &MF,
                                       int &MinCSFrameIndex,
                                       int &MaxCSFrameIndex) const;
+  MCCFIInstruction
+  createDefCFAExpressionFromSP(const TargetRegisterInfo &TRI,
+                               const StackOffset &OffsetFromSP) const;
+  MCCFIInstruction createCfaOffset(const TargetRegisterInfo &MRI, unsigned DwarfReg,
+                                   const StackOffset &OffsetFromDefCFA) const;
   bool shouldCombineCSRLocalStackBumpInEpilogue(MachineBasicBlock &MBB,
                                                 unsigned StackBumpBytes) const;
 };

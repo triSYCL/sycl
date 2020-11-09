@@ -1,6 +1,9 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+// Include this header only under the llvm source tree.
+// This is a private header.
+
 /* Exported configuration */
 #include "llvm/Config/llvm-config.h"
 
@@ -96,6 +99,9 @@
 
 /* Define to 1 if you have the `pfm' library (-lpfm). */
 #cmakedefine HAVE_LIBPFM ${HAVE_LIBPFM}
+
+/* Define to 1 if the `perf_branch_entry' struct has field cycles. */
+#cmakedefine LIBPFM_HAS_FIELD_CYCLES ${LIBPFM_HAS_FIELD_CYCLES}
 
 /* Define to 1 if you have the `psapi' library (-lpsapi). */
 #cmakedefine HAVE_LIBPSAPI ${HAVE_LIBPSAPI}
@@ -203,7 +209,7 @@
 #cmakedefine HAVE_SYS_TYPES_H ${HAVE_SYS_TYPES_H}
 
 /* Define if the setupterm() function is supported this platform. */
-#cmakedefine HAVE_TERMINFO ${HAVE_TERMINFO}
+#cmakedefine LLVM_ENABLE_TERMINFO ${LLVM_ENABLE_TERMINFO}
 
 /* Define if the xar_open() function is supported this platform. */
 #cmakedefine HAVE_LIBXAR ${HAVE_LIBXAR}
@@ -297,7 +303,7 @@
 #cmakedefine01 LLVM_VERSION_PRINTER_SHOW_HOST_TARGET_INFO
 
 /* Define if libxml2 is supported on this platform. */
-#cmakedefine LLVM_LIBXML2_ENABLED ${LLVM_LIBXML2_ENABLED}
+#cmakedefine LLVM_ENABLE_LIBXML2 ${LLVM_ENABLE_LIBXML2}
 
 /* Define to the extension used for shared libraries, say, ".so". */
 #cmakedefine LTDL_SHLIB_EXT "${LTDL_SHLIB_EXT}"
@@ -331,9 +337,6 @@
 
 /* Whether GlobalISel rule coverage is being collected */
 #cmakedefine01 LLVM_GISEL_COV_ENABLED
-
-/* Define if we have z3 and want to build it */
-#cmakedefine LLVM_WITH_Z3 ${LLVM_WITH_Z3}
 
 /* Define to the default GlobalISel coverage file prefix */
 #cmakedefine LLVM_GISEL_COV_PREFIX "${LLVM_GISEL_COV_PREFIX}"

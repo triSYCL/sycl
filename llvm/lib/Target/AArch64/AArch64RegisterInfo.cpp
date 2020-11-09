@@ -40,7 +40,30 @@ AArch64RegisterInfo::AArch64RegisterInfo(const Triple &TT)
   AArch64_MC::initLLVMToCVRegMapping(this);
 }
 
-static bool hasSVEArgsOrReturn(const MachineFunction *MF) {
+/// Return whether the register needs a CFI entry. Not all unwinders may know
+/// about SVE registers, so we assume the lowest common denominator, i.e. the
+/// callee-saves required by the base ABI. For the SVE registers z8-z15 only the
+/// lower 64-bits (d8-d15) need to be saved. The lower 64-bits subreg is
+/// returned in \p RegToUseForCFI.
+bool AArch64RegisterInfo::regNeedsCFI(unsigned Reg,
+                                      unsigned &RegToUseForCFI) const {
+  if (AArch64::PPRRegClass.contains(Reg))
+    return false;
+
+  if (AArch64::ZPRRegClass.contains(Reg)) {
+    RegToUseForCFI = getSubReg(Reg, AArch64::dsub);
+    for (int I = 0; CSR_AArch64_AAPCS_SaveList[I]; ++I) {
+      if (CSR_AArch64_AAPCS_SaveList[I] == RegToUseForCFI)
+        return true;
+    }
+    return false;
+  }
+
+  RegToUseForCFI = Reg;
+  return true;
+}
+
+bool AArch64RegisterInfo::hasSVEArgsOrReturn(const MachineFunction *MF) {
   const Function &F = MF->getFunction();
   return isa<ScalableVectorType>(F.getReturnType()) ||
          any_of(F.args(), [](const Argument &Arg) {
@@ -217,6 +240,14 @@ AArch64RegisterInfo::getCallPreservedMask(const MachineFunction &MF,
     return SCS ? CSR_AArch64_AAPCS_SCS_RegMask : CSR_AArch64_AAPCS_RegMask;
 }
 
+const uint32_t *AArch64RegisterInfo::getCustomEHPadPreservedMask(
+    const MachineFunction &MF) const {
+  if (MF.getSubtarget<AArch64Subtarget>().isTargetLinux())
+    return CSR_AArch64_AAPCS_RegMask;
+
+  return nullptr;
+}
+
 const uint32_t *AArch64RegisterInfo::getTLSCallPreservedMask() const {
   if (TT.isOSDarwin())
     return CSR_Darwin_AArch64_TLS_RegMask;
@@ -311,8 +342,8 @@ bool AArch64RegisterInfo::isAnyArgRegReserved(const MachineFunction &MF) const {
 void AArch64RegisterInfo::emitReservedArgRegCallError(
     const MachineFunction &MF) const {
   const Function &F = MF.getFunction();
-  F.getContext().diagnose(DiagnosticInfoUnsupported{F, "AArch64 doesn't support"
-    " function calls if any of the argument registers is reserved."});
+  F.getContext().diagnose(DiagnosticInfoUnsupported{F, ("AArch64 doesn't support"
+    " function calls if any of the argument registers is reserved.")});
 }
 
 bool AArch64RegisterInfo::isAsmClobberable(const MachineFunction &MF,
@@ -580,9 +611,10 @@ void AArch64RegisterInfo::eliminateFrameIndex(MachineBasicBlock::iterator II,
       MI.getOperand(FIOperandNum).getTargetFlags() & AArch64II::MO_TAGGED;
   Register FrameReg;
 
-  // Special handling of dbg_value, stackmap and patchpoint instructions.
+  // Special handling of dbg_value, stackmap patchpoint statepoint instructions.
   if (MI.isDebugValue() || MI.getOpcode() == TargetOpcode::STACKMAP ||
-      MI.getOpcode() == TargetOpcode::PATCHPOINT) {
+      MI.getOpcode() == TargetOpcode::PATCHPOINT ||
+      MI.getOpcode() == TargetOpcode::STATEPOINT) {
     StackOffset Offset =
         TFI->resolveFrameIndexReference(MF, FrameIndex, FrameReg,
                                         /*PreferFP=*/true,
@@ -702,4 +734,20 @@ unsigned AArch64RegisterInfo::getLocalAddressRegister(
   else if (needsStackRealignment(MF))
     return getBaseRegister();
   return getFrameRegister(MF);
+}
+
+/// SrcRC and DstRC will be morphed into NewRC if this returns true
+bool AArch64RegisterInfo::shouldCoalesce(
+    MachineInstr *MI, const TargetRegisterClass *SrcRC, unsigned SubReg,
+    const TargetRegisterClass *DstRC, unsigned DstSubReg,
+    const TargetRegisterClass *NewRC, LiveIntervals &LIS) const {
+  if (MI->isCopy() &&
+      ((DstRC->getID() == AArch64::GPR64RegClassID) ||
+       (DstRC->getID() == AArch64::GPR64commonRegClassID)) &&
+      MI->getOperand(0).getSubReg() && MI->getOperand(1).getSubReg())
+    // Do not coalesce in the case of a 32-bit subregister copy
+    // which implements a 32 to 64 bit zero extension
+    // which relies on the upper 32 bits being zeroed.
+    return false;
+  return true;
 }

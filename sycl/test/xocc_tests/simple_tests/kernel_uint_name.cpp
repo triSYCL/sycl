@@ -24,7 +24,7 @@ struct foo
 {
     cl::sycl::accessor<int, 1, cl::sycl::access::mode::read_write> acc;
 
-    auto operator()()
+    auto operator()() const
     {
         for(auto i = 0; i < 1024; ++i)
             acc[i] = Var;

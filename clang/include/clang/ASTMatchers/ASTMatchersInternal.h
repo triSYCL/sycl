@@ -938,14 +938,13 @@ private:
 template <typename T>
 struct IsBaseType {
   static const bool value =
-      std::is_same<T, Decl>::value ||
-      std::is_same<T, Stmt>::value ||
-      std::is_same<T, QualType>::value ||
-      std::is_same<T, Type>::value ||
+      std::is_same<T, Decl>::value || std::is_same<T, Stmt>::value ||
+      std::is_same<T, QualType>::value || std::is_same<T, Type>::value ||
       std::is_same<T, TypeLoc>::value ||
       std::is_same<T, NestedNameSpecifier>::value ||
       std::is_same<T, NestedNameSpecifierLoc>::value ||
-      std::is_same<T, CXXCtorInitializer>::value;
+      std::is_same<T, CXXCtorInitializer>::value ||
+      std::is_same<T, TemplateArgumentLoc>::value;
 };
 template <typename T>
 const bool IsBaseType<T>::value;
@@ -1836,17 +1835,17 @@ struct NotEqualsBoundNodePredicate {
   DynTypedNode Node;
 };
 
-template <typename Ty>
-struct GetBodyMatcher {
-  static const Stmt *get(const Ty &Node) {
-    return Node.getBody();
-  }
+template <typename Ty, typename Enable = void> struct GetBodyMatcher {
+  static const Stmt *get(const Ty &Node) { return Node.getBody(); }
 };
 
-template <>
-inline const Stmt *GetBodyMatcher<FunctionDecl>::get(const FunctionDecl &Node) {
-  return Node.doesThisDeclarationHaveABody() ? Node.getBody() : nullptr;
-}
+template <typename Ty>
+struct GetBodyMatcher<Ty, typename std::enable_if<
+                              std::is_base_of<FunctionDecl, Ty>::value>::type> {
+  static const Stmt *get(const Ty &Node) {
+    return Node.doesThisDeclarationHaveABody() ? Node.getBody() : nullptr;
+  }
+};
 
 template <typename Ty>
 struct HasSizeMatcher {

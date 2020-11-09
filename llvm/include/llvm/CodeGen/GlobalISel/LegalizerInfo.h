@@ -183,7 +183,7 @@ struct TypePairAndMemDesc {
            MemSize == Other.MemSize;
   }
 
-  /// \returns true if this memory access is legal with for the acecss described
+  /// \returns true if this memory access is legal with for the access described
   /// by \p Other (The alignment is sufficient for the size and result type).
   bool isCompatible(const TypePairAndMemDesc &Other) const {
     return Type0 == Other.Type0 && Type1 == Other.Type1 &&
@@ -218,11 +218,19 @@ Predicate any(Predicate P0, Predicate P1, Args... args) {
   return any(any(P0, P1), args...);
 }
 
-/// True iff the given type index is the specified types.
+/// True iff the given type index is the specified type.
 LegalityPredicate typeIs(unsigned TypeIdx, LLT TypesInit);
 /// True iff the given type index is one of the specified types.
 LegalityPredicate typeInSet(unsigned TypeIdx,
                             std::initializer_list<LLT> TypesInit);
+
+/// True iff the given type index is not the specified type.
+inline LegalityPredicate typeIsNot(unsigned TypeIdx, LLT Type) {
+  return [=](const LegalityQuery &Query) {
+           return Query.Types[TypeIdx] != Type;
+         };
+}
+
 /// True iff the given types for the given pair of type indexes is one of the
 /// specified type pairs.
 LegalityPredicate
@@ -621,8 +629,7 @@ public:
   /// The instruction is lowered when type index 0 is any type in the given
   /// list. Keep type index 0 as the same type.
   LegalizeRuleSet &lowerFor(std::initializer_list<LLT> Types) {
-    return actionFor(LegalizeAction::Lower, Types,
-                     LegalizeMutations::changeTo(0, 0));
+    return actionFor(LegalizeAction::Lower, Types);
   }
   /// The instruction is lowered when type index 0 is any type in the given
   /// list.
@@ -633,8 +640,7 @@ public:
   /// The instruction is lowered when type indexes 0 and 1 is any type pair in
   /// the given list. Keep type index 0 as the same type.
   LegalizeRuleSet &lowerFor(std::initializer_list<std::pair<LLT, LLT>> Types) {
-    return actionFor(LegalizeAction::Lower, Types,
-                     LegalizeMutations::changeTo(0, 0));
+    return actionFor(LegalizeAction::Lower, Types);
   }
   /// The instruction is lowered when type indexes 0 and 1 is any type pair in
   /// the given list.
@@ -657,6 +663,15 @@ public:
     using namespace LegalityPredicates;
     return actionForCartesianProduct(LegalizeAction::Lower, Types0, Types1,
                                      Types2);
+  }
+
+  /// The instruction is emitted as a library call.
+  LegalizeRuleSet &libcall() {
+    using namespace LegalizeMutations;
+    // We have no choice but conservatively assume that predicate-less lowering
+    // properly handles all type indices by design:
+    markAllIdxsAsCovered();
+    return actionIf(LegalizeAction::Libcall, always);
   }
 
   /// Like legalIf, but for the Libcall action.
@@ -809,6 +824,13 @@ public:
   LegalizeRuleSet &scalarize(unsigned TypeIdx) {
     using namespace LegalityPredicates;
     return actionIf(LegalizeAction::FewerElements, isVector(typeIdx(TypeIdx)),
+                    LegalizeMutations::scalarize(TypeIdx));
+  }
+
+  LegalizeRuleSet &scalarizeIf(LegalityPredicate Predicate, unsigned TypeIdx) {
+    using namespace LegalityPredicates;
+    return actionIf(LegalizeAction::FewerElements,
+                    all(Predicate, isVector(typeIdx(TypeIdx))),
                     LegalizeMutations::scalarize(TypeIdx));
   }
 

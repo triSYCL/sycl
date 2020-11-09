@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Writer.h"
+#include "CallGraphSort.h"
 #include "Config.h"
 #include "DLL.h"
 #include "InputFiles.h"
@@ -86,6 +87,8 @@ static std::vector<OutputSection *> outputSections;
 OutputSection *Chunk::getOutputSection() const {
   return osidx == 0 ? nullptr : outputSections[osidx - 1];
 }
+
+void OutputSection::clear() { outputSections.clear(); }
 
 namespace {
 
@@ -229,6 +232,7 @@ private:
   void setSectionPermissions();
   void writeSections();
   void writeBuildId();
+  void sortSections();
   void sortExceptionTable();
   void sortCRTSectionChunks(std::vector<Chunk *> &chunks);
   void addSyntheticIdata();
@@ -798,6 +802,19 @@ static bool shouldStripSectionSuffix(SectionChunk *sc, StringRef name) {
          name.startswith(".xdata$") || name.startswith(".eh_frame$");
 }
 
+void Writer::sortSections() {
+  if (!config->callGraphProfile.empty()) {
+    DenseMap<const SectionChunk *, int> order = computeCallGraphProfileOrder();
+    for (auto it : order) {
+      if (DefinedRegular *sym = it.first->sym)
+        config->order[sym->getName()] = it.second;
+    }
+  }
+  if (!config->order.empty())
+    for (auto it : partialSections)
+      sortBySectionOrder(it.second->chunks);
+}
+
 // Create output section objects and add them to OutputSections.
 void Writer::createSections() {
   // First, create the builtin sections.
@@ -861,10 +878,7 @@ void Writer::createSections() {
   if (hasIdata)
     addSyntheticIdata();
 
-  // Process an /order option.
-  if (!config->order.empty())
-    for (auto it : partialSections)
-      sortBySectionOrder(it.second->chunks);
+  sortSections();
 
   if (hasIdata)
     locateImportTables();
@@ -1359,8 +1373,8 @@ template <typename PEHeaderTy> void Writer::writeHeader() {
   pe->MinorImageVersion = config->minorImageVersion;
   pe->MajorOperatingSystemVersion = config->majorOSVersion;
   pe->MinorOperatingSystemVersion = config->minorOSVersion;
-  pe->MajorSubsystemVersion = config->majorOSVersion;
-  pe->MinorSubsystemVersion = config->minorOSVersion;
+  pe->MajorSubsystemVersion = config->majorSubsystemVersion;
+  pe->MinorSubsystemVersion = config->minorSubsystemVersion;
   pe->Subsystem = config->subsystem;
   pe->SizeOfImage = sizeOfImage;
   pe->SizeOfHeaders = sizeOfHeaders;
@@ -1393,7 +1407,7 @@ template <typename PEHeaderTy> void Writer::writeHeader() {
     pe->DLLCharacteristics |= IMAGE_DLL_CHARACTERISTICS_GUARD_CF;
   if (config->integrityCheck)
     pe->DLLCharacteristics |= IMAGE_DLL_CHARACTERISTICS_FORCE_INTEGRITY;
-  if (setNoSEHCharacteristic)
+  if (setNoSEHCharacteristic || config->noSEH)
     pe->DLLCharacteristics |= IMAGE_DLL_CHARACTERISTICS_NO_SEH;
   if (config->terminalServerAware)
     pe->DLLCharacteristics |= IMAGE_DLL_CHARACTERISTICS_TERMINAL_SERVER_AWARE;

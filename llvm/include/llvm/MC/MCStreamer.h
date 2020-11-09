@@ -13,6 +13,7 @@
 #ifndef LLVM_MC_MCSTREAMER_H
 #define LLVM_MC_MCSTREAMER_H
 
+#include "llvm/ADT/APInt.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/Optional.h"
@@ -673,6 +674,7 @@ public:
   /// Special case of EmitValue that avoids the client having
   /// to pass in a MCExpr for constant integers.
   virtual void emitIntValue(uint64_t Value, unsigned Size);
+  virtual void emitIntValue(APInt Value);
 
   /// Special case of EmitValue that avoids the client having to pass
   /// in a MCExpr for constant integers & prints in Hex format for certain
@@ -776,6 +778,9 @@ public:
   /// \param Expr - The expression from which \p Size bytes are used.
   virtual void emitFill(const MCExpr &NumValues, int64_t Size, int64_t Expr,
                         SMLoc Loc = SMLoc());
+
+  virtual void emitNops(int64_t NumBytes, int64_t ControlledNopLength,
+                        SMLoc Loc);
 
   /// Emit NumBytes worth of zeros.
   /// This function properly handles data in virtual sections.

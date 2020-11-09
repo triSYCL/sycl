@@ -259,7 +259,9 @@ int mlir::JitRunnerMain(
     }
   }
 
-  MLIRContext context;
+  MLIRContext context(/*loadAllDialects=*/false);
+  registerAllDialects(&context);
+
   auto m = parseMLIRInput(options.inputFilename, &context);
   if (!m) {
     llvm::errs() << "could not parse the input IR\n";
@@ -289,7 +291,7 @@ int mlir::JitRunnerMain(
       Error (*)(Options &, ModuleOp, StringRef,
                 std::function<llvm::Error(llvm::Module *)>);
   auto compileAndExecuteFn =
-      llvm::StringSwitch<CompileAndExecuteFnT>(options.mainFuncType.getValue())
+      StringSwitch<CompileAndExecuteFnT>(options.mainFuncType.getValue())
           .Case("i32", compileAndExecuteSingleReturnFunction<int32_t>)
           .Case("i64", compileAndExecuteSingleReturnFunction<int64_t>)
           .Case("f32", compileAndExecuteSingleReturnFunction<float>)

@@ -40,7 +40,7 @@ enum PropWithDataKind {
   BufferContextBound,
   ImageUseMutex,
   ImageContextBound,
-  PropWithDataKindSize
+  PropWithDataKindSize,
 };
 
 // Base class for dataless properties, needed to check that the type of an

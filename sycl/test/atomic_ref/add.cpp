@@ -1,7 +1,5 @@
 // RUN: %clangxx -fsycl -fsycl-unnamed-lambda -fsycl-targets=%sycl_triple %s -o %t.out
 // RUN: env SYCL_DEVICE_TYPE=HOST %t.out
-// RUN: %CPU_RUN_PLACEHOLDER %t.out
-// RUN: %GPU_RUN_PLACEHOLDER %t.out
 
 #include <CL/sycl.hpp>
 #include <algorithm>
@@ -10,7 +8,7 @@
 #include <numeric>
 #include <vector>
 using namespace sycl;
-using namespace sycl::intel;
+using namespace sycl::ONEAPI;
 
 template <typename T, typename Difference = T>
 void add_fetch_test(queue q, size_t N) {
@@ -23,10 +21,13 @@ void add_fetch_test(queue q, size_t N) {
 
     q.submit([&](handler &cgh) {
       auto sum = sum_buf.template get_access<access::mode::read_write>(cgh);
-      auto out = output_buf.template get_access<access::mode::discard_write>(cgh);
+      auto out =
+          output_buf.template get_access<access::mode::discard_write>(cgh);
       cgh.parallel_for(range<1>(N), [=](item<1> it) {
         int gid = it.get_id(0);
-        auto atm = atomic_ref<T, intel::memory_order::relaxed, intel::memory_scope::device, access::address_space::global_space>(sum[0]);
+        auto atm = atomic_ref<T, ONEAPI::memory_order::relaxed,
+                              ONEAPI::memory_scope::device,
+                              access::address_space::global_space>(sum[0]);
         out[gid] = atm.fetch_add(Difference(1));
       });
     });
@@ -56,10 +57,13 @@ void add_plus_equal_test(queue q, size_t N) {
 
     q.submit([&](handler &cgh) {
       auto sum = sum_buf.template get_access<access::mode::read_write>(cgh);
-      auto out = output_buf.template get_access<access::mode::discard_write>(cgh);
+      auto out =
+          output_buf.template get_access<access::mode::discard_write>(cgh);
       cgh.parallel_for(range<1>(N), [=](item<1> it) {
         int gid = it.get_id(0);
-        auto atm = atomic_ref<T, intel::memory_order::relaxed, intel::memory_scope::device, access::address_space::global_space>(sum[0]);
+        auto atm = atomic_ref<T, ONEAPI::memory_order::relaxed,
+                              ONEAPI::memory_scope::device,
+                              access::address_space::global_space>(sum[0]);
         out[gid] = atm += Difference(1);
       });
     });
@@ -89,10 +93,13 @@ void add_pre_inc_test(queue q, size_t N) {
 
     q.submit([&](handler &cgh) {
       auto sum = sum_buf.template get_access<access::mode::read_write>(cgh);
-      auto out = output_buf.template get_access<access::mode::discard_write>(cgh);
+      auto out =
+          output_buf.template get_access<access::mode::discard_write>(cgh);
       cgh.parallel_for(range<1>(N), [=](item<1> it) {
         int gid = it.get_id(0);
-        auto atm = atomic_ref<T, intel::memory_order::relaxed, intel::memory_scope::device, access::address_space::global_space>(sum[0]);
+        auto atm = atomic_ref<T, ONEAPI::memory_order::relaxed,
+                              ONEAPI::memory_scope::device,
+                              access::address_space::global_space>(sum[0]);
         out[gid] = ++atm;
       });
     });
@@ -122,10 +129,13 @@ void add_post_inc_test(queue q, size_t N) {
 
     q.submit([&](handler &cgh) {
       auto sum = sum_buf.template get_access<access::mode::read_write>(cgh);
-      auto out = output_buf.template get_access<access::mode::discard_write>(cgh);
+      auto out =
+          output_buf.template get_access<access::mode::discard_write>(cgh);
       cgh.parallel_for(range<1>(N), [=](item<1> it) {
         int gid = it.get_id(0);
-        auto atm = atomic_ref<T, intel::memory_order::relaxed, intel::memory_scope::device, access::address_space::global_space>(sum[0]);
+        auto atm = atomic_ref<T, ONEAPI::memory_order::relaxed,
+                              ONEAPI::memory_scope::device,
+                              access::address_space::global_space>(sum[0]);
         out[gid] = atm++;
       });
     });
@@ -153,13 +163,11 @@ void add_test(queue q, size_t N) {
 }
 
 // Floating-point types do not support pre- or post-increment
-template <>
-void add_test<float>(queue q, size_t N) {
+template <> void add_test<float>(queue q, size_t N) {
   add_fetch_test<float>(q, N);
   add_plus_equal_test<float>(q, N);
 }
-template <>
-void add_test<double>(queue q, size_t N) {
+template <> void add_test<double>(queue q, size_t N) {
   add_fetch_test<double>(q, N);
   add_plus_equal_test<double>(q, N);
 }

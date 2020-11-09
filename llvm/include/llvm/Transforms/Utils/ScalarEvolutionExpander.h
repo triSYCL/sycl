@@ -39,6 +39,19 @@ bool isSafeToExpand(const SCEV *S, ScalarEvolution &SE);
 bool isSafeToExpandAt(const SCEV *S, const Instruction *InsertionPoint,
                       ScalarEvolution &SE);
 
+/// struct for holding enough information to help calculate the cost of the
+/// given SCEV when expanded into IR.
+struct SCEVOperand {
+  explicit SCEVOperand(unsigned Opc, int Idx, const SCEV *S) :
+    ParentOpcode(Opc), OperandIdx(Idx), S(S) { }
+  /// LLVM instruction opcode that uses the operand.
+  unsigned ParentOpcode;
+  /// The use index of an expanded instruction.
+  int OperandIdx;
+  /// The SCEV operand to be costed.
+  const SCEV* S;
+};
+
 /// This class uses information about analyze scalars to rewrite expressions
 /// in canonical form.
 ///
@@ -52,6 +65,9 @@ class SCEVExpander : public SCEVVisitor<SCEVExpander, Value *> {
   // New instructions receive a name to identify them with the current pass.
   const char *IVName;
 
+  /// Indicates whether LCSSA phis should be created for inserted values.
+  bool PreserveLCSSA;
+
   // InsertedExpressions caches Values for reuse, so must track RAUW.
   DenseMap<std::pair<const SCEV *, Instruction *>, TrackingVH<Value>>
       InsertedExpressions;
@@ -59,6 +75,11 @@ class SCEVExpander : public SCEVVisitor<SCEVExpander, Value *> {
   // InsertedValues only flags inserted instructions so needs no RAUW.
   DenseSet<AssertingVH<Value>> InsertedValues;
   DenseSet<AssertingVH<Value>> InsertedPostIncValues;
+
+  /// Keep track of the existing IR values re-used during expansion.
+  /// FIXME: Ideally re-used instructions would not be added to
+  /// InsertedValues/InsertedPostIncValues.
+  SmallPtrSet<Value *, 16> ReusedValues;
 
   /// A memoization of the "relevant" loop for a given SCEV.
   DenseMap<const SCEV *, const Loop *> RelevantLoops;
@@ -146,9 +167,10 @@ class SCEVExpander : public SCEVVisitor<SCEVExpander, Value *> {
 public:
   /// Construct a SCEVExpander in "canonical" mode.
   explicit SCEVExpander(ScalarEvolution &se, const DataLayout &DL,
-                        const char *name)
-      : SE(se), DL(DL), IVName(name), IVIncInsertLoop(nullptr),
-        IVIncInsertPos(nullptr), CanonicalMode(true), LSRMode(false),
+                        const char *name, bool PreserveLCSSA = true)
+      : SE(se), DL(DL), IVName(name), PreserveLCSSA(PreserveLCSSA),
+        IVIncInsertLoop(nullptr), IVIncInsertPos(nullptr), CanonicalMode(true),
+        LSRMode(false),
         Builder(se.getContext(), TargetFolder(DL),
                 IRBuilderCallbackInserter(
                     [this](Instruction *I) { rememberInstruction(I); })) {
@@ -173,7 +195,29 @@ public:
     InsertedExpressions.clear();
     InsertedValues.clear();
     InsertedPostIncValues.clear();
+    ReusedValues.clear();
     ChainedPhis.clear();
+  }
+
+  /// Return a vector containing all instructions inserted during expansion.
+  SmallVector<Instruction *, 32> getAllInsertedInstructions() const {
+    SmallVector<Instruction *, 32> Result;
+    for (auto &VH : InsertedValues) {
+      Value *V = VH;
+      if (ReusedValues.contains(V))
+        continue;
+      if (auto *Inst = dyn_cast<Instruction>(V))
+        Result.push_back(Inst);
+    }
+    for (auto &VH : InsertedPostIncValues) {
+      Value *V = VH;
+      if (ReusedValues.contains(V))
+        continue;
+      if (auto *Inst = dyn_cast<Instruction>(V))
+        Result.push_back(Inst);
+    }
+
+    return Result;
   }
 
   /// Return true for expressions that can't be evaluated at runtime
@@ -189,14 +233,14 @@ public:
     assert(At && "This function requires At instruction to be provided.");
     if (!TTI)      // In assert-less builds, avoid crashing
       return true; // by always claiming to be high-cost.
-    SmallVector<const SCEV *, 8> Worklist;
+    SmallVector<SCEVOperand, 8> Worklist;
     SmallPtrSet<const SCEV *, 8> Processed;
     int BudgetRemaining = Budget * TargetTransformInfo::TCC_Basic;
-    Worklist.emplace_back(Expr);
+    Worklist.emplace_back(-1, -1, Expr);
     while (!Worklist.empty()) {
-      const SCEV *S = Worklist.pop_back_val();
-      if (isHighCostExpansionHelper(S, L, *At, BudgetRemaining, *TTI, Processed,
-                                    Worklist))
+      const SCEVOperand WorkItem = Worklist.pop_back_val();
+      if (isHighCostExpansionHelper(WorkItem, L, *At, BudgetRemaining,
+                                    *TTI, Processed, Worklist))
         return true;
     }
     assert(BudgetRemaining >= 0 && "Should have returned from inner loop.");
@@ -223,14 +267,18 @@ public:
                                const TargetTransformInfo *TTI = nullptr);
 
   /// Insert code to directly compute the specified SCEV expression into the
-  /// program.  The inserted code is inserted into the specified block.
-  Value *expandCodeFor(const SCEV *SH, Type *Ty, Instruction *I);
+  /// program.  The code is inserted into the specified block.
+  Value *expandCodeFor(const SCEV *SH, Type *Ty, Instruction *I) {
+    return expandCodeForImpl(SH, Ty, I, true);
+  }
 
   /// Insert code to directly compute the specified SCEV expression into the
-  /// program.  The inserted code is inserted into the SCEVExpander's current
+  /// program.  The code is inserted into the SCEVExpander's current
   /// insertion point. If a type is specified, the result will be expanded to
   /// have that type, with a cast if necessary.
-  Value *expandCodeFor(const SCEV *SH, Type *Ty = nullptr);
+  Value *expandCodeFor(const SCEV *SH, Type *Ty = nullptr) {
+    return expandCodeForImpl(SH, Ty, true);
+  }
 
   /// Generates a code sequence that evaluates this predicate.  The inserted
   /// instructions will be at position \p Loc.  The result will be of type i1
@@ -309,7 +357,8 @@ public:
   }
 
   /// Return true if the specified instruction was inserted by the code
-  /// rewriter.  If so, the client should not modify the instruction.
+  /// rewriter.  If so, the client should not modify the instruction. Note that
+  /// this also includes instructions re-used during expansion.
   bool isInsertedInstruction(Instruction *I) const {
     return InsertedValues.count(I) || InsertedPostIncValues.count(I);
   }
@@ -335,15 +384,34 @@ public:
   Optional<ScalarEvolution::ValueOffsetPair>
   getRelatedExistingExpansion(const SCEV *S, const Instruction *At, Loop *L);
 
+  /// Returns a suitable insert point after \p I, that dominates \p
+  /// MustDominate. Skips instructions inserted by the expander.
+  BasicBlock::iterator findInsertPointAfter(Instruction *I,
+                                            Instruction *MustDominate);
+
 private:
   LLVMContext &getContext() const { return SE.getContext(); }
 
+  /// Insert code to directly compute the specified SCEV expression into the
+  /// program. The code is inserted into the SCEVExpander's current
+  /// insertion point. If a type is specified, the result will be expanded to
+  /// have that type, with a cast if necessary. If \p Root is true, this
+  /// indicates that \p SH is the top-level expression to expand passed from
+  /// an external client call.
+  Value *expandCodeForImpl(const SCEV *SH, Type *Ty, bool Root);
+
+  /// Insert code to directly compute the specified SCEV expression into the
+  /// program. The code is inserted into the specified block. If \p
+  /// Root is true, this indicates that \p SH is the top-level expression to
+  /// expand passed from an external client call.
+  Value *expandCodeForImpl(const SCEV *SH, Type *Ty, Instruction *I, bool Root);
+
   /// Recursive helper function for isHighCostExpansion.
-  bool isHighCostExpansionHelper(const SCEV *S, Loop *L, const Instruction &At,
-                                 int &BudgetRemaining,
-                                 const TargetTransformInfo &TTI,
-                                 SmallPtrSetImpl<const SCEV *> &Processed,
-                                 SmallVectorImpl<const SCEV *> &Worklist);
+  bool isHighCostExpansionHelper(
+    const SCEVOperand &WorkItem, Loop *L, const Instruction &At,
+    int &BudgetRemaining, const TargetTransformInfo &TTI,
+    SmallPtrSetImpl<const SCEV *> &Processed,
+    SmallVectorImpl<SCEVOperand> &Worklist);
 
   /// Insert the specified binary operator, doing a small amount of work to
   /// avoid inserting an obviously redundant operation, and hoisting to an
@@ -419,6 +487,32 @@ private:
                       Instruction *Pos, PHINode *LoopPhi);
 
   void fixupInsertPoints(Instruction *I);
+
+  /// If required, create LCSSA PHIs for \p Users' operand \p OpIdx. If new
+  /// LCSSA PHIs have been created, return the LCSSA PHI available at \p User.
+  /// If no PHIs have been created, return the unchanged operand \p OpIdx.
+  Value *fixupLCSSAFormFor(Instruction *User, unsigned OpIdx);
+};
+
+/// Helper to remove instructions inserted during SCEV expansion, unless they
+/// are marked as used.
+class SCEVExpanderCleaner {
+  SCEVExpander &Expander;
+
+  DominatorTree &DT;
+
+  /// Indicates whether the result of the expansion is used. If false, the
+  /// instructions added during expansion are removed.
+  bool ResultUsed;
+
+public:
+  SCEVExpanderCleaner(SCEVExpander &Expander, DominatorTree &DT)
+      : Expander(Expander), DT(DT), ResultUsed(false) {}
+
+  ~SCEVExpanderCleaner();
+
+  /// Indicate that the result of the expansion is used.
+  void markResultUsed() { ResultUsed = true; }
 };
 } // namespace llvm
 

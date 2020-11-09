@@ -99,15 +99,16 @@ if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR})
   include(CheckLibraryExists)
   include(CheckCCompilerFlag)
 
-  # We don't have libc++ (yet).
-  set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -nostdlib++")
+  # We don't have libc++ (yet)...
+  set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -nostdinc++ -nostdlib++")
+
+  # ...but we need access to libc++ headers for CMake checks to succeed.
+  if (LLVM_EXTERNAL_LIBCXX_SOURCE_DIR AND "libcxx" IN_LIST LLVM_ENABLE_RUNTIMES)
+    set(CMAKE_REQUIRED_FLAGS "${CMAKE_REQUIRED_FLAGS} -isystem ${LLVM_EXTERNAL_LIBCXX_SOURCE_DIR}/include")
+  endif()
 
   # Avoid checking whether the compiler is working.
   set(LLVM_COMPILER_CHECKED ON)
-
-  # Enable warnings, otherwise -w gets added to the cflags by HandleLLVMOptions
-  # resulting in unjustified successes by check_cxx_compiler_flag.
-  set(LLVM_ENABLE_WARNINGS ON)
 
   # Handle common options used by all runtimes.
   include(AddLLVM)
@@ -219,22 +220,47 @@ if(${CMAKE_SOURCE_DIR} STREQUAL ${CMAKE_CURRENT_SOURCE_DIR})
 
 else() # if this is included from LLVM's CMake
   include(LLVMExternalProjectUtils)
-  if (LLVM_EXTERNAL_LIBCXX_SOURCE_DIR AND "libcxx" IN_LIST LLVM_ENABLE_RUNTIMES)
-    # This looks wrong, but libcxx's build actually wants the header dir to be
-    # the root build dir, not the include directory.
-    set(LIBCXX_BINARY_DIR ${LLVM_BINARY_DIR})
-    set(LIBCXX_SOURCE_DIR ${LLVM_EXTERNAL_LIBCXX_SOURCE_DIR})
-    set(LIBCXX_HEADER_DIR ${LLVM_BINARY_DIR})
-    set(CXX_HEADER_TARGET runtime-libcxx-headers)
-    add_subdirectory(${LLVM_EXTERNAL_LIBCXX_SOURCE_DIR}/include ${CXX_HEADER_TARGET})
-  endif()
 
   if(NOT LLVM_BUILD_RUNTIMES)
     set(EXTRA_ARGS EXCLUDE_FROM_ALL)
   endif()
 
+  function(check_apple_target triple builtin_or_runtime)
+    set(error "\
+compiler-rt for Darwin builds for all platforms and architectures using a \
+single configuration. Specify only a single darwin triple (e.g. x86_64-apple-darwin) \
+in your targets list (and not a triple for a specific platform such as macos). \
+You can use variables such as COMPILER_RT_ENABLE_IOS and DARWIN_ios_ARCHS to \
+control the specific platforms and architectures to build.")
+
+    set(seen_property ${builtin_or_runtime}_darwin_triple_seen)
+    string(REPLACE "-" ";" triple_components ${triple})
+    foreach(component ${triple_components})
+      string(TOLOWER "${component}" component_lower)
+      if(component_lower MATCHES "^darwin")
+        get_property(darwin_triple_seen GLOBAL PROPERTY ${seen_property})
+        if(darwin_triple_seen)
+          message(FATAL_ERROR "${error}")
+        endif()
+        set_property(GLOBAL PROPERTY ${seen_property} YES)
+        if(NOT RUNTIMES_BUILD_ALLOW_DARWIN)
+          message(FATAL_ERROR "\
+${error} Set RUNTIMES_BUILD_ALLOW_DARWIN to allow a single darwin triple.")
+        endif()
+      elseif(component_lower MATCHES "^ios|^macos|^tvos|^watchos")
+        message(FATAL_ERROR "${error}")
+      endif()
+    endforeach()
+  endfunction()
+
   function(builtin_default_target compiler_rt_path)
     cmake_parse_arguments(ARG "" "" "DEPENDS" ${ARGN})
+
+    set(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR_default ON)
+    # AIX should fold 32-bit & 64-bit arch libraries into a single archive.
+    if (TARGET_TRIPLE MATCHES "aix")
+      set(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR_default OFF)
+    endif()
 
     llvm_ExternalProject_Add(builtins
                              ${compiler_rt_path}/lib/builtins
@@ -242,7 +268,7 @@ else() # if this is included from LLVM's CMake
                              CMAKE_ARGS -DLLVM_LIBRARY_OUTPUT_INTDIR=${LLVM_LIBRARY_DIR}
                                         -DLLVM_RUNTIME_OUTPUT_INTDIR=${LLVM_TOOLS_BINARY_DIR}
                                         -DLLVM_DEFAULT_TARGET_TRIPLE=${TARGET_TRIPLE}
-                                        -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON
+                                        -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=${LLVM_ENABLE_PER_TARGET_RUNTIME_DIR_default}
                                         -DCMAKE_C_COMPILER_TARGET=${TARGET_TRIPLE}
                                         -DCMAKE_ASM_COMPILER_TARGET=${TARGET_TRIPLE}
                                         -DCMAKE_C_COMPILER_WORKS=ON
@@ -256,13 +282,7 @@ else() # if this is included from LLVM's CMake
   function(builtin_register_target compiler_rt_path target)
     cmake_parse_arguments(ARG "" "" "DEPENDS" ${ARGN})
 
-    string(REPLACE "-" ";" builtin_target_list ${target})
-    foreach(item ${builtin_target_list})
-      string(TOLOWER "${item}" item_lower)
-      if(item_lower MATCHES "darwin")
-        message(FATAL_ERROR "LLVM_BUILTIN_TARGETS isn't implemented for Darwin platform!")
-      endif()
-    endforeach()
+    check_apple_target(${target} builtin)
 
     get_cmake_property(variableNames VARIABLES)
     foreach(variableName ${variableNames})
@@ -287,7 +307,6 @@ else() # if this is included from LLVM's CMake
                                         -DCMAKE_ASM_COMPILER_WORKS=ON
                                         -DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON
                                         ${${target}_extra_args}
-                             TOOLCHAIN_TOOLS clang lld llvm-ar llvm-lipo llvm-ranlib llvm-nm llvm-objcopy llvm-objdump llvm-strip
                              USE_TOOLCHAIN
                              ${EXTRA_ARGS})
   endfunction()
@@ -383,15 +402,21 @@ else() # if this is included from LLVM's CMake
       list(APPEND test_targets runtimes-test-depends check-runtimes)
     endif()
 
+    set(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR_default ON)
+    # AIX should fold 32-bit & 64-bit arch libraries into a single archive.
+    if (TARGET_TRIPLE MATCHES "aix")
+      set(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR_default OFF)
+    endif()
+
     llvm_ExternalProject_Add(runtimes
                              ${CMAKE_CURRENT_SOURCE_DIR}
-                             DEPENDS ${ARG_DEPENDS} ${CXX_HEADER_TARGET}
+                             DEPENDS ${ARG_DEPENDS}
                              # Builtins were built separately above
                              CMAKE_ARGS -DCOMPILER_RT_BUILD_BUILTINS=Off
                                         -DLLVM_INCLUDE_TESTS=${LLVM_INCLUDE_TESTS}
                                         -DLLVM_DEFAULT_TARGET_TRIPLE=${TARGET_TRIPLE}
                                         -DLLVM_ENABLE_PROJECTS_USED=${LLVM_ENABLE_PROJECTS_USED}
-                                        -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=ON
+                                        -DLLVM_ENABLE_PER_TARGET_RUNTIME_DIR=${LLVM_ENABLE_PER_TARGET_RUNTIME_DIR_default}
                                         -DCMAKE_C_COMPILER_TARGET=${TARGET_TRIPLE}
                                         -DCMAKE_CXX_COMPILER_TARGET=${TARGET_TRIPLE}
                                         -DCMAKE_ASM_COMPILER_TARGET=${TARGET_TRIPLE}
@@ -416,6 +441,8 @@ else() # if this is included from LLVM's CMake
     cmake_parse_arguments(ARG "" "" "DEPENDS;CMAKE_ARGS" ${ARGN})
     include(${LLVM_BINARY_DIR}/runtimes/${name}/Components.cmake OPTIONAL)
     set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS ${LLVM_BINARY_DIR}/runtimes/${name}/Components.cmake)
+
+    check_apple_target(${target} runtime)
 
     set(${name}_deps ${ARG_DEPENDS})
     if(NOT name STREQUAL target)
@@ -489,7 +516,7 @@ else() # if this is included from LLVM's CMake
 
     llvm_ExternalProject_Add(runtimes-${name}
                              ${CMAKE_CURRENT_SOURCE_DIR}
-                             DEPENDS ${${name}_deps} ${CXX_HEADER_TARGET}
+                             DEPENDS ${${name}_deps}
                              # Builtins were built separately above
                              CMAKE_ARGS -DCOMPILER_RT_BUILD_BUILTINS=Off
                                         -DLLVM_INCLUDE_TESTS=${LLVM_INCLUDE_TESTS}
@@ -505,7 +532,6 @@ else() # if this is included from LLVM's CMake
                                         -DCOMPILER_RT_DEFAULT_TARGET_ONLY=ON
                                         -DLLVM_RUNTIMES_TARGET=${name}
                                         ${${name}_extra_args}
-                             TOOLCHAIN_TOOLS clang lld llvm-ar llvm-lipo llvm-ranlib llvm-nm llvm-objcopy llvm-objdump llvm-strip
                              EXTRA_TARGETS ${${name}_extra_targets}
                                            ${${name}_test_targets}
                              USE_TOOLCHAIN

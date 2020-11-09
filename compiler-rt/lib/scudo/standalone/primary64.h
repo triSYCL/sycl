@@ -14,6 +14,7 @@
 #include "list.h"
 #include "local_cache.h"
 #include "memtag.h"
+#include "options.h"
 #include "release.h"
 #include "stats.h"
 #include "string_utils.h"
@@ -91,10 +92,10 @@ public:
       if (Region->CanRelease)
         Region->ReleaseInfo.LastReleaseAtNs = Time;
     }
-    setReleaseToOsIntervalMs(ReleaseToOsInterval);
+    setOption(Option::ReleaseInterval, static_cast<sptr>(ReleaseToOsInterval));
 
-    if (SupportsMemoryTagging)
-      UseMemoryTagging = systemSupportsMemoryTagging();
+    if (SupportsMemoryTagging && systemSupportsMemoryTagging())
+      Options.set(OptionBit::UseMemoryTagging);
   }
   void init(s32 ReleaseToOsInterval) {
     memset(this, 0, sizeof(*this));
@@ -185,13 +186,16 @@ public:
       getStats(Str, I, 0);
   }
 
-  void setReleaseToOsIntervalMs(s32 Interval) {
-    if (Interval >= MaxReleaseToOsIntervalMs) {
-      Interval = MaxReleaseToOsIntervalMs;
-    } else if (Interval <= MinReleaseToOsIntervalMs) {
-      Interval = MinReleaseToOsIntervalMs;
+  bool setOption(Option O, sptr Value) {
+    if (O == Option::ReleaseInterval) {
+      const s32 Interval =
+          Max(Min(static_cast<s32>(Value), MaxReleaseToOsIntervalMs),
+              MinReleaseToOsIntervalMs);
+      atomic_store(&ReleaseToOsIntervalMs, Interval, memory_order_relaxed);
+      return true;
     }
-    atomic_store(&ReleaseToOsIntervalMs, Interval, memory_order_relaxed);
+    // Not supported by the Primary, but not an error either.
+    return true;
   }
 
   uptr releaseToOS() {
@@ -204,10 +208,10 @@ public:
     return TotalReleasedBytes;
   }
 
-  bool useMemoryTagging() const {
-    return SupportsMemoryTagging && UseMemoryTagging;
+  static bool useMemoryTagging(Options Options) {
+    return SupportsMemoryTagging && Options.get(OptionBit::UseMemoryTagging);
   }
-  void disableMemoryTagging() { UseMemoryTagging = false; }
+  void disableMemoryTagging() { Options.clear(OptionBit::UseMemoryTagging); }
 
   const char *getRegionInfoArrayAddress() const {
     return reinterpret_cast<const char *>(RegionInfoArray);
@@ -259,6 +263,8 @@ public:
     return B;
   }
 
+  AtomicOptions Options;
+
 private:
   static const uptr RegionSize = 1UL << RegionSizeLog;
   static const uptr NumClasses = SizeClassMap::NumClasses;
@@ -303,7 +309,6 @@ private:
   uptr PrimaryBase;
   MapPlatformData Data;
   atomic_s32 ReleaseToOsIntervalMs;
-  bool UseMemoryTagging;
   alignas(SCUDO_CACHE_LINE_SIZE) RegionInfo RegionInfoArray[NumClasses];
 
   RegionInfo *getRegionInfo(uptr ClassId) {
@@ -370,7 +375,7 @@ private:
       if (UNLIKELY(!map(reinterpret_cast<void *>(RegionBeg + MappedUser),
                         UserMapSize, "scudo:primary",
                         MAP_ALLOWNOMEM | MAP_RESIZABLE |
-                            (useMemoryTagging() ? MAP_MEMTAG : 0),
+                            (useMemoryTagging(Options.load()) ? MAP_MEMTAG : 0),
                         &Region->Data)))
         return nullptr;
       Region->MappedUser += UserMapSize;
@@ -435,10 +440,6 @@ private:
                 getRegionBaseByClassId(ClassId));
   }
 
-  s32 getReleaseToOsIntervalMs() {
-    return atomic_load(&ReleaseToOsIntervalMs, memory_order_relaxed);
-  }
-
   NOINLINE uptr releaseToOSMaybe(RegionInfo *Region, uptr ClassId,
                                  bool Force = false) {
     const uptr BlockSize = getSizeByClassId(ClassId);
@@ -469,7 +470,8 @@ private:
     }
 
     if (!Force) {
-      const s32 IntervalMs = getReleaseToOsIntervalMs();
+      const s32 IntervalMs =
+          atomic_load(&ReleaseToOsIntervalMs, memory_order_relaxed);
       if (IntervalMs < 0)
         return 0;
       if (Region->ReleaseInfo.LastReleaseAtNs +
@@ -479,9 +481,11 @@ private:
       }
     }
 
+    auto SkipRegion = [](UNUSED uptr RegionIndex) { return false; };
     ReleaseRecorder Recorder(Region->RegionBeg, &Region->Data);
     releaseFreeMemoryToOS(Region->FreeList, Region->RegionBeg,
-                          Region->AllocatedUser, BlockSize, &Recorder);
+                          Region->AllocatedUser, 1U, BlockSize, &Recorder,
+                          SkipRegion);
 
     if (Recorder.getReleasedRangesCount() > 0) {
       Region->ReleaseInfo.PushedBlocksAtLastRelease =

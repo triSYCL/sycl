@@ -199,6 +199,7 @@ bool FlattenCFG(BasicBlock *BB, AAResults *AA = nullptr);
 /// branches to us and one of our successors, fold the setcc into the
 /// predecessor and use logical operations to pick the right destination.
 bool FoldBranchToCommonDest(BranchInst *BI, MemorySSAUpdater *MSSAU = nullptr,
+                            const TargetTransformInfo *TTI = nullptr,
                             unsigned BonusInstThreshold = 1);
 
 /// This function takes a virtual register computed by an Instruction and
@@ -305,10 +306,6 @@ bool replaceDbgDeclare(Value *Address, Value *NewAddress, DIBuilder &Builder,
 void replaceDbgValueForAlloca(AllocaInst *AI, Value *NewAllocaAddress,
                               DIBuilder &Builder, int Offset = 0);
 
-/// Finds alloca where the value comes from.
-AllocaInst *findAllocaForValue(Value *V,
-                               DenseMap<Value *, AllocaInst *> &AllocaForValue);
-
 /// Assuming the instruction \p I is going to be deleted, attempt to salvage
 /// debug users of \p I by writing the effect of \p I in a DIExpression. If it
 /// cannot be salvaged changes its debug uses to undef.
@@ -346,9 +343,13 @@ DIExpression *salvageDebugInfoImpl(Instruction &I, DIExpression *DIExpr,
 bool replaceAllDbgUsesWith(Instruction &From, Value &To, Instruction &DomPoint,
                            DominatorTree &DT);
 
-/// Remove all instructions from a basic block other than it's terminator
-/// and any present EH pad instructions.
-unsigned removeAllNonTerminatorAndEHPadInstructions(BasicBlock *BB);
+/// Remove all instructions from a basic block other than its terminator
+/// and any present EH pad instructions. Returns a pair where the first element
+/// is the number of instructions (excluding debug info instrinsics) that have
+/// been removed, and the second element is the number of debug info intrinsics
+/// that have been removed.
+std::pair<unsigned, unsigned>
+removeAllNonTerminatorAndEHPadInstructions(BasicBlock *BB);
 
 /// Insert an unreachable instruction before the specified
 /// instruction, making it and the rest of the code in the block dead.

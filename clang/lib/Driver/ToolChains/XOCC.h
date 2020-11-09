@@ -11,6 +11,7 @@
 
 #include "clang/Driver/ToolChain.h"
 #include "clang/Driver/Tool.h"
+#include "llvm/ADT/Triple.h"
 
 namespace clang {
 namespace driver {

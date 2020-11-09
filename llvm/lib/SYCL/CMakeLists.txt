@@ -1,5 +1,15 @@
-add_subdirectory(ASFixer)
-add_subdirectory(InSPIRation)
-add_subdirectory(KernelPropGen)
-add_subdirectory(XOCCIRDowngrader)
-add_subdirectory(ChessMassage)
+add_llvm_component_library(LLVMSYCL
+  XOCCIRDowngrader.cpp
+  ASFixer.cpp
+  InSPIRation.cpp
+  KernelPropGen.cpp
+  PrepareSYCLOpt.cpp
+  LowerSYCLMetaData.cpp
+  ChessMassage.cpp
+
+  ADDITIONAL_HEADER_DIRS
+  ${LLVM_MAIN_INCLUDE_DIR}/llvm/SYCL
+
+  DEPENDS
+  intrinsics_gen
+)

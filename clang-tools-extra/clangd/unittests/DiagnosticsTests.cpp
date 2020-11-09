@@ -29,6 +29,8 @@ namespace clangd {
 namespace {
 
 using ::testing::_;
+using ::testing::AllOf;
+using ::testing::Contains;
 using ::testing::ElementsAre;
 using ::testing::Field;
 using ::testing::IsEmpty;
@@ -278,6 +280,23 @@ TEST(DiagnosticsTest, ClangTidy) {
                   "use a trailing return type for this function")))));
 }
 
+TEST(DiagnosticsTest, ClangTidyEOF) {
+  // clang-format off
+  Annotations Test(R"cpp(
+  [[#]]include <b.h>
+  #include "a.h")cpp");
+  // clang-format on
+  auto TU = TestTU::withCode(Test.code());
+  TU.ExtraArgs = {"-isystem."};
+  TU.AdditionalFiles["a.h"] = TU.AdditionalFiles["b.h"] = "";
+  TU.ClangTidyChecks = "-*, llvm-include-order";
+  EXPECT_THAT(
+      TU.build().getDiagnostics(),
+      Contains(AllOf(Diag(Test.range(), "#includes are not sorted properly"),
+                     DiagSource(Diag::ClangTidy),
+                     DiagName("llvm-include-order"))));
+}
+
 TEST(DiagnosticTest, TemplatesInHeaders) {
   // Diagnostics from templates defined in headers are placed at the expansion.
   Annotations Main(R"cpp(
@@ -436,6 +455,21 @@ TEST(DiagnosticTest, ClangTidySuppressionCommentTrumpsWarningAsError) {
   TU.ClangTidyChecks = "bugprone-integer-division";
   TU.ClangTidyWarningsAsErrors = "bugprone-integer-division";
   EXPECT_THAT(TU.build().getDiagnostics(), UnorderedElementsAre());
+}
+
+TEST(DiagnosticTest, ClangTidyNoLiteralDataInMacroToken) {
+  Annotations Main(R"cpp(
+    #define SIGTERM 15
+    using pthread_t = int;
+    int pthread_kill(pthread_t thread, int sig);
+    int func() {
+      pthread_t thread;
+      return pthread_kill(thread, 0);
+    }
+  )cpp");
+  TestTU TU = TestTU::withCode(Main.code());
+  TU.ClangTidyChecks = "-*,bugprone-bad-signal-to-kill-thread";
+  EXPECT_THAT(TU.build().getDiagnostics(), UnorderedElementsAre()); // no-crash
 }
 
 TEST(DiagnosticsTest, Preprocessor) {
@@ -686,13 +720,16 @@ int main() {
       UnorderedElementsAre(
           AllOf(Diag(Test.range("nested"),
                      "incomplete type 'ns::X' named in nested name specifier"),
+                DiagName("incomplete_nested_name_spec"),
                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
                             "Add include \"x.h\" for symbol ns::X"))),
           AllOf(Diag(Test.range("base"), "base class has incomplete type"),
+                DiagName("incomplete_base_class"),
                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
                             "Add include \"x.h\" for symbol ns::X"))),
           AllOf(Diag(Test.range("access"),
                      "member access into incomplete type 'ns::X'"),
+                DiagName("incomplete_member_access"),
                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
                             "Add include \"x.h\" for symbol ns::X")))));
 }
@@ -755,19 +792,23 @@ void bar() {
       TU.build().getDiagnostics(),
       UnorderedElementsAre(
           AllOf(Diag(Test.range("unqualified1"), "unknown type name 'X'"),
+                DiagName("unknown_typename"),
                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
                             "Add include \"x.h\" for symbol ns::X"))),
           Diag(Test.range("unqualified2"), "use of undeclared identifier 'X'"),
           AllOf(Diag(Test.range("qualified1"),
                      "no type named 'X' in namespace 'ns'"),
+                DiagName("typename_nested_not_found"),
                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
                             "Add include \"x.h\" for symbol ns::X"))),
           AllOf(Diag(Test.range("qualified2"),
                      "no member named 'X' in namespace 'ns'"),
+                DiagName("no_member"),
                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
                             "Add include \"x.h\" for symbol ns::X"))),
           AllOf(Diag(Test.range("global"),
                      "no type named 'Global' in the global namespace"),
+                DiagName("typename_nested_not_found"),
                 WithFix(Fix(Test.range("insert"), "#include \"global.h\"\n",
                             "Add include \"global.h\" for symbol Global")))));
 }
@@ -791,6 +832,7 @@ void foo() {
   EXPECT_THAT(TU.build().getDiagnostics(),
               UnorderedElementsAre(AllOf(
                   Diag(Test.range("unqualified"), "unknown type name 'X'"),
+                  DiagName("unknown_typename"),
                   WithFix(Fix(Test.range("insert"), "#include \"a.h\"\n",
                               "Add include \"a.h\" for symbol na::X"),
                           Fix(Test.range("insert"), "#include \"b.h\"\n",
@@ -871,6 +913,7 @@ void g() {  ns::$[[scope]]::X_Y();  }
       TU.build().getDiagnostics(),
       UnorderedElementsAre(AllOf(
           Diag(Test.range(), "no member named 'scope' in namespace 'ns'"),
+          DiagName("no_member"),
           WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
                       "Add include \"x.h\" for symbol ns::scope::X_Y")))));
 }
@@ -900,22 +943,26 @@ void f() {
           AllOf(
               Diag(Test.range("q1"), "use of undeclared identifier 'clangd'; "
                                      "did you mean 'clang'?"),
+              DiagName("undeclared_var_use_suggest"),
               WithFix(_, // change clangd to clang
                       Fix(Test.range("insert"), "#include \"x.h\"\n",
                           "Add include \"x.h\" for symbol clang::clangd::X"))),
           AllOf(
               Diag(Test.range("x"), "no type named 'X' in namespace 'clang'"),
+              DiagName("typename_nested_not_found"),
               WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
                           "Add include \"x.h\" for symbol clang::clangd::X"))),
           AllOf(
               Diag(Test.range("q2"), "use of undeclared identifier 'clangd'; "
                                      "did you mean 'clang'?"),
+              DiagName("undeclared_var_use_suggest"),
               WithFix(
-                  _, // change clangd to clangd
+                  _, // change clangd to clang
                   Fix(Test.range("insert"), "#include \"y.h\"\n",
                       "Add include \"y.h\" for symbol clang::clangd::ns::Y"))),
           AllOf(Diag(Test.range("ns"),
                      "no member named 'ns' in namespace 'clang'"),
+                DiagName("no_member"),
                 WithFix(Fix(
                     Test.range("insert"), "#include \"y.h\"\n",
                     "Add include \"y.h\" for symbol clang::clangd::ns::Y")))));
@@ -937,6 +984,7 @@ namespace c {
   EXPECT_THAT(TU.build().getDiagnostics(),
               UnorderedElementsAre(AllOf(
                   Diag(Test.range(), "no type named 'X' in namespace 'a'"),
+                  DiagName("typename_nested_not_found"),
                   WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
                               "Add include \"x.h\" for symbol a::X")))));
 }

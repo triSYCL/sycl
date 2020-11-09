@@ -42,6 +42,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
+#include "llvm/Support/KnownBits.h"
 #include "llvm/Support/MachineValueType.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Target/TargetMachine.h"
@@ -82,7 +83,7 @@ static cl::opt<bool> UseLegacyDA(
 static cl::opt<unsigned> UnrollMaxBlockToAnalyze(
     "amdgpu-unroll-max-block-to-analyze",
     cl::desc("Inner loop block size threshold to analyze in unroll for AMDGPU"),
-    cl::init(20), cl::Hidden);
+    cl::init(32), cl::Hidden);
 
 static bool dependsOnLocalPhi(const Loop *L, const Value *Cond,
                               unsigned Depth = 0) {
@@ -169,7 +170,7 @@ void AMDGPUTTIImpl::getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
       if (AS == AMDGPUAS::PRIVATE_ADDRESS) {
         const Value *Ptr = GEP->getPointerOperand();
         const AllocaInst *Alloca =
-            dyn_cast<AllocaInst>(GetUnderlyingObject(Ptr, DL));
+            dyn_cast<AllocaInst>(getUnderlyingObject(Ptr));
         if (!Alloca || !Alloca->isStaticAlloca())
           continue;
         Type *Ty = Alloca->getAllocatedType();
@@ -231,7 +232,7 @@ void AMDGPUTTIImpl::getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
 
     // If we got a GEP in a small BB from inner loop then increase max trip
     // count to analyze for better estimation cost in unroll
-    if (L->empty() && BB->size() < UnrollMaxBlockToAnalyze)
+    if (L->isInnermost() && BB->size() < UnrollMaxBlockToAnalyze)
       UP.MaxIterationsCountToAnalyze = 32;
   }
 }
@@ -510,11 +511,21 @@ int GCNTTIImpl::getArithmeticInstrCost(unsigned Opcode, Type *Ty,
     // Check possible fuse {fadd|fsub}(a,fmul(b,c)) and return zero cost for
     // fmul(b,c) supposing the fadd|fsub will get estimated cost for the whole
     // fused operation.
-    if (!HasFP32Denormals && SLT == MVT::f32 && CxtI && CxtI->hasOneUse())
+    if (CxtI && CxtI->hasOneUse())
       if (const auto *FAdd = dyn_cast<BinaryOperator>(*CxtI->user_begin())) {
         const int OPC = TLI->InstructionOpcodeToISD(FAdd->getOpcode());
         if (OPC == ISD::FADD || OPC == ISD::FSUB) {
-          return TargetTransformInfo::TCC_Free;
+          if (ST->hasMadMacF32Insts() && SLT == MVT::f32 && !HasFP32Denormals)
+            return TargetTransformInfo::TCC_Free;
+          if (ST->has16BitInsts() && SLT == MVT::f16 && !HasFP64FP16Denormals)
+            return TargetTransformInfo::TCC_Free;
+
+          // Estimate all types may be fused with contract/unsafe flags
+          const TargetOptions &Options = TLI->getTargetMachine().Options;
+          if (Options.AllowFPOpFusion == FPOpFusion::Fast ||
+              Options.UnsafeFPMath ||
+              (FAdd->hasAllowContract() && CxtI->hasAllowContract()))
+            return TargetTransformInfo::TCC_Free;
         }
       }
     LLVM_FALLTHROUGH;
@@ -583,13 +594,17 @@ int GCNTTIImpl::getArithmeticInstrCost(unsigned Opcode, Type *Ty,
                                        Opd1PropInfo, Opd2PropInfo, Args, CxtI);
 }
 
-// Return true if there's a potential benefit from using v2f16 instructions for
-// an intrinsic, even if it requires nontrivial legalization.
+// Return true if there's a potential benefit from using v2f16/v2i16
+// instructions for an intrinsic, even if it requires nontrivial legalization.
 static bool intrinsicHasPackedVectorBenefit(Intrinsic::ID ID) {
   switch (ID) {
   case Intrinsic::fma: // TODO: fmuladd
   // There's a small benefit to using vector ops in the legalized code.
   case Intrinsic::round:
+  case Intrinsic::uadd_sat:
+  case Intrinsic::usub_sat:
+  case Intrinsic::sadd_sat:
+  case Intrinsic::ssub_sat:
     return true;
   default:
     return false;
@@ -930,7 +945,10 @@ Value *GCNTTIImpl::rewriteIntrinsicWithAddressSpace(IntrinsicInst *II,
     Type *MaskTy = MaskOp->getType();
 
     bool DoTruncate = false;
-    if (!getTLI()->isNoopAddrSpaceCast(OldAS, NewAS)) {
+
+    const GCNTargetMachine &TM =
+        static_cast<const GCNTargetMachine &>(getTLI()->getTargetMachine());
+    if (!TM.isNoopAddrSpaceCast(OldAS, NewAS)) {
       // All valid 64-bit to 32-bit casts work by chopping off the high
       // bits. Any masking only clearing the low bits will also apply in the new
       // address space.

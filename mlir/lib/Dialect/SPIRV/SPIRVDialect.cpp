@@ -26,6 +26,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringSwitch.h"
+#include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/raw_ostream.h"
 
 namespace mlir {
@@ -112,8 +113,7 @@ struct SPIRVInlinerInterface : public DialectInlinerInterface {
 // SPIR-V Dialect
 //===----------------------------------------------------------------------===//
 
-SPIRVDialect::SPIRVDialect(MLIRContext *context)
-    : Dialect(getDialectNamespace(), context) {
+void SPIRVDialect::initialize() {
   addTypes<ArrayType, CooperativeMatrixNVType, ImageType, MatrixType,
            PointerType, RuntimeArrayType, StructType>();
 
@@ -728,31 +728,11 @@ static void print(MatrixType type, DialectAsmPrinter &os) {
 }
 
 void SPIRVDialect::printType(Type type, DialectAsmPrinter &os) const {
-  switch (type.getKind()) {
-  case TypeKind::Array:
-    print(type.cast<ArrayType>(), os);
-    return;
-  case TypeKind::CooperativeMatrix:
-    print(type.cast<CooperativeMatrixNVType>(), os);
-    return;
-  case TypeKind::Pointer:
-    print(type.cast<PointerType>(), os);
-    return;
-  case TypeKind::RuntimeArray:
-    print(type.cast<RuntimeArrayType>(), os);
-    return;
-  case TypeKind::Image:
-    print(type.cast<ImageType>(), os);
-    return;
-  case TypeKind::Struct:
-    print(type.cast<StructType>(), os);
-    return;
-  case TypeKind::Matrix:
-    print(type.cast<MatrixType>(), os);
-    return;
-  default:
-    llvm_unreachable("unhandled SPIR-V type");
-  }
+  TypeSwitch<Type>(type)
+      .Case<ArrayType, CooperativeMatrixNVType, PointerType, RuntimeArrayType,
+            ImageType, StructType, MatrixType>(
+          [&](auto type) { print(type, os); })
+      .Default([](Type) { llvm_unreachable("unhandled SPIR-V type"); });
 }
 
 //===----------------------------------------------------------------------===//
@@ -938,6 +918,42 @@ static Attribute parseTargetEnvAttr(DialectAsmParser &parser) {
   if (parser.parseAttribute(tripleAttr) || parser.parseComma())
     return {};
 
+  // Parse [vendor[:device-type[:device-id]]]
+  Vendor vendorID = Vendor::Unknown;
+  DeviceType deviceType = DeviceType::Unknown;
+  uint32_t deviceID = spirv::TargetEnvAttr::kUnknownDeviceID;
+  {
+    auto loc = parser.getCurrentLocation();
+    StringRef vendorStr;
+    if (succeeded(parser.parseOptionalKeyword(&vendorStr))) {
+      if (auto vendorSymbol = spirv::symbolizeVendor(vendorStr)) {
+        vendorID = *vendorSymbol;
+      } else {
+        parser.emitError(loc, "unknown vendor: ") << vendorStr;
+      }
+
+      if (succeeded(parser.parseOptionalColon())) {
+        loc = parser.getCurrentLocation();
+        StringRef deviceTypeStr;
+        if (parser.parseKeyword(&deviceTypeStr))
+          return {};
+        if (auto deviceTypeSymbol = spirv::symbolizeDeviceType(deviceTypeStr)) {
+          deviceType = *deviceTypeSymbol;
+        } else {
+          parser.emitError(loc, "unknown device type: ") << deviceTypeStr;
+        }
+
+        if (succeeded(parser.parseOptionalColon())) {
+          loc = parser.getCurrentLocation();
+          if (parser.parseInteger(deviceID))
+            return {};
+        }
+      }
+      if (parser.parseComma())
+        return {};
+    }
+  }
+
   DictionaryAttr limitsAttr;
   {
     auto loc = parser.getCurrentLocation();
@@ -957,7 +973,8 @@ static Attribute parseTargetEnvAttr(DialectAsmParser &parser) {
   if (parser.parseGreater())
     return {};
 
-  return spirv::TargetEnvAttr::get(tripleAttr, limitsAttr);
+  return spirv::TargetEnvAttr::get(tripleAttr, vendorID, deviceType, deviceID,
+                                   limitsAttr);
 }
 
 Attribute SPIRVDialect::parseAttribute(DialectAsmParser &parser,
@@ -1006,6 +1023,17 @@ static void print(spirv::VerCapExtAttr triple, DialectAsmPrinter &printer) {
 static void print(spirv::TargetEnvAttr targetEnv, DialectAsmPrinter &printer) {
   printer << spirv::TargetEnvAttr::getKindName() << "<#spv.";
   print(targetEnv.getTripleAttr(), printer);
+  spirv::Vendor vendorID = targetEnv.getVendorID();
+  spirv::DeviceType deviceType = targetEnv.getDeviceType();
+  uint32_t deviceID = targetEnv.getDeviceID();
+  if (vendorID != spirv::Vendor::Unknown) {
+    printer << ", " << spirv::stringifyVendor(vendorID);
+    if (deviceType != spirv::DeviceType::Unknown) {
+      printer << ":" << spirv::stringifyDeviceType(deviceType);
+      if (deviceID != spirv::TargetEnvAttr::kUnknownDeviceID)
+        printer << ":" << deviceID;
+    }
+  }
   printer << ", " << targetEnv.getResourceLimits() << ">";
 }
 

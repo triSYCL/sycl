@@ -16,6 +16,7 @@
 #include "mlir/Dialect/SPIRV/SPIRVAttributes.h"
 #include "mlir/Dialect/SPIRV/SPIRVDialect.h"
 #include "mlir/Dialect/SPIRV/SPIRVTypes.h"
+#include "mlir/Dialect/SPIRV/TargetAndABI.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/Function.h"
 #include "mlir/IR/FunctionImplementation.h"
@@ -36,6 +37,7 @@ static constexpr const char kSourceAlignmentAttrName[] = "source_alignment";
 static constexpr const char kBranchWeightAttrName[] = "branch_weights";
 static constexpr const char kCallee[] = "callee";
 static constexpr const char kClusterSize[] = "cluster_size";
+static constexpr const char kControl[] = "control";
 static constexpr const char kDefaultValueAttrName[] = "default_value";
 static constexpr const char kExecutionScopeAttrName[] = "execution_scope";
 static constexpr const char kEqualSemanticsAttrName[] = "equal_semantics";
@@ -51,6 +53,7 @@ static constexpr const char kTypeAttrName[] = "type";
 static constexpr const char kUnequalSemanticsAttrName[] = "unequal_semantics";
 static constexpr const char kValueAttrName[] = "value";
 static constexpr const char kValuesAttrName[] = "values";
+static constexpr const char kCompositeSpecConstituentsName[] = "constituents";
 
 //===----------------------------------------------------------------------===//
 // Common utility functions
@@ -161,6 +164,25 @@ parseEnumKeywordAttr(EnumClass &value, OpAsmParser &parser,
   return success();
 }
 
+/// Parses Function, Selection and Loop control attributes. If no control is
+/// specified, "None" is used as a default.
+template <typename EnumClass>
+static ParseResult
+parseControlAttribute(OpAsmParser &parser, OperationState &state,
+                      StringRef attrName = spirv::attributeName<EnumClass>()) {
+  if (succeeded(parser.parseOptionalKeyword(kControl))) {
+    EnumClass control;
+    if (parser.parseLParen() || parseEnumKeywordAttr(control, parser, state) ||
+        parser.parseRParen())
+      return failure();
+    return success();
+  }
+  // Set control to "None" otherwise.
+  Builder builder = parser.getBuilder();
+  state.addAttribute(attrName, builder.getI32IntegerAttr(0));
+  return success();
+}
+
 /// Parses optional memory access attributes attached to a memory access
 /// operand/pointer. Specifically, parses the following syntax:
 ///     (`[` memory-access `]`)?
@@ -230,7 +252,7 @@ static void printMemoryAccessAttribute(
     MemoryOpTy memoryOp, OpAsmPrinter &printer,
     SmallVectorImpl<StringRef> &elidedAttrs,
     Optional<spirv::MemoryAccess> memoryAccessAtrrValue = None,
-    Optional<llvm::APInt> alignmentAttrValue = None) {
+    Optional<uint32_t> alignmentAttrValue = None) {
   // Print optional memory access attribute.
   if (auto memAccess = (memoryAccessAtrrValue ? memoryAccessAtrrValue
                                               : memoryOp.memory_access())) {
@@ -260,7 +282,7 @@ static void printSourceMemoryAccessAttribute(
     MemoryOpTy memoryOp, OpAsmPrinter &printer,
     SmallVectorImpl<StringRef> &elidedAttrs,
     Optional<spirv::MemoryAccess> memoryAccessAtrrValue = None,
-    Optional<llvm::APInt> alignmentAttrValue = None) {
+    Optional<uint32_t> alignmentAttrValue = None) {
 
   printer << ", ";
 
@@ -285,7 +307,12 @@ static void printSourceMemoryAccessAttribute(
 }
 
 static LogicalResult verifyCastOp(Operation *op,
-                                  bool requireSameBitWidth = true) {
+                                  bool requireSameBitWidth = true,
+                                  bool skipBitWidthCheck = false) {
+  // Some CastOps have no limit on bit widths for result and operand type.
+  if (skipBitWidthCheck)
+    return success();
+
   Type operandType = op->getOperand(0).getType();
   Type resultType = op->getResult(0).getType();
 
@@ -443,6 +470,19 @@ static LogicalResult verifyLoadStorePtrAndValTypes(LoadStoreOpTy op, Value ptr,
   // SPIR-V OpLoad/OpStore operations
   if (val.getType() !=
       ptr.getType().cast<spirv::PointerType>().getPointeeType()) {
+    return op.emitOpError("mismatch in result type and pointer type");
+  }
+  return success();
+}
+
+template <typename BlockReadWriteOpTy>
+static LogicalResult verifyBlockReadWritePtrAndValTypes(BlockReadWriteOpTy op,
+                                                        Value ptr, Value val) {
+  auto valType = val.getType();
+  if (auto valVecTy = valType.dyn_cast<VectorType>())
+    valType = valVecTy.getElementType();
+
+  if (valType != ptr.getType().cast<spirv::PointerType>().getPointeeType()) {
     return op.emitOpError("mismatch in result type and pointer type");
   }
   return success();
@@ -1370,6 +1410,13 @@ static LogicalResult verify(spirv::CompositeExtractOp compExOp) {
 // spv.CompositeInsert
 //===----------------------------------------------------------------------===//
 
+void spirv::CompositeInsertOp::build(OpBuilder &builder, OperationState &state,
+                                     Value object, Value composite,
+                                     ArrayRef<int32_t> indices) {
+  auto indexAttr = builder.getI32ArrayAttr(indices);
+  build(builder, state, composite.getType(), object, composite, indexAttr);
+}
+
 static ParseResult parseCompositeInsertOp(OpAsmParser &parser,
                                           OperationState &state) {
   SmallVector<OpAsmParser::OperandType, 2> operands;
@@ -1452,18 +1499,15 @@ static LogicalResult verify(spirv::ConstantOp constOp) {
   // ODS already generates checks to make sure the result type is valid. We just
   // need to additionally check that the value's attribute type is consistent
   // with the result type.
-  switch (value.getKind()) {
-  case StandardAttributes::Integer:
-  case StandardAttributes::Float: {
+  if (value.isa<IntegerAttr, FloatAttr>()) {
     if (valueType != opType)
       return constOp.emitOpError("result type (")
              << opType << ") does not match value type (" << valueType << ")";
     return success();
-  } break;
-  case StandardAttributes::DenseIntOrFPElements:
-  case StandardAttributes::SparseElements: {
+  }
+  if (value.isa<DenseIntOrFPElementsAttr, SparseElementsAttr>()) {
     if (valueType == opType)
-      break;
+      return success();
     auto arrayType = opType.dyn_cast<spirv::ArrayType>();
     auto shapedType = valueType.dyn_cast<ShapedType>();
     if (!arrayType) {
@@ -1477,9 +1521,8 @@ static LogicalResult verify(spirv::ConstantOp constOp) {
       numElements *= t.getNumElements();
       opElemType = t.getElementType();
     }
-    if (!opElemType.isIntOrFloat()) {
+    if (!opElemType.isIntOrFloat())
       return constOp.emitOpError("only support nested array result type");
-    }
 
     auto valueElemType = shapedType.getElementType();
     if (valueElemType != opElemType) {
@@ -1493,26 +1536,24 @@ static LogicalResult verify(spirv::ConstantOp constOp) {
              << numElements << ") does not match value number of elements ("
              << shapedType.getNumElements() << ")";
     }
-  } break;
-  case StandardAttributes::Array: {
+    return success();
+  }
+  if (auto attayAttr = value.dyn_cast<ArrayAttr>()) {
     auto arrayType = opType.dyn_cast<spirv::ArrayType>();
     if (!arrayType)
       return constOp.emitOpError(
           "must have spv.array result type for array value");
-    auto elemType = arrayType.getElementType();
-    for (auto element : value.cast<ArrayAttr>().getValue()) {
+    Type elemType = arrayType.getElementType();
+    for (Attribute element : attayAttr.getValue()) {
       if (element.getType() != elemType)
         return constOp.emitOpError("has array element whose type (")
                << element.getType()
                << ") does not match the result element type (" << elemType
                << ')';
     }
-  } break;
-  default:
-    return constOp.emitOpError("cannot have value of type ") << valueType;
+    return success();
   }
-
-  return success();
+  return constOp.emitOpError("cannot have value of type ") << valueType;
 }
 
 bool spirv::ConstantOp::isBuildableWith(Type type) {
@@ -1520,8 +1561,7 @@ bool spirv::ConstantOp::isBuildableWith(Type type) {
   if (!type.isa<spirv::SPIRVType>())
     return false;
 
-  if (type.getKind() >= Type::FIRST_SPIRV_TYPE &&
-      type.getKind() <= spirv::TypeKind::LAST_SPIRV_TYPE) {
+  if (isa<SPIRVDialect>(type.getDialect())) {
     // TODO: support constant struct
     return type.isa<spirv::ArrayType>();
   }
@@ -1955,8 +1995,13 @@ static LogicalResult verify(spirv::GlobalVariableOp varOp) {
   // SPIR-V spec: "Storage Class is the Storage Class of the memory holding the
   // object. It cannot be Generic. It must be the same as the Storage Class
   // operand of the Result Type."
-  if (varOp.storageClass() == spirv::StorageClass::Generic)
-    return varOp.emitOpError("storage class cannot be 'Generic'");
+  // Also, Function storage class is reserved by spv.Variable.
+  auto storageClass = varOp.storageClass();
+  if (storageClass == spirv::StorageClass::Generic ||
+      storageClass == spirv::StorageClass::Function) {
+    return varOp.emitOpError("storage class cannot be '")
+           << stringifyStorageClass(storageClass) << "'";
+  }
 
   if (auto init =
           varOp.getAttrOfType<FlatSymbolRefAttr>(kInitializerAttrName)) {
@@ -1976,6 +2021,25 @@ static LogicalResult verify(spirv::GlobalVariableOp varOp) {
 }
 
 //===----------------------------------------------------------------------===//
+// spv.GroupBroadcast
+//===----------------------------------------------------------------------===//
+
+static LogicalResult verify(spirv::GroupBroadcastOp broadcastOp) {
+  spirv::Scope scope = broadcastOp.execution_scope();
+  if (scope != spirv::Scope::Workgroup && scope != spirv::Scope::Subgroup)
+    return broadcastOp.emitOpError(
+        "execution scope must be 'Workgroup' or 'Subgroup'");
+
+  if (auto localIdTy = broadcastOp.localid().getType().dyn_cast<VectorType>())
+    if (!(localIdTy.getNumElements() == 2 || localIdTy.getNumElements() == 3))
+      return broadcastOp.emitOpError("localid is a vector and can be with only "
+                                     " 2 or 3 components, actual number is ")
+             << localIdTy.getNumElements();
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
 // spv.GroupNonUniformBallotOp
 //===----------------------------------------------------------------------===//
 
@@ -1984,6 +2048,119 @@ static LogicalResult verify(spirv::GroupNonUniformBallotOp ballotOp) {
   if (scope != spirv::Scope::Workgroup && scope != spirv::Scope::Subgroup)
     return ballotOp.emitOpError(
         "execution scope must be 'Workgroup' or 'Subgroup'");
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// spv.GroupNonUniformBroadcast
+//===----------------------------------------------------------------------===//
+
+static LogicalResult verify(spirv::GroupNonUniformBroadcastOp broadcastOp) {
+  spirv::Scope scope = broadcastOp.execution_scope();
+  if (scope != spirv::Scope::Workgroup && scope != spirv::Scope::Subgroup)
+    return broadcastOp.emitOpError(
+        "execution scope must be 'Workgroup' or 'Subgroup'");
+
+  // SPIR-V spec: "Before version 1.5, Id must come from a
+  // constant instruction.
+  auto targetEnv = spirv::getDefaultTargetEnv(broadcastOp.getContext());
+  if (auto spirvModule = broadcastOp.getParentOfType<spirv::ModuleOp>())
+    targetEnv = spirv::lookupTargetEnvOrDefault(spirvModule);
+
+  if (targetEnv.getVersion() < spirv::Version::V_1_5) {
+    auto *idOp = broadcastOp.id().getDefiningOp();
+    if (!idOp || !isa<spirv::ConstantOp,           // for normal constant
+                      spirv::ReferenceOfOp>(idOp)) // for spec constant
+      return broadcastOp.emitOpError("id must be the result of a constant op");
+  }
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// spv.SubgroupBlockReadINTEL
+//===----------------------------------------------------------------------===//
+
+static ParseResult parseSubgroupBlockReadINTELOp(OpAsmParser &parser,
+                                                 OperationState &state) {
+  // Parse the storage class specification
+  spirv::StorageClass storageClass;
+  OpAsmParser::OperandType ptrInfo;
+  Type elementType;
+  if (parseEnumStrAttr(storageClass, parser) || parser.parseOperand(ptrInfo) ||
+      parser.parseColon() || parser.parseType(elementType)) {
+    return failure();
+  }
+
+  auto ptrType = spirv::PointerType::get(elementType, storageClass);
+  if (auto valVecTy = elementType.dyn_cast<VectorType>())
+    ptrType = spirv::PointerType::get(valVecTy.getElementType(), storageClass);
+
+  if (parser.resolveOperand(ptrInfo, ptrType, state.operands)) {
+    return failure();
+  }
+
+  state.addTypes(elementType);
+  return success();
+}
+
+static void print(spirv::SubgroupBlockReadINTELOp blockReadOp,
+                  OpAsmPrinter &printer) {
+  SmallVector<StringRef, 4> elidedAttrs;
+  printer << spirv::SubgroupBlockReadINTELOp::getOperationName() << " "
+          << blockReadOp.ptr();
+  printer << " : " << blockReadOp.getType();
+}
+
+static LogicalResult verify(spirv::SubgroupBlockReadINTELOp blockReadOp) {
+  if (failed(verifyBlockReadWritePtrAndValTypes(blockReadOp, blockReadOp.ptr(),
+                                                blockReadOp.value())))
+    return failure();
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// spv.SubgroupBlockWriteINTEL
+//===----------------------------------------------------------------------===//
+
+static ParseResult parseSubgroupBlockWriteINTELOp(OpAsmParser &parser,
+                                                  OperationState &state) {
+  // Parse the storage class specification
+  spirv::StorageClass storageClass;
+  SmallVector<OpAsmParser::OperandType, 2> operandInfo;
+  auto loc = parser.getCurrentLocation();
+  Type elementType;
+  if (parseEnumStrAttr(storageClass, parser) ||
+      parser.parseOperandList(operandInfo, 2) || parser.parseColon() ||
+      parser.parseType(elementType)) {
+    return failure();
+  }
+
+  auto ptrType = spirv::PointerType::get(elementType, storageClass);
+  if (auto valVecTy = elementType.dyn_cast<VectorType>())
+    ptrType = spirv::PointerType::get(valVecTy.getElementType(), storageClass);
+
+  if (parser.resolveOperands(operandInfo, {ptrType, elementType}, loc,
+                             state.operands)) {
+    return failure();
+  }
+  return success();
+}
+
+static void print(spirv::SubgroupBlockWriteINTELOp blockWriteOp,
+                  OpAsmPrinter &printer) {
+  SmallVector<StringRef, 4> elidedAttrs;
+  printer << spirv::SubgroupBlockWriteINTELOp::getOperationName() << " "
+          << blockWriteOp.ptr() << ", " << blockWriteOp.value();
+  printer << " : " << blockWriteOp.value().getType();
+}
+
+static LogicalResult verify(spirv::SubgroupBlockWriteINTELOp blockWriteOp) {
+  if (failed(verifyBlockReadWritePtrAndValTypes(
+          blockWriteOp, blockWriteOp.ptr(), blockWriteOp.value())))
+    return failure();
 
   return success();
 }
@@ -2077,12 +2254,8 @@ void spirv::LoopOp::build(OpBuilder &builder, OperationState &state) {
 }
 
 static ParseResult parseLoopOp(OpAsmParser &parser, OperationState &state) {
-  // TODO: support loop control properly
-  Builder builder = parser.getBuilder();
-  state.addAttribute("loop_control",
-                     builder.getI32IntegerAttr(
-                         static_cast<uint32_t>(spirv::LoopControl::None)));
-
+  if (parseControlAttribute<spirv::LoopControl>(parser, state))
+    return failure();
   return parser.parseRegion(*state.addRegion(), /*arguments=*/{},
                             /*argTypes=*/{});
 }
@@ -2091,6 +2264,9 @@ static void print(spirv::LoopOp loopOp, OpAsmPrinter &printer) {
   auto *op = loopOp.getOperation();
 
   printer << spirv::LoopOp::getOperationName();
+  auto control = loopOp.loop_control();
+  if (control != spirv::LoopControl::None)
+    printer << " control(" << spirv::stringifyLoopControl(control) << ")";
   printer.printRegion(op->getRegion(0), /*printEntryBlockArgs=*/false,
                       /*printBlockTerminators=*/true);
 }
@@ -2246,23 +2422,38 @@ static LogicalResult verify(spirv::MergeOp mergeOp) {
 // spv.module
 //===----------------------------------------------------------------------===//
 
-void spirv::ModuleOp::build(OpBuilder &builder, OperationState &state) {
+void spirv::ModuleOp::build(OpBuilder &builder, OperationState &state,
+                            Optional<StringRef> name) {
   ensureTerminator(*state.addRegion(), builder, state.location);
+  if (name) {
+    state.attributes.append(mlir::SymbolTable::getSymbolAttrName(),
+                            builder.getStringAttr(*name));
+  }
 }
 
 void spirv::ModuleOp::build(OpBuilder &builder, OperationState &state,
-                            spirv::AddressingModel addressing_model,
-                            spirv::MemoryModel memory_model) {
+                            spirv::AddressingModel addressingModel,
+                            spirv::MemoryModel memoryModel,
+                            Optional<StringRef> name) {
   state.addAttribute(
       "addressing_model",
-      builder.getI32IntegerAttr(static_cast<int32_t>(addressing_model)));
+      builder.getI32IntegerAttr(static_cast<int32_t>(addressingModel)));
   state.addAttribute("memory_model", builder.getI32IntegerAttr(
-                                         static_cast<int32_t>(memory_model)));
+                                         static_cast<int32_t>(memoryModel)));
   ensureTerminator(*state.addRegion(), builder, state.location);
+  if (name) {
+    state.attributes.append(mlir::SymbolTable::getSymbolAttrName(),
+                            builder.getStringAttr(*name));
+  }
 }
 
 static ParseResult parseModuleOp(OpAsmParser &parser, OperationState &state) {
   Region *body = state.addRegion();
+
+  // If the name is present, parse it.
+  StringAttr nameAttr;
+  parser.parseOptionalSymbolName(nameAttr, SymbolTable::getSymbolAttrName(),
+                                 state.attributes);
 
   // Parse attributes
   spirv::AddressingModel addrModel;
@@ -2292,13 +2483,19 @@ static ParseResult parseModuleOp(OpAsmParser &parser, OperationState &state) {
 static void print(spirv::ModuleOp moduleOp, OpAsmPrinter &printer) {
   printer << spirv::ModuleOp::getOperationName();
 
+  if (Optional<StringRef> name = moduleOp.getName()) {
+    printer << ' ';
+    printer.printSymbolName(*name);
+  }
+
   SmallVector<StringRef, 2> elidedAttrs;
 
   printer << " " << spirv::stringifyAddressingModel(moduleOp.addressing_model())
           << " " << spirv::stringifyMemoryModel(moduleOp.memory_model());
   auto addressingModelAttrName = spirv::attributeName<spirv::AddressingModel>();
   auto memoryModelAttrName = spirv::attributeName<spirv::MemoryModel>();
-  elidedAttrs.assign({addressingModelAttrName, memoryModelAttrName});
+  elidedAttrs.assign({addressingModelAttrName, memoryModelAttrName,
+                      SymbolTable::getSymbolAttrName()});
 
   if (Optional<spirv::VerCapExtAttr> triple = moduleOp.vce_triple()) {
     printer << " requires " << *triple;
@@ -2378,17 +2575,27 @@ static LogicalResult verify(spirv::ModuleOp moduleOp) {
 //===----------------------------------------------------------------------===//
 
 static LogicalResult verify(spirv::ReferenceOfOp referenceOfOp) {
-  auto specConstOp = dyn_cast_or_null<spirv::SpecConstantOp>(
-      SymbolTable::lookupNearestSymbolFrom(referenceOfOp.getParentOp(),
-                                           referenceOfOp.spec_const()));
-  if (!specConstOp) {
-    return referenceOfOp.emitOpError("expected spv.specConstant symbol");
-  }
-  if (referenceOfOp.reference().getType() !=
-      specConstOp.default_value().getType()) {
+  auto *specConstSym = SymbolTable::lookupNearestSymbolFrom(
+      referenceOfOp.getParentOp(), referenceOfOp.spec_const());
+  Type constType;
+
+  auto specConstOp = dyn_cast_or_null<spirv::SpecConstantOp>(specConstSym);
+  if (specConstOp)
+    constType = specConstOp.default_value().getType();
+
+  auto specConstCompositeOp =
+      dyn_cast_or_null<spirv::SpecConstantCompositeOp>(specConstSym);
+  if (specConstCompositeOp)
+    constType = specConstCompositeOp.type();
+
+  if (!specConstOp && !specConstCompositeOp)
+    return referenceOfOp.emitOpError(
+        "expected spv.specConstant or spv.SpecConstantComposite symbol");
+
+  if (referenceOfOp.reference().getType() != constType)
     return referenceOfOp.emitOpError("result type mismatch with the referenced "
                                      "specialization constant's type");
-  }
+
   return success();
 }
 
@@ -2440,12 +2647,8 @@ static LogicalResult verify(spirv::SelectOp op) {
 
 static ParseResult parseSelectionOp(OpAsmParser &parser,
                                     OperationState &state) {
-  // TODO: support selection control properly
-  Builder builder = parser.getBuilder();
-  state.addAttribute("selection_control",
-                     builder.getI32IntegerAttr(
-                         static_cast<uint32_t>(spirv::SelectionControl::None)));
-
+  if (parseControlAttribute<spirv::SelectionControl>(parser, state))
+    return failure();
   return parser.parseRegion(*state.addRegion(), /*arguments=*/{},
                             /*argTypes=*/{});
 }
@@ -2454,6 +2657,9 @@ static void print(spirv::SelectionOp selectionOp, OpAsmPrinter &printer) {
   auto *op = selectionOp.getOperation();
 
   printer << spirv::SelectionOp::getOperationName();
+  auto control = selectionOp.selection_control();
+  if (control != spirv::SelectionControl::None)
+    printer << " control(" << spirv::stringifySelectionControl(control) << ")";
   printer.printRegion(op->getRegion(0), /*printEntryBlockArgs=*/false,
                       /*printBlockTerminators=*/true);
 }
@@ -2596,19 +2802,14 @@ static LogicalResult verify(spirv::SpecConstantOp constOp) {
       return constOp.emitOpError("SpecId cannot be negative");
 
   auto value = constOp.default_value();
-
-  switch (value.getKind()) {
-  case StandardAttributes::Integer:
-  case StandardAttributes::Float: {
+  if (value.isa<IntegerAttr, FloatAttr>()) {
     // Make sure bitwidth is allowed.
     if (!value.getType().isa<spirv::SPIRVType>())
       return constOp.emitOpError("default value bitwidth disallowed");
     return success();
   }
-  default:
-    return constOp.emitOpError(
-        "default value can only be a bool, integer, or float scalar");
-  }
+  return constOp.emitOpError(
+      "default value can only be a bool, integer, or float scalar");
 }
 
 //===----------------------------------------------------------------------===//
@@ -2788,24 +2989,19 @@ static LogicalResult verify(spirv::VariableOp varOp) {
 
 static ParseResult parseCooperativeMatrixLoadNVOp(OpAsmParser &parser,
                                                   OperationState &state) {
-  spirv::StorageClass storageClass;
   SmallVector<OpAsmParser::OperandType, 3> operandInfo;
   Type strideType = parser.getBuilder().getIntegerType(32);
   Type columnMajorType = parser.getBuilder().getIntegerType(1);
+  Type ptrType;
   Type elementType;
-  if (parseEnumStrAttr(storageClass, parser) ||
-      parser.parseOperandList(operandInfo, 3) ||
+  if (parser.parseOperandList(operandInfo, 3) ||
       parseMemoryAccessAttributes(parser, state) || parser.parseColon() ||
-      parser.parseType(elementType)) {
+      parser.parseType(ptrType) || parser.parseKeywordType("as", elementType)) {
     return failure();
   }
-
-  auto ptrType = spirv::PointerType::get(
-      elementType.cast<spirv::CooperativeMatrixNVType>().getElementType(),
-      storageClass);
-  SmallVector<Type, 3> OperandType = {ptrType, strideType, columnMajorType};
-  if (parser.resolveOperands(operandInfo, OperandType, parser.getNameLoc(),
-                             state.operands)) {
+  if (parser.resolveOperands(operandInfo,
+                             {ptrType, strideType, columnMajorType},
+                             parser.getNameLoc(), state.operands)) {
     return failure();
   }
 
@@ -2814,25 +3010,30 @@ static ParseResult parseCooperativeMatrixLoadNVOp(OpAsmParser &parser,
 }
 
 static void print(spirv::CooperativeMatrixLoadNVOp M, OpAsmPrinter &printer) {
-  StringRef sc = stringifyStorageClass(
-      M.pointer().getType().cast<spirv::PointerType>().getStorageClass());
-  printer << spirv::CooperativeMatrixLoadNVOp::getOperationName() << " \"" << sc
-          << "\" " << M.pointer() << ", " << M.stride() << ", "
-          << M.columnmajor();
+  printer << spirv::CooperativeMatrixLoadNVOp::getOperationName() << " "
+          << M.pointer() << ", " << M.stride() << ", " << M.columnmajor();
   // Print optional memory access attribute.
   if (auto memAccess = M.memory_access())
     printer << " [\"" << stringifyMemoryAccess(*memAccess) << "\"]";
-  printer << " : " << M.getType();
+  printer << " : " << M.pointer().getType() << " as " << M.getType();
 }
 
 static LogicalResult verifyPointerAndCoopMatrixType(Operation *op, Type pointer,
                                                     Type coopMatrix) {
-  if (pointer.cast<spirv::PointerType>().getPointeeType() !=
-      coopMatrix.cast<spirv::CooperativeMatrixNVType>().getElementType())
+  Type pointeeType = pointer.cast<spirv::PointerType>().getPointeeType();
+  if (!pointeeType.isa<spirv::ScalarType>() && !pointeeType.isa<VectorType>())
     return op->emitError(
-               "expected the same type for pointer and the cooperative matrix"
-               "element, bu provided ")
-           << pointer << " and " << coopMatrix;
+               "Pointer must point to a scalar or vector type but provided ")
+           << pointeeType;
+  spirv::StorageClass storage =
+      pointer.cast<spirv::PointerType>().getStorageClass();
+  if (storage != spirv::StorageClass::Workgroup &&
+      storage != spirv::StorageClass::StorageBuffer &&
+      storage != spirv::StorageClass::PhysicalStorageBuffer)
+    return op->emitError(
+               "Pointer storage class must be Workgroup, StorageBuffer or "
+               "PhysicalStorageBufferEXT but provided ")
+           << stringifyStorageClass(storage);
   return success();
 }
 
@@ -2842,25 +3043,20 @@ static LogicalResult verifyPointerAndCoopMatrixType(Operation *op, Type pointer,
 
 static ParseResult parseCooperativeMatrixStoreNVOp(OpAsmParser &parser,
                                                    OperationState &state) {
-  spirv::StorageClass storageClass;
   SmallVector<OpAsmParser::OperandType, 4> operandInfo;
   Type strideType = parser.getBuilder().getIntegerType(32);
   Type columnMajorType = parser.getBuilder().getIntegerType(1);
+  Type ptrType;
   Type elementType;
-  if (parseEnumStrAttr(storageClass, parser) ||
-      parser.parseOperandList(operandInfo, 4) ||
+  if (parser.parseOperandList(operandInfo, 4) ||
       parseMemoryAccessAttributes(parser, state) || parser.parseColon() ||
+      parser.parseType(ptrType) || parser.parseComma() ||
       parser.parseType(elementType)) {
     return failure();
   }
-
-  auto ptrType = spirv::PointerType::get(
-      elementType.cast<spirv::CooperativeMatrixNVType>().getElementType(),
-      storageClass);
-  SmallVector<Type, 4> OperandType = {ptrType, elementType, strideType,
-                                      columnMajorType};
-  if (parser.resolveOperands(operandInfo, OperandType, parser.getNameLoc(),
-                             state.operands)) {
+  if (parser.resolveOperands(
+          operandInfo, {ptrType, elementType, strideType, columnMajorType},
+          parser.getNameLoc(), state.operands)) {
     return failure();
   }
 
@@ -2869,17 +3065,14 @@ static ParseResult parseCooperativeMatrixStoreNVOp(OpAsmParser &parser,
 
 static void print(spirv::CooperativeMatrixStoreNVOp coopMatrix,
                   OpAsmPrinter &printer) {
-  StringRef sc = stringifyStorageClass(coopMatrix.pointer()
-                                           .getType()
-                                           .cast<spirv::PointerType>()
-                                           .getStorageClass());
-  printer << spirv::CooperativeMatrixStoreNVOp::getOperationName() << " \""
-          << sc << "\" " << coopMatrix.pointer() << ", " << coopMatrix.object()
-          << ", " << coopMatrix.stride() << ", " << coopMatrix.columnmajor();
+  printer << spirv::CooperativeMatrixStoreNVOp::getOperationName() << " "
+          << coopMatrix.pointer() << ", " << coopMatrix.object() << ", "
+          << coopMatrix.stride() << ", " << coopMatrix.columnmajor();
   // Print optional memory access attribute.
   if (auto memAccess = coopMatrix.memory_access())
     printer << " [\"" << stringifyMemoryAccess(*memAccess) << "\"]";
-  printer << " : " << coopMatrix.getOperand(1).getType();
+  printer << " : " << coopMatrix.pointer().getType() << ", "
+          << coopMatrix.getOperand(1).getType();
 }
 
 //===----------------------------------------------------------------------===//
@@ -3112,17 +3305,110 @@ static LogicalResult verifyMatrixTimesMatrix(spirv::MatrixTimesMatrixOp op) {
   return success();
 }
 
+//===----------------------------------------------------------------------===//
+// spv.specConstantComposite
+//===----------------------------------------------------------------------===//
+
+static ParseResult parseSpecConstantCompositeOp(OpAsmParser &parser,
+                                                OperationState &state) {
+
+  StringAttr compositeName;
+  if (parser.parseSymbolName(compositeName, SymbolTable::getSymbolAttrName(),
+                             state.attributes))
+    return failure();
+
+  if (parser.parseLParen())
+    return failure();
+
+  SmallVector<Attribute, 4> constituents;
+
+  do {
+    // The name of the constituent attribute isn't important
+    const char *attrName = "spec_const";
+    FlatSymbolRefAttr specConstRef;
+    NamedAttrList attrs;
+
+    if (parser.parseAttribute(specConstRef, Type(), attrName, attrs))
+      return failure();
+
+    constituents.push_back(specConstRef);
+  } while (!parser.parseOptionalComma());
+
+  if (parser.parseRParen())
+    return failure();
+
+  state.addAttribute(kCompositeSpecConstituentsName,
+                     parser.getBuilder().getArrayAttr(constituents));
+
+  Type type;
+  if (parser.parseColonType(type))
+    return failure();
+
+  state.addAttribute(kTypeAttrName, TypeAttr::get(type));
+
+  return success();
+}
+
+static void print(spirv::SpecConstantCompositeOp op, OpAsmPrinter &printer) {
+  printer << spirv::SpecConstantCompositeOp::getOperationName() << " ";
+  printer.printSymbolName(op.sym_name());
+  printer << " (";
+  auto constituents = op.constituents().getValue();
+
+  if (!constituents.empty())
+    llvm::interleaveComma(constituents, printer);
+
+  printer << ") : " << op.type();
+}
+
+static LogicalResult verify(spirv::SpecConstantCompositeOp constOp) {
+  auto cType = constOp.type().dyn_cast<spirv::CompositeType>();
+  auto constituents = constOp.constituents().getValue();
+
+  if (!cType)
+    return constOp.emitError(
+               "result type must be a composite type, but provided ")
+           << constOp.type();
+
+  if (cType.isa<spirv::CooperativeMatrixNVType>())
+    return constOp.emitError("unsupported composite type  ") << cType;
+  else if (constituents.size() != cType.getNumElements())
+    return constOp.emitError("has incorrect number of operands: expected ")
+           << cType.getNumElements() << ", but provided "
+           << constituents.size();
+
+  for (auto index : llvm::seq<uint32_t>(0, constituents.size())) {
+    auto constituent = constituents[index].dyn_cast<FlatSymbolRefAttr>();
+
+    auto constituentSpecConstOp =
+        dyn_cast<spirv::SpecConstantOp>(SymbolTable::lookupNearestSymbolFrom(
+            constOp.getParentOp(), constituent.getValue()));
+
+    if (constituentSpecConstOp.default_value().getType() !=
+        cType.getElementType(index))
+      return constOp.emitError("has incorrect types of operands: expected ")
+             << cType.getElementType(index) << ", but provided "
+             << constituentSpecConstOp.default_value().getType();
+  }
+
+  return success();
+}
+
 namespace mlir {
 namespace spirv {
 
 // TableGen'erated operation interfaces for querying versions, extensions, and
 // capabilities.
 #include "mlir/Dialect/SPIRV/SPIRVAvailability.cpp.inc"
+} // namespace spirv
+} // namespace mlir
 
 // TablenGen'erated operation definitions.
 #define GET_OP_CLASSES
 #include "mlir/Dialect/SPIRV/SPIRVOps.cpp.inc"
 
+namespace mlir {
+namespace spirv {
 // TableGen'erated operation availability interface implementations.
 #include "mlir/Dialect/SPIRV/SPIRVOpAvailabilityImpl.inc"
 

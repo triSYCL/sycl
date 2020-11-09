@@ -201,10 +201,6 @@ public:
                    const DebugLoc &DL, MCRegister DestReg, MCRegister SrcReg,
                    bool KillSrc) const override;
 
-  unsigned calculateLDSSpillAddress(MachineBasicBlock &MBB, MachineInstr &MI,
-                                    RegScavenger *RS, unsigned TmpReg,
-                                    unsigned Offset, unsigned Size) const;
-
   void materializeImmediate(MachineBasicBlock &MBB,
                             MachineBasicBlock::iterator MI,
                             const DebugLoc &DL,
@@ -677,7 +673,7 @@ public:
 
   bool isVGPRCopy(const MachineInstr &MI) const {
     assert(MI.isCopy());
-    unsigned Dest = MI.getOperand(0).getReg();
+    Register Dest = MI.getOperand(0).getReg();
     const MachineFunction &MF = *MI.getParent()->getParent();
     const MachineRegisterInfo &MRI = MF.getRegInfo();
     return !RI.isSGPRReg(MRI, Dest);
@@ -883,6 +879,7 @@ public:
                               MachineRegisterInfo &MRI) const;
 
   void legalizeOperandsSMRD(MachineRegisterInfo &MRI, MachineInstr &MI) const;
+  void legalizeOperandsFLAT(MachineRegisterInfo &MRI, MachineInstr &MI) const;
 
   void legalizeGenericOperand(MachineBasicBlock &InsertMBB,
                               MachineBasicBlock::iterator I,
@@ -1015,7 +1012,7 @@ public:
     return isUInt<12>(Imm);
   }
 
-  unsigned getNumFlatOffsetBits(unsigned AddrSpace, bool Signed) const;
+  unsigned getNumFlatOffsetBits(bool Signed) const;
 
   /// Returns if \p Offset is legal for the subtarget as the offset to a FLAT
   /// encoded instruction. If \p Signed, this is for an instruction that
@@ -1053,6 +1050,8 @@ public:
   unsigned getInstrLatency(const InstrItineraryData *ItinData,
                            const MachineInstr &MI,
                            unsigned *PredCost = nullptr) const override;
+
+  static unsigned getDSShaderTypeValue(const MachineFunction &MF);
 };
 
 /// \brief Returns true if a reg:subreg pair P has a TRC class

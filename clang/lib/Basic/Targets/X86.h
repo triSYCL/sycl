@@ -127,6 +127,8 @@ class LLVM_LIBRARY_VISIBILITY X86TargetInfo : public TargetInfo {
   bool HasPTWRITE = false;
   bool HasINVPCID = false;
   bool HasENQCMD = false;
+  bool HasKL = false;      // For key locker
+  bool HasWIDEKL = false; // For wide key locker
   bool HasAMXTILE = false;
   bool HasAMXINT8 = false;
   bool HasAMXBF16 = false;
@@ -144,6 +146,11 @@ public:
     LongDoubleFormat = &llvm::APFloat::x87DoubleExtended();
     AddrSpaceMap = &X86AddrSpaceMap;
     HasStrictFP = true;
+
+    bool IsWinCOFF =
+        getTriple().isOSWindows() && getTriple().isOSBinFormatCOFF();
+    if (IsWinCOFF)
+      MaxVectorAlign = MaxTLSAlign = 8192u * getCharWidth();
   }
 
   const char *getLongDoubleMangling() const override {
@@ -291,12 +298,27 @@ public:
     return "";
   }
 
+  bool supportsTargetAttributeTune() const override {
+    return true;
+  }
+
   bool isValidCPUName(StringRef Name) const override {
     bool Only64Bit = getTriple().getArch() != llvm::Triple::x86;
     return llvm::X86::parseArchX86(Name, Only64Bit) != llvm::X86::CK_None;
   }
 
+  bool isValidTuneCPUName(StringRef Name) const override {
+    if (Name == "generic")
+      return true;
+
+    // Allow 32-bit only CPUs regardless of 64-bit mode unlike isValidCPUName.
+    // NOTE: gcc rejects 32-bit mtune CPUs in 64-bit mode. But being lenient
+    // since mtune was ignored by clang for so long.
+    return llvm::X86::parseArchX86(Name) != llvm::X86::CK_None;
+  }
+
   void fillValidCPUList(SmallVectorImpl<StringRef> &Values) const override;
+  void fillValidTuneCPUList(SmallVectorImpl<StringRef> &Values) const override;
 
   bool setCPU(const std::string &Name) override {
     bool Only64Bit = getTriple().getArch() != llvm::Triple::x86;

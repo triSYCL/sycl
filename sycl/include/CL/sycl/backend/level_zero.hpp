@@ -9,7 +9,8 @@
 #pragma once
 
 #include <CL/sycl.hpp>
-#include <level_zero/ze_api.h>
+// This header should be included by users.
+//#include <level_zero/ze_api.h>
 
 __SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
@@ -20,6 +21,10 @@ template <> struct interop<backend::level_zero, platform> {
 
 template <> struct interop<backend::level_zero, device> {
   using type = ze_device_handle_t;
+};
+
+template <> struct interop<backend::level_zero, context> {
+  using type = ze_context_handle_t;
 };
 
 template <> struct interop<backend::level_zero, queue> {

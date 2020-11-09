@@ -41,12 +41,12 @@ enum class InternalControlVar {
 #include "llvm/Frontend/OpenMP/OMPKinds.def"
 
 enum class ICVInitValue {
-#define ICV_DATA_ENV(Enum, Name, EnvVar, Init) Init,
+#define ICV_INIT_VALUE(Enum, Name) Enum,
 #include "llvm/Frontend/OpenMP/OMPKinds.def"
 };
 
-#define ICV_DATA_ENV(Enum, Name, EnvVar, Init)                                 \
-  constexpr auto Init = omp::ICVInitValue::Init;
+#define ICV_INIT_VALUE(Enum, Name)                                             \
+  constexpr auto Enum = omp::ICVInitValue::Enum;
 #include "llvm/Frontend/OpenMP/OMPKinds.def"
 
 /// IDs for all omp runtime library (RTL) functions.
@@ -66,16 +66,6 @@ enum class DefaultKind {
 
 #define OMP_DEFAULT_KIND(Enum, ...)                                            \
   constexpr auto Enum = omp::DefaultKind::Enum;
-#include "llvm/Frontend/OpenMP/OMPKinds.def"
-
-/// IDs for the different proc bind kinds.
-enum class ProcBindKind {
-#define OMP_PROC_BIND_KIND(Enum, Str, Value) Enum = Value,
-#include "llvm/Frontend/OpenMP/OMPKinds.def"
-};
-
-#define OMP_PROC_BIND_KIND(Enum, ...)                                          \
-  constexpr auto Enum = omp::ProcBindKind::Enum;
 #include "llvm/Frontend/OpenMP/OMPKinds.def"
 
 /// IDs for all omp runtime library ident_t flag encodings (see

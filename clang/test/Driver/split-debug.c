@@ -10,6 +10,11 @@
 // RUN: %clang -target x86_64-unknown-linux-gnu -gsplit-dwarf=split -c -### %s 2> %t
 // RUN: FileCheck -check-prefix=CHECK-ACTIONS < %t %s
 
+// RUN: %clang -target wasm32-unknown-unknown -gsplit-dwarf -c -### %s 2> %t
+// RUN: FileCheck -check-prefix=CHECK-ACTIONS < %t %s
+// RUN: %clang -target wasm32-unknown-unknown -gsplit-dwarf=split -c -### %s 2> %t
+// RUN: FileCheck -check-prefix=CHECK-ACTIONS < %t %s
+
 // RUN: %clang -target x86_64-unknown-linux-gnu -gsplit-dwarf=single -c -### %s 2> %t
 // RUN: FileCheck -check-prefix=CHECK-ACTIONS-SINGLE-SPLIT < %t %s
 //
@@ -68,18 +73,18 @@
 // RUN: FileCheck -check-prefix=CHECK-NOINLINE-WITHOUT-SPLIT < %t %s
 //
 // CHECK-NOINLINE-WITHOUT-SPLIT: "-fno-split-dwarf-inlining"
-// CHECK-NOINLINE-WITHOUT-SPLIT: "-debug-info-kind=constructor"
+// CHECK-NOINLINE-WITHOUT-SPLIT: "-debug-info-kind=limited"
 
 // RUN: %clang -target x86_64-unknown-linux-gnu -gmlt -gsplit-dwarf -fno-split-dwarf-inlining -S -### %s 2> %t
 // RUN: FileCheck -check-prefix=CHECK-SPLIT-WITH-GMLT < %t %s
 //
-// CHECK-SPLIT-WITH-GMLT: "-debug-info-kind=constructor"
+// CHECK-SPLIT-WITH-GMLT: "-debug-info-kind=limited"
 // CHECK-SPLIT-WITH-GMLT: "-split-dwarf-output"
 
 // RUN: %clang -target x86_64-unknown-linux-gnu -gsplit-dwarf -fno-split-dwarf-inlining -S -### %s 2> %t
 // RUN: FileCheck -check-prefix=CHECK-SPLIT-WITH-NOINL < %t %s
 //
-// CHECK-SPLIT-WITH-NOINL: "-debug-info-kind=constructor"
+// CHECK-SPLIT-WITH-NOINL: "-debug-info-kind=limited"
 // CHECK-SPLIT-WITH-NOINL: "-split-dwarf-output"
 
 // RUN: %clang -target x86_64-unknown-linux-gnu -gsplit-dwarf -gmlt -fsplit-dwarf-inlining -S -### %s 2> %t
@@ -92,7 +97,7 @@
 // RUN: %clang -target x86_64-unknown-linux-gnu -gmlt -gsplit-dwarf -S -### %s 2> %t
 // RUN: FileCheck -check-prefix=CHECK-SPLIT-OVER-GMLT < %t %s
 //
-// CHECK-SPLIT-OVER-GMLT: "-debug-info-kind=constructor"
+// CHECK-SPLIT-OVER-GMLT: "-debug-info-kind=limited"
 // CHECK-SPLIT-OVER-GMLT: "-split-dwarf-file"
 // CHECK-SPLIT-OVER-GMLT: "-split-dwarf-output"
 
@@ -117,6 +122,6 @@
 // RUN: %clang -target x86_64-unknown-linux-gnu -g0 -gsplit-dwarf=split -S -### %s 2> %t
 // RUN: FileCheck -check-prefix=CHECK-SPLIT-OVER-G0 < %t %s
 //
-// CHECK-SPLIT-OVER-G0: "-debug-info-kind=constructor"
+// CHECK-SPLIT-OVER-G0: "-debug-info-kind=limited"
 // CHECK-SPLIT-OVER-G0: "-split-dwarf-file"
 // CHECK-SPLIT-OVER-G0: "-split-dwarf-output"

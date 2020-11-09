@@ -54,7 +54,6 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -96,6 +95,7 @@ LiveDebugVariables::LiveDebugVariables() : MachineFunctionPass(ID) {
 
 enum : unsigned { UndefLocNo = ~0U };
 
+namespace {
 /// Describes a debug variable value by location number and expression along
 /// with some flags about the original usage of the location.
 class DbgVariableValue {
@@ -136,6 +136,7 @@ private:
   unsigned WasIndirect : 1;
   const DIExpression *Expression = nullptr;
 };
+} // namespace
 
 /// Map of where a user value is live to that value.
 using LocMap = IntervalMap<SlotIndex, DbgVariableValue, 4>;
@@ -775,12 +776,12 @@ void UserValue::addDefsFromCopies(
   if (Kills.empty())
     return;
   // Don't track copies from physregs, there are too many uses.
-  if (!Register::isVirtualRegister(LI->reg))
+  if (!Register::isVirtualRegister(LI->reg()))
     return;
 
   // Collect all the (vreg, valno) pairs that are copies of LI.
   SmallVector<std::pair<LiveInterval*, const VNInfo*>, 8> CopyValues;
-  for (MachineOperand &MO : MRI.use_nodbg_operands(LI->reg)) {
+  for (MachineOperand &MO : MRI.use_nodbg_operands(LI->reg())) {
     MachineInstr *MI = MO.getParent();
     // Copies of the full value.
     if (MO.getSubReg() || !MI->isCopy())
@@ -1064,7 +1065,7 @@ UserValue::splitLocation(unsigned OldLocNo, ArrayRef<Register> NewRegs,
           LII->start < LocMapI.stop()) {
         // Overlapping correct location. Allocate NewLocNo now.
         if (NewLocNo == UndefLocNo) {
-          MachineOperand MO = MachineOperand::CreateReg(LI->reg, false);
+          MachineOperand MO = MachineOperand::CreateReg(LI->reg(), false);
           MO.setSubReg(locations[OldLocNo].getSubReg());
           NewLocNo = getLocationNo(MO);
           DidChange = true;
@@ -1440,10 +1441,6 @@ void LDVImpl::emitDebugValues(VirtRegMap *VRM) {
 void LiveDebugVariables::emitDebugValues(VirtRegMap *VRM) {
   if (pImpl)
     static_cast<LDVImpl*>(pImpl)->emitDebugValues(VRM);
-}
-
-bool LiveDebugVariables::doInitialization(Module &M) {
-  return Pass::doInitialization(M);
 }
 
 #if !defined(NDEBUG) || defined(LLVM_ENABLE_DUMP)

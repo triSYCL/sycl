@@ -54,9 +54,9 @@ class SOP1_Pseudo <string opName, dag outs, dag ins,
   bits<1> has_sdst = 1;
 }
 
-class SOP1_Real<bits<8> op, SOP1_Pseudo ps> :
+class SOP1_Real<bits<8> op, SOP1_Pseudo ps, string real_name = ps.Mnemonic> :
   InstSI <ps.OutOperandList, ps.InOperandList,
-          ps.Mnemonic # " " # ps.AsmOperands, []>,
+          real_name # " " # ps.AsmOperands, []>,
   Enc32 {
 
   let isPseudo = 0;
@@ -408,13 +408,31 @@ class SOP2_64_32_32 <string opName, list<dag> pattern=[]> : SOP2_Pseudo <
 class UniformUnaryFrag<SDPatternOperator Op> : PatFrag <
   (ops node:$src0),
   (Op $src0),
-  [{ return !N->isDivergent(); }]
->;
+  [{ return !N->isDivergent(); }]> {
+  // This check is unnecessary as it's captured by the result register
+  // bank constraint.
+  //
+  // FIXME: Should add a way for the emitter to recognize this is a
+  // trivially true predicate to eliminate the check.
+  let GISelPredicateCode = [{return true;}];
+}
 
 class UniformBinFrag<SDPatternOperator Op> : PatFrag <
   (ops node:$src0, node:$src1),
   (Op $src0, $src1),
   [{ return !N->isDivergent(); }]> {
+  // This check is unnecessary as it's captured by the result register
+  // bank constraint.
+  //
+  // FIXME: Should add a way for the emitter to recognize this is a
+  // trivially true predicate to eliminate the check.
+  let GISelPredicateCode = [{return true;}];
+}
+
+class DivergentBinFrag<SDPatternOperator Op> : PatFrag <
+  (ops node:$src0, node:$src1),
+  (Op $src0, $src1),
+  [{ return N->isDivergent(); }]> {
   // This check is unnecessary as it's captured by the result register
   // bank constraint.
   //
@@ -463,10 +481,15 @@ def S_MAX_U32 : SOP2_32 <"s_max_u32",
 } // End isCommutable = 1
 } // End Defs = [SCC]
 
+// This pattern is restricted to certain subtargets (practically GFX8Plus)
+// because isel sometimes produces an sreg_64 copy to SCC as a by-product
+// of this pattern, and only for subtargets with hasScalarCompareEq64
+// is it possible to map such copy to a single instruction (S_CMP_LG_U64).
 class SelectPat<SDPatternOperator select> : PatFrag <
   (ops node:$src1, node:$src2),
   (select SCC, $src1, $src2),
-  [{ return N->getOperand(0)->hasOneUse() && !N->isDivergent(); }]
+  [{ return Subtarget->hasScalarCompareEq64() &&
+            N->getOperand(0)->hasOneUse() && !N->isDivergent(); }]
 >;
 
 let Uses = [SCC] in {
@@ -530,6 +553,7 @@ def S_NOR_B64 : SOP2_64 <"s_nor_b64",
 >;
 } // End isCommutable = 1
 
+// There are also separate patterns for types other than i32
 def S_ANDN2_B32 : SOP2_32 <"s_andn2_b32",
   [(set i32:$sdst, (UniformBinFrag<and> i32:$src0, (UniformUnaryFrag<not> i32:$src1)))]
 >;
@@ -801,48 +825,65 @@ def S_CBRANCH_I_FORK : SOPK_Pseudo <
   "$sdst, $simm16"
 >;
 
-let hasSideEffects = 1 in {
-
 let mayLoad = 1 in {
 // s_getreg_b32 should use hasSideEffects = 1 for tablegen to allow
 // its use in the readcyclecounter selection.
+// FIXME: Need to truncate immediate to 16-bits.
 def S_GETREG_B32 : SOPK_Pseudo <
   "s_getreg_b32",
   (outs SReg_32:$sdst), (ins hwreg:$simm16),
-  "$sdst, $simm16"
->;
+  "$sdst, $simm16",
+  [(set i32:$sdst, (int_amdgcn_s_getreg (i32 timm:$simm16)))]> {
+  let SOPKZext = 1;
+  let hasSideEffects = 1;
 }
+} // End mayLoad = 1
 
-let mayLoad = 0, mayStore =0 in {
+let mayLoad = 0, mayStore = 0, Defs = [MODE], Uses = [MODE] in {
 
-def S_SETREG_B32 : SOPK_Pseudo <
+// FIXME: Need to truncate immediate to 16-bits.
+class S_SETREG_B32_Pseudo <list<dag> pattern=[]> : SOPK_Pseudo <
   "s_setreg_b32",
   (outs), (ins SReg_32:$sdst, hwreg:$simm16),
   "$simm16, $sdst",
-  [(int_amdgcn_s_setreg (i32 timm:$simm16), i32:$sdst)]> {
+  pattern>;
 
+def S_SETREG_B32 : S_SETREG_B32_Pseudo <
+  [(int_amdgcn_s_setreg (i32 timm:$simm16), i32:$sdst)]> {
   // Use custom inserter to optimize some cases to
-  // S_DENORM_MODE/S_ROUND_MODE.
+  // S_DENORM_MODE/S_ROUND_MODE/S_SETREG_B32_mode.
   let usesCustomInserter = 1;
-  let Defs = [MODE];
-  let Uses = [MODE];
+  let hasSideEffects = 1;
+}
+
+// Variant of SETREG that is guaranteed to only touch FP bits in the MODE
+// register, so doesn't have unmodeled side effects.
+def S_SETREG_B32_mode : S_SETREG_B32_Pseudo {
+  let hasSideEffects = 0;
 }
 
 // FIXME: Not on SI?
 //def S_GETREG_REGRD_B32 : SOPK_32 <sopk<0x14, 0x13>, "s_getreg_regrd_b32">;
 
-def S_SETREG_IMM32_B32 : SOPK_Pseudo <
+class S_SETREG_IMM32_B32_Pseudo : SOPK_Pseudo <
   "s_setreg_imm32_b32",
   (outs), (ins i32imm:$imm, hwreg:$simm16),
   "$simm16, $imm"> {
   let Size = 8; // Unlike every other SOPK instruction.
   let has_sdst = 0;
-  let Defs = [MODE];
-  let Uses = [MODE];
 }
 
+def S_SETREG_IMM32_B32 : S_SETREG_IMM32_B32_Pseudo {
+  let hasSideEffects = 1;
 }
-} // End hasSideEffects = 1
+
+// Variant of SETREG_IMM32 that is guaranteed to only touch FP bits in the MODE
+// register, so doesn't have unmodeled side effects.
+def S_SETREG_IMM32_B32_mode : S_SETREG_IMM32_B32_Pseudo {
+  let hasSideEffects = 0;
+}
+
+} // End mayLoad = 0, mayStore = 0, Defs = [MODE], Uses = [MODE]
 
 class SOPK_WAITCNT<string opName, list<dag> pat=[]> :
     SOPK_Pseudo<
@@ -1251,14 +1292,6 @@ let SubtargetPredicate = isGFX10Plus in {
 } // End SubtargetPredicate = isGFX10Plus
 
 //===----------------------------------------------------------------------===//
-// S_GETREG_B32 Intrinsic Pattern.
-//===----------------------------------------------------------------------===//
-def : GCNPat <
-  (int_amdgcn_s_getreg timm:$simm16),
-  (S_GETREG_B32 (as_i16imm $simm16))
->;
-
-//===----------------------------------------------------------------------===//
 // SOP1 Patterns
 //===----------------------------------------------------------------------===//
 
@@ -1323,6 +1356,24 @@ def : GCNPat<
   (S_AND_B32 (S_MOV_B32 (i32 0xffff)), $src)
 >;
 
+// FIXME: ValueType should have isVector field
+class ScalarNot2Pat<Instruction inst, SDPatternOperator op, ValueType vt,
+                    bit isVector = 1> : GCNPat<
+  (UniformBinFrag<op> vt:$src0, (UniformUnaryFrag<!if(isVector, vnot, not)> vt:$src1)),
+  (inst getSOPSrcForVT<vt>.ret:$src0, getSOPSrcForVT<vt>.ret:$src1)
+>;
+
+// Match these for some more types
+// TODO: i1
+def : ScalarNot2Pat<S_ANDN2_B32, and, i16, 0>;
+def : ScalarNot2Pat<S_ANDN2_B32, and, v2i16>;
+def : ScalarNot2Pat<S_ANDN2_B64, and, v4i16>;
+def : ScalarNot2Pat<S_ANDN2_B64, and, v2i32>;
+
+def : ScalarNot2Pat<S_ORN2_B32, or, i16, 0>;
+def : ScalarNot2Pat<S_ORN2_B32, or, v2i16>;
+def : ScalarNot2Pat<S_ORN2_B64, or, v4i16>;
+def : ScalarNot2Pat<S_ORN2_B64, or, v2i32>;
 
 //===----------------------------------------------------------------------===//
 // Target-specific instruction encodings.
@@ -1570,7 +1621,7 @@ defm S_SETREG_B32       : SOPK_Real32_gfx6_gfx7_gfx10<0x013>;
 defm S_SETREG_IMM32_B32 : SOPK_Real64_gfx6_gfx7_gfx10<0x015>;
 
 //===----------------------------------------------------------------------===//
-// GFX8, GFX9 (VI).
+// GFX8 (VI), GFX9.
 //===----------------------------------------------------------------------===//
 
 class Select_vi<string opName> :

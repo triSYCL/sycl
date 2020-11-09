@@ -126,9 +126,12 @@ static Value emulateSignedRemainder(Location loc, Value lhs, Value rhs,
   return builder.create<spirv::SelectOp>(loc, type, isPositive, abs, absNegate);
 }
 
-/// Returns the offset of the value in `targetBits` representation. `srcIdx` is
-/// an index into a 1-D array with each element having `sourceBits`. When
-/// accessing an element in the array treating as having elements of
+/// Returns the offset of the value in `targetBits` representation.
+///
+/// `srcIdx` is an index into a 1-D array with each element having `sourceBits`.
+/// It's assumed to be non-negative.
+///
+/// When accessing an element in the array treating as having elements of
 /// `targetBits`, multiple values are loaded in the same time. The method
 /// returns the offset where the `srcIdx` locates in the value. For example, if
 /// `sourceBits` equals to 8 and `targetBits` equals to 32, the x-th element is
@@ -144,7 +147,7 @@ static Value getOffsetForBitwidth(Location loc, Value srcIdx, int sourceBits,
   IntegerAttr srcBitsAttr = builder.getIntegerAttr(targetType, sourceBits);
   auto srcBitsValue =
       builder.create<spirv::ConstantOp>(loc, targetType, srcBitsAttr);
-  auto m = builder.create<spirv::SModOp>(loc, srcIdx, idx);
+  auto m = builder.create<spirv::UModOp>(loc, srcIdx, idx);
   return builder.create<spirv::IMulOp>(loc, targetType, m, srcBitsValue);
 }
 
@@ -217,11 +220,15 @@ CHECK_UNSIGNED_OP(spirv::UModOp)
 /// Returns true if the allocations of type `t` can be lowered to SPIR-V.
 static bool isAllocationSupported(MemRefType t) {
   // Currently only support workgroup local memory allocations with static
-  // shape and int or float element type.
-  return t.hasStaticShape() &&
-         SPIRVTypeConverter::getMemorySpaceForStorageClass(
-             spirv::StorageClass::Workgroup) == t.getMemorySpace() &&
-         t.getElementType().isIntOrFloat();
+  // shape and int or float or vector of int or float element type.
+  if (!(t.hasStaticShape() &&
+        SPIRVTypeConverter::getMemorySpaceForStorageClass(
+            spirv::StorageClass::Workgroup) == t.getMemorySpace()))
+    return false;
+  Type elementType = t.getElementType();
+  if (auto vecType = elementType.dyn_cast<VectorType>())
+    elementType = vecType.getElementType();
+  return elementType.isIntOrFloat();
 }
 
 /// Returns the scope to use for atomic operations use for emulating store
@@ -486,7 +493,8 @@ public:
                   ConversionPatternRewriter &rewriter) const override;
 };
 
-/// Converts std.zexti to spv.Select if the type of source is i1.
+/// Converts std.zexti to spv.Select if the type of source is i1 or vector of
+/// i1.
 class ZeroExtendI1Pattern final : public SPIRVOpLowering<ZeroExtendIOp> {
 public:
   using SPIRVOpLowering<ZeroExtendIOp>::SPIRVOpLowering;
@@ -495,13 +503,21 @@ public:
   matchAndRewrite(ZeroExtendIOp op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
     auto srcType = operands.front().getType();
-    if (!srcType.isSignlessInteger() || srcType.getIntOrFloatBitWidth() != 1)
+    if (!isBoolScalarOrVector(srcType))
       return failure();
 
     auto dstType = this->typeConverter.convertType(op.getResult().getType());
     Location loc = op.getLoc();
-    Value zero = rewriter.create<ConstantIntOp>(loc, 0, dstType);
-    Value one = rewriter.create<ConstantIntOp>(loc, 1, dstType);
+    Attribute zeroAttr, oneAttr;
+    if (auto vectorType = dstType.dyn_cast<VectorType>()) {
+      zeroAttr = DenseElementsAttr::get(vectorType, 0);
+      oneAttr = DenseElementsAttr::get(vectorType, 1);
+    } else {
+      zeroAttr = IntegerAttr::get(dstType, 0);
+      oneAttr = IntegerAttr::get(dstType, 1);
+    }
+    Value zero = rewriter.create<ConstantOp>(loc, zeroAttr);
+    Value one = rewriter.create<ConstantOp>(loc, oneAttr);
     rewriter.template replaceOpWithNewOp<spirv::SelectOp>(
         op, dstType, operands.front(), one, zero);
     return success();
@@ -519,7 +535,7 @@ public:
                   ConversionPatternRewriter &rewriter) const override {
     assert(operands.size() == 1);
     auto srcType = operands.front().getType();
-    if (srcType.isSignlessInteger() && srcType.getIntOrFloatBitWidth() == 1)
+    if (isBoolScalarOrVector(srcType))
       return failure();
     auto dstType =
         this->typeConverter.convertType(operation.getResult().getType());
@@ -1069,6 +1085,7 @@ void populateStandardToSPIRVPatterns(MLIRContext *context,
       UnaryAndBinaryOpPattern<CosOp, spirv::GLSLCosOp>,
       UnaryAndBinaryOpPattern<DivFOp, spirv::FDivOp>,
       UnaryAndBinaryOpPattern<ExpOp, spirv::GLSLExpOp>,
+      UnaryAndBinaryOpPattern<FloorFOp, spirv::GLSLFloorOp>,
       UnaryAndBinaryOpPattern<LogOp, spirv::GLSLLogOp>,
       UnaryAndBinaryOpPattern<MulFOp, spirv::FMulOp>,
       UnaryAndBinaryOpPattern<MulIOp, spirv::IMulOp>,

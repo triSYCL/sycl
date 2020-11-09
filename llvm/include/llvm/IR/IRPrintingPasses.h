@@ -18,11 +18,12 @@
 #ifndef LLVM_IR_IRPRINTINGPASSES_H
 #define LLVM_IR_IRPRINTINGPASSES_H
 
-#include "llvm/ADT/StringRef.h"
 #include "llvm/IR/PassManager.h"
 #include <string>
 
 namespace llvm {
+class raw_ostream;
+class StringRef;
 
 /// Create and return a pass that writes the module to the specified
 /// \c raw_ostream.
@@ -75,6 +76,7 @@ public:
                   bool ShouldPreserveUseListOrder = false);
 
   PreservedAnalyses run(Module &M, AnalysisManager<Module> &);
+  static bool isRequired() { return true; }
 };
 
 /// Pass for printing a Function as LLVM's text IR assembly.
@@ -90,6 +92,7 @@ public:
   PrintFunctionPass(raw_ostream &OS, const std::string &Banner = "");
 
   PreservedAnalyses run(Function &F, AnalysisManager<Function> &);
+  static bool isRequired() { return true; }
 };
 
 } // End llvm namespace

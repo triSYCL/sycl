@@ -121,6 +121,26 @@ size_t __scudo_get_region_info_size();
 #define M_MEMTAG_TUNING -102
 #endif
 
+// Per-thread memory initialization tuning. The value argument should be one of:
+// 1: Disable automatic heap initialization and, where possible, memory tagging,
+//    on this thread.
+// 0: Normal behavior.
+#ifndef M_THREAD_DISABLE_MEM_INIT
+#define M_THREAD_DISABLE_MEM_INIT -103
+#endif
+
+#ifndef M_CACHE_COUNT_MAX
+#define M_CACHE_COUNT_MAX -200
+#endif
+
+#ifndef M_CACHE_SIZE_MAX
+#define M_CACHE_SIZE_MAX -201
+#endif
+
+#ifndef M_TSDS_COUNT_MAX
+#define M_TSDS_COUNT_MAX -202
+#endif
+
 enum scudo_memtag_tuning {
   // Tune for buffer overflows.
   M_MEMTAG_TUNING_BUFFER_OVERFLOW,

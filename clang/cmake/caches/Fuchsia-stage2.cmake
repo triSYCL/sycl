@@ -84,7 +84,6 @@ if(WIN32)
   set(RUNTIMES_${target}_CMAKE_SYSTEM_NAME Windows CACHE STRING "")
   set(RUNTIMES_${target}_CMAKE_BUILD_TYPE RelWithDebInfo CACHE STRING "")
   set(RUNTIMES_${target}_LIBCXX_ABI_VERSION 2 CACHE STRING "")
-  set(RUNTIMES_${target}_LIBCXX_HAS_WIN32_THREAD_API ON CACHE BOOL "")
   set(RUNTIMES_${target}_LIBCXX_ENABLE_EXPERIMENTAL_LIBRARY OFF CACHE BOOL "")
   set(RUNTIMES_${target}_LIBCXX_ENABLE_FILESYSTEM OFF CACHE BOOL "")
   set(RUNTIMES_${target}_LIBCXX_ENABLE_ABI_LINKER_SCRIPT OFF CACHE BOOL "")
@@ -233,14 +232,17 @@ set(LLVM_TOOLCHAIN_TOOLS
   llvm-ar
   llvm-cov
   llvm-cxxfilt
+  llvm-dlltool
   llvm-dwarfdump
   llvm-dwp
   llvm-gsymutil
   llvm-lib
+  llvm-mt
   llvm-nm
   llvm-objcopy
   llvm-objdump
   llvm-profdata
+  llvm-rc
   llvm-ranlib
   llvm-readelf
   llvm-readobj

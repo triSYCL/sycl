@@ -6,7 +6,8 @@ set(LLVM_LIBS_DIR "${LLVM_BINARY_DIR}/lib${LLVM_LIBDIR_SUFFIX}/%(build_config)s"
 
 llvm_canonicalize_cmake_booleans(
   LLVM_ENABLE_ZLIB
-  LLVM_LIBXML2_ENABLED
+  LLVM_ENABLE_LIBXML2
+  LLD_DEFAULT_LD_LLD_IS_MINGW
   )
 
 configure_lit_site_cfg(
@@ -25,10 +26,10 @@ configure_lit_site_cfg(
 set(LLD_TEST_DEPS lld)
 if (NOT LLD_BUILT_STANDALONE)
   list(APPEND LLD_TEST_DEPS
-    FileCheck count extract llc llvm-ar llvm-as llvm-bcanalyzer llvm-config llvm-cvtres
+    FileCheck count llc llvm-ar llvm-as llvm-bcanalyzer llvm-config llvm-cvtres
     llvm-dis llvm-dwarfdump llvm-lib llvm-lipo llvm-mc llvm-nm llvm-objcopy
     llvm-objdump llvm-pdbutil llvm-readelf llvm-readobj llvm-strip not obj2yaml
-    opt yaml2obj
+    opt split-file yaml2obj
     )
 endif()
 

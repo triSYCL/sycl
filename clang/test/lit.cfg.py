@@ -91,6 +91,7 @@ config.substitutions.append(
     ('%hmaptool', "'%s' %s" % (config.python_executable,
                              os.path.join(config.clang_tools_dir, 'hmaptool'))))
 
+
 # Plugins (loadable modules)
 if config.has_plugins and config.llvm_plugin_ext:
     config.available_features.add('plugins')

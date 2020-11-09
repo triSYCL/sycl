@@ -48,19 +48,19 @@ protected:
       state = process->GetState();
 
       if (process->IsAlive() && state != eStateConnected) {
-        char message[1024];
+        std::string message;
         if (process->GetState() == eStateAttaching)
-          ::snprintf(message, sizeof(message),
-                     "There is a pending attach, abort it and %s?",
-                     m_new_process_action.c_str());
+          message =
+              llvm::formatv("There is a pending attach, abort it and {0}?",
+                            m_new_process_action);
         else if (process->GetShouldDetach())
-          ::snprintf(message, sizeof(message),
-                     "There is a running process, detach from it and %s?",
-                     m_new_process_action.c_str());
+          message = llvm::formatv(
+              "There is a running process, detach from it and {0}?",
+              m_new_process_action);
         else
-          ::snprintf(message, sizeof(message),
-                     "There is a running process, kill it and %s?",
-                     m_new_process_action.c_str());
+          message =
+              llvm::formatv("There is a running process, kill it and {0}?",
+                            m_new_process_action);
 
         if (!m_interpreter.Confirm(message, true)) {
           result.SetStatus(eReturnStatusFailed);
@@ -183,6 +183,9 @@ protected:
       m_options.launch_info.GetFlags().Set(eLaunchFlagDisableASLR);
     else
       m_options.launch_info.GetFlags().Clear(eLaunchFlagDisableASLR);
+
+    if (target->GetInheritTCC())
+      m_options.launch_info.GetFlags().Set(eLaunchFlagInheritTCCFromParent);
 
     if (target->GetDetachOnError())
       m_options.launch_info.GetFlags().Set(eLaunchFlagDetachOnError);
@@ -316,49 +319,6 @@ public:
     llvm::ArrayRef<OptionDefinition> GetDefinitions() override {
       return llvm::makeArrayRef(g_process_attach_options);
     }
-
-    void HandleOptionArgumentCompletion(
-        CompletionRequest &request, OptionElementVector &opt_element_vector,
-        int opt_element_index, CommandInterpreter &interpreter) override {
-      int opt_arg_pos = opt_element_vector[opt_element_index].opt_arg_pos;
-      int opt_defs_index = opt_element_vector[opt_element_index].opt_defs_index;
-
-      switch (GetDefinitions()[opt_defs_index].short_option) {
-      case 'n': {
-        // Look to see if there is a -P argument provided, and if so use that
-        // plugin, otherwise use the default plugin.
-
-        const char *partial_name = nullptr;
-        partial_name = request.GetParsedLine().GetArgumentAtIndex(opt_arg_pos);
-
-        PlatformSP platform_sp(interpreter.GetPlatform(true));
-        if (!platform_sp)
-          return;
-        ProcessInstanceInfoList process_infos;
-        ProcessInstanceInfoMatch match_info;
-        if (partial_name) {
-          match_info.GetProcessInfo().GetExecutableFile().SetFile(
-              partial_name, FileSpec::Style::native);
-          match_info.SetNameMatchType(NameMatch::StartsWith);
-        }
-        platform_sp->FindProcesses(match_info, process_infos);
-        const size_t num_matches = process_infos.size();
-        if (num_matches == 0)
-          return;
-        for (size_t i = 0; i < num_matches; ++i) {
-          request.AddCompletion(process_infos[i].GetNameAsStringRef());
-        }
-      } break;
-
-      case 'P':
-        CommandCompletions::InvokeCommonCompletionCallbacks(
-            interpreter, CommandCompletions::eProcessPluginCompletion, request,
-            nullptr);
-        break;
-      }
-    }
-
-    // Instance variables to hold the values for command options.
 
     ProcessAttachInfo attach_info;
   };
@@ -920,6 +880,17 @@ public:
 
   ~CommandObjectProcessLoad() override = default;
 
+  void
+  HandleArgumentCompletion(CompletionRequest &request,
+                           OptionElementVector &opt_element_vector) override {
+    if (!m_exe_ctx.HasProcessScope())
+      return;
+
+    CommandCompletions::InvokeCommonCompletionCallbacks(
+        GetCommandInterpreter(), CommandCompletions::eDiskFileCompletion,
+        request, nullptr);
+  }
+
   Options *GetOptions() override { return &m_options; }
 
 protected:
@@ -984,6 +955,24 @@ public:
                 eCommandProcessMustBeLaunched | eCommandProcessMustBePaused) {}
 
   ~CommandObjectProcessUnload() override = default;
+
+  void
+  HandleArgumentCompletion(CompletionRequest &request,
+                           OptionElementVector &opt_element_vector) override {
+
+    if (request.GetCursorIndex() || !m_exe_ctx.HasProcessScope())
+      return;
+
+    Process *process = m_exe_ctx.GetProcessPtr();
+
+    const std::vector<lldb::addr_t> &tokens = process->GetImageTokens();
+    const size_t token_num = tokens.size();
+    for (size_t i = 0; i < token_num; ++i) {
+      if (tokens[i] == LLDB_INVALID_IMAGE_TOKEN)
+        continue;
+      request.TryCompleteCurrentArg(std::to_string(i));
+    }
+  }
 
 protected:
   bool DoExecute(Args &command, CommandReturnObject &result) override {

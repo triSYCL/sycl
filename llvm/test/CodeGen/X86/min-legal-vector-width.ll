@@ -197,9 +197,9 @@ define i32 @_Z9test_charPcS_i_256(i8* nocapture readonly, i8* nocapture readonly
 ; CHECK-NEXT:    vpaddd %ymm0, %ymm1, %ymm0
 ; CHECK-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; CHECK-NEXT:    vpaddd %xmm1, %xmm0, %xmm0
-; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
+; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,2,3]
 ; CHECK-NEXT:    vpaddd %xmm1, %xmm0, %xmm0
-; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
+; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,1,1]
 ; CHECK-NEXT:    vpaddd %xmm1, %xmm0, %xmm0
 ; CHECK-NEXT:    vmovd %xmm0, %eax
 ; CHECK-NEXT:    vzeroupper
@@ -263,9 +263,9 @@ define i32 @_Z9test_charPcS_i_512(i8* nocapture readonly, i8* nocapture readonly
 ; CHECK-NEXT:    vpaddd %zmm1, %zmm0, %zmm0
 ; CHECK-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; CHECK-NEXT:    vpaddd %xmm1, %xmm0, %xmm0
-; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
+; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,2,3]
 ; CHECK-NEXT:    vpaddd %xmm1, %xmm0, %xmm0
-; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
+; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,1,1]
 ; CHECK-NEXT:    vpaddd %xmm1, %xmm0, %xmm0
 ; CHECK-NEXT:    vmovd %xmm0, %eax
 ; CHECK-NEXT:    vzeroupper
@@ -327,9 +327,9 @@ define i32 @sad_16i8_256() "min-legal-vector-width"="256" {
 ; CHECK-NEXT:    vpaddd %ymm0, %ymm1, %ymm0
 ; CHECK-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; CHECK-NEXT:    vpaddd %xmm1, %xmm0, %xmm0
-; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
+; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,2,3]
 ; CHECK-NEXT:    vpaddd %xmm1, %xmm0, %xmm0
-; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
+; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,1,1]
 ; CHECK-NEXT:    vpaddd %xmm1, %xmm0, %xmm0
 ; CHECK-NEXT:    vmovd %xmm0, %eax
 ; CHECK-NEXT:    vzeroupper
@@ -388,9 +388,9 @@ define i32 @sad_16i8_512() "min-legal-vector-width"="512" {
 ; CHECK-NEXT:    vpaddd %zmm1, %zmm0, %zmm0
 ; CHECK-NEXT:    vextracti128 $1, %ymm0, %xmm1
 ; CHECK-NEXT:    vpaddd %xmm1, %xmm0, %xmm0
-; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
+; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,2,3]
 ; CHECK-NEXT:    vpaddd %xmm1, %xmm0, %xmm0
-; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,2,3]
+; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[1,1,1,1]
 ; CHECK-NEXT:    vpaddd %xmm1, %xmm0, %xmm0
 ; CHECK-NEXT:    vmovd %xmm0, %eax
 ; CHECK-NEXT:    vzeroupper
@@ -857,10 +857,10 @@ define <8 x i16> @trunc_v8i64_v8i16(<8 x i64>* %x) nounwind "min-legal-vector-wi
 define <8 x i32> @trunc_v8i64_v8i32_zeroes(<8 x i64>* %x) nounwind "min-legal-vector-width"="256" {
 ; CHECK-LABEL: trunc_v8i64_v8i32_zeroes:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vpsrlq $48, 32(%rdi), %ymm1
-; CHECK-NEXT:    vpsrlq $48, (%rdi), %ymm2
-; CHECK-NEXT:    vmovdqa {{.*#+}} ymm0 = [0,2,4,6,8,10,12,14,16,18,20,22,24,26,28,30]
-; CHECK-NEXT:    vpermi2w %ymm1, %ymm2, %ymm0
+; CHECK-NEXT:    vpsrlq $48, 32(%rdi), %ymm0
+; CHECK-NEXT:    vpsrlq $48, (%rdi), %ymm1
+; CHECK-NEXT:    vpackusdw %ymm0, %ymm1, %ymm0
+; CHECK-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[0,2,1,3]
 ; CHECK-NEXT:    retq
   %a = load <8 x i64>, <8 x i64>* %x
   %b = lshr <8 x i64> %a, <i64 48, i64 48, i64 48, i64 48, i64 48, i64 48, i64 48, i64 48>
@@ -920,9 +920,10 @@ define <8 x i32> @trunc_v8i64_v8i32_sign(<8 x i64>* %x) nounwind "min-legal-vect
 define <16 x i16> @trunc_v16i32_v16i16_sign(<16 x i32>* %x) nounwind "min-legal-vector-width"="256" {
 ; CHECK-LABEL: trunc_v16i32_v16i16_sign:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vmovdqa (%rdi), %ymm1
-; CHECK-NEXT:    vmovdqa {{.*#+}} ymm0 = [1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31]
-; CHECK-NEXT:    vpermi2w 32(%rdi), %ymm1, %ymm0
+; CHECK-NEXT:    vpsrad $16, 32(%rdi), %ymm0
+; CHECK-NEXT:    vpsrad $16, (%rdi), %ymm1
+; CHECK-NEXT:    vpackssdw %ymm0, %ymm1, %ymm0
+; CHECK-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[0,2,1,3]
 ; CHECK-NEXT:    retq
   %a = load <16 x i32>, <16 x i32>* %x
   %b = ashr <16 x i32> %a, <i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16, i32 16>
@@ -931,20 +932,13 @@ define <16 x i16> @trunc_v16i32_v16i16_sign(<16 x i32>* %x) nounwind "min-legal-
 }
 
 define <32 x i8> @trunc_v32i16_v32i8_sign(<32 x i16>* %x) nounwind "min-legal-vector-width"="256" {
-; CHECK-AVX512-LABEL: trunc_v32i16_v32i8_sign:
-; CHECK-AVX512:       # %bb.0:
-; CHECK-AVX512-NEXT:    vpsraw $8, 32(%rdi), %ymm0
-; CHECK-AVX512-NEXT:    vpsraw $8, (%rdi), %ymm1
-; CHECK-AVX512-NEXT:    vpacksswb %ymm0, %ymm1, %ymm0
-; CHECK-AVX512-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[0,2,1,3]
-; CHECK-AVX512-NEXT:    retq
-;
-; CHECK-VBMI-LABEL: trunc_v32i16_v32i8_sign:
-; CHECK-VBMI:       # %bb.0:
-; CHECK-VBMI-NEXT:    vmovdqa (%rdi), %ymm1
-; CHECK-VBMI-NEXT:    vmovdqa {{.*#+}} ymm0 = [1,3,5,7,9,11,13,15,17,19,21,23,25,27,29,31,33,35,37,39,41,43,45,47,49,51,53,55,57,59,61,63]
-; CHECK-VBMI-NEXT:    vpermi2b 32(%rdi), %ymm1, %ymm0
-; CHECK-VBMI-NEXT:    retq
+; CHECK-LABEL: trunc_v32i16_v32i8_sign:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vpsraw $8, 32(%rdi), %ymm0
+; CHECK-NEXT:    vpsraw $8, (%rdi), %ymm1
+; CHECK-NEXT:    vpacksswb %ymm0, %ymm1, %ymm0
+; CHECK-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[0,2,1,3]
+; CHECK-NEXT:    retq
   %a = load <32 x i16>, <32 x i16>* %x
   %b = ashr <32 x i16> %a, <i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8, i16 8>
   %c = trunc <32 x i16> %b to <32 x i8>
@@ -955,10 +949,10 @@ define void @zext_v16i8_v16i64(<16 x i8> %x, <16 x i64>* %y) nounwind "min-legal
 ; CHECK-LABEL: zext_v16i8_v16i64:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    vpmovzxbw {{.*#+}} ymm1 = xmm0[0],zero,xmm0[1],zero,xmm0[2],zero,xmm0[3],zero,xmm0[4],zero,xmm0[5],zero,xmm0[6],zero,xmm0[7],zero,xmm0[8],zero,xmm0[9],zero,xmm0[10],zero,xmm0[11],zero,xmm0[12],zero,xmm0[13],zero,xmm0[14],zero,xmm0[15],zero
-; CHECK-NEXT:    vpshufd {{.*#+}} xmm2 = xmm1[2,3,0,1]
+; CHECK-NEXT:    vpshufd {{.*#+}} xmm2 = xmm1[2,3,2,3]
 ; CHECK-NEXT:    vpmovzxwq {{.*#+}} ymm2 = xmm2[0],zero,zero,zero,xmm2[1],zero,zero,zero,xmm2[2],zero,zero,zero,xmm2[3],zero,zero,zero
 ; CHECK-NEXT:    vextracti128 $1, %ymm1, %xmm1
-; CHECK-NEXT:    vpshufd {{.*#+}} xmm3 = xmm1[2,3,0,1]
+; CHECK-NEXT:    vpshufd {{.*#+}} xmm3 = xmm1[2,3,2,3]
 ; CHECK-NEXT:    vpmovzxwq {{.*#+}} ymm3 = xmm3[0],zero,zero,zero,xmm3[1],zero,zero,zero,xmm3[2],zero,zero,zero,xmm3[3],zero,zero,zero
 ; CHECK-NEXT:    vpmovzxwq {{.*#+}} ymm1 = xmm1[0],zero,zero,zero,xmm1[1],zero,zero,zero,xmm1[2],zero,zero,zero,xmm1[3],zero,zero,zero
 ; CHECK-NEXT:    vpmovzxbq {{.*#+}} ymm0 = xmm0[0],zero,zero,zero,zero,zero,zero,zero,xmm0[1],zero,zero,zero,zero,zero,zero,zero,xmm0[2],zero,zero,zero,zero,zero,zero,zero,xmm0[3],zero,zero,zero,zero,zero,zero,zero
@@ -976,18 +970,18 @@ define void @zext_v16i8_v16i64(<16 x i8> %x, <16 x i64>* %y) nounwind "min-legal
 define void @sext_v16i8_v16i64(<16 x i8> %x, <16 x i64>* %y) nounwind "min-legal-vector-width"="256" {
 ; CHECK-LABEL: sext_v16i8_v16i64:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    vpmovsxbw %xmm0, %ymm0
-; CHECK-NEXT:    vpshufd {{.*#+}} xmm1 = xmm0[2,3,0,1]
-; CHECK-NEXT:    vpmovsxwq %xmm1, %ymm1
-; CHECK-NEXT:    vextracti128 $1, %ymm0, %xmm2
-; CHECK-NEXT:    vpshufd {{.*#+}} xmm3 = xmm2[2,3,0,1]
-; CHECK-NEXT:    vpmovsxwq %xmm3, %ymm3
-; CHECK-NEXT:    vpmovsxwq %xmm0, %ymm0
+; CHECK-NEXT:    vpmovsxbw %xmm0, %ymm1
+; CHECK-NEXT:    vpshufd {{.*#+}} xmm2 = xmm1[2,3,2,3]
 ; CHECK-NEXT:    vpmovsxwq %xmm2, %ymm2
-; CHECK-NEXT:    vmovdqa %ymm2, 64(%rdi)
+; CHECK-NEXT:    vextracti128 $1, %ymm1, %xmm1
+; CHECK-NEXT:    vpshufd {{.*#+}} xmm3 = xmm1[2,3,2,3]
+; CHECK-NEXT:    vpmovsxwq %xmm3, %ymm3
+; CHECK-NEXT:    vpmovsxwq %xmm1, %ymm1
+; CHECK-NEXT:    vpmovsxbq %xmm0, %ymm0
 ; CHECK-NEXT:    vmovdqa %ymm0, (%rdi)
+; CHECK-NEXT:    vmovdqa %ymm1, 64(%rdi)
 ; CHECK-NEXT:    vmovdqa %ymm3, 96(%rdi)
-; CHECK-NEXT:    vmovdqa %ymm1, 32(%rdi)
+; CHECK-NEXT:    vmovdqa %ymm2, 32(%rdi)
 ; CHECK-NEXT:    vzeroupper
 ; CHECK-NEXT:    retq
   %a = sext <16 x i8> %x to <16 x i64>

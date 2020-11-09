@@ -381,6 +381,10 @@ namespace llvm {
     /// sym\@got\@dtprel\@l.
     ADDI_DTPREL_L,
 
+    /// G8RC = PADDI_DTPREL %x3, Symbol - For the pc-rel based local-dynamic TLS
+    /// model, produces a PADDI8 instruction that adds X3 to sym\@dtprel.
+    PADDI_DTPREL,
+
     /// VRRC = VADD_SPLAT Elt, EltSize - Temporary node to be expanded
     /// during instruction selection to optimize a BUILD_VECTOR into
     /// operations on splats.  This is necessary to avoid losing these
@@ -427,22 +431,6 @@ namespace llvm {
     ///               => VABSDUW((XVNEGSP a), (XVNEGSP b))
     VABSD,
 
-    /// QVFPERM = This corresponds to the QPX qvfperm instruction.
-    QVFPERM,
-
-    /// QVGPCI = This corresponds to the QPX qvgpci instruction.
-    QVGPCI,
-
-    /// QVALIGNI = This corresponds to the QPX qvaligni instruction.
-    QVALIGNI,
-
-    /// QVESPLATI = This corresponds to the QPX qvesplati instruction.
-    QVESPLATI,
-
-    /// QBFLT = Access the underlying QPX floating-point boolean
-    /// representation.
-    QBFLT,
-
     /// FP_EXTEND_HALF(VECTOR, IDX) - Custom extend upper (IDX=0) half or
     /// lower (IDX=1) half of v4f32 to v2f64.
     FP_EXTEND_HALF,
@@ -451,6 +439,46 @@ namespace llvm {
     /// either through an add like PADDI or through a PC Relative load like
     /// PLD.
     MAT_PCREL_ADDR,
+
+    /// TLS_DYNAMIC_MAT_PCREL_ADDR = Materialize a PC Relative address for
+    /// TLS global address when using dynamic access models. This can be done
+    /// through an add like PADDI.
+    TLS_DYNAMIC_MAT_PCREL_ADDR,
+
+    /// TLS_LOCAL_EXEC_MAT_ADDR = Materialize an address for TLS global address
+    /// when using local exec access models, and when prefixed instructions are
+    /// available. This is used with ADD_TLS to produce an add like PADDI.
+    TLS_LOCAL_EXEC_MAT_ADDR,
+
+    /// ACC_BUILD = Build an accumulator register from 4 VSX registers.
+    ACC_BUILD,
+
+    /// PAIR_BUILD = Build a vector pair register from 2 VSX registers.
+    PAIR_BUILD,
+
+    /// EXTRACT_VSX_REG = Extract one of the underlying vsx registers of
+    /// an accumulator or pair register. This node is needed because
+    /// EXTRACT_SUBVECTOR expects the input and output vectors to have the same
+    /// element type.
+    EXTRACT_VSX_REG,
+
+    /// XXMFACC = This corresponds to the xxmfacc instruction.
+    XXMFACC,
+
+    // Constrained conversion from floating point to int
+    STRICT_FCTIDZ = ISD::FIRST_TARGET_STRICTFP_OPCODE,
+    STRICT_FCTIWZ,
+    STRICT_FCTIDUZ,
+    STRICT_FCTIWUZ,
+
+    /// Constrained integer-to-floating-point conversion instructions.
+    STRICT_FCFID,
+    STRICT_FCFIDU,
+    STRICT_FCFIDS,
+    STRICT_FCFIDUS,
+
+    /// Constrained floating point add in round-to-zero mode.
+    STRICT_FADDRTZ,
 
     /// CHAIN = STBRX CHAIN, GPRC, Ptr, Type - This is a
     /// byte-swapping store instruction.  It byte-swaps the low "Type" bits of
@@ -493,6 +521,12 @@ namespace llvm {
     /// an xxswapd.
     LXVD2X,
 
+    /// LXVRZX - Load VSX Vector Rightmost and Zero Extend
+    /// This node represents v1i128 BUILD_VECTOR of a zero extending load
+    /// instruction from <byte, halfword, word, or doubleword> to i128.
+    /// Allows utilization of the Load VSX Vector Rightmost Instructions.
+    LXVRZX,
+
     /// VSRC, CHAIN = LOAD_VEC_BE CHAIN, Ptr - Occurs only for little endian.
     /// Maps directly to one of lxvd2x/lxvw4x/lxvh8x/lxvb16x depending on
     /// the vector type to load vector in big-endian element order.
@@ -518,10 +552,6 @@ namespace llvm {
 
     /// Store scalar integers from VSR.
     ST_VSR_SCAL_INT,
-
-    /// QBRC, CHAIN = QVLFSb CHAIN, Ptr
-    /// The 4xf32 load used for v4i1 constants.
-    QVLFSb,
 
     /// ATOMIC_CMP_SWAP - the exact same as the target-independent nodes
     /// except they ensure that the compare input is zero-extended for
@@ -755,6 +785,12 @@ namespace llvm {
     /// LowerOperation - Provide custom lowering hooks for some operations.
     ///
     SDValue LowerOperation(SDValue Op, SelectionDAG &DAG) const override;
+
+    /// LowerOperationWrapper - Place custom new result values for node in
+    /// Results.
+    void LowerOperationWrapper(SDNode *N,
+                               SmallVectorImpl<SDValue> &Results,
+                               SelectionDAG &DAG) const override;
 
     /// ReplaceNodeResults - Replace the results of node with an illegal result
     /// type with new values built out of custom code.
@@ -1042,11 +1078,6 @@ namespace llvm {
       }
     };
 
-    bool isNoopAddrSpaceCast(unsigned SrcAS, unsigned DestAS) const override {
-      // Addrspacecasts are always noops.
-      return true;
-    }
-
     bool canReuseLoadAddress(SDValue Op, EVT MemVT, ReuseLoadInfo &RLI,
                              SelectionDAG &DAG,
                              ISD::LoadExtType ET = ISD::NON_EXTLOAD) const;
@@ -1117,6 +1148,7 @@ namespace llvm {
     SDValue LowerSHL_PARTS(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSRL_PARTS(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSRA_PARTS(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerFunnelShift(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVECTOR_SHUFFLE(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINSERT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;

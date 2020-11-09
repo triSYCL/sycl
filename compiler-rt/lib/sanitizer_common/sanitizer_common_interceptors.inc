@@ -445,8 +445,10 @@ INTERCEPTOR(int, strcmp, const char *s1, const char *s2) {
     c2 = (unsigned char)s2[i];
     if (c1 != c2 || c1 == '\0') break;
   }
-  COMMON_INTERCEPTOR_READ_STRING(ctx, s1, i + 1);
-  COMMON_INTERCEPTOR_READ_STRING(ctx, s2, i + 1);
+  if (common_flags()->intercept_strcmp) {
+    COMMON_INTERCEPTOR_READ_STRING(ctx, s1, i + 1);
+    COMMON_INTERCEPTOR_READ_STRING(ctx, s2, i + 1);
+  }
   int result = CharCmpX(c1, c2);
   CALL_WEAK_INTERCEPTOR_HOOK(__sanitizer_weak_hook_strcmp, GET_CALLER_PC(), s1,
                              s2, result);
@@ -4863,6 +4865,34 @@ INTERCEPTOR(char *, tmpnam_r, char *s) {
 #define INIT_TMPNAM_R COMMON_INTERCEPT_FUNCTION(tmpnam_r);
 #else
 #define INIT_TMPNAM_R
+#endif
+
+#if SANITIZER_INTERCEPT_PTSNAME
+INTERCEPTOR(char *, ptsname, int fd) {
+  void *ctx;
+  COMMON_INTERCEPTOR_ENTER(ctx, ptsname, fd);
+  char *res = REAL(ptsname)(fd);
+  if (res != nullptr)
+    COMMON_INTERCEPTOR_INITIALIZE_RANGE(res, REAL(strlen)(res) + 1);
+  return res;
+}
+#define INIT_PTSNAME COMMON_INTERCEPT_FUNCTION(ptsname);
+#else
+#define INIT_PTSNAME
+#endif
+
+#if SANITIZER_INTERCEPT_PTSNAME_R
+INTERCEPTOR(int, ptsname_r, int fd, char *name, SIZE_T namesize) {
+  void *ctx;
+  COMMON_INTERCEPTOR_ENTER(ctx, ptsname_r, fd, name, namesize);
+  int res = REAL(ptsname_r)(fd, name, namesize);
+  if (res == 0)
+    COMMON_INTERCEPTOR_WRITE_RANGE(ctx, name, REAL(strlen)(name) + 1);
+  return res;
+}
+#define INIT_PTSNAME_R COMMON_INTERCEPT_FUNCTION(ptsname_r);
+#else
+#define INIT_PTSNAME_R
 #endif
 
 #if SANITIZER_INTERCEPT_TTYNAME
@@ -9855,12 +9885,25 @@ INTERCEPTOR(void, qsort, void *base, SIZE_T nmemb, SIZE_T size,
     }
   }
   qsort_compar_f old_compar = qsort_compar;
-  qsort_compar = compar;
   SIZE_T old_size = qsort_size;
-  qsort_size = size;
+  // Handle qsort() implementations that recurse using an
+  // interposable function call:
+  bool already_wrapped = compar == wrapped_qsort_compar;
+  if (already_wrapped) {
+    // This case should only happen if the qsort() implementation calls itself
+    // using a preemptible function call (e.g. the FreeBSD libc version).
+    // Check that the size and comparator arguments are as expected.
+    CHECK_NE(compar, qsort_compar);
+    CHECK_EQ(qsort_size, size);
+  } else {
+    qsort_compar = compar;
+    qsort_size = size;
+  }
   REAL(qsort)(base, nmemb, size, wrapped_qsort_compar);
-  qsort_compar = old_compar;
-  qsort_size = old_size;
+  if (!already_wrapped) {
+    qsort_compar = old_compar;
+    qsort_size = old_size;
+  }
   COMMON_INTERCEPTOR_WRITE_RANGE(ctx, base, nmemb * size);
 }
 #define INIT_QSORT COMMON_INTERCEPT_FUNCTION(qsort)
@@ -9893,12 +9936,25 @@ INTERCEPTOR(void, qsort_r, void *base, SIZE_T nmemb, SIZE_T size,
     }
   }
   qsort_r_compar_f old_compar = qsort_r_compar;
-  qsort_r_compar = compar;
   SIZE_T old_size = qsort_r_size;
-  qsort_r_size = size;
+  // Handle qsort_r() implementations that recurse using an
+  // interposable function call:
+  bool already_wrapped = compar == wrapped_qsort_r_compar;
+  if (already_wrapped) {
+    // This case should only happen if the qsort() implementation calls itself
+    // using a preemptible function call (e.g. the FreeBSD libc version).
+    // Check that the size and comparator arguments are as expected.
+    CHECK_NE(compar, qsort_r_compar);
+    CHECK_EQ(qsort_r_size, size);
+  } else {
+    qsort_r_compar = compar;
+    qsort_r_size = size;
+  }
   REAL(qsort_r)(base, nmemb, size, wrapped_qsort_r_compar, arg);
-  qsort_r_compar = old_compar;
-  qsort_r_size = old_size;
+  if (!already_wrapped) {
+    qsort_r_compar = old_compar;
+    qsort_r_size = old_size;
+  }
   COMMON_INTERCEPTOR_WRITE_RANGE(ctx, base, nmemb * size);
 }
 #define INIT_QSORT_R COMMON_INTERCEPT_FUNCTION(qsort_r)
@@ -10138,6 +10194,8 @@ static void InitializeCommonInterceptors() {
   INIT_PTHREAD_BARRIERATTR_GETPSHARED;
   INIT_TMPNAM;
   INIT_TMPNAM_R;
+  INIT_PTSNAME;
+  INIT_PTSNAME_R;
   INIT_TTYNAME;
   INIT_TTYNAME_R;
   INIT_TEMPNAM;

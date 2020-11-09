@@ -13,10 +13,6 @@ include_directories(
   ${CLANGD_BINARY_DIR}
   )
 
-if (CXX_SUPPORTS_SUGGEST_OVERRIDE_FLAG)
-  add_compile_options("-Wno-suggest-override")
-endif()
-
 if(CLANG_BUILT_STANDALONE)
   # LLVMTestingSupport library is needed for clangd tests.
   if (EXISTS ${LLVM_MAIN_SRC_DIR}/lib/Testing/Support
@@ -31,6 +27,9 @@ if (CLANGD_ENABLE_REMOTE)
   add_definitions(-DGOOGLE_PROTOBUF_NO_RTTI=1)
   set(REMOTE_TEST_SOURCES remote/MarshallingTests.cpp)
 endif()
+
+include(${CMAKE_CURRENT_SOURCE_DIR}/../quality/CompletionModel.cmake)
+gen_decision_forest(${CMAKE_CURRENT_SOURCE_DIR}/decision_forest_model DecisionForestRuntimeTest ::ns1::ns2::test::Example)
 
 add_custom_target(ClangdUnitTests)
 add_unittest(ClangdUnitTests ClangdTests
@@ -48,6 +47,7 @@ add_unittest(ClangdUnitTests ClangdTests
   ConfigCompileTests.cpp
   ConfigProviderTests.cpp
   ConfigYAMLTests.cpp
+  DecisionForestTests.cpp
   DexTests.cpp
   DiagnosticsTests.cpp
   DraftStoreTests.cpp
@@ -66,7 +66,9 @@ add_unittest(ClangdUnitTests ClangdTests
   IndexActionTests.cpp
   IndexTests.cpp
   JSONTransportTests.cpp
+  LoggerTests.cpp
   LSPClient.cpp
+  ModulesTests.cpp
   ParsedASTTests.cpp
   PathMappingTests.cpp
   PreambleTests.cpp
@@ -91,6 +93,7 @@ add_unittest(ClangdUnitTests ClangdTests
   TweakTesting.cpp
   URITests.cpp
   XRefsTests.cpp
+  ${CMAKE_CURRENT_BINARY_DIR}/DecisionForestRuntimeTest.cpp
 
   support/CancellationTests.cpp
   support/ContextTests.cpp
@@ -104,6 +107,11 @@ add_unittest(ClangdUnitTests ClangdTests
 
   $<TARGET_OBJECTS:obj.clangDaemonTweaks>
   )
+
+# Include generated ComletionModel headers.
+target_include_directories(ClangdTests PUBLIC
+  $<BUILD_INTERFACE:${CMAKE_CURRENT_BINARY_DIR}>
+)
 
 clang_target_link_libraries(ClangdTests
   PRIVATE

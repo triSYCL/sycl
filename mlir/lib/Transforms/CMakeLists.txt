@@ -12,6 +12,7 @@ add_mlir_library(MLIRTransforms
   LoopFusion.cpp
   LoopInvariantCodeMotion.cpp
   MemRefDataFlowOpt.cpp
+  NormalizeMemRefs.cpp
   OpStats.cpp
   ParallelLoopCollapsing.cpp
   PipelineDataTransfer.cpp
@@ -29,10 +30,10 @@ add_mlir_library(MLIRTransforms
   MLIRTransformsPassIncGen
 
   LINK_LIBS PUBLIC
-  MLIRAffineOps
+  MLIRAffine
   MLIRAnalysis
   MLIRCopyOpInterface
-  MLIRLinalgOps
+  MLIRLinalg
   MLIRLoopLikeInterface
   MLIRSCF
   MLIRPass

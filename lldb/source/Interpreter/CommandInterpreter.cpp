@@ -12,9 +12,6 @@
 #include <string>
 #include <vector>
 
-#include "CommandObjectScript.h"
-#include "lldb/Interpreter/CommandObjectRegexCommand.h"
-
 #include "Commands/CommandObjectApropos.h"
 #include "Commands/CommandObjectBreakpoint.h"
 #include "Commands/CommandObjectCommands.h"
@@ -30,14 +27,17 @@
 #include "Commands/CommandObjectPlugin.h"
 #include "Commands/CommandObjectProcess.h"
 #include "Commands/CommandObjectQuit.h"
+#include "Commands/CommandObjectRegexCommand.h"
 #include "Commands/CommandObjectRegister.h"
 #include "Commands/CommandObjectReproducer.h"
+#include "Commands/CommandObjectScript.h"
 #include "Commands/CommandObjectSession.h"
 #include "Commands/CommandObjectSettings.h"
 #include "Commands/CommandObjectSource.h"
 #include "Commands/CommandObjectStats.h"
 #include "Commands/CommandObjectTarget.h"
 #include "Commands/CommandObjectThread.h"
+#include "Commands/CommandObjectTrace.h"
 #include "Commands/CommandObjectType.h"
 #include "Commands/CommandObjectVersion.h"
 #include "Commands/CommandObjectWatchpoint.h"
@@ -46,6 +46,7 @@
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/StreamFile.h"
 #include "lldb/Utility/Log.h"
+#include "lldb/Utility/Reproducer.h"
 #include "lldb/Utility/State.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/Timer.h"
@@ -67,6 +68,7 @@
 #include "lldb/Interpreter/Property.h"
 #include "lldb/Utility/Args.h"
 
+#include "lldb/Target/Language.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/StopInfo.h"
 #include "lldb/Target/TargetList.h"
@@ -511,6 +513,7 @@ void CommandInterpreter::LoadCommandDictionary() {
   REGISTER_COMMAND_OBJECT("statistics", CommandObjectStats);
   REGISTER_COMMAND_OBJECT("target", CommandObjectMultiwordTarget);
   REGISTER_COMMAND_OBJECT("thread", CommandObjectMultiwordThread);
+  REGISTER_COMMAND_OBJECT("trace", CommandObjectTrace);
   REGISTER_COMMAND_OBJECT("type", CommandObjectType);
   REGISTER_COMMAND_OBJECT("version", CommandObjectVersion);
   REGISTER_COMMAND_OBJECT("watchpoint", CommandObjectMultiwordWatchpoint);
@@ -631,15 +634,10 @@ void CommandInterpreter::LoadCommandDictionary() {
   if (tbreak_regex_cmd_up) {
     bool success = true;
     for (size_t i = 0; i < num_regexes; i++) {
-      // If you add a resultant command string longer than 1024 characters be
-      // sure to increase the size of this buffer.
-      char buffer[1024];
-      int num_printed =
-          snprintf(buffer, 1024, "%s %s", break_regexes[i][1], "-o 1");
-      lldbassert(num_printed < 1024);
-      UNUSED_IF_ASSERT_DISABLED(num_printed);
+      std::string command = break_regexes[i][1];
+      command += " -o 1";
       success =
-          tbreak_regex_cmd_up->AddRegexCommand(break_regexes[i][0], buffer);
+          tbreak_regex_cmd_up->AddRegexCommand(break_regexes[i][0], command);
       if (!success)
         break;
     }
@@ -1883,6 +1881,19 @@ void CommandInterpreter::HandleCompletion(CompletionRequest &request) {
   HandleCompletionMatches(request);
 }
 
+llvm::Optional<std::string>
+CommandInterpreter::GetAutoSuggestionForCommand(llvm::StringRef line) {
+  if (line.empty())
+    return llvm::None;
+  const size_t s = m_command_history.GetSize();
+  for (int i = s - 1; i >= 0; --i) {
+    llvm::StringRef entry = m_command_history.GetStringAtIndex(i);
+    if (entry.consume_front(line))
+      return entry.str();
+  }
+  return llvm::None;
+}
+
 CommandInterpreter::~CommandInterpreter() {}
 
 void CommandInterpreter::UpdatePrompt(llvm::StringRef new_prompt) {
@@ -1987,10 +1998,7 @@ void CommandInterpreter::BuildAliasCommandArgs(CommandObject *alias_cmd_obj,
         if (value_type != OptionParser::eOptionalArgument)
           new_args.AppendArgument(value);
         else {
-          char buffer[255];
-          ::snprintf(buffer, sizeof(buffer), "%s%s", option.c_str(),
-                     value.c_str());
-          new_args.AppendArgument(llvm::StringRef(buffer));
+          new_args.AppendArgument(option + value);
         }
 
       } else if (static_cast<size_t>(index) >= cmd_args.GetArgumentCount()) {
@@ -2012,10 +2020,7 @@ void CommandInterpreter::BuildAliasCommandArgs(CommandObject *alias_cmd_obj,
         if (value_type != OptionParser::eOptionalArgument)
           new_args.AppendArgument(cmd_args.GetArgumentAtIndex(index));
         else {
-          char buffer[255];
-          ::snprintf(buffer, sizeof(buffer), "%s%s", option.c_str(),
-                     cmd_args.GetArgumentAtIndex(index));
-          new_args.AppendArgument(buffer);
+          new_args.AppendArgument(option + cmd_args.GetArgumentAtIndex(index));
         }
         used[index] = true;
       }
@@ -2082,9 +2087,27 @@ static void GetHomeInitFile(llvm::SmallVectorImpl<char> &init_file,
     init_file_name.append(suffix.str());
   }
 
-  llvm::sys::path::home_directory(init_file);
+  FileSystem::Instance().GetHomeDirectory(init_file);
   llvm::sys::path::append(init_file, init_file_name);
 
+  FileSystem::Instance().Resolve(init_file);
+}
+
+static void GetHomeREPLInitFile(llvm::SmallVectorImpl<char> &init_file) {
+  LanguageSet repl_languages = Language::GetLanguagesSupportingREPLs();
+  LanguageType language = eLanguageTypeUnknown;
+  if (auto main_repl_language = repl_languages.GetSingularLanguage())
+    language = *main_repl_language;
+  else
+    return;
+
+  std::string init_file_name =
+      (llvm::Twine(".lldbinit-") +
+       llvm::Twine(Language::GetNameForLanguageType(language)) +
+       llvm::Twine("-repl"))
+          .str();
+  FileSystem::Instance().GetHomeDirectory(init_file);
+  llvm::sys::path::append(init_file, init_file_name);
   FileSystem::Instance().Resolve(init_file);
 }
 
@@ -2162,15 +2185,22 @@ void CommandInterpreter::SourceInitFileCwd(CommandReturnObject &result) {
 
 /// We will first see if there is an application specific ".lldbinit" file
 /// whose name is "~/.lldbinit" followed by a "-" and the name of the program.
-/// If this file doesn't exist, we fall back to just the "~/.lldbinit" file.
-void CommandInterpreter::SourceInitFileHome(CommandReturnObject &result) {
+/// If this file doesn't exist, we fall back to the REPL init file or the
+/// default home init file in "~/.lldbinit".
+void CommandInterpreter::SourceInitFileHome(CommandReturnObject &result,
+                                            bool is_repl) {
   if (m_skip_lldbinit_files) {
     result.SetStatus(eReturnStatusSuccessFinishNoResult);
     return;
   }
 
   llvm::SmallString<128> init_file;
-  GetHomeInitFile(init_file);
+
+  if (is_repl)
+    GetHomeREPLInitFile(init_file);
+
+  if (init_file.empty())
+    GetHomeInitFile(init_file);
 
   if (!m_skip_app_init_files) {
     llvm::StringRef program_name =

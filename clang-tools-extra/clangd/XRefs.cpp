@@ -78,6 +78,32 @@ const NamedDecl *getDefinition(const NamedDecl *D) {
     return VD->getDefinition();
   if (const auto *FD = dyn_cast<FunctionDecl>(D))
     return FD->getDefinition();
+  // Objective-C classes can have three types of declarations:
+  //
+  // - forward declaration: @class MyClass;
+  // - true declaration (interface definition): @interface MyClass ... @end
+  // - true definition (implementation): @implementation MyClass ... @end
+  //
+  // Objective-C categories are extensions are on classes:
+  //
+  // - declaration: @interface MyClass (Ext) ... @end
+  // - definition: @implementation MyClass (Ext) ... @end
+  //
+  // With one special case, a class extension, which is normally used to keep
+  // some declarations internal to a file without exposing them in a header.
+  //
+  // - class extension declaration: @interface MyClass () ... @end
+  // - which really links to class definition: @implementation MyClass ... @end
+  if (const auto *ID = dyn_cast<ObjCInterfaceDecl>(D))
+    return ID->getImplementation();
+  if (const auto *CD = dyn_cast<ObjCCategoryDecl>(D)) {
+    if (CD->IsClassExtension()) {
+      if (const auto *ID = CD->getClassInterface())
+        return ID->getImplementation();
+      return nullptr;
+    }
+    return CD->getImplementation();
+  }
   // Only a single declaration is allowed.
   if (isa<ValueDecl>(D) || isa<TemplateTypeParmDecl>(D) ||
       isa<TemplateTemplateParmDecl>(D)) // except cases above
@@ -223,6 +249,37 @@ locateMacroReferent(const syntax::Token &TouchedIdentifier, ParsedAST &AST,
   return llvm::None;
 }
 
+// A wrapper around `Decl::getCanonicalDecl` to support cases where Clang's
+// definition of a canonical declaration doesn't match up to what a programmer
+// would expect. For example, Objective-C classes can have three types of
+// declarations:
+//
+// - forward declaration(s): @class MyClass;
+// - true declaration (interface definition): @interface MyClass ... @end
+// - true definition (implementation): @implementation MyClass ... @end
+//
+// Clang will consider the forward declaration to be the canonical declaration
+// because it is first. We actually want the class definition if it is
+// available since that is what a programmer would consider the primary
+// declaration to be.
+const NamedDecl *getPreferredDecl(const NamedDecl *D) {
+  // FIXME: Canonical declarations of some symbols might refer to built-in
+  // decls with possibly-invalid source locations (e.g. global new operator).
+  // In such cases we should pick up a redecl with valid source location
+  // instead of failing.
+  D = llvm::cast<NamedDecl>(D->getCanonicalDecl());
+
+  // Prefer Objective-C class/protocol definitions over the forward declaration.
+  if (const auto *ID = dyn_cast<ObjCInterfaceDecl>(D))
+    if (const auto *DefinitionID = ID->getDefinition())
+      return DefinitionID;
+  if (const auto *PD = dyn_cast<ObjCProtocolDecl>(D))
+    if (const auto *DefinitionID = PD->getDefinition())
+      return DefinitionID;
+
+  return D;
+}
+
 // Decls are more complicated.
 // The AST contains at least a declaration, maybe a definition.
 // These are up-to-date, and so generally preferred over index results.
@@ -238,7 +295,7 @@ locateASTReferent(SourceLocation CurLoc, const syntax::Token *TouchedIdentifier,
   llvm::DenseMap<SymbolID, size_t> ResultIndex;
 
   auto AddResultDecl = [&](const NamedDecl *D) {
-    D = llvm::cast<NamedDecl>(D->getCanonicalDecl());
+    D = getPreferredDecl(D);
     auto Loc =
         makeLocation(AST.getASTContext(), nameLocation(*D, SM), MainFilePath);
     if (!Loc)
@@ -285,6 +342,19 @@ locateASTReferent(SourceLocation CurLoc, const syntax::Token *TouchedIdentifier,
         continue;
       }
     }
+
+    // Special case: if the class name is selected, also map Objective-C
+    // categories and category implementations back to their class interface.
+    //
+    // Since `TouchedIdentifier` might refer to the `ObjCCategoryImplDecl`
+    // instead of the `ObjCCategoryDecl` we intentionally check the contents
+    // of the locs when checking for class name equivalence.
+    if (const auto *CD = dyn_cast<ObjCCategoryDecl>(D))
+      if (const auto *ID = CD->getClassInterface())
+        if (TouchedIdentifier &&
+            (CD->getLocation() == TouchedIdentifier->location() ||
+             ID->getName() == TouchedIdentifier->text(SM)))
+          AddResultDecl(ID);
 
     // Otherwise the target declaration is the right one.
     AddResultDecl(D);
@@ -363,8 +433,8 @@ locateSymbolTextually(const SpelledWord &Word, ParsedAST &AST,
   if ((Word.ExpandedToken && !isDependentName(NodeKind)) ||
       !Word.LikelyIdentifier || !Index)
     return {};
-  // We don't want to handle words in string literals. It'd be nice to include
-  // comments, but they're not retained in TokenBuffer.
+  // We don't want to handle words in string literals. (It'd be nice to list
+  // *allowed* token kinds explicitly, but comment Tokens aren't retained).
   if (Word.PartOfSpelledToken &&
       isStringLiteral(Word.PartOfSpelledToken->kind()))
     return {};
@@ -405,15 +475,17 @@ locateSymbolTextually(const SpelledWord &Word, ParsedAST &AST,
       log("locateSymbolNamedTextuallyAt: {0}", MaybeDeclLoc.takeError());
       return;
     }
-    Location DeclLoc = *MaybeDeclLoc;
-    Location DefLoc;
+    LocatedSymbol Located;
+    Located.PreferredDeclaration = *MaybeDeclLoc;
+    Located.Name = (Sym.Name + Sym.TemplateSpecializationArgs).str();
     if (Sym.Definition) {
       auto MaybeDefLoc = indexToLSPLocation(Sym.Definition, MainFilePath);
       if (!MaybeDefLoc) {
         log("locateSymbolNamedTextuallyAt: {0}", MaybeDefLoc.takeError());
         return;
       }
-      DefLoc = *MaybeDefLoc;
+      Located.PreferredDeclaration = *MaybeDefLoc;
+      Located.Definition = *MaybeDefLoc;
     }
 
     if (ScoredResults.size() >= 3) {
@@ -424,19 +496,14 @@ locateSymbolTextually(const SpelledWord &Word, ParsedAST &AST,
       return;
     }
 
-    LocatedSymbol Located;
-    Located.Name = (Sym.Name + Sym.TemplateSpecializationArgs).str();
-    Located.PreferredDeclaration = bool(Sym.Definition) ? DefLoc : DeclLoc;
-    Located.Definition = DefLoc;
-
     SymbolQualitySignals Quality;
     Quality.merge(Sym);
     SymbolRelevanceSignals Relevance;
     Relevance.Name = Sym.Name;
     Relevance.Query = SymbolRelevanceSignals::Generic;
     Relevance.merge(Sym);
-    auto Score =
-        evaluateSymbolAndRelevance(Quality.evaluate(), Relevance.evaluate());
+    auto Score = evaluateSymbolAndRelevance(Quality.evaluateHeuristics(),
+                                            Relevance.evaluateHeuristics());
     dlog("locateSymbolNamedTextuallyAt: {0}{1} = {2}\n{3}{4}\n", Sym.Scope,
          Sym.Name, Score, Quality, Relevance);
 
@@ -469,8 +536,8 @@ const syntax::Token *findNearbyIdentifier(const SpelledWord &Word,
   // Unlikely identifiers are OK if they were used as identifiers nearby.
   if (Word.ExpandedToken)
     return nullptr;
-  // We don't want to handle words in string literals. It'd be nice to include
-  // comments, but they're not retained in TokenBuffer.
+  // We don't want to handle words in string literals. (It'd be nice to list
+  // *allowed* token kinds explicitly, but comment Tokens aren't retained).
   if (Word.PartOfSpelledToken &&
       isStringLiteral(Word.PartOfSpelledToken->kind()))
     return {};
@@ -483,19 +550,34 @@ const syntax::Token *findNearbyIdentifier(const SpelledWord &Word,
   auto Cost = [&](SourceLocation Loc) -> unsigned {
     assert(SM.getFileID(Loc) == File && "spelled token in wrong file?");
     unsigned Line = SM.getSpellingLineNumber(Loc);
-    if (Line > WordLine)
-      return 1 + llvm::Log2_64(Line - WordLine);
-    if (Line < WordLine)
-      return 2 + llvm::Log2_64(WordLine - Line);
-    return 0;
+    return Line >= WordLine ? Line - WordLine : 2 * (WordLine - Line);
   };
   const syntax::Token *BestTok = nullptr;
-  // Search bounds are based on word length: 2^N lines forward.
-  unsigned BestCost = Word.Text.size() + 1;
+  unsigned BestCost = -1;
+  // Search bounds are based on word length:
+  // - forward: 2^N lines
+  // - backward: 2^(N-1) lines.
+  unsigned MaxDistance =
+      1U << std::min<unsigned>(Word.Text.size(),
+                               std::numeric_limits<unsigned>::digits - 1);
+  // Line number for SM.translateLineCol() should be one-based, also
+  // SM.translateLineCol() can handle line number greater than
+  // number of lines in the file.
+  // - LineMin = max(1, WordLine + 1 - 2^(N-1))
+  // - LineMax = WordLine + 1 + 2^N
+  unsigned LineMin =
+      WordLine + 1 <= MaxDistance / 2 ? 1 : WordLine + 1 - MaxDistance / 2;
+  unsigned LineMax = WordLine + 1 + MaxDistance;
+  SourceLocation LocMin = SM.translateLineCol(File, LineMin, 1);
+  assert(LocMin.isValid());
+  SourceLocation LocMax = SM.translateLineCol(File, LineMax, 1);
+  assert(LocMax.isValid());
 
   // Updates BestTok and BestCost if Tok is a good candidate.
   // May return true if the cost is too high for this token.
   auto Consider = [&](const syntax::Token &Tok) {
+    if (Tok.location() < LocMin || Tok.location() > LocMax)
+      return true; // we are too far from the word, break the outer loop.
     if (!(Tok.kind() == tok::identifier && Tok.text(SM) == Word.Text))
       return false;
     // No point guessing the same location we started with.
@@ -518,7 +600,7 @@ const syntax::Token *findNearbyIdentifier(const SpelledWord &Word,
   // Find where the word occurred in the token stream, to search forward & back.
   auto *I = llvm::partition_point(SpelledTokens, [&](const syntax::Token &T) {
     assert(SM.getFileID(T.location()) == SM.getFileID(Word.Location));
-    return T.location() >= Word.Location; // Comparison OK: same file.
+    return T.location() < Word.Location; // Comparison OK: same file.
   });
   // Search for matches after the cursor.
   for (const syntax::Token &Tok : llvm::makeArrayRef(I, SpelledTokens.end()))
@@ -1061,11 +1143,10 @@ ReferencesResult findReferences(ParsedAST &AST, Position Pos, uint32_t Limit,
   } else {
     // Handle references to Decls.
 
-    // We also show references to the targets of using-decls, so we include
-    // DeclRelation::Underlying.
-    DeclRelationSet Relations = DeclRelation::TemplatePattern |
-                                DeclRelation::Alias | DeclRelation::Underlying;
-    auto Decls = getDeclAtPosition(AST, *CurLoc, Relations);
+    DeclRelationSet Relations =
+        DeclRelation::TemplatePattern | DeclRelation::Alias;
+    std::vector<const NamedDecl *> Decls =
+        getDeclAtPosition(AST, *CurLoc, Relations);
 
     // We traverse the AST to find references in the main file.
     auto MainFileRefs = findRefs(Decls, AST);
@@ -1400,30 +1481,39 @@ getTypeHierarchy(ParsedAST &AST, Position Pos, int ResolveLevels,
   if (!CXXRD)
     return llvm::None;
 
+  bool WantParents = Direction == TypeHierarchyDirection::Parents ||
+                     Direction == TypeHierarchyDirection::Both;
+  bool WantChildren = Direction == TypeHierarchyDirection::Children ||
+                      Direction == TypeHierarchyDirection::Both;
+
+  // If we're looking for children, we're doing the lookup in the index.
+  // The index does not store relationships between implicit
+  // specializations, so if we have one, use the template pattern instead.
+  // Note that this needs to be done before the declToTypeHierarchyItem(),
+  // otherwise the type hierarchy item would misleadingly contain the
+  // specialization parameters, while the children would involve classes
+  // that derive from other specializations of the template.
+  if (WantChildren) {
+    if (auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(CXXRD))
+      CXXRD = CTSD->getTemplateInstantiationPattern();
+  }
+
   Optional<TypeHierarchyItem> Result =
       declToTypeHierarchyItem(AST.getASTContext(), *CXXRD);
   if (!Result)
     return Result;
 
-  if (Direction == TypeHierarchyDirection::Parents ||
-      Direction == TypeHierarchyDirection::Both) {
+  if (WantParents) {
     Result->parents.emplace();
 
     RecursionProtectionSet RPSet;
     fillSuperTypes(*CXXRD, AST.getASTContext(), *Result->parents, RPSet);
   }
 
-  if ((Direction == TypeHierarchyDirection::Children ||
-       Direction == TypeHierarchyDirection::Both) &&
-      ResolveLevels > 0) {
+  if (WantChildren && ResolveLevels > 0) {
     Result->children.emplace();
 
     if (Index) {
-      // The index does not store relationships between implicit
-      // specializations, so if we have one, use the template pattern instead.
-      if (auto *CTSD = dyn_cast<ClassTemplateSpecializationDecl>(CXXRD))
-        CXXRD = CTSD->getTemplateInstantiationPattern();
-
       if (Optional<SymbolID> ID = getSymbolID(CXXRD))
         fillSubTypes(*ID, *Result->children, Index, ResolveLevels, TUPath);
     }

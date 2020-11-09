@@ -1,5 +1,5 @@
 // RUN: %clang_cc1 -disable-llvm-passes -triple spir64-unknown-unknown-sycldevice \
-// RUN:   -fsycl -fsycl-is-device -fsycl-explicit-simd -I %S/Inputs -S -emit-llvm %s -o - | \
+// RUN:   -fsycl -fsycl-is-device -fsycl-explicit-simd -S -emit-llvm %s -o - | \
 // RUN:   FileCheck %s
 
 // The test checks that:
@@ -9,7 +9,7 @@
 // 3. Proper module !spirv.Source metadata is generated
 
 template <typename name, typename Func>
-void kernel(Func f) __attribute__((sycl_kernel)) {
+void kernel(const Func &f) __attribute__((sycl_kernel)) {
   f();
 }
 

@@ -10,7 +10,9 @@
 #ifndef __CLANG_HIP_LIBDEVICE_DECLARES_H__
 #define __CLANG_HIP_LIBDEVICE_DECLARES_H__
 
+#ifdef __cplusplus
 extern "C" {
+#endif
 
 // BEGIN FLOAT
 __device__ __attribute__((const)) float __ocml_acos_f32(float);
@@ -127,10 +129,10 @@ __device__ __attribute__((const)) float __ocml_div_rte_f32(float, float);
 __device__ __attribute__((const)) float __ocml_div_rtn_f32(float, float);
 __device__ __attribute__((const)) float __ocml_div_rtp_f32(float, float);
 __device__ __attribute__((const)) float __ocml_div_rtz_f32(float, float);
-__device__ __attribute__((const)) float __ocml_sqrt_rte_f32(float, float);
-__device__ __attribute__((const)) float __ocml_sqrt_rtn_f32(float, float);
-__device__ __attribute__((const)) float __ocml_sqrt_rtp_f32(float, float);
-__device__ __attribute__((const)) float __ocml_sqrt_rtz_f32(float, float);
+__device__ __attribute__((const)) float __ocml_sqrt_rte_f32(float);
+__device__ __attribute__((const)) float __ocml_sqrt_rtn_f32(float);
+__device__ __attribute__((const)) float __ocml_sqrt_rtp_f32(float);
+__device__ __attribute__((const)) float __ocml_sqrt_rtz_f32(float);
 __device__ __attribute__((const)) float __ocml_fma_rte_f32(float, float, float);
 __device__ __attribute__((const)) float __ocml_fma_rtn_f32(float, float, float);
 __device__ __attribute__((const)) float __ocml_fma_rtp_f32(float, float, float);
@@ -254,10 +256,10 @@ __device__ __attribute__((const)) double __ocml_div_rte_f64(double, double);
 __device__ __attribute__((const)) double __ocml_div_rtn_f64(double, double);
 __device__ __attribute__((const)) double __ocml_div_rtp_f64(double, double);
 __device__ __attribute__((const)) double __ocml_div_rtz_f64(double, double);
-__device__ __attribute__((const)) double __ocml_sqrt_rte_f64(double, double);
-__device__ __attribute__((const)) double __ocml_sqrt_rtn_f64(double, double);
-__device__ __attribute__((const)) double __ocml_sqrt_rtp_f64(double, double);
-__device__ __attribute__((const)) double __ocml_sqrt_rtz_f64(double, double);
+__device__ __attribute__((const)) double __ocml_sqrt_rte_f64(double);
+__device__ __attribute__((const)) double __ocml_sqrt_rtn_f64(double);
+__device__ __attribute__((const)) double __ocml_sqrt_rtp_f64(double);
+__device__ __attribute__((const)) double __ocml_sqrt_rtz_f64(double);
 __device__ __attribute__((const)) double __ocml_fma_rte_f64(double, double,
                                                             double);
 __device__ __attribute__((const)) double __ocml_fma_rtn_f64(double, double,
@@ -316,7 +318,7 @@ __device__ __attribute__((pure)) __2f16 __ocml_log2_2f16(__2f16);
 __device__ inline __2f16
 __llvm_amdgcn_rcp_2f16(__2f16 __x) // Not currently exposed by ROCDL.
 {
-  return __2f16{__llvm_amdgcn_rcp_f16(__x.x), __llvm_amdgcn_rcp_f16(__x.y)};
+  return (__2f16)(__llvm_amdgcn_rcp_f16(__x.x), __llvm_amdgcn_rcp_f16(__x.y));
 }
 __device__ __attribute__((const)) __2f16 __ocml_rint_2f16(__2f16);
 __device__ __attribute__((const)) __2f16 __ocml_rsqrt_2f16(__2f16);
@@ -325,6 +327,8 @@ __device__ __attribute__((const)) __2f16 __ocml_sqrt_2f16(__2f16);
 __device__ __attribute__((const)) __2f16 __ocml_trunc_2f16(__2f16);
 __device__ __attribute__((const)) __2f16 __ocml_pown_2f16(__2f16, __2i16);
 
+#ifdef __cplusplus
 } // extern "C"
+#endif
 
 #endif // __CLANG_HIP_LIBDEVICE_DECLARES_H__

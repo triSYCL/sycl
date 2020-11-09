@@ -19,6 +19,7 @@
 #include <CL/sycl/access/access.hpp>
 #include <CL/sycl/detail/accessor_impl.hpp>
 #include <CL/sycl/detail/cg.hpp>
+#include <detail/program_manager/program_manager.hpp>
 
 __SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
@@ -32,6 +33,7 @@ class DispatchHostTask;
 using QueueImplPtr = std::shared_ptr<detail::queue_impl>;
 using EventImplPtr = std::shared_ptr<detail::event_impl>;
 using ContextImplPtr = std::shared_ptr<detail::context_impl>;
+using StreamImplPtr = std::shared_ptr<detail::stream_impl>;
 
 class Command;
 class AllocaCommand;
@@ -120,12 +122,16 @@ public:
   /// \param Blocking if this argument is true, function will wait for the
   ///        command to be unblocked before calling enqueueImp.
   /// \return true if the command is enqueued.
-  bool enqueue(EnqueueResultT &EnqueueResult, BlockingT Blocking);
+  virtual bool enqueue(EnqueueResultT &EnqueueResult, BlockingT Blocking);
 
   bool isFinished();
 
   bool isSuccessfullyEnqueued() const {
     return MEnqueueStatus == EnqueueResultT::SyclEnqueueSuccess;
+  }
+
+  bool isEnqueueBlocked() const {
+    return MEnqueueStatus == EnqueueResultT::SyclEnqueueBlocked;
   }
 
   std::shared_ptr<queue_impl> getQueue() const { return MQueue; }
@@ -211,6 +217,10 @@ protected:
   friend class DispatchHostTask;
 
 public:
+  const std::vector<EventImplPtr> getPreparedHostDepsEvents() const {
+    return MPreparedHostDepsEvents;
+  }
+
   /// Contains list of dependencies(edges)
   std::vector<DepDesc> MDeps;
   /// Contains list of commands that depend on the command.
@@ -248,7 +258,7 @@ public:
   ///
   /// Stream ids are positive integers and we set it to an invalid value.
   int32_t MStreamID = -1;
-  /// Reserved for storing the object address such as SPIRV or memory object
+  /// Reserved for storing the object address such as SPIR-V or memory object
   /// address.
   void *MAddress = nullptr;
   /// Buffer to build the address string.
@@ -480,28 +490,39 @@ class ExecCGCommand : public Command {
 public:
   ExecCGCommand(std::unique_ptr<detail::CG> CommandGroup, QueueImplPtr Queue);
 
-  void flushStreams();
+  vector_class<StreamImplPtr> getStreams() const;
+
+  void clearStreams();
 
   void printDot(std::ostream &Stream) const final override;
   void emitInstrumentationData() final override;
 
   detail::CG &getCG() const { return *MCommandGroup; }
 
-  // MEmptyCmd one is only employed if this command refers to host-task.
-  // MEmptyCmd due to unreliable mechanism of lookup for single EmptyCommand
-  // amongst users of host-task-representing command. This unreliability roots
-  // in cleanup process.
+  // MEmptyCmd is only employed if this command refers to host-task.
+  // The mechanism of lookup for single EmptyCommand amongst users of
+  // host-task-representing command is unreliable. This unreliability roots in
+  // the cleanup process.
   EmptyCommand *MEmptyCmd = nullptr;
+
+  // This function is only usable for native kernel to prevent access to free'd
+  // memory in DispatchNativeKernel.
+  // TODO remove when native kernel support is terminated.
+  void releaseCG() {
+    assert(MCommandGroup->getType() == CG::RUN_ON_HOST_INTEL &&
+           "Only 'native kernel' is allowed to release command group");
+    MCommandGroup.release();
+  }
 
 private:
   cl_int enqueueImp() final override;
 
   AllocaCommandBase *getAllocaForReq(Requirement *Req);
 
-  pi_result SetKernelParamsAndLaunch(CGExecKernel *ExecKernel,
-                                     RT::PiKernel Kernel, NDRDescT &NDRDesc,
-                                     std::vector<RT::PiEvent> &RawEvents,
-                                     RT::PiEvent &Event);
+  pi_result SetKernelParamsAndLaunch(
+      CGExecKernel *ExecKernel, RT::PiKernel Kernel, NDRDescT &NDRDesc,
+      std::vector<RT::PiEvent> &RawEvents, RT::PiEvent &Event,
+      ProgramManager::KernelArgMask EliminatedArgMask);
 
   std::unique_ptr<detail::CG> MCommandGroup;
 

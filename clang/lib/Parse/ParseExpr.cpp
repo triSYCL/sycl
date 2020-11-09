@@ -1007,23 +1007,11 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
     Res = Actions.ActOnCXXNullPtrLiteral(ConsumeToken());
     break;
 
-  case tok::annot_uneval_primary_expr:
   case tok::annot_primary_expr:
+  case tok::annot_overload_set:
     Res = getExprAnnotation(Tok);
-    if (SavedKind == tok::annot_uneval_primary_expr) {
-      if (Expr *E = Res.get()) {
-        if (!E->isTypeDependent() && !E->containsErrors()) {
-          // TransformToPotentiallyEvaluated expects that it will still be in a
-          // (temporary) unevaluated context and then looks through that context
-          // to build it in the surrounding context. So we need to push an
-          // unevaluated context to balance things out.
-          EnterExpressionEvaluationContext Unevaluated(
-              Actions, Sema::ExpressionEvaluationContext::Unevaluated,
-              Sema::ReuseLambdaContextDecl);
-          Res = Actions.TransformToPotentiallyEvaluated(Res.get());
-        }
-      }
-    }
+    if (!Res.isInvalid() && Tok.getKind() == tok::annot_overload_set)
+      Res = Actions.ActOnNameClassifiedAsOverloadSet(getCurScope(), Res.get());
     ConsumeAnnotationToken();
     if (!Res.isInvalid() && Tok.is(tok::less))
       checkPotentialAngleBracket(Res);
@@ -2852,6 +2840,8 @@ Parser::ParseParenExpression(ParenParseOption &ExprType, bool stopIfCastExpr,
   if (ExprType >= CompoundStmt && Tok.is(tok::l_brace)) {
     Diag(Tok, diag::ext_gnu_statement_expr);
 
+    checkCompoundToken(OpenLoc, tok::l_paren, CompoundToken::StmtExprBegin);
+
     if (!getCurScope()->getFnParent() && !getCurScope()->getBlockParent()) {
       Result = ExprError(Diag(OpenLoc, diag::err_stmtexpr_file_scope));
     } else {
@@ -3336,8 +3326,9 @@ ExprResult Parser::ParseFoldExpression(ExprResult LHS,
                         : diag::ext_fold_expression);
 
   T.consumeClose();
-  return Actions.ActOnCXXFoldExpr(T.getOpenLocation(), LHS.get(), Kind,
-                                  EllipsisLoc, RHS.get(), T.getCloseLocation());
+  return Actions.ActOnCXXFoldExpr(getCurScope(), T.getOpenLocation(), LHS.get(),
+                                  Kind, EllipsisLoc, RHS.get(),
+                                  T.getCloseLocation());
 }
 
 /// ParseExpressionList - Used for C/C++ (argument-)expression-list.

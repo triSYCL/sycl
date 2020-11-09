@@ -20,6 +20,8 @@
 
 #cmakedefine01 HAVE_PPOLL
 
+#cmakedefine01 HAVE_PTSNAME_R
+
 #cmakedefine01 HAVE_SIGACTION
 
 #cmakedefine01 HAVE_PROCESS_VM_READV
@@ -37,6 +39,8 @@
 #cmakedefine01 LLDB_ENABLE_LZMA
 
 #cmakedefine01 LLDB_ENABLE_CURSES
+
+#cmakedefine01 CURSES_HAVE_NCURSES_CURSES_H
 
 #cmakedefine01 LLDB_ENABLE_LIBEDIT
 

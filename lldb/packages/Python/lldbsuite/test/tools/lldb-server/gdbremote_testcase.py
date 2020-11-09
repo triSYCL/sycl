@@ -36,7 +36,7 @@ class GdbRemoteTestCaseBase(TestBase):
     # Default sleep time in seconds. The sleep time is doubled under Asan.
     DEFAULT_SLEEP   =  5  * (2  if ('ASAN_OPTIONS' in os.environ) else 1)
 
-    _GDBREMOTE_KILL_PACKET = "$k#6b"
+    _GDBREMOTE_KILL_PACKET = b"$k#6b"
 
     # Start the inferior separately, attach to the inferior on the stub
     # command line.
@@ -318,7 +318,13 @@ class GdbRemoteTestCaseBase(TestBase):
             raise _ConnectionRefused()  # Got EOF, connection dropped.
 
     def create_socket(self):
-        sock = socket.socket()
+        try:
+            sock = socket.socket(family=socket.AF_INET)
+        except OSError as e:
+            if e.errno != errno.EAFNOSUPPORT:
+                raise
+            sock = socket.socket(family=socket.AF_INET6)
+
         logger = self.logger
 
         triple = self.dbg.GetSelectedPlatform().GetTriple()
@@ -379,7 +385,7 @@ class GdbRemoteTestCaseBase(TestBase):
                 ["*:{}".format(self.port)]
         else:
             commandline_args = self.debug_monitor_extra_args + \
-                ["127.0.0.1:{}".format(self.port)]
+                ["localhost:{}".format(self.port)]
 
         if attach_pid:
             commandline_args += ["--attach=%d" % attach_pid]
@@ -703,7 +709,7 @@ class GdbRemoteTestCaseBase(TestBase):
             self.sock,
             self.test_sequence,
             self._pump_queues,
-            self.DEFAULT_TIMEOUT,
+            self.DEFAULT_TIMEOUT * len(self.test_sequence),
             self.logger)
 
     _KNOWN_REGINFO_KEYS = [

@@ -19,6 +19,7 @@
 #include "CGObjCRuntime.h"
 #include "CGOpenCLRuntime.h"
 #include "CGOpenMPRuntime.h"
+#include "CGOpenMPRuntimeAMDGCN.h"
 #include "CGOpenMPRuntimeNVPTX.h"
 #include "CGSYCLRuntime.h"
 #include "CodeGenFunction.h"
@@ -217,6 +218,11 @@ void CodeGenModule::createOpenMPRuntime() {
     assert(getLangOpts().OpenMPIsDevice &&
            "OpenMP NVPTX is only prepared to deal with device code.");
     OpenMPRuntime.reset(new CGOpenMPRuntimeNVPTX(*this));
+    break;
+  case llvm::Triple::amdgcn:
+    assert(getLangOpts().OpenMPIsDevice &&
+           "OpenMP AMDGCN is only prepared to deal with device code.");
+    OpenMPRuntime.reset(new CGOpenMPRuntimeAMDGCN(*this));
     break;
   default:
     if (LangOpts.OpenMPSimd)
@@ -601,6 +607,23 @@ void CodeGenModule::Release() {
     // Indicate that we want to instrument branch control flow protection.
     getModule().addModuleFlag(llvm::Module::Override, "cf-protection-branch",
                               1);
+  }
+
+  if (Arch == llvm::Triple::aarch64 || Arch == llvm::Triple::aarch64_32 ||
+      Arch == llvm::Triple::aarch64_be) {
+    getModule().addModuleFlag(llvm::Module::Error,
+                              "branch-target-enforcement",
+                              LangOpts.BranchTargetEnforcement);
+
+    getModule().addModuleFlag(llvm::Module::Error, "sign-return-address",
+                              LangOpts.hasSignReturnAddress());
+
+    getModule().addModuleFlag(llvm::Module::Error, "sign-return-address-all",
+                              LangOpts.isSignReturnAddressScopeAll());
+
+    getModule().addModuleFlag(llvm::Module::Error,
+                              "sign-return-address-with-bkey",
+                              !LangOpts.isSignReturnAddressWithAKey());
   }
 
   if (LangOpts.CUDAIsDevice && getTriple().isNVPTX()) {
@@ -1416,6 +1439,22 @@ void CodeGenModule::GenOpenCLArgMetadata(llvm::Function *Fn,
   // MDNode for the kernel argument names.
   SmallVector<llvm::Metadata *, 8> argNames;
 
+  auto Mangle = [&](QualType ty) {
+    /// When using XOCC in hw_emu mode this metadata is stored in an XML
+    /// file so we need to remove '<' and '>' because they aren't parsed
+    /// correctly
+    std::unique_ptr<MangleContext> Ctx{ItaniumMangleContext::create(
+        Context, Context.getDiagnostics(), /*IsUniqueNameMangler*/ true)};
+
+    SmallString<256> Buffer;
+    llvm::raw_svector_ostream Out(Buffer);
+    Ctx->mangleTypeName(ty, Out);
+    return Buffer.str().str();
+  };
+
+  // MDNode for the intel_buffer_location attribute.
+  SmallVector<llvm::Metadata *, 8> argSYCLBufferLocationAttr;
+
   if (FD && CGF)
     for (unsigned i = 0, e = FD->getNumParams(); i != e; ++i) {
       const ParmVarDecl *parm = FD->getParamDecl(i);
@@ -1439,6 +1478,9 @@ void CodeGenModule::GenOpenCLArgMetadata(llvm::Function *Fn,
         if (pointeeTy.isCanonical() && pos != std::string::npos)
           typeName.erase(pos + 1, 8);
 
+        if (CGF->Target.getTriple().isXilinxSYCLDevice())
+          typeName = Mangle(pointeeTy);
+
         argTypeNames.push_back(llvm::MDString::get(VMContext, typeName));
 
         std::string baseTypeName =
@@ -1450,6 +1492,9 @@ void CodeGenModule::GenOpenCLArgMetadata(llvm::Function *Fn,
         pos = baseTypeName.find("unsigned");
         if (pos != std::string::npos)
           baseTypeName.erase(pos + 1, 8);
+
+        if (CGF->Target.getTriple().isXilinxSYCLDevice())
+          baseTypeName = Mangle(pointeeTy);
 
         argBaseTypeNames.push_back(
             llvm::MDString::get(VMContext, baseTypeName));
@@ -1506,18 +1551,8 @@ void CodeGenModule::GenOpenCLArgMetadata(llvm::Function *Fn,
           removeImageAccessQualifier(baseTypeName);
         }
 
-        /// When using XOCC in hw_emu mode this metadata is stored in an XML
-        /// file so we need to remove '<' and '>' because they aren't parsed
-        /// correctly
-        if (CGF->Target.getTriple().isXilinxSYCLDevice()) {
-          std::unique_ptr<MangleContext> Ctx{ItaniumMangleContext::create(
-              Context, Context.getDiagnostics(), /*IsUniqueNameMangler*/ true)};
-
-          SmallString<256> Buffer;
-          llvm::raw_svector_ostream Out(Buffer);
-          Ctx->mangleTypeName(ty, Out);
-          typeName = Buffer.str().str();
-        }
+        if (CGF->Target.getTriple().isXilinxSYCLDevice())
+          typeName = Mangle(ty);
 
         argTypeNames.push_back(llvm::MDString::get(VMContext, typeName));
 
@@ -1525,6 +1560,9 @@ void CodeGenModule::GenOpenCLArgMetadata(llvm::Function *Fn,
         pos = baseTypeName.find("unsigned");
         if (pos != std::string::npos)
           baseTypeName.erase(pos + 1, 8);
+
+        if (CGF->Target.getTriple().isXilinxSYCLDevice())
+          baseTypeName = Mangle(ty);
 
         argBaseTypeNames.push_back(
             llvm::MDString::get(VMContext, baseTypeName));
@@ -1552,21 +1590,34 @@ void CodeGenModule::GenOpenCLArgMetadata(llvm::Function *Fn,
 
       // Get argument name.
       argNames.push_back(llvm::MDString::get(VMContext, parm->getName()));
+
+      auto *SYCLBufferLocationAttr =
+          parm->getAttr<SYCLIntelBufferLocationAttr>();
+      argSYCLBufferLocationAttr.push_back(
+          (SYCLBufferLocationAttr)
+              ? llvm::ConstantAsMetadata::get(CGF->Builder.getInt32(
+                    SYCLBufferLocationAttr->getLocationID()))
+              : llvm::ConstantAsMetadata::get(CGF->Builder.getInt32(-1)));
     }
 
-  Fn->setMetadata("kernel_arg_addr_space",
-                  llvm::MDNode::get(VMContext, addressQuals));
-  Fn->setMetadata("kernel_arg_access_qual",
-                  llvm::MDNode::get(VMContext, accessQuals));
-  Fn->setMetadata("kernel_arg_type",
-                  llvm::MDNode::get(VMContext, argTypeNames));
-  Fn->setMetadata("kernel_arg_base_type",
-                  llvm::MDNode::get(VMContext, argBaseTypeNames));
-  Fn->setMetadata("kernel_arg_type_qual",
-                  llvm::MDNode::get(VMContext, argTypeQuals));
-  if (getCodeGenOpts().EmitOpenCLArgMetadata)
-    Fn->setMetadata("kernel_arg_name",
-                    llvm::MDNode::get(VMContext, argNames));
+  if (LangOpts.SYCLIsDevice && !LangOpts.SYCLExplicitSIMD)
+    Fn->setMetadata("kernel_arg_buffer_location",
+                    llvm::MDNode::get(VMContext, argSYCLBufferLocationAttr));
+  else {
+    Fn->setMetadata("kernel_arg_addr_space",
+                    llvm::MDNode::get(VMContext, addressQuals));
+    Fn->setMetadata("kernel_arg_access_qual",
+                    llvm::MDNode::get(VMContext, accessQuals));
+    Fn->setMetadata("kernel_arg_type",
+                    llvm::MDNode::get(VMContext, argTypeNames));
+    Fn->setMetadata("kernel_arg_base_type",
+                    llvm::MDNode::get(VMContext, argBaseTypeNames));
+    Fn->setMetadata("kernel_arg_type_qual",
+                    llvm::MDNode::get(VMContext, argTypeQuals));
+    if (getCodeGenOpts().EmitOpenCLArgMetadata)
+      Fn->setMetadata("kernel_arg_name",
+                      llvm::MDNode::get(VMContext, argNames));
+  }
 }
 
 /// Determines whether the language options require us to model
@@ -1802,6 +1853,7 @@ bool CodeGenModule::GetCPUAndFeaturesAttributes(GlobalDecl GD,
   // we have a decl for the function and it has a target attribute then
   // parse that and add it to the feature set.
   StringRef TargetCPU = getTarget().getTargetOpts().CPU;
+  StringRef TuneCPU = getTarget().getTargetOpts().TuneCPU;
   std::vector<std::string> Features;
   const auto *FD = dyn_cast_or_null<FunctionDecl>(GD.getDecl());
   FD = FD ? FD->getMostRecentDecl() : FD;
@@ -1822,9 +1874,14 @@ bool CodeGenModule::GetCPUAndFeaturesAttributes(GlobalDecl GD,
     // the function.
     if (TD) {
       ParsedTargetAttr ParsedAttr = TD->parse();
-      if (ParsedAttr.Architecture != "" &&
-          getTarget().isValidCPUName(ParsedAttr.Architecture))
+      if (!ParsedAttr.Architecture.empty() &&
+          getTarget().isValidCPUName(ParsedAttr.Architecture)) {
         TargetCPU = ParsedAttr.Architecture;
+        TuneCPU = ""; // Clear the tune CPU.
+      }
+      if (!ParsedAttr.Tune.empty() &&
+          getTarget().isValidCPUName(ParsedAttr.Tune))
+        TuneCPU = ParsedAttr.Tune;
     }
   } else {
     // Otherwise just add the existing target cpu and target features to the
@@ -1832,8 +1889,12 @@ bool CodeGenModule::GetCPUAndFeaturesAttributes(GlobalDecl GD,
     Features = getTarget().getTargetOpts().Features;
   }
 
-  if (TargetCPU != "") {
+  if (!TargetCPU.empty()) {
     Attrs.addAttribute("target-cpu", TargetCPU);
+    AddedAttr = true;
+  }
+  if (!TuneCPU.empty()) {
+    Attrs.addAttribute("tune-cpu", TuneCPU);
     AddedAttr = true;
   }
   if (!Features.empty()) {
@@ -1872,8 +1933,11 @@ void CodeGenModule::setNonAliasAttributes(GlobalDecl GD,
         // We know that GetCPUAndFeaturesAttributes will always have the
         // newest set, since it has the newest possible FunctionDecl, so the
         // new ones should replace the old.
-        F->removeFnAttr("target-cpu");
-        F->removeFnAttr("target-features");
+        llvm::AttrBuilder RemoveAttrs;
+        RemoveAttrs.addAttribute("target-cpu");
+        RemoveAttrs.addAttribute("target-features");
+        RemoveAttrs.addAttribute("tune-cpu");
+        F->removeAttributes(llvm::AttributeList::FunctionIndex, RemoveAttrs);
         F->addAttributes(llvm::AttributeList::FunctionIndex, Attrs);
       }
     }
@@ -2029,7 +2093,7 @@ void CodeGenModule::SetFunctionAttributes(GlobalDecl GD, llvm::Function *F,
 }
 
 void CodeGenModule::addUsedGlobal(llvm::GlobalValue *GV) {
-  assert(!GV->isDeclaration() &&
+  assert((isa<llvm::Function>(GV) || !GV->isDeclaration()) &&
          "Only globals with definition can force usage.");
   LLVMUsed.emplace_back(GV);
 }
@@ -2235,6 +2299,11 @@ void CodeGenModule::EmitDeferred() {
     assert(DeferredVTables.empty());
   }
 
+  // Emit CUDA/HIP static device variables referenced by host code only.
+  if (getLangOpts().CUDA)
+    for (auto V : getContext().CUDAStaticDeviceVarReferencedByHost)
+      DeferredDeclsToEmit.push_back(V);
+
   // Stop if we're out of both deferred vtables and deferred declarations.
   if (DeferredDeclsToEmit.empty())
     return;
@@ -2245,6 +2314,31 @@ void CodeGenModule::EmitDeferred() {
   CurDeclsToEmit.swap(DeferredDeclsToEmit);
 
   for (GlobalDecl &D : CurDeclsToEmit) {
+    const ValueDecl *VD = cast<ValueDecl>(D.getDecl());
+    // If emitting for SYCL device, emit the deferred alias
+    // as well as what it aliases.
+    if (LangOpts.SYCLIsDevice) {
+      if (AliasAttr *Attr = VD->getAttr<AliasAttr>()) {
+        StringRef AliaseeName = Attr->getAliasee();
+        auto DDI = DeferredDecls.find(AliaseeName);
+        // Emit what is aliased first.
+        if (DDI != DeferredDecls.end()) {
+          GlobalDecl GD = DDI->second;
+          llvm::GlobalValue *AliaseeGV =
+              dyn_cast<llvm::GlobalValue>(GetAddrOfGlobal(GD, ForDefinition));
+          if (!AliaseeGV)
+            AliaseeGV = GetGlobalValue(getMangledName(GD));
+          assert(AliaseeGV);
+          EmitGlobalDefinition(GD, AliaseeGV);
+          // Remove the entry just added to the DeferredDeclsToEmit
+          // since we have emitted it.
+          DeferredDeclsToEmit.pop_back();
+        }
+        // Now emit the alias itself.
+        EmitAliasDefinition(D);
+        continue;
+      }
+    }
     // We should call GetAddrOfGlobal with IsForDefinition set to true in order
     // to get GlobalValue with exactly the type we need, not something that
     // might had been created for another decl with the same mangled name but
@@ -2276,6 +2370,20 @@ void CodeGenModule::EmitDeferred() {
 
     // Otherwise, emit the definition and move on to the next one.
     EmitGlobalDefinition(D, GV);
+
+    if (LangOpts.SYCLIsDevice) {
+      // If there are any aliases deferred for this, emit those now.
+      for (auto It = DeferredAliases.begin(); It != DeferredAliases.end();
+           /*no increment*/) {
+        const ValueDecl *Global = cast<ValueDecl>(It->second.getDecl());
+        if (It->first == getMangledName(D)) {
+          EmitAliasDefinition(Global);
+          It = DeferredAliases.erase(It);
+        } else {
+          ++It;
+        }
+      }
+    }
 
     // If we found out that we need to emit more decls, do that recursively.
     // This has the advantage that the decls are emitted in a DFS and related
@@ -2600,9 +2708,19 @@ void CodeGenModule::EmitGlobal(GlobalDecl GD) {
     return;
 
   // If this is an alias definition (which otherwise looks like a declaration)
-  // emit it now.
-  if (Global->hasAttr<AliasAttr>())
-    return EmitAliasDefinition(GD);
+  // handle it now.
+  if (AliasAttr *Attr = Global->getAttr<AliasAttr>()) {
+    // Emit the alias here if it is not SYCL device compilation.
+    if (!LangOpts.SYCLIsDevice)
+      return EmitAliasDefinition(GD);
+    // Defer for SYCL devices, until either the alias or what it aliases
+    // is used.
+    StringRef MangledName = getMangledName(GD);
+    DeferredDecls[MangledName] = GD;
+    StringRef AliaseeName = Attr->getAliasee();
+    DeferredAliases[AliaseeName] = GD;
+    return;
+  }
 
   // IFunc like an alias whose value is resolved at runtime by calling resolver.
   if (Global->hasAttr<IFuncAttr>())
@@ -3944,7 +4062,10 @@ LangAS CodeGenModule::getStringLiteralAddressSpace() const {
     //   const char *getLiteral() n{
     //     return "AB";
     //   }
-    return LangAS::opencl_private;
+    // Use global address space to avoid illegal casts from constant to generic.
+    // Private address space is not used here because in SPIR-V global values
+    // cannot have private address space.
+    return LangAS::opencl_global;
   if (auto AS = getTarget().getConstantAddressSpace())
     return AS.getValue();
   return LangAS::Default;
@@ -4321,7 +4442,12 @@ void CodeGenModule::EmitGlobalVarDefinition(const VarDecl *D,
         // Shadow variables and their properties must be registered with CUDA
         // runtime. Skip Extern global variables, which will be registered in
         // the TU where they are defined.
-        if (!D->hasExternalStorage())
+        //
+        // Don't register a C++17 inline variable. The local symbol can be
+        // discarded and referencing a discarded local symbol from outside the
+        // comdat (__cuda_register_globals) is disallowed by the ELF spec.
+        // TODO: Reject __device__ constexpr and __device__ inline in Sema.
+        if (!D->hasExternalStorage() && !D->isInline())
           getCUDARuntime().registerDeviceVar(D, *GV, !D->hasDefinition(),
                                              D->hasAttr<CUDAConstantAttr>());
       } else if (D->hasAttr<CUDASharedAttr>()) {
@@ -4817,20 +4943,21 @@ void CodeGenModule::EmitAliasDefinition(GlobalDecl GD) {
   // if a deferred decl.
   llvm::Constant *Aliasee;
   llvm::GlobalValue::LinkageTypes LT;
+  unsigned AS;
   if (isa<llvm::FunctionType>(DeclTy)) {
     Aliasee = GetOrCreateLLVMFunction(AA->getAliasee(), DeclTy, GD,
                                       /*ForVTable=*/false);
     LT = getFunctionLinkage(GD);
+    AS = Aliasee->getType()->getPointerAddressSpace();
   } else {
-    Aliasee = GetOrCreateLLVMGlobal(AA->getAliasee(),
-                                    llvm::PointerType::getUnqual(DeclTy),
+    AS = ArgInfoAddressSpace(GetGlobalVarAddressSpace(/*D=*/nullptr));
+    Aliasee = GetOrCreateLLVMGlobal(AA->getAliasee(), DeclTy->getPointerTo(AS),
                                     /*D=*/nullptr);
     LT = getLLVMLinkageVarDefinition(cast<VarDecl>(GD.getDecl()),
                                      D->getType().isConstQualified());
   }
 
   // Create the new alias itself, but don't set a name yet.
-  unsigned AS = Aliasee->getType()->getPointerAddressSpace();
   auto *GA =
       llvm::GlobalAlias::create(DeclTy, AS, LT, "", Aliasee, &getModule());
 
@@ -4851,8 +4978,8 @@ void CodeGenModule::EmitAliasDefinition(GlobalDecl GD) {
     // Remove it and replace uses of it with the alias.
     GA->takeName(Entry);
 
-    Entry->replaceAllUsesWith(llvm::ConstantExpr::getBitCast(GA,
-                                                          Entry->getType()));
+    Entry->replaceAllUsesWith(
+        llvm::ConstantExpr::getBitCast(GA, Entry->getType()));
     Entry->eraseFromParent();
   } else {
     GA->setName(MangledName);
@@ -5149,6 +5276,8 @@ CodeGenModule::GetAddrOfConstantCFString(const StringLiteral *Literal) {
   switch (Triple.getObjectFormat()) {
   case llvm::Triple::UnknownObjectFormat:
     llvm_unreachable("unknown file format");
+  case llvm::Triple::GOFF:
+    llvm_unreachable("GOFF is not yet implemented");
   case llvm::Triple::XCOFF:
     llvm_unreachable("XCOFF is not yet implemented");
   case llvm::Triple::COFF:
@@ -5626,16 +5755,21 @@ void CodeGenModule::EmitTopLevelDecl(Decl *D) {
           Spec->hasDefinition())
         DI->completeTemplateDefinition(*Spec);
   } LLVM_FALLTHROUGH;
-  case Decl::CXXRecord:
-    if (CGDebugInfo *DI = getModuleDebugInfo())
+  case Decl::CXXRecord: {
+    CXXRecordDecl *CRD = cast<CXXRecordDecl>(D);
+    if (CGDebugInfo *DI = getModuleDebugInfo()) {
+      if (CRD->hasDefinition())
+        DI->EmitAndRetainType(getContext().getRecordType(cast<RecordDecl>(D)));
       if (auto *ES = D->getASTContext().getExternalSource())
         if (ES->hasExternalDefinitions(D) == ExternalASTSource::EK_Never)
-          DI->completeUnusedClass(cast<CXXRecordDecl>(*D));
+          DI->completeUnusedClass(*CRD);
+    }
     // Emit any static data members, they may be definitions.
-    for (auto *I : cast<CXXRecordDecl>(D)->decls())
+    for (auto *I : CRD->decls())
       if (isa<VarDecl>(I) || isa<CXXRecordDecl>(I))
         EmitTopLevelDecl(I);
     break;
+  }
     // No code generation needed.
   case Decl::UsingShadow:
   case Decl::ClassTemplate:
@@ -5819,6 +5953,25 @@ void CodeGenModule::EmitTopLevelDecl(Decl *D) {
 
   case Decl::OMPRequires:
     EmitOMPRequiresDecl(cast<OMPRequiresDecl>(D));
+    break;
+
+  case Decl::Typedef:
+  case Decl::TypeAlias: // using foo = bar; [C++11]
+    if (CGDebugInfo *DI = getModuleDebugInfo())
+      DI->EmitAndRetainType(
+          getContext().getTypedefType(cast<TypedefNameDecl>(D)));
+    break;
+
+  case Decl::Record:
+    if (CGDebugInfo *DI = getModuleDebugInfo())
+      if (cast<RecordDecl>(D)->getDefinition())
+        DI->EmitAndRetainType(getContext().getRecordType(cast<RecordDecl>(D)));
+    break;
+
+  case Decl::Enum:
+    if (CGDebugInfo *DI = getModuleDebugInfo())
+      if (cast<EnumDecl>(D)->getDefinition())
+        DI->EmitAndRetainType(getContext().getEnumType(cast<EnumDecl>(D)));
     break;
 
   default:

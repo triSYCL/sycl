@@ -1,5 +1,5 @@
-// RUN: %clang_cc1 -fsycl -fsycl-is-device -fsyntax-only -verify -DTRIGGER_ERROR %s
-// RUN: %clang_cc1 -fsycl -fsycl-is-device -ast-dump %s | FileCheck %s
+// RUN: %clang_cc1 -fsycl -fsycl-is-device -fsyntax-only -Wno-sycl-2017-compat -verify -DTRIGGER_ERROR %s
+// RUN: %clang_cc1 -fsycl -fsycl-is-device -Wno-sycl-2017-compat -ast-dump %s | FileCheck %s
 
 [[intel::reqd_sub_group_size(4)]] void foo() {} // expected-note {{conflicting attribute is here}}
 // expected-note@-1 {{conflicting attribute is here}}
@@ -7,32 +7,30 @@
 
 class Functor16 {
 public:
-  // expected-warning@+2 {{attribute 'intel_reqd_sub_group_size' is deprecated}}
-  // expected-note@+1 {{did you mean to use 'intel::reqd_sub_group_size' instead?}}
-  [[cl::intel_reqd_sub_group_size(16)]] void operator()() {}
+  [[intel::reqd_sub_group_size(16)]] void operator()() const {}
 };
 
 class Functor8 { // expected-error {{conflicting attributes applied to a SYCL kernel}}
 public:
-  [[intel::reqd_sub_group_size(8)]] void operator()() { // expected-note {{conflicting attribute is here}}
+  [[intel::reqd_sub_group_size(8)]] void operator()() const { // expected-note {{conflicting attribute is here}}
     foo();
   }
 };
 
 class Functor4 {
 public:
-  [[intel::reqd_sub_group_size(12)]] void operator()() {}
+  [[intel::reqd_sub_group_size(12)]] void operator()() const {}
 };
 
 class Functor {
 public:
-  void operator()() {
+  void operator()() const {
     foo();
   }
 };
 
 template <typename name, typename Func>
-__attribute__((sycl_kernel)) void kernel(Func kernelFunc) {
+__attribute__((sycl_kernel)) void kernel(const Func &kernelFunc) {
   kernelFunc();
 }
 
@@ -55,9 +53,7 @@ void bar() {
 
   kernel<class kernel_name5>([]() [[intel::reqd_sub_group_size(2)]]{});
   kernel<class kernel_name6>([]() [[intel::reqd_sub_group_size(4)]] { foo(); });
-  // expected-warning@+2 {{attribute 'intel_reqd_sub_group_size' is deprecated}}
-  // expected-note@+1 {{did you mean to use 'intel::reqd_sub_group_size' instead?}}
-  kernel<class kernel_name7>([]() [[cl::intel_reqd_sub_group_size(6)]]{});
+  kernel<class kernel_name7>([]() [[intel::reqd_sub_group_size(6)]]{});
 
   Functor4 f4;
   kernel<class kernel_name8>(f4);

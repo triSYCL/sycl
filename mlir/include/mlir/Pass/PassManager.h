@@ -9,6 +9,7 @@
 #ifndef MLIR_PASS_PASSMANAGER_H
 #define MLIR_PASS_PASSMANAGER_H
 
+#include "mlir/IR/Dialect.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/Support/LogicalResult.h"
 #include "llvm/ADT/Optional.h"
@@ -25,9 +26,9 @@ class Any;
 
 namespace mlir {
 class AnalysisManager;
+class Identifier;
 class MLIRContext;
 class ModuleOp;
-class OperationName;
 class Operation;
 class Pass;
 class PassInstrumentation;
@@ -35,6 +36,7 @@ class PassInstrumentor;
 
 namespace detail {
 struct OpPassManagerImpl;
+struct PassExecutionState;
 } // end namespace detail
 
 //===----------------------------------------------------------------------===//
@@ -46,6 +48,8 @@ struct OpPassManagerImpl;
 /// other OpPassManagers or the top-level PassManager.
 class OpPassManager {
 public:
+  OpPassManager(Identifier name, bool verifyPasses);
+  OpPassManager(StringRef name, bool verifyPasses);
   OpPassManager(OpPassManager &&rhs);
   OpPassManager(const OpPassManager &rhs);
   ~OpPassManager();
@@ -53,17 +57,22 @@ public:
 
   /// Iterator over the passes in this pass manager.
   using pass_iterator =
-      llvm::pointee_iterator<std::vector<std::unique_ptr<Pass>>::iterator>;
+      llvm::pointee_iterator<MutableArrayRef<std::unique_ptr<Pass>>::iterator>;
   pass_iterator begin();
   pass_iterator end();
   iterator_range<pass_iterator> getPasses() { return {begin(), end()}; }
 
-  /// Run the held passes over the given operation.
-  LogicalResult run(Operation *op, AnalysisManager am);
+  using const_pass_iterator =
+      llvm::pointee_iterator<ArrayRef<std::unique_ptr<Pass>>::const_iterator>;
+  const_pass_iterator begin() const;
+  const_pass_iterator end() const;
+  iterator_range<const_pass_iterator> getPasses() const {
+    return {begin(), end()};
+  }
 
   /// Nest a new operation pass manager for the given operation kind under this
   /// pass manager.
-  OpPassManager &nest(const OperationName &nestedName);
+  OpPassManager &nest(Identifier nestedName);
   OpPassManager &nest(StringRef nestedName);
   template <typename OpT> OpPassManager &nest() {
     return nest(OpT::getOperationName());
@@ -82,11 +91,11 @@ public:
   /// Returns the number of passes held by this manager.
   size_t size() const;
 
-  /// Return an instance of the context.
-  MLIRContext *getContext() const;
+  /// Return the operation name that this pass manager operates on.
+  Identifier getOpName(MLIRContext &context) const;
 
   /// Return the operation name that this pass manager operates on.
-  const OperationName &getOpName() const;
+  StringRef getOpName() const;
 
   /// Returns the internal implementation instance.
   detail::OpPassManagerImpl &getImpl();
@@ -95,19 +104,26 @@ public:
   /// of pipelines.
   /// Note: The quality of the string representation depends entirely on the
   /// the correctness of per-pass overrides of Pass::printAsTextualPipeline.
-  void printAsTextualPipeline(raw_ostream &os);
+  void printAsTextualPipeline(raw_ostream &os, bool filterVerifier = true);
+
+  /// Raw dump of the pass manager to llvm::errs().
+  void dump();
 
   /// Merge the pass statistics of this class into 'other'.
   void mergeStatisticsInto(OpPassManager &other);
 
-private:
-  OpPassManager(OperationName name, bool verifyPasses);
+  /// Register dependent dialects for the current pass manager.
+  /// This is forwarding to every pass in this PassManager, see the
+  /// documentation for the same method on the Pass class.
+  void getDependentDialects(DialectRegistry &dialects) const;
 
+private:
   /// A pointer to an internal implementation instance.
   std::unique_ptr<detail::OpPassManagerImpl> impl;
 
   /// Allow access to the constructor.
   friend class PassManager;
+  friend class Pass;
 
   /// Allow access.
   friend detail::OpPassManagerImpl;
@@ -140,6 +156,9 @@ public:
   /// Run the passes within this manager on the provided module.
   LLVM_NODISCARD
   LogicalResult run(ModuleOp module);
+
+  /// Return an instance of the context.
+  MLIRContext *getContext() const { return context; }
 
   /// Enable support for the pass manager to generate a reproducer on the event
   /// of a crash or a pass failure. `outputFile` is a .mlir filename used to
@@ -293,6 +312,9 @@ private:
   LogicalResult
   runWithCrashRecovery(MutableArrayRef<std::unique_ptr<Pass>> passes,
                        ModuleOp module, AnalysisManager am);
+
+  /// Context this PassManager was initialized with.
+  MLIRContext *context;
 
   /// Flag that specifies if pass statistics should be dumped.
   Optional<PassDisplayMode> passStatisticsMode;

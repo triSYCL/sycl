@@ -605,16 +605,24 @@ class ThreeOpFrag<SDPatternOperator op1, SDPatternOperator op2> : PatFrag<
   let PredicateCodeUsesOperands = 1;
 
   // The divergence predicate is irrelevant in GlobalISel, as we have
-  // proper register bank checks. We also force all VOP instruction
-  // operands to VGPR, so we should not need to check the constant bus
-  // restriction.
+  // proper register bank checks. We just need to verify the constant
+  // bus restriction when all the sources are considered.
   //
   // FIXME: With unlucky SGPR operands, we could penalize code by
   // blocking folding SGPR->VGPR copies later.
   // FIXME: There's no register bank verifier
-  // FIXME: Should add a way for the emitter to recognize this is a
-  // trivially true predicate to eliminate the check.
-  let GISelPredicateCode = [{return true;}];
+  let GISelPredicateCode = [{
+    const int ConstantBusLimit = Subtarget->getConstantBusLimit(AMDGPU::V_ADD3_U32);
+    int ConstantBusUses = 0;
+    for (unsigned i = 0; i < 3; ++i) {
+      const RegisterBank *RegBank = RBI.getRegBank(Operands[i]->getReg(), MRI, TRI);
+      if (RegBank->getID() == AMDGPU::SGPRRegBankID) {
+        if (++ConstantBusUses > ConstantBusLimit)
+          return false;
+      }
+    }
+    return true;
+  }];
 }
 
 let SubtargetPredicate = isGFX9Plus in {
@@ -667,6 +675,20 @@ def : ThreeOp_i32_Pats<and, or, V_AND_OR_B32>;
 def : ThreeOp_i32_Pats<or, or, V_OR3_B32>;
 def : ThreeOp_i32_Pats<xor, add, V_XAD_U32>;
 
+def : VOPBinOpClampPat<saddsat, V_ADD_I32, i32>;
+def : VOPBinOpClampPat<ssubsat, V_SUB_I32, i32>;
+
+
+// FIXME: Probably should hardcode clamp bit in pseudo and avoid this.
+class OpSelBinOpClampPat<SDPatternOperator node,
+                         Instruction inst> : GCNPat<
+ (node (i16 (VOP3OpSel i16:$src0, i32:$src0_modifiers)),
+       (i16 (VOP3OpSel i16:$src1, i32:$src1_modifiers))),
+  (inst $src0_modifiers, $src0, $src1_modifiers, $src1, DSTCLAMP.ENABLE, 0)
+>;
+
+def : OpSelBinOpClampPat<saddsat, V_ADD_I16>;
+def : OpSelBinOpClampPat<ssubsat, V_SUB_I16>;
 } // End SubtargetPredicate = isGFX9Plus
 
 def VOP3_PERMLANE_Profile : VOP3_Profile<VOPProfile <[i32, i32, i32, i32]>, VOP3_OPSEL> {

@@ -252,9 +252,15 @@ LANGOPT(SYCLAllowVirtual  , 1, 0, "Allow virtual functions and types in SYCL dev
 LANGOPT(SYCLAllowVariadicFunc  , 1, 0, "Allow variadic functions in SYCL device code")
 LANGOPT(SYCLStdLayoutKernelParams, 1, 0, "Enable standard layout requirement for SYCL kernel parameters")
 LANGOPT(SYCLUnnamedLambda , 1, 0, "Allow unnamed lambda SYCL kernels")
-ENUM_LANGOPT(SYCLVersion, SYCLVersionList, 4, SYCLVersionList::undefined, "Version of the SYCL standard used")
+LANGOPT(SYCLVersion       , 32, 0, "Version of the SYCL standard used")
 LANGOPT(DeclareSPIRVBuiltins, 1, 0, "Declare SPIR-V builtin functions")
 LANGOPT(SYCLExplicitSIMD  , 1, 0, "SYCL compilation with explicit SIMD extension")
+LANGOPT(EnableDAEInSpirKernels , 1, 0, "Enable Dead Argument Elimination in SPIR kernels")
+LANGOPT(
+    SYCLValueFitInMaxInt, 1, 0,
+    "SYCL compiler assumes value fits within MAX_INT for member function of "
+    "get/operator[], get_id/operator[] and get_global_id/get_global_linear_id "
+    "in SYCL class id, iterm and nd_iterm")
 
 LANGOPT(HIPUseNewLaunchAPI, 1, 0, "Use new kernel launching API for HIP")
 
@@ -271,6 +277,9 @@ BENIGN_LANGOPT(DumpRecordLayoutsSimple , 1, 0, "dumping the layout of IRgen'd re
 BENIGN_LANGOPT(DumpVTableLayouts , 1, 0, "dumping the layouts of emitted vtables")
 LANGOPT(NoConstantCFStrings , 1, 0, "no constant CoreFoundation strings")
 BENIGN_LANGOPT(InlineVisibilityHidden , 1, 0, "hidden visibility for inline C++ methods")
+BENIGN_LANGOPT(VisibilityInlinesHiddenStaticLocalVar, 1, 0,
+               "hidden visibility for static local variables in inline C++ "
+               "methods when -fvisibility-inlines hidden is enabled")
 LANGOPT(GlobalAllocationFunctionVisibilityHidden , 1, 0, "hidden visibility for global operator new and delete declaration")
 BENIGN_LANGOPT(ParseUnknownAnytype, 1, 0, "__unknown_anytype")
 BENIGN_LANGOPT(DebuggerSupport , 1, 0, "debugger support")

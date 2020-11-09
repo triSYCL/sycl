@@ -2,7 +2,7 @@
 ; RUN: opt -O1 -S -debug -enable-new-pm=0 %s 2>&1 | FileCheck %s --check-prefix=O1
 ; RUN: opt -O2 -S -debug -enable-new-pm=0 %s 2>&1 | FileCheck %s --check-prefix=O1 --check-prefix=O2O3
 ; RUN: opt -O3 -S -debug -enable-new-pm=0 %s 2>&1 | FileCheck %s --check-prefix=O1 --check-prefix=O2O3
-; RUN: opt -dce -die -gvn-hoist -loweratomic -S -debug -enable-new-pm=0 %s 2>&1 | FileCheck %s --check-prefix=MORE
+; RUN: opt -dce -gvn-hoist -loweratomic -S -debug -enable-new-pm=0 %s 2>&1 | FileCheck %s --check-prefix=MORE
 ; RUN: opt -indvars -licm -loop-deletion -loop-extract -loop-idiom -loop-instsimplify -loop-reduce -loop-reroll -loop-rotate -loop-unroll -loop-unswitch -enable-new-pm=0 -S -debug %s 2>&1 | FileCheck %s --check-prefix=LOOP
 ; RUN: opt -enable-npm-optnone     -S -debug-pass-manager -enable-new-pm %s 2>&1 | FileCheck %s --check-prefix=NPM-O0
 ; RUN: opt -enable-npm-optnone -O1 -S -debug-pass-manager -enable-new-pm %s 2>&1 | FileCheck %s --check-prefix=NPM-O1
@@ -34,7 +34,7 @@ while.body:                                       ; preds = %while.cond
   br label %while.cond
 
 while.end:                                        ; preds = %while.cond
-  ret i32 0
+  ret i32 %dec
 }
 
 attributes #0 = { optnone noinline }
@@ -50,7 +50,7 @@ attributes #0 = { optnone noinline }
 ; O1-DAG: Skipping pass 'Reassociate expressions'
 ; O1-DAG: Skipping pass 'Simplify the CFG'
 ; O1-DAG: Skipping pass 'Sparse Conditional Constant Propagation'
-; NPM-O1-DAG: Skipping pass: SimplifyCFGPass
+; NPM-O1-DAG: Skipping pass: SimplifyCFGPass on {{.*}}foo
 ; NPM-O1-DAG: Skipping pass: SROA
 ; NPM-O1-DAG: Skipping pass: EarlyCSEPass
 ; NPM-O1-DAG: Skipping pass: LowerExpectIntrinsicPass
@@ -65,9 +65,8 @@ attributes #0 = { optnone noinline }
 
 ; Additional IR passes that opt doesn't turn on by default.
 ; MORE-DAG: Skipping pass 'Dead Code Elimination'
-; MORE-DAG: Skipping pass 'Dead Instruction Elimination'
+; NPM-MORE-DAG: Skipping pass: DCEPass
 ; NPM-MORE-DAG: Skipping pass: GVNHoistPass
-; NPM-MORE-DAG: Skipping pass: LowerAtomicPass
 
 ; Loop IR passes that opt doesn't turn on by default.
 ; LOOP-DAG: Skipping pass 'Delete dead loops'
@@ -80,7 +79,9 @@ attributes #0 = { optnone noinline }
 ; LOOP-DAG: Skipping pass 'Simplify instructions in loops'
 ; LOOP-DAG: Skipping pass 'Unroll loops'
 ; LOOP-DAG: Skipping pass 'Unswitch loops'
-; NPM-LOOP-DAG: Skipping pass: LoopSimplifyPass
+; LoopPassManager should not be skipped over an optnone function
+; NPM-LOOP-NOT: Skipping pass: PassManager
+; NPM-LOOP-DAG: Skipping pass: LoopSimplifyPass on {{.*}}foo
 ; NPM-LOOP-DAG: Skipping pass: LCSSAPass
 ; NPM-LOOP-DAG: Skipping pass: IndVarSimplifyPass
 ; NPM-LOOP-DAG: Skipping pass: SimpleLoopUnswitchPass

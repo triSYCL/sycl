@@ -53,6 +53,7 @@
 #include "SPIRVType.h"
 #include "SPIRVValue.h"
 
+#include "llvm/ADT/SmallSet.h"
 #include "llvm/Analysis/CallGraph.h"
 #include "llvm/IR/IntrinsicInst.h"
 
@@ -79,6 +80,13 @@ public:
   }
 
   static char ID;
+
+  // This enum sets the mode used to translate the value which is
+  // a function, that is necessary for a convenient function pointers handling.
+  // By default transValue uses 'Decl' mode, which means every function
+  // we meet during the translation should result in its declaration generated.
+  // In 'Pointer' mode we generate OpConstFunctionPointerINTEL constant instead.
+  enum class FuncTransMode { Decl, Pointer };
 
   SPIRVType *transType(Type *T);
   SPIRVType *transSPIRVOpaqueType(Type *T);
@@ -117,15 +125,21 @@ public:
   void transFPContract();
   SPIRVValue *transConstant(Value *V);
   SPIRVValue *transValue(Value *V, SPIRVBasicBlock *BB,
-                         bool CreateForward = true);
+                         bool CreateForward = true,
+                         FuncTransMode FuncTrans = FuncTransMode::Decl);
   void transGlobalAnnotation(GlobalVariable *V);
-  SPIRVValue *transValueWithoutDecoration(Value *V, SPIRVBasicBlock *BB,
-                                          bool CreateForward = true);
+  SPIRVValue *
+  transValueWithoutDecoration(Value *V, SPIRVBasicBlock *BB,
+                              bool CreateForward = true,
+                              FuncTransMode FuncTrans = FuncTransMode::Decl);
   void transGlobalIOPipeStorage(GlobalVariable *V, MDNode *IO);
+
+  static SPIRVInstruction *applyRoundingModeConstraint(Value *V,
+                                                       SPIRVInstruction *I);
 
   typedef DenseMap<Type *, SPIRVType *> LLVMToSPIRVTypeMap;
   typedef DenseMap<Value *, SPIRVValue *> LLVMToSPIRVValueMap;
-  typedef DenseMap<MDNode *, SPIRVId> LLVMToSPIRVMetadataMap;
+  typedef DenseMap<MDNode *, SmallSet<SPIRVId, 2>> LLVMToSPIRVMetadataMap;
 
 private:
   Module *M;

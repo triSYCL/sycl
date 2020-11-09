@@ -6,14 +6,19 @@
 #
 #===----------------------------------------------------------------------===##
 
-import libcxx.test.format
-import lit
-import lit.util
 import os
 import pipes
 import platform
 import re
 import tempfile
+
+import libcxx.test.format
+import lit
+import lit.LitConfig
+import lit.Test
+import lit.TestRunner
+import lit.util
+
 
 def _memoize(f):
   cache = dict()
@@ -52,7 +57,7 @@ def _executeScriptInternal(test, commands):
     res = ('', '', 127, None)
   return res
 
-def _makeConfigTest(config, testPrefix=None):
+def _makeConfigTest(config, testPrefix=''):
   sourceRoot = os.path.join(config.test_exec_root, '__config_src__')
   execRoot = os.path.join(config.test_exec_root, '__config_exec__')
   suite = lit.Test.TestSuite('__config__', sourceRoot, execRoot, config)
@@ -83,7 +88,7 @@ def sourceBuilds(config, source):
     _executeScriptInternal(test, ['rm %t.exe'])
     return exitCode == 0
 
-def programOutput(config, program, args=[], testPrefix=None):
+def programOutput(config, program, args=None, testPrefix=''):
   """
   Compiles a program for the test target, run it on the test target and return
   the output.
@@ -92,6 +97,8 @@ def programOutput(config, program, args=[], testPrefix=None):
   execution of the program is done through the %{exec} substitution, which means
   that the program may be run on a remote host depending on what %{exec} does.
   """
+  if args is None:
+    args = []
   with _makeConfigTest(config, testPrefix=testPrefix) as test:
     with open(test.getSourcePath(), 'w') as source:
       source.write(program)

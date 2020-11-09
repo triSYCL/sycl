@@ -345,6 +345,11 @@ private:
   /// yet.
   std::map<StringRef, GlobalDecl> DeferredDecls;
 
+  /// This contains all the aliases that are deferred for emission until
+  /// they or what they alias are actually used.  Note that the StringRef
+  /// associated in this map is that of the aliasee.
+  std::map<StringRef, GlobalDecl> DeferredAliases;
+
   /// This is a list of deferred decls which we have seen that *are* actually
   /// referenced. These get code generated when the module is done.
   std::vector<GlobalDecl> DeferredDeclsToEmit;
@@ -397,10 +402,6 @@ private:
   /// Store the list of global destructors and their respective priorities to be
   /// emitted when the translation unit is complete.
   CtorList GlobalDtors;
-
-  /// A unique trailing identifier as a part of sinit/sterm function when
-  /// UseSinitAndSterm of CXXABI is set as true.
-  std::string GlobalUniqueModuleId;
 
   /// An ordered map of canonical GlobalDecls to their mangled names.
   llvm::MapVector<GlobalDecl, StringRef> MangledDeclNames;
@@ -828,8 +829,7 @@ public:
 
   llvm::Function *CreateGlobalInitOrCleanUpFunction(
       llvm::FunctionType *ty, const Twine &name, const CGFunctionInfo &FI,
-      SourceLocation Loc = SourceLocation(), bool TLS = false,
-      bool IsExternalLinkage = false);
+      SourceLocation Loc = SourceLocation(), bool TLS = false);
 
   /// Return the AST address space of the underlying global variable for D, as
   /// determined by its declaration. Normally this is the same as the address
@@ -1070,6 +1070,12 @@ public:
   void AddCXXStermFinalizerEntry(llvm::FunctionCallee DtorFn) {
     CXXGlobalDtorsOrStermFinalizers.emplace_back(DtorFn.getFunctionType(),
                                                  DtorFn.getCallee(), nullptr);
+  }
+
+  /// Add an sterm finalizer to its own llvm.global_dtors entry.
+  void AddCXXStermFinalizerToGlobalDtor(llvm::Function *StermFinalizer,
+                                        int Priority) {
+    AddGlobalDtor(StermFinalizer, Priority);
   }
 
   /// Create or return a runtime function declaration with the specified type

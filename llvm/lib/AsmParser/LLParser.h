@@ -166,8 +166,8 @@ namespace llvm {
         : Context(Context), Lex(F, SM, Err, Context), M(M), Index(Index),
           Slots(Slots), BlockAddressPFS(nullptr) {}
     bool Run(
-        bool UpgradeDebugInfo,
-        DataLayoutCallbackTy DataLayoutCallback = [](Module *) {});
+        bool UpgradeDebugInfo, DataLayoutCallbackTy DataLayoutCallback =
+                                   [](StringRef) { return None; });
 
     bool parseStandaloneConstantValue(Constant *&C, const SlotMapping *Slots);
 
@@ -372,8 +372,11 @@ namespace llvm {
     bool ParseOptionalParamAccesses(
         std::vector<FunctionSummary::ParamAccess> &Params);
     bool ParseParamNo(uint64_t &ParamNo);
-    bool ParseParamAccess(FunctionSummary::ParamAccess &Param);
-    bool ParseParamAccessCall(FunctionSummary::ParamAccess::Call &Call);
+    using IdLocListType = std::vector<std::pair<unsigned, LocTy>>;
+    bool ParseParamAccess(FunctionSummary::ParamAccess &Param,
+                          IdLocListType &IdLocList);
+    bool ParseParamAccessCall(FunctionSummary::ParamAccess::Call &Call,
+                              IdLocListType &IdLocList);
     bool ParseParamAccessOffset(ConstantRange &range);
     bool ParseOptionalRefs(std::vector<ValueInfo> &Refs);
     bool ParseTypeIdEntry(unsigned ID);

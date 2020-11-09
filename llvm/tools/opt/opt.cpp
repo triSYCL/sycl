@@ -446,8 +446,8 @@ static TargetMachine* GetTargetMachine(Triple TheTriple, StringRef CPUStr,
 void initializeExampleIRTransforms(llvm::PassRegistry &Registry);
 #endif
 
-
-void exportDebugifyStats(llvm::StringRef Path, const DebugifyStatsMap &Map) {
+static void exportDebugifyStats(llvm::StringRef Path,
+                                const DebugifyStatsMap &Map) {
   std::error_code EC;
   raw_fd_ostream OS{Path, EC};
   if (EC) {
@@ -485,6 +485,48 @@ struct TimeTracerRAII {
     }
   }
 };
+
+// For use in NPM transition.
+// TODO: use a codegen version of PassRegistry.def/PassBuilder::is*Pass() once
+// it exists.
+static bool IsCodegenPass(StringRef Pass) {
+  std::vector<StringRef> PassNamePrefix = {
+      "x86-",  "xcore-", "wasm-",    "systemz-", "ppc-",   "nvvm-",   "nvptx-",
+      "mips-", "lanai-", "hexagon-", "bpf-",     "avr-",   "thumb2-", "arm-",
+      "si-",   "gcn-",   "amdgpu-",  "aarch64-", "amdgcn-"};
+  std::vector<StringRef> PassNameContain = {"ehprepare"};
+  std::vector<StringRef> PassNameExact = {
+      "safe-stack",           "cost-model",
+      "codegenprepare",       "interleaved-load-combine",
+      "unreachableblockelim", "scalarize-masked-mem-intrin",
+      "verify-safepoint-ir",  "divergence",
+      "infer-address-spaces", "atomic-expand",
+      "hardware-loops",       "type-promotion",
+      "mve-tail-predication", "interleaved-access",
+      "global-merge",         "pre-isel-intrinsic-lowering",
+      "expand-reductions",    "indirectbr-expand",
+      "generic-to-nvvm",      "expandmemcmp"};
+  for (const auto &P : PassNamePrefix)
+    if (Pass.startswith(P))
+      return true;
+  for (const auto &P : PassNameContain)
+    if (Pass.contains(P))
+      return true;
+  for (const auto &P : PassNameExact)
+    if (Pass == P)
+      return true;
+  return false;
+}
+
+// For use in NPM transition.
+static bool CodegenPassSpecifiedInPassList() {
+  for (const auto &P : PassList) {
+    StringRef Arg = P->getPassArgument();
+    if (IsCodegenPass(Arg))
+      return true;
+  }
+  return false;
+}
 
 //===----------------------------------------------------------------------===//
 // main for opt
@@ -548,6 +590,8 @@ int main(int argc, char **argv) {
   initializeKernelPropGenPass(Registry);
   initializeXOCCIRDowngraderPass(Registry);
   initializeChessMassagePass(Registry);
+  initializePrepareSYCLOptPass(Registry);
+  initializeLowerSYCLMetaDataPass(Registry);
   initializeHardwareLoopsPass(Registry);
   initializeTypePromotionPass(Registry);
   initializeSYCLLowerWGScopeLegacyPassPass(Registry);
@@ -699,7 +743,31 @@ int main(int argc, char **argv) {
   if (OutputThinLTOBC)
     M->addModuleFlag(Module::Error, "EnableSplitLTOUnit", SplitLTOUnit);
 
-  if (EnableNewPassManager || PassPipeline.getNumOccurrences() > 0) {
+  // Add an appropriate TargetLibraryInfo pass for the module's triple.
+  TargetLibraryInfoImpl TLII(ModuleTriple);
+
+  // The -disable-simplify-libcalls flag actually disables all builtin optzns.
+  if (DisableSimplifyLibCalls)
+    TLII.disableAllFunctions();
+  else {
+    // Disable individual builtin functions in TargetLibraryInfo.
+    LibFunc F;
+    for (auto &FuncName : DisableBuiltins)
+      if (TLII.getLibFunc(FuncName, F))
+        TLII.setUnavailable(F);
+      else {
+        errs() << argv[0] << ": cannot disable nonexistent builtin function "
+               << FuncName << '\n';
+        return 1;
+      }
+  }
+
+  // If `-passes=` is specified, use NPM.
+  // If `-enable-new-pm` is specified and there are no codegen passes, use NPM.
+  // e.g. `-enable-new-pm -sroa` will use NPM.
+  // but `-enable-new-pm -codegenprepare` will still revert to legacy PM.
+  if ((EnableNewPassManager && !CodegenPassSpecifiedInPassList()) ||
+      PassPipeline.getNumOccurrences() > 0) {
     if (PassPipeline.getNumOccurrences() > 0 && PassList.size() > 0) {
       errs()
           << "Cannot specify passes via both -foo-pass and --passes=foo-pass";
@@ -736,9 +804,9 @@ int main(int argc, char **argv) {
     // The user has asked to use the new pass manager and provided a pipeline
     // string. Hand off the rest of the functionality to the new code for that
     // layer.
-    return runPassPipeline(argv[0], *M, TM.get(), Out.get(), ThinLinkOut.get(),
-                           RemarksFile.get(), PassPipeline, Passes, OK, VK,
-                           PreserveAssemblyUseListOrder,
+    return runPassPipeline(argv[0], *M, TM.get(), &TLII, Out.get(),
+                           ThinLinkOut.get(), RemarksFile.get(), PassPipeline,
+                           Passes, OK, VK, PreserveAssemblyUseListOrder,
                            PreserveBitcodeUseListOrder, EmitSummaryIndex,
                            EmitModuleHash, EnableDebugify, Coroutines)
                ? 0
@@ -753,25 +821,6 @@ int main(int argc, char **argv) {
     Passes.enableDebugifyEach();
 
   bool AddOneTimeDebugifyPasses = EnableDebugify && !DebugifyEach;
-
-  // Add an appropriate TargetLibraryInfo pass for the module's triple.
-  TargetLibraryInfoImpl TLII(ModuleTriple);
-
-  // The -disable-simplify-libcalls flag actually disables all builtin optzns.
-  if (DisableSimplifyLibCalls)
-    TLII.disableAllFunctions();
-  else {
-    // Disable individual builtin functions in TargetLibraryInfo.
-    LibFunc F;
-    for (auto &FuncName : DisableBuiltins)
-      if (TLII.getLibFunc(FuncName, F))
-        TLII.setUnavailable(F);
-      else {
-        errs() << argv[0] << ": cannot disable nonexistent builtin function "
-               << FuncName << '\n';
-        return 1;
-      }
-  }
 
   Passes.add(new TargetLibraryInfoWrapperPass(TLII));
 
