@@ -831,12 +831,11 @@ constructKernelName(Sema &S, FunctionDecl *KernelCallerFunc,
   MC.mangleTypeName(KernelNameType, Out);
 
   std::string Res = std::string(Out.str());
+  std::string Str = PredefinedExpr::ComputeName(
+      S.getASTContext(), PredefinedExpr::UniqueStableNameType, KernelNameType);
   Res = computeUniqueSYCLXOCCName(Res, KernelNameType.getAsString());
-
-  return {Res,
-          PredefinedExpr::ComputeName(S.getASTContext(),
-                                      PredefinedExpr::UniqueStableNameType,
-                                      KernelNameType)};
+  Str = computeUniqueSYCLXOCCName(Str, KernelNameType.getAsString());
+  return {Res, Str};
 }
 
 // anonymous namespace so these don't get linkage.
