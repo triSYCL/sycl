@@ -17,6 +17,7 @@
 
 #include <array>
 #include <cstdint>
+#include <string>
 
 namespace llvm {
 template <typename T> class ArrayRef;
@@ -50,6 +51,9 @@ public:
 
   /// Returns a raw 160-bit SHA1 hash for the given data.
   static std::array<uint8_t, 20> hash(ArrayRef<uint8_t> Data);
+
+  /// Returns a hash of the input represented using the provided maping.
+  static std::string hashToString(ArrayRef<uint8_t> Data, StringRef Mapping);
 
 private:
   /// Define some constants.

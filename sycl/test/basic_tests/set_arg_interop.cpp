@@ -1,4 +1,5 @@
 // REQUIRES: opencl
+// UNSUPPORTED: xocc
 
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out -L %opencl_libs_dir -lOpenCL -O3
 // RUN: %CPU_RUN_PLACEHOLDER %t.out

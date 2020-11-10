@@ -135,6 +135,9 @@ void IoChecker::Enter(const parser::ConnectSpec::CharExpr &spec) {
   case ParseKind::Sign:
     specKind = IoSpecKind::Sign;
     break;
+  case ParseKind::Carriagecontrol:
+    specKind = IoSpecKind::Carriagecontrol;
+    break;
   case ParseKind::Convert:
     specKind = IoSpecKind::Convert;
     break;
@@ -152,6 +155,13 @@ void IoChecker::Enter(const parser::ConnectSpec::CharExpr &spec) {
       flags_.set(Flag::AccessStream, s == "STREAM");
     }
     CheckStringValue(specKind, *charConst, parser::FindSourceLocation(spec));
+    if (specKind == IoSpecKind::Carriagecontrol &&
+        (s == "FORTRAN" || s == "NONE")) {
+      context_.Say(parser::FindSourceLocation(spec),
+          "Unimplemented %s value '%s'"_err_en_US,
+          parser::ToUpperCaseLetters(common::EnumToString(specKind)),
+          *charConst);
+    }
   }
 }
 
@@ -288,14 +298,6 @@ void IoChecker::Enter(const parser::InputItem &spec) {
     return;
   }
   CheckForDefinableVariable(*var, "Input");
-  const auto &name{GetLastName(*var)};
-  const auto *expr{GetExpr(*var)};
-  if (name.symbol && IsAssumedSizeArray(*name.symbol) && expr &&
-      !evaluate::IsArrayElement(*GetExpr(*var))) {
-    context_.Say(name.source,
-        "Whole assumed size array '%s' may not be an input item"_err_en_US,
-        name.source); // C1231
-  }
 }
 
 void IoChecker::Enter(const parser::InquireSpec &spec) {
@@ -377,6 +379,9 @@ void IoChecker::Enter(const parser::InquireSpec::CharVar &spec) {
     break;
   case ParseKind::Write:
     specKind = IoSpecKind::Write;
+    break;
+  case ParseKind::Carriagecontrol:
+    specKind = IoSpecKind::Carriagecontrol;
     break;
   case ParseKind::Convert:
     specKind = IoSpecKind::Convert;
@@ -821,6 +826,7 @@ void IoChecker::CheckStringValue(IoSpecKind specKind, const std::string &value,
       {IoSpecKind::Status,
           // Open values; Close values are {"DELETE", "KEEP"}.
           {"NEW", "OLD", "REPLACE", "SCRATCH", "UNKNOWN"}},
+      {IoSpecKind::Carriagecontrol, {"LIST", "FORTRAN", "NONE"}},
       {IoSpecKind::Convert, {"BIG_ENDIAN", "LITTLE_ENDIAN", "NATIVE"}},
       {IoSpecKind::Dispose, {"DELETE", "KEEP"}},
   };

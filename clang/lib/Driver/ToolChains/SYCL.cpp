@@ -43,6 +43,7 @@ const char *SYCL::Linker::constructLLVMSpirvCommand(Compilation &C,
     CmdArgs.push_back("-spirv-max-version=1.1");
     CmdArgs.push_back("-spirv-ext=+all");
     CmdArgs.push_back("-spirv-debug-info-version=legacy");
+    CmdArgs.push_back("-spirv-allow-extra-diexpressions");
     if (C.getArgs().hasArg(options::OPT_fsycl_esimd))
       CmdArgs.push_back("-spirv-allow-unknown-intrinsics");
     CmdArgs.push_back("-o");
@@ -207,7 +208,8 @@ void SYCL::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
 static const char *makeExeName(Compilation &C, StringRef Name) {
   llvm::SmallString<8> ExeName(Name);
-  if (C.getDriver().IsCLMode())
+  const ToolChain *HostTC = C.getSingleOffloadToolChain<Action::OFK_Host>();
+  if (HostTC->getTriple().isWindowsMSVCEnvironment())
     ExeName.append(".exe");
   return C.getArgs().MakeArgString(ExeName);
 }
@@ -508,7 +510,20 @@ static void addImpliedArgs(const llvm::Triple &Triple,
     if (!A->getOption().matches(options::OPT_g0))
       BeArgs.push_back("-g");
   if (Args.getLastArg(options::OPT_O0))
-    BeArgs.push_back(IsGen ? "-O0" : "-cl-opt-disable");
+    BeArgs.push_back("-cl-opt-disable");
+  // Check if floating pointing optimizations are allowed.
+  bool isFastMath = isOptimizationLevelFast(Args);
+  Arg *A = Args.getLastArg(options::OPT_ffast_math, options::OPT_fno_fast_math,
+                           options::OPT_funsafe_math_optimizations,
+                           options::OPT_fno_unsafe_math_optimizations);
+  isFastMath =
+      isFastMath || (A && (A->getOption().getID() == options::OPT_ffast_math ||
+                           A->getOption().getID() ==
+                               options::OPT_funsafe_math_optimizations));
+  A = Args.getLastArg(options::OPT_ffp_model_EQ);
+  isFastMath = isFastMath || (A && StringRef(A->getValue()).equals("fast"));
+  if (isFastMath)
+    BeArgs.push_back("-cl-fast-relaxed-math");
   if (BeArgs.empty())
     return;
   if (Triple.getSubArch() == llvm::Triple::NoSubArch ||

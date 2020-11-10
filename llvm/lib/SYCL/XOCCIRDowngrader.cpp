@@ -16,6 +16,8 @@
 #include <string>
 
 #include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/SYCL/XOCCIRDowngrader.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Attributes.h"
@@ -201,6 +203,17 @@ struct XOCCIRDowngrader : public ModulePass {
       I->eraseFromParent();
   }
 
+  /// V++ has issues with intrinsic having different alignment attributes on
+  /// inputs and outputs. So we remove alignment attributes.
+  void removeMemIntrAlign(Module &M) {
+    for (auto &F : M.functions())
+      for (auto &I : instructions(F))
+        if (auto *MI = dyn_cast<AnyMemIntrinsic>(&I))
+          for (Use &U : MI->args())
+            MI->removeAttribute(U.getOperandNo(),
+                                Attribute::AttrKind::Alignment);
+  }
+
   bool runOnModule(Module &M) override {
     removeImmarg(M);
     removeWillReturn(M);
@@ -209,6 +222,7 @@ struct XOCCIRDowngrader : public ModulePass {
     renameBasicBlocks(M);
     removeFreezeInst(M);
     removeFNegInst(M);
+    removeMemIntrAlign(M);
 
     // The module probably changed
     return true;

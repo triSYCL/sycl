@@ -2,7 +2,7 @@
 // RUN: %clang_cc1 -fsycl -fsycl-is-device -triple spir64-unknown-unknown-sycldevice -fsycl-int-header=%t.h %s
 // RUN: FileCheck -input-file=%t.h %s
 //
-// CHECK: #include <CL/sycl/detail/defines.hpp>
+// CHECK: #include <CL/sycl/detail/defines_elementary.hpp>
 // CHECK-NEXT: #include <CL/sycl/detail/kernel_desc.hpp>
 //
 // CHECK: static constexpr
@@ -17,12 +17,6 @@
 // CHECK-EMPTY:
 // CHECK-NEXT:   //--- _ZTSl
 // CHECK-EMPTY:
-// CHECK-NEXT: };
-//
-// CHECK: static constexpr
-// CHECK-NEXT: const unsigned kernel_signature_start[] = {
-// CHECK-NEXT:  0, // _ZTSm
-// CHECK-NEXT:  1 // _ZTSl
 // CHECK-NEXT: };
 
 // CHECK: template <> struct KernelInfo<unsigned long> {

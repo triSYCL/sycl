@@ -591,6 +591,7 @@ bool isSI(const MCSubtargetInfo &STI);
 bool isCI(const MCSubtargetInfo &STI);
 bool isVI(const MCSubtargetInfo &STI);
 bool isGFX9(const MCSubtargetInfo &STI);
+bool isGFX9Plus(const MCSubtargetInfo &STI);
 bool isGFX10(const MCSubtargetInfo &STI);
 bool isGCN3Encoding(const MCSubtargetInfo &STI);
 bool isGFX10_BEncoding(const MCSubtargetInfo &STI);
@@ -692,6 +693,9 @@ bool isInlinableLiteralV216(int32_t Literal, bool HasInv2Pi);
 
 LLVM_READNONE
 bool isInlinableIntLiteralV216(int32_t Literal);
+
+LLVM_READNONE
+bool isFoldableLiteralV216(int32_t Literal, bool HasInv2Pi);
 
 bool isArgPassedInSGPR(const Argument *Arg);
 

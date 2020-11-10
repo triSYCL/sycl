@@ -1117,8 +1117,22 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
     Builder.defineMacro("SYCL_EXTERNAL", "__attribute__((sycl_device))");
     // Defines a macro that switches on SPIR intrinsics in SYCL runtime, used
     // by Xilinx FPGA devices for the moment
-    if (LangOpts.SYCLXOCCDevice)
+    if (TI.getTriple().isXilinxFPGA()) {
       Builder.defineMacro("__SYCL_SPIR_DEVICE__");
+      switch (TI.getTriple().getSubArch()) {
+      case llvm::Triple::FPGASubArch_sw_emu:
+        Builder.defineMacro("__SYCL_XILINX_SW_EMU_MODE__");
+        break;
+      case llvm::Triple::FPGASubArch_hw_emu:
+        Builder.defineMacro("__SYCL_XILINX_HW_EMU_MODE__");
+        break;
+      case llvm::Triple::FPGASubArch_hw:
+        Builder.defineMacro("__SYCL_XILINX_HW_MODE__");
+        break;
+      default:
+        break;
+      }
+    }
 
     if (TI.getTriple().isNVPTX()) {
         Builder.defineMacro("__SYCL_NVPTX__", "1");
@@ -1135,8 +1149,8 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
   // be a good long term solution, it will probably cause some conflicts when
   // compiling for multiple targets, what if I want to compile for both an Intel
   // and Xilinx platform? Will they mesh well on the host?
-  if (LangOpts.SYCLXOCCDevice)
-    Builder.defineMacro("__SYCL_XILINX_ONLY__");
+  if (TI.getTriple().isXilinxFPGA())
+    Builder.defineMacro("__SYCL_HAS_XILINX_DEVICE__");
 
 
   // OpenCL definitions.

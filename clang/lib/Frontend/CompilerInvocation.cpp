@@ -888,6 +888,7 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
   Opts.DebugRangesBaseAddress = Args.hasArg(OPT_fdebug_ranges_base_address);
 
   setPGOInstrumentor(Opts, Args, Diags);
+  Opts.AtomicProfileUpdate = Args.hasArg(OPT_fprofile_update_EQ);
   Opts.InstrProfileOutput =
       std::string(Args.getLastArgValue(OPT_fprofile_instrument_path_EQ));
   Opts.ProfileInstrumentUsePath =
@@ -1002,6 +1003,8 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
   Opts.UniqueInternalLinkageNames =
       Args.hasArg(OPT_funique_internal_linkage_names);
 
+  Opts.SplitMachineFunctions = Args.hasArg(OPT_fsplit_machine_functions);
+
   Opts.MergeFunctions = Args.hasArg(OPT_fmerge_functions);
 
   Opts.NoUseJumpTables = Args.hasArg(OPT_fno_jump_tables);
@@ -1037,7 +1040,7 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
   Opts.ThinLinkBitcodeFile =
       std::string(Args.getLastArgValue(OPT_fthin_link_bitcode_EQ));
 
-  Opts.HeapProf = Args.hasArg(OPT_fmemprof);
+  Opts.MemProf = Args.hasArg(OPT_fmemory_profile);
 
   Opts.MSVolatile = Args.hasArg(OPT_fms_volatile);
 
@@ -1132,6 +1135,10 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
       getLastArgIntValue(Args, OPT_fxray_instruction_threshold_EQ, 200, Diags);
   Opts.XRayIgnoreLoops = Args.hasArg(OPT_fxray_ignore_loops);
   Opts.XRayOmitFunctionIndex = Args.hasArg(OPT_fno_xray_function_index);
+  Opts.XRayTotalFunctionGroups =
+      getLastArgIntValue(Args, OPT_fxray_function_groups, 1, Diags);
+  Opts.XRaySelectedFunctionGroup =
+      getLastArgIntValue(Args, OPT_fxray_selected_function_group, 0, Diags);
 
   auto XRayInstrBundles =
       Args.getAllArgValues(OPT_fxray_instrumentation_bundle);
@@ -1457,6 +1464,8 @@ static bool ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args, InputKind IK,
       std::string(Args.getLastArgValue(OPT_fsymbol_partition_EQ));
 
   Opts.ForceAAPCSBitfieldLoad = Args.hasArg(OPT_ForceAAPCSBitfieldLoad);
+
+  Opts.PassByValueIsNoAlias = Args.hasArg(OPT_fpass_by_value_is_noalias);
   return Success;
 }
 
@@ -2789,6 +2798,9 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   if (Args.hasArg(OPT_fvisibility_inlines_hidden))
     Opts.InlineVisibilityHidden = 1;
 
+  if (Args.hasArg(OPT_fvisibility_inlines_hidden_static_local_var))
+    Opts.VisibilityInlinesHiddenStaticLocalVar = 1;
+
   if (Args.hasArg(OPT_fvisibility_global_new_delete_hidden))
     Opts.GlobalAllocationFunctionVisibilityHidden = 1;
 
@@ -3231,12 +3243,6 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
           << Opts.OMPHostIRFile;
   }
 
-  // SYCLXOCCDevice forces things like:
-  // 1) The InitPreprocessor to define some Xilinx related macros which force
-  //    alternate paths in the SYCL runtime
-  // 2) The assembler stage of clang to emit llvm ir (-emit-llvm) rather than
-  //     assembly (-S)
-  Opts.SYCLXOCCDevice = Args.hasArg(options::OPT_fsycl_xocc);
   Opts.SYCLIsDevice   = Args.hasArg(options::OPT_fsycl_is_device);
   Opts.SYCLIsHost   = Args.hasArg(options::OPT_fsycl_is_host);
   Opts.SYCLAllowFuncPtr = Args.hasFlag(options::OPT_fsycl_allow_func_ptr,
@@ -3248,12 +3254,12 @@ static void ParseLangArgs(LangOptions &Opts, ArgList &Args, InputKind IK,
   // for anything else..For example you have to specify that you wish variadics
   // off for xocc if you wish to emit diagnostics for them and you have to
   // specify if you wish no diagnostics for other devices.
-  Opts.SYCLAllowVariadicFunc = Opts.SYCLXOCCDevice ?
-    Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
-                 options::OPT_fno_sycl_allow_variadic_func) :
-    Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
-                 options::OPT_fno_sycl_allow_variadic_func,
-                 false);
+  Opts.SYCLAllowVariadicFunc =
+      T.isXilinxFPGA()
+          ? Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
+                         options::OPT_fno_sycl_allow_variadic_func)
+          : Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
+                         options::OPT_fno_sycl_allow_variadic_func, false);
   Opts.SYCLUnnamedLambda = Args.hasArg(options::OPT_fsycl_unnamed_lambda);
 
   // Set CUDA mode for OpenMP target NVPTX/AMDGCN if specified in options

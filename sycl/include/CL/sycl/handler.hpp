@@ -463,16 +463,16 @@ private:
   }
 
   static id<2> getDelinearizedIndex(const range<2> Range, const size_t Index) {
-    size_t x = Index / Range[1];
-    size_t y = Index % Range[1];
-    return {x, y};
+    size_t x = Index % Range[1];
+    size_t y = Index / Range[1];
+    return {y, x};
   }
 
   static id<3> getDelinearizedIndex(const range<3> Range, const size_t Index) {
-    size_t x = Index / (Range[1] * Range[2]);
+    size_t z = Index / (Range[1] * Range[2]);
     size_t y = (Index / Range[2]) % Range[1];
-    size_t z = Index % Range[2];
-    return {x, y, z};
+    size_t x = Index % Range[2];
+    return {z, y, x};
   }
 
   /// Stores lambda to the template-free object
@@ -642,9 +642,7 @@ private:
     range<Dim> Range = Src.get_range();
     parallel_for<class __copyAcc2Ptr<TSrc, TDst, Dim, AccMode, AccTarget, IsPH>>
         (Range, [=](id<Dim> Index) {
-      size_t LinearIndex = Index[0];
-      for (int I = 1; I < Dim; ++I)
-        LinearIndex += Range[I] * Index[I];
+      const size_t LinearIndex = detail::getLinearIndex(Index, Range);
       using TSrcNonConst = typename std::remove_const<TSrc>::type;
       (reinterpret_cast<TSrcNonConst *>(Dst))[LinearIndex] = Src[Index];
     });
@@ -679,9 +677,7 @@ private:
     range<Dim> Range = Dst.get_range();
     parallel_for<class __copyPtr2Acc<TSrc, TDst, Dim, AccMode, AccTarget, IsPH>>
         (Range, [=](id<Dim> Index) {
-      size_t LinearIndex = Index[0];
-      for (int I = 1; I < Dim; ++I)
-        LinearIndex += Range[I] * Index[I];
+      const size_t LinearIndex = detail::getLinearIndex(Index, Range);
       Dst[Index] = (reinterpret_cast<const TDst *>(Src))[LinearIndex];
     });
   }
@@ -1595,7 +1591,7 @@ public:
     // Make sure data shared_ptr points to is not released until we finish
     // work with it.
     MSharedPtrStorage.push_back(Dst);
-    T_Dst *RawDstPtr = Dst.get();
+    typename shared_ptr_class<T_Dst>::element_type *RawDstPtr = Dst.get();
     copy(Src, RawDstPtr);
   }
 
@@ -1618,7 +1614,7 @@ public:
     // Make sure data shared_ptr points to is not released until we finish
     // work with it.
     MSharedPtrStorage.push_back(Src);
-    T_Src *RawSrcPtr = Src.get();
+    typename shared_ptr_class<T_Src>::element_type *RawSrcPtr = Src.get();
     copy(RawSrcPtr, Dst);
   }
 
@@ -1773,9 +1769,12 @@ public:
   /// \param Pattern is a value to be used to fill the memory.
   template <typename T, int Dims, access::mode AccessMode,
             access::target AccessTarget,
-            access::placeholder IsPlaceholder = access::placeholder::false_t>
-  void fill(accessor<T, Dims, AccessMode, AccessTarget, IsPlaceholder> Dst,
-            const T &Pattern) {
+            access::placeholder IsPlaceholder = access::placeholder::false_t,
+            typename PropertyListT = property_list>
+  void
+  fill(accessor<T, Dims, AccessMode, AccessTarget, IsPlaceholder, PropertyListT>
+           Dst,
+       const T &Pattern) {
     throwIfActionIsCreated();
     // TODO add check:T must be an integral scalar value or a SYCL vector type
     static_assert(isValidTargetForExplicitOp(AccessTarget),
@@ -1924,7 +1923,8 @@ private:
   friend class detail::queue_impl;
   // Make accessor class friend to keep the list of associated accessors.
   template <typename DataT, int Dims, access::mode AccMode,
-            access::target AccTarget, access::placeholder isPlaceholder>
+            access::target AccTarget, access::placeholder isPlaceholder,
+            typename PropertyListT>
   friend class accessor;
   friend device detail::getDeviceFromHandler(handler &);
 

@@ -159,6 +159,7 @@ public:
   Instruction *visitFenceInst(FenceInst &FI);
   Instruction *visitSwitchInst(SwitchInst &SI);
   Instruction *visitReturnInst(ReturnInst &RI);
+  Instruction *visitUnreachableInst(UnreachableInst &I);
   Instruction *
   foldAggregateConstructionIntoAggregateReuse(InsertValueInst &OrigIVI);
   Instruction *visitInsertValueInst(InsertValueInst &IV);
@@ -710,6 +711,7 @@ public:
                             Value *A, Value *B, Instruction &Outer,
                             SelectPatternFlavor SPF2, Value *C);
   Instruction *foldSelectInstWithICmp(SelectInst &SI, ICmpInst *ICI);
+  Instruction *foldSelectValueEquivalence(SelectInst &SI, ICmpInst &ICI);
 
   Instruction *OptAndOp(BinaryOperator *Op, ConstantInt *OpRHS,
                         ConstantInt *AndRHS, BinaryOperator &TheAnd);
@@ -759,6 +761,8 @@ class Negator final {
 
   using Result = std::pair<ArrayRef<Instruction *> /*NewInstructions*/,
                            Value * /*NegatedRoot*/>;
+
+  std::array<Value *, 2> getSortedOperandsOfBinOp(Instruction *I);
 
   LLVM_NODISCARD Value *visitImpl(Value *V, unsigned Depth);
 

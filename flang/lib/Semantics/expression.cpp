@@ -151,6 +151,7 @@ private:
       std::vector<const char *>, parser::MessageFixedText &&);
   MaybeExpr TryBoundOp(const Symbol &, int passIndex);
   std::optional<ActualArgument> AnalyzeExpr(const parser::Expr &);
+  MaybeExpr AnalyzeExprOrWholeAssumedSizeArray(const parser::Expr &);
   bool AreConformable() const;
   const Symbol *FindBoundOp(parser::CharBlock, int passIndex);
   void AddAssignmentConversion(
@@ -673,6 +674,14 @@ MaybeExpr ExpressionAnalyzer::Analyze(const parser::Name &n) {
           n.symbol->attrs().reset(semantics::Attr::VOLATILE);
         }
       }
+      if (!isWholeAssumedSizeArrayOk_ &&
+          semantics::IsAssumedSizeArray(*n.symbol)) { // C1002, C1014, C1231
+        AttachDeclaration(
+            SayAt(n,
+                "Whole assumed-size array '%s' may not appear here without subscripts"_err_en_US,
+                n.source),
+            *n.symbol);
+      }
       return Designate(DataRef{*n.symbol});
     }
   }
@@ -885,7 +894,12 @@ std::vector<Subscript> ExpressionAnalyzer::AnalyzeSectionSubscripts(
 }
 
 MaybeExpr ExpressionAnalyzer::Analyze(const parser::ArrayElement &ae) {
-  if (MaybeExpr baseExpr{Analyze(ae.base)}) {
+  MaybeExpr baseExpr;
+  {
+    auto restorer{AllowWholeAssumedSizeArray()};
+    baseExpr = Analyze(ae.base);
+  }
+  if (baseExpr) {
     if (ae.subscripts.empty()) {
       // will be converted to function call later or error reported
       return std::nullopt;
@@ -1684,7 +1698,6 @@ auto ExpressionAnalyzer::AnalyzeProcedureComponentRef(
     const parser::ProcComponentRef &pcr, ActualArguments &&arguments)
     -> std::optional<CalleeAndArguments> {
   const parser::StructureComponent &sc{pcr.v.thing};
-  const auto &name{sc.component.source};
   if (MaybeExpr base{Analyze(sc.base)}) {
     if (const Symbol * sym{sc.component.symbol}) {
       if (auto *dtExpr{UnwrapExpr<Expr<SomeDerived>>(*base)}) {
@@ -1722,7 +1735,7 @@ auto ExpressionAnalyzer::AnalyzeProcedureComponentRef(
           }
         }
       }
-      Say(name,
+      Say(sc.component.source,
           "Base of procedure component reference is not a derived-type object"_err_en_US);
     }
   }
@@ -1997,11 +2010,18 @@ MaybeExpr ExpressionAnalyzer::Analyze(const parser::FunctionReference &funcRef,
       const auto &designator{std::get<parser::ProcedureDesignator>(call.t)};
       if (const auto *name{std::get_if<parser::Name>(&designator.u)}) {
         semantics::Scope &scope{context_.FindScope(name->source)};
+        semantics::DerivedTypeSpec dtSpec{
+            name->source, derivedType.GetUltimate()};
+        if (dtSpec.IsForwardReferenced()) {
+          Say(call.source,
+              "Cannot construct value for derived type '%s' "
+              "before it is defined"_err_en_US,
+              name->source);
+          return std::nullopt;
+        }
         const semantics::DeclTypeSpec &type{
-            semantics::FindOrInstantiateDerivedType(scope,
-                semantics::DerivedTypeSpec{
-                    name->source, derivedType.GetUltimate()},
-                context_)};
+            semantics::FindOrInstantiateDerivedType(
+                scope, std::move(dtSpec), context_)};
         auto &mutableRef{const_cast<parser::FunctionReference &>(funcRef)};
         *structureConstructor =
             mutableRef.ConvertToStructureConstructor(type.derivedTypeSpec());
@@ -2707,9 +2727,6 @@ void ArgumentAnalyzer::Analyze(const parser::Variable &x) {
 
 void ArgumentAnalyzer::Analyze(
     const parser::ActualArgSpec &arg, bool isSubroutine) {
-  // TODO: C1002: Allow a whole assumed-size array to appear if the dummy
-  // argument would accept it.  Handle by special-casing the context
-  // ActualArg -> Variable -> Designator.
   // TODO: Actual arguments that are procedures and procedure pointers need to
   // be detected and represented (they're not expressions).
   // TODO: C1534: Don't allow a "restricted" specific intrinsic to be passed.
@@ -2940,18 +2957,26 @@ std::optional<ProcedureRef> ArgumentAnalyzer::GetDefinedAssignmentProc() {
       context_.EmitGenericResolutionError(*symbol);
     }
   }
-  for (std::size_t passIndex{0}; passIndex < actuals_.size(); ++passIndex) {
-    if (const Symbol * specific{FindBoundOp(oprName, passIndex)}) {
-      proc = specific;
+  int passedObjectIndex{-1};
+  for (std::size_t i{0}; i < actuals_.size(); ++i) {
+    if (const Symbol * specific{FindBoundOp(oprName, i)}) {
+      if (const Symbol *
+          resolution{GetBindingResolution(GetType(i), *specific)}) {
+        proc = resolution;
+      } else {
+        proc = specific;
+        passedObjectIndex = i;
+      }
     }
   }
-  if (proc) {
-    ActualArguments actualsCopy{actuals_};
-    actualsCopy[1]->Parenthesize();
-    return ProcedureRef{ProcedureDesignator{*proc}, std::move(actualsCopy)};
-  } else {
+  if (!proc) {
     return std::nullopt;
   }
+  ActualArguments actualsCopy{actuals_};
+  if (passedObjectIndex >= 0) {
+    actualsCopy[passedObjectIndex]->set_isPassedObject();
+  }
+  return ProcedureRef{ProcedureDesignator{*proc}, std::move(actualsCopy)};
 }
 
 void ArgumentAnalyzer::Dump(llvm::raw_ostream &os) {
@@ -2969,6 +2994,7 @@ void ArgumentAnalyzer::Dump(llvm::raw_ostream &os) {
     }
   }
 }
+
 std::optional<ActualArgument> ArgumentAnalyzer::AnalyzeExpr(
     const parser::Expr &expr) {
   source_.ExtendToCover(expr.source);
@@ -2976,26 +3002,33 @@ std::optional<ActualArgument> ArgumentAnalyzer::AnalyzeExpr(
     expr.typedExpr.Reset(new GenericExprWrapper{}, GenericExprWrapper::Deleter);
     if (isProcedureCall_) {
       return ActualArgument{ActualArgument::AssumedType{*assumedTypeDummy}};
-    } else {
-      context_.SayAt(expr.source,
-          "TYPE(*) dummy argument may only be used as an actual argument"_err_en_US);
-      return std::nullopt;
     }
-  } else if (MaybeExpr argExpr{context_.Analyze(expr)}) {
-    if (!isProcedureCall_ && IsProcedure(*argExpr)) {
-      if (IsFunction(*argExpr)) {
-        context_.SayAt(
-            expr.source, "Function call must have argument list"_err_en_US);
-      } else {
-        context_.SayAt(
-            expr.source, "Subroutine name is not allowed here"_err_en_US);
-      }
-      return std::nullopt;
+    context_.SayAt(expr.source,
+        "TYPE(*) dummy argument may only be used as an actual argument"_err_en_US);
+  } else if (MaybeExpr argExpr{AnalyzeExprOrWholeAssumedSizeArray(expr)}) {
+    if (isProcedureCall_ || !IsProcedure(*argExpr)) {
+      return ActualArgument{context_.Fold(std::move(*argExpr))};
     }
-    return ActualArgument{context_.Fold(std::move(*argExpr))};
-  } else {
-    return std::nullopt;
+    context_.SayAt(expr.source,
+        IsFunction(*argExpr) ? "Function call must have argument list"_err_en_US
+                             : "Subroutine name is not allowed here"_err_en_US);
   }
+  return std::nullopt;
+}
+
+MaybeExpr ArgumentAnalyzer::AnalyzeExprOrWholeAssumedSizeArray(
+    const parser::Expr &expr) {
+  // If an expression's parse tree is a whole assumed-size array:
+  //   Expr -> Designator -> DataRef -> Name
+  // treat it as a special case for argument passing and bypass
+  // the C1002/C1014 constraint checking in expression semantics.
+  if (const auto *name{parser::Unwrap<parser::Name>(expr)}) {
+    if (name->symbol && semantics::IsAssumedSizeArray(*name->symbol)) {
+      auto restorer{context_.AllowWholeAssumedSizeArray()};
+      return context_.Analyze(expr);
+    }
+  }
+  return context_.Analyze(expr);
 }
 
 bool ArgumentAnalyzer::AreConformable() const {

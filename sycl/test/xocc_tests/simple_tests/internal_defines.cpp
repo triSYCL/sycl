@@ -14,7 +14,7 @@
 
   When compiling for a Xilinx device the following defines should be defined:
 
-  __SYCL_XILINX_ONLY__ : defined on both the host and device
+  __SYCL_HAS_XILINX_DEVICE__ : defined on both the host and device
   __SYCL_SPIR_ONLY__ : defined only on the device
 
   When compiled for anything but a Xilinx device at the moment both flags should
@@ -34,14 +34,16 @@ int main() {
 
 #ifdef __SYCL_SPIR_DEVICE__
         std::cout << "__SYCL_SPIR_DEVICE__ defined on host \n";
+        assert(false);
 #else
         std::cout << "__SYCL_SPIR_DEVICE__ not defined on host \n";
 #endif
 
-#ifdef __SYCL_XILINX_ONLY__
-        std::cout << "__SYCL_XILINX_ONLY__ defined on host \n";
+#ifdef __SYCL_HAS_XILINX_DEVICE__
+        std::cout << "__SYCL_HAS_XILINX_DEVICE__ defined on host \n";
 #else
-        std::cout << "__SYCL_XILINX_ONLY__ not defined on host \n";
+        assert(false);
+        std::cout << "__SYCL_HAS_XILINX_DEVICE__ not defined on host \n";
 #endif
 
   buffer<unsigned int> ob(range<1>{2});
@@ -55,7 +57,7 @@ int main() {
       wb[0] = 2;
 #endif
 
-#ifdef __SYCL_XILINX_ONLY__
+#ifdef __SYCL_HAS_XILINX_DEVICE__
       wb[1] = 1;
 #else
       wb[1] = 2;
@@ -72,10 +74,10 @@ int main() {
    else
       assert("kernel failure");
        
-   if (rb[1] == 1)   
-      std::cout << "__SYCL_XILINX_ONLY__ defined on device \n";
-   else if (rb[1] == 2) 
-      std::cout << "__SYCL_XILINX_ONLY__ not defined on device \n";
+   if (rb[1] == 1)
+     std::cout << "__SYCL_HAS_XILINX_DEVICE__ defined on device \n";
+   else if (rb[1] == 2)
+     std::cout << "__SYCL_HAS_XILINX_DEVICE__ not defined on device \n";
    else
       assert("kernel failure");
   

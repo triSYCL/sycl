@@ -3553,10 +3553,6 @@ uses with" concept would not hold.
 
 To ensure all uses of a given register observe the same value (even if
 '``undef``'), the :ref:`freeze instruction <i_freeze>` can be used.
-A value is frozen if its uses see the same value.
-An aggregate value or vector is frozen if its elements are frozen.
-The padding of an aggregate isn't considered, since it isn't visible
-without storing it into memory and loading it with a different type.
 
 .. code-block:: llvm
 
@@ -3728,6 +3724,23 @@ Here are some examples:
       br i1 %cmp, label %end, label %end   ; undefined behavior
 
     end:
+
+.. _welldefinedvalues:
+
+Well-Defined Values
+-------------------
+
+Given a program execution, a value is *well defined* if the value does not
+have an undef bit and is not poison in the execution.
+An aggregate value or vector is well defined if its elements are well defined.
+The padding of an aggregate isn't considered, since it isn't visible
+without storing it into memory and loading it with a different type.
+
+A constant of a :ref:`single value <t_single_value>`, non-vector type is well
+defined if it is a non-undef constant. Note that there is no poison constant
+in LLVM.
+The result of :ref:`freeze instruction <i_freeze>` is well defined regardless
+of its operand.
 
 .. _blockaddress:
 
@@ -6885,7 +6898,7 @@ where the first ``param`` is the number of the parameter it describes,
 which can be accessed by the function. This range does not include accesses by
 function calls from ``calls`` list.
 
-where each ``Callee`` decribes how parameter is forwared into other
+where each ``Callee`` describes how parameter is forwarded into other
 functions and looks like:
 
 .. code-block:: text
@@ -9244,6 +9257,12 @@ If the value being loaded is of aggregate type, the bytes that correspond to
 padding may be accessed but are ignored, because it is impossible to observe
 padding from the loaded aggregate value.
 
+If the pointer is not a well-defined value, all of its possible representations
+should be dereferenceable. For example, loading a byte from a pointer to an
+array of type ``[16 x i8]`` with offset ``undef & 31`` is undefined behavior.
+Loading a byte at offset ``undef & 15`` nondeterministically reads one of the
+bytes.
+
 Examples:
 """""""""
 
@@ -9334,6 +9353,12 @@ of bytes, it is unspecified what happens to the extra bits that do not
 belong to the type, but they will typically be overwritten.
 If ``<value>`` is of aggregate type, padding is filled with
 :ref:`undef <undefvalues>`.
+
+If ``<pointer>`` is not a well-defined value, all of its possible
+representations should be dereferenceable. For example, storing a byte to a
+pointer to an array of type ``[16 x i8]`` with offset ``undef & 31`` is
+undefined behavior. Storing a byte to an offset ``undef & 15``
+nondeterministically stores to one of offsets from 0 to 15.
 
 Example:
 """"""""
@@ -12479,14 +12504,17 @@ very cleanly specified and it is unwise to depend on it.
 Semantics:
 """"""""""
 
-The '``llvm.memcpy.*``' intrinsics copy a block of memory from the
-source location to the destination location, which are not allowed to
-overlap. It copies "len" bytes of memory over. If the argument is known
-to be aligned to some boundary, this can be specified as an attribute on
-the argument.
+The '``llvm.memcpy.*``' intrinsics copy a block of memory from the source
+location to the destination location, which must either be equal or
+non-overlapping. It copies "len" bytes of memory over. If the argument is known
+to be aligned to some boundary, this can be specified as an attribute on the
+argument.
 
 If "len" is 0, the pointers may be NULL, dangling, ``undef``, or ``poison``
 pointers. However, they must still be appropriately aligned.
+If "len" isn't a well-defined value, all of its possible representations should
+make the behavior of this ``llvm.memcpy`` defined, otherwise the behavior is
+undefined.
 
 .. _int_memcpy_inline:
 
@@ -12604,6 +12632,9 @@ the argument.
 
 If "len" is 0, the pointers may be NULL, dangling, ``undef``, or ``poison``
 pointers. However, they must still be appropriately aligned.
+If "len" isn't a well-defined value, all of its possible representations should
+make the behavior of this ``llvm.memmove`` defined, otherwise the behavior is
+undefined.
 
 .. _int_memset:
 
@@ -12659,6 +12690,9 @@ the argument.
 
 If "len" is 0, the pointer may be NULL, dangling, ``undef``, or ``poison``
 pointer. However, it must still be appropriately aligned.
+If "len" isn't a well-defined value, all of its possible representations should
+make the behavior of this ``llvm.memset`` defined, otherwise the behavior is
+undefined.
 
 '``llvm.sqrt.*``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -15509,8 +15543,8 @@ should exit, this ``SUB`` is not allowed to wrap. The result is a condition
 that is used by the conditional branch controlling the loop.
 
 
-Experimental Vector Reduction Intrinsics
-----------------------------------------
+Vector Reduction Intrinsics
+---------------------------
 
 Horizontal reductions of vectors can be expressed using the following
 intrinsics. Each one takes a vector operand as an input and applies its
@@ -15518,21 +15552,21 @@ respective operation across all elements of the vector, returning a single
 scalar result of the same element type.
 
 
-'``llvm.experimental.vector.reduce.add.*``' Intrinsic
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+'``llvm.vector.reduce.add.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
 """""""
 
 ::
 
-      declare i32 @llvm.experimental.vector.reduce.add.v4i32(<4 x i32> %a)
-      declare i64 @llvm.experimental.vector.reduce.add.v2i64(<2 x i64> %a)
+      declare i32 @llvm.vector.reduce.add.v4i32(<4 x i32> %a)
+      declare i64 @llvm.vector.reduce.add.v2i64(<2 x i64> %a)
 
 Overview:
 """""""""
 
-The '``llvm.experimental.vector.reduce.add.*``' intrinsics do an integer ``ADD``
+The '``llvm.vector.reduce.add.*``' intrinsics do an integer ``ADD``
 reduction of a vector, returning the result as a scalar. The return type matches
 the element-type of the vector input.
 
@@ -15540,34 +15574,34 @@ Arguments:
 """"""""""
 The argument to this intrinsic must be a vector of integer values.
 
-'``llvm.experimental.vector.reduce.v2.fadd.*``' Intrinsic
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+'``llvm.vector.reduce.fadd.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
 """""""
 
 ::
 
-      declare float @llvm.experimental.vector.reduce.v2.fadd.f32.v4f32(float %start_value, <4 x float> %a)
-      declare double @llvm.experimental.vector.reduce.v2.fadd.f64.v2f64(double %start_value, <2 x double> %a)
+      declare float @llvm.vector.reduce.fadd.v4f32(float %start_value, <4 x float> %a)
+      declare double @llvm.vector.reduce.fadd.v2f64(double %start_value, <2 x double> %a)
 
 Overview:
 """""""""
 
-The '``llvm.experimental.vector.reduce.v2.fadd.*``' intrinsics do a floating-point
+The '``llvm.vector.reduce.fadd.*``' intrinsics do a floating-point
 ``ADD`` reduction of a vector, returning the result as a scalar. The return type
 matches the element-type of the vector input.
 
-If the intrinsic call has the 'reassoc' or 'fast' flags set, then the
-reduction will not preserve the associativity of an equivalent scalarized
-counterpart. Otherwise the reduction will be *ordered*, thus implying that
-the operation respects the associativity of a scalarized reduction. That is, the
-reduction begins with the start value and performs an fadd operation with consecutively
-increasing vector element indices. See the following pseudocode:
+If the intrinsic call has the 'reassoc' flag set, then the reduction will not
+preserve the associativity of an equivalent scalarized counterpart. Otherwise
+the reduction will be *sequential*, thus implying that the operation respects
+the associativity of a scalarized reduction. That is, the reduction begins with
+the start value and performs an fadd operation with consecutively increasing
+vector element indices. See the following pseudocode:
 
 ::
 
-    float ordered_fadd(start_value, input_vector)
+    float sequential_fadd(start_value, input_vector)
       result = start_value
       for i = 0 to length(input_vector)
         result = result + input_vector[i]
@@ -15585,25 +15619,25 @@ Examples:
 
 ::
 
-      %unord = call reassoc float @llvm.experimental.vector.reduce.v2.fadd.f32.v4f32(float 0.0, <4 x float> %input) ; unordered reduction
-      %ord = call float @llvm.experimental.vector.reduce.v2.fadd.f32.v4f32(float %start_value, <4 x float> %input) ; ordered reduction
+      %unord = call reassoc float @llvm.vector.reduce.fadd.v4f32(float 0.0, <4 x float> %input) ; relaxed reduction
+      %ord = call float @llvm.vector.reduce.fadd.v4f32(float %start_value, <4 x float> %input) ; sequential reduction
 
 
-'``llvm.experimental.vector.reduce.mul.*``' Intrinsic
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+'``llvm.vector.reduce.mul.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
 """""""
 
 ::
 
-      declare i32 @llvm.experimental.vector.reduce.mul.v4i32(<4 x i32> %a)
-      declare i64 @llvm.experimental.vector.reduce.mul.v2i64(<2 x i64> %a)
+      declare i32 @llvm.vector.reduce.mul.v4i32(<4 x i32> %a)
+      declare i64 @llvm.vector.reduce.mul.v2i64(<2 x i64> %a)
 
 Overview:
 """""""""
 
-The '``llvm.experimental.vector.reduce.mul.*``' intrinsics do an integer ``MUL``
+The '``llvm.vector.reduce.mul.*``' intrinsics do an integer ``MUL``
 reduction of a vector, returning the result as a scalar. The return type matches
 the element-type of the vector input.
 
@@ -15611,34 +15645,34 @@ Arguments:
 """"""""""
 The argument to this intrinsic must be a vector of integer values.
 
-'``llvm.experimental.vector.reduce.v2.fmul.*``' Intrinsic
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+'``llvm.vector.reduce.fmul.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
 """""""
 
 ::
 
-      declare float @llvm.experimental.vector.reduce.v2.fmul.f32.v4f32(float %start_value, <4 x float> %a)
-      declare double @llvm.experimental.vector.reduce.v2.fmul.f64.v2f64(double %start_value, <2 x double> %a)
+      declare float @llvm.vector.reduce.fmul.v4f32(float %start_value, <4 x float> %a)
+      declare double @llvm.vector.reduce.fmul.v2f64(double %start_value, <2 x double> %a)
 
 Overview:
 """""""""
 
-The '``llvm.experimental.vector.reduce.v2.fmul.*``' intrinsics do a floating-point
+The '``llvm.vector.reduce.fmul.*``' intrinsics do a floating-point
 ``MUL`` reduction of a vector, returning the result as a scalar. The return type
 matches the element-type of the vector input.
 
-If the intrinsic call has the 'reassoc' or 'fast' flags set, then the
-reduction will not preserve the associativity of an equivalent scalarized
-counterpart. Otherwise the reduction will be *ordered*, thus implying that
-the operation respects the associativity of a scalarized reduction. That is, the
-reduction begins with the start value and performs an fmul operation with consecutively
-increasing vector element indices. See the following pseudocode:
+If the intrinsic call has the 'reassoc' flag set, then the reduction will not
+preserve the associativity of an equivalent scalarized counterpart. Otherwise
+the reduction will be *sequential*, thus implying that the operation respects
+the associativity of a scalarized reduction. That is, the reduction begins with
+the start value and performs an fmul operation with consecutively increasing
+vector element indices. See the following pseudocode:
 
 ::
 
-    float ordered_fmul(start_value, input_vector)
+    float sequential_fmul(start_value, input_vector)
       result = start_value
       for i = 0 to length(input_vector)
         result = result * input_vector[i]
@@ -15656,23 +15690,23 @@ Examples:
 
 ::
 
-      %unord = call reassoc float @llvm.experimental.vector.reduce.v2.fmul.f32.v4f32(float 1.0, <4 x float> %input) ; unordered reduction
-      %ord = call float @llvm.experimental.vector.reduce.v2.fmul.f32.v4f32(float %start_value, <4 x float> %input) ; ordered reduction
+      %unord = call reassoc float @llvm.vector.reduce.fmul.v4f32(float 1.0, <4 x float> %input) ; relaxed reduction
+      %ord = call float @llvm.vector.reduce.fmul.v4f32(float %start_value, <4 x float> %input) ; sequential reduction
 
-'``llvm.experimental.vector.reduce.and.*``' Intrinsic
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+'``llvm.vector.reduce.and.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
 """""""
 
 ::
 
-      declare i32 @llvm.experimental.vector.reduce.and.v4i32(<4 x i32> %a)
+      declare i32 @llvm.vector.reduce.and.v4i32(<4 x i32> %a)
 
 Overview:
 """""""""
 
-The '``llvm.experimental.vector.reduce.and.*``' intrinsics do a bitwise ``AND``
+The '``llvm.vector.reduce.and.*``' intrinsics do a bitwise ``AND``
 reduction of a vector, returning the result as a scalar. The return type matches
 the element-type of the vector input.
 
@@ -15680,20 +15714,20 @@ Arguments:
 """"""""""
 The argument to this intrinsic must be a vector of integer values.
 
-'``llvm.experimental.vector.reduce.or.*``' Intrinsic
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+'``llvm.vector.reduce.or.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
 """""""
 
 ::
 
-      declare i32 @llvm.experimental.vector.reduce.or.v4i32(<4 x i32> %a)
+      declare i32 @llvm.vector.reduce.or.v4i32(<4 x i32> %a)
 
 Overview:
 """""""""
 
-The '``llvm.experimental.vector.reduce.or.*``' intrinsics do a bitwise ``OR`` reduction
+The '``llvm.vector.reduce.or.*``' intrinsics do a bitwise ``OR`` reduction
 of a vector, returning the result as a scalar. The return type matches the
 element-type of the vector input.
 
@@ -15701,20 +15735,20 @@ Arguments:
 """"""""""
 The argument to this intrinsic must be a vector of integer values.
 
-'``llvm.experimental.vector.reduce.xor.*``' Intrinsic
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+'``llvm.vector.reduce.xor.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
 """""""
 
 ::
 
-      declare i32 @llvm.experimental.vector.reduce.xor.v4i32(<4 x i32> %a)
+      declare i32 @llvm.vector.reduce.xor.v4i32(<4 x i32> %a)
 
 Overview:
 """""""""
 
-The '``llvm.experimental.vector.reduce.xor.*``' intrinsics do a bitwise ``XOR``
+The '``llvm.vector.reduce.xor.*``' intrinsics do a bitwise ``XOR``
 reduction of a vector, returning the result as a scalar. The return type matches
 the element-type of the vector input.
 
@@ -15722,20 +15756,20 @@ Arguments:
 """"""""""
 The argument to this intrinsic must be a vector of integer values.
 
-'``llvm.experimental.vector.reduce.smax.*``' Intrinsic
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+'``llvm.vector.reduce.smax.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
 """""""
 
 ::
 
-      declare i32 @llvm.experimental.vector.reduce.smax.v4i32(<4 x i32> %a)
+      declare i32 @llvm.vector.reduce.smax.v4i32(<4 x i32> %a)
 
 Overview:
 """""""""
 
-The '``llvm.experimental.vector.reduce.smax.*``' intrinsics do a signed integer
+The '``llvm.vector.reduce.smax.*``' intrinsics do a signed integer
 ``MAX`` reduction of a vector, returning the result as a scalar. The return type
 matches the element-type of the vector input.
 
@@ -15743,20 +15777,20 @@ Arguments:
 """"""""""
 The argument to this intrinsic must be a vector of integer values.
 
-'``llvm.experimental.vector.reduce.smin.*``' Intrinsic
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+'``llvm.vector.reduce.smin.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
 """""""
 
 ::
 
-      declare i32 @llvm.experimental.vector.reduce.smin.v4i32(<4 x i32> %a)
+      declare i32 @llvm.vector.reduce.smin.v4i32(<4 x i32> %a)
 
 Overview:
 """""""""
 
-The '``llvm.experimental.vector.reduce.smin.*``' intrinsics do a signed integer
+The '``llvm.vector.reduce.smin.*``' intrinsics do a signed integer
 ``MIN`` reduction of a vector, returning the result as a scalar. The return type
 matches the element-type of the vector input.
 
@@ -15764,20 +15798,20 @@ Arguments:
 """"""""""
 The argument to this intrinsic must be a vector of integer values.
 
-'``llvm.experimental.vector.reduce.umax.*``' Intrinsic
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+'``llvm.vector.reduce.umax.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
 """""""
 
 ::
 
-      declare i32 @llvm.experimental.vector.reduce.umax.v4i32(<4 x i32> %a)
+      declare i32 @llvm.vector.reduce.umax.v4i32(<4 x i32> %a)
 
 Overview:
 """""""""
 
-The '``llvm.experimental.vector.reduce.umax.*``' intrinsics do an unsigned
+The '``llvm.vector.reduce.umax.*``' intrinsics do an unsigned
 integer ``MAX`` reduction of a vector, returning the result as a scalar. The
 return type matches the element-type of the vector input.
 
@@ -15785,20 +15819,20 @@ Arguments:
 """"""""""
 The argument to this intrinsic must be a vector of integer values.
 
-'``llvm.experimental.vector.reduce.umin.*``' Intrinsic
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+'``llvm.vector.reduce.umin.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
 """""""
 
 ::
 
-      declare i32 @llvm.experimental.vector.reduce.umin.v4i32(<4 x i32> %a)
+      declare i32 @llvm.vector.reduce.umin.v4i32(<4 x i32> %a)
 
 Overview:
 """""""""
 
-The '``llvm.experimental.vector.reduce.umin.*``' intrinsics do an unsigned
+The '``llvm.vector.reduce.umin.*``' intrinsics do an unsigned
 integer ``MIN`` reduction of a vector, returning the result as a scalar. The
 return type matches the element-type of the vector input.
 
@@ -15806,33 +15840,38 @@ Arguments:
 """"""""""
 The argument to this intrinsic must be a vector of integer values.
 
-'``llvm.experimental.vector.reduce.fmax.*``' Intrinsic
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+'``llvm.vector.reduce.fmax.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
 """""""
 
 ::
 
-      declare float @llvm.experimental.vector.reduce.fmax.v4f32(<4 x float> %a)
-      declare double @llvm.experimental.vector.reduce.fmax.v2f64(<2 x double> %a)
+      declare float @llvm.vector.reduce.fmax.v4f32(<4 x float> %a)
+      declare double @llvm.vector.reduce.fmax.v2f64(<2 x double> %a)
 
 Overview:
 """""""""
 
-The '``llvm.experimental.vector.reduce.fmax.*``' intrinsics do a floating-point
+The '``llvm.vector.reduce.fmax.*``' intrinsics do a floating-point
 ``MAX`` reduction of a vector, returning the result as a scalar. The return type
 matches the element-type of the vector input.
 
-If the intrinsic call has the ``nnan`` fast-math flag then the operation can
+This instruction has the same comparison semantics as the '``llvm.maxnum.*``'
+intrinsic. That is, the result will always be a number unless all elements of
+the vector are NaN. For a vector with maximum element magnitude 0.0 and
+containing both +0.0 and -0.0 elements, the sign of the result is unspecified.
+
+If the intrinsic call has the ``nnan`` fast-math flag, then the operation can
 assume that NaNs are not present in the input vector.
 
 Arguments:
 """"""""""
 The argument to this intrinsic must be a vector of floating-point values.
 
-'``llvm.experimental.vector.reduce.fmin.*``' Intrinsic
-^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+'``llvm.vector.reduce.fmin.*``' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Syntax:
 """""""
@@ -15840,17 +15879,22 @@ This is an overloaded intrinsic.
 
 ::
 
-      declare float @llvm.experimental.vector.reduce.fmin.v4f32(<4 x float> %a)
-      declare double @llvm.experimental.vector.reduce.fmin.v2f64(<2 x double> %a)
+      declare float @llvm.vector.reduce.fmin.v4f32(<4 x float> %a)
+      declare double @llvm.vector.reduce.fmin.v2f64(<2 x double> %a)
 
 Overview:
 """""""""
 
-The '``llvm.experimental.vector.reduce.fmin.*``' intrinsics do a floating-point
+The '``llvm.vector.reduce.fmin.*``' intrinsics do a floating-point
 ``MIN`` reduction of a vector, returning the result as a scalar. The return type
 matches the element-type of the vector input.
 
-If the intrinsic call has the ``nnan`` fast-math flag then the operation can
+This instruction has the same comparison semantics as the '``llvm.minnum.*``'
+intrinsic. That is, the result will always be a number unless all elements of
+the vector are NaN. For a vector with minimum element magnitude 0.0 and
+containing both +0.0 and -0.0 elements, the sign of the result is unspecified.
+
+If the intrinsic call has the ``nnan`` fast-math flag, then the operation can
 assume that NaNs are not present in the input vector.
 
 Arguments:
@@ -15952,8 +15996,8 @@ Arguments:
 """"""""""
 
 The first argument ``%Ptr`` is a pointer type to the returned vector type, and
-correponds to the start address to load from. The second argument ``%Stride``
-is a postive, constant integer with ``%Stride >= <Rows>``. ``%Stride`` is used
+corresponds to the start address to load from. The second argument ``%Stride``
+is a positive, constant integer with ``%Stride >= <Rows>``. ``%Stride`` is used
 to compute the column memory addresses. I.e., for a column ``C``, its start
 memory addresses is calculated with ``%Ptr + C * %Stride``. The third Argument
 ``<IsVolatile>`` is a boolean value.  The fourth and fifth arguments,
@@ -20021,6 +20065,8 @@ not overflow at link time under the medium code model if ``x`` is an
 ``unnamed_addr`` function. However, it does not provide this guarantee for
 a constant initializer folded into a function body. This intrinsic can be
 used to avoid the possibility of overflows when loading from such a constant.
+
+.. _llvm_sideeffect:
 
 '``llvm.sideeffect``' Intrinsic
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

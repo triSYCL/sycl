@@ -141,7 +141,7 @@ std::string mapLLVMTypeToOCLType(const Type *Ty, bool Signed) {
     }
     return SignPrefix + Stem;
   }
-  if (auto VecTy = dyn_cast<VectorType>(Ty)) {
+  if (auto VecTy = dyn_cast<FixedVectorType>(Ty)) {
     Type *EleTy = VecTy->getElementType();
     unsigned Size = VecTy->getNumElements();
     std::stringstream Ss;
@@ -740,7 +740,7 @@ void makeVector(Instruction *InsPos, std::vector<Value *> &Ops,
 void expandVector(Instruction *InsPos, std::vector<Value *> &Ops,
                   size_t VecPos) {
   auto Vec = Ops[VecPos];
-  auto *VT = dyn_cast<VectorType>(Vec->getType());
+  auto *VT = dyn_cast<FixedVectorType>(Vec->getType());
   if (!VT)
     return;
   size_t N = VT->getNumElements();
@@ -1047,7 +1047,7 @@ static SPIR::RefParamType transTypeDesc(Type *Ty,
     return SPIR::RefParamType(new SPIR::PrimitiveType(SPIR::PRIMITIVE_FLOAT));
   if (Ty->isDoubleTy())
     return SPIR::RefParamType(new SPIR::PrimitiveType(SPIR::PRIMITIVE_DOUBLE));
-  if (auto *VecTy = dyn_cast<VectorType>(Ty)) {
+  if (auto *VecTy = dyn_cast<FixedVectorType>(Ty)) {
     return SPIR::RefParamType(new SPIR::VectorType(
         transTypeDesc(VecTy->getElementType(), Info), VecTy->getNumElements()));
   }
@@ -1161,7 +1161,7 @@ Value *getScalarOrArray(Value *V, unsigned Size, Instruction *Pos) {
 Constant *getScalarOrVectorConstantInt(Type *T, uint64_t V, bool IsSigned) {
   if (auto IT = dyn_cast<IntegerType>(T))
     return ConstantInt::get(IT, V);
-  if (auto VT = dyn_cast<VectorType>(T)) {
+  if (auto VT = dyn_cast<FixedVectorType>(T)) {
     std::vector<Constant *> EV(
         VT->getNumElements(),
         getScalarOrVectorConstantInt(VT->getElementType(), V, IsSigned));
@@ -1533,16 +1533,17 @@ bool checkTypeForSPIRVExtendedInstLowering(IntrinsicInst *II, SPIRVModule *BM) {
   switch (II->getIntrinsicID()) {
   case Intrinsic::fabs:
   case Intrinsic::ceil:
-  case Intrinsic::maxnum: {
+  case Intrinsic::maxnum:
+  case Intrinsic::nearbyint: {
     Type *Ty = II->getType();
     if (II->getArgOperand(0)->getType() != Ty)
       return false;
     int NumElems = 1;
-    if (auto *VecTy = dyn_cast<VectorType>(Ty)) {
+    if (auto *VecTy = dyn_cast<FixedVectorType>(Ty)) {
       NumElems = VecTy->getNumElements();
       Ty = VecTy->getElementType();
     }
-    if ((!Ty->isFloatTy() && !Ty->isDoubleTy()) ||
+    if ((!Ty->isFloatTy() && !Ty->isDoubleTy() && !Ty->isHalfTy()) ||
         ((NumElems > 4) && (NumElems != 8) && (NumElems != 16))) {
       BM->getErrorLog().checkError(false, SPIRVEC_InvalidFunctionCall,
                                    II->getCalledOperand()->getName().str(), "",
@@ -1551,10 +1552,90 @@ bool checkTypeForSPIRVExtendedInstLowering(IntrinsicInst *II, SPIRVModule *BM) {
     }
     break;
   }
+  case Intrinsic::abs: {
+    Type *Ty = II->getType();
+    int NumElems = 1;
+    if (auto *VecTy = dyn_cast<FixedVectorType>(Ty)) {
+      NumElems = VecTy->getNumElements();
+      Ty = VecTy->getElementType();
+    }
+    if ((!Ty->isIntegerTy()) ||
+        ((NumElems > 4) && (NumElems != 8) && (NumElems != 16))) {
+      BM->getErrorLog().checkError(false, SPIRVEC_InvalidFunctionCall,
+                                   II->getCalledOperand()->getName().str(), "",
+                                   __FILE__, __LINE__);
+    }
+    break;
+  }
   default:
     break;
   }
   return true;
+}
+} // namespace SPIRV
+
+namespace {
+class OpenCLStdToSPIRVFriendlyIRMangleInfo : public BuiltinFuncMangleInfo {
+public:
+  OpenCLStdToSPIRVFriendlyIRMangleInfo(OCLExtOpKind ExtOpId,
+                                       ArrayRef<Type *> ArgTys)
+      : ExtOpId(ExtOpId), ArgTys(ArgTys) {
+    UnmangledName = getSPIRVExtFuncName(SPIRVEIS_OpenCL, ExtOpId);
+  }
+
+  void init(StringRef) override {
+    switch (ExtOpId) {
+    case OpenCLLIB::UAbs:
+      LLVM_FALLTHROUGH;
+    case OpenCLLIB::UAbs_diff:
+      LLVM_FALLTHROUGH;
+    case OpenCLLIB::UAdd_sat:
+      LLVM_FALLTHROUGH;
+    case OpenCLLIB::UHadd:
+      LLVM_FALLTHROUGH;
+    case OpenCLLIB::URhadd:
+      LLVM_FALLTHROUGH;
+    case OpenCLLIB::UClamp:
+      LLVM_FALLTHROUGH;
+    case OpenCLLIB::UMad_hi:
+      LLVM_FALLTHROUGH;
+    case OpenCLLIB::UMad_sat:
+      LLVM_FALLTHROUGH;
+    case OpenCLLIB::UMax:
+      LLVM_FALLTHROUGH;
+    case OpenCLLIB::UMin:
+      LLVM_FALLTHROUGH;
+    case OpenCLLIB::UMul_hi:
+      LLVM_FALLTHROUGH;
+    case OpenCLLIB::USub_sat:
+      LLVM_FALLTHROUGH;
+    case OpenCLLIB::U_Upsample:
+      LLVM_FALLTHROUGH;
+    case OpenCLLIB::UMad24:
+      LLVM_FALLTHROUGH;
+    case OpenCLLIB::UMul24:
+      // Treat all arguments as unsigned
+      addUnsignedArg(-1);
+      break;
+    case OpenCLLIB::S_Upsample:
+      addUnsignedArg(1);
+      break;
+    default:;
+      // No special handling is needed
+    }
+  }
+
+private:
+  OCLExtOpKind ExtOpId;
+  ArrayRef<Type *> ArgTys;
+};
+} // namespace
+
+namespace SPIRV {
+std::string getSPIRVFriendlyIRFunctionName(OCLExtOpKind ExtOpId,
+                                           ArrayRef<Type *> ArgTys) {
+  OpenCLStdToSPIRVFriendlyIRMangleInfo MangleInfo(ExtOpId, ArgTys);
+  return mangleBuiltin(MangleInfo.getUnmangledName(), ArgTys, &MangleInfo);
 }
 
 } // namespace SPIRV

@@ -4,7 +4,6 @@
 
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
 
-
 /*
   Test to see if the world will explode when using SPIR built-ins that are
   derived from those in cl__spirv on Xilinx FPGAs when compiling using xocc.
@@ -28,7 +27,7 @@ class id_mangle;
 // overwrite the index implementation somehow.
 // /todo Look into this? I assumed using SPIRV oriented calls should avoid this
 //  interaction. Perhaps a misunderstanding on my part?
-#ifdef __SYCL_XILINX_ONLY__
+#ifdef __SYCL_HAS_XILINX_DEVICE__
 size_t get_global_id(uint dimindx) {
   return 1000;
 };
@@ -51,7 +50,7 @@ int main() {
     auto wb = test_buffer.get_access<access::mode::write>(cgh);
 
     cgh.parallel_for<id_mangle>(nd, [=](nd_item<3> index) {
-#ifdef __SYCL_XILINX_ONLY__
+#ifdef __SYCL_HAS_XILINX_DEVICE__
         wb[index.get_global_linear_id()] += get_global_id(0);
 #endif
         wb[index.get_global_linear_id()] += index.get_global_id(0);
@@ -104,7 +103,7 @@ int main() {
   // all of our invocations of the user defined get_global_id on the device plus
   // one host invocation should sum up to 9000, this is only relevant for Xilinx
   // at the moment
-#ifdef __SYCL_XILINX_ONLY__
+#ifdef __SYCL_HAS_XILINX_DEVICE__
   std::cout << "sum of all id's, sizes and offsets and user get_global_id call "
             <<  sum + get_global_id(0) << "\n";
   assert((sum + get_global_id(0)) == 9172);

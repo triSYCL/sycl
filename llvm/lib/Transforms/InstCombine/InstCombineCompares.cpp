@@ -552,7 +552,7 @@ static bool canRewriteGEPAsOffset(Value *Start, Value *Base,
         return false;
 
       if (isa<IntToPtrInst>(V) || isa<PtrToIntInst>(V)) {
-        auto *CI = dyn_cast<CastInst>(V);
+        auto *CI = cast<CastInst>(V);
         if (!CI->isNoopCast(DL))
           return false;
 
@@ -3088,6 +3088,14 @@ Instruction *InstCombinerImpl::foldICmpEqIntrinsicWithConstant(
   Type *Ty = II->getType();
   unsigned BitWidth = C.getBitWidth();
   switch (II->getIntrinsicID()) {
+  case Intrinsic::abs:
+    // abs(A) == 0  ->  A == 0
+    // abs(A) == INT_MIN  ->  A == INT_MIN
+    if (C.isNullValue() || C.isMinSignedValue())
+      return new ICmpInst(Cmp.getPredicate(), II->getArgOperand(0),
+                          ConstantInt::get(Ty, C));
+    break;
+
   case Intrinsic::bswap:
     // bswap(A) == C  ->  A == bswap(C)
     return new ICmpInst(Cmp.getPredicate(), II->getArgOperand(0),
@@ -3976,6 +3984,19 @@ Instruction *InstCombinerImpl::foldICmpBinOp(ICmpInst &I,
                               ConstantExpr::getNeg(RHSC));
   }
 
+  {
+    // Try to remove shared constant multiplier from equality comparison:
+    // X * C == Y * C (with no overflowing/aliasing) --> X == Y
+    Value *X, *Y;
+    const APInt *C;
+    if (match(Op0, m_Mul(m_Value(X), m_APInt(C))) && *C != 0 &&
+        match(Op1, m_Mul(m_Value(Y), m_SpecificInt(*C))) && I.isEquality())
+      if (!C->countTrailingZeros() ||
+          (BO0->hasNoSignedWrap() && BO1->hasNoSignedWrap()) ||
+          (BO0->hasNoUnsignedWrap() && BO1->hasNoUnsignedWrap()))
+      return new ICmpInst(Pred, X, Y);
+  }
+
   BinaryOperator *SRem = nullptr;
   // icmp (srem X, Y), Y
   if (BO0 && BO0->getOpcode() == Instruction::SRem && Op1 == BO0->getOperand(1))
@@ -4052,10 +4073,6 @@ Instruction *InstCombinerImpl::foldICmpBinOp(ICmpInst &I,
           Value *And2 = Builder.CreateAnd(BO1->getOperand(0), Mask);
           return new ICmpInst(Pred, And1, And2);
         }
-        // If there are no trailing zeros in the multiplier, just eliminate
-        // the multiplies (no masking is needed):
-        // icmp eq/ne (X * C), (Y * C) --> icmp eq/ne X, Y
-        return new ICmpInst(Pred, BO0->getOperand(0), BO1->getOperand(0));
       }
       break;
     }
@@ -5243,8 +5260,8 @@ InstCombiner::getFlippedStrictnessPredicateAndConstant(CmpInst::Predicate Pred,
     // Bail out if the constant can't be safely incremented/decremented.
     if (!ConstantIsOk(CI))
       return llvm::None;
-  } else if (auto *VTy = dyn_cast<VectorType>(Type)) {
-    unsigned NumElts = cast<FixedVectorType>(VTy)->getNumElements();
+  } else if (auto *FVTy = dyn_cast<FixedVectorType>(Type)) {
+    unsigned NumElts = FVTy->getNumElements();
     for (unsigned i = 0; i != NumElts; ++i) {
       Constant *Elt = C->getAggregateElement(i);
       if (!Elt)
@@ -6072,7 +6089,7 @@ static Instruction *foldFCmpReciprocalAndZero(FCmpInst &I, Instruction *LHSI,
 /// Optimize fabs(X) compared with zero.
 static Instruction *foldFabsWithFcmpZero(FCmpInst &I, InstCombinerImpl &IC) {
   Value *X;
-  if (!match(I.getOperand(0), m_Intrinsic<Intrinsic::fabs>(m_Value(X))) ||
+  if (!match(I.getOperand(0), m_FAbs(m_Value(X))) ||
       !match(I.getOperand(1), m_PosZeroFP()))
     return nullptr;
 

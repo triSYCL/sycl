@@ -355,17 +355,26 @@ To run an example from the provided examples:
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
     parallel_for_ND_range.cpp -o parallel_for_ND_range
-  # Do not forget about unset the variable for real hardware execution
-  unset XCL_EMULATION_MODE
   # Run on the real FPGA board
   ./parallel_for_ND_range
   ```
-
 Note that in the previous examples, the compilation line does not
 change, only the environment ``XCL_EMULATION_MODE`` variable.
 
+it is possible to not use `XCL_EMULATION_MODE` and specify only the beginning of the triple:
+  ```bash
+  # Software emulation
+  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_sw_emu parallel_for_ND_range.cpp -o parallel_for_ND_range
+  # Hardware emulation
+  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hw_emu parallel_for_ND_range.cpp -o parallel_for_ND_range
+  # Hardware
+  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hw parallel_for_ND_range.cpp -o parallel_for_ND_range
+  ```
+
 
 ### Running the test suite
+
+setting XCL_EMULATION_MODE is needed to run tests or it defaults to hw
 
 - Run the test suite with software emulation:
   ```bash
@@ -462,6 +471,18 @@ executing:
 sudo rmmod xocl
 sudo modprobe xocl
 ```
+
+## Xilinx Macros
+
+``__SYCL_XILINX_SW_EMU_MODE__`` will be defined when compiling device code in sw_emu mode
+
+``__SYCL_XILINX_HW_EMU_MODE__`` will be defined when compiling device code in hw_emu mode
+
+``__SYCL_XILINX_HW_MODE__`` will be defined when compiling device code in hw mode
+
+when compiling host code none of the ``__SYCL_XILINX_*_MODE__`` macros will be defined.
+
+``__SYCL_HAS_XILINX_DEVICE__`` will be defined on the host if one of the specified targets is a Xilinx device or on a Xilinx device
 
 ## Xilinx FPGA SYCL compiler architecture
 
