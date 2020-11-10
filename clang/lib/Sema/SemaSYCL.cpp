@@ -954,14 +954,14 @@ static void populateMainEntryPoint(const StringRef Name,
   // makes life simpler for now
   Out << "extern \"C\" void " << Name << "(";
   // loop over parameter types
-  auto ParamCount = KernelFunction->param_size();
-  for (size_t i = 0; i < ParamCount; ++i) {
-    Out << RemoveGlobalFromType(
-      KernelFunction->getParamDecl(i)->getOriginalType().getAsString());
-    Out << " " << KernelFunction->getParamDecl(i)->getNameAsString();
-    if (i < ParamCount - 1)
-      Out << ", ";
-  }
+  // auto ParamCount = KernelFunction->param_size();
+  // for (size_t i = 0; i < ParamCount; ++i) {
+  //   Out << RemoveGlobalFromType(
+  //     KernelFunction->getParamDecl(i)->getOriginalType().getAsString());
+  //   Out << " " << KernelFunction->getParamDecl(i)->getNameAsString();
+  //   if (i < ParamCount - 1)
+  //     Out << ", ";
+  // }
   Out << ");" << "\n";
 
   // TODO: Declare Kernel objects and external arrays
@@ -978,25 +978,25 @@ static void populateMainEntryPoint(const StringRef Name,
 
   // Assign arg registers to parameters
   // e.g. uint16_t *input = (uint16_t *)args[0];
-  for (size_t i = 0; i < ParamCount; ++i) {
-    Out << "  "<< RemoveGlobalFromType(
-      KernelFunction->getParamDecl(i)->getOriginalType().getAsString());
-    Out << " " << KernelFunction->getParamDecl(i)->getNameAsString();
-    Out << " = ("
-        << RemoveGlobalFromType(KernelFunction->getParamDecl(i)->
-                                  getOriginalType().getAsString())
-        << ") args[" << i << "];" << "\n";
-  }
+  // for (size_t i = 0; i < ParamCount; ++i) {
+  //   Out << "  "<< RemoveGlobalFromType(
+  //     KernelFunction->getParamDecl(i)->getOriginalType().getAsString());
+  //   Out << " " << KernelFunction->getParamDecl(i)->getNameAsString();
+  //   Out << " = ("
+  //       << RemoveGlobalFromType(KernelFunction->getParamDecl(i)->
+  //                                 getOriginalType().getAsString())
+  //       << ") args[" << i << "];" << "\n";
+  // }
   Out << "\n";
   // Kernel Invocation
   // e.g. f(input, output, width, height);
   Out << "  "<< Name << "(";
   // loop over parameter types
-  for (size_t i = 0; i < ParamCount; ++i) {
-    Out << KernelFunction->getParamDecl(i)->getNameAsString();
-    if (i < ParamCount - 1)
-      Out << ", ";
-  }
+  // for (size_t i = 0; i < ParamCount; ++i) {
+  //   Out << KernelFunction->getParamDecl(i)->getNameAsString();
+  //   if (i < ParamCount - 1)
+  //     Out << ", ";
+  // }
   Out << ");" << "\n";
 
   Out << "\n";
@@ -3941,11 +3941,16 @@ public:
 };
 
 void SYCLIntegrationHeader::emit(raw_ostream &O) {
+  bool IsAIE = S.getASTContext().getTargetInfo().getTriple().isXilinxAIE();
   O << "// This is auto-generated SYCL integration header.\n";
   O << "\n";
 
-  O << "#include <CL/sycl/detail/defines_elementary.hpp>\n";
-  O << "#include <CL/sycl/detail/kernel_desc.hpp>\n";
+  if (IsAIE)
+    O << "#include <triSYCL/detail/kernel_desc.hpp>\n";
+  else {
+    O << "#include <CL/sycl/detail/defines_elementary.hpp>\n";
+    O << "#include <CL/sycl/detail/kernel_desc.hpp>\n";
+  }
 
   O << "\n";
 
@@ -3970,7 +3975,10 @@ void SYCLIntegrationHeader::emit(raw_ostream &O) {
                     });
     O << "// Specialization constants IDs:\n";
     for (const auto &P : llvm::make_range(SpecConsts.begin(), End)) {
-      O << "template <> struct sycl::detail::SpecConstantInfo<";
+      if (IsAIE)
+        O << "template <> struct trisycl::detail::SpecConstantInfo<";
+      else
+        O << "template <> struct sycl::detail::SpecConstantInfo<";
       O << P.first.getAsString(Policy);
       O << "> {\n";
       O << "  static constexpr const char* getName() {\n";
@@ -3990,8 +3998,12 @@ void SYCLIntegrationHeader::emit(raw_ostream &O) {
   }
   O << "\n";
 
-  O << "__SYCL_INLINE_NAMESPACE(cl) {\n";
-  O << "namespace sycl {\n";
+  if (IsAIE) {
+    O << "namespace trisycl {\n";
+  } else {
+    O << "__SYCL_INLINE_NAMESPACE(cl) {\n";
+    O << "namespace sycl {\n";
+  }
   O << "namespace detail {\n";
 
   O << "\n";
@@ -4060,7 +4072,8 @@ void SYCLIntegrationHeader::emit(raw_ostream &O) {
   O << "\n";
   O << "} // namespace detail\n";
   O << "} // namespace sycl\n";
-  O << "} // __SYCL_INLINE_NAMESPACE(cl)\n";
+  if (!IsAIE)
+    O << "} // __SYCL_INLINE_NAMESPACE(cl)\n";
   O << "\n";
 }
 

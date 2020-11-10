@@ -4205,7 +4205,7 @@ class OffloadingActionBuilder final {
         types::ID PostLinkOutType = isNVPTX || !MultiFileActionDeps
                                         ? types::TY_LLVM_BC
                                         : types::TY_Tempfiletable;
-        if ((*TC)->getTriple().isXilinxFPGA()) {
+        if (TripleIt->isXilinxSYCLDevice()) {
           WrapperInputs.push_back(DeviceLinkAction);
         } else {
         auto *PostLinkAction = C.MakeAction<SYCLPostLinkJobAction>(

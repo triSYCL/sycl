@@ -17,13 +17,13 @@
 #include <string>
 
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/SYCL/KernelPropGen.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
@@ -178,7 +178,8 @@ struct KernelPropGen : public ModulePass {
     }
   }
 
-  void GenerateChessPropertyScript(Module &M, llvm::raw_ostream& O) {
+  void GenerateChessPropertyScript(Module &M, llvm::raw_fd_ostream& O) {
+    
     llvm::SmallString<512> kernelNames;
     for (auto &F : M.functions()) {
       if (isKernel(F)) {
@@ -195,18 +196,18 @@ struct KernelPropGen : public ModulePass {
 
   /// Visit all the functions of the module
   bool runOnModule(Module &M) override {
-    auto T = Triple(M.getTargetTriple());
     llvm::raw_fd_ostream O(GetWriteStreamID(KernelPropGenOutput),
                            true /*close in destructor*/);
 
     if (O.has_error())
-      return false;
+      return true;
 
     // Script header/comment
     O << "# This is a generated bash script to inject environment information\n"
          "# containing kernel properties that we need so we can compile.\n"
          "# This script is called from sycl-xocc.\n";
 
+    auto T = llvm::Triple(M.getTargetTriple());
     if (T.isXilinxAIE())
       GenerateChessPropertyScript(M, O);
     else

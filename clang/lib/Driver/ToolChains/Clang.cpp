@@ -4176,7 +4176,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
                    [](const auto &Elem) {
                      return Elem.second->getTriple().isXilinxAIE();
                    }))
-    IsSYCLXOCC = true;
+    IsSYCLAIE = true;
 
   if (UseSYCLTriple) {
     // We want to compile sycl kernels.

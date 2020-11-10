@@ -78,11 +78,8 @@ struct ChessMassage : public ModulePass {
         // method would be to go through each basic block and check each
         // instruction, but this seems more optimal
         for (auto U : F.users()) {
-          if (auto CI = dyn_cast<CallInst>(U))
-            CI->setCallingConv(CallingConv::C);
-
-          if (auto II = dyn_cast<InvokeInst>(U))
-            II->setCallingConv(CallingConv::C);
+          if (auto CB = dyn_cast<CallBase>(U))\
+            CB->setCallingConv(CallingConv::C);
          }
       }
     }
