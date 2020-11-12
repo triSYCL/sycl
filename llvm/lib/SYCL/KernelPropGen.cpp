@@ -77,8 +77,11 @@ struct KernelPropGen : public ModulePass {
     return FileFD;
   }
 
+  static StringRef KindOf(const char *Str) {
+    return StringRef(Str, strlen(Str) + 1);
+  }
+
   void CollectUserSpecifiedDDRBanks(Function &F) {
-    constexpr StringRef Prefix = "xilinx_ddr_bank_";
     for (Instruction &I : instructions(F)) {
       auto *CB = dyn_cast<CallBase>(&I);
       if (!CB || CB->getIntrinsicID() != Intrinsic::var_annotation)
@@ -91,12 +94,18 @@ struct KernelPropGen : public ModulePass {
       if (!Alloca)
         continue;
       StringRef Annot = Str->getRawDataValues();
-      if (!Annot.startswith(Prefix))
+      if (Str->getRawDataValues() != KindOf("xilinx_ddr_bank"))
         continue;
-      Annot = Annot.drop_front(Prefix.size()).drop_back();
-      unsigned Bank = 0;
-      if (Annot.getAsInteger(10, Bank))
-        continue;
+      Constant *Args = (
+          cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(4)))
+              ->getInitializer());
+      Args->dump();
+      unsigned Bank;
+      if (auto* ZeroData = dyn_cast<ConstantAggregateZero>(Args))
+        Bank = 0;
+      else
+        Bank = cast<ConstantInt>(Args->getOperand(0))->getZExtValue();
+
       UserSpecifiedDDRBanks[Alloca] = Bank;
     }
   }
