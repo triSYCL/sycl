@@ -261,9 +261,7 @@ INFO: All cards validated successfully.
 
 ## Compile the SYCL compiler
 
-For details about LLVM's CMake configuration see https://llvm.org/docs/CMake.html
-but it is possible to use the simpler Python scripts to build the SYCL
-environment:
+Building SYCL can be done with Python scripts:
 ```
 # Pick some place where SYCL has to be compiled, such as:
 SYCL_HOME=~/sycl_workspace
@@ -528,3 +526,203 @@ the insane! Hopefully...
   assumptions are false. However, in the basic 2018.3 release the
   standard directory structure that is assumed is correct without
   alterations.
+
+## Debugging the SYCL implementation
+
+### Build
+
+For serious work on the SYCL toolchain it is better to
+not use the scripts in `$SYCL_HOME/buildbot` but to invoke `cmake` directly.
+This gives much more control over the build configuration.
+
+It is quite useful to work with two builds, a Release one used by default
+and a Debug one used for debugging.
+
+Note: the configuration of environment variables must be done before the `cmake` invocation.
+
+A possible Release configuration and build script targeting Xilinx FPGA, CUDA & OpenCL:
+```bash
+cd $SYCL_HOME
+mkdir -p "build-Release" && cd "build-Release" && cmake \
+ -DCMAKE_INSTALL_PREFIX="../Install-Release" \
+ -DCMAKE_CXX_FLAGS_RELEASE="-O3 -march=native -fno-omit-frame-pointer" \
+ -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+ -G Ninja \
+ -DCMAKE_C_COMPILER="/usr/bin/clang-11" \
+ -DCMAKE_CXX_COMPILER="/usr/bin/clang++-11" \
+ -DLLVM_USE_LINKER="lld-11" \
+ -DCMAKE_BUILD_TYPE=Release \
+ -DLLVM_ENABLE_ASSERTIONS=ON \
+ -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
+ -DLLVM_EXTERNAL_PROJECTS="sycl;llvm-spirv;opencl-aot;xpti;libdevice" \
+ -DLLVM_EXTERNAL_SYCL_SOURCE_DIR=$SYCL_HOME/sycl \
+ -DLLVM_EXTERNAL_LLVM_SPIRV_SOURCE_DIR=$SYCL_HOME/llvm-spirv \
+ -DLLVM_EXTERNAL_XPTI_SOURCE_DIR=$SYCL_HOME/xpti \
+ -DLLVM_EXTERNAL_LIBDEVICE_SOURCE_DIR=$SYCL_HOME/libdevice \
+ -DLLVM_ENABLE_PROJECTS="clang;llvm-spirv;sycl;opencl-aot;xpti;libdevice;libclc" \
+ -DLIBCLC_TARGETS_TO_BUILD="nvptx64--;nvptx64--nvidiacl" \
+ -DSYCL_BUILD_PI_CUDA=ON \
+ -DLLVM_BUILD_TOOLS=ON \
+ -DSYCL_INCLUDE_TESTS=ON \
+ -DLLVM_ENABLE_DOXYGEN=OFF \
+ -DLLVM_ENABLE_SPHINX=OFF \
+ -DBUILD_SHARED_LIBS=ON \
+ -DSYCL_ENABLE_XPTI_TRACING=ON \
+ $SYCL_HOME/llvm
+```
+then build with
+```bash
+cd $SYCL_HOME
+ninja -C build-Release sycl-toolchain
+```
+
+A possible Debug configuration and build script targeting Xilinx FPGA, CUDA & OpenCL:
+```bash
+cd $SYCL_HOME
+mkdir -p "build-Debug" && cd "build-Debug" && cmake \
+ -DCMAKE_BUILD_TYPE="Debug" \
+ -DCMAKE_CXX_FLAGS_DEBUG="-g -fstandalone-debug" \
+ -DLLVM_TABLEGEN="$(pwd)/../build-Release/bin/llvm-tblgen" \
+ -DCLANG_TABLEGEN="$(pwd)/../build-Release/bin/clang-tblgen" \
+ -DCMAKE_INSTALL_PREFIX="../Install-Debug" \
+ -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+ -G Ninja \
+ -DLLVM_ENABLE_ASSERTIONS=ON \
+ -DCMAKE_C_COMPILER="/usr/bin/clang-11" \
+ -DCMAKE_CXX_COMPILER="/usr/bin/clang++-11" \
+ -DLLVM_USE_LINKER="lld-11" \
+ -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
+ -DLLVM_EXTERNAL_PROJECTS="sycl;llvm-spirv;opencl-aot;xpti;libdevice" \
+ -DLLVM_EXTERNAL_SYCL_SOURCE_DIR=$SYCL_HOME/sycl \
+ -DLLVM_EXTERNAL_LLVM_SPIRV_SOURCE_DIR=$SYCL_HOME/llvm-spirv \
+ -DLLVM_EXTERNAL_XPTI_SOURCE_DIR=$SYCL_HOME/xpti \
+ -DLLVM_EXTERNAL_LIBDEVICE_SOURCE_DIR=$SYCL_HOME/libdevice \
+ -DLLVM_ENABLE_PROJECTS="clang;llvm-spirv;sycl;opencl-aot;xpti;libdevice;libclc" \
+ -DLIBCLC_TARGETS_TO_BUILD="nvptx64--;nvptx64--nvidiacl" \
+ -DSYCL_BUILD_PI_CUDA=ON \
+ -DLLVM_BUILD_TOOLS=ON \
+ -DSYCL_INCLUDE_TESTS=ON \
+ -DLLVM_ENABLE_DOXYGEN=OFF \
+ -DLLVM_ENABLE_SPHINX=OFF \
+ -DBUILD_SHARED_LIBS=ON \
+ -DSYCL_ENABLE_XPTI_TRACING=ON \
+ $SYCL_HOME/llvm
+```
+then build with
+```bash
+cd $SYCL_HOME
+ninja -C build-Debug sycl-toolchain
+```
+
+* `-CMAKE_CXX_FLAGS_RELEASE="-O3 -march=native -fno-omit-frame-pointer"` to have an optimized build with relatively accurate stack traces;
+* `-G Ninja` use `ninja` instead of `make` to speedup builds;
+* `-DLLVM_USE_LINKER="lld-11"` select `lld` or `gold` instead of `ld` to speedup builds;
+* `-DLLVM_TARGETS_TO_BUILD="X86;NVPTX"` to build only the targets needed, like NVPTX for CUDA support;
+* `-DLIBCLC_TARGETS_TO_BUILD="nvptx64--;nvptx64--nvidiacl"` needed for CUDA support;
+* `-DSYCL_ENABLE_XPTI_TRACING=ON` adds useful debugging capabilities;
+* `-DBUILD_SHARED_LIBS=ON` to speed up the build process by using shared libraries;
+* `-DLLVM_TABLEGEN="$SYCL_HOME/build-Release/bin/llvm-tblgen" -DCLANG_TABLEGEN="$SYCL_HOME/build-Release/bin/clang-tblgen"` to reuse the tablegen built with the Release version and speedup builds. The Release build must be done before configuring the Debug one;
+* `-DCMAKE_CXX_FLAGS_DEBUG="-g -fstandalone-debug"` to have full debug information.
+
+For details about the `CMake` configuration see https://llvm.org/docs/CMake.html
+
+While building the `sycl-toolchain` target, the device runtime for `spirv` and `nvptx` targets gets compiled using the device compiler from the specific build.
+Building anything with a debug compiler is very slow, but it can be speedup using:
+```bash
+export LD_LIBRARY_PATH=$SYCL_HOME/build-Release/lib:$LD_LIBRARY_PATH
+```
+
+This will make the debug compiler select the dynamic libraries of the release compiler and speedup the build. This only works because the Release and Debug build have ABI compatible configuration, changing `LLVM_ENABLE_ASSERTIONS` or other configuration may change that.
+
+### Debugging
+
+#### Environnement variables
+
+Some environment variables are very useful for debugging:
+
+```bash
+# Redirect the directory used as temporary directory
+# for the compiler and various tools
+export TMP=$SYCL_HOME/../tmp
+
+# SYCL_PI_TRACE should always be at least at 1, this make the SYCL runtime emit logs about which device is selected
+export SYCL_PI_TRACE=1
+
+# SYCL_PI_TRACE can be set at -1 to have full debug information but this is quite noisy
+export SYCL_PI_TRACE=-1
+```
+
+#### Clang flags
+
+Some useful Clang flags:
+* `-ccc-print-phases` outputs the graph of compilation phases;
+* `-ccc-print-bindings` outputs the mapping from compilation phases to commands;
+* `-###` outputs the commands to run to compile. The driver will create files to reserve them for those commands.
+
+#### Running a single test
+
+To run a test from the test suite in isolation, use:
+```bash
+/path/to/build/dir/bin/llvm-lit -v --param XOCC=all path/to/test.cpp
+```
+where all tests utilities must have been build for this to work.
+
+#### v++ Logs
+The kinds of following errors are typical of a back-end issue:
+```
+ERROR: [v++ 60-300] Failed to build kernel(ip) kernel_name, see log for details: ROOT/_x/sycl-xocc.ppArYN_kernel_name/kernel_name/vitis_hls.log
+ERROR: [v++ 60-599] Kernel compilation failed to complete
+ERROR: [v++ 60-592] Failed to finish compilation
+```
+the path contains a hash and kernel names so they won't match exactly.
+
+Sometimes the log file in `ROOT/_x/sycl-xocc.ppArYN_kernel_name/kernel_name/vitis_hls.log` contains useful information
+but the more detailed log file `ROOT/_x/sycl-xocc.ppArYN_kernel_name/kernel_name/kernel_name/solution/.autopilot/db/autopilot.flow.log`
+in the second log we can find the specific `v++` command that has an issue.
+
+#### llvm-reduce
+
+It is possible to use `llvm-reduce` to track down `v++` issues.
+First build `llvm-reduce` with:
+```bash
+ninja -C build-Release llvm-reduce
+```
+then build a script called later `is_interesting_llvm.sh` to exhibits the `v++` bug.
+This will look like the following:
+```bash
+#!/bin/bash
+
+# Downgrade the IR generate by llvm-reduce
+./build-Release/bin/opt -verify -S -xoccIRDowngrader $1 -o $1.tmp.ll || exit 1
+
+# Assemble the IR using Vitis's assembler
+.../clang-3.9-csynth/bin/llvm-as $1.tmp.ll -o $1.tmp.xpirbc
+
+# run the command that crashed v++ on the file generated by llvm-reduce while outputting everything to a file
+.../clang-3.9-csynth/bin/clang ... -x ir $1.tmp.xpirbc -o - &> out
+
+# Save the exit code of the command since it might have crashed
+res=$?
+
+# Test that the output matches the original error
+cat out | grep "..." > /dev/null || exit 1
+
+# Test the error code
+if [ $res -eq 254 ]; then
+# exit 0 to indicate this still exhibits the original bug
+  exit 0
+else
+# exit 1 to indicate this doesn't exhibit the original bug
+  exit 1
+fi
+```
+then we can run `llvm-reduce` by doing the following:
+```bash
+# Disassemble the file that crashed Vitis's clang
+./build-Release/bin/opt -S file_that_crashed_vitis_clang.bc -o tmp.ll
+
+# Run llvm-reduce
+./build-Release/bin/llvm-reduce --test=./is_interesting_llvm.sh tmp.ll
+```
+
+When `llvm-reduce` finishes, the reduced IR crashing `v++` will be in a file named `reduced.ll`.
