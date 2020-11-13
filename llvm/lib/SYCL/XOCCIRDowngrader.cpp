@@ -45,40 +45,6 @@ struct XOCCIRDowngrader : public ModulePass {
 
   XOCCIRDowngrader() : ModulePass(ID) {}
 
-  /// Removes immarg (immutable arg) bitcode attribute that is applied to
-  /// function parameters. It was added in LLVM-9 (D57825), so as xocc catches
-  /// up it can be removed
-  void removeImmarg(Module &M) {
-    for (auto &F : M.functions()) {
-      for (auto &P : F.args()) {
-          if (P.hasAttribute(llvm::Attribute::ImmArg)) {
-              P.removeAttr(llvm::Attribute::ImmArg);
-          }
-      }
-    }
-  }
-
-  /// Removes WillReturn LLVM bitcode attribute from llvm/Doc/LangRef:
-  ///
-  /// "This function attribute indicates that a call of this function will
-  ///  either exhibit undefined behavior or comes back and continues execution
-  ///  at a point in the existing call stack that includes the current
-  ///  invocation.
-  ///  Annotated functions may still raise an exception, i.a., ``nounwind``
-  ///  is not implied.
-  ///  If an invocation of an annotated function does not return control back
-  ///  to a point in the call stack, the behavior is undefined."
-  ///
-  /// Added in LLVM-10: rL364555 + D62801, this removal can be reverted as the
-  /// xocc backend catches up. It seems unlikely removal will cause any problems
-  /// as it appears to be an attribute that helps carry information to
-  /// backends/other passes for further transformations.
-  void removeWillReturn(Module &M) {
-    for (auto &F : M.functions())
-      if (F.hasFnAttribute(llvm::Attribute::WillReturn))
-        F.removeFnAttr(llvm::Attribute::WillReturn);
-  }
-
   /// Removes byval bitcode function parameter attribute that is applied to
   /// pointer arguments of functions to state that they should technically be
   /// passed by value.
@@ -163,10 +129,40 @@ struct XOCCIRDowngrader : public ModulePass {
   /// Removes nofree bitcode function attribute that is applied to
   /// functions to indicate that they do not deallocate memory.
   /// It was added in LLVM-9 (D49165), so as xocc catches up it can be removed
-  void removeNoFree(Module &M) {
-    for (auto &F : M.functions()) {
-      F.removeFnAttr(llvm::Attribute::NoFree);
-    }
+  /// Removes immarg (immutable arg) bitcode attribute that is applied to
+  /// function parameters. It was added in LLVM-9 (D57825), so as xocc catches
+  /// up it can be removed
+  /// Removes WillReturn LLVM bitcode attribute from llvm/Doc/LangRef:
+  ///
+  /// "This function attribute indicates that a call of this function will
+  ///  either exhibit undefined behavior or comes back and continues execution
+  ///  at a point in the existing call stack that includes the current
+  ///  invocation.
+  ///  Annotated functions may still raise an exception, i.a., ``nounwind``
+  ///  is not implied.
+  ///  If an invocation of an annotated function does not return control back
+  ///  to a point in the call stack, the behavior is undefined."
+  ///
+  /// Added in LLVM-10: rL364555 + D62801, this removal can be reverted as the
+  /// xocc backend catches up. It seems unlikely removal will cause any problems
+  /// as it appears to be an attribute that helps carry information to
+  /// backends/other passes for further transformations.
+  void removeAttributes(Module &M, ArrayRef<Attribute::AttrKind> Kinds) {
+    for (auto &F : M.functions())
+      for (auto Kind : Kinds) {
+        F.removeAttribute(AttributeList::FunctionIndex, Kind);
+        F.removeAttribute(AttributeList::ReturnIndex, Kind);
+        for (auto &P : F.args())
+          P.removeAttr(Kind);
+        for (User *U : F.users())
+          if (CallBase *CB = dyn_cast<CallBase>(U)) {
+            CB->removeAttribute(AttributeList::FunctionIndex, Kind);
+            CB->removeAttribute(AttributeList::ReturnIndex, Kind);
+            for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
+              CB->removeParamAttr(i, llvm::Attribute::ByVal);
+            }
+          }
+      }
   }
 
   /// Remove Freeze instruction because xocc can't deal with them.
@@ -215,10 +211,9 @@ struct XOCCIRDowngrader : public ModulePass {
   }
 
   bool runOnModule(Module &M) override {
-    removeImmarg(M);
-    removeWillReturn(M);
-    removeNoFree(M);
     resetByVal(M);
+    removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
+                         Attribute::ImmArg, Attribute::NoSync});
     renameBasicBlocks(M);
     removeFreezeInst(M);
     removeFNegInst(M);
