@@ -39,6 +39,7 @@ struct PrepareSYCLOpt : public ModulePass {
           continue;
       if (G.isDeclaration())
         continue;
+      G.setComdat(nullptr);
       G.setLinkage(llvm::GlobalValue::PrivateLinkage);
     }
   }

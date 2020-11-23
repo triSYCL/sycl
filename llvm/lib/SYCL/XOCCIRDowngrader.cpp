@@ -21,6 +21,7 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/SYCL/XOCCIRDowngrader.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
@@ -164,7 +165,7 @@ struct XOCCIRDowngrader : public ModulePass {
             CB->removeAttribute(AttributeList::FunctionIndex, Kind);
             CB->removeAttribute(AttributeList::ReturnIndex, Kind);
             for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
-              CB->removeParamAttr(i, llvm::Attribute::ByVal);
+              CB->removeParamAttr(i, Kind);
             }
           }
       }

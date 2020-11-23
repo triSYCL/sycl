@@ -170,10 +170,10 @@ cp "$INPUT_FILE_NAME" "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels.bc"
 # something concrete, used by the infer-address-spaces pass which is slightly
 # modified from the upstream implementation to take this argument to avoid
 # adding a new LLVM Target that will largelly be unused right now..
-$OPT -asfix -globaldce -O3 -globaldce --infer-address-spaces \
+$OPT -infer-address-spaces -globaldce -O3 -globaldce\
   -flat-address-space=4 -globaldce -inSPIRation -globaldce -kernelPropGen \
   --sycl-kernel-propgen-output $KERNELPROP \
-  "$INPUT_FILE_NAME" -o "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc"
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels.bc" -o "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc"
 
 # Link our SDx SPIR binaries in
 $LLVM_LINK "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc" \
