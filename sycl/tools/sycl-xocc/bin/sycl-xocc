@@ -211,23 +211,23 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   # Compile all Kernels in the source file to seperate .xo ("object") files
   # and add them to the list of kernels to be linked
   LINKER_LIST=""
-  for index in "${KERNEL_NAME_ARRAY[@]}"; do
-  if [[ -n "$index" ]]; then
+  for ((i=0;i<${#KERNEL_NAME_ARRAY[@]};++i)); do
+  if [[ -n "${KERNEL_NAME_ARRAY[i]}" ]]; then
     if [[ ! -z "$VERBOSE" ]]; then
       echo "Invoking Kernel Compilation with $SDX"
       echo "--target: $XCL_EMULATION_MODE"
       echo "--platform: $XILINX_PLATFORM"
-      echo "Compiling kernel: $index"
-      echo "Outputting file to: ${TMP_PATH}_$index.xo"
+      echo "Compiling kernel: ${KERNEL_NAME_ARRAY[i]}"
+      echo "Outputting file to: ${TMP_PATH}_${KERNEL_NAME_ARRAY[i]}.xo"
       echo "Input file is: ${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc"
     fi
 
     $SDX --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM \
       --xp param:compiler.hlsDataflowStrictMode=off \
-      --save-temps -c -k "$index" -o "${TMP_PATH}_$index.xo" \
+      --save-temps -c -k "${KERNEL_NAME_ARRAY[i]}" -o "${TMP_PATH}_${KERNEL_NAME_ARRAY[i]}.xo" \
       "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc" \
-      $ADDITIONAL_COMPILE_ARGS &
-      LINKER_LIST="${TMP_PATH}_$index.xo $LINKER_LIST"
+      $ADDITIONAL_COMPILE_ARGS ${EXTRA_KERNEL_PARAMS_ARRAY[i]} &
+      LINKER_LIST="${TMP_PATH}_${KERNEL_NAME_ARRAY[i]}.xo $LINKER_LIST"
   fi
   done
 
