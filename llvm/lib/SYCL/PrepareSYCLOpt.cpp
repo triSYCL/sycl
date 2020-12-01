@@ -62,7 +62,7 @@ struct PrepareSYCLOpt : public ModulePass {
   /// At this point in the pipeline Annotations intrinsic have all been
   /// converted into what they need to be. But they can still be present and
   /// have pointer on pointer as arguments which v++ can't deal with.
-  void removeAnnotationsIntrisic(Module &M) {
+  void removeAnnotations(Module &M) {
     SmallVector<Instruction *, 16> ToRemove;
     for (Function &F : M.functions())
       if (F.getIntrinsicID() == Intrinsic::annotation ||
@@ -73,6 +73,9 @@ struct PrepareSYCLOpt : public ModulePass {
             ToRemove.push_back(I);
     for (Instruction *I : ToRemove)
       I->eraseFromParent();
+    GlobalVariable *Annot = M.getGlobalVariable("llvm.global.annotations");
+    if (Annot)
+      Annot->eraseFromParent();
   }
 
   /// This will change array partition such that after the O3 pipeline it
@@ -113,7 +116,7 @@ struct PrepareSYCLOpt : public ModulePass {
     turnNonKernelsIntoPrivate(M);
     setCallingConventions(M);
     lowerArrayPartition(M);
-    removeAnnotationsIntrisic(M);
+    removeAnnotations(M);
     return true;
   }
 };
