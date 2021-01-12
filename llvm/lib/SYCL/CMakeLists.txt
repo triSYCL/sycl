@@ -9,6 +9,6 @@ add_llvm_component_library(LLVMSYCL
   ADDITIONAL_HEADER_DIRS
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/SYCL
 
-  DEPENDS
-  intrinsics_gen
+  LINK_COMPONENTS
+  Passes Core Support TransformUtils Demangle Analysis
 )

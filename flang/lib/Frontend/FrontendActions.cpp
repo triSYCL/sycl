@@ -5,12 +5,14 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+
 #include "flang/Frontend/FrontendActions.h"
-#include "flang/Common/Fortran-features.h"
 #include "flang/Common/default-kinds.h"
 #include "flang/Frontend/CompilerInstance.h"
+#include "flang/Parser/parsing.h"
+#include "flang/Parser/provenance.h"
 #include "flang/Parser/source.h"
-#include "clang/Serialization/PCHContainerOperations.h"
+#include "flang/Semantics/semantics.h"
 
 using namespace Fortran::frontend;
 
@@ -23,8 +25,8 @@ void InputOutputTestAction::ExecuteAction() {
   bool binaryMode = true;
 
   // Set/store input file info into CompilerInstance.
-  CompilerInstance &ci = GetCompilerInstance();
-  Fortran::parser::AllSources &allSources{ci.GetAllSources()};
+  CompilerInstance &ci = instance();
+  Fortran::parser::AllSources &allSources{ci.allSources()};
   const Fortran::parser::SourceFile *sf;
   sf = allSources.Open(path, error_stream);
   llvm::ArrayRef<char> fileContent = sf->content();
@@ -41,5 +43,60 @@ void InputOutputTestAction::ExecuteAction() {
     (*os) << fileContent.data();
   } else {
     ci.WriteOutputStream(fileContent.data());
+  }
+}
+
+void PrintPreprocessedAction::ExecuteAction() {
+  std::string buf;
+  llvm::raw_string_ostream outForPP{buf};
+
+  // Run the preprocessor
+  CompilerInstance &ci = this->instance();
+  ci.parsing().DumpCookedChars(outForPP);
+
+  // If a pre-defined output stream exists, dump the preprocessed content there
+  if (!ci.IsOutputStreamNull()) {
+    // Send the output to the pre-defined output buffer.
+    ci.WriteOutputStream(outForPP.str());
+    return;
+  }
+
+  // Create a file and save the preprocessed output there
+  if (auto os{ci.CreateDefaultOutputFile(
+          /*Binary=*/true, /*InFile=*/GetCurrentFileOrBufferName())}) {
+    (*os) << outForPP.str();
+  } else {
+    llvm::errs() << "Unable to create the output file\n";
+    return;
+  }
+}
+
+void ParseSyntaxOnlyAction::ExecuteAction() {
+  CompilerInstance &ci = this->instance();
+
+  // TODO: These should be specifiable by users. For now just use the defaults.
+  common::LanguageFeatureControl features;
+  Fortran::common::IntrinsicTypeDefaultKinds defaultKinds;
+
+  // Parse
+  ci.parsing().Parse(llvm::outs());
+  auto &parseTree{*ci.parsing().parseTree()};
+
+  // Prepare semantics
+  Fortran::semantics::SemanticsContext semanticsContext{
+      defaultKinds, features, ci.allCookedSources()};
+  Fortran::semantics::Semantics semantics{
+      semanticsContext, parseTree, ci.parsing().cooked().AsCharBlock()};
+
+  // Run semantic checks
+  semantics.Perform();
+
+  // Report the diagnostics from the semantic checks
+  semantics.EmitMessages(ci.semaOutputStream());
+
+  if (semantics.AnyFatalError()) {
+    unsigned DiagID = ci.diagnostics().getCustomDiagID(
+        clang::DiagnosticsEngine::Error, "semantic errors in %0");
+    ci.diagnostics().Report(DiagID) << GetCurrentFileOrBufferName();
   }
 }

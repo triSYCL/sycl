@@ -19,11 +19,12 @@
 #include "mlir/Dialect/Linalg/Utils/Utils.h"
 #include "mlir/Dialect/SCF/EDSC/Builders.h"
 #include "mlir/Dialect/StandardOps/EDSC/Intrinsics.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/AffineExpr.h"
 #include "mlir/IR/AffineExprVisitor.h"
 #include "mlir/IR/AffineMap.h"
-#include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/FoldUtils.h"
+#include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 #include "llvm/Support/CommandLine.h"
 
@@ -332,13 +333,8 @@ tileLinalgOpImpl(OpBuilder &b, LinalgOp op, ValueRange tileSizes,
   }
 
   // 1. Build the tiled loop ranges.
-  auto allShapeSizes = getShape(b, op);
-  // The flattened loopToOperandRangesMaps is expected to be an invertible
-  // permutation map (asserted in the inverse calculation).
-  auto mapsRange = op.indexing_maps().getAsRange<AffineMapAttr>();
-  auto maps = llvm::to_vector<8>(
-      llvm::map_range(mapsRange, [](AffineMapAttr a) { return a.getValue(); }));
-  auto shapeSizesToLoopsMap = inversePermutation(concatAffineMaps(maps));
+  auto allShapeSizes = op.createFlatListOfOperandDims(b, op.getLoc());
+  AffineMap shapeSizesToLoopsMap = op.getShapesToLoopsMap();
   if (!shapeSizesToLoopsMap)
     return llvm::None;
 
@@ -367,10 +363,11 @@ tileLinalgOpImpl(OpBuilder &b, LinalgOp op, ValueRange tileSizes,
         continue;
       interchangeVector.push_back(it->second);
     }
+    // Interchange vector is guaranteed to be a permutation,
+    // `inversePermutation` must succeed.
     invPermutationMap = inversePermutation(
         AffineMap::getPermutationMap(interchangeVector, b.getContext()));
-    if (!invPermutationMap)
-      return llvm::None;
+    assert(invPermutationMap);
     applyPermutationToVector(loopRanges, interchangeVector);
     applyPermutationToVector(iteratorTypes, interchangeVector);
   }
@@ -418,7 +415,7 @@ tileLinalgOpImpl(OpBuilder &b, LinalgOp op, ValueRange tileSizes,
         // This would not be the case with a special terminator op that
         // generates the whole tensor (instead of inserting a subtensor). But
         // the generator-based abstraction has other issues.
-        assert(op.getNumInitTensors() == op.getOperation()->getNumResults() &&
+        assert(op.getNumInitTensors() == op->getNumResults() &&
                "expected same number of init tensors as number of results");
 
         // Handle init tensor operands.
@@ -438,13 +435,12 @@ tileLinalgOpImpl(OpBuilder &b, LinalgOp op, ValueRange tileSizes,
               tiledOperands[op.getNumInputsAndOutputBuffers() + idx];
           if (auto subtensor = initTensor.getDefiningOp<SubTensorOp>()) {
             tensorResults.push_back(b.create<SubTensorInsertOp>(
-                loc, subtensor.source().getType(),
-                res.getOperation()->getResult(idx), subtensor.source(),
-                subtensor.offsets(), subtensor.sizes(), subtensor.strides(),
-                subtensor.static_offsets(), subtensor.static_sizes(),
-                subtensor.static_strides()));
+                loc, subtensor.source().getType(), res->getResult(idx),
+                subtensor.source(), subtensor.offsets(), subtensor.sizes(),
+                subtensor.strides(), subtensor.static_offsets(),
+                subtensor.static_sizes(), subtensor.static_strides()));
           } else {
-            tensorResults.push_back(res.getOperation()->getResult(idx));
+            tensorResults.push_back(res->getResult(idx));
           }
         }
         return scf::ValueVector(tensorResults.begin(), tensorResults.end());
@@ -559,6 +555,12 @@ public:
 OwningRewritePatternList
 mlir::linalg::getLinalgTilingCanonicalizationPatterns(MLIRContext *ctx) {
   OwningRewritePatternList patterns;
+  populateLinalgTilingCanonicalizationPatterns(patterns, ctx);
+  return patterns;
+}
+
+void mlir::linalg::populateLinalgTilingCanonicalizationPatterns(
+    OwningRewritePatternList &patterns, MLIRContext *ctx) {
   AffineApplyOp::getCanonicalizationPatterns(patterns, ctx);
   AffineForOp::getCanonicalizationPatterns(patterns, ctx);
   AffineMinOp::getCanonicalizationPatterns(patterns, ctx);
@@ -568,13 +570,12 @@ mlir::linalg::getLinalgTilingCanonicalizationPatterns(MLIRContext *ctx) {
   ConstantIndexOp::getCanonicalizationPatterns(patterns, ctx);
   SubTensorOp::getCanonicalizationPatterns(patterns, ctx);
   SubViewOp::getCanonicalizationPatterns(patterns, ctx);
-  TensorCastOp::getCanonicalizationPatterns(patterns, ctx);
+  tensor::CastOp::getCanonicalizationPatterns(patterns, ctx);
   ViewOp::getCanonicalizationPatterns(patterns, ctx);
   CanonicalizationPatternList<
 #define GET_OP_LIST
 #include "mlir/Dialect/Linalg/IR/LinalgStructuredOps.cpp.inc"
       >::insert(patterns, ctx);
-  return patterns;
 }
 
 /// Populate the given list with patterns that apply Linalg tiling.
@@ -595,7 +596,7 @@ static void applyTilingToLoopPatterns(LinalgTilingLoopType loopType,
   MLIRContext *ctx = funcOp.getContext();
   OwningRewritePatternList patterns;
   insertTilingPatterns(patterns, options, ctx);
-  applyPatternsAndFoldGreedily(funcOp, patterns);
+  applyPatternsAndFoldGreedily(funcOp, std::move(patterns));
   applyPatternsAndFoldGreedily(funcOp,
                                getLinalgTilingCanonicalizationPatterns(ctx));
   // Drop the marker.

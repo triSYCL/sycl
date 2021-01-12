@@ -339,6 +339,8 @@ public:
         .Case("f32", WebAssembly::BlockType::F32)
         .Case("f64", WebAssembly::BlockType::F64)
         .Case("v128", WebAssembly::BlockType::V128)
+        .Case("funcref", WebAssembly::BlockType::Funcref)
+        .Case("externref", WebAssembly::BlockType::Externref)
         .Case("exnref", WebAssembly::BlockType::Exnref)
         .Case("void", WebAssembly::BlockType::Void)
         .Default(WebAssembly::BlockType::Invalid);
@@ -440,6 +442,13 @@ public:
     return false;
   }
 
+  WebAssembly::HeapType parseHeapType(StringRef Id) {
+    return StringSwitch<WebAssembly::HeapType>(Id)
+        .Case("extern", WebAssembly::HeapType::Externref)
+        .Case("func", WebAssembly::HeapType::Funcref)
+        .Default(WebAssembly::HeapType::Invalid);
+  }
+
   void addBlockTypeOperand(OperandVector &Operands, SMLoc NameLoc,
                            WebAssembly::BlockType BT) {
     Operands.push_back(std::make_unique<WebAssemblyOperand>(
@@ -482,6 +491,7 @@ public:
     // proper nesting.
     bool ExpectBlockType = false;
     bool ExpectFuncType = false;
+    bool ExpectHeapType = false;
     if (Name == "block") {
       push(Block);
       ExpectBlockType = true;
@@ -521,6 +531,8 @@ public:
         return true;
     } else if (Name == "call_indirect" || Name == "return_call_indirect") {
       ExpectFuncType = true;
+    } else if (Name == "ref.null") {
+      ExpectHeapType = true;
     }
 
     if (ExpectFuncType || (ExpectBlockType && Lexer.is(AsmToken::LParen))) {
@@ -561,6 +573,15 @@ public:
           if (BT == WebAssembly::BlockType::Invalid)
             return error("Unknown block type: ", Id);
           addBlockTypeOperand(Operands, NameLoc, BT);
+          Parser.Lex();
+        } else if (ExpectHeapType) {
+          auto HeapType = parseHeapType(Id.getString());
+          if (HeapType == WebAssembly::HeapType::Invalid) {
+            return error("Expected a heap type: ", Id);
+          }
+          Operands.push_back(std::make_unique<WebAssemblyOperand>(
+              WebAssemblyOperand::Integer, Id.getLoc(), Id.getEndLoc(),
+              WebAssemblyOperand::IntOp{static_cast<int64_t>(HeapType)}));
           Parser.Lex();
         } else {
           // Assume this identifier is a label.
@@ -950,12 +971,27 @@ public:
     auto SymName = Symbol->getName();
     if (SymName.startswith(".L"))
       return; // Local Symbol.
+
     // Only create a new text section if we're already in one.
+    // TODO: If the user explicitly creates a new function section, we ignore
+    // its name when we create this one. It would be nice to honor their
+    // choice, while still ensuring that we create one if they forget.
+    // (that requires coordination with WasmAsmParser::parseSectionDirective)
     auto CWS = cast<MCSectionWasm>(getStreamer().getCurrentSection().first);
     if (!CWS || !CWS->getKind().isText())
       return;
     auto SecName = ".text." + SymName;
-    auto WS = getContext().getWasmSection(SecName, SectionKind::getText());
+
+    auto *Group = CWS->getGroup();
+    // If the current section is a COMDAT, also set the flag on the symbol.
+    // TODO: Currently the only place that the symbols' comdat flag matters is
+    // for importing comdat functions. But there's no way to specify that in
+    // assembly currently.
+    if (Group)
+      cast<MCSymbolWasm>(Symbol)->setComdat(true);
+    auto *WS =
+        getContext().getWasmSection(SecName, SectionKind::getText(), Group,
+                                    MCContext::GenericSectionID, nullptr);
     getStreamer().SwitchSection(WS);
     // Also generate DWARF for this section if requested.
     if (getContext().getGenDwarfForAssembly())

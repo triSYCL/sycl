@@ -15,7 +15,6 @@
 
 #include "AArch64.h"
 #include "AArch64RegisterInfo.h"
-#include "AArch64StackOffset.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/CodeGen/MachineCombinerPattern.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
@@ -236,9 +235,10 @@ public:
   /// Return true when there is potentially a faster code sequence
   /// for an instruction chain ending in ``Root``. All potential patterns are
   /// listed in the ``Patterns`` array.
-  bool getMachineCombinerPatterns(
-      MachineInstr &Root,
-      SmallVectorImpl<MachineCombinerPattern> &Patterns) const override;
+  bool
+  getMachineCombinerPatterns(MachineInstr &Root,
+                             SmallVectorImpl<MachineCombinerPattern> &Patterns,
+                             bool DoRegPressureReduce) const override;
   /// Return true when Inst is associative and commutative so that it can be
   /// reassociated.
   bool isAssociativeAndCommutative(const MachineInstr &Inst) const override;
@@ -293,6 +293,13 @@ public:
   Optional<ParamLoadedValue> describeLoadedValue(const MachineInstr &MI,
                                                  Register Reg) const override;
 
+  static void decomposeStackOffsetForFrameOffsets(const StackOffset &Offset,
+                                                  int64_t &NumBytes,
+                                                  int64_t &NumPredicateVectors,
+                                                  int64_t &NumDataVectors);
+  static void decomposeStackOffsetForDwarfOffsets(const StackOffset &Offset,
+                                                  int64_t &ByteSized,
+                                                  int64_t &VGSized);
 #define GET_INSTRINFO_HELPER_DECLS
 #include "AArch64GenInstrInfo.inc"
 

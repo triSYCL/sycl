@@ -97,12 +97,14 @@ StringRef AMDGPUTargetStreamer::getArchNameFromElfMach(unsigned ElfMach) {
   case ELF::EF_AMDGPU_MACH_AMDGCN_GFX906:  AK = GK_GFX906;  break;
   case ELF::EF_AMDGPU_MACH_AMDGCN_GFX908:  AK = GK_GFX908;  break;
   case ELF::EF_AMDGPU_MACH_AMDGCN_GFX909:  AK = GK_GFX909;  break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX90C:  AK = GK_GFX90C;  break;
   case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1010: AK = GK_GFX1010; break;
   case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1011: AK = GK_GFX1011; break;
   case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1012: AK = GK_GFX1012; break;
   case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1030: AK = GK_GFX1030; break;
   case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1031: AK = GK_GFX1031; break;
   case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1032: AK = GK_GFX1032; break;
+  case ELF::EF_AMDGPU_MACH_AMDGCN_GFX1033: AK = GK_GFX1033; break;
   case ELF::EF_AMDGPU_MACH_NONE:           AK = GK_NONE;    break;
   }
 
@@ -154,12 +156,14 @@ unsigned AMDGPUTargetStreamer::getElfMach(StringRef GPU) {
   case GK_GFX906:  return ELF::EF_AMDGPU_MACH_AMDGCN_GFX906;
   case GK_GFX908:  return ELF::EF_AMDGPU_MACH_AMDGCN_GFX908;
   case GK_GFX909:  return ELF::EF_AMDGPU_MACH_AMDGCN_GFX909;
+  case GK_GFX90C:  return ELF::EF_AMDGPU_MACH_AMDGCN_GFX90C;
   case GK_GFX1010: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1010;
   case GK_GFX1011: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1011;
   case GK_GFX1012: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1012;
   case GK_GFX1030: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1030;
   case GK_GFX1031: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1031;
   case GK_GFX1032: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1032;
+  case GK_GFX1033: return ELF::EF_AMDGPU_MACH_AMDGCN_GFX1033;
   case GK_NONE:    return ELF::EF_AMDGPU_MACH_NONE;
   }
 
@@ -317,7 +321,7 @@ void AMDGPUTargetAsmStreamer::EmitAmdhsaKernelDescriptor(
   PRINT_FIELD(
       OS, ".amdhsa_system_sgpr_private_segment_wavefront_offset", KD,
       compute_pgm_rsrc2,
-      amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_PRIVATE_SEGMENT_WAVEFRONT_OFFSET);
+      amdhsa::COMPUTE_PGM_RSRC2_ENABLE_PRIVATE_SEGMENT);
   PRINT_FIELD(OS, ".amdhsa_system_sgpr_workgroup_id_x", KD,
               compute_pgm_rsrc2,
               amdhsa::COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X);

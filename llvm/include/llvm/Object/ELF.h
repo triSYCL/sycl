@@ -183,7 +183,9 @@ public:
 
   Expected<Elf_Dyn_Range> dynamicEntries() const;
 
-  Expected<const uint8_t *> toMappedAddr(uint64_t VAddr) const;
+  Expected<const uint8_t *>
+  toMappedAddr(uint64_t VAddr,
+               WarningHandler WarnHandler = &defaultWarningHandler) const;
 
   Expected<Elf_Sym_Range> symbols(const Elf_Shdr *Sec) const {
     if (!Sec)
@@ -238,9 +240,9 @@ public:
     assert(Phdr.p_type == ELF::PT_NOTE && "Phdr is not of type PT_NOTE");
     ErrorAsOutParameter ErrAsOutParam(&Err);
     if (Phdr.p_offset + Phdr.p_filesz > getBufSize()) {
-      Err = createError("PT_NOTE header has invalid offset (0x" +
-                        Twine::utohexstr(Phdr.p_offset) + ") or size (0x" +
-                        Twine::utohexstr(Phdr.p_filesz) + ")");
+      Err =
+          createError("invalid offset (0x" + Twine::utohexstr(Phdr.p_offset) +
+                      ") or size (0x" + Twine::utohexstr(Phdr.p_filesz) + ")");
       return Elf_Note_Iterator(Err);
     }
     return Elf_Note_Iterator(base() + Phdr.p_offset, Phdr.p_filesz, Err);
@@ -257,10 +259,9 @@ public:
     assert(Shdr.sh_type == ELF::SHT_NOTE && "Shdr is not of type SHT_NOTE");
     ErrorAsOutParameter ErrAsOutParam(&Err);
     if (Shdr.sh_offset + Shdr.sh_size > getBufSize()) {
-      Err = createError("SHT_NOTE section " + getSecIndexForError(*this, Shdr) +
-                        " has invalid offset (0x" +
-                        Twine::utohexstr(Shdr.sh_offset) + ") or size (0x" +
-                        Twine::utohexstr(Shdr.sh_size) + ")");
+      Err =
+          createError("invalid offset (0x" + Twine::utohexstr(Shdr.sh_offset) +
+                      ") or size (0x" + Twine::utohexstr(Shdr.sh_size) + ")");
       return Elf_Note_Iterator(Err);
     }
     return Elf_Note_Iterator(base() + Shdr.sh_offset, Shdr.sh_size, Err);
@@ -411,7 +412,8 @@ Expected<ArrayRef<T>>
 ELFFile<ELFT>::getSectionContentsAsArray(const Elf_Shdr &Sec) const {
   if (Sec.sh_entsize != sizeof(T) && sizeof(T) != 1)
     return createError("section " + getSecIndexForError(*this, Sec) +
-                       " has an invalid sh_entsize: " + Twine(Sec.sh_entsize));
+                       " has invalid sh_entsize: expected " + Twine(sizeof(T)) +
+                       ", but got " + Twine(Sec.sh_entsize));
 
   uintX_t Offset = Sec.sh_offset;
   uintX_t Size = Sec.sh_size;
@@ -617,17 +619,18 @@ template <class ELFT>
 template <typename T>
 Expected<const T *> ELFFile<ELFT>::getEntry(const Elf_Shdr &Section,
                                             uint32_t Entry) const {
-  if (sizeof(T) != Section.sh_entsize)
-    return createError("section " + getSecIndexForError(*this, Section) +
-                       " has invalid sh_entsize: expected " + Twine(sizeof(T)) +
-                       ", but got " + Twine(Section.sh_entsize));
-  uint64_t Pos = Section.sh_offset + (uint64_t)Entry * sizeof(T);
-  if (Pos + sizeof(T) > Buf.size())
-    return createError("unable to access section " +
-                       getSecIndexForError(*this, Section) + " data at 0x" +
-                       Twine::utohexstr(Pos) +
-                       ": offset goes past the end of file");
-  return reinterpret_cast<const T *>(base() + Pos);
+  Expected<ArrayRef<T>> EntriesOrErr = getSectionContentsAsArray<T>(Section);
+  if (!EntriesOrErr)
+    return EntriesOrErr.takeError();
+
+  ArrayRef<T> Arr = *EntriesOrErr;
+  if (Entry >= Arr.size())
+    return createError(
+        "can't read an entry at 0x" +
+        Twine::utohexstr(Entry * static_cast<uint64_t>(sizeof(T))) +
+        ": it goes past the end of the section (0x" +
+        Twine::utohexstr(Section.sh_size) + ")");
+  return &Arr[Entry];
 }
 
 template <class ELFT>

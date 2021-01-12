@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include <CL/sycl/detail/device_filter.hpp>
+#include <CL/sycl/detail/pi.hpp>
 #include <CL/sycl/detail/spinlock.hpp>
 #include <detail/global_handler.hpp>
 #include <detail/platform_impl.hpp>
@@ -14,7 +15,7 @@
 #include <detail/program_manager/program_manager.hpp>
 #include <detail/scheduler/scheduler.hpp>
 
-#ifdef WIN32
+#ifdef _WIN32
 #include <windows.h>
 #endif
 
@@ -113,9 +114,20 @@ GlobalHandler::getDeviceFilterList(const std::string &InitValue) {
   return *MDeviceFilterList;
 }
 
-void shutdown() { delete &GlobalHandler::instance(); }
+void shutdown() {
+  for (plugin &Plugin : GlobalHandler::instance().getPlugins()) {
+    // PluginParameter is reserved for future use that can control
+    // some parameters in the plugin tear-down process.
+    // Currently, it is not used.
+    void *PluginParameter = nullptr;
+    Plugin.call_nocheck<PiApiKind::piTearDown>(PluginParameter);
+    Plugin.unload();
+  }
 
-#ifdef WIN32
+  delete &GlobalHandler::instance();
+}
+
+#ifdef _WIN32
 BOOL WINAPI DllMain(HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpReserved) {
   // Perform actions based on the reason for calling.
   switch (fdwReason) {

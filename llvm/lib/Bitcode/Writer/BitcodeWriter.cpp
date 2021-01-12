@@ -300,6 +300,9 @@ private:
                           SmallVectorImpl<uint64_t> &Record, unsigned &Abbrev);
   void writeDISubrange(const DISubrange *N, SmallVectorImpl<uint64_t> &Record,
                        unsigned Abbrev);
+  void writeDIGenericSubrange(const DIGenericSubrange *N,
+                              SmallVectorImpl<uint64_t> &Record,
+                              unsigned Abbrev);
   void writeDIEnumerator(const DIEnumerator *N,
                          SmallVectorImpl<uint64_t> &Record, unsigned Abbrev);
   void writeDIBasicType(const DIBasicType *N, SmallVectorImpl<uint64_t> &Record,
@@ -623,6 +626,8 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
     return bitc::ATTR_KIND_IN_ALLOCA;
   case Attribute::Cold:
     return bitc::ATTR_KIND_COLD;
+  case Attribute::Hot:
+    return bitc::ATTR_KIND_HOT;
   case Attribute::InaccessibleMemOnly:
     return bitc::ATTR_KIND_INACCESSIBLEMEM_ONLY;
   case Attribute::InaccessibleMemOrArgMemOnly:
@@ -643,6 +648,8 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
     return bitc::ATTR_KIND_NO_ALIAS;
   case Attribute::NoBuiltin:
     return bitc::ATTR_KIND_NO_BUILTIN;
+  case Attribute::NoCallback:
+    return bitc::ATTR_KIND_NO_CALLBACK;
   case Attribute::NoCapture:
     return bitc::ATTR_KIND_NO_CAPTURE;
   case Attribute::NoDuplicate:
@@ -697,8 +704,6 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
     return bitc::ATTR_KIND_SPECULATABLE;
   case Attribute::StackAlignment:
     return bitc::ATTR_KIND_STACK_ALIGNMENT;
-  case Attribute::NoStackProtect:
-    return bitc::ATTR_KIND_NO_STACK_PROTECT;
   case Attribute::StackProtect:
     return bitc::ATTR_KIND_STACK_PROTECT;
   case Attribute::StackProtectReq:
@@ -1553,6 +1558,19 @@ void ModuleBitcodeWriter::writeDISubrange(const DISubrange *N,
   Record.clear();
 }
 
+void ModuleBitcodeWriter::writeDIGenericSubrange(
+    const DIGenericSubrange *N, SmallVectorImpl<uint64_t> &Record,
+    unsigned Abbrev) {
+  Record.push_back((uint64_t)N->isDistinct());
+  Record.push_back(VE.getMetadataOrNullID(N->getRawCountNode()));
+  Record.push_back(VE.getMetadataOrNullID(N->getRawLowerBound()));
+  Record.push_back(VE.getMetadataOrNullID(N->getRawUpperBound()));
+  Record.push_back(VE.getMetadataOrNullID(N->getRawStride()));
+
+  Stream.EmitRecord(bitc::METADATA_GENERIC_SUBRANGE, Record, Abbrev);
+  Record.clear();
+}
+
 static void emitSignedInt64(SmallVectorImpl<uint64_t> &Vals, uint64_t V) {
   if ((int64_t)V >= 0)
     Vals.push_back(V << 1);
@@ -1850,6 +1868,7 @@ void ModuleBitcodeWriter::writeDIModule(const DIModule *N,
   for (auto &I : N->operands())
     Record.push_back(VE.getMetadataOrNullID(I));
   Record.push_back(N->getLineNo());
+  Record.push_back(N->getIsDecl());
 
   Stream.EmitRecord(bitc::METADATA_MODULE, Record, Abbrev);
   Record.clear();
@@ -2411,6 +2430,8 @@ void ModuleBitcodeWriter::writeConstants(unsigned FirstVal, unsigned LastVal,
     unsigned AbbrevToUse = 0;
     if (C->isNullValue()) {
       Code = bitc::CST_CODE_NULL;
+    } else if (isa<PoisonValue>(C)) {
+      Code = bitc::CST_CODE_POISON;
     } else if (isa<UndefValue>(C)) {
       Code = bitc::CST_CODE_UNDEF;
     } else if (const ConstantInt *IV = dyn_cast<ConstantInt>(C)) {
@@ -4818,8 +4839,8 @@ static const char *getSectionNameForCommandline(const Triple &T) {
 }
 
 void llvm::EmbedBitcodeInModule(llvm::Module &M, llvm::MemoryBufferRef Buf,
-                                bool EmbedBitcode, bool EmbedMarker,
-                                const std::vector<uint8_t> *CmdArgs) {
+                                bool EmbedBitcode, bool EmbedCmdline,
+                                const std::vector<uint8_t> &CmdArgs) {
   // Save llvm.compiler.used and remove it.
   SmallVector<Constant *, 2> UsedArray;
   SmallPtrSet<GlobalValue *, 4> UsedGlobals;
@@ -4876,10 +4897,10 @@ void llvm::EmbedBitcodeInModule(llvm::Module &M, llvm::MemoryBufferRef Buf,
   }
 
   // Skip if only bitcode needs to be embedded.
-  if (EmbedMarker) {
+  if (EmbedCmdline) {
     // Embed command-line options.
-    ArrayRef<uint8_t> CmdData(const_cast<uint8_t *>(CmdArgs->data()),
-                              CmdArgs->size());
+    ArrayRef<uint8_t> CmdData(const_cast<uint8_t *>(CmdArgs.data()),
+                              CmdArgs.size());
     llvm::Constant *CmdConstant =
         llvm::ConstantDataArray::get(M.getContext(), CmdData);
     GV = new llvm::GlobalVariable(M, CmdConstant->getType(), true,

@@ -187,6 +187,11 @@ def Signature : Operand<i32> {
   let PrintMethod = "printWebAssemblySignatureOperand";
 }
 
+let OperandType = "OPERAND_HEAPTYPE" in
+def HeapType : Operand<i32> {
+  let PrintMethod = "printWebAssemblyHeapTypeOperand";
+}
+
 let OperandType = "OPERAND_TYPEINDEX" in
 def TypeIndex : Operand<i32>;
 
@@ -346,6 +351,11 @@ def : Pat<(i32 (WebAssemblywrapperPIC tglobaladdr:$addr)),
           (CONST_I32 tglobaladdr:$addr)>, Requires<[IsPIC, HasAddr32]>;
 def : Pat<(i64 (WebAssemblywrapperPIC tglobaladdr:$addr)),
           (CONST_I64 tglobaladdr:$addr)>, Requires<[IsPIC, HasAddr64]>;
+
+def : Pat<(i32 (WebAssemblywrapper tglobaltlsaddr:$addr)),
+          (CONST_I32 tglobaltlsaddr:$addr)>, Requires<[HasAddr32]>;
+def : Pat<(i64 (WebAssemblywrapper tglobaltlsaddr:$addr)),
+          (CONST_I64 tglobaltlsaddr:$addr)>, Requires<[HasAddr64]>;
 
 def : Pat<(i32 (WebAssemblywrapper texternalsym:$addr)),
           (GLOBAL_GET_I32 texternalsym:$addr)>, Requires<[IsPIC, HasAddr32]>;

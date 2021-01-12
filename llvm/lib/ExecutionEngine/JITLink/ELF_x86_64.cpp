@@ -73,7 +73,6 @@ public:
 
   void fixExternalBranchEdge(Edge &E, Symbol &Stub) {
     assert(E.getKind() == Branch32 && "Not a Branch32 edge?");
-    assert(E.getAddend() == 0 && "Branch32 edge has non-zero addend?");
 
     // Set the edge kind to Branch32ToStub. We will use this to check for stub
     // optimization opportunities in the optimize ELF_x86_64_GOTAndStubs pass
@@ -160,11 +159,6 @@ static Error optimizeELF_x86_64_GOTAndStubs(LinkGraph &G) {
           });
         }
       } else if (E.getKind() == Branch32ToStub) {
-
-        // Switch the edge kind to PCRel32: Whether we change the edge target
-        // or not this will be the desired kind.
-        E.setKind(Branch32);
-
         auto &StubBlock = E.getTarget().getBlock();
         assert(StubBlock.getSize() ==
                    sizeof(ELF_x86_64_GOTAndStubsBuilder::StubContent) &&
@@ -185,6 +179,7 @@ static Error optimizeELF_x86_64_GOTAndStubs(LinkGraph &G) {
         int64_t Displacement = TargetAddr - EdgeAddr + 4;
         if (Displacement >= std::numeric_limits<int32_t>::min() &&
             Displacement <= std::numeric_limits<int32_t>::max()) {
+          E.setKind(Branch32);
           E.setTarget(GOTTarget);
           LLVM_DEBUG({
             dbgs() << "  Replaced stub branch with direct branch:\n    ";
@@ -232,6 +227,8 @@ private:
     case ELF::R_X86_64_GOTPCRELX:
     case ELF::R_X86_64_REX_GOTPCRELX:
       return ELF_x86_64_Edges::ELFX86RelocationKind::PCRel32GOTLoad;
+    case ELF::R_X86_64_PLT32:
+      return ELF_x86_64_Edges::ELFX86RelocationKind::Branch32;
     }
     return make_error<JITLinkError>("Unsupported x86-64 relocation:" +
                                     formatv("{0:d}", Type));
@@ -289,17 +286,13 @@ private:
           return NameOrErr.takeError();
 
         LLVM_DEBUG({
-          dbgs() << "  ";
-          if (!Name)
-            dbgs() << "<anonymous symbol>";
-          else
-            dbgs() << *Name;
-          dbgs() << ": value = " << formatv("{0:x16}", SymRef.getValue())
+          dbgs() << "  value = " << formatv("{0:x16}", SymRef.getValue())
                  << ", type = " << formatv("{0:x2}", SymRef.getType())
-                 << ", binding = " << SymRef.getBinding()
-                 << ", size =" << SymRef.st_size
-                 << ", info =" << SymRef.st_info;
-          dbgs() << "\n";
+                 << ", binding = " << formatv("{0:x2}", SymRef.getBinding())
+                 << ", size = "
+                 << formatv("{0:x16}", static_cast<uint64_t>(SymRef.st_size))
+                 << ", info = " << formatv("{0:x2}", SymRef.st_info)
+                 << " :" << (Name ? *Name : "<anonymous symbol>") << "\n";
         });
       }
     }
@@ -336,7 +329,7 @@ private:
       LLVM_DEBUG({
         dbgs() << "  " << *Name << ": " << formatv("{0:x16}", Address) << " -- "
                << formatv("{0:x16}", Address + Size) << ", align: " << Alignment
-               << " Flags:" << Flags << "\n";
+               << " Flags: " << formatv("{0:x}", Flags) << "\n";
       });
 
       if (SecRef.sh_type != ELF::SHT_NOBITS) {
@@ -421,8 +414,8 @@ private:
         if (!TargetSymbol) {
           return make_error<llvm::StringError>(
               "Could not find symbol at given index, did you add it to "
-              "JITSymbolTable? index: " +
-                  std::to_string((*Symbol)->st_shndx) +
+              "JITSymbolTable? index: " + std::to_string(SymbolIndex)
+              + ", shndx: " + std::to_string((*Symbol)->st_shndx) +
                   " Size of table: " + std::to_string(JITSymbolTable.size()),
               llvm::inconvertibleErrorCode());
         }
@@ -549,7 +542,7 @@ private:
                 "Section has no block", llvm::inconvertibleErrorCode());
 
           auto B = *bs.begin();
-          LLVM_DEBUG({ dbgs() << "  " << *Name << ": "; });
+          LLVM_DEBUG({ dbgs() << "  " << *Name << " at index " << SymbolIndex << "\n"; });
           if (SymRef.getType() == ELF::STT_SECTION)
             *Name = *sectName;
           auto &S = G->addDefinedSymbol(
@@ -559,7 +552,12 @@ private:
         } else if (SymRef.isUndefined() && SymRef.isExternal()) {
           auto &S = G->addExternalSymbol(*Name, SymRef.st_size, bindings.first);
           JITSymbolTable[SymbolIndex] = &S;
-        }
+        } else
+          LLVM_DEBUG({
+              dbgs()
+                << "Not creating graph symbol for normalized symbol at index "
+                << SymbolIndex << ", \"" << *Name << "\"\n";
+            });
 
         // TODO: The following has to be implmented.
         // leaving commented out to save time for future patchs
@@ -573,10 +571,11 @@ private:
   }
 
 public:
-  ELFLinkGraphBuilder_x86_64(std::string filename,
+  ELFLinkGraphBuilder_x86_64(StringRef FileName,
                              const object::ELFFile<object::ELF64LE> &Obj)
-      : G(std::make_unique<LinkGraph>(filename, getPointerSize(Obj),
-                                      getEndianness(Obj))),
+      : G(std::make_unique<LinkGraph>(FileName.str(),
+                                      Triple("x86_64-unknown-linux"),
+                                      getPointerSize(Obj), getEndianness(Obj))),
         Obj(Obj) {}
 
   Expected<std::unique_ptr<LinkGraph>> buildGraph() {
@@ -612,25 +611,13 @@ class ELFJITLinker_x86_64 : public JITLinker<ELFJITLinker_x86_64> {
 
 public:
   ELFJITLinker_x86_64(std::unique_ptr<JITLinkContext> Ctx,
+                      std::unique_ptr<LinkGraph> G,
                       PassConfiguration PassConfig)
-      : JITLinker(std::move(Ctx), std::move(PassConfig)) {}
+      : JITLinker(std::move(Ctx), std::move(G), std::move(PassConfig)) {}
 
 private:
   StringRef getEdgeKindName(Edge::Kind R) const override {
     return getELFX86RelocationKindName(R);
-  }
-
-  Expected<std::unique_ptr<LinkGraph>>
-  buildGraph(MemoryBufferRef ObjBuffer) override {
-    auto ELFObj = object::ObjectFile::createELFObjectFile(ObjBuffer);
-    if (!ELFObj)
-      return ELFObj.takeError();
-
-    auto &ELFObjFile = cast<object::ELFObjectFile<object::ELF64LE>>(**ELFObj);
-    std::string fileName(ELFObj->get()->getFileName());
-    return ELFLinkGraphBuilder_x86_64(std::move(fileName),
-                                      *ELFObjFile.getELFFile())
-        .buildGraph();
   }
 
   Error applyFixup(Block &B, const Edge &E, char *BlockWorkingMem) const {
@@ -639,6 +626,8 @@ private:
     char *FixupPtr = BlockWorkingMem + E.getOffset();
     JITTargetAddress FixupAddress = B.getAddress() + E.getOffset();
     switch (E.getKind()) {
+    case ELFX86RelocationKind::Branch32:
+    case ELFX86RelocationKind::Branch32ToStub:
     case ELFX86RelocationKind::PCRel32:
     case ELFX86RelocationKind::PCRel32GOTLoad: {
       int64_t Value = E.getTarget().getAddress() + E.getAddend() - FixupAddress;
@@ -655,12 +644,30 @@ private:
   }
 };
 
-void jitLink_ELF_x86_64(std::unique_ptr<JITLinkContext> Ctx) {
+Expected<std::unique_ptr<LinkGraph>>
+createLinkGraphFromELFObject_x86_64(MemoryBufferRef ObjectBuffer) {
+  LLVM_DEBUG({
+    dbgs() << "Building jitlink graph for new input "
+           << ObjectBuffer.getBufferIdentifier() << "...\n";
+  });
+
+  auto ELFObj = object::ObjectFile::createELFObjectFile(ObjectBuffer);
+  if (!ELFObj)
+    return ELFObj.takeError();
+
+  auto &ELFObjFile = cast<object::ELFObjectFile<object::ELF64LE>>(**ELFObj);
+  return ELFLinkGraphBuilder_x86_64((*ELFObj)->getFileName(),
+                                    ELFObjFile.getELFFile())
+      .buildGraph();
+}
+
+void link_ELF_x86_64(std::unique_ptr<LinkGraph> G,
+                     std::unique_ptr<JITLinkContext> Ctx) {
   PassConfiguration Config;
-  Triple TT("x86_64-linux");
+
   // Construct a JITLinker and run the link function.
   // Add a mark-live pass.
-  if (auto MarkLive = Ctx->getMarkLivePass(TT))
+  if (auto MarkLive = Ctx->getMarkLivePass(G->getTargetTriple()))
     Config.PrePrunePasses.push_back(std::move(MarkLive));
   else
     Config.PrePrunePasses.push_back(markAllSymbolsLive);
@@ -674,10 +681,10 @@ void jitLink_ELF_x86_64(std::unique_ptr<JITLinkContext> Ctx) {
   // Add GOT/Stubs optimizer pass.
   Config.PostAllocationPasses.push_back(optimizeELF_x86_64_GOTAndStubs);
 
-  if (auto Err = Ctx->modifyPassConfig(TT, Config))
+  if (auto Err = Ctx->modifyPassConfig(G->getTargetTriple(), Config))
     return Ctx->notifyFailed(std::move(Err));
 
-  ELFJITLinker_x86_64::link(std::move(Ctx), std::move(Config));
+  ELFJITLinker_x86_64::link(std::move(Ctx), std::move(G), std::move(Config));
 }
 StringRef getELFX86RelocationKindName(Edge::Kind R) {
   switch (R) {
@@ -687,6 +694,10 @@ StringRef getELFX86RelocationKindName(Edge::Kind R) {
     return "Pointer64";
   case PCRel32GOTLoad:
     return "PCRel32GOTLoad";
+  case Branch32:
+    return "Branch32";
+  case Branch32ToStub:
+    return "Branch32ToStub";
   }
   return getGenericEdgeKindName(static_cast<Edge::Kind>(R));
 }

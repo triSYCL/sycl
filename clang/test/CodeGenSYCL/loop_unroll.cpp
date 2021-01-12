@@ -45,12 +45,13 @@ int main() {
   return 0;
 }
 
-// ENABLE: ![[ENABLE]] = distinct !{![[ENABLE]], ![[ENABLE_A:[0-9]+]]}
-// ENABLE-NEXT: ![[ENABLE_A]] = !{!"llvm.loop.unroll.enable"}
-// COUNT: ![[COUNT]] = distinct !{![[COUNT]], ![[COUNT_A:[0-9]+]]}
+// ENABLE: ![[ENABLE]] = distinct !{![[ENABLE]], ![[MP:[0-9]+]], ![[ENABLE_A:[0-9]+]]}
+// ENABLE-NEXT: ![[MP]] = !{!"llvm.loop.mustprogress"}
+// CHECK-NEXT: ![[ENABLE_A]] = !{!"llvm.loop.unroll.enable"}
+// COUNT: ![[COUNT]] = distinct !{![[COUNT]], ![[MP]], ![[COUNT_A:[0-9]+]]}
 // COUNT-NEXT: ![[COUNT_A]] = !{!"llvm.loop.unroll.count", i32 8}
-// COUNT: ![[COUNT_TEMPLATE]] = distinct !{![[COUNT_TEMPLATE]], ![[COUNT_TEMPLATE_A:[0-9]+]]}
+// COUNT: ![[COUNT_TEMPLATE]] = distinct !{![[COUNT_TEMPLATE]], ![[MP]], ![[COUNT_TEMPLATE_A:[0-9]+]]}
 // COUNT-NEXT: ![[COUNT_TEMPLATE_A]] = !{!"llvm.loop.unroll.count", i32 4}
-// DISABLE: ![[DISABLE]] = distinct !{![[DISABLE]], ![[DISABLE_A:[0-9]+]]}
+// DISABLE: ![[DISABLE]] = distinct !{![[DISABLE]], ![[MP]], ![[DISABLE_A:[0-9]+]]}
 // DISABLE-NEXT: ![[DISABLE_A]] = !{!"llvm.loop.unroll.disable"}
-// DISABLEL ![[DISABLE_TEMPLATE]] = distinct !{!![[DISABLE_TEMPLATE]], ![[DISABLE_A]]}
+// DISABLEL ![[DISABLE_TEMPLATE]] = distinct !{!![[DISABLE_TEMPLATE]], ![[MP]], ![[DISABLE_A]]}

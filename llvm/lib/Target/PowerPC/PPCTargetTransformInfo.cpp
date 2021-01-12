@@ -978,9 +978,11 @@ int PPCTTIImpl::getCastInstrCost(unsigned Opcode, Type *Dst, Type *Src,
 }
 
 int PPCTTIImpl::getCmpSelInstrCost(unsigned Opcode, Type *ValTy, Type *CondTy,
+                                   CmpInst::Predicate VecPred,
                                    TTI::TargetCostKind CostKind,
                                    const Instruction *I) {
-  int Cost = BaseT::getCmpSelInstrCost(Opcode, ValTy, CondTy, CostKind, I);
+  int Cost =
+      BaseT::getCmpSelInstrCost(Opcode, ValTy, CondTy, VecPred, CostKind, I);
   // TODO: Handle other cost kinds.
   if (CostKind != TTI::TCK_RecipThroughput)
     return Cost;
@@ -1204,7 +1206,7 @@ bool PPCTTIImpl::isLSRCostLess(TargetTransformInfo::LSRCost &C1,
     return TargetTransformInfoImplBase::isLSRCostLess(C1, C2);
 }
 
-bool PPCTTIImpl::isRegNumMajorCostOfLSR() {
+bool PPCTTIImpl::isNumRegsMajorCostOfLSR() {
   return false;
 }
 
@@ -1221,7 +1223,8 @@ bool PPCTTIImpl::getTgtMemIntrinsic(IntrinsicInst *Inst,
   case Intrinsic::ppc_vsx_lxvd2x_be:
   case Intrinsic::ppc_vsx_lxvw4x_be:
   case Intrinsic::ppc_vsx_lxvl:
-  case Intrinsic::ppc_vsx_lxvll: {
+  case Intrinsic::ppc_vsx_lxvll:
+  case Intrinsic::ppc_vsx_lxvp: {
     Info.PtrVal = Inst->getArgOperand(0);
     Info.ReadMem = true;
     Info.WriteMem = false;
@@ -1237,7 +1240,8 @@ bool PPCTTIImpl::getTgtMemIntrinsic(IntrinsicInst *Inst,
   case Intrinsic::ppc_vsx_stxvd2x_be:
   case Intrinsic::ppc_vsx_stxvw4x_be:
   case Intrinsic::ppc_vsx_stxvl:
-  case Intrinsic::ppc_vsx_stxvll: {
+  case Intrinsic::ppc_vsx_stxvll:
+  case Intrinsic::ppc_vsx_stxvp: {
     Info.PtrVal = Inst->getArgOperand(1);
     Info.ReadMem = false;
     Info.WriteMem = true;

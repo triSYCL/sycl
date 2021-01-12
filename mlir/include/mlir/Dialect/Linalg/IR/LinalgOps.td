@@ -14,6 +14,7 @@
 #define LINALG_OPS
 
 include "mlir/Dialect/Linalg/IR/LinalgBase.td"
+include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 include "mlir/Interfaces/ViewLikeInterface.td"
 
@@ -29,6 +30,91 @@ class Linalg_Op<string mnemonic, list<OpTrait> traits = []> :
   let printer = [{ return ::print(p, *this); }];
   let verifier = [{ return ::verify(*this); }];
   let parser = [{ return ::parse$cppClass(parser, result); }];
+}
+
+def Linalg_InitTensorOp : Linalg_Op<"init_tensor", [NoSideEffect]> {
+  let summary = "operation to define a tensor of particular value";
+
+  let description = [{
+    `linalg.init_tensor` is an operation that materializes a tensor of
+    a given shape. The shape could be dynamic or static.
+  }];
+
+  let arguments =
+    (ins Variadic<Index>:$sizes, I64ArrayAttr:$static_sizes);
+
+  let results = (outs AnyTensor:$result);
+
+  let verifier = [{ return ::verify(*this); }];
+
+  let extraClassDeclaration = [{
+    static StringRef getStaticSizesAttrName() {
+      return "static_sizes";
+    }
+
+    RankedTensorType getType() {
+      return getResult().getType().cast<RankedTensorType>(); }
+
+    // Infer the shape of the result tensor given the static shapes
+    // and element type of the result tensor.
+    static Type inferResultType(ArrayRef<int64_t> staticSizes, Type elementType);
+
+    // Return true if the size of the tensor is dynamic at `idx`
+    bool isDynamicSize(unsigned idx) {
+      APInt v = *(static_sizes().getAsValueRange<IntegerAttr>().begin() + idx);
+      return ShapedType::isDynamic(v.getSExtValue());
+    }
+
+    // Assert that the size of the result tensor is static at `idx`
+    // and return the shape.
+    int64_t getStaticSize(unsigned idx) {
+      assert(!isDynamicSize(idx) && "expected static size");
+      APInt v = *(static_sizes().
+          template getAsValueRange<IntegerAttr>().begin() + idx);
+        return v.getSExtValue();
+    }
+
+    // Return the argument position that contains the dynamic size of
+    // the tensor at dimension `idx`. Asserts that the shape is
+    // dynamic at that `idx`.
+    unsigned getIndexOfDynamicSize(unsigned idx) {
+      assert(isDynamicSize(idx) && "expected dynamic size");
+      return std::count_if(
+          static_sizes().getValue().begin(),
+          static_sizes().getValue().begin() + idx,
+          [&](Attribute attr) {
+            return ShapedType::isDynamic(attr.cast<IntegerAttr>().getInt());
+          });
+    }
+
+    // Return the Value of the dynamic size of the tensor at dimension
+    // `idx`. Asserts that the shape is dynamic at that `idx.
+    Value getDynamicSize(unsigned idx) {
+      return getOperand(getIndexOfDynamicSize(idx));
+    }
+  }];
+
+  let builders = [
+    OpBuilderDAG<(ins "ValueRange":$shape,
+                  "ArrayRef<int64_t>":$staticShape, "Type":$elementType),
+    [{
+      build($_builder, $_state,
+            InitTensorOp::inferResultType(staticShape, elementType),
+            shape, $_builder.getI64ArrayAttr(staticShape));
+    }]>,
+    OpBuilderDAG<(ins "ValueRange":$shape, "Type":$elementType),
+    [{
+      SmallVector<int64_t, 4> staticShape(
+        shape.size(), ShapedType::kDynamicSize);
+      build($_builder, $_state, shape, staticShape, elementType);
+    }]>,
+    OpBuilderDAG<(ins "ArrayRef<int64_t>":$staticShape, "Type":$elementType),
+    [{
+      build($_builder, $_state, ValueRange{}, staticShape, elementType);
+    }]>
+  ];
+
+  let hasCanonicalizer = 1;
 }
 
 def Linalg_RangeOp :
@@ -47,8 +133,8 @@ def Linalg_RangeOp :
     %3 = linalg.range %0:%1:%2 : !linalg.range
     ````
   }];
-  let builders = [OpBuilder<
-    "Value min, Value max, Value step",
+  let builders = [
+    OpBuilderDAG<(ins "Value":$min, "Value":$max, "Value":$step),
     [{
       auto rangeType = RangeType::get($_builder.getContext());
       build($_builder, $_state, rangeType, min, max, step);
@@ -64,12 +150,13 @@ class Linalg_ReshapeLikeOp<string mnemonic, list<OpTrait> traits = []> :
   let builders = [
     // Builders for a contracting reshape whose result type is computed from
     // `src` and `reassociation`.
-    OpBuilder<"Value src, "
-              "ArrayRef<ReassociationExprs> reassociation, "
-              "ArrayRef<NamedAttribute> attrs = {}">,
-    OpBuilder<"Value src, "
-              "ArrayRef<ReassociationIndices> reassociation, "
-              "ArrayRef<NamedAttribute> attrs = {}", [{
+    OpBuilderDAG<(ins "Value":$src,
+      "ArrayRef<ReassociationExprs>":$reassociation,
+      CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)>,
+    OpBuilderDAG<(ins "Value":$src,
+      "ArrayRef<ReassociationIndices>":$reassociation,
+      CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs),
+    [{
       auto reassociationMaps =
           convertReassociationIndicesToMaps($_builder, reassociation);
       build($_builder, $_state, src, reassociationMaps, attrs);
@@ -77,12 +164,13 @@ class Linalg_ReshapeLikeOp<string mnemonic, list<OpTrait> traits = []> :
 
     // Builders for a reshape whose result type is passed explicitly. This may
     // be either a contracting or expanding reshape.
-    OpBuilder<"Type resultType, Value src, "
-              "ArrayRef<ReassociationExprs> reassociation, "
-              "ArrayRef<NamedAttribute> attrs = {}">,
-    OpBuilder<"Type resultType, Value src, "
-              "ArrayRef<ReassociationIndices> reassociation, "
-              "ArrayRef<NamedAttribute> attrs = {}", [{
+    OpBuilderDAG<(ins "Type":$resultType, "Value":$src,
+      "ArrayRef<ReassociationExprs>":$reassociation,
+      CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)>,
+    OpBuilderDAG<(ins "Type":$resultType, "Value":$src,
+      "ArrayRef<ReassociationIndices>":$reassociation,
+      CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs),
+    [{
       auto reassociationMaps =
           convertReassociationIndicesToMaps($_builder, reassociation);
       build($_builder, $_state, resultType, src, reassociationMaps, attrs);
@@ -258,7 +346,7 @@ def Linalg_SliceOp : Linalg_Op<"slice", [
       ```
   }];
 
-  let builders = [OpBuilder<"Value base, ValueRange indexings">];
+  let builders = [OpBuilderDAG<(ins "Value":$base, "ValueRange":$indexings)>];
 
   let extraClassDeclaration = [{
     enum { FirstIndexingOperand = 1 };
@@ -284,7 +372,7 @@ def Linalg_SliceOp : Linalg_Op<"slice", [
   let hasFolder = 1;
 }
 
-def Linalg_YieldOp : Linalg_Op<"yield", [NoSideEffect, Terminator]>,
+def Linalg_YieldOp : Linalg_Op<"yield", [NoSideEffect, ReturnLike, Terminator]>,
     Arguments<(ins Variadic<AnyType>:$values)> {
   let summary = "Linalg yield operation";
   let description = [{

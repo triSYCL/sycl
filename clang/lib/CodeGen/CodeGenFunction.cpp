@@ -26,6 +26,7 @@
 #include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclCXX.h"
+#include "clang/AST/Expr.h"
 #include "clang/AST/StmtCXX.h"
 #include "clang/AST/StmtObjC.h"
 #include "clang/Basic/Builtins.h"
@@ -132,9 +133,23 @@ void CodeGenFunction::SetFastMathFlags(FPOptions FPFeatures) {
 }
 
 CodeGenFunction::CGFPOptionsRAII::CGFPOptionsRAII(CodeGenFunction &CGF,
+                                                  const Expr *E)
+    : CGF(CGF) {
+  ConstructorHelper(E->getFPFeaturesInEffect(CGF.getLangOpts()));
+}
+
+CodeGenFunction::CGFPOptionsRAII::CGFPOptionsRAII(CodeGenFunction &CGF,
                                                   FPOptions FPFeatures)
-    : CGF(CGF), OldFPFeatures(CGF.CurFPFeatures) {
+    : CGF(CGF) {
+  ConstructorHelper(FPFeatures);
+}
+
+void CodeGenFunction::CGFPOptionsRAII::ConstructorHelper(FPOptions FPFeatures) {
+  OldFPFeatures = CGF.CurFPFeatures;
   CGF.CurFPFeatures = FPFeatures;
+
+  OldExcept = CGF.Builder.getDefaultConstrainedExcept();
+  OldRounding = CGF.Builder.getDefaultConstrainedRounding();
 
   if (OldFPFeatures == FPFeatures)
     return;
@@ -176,6 +191,8 @@ CodeGenFunction::CGFPOptionsRAII::CGFPOptionsRAII(CodeGenFunction &CGF,
 
 CodeGenFunction::CGFPOptionsRAII::~CGFPOptionsRAII() {
   CGF.CurFPFeatures = OldFPFeatures;
+  CGF.Builder.setDefaultConstrainedExcept(OldExcept);
+  CGF.Builder.setDefaultConstrainedRounding(OldRounding);
 }
 
 LValue CodeGenFunction::MakeNaturalAlignAddrLValue(llvm::Value *V, QualType T) {
@@ -603,11 +620,27 @@ void CodeGenFunction::EmitOpenCLKernelMetadata(const FunctionDecl *FD,
   }
 
   if (const ReqdWorkGroupSizeAttr *A = FD->getAttr<ReqdWorkGroupSizeAttr>()) {
+    llvm::LLVMContext &Context = getLLVMContext();
+    Optional<llvm::APSInt> XDimVal =
+        A->getXDim()->getIntegerConstantExpr(FD->getASTContext());
+    Optional<llvm::APSInt> YDimVal =
+        A->getYDim()->getIntegerConstantExpr(FD->getASTContext());
+    Optional<llvm::APSInt> ZDimVal =
+        A->getZDim()->getIntegerConstantExpr(FD->getASTContext());
+
+    // For a SYCLDevice ReqdWorkGroupSizeAttr arguments are reversed.
+    if (getLangOpts().SYCLIsDevice)
+      std::swap(XDimVal, ZDimVal);
+
     llvm::Metadata *AttrMDArgs[] = {
-        llvm::ConstantAsMetadata::get(Builder.getInt32(A->getXDim())),
-        llvm::ConstantAsMetadata::get(Builder.getInt32(A->getYDim())),
-        llvm::ConstantAsMetadata::get(Builder.getInt32(A->getZDim()))};
-    Fn->setMetadata("reqd_work_group_size", llvm::MDNode::get(Context, AttrMDArgs));
+        llvm::ConstantAsMetadata::get(
+            Builder.getInt32(XDimVal->getZExtValue())),
+        llvm::ConstantAsMetadata::get(
+            Builder.getInt32(YDimVal->getZExtValue())),
+        llvm::ConstantAsMetadata::get(
+            Builder.getInt32(ZDimVal->getZExtValue()))};
+    Fn->setMetadata("reqd_work_group_size",
+                    llvm::MDNode::get(Context, AttrMDArgs));
   }
 
   if (const IntelReqdSubGroupSizeAttr *A =
@@ -653,31 +686,55 @@ void CodeGenFunction::EmitOpenCLKernelMetadata(const FunctionDecl *FD,
                     llvm::MDNode::get(Context, AttrMDArgs));
   }
 
-  if (const SYCLIntelMaxWorkGroupSizeAttr *A =
-      FD->getAttr<SYCLIntelMaxWorkGroupSizeAttr>()) {
-    llvm::Metadata *AttrMDArgs[] = {
-        llvm::ConstantAsMetadata::get(Builder.getInt32(A->getXDim())),
-        llvm::ConstantAsMetadata::get(Builder.getInt32(A->getYDim())),
-        llvm::ConstantAsMetadata::get(Builder.getInt32(A->getZDim()))};
-    Fn->setMetadata("max_work_group_size",
+  if (const SYCLIntelMaxGlobalWorkDimAttr *A =
+      FD->getAttr<SYCLIntelMaxGlobalWorkDimAttr>()) {
+    llvm::LLVMContext &Context = getLLVMContext();
+    Optional<llvm::APSInt> ArgVal =
+        A->getValue()->getIntegerConstantExpr(FD->getASTContext());
+    assert(ArgVal.hasValue() && "Not an integer constant expression");
+    llvm::Metadata *AttrMDArgs[] = {llvm::ConstantAsMetadata::get(
+        Builder.getInt32(ArgVal->getSExtValue()))};
+    Fn->setMetadata("max_global_work_dim",
                     llvm::MDNode::get(Context, AttrMDArgs));
   }
 
-  if (const SYCLIntelMaxGlobalWorkDimAttr *A =
-      FD->getAttr<SYCLIntelMaxGlobalWorkDimAttr>()) {
+  if (const SYCLIntelMaxWorkGroupSizeAttr *A =
+          FD->getAttr<SYCLIntelMaxWorkGroupSizeAttr>()) {
+    llvm::LLVMContext &Context = getLLVMContext();
+    Optional<llvm::APSInt> XDimVal =
+        A->getXDim()->getIntegerConstantExpr(FD->getASTContext());
+    Optional<llvm::APSInt> YDimVal =
+        A->getYDim()->getIntegerConstantExpr(FD->getASTContext());
+    Optional<llvm::APSInt> ZDimVal =
+        A->getZDim()->getIntegerConstantExpr(FD->getASTContext());
+
+    // For a SYCLDevice SYCLIntelMaxWorkGroupSizeAttr arguments are reversed.
+    if (getLangOpts().SYCLIsDevice)
+      std::swap(XDimVal, ZDimVal);
+
     llvm::Metadata *AttrMDArgs[] = {
-        llvm::ConstantAsMetadata::get(Builder.getInt32(A->getNumber()))};
-    Fn->setMetadata("max_global_work_dim",
+        llvm::ConstantAsMetadata::get(
+            Builder.getInt32(XDimVal->getZExtValue())),
+        llvm::ConstantAsMetadata::get(
+            Builder.getInt32(YDimVal->getZExtValue())),
+        llvm::ConstantAsMetadata::get(
+            Builder.getInt32(ZDimVal->getZExtValue()))};
+    Fn->setMetadata("max_work_group_size",
                     llvm::MDNode::get(Context, AttrMDArgs));
   }
 
   if (const SYCLIntelNoGlobalWorkOffsetAttr *A =
           FD->getAttr<SYCLIntelNoGlobalWorkOffsetAttr>()) {
-    if (A->getEnabled())
+    const Expr *Arg = A->getValue();
+    assert(Arg && "Got an unexpected null argument");
+    Optional<llvm::APSInt> ArgVal =
+        Arg->getIntegerConstantExpr(FD->getASTContext());
+    assert(ArgVal.hasValue() && "Not an integer constant expression");
+    if (ArgVal->getBoolValue())
       Fn->setMetadata("no_global_work_offset", llvm::MDNode::get(Context, {}));
   }
 
-  if (FD->hasAttr<SYCLIntelStallEnableAttr>()) {
+  if (FD->hasAttr<SYCLIntelUseStallEnableClustersAttr>()) {
     llvm::Metadata *AttrMDArgs[] = {
         llvm::ConstantAsMetadata::get(Builder.getInt32(1))};
     Fn->setMetadata("stall_enable", llvm::MDNode::get(Context, AttrMDArgs));
@@ -928,6 +985,19 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
 
   if (getLangOpts().SYCLIsHost && D && D->hasAttr<SYCLKernelAttr>())
     Fn->addFnAttr("sycl_kernel");
+
+  if (getLangOpts().SYCLIsDevice && D) {
+    if (const auto *A = D->getAttr<SYCLIntelLoopFuseAttr>()) {
+      Expr *E = A->getValue();
+      llvm::Metadata *AttrMDArgs[] = {
+          llvm::ConstantAsMetadata::get(Builder.getInt32(
+              E->getIntegerConstantExpr(D->getASTContext())->getZExtValue())),
+          llvm::ConstantAsMetadata::get(
+              A->isIndependent() ? Builder.getInt32(1) : Builder.getInt32(0))};
+      Fn->setMetadata("loop_fuse",
+                      llvm::MDNode::get(getLLVMContext(), AttrMDArgs));
+    }
+  }
 
   if (getLangOpts().OpenCL || getLangOpts().SYCLIsDevice) {
     // Add metadata for a kernel function.
@@ -1242,10 +1312,18 @@ void CodeGenFunction::StartFunction(GlobalDecl GD, QualType RetTy,
 
 void CodeGenFunction::EmitFunctionBody(const Stmt *Body) {
   incrementProfileCounter(Body);
+  if (CPlusPlusWithProgress())
+    FnIsMustProgress = true;
+
   if (const CompoundStmt *S = dyn_cast<CompoundStmt>(Body))
     EmitCompoundStmtWithoutScope(*S);
   else
     EmitStmt(Body);
+
+  // This is checked after emitting the function body so we know if there
+  // are any permitted infinite loops.
+  if (FnIsMustProgress)
+    CurFn->addFnAttr(llvm::Attribute::MustProgress);
 }
 
 /// When instrumenting to collect profile data, the counts for some blocks
@@ -2438,34 +2516,6 @@ void CGBuilderInserter::InsertHelper(
     CGF->InsertHelper(I, Name, BB, InsertPt);
 }
 
-static bool hasRequiredFeatures(const SmallVectorImpl<StringRef> &ReqFeatures,
-                                CodeGenModule &CGM, const FunctionDecl *FD,
-                                std::string &FirstMissing) {
-  // If there aren't any required features listed then go ahead and return.
-  if (ReqFeatures.empty())
-    return false;
-
-  // Now build up the set of caller features and verify that all the required
-  // features are there.
-  llvm::StringMap<bool> CallerFeatureMap;
-  CGM.getContext().getFunctionFeatureMap(CallerFeatureMap, FD);
-
-  // If we have at least one of the features in the feature list return
-  // true, otherwise return false.
-  return std::all_of(
-      ReqFeatures.begin(), ReqFeatures.end(), [&](StringRef Feature) {
-        SmallVector<StringRef, 1> OrFeatures;
-        Feature.split(OrFeatures, '|');
-        return llvm::any_of(OrFeatures, [&](StringRef Feature) {
-          if (!CallerFeatureMap.lookup(Feature)) {
-            FirstMissing = Feature.str();
-            return false;
-          }
-          return true;
-        });
-      });
-}
-
 // Emits an error if we don't have a valid set of target features for the
 // called function.
 void CodeGenFunction::checkTargetFeatures(const CallExpr *E,
@@ -2492,19 +2542,20 @@ void CodeGenFunction::checkTargetFeatures(SourceLocation Loc,
   // listed cpu and any listed features.
   unsigned BuiltinID = TargetDecl->getBuiltinID();
   std::string MissingFeature;
+  llvm::StringMap<bool> CallerFeatureMap;
+  CGM.getContext().getFunctionFeatureMap(CallerFeatureMap, FD);
   if (BuiltinID) {
-    SmallVector<StringRef, 1> ReqFeatures;
-    const char *FeatureList =
-        CGM.getContext().BuiltinInfo.getRequiredFeatures(BuiltinID);
+    StringRef FeatureList(
+        CGM.getContext().BuiltinInfo.getRequiredFeatures(BuiltinID));
     // Return if the builtin doesn't have any required features.
-    if (!FeatureList || StringRef(FeatureList) == "")
+    if (FeatureList.empty())
       return;
-    StringRef(FeatureList).split(ReqFeatures, ',');
-    if (!hasRequiredFeatures(ReqFeatures, CGM, FD, MissingFeature))
+    assert(FeatureList.find(' ') == StringRef::npos &&
+           "Space in feature list");
+    TargetFeatures TF(CallerFeatureMap);
+    if (!TF.hasRequiredFeatures(FeatureList))
       CGM.getDiags().Report(Loc, diag::err_builtin_needs_feature)
-          << TargetDecl->getDeclName()
-          << CGM.getContext().BuiltinInfo.getRequiredFeatures(BuiltinID);
-
+          << TargetDecl->getDeclName() << FeatureList;
   } else if (!TargetDecl->isMultiVersion() &&
              TargetDecl->hasAttr<TargetAttr>()) {
     // Get the required features for the callee.
@@ -2527,7 +2578,13 @@ void CodeGenFunction::checkTargetFeatures(SourceLocation Loc,
       if (F.getValue())
         ReqFeatures.push_back(F.getKey());
     }
-    if (!hasRequiredFeatures(ReqFeatures, CGM, FD, MissingFeature))
+    if (!llvm::all_of(ReqFeatures, [&](StringRef Feature) {
+      if (!CallerFeatureMap.lookup(Feature)) {
+        MissingFeature = Feature.str();
+        return false;
+      }
+      return true;
+    }))
       CGM.getDiags().Report(Loc, diag::err_function_needs_feature)
           << FD->getDeclName() << TargetDecl->getDeclName() << MissingFeature;
   }
@@ -2706,4 +2763,13 @@ llvm::MDNode *CodeGenFunction::createBranchWeights(Stmt::Likelihood LH) const {
 
   llvm::MDBuilder MDHelper(CGM.getLLVMContext());
   return MDHelper.createBranchWeights(LHW->first, LHW->second);
+}
+
+llvm::MDNode *CodeGenFunction::createProfileOrBranchWeightsForLoop(
+    const Stmt *Cond, uint64_t LoopCount, const Stmt *Body) const {
+  llvm::MDNode *Weights = createProfileWeightsForLoop(Cond, LoopCount);
+  if (!Weights && CGM.getCodeGenOpts().OptimizationLevel)
+    Weights = createBranchWeights(Stmt::getLikelihood(Body));
+
+  return Weights;
 }
