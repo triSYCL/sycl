@@ -94,13 +94,11 @@ struct KernelPropGen : public ModulePass {
               ->getOperand(0));
       if (!Alloca)
         continue;
-      StringRef Annot = Str->getRawDataValues();
       if (Str->getRawDataValues() != KindOf("xilinx_ddr_bank"))
         continue;
       Constant *Args = (
           cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(4)))
               ->getInitializer());
-      Args->dump();
       unsigned Bank;
       if (auto* ZeroData = dyn_cast<ConstantAggregateZero>(Args))
         Bank = 0;

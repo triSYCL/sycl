@@ -18,6 +18,7 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/SYCL/XOCCIRDowngrader.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Attributes.h"
@@ -210,6 +211,29 @@ struct XOCCIRDowngrader : public ModulePass {
                                 Attribute::AttrKind::Alignment);
   }
 
+  void lowerIntrinsic(Module &M) {
+    IRBuilder<> B(M.getContext());
+    SmallVector<Instruction *, 16> ToRemove;
+    for (auto &F : M.functions())
+      for (auto &I : instructions(F))
+        if (auto *CI = dyn_cast<CallBase>(&I)) {
+          if (CI->getIntrinsicID() == Intrinsic::abs) {
+            B.SetInsertPoint(CI->getNextNode());
+            Value *Cmp = B.CreateICmpSLT(
+                CI->getArgOperand(0),
+                ConstantInt::getNullValue(CI->getArgOperand(0)->getType()));
+            Value *Sub = B.CreateSub(
+                CI->getArgOperand(0),
+                ConstantInt::getNullValue(CI->getArgOperand(0)->getType()));
+            Value *ABS = B.CreateSelect(Cmp, Sub, CI->getArgOperand(0));
+            CI->replaceAllUsesWith(ABS);
+            ToRemove.push_back(CI);
+          }
+        }
+    for (auto *I : ToRemove)
+      I->eraseFromParent();
+  }
+
   bool runOnModule(Module &M) override {
     resetByVal(M);
     removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
@@ -219,6 +243,7 @@ struct XOCCIRDowngrader : public ModulePass {
     removeFNegInst(M);
     removeMemIntrAlign(M);
 
+    lowerIntrinsic(M);
     // The module probably changed
     return true;
   }

@@ -1786,8 +1786,6 @@ class SyclKernelDeclCreator : public SyclKernelFieldHandler {
     ResTy = Ctx.getConstantArrayType(ResTy, llvm::APInt(32, Annot.size()),
                                      nullptr, ArrayType::Normal,
                                      /*IndexTypeQuals*/ 0);
-    Args.push_back(StringLiteral::Create(
-        Ctx, Annot, StringLiteral::StringKind::Ascii, false, ResTy, Loc));
     if (const auto *PropDecl = dyn_cast<ClassTemplateSpecializationDecl>(RD)) {
       for (auto &Arg : PropDecl->getTemplateArgs().asArray()) {
         switch (Arg.getKind()) {

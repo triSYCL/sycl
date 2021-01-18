@@ -153,8 +153,12 @@ TMP_PATH="$(mktemp $5/sycl-xocc.XXXXXX)"
 # output file name including extensions and path
 OUTPUT_FILE_NAME="$6"
 
+set +e
+# allow faillures because empty string is good default
+# This make debugging easier.
 ADDITIONAL_COMPILE_ARGS=$(cat $7)
 ADDITIONAL_LINK_ARGS=$(cat $8)
+set -e
 XCL_EMULATION_MODE=$9
 
 KERNELPROP="${TMP_PATH}_KernelProperties_${SOURCE_FILE_NAME}.bash"

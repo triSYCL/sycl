@@ -27,7 +27,7 @@ config.test_format = lit.formats.ShTest()
 config.suffixes = ['.c', '.cpp', '.dump'] #add .spv. Currently not clear what to do with those
 
 # feature tests are considered not so lightweight, so, they are excluded by default
-config.excludes = ['Inputs', 'feature-tests']
+config.excludes = ['Inputs', 'feature-tests', 'disabled', '_x', '.Xil', '.run']
 
 # test_source_root: The root path where tests are located.
 config.test_source_root = os.path.dirname(__file__)
@@ -37,6 +37,13 @@ config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
 
 # Propagate some variables from the host environment.
 llvm_config.with_system_environment(['PATH', 'OCL_ICD_FILENAMES', 'SYCL_DEVICE_ALLOWLIST', 'SYCL_CONFIG_FILE_NAME'])
+
+timeout=600
+
+xocc=lit_config.params.get('XOCC', "off")
+xocc_target = "hw"
+if "XCL_EMULATION_MODE" in os.environ:
+    xocc_target = os.environ["XCL_EMULATION_MODE"]
 
 # Configure LD_LIBRARY_PATH or corresponding os-specific alternatives
 if platform.system() == "Linux":
@@ -86,8 +93,12 @@ get_device_count_by_type_path = os.path.join(config.llvm_tools_dir, "get_device_
 def getDeviceCount(device_type):
     is_cuda = False;
     is_level_zero = False;
+    device_count_env = os.environ.copy()
+    if "XCL_EMULATION_MODE" in os.environ:
+        if os.environ["XCL_EMULATION_MODE"] == "hw":
+            device_count_env.pop("XCL_EMULATION_MODE")
     process = subprocess.Popen([get_device_count_by_type_path, device_type, backend],
-        stdout=subprocess.PIPE)
+        stdout=subprocess.PIPE, env=device_count_env)
     (output, err) = process.communicate()
     exit_code = process.wait()
 
@@ -192,6 +203,27 @@ if getDeviceCount("accelerator")[0]:
     config.available_features.add('accelerator')
 else:
     lit_config.warning("Accelerator device not found")
+
+if xocc != "off":
+    # xrt doesn't deal well with multiple executables using it concurrently (at the time of writing).
+    # The details are at https://xilinx.github.io/XRT/master/html/multiprocess.html
+    # so we wrap every use of XRT inside an file lock.
+    # We also wrap invocation of executable in an setsid to prevent
+    # a single program failure from ending all the tests.
+    xrt_lock = "/tmp/xrt.lock"
+    acc_run_substitute+= "setsid flock --exclusive " + xrt_lock + " "
+    if os.path.exists(xrt_lock):
+        os.remove(xrt_lock)
+    # XCL_EMULATION_MODE = hw is only valid for our SYCL driver, 
+    # for XRT XCL_EMULATION_MODE should only be used when using either hw_emu or sw_emu
+    # if xocc_target == "hw":
+    acc_run_substitute="env --unset=XCL_EMULATION_MODE " + acc_run_substitute
+    # hw_emu is very slow so it has a higher timeout.
+    if xocc_target != "hw_emu":
+        acc_run_substitute+= "timeout 30 env "
+    else:
+        acc_run_substitute+= "timeout 300 env "
+
 config.substitutions.append( ('%ACC_RUN_PLACEHOLDER',  acc_run_substitute) )
 config.substitutions.append( ('%ACC_CHECK_PLACEHOLDER',  acc_check_substitute) )
 
@@ -201,6 +233,8 @@ if not cuda and not level_zero and found_at_least_one_device:
 
 if cuda:
     config.substitutions.append( ('%sycl_triple',  "nvptx64-nvidia-cuda-sycldevice" ) )
+elif xocc != "off":
+    config.substitutions.append( ('%sycl_triple',  "fpga64-xilinx-unknown-sycldevice" ) )
 else:
     config.substitutions.append( ('%sycl_triple',  "spir64-unknown-linux-sycldevice" ) )
 
@@ -222,9 +256,51 @@ for aot_tool in aot_tools:
     else:
         lit_config.warning("Couldn't find pre-installed AOT device compiler " + aot_tool)
 
+if xocc == "off":
+    config.excludes += ['xocc']
+else:
+    llvm_config.with_environment('XCL_EMULATION_MODE', xocc_target, append_path=False)
+    lit_config.note("XOCC target: {}".format(xocc_target))
+    required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]
+    has_error=False
+    config.available_features.add("xocc")
+    config.available_features.add(xocc_target)
+    pkg_opencv4 = subprocess.run(["pkg-config", "--libs", "--cflags", "opencv4"], stdout=subprocess.PIPE)
+    has_opencv4 = not pkg_opencv4.returncode
+    lit_config.note("has opencv4: {}".format(has_opencv4))
+    if has_opencv4:
+        config.available_features.add("opencv4")
+        config.substitutions.append( ('%opencv4_flags', pkg_opencv4.stdout.decode('utf-8')[:-1]) )
+    for env in required_env:
+        if env not in os.environ:
+            lit_config.note("missing environnement variable: {}".format(env))
+            has_error=True
+    if has_error:
+        lit_config.error("Can't configure tests for XOCC")
+    llvm_config.with_system_environment(required_env)
+    if xocc == "only":
+        config.excludes += ['basic_tests', 'extentions', 'online_compiler', 'plugins']
+    # run_if_* defaults to a simple echo to print the comand instead of running it.
+    # it will be replaced by and empty string to actually run the command.
+    run_if_hw="echo"
+    run_if_hw_emu="echo"
+    run_if_sw_emu="echo"
+    if xocc_target == "hw":
+        timeout = 10800 # 3h
+        run_if_hw=""
+    if xocc_target == "hw_emu":
+        timeout = 3600 # 1h
+        run_if_hw_emu=""
+    if xocc_target == "sw_emu":
+        timeout = 1200 # 20min
+        run_if_sw_emu=""
+    config.substitutions.append( ('%run_if_hw', run_if_hw) )
+    config.substitutions.append( ('%run_if_hw_emu', run_if_hw_emu) )
+    config.substitutions.append( ('%run_if_sw_emu', run_if_sw_emu) )
+
 # Set timeout for test = 10 mins
 try:
     import psutil
-    lit_config.maxIndividualTestTime = 600
+    lit_config.maxIndividualTestTime = timeout
 except ImportError:
     pass
