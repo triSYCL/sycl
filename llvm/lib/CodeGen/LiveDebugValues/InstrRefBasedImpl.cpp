@@ -109,7 +109,7 @@
 /// a matching machine-location PHI, each input to which is the variables value
 /// in the predecessor block.
 ///
-/// To accomodate this difference, each point on the lattice is split in
+/// To accommodate this difference, each point on the lattice is split in
 /// two: a "proposed" PHI and "definite" PHI. Any PHI that can immediately
 /// have a location determined are "definite" PHIs, and no further work is
 /// needed. Otherwise, a location that all non-backedge predecessors agree
@@ -343,9 +343,12 @@ public:
   bool operator!=(const ValueIDNum &Other) const { return !(*this == Other); }
 
   std::string asString(const std::string &mlocname) const {
-    return Twine("bb ")
-        .concat(Twine(BlockNo).concat(Twine(" inst ").concat(
-            Twine(InstNo).concat(Twine(" loc ").concat(Twine(mlocname))))))
+    return Twine("Value{bb: ")
+        .concat(Twine(BlockNo).concat(
+            Twine(", inst: ")
+                .concat((InstNo ? Twine(InstNo) : Twine("live-in"))
+                            .concat(Twine(", loc: ").concat(Twine(mlocname)))
+                            .concat(Twine("}")))))
         .str();
   }
 
@@ -411,7 +414,7 @@ public:
   const TargetLowering &TLI;
 
   /// IndexedMap type, mapping from LocIdx to ValueIDNum.
-  typedef IndexedMap<ValueIDNum, LocIdxToIndexFunctor> LocToValueType;
+  using LocToValueType = IndexedMap<ValueIDNum, LocIdxToIndexFunctor>;
 
   /// Map of LocIdxes to the ValueIDNums that they store. This is tightly
   /// packed, entries only exist for locations that are being tracked.
@@ -753,8 +756,9 @@ public:
   /// just return the builder for it.
   MachineInstrBuilder emitLoc(Optional<LocIdx> MLoc, const DebugVariable &Var,
                               const DbgValueProperties &Properties) {
-    DebugLoc DL =
-        DebugLoc::get(0, 0, Var.getVariable()->getScope(), Var.getInlinedAt());
+    DebugLoc DL = DILocation::get(Var.getVariable()->getContext(), 0, 0,
+                                  Var.getVariable()->getScope(),
+                                  const_cast<DILocation *>(Var.getInlinedAt()));
     auto MIB = BuildMI(MF, DL, TII.get(TargetOpcode::DBG_VALUE));
 
     const DIExpression *Expr = Properties.DIExpr;
@@ -1277,8 +1281,9 @@ public:
   MachineInstrBuilder emitMOLoc(const MachineOperand &MO,
                                 const DebugVariable &Var,
                                 const DbgValueProperties &Properties) {
-    DebugLoc DL =
-        DebugLoc::get(0, 0, Var.getVariable()->getScope(), Var.getInlinedAt());
+    DebugLoc DL = DILocation::get(Var.getVariable()->getContext(), 0, 0,
+                                  Var.getVariable()->getScope(),
+                                  const_cast<DILocation *>(Var.getInlinedAt()));
     auto MIB = BuildMI(MF, DL, TII->get(TargetOpcode::DBG_VALUE));
     MIB.add(MO);
     if (Properties.Indirect)
@@ -1302,23 +1307,22 @@ private:
       DenseMap<const DILocalVariable *, SmallSet<FragmentInfo, 4>>;
 
   /// Machine location/value transfer function, a mapping of which locations
-  // are assigned which new values.
-  typedef std::map<LocIdx, ValueIDNum> MLocTransferMap;
+  /// are assigned which new values.
+  using MLocTransferMap = std::map<LocIdx, ValueIDNum>;
 
   /// Live in/out structure for the variable values: a per-block map of
   /// variables to their values. XXX, better name?
-  typedef DenseMap<const MachineBasicBlock *,
-                   DenseMap<DebugVariable, DbgValue> *>
-      LiveIdxT;
+  using LiveIdxT =
+      DenseMap<const MachineBasicBlock *, DenseMap<DebugVariable, DbgValue> *>;
 
-  typedef std::pair<DebugVariable, DbgValue> VarAndLoc;
+  using VarAndLoc = std::pair<DebugVariable, DbgValue>;
 
   /// Type for a live-in value: the predecessor block, and its value.
-  typedef std::pair<MachineBasicBlock *, DbgValue *> InValueT;
+  using InValueT = std::pair<MachineBasicBlock *, DbgValue *>;
 
   /// Vector (per block) of a collection (inner smallvector) of live-ins.
   /// Used as the result type for the variable value dataflow problem.
-  typedef SmallVector<SmallVector<VarAndLoc, 8>, 8> LiveInsT;
+  using LiveInsT = SmallVector<SmallVector<VarAndLoc, 8>, 8>;
 
   const TargetRegisterInfo *TRI;
   const TargetInstrInfo *TII;
@@ -1357,7 +1361,7 @@ private:
   DenseMap<unsigned, unsigned> BBNumToRPO;
 
   /// Pair of MachineInstr, and its 1-based offset into the containing block.
-  typedef std::pair<const MachineInstr *, unsigned> InstAndNum;
+  using InstAndNum = std::pair<const MachineInstr *, unsigned>;
   /// Map from debug instruction number to the MachineInstr labelled with that
   /// number, and its location within the function. Used to transform
   /// instruction numbers in DBG_INSTR_REFs into machine value numbers.
@@ -1574,8 +1578,10 @@ InstrRefBasedLDV::extractSpillBaseRegAndOffset(const MachineInstr &MI) {
   int FI = cast<FixedStackPseudoSourceValue>(PVal)->getFrameIndex();
   const MachineBasicBlock *MBB = MI.getParent();
   Register Reg;
-  int Offset = TFI->getFrameIndexReference(*MBB->getParent(), FI, Reg);
-  return {Reg, Offset};
+  StackOffset Offset = TFI->getFrameIndexReference(*MBB->getParent(), FI, Reg);
+  assert(!Offset.getScalable() &&
+         "Frame offsets with a scalable component are not supported");
+  return {Reg, static_cast<int>(Offset.getFixed())};
 }
 
 /// End all previous ranges related to @MI and start a new range from @MI
@@ -1964,13 +1970,6 @@ bool InstrRefBasedLDV::transferSpillOrRestoreInst(MachineInstr &MI) {
     if (TTracker)
       TTracker->transferMlocs(MTracker->getRegMLoc(Reg), SpillLocIdx,
                               MI.getIterator());
-
-    // VarLocBasedImpl would, at this point, stop tracking the source
-    // register of the store.
-    if (EmulateOldLDV) {
-      for (MCRegAliasIterator RAI(Reg, TRI, true); RAI.isValid(); ++RAI)
-        MTracker->defReg(*RAI, CurBB, CurInst);
-    }
   } else {
     if (!(Loc = isRestoreInstruction(MI, MF, Reg)))
       return false;
@@ -2177,8 +2176,7 @@ void InstrRefBasedLDV::produceMLocTransferFunction(
 
       // Create a map from the instruction number (if present) to the
       // MachineInstr and its position.
-      if (MI.peekDebugInstrNum()) {
-        uint64_t InstrNo = MI.peekDebugInstrNum();
+      if (uint64_t InstrNo = MI.peekDebugInstrNum()) {
         auto InstrAndPos = std::make_pair(&MI, CurInst);
         auto InsertResult =
             DebugInstrNumToInstr.insert(std::make_pair(InstrNo, InstrAndPos));
@@ -2356,7 +2354,7 @@ InstrRefBasedLDV::mlocJoin(MachineBasicBlock &MBB,
     }
   }
 
-  // Uhhhhhh, reimplement NumInserted and NumRemoved pls.
+  // TODO: Reimplement NumInserted and NumRemoved.
   return std::tuple<bool, bool>(Changed, DowngradeOccurred);
 }
 
@@ -2572,7 +2570,7 @@ std::tuple<Optional<ValueIDNum>, bool> InstrRefBasedLDV::pickVPHILoc(
     return std::tuple<Optional<ValueIDNum>, bool>(None, false);
 
   // Lambda for seeking a common location within a range of location-sets.
-  typedef SmallVector<SmallVector<LocIdx, 4>, 8>::iterator LocsIt;
+  using LocsIt = SmallVector<SmallVector<LocIdx, 4>, 8>::iterator;
   auto SeekLocation =
       [&Locs](llvm::iterator_range<LocsIt> SearchRange) -> Optional<LocIdx> {
     // Starting with the first set of locations, take the intersection with
@@ -2681,7 +2679,7 @@ std::tuple<bool, bool> InstrRefBasedLDV::vlocJoin(
     for (auto p : BlockOrders) {
       // If the predecessor isn't in scope / to be explored, we'll never be
       // able to join any locations.
-      if (BlocksToExplore.find(p) == BlocksToExplore.end()) {
+      if (!BlocksToExplore.contains(p)) {
         Bail = true;
         break;
       }

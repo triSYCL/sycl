@@ -511,7 +511,7 @@ class NewGVN {
   unsigned int NumFuncArgs = 0;
 
   // RPOOrdering of basic blocks
-  DenseMap<const GenericDomTreeNodeBase *, unsigned> RPOOrdering;
+  DenseMap<const DomTreeNode *, unsigned> RPOOrdering;
 
   // Congruence class info.
 
@@ -801,9 +801,6 @@ private:
   Value *findPHIOfOpsLeader(const Expression *, const Instruction *,
                             const BasicBlock *) const;
 
-  // New instruction creation.
-  void handleNewInstruction(Instruction *) {}
-
   // Various instruction touch utilities
   template <typename Map, typename KeyType, typename Func>
   void for_each_found(Map &, const KeyType &, Func);
@@ -835,7 +832,6 @@ private:
   BasicBlock *getBlockForValue(Value *V) const;
   void deleteExpression(const Expression *E) const;
   MemoryUseOrDef *getMemoryAccess(const Instruction *) const;
-  MemoryAccess *getDefiningAccess(const MemoryAccess *) const;
   MemoryPhi *getMemoryAccess(const BasicBlock *) const;
   template <class T, class Range> T *getMinDFSOfRange(const Range &) const;
 
@@ -3388,10 +3384,8 @@ bool NewGVN::runGVN() {
   for (auto &B : RPOT) {
     auto *Node = DT->getNode(B);
     if (Node->getNumChildren() > 1)
-      llvm::sort(Node->GenericDomTreeNodeBase::begin(),
-                 Node->GenericDomTreeNodeBase::end(),
-                 [&](const GenericDomTreeNodeBase *A,
-                     const GenericDomTreeNodeBase *B) {
+      llvm::sort(Node->begin(), Node->end(),
+                 [&](const DomTreeNode *A, const DomTreeNode *B) {
                    return RPOOrdering[A] < RPOOrdering[B];
                  });
   }

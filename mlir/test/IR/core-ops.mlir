@@ -86,6 +86,9 @@ func @standard_instrs(tensor<4x4x?xf32>, f32, i32, index, i64, f16) {
   // CHECK: %[[I6:.*]] = muli %[[I2]], %[[I2]] : i32
   %i6 = muli %i2, %i2 : i32
 
+  // CHECK: %[[F7:.*]] = powf %[[F2]], %[[F2]] : f32
+  %f7 = powf %f2, %f2 : f32
+
   // CHECK: %[[C0:.*]] = create_complex %[[F2]], %[[F2]] : complex<f32>
   %c0 = "std.create_complex"(%f2, %f2) : (f32, f32) -> complex<f32>
 
@@ -569,6 +572,30 @@ func @standard_instrs(tensor<4x4x?xf32>, f32, i32, index, i64, f16) {
   // CHECK: %{{[0-9]+}} = floorf %arg0 : tensor<4x4x?xf32>
   %166 = floorf %t : tensor<4x4x?xf32>
 
+  // CHECK: %{{[0-9]+}} = floordivi_signed %arg2, %arg2 : i32
+  %167 = floordivi_signed %i, %i : i32
+
+  // CHECK: %{{[0-9]+}} = floordivi_signed %arg3, %arg3 : index
+  %168 = floordivi_signed %idx, %idx : index
+
+  // CHECK: %{{[0-9]+}} = floordivi_signed %cst_5, %cst_5 : vector<42xi32>
+  %169 = floordivi_signed %vci32, %vci32 : vector<42 x i32>
+
+  // CHECK: %{{[0-9]+}} = floordivi_signed %cst_4, %cst_4 : tensor<42xi32>
+  %170 = floordivi_signed %tci32, %tci32 : tensor<42 x i32>
+
+  // CHECK: %{{[0-9]+}} = ceildivi_signed %arg2, %arg2 : i32
+  %171 = ceildivi_signed %i, %i : i32
+
+  // CHECK: %{{[0-9]+}} = ceildivi_signed %arg3, %arg3 : index
+  %172 = ceildivi_signed %idx, %idx : index
+
+  // CHECK: %{{[0-9]+}} = ceildivi_signed %cst_5, %cst_5 : vector<42xi32>
+  %173 = ceildivi_signed %vci32, %vci32 : vector<42 x i32>
+
+  // CHECK: %{{[0-9]+}} = ceildivi_signed %cst_4, %cst_4 : tensor<42xi32>
+  %174 = ceildivi_signed %tci32, %tci32 : tensor<42 x i32>
+
   return
 }
 
@@ -648,19 +675,6 @@ func @calls(%arg0: i32) {
   return
 }
 
-// CHECK-LABEL: func @extract_element(%arg0: tensor<*xi32>, %arg1: tensor<4x4xf32>) -> i32 {
-func @extract_element(%arg0: tensor<*xi32>, %arg1 : tensor<4x4xf32>) -> i32 {
-  %c0 = "std.constant"() {value = 0: index} : () -> index
-
-  // CHECK: %0 = extract_element %arg0[%c0, %c0, %c0, %c0] : tensor<*xi32>
-  %0 = extract_element %arg0[%c0, %c0, %c0, %c0] : tensor<*xi32>
-
-  // CHECK: %1 = extract_element %arg1[%c0, %c0] : tensor<4x4xf32>
-  %1 = extract_element %arg1[%c0, %c0] : tensor<4x4xf32>
-
-  return %0 : i32
-}
-
 // CHECK-LABEL: func @tensor_from_elements() {
 func @tensor_from_elements() {
   %c0 = "std.constant"() {value = 0: index} : () -> index
@@ -678,23 +692,6 @@ func @tensor_from_elements() {
 
   // CHECK: tensor_from_elements : tensor<0xindex>
   %3 = tensor_from_elements : tensor<0xindex>
-
-  return
-}
-
-// CHECK-LABEL: func @tensor_cast(%arg0
-func @tensor_cast(%arg0: tensor<*xf32>, %arg1 : tensor<4x4xf32>, %arg2: tensor<?x?xf32>) {
-  // CHECK: %0 = tensor_cast %arg0 : tensor<*xf32> to tensor<?x?xf32>
-  %0 = tensor_cast %arg0 : tensor<*xf32> to tensor<?x?xf32>
-
-  // CHECK: %1 = tensor_cast %arg1 : tensor<4x4xf32> to tensor<*xf32>
-  %1 = tensor_cast %arg1 : tensor<4x4xf32> to tensor<*xf32>
-
-  // CHECK: %2 = tensor_cast %arg2 : tensor<?x?xf32> to tensor<4x?xf32>
-  %2 = tensor_cast %arg2 : tensor<?x?xf32> to tensor<4x?xf32>
-
-  // CHECK: %3 = tensor_cast %2 : tensor<4x?xf32> to tensor<?x?xf32>
-  %3 = tensor_cast %2 : tensor<4x?xf32> to tensor<?x?xf32>
 
   return
 }
@@ -724,7 +721,7 @@ func @memref_cast(%arg0: memref<4xf32>, %arg1 : memref<?xf32>, %arg2 : memref<64
 // Check that unranked memrefs with non-default memory space roundtrip
 // properly.
 // CHECK-LABEL: @unranked_memref_roundtrip(memref<*xf32, 4>)
-func @unranked_memref_roundtrip(memref<*xf32, 4>)
+func private @unranked_memref_roundtrip(memref<*xf32, 4>)
 
 // CHECK-LABEL: func @memref_view(%arg0
 func @memref_view(%arg0 : index, %arg1 : index, %arg2 : index) {
@@ -945,3 +942,6 @@ func @subtensor_insert(%t: tensor<8x16x4xf32>, %t2: tensor<16x32x8xf32>, %idx : 
 
   return
 }
+
+// CHECK-LABEL: func private @legacy_visibility_syntax
+func @legacy_visibility_syntax() attributes { sym_visibility = "private" }

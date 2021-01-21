@@ -21,6 +21,21 @@
 using namespace mlir;
 
 namespace {
+class BufferizeDimOp : public OpConversionPattern<DimOp> {
+public:
+  using OpConversionPattern::OpConversionPattern;
+  LogicalResult
+  matchAndRewrite(DimOp op, ArrayRef<Value> operands,
+                  ConversionPatternRewriter &rewriter) const override {
+    DimOp::Adaptor adaptor(operands);
+    rewriter.replaceOpWithNewOp<DimOp>(op, adaptor.memrefOrTensor(),
+                                       adaptor.index());
+    return success();
+  }
+};
+} // namespace
+
+namespace {
 class BufferizeDynamicTensorFromElementsOp
     : public OpConversionPattern<DynamicTensorFromElementsOp> {
 public:
@@ -54,18 +69,29 @@ public:
       upperBounds.push_back(upperBound);
     }
 
-    // Generate tensor elements with a parallel loop.
-    rewriter.create<scf::ParallelOp>(
-        loc, lowerBounds, upperBounds, steps,
-        [&](OpBuilder &b, Location loc, ValueRange ivs) {
-          BlockAndValueMapping mapping;
-          mapping.map(op.body().getArguments(), ivs);
-          for (auto &nestedOp : op.getBody()->without_terminator())
-            b.clone(nestedOp, mapping);
-          auto yieldOp = cast<YieldOp>(op.getBody()->getTerminator());
-          b.create<StoreOp>(loc, mapping.lookup(yieldOp.value()), result, ivs);
-          b.create<scf::YieldOp>(loc);
-        });
+    // Generate tensor elements with a parallel loop that stores into
+    // each element of the resulting memref.
+    //
+    // This is a bit tricky. We cannot simply clone the ops because when an op
+    // is cloned, it must be legalized. However, we want to allow arbitrary ops
+    // in the body that we don't necessarily have legalization patterns for as
+    // part of this dialect conversion invocation.
+    //
+    // To accomplish this, we use mergeBlockBefore to "move" this op's body
+    // into the scf.parallel's body.
+    auto parallel =
+        rewriter.create<scf::ParallelOp>(loc, lowerBounds, upperBounds, steps);
+    Block *parallelBody = parallel.getBody();
+    rewriter.mergeBlockBefore(op.getBody(), parallelBody->getTerminator(),
+                              parallelBody->getArguments());
+    // Replace the inlined yield op with a store op. The scf.parallel's builder
+    // already populated an scf.yield at the end, so we don't need to worry
+    // about creating that.
+    Operation *elementYield = parallelBody->getTerminator()->getPrevNode();
+    rewriter.setInsertionPointAfter(elementYield);
+    rewriter.replaceOpWithNewOp<StoreOp>(elementYield,
+                                         elementYield->getOperands()[0], result,
+                                         parallelBody->getArguments());
 
     rewriter.replaceOp(op, {result});
     return success();
@@ -74,29 +100,18 @@ public:
 } // namespace
 
 namespace {
-class BufferizeExtractElementOp : public OpConversionPattern<ExtractElementOp> {
+class BufferizeSelectOp : public OpConversionPattern<SelectOp> {
 public:
   using OpConversionPattern::OpConversionPattern;
   LogicalResult
-  matchAndRewrite(ExtractElementOp op, ArrayRef<Value> operands,
+  matchAndRewrite(SelectOp op, ArrayRef<Value> operands,
                   ConversionPatternRewriter &rewriter) const override {
-    ExtractElementOp::Adaptor adaptor(operands);
-    rewriter.replaceOpWithNewOp<LoadOp>(op, adaptor.aggregate(),
-                                        adaptor.indices());
-    return success();
-  }
-};
-} // namespace
+    if (!op.condition().getType().isa<IntegerType>())
+      return rewriter.notifyMatchFailure(op, "requires scalar condition");
 
-namespace {
-class BufferizeTensorCastOp : public OpConversionPattern<TensorCastOp> {
-public:
-  using OpConversionPattern::OpConversionPattern;
-  LogicalResult
-  matchAndRewrite(TensorCastOp op, ArrayRef<Value> operands,
-                  ConversionPatternRewriter &rewriter) const override {
-    auto resultType = getTypeConverter()->convertType(op.getType());
-    rewriter.replaceOpWithNewOp<MemRefCastOp>(op, resultType, operands[0]);
+    SelectOp::Adaptor adaptor(operands);
+    rewriter.replaceOpWithNewOp<SelectOp>(
+        op, adaptor.condition(), adaptor.true_value(), adaptor.false_value());
     return success();
   }
 };
@@ -128,10 +143,14 @@ public:
 void mlir::populateStdBufferizePatterns(MLIRContext *context,
                                         BufferizeTypeConverter &typeConverter,
                                         OwningRewritePatternList &patterns) {
-  patterns
-      .insert<BufferizeDynamicTensorFromElementsOp, BufferizeExtractElementOp,
-              BufferizeTensorCastOp, BufferizeTensorFromElementsOp>(
-          typeConverter, context);
+  patterns.insert<
+      // clang-format off
+      BufferizeDimOp,
+      BufferizeDynamicTensorFromElementsOp,
+      BufferizeSelectOp,
+      BufferizeTensorFromElementsOp
+      // clang-format on
+      >(typeConverter, context);
 }
 
 namespace {
@@ -146,10 +165,18 @@ struct StdBufferizePass : public StdBufferizeBase<StdBufferizePass> {
     target.addLegalDialect<scf::SCFDialect>();
 
     populateStdBufferizePatterns(context, typeConverter, patterns);
-    target.addIllegalOp<DynamicTensorFromElementsOp, ExtractElementOp,
-                        TensorCastOp, TensorFromElementsOp>();
-
-    if (failed(applyPartialConversion(getFunction(), target, patterns)))
+    target.addIllegalOp<DynamicTensorFromElementsOp, TensorFromElementsOp>();
+    // We only bufferize the case of tensor selected type and scalar condition,
+    // as that boils down to a select over memref descriptors (don't need to
+    // touch the data).
+    target.addDynamicallyLegalOp<SelectOp>([&](SelectOp op) {
+      return typeConverter.isLegal(op.getType()) ||
+             !op.condition().getType().isa<IntegerType>();
+    });
+    target.addDynamicallyLegalOp<DimOp>(
+        [&](DimOp op) { return typeConverter.isLegal(op); });
+    if (failed(
+            applyPartialConversion(getFunction(), target, std::move(patterns))))
       signalPassFailure();
   }
 };

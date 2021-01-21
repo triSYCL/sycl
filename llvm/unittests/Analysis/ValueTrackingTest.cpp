@@ -19,6 +19,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/KnownBits.h"
 #include "llvm/Support/SourceMgr.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include "gtest/gtest.h"
 
 using namespace llvm;
@@ -689,6 +690,15 @@ TEST_F(ValueTrackingTest, ComputeNumSignBits_Shuffle2) {
   EXPECT_EQ(ComputeNumSignBits(A, M->getDataLayout()), 1u);
 }
 
+TEST_F(ValueTrackingTest, ComputeNumSignBits_Shuffle_Pointers) {
+  parseAssembly(
+      "define <2 x i32*> @test(<2 x i32*> %x) {\n"
+      "  %A = shufflevector <2 x i32*> zeroinitializer, <2 x i32*> undef, <2 x i32> zeroinitializer\n"
+      "  ret <2 x i32*> %A\n"
+      "}\n");
+  EXPECT_EQ(ComputeNumSignBits(A, M->getDataLayout()), 64u);
+}
+
 TEST(ValueTracking, propagatesPoison) {
   std::string AsmHead = "declare i32 @g(i32)\n"
                         "define void @f(i32 %x, i32 %y, float %fx, float %fy, "
@@ -936,6 +946,34 @@ TEST(ValueTracking, canCreatePoisonOrUndef) {
         << " = " << I;
     Index++;
   }
+}
+
+TEST_F(ValueTrackingTest, computePtrAlignment) {
+  parseAssembly("declare i1 @f_i1()\n"
+                "declare i8* @f_i8p()\n"
+                "declare void @llvm.assume(i1)\n"
+                "define void @test() {\n"
+                "  %A = call i8* @f_i8p()\n"
+                "  %cond = call i1 @f_i1()\n"
+                "  %CxtI = add i32 0, 0\n"
+                "  br i1 %cond, label %BB1, label %EXIT\n"
+                "BB1:\n"
+                "  %CxtI2 = add i32 0, 0\n"
+                "  %cond2 = call i1 @f_i1()\n"
+                "  call void @llvm.assume(i1 true) [ \"align\"(i8* %A, i64 16) ]\n"
+                "  br i1 %cond2, label %BB2, label %EXIT\n"
+                "BB2:\n"
+                "  %CxtI3 = add i32 0, 0\n"
+                "  ret void\n"
+                "EXIT:\n"
+                "  ret void\n"
+                "}");
+  AssumptionCache AC(*F);
+  DominatorTree DT(*F);
+  DataLayout DL = M->getDataLayout();
+  EXPECT_EQ(getKnownAlignment(A, DL, CxtI, &AC, &DT), Align(1));
+  EXPECT_EQ(getKnownAlignment(A, DL, CxtI2, &AC, &DT), Align(1));
+  EXPECT_EQ(getKnownAlignment(A, DL, CxtI3, &AC, &DT), Align(16));
 }
 
 TEST_F(ComputeKnownBitsTest, ComputeKnownBits) {

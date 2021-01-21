@@ -1,4 +1,4 @@
-//===- FrontendOptions.h ----------------------------------------*- C -*-===//
+//===- FrontendOptions.h ----------------------------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -22,15 +22,24 @@ enum ActionKind {
   /// -test-io mode
   InputOutputTest,
 
-  // TODO: ADD flags as the Actions are implemented, e.g.
-  // RunPreprocessor, ParserSyntaxOnly, EmitLLVM, EmitLLVMOnly,
-  // EmitCodeGenOnly, EmitAssembly, (...)
+  /// -E mode.
+  PrintPreprocessedInput,
+
+  /// -fsyntax-only
+  ParseSyntaxOnly,
+
+  /// TODO: RunPreprocessor, EmitLLVM, EmitLLVMOnly,
+  /// EmitCodeGenOnly, EmitAssembly, (...)
 };
 
 inline const char *GetActionKindName(const ActionKind ak) {
   switch (ak) {
   case InputOutputTest:
     return "InputOutputTest";
+  case PrintPreprocessedInput:
+    return "PrintPreprocessedInput";
+  case ParseSyntaxOnly:
+    return "ParseSyntaxOnly";
   default:
     return "<unknown ActionKind>";
     // TODO:
@@ -91,18 +100,18 @@ public:
   FrontendInputFile(const llvm::MemoryBuffer *buffer, InputKind kind)
       : buffer_(buffer), kind_(kind) {}
 
-  InputKind GetKind() const { return kind_; }
+  InputKind kind() const { return kind_; }
 
   bool IsEmpty() const { return file_.empty() && buffer_ == nullptr; }
   bool IsFile() const { return !IsBuffer(); }
   bool IsBuffer() const { return buffer_ != nullptr; }
 
-  llvm::StringRef GetFile() const {
+  llvm::StringRef file() const {
     assert(IsFile());
     return file_;
   }
 
-  const llvm::MemoryBuffer *GetBuffer() const {
+  const llvm::MemoryBuffer *buffer() const {
     assert(IsBuffer() && "Requested buffer_, but it is empty!");
     return buffer_;
   }

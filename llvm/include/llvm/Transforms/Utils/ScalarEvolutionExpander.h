@@ -352,7 +352,7 @@ public:
   }
 
   /// Get location information used by debugging information.
-  const DebugLoc &getCurrentDebugLocation() const {
+  DebugLoc getCurrentDebugLocation() const {
     return Builder.getCurrentDebugLocation();
   }
 
@@ -445,6 +445,8 @@ private:
   const Loop *getRelevantLoop(const SCEV *);
 
   Value *visitConstant(const SCEVConstant *S) { return S->getValue(); }
+
+  Value *visitPtrToIntExpr(const SCEVPtrToIntExpr *S);
 
   Value *visitTruncateExpr(const SCEVTruncateExpr *S);
 
