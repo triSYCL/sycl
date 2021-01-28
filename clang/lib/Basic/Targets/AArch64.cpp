@@ -254,7 +254,7 @@ void AArch64TargetInfo::getTargetDefines(const LangOptions &Opts,
 
   Builder.defineMacro("__ARM_SIZEOF_MINIMAL_ENUM", Opts.ShortEnums ? "1" : "4");
 
-  if (FPU & NeonMode) {
+  if (FPU & NeonMode && !Opts.SYCLAIEDevice) {
     Builder.defineMacro("__ARM_NEON", "1");
     // 64-bit NEON supports half, single and double precision operations.
     Builder.defineMacro("__ARM_NEON_FP", "0xE");

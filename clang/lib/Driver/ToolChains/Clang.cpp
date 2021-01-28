@@ -3713,7 +3713,7 @@ static void RenderDebugOptions(const ToolChain &TC, const Driver &D,
   /// The XOCC backend currently doesn't deal properly with some debug metadata.
   /// and there is currently no support for any debugability of device code.
   /// so we disable emition of debug info for device code.
-  if (T.isXilinxFPGA())
+  if (T.isXilinxSYCLDevice())
     return;
 
   if (Args.hasFlag(options::OPT_fdebug_info_for_profiling,
