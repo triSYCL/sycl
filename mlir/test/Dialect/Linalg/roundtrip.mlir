@@ -1,5 +1,4 @@
-// RUN: mlir-opt -split-input-file %s | FileCheck %s
-// | mlir-opt | FileCheck %s
+// RUN: mlir-opt -split-input-file -verify-diagnostics %s | FileCheck %s
 
 // TODO: Re-enable LLVM lowering test after IndexedGenericOp is lowered.
 //
@@ -341,6 +340,24 @@ func @generic_with_tensor_input(%arg0: tensor<?x?xvector<3x4xi4>>,
 
 // -----
 
+#map0 = affine_map<(d0, d1, d2) -> (d0, d1, d2)>
+func @generic_without_inputs(%arg0 : memref<?x?x?xf32>) {
+  linalg.generic  {indexing_maps = [#map0],
+                   iterator_types = ["parallel", "parallel", "parallel"]}
+                  outs(%arg0 : memref<?x?x?xf32>) {
+   ^bb0(%arg3: f32):  // no predecessors
+      %cst = constant 0.000000e+00 : f32
+      linalg.yield %cst : f32
+    }
+  return
+}
+
+// CHECK-LABEL: func @generic_without_inputs
+//       CHECK:   linalg.generic
+//   CHECK-NOT:     ins
+
+// -----
+
 #accesses = [
   affine_map<(i, j, k) -> (j, i)>,
   affine_map<(i, j, k) -> (i, k, i + j)>,
@@ -617,6 +634,10 @@ func @reshape_dynamic(%arg0: memref<?x?x?xf32>,
     memref<?x?x?xf32, offset : ?, strides : [?, ?, 1]>
   return
 }
+
+// CHECK-DAG: #[[$reshapeD01:.*]] = affine_map<(d0, d1, d2) -> (d0, d1)>
+// CHECK-DAG: #[[$reshapeD2:.*]] = affine_map<(d0, d1, d2) -> (d2)>
+
 // CHECK-LABEL: func @reshape
 //       CHECK:   linalg.reshape {{.*}} [#[[$reshapeD01]], #[[$reshapeD2]]]
 //  CHECK-SAME:     memref<?x?x?xf32> into memref<?x?xf32>
@@ -676,3 +697,42 @@ func @memref_reshape_zero_dim(%arg0 : memref<1x1xf32>, %arg1 : memref<f32>) -> (
 // CHECK-LABEL: func @memref_reshape_zero_dim
 //       CHECK:   linalg.reshape %{{.*}} [] : memref<1x1xf32> into memref<f32>
 //       CHECK:   linalg.reshape %{{.*}} [] : memref<f32> into memref<1x1xf32>
+
+// -----
+
+func @init_tensor(%arg0 : index, %arg1 : index)
+{
+  %0 = linalg.init_tensor [3, 42] : tensor<3x42xf32>
+  %1 = linalg.init_tensor [4, %arg0, %arg1, 5] : tensor<4x?x?x5xf32>
+  return
+}
+// CHECK-LABEL: func @init_tensor
+//       CHECK:   linalg.init_tensor [3, 42] : tensor<3x42xf32>
+//       CHECK:   linalg.init_tensor [4, %{{.*}}, %{{.*}}, 5] : tensor<4x?x?x5xf32>
+
+// -----
+
+func @init_tensor_err(%arg0 : index, %arg1 : index)
+{
+  // expected-error @+1 {{specified type 'tensor<4x?x?x5xf32>' does not match the inferred type 'tensor<4x5x?x?xf32>'}}
+  %1 = linalg.init_tensor [4, 5, %arg0, %arg1] : tensor<4x?x?x5xf32>
+  return
+}
+
+// -----
+
+func @init_tensor_err(%arg0 : index)
+{
+  // expected-error @+1 {{expected 4 sizes values}}
+  %1 = linalg.init_tensor [4, 5, %arg0] : tensor<4x?x?x5xf32>
+  return
+}
+
+// -----
+
+func @init_tensor_err(%arg0 : index)
+{
+  // expected-error @+1 {{expected 2 dynamic sizes values}}
+  %1 = "linalg.init_tensor"(%arg0) {static_sizes = [4, -1, -1, 5]} : (index) -> tensor<4x?x?x5xf32>
+  return
+}

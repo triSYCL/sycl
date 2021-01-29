@@ -1,11 +1,11 @@
 # Operation Definition Specification (ODS)
 
 In addition to specializing the `mlir::Op` C++ template, MLIR also supports
-defining operations in a table-driven manner. This is achieved via
-[TableGen][TableGen], which is both a generic language and its tooling to
+defining operations and data types in a table-driven manner. This is achieved
+via [TableGen][TableGen], which is both a generic language and its tooling to
 maintain records of domain-specific information. Facts regarding an operation
-are specified concisely into a TableGen record, which will be expanded into an
-equivalent `mlir::Op` C++ template specialization at compiler build time.
+are specified concisely into a TableGen record, which will be expanded into
+an equivalent `mlir::Op` C++ template specialization at compiler build time.
 
 This manual explains in detail all the available mechanisms for defining
 operations in such a table-driven manner. It aims to be a specification instead
@@ -340,134 +340,10 @@ currently only be specified as the last successor in the successor list.
 Traits are operation properties that affect syntax or semantics. MLIR C++
 models various traits in the `mlir::OpTrait` namespace.
 
-Both operation traits, [interfaces](#operation-interfaces), and constraints
-involving multiple operands/attributes/results are provided as the second
-template parameter to the `Op` class. They should be deriving from the `OpTrait`
-class. See [Constraints](#constraints) for more information.
-
-### Interfaces
-
-[Interfaces](Interfaces.md#attribute-operation-type-interfaces) allow for
-attributes, operations, and types to expose method calls without the caller
-needing to know the derived type. Operation interfaces defined in C++ can be
-accessed in the ODS framework via the `OpInterfaceTrait` class. Aside from using
-pre-existing interfaces in the C++ API, the ODS framework also provides a
-simplified mechanism for defining such interfaces which removes much of the
-boilerplate necessary.
-
-Providing a definition of the `AttrInterface`, `OpInterface`, or `TypeInterface`
-class will auto-generate the C++ classes for the interface. An interface
-includes a name, for the C++ class, a description, and a list of interface
-methods.
-
-```tablegen
-def MyInterface : OpInterface<"MyInterface"> {
-  let description = ...;
-  let methods = [...];
-}
-```
-
-There are two types of methods that can be used with an interface,
-`InterfaceMethod` and `StaticInterfaceMethod`. They are both comprised of the
-same core components, with the distinction that `StaticInterfaceMethod` models a
-static method on the derived operation.
-
-An `InterfaceMethod` is comprised of the following components:
-
-*   Description
-    -   A string description of what this method does and its invariants.
-*   ReturnType
-    -   A string corresponding to the C++ return type of the method.
-*   MethodName
-    -   A string corresponding to the desired name of the method.
-*   Arguments (Optional)
-    -   A dag of strings that correspond to a C++ type and variable name
-        respectively.
-*   MethodBody (Optional)
-    -   An optional explicit implementation of the interface method.
-    -   `ConcreteOp` is an implicitly defined typename that can be used to refer
-        to the type of the derived operation currently being operated on.
-    -   In non-static methods, a variable 'ConcreteOp op' is defined and may be
-        used to refer to an instance of the derived operation.
-*   DefaultImplementation (Optional)
-    -   An optional explicit default implementation of the interface method.
-    -   This method is placed within the `Trait` class that is attached to the
-        operation. As such, this method has the same characteristics as any
-        other [`Trait`](Traits.md) method.
-    -   `ConcreteOp` is an implicitly defined typename that can be used to refer
-        to the type of the derived operation currently being operated on.
-
-ODS also allows generating the declarations for the `InterfaceMethod` of the op
-if one specifies the interface with `DeclareOpInterfaceMethods` (see example
-below).
-
-Examples:
-
-```tablegen
-def MyInterface : OpInterface<"MyInterface"> {
-  let description = [{
-    My interface is very interesting. ...
-  }];
-
-  let methods = [
-    // A simple non-static method with no inputs.
-    InterfaceMethod<"'foo' is a non-static method with no inputs.",
-      "unsigned", "foo"
-    >,
-
-    // A new non-static method accepting an input argument.
-    InterfaceMethod<"/*insert doc here*/",
-      "Value ", "bar", (ins "unsigned":$i)
-    >,
-
-    // Query a static property of the derived operation.
-    StaticInterfaceMethod<"'fooStatic' is a static method with no inputs.",
-      "unsigned", "fooStatic"
-    >,
-
-    // Provide the definition of a static interface method.
-    // Note: `ConcreteOp` corresponds to the derived operation typename.
-    StaticInterfaceMethod<"/*insert doc here*/",
-      "Operation *", "create", (ins "OpBuilder &":$builder, "Location":$loc), [{
-        return builder.create<ConcreteOp>(loc);
-    }]>,
-
-    // Provide a definition of the non-static method.
-    // Note: `op` corresponds to the derived operation variable.
-    InterfaceMethod<"/*insert doc here*/",
-      "unsigned", "getNumInputsAndOutputs", (ins), [{
-        return op.getNumInputs() + op.getNumOutputs();
-    }]>,
-
-    // Provide only a default definition of the method.
-    // Note: `ConcreteOp` corresponds to the derived operation typename.
-    InterfaceMethod<"/*insert doc here*/",
-      "unsigned", "getNumWithDefault", (ins), /*methodBody=*/[{}], [{
-        ConcreteOp op = cast<ConcreteOp>(this->getOperation());
-        return op.getNumInputs() + op.getNumOutputs();
-    }]>,
-  ];
-}
-
-// Operation interfaces can optionally be wrapped inside
-// DeclareOpInterfaceMethods. This would result in autogenerating declarations
-// for members `foo`, `bar` and `fooStatic`. Methods with bodies are not
-// declared inside the op declaration but instead handled by the op interface
-// trait directly.
-def OpWithInferTypeInterfaceOp : Op<...
-    [DeclareOpInterfaceMethods<MyInterface>]> { ... }
-
-// Methods that have a default implementation do not have declarations
-// generated. If an operation wishes to override the default behavior, it can
-// explicitly specify the method that it wishes to override. This will force
-// the generation of a declaration for those methods.
-def OpWithOverrideInferTypeInterfaceOp : Op<...
-    [DeclareOpInterfaceMethods<MyInterface, ["getNumWithDefault"]>]> { ... }
-```
-
-Operation interfaces may also provide a verification method on `OpInterface` by
-setting `verify`. Setting `verify` results in the generated trait having a
-`verifyTrait` method that is applied to all operations implementing the trait.
+Both operation traits, [interfaces](Interfaces.md#utilizing-the-ods-framework),
+and constraints involving multiple operands/attributes/results are provided as
+the second template parameter to the `Op` class. They should be deriving from
+the `OpTrait` class. See [Constraints](#constraints) for more information.
 
 ### Builder methods
 
@@ -567,50 +443,103 @@ complete list.
 #### Custom builder methods
 
 However, if the above cases cannot satisfy all needs, you can define additional
-convenience build methods with `OpBuilder`.
-
-`OpBuilder` is a class that takes the parameter list and the optional `build()`
-method body. They are separated because we need to generate op declaration and
-definition into separate files. The parameter list should not include `OpBuilder
-&builder, OperationState &state` as they will be inserted automatically and the
-placeholders `$_builder` and `$_state` used. For legacy/to be deprecated reason
-if the `OpBuilder` parameter starts with `OpBuilder` param, then the parameter
-is used. If the `body` is not provided, only the builder declaration will be
-generated; this provides a way to define complicated builders entirely in C++
-files.
-
-For example, for the following op:
+convenience build methods in the `builders` field as follows.
 
 ```tablegen
 def MyOp : Op<"my_op", []> {
   let arguments = (ins F32Attr:$attr);
 
-  let results = (outs);
+  let builders = [
+    OpBuilderDAG<(ins "float":$val)>
+  ];
 }
 ```
 
-If we want to define a builder with a default value for the only attribute, we
-can add into `MyOp`:
+The `builders` field is a list of custom builders that are added to the Op
+class. In this example, we provide a convenience builder that takes a floating
+point value instead of an attribute. The `ins` prefix is common to many function
+declarations in ODS, which use a TableGen [`dag`](#tablegen-syntax). What
+follows is a comma-separated list of types (quoted string) and names prefixed
+with the `$` sign. This will generate the declaration of a builder method that
+looks like:
+
+```c++
+class MyOp : /*...*/ {
+  /*...*/
+  static void build(::mlir::OpBuilder &builder, ::mlir::OperationState &state,
+                    float val);
+};
+```
+
+Note that the method has two additional leading arguments. These arguments are
+useful to construct the operation. In particular, the method must populate
+`state` with attributes, operands, regions and result types of the operation to
+be constructed. `builder` can be used to construct any IR objects that belong to
+the Op, such as types or nested operations. Since the type and name are
+generated as is in the C++ code, they should be valid C++ constructs for a type
+(in the namespace of the Op) and an identifier (e.g., `class` is not a valid
+identifier).
+
+Implementations of the builder can be provided directly in ODS, using TableGen
+code block as follows.
 
 ```tablegen
-def MyOp : ... {
-  ...
+def MyOp : Op<"my_op", []> {
+  let arguments = (ins F32Attr:$attr);
 
   let builders = [
-    OpBuilder<"float val = 0.5f", [{
+    OpBuilderDAG<(ins "float":$val), [{
       $_state.addAttribute("attr", $_builder.getF32FloatAttr(val));
     }]>
   ];
 }
 ```
 
-The generated builder will look like:
+The equivalents of `builder` and `state` arguments are available as `$_builder`
+and `$_state` special variables. The named arguments listed in the `ins` part
+are available directly, e.g. `val`. The body of the builder will be generated by
+substituting special variables and should otherwise be valid C++. While there is
+no limitation on the code size, we encourage one to define only short builders
+inline in ODS and put definitions of longer builders in C++ files.
+
+Finally, if some arguments need a default value, they can be defined using
+`CArg` to wrap the type and this value as follows.
+
+```tablegen
+def MyOp : Op<"my_op", []> {
+  let arguments = (ins F32Attr:$attr);
+
+  let builders = [
+    OpBuilderDAG<(ins CArg<"float", "0.5f">:$val), [{
+      $_state.addAttribute("attr", $_builder.getF32FloatAttr(val));
+    }]>
+  ];
+}
+```
+
+The generated code will use default value in the declaration, but not in the
+definition, as required by C++.
 
 ```c++
-static void build(OpBuilder &builder, OperationState &state, float val = 0.5f) {
+/// Header file.
+class MyOp : /*...*/ {
+  /*...*/
+  static void build(::mlir::OpBuilder &builder, ::mlir::OperationState &state,
+                    float val = 0.5f);
+};
+
+/// Source file.
+MyOp::build(::mlir::OpBuilder &builder, ::mlir::OperationState &state,
+            float val) {
   state.addAttribute("attr", builder.getF32FloatAttr(val));
 }
 ```
+
+**Deprecated:** `OpBuilder` class allows one to specify the custom builder
+signature as a raw string, without separating parameters into different `dag`
+arguments. It also supports leading parameters of `OpBuilder &` and
+`OperationState &` types, which will be used instead of the autogenerated ones
+if present.
 
 ### Custom parser and printer methods
 
@@ -715,7 +644,31 @@ A literal is either a keyword or punctuation surrounded by \`\`.
 
 The following are the set of valid punctuation:
 
-`:`, `,`, `=`, `<`, `>`, `(`, `)`, `{`, `}`, `[`, `]`, `->`
+`:`, `,`, `=`, `<`, `>`, `(`, `)`, `{`, `}`, `[`, `]`, `->`, `?`, `+`, `*`
+
+The following are valid whitespace punctuation:
+
+`\n`, ` `
+
+The `\n` literal emits a newline an indents to the start of the operation. An
+example is shown below:
+
+```tablegen
+let assemblyFormat = [{
+  `{` `\n` ` ` ` ` `this_is_on_a_newline` `\n` `}` attr-dict
+}];
+```
+
+```mlir
+%results = my.operation {
+  this_is_on_a_newline
+}
+```
+
+An empty literal \`\` may be used to remove a space that is inserted implicitly
+after certain literal elements, such as `)`/`]`/etc. For example, "`]`" may
+result in an output of `]` it is not the last element in the format. "`]` \`\`"
+would trim the trailing space in this situation.
 
 #### Variables
 
@@ -744,14 +697,14 @@ A custom directive has two main parts: The `UserDirective` and the `Params`. A
 custom directive is transformed into a call to a `print*` and a `parse*` method
 when generating the C++ code for the format. The `UserDirective` is an
 identifier used as a suffix to these two calls, i.e., `custom<MyDirective>(...)`
-would result in calls to `parseMyDirective` and `printMyDirective` wihtin the
+would result in calls to `parseMyDirective` and `printMyDirective` within the
 parser and printer respectively. `Params` may be any combination of variables
-(i.e. Attribute, Operand, Successor, etc.) and type directives. The type
-directives must refer to a variable, but that variable need not also be a
-parameter to the custom directive.
+(i.e. Attribute, Operand, Successor, etc.), type directives, and `attr-dict`.
+The type directives must refer to a variable, but that variable need not also
+be a parameter to the custom directive.
 
-The arguments to the `parse<UserDirective>` method is firstly a reference to the
-`OpAsmParser`(`OpAsmParser &`), and secondly a set of output parameters
+The arguments to the `parse<UserDirective>` method are firstly a reference to
+the `OpAsmParser`(`OpAsmParser &`), and secondly a set of output parameters
 corresponding to the parameters specified in the format. The mapping of
 declarative parameter to `parse` method argument is detailed below:
 
@@ -776,12 +729,14 @@ declarative parameter to `parse` method argument is detailed below:
     -   Single: `Type`
     -   Optional: `Type`
     -   Variadic: `const SmallVectorImpl<Type> &`
+*   `attr-dict` Directive: `NamedAttrList &`
 
 When a variable is optional, the value should only be specified if the variable
 is present. Otherwise, the value should remain `None` or null.
 
-The arguments to the `print<UserDirective>` method is firstly a reference to the
-`OpAsmPrinter`(`OpAsmPrinter &`), and secondly a set of output parameters
+The arguments to the `print<UserDirective>` method is firstly a reference to
+the `OpAsmPrinter`(`OpAsmPrinter &`), second the op (e.g. `FooOp op` which
+can be `Operation *op` alternatively), and finally a set of output parameters
 corresponding to the parameters specified in the format. The mapping of
 declarative parameter to `print` method argument is detailed below:
 
@@ -806,6 +761,7 @@ declarative parameter to `print` method argument is detailed below:
     -   Single: `Type`
     -   Optional: `Type`
     -   Variadic: `TypeRange`
+*   `attr-dict` Directive: `DictionaryAttr`
 
 When a variable is optional, the provided value may be null.
 
@@ -1411,6 +1367,173 @@ llvm::Optional<MyBitEnum> symbolizeMyBitEnum(uint32_t value) {
   return static_cast<MyBitEnum>(value);
 }
 ```
+
+## Type Definitions
+
+MLIR defines the TypeDef class hierarchy to enable generation of data types from
+their specifications. A type is defined by specializing the TypeDef class with
+concrete contents for all the fields it requires. For example, an integer type
+could be defined as:
+
+```tablegen
+// All of the types will extend this class.
+class Test_Type<string name> : TypeDef<Test_Dialect, name> { }
+
+// An alternate int type.
+def IntegerType : Test_Type<"TestInteger"> {
+  let mnemonic = "int";
+
+  let summary = "An integer type with special semantics";
+
+  let description = [{
+    An alternate integer type. This type differentiates itself from the
+    standard integer type by not having a SignednessSemantics parameter, just
+    a width.
+  }];
+
+  let parameters = (ins "unsigned":$width);
+
+  // We define the printer inline.
+  let printer = [{
+    $_printer << "int<" << getImpl()->width << ">";
+  }];
+
+  // The parser is defined here also.
+  let parser = [{
+    if (parser.parseLess())
+      return Type();
+    int width;
+    if ($_parser.parseInteger(width))
+      return Type();
+    if ($_parser.parseGreater())
+      return Type();
+    return get(ctxt, width);
+  }];
+```
+
+### Type name
+
+The name of the C++ class which gets generated defaults to
+`<classParamName>Type` (e.g. `TestIntegerType` in the above example). This can
+be overridden via the `cppClassName` field. The field `mnemonic` is to specify
+the asm name for parsing. It is optional and not specifying it will imply that
+no parser or printer methods are attached to this class.
+
+### Type documentation
+
+The `summary` and `description` fields exist and are to be used the same way as
+in Operations. Namely, the summary should be a one-liner and `description`
+should be a longer explanation.
+
+### Type parameters
+
+The `parameters` field is a list of the types parameters. If no parameters are
+specified (the default), this type is considered a singleton type. Parameters
+are in the `"c++Type":$paramName` format. To use C++ types as parameters which
+need allocation in the storage constructor, there are two options:
+
+-   Set `hasCustomStorageConstructor` to generate the TypeStorage class with a
+    constructor which is just declared -- no definition -- so you can write it
+    yourself.
+-   Use the `TypeParameter` tablegen class instead of the "c++Type" string.
+
+### TypeParameter tablegen class
+
+This is used to further specify attributes about each of the types parameters.
+It includes documentation (`description` and `syntax`), the C++ type to use, and
+a custom allocator to use in the storage constructor method.
+
+```tablegen
+// DO NOT DO THIS!
+let parameters = (ins "ArrayRef<int>":$dims);
+```
+
+The default storage constructor blindly copies fields by value. It does not know
+anything about the types. In this case, the ArrayRef<int> requires allocation
+with `dims = allocator.copyInto(dims)`.
+
+You can specify the necessary constructor by specializing the `TypeParameter`
+tblgen class:
+
+```tablegen
+class ArrayRefIntParam :
+    TypeParameter<"::llvm::ArrayRef<int>", "Array of ints"> {
+  let allocator = "$_dst = $_allocator.copyInto($_self);";
+}
+
+...
+
+let parameters = (ins ArrayRefIntParam:$dims);
+```
+
+The `allocator` code block has the following substitutions:
+
+-   `$_allocator` is the TypeStorageAllocator in which to allocate objects.
+-   `$_dst` is the variable in which to place the allocated data.
+
+MLIR includes several specialized classes for common situations:
+
+-   `StringRefParameter<descriptionOfParam>` for StringRefs.
+-   `ArrayRefParameter<arrayOf, descriptionOfParam>` for ArrayRefs of value
+    types
+-   `SelfAllocationParameter<descriptionOfParam>` for C++ classes which contain
+    a method called `allocateInto(StorageAllocator &allocator)` to allocate
+    itself into `allocator`.
+-   `ArrayRefOfSelfAllocationParameter<arrayOf, descriptionOfParam>` for arrays
+    of objects which self-allocate as per the last specialization.
+
+If we were to use one of these included specializations:
+
+```tablegen
+let parameters = (ins
+  ArrayRefParameter<"int", "The dimensions">:$dims
+);
+```
+
+### Parsing and printing
+
+If a mnemonic is specified, the `printer` and `parser` code fields are active.
+The rules for both are:
+
+-   If null, generate just the declaration.
+-   If non-null and non-empty, use the code in the definition. The `$_printer`
+    or `$_parser` substitutions are valid and should be used.
+-   It is an error to have an empty code block.
+
+For each dialect, two "dispatch" functions will be created: one for parsing and
+one for printing. You should add calls to these in your `Dialect::printType` and
+`Dialect::parseType` methods. They are static functions placed alongside the
+type class definitions and have the following function signatures:
+
+```c++
+static Type generatedTypeParser(MLIRContext* ctxt, DialectAsmParser& parser, StringRef mnemonic);
+LogicalResult generatedTypePrinter(Type type, DialectAsmPrinter& printer);
+```
+
+The mnemonic, parser, and printer fields are optional. If they're not defined,
+the generated code will not include any parsing or printing code and omit the
+type from the dispatch functions above. In this case, the dialect author is
+responsible for parsing/printing the types in `Dialect::printType` and
+`Dialect::parseType`.
+
+### Other fields
+
+-   If the `genStorageClass` field is set to 1 (the default) a storage class is
+    generated with member variables corresponding to each of the specified
+    `parameters`.
+-   If the `genAccessors` field is 1 (the default) accessor methods will be
+    generated on the Type class (e.g. `int getWidth() const` in the example
+    above).
+-   If the `genVerifyInvariantsDecl` field is set, a declaration for a method
+    `static LogicalResult verifyConstructionInvariants(Location, parameters...)`
+    is added to the class as well as a `getChecked(Location, parameters...)`
+    method which gets the result of `verifyConstructionInvariants` before
+    calling `get`.
+-   The `storageClass` field can be used to set the name of the storage class.
+-   The `storageNamespace` field is used to set the namespace where the storage
+    class should sit. Defaults to "detail".
+-   The `extraClassDeclaration` field is used to include extra code in the class
+    declaration.
 
 ## Debugging Tips
 

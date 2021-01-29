@@ -82,6 +82,10 @@ def get_asan_rtlib():
         return ''
     return found_dylibs[0]
 
+# Define this first. Afterwards, use_default_substitutions will add the rule for
+# expanding FileCheck to the full path.
+config.substitutions.append(('%FileCheckWithUnusedPrefixes%', 
+    'FileCheck --allow-unused-prefixes=true'))
 
 llvm_config.use_default_substitutions()
 
@@ -150,7 +154,8 @@ tools.extend([
     'dsymutil', 'lli', 'lli-child-target', 'llvm-ar', 'llvm-as',
     'llvm-addr2line', 'llvm-bcanalyzer', 'llvm-bitcode-strip', 'llvm-config', 
     'llvm-cov', 'llvm-cxxdump', 'llvm-cvtres', 'llvm-diff', 'llvm-dis', 
-    'llvm-dwarfdump', 'llvm-exegesis', 'llvm-extract', 'llvm-isel-fuzzer', 'llvm-ifs',
+    'llvm-dwarfdump', 'llvm-dlltool', 'llvm-exegesis', 'llvm-extract',
+    'llvm-isel-fuzzer', 'llvm-ifs',
     'llvm-install-name-tool', 'llvm-jitlink', 'llvm-opt-fuzzer', 'llvm-lib',
     'llvm-link', 'llvm-lto', 'llvm-lto2', 'llvm-mc', 'llvm-mca',
     'llvm-modextract', 'llvm-nm', 'llvm-objcopy', 'llvm-objdump',

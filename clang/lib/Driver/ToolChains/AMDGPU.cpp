@@ -365,9 +365,6 @@ void amdgpu::getAMDGPUTargetFeatures(const Driver &D,
                                      const llvm::Triple &Triple,
                                      const llvm::opt::ArgList &Args,
                                      std::vector<StringRef> &Features) {
-  if (const Arg *dAbi = Args.getLastArg(options::OPT_mamdgpu_debugger_abi))
-    D.Diag(diag::err_drv_clang_unsupported) << dAbi->getAsString(Args);
-
   // Add target ID features to -target-feature options. No diagnostics should
   // be emitted here since invalid target ID is diagnosed at other places.
   StringRef TargetID = Args.getLastArgValue(options::OPT_mcpu_EQ);
@@ -402,8 +399,14 @@ void amdgpu::getAMDGPUTargetFeatures(const Driver &D,
 AMDGPUToolChain::AMDGPUToolChain(const Driver &D, const llvm::Triple &Triple,
                                  const ArgList &Args)
     : Generic_ELF(D, Triple, Args),
-      OptionsDefault({{options::OPT_O, "3"},
-                      {options::OPT_cl_std_EQ, "CL1.2"}}) {}
+      OptionsDefault(
+          {{options::OPT_O, "3"}, {options::OPT_cl_std_EQ, "CL1.2"}}) {
+  // Check code object version options. Emit warnings for legacy options
+  // and errors for the last invalid code object version options.
+  // It is done here to avoid repeated warning or error messages for
+  // each tool invocation.
+  (void)getOrCheckAMDGPUCodeObjectVersion(D, Args, /*Diagnose=*/true);
+}
 
 Tool *AMDGPUToolChain::buildLinker() const {
   return new tools::amdgpu::Linker(*this);
@@ -502,7 +505,7 @@ llvm::DenormalMode AMDGPUToolChain::getDefaultDenormalModeForType(
 bool AMDGPUToolChain::isWave64(const llvm::opt::ArgList &DriverArgs,
                                llvm::AMDGPU::GPUKind Kind) {
   const unsigned ArchAttr = llvm::AMDGPU::getArchAttrAMDGCN(Kind);
-  static bool HasWave32 = (ArchAttr & llvm::AMDGPU::FEATURE_WAVE32);
+  bool HasWave32 = (ArchAttr & llvm::AMDGPU::FEATURE_WAVE32);
 
   return !HasWave32 || DriverArgs.hasFlag(
     options::OPT_mwavefrontsize64, options::OPT_mno_wavefrontsize64, false);

@@ -121,9 +121,6 @@ public:
 
   bool canRealignStack(const MachineFunction &MF) const override;
 
-  bool hasReservedSpillSlot(const MachineFunction &MF, Register Reg,
-                            int &FrameIdx) const override;
-
   void eliminateFrameIndex(MachineBasicBlock::iterator MI,
                            int SPAdj, unsigned FIOperandNum,
                            RegScavenger *RS = nullptr) const override;
@@ -147,6 +144,11 @@ public:
   Register getFramePtr() const { return FramePtr; }
   // FIXME: Move to FrameInfok
   unsigned getSlotSize() const { return SlotSize; }
+
+  bool getRegAllocationHints(Register VirtReg, ArrayRef<MCPhysReg> Order,
+                             SmallVectorImpl<MCPhysReg> &Hints,
+                             const MachineFunction &MF, const VirtRegMap *VRM,
+                             const LiveRegMatrix *Matrix) const override;
 };
 
 } // End llvm namespace

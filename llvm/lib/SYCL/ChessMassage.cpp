@@ -27,6 +27,8 @@
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/Utils/FunctionComparator.h"
 
+#include "DownGradeUtils.h"
+
 using namespace llvm;
 
 // Put the code in an anonymous namespace to avoid polluting the global
@@ -206,6 +208,8 @@ struct ChessMassage : public ModulePass {
     // provided it's not empty. But at least for the moment it's empty and Tale
     // doesn't know how to handle it.
     removeMetadata(M, "llvm.linker.options");
+
+    llvm::removeAttributes(M, {Attribute::MustProgress});
 
     // The module probably changed
     return true;

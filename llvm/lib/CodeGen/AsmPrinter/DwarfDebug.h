@@ -375,6 +375,9 @@ class DwarfDebug : public DebugHandlerBase {
   /// Emit a .debug_macro section instead of .debug_macinfo.
   bool UseDebugMacroSection;
 
+  /// Avoid using DW_OP_convert due to consumer incompatibilities.
+  bool EnableOpConvert;
+
   /// DWARF5 Experimental Options
   /// @{
   AccelTableKind TheAccelTableKind;
@@ -621,13 +624,13 @@ public:
   //===--------------------------------------------------------------------===//
   // Main entry points.
   //
-  DwarfDebug(AsmPrinter *A, Module *M);
+  DwarfDebug(AsmPrinter *A);
 
   ~DwarfDebug() override;
 
   /// Emit all Dwarf sections that should come prior to the
   /// content.
-  void beginModule();
+  void beginModule(Module *M) override;
 
   /// Emit all Dwarf sections that should come after the content.
   void endModule() override;
@@ -724,6 +727,10 @@ public:
     return EmitDebugEntryValues;
   }
 
+  bool useOpConvert() const {
+    return EnableOpConvert;
+  }
+
   bool shareAcrossDWOCUs() const;
 
   /// Returns the Dwarf Version.
@@ -799,7 +806,6 @@ public:
   bool tuneForSCE() const { return DebuggerTuning == DebuggerKind::SCE; }
   /// @}
 
-  void addSectionLabel(const MCSymbol *Sym);
   const MCSymbol *getSectionLabel(const MCSection *S);
   void insertSectionLabel(const MCSymbol *S);
 

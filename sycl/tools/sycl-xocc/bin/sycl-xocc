@@ -94,10 +94,19 @@ else
   # ENV variable
 
   SDX_LIB_SPIR="$SDX_BIN_PATH_DIR/../lnx64/lib/libspir64-39-hls.bc"
+  if [[ ! -f "$SDX_LIB_SPIR" ]]; then
+    SDX_LIB_SPIR="$SDX_BIN_PATH_DIR/../../../Vitis_HLS/2*/lnx64/lib/libspir64-39-hls.bc"
+    if [[ ! -f "$SDX_LIB_SPIR" ]]; then
+      usage 9 "could not find SDx's libspir64-39-hls.bc"
+    fi
+  fi
   # It says 3.9, but trust us this is Clang/LLVM 7..
   SDX_CLANG_LLVM_BIN="$SDX_BIN_PATH_DIR/../lnx64/tools/clang-3.9-csynth/bin"
-  if [[ ! -f "$SDX_LIB_SPIR" ]]; then
-    usage 9 "could not find SDx's libspir64-39-hls.bc"
+  if [[ ! -f "$SDX_CLANG_LLVM_BIN/llvm-as" ]]; then
+    SDX_CLANG_LLVM_BIN="$SDX_BIN_PATH_DIR/../../../Vitis_HLS/2*/lnx64/tools/clang-3.9-csynth/bin"
+    if [[ ! -f "$SDX_CLANG_LLVM_BIN/llvm-as" ]]; then
+      usage 9 "could not find SDx's binary directory"
+    fi
   fi
 
   SDX="$SDX_BIN_PATH_DIR/v++"
@@ -145,8 +154,12 @@ TMP_PATH="$(mktemp $5/sycl-xocc.XXXXXX)"
 # output file name including extensions and path
 OUTPUT_FILE_NAME="$6"
 
+set +e
+# allow faillures because empty string is good default
+# This make debugging easier.
 ADDITIONAL_COMPILE_ARGS=$(cat $7)
 ADDITIONAL_LINK_ARGS=$(cat $8)
+set -e
 XCL_EMULATION_MODE=$9
 
 KERNELPROP="${TMP_PATH}_KernelProperties_${SOURCE_FILE_NAME}.bash"
@@ -203,23 +216,23 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   # Compile all Kernels in the source file to seperate .xo ("object") files
   # and add them to the list of kernels to be linked
   LINKER_LIST=""
-  for index in "${KERNEL_NAME_ARRAY[@]}"; do
-  if [[ -n "$index" ]]; then
+  for ((i=0;i<${#KERNEL_NAME_ARRAY[@]};++i)); do
+  if [[ -n "${KERNEL_NAME_ARRAY[i]}" ]]; then
     if [[ ! -z "$VERBOSE" ]]; then
       echo "Invoking Kernel Compilation with $SDX"
       echo "--target: $XCL_EMULATION_MODE"
       echo "--platform: $XILINX_PLATFORM"
-      echo "Compiling kernel: $index"
-      echo "Outputting file to: ${TMP_PATH}_$index.xo"
+      echo "Compiling kernel: ${KERNEL_NAME_ARRAY[i]}"
+      echo "Outputting file to: ${TMP_PATH}_${KERNEL_NAME_ARRAY[i]}.xo"
       echo "Input file is: ${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc"
     fi
 
     $SDX --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM \
       --xp param:compiler.hlsDataflowStrictMode=off \
-      --save-temps -c -k "$index" -o "${TMP_PATH}_$index.xo" \
+      --save-temps -c -k "${KERNEL_NAME_ARRAY[i]}" -o "${TMP_PATH}_${KERNEL_NAME_ARRAY[i]}.xo" \
       "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc" \
-      $ADDITIONAL_COMPILE_ARGS &
-      LINKER_LIST="${TMP_PATH}_$index.xo $LINKER_LIST"
+      $ADDITIONAL_COMPILE_ARGS ${EXTRA_KERNEL_PARAMS_ARRAY[i]} &
+      LINKER_LIST="${TMP_PATH}_${KERNEL_NAME_ARRAY[i]}.xo $LINKER_LIST"
   fi
   done
 

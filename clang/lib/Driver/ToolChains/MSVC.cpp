@@ -375,6 +375,7 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-defaultlib:msvcrt");
     else
       CmdArgs.push_back("-defaultlib:libcmt");
+    CmdArgs.push_back("-defaultlib:oldnames");
   }
 
   if (!C.getDriver().IsCLMode() && !Args.hasArg(options::OPT_nostdlib) &&
@@ -436,8 +437,7 @@ void visualstudio::Linker::ConstructJob(Compilation &C, const JobAction &JA,
 
   CmdArgs.push_back("-nologo");
 
-  if (Args.hasArg(options::OPT_g_Group, options::OPT__SLASH_Z7,
-                  options::OPT__SLASH_Zd))
+  if (Args.hasArg(options::OPT_g_Group, options::OPT__SLASH_Z7))
     CmdArgs.push_back("-debug");
 
   // Pass on /Brepro if it was passed to the compiler.

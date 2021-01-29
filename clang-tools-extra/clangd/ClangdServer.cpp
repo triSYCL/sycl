@@ -9,6 +9,7 @@
 #include "ClangdServer.h"
 #include "CodeComplete.h"
 #include "Config.h"
+#include "DumpAST.h"
 #include "FindSymbols.h"
 #include "Format.h"
 #include "HeaderSourceSwitch.h"
@@ -28,6 +29,7 @@
 #include "refactor/Tweak.h"
 #include "support/Logger.h"
 #include "support/Markup.h"
+#include "support/MemoryTree.h"
 #include "support/ThreadsafeFS.h"
 #include "support/Trace.h"
 #include "clang/Format/Format.h"
@@ -112,40 +114,6 @@ private:
   bool TheiaSemanticHighlighting;
 };
 
-// Set of clang-tidy checks that don't work well in clangd, either due to
-// crashes or false positives.
-// Returns a clang-tidy filter string: -check1,-check2.
-llvm::StringRef getUnusableTidyChecks() {
-  static const std::string FalsePositives =
-      llvm::join_items(", ",
-                       // Check relies on seeing ifndef/define/endif directives,
-                       // clangd doesn't replay those when using a preamble.
-                       "-llvm-header-guard");
-  static const std::string CrashingChecks =
-      llvm::join_items(", ",
-                       // Check can choke on invalid (intermediate) c++ code,
-                       // which is often the case when clangd tries to build an
-                       // AST.
-                       "-bugprone-use-after-move");
-  static const std::string UnusableTidyChecks =
-      llvm::join_items(", ", FalsePositives, CrashingChecks);
-  return UnusableTidyChecks;
-}
-
-// Returns a clang-tidy options string: check1,check2.
-llvm::StringRef getDefaultTidyChecks() {
-  // These default checks are chosen for:
-  //  - low false-positive rate
-  //  - providing a lot of value
-  //  - being reasonably efficient
-  static const std::string DefaultChecks = llvm::join_items(
-      ",", "readability-misleading-indentation", "readability-deleted-default",
-      "bugprone-integer-division", "bugprone-sizeof-expression",
-      "bugprone-suspicious-missing-comma", "bugprone-unused-raii",
-      "bugprone-unused-return-value", "misc-unused-using-decls",
-      "misc-unused-alias-decls", "misc-definitions-in-headers");
-  return DefaultChecks;
-}
 } // namespace
 
 ClangdServer::Options ClangdServer::optsForTest() {
@@ -171,16 +139,16 @@ ClangdServer::Options::operator TUScheduler::Options() const {
 ClangdServer::ClangdServer(const GlobalCompilationDatabase &CDB,
                            const ThreadsafeFS &TFS, const Options &Opts,
                            Callbacks *Callbacks)
-    : ConfigProvider(Opts.ConfigProvider), TFS(TFS),
+    : ConfigProvider(Opts.ConfigProvider), TFS(TFS), ServerCallbacks(Callbacks),
       DynamicIdx(Opts.BuildDynamicSymbolIndex
                      ? new FileIndex(Opts.HeavyweightDynamicSymbolIndex,
                                      Opts.CollectMainFileRefs)
                      : nullptr),
-      GetClangTidyOptions(Opts.GetClangTidyOptions),
+      ClangTidyProvider(Opts.ClangTidyProvider),
       SuggestMissingIncludes(Opts.SuggestMissingIncludes),
       BuildRecoveryAST(Opts.BuildRecoveryAST),
       PreserveRecoveryASTType(Opts.PreserveRecoveryASTType),
-      TweakFilter(Opts.TweakFilter), WorkspaceRoot(Opts.WorkspaceRoot),
+      WorkspaceRoot(Opts.WorkspaceRoot),
       // Pass a callback into `WorkScheduler` to extract symbols from a newly
       // parsed file and rebuild the file index synchronously each time an AST
       // is parsed.
@@ -218,6 +186,7 @@ ClangdServer::ClangdServer(const GlobalCompilationDatabase &CDB,
     BGOpts.ContextProvider = [this](PathRef P) {
       return createProcessingContext(P);
     };
+    BGOpts.CollectMainFileRefs = Opts.CollectMainFileRefs;
     BackgroundIdx = std::make_unique<BackgroundIndex>(
         TFS, CDB,
         BackgroundIndexStorage::createDiskBackedStorageFactory(
@@ -233,20 +202,6 @@ void ClangdServer::addDocument(PathRef File, llvm::StringRef Contents,
                                llvm::StringRef Version,
                                WantDiagnostics WantDiags, bool ForceRebuild) {
   ParseOptions Opts;
-  Opts.ClangTidyOpts = tidy::ClangTidyOptions::getDefaults();
-  // FIXME: call tidy options builder on the worker thread, it can do IO.
-  if (GetClangTidyOptions)
-    Opts.ClangTidyOpts =
-        GetClangTidyOptions(*TFS.view(/*CWD=*/llvm::None), File);
-  if (Opts.ClangTidyOpts.Checks.hasValue()) {
-    // If the set of checks was configured, make sure clangd incompatible ones
-    // are disabled.
-    Opts.ClangTidyOpts.Checks = llvm::join_items(
-        ", ", *Opts.ClangTidyOpts.Checks, getUnusableTidyChecks());
-  } else {
-    // Otherwise provide a nice set of defaults.
-    Opts.ClangTidyOpts.Checks = getDefaultTidyChecks().str();
-  }
   Opts.SuggestMissingIncludes = SuggestMissingIncludes;
 
   // Compile command is set asynchronously during update, as it can be slow.
@@ -257,6 +212,7 @@ void ClangdServer::addDocument(PathRef File, llvm::StringRef Contents,
   Inputs.ForceRebuild = ForceRebuild;
   Inputs.Opts = std::move(Opts);
   Inputs.Index = Index;
+  Inputs.ClangTidyProvider = ClangTidyProvider;
   Inputs.Opts.BuildRecoveryAST = BuildRecoveryAST;
   Inputs.Opts.PreserveRecoveryASTType = PreserveRecoveryASTType;
   bool NewFile = WorkScheduler.update(File, Inputs, WantDiags);
@@ -492,13 +448,15 @@ tweakSelection(const Range &Sel, const InputsAndAST &AST) {
   return std::move(Result);
 }
 
-void ClangdServer::enumerateTweaks(PathRef File, Range Sel,
-                                   Callback<std::vector<TweakRef>> CB) {
+void ClangdServer::enumerateTweaks(
+    PathRef File, Range Sel, llvm::unique_function<bool(const Tweak &)> Filter,
+    Callback<std::vector<TweakRef>> CB) {
   // Tracks number of times a tweak has been offered.
   static constexpr trace::Metric TweakAvailable(
       "tweak_available", trace::Metric::Counter, "tweak_id");
   auto Action = [File = File.str(), Sel, CB = std::move(CB),
-                 this](Expected<InputsAndAST> InpAST) mutable {
+                 Filter =
+                     std::move(Filter)](Expected<InputsAndAST> InpAST) mutable {
     if (!InpAST)
       return CB(InpAST.takeError());
     auto Selections = tweakSelection(Sel, *InpAST);
@@ -507,11 +465,11 @@ void ClangdServer::enumerateTweaks(PathRef File, Range Sel,
     std::vector<TweakRef> Res;
     // Don't allow a tweak to fire more than once across ambiguous selections.
     llvm::DenseSet<llvm::StringRef> PreparedTweaks;
-    auto Filter = [&](const Tweak &T) {
-      return TweakFilter(T) && !PreparedTweaks.count(T.id());
+    auto DeduplicatingFilter = [&](const Tweak &T) {
+      return Filter(T) && !PreparedTweaks.count(T.id());
     };
     for (const auto &Sel : *Selections) {
-      for (auto &T : prepareTweaks(*Sel, Filter)) {
+      for (auto &T : prepareTweaks(*Sel, DeduplicatingFilter)) {
         Res.push_back({T->id(), T->title(), T->kind()});
         PreparedTweaks.insert(T->id());
         TweakAvailable.record(1, T->id());
@@ -669,8 +627,31 @@ void ClangdServer::typeHierarchy(PathRef File, Position Pos, int Resolve,
 void ClangdServer::resolveTypeHierarchy(
     TypeHierarchyItem Item, int Resolve, TypeHierarchyDirection Direction,
     Callback<llvm::Optional<TypeHierarchyItem>> CB) {
-  clangd::resolveTypeHierarchy(Item, Resolve, Direction, Index);
-  CB(Item);
+  WorkScheduler.run(
+      "Resolve Type Hierarchy", "", [=, CB = std::move(CB)]() mutable {
+        clangd::resolveTypeHierarchy(Item, Resolve, Direction, Index);
+        CB(Item);
+      });
+}
+
+void ClangdServer::prepareCallHierarchy(
+    PathRef File, Position Pos, Callback<std::vector<CallHierarchyItem>> CB) {
+  auto Action = [File = File.str(), Pos,
+                 CB = std::move(CB)](Expected<InputsAndAST> InpAST) mutable {
+    if (!InpAST)
+      return CB(InpAST.takeError());
+    CB(clangd::prepareCallHierarchy(InpAST->AST, Pos, File));
+  };
+  WorkScheduler.runWithAST("Call Hierarchy", File, std::move(Action));
+}
+
+void ClangdServer::incomingCalls(
+    const CallHierarchyItem &Item,
+    Callback<std::vector<CallHierarchyIncomingCall>> CB) {
+  WorkScheduler.run("Incoming Calls", "",
+                    [CB = std::move(CB), Item, this]() mutable {
+                      CB(clangd::incomingCalls(Item, Index));
+                    });
 }
 
 void ClangdServer::onFileEvent(const DidChangeWatchedFilesParams &Params) {
@@ -711,6 +692,18 @@ void ClangdServer::foldingRanges(llvm::StringRef File,
       };
   WorkScheduler.runWithAST("foldingRanges", File, std::move(Action),
                            TUScheduler::InvalidateOnUpdate);
+}
+
+void ClangdServer::findImplementations(
+    PathRef File, Position Pos, Callback<std::vector<LocatedSymbol>> CB) {
+  auto Action = [Pos, CB = std::move(CB),
+                 this](llvm::Expected<InputsAndAST> InpAST) mutable {
+    if (!InpAST)
+      return CB(InpAST.takeError());
+    CB(clangd::findImplementations(InpAST->AST, Pos, Index));
+  };
+
+  WorkScheduler.runWithAST("Implementations", File, std::move(Action));
 }
 
 void ClangdServer::findReferences(PathRef File, Position Pos, uint32_t Limit,
@@ -780,6 +773,38 @@ void ClangdServer::semanticHighlights(
                            TUScheduler::InvalidateOnUpdate);
 }
 
+void ClangdServer::getAST(PathRef File, Range R,
+                          Callback<llvm::Optional<ASTNode>> CB) {
+  auto Action =
+      [R, CB(std::move(CB))](llvm::Expected<InputsAndAST> Inputs) mutable {
+        if (!Inputs)
+          return CB(Inputs.takeError());
+        unsigned Start, End;
+        if (auto Offset = positionToOffset(Inputs->Inputs.Contents, R.start))
+          Start = *Offset;
+        else
+          return CB(Offset.takeError());
+        if (auto Offset = positionToOffset(Inputs->Inputs.Contents, R.end))
+          End = *Offset;
+        else
+          return CB(Offset.takeError());
+
+        bool Success = SelectionTree::createEach(
+            Inputs->AST.getASTContext(), Inputs->AST.getTokens(), Start, End,
+            [&](SelectionTree T) {
+              if (const SelectionTree::Node *N = T.commonAncestor()) {
+                CB(dumpAST(N->ASTNode, Inputs->AST.getTokens(),
+                           Inputs->AST.getASTContext()));
+                return true;
+              }
+              return false;
+            });
+        if (!Success)
+          CB(llvm::None);
+      };
+  WorkScheduler.runWithAST("GetAST", File, std::move(Action));
+}
+
 void ClangdServer::customAction(PathRef File, llvm::StringRef Name,
                                 Callback<InputsAndAST> Action) {
   WorkScheduler.runWithAST(Name, File, std::move(Action));
@@ -804,16 +829,44 @@ Context ClangdServer::createProcessingContext(PathRef File) const {
     Params.Path = PosixPath.str();
   }
 
-  auto DiagnosticHandler = [](const llvm::SMDiagnostic &Diag) {
-    if (Diag.getKind() == llvm::SourceMgr::DK_Error) {
-      elog("config error at {0}:{1}:{2}: {3}", Diag.getFilename(),
-           Diag.getLineNo(), Diag.getColumnNo(), Diag.getMessage());
-    } else {
-      log("config warning at {0}:{1}:{2}: {3}", Diag.getFilename(),
-          Diag.getLineNo(), Diag.getColumnNo(), Diag.getMessage());
+  llvm::StringMap<std::vector<Diag>> ReportableDiagnostics;
+  auto ConfigDiagnosticHandler = [&](const llvm::SMDiagnostic &D) {
+    // Ensure we create the map entry even for note diagnostics we don't report.
+    // This means that when the file is parsed with no warnings, we'll
+    // publish an empty set of diagnostics, clearing any the client has.
+    auto *Reportable = D.getFilename().empty()
+                           ? nullptr
+                           : &ReportableDiagnostics[D.getFilename()];
+    switch (D.getKind()) {
+    case llvm::SourceMgr::DK_Error:
+      elog("config error at {0}:{1}:{2}: {3}", D.getFilename(), D.getLineNo(),
+           D.getColumnNo(), D.getMessage());
+      if (Reportable)
+        Reportable->push_back(toDiag(D, Diag::ClangdConfig));
+      break;
+    case llvm::SourceMgr::DK_Warning:
+      log("config warning at {0}:{1}:{2}: {3}", D.getFilename(), D.getLineNo(),
+          D.getColumnNo(), D.getMessage());
+      if (Reportable)
+        Reportable->push_back(toDiag(D, Diag::ClangdConfig));
+      break;
+    case llvm::SourceMgr::DK_Note:
+    case llvm::SourceMgr::DK_Remark:
+      vlog("config note at {0}:{1}:{2}: {3}", D.getFilename(), D.getLineNo(),
+           D.getColumnNo(), D.getMessage());
+      break;
     }
   };
-  Config C = ConfigProvider->getConfig(Params, DiagnosticHandler);
+  Config C = ConfigProvider->getConfig(Params, ConfigDiagnosticHandler);
+  // Blindly publish diagnostics for the (unopened) parsed config files.
+  // We must avoid reporting diagnostics for *the same file* concurrently.
+  // Source file diags are published elsewhere, but those are different files.
+  if (!ReportableDiagnostics.empty()) {
+    std::lock_guard<std::mutex> Lock(ConfigDiagnosticsMu);
+    for (auto &Entry : ReportableDiagnostics)
+      ServerCallbacks->onDiagnosticsReady(Entry.first(), /*Version=*/"",
+                                          std::move(Entry.second));
+  }
   return Context::current().derive(Config::Key, std::move(C));
 }
 
@@ -824,5 +877,12 @@ ClangdServer::blockUntilIdleForTest(llvm::Optional<double> TimeoutSeconds) {
           BackgroundIdx->blockUntilIdleForTest(TimeoutSeconds));
 }
 
+void ClangdServer::profile(MemoryTree &MT) const {
+  if (DynamicIdx)
+    DynamicIdx->profile(MT.child("dynamic_index"));
+  if (BackgroundIdx)
+    BackgroundIdx->profile(MT.child("background_index"));
+  WorkScheduler.profile(MT.child("tuscheduler"));
+}
 } // namespace clangd
 } // namespace clang

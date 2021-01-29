@@ -91,8 +91,9 @@ INLINE uint64_t __kmpc_impl_pack(uint32_t lo, uint32_t hi) {
   return val;
 }
 
-static const __kmpc_impl_lanemask_t __kmpc_impl_all_lanes =
-    UINT32_C(0xffffffff);
+enum : __kmpc_impl_lanemask_t {
+  __kmpc_impl_all_lanes = ~(__kmpc_impl_lanemask_t)0
+};
 
 INLINE __kmpc_impl_lanemask_t __kmpc_impl_lanemask_lt() {
   __kmpc_impl_lanemask_t res;
@@ -183,6 +184,11 @@ INLINE void __kmpc_impl_syncwarp(__kmpc_impl_lanemask_t Mask) {
 #endif // CUDA_VERSION
 }
 
+// NVPTX specific kernel initialization
+INLINE void __kmpc_impl_target_init() { /* nvptx needs no extra setup */
+}
+
+// Barrier until num_threads arrive.
 INLINE void __kmpc_impl_named_sync(uint32_t num_threads) {
   // The named barrier for active parallel threads of a team in an L1 parallel
   // region to synchronize with each other.

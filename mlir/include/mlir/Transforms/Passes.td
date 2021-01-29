@@ -102,12 +102,13 @@ def AffinePipelineDataTransfer
   let constructor = "mlir::createPipelineDataTransferPass()";
 }
 
-def BufferPlacement : FunctionPass<"buffer-placement"> {
-  let summary = "Optimizes placement of alloc and dealloc operations";
+def BufferDeallocation : FunctionPass<"buffer-deallocation"> {
+  let summary = "Adds all required dealloc operations for all allocations in the "
+                "input program";
   let description = [{
-    This pass implements an algorithm to optimize the placement of alloc and
-    dealloc operations. This pass also inserts missing dealloc operations
-    automatically to reclaim memory.
+    This pass implements an algorithm to automatically introduce all required
+    deallocation operations for all buffers in the input program. This ensures that
+    the resulting program does not have any memory leaks.
 
 
     Input
@@ -121,7 +122,11 @@ def BufferPlacement : FunctionPass<"buffer-placement"> {
         br ^bb3(%arg1 : memref<2xf32>)
       ^bb2:
         %0 = alloc() : memref<2xf32>
-        linalg.generic {args_in = 1 : i64, args_out = 1 : i64, indexing_maps = [#map0, #map0], iterator_types = ["parallel"]} %arg1, %0 {
+        linalg.generic {
+          args_in = 1 : i64,
+          args_out = 1 : i64,
+          indexing_maps = [#map0, #map0],
+          iterator_types = ["parallel"]} %arg1, %0 {
         ^bb0(%gen1_arg0: f32, %gen1_arg1: f32):
           %tmp1 = exp %gen1_arg0 : f32
           linalg.yield %tmp1 : f32
@@ -141,28 +146,107 @@ def BufferPlacement : FunctionPass<"buffer-placement"> {
     #map0 = affine_map<(d0) -> (d0)>
     module {
       func @condBranch(%arg0: i1, %arg1: memref<2xf32>, %arg2: memref<2xf32>) {
-        %0 = alloc() : memref<2xf32>
         cond_br %arg0, ^bb1, ^bb2
-      ^bb1: // pred: ^bb0
-        br ^bb3(%arg1 : memref<2xf32>)
-      ^bb2: // pred: ^bb0
-        linalg.generic {args_in = 1 : i64, args_out = 1 : i64, indexing_maps = [#map0, #map0], iterator_types = ["parallel"]} %arg1, %0 {
-        ^bb0(%arg3: f32, %arg4: f32):       // no predecessors
-          %2 = exp %arg3 : f32
-          linalg.yield %2 : f32
-        }: memref<2xf32>, memref<2xf32>
+      ^bb1:  // pred: ^bb0
+        %0 = alloc() : memref<2xf32>
+        linalg.copy(%arg1, %0) : memref<2xf32>, memref<2xf32>
         br ^bb3(%0 : memref<2xf32>)
-      ^bb3(%1: memref<2xf32>):      // 2 preds: ^bb1, ^bb2
-        linalg.copy(%1, %arg2) : memref<2xf32>, memref<2xf32>
-        dealloc %0 : memref<2xf32>
+      ^bb2:  // pred: ^bb0
+        %1 = alloc() : memref<2xf32>
+        linalg.generic {
+          args_in = 1 : i64,
+          args_out = 1 : i64,
+          indexing_maps = [#map0, #map0],
+          iterator_types = ["parallel"]} %arg1, %1 {
+        ^bb0(%arg3: f32, %arg4: f32):  // no predecessors
+          %4 = exp %arg3 : f32
+          linalg.yield %4 : f32
+        }: memref<2xf32>, memref<2xf32>
+        %2 = alloc() : memref<2xf32>
+        linalg.copy(%1, %2) : memref<2xf32>, memref<2xf32>
+        dealloc %1 : memref<2xf32>
+        br ^bb3(%2 : memref<2xf32>)
+      ^bb3(%3: memref<2xf32>):  // 2 preds: ^bb1, ^bb2
+        linalg.copy(%3, %arg2) : memref<2xf32>, memref<2xf32>
+        dealloc %3 : memref<2xf32>
         return
       }
+
     }
     ```
 
   }];
-  let constructor = "mlir::createBufferPlacementPass()";
+  let constructor = "mlir::createBufferDeallocationPass()";
   // TODO: this pass likely shouldn't depend on Linalg?
+  let dependentDialects = ["linalg::LinalgDialect"];
+}
+
+def BufferHoisting : FunctionPass<"buffer-hoisting"> {
+  let summary = "Optimizes placement of allocation operations by moving them "
+                "into common dominators and out of nested regions";
+  let description = [{
+    This pass implements an approach to aggressively move allocations upwards
+    into common dominators and out of nested regions.
+  }];
+  let constructor = "mlir::createBufferHoistingPass()";
+}
+
+def BufferLoopHoisting : FunctionPass<"buffer-loop-hoisting"> {
+  let summary = "Optimizes placement of allocation operations by moving them "
+                "out of loop nests";
+  let description = [{
+    This pass implements an approach to aggressively move allocations upwards
+    out of loop nests. It does not move allocations into common dominators.
+  }];
+  let constructor = "mlir::createBufferLoopHoistingPass()";
+}
+
+def PromoteBuffersToStack : FunctionPass<"promote-buffers-to-stack"> {
+  let summary = "Promotes heap-based allocations to automatically managed "
+                "stack-based allocations";
+  let description = [{
+    This pass implements a simple algorithm to convert heap-based memory
+    allocations to stack-based ones. It uses a built-in heuristic to decide
+    whether it makes sense to convert an allocation. Furthermore, dynamic
+    shaped buffers that are limited by the rank of the tensor can be
+    converted. They are only transformed if they are considered to be small.
+  }];
+  let constructor = "mlir::createPromoteBuffersToStackPass()";
+  let options = [
+    Option<"maxAllocSizeInBytes", "max-alloc-size-in-bytes", "unsigned",
+           /*default=*/"1024",
+           "Maximal size in bytes to promote allocations to stack.">,
+    Option<"bitwidthOfIndexType", "bitwidth-of-index-type", "unsigned",
+           /*default=*/"64",
+           "Bitwidth of the index type. Used for size estimation.">,
+    Option<"maxRankOfAllocatedMemRef", "max-rank-of-allocated-memref", "unsigned",
+           /*default=*/"1",
+           "Maximal memref rank to promote dynamic buffers.">,
+  ];
+}
+
+def BufferResultsToOutParams : Pass<"buffer-results-to-out-params", "ModuleOp">  {
+  let summary = "Converts memref-typed function results to out-params";
+  let description = [{
+    Some calling conventions prefer to pass output memrefs as "out params". The
+    conversion to this calling convention must be done as an atomic
+    transformation of the entire program (hence this is a module pass).
+
+    For example, if a call is rewritten, the callee needs to be rewritten
+    otherwise the IR will end up invalid. Thus, this transformation
+    require an atomic change to the entire program (e.g. the whole module).
+
+    This pass is expected to run immediately after bufferization is finished.
+    At that point, tensor-typed results will have been converted to memref-typed
+    results, and can be consistently converted to out params.
+
+    All memref-typed results are appended to the function argument list.
+
+    The main issue with this pass (and the out-param calling convention) is that
+    buffers for results need to be allocated in the caller. This currently only
+    works for static shaped memrefs.
+  }];
+  let constructor = "mlir::createBufferResultsToOutParamsPass()";
   let dependentDialects = ["linalg::LinalgDialect"];
 }
 
@@ -201,13 +285,32 @@ def Inliner : Pass<"inline"> {
   let summary = "Inline function calls";
   let constructor = "mlir::createInlinerPass()";
   let options = [
-    Option<"disableCanonicalization", "disable-simplify", "bool",
-           /*default=*/"false",
-           "Disable running simplifications during inlining">,
+    Option<"defaultPipelineStr", "default-pipeline", "std::string",
+           /*default=*/"", "The default optimizer pipeline used for callables">,
+    ListOption<"opPipelineStrs", "op-pipelines", "std::string",
+               "Callable operation specific optimizer pipelines (in the form "
+               "of `dialect.op(pipeline)`)",
+               "llvm::cl::MiscFlags::CommaSeparated">,
     Option<"maxInliningIterations", "max-iterations", "unsigned",
            /*default=*/"4",
            "Maximum number of iterations when inlining within an SCC">,
   ];
+}
+
+def FinalizingBufferize : FunctionPass<"finalizing-bufferize"> {
+  let summary = "Finalize a partial bufferization";
+  let description = [{
+    A bufferize pass that finalizes a partial bufferization by removing
+    remaining `tensor_load` and `tensor_to_memref` operations.
+
+    The removal of those operations is only possible if the operations only
+    exist in pairs, i.e., all uses of `tensor_load` operations are
+    `tensor_to_memref` operations.
+
+    This pass will fail if not all operations can be removed or if any operation
+    with tensor typed operands remains.
+  }];
+  let constructor = "mlir::createFinalizingBufferizePass()";
 }
 
 def LocationSnapshot : Pass<"snapshot-op-locations"> {
@@ -447,7 +550,7 @@ def PrintCFG : FunctionPass<"print-cfg-graph"> {
   let constructor = "mlir::createPrintCFGGraphPass()";
 }
 
-def PrintOpStats : Pass<"print-op-stats", "ModuleOp"> {
+def PrintOpStats : Pass<"print-op-stats"> {
   let summary = "Print statistics of operations";
   let constructor = "mlir::createPrintOpStatsPass()";
 }
@@ -494,11 +597,11 @@ def SymbolDCE : Pass<"symbol-dce"> {
     For example, consider the following input:
 
     ```mlir
-    func @dead_private_function() attributes { sym_visibility = "private" }
-    func @live_private_function() attributes { sym_visibility = "private" }
+    func private @dead_private_function()
+    func private @live_private_function()
 
     // Note: The `public` isn't necessary here, as this is the default.
-    func @public_function() attributes { sym_visibility = "public" } {
+    func public @public_function() {
       "foo.return"() {uses = [@live_private_function]} : () -> ()
     }
     ```
@@ -510,9 +613,9 @@ def SymbolDCE : Pass<"symbol-dce"> {
     are no links to known-live operations. After running, we get the expected:
 
     ```mlir
-    func @live_private_function() attributes { sym_visibility = "private" }
+    func private @live_private_function()
 
-    func @public_function() attributes { sym_visibility = "public" } {
+    func public @public_function() {
       "foo.return"() {uses = [@live_private_function]} : () -> ()
     }
     ```

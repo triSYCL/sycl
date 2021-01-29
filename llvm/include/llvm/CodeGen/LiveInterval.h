@@ -736,10 +736,10 @@ namespace llvm {
         ++*this;
         return res;
       }
-      bool operator!=(const SingleLinkedListIterator<T> &Other) {
+      bool operator!=(const SingleLinkedListIterator<T> &Other) const {
         return P != Other.operator->();
       }
-      bool operator==(const SingleLinkedListIterator<T> &Other) {
+      bool operator==(const SingleLinkedListIterator<T> &Other) const {
         return P == Other.operator->();
       }
       T &operator*() const {
@@ -835,7 +835,7 @@ namespace llvm {
     ///    function will be applied to the L0010 and L0008 subranges.
     ///
     /// \p Indexes and \p TRI are required to clean up the VNIs that
-    /// don't defne the related lane masks after they get shrunk. E.g.,
+    /// don't define the related lane masks after they get shrunk. E.g.,
     /// when L000F gets split into L0007 and L0008 maybe only a subset
     /// of the VNIs that defined L000F defines L0007.
     ///

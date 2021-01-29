@@ -578,12 +578,12 @@ public:
   struct EvalStatus {
     /// Whether the evaluated expression has side effects.
     /// For example, (f() && 0) can be folded, but it still has side effects.
-    bool HasSideEffects;
+    bool HasSideEffects = false;
 
     /// Whether the evaluation hit undefined behavior.
     /// For example, 1.0 / 0.0 can be folded to Inf, but has undefined behavior.
     /// Likewise, INT_MAX + 1 can be folded to INT_MIN, but has UB.
-    bool HasUndefinedBehavior;
+    bool HasUndefinedBehavior = false;
 
     /// Diag - If this is non-null, it will be filled in with a stack of notes
     /// indicating why evaluation failed (or why it failed to produce a constant
@@ -592,10 +592,7 @@ public:
     /// foldable. If the expression is foldable, but not a constant expression,
     /// the notes will describes why it isn't a constant expression. If the
     /// expression *is* a constant expression, no notes will be produced.
-    SmallVectorImpl<PartialDiagnosticAt> *Diag;
-
-    EvalStatus()
-        : HasSideEffects(false), HasUndefinedBehavior(false), Diag(nullptr) {}
+    SmallVectorImpl<PartialDiagnosticAt> *Diag = nullptr;
 
     // hasSideEffects - Return true if the evaluated expression has
     // side effects.
@@ -606,8 +603,11 @@ public:
 
   /// EvalResult is a struct with detailed info about an evaluated expression.
   struct EvalResult : EvalStatus {
-    /// Val - This is the value the expression can be folded to.
+    /// This is the value the expression can be folded to.
     APValue Val;
+    /// Indicates whether Val contains a pointer or reference or pointer to
+    /// member naming a templated entity, and thus the value is dependent.
+    bool Dependent = false;
 
     // isGlobalLValue - Return true if the evaluated lvalue expression
     // is global.
@@ -699,7 +699,8 @@ public:
   /// notes will be produced if the expression is not a constant expression.
   bool EvaluateAsInitializer(APValue &Result, const ASTContext &Ctx,
                              const VarDecl *VD,
-                             SmallVectorImpl<PartialDiagnosticAt> &Notes) const;
+                             SmallVectorImpl<PartialDiagnosticAt> &Notes,
+                             bool IsConstantInitializer) const;
 
   /// EvaluateWithSubstitution - Evaluate an expression as if from the context
   /// of a call to the given function with the given arguments, inside an
@@ -710,13 +711,26 @@ public:
                                 ArrayRef<const Expr*> Args,
                                 const Expr *This = nullptr) const;
 
-  /// Indicates how the constant expression will be used.
-  enum ConstExprUsage { EvaluateForCodeGen, EvaluateForMangling };
+  enum class ConstantExprKind {
+    /// An integer constant expression (an array bound, enumerator, case value,
+    /// bit-field width, or similar) or similar.
+    Normal,
+    /// A non-class template argument. Such a value is only used for mangling,
+    /// not for code generation, so can refer to dllimported functions.
+    NonClassTemplateArgument,
+    /// A class template argument. Such a value is used for code generation.
+    ClassTemplateArgument,
+    /// An immediate invocation. The destruction of the end result of this
+    /// evaluation is not part of the evaluation, but all other temporaries
+    /// are destroyed.
+    ImmediateInvocation,
+  };
 
-  /// Evaluate an expression that is required to be a constant expression.
-  bool EvaluateAsConstantExpr(EvalResult &Result, ConstExprUsage Usage,
-                              const ASTContext &Ctx,
-                              bool InPlace = false) const;
+  /// Evaluate an expression that is required to be a constant expression. Does
+  /// not check the syntactic constraints for C and C++98 constant expressions.
+  bool EvaluateAsConstantExpr(
+      EvalResult &Result, const ASTContext &Ctx,
+      ConstantExprKind Kind = ConstantExprKind::Normal) const;
 
   /// If the current Expr is a pointer, this will try to statically
   /// determine the number of bytes available where the pointer is pointing.
@@ -969,6 +983,8 @@ public:
 static_assert(llvm::PointerLikeTypeTraits<Expr *>::NumLowBitsAvailable <=
                   llvm::detail::ConstantLog2<alignof(Expr)>::value,
               "PointerLikeTypeTraits<Expr*> assumes too much alignment.");
+
+using ConstantExprKind = Expr::ConstantExprKind;
 
 //===----------------------------------------------------------------------===//
 // Wrapper Expressions.
@@ -1268,7 +1284,7 @@ public:
 
   ValueDecl *getDecl() { return D; }
   const ValueDecl *getDecl() const { return D; }
-  void setDecl(ValueDecl *NewD) { D = NewD; }
+  void setDecl(ValueDecl *NewD);
 
   DeclarationNameInfo getNameInfo() const {
     return DeclarationNameInfo(getDecl()->getDeclName(), getLocation(), DNLoc);
@@ -2059,6 +2075,10 @@ public:
   }
 
   static StringRef getIdentKindName(IdentKind IK);
+  StringRef getIdentKindName() const {
+    return getIdentKindName(getIdentKind());
+  }
+
   static std::string ComputeName(IdentKind IK, const Decl *CurrentDecl);
   static std::string ComputeName(ASTContext &Context, IdentKind IK,
                                  const QualType Ty);
@@ -3212,7 +3232,7 @@ public:
   /// The returned declaration will be a FieldDecl or (in C++) a VarDecl (for
   /// static data members), a CXXMethodDecl, or an EnumConstantDecl.
   ValueDecl *getMemberDecl() const { return MemberDecl; }
-  void setMemberDecl(ValueDecl *D) { MemberDecl = D; }
+  void setMemberDecl(ValueDecl *D);
 
   /// Retrieves the declaration found by lookup.
   DeclAccessPair getFoundDecl() const {
@@ -6375,9 +6395,6 @@ public:
 ///
 /// One can also reliably suppress all bogus errors on expressions containing
 /// recovery expressions by examining results of Expr::containsErrors().
-///
-/// FIXME: RecoveryExpr is currently generated by default in C++ mode only, as
-/// dependence isn't handled properly on several C-only codepaths.
 class RecoveryExpr final : public Expr,
                            private llvm::TrailingObjects<RecoveryExpr, Expr *> {
 public:

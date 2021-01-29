@@ -1163,6 +1163,8 @@ public:
     case CK_FloatingToIntegral:
     case CK_FloatingToBoolean:
     case CK_FloatingCast:
+    case CK_FloatingToFixedPoint:
+    case CK_FixedPointToFloating:
     case CK_FixedPointCast:
     case CK_FixedPointToBoolean:
     case CK_FixedPointToIntegral:
@@ -1364,11 +1366,11 @@ llvm::Constant *ConstantEmitter::tryEmitConstantExpr(const ConstantExpr *CE) {
   if (!CE->hasAPValueResult())
     return nullptr;
   const Expr *Inner = CE->getSubExpr()->IgnoreImplicit();
-  QualType RetType;
-  if (auto *Call = dyn_cast<CallExpr>(Inner))
-    RetType = Call->getCallReturnType(CGF->getContext());
-  else if (auto *Ctor = dyn_cast<CXXConstructExpr>(Inner))
-    RetType = Ctor->getType();
+  QualType RetType = Inner->getType();
+  if (Inner->isLValue())
+    RetType = CGF->getContext().getLValueReferenceType(RetType);
+  else if (Inner->isXValue())
+    RetType = CGF->getContext().getRValueReferenceType(RetType);
   llvm::Constant *Res =
       emitAbstract(CE->getBeginLoc(), CE->getAPValueResult(), RetType);
   return Res;
@@ -1620,8 +1622,8 @@ llvm::Constant *ConstantEmitter::tryEmitPrivateForVarInit(const VarDecl &D) {
         if (CD->isTrivial() && CD->isDefaultConstructor())
           return CGM.EmitNullConstant(D.getType());
       }
-    InConstantContext = true;
   }
+  InConstantContext = D.hasConstantInitialization();
 
   QualType destType = D.getType();
 
@@ -1902,6 +1904,9 @@ ConstantLValueEmitter::tryEmitBase(const APValue::LValueBase &base) {
 
     if (auto *GD = dyn_cast<MSGuidDecl>(D))
       return CGM.GetAddrOfMSGuidDecl(GD);
+
+    if (auto *TPO = dyn_cast<TemplateParamObjectDecl>(D))
+      return CGM.GetAddrOfTemplateParamObject(TPO);
 
     return nullptr;
   }

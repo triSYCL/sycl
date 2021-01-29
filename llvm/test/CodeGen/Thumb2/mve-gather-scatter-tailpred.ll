@@ -9,8 +9,8 @@ define dso_local void @mve_gather_qi_wb(i32* noalias nocapture readonly %A, i32*
 ; CHECK-NEXT:    add.w r12, r0, r3, lsl #2
 ; CHECK-NEXT:    adr r0, .LCPI0_0
 ; CHECK-NEXT:    vldrw.u32 q0, [r0]
-; CHECK-NEXT:    movw lr, #1250
 ; CHECK-NEXT:    vmov.i32 q1, #0x0
+; CHECK-NEXT:    movw lr, #1250
 ; CHECK-NEXT:    vadd.i32 q0, q0, r1
 ; CHECK-NEXT:    adds r1, r3, #4
 ; CHECK-NEXT:    dls lr, lr
@@ -82,9 +82,9 @@ define dso_local void @mve_gatherscatter_offset(i32* noalias nocapture readonly 
 ; CHECK-NEXT:    adr r0, .LCPI1_0
 ; CHECK-NEXT:    vldrw.u32 q1, [r0]
 ; CHECK-NEXT:    add.w r12, r3, #4
-; CHECK-NEXT:    movw lr, #1250
 ; CHECK-NEXT:    vmov.i32 q2, #0x0
 ; CHECK-NEXT:    vmov.i32 q0, #0x14
+; CHECK-NEXT:    movw lr, #1250
 ; CHECK-NEXT:    dls lr, lr
 ; CHECK-NEXT:  .LBB1_1: @ %vector.body
 ; CHECK-NEXT:    @ =>This Inner Loop Header: Depth=1
@@ -155,8 +155,8 @@ define dso_local void @mve_scatter_qi(i32* noalias nocapture readonly %A, i32* n
 ; CHECK-NEXT:    add.w r12, r0, r3, lsl #2
 ; CHECK-NEXT:    adr r0, .LCPI2_0
 ; CHECK-NEXT:    vldrw.u32 q0, [r0]
-; CHECK-NEXT:    movw lr, #1250
 ; CHECK-NEXT:    vmov.i32 q1, #0x0
+; CHECK-NEXT:    movw lr, #1250
 ; CHECK-NEXT:    vmov.i32 q2, #0x3
 ; CHECK-NEXT:    vadd.i32 q0, q0, r1
 ; CHECK-NEXT:    adds r1, r3, #4
@@ -231,38 +231,38 @@ define void @justoffsets(i8* noalias nocapture readonly %r, i8* noalias nocaptur
 ; CHECK-NEXT:    cmp r2, #0
 ; CHECK-NEXT:    beq.w .LBB3_3
 ; CHECK-NEXT:  @ %bb.1: @ %vector.ph
-; CHECK-NEXT:    adr r7, .LCPI3_5
 ; CHECK-NEXT:    vmov.i32 q0, #0x8000
-; CHECK-NEXT:    adr r6, .LCPI3_4
-; CHECK-NEXT:    adr r5, .LCPI3_3
-; CHECK-NEXT:    adr r4, .LCPI3_2
+; CHECK-NEXT:    adr r7, .LCPI3_5
 ; CHECK-NEXT:    vstrw.32 q0, [sp, #160] @ 16-byte Spill
 ; CHECK-NEXT:    vldrw.u32 q0, [r7]
-; CHECK-NEXT:    adr.w r8, .LCPI3_1
-; CHECK-NEXT:    adr.w r12, .LCPI3_0
-; CHECK-NEXT:    adr r3, .LCPI3_6
+; CHECK-NEXT:    adr r6, .LCPI3_4
+; CHECK-NEXT:    adr r5, .LCPI3_3
 ; CHECK-NEXT:    vstrw.32 q0, [sp, #176] @ 16-byte Spill
 ; CHECK-NEXT:    vldrw.u32 q0, [r6]
-; CHECK-NEXT:    vldrw.u32 q1, [r3]
-; CHECK-NEXT:    adr r3, .LCPI3_7
+; CHECK-NEXT:    adr r4, .LCPI3_2
 ; CHECK-NEXT:    vstrw.32 q0, [sp, #144] @ 16-byte Spill
 ; CHECK-NEXT:    vldrw.u32 q0, [r5]
-; CHECK-NEXT:    adr r6, .LCPI3_10
-; CHECK-NEXT:    adr r7, .LCPI3_9
+; CHECK-NEXT:    adr.w r8, .LCPI3_1
 ; CHECK-NEXT:    vstrw.32 q0, [sp, #128] @ 16-byte Spill
 ; CHECK-NEXT:    vldrw.u32 q0, [r4]
-; CHECK-NEXT:    vstrw.32 q1, [sp, #192] @ 16-byte Spill
 ; CHECK-NEXT:    vstrw.32 q0, [sp, #112] @ 16-byte Spill
 ; CHECK-NEXT:    vldrw.u32 q0, [r8]
+; CHECK-NEXT:    adr.w r12, .LCPI3_0
 ; CHECK-NEXT:    vstrw.32 q0, [sp, #96] @ 16-byte Spill
 ; CHECK-NEXT:    vldrw.u32 q0, [r12]
+; CHECK-NEXT:    adr r3, .LCPI3_6
+; CHECK-NEXT:    adr r6, .LCPI3_10
+; CHECK-NEXT:    vldrw.u32 q1, [r3]
 ; CHECK-NEXT:    vstrw.32 q0, [sp, #80] @ 16-byte Spill
 ; CHECK-NEXT:    vmov.i32 q0, #0x7fff
+; CHECK-NEXT:    adr r3, .LCPI3_7
 ; CHECK-NEXT:    vstrw.32 q0, [sp, #64] @ 16-byte Spill
 ; CHECK-NEXT:    vldrw.u32 q0, [r3]
+; CHECK-NEXT:    adr r7, .LCPI3_9
 ; CHECK-NEXT:    adr r3, .LCPI3_8
 ; CHECK-NEXT:    vstrw.32 q0, [sp, #48] @ 16-byte Spill
 ; CHECK-NEXT:    vldrw.u32 q0, [r6]
+; CHECK-NEXT:    vstrw.32 q1, [sp, #192] @ 16-byte Spill
 ; CHECK-NEXT:    vstrw.32 q0, [sp, #32] @ 16-byte Spill
 ; CHECK-NEXT:    vldrw.u32 q0, [r7]
 ; CHECK-NEXT:    vstrw.32 q0, [sp, #16] @ 16-byte Spill

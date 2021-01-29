@@ -25,6 +25,8 @@ void foo() {
   [[intel::max_interleaving(4)]] int i[10];
   // expected-error@+1 {{intelfpga loop attributes must be applied to for, while, or do statements}}
   [[intel::speculated_iterations(6)]] int j[10];
+  // expected-error@+1 {{intelfpga loop attributes must be applied to for, while, or do statements}}
+  [[intel::nofusion]] int k[10];
 }
 
 // Test for deprecated spelling of Intel FPGA loop attributes
@@ -70,49 +72,52 @@ void foo_deprecated() {
 void boo() {
   int a[10];
   int b[10];
-  // expected-error@+1 {{duplicate argument to 'ivdep'. attribute requires one or both of a safelen and array}}
+  // expected-error@+1 {{duplicate argument to 'ivdep'; attribute requires one or both of a safelen and array}}
   [[intel::ivdep(2, 2)]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
-  // expected-warning@+1 {{'ii' attribute takes at least 1 argument - attribute ignored}}
+  // expected-warning@+1 {{'ii' attribute takes at least 1 argument; attribute ignored}}
   [[intel::ii]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
-  // expected-warning@+1 {{'ii' attribute takes no more than 1 argument - attribute ignored}}
+  // expected-warning@+1 {{'ii' attribute takes no more than 1 argument; attribute ignored}}
   [[intel::ii(2, 2)]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
-  // expected-warning@+1 {{'max_concurrency' attribute takes at least 1 argument - attribute ignored}}
+  // expected-warning@+1 {{'max_concurrency' attribute takes at least 1 argument; attribute ignored}}
   [[intel::max_concurrency]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
-  // expected-warning@+1 {{'max_concurrency' attribute takes no more than 1 argument - attribute ignored}}
+  // expected-warning@+1 {{'max_concurrency' attribute takes no more than 1 argument; attribute ignored}}
   [[intel::max_concurrency(2, 2)]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
 
-  // expected-error@+1 {{duplicate argument to 'ivdep'. attribute requires one or both of a safelen and array}}
+  // expected-error@+1 {{duplicate argument to 'ivdep'; attribute requires one or both of a safelen and array}}
   [[intel::ivdep(2, 3)]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
-  // expected-error@+1 {{duplicate argument to 'ivdep'. attribute requires one or both of a safelen and array}}
+  // expected-error@+1 {{duplicate argument to 'ivdep'; attribute requires one or both of a safelen and array}}
   [[intel::ivdep(a, b)]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
-  // expected-error@+1 {{unknown argument to 'ivdep'. Expected integer or array variable}}
+  // expected-error@+1 {{unknown argument to 'ivdep'; expected integer or array variable}}
   [[intel::ivdep(2, 3.0)]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
 
-  // expected-warning@+1 {{'disable_loop_pipelining' attribute takes no more than 0 arguments - attribute ignored}}
+  // expected-warning@+1 {{'disable_loop_pipelining' attribute takes no more than 0 arguments; attribute ignored}}
   [[intel::disable_loop_pipelining(0)]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
-  // expected-warning@+1 {{'loop_coalesce' attribute takes no more than 1 argument - attribute ignored}}
+  // expected-warning@+1 {{'loop_coalesce' attribute takes no more than 1 argument; attribute ignored}}
   [[intel::loop_coalesce(2, 3)]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
-  // expected-warning@+1 {{'max_interleaving' attribute takes at least 1 argument - attribute ignored}}
+  // expected-warning@+1 {{'max_interleaving' attribute takes at least 1 argument; attribute ignored}}
   [[intel::max_interleaving]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
-  // expected-warning@+1 {{'max_interleaving' attribute takes no more than 1 argument - attribute ignored}}
+  // expected-warning@+1 {{'max_interleaving' attribute takes no more than 1 argument; attribute ignored}}
   [[intel::max_interleaving(2, 4)]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
-  // expected-warning@+1 {{'speculated_iterations' attribute takes at least 1 argument - attribute ignored}}
+  // expected-warning@+1 {{'speculated_iterations' attribute takes at least 1 argument; attribute ignored}}
   [[intel::speculated_iterations]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
-  // expected-warning@+1 {{'speculated_iterations' attribute takes no more than 1 argument - attribute ignored}}
+  // expected-warning@+1 {{'speculated_iterations' attribute takes no more than 1 argument; attribute ignored}}
   [[intel::speculated_iterations(1, 2)]] for (int i = 0; i != 10; ++i)
+      a[i] = 0;
+  // expected-warning@+1 {{'nofusion' attribute takes no more than 0 arguments; attribute ignored}}
+  [[intel::nofusion(0)]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
 }
 
@@ -143,7 +148,7 @@ void goo() {
   // expected-error@+1 {{'speculated_iterations' attribute requires a non-negative integral compile time constant expression}}
   [[intel::speculated_iterations(-1)]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
-  // expected-error@+1 {{unknown argument to 'ivdep'. Expected integer or array variable}}
+  // expected-error@+1 {{unknown argument to 'ivdep'; expected integer or array variable}}
   [[intel::ivdep("test123")]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
   // expected-error@+1 {{'ii' attribute requires an integer constant}}
@@ -161,7 +166,7 @@ void goo() {
   // expected-error@+1 {{'speculated_iterations' attribute requires an integer constant}}
   [[intel::speculated_iterations("test123")]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
-  // expected-error@+1 {{unknown argument to 'ivdep'. Expected integer or array variable}}
+  // expected-error@+1 {{unknown argument to 'ivdep'; expected integer or array variable}}
   [[intel::ivdep("test123")]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
   // no diagnostics are expected
@@ -187,6 +192,10 @@ void goo() {
   // no diagnostics are expected
   [[intel::ivdep(2, s.ptr)]] for (int i = 0; i != 10; ++i)
       s.ptr[i] = 0;
+
+  // no diagnostics are expected
+  [[intel::nofusion]] for (int i = 0; i != 10; ++i)
+      a[i] = 0;
 }
 
 // Test for Intel FPGA loop attributes duplication
@@ -290,6 +299,11 @@ void zoo() {
   // expected-note@+1 {{previous attribute is here}}
   [[intel::ivdep(a, 3)]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
+
+  [[intel::nofusion]]
+  // expected-error@-1 {{duplicate Intel FPGA loop attribute 'nofusion'}}
+  [[intel::nofusion]] for (int i = 0; i != 10; ++i)
+      a[i] = 0;
 }
 
 // Test for Intel FPGA loop attributes compatibility
@@ -318,6 +332,10 @@ void loop_attrs_compatibility() {
   // expected-error@+1 {{disable_loop_pipelining and ivdep attributes are not compatible}}
   [[intel::disable_loop_pipelining]]
   [[intel::ivdep]] for (int i = 0; i != 10; ++i)
+      a[i] = 0;
+  // no diagnostics are expected
+  [[intel::disable_loop_pipelining]]
+  [[intel::nofusion]] for (int i = 0; i != 10; ++i)
       a[i] = 0;
 }
 

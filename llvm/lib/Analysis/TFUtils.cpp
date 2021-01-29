@@ -18,6 +18,8 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/ManagedStatic.h"
+#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 
 #include "tensorflow/c/c_api.h"
@@ -77,10 +79,15 @@ void writeTensorValues(raw_ostream &OutFile, const char *TensorData,
   OutFile << "]";
 }
 
-/// Untyped implementation of the API above.
+/// Write a list of tensors as a sequence of TensorFlow FeatureList protobufs.
+/// The tensors are assumed to be stored contiguously, in row-major format,
+/// in the TensorData buffer. Each tensor has the shape given by Spec. The
+/// feature name in the output is either the provided LoggingName, if
+/// specified, otherwise it's the name of the tensor (as given by Spec).
 void writeRawTensorsAsFeatureLists(raw_ostream &OutFile,
-                                   const Logger::LoggedFeatureSpec &LoggedSpec,
-                                   const char *TensorData, size_t TensorCount) {
+                                   const LoggedFeatureSpec &LoggedSpec,
+                                   const char *TensorData, size_t TensorCount,
+                                   bool FinalReward = false) {
   const char *FieldName = "<invalid>";
   std::function<void(const char *)> ValueWriter;
   const auto &Spec = LoggedSpec.Spec;
@@ -115,28 +122,30 @@ void writeRawTensorsAsFeatureLists(raw_ostream &OutFile,
           << "\" ";
   OutFile << "value: {\n";
   size_t TensorByteSize = Spec.getElementCount() * Spec.getElementByteSize();
-  for (const char *P = TensorData,
-                  *E = TensorData + TensorByteSize * TensorCount;
-       P < E; P += TensorByteSize) {
+
+  auto WriteFeatureProto = [&](const char *P) {
     OutFile << "      feature: { " << FieldName << ": { value: ";
     ValueWriter(P);
     OutFile << " } }\n";
+  };
+
+  const char *CurrentTensor = TensorData;
+  static int64_t Zero = 0;
+  // Write all but the last value. If this is the final reward, don't increment
+  // the CurrentTensor, and just write 0.
+  for (size_t I = 0; I < TensorCount - 1; ++I) {
+    if (FinalReward)
+      WriteFeatureProto(reinterpret_cast<const char *>(&Zero));
+    else {
+      WriteFeatureProto(CurrentTensor);
+      CurrentTensor += TensorByteSize;
+    }
   }
+
+  WriteFeatureProto(CurrentTensor);
+
   OutFile << "    }\n";
   OutFile << "  }\n";
-}
-
-/// Write a list of tensors as a sequence of TensorFlow FeatureList protobufs.
-/// The tensors are assumed to be stored contiguously, in row-major format,
-/// in the TensorData buffer. Each tensor has the shape given by Spec. The
-/// feature name in the output is either the provided LoggingName, if
-/// specified, otherwise it's the name of the tensor (as given by Spec).
-template <typename T>
-void writeTensorsAsFeatureLists(raw_ostream &OutFile,
-                                const Logger::LoggedFeatureSpec &Spec,
-                                const T *TensorData, size_t TensorCount) {
-  writeRawTensorsAsFeatureLists(
-      OutFile, Spec, reinterpret_cast<const char *>(TensorData), TensorCount);
 }
 } // namespace
 
@@ -208,12 +217,75 @@ Optional<TensorSpec> getTensorSpecFromJSON(LLVMContext &Ctx,
   return None;
 }
 
+Optional<std::vector<LoggedFeatureSpec>>
+loadOutputSpecs(LLVMContext &Ctx, StringRef ExpectedDecisionName,
+                StringRef ModelPath, StringRef SpecFileOverride) {
+  SmallVector<char, 128> OutputSpecsPath;
+  StringRef FileName = SpecFileOverride;
+  if (FileName.empty()) {
+    llvm::sys::path::append(OutputSpecsPath, ModelPath, "output_spec.json");
+    FileName = {OutputSpecsPath.data(), OutputSpecsPath.size()};
+  }
+
+  auto BufferOrError = MemoryBuffer::getFileOrSTDIN(FileName);
+  if (!BufferOrError) {
+    Ctx.emitError("Error opening output specs file: " + FileName + " : " +
+                  BufferOrError.getError().message());
+    return None;
+  }
+  auto ParsedJSONValues = json::parse(BufferOrError.get()->getBuffer());
+  if (!ParsedJSONValues) {
+    Ctx.emitError("Could not parse specs file: " + FileName);
+    return None;
+  }
+  auto ValuesArray = ParsedJSONValues->getAsArray();
+  if (!ValuesArray) {
+    Ctx.emitError("Expected an array of {tensor_spec:<TensorSpec>, "
+                  "logging_name:<name>} dictionaries");
+    return None;
+  }
+  std::vector<LoggedFeatureSpec> Ret;
+  for (const auto &Value : *ValuesArray)
+    if (const auto *Obj = Value.getAsObject())
+      if (const auto *SpecPart = Obj->get("tensor_spec"))
+        if (auto TensorSpec = getTensorSpecFromJSON(Ctx, *SpecPart))
+          if (auto LoggingName = Obj->getString("logging_name")) {
+            if (!TensorSpec->isElementType<int64_t>() &&
+                !TensorSpec->isElementType<int32_t>() &&
+                !TensorSpec->isElementType<float>()) {
+              Ctx.emitError(
+                  "Only int64, int32, and float tensors are supported. "
+                  "Found unsupported type for tensor named " +
+                  TensorSpec->name());
+              return None;
+            }
+            Ret.push_back({*TensorSpec, LoggingName->str()});
+          }
+
+  if (ValuesArray->size() != Ret.size()) {
+    Ctx.emitError(
+        "Unable to parse output spec. It should be a json file containing an "
+        "array of dictionaries. Each dictionary must have a 'tensor_spec' key, "
+        "with a json object describing a TensorSpec; and a 'logging_name' key, "
+        "which is a string to use as name when logging this tensor in the "
+        "training log.");
+    return None;
+  }
+  if (Ret.empty() || *Ret[0].LoggingName != ExpectedDecisionName) {
+    Ctx.emitError("The first output spec must describe the decision tensor, "
+                  "and must have the logging_name " +
+                  StringRef(ExpectedDecisionName));
+    return None;
+  }
+  return Ret;
+}
+
 class TFModelEvaluatorImpl {
 public:
   TFModelEvaluatorImpl(StringRef SavedModelPath,
                        const std::vector<TensorSpec> &InputSpecs,
-                       const std::vector<TensorSpec> &OutputSpecs,
-                       const char *Tags);
+                       function_ref<TensorSpec(size_t)> GetOutputSpecs,
+                       size_t OutputSpecsSize, const char *Tags);
 
   bool isValid() const { return IsValid; }
   size_t OutputSize() const { return OutputFeed.size(); }
@@ -264,10 +336,11 @@ private:
 
 TFModelEvaluatorImpl::TFModelEvaluatorImpl(
     StringRef SavedModelPath, const std::vector<TensorSpec> &InputSpecs,
-    const std::vector<TensorSpec> &OutputSpecs, const char *Tags)
+    function_ref<TensorSpec(size_t)> GetOutputSpecs, size_t OutputSpecsSize,
+    const char *Tags = "serve")
     : Graph(createTFGraph()), Options(createTFSessionOptions()),
       InputFeed(InputSpecs.size()), Input(InputSpecs.size()),
-      OutputFeed(OutputSpecs.size()) {
+      OutputFeed(OutputSpecsSize) {
   if (!ensureInitTF()) {
     errs() << "Tensorflow should have been initialized";
     return;
@@ -291,8 +364,8 @@ TFModelEvaluatorImpl::TFModelEvaluatorImpl(
     initInput(I, static_cast<TF_DataType>(InputSpec.typeIndex()),
               InputSpec.shape());
   }
-  for (size_t I = 0; I < OutputSpecs.size(); ++I) {
-    auto &OutputSpec = OutputSpecs[I];
+  for (size_t I = 0; I < OutputSpecsSize; ++I) {
+    auto OutputSpec = GetOutputSpecs(I);
     OutputFeed[I] = {
         TF_GraphOperationByName(Graph.get(), (OutputSpec.name()).c_str()),
         OutputSpec.port()};
@@ -301,15 +374,23 @@ TFModelEvaluatorImpl::TFModelEvaluatorImpl(
   }
 }
 
+TFModelEvaluator::TFModelEvaluator(
+    StringRef SavedModelPath, const std::vector<TensorSpec> &InputSpecs,
+    function_ref<TensorSpec(size_t)> GetOutputSpecs, size_t OutputSpecsSize,
+    const char *Tags)
+    : Impl(new TFModelEvaluatorImpl(SavedModelPath, InputSpecs, GetOutputSpecs,
+                                    OutputSpecsSize, Tags)) {
+  if (!Impl->isValid())
+    Impl.reset();
+}
+
 TFModelEvaluator::TFModelEvaluator(StringRef SavedModelPath,
                                    const std::vector<TensorSpec> &InputSpecs,
                                    const std::vector<TensorSpec> &OutputSpecs,
                                    const char *Tags)
-    : Impl(new TFModelEvaluatorImpl(SavedModelPath, InputSpecs, OutputSpecs,
-                                    Tags)) {
-  if (!Impl->isValid())
-    Impl.reset();
-}
+    : TFModelEvaluator(
+          SavedModelPath, InputSpecs, [&](size_t I) { return OutputSpecs[I]; },
+          OutputSpecs.size(), Tags) {}
 
 TFModelEvaluatorImpl::~TFModelEvaluatorImpl() {
   for (auto *T : Input) {
@@ -405,15 +486,19 @@ void Logger::print(raw_ostream &OS) {
   size_t NumberOfRecords = RawLogData[0].size() / Tensor0Size;
   if (NumberOfRecords == 0)
     return;
+  size_t RewardSize =
+      RewardSpec.getElementCount() * RewardSpec.getElementByteSize();
+  size_t NumberOfRewards = RawLogData.back().size() / RewardSize;
 
   OS << "feature_lists: {\n";
   for (size_t I = 0; I < FeatureSpecs.size(); ++I)
-    writeTensorsAsFeatureLists(OS, FeatureSpecs[I], RawLogData[I].data(),
-                               NumberOfRecords);
+    writeRawTensorsAsFeatureLists(OS, FeatureSpecs[I], RawLogData[I].data(),
+                                  NumberOfRecords);
 
   if (IncludeReward)
-    writeTensorsAsFeatureLists(OS, {RewardSpec, None}, RawLogData.back().data(),
-                               NumberOfRecords);
+    writeRawTensorsAsFeatureLists(OS, {RewardSpec, None},
+                                  RawLogData.back().data(), NumberOfRecords,
+                                  NumberOfRewards == 1);
 
   OS << "}\n";
 }

@@ -959,8 +959,7 @@ Instruction *InstCombinerImpl::FoldOpIntoSelect(Instruction &Op,
       return nullptr;
 
     // If vectors, verify that they have the same number of elements.
-    if (SrcTy && cast<FixedVectorType>(SrcTy)->getNumElements() !=
-                     cast<FixedVectorType>(DestTy)->getNumElements())
+    if (SrcTy && SrcTy->getElementCount() != DestTy->getElementCount())
       return nullptr;
   }
 
@@ -1083,9 +1082,11 @@ Instruction *InstCombinerImpl::foldOpIntoPhi(Instruction &I, PHINode *PN) {
   // operation in that block.  However, if this is a critical edge, we would be
   // inserting the computation on some other paths (e.g. inside a loop).  Only
   // do this if the pred block is unconditionally branching into the phi block.
+  // Also, make sure that the pred block is not dead code.
   if (NonConstBB != nullptr) {
     BranchInst *BI = dyn_cast<BranchInst>(NonConstBB->getTerminator());
-    if (!BI || !BI->isUnconditional()) return nullptr;
+    if (!BI || !BI->isUnconditional() || !DT.isReachableFromEntry(NonConstBB))
+      return nullptr;
   }
 
   // Okay, we can do the transformation: create the new PHI node.
@@ -1513,8 +1514,7 @@ Value *InstCombinerImpl::Descale(Value *Val, APInt Scale, bool &NoSignedWrap) {
 }
 
 Instruction *InstCombinerImpl::foldVectorBinop(BinaryOperator &Inst) {
-  // FIXME: some of this is likely fine for scalable vectors
-  if (!isa<FixedVectorType>(Inst.getType()))
+  if (!isa<VectorType>(Inst.getType()))
     return nullptr;
 
   BinaryOperator::BinaryOps Opcode = Inst.getOpcode();
@@ -1603,13 +1603,16 @@ Instruction *InstCombinerImpl::foldVectorBinop(BinaryOperator &Inst) {
   // intends to move shuffles closer to other shuffles and binops closer to
   // other binops, so they can be folded. It may also enable demanded elements
   // transforms.
-  unsigned NumElts = cast<FixedVectorType>(Inst.getType())->getNumElements();
   Constant *C;
-  if (match(&Inst,
+  auto *InstVTy = dyn_cast<FixedVectorType>(Inst.getType());
+  if (InstVTy &&
+      match(&Inst,
             m_c_BinOp(m_OneUse(m_Shuffle(m_Value(V1), m_Undef(), m_Mask(Mask))),
-                      m_Constant(C))) && !isa<ConstantExpr>(C) &&
-      cast<FixedVectorType>(V1->getType())->getNumElements() <= NumElts) {
-    assert(Inst.getType()->getScalarType() == V1->getType()->getScalarType() &&
+                      m_Constant(C))) &&
+      !isa<ConstantExpr>(C) &&
+      cast<FixedVectorType>(V1->getType())->getNumElements() <=
+          InstVTy->getNumElements()) {
+    assert(InstVTy->getScalarType() == V1->getType()->getScalarType() &&
            "Shuffle should not change scalar type");
 
     // Find constant NewC that has property:
@@ -1624,6 +1627,7 @@ Instruction *InstCombinerImpl::foldVectorBinop(BinaryOperator &Inst) {
     UndefValue *UndefScalar = UndefValue::get(C->getType()->getScalarType());
     SmallVector<Constant *, 16> NewVecC(SrcVecNumElts, UndefScalar);
     bool MayChange = true;
+    unsigned NumElts = InstVTy->getNumElements();
     for (unsigned I = 0; I < NumElts; ++I) {
       Constant *CElt = C->getAggregateElement(I);
       if (ShMask[I] >= 0) {
@@ -2377,9 +2381,9 @@ Instruction *InstCombinerImpl::visitGetElementPtrInst(GetElementPtrInst &GEP) {
              DL.getTypeAllocSize(ArrTy) == DL.getTypeAllocSize(VecTy);
     };
     if (GEP.getNumOperands() == 3 &&
-        ((GEPEltType->isArrayTy() && SrcEltType->isVectorTy() &&
+        ((GEPEltType->isArrayTy() && isa<FixedVectorType>(SrcEltType) &&
           areMatchingArrayAndVecTypes(GEPEltType, SrcEltType, DL)) ||
-         (GEPEltType->isVectorTy() && SrcEltType->isArrayTy() &&
+         (isa<FixedVectorType>(GEPEltType) && SrcEltType->isArrayTy() &&
           areMatchingArrayAndVecTypes(SrcEltType, GEPEltType, DL)))) {
 
       // Create a new GEP here, as using `setOperand()` followed by
@@ -2589,10 +2593,10 @@ Instruction *InstCombinerImpl::visitAllocSite(Instruction &MI) {
 
   // If we are removing an alloca with a dbg.declare, insert dbg.value calls
   // before each store.
-  TinyPtrVector<DbgVariableIntrinsic *> DIIs;
+  SmallVector<DbgVariableIntrinsic *, 8> DVIs;
   std::unique_ptr<DIBuilder> DIB;
   if (isa<AllocaInst>(MI)) {
-    DIIs = FindDbgAddrUses(&MI);
+    findDbgUsers(DVIs, &MI);
     DIB.reset(new DIBuilder(*MI.getModule(), /*AllowUnresolved=*/false));
   }
 
@@ -2626,8 +2630,9 @@ Instruction *InstCombinerImpl::visitAllocSite(Instruction &MI) {
                             ConstantInt::get(Type::getInt1Ty(C->getContext()),
                                              C->isFalseWhenEqual()));
       } else if (auto *SI = dyn_cast<StoreInst>(I)) {
-        for (auto *DII : DIIs)
-          ConvertDebugDeclareToDebugValue(DII, SI, *DIB);
+        for (auto *DVI : DVIs)
+          if (DVI->isAddressOfVariable())
+            ConvertDebugDeclareToDebugValue(DVI, SI, *DIB);
       } else {
         // Casts, GEP, or anything else: we're about to delete this instruction,
         // so it can not have any valid uses.
@@ -2644,8 +2649,31 @@ Instruction *InstCombinerImpl::visitAllocSite(Instruction &MI) {
                          None, "", II->getParent());
     }
 
-    for (auto *DII : DIIs)
-      eraseInstFromFunction(*DII);
+    // Remove debug intrinsics which describe the value contained within the
+    // alloca. In addition to removing dbg.{declare,addr} which simply point to
+    // the alloca, remove dbg.value(<alloca>, ..., DW_OP_deref)'s as well, e.g.:
+    //
+    // ```
+    //   define void @foo(i32 %0) {
+    //     %a = alloca i32                              ; Deleted.
+    //     store i32 %0, i32* %a
+    //     dbg.value(i32 %0, "arg0")                    ; Not deleted.
+    //     dbg.value(i32* %a, "arg0", DW_OP_deref)      ; Deleted.
+    //     call void @trivially_inlinable_no_op(i32* %a)
+    //     ret void
+    //  }
+    // ```
+    //
+    // This may not be required if we stop describing the contents of allocas
+    // using dbg.value(<alloca>, ..., DW_OP_deref), but we currently do this in
+    // the LowerDbgDeclare utility.
+    //
+    // If there is a dead store to `%a` in @trivially_inlinable_no_op, the
+    // "arg0" dbg.value may be stale after the call. However, failing to remove
+    // the DW_OP_deref dbg.value causes large gaps in location coverage.
+    for (auto *DVI : DVIs)
+      if (DVI->isAddressOfVariable() || DVI->getExpression()->startsWithDeref())
+        DVI->eraseFromParent();
 
     return eraseInstFromFunction(MI);
   }
@@ -3081,10 +3109,11 @@ static bool isCatchAll(EHPersonality Personality, Constant *TypeInfo) {
   case EHPersonality::GNU_CXX_SjLj:
   case EHPersonality::GNU_ObjC:
   case EHPersonality::MSVC_X86SEH:
-  case EHPersonality::MSVC_Win64SEH:
+  case EHPersonality::MSVC_TableSEH:
   case EHPersonality::MSVC_CXX:
   case EHPersonality::CoreCLR:
   case EHPersonality::Wasm_CXX:
+  case EHPersonality::XL_CXX:
     return TypeInfo->isNullValue();
   }
   llvm_unreachable("invalid enum");
@@ -3613,7 +3642,9 @@ bool InstCombinerImpl::run() {
         else
           UserParent = UserInst->getParent();
 
-        if (UserParent != BB) {
+        // Try sinking to another block. If that block is unreachable, then do
+        // not bother. SimplifyCFG should handle it.
+        if (UserParent != BB && DT.isReachableFromEntry(UserParent)) {
           // See if the user is one of our successors that has only one
           // predecessor, so that we don't have to split the critical edge.
           bool ShouldSink = UserParent->getUniquePredecessor() == BB;
@@ -3647,7 +3678,8 @@ bool InstCombinerImpl::run() {
 
     // Now that we have an instruction, try combining it to simplify it.
     Builder.SetInsertPoint(I);
-    Builder.SetCurrentDebugLocation(I->getDebugLoc());
+    Builder.CollectMetadataToCopy(
+        I, {LLVMContext::MD_dbg, LLVMContext::MD_annotation});
 
 #ifndef NDEBUG
     std::string OrigI;
@@ -3662,8 +3694,8 @@ bool InstCombinerImpl::run() {
         LLVM_DEBUG(dbgs() << "IC: Old = " << *I << '\n'
                           << "    New = " << *Result << '\n');
 
-        if (I->getDebugLoc())
-          Result->setDebugLoc(I->getDebugLoc());
+        Result->copyMetadata(*I,
+                             {LLVMContext::MD_dbg, LLVMContext::MD_annotation});
         // Everything uses the new instruction now.
         I->replaceAllUsesWith(Result);
 

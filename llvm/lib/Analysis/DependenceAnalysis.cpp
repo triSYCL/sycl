@@ -653,8 +653,10 @@ static AliasResult underlyingObjectsAlias(AAResults *AA,
                                           const MemoryLocation &LocB) {
   // Check the original locations (minus size) for noalias, which can happen for
   // tbaa, incompatible underlying object locations, etc.
-  MemoryLocation LocAS(LocA.Ptr, LocationSize::unknown(), LocA.AATags);
-  MemoryLocation LocBS(LocB.Ptr, LocationSize::unknown(), LocB.AATags);
+  MemoryLocation LocAS =
+      MemoryLocation::getBeforeOrAfter(LocA.Ptr, LocA.AATags);
+  MemoryLocation LocBS =
+      MemoryLocation::getBeforeOrAfter(LocB.Ptr, LocB.AATags);
   if (AA->alias(LocAS, LocBS) == NoAlias)
     return NoAlias;
 
@@ -871,8 +873,8 @@ void DependenceInfo::removeMatchingExtensions(Subscript *Pair) {
   const SCEV *Dst = Pair->Dst;
   if ((isa<SCEVZeroExtendExpr>(Src) && isa<SCEVZeroExtendExpr>(Dst)) ||
       (isa<SCEVSignExtendExpr>(Src) && isa<SCEVSignExtendExpr>(Dst))) {
-    const SCEVCastExpr *SrcCast = cast<SCEVCastExpr>(Src);
-    const SCEVCastExpr *DstCast = cast<SCEVCastExpr>(Dst);
+    const SCEVIntegralCastExpr *SrcCast = cast<SCEVIntegralCastExpr>(Src);
+    const SCEVIntegralCastExpr *DstCast = cast<SCEVIntegralCastExpr>(Dst);
     const SCEV *SrcCastOp = SrcCast->getOperand();
     const SCEV *DstCastOp = DstCast->getOperand();
     if (SrcCastOp->getType() == DstCastOp->getType()) {
@@ -969,8 +971,8 @@ bool DependenceInfo::isKnownPredicate(ICmpInst::Predicate Pred, const SCEV *X,
          isa<SCEVSignExtendExpr>(Y)) ||
         (isa<SCEVZeroExtendExpr>(X) &&
          isa<SCEVZeroExtendExpr>(Y))) {
-      const SCEVCastExpr *CX = cast<SCEVCastExpr>(X);
-      const SCEVCastExpr *CY = cast<SCEVCastExpr>(Y);
+      const SCEVIntegralCastExpr *CX = cast<SCEVIntegralCastExpr>(X);
+      const SCEVIntegralCastExpr *CY = cast<SCEVIntegralCastExpr>(Y);
       const SCEV *Xop = CX->getOperand();
       const SCEV *Yop = CY->getOperand();
       if (Xop->getType() == Yop->getType()) {

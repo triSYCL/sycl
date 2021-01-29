@@ -1068,9 +1068,9 @@ AMDGPULegalizerInfo::AMDGPULegalizerInfo(const GCNSubtarget &ST_,
     return false;
   };
 
-  unsigned GlobalAlign32 = ST.hasUnalignedBufferAccess() ? 0 : 32;
-  unsigned GlobalAlign16 = ST.hasUnalignedBufferAccess() ? 0 : 16;
-  unsigned GlobalAlign8 = ST.hasUnalignedBufferAccess() ? 0 : 8;
+  unsigned GlobalAlign32 = ST.hasUnalignedBufferAccessEnabled() ? 0 : 32;
+  unsigned GlobalAlign16 = ST.hasUnalignedBufferAccessEnabled() ? 0 : 16;
+  unsigned GlobalAlign8 = ST.hasUnalignedBufferAccessEnabled() ? 0 : 8;
 
   // TODO: Refine based on subtargets which support unaligned access or 128-bit
   // LDS
@@ -2260,7 +2260,7 @@ bool AMDGPULegalizerInfo::legalizeGlobalValue(
   SIMachineFunctionInfo *MFI = MF.getInfo<SIMachineFunctionInfo>();
 
   if (AS == AMDGPUAS::LOCAL_ADDRESS || AS == AMDGPUAS::REGION_ADDRESS) {
-    if (!MFI->isEntryFunction()) {
+    if (!MFI->isModuleEntryFunction()) {
       const Function &Fn = MF.getFunction();
       DiagnosticInfoUnsupported BadLDSDecl(
         Fn, "local memory global used by non-kernel function", MI.getDebugLoc(),
@@ -2695,7 +2695,7 @@ bool AMDGPULegalizerInfo::loadInputValue(Register DstReg, MachineIRBuilder &B,
                                          const TargetRegisterClass *ArgRC,
                                          LLT ArgTy) const {
   MCRegister SrcReg = Arg->getRegister();
-  assert(SrcReg.isPhysical() && "Physical register expected");
+  assert(Register::isPhysicalRegister(SrcReg) && "Physical register expected");
   assert(DstReg.isVirtual() && "Virtual register expected");
 
   Register LiveIn = getFunctionLiveInPhysReg(B.getMF(), B.getTII(), SrcReg, *ArgRC,
@@ -3488,11 +3488,10 @@ AMDGPULegalizerInfo::splitBufferOffsets(MachineIRBuilder &B,
   const unsigned MaxImm = 4095;
   Register BaseReg;
   unsigned TotalConstOffset;
-  MachineInstr *OffsetDef;
   const LLT S32 = LLT::scalar(32);
 
-  std::tie(BaseReg, TotalConstOffset, OffsetDef)
-    = AMDGPU::getBaseWithConstantOffset(*B.getMRI(), OrigOffset);
+  std::tie(BaseReg, TotalConstOffset) =
+      AMDGPU::getBaseWithConstantOffset(*B.getMRI(), OrigOffset);
 
   unsigned ImmOffset = TotalConstOffset;
 
@@ -3561,9 +3560,9 @@ Register AMDGPULegalizerInfo::handleD16VData(MachineIRBuilder &B,
       auto Unmerge = B.buildUnmerge(S16, Reg);
       for (int I = 0, E = Unmerge->getNumOperands() - 1; I != E; ++I)
         PackedRegs.push_back(Unmerge.getReg(I));
-      PackedRegs.resize(8, B.buildUndef(S16).getReg(0));
-      Reg = B.buildBuildVector(LLT::vector(8, S16), PackedRegs).getReg(0);
-      return B.buildBitcast(LLT::vector(4, S32), Reg).getReg(0);
+      PackedRegs.resize(6, B.buildUndef(S16).getReg(0));
+      Reg = B.buildBuildVector(LLT::vector(6, S16), PackedRegs).getReg(0);
+      return B.buildBitcast(LLT::vector(3, S32), Reg).getReg(0);
     }
 
     if (StoreVT.getNumElements() == 4) {
@@ -4625,10 +4624,9 @@ bool AMDGPULegalizerInfo::legalizeIntrinsic(LegalizerHelper &Helper,
           .addMBB(UncondBrTarget);
       } else {
         B.buildInstr(AMDGPU::SI_ELSE)
-          .addDef(Def)
-          .addUse(Use)
-          .addMBB(UncondBrTarget)
-          .addImm(0);
+            .addDef(Def)
+            .addUse(Use)
+            .addMBB(UncondBrTarget);
       }
 
       if (Br) {

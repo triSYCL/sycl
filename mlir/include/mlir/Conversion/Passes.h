@@ -9,8 +9,8 @@
 #ifndef MLIR_CONVERSION_PASSES_H
 #define MLIR_CONVERSION_PASSES_H
 
-#include "mlir/Conversion/AVX512ToLLVM/ConvertAVX512ToLLVM.h"
 #include "mlir/Conversion/AffineToStandard/AffineToStandard.h"
+#include "mlir/Conversion/AsyncToLLVM/AsyncToLLVM.h"
 #include "mlir/Conversion/GPUCommon/GPUCommonPass.h"
 #include "mlir/Conversion/GPUToNVVM/GPUToNVVMPass.h"
 #include "mlir/Conversion/GPUToROCDL/GPUToROCDLPass.h"
@@ -20,7 +20,9 @@
 #include "mlir/Conversion/LinalgToSPIRV/LinalgToSPIRVPass.h"
 #include "mlir/Conversion/LinalgToStandard/LinalgToStandard.h"
 #include "mlir/Conversion/OpenMPToLLVM/ConvertOpenMPToLLVM.h"
+#include "mlir/Conversion/PDLToPDLInterp/PDLToPDLInterp.h"
 #include "mlir/Conversion/SCFToGPU/SCFToGPUPass.h"
+#include "mlir/Conversion/SCFToOpenMP/SCFToOpenMP.h"
 #include "mlir/Conversion/SCFToStandard/SCFToStandard.h"
 #include "mlir/Conversion/SPIRVToLLVM/ConvertSPIRVToLLVMPass.h"
 #include "mlir/Conversion/ShapeToStandard/ShapeToStandard.h"

@@ -57,7 +57,7 @@ The improvements are...
 Improvements to clang-query
 ---------------------------
 
-The improvements are...
+- The IgnoreImplicitCastsAndParentheses traversal mode has been removed.
 
 Improvements to clang-rename
 ----------------------------
@@ -73,6 +73,9 @@ Improvements to clang-tidy
   <clang-tidy/checks/cppcoreguidelines-init-variables>` and
   :doc:`modernize-make-unique <clang-tidy/checks/modernize-make-unique>`.
 
+- CheckOptions that take boolean values now support all spellings supported in 
+  the `YAML format <https://yaml.org/type/bool.html>`_.
+
 New modules
 ^^^^^^^^^^^
 
@@ -82,8 +85,25 @@ New modules
   `Altera SDK for OpenCL: Best Practices Guide
   <https://www.altera.com/en_US/pdfs/literature/hb/opencl-sdk/aocl_optimization_guide.pdf>`_.
 
+- New ``concurrency`` module.
+
+  Includes checks related to concurrent programming (e.g. threads, fibers,
+  coroutines, etc.).
+
 New checks
 ^^^^^^^^^^
+
+- New :doc:`altera-kernel-name-restriction
+  <clang-tidy/checks/altera-kernel-name-restriction>` check.
+
+  Finds kernel files and include directives whose filename is `kernel.cl`,
+  `Verilog.cl`, or `VHDL.cl`.
+
+- New :doc:`altera-single-work-item-barrier
+  <clang-tidy/checks/altera-single-work-item-barrier>` check.
+
+  Finds OpenCL kernel functions that call a barrier function but do not call
+  an ID function.
 
 - New :doc:`altera-struct-pack-align
   <clang-tidy/checks/altera-struct-pack-align>` check.
@@ -106,6 +126,29 @@ New checks
   Finds condition variables in nested ``if`` statements that were also checked
   in the outer ``if`` statement and were not changed.
 
+- New :doc:`concurrency-mt-unsafe <clang-tidy/checks/concurrency-mt-unsafe>`
+  check.
+
+  Finds thread-unsafe functions usage. Currently knows about POSIX and
+  Glibc function sets.
+
+- New :doc:`bugprone-signal-handler
+  <clang-tidy/checks/bugprone-signal-handler>` check.
+
+  Finds functions registered as signal handlers that call non asynchronous-safe
+  functions.
+
+- New :doc:`cert-sig30-c
+  <clang-tidy/checks/cert-sig30-c>` check.
+
+  Alias to the :doc:`bugprone-signal-handler
+  <clang-tidy/checks/bugprone-signal-handler>` check.
+
+- New :doc:`performance-no-int-to-ptr
+  <clang-tidy/checks/performance-no-int-to-ptr>` check.
+
+  Diagnoses every integer to pointer cast.
+
 - New :doc:`readability-function-cognitive-complexity
   <clang-tidy/checks/readability-function-cognitive-complexity>` check.
 
@@ -114,14 +157,33 @@ New checks
 Changes in existing checks
 ^^^^^^^^^^^^^^^^^^^^^^^^^^
 
+- Improved :doc:`modernize-loop-convert
+  <clang-tidy/checks/modernize-loop-convert>` check.
+
+  Now able to transform iterator loops using ``rbegin`` and ``rend`` methods.
+
 - Improved :doc:`readability-identifier-naming
   <clang-tidy/checks/readability-identifier-naming>` check.
 
   Added an option `GetConfigPerFile` to support including files which use
   different naming styles.
 
+  Now renames overridden virtual methods if the method they override has a
+  style violation.
+  
+  Added support for specifying the style of scoped ``enum`` constants. If 
+  unspecified, will fall back to the style for regular ``enum`` constants.
+
+  Added an option `IgnoredRegexp` per identifier type to suppress identifier
+  naming checks for names matching a regular expression.
+
 - Removed `google-runtime-references` check because the rule it checks does
   not exist in the Google Style Guide anymore.
+
+- Improved :doc:`readability-redundant-string-init
+  <clang-tidy/checks/readability-redundant-string-init>` check.
+
+  Added `std::basic_string_view` to default list of ``string``-like types.
 
 Improvements to include-fixer
 -----------------------------

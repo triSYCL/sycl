@@ -647,7 +647,7 @@ void TpiSource::mergeTypeRecord(TypeIndex curIndex, CVType ty) {
   merged.recHashes.push_back(pdbHash);
 
   // Retain a mapping from PDB function id to PDB function type. This mapping is
-  // used during symbol procesing to rewrite S_GPROC32_ID symbols to S_GPROC32
+  // used during symbol processing to rewrite S_GPROC32_ID symbols to S_GPROC32
   // symbols.
   if (ty.kind() == LF_FUNC_ID || ty.kind() == LF_MFUNC_ID) {
     bool success = ty.length() >= 12;
@@ -732,7 +732,7 @@ void TypeServerSource::loadGHashes() {
     return;
   Expected<pdb::TpiStream &> expectedIpi = pdbFile.getPDBIpiStream();
   if (auto e = expectedIpi.takeError())
-    fatal("error retreiving IPI stream: " + toString(std::move(e)));
+    fatal("error retrieving IPI stream: " + toString(std::move(e)));
   ipiSrc->assignGHashesFromVector(
       GloballyHashedType::hashIds(expectedIpi->typeArray(), ghashes));
 
@@ -1051,7 +1051,7 @@ void TypeMerger::mergeTypesWithGHash() {
   // the contents of the hash table cell, but we can remember the insertion
   // position. Because the table does not rehash, the position will not change
   // under insertion. After insertion is done, the value of the cell can be read
-  // to retreive the final PDB type index.
+  // to retrieve the final PDB type index.
   parallelForEachN(0, TpiSource::instances.size(), [&](size_t tpiSrcIdx) {
     TpiSource *source = TpiSource::instances[tpiSrcIdx];
     source->indexMapStorage.resize(source->ghashes.size());
@@ -1088,7 +1088,8 @@ void TypeMerger::mergeTypesWithGHash() {
   }
   parallelSort(entries, std::less<GHashCell>());
   log(formatv("ghash table load factor: {0:p} (size {1} / capacity {2})\n",
-              double(entries.size()) / tableSize, entries.size(), tableSize));
+              tableSize ? double(entries.size()) / tableSize : 0,
+              entries.size(), tableSize));
 
   // Find out how many type and item indices there are.
   auto mid =

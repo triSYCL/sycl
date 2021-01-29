@@ -15,11 +15,12 @@
 
 #include "mlir/IR/AffineMap.h"
 #include "mlir/IR/Attributes.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/OpDefinition.h"
-#include "mlir/IR/StandardTypes.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Interfaces/VectorInterfaces.h"
+#include "mlir/Interfaces/ViewLikeInterface.h"
 
 namespace mlir {
 class MLIRContext;

@@ -295,9 +295,22 @@ Constant *FoldBitCast(Constant *C, Type *DestTy, const DataLayout &DL) {
 /// If this constant is a constant offset from a global, return the global and
 /// the constant. Because of constantexprs, this function is recursive.
 bool llvm::IsConstantOffsetFromGlobal(Constant *C, GlobalValue *&GV,
-                                      APInt &Offset, const DataLayout &DL) {
+                                      APInt &Offset, const DataLayout &DL,
+                                      DSOLocalEquivalent **DSOEquiv) {
+  if (DSOEquiv)
+    *DSOEquiv = nullptr;
+
   // Trivial case, constant is the global.
   if ((GV = dyn_cast<GlobalValue>(C))) {
+    unsigned BitWidth = DL.getIndexTypeSizeInBits(GV->getType());
+    Offset = APInt(BitWidth, 0);
+    return true;
+  }
+
+  if (auto *FoundDSOEquiv = dyn_cast<DSOLocalEquivalent>(C)) {
+    if (DSOEquiv)
+      *DSOEquiv = FoundDSOEquiv;
+    GV = FoundDSOEquiv->getGlobalValue();
     unsigned BitWidth = DL.getIndexTypeSizeInBits(GV->getType());
     Offset = APInt(BitWidth, 0);
     return true;
@@ -310,7 +323,8 @@ bool llvm::IsConstantOffsetFromGlobal(Constant *C, GlobalValue *&GV,
   // Look through ptr->int and ptr->ptr casts.
   if (CE->getOpcode() == Instruction::PtrToInt ||
       CE->getOpcode() == Instruction::BitCast)
-    return IsConstantOffsetFromGlobal(CE->getOperand(0), GV, Offset, DL);
+    return IsConstantOffsetFromGlobal(CE->getOperand(0), GV, Offset, DL,
+                                      DSOEquiv);
 
   // i32* getelementptr ([5 x i32]* @a, i32 0, i32 5)
   auto *GEP = dyn_cast<GEPOperator>(CE);
@@ -321,7 +335,8 @@ bool llvm::IsConstantOffsetFromGlobal(Constant *C, GlobalValue *&GV,
   APInt TmpOffset(BitWidth, 0);
 
   // If the base isn't a global+constant, we aren't either.
-  if (!IsConstantOffsetFromGlobal(CE->getOperand(0), GV, TmpOffset, DL))
+  if (!IsConstantOffsetFromGlobal(CE->getOperand(0), GV, TmpOffset, DL,
+                                  DSOEquiv))
     return false;
 
   // Otherwise, add any offset that our operands provide.
@@ -1504,6 +1519,7 @@ bool llvm::canConstantFoldCallTo(const CallBase *Call, const Function *F) {
   case Intrinsic::amdgcn_cubesc:
   case Intrinsic::amdgcn_cubetc:
   case Intrinsic::amdgcn_fmul_legacy:
+  case Intrinsic::amdgcn_fma_legacy:
   case Intrinsic::amdgcn_fract:
   case Intrinsic::amdgcn_ldexp:
   case Intrinsic::amdgcn_sin:
@@ -2371,8 +2387,8 @@ static Constant *ConstantFoldScalarCall2(StringRef Name,
       if (IntrinsicID == Intrinsic::amdgcn_fmul_legacy) {
         const APFloat &C1 = Op1->getValueAPF();
         const APFloat &C2 = Op2->getValueAPF();
-        // The legacy behaviour is that multiplying zero by anything, even NaN
-        // or infinity, gives +0.0.
+        // The legacy behaviour is that multiplying +/- 0.0 by anything, even
+        // NaN or infinity, gives +0.0.
         if (C1.isZero() || C2.isZero())
           return ConstantFP::getNullValue(Ty);
         return ConstantFP::get(Ty->getContext(), C1 * C2);
@@ -2706,6 +2722,19 @@ static Constant *ConstantFoldScalarCall3(StringRef Name,
       if (const auto *Op3 = dyn_cast<ConstantFP>(Operands[2])) {
         switch (IntrinsicID) {
         default: break;
+        case Intrinsic::amdgcn_fma_legacy: {
+          const APFloat &C1 = Op1->getValueAPF();
+          const APFloat &C2 = Op2->getValueAPF();
+          // The legacy behaviour is that multiplying +/- 0.0 by anything, even
+          // NaN or infinity, gives +0.0.
+          if (C1.isZero() || C2.isZero()) {
+            const APFloat &C3 = Op3->getValueAPF();
+            // It's tempting to just return C3 here, but that would give the
+            // wrong result if C3 was -0.0.
+            return ConstantFP::get(Ty->getContext(), APFloat(0.0f) + C3);
+          }
+          LLVM_FALLTHROUGH;
+        }
         case Intrinsic::fma:
         case Intrinsic::fmuladd: {
           APFloat V = Op1->getValueAPF();

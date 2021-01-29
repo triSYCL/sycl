@@ -19,43 +19,7 @@ include "VOPInstructions.td"
 include "SMInstructions.td"
 include "FLATInstructions.td"
 include "BUFInstructions.td"
-
-//===----------------------------------------------------------------------===//
-// EXP Instructions
-//===----------------------------------------------------------------------===//
-
-defm EXP : EXP_m<0>;
-defm EXP_DONE : EXP_m<1>;
-
-class ExpPattern<ValueType vt, Instruction Inst, int done_val> : GCNPat<
-  (int_amdgcn_exp timm:$tgt, timm:$en,
-                  (vt ExpSrc0:$src0), (vt ExpSrc1:$src1),
-                  (vt ExpSrc2:$src2), (vt ExpSrc3:$src3),
-                  done_val, timm:$vm),
-  (Inst timm:$tgt, ExpSrc0:$src0, ExpSrc1:$src1,
-        ExpSrc2:$src2, ExpSrc3:$src3, timm:$vm, 0, timm:$en)
->;
-
-class ExpComprPattern<ValueType vt, Instruction Inst, int done_val> : GCNPat<
-  (int_amdgcn_exp_compr timm:$tgt, timm:$en,
-                        (vt ExpSrc0:$src0), (vt ExpSrc1:$src1),
-                        done_val, timm:$vm),
-  (Inst timm:$tgt, ExpSrc0:$src0, ExpSrc1:$src1,
-        (IMPLICIT_DEF), (IMPLICIT_DEF), timm:$vm, 1, timm:$en)
->;
-
-// FIXME: The generated DAG matcher seems to have strange behavior
-// with a 1-bit literal to match, so use a -1 for checking a true
-// 1-bit value.
-def : ExpPattern<i32, EXP, 0>;
-def : ExpPattern<i32, EXP_DONE, -1>;
-def : ExpPattern<f32, EXP, 0>;
-def : ExpPattern<f32, EXP_DONE, -1>;
-
-def : ExpComprPattern<v2i16, EXP, 0>;
-def : ExpComprPattern<v2i16, EXP_DONE, -1>;
-def : ExpComprPattern<v2f16, EXP, 0>;
-def : ExpComprPattern<v2f16, EXP_DONE, -1>;
+include "EXPInstructions.td"
 
 //===----------------------------------------------------------------------===//
 // VINTRP Instructions
@@ -325,7 +289,7 @@ def SI_IF: CFPseudoInstSI <
 
 def SI_ELSE : CFPseudoInstSI <
   (outs SReg_1:$dst),
-  (ins SReg_1:$src, brtarget:$target, i1imm:$execfix), [], 1, 1> {
+  (ins SReg_1:$src, brtarget:$target), [], 1, 1> {
   let Size = 12;
   let hasSideEffects = 1;
 }
@@ -581,64 +545,97 @@ def SI_INDIRECT_DST_V32 : SI_INDIRECT_DST<VReg_1024>;
 
 } // End Uses = [EXEC], Defs = [M0, EXEC]
 
-
-// This is a pseudo variant of the v_movreld_b32 (or v_mov_b32
-// expecting to be executed with gpr indexing mode enabled)
-// instruction in which the vector operand appears only twice, once as
-// def and once as use. Using this pseudo avoids problems with the Two
-// Address instructions pass.
-class INDIRECT_REG_WRITE_pseudo<RegisterClass rc,
+// This is a pseudo variant of the v_movreld_b32 instruction in which the
+// vector operand appears only twice, once as def and once as use. Using this
+// pseudo avoids problems with the Two Address instructions pass.
+class INDIRECT_REG_WRITE_MOVREL_pseudo<RegisterClass rc,
                                 RegisterOperand val_ty> : PseudoInstSI <
   (outs rc:$vdst), (ins rc:$vsrc, val_ty:$val, i32imm:$subreg)> {
   let Constraints = "$vsrc = $vdst";
   let Uses = [M0];
 }
 
-class V_INDIRECT_REG_WRITE_B32_pseudo<RegisterClass rc> :
-  INDIRECT_REG_WRITE_pseudo<rc, VSrc_b32> {
+class V_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<RegisterClass rc> :
+  INDIRECT_REG_WRITE_MOVREL_pseudo<rc, VSrc_b32> {
   let VALU = 1;
   let VOP1 = 1;
   let Uses = [M0, EXEC];
 }
 
-class S_INDIRECT_REG_WRITE_pseudo<RegisterClass rc,
+class S_INDIRECT_REG_WRITE_MOVREL_pseudo<RegisterClass rc,
                                   RegisterOperand val_ty> :
-  INDIRECT_REG_WRITE_pseudo<rc, val_ty> {
+  INDIRECT_REG_WRITE_MOVREL_pseudo<rc, val_ty> {
   let SALU = 1;
   let SOP1 = 1;
   let Uses = [M0];
 }
 
-class S_INDIRECT_REG_WRITE_B32_pseudo<RegisterClass rc> :
-  S_INDIRECT_REG_WRITE_pseudo<rc, SSrc_b32>;
-class S_INDIRECT_REG_WRITE_B64_pseudo<RegisterClass rc> :
-  S_INDIRECT_REG_WRITE_pseudo<rc, SSrc_b64>;
+class S_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<RegisterClass rc> :
+  S_INDIRECT_REG_WRITE_MOVREL_pseudo<rc, SSrc_b32>;
+class S_INDIRECT_REG_WRITE_MOVREL_B64_pseudo<RegisterClass rc> :
+  S_INDIRECT_REG_WRITE_MOVREL_pseudo<rc, SSrc_b64>;
 
+def V_INDIRECT_REG_WRITE_MOVREL_B32_V1 : V_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<VGPR_32>;
+def V_INDIRECT_REG_WRITE_MOVREL_B32_V2 : V_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<VReg_64>;
+def V_INDIRECT_REG_WRITE_MOVREL_B32_V3 : V_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<VReg_96>;
+def V_INDIRECT_REG_WRITE_MOVREL_B32_V4 : V_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<VReg_128>;
+def V_INDIRECT_REG_WRITE_MOVREL_B32_V5 : V_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<VReg_160>;
+def V_INDIRECT_REG_WRITE_MOVREL_B32_V8 : V_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<VReg_256>;
+def V_INDIRECT_REG_WRITE_MOVREL_B32_V16 : V_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<VReg_512>;
+def V_INDIRECT_REG_WRITE_MOVREL_B32_V32 : V_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<VReg_1024>;
 
-def V_INDIRECT_REG_WRITE_B32_V1 : V_INDIRECT_REG_WRITE_B32_pseudo<VGPR_32>;
-def V_INDIRECT_REG_WRITE_B32_V2 : V_INDIRECT_REG_WRITE_B32_pseudo<VReg_64>;
-def V_INDIRECT_REG_WRITE_B32_V3 : V_INDIRECT_REG_WRITE_B32_pseudo<VReg_96>;
-def V_INDIRECT_REG_WRITE_B32_V4 : V_INDIRECT_REG_WRITE_B32_pseudo<VReg_128>;
-def V_INDIRECT_REG_WRITE_B32_V5 : V_INDIRECT_REG_WRITE_B32_pseudo<VReg_160>;
-def V_INDIRECT_REG_WRITE_B32_V8 : V_INDIRECT_REG_WRITE_B32_pseudo<VReg_256>;
-def V_INDIRECT_REG_WRITE_B32_V16 : V_INDIRECT_REG_WRITE_B32_pseudo<VReg_512>;
-def V_INDIRECT_REG_WRITE_B32_V32 : V_INDIRECT_REG_WRITE_B32_pseudo<VReg_1024>;
+def S_INDIRECT_REG_WRITE_MOVREL_B32_V1 : S_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<SReg_32>;
+def S_INDIRECT_REG_WRITE_MOVREL_B32_V2 : S_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<SReg_64>;
+def S_INDIRECT_REG_WRITE_MOVREL_B32_V3 : S_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<SReg_96>;
+def S_INDIRECT_REG_WRITE_MOVREL_B32_V4 : S_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<SReg_128>;
+def S_INDIRECT_REG_WRITE_MOVREL_B32_V5 : S_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<SReg_160>;
+def S_INDIRECT_REG_WRITE_MOVREL_B32_V8 : S_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<SReg_256>;
+def S_INDIRECT_REG_WRITE_MOVREL_B32_V16 : S_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<SReg_512>;
+def S_INDIRECT_REG_WRITE_MOVREL_B32_V32 : S_INDIRECT_REG_WRITE_MOVREL_B32_pseudo<SReg_1024>;
 
-def S_INDIRECT_REG_WRITE_B32_V1 : S_INDIRECT_REG_WRITE_B32_pseudo<SReg_32>;
-def S_INDIRECT_REG_WRITE_B32_V2 : S_INDIRECT_REG_WRITE_B32_pseudo<SReg_64>;
-def S_INDIRECT_REG_WRITE_B32_V3 : S_INDIRECT_REG_WRITE_B32_pseudo<SReg_96>;
-def S_INDIRECT_REG_WRITE_B32_V4 : S_INDIRECT_REG_WRITE_B32_pseudo<SReg_128>;
-def S_INDIRECT_REG_WRITE_B32_V5 : S_INDIRECT_REG_WRITE_B32_pseudo<SReg_160>;
-def S_INDIRECT_REG_WRITE_B32_V8 : S_INDIRECT_REG_WRITE_B32_pseudo<SReg_256>;
-def S_INDIRECT_REG_WRITE_B32_V16 : S_INDIRECT_REG_WRITE_B32_pseudo<SReg_512>;
-def S_INDIRECT_REG_WRITE_B32_V32 : S_INDIRECT_REG_WRITE_B32_pseudo<SReg_1024>;
+def S_INDIRECT_REG_WRITE_MOVREL_B64_V1 : S_INDIRECT_REG_WRITE_MOVREL_B64_pseudo<SReg_64>;
+def S_INDIRECT_REG_WRITE_MOVREL_B64_V2 : S_INDIRECT_REG_WRITE_MOVREL_B64_pseudo<SReg_128>;
+def S_INDIRECT_REG_WRITE_MOVREL_B64_V4 : S_INDIRECT_REG_WRITE_MOVREL_B64_pseudo<SReg_256>;
+def S_INDIRECT_REG_WRITE_MOVREL_B64_V8 : S_INDIRECT_REG_WRITE_MOVREL_B64_pseudo<SReg_512>;
+def S_INDIRECT_REG_WRITE_MOVREL_B64_V16 : S_INDIRECT_REG_WRITE_MOVREL_B64_pseudo<SReg_1024>;
 
-def S_INDIRECT_REG_WRITE_B64_V1 : S_INDIRECT_REG_WRITE_B64_pseudo<SReg_64>;
-def S_INDIRECT_REG_WRITE_B64_V2 : S_INDIRECT_REG_WRITE_B64_pseudo<SReg_128>;
-def S_INDIRECT_REG_WRITE_B64_V4 : S_INDIRECT_REG_WRITE_B64_pseudo<SReg_256>;
-def S_INDIRECT_REG_WRITE_B64_V8 : S_INDIRECT_REG_WRITE_B64_pseudo<SReg_512>;
-def S_INDIRECT_REG_WRITE_B64_V16 : S_INDIRECT_REG_WRITE_B64_pseudo<SReg_1024>;
+// These variants of V_INDIRECT_REG_READ/WRITE use VGPR indexing. By using these
+// pseudos we avoid spills or copies being inserted within indirect sequences
+// that switch the VGPR indexing mode. Spills to accvgprs could be effected by
+// this mode switching.
 
+class V_INDIRECT_REG_WRITE_GPR_IDX_pseudo<RegisterClass rc> : PseudoInstSI <
+  (outs rc:$vdst), (ins rc:$vsrc, VSrc_b32:$val, SSrc_b32:$idx, i32imm:$subreg)> {
+  let Constraints = "$vsrc = $vdst";
+  let VALU = 1;
+  let Uses = [M0, EXEC];
+  let Defs = [M0];
+}
+
+def V_INDIRECT_REG_WRITE_GPR_IDX_B32_V1 : V_INDIRECT_REG_WRITE_GPR_IDX_pseudo<VGPR_32>;
+def V_INDIRECT_REG_WRITE_GPR_IDX_B32_V2 : V_INDIRECT_REG_WRITE_GPR_IDX_pseudo<VReg_64>;
+def V_INDIRECT_REG_WRITE_GPR_IDX_B32_V3 : V_INDIRECT_REG_WRITE_GPR_IDX_pseudo<VReg_96>;
+def V_INDIRECT_REG_WRITE_GPR_IDX_B32_V4 : V_INDIRECT_REG_WRITE_GPR_IDX_pseudo<VReg_128>;
+def V_INDIRECT_REG_WRITE_GPR_IDX_B32_V5 : V_INDIRECT_REG_WRITE_GPR_IDX_pseudo<VReg_160>;
+def V_INDIRECT_REG_WRITE_GPR_IDX_B32_V8 : V_INDIRECT_REG_WRITE_GPR_IDX_pseudo<VReg_256>;
+def V_INDIRECT_REG_WRITE_GPR_IDX_B32_V16 : V_INDIRECT_REG_WRITE_GPR_IDX_pseudo<VReg_512>;
+def V_INDIRECT_REG_WRITE_GPR_IDX_B32_V32 : V_INDIRECT_REG_WRITE_GPR_IDX_pseudo<VReg_1024>;
+
+class V_INDIRECT_REG_READ_GPR_IDX_pseudo<RegisterClass rc> : PseudoInstSI <
+  (outs VGPR_32:$vdst), (ins rc:$vsrc, SSrc_b32:$idx, i32imm:$subreg)> {
+  let VALU = 1;
+  let Uses = [M0, EXEC];
+  let Defs = [M0];
+}
+
+def V_INDIRECT_REG_READ_GPR_IDX_B32_V1 : V_INDIRECT_REG_READ_GPR_IDX_pseudo<VGPR_32>;
+def V_INDIRECT_REG_READ_GPR_IDX_B32_V2 : V_INDIRECT_REG_READ_GPR_IDX_pseudo<VReg_64>;
+def V_INDIRECT_REG_READ_GPR_IDX_B32_V3 : V_INDIRECT_REG_READ_GPR_IDX_pseudo<VReg_96>;
+def V_INDIRECT_REG_READ_GPR_IDX_B32_V4 : V_INDIRECT_REG_READ_GPR_IDX_pseudo<VReg_128>;
+def V_INDIRECT_REG_READ_GPR_IDX_B32_V5 : V_INDIRECT_REG_READ_GPR_IDX_pseudo<VReg_160>;
+def V_INDIRECT_REG_READ_GPR_IDX_B32_V8 : V_INDIRECT_REG_READ_GPR_IDX_pseudo<VReg_256>;
+def V_INDIRECT_REG_READ_GPR_IDX_B32_V16 : V_INDIRECT_REG_READ_GPR_IDX_pseudo<VReg_512>;
+def V_INDIRECT_REG_READ_GPR_IDX_B32_V32 : V_INDIRECT_REG_READ_GPR_IDX_pseudo<VReg_1024>;
 
 multiclass SI_SPILL_SGPR <RegisterClass sgpr_class> {
   let UseNamedOperandTable = 1, SGPRSpill = 1, Uses = [EXEC] in {
@@ -680,7 +677,7 @@ multiclass SI_SPILL_VGPR <RegisterClass vgpr_class, bit UsesTmp = 0> {
        SchedRW = [WriteVMEM] in {
     def _SAVE : VPseudoInstSI <
       (outs),
-      (ins vgpr_class:$vdata, i32imm:$vaddr, SReg_128:$srsrc,
+      (ins vgpr_class:$vdata, i32imm:$vaddr,
            SReg_32:$soffset, i32imm:$offset)> {
       let mayStore = 1;
       let mayLoad = 0;
@@ -692,8 +689,8 @@ multiclass SI_SPILL_VGPR <RegisterClass vgpr_class, bit UsesTmp = 0> {
 
     def _RESTORE : VPseudoInstSI <
       (outs vgpr_class:$vdata),
-      (ins i32imm:$vaddr, SReg_128:$srsrc, SReg_32:$soffset,
-           i32imm:$offset)> {
+      (ins i32imm:$vaddr,
+           SReg_32:$soffset, i32imm:$offset)> {
       let mayStore = 0;
       let mayLoad = 1;
 
@@ -745,7 +742,7 @@ def : GCNPat<
 
 def : GCNPat<
   (AMDGPUelse i1:$src, bb:$target),
-  (SI_ELSE $src, $target, 0)
+  (SI_ELSE $src, $target)
 >;
 
 def : Pat <
@@ -866,7 +863,8 @@ def : GCNPat <
 // VOP2 Patterns
 //===----------------------------------------------------------------------===//
 
-// TODO: Check only no src2 mods?
+// NoMods pattern used for mac. If there are any source modifiers then it's
+// better to select mad instead of mac.
 class FMADPat <ValueType vt, Instruction inst, SDPatternOperator node>
   : GCNPat <(vt (node (vt (VOP3NoMods vt:$src0)),
                       (vt (VOP3NoMods vt:$src1)),
@@ -875,18 +873,41 @@ class FMADPat <ValueType vt, Instruction inst, SDPatternOperator node>
           SRCMODS.NONE, $src2, DSTCLAMP.NONE, DSTOMOD.NONE)
 >;
 
-
 // Prefer mac form when there are no modifiers.
 let AddedComplexity = 9 in {
+let OtherPredicates = [HasMadMacF32Insts] in {
 def : FMADPat <f32, V_MAC_F32_e64, fmad>;
 def : FMADPat <f32, V_MAC_F32_e64, AMDGPUfmad_ftz>;
+} // OtherPredicates = [HasMadMacF32Insts]
+
+// Don't allow source modifiers. If there are any source modifiers then it's
+// better to select mad instead of mac.
+let SubtargetPredicate = isGFX6GFX7GFX10,
+    OtherPredicates = [HasMadMacF32Insts, NoFP32Denormals] in
+def : GCNPat <
+      (f32 (fadd (AMDGPUfmul_legacy (VOP3NoMods f32:$src0),
+                                    (VOP3NoMods f32:$src1)),
+                 (VOP3NoMods f32:$src2))),
+      (V_MAC_LEGACY_F32_e64 SRCMODS.NONE, $src0, SRCMODS.NONE, $src1,
+                            SRCMODS.NONE, $src2, DSTCLAMP.NONE, DSTOMOD.NONE)
+>;
+
+// Don't allow source modifiers. If there are any source modifiers then it's
+// better to select fma instead of fmac.
+let SubtargetPredicate = HasFmaLegacy32 in
+def : GCNPat <
+      (f32 (int_amdgcn_fma_legacy (VOP3NoMods f32:$src0),
+                                  (VOP3NoMods f32:$src1),
+                                  (VOP3NoMods f32:$src2))),
+      (V_FMAC_LEGACY_F32_e64 SRCMODS.NONE, $src0, SRCMODS.NONE, $src1,
+                             SRCMODS.NONE, $src2, DSTCLAMP.NONE, DSTOMOD.NONE)
+>;
 
 let SubtargetPredicate = Has16BitInsts in {
 def : FMADPat <f16, V_MAC_F16_e64, fmad>;
 def : FMADPat <f16, V_MAC_F16_e64, AMDGPUfmad_ftz>;
-}
-
-}
+} // SubtargetPredicate = Has16BitInsts
+} // AddedComplexity = 9
 
 class FMADModsPat<ValueType Ty, Instruction inst, SDPatternOperator mad_opr>
   : GCNPat<
@@ -897,11 +918,20 @@ class FMADModsPat<ValueType Ty, Instruction inst, SDPatternOperator mad_opr>
   $src2_mod, $src2, DSTCLAMP.NONE, DSTOMOD.NONE)
 >;
 
-let SubtargetPredicate = HasMadMacF32Insts in
+let OtherPredicates = [HasMadMacF32Insts] in
 def : FMADModsPat<f32, V_MAD_F32, AMDGPUfmad_ftz>;
-def : FMADModsPat<f16, V_MAD_F16, AMDGPUfmad_ftz> {
-  let SubtargetPredicate = Has16BitInsts;
-}
+
+let OtherPredicates = [HasMadMacF32Insts, NoFP32Denormals] in
+def : GCNPat <
+      (f32 (fadd (AMDGPUfmul_legacy (VOP3Mods f32:$src0, i32:$src0_mod),
+                                    (VOP3Mods f32:$src1, i32:$src1_mod)),
+                 (VOP3Mods f32:$src2, i32:$src2_mod))),
+      (V_MAD_LEGACY_F32 $src0_mod, $src0, $src1_mod, $src1,
+                        $src2_mod, $src2, DSTCLAMP.NONE, DSTOMOD.NONE)
+>;
+
+let SubtargetPredicate = Has16BitInsts in
+def : FMADModsPat<f16, V_MAD_F16, AMDGPUfmad_ftz>;
 
 class VOPSelectModsPat <ValueType vt> : GCNPat <
   (vt (select i1:$src0, (VOP3Mods vt:$src1, i32:$src1_mods),

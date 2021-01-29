@@ -214,3 +214,80 @@ llvm.func @test_omp_parallel_3() -> () {
 // CHECK: define internal void @[[OMP_OUTLINED_FN_3_3]]
 // CHECK: define internal void @[[OMP_OUTLINED_FN_3_2]]
 // CHECK: define internal void @[[OMP_OUTLINED_FN_3_1]]
+
+// CHECK-LABEL: define void @test_omp_parallel_4()
+llvm.func @test_omp_parallel_4() -> () {
+// CHECK: call void {{.*}}@__kmpc_fork_call{{.*}} @[[OMP_OUTLINED_FN_4_1:.*]] to
+// CHECK: define internal void @[[OMP_OUTLINED_FN_4_1]]
+// CHECK: call void @__kmpc_barrier
+// CHECK: call void {{.*}}@__kmpc_fork_call{{.*}} @[[OMP_OUTLINED_FN_4_1_1:.*]] to
+// CHECK: call void @__kmpc_barrier
+  omp.parallel {
+    omp.barrier
+
+// CHECK: define internal void @[[OMP_OUTLINED_FN_4_1_1]]
+// CHECK: call void @__kmpc_barrier
+    omp.parallel {
+      omp.barrier
+      omp.terminator
+    }
+
+    omp.barrier
+    omp.terminator
+  }
+  llvm.return
+}
+
+llvm.func @test_omp_parallel_5() -> () {
+// CHECK: call void {{.*}}@__kmpc_fork_call{{.*}} @[[OMP_OUTLINED_FN_5_1:.*]] to
+// CHECK: define internal void @[[OMP_OUTLINED_FN_5_1]]
+// CHECK: call void @__kmpc_barrier
+// CHECK: call void {{.*}}@__kmpc_fork_call{{.*}} @[[OMP_OUTLINED_FN_5_1_1:.*]] to
+// CHECK: call void @__kmpc_barrier
+  omp.parallel {
+    omp.barrier
+
+// CHECK: define internal void @[[OMP_OUTLINED_FN_5_1_1]]
+    omp.parallel {
+// CHECK: call void {{.*}}@__kmpc_fork_call{{.*}} @[[OMP_OUTLINED_FN_5_1_1_1:.*]] to
+// CHECK: define internal void @[[OMP_OUTLINED_FN_5_1_1_1]]
+// CHECK: call void @__kmpc_barrier
+      omp.parallel {
+        omp.barrier
+        omp.terminator
+      }
+      omp.terminator
+    }
+
+    omp.barrier
+    omp.terminator
+  }
+  llvm.return
+}
+
+// CHECK-LABEL: define void @test_omp_master()
+llvm.func @test_omp_master() -> () {
+// CHECK: call void {{.*}}@__kmpc_fork_call{{.*}} @{{.*}} to
+// CHECK: omp.par.region1:
+  omp.parallel {
+    omp.master {
+// CHECK: [[OMP_THREAD_3_4:%.*]] = call i32 @__kmpc_global_thread_num(%struct.ident_t* @{{[0-9]+}})
+// CHECK: {{[0-9]+}} = call i32 @__kmpc_master(%struct.ident_t* @{{[0-9]+}}, i32 [[OMP_THREAD_3_4]])
+// CHECK: omp.master.region
+// CHECK: call void @__kmpc_end_master(%struct.ident_t* @{{[0-9]+}}, i32 [[OMP_THREAD_3_4]])
+// CHECK: br label %omp_region.end
+      omp.terminator
+    }
+    omp.terminator
+  }
+  omp.parallel {
+    omp.parallel {
+      omp.master {
+        omp.terminator
+      }
+      omp.terminator
+    }
+    omp.terminator
+  }
+  llvm.return
+}

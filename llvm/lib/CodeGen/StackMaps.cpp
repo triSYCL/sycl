@@ -361,10 +361,7 @@ StackMaps::parseRegisterLiveOutMask(const uint32_t *Mask) const {
     }
   }
 
-  LiveOuts.erase(
-      llvm::remove_if(LiveOuts,
-                      [](const LiveOutReg &LO) { return LO.Reg == 0; }),
-      LiveOuts.end());
+  llvm::erase_if(LiveOuts, [](const LiveOutReg &LO) { return LO.Reg == 0; });
 
   return LiveOuts;
 }
@@ -384,7 +381,7 @@ void StackMaps::parseStatepointOpers(const MachineInstr &MI,
 
   // Record Deopt Args.
   unsigned NumDeoptArgs = Locations.back().Offset;
-  assert(Locations.back().Type = Location::Constant);
+  assert(Locations.back().Type == Location::Constant);
   assert(NumDeoptArgs == SO.getNumDeoptArgs());
 
   while (NumDeoptArgs--)
@@ -401,7 +398,7 @@ void StackMaps::parseStatepointOpers(const MachineInstr &MI,
     SmallVector<unsigned, 8> GCPtrIndices;
     unsigned GCPtrIdx = (unsigned)SO.getFirstGCPtrIdx();
     assert((int)GCPtrIdx != -1);
-    assert(MOI - MI.operands_begin() == GCPtrIdx);
+    assert(MOI - MI.operands_begin() == GCPtrIdx + 0LL);
     while (NumGCPointers--) {
       GCPtrIndices.push_back(GCPtrIdx);
       GCPtrIdx = StackMaps::getNextMetaArgIdx(&MI, GCPtrIdx);

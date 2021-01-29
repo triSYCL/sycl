@@ -17,7 +17,8 @@
 // This file defines some of the SSDM intrinsics used in Xilinx tools.
 // The SSDM intrinsics and the SYCL extensions that rely on them should be a
 // no-op on non-Xilinx devices and a no-op on the host
-#if (defined(__SYCL_DEVICE_ONLY__) && defined(__SYCL_XILINX_ONLY__))
+#if (defined(__SYCL_DEVICE_ONLY__) && (defined(__SYCL_XILINX_HW_EMU_MODE__) || \
+                                       defined(__SYCL_XILINX_HW_MODE__)))
 extern "C" {
   /// SSDM Intrinsics: dataflow operation
   SYCL_EXTERNAL void _ssdm_op_SpecDataflowPipeline(...)

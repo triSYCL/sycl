@@ -1839,6 +1839,15 @@ public:
   void Unparse(const AccDataModifier::Modifier &x) {
     Word(AccDataModifier::EnumToString(x));
   }
+  void Unparse(const AccBindClause &x) {
+    std::visit(common::visitors{
+                   [&](const Name &y) { Put('('), Walk(y), Put(')'); },
+                   [&](const ScalarDefaultCharExpr &y) {
+                     Put('('), Walk(y), Put(')');
+                   },
+               },
+        x.u);
+  }
   void Unparse(const AccDefaultClause &x) {
     switch (x.v) {
     case AccDefaultClause::Arg::None:
@@ -2074,7 +2083,7 @@ public:
     Put(")");
   }
 #define GEN_FLANG_CLAUSE_UNPARSE
-#include "llvm/Frontend/OpenMP/OMP.cpp.inc"
+#include "llvm/Frontend/OpenMP/OMP.inc"
   void Unparse(const OmpLoopDirective &x) {
     switch (x.v) {
     case llvm::omp::Directive::OMPD_distribute:
@@ -2222,36 +2231,12 @@ public:
       break;
     }
   }
-  void Unparse(const OmpHintExpr &x) { Word("HINT("), Walk(x.v), Put(')'); }
-  void Unparse(const OmpMemoryOrderClause &x) {
-    switch (x.v) {
-    case llvm::omp::Clause::OMPC_seq_cst:
-      Word("SEQ_CST");
-      break;
-    case llvm::omp::Clause::OMPC_acq_rel:
-      Word("ACQ_REL");
-      break;
-    case llvm::omp::Clause::OMPC_release:
-      Word("RELEASE");
-      break;
-    case llvm::omp::Clause::OMPC_acquire:
-      Word("ACQUIRE");
-      break;
-    case llvm::omp::Clause::OMPC_relaxed:
-      Word("RELAXED");
-      break;
-    default:
-      break;
-    }
-  }
-  void Unparse(const OmpAtomicMemoryOrderClauseList &x) { Walk(" ", x.v, " "); }
-  void Unparse(const OmpAtomicMemoryOrderClausePostList &x) {
-    Walk(" ", x.v, " ");
-  }
+  void Unparse(const OmpAtomicClauseList &x) { Walk(" ", x.v, " "); }
+
   void Unparse(const OmpAtomic &x) {
     BeginOpenMP();
     Word("!$OMP ATOMIC");
-    Walk(std::get<OmpAtomicMemoryOrderClauseList>(x.t));
+    Walk(std::get<OmpAtomicClauseList>(x.t));
     Put("\n");
     EndOpenMP();
     Walk(std::get<Statement<AssignmentStmt>>(x.t));
@@ -2262,9 +2247,9 @@ public:
   void Unparse(const OmpAtomicCapture &x) {
     BeginOpenMP();
     Word("!$OMP ATOMIC");
-    Walk(std::get<OmpAtomicMemoryOrderClauseList>(x.t));
+    Walk(std::get<0>(x.t));
     Word(" CAPTURE");
-    Walk(std::get<OmpAtomicMemoryOrderClausePostList>(x.t));
+    Walk(std::get<2>(x.t));
     Put("\n");
     EndOpenMP();
     Walk(std::get<OmpAtomicCapture::Stmt1>(x.t));
@@ -2277,9 +2262,9 @@ public:
   void Unparse(const OmpAtomicRead &x) {
     BeginOpenMP();
     Word("!$OMP ATOMIC");
-    Walk(std::get<OmpAtomicMemoryOrderClauseList>(x.t));
+    Walk(std::get<0>(x.t));
     Word(" READ");
-    Walk(std::get<OmpAtomicMemoryOrderClausePostList>(x.t));
+    Walk(std::get<2>(x.t));
     Put("\n");
     EndOpenMP();
     Walk(std::get<Statement<AssignmentStmt>>(x.t));
@@ -2290,9 +2275,9 @@ public:
   void Unparse(const OmpAtomicUpdate &x) {
     BeginOpenMP();
     Word("!$OMP ATOMIC");
-    Walk(std::get<OmpAtomicMemoryOrderClauseList>(x.t));
+    Walk(std::get<0>(x.t));
     Word(" UPDATE");
-    Walk(std::get<OmpAtomicMemoryOrderClausePostList>(x.t));
+    Walk(std::get<2>(x.t));
     Put("\n");
     EndOpenMP();
     Walk(std::get<Statement<AssignmentStmt>>(x.t));
@@ -2303,9 +2288,9 @@ public:
   void Unparse(const OmpAtomicWrite &x) {
     BeginOpenMP();
     Word("!$OMP ATOMIC");
-    Walk(std::get<OmpAtomicMemoryOrderClauseList>(x.t));
+    Walk(std::get<0>(x.t));
     Word(" WRITE");
-    Walk(std::get<OmpAtomicMemoryOrderClausePostList>(x.t));
+    Walk(std::get<2>(x.t));
     Put("\n");
     EndOpenMP();
     Walk(std::get<Statement<AssignmentStmt>>(x.t));
@@ -2313,11 +2298,30 @@ public:
     Walk(std::get<std::optional<OmpEndAtomic>>(x.t), "!$OMP END ATOMIC\n");
     EndOpenMP();
   }
+  void Unparse(const OpenMPExecutableAllocate &x) {
+    BeginOpenMP();
+    Word("!$OMP ALLOCATE");
+    Walk(" (", std::get<std::optional<OmpObjectList>>(x.t), ")");
+    Walk(std::get<OmpClauseList>(x.t));
+    Put("\n");
+    EndOpenMP();
+    Walk(std::get<Statement<AllocateStmt>>(x.t));
+  }
+  void Unparse(const OpenMPDeclarativeAllocate &x) {
+    BeginOpenMP();
+    Word("!$OMP ALLOCATE");
+    Put(" (");
+    Walk(std::get<OmpObjectList>(x.t));
+    Put(")");
+    Walk(std::get<OmpClauseList>(x.t));
+    Put("\n");
+    EndOpenMP();
+  }
   void Unparse(const OmpCriticalDirective &x) {
     BeginOpenMP();
     Word("!$OMP CRITICAL");
     Walk(" (", std::get<std::optional<Name>>(x.t), ")");
-    Walk(std::get<std::optional<OmpHintExpr>>(x.t));
+    Walk(std::get<std::optional<OmpClause>>(x.t));
     Put("\n");
     EndOpenMP();
   }
@@ -2365,6 +2369,15 @@ public:
     BeginOpenMP();
     Word("!$OMP ");
     return std::visit(common::visitors{
+                          [&](const OpenMPDeclarativeAllocate &z) {
+                            Word("ALLOCATE (");
+                            Walk(std::get<OmpObjectList>(z.t));
+                            Put(")");
+                            Walk(std::get<OmpClauseList>(z.t));
+                            Put("\n");
+                            EndOpenMP();
+                            return false;
+                          },
                           [&](const OpenMPDeclareReductionConstruct &) {
                             Word("DECLARE REDUCTION ");
                             return true;
@@ -2445,25 +2458,18 @@ public:
     Put("\n");
     EndOpenMP();
   }
-  void Unparse(const OmpFlushMemoryClause &x) {
-    switch (x.v) {
-    case llvm::omp::Clause::OMPC_acq_rel:
-      Word("ACQ_REL ");
-      break;
-    case llvm::omp::Clause::OMPC_release:
-      Word("RELEASE ");
-      break;
-    case llvm::omp::Clause::OMPC_acquire:
-      Word("ACQUIRE ");
-      break;
-    default:
-      break;
-    }
+  void Unparse(const OmpMemoryOrderClause &x) { Walk(x.v); }
+  void Unparse(const OmpAtomicClause &x) {
+    std::visit(common::visitors{
+                   [&](const OmpMemoryOrderClause &y) { Walk(y); },
+                   [&](const OmpClause &z) { Walk(z); },
+               },
+        x.u);
   }
   void Unparse(const OpenMPFlushConstruct &x) {
     BeginOpenMP();
     Word("!$OMP FLUSH ");
-    Walk(std::get<std::optional<OmpFlushMemoryClause>>(x.t));
+    Walk(std::get<std::optional<std::list<OmpMemoryOrderClause>>>(x.t));
     Walk(" (", std::get<std::optional<OmpObjectList>>(x.t), ")");
     Put("\n");
     EndOpenMP();

@@ -37,6 +37,15 @@ class Triple;
 
 namespace AMDGPU {
 
+/// \returns HSA OS ABI Version identification.
+Optional<uint8_t> getHsaAbiVersion(const MCSubtargetInfo *STI);
+/// \returns True if HSA OS ABI Version identification is 2,
+/// false otherwise.
+bool isHsaAbiVersion2(const MCSubtargetInfo *STI);
+/// \returns True if HSA OS ABI Version identification is 3,
+/// false otherwise.
+bool isHsaAbiVersion3(const MCSubtargetInfo *STI);
+
 struct GcnBufferFormatInfo {
   unsigned Format;
   unsigned BitsPerComp;
@@ -63,10 +72,6 @@ enum {
 
 /// Streams isa version string for given subtarget \p STI into \p Stream.
 void streamIsaVersion(const MCSubtargetInfo *STI, raw_ostream &Stream);
-
-/// \returns True if given subtarget \p STI supports code object version 3,
-/// false otherwise.
-bool hasCodeObjectV3(const MCSubtargetInfo *STI);
 
 /// \returns Wavefront size for given subtarget \p STI.
 unsigned getWavefrontSize(const MCSubtargetInfo *STI);
@@ -563,10 +568,22 @@ LLVM_READNONE
 bool isShader(CallingConv::ID CC);
 
 LLVM_READNONE
+bool isGraphics(CallingConv::ID CC);
+
+LLVM_READNONE
 bool isCompute(CallingConv::ID CC);
 
 LLVM_READNONE
 bool isEntryFunctionCC(CallingConv::ID CC);
+
+// These functions are considered entrypoints into the current module, i.e. they
+// are allowed to be called from outside the current module. This is different
+// from isEntryFunctionCC, which is only true for functions that are entered by
+// the hardware. Module entry points include all entry functions but also
+// include functions that can be called from other functions inside or outside
+// the current module. Module entry functions are allowed to allocate LDS.
+LLVM_READNONE
+bool isModuleEntryFunctionCC(CallingConv::ID CC);
 
 // FIXME: Remove this when calling conventions cleaned up
 LLVM_READNONE
@@ -593,6 +610,7 @@ bool isVI(const MCSubtargetInfo &STI);
 bool isGFX9(const MCSubtargetInfo &STI);
 bool isGFX9Plus(const MCSubtargetInfo &STI);
 bool isGFX10(const MCSubtargetInfo &STI);
+bool isGFX10Plus(const MCSubtargetInfo &STI);
 bool isGCN3Encoding(const MCSubtargetInfo &STI);
 bool isGFX10_BEncoding(const MCSubtargetInfo &STI);
 bool hasGFX10_3Insts(const MCSubtargetInfo &STI);
@@ -724,6 +742,13 @@ Optional<int64_t> getSMRDEncodedOffset(const MCSubtargetInfo &ST,
 Optional<int64_t> getSMRDEncodedLiteralOffset32(const MCSubtargetInfo &ST,
                                                 int64_t ByteOffset);
 
+/// For FLAT segment the offset must be positive;
+/// MSB is ignored and forced to zero.
+///
+/// \return The number of bits available for the offset field in flat
+/// instructions.
+unsigned getNumFlatOffsetBits(const MCSubtargetInfo &ST, bool Signed);
+
 /// \returns true if this offset is small enough to fit in the SMRD
 /// offset field.  \p ByteOffset should be the offset in bytes and
 /// not the encoded offset.
@@ -769,10 +794,8 @@ struct SIModeRegisterDefaults {
   SIModeRegisterDefaults(const Function &F);
 
   static SIModeRegisterDefaults getDefaultForCallingConv(CallingConv::ID CC) {
-    const bool IsCompute = AMDGPU::isCompute(CC);
-
     SIModeRegisterDefaults Mode;
-    Mode.IEEE = IsCompute;
+    Mode.IEEE = !AMDGPU::isShader(CC);
     return Mode;
   }
 

@@ -95,6 +95,8 @@ INITIALIZE_PASS_BEGIN(IRTranslator, DEBUG_TYPE, "IRTranslator LLVM IR -> MI",
                 false, false)
 INITIALIZE_PASS_DEPENDENCY(TargetPassConfig)
 INITIALIZE_PASS_DEPENDENCY(GISelCSEAnalysisWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(BlockFrequencyInfoWrapperPass)
+INITIALIZE_PASS_DEPENDENCY(StackProtector)
 INITIALIZE_PASS_END(IRTranslator, DEBUG_TYPE, "IRTranslator LLVM IR -> MI",
                 false, false)
 
@@ -168,7 +170,9 @@ void IRTranslator::getAnalysisUsage(AnalysisUsage &AU) const {
 
 IRTranslator::ValueToVRegInfo::VRegListT &
 IRTranslator::allocateVRegs(const Value &Val) {
-  assert(!VMap.contains(Val) && "Value already allocated in VMap");
+  auto VRegsIt = VMap.findVRegs(Val);
+  if (VRegsIt != VMap.vregs_end())
+    return *VRegsIt->second;
   auto *Regs = VMap.getVRegs(Val);
   auto *Offsets = VMap.getOffsets(Val);
   SmallVector<LLT, 4> SplitTys;
@@ -1718,6 +1722,29 @@ unsigned IRTranslator::getSimpleIntrinsicOpcode(Intrinsic::ID ID) {
       return TargetOpcode::G_PTRMASK;
     case Intrinsic::lrint:
       return TargetOpcode::G_INTRINSIC_LRINT;
+    // FADD/FMUL require checking the FMF, so are handled elsewhere.
+    case Intrinsic::vector_reduce_fmin:
+      return TargetOpcode::G_VECREDUCE_FMIN;
+    case Intrinsic::vector_reduce_fmax:
+      return TargetOpcode::G_VECREDUCE_FMAX;
+    case Intrinsic::vector_reduce_add:
+      return TargetOpcode::G_VECREDUCE_ADD;
+    case Intrinsic::vector_reduce_mul:
+      return TargetOpcode::G_VECREDUCE_MUL;
+    case Intrinsic::vector_reduce_and:
+      return TargetOpcode::G_VECREDUCE_AND;
+    case Intrinsic::vector_reduce_or:
+      return TargetOpcode::G_VECREDUCE_OR;
+    case Intrinsic::vector_reduce_xor:
+      return TargetOpcode::G_VECREDUCE_XOR;
+    case Intrinsic::vector_reduce_smax:
+      return TargetOpcode::G_VECREDUCE_SMAX;
+    case Intrinsic::vector_reduce_smin:
+      return TargetOpcode::G_VECREDUCE_SMIN;
+    case Intrinsic::vector_reduce_umax:
+      return TargetOpcode::G_VECREDUCE_UMAX;
+    case Intrinsic::vector_reduce_umin:
+      return TargetOpcode::G_VECREDUCE_UMIN;
   }
   return Intrinsic::not_intrinsic;
 }
@@ -2135,6 +2162,41 @@ bool IRTranslator::translateKnownIntrinsic(const CallInst &CI, Intrinsic::ID ID,
 
     return true;
   }
+  case Intrinsic::vector_reduce_fadd:
+  case Intrinsic::vector_reduce_fmul: {
+    // Need to check for the reassoc flag to decide whether we want a
+    // sequential reduction opcode or not.
+    Register Dst = getOrCreateVReg(CI);
+    Register ScalarSrc = getOrCreateVReg(*CI.getArgOperand(0));
+    Register VecSrc = getOrCreateVReg(*CI.getArgOperand(1));
+    unsigned Opc = 0;
+    if (!CI.hasAllowReassoc()) {
+      // The sequential ordering case.
+      Opc = ID == Intrinsic::vector_reduce_fadd
+                ? TargetOpcode::G_VECREDUCE_SEQ_FADD
+                : TargetOpcode::G_VECREDUCE_SEQ_FMUL;
+      MIRBuilder.buildInstr(Opc, {Dst}, {ScalarSrc, VecSrc},
+                            MachineInstr::copyFlagsFromInstruction(CI));
+      return true;
+    }
+    // We split the operation into a separate G_FADD/G_FMUL + the reduce,
+    // since the associativity doesn't matter.
+    unsigned ScalarOpc;
+    if (ID == Intrinsic::vector_reduce_fadd) {
+      Opc = TargetOpcode::G_VECREDUCE_FADD;
+      ScalarOpc = TargetOpcode::G_FADD;
+    } else {
+      Opc = TargetOpcode::G_VECREDUCE_FMUL;
+      ScalarOpc = TargetOpcode::G_FMUL;
+    }
+    LLT DstTy = MRI->getType(Dst);
+    auto Rdx = MIRBuilder.buildInstr(
+        Opc, {DstTy}, {VecSrc}, MachineInstr::copyFlagsFromInstruction(CI));
+    MIRBuilder.buildInstr(ScalarOpc, {Dst}, {ScalarSrc, Rdx},
+                          MachineInstr::copyFlagsFromInstruction(CI));
+
+    return true;
+  }
 #define INSTRUCTION(NAME, NARG, ROUND_MODE, INTRINSIC)  \
   case Intrinsic::INTRINSIC:
 #include "llvm/IR/ConstrainedOps.def"
@@ -2285,6 +2347,62 @@ bool IRTranslator::translateCall(const User &U, MachineIRBuilder &MIRBuilder) {
   return true;
 }
 
+bool IRTranslator::findUnwindDestinations(
+    const BasicBlock *EHPadBB,
+    BranchProbability Prob,
+    SmallVectorImpl<std::pair<MachineBasicBlock *, BranchProbability>>
+        &UnwindDests) {
+  EHPersonality Personality = classifyEHPersonality(
+      EHPadBB->getParent()->getFunction().getPersonalityFn());
+  bool IsMSVCCXX = Personality == EHPersonality::MSVC_CXX;
+  bool IsCoreCLR = Personality == EHPersonality::CoreCLR;
+  bool IsWasmCXX = Personality == EHPersonality::Wasm_CXX;
+  bool IsSEH = isAsynchronousEHPersonality(Personality);
+
+  if (IsWasmCXX) {
+    // Ignore this for now.
+    return false;
+  }
+
+  while (EHPadBB) {
+    const Instruction *Pad = EHPadBB->getFirstNonPHI();
+    BasicBlock *NewEHPadBB = nullptr;
+    if (isa<LandingPadInst>(Pad)) {
+      // Stop on landingpads. They are not funclets.
+      UnwindDests.emplace_back(&getMBB(*EHPadBB), Prob);
+      break;
+    }
+    if (isa<CleanupPadInst>(Pad)) {
+      // Stop on cleanup pads. Cleanups are always funclet entries for all known
+      // personalities.
+      UnwindDests.emplace_back(&getMBB(*EHPadBB), Prob);
+      UnwindDests.back().first->setIsEHScopeEntry();
+      UnwindDests.back().first->setIsEHFuncletEntry();
+      break;
+    }
+    if (auto *CatchSwitch = dyn_cast<CatchSwitchInst>(Pad)) {
+      // Add the catchpad handlers to the possible destinations.
+      for (const BasicBlock *CatchPadBB : CatchSwitch->handlers()) {
+        UnwindDests.emplace_back(&getMBB(*CatchPadBB), Prob);
+        // For MSVC++ and the CLR, catchblocks are funclets and need prologues.
+        if (IsMSVCCXX || IsCoreCLR)
+          UnwindDests.back().first->setIsEHFuncletEntry();
+        if (!IsSEH)
+          UnwindDests.back().first->setIsEHScopeEntry();
+      }
+      NewEHPadBB = CatchSwitch->getUnwindDest();
+    } else {
+      continue;
+    }
+
+    BranchProbabilityInfo *BPI = FuncInfo.BPI;
+    if (BPI && NewEHPadBB)
+      Prob *= BPI->getEdgeProbability(EHPadBB, NewEHPadBB);
+    EHPadBB = NewEHPadBB;
+  }
+  return true;
+}
+
 bool IRTranslator::translateInvoke(const User &U,
                                    MachineIRBuilder &MIRBuilder) {
   const InvokeInst &I = cast<InvokeInst>(U);
@@ -2324,14 +2442,28 @@ bool IRTranslator::translateInvoke(const User &U,
   MCSymbol *EndSymbol = Context.createTempSymbol();
   MIRBuilder.buildInstr(TargetOpcode::EH_LABEL).addSym(EndSymbol);
 
-  // FIXME: track probabilities.
+  SmallVector<std::pair<MachineBasicBlock *, BranchProbability>, 1> UnwindDests;
+  BranchProbabilityInfo *BPI = FuncInfo.BPI;
+  MachineBasicBlock *InvokeMBB = &MIRBuilder.getMBB();
+  BranchProbability EHPadBBProb =
+      BPI ? BPI->getEdgeProbability(InvokeMBB->getBasicBlock(), EHPadBB)
+          : BranchProbability::getZero();
+
+  if (!findUnwindDestinations(EHPadBB, EHPadBBProb, UnwindDests))
+    return false;
+
   MachineBasicBlock &EHPadMBB = getMBB(*EHPadBB),
                     &ReturnMBB = getMBB(*ReturnBB);
-  MF->addInvoke(&EHPadMBB, BeginSymbol, EndSymbol);
-  MIRBuilder.getMBB().addSuccessor(&ReturnMBB);
-  MIRBuilder.getMBB().addSuccessor(&EHPadMBB);
-  MIRBuilder.buildBr(ReturnMBB);
+  // Update successor info.
+  addSuccessorWithProb(InvokeMBB, &ReturnMBB);
+  for (auto &UnwindDest : UnwindDests) {
+    UnwindDest.first->setIsEHPad();
+    addSuccessorWithProb(InvokeMBB, UnwindDest.first, UnwindDest.second);
+  }
+  InvokeMBB->normalizeSuccProbs();
 
+  MF->addInvoke(&EHPadMBB, BeginSymbol, EndSymbol);
+  MIRBuilder.buildBr(ReturnMBB);
   return true;
 }
 
@@ -2713,8 +2845,8 @@ bool IRTranslator::translate(const Instruction &Inst) {
   // We only emit constants into the entry block from here. To prevent jumpy
   // debug behaviour set the line to 0.
   if (const DebugLoc &DL = Inst.getDebugLoc())
-    EntryBuilder->setDebugLoc(
-        DebugLoc::get(0, 0, DL.getScope(), DL.getInlinedAt()));
+    EntryBuilder->setDebugLoc(DILocation::get(
+        Inst.getContext(), 0, 0, DL.getScope(), DL.getInlinedAt()));
   else
     EntryBuilder->setDebugLoc(DebugLoc());
 

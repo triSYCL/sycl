@@ -27,8 +27,10 @@ namespace __device_builtin = __spirv;
 #include <CL/sycl/detail/pi.hpp>
 #include <CL/sycl/detail/type_traits.hpp>
 
+#if __cpp_lib_bit_cast
+#include <bit>
+#endif
 #include <memory>
-#include <numeric> // std::bit_cast
 #include <stdexcept>
 #include <type_traits>
 #include <vector>
