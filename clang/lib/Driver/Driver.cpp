@@ -1368,12 +1368,12 @@ Compilation *Driver::BuildCompilation(ArrayRef<const char *> ArgList) {
   InputList Inputs;
   BuildInputs(C->getDefaultToolChain(), *TranslatedArgs, Inputs);
 
+  // Populate the tool chains for the offloading devices, if any.
+  CreateOffloadingDeviceToolChains(*C, Inputs);
+
   // Determine if there are any offload static libraries.
   if (checkForOffloadStaticLib(*C, *TranslatedArgs))
     setOffloadStaticLibSeen();
-
-  // Populate the tool chains for the offloading devices, if any.
-  CreateOffloadingDeviceToolChains(*C, Inputs);
 
   // Construct the list of abstract actions to perform for this compilation. On
   // MachO targets this uses the driver-driver and universal actions.
@@ -2804,6 +2804,12 @@ bool Driver::checkForOffloadStaticLib(Compilation &C,
   if (!Args.hasFlag(options::OPT_fsycl, options::OPT_fno_sycl, false) &&
       !Args.hasArg(options::OPT_fopenmp_targets_EQ))
     return false;
+
+  /// This fix will not work when mixing Xilinx devices with devices that use
+  /// OffloadStaticLibs
+  for (auto &P : llvm::make_range(C.getOffloadToolChains<Action::OFK_SYCL>()))
+    if (P.second->getTriple().isXilinxFPGA())
+      return false;
 
   // Right off the bat, assume the presense of -foffload-static-lib means
   // the need to perform linking steps for fat static archive offloading.
