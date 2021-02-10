@@ -15,6 +15,7 @@
 #include <regex>
 #include <string>
 
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/SYCL/ChessMassage.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Function.h"
@@ -45,6 +46,51 @@ struct ChessMassage : public ModulePass {
 
   ChessMassage() : ModulePass(ID) {}
 
+  struct Loc {
+    int x;
+    int y;
+  };
+
+  static StringRef KindOf(const char *Str) {
+    return StringRef(Str, strlen(Str) + 1);
+  }
+  DenseMap<Function *, Loc> FuncLocCache;
+
+  Loc getKernelLoc(Function *Kernel) {
+    auto It = FuncLocCache.find(Kernel);
+    if (It != FuncLocCache.end())
+      return It->second;
+    Module *M = Kernel->getParent();
+    GlobalVariable *Annots = M->getGlobalVariable("llvm.global.annotations");
+    auto *Array = cast<ConstantArray>(Annots->getOperand(0));
+    for (auto *E : Array->operand_values()) {
+      auto *CS = cast<ConstantStruct>(E);
+      if (getUnderlyingObject(CS->getAggregateElement(0u)) != Kernel)
+        continue;
+
+      StringRef AnnotKind =
+          cast<ConstantDataArray>(
+              cast<GlobalVariable>(
+                  getUnderlyingObject(CS->getAggregateElement(1)))
+                  ->getOperand(0))
+              ->getRawDataValues();
+      if (AnnotKind != KindOf("xilinx_acap_tile"))
+        continue;
+      Constant *Args =
+          (cast<GlobalVariable>(getUnderlyingObject(CS->getAggregateElement(4)))
+               ->getInitializer());
+      Loc r;
+      if (isa<ConstantAggregateZero>(Args))
+        r = {0, 0};
+      else
+        r = {(int)cast<ConstantInt>(Args->getOperand(0))->getZExtValue(),
+             (int)cast<ConstantInt>(Args->getOperand(1))->getZExtValue()};
+      FuncLocCache[Kernel] = r;
+      return r;
+    }
+    llvm_unreachable("not a acap kernel");
+  }
+
   // Re-order functions with hash values. This is taken from MergeFunctions
   // and required to correctly identifie to which one the functions are
   // merged into. This means, the original list is sorted as:
@@ -64,6 +110,10 @@ struct ChessMassage : public ModulePass {
       // Collect the kernel functions
       if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
         Funcs.emplace_back(&F);
+        if (getKernelLoc(&F).y & 1)
+          F.addFnAttr("xilinx_acap_tile_odd");
+        else
+          F.addFnAttr("xilinx_acap_tile_even");
       }
     }
 
@@ -92,9 +142,11 @@ struct ChessMassage : public ModulePass {
 
     // Put sorted kernel functions back to the Modules's function list
     for (auto I = Funcs.begin(), IE = Funcs.end(); I != IE; ++I) {
-      (*I)->removeFromParent();
-      M.getFunctionList().push_back((*I));
-      kernelNames += (" \"" + (*I)->getName() + "\" ").str();
+      Function* F = *I;
+      F->removeFromParent();
+      M.getFunctionList().push_back(F);
+      kernelNames += (" \"" + F->getName() + "\" ").str();
+      F->replaceAllUsesWith(UndefValue::get(F->getType()));
     }
 
     // output our list of kernel names as a bash array we can iterate over
@@ -209,7 +261,7 @@ struct ChessMassage : public ModulePass {
     // doesn't know how to handle it.
     removeMetadata(M, "llvm.linker.options");
 
-    llvm::removeAttributes(M, {Attribute::MustProgress});
+    llvm::removeAttributes(M, {Attribute::MustProgress, Attribute::ByVal});
 
     // The module probably changed
     return true;

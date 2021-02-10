@@ -200,7 +200,7 @@ struct XOCCIRDowngrader : public ModulePass {
   bool runOnModule(Module &M) override {
     resetByVal(M);
     llvm::removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
-                         Attribute::ImmArg, Attribute::NoSync});
+                               Attribute::ImmArg, Attribute::NoSync});
     renameBasicBlocks(M);
     removeFreezeInst(M);
     removeFNegInst(M);

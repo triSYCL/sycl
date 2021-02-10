@@ -57,15 +57,27 @@
                             // for a tile program according to the specification
                             // we're all unsure what the other 96kbs is for..
 
-  _entry_point _main_init
-  _symbol      _main _after _main_init
-  _symbol      _main_init 0
-  _stack DM_stack 0x30100  0x200 //stack for core
+// Linker script for internal stream test core0
+_entry_point _main_init
+_symbol      _main _after _main_init
+_symbol      _main_init 0
 
-  _reserved DMb 0x20000 0x8000 // reserving 32kbs of south memory
-  _reserved DMb 0x28000 0x8000 // reserving 32kbs of west memory
-  //_reserved DMb 0x30000 0x8000 // north
-  _reserved DMb 0x30300 0x7d00
-  _reserved DMb 0x38000 0x8000 // east
-  _reserved DMb 0x40000 0xc0000 // And everything else the core can't see
+//PM
+_reserved   DMb            0x00000   0x20000
+
+//South-------------------------------------------------
+_reserved   DMb                        0x20000   0x08000
+
+
+//West-------------------------------------------------
+_reserved   DMb                        0x28000   0x08000
+
+
+//North-------------------------------------------------
+_reserved   DMb                        0x30000   0x08000
+
+
+//East-------------------------------------------------
+_stack DM_stack                        0x38000   0x01000
+_symbol args                           0x39000   0x00100
 

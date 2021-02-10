@@ -4326,9 +4326,16 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
         llvm::any_of(
             llvm::make_range(C.getOffloadToolChains<Action::OFK_SYCL>()),
             [](const auto &Elem) {
-              return Elem.second->getTriple().isXilinxFPGA();
+              return Elem.second->getTriple().isXilinxSYCLDevice();
             }))
       CmdArgs.push_back("-D__SYCL_HAS_XILINX_DEVICE__");
+    if (!IsSYCLDevice &&
+        llvm::any_of(
+            llvm::make_range(C.getOffloadToolChains<Action::OFK_SYCL>()),
+            [](const auto &Elem) {
+              return Elem.second->getTriple().isXilinxAIE();
+            }))
+      CmdArgs.push_back("-D__SYCL_XILINX_AIE__");
     if (SYCLStdArg) {
       SYCLStdArg->render(Args, CmdArgs);
       CmdArgs.push_back("-fsycl-std-layout-kernel-params");

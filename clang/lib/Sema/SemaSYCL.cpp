@@ -612,10 +612,13 @@ public:
     auto Ref = dyn_cast<DeclaratorDecl>(DRE->getDecl());
     if (Ref && Ref == MappingPair.first) {
       auto NewDecl = MappingPair.second;
-      return DeclRefExpr::Create(
-          SemaRef.getASTContext(), DRE->getQualifierLoc(),
-          DRE->getTemplateKeywordLoc(), NewDecl, false, DRE->getNameInfo(),
-          NewDecl->getType(), DRE->getValueKind());
+      auto Ty = NewDecl->getType()->isReferenceType()
+                    ? NewDecl->getType()->getPointeeType()
+                    : NewDecl->getType();
+      return DeclRefExpr::Create(SemaRef.getASTContext(),
+                                 DRE->getQualifierLoc(),
+                                 DRE->getTemplateKeywordLoc(), NewDecl, false,
+                                 DRE->getNameInfo(), Ty, DRE->getValueKind());
     }
     return DRE;
   }
@@ -960,7 +963,7 @@ static std::string RemoveGlobalFromType(std::string S) {
 // However, the second set happens after the script so it makes it impossible
 // to automate the deletion from the script. Also a waste of processing time
 // when you need to generate 400 main files a second time around.
-static void populateMainEntryPoint(const StringRef Name,
+static void populateMainEntryPoint(Sema& S, const StringRef Name,
                                    const FunctionDecl *KernelFunction) {
   SmallString<256> TmpDir;
   llvm::sys::path::system_temp_directory(true, TmpDir);
@@ -984,17 +987,7 @@ static void populateMainEntryPoint(const StringRef Name,
   // void f(uint16_t *input, uint8_t *output, uint32_t width, uint32_t height);
   // FIXME: We can probably mangle this eventually if we'd like, but extern C
   // makes life simpler for now
-  Out << "extern \"C\" void " << Name << "(";
-  // loop over parameter types
-  // auto ParamCount = KernelFunction->param_size();
-  // for (size_t i = 0; i < ParamCount; ++i) {
-  //   Out << RemoveGlobalFromType(
-  //     KernelFunction->getParamDecl(i)->getOriginalType().getAsString());
-  //   Out << " " << KernelFunction->getParamDecl(i)->getNameAsString();
-  //   if (i < ParamCount - 1)
-  //     Out << ", ";
-  // }
-  Out << ");" << "\n";
+  Out << "extern \"C\" void " << Name << "(void*);\n";
 
   // TODO: Declare Kernel objects and external arrays
   Out << "// Declare Kernel objects and external arrays \n";
@@ -1005,37 +998,12 @@ static void populateMainEntryPoint(const StringRef Name,
   Out << "\n";
 
   Out << "// SYCL Tile Address Register \n";
-  Out << "uint32_t args[64];" << "\n";
-  Out << "int main(void) {" << "\n";
-
-  // Assign arg registers to parameters
-  // e.g. uint16_t *input = (uint16_t *)args[0];
-  // for (size_t i = 0; i < ParamCount; ++i) {
-  //   Out << "  "<< RemoveGlobalFromType(
-  //     KernelFunction->getParamDecl(i)->getOriginalType().getAsString());
-  //   Out << " " << KernelFunction->getParamDecl(i)->getNameAsString();
-  //   Out << " = ("
-  //       << RemoveGlobalFromType(KernelFunction->getParamDecl(i)->
-  //                                 getOriginalType().getAsString())
-  //       << ") args[" << i << "];" << "\n";
-  // }
-  Out << "\n";
-  // Kernel Invocation
-  // e.g. f(input, output, width, height);
-  Out << "  "<< Name << "(";
-  // loop over parameter types
-  // for (size_t i = 0; i < ParamCount; ++i) {
-  //   Out << KernelFunction->getParamDecl(i)->getNameAsString();
-  //   if (i < ParamCount - 1)
-  //     Out << ", ";
-  // }
-  Out << ");" << "\n";
-
-  Out << "\n";
-  Out << "  return 0;";
-  Out << "\n";
-  Out << "}";
-  Out << "\n";
+  Out << "uint32_t args[64];\n";
+  Out << "int main(void) {\n";
+  // Out << "  args[0] += 2;\n";
+  Out << "  "<< Name << "((void*)&args);\n";
+  Out << "  return 0;\n";
+  Out << "}\n";
 }
 
 // anonymous namespace so these don't get linkage.
@@ -1908,6 +1876,7 @@ static bool isSyclXilinxType(const QualType &Ty) {
 // A type to Create and own the FunctionDecl for the kernel.
 class SyclKernelDeclCreator : public SyclKernelFieldHandler {
   FunctionDecl *KernelDecl;
+  FunctionDecl *OldDecl;
   llvm::SmallVector<ParmVarDecl *, 8> Params;
   Sema::ContextRAII FuncContext;
   // Holds the last handled field's first parameter. This doesn't store an
@@ -2089,16 +2058,25 @@ class SyclKernelDeclCreator : public SyclKernelFieldHandler {
 public:
   static constexpr const bool VisitInsideSimpleContainers = false;
   SyclKernelDeclCreator(Sema &S, StringRef Name, SourceLocation Loc,
-                        bool IsInline, bool IsSIMDKernel)
+                        bool IsInline, bool IsSIMDKernel, FunctionDecl *FD)
       : SyclKernelFieldHandler(S),
         KernelDecl(createKernelDecl(S.getASTContext(), Name, Loc, IsInline,
                                     IsSIMDKernel)),
-        FuncContext(SemaRef, KernelDecl) {}
+        OldDecl(FD), FuncContext(SemaRef, KernelDecl) {}
 
   ~SyclKernelDeclCreator() {
     ASTContext &Ctx = SemaRef.getASTContext();
     FunctionProtoType::ExtProtoInfo Info(CC_OpenCLKernel);
 
+    if (Ctx.getTargetInfo().getTriple().isXilinxAIE()) {
+      Params.clear();
+
+      std::string Name = (Twine("_arg_")).str();
+      QualType Ty = OldDecl->getParamDecl(0)->getType();
+      addParam(std::make_tuple(Ty, &Ctx.Idents.get(Name),
+                               Ctx.getTrivialTypeSourceInfo(Ty)),
+               Ty);
+    }
     SmallVector<QualType, 8> ArgTys;
     std::transform(std::begin(Params), std::end(Params),
                    std::back_inserter(ArgTys),
@@ -2107,6 +2085,18 @@ public:
     QualType FuncType = Ctx.getFunctionType(Ctx.VoidTy, ArgTys, Info);
     KernelDecl->setType(FuncType);
     KernelDecl->setParams(Params);
+    if (Ctx.getTargetInfo().getTriple().isXilinxAIE()) {
+      auto P = std::pair<DeclaratorDecl *, DeclaratorDecl *>{
+          OldDecl->param_begin()[0], KernelDecl->param_begin()[0]};
+      KernelBodyTransform KBT(P, SemaRef);
+      Stmt *NewBody = KBT.TransformStmt(OldDecl->getBody()).get();
+      KernelDecl->setBody(NewBody);
+      populateMainEntryPoint(SemaRef, KernelDecl->getName(), KernelDecl);
+      if (OldDecl->hasAttr<AnnotateAttr>()) {
+        auto* AA = OldDecl->getAttr<AnnotateAttr>();
+        KernelDecl->addAttr(AA->clone(Ctx));
+      }
+    }
 
     SemaRef.addSyclDeviceDecl(KernelDecl);
   }
@@ -3514,16 +3504,14 @@ void Sema::ConstructOpenCLKernel(FunctionDecl *KernelCallerFunc,
                                                        : CalculatedName);
   SyclKernelDeclCreator kernel_decl(*this, KernelName, KernelObj->getLocation(),
                                     KernelCallerFunc->isInlined(),
-                                    IsSIMDKernel);
+                                    IsSIMDKernel, KernelCallerFunc);
+  
   SyclKernelBodyCreator kernel_body(*this, kernel_decl, KernelObj,
                                     KernelCallerFunc);
   SyclKernelIntHeaderCreator int_header(
       *this, getSyclIntegrationHeader(), KernelObj,
       calculateKernelNameType(Context, KernelCallerFunc), KernelName,
       StableName, KernelCallerFunc);
-
-  if (getASTContext().getTargetInfo().getTriple().isXilinxAIE())
-    populateMainEntryPoint(KernelName, KernelCallerFunc);
 
   KernelObjVisitor Visitor{*this};
   Visitor.VisitRecordBases(KernelObj, kernel_decl, kernel_body, int_header);

@@ -116,11 +116,11 @@ UNMERGED_PROP=$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}
 # The order of opt passes matters: ChessMassage -> mergefunc ->kernelPropGen
 # Maybe passes can be renamed to describe stages better.
 cp $INPUT_FILE_NAME $INPUT_FILE_NAME.saved.bc
-$OPT -S -O3 -instnamer \
+$OPT -O3 -instnamer \
   -xoccIRDowngrader -ChessMassage -mergefunc -kernelPropGen \
   "$INPUT_FILE_NAME" --sycl-kernel-propgen-output $KERNELPROP \
   --sycl-kernel-unmerged-prop-out $UNMERGED_PROP -o \
-  "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
+  "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.bc"
 
 # Our bash file containing kernel property environment variables is placed in
 # the systems temporary directory (or wherever the Clang driver is told is the
@@ -140,7 +140,7 @@ source "$UNMERGED_PROP"
 # AI Engine .o file containing all kernels for the module
 $XCHESSCC +P $(nproc) -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c \
   -o "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
-  "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
+  "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.bc"
 
 # A function we can fork into child processes to achieve some form of
 # parallelism at a higher level than chess itself provides with it's own
@@ -157,8 +157,11 @@ $XCHESSCC +P $(nproc) -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c \
 # variations, if it does then may the implementer fall apon the sword of their
 # own making!
 chess_kernel_compile () {
+    set -e
+    set -x
     echo "Linking Kernel: $0"
     echo "Tile Main File: $SOURCE_TEMPORARY_DIR/$0.cpp"
+    echo "Kernel Parity: $1"
 
     # TODO: Look into the fact that SemaSYCL generates the main files twice
     # once pre-linker phase and once after. This is probably normal behaviour
@@ -170,7 +173,7 @@ chess_kernel_compile () {
       -o "$SOURCE_TEMPORARY_DIR/$0.main.o" "$SOURCE_TEMPORARY_DIR/$0.cpp"
 
     $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f \
-      +l$DRIVER_PATH_DIR/chesswrappers/linker_script.bcf \
+      +l$DRIVER_PATH_DIR/chesswrappers/linker_script_$1.bcf \
       -o "$SOURCE_TEMPORARY_DIR/$0.elf.o" \
       "$SOURCE_TEMPORARY_DIR/$0.main.o" \
       "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o"
@@ -183,8 +186,8 @@ export -f chess_kernel_compile
 # and only consume 1 argument per invocation. This is passed in as the $0'th
 # variable. We invoke xargs for the maximum number of cores available on the
 # system.
-if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
-  echo "${KERNEL_NAME_ARRAY[@]}" | xargs -n1 -P$(nproc) \
+if [[ ! ${#KERNEL_PARITY_ARRAY[@]} -eq 0 ]]; then
+  echo "${KERNEL_PARITY_ARRAY[@]}" | xargs -n2 -P$(nproc) \
     bash -c 'chess_kernel_compile "$@"'
 fi
 
