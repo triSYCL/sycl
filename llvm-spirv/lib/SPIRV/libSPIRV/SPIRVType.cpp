@@ -1,4 +1,4 @@
-//===- SPIRVtype.cpp – Class to represent a SPIR-V type ---------*- C++ -*-===//
+//===- SPIRVtype.cpp - Class to represent a SPIR-V type ---------*- C++ -*-===//
 //
 //                     The LLVM/SPIRV Translator
 //
@@ -112,6 +112,36 @@ SPIRVWord SPIRVType::getVectorComponentCount() const {
 SPIRVType *SPIRVType::getVectorComponentType() const {
   assert(OpCode == OpTypeVector && "Not vector type");
   return static_cast<const SPIRVTypeVector *>(this)->getComponentType();
+}
+
+SPIRVWord SPIRVType::getMatrixColumnCount() const {
+  assert(OpCode == OpTypeMatrix && "Not matrix type");
+  return static_cast<const SPIRVTypeMatrix *const>(this)->getColumnCount();
+}
+
+SPIRVType *SPIRVType::getMatrixColumnType() const {
+  assert(OpCode == OpTypeMatrix && "Not matrix type");
+  return static_cast<const SPIRVTypeMatrix *const>(this)->getColumnType();
+}
+
+SPIRVType *SPIRVType::getScalarType() const {
+  switch (OpCode) {
+  case OpTypePointer:
+    return getPointerElementType()->getScalarType();
+  case OpTypeArray:
+    return getArrayElementType();
+  case OpTypeVector:
+    return getVectorComponentType();
+  case OpTypeMatrix:
+    return getMatrixColumnType()->getVectorComponentType();
+  case OpTypeInt:
+  case OpTypeFloat:
+  case OpTypeBool:
+    return const_cast<SPIRVType *>(this);
+  default:
+    break;
+  }
+  return nullptr;
 }
 
 bool SPIRVType::isTypeVoid() const { return OpCode == OpTypeVoid; }

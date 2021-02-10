@@ -128,7 +128,8 @@ void PrintStack(const ReportStack *ent) {
   SymbolizedStack *frame = ent->frames;
   for (int i = 0; frame && frame->info.address; frame = frame->next, i++) {
     InternalScopedString res(2 * GetPageSizeCached());
-    RenderFrame(&res, common_flags()->stack_trace_format, i, frame->info,
+    RenderFrame(&res, common_flags()->stack_trace_format, i,
+                frame->info.address, &frame->info,
                 common_flags()->symbolize_vs_style,
                 common_flags()->strip_path_prefix, kInterposedFunctionPrefix);
     Printf("%s\n", res.data());
@@ -298,7 +299,7 @@ static bool FrameIsInternal(const SymbolizedStack *frame) {
   const char *file = frame->info.file;
   const char *module = frame->info.module;
   if (file != 0 &&
-      (internal_strstr(file, "tsan_interceptors.cpp") ||
+      (internal_strstr(file, "tsan_interceptors_posix.cpp") ||
        internal_strstr(file, "sanitizer_common_interceptors.inc") ||
        internal_strstr(file, "tsan_interface_")))
     return true;
@@ -385,7 +386,8 @@ void PrintReport(const ReportDesc *rep) {
       ReportErrorSummary(rep_typ_str, frame->info);
   }
 
-  if (common_flags()->print_module_map == 2) PrintModuleMap();
+  if (common_flags()->print_module_map == 2)
+    DumpProcessMap();
 
   Printf("==================\n");
 }

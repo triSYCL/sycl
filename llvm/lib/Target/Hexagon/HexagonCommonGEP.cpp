@@ -6,17 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define DEBUG_TYPE "commgep"
-
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/FoldingSet.h"
 #include "llvm/ADT/GraphTraits.h"
-#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/PostDominators.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
@@ -30,6 +27,7 @@
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/Casting.h"
@@ -37,6 +35,7 @@
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
@@ -46,6 +45,8 @@
 #include <set>
 #include <utility>
 #include <vector>
+
+#define DEBUG_TYPE "commgep"
 
 using namespace llvm;
 
@@ -203,17 +204,7 @@ namespace {
   Type *next_type(Type *Ty, Value *Idx) {
     if (auto *PTy = dyn_cast<PointerType>(Ty))
       return PTy->getElementType();
-    // Advance the type.
-    if (!Ty->isStructTy()) {
-      Type *NexTy = cast<SequentialType>(Ty)->getElementType();
-      return NexTy;
-    }
-    // Otherwise it is a struct type.
-    ConstantInt *CI = dyn_cast<ConstantInt>(Idx);
-    assert(CI && "Struct type with non-constant index");
-    int64_t i = CI->getValue().getSExtValue();
-    Type *NextTy = cast<StructType>(Ty)->getElementType(i);
-    return NextTy;
+    return GetElementPtrInst::getTypeAtIndex(Ty, Idx);
   }
 
   raw_ostream &operator<< (raw_ostream &OS, const GepNode &GN) {
@@ -659,8 +650,7 @@ void HexagonCommonGEP::common() {
     // Node for removal.
     Erase.insert(*I);
   }
-  NodeVect::iterator NewE = remove_if(Nodes, in_set(Erase));
-  Nodes.resize(std::distance(Nodes.begin(), NewE));
+  erase_if(Nodes, in_set(Erase));
 
   LLVM_DEBUG(dbgs() << "Gep nodes after post-commoning cleanup:\n" << Nodes);
 }
@@ -1301,7 +1291,8 @@ bool HexagonCommonGEP::runOnFunction(Function &F) {
 
 #ifdef EXPENSIVE_CHECKS
   // Run this only when expensive checks are enabled.
-  verifyFunction(F);
+  if (verifyFunction(F, &dbgs()))
+    report_fatal_error("Broken function");
 #endif
   return true;
 }

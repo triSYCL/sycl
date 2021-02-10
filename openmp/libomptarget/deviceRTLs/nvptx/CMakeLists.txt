@@ -35,6 +35,14 @@ if(CUDA_HOST_COMPILER MATCHES clang)
   set(CUDA_HOST_COMPILER "${LIBOMPTARGET_NVPTX_ALTERNATE_GCC_HOST_COMPILER}" CACHE FILEPATH "" FORCE)
 endif()
 
+get_filename_component(devicertl_base_directory
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  DIRECTORY)
+set(devicertl_common_directory
+  ${devicertl_base_directory}/common)
+set(devicertl_nvptx_directory
+  ${devicertl_base_directory}/nvptx)
+
 if(LIBOMPTARGET_DEP_CUDA_FOUND)
   libomptarget_say("Building CUDA offloading device RTL.")
 
@@ -43,23 +51,30 @@ if(LIBOMPTARGET_DEP_CUDA_FOUND)
   set(CUDA_PROPAGATE_HOST_FLAGS OFF)
 
   set(cuda_src_files
-      src/cancel.cu
-      src/critical.cu
-      src/data_sharing.cu
-      src/libcall.cu
-      src/loop.cu
-      src/omptarget-nvptx.cu
-      src/parallel.cu
-      src/reduction.cu
-      src/sync.cu
-      src/task.cu
+      ${devicertl_common_directory}/src/cancel.cu
+      ${devicertl_common_directory}/src/critical.cu
+      ${devicertl_common_directory}/src/data_sharing.cu
+      ${devicertl_common_directory}/src/libcall.cu
+      ${devicertl_common_directory}/src/loop.cu
+      ${devicertl_common_directory}/src/omptarget.cu
+      ${devicertl_common_directory}/src/parallel.cu
+      ${devicertl_common_directory}/src/reduction.cu
+      ${devicertl_common_directory}/src/support.cu
+      ${devicertl_common_directory}/src/sync.cu
+      ${devicertl_common_directory}/src/task.cu
+      src/target_impl.cu
   )
 
-  set(omp_data_objects src/omp_data.cu)
+  set(omp_data_objects ${devicertl_common_directory}/src/omp_data.cu)
 
-  # Get the compute capability the user requested or use SM_35 by default.
-  # SM_35 is what clang uses by default.
-  set(default_capabilities 35)
+  # Build library support for the highest compute capability the system supports
+  # and always build support for sm_35 by default
+  if (${LIBOMPTARGET_DEP_CUDA_ARCH} EQUAL 35)
+    set(default_capabilities 35)
+  else()
+      set(default_capabilities "35,${LIBOMPTARGET_DEP_CUDA_ARCH}")
+  endif()
+
   if (DEFINED LIBOMPTARGET_NVPTX_COMPUTE_CAPABILITY)
     set(default_capabilities ${LIBOMPTARGET_NVPTX_COMPUTE_CAPABILITY})
     libomptarget_warning_say("LIBOMPTARGET_NVPTX_COMPUTE_CAPABILITY is deprecated, please use LIBOMPTARGET_NVPTX_COMPUTE_CAPABILITIES")
@@ -72,6 +87,11 @@ if(LIBOMPTARGET_DEP_CUDA_FOUND)
     set(CUDA_ARCH ${CUDA_ARCH} -gencode arch=compute_${sm},code=sm_${sm})
   endforeach()
 
+  # Override default MAX_SM in src/target_impl.h if requested
+  if (DEFINED LIBOMPTARGET_NVPTX_MAX_SM)
+    set(MAX_SM_DEFINITION "-DMAX_SM=${LIBOMPTARGET_NVPTX_MAX_SM}")
+  endif()
+
   # Activate RTL message dumps if requested by the user.
   set(LIBOMPTARGET_NVPTX_DEBUG FALSE CACHE BOOL
     "Activate NVPTX device RTL debug messages.")
@@ -83,9 +103,10 @@ if(LIBOMPTARGET_DEP_CUDA_FOUND)
   # yet supported by the CUDA toolchain on the device.
   set(BUILD_SHARED_LIBS OFF)
   set(CUDA_SEPARABLE_COMPILATION ON)
-
+  list(APPEND CUDA_NVCC_FLAGS -I${devicertl_base_directory}
+                              -I${devicertl_nvptx_directory}/src)
   cuda_add_library(omptarget-nvptx STATIC ${cuda_src_files} ${omp_data_objects}
-      OPTIONS ${CUDA_ARCH} ${CUDA_DEBUG})
+      OPTIONS ${CUDA_ARCH} ${CUDA_DEBUG} ${MAX_SM_DEFINITION})
 
   # Install device RTL under the lib destination folder.
   install(TARGETS omptarget-nvptx ARCHIVE DESTINATION "${OPENMP_INSTALL_LIBDIR}")
@@ -117,7 +138,10 @@ if(LIBOMPTARGET_DEP_CUDA_FOUND)
     libomptarget_say("Building CUDA LLVM bitcode offloading device RTL.")
 
     # Set flags for LLVM Bitcode compilation.
-    set(bc_flags ${LIBOMPTARGET_NVPTX_SELECTED_CUDA_COMPILER_FLAGS})
+    set(bc_flags ${LIBOMPTARGET_NVPTX_SELECTED_CUDA_COMPILER_FLAGS}
+                 -I${devicertl_base_directory}
+                 -I${devicertl_nvptx_directory}/src)
+
     if(${LIBOMPTARGET_NVPTX_DEBUG})
       set(bc_flags ${bc_flags} -DOMPTARGET_NVPTX_DEBUG=-1)
     else()
@@ -145,7 +169,7 @@ if(LIBOMPTARGET_DEP_CUDA_FOUND)
         get_filename_component(outfile ${src} NAME)
 
         add_custom_command(OUTPUT ${outfile}-sm_${sm}.bc
-          COMMAND ${LIBOMPTARGET_NVPTX_SELECTED_CUDA_COMPILER} ${bc_flags} ${cuda_arch}
+          COMMAND ${LIBOMPTARGET_NVPTX_SELECTED_CUDA_COMPILER} ${bc_flags} ${cuda_arch} ${MAX_SM_DEFINITION}
             -c ${infile} -o ${outfile}-sm_${sm}.bc
           DEPENDS ${infile}
           IMPLICIT_DEPENDS CXX ${infile}

@@ -6,14 +6,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include <CL/sycl/detail/event_impl.hpp>
-#include <CL/sycl/detail/queue_impl.hpp>
-#include <CL/sycl/detail/scheduler/scheduler.hpp>
+#include <detail/event_impl.hpp>
+#include <detail/queue_impl.hpp>
+#include <detail/scheduler/scheduler.hpp>
 
 #include <memory>
 #include <vector>
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 namespace detail {
 
@@ -38,31 +38,58 @@ Scheduler::GraphProcessor::getWaitList(EventImplPtr Event) {
 
 void Scheduler::GraphProcessor::waitForEvent(EventImplPtr Event) {
   Command *Cmd = getCommand(Event);
-  assert(Cmd && "Event has no associated command?");
-  Command *FailedCommand = enqueueCommand(Cmd);
-  if (FailedCommand)
-    // TODO: Reschedule commands.
-    throw runtime_error("Enqueue process failed.");
+  // Command can be nullptr if user creates cl::sycl::event explicitly or the
+  // event has been waited on by another thread
+  if (!Cmd)
+    return;
 
-  RT::PiEvent &CLEvent = Cmd->getEvent()->getHandleRef();
-  if (CLEvent)
-    PI_CALL(RT::piEventsWait(1, &CLEvent));
+  EnqueueResultT Res;
+  bool Enqueued = enqueueCommand(Cmd, Res, BLOCKING);
+  if (!Enqueued && EnqueueResultT::SyclEnqueueFailed == Res.MResult)
+    // TODO: Reschedule commands.
+    throw runtime_error("Enqueue process failed.", PI_INVALID_OPERATION);
+
+  Cmd->getEvent()->waitInternal();
 }
 
-Command *Scheduler::GraphProcessor::enqueueCommand(Command *Cmd) {
-  if (!Cmd || Cmd->isEnqueued())
-    return nullptr;
+bool Scheduler::GraphProcessor::enqueueCommand(Command *Cmd,
+                                               EnqueueResultT &EnqueueResult,
+                                               BlockingT Blocking) {
+  if (!Cmd || Cmd->isSuccessfullyEnqueued())
+    return true;
 
-  for (DepDesc &Dep : Cmd->MDeps) {
-    Command *FailedCommand = enqueueCommand(Dep.MDepCommand);
-    if (FailedCommand)
-      return FailedCommand;
+  // Exit early if the command is blocked and the enqueue type is non-blocking
+  if (Cmd->isEnqueueBlocked() && !Blocking) {
+    EnqueueResult = EnqueueResultT(EnqueueResultT::SyclEnqueueBlocked, Cmd);
+    return false;
   }
 
-  cl_int Result = Cmd->enqueue();
-  return CL_SUCCESS == Result ? nullptr : Cmd;
+  // Recursively enqueue all the dependencies first and
+  // exit immediately if any of the commands cannot be enqueued.
+  for (DepDesc &Dep : Cmd->MDeps) {
+    if (!enqueueCommand(Dep.MDepCommand, EnqueueResult, Blocking))
+      return false;
+  }
+
+  // Asynchronous host operations (amongst dependencies of an arbitrary command)
+  // are not supported (see Command::processDepEvent method). This impacts
+  // operation of host-task feature a lot with hangs and long-runs. Hence we
+  // have this workaround here.
+  // This workaround is safe as long as the only asynchronous host operation we
+  // have is a host task.
+  // This may iterate over some of dependencies in Cmd->MDeps. Though, the
+  // enqueue operation is idempotent and the second call will result in no-op.
+  // TODO remove the workaround when proper fix for host-task dispatching is
+  // implemented.
+  for (const EventImplPtr &Event : Cmd->getPreparedHostDepsEvents()) {
+    if (Command *DepCmd = static_cast<Command *>(Event->getCommand()))
+      if (!enqueueCommand(DepCmd, EnqueueResult, Blocking))
+        return false;
+  }
+
+  return Cmd->enqueue(EnqueueResult, Blocking);
 }
 
 } // namespace detail
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

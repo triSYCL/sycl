@@ -1,5 +1,5 @@
-; RUN: opt -S -licm -enable-mssa-loop-dependency %s | FileCheck %s
-; REQUIRES: asserts
+; RUN: opt -disable-output -licm -enable-new-pm=0 -print-memoryssa -enable-mssa-loop-dependency=true < %s 2>&1 | FileCheck %s
+; RUN: opt -disable-output -passes='loop-mssa(licm),print<memoryssa>' < %s 2>&1 | FileCheck %s
 target datalayout = "E-m:e-i1:8:16-i8:8:16-i64:64-f128:64-v128:64-a:8:16-n32:64"
 target triple = "s390x-ibm-linux"
 
@@ -8,6 +8,8 @@ target triple = "s390x-ibm-linux"
 @g_1087 = external dso_local global i32**, align 8
 
 ; CHECK-LABEL: @f1()
+; CHECK: 5 = MemoryPhi(
+; CHECK-NOT: 7 = MemoryPhi(
 define dso_local fastcc void @f1() unnamed_addr #0 {
 label0:
   br i1 undef, label %thread-pre-split.i.preheader, label %label5

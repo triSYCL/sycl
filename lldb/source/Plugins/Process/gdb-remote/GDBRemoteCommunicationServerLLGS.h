@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_GDBRemoteCommunicationServerLLGS_h_
-#define liblldb_GDBRemoteCommunicationServerLLGS_h_
+#ifndef LLDB_SOURCE_PLUGINS_PROCESS_GDB_REMOTE_GDBREMOTECOMMUNICATIONSERVERLLGS_H
+#define LLDB_SOURCE_PLUGINS_PROCESS_GDB_REMOTE_GDBREMOTECOMMUNICATIONSERVERLLGS_H
 
 #include <mutex>
 #include <unordered_map>
@@ -67,7 +67,7 @@ public:
 
   void DidExec(NativeProcessProtocol *process) override;
 
-  Status InitializeConnection(std::unique_ptr<Connection> &&connection);
+  Status InitializeConnection(std::unique_ptr<Connection> connection);
 
 protected:
   MainLoop &m_mainloop;
@@ -138,6 +138,8 @@ protected:
   PacketResult Handle_memory_read(StringExtractorGDBRemote &packet);
 
   PacketResult Handle_M(StringExtractorGDBRemote &packet);
+  PacketResult Handle__M(StringExtractorGDBRemote &packet);
+  PacketResult Handle__m(StringExtractorGDBRemote &packet);
 
   PacketResult
   Handle_qMemoryRegionInfoSupported(StringExtractorGDBRemote &packet);
@@ -161,6 +163,8 @@ protected:
   PacketResult Handle_jTraceStop(StringExtractorGDBRemote &packet);
 
   PacketResult Handle_jTraceConfigRead(StringExtractorGDBRemote &packet);
+
+  PacketResult Handle_jLLDBTraceSupportedType(StringExtractorGDBRemote &packet);
 
   PacketResult Handle_QRestoreRegisterState(StringExtractorGDBRemote &packet);
 
@@ -199,6 +203,8 @@ protected:
   static std::string XMLEncodeAttributeValue(llvm::StringRef value);
 
 private:
+  llvm::Expected<std::unique_ptr<llvm::MemoryBuffer>> BuildTargetXml();
+
   void HandleInferiorState_Exited(NativeProcessProtocol *process);
 
   void HandleInferiorState_Stopped(NativeProcessProtocol *process);
@@ -222,10 +228,13 @@ private:
   void StopSTDIOForwarding();
 
   // For GDBRemoteCommunicationServerLLGS only
-  DISALLOW_COPY_AND_ASSIGN(GDBRemoteCommunicationServerLLGS);
+  GDBRemoteCommunicationServerLLGS(const GDBRemoteCommunicationServerLLGS &) =
+      delete;
+  const GDBRemoteCommunicationServerLLGS &
+  operator=(const GDBRemoteCommunicationServerLLGS &) = delete;
 };
 
 } // namespace process_gdb_remote
 } // namespace lldb_private
 
-#endif // liblldb_GDBRemoteCommunicationServerLLGS_h_
+#endif // LLDB_SOURCE_PLUGINS_PROCESS_GDB_REMOTE_GDBREMOTECOMMUNICATIONSERVERLLGS_H

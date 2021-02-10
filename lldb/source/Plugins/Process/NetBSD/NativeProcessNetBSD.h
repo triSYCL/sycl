@@ -47,6 +47,8 @@ public:
 
   Status Signal(int signo) override;
 
+  Status Interrupt() override;
+
   Status Kill() override;
 
   Status GetMemoryRegionInfo(lldb::addr_t load_addr,
@@ -57,11 +59,6 @@ public:
 
   Status WriteMemory(lldb::addr_t addr, const void *buf, size_t size,
                      size_t &bytes_written) override;
-
-  Status AllocateMemory(size_t size, uint32_t permissions,
-                        lldb::addr_t &addr) override;
-
-  Status DeallocateMemory(lldb::addr_t addr) override;
 
   lldb::addr_t GetSharedLibraryInfoAddress() override;
 
@@ -98,6 +95,7 @@ private:
   bool HasThreadNoLock(lldb::tid_t thread_id);
 
   NativeThreadNetBSD &AddThread(lldb::tid_t thread_id);
+  void RemoveThread(lldb::tid_t thread_id);
 
   void MonitorCallback(lldb::pid_t pid, int signal);
   void MonitorExited(lldb::pid_t pid, WaitStatus status);
@@ -109,6 +107,7 @@ private:
   void SigchldHandler();
 
   Status Attach();
+  Status SetupTrace();
   Status ReinitializeThreads();
 };
 

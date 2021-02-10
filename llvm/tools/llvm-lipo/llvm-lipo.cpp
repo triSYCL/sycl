@@ -12,9 +12,14 @@
 
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/BinaryFormat/MachO.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/IR/Module.h"
 #include "llvm/Object/Binary.h"
+#include "llvm/Object/IRObjectFile.h"
 #include "llvm/Object/MachO.h"
 #include "llvm/Object/MachOUniversal.h"
+#include "llvm/Object/MachOUniversalWriter.h"
 #include "llvm/Object/ObjectFile.h"
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/ArgList.h"
@@ -23,16 +28,27 @@
 #include "llvm/Support/FileOutputBuffer.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/WithColor.h"
+#include "llvm/TextAPI/MachO/Architecture.h"
 
 using namespace llvm;
 using namespace llvm::object;
 
 static const StringRef ToolName = "llvm-lipo";
+static LLVMContext LLVMCtx;
 
 LLVM_ATTRIBUTE_NORETURN static void reportError(Twine Message) {
   WithColor::error(errs(), ToolName) << Message << "\n";
   errs().flush();
   exit(EXIT_FAILURE);
+}
+
+LLVM_ATTRIBUTE_NORETURN static void reportError(Error E) {
+  assert(E);
+  std::string Buf;
+  raw_string_ostream OS(Buf);
+  logAllUnhandledErrors(std::move(E), OS);
+  OS.flush();
+  reportError(Buf);
 }
 
 LLVM_ATTRIBUTE_NORETURN static void reportError(StringRef File, Error E) {
@@ -82,32 +98,39 @@ enum class LipoAction {
   PrintInfo,
   VerifyArch,
   ThinArch,
+  ExtractArch,
   CreateUniversal,
   ReplaceArch,
 };
 
-struct Replacement {
-  StringRef ArchType;
+struct InputFile {
+  Optional<StringRef> ArchType;
   StringRef FileName;
 };
 
 struct Config {
-  SmallVector<std::string, 1> InputFiles;
+  SmallVector<InputFile, 1> InputFiles;
   SmallVector<std::string, 1> VerifyArchList;
-  SmallVector<Replacement, 1> Replacements;
+  SmallVector<InputFile, 1> ReplacementFiles;
   StringMap<const uint32_t> SegmentAlignments;
-  std::string ThinArchType;
+  std::string ArchType;
   std::string OutputFile;
   LipoAction ActionToPerform;
 };
 
-struct Slice {
-  const MachOObjectFile *ObjectFile;
-  // Requires Alignment field to store slice alignment values from universal
-  // binaries. Also needed to order the slices using compareSlices, so the total
-  // file size can be calculated before creating the output buffer.
-  uint32_t Alignment;
-};
+static Slice createSliceFromArchive(const Archive &A) {
+  Expected<Slice> ArchiveOrSlice = Slice::create(A, &LLVMCtx);
+  if (!ArchiveOrSlice)
+    reportError(A.getFileName(), ArchiveOrSlice.takeError());
+  return *ArchiveOrSlice;
+}
+
+static Slice createSliceFromIR(const IRObjectFile &IRO, unsigned Align) {
+  Expected<Slice> IROrErr = Slice::create(IRO, Align);
+  if (!IROrErr)
+    reportError(IRO.getFileName(), IROrErr.takeError());
+  return *IROrErr;
+}
 
 } // end namespace
 
@@ -157,12 +180,20 @@ static Config parseLipoOptions(ArrayRef<const char *> ArgsArr) {
     reportError("unknown argument '" + Arg->getAsString(InputArgs) + "'");
 
   for (auto Arg : InputArgs.filtered(LIPO_INPUT))
-    C.InputFiles.push_back(Arg->getValue());
+    C.InputFiles.push_back({None, Arg->getValue()});
+  for (auto Arg : InputArgs.filtered(LIPO_arch)) {
+    validateArchitectureName(Arg->getValue(0));
+    if (!Arg->getValue(1))
+      reportError(
+          "arch is missing an argument: expects -arch arch_type file_name");
+    C.InputFiles.push_back({StringRef(Arg->getValue(0)), Arg->getValue(1)});
+  }
+
   if (C.InputFiles.empty())
     reportError("at least one input file should be specified");
 
   if (InputArgs.hasArg(LIPO_output))
-    C.OutputFile = InputArgs.getLastArgValue(LIPO_output);
+    C.OutputFile = std::string(InputArgs.getLastArgValue(LIPO_output));
 
   for (auto Segalign : InputArgs.filtered(LIPO_segalign)) {
     if (!Segalign->getValue(1))
@@ -238,12 +269,21 @@ static Config parseLipoOptions(ArrayRef<const char *> ArgsArr) {
   case LIPO_thin:
     if (C.InputFiles.size() > 1)
       reportError("thin expects a single input file");
-    C.ThinArchType = ActionArgs[0]->getValue();
-    validateArchitectureName(C.ThinArchType);
     if (C.OutputFile.empty())
       reportError("thin expects a single output file");
-
+    C.ArchType = ActionArgs[0]->getValue();
+    validateArchitectureName(C.ArchType);
     C.ActionToPerform = LipoAction::ThinArch;
+    return C;
+
+  case LIPO_extract:
+    if (C.InputFiles.size() > 1)
+      reportError("extract expects a single input file");
+    if (C.OutputFile.empty())
+      reportError("extract expects a single output file");
+    C.ArchType = ActionArgs[0]->getValue();
+    validateArchitectureName(C.ArchType);
+    C.ActionToPerform = LipoAction::ExtractArch;
     return C;
 
   case LIPO_create:
@@ -258,8 +298,9 @@ static Config parseLipoOptions(ArrayRef<const char *> ArgsArr) {
         reportError(
             "replace is missing an argument: expects -replace arch_type "
             "file_name");
-      C.Replacements.push_back(
-          Replacement{Action->getValue(0), Action->getValue(1)});
+      validateArchitectureName(Action->getValue(0));
+      C.ReplacementFiles.push_back(
+          {StringRef(Action->getValue(0)), Action->getValue(1)});
     }
 
     if (C.OutputFile.empty())
@@ -275,19 +316,35 @@ static Config parseLipoOptions(ArrayRef<const char *> ArgsArr) {
 }
 
 static SmallVector<OwningBinary<Binary>, 1>
-readInputBinaries(ArrayRef<std::string> InputFiles) {
+readInputBinaries(ArrayRef<InputFile> InputFiles) {
   SmallVector<OwningBinary<Binary>, 1> InputBinaries;
-  for (StringRef InputFile : InputFiles) {
-    Expected<OwningBinary<Binary>> BinaryOrErr = createBinary(InputFile);
+  for (const InputFile &IF : InputFiles) {
+    Expected<OwningBinary<Binary>> BinaryOrErr =
+        createBinary(IF.FileName, &LLVMCtx);
     if (!BinaryOrErr)
-      reportError(InputFile, BinaryOrErr.takeError());
-    // TODO: Add compatibility for archive files
-    if (BinaryOrErr->getBinary()->isArchive())
-      reportError("File " + InputFile +
-                  " is an archive file and is not yet supported.");
-    if (!BinaryOrErr->getBinary()->isMachO() &&
-        !BinaryOrErr->getBinary()->isMachOUniversalBinary())
-      reportError("File " + InputFile + " has unsupported binary format");
+      reportError(IF.FileName, BinaryOrErr.takeError());
+    const Binary *B = BinaryOrErr->getBinary();
+    if (!B->isArchive() && !B->isMachO() && !B->isMachOUniversalBinary() &&
+        !B->isIR())
+      reportError("File " + IF.FileName + " has unsupported binary format");
+    if (IF.ArchType && (B->isMachO() || B->isArchive() || B->isIR())) {
+      const auto S = B->isMachO()
+                         ? Slice(*cast<MachOObjectFile>(B))
+                         : B->isArchive()
+                               ? createSliceFromArchive(*cast<Archive>(B))
+                               : createSliceFromIR(*cast<IRObjectFile>(B), 0);
+      const auto SpecifiedCPUType = MachO::getCPUTypeFromArchitecture(
+                                        MachO::getArchitectureFromName(
+                                            Triple(*IF.ArchType).getArchName()))
+                                        .first;
+      // For compatibility with cctools' lipo the comparison is relaxed just to
+      // checking cputypes.
+      if (S.getCPUType() != SpecifiedCPUType)
+        reportError("specified architecture: " + *IF.ArchType +
+                    " for file: " + B->getFileName() +
+                    " does not match the file's architecture (" +
+                    S.getArchString() + ")");
+    }
     InputBinaries.push_back(std::move(*BinaryOrErr));
   }
   return InputBinaries;
@@ -306,7 +363,7 @@ static void verifyArch(ArrayRef<OwningBinary<Binary>> InputBinaries,
   if (auto UO =
           dyn_cast<MachOUniversalBinary>(InputBinaries.front().getBinary())) {
     for (StringRef Arch : VerifyArchList) {
-      Expected<std::unique_ptr<MachOObjectFile>> Obj =
+      Expected<MachOUniversalBinary::ObjectForArch> Obj =
           UO->getObjectForArch(Arch);
       if (!Obj)
         exit(EXIT_FAILURE);
@@ -323,34 +380,57 @@ static void verifyArch(ArrayRef<OwningBinary<Binary>> InputBinaries,
   exit(EXIT_SUCCESS);
 }
 
-// Returns a string of the given Object file's architecture type
-// Unknown architectures formatted unknown(CPUType,CPUSubType) for compatibility
-// with cctools lipo
-static std::string getArchString(const MachOObjectFile &ObjectFile) {
-  const Triple T = ObjectFile.getArchTriple();
-  const StringRef ObjectArch = T.getArchName();
-  if (!ObjectArch.empty())
-    return ObjectArch;
-  return ("unknown(" + Twine(ObjectFile.getHeader().cputype) + "," +
-          Twine(ObjectFile.getHeader().cpusubtype & ~MachO::CPU_SUBTYPE_MASK) +
-          ")")
-      .str();
-}
-
 static void printBinaryArchs(const Binary *Binary, raw_ostream &OS) {
   // Prints trailing space for compatibility with cctools lipo.
   if (auto UO = dyn_cast<MachOUniversalBinary>(Binary)) {
     for (const auto &O : UO->objects()) {
-      Expected<std::unique_ptr<MachOObjectFile>> BinaryOrError =
+      // Order here is important, because both MachOObjectFile and
+      // IRObjectFile can be created with a binary that has embedded bitcode.
+      Expected<std::unique_ptr<MachOObjectFile>> MachOObjOrError =
           O.getAsObjectFile();
-      if (!BinaryOrError)
-        reportError(Binary->getFileName(), BinaryOrError.takeError());
-      OS << getArchString(*BinaryOrError.get().get()) << " ";
+      if (MachOObjOrError) {
+        OS << Slice(*(MachOObjOrError->get())).getArchString() << " ";
+        continue;
+      }
+      Expected<std::unique_ptr<IRObjectFile>> IROrError =
+          O.getAsIRObject(LLVMCtx);
+      if (IROrError) {
+        consumeError(MachOObjOrError.takeError());
+        Expected<Slice> SliceOrErr = Slice::create(**IROrError, O.getAlign());
+        if (!SliceOrErr) {
+          reportError(Binary->getFileName(), SliceOrErr.takeError());
+          continue;
+        }
+        OS << SliceOrErr.get().getArchString() << " ";
+        continue;
+      }
+      Expected<std::unique_ptr<Archive>> ArchiveOrError = O.getAsArchive();
+      if (ArchiveOrError) {
+        consumeError(MachOObjOrError.takeError());
+        consumeError(IROrError.takeError());
+        OS << createSliceFromArchive(**ArchiveOrError).getArchString() << " ";
+        continue;
+      }
+      consumeError(ArchiveOrError.takeError());
+      reportError(Binary->getFileName(), MachOObjOrError.takeError());
+      reportError(Binary->getFileName(), IROrError.takeError());
     }
     OS << "\n";
     return;
   }
-  OS << getArchString(*cast<MachOObjectFile>(Binary)) << " \n";
+
+  if (const auto *MachO = dyn_cast<MachOObjectFile>(Binary)) {
+    OS << Slice(*MachO).getArchString() << " \n";
+    return;
+  }
+
+  // This should be always the case, as this is tested in readInputBinaries
+  const auto *IR = cast<IRObjectFile>(Binary);
+  Expected<Slice> SliceOrErr = createSliceFromIR(*IR, 0);
+  if (!SliceOrErr)
+    reportError(IR->getFileName(), SliceOrErr.takeError());
+  
+  OS << SliceOrErr->getArchString() << " \n";
 }
 
 LLVM_ATTRIBUTE_NORETURN
@@ -384,9 +464,9 @@ static void printInfo(ArrayRef<OwningBinary<Binary>> InputBinaries) {
 }
 
 LLVM_ATTRIBUTE_NORETURN
-static void extractSlice(ArrayRef<OwningBinary<Binary>> InputBinaries,
-                         StringRef ThinArchType, StringRef OutputFileName) {
-  assert(!ThinArchType.empty() && "The architecture type should be non-empty");
+static void thinSlice(ArrayRef<OwningBinary<Binary>> InputBinaries,
+                      StringRef ArchType, StringRef OutputFileName) {
+  assert(!ArchType.empty() && "The architecture type should be non-empty");
   assert(InputBinaries.size() == 1 && "Incorrect number of input binaries");
   assert(!OutputFileName.empty() && "Thin expects a single output file");
 
@@ -399,121 +479,59 @@ static void extractSlice(ArrayRef<OwningBinary<Binary>> InputBinaries,
 
   auto *UO = cast<MachOUniversalBinary>(InputBinaries.front().getBinary());
   Expected<std::unique_ptr<MachOObjectFile>> Obj =
-      UO->getObjectForArch(ThinArchType);
-  if (!Obj)
+      UO->getMachOObjectForArch(ArchType);
+  Expected<std::unique_ptr<IRObjectFile>> IRObj =
+      UO->getIRObjectForArch(ArchType, LLVMCtx);
+  Expected<std::unique_ptr<Archive>> Ar = UO->getArchiveForArch(ArchType);
+  if (!Obj && !IRObj && !Ar)
     reportError("fat input file " + UO->getFileName() +
-                " does not contain the specified architecture " + ThinArchType +
+                " does not contain the specified architecture " + ArchType +
                 " to thin it to");
+  Binary *B;
+  // Order here is important, because both Obj and IRObj will be valid with a
+  // binary that has embedded bitcode.
+  if (Obj)
+    B = Obj->get();
+  else if (IRObj)
+    B = IRObj->get();
+  else
+    B = Ar->get();
 
   Expected<std::unique_ptr<FileOutputBuffer>> OutFileOrError =
       FileOutputBuffer::create(OutputFileName,
-                               Obj.get()->getMemoryBufferRef().getBufferSize(),
+                               B->getMemoryBufferRef().getBufferSize(),
                                sys::fs::can_execute(UO->getFileName())
                                    ? FileOutputBuffer::F_executable
                                    : 0);
   if (!OutFileOrError)
     reportError(OutputFileName, OutFileOrError.takeError());
-  std::copy(Obj.get()->getMemoryBufferRef().getBufferStart(),
-            Obj.get()->getMemoryBufferRef().getBufferEnd(),
+  std::copy(B->getMemoryBufferRef().getBufferStart(),
+            B->getMemoryBufferRef().getBufferEnd(),
             OutFileOrError.get()->getBufferStart());
   if (Error E = OutFileOrError.get()->commit())
     reportError(OutputFileName, std::move(E));
   exit(EXIT_SUCCESS);
 }
 
-static void checkArchDuplicates(const ArrayRef<Slice> &Slices) {
-  DenseMap<uint64_t, const MachOObjectFile *> CPUIds;
-  auto CPUIDForSlice = [](const Slice &S) {
-    return static_cast<uint64_t>(S.ObjectFile->getHeader().cputype) << 32 |
-           S.ObjectFile->getHeader().cpusubtype;
-  };
+static void checkArchDuplicates(ArrayRef<Slice> Slices) {
+  DenseMap<uint64_t, const Binary *> CPUIds;
   for (const auto &S : Slices) {
-    auto Entry = CPUIds.try_emplace(CPUIDForSlice(S), S.ObjectFile);
+    auto Entry = CPUIds.try_emplace(S.getCPUID(), S.getBinary());
     if (!Entry.second)
       reportError(Entry.first->second->getFileName() + " and " +
-                  S.ObjectFile->getFileName() + " have the same architecture " +
-                  getArchString(*S.ObjectFile) +
+                  S.getBinary()->getFileName() +
+                  " have the same architecture " + S.getArchString() +
                   " and therefore cannot be in the same universal binary");
   }
 }
 
-// For compatibility with cctools lipo, alignment is calculated as the minimum
-// aligment of all segments. Each segments's alignment is the maximum alignment
-// from its sections
-static uint32_t calculateSegmentAlignment(const MachOObjectFile &O) {
-  uint32_t P2CurrentAlignment;
-  uint32_t P2MinAlignment = MachOUniversalBinary::MaxSectionAlignment;
-  const bool Is64Bit = O.is64Bit();
-
-  for (const auto &LC : O.load_commands()) {
-    if (LC.C.cmd != (Is64Bit ? MachO::LC_SEGMENT_64 : MachO::LC_SEGMENT))
-      continue;
-    if (O.getHeader().filetype == MachO::MH_OBJECT) {
-      unsigned NumberOfSections =
-          (Is64Bit ? O.getSegment64LoadCommand(LC).nsects
-                   : O.getSegmentLoadCommand(LC).nsects);
-      P2CurrentAlignment = NumberOfSections ? 2 : P2MinAlignment;
-      for (unsigned SI = 0; SI < NumberOfSections; ++SI) {
-        P2CurrentAlignment = std::max(P2CurrentAlignment,
-                                      (Is64Bit ? O.getSection64(LC, SI).align
-                                               : O.getSection(LC, SI).align));
-      }
-    } else {
-      P2CurrentAlignment =
-          countTrailingZeros(Is64Bit ? O.getSegment64LoadCommand(LC).vmaddr
-                                     : O.getSegmentLoadCommand(LC).vmaddr);
-    }
-    P2MinAlignment = std::min(P2MinAlignment, P2CurrentAlignment);
-  }
-  // return a value >= 4 byte aligned, and less than MachO MaxSectionAlignment
-  return std::max(
-      static_cast<uint32_t>(2),
-      std::min(P2MinAlignment, static_cast<uint32_t>(
-                                   MachOUniversalBinary::MaxSectionAlignment)));
-}
-
-static uint32_t calculateAlignment(const MachOObjectFile *ObjectFile) {
-  switch (ObjectFile->getHeader().cputype) {
-  case MachO::CPU_TYPE_I386:
-  case MachO::CPU_TYPE_X86_64:
-  case MachO::CPU_TYPE_POWERPC:
-  case MachO::CPU_TYPE_POWERPC64:
-    return 12; // log2 value of page size(4k) for x86 and PPC
-  case MachO::CPU_TYPE_ARM:
-  case MachO::CPU_TYPE_ARM64:
-  case MachO::CPU_TYPE_ARM64_32:
-    return 14; // log2 value of page size(16k) for Darwin ARM
-  default:
-    return calculateSegmentAlignment(*ObjectFile);
-  }
-}
-
-// This function replicates ordering from cctools lipo for consistency
-static bool compareSlices(const Slice &Lhs, const Slice &Rhs) {
-  if (Lhs.ObjectFile->getHeader().cputype ==
-      Rhs.ObjectFile->getHeader().cputype)
-    return Lhs.ObjectFile->getHeader().cpusubtype <
-           Rhs.ObjectFile->getHeader().cpusubtype;
-
-  // force arm64-family to follow after all other slices for compatibility
-  // with cctools lipo
-  if (Lhs.ObjectFile->getHeader().cputype == MachO::CPU_TYPE_ARM64)
-    return false;
-  if (Rhs.ObjectFile->getHeader().cputype == MachO::CPU_TYPE_ARM64)
-    return true;
-
-  // Sort by alignment to minimize file size
-  return Lhs.Alignment < Rhs.Alignment;
-}
-
 template <typename Range>
-static void
-updateSegmentAlignments(Range &Slices,
-                        const StringMap<const uint32_t> &Alignments) {
+static void updateAlignments(Range &Slices,
+                             const StringMap<const uint32_t> &Alignments) {
   for (auto &Slice : Slices) {
-    auto Alignment = Alignments.find(getArchString(*Slice.ObjectFile));
+    auto Alignment = Alignments.find(Slice.getArchString());
     if (Alignment != Alignments.end())
-      Slice.Alignment = Alignment->second;
+      Slice.setP2Alignment(Alignment->second);
   }
 }
 
@@ -521,7 +539,7 @@ static void checkUnusedAlignments(ArrayRef<Slice> Slices,
                                   const StringMap<const uint32_t> &Alignments) {
   auto HasArch = [&](StringRef Arch) {
     return llvm::find_if(Slices, [Arch](Slice S) {
-             return getArchString(*S.ObjectFile) == Arch;
+             return S.getArchString() == Arch;
            }) != Slices.end();
   };
   for (StringRef Arch : Alignments.keys())
@@ -533,104 +551,53 @@ static void checkUnusedAlignments(ArrayRef<Slice> Slices,
 
 // Updates vector ExtractedObjects with the MachOObjectFiles extracted from
 // Universal Binary files to transfer ownership.
-static SmallVector<Slice, 2> buildSlices(
-    ArrayRef<OwningBinary<Binary>> InputBinaries,
-    const StringMap<const uint32_t> &Alignments,
-    SmallVectorImpl<std::unique_ptr<MachOObjectFile>> &ExtractedObjects) {
+static SmallVector<Slice, 2>
+buildSlices(ArrayRef<OwningBinary<Binary>> InputBinaries,
+            const StringMap<const uint32_t> &Alignments,
+            SmallVectorImpl<std::unique_ptr<SymbolicFile>> &ExtractedObjects) {
   SmallVector<Slice, 2> Slices;
   for (auto &IB : InputBinaries) {
     const Binary *InputBinary = IB.getBinary();
     if (auto UO = dyn_cast<MachOUniversalBinary>(InputBinary)) {
       for (const auto &O : UO->objects()) {
+        // Order here is important, because both MachOObjectFile and
+        // IRObjectFile can be created with a binary that has embedded bitcode.
         Expected<std::unique_ptr<MachOObjectFile>> BinaryOrError =
             O.getAsObjectFile();
-        if (!BinaryOrError)
-          reportError(InputBinary->getFileName(), BinaryOrError.takeError());
-        ExtractedObjects.push_back(std::move(BinaryOrError.get()));
-        Slices.push_back(Slice{ExtractedObjects.back().get(), O.getAlign()});
+        if (BinaryOrError) {
+          Slices.emplace_back(*(BinaryOrError.get()), O.getAlign());
+          ExtractedObjects.push_back(std::move(BinaryOrError.get()));
+          continue;
+        }
+        Expected<std::unique_ptr<IRObjectFile>> IROrError =
+            O.getAsIRObject(LLVMCtx);
+        if (IROrError) {
+          consumeError(BinaryOrError.takeError());
+          Slice S = createSliceFromIR(**IROrError, O.getAlign());
+          ExtractedObjects.emplace_back(std::move(IROrError.get()));
+          Slices.emplace_back(std::move(S));
+          continue;
+        }
+        reportError(InputBinary->getFileName(), BinaryOrError.takeError());
       }
-    } else if (auto O = dyn_cast<MachOObjectFile>(InputBinary)) {
-      Slices.push_back(Slice{O, calculateAlignment(O)});
+    } else if (const auto *O = dyn_cast<MachOObjectFile>(InputBinary)) {
+      Slices.emplace_back(*O);
+    } else if (const auto *A = dyn_cast<Archive>(InputBinary)) {
+      Slices.push_back(createSliceFromArchive(*A));
+    } else if (const auto *IRO = dyn_cast<IRObjectFile>(InputBinary)) {
+      // Original Apple's lipo set the alignment to 0
+      Expected<Slice> SliceOrErr = Slice::create(*IRO, 0);
+      if (!SliceOrErr) {
+        reportError(InputBinary->getFileName(), SliceOrErr.takeError());
+        continue;
+      }
+      Slices.emplace_back(std::move(SliceOrErr.get()));
     } else {
       llvm_unreachable("Unexpected binary format");
     }
   }
-  updateSegmentAlignments(Slices, Alignments);
+  updateAlignments(Slices, Alignments);
   return Slices;
-}
-
-static SmallVector<MachO::fat_arch, 2>
-buildFatArchList(ArrayRef<Slice> Slices) {
-  SmallVector<MachO::fat_arch, 2> FatArchList;
-  uint64_t Offset =
-      sizeof(MachO::fat_header) + Slices.size() * sizeof(MachO::fat_arch);
-
-  for (size_t Index = 0, Size = Slices.size(); Index < Size; ++Index) {
-    Offset = alignTo(Offset, 1ull << Slices[Index].Alignment);
-    const MachOObjectFile *ObjectFile = Slices[Index].ObjectFile;
-    if (Offset > UINT32_MAX)
-      reportError("fat file too large to be created because the offset "
-                  "field in struct fat_arch is only 32-bits and the offset " +
-                  Twine(Offset) + " for " + ObjectFile->getFileName() +
-                  " for architecture " + getArchString(*ObjectFile) +
-                  "exceeds that.");
-
-    MachO::fat_arch FatArch;
-    FatArch.cputype = ObjectFile->getHeader().cputype;
-    FatArch.cpusubtype = ObjectFile->getHeader().cpusubtype;
-    FatArch.offset = Offset;
-    FatArch.size = ObjectFile->getMemoryBufferRef().getBufferSize();
-    FatArch.align = Slices[Index].Alignment;
-    Offset += FatArch.size;
-    FatArchList.push_back(FatArch);
-  }
-  return FatArchList;
-}
-
-static void createUniversalBinary(SmallVectorImpl<Slice> &Slices,
-                                  StringRef OutputFileName) {
-  MachO::fat_header FatHeader;
-  FatHeader.magic = MachO::FAT_MAGIC;
-  FatHeader.nfat_arch = Slices.size();
-
-  stable_sort(Slices, compareSlices);
-  SmallVector<MachO::fat_arch, 2> FatArchList = buildFatArchList(Slices);
-
-  const bool IsExecutable = any_of(Slices, [](Slice S) {
-    return sys::fs::can_execute(S.ObjectFile->getFileName());
-  });
-  const uint64_t OutputFileSize =
-      FatArchList.back().offset + FatArchList.back().size;
-  Expected<std::unique_ptr<FileOutputBuffer>> OutFileOrError =
-      FileOutputBuffer::create(OutputFileName, OutputFileSize,
-                               IsExecutable ? FileOutputBuffer::F_executable
-                                            : 0);
-  if (!OutFileOrError)
-    reportError(OutputFileName, OutFileOrError.takeError());
-  std::unique_ptr<FileOutputBuffer> OutFile = std::move(OutFileOrError.get());
-  std::memset(OutFile->getBufferStart(), 0, OutputFileSize);
-
-  if (sys::IsLittleEndianHost)
-    MachO::swapStruct(FatHeader);
-  std::memcpy(OutFile->getBufferStart(), &FatHeader, sizeof(MachO::fat_header));
-
-  for (size_t Index = 0, Size = Slices.size(); Index < Size; ++Index) {
-    MemoryBufferRef BufferRef = Slices[Index].ObjectFile->getMemoryBufferRef();
-    std::copy(BufferRef.getBufferStart(), BufferRef.getBufferEnd(),
-              OutFile->getBufferStart() + FatArchList[Index].offset);
-  }
-
-  // FatArchs written after Slices in order to reduce the number of swaps for
-  // the LittleEndian case
-  if (sys::IsLittleEndianHost)
-    for (MachO::fat_arch &FA : FatArchList)
-      MachO::swapStruct(FA);
-  std::memcpy(OutFile->getBufferStart() + sizeof(MachO::fat_header),
-              FatArchList.begin(),
-              sizeof(MachO::fat_arch) * FatArchList.size());
-
-  if (Error E = OutFile->commit())
-    reportError(OutputFileName, std::move(E));
 }
 
 LLVM_ATTRIBUTE_NORETURN
@@ -640,52 +607,75 @@ static void createUniversalBinary(ArrayRef<OwningBinary<Binary>> InputBinaries,
   assert(InputBinaries.size() >= 1 && "Incorrect number of input binaries");
   assert(!OutputFileName.empty() && "Create expects a single output file");
 
-  SmallVector<std::unique_ptr<MachOObjectFile>, 1> ExtractedObjects;
+  SmallVector<std::unique_ptr<SymbolicFile>, 1> ExtractedObjects;
   SmallVector<Slice, 1> Slices =
       buildSlices(InputBinaries, Alignments, ExtractedObjects);
   checkArchDuplicates(Slices);
   checkUnusedAlignments(Slices, Alignments);
-  createUniversalBinary(Slices, OutputFileName);
 
+  llvm::stable_sort(Slices);
+  if (Error E = writeUniversalBinary(Slices, OutputFileName))
+    reportError(std::move(E));
+
+  exit(EXIT_SUCCESS);
+}
+
+LLVM_ATTRIBUTE_NORETURN
+static void extractSlice(ArrayRef<OwningBinary<Binary>> InputBinaries,
+                         const StringMap<const uint32_t> &Alignments,
+                         StringRef ArchType, StringRef OutputFileName) {
+  assert(!ArchType.empty() &&
+         "The architecture type should be non-empty");
+  assert(InputBinaries.size() == 1 && "Incorrect number of input binaries");
+  assert(!OutputFileName.empty() && "Thin expects a single output file");
+
+  if (InputBinaries.front().getBinary()->isMachO()) {
+    reportError("input file " +
+                InputBinaries.front().getBinary()->getFileName() +
+                " must be a fat file when the -extract option is specified");
+  }
+
+  SmallVector<std::unique_ptr<SymbolicFile>, 2> ExtractedObjects;
+  SmallVector<Slice, 2> Slices =
+      buildSlices(InputBinaries, Alignments, ExtractedObjects);
+  erase_if(Slices, [ArchType](const Slice &S) {
+    return ArchType != S.getArchString();
+  });
+
+  if (Slices.empty())
+    reportError(
+        "fat input file " + InputBinaries.front().getBinary()->getFileName() +
+        " does not contain the specified architecture " + ArchType);
+
+  llvm::stable_sort(Slices);
+  if (Error E = writeUniversalBinary(Slices, OutputFileName))
+    reportError(std::move(E));
   exit(EXIT_SUCCESS);
 }
 
 static StringMap<Slice>
 buildReplacementSlices(ArrayRef<OwningBinary<Binary>> ReplacementBinaries,
-                       const StringMap<const uint32_t> &Alignments,
-                       ArrayRef<Replacement> Replacements) {
-  assert(ReplacementBinaries.size() == Replacements.size() &&
-         "Number of replacment binaries does not match the number of "
-         "replacements");
+                       const StringMap<const uint32_t> &Alignments) {
   StringMap<Slice> Slices;
   // populates StringMap of slices to replace with; error checks for mismatched
   // replace flag args, fat files, and duplicate arch_types
-  for (size_t Index = 0, Size = Replacements.size(); Index < Size; ++Index) {
-    StringRef ReplacementArch = Replacements[Index].ArchType;
-    const Binary *ReplacementBinary = ReplacementBinaries[Index].getBinary();
-    validateArchitectureName(ReplacementArch);
-
+  for (const auto &OB : ReplacementBinaries) {
+    const Binary *ReplacementBinary = OB.getBinary();
     auto O = dyn_cast<MachOObjectFile>(ReplacementBinary);
     if (!O)
       reportError("replacement file: " + ReplacementBinary->getFileName() +
                   " is a fat file (must be a thin file)");
-
-    if (O->getArch() != Triple(ReplacementArch).getArch())
-      reportError("specified architecture: " + ReplacementArch +
-                  " for replacement file: " + ReplacementBinary->getFileName() +
-                  " does not match the file's architecture");
-
-    auto Entry =
-        Slices.try_emplace(ReplacementArch, Slice{O, calculateAlignment(O)});
+    Slice S(*O);
+    auto Entry = Slices.try_emplace(S.getArchString(), S);
     if (!Entry.second)
-      reportError("-replace " + ReplacementArch +
+      reportError("-replace " + S.getArchString() +
                   " <file_name> specified multiple times: " +
-                  Entry.first->second.ObjectFile->getFileName() + ", " +
+                  Entry.first->second.getBinary()->getFileName() + ", " +
                   O->getFileName());
   }
   auto SlicesMapRange = map_range(
       Slices, [](StringMapEntry<Slice> &E) -> Slice & { return E.getValue(); });
-  updateSegmentAlignments(SlicesMapRange, Alignments);
+  updateAlignments(SlicesMapRange, Alignments);
   return Slices;
 }
 
@@ -693,7 +683,7 @@ LLVM_ATTRIBUTE_NORETURN
 static void replaceSlices(ArrayRef<OwningBinary<Binary>> InputBinaries,
                           const StringMap<const uint32_t> &Alignments,
                           StringRef OutputFileName,
-                          ArrayRef<Replacement> Replacements) {
+                          ArrayRef<InputFile> ReplacementFiles) {
   assert(InputBinaries.size() == 1 && "Incorrect number of input binaries");
   assert(!OutputFileName.empty() && "Replace expects a single output file");
 
@@ -702,20 +692,17 @@ static void replaceSlices(ArrayRef<OwningBinary<Binary>> InputBinaries,
                 InputBinaries.front().getBinary()->getFileName() +
                 " must be a fat file when the -replace option is specified");
 
-  SmallVector<std::string, 1> ReplacementFiles;
-  for (const auto &R : Replacements)
-    ReplacementFiles.push_back(R.FileName);
   SmallVector<OwningBinary<Binary>, 1> ReplacementBinaries =
       readInputBinaries(ReplacementFiles);
 
   StringMap<Slice> ReplacementSlices =
-      buildReplacementSlices(ReplacementBinaries, Alignments, Replacements);
-  SmallVector<std::unique_ptr<MachOObjectFile>, 2> ExtractedObjects;
+      buildReplacementSlices(ReplacementBinaries, Alignments);
+  SmallVector<std::unique_ptr<SymbolicFile>, 2> ExtractedObjects;
   SmallVector<Slice, 2> Slices =
       buildSlices(InputBinaries, Alignments, ExtractedObjects);
 
   for (auto &Slice : Slices) {
-    auto It = ReplacementSlices.find(getArchString(*Slice.ObjectFile));
+    auto It = ReplacementSlices.find(Slice.getArchString());
     if (It != ReplacementSlices.end()) {
       Slice = It->second;
       ReplacementSlices.erase(It); // only keep remaining replacing arch_types
@@ -729,7 +716,10 @@ static void replaceSlices(ArrayRef<OwningBinary<Binary>> InputBinaries,
                 " does not contain that architecture");
 
   checkUnusedAlignments(Slices, Alignments);
-  createUniversalBinary(Slices, OutputFileName);
+
+  llvm::stable_sort(Slices);
+  if (Error E = writeUniversalBinary(Slices, OutputFileName))
+    reportError(std::move(E));
   exit(EXIT_SUCCESS);
 }
 
@@ -750,14 +740,17 @@ int main(int argc, char **argv) {
     printInfo(InputBinaries);
     break;
   case LipoAction::ThinArch:
-    extractSlice(InputBinaries, C.ThinArchType, C.OutputFile);
+    thinSlice(InputBinaries, C.ArchType, C.OutputFile);
+    break;
+  case LipoAction::ExtractArch:
+    extractSlice(InputBinaries, C.SegmentAlignments, C.ArchType, C.OutputFile);
     break;
   case LipoAction::CreateUniversal:
     createUniversalBinary(InputBinaries, C.SegmentAlignments, C.OutputFile);
     break;
   case LipoAction::ReplaceArch:
     replaceSlices(InputBinaries, C.SegmentAlignments, C.OutputFile,
-                  C.Replacements);
+                  C.ReplacementFiles);
     break;
   }
   return EXIT_SUCCESS;

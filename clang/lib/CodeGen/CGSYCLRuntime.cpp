@@ -12,12 +12,15 @@
 
 #include "CGSYCLRuntime.h"
 #include "CodeGenFunction.h"
+#include "clang/AST/Attr.h"
 #include "clang/AST/Decl.h"
 #include "llvm/IR/Instructions.h"
 #include <assert.h>
 
 using namespace clang;
 using namespace CodeGen;
+
+namespace {
 
 /// Various utilities.
 /// TODO partially duplicates functionality from SemaSYCL.cpp, can be shared.
@@ -47,12 +50,20 @@ static bool isPFWI(const FunctionDecl &FD) {
   return FD.getName() == "parallel_for_work_item";
 }
 
-const char *WG_SCOPE_MD_ID = "work_group_scope";
-const char *WI_SCOPE_MD_ID = "work_item_scope";
-const char *PFWI_MD_ID = "parallel_for_work_item";
+constexpr char WG_SCOPE_MD_ID[] = "work_group_scope";
+constexpr char WI_SCOPE_MD_ID[] = "work_item_scope";
+constexpr char PFWI_MD_ID[] = "parallel_for_work_item";
+constexpr char ATTR_GENX_VOLATILE[] = "genx_volatile";
+constexpr char ATTR_GENX_BYTE_OFFSET[] = "genx_byte_offset";
+
+} // anonymous namespace
 
 bool CGSYCLRuntime::actOnFunctionStart(const FunctionDecl &FD,
                                        llvm::Function &F) {
+  // Populate "sycl_explicit_simd" attribute if any.
+  if (FD.hasAttr<SYCLSimdAttr>())
+    F.setMetadata("sycl_explicit_simd", llvm::MDNode::get(F.getContext(), {}));
+
   SYCLScopeAttr *Scope = FD.getAttr<SYCLScopeAttr>();
   if (!Scope)
     return false;
@@ -96,6 +107,19 @@ bool CGSYCLRuntime::actOnAutoVarEmit(CodeGenFunction &CGF, const VarDecl &D,
   return true;
 }
 
+bool CGSYCLRuntime::actOnGlobalVarEmit(CodeGenModule &CGM, const VarDecl &D,
+                                       llvm::Value *Addr) {
+  SYCLRegisterNumAttr *RegAttr = D.getAttr<SYCLRegisterNumAttr>();
+  if (!RegAttr)
+    return false;
+  auto *GlobVar = cast<llvm::GlobalVariable>(Addr);
+  GlobVar->addAttribute(ATTR_GENX_VOLATILE);
+  GlobVar->addAttribute(ATTR_GENX_BYTE_OFFSET,
+                        Twine(RegAttr->getNumber()).str());
+  // TODO consider reversing the error/success return values
+  return true;
+}
+
 bool Util::matchQualifiedTypeName(const CXXRecordDecl *RecTy,
                                   ArrayRef<Util::DeclContextDesc> Scopes) {
   // The idea: check the declaration context chain starting from the type
@@ -103,7 +127,7 @@ bool Util::matchQualifiedTypeName(const CXXRecordDecl *RecTy,
   // (namespace) and name.
   if (!RecTy)
     return false; // only classes/structs supported
-  const auto *Ctx = dyn_cast<DeclContext>(RecTy);
+  const auto *Ctx = cast<DeclContext>(RecTy);
   StringRef Name = "";
 
   for (const auto &Scope : llvm::reverse(Scopes)) {

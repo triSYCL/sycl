@@ -57,6 +57,10 @@
 using namespace SPIRV;
 using namespace llvm;
 
+namespace llvm {
+class IntrinsicInst;
+}
+
 namespace SPIRV {
 
 /// The LLVM/SPIR-V translator version used to fill the lower 16 bits of the
@@ -98,6 +102,7 @@ template <> inline void SPIRVMap<unsigned, Op>::init() {
   _SPIRV_OP(BitCast, Bitcast)
   _SPIRV_OP(AddrSpaceCast, GenericCastToPtr)
   _SPIRV_OP(GetElementPtr, AccessChain)
+  _SPIRV_OP(FNeg, FNegate)
   /*Binary*/
   _SPIRV_OP(And, BitwiseAnd)
   _SPIRV_OP(Or, BitwiseOr)
@@ -183,6 +188,8 @@ enum SPIRAddressSpace {
   SPIRAS_Constant,
   SPIRAS_Local,
   SPIRAS_Generic,
+  SPIRAS_GlobalDevice,
+  SPIRAS_GlobalHost,
   SPIRAS_Input,
   SPIRAS_Output,
   SPIRAS_Count,
@@ -195,6 +202,8 @@ template <> inline void SPIRVMap<SPIRAddressSpace, std::string>::init() {
   add(SPIRAS_Local, "Local");
   add(SPIRAS_Generic, "Generic");
   add(SPIRAS_Input, "Input");
+  add(SPIRAS_GlobalDevice, "GlobalDevice");
+  add(SPIRAS_GlobalHost, "GlobalHost");
 }
 typedef SPIRVMap<SPIRAddressSpace, SPIRVStorageClassKind>
     SPIRAddrSpaceCapitalizedNameMap;
@@ -207,6 +216,8 @@ inline void SPIRVMap<SPIRAddressSpace, SPIRVStorageClassKind>::init() {
   add(SPIRAS_Local, StorageClassWorkgroup);
   add(SPIRAS_Generic, StorageClassGeneric);
   add(SPIRAS_Input, StorageClassInput);
+  add(SPIRAS_GlobalDevice, StorageClassDeviceOnlyINTEL);
+  add(SPIRAS_GlobalHost, StorageClassHostOnlyINTEL);
 }
 typedef SPIRVMap<SPIRAddressSpace, SPIRVStorageClassKind> SPIRSPIRVAddrSpaceMap;
 
@@ -317,6 +328,13 @@ const static char WriteOnly[] = "write_only";
 const static char ReadWrite[] = "read_write";
 } // namespace kAccessQualName
 
+namespace kAccessQualPostfix {
+const static char ReadOnly[] = "_ro";
+const static char WriteOnly[] = "_wo";
+const static char ReadWrite[] = "_rw";
+const static char Type[] = "_t";
+} // namespace kAccessQualPostfix
+
 namespace kMangledName {
 const static char Sampler[] = "11ocl_sampler";
 const static char AtomicPrefixIncoming[] = "U7_Atomic";
@@ -325,6 +343,8 @@ const static char AtomicPrefixInternal[] = "atomic_";
 
 namespace kSPIRVName {
 const static char GroupPrefix[] = "group_";
+const static char GroupNonUniformPrefix[] = "group_non_uniform_";
+const static char ClusteredPrefix[] = "clustered_";
 const static char Prefix[] = "__spirv_";
 const static char Postfix[] = "__";
 const static char ImageQuerySize[] = "ImageQuerySize";
@@ -374,6 +394,13 @@ const static char VecTyHint[] = "vec_type_hint";
 const static char WGSize[] = "reqd_work_group_size";
 const static char WGSizeHint[] = "work_group_size_hint";
 const static char SubgroupSize[] = "intel_reqd_sub_group_size";
+const static char MaxWGSize[] = "max_work_group_size";
+const static char NoGlobalOffset[] = "no_global_work_offset";
+const static char MaxWGDim[] = "max_global_work_dim";
+const static char NumSIMD[] = "num_simd_work_items";
+const static char StallEnable[] = "stall_enable";
+const static char FmaxMhz[] = "scheduler_target_fmax_mhz";
+const static char LoopFuse[] = "loop_fuse";
 } // namespace kSPIR2MD
 
 enum Spir2SamplerKind {
@@ -478,8 +505,8 @@ public:
     Info.Attr = getArgAttr(Ndx);
     return Info;
   }
-  virtual void init(const std::string &UniqUnmangledName) {
-    UnmangledName = UniqUnmangledName;
+  virtual void init(StringRef UniqUnmangledName) {
+    UnmangledName = UniqUnmangledName.str();
   }
 
 protected:
@@ -598,11 +625,11 @@ bool isSPIRVType(llvm::Type *Ty, StringRef BaseTyName, StringRef *Postfix = 0);
 std::string decorateSPIRVFunction(const std::string &S);
 
 /// Remove prefix/postfix from __spirv_{Name}_
-std::string undecorateSPIRVFunction(const std::string &S);
+StringRef undecorateSPIRVFunction(StringRef S);
 
 /// Check if a function has decorated name as __spirv_{Name}_
 /// and get the original name.
-bool isDecoratedSPIRVFunc(const Function *F, std::string *UndecName = nullptr);
+bool isDecoratedSPIRVFunc(const Function *F, StringRef &UndecName);
 
 /// Get a canonical function name for a SPIR-V op code.
 std::string getSPIRVFuncName(Op OC, StringRef PostFix = "");
@@ -620,8 +647,7 @@ std::string getSPIRVExtFuncName(SPIRVExtInstSetKind Set, unsigned ExtOp,
 ///   otherwise return OpNop.
 /// \param Dec contains decorations decoded from function name if it is
 ///   not nullptr.
-Op getSPIRVFuncOC(const std::string &Name,
-                  SmallVectorImpl<std::string> *Dec = nullptr);
+Op getSPIRVFuncOC(StringRef Name, SmallVectorImpl<std::string> *Dec = nullptr);
 
 /// Get SPIR-V builtin variable enum given the canonical builtin name
 /// Assume \param Name is in format __spirv_BuiltIn{Name}
@@ -632,8 +658,7 @@ bool getSPIRVBuiltin(const std::string &Name, spv::BuiltIn &Builtin);
 /// \param DemangledName demanged name of the OpenCL built-in function
 /// \returns true if Name is the name of the OpenCL built-in function,
 /// false for other functions
-bool oclIsBuiltin(const StringRef &Name, std::string *DemangledName = nullptr,
-                  bool IsCpp = false);
+bool oclIsBuiltin(StringRef Name, StringRef &DemangledName, bool IsCpp = false);
 
 /// Check if a function type is void(void).
 bool isVoidFuncTy(FunctionType *FT);
@@ -773,6 +798,9 @@ int getMDOperandAsInt(MDNode *N, unsigned I);
 /// Get metadata operand as string.
 std::string getMDOperandAsString(MDNode *N, unsigned I);
 
+/// Get metadata operand as another metadata node
+MDNode *getMDOperandAsMDNode(MDNode *N, unsigned I);
+
 /// Get metadata operand as type.
 Type *getMDOperandAsType(MDNode *N, unsigned I);
 
@@ -864,7 +892,13 @@ std::string mapOCLTypeNameToSPIRV(StringRef Name, StringRef Acc = "");
 bool hasAccessQualifiedName(StringRef TyName);
 
 /// Get access qualifier from the type name.
-StringRef getAccessQualifier(StringRef TyName);
+SPIRVAccessQualifierKind getAccessQualifier(StringRef TyName);
+
+/// Get access qualifier from the type name.
+StringRef getAccessQualifierPostfix(SPIRVAccessQualifierKind Access);
+
+/// Get access qualifier from the type name.
+StringRef getAccessQualifierFullName(StringRef TyName);
 
 bool eraseUselessFunctions(Module *M);
 
@@ -890,10 +924,10 @@ bool isValidVectorSize(unsigned I);
 
 enum class ParamType { FLOAT = 0, SIGNED = 1, UNSIGNED = 2, UNKNOWN = 3 };
 
-ParamType lastFuncParamType(const std::string &MangledName);
+ParamType lastFuncParamType(StringRef MangledName);
 
 // Check if the last function parameter is signed
-bool isLastFuncParamSigned(const std::string &MangledName);
+bool isLastFuncParamSigned(StringRef MangledName);
 
 // Check if a mangled function name contains unsigned atomic type
 bool containsUnsignedAtomicType(StringRef Name);
@@ -901,9 +935,13 @@ bool containsUnsignedAtomicType(StringRef Name);
 /// Mangle builtin function name.
 /// \return \param UniqName if \param BtnInfo is null pointer, otherwise
 ///    return IA64 mangled name.
-std::string mangleBuiltin(const std::string &UniqName,
-                          ArrayRef<Type *> ArgTypes,
+std::string mangleBuiltin(StringRef UniqName, ArrayRef<Type *> ArgTypes,
                           BuiltinFuncMangleInfo *BtnInfo);
+
+/// Mangle a function from OpenCL extended instruction set in SPIR-V friendly IR
+/// manner
+std::string getSPIRVFriendlyIRFunctionName(OCLExtOpKind ExtOpId,
+                                           ArrayRef<Type *> ArgTys);
 
 /// Remove cast from a value.
 Value *removeCast(Value *V);
@@ -928,13 +966,11 @@ template <> inline void SPIRVMap<std::string, Op, SPIRVOpaqueType>::init() {
   add(kSPIRVTypeName::SampledImg, OpTypeSampledImage);
 }
 
-// Check if the module contains llvm.loop.unroll.* metadata
-bool hasLoopUnrollMetadata(const Module *M);
+// Check if the module contains llvm.loop.* metadata
+bool hasLoopMetadata(const Module *M);
 
-// If the branch instruction has !llvm.loop metadata, go through its operands
-// and find Loop Control mask and possible parameters.
-spv::LoopControlMask getLoopControl(const BranchInst *Branch,
-                                    std::vector<SPIRVWord> &Parameters);
+// check LLVM Intrinsics type(s) for validity
+bool checkTypeForSPIRVExtendedInstLowering(IntrinsicInst *II, SPIRVModule *BM);
 } // namespace SPIRV
 
 #endif // SPIRV_SPIRVINTERNAL_H

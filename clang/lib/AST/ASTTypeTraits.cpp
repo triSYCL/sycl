@@ -16,31 +16,34 @@
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/DeclCXX.h"
 #include "clang/AST/NestedNameSpecifier.h"
+#include "clang/AST/OpenMPClause.h"
 
-namespace clang {
-namespace ast_type_traits {
+using namespace clang;
 
 const ASTNodeKind::KindInfo ASTNodeKind::AllKindInfo[] = {
-  { NKI_None, "<None>" },
-  { NKI_None, "TemplateArgument" },
-  { NKI_None, "TemplateName" },
-  { NKI_None, "NestedNameSpecifierLoc" },
-  { NKI_None, "QualType" },
-  { NKI_None, "TypeLoc" },
-  { NKI_None, "CXXCtorInitializer" },
-  { NKI_None, "NestedNameSpecifier" },
-  { NKI_None, "Decl" },
+    {NKI_None, "<None>"},
+    {NKI_None, "TemplateArgument"},
+    {NKI_None, "TemplateArgumentLoc"},
+    {NKI_None, "TemplateName"},
+    {NKI_None, "NestedNameSpecifierLoc"},
+    {NKI_None, "QualType"},
+    {NKI_None, "TypeLoc"},
+    {NKI_None, "CXXBaseSpecifier"},
+    {NKI_None, "CXXCtorInitializer"},
+    {NKI_None, "NestedNameSpecifier"},
+    {NKI_None, "Decl"},
 #define DECL(DERIVED, BASE) { NKI_##BASE, #DERIVED "Decl" },
 #include "clang/AST/DeclNodes.inc"
-  { NKI_None, "Stmt" },
+    {NKI_None, "Stmt"},
 #define STMT(DERIVED, BASE) { NKI_##BASE, #DERIVED },
 #include "clang/AST/StmtNodes.inc"
-  { NKI_None, "Type" },
+    {NKI_None, "Type"},
 #define TYPE(DERIVED, BASE) { NKI_##BASE, #DERIVED "Type" },
-#include "clang/AST/TypeNodes.def"
-  { NKI_None, "OMPClause" },
-#define OPENMP_CLAUSE(TextualSpelling, Class) {NKI_OMPClause, #Class},
-#include "clang/Basic/OpenMPKinds.def"
+#include "clang/AST/TypeNodes.inc"
+    {NKI_None, "OMPClause"},
+#define GEN_CLANG_CLAUSE_CLASS
+#define CLAUSE_CLASS(Enum, Str, Class) {NKI_OMPClause, #Class},
+#include "llvm/Frontend/OpenMP/OMP.inc"
 };
 
 bool ASTNodeKind::isBaseOf(ASTNodeKind Other, unsigned *Distance) const {
@@ -104,21 +107,21 @@ ASTNodeKind ASTNodeKind::getFromNode(const Type &T) {
 #define TYPE(Class, Base)                                                      \
     case Type::Class: return ASTNodeKind(NKI_##Class##Type);
 #define ABSTRACT_TYPE(Class, Base)
-#include "clang/AST/TypeNodes.def"
+#include "clang/AST/TypeNodes.inc"
   }
   llvm_unreachable("invalid type kind");
  }
 
 ASTNodeKind ASTNodeKind::getFromNode(const OMPClause &C) {
   switch (C.getClauseKind()) {
-#define OPENMP_CLAUSE(Name, Class)                                             \
-    case OMPC_##Name: return ASTNodeKind(NKI_##Class);
-#include "clang/Basic/OpenMPKinds.def"
-  case OMPC_threadprivate:
-  case OMPC_uniform:
-  case OMPC_device_type:
-  case OMPC_unknown:
+#define GEN_CLANG_CLAUSE_CLASS
+#define CLAUSE_CLASS(Enum, Str, Class)                                         \
+  case llvm::omp::Clause::Enum:                                                \
+    return ASTNodeKind(NKI_##Class);
+#define CLAUSE_NO_CLASS(Enum, Str)                                             \
+  case llvm::omp::Clause::Enum:                                                \
     llvm_unreachable("unexpected OpenMP clause kind");
+#include "llvm/Frontend/OpenMP/OMP.inc"
   }
   llvm_unreachable("invalid stmt kind");
 }
@@ -127,6 +130,8 @@ void DynTypedNode::print(llvm::raw_ostream &OS,
                          const PrintingPolicy &PP) const {
   if (const TemplateArgument *TA = get<TemplateArgument>())
     TA->print(PP, OS);
+  else if (const TemplateArgumentLoc *TAL = get<TemplateArgumentLoc>())
+    TAL->getArgument().print(PP, OS);
   else if (const TemplateName *TN = get<TemplateName>())
     TN->print(OS, PP);
   else if (const NestedNameSpecifier *NNS = get<NestedNameSpecifier>())
@@ -150,13 +155,14 @@ void DynTypedNode::print(llvm::raw_ostream &OS,
     OS << "Unable to print values of type " << NodeKind.asStringRef() << "\n";
 }
 
-void DynTypedNode::dump(llvm::raw_ostream &OS, SourceManager &SM) const {
+void DynTypedNode::dump(llvm::raw_ostream &OS,
+                        const ASTContext &Context) const {
   if (const Decl *D = get<Decl>())
     D->dump(OS);
   else if (const Stmt *S = get<Stmt>())
-    S->dump(OS, SM);
+    S->dump(OS, Context);
   else if (const Type *T = get<Type>())
-    T->dump(OS);
+    T->dump(OS, Context);
   else
     OS << "Unable to dump values of type " << NodeKind.asStringRef() << "\n";
 }
@@ -172,10 +178,9 @@ SourceRange DynTypedNode::getSourceRange() const {
     return D->getSourceRange();
   if (const Stmt *S = get<Stmt>())
     return S->getSourceRange();
+  if (const TemplateArgumentLoc *TAL = get<TemplateArgumentLoc>())
+    return TAL->getSourceRange();
   if (const auto *C = get<OMPClause>())
     return SourceRange(C->getBeginLoc(), C->getEndLoc());
   return SourceRange();
 }
-
-} // end namespace ast_type_traits
-} // end namespace clang

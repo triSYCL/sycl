@@ -16,19 +16,11 @@ namespace clang {
 namespace tidy {
 namespace matchers {
 
-AST_MATCHER(BinaryOperator, isAssignmentOperator) {
-  return Node.isAssignmentOp();
-}
-
 AST_MATCHER(BinaryOperator, isRelationalOperator) {
   return Node.isRelationalOp();
 }
 
 AST_MATCHER(BinaryOperator, isEqualityOperator) { return Node.isEqualityOp(); }
-
-AST_MATCHER(BinaryOperator, isComparisonOperator) {
-  return Node.isComparisonOp();
-}
 
 AST_MATCHER(QualType, isExpensiveToCopy) {
   llvm::Optional<bool> IsExpensive =
@@ -41,10 +33,20 @@ AST_MATCHER(RecordDecl, isTriviallyDefaultConstructible) {
       Node, Finder->getASTContext());
 }
 
+AST_MATCHER(QualType, isTriviallyDestructible) {
+  return utils::type_traits::isTriviallyDestructible(Node);
+}
+
 // Returns QualType matcher for references to const.
 AST_MATCHER_FUNCTION(ast_matchers::TypeMatcher, isReferenceToConst) {
   using namespace ast_matchers;
   return referenceType(pointee(qualType(isConstQualified())));
+}
+
+// Returns QualType matcher for pointers to const.
+AST_MATCHER_FUNCTION(ast_matchers::TypeMatcher, isPointerToConst) {
+  using namespace ast_matchers;
+  return pointerType(pointee(qualType(isConstQualified())));
 }
 
 AST_MATCHER_P(NamedDecl, matchesAnyListedName, std::vector<std::string>,

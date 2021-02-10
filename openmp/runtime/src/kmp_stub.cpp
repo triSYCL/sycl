@@ -147,7 +147,7 @@ void *kmp_malloc(size_t size) {
   i;
   void *res;
 #if KMP_OS_WINDOWS
-  // If succesfull returns a pointer to the memory block, otherwise returns
+  // If successful returns a pointer to the memory block, otherwise returns
   // NULL.
   // Sets errno to ENOMEM or EINVAL if memory allocation failed or parameter
   // validation failed.
@@ -365,6 +365,17 @@ omp_memspace_handle_t const omp_low_lat_mem_space =
 void *omp_alloc(size_t size, const omp_allocator_handle_t allocator) {
   i;
   return malloc(size);
+}
+void *omp_calloc(size_t nmemb, size_t size,
+                 const omp_allocator_handle_t allocator) {
+  i;
+  return calloc(nmemb, size);
+}
+void *omp_realloc(void *ptr, size_t size,
+                  const omp_allocator_handle_t allocator,
+                  const omp_allocator_handle_t free_allocator) {
+  i;
+  return realloc(ptr, size);
 }
 void omp_free(void *ptr, const omp_allocator_handle_t allocator) {
   i;

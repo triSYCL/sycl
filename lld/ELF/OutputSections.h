@@ -71,7 +71,9 @@ public:
   uint64_t addr = 0;
   uint32_t shName = 0;
 
-  void addSection(InputSection *isec);
+  void recordSection(InputSectionBase *isec);
+  void commitSection(InputSection *isec);
+  void finalizeInputSections();
 
   // The following members are normally only used in linker scripts.
   MemoryRegion *memRegion = nullptr;
@@ -109,14 +111,15 @@ public:
 private:
   // Used for implementation of --compress-debug-sections option.
   std::vector<uint8_t> zDebugHeader;
-  llvm::SmallVector<char, 1> compressedData;
+  llvm::SmallVector<char, 0> compressedData;
 
   std::array<uint8_t, 4> getFiller();
 };
 
 int getPriority(StringRef s);
 
-std::vector<InputSection *> getInputSections(OutputSection* os);
+InputSection *getFirstInputSection(const OutputSection *os);
+std::vector<InputSection *> getInputSections(const OutputSection *os);
 
 // All output sections that are handled by the linker specially are
 // globally accessible. Writer initializes them, so don't use them

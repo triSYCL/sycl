@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLDB_SBType_h_
-#define LLDB_SBType_h_
+#ifndef LLDB_API_SBTYPE_H
+#define LLDB_API_SBTYPE_H
 
 #include "lldb/API/SBDefines.h"
 
@@ -185,6 +185,8 @@ public:
 
   lldb::SBTypeMemberFunction GetMemberFunctionAtIndex(uint32_t idx);
 
+  lldb::SBModule GetModule();
+
   const char *GetName();
 
   const char *GetDisplayTypeName();
@@ -259,4 +261,4 @@ private:
 
 } // namespace lldb
 
-#endif // LLDB_SBType_h_
+#endif // LLDB_API_SBTYPE_H

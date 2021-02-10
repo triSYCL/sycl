@@ -8,149 +8,102 @@
 #pragma once
 
 #include <CL/sycl/context.hpp>
-#include <CL/sycl/detail/usm_impl.hpp>
+#include <CL/sycl/detail/export.hpp>
 #include <CL/sycl/device.hpp>
 #include <CL/sycl/exception.hpp>
+#include <CL/sycl/queue.hpp>
 #include <CL/sycl/usm/usm_enums.hpp>
 
 #include <cstdlib>
 #include <memory>
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 
-template <typename T, usm::alloc AllocKind, size_t Alignment = 0>
+// Forward declarations.
+__SYCL_EXPORT void *aligned_alloc(size_t alignment, size_t size,
+                                  const device &dev, const context &ctxt,
+                                  usm::alloc kind);
+__SYCL_EXPORT void free(void *ptr, const context &ctxt);
+
+template <typename T, usm::alloc AllocKind, size_t Alignment = alignof(T)>
 class usm_allocator {
 public:
   using value_type = T;
-  using pointer = T *;
-  using const_pointer = const T *;
-  using reference = T &;
-  using const_reference = const T &;
+  using propagate_on_container_copy_assignment = std::true_type;
+  using propagate_on_container_move_assignment = std::true_type;
+  using propagate_on_container_swap = std::true_type;
 
 public:
   template <typename U> struct rebind {
     typedef usm_allocator<U, AllocKind, Alignment> other;
   };
 
-  usm_allocator() = delete;
-  usm_allocator(const context &Ctxt, const device &Dev)
-      : mContext(Ctxt), mDevice(Dev) {}
-  usm_allocator(const usm_allocator &Other)
-      : mContext(Other.mContext), mDevice(Other.mDevice) {}
+  static_assert(
+      AllocKind != usm::alloc::device,
+      "usm_allocator does not support AllocKind == usm::alloc::device");
 
-  // Construct an object
-  // Note: AllocKind == alloc::device is not allowed
-  template <
-      usm::alloc AllocT = AllocKind,
-      typename std::enable_if<AllocT != usm::alloc::device, int>::type = 0>
-  void construct(pointer Ptr, const_reference Val) {
-    new (Ptr) value_type(Val);
-  }
+  usm_allocator() noexcept = delete;
+  usm_allocator(const context &Ctxt, const device &Dev) noexcept
+      : MContext(Ctxt), MDevice(Dev) {}
+  usm_allocator(const queue &Q) noexcept
+      : MContext(Q.get_context()), MDevice(Q.get_device()) {}
+  usm_allocator(const usm_allocator &) noexcept = default;
+  usm_allocator(usm_allocator &&) noexcept = default;
+  usm_allocator &operator=(const usm_allocator &) = delete;
+  usm_allocator &operator=(usm_allocator &&) = default;
 
-  template <
-      usm::alloc AllocT = AllocKind,
-      typename std::enable_if<AllocT == usm::alloc::device, int>::type = 0>
-  void construct(pointer Ptr, const_reference Val) {
-    throw feature_not_supported(
-        "Device pointers do not support construct on host");
-  }
+  template <class U>
+  usm_allocator(const usm_allocator<U, AllocKind, Alignment> &Other) noexcept
+      : MContext(Other.MContext), MDevice(Other.MDevice) {}
 
-  // Destroy an object
-  // Note:: AllocKind == alloc::device is not allowed
-  template <
-      usm::alloc AllocT = AllocKind,
-      typename std::enable_if<AllocT != usm::alloc::device, int>::type = 0>
-  void destroy(pointer Ptr) {
-    Ptr->~value_type();
-  }
+  /// Allocates memory.
+  ///
+  /// \param NumberOfElements is a count of elements to allocate memory for.
+  T *allocate(size_t NumberOfElements) {
 
-  template <
-      usm::alloc AllocT = AllocKind,
-      typename std::enable_if<AllocT == usm::alloc::device, int>::type = 0>
-  void destroy(pointer Ptr) {
-    throw feature_not_supported(
-        "Device pointers do not support destroy on host");
-  }
-
-  // Note:: AllocKind == alloc::device is not allowed
-  template <
-      usm::alloc AllocT = AllocKind,
-      typename std::enable_if<AllocT != usm::alloc::device, int>::type = 0>
-  pointer address(reference Val) const {
-    return &Val;
-  }
-
-  template <
-      usm::alloc AllocT = AllocKind,
-      typename std::enable_if<AllocT == usm::alloc::device, int>::type = 0>
-  pointer address(reference Val) const {
-    throw feature_not_supported(
-        "Device pointers do not support address on host");
-  }
-
-  template <
-      usm::alloc AllocT = AllocKind,
-      typename std::enable_if<AllocT != usm::alloc::device, int>::type = 0>
-  const_pointer address(const_reference Val) const {
-    return &Val;
-  }
-
-  template <
-      usm::alloc AllocT = AllocKind,
-      typename std::enable_if<AllocT == usm::alloc::device, int>::type = 0>
-  const_pointer address(const_reference Val) const {
-    throw feature_not_supported(
-        "Device pointers do not support address on host");
-  }
-
-  // Allocate memory
-  template <
-      usm::alloc AllocT = AllocKind,
-      typename std::enable_if<AllocT == usm::alloc::host, int>::type = 0>
-  pointer allocate(size_t Size) {
-    auto Result = reinterpret_cast<pointer>(detail::usm::alignedAlloc(
-        getAlignment(), Size * sizeof(value_type), mContext, AllocKind));
+    auto Result = reinterpret_cast<T *>(
+        aligned_alloc(getAlignment(), NumberOfElements * sizeof(value_type),
+                      MDevice, MContext, AllocKind));
     if (!Result) {
       throw memory_allocation_error();
     }
     return Result;
   }
 
-  template <usm::alloc AllocT = AllocKind,
-            typename std::enable_if<AllocT != usm::alloc::host, int>::type = 0>
-  pointer allocate(size_t Size) {
-    auto Result = reinterpret_cast<pointer>(
-        detail::usm::alignedAlloc(getAlignment(), Size * sizeof(value_type),
-                                  mContext, mDevice, AllocKind));
-    if (!Result) {
-      throw memory_allocation_error();
-    }
-    return Result;
-  }
-
-  // Deallocate memory
-  void deallocate(pointer Ptr, size_t size) {
+  /// Deallocates memory.
+  ///
+  /// \param Ptr is a pointer to memory being deallocated.
+  /// \param Size is a number of elements previously passed to allocate.
+  void deallocate(T *Ptr, size_t) {
     if (Ptr) {
-      detail::usm::free(Ptr, mContext);
+      free(Ptr, MContext);
     }
+  }
+
+  template <class U, usm::alloc AllocKindU, size_t AlignmentU>
+  friend bool operator==(const usm_allocator<T, AllocKind, Alignment> &One,
+                         const usm_allocator<U, AllocKindU, AlignmentU> &Two) {
+    return ((AllocKind == AllocKindU) && (One.MContext == Two.MContext) &&
+            (One.MDevice == Two.MDevice));
+  }
+
+  template <class U, usm::alloc AllocKindU, size_t AlignmentU>
+  friend bool operator!=(const usm_allocator<T, AllocKind, Alignment> &One,
+                         const usm_allocator<U, AllocKindU, AlignmentU> &Two) {
+    return !((AllocKind == AllocKindU) && (One.MContext == Two.MContext) &&
+             (One.MDevice == Two.MDevice));
   }
 
 private:
-  constexpr size_t getAlignment() const {
-    /*
-      // This form might be preferable if the underlying implementation
-      // doesn't do the right thing when given 0 for alignment
-    return ((Alignment == 0)
-            ? alignof(value_type)
-            : Alignment);
-    */
-    return Alignment;
-  }
+  constexpr size_t getAlignment() const { return Alignment; }
 
-  const context mContext;
-  const device mDevice;
+  template <class U, usm::alloc AllocKindU, size_t AlignmentU>
+  friend class usm_allocator;
+
+  const context MContext;
+  const device MDevice;
 };
 
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

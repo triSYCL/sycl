@@ -1,4 +1,4 @@
-//===-- NativeProcessProtocol.cpp -------------------------------*- C++ -*-===//
+//===-- NativeProcessProtocol.cpp -----------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -298,8 +298,7 @@ Status NativeProcessProtocol::RemoveHardwareBreakpoint(lldb::addr_t addr) {
 bool NativeProcessProtocol::RegisterNativeDelegate(
     NativeDelegate &native_delegate) {
   std::lock_guard<std::recursive_mutex> guard(m_delegates_mutex);
-  if (std::find(m_delegates.begin(), m_delegates.end(), &native_delegate) !=
-      m_delegates.end())
+  if (llvm::is_contained(m_delegates, &native_delegate))
     return false;
 
   m_delegates.push_back(&native_delegate);
@@ -527,6 +526,7 @@ NativeProcessProtocol::GetSoftwareBreakpointTrapOpcode(size_t size_hint) {
 
   switch (GetArchitecture().GetMachine()) {
   case llvm::Triple::aarch64:
+  case llvm::Triple::aarch64_32:
     return llvm::makeArrayRef(g_aarch64_opcode);
 
   case llvm::Triple::x86:
@@ -563,6 +563,7 @@ size_t NativeProcessProtocol::GetSoftwareBreakpointPCOffset() {
 
   case llvm::Triple::arm:
   case llvm::Triple::aarch64:
+  case llvm::Triple::aarch64_32:
   case llvm::Triple::mips64:
   case llvm::Triple::mips64el:
   case llvm::Triple::mips:
@@ -648,7 +649,7 @@ Status NativeProcessProtocol::ReadMemoryWithoutTrap(lldb::addr_t addr,
     auto saved_opcodes = makeArrayRef(pair.second.saved_opcodes);
 
     if (bp_addr + saved_opcodes.size() < addr || addr + bytes_read <= bp_addr)
-      continue; // Breapoint not in range, ignore
+      continue; // Breakpoint not in range, ignore
 
     if (bp_addr < addr) {
       saved_opcodes = saved_opcodes.drop_front(addr - bp_addr);
@@ -680,7 +681,7 @@ NativeProcessProtocol::ReadCStringFromMemory(lldb::addr_t addr, char *buffer,
     addr_t cache_line_bytes_left =
         cache_line_size - (curr_addr % cache_line_size);
     addr_t bytes_to_read = std::min<addr_t>(bytes_left, cache_line_bytes_left);
-    status = ReadMemory(curr_addr, reinterpret_cast<void *>(curr_buffer),
+    status = ReadMemory(curr_addr, static_cast<void *>(curr_buffer),
                         bytes_to_read, bytes_read);
 
     if (bytes_read == 0)
@@ -689,7 +690,7 @@ NativeProcessProtocol::ReadCStringFromMemory(lldb::addr_t addr, char *buffer,
     void *str_end = std::memchr(curr_buffer, '\0', bytes_read);
     if (str_end != nullptr) {
       total_bytes_read =
-          (size_t)(reinterpret_cast<char *>(str_end) - buffer + 1);
+          static_cast<size_t>((static_cast<char *>(str_end) - buffer + 1));
       status.Clear();
       break;
     }

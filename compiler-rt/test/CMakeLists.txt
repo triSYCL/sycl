@@ -1,6 +1,7 @@
 # Needed for lit support in standalone builds.
 include(AddLLVM)
 
+pythonize_bool(LLVM_ENABLE_EXPENSIVE_CHECKS)
 configure_compiler_rt_lit_site_cfg(
   ${CMAKE_CURRENT_SOURCE_DIR}/lit.common.configured.in
   ${CMAKE_CURRENT_BINARY_DIR}/lit.common.configured)
@@ -66,6 +67,9 @@ if(COMPILER_RT_CAN_EXECUTE_TESTS)
   endif()
   if(COMPILER_RT_BUILD_PROFILE AND COMPILER_RT_HAS_PROFILE)
     compiler_rt_test_runtime(profile)
+  endif()
+  if(COMPILER_RT_BUILD_MEMPROF)
+    compiler_rt_test_runtime(memprof)
   endif()
   if(COMPILER_RT_BUILD_XRAY)
     compiler_rt_test_runtime(xray)

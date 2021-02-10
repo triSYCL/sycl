@@ -16,11 +16,35 @@
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/TargetOptions.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/IR/DataLayout.h"
 #include "llvm/Support/Compiler.h"
 #include "OSTargets.h"
 
 namespace clang {
 namespace targets {
+
+/// Nullary address space map hack for AIE
+/// \TODO: Either a less hacky implementation, like having an AIE target/target
+///   info rather than using the SPIR target
+///   OR AIE has some of it's own address spaces so perhaps this can be
+///   used for that. However, it's advisable to move towards AIE having its own
+///  target info.
+static const unsigned AIEAddrSpaceMap[] = {
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+};
 
 static const unsigned SPIRAddrSpaceMap[] = {
     0, // Default
@@ -29,14 +53,14 @@ static const unsigned SPIRAddrSpaceMap[] = {
     2, // opencl_constant
     0, // opencl_private
     4, // opencl_generic
+    5, // opencl_global_device
+    6, // opencl_global_host
     0, // cuda_device
     0, // cuda_constant
     0, // cuda_shared
-    1, // sycl_global
-    3, // sycl_local
-    2, // sycl_constant
-    0, // sycl_private
-    4, // sycl_generic
+    0, // ptr32_sptr
+    0, // ptr32_uptr
+    0  // ptr64
 };
 
 static const unsigned SYCLAddrSpaceMap[] = {
@@ -46,14 +70,14 @@ static const unsigned SYCLAddrSpaceMap[] = {
     2, // opencl_constant
     0, // opencl_private
     4, // opencl_generic
+    5, // opencl_global_device
+    6, // opencl_global_host
     0, // cuda_device
     0, // cuda_constant
     0, // cuda_shared
-    1, // sycl_global
-    3, // sycl_local
-    2, // sycl_constant
-    0, // sycl_private
-    4, // sycl_generic
+    0, // ptr32_sptr
+    0, // ptr32_uptr
+    0  // ptr64
 };
 
 class LLVM_LIBRARY_VISIBILITY SPIRTargetInfo : public TargetInfo {
@@ -63,12 +87,14 @@ public:
     TLSSupported = false;
     VLASupported = false;
     LongWidth = LongAlign = 64;
-    if (Triple.getEnvironment() == llvm::Triple::SYCLDevice &&
-        !getenv("DISABLE_INFER_AS")) {
+    if (Triple.isXilinxAIE()) {
+      AddrSpaceMap = &AIEAddrSpaceMap;
+    } else if (Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
       AddrSpaceMap = &SYCLAddrSpaceMap;
     } else {
       AddrSpaceMap = &SPIRAddrSpaceMap;
     }
+
     UseAddrSpaceMapMangling = true;
     HasLegalHalfType = true;
     HasFloat16 = true;
@@ -121,6 +147,10 @@ public:
     // for SPIR since it is a generic target.
     getSupportedOpenCLOpts().supportAll();
   }
+
+  bool hasExtIntType() const override { return true; }
+
+  bool hasInt128Type() const override { return false; }
 };
 class LLVM_LIBRARY_VISIBILITY SPIR32TargetInfo : public SPIRTargetInfo {
 public:
@@ -129,8 +159,9 @@ public:
     PointerWidth = PointerAlign = 32;
     SizeType = TargetInfo::UnsignedInt;
     PtrDiffType = IntPtrType = TargetInfo::SignedInt;
-    resetDataLayout("e-p:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-"
-                    "v96:128-v192:256-v256:256-v512:512-v1024:1024");
+    resetDataLayout(
+        "e-p:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-"
+        "v96:128-v192:256-v256:256-v512:512-v1024:1024-n8:16:32:64");
   }
 
   void getTargetDefines(const LangOptions &Opts,
@@ -145,8 +176,9 @@ public:
     SizeType = TargetInfo::UnsignedLong;
     PtrDiffType = IntPtrType = TargetInfo::SignedLong;
 
-    resetDataLayout("e-i64:64-v16:16-v24:32-v32:32-v48:64-"
-                    "v96:128-v192:256-v256:256-v512:512-v1024:1024");
+    resetDataLayout(
+        "e-i64:64-v16:16-v24:32-v32:32-v48:64-"
+        "v96:128-v192:256-v256:256-v512:512-v1024:1024-n8:16:32:64");
   }
 
   void getTargetDefines(const LangOptions &Opts,
@@ -211,8 +243,6 @@ public:
   MicrosoftX86_32SPIRTargetInfo(const llvm::Triple &Triple,
                             const TargetOptions &Opts)
       : WindowsX86_32SPIRTargetInfo(Triple, Opts) {
-    LongDoubleWidth = LongDoubleAlign = 64;
-    LongDoubleFormat = &llvm::APFloat::IEEEdouble();
     assert(DataLayout->getPointerSizeInBits() == 32);
   }
 
@@ -263,8 +293,6 @@ public:
   MicrosoftX86_64_SPIR64TargetInfo(const llvm::Triple &Triple,
                             const TargetOptions &Opts)
       : WindowsX86_64_SPIR64TargetInfo(Triple, Opts) {
-    LongDoubleWidth = LongDoubleAlign = 64;
-    LongDoubleFormat = &llvm::APFloat::IEEEdouble();
     assert(DataLayout->getPointerSizeInBits() == 64);
   }
 

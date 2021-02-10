@@ -87,6 +87,7 @@
 #include "llvm/MC/MCSchedule.h"
 #include "llvm/MC/MCSubtargetInfo.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/FormattedStream.h"
 
 namespace llvm {
 namespace mca {
@@ -236,8 +237,9 @@ class DependencyGraph {
   void addDependency(unsigned From, unsigned To,
                      DependencyEdge::Dependency &&DE);
 
+  void pruneEdges(unsigned Iterations);
   void initializeRootSet(SmallVectorImpl<unsigned> &RootSet) const;
-  void propagateThroughEdges(SmallVectorImpl<unsigned> &RootSet);
+  void propagateThroughEdges(SmallVectorImpl<unsigned> &RootSet, unsigned Iterations);
 
 #ifndef NDEBUG
   void dumpDependencyEdge(raw_ostream &OS, const DependencyEdge &DE,
@@ -263,10 +265,11 @@ public:
 
   // Called by the bottleneck analysis at the end of simulation to propagate
   // costs through the edges of the graph, and compute a critical path.
-  void finalizeGraph() {
+  void finalizeGraph(unsigned Iterations) {
     SmallVector<unsigned, 16> RootSet;
+    pruneEdges(Iterations);
     initializeRootSet(RootSet);
-    propagateThroughEdges(RootSet);
+    propagateThroughEdges(RootSet, Iterations);
   }
 
   // Returns a sequence of edges representing the critical sequence based on the
@@ -280,13 +283,10 @@ public:
 };
 
 /// A view that collects and prints a few performance numbers.
-class BottleneckAnalysis : public View {
-  const MCSubtargetInfo &STI;
-  MCInstPrinter &MCIP;
+class BottleneckAnalysis : public InstructionView {
   PressureTracker Tracker;
   DependencyGraph DG;
 
-  ArrayRef<MCInst> Source;
   unsigned Iterations;
   unsigned TotalCycles;
 
@@ -314,6 +314,9 @@ class BottleneckAnalysis : public View {
   void addRegisterDep(unsigned From, unsigned To, unsigned RegID, unsigned Cy);
   void addMemoryDep(unsigned From, unsigned To, unsigned Cy);
   void addResourceDep(unsigned From, unsigned To, uint64_t Mask, unsigned Cy);
+
+  void printInstruction(formatted_raw_ostream &FOS, const MCInst &MCI,
+                        bool UseDifferentColor = false) const;
 
   // Prints a bottleneck message to OS.
   void printBottleneckHints(raw_ostream &OS) const;

@@ -2,7 +2,7 @@
 # RUN: llvm-mc -filetype=obj -triple=x86_64-unknown-linux %s -o %t.o
 # RUN: ld.lld %t.o -o %t
 # RUN: llvm-readobj -r %t | FileCheck --check-prefix=NORELOC %s
-# RUN: llvm-readelf -x .data %t | FileCheck --check-prefix=DATA %s
+# RUN: llvm-readelf -x .data -x nonalloc %t | FileCheck --check-prefix=DATA %s
 # RUN: llvm-objdump -d --no-show-raw-insn %t | FileCheck --check-prefix=DISASM %s
 
 # RUN: ld.lld -shared %t.o -o %t.so
@@ -14,12 +14,15 @@
 # NORELOC-NEXT: ]
 
 # DATA:      section '.data':
-# DATA-NEXT: 0x00202000 00000000 00000000 00000000 00000000
-# DATA-NEXT: 0x00202010 00000000 00000000 00001900 00000000
-# DATA-NEXT: 0x00202020 00001b00 00000000 00001900 00000000
-# DATA-NEXT: 0x00202030 00001b00 00000000 0000
+# DATA-NEXT: 0x002031ac 00000000 00000000 00000000 00000000
+# DATA-NEXT: 0x002031bc 00000000 00000000 00001900 00000000
+# DATA-NEXT: 0x002031cc 00001b00 00000000 00001900 00000000
+# DATA-NEXT: 0x002031dc 00001b00 00000000 0000
 
-# DISASM:      _start:
+# DATA:      section 'nonalloc':
+# DATA-NEXT: 0x00000000 1a000000 00000000
+
+# DISASM:      <_start>:
 # DISASM-NEXT:   movl 25, %eax
 # DISASM-NEXT:   movl 27, %eax
 # DISASM-NEXT:   movl 25, %eax
@@ -27,10 +30,10 @@
 
 # RELOC2:      Relocations [
 # RELOC2-NEXT: Section ({{.*}}) .rela.dyn {
-# RELOC2-NEXT:    0x1003 R_X86_64_SIZE32 foo 0xFFFFFFFFFFFFFFFF
-# RELOC2-NEXT:    0x100A R_X86_64_SIZE32 foo 0x1
-# RELOC2-NEXT:    0x301A R_X86_64_SIZE64 foo 0xFFFFFFFFFFFFFFFF
-# RELOC2-NEXT:    0x3022 R_X86_64_SIZE64 foo 0x1
+# RELOC2-NEXT:    0x2333 R_X86_64_SIZE32 foo 0xFFFFFFFFFFFFFFFF
+# RELOC2-NEXT:    0x233A R_X86_64_SIZE32 foo 0x1
+# RELOC2-NEXT:    0x440A R_X86_64_SIZE64 foo 0xFFFFFFFFFFFFFFFF
+# RELOC2-NEXT:    0x4412 R_X86_64_SIZE64 foo 0x1
 # RELOC2-NEXT:  }
 # RELOC2-NEXT: ]
 
@@ -40,7 +43,7 @@
 # DATA2-NEXT: 00000000 00000000 00001900 00000000
 # DATA2-NEXT: 00001b00 00000000 0000
 
-# DISASM2:      _start:
+# DISASM2:      <_start>:
 # DISASM2-NEXT:   movl 0, %eax
 # DISASM2-NEXT:   movl 0, %eax
 # DISASM2-NEXT:   movl 25, %eax
@@ -71,3 +74,6 @@ _start:
   movl foo@SIZE+1,%eax
   movl foohidden@SIZE-1,%eax
   movl foohidden@SIZE+1,%eax
+
+.section nonalloc
+  .quad foo@SIZE

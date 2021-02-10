@@ -1,5 +1,6 @@
-; RUN: llc -march=bpfel -filetype=asm -o - %s | FileCheck -check-prefixes=CHECK %s
-; RUN: llc -march=bpfeb -filetype=asm -o - %s | FileCheck -check-prefixes=CHECK %s
+; RUN: opt -O2 %s | llvm-dis > %t1
+; RUN: llc -filetype=asm -o - %t1 | FileCheck -check-prefixes=CHECK %s
+; RUN: llc -mattr=+alu32 -filetype=asm -o - %t1 | FileCheck -check-prefixes=CHECK %s
 ; Source code:
 ;   typedef struct v3 { int a; int b; } __v3;
 ;   #define _(x) (__builtin_preserve_access_index(x))
@@ -9,7 +10,9 @@
 ;     return get_value(_(&g->b));
 ;   }
 ; Compilation flag:
-;   clang -target bpf -O2 -g -S -emit-llvm test.c
+;   clang -target bpf -O2 -g -S -emit-llvm -Xclang -disable-llvm-passes test.c
+
+target triple = "bpf"
 
 %struct.v3 = type { i32, i32 }
 
@@ -34,12 +37,13 @@ entry:
 ; CHECK:              .ascii  "v3"                    # string offset=16
 ; CHECK:              .ascii  "0:1"                   # string offset=23
 
-; CHECK:              .long   12                      # OffsetReloc
-; CHECK-NEXT:         .long   10                      # Offset reloc section string offset=10
+; CHECK:              .long   16                      # FieldReloc
+; CHECK-NEXT:         .long   10                      # Field reloc section string offset=10
 ; CHECK-NEXT:         .long   1
 ; CHECK-NEXT:         .long   .Ltmp{{[0-9]+}}
 ; CHECK-NEXT:         .long   [[TID1]]
 ; CHECK-NEXT:         .long   23
+; CHECK-NEXT:         .long   0
 
 declare dso_local i32 @get_value(i32*) local_unnamed_addr #1
 

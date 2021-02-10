@@ -85,10 +85,11 @@ namespace {
 
 /// Helper class for values going out through an ABI boundary (used for handling
 /// function return values and call parameters).
-struct OutgoingValueHandler : public CallLowering::ValueHandler {
-  OutgoingValueHandler(MachineIRBuilder &MIRBuilder, MachineRegisterInfo &MRI,
-                       MachineInstrBuilder &MIB, CCAssignFn *AssignFn)
-      : ValueHandler(MIRBuilder, MRI, AssignFn), MIB(MIB) {}
+struct ARMOutgoingValueHandler : public CallLowering::OutgoingValueHandler {
+  ARMOutgoingValueHandler(MachineIRBuilder &MIRBuilder,
+                          MachineRegisterInfo &MRI, MachineInstrBuilder &MIB,
+                          CCAssignFn *AssignFn)
+      : OutgoingValueHandler(MIRBuilder, MRI, AssignFn), MIB(MIB) {}
 
   Register getStackAddress(uint64_t Size, int64_t Offset,
                            MachinePointerInfo &MPO) override {
@@ -97,17 +98,14 @@ struct OutgoingValueHandler : public CallLowering::ValueHandler {
 
     LLT p0 = LLT::pointer(0, 32);
     LLT s32 = LLT::scalar(32);
-    Register SPReg = MRI.createGenericVirtualRegister(p0);
-    MIRBuilder.buildCopy(SPReg, Register(ARM::SP));
+    auto SPReg = MIRBuilder.buildCopy(p0, Register(ARM::SP));
 
-    Register OffsetReg = MRI.createGenericVirtualRegister(s32);
-    MIRBuilder.buildConstant(OffsetReg, Offset);
+    auto OffsetReg = MIRBuilder.buildConstant(s32, Offset);
 
-    Register AddrReg = MRI.createGenericVirtualRegister(p0);
-    MIRBuilder.buildGEP(AddrReg, SPReg, OffsetReg);
+    auto AddrReg = MIRBuilder.buildPtrAdd(p0, SPReg, OffsetReg);
 
     MPO = MachinePointerInfo::getStack(MIRBuilder.getMF(), Offset);
-    return AddrReg;
+    return AddrReg.getReg(0);
   }
 
   void assignValueToReg(Register ValVReg, Register PhysReg,
@@ -131,7 +129,7 @@ struct OutgoingValueHandler : public CallLowering::ValueHandler {
     Register ExtReg = extendRegister(ValVReg, VA);
     auto MMO = MIRBuilder.getMF().getMachineMemOperand(
         MPO, MachineMemOperand::MOStore, VA.getLocVT().getStoreSize(),
-        /* Alignment */ 1);
+        Align(1));
     MIRBuilder.buildStore(ExtReg, Addr, *MMO);
   }
 
@@ -141,7 +139,10 @@ struct OutgoingValueHandler : public CallLowering::ValueHandler {
 
     CCValAssign VA = VAs[0];
     assert(VA.needsCustom() && "Value doesn't need custom handling");
-    assert(VA.getValVT() == MVT::f64 && "Unsupported type");
+
+    // Custom lowering for other types, such as f16, is currently not supported
+    if (VA.getValVT() != MVT::f64)
+      return 0;
 
     CCValAssign NextVA = VAs[1];
     assert(NextVA.needsCustom() && "Value doesn't need custom handling");
@@ -201,8 +202,7 @@ void ARMCallLowering::splitToValueTypes(const ArgInfo &OrigArg,
     // Even if there is no splitting to do, we still want to replace the
     // original type (e.g. pointer type -> integer).
     auto Flags = OrigArg.Flags[0];
-    unsigned OriginalAlignment = DL.getABITypeAlignment(OrigArg.Ty);
-    Flags.setOrigAlign(OriginalAlignment);
+    Flags.setOrigAlign(DL.getABITypeAlign(OrigArg.Ty));
     SplitArgs.emplace_back(OrigArg.Regs[0], SplitVTs[0].getTypeForEVT(Ctx),
                            Flags, OrigArg.IsFixed);
     return;
@@ -214,8 +214,7 @@ void ARMCallLowering::splitToValueTypes(const ArgInfo &OrigArg,
     Type *SplitTy = SplitVT.getTypeForEVT(Ctx);
     auto Flags = OrigArg.Flags[0];
 
-    unsigned OriginalAlignment = DL.getABITypeAlignment(SplitTy);
-    Flags.setOrigAlign(OriginalAlignment);
+    Flags.setOrigAlign(DL.getABITypeAlign(SplitTy));
 
     bool NeedsConsecutiveRegisters =
         TLI.functionArgumentNeedsConsecutiveRegisters(
@@ -258,7 +257,8 @@ bool ARMCallLowering::lowerReturnVal(MachineIRBuilder &MIRBuilder,
   CCAssignFn *AssignFn =
       TLI.CCAssignFnForReturn(F.getCallingConv(), F.isVarArg());
 
-  OutgoingValueHandler RetHandler(MIRBuilder, MF.getRegInfo(), Ret, AssignFn);
+  ARMOutgoingValueHandler RetHandler(MIRBuilder, MF.getRegInfo(), Ret,
+                                     AssignFn);
   return handleAssignments(MIRBuilder, SplitRetInfos, RetHandler);
 }
 
@@ -282,12 +282,10 @@ namespace {
 
 /// Helper class for values coming in through an ABI boundary (used for handling
 /// formal arguments and call return values).
-struct IncomingValueHandler : public CallLowering::ValueHandler {
-  IncomingValueHandler(MachineIRBuilder &MIRBuilder, MachineRegisterInfo &MRI,
-                       CCAssignFn AssignFn)
-      : ValueHandler(MIRBuilder, MRI, AssignFn) {}
-
-  bool isIncomingArgumentHandler() const override { return true; }
+struct ARMIncomingValueHandler : public CallLowering::IncomingValueHandler {
+  ARMIncomingValueHandler(MachineIRBuilder &MIRBuilder,
+                          MachineRegisterInfo &MRI, CCAssignFn AssignFn)
+      : IncomingValueHandler(MIRBuilder, MRI, AssignFn) {}
 
   Register getStackAddress(uint64_t Size, int64_t Offset,
                            MachinePointerInfo &MPO) override {
@@ -299,11 +297,8 @@ struct IncomingValueHandler : public CallLowering::ValueHandler {
     int FI = MFI.CreateFixedObject(Size, Offset, true);
     MPO = MachinePointerInfo::getFixedStack(MIRBuilder.getMF(), FI);
 
-    Register AddrReg =
-        MRI.createGenericVirtualRegister(LLT::pointer(MPO.getAddrSpace(), 32));
-    MIRBuilder.buildFrameIndex(AddrReg, FI);
-
-    return AddrReg;
+    return MIRBuilder.buildFrameIndex(LLT::pointer(MPO.getAddrSpace(), 32), FI)
+        .getReg(0);
   }
 
   void assignValueToAddress(Register ValVReg, Register Addr, uint64_t Size,
@@ -318,20 +313,21 @@ struct IncomingValueHandler : public CallLowering::ValueHandler {
       Size = 4;
       assert(MRI.getType(ValVReg).isScalar() && "Only scalars supported atm");
 
-      auto LoadVReg = MRI.createGenericVirtualRegister(LLT::scalar(32));
-      buildLoad(LoadVReg, Addr, Size, /* Alignment */ 1, MPO);
+      auto LoadVReg = buildLoad(LLT::scalar(32), Addr, Size, MPO);
       MIRBuilder.buildTrunc(ValVReg, LoadVReg);
     } else {
       // If the value is not extended, a simple load will suffice.
-      buildLoad(ValVReg, Addr, Size, /* Alignment */ 1, MPO);
+      buildLoad(ValVReg, Addr, Size, MPO);
     }
   }
 
-  void buildLoad(Register Val, Register Addr, uint64_t Size, unsigned Alignment,
-                 MachinePointerInfo &MPO) {
-    auto MMO = MIRBuilder.getMF().getMachineMemOperand(
-        MPO, MachineMemOperand::MOLoad, Size, Alignment);
-    MIRBuilder.buildLoad(Val, Addr, *MMO);
+  MachineInstrBuilder buildLoad(const DstOp &Res, Register Addr, uint64_t Size,
+                                MachinePointerInfo &MPO) {
+    MachineFunction &MF = MIRBuilder.getMF();
+
+    auto MMO = MF.getMachineMemOperand(MPO, MachineMemOperand::MOLoad, Size,
+                                       inferAlignFromPtrInfo(MF, MPO));
+    return MIRBuilder.buildLoad(Res, Addr, *MMO);
   }
 
   void assignValueToReg(Register ValVReg, Register PhysReg,
@@ -339,8 +335,8 @@ struct IncomingValueHandler : public CallLowering::ValueHandler {
     assert(VA.isRegLoc() && "Value shouldn't be assigned to reg");
     assert(VA.getLocReg() == PhysReg && "Assigning to the wrong reg?");
 
-    auto ValSize = VA.getValVT().getSizeInBits();
-    auto LocSize = VA.getLocVT().getSizeInBits();
+    uint64_t ValSize = VA.getValVT().getFixedSizeInBits();
+    uint64_t LocSize = VA.getLocVT().getFixedSizeInBits();
 
     assert(ValSize <= 64 && "Unsupported value size");
     assert(LocSize <= 64 && "Unsupported location size");
@@ -354,9 +350,7 @@ struct IncomingValueHandler : public CallLowering::ValueHandler {
       // We cannot create a truncating copy, nor a trunc of a physical register.
       // Therefore, we need to copy the content of the physical register into a
       // virtual one and then truncate that.
-      auto PhysRegToVReg =
-          MRI.createGenericVirtualRegister(LLT::scalar(LocSize));
-      MIRBuilder.buildCopy(PhysRegToVReg, PhysReg);
+      auto PhysRegToVReg = MIRBuilder.buildCopy(LLT::scalar(LocSize), PhysReg);
       MIRBuilder.buildTrunc(ValVReg, PhysRegToVReg);
     }
   }
@@ -367,7 +361,10 @@ struct IncomingValueHandler : public CallLowering::ValueHandler {
 
     CCValAssign VA = VAs[0];
     assert(VA.needsCustom() && "Value doesn't need custom handling");
-    assert(VA.getValVT() == MVT::f64 && "Unsupported type");
+
+    // Custom lowering for other types, such as f16, is currently not supported
+    if (VA.getValVT() != MVT::f64)
+      return 0;
 
     CCValAssign NextVA = VAs[1];
     assert(NextVA.needsCustom() && "Value doesn't need custom handling");
@@ -400,10 +397,10 @@ struct IncomingValueHandler : public CallLowering::ValueHandler {
   virtual void markPhysRegUsed(unsigned PhysReg) = 0;
 };
 
-struct FormalArgHandler : public IncomingValueHandler {
+struct FormalArgHandler : public ARMIncomingValueHandler {
   FormalArgHandler(MachineIRBuilder &MIRBuilder, MachineRegisterInfo &MRI,
                    CCAssignFn AssignFn)
-      : IncomingValueHandler(MIRBuilder, MRI, AssignFn) {}
+      : ARMIncomingValueHandler(MIRBuilder, MRI, AssignFn) {}
 
   void markPhysRegUsed(unsigned PhysReg) override {
     MIRBuilder.getMRI()->addLiveIn(PhysReg);
@@ -436,7 +433,7 @@ bool ARMCallLowering::lowerFormalArguments(
   for (auto &Arg : F.args()) {
     if (!isSupportedType(DL, TLI, Arg.getType()))
       return false;
-    if (Arg.hasByValOrInAllocaAttr())
+    if (Arg.hasPassPointeeByValueCopyAttr())
       return false;
   }
 
@@ -470,10 +467,10 @@ bool ARMCallLowering::lowerFormalArguments(
 
 namespace {
 
-struct CallReturnHandler : public IncomingValueHandler {
+struct CallReturnHandler : public ARMIncomingValueHandler {
   CallReturnHandler(MachineIRBuilder &MIRBuilder, MachineRegisterInfo &MRI,
                     MachineInstrBuilder MIB, CCAssignFn *AssignFn)
-      : IncomingValueHandler(MIRBuilder, MRI, AssignFn), MIB(MIB) {}
+      : ARMIncomingValueHandler(MIRBuilder, MRI, AssignFn), MIB(MIB) {}
 
   void markPhysRegUsed(unsigned PhysReg) override {
     MIB.addDef(PhysReg, RegState::Implicit);
@@ -483,15 +480,16 @@ struct CallReturnHandler : public IncomingValueHandler {
 };
 
 // FIXME: This should move to the ARMSubtarget when it supports all the opcodes.
-unsigned getCallOpcode(const ARMSubtarget &STI, bool isDirect) {
+unsigned getCallOpcode(const MachineFunction &MF, const ARMSubtarget &STI,
+                       bool isDirect) {
   if (isDirect)
     return STI.isThumb() ? ARM::tBL : ARM::BL;
 
   if (STI.isThumb())
-    return ARM::tBLXr;
+    return gettBLXrOpcode(MF);
 
   if (STI.hasV5TOps())
-    return ARM::BLX;
+    return getBLXOpcode(MF);
 
   if (STI.hasV4TOps())
     return ARM::BX_CALL;
@@ -519,7 +517,7 @@ bool ARMCallLowering::lowerCall(MachineIRBuilder &MIRBuilder, CallLoweringInfo &
   // Create the call instruction so we can add the implicit uses of arg
   // registers, but don't insert it yet.
   bool IsDirect = !Info.Callee.isReg();
-  auto CallOpcode = getCallOpcode(STI, IsDirect);
+  auto CallOpcode = getCallOpcode(MF, STI, IsDirect);
   auto MIB = MIRBuilder.buildInstrNoInsert(CallOpcode);
 
   bool IsThumb = STI.isThumb();
@@ -555,7 +553,7 @@ bool ARMCallLowering::lowerCall(MachineIRBuilder &MIRBuilder, CallLoweringInfo &
   }
 
   auto ArgAssignFn = TLI.CCAssignFnForCall(Info.CallConv, IsVarArg);
-  OutgoingValueHandler ArgHandler(MIRBuilder, MRI, MIB, ArgAssignFn);
+  ARMOutgoingValueHandler ArgHandler(MIRBuilder, MRI, MIB, ArgAssignFn);
   if (!handleAssignments(MIRBuilder, ArgInfos, ArgHandler))
     return false;
 

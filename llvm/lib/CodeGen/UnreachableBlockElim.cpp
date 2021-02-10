@@ -36,6 +36,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Type.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 using namespace llvm;
@@ -80,7 +81,7 @@ namespace {
   class UnreachableMachineBlockElim : public MachineFunctionPass {
     bool runOnMachineFunction(MachineFunction &F) override;
     void getAnalysisUsage(AnalysisUsage &AU) const override;
-    MachineModuleInfo *MMI;
+
   public:
     static char ID; // Pass identification, replacement for typeid
     UnreachableMachineBlockElim() : MachineFunctionPass(ID) {}
@@ -103,7 +104,6 @@ bool UnreachableMachineBlockElim::runOnMachineFunction(MachineFunction &F) {
   df_iterator_default_set<MachineBasicBlock*> Reachable;
   bool ModifiedPHI = false;
 
-  MMI = getAnalysisIfAvailable<MachineModuleInfo>();
   MachineDominatorTree *MDT = getAnalysisIfAvailable<MachineDominatorTree>();
   MachineLoopInfo *MLI = getAnalysisIfAvailable<MachineLoopInfo>();
 
@@ -149,8 +149,8 @@ bool UnreachableMachineBlockElim::runOnMachineFunction(MachineFunction &F) {
   for (unsigned i = 0, e = DeadBlocks.size(); i != e; ++i) {
     // Remove any call site information for calls in the block.
     for (auto &I : DeadBlocks[i]->instrs())
-      if (I.isCall(MachineInstr::IgnoreBundle))
-        DeadBlocks[i]->getParent()->updateCallSiteInfo(&I);
+      if (I.shouldUpdateCallSiteInfo())
+        DeadBlocks[i]->getParent()->eraseCallSiteInfo(&I);
 
     DeadBlocks[i]->eraseFromParent();
   }

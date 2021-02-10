@@ -1,4 +1,4 @@
-//===-- OptionValueEnumeration.cpp ------------------------------*- C++ -*-===//
+//===-- OptionValueEnumeration.cpp ----------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -108,8 +108,7 @@ void OptionValueEnumeration::AutoComplete(CommandInterpreter &interpreter,
   if (!request.GetCursorArgumentPrefix().empty()) {
     for (size_t i = 0; i < num_enumerators; ++i) {
       llvm::StringRef name = m_enumerations.GetCStringAtIndex(i).GetStringRef();
-      if (name.startswith(request.GetCursorArgumentPrefix()))
-        request.AddCompletion(name);
+      request.TryCompleteCurrentArg(name);
     }
     return;
   }

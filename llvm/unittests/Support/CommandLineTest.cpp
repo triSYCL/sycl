@@ -9,22 +9,36 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Config/config.h"
+#include "llvm/Support/Allocator.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/Host.h"
 #include "llvm/Support/InitLLVM.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/StringSaver.h"
+#include "llvm/Support/VirtualFileSystem.h"
+#include "llvm/Support/raw_ostream.h"
+#include "llvm/Testing/Support/SupportHelpers.h"
+#include "gmock/gmock.h"
 #include "gtest/gtest.h"
 #include <fstream>
 #include <stdlib.h>
 #include <string>
+#include <tuple>
 
 using namespace llvm;
+using llvm::unittest::TempDir;
+using llvm::unittest::TempFile;
 
 namespace {
+
+MATCHER(StringEquality, "Checks if two char* are equal as strings") {
+  return std::string(std::get<0>(arg)) == std::string(std::get<1>(arg));
+}
 
 class TempEnvVar {
  public:
@@ -34,8 +48,6 @@ class TempEnvVar {
     EXPECT_EQ(nullptr, old_value) << old_value;
 #if HAVE_SETENV
     setenv(name, value, true);
-#else
-#   define SKIP_ENVIRONMENT_TESTS
 #endif
   }
 
@@ -61,7 +73,7 @@ public:
   ~StackOption() override { this->removeArgument(); }
 
   template <class DT> StackOption<T> &operator=(const DT &V) {
-    this->setValue(V);
+    Base::operator=(V);
     return *this;
   }
 };
@@ -126,36 +138,6 @@ TEST(CommandLineTest, ModifyExisitingOption) {
   ASSERT_EQ(cl::Hidden, TestOption.getOptionHiddenFlag()) <<
     "Failed to modify option's hidden flag.";
 }
-#ifndef SKIP_ENVIRONMENT_TESTS
-
-const char test_env_var[] = "LLVM_TEST_COMMAND_LINE_FLAGS";
-
-cl::opt<std::string> EnvironmentTestOption("env-test-opt");
-TEST(CommandLineTest, ParseEnvironment) {
-  TempEnvVar TEV(test_env_var, "-env-test-opt=hello");
-  EXPECT_EQ("", EnvironmentTestOption);
-  cl::ParseEnvironmentOptions("CommandLineTest", test_env_var);
-  EXPECT_EQ("hello", EnvironmentTestOption);
-}
-
-// This test used to make valgrind complain
-// ("Conditional jump or move depends on uninitialised value(s)")
-//
-// Warning: Do not run any tests after this one that try to gain access to
-// registered command line options because this will likely result in a
-// SEGFAULT. This can occur because the cl::opt in the test below is declared
-// on the stack which will be destroyed after the test completes but the
-// command line system will still hold a pointer to a deallocated cl::Option.
-TEST(CommandLineTest, ParseEnvironmentToLocalVar) {
-  // Put cl::opt on stack to check for proper initialization of fields.
-  StackOption<std::string> EnvironmentTestOptionLocal("env-test-opt-local");
-  TempEnvVar TEV(test_env_var, "-env-test-opt-local=hello-local");
-  EXPECT_EQ("", EnvironmentTestOptionLocal);
-  cl::ParseEnvironmentOptions("CommandLineTest", test_env_var);
-  EXPECT_EQ("hello-local", EnvironmentTestOptionLocal);
-}
-
-#endif  // SKIP_ENVIRONMENT_TESTS
 
 TEST(CommandLineTest, UseOptionCategory) {
   StackOption<int> TestOption2("test-option", cl::cat(TestCategory));
@@ -217,14 +199,15 @@ typedef void ParserFunction(StringRef Source, StringSaver &Saver,
                             bool MarkEOLs);
 
 void testCommandLineTokenizer(ParserFunction *parse, StringRef Input,
-                              const char *const Output[], size_t OutputSize) {
+                              ArrayRef<const char *> Output,
+                              bool MarkEOLs = false) {
   SmallVector<const char *, 0> Actual;
   BumpPtrAllocator A;
   StringSaver Saver(A);
-  parse(Input, Saver, Actual, /*MarkEOLs=*/false);
-  EXPECT_EQ(OutputSize, Actual.size());
+  parse(Input, Saver, Actual, MarkEOLs);
+  EXPECT_EQ(Output.size(), Actual.size());
   for (unsigned I = 0, E = Actual.size(); I != E; ++I) {
-    if (I < OutputSize) {
+    if (I < Output.size()) {
       EXPECT_STREQ(Output[I], Actual[I]);
     }
   }
@@ -237,73 +220,93 @@ TEST(CommandLineTest, TokenizeGNUCommandLine) {
   const char *const Output[] = {
       "foo bar",     "foo bar",   "foo bar",          "foo\\bar",
       "-DFOO=bar()", "foobarbaz", "C:\\src\\foo.cpp", "C:srcfoo.cpp"};
-  testCommandLineTokenizer(cl::TokenizeGNUCommandLine, Input, Output,
-                           array_lengthof(Output));
+  testCommandLineTokenizer(cl::TokenizeGNUCommandLine, Input, Output);
 }
 
 TEST(CommandLineTest, TokenizeWindowsCommandLine1) {
-  const char Input[] = "a\\b c\\\\d e\\\\\"f g\" h\\\"i j\\\\\\\"k \"lmn\" o pqr "
-                      "\"st \\\"u\" \\v";
+  const char Input[] =
+      R"(a\b c\\d e\\"f g" h\"i j\\\"k "lmn" o pqr "st \"u" \v)";
   const char *const Output[] = { "a\\b", "c\\\\d", "e\\f g", "h\"i", "j\\\"k",
                                  "lmn", "o", "pqr", "st \"u", "\\v" };
-  testCommandLineTokenizer(cl::TokenizeWindowsCommandLine, Input, Output,
-                           array_lengthof(Output));
+  testCommandLineTokenizer(cl::TokenizeWindowsCommandLine, Input, Output);
 }
 
 TEST(CommandLineTest, TokenizeWindowsCommandLine2) {
   const char Input[] = "clang -c -DFOO=\"\"\"ABC\"\"\" x.cpp";
   const char *const Output[] = { "clang", "-c", "-DFOO=\"ABC\"", "x.cpp"};
+  testCommandLineTokenizer(cl::TokenizeWindowsCommandLine, Input, Output);
+}
+
+TEST(CommandLineTest, TokenizeWindowsCommandLineQuotedLastArgument) {
+  const char Input1[] = R"(a b c d "")";
+  const char *const Output1[] = {"a", "b", "c", "d", ""};
+  testCommandLineTokenizer(cl::TokenizeWindowsCommandLine, Input1, Output1);
+  const char Input2[] = R"(a b c d ")";
+  const char *const Output2[] = {"a", "b", "c", "d"};
+  testCommandLineTokenizer(cl::TokenizeWindowsCommandLine, Input2, Output2);
+}
+
+TEST(CommandLineTest, TokenizeAndMarkEOLs) {
+  // Clang uses EOL marking in response files to support options that consume
+  // the rest of the arguments on the current line, but do not consume arguments
+  // from subsequent lines. For example, given these rsp files contents:
+  // /c /Zi /O2
+  // /Oy- /link /debug /opt:ref
+  // /Zc:ThreadsafeStatics-
+  //
+  // clang-cl needs to treat "/debug /opt:ref" as linker flags, and everything
+  // else as compiler flags. The tokenizer inserts nullptr sentinels into the
+  // output so that clang-cl can find the end of the current line.
+  const char Input[] = "clang -Xclang foo\n\nfoo\"bar\"baz\n x.cpp\n";
+  const char *const Output[] = {"clang", "-Xclang", "foo",
+                                nullptr, nullptr,   "foobarbaz",
+                                nullptr, "x.cpp",   nullptr};
   testCommandLineTokenizer(cl::TokenizeWindowsCommandLine, Input, Output,
-                           array_lengthof(Output));
+                           /*MarkEOLs=*/true);
+  testCommandLineTokenizer(cl::TokenizeGNUCommandLine, Input, Output,
+                           /*MarkEOLs=*/true);
 }
 
 TEST(CommandLineTest, TokenizeConfigFile1) {
   const char *Input = "\\";
   const char *const Output[] = { "\\" };
-  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output,
-                           array_lengthof(Output));
+  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output);
 }
 
 TEST(CommandLineTest, TokenizeConfigFile2) {
   const char *Input = "\\abc";
   const char *const Output[] = { "abc" };
-  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output,
-                           array_lengthof(Output));
+  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output);
 }
 
 TEST(CommandLineTest, TokenizeConfigFile3) {
   const char *Input = "abc\\";
   const char *const Output[] = { "abc\\" };
-  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output,
-                           array_lengthof(Output));
+  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output);
 }
 
 TEST(CommandLineTest, TokenizeConfigFile4) {
   const char *Input = "abc\\\n123";
   const char *const Output[] = { "abc123" };
-  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output,
-                           array_lengthof(Output));
+  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output);
 }
 
 TEST(CommandLineTest, TokenizeConfigFile5) {
   const char *Input = "abc\\\r\n123";
   const char *const Output[] = { "abc123" };
-  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output,
-                           array_lengthof(Output));
+  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output);
 }
 
 TEST(CommandLineTest, TokenizeConfigFile6) {
   const char *Input = "abc\\\n";
   const char *const Output[] = { "abc" };
-  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output,
-                           array_lengthof(Output));
+  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output);
 }
 
 TEST(CommandLineTest, TokenizeConfigFile7) {
   const char *Input = "abc\\\r\n";
   const char *const Output[] = { "abc" };
-  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output,
-                           array_lengthof(Output));
+  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output);
 }
 
 TEST(CommandLineTest, TokenizeConfigFile8) {
@@ -325,15 +328,13 @@ TEST(CommandLineTest, TokenizeConfigFile9) {
 TEST(CommandLineTest, TokenizeConfigFile10) {
   const char *Input = "\\\nabc";
   const char *const Output[] = { "abc" };
-  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output,
-                           array_lengthof(Output));
+  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output);
 }
 
 TEST(CommandLineTest, TokenizeConfigFile11) {
   const char *Input = "\\\r\nabc";
   const char *const Output[] = { "abc" };
-  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output,
-                           array_lengthof(Output));
+  testCommandLineTokenizer(cl::tokenizeConfigFile, Input, Output);
 }
 
 TEST(CommandLineTest, AliasesWithArguments) {
@@ -741,6 +742,18 @@ TEST(CommandLineTest, DefaultOptions) {
 TEST(CommandLineTest, ArgumentLimit) {
   std::string args(32 * 4096, 'a');
   EXPECT_FALSE(llvm::sys::commandLineFitsWithinSystemLimits("cl", args.data()));
+  std::string args2(256, 'a');
+  EXPECT_TRUE(llvm::sys::commandLineFitsWithinSystemLimits("cl", args2.data()));
+  if (Triple(sys::getProcessTriple()).isOSWindows()) {
+    // We use 32000 as a limit for command line length. Program name ('cl'),
+    // separating spaces and termination null character occupy 5 symbols.
+    std::string long_arg(32000 - 5, 'b');
+    EXPECT_TRUE(
+        llvm::sys::commandLineFitsWithinSystemLimits("cl", long_arg.data()));
+    long_arg += 'b';
+    EXPECT_FALSE(
+        llvm::sys::commandLineFitsWithinSystemLimits("cl", long_arg.data()));
+  }
 }
 
 TEST(CommandLineTest, ResponseFileWindows) {
@@ -752,20 +765,13 @@ TEST(CommandLineTest, ResponseFileWindows) {
   StackOption<bool> TopLevelOpt("top-level", cl::init(false));
 
   // Create response file.
-  int FileDescriptor;
-  SmallString<64> TempPath;
-  std::error_code EC =
-      llvm::sys::fs::createTemporaryFile("resp-", ".txt", FileDescriptor, TempPath);
-  EXPECT_TRUE(!EC);
-
-  std::ofstream RspFile(TempPath.c_str());
-  EXPECT_TRUE(RspFile.is_open());
-  RspFile << "-top-level\npath\\dir\\file1\npath/dir/file2";
-  RspFile.close();
+  TempFile ResponseFile("resp-", ".txt",
+                        "-top-level\npath\\dir\\file1\npath/dir/file2",
+                        /*Unique*/ true);
 
   llvm::SmallString<128> RspOpt;
   RspOpt.append(1, '@');
-  RspOpt.append(TempPath.c_str());
+  RspOpt.append(ResponseFile.path());
   const char *args[] = {"prog", RspOpt.c_str()};
   EXPECT_FALSE(TopLevelOpt);
   EXPECT_TRUE(
@@ -773,124 +779,102 @@ TEST(CommandLineTest, ResponseFileWindows) {
   EXPECT_TRUE(TopLevelOpt);
   EXPECT_TRUE(InputFilenames[0] == "path\\dir\\file1");
   EXPECT_TRUE(InputFilenames[1] == "path/dir/file2");
-
-  llvm::sys::fs::remove(TempPath.c_str());
 }
 
 TEST(CommandLineTest, ResponseFiles) {
-  llvm::SmallString<128> TestDir;
-  std::error_code EC =
-    llvm::sys::fs::createUniqueDirectory("unittest", TestDir);
-  EXPECT_TRUE(!EC);
+  vfs::InMemoryFileSystem FS;
+#ifdef _WIN32
+  const char *TestRoot = "C:\\";
+#else
+  const char *TestRoot = "/";
+#endif
+  FS.setCurrentWorkingDirectory(TestRoot);
 
   // Create included response file of first level.
-  llvm::SmallString<128> IncludedFileName;
-  llvm::sys::path::append(IncludedFileName, TestDir, "resp1");
-  std::ofstream IncludedFile(IncludedFileName.c_str());
-  EXPECT_TRUE(IncludedFile.is_open());
-  IncludedFile << "-option_1 -option_2\n"
-                  "@incdir/resp2\n"
-                  "-option_3=abcd\n"
-                  "@incdir/resp3\n"
-                  "-option_4=efjk\n";
-  IncludedFile.close();
+  llvm::StringRef IncludedFileName = "resp1";
+  FS.addFile(IncludedFileName, 0,
+             llvm::MemoryBuffer::getMemBuffer("-option_1 -option_2\n"
+                                              "@incdir/resp2\n"
+                                              "-option_3=abcd\n"
+                                              "@incdir/resp3\n"
+                                              "-option_4=efjk\n"));
 
   // Directory for included file.
-  llvm::SmallString<128> IncDir;
-  llvm::sys::path::append(IncDir, TestDir, "incdir");
-  EC = llvm::sys::fs::create_directory(IncDir);
-  EXPECT_TRUE(!EC);
+  llvm::StringRef IncDir = "incdir";
 
   // Create included response file of second level.
   llvm::SmallString<128> IncludedFileName2;
   llvm::sys::path::append(IncludedFileName2, IncDir, "resp2");
-  std::ofstream IncludedFile2(IncludedFileName2.c_str());
-  EXPECT_TRUE(IncludedFile2.is_open());
-  IncludedFile2 << "-option_21 -option_22\n";
-  IncludedFile2 << "-option_23=abcd\n";
-  IncludedFile2.close();
+  FS.addFile(IncludedFileName2, 0,
+             MemoryBuffer::getMemBuffer("-option_21 -option_22\n"
+                                        "-option_23=abcd\n"));
 
   // Create second included response file of second level.
   llvm::SmallString<128> IncludedFileName3;
   llvm::sys::path::append(IncludedFileName3, IncDir, "resp3");
-  std::ofstream IncludedFile3(IncludedFileName3.c_str());
-  EXPECT_TRUE(IncludedFile3.is_open());
-  IncludedFile3 << "-option_31 -option_32\n";
-  IncludedFile3 << "-option_33=abcd\n";
-  IncludedFile3.close();
+  FS.addFile(IncludedFileName3, 0,
+             MemoryBuffer::getMemBuffer("-option_31 -option_32\n"
+                                        "-option_33=abcd\n"));
 
   // Prepare 'file' with reference to response file.
   SmallString<128> IncRef;
   IncRef.append(1, '@');
-  IncRef.append(IncludedFileName.c_str());
-  llvm::SmallVector<const char *, 4> Argv =
-                          { "test/test", "-flag_1", IncRef.c_str(), "-flag_2" };
+  IncRef.append(IncludedFileName);
+  llvm::SmallVector<const char *, 4> Argv = {"test/test", "-flag_1",
+                                             IncRef.c_str(), "-flag_2"};
 
   // Expand response files.
   llvm::BumpPtrAllocator A;
   llvm::StringSaver Saver(A);
-  bool Res = llvm::cl::ExpandResponseFiles(
-                    Saver, llvm::cl::TokenizeGNUCommandLine, Argv, false, true);
-  EXPECT_TRUE(Res);
-  EXPECT_EQ(Argv.size(), 13U);
-  EXPECT_STREQ(Argv[0], "test/test");
-  EXPECT_STREQ(Argv[1], "-flag_1");
-  EXPECT_STREQ(Argv[2], "-option_1");
-  EXPECT_STREQ(Argv[3], "-option_2");
-  EXPECT_STREQ(Argv[4], "-option_21");
-  EXPECT_STREQ(Argv[5], "-option_22");
-  EXPECT_STREQ(Argv[6], "-option_23=abcd");
-  EXPECT_STREQ(Argv[7], "-option_3=abcd");
-  EXPECT_STREQ(Argv[8], "-option_31");
-  EXPECT_STREQ(Argv[9], "-option_32");
-  EXPECT_STREQ(Argv[10], "-option_33=abcd");
-  EXPECT_STREQ(Argv[11], "-option_4=efjk");
-  EXPECT_STREQ(Argv[12], "-flag_2");
-
-  llvm::sys::fs::remove(IncludedFileName3);
-  llvm::sys::fs::remove(IncludedFileName2);
-  llvm::sys::fs::remove(IncDir);
-  llvm::sys::fs::remove(IncludedFileName);
-  llvm::sys::fs::remove(TestDir);
+  ASSERT_TRUE(llvm::cl::ExpandResponseFiles(
+      Saver, llvm::cl::TokenizeGNUCommandLine, Argv, false, true, FS,
+      /*CurrentDir=*/StringRef(TestRoot)));
+  EXPECT_THAT(Argv, testing::Pointwise(
+                        StringEquality(),
+                        {"test/test", "-flag_1", "-option_1", "-option_2",
+                         "-option_21", "-option_22", "-option_23=abcd",
+                         "-option_3=abcd", "-option_31", "-option_32",
+                         "-option_33=abcd", "-option_4=efjk", "-flag_2"}));
 }
 
 TEST(CommandLineTest, RecursiveResponseFiles) {
-  SmallString<128> TestDir;
-  std::error_code EC = sys::fs::createUniqueDirectory("unittest", TestDir);
-  EXPECT_TRUE(!EC);
+  vfs::InMemoryFileSystem FS;
+#ifdef _WIN32
+  const char *TestRoot = "C:\\";
+#else
+  const char *TestRoot = "/";
+#endif
+  FS.setCurrentWorkingDirectory(TestRoot);
 
-  SmallString<128> SelfFilePath;
-  sys::path::append(SelfFilePath, TestDir, "self.rsp");
-  std::string SelfFileRef = std::string("@") + SelfFilePath.c_str();
+  StringRef SelfFilePath = "self.rsp";
+  std::string SelfFileRef = ("@" + SelfFilePath).str();
 
-  SmallString<128> NestedFilePath;
-  sys::path::append(NestedFilePath, TestDir, "nested.rsp");
-  std::string NestedFileRef = std::string("@") + NestedFilePath.c_str();
+  StringRef NestedFilePath = "nested.rsp";
+  std::string NestedFileRef = ("@" + NestedFilePath).str();
 
-  SmallString<128> FlagFilePath;
-  sys::path::append(FlagFilePath, TestDir, "flag.rsp");
-  std::string FlagFileRef = std::string("@") + FlagFilePath.c_str();
+  StringRef FlagFilePath = "flag.rsp";
+  std::string FlagFileRef = ("@" + FlagFilePath).str();
 
-  std::ofstream SelfFile(SelfFilePath.str());
-  EXPECT_TRUE(SelfFile.is_open());
+  std::string SelfFileContents;
+  raw_string_ostream SelfFile(SelfFileContents);
   SelfFile << "-option_1\n";
   SelfFile << FlagFileRef << "\n";
   SelfFile << NestedFileRef << "\n";
   SelfFile << SelfFileRef << "\n";
-  SelfFile.close();
+  FS.addFile(SelfFilePath, 0, MemoryBuffer::getMemBuffer(SelfFile.str()));
 
-  std::ofstream NestedFile(NestedFilePath.str());
-  EXPECT_TRUE(NestedFile.is_open());
+  std::string NestedFileContents;
+  raw_string_ostream NestedFile(NestedFileContents);
   NestedFile << "-option_2\n";
   NestedFile << FlagFileRef << "\n";
   NestedFile << SelfFileRef << "\n";
   NestedFile << NestedFileRef << "\n";
-  NestedFile.close();
+  FS.addFile(NestedFilePath, 0, MemoryBuffer::getMemBuffer(NestedFile.str()));
 
-  std::ofstream FlagFile(FlagFilePath.str());
-  EXPECT_TRUE(FlagFile.is_open());
+  std::string FlagFileContents;
+  raw_string_ostream FlagFile(FlagFileContents);
   FlagFile << "-option_x\n";
-  FlagFile.close();
+  FS.addFile(FlagFilePath, 0, MemoryBuffer::getMemBuffer(FlagFile.str()));
 
   // Ensure:
   // Recursive expansion terminates
@@ -905,47 +889,48 @@ TEST(CommandLineTest, RecursiveResponseFiles) {
 #else
   cl::TokenizerCallback Tokenizer = cl::TokenizeGNUCommandLine;
 #endif
-  bool Res = cl::ExpandResponseFiles(Saver, Tokenizer, Argv, false, false);
-  EXPECT_FALSE(Res);
+  ASSERT_FALSE(
+      cl::ExpandResponseFiles(Saver, Tokenizer, Argv, false, false, FS,
+                              /*CurrentDir=*/llvm::StringRef(TestRoot)));
 
-  EXPECT_EQ(Argv.size(), 9U);
-  EXPECT_STREQ(Argv[0], "test/test");
-  EXPECT_STREQ(Argv[1], "-option_1");
-  EXPECT_STREQ(Argv[2], "-option_x");
-  EXPECT_STREQ(Argv[3], "-option_2");
-  EXPECT_STREQ(Argv[4], "-option_x");
-  EXPECT_STREQ(Argv[5], SelfFileRef.c_str());
-  EXPECT_STREQ(Argv[6], NestedFileRef.c_str());
-  EXPECT_STREQ(Argv[7], SelfFileRef.c_str());
-  EXPECT_STREQ(Argv[8], "-option_3");
+  EXPECT_THAT(Argv,
+              testing::Pointwise(StringEquality(),
+                                 {"test/test", "-option_1", "-option_x",
+                                  "-option_2", "-option_x", SelfFileRef.c_str(),
+                                  NestedFileRef.c_str(), SelfFileRef.c_str(),
+                                  "-option_3"}));
 }
 
 TEST(CommandLineTest, ResponseFilesAtArguments) {
-  SmallString<128> TestDir;
-  std::error_code EC = sys::fs::createUniqueDirectory("unittest", TestDir);
-  EXPECT_TRUE(!EC);
+  vfs::InMemoryFileSystem FS;
+#ifdef _WIN32
+  const char *TestRoot = "C:\\";
+#else
+  const char *TestRoot = "/";
+#endif
+  FS.setCurrentWorkingDirectory(TestRoot);
 
-  SmallString<128> ResponseFilePath;
-  sys::path::append(ResponseFilePath, TestDir, "test.rsp");
+  StringRef ResponseFilePath = "test.rsp";
 
-  std::ofstream ResponseFile(ResponseFilePath.c_str());
-  EXPECT_TRUE(ResponseFile.is_open());
+  std::string ResponseFileContents;
+  raw_string_ostream ResponseFile(ResponseFileContents);
   ResponseFile << "-foo" << "\n";
   ResponseFile << "-bar" << "\n";
-  ResponseFile.close();
+  FS.addFile(ResponseFilePath, 0,
+             MemoryBuffer::getMemBuffer(ResponseFile.str()));
 
   // Ensure we expand rsp files after lots of non-rsp arguments starting with @.
   constexpr size_t NON_RSP_AT_ARGS = 64;
   SmallVector<const char *, 4> Argv = {"test/test"};
   Argv.append(NON_RSP_AT_ARGS, "@non_rsp_at_arg");
-  std::string ResponseFileRef = std::string("@") + ResponseFilePath.c_str();
+  std::string ResponseFileRef = ("@" + ResponseFilePath).str();
   Argv.push_back(ResponseFileRef.c_str());
 
   BumpPtrAllocator A;
   StringSaver Saver(A);
-  bool Res = cl::ExpandResponseFiles(Saver, cl::TokenizeGNUCommandLine, Argv,
-                                     false, false);
-  EXPECT_FALSE(Res);
+  ASSERT_FALSE(cl::ExpandResponseFiles(Saver, cl::TokenizeGNUCommandLine, Argv,
+                                       false, false, FS,
+                                       /*CurrentDir=*/StringRef(TestRoot)));
 
   // ASSERT instead of EXPECT to prevent potential out-of-bounds access.
   ASSERT_EQ(Argv.size(), 1 + NON_RSP_AT_ARGS + 2);
@@ -955,6 +940,62 @@ TEST(CommandLineTest, ResponseFilesAtArguments) {
     EXPECT_STREQ(Argv[i], "@non_rsp_at_arg");
   EXPECT_STREQ(Argv[i++], "-foo");
   EXPECT_STREQ(Argv[i++], "-bar");
+}
+
+TEST(CommandLineTest, ResponseFileRelativePath) {
+  vfs::InMemoryFileSystem FS;
+#ifdef _WIN32
+  const char *TestRoot = "C:\\";
+#else
+  const char *TestRoot = "//net";
+#endif
+  FS.setCurrentWorkingDirectory(TestRoot);
+
+  StringRef OuterFile = "dir/outer.rsp";
+  StringRef OuterFileContents = "@inner.rsp";
+  FS.addFile(OuterFile, 0, MemoryBuffer::getMemBuffer(OuterFileContents));
+
+  StringRef InnerFile = "dir/inner.rsp";
+  StringRef InnerFileContents = "-flag";
+  FS.addFile(InnerFile, 0, MemoryBuffer::getMemBuffer(InnerFileContents));
+
+  SmallVector<const char *, 2> Argv = {"test/test", "@dir/outer.rsp"};
+
+  BumpPtrAllocator A;
+  StringSaver Saver(A);
+  ASSERT_TRUE(cl::ExpandResponseFiles(Saver, cl::TokenizeGNUCommandLine, Argv,
+                                      false, true, FS,
+                                      /*CurrentDir=*/StringRef(TestRoot)));
+  EXPECT_THAT(Argv,
+              testing::Pointwise(StringEquality(), {"test/test", "-flag"}));
+}
+
+TEST(CommandLineTest, ResponseFileEOLs) {
+  vfs::InMemoryFileSystem FS;
+#ifdef _WIN32
+  const char *TestRoot = "C:\\";
+#else
+  const char *TestRoot = "//net";
+#endif
+  FS.setCurrentWorkingDirectory(TestRoot);
+  FS.addFile("eols.rsp", 0,
+             MemoryBuffer::getMemBuffer("-Xclang -Wno-whatever\n input.cpp"));
+  SmallVector<const char *, 2> Argv = {"clang", "@eols.rsp"};
+  BumpPtrAllocator A;
+  StringSaver Saver(A);
+  ASSERT_TRUE(cl::ExpandResponseFiles(Saver, cl::TokenizeWindowsCommandLine,
+                                      Argv, true, true, FS,
+                                      /*CurrentDir=*/StringRef(TestRoot)));
+  const char *Expected[] = {"clang", "-Xclang", "-Wno-whatever", nullptr,
+                            "input.cpp"};
+  ASSERT_EQ(array_lengthof(Expected), Argv.size());
+  for (size_t I = 0, E = array_lengthof(Expected); I < E; ++I) {
+    if (Expected[I] == nullptr) {
+      ASSERT_EQ(Argv[I], nullptr);
+    } else {
+      ASSERT_STREQ(Expected[I], Argv[I]);
+    }
+  }
 }
 
 TEST(CommandLineTest, SetDefautValue) {
@@ -996,44 +1037,38 @@ TEST(CommandLineTest, SetDefautValue) {
 TEST(CommandLineTest, ReadConfigFile) {
   llvm::SmallVector<const char *, 1> Argv;
 
-  llvm::SmallString<128> TestDir;
-  std::error_code EC =
-      llvm::sys::fs::createUniqueDirectory("unittest", TestDir);
-  EXPECT_TRUE(!EC);
+  TempDir TestDir("unittest", /*Unique*/ true);
 
   llvm::SmallString<128> TestCfg;
-  llvm::sys::path::append(TestCfg, TestDir, "foo");
-  std::ofstream ConfigFile(TestCfg.c_str());
-  EXPECT_TRUE(ConfigFile.is_open());
-  ConfigFile << "# Comment\n"
-                "-option_1\n"
-                "@subconfig\n"
-                "-option_3=abcd\n"
-                "-option_4=\\\n"
-                "cdef\n";
-  ConfigFile.close();
+  llvm::sys::path::append(TestCfg, TestDir.path(), "foo");
+
+  TempFile ConfigFile(TestCfg, "",
+                      "# Comment\n"
+                      "-option_1\n"
+                      "@subconfig\n"
+                      "-option_3=abcd\n"
+                      "-option_4=\\\n"
+                      "cdef\n");
 
   llvm::SmallString<128> TestCfg2;
-  llvm::sys::path::append(TestCfg2, TestDir, "subconfig");
-  std::ofstream ConfigFile2(TestCfg2.c_str());
-  EXPECT_TRUE(ConfigFile2.is_open());
-  ConfigFile2 << "-option_2\n"
-                 "\n"
-                 "   # comment\n";
-  ConfigFile2.close();
+  llvm::sys::path::append(TestCfg2, TestDir.path(), "subconfig");
+  TempFile ConfigFile2(TestCfg2, "",
+                       "-option_2\n"
+                       "\n"
+                       "   # comment\n");
 
   // Make sure the current directory is not the directory where config files
   // resides. In this case the code that expands response files will not find
   // 'subconfig' unless it resolves nested inclusions relative to the including
   // file.
   llvm::SmallString<128> CurrDir;
-  EC = llvm::sys::fs::current_path(CurrDir);
+  std::error_code EC = llvm::sys::fs::current_path(CurrDir);
   EXPECT_TRUE(!EC);
-  EXPECT_TRUE(StringRef(CurrDir) != StringRef(TestDir));
+  EXPECT_TRUE(StringRef(CurrDir) != TestDir.path());
 
   llvm::BumpPtrAllocator A;
   llvm::StringSaver Saver(A);
-  bool Result = llvm::cl::readConfigFile(TestCfg, Saver, Argv);
+  bool Result = llvm::cl::readConfigFile(ConfigFile.path(), Saver, Argv);
 
   EXPECT_TRUE(Result);
   EXPECT_EQ(Argv.size(), 4U);
@@ -1041,10 +1076,6 @@ TEST(CommandLineTest, ReadConfigFile) {
   EXPECT_STREQ(Argv[1], "-option_2");
   EXPECT_STREQ(Argv[2], "-option_3=abcd");
   EXPECT_STREQ(Argv[3], "-option_4=cdef");
-
-  llvm::sys::fs::remove(TestCfg2);
-  llvm::sys::fs::remove(TestCfg);
-  llvm::sys::fs::remove(TestDir);
 }
 
 TEST(CommandLineTest, PositionalEatArgsError) {
@@ -1653,4 +1684,192 @@ TEST(CommandLineTest, LongOptions) {
   EXPECT_TRUE(Errs.empty()); Errs.clear();
   cl::ResetAllOptionOccurrences();
 }
-}  // anonymous namespace
+
+TEST(CommandLineTest, OptionErrorMessage) {
+  // When there is an error, we expect some error message like:
+  //   prog: for the -a option: [...]
+  //
+  // Test whether the "for the -a option"-part is correctly formatted.
+  cl::ResetCommandLineParser();
+
+  StackOption<bool> OptA("a", cl::desc("Some option"));
+  StackOption<bool> OptLong("long", cl::desc("Some long option"));
+
+  std::string Errs;
+  raw_string_ostream OS(Errs);
+
+  OptA.error("custom error", OS);
+  OS.flush();
+  EXPECT_FALSE(Errs.find("for the -a option:") == std::string::npos);
+  Errs.clear();
+
+  OptLong.error("custom error", OS);
+  OS.flush();
+  EXPECT_FALSE(Errs.find("for the --long option:") == std::string::npos);
+  Errs.clear();
+
+  cl::ResetAllOptionOccurrences();
+}
+
+TEST(CommandLineTest, OptionErrorMessageSuggest) {
+  // When there is an error, and the edit-distance is not very large,
+  // we expect some error message like:
+  //   prog: did you mean '--option'?
+  //
+  // Test whether this message is well-formatted.
+  cl::ResetCommandLineParser();
+
+  StackOption<bool> OptLong("aluminium", cl::desc("Some long option"));
+
+  const char *args[] = {"prog", "--aluminum"};
+
+  std::string Errs;
+  raw_string_ostream OS(Errs);
+
+  EXPECT_FALSE(cl::ParseCommandLineOptions(2, args, StringRef(), &OS));
+  OS.flush();
+  EXPECT_FALSE(Errs.find("prog: Did you mean '--aluminium'?\n") ==
+               std::string::npos);
+  Errs.clear();
+
+  cl::ResetAllOptionOccurrences();
+}
+
+TEST(CommandLineTest, OptionErrorMessageSuggestNoHidden) {
+  // We expect that 'really hidden' option do not show up in option
+  // suggestions.
+  cl::ResetCommandLineParser();
+
+  StackOption<bool> OptLong("aluminium", cl::desc("Some long option"));
+  StackOption<bool> OptLong2("aluminum", cl::desc("Bad option"),
+                             cl::ReallyHidden);
+
+  const char *args[] = {"prog", "--alumnum"};
+
+  std::string Errs;
+  raw_string_ostream OS(Errs);
+
+  EXPECT_FALSE(cl::ParseCommandLineOptions(2, args, StringRef(), &OS));
+  OS.flush();
+  EXPECT_FALSE(Errs.find("prog: Did you mean '--aluminium'?\n") ==
+               std::string::npos);
+  Errs.clear();
+
+  cl::ResetAllOptionOccurrences();
+}
+
+TEST(CommandLineTest, Callback) {
+  cl::ResetCommandLineParser();
+
+  StackOption<bool> OptA("a", cl::desc("option a"));
+  StackOption<bool> OptB(
+      "b", cl::desc("option b -- This option turns on option a"),
+      cl::callback([&](const bool &) { OptA = true; }));
+  StackOption<bool> OptC(
+      "c", cl::desc("option c -- This option turns on options a and b"),
+      cl::callback([&](const bool &) { OptB = true; }));
+  StackOption<std::string, cl::list<std::string>> List(
+      "list",
+      cl::desc("option list -- This option turns on options a, b, and c when "
+               "'foo' is included in list"),
+      cl::CommaSeparated,
+      cl::callback([&](const std::string &Str) {
+        if (Str == "foo")
+          OptC = true;
+      }));
+
+  const char *args1[] = {"prog", "-a"};
+  EXPECT_TRUE(cl::ParseCommandLineOptions(2, args1));
+  EXPECT_TRUE(OptA);
+  EXPECT_FALSE(OptB);
+  EXPECT_FALSE(OptC);
+  EXPECT_TRUE(List.size() == 0);
+  cl::ResetAllOptionOccurrences();
+
+  const char *args2[] = {"prog", "-b"};
+  EXPECT_TRUE(cl::ParseCommandLineOptions(2, args2));
+  EXPECT_TRUE(OptA);
+  EXPECT_TRUE(OptB);
+  EXPECT_FALSE(OptC);
+  EXPECT_TRUE(List.size() == 0);
+  cl::ResetAllOptionOccurrences();
+
+  const char *args3[] = {"prog", "-c"};
+  EXPECT_TRUE(cl::ParseCommandLineOptions(2, args3));
+  EXPECT_TRUE(OptA);
+  EXPECT_TRUE(OptB);
+  EXPECT_TRUE(OptC);
+  EXPECT_TRUE(List.size() == 0);
+  cl::ResetAllOptionOccurrences();
+
+  const char *args4[] = {"prog", "--list=foo,bar"};
+  EXPECT_TRUE(cl::ParseCommandLineOptions(2, args4));
+  EXPECT_TRUE(OptA);
+  EXPECT_TRUE(OptB);
+  EXPECT_TRUE(OptC);
+  EXPECT_TRUE(List.size() == 2);
+  cl::ResetAllOptionOccurrences();
+
+  const char *args5[] = {"prog", "--list=bar"};
+  EXPECT_TRUE(cl::ParseCommandLineOptions(2, args5));
+  EXPECT_FALSE(OptA);
+  EXPECT_FALSE(OptB);
+  EXPECT_FALSE(OptC);
+  EXPECT_TRUE(List.size() == 1);
+
+  cl::ResetAllOptionOccurrences();
+}
+
+enum Enum { Val1, Val2 };
+static cl::bits<Enum> ExampleBits(
+    cl::desc("An example cl::bits to ensure it compiles"),
+    cl::values(
+      clEnumValN(Val1, "bits-val1", "The Val1 value"),
+      clEnumValN(Val1, "bits-val2", "The Val2 value")));
+
+TEST(CommandLineTest, ConsumeAfterOnePositional) {
+  cl::ResetCommandLineParser();
+
+  // input [args]
+  StackOption<std::string, cl::opt<std::string>> Input(cl::Positional,
+                                                       cl::Required);
+  StackOption<std::string, cl::list<std::string>> ExtraArgs(cl::ConsumeAfter);
+
+  const char *Args[] = {"prog", "input", "arg1", "arg2"};
+
+  std::string Errs;
+  raw_string_ostream OS(Errs);
+  EXPECT_TRUE(cl::ParseCommandLineOptions(4, Args, StringRef(), &OS));
+  OS.flush();
+  EXPECT_EQ("input", Input);
+  EXPECT_TRUE(ExtraArgs.size() == 2);
+  EXPECT_TRUE(ExtraArgs[0] == "arg1");
+  EXPECT_TRUE(ExtraArgs[1] == "arg2");
+  EXPECT_TRUE(Errs.empty());
+}
+
+TEST(CommandLineTest, ConsumeAfterTwoPositionals) {
+  cl::ResetCommandLineParser();
+
+  // input1 input2 [args]
+  StackOption<std::string, cl::opt<std::string>> Input1(cl::Positional,
+                                                        cl::Required);
+  StackOption<std::string, cl::opt<std::string>> Input2(cl::Positional,
+                                                        cl::Required);
+  StackOption<std::string, cl::list<std::string>> ExtraArgs(cl::ConsumeAfter);
+
+  const char *Args[] = {"prog", "input1", "input2", "arg1", "arg2"};
+
+  std::string Errs;
+  raw_string_ostream OS(Errs);
+  EXPECT_TRUE(cl::ParseCommandLineOptions(5, Args, StringRef(), &OS));
+  OS.flush();
+  EXPECT_EQ("input1", Input1);
+  EXPECT_EQ("input2", Input2);
+  EXPECT_TRUE(ExtraArgs.size() == 2);
+  EXPECT_TRUE(ExtraArgs[0] == "arg1");
+  EXPECT_TRUE(ExtraArgs[1] == "arg2");
+  EXPECT_TRUE(Errs.empty());
+}
+
+} // anonymous namespace

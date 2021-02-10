@@ -5,7 +5,7 @@
 
 ; Generate bitcode file with summary, as well as a minimized bitcode without
 ; the debug metadata for the thin link.
-; RUN: opt -thinlto-bc %s -thin-link-bitcode-file=%t1.thinlink.bc -o %t1.o
+; RUN: opt --thinlto-bc %s -thin-link-bitcode-file=%t1.thinlink.bc -o %t1.o
 
 ; First perform the thin link on the normal bitcode file, and save the
 ; resulting index.
@@ -19,6 +19,11 @@
 ; RUN: rm -f %t1.o
 ; RUN: ld.lld --plugin-opt=thinlto-index-only \
 ; RUN: --plugin-opt=thinlto-object-suffix-replace=".thinlink.bc;.o" \
+; RUN: -shared %t1.thinlink.bc -o %t3
+; RUN: diff %t1.o.thinlto.bc.orig %t1.o.thinlto.bc
+; Also check that this works without the --plugin-opt= prefix.
+; RUN: ld.lld --thinlto-index-only \
+; RUN: --thinlto-object-suffix-replace=".thinlink.bc;.o" \
 ; RUN: -shared %t1.thinlink.bc -o %t3
 ; RUN: diff %t1.o.thinlto.bc.orig %t1.o.thinlto.bc
 

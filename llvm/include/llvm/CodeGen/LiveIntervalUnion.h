@@ -75,6 +75,7 @@ public:
 
   bool empty() const { return Segments.empty(); }
   SlotIndex startIndex() const { return Segments.start(); }
+  SlotIndex endIndex() const { return Segments.stop(); }
 
   // Provide public access to the underlying map to allow overlap iteration.
   using Map = LiveSegments;
@@ -102,6 +103,9 @@ public:
   // Verify the live intervals in this union and add them to the visited set.
   void verify(LiveVirtRegBitSet& VisitedVRegs);
 #endif
+
+  // Get any virtual register that is assign to this physical unit
+  LiveInterval *getOneVReg() const;
 
   /// Query interferences between a single live virtual register and a live
   /// interval union.

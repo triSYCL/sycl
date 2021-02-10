@@ -40,11 +40,13 @@ public:
                  llvm::function_ref<void(const Symbol &)>) const override;
   void lookup(const LookupRequest &,
               llvm::function_ref<void(const Symbol &)>) const override;
-  void refs(const RefsRequest &,
+  bool refs(const RefsRequest &,
             llvm::function_ref<void(const Ref &)>) const override;
   void relations(const RelationsRequest &,
                  llvm::function_ref<void(const SymbolID &, const Symbol &)>)
       const override;
+  llvm::unique_function<bool(llvm::StringRef) const>
+  indexedFiles() const override;
   size_t estimateMemoryUsage() const override {
     return Dynamic->estimateMemoryUsage() + Static->estimateMemoryUsage();
   }

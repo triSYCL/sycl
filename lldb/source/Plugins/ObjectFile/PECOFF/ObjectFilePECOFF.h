@@ -6,13 +6,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ObjectFilePECOFF_h_
-#define liblldb_ObjectFilePECOFF_h_
+#ifndef LLDB_SOURCE_PLUGINS_OBJECTFILE_PECOFF_OBJECTFILEPECOFF_H
+#define LLDB_SOURCE_PLUGINS_OBJECTFILE_PECOFF_OBJECTFILEPECOFF_H
 
 #include <vector>
 
 #include "lldb/Symbol/ObjectFile.h"
-#include "llvm/Object/Binary.h"
+#include "llvm/Object/COFF.h"
 
 class ObjectFilePECOFF : public lldb_private::ObjectFile {
 public:
@@ -135,7 +135,14 @@ public:
 
   bool IsWindowsSubsystem();
 
+  uint32_t GetRVA(const lldb_private::Address &addr) const;
+  lldb_private::Address GetAddress(uint32_t rva);
+  lldb::addr_t GetFileAddress(uint32_t rva) const;
+
   lldb_private::DataExtractor ReadImageData(uint32_t offset, size_t size);
+  lldb_private::DataExtractor ReadImageDataByRVA(uint32_t rva, size_t size);
+
+  std::unique_ptr<lldb_private::CallFrameInfo> CreateCallFrameInfo() override;
 
 protected:
   bool NeedsEndianSwap() const;
@@ -216,6 +223,7 @@ protected:
   enum coff_data_dir_type {
     coff_data_dir_export_table = 0,
     coff_data_dir_import_table = 1,
+    coff_data_dir_exception_table = 3
   };
 
   typedef struct section_header {
@@ -275,6 +283,8 @@ protected:
   void DumpDependentModules(lldb_private::Stream *s);
 
   llvm::StringRef GetSectionName(const section_header_t &sect);
+  static lldb::SectionType GetSectionType(llvm::StringRef sect_name,
+                                          const section_header_t &sect);
 
   typedef std::vector<section_header_t> SectionHeaderColl;
   typedef SectionHeaderColl::iterator SectionHeaderCollIter;
@@ -283,7 +293,6 @@ protected:
 private:
   bool CreateBinary();
 
-private:
   dos_header_t m_dos_header;
   coff_header_t m_coff_header;
   coff_opt_header_t m_coff_header_opt;
@@ -291,9 +300,8 @@ private:
   lldb::addr_t m_image_base;
   lldb_private::Address m_entry_point_address;
   llvm::Optional<lldb_private::FileSpecList> m_deps_filespec;
-  typedef llvm::object::OwningBinary<llvm::object::Binary> OWNBINType;
-  llvm::Optional<OWNBINType> m_owningbin;
+  std::unique_ptr<llvm::object::COFFObjectFile> m_binary;
   lldb_private::UUID m_uuid;
 };
 
-#endif // liblldb_ObjectFilePECOFF_h_
+#endif // LLDB_SOURCE_PLUGINS_OBJECTFILE_PECOFF_OBJECTFILEPECOFF_H

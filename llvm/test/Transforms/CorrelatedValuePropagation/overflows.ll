@@ -38,7 +38,7 @@ define i32 @signed_add(i32 %x, i32 %y) {
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp sgt i32 [[Y:%.*]], 0
 ; CHECK-NEXT:    br i1 [[CMP]], label [[LAND_LHS_TRUE:%.*]], label [[LOR_LHS_FALSE:%.*]]
 ; CHECK:       land.lhs.true:
-; CHECK-NEXT:    [[TMP0:%.*]] = sub nsw i32 2147483647, [[Y]]
+; CHECK-NEXT:    [[TMP0:%.*]] = sub nuw nsw i32 2147483647, [[Y]]
 ; CHECK-NEXT:    [[TMP1:%.*]] = insertvalue { i32, i1 } { i32 undef, i1 false }, i32 [[TMP0]], 0
 ; CHECK-NEXT:    [[TMP2:%.*]] = extractvalue { i32, i1 } [[TMP1]], 1
 ; CHECK-NEXT:    br i1 [[TMP2]], label [[TRAP:%.*]], label [[CONT:%.*]]
@@ -116,7 +116,7 @@ cond.end:                                         ; preds = %cond.false, %cont, 
 define i32 @unsigned_add(i32 %x, i32 %y) {
 ; CHECK-LABEL: @unsigned_add(
 ; CHECK-NEXT:  entry:
-; CHECK-NEXT:    [[TMP0:%.*]] = sub nuw i32 -1, [[Y:%.*]]
+; CHECK-NEXT:    [[TMP0:%.*]] = sub nuw nsw i32 -1, [[Y:%.*]]
 ; CHECK-NEXT:    [[TMP1:%.*]] = insertvalue { i32, i1 } { i32 undef, i1 false }, i32 [[TMP0]], 0
 ; CHECK-NEXT:    [[TMP2:%.*]] = extractvalue { i32, i1 } [[TMP1]], 1
 ; CHECK-NEXT:    br i1 [[TMP2]], label [[TRAP:%.*]], label [[CONT:%.*]]
@@ -182,7 +182,7 @@ define i32 @signed_sub(i32 %x, i32 %y) {
 ; CHECK-NEXT:    [[CMP2:%.*]] = icmp eq i32 [[Y]], 0
 ; CHECK-NEXT:    br i1 [[CMP2]], label [[COND_FALSE]], label [[LAND_LHS_TRUE3:%.*]]
 ; CHECK:       land.lhs.true3:
-; CHECK-NEXT:    [[TMP4:%.*]] = add nsw i32 [[Y]], -2147483648
+; CHECK-NEXT:    [[TMP4:%.*]] = add nuw nsw i32 [[Y]], -2147483648
 ; CHECK-NEXT:    [[TMP5:%.*]] = insertvalue { i32, i1 } { i32 undef, i1 false }, i32 [[TMP4]], 0
 ; CHECK-NEXT:    [[TMP6:%.*]] = extractvalue { i32, i1 } [[TMP5]], 1
 ; CHECK-NEXT:    br i1 [[TMP6]], label [[TRAP]], label [[CONT4:%.*]]
@@ -506,7 +506,7 @@ define i32 @unsigned_mul(i32 %x) {
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp ugt i32 [[X:%.*]], 10000
 ; CHECK-NEXT:    br i1 [[CMP]], label [[COND_END:%.*]], label [[COND_FALSE:%.*]]
 ; CHECK:       cond.false:
-; CHECK-NEXT:    [[MULO1:%.*]] = mul nuw i32 [[X]], 100
+; CHECK-NEXT:    [[MULO1:%.*]] = mul nuw nsw i32 [[X]], 100
 ; CHECK-NEXT:    [[TMP0:%.*]] = insertvalue { i32, i1 } { i32 undef, i1 false }, i32 [[MULO1]], 0
 ; CHECK-NEXT:    [[RES:%.*]] = extractvalue { i32, i1 } [[TMP0]], 0
 ; CHECK-NEXT:    [[OV:%.*]] = extractvalue { i32, i1 } [[TMP0]], 1
@@ -729,8 +729,8 @@ define { <2 x i32>, <2 x i1> } @uaddo_vec(<2 x i32> %a) {
 }
 
 
-define i8 @uadd_sat_no_overflow(i8 %x) {
-; CHECK-LABEL: @uadd_sat_no_overflow(
+define i8 @uadd_sat_no_unsigned_overflow(i8 %x) {
+; CHECK-LABEL: @uadd_sat_no_unsigned_overflow(
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp ugt i8 [[X:%.*]], 100
 ; CHECK-NEXT:    br i1 [[CMP]], label [[TRAP:%.*]], label [[CONT:%.*]]
 ; CHECK:       trap:
@@ -752,8 +752,31 @@ cont:
   ret i8 %res
 }
 
-define i8 @sadd_sat_no_overflow(i8 %x) {
-; CHECK-LABEL: @sadd_sat_no_overflow(
+define i8 @uadd_sat_no_overflow(i8 %x) {
+; CHECK-LABEL: @uadd_sat_no_overflow(
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ugt i8 [[X:%.*]], 27
+; CHECK-NEXT:    br i1 [[CMP]], label [[TRAP:%.*]], label [[CONT:%.*]]
+; CHECK:       trap:
+; CHECK-NEXT:    call void @llvm.trap()
+; CHECK-NEXT:    unreachable
+; CHECK:       cont:
+; CHECK-NEXT:    [[RES1:%.*]] = add nuw nsw i8 [[X]], 100
+; CHECK-NEXT:    ret i8 [[RES1]]
+;
+  %cmp = icmp ugt i8 %x, 27
+  br i1 %cmp, label %trap, label %cont
+
+trap:
+  call void @llvm.trap()
+  unreachable
+
+cont:
+  %res = call i8 @llvm.uadd.sat.i8(i8 %x, i8 100)
+  ret i8 %res
+}
+
+define i8 @sadd_sat_no_signed_overflow(i8 %x) {
+; CHECK-LABEL: @sadd_sat_no_signed_overflow(
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp sgt i8 [[X:%.*]], 100
 ; CHECK-NEXT:    br i1 [[CMP]], label [[TRAP:%.*]], label [[CONT:%.*]]
 ; CHECK:       trap:
@@ -775,8 +798,31 @@ cont:
   ret i8 %res
 }
 
-define i8 @usub_sat_no_overflow(i8 %x) {
-; CHECK-LABEL: @usub_sat_no_overflow(
+define i8 @sadd_sat_no_overflow(i8 %x) {
+; CHECK-LABEL: @sadd_sat_no_overflow(
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ugt i8 [[X:%.*]], 107
+; CHECK-NEXT:    br i1 [[CMP]], label [[TRAP:%.*]], label [[CONT:%.*]]
+; CHECK:       trap:
+; CHECK-NEXT:    call void @llvm.trap()
+; CHECK-NEXT:    unreachable
+; CHECK:       cont:
+; CHECK-NEXT:    [[RES1:%.*]] = add nuw nsw i8 [[X]], 20
+; CHECK-NEXT:    ret i8 [[RES1]]
+;
+  %cmp = icmp ugt i8 %x, 107
+  br i1 %cmp, label %trap, label %cont
+
+trap:
+  call void @llvm.trap()
+  unreachable
+
+cont:
+  %res = call i8 @llvm.sadd.sat.i8(i8 %x, i8 20)
+  ret i8 %res
+}
+
+define i8 @usub_sat_no_unsigned_overflow(i8 %x) {
+; CHECK-LABEL: @usub_sat_no_unsigned_overflow(
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp ult i8 [[X:%.*]], 100
 ; CHECK-NEXT:    br i1 [[CMP]], label [[TRAP:%.*]], label [[CONT:%.*]]
 ; CHECK:       trap:
@@ -798,8 +844,31 @@ cont:
   ret i8 %res
 }
 
-define i8 @ssub_sat_no_overflow(i8 %x) {
-; CHECK-LABEL: @ssub_sat_no_overflow(
+define i8 @usub_sat_no_overflow(i8 %x) {
+; CHECK-LABEL: @usub_sat_no_overflow(
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ult i8 [[X:%.*]], -28
+; CHECK-NEXT:    br i1 [[CMP]], label [[TRAP:%.*]], label [[CONT:%.*]]
+; CHECK:       trap:
+; CHECK-NEXT:    call void @llvm.trap()
+; CHECK-NEXT:    unreachable
+; CHECK:       cont:
+; CHECK-NEXT:    [[RES1:%.*]] = sub nuw nsw i8 [[X]], 100
+; CHECK-NEXT:    ret i8 [[RES1]]
+;
+  %cmp = icmp ult i8 %x, 228
+  br i1 %cmp, label %trap, label %cont
+
+trap:
+  call void @llvm.trap()
+  unreachable
+
+cont:
+  %res = call i8 @llvm.usub.sat.i8(i8 %x, i8 100)
+  ret i8 %res
+}
+
+define i8 @ssub_sat_no_signed_overflow(i8 %x) {
+; CHECK-LABEL: @ssub_sat_no_signed_overflow(
 ; CHECK-NEXT:    [[CMP:%.*]] = icmp slt i8 [[X:%.*]], -100
 ; CHECK-NEXT:    br i1 [[CMP]], label [[TRAP:%.*]], label [[CONT:%.*]]
 ; CHECK:       trap:
@@ -810,6 +879,29 @@ define i8 @ssub_sat_no_overflow(i8 %x) {
 ; CHECK-NEXT:    ret i8 [[RES1]]
 ;
   %cmp = icmp slt i8 %x, -100
+  br i1 %cmp, label %trap, label %cont
+
+trap:
+  call void @llvm.trap()
+  unreachable
+
+cont:
+  %res = call i8 @llvm.ssub.sat.i8(i8 %x, i8 20)
+  ret i8 %res
+}
+
+define i8 @ssub_sat_no_overflow(i8 %x) {
+; CHECK-LABEL: @ssub_sat_no_overflow(
+; CHECK-NEXT:    [[CMP:%.*]] = icmp ult i8 [[X:%.*]], -108
+; CHECK-NEXT:    br i1 [[CMP]], label [[TRAP:%.*]], label [[CONT:%.*]]
+; CHECK:       trap:
+; CHECK-NEXT:    call void @llvm.trap()
+; CHECK-NEXT:    unreachable
+; CHECK:       cont:
+; CHECK-NEXT:    [[RES1:%.*]] = sub nuw nsw i8 [[X]], 20
+; CHECK-NEXT:    ret i8 [[RES1]]
+;
+  %cmp = icmp ult i8 %x, 148
   br i1 %cmp, label %trap, label %cont
 
 trap:
@@ -848,8 +940,6 @@ define i1 @sadd_and_cmp(i32 %x, i32 %y) #0 {
 ; CHECK-NEXT:    [[RES1:%.*]] = add nsw i32 [[X]], [[Y]]
 ; CHECK-NEXT:    [[TMP0:%.*]] = insertvalue { i32, i1 } { i32 undef, i1 false }, i32 [[RES1]], 0
 ; CHECK-NEXT:    [[ADD:%.*]] = extractvalue { i32, i1 } [[TMP0]], 0
-; CHECK-NEXT:    br label [[CONT3:%.*]]
-; CHECK:       cont3:
 ; CHECK-NEXT:    br label [[OUT]]
 ; CHECK:       out:
 ; CHECK-NEXT:    ret i1 true
@@ -868,15 +958,12 @@ cont2:
   ; x = [-9,10), y = [-9,10)
   %res = tail call { i32, i1 } @llvm.sadd.with.overflow.i32(i32 %x, i32 %y)
   %add = extractvalue { i32, i1 } %res, 0
-  br label %cont3
-
-cont3:
   ; add = [-18,19)
   %cmp3 = icmp slt i32 %add, 19
   br label %out
 
 out:
-  %ret = phi i1 [ true, %entry], [ true, %cont1 ], [ %cmp3, %cont3 ]
+  %ret = phi i1 [ true, %entry], [ true, %cont1 ], [ %cmp3, %cont2 ]
   ret i1 %ret
 }
 
@@ -890,11 +977,9 @@ define i1 @uadd_and_cmp(i32 %x, i32 %y) #0 {
 ; CHECK-NEXT:    [[CMP2:%.*]] = icmp ult i32 [[Y:%.*]], 10
 ; CHECK-NEXT:    br i1 [[CMP2]], label [[CONT2:%.*]], label [[OUT]]
 ; CHECK:       cont2:
-; CHECK-NEXT:    [[RES1:%.*]] = add nuw i32 [[X]], [[Y]]
+; CHECK-NEXT:    [[RES1:%.*]] = add nuw nsw i32 [[X]], [[Y]]
 ; CHECK-NEXT:    [[TMP0:%.*]] = insertvalue { i32, i1 } { i32 undef, i1 false }, i32 [[RES1]], 0
 ; CHECK-NEXT:    [[ADD:%.*]] = extractvalue { i32, i1 } [[TMP0]], 0
-; CHECK-NEXT:    br label [[CONT3:%.*]]
-; CHECK:       cont3:
 ; CHECK-NEXT:    br label [[OUT]]
 ; CHECK:       out:
 ; CHECK-NEXT:    ret i1 true
@@ -910,14 +995,11 @@ cont1:
 cont2:
   %res = tail call { i32, i1 } @llvm.uadd.with.overflow.i32(i32 %x, i32 %y)
   %add = extractvalue { i32, i1 } %res, 0
-  br label %cont3
-
-cont3:
   %cmp3 = icmp ult i32 %add, 19
   br label %out
 
 out:
-  %ret = phi i1 [ true, %entry], [ true, %cont1 ], [ %cmp3, %cont3 ]
+  %ret = phi i1 [ true, %entry], [ true, %cont1 ], [ %cmp3, %cont2 ]
   ret i1 %ret
 }
 
@@ -931,11 +1013,9 @@ define i1 @ssub_and_cmp(i32 %x, i32 %y) #0 {
 ; CHECK-NEXT:    br i1 [[CMP2]], label [[CONT2:%.*]], label [[OUT]]
 ; CHECK:       cont2:
 ; CHECK-NEXT:    [[OFFSET:%.*]] = add nuw nsw i32 [[X]], 9
-; CHECK-NEXT:    [[RES1:%.*]] = sub nsw i32 [[OFFSET]], [[Y]]
+; CHECK-NEXT:    [[RES1:%.*]] = sub nuw nsw i32 [[OFFSET]], [[Y]]
 ; CHECK-NEXT:    [[TMP0:%.*]] = insertvalue { i32, i1 } { i32 undef, i1 false }, i32 [[RES1]], 0
 ; CHECK-NEXT:    [[SUB:%.*]] = extractvalue { i32, i1 } [[TMP0]], 0
-; CHECK-NEXT:    br label [[CONT3:%.*]]
-; CHECK:       cont3:
 ; CHECK-NEXT:    br label [[OUT]]
 ; CHECK:       out:
 ; CHECK-NEXT:    ret i1 true
@@ -953,14 +1033,11 @@ cont2:
   ; x = [0,10), y = [0,10), offset = [9,19)
   %res = tail call { i32, i1 } @llvm.ssub.with.overflow.i32(i32 %offset, i32 %y)
   %sub = extractvalue { i32, i1 } %res, 0
-  br label %cont3
-
-cont3:
   %cmp3 = icmp ult i32 %sub, 19
   br label %out
 
 out:
-  %ret = phi i1 [ true, %entry], [ true, %cont1 ], [ %cmp3, %cont3 ]
+  %ret = phi i1 [ true, %entry], [ true, %cont1 ], [ %cmp3, %cont2 ]
   ret i1 %ret
 }
 
@@ -974,11 +1051,9 @@ define i1 @usub_and_cmp(i32 %x, i32 %y) #0 {
 ; CHECK-NEXT:    br i1 [[CMP2]], label [[CONT2:%.*]], label [[OUT]]
 ; CHECK:       cont2:
 ; CHECK-NEXT:    [[OFFSET:%.*]] = add nuw nsw i32 [[X]], 9
-; CHECK-NEXT:    [[RES1:%.*]] = sub nuw i32 [[OFFSET]], [[Y]]
+; CHECK-NEXT:    [[RES1:%.*]] = sub nuw nsw i32 [[OFFSET]], [[Y]]
 ; CHECK-NEXT:    [[TMP0:%.*]] = insertvalue { i32, i1 } { i32 undef, i1 false }, i32 [[RES1]], 0
 ; CHECK-NEXT:    [[SUB:%.*]] = extractvalue { i32, i1 } [[TMP0]], 0
-; CHECK-NEXT:    br label [[CONT3:%.*]]
-; CHECK:       cont3:
 ; CHECK-NEXT:    br label [[OUT]]
 ; CHECK:       out:
 ; CHECK-NEXT:    ret i1 true
@@ -996,14 +1071,11 @@ cont2:
   ; x = [0,10), y = [0,10), offset = [9,19)
   %res = tail call { i32, i1 } @llvm.usub.with.overflow.i32(i32 %offset, i32 %y)
   %sub = extractvalue { i32, i1 } %res, 0
-  br label %cont3
-
-cont3:
   %cmp3 = icmp ult i32 %sub, 19
   br label %out
 
 out:
-  %ret = phi i1 [ true, %entry], [ true, %cont1 ], [ %cmp3, %cont3 ]
+  %ret = phi i1 [ true, %entry], [ true, %cont1 ], [ %cmp3, %cont2 ]
   ret i1 %ret
 }
 
@@ -1021,9 +1093,6 @@ define i1 @smul_and_cmp(i32 %x, i32 %y) #0 {
 ; CHECK-NEXT:    [[RES1:%.*]] = mul nsw i32 [[X]], [[Y]]
 ; CHECK-NEXT:    [[TMP0:%.*]] = insertvalue { i32, i1 } { i32 undef, i1 false }, i32 [[RES1]], 0
 ; CHECK-NEXT:    [[MUL:%.*]] = extractvalue { i32, i1 } [[TMP0]], 0
-; CHECK-NEXT:    br label [[CONT3:%.*]]
-; CHECK:       cont3:
-; CHECK-NEXT:    [[CMP5:%.*]] = and i1 true, true
 ; CHECK-NEXT:    br label [[OUT]]
 ; CHECK:       out:
 ; CHECK-NEXT:    ret i1 true
@@ -1042,16 +1111,13 @@ cont2:
   ; x = [-9,10), y = [-9,10)
   %res = tail call { i32, i1 } @llvm.smul.with.overflow.i32(i32 %x, i32 %y)
   %mul = extractvalue { i32, i1 } %res, 0
-  br label %cont3
-
-cont3:
   %cmp3 = icmp sle i32 %mul, 81
   %cmp4 = icmp sge i32 %mul, -81
   %cmp5 = and i1 %cmp3, %cmp4
   br label %out
 
 out:
-  %ret = phi i1 [ true, %entry], [ true, %cont1 ], [ %cmp5, %cont3 ]
+  %ret = phi i1 [ true, %entry], [ true, %cont1 ], [ %cmp5, %cont2 ]
   ret i1 %ret
 }
 
@@ -1064,11 +1130,9 @@ define i1 @umul_and_cmp(i32 %x, i32 %y) #0 {
 ; CHECK-NEXT:    [[CMP2:%.*]] = icmp ult i32 [[Y:%.*]], 100
 ; CHECK-NEXT:    br i1 [[CMP2]], label [[CONT2:%.*]], label [[OUT]]
 ; CHECK:       cont2:
-; CHECK-NEXT:    [[RES1:%.*]] = mul nuw i32 [[X]], [[Y]]
+; CHECK-NEXT:    [[RES1:%.*]] = mul nuw nsw i32 [[X]], [[Y]]
 ; CHECK-NEXT:    [[TMP0:%.*]] = insertvalue { i32, i1 } { i32 undef, i1 false }, i32 [[RES1]], 0
 ; CHECK-NEXT:    [[MUL:%.*]] = extractvalue { i32, i1 } [[TMP0]], 0
-; CHECK-NEXT:    br label [[CONT3:%.*]]
-; CHECK:       cont3:
 ; CHECK-NEXT:    br label [[OUT]]
 ; CHECK:       out:
 ; CHECK-NEXT:    ret i1 true
@@ -1084,13 +1148,10 @@ cont1:
 cont2:
   %res = tail call { i32, i1 } @llvm.umul.with.overflow.i32(i32 %x, i32 %y)
   %mul = extractvalue { i32, i1 } %res, 0
-  br label %cont3
-
-cont3:
   %cmp3 = icmp ule i32 %mul, 9801
   br label %out
 
 out:
-  %ret = phi i1 [ true, %entry], [ true, %cont1 ], [ %cmp3, %cont3 ]
+  %ret = phi i1 [ true, %entry], [ true, %cont1 ], [ %cmp3, %cont2 ]
   ret i1 %ret
 }

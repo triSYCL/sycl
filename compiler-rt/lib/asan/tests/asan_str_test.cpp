@@ -39,12 +39,12 @@ enum class OOBKind {
   Global,
 };
 
-string LeftOOBReadMessage(OOBKind oob_kind, int oob_distance) {
+std::string LeftOOBReadMessage(OOBKind oob_kind, int oob_distance) {
   return oob_kind == OOBKind::Stack ? kStackReadUnderflow
                                     : ::LeftOOBReadMessage(oob_distance);
 }
 
-string RightOOBReadMessage(OOBKind oob_kind, int oob_distance) {
+std::string RightOOBReadMessage(OOBKind oob_kind, int oob_distance) {
   return oob_kind == OOBKind::Stack ? kStackReadOverflow
                                     : ::RightOOBReadMessage(oob_distance);
 }
@@ -458,8 +458,6 @@ TEST(AddressSanitizer, StrNCatOOBTest) {
   strncat(to, from, from_size);
   from[from_size - 1] = '\0';
   strncat(to, from, 2 * from_size);
-  // Catenating empty string with an invalid string is still an error.
-  EXPECT_DEATH(strncat(to - 1, from, 0), LeftOOBAccessMessage(1));
   strncat(to, from + from_size - 1, 10);
   // One of arguments points to not allocated memory.
   EXPECT_DEATH(strncat(to - 1, from, 2), LeftOOBAccessMessage(1));
@@ -482,7 +480,7 @@ TEST(AddressSanitizer, StrNCatOOBTest) {
   free(from);
 }
 
-static string OverlapErrorMessage(const string &func) {
+static std::string OverlapErrorMessage(const std::string &func) {
   return func + "-param-overlap";
 }
 

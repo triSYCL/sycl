@@ -55,6 +55,7 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/IR/Type.h"
 #include "llvm/IR/Value.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -132,11 +133,6 @@ static cl::opt<bool> PollyPreciseInbounds(
     cl::desc("Take more precise inbounds assumptions (do not scale well)"),
     cl::Hidden, cl::init(false), cl::cat(PollyCategory));
 
-static cl::opt<bool>
-    PollyIgnoreInbounds("polly-ignore-inbounds",
-                        cl::desc("Do not take inbounds assumptions at all"),
-                        cl::Hidden, cl::init(false), cl::cat(PollyCategory));
-
 static cl::opt<bool> PollyIgnoreParamBounds(
     "polly-ignore-parameter-bounds",
     cl::desc(
@@ -160,6 +156,11 @@ static cl::opt<bool, true> XUseInstructionNames(
 static cl::opt<bool> PollyPrintInstructions(
     "polly-print-instructions", cl::desc("Output instructions per ScopStmt"),
     cl::Hidden, cl::Optional, cl::init(false), cl::cat(PollyCategory));
+
+static cl::list<std::string> IslArgs("polly-isl-arg",
+                                     cl::value_desc("argument"),
+                                     cl::desc("Option passed to ISL"),
+                                     cl::ZeroOrMore, cl::cat(PollyCategory));
 
 //===----------------------------------------------------------------------===//
 
@@ -661,9 +662,7 @@ isl::basic_map MemoryAccess::createBasicAccessMap(ScopStmt *Statement) {
 // possibly yield out of bound memory accesses. The complement of these
 // constraints is the set of constraints that needs to be assumed to ensure such
 // statement instances are never executed.
-void MemoryAccess::assumeNoOutOfBound() {
-  if (PollyIgnoreInbounds)
-    return;
+isl::set MemoryAccess::assumeNoOutOfBound() {
   auto *SAI = getScopArrayInfo();
   isl::space Space = getOriginalAccessRelationSpace().range();
   isl::set Outside = isl::set::empty(Space);
@@ -691,13 +690,10 @@ void MemoryAccess::assumeNoOutOfBound() {
   // bail out more often than strictly necessary.
   Outside = Outside.remove_divs();
   Outside = Outside.complement();
-  const auto &Loc = getAccessInstruction()
-                        ? getAccessInstruction()->getDebugLoc()
-                        : DebugLoc();
+
   if (!PollyPreciseInbounds)
     Outside = Outside.gist_params(Statement->getDomain().params());
-  Statement->getParent()->recordAssumption(INBOUNDS, Outside, Loc,
-                                           AS_ASSUMPTION);
+  return Outside;
 }
 
 void MemoryAccess::buildMemIntrinsicAccessRelation() {
@@ -925,6 +921,12 @@ void MemoryAccess::realignParams() {
   isl::set Ctx = Statement->getParent()->getContext();
   InvalidDomain = InvalidDomain.gist_params(Ctx);
   AccessRelation = AccessRelation.gist_params(Ctx);
+
+  // Predictable parameter order is required for JSON imports. Ensure alignment
+  // by explicitly calling align_params.
+  isl::space CtxSpace = Ctx.get_space();
+  InvalidDomain = InvalidDomain.align_params(CtxSpace);
+  AccessRelation = AccessRelation.align_params(CtxSpace);
 }
 
 const std::string MemoryAccess::getReductionOperatorStr() const {
@@ -1077,6 +1079,8 @@ void MemoryAccess::setNewAccessRelation(isl::map NewAccess) {
     isl::set StmtDomain = getStatement()->getDomain();
     StmtDomain =
         StmtDomain.intersect_params(getStatement()->getParent()->getContext());
+    StmtDomain = subtractParams(
+        StmtDomain, getStatement()->getParent()->getInvalidContext());
     isl::set NewDomain = NewAccess.domain();
     assert(StmtDomain.is_subset(NewDomain) &&
            "Partial READ accesses not supported");
@@ -1183,6 +1187,12 @@ void ScopStmt::realignParams() {
   isl::set Ctx = Parent.getContext();
   InvalidDomain = InvalidDomain.gist_params(Ctx);
   Domain = Domain.gist_params(Ctx);
+
+  // Predictable parameter order is required for JSON imports. Ensure alignment
+  // by explicitly calling align_params.
+  isl::space CtxSpace = Ctx.get_space();
+  InvalidDomain = InvalidDomain.align_params(CtxSpace);
+  Domain = Domain.align_params(CtxSpace);
 }
 
 ScopStmt::ScopStmt(Scop &parent, Region &R, StringRef Name,
@@ -1474,7 +1484,7 @@ StringMap<std::string> KnownNames = {
 static std::string getCallParamName(CallInst *Call) {
   std::string Result;
   raw_string_ostream OS(Result);
-  std::string Name = Call->getCalledFunction()->getName();
+  std::string Name = Call->getCalledFunction()->getName().str();
 
   auto Iterator = KnownNames.find(Name);
   if (Iterator != KnownNames.end())
@@ -1505,7 +1515,7 @@ void Scop::createParameterId(const SCEV *Parameter) {
       // we use this name as it is likely to be unique and more useful than just
       // a number.
       if (Val->hasName())
-        ParameterName = Val->getName();
+        ParameterName = Val->getName().str();
       else if (LoadInst *LI = dyn_cast<LoadInst>(Val)) {
         auto *LoadOrigin = LI->getPointerOperand()->stripInBoundsOffsets();
         if (LoadOrigin->hasName()) {
@@ -1604,6 +1614,8 @@ void Scop::realignParams() {
 
   // Align the parameters of all data structures to the model.
   Context = Context.align_params(Space);
+  AssumedContext = AssumedContext.align_params(Space);
+  InvalidContext = InvalidContext.align_params(Space);
 
   // Bound the size of the fortran array dimensions.
   Context = boundFortranArrayParams(Context, arrays());
@@ -1615,6 +1627,10 @@ void Scop::realignParams() {
     Stmt.realignParams();
   // Simplify the schedule according to the context too.
   Schedule = Schedule.gist_domain_params(getContext());
+
+  // Predictable parameter order is required for JSON imports. Ensure alignment
+  // by explicitly calling align_params.
+  Schedule = Schedule.align_params(Space);
 }
 
 static isl::set simplifyAssumptionContext(isl::set AssumptionContext,
@@ -1683,25 +1699,29 @@ isl::set Scop::getDomainConditions(BasicBlock *BB) const {
   return getDomainConditions(BBR->getEntry());
 }
 
-int Scop::NextScopID = 0;
-
-std::string Scop::CurrentFunc;
-
-int Scop::getNextID(std::string ParentFunc) {
-  if (ParentFunc != CurrentFunc) {
-    CurrentFunc = ParentFunc;
-    NextScopID = 0;
-  }
-  return NextScopID++;
-}
-
 Scop::Scop(Region &R, ScalarEvolution &ScalarEvolution, LoopInfo &LI,
            DominatorTree &DT, ScopDetection::DetectionContext &DC,
-           OptimizationRemarkEmitter &ORE)
+           OptimizationRemarkEmitter &ORE, int ID)
     : IslCtx(isl_ctx_alloc(), isl_ctx_free), SE(&ScalarEvolution), DT(&DT),
       R(R), name(None), HasSingleExitEdge(R.getExitingBlock()), DC(DC),
-      ORE(ORE), Affinator(this, LI),
-      ID(getNextID((*R.getEntry()->getParent()).getName().str())) {
+      ORE(ORE), Affinator(this, LI), ID(ID) {
+  SmallVector<char *, 8> IslArgv;
+  IslArgv.reserve(1 + IslArgs.size());
+
+  // Substitute for program name.
+  IslArgv.push_back(const_cast<char *>("-polly-isl-arg"));
+
+  for (std::string &Arg : IslArgs)
+    IslArgv.push_back(const_cast<char *>(Arg.c_str()));
+
+  // Abort if unknown argument is passed.
+  // Note that "-V" (print isl version) will always call exit(0), so we cannot
+  // avoid ISL aborting the program at this point.
+  unsigned IslParseFlags = ISL_ARG_ALL;
+
+  isl_ctx_parse_options(IslCtx.get(), IslArgv.size(), IslArgv.data(),
+                        IslParseFlags);
+
   if (IslOnErrorAbort)
     isl_options_set_on_error(getIslCtx().get(), ISL_ON_ERROR_ABORT);
   buildContext();
@@ -1734,7 +1754,7 @@ void Scop::removeFromStmtMap(ScopStmt &Stmt) {
   }
 }
 
-void Scop::removeStmts(std::function<bool(ScopStmt &)> ShouldDelete,
+void Scop::removeStmts(function_ref<bool(ScopStmt &)> ShouldDelete,
                        bool AfterHoisting) {
   for (auto StmtIt = Stmts.begin(), StmtEnd = Stmts.end(); StmtIt != StmtEnd;) {
     if (!ShouldDelete(*StmtIt)) {
@@ -1755,40 +1775,39 @@ void Scop::removeStmts(std::function<bool(ScopStmt &)> ShouldDelete,
 }
 
 void Scop::removeStmtNotInDomainMap() {
-  auto ShouldDelete = [this](ScopStmt &Stmt) -> bool {
+  removeStmts([this](ScopStmt &Stmt) -> bool {
     isl::set Domain = DomainMap.lookup(Stmt.getEntryBlock());
     if (!Domain)
       return true;
     return Domain.is_empty();
-  };
-  removeStmts(ShouldDelete, false);
+  });
 }
 
 void Scop::simplifySCoP(bool AfterHoisting) {
-  auto ShouldDelete = [AfterHoisting](ScopStmt &Stmt) -> bool {
-    // Never delete statements that contain calls to debug functions.
-    if (hasDebugCall(&Stmt))
-      return false;
+  removeStmts(
+      [AfterHoisting](ScopStmt &Stmt) -> bool {
+        // Never delete statements that contain calls to debug functions.
+        if (hasDebugCall(&Stmt))
+          return false;
 
-    bool RemoveStmt = Stmt.isEmpty();
+        bool RemoveStmt = Stmt.isEmpty();
 
-    // Remove read only statements only after invariant load hoisting.
-    if (!RemoveStmt && AfterHoisting) {
-      bool OnlyRead = true;
-      for (MemoryAccess *MA : Stmt) {
-        if (MA->isRead())
-          continue;
+        // Remove read only statements only after invariant load hoisting.
+        if (!RemoveStmt && AfterHoisting) {
+          bool OnlyRead = true;
+          for (MemoryAccess *MA : Stmt) {
+            if (MA->isRead())
+              continue;
 
-        OnlyRead = false;
-        break;
-      }
+            OnlyRead = false;
+            break;
+          }
 
-      RemoveStmt = OnlyRead;
-    }
-    return RemoveStmt;
-  };
-
-  removeStmts(ShouldDelete, AfterHoisting);
+          RemoveStmt = OnlyRead;
+        }
+        return RemoveStmt;
+      },
+      AfterHoisting);
 }
 
 InvariantEquivClassTy *Scop::lookupInvariantEquivClass(Value *Val) {
@@ -1855,13 +1874,12 @@ ScopArrayInfo *Scop::createScopArrayInfo(Type *ElementType,
   return SAI;
 }
 
-const ScopArrayInfo *Scop::getScopArrayInfoOrNull(Value *BasePtr,
-                                                  MemoryKind Kind) {
+ScopArrayInfo *Scop::getScopArrayInfoOrNull(Value *BasePtr, MemoryKind Kind) {
   auto *SAI = ScopArrayInfoMap[std::make_pair(BasePtr, Kind)].get();
   return SAI;
 }
 
-const ScopArrayInfo *Scop::getScopArrayInfo(Value *BasePtr, MemoryKind Kind) {
+ScopArrayInfo *Scop::getScopArrayInfo(Value *BasePtr, MemoryKind Kind) {
   auto *SAI = getScopArrayInfoOrNull(BasePtr, Kind);
   assert(SAI && "No ScopArrayInfo available for this base pointer");
   return SAI;
@@ -2116,13 +2134,6 @@ void Scop::addAssumption(AssumptionKind Kind, isl::set Set, DebugLoc Loc,
     InvalidContext = InvalidContext.unite(Set).coalesce();
 }
 
-void Scop::recordAssumption(AssumptionKind Kind, isl::set Set, DebugLoc Loc,
-                            AssumptionSign Sign, BasicBlock *BB) {
-  assert((Set.is_params() || BB) &&
-         "Assumptions without a basic block must be parameter sets");
-  RecordedAssumptions.push_back({Kind, Sign, Set, Loc, BB});
-}
-
 void Scop::invalidate(AssumptionKind Kind, DebugLoc Loc, BasicBlock *BB) {
   LLVM_DEBUG(dbgs() << "Invalidate SCoP because of reason " << Kind << "\n");
   addAssumption(Kind, isl::set::empty(getParamSpace()), Loc, AS_ASSUMPTION, BB);
@@ -2240,13 +2251,14 @@ LLVM_DUMP_METHOD void Scop::dump() const { print(dbgs(), true); }
 isl::ctx Scop::getIslCtx() const { return IslCtx.get(); }
 
 __isl_give PWACtx Scop::getPwAff(const SCEV *E, BasicBlock *BB,
-                                 bool NonNegative) {
+                                 bool NonNegative,
+                                 RecordedAssumptionsTy *RecordedAssumptions) {
   // First try to use the SCEVAffinator to generate a piecewise defined
   // affine function from @p E in the context of @p BB. If that tasks becomes to
   // complex the affinator might return a nullptr. In such a case we invalidate
   // the SCoP and return a dummy value. This way we do not need to add error
   // handling code to all users of this function.
-  auto PWAC = Affinator.getPwAff(E, BB);
+  auto PWAC = Affinator.getPwAff(E, BB, RecordedAssumptions);
   if (PWAC.first) {
     // TODO: We could use a heuristic and either use:
     //         SCEVAffinator::takeNonNegativeAssumption
@@ -2254,13 +2266,13 @@ __isl_give PWACtx Scop::getPwAff(const SCEV *E, BasicBlock *BB,
     //         SCEVAffinator::interpretAsUnsigned
     //       to deal with unsigned or "NonNegative" SCEVs.
     if (NonNegative)
-      Affinator.takeNonNegativeAssumption(PWAC);
+      Affinator.takeNonNegativeAssumption(PWAC, RecordedAssumptions);
     return PWAC;
   }
 
   auto DL = BB ? BB->getTerminator()->getDebugLoc() : DebugLoc();
   invalidate(COMPLEXITY, DL, BB);
-  return Affinator.getPwAff(SE->getZero(E->getType()), BB);
+  return Affinator.getPwAff(SE->getZero(E->getType()), BB, RecordedAssumptions);
 }
 
 isl::union_set Scop::getDomains() const {
@@ -2273,8 +2285,9 @@ isl::union_set Scop::getDomains() const {
   return isl::manage(Domain);
 }
 
-isl::pw_aff Scop::getPwAffOnly(const SCEV *E, BasicBlock *BB) {
-  PWACtx PWAC = getPwAff(E, BB);
+isl::pw_aff Scop::getPwAffOnly(const SCEV *E, BasicBlock *BB,
+                               RecordedAssumptionsTy *RecordedAssumptions) {
+  PWACtx PWAC = getPwAff(E, BB, RecordedAssumptions);
   return PWAC.first;
 }
 

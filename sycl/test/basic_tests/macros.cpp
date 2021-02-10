@@ -1,4 +1,4 @@
-// RUN: %clangxx -std=c++17 -fsycl %s -o %t.out
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
 //==------------------- macros.cpp - SYCL buffer basic test ----------------==//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -11,8 +11,7 @@
 #include <iostream>
 
 int main() {
-  std::cout << "SYCL language version: " << CL_SYCL_LANGUAGE_VERSION
-            << std::endl;
+  std::cout << "SYCL language version: " << SYCL_LANGUAGE_VERSION << std::endl;
   std::cout << "SYCL compiler version: " << __SYCL_COMPILER_VERSION
             << std::endl;
   return 0;

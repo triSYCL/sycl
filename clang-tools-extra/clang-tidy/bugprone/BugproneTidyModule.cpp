@@ -12,6 +12,7 @@
 #include "../cppcoreguidelines/NarrowingConversionsCheck.h"
 #include "ArgumentCommentCheck.h"
 #include "AssertSideEffectCheck.h"
+#include "BadSignalToKillThreadCheck.h"
 #include "BoolPointerImplicitConversionCheck.h"
 #include "BranchCloneCheck.h"
 #include "CopyConstructorInitCheck.h"
@@ -23,22 +24,32 @@
 #include "ForwardingReferenceOverloadCheck.h"
 #include "InaccurateEraseCheck.h"
 #include "IncorrectRoundingsCheck.h"
+#include "InfiniteLoopCheck.h"
 #include "IntegerDivisionCheck.h"
 #include "LambdaFunctionNameCheck.h"
 #include "MacroParenthesesCheck.h"
 #include "MacroRepeatedSideEffectsCheck.h"
 #include "MisplacedOperatorInStrlenInAllocCheck.h"
+#include "MisplacedPointerArithmeticInAllocCheck.h"
 #include "MisplacedWideningCastCheck.h"
 #include "MoveForwardingReferenceCheck.h"
 #include "MultipleStatementMacroCheck.h"
+#include "NoEscapeCheck.h"
+#include "NotNullTerminatedResultCheck.h"
 #include "ParentVirtualCallCheck.h"
 #include "PosixReturnCheck.h"
+#include "RedundantBranchConditionCheck.h"
+#include "ReservedIdentifierCheck.h"
+#include "SignalHandlerCheck.h"
+#include "SignedCharMisuseCheck.h"
 #include "SizeofContainerCheck.h"
 #include "SizeofExpressionCheck.h"
+#include "SpuriouslyWakeUpFunctionsCheck.h"
 #include "StringConstructorCheck.h"
 #include "StringIntegerAssignmentCheck.h"
 #include "StringLiteralWithEmbeddedNulCheck.h"
 #include "SuspiciousEnumUsageCheck.h"
+#include "SuspiciousIncludeCheck.h"
 #include "SuspiciousMemsetUsageCheck.h"
 #include "SuspiciousMissingCommaCheck.h"
 #include "SuspiciousSemicolonCheck.h"
@@ -66,6 +77,8 @@ public:
         "bugprone-argument-comment");
     CheckFactories.registerCheck<AssertSideEffectCheck>(
         "bugprone-assert-side-effect");
+    CheckFactories.registerCheck<BadSignalToKillThreadCheck>(
+        "bugprone-bad-signal-to-kill-thread");
     CheckFactories.registerCheck<BoolPointerImplicitConversionCheck>(
         "bugprone-bool-pointer-implicit-conversion");
     CheckFactories.registerCheck<BranchCloneCheck>(
@@ -88,6 +101,8 @@ public:
         "bugprone-inaccurate-erase");
     CheckFactories.registerCheck<IncorrectRoundingsCheck>(
         "bugprone-incorrect-roundings");
+    CheckFactories.registerCheck<InfiniteLoopCheck>(
+        "bugprone-infinite-loop");
     CheckFactories.registerCheck<IntegerDivisionCheck>(
         "bugprone-integer-division");
     CheckFactories.registerCheck<LambdaFunctionNameCheck>(
@@ -98,22 +113,36 @@ public:
         "bugprone-macro-repeated-side-effects");
     CheckFactories.registerCheck<MisplacedOperatorInStrlenInAllocCheck>(
         "bugprone-misplaced-operator-in-strlen-in-alloc");
+    CheckFactories.registerCheck<MisplacedPointerArithmeticInAllocCheck>(
+        "bugprone-misplaced-pointer-arithmetic-in-alloc");
     CheckFactories.registerCheck<MisplacedWideningCastCheck>(
         "bugprone-misplaced-widening-cast");
     CheckFactories.registerCheck<MoveForwardingReferenceCheck>(
         "bugprone-move-forwarding-reference");
     CheckFactories.registerCheck<MultipleStatementMacroCheck>(
         "bugprone-multiple-statement-macro");
+    CheckFactories.registerCheck<RedundantBranchConditionCheck>(
+        "bugprone-redundant-branch-condition");
     CheckFactories.registerCheck<cppcoreguidelines::NarrowingConversionsCheck>(
         "bugprone-narrowing-conversions");
+    CheckFactories.registerCheck<NoEscapeCheck>("bugprone-no-escape");
+    CheckFactories.registerCheck<NotNullTerminatedResultCheck>(
+        "bugprone-not-null-terminated-result");
     CheckFactories.registerCheck<ParentVirtualCallCheck>(
         "bugprone-parent-virtual-call");
     CheckFactories.registerCheck<PosixReturnCheck>(
         "bugprone-posix-return");
+    CheckFactories.registerCheck<ReservedIdentifierCheck>(
+        "bugprone-reserved-identifier");
+    CheckFactories.registerCheck<SignalHandlerCheck>("bugprone-signal-handler");
+    CheckFactories.registerCheck<SignedCharMisuseCheck>(
+        "bugprone-signed-char-misuse");
     CheckFactories.registerCheck<SizeofContainerCheck>(
         "bugprone-sizeof-container");
     CheckFactories.registerCheck<SizeofExpressionCheck>(
         "bugprone-sizeof-expression");
+    CheckFactories.registerCheck<SpuriouslyWakeUpFunctionsCheck>(
+        "bugprone-spuriously-wake-up-functions");
     CheckFactories.registerCheck<StringConstructorCheck>(
         "bugprone-string-constructor");
     CheckFactories.registerCheck<StringIntegerAssignmentCheck>(
@@ -122,6 +151,8 @@ public:
         "bugprone-string-literal-with-embedded-nul");
     CheckFactories.registerCheck<SuspiciousEnumUsageCheck>(
         "bugprone-suspicious-enum-usage");
+    CheckFactories.registerCheck<SuspiciousIncludeCheck>(
+        "bugprone-suspicious-include");
     CheckFactories.registerCheck<SuspiciousMemsetUsageCheck>(
         "bugprone-suspicious-memset-usage");
     CheckFactories.registerCheck<SuspiciousMissingCommaCheck>(

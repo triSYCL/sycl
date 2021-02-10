@@ -32,7 +32,7 @@ set(TSAN_SOURCES
   rtl/tsan_fd.cpp
   rtl/tsan_flags.cpp
   rtl/tsan_ignoreset.cpp
-  rtl/tsan_interceptors.cpp
+  rtl/tsan_interceptors_posix.cpp
   rtl/tsan_interface.cpp
   rtl/tsan_interface_ann.cpp
   rtl/tsan_interface_atomic.cpp
@@ -114,6 +114,14 @@ set(TSAN_RUNTIME_LIBRARIES)
 add_compiler_rt_component(tsan)
 
 if(APPLE)
+  # Ideally we would check the SDK version for the actual platform we are
+  # building for here.  To make our lifes easier we assume the host SDK setup is
+  # sane and use the macOS SDK version as a proxy for aligned SDKs.
+  find_darwin_sdk_version(macosx_sdk_version "macosx")
+  if ("${macosx_sdk_version}" VERSION_LESS 10.12)
+    message(FATAL_ERROR "Building the TSan runtime requires at least macOS SDK 10.12 (or aligned SDK on other platforms)")
+  endif()
+
   add_asm_sources(TSAN_ASM_SOURCES rtl/tsan_rtl_amd64.S rtl/tsan_rtl_aarch64.S)
 
   set(TSAN_LINK_LIBS ${SANITIZER_COMMON_LINK_LIBS})

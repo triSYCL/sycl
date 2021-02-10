@@ -17,14 +17,10 @@ def err_fe_pch_malformed : Error<
     "malformed or corrupted AST file: '%0'">, DefaultFatal;
 def err_fe_pch_malformed_block : Error<
     "malformed block record in PCH file: '%0'">, DefaultFatal;
-def err_fe_pch_file_modified : Error<
-    "file '%0' has been modified since the precompiled header '%1' was built">,
-    DefaultFatal;
-def err_fe_module_file_modified : Error<
-    "file '%0' has been modified since the module file '%1' was built">,
-    DefaultFatal;
 def err_fe_ast_file_modified : Error<
-    "file '%0' has been modified since the AST file '%1' was built">,
+    "file '%0' has been modified since the "
+    "%select{precompiled header|module file|AST file}1 '%2' was built"
+    ": %select{size|mtime|content}3 changed">,
     DefaultFatal;
 def err_fe_pch_file_overridden : Error<
     "file '%0' from the precompiled header has been overridden">;
@@ -60,17 +56,19 @@ def err_pch_with_compiler_errors : Error<
 
 def err_module_file_conflict : Error<
   "module '%0' is defined in both '%1' and '%2'">, DefaultFatal;
-def err_module_file_not_found : Error<
+def err_ast_file_not_found : Error<
   "%select{PCH|module|AST}0 file '%1' not found%select{|: %3}2">, DefaultFatal;
-def err_module_file_out_of_date : Error<
+def err_ast_file_out_of_date : Error<
   "%select{PCH|module|AST}0 file '%1' is out of date and "
   "needs to be rebuilt%select{|: %3}2">, DefaultFatal;
-def err_module_file_invalid : Error<
+def err_ast_file_invalid : Error<
   "file '%1' is not a valid precompiled %select{PCH|module|AST}0 file">, DefaultFatal;
 def note_module_file_imported_by : Note<
   "imported by %select{|module '%2' in }1'%0'">;
 def err_module_file_not_module : Error<
   "AST file '%0' was not built as a module">, DefaultFatal;
+def err_module_file_missing_top_level_submodule : Error<
+  "module file '%0' is missing its top-level submodule">, DefaultFatal;
 
 def remark_module_import : Remark<
   "importing module '%0'%select{| into '%3'}2 from '%1'">,
@@ -399,6 +397,8 @@ def warn_module_uses_date_time : Warning<
 def err_module_no_size_mtime_for_header : Error<
   "cannot emit module %0: %select{size|mtime}1 must be explicitly specified "
   "for missing header file \"%2\"">;
+def err_module_unable_to_hash_content : Error<
+  "failed to hash content for '%0' because memory buffer cannot be retrieved">;
 } // let CategoryName
 } // let Component
 

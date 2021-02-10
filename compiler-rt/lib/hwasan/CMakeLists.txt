@@ -6,15 +6,18 @@ set(HWASAN_RTL_SOURCES
   hwasan_allocator.cpp
   hwasan_dynamic_shadow.cpp
   hwasan_exceptions.cpp
+  hwasan_globals.cpp
   hwasan_interceptors.cpp
   hwasan_interceptors_vfork.S
   hwasan_linux.cpp
   hwasan_memintrinsics.cpp
   hwasan_poisoning.cpp
   hwasan_report.cpp
+  hwasan_setjmp.S
   hwasan_tag_mismatch_aarch64.S
   hwasan_thread.cpp
   hwasan_thread_list.cpp
+  hwasan_type_test.cpp
   )
 
 set(HWASAN_RTL_CXX_SOURCES
@@ -27,6 +30,7 @@ set(HWASAN_RTL_HEADERS
   hwasan_dynamic_shadow.h
   hwasan_flags.h
   hwasan_flags.inc
+  hwasan_globals.h
   hwasan_interface_internal.h
   hwasan_malloc_bisect.h
   hwasan_mapping.h
@@ -67,10 +71,6 @@ append_list_if(COMPILER_RT_HAS_LIBRT rt HWASAN_DYNAMIC_LIBS)
 append_list_if(COMPILER_RT_HAS_LIBM m HWASAN_DYNAMIC_LIBS)
 append_list_if(COMPILER_RT_HAS_LIBPTHREAD pthread HWASAN_DYNAMIC_LIBS)
 
-if (TARGET cxx-headers OR HAVE_LIBCXX)
-  set(HWASAN_DEPS cxx-headers)
-endif()
-
 # Static runtime library.
 add_compiler_rt_component(hwasan)
 
@@ -79,30 +79,26 @@ add_compiler_rt_object_libraries(RTHwasan
   SOURCES ${HWASAN_RTL_SOURCES}
   ADDITIONAL_HEADERS ${HWASAN_RTL_HEADERS}
   CFLAGS ${HWASAN_RTL_CFLAGS}
-  DEFS ${HWASAN_DEFINITIONS}
-  DEPS ${HWASAN_DEPS})
+  DEFS ${HWASAN_DEFINITIONS})
 add_compiler_rt_object_libraries(RTHwasan_cxx
   ARCHS ${HWASAN_SUPPORTED_ARCH}
   SOURCES ${HWASAN_RTL_CXX_SOURCES}
   ADDITIONAL_HEADERS ${HWASAN_RTL_HEADERS}
   CFLAGS ${HWASAN_RTL_CFLAGS}
-  DEFS ${HWASAN_DEFINITIONS}
-  DEPS ${HWASAN_DEPS})
+  DEFS ${HWASAN_DEFINITIONS})
 add_compiler_rt_object_libraries(RTHwasan_dynamic
   ARCHS ${HWASAN_SUPPORTED_ARCH}
   SOURCES ${HWASAN_RTL_SOURCES} ${HWASAN_RTL_CXX_SOURCES}
   ADDITIONAL_HEADERS ${HWASAN_RTL_HEADERS}
   CFLAGS ${HWASAN_DYNAMIC_CFLAGS}
-  DEFS ${HWASAN_DEFINITIONS}
-  DEPS ${HWASAN_DEPS})
+  DEFS ${HWASAN_DEFINITIONS})
 
 file(WRITE ${CMAKE_CURRENT_BINARY_DIR}/dummy.cpp "")
 add_compiler_rt_object_libraries(RTHwasan_dynamic_version_script_dummy
   ARCHS ${HWASAN_SUPPORTED_ARCH}
   SOURCES ${CMAKE_CURRENT_BINARY_DIR}/dummy.cpp
   CFLAGS ${HWASAN_DYNAMIC_CFLAGS}
-  DEFS ${HWASAN_DEFINITIONS}
-  DEPS ${HWASAN_DEPS})
+  DEFS ${HWASAN_DEFINITIONS})
 
 foreach(arch ${HWASAN_SUPPORTED_ARCH})
   add_compiler_rt_runtime(clang_rt.hwasan
@@ -178,6 +174,8 @@ foreach(arch ${HWASAN_SUPPORTED_ARCH})
 endforeach()
 
 add_compiler_rt_resource_file(hwasan_blacklist hwasan_blacklist.txt hwasan)
+
+add_subdirectory("scripts")
 
 # if(COMPILER_RT_INCLUDE_TESTS)
 #   add_subdirectory(tests)

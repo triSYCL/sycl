@@ -136,9 +136,9 @@ define i64 @fcvt_l_d(double %a) nounwind {
 ; RV32IFD-LABEL: fcvt_l_d:
 ; RV32IFD:       # %bb.0:
 ; RV32IFD-NEXT:    addi sp, sp, -16
-; RV32IFD-NEXT:    sw ra, 12(sp)
-; RV32IFD-NEXT:    call __fixdfdi
-; RV32IFD-NEXT:    lw ra, 12(sp)
+; RV32IFD-NEXT:    sw ra, 12(sp) # 4-byte Folded Spill
+; RV32IFD-NEXT:    call __fixdfdi@plt
+; RV32IFD-NEXT:    lw ra, 12(sp) # 4-byte Folded Reload
 ; RV32IFD-NEXT:    addi sp, sp, 16
 ; RV32IFD-NEXT:    ret
 ;
@@ -155,9 +155,9 @@ define i64 @fcvt_lu_d(double %a) nounwind {
 ; RV32IFD-LABEL: fcvt_lu_d:
 ; RV32IFD:       # %bb.0:
 ; RV32IFD-NEXT:    addi sp, sp, -16
-; RV32IFD-NEXT:    sw ra, 12(sp)
-; RV32IFD-NEXT:    call __fixunsdfdi
-; RV32IFD-NEXT:    lw ra, 12(sp)
+; RV32IFD-NEXT:    sw ra, 12(sp) # 4-byte Folded Spill
+; RV32IFD-NEXT:    call __fixunsdfdi@plt
+; RV32IFD-NEXT:    lw ra, 12(sp) # 4-byte Folded Reload
 ; RV32IFD-NEXT:    addi sp, sp, 16
 ; RV32IFD-NEXT:    ret
 ;
@@ -203,9 +203,9 @@ define double @fcvt_d_l(i64 %a) nounwind {
 ; RV32IFD-LABEL: fcvt_d_l:
 ; RV32IFD:       # %bb.0:
 ; RV32IFD-NEXT:    addi sp, sp, -16
-; RV32IFD-NEXT:    sw ra, 12(sp)
-; RV32IFD-NEXT:    call __floatdidf
-; RV32IFD-NEXT:    lw ra, 12(sp)
+; RV32IFD-NEXT:    sw ra, 12(sp) # 4-byte Folded Spill
+; RV32IFD-NEXT:    call __floatdidf@plt
+; RV32IFD-NEXT:    lw ra, 12(sp) # 4-byte Folded Reload
 ; RV32IFD-NEXT:    addi sp, sp, 16
 ; RV32IFD-NEXT:    ret
 ;
@@ -222,9 +222,9 @@ define double @fcvt_d_lu(i64 %a) nounwind {
 ; RV32IFD-LABEL: fcvt_d_lu:
 ; RV32IFD:       # %bb.0:
 ; RV32IFD-NEXT:    addi sp, sp, -16
-; RV32IFD-NEXT:    sw ra, 12(sp)
-; RV32IFD-NEXT:    call __floatundidf
-; RV32IFD-NEXT:    lw ra, 12(sp)
+; RV32IFD-NEXT:    sw ra, 12(sp) # 4-byte Folded Spill
+; RV32IFD-NEXT:    call __floatundidf@plt
+; RV32IFD-NEXT:    lw ra, 12(sp) # 4-byte Folded Reload
 ; RV32IFD-NEXT:    addi sp, sp, 16
 ; RV32IFD-NEXT:    ret
 ;
@@ -257,9 +257,9 @@ define double @fmv_d_x(i64 %a, i64 %b) nounwind {
 ;
 ; RV64IFD-LABEL: fmv_d_x:
 ; RV64IFD:       # %bb.0:
-; RV64IFD-NEXT:    fmv.d.x ft0, a1
-; RV64IFD-NEXT:    fmv.d.x ft1, a0
-; RV64IFD-NEXT:    fadd.d ft0, ft1, ft0
+; RV64IFD-NEXT:    fmv.d.x ft0, a0
+; RV64IFD-NEXT:    fmv.d.x ft1, a1
+; RV64IFD-NEXT:    fadd.d ft0, ft0, ft1
 ; RV64IFD-NEXT:    fmv.x.d a0, ft0
 ; RV64IFD-NEXT:    ret
   %1 = bitcast i64 %a to double

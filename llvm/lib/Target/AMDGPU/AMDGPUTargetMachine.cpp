@@ -16,6 +16,7 @@
 #include "AMDGPU.h"
 #include "AMDGPUAliasAnalysis.h"
 #include "AMDGPUCallLowering.h"
+#include "AMDGPUExportClustering.h"
 #include "AMDGPUInstructionSelector.h"
 #include "AMDGPULegalizerInfo.h"
 #include "AMDGPUMacroFusion.h"
@@ -23,6 +24,7 @@
 #include "AMDGPUTargetTransformInfo.h"
 #include "GCNIterativeScheduler.h"
 #include "GCNSchedStrategy.h"
+#include "MCTargetDesc/AMDGPUMCTargetDesc.h"
 #include "R600MachineScheduler.h"
 #include "SIMachineFunctionInfo.h"
 #include "SIMachineScheduler.h"
@@ -30,6 +32,7 @@
 #include "llvm/CodeGen/GlobalISel/IRTranslator.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
 #include "llvm/CodeGen/GlobalISel/Legalizer.h"
+#include "llvm/CodeGen/GlobalISel/Localizer.h"
 #include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
 #include "llvm/CodeGen/MIRParser/MIParser.h"
 #include "llvm/CodeGen/Passes.h"
@@ -37,6 +40,7 @@
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Compiler.h"
@@ -137,6 +141,13 @@ static cl::opt<bool, true> EnableAMDGPUFunctionCallsOpt(
   cl::init(true),
   cl::Hidden);
 
+static cl::opt<bool, true> EnableAMDGPUFixedFunctionABIOpt(
+  "amdgpu-fixed-function-abi",
+  cl::desc("Enable all implicit function arguments"),
+  cl::location(AMDGPUTargetMachine::EnableFixedFunctionABI),
+  cl::init(false),
+  cl::Hidden);
+
 // Enable lib calls simplifications
 static cl::opt<bool> EnableLibCallSimplify(
   "amdgpu-simplify-libcall",
@@ -182,7 +193,12 @@ static cl::opt<bool> EnableScalarIRPasses(
   cl::init(true),
   cl::Hidden);
 
-extern "C" void LLVMInitializeAMDGPUTarget() {
+static cl::opt<bool> EnableStructurizerWorkarounds(
+    "amdgpu-enable-structurizer-workarounds",
+    cl::desc("Enable workarounds for the StructurizeCFG pass"), cl::init(true),
+    cl::Hidden);
+
+extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeAMDGPUTarget() {
   // Register the target
   RegisterTargetMachine<R600TargetMachine> X(getTheAMDGPUTarget());
   RegisterTargetMachine<GCNTargetMachine> Y(getTheGCNTarget());
@@ -200,7 +216,6 @@ extern "C" void LLVMInitializeAMDGPUTarget() {
   initializeSILowerSGPRSpillsPass(*PR);
   initializeSIFixSGPRCopiesPass(*PR);
   initializeSIFixVGPRCopiesPass(*PR);
-  initializeSIFixupVectorISelPass(*PR);
   initializeSIFoldOperandsPass(*PR);
   initializeSIPeepholeSDWAPass(*PR);
   initializeSIShrinkInstructionsPass(*PR);
@@ -216,22 +231,30 @@ extern "C" void LLVMInitializeAMDGPUTarget() {
   initializeAMDGPULowerKernelAttributesPass(*PR);
   initializeAMDGPULowerIntrinsicsPass(*PR);
   initializeAMDGPUOpenCLEnqueuedBlockLoweringPass(*PR);
+  initializeAMDGPUPostLegalizerCombinerPass(*PR);
+  initializeAMDGPUPreLegalizerCombinerPass(*PR);
   initializeAMDGPUPromoteAllocaPass(*PR);
+  initializeAMDGPUPromoteAllocaToVectorPass(*PR);
   initializeAMDGPUCodeGenPreparePass(*PR);
+  initializeAMDGPULateCodeGenPreparePass(*PR);
   initializeAMDGPUPropagateAttributesEarlyPass(*PR);
   initializeAMDGPUPropagateAttributesLatePass(*PR);
   initializeAMDGPURewriteOutArgumentsPass(*PR);
   initializeAMDGPUUnifyMetadataPass(*PR);
   initializeSIAnnotateControlFlowPass(*PR);
+  initializeSIInsertHardClausesPass(*PR);
   initializeSIInsertWaitcntsPass(*PR);
   initializeSIModeRegisterPass(*PR);
   initializeSIWholeQuadModePass(*PR);
   initializeSILowerControlFlowPass(*PR);
+  initializeSIRemoveShortExecBranchesPass(*PR);
+  initializeSIPreEmitPeepholePass(*PR);
   initializeSIInsertSkipsPass(*PR);
   initializeSIMemoryLegalizerPass(*PR);
   initializeSIOptimizeExecMaskingPass(*PR);
   initializeSIPreAllocateWWMRegsPass(*PR);
   initializeSIFormMemoryClausesPass(*PR);
+  initializeSIPostRABundlerPass(*PR);
   initializeAMDGPUUnifyDivergentExitNodesPass(*PR);
   initializeAMDGPUAAWrapperPassPass(*PR);
   initializeAMDGPUExternalAAWrapperPass(*PR);
@@ -241,6 +264,7 @@ extern "C" void LLVMInitializeAMDGPUTarget() {
   initializeAMDGPUPrintfRuntimeBindingPass(*PR);
   initializeGCNRegBankReassignPass(*PR);
   initializeGCNNSAReassignPass(*PR);
+  initializeSIAddIMGInitPass(*PR);
 }
 
 static std::unique_ptr<TargetLoweringObjectFile> createTLOF(const Triple &TT) {
@@ -260,8 +284,8 @@ createGCNMaxOccupancyMachineScheduler(MachineSchedContext *C) {
   ScheduleDAGMILive *DAG =
     new GCNScheduleDAGMILive(C, std::make_unique<GCNMaxOccupancySchedStrategy>(C));
   DAG->addMutation(createLoadClusterDAGMutation(DAG->TII, DAG->TRI));
-  DAG->addMutation(createStoreClusterDAGMutation(DAG->TII, DAG->TRI));
   DAG->addMutation(createAMDGPUMacroFusionDAGMutation());
+  DAG->addMutation(createAMDGPUExportClusteringDAGMutation());
   return DAG;
 }
 
@@ -270,7 +294,6 @@ createIterativeGCNMaxOccupancyMachineScheduler(MachineSchedContext *C) {
   auto DAG = new GCNIterativeScheduler(C,
     GCNIterativeScheduler::SCHEDULE_LEGACYMAXOCCUPANCY);
   DAG->addMutation(createLoadClusterDAGMutation(DAG->TII, DAG->TRI));
-  DAG->addMutation(createStoreClusterDAGMutation(DAG->TII, DAG->TRI));
   return DAG;
 }
 
@@ -284,7 +307,6 @@ createIterativeILPMachineScheduler(MachineSchedContext *C) {
   auto DAG = new GCNIterativeScheduler(C,
     GCNIterativeScheduler::SCHEDULE_ILP);
   DAG->addMutation(createLoadClusterDAGMutation(DAG->TII, DAG->TRI));
-  DAG->addMutation(createStoreClusterDAGMutation(DAG->TII, DAG->TRI));
   DAG->addMutation(createAMDGPUMacroFusionDAGMutation());
   return DAG;
 }
@@ -320,15 +342,15 @@ GCNILPSchedRegistry("gcn-ilp",
 static StringRef computeDataLayout(const Triple &TT) {
   if (TT.getArch() == Triple::r600) {
     // 32-bit pointers.
-      return "e-p:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128"
-             "-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5";
+    return "e-p:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128"
+           "-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5-G1";
   }
 
   // 32-bit private, local, and region pointers. 64-bit global, constant and
   // flat, non-integral buffer fat pointers.
-    return "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
+  return "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32"
          "-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128"
-         "-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5"
+         "-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5-G1"
          "-ni:7";
 }
 
@@ -361,25 +383,30 @@ AMDGPUTargetMachine::AMDGPUTargetMachine(const Target &T, const Triple &TT,
                         getEffectiveCodeModel(CM, CodeModel::Small), OptLevel),
       TLOF(createTLOF(getTargetTriple())) {
   initAsmInfo();
+  if (TT.getArch() == Triple::amdgcn) {
+    if (getMCSubtargetInfo()->checkFeatures("+wavefrontsize64"))
+      MRI.reset(llvm::createGCNMCRegisterInfo(AMDGPUDwarfFlavour::Wave64));
+    else if (getMCSubtargetInfo()->checkFeatures("+wavefrontsize32"))
+      MRI.reset(llvm::createGCNMCRegisterInfo(AMDGPUDwarfFlavour::Wave32));
+  }
 }
 
 bool AMDGPUTargetMachine::EnableLateStructurizeCFG = false;
 bool AMDGPUTargetMachine::EnableFunctionCalls = false;
+bool AMDGPUTargetMachine::EnableFixedFunctionABI = false;
 
 AMDGPUTargetMachine::~AMDGPUTargetMachine() = default;
 
 StringRef AMDGPUTargetMachine::getGPUName(const Function &F) const {
   Attribute GPUAttr = F.getFnAttribute("target-cpu");
-  return GPUAttr.hasAttribute(Attribute::None) ?
-    getTargetCPU() : GPUAttr.getValueAsString();
+  return GPUAttr.isValid() ? GPUAttr.getValueAsString() : getTargetCPU();
 }
 
 StringRef AMDGPUTargetMachine::getFeatureString(const Function &F) const {
   Attribute FSAttr = F.getFnAttribute("target-features");
 
-  return FSAttr.hasAttribute(Attribute::None) ?
-    getTargetFeatureString() :
-    FSAttr.getValueAsString();
+  return FSAttr.isValid() ? FSAttr.getValueAsString()
+                          : getTargetFeatureString();
 }
 
 /// Predicate for Internalize pass.
@@ -414,20 +441,19 @@ void AMDGPUTargetMachine::adjustPassManager(PassManagerBuilder &Builder) {
       }
       PM.add(createAMDGPUUnifyMetadataPass());
       PM.add(createAMDGPUPrintfRuntimeBinding());
-      PM.add(createAMDGPUPropagateAttributesLatePass(this));
-      if (Internalize) {
+      if (Internalize)
         PM.add(createInternalizePass(mustPreserveGV));
+      PM.add(createAMDGPUPropagateAttributesLatePass(this));
+      if (Internalize)
         PM.add(createGlobalDCEPass());
-      }
       if (EarlyInline)
         PM.add(createAMDGPUAlwaysInlinePass(false));
   });
 
-  const auto &Opt = Options;
   Builder.addExtension(
     PassManagerBuilder::EP_EarlyAsPossible,
-    [AMDGPUAA, LibCallSimplify, &Opt, this](const PassManagerBuilder &,
-                                            legacy::PassManagerBase &PM) {
+    [AMDGPUAA, LibCallSimplify, this](const PassManagerBuilder &,
+                                      legacy::PassManagerBase &PM) {
       if (AMDGPUAA) {
         PM.add(createAMDGPUAAWrapperPass());
         PM.add(createAMDGPUExternalAAWrapperPass());
@@ -435,12 +461,12 @@ void AMDGPUTargetMachine::adjustPassManager(PassManagerBuilder &Builder) {
       PM.add(llvm::createAMDGPUPropagateAttributesEarlyPass(this));
       PM.add(llvm::createAMDGPUUseNativeCallsPass());
       if (LibCallSimplify)
-        PM.add(llvm::createAMDGPUSimplifyLibCallsPass(Opt, this));
+        PM.add(llvm::createAMDGPUSimplifyLibCallsPass(this));
   });
 
   Builder.addExtension(
     PassManagerBuilder::EP_CGSCCOptimizerLate,
-    [](const PassManagerBuilder &, legacy::PassManagerBase &PM) {
+    [EnableOpt](const PassManagerBuilder &, legacy::PassManagerBase &PM) {
       // Add infer address spaces pass to the opt pipeline after inlining
       // but before SROA to increase SROA opportunities.
       PM.add(createInferAddressSpacesPass());
@@ -448,6 +474,11 @@ void AMDGPUTargetMachine::adjustPassManager(PassManagerBuilder &Builder) {
       // This should run after inlining to have any chance of doing anything,
       // and before other cleanup optimizations.
       PM.add(createAMDGPULowerKernelAttributesPass());
+
+      // Promote alloca to vector before SROA and loop unroll. If we manage
+      // to eliminate allocas before unroll we may choose to unroll less.
+      if (EnableOpt)
+        PM.add(createAMDGPUPromoteAllocaToVector());
   });
 }
 
@@ -488,6 +519,31 @@ const R600Subtarget *R600TargetMachine::getSubtargetImpl(
   }
 
   return I.get();
+}
+
+bool AMDGPUTargetMachine::isNoopAddrSpaceCast(unsigned SrcAS,
+                                              unsigned DestAS) const {
+  return AMDGPU::isFlatGlobalAddrSpace(SrcAS) &&
+         AMDGPU::isFlatGlobalAddrSpace(DestAS);
+}
+
+unsigned AMDGPUTargetMachine::getAssumedAddrSpace(const Value *V) const {
+  const auto *LD = dyn_cast<LoadInst>(V);
+  if (!LD)
+    return AMDGPUAS::UNKNOWN_ADDRESS_SPACE;
+
+  // It must be a generic pointer loaded.
+  assert(V->getType()->isPointerTy() &&
+         V->getType()->getPointerAddressSpace() == AMDGPUAS::FLAT_ADDRESS);
+
+  const auto *Ptr = LD->getPointerOperand();
+  if (Ptr->getType()->getPointerAddressSpace() != AMDGPUAS::CONSTANT_ADDRESS)
+    return AMDGPUAS::UNKNOWN_ADDRESS_SPACE;
+  // For a generic pointer loaded from the constant memory, it could be assumed
+  // as a global pointer since the constant memory is only populated on the
+  // host side. As implied by the offload programming model, only global
+  // pointers could be referenced on the host side.
+  return AMDGPUAS::GLOBAL_ADDRESS;
 }
 
 TargetTransformInfo
@@ -557,7 +613,6 @@ public:
   createMachineScheduler(MachineSchedContext *C) const override {
     ScheduleDAGMILive *DAG = createGenericSchedLive(C);
     DAG->addMutation(createLoadClusterDAGMutation(DAG->TII, DAG->TRI));
-    DAG->addMutation(createStoreClusterDAGMutation(DAG->TII, DAG->TRI));
     return DAG;
   }
 
@@ -615,7 +670,9 @@ public:
   bool addILPOpts() override;
   bool addInstSelector() override;
   bool addIRTranslator() override;
+  void addPreLegalizeMachineIR() override;
   bool addLegalizeMachineIR() override;
+  void addPreRegBankSelect() override;
   bool addRegBankSelect() override;
   bool addGlobalInstructionSelect() override;
   void addFastRegAlloc() override;
@@ -749,10 +806,15 @@ void AMDGPUPassConfig::addCodeGenPrepare() {
 
   if (EnableLoadStoreVectorizer)
     addPass(createLoadStoreVectorizerPass());
+
+  // LowerSwitch pass may introduce unreachable blocks that can
+  // cause unexpected behavior for subsequent passes. Placing it
+  // here seems better that these blocks would get cleaned up by
+  // UnreachableBlockElim inserted next in the pass flow.
+  addPass(createLowerSwitchPass());
 }
 
 bool AMDGPUPassConfig::addPreISel() {
-  addPass(createLowerSwitchPass());
   addPass(createFlattenCFGPass());
   return false;
 }
@@ -823,6 +885,7 @@ ScheduleDAGInstrs *GCNPassConfig::createMachineScheduler(
 bool GCNPassConfig::addPreISel() {
   AMDGPUPassConfig::addPreISel();
 
+  addPass(createAMDGPULateCodeGenPreparePass());
   if (EnableAtomicOptimizations) {
     addPass(createAMDGPUAtomicOptimizerPass());
   }
@@ -834,7 +897,11 @@ bool GCNPassConfig::addPreISel() {
   // regions formed by them.
   addPass(&AMDGPUUnifyDivergentExitNodesID);
   if (!LateCFGStructurize) {
-    addPass(createStructurizeCFGPass(true)); // true -> SkipUniformRegions
+    if (EnableStructurizerWorkarounds) {
+      addPass(createFixIrreduciblePass());
+      addPass(createUnifyLoopExitsPass());
+    }
+    addPass(createStructurizeCFGPass(false)); // true -> SkipUniformRegions
   }
   addPass(createSinkingPass());
   addPass(createAMDGPUAnnotateUniformValues());
@@ -883,22 +950,29 @@ bool GCNPassConfig::addInstSelector() {
   AMDGPUPassConfig::addInstSelector();
   addPass(&SIFixSGPRCopiesID);
   addPass(createSILowerI1CopiesPass());
-  addPass(createSIFixupVectorISelPass());
   addPass(createSIAddIMGInitPass());
-  // FIXME: Remove this once the phi on CF_END is cleaned up by either removing
-  // LCSSA or other ways.
-  addPass(&UnreachableMachineBlockElimID);
   return false;
 }
 
 bool GCNPassConfig::addIRTranslator() {
-  addPass(new IRTranslator());
+  addPass(new IRTranslator(getOptLevel()));
   return false;
+}
+
+void GCNPassConfig::addPreLegalizeMachineIR() {
+  bool IsOptNone = getOptLevel() == CodeGenOpt::None;
+  addPass(createAMDGPUPreLegalizeCombiner(IsOptNone));
+  addPass(new Localizer());
 }
 
 bool GCNPassConfig::addLegalizeMachineIR() {
   addPass(new Legalizer());
   return false;
+}
+
+void GCNPassConfig::addPreRegBankSelect() {
+  bool IsOptNone = getOptLevel() == CodeGenOpt::None;
+  addPass(createAMDGPUPostLegalizeCombiner(IsOptNone));
 }
 
 bool GCNPassConfig::addRegBankSelect() {
@@ -915,7 +989,6 @@ void GCNPassConfig::addPreRegAlloc() {
   if (LateCFGStructurize) {
     addPass(createAMDGPUMachineCFGStructurizerPass());
   }
-  addPass(createSIWholeQuadModePass());
 }
 
 void GCNPassConfig::addFastRegAlloc() {
@@ -927,30 +1000,29 @@ void GCNPassConfig::addFastRegAlloc() {
   // SI_ELSE will introduce a copy of the tied operand source after the else.
   insertPass(&PHIEliminationID, &SILowerControlFlowID, false);
 
-  // This must be run just after RegisterCoalescing.
-  insertPass(&RegisterCoalescerID, &SIPreAllocateWWMRegsID, false);
+  insertPass(&TwoAddressInstructionPassID, &SIWholeQuadModeID);
+  insertPass(&TwoAddressInstructionPassID, &SIPreAllocateWWMRegsID);
 
   TargetPassConfig::addFastRegAlloc();
 }
 
 void GCNPassConfig::addOptimizedRegAlloc() {
-  if (OptExecMaskPreRA) {
+  // Allow the scheduler to run before SIWholeQuadMode inserts exec manipulation
+  // instructions that cause scheduling barriers.
+  insertPass(&MachineSchedulerID, &SIWholeQuadModeID);
+  insertPass(&MachineSchedulerID, &SIPreAllocateWWMRegsID);
+
+  if (OptExecMaskPreRA)
     insertPass(&MachineSchedulerID, &SIOptimizeExecMaskingPreRAID);
-    insertPass(&SIOptimizeExecMaskingPreRAID, &SIFormMemoryClausesID);
-  } else {
-    insertPass(&MachineSchedulerID, &SIFormMemoryClausesID);
-  }
+  insertPass(&MachineSchedulerID, &SIFormMemoryClausesID);
 
   // This must be run immediately after phi elimination and before
   // TwoAddressInstructions, otherwise the processing of the tied operand of
   // SI_ELSE will introduce a copy of the tied operand source after the else.
   insertPass(&PHIEliminationID, &SILowerControlFlowID, false);
 
-  // This must be run just after RegisterCoalescing.
-  insertPass(&RegisterCoalescerID, &SIPreAllocateWWMRegsID, false);
-
   if (EnableDCEInRA)
-    insertPass(&RenameIndependentSubregsID, &DeadMachineInstructionElimID);
+    insertPass(&DetectDeadLanesID, &DeadMachineInstructionElimID);
 
   TargetPassConfig::addOptimizedRegAlloc();
 }
@@ -974,6 +1046,7 @@ void GCNPassConfig::addPostRegAlloc() {
 }
 
 void GCNPassConfig::addPreSched2() {
+  addPass(&SIPostRABundlerID);
 }
 
 void GCNPassConfig::addPreEmitPass() {
@@ -982,6 +1055,12 @@ void GCNPassConfig::addPreEmitPass() {
   addPass(createSIShrinkInstructionsPass());
   addPass(createSIModeRegisterPass());
 
+  if (getOptLevel() > CodeGenOpt::None)
+    addPass(&SIInsertHardClausesID);
+
+  addPass(&SIRemoveShortExecBranchesID);
+  addPass(&SIInsertSkipsPassID);
+  addPass(&SIPreEmitPeepholeID);
   // The hazard recognizer that runs as part of the post-ra scheduler does not
   // guarantee to be able handle all hazards correctly. This is because if there
   // are multiple scheduling regions in a basic block, the regions are scheduled
@@ -990,12 +1069,7 @@ void GCNPassConfig::addPreEmitPass() {
   //
   // Here we add a stand-alone hazard recognizer pass which can handle all
   // cases.
-  //
-  // FIXME: This stand-alone pass will emit indiv. S_NOP 0, as needed. It would
-  // be better for it to emit S_NOP <N> when possible.
   addPass(&PostRAHazardRecognizerID);
-
-  addPass(&SIInsertSkipsPassID);
   addPass(&BranchRelaxationPassID);
 }
 
@@ -1024,11 +1098,13 @@ bool GCNTargetMachine::parseMachineFunctionInfo(
 
   MFI->initializeBaseYamlFields(YamlMFI);
 
-  auto parseRegister = [&](const yaml::StringValue &RegName, unsigned &RegVal) {
-    if (parseNamedRegisterReference(PFS, RegVal, RegName.Value, Error)) {
+  auto parseRegister = [&](const yaml::StringValue &RegName, Register &RegVal) {
+    Register TempReg;
+    if (parseNamedRegisterReference(PFS, TempReg, RegName.Value, Error)) {
       SourceRange = RegName.SourceRange;
       return true;
     }
+    RegVal = TempReg;
 
     return false;
   };
@@ -1046,19 +1122,13 @@ bool GCNTargetMachine::parseMachineFunctionInfo(
   };
 
   if (parseRegister(YamlMFI.ScratchRSrcReg, MFI->ScratchRSrcReg) ||
-      parseRegister(YamlMFI.ScratchWaveOffsetReg, MFI->ScratchWaveOffsetReg) ||
       parseRegister(YamlMFI.FrameOffsetReg, MFI->FrameOffsetReg) ||
       parseRegister(YamlMFI.StackPtrOffsetReg, MFI->StackPtrOffsetReg))
     return true;
 
   if (MFI->ScratchRSrcReg != AMDGPU::PRIVATE_RSRC_REG &&
-      !AMDGPU::SReg_128RegClass.contains(MFI->ScratchRSrcReg)) {
+      !AMDGPU::SGPR_128RegClass.contains(MFI->ScratchRSrcReg)) {
     return diagnoseRegisterClass(YamlMFI.ScratchRSrcReg);
-  }
-
-  if (MFI->ScratchWaveOffsetReg != AMDGPU::SCRATCH_WAVE_OFFSET_REG &&
-      !AMDGPU::SGPR_32RegClass.contains(MFI->ScratchWaveOffsetReg)) {
-    return diagnoseRegisterClass(YamlMFI.ScratchWaveOffsetReg);
   }
 
   if (MFI->FrameOffsetReg != AMDGPU::FP_REG &&
@@ -1080,7 +1150,7 @@ bool GCNTargetMachine::parseMachineFunctionInfo(
       return false;
 
     if (A->IsRegister) {
-      unsigned Reg;
+      Register Reg;
       if (parseNamedRegisterReference(PFS, Reg, A->RegisterName.Value, Error)) {
         SourceRange = A->RegisterName.SourceRange;
         return true;
@@ -1101,7 +1171,7 @@ bool GCNTargetMachine::parseMachineFunctionInfo(
 
   if (YamlMFI.ArgInfo &&
       (parseAndCheckArgument(YamlMFI.ArgInfo->PrivateSegmentBuffer,
-                             AMDGPU::SReg_128RegClass,
+                             AMDGPU::SGPR_128RegClass,
                              MFI->ArgInfo.PrivateSegmentBuffer, 4, 0) ||
        parseAndCheckArgument(YamlMFI.ArgInfo->DispatchPtr,
                              AMDGPU::SReg_64RegClass, MFI->ArgInfo.DispatchPtr,
@@ -1154,6 +1224,10 @@ bool GCNTargetMachine::parseMachineFunctionInfo(
 
   MFI->Mode.IEEE = YamlMFI.Mode.IEEE;
   MFI->Mode.DX10Clamp = YamlMFI.Mode.DX10Clamp;
+  MFI->Mode.FP32InputDenormals = YamlMFI.Mode.FP32InputDenormals;
+  MFI->Mode.FP32OutputDenormals = YamlMFI.Mode.FP32OutputDenormals;
+  MFI->Mode.FP64FP16InputDenormals = YamlMFI.Mode.FP64FP16InputDenormals;
+  MFI->Mode.FP64FP16OutputDenormals = YamlMFI.Mode.FP64FP16OutputDenormals;
 
   return false;
 }

@@ -6,16 +6,13 @@
 //
 //===----------------------------------------------------------------------===//
 // >> ---- compile src1
-// RUN: %clangxx -std=c++17  -fsycl -c %s -o %t-same-kernel-a.o
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -c %s -o %t-same-kernel-a.o
 //
 // >> ---- compile src2
-// RUN: %clangxx -DB_CPP=1 -std=c++17  -fsycl -c %s -o %t-same-kernel-b.o
+// RUN: %clangxx -DB_CPP=1 -fsycl -fsycl-targets=%sycl_triple -c %s -o %t-same-kernel-b.o
 //
 // >> ---- link the full hetero app
-// RUN: %clangxx %t-same-kernel-a.o %t-same-kernel-b.o -o %t-same-kernel.exe -fsycl
-// RUN: %CPU_RUN_PLACEHOLDER %t-same-kernel.exe
-// RUN: %GPU_RUN_PLACEHOLDER %t-same-kernel.exe
-// RUN: %ACC_RUN_PLACEHOLDER %t-same-kernel.exe
+// RUN: %clangxx %t-same-kernel-a.o %t-same-kernel-b.o -o %t-same-kernel.exe -fsycl -fsycl-targets=%sycl_triple
 
 #include <CL/sycl.hpp>
 
@@ -26,9 +23,7 @@ public:
   TestFnObj(buffer<int> &buf, handler &cgh) :
     data(buf.get_access<access::mode::write>(cgh)) {}
   accessor<int, 1, access::mode::write, access::target::global_buffer> data;
-  void operator()(id<1> item) {
-    data[item] = item[0];
-  }
+  void operator()(id<1> item) const { data[item] = item[0]; }
 };
 
 void kernel2();

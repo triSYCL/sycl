@@ -38,8 +38,7 @@ protected:
     return *Result;
   }
 
-  std::string sort(StringRef Code,
-                   StringRef FileName = "input.cpp",
+  std::string sort(StringRef Code, StringRef FileName = "input.cpp",
                    unsigned ExpectedNumRanges = 1) {
     return sort(Code, GetCodeRange(Code), FileName, ExpectedNumRanges);
   }
@@ -70,6 +69,77 @@ TEST_F(SortIncludesTest, BasicSorting) {
                  {tooling::Range(25, 1)}));
 }
 
+TEST_F(SortIncludesTest, SortedIncludesUsingSortPriorityAttribute) {
+  FmtStyle.IncludeStyle.IncludeBlocks = tooling::IncludeStyle::IBS_Regroup;
+  FmtStyle.IncludeStyle.IncludeCategories = {
+      {"^<sys/param\\.h>", 1, 0, false},
+      {"^<sys/types\\.h>", 1, 1, false},
+      {"^<sys.*/", 1, 2, false},
+      {"^<uvm/", 2, 3, false},
+      {"^<machine/", 3, 4, false},
+      {"^<dev/", 4, 5, false},
+      {"^<net.*/", 5, 6, false},
+      {"^<protocols/", 5, 7, false},
+      {"^<(fs|miscfs|msdosfs|nfs|ntfs|ufs)/", 6, 8, false},
+      {"^<(x86|amd64|i386|xen)/", 7, 8, false},
+      {"<path", 9, 11, false},
+      {"^<[^/].*\\.h>", 8, 10, false},
+      {"^\".*\\.h\"", 10, 12, false}};
+  EXPECT_EQ("#include <sys/param.h>\n"
+            "#include <sys/types.h>\n"
+            "#include <sys/ioctl.h>\n"
+            "#include <sys/socket.h>\n"
+            "#include <sys/stat.h>\n"
+            "#include <sys/wait.h>\n"
+            "\n"
+            "#include <net/if.h>\n"
+            "#include <net/if_dl.h>\n"
+            "#include <net/route.h>\n"
+            "#include <netinet/in.h>\n"
+            "#include <protocols/rwhod.h>\n"
+            "\n"
+            "#include <assert.h>\n"
+            "#include <errno.h>\n"
+            "#include <inttypes.h>\n"
+            "#include <stdio.h>\n"
+            "#include <stdlib.h>\n"
+            "\n"
+            "#include <paths.h>\n"
+            "\n"
+            "#include \"pathnames.h\"\n",
+            sort("#include <sys/param.h>\n"
+                 "#include <sys/types.h>\n"
+                 "#include <sys/ioctl.h>\n"
+                 "#include <net/if_dl.h>\n"
+                 "#include <net/route.h>\n"
+                 "#include <netinet/in.h>\n"
+                 "#include <sys/socket.h>\n"
+                 "#include <sys/stat.h>\n"
+                 "#include <sys/wait.h>\n"
+                 "#include <net/if.h>\n"
+                 "#include <protocols/rwhod.h>\n"
+                 "#include <assert.h>\n"
+                 "#include <paths.h>\n"
+                 "#include \"pathnames.h\"\n"
+                 "#include <errno.h>\n"
+                 "#include <inttypes.h>\n"
+                 "#include <stdio.h>\n"
+                 "#include <stdlib.h>\n"));
+}
+TEST_F(SortIncludesTest, SortPriorityNotDefined) {
+  FmtStyle = getLLVMStyle();
+  EXPECT_EQ("#include \"FormatTestUtils.h\"\n"
+            "#include \"clang/Format/Format.h\"\n"
+            "#include \"llvm/ADT/None.h\"\n"
+            "#include \"llvm/Support/Debug.h\"\n"
+            "#include \"gtest/gtest.h\"\n",
+            sort("#include \"clang/Format/Format.h\"\n"
+                 "#include \"llvm/ADT/None.h\"\n"
+                 "#include \"FormatTestUtils.h\"\n"
+                 "#include \"gtest/gtest.h\"\n"
+                 "#include \"llvm/Support/Debug.h\"\n"));
+}
+
 TEST_F(SortIncludesTest, NoReplacementsForValidIncludes) {
   // Identical #includes have led to a failure with an unstable sort.
   std::string Code = "#include <a>\n"
@@ -79,6 +149,23 @@ TEST_F(SortIncludesTest, NoReplacementsForValidIncludes) {
                      "#include <e>\n"
                      "#include <f>\n";
   EXPECT_TRUE(sortIncludes(FmtStyle, Code, GetCodeRange(Code), "a.cc").empty());
+}
+
+TEST_F(SortIncludesTest, MainFileHeader) {
+  std::string Code = "#include <string>\n"
+                     "\n"
+                     "#include \"a/extra_action.proto.h\"\n";
+  FmtStyle = getGoogleStyle(FormatStyle::LK_Cpp);
+  EXPECT_TRUE(
+      sortIncludes(FmtStyle, Code, GetCodeRange(Code), "a/extra_action.cc")
+          .empty());
+
+  EXPECT_EQ("#include \"foo.bar.h\"\n"
+            "\n"
+            "#include \"a.h\"\n",
+            sort("#include \"a.h\"\n"
+                 "#include \"foo.bar.h\"\n",
+                 "foo.bar.cc"));
 }
 
 TEST_F(SortIncludesTest, SortedIncludesInMultipleBlocksAreMerged) {
@@ -156,7 +243,8 @@ TEST_F(SortIncludesTest, SupportClangFormatOffCStyle) {
                  "#include <b>\n"
                  "#include <a>\n"
                  "#include <c>\n"
-                 "/* clang-format onwards */\n", "input.h", 2));
+                 "/* clang-format onwards */\n",
+                 "input.h", 2));
 }
 
 TEST_F(SortIncludesTest, IncludeSortingCanBeDisabled) {
@@ -201,6 +289,19 @@ TEST_F(SortIncludesTest, LeadingWhitespace) {
             sort("# include \"a.h\"\n"
                  "#  include \"c.h\"\n"
                  "#   include \"b.h\"\n"));
+  EXPECT_EQ("#include \"a.h\"\n", sort("#include \"a.h\"\n"
+                                       " #include \"a.h\"\n"));
+}
+
+TEST_F(SortIncludesTest, TrailingWhitespace) {
+  EXPECT_EQ("#include \"a.h\"\n"
+            "#include \"b.h\"\n"
+            "#include \"c.h\"\n",
+            sort("#include \"a.h\" \n"
+                 "#include \"c.h\"  \n"
+                 "#include \"b.h\"   \n"));
+  EXPECT_EQ("#include \"a.h\"\n", sort("#include \"a.h\"\n"
+                                       "#include \"a.h\" \n"));
 }
 
 TEST_F(SortIncludesTest, GreaterInComment) {
@@ -220,7 +321,8 @@ TEST_F(SortIncludesTest, SortsLocallyInEachBlock) {
             sort("#include \"a.h\"\n"
                  "#include \"c.h\"\n"
                  "\n"
-                 "#include \"b.h\"\n", "input.h", 0));
+                 "#include \"b.h\"\n",
+                 "input.h", 0));
 }
 
 TEST_F(SortIncludesTest, SortsAllBlocksWhenMerging) {
@@ -395,6 +497,57 @@ TEST_F(SortIncludesTest, LeavesMainHeaderFirst) {
                  "a.cc"));
 }
 
+TEST_F(SortIncludesTest, LeavesMainHeaderFirstInAdditionalExtensions) {
+  Style.IncludeIsMainRegex = "([-_](test|unittest))?|(Impl)?$";
+  EXPECT_EQ("#include \"b.h\"\n"
+            "#include \"c.h\"\n"
+            "#include \"llvm/a.h\"\n",
+            sort("#include \"llvm/a.h\"\n"
+                 "#include \"c.h\"\n"
+                 "#include \"b.h\"\n",
+                 "a_test.xxx"));
+  EXPECT_EQ("#include \"b.h\"\n"
+            "#include \"c.h\"\n"
+            "#include \"llvm/a.h\"\n",
+            sort("#include \"llvm/a.h\"\n"
+                 "#include \"c.h\"\n"
+                 "#include \"b.h\"\n",
+                 "aImpl.hpp"));
+
+  // .cpp extension is considered "main" by default
+  EXPECT_EQ("#include \"llvm/a.h\"\n"
+            "#include \"b.h\"\n"
+            "#include \"c.h\"\n",
+            sort("#include \"llvm/a.h\"\n"
+                 "#include \"c.h\"\n"
+                 "#include \"b.h\"\n",
+                 "aImpl.cpp"));
+  EXPECT_EQ("#include \"llvm/a.h\"\n"
+            "#include \"b.h\"\n"
+            "#include \"c.h\"\n",
+            sort("#include \"llvm/a.h\"\n"
+                 "#include \"c.h\"\n"
+                 "#include \"b.h\"\n",
+                 "a_test.cpp"));
+
+  // Allow additional filenames / extensions
+  Style.IncludeIsMainSourceRegex = "(Impl\\.hpp)|(\\.xxx)$";
+  EXPECT_EQ("#include \"llvm/a.h\"\n"
+            "#include \"b.h\"\n"
+            "#include \"c.h\"\n",
+            sort("#include \"llvm/a.h\"\n"
+                 "#include \"c.h\"\n"
+                 "#include \"b.h\"\n",
+                 "a_test.xxx"));
+  EXPECT_EQ("#include \"llvm/a.h\"\n"
+            "#include \"b.h\"\n"
+            "#include \"c.h\"\n",
+            sort("#include \"llvm/a.h\"\n"
+                 "#include \"c.h\"\n"
+                 "#include \"b.h\"\n",
+                 "aImpl.hpp"));
+}
+
 TEST_F(SortIncludesTest, RecognizeMainHeaderInAllGroups) {
   Style.IncludeIsMainRegex = "([-_](test|unittest))?$";
   Style.IncludeBlocks = tooling::IncludeStyle::IBS_Merge;
@@ -447,8 +600,59 @@ TEST_F(SortIncludesTest, SupportCaseInsensitiveMatching) {
                  "a_TEST.cc"));
 }
 
+TEST_F(SortIncludesTest, SupportOptionalCaseSensitiveMachting) {
+  Style.IncludeBlocks = clang::tooling::IncludeStyle::IBS_Regroup;
+  Style.IncludeCategories = {{"^\"", 1, 0, false},
+                             {"^<.*\\.h>$", 2, 0, false},
+                             {"^<Q[A-Z][^\\.]*>", 3, 0, false},
+                             {"^<Qt[^\\.]*>", 4, 0, false},
+                             {"^<", 5, 0, false}};
+
+  StringRef UnsortedCode = "#include <QWidget>\n"
+                           "#include \"qt.h\"\n"
+                           "#include <algorithm>\n"
+                           "#include <windows.h>\n"
+                           "#include <QLabel>\n"
+                           "#include \"qa.h\"\n"
+                           "#include <queue>\n"
+                           "#include <qtwhatever.h>\n"
+                           "#include <QtGlobal>\n";
+
+  EXPECT_EQ("#include \"qa.h\"\n"
+            "#include \"qt.h\"\n"
+            "\n"
+            "#include <qtwhatever.h>\n"
+            "#include <windows.h>\n"
+            "\n"
+            "#include <QLabel>\n"
+            "#include <QWidget>\n"
+            "#include <QtGlobal>\n"
+            "#include <queue>\n"
+            "\n"
+            "#include <algorithm>\n",
+            sort(UnsortedCode));
+
+  Style.IncludeCategories[2].RegexIsCaseSensitive = true;
+  Style.IncludeCategories[3].RegexIsCaseSensitive = true;
+  EXPECT_EQ("#include \"qa.h\"\n"
+            "#include \"qt.h\"\n"
+            "\n"
+            "#include <qtwhatever.h>\n"
+            "#include <windows.h>\n"
+            "\n"
+            "#include <QLabel>\n"
+            "#include <QWidget>\n"
+            "\n"
+            "#include <QtGlobal>\n"
+            "\n"
+            "#include <algorithm>\n"
+            "#include <queue>\n",
+            sort(UnsortedCode));
+}
+
 TEST_F(SortIncludesTest, NegativePriorities) {
-  Style.IncludeCategories = {{".*important_os_header.*", -1}, {".*", 1}};
+  Style.IncludeCategories = {{".*important_os_header.*", -1, 0, false},
+                             {".*", 1, 0, false}};
   EXPECT_EQ("#include \"important_os_header.h\"\n"
             "#include \"c_main.h\"\n"
             "#include \"a_other.h\"\n",
@@ -468,7 +672,8 @@ TEST_F(SortIncludesTest, NegativePriorities) {
 }
 
 TEST_F(SortIncludesTest, PriorityGroupsAreSeparatedWhenRegroupping) {
-  Style.IncludeCategories = {{".*important_os_header.*", -1}, {".*", 1}};
+  Style.IncludeCategories = {{".*important_os_header.*", -1, 0, false},
+                             {".*", 1, 0, false}};
   Style.IncludeBlocks = tooling::IncludeStyle::IBS_Regroup;
 
   EXPECT_EQ("#include \"important_os_header.h\"\n"
@@ -640,7 +845,8 @@ TEST_F(SortIncludesTest, DoNotSortLikelyXml) {
             sort("<!--;\n"
                  "#include <b>\n"
                  "#include <a>\n"
-                 "-->", "input.h", 0));
+                 "-->",
+                 "input.h", 0));
 }
 
 TEST_F(SortIncludesTest, DoNotOutputReplacementsForSortedBlocksWithRegrouping) {
@@ -653,6 +859,14 @@ TEST_F(SortIncludesTest, DoNotOutputReplacementsForSortedBlocksWithRegrouping) {
   EXPECT_EQ(Code, sort(Code, "input.h", 0));
 }
 
+TEST_F(SortIncludesTest,
+       DoNotOutputReplacementsForSortedBlocksWithRegroupingWindows) {
+  Style.IncludeBlocks = Style.IBS_Regroup;
+  std::string Code = "#include \"b.h\"\r\n"
+                     "\r\n"
+                     "#include <a.h>\r\n";
+  EXPECT_EQ(Code, sort(Code, "input.h", 0));
+}
 
 TEST_F(SortIncludesTest, DoNotRegroupGroupsInGoogleObjCStyle) {
   FmtStyle = getGoogleStyle(FormatStyle::LK_ObjC);

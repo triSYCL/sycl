@@ -41,10 +41,10 @@ $comdat.samesize = comdat samesize
 ; CHECK: @const.float = constant double 0.0
 @const.null = constant i8* null
 ; CHECK: @const.null = constant i8* null
-%const.struct.type = type { i32, i8 }
+%const.struct.type = type { i32, i8, i64 }
 %const.struct.type.packed = type <{ i32, i8 }>
-@const.struct = constant %const.struct.type { i32 -1, i8 undef }
-; CHECK: @const.struct = constant %const.struct.type { i32 -1, i8 undef }
+@const.struct = constant %const.struct.type { i32 -1, i8 undef, i64 poison }
+; CHECK: @const.struct = constant %const.struct.type { i32 -1, i8 undef, i64 poison }
 @const.struct.packed = constant %const.struct.type.packed <{ i32 -1, i8 1 }>
 ; CHECK: @const.struct.packed = constant %const.struct.type.packed <{ i32 -1, i8 1 }>
 
@@ -450,10 +450,10 @@ declare cc82 void @f.cc82()
 ; CHECK: declare hhvm_ccc void @f.cc82()
 declare hhvm_ccc void @f.hhvm_ccc()
 ; CHECK: declare hhvm_ccc void @f.hhvm_ccc()
-declare cc83 void @f.cc83()
-; CHECK: declare x86_intrcc void @f.cc83()
-declare x86_intrcc void @f.x86_intrcc()
-; CHECK: declare x86_intrcc void @f.x86_intrcc()
+declare cc83 void @f.cc83(i8* byval(i8))
+; CHECK: declare x86_intrcc void @f.cc83(i8* byval(i8))
+declare x86_intrcc void @f.x86_intrcc(i8* byval(i8))
+; CHECK: declare x86_intrcc void @f.x86_intrcc(i8* byval(i8))
 declare cc84 void @f.cc84()
 ; CHECK: declare avr_intrcc void @f.cc84()
 declare avr_intrcc void @f.avr_intrcc()
@@ -478,6 +478,8 @@ declare cc90 void @f.cc90()
 ; CHECK: declare amdgpu_cs void @f.cc90()
 declare amdgpu_cs void @f.amdgpu_cs()
 ; CHECK: declare amdgpu_cs void @f.amdgpu_cs()
+declare amdgpu_gfx void @f.amdgpu_gfx()
+; CHECK: declare amdgpu_gfx void @f.amdgpu_gfx()
 declare cc91 void @f.cc91()
 ; CHECK: declare amdgpu_kernel void @f.cc91()
 declare amdgpu_kernel void @f.amdgpu_kernel()
@@ -528,12 +530,12 @@ declare void @f.param.signext(i8 signext)
 ; CHECK: declare void @f.param.signext(i8 signext)
 declare void @f.param.inreg(i8 inreg)
 ; CHECK: declare void @f.param.inreg(i8 inreg)
-declare void @f.param.byval({ i8, i8 }* byval)
+declare void @f.param.byval({ i8, i8 }* byval({ i8, i8 }))
 ; CHECK: declare void @f.param.byval({ i8, i8 }* byval({ i8, i8 }))
 declare void @f.param.inalloca(i8* inalloca)
 ; CHECK: declare void @f.param.inalloca(i8* inalloca)
-declare void @f.param.sret(i8* sret)
-; CHECK: declare void @f.param.sret(i8* sret)
+declare void @f.param.sret(i8* sret(i8))
+; CHECK: declare void @f.param.sret(i8* sret(i8))
 declare void @f.param.noalias(i8* noalias)
 ; CHECK: declare void @f.param.noalias(i8* noalias)
 declare void @f.param.nocapture(i8* nocapture)
@@ -861,24 +863,115 @@ define void @fastmathflags_vector_select(<2 x i1> %cond, <2 x double> %op1, <2 x
   ret void
 }
 
+define void @fastmathflags_array_select(i1 %cond, [2 x double] %op1, [2 x double] %op2) {
+  %f.nnan.nsz = select nnan nsz i1 %cond, [2 x double] %op1, [2 x double] %op2
+  ; CHECK: %f.nnan.nsz = select nnan nsz i1 %cond, [2 x double] %op1, [2 x double] %op2
+  %f.fast = select fast i1 %cond, [2 x double] %op1, [2 x double] %op2
+  ; CHECK: %f.fast = select fast i1 %cond, [2 x double] %op1, [2 x double] %op2
+  ret void
+}
+
+define void @fastmathflags_phi(i1 %cond, float %f1, float %f2, double %d1, double %d2, half %h1, half %h2) {
+entry:
+  br i1 %cond, label %L1, label %L2
+L1:
+  br label %exit
+L2:
+  br label %exit
+exit:
+  %p.nnan = phi nnan float [ %f1, %L1 ], [ %f2, %L2 ]
+  ; CHECK: %p.nnan = phi nnan float [ %f1, %L1 ], [ %f2, %L2 ]
+  %p.ninf = phi ninf double [ %d1, %L1 ], [ %d2, %L2 ]
+  ; CHECK: %p.ninf = phi ninf double [ %d1, %L1 ], [ %d2, %L2 ]
+  %p.contract = phi contract half [ %h1, %L1 ], [ %h2, %L2 ]
+  ; CHECK: %p.contract = phi contract half [ %h1, %L1 ], [ %h2, %L2 ]
+  %p.nsz.reassoc = phi reassoc nsz float [ %f1, %L1 ], [ %f2, %L2 ]
+  ; CHECK: %p.nsz.reassoc = phi reassoc nsz float [ %f1, %L1 ], [ %f2, %L2 ]
+  %p.fast = phi fast half [ %h2, %L1 ], [ %h1, %L2 ]
+  ; CHECK: %p.fast = phi fast half [ %h2, %L1 ], [ %h1, %L2 ]
+  ret void
+}
+
+define void @fastmathflags_vector_phi(i1 %cond, <4 x float> %f1, <4 x float> %f2, <2 x double> %d1, <2 x double> %d2, <8 x half> %h1, <8 x half> %h2) {
+entry:
+  br i1 %cond, label %L1, label %L2
+L1:
+  br label %exit
+L2:
+  br label %exit
+exit:
+  %p.nnan = phi nnan <4 x float> [ %f1, %L1 ], [ %f2, %L2 ]
+  ; CHECK: %p.nnan = phi nnan <4 x float> [ %f1, %L1 ], [ %f2, %L2 ]
+  %p.ninf = phi ninf <2 x double> [ %d1, %L1 ], [ %d2, %L2 ]
+  ; CHECK: %p.ninf = phi ninf <2 x double> [ %d1, %L1 ], [ %d2, %L2 ]
+  %p.contract = phi contract <8 x half> [ %h1, %L1 ], [ %h2, %L2 ]
+  ; CHECK: %p.contract = phi contract <8 x half> [ %h1, %L1 ], [ %h2, %L2 ]
+  %p.nsz.reassoc = phi reassoc nsz <4 x float> [ %f1, %L1 ], [ %f2, %L2 ]
+  ; CHECK: %p.nsz.reassoc = phi reassoc nsz <4 x float> [ %f1, %L1 ], [ %f2, %L2 ]
+  %p.fast = phi fast <8 x half> [ %h2, %L1 ], [ %h1, %L2 ]
+  ; CHECK: %p.fast = phi fast <8 x half> [ %h2, %L1 ], [ %h1, %L2 ]
+  ret void
+}
+
+define void @fastmathflags_array_phi(i1 %cond, [4 x float] %f1, [4 x float] %f2, [2 x double] %d1, [2 x double] %d2, [8 x half] %h1, [8 x half] %h2) {
+entry:
+  br i1 %cond, label %L1, label %L2
+L1:
+  br label %exit
+L2:
+  br label %exit
+exit:
+  %p.nnan = phi nnan [4 x float] [ %f1, %L1 ], [ %f2, %L2 ]
+  ; CHECK: %p.nnan = phi nnan [4 x float] [ %f1, %L1 ], [ %f2, %L2 ]
+  %p.ninf = phi ninf [2 x double] [ %d1, %L1 ], [ %d2, %L2 ]
+  ; CHECK: %p.ninf = phi ninf [2 x double] [ %d1, %L1 ], [ %d2, %L2 ]
+  %p.contract = phi contract [8 x half] [ %h1, %L1 ], [ %h2, %L2 ]
+  ; CHECK: %p.contract = phi contract [8 x half] [ %h1, %L1 ], [ %h2, %L2 ]
+  %p.nsz.reassoc = phi reassoc nsz [4 x float] [ %f1, %L1 ], [ %f2, %L2 ]
+  ; CHECK: %p.nsz.reassoc = phi reassoc nsz [4 x float] [ %f1, %L1 ], [ %f2, %L2 ]
+  %p.fast = phi fast [8 x half] [ %h2, %L1 ], [ %h1, %L2 ]
+  ; CHECK: %p.fast = phi fast [8 x half] [ %h2, %L1 ], [ %h1, %L2 ]
+  ret void
+}
+
 ; Check various fast math flags and floating-point types on calls.
 
-declare float @fmf1()
-declare double @fmf2()
-declare <4 x double> @fmf3()
+declare float @fmf_f32()
+declare double @fmf_f64()
+declare <4 x double> @fmf_v4f64()
 
 ; CHECK-LABEL: fastMathFlagsForCalls(
 define void @fastMathFlagsForCalls(float %f, double %d1, <4 x double> %d2) {
-  %call.fast = call fast float @fmf1()
-  ; CHECK: %call.fast = call fast float @fmf1()
+  %call.fast = call fast float @fmf_f32()
+  ; CHECK: %call.fast = call fast float @fmf_f32()
 
   ; Throw in some other attributes to make sure those stay in the right places.
 
-  %call.nsz.arcp = notail call nsz arcp double @fmf2()
-  ; CHECK: %call.nsz.arcp = notail call nsz arcp double @fmf2()
+  %call.nsz.arcp = notail call nsz arcp double @fmf_f64()
+  ; CHECK: %call.nsz.arcp = notail call nsz arcp double @fmf_f64()
 
-  %call.nnan.ninf = tail call nnan ninf fastcc <4 x double> @fmf3()
-  ; CHECK: %call.nnan.ninf = tail call nnan ninf fastcc <4 x double> @fmf3()
+  %call.nnan.ninf = tail call nnan ninf fastcc <4 x double> @fmf_v4f64()
+  ; CHECK: %call.nnan.ninf = tail call nnan ninf fastcc <4 x double> @fmf_v4f64()
+
+  ret void
+}
+
+declare [2 x float] @fmf_a2f32()
+declare [2 x double] @fmf_a2f64()
+declare [2 x <4 x double>] @fmf_a2v4f64()
+
+; CHECK-LABEL: fastMathFlagsForArrayCalls(
+define void @fastMathFlagsForArrayCalls([2 x float] %f, [2 x double] %d1, [2 x <4 x double>] %d2) {
+  %call.fast = call fast [2 x float] @fmf_a2f32()
+  ; CHECK: %call.fast = call fast [2 x float] @fmf_a2f32()
+
+  ; Throw in some other attributes to make sure those stay in the right places.
+
+  %call.nsz.arcp = notail call nsz arcp [2 x double] @fmf_a2f64()
+  ; CHECK: %call.nsz.arcp = notail call nsz arcp [2 x double] @fmf_a2f64()
+
+  %call.nnan.ninf = tail call nnan ninf fastcc [2 x <4 x double>] @fmf_a2v4f64()
+  ; CHECK: %call.nnan.ninf = tail call nnan ninf fastcc [2 x <4 x double>] @fmf_a2v4f64()
 
   ret void
 }
@@ -982,6 +1075,8 @@ exc:
 
   resume i32 undef
   ; CHECK: resume i32 undef
+  resume i32 poison
+  ; CHECK: resume i32 poison
   unreachable
   ; CHECK: unreachable
 
@@ -1261,6 +1356,14 @@ define void @instructions.conversions() {
   ; CHECK: fptoui float undef to i32
   fptosi float undef to i32
   ; CHECK: fptosi float undef to i32
+  fptrunc float poison to half
+  ; CHECK: fptrunc float poison to half
+  fpext half poison to float
+  ; CHECK: fpext half poison to float
+  fptoui float poison to i32
+  ; CHECK: fptoui float poison to i32
+  fptosi float poison to i32
+  ; CHECK: fptosi float poison to i32
   uitofp i32 1 to float
   ; CHECK: uitofp i32 1 to float
   sitofp i32 -1 to float
@@ -1278,7 +1381,7 @@ define void @instructions.conversions() {
 }
 
 ; Instructions -- Other Operations
-define void @instructions.other(i32 %op1, i32 %op2, half %fop1, half %fop2) {
+define void @instructions.other(i32 %op1, i32 %op2, half %fop1, half %fop2, <2 x i32> %vop, i8* %pop) {
 entry:
   icmp eq  i32 %op1, %op2
   ; CHECK: icmp eq  i32 %op1, %op2
@@ -1351,16 +1454,23 @@ exit:
   ; CHECK: select <2 x i1> <i1 true, i1 false>, <2 x i8> <i8 2, i8 3>, <2 x i8> <i8 3, i8 2>
 
   call void @f.nobuiltin() builtin
-  ; CHECK: call void @f.nobuiltin() #43
-
-  call void @f.strictfp() strictfp
-  ; CHECK: call void @f.strictfp() #44
+  ; CHECK: call void @f.nobuiltin() #44
 
   call fastcc noalias i32* @f.noalias() noinline
   ; CHECK: call fastcc noalias i32* @f.noalias() #12
   tail call ghccc nonnull i32* @f.nonnull() minsize
   ; CHECK: tail call ghccc nonnull i32* @f.nonnull() #7
 
+  freeze i32 %op1
+  ; CHECK: freeze i32 %op1
+  freeze i32 10
+  ; CHECK: freeze i32 10
+  freeze half %fop1
+  ; CHECK: freeze half %fop1
+  freeze <2 x i32> %vop
+  ; CHECK: freeze <2 x i32> %vop
+  freeze i8* %pop
+  ; CHECK: freeze i8* %pop
   ret void
 }
 
@@ -1731,6 +1841,13 @@ define i8** @constexpr() {
   ret i8** getelementptr inbounds ({ [4 x i8*], [4 x i8*] }, { [4 x i8*], [4 x i8*] }* null, i32 0, inrange i32 1, i32 2)
 }
 
+define void @instructions.strictfp() strictfp {
+  call void @f.strictfp() strictfp
+  ; CHECK: call void @f.strictfp() #43
+
+  ret void
+}
+
 ; immarg attribute
 declare void @llvm.test.immarg.intrinsic(i32 immarg)
 ; CHECK: declare void @llvm.test.immarg.intrinsic(i32 immarg)
@@ -1779,16 +1896,16 @@ declare void @byval_named_type(%named_type* byval(%named_type))
 ; CHECK: attributes #32 = { norecurse }
 ; CHECK: attributes #33 = { inaccessiblememonly }
 ; CHECK: attributes #34 = { inaccessiblemem_or_argmemonly }
-; CHECK: attributes #35 = { nounwind readnone willreturn }
-; CHECK: attributes #36 = { argmemonly nounwind readonly }
-; CHECK: attributes #37 = { argmemonly nounwind }
-; CHECK: attributes #38 = { nounwind readnone }
+; CHECK: attributes #35 = { nofree nosync nounwind readnone willreturn }
+; CHECK: attributes #36 = { nofree nosync nounwind willreturn }
+; CHECK: attributes #37 = { argmemonly nounwind readonly }
+; CHECK: attributes #38 = { argmemonly nounwind }
 ; CHECK: attributes #39 = { nounwind readonly }
-; CHECK: attributes #40 = { inaccessiblemem_or_argmemonly nounwind willreturn }
+; CHECK: attributes #40 = { inaccessiblemem_or_argmemonly nofree nosync nounwind willreturn }
 ; CHECK: attributes #41 = { writeonly }
 ; CHECK: attributes #42 = { speculatable }
-; CHECK: attributes #43 = { builtin }
-; CHECK: attributes #44 = { strictfp }
+; CHECK: attributes #43 = { strictfp }
+; CHECK: attributes #44 = { builtin }
 
 ;; Metadata
 

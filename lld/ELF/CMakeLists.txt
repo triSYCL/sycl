@@ -2,10 +2,6 @@ set(LLVM_TARGET_DEFINITIONS Options.td)
 tablegen(LLVM Options.inc -gen-opt-parser-defs)
 add_public_tablegen_target(ELFOptionsTableGen)
 
-if(NOT LLD_BUILT_STANDALONE)
-  set(tablegen_deps intrinsics_gen)
-endif()
-
 add_lld_library(lldELF
   AArch64ErrataFix.cpp
   Arch/AArch64.cpp
@@ -22,6 +18,7 @@ add_lld_library(lldELF
   Arch/SPARCV9.cpp
   Arch/X86.cpp
   Arch/X86_64.cpp
+  ARMErrataFix.cpp
   CallGraphSort.cpp
   DWARF.cpp
   Driver.cpp
@@ -51,10 +48,12 @@ add_lld_library(lldELF
   BitWriter
   Core
   DebugInfoDWARF
+  Demangle
   LTO
   MC
   Object
   Option
+  Passes
   Support
 
   LINK_LIBS
@@ -63,5 +62,5 @@ add_lld_library(lldELF
 
   DEPENDS
   ELFOptionsTableGen
-  ${tablegen_deps}
+  intrinsics_gen
   )

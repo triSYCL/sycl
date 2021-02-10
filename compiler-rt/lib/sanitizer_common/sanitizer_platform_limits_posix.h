@@ -19,11 +19,12 @@
 #include "sanitizer_internal_defs.h"
 #include "sanitizer_platform.h"
 
-# define GET_LINK_MAP_BY_DLOPEN_HANDLE(handle) ((link_map*)(handle))
-
-#ifndef __GLIBC_PREREQ
-#define __GLIBC_PREREQ(x, y) 0
+#if defined(__sparc__)
+// FIXME: This can't be included from tsan which does not support sparc yet.
+#include "sanitizer_glibc_version.h"
 #endif
+
+# define GET_LINK_MAP_BY_DLOPEN_HANDLE(handle) ((link_map*)(handle))
 
 namespace __sanitizer {
 extern unsigned struct_utsname_sz;
@@ -46,6 +47,7 @@ extern unsigned struct_timezone_sz;
 extern unsigned struct_tms_sz;
 extern unsigned struct_itimerspec_sz;
 extern unsigned struct_sigevent_sz;
+extern unsigned struct_stack_t_sz;
 extern unsigned struct_sched_param_sz;
 extern unsigned struct_statfs64_sz;
 extern unsigned struct_regex_sz;
@@ -97,6 +99,9 @@ const unsigned struct_kernel_stat64_sz = 144;
 const unsigned struct___old_kernel_stat_sz = 0;
 const unsigned struct_kernel_stat_sz = 64;
 const unsigned struct_kernel_stat64_sz = 104;
+#elif SANITIZER_RISCV64
+const unsigned struct_kernel_stat_sz = 128;
+const unsigned struct_kernel_stat64_sz = 0;  // RISCV64 does not use stat64
 #endif
 struct __sanitizer_perf_event_attr {
   unsigned type;
@@ -203,26 +208,13 @@ struct __sanitizer_ipc_perm {
   u64 __unused1;
   u64 __unused2;
 #elif defined(__sparc__)
-#if defined(__arch64__)
   unsigned mode;
-  unsigned short __pad1;
-#else
-  unsigned short __pad1;
-  unsigned short mode;
   unsigned short __pad2;
-#endif
   unsigned short __seq;
   unsigned long long __unused1;
   unsigned long long __unused2;
-#elif defined(__mips__) || defined(__aarch64__) || defined(__s390x__)
-  unsigned int mode;
-  unsigned short __seq;
-  unsigned short __pad1;
-  unsigned long __unused1;
-  unsigned long __unused2;
 #else
-  unsigned short mode;
-  unsigned short __pad1;
+  unsigned int mode;
   unsigned short __seq;
   unsigned short __pad2;
 #if defined(__x86_64__) && !defined(_LP64)
@@ -303,6 +295,7 @@ extern unsigned struct_msqid_ds_sz;
 extern unsigned struct_mq_attr_sz;
 extern unsigned struct_timex_sz;
 extern unsigned struct_statvfs_sz;
+extern unsigned struct_crypt_data_sz;
 #endif  // SANITIZER_LINUX && !SANITIZER_ANDROID
 
 struct __sanitizer_iovec {
@@ -711,6 +704,12 @@ struct __sanitizer_dl_phdr_info {
 extern unsigned struct_ElfW_Phdr_sz;
 #endif
 
+struct __sanitizer_protoent {
+  char *p_name;
+  char **p_aliases;
+  int p_proto;
+};
+
 struct __sanitizer_addrinfo {
   int ai_flags;
   int ai_family;
@@ -805,7 +804,7 @@ typedef void __sanitizer_FILE;
 #if SANITIZER_LINUX && !SANITIZER_ANDROID &&                               \
     (defined(__i386) || defined(__x86_64) || defined(__mips64) ||          \
      defined(__powerpc64__) || defined(__aarch64__) || defined(__arm__) || \
-     defined(__s390__))
+     defined(__s390__) || SANITIZER_RISCV64)
 extern unsigned struct_user_regs_struct_sz;
 extern unsigned struct_user_fpregs_struct_sz;
 extern unsigned struct_user_fpxregs_struct_sz;

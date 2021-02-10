@@ -17,17 +17,19 @@ test0:
 
 # BIN:      --- !WASM
 # BIN-NEXT: FileHeader:
-# BIN-NEXT:   Version:         0x00000001
+# BIN-NEXT:   Version:         0x1
 # BIN-NEXT: Sections:
 # BIN-NEXT:   - Type:            TYPE
 # BIN-NEXT:     Signatures:
 # BIN-NEXT:       - Index:           0
-# BIN-NEXT:         ReturnType:      I32
 # BIN-NEXT:         ParamTypes:
 # BIN-NEXT:           - I32
+# BIN-NEXT:         ReturnTypes:
+# BIN-NEXT:           - I32
 # BIN-NEXT:       - Index:           1
-# BIN-NEXT:         ReturnType:      F64
 # BIN-NEXT:         ParamTypes:
+# BIN-NEXT:           - F64
+# BIN-NEXT:         ReturnTypes:
 # BIN-NEXT:           - F64
 # BIN-NEXT:   - Type:            IMPORT
 # BIN-NEXT:     Imports:
@@ -35,21 +37,14 @@ test0:
 # BIN-NEXT:         Field:           __linear_memory
 # BIN-NEXT:         Kind:            MEMORY
 # BIN-NEXT:         Memory:
-# BIN-NEXT:           Initial:         0x00000000
-# BIN-NEXT:       - Module:          env
-# BIN-NEXT:         Field:           __indirect_function_table
-# BIN-NEXT:         Kind:            TABLE
-# BIN-NEXT:         Table:
-# BIN-NEXT:           ElemType:        FUNCREF
-# BIN-NEXT:           Limits:
-# BIN-NEXT:             Initial:         0x00000000
+# BIN-NEXT:           Initial:         0x0
 # BIN-NEXT:   - Type:            FUNCTION
 # BIN-NEXT:     FunctionTypes:   [ 0 ]
 # BIN-NEXT:   - Type:            CODE
 # BIN-NEXT:     Relocations:
 # BIN-NEXT:       - Type:            R_WASM_TYPE_INDEX_LEB
 # BIN-NEXT:         Index:           1
-# BIN-NEXT:         Offset:          0x00000004
+# BIN-NEXT:         Offset:          0x4
 # BIN-NEXT:     Functions:
 # BIN-NEXT:       - Index:           0
 # BIN-NEXT:         Locals:          []
@@ -64,4 +59,3 @@ test0:
 # BIN-NEXT:         Flags:           [ BINDING_LOCAL ]
 # BIN-NEXT:         Function:        0
 # BIN-NEXT: ...
-

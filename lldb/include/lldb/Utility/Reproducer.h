@@ -10,17 +10,19 @@
 #define LLDB_UTILITY_REPRODUCER_H
 
 #include "lldb/Utility/FileSpec.h"
-
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
-#include "llvm/Support/FileCollector.h"
+#include "llvm/Support/VirtualFileSystem.h"
 #include "llvm/Support/YAMLTraits.h"
 
 #include <mutex>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace lldb_private {
+class UUID;
 namespace repro {
 
 class Reproducer;
@@ -28,6 +30,7 @@ class Reproducer;
 enum class ReproducerMode {
   Capture,
   Replay,
+  PassiveReplay,
   Off,
 };
 
@@ -82,141 +85,13 @@ protected:
   using ProviderBase::ProviderBase; // Inherit constructor.
 };
 
-class FileProvider : public Provider<FileProvider> {
-public:
-  struct Info {
-    static const char *name;
-    static const char *file;
-  };
-
-  FileProvider(const FileSpec &directory)
-      : Provider(directory),
-        m_collector(std::make_shared<llvm::FileCollector>(
-            directory.CopyByAppendingPathComponent("root").GetPath(),
-            directory.GetPath())) {}
-
-  std::shared_ptr<llvm::FileCollector> GetFileCollector() {
-    return m_collector;
-  }
-
-  void Keep() override {
-    auto mapping = GetRoot().CopyByAppendingPathComponent(Info::file);
-    // Temporary files that are removed during execution can cause copy errors.
-    if (auto ec = m_collector->copyFiles(/*stop_on_error=*/false))
-      return;
-    m_collector->writeMapping(mapping.GetPath());
-  }
-
-  static char ID;
-
-private:
-  std::shared_ptr<llvm::FileCollector> m_collector;
-};
-
-/// Provider for the LLDB version number.
-///
-/// When the reproducer is kept, it writes the lldb version to a file named
-/// version.txt in the reproducer root.
-class VersionProvider : public Provider<VersionProvider> {
-public:
-  VersionProvider(const FileSpec &directory) : Provider(directory) {}
-  struct Info {
-    static const char *name;
-    static const char *file;
-  };
-  void SetVersion(std::string version) {
-    assert(m_version.empty());
-    m_version = std::move(version);
-  }
-  void Keep() override;
-  std::string m_version;
-  static char ID;
-};
-
-class DataRecorder {
-public:
-  DataRecorder(const FileSpec &filename, std::error_code &ec)
-      : m_filename(filename.GetFilename().GetStringRef()),
-        m_os(filename.GetPath(), ec, llvm::sys::fs::OF_Text), m_record(true) {}
-
-  static llvm::Expected<std::unique_ptr<DataRecorder>>
-  Create(const FileSpec &filename);
-
-  template <typename T> void Record(const T &t, bool newline = false) {
-    if (!m_record)
-      return;
-    m_os << t;
-    if (newline)
-      m_os << '\n';
-    m_os.flush();
-  }
-
-  const FileSpec &GetFilename() { return m_filename; }
-
-  void Stop() {
-    assert(m_record);
-    m_record = false;
-  }
-
-private:
-  FileSpec m_filename;
-  llvm::raw_fd_ostream m_os;
-  bool m_record;
-};
-
-class CommandProvider : public Provider<CommandProvider> {
-public:
-  struct Info {
-    static const char *name;
-    static const char *file;
-  };
-
-  CommandProvider(const FileSpec &directory) : Provider(directory) {}
-
-  DataRecorder *GetNewDataRecorder();
-
-  void Keep() override;
-  void Discard() override;
-
-  static char ID;
-
-private:
-  std::vector<std::unique_ptr<DataRecorder>> m_data_recorders;
-};
-
-class ProcessGDBRemoteProvider
-    : public repro::Provider<ProcessGDBRemoteProvider> {
-public:
-  struct Info {
-    static const char *name;
-    static const char *file;
-  };
-
-  ProcessGDBRemoteProvider(const FileSpec &directory) : Provider(directory) {}
-
-  llvm::raw_ostream *GetHistoryStream();
-
-  void SetCallback(std::function<void()> callback) {
-    m_callback = std::move(callback);
-  }
-
-  void Keep() override { m_callback(); }
-  void Discard() override { m_callback(); }
-
-  static char ID;
-
-private:
-  std::function<void()> m_callback;
-  std::unique_ptr<llvm::raw_fd_ostream> m_stream_up;
-};
-
 /// The generator is responsible for the logic needed to generate a
 /// reproducer. For doing so it relies on providers, who serialize data that
 /// is necessary for reproducing  a failure.
 class Generator final {
 
 public:
-  Generator(const FileSpec &root);
+  Generator(FileSpec root);
   ~Generator();
 
   /// Method to indicate we want to keep the reproducer. If reproducer
@@ -227,6 +102,12 @@ public:
   /// unaffected by whether or not generation reproduction is enabled, as we
   /// might need to clean up files already written to disk.
   void Discard();
+
+  /// Enable or disable auto generate.
+  void SetAutoGenerate(bool b);
+
+  /// Return whether auto generate is enabled.
+  bool IsAutoGenerate() const;
 
   /// Create and register a new provider.
   template <typename T> T *Create() {
@@ -268,12 +149,15 @@ private:
   FileSpec m_root;
 
   /// Flag to ensure that we never call both keep and discard.
-  bool m_done;
+  bool m_done = false;
+
+  /// Flag to auto generate a reproducer when it would otherwise be discarded.
+  bool m_auto_generate = false;
 };
 
 class Loader final {
 public:
-  Loader(const FileSpec &root);
+  Loader(FileSpec root, bool passive = false);
 
   template <typename T> FileSpec GetFile() {
     if (!HasFile(T::file))
@@ -282,9 +166,20 @@ public:
     return GetRoot().CopyByAppendingPathComponent(T::file);
   }
 
+  template <typename T> llvm::Expected<std::string> LoadBuffer() {
+    FileSpec file = GetFile<typename T::Info>();
+    llvm::ErrorOr<std::unique_ptr<llvm::MemoryBuffer>> buffer =
+        llvm::vfs::getRealFileSystem()->getBufferForFile(file.GetPath());
+    if (!buffer)
+      return llvm::errorCodeToError(buffer.getError());
+    return (*buffer)->getBuffer().str();
+  }
+
   llvm::Error LoadIndex();
 
   const FileSpec &GetRoot() const { return m_root; }
+
+  bool IsPassiveReplay() const { return m_passive_replay; }
 
 private:
   bool HasFile(llvm::StringRef file);
@@ -292,6 +187,7 @@ private:
   FileSpec m_root;
   std::vector<std::string> m_files;
   bool m_loaded;
+  bool m_passive_replay;
 };
 
 /// The reproducer enables clients to obtain access to the Generator and
@@ -301,6 +197,7 @@ public:
   static Reproducer &Instance();
   static llvm::Error Initialize(ReproducerMode mode,
                                 llvm::Optional<FileSpec> root);
+  static void Initialize();
   static bool Initialized();
   static void Terminate();
 
@@ -314,9 +211,12 @@ public:
 
   FileSpec GetReproducerPath() const;
 
+  bool IsCapturing() { return static_cast<bool>(m_generator); };
+  bool IsReplaying() { return static_cast<bool>(m_loader); };
+
 protected:
   llvm::Error SetCapture(llvm::Optional<FileSpec> root);
-  llvm::Error SetReplay(llvm::Optional<FileSpec> root);
+  llvm::Error SetReplay(llvm::Optional<FileSpec> root, bool passive = false);
 
 private:
   static llvm::Optional<Reproducer> &InstanceImpl();
@@ -327,18 +227,24 @@ private:
   mutable std::mutex m_mutex;
 };
 
-/// Helper class for replaying commands through the reproducer.
-class CommandLoader {
+class Verifier {
 public:
-  CommandLoader(std::vector<std::string> files) : m_files(files) {}
-
-  static std::unique_ptr<CommandLoader> Create(Loader *loader);
-  llvm::Optional<std::string> GetNextFile();
+  Verifier(Loader *loader) : m_loader(loader) {}
+  void Verify(llvm::function_ref<void(llvm::StringRef)> error_callback,
+              llvm::function_ref<void(llvm::StringRef)> warning_callback,
+              llvm::function_ref<void(llvm::StringRef)> note_callback) const;
 
 private:
-  std::vector<std::string> m_files;
-  unsigned m_index = 0;
+  Loader *m_loader;
 };
+
+struct ReplayOptions {
+  bool verify = true;
+  bool check_version = true;
+};
+
+llvm::Error Finalize(Loader *loader);
+llvm::Error Finalize(const FileSpec &root);
 
 } // namespace repro
 } // namespace lldb_private

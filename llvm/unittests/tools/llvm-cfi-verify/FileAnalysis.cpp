@@ -62,9 +62,10 @@ public:
 
 class BasicFileAnalysisTest : public ::testing::Test {
 public:
-  BasicFileAnalysisTest(StringRef Trip) : Analysis(Trip) {}
+  BasicFileAnalysisTest(StringRef Trip)
+      : SuccessfullyInitialised(false), Analysis(Trip) {}
 protected:
-  virtual void SetUp() {
+  void SetUp() override {
     IgnoreDWARFFlag = true;
     SuccessfullyInitialised = true;
     if (auto Err = Analysis.initialiseDisassemblyMembers()) {

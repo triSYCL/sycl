@@ -126,32 +126,12 @@ _start:
 # CHECK-NEXT:     EntrySize: 0
 # CHECK-NEXT:   }
 # CHECK-NEXT: ]
-# CHECK-NEXT: Symbols [
-# CHECK-NEXT:   Symbol {
-# CHECK-NEXT:     Name:  (0)
-# CHECK-NEXT:     Value: 0x0
-# CHECK-NEXT:     Size: 0
-# CHECK-NEXT:     Binding: Local (0x0)
-# CHECK-NEXT:     Type: None (0x0)
-# CHECK-NEXT:     Other: 0
-# CHECK-NEXT:     Section: Undefined (0x0)
-# CHECK-NEXT:   }
-# CHECK-NEXT:   Symbol {
-# CHECK-NEXT:     Name: _start
-# CHECK-NEXT:     Value: [[ENTRY]]
-# CHECK-NEXT:     Size: 0
-# CHECK-NEXT:     Binding: Global (0x1)
-# CHECK-NEXT:     Type: None (0x0)
-# CHECK-NEXT:     Other: 0
-# CHECK-NEXT:     Section: .text
-# CHECK-NEXT:   }
-# CHECK-NEXT: ]
 # CHECK-NEXT: ProgramHeaders [
 # CHECK-NEXT:   ProgramHeader {
 # CHECK-NEXT:     Type: PT_PHDR (0x6)
 # CHECK-NEXT:     Offset: 0x40
-# CHECK-NEXT:     VirtualAddress: 0x200040
-# CHECK-NEXT:     PhysicalAddress: 0x200040
+# CHECK-NEXT:     VirtualAddress: 0x100040
+# CHECK-NEXT:     PhysicalAddress: 0x100040
 # CHECK-NEXT:     FileSize: 224
 # CHECK-NEXT:     MemSize: 224
 # CHECK-NEXT:     Flags [ (0x4)
@@ -162,8 +142,8 @@ _start:
 # CHECK-NEXT:   ProgramHeader {
 # CHECK-NEXT:     Type: PT_LOAD (0x1)
 # CHECK-NEXT:     Offset: 0x0
-# CHECK-NEXT:     VirtualAddress: 0x200000
-# CHECK-NEXT:     PhysicalAddress: 0x200000
+# CHECK-NEXT:     VirtualAddress: 0x100000
+# CHECK-NEXT:     PhysicalAddress: 0x100000
 # CHECK-NEXT:     FileSize: 288
 # CHECK-NEXT:     MemSize: 288
 # CHECK-NEXT:     Flags [
@@ -196,5 +176,25 @@ _start:
 # CHECK-NEXT:       PF_W
 # CHECK-NEXT:     ]
 # CHECK-NEXT:     Alignment: 0
+# CHECK-NEXT:   }
+# CHECK-NEXT: ]
+# CHECK-NEXT: Symbols [
+# CHECK-NEXT:   Symbol {
+# CHECK-NEXT:     Name:  (0)
+# CHECK-NEXT:     Value: 0x0
+# CHECK-NEXT:     Size: 0
+# CHECK-NEXT:     Binding: Local (0x0)
+# CHECK-NEXT:     Type: None (0x0)
+# CHECK-NEXT:     Other: 0
+# CHECK-NEXT:     Section: Undefined (0x0)
+# CHECK-NEXT:   }
+# CHECK-NEXT:   Symbol {
+# CHECK-NEXT:     Name: _start
+# CHECK-NEXT:     Value: [[ENTRY]]
+# CHECK-NEXT:     Size: 0
+# CHECK-NEXT:     Binding: Global (0x1)
+# CHECK-NEXT:     Type: None (0x0)
+# CHECK-NEXT:     Other: 0
+# CHECK-NEXT:     Section: .text
 # CHECK-NEXT:   }
 # CHECK-NEXT: ]

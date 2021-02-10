@@ -204,22 +204,19 @@ int f() {
 // DARWIN: declare i32 @_tlv_atexit(void (i8*)*, i8*, i8*)
 
 // DARWIN: declare cxx_fast_tlscc i32* @_ZTWN1VIcE1mE()
-// LINUX: define linkonce_odr hidden i32* @_ZTWN1VIcE1mE()
-// LINUX-NOT: comdat
+// LINUX: define linkonce_odr hidden i32* @_ZTWN1VIcE1mE() {{#[0-9]+}} comdat {
 // LINUX: br i1 icmp ne (void ()* @_ZTHN1VIcE1mE,
 // LINUX: call void @_ZTHN1VIcE1mE()
 // LINUX: ret i32* @_ZN1VIcE1mE
 
 // DARWIN: declare cxx_fast_tlscc i32* @_ZTWN1WIcE1mE()
-// LINUX: define linkonce_odr hidden i32* @_ZTWN1WIcE1mE()
-// LINUX-NOT: comdat
+// LINUX: define linkonce_odr hidden i32* @_ZTWN1WIcE1mE() {{#[0-9]+}} comdat {
 // LINUX: br i1 icmp ne (void ()* @_ZTHN1WIcE1mE,
 // LINUX: call void @_ZTHN1WIcE1mE()
 // LINUX: ret i32* @_ZN1WIcE1mE
 
 // DARWIN: declare cxx_fast_tlscc {{.*}}* @_ZTWN1XIcE1mE()
-// LINUX: define linkonce_odr hidden {{.*}}* @_ZTWN1XIcE1mE()
-// LINUX-NOT: comdat
+// LINUX: define linkonce_odr hidden {{.*}}* @_ZTWN1XIcE1mE() {{#[0-9]+}} comdat {
 // LINUX: br i1 icmp ne (void ()* @_ZTHN1XIcE1mE,
 // LINUX: call void @_ZTHN1XIcE1mE()
 // LINUX: ret {{.*}}* @_ZN1XIcE1mE
@@ -230,7 +227,7 @@ struct T { ~T(); };
 // CHECK-LABEL: define void @_Z8tls_dtorv()
 void tls_dtor() {
   // CHECK: load i8, i8* @_ZGVZ8tls_dtorvE1s
-  // CHECK: call void @_ZN1SC1Ev(%struct.S* @_ZZ8tls_dtorvE1s)
+  // CHECK: call void @_ZN1SC1Ev(%struct.S* {{[^,]*}} @_ZZ8tls_dtorvE1s)
   // LINUX: call i32 @__cxa_thread_atexit({{.*}}@_ZN1SD1Ev {{.*}} @_ZZ8tls_dtorvE1s{{.*}} @__dso_handle
   // DARWIN: call i32 @_tlv_atexit({{.*}}@_ZN1SD1Ev {{.*}} @_ZZ8tls_dtorvE1s{{.*}} @__dso_handle
   // CHECK: store i8 1, i8* @_ZGVZ8tls_dtorvE1s
@@ -244,7 +241,7 @@ void tls_dtor() {
   static thread_local T t;
 
   // CHECK: load i8, i8* @_ZGVZ8tls_dtorvE1u
-  // CHECK: call void @_ZN1SC1Ev(%struct.S* @_ZGRZ8tls_dtorvE1u_)
+  // CHECK: call void @_ZN1SC1Ev(%struct.S* {{[^,]*}} @_ZGRZ8tls_dtorvE1u_)
   // LINUX: call i32 @__cxa_thread_atexit({{.*}}@_ZN1SD1Ev {{.*}} @_ZGRZ8tls_dtorvE1u_{{.*}} @__dso_handle
   // DARWIN: call i32 @_tlv_atexit({{.*}}@_ZN1SD1Ev {{.*}} @_ZGRZ8tls_dtorvE1u_{{.*}} @__dso_handle
   // CHECK: store i8 1, i8* @_ZGVZ8tls_dtorvE1u

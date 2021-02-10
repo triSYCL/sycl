@@ -4,12 +4,13 @@ set(LIBCXX_LIB_CMAKEFILES_DIR "${CMAKE_CURRENT_BINARY_DIR}${CMAKE_FILES_DIRECTOR
 set(LIBCXX_SOURCES
   algorithm.cpp
   any.cpp
+  atomic.cpp
+  barrier.cpp
   bind.cpp
   charconv.cpp
   chrono.cpp
   condition_variable.cpp
   condition_variable_destructor.cpp
-  debug.cpp
   exception.cpp
   functional.cpp
   future.cpp
@@ -18,20 +19,15 @@ set(LIBCXX_SOURCES
   include/atomic_support.h
   include/config_elast.h
   include/refstring.h
-  ios.cpp
-  iostream.cpp
-  locale.cpp
   memory.cpp
   mutex.cpp
   mutex_destructor.cpp
   new.cpp
   optional.cpp
-  random.cpp
-  regex.cpp
+  random_shuffle.cpp
   shared_mutex.cpp
   stdexcept.cpp
   string.cpp
-  strstream.cpp
   support/runtime/exception_fallback.ipp
   support/runtime/exception_glibcxx.ipp
   support/runtime/exception_libcxxabi.ipp
@@ -52,6 +48,29 @@ set(LIBCXX_SOURCES
   variant.cpp
   vector.cpp
   )
+
+if (LIBCXX_ENABLE_DEBUG_MODE_SUPPORT)
+  list(APPEND LIBCXX_SOURCES
+    debug.cpp
+    )
+endif()
+
+if (LIBCXX_ENABLE_RANDOM_DEVICE)
+  list(APPEND LIBCXX_SOURCES
+    random.cpp
+    )
+endif()
+
+if (LIBCXX_ENABLE_LOCALIZATION)
+  list(APPEND LIBCXX_SOURCES
+    ios.cpp
+    ios.instantiations.cpp
+    iostream.cpp
+    locale.cpp
+    regex.cpp
+    strstream.cpp
+    )
+endif()
 
 if(WIN32)
   list(APPEND LIBCXX_SOURCES
@@ -137,65 +156,6 @@ if (APPLE AND LLVM_USE_SANITIZER)
   endif()
 endif()
 
-function(cxx_link_system_libraries target)
-  target_add_link_flags_if_supported(${target} PRIVATE "-nodefaultlibs")
-  target_add_compile_flags_if_supported(${target} PRIVATE "/Zl")
-  target_add_link_flags_if_supported(${target} PRIVATE "/nodefaultlib")
-
-  if (LIBCXX_HAS_SYSTEM_LIB)
-    target_link_libraries(${target} PUBLIC System)
-  endif()
-
-  if (LIBCXX_HAS_PTHREAD_LIB)
-    target_link_libraries(${target} PUBLIC pthread)
-  endif()
-
-  if (LIBCXX_HAS_C_LIB)
-    target_link_libraries(${target} PUBLIC c)
-  endif()
-
-  if (LIBCXX_HAS_M_LIB)
-    target_link_libraries(${target} PUBLIC m)
-  endif()
-
-  if (LIBCXX_HAS_RT_LIB)
-    target_link_libraries(${target} PUBLIC rt)
-  endif()
-
-  if (LIBCXX_USE_COMPILER_RT)
-    find_compiler_rt_library(builtins LIBCXX_BUILTINS_LIBRARY)
-    if (LIBCXX_BUILTINS_LIBRARY)
-      target_link_libraries(${target} PUBLIC "${LIBCXX_BUILTINS_LIBRARY}")
-    endif()
-  elseif (LIBCXX_HAS_GCC_S_LIB)
-    target_link_libraries(${target} PUBLIC gcc_s)
-  endif()
-
-  if (LIBCXX_HAVE_CXX_ATOMICS_WITH_LIB)
-    target_link_libraries(${target} PUBLIC atomic)
-  endif()
-
-  if (MINGW)
-    target_link_libraries(${target} PUBLIC "${MINGW_LIBRARIES}")
-  endif()
-
-  if (LIBCXX_TARGETING_MSVC)
-    if (LIBCXX_DEBUG_BUILD)
-      set(LIB_SUFFIX "d")
-    else()
-      set(LIB_SUFFIX "")
-    endif()
-
-    target_link_libraries(${target} PUBLIC ucrt${LIB_SUFFIX}) # Universal C runtime
-    target_link_libraries(${target} PUBLIC vcruntime${LIB_SUFFIX}) # C++ runtime
-    target_link_libraries(${target} PUBLIC msvcrt${LIB_SUFFIX}) # C runtime startup files
-    target_link_libraries(${target} PUBLIC msvcprt${LIB_SUFFIX}) # C++ standard library. Required for exception_ptr internals.
-    # Required for standards-complaint wide character formatting functions
-    # (e.g. `printfw`/`scanfw`)
-    target_link_libraries(${target} PUBLIC iso_stdio_wide_specifiers)
-  endif()
-endfunction()
-
 if (LIBCXX_ENABLE_PARALLEL_ALGORITHMS AND NOT TARGET pstl::ParallelSTL)
   message(FATAL_ERROR "Could not find ParallelSTL")
 endif()
@@ -203,35 +163,6 @@ endif()
 function(cxx_set_common_defines name)
   if(LIBCXX_CXX_ABI_HEADER_TARGET)
     add_dependencies(${name} ${LIBCXX_CXX_ABI_HEADER_TARGET})
-  endif()
-  # Our visibility annotations are not quite right for non-Clang compilers,
-  # so we end up not exporting all the symbols we should. In the future, we
-  # can improve the situation by providing an explicit list of exported
-  # symbols on all compilers.
-  if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(${name} PRIVATE -fvisibility=hidden)
-  endif()
-  if(WIN32 AND NOT MINGW)
-    target_compile_definitions(${name}
-                               PRIVATE
-                                 # Ignore the -MSC_VER mismatch, as we may build
-                                 # with a different compatibility version.
-                                 _ALLOW_MSC_VER_MISMATCH
-                                 # Don't check the msvcprt iterator debug levels
-                                 # as we will define the iterator types; libc++
-                                 # uses a different macro to identify the debug
-                                 # level.
-                                 _ALLOW_ITERATOR_DEBUG_LEVEL_MISMATCH
-                                 # We are building the c++ runtime, don't pull in
-                                 # msvcprt.
-                                 _CRTBLD
-                                 # Don't warn on the use of "deprecated"
-                                 # "insecure" functions which are standards
-                                 # specified.
-                                 _CRT_SECURE_NO_WARNINGS
-                                 # Use the ISO conforming behaviour for conversion
-                                 # in printf, scanf.
-                                 _CRT_STDIO_ISO_WIDE_SPECIFIERS)
   endif()
 
   if (LIBCXX_ENABLE_PARALLEL_ALGORITHMS)
@@ -245,11 +176,8 @@ split_list(LIBCXX_LINK_FLAGS)
 # Build the shared library.
 if (LIBCXX_ENABLE_SHARED)
   add_library(cxx_shared SHARED ${exclude_from_all} ${LIBCXX_SOURCES} ${LIBCXX_HEADERS})
-  if(COMMAND llvm_setup_rpath)
-    llvm_setup_rpath(cxx_shared)
-  endif()
-  cxx_link_system_libraries(cxx_shared)
-  target_link_libraries(cxx_shared PRIVATE ${LIBCXX_LIBRARIES})
+  target_link_libraries(cxx_shared PUBLIC cxx-headers
+                                   PRIVATE ${LIBCXX_LIBRARIES})
   set_target_properties(cxx_shared
     PROPERTIES
       COMPILE_FLAGS "${LIBCXX_COMPILE_FLAGS}"
@@ -259,18 +187,17 @@ if (LIBCXX_ENABLE_SHARED)
       SOVERSION     "${LIBCXX_ABI_VERSION}"
       DEFINE_SYMBOL ""
   )
+  cxx_add_common_build_flags(cxx_shared)
   cxx_set_common_defines(cxx_shared)
 
   # Link against LLVM libunwind
   if (LIBCXXABI_USE_LLVM_UNWINDER)
     if (NOT LIBCXXABI_STATICALLY_LINK_UNWINDER_IN_SHARED_LIBRARY AND (TARGET unwind_shared OR HAVE_LIBUNWIND))
       target_link_libraries(cxx_shared PUBLIC unwind_shared)
-      list(APPEND LIBCXX_INTERFACE_LIBRARIES unwind_shared) # For the linker script
     elseif (LIBCXXABI_STATICALLY_LINK_UNWINDER_IN_SHARED_LIBRARY AND (TARGET unwind_static OR HAVE_LIBUNWIND))
       # libunwind is already included in libc++abi
     else()
-      target_link_libraries(cxx_shared PRIVATE unwind)
-      list(APPEND LIBCXX_INTERFACE_LIBRARIES unwind) # For the linker script
+      target_link_libraries(cxx_shared PUBLIC unwind)
     endif()
   endif()
 
@@ -283,7 +210,6 @@ if (LIBCXX_ENABLE_SHARED)
     endif()
   else()
     target_link_libraries(cxx_shared PUBLIC "${LIBCXX_CXX_SHARED_ABI_LIBRARY}")
-    list(APPEND LIBCXX_INTERFACE_LIBRARIES "${LIBCXX_CXX_SHARED_ABI_LIBRARY}") # For the linker script
   endif()
 
   # Maybe re-export symbols from libc++abi
@@ -294,47 +220,19 @@ if (LIBCXX_ENABLE_SHARED)
   endif()
 
   if (LIBCXX_OSX_REEXPORT_LIBCXXABI_SYMBOLS)
-    if ("${CMAKE_OSX_ARCHITECTURES}" MATCHES "^(armv6|armv7|armv7s)$")
-      set(RE_EXPORT_LIST "${CMAKE_CURRENT_SOURCE_DIR}/../lib/libc++sjlj-abi.v${LIBCXX_LIBCPPABI_VERSION}.exp")
-    else()
-      set(RE_EXPORT_LIST "${CMAKE_CURRENT_SOURCE_DIR}/../lib/libc++abi.v${LIBCXX_LIBCPPABI_VERSION}.exp")
-    endif()
     target_link_libraries(cxx_shared PRIVATE
       "-Wl,-unexported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/../lib/libc++unexp.exp"
-      "-Wl,-reexported_symbols_list,${RE_EXPORT_LIST}"
+      "-Wl,-reexported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/../lib/libc++abi.v${LIBCXX_LIBCPPABI_VERSION}.exp"
       "-Wl,-force_symbols_not_weak_list,${CMAKE_CURRENT_SOURCE_DIR}/../lib/notweak.exp"
       "-Wl,-force_symbols_weak_list,${CMAKE_CURRENT_SOURCE_DIR}/../lib/weak.exp")
 
-    if (NOT LIBCXX_ENABLE_NEW_DELETE_DEFINITIONS)
-      target_link_libraries(cxx_shared PRIVATE "-Wl,-reexported_symbols_list,${CMAKE_CURRENT_SOURCE_DIR}/../lib/libc++abi-new-delete.exp")
-    endif()
+    target_link_libraries(cxx_shared PRIVATE $<TARGET_NAME_IF_EXISTS:cxxabi-reexports>)
   endif()
 
-  # Generate a linker script in place of a libc++.so symlink. Rerun this command
-  # after cxx builds.
+  # Generate a linker script in place of a libc++.so symlink.
   if (LIBCXX_ENABLE_ABI_LINKER_SCRIPT)
-    # Get the name of the ABI library and handle the case where CXXABI_LIBNAME
-    # is a target name and not a library. Ex cxxabi_shared.
-    set(LIBCXX_INTERFACE_LIBRARY_NAMES)
-    foreach(lib ${LIBCXX_INTERFACE_LIBRARIES})
-      # FIXME: Handle cxxabi_static and unwind_static.
-      if (TARGET ${lib} OR
-          (${lib} MATCHES "cxxabi(_static|_shared)?" AND HAVE_LIBCXXABI) OR
-          (${lib} MATCHES "unwind(_static|_shared)?" AND HAVE_LIBUNWIND))
-        list(APPEND LIBCXX_INTERFACE_LIBRARY_NAMES "$<TARGET_PROPERTY:${lib},OUTPUT_NAME>")
-      else()
-        list(APPEND LIBCXX_INTERFACE_LIBRARY_NAMES "${lib}")
-      endif()
-    endforeach()
-    add_custom_command(TARGET cxx_shared POST_BUILD
-      COMMAND
-        ${PYTHON_EXECUTABLE} ${LIBCXX_SOURCE_DIR}/utils/gen_link_script.py
-      ARGS
-        --input "$<TARGET_SONAME_FILE:cxx_shared>"
-        --output "$<TARGET_LINKER_FILE:cxx_shared>"
-        ${LIBCXX_INTERFACE_LIBRARY_NAMES}
-      WORKING_DIRECTORY ${LIBCXX_BUILD_DIR}
-    )
+      include(DefineLinkerScript)
+      define_linker_script(cxx_shared)
   endif()
 
   list(APPEND LIBCXX_BUILD_TARGETS "cxx_shared")
@@ -350,8 +248,8 @@ endif()
 # Build the static library.
 if (LIBCXX_ENABLE_STATIC)
   add_library(cxx_static STATIC ${exclude_from_all} ${LIBCXX_SOURCES} ${LIBCXX_HEADERS})
-  cxx_link_system_libraries(cxx_static)
-  target_link_libraries(cxx_static PRIVATE ${LIBCXX_LIBRARIES})
+  target_link_libraries(cxx_static PUBLIC cxx-headers
+                                   PRIVATE ${LIBCXX_LIBRARIES})
   set(CMAKE_STATIC_LIBRARY_PREFIX "lib")
   set_target_properties(cxx_static
     PROPERTIES
@@ -359,6 +257,7 @@ if (LIBCXX_ENABLE_STATIC)
       LINK_FLAGS    "${LIBCXX_LINK_FLAGS}"
       OUTPUT_NAME   "c++"
   )
+  cxx_add_common_build_flags(cxx_static)
   cxx_set_common_defines(cxx_static)
 
   if (LIBCXX_HERMETIC_STATIC_LIBRARY)
@@ -390,7 +289,7 @@ if (LIBCXX_ENABLE_STATIC)
     endif()
     add_custom_command(TARGET cxx_static POST_BUILD
     COMMAND
-      ${PYTHON_EXECUTABLE} ${LIBCXX_SOURCE_DIR}/utils/merge_archives.py
+      ${Python3_EXECUTABLE} ${LIBCXX_SOURCE_DIR}/utils/merge_archives.py
     ARGS
       -o $<TARGET_LINKER_FILE:cxx_static>
       --ar "${CMAKE_AR}"
@@ -404,7 +303,7 @@ if (LIBCXX_ENABLE_STATIC)
 endif()
 
 # Add a meta-target for both libraries.
-add_custom_target(cxx DEPENDS cxx-headers ${LIBCXX_BUILD_TARGETS})
+add_custom_target(cxx DEPENDS ${LIBCXX_BUILD_TARGETS})
 
 if (LIBCXX_ENABLE_EXPERIMENTAL_LIBRARY)
   set(LIBCXX_EXPERIMENTAL_SOURCES
@@ -412,25 +311,23 @@ if (LIBCXX_ENABLE_EXPERIMENTAL_LIBRARY)
     )
   add_library(cxx_experimental STATIC ${LIBCXX_EXPERIMENTAL_SOURCES})
   if (LIBCXX_ENABLE_SHARED)
-    target_link_libraries(cxx_experimental cxx_shared)
+    target_link_libraries(cxx_experimental PRIVATE cxx_shared)
   else()
-    target_link_libraries(cxx_experimental cxx_static)
+    target_link_libraries(cxx_experimental PRIVATE cxx_static)
   endif()
 
-  set(experimental_flags "${LIBCXX_COMPILE_FLAGS}")
-  check_flag_supported(-std=c++14)
-  if (NOT MSVC AND LIBCXX_SUPPORTS_STD_EQ_CXX14_FLAG)
-    string(REPLACE "-std=c++11" "-std=c++14" experimental_flags "${LIBCXX_COMPILE_FLAGS}")
-  endif()
   set_target_properties(cxx_experimental
     PROPERTIES
-      COMPILE_FLAGS "${experimental_flags}"
+      COMPILE_FLAGS "${LIBCXX_COMPILE_FLAGS}"
       OUTPUT_NAME   "c++experimental"
   )
+  cxx_add_common_build_flags(cxx_experimental)
 endif()
 
+
 if (LIBCXX_BUILD_EXTERNAL_THREAD_LIBRARY)
-  file(GLOB LIBCXX_EXTERNAL_THREADING_SUPPORT_SOURCES ../test/support/external_threads.cpp)
+  set(LIBCXX_EXTERNAL_THREADING_SUPPORT_SOURCES
+      "${CMAKE_CURRENT_SOURCE_DIR}/../test/support/external_threads.cpp")
 
   if (LIBCXX_ENABLE_SHARED)
     add_library(cxx_external_threads SHARED ${LIBCXX_EXTERNAL_THREADING_SUPPORT_SOURCES})
@@ -444,43 +341,42 @@ if (LIBCXX_BUILD_EXTERNAL_THREAD_LIBRARY)
       COMPILE_FLAGS "${LIBCXX_COMPILE_FLAGS}"
       OUTPUT_NAME   "c++external_threads"
   )
+
+  target_link_libraries(cxx_external_threads PRIVATE cxx-headers)
 endif()
 
-if (LIBCXX_INSTALL_LIBRARY)
-  if (LIBCXX_INSTALL_SHARED_LIBRARY)
-    install(TARGETS cxx_shared
-      ARCHIVE DESTINATION ${LIBCXX_INSTALL_PREFIX}${LIBCXX_INSTALL_LIBRARY_DIR} COMPONENT cxx
-      LIBRARY DESTINATION ${LIBCXX_INSTALL_PREFIX}${LIBCXX_INSTALL_LIBRARY_DIR} COMPONENT cxx
-      RUNTIME DESTINATION ${LIBCXX_INSTALL_PREFIX}bin COMPONENT cxx)
-  endif()
-
-  if (LIBCXX_INSTALL_STATIC_LIBRARY)
-    install(TARGETS cxx_static
-      ARCHIVE DESTINATION ${LIBCXX_INSTALL_PREFIX}${LIBCXX_INSTALL_LIBRARY_DIR} COMPONENT cxx
-      LIBRARY DESTINATION ${LIBCXX_INSTALL_PREFIX}${LIBCXX_INSTALL_LIBRARY_DIR} COMPONENT cxx
-      RUNTIME DESTINATION ${LIBCXX_INSTALL_PREFIX}bin COMPONENT cxx)
-  endif()
-
-  if(LIBCXX_INSTALL_EXPERIMENTAL_LIBRARY)
-    install(TARGETS ${LIBCXX_INSTALL_TARGETS} ${experimental_lib}
-      LIBRARY DESTINATION ${LIBCXX_INSTALL_PREFIX}${LIBCXX_INSTALL_LIBRARY_DIR} COMPONENT cxx
-      ARCHIVE DESTINATION ${LIBCXX_INSTALL_PREFIX}${LIBCXX_INSTALL_LIBRARY_DIR} COMPONENT cxx
-      RUNTIME DESTINATION ${LIBCXX_INSTALL_PREFIX}bin COMPONENT cxx)
-  endif()
-
-  # NOTE: This install command must go after the cxx install command otherwise
-  # it will not be executed after the library symlinks are installed.
-  if (LIBCXX_ENABLE_SHARED AND LIBCXX_ENABLE_ABI_LINKER_SCRIPT)
-    # Replace the libc++ filename with $<TARGET_LINKER_FILE:cxx>
-    # after we required CMake 3.0.
-    install(FILES "${LIBCXX_LIBRARY_DIR}/libc++${CMAKE_SHARED_LIBRARY_SUFFIX}"
-      DESTINATION ${LIBCXX_INSTALL_PREFIX}${LIBCXX_INSTALL_LIBRARY_DIR}
-      COMPONENT libcxx)
-  endif()
+if (LIBCXX_INSTALL_SHARED_LIBRARY)
+  install(TARGETS cxx_shared
+    ARCHIVE DESTINATION ${LIBCXX_INSTALL_PREFIX}${LIBCXX_INSTALL_LIBRARY_DIR} COMPONENT cxx
+    LIBRARY DESTINATION ${LIBCXX_INSTALL_PREFIX}${LIBCXX_INSTALL_LIBRARY_DIR} COMPONENT cxx
+    RUNTIME DESTINATION ${LIBCXX_INSTALL_PREFIX}bin COMPONENT cxx)
 endif()
 
-if (NOT CMAKE_CONFIGURATION_TYPES AND (LIBCXX_INSTALL_LIBRARY OR
-                                       LIBCXX_INSTALL_HEADERS))
+if (LIBCXX_INSTALL_STATIC_LIBRARY)
+  install(TARGETS cxx_static
+    ARCHIVE DESTINATION ${LIBCXX_INSTALL_PREFIX}${LIBCXX_INSTALL_LIBRARY_DIR} COMPONENT cxx
+    LIBRARY DESTINATION ${LIBCXX_INSTALL_PREFIX}${LIBCXX_INSTALL_LIBRARY_DIR} COMPONENT cxx
+    RUNTIME DESTINATION ${LIBCXX_INSTALL_PREFIX}bin COMPONENT cxx)
+endif()
+
+if(LIBCXX_INSTALL_EXPERIMENTAL_LIBRARY)
+  install(TARGETS cxx_experimental
+    LIBRARY DESTINATION ${LIBCXX_INSTALL_PREFIX}${LIBCXX_INSTALL_LIBRARY_DIR} COMPONENT cxx
+    ARCHIVE DESTINATION ${LIBCXX_INSTALL_PREFIX}${LIBCXX_INSTALL_LIBRARY_DIR} COMPONENT cxx
+    RUNTIME DESTINATION ${LIBCXX_INSTALL_PREFIX}bin COMPONENT cxx)
+endif()
+
+# NOTE: This install command must go after the cxx install command otherwise
+# it will not be executed after the library symlinks are installed.
+if (LIBCXX_ENABLE_SHARED AND LIBCXX_ENABLE_ABI_LINKER_SCRIPT)
+  # Replace the libc++ filename with $<TARGET_LINKER_FILE:cxx>
+  # after we required CMake 3.0.
+  install(FILES "${LIBCXX_LIBRARY_DIR}/libc++${CMAKE_SHARED_LIBRARY_SUFFIX}"
+    DESTINATION ${LIBCXX_INSTALL_PREFIX}${LIBCXX_INSTALL_LIBRARY_DIR}
+    COMPONENT libcxx)
+endif()
+
+if (NOT CMAKE_CONFIGURATION_TYPES)
     if(LIBCXX_INSTALL_LIBRARY)
       set(lib_install_target cxx)
     endif()
@@ -490,10 +386,14 @@ if (NOT CMAKE_CONFIGURATION_TYPES AND (LIBCXX_INSTALL_LIBRARY OR
     if(LIBCXX_INSTALL_HEADERS)
       set(header_install_target install-cxx-headers)
     endif()
+    if (LIBCXX_ENABLE_PARALLEL_ALGORITHMS)
+      set(pstl_install_target install-pstl)
+    endif()
     add_custom_target(install-cxx
                       DEPENDS ${lib_install_target}
                               ${experimental_lib_install_target}
                               ${header_install_target}
+                              ${pstl_install_target}
                       COMMAND "${CMAKE_COMMAND}"
                       -DCMAKE_INSTALL_COMPONENT=cxx
                       -P "${LIBCXX_BINARY_DIR}/cmake_install.cmake")
@@ -501,9 +401,9 @@ if (NOT CMAKE_CONFIGURATION_TYPES AND (LIBCXX_INSTALL_LIBRARY OR
                       DEPENDS ${lib_install_target}
                               ${experimental_lib_install_target}
                               ${header_install_target}
+                              ${pstl_install_target}
                       COMMAND "${CMAKE_COMMAND}"
                       -DCMAKE_INSTALL_COMPONENT=cxx
                       -DCMAKE_INSTALL_DO_STRIP=1
                       -P "${LIBCXX_BINARY_DIR}/cmake_install.cmake")
-    add_custom_target(install-libcxx DEPENDS install-cxx)
 endif()

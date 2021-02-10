@@ -25,25 +25,25 @@ import sys
 
 def patch_gn_file(gn_file, add, remove):
     with open(gn_file) as f:
-      gn_contents = f.read()
-
-    srcs_tok = 'sources = ['
-    tokloc = gn_contents.find(srcs_tok)
-
-    if tokloc == -1: raise ValueError(gn_file + ': Failed to find source list')
-    if gn_contents.find(srcs_tok, tokloc + 1) != -1:
-        raise ValueError(gn_file + ': Multiple source lists')
-    if gn_file.find('# NOSORT', 0, tokloc) != -1:
-        raise ValueError(gn_file + ': Found # NOSORT, needs manual merge')
-
-    tokloc += len(srcs_tok)
-    for a in add:
-        gn_contents = (gn_contents[:tokloc] + ('"%s",' % a) +
-                       gn_contents[tokloc:])
+        gn_contents = f.read()
+    if add:
+        srcs_tok = 'sources = ['
+        tokloc = gn_contents.find(srcs_tok)
+        while gn_contents.startswith('sources = []', tokloc):
+            tokloc = gn_contents.find(srcs_tok, tokloc + 1)
+        if tokloc == -1: raise ValueError(gn_file + ': No source list')
+        if gn_contents.find(srcs_tok, tokloc + 1) != -1:
+            raise ValueError(gn_file + ': Multiple source lists')
+        if gn_contents.find('# NOSORT', 0, tokloc) != -1:
+            raise ValueError(gn_file + ': Found # NOSORT, needs manual merge')
+        tokloc += len(srcs_tok)
+        for a in add:
+            gn_contents = (gn_contents[:tokloc] + ('"%s",' % a) +
+                           gn_contents[tokloc:])
     for r in remove:
         gn_contents = gn_contents.replace('"%s",' % r, '')
     with open(gn_file, 'w') as f:
-      f.write(gn_contents)
+        f.write(gn_contents)
 
     # Run `gn format`.
     gn = os.path.join(os.path.dirname(__file__), '..', 'gn.py')
@@ -58,7 +58,11 @@ def sync_source_lists(write):
     gn_files = git_out(['ls-files', '*BUILD.gn']).splitlines()
 
     # Matches e.g. |   "foo.cpp",|, captures |foo| in group 1.
-    gn_cpp_re = re.compile(r'^\s*"([^"]+\.(?:cpp|c|h|S))",$', re.MULTILINE)
+    gn_cpp_re = re.compile(r'^\s*"([^$"]+\.(?:cpp|c|h|S))",$', re.MULTILINE)
+    # Matches e.g. |   bar_sources = [ "foo.cpp" ]|, captures |foo| in group 1.
+    gn_cpp_re2 = re.compile(
+        r'^\s*(?:.*_)?sources \+?= \[ "([^$"]+\.(?:cpp|c|h|S))" ]$',
+        re.MULTILINE)
     # Matches e.g. |   foo.cpp|, captures |foo| in group 1.
     cmake_cpp_re = re.compile(r'^\s*([A-Za-z_0-9./-]+\.(?:cpp|c|h|S))$',
                               re.MULTILINE)
@@ -66,14 +70,12 @@ def sync_source_lists(write):
     changes_by_rev = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
 
     def find_gitrev(touched_line, in_file):
-        return git_out(
-            ['log', '--format=%h', '-1', '-S' + touched_line, in_file]).rstrip()
-    def svnrev_from_gitrev(gitrev):
-        git_llvm = os.path.join(
-            os.path.dirname(__file__), '..', '..', 'git-svn', 'git-llvm')
-        return int(subprocess.check_output(
-            [sys.executable, git_llvm, 'svn-lookup', gitrev],
-            ).rstrip().lstrip('r'))
+        # re.escape() escapes e.g. '-', which works in practice but has
+        # undefined behavior according to the POSIX extended regex spec.
+        posix_re_escape = lambda s: re.sub(r'([.[{()\\*+?|^$])', r'\\\1', s)
+        cmd = ['log', '--format=%h', '-1', '--pickaxe-regex',
+               r'-S\b%s\b' % posix_re_escape(touched_line), in_file]
+        return git_out(cmd).rstrip()
 
     # Collect changes to gn files, grouped by revision.
     for gn_file in gn_files:
@@ -90,6 +92,7 @@ def sync_source_lists(write):
         def get_sources(source_re, text):
             return set([m.group(1) for m in source_re.finditer(text)])
         gn_cpp = get_sources(gn_cpp_re, open(gn_file).read())
+        gn_cpp |= get_sources(gn_cpp_re2, open(gn_file).read())
         cmake_cpp = get_sources(cmake_cpp_re, open(cmake_file).read())
 
         if gn_cpp == cmake_cpp:
@@ -97,16 +100,16 @@ def sync_source_lists(write):
 
         def by_rev(files, key):
             for f in files:
-                svnrev = svnrev_from_gitrev(find_gitrev(f, cmake_file))
-                changes_by_rev[svnrev][gn_file][key].append(f)
+                rev = find_gitrev(f, cmake_file)
+                changes_by_rev[rev][gn_file][key].append(f)
         by_rev(sorted(cmake_cpp - gn_cpp), 'add')
         by_rev(sorted(gn_cpp - cmake_cpp), 'remove')
 
     # Output necessary changes grouped by revision.
-    for svnrev in sorted(changes_by_rev):
-        print('gn build: Merge r{0} -- https://reviews.llvm.org/rL{0}'
-            .format(svnrev))
-        for gn_file, data in sorted(changes_by_rev[svnrev].items()):
+    for rev in sorted(changes_by_rev):
+        print('[gn build] Port {0} -- https://reviews.llvm.org/rG{0}'
+            .format(rev))
+        for gn_file, data in sorted(changes_by_rev[rev].items()):
             add = data.get('add', [])
             remove = data.get('remove', [])
             if write:
@@ -120,7 +123,7 @@ def sync_source_lists(write):
                     print('   remove:\n    ' + '\n    '.join(remove))
                 print()
         if write:
-            git(['commit', '-m', 'gn build: Merge r%d' % svnrev])
+            git(['commit', '-m', '[gn build] Port %s' % rev])
         else:
             print()
 
@@ -153,7 +156,6 @@ def main():
     tests = sync_unittests()
     if src or tests:
         sys.exit(1)
-
 
 
 if __name__ == '__main__':

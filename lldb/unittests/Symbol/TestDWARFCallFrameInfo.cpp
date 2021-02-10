@@ -1,4 +1,4 @@
-//===-- TestDWARFCallFrameInfo.cpp ------------------------------*- C++ -*-===//
+//===-- TestDWARFCallFrameInfo.cpp ----------------------------------------===//
 //
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
@@ -12,6 +12,7 @@
 #include "Plugins/ObjectFile/ELF/ObjectFileELF.h"
 #include "Plugins/Process/Utility/RegisterContext_x86.h"
 #include "Plugins/SymbolFile/Symtab/SymbolFileSymtab.h"
+#include "TestingSupport/SubsystemRAII.h"
 #include "TestingSupport/TestUtilities.h"
 
 #include "lldb/Core/Module.h"
@@ -32,20 +33,8 @@ using namespace lldb_private;
 using namespace lldb;
 
 class DWARFCallFrameInfoTest : public testing::Test {
-public:
-  void SetUp() override {
-    FileSystem::Initialize();
-    HostInfo::Initialize();
-    ObjectFileELF::Initialize();
-    SymbolFileSymtab::Initialize();
-  }
-
-  void TearDown() override {
-    SymbolFileSymtab::Terminate();
-    ObjectFileELF::Terminate();
-    HostInfo::Terminate();
-    FileSystem::Terminate();
-  }
+  SubsystemRAII<FileSystem, HostInfo, ObjectFileELF, SymbolFileSymtab>
+      subsystems;
 
 protected:
   void TestBasic(DWARFCallFrameInfo::Type type, llvm::StringRef symbol);
@@ -231,8 +220,7 @@ Symbols:
 )");
   ASSERT_THAT_EXPECTED(ExpectedFile, llvm::Succeeded());
 
-  auto module_sp =
-      std::make_shared<Module>(ModuleSpec(FileSpec(ExpectedFile->name())));
+  auto module_sp = std::make_shared<Module>(ExpectedFile->moduleSpec());
   SectionList *list = module_sp->GetSectionList();
   ASSERT_NE(nullptr, list);
 

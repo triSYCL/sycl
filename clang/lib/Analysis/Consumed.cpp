@@ -644,10 +644,10 @@ bool ConsumedStmtVisitor::handleCall(const CallExpr *Call, const Expr *ObjArg,
       continue;
 
     // Adjust state on the caller side.
-    if (isRValueRef(ParamType))
-      setStateForVarOrTmp(StateMap, PInfo, consumed::CS_Consumed);
-    else if (ReturnTypestateAttr *RT = Param->getAttr<ReturnTypestateAttr>())
+    if (ReturnTypestateAttr *RT = Param->getAttr<ReturnTypestateAttr>())
       setStateForVarOrTmp(StateMap, PInfo, mapReturnTypestateAttrState(RT));
+    else if (isRValueRef(ParamType) || isConsumableType(ParamType))
+      setStateForVarOrTmp(StateMap, PInfo, consumed::CS_Consumed);
     else if (isPointerOrRef(ParamType) &&
              (!ParamType->getPointeeType().isConstQualified() ||
               isSetOnReadPtrType(ParamType)))
@@ -847,7 +847,7 @@ void ConsumedStmtVisitor::VisitDeclStmt(const DeclStmt *DeclS) {
 
 void ConsumedStmtVisitor::VisitMaterializeTemporaryExpr(
   const MaterializeTemporaryExpr *Temp) {
-  forwardInfo(Temp->GetTemporaryExpr(), Temp);
+  forwardInfo(Temp->getSubExpr(), Temp);
 }
 
 void ConsumedStmtVisitor::VisitMemberExpr(const MemberExpr *MExpr) {

@@ -23,16 +23,17 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/CodeGen/BasicTTIImpl.h"
 #include "llvm/CodeGen/GlobalISel/IRTranslator.h"
+#include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
 #include "llvm/CodeGen/GlobalISel/Legalizer.h"
 #include "llvm/CodeGen/GlobalISel/RegBankSelect.h"
-#include "llvm/CodeGen/GlobalISel/InstructionSelect.h"
-#include "llvm/CodeGen/BasicTTIImpl.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/TargetRegistry.h"
@@ -44,7 +45,7 @@ using namespace llvm;
 
 #define DEBUG_TYPE "mips"
 
-extern "C" void LLVMInitializeMipsTarget() {
+extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeMipsTarget() {
   // Register the target.
   RegisterTargetMachine<MipsebTargetMachine> X(getTheMipsTarget());
   RegisterTargetMachine<MipselTargetMachine> Y(getTheMipselTarget());
@@ -119,14 +120,20 @@ MipsTargetMachine::MipsTargetMachine(const Target &T, const Triple &TT,
                         getEffectiveCodeModel(CM, CodeModel::Small), OL),
       isLittle(isLittle), TLOF(std::make_unique<MipsTargetObjectFile>()),
       ABI(MipsABIInfo::computeTargetABI(TT, CPU, Options.MCOptions)),
-      Subtarget(nullptr), DefaultSubtarget(TT, CPU, FS, isLittle, *this,
-                                           Options.StackAlignmentOverride),
+      Subtarget(nullptr),
+      DefaultSubtarget(TT, CPU, FS, isLittle, *this,
+                       MaybeAlign(Options.StackAlignmentOverride)),
       NoMips16Subtarget(TT, CPU, FS.empty() ? "-mips16" : FS.str() + ",-mips16",
-                        isLittle, *this, Options.StackAlignmentOverride),
+                        isLittle, *this,
+                        MaybeAlign(Options.StackAlignmentOverride)),
       Mips16Subtarget(TT, CPU, FS.empty() ? "+mips16" : FS.str() + ",+mips16",
-                      isLittle, *this, Options.StackAlignmentOverride) {
+                      isLittle, *this,
+                      MaybeAlign(Options.StackAlignmentOverride)) {
   Subtarget = &DefaultSubtarget;
   initAsmInfo();
+
+  // Mips supports the debug entry values.
+  setSupportsDebugEntryValues(true);
 }
 
 MipsTargetMachine::~MipsTargetMachine() = default;
@@ -156,21 +163,15 @@ MipsTargetMachine::getSubtargetImpl(const Function &F) const {
   Attribute CPUAttr = F.getFnAttribute("target-cpu");
   Attribute FSAttr = F.getFnAttribute("target-features");
 
-  std::string CPU = !CPUAttr.hasAttribute(Attribute::None)
-                        ? CPUAttr.getValueAsString().str()
-                        : TargetCPU;
-  std::string FS = !FSAttr.hasAttribute(Attribute::None)
-                       ? FSAttr.getValueAsString().str()
-                       : TargetFS;
-  bool hasMips16Attr =
-      !F.getFnAttribute("mips16").hasAttribute(Attribute::None);
-  bool hasNoMips16Attr =
-      !F.getFnAttribute("nomips16").hasAttribute(Attribute::None);
+  std::string CPU =
+      CPUAttr.isValid() ? CPUAttr.getValueAsString().str() : TargetCPU;
+  std::string FS =
+      FSAttr.isValid() ? FSAttr.getValueAsString().str() : TargetFS;
+  bool hasMips16Attr = F.getFnAttribute("mips16").isValid();
+  bool hasNoMips16Attr = F.getFnAttribute("nomips16").isValid();
 
-  bool HasMicroMipsAttr =
-      !F.getFnAttribute("micromips").hasAttribute(Attribute::None);
-  bool HasNoMicroMipsAttr =
-      !F.getFnAttribute("nomicromips").hasAttribute(Attribute::None);
+  bool HasMicroMipsAttr = F.getFnAttribute("micromips").isValid();
+  bool HasNoMicroMipsAttr = F.getFnAttribute("nomicromips").isValid();
 
   // FIXME: This is related to the code below to reset the target options,
   // we need to know whether or not the soft float flag is set on the
@@ -196,8 +197,9 @@ MipsTargetMachine::getSubtargetImpl(const Function &F) const {
     // creation will depend on the TM and the code generation flags on the
     // function that reside in TargetOptions.
     resetTargetOptions(F);
-    I = std::make_unique<MipsSubtarget>(TargetTriple, CPU, FS, isLittle, *this,
-                                         Options.StackAlignmentOverride);
+    I = std::make_unique<MipsSubtarget>(
+        TargetTriple, CPU, FS, isLittle, *this,
+        MaybeAlign(Options.StackAlignmentOverride));
   }
   return I.get();
 }
@@ -287,8 +289,7 @@ MipsTargetMachine::getTargetTransformInfo(const Function &F) {
 }
 
 // Implemented by targets that want to run passes immediately before
-// machine code is emitted. return true if -print-machineinstrs should
-// print out the code after the passes.
+// machine code is emitted.
 void MipsPassConfig::addPreEmitPass() {
   // Expand pseudo instructions that are sensitive to register allocation.
   addPass(createMipsExpandPseudoPass());
@@ -315,7 +316,7 @@ void MipsPassConfig::addPreEmitPass() {
 }
 
 bool MipsPassConfig::addIRTranslator() {
-  addPass(new IRTranslator());
+  addPass(new IRTranslator(getOptLevel()));
   return false;
 }
 

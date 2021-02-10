@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Analysis/LazyCallGraph.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/AsmParser/Parser.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
@@ -264,7 +265,7 @@ TEST(LazyCallGraphTest, BasicGraphFormation) {
   std::vector<std::string> Nodes;
 
   for (LazyCallGraph::Edge &E : A1.populate())
-    Nodes.push_back(E.getFunction().getName());
+    Nodes.push_back(std::string(E.getFunction().getName()));
   llvm::sort(Nodes);
   EXPECT_EQ("a2", Nodes[0]);
   EXPECT_EQ("b2", Nodes[1]);
@@ -279,7 +280,7 @@ TEST(LazyCallGraphTest, BasicGraphFormation) {
   EXPECT_EQ("a1", A3->begin()->getFunction().getName());
 
   for (LazyCallGraph::Edge &E : B1.populate())
-    Nodes.push_back(E.getFunction().getName());
+    Nodes.push_back(std::string(E.getFunction().getName()));
   llvm::sort(Nodes);
   EXPECT_EQ("b2", Nodes[0]);
   EXPECT_EQ("d3", Nodes[1]);
@@ -293,7 +294,7 @@ TEST(LazyCallGraphTest, BasicGraphFormation) {
   EXPECT_EQ("b1", B3->begin()->getFunction().getName());
 
   for (LazyCallGraph::Edge &E : C1.populate())
-    Nodes.push_back(E.getFunction().getName());
+    Nodes.push_back(std::string(E.getFunction().getName()));
   llvm::sort(Nodes);
   EXPECT_EQ("c2", Nodes[0]);
   EXPECT_EQ("d2", Nodes[1]);
@@ -323,7 +324,7 @@ TEST(LazyCallGraphTest, BasicGraphFormation) {
   LazyCallGraph::RefSCC &D = *J++;
   ASSERT_EQ(1, D.size());
   for (LazyCallGraph::Node &N : *D.begin())
-    Nodes.push_back(N.getFunction().getName());
+    Nodes.push_back(std::string(N.getFunction().getName()));
   llvm::sort(Nodes);
   EXPECT_EQ(3u, Nodes.size());
   EXPECT_EQ("d1", Nodes[0]);
@@ -336,26 +337,10 @@ TEST(LazyCallGraphTest, BasicGraphFormation) {
   EXPECT_FALSE(D.isDescendantOf(D));
   EXPECT_EQ(&D, &*CG.postorder_ref_scc_begin());
 
-  LazyCallGraph::RefSCC &C = *J++;
-  ASSERT_EQ(1, C.size());
-  for (LazyCallGraph::Node &N : *C.begin())
-    Nodes.push_back(N.getFunction().getName());
-  llvm::sort(Nodes);
-  EXPECT_EQ(3u, Nodes.size());
-  EXPECT_EQ("c1", Nodes[0]);
-  EXPECT_EQ("c2", Nodes[1]);
-  EXPECT_EQ("c3", Nodes[2]);
-  Nodes.clear();
-  EXPECT_TRUE(C.isParentOf(D));
-  EXPECT_FALSE(C.isChildOf(D));
-  EXPECT_TRUE(C.isAncestorOf(D));
-  EXPECT_FALSE(C.isDescendantOf(D));
-  EXPECT_EQ(&C, &*std::next(CG.postorder_ref_scc_begin()));
-
   LazyCallGraph::RefSCC &B = *J++;
   ASSERT_EQ(1, B.size());
   for (LazyCallGraph::Node &N : *B.begin())
-    Nodes.push_back(N.getFunction().getName());
+    Nodes.push_back(std::string(N.getFunction().getName()));
   llvm::sort(Nodes);
   EXPECT_EQ(3u, Nodes.size());
   EXPECT_EQ("b1", Nodes[0]);
@@ -366,14 +351,30 @@ TEST(LazyCallGraphTest, BasicGraphFormation) {
   EXPECT_FALSE(B.isChildOf(D));
   EXPECT_TRUE(B.isAncestorOf(D));
   EXPECT_FALSE(B.isDescendantOf(D));
+  EXPECT_EQ(&B, &*std::next(CG.postorder_ref_scc_begin()));
+
+  LazyCallGraph::RefSCC &C = *J++;
+  ASSERT_EQ(1, C.size());
+  for (LazyCallGraph::Node &N : *C.begin())
+    Nodes.push_back(std::string(N.getFunction().getName()));
+  llvm::sort(Nodes);
+  EXPECT_EQ(3u, Nodes.size());
+  EXPECT_EQ("c1", Nodes[0]);
+  EXPECT_EQ("c2", Nodes[1]);
+  EXPECT_EQ("c3", Nodes[2]);
+  Nodes.clear();
   EXPECT_FALSE(B.isAncestorOf(C));
   EXPECT_FALSE(C.isAncestorOf(B));
-  EXPECT_EQ(&B, &*std::next(CG.postorder_ref_scc_begin(), 2));
+  EXPECT_TRUE(C.isParentOf(D));
+  EXPECT_FALSE(C.isChildOf(D));
+  EXPECT_TRUE(C.isAncestorOf(D));
+  EXPECT_FALSE(C.isDescendantOf(D));
+  EXPECT_EQ(&C, &*std::next(CG.postorder_ref_scc_begin(), 2));
 
   LazyCallGraph::RefSCC &A = *J++;
   ASSERT_EQ(1, A.size());
   for (LazyCallGraph::Node &N : *A.begin())
-    Nodes.push_back(N.getFunction().getName());
+    Nodes.push_back(std::string(N.getFunction().getName()));
   llvm::sort(Nodes);
   EXPECT_EQ(3u, Nodes.size());
   EXPECT_EQ("a1", Nodes[0]);
@@ -477,7 +478,7 @@ TEST(LazyCallGraphTest, InnerSCCFormation) {
   auto J = RC.begin();
   LazyCallGraph::SCC &D = *J++;
   for (LazyCallGraph::Node &N : D)
-    Nodes.push_back(N.getFunction().getName());
+    Nodes.push_back(std::string(N.getFunction().getName()));
   llvm::sort(Nodes);
   EXPECT_EQ(3u, Nodes.size());
   EXPECT_EQ("d1", Nodes[0]);
@@ -487,7 +488,7 @@ TEST(LazyCallGraphTest, InnerSCCFormation) {
 
   LazyCallGraph::SCC &B = *J++;
   for (LazyCallGraph::Node &N : B)
-    Nodes.push_back(N.getFunction().getName());
+    Nodes.push_back(std::string(N.getFunction().getName()));
   llvm::sort(Nodes);
   EXPECT_EQ(3u, Nodes.size());
   EXPECT_EQ("b1", Nodes[0]);
@@ -497,7 +498,7 @@ TEST(LazyCallGraphTest, InnerSCCFormation) {
 
   LazyCallGraph::SCC &C = *J++;
   for (LazyCallGraph::Node &N : C)
-    Nodes.push_back(N.getFunction().getName());
+    Nodes.push_back(std::string(N.getFunction().getName()));
   llvm::sort(Nodes);
   EXPECT_EQ(3u, Nodes.size());
   EXPECT_EQ("c1", Nodes[0]);
@@ -507,7 +508,7 @@ TEST(LazyCallGraphTest, InnerSCCFormation) {
 
   LazyCallGraph::SCC &A = *J++;
   for (LazyCallGraph::Node &N : A)
-    Nodes.push_back(N.getFunction().getName());
+    Nodes.push_back(std::string(N.getFunction().getName()));
   llvm::sort(Nodes);
   EXPECT_EQ(3u, Nodes.size());
   EXPECT_EQ("a1", Nodes[0]);
@@ -1205,9 +1206,9 @@ TEST(LazyCallGraphTest, InlineAndDeleteFunction) {
   ASSERT_NE(I, E);
   EXPECT_EQ(&NewDRC, &*I) << "Actual RefSCC: " << *I;
   ASSERT_NE(++I, E);
-  EXPECT_EQ(&CRC, &*I) << "Actual RefSCC: " << *I;
-  ASSERT_NE(++I, E);
   EXPECT_EQ(&BRC, &*I) << "Actual RefSCC: " << *I;
+  ASSERT_NE(++I, E);
+  EXPECT_EQ(&CRC, &*I) << "Actual RefSCC: " << *I;
   ASSERT_NE(++I, E);
   EXPECT_EQ(&ARC, &*I) << "Actual RefSCC: " << *I;
   EXPECT_EQ(++I, E);
@@ -1996,8 +1997,8 @@ TEST(LazyCallGraphTest, HandleBlockAddress2) {
 
   CG.buildRefSCCs();
   auto I = CG.postorder_ref_scc_begin();
-  LazyCallGraph::RefSCC &GRC = *I++;
   LazyCallGraph::RefSCC &FRC = *I++;
+  LazyCallGraph::RefSCC &GRC = *I++;
   EXPECT_EQ(CG.postorder_ref_scc_end(), I);
 
   LazyCallGraph::Node &F = *CG.lookup(lookupFunction(*M, "f"));

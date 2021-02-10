@@ -31,7 +31,9 @@ namespace {
 class ExpandMacro : public Tweak {
 public:
   const char *id() const override final;
-  Intent intent() const override { return Intent::Refactor; }
+  llvm::StringLiteral kind() const override {
+    return CodeAction::REFACTOR_KIND;
+  }
 
   bool prepare(const Selection &Inputs) override;
   Expected<Tweak::Effect> apply(const Selection &Inputs) override;
@@ -90,21 +92,21 @@ bool ExpandMacro::prepare(const Selection &Inputs) {
   //        'FOO[[ ]]BAR'. We should not trigger in that case.
 
   // Find a token under the cursor.
-  auto *T = findIdentifierUnderCursor(Inputs.AST.getTokens(), Inputs.Cursor);
+  auto *T = findIdentifierUnderCursor(Inputs.AST->getTokens(), Inputs.Cursor);
   // We are interested only in identifiers, other tokens can't be macro names.
   if (!T)
     return false;
   // If the identifier is a macro we will find the corresponding expansion.
-  auto Expansion = Inputs.AST.getTokens().expansionStartingAt(T);
+  auto Expansion = Inputs.AST->getTokens().expansionStartingAt(T);
   if (!Expansion)
     return false;
-  this->MacroName = T->text(Inputs.AST.getSourceManager());
+  this->MacroName = std::string(T->text(Inputs.AST->getSourceManager()));
   this->Expansion = *Expansion;
   return true;
 }
 
 Expected<Tweak::Effect> ExpandMacro::apply(const Selection &Inputs) {
-  auto &SM = Inputs.AST.getSourceManager();
+  auto &SM = Inputs.AST->getSourceManager();
 
   std::string Replacement;
   for (const syntax::Token &T : Expansion.Expanded) {
@@ -126,7 +128,7 @@ Expected<Tweak::Effect> ExpandMacro::apply(const Selection &Inputs) {
 }
 
 std::string ExpandMacro::title() const {
-  return llvm::formatv("Expand macro '{0}'", MacroName);
+  return std::string(llvm::formatv("Expand macro '{0}'", MacroName));
 }
 
 } // namespace

@@ -42,12 +42,42 @@ define <4 x i32> @test5(<4 x i32> %A) {
   ret <4 x i32> %I
 }
 
+define <4 x i32> @test5_poison(<4 x i32> %A) {
+; CHECK-LABEL: @test5_poison(
+; CHECK-NEXT:    ret <4 x i32> undef
+;
+  %I = insertelement <4 x i32> %A, i32 5, i64 poison
+  ret <4 x i32> %I
+}
+
+define <4 x i32> @elem_poison(<4 x i32> %A) {
+; CHECK-LABEL: @elem_poison(
+; CHECK-NEXT:    [[B:%.*]] = insertelement <4 x i32> [[A:%.*]], i32 poison, i32 1
+; CHECK-NEXT:    ret <4 x i32> [[B]]
+;
+  %B = insertelement <4 x i32> %A, i32 poison, i32 1
+  ret <4 x i32> %B
+}
+
+; The undef may be replacing a poison value, so it is not safe to just return 'A'.
+
 define <4 x i32> @PR1286(<4 x i32> %A) {
 ; CHECK-LABEL: @PR1286(
-; CHECK-NEXT:    ret <4 x i32> [[A:%.*]]
+; CHECK-NEXT:    [[B:%.*]] = insertelement <4 x i32> [[A:%.*]], i32 undef, i32 1
+; CHECK-NEXT:    ret <4 x i32> [[B]]
 ;
   %B = insertelement <4 x i32> %A, i32 undef, i32 1
   ret <4 x i32> %B
+}
+
+; Constant is not poison, so this can simplify.
+
+define <2 x i32> @undef_into_constant_vector_with_variable_index(<2 x i32> %A, i32 %Index) {
+; CHECK-LABEL: @undef_into_constant_vector_with_variable_index(
+; CHECK-NEXT:    ret <2 x i32> <i32 42, i32 -42>
+;
+  %B = insertelement <2 x i32> <i32 42, i32 -42>, i32 undef, i32 %Index
+  ret <2 x i32> %B
 }
 
 define <8 x i8> @extract_insert_same_vec_and_index(<8 x i8> %in) {

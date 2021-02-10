@@ -34,6 +34,8 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/PassManager.h"
+#include "llvm/IR/PrintPasses.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/raw_ostream.h"
@@ -105,7 +107,8 @@ bool Loop::makeLoopInvariant(Instruction *I, bool &Changed,
   I->moveBefore(InsertPt);
   if (MSSAU)
     if (auto *MUD = MSSAU->getMemorySSA()->getMemoryAccess(I))
-      MSSAU->moveToPlace(MUD, InsertPt->getParent(), MemorySSA::End);
+      MSSAU->moveToPlace(MUD, InsertPt->getParent(),
+                         MemorySSA::BeforeTerminator);
 
   // There is possibility of hoisting this instruction above some arbitrary
   // condition. Any metadata defined on it can be control dependent on this
@@ -360,20 +363,23 @@ bool Loop::isAuxiliaryInductionVariable(PHINode &AuxIndVar,
 }
 
 BranchInst *Loop::getLoopGuardBranch() const {
-  assert(isLoopSimplifyForm() && "Only valid for loop in simplify form");
-  BasicBlock *Preheader = getLoopPreheader();
-  BasicBlock *Latch = getLoopLatch();
-  assert(Preheader && Latch &&
-         "Expecting a loop with valid preheader and latch");
-  assert(isLoopExiting(Latch) && "Only valid for rotated loop");
-
-  Instruction *LatchTI = Latch->getTerminator();
-  if (!LatchTI || LatchTI->getNumSuccessors() != 2)
+  if (!isLoopSimplifyForm())
     return nullptr;
 
-  BasicBlock *ExitFromLatch = (LatchTI->getSuccessor(0) == getHeader())
-                                  ? LatchTI->getSuccessor(1)
-                                  : LatchTI->getSuccessor(0);
+  BasicBlock *Preheader = getLoopPreheader();
+  assert(Preheader && getLoopLatch() &&
+         "Expecting a loop with valid preheader and latch");
+
+  // Loop should be in rotate form.
+  if (!isRotatedForm())
+    return nullptr;
+
+  // Disallow loops with more than one unique exit block, as we do not verify
+  // that GuardOtherSucc post dominates all exit blocks.
+  BasicBlock *ExitFromLatch = getUniqueExitBlock();
+  if (!ExitFromLatch)
+    return nullptr;
+
   BasicBlock *ExitFromLatchSucc = ExitFromLatch->getUniqueSuccessor();
   if (!ExitFromLatchSucc)
     return nullptr;
@@ -415,7 +421,7 @@ bool Loop::isCanonical(ScalarEvolution &SE) const {
 
 // Check that 'BB' doesn't have any uses outside of the 'L'
 static bool isBlockInLCSSAForm(const Loop &L, const BasicBlock &BB,
-                               DominatorTree &DT) {
+                               const DominatorTree &DT) {
   for (const Instruction &I : BB) {
     // Tokens can't be used in PHI nodes and live-out tokens prevent loop
     // optimizations, so for the purposes of considered LCSSA form, we
@@ -426,6 +432,10 @@ static bool isBlockInLCSSAForm(const Loop &L, const BasicBlock &BB,
     for (const Use &U : I.uses()) {
       const Instruction *UI = cast<Instruction>(U.getUser());
       const BasicBlock *UserBB = UI->getParent();
+
+      // For practical purposes, we consider that the use in a PHI
+      // occurs in the respective predecessor block. For more info,
+      // see the `phi` doc in LangRef and the LCSSA doc.
       if (const PHINode *P = dyn_cast<PHINode>(UI))
         UserBB = P->getIncomingBlock(U);
 
@@ -441,14 +451,15 @@ static bool isBlockInLCSSAForm(const Loop &L, const BasicBlock &BB,
   return true;
 }
 
-bool Loop::isLCSSAForm(DominatorTree &DT) const {
+bool Loop::isLCSSAForm(const DominatorTree &DT) const {
   // For each block we check that it doesn't have any uses outside of this loop.
   return all_of(this->blocks(), [&](const BasicBlock *BB) {
     return isBlockInLCSSAForm(*this, *BB, DT);
   });
 }
 
-bool Loop::isRecursivelyLCSSAForm(DominatorTree &DT, const LoopInfo &LI) const {
+bool Loop::isRecursivelyLCSSAForm(const DominatorTree &DT,
+                                  const LoopInfo &LI) const {
   // For each block we check that it doesn't have any uses outside of its
   // innermost loop. This process will transitively guarantee that the current
   // loop and all of the nested loops are in LCSSA form.
@@ -475,8 +486,8 @@ bool Loop::isSafeToClone() const {
       return false;
 
     for (Instruction &I : *BB)
-      if (auto CS = CallSite(&I))
-        if (CS.cannotDuplicate())
+      if (auto *CB = dyn_cast<CallBase>(&I))
+        if (CB->cannotDuplicate())
           return false;
   }
   return true;
@@ -526,6 +537,22 @@ void Loop::setLoopAlreadyUnrolled() {
   MDNode *LoopID = getLoopID();
   MDNode *NewLoopID = makePostTransformationMetadata(
       Context, LoopID, {"llvm.loop.unroll."}, {DisableUnrollMD});
+  setLoopID(NewLoopID);
+}
+
+void Loop::setLoopMustProgress() {
+  LLVMContext &Context = getHeader()->getContext();
+
+  MDNode *MustProgress = findOptionMDForLoop(this, "llvm.loop.mustprogress");
+
+  if (MustProgress)
+    return;
+
+  MDNode *MustProgressMD =
+      MDNode::get(Context, MDString::get(Context, "llvm.loop.mustprogress"));
+  MDNode *LoopID = getLoopID();
+  MDNode *NewLoopID =
+      makePostTransformationMetadata(Context, LoopID, {}, {MustProgressMD});
   setLoopID(NewLoopID);
 }
 
@@ -758,7 +785,7 @@ void UnloopUpdater::removeBlocksFromAncestors() {
 
 /// Update the parent loop for all subloops directly nested within unloop.
 void UnloopUpdater::updateSubloopParents() {
-  while (!Unloop.empty()) {
+  while (!Unloop.isInnermost()) {
     Loop *Subloop = *std::prev(Unloop.end());
     Unloop.removeChildLoop(std::prev(Unloop.end()));
 
@@ -856,7 +883,7 @@ void LoopInfo::erase(Loop *Unloop) {
   auto InvalidateOnExit = make_scope_exit([&]() { destroy(Unloop); });
 
   // First handle the special case of no parent loop to simplify the algorithm.
-  if (!Unloop->getParentLoop()) {
+  if (Unloop->isOutermost()) {
     // Since BBLoop had no parent, Unloop blocks are no longer in a loop.
     for (Loop::block_iterator I = Unloop->block_begin(),
                               E = Unloop->block_end();
@@ -881,7 +908,7 @@ void LoopInfo::erase(Loop *Unloop) {
     }
 
     // Move all of the subloops to the top-level.
-    while (!Unloop->empty())
+    while (!Unloop->isInnermost())
       addTopLevelLoop(Unloop->removeChildLoop(std::prev(Unloop->end())));
 
     return;
@@ -1011,8 +1038,7 @@ MDNode *llvm::makePostTransformationMetadata(LLVMContext &Context,
   SmallVector<Metadata *, 4> MDs;
 
   // Reserve first location for self reference to the LoopID metadata node.
-  TempMDTuple TempNode = MDNode::getTemporary(Context, None);
-  MDs.push_back(TempNode.get());
+  MDs.push_back(nullptr);
 
   // Remove metadata for the transformation that has been applied or that became
   // outdated.
@@ -1046,6 +1072,10 @@ MDNode *llvm::makePostTransformationMetadata(LLVMContext &Context,
 //===----------------------------------------------------------------------===//
 // LoopInfo implementation
 //
+
+LoopInfoWrapperPass::LoopInfoWrapperPass() : FunctionPass(ID) {
+  initializeLoopInfoWrapperPassPass(*PassRegistry::getPassRegistry());
+}
 
 char LoopInfoWrapperPass::ID = 0;
 INITIALIZE_PASS_BEGIN(LoopInfoWrapperPass, "loops", "Natural Loop Information",

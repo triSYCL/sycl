@@ -290,7 +290,7 @@ set LIB=%SYCL_HOME%\build\lib;%LIB%
 and run following command:
 
 ```bash
-clang++ -std=c++2a -fsycl simple-sycl-app.cpp -o simple-sycl-app.exe
+clang++ -std=c++20 -fsycl simple-sycl-app.cpp -o simple-sycl-app.exe
 ```
 
 This `simple-sycl-app.exe` application doesn't specify SYCL device for

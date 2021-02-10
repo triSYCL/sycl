@@ -41,6 +41,11 @@ class CCIf<string predicate, CCAction A> : CCPredicateAction<A> {
 class CCIfByVal<CCAction A> : CCIf<"ArgFlags.isByVal()", A> {
 }
 
+/// CCIfPreallocated - If the current argument has Preallocated parameter attribute,
+/// apply Action A.
+class CCIfPreallocated<CCAction A> : CCIf<"ArgFlags.isPreallocated()", A> {
+}
+
 /// CCIfSwiftSelf - If the current argument has swiftself parameter attribute,
 /// apply Action A.
 class CCIfSwiftSelf<CCAction A> : CCIf<"ArgFlags.isSwiftSelf()", A> {
@@ -49,6 +54,11 @@ class CCIfSwiftSelf<CCAction A> : CCIf<"ArgFlags.isSwiftSelf()", A> {
 /// CCIfSwiftError - If the current argument has swifterror parameter attribute,
 /// apply Action A.
 class CCIfSwiftError<CCAction A> : CCIf<"ArgFlags.isSwiftError()", A> {
+}
+
+/// CCIfCFGuardTarget - If the current argument has cfguardtarget parameter
+/// attribute, apply Action A.
+class CCIfCFGuardTarget<CCAction A> : CCIf<"ArgFlags.isCFGuardTarget()", A> {
 }
 
 /// CCIfConsecutiveRegs - If the current argument has InConsecutiveRegs
@@ -177,15 +187,15 @@ class CallingConv<list<CCAction> actions> {
 
   /// If true, this calling convention will be emitted as externally visible in
   /// the llvm namespaces instead of as a static function.
-  bit Entry = 0;
+  bit Entry = false;
 
-  bit Custom = 0;
+  bit Custom = false;
 }
 
 /// CustomCallingConv - An instance of this is used to declare calling
 /// conventions that are implemented using a custom function of the same name.
 class CustomCallingConv : CallingConv<[]> {
-  let Custom = 1;
+  let Custom = true;
 }
 
 /// CalleeSavedRegs - A list of callee saved registers for a given calling

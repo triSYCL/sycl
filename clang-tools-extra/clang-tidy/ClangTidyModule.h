@@ -9,15 +9,19 @@
 #ifndef LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_CLANGTIDYMODULE_H
 #define LLVM_CLANG_TOOLS_EXTRA_CLANG_TIDY_CLANGTIDYMODULE_H
 
-#include "ClangTidy.h"
+#include "ClangTidyOptions.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include <functional>
 #include <map>
+#include <memory>
 #include <string>
-#include <utility>
 
 namespace clang {
 namespace tidy {
+
+class ClangTidyCheck;
+class ClangTidyContext;
 
 /// A collection of \c ClangTidyCheckFactory instances.
 ///
@@ -25,14 +29,13 @@ namespace tidy {
 /// this object.
 class ClangTidyCheckFactories {
 public:
-  typedef std::function<ClangTidyCheck *(StringRef Name,
-                                         ClangTidyContext *Context)>
-      CheckFactory;
+  using CheckFactory = std::function<std::unique_ptr<ClangTidyCheck>(
+      llvm::StringRef Name, ClangTidyContext *Context)>;
 
   /// Registers check \p Factory with name \p Name.
   ///
   /// For all checks that have default constructors, use \c registerCheck.
-  void registerCheckFactory(StringRef Name, CheckFactory Factory);
+  void registerCheckFactory(llvm::StringRef Name, CheckFactory Factory);
 
   /// Registers the \c CheckType with the name \p Name.
   ///
@@ -55,21 +58,18 @@ public:
   ///   }
   /// };
   /// \endcode
-  template <typename CheckType> void registerCheck(StringRef CheckName) {
+  template <typename CheckType> void registerCheck(llvm::StringRef CheckName) {
     registerCheckFactory(CheckName,
-                         [](StringRef Name, ClangTidyContext *Context) {
-                           return new CheckType(Name, Context);
+                         [](llvm::StringRef Name, ClangTidyContext *Context) {
+                           return std::make_unique<CheckType>(Name, Context);
                          });
   }
 
-  /// Create instances of all checks matching \p CheckRegexString and
-  /// store them in \p Checks.
-  ///
-  /// The caller takes ownership of the return \c ClangTidyChecks.
-  void createChecks(ClangTidyContext *Context,
-                    std::vector<std::unique_ptr<ClangTidyCheck>> &Checks);
+  /// Create instances of checks that are enabled.
+  std::vector<std::unique_ptr<ClangTidyCheck>>
+  createChecks(ClangTidyContext *Context);
 
-  typedef std::map<std::string, CheckFactory> FactoryMap;
+  typedef llvm::StringMap<CheckFactory> FactoryMap;
   FactoryMap::const_iterator begin() const { return Factories.begin(); }
   FactoryMap::const_iterator end() const { return Factories.end(); }
   bool empty() const { return Factories.empty(); }

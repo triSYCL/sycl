@@ -33,7 +33,7 @@ decltype(::UnDecorateSymbolName) *UnDecorateSymbolName;
 
 namespace {
 
-class WinSymbolizerTool : public SymbolizerTool {
+class WinSymbolizerTool final : public SymbolizerTool {
  public:
   // The constructor is provided to avoid synthesized memsets.
   WinSymbolizerTool() {}
@@ -310,7 +310,7 @@ Symbolizer *Symbolizer::PlatformInit() {
 }
 
 void Symbolizer::LateInitialize() {
-  Symbolizer::GetOrInit();
+  Symbolizer::GetOrInit()->LateInitializeTools();
 }
 
 }  // namespace __sanitizer

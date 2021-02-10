@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fsycl-is-device -fsyntax-only -verify %s
+// RUN: %clang_cc1 -fsycl -fsycl-is-device -fsyntax-only -verify %s
 // RUN: %clang_cc1 -verify -DNO_SYCL %s
 
 #ifndef NO_SYCL
@@ -18,21 +18,24 @@ namespace {
 }
 
 class A {
-  __attribute__((sycl_device)) // expected-error {{'sycl_device' attribute cannot be applied to a class member function}}
+  __attribute__((sycl_device))
   A() {}
 
-  __attribute__((sycl_device)) // expected-error {{'sycl_device' attribute cannot be applied to a class member function}}
-  int func3() {}
+  __attribute__((sycl_device)) void func3() {}
 };
 
-__attribute__((sycl_device)) // expected-error {{'sycl_device' attribute cannot be applied to a function with a raw pointer return type}}
-int* func3() { return nullptr; }
+class B {
+public:
+  __attribute__((sycl_device)) virtual void foo() {}
 
-__attribute__((sycl_device)) // expected-error {{'sycl_device' attribute cannot be applied to a function with a raw pointer parameter type}}
-void func3(int *) {}
+  __attribute__((sycl_device)) virtual void bar() = 0;
+};
 
-#else
+__attribute__((sycl_device)) int *func0() { return nullptr; }
 
+__attribute__((sycl_device)) void func2(int *) {}
+
+#else // NO_SYCL
 __attribute__((sycl_device)) // expected-warning {{'sycl_device' attribute ignored}}
 void baz() {}
 

@@ -7,11 +7,11 @@ define <4 x double> @autogen_SD30452(i1 %L230) {
 ; CHECK-NEXT:    movdqa {{.*#+}} xmm1 = [151829,151829]
 ; CHECK-NEXT:    movq %xmm0, %rax
 ; CHECK-NEXT:    cvtsi2sd %rax, %xmm0
-; CHECK-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[2,3,0,1]
+; CHECK-NEXT:    pshufd {{.*#+}} xmm2 = xmm0[2,3,2,3]
 ; CHECK-NEXT:    movq %xmm2, %rax
 ; CHECK-NEXT:    xorps %xmm2, %xmm2
 ; CHECK-NEXT:    cvtsi2sd %rax, %xmm2
-; CHECK-NEXT:    punpcklqdq {{.*#+}} xmm0 = xmm0[0],xmm2[0]
+; CHECK-NEXT:    unpcklpd {{.*#+}} xmm0 = xmm0[0],xmm2[0]
 ; CHECK-NEXT:    pshufd {{.*#+}} xmm1 = xmm1[0,2,2,3]
 ; CHECK-NEXT:    cvtdq2pd %xmm1, %xmm1
 ; CHECK-NEXT:    retq

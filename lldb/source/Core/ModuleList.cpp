@@ -1,4 +1,4 @@
-//===-- ModuleList.cpp ------------------------------------------*- C++ -*-===//
+//===-- ModuleList.cpp ----------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -12,11 +12,13 @@
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Host/FileSystem.h"
 #include "lldb/Interpreter/OptionValueFileSpec.h"
+#include "lldb/Interpreter/OptionValueFileSpecList.h"
 #include "lldb/Interpreter/OptionValueProperties.h"
 #include "lldb/Interpreter/Property.h"
 #include "lldb/Symbol/LocateSymbolFile.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/SymbolContext.h"
+#include "lldb/Symbol/TypeList.h"
 #include "lldb/Symbol/VariableList.h"
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/ConstString.h"
@@ -56,9 +58,6 @@ class SymbolFile;
 namespace lldb_private {
 class Target;
 }
-namespace lldb_private {
-class TypeList;
-}
 
 using namespace lldb;
 using namespace lldb_private;
@@ -79,10 +78,13 @@ ModuleListProperties::ModuleListProperties() {
   m_collection_sp =
       std::make_shared<OptionValueProperties>(ConstString("symbols"));
   m_collection_sp->Initialize(g_modulelist_properties);
+  m_collection_sp->SetValueChangedCallback(ePropertySymLinkPaths,
+                                           [this] { UpdateSymlinkMappings(); });
 
   llvm::SmallString<128> path;
-  clang::driver::Driver::getDefaultModuleCachePath(path);
-  SetClangModulesCachePath(path);
+  if (clang::driver::Driver::getDefaultModuleCachePath(path)) {
+    lldbassert(SetClangModulesCachePath(FileSpec(path)));
+  }
 }
 
 bool ModuleListProperties::GetEnableExternalLookup() const {
@@ -103,9 +105,31 @@ FileSpec ModuleListProperties::GetClangModulesCachePath() const {
       ->GetCurrentValue();
 }
 
-bool ModuleListProperties::SetClangModulesCachePath(llvm::StringRef path) {
-  return m_collection_sp->SetPropertyAtIndexAsString(
+bool ModuleListProperties::SetClangModulesCachePath(const FileSpec &path) {
+  return m_collection_sp->SetPropertyAtIndexAsFileSpec(
       nullptr, ePropertyClangModulesCachePath, path);
+}
+
+void ModuleListProperties::UpdateSymlinkMappings() {
+  FileSpecList list = m_collection_sp
+                          ->GetPropertyAtIndexAsOptionValueFileSpecList(
+                              nullptr, false, ePropertySymLinkPaths)
+                          ->GetCurrentValue();
+  llvm::sys::ScopedWriter lock(m_symlink_paths_mutex);
+  const bool notify = false;
+  m_symlink_paths.Clear(notify);
+  for (FileSpec symlink : list) {
+    FileSpec resolved;
+    Status status = FileSystem::Instance().Readlink(symlink, resolved);
+    if (status.Success())
+      m_symlink_paths.Append(ConstString(symlink.GetPath()),
+                             ConstString(resolved.GetPath()), notify);
+  }
+}
+
+PathMappingList ModuleListProperties::GetSymlinkMappings() const {
+  llvm::sys::ScopedReader lock(m_symlink_paths_mutex);
+  return m_symlink_paths;
 }
 
 ModuleList::ModuleList()
@@ -148,7 +172,9 @@ void ModuleList::Append(const ModuleSP &module_sp, bool notify) {
   AppendImpl(module_sp, notify);
 }
 
-void ModuleList::ReplaceEquivalent(const ModuleSP &module_sp) {
+void ModuleList::ReplaceEquivalent(
+    const ModuleSP &module_sp,
+    llvm::SmallVectorImpl<lldb::ModuleSP> *old_modules) {
   if (module_sp) {
     std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
 
@@ -161,11 +187,14 @@ void ModuleList::ReplaceEquivalent(const ModuleSP &module_sp) {
 
     size_t idx = 0;
     while (idx < m_modules.size()) {
-      ModuleSP module_sp(m_modules[idx]);
-      if (module_sp->MatchesModuleSpec(equivalent_module_spec))
+      ModuleSP test_module_sp(m_modules[idx]);
+      if (test_module_sp->MatchesModuleSpec(equivalent_module_spec)) {
+        if (old_modules)
+          old_modules->push_back(test_module_sp);
         RemoveImpl(m_modules.begin() + idx);
-      else
+      } else {
         ++idx;
+      }
     }
     // Now add the new module to the list
     Append(module_sp);
@@ -268,14 +297,24 @@ size_t ModuleList::RemoveOrphans(bool mandatory) {
     if (!lock.try_lock())
       return 0;
   }
-  collection::iterator pos = m_modules.begin();
   size_t remove_count = 0;
-  while (pos != m_modules.end()) {
-    if (pos->unique()) {
-      pos = RemoveImpl(pos);
-      ++remove_count;
-    } else {
-      ++pos;
+  // Modules might hold shared pointers to other modules, so removing one
+  // module might make other other modules orphans. Keep removing modules until
+  // there are no further modules that can be removed.
+  bool made_progress = true;
+  while (made_progress) {
+    // Keep track if we make progress this iteration.
+    made_progress = false;
+    collection::iterator pos = m_modules.begin();
+    while (pos != m_modules.end()) {
+      if (pos->unique()) {
+        pos = RemoveImpl(pos);
+        ++remove_count;
+        // We did make progress.
+        made_progress = true;
+      } else {
+        ++pos;
+      }
     }
   }
   return remove_count;
@@ -328,14 +367,10 @@ ModuleSP ModuleList::GetModuleAtIndexUnlocked(size_t idx) const {
   return module_sp;
 }
 
-size_t ModuleList::FindFunctions(ConstString name,
-                                 FunctionNameType name_type_mask,
-                                 bool include_symbols, bool include_inlines,
-                                 bool append,
-                                 SymbolContextList &sc_list) const {
-  if (!append)
-    sc_list.Clear();
-
+void ModuleList::FindFunctions(ConstString name,
+                               FunctionNameType name_type_mask,
+                               bool include_symbols, bool include_inlines,
+                               SymbolContextList &sc_list) const {
   const size_t old_size = sc_list.GetSize();
 
   if (name_type_mask & eFunctionNameTypeAuto) {
@@ -344,9 +379,9 @@ size_t ModuleList::FindFunctions(ConstString name,
     std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
     collection::const_iterator pos, end = m_modules.end();
     for (pos = m_modules.begin(); pos != end; ++pos) {
-      (*pos)->FindFunctions(lookup_info.GetLookupName(), nullptr,
+      (*pos)->FindFunctions(lookup_info.GetLookupName(), CompilerDeclContext(),
                             lookup_info.GetNameTypeMask(), include_symbols,
-                            include_inlines, true, sc_list);
+                            include_inlines, sc_list);
     }
 
     const size_t new_size = sc_list.GetSize();
@@ -357,16 +392,15 @@ size_t ModuleList::FindFunctions(ConstString name,
     std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
     collection::const_iterator pos, end = m_modules.end();
     for (pos = m_modules.begin(); pos != end; ++pos) {
-      (*pos)->FindFunctions(name, nullptr, name_type_mask, include_symbols,
-                            include_inlines, true, sc_list);
+      (*pos)->FindFunctions(name, CompilerDeclContext(), name_type_mask,
+                            include_symbols, include_inlines, sc_list);
     }
   }
-  return sc_list.GetSize() - old_size;
 }
 
-size_t ModuleList::FindFunctionSymbols(ConstString name,
-                                       lldb::FunctionNameType name_type_mask,
-                                       SymbolContextList &sc_list) {
+void ModuleList::FindFunctionSymbols(ConstString name,
+                                     lldb::FunctionNameType name_type_mask,
+                                     SymbolContextList &sc_list) {
   const size_t old_size = sc_list.GetSize();
 
   if (name_type_mask & eFunctionNameTypeAuto) {
@@ -390,96 +424,67 @@ size_t ModuleList::FindFunctionSymbols(ConstString name,
       (*pos)->FindFunctionSymbols(name, name_type_mask, sc_list);
     }
   }
-
-  return sc_list.GetSize() - old_size;
 }
 
-size_t ModuleList::FindFunctions(const RegularExpression &name,
-                                 bool include_symbols, bool include_inlines,
-                                 bool append, SymbolContextList &sc_list) {
-  const size_t old_size = sc_list.GetSize();
-
+void ModuleList::FindFunctions(const RegularExpression &name,
+                               bool include_symbols, bool include_inlines,
+                               SymbolContextList &sc_list) {
   std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
   collection::const_iterator pos, end = m_modules.end();
   for (pos = m_modules.begin(); pos != end; ++pos) {
-    (*pos)->FindFunctions(name, include_symbols, include_inlines, append,
-                          sc_list);
+    (*pos)->FindFunctions(name, include_symbols, include_inlines, sc_list);
   }
-
-  return sc_list.GetSize() - old_size;
 }
 
-size_t ModuleList::FindCompileUnits(const FileSpec &path, bool append,
-                                    SymbolContextList &sc_list) const {
-  if (!append)
-    sc_list.Clear();
-
+void ModuleList::FindCompileUnits(const FileSpec &path,
+                                  SymbolContextList &sc_list) const {
   std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
   collection::const_iterator pos, end = m_modules.end();
   for (pos = m_modules.begin(); pos != end; ++pos) {
-    (*pos)->FindCompileUnits(path, true, sc_list);
+    (*pos)->FindCompileUnits(path, sc_list);
   }
-
-  return sc_list.GetSize();
 }
 
-size_t ModuleList::FindGlobalVariables(ConstString name,
-                                       size_t max_matches,
-                                       VariableList &variable_list) const {
-  size_t initial_size = variable_list.GetSize();
+void ModuleList::FindGlobalVariables(ConstString name, size_t max_matches,
+                                     VariableList &variable_list) const {
   std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
   collection::const_iterator pos, end = m_modules.end();
   for (pos = m_modules.begin(); pos != end; ++pos) {
-    (*pos)->FindGlobalVariables(name, nullptr, max_matches, variable_list);
+    (*pos)->FindGlobalVariables(name, CompilerDeclContext(), max_matches,
+                                variable_list);
   }
-  return variable_list.GetSize() - initial_size;
 }
 
-size_t ModuleList::FindGlobalVariables(const RegularExpression &regex,
-                                       size_t max_matches,
-                                       VariableList &variable_list) const {
-  size_t initial_size = variable_list.GetSize();
+void ModuleList::FindGlobalVariables(const RegularExpression &regex,
+                                     size_t max_matches,
+                                     VariableList &variable_list) const {
   std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
   collection::const_iterator pos, end = m_modules.end();
   for (pos = m_modules.begin(); pos != end; ++pos) {
     (*pos)->FindGlobalVariables(regex, max_matches, variable_list);
   }
-  return variable_list.GetSize() - initial_size;
 }
 
-size_t ModuleList::FindSymbolsWithNameAndType(ConstString name,
-                                              SymbolType symbol_type,
-                                              SymbolContextList &sc_list,
-                                              bool append) const {
+void ModuleList::FindSymbolsWithNameAndType(ConstString name,
+                                            SymbolType symbol_type,
+                                            SymbolContextList &sc_list) const {
   std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
-  if (!append)
-    sc_list.Clear();
-  size_t initial_size = sc_list.GetSize();
-
   collection::const_iterator pos, end = m_modules.end();
   for (pos = m_modules.begin(); pos != end; ++pos)
     (*pos)->FindSymbolsWithNameAndType(name, symbol_type, sc_list);
-  return sc_list.GetSize() - initial_size;
 }
 
-size_t ModuleList::FindSymbolsMatchingRegExAndType(
+void ModuleList::FindSymbolsMatchingRegExAndType(
     const RegularExpression &regex, lldb::SymbolType symbol_type,
-    SymbolContextList &sc_list, bool append) const {
+    SymbolContextList &sc_list) const {
   std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
-  if (!append)
-    sc_list.Clear();
-  size_t initial_size = sc_list.GetSize();
-
   collection::const_iterator pos, end = m_modules.end();
   for (pos = m_modules.begin(); pos != end; ++pos)
     (*pos)->FindSymbolsMatchingRegExAndType(regex, symbol_type, sc_list);
-  return sc_list.GetSize() - initial_size;
 }
 
-size_t ModuleList::FindModules(const ModuleSpec &module_spec,
-                               ModuleList &matching_module_list) const {
-  size_t existing_matches = matching_module_list.GetSize();
-
+void ModuleList::FindModules(const ModuleSpec &module_spec,
+                             ModuleList &matching_module_list) const {
   std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
   collection::const_iterator pos, end = m_modules.end();
   for (pos = m_modules.begin(); pos != end; ++pos) {
@@ -487,7 +492,6 @@ size_t ModuleList::FindModules(const ModuleSpec &module_spec,
     if (module_sp->MatchesModuleSpec(module_spec))
       matching_module_list.Append(module_sp);
   }
-  return matching_module_list.GetSize() - existing_matches;
 }
 
 ModuleSP ModuleList::FindModule(const Module *module_ptr) const {
@@ -525,44 +529,36 @@ ModuleSP ModuleList::FindModule(const UUID &uuid) const {
   return module_sp;
 }
 
-size_t
-ModuleList::FindTypes(Module *search_first, ConstString name,
-                      bool name_is_fully_qualified, size_t max_matches,
-                      llvm::DenseSet<SymbolFile *> &searched_symbol_files,
-                      TypeList &types) const {
+void ModuleList::FindTypes(Module *search_first, ConstString name,
+                           bool name_is_fully_qualified, size_t max_matches,
+                           llvm::DenseSet<SymbolFile *> &searched_symbol_files,
+                           TypeList &types) const {
   std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
 
-  size_t total_matches = 0;
   collection::const_iterator pos, end = m_modules.end();
   if (search_first) {
     for (pos = m_modules.begin(); pos != end; ++pos) {
       if (search_first == pos->get()) {
-        total_matches +=
-            search_first->FindTypes(name, name_is_fully_qualified, max_matches,
-                                    searched_symbol_files, types);
+        search_first->FindTypes(name, name_is_fully_qualified, max_matches,
+                                searched_symbol_files, types);
 
-        if (total_matches >= max_matches)
-          break;
+        if (types.GetSize() >= max_matches)
+          return;
       }
     }
   }
 
-  if (total_matches < max_matches) {
-    for (pos = m_modules.begin(); pos != end; ++pos) {
-      // Search the module if the module is not equal to the one in the symbol
-      // context "sc". If "sc" contains a empty module shared pointer, then the
-      // comparison will always be true (valid_module_ptr != nullptr).
-      if (search_first != pos->get())
-        total_matches +=
-            (*pos)->FindTypes(name, name_is_fully_qualified, max_matches,
-                              searched_symbol_files, types);
+  for (pos = m_modules.begin(); pos != end; ++pos) {
+    // Search the module if the module is not equal to the one in the symbol
+    // context "sc". If "sc" contains a empty module shared pointer, then the
+    // comparison will always be true (valid_module_ptr != nullptr).
+    if (search_first != pos->get())
+      (*pos)->FindTypes(name, name_is_fully_qualified, max_matches,
+                        searched_symbol_files, types);
 
-      if (total_matches >= max_matches)
-        break;
-    }
+    if (types.GetSize() >= max_matches)
+      return;
   }
-
-  return total_matches;
 }
 
 bool ModuleList::FindSourceFile(const FileSpec &orig_spec,
@@ -611,10 +607,6 @@ size_t ModuleList::GetSize() const {
 }
 
 void ModuleList::Dump(Stream *s) const {
-  //  s.Printf("%.*p: ", (int)sizeof(void*) * 2, this);
-  //  s.Indent();
-  //  s << "ModuleList\n";
-
   std::lock_guard<std::recursive_mutex> guard(m_modules_mutex);
   collection::const_iterator pos, end = m_modules.end();
   for (pos = m_modules.begin(); pos != end; ++pos) {
@@ -746,20 +738,20 @@ bool ModuleList::ModuleIsInCache(const Module *module_ptr) {
   return false;
 }
 
-size_t ModuleList::FindSharedModules(const ModuleSpec &module_spec,
-                                     ModuleList &matching_module_list) {
-  return GetSharedModuleList().FindModules(module_spec, matching_module_list);
+void ModuleList::FindSharedModules(const ModuleSpec &module_spec,
+                                   ModuleList &matching_module_list) {
+  GetSharedModuleList().FindModules(module_spec, matching_module_list);
 }
 
 size_t ModuleList::RemoveOrphanSharedModules(bool mandatory) {
   return GetSharedModuleList().RemoveOrphans(mandatory);
 }
 
-Status ModuleList::GetSharedModule(const ModuleSpec &module_spec,
-                                   ModuleSP &module_sp,
-                                   const FileSpecList *module_search_paths_ptr,
-                                   ModuleSP *old_module_sp_ptr,
-                                   bool *did_create_ptr, bool always_create) {
+Status
+ModuleList::GetSharedModule(const ModuleSpec &module_spec, ModuleSP &module_sp,
+                            const FileSpecList *module_search_paths_ptr,
+                            llvm::SmallVectorImpl<lldb::ModuleSP> *old_modules,
+                            bool *did_create_ptr, bool always_create) {
   ModuleList &shared_module_list = GetSharedModuleList();
   std::lock_guard<std::recursive_mutex> guard(
       shared_module_list.m_modules_mutex);
@@ -771,8 +763,6 @@ Status ModuleList::GetSharedModule(const ModuleSpec &module_spec,
 
   if (did_create_ptr)
     *did_create_ptr = false;
-  if (old_module_sp_ptr)
-    old_module_sp_ptr->reset();
 
   const UUID *uuid_ptr = module_spec.GetUUIDPtr();
   const FileSpec &module_file_spec = module_spec.GetFileSpec();
@@ -783,8 +773,9 @@ Status ModuleList::GetSharedModule(const ModuleSpec &module_spec,
   // mutex list.
   if (!always_create) {
     ModuleList matching_module_list;
-    const size_t num_matching_modules =
-        shared_module_list.FindModules(module_spec, matching_module_list);
+    shared_module_list.FindModules(module_spec, matching_module_list);
+    const size_t num_matching_modules = matching_module_list.GetSize();
+
     if (num_matching_modules > 0) {
       for (size_t module_idx = 0; module_idx < num_matching_modules;
            ++module_idx) {
@@ -792,14 +783,15 @@ Status ModuleList::GetSharedModule(const ModuleSpec &module_spec,
 
         // Make sure the file for the module hasn't been modified
         if (module_sp->FileHasChanged()) {
-          if (old_module_sp_ptr && !*old_module_sp_ptr)
-            *old_module_sp_ptr = module_sp;
+          if (old_modules)
+            old_modules->push_back(module_sp);
 
           Log *log(lldb_private::GetLogIfAnyCategoriesSet(LIBLLDB_LOG_MODULES));
           if (log != nullptr)
-            LLDB_LOGF(log,
-                      "module changed: %p, removing from global module list",
-                      static_cast<void *>(module_sp.get()));
+            LLDB_LOGF(
+                log, "%p '%s' module changed: removing from global module list",
+                static_cast<void *>(module_sp.get()),
+                module_sp->GetFileSpec().GetFilename().GetCString());
 
           shared_module_list.Remove(module_sp);
           module_sp.reset();
@@ -834,7 +826,7 @@ Status ModuleList::GetSharedModule(const ModuleSpec &module_spec,
           *did_create_ptr = true;
         }
 
-        shared_module_list.ReplaceEquivalent(module_sp);
+        shared_module_list.ReplaceEquivalent(module_sp, old_modules);
         return error;
       }
     }
@@ -851,7 +843,7 @@ Status ModuleList::GetSharedModule(const ModuleSpec &module_spec,
       if (!FileSystem::Instance().IsDirectory(search_path_spec))
         continue;
       search_path_spec.AppendPathComponent(
-          module_spec.GetFileSpec().GetFilename().AsCString());
+          module_spec.GetFileSpec().GetFilename().GetStringRef());
       if (!FileSystem::Instance().Exists(search_path_spec))
         continue;
 
@@ -871,7 +863,7 @@ Status ModuleList::GetSharedModule(const ModuleSpec &module_spec,
             if (did_create_ptr)
               *did_create_ptr = true;
 
-            shared_module_list.ReplaceEquivalent(module_sp);
+            shared_module_list.ReplaceEquivalent(module_sp, old_modules);
             return Status();
           }
         }
@@ -935,8 +927,8 @@ Status ModuleList::GetSharedModule(const ModuleSpec &module_spec,
     platform_module_spec.GetSymbolFileSpec() =
         located_binary_modulespec.GetSymbolFileSpec();
     ModuleList matching_module_list;
-    if (shared_module_list.FindModules(platform_module_spec,
-                                       matching_module_list) > 0) {
+    shared_module_list.FindModules(platform_module_spec, matching_module_list);
+    if (!matching_module_list.IsEmpty()) {
       module_sp = matching_module_list.GetModuleAtIndex(0);
 
       // If we didn't have a UUID in mind when looking for the object file,
@@ -946,8 +938,8 @@ Status ModuleList::GetSharedModule(const ModuleSpec &module_spec,
             located_binary_modulespec.GetFileSpec());
         if (file_spec_mod_time != llvm::sys::TimePoint<>()) {
           if (file_spec_mod_time != module_sp->GetModificationTime()) {
-            if (old_module_sp_ptr)
-              *old_module_sp_ptr = module_sp;
+            if (old_modules)
+              old_modules->push_back(module_sp);
             shared_module_list.Remove(module_sp);
             module_sp.reset();
           }
@@ -969,7 +961,7 @@ Status ModuleList::GetSharedModule(const ModuleSpec &module_spec,
           if (did_create_ptr)
             *did_create_ptr = true;
 
-          shared_module_list.ReplaceEquivalent(module_sp);
+          shared_module_list.ReplaceEquivalent(module_sp, old_modules);
         }
       } else {
         located_binary_modulespec.GetFileSpec().GetPath(path, sizeof(path));
@@ -990,7 +982,7 @@ Status ModuleList::GetSharedModule(const ModuleSpec &module_spec,
             error.SetErrorStringWithFormat(
                 "cannot locate a module for UUID '%s'", uuid_str.c_str());
           else
-            error.SetErrorStringWithFormat("cannot locate a module");
+            error.SetErrorString("cannot locate a module");
         }
       }
     }

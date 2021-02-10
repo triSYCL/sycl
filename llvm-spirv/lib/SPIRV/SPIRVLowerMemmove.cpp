@@ -38,25 +38,18 @@
 #define DEBUG_TYPE "spvmemmove"
 
 #include "SPIRVInternal.h"
+#include "libSPIRV/SPIRVDebug.h"
+
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Module.h"
-#include "llvm/IR/Verifier.h"
 #include "llvm/Pass.h"
-#include "llvm/PassSupport.h"
-#include "llvm/Support/CommandLine.h"
-#include "llvm/Support/Debug.h"
 
 using namespace llvm;
 using namespace SPIRV;
 
 namespace SPIRV {
-cl::opt<bool> SPIRVLowerMemmoveValidate(
-    "spvmemmove-validate",
-    cl::desc("Validate module after lowering llvm.memmove instructions into "
-             "llvm.memcpy"));
-
 class SPIRVLowerMemmove : public ModulePass,
                           public InstVisitor<SPIRVLowerMemmove> {
 public:
@@ -75,11 +68,13 @@ public:
       report_fatal_error("llvm.memmove of non-constant length not supported",
                          false);
     auto *Length = cast<ConstantInt>(I.getLength());
-    if (isa<BitCastInst>(Src))
-      // The source could be bit-cast from another type,
-      // need the original type for the allocation of the temporary variable
-      SrcTy = cast<BitCastInst>(Src)->getOperand(0)->getType();
-    auto Align = I.getSourceAlignment();
+    auto *S = Src;
+    // The source could be bit-cast or addrspacecast from another type,
+    // need the original type for the allocation of the temporary variable
+    while (isa<BitCastInst>(S) || isa<AddrSpaceCastInst>(S))
+      S = cast<CastInst>(S)->getOperand(0);
+    SrcTy = S->getType();
+    MaybeAlign Align = I.getSourceAlign();
     auto Volatile = I.isVolatile();
     Value *NumElements = nullptr;
     uint64_t ElementsCount = 1;
@@ -87,18 +82,24 @@ public:
       NumElements = Builder.getInt32(SrcTy->getArrayNumElements());
       ElementsCount = SrcTy->getArrayNumElements();
     }
-    if (Mod->getDataLayout().getTypeSizeInBits(SrcTy->getPointerElementType()) *
-            ElementsCount !=
-        Length->getZExtValue() * 8)
+    if (((ElementsCount > 1) && (Mod->getDataLayout().getTypeSizeInBits(
+                                     SrcTy->getPointerElementType()) *
+                                     ElementsCount !=
+                                 Length->getZExtValue() * 8)) ||
+        ((ElementsCount == 1) &&
+         (Mod->getDataLayout().getTypeSizeInBits(
+              SrcTy->getPointerElementType()) < Length->getZExtValue() * 8)))
       report_fatal_error("Size of the memcpy should match the allocated memory",
                          false);
 
     auto *Alloca =
         Builder.CreateAlloca(SrcTy->getPointerElementType(), NumElements);
-    Alloca->setAlignment(Align);
+    if (Align.hasValue()) {
+      Alloca->setAlignment(Align.getValue());
+    }
     Builder.CreateLifetimeStart(Alloca);
     Builder.CreateMemCpy(Alloca, Align, Src, Align, Length, Volatile);
-    auto *SecondCpy = Builder.CreateMemCpy(Dest, I.getDestAlignment(), Alloca,
+    auto *SecondCpy = Builder.CreateMemCpy(Dest, I.getDestAlign(), Alloca,
                                            Align, Length, Volatile);
     Builder.CreateLifetimeEnd(Alloca);
 
@@ -112,15 +113,7 @@ public:
     Mod = &M;
     visit(M);
 
-    if (SPIRVLowerMemmoveValidate) {
-      LLVM_DEBUG(dbgs() << "After SPIRVLowerMemmove:\n" << M);
-      std::string Err;
-      raw_string_ostream ErrorOS(Err);
-      if (verifyModule(M, &ErrorOS)) {
-        Err = std::string("Fails to verify module: ") + Err;
-        report_fatal_error(Err.c_str(), false);
-      }
-    }
+    verifyRegularizationPass(M, "SPIRVLowerMemmove");
     return true;
   }
 

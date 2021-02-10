@@ -31,6 +31,7 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/Support/VirtualFileSystem.h"
 #include <memory>
 #include <string>
 #include <utility>
@@ -183,10 +184,15 @@ public:
       int &Argc, const char *const *Argv, std::string &ErrorMsg,
       Twine Directory = ".");
 
-  /// Reads flags from the given file, one-per line.
+  /// Reads flags from the given file, one-per-line.
   /// Returns nullptr and sets ErrorMessage if we can't read the file.
   static std::unique_ptr<FixedCompilationDatabase>
   loadFromFile(StringRef Path, std::string &ErrorMsg);
+
+  /// Reads flags from the given buffer, one-per-line.
+  /// Directory is the command CWD, typically the parent of compile_flags.txt.
+  static std::unique_ptr<FixedCompilationDatabase>
+  loadFromBuffer(StringRef Directory, StringRef Data, std::string &ErrorMsg);
 
   /// Constructs a compilation data base from a specified directory
   /// and command line.
@@ -218,6 +224,12 @@ std::unique_ptr<CompilationDatabase>
 /// by underlying database.
 std::unique_ptr<CompilationDatabase>
 inferTargetAndDriverMode(std::unique_ptr<CompilationDatabase> Base);
+
+/// Returns a wrapped CompilationDatabase that will expand all rsp(response)
+/// files on commandline returned by underlying database.
+std::unique_ptr<CompilationDatabase>
+expandResponseFiles(std::unique_ptr<CompilationDatabase> Base,
+                    llvm::IntrusiveRefCntPtr<llvm::vfs::FileSystem> FS);
 
 } // namespace tooling
 } // namespace clang

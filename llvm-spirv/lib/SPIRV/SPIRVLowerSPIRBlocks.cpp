@@ -53,8 +53,8 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
-#include "llvm/PassSupport.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Transforms/Utils/Cloning.h"
@@ -209,6 +209,7 @@ private:
       Value *CtxAlign = nullptr;
       getBlockInvokeFuncAndContext(CallBlkBind, &InvF, &Ctx, &CtxLen,
                                    &CtxAlign);
+      assert(Ctx && "Invalid context");
       for (auto II = CallBlkBind->user_begin(), EE = CallBlkBind->user_end();
            II != EE;) {
         auto BlkUser = *II++;
@@ -221,7 +222,7 @@ private:
         } else if (auto CI = dyn_cast<CallInst>(BlkUser)) {
           auto CallBindF = CI->getCalledFunction();
           auto Name = CallBindF->getName();
-          std::string DemangledName;
+          StringRef DemangledName;
           if (Name == SPIR_INTRINSIC_GET_BLOCK_INVOKE) {
             assert(CI->getArgOperand(0) == CallBlkBind);
             Changed |= lowerGetBlockInvoke(CI, cast<Function>(InvF));
@@ -230,7 +231,7 @@ private:
             // Handle context_ptr = spir_get_block_context(block)
             lowerGetBlockContext(CI, Ctx);
             Changed = true;
-          } else if (oclIsBuiltin(Name, &DemangledName)) {
+          } else if (oclIsBuiltin(Name, DemangledName)) {
             lowerBlockBuiltin(CI, InvF, Ctx, CtxLen, CtxAlign, DemangledName);
             Changed = true;
           } else
@@ -247,6 +248,7 @@ private:
     if (!Ctx)
       getBlockInvokeFuncAndContext(CallGetBlkCtx->getArgOperand(0), nullptr,
                                    &Ctx);
+    assert(Ctx && "Invalid context");
     CallGetBlkCtx->replaceAllUsesWith(Ctx);
     LLVM_DEBUG(dbgs() << "  [lowerGetBlockContext] " << *CallGetBlkCtx << " => "
                       << *Ctx << "\n\n");
@@ -267,7 +269,7 @@ private:
       LLVM_DEBUG(dbgs() << "[lowerGetBlockInvoke]  " << *CallInv);
       // Handle ret = block_func_ptr(context_ptr, args)
       auto CI = cast<CallInst>(CallInv);
-      auto F = CI->getCalledValue();
+      auto F = CI->getCalledOperand();
       if (InvokeF == nullptr) {
         getBlockInvokeFuncAndContext(CallGetBlkInvoke->getArgOperand(0),
                                      &InvokeF, nullptr);
@@ -285,7 +287,7 @@ private:
 
   void lowerBlockBuiltin(CallInst *CI, Function *InvF, Value *Ctx,
                          Value *CtxLen, Value *CtxAlign,
-                         const std::string &DemangledName) {
+                         StringRef DemangledName) {
     mutateCallInstSPIRV(M, CI, [=](CallInst *CI, std::vector<Value *> &Args) {
       size_t I = 0;
       size_t E = Args.size();
@@ -315,7 +317,7 @@ private:
         if (!isOCLClkEventPtrType(Args[5]->getType()))
           Args.insert(Args.begin() + 5, getOCLNullClkEventPtr());
       }
-      return getSPIRVFuncName(OCLSPIRVBuiltinMap::map(DemangledName));
+      return getSPIRVFuncName(OCLSPIRVBuiltinMap::map(DemangledName.str()));
     });
   }
   /// Transform return of a block.
@@ -342,12 +344,11 @@ private:
                         << '\n');
       auto CG = &getAnalysis<CallGraphWrapperPass>().getCallGraph();
       auto ACT = &getAnalysis<AssumptionCacheTracker>();
-      std::function<AssumptionCache &(Function &)> GetAssumptionCache =
-          [&](Function &F) -> AssumptionCache & {
+      auto GetAssumptionCache = [&ACT](Function &F) -> AssumptionCache & {
         return ACT->getAssumptionCache(F);
       };
-      InlineFunctionInfo IFI(CG, &GetAssumptionCache);
-      InlineFunction(CI, IFI);
+      InlineFunctionInfo IFI(CG, GetAssumptionCache);
+      InlineFunction(*cast<CallBase>(CI), IFI);
       Inlined = true;
     }
     return Changed || Inlined;
@@ -461,21 +462,16 @@ private:
       // Redirect all users of the old function to the new one.
       for (User *U : F.users()) {
         ConstantExpr *CE = dyn_cast<ConstantExpr>(U);
-        CallSite CS(U);
         if (CE && CE->getOpcode() == Instruction::BitCast) {
           Constant *NewCE = ConstantExpr::getBitCast(NF, CE->getType());
           U->replaceAllUsesWith(NewCE);
-        } else if (CS) {
-          assert(isa<CallInst>(CS.getInstruction()) &&
-                 "Call instruction is expected");
-          CallInst *Call = cast<CallInst>(CS.getInstruction());
-
+        } else if (auto *Call = dyn_cast<CallInst>(U)) {
           std::vector<Value *> Args;
-          auto I = CS.arg_begin();
-          Args.assign(++I, CS.arg_end()); // Skip first argument.
+          auto I = Call->arg_begin();
+          Args.assign(++I, Call->arg_end()); // Skip first argument.
           CallInst *New = CallInst::Create(NF, Args, "", Call);
           assert(New->getType() == Call->getType());
-          New->setCallingConv(CS.getCallingConv());
+          New->setCallingConv(Call->getCallingConv());
           New->setAttributes(NF->getAttributes());
           if (Call->isTailCall())
             New->setTailCall();

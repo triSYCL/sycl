@@ -1,24 +1,46 @@
 import argparse
-import os
+import multiprocessing
 import subprocess
 import sys
+import os
 
 DEFAULT_CPU_COUNT = 4
 
-def do_compile(args):
-    ret = False
 
-    cpu_count = os.cpu_count()
-    if cpu_count is None:
+def do_compile(args):
+    try:
+        cpu_count = multiprocessing.cpu_count()
+    except NotImplementedError:
         cpu_count = DEFAULT_CPU_COUNT
 
-    make_cmd = ["ninja", "-j", str(cpu_count), "sycl-toolchain"]
-    print(make_cmd)
+    if args.build_parallelism:
+        cpu_count = int(args.build_parallelism)
 
-    subprocess.check_call(make_cmd, cwd=args.obj_dir)
+    # Get absolute path to source directory
+    if args.src_dir:
+      abs_src_dir = os.path.abspath(args.src_dir)
+    else:
+      abs_src_dir = os.path.abspath(os.path.join(__file__, "../.."))
+    # Get absolute path to build directory
+    if args.obj_dir:
+      abs_obj_dir = os.path.abspath(args.obj_dir)
+    else:
+      abs_obj_dir = os.path.join(abs_src_dir, "build")
 
-    ret = True
-    return ret
+    cmake_cmd = [
+        "cmake",
+        "--build", abs_obj_dir,
+        "--",
+        "deploy-sycl-toolchain",
+        "deploy-opencl-aot",
+        "-j", str(cpu_count)]
+
+    print("[Cmake Command]: {}".format(" ".join(cmake_cmd)))
+
+    subprocess.check_call(cmake_cmd, cwd=abs_obj_dir)
+
+    return True
+
 
 def main():
     parser = argparse.ArgumentParser(prog="compile.py",
@@ -31,7 +53,8 @@ def main():
     parser.add_argument("-w", "--builder-dir", metavar="BUILDER_DIR",
                         help="builder directory, which is the directory contains source and build directories")
     parser.add_argument("-s", "--src-dir", metavar="SRC_DIR", help="source directory")
-    parser.add_argument("-o", "--obj-dir", metavar="OBJ_DIR", required=True, help="build directory")
+    parser.add_argument("-o", "--obj-dir", metavar="OBJ_DIR", help="build directory")
+    parser.add_argument("-j", "--build-parallelism", metavar="BUILD_PARALLELISM", help="build parallelism")
 
     args = parser.parse_args()
 
@@ -39,8 +62,8 @@ def main():
 
     return do_compile(args)
 
+
 if __name__ == "__main__":
     ret = main()
     exit_code = 0 if ret else 1
     sys.exit(exit_code)
-

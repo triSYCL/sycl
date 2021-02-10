@@ -12,12 +12,15 @@
 
 #include "llvm/Transforms/Scalar/LoopRotation.h"
 #include "llvm/ADT/Statistic.h"
+#include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/InstructionSimplify.h"
 #include "llvm/Analysis/LoopPass.h"
 #include "llvm/Analysis/MemorySSA.h"
 #include "llvm/Analysis/MemorySSAUpdater.h"
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/InitializePasses.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Transforms/Scalar.h"
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
@@ -37,7 +40,13 @@ LoopRotatePass::LoopRotatePass(bool EnableHeaderDuplication)
 PreservedAnalyses LoopRotatePass::run(Loop &L, LoopAnalysisManager &AM,
                                       LoopStandardAnalysisResults &AR,
                                       LPMUpdater &) {
-  int Threshold = EnableHeaderDuplication ? DefaultRotationThreshold : 0;
+  // Vectorization requires loop-rotation. Use default threshold for loops the
+  // user explicitly marked for vectorization, even when header duplication is
+  // disabled.
+  int Threshold = EnableHeaderDuplication ||
+                          hasVectorizeTransformation(&L) == TM_ForcedByUser
+                      ? DefaultRotationThreshold
+                      : 0;
   const DataLayout &DL = L.getHeader()->getModule()->getDataLayout();
   const SimplifyQuery SQ = getBestSimplifyQuery(AR, DL);
 
@@ -79,10 +88,8 @@ public:
   void getAnalysisUsage(AnalysisUsage &AU) const override {
     AU.addRequired<AssumptionCacheTracker>();
     AU.addRequired<TargetTransformInfoWrapperPass>();
-    if (EnableMSSALoopDependency) {
-      AU.addRequired<MemorySSAWrapperPass>();
+    if (EnableMSSALoopDependency)
       AU.addPreserved<MemorySSAWrapperPass>();
-    }
     getLoopAnalysisUsage(AU);
   }
 
@@ -94,22 +101,30 @@ public:
     auto *LI = &getAnalysis<LoopInfoWrapperPass>().getLoopInfo();
     const auto *TTI = &getAnalysis<TargetTransformInfoWrapperPass>().getTTI(F);
     auto *AC = &getAnalysis<AssumptionCacheTracker>().getAssumptionCache(F);
-    auto *DTWP = getAnalysisIfAvailable<DominatorTreeWrapperPass>();
-    auto *DT = DTWP ? &DTWP->getDomTree() : nullptr;
-    auto *SEWP = getAnalysisIfAvailable<ScalarEvolutionWrapperPass>();
-    auto *SE = SEWP ? &SEWP->getSE() : nullptr;
+    auto &DT = getAnalysis<DominatorTreeWrapperPass>().getDomTree();
+    auto &SE = getAnalysis<ScalarEvolutionWrapperPass>().getSE();
     const SimplifyQuery SQ = getBestSimplifyQuery(*this, F);
     Optional<MemorySSAUpdater> MSSAU;
     if (EnableMSSALoopDependency) {
-      MemorySSA *MSSA = &getAnalysis<MemorySSAWrapperPass>().getMSSA();
-      MSSAU = MemorySSAUpdater(MSSA);
+      // Not requiring MemorySSA and getting it only if available will split
+      // the loop pass pipeline when LoopRotate is being run first.
+      auto *MSSAA = getAnalysisIfAvailable<MemorySSAWrapperPass>();
+      if (MSSAA)
+        MSSAU = MemorySSAUpdater(&MSSAA->getMSSA());
     }
-    return LoopRotation(L, LI, TTI, AC, DT, SE,
+    // Vectorization requires loop-rotation. Use default threshold for loops the
+    // user explicitly marked for vectorization, even when header duplication is
+    // disabled.
+    int Threshold = hasVectorizeTransformation(L) == TM_ForcedByUser
+                        ? DefaultRotationThreshold
+                        : MaxHeaderSize;
+
+    return LoopRotation(L, LI, TTI, AC, &DT, &SE,
                         MSSAU.hasValue() ? MSSAU.getPointer() : nullptr, SQ,
-                        false, MaxHeaderSize, false);
+                        false, Threshold, false);
   }
 };
-}
+} // end namespace
 
 char LoopRotateLegacyPass::ID = 0;
 INITIALIZE_PASS_BEGIN(LoopRotateLegacyPass, "loop-rotate", "Rotate Loops",

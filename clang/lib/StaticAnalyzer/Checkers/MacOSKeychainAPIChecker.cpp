@@ -66,7 +66,7 @@ public:
   ProgramStateRef evalAssume(ProgramStateRef state, SVal Cond,
                              bool Assumption) const;
   void printState(raw_ostream &Out, ProgramStateRef State,
-                  const char *NL, const char *Sep) const;
+                  const char *NL, const char *Sep) const override;
 
 private:
   typedef std::pair<SymbolRef, const AllocationState*> AllocationPair;
@@ -113,8 +113,10 @@ private:
   const ExplodedNode *getAllocationNode(const ExplodedNode *N, SymbolRef Sym,
                                         CheckerContext &C) const;
 
-  std::unique_ptr<BugReport> generateAllocatedDataNotReleasedReport(
-      const AllocationPair &AP, ExplodedNode *N, CheckerContext &C) const;
+  std::unique_ptr<PathSensitiveBugReport>
+  generateAllocatedDataNotReleasedReport(const AllocationPair &AP,
+                                         ExplodedNode *N,
+                                         CheckerContext &C) const;
 
   /// Mark an AllocationPair interesting for diagnostic reporting.
   void markInteresting(PathSensitiveBugReport *R,
@@ -467,7 +469,7 @@ MacOSKeychainAPIChecker::getAllocationNode(const ExplodedNode *N,
   return AllocNode;
 }
 
-std::unique_ptr<BugReport>
+std::unique_ptr<PathSensitiveBugReport>
 MacOSKeychainAPIChecker::generateAllocatedDataNotReleasedReport(
     const AllocationPair &AP, ExplodedNode *N, CheckerContext &C) const {
   const ADFunctionInfo &FI = FunctionsToTrack[AP.second->AllocatorIdx];
@@ -507,7 +509,7 @@ ProgramStateRef MacOSKeychainAPIChecker::evalAssume(ProgramStateRef State,
   if (AMap.isEmpty())
     return State;
 
-  auto *CondBSE = dyn_cast_or_null<BinarySymExpr>(Cond.getAsSymExpr());
+  auto *CondBSE = dyn_cast_or_null<BinarySymExpr>(Cond.getAsSymbol());
   if (!CondBSE)
     return State;
   BinaryOperator::Opcode OpCode = CondBSE->getOpcode();
@@ -665,6 +667,6 @@ void ento::registerMacOSKeychainAPIChecker(CheckerManager &mgr) {
   mgr.registerChecker<MacOSKeychainAPIChecker>();
 }
 
-bool ento::shouldRegisterMacOSKeychainAPIChecker(const LangOptions &LO) {
+bool ento::shouldRegisterMacOSKeychainAPIChecker(const CheckerManager &mgr) {
   return true;
 }

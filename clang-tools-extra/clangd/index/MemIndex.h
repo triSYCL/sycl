@@ -10,6 +10,7 @@
 #define LLVM_CLANG_TOOLS_EXTRA_CLANGD_INDEX_MEMINDEX_H
 
 #include "Index.h"
+#include "llvm/ADT/StringSet.h"
 #include <mutex>
 
 namespace clang {
@@ -27,8 +28,9 @@ public:
     for (const std::pair<SymbolID, llvm::ArrayRef<Ref>> &R : Refs)
       this->Refs.try_emplace(R.first, R.second.begin(), R.second.end());
     for (const Relation &R : Relations)
-      this->Relations[std::make_pair(R.Subject, R.Predicate)].push_back(
-          R.Object);
+      this->Relations[std::make_pair(R.Subject,
+                                     static_cast<uint8_t>(R.Predicate))]
+          .push_back(R.Object);
   }
   // Symbols are owned by BackingData, Index takes ownership.
   template <typename SymbolRange, typename RefRange, typename RelationRange,
@@ -43,6 +45,17 @@ public:
     this->BackingDataSize = BackingDataSize;
   }
 
+  template <typename SymbolRange, typename RefRange, typename RelationRange,
+            typename FileRange, typename Payload>
+  MemIndex(SymbolRange &&Symbols, RefRange &&Refs, RelationRange &&Relations,
+           FileRange &&Files, Payload &&BackingData, size_t BackingDataSize)
+      : MemIndex(std::forward<SymbolRange>(Symbols),
+                 std::forward<RefRange>(Refs),
+                 std::forward<RelationRange>(Relations),
+                 std::forward<Payload>(BackingData), BackingDataSize) {
+    this->Files = std::forward<FileRange>(Files);
+  }
+
   /// Builds an index from slabs. The index takes ownership of the data.
   static std::unique_ptr<SymbolIndex> build(SymbolSlab Symbols, RefSlab Refs,
                                             RelationSlab Relations);
@@ -54,12 +67,15 @@ public:
   void lookup(const LookupRequest &Req,
               llvm::function_ref<void(const Symbol &)> Callback) const override;
 
-  void refs(const RefsRequest &Req,
+  bool refs(const RefsRequest &Req,
             llvm::function_ref<void(const Ref &)> Callback) const override;
 
   void relations(const RelationsRequest &Req,
                  llvm::function_ref<void(const SymbolID &, const Symbol &)>
                      Callback) const override;
+
+  llvm::unique_function<bool(llvm::StringRef) const>
+  indexedFiles() const override;
 
   size_t estimateMemoryUsage() const override;
 
@@ -69,8 +85,11 @@ private:
   // A map from symbol ID to symbol refs, support query by IDs.
   llvm::DenseMap<SymbolID, llvm::ArrayRef<Ref>> Refs;
   // A map from (subject, predicate) pair to objects.
-  llvm::DenseMap<std::pair<SymbolID, index::SymbolRole>, std::vector<SymbolID>>
-      Relations;
+  static_assert(sizeof(RelationKind) == sizeof(uint8_t),
+                "RelationKind should be of same size as a uint8_t");
+  llvm::DenseMap<std::pair<SymbolID, uint8_t>, std::vector<SymbolID>> Relations;
+  // Set of files which were used during this index build.
+  llvm::StringSet<> Files;
   std::shared_ptr<void> KeepAlive; // poor man's move-only std::any
   // Size of memory retained by KeepAlive.
   size_t BackingDataSize = 0;

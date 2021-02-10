@@ -25,8 +25,6 @@
 namespace clang {
 class TargetInfo;
 class IdentifierTable;
-class ASTContext;
-class QualType;
 class LangOptions;
 
 enum LanguageID {
@@ -160,6 +158,13 @@ public:
     return strchr(getRecord(ID).Attributes, 't') != nullptr;
   }
 
+  /// Determines whether a declaration of this builtin should be recognized
+  /// even if the type doesn't match the specified signature.
+  bool allowTypeMismatch(unsigned ID) const {
+    return strchr(getRecord(ID).Attributes, 'T') != nullptr ||
+           hasCustomTypechecking(ID);
+  }
+
   /// Determines whether this builtin has a result or any arguments which
   /// are pointer types.
   bool hasPtrArgsOrResult(unsigned ID) const {
@@ -224,7 +229,7 @@ public:
 
   /// Returns true if this is a libc/libm function without the '__builtin_'
   /// prefix.
-  static bool isBuiltinFunc(const char *Name);
+  static bool isBuiltinFunc(llvm::StringRef Name);
 
   /// Returns true if this is a builtin that can be redeclared.  Returns true
   /// for non-builtins.

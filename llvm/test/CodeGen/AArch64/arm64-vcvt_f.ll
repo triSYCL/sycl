@@ -38,6 +38,151 @@ define <2 x double> @test_vcvt_high_f64_f32(<4 x float> %x) nounwind readnone ss
   ret <2 x double> %vcvt1.i
 }
 
+define <2 x double> @test_vcvt_high_v1f64_f32_bitcast(<4 x float> %x) nounwind readnone ssp {
+; CHECK-LABEL: test_vcvt_high_v1f64_f32_bitcast:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    fcvtl2 v0.2d, v0.4s
+; CHECK-NEXT:    ret
+;
+; GISEL-LABEL: test_vcvt_high_v1f64_f32_bitcast:
+; GISEL:       // %bb.0:
+; GISEL-NEXT:    fcvtl2 v0.2d, v0.4s
+; GISEL-NEXT:    ret
+  %bc1 = bitcast <4 x float> %x to <2 x double>
+  %ext = shufflevector <2 x double> %bc1, <2 x double> undef, <1 x i32> <i32 1>
+  %bc2 = bitcast <1 x double> %ext to <2 x float>
+  %r = fpext <2 x float> %bc2 to <2 x double>
+  ret <2 x double> %r
+}
+
+define <2 x double> @test_vcvt_high_v1i64_f32_bitcast(<2 x i64> %x) nounwind readnone ssp {
+; CHECK-LABEL: test_vcvt_high_v1i64_f32_bitcast:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    fcvtl2 v0.2d, v0.4s
+; CHECK-NEXT:    ret
+;
+; GISEL-LABEL: test_vcvt_high_v1i64_f32_bitcast:
+; GISEL:       // %bb.0:
+; GISEL-NEXT:    fcvtl2 v0.2d, v0.4s
+; GISEL-NEXT:    ret
+  %ext = shufflevector <2 x i64> %x, <2 x i64> undef, <1 x i32> <i32 1>
+  %bc2 = bitcast <1 x i64> %ext to <2 x float>
+  %r = fpext <2 x float> %bc2 to <2 x double>
+  ret <2 x double> %r
+}
+
+define <2 x double> @test_vcvt_high_v2i32_f32_bitcast(<4 x i32> %x) nounwind readnone ssp {
+; CHECK-LABEL: test_vcvt_high_v2i32_f32_bitcast:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    fcvtl2 v0.2d, v0.4s
+; CHECK-NEXT:    ret
+;
+; GISEL-LABEL: test_vcvt_high_v2i32_f32_bitcast:
+; GISEL:       // %bb.0:
+; GISEL-NEXT:    fcvtl2 v0.2d, v0.4s
+; GISEL-NEXT:    ret
+  %ext = shufflevector <4 x i32> %x, <4 x i32> undef, <2 x i32> <i32 2, i32 3>
+  %bc2 = bitcast <2 x i32> %ext to <2 x float>
+  %r = fpext <2 x float> %bc2 to <2 x double>
+  ret <2 x double> %r
+}
+
+define <2 x double> @test_vcvt_high_v4i16_f32_bitcast(<8 x i16> %x) nounwind readnone ssp {
+; CHECK-LABEL: test_vcvt_high_v4i16_f32_bitcast:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    fcvtl2 v0.2d, v0.4s
+; CHECK-NEXT:    ret
+;
+; GISEL-LABEL: test_vcvt_high_v4i16_f32_bitcast:
+; GISEL:       // %bb.0:
+; GISEL-NEXT:    fcvtl2 v0.2d, v0.4s
+; GISEL-NEXT:    ret
+  %ext = shufflevector <8 x i16> %x, <8 x i16> undef, <4 x i32> <i32 4, i32 5, i32 6, i32 7>
+  %bc2 = bitcast <4 x i16> %ext to <2 x float>
+  %r = fpext <2 x float> %bc2 to <2 x double>
+  ret <2 x double> %r
+}
+
+define <2 x double> @test_vcvt_high_v8i8_f32_bitcast(<16 x i8> %x) nounwind readnone ssp {
+; CHECK-LABEL: test_vcvt_high_v8i8_f32_bitcast:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    fcvtl2 v0.2d, v0.4s
+; CHECK-NEXT:    ret
+;
+; GISEL-LABEL: test_vcvt_high_v8i8_f32_bitcast:
+; GISEL:       // %bb.0:
+; GISEL-NEXT:    fcvtl2 v0.2d, v0.4s
+; GISEL-NEXT:    ret
+  %ext = shufflevector <16 x i8> %x, <16 x i8> undef, <8 x i32> <i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15>
+  %bc2 = bitcast <8 x i8> %ext to <2 x float>
+  %r = fpext <2 x float> %bc2 to <2 x double>
+  ret <2 x double> %r
+}
+
+define <4 x float> @test_vcvt_high_v1i64_f16_bitcast(<2 x i64> %x) nounwind readnone ssp {
+; CHECK-LABEL: test_vcvt_high_v1i64_f16_bitcast:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    fcvtl2 v0.4s, v0.8h
+; CHECK-NEXT:    ret
+;
+; GISEL-LABEL: test_vcvt_high_v1i64_f16_bitcast:
+; GISEL:       // %bb.0:
+; GISEL-NEXT:    fcvtl2 v0.4s, v0.8h
+; GISEL-NEXT:    ret
+  %ext = shufflevector <2 x i64> %x, <2 x i64> undef, <1 x i32> <i32 1>
+  %bc2 = bitcast <1 x i64> %ext to <4 x half>
+  %r = fpext <4 x half> %bc2 to <4 x float>
+  ret <4 x float> %r
+}
+
+define <4 x float> @test_vcvt_high_v2i32_f16_bitcast(<4 x i32> %x) nounwind readnone ssp {
+; CHECK-LABEL: test_vcvt_high_v2i32_f16_bitcast:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    fcvtl2 v0.4s, v0.8h
+; CHECK-NEXT:    ret
+;
+; GISEL-LABEL: test_vcvt_high_v2i32_f16_bitcast:
+; GISEL:       // %bb.0:
+; GISEL-NEXT:    fcvtl2 v0.4s, v0.8h
+; GISEL-NEXT:    ret
+  %ext = shufflevector <4 x i32> %x, <4 x i32> undef, <2 x i32> <i32 2, i32 3>
+  %bc2 = bitcast <2 x i32> %ext to <4 x half>
+  %r = fpext <4 x half> %bc2 to <4 x float>
+  ret <4 x float> %r
+}
+
+define <4 x float> @test_vcvt_high_v4i16_f16_bitcast(<8 x i16> %x) nounwind readnone ssp {
+; CHECK-LABEL: test_vcvt_high_v4i16_f16_bitcast:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    fcvtl2 v0.4s, v0.8h
+; CHECK-NEXT:    ret
+;
+; GISEL-LABEL: test_vcvt_high_v4i16_f16_bitcast:
+; GISEL:       // %bb.0:
+; GISEL-NEXT:    fcvtl2 v0.4s, v0.8h
+; GISEL-NEXT:    ret
+  %ext = shufflevector <8 x i16> %x, <8 x i16> undef, <4 x i32> <i32 4, i32 5, i32 6, i32 7>
+  %bc2 = bitcast <4 x i16> %ext to <4 x half>
+  %r = fpext <4 x half> %bc2 to <4 x float>
+  ret <4 x float> %r
+}
+
+define <4 x float> @test_vcvt_high_v8i8_f16_bitcast(<16 x i8> %x) nounwind readnone ssp {
+; CHECK-LABEL: test_vcvt_high_v8i8_f16_bitcast:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    fcvtl2 v0.4s, v0.8h
+; CHECK-NEXT:    ret
+;
+; GISEL-LABEL: test_vcvt_high_v8i8_f16_bitcast:
+; GISEL:       // %bb.0:
+; GISEL-NEXT:    fcvtl2 v0.4s, v0.8h
+; GISEL-NEXT:    ret
+  %ext = shufflevector <16 x i8> %x, <16 x i8> undef, <8 x i32> <i32 8, i32 9, i32 10, i32 11, i32 12, i32 13, i32 14, i32 15>
+  %bc2 = bitcast <8 x i8> %ext to <4 x half>
+  %r = fpext <4 x half> %bc2 to <4 x float>
+  ret <4 x float> %r
+}
+
 ; FALLBACK-NOT: remark{{.*}}G_FPEXT{{.*}}(in function: test_vcvt_f32_f64)
 ; FALLBACK-NOT: remark{{.*}}fpext{{.*}}(in function: test_vcvt_f32_f64)
 define <2 x float> @test_vcvt_f32_f64(<2 x double> %v) nounwind readnone ssp {
@@ -65,10 +210,10 @@ define <4 x float> @test_vcvt_high_f32_f64(<2 x float> %x, <2 x double> %v) noun
 ;
 ; FAST-LABEL: test_vcvt_high_f32_f64:
 ; FAST:       // %bb.0:
-; FAST-NEXT:    // implicit-def: $q2
 ; FAST-NEXT:    mov.16b v2, v0
-; FAST-NEXT:    fcvtn2 v2.4s, v1.2d
+; FAST-NEXT:    // implicit-def: $q0
 ; FAST-NEXT:    mov.16b v0, v2
+; FAST-NEXT:    fcvtn2 v0.4s, v1.2d
 ; FAST-NEXT:    ret
 ;
 ; GISEL-LABEL: test_vcvt_high_f32_f64:
@@ -104,10 +249,10 @@ define <4 x float> @test_vcvtx_high_f32_f64(<2 x float> %x, <2 x double> %v) nou
 ;
 ; FAST-LABEL: test_vcvtx_high_f32_f64:
 ; FAST:       // %bb.0:
-; FAST-NEXT:    // implicit-def: $q2
 ; FAST-NEXT:    mov.16b v2, v0
-; FAST-NEXT:    fcvtxn2 v2.4s, v1.2d
+; FAST-NEXT:    // implicit-def: $q0
 ; FAST-NEXT:    mov.16b v0, v2
+; FAST-NEXT:    fcvtxn2 v0.4s, v1.2d
 ; FAST-NEXT:    ret
 ;
 ; GISEL-LABEL: test_vcvtx_high_f32_f64:
@@ -138,17 +283,12 @@ define i16 @to_half(float %in) {
 ;
 ; FAST-LABEL: to_half:
 ; FAST:       // %bb.0:
-; FAST-NEXT:    sub sp, sp, #16 // =16
-; FAST-NEXT:    .cfi_def_cfa_offset 16
 ; FAST-NEXT:    fcvt h1, s0
 ; FAST-NEXT:    // implicit-def: $w0
 ; FAST-NEXT:    fmov s0, w0
 ; FAST-NEXT:    mov.16b v0, v1
-; FAST-NEXT:    fmov w8, s0
-; FAST-NEXT:    mov w0, w8
-; FAST-NEXT:    str w0, [sp, #12] // 4-byte Folded Spill
-; FAST-NEXT:    mov w0, w8
-; FAST-NEXT:    add sp, sp, #16 // =16
+; FAST-NEXT:    fmov w0, s0
+; FAST-NEXT:    // kill: def $w1 killed $w0
 ; FAST-NEXT:    ret
 ;
 ; GISEL-LABEL: to_half:

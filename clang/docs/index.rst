@@ -41,8 +41,10 @@ Using Clang as a Compiler
    SourceBasedCodeCoverage
    Modules
    MSVCCompatibility
+   OpenCLSupport
    OpenMPSupport
    ThinLTO
+   APINotes
    CommandGuide/index
    FAQ
 
@@ -76,6 +78,8 @@ Using Clang Tools
    ClangCheck
    ClangFormat
    ClangFormatStyleOptions
+   ClangFormattedStatus
+   ClangOffloadBundler
 
 Design Documents
 ================

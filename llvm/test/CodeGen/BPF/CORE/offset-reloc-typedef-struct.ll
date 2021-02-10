@@ -1,5 +1,6 @@
-; RUN: llc -march=bpfel -filetype=asm -o - %s | FileCheck %s
-; RUN: llc -march=bpfeb -filetype=asm -o - %s | FileCheck %s
+; RUN: opt -O2 %s | llvm-dis > %t1
+; RUN: llc -filetype=asm -o - %t1 | FileCheck %s
+; RUN: llc -mattr=+alu32 -filetype=asm -o - %t1 | FileCheck %s
 ;
 ; Source code:
 ;   typedef int _int;
@@ -12,7 +13,9 @@
 ;   int test(s *arg) {
 ;     return get_value(_(&arg->b));
 ;   }
-; clang -target bpf -S -O2 -g -emit-llvm test.c
+; clang -target bpf -S -O2 -g -emit-llvm -Xclang -disable-llvm-passes test.c
+
+target triple = "bpf"
 
 %struct.__s = type { i32, i32 }
 
@@ -37,12 +40,13 @@ entry:
 ; CHECK-NEXT:   .byte   0
 ; CHECK:        .ascii  "0:1"                   # string offset=[[ACCESS_STR:[0-9]+]]
 ; CHECK-NEXT:   .byte   0
-; CHECK:        .long   12                      # OffsetReloc
-; CHECK-NEXT:   .long   [[SEC_STR]]             # Offset reloc section string offset={{[0-9]+}}
+; CHECK:        .long   16                      # FieldReloc
+; CHECK-NEXT:   .long   [[SEC_STR]]             # Field reloc section string offset={{[0-9]+}}
 ; CHECK-NEXT:   .long   1
 ; CHECK-NEXT:   .long   [[RELOC]]
 ; CHECK-NEXT:   .long   [[TYPE_ID]]
 ; CHECK-NEXT:   .long   [[ACCESS_STR]]
+; CHECK-NEXT:   .long   0
 
 declare dso_local i32 @get_value(i8*) local_unnamed_addr #1
 

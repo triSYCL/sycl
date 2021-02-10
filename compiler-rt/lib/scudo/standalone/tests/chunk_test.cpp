@@ -6,9 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "chunk.h"
+#include "tests/scudo_unit_test.h"
 
-#include "gtest/gtest.h"
+#include "chunk.h"
 
 #include <stdlib.h>
 
@@ -41,7 +41,7 @@ TEST(ScudoChunkTest, ChunkCmpXchg) {
   initChecksum();
   const scudo::uptr Size = 0x100U;
   scudo::Chunk::UnpackedHeader OldHeader = {};
-  OldHeader.Origin = scudo::Chunk::Origin::Malloc;
+  OldHeader.OriginOrWasZeroed = scudo::Chunk::Origin::Malloc;
   OldHeader.ClassId = 0x42U;
   OldHeader.SizeOrUnusedBytes = Size;
   OldHeader.State = scudo::Chunk::State::Allocated;

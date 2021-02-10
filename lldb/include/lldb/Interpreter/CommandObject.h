@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_CommandObject_h_
-#define liblldb_CommandObject_h_
+#ifndef LLDB_INTERPRETER_COMMANDOBJECT_H
+#define LLDB_INTERPRETER_COMMANDOBJECT_H
 
 #include <map>
 #include <string>
@@ -40,7 +40,7 @@ int AddNamesMatchingPartialString(
   const bool add_all = cmd_str.empty();
 
   for (auto iter = in_map.begin(), end = in_map.end(); iter != end; iter++) {
-    if (add_all || (iter->first.find(cmd_str, 0) == 0)) {
+    if (add_all || (iter->first.find(std::string(cmd_str), 0) == 0)) {
       ++number_added;
       matches.AppendString(iter->first.c_str());
       if (descriptions)
@@ -90,14 +90,15 @@ public:
   {
     lldb::CommandArgumentType arg_type;
     ArgumentRepetitionType arg_repetition;
-    uint32_t arg_opt_set_association; // This arg might be associated only with
-                                      // some particular option set(s).
-    CommandArgumentData()
-        : arg_type(lldb::eArgTypeNone), arg_repetition(eArgRepeatPlain),
-          arg_opt_set_association(LLDB_OPT_SET_ALL) // By default, the arg
-                                                    // associates to all option
-                                                    // sets.
-    {}
+    /// This arg might be associated only with some particular option set(s). By
+    /// default the arg associates to all option sets.
+    uint32_t arg_opt_set_association;
+
+    CommandArgumentData(lldb::CommandArgumentType type = lldb::eArgTypeNone,
+                        ArgumentRepetitionType repetition = eArgRepeatPlain,
+                        uint32_t opt_set = LLDB_OPT_SET_ALL)
+        : arg_type(type), arg_repetition(repetition),
+          arg_opt_set_association(opt_set) {}
   };
 
   typedef std::vector<CommandArgumentData>
@@ -226,7 +227,7 @@ public:
   /// option. Don't override this method, override HandleArgumentCompletion
   /// instead unless you have special reasons.
   ///
-  /// \param[in/out] request
+  /// \param[in,out] request
   ///    The completion request that needs to be answered.
   virtual void HandleCompletion(CompletionRequest &request);
 
@@ -235,7 +236,7 @@ public:
   /// We've constructed the map of options and their arguments as well if that
   /// is helpful for the completion.
   ///
-  /// \param[in/out] request
+  /// \param[in,out] request
   ///    The completion request that needs to be answered.
   virtual void
   HandleArgumentCompletion(CompletionRequest &request,
@@ -261,8 +262,8 @@ public:
 
   /// Get the command that appropriate for a "repeat" of the current command.
   ///
-  /// \param[in] current_command_line
-  ///    The complete current command line.
+  /// \param[in] current_command_args
+  ///    The command arguments.
   ///
   /// \return
   ///     nullptr if there is no special repeat command - it will use the
@@ -411,4 +412,4 @@ protected:
 
 } // namespace lldb_private
 
-#endif // liblldb_CommandObject_h_
+#endif // LLDB_INTERPRETER_COMMANDOBJECT_H

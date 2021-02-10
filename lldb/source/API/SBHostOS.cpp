@@ -1,4 +1,4 @@
-//===-- SBHostOS.cpp --------------------------------------------*- C++ -*-===//
+//===-- SBHostOS.cpp ------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,9 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "lldb/API/SBHostOS.h"
 #include "SBReproducerPrivate.h"
 #include "lldb/API/SBError.h"
-#include "lldb/API/SBHostOS.h"
+#include "lldb/Host/Config.h"
 #include "lldb/Host/FileSystem.h"
 #include "lldb/Host/Host.h"
 #include "lldb/Host/HostInfo.h"
@@ -18,7 +19,7 @@
 #include "lldb/Utility/FileSpec.h"
 
 #include "Plugins/ExpressionParser/Clang/ClangHost.h"
-#ifndef LLDB_DISABLE_PYTHON
+#if LLDB_ENABLE_PYTHON
 #include "Plugins/ScriptInterpreter/Python/ScriptInterpreterPython.h"
 #endif
 
@@ -60,7 +61,7 @@ SBFileSpec SBHostOS::GetLLDBPath(lldb::PathType path_type) {
     fspec = HostInfo::GetHeaderDir();
     break;
   case ePathTypePythonDir:
-#ifndef LLDB_DISABLE_PYTHON
+#if LLDB_ENABLE_PYTHON
     fspec = ScriptInterpreterPython::GetPythonDir();
 #endif
     break;
@@ -90,14 +91,13 @@ SBFileSpec SBHostOS::GetUserHomeDirectory() {
   LLDB_RECORD_STATIC_METHOD_NO_ARGS(lldb::SBFileSpec, SBHostOS,
                                     GetUserHomeDirectory);
 
-  SBFileSpec sb_fspec;
-
-  llvm::SmallString<64> home_dir_path;
-  llvm::sys::path::home_directory(home_dir_path);
-  FileSpec homedir(home_dir_path.c_str());
+  FileSpec homedir;
+  FileSystem::Instance().GetHomeDirectory(homedir);
   FileSystem::Instance().Resolve(homedir);
 
+  SBFileSpec sb_fspec;
   sb_fspec.SetFileSpec(homedir);
+
   return LLDB_RECORD_RESULT(sb_fspec);
 }
 

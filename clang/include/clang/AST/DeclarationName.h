@@ -528,7 +528,7 @@ public:
 
   static int compare(DeclarationName LHS, DeclarationName RHS);
 
-  void print(raw_ostream &OS, const PrintingPolicy &Policy);
+  void print(raw_ostream &OS, const PrintingPolicy &Policy) const;
 
   void dump() const;
 };
@@ -792,7 +792,7 @@ public:
   std::string getAsString() const;
 
   /// printName - Print the human-readable name to a stream.
-  void printName(raw_ostream &OS) const;
+  void printName(raw_ostream &OS, PrintingPolicy Policy) const;
 
   /// getBeginLoc - Retrieve the location of the first token.
   SourceLocation getBeginLoc() const { return NameLoc; }
@@ -811,29 +811,16 @@ private:
   SourceLocation getEndLocPrivate() const;
 };
 
-/// Insertion operator for diagnostics.  This allows sending DeclarationName's
-/// into a diagnostic with <<.
-inline const DiagnosticBuilder &operator<<(const DiagnosticBuilder &DB,
-                                           DeclarationName N) {
-  DB.AddTaggedVal(N.getAsOpaqueInteger(),
-                  DiagnosticsEngine::ak_declarationname);
-  return DB;
-}
-
 /// Insertion operator for partial diagnostics.  This allows binding
 /// DeclarationName's into a partial diagnostic with <<.
-inline const PartialDiagnostic &operator<<(const PartialDiagnostic &PD,
-                                           DeclarationName N) {
+inline const StreamingDiagnostic &operator<<(const StreamingDiagnostic &PD,
+                                             DeclarationName N) {
   PD.AddTaggedVal(N.getAsOpaqueInteger(),
                   DiagnosticsEngine::ak_declarationname);
   return PD;
 }
 
-inline raw_ostream &operator<<(raw_ostream &OS,
-                                     DeclarationNameInfo DNInfo) {
-  DNInfo.printName(OS);
-  return OS;
-}
+raw_ostream &operator<<(raw_ostream &OS, DeclarationNameInfo DNInfo);
 
 } // namespace clang
 
@@ -859,6 +846,16 @@ struct DenseMapInfo<clang::DeclarationName> {
   isEqual(clang::DeclarationName LHS, clang::DeclarationName RHS) {
     return LHS == RHS;
   }
+};
+
+template <> struct PointerLikeTypeTraits<clang::DeclarationName> {
+  static inline void *getAsVoidPointer(clang::DeclarationName P) {
+    return P.getAsOpaquePtr();
+  }
+  static inline clang::DeclarationName getFromVoidPointer(void *P) {
+    return clang::DeclarationName::getFromOpaquePtr(P);
+  }
+  static constexpr int NumLowBitsAvailable = 0;
 };
 
 } // namespace llvm

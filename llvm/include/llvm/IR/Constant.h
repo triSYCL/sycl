@@ -43,6 +43,8 @@ protected:
   Constant(Type *ty, ValueTy vty, Use *Ops, unsigned NumOps)
     : User(ty, vty, Ops, NumOps) {}
 
+  ~Constant() = default;
+
 public:
   void operator=(const Constant &) = delete;
   Constant(const Constant &) = delete;
@@ -52,6 +54,10 @@ public:
 
   /// Returns true if the value is one.
   bool isOneValue() const;
+
+  /// Return true if the value is not the one value, or,
+  /// for vectors, does not contain one value elements.
+  bool isNotOneValue() const;
 
   /// Return true if this is the value that would be returned by
   /// getAllOnesValue.
@@ -64,18 +70,21 @@ public:
   /// Return true if the value is negative zero or null value.
   bool isZeroValue() const;
 
-  /// Return true if the value is not the smallest signed value.
+  /// Return true if the value is not the smallest signed value, or,
+  /// for vectors, does not contain smallest signed value elements.
   bool isNotMinSignedValue() const;
 
   /// Return true if the value is the smallest signed value.
   bool isMinSignedValue() const;
 
   /// Return true if this is a finite and non-zero floating-point scalar
-  /// constant or a vector constant with all finite and non-zero elements.
+  /// constant or a fixed width vector constant with all finite and non-zero
+  /// elements.
   bool isFiniteNonZeroFP() const;
 
-  /// Return true if this is a normal (as opposed to denormal) floating-point
-  /// scalar constant or a vector constant with all normal elements.
+  /// Return true if this is a normal (as opposed to denormal, infinity, nan,
+  /// or zero) floating-point scalar constant or a vector constant with all
+  /// normal elements. See APFloat::isNormal.
   bool isNormalFP() const;
 
   /// Return true if this scalar has an exact multiplicative inverse or this
@@ -93,11 +102,13 @@ public:
   bool isElementWiseEqual(Value *Y) const;
 
   /// Return true if this is a vector constant that includes any undefined
-  /// elements.
+  /// elements. Since it is impossible to inspect a scalable vector element-
+  /// wise at compile time, this function returns true only if the entire
+  /// vector is undef
   bool containsUndefElement() const;
 
-  /// Return true if this is a vector constant that includes any constant
-  /// expressions.
+  /// Return true if this is a fixed width vector constant that includes
+  /// any constant expressions.
   bool containsConstantExpression() const;
 
   /// Return true if evaluation of this constant could trap. This is true for
@@ -128,9 +139,10 @@ public:
   Constant *getAggregateElement(unsigned Elt) const;
   Constant *getAggregateElement(Constant *Elt) const;
 
-  /// If this is a splat vector constant, meaning that all of the elements have
-  /// the same value, return that value. Otherwise return 0.
-  Constant *getSplatValue() const;
+  /// If all elements of the vector constant have the same value, return that
+  /// value. Otherwise, return nullptr. Ignore undefined elements by setting
+  /// AllowUndefs to true.
+  Constant *getSplatValue(bool AllowUndefs = false) const;
 
   /// If C is a constant integer then return its value, otherwise C must be a
   /// vector of constant integers, all equal, and the common value is returned.
@@ -188,6 +200,16 @@ public:
     return const_cast<Constant*>(
                       static_cast<const Constant *>(this)->stripPointerCasts());
   }
+
+  /// Try to replace undefined constant C or undefined elements in C with
+  /// Replacement. If no changes are made, the constant C is returned.
+  static Constant *replaceUndefsWith(Constant *C, Constant *Replacement);
+
+  /// Merges undefs of a Constant with another Constant, along with the
+  /// undefs already present. Other doesn't have to be the same type as C, but
+  /// both must either be scalars or vectors with the same element count. If no
+  /// changes are made, the constant C is returned.
+  static Constant *mergeUndefsWith(Constant *C, Constant *Other);
 };
 
 } // end namespace llvm

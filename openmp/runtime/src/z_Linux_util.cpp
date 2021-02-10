@@ -31,7 +31,7 @@
 #include <sys/times.h>
 #include <unistd.h>
 
-#if KMP_OS_LINUX && !KMP_OS_CNK
+#if KMP_OS_LINUX
 #include <sys/sysinfo.h>
 #if KMP_USE_FUTEX
 // We should really include <futex.h>, but that causes compatibility problems on
@@ -50,8 +50,11 @@
 #include <mach/mach.h>
 #include <sys/sysctl.h>
 #elif KMP_OS_DRAGONFLY || KMP_OS_FREEBSD
+#include <sys/types.h>
+#include <sys/sysctl.h>
+#include <sys/user.h>
 #include <pthread_np.h>
-#elif KMP_OS_NETBSD
+#elif KMP_OS_NETBSD || KMP_OS_OPENBSD
 #include <sys/types.h>
 #include <sys/sysctl.h>
 #endif
@@ -97,7 +100,7 @@ static void __kmp_print_cond(char *buffer, kmp_cond_align_t *cond) {
 }
 #endif
 
-#if (KMP_OS_LINUX && KMP_AFFINITY_SUPPORTED)
+#if ((KMP_OS_LINUX || KMP_OS_FREEBSD) && KMP_AFFINITY_SUPPORTED)
 
 /* Affinity support */
 
@@ -119,16 +122,21 @@ void __kmp_affinity_bind_thread(int which) {
 void __kmp_affinity_determine_capable(const char *env_var) {
 // Check and see if the OS supports thread affinity.
 
+#if KMP_OS_LINUX
 #define KMP_CPU_SET_SIZE_LIMIT (1024 * 1024)
+#elif KMP_OS_FREEBSD
+#define KMP_CPU_SET_SIZE_LIMIT (sizeof(cpuset_t))
+#endif
 
+
+#if KMP_OS_LINUX
+  // If Linux* OS:
+  // If the syscall fails or returns a suggestion for the size,
+  // then we don't have to search for an appropriate size.
   int gCode;
   int sCode;
   unsigned char *buf;
   buf = (unsigned char *)KMP_INTERNAL_MALLOC(KMP_CPU_SET_SIZE_LIMIT);
-
-  // If Linux* OS:
-  // If the syscall fails or returns a suggestion for the size,
-  // then we don't have to search for an appropriate size.
   gCode = syscall(__NR_sched_getaffinity, 0, KMP_CPU_SET_SIZE_LIMIT, buf);
   KA_TRACE(30, ("__kmp_affinity_determine_capable: "
                 "initial getaffinity call returned %d errno = %d\n",
@@ -156,7 +164,7 @@ void __kmp_affinity_determine_capable(const char *env_var) {
   if (gCode > 0) { // Linux* OS only
     // The optimal situation: the OS returns the size of the buffer it expects.
     //
-    // A verification of correct behavior is that Isetaffinity on a NULL
+    // A verification of correct behavior is that setaffinity on a NULL
     // buffer with the same size fails with errno set to EFAULT.
     sCode = syscall(__NR_sched_setaffinity, 0, gCode, NULL);
     KA_TRACE(30, ("__kmp_affinity_determine_capable: "
@@ -267,6 +275,23 @@ void __kmp_affinity_determine_capable(const char *env_var) {
       }
     }
   }
+#elif KMP_OS_FREEBSD
+  int gCode;
+  unsigned char *buf;
+  buf = (unsigned char *)KMP_INTERNAL_MALLOC(KMP_CPU_SET_SIZE_LIMIT);
+  gCode = pthread_getaffinity_np(pthread_self(), KMP_CPU_SET_SIZE_LIMIT, reinterpret_cast<cpuset_t *>(buf));
+  KA_TRACE(30, ("__kmp_affinity_determine_capable: "
+                "initial getaffinity call returned %d errno = %d\n",
+                gCode, errno));
+  if (gCode == 0) {
+    KMP_AFFINITY_ENABLE(KMP_CPU_SET_SIZE_LIMIT);
+    KA_TRACE(10, ("__kmp_affinity_determine_capable: "
+                  "affinity supported (mask size %d)\n",
+		  (int)__kmp_affin_mask_size));
+    KMP_INTERNAL_FREE(buf);
+    return;
+  }
+#endif
   // save uncaught error code
   // int error = errno;
   KMP_INTERNAL_FREE(buf);
@@ -1124,6 +1149,7 @@ static void __kmp_team_handler(int signo) {
       if (__kmp_debug_buf) {
         __kmp_dump_debug_buffer();
       }
+      __kmp_unregister_library(); // cleanup shared memory
       KMP_MB(); // Flush all pending memory write invalidates.
       TCW_4(__kmp_global.g.g_abort, signo);
       KMP_MB(); // Flush all pending memory write invalidates.
@@ -1246,8 +1272,8 @@ static void __kmp_atfork_prepare(void) {
 }
 
 static void __kmp_atfork_parent(void) {
-  __kmp_release_bootstrap_lock(&__kmp_initz_lock);
   __kmp_release_bootstrap_lock(&__kmp_forkjoin_lock);
+  __kmp_release_bootstrap_lock(&__kmp_initz_lock);
 }
 
 /* Reset the library so execution in the child starts "all over again" with
@@ -1255,6 +1281,7 @@ static void __kmp_atfork_parent(void) {
    allocated by parent, just abandon it to be safe. */
 static void __kmp_atfork_child(void) {
   __kmp_release_bootstrap_lock(&__kmp_forkjoin_lock);
+  __kmp_release_bootstrap_lock(&__kmp_initz_lock);
   /* TODO make sure this is done right for nested/sibling */
   // ATT:  Memory leaks are here? TODO: Check it and fix.
   /* KMP_ASSERT( 0 ); */
@@ -1262,7 +1289,7 @@ static void __kmp_atfork_child(void) {
   ++__kmp_fork_count;
 
 #if KMP_AFFINITY_SUPPORTED
-#if KMP_OS_LINUX
+#if KMP_OS_LINUX || KMP_OS_FREEBSD
   // reset the affinity in the child to the initial thread
   // affinity in the parent
   kmp_set_thread_affinity_mask_initial();
@@ -1276,7 +1303,6 @@ static void __kmp_atfork_child(void) {
   }
 #endif // KMP_AFFINITY_SUPPORTED
 
-  __kmp_init_runtime = FALSE;
 #if KMP_USE_MONITOR
   __kmp_init_monitor = 0;
 #endif
@@ -1328,6 +1354,8 @@ static void __kmp_atfork_child(void) {
 #if USE_ITT_BUILD
   __kmp_itt_reset(); // reset ITT's global state
 #endif /* USE_ITT_BUILD */
+
+  __kmp_serial_initialize();
 
   /* This is necessary to make sure no stale data is left around */
   /* AC: customers complain that we use unsafe routines in the atfork
@@ -1434,8 +1462,7 @@ static inline void __kmp_suspend_template(int th_gtid, C *flag) {
 
   __kmp_suspend_initialize_thread(th);
 
-  status = pthread_mutex_lock(&th->th.th_suspend_mx.m_mutex);
-  KMP_CHECK_SYSFAIL("pthread_mutex_lock", status);
+  __kmp_lock_suspend_mx(th);
 
   KF_TRACE(10, ("__kmp_suspend_template: T#%d setting sleep bit for spin(%p)\n",
                 th_gtid, flag->get()));
@@ -1446,8 +1473,7 @@ static inline void __kmp_suspend_template(int th_gtid, C *flag) {
   if (__kmp_dflt_blocktime == KMP_MAX_BLOCKTIME &&
       __kmp_pause_status != kmp_soft_paused) {
     flag->unset_sleeping();
-    status = pthread_mutex_unlock(&th->th.th_suspend_mx.m_mutex);
-    KMP_CHECK_SYSFAIL("pthread_mutex_unlock", status);
+    __kmp_unlock_suspend_mx(th);
     return;
   }
   KF_TRACE(5, ("__kmp_suspend_template: T#%d set sleep bit for spin(%p)==%x,"
@@ -1510,7 +1536,7 @@ static inline void __kmp_suspend_template(int th_gtid, C *flag) {
                     th_gtid));
       status = pthread_cond_wait(&th->th.th_suspend_cv.c_cond,
                                  &th->th.th_suspend_mx.m_mutex);
-#endif
+#endif // USE_SUSPEND_TIMEOUT
 
       if ((status != 0) && (status != EINTR) && (status != ETIMEDOUT)) {
         KMP_SYSFAIL("pthread_cond_wait", status);
@@ -1550,20 +1576,25 @@ static inline void __kmp_suspend_template(int th_gtid, C *flag) {
   }
 #endif
 
-  status = pthread_mutex_unlock(&th->th.th_suspend_mx.m_mutex);
-  KMP_CHECK_SYSFAIL("pthread_mutex_unlock", status);
+  __kmp_unlock_suspend_mx(th);
   KF_TRACE(30, ("__kmp_suspend_template: T#%d exit\n", th_gtid));
 }
 
-void __kmp_suspend_32(int th_gtid, kmp_flag_32 *flag) {
+template <bool C, bool S>
+void __kmp_suspend_32(int th_gtid, kmp_flag_32<C, S> *flag) {
   __kmp_suspend_template(th_gtid, flag);
 }
-void __kmp_suspend_64(int th_gtid, kmp_flag_64 *flag) {
+template <bool C, bool S>
+void __kmp_suspend_64(int th_gtid, kmp_flag_64<C, S> *flag) {
   __kmp_suspend_template(th_gtid, flag);
 }
 void __kmp_suspend_oncore(int th_gtid, kmp_flag_oncore *flag) {
   __kmp_suspend_template(th_gtid, flag);
 }
+
+template void __kmp_suspend_32<false, false>(int, kmp_flag_32<false, false> *);
+template void __kmp_suspend_64<false, true>(int, kmp_flag_64<false, true> *);
+template void __kmp_suspend_64<true, false>(int, kmp_flag_64<true, false> *);
 
 /* This routine signals the thread specified by target_gtid to wake up
    after setting the sleep bit indicated by the flag argument to FALSE.
@@ -1584,8 +1615,7 @@ static inline void __kmp_resume_template(int target_gtid, C *flag) {
 
   __kmp_suspend_initialize_thread(th);
 
-  status = pthread_mutex_lock(&th->th.th_suspend_mx.m_mutex);
-  KMP_CHECK_SYSFAIL("pthread_mutex_lock", status);
+  __kmp_lock_suspend_mx(th);
 
   if (!flag) { // coming from __kmp_null_resume_wrapper
     flag = (C *)CCAST(void *, th->th.th_sleep_loc);
@@ -1594,13 +1624,11 @@ static inline void __kmp_resume_template(int target_gtid, C *flag) {
   // First, check if the flag is null or its type has changed. If so, someone
   // else woke it up.
   if (!flag || flag->get_type() != flag->get_ptr_type()) { // get_ptr_type
-    // simply shows what
-    // flag was cast to
+    // simply shows what flag was cast to
     KF_TRACE(5, ("__kmp_resume_template: T#%d exiting, thread T#%d already "
                  "awake: flag(%p)\n",
                  gtid, target_gtid, NULL));
-    status = pthread_mutex_unlock(&th->th.th_suspend_mx.m_mutex);
-    KMP_CHECK_SYSFAIL("pthread_mutex_unlock", status);
+    __kmp_unlock_suspend_mx(th);
     return;
   } else { // if multiple threads are sleeping, flag should be internally
     // referring to a specific thread here
@@ -1610,8 +1638,7 @@ static inline void __kmp_resume_template(int target_gtid, C *flag) {
                    "awake: flag(%p): "
                    "%u => %u\n",
                    gtid, target_gtid, flag->get(), old_spin, flag->load()));
-      status = pthread_mutex_unlock(&th->th.th_suspend_mx.m_mutex);
-      KMP_CHECK_SYSFAIL("pthread_mutex_unlock", status);
+      __kmp_unlock_suspend_mx(th);
       return;
     }
     KF_TRACE(5, ("__kmp_resume_template: T#%d about to wakeup T#%d, reset "
@@ -1631,22 +1658,26 @@ static inline void __kmp_resume_template(int target_gtid, C *flag) {
 #endif
   status = pthread_cond_signal(&th->th.th_suspend_cv.c_cond);
   KMP_CHECK_SYSFAIL("pthread_cond_signal", status);
-  status = pthread_mutex_unlock(&th->th.th_suspend_mx.m_mutex);
-  KMP_CHECK_SYSFAIL("pthread_mutex_unlock", status);
+  __kmp_unlock_suspend_mx(th);
   KF_TRACE(30, ("__kmp_resume_template: T#%d exiting after signaling wake up"
                 " for T#%d\n",
                 gtid, target_gtid));
 }
 
-void __kmp_resume_32(int target_gtid, kmp_flag_32 *flag) {
+template <bool C, bool S>
+void __kmp_resume_32(int target_gtid, kmp_flag_32<C, S> *flag) {
   __kmp_resume_template(target_gtid, flag);
 }
-void __kmp_resume_64(int target_gtid, kmp_flag_64 *flag) {
+template <bool C, bool S>
+void __kmp_resume_64(int target_gtid, kmp_flag_64<C, S> *flag) {
   __kmp_resume_template(target_gtid, flag);
 }
 void __kmp_resume_oncore(int target_gtid, kmp_flag_oncore *flag) {
   __kmp_resume_template(target_gtid, flag);
 }
+
+template void __kmp_resume_32<false, true>(int, kmp_flag_32<false, true> *);
+template void __kmp_resume_64<false, true>(int, kmp_flag_64<false, true> *);
 
 #if KMP_USE_MONITOR
 void __kmp_resume_monitor() {
@@ -1979,7 +2010,7 @@ int __kmp_is_address_mapped(void *addr) {
   int found = 0;
   int rc;
 
-#if KMP_OS_LINUX || KMP_OS_FREEBSD || KMP_OS_HURD
+#if KMP_OS_LINUX || KMP_OS_HURD
 
   /* On GNUish OSes, read the /proc/<pid>/maps pseudo-file to get all the address
      ranges mapped into the address space. */
@@ -2017,6 +2048,44 @@ int __kmp_is_address_mapped(void *addr) {
   // Free resources.
   fclose(file);
   KMP_INTERNAL_FREE(name);
+#elif KMP_OS_FREEBSD
+  char *buf;
+  size_t lstsz;
+  int mib[] = {CTL_KERN, KERN_PROC, KERN_PROC_VMMAP, getpid()};
+  rc = sysctl(mib, 4, NULL, &lstsz, NULL, 0);
+  if (rc < 0)
+     return 0;
+  // We pass from number of vm entry's semantic
+  // to size of whole entry map list.
+  lstsz = lstsz * 4 / 3;
+  buf = reinterpret_cast<char *>(kmpc_malloc(lstsz));
+  rc = sysctl(mib, 4, buf, &lstsz, NULL, 0);
+  if (rc < 0) {
+     kmpc_free(buf);
+     return 0;
+  }
+
+  char *lw = buf;
+  char *up = buf + lstsz;
+
+  while (lw < up) {
+      struct kinfo_vmentry *cur = reinterpret_cast<struct kinfo_vmentry *>(lw);
+      size_t cursz = cur->kve_structsize;
+      if (cursz == 0)
+          break;
+      void *start = reinterpret_cast<void *>(cur->kve_start);
+      void *end = reinterpret_cast<void *>(cur->kve_end);
+      // Readable/Writable addresses within current map entry
+      if ((addr >= start) && (addr < end)) {
+          if ((cur->kve_protection & KVME_PROT_READ) != 0 &&
+              (cur->kve_protection & KVME_PROT_WRITE) != 0) {
+              found = 1;
+              break;
+          }
+      }
+      lw += cursz;
+  }
+  kmpc_free(buf);
 
 #elif KMP_OS_DARWIN
 
@@ -2067,9 +2136,36 @@ int __kmp_is_address_mapped(void *addr) {
     }
   }
   KMP_INTERNAL_FREE(kiv);
-#elif KMP_OS_DRAGONFLY || KMP_OS_OPENBSD
+#elif KMP_OS_OPENBSD
 
-  // FIXME(DragonFly, OpenBSD): Implement this
+  int mib[3];
+  mib[0] = CTL_KERN;
+  mib[1] = KERN_PROC_VMMAP;
+  mib[2] = getpid();
+
+  size_t size;
+  uint64_t end;
+  rc = sysctl(mib, 3, NULL, &size, NULL, 0);
+  KMP_ASSERT(!rc);
+  KMP_ASSERT(size);
+  end = size;
+
+  struct kinfo_vmentry kiv = {.kve_start = 0};
+
+  while ((rc = sysctl(mib, 3, &kiv, &size, NULL, 0)) == 0) {
+    KMP_ASSERT(size);
+    if (kiv.kve_end == end)
+      break;
+
+    if (kiv.kve_start >= (uint64_t)addr && kiv.kve_end <= (uint64_t)addr) {
+      found = 1;
+      break;
+    }
+    kiv.kve_start += 1;
+  }
+#elif KMP_OS_DRAGONFLY
+
+  // FIXME(DragonFly): Implement this
   found = 1;
 
 #else
@@ -2117,14 +2213,14 @@ int __kmp_get_load_balance(int max) {
 
 #else // Linux* OS
 
-// The fuction returns number of running (not sleeping) threads, or -1 in case
+// The function returns number of running (not sleeping) threads, or -1 in case
 // of error. Error could be reported if Linux* OS kernel too old (without
 // "/proc" support). Counting running threads stops if max running threads
 // encountered.
 int __kmp_get_load_balance(int max) {
   static int permanent_error = 0;
   static int glb_running_threads = 0; // Saved count of the running threads for
-  // the thread balance algortihm
+  // the thread balance algorithm
   static double glb_call_time = 0; /* Thread balance algorithm call time */
 
   int running_threads = 0; // Number of running threads in the system.
@@ -2232,7 +2328,7 @@ int __kmp_get_load_balance(int max) {
           if (proc_entry->d_type == DT_DIR && isdigit(task_entry->d_name[0])) {
             ++total_threads;
 
-            // Consruct complete stat file path. Easiest way would be:
+            // Construct complete stat file path. Easiest way would be:
             //  __kmp_str_buf_print( & stat_path, "%s/%s/stat", task_path.str,
             //  task_entry->d_name );
             // but seriae of __kmp_str_buf_cat works a bit faster.

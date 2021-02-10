@@ -1,7 +1,7 @@
-// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=+WavefrontSize32,-WavefrontSize64 -show-encoding %s | FileCheck --check-prefixes=GFX10,W32 %s
-// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=-WavefrontSize32,+WavefrontSize64 -show-encoding %s | FileCheck --check-prefixes=GFX10,W64 %s
-// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=+WavefrontSize32,-WavefrontSize64 -show-encoding %s 2>&1 | FileCheck --check-prefixes=GFX10-ERR,W32-ERR %s
-// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=-WavefrontSize32,+WavefrontSize64 -show-encoding %s 2>&1 | FileCheck --check-prefixes=GFX10-ERR,W64-ERR %s
+// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=+wavefrontsize32,-wavefrontsize64 -show-encoding %s | FileCheck --check-prefixes=GFX10,W32 %s
+// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=-wavefrontsize32,+wavefrontsize64 -show-encoding %s | FileCheck --check-prefixes=GFX10,W64 %s
+// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=+wavefrontsize32,-wavefrontsize64 %s 2>&1 | FileCheck --check-prefixes=GFX10-ERR,W32-ERR --implicit-check-not=error: %s
+// RUN: not llvm-mc -arch=amdgcn -mcpu=gfx1010 -mattr=-wavefrontsize32,+wavefrontsize64 %s 2>&1 | FileCheck --check-prefixes=GFX10-ERR,W64-ERR --implicit-check-not=error: %s
 
 v_mov_b32_dpp v5, v1 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0
 // GFX10: [0xfa,0x02,0x0a,0x7e,0x01,0x1b,0x00,0x00]
@@ -317,27 +317,27 @@ v_mac_f32_dpp v5, v1, v2 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0
 
 v_add_co_ci_u32_dpp v5, vcc_lo, v1, v2, vcc_lo quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0
 // W32: [0xfa,0x04,0x0a,0x50,0x01,0x1b,0x00,0x00]
-// W64-ERR: error: instruction not supported on this GPU
+// W64-ERR: error: operands are not valid for this GPU or mode
 
 v_sub_co_ci_u32_dpp v5, vcc_lo, v1, v2, vcc_lo quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0
 // W32: [0xfa,0x04,0x0a,0x52,0x01,0x1b,0x00,0x00]
-// W64-ERR: error: instruction not supported on this GPU
+// W64-ERR: error: operands are not valid for this GPU or mode
 
 v_subrev_co_ci_u32_dpp v5, vcc_lo, v1, v2, vcc_lo quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0
 // W32: [0xfa,0x04,0x0a,0x54,0x01,0x1b,0x00,0x00]
-// W64-ERR: error: instruction not supported on this GPU
+// W64-ERR: error: operands are not valid for this GPU or mode
 
 v_add_co_ci_u32_dpp v5, vcc, v1, v2, vcc quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0
 // W64: [0xfa,0x04,0x0a,0x50,0x01,0x1b,0x00,0x00]
-// W32-ERR: error: instruction not supported on this GPU
+// W32-ERR: error: operands are not valid for this GPU or mode
 
 v_sub_co_ci_u32_dpp v5, vcc, v1, v2, vcc quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0
 // W64: [0xfa,0x04,0x0a,0x52,0x01,0x1b,0x00,0x00]
-// W32-ERR: error: instruction not supported on this GPU
+// W32-ERR: error: operands are not valid for this GPU or mode
 
 v_subrev_co_ci_u32_dpp v5, vcc, v1, v2, vcc quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0
 // W64: [0xfa,0x04,0x0a,0x54,0x01,0x1b,0x00,0x00]
-// W32-ERR: error: instruction not supported on this GPU
+// W32-ERR: error: operands are not valid for this GPU or mode
 
 v_fmac_f32_dpp v5, v1, v2 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0
 // GFX10: [0xfa,0x04,0x0a,0x56,0x01,0x1b,0x00,0x00]
@@ -605,27 +605,27 @@ v_mac_f32_dpp v5, v1, v2 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0 fi:1
 
 v_add_co_ci_u32_dpp v5, vcc_lo, v1, v2, vcc_lo quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0 fi:1
 // W32: [0xfa,0x04,0x0a,0x50,0x01,0x1b,0x04,0x00]
-// W64-ERR: error: instruction not supported on this GPU
+// W64-ERR: error: operands are not valid for this GPU or mode
 
 v_sub_co_ci_u32_dpp v5, vcc_lo, v1, v2, vcc_lo quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0 fi:1
 // W32: [0xfa,0x04,0x0a,0x52,0x01,0x1b,0x04,0x00]
-// W64-ERR: error: instruction not supported on this GPU
+// W64-ERR: error: operands are not valid for this GPU or mode
 
 v_subrev_co_ci_u32_dpp v5, vcc_lo, v1, v2, vcc_lo quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0 fi:1
 // W32: [0xfa,0x04,0x0a,0x54,0x01,0x1b,0x04,0x00]
-// W64-ERR: error: instruction not supported on this GPU
+// W64-ERR: error: operands are not valid for this GPU or mode
 
 v_add_co_ci_u32_dpp v5, vcc, v1, v2, vcc quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0 fi:1
 // W64: [0xfa,0x04,0x0a,0x50,0x01,0x1b,0x04,0x00]
-// W32-ERR: error: instruction not supported on this GPU
+// W32-ERR: error: operands are not valid for this GPU or mode
 
 v_sub_co_ci_u32_dpp v5, vcc, v1, v2, vcc quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0 fi:1
 // W64: [0xfa,0x04,0x0a,0x52,0x01,0x1b,0x04,0x00]
-// W32-ERR: error: instruction not supported on this GPU
+// W32-ERR: error: operands are not valid for this GPU or mode
 
 v_subrev_co_ci_u32_dpp v5, vcc, v1, v2, vcc quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0 fi:1
 // W64: [0xfa,0x04,0x0a,0x54,0x01,0x1b,0x04,0x00]
-// W32-ERR: error: instruction not supported on this GPU
+// W32-ERR: error: operands are not valid for this GPU or mode
 
 v_fmac_f32_dpp v5, v1, v2 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0 fi:1
 // GFX10: [0xfa,0x04,0x0a,0x56,0x01,0x1b,0x04,0x00]
@@ -680,3 +680,15 @@ v_subrev_nc_u32_dpp v5, v1, v2 quad_perm:[3,2,1,0] row_mask:0x1 bank_mask:0x0
 
 v_subrev_nc_u32_dpp v5, v1, v2 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0 fi:1
 // GFX10: [0xfa,0x04,0x0a,0x4e,0x01,0x1b,0x04,0x00]
+
+v_movreld_b32_dpp v1, v0 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0
+// GFX10: [0xfa,0x84,0x02,0x7e,0x00,0x1b,0x00,0x00]
+
+v_movrels_b32_dpp v1, v0 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0 fi:1
+// GFX10: [0xfa,0x86,0x02,0x7e,0x00,0x1b,0x04,0x00]
+
+v_movrelsd_2_b32_dpp v0, v2 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0
+// GFX10: [0xfa,0x90,0x00,0x7e,0x02,0x1b,0x00,0x00]
+
+v_movrelsd_b32_dpp v0, v255 quad_perm:[3,2,1,0] row_mask:0x0 bank_mask:0x0
+// GFX10: [0xfa,0x88,0x00,0x7e,0xff,0x1b,0x00,0x00]

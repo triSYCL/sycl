@@ -1,4 +1,4 @@
-//===-- ClangExpressionParser.cpp -------------------------------*- C++ -*-===//
+//===-- ClangExpressionParser.cpp -----------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -10,6 +10,7 @@
 #include "clang/AST/ASTDiagnostic.h"
 #include "clang/AST/ExternalASTSource.h"
 #include "clang/AST/PrettyPrinter.h"
+#include "clang/Basic/Builtins.h"
 #include "clang/Basic/DiagnosticIDs.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/TargetInfo.h"
@@ -66,6 +67,7 @@
 #include "IRForTarget.h"
 #include "ModuleDependencyCollector.h"
 
+#include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "lldb/Core/Debugger.h"
 #include "lldb/Core/Disassembler.h"
 #include "lldb/Core/Module.h"
@@ -74,7 +76,6 @@
 #include "lldb/Expression/IRInterpreter.h"
 #include "lldb/Host/File.h"
 #include "lldb/Host/HostInfo.h"
-#include "lldb/Symbol/ClangASTContext.h"
 #include "lldb/Symbol/SymbolVendor.h"
 #include "lldb/Target/ExecutionContext.h"
 #include "lldb/Target/Language.h"
@@ -84,12 +85,13 @@
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/LLDBAssert.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/Reproducer.h"
+#include "lldb/Utility/ReproducerProvider.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StreamString.h"
 #include "lldb/Utility/StringList.h"
 
 #include "Plugins/LanguageRuntime/ObjC/ObjCLanguageRuntime.h"
+#include "Plugins/LanguageRuntime/RenderScript/RenderScriptRuntime/RenderScriptRuntime.h"
 
 #include <cctype>
 #include <memory>
@@ -105,16 +107,26 @@ using namespace lldb_private;
 class ClangExpressionParser::LLDBPreprocessorCallbacks : public PPCallbacks {
   ClangModulesDeclVendor &m_decl_vendor;
   ClangPersistentVariables &m_persistent_vars;
+  clang::SourceManager &m_source_mgr;
   StreamString m_error_stream;
   bool m_has_errors = false;
 
 public:
   LLDBPreprocessorCallbacks(ClangModulesDeclVendor &decl_vendor,
-                            ClangPersistentVariables &persistent_vars)
-      : m_decl_vendor(decl_vendor), m_persistent_vars(persistent_vars) {}
+                            ClangPersistentVariables &persistent_vars,
+                            clang::SourceManager &source_mgr)
+      : m_decl_vendor(decl_vendor), m_persistent_vars(persistent_vars),
+        m_source_mgr(source_mgr) {}
 
   void moduleImport(SourceLocation import_location, clang::ModuleIdPath path,
                     const clang::Module * /*null*/) override {
+    // Ignore modules that are imported in the wrapper code as these are not
+    // loaded by the user.
+    llvm::StringRef filename =
+        m_source_mgr.getPresumedLoc(import_location).getFilename();
+    if (filename == ClangExpressionSourceCode::g_prefix_file_name)
+      return;
+
     SourceModule module;
 
     for (const std::pair<IdentifierInfo *, SourceLocation> &component : path)
@@ -135,82 +147,136 @@ public:
   llvm::StringRef getErrorString() { return m_error_stream.GetString(); }
 };
 
+static void AddAllFixIts(ClangDiagnostic *diag, const clang::Diagnostic &Info) {
+  for (auto &fix_it : Info.getFixItHints()) {
+    if (fix_it.isNull())
+      continue;
+    diag->AddFixitHint(fix_it);
+  }
+}
+
 class ClangDiagnosticManagerAdapter : public clang::DiagnosticConsumer {
 public:
-  ClangDiagnosticManagerAdapter()
-      : m_passthrough(new clang::TextDiagnosticBuffer) {}
-
-  ClangDiagnosticManagerAdapter(
-      const std::shared_ptr<clang::TextDiagnosticBuffer> &passthrough)
-      : m_passthrough(passthrough) {}
+  ClangDiagnosticManagerAdapter(DiagnosticOptions &opts) {
+    DiagnosticOptions *options = new DiagnosticOptions(opts);
+    options->ShowPresumedLoc = true;
+    options->ShowLevel = false;
+    m_os = std::make_shared<llvm::raw_string_ostream>(m_output);
+    m_passthrough =
+        std::make_shared<clang::TextDiagnosticPrinter>(*m_os, options);
+  }
 
   void ResetManager(DiagnosticManager *manager = nullptr) {
     m_manager = manager;
   }
 
+  /// Returns the last ClangDiagnostic message that the DiagnosticManager
+  /// received or a nullptr if the DiagnosticMangager hasn't seen any
+  /// Clang diagnostics yet.
+  ClangDiagnostic *MaybeGetLastClangDiag() const {
+    if (m_manager->Diagnostics().empty())
+      return nullptr;
+    lldb_private::Diagnostic *diag = m_manager->Diagnostics().back().get();
+    ClangDiagnostic *clang_diag = dyn_cast<ClangDiagnostic>(diag);
+    return clang_diag;
+  }
+
   void HandleDiagnostic(DiagnosticsEngine::Level DiagLevel,
                         const clang::Diagnostic &Info) override {
-    if (m_manager) {
-      llvm::SmallVector<char, 32> diag_str;
-      Info.FormatDiagnostic(diag_str);
-      diag_str.push_back('\0');
-      const char *data = diag_str.data();
-
-      lldb_private::DiagnosticSeverity severity;
-      bool make_new_diagnostic = true;
-
-      switch (DiagLevel) {
-      case DiagnosticsEngine::Level::Fatal:
-      case DiagnosticsEngine::Level::Error:
-        severity = eDiagnosticSeverityError;
-        break;
-      case DiagnosticsEngine::Level::Warning:
-        severity = eDiagnosticSeverityWarning;
-        break;
-      case DiagnosticsEngine::Level::Remark:
-      case DiagnosticsEngine::Level::Ignored:
-        severity = eDiagnosticSeverityRemark;
-        break;
-      case DiagnosticsEngine::Level::Note:
-        m_manager->AppendMessageToDiagnostic(data);
-        make_new_diagnostic = false;
+    if (!m_manager) {
+      // We have no DiagnosticManager before/after parsing but we still could
+      // receive diagnostics (e.g., by the ASTImporter failing to copy decls
+      // when we move the expression result ot the ScratchASTContext). Let's at
+      // least log these diagnostics until we find a way to properly render
+      // them and display them to the user.
+      Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
+      if (log) {
+        llvm::SmallVector<char, 32> diag_str;
+        Info.FormatDiagnostic(diag_str);
+        diag_str.push_back('\0');
+        const char *plain_diag = diag_str.data();
+        LLDB_LOG(log, "Received diagnostic outside parsing: {0}", plain_diag);
       }
-      if (make_new_diagnostic) {
-        ClangDiagnostic *new_diagnostic =
-            new ClangDiagnostic(data, severity, Info.getID());
-        m_manager->AddDiagnostic(new_diagnostic);
-
-        // Don't store away warning fixits, since the compiler doesn't have
-        // enough context in an expression for the warning to be useful.
-        // FIXME: Should we try to filter out FixIts that apply to our generated
-        // code, and not the user's expression?
-        if (severity == eDiagnosticSeverityError) {
-          size_t num_fixit_hints = Info.getNumFixItHints();
-          for (size_t i = 0; i < num_fixit_hints; i++) {
-            const clang::FixItHint &fixit = Info.getFixItHint(i);
-            if (!fixit.isNull())
-              new_diagnostic->AddFixitHint(fixit);
-          }
-        }
-      }
+      return;
     }
 
+    // Update error/warning counters.
+    DiagnosticConsumer::HandleDiagnostic(DiagLevel, Info);
+
+    // Render diagnostic message to m_output.
+    m_output.clear();
     m_passthrough->HandleDiagnostic(DiagLevel, Info);
+    m_os->flush();
+
+    lldb_private::DiagnosticSeverity severity;
+    bool make_new_diagnostic = true;
+
+    switch (DiagLevel) {
+    case DiagnosticsEngine::Level::Fatal:
+    case DiagnosticsEngine::Level::Error:
+      severity = eDiagnosticSeverityError;
+      break;
+    case DiagnosticsEngine::Level::Warning:
+      severity = eDiagnosticSeverityWarning;
+      break;
+    case DiagnosticsEngine::Level::Remark:
+    case DiagnosticsEngine::Level::Ignored:
+      severity = eDiagnosticSeverityRemark;
+      break;
+    case DiagnosticsEngine::Level::Note:
+      m_manager->AppendMessageToDiagnostic(m_output);
+      make_new_diagnostic = false;
+
+      // 'note:' diagnostics for errors and warnings can also contain Fix-Its.
+      // We add these Fix-Its to the last error diagnostic to make sure
+      // that we later have all Fix-Its related to an 'error' diagnostic when
+      // we apply them to the user expression.
+      auto *clang_diag = MaybeGetLastClangDiag();
+      // If we don't have a previous diagnostic there is nothing to do.
+      // If the previous diagnostic already has its own Fix-Its, assume that
+      // the 'note:' Fix-It is just an alternative way to solve the issue and
+      // ignore these Fix-Its.
+      if (!clang_diag || clang_diag->HasFixIts())
+        break;
+      // Ignore all Fix-Its that are not associated with an error.
+      if (clang_diag->GetSeverity() != eDiagnosticSeverityError)
+        break;
+      AddAllFixIts(clang_diag, Info);
+      break;
+    }
+    if (make_new_diagnostic) {
+      // ClangDiagnostic messages are expected to have no whitespace/newlines
+      // around them.
+      std::string stripped_output =
+          std::string(llvm::StringRef(m_output).trim());
+
+      auto new_diagnostic = std::make_unique<ClangDiagnostic>(
+          stripped_output, severity, Info.getID());
+
+      // Don't store away warning fixits, since the compiler doesn't have
+      // enough context in an expression for the warning to be useful.
+      // FIXME: Should we try to filter out FixIts that apply to our generated
+      // code, and not the user's expression?
+      if (severity == eDiagnosticSeverityError)
+        AddAllFixIts(new_diagnostic.get(), Info);
+
+      m_manager->AddDiagnostic(std::move(new_diagnostic));
+    }
   }
 
-  void FlushDiagnostics(DiagnosticsEngine &Diags) {
-    m_passthrough->FlushDiagnostics(Diags);
+  void BeginSourceFile(const LangOptions &LO, const Preprocessor *PP) override {
+    m_passthrough->BeginSourceFile(LO, PP);
   }
 
-  DiagnosticConsumer *clone(DiagnosticsEngine &Diags) const {
-    return new ClangDiagnosticManagerAdapter(m_passthrough);
-  }
-
-  clang::TextDiagnosticBuffer *GetPassthrough() { return m_passthrough.get(); }
+  void EndSourceFile() override { m_passthrough->EndSourceFile(); }
 
 private:
   DiagnosticManager *m_manager = nullptr;
-  std::shared_ptr<clang::TextDiagnosticBuffer> m_passthrough;
+  std::shared_ptr<clang::TextDiagnosticPrinter> m_passthrough;
+  /// Output stream of m_passthrough.
+  std::shared_ptr<llvm::raw_string_ostream> m_os;
+  /// Output string filled by m_os.
+  std::string m_output;
 };
 
 static void SetupModuleHeaderPaths(CompilerInstance *compiler,
@@ -226,32 +292,49 @@ static void SetupModuleHeaderPaths(CompilerInstance *compiler,
   }
 
   llvm::SmallString<128> module_cache;
-  auto props = ModuleList::GetGlobalModuleListProperties();
+  const auto &props = ModuleList::GetGlobalModuleListProperties();
   props.GetClangModulesCachePath().GetPath(module_cache);
-  search_opts.ModuleCachePath = module_cache.str();
+  search_opts.ModuleCachePath = std::string(module_cache.str());
   LLDB_LOG(log, "Using module cache path: {0}", module_cache.c_str());
 
-  FileSpec clang_resource_dir = GetClangResourceDir();
-  std::string resource_dir = clang_resource_dir.GetPath();
-  if (FileSystem::Instance().IsDirectory(resource_dir)) {
-    search_opts.ResourceDir = resource_dir;
-    std::string resource_include = resource_dir + "/include";
-    search_opts.AddPath(resource_include, frontend::System, false, true);
-
-    LLDB_LOG(log, "Added resource include dir: {0}", resource_include);
-  }
+  search_opts.ResourceDir = GetClangResourceDir().GetPath();
 
   search_opts.ImplicitModuleMaps = true;
+}
 
-  std::vector<std::string> system_include_directories =
-      target_sp->GetPlatform()->GetSystemIncludeDirectories(
-          lldb::eLanguageTypeC_plus_plus);
+/// Iff the given identifier is a C++ keyword, remove it from the
+/// identifier table (i.e., make the token a normal identifier).
+static void RemoveCppKeyword(IdentifierTable &idents, llvm::StringRef token) {
+  // FIXME: 'using' is used by LLDB for local variables, so we can't remove
+  // this keyword without breaking this functionality.
+  if (token == "using")
+    return;
+  // GCC's '__null' is used by LLDB to define NULL/Nil/nil.
+  if (token == "__null")
+    return;
 
-  for (const std::string &include_dir : system_include_directories) {
-    search_opts.AddPath(include_dir, frontend::System, false, true);
+  LangOptions cpp_lang_opts;
+  cpp_lang_opts.CPlusPlus = true;
+  cpp_lang_opts.CPlusPlus11 = true;
+  cpp_lang_opts.CPlusPlus20 = true;
 
-    LLDB_LOG(log, "Added system include dir: {0}", include_dir);
-  }
+  clang::IdentifierInfo &ii = idents.get(token);
+  // The identifier has to be a C++-exclusive keyword. if not, then there is
+  // nothing to do.
+  if (!ii.isCPlusPlusKeyword(cpp_lang_opts))
+    return;
+  // If the token is already an identifier, then there is nothing to do.
+  if (ii.getTokenID() == clang::tok::identifier)
+    return;
+  // Otherwise the token is a C++ keyword, so turn it back into a normal
+  // identifier.
+  ii.revertTokenIDToIdentifier();
+}
+
+/// Remove all C++ keywords from the given identifier table.
+static void RemoveAllCppKeywords(IdentifierTable &idents) {
+#define KEYWORD(NAME, FLAGS) RemoveCppKeyword(idents, llvm::StringRef(#NAME));
+#include "clang/Basic/TokenKinds.def"
 }
 
 //===----------------------------------------------------------------------===//
@@ -260,36 +343,37 @@ static void SetupModuleHeaderPaths(CompilerInstance *compiler,
 
 ClangExpressionParser::ClangExpressionParser(
     ExecutionContextScope *exe_scope, Expression &expr,
-    bool generate_debug_info, std::vector<std::string> include_directories)
+    bool generate_debug_info, std::vector<std::string> include_directories,
+    std::string filename)
     : ExpressionParser(exe_scope, expr, generate_debug_info), m_compiler(),
       m_pp_callbacks(nullptr),
-      m_include_directories(std::move(include_directories)) {
+      m_include_directories(std::move(include_directories)),
+      m_filename(std::move(filename)) {
   Log *log(lldb_private::GetLogIfAllCategoriesSet(LIBLLDB_LOG_EXPRESSIONS));
 
   // We can't compile expressions without a target.  So if the exe_scope is
   // null or doesn't have a target, then we just need to get out of here.  I'll
-  // lldb_assert and not make any of the compiler objects since
+  // lldbassert and not make any of the compiler objects since
   // I can't return errors directly from the constructor.  Further calls will
   // check if the compiler was made and
   // bag out if it wasn't.
 
   if (!exe_scope) {
-    lldb_assert(exe_scope, "Can't make an expression parser with a null scope.",
-                __FUNCTION__, __FILE__, __LINE__);
+    lldbassert(exe_scope &&
+               "Can't make an expression parser with a null scope.");
     return;
   }
 
   lldb::TargetSP target_sp;
   target_sp = exe_scope->CalculateTarget();
   if (!target_sp) {
-    lldb_assert(target_sp.get(),
-                "Can't make an expression parser with a null target.",
-                __FUNCTION__, __FILE__, __LINE__);
+    lldbassert(target_sp.get() &&
+               "Can't make an expression parser with a null target.");
     return;
   }
 
   // 1. Create a new compiler instance.
-  m_compiler.reset(new CompilerInstance());
+  m_compiler = std::make_unique<CompilerInstance>();
 
   // When capturing a reproducer, hook up the file collector with clang to
   // collector modules and headers.
@@ -380,9 +464,13 @@ ClangExpressionParser::ClangExpressionParser(
   // target. In this case, a specialized language runtime is available and we
   // can query it for extra options. For 99% of use cases, this will not be
   // needed and should be provided when basic platform detection is not enough.
-  if (lang_rt)
+  // FIXME: Generalize this. Only RenderScriptRuntime currently supports this
+  // currently. Hardcoding this isn't ideal but it's better than LanguageRuntime
+  // having knowledge of clang::TargetOpts.
+  if (auto *renderscript_rt =
+          llvm::dyn_cast_or_null<RenderScriptRuntime>(lang_rt))
     overridden_target_opts =
-        lang_rt->GetOverrideExprOptions(m_compiler->getTargetOpts());
+        renderscript_rt->GetOverrideExprOptions(m_compiler->getTargetOpts());
 
   if (overridden_target_opts)
     if (log && log->GetVerbose()) {
@@ -401,6 +489,10 @@ ClangExpressionParser::ClangExpressionParser(
 
   // 4. Create and install the target on the compiler.
   m_compiler->createDiagnostics();
+  // Limit the number of error diagnostics we emit.
+  // A value of 0 means no limit for both LLDB and Clang.
+  m_compiler->getDiagnostics().setErrorLimit(target_sp->GetExprErrorLimit());
+
   auto target_info = TargetInfo::CreateTargetInfo(
       m_compiler->getDiagnostics(), m_compiler->getInvocation().TargetOpts);
   if (log) {
@@ -505,6 +597,9 @@ ClangExpressionParser::ClangExpressionParser(
     lang_opts.DoubleSquareBracketAttributes = true;
     lang_opts.CPlusPlus11 = true;
 
+    // The Darwin libc expects this macro to be set.
+    lang_opts.GNUCVersion = 40201;
+
     SetupModuleHeaderPaths(m_compiler.get(), m_include_directories,
                            target_sp);
   }
@@ -557,7 +652,9 @@ ClangExpressionParser::ClangExpressionParser(
 
   // 6. Set up the diagnostic buffer for reporting errors
 
-  m_compiler->getDiagnostics().setClient(new ClangDiagnosticManagerAdapter);
+  auto diag_mgr = new ClangDiagnosticManagerAdapter(
+      m_compiler->getDiagnostics().getDiagnosticOptions());
+  m_compiler->getDiagnostics().setClient(diag_mgr);
 
   // 7. Set up the source management objects inside the compiler
   m_compiler->createFileManager();
@@ -565,17 +662,33 @@ ClangExpressionParser::ClangExpressionParser(
     m_compiler->createSourceManager(m_compiler->getFileManager());
   m_compiler->createPreprocessor(TU_Complete);
 
+  switch (language) {
+  case lldb::eLanguageTypeC:
+  case lldb::eLanguageTypeC89:
+  case lldb::eLanguageTypeC99:
+  case lldb::eLanguageTypeC11:
+  case lldb::eLanguageTypeObjC:
+    // This is not a C++ expression but we enabled C++ as explained above.
+    // Remove all C++ keywords from the PP so that the user can still use
+    // variables that have C++ keywords as names (e.g. 'int template;').
+    RemoveAllCppKeywords(m_compiler->getPreprocessor().getIdentifierTable());
+    break;
+  default:
+    break;
+  }
+
   if (ClangModulesDeclVendor *decl_vendor =
           target_sp->GetClangModulesDeclVendor()) {
-    ClangPersistentVariables *clang_persistent_vars =
-        llvm::cast<ClangPersistentVariables>(
+    if (auto *clang_persistent_vars = llvm::cast<ClangPersistentVariables>(
             target_sp->GetPersistentExpressionStateForLanguage(
-                lldb::eLanguageTypeC));
-    std::unique_ptr<PPCallbacks> pp_callbacks(
-        new LLDBPreprocessorCallbacks(*decl_vendor, *clang_persistent_vars));
-    m_pp_callbacks =
-        static_cast<LLDBPreprocessorCallbacks *>(pp_callbacks.get());
-    m_compiler->getPreprocessor().addPPCallbacks(std::move(pp_callbacks));
+                lldb::eLanguageTypeC))) {
+      std::unique_ptr<PPCallbacks> pp_callbacks(
+          new LLDBPreprocessorCallbacks(*decl_vendor, *clang_persistent_vars,
+                                        m_compiler->getSourceManager()));
+      m_pp_callbacks =
+          static_cast<LLDBPreprocessorCallbacks *>(pp_callbacks.get());
+      m_compiler->getPreprocessor().addPPCallbacks(std::move(pp_callbacks));
+    }
   }
 
   // 8. Most of this we get from the CompilerInstance, but we also want to give
@@ -589,13 +702,12 @@ ClangExpressionParser::ClangExpressionParser(
   m_compiler->createASTContext();
   clang::ASTContext &ast_context = m_compiler->getASTContext();
 
-  m_ast_context.reset(
-      new ClangASTContext(m_compiler->getTargetOpts().Triple.c_str()));
-  m_ast_context->setASTContext(&ast_context);
+  m_ast_context = std::make_unique<TypeSystemClang>(
+      "Expression ASTContext for '" + m_filename + "'", ast_context);
 
   std::string module_name("$__lldb_module");
 
-  m_llvm_context.reset(new LLVMContext());
+  m_llvm_context = std::make_unique<LLVMContext>();
   m_code_generator.reset(CreateLLVMCodeGen(
       m_compiler->getDiagnostics(), module_name,
       m_compiler->getHeaderSearchOpts(), m_compiler->getPreprocessorOpts(),
@@ -616,10 +728,32 @@ class CodeComplete : public CodeCompleteConsumer {
 
   std::string m_expr;
   unsigned m_position = 0;
-  CompletionRequest &m_request;
   /// The printing policy we use when printing declarations for our completion
   /// descriptions.
   clang::PrintingPolicy m_desc_policy;
+
+  struct CompletionWithPriority {
+    CompletionResult::Completion completion;
+    /// See CodeCompletionResult::Priority;
+    unsigned Priority;
+
+    /// Establishes a deterministic order in a list of CompletionWithPriority.
+    /// The order returned here is the order in which the completions are
+    /// displayed to the user.
+    bool operator<(const CompletionWithPriority &o) const {
+      // High priority results should come first.
+      if (Priority != o.Priority)
+        return Priority > o.Priority;
+
+      // Identical priority, so just make sure it's a deterministic order.
+      return completion.GetUniqueKey() < o.completion.GetUniqueKey();
+    }
+  };
+
+  /// The stored completions.
+  /// Warning: These are in a non-deterministic order until they are sorted
+  /// and returned back to the caller.
+  std::vector<CompletionWithPriority> m_completions;
 
   /// Returns true if the given character can be used in an identifier.
   /// This also returns true for numbers because for completion we usually
@@ -637,7 +771,7 @@ class CodeComplete : public CodeCompleteConsumer {
   /// Drops all tokens in front of the expression that are unrelated for
   /// the completion of the cmd line. 'unrelated' means here that the token
   /// is not interested for the lldb completion API result.
-  StringRef dropUnrelatedFrontTokens(StringRef cmd) {
+  StringRef dropUnrelatedFrontTokens(StringRef cmd) const {
     if (cmd.empty())
       return cmd;
 
@@ -658,18 +792,18 @@ class CodeComplete : public CodeCompleteConsumer {
   }
 
   /// Removes the last identifier token from the given cmd line.
-  StringRef removeLastToken(StringRef cmd) {
+  StringRef removeLastToken(StringRef cmd) const {
     while (!cmd.empty() && IsIdChar(cmd.back())) {
       cmd = cmd.drop_back();
     }
     return cmd;
   }
 
-  /// Attemps to merge the given completion from the given position into the
+  /// Attempts to merge the given completion from the given position into the
   /// existing command. Returns the completion string that can be returned to
   /// the lldb completion API.
   std::string mergeCompletion(StringRef existing, unsigned pos,
-                              StringRef completion) {
+                              StringRef completion) const {
     StringRef existing_command = existing.substr(0, pos);
     // We rewrite the last token with the completion, so let's drop that
     // token from the command.
@@ -683,10 +817,7 @@ class CodeComplete : public CodeCompleteConsumer {
 
 public:
   /// Constructs a CodeComplete consumer that can be attached to a Sema.
-  /// \param[out] matches
-  ///    The list of matches that the lldb completion API expects as a result.
-  ///    This may already contain matches, so it's only allowed to append
-  ///    to this variable.
+  ///
   /// \param[out] expr
   ///    The whole expression string that we are currently parsing. This
   ///    string needs to be equal to the input the user typed, and NOT the
@@ -694,11 +825,10 @@ public:
   /// \param[out] position
   ///    The character position of the user cursor in the `expr` parameter.
   ///
-  CodeComplete(CompletionRequest &request, clang::LangOptions ops,
-               std::string expr, unsigned position)
+  CodeComplete(clang::LangOptions ops, std::string expr, unsigned position)
       : CodeCompleteConsumer(CodeCompleteOptions()),
         m_info(std::make_shared<GlobalCodeCompletionAllocator>()), m_expr(expr),
-        m_position(position), m_request(request), m_desc_policy(ops) {
+        m_position(position), m_desc_policy(ops) {
 
     // Ensure that the printing policy is producing a description that is as
     // short as possible.
@@ -710,9 +840,6 @@ public:
     m_desc_policy.UseVoidForZeroParams = false;
     m_desc_policy.Bool = true;
   }
-
-  /// Deregisters and destroys this code-completion consumer.
-  ~CodeComplete() override {}
 
   /// \name Code-completion filtering
   /// Check if the result should be filtered out.
@@ -741,6 +868,85 @@ public:
     return true;
   }
 
+private:
+  /// Generate the completion strings for the given CodeCompletionResult.
+  /// Note that this function has to process results that could come in
+  /// non-deterministic order, so this function should have no side effects.
+  /// To make this easier to enforce, this function and all its parameters
+  /// should always be const-qualified.
+  /// \return Returns llvm::None if no completion should be provided for the
+  ///         given CodeCompletionResult.
+  llvm::Optional<CompletionWithPriority>
+  getCompletionForResult(const CodeCompletionResult &R) const {
+    std::string ToInsert;
+    std::string Description;
+    // Handle the different completion kinds that come from the Sema.
+    switch (R.Kind) {
+    case CodeCompletionResult::RK_Declaration: {
+      const NamedDecl *D = R.Declaration;
+      ToInsert = R.Declaration->getNameAsString();
+      // If we have a function decl that has no arguments we want to
+      // complete the empty parantheses for the user. If the function has
+      // arguments, we at least complete the opening bracket.
+      if (const FunctionDecl *F = dyn_cast<FunctionDecl>(D)) {
+        if (F->getNumParams() == 0)
+          ToInsert += "()";
+        else
+          ToInsert += "(";
+        raw_string_ostream OS(Description);
+        F->print(OS, m_desc_policy, false);
+        OS.flush();
+      } else if (const VarDecl *V = dyn_cast<VarDecl>(D)) {
+        Description = V->getType().getAsString(m_desc_policy);
+      } else if (const FieldDecl *F = dyn_cast<FieldDecl>(D)) {
+        Description = F->getType().getAsString(m_desc_policy);
+      } else if (const NamespaceDecl *N = dyn_cast<NamespaceDecl>(D)) {
+        // If we try to complete a namespace, then we can directly append
+        // the '::'.
+        if (!N->isAnonymousNamespace())
+          ToInsert += "::";
+      }
+      break;
+    }
+    case CodeCompletionResult::RK_Keyword:
+      ToInsert = R.Keyword;
+      break;
+    case CodeCompletionResult::RK_Macro:
+      ToInsert = R.Macro->getName().str();
+      break;
+    case CodeCompletionResult::RK_Pattern:
+      ToInsert = R.Pattern->getTypedText();
+      break;
+    }
+    // We also filter some internal lldb identifiers here. The user
+    // shouldn't see these.
+    if (llvm::StringRef(ToInsert).startswith("$__lldb_"))
+      return llvm::None;
+    if (ToInsert.empty())
+      return llvm::None;
+    // Merge the suggested Token into the existing command line to comply
+    // with the kind of result the lldb API expects.
+    std::string CompletionSuggestion =
+        mergeCompletion(m_expr, m_position, ToInsert);
+
+    CompletionResult::Completion completion(CompletionSuggestion, Description,
+                                            CompletionMode::Normal);
+    return {{completion, R.Priority}};
+  }
+
+public:
+  /// Adds the completions to the given CompletionRequest.
+  void GetCompletions(CompletionRequest &request) {
+    // Bring m_completions into a deterministic order and pass it on to the
+    // CompletionRequest.
+    llvm::sort(m_completions);
+
+    for (const CompletionWithPriority &C : m_completions)
+      request.AddCompletion(C.completion.GetCompletion(),
+                            C.completion.GetDescription(),
+                            C.completion.GetMode());
+  }
+
   /// \name Code-completion callbacks
   /// Process the finalized code-completion results.
   void ProcessCodeCompleteResults(Sema &SemaRef, CodeCompletionContext Context,
@@ -759,59 +965,11 @@ public:
         continue;
 
       CodeCompletionResult &R = Results[I];
-      std::string ToInsert;
-      std::string Description;
-      // Handle the different completion kinds that come from the Sema.
-      switch (R.Kind) {
-      case CodeCompletionResult::RK_Declaration: {
-        const NamedDecl *D = R.Declaration;
-        ToInsert = R.Declaration->getNameAsString();
-        // If we have a function decl that has no arguments we want to
-        // complete the empty parantheses for the user. If the function has
-        // arguments, we at least complete the opening bracket.
-        if (const FunctionDecl *F = dyn_cast<FunctionDecl>(D)) {
-          if (F->getNumParams() == 0)
-            ToInsert += "()";
-          else
-            ToInsert += "(";
-          raw_string_ostream OS(Description);
-          F->print(OS, m_desc_policy, false);
-          OS.flush();
-        } else if (const VarDecl *V = dyn_cast<VarDecl>(D)) {
-          Description = V->getType().getAsString(m_desc_policy);
-        } else if (const FieldDecl *F = dyn_cast<FieldDecl>(D)) {
-          Description = F->getType().getAsString(m_desc_policy);
-        } else if (const NamespaceDecl *N = dyn_cast<NamespaceDecl>(D)) {
-          // If we try to complete a namespace, then we can directly append
-          // the '::'.
-          if (!N->isAnonymousNamespace())
-            ToInsert += "::";
-        }
-        break;
-      }
-      case CodeCompletionResult::RK_Keyword:
-        ToInsert = R.Keyword;
-        break;
-      case CodeCompletionResult::RK_Macro:
-        ToInsert = R.Macro->getName().str();
-        break;
-      case CodeCompletionResult::RK_Pattern:
-        ToInsert = R.Pattern->getTypedText();
-        break;
-      }
-      // At this point all information is in the ToInsert string.
-
-      // We also filter some internal lldb identifiers here. The user
-      // shouldn't see these.
-      if (StringRef(ToInsert).startswith("$__lldb_"))
+      llvm::Optional<CompletionWithPriority> CompletionAndPriority =
+          getCompletionForResult(R);
+      if (!CompletionAndPriority)
         continue;
-      if (!ToInsert.empty()) {
-        // Merge the suggested Token into the existing command line to comply
-        // with the kind of result the lldb API expects.
-        std::string CompletionSuggestion =
-            mergeCompletion(m_expr, m_position, ToInsert);
-        m_request.AddCompletion(CompletionSuggestion, Description);
-      }
+      m_completions.push_back(*CompletionAndPriority);
     }
   }
 
@@ -848,12 +1006,13 @@ bool ClangExpressionParser::Complete(CompletionRequest &request, unsigned line,
   // the LLVMUserExpression which exposes the right API. This should never fail
   // as we always have a ClangUserExpression whenever we call this.
   ClangUserExpression *llvm_expr = cast<ClangUserExpression>(&m_expr);
-  CodeComplete CC(request, m_compiler->getLangOpts(), llvm_expr->GetUserText(),
+  CodeComplete CC(m_compiler->getLangOpts(), llvm_expr->GetUserText(),
                   typed_pos);
   // We don't need a code generator for parsing.
   m_code_generator.reset();
   // Start parsing the expression with our custom code completion consumer.
   ParseInternal(mgr, &CC, line, pos);
+  CC.GetCompletions(request);
   return true;
 }
 
@@ -869,8 +1028,6 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
   ClangDiagnosticManagerAdapter *adapter =
       static_cast<ClangDiagnosticManagerAdapter *>(
           m_compiler->getDiagnostics().getClient());
-  clang::TextDiagnosticBuffer *diag_buf = adapter->GetPassthrough();
-  diag_buf->FlushDiagnostics(m_compiler->getDiagnostics());
 
   adapter->ResetManager(&diagnostic_manager);
 
@@ -901,7 +1058,7 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
     }
 
     if (temp_fd != -1) {
-      lldb_private::File file(temp_fd, true);
+      lldb_private::NativeFile file(temp_fd, File::eOpenOptionWrite, true);
       const size_t expr_text_len = strlen(expr_text);
       size_t bytes_written = expr_text_len;
       if (file.Write(expr_text, bytes_written).Success()) {
@@ -921,12 +1078,12 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
 
   if (!created_main_file) {
     std::unique_ptr<MemoryBuffer> memory_buffer =
-        MemoryBuffer::getMemBufferCopy(expr_text, "<lldb-expr>");
+        MemoryBuffer::getMemBufferCopy(expr_text, m_filename);
     source_mgr.setMainFileID(source_mgr.createFileID(std::move(memory_buffer)));
   }
 
-  diag_buf->BeginSourceFile(m_compiler->getLangOpts(),
-                            &m_compiler->getPreprocessor());
+  adapter->BeginSourceFile(m_compiler->getLangOpts(),
+                           &m_compiler->getPreprocessor());
 
   ClangExpressionHelper *type_system_helper =
       dyn_cast<ClangExpressionHelper>(m_expr.GetTypeSystemHelper());
@@ -950,11 +1107,11 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
 
   std::unique_ptr<clang::ASTConsumer> Consumer;
   if (ast_transformer) {
-    Consumer.reset(new ASTConsumerForwarder(ast_transformer));
+    Consumer = std::make_unique<ASTConsumerForwarder>(ast_transformer);
   } else if (m_code_generator) {
-    Consumer.reset(new ASTConsumerForwarder(m_code_generator.get()));
+    Consumer = std::make_unique<ASTConsumerForwarder>(m_code_generator.get());
   } else {
-    Consumer.reset(new ASTConsumer());
+    Consumer = std::make_unique<ASTConsumer>();
   }
 
   clang::ASTContext &ast_context = m_compiler->getASTContext();
@@ -964,13 +1121,14 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
   m_compiler->setASTConsumer(std::move(Consumer));
 
   if (ast_context.getLangOpts().Modules) {
-    m_compiler->createModuleManager();
+    m_compiler->createASTReader();
     m_ast_context->setSema(&m_compiler->getSema());
   }
 
   ClangExpressionDeclMap *decl_map = type_system_helper->DeclMap();
   if (decl_map) {
     decl_map->InstallCodeGenerator(&m_compiler->getASTConsumer());
+    decl_map->InstallDiagnosticManager(diagnostic_manager);
 
     clang::ExternalASTSource *ast_source = decl_map->CreateProxy();
 
@@ -987,7 +1145,7 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
     } else {
       ast_context.setExternalSource(ast_source);
     }
-    decl_map->InstallASTContext(ast_context, m_compiler->getFileManager());
+    decl_map->InstallASTContext(*m_ast_context);
   }
 
   // Check that the ASTReader is properly attached to ASTContext and Sema.
@@ -1011,9 +1169,9 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
   // original behavior of ParseAST (which also destroys the Sema after parsing).
   m_compiler->setSema(nullptr);
 
-  diag_buf->EndSourceFile();
+  adapter->EndSourceFile();
 
-  unsigned num_errors = diag_buf->getNumErrors();
+  unsigned num_errors = adapter->getNumErrors();
 
   if (m_pp_callbacks && m_pp_callbacks->hasErrors()) {
     num_errors++;
@@ -1021,15 +1179,6 @@ ClangExpressionParser::ParseInternal(DiagnosticManager &diagnostic_manager,
                                  "while importing modules:");
     diagnostic_manager.AppendMessageToDiagnostic(
         m_pp_callbacks->getErrorString());
-  }
-
-  if (!num_errors) {
-    if (type_system_helper->DeclMap() &&
-        !type_system_helper->DeclMap()->ResolveUnknownTypes()) {
-      diagnostic_manager.Printf(eDiagnosticSeverityError,
-                                "Couldn't infer the type of a variable");
-      num_errors++;
-    }
   }
 
   if (!num_errors) {
@@ -1063,6 +1212,28 @@ ClangExpressionParser::GetClangTargetABI(const ArchSpec &target_arch) {
   return abi;
 }
 
+/// Applies the given Fix-It hint to the given commit.
+static void ApplyFixIt(const FixItHint &fixit, clang::edit::Commit &commit) {
+  // This is cobbed from clang::Rewrite::FixItRewriter.
+  if (fixit.CodeToInsert.empty()) {
+    if (fixit.InsertFromRange.isValid()) {
+      commit.insertFromRange(fixit.RemoveRange.getBegin(),
+                             fixit.InsertFromRange, /*afterToken=*/false,
+                             fixit.BeforePreviousInsertions);
+      return;
+    }
+    commit.remove(fixit.RemoveRange);
+    return;
+  }
+  if (fixit.RemoveRange.isTokenRange() ||
+      fixit.RemoveRange.getBegin() != fixit.RemoveRange.getEnd()) {
+    commit.replace(fixit.RemoveRange, fixit.CodeToInsert);
+    return;
+  }
+  commit.insert(fixit.RemoveRange.getBegin(), fixit.CodeToInsert,
+                /*afterToken=*/false, fixit.BeforePreviousInsertions);
+}
+
 bool ClangExpressionParser::RewriteExpression(
     DiagnosticManager &diagnostic_manager) {
   clang::SourceManager &source_manager = m_compiler->getSourceManager();
@@ -1092,28 +1263,14 @@ bool ClangExpressionParser::RewriteExpression(
   if (num_diags == 0)
     return false;
 
-  for (const Diagnostic *diag : diagnostic_manager.Diagnostics()) {
-    const ClangDiagnostic *diagnostic = llvm::dyn_cast<ClangDiagnostic>(diag);
-    if (diagnostic && diagnostic->HasFixIts()) {
-      for (const FixItHint &fixit : diagnostic->FixIts()) {
-        // This is cobbed from clang::Rewrite::FixItRewriter.
-        if (fixit.CodeToInsert.empty()) {
-          if (fixit.InsertFromRange.isValid()) {
-            commit.insertFromRange(fixit.RemoveRange.getBegin(),
-                                   fixit.InsertFromRange, /*afterToken=*/false,
-                                   fixit.BeforePreviousInsertions);
-          } else
-            commit.remove(fixit.RemoveRange);
-        } else {
-          if (fixit.RemoveRange.isTokenRange() ||
-              fixit.RemoveRange.getBegin() != fixit.RemoveRange.getEnd())
-            commit.replace(fixit.RemoveRange, fixit.CodeToInsert);
-          else
-            commit.insert(fixit.RemoveRange.getBegin(), fixit.CodeToInsert,
-                          /*afterToken=*/false, fixit.BeforePreviousInsertions);
-        }
-      }
-    }
+  for (const auto &diag : diagnostic_manager.Diagnostics()) {
+    const auto *diagnostic = llvm::dyn_cast<ClangDiagnostic>(diag.get());
+    if (!diagnostic)
+      continue;
+    if (!diagnostic->HasFixIts())
+      continue;
+    for (const FixItHint &fixit : diagnostic->FixIts())
+      ApplyFixIt(fixit, commit);
   }
 
   // FIXME - do we want to try to propagate specific errors here?
@@ -1228,20 +1385,13 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
       type_system_helper->DeclMap(); // result can be NULL
 
   if (decl_map) {
-    Stream *error_stream = nullptr;
-    Target *target = exe_ctx.GetTargetPtr();
-    error_stream = target->GetDebugger().GetErrorFile().get();
-
+    StreamString error_stream;
     IRForTarget ir_for_target(decl_map, m_expr.NeedsVariableResolution(),
-                              *execution_unit_sp, *error_stream,
+                              *execution_unit_sp, error_stream,
                               function_name.AsCString());
 
-    bool ir_can_run =
-        ir_for_target.runOnModule(*execution_unit_sp->GetModule());
-
-    if (!ir_can_run) {
-      err.SetErrorString(
-          "The expression could not be prepared to run in the target");
+    if (!ir_for_target.runOnModule(*execution_unit_sp->GetModule())) {
+      err.SetErrorString(error_stream.GetString());
       return err;
     }
 
@@ -1258,8 +1408,9 @@ lldb_private::Status ClangExpressionParser::PrepareForExecution(
           interpret_error, interpret_function_calls);
 
       if (!can_interpret && execution_policy == eExecutionPolicyNever) {
-        err.SetErrorStringWithFormat("Can't run the expression locally: %s",
-                                     interpret_error.AsCString());
+        err.SetErrorStringWithFormat(
+            "Can't evaluate the expression without a running target due to: %s",
+            interpret_error.AsCString());
         return err;
       }
     }

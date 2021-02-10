@@ -15,8 +15,6 @@
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/BinaryFormat/Magic.h"
-#include "llvm/DebugInfo/CodeView/TypeRecord.h"
-#include "llvm/LTO/LTO.h"
 #include "llvm/Object/Archive.h"
 #include "llvm/Object/COFF.h"
 #include "llvm/Support/StringSaver.h"
@@ -25,12 +23,19 @@
 #include <vector>
 
 namespace llvm {
+struct DILineInfo;
 namespace pdb {
 class DbiModuleDescriptorBuilder;
+class NativeSession;
+}
+namespace lto {
+class InputFile;
 }
 }
 
 namespace lld {
+class DWARFCache;
+
 namespace coff {
 
 std::vector<MemoryBufferRef> getArchiveMembers(llvm::object::Archive *file);
@@ -60,6 +65,7 @@ public:
     ArchiveKind,
     ObjectKind,
     LazyObjectKind,
+    PDBKind,
     ImportKind,
     BitcodeKind
   };
@@ -136,10 +142,13 @@ public:
   MachineTypes getMachineType() override;
   ArrayRef<Chunk *> getChunks() { return chunks; }
   ArrayRef<SectionChunk *> getDebugChunks() { return debugChunks; }
-  ArrayRef<SectionChunk *> getSXDataChunks() { return sXDataChunks; }
+  ArrayRef<SectionChunk *> getSXDataChunks() { return sxDataChunks; }
   ArrayRef<SectionChunk *> getGuardFidChunks() { return guardFidChunks; }
+  ArrayRef<SectionChunk *> getGuardIATChunks() { return guardIATChunks; }
   ArrayRef<SectionChunk *> getGuardLJmpChunks() { return guardLJmpChunks; }
   ArrayRef<Symbol *> getSymbols() { return symbols; }
+
+  MutableArrayRef<Symbol *> getMutableSymbols() { return symbols; }
 
   ArrayRef<uint8_t> getDebugSection(StringRef secName);
 
@@ -185,6 +194,8 @@ public:
 
   const coff_section *addrsigSec = nullptr;
 
+  const coff_section *callgraphSec = nullptr;
+
   // When using Microsoft precompiled headers, this is the PCH's key.
   // The same key is used by both the precompiled object, and objects using the
   // precompiled object. Any difference indicates out-of-date objects.
@@ -199,8 +210,14 @@ public:
   // If the OBJ has a .debug$T stream, this tells how it will be handled.
   TpiSource *debugTypesObj = nullptr;
 
-  // The .debug$T stream if there's one.
-  llvm::Optional<llvm::codeview::CVTypeArray> debugTypes;
+  // The .debug$P or .debug$T section data if present. Empty otherwise.
+  ArrayRef<uint8_t> debugTypes;
+
+  llvm::Optional<std::pair<StringRef, uint32_t>>
+  getVariableLocation(StringRef var);
+
+  llvm::Optional<llvm::DILineInfo> getDILineInfo(uint32_t offset,
+                                                 uint32_t sectionIndex);
 
 private:
   const coff_section* getSection(uint32_t i);
@@ -241,9 +258,10 @@ private:
   // match the existing symbol and its selection. If either old or new
   // symbol have selection IMAGE_COMDAT_SELECT_LARGEST, Sym might replace
   // the existing leader. In that case, Prevailing is set to true.
-  void handleComdatSelection(COFFSymbolRef sym,
-                             llvm::COFF::COMDATType &selection,
-                             bool &prevailing, DefinedRegular *leader);
+  void
+  handleComdatSelection(COFFSymbolRef sym, llvm::COFF::COMDATType &selection,
+                        bool &prevailing, DefinedRegular *leader,
+                        const llvm::object::coff_aux_section_definition *def);
 
   llvm::Optional<Symbol *>
   createDefined(COFFSymbolRef sym,
@@ -266,25 +284,55 @@ private:
 
   // Chunks containing symbol table indices of exception handlers. Only used for
   // 32-bit x86.
-  std::vector<SectionChunk *> sXDataChunks;
+  std::vector<SectionChunk *> sxDataChunks;
 
-  // Chunks containing symbol table indices of address taken symbols and longjmp
-  // targets.  These are not linked into the final binary when /guard:cf is set.
+  // Chunks containing symbol table indices of address taken symbols, address
+  // taken IAT entries, and longjmp targets. These are not linked into the
+  // final binary when /guard:cf is set.
   std::vector<SectionChunk *> guardFidChunks;
+  std::vector<SectionChunk *> guardIATChunks;
   std::vector<SectionChunk *> guardLJmpChunks;
-
-  // This vector contains the same chunks as Chunks, but they are
-  // indexed such that you can get a SectionChunk by section index.
-  // Nonexistent section indices are filled with null pointers.
-  // (Because section number is 1-based, the first slot is always a
-  // null pointer.)
-  std::vector<SectionChunk *> sparseChunks;
 
   // This vector contains a list of all symbols defined or referenced by this
   // file. They are indexed such that you can get a Symbol by symbol
   // index. Nonexistent indices (which are occupied by auxiliary
   // symbols in the real symbol table) are filled with null pointers.
   std::vector<Symbol *> symbols;
+
+  // This vector contains the same chunks as Chunks, but they are
+  // indexed such that you can get a SectionChunk by section index.
+  // Nonexistent section indices are filled with null pointers.
+  // (Because section number is 1-based, the first slot is always a
+  // null pointer.) This vector is only valid during initialization.
+  std::vector<SectionChunk *> sparseChunks;
+
+  DWARFCache *dwarf = nullptr;
+};
+
+// This is a PDB type server dependency, that is not a input file per se, but
+// needs to be treated like one. Such files are discovered from the debug type
+// stream.
+class PDBInputFile : public InputFile {
+public:
+  explicit PDBInputFile(MemoryBufferRef m);
+  ~PDBInputFile();
+  static bool classof(const InputFile *f) { return f->kind() == PDBKind; }
+  void parse() override;
+
+  static void enqueue(StringRef path, ObjFile *fromFile);
+
+  static PDBInputFile *findFromRecordPath(StringRef path, ObjFile *fromFile);
+
+  static std::map<std::string, PDBInputFile *> instances;
+
+  // Record possible errors while opening the PDB file
+  llvm::Optional<Error> loadErr;
+
+  // This is the actual interface to the PDB (if it was opened successfully)
+  std::unique_ptr<llvm::pdb::NativeSession> session;
+
+  // If the PDB has a .debug$T stream, this tells how it will be handled.
+  TpiSource *debugTypesObj = nullptr;
 };
 
 // This type represents import library members that contain DLL names
@@ -310,7 +358,7 @@ public:
   const coff_import_header *hdr;
   Chunk *location = nullptr;
 
-  // We want to eliminate dllimported symbols if no one actually refers them.
+  // We want to eliminate dllimported symbols if no one actually refers to them.
   // These "Live" bits are used to keep track of which import library members
   // are actually in use.
   //
@@ -326,11 +374,11 @@ public:
 class BitcodeFile : public InputFile {
 public:
   BitcodeFile(MemoryBufferRef mb, StringRef archiveName,
-              uint64_t offsetInArchive)
-      : BitcodeFile(mb, archiveName, offsetInArchive, {}) {}
+              uint64_t offsetInArchive);
   explicit BitcodeFile(MemoryBufferRef m, StringRef archiveName,
                        uint64_t offsetInArchive,
                        std::vector<Symbol *> &&symbols);
+  ~BitcodeFile();
   static bool classof(const InputFile *f) { return f->kind() == BitcodeKind; }
   ArrayRef<Symbol *> getSymbols() { return symbols; }
   MachineTypes getMachineType() override;

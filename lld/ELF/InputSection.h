@@ -52,28 +52,15 @@ public:
   // this but instead this->Repl.
   SectionBase *repl;
 
-  unsigned sectionKind : 3;
+  uint8_t sectionKind : 3;
 
-  // The next three bit fields are only used by InputSectionBase, but we
+  // The next two bit fields are only used by InputSectionBase, but we
   // put them here so the struct packs better.
 
-  // True if this section has already been placed to a linker script
-  // output section. This is needed because, in a linker script, you
-  // can refer to the same section more than once. For example, in
-  // the following linker script,
-  //
-  //   .foo : { *(.text) }
-  //   .bar : { *(.text) }
-  //
-  // .foo takes all .text sections, and .bar becomes empty. To achieve
-  // this, we need to memorize whether a section has been placed or
-  // not for each input section.
-  unsigned assigned : 1;
-
-  unsigned bss : 1;
+  uint8_t bss : 1;
 
   // Set for sections that should not be folded by ICF.
-  unsigned keepUnique : 1;
+  uint8_t keepUnique : 1;
 
   // The 1-indexed partition that this section is assigned to by the garbage
   // collector, or 0 if this section is dead. Normally there is only one
@@ -108,9 +95,9 @@ protected:
   SectionBase(Kind sectionKind, StringRef name, uint64_t flags,
               uint64_t entsize, uint64_t alignment, uint32_t type,
               uint32_t info, uint32_t link)
-      : name(name), repl(this), sectionKind(sectionKind), assigned(false),
-        bss(false), keepUnique(false), partition(0), alignment(alignment),
-        flags(flags), entsize(entsize), type(type), link(link), info(info) {}
+      : name(name), repl(this), sectionKind(sectionKind), bss(false),
+        keepUnique(false), partition(0), alignment(alignment), flags(flags),
+        entsize(entsize), type(type), link(link), info(info) {}
 };
 
 // This corresponds to a section of an input file.
@@ -141,6 +128,30 @@ public:
     return cast_or_null<ObjFile<ELFT>>(file);
   }
 
+  // If basic block sections are enabled, many code sections could end up with
+  // one or two jump instructions at the end that could be relaxed to a smaller
+  // instruction. The members below help trimming the trailing jump instruction
+  // and shrinking a section.
+  unsigned bytesDropped = 0;
+
+  // Whether the section needs to be padded with a NOP filler due to
+  // deleteFallThruJmpInsn.
+  bool nopFiller = false;
+
+  void drop_back(uint64_t num) { bytesDropped += num; }
+
+  void push_back(uint64_t num) {
+    assert(bytesDropped >= num);
+    bytesDropped -= num;
+  }
+
+  void trim() {
+    if (bytesDropped) {
+      rawData = rawData.drop_back(bytesDropped);
+      bytesDropped = 0;
+    }
+  }
+
   ArrayRef<uint8_t> data() const {
     if (uncompressedSize >= 0)
       uncompress();
@@ -154,6 +165,10 @@ public:
   // synthetic section that is then added to an output section. In all
   // cases this points one level up.
   SectionBase *parent = nullptr;
+
+  // The next member in the section group if this section is in a group. This is
+  // used by --gc-sections.
+  InputSectionBase *nextInSectionGroup = nullptr;
 
   template <class ELFT> ArrayRef<typename ELFT::Rel> rels() const {
     assert(!areRelocsRela);
@@ -192,11 +207,20 @@ public:
   // the mmap'ed output buffer.
   template <class ELFT> void relocate(uint8_t *buf, uint8_t *bufEnd);
   void relocateAlloc(uint8_t *buf, uint8_t *bufEnd);
+  static uint64_t getRelocTargetVA(const InputFile *File, RelType Type,
+                                   int64_t A, uint64_t P, const Symbol &Sym,
+                                   RelExpr Expr);
 
   // The native ELF reloc data type is not very convenient to handle.
   // So we convert ELF reloc records to our own records in Relocations.cpp.
   // This vector contains such "cooked" relocations.
-  std::vector<Relocation> relocations;
+  SmallVector<Relocation, 0> relocations;
+
+  // These are modifiers to jump instructions that are necessary when basic
+  // block sections are enabled.  Basic block sections creates opportunities to
+  // relax jump instructions at basic block boundaries after reordering the
+  // basic blocks.
+  SmallVector<JumpInstrMod, 0> jumpInstrMods;
 
   // A function compiled with -fsplit-stack calling a function
   // compiled without -fsplit-stack needs its prologue adjusted. Find
@@ -290,7 +314,7 @@ struct EhSectionPiece {
                  unsigned firstRelocation)
       : inputOff(off), sec(sec), size(size), firstRelocation(firstRelocation) {}
 
-  ArrayRef<uint8_t> data() {
+  ArrayRef<uint8_t> data() const {
     return {sec->data().data() + this->inputOff, size};
   }
 
@@ -366,8 +390,24 @@ private:
   template <class ELFT> void copyShtGroup(uint8_t *buf);
 };
 
+#ifdef _WIN32
+static_assert(sizeof(InputSection) <= 192, "InputSection is too big");
+#else
+static_assert(sizeof(InputSection) <= 184, "InputSection is too big");
+#endif
+
+inline bool isDebugSection(const InputSectionBase &sec) {
+  return (sec.flags & llvm::ELF::SHF_ALLOC) == 0 &&
+         (sec.name.startswith(".debug") || sec.name.startswith(".zdebug"));
+}
+
 // The list of all input sections.
 extern std::vector<InputSectionBase *> inputSections;
+
+// The set of TOC entries (.toc + addend) for which we should not apply
+// toc-indirect to toc-relative relaxation. const Symbol * refers to the
+// STT_SECTION symbol associated to the .toc input section.
+extern llvm::DenseSet<std::pair<const Symbol *, uint64_t>> ppc64noTocRelax;
 
 } // namespace elf
 

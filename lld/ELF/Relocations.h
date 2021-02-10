@@ -24,6 +24,7 @@ class SectionBase;
 
 // Represents a relocation type, such as R_X86_64_PC32 or R_ARM_THM_CALL.
 using RelType = uint32_t;
+using JumpModType = uint32_t;
 
 // List of target-independent relocation types. Relocations read
 // from files are converted to these types so that the main code
@@ -40,8 +41,6 @@ enum RelExpr {
   R_GOTPLT,
   R_GOTPLTREL,
   R_GOTREL,
-  R_HINT,
-  R_NEG_TLS,
   R_NONE,
   R_PC,
   R_PLT,
@@ -58,7 +57,8 @@ enum RelExpr {
   R_RELAX_TLS_LD_TO_LE,
   R_RELAX_TLS_LD_TO_LE_ABS,
   R_SIZE,
-  R_TLS,
+  R_TPREL,
+  R_TPREL_NEG,
   R_TLSDESC,
   R_TLSDESC_CALL,
   R_TLSDESC_PC,
@@ -81,6 +81,7 @@ enum RelExpr {
   R_AARCH64_PAGE_PC,
   R_AARCH64_RELAX_TLS_GD_TO_IE_PAGE_PC,
   R_AARCH64_TLSDESC_PAGE,
+  R_ARM_PCA,
   R_ARM_SBREL,
   R_MIPS_GOTREL,
   R_MIPS_GOT_GP,
@@ -95,6 +96,7 @@ enum RelExpr {
   R_PPC64_CALL_PLT,
   R_PPC64_RELAX_TOC,
   R_PPC64_TOCBASE,
+  R_PPC64_RELAX_GOT_PC,
   R_RISCV_ADD,
   R_RISCV_PC_INDIRECT,
 };
@@ -108,6 +110,15 @@ struct Relocation {
   Symbol *sym;
 };
 
+// Manipulate jump instructions with these modifiers.  These are used to relax
+// jump instruction opcodes at basic block boundaries and are particularly
+// useful when basic block sections are enabled.
+struct JumpInstrMod {
+  JumpModType original;
+  uint64_t offset;
+  unsigned size;
+};
+
 // This function writes undefined symbol diagnostics to an internal buffer.
 // Call reportUndefinedSymbols() after calling scanRelocations() to emit
 // the diagnostics.
@@ -115,11 +126,12 @@ template <class ELFT> void scanRelocations(InputSectionBase &);
 
 template <class ELFT> void reportUndefinedSymbols();
 
-void addIRelativeRelocs();
+void hexagonTLSSymbolUpdate(ArrayRef<OutputSection *> outputSections);
+bool hexagonNeedsTLSSymbol(ArrayRef<OutputSection *> outputSections);
 
 class ThunkSection;
 class Thunk;
-struct InputSectionDescription;
+class InputSectionDescription;
 
 class ThunkCreator {
 public:
@@ -150,10 +162,17 @@ private:
 
   bool normalizeExistingThunk(Relocation &rel, uint64_t src);
 
-  // Record all the available Thunks for a Symbol
-  llvm::DenseMap<std::pair<SectionBase *, uint64_t>, std::vector<Thunk *>>
-      thunkedSymbolsBySection;
-  llvm::DenseMap<Symbol *, std::vector<Thunk *>> thunkedSymbols;
+  // Record all the available Thunks for a (Symbol, addend) pair, where Symbol
+  // is represented as a (section, offset) pair. There may be multiple
+  // relocations sharing the same (section, offset + addend) pair. We may revert
+  // a relocation back to its original non-Thunk target, and restore the
+  // original addend, so we cannot fold offset + addend. A nested pair is used
+  // because DenseMapInfo is not specialized for std::tuple.
+  llvm::DenseMap<std::pair<std::pair<SectionBase *, uint64_t>, int64_t>,
+                 std::vector<Thunk *>>
+      thunkedSymbolsBySectionAndAddend;
+  llvm::DenseMap<std::pair<Symbol *, int64_t>, std::vector<Thunk *>>
+      thunkedSymbols;
 
   // Find a Thunk from the Thunks symbol definition, we can use this to find
   // the Thunk from a relocation to the Thunks symbol definition.

@@ -8,8 +8,10 @@
 
 #include "clang/Index/USRGeneration.h"
 #include "clang/AST/ASTContext.h"
+#include "clang/AST/Attr.h"
 #include "clang/AST/DeclTemplate.h"
 #include "clang/AST/DeclVisitor.h"
+#include "clang/Basic/FileManager.h"
 #include "clang/Lex/PreprocessingRecord.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
@@ -381,6 +383,14 @@ void USRGenerator::VisitNamespaceAliasDecl(const NamespaceAliasDecl *D) {
     Out << "@NA@" << D->getName();
 }
 
+static const ObjCCategoryDecl *getCategoryContext(const NamedDecl *D) {
+  if (auto *CD = dyn_cast<ObjCCategoryDecl>(D->getDeclContext()))
+    return CD;
+  if (auto *ICD = dyn_cast<ObjCCategoryImplDecl>(D->getDeclContext()))
+    return ICD->getCategoryDecl();
+  return nullptr;
+}
+
 void USRGenerator::VisitObjCMethodDecl(const ObjCMethodDecl *D) {
   const DeclContext *container = D->getDeclContext();
   if (const ObjCProtocolDecl *pd = dyn_cast<ObjCProtocolDecl>(container)) {
@@ -394,14 +404,6 @@ void USRGenerator::VisitObjCMethodDecl(const ObjCMethodDecl *D) {
       IgnoreResults = true;
       return;
     }
-    auto getCategoryContext = [](const ObjCMethodDecl *D) ->
-                                    const ObjCCategoryDecl * {
-      if (auto *CD = dyn_cast<ObjCCategoryDecl>(D->getDeclContext()))
-        return CD;
-      if (auto *ICD = dyn_cast<ObjCCategoryImplDecl>(D->getDeclContext()))
-        return ICD->getCategoryDecl();
-      return nullptr;
-    };
     auto *CD = getCategoryContext(D);
     VisitObjCContainerDecl(ID, CD);
   }
@@ -474,7 +476,7 @@ void USRGenerator::VisitObjCPropertyDecl(const ObjCPropertyDecl *D) {
   // The USR for a property declared in a class extension or category is based
   // on the ObjCInterfaceDecl, not the ObjCCategoryDecl.
   if (const ObjCInterfaceDecl *ID = Context->getObjContainingInterface(D))
-    Visit(ID);
+    VisitObjCContainerDecl(ID, getCategoryContext(D));
   else
     Visit(cast<Decl>(D->getDeclContext()));
   GenObjCProperty(D->getName(), D->isClassProperty());
@@ -716,6 +718,11 @@ void USRGenerator::VisitType(QualType T) {
 #define IMAGE_TYPE(ImgType, Id, SingletonId, Access, Suffix) \
         case BuiltinType::Id:
 #include "clang/Basic/OpenCLImageTypes.def"
+#define IMAGE_TYPE(ImgType, Id, SingletonId, Access, Suffix)                   \
+  case BuiltinType::Sampled##Id:
+#define IMAGE_WRITE_TYPE(Type, Id, Ext)
+#define IMAGE_READ_WRITE_TYPE(Type, Id, Ext)
+#include "clang/Basic/OpenCLImageTypes.def"
 #define EXT_OPAQUE_TYPE(ExtType, Id, Ext) \
         case BuiltinType::Id:
 #include "clang/Basic/OpenCLExtensionTypes.def"
@@ -727,6 +734,9 @@ void USRGenerator::VisitType(QualType T) {
 #define SVE_TYPE(Name, Id, SingletonId) \
         case BuiltinType::Id:
 #include "clang/Basic/AArch64SVEACLETypes.def"
+#define PPC_VECTOR_TYPE(Name, Id, Size) \
+        case BuiltinType::Id:
+#include "clang/Basic/PPCTypes.def"
         case BuiltinType::ShortAccum:
         case BuiltinType::Accum:
         case BuiltinType::LongAccum:
@@ -751,6 +761,7 @@ void USRGenerator::VisitType(QualType T) {
         case BuiltinType::SatUShortFract:
         case BuiltinType::SatUFract:
         case BuiltinType::SatULongFract:
+        case BuiltinType::BFloat16:
           IgnoreResults = true;
           return;
         case BuiltinType::ObjCId:
@@ -976,6 +987,10 @@ void USRGenerator::VisitTemplateArgument(const TemplateArgument &Arg) {
     Out << 'V';
     VisitType(Arg.getIntegralType());
     Out << Arg.getAsIntegral();
+    break;
+
+  case TemplateArgument::UncommonValue:
+    // FIXME: Visit value.
     break;
   }
 }

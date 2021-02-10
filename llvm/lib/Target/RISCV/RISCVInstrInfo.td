@@ -25,6 +25,8 @@ def SDT_RISCVCall     : SDTypeProfile<0, -1, [SDTCisVT<0, XLenVT>]>;
 def SDT_RISCVSelectCC : SDTypeProfile<1, 5, [SDTCisSameAs<1, 2>,
                                              SDTCisSameAs<0, 4>,
                                              SDTCisSameAs<4, 5>]>;
+def SDT_RISCVReadCycleWide : SDTypeProfile<2, 0, [SDTCisVT<0, i32>,
+                                                  SDTCisVT<1, i32>]>;
 
 // Target-independent nodes, but with target-specific formats.
 def callseq_start : SDNode<"ISD::CALLSEQ_START", SDT_CallSeqStart,
@@ -44,14 +46,17 @@ def riscv_sret_flag : SDNode<"RISCVISD::SRET_FLAG", SDTNone,
                              [SDNPHasChain, SDNPOptInGlue]>;
 def riscv_mret_flag : SDNode<"RISCVISD::MRET_FLAG", SDTNone,
                              [SDNPHasChain, SDNPOptInGlue]>;
-def riscv_selectcc  : SDNode<"RISCVISD::SELECT_CC", SDT_RISCVSelectCC,
-                             [SDNPInGlue]>;
+def riscv_selectcc  : SDNode<"RISCVISD::SELECT_CC", SDT_RISCVSelectCC>;
 def riscv_tail      : SDNode<"RISCVISD::TAIL", SDT_RISCVCall,
                              [SDNPHasChain, SDNPOptInGlue, SDNPOutGlue,
                               SDNPVariadic]>;
 def riscv_sllw      : SDNode<"RISCVISD::SLLW", SDTIntShiftOp>;
 def riscv_sraw      : SDNode<"RISCVISD::SRAW", SDTIntShiftOp>;
 def riscv_srlw      : SDNode<"RISCVISD::SRLW", SDTIntShiftOp>;
+
+def riscv_read_cycle_wide : SDNode<"RISCVISD::READ_CYCLE_WIDE",
+                                   SDT_RISCVReadCycleWide,
+                                   [SDNPHasChain, SDNPSideEffect]>;
 
 //===----------------------------------------------------------------------===//
 // Operand and SDNode transformation definitions.
@@ -93,6 +98,8 @@ def fencearg : Operand<XLenVT> {
   let ParserMatchClass = FenceArg;
   let PrintMethod = "printFenceArg";
   let DecoderMethod = "decodeUImmOperand<4>";
+  let OperandType = "OPERAND_UIMM4";
+  let OperandNamespace = "RISCVOp";
 }
 
 def UImmLog2XLenAsmOperand : AsmOperandClass {
@@ -117,11 +124,15 @@ def uimmlog2xlen : Operand<XLenVT>, ImmLeaf<XLenVT, [{
       return  isUInt<6>(Imm);
     return isUInt<5>(Imm);
   }];
+  let OperandType = "OPERAND_UIMMLOG2XLEN";
+  let OperandNamespace = "RISCVOp";
 }
 
 def uimm5 : Operand<XLenVT>, ImmLeaf<XLenVT, [{return isUInt<5>(Imm);}]> {
   let ParserMatchClass = UImmAsmOperand<5>;
   let DecoderMethod = "decodeUImmOperand<5>";
+  let OperandType = "OPERAND_UIMM5";
+  let OperandNamespace = "RISCVOp";
 }
 
 def simm12 : Operand<XLenVT>, ImmLeaf<XLenVT, [{return isInt<12>(Imm);}]> {
@@ -134,11 +145,28 @@ def simm12 : Operand<XLenVT>, ImmLeaf<XLenVT, [{return isInt<12>(Imm);}]> {
       return isInt<12>(Imm);
     return MCOp.isBareSymbolRef();
   }];
+  let OperandType = "OPERAND_SIMM12";
+  let OperandNamespace = "RISCVOp";
+}
+
+// A 12-bit signed immediate plus one where the imm range will be -2047~2048.
+def simm12_plus1 : Operand<XLenVT>, ImmLeaf<XLenVT,
+  [{return (isInt<12>(Imm) && Imm != -2048) || Imm == 2048;}]> {
+  let ParserMatchClass = SImmAsmOperand<12>;
+  let EncoderMethod = "getImmOpValue";
+  let DecoderMethod = "decodeSImmOperand<12>";
+  let MCOperandPredicate = [{
+    int64_t Imm;
+    if (MCOp.evaluateAsConstantImm(Imm))
+      return (isInt<12>(Imm) && Imm != -2048) || Imm == 2048;
+    return MCOp.isBareSymbolRef();
+  }];
 }
 
 // A 13-bit signed immediate where the least significant bit is zero.
 def simm13_lsb0 : Operand<OtherVT> {
   let ParserMatchClass = SImmAsmOperand<13, "Lsb0">;
+  let PrintMethod = "printBranchOperand";
   let EncoderMethod = "getImmOpValueAsr1";
   let DecoderMethod = "decodeSImmOperandAndLsl1<13>";
   let MCOperandPredicate = [{
@@ -147,6 +175,7 @@ def simm13_lsb0 : Operand<OtherVT> {
       return isShiftedInt<12, 1>(Imm);
     return MCOp.isBareSymbolRef();
   }];
+  let OperandType = "OPERAND_PCREL";
 }
 
 class UImm20Operand : Operand<XLenVT> {
@@ -158,6 +187,8 @@ class UImm20Operand : Operand<XLenVT> {
       return isUInt<20>(Imm);
     return MCOp.isBareSymbolRef();
   }];
+  let OperandType = "OPERAND_UIMM20";
+  let OperandNamespace = "RISCVOp";
 }
 
 def uimm20_lui : UImm20Operand {
@@ -174,6 +205,7 @@ def Simm21Lsb0JALAsmOperand : SImmAsmOperand<21, "Lsb0JAL"> {
 // A 21-bit signed immediate where the least significant bit is zero.
 def simm21_lsb0_jal : Operand<OtherVT> {
   let ParserMatchClass = Simm21Lsb0JALAsmOperand;
+  let PrintMethod = "printBranchOperand";
   let EncoderMethod = "getImmOpValueAsr1";
   let DecoderMethod = "decodeSImmOperandAndLsl1<21>";
   let MCOperandPredicate = [{
@@ -182,6 +214,7 @@ def simm21_lsb0_jal : Operand<OtherVT> {
       return isShiftedInt<20, 1>(Imm);
     return MCOp.isBareSymbolRef();
   }];
+  let OperandType = "OPERAND_PCREL";
 }
 
 def BareSymbol : AsmOperandClass {
@@ -208,6 +241,18 @@ def call_symbol : Operand<XLenVT> {
   let ParserMatchClass = CallSymbol;
 }
 
+def PseudoJumpSymbol : AsmOperandClass {
+  let Name = "PseudoJumpSymbol";
+  let RenderMethod = "addImmOperands";
+  let DiagnosticType = "InvalidPseudoJumpSymbol";
+  let ParserMethod = "parsePseudoJumpSymbol";
+}
+
+// A bare symbol used for pseudo jumps only.
+def pseudo_jump_symbol : Operand<XLenVT> {
+  let ParserMatchClass = PseudoJumpSymbol;
+}
+
 def TPRelAddSymbol : AsmOperandClass {
   let Name = "TPRelAddSymbol";
   let RenderMethod = "addImmOperands";
@@ -230,6 +275,8 @@ def csr_sysreg : Operand<XLenVT> {
   let ParserMatchClass = CSRSystemRegister;
   let PrintMethod = "printCSRSystemRegister";
   let DecoderMethod = "decodeUImmOperand<12>";
+  let OperandType = "OPERAND_UIMM12";
+  let OperandNamespace = "RISCVOp";
 }
 
 // A parameterized register class alternative to i32imm/i64imm from Target.td.
@@ -247,6 +294,11 @@ def immbottomxlenset : ImmLeaf<XLenVT, [{
   if (Subtarget->is64Bit())
     return countTrailingOnes<uint64_t>(Imm) >= 6;
   return countTrailingOnes<uint64_t>(Imm) >= 5;
+}]>;
+
+// A 6-bit constant greater than 32.
+def uimm6gt32 : ImmLeaf<XLenVT, [{
+  return isUInt<6>(Imm) && Imm > 32;
 }]>;
 
 // Addressing modes.
@@ -268,6 +320,18 @@ def HI20 : SDNodeXForm<imm, [{
                                    SDLoc(N), N->getValueType(0));
 }]>;
 
+// Return the negation of an immediate value.
+def NegImm : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(-N->getSExtValue(), SDLoc(N),
+                                   N->getValueType(0));
+}]>;
+
+// Return an immediate value minus 32.
+def ImmSub32 : SDNodeXForm<imm, [{
+  return CurDAG->getTargetConstant(N->getSExtValue() - 32, SDLoc(N),
+                                   N->getValueType(0));
+}]>;
+
 //===----------------------------------------------------------------------===//
 // Instruction Formats
 //===----------------------------------------------------------------------===//
@@ -282,7 +346,8 @@ let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
 class BranchCC_rri<bits<3> funct3, string opcodestr>
     : RVInstB<funct3, OPC_BRANCH, (outs),
               (ins GPR:$rs1, GPR:$rs2, simm13_lsb0:$imm12),
-              opcodestr, "$rs1, $rs2, $imm12"> {
+              opcodestr, "$rs1, $rs2, $imm12">,
+      Sched<[WriteJmp, ReadJmp, ReadJmp]> {
   let isBranch = 1;
   let isTerminator = 1;
 }
@@ -304,35 +369,40 @@ class Store_rri<bits<3> funct3, string opcodestr>
 let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
 class ALU_ri<bits<3> funct3, string opcodestr>
     : RVInstI<funct3, OPC_OP_IMM, (outs GPR:$rd), (ins GPR:$rs1, simm12:$imm12),
-              opcodestr, "$rd, $rs1, $imm12">;
+              opcodestr, "$rd, $rs1, $imm12">,
+      Sched<[WriteIALU, ReadIALU]>;
 
 let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
 class Shift_ri<bit arithshift, bits<3> funct3, string opcodestr>
     : RVInstIShift<arithshift, funct3, OPC_OP_IMM, (outs GPR:$rd),
                    (ins GPR:$rs1, uimmlog2xlen:$shamt), opcodestr,
-                   "$rd, $rs1, $shamt">;
+                   "$rd, $rs1, $shamt">,
+      Sched<[WriteShift, ReadShift]>;
 
 let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
 class ALU_rr<bits<7> funct7, bits<3> funct3, string opcodestr>
     : RVInstR<funct7, funct3, OPC_OP, (outs GPR:$rd), (ins GPR:$rs1, GPR:$rs2),
               opcodestr, "$rd, $rs1, $rs2">;
 
-let hasSideEffects = 1, mayLoad = 0, mayStore = 0 in
+let hasNoSchedulingInfo = 1,
+    hasSideEffects = 1, mayLoad = 0, mayStore = 0 in
 class CSR_ir<bits<3> funct3, string opcodestr>
     : RVInstI<funct3, OPC_SYSTEM, (outs GPR:$rd), (ins csr_sysreg:$imm12, GPR:$rs1),
-              opcodestr, "$rd, $imm12, $rs1">;
+              opcodestr, "$rd, $imm12, $rs1">, Sched<[WriteCSR, ReadCSR]>;
 
-let hasSideEffects = 1, mayLoad = 0, mayStore = 0 in
+let hasNoSchedulingInfo = 1,
+    hasSideEffects = 1, mayLoad = 0, mayStore = 0 in
 class CSR_ii<bits<3> funct3, string opcodestr>
     : RVInstI<funct3, OPC_SYSTEM, (outs GPR:$rd),
               (ins csr_sysreg:$imm12, uimm5:$rs1),
-              opcodestr, "$rd, $imm12, $rs1">;
+              opcodestr, "$rd, $imm12, $rs1">, Sched<[WriteCSR]>;
 
 let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
 class ShiftW_ri<bit arithshift, bits<3> funct3, string opcodestr>
     : RVInstIShiftW<arithshift, funct3, OPC_OP_IMM_32, (outs GPR:$rd),
                     (ins GPR:$rs1, uimm5:$shamt), opcodestr,
-                    "$rd, $rs1, $shamt">;
+                    "$rd, $rs1, $shamt">,
+      Sched<[WriteShift32, ReadShift32]>;
 
 let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
 class ALUW_rr<bits<7> funct7, bits<3> funct3, string opcodestr>
@@ -351,19 +421,20 @@ class Priv<string opcodestr, bits<7> funct7>
 let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in {
 let isReMaterializable = 1, isAsCheapAsAMove = 1 in
 def LUI : RVInstU<OPC_LUI, (outs GPR:$rd), (ins uimm20_lui:$imm20),
-                  "lui", "$rd, $imm20">;
+                  "lui", "$rd, $imm20">, Sched<[WriteIALU]>;
 
 def AUIPC : RVInstU<OPC_AUIPC, (outs GPR:$rd), (ins uimm20_auipc:$imm20),
-                    "auipc", "$rd, $imm20">;
+                    "auipc", "$rd, $imm20">, Sched<[WriteIALU]>;
 
 let isCall = 1 in
 def JAL : RVInstJ<OPC_JAL, (outs GPR:$rd), (ins simm21_lsb0_jal:$imm20),
-                  "jal", "$rd, $imm20">;
+                  "jal", "$rd, $imm20">, Sched<[WriteJal]>;
 
 let isCall = 1 in
 def JALR : RVInstI<0b000, OPC_JALR, (outs GPR:$rd),
                    (ins GPR:$rs1, simm12:$imm12),
-                   "jalr", "$rd, ${imm12}(${rs1})">;
+                   "jalr", "$rd, ${imm12}(${rs1})">,
+           Sched<[WriteJalr, ReadJalr]>;
 } // hasSideEffects = 0, mayLoad = 0, mayStore = 0
 
 def BEQ  : BranchCC_rri<0b000, "beq">;
@@ -373,15 +444,15 @@ def BGE  : BranchCC_rri<0b101, "bge">;
 def BLTU : BranchCC_rri<0b110, "bltu">;
 def BGEU : BranchCC_rri<0b111, "bgeu">;
 
-def LB  : Load_ri<0b000, "lb">;
-def LH  : Load_ri<0b001, "lh">;
-def LW  : Load_ri<0b010, "lw">;
-def LBU : Load_ri<0b100, "lbu">;
-def LHU : Load_ri<0b101, "lhu">;
+def LB  : Load_ri<0b000, "lb">, Sched<[WriteLDB, ReadMemBase]>;
+def LH  : Load_ri<0b001, "lh">, Sched<[WriteLDH, ReadMemBase]>;
+def LW  : Load_ri<0b010, "lw">, Sched<[WriteLDW, ReadMemBase]>;
+def LBU : Load_ri<0b100, "lbu">, Sched<[WriteLDB, ReadMemBase]>;
+def LHU : Load_ri<0b101, "lhu">, Sched<[WriteLDH, ReadMemBase]>;
 
-def SB : Store_rri<0b000, "sb">;
-def SH : Store_rri<0b001, "sh">;
-def SW : Store_rri<0b010, "sw">;
+def SB : Store_rri<0b000, "sb">, Sched<[WriteSTB, ReadStoreData, ReadMemBase]>;
+def SH : Store_rri<0b001, "sh">, Sched<[WriteSTH, ReadStoreData, ReadMemBase]>;
+def SW : Store_rri<0b010, "sw">, Sched<[WriteSTW, ReadStoreData, ReadMemBase]>;
 
 // ADDI isn't always rematerializable, but isReMaterializable will be used as
 // a hint which is verified in isReallyTriviallyReMaterializable.
@@ -402,21 +473,21 @@ def SLLI : Shift_ri<0, 0b001, "slli">;
 def SRLI : Shift_ri<0, 0b101, "srli">;
 def SRAI : Shift_ri<1, 0b101, "srai">;
 
-def ADD  : ALU_rr<0b0000000, 0b000, "add">;
-def SUB  : ALU_rr<0b0100000, 0b000, "sub">;
-def SLL  : ALU_rr<0b0000000, 0b001, "sll">;
-def SLT  : ALU_rr<0b0000000, 0b010, "slt">;
-def SLTU : ALU_rr<0b0000000, 0b011, "sltu">;
-def XOR  : ALU_rr<0b0000000, 0b100, "xor">;
-def SRL  : ALU_rr<0b0000000, 0b101, "srl">;
-def SRA  : ALU_rr<0b0100000, 0b101, "sra">;
-def OR   : ALU_rr<0b0000000, 0b110, "or">;
-def AND  : ALU_rr<0b0000000, 0b111, "and">;
+def ADD  : ALU_rr<0b0000000, 0b000, "add">, Sched<[WriteIALU, ReadIALU, ReadIALU]>;
+def SUB  : ALU_rr<0b0100000, 0b000, "sub">, Sched<[WriteIALU, ReadIALU, ReadIALU]>;
+def SLL  : ALU_rr<0b0000000, 0b001, "sll">, Sched<[WriteIALU, ReadIALU, ReadIALU]>;
+def SLT  : ALU_rr<0b0000000, 0b010, "slt">, Sched<[WriteIALU, ReadIALU, ReadIALU]>;
+def SLTU : ALU_rr<0b0000000, 0b011, "sltu">, Sched<[WriteIALU, ReadIALU, ReadIALU]>;
+def XOR  : ALU_rr<0b0000000, 0b100, "xor">, Sched<[WriteIALU, ReadIALU, ReadIALU]>;
+def SRL  : ALU_rr<0b0000000, 0b101, "srl">, Sched<[WriteIALU, ReadIALU, ReadIALU]>;
+def SRA  : ALU_rr<0b0100000, 0b101, "sra">, Sched<[WriteIALU, ReadIALU, ReadIALU]>;
+def OR   : ALU_rr<0b0000000, 0b110, "or">, Sched<[WriteIALU, ReadIALU, ReadIALU]>;
+def AND  : ALU_rr<0b0000000, 0b111, "and">, Sched<[WriteIALU, ReadIALU, ReadIALU]>;
 
 let hasSideEffects = 1, mayLoad = 0, mayStore = 0 in {
 def FENCE : RVInstI<0b000, OPC_MISC_MEM, (outs),
                     (ins fencearg:$pred, fencearg:$succ),
-                    "fence", "$pred, $succ"> {
+                    "fence", "$pred, $succ">, Sched<[]> {
   bits<4> pred;
   bits<4> succ;
 
@@ -425,25 +496,26 @@ def FENCE : RVInstI<0b000, OPC_MISC_MEM, (outs),
   let imm12 = {0b0000,pred,succ};
 }
 
-def FENCE_TSO : RVInstI<0b000, OPC_MISC_MEM, (outs), (ins), "fence.tso", ""> {
+def FENCE_TSO : RVInstI<0b000, OPC_MISC_MEM, (outs), (ins), "fence.tso", "">, Sched<[]> {
   let rs1 = 0;
   let rd = 0;
   let imm12 = {0b1000,0b0011,0b0011};
 }
 
-def FENCE_I : RVInstI<0b001, OPC_MISC_MEM, (outs), (ins), "fence.i", ""> {
+def FENCE_I : RVInstI<0b001, OPC_MISC_MEM, (outs), (ins), "fence.i", "">, Sched<[]> {
   let rs1 = 0;
   let rd = 0;
   let imm12 = 0;
 }
 
-def ECALL : RVInstI<0b000, OPC_SYSTEM, (outs), (ins), "ecall", ""> {
+def ECALL : RVInstI<0b000, OPC_SYSTEM, (outs), (ins), "ecall", "">, Sched<[WriteJmp]> {
   let rs1 = 0;
   let rd = 0;
   let imm12 = 0;
 }
 
-def EBREAK : RVInstI<0b000, OPC_SYSTEM, (outs), (ins), "ebreak", ""> {
+def EBREAK : RVInstI<0b000, OPC_SYSTEM, (outs), (ins), "ebreak", "">,
+             Sched<[]> {
   let rs1 = 0;
   let rd = 0;
   let imm12 = 1;
@@ -452,7 +524,8 @@ def EBREAK : RVInstI<0b000, OPC_SYSTEM, (outs), (ins), "ebreak", ""> {
 // This is a de facto standard (as set by GNU binutils) 32-bit unimplemented
 // instruction (i.e., it should always trap, if your implementation has invalid
 // instruction traps).
-def UNIMP : RVInstI<0b001, OPC_SYSTEM, (outs), (ins), "unimp", ""> {
+def UNIMP : RVInstI<0b001, OPC_SYSTEM, (outs), (ins), "unimp", "">,
+            Sched<[]> {
   let rs1 = 0;
   let rd = 0;
   let imm12 = 0b110000000000;
@@ -470,24 +543,30 @@ def CSRRCI : CSR_ii<0b111, "csrrci">;
 /// RV64I instructions
 
 let Predicates = [IsRV64] in {
-def LWU   : Load_ri<0b110, "lwu">;
-def LD    : Load_ri<0b011, "ld">;
-def SD    : Store_rri<0b011, "sd">;
+def LWU   : Load_ri<0b110, "lwu">, Sched<[WriteLDWU, ReadMemBase]>;
+def LD    : Load_ri<0b011, "ld">, Sched<[WriteLDD, ReadMemBase]>;
+def SD    : Store_rri<0b011, "sd">, Sched<[WriteSTD, ReadStoreData, ReadMemBase]>;
 
 let hasSideEffects = 0, mayLoad = 0, mayStore = 0 in
 def ADDIW : RVInstI<0b000, OPC_OP_IMM_32, (outs GPR:$rd),
                     (ins GPR:$rs1, simm12:$imm12),
-                    "addiw", "$rd, $rs1, $imm12">;
+                    "addiw", "$rd, $rs1, $imm12">,
+            Sched<[WriteIALU32, ReadIALU32]>;
 
 def SLLIW : ShiftW_ri<0, 0b001, "slliw">;
 def SRLIW : ShiftW_ri<0, 0b101, "srliw">;
 def SRAIW : ShiftW_ri<1, 0b101, "sraiw">;
 
-def ADDW  : ALUW_rr<0b0000000, 0b000, "addw">;
-def SUBW  : ALUW_rr<0b0100000, 0b000, "subw">;
-def SLLW  : ALUW_rr<0b0000000, 0b001, "sllw">;
-def SRLW  : ALUW_rr<0b0000000, 0b101, "srlw">;
-def SRAW  : ALUW_rr<0b0100000, 0b101, "sraw">;
+def ADDW  : ALUW_rr<0b0000000, 0b000, "addw">,
+            Sched<[WriteIALU32, ReadIALU32, ReadIALU32]>;
+def SUBW  : ALUW_rr<0b0100000, 0b000, "subw">,
+            Sched<[WriteIALU32, ReadIALU32, ReadIALU32]>;
+def SLLW  : ALUW_rr<0b0000000, 0b001, "sllw">,
+            Sched<[WriteIALU32, ReadIALU32, ReadIALU32]>;
+def SRLW  : ALUW_rr<0b0000000, 0b101, "srlw">,
+            Sched<[WriteIALU32, ReadIALU32, ReadIALU32]>;
+def SRAW  : ALUW_rr<0b0100000, 0b101, "sraw">,
+            Sched<[WriteIALU32, ReadIALU32, ReadIALU32]>;
 } // Predicates = [IsRV64]
 
 //===----------------------------------------------------------------------===//
@@ -495,26 +574,26 @@ def SRAW  : ALUW_rr<0b0100000, 0b101, "sraw">;
 //===----------------------------------------------------------------------===//
 
 let isBarrier = 1, isReturn = 1, isTerminator = 1 in {
-def URET : Priv<"uret", 0b0000000> {
+def URET : Priv<"uret", 0b0000000>, Sched<[]> {
   let rd = 0;
   let rs1 = 0;
   let rs2 = 0b00010;
 }
 
-def SRET : Priv<"sret", 0b0001000> {
+def SRET : Priv<"sret", 0b0001000>, Sched<[]> {
   let rd = 0;
   let rs1 = 0;
   let rs2 = 0b00010;
 }
 
-def MRET : Priv<"mret", 0b0011000> {
+def MRET : Priv<"mret", 0b0011000>, Sched<[]> {
   let rd = 0;
   let rs1 = 0;
   let rs2 = 0b00010;
 }
 } // isBarrier = 1, isReturn = 1, isTerminator = 1
 
-def WFI : Priv<"wfi", 0b0001000> {
+def WFI : Priv<"wfi", 0b0001000>, Sched<[]> {
   let rd = 0;
   let rs1 = 0;
   let rs2 = 0b00101;
@@ -523,9 +602,21 @@ def WFI : Priv<"wfi", 0b0001000> {
 let hasSideEffects = 1, mayLoad = 0, mayStore = 0 in
 def SFENCE_VMA : RVInstR<0b0001001, 0b000, OPC_SYSTEM, (outs),
                          (ins GPR:$rs1, GPR:$rs2),
-                         "sfence.vma", "$rs1, $rs2"> {
+                         "sfence.vma", "$rs1, $rs2">, Sched<[]> {
   let rd = 0;
 }
+
+//===----------------------------------------------------------------------===//
+// Debug instructions
+//===----------------------------------------------------------------------===//
+
+let isBarrier = 1, isReturn = 1, isTerminator = 1 in {
+def DRET : Priv<"dret", 0b0111101>, Sched<[]> {
+  let rd = 0;
+  let rs1 = 0;
+  let rs2 = 0b10010;
+}
+} // isBarrier = 1, isReturn = 1, isTerminator = 1
 
 //===----------------------------------------------------------------------===//
 // Assembler Pseudo Instructions (User-Level ISA, Version 2.2, Chapter 20)
@@ -619,9 +710,6 @@ def : InstAlias<"ret",                   (JALR      X0,      X1, 0), 4>;
 def : InstAlias<"jr $rs, $offset",        (JALR      X0, GPR:$rs, simm12:$offset), 0>;
 def : InstAlias<"jalr $rs, $offset",      (JALR      X1, GPR:$rs, simm12:$offset), 0>;
 def : InstAlias<"jalr $rd, $rs, $offset", (JALR GPR:$rd, GPR:$rs, simm12:$offset), 0>;
-
-// TODO call
-// TODO tail
 
 def : InstAlias<"fence", (FENCE 0xF, 0xF)>; // 0xF == iorw
 
@@ -721,12 +809,14 @@ def : MnemonicAlias<"move", "mv">;
 def : MnemonicAlias<"scall", "ecall">;
 def : MnemonicAlias<"sbreak", "ebreak">;
 
+def : InstAlias<"zext.b $rd, $rs", (ANDI GPR:$rd, GPR:$rs, 0xFF)>;
+
 //===----------------------------------------------------------------------===//
 // Pseudo-instructions and codegen patterns
 //
 // Naming convention: For 'generic' pattern classes, we use the naming
 // convention PatTy1Ty2. For pattern classes which offer a more complex
-// expension, prefix the class name, e.g. BccPat.
+// expansion, prefix the class name, e.g. BccPat.
 //===----------------------------------------------------------------------===//
 
 /// Generic pattern classes
@@ -819,12 +909,12 @@ def : PatGprSimm12<setult, SLTIU>;
 // handled by a RISC-V instruction.
 def : Pat<(seteq GPR:$rs1, 0), (SLTIU GPR:$rs1, 1)>;
 def : Pat<(seteq GPR:$rs1, GPR:$rs2), (SLTIU (XOR GPR:$rs1, GPR:$rs2), 1)>;
-def : Pat<(seteq GPR:$rs1, simm12:$imm12),
-          (SLTIU (XORI GPR:$rs1, simm12:$imm12), 1)>;
+def : Pat<(seteq GPR:$rs1, simm12_plus1:$imm12),
+          (SLTIU (ADDI GPR:$rs1, (NegImm simm12_plus1:$imm12)), 1)>;
 def : Pat<(setne GPR:$rs1, 0), (SLTU X0, GPR:$rs1)>;
 def : Pat<(setne GPR:$rs1, GPR:$rs2), (SLTU X0, (XOR GPR:$rs1, GPR:$rs2))>;
-def : Pat<(setne GPR:$rs1, simm12:$imm12),
-          (SLTU X0, (XORI GPR:$rs1, simm12:$imm12))>;
+def : Pat<(setne GPR:$rs1, simm12_plus1:$imm12),
+          (SLTU X0, (ADDI GPR:$rs1, (NegImm simm12_plus1:$imm12)))>;
 def : Pat<(setugt GPR:$rs1, GPR:$rs2), (SLTU GPR:$rs2, GPR:$rs1)>;
 def : Pat<(setuge GPR:$rs1, GPR:$rs2), (XORI (SLTU GPR:$rs1, GPR:$rs2), 1)>;
 def : Pat<(setule GPR:$rs1, GPR:$rs2), (XORI (SLTU GPR:$rs2, GPR:$rs1), 1)>;
@@ -876,7 +966,6 @@ let isBarrier = 1, isBranch = 1, isTerminator = 1 in
 def PseudoBR : Pseudo<(outs), (ins simm21_lsb0_jal:$imm20), [(br bb:$imm20)]>,
                PseudoInstExpansion<(JAL X0, simm21_lsb0_jal:$imm20)>;
 
-let isCall = 1, Defs=[X1] in
 let isBarrier = 1, isBranch = 1, isIndirectBranch = 1, isTerminator = 1 in
 def PseudoBRIND : Pseudo<(outs), (ins GPR:$rs1, simm12:$imm12), []>,
                   PseudoInstExpansion<(JALR X0, GPR:$rs1, simm12:$imm12)>;
@@ -885,7 +974,7 @@ def : Pat<(brind GPR:$rs1), (PseudoBRIND GPR:$rs1, 0)>;
 def : Pat<(brind (add GPR:$rs1, simm12:$imm12)),
           (PseudoBRIND GPR:$rs1, simm12:$imm12)>;
 
-// PsuedoCALLReg is a generic pseudo instruction for calls which will eventually
+// PseudoCALLReg is a generic pseudo instruction for calls which will eventually
 // expand to auipc and jalr while encoding, with any given register used as the
 // destination.
 // Define AsmString to print "call" when compile with -S flag.
@@ -942,6 +1031,12 @@ def : Pat<(riscv_tail (iPTR tglobaladdr:$dst)),
 def : Pat<(riscv_tail (iPTR texternalsym:$dst)),
           (PseudoTAIL texternalsym:$dst)>;
 
+let isCall = 0, isBarrier = 1, isBranch = 1, isTerminator = 1,
+    isCodeGenOnly = 0, hasSideEffects = 0, mayStore = 0, mayLoad = 0 in
+def PseudoJump : Pseudo<(outs GPR:$rd), (ins pseudo_jump_symbol:$target), []> {
+  let AsmString = "jump\t$target, $rd";
+}
+
 let hasSideEffects = 0, mayLoad = 0, mayStore = 0, isCodeGenOnly = 0,
     isAsmParserOnly = 1 in
 def PseudoLLA : Pseudo<(outs GPR:$dst), (ins bare_symbol:$src), [],
@@ -961,6 +1056,25 @@ let hasSideEffects = 0, mayLoad = 1, mayStore = 0, isCodeGenOnly = 0,
     isAsmParserOnly = 1 in
 def PseudoLA_TLS_GD : Pseudo<(outs GPR:$dst), (ins bare_symbol:$src), [],
                              "la.tls.gd", "$dst, $src">;
+
+
+/// Sign/Zero Extends
+
+// There are single-instruction versions of these in Zbb, so disable these
+// Pseudos if that extension is present.
+let Predicates = [NotHasStdExtZbb], hasSideEffects = 0, mayLoad = 0,
+    mayStore = 0, isCodeGenOnly = 0, isAsmParserOnly = 1 in {
+def PseudoSEXT_B : Pseudo<(outs GPR:$rd), (ins GPR:$rs), [], "sext.b", "$rd, $rs">;
+def PseudoSEXT_H : Pseudo<(outs GPR:$rd), (ins GPR:$rs), [], "sext.h", "$rd, $rs">;
+// rv64's sext.w is defined above, using InstAlias<"sext.w ...
+// zext.b is defined above, using InstAlias<"zext.b ...
+def PseudoZEXT_H : Pseudo<(outs GPR:$rd), (ins GPR:$rs), [], "zext.h", "$rd, $rs">;
+} // Predicates = [NotHasStdExtZbb], ...
+
+let Predicates = [NotHasStdExtZbb, IsRV64], hasSideEffects = 0, mayLoad = 0, mayStore = 0,
+  isCodeGenOnly = 0, isAsmParserOnly = 1 in {
+def PseudoZEXT_W : Pseudo<(outs GPR:$rd), (ins GPR:$rs), [], "zext.w", "$rd, $rs">;
+} // Predicates = [NotHasStdExtZbb, IsRV64], ...
 
 /// Loads
 
@@ -1006,13 +1120,13 @@ defm : StPat<store, SW, GPR>, Requires<[IsRV32]>;
 // Manual: Volume I.
 
 // fence acquire -> fence r, rw
-def : Pat<(atomic_fence (XLenVT 4), (imm)), (FENCE 0b10, 0b11)>;
+def : Pat<(atomic_fence (XLenVT 4), (timm)), (FENCE 0b10, 0b11)>;
 // fence release -> fence rw, w
-def : Pat<(atomic_fence (XLenVT 5), (imm)), (FENCE 0b11, 0b1)>;
+def : Pat<(atomic_fence (XLenVT 5), (timm)), (FENCE 0b11, 0b1)>;
 // fence acq_rel -> fence.tso
-def : Pat<(atomic_fence (XLenVT 6), (imm)), (FENCE_TSO)>;
+def : Pat<(atomic_fence (XLenVT 6), (timm)), (FENCE_TSO)>;
 // fence seq_cst -> fence rw, rw
-def : Pat<(atomic_fence (XLenVT 7), (imm)), (FENCE 0b11, 0b11)>;
+def : Pat<(atomic_fence (XLenVT 7), (timm)), (FENCE 0b11, 0b11)>;
 
 // Lowering for atomic load and store is defined in RISCVInstrInfoA.td.
 // Although these are lowered to fence+load/store instructions defined in the
@@ -1032,12 +1146,14 @@ def ADJCALLSTACKUP   : Pseudo<(outs), (ins i32imm:$amt1, i32imm:$amt2),
 
 /// RV64 patterns
 
+let Predicates = [IsRV64, NotHasStdExtZbbOrZbp] in
+def : Pat<(and GPR:$rs1, 0xffffffff), (SRLI (SLLI GPR:$rs1, 32), 32)>;
+
 let Predicates = [IsRV64] in {
 
 /// sext and zext
 
 def : Pat<(sext_inreg GPR:$rs1, i32), (ADDIW GPR:$rs1, 0)>;
-def : Pat<(and GPR:$rs1, 0xffffffff), (SRLI (SLLI GPR:$rs1, 32), 32)>;
 
 /// ALU operations
 
@@ -1051,8 +1167,12 @@ def : Pat<(sext_inreg (shl GPR:$rs1, uimm5:$shamt), i32),
           (SLLIW GPR:$rs1, uimm5:$shamt)>;
 // (srl (zexti32 ...), uimm5:$shamt) is matched with custom code due to the
 // need to undo manipulation of the mask value performed by DAGCombine.
+def : Pat<(srl (shl GPR:$rs1, (i64 32)), uimm6gt32:$shamt),
+          (SRLIW GPR:$rs1, (ImmSub32 uimm6gt32:$shamt))>;
 def : Pat<(sra (sext_inreg GPR:$rs1, i32), uimm5:$shamt),
           (SRAIW GPR:$rs1, uimm5:$shamt)>;
+def : Pat<(sra (shl GPR:$rs1, (i64 32)), uimm6gt32:$shamt),
+          (SRAIW GPR:$rs1, (ImmSub32 uimm6gt32:$shamt))>;
 
 def : PatGprGpr<riscv_sllw, SLLW>;
 def : PatGprGpr<riscv_srlw, SRLW>;
@@ -1077,9 +1197,20 @@ let Predicates = [IsRV64] in
 def : Pat<(readcyclecounter), (CSRRS CYCLE.Encoding, X0)>;
 // On RV32, ReadCycleWide will be expanded to the suggested loop reading both
 // halves of the 64-bit "cycle" CSR.
-let Predicates = [IsRV32], usesCustomInserter = 1, hasSideEffects = 0,
-mayLoad = 0, mayStore = 0, hasNoSchedulingInfo = 1 in
-def ReadCycleWide : Pseudo<(outs GPR:$lo, GPR:$hi), (ins), [], "", "">;
+let Predicates = [IsRV32], usesCustomInserter = 1, hasNoSchedulingInfo = 1 in
+def ReadCycleWide : Pseudo<(outs GPR:$lo, GPR:$hi), (ins),
+                           [(set GPR:$lo, GPR:$hi, (riscv_read_cycle_wide))],
+                           "", "">;
+
+/// traps
+
+// We lower `trap` to `unimp`, as this causes a hard exception on nearly all
+// systems.
+def : Pat<(trap), (UNIMP)>;
+
+// We lower `debugtrap` to `ebreak`, as this will get the attention of the
+// debugger if possible.
+def : Pat<(debugtrap), (EBREAK)>;
 
 //===----------------------------------------------------------------------===//
 // Standard extensions
@@ -1090,3 +1221,6 @@ include "RISCVInstrInfoA.td"
 include "RISCVInstrInfoF.td"
 include "RISCVInstrInfoD.td"
 include "RISCVInstrInfoC.td"
+include "RISCVInstrInfoB.td"
+include "RISCVInstrInfoV.td"
+include "RISCVInstrInfoZfh.td"

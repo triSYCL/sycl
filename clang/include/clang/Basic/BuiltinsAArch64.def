@@ -33,6 +33,8 @@ BUILTIN(__builtin_arm_clrex, "v", "")
 // Bit manipulation
 BUILTIN(__builtin_arm_rbit, "UiUi", "nc")
 BUILTIN(__builtin_arm_rbit64, "WUiWUi", "nc")
+BUILTIN(__builtin_arm_cls, "UiZUi", "nc")
+BUILTIN(__builtin_arm_cls64, "UiWUi", "nc")
 
 // HINT
 BUILTIN(__builtin_arm_nop, "v", "")
@@ -150,6 +152,11 @@ TARGET_HEADER_BUILTIN(_InterlockedCompareExchange_rel,   "NiNiD*NiNi",     "nh",
 TARGET_HEADER_BUILTIN(_InterlockedCompareExchange64_acq, "LLiLLiD*LLiLLi", "nh", "intrin.h", ALL_MS_LANGUAGES, "")
 TARGET_HEADER_BUILTIN(_InterlockedCompareExchange64_nf,  "LLiLLiD*LLiLLi", "nh", "intrin.h", ALL_MS_LANGUAGES, "")
 TARGET_HEADER_BUILTIN(_InterlockedCompareExchange64_rel, "LLiLLiD*LLiLLi", "nh", "intrin.h", ALL_MS_LANGUAGES, "")
+
+TARGET_HEADER_BUILTIN(_InterlockedCompareExchange128,    "UcLLiD*LLiLLiLLi*", "nh", "intrin.h", ALL_MS_LANGUAGES, "")
+TARGET_HEADER_BUILTIN(_InterlockedCompareExchange128_acq,"UcLLiD*LLiLLiLLi*", "nh", "intrin.h", ALL_MS_LANGUAGES, "")
+TARGET_HEADER_BUILTIN(_InterlockedCompareExchange128_nf ,"UcLLiD*LLiLLiLLi*", "nh", "intrin.h", ALL_MS_LANGUAGES, "")
+TARGET_HEADER_BUILTIN(_InterlockedCompareExchange128_rel,"UcLLiD*LLiLLiLLi*", "nh", "intrin.h", ALL_MS_LANGUAGES, "")
 
 TARGET_HEADER_BUILTIN(_InterlockedOr8_acq,  "ccD*c",       "nh", "intrin.h", ALL_MS_LANGUAGES, "")
 TARGET_HEADER_BUILTIN(_InterlockedOr8_nf,   "ccD*c",       "nh", "intrin.h", ALL_MS_LANGUAGES, "")

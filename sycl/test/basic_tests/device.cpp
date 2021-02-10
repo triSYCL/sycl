@@ -1,5 +1,5 @@
-// RUN: %clangxx -std=c++17 %s -o %t.out -lsycl
-// RUN: env SYCL_DEVICE_TYPE=HOST %t.out
+// RUN: %clangxx %s -o %t.out -I %sycl_include -lsycl
+// RUN: %RUN_ON_HOST %t.out
 
 //==--------------- device.cpp - SYCL device test --------------------------==//
 //

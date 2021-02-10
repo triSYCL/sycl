@@ -1,4 +1,4 @@
-//===-- Options.cpp ---------------------------------------------*- C++ -*-===//
+//===-- Options.cpp -------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -223,7 +223,7 @@ Option *Options::GetLongOptions() {
         std::map<int, uint32_t>::const_iterator pos =
             option_seen.find(short_opt);
         StreamString strm;
-        if (isprint8(short_opt))
+        if (defs[i].HasShortOption())
           Host::SystemLog(Host::eSystemLogError,
                           "option[%u] --%s has a short option -%c that "
                           "conflicts with option[%u] --%s, short option won't "
@@ -282,7 +282,7 @@ void Options::OutputFormattedUsageText(Stream &strm,
   if (static_cast<uint32_t>(actual_text.length() + strm.GetIndentLevel()) <
       output_max_columns) {
     // Output it as a single line.
-    strm.Indent(actual_text.c_str());
+    strm.Indent(actual_text);
     strm.EOL();
   } else {
     // We need to break it up into multiple lines.
@@ -355,9 +355,7 @@ enum OptionDisplayType {
 static bool PrintOption(const OptionDefinition &opt_def,
                         OptionDisplayType display_type, const char *header,
                         const char *footer, bool show_optional, Stream &strm) {
-  const bool has_short_option = isprint8(opt_def.short_option) != 0;
-
-  if (display_type == eDisplayShortOption && !has_short_option)
+  if (display_type == eDisplayShortOption && !opt_def.HasShortOption())
     return false;
 
   if (header && header[0])
@@ -366,7 +364,7 @@ static bool PrintOption(const OptionDefinition &opt_def,
   if (show_optional && !opt_def.required)
     strm.PutChar('[');
   const bool show_short_option =
-      has_short_option && display_type != eDisplayLongOption;
+      opt_def.HasShortOption() && display_type != eDisplayLongOption;
   if (show_short_option)
     strm.Printf("-%c", opt_def.short_option);
   else
@@ -445,7 +443,7 @@ void Options::GenerateOptionUsage(Stream &strm, CommandObject *cmd,
       std::set<int> options;
       std::set<int>::const_iterator options_pos, options_end;
       for (auto &def : opt_defs) {
-        if (def.usage_mask & opt_set_mask && isprint8(def.short_option)) {
+        if (def.usage_mask & opt_set_mask && def.HasShortOption()) {
           // Add current option to the end of out_stream.
 
           if (def.required && def.option_has_arg == OptionParser::eNoArgument) {
@@ -470,7 +468,7 @@ void Options::GenerateOptionUsage(Stream &strm, CommandObject *cmd,
 
       options.clear();
       for (auto &def : opt_defs) {
-        if (def.usage_mask & opt_set_mask && isprint8(def.short_option)) {
+        if (def.usage_mask & opt_set_mask && def.HasShortOption()) {
           // Add current option to the end of out_stream.
 
           if (!def.required &&
@@ -498,7 +496,7 @@ void Options::GenerateOptionUsage(Stream &strm, CommandObject *cmd,
       // First go through and print the required options (list them up front).
 
       for (auto &def : opt_defs) {
-        if (def.usage_mask & opt_set_mask && isprint8(def.short_option)) {
+        if (def.usage_mask & opt_set_mask && def.HasShortOption()) {
           if (def.required && def.option_has_arg != OptionParser::eNoArgument)
             PrintOption(def, eDisplayBestOption, " ", nullptr, true, strm);
         }
@@ -579,7 +577,7 @@ void Options::GenerateOptionUsage(Stream &strm, CommandObject *cmd,
       arg_name_str.Printf("<%s>", CommandObject::GetArgumentName(arg_type));
 
       strm.Indent();
-      if (opt_defs[i].short_option && isprint8(opt_defs[i].short_option)) {
+      if (opt_defs[i].short_option && opt_defs[i].HasShortOption()) {
         PrintOption(opt_defs[i], eDisplayShortOption, nullptr, nullptr, false,
                     strm);
         PrintOption(opt_defs[i], eDisplayLongOption, " ( ", " )", false, strm);
@@ -655,8 +653,8 @@ bool Options::HandleOptionCompletion(CompletionRequest &request,
   llvm::StringRef cur_opt_str = request.GetCursorArgumentPrefix();
 
   for (size_t i = 0; i < opt_element_vector.size(); i++) {
-    int opt_pos = opt_element_vector[i].opt_pos;
-    int opt_arg_pos = opt_element_vector[i].opt_arg_pos;
+    size_t opt_pos = static_cast<size_t>(opt_element_vector[i].opt_pos);
+    size_t opt_arg_pos = static_cast<size_t>(opt_element_vector[i].opt_arg_pos);
     int opt_defs_index = opt_element_vector[i].opt_defs_index;
     if (opt_pos == request.GetCursorIndex()) {
       // We're completing the option itself.
@@ -698,7 +696,7 @@ bool Options::HandleOptionCompletion(CompletionRequest &request,
           request.AddCompletion("--" + long_option.str(), opt.usage_text);
           return true;
         } else
-          request.AddCompletion(request.GetCursorArgument());
+          request.AddCompletion(request.GetCursorArgumentPrefix());
         return true;
       } else {
         // FIXME - not handling wrong options yet:
@@ -720,11 +718,8 @@ bool Options::HandleOptionCompletion(CompletionRequest &request,
     } else if (opt_arg_pos == request.GetCursorIndex()) {
       // Okay the cursor is on the completion of an argument. See if it has a
       // completion, otherwise return no matches.
-
-      CompletionRequest subrequest = request;
-      subrequest.SetCursorCharPosition(subrequest.GetCursorArgument().size());
       if (opt_defs_index != -1) {
-        HandleOptionArgumentCompletion(subrequest, opt_element_vector, i,
+        HandleOptionArgumentCompletion(request, opt_element_vector, i,
                                        interpreter);
         return true;
       } else {
@@ -746,25 +741,14 @@ void Options::HandleOptionArgumentCompletion(
   auto opt_defs = GetDefinitions();
   std::unique_ptr<SearchFilter> filter_up;
 
-  int opt_arg_pos = opt_element_vector[opt_element_index].opt_arg_pos;
   int opt_defs_index = opt_element_vector[opt_element_index].opt_defs_index;
 
   // See if this is an enumeration type option, and if so complete it here:
 
   const auto &enum_values = opt_defs[opt_defs_index].enum_values;
-  if (!enum_values.empty()) {
-    std::string match_string(
-        request.GetParsedLine().GetArgumentAtIndex(opt_arg_pos),
-        request.GetParsedLine().GetArgumentAtIndex(opt_arg_pos) +
-            request.GetCursorCharPosition());
-
-    for (const auto &enum_value : enum_values) {
-      if (strstr(enum_value.string_value, match_string.c_str()) ==
-          enum_value.string_value) {
-        request.AddCompletion(enum_value.string_value);
-      }
-    }
-  }
+  if (!enum_values.empty())
+    for (const auto &enum_value : enum_values)
+      request.TryCompleteCurrentArg(enum_value.string_value);
 
   // If this is a source file or symbol type completion, and  there is a -shlib
   // option somewhere in the supplied arguments, then make a search filter for
@@ -812,7 +796,8 @@ void Options::HandleOptionArgumentCompletion(
               interpreter.GetDebugger().GetSelectedTarget();
           // Search filters require a target...
           if (target_sp)
-            filter_up.reset(new SearchFilterByModule(target_sp, module_spec));
+            filter_up =
+                std::make_unique<SearchFilterByModule>(target_sp, module_spec);
         }
         break;
       }
@@ -946,7 +931,7 @@ static size_t FindArgumentIndexForOption(const Args &args,
                                          const Option &long_option) {
   std::string short_opt = llvm::formatv("-{0}", char(long_option.val)).str();
   std::string long_opt =
-      llvm::formatv("--{0}", long_option.definition->long_option);
+      std::string(llvm::formatv("--{0}", long_option.definition->long_option));
   for (const auto &entry : llvm::enumerate(args)) {
     if (entry.value().ref().startswith(short_opt) ||
         entry.value().ref().startswith(long_opt))
@@ -1075,8 +1060,8 @@ llvm::Expected<Args> Options::ParseAlias(const Args &args,
     }
     if (!option_arg)
       option_arg = "<no-argument>";
-    option_arg_vector->emplace_back(option_str.GetString(), has_arg,
-                                    option_arg);
+    option_arg_vector->emplace_back(std::string(option_str.GetString()),
+                                    has_arg, std::string(option_arg));
 
     // Find option in the argument list; also see if it was supposed to take an
     // argument and if one was supplied.  Remove option (and argument, if
@@ -1089,7 +1074,7 @@ llvm::Expected<Args> Options::ParseAlias(const Args &args,
 
     if (!input_line.empty()) {
       auto tmp_arg = args_copy[idx].ref();
-      size_t pos = input_line.find(tmp_arg);
+      size_t pos = input_line.find(std::string(tmp_arg));
       if (pos != std::string::npos)
         input_line.erase(pos, tmp_arg.size());
     }
@@ -1101,7 +1086,7 @@ llvm::Expected<Args> Options::ParseAlias(const Args &args,
         (args_copy[idx].ref() == OptionParser::GetOptionArgument())) {
       if (input_line.size() > 0) {
         auto tmp_arg = args_copy[idx].ref();
-        size_t pos = input_line.find(tmp_arg);
+        size_t pos = input_line.find(std::string(tmp_arg));
         if (pos != std::string::npos)
           input_line.erase(pos, tmp_arg.size());
       }
@@ -1321,7 +1306,7 @@ llvm::Expected<Args> Options::Parse(const Args &args,
                               &long_options_index);
 
     if (val == ':') {
-      error.SetErrorStringWithFormat("last option requires an argument");
+      error.SetErrorString("last option requires an argument");
       break;
     }
 
@@ -1330,7 +1315,7 @@ llvm::Expected<Args> Options::Parse(const Args &args,
 
     // Did we get an error?
     if (val == '?') {
-      error.SetErrorStringWithFormat("unknown or ambiguous option");
+      error.SetErrorString("unknown or ambiguous option");
       break;
     }
     // The option auto-set itself
@@ -1394,6 +1379,10 @@ llvm::Expected<Args> Options::Parse(const Args &args,
                                ? nullptr
                                : OptionParser::GetOptionArgument(),
                            execution_context);
+      // If the Option setting returned an error, we should stop parsing
+      // and return the error.
+      if (error.Fail())
+        break;      
     } else {
       error.SetErrorStringWithFormat("invalid option with value '%i'", val);
     }

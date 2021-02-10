@@ -223,6 +223,9 @@ void setAfterReturnValues(MutableArrayRef<VirtualCallTarget> Targets,
 struct WholeProgramDevirtPass : public PassInfoMixin<WholeProgramDevirtPass> {
   ModuleSummaryIndex *ExportSummary;
   const ModuleSummaryIndex *ImportSummary;
+  bool UseCommandLine = false;
+  WholeProgramDevirtPass()
+      : ExportSummary(nullptr), ImportSummary(nullptr), UseCommandLine(true) {}
   WholeProgramDevirtPass(ModuleSummaryIndex *ExportSummary,
                          const ModuleSummaryIndex *ImportSummary)
       : ExportSummary(ExportSummary), ImportSummary(ImportSummary) {
@@ -235,6 +238,11 @@ struct VTableSlotSummary {
   StringRef TypeID;
   uint64_t ByteOffset;
 };
+
+void updateVCallVisibilityInModule(Module &M,
+                                   bool WholeProgramVisibilityEnabledInLTO);
+void updateVCallVisibilityInIndex(ModuleSummaryIndex &Index,
+                                  bool WholeProgramVisibilityEnabledInLTO);
 
 /// Perform index-based whole program devirtualization on the \p Summary
 /// index. Any devirtualized targets used by a type test in another module
@@ -251,7 +259,7 @@ void runWholeProgramDevirtOnIndex(
 /// devirt target names for any locals that were exported.
 void updateIndexWPDForExports(
     ModuleSummaryIndex &Summary,
-    StringMap<FunctionImporter::ExportSetTy> &ExportLists,
+    function_ref<bool(StringRef, ValueInfo)> isExported,
     std::map<ValueInfo, std::vector<VTableSlotSummary>> &LocalWPDTargetsMap);
 
 } // end namespace llvm

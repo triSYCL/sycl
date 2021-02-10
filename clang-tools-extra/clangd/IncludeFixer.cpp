@@ -9,11 +9,11 @@
 #include "IncludeFixer.h"
 #include "AST.h"
 #include "Diagnostics.h"
-#include "Logger.h"
 #include "SourceCode.h"
-#include "Trace.h"
 #include "index/Index.h"
 #include "index/Symbol.h"
+#include "support/Logger.h"
+#include "support/Trace.h"
 #include "clang/AST/Decl.h"
 #include "clang/AST/DeclBase.h"
 #include "clang/AST/DeclarationName.h"
@@ -68,10 +68,16 @@ private:
 std::vector<Fix> IncludeFixer::fix(DiagnosticsEngine::Level DiagLevel,
                                    const clang::Diagnostic &Info) const {
   switch (Info.getID()) {
-  case diag::err_incomplete_type:
-  case diag::err_incomplete_member_access:
-  case diag::err_incomplete_base_class:
   case diag::err_incomplete_nested_name_spec:
+  case diag::err_incomplete_base_class:
+  case diag::err_incomplete_member_access:
+  case diag::err_incomplete_type:
+  case diag::err_typecheck_decl_incomplete_type:
+  case diag::err_typecheck_incomplete_tag:
+  case diag::err_invalid_incomplete_type_use:
+  case diag::err_sizeof_alignof_incomplete_or_sizeless_type:
+  case diag::err_for_range_incomplete_type:
+  case diag::err_func_def_incomplete_result:
     // Incomplete type diagnostics should have a QualType argument for the
     // incomplete type.
     for (unsigned Idx = 0; Idx < Info.getNumArgs(); ++Idx) {
@@ -95,7 +101,7 @@ std::vector<Fix> IncludeFixer::fix(DiagnosticsEngine::Level DiagLevel,
   case diag::err_no_member: // Could be no member in namespace.
   case diag::err_no_member_suggest:
     if (LastUnresolvedName) {
-      // Try to fix unresolved name caused by missing declaraion.
+      // Try to fix unresolved name caused by missing declaration.
       // E.g.
       //   clang::SourceManager SM;
       //          ~~~~~~~~~~~~~
@@ -127,7 +133,7 @@ std::vector<Fix> IncludeFixer::fixIncompleteType(const Type &T) const {
   auto ID = getSymbolID(TD);
   if (!ID)
     return {};
-  llvm::Optional<const SymbolSlab *> Symbols = lookupCached(*ID);
+  llvm::Optional<const SymbolSlab *> Symbols = lookupCached(ID);
   if (!Symbols)
     return {};
   const SymbolSlab &Syms = **Symbols;
@@ -144,10 +150,8 @@ std::vector<Fix> IncludeFixer::fixIncompleteType(const Type &T) const {
 std::vector<Fix> IncludeFixer::fixesForSymbols(const SymbolSlab &Syms) const {
   auto Inserted = [&](const Symbol &Sym, llvm::StringRef Header)
       -> llvm::Expected<std::pair<std::string, bool>> {
-    auto DeclaringURI = URI::parse(Sym.CanonicalDeclaration.FileURI);
-    if (!DeclaringURI)
-      return DeclaringURI.takeError();
-    auto ResolvedDeclaring = URI::resolve(*DeclaringURI, File);
+    auto ResolvedDeclaring =
+        URI::resolve(Sym.CanonicalDeclaration.FileURI, File);
     if (!ResolvedDeclaring)
       return ResolvedDeclaring.takeError();
     auto ResolvedInserted = toHeaderFile(Header, File);
@@ -155,15 +159,14 @@ std::vector<Fix> IncludeFixer::fixesForSymbols(const SymbolSlab &Syms) const {
       return ResolvedInserted.takeError();
     auto Spelled = Inserter->calculateIncludePath(*ResolvedInserted, File);
     if (!Spelled)
-      return llvm::createStringError(llvm::inconvertibleErrorCode(),
-                                     "Header not on include path");
+      return error("Header not on include path");
     return std::make_pair(
         std::move(*Spelled),
         Inserter->shouldInsertInclude(*ResolvedDeclaring, *ResolvedInserted));
   };
 
   std::vector<Fix> Fixes;
-  // Deduplicate fixes by include headers. This doesn't distiguish symbols in
+  // Deduplicate fixes by include headers. This doesn't distinguish symbols in
   // different scopes from the same header, but this case should be rare and is
   // thus ignored.
   llvm::StringSet<> InsertedHeaders;
@@ -175,10 +178,10 @@ std::vector<Fix> IncludeFixer::fixesForSymbols(const SymbolSlab &Syms) const {
           if (!I.second)
             continue;
           if (auto Edit = Inserter->insert(ToInclude->first))
-            Fixes.push_back(
-                Fix{llvm::formatv("Add include {0} for symbol {1}{2}",
-                                  ToInclude->first, Sym.Scope, Sym.Name),
-                    {std::move(*Edit)}});
+            Fixes.push_back(Fix{std::string(llvm::formatv(
+                                    "Add include {0} for symbol {1}{2}",
+                                    ToInclude->first, Sym.Scope, Sym.Name)),
+                                {std::move(*Edit)}});
         }
       } else {
         vlog("Failed to calculate include insertion for {0} into {1}: {2}", Inc,
@@ -297,7 +300,7 @@ llvm::Optional<CheapUnresolvedName> extractUnresolvedNameCheaply(
       // it as extra scope. With "index" being a specifier, we append "index::"
       // to the extra scope.
       Result.UnresolvedScope->append((Result.Name + Split.first).str());
-      Result.Name = Split.second;
+      Result.Name = std::string(Split.second);
     }
   }
   return Result;

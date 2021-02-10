@@ -24,10 +24,19 @@ struct TypeInfo {
   const char *Name;
   const char *TempSuffix;
   ID PreprocessedType;
-  const llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases> Phases;
+  class PhasesBitSet {
+    unsigned Bits = 0;
+
+  public:
+    constexpr PhasesBitSet(std::initializer_list<phases::ID> Phases) {
+      for (auto Id : Phases)
+        Bits |= 1 << Id;
+    }
+    bool contains(phases::ID Id) const { return Bits & (1 << Id); }
+  } Phases;
 };
 
-static const TypeInfo TypeInfos[] = {
+static constexpr TypeInfo TypeInfos[] = {
 #define TYPE(NAME, ID, PP_TYPE, TEMP_SUFFIX, ...) \
   { NAME, TEMP_SUFFIX, TY_##PP_TYPE, { __VA_ARGS__ }, },
 #include "clang/Driver/Types.def"
@@ -46,18 +55,18 @@ const char *types::getTypeName(ID Id) {
 
 types::ID types::getPreprocessedType(ID Id) {
   ID PPT = getInfo(Id).PreprocessedType;
-  assert((llvm::is_contained(getInfo(Id).Phases, phases::Preprocess) !=
+  assert((getInfo(Id).Phases.contains(phases::Preprocess) !=
           (PPT == TY_INVALID)) &&
          "Unexpected Preprocess Type.");
   return PPT;
 }
 
-static bool isPrepeocessedModuleType(ID Id) {
+static bool isPreprocessedModuleType(ID Id) {
   return Id == TY_CXXModule || Id == TY_PP_CXXModule;
 }
 
 types::ID types::getPrecompiledType(ID Id) {
-  if (isPrepeocessedModuleType(Id))
+  if (isPreprocessedModuleType(Id))
     return TY_ModuleFile;
   if (onlyPrecompileType(Id))
     return TY_PCH;
@@ -81,15 +90,9 @@ const char *types::getTypeTempSuffix(ID Id, bool CLMode) {
   return getInfo(Id).TempSuffix;
 }
 
-bool types::onlyAssembleType(ID Id) {
-  return llvm::is_contained(getInfo(Id).Phases, phases::Assemble) &&
-         !llvm::is_contained(getInfo(Id).Phases, phases::Compile) &&
-         !llvm::is_contained(getInfo(Id).Phases, phases::Backend);
-}
-
 bool types::onlyPrecompileType(ID Id) {
-  return llvm::is_contained(getInfo(Id).Phases, phases::Precompile) &&
-         !isPrepeocessedModuleType(Id);
+  return getInfo(Id).Phases.contains(phases::Precompile) &&
+         !isPreprocessedModuleType(Id);
 }
 
 bool types::canTypeBeUserSpecified(ID Id) {
@@ -138,7 +141,7 @@ bool types::isAcceptedByClang(ID Id) {
   case TY_CXXHeader: case TY_PP_CXXHeader:
   case TY_ObjCXXHeader: case TY_PP_ObjCXXHeader:
   case TY_CXXModule: case TY_PP_CXXModule:
-  case TY_AST: case TY_ModuleFile:
+  case TY_AST: case TY_ModuleFile: case TY_PCH:
   case TY_LLVM_IR: case TY_LLVM_BC:
   case TY_SPIRV:
     return true;
@@ -213,69 +216,105 @@ bool types::isHIP(ID Id) {
   }
 }
 
+bool types::isFortran(ID Id) {
+  switch (Id) {
+  default:
+    return false;
+
+  case TY_Fortran: case TY_PP_Fortran:
+    return true;
+  }
+}
+
+bool types::isFPGA(ID Id) {
+  switch (Id) {
+  default:
+    return false;
+
+  case TY_FPGA_AOCR:
+  case TY_FPGA_AOCX:
+  case TY_FPGA_AOCO:
+    return true;
+  }
+}
+
+bool types::isArchive(ID Id) {
+  switch (Id) {
+  default:
+    return false;
+  case TY_Archive:
+  case TY_WholeArchive:
+    return true;
+  }
+}
+
 bool types::isSrcFile(ID Id) {
   return Id != TY_Object && getPreprocessedType(Id) != TY_INVALID;
 }
 
 types::ID types::lookupTypeForExtension(llvm::StringRef Ext) {
   return llvm::StringSwitch<types::ID>(Ext)
-           .Case("c", TY_C)
-           .Case("C", TY_CXX)
-           .Case("F", TY_Fortran)
-           .Case("f", TY_PP_Fortran)
-           .Case("h", TY_CHeader)
-           .Case("H", TY_CXXHeader)
-           .Case("i", TY_PP_C)
-           .Case("m", TY_ObjC)
-           .Case("M", TY_ObjCXX)
-           .Case("o", TY_Object)
-           .Case("S", TY_Asm)
-           .Case("s", TY_PP_Asm)
-           .Case("bc", TY_LLVM_BC)
-           .Case("cc", TY_CXX)
-           .Case("CC", TY_CXX)
-           .Case("cl", TY_CL)
-           .Case("cp", TY_CXX)
-           .Case("cu", TY_CUDA)
-           .Case("hh", TY_CXXHeader)
-           .Case("ii", TY_PP_CXX)
-           .Case("ll", TY_LLVM_IR)
-           .Case("mi", TY_PP_ObjC)
-           .Case("mm", TY_ObjCXX)
-           .Case("rs", TY_RenderScript)
-           .Case("adb", TY_Ada)
-           .Case("ads", TY_Ada)
-           .Case("asm", TY_PP_Asm)
-           .Case("ast", TY_AST)
-           .Case("ccm", TY_CXXModule)
-           .Case("cpp", TY_CXX)
-           .Case("CPP", TY_CXX)
-           .Case("c++", TY_CXX)
-           .Case("C++", TY_CXX)
-           .Case("cui", TY_PP_CUDA)
-           .Case("cxx", TY_CXX)
-           .Case("CXX", TY_CXX)
-           .Case("F90", TY_Fortran)
-           .Case("f90", TY_PP_Fortran)
-           .Case("F95", TY_Fortran)
-           .Case("f95", TY_PP_Fortran)
-           .Case("for", TY_PP_Fortran)
-           .Case("FOR", TY_PP_Fortran)
-           .Case("fpp", TY_Fortran)
-           .Case("FPP", TY_Fortran)
-           .Case("gch", TY_PCH)
-           .Case("hip", TY_HIP)
-           .Case("hpp", TY_CXXHeader)
-           .Case("iim", TY_PP_CXXModule)
-           .Case("lib", TY_Object)
-           .Case("mii", TY_PP_ObjCXX)
-           .Case("obj", TY_Object)
-           .Case("pch", TY_PCH)
-           .Case("pcm", TY_ModuleFile)
-           .Case("c++m", TY_CXXModule)
-           .Case("cppm", TY_CXXModule)
-           .Case("cxxm", TY_CXXModule)
-           .Default(TY_INVALID);
+      .Case("c", TY_C)
+      .Case("C", TY_CXX)
+      .Case("F", TY_Fortran)
+      .Case("f", TY_PP_Fortran)
+      .Case("h", TY_CHeader)
+      .Case("H", TY_CXXHeader)
+      .Case("i", TY_PP_C)
+      .Case("m", TY_ObjC)
+      .Case("M", TY_ObjCXX)
+      .Case("o", TY_Object)
+      .Case("S", TY_Asm)
+      .Case("s", TY_PP_Asm)
+      .Case("bc", TY_LLVM_BC)
+      .Case("cc", TY_CXX)
+      .Case("CC", TY_CXX)
+      .Case("cl", TY_CL)
+      .Case("cp", TY_CXX)
+      .Case("cu", TY_CUDA)
+      .Case("hh", TY_CXXHeader)
+      .Case("ii", TY_PP_CXX)
+      .Case("ll", TY_LLVM_IR)
+      .Case("mi", TY_PP_ObjC)
+      .Case("mm", TY_ObjCXX)
+      .Case("rs", TY_RenderScript)
+      .Case("adb", TY_Ada)
+      .Case("ads", TY_Ada)
+      .Case("asm", TY_PP_Asm)
+      .Case("ast", TY_AST)
+      .Case("ccm", TY_CXXModule)
+      .Case("cpp", TY_CXX)
+      .Case("CPP", TY_CXX)
+      .Case("c++", TY_CXX)
+      .Case("C++", TY_CXX)
+      .Case("cui", TY_PP_CUDA)
+      .Case("cxx", TY_CXX)
+      .Case("CXX", TY_CXX)
+      .Case("F90", TY_Fortran)
+      .Case("f90", TY_PP_Fortran)
+      .Case("F95", TY_Fortran)
+      .Case("f95", TY_PP_Fortran)
+      .Case("for", TY_PP_Fortran)
+      .Case("FOR", TY_PP_Fortran)
+      .Case("fpp", TY_Fortran)
+      .Case("FPP", TY_Fortran)
+      .Case("gch", TY_PCH)
+      .Case("hip", TY_HIP)
+      .Case("hpp", TY_CXXHeader)
+      .Case("hxx", TY_CXXHeader)
+      .Case("iim", TY_PP_CXXModule)
+      .Case("lib", TY_Object)
+      .Case("mii", TY_PP_ObjCXX)
+      .Case("obj", TY_Object)
+      .Case("ifs", TY_IFS)
+      .Case("pch", TY_PCH)
+      .Case("pcm", TY_ModuleFile)
+      .Case("c++m", TY_CXXModule)
+      .Case("cppm", TY_CXXModule)
+      .Case("cxxm", TY_CXXModule)
+      .Case("aocr", TY_FPGA_AOCR)
+      .Case("aocx", TY_FPGA_AOCX)
+      .Default(TY_INVALID);
 }
 
 types::ID types::lookupTypeForTypeSpecifier(const char *Name) {
@@ -285,40 +324,44 @@ types::ID types::lookupTypeForTypeSpecifier(const char *Name) {
         strcmp(Name, getInfo(Id).Name) == 0)
       return Id;
   }
-
+  // Accept "cu" as an alias for "cuda" for NVCC compatibility
+  if (strcmp(Name, "cu") == 0) {
+    return types::TY_CUDA;
+  }
   return TY_INVALID;
 }
 
-// FIXME: Why don't we just put this list in the defs file, eh.
-// FIXME: The list is now in Types.def but for now this function will verify
-//        the old behavior and a subsequent change will delete most of the body.
-void types::getCompilationPhases(ID Id, llvm::SmallVectorImpl<phases::ID> &P) {
-  P = getInfo(Id).Phases;
-  assert(0 < P.size() && "Not enough phases in list");
+llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases>
+types::getCompilationPhases(ID Id, phases::ID LastPhase) {
+  llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases> P;
+  const auto &Info = getInfo(Id);
+  for (int I = 0; I <= LastPhase; ++I)
+    if (Info.Phases.contains(static_cast<phases::ID>(I)))
+      P.push_back(static_cast<phases::ID>(I));
   assert(P.size() <= phases::MaxNumberOfPhases && "Too many phases in list");
+  return P;
 }
 
-void types::getCompilationPhases(const clang::driver::Driver &Driver,
-                                 llvm::opt::DerivedArgList &DAL, ID Id,
-                                 llvm::SmallVectorImpl<phases::ID> &P) {
-  llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases> PhaseList;
-  types::getCompilationPhases(Id, PhaseList);
+llvm::SmallVector<phases::ID, phases::MaxNumberOfPhases>
+types::getCompilationPhases(const clang::driver::Driver &Driver,
+                            llvm::opt::DerivedArgList &DAL, ID Id) {
+  phases::ID LastPhase;
 
   // Filter to compiler mode. When the compiler is run as a preprocessor then
   // compilation is not an option.
   // -S runs the compiler in Assembly listing mode.
+  // -test-io is used by Flang to run InputOutputTest action
   if (Driver.CCCIsCPP() || DAL.getLastArg(options::OPT_E) ||
       DAL.getLastArg(options::OPT__SLASH_EP) ||
       DAL.getLastArg(options::OPT_M, options::OPT_MM) ||
-      DAL.getLastArg(options::OPT__SLASH_P))
-    llvm::copy_if(PhaseList, std::back_inserter(P),
-                  [](phases::ID Phase) { return Phase <= phases::Preprocess; });
+      DAL.getLastArg(options::OPT__SLASH_P) ||
+      DAL.getLastArg(options::OPT_test_io))
+    LastPhase = phases::Preprocess;
 
   // --precompile only runs up to precompilation.
   // This is a clang extension and is not compatible with GCC.
   else if (DAL.getLastArg(options::OPT__precompile))
-    llvm::copy_if(PhaseList, std::back_inserter(P),
-                  [](phases::ID Phase) { return Phase <= phases::Precompile; });
+    LastPhase = phases::Precompile;
 
   // -{fsyntax-only,-analyze,emit-ast} only run up to the compiler.
   else if (DAL.getLastArg(options::OPT_fsyntax_only) ||
@@ -328,25 +371,23 @@ void types::getCompilationPhases(const clang::driver::Driver &Driver,
            DAL.getLastArg(options::OPT_rewrite_objc) ||
            DAL.getLastArg(options::OPT_rewrite_legacy_objc) ||
            DAL.getLastArg(options::OPT__migrate) ||
-           DAL.getLastArg(options::OPT_emit_iterface_stubs) ||
-           DAL.getLastArg(options::OPT__analyze, options::OPT__analyze_auto) ||
+           DAL.getLastArg(options::OPT__analyze) ||
            DAL.getLastArg(options::OPT_emit_ast))
-    llvm::copy_if(PhaseList, std::back_inserter(P),
-                  [](phases::ID Phase) { return Phase <= phases::Compile; });
+    LastPhase = phases::Compile;
 
   else if (DAL.getLastArg(options::OPT_S) ||
            DAL.getLastArg(options::OPT_emit_llvm) ||
-           DAL.getLastArg(options::OPT_sycl_device_only))
-    llvm::copy_if(PhaseList, std::back_inserter(P),
-                  [](phases::ID Phase) { return Phase <= phases::Backend; });
+           DAL.getLastArg(options::OPT_fsycl_device_only))
+    LastPhase = phases::Backend;
 
   else if (DAL.getLastArg(options::OPT_c))
-    llvm::copy_if(PhaseList, std::back_inserter(P),
-                  [](phases::ID Phase) { return Phase <= phases::Assemble; });
+    LastPhase = phases::Assemble;
 
   // Generally means, do every phase until Link.
   else
-    P = PhaseList;
+    LastPhase = phases::LastPhase;
+
+  return types::getCompilationPhases(Id, LastPhase);
 }
 
 ID types::lookupCXXTypeForCType(ID Id) {

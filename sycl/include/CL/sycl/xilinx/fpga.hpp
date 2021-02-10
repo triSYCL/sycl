@@ -18,5 +18,6 @@
 #include "CL/sycl/xilinx/fpga/opt_decorate_func.hpp"
 #include "CL/sycl/xilinx/fpga/partition_array.hpp"
 #include "CL/sycl/xilinx/fpga/kernel_properties.hpp"
+#include "CL/sycl/xilinx/fpga/memory_properties.hpp"
 
 #endif // SYCL_XILINX_FPGA_HPP

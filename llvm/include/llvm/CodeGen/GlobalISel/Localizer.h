@@ -42,14 +42,15 @@ public:
   static char ID;
 
 private:
+  /// An input function to decide if the pass should run or not
+  /// on the given MachineFunction.
+  std::function<bool(const MachineFunction &)> DoNotRunPass;
+
   /// MRI contains all the register class/bank information that this
   /// pass uses and updates.
   MachineRegisterInfo *MRI;
   /// TTI used for getting remat costs for instructions.
   TargetTransformInfo *TTI;
-
-  /// Check whether or not \p MI needs to be moved close to its uses.
-  bool shouldLocalize(const MachineInstr &MI);
 
   /// Check if \p MOUse is used in the same basic block as \p Def.
   /// If the use is in the same block, we say it is local.
@@ -72,14 +73,13 @@ private:
 
 public:
   Localizer();
+  Localizer(std::function<bool(const MachineFunction &)>);
 
   StringRef getPassName() const override { return "Localizer"; }
 
   MachineFunctionProperties getRequiredProperties() const override {
     return MachineFunctionProperties()
-        .set(MachineFunctionProperties::Property::IsSSA)
-        .set(MachineFunctionProperties::Property::Legalized)
-        .set(MachineFunctionProperties::Property::RegBankSelected);
+        .set(MachineFunctionProperties::Property::IsSSA);
   }
 
   void getAnalysisUsage(AnalysisUsage &AU) const override;

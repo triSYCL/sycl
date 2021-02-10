@@ -6,15 +6,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_IOHandler_h_
-#define liblldb_IOHandler_h_
+#ifndef LLDB_CORE_IOHANDLER_H
+#define LLDB_CORE_IOHANDLER_H
 
 #include "lldb/Core/ValueObjectList.h"
+#include "lldb/Host/Config.h"
 #include "lldb/Utility/CompletionRequest.h"
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/Flags.h"
 #include "lldb/Utility/Predicate.h"
-#include "lldb/Utility/Reproducer.h"
 #include "lldb/Utility/Stream.h"
 #include "lldb/Utility/StringList.h"
 #include "lldb/lldb-defines.h"
@@ -31,6 +31,9 @@
 
 namespace lldb_private {
 class Debugger;
+namespace repro {
+class DataRecorder;
+}
 }
 
 namespace curses {
@@ -51,6 +54,7 @@ public:
     REPL,
     ProcessIO,
     PythonInterpreter,
+    LuaInterpreter,
     PythonCode,
     Other
   };
@@ -58,8 +62,7 @@ public:
   IOHandler(Debugger &debugger, IOHandler::Type type);
 
   IOHandler(Debugger &debugger, IOHandler::Type type,
-            const lldb::StreamFileSP &input_sp,
-            const lldb::StreamFileSP &output_sp,
+            const lldb::FileSP &input_sp, const lldb::StreamFileSP &output_sp,
             const lldb::StreamFileSP &error_sp, uint32_t flags,
             repro::DataRecorder *data_recorder);
 
@@ -94,6 +97,8 @@ public:
 
   virtual void Deactivate() { m_active = false; }
 
+  virtual void TerminalSizeChanged() {}
+
   virtual const char *GetPrompt() {
     // Prompt support isn't mandatory
     return nullptr;
@@ -123,11 +128,11 @@ public:
 
   FILE *GetErrorFILE();
 
-  lldb::StreamFileSP &GetInputStreamFile();
+  lldb::FileSP GetInputFileSP();
 
-  lldb::StreamFileSP &GetOutputStreamFile();
+  lldb::StreamFileSP GetOutputStreamFileSP();
 
-  lldb::StreamFileSP &GetErrorStreamFile();
+  lldb::StreamFileSP GetErrorStreamFileSP();
 
   Debugger &GetDebugger() { return m_debugger; }
 
@@ -165,7 +170,7 @@ public:
 
 protected:
   Debugger &m_debugger;
-  lldb::StreamFileSP m_input_sp;
+  lldb::FileSP m_input_sp;
   lldb::StreamFileSP m_output_sp;
   lldb::StreamFileSP m_error_sp;
   repro::DataRecorder *m_data_recorder;
@@ -177,7 +182,8 @@ protected:
   bool m_active;
 
 private:
-  DISALLOW_COPY_AND_ASSIGN(IOHandler);
+  IOHandler(const IOHandler &) = delete;
+  const IOHandler &operator=(const IOHandler &) = delete;
 };
 
 /// A delegate class for use with IOHandler subclasses.
@@ -198,6 +204,9 @@ public:
   virtual void IOHandlerActivated(IOHandler &io_handler, bool interactive) {}
 
   virtual void IOHandlerDeactivated(IOHandler &io_handler) {}
+
+  virtual llvm::Optional<std::string> IOHandlerSuggestion(IOHandler &io_handler,
+                                                          llvm::StringRef line);
 
   virtual void IOHandlerComplete(IOHandler &io_handler,
                                  CompletionRequest &request);
@@ -333,7 +342,7 @@ public:
                     repro::DataRecorder *data_recorder);
 
   IOHandlerEditline(Debugger &debugger, IOHandler::Type type,
-                    const lldb::StreamFileSP &input_sp,
+                    const lldb::FileSP &input_sp,
                     const lldb::StreamFileSP &output_sp,
                     const lldb::StreamFileSP &error_sp, uint32_t flags,
                     const char *editline_name, // Used for saving history files
@@ -349,7 +358,7 @@ public:
                     const char *, bool, bool, uint32_t,
                     IOHandlerDelegate &) = delete;
 
-  IOHandlerEditline(Debugger &, IOHandler::Type, const lldb::StreamFileSP &,
+  IOHandlerEditline(Debugger &, IOHandler::Type, const lldb::FileSP &,
                     const lldb::StreamFileSP &, const lldb::StreamFileSP &,
                     uint32_t, const char *, const char *, const char *, bool,
                     bool, uint32_t, IOHandlerDelegate &) = delete;
@@ -367,6 +376,8 @@ public:
   void Activate() override;
 
   void Deactivate() override;
+
+  void TerminalSizeChanged() override;
 
   ConstString GetControlSequence(char ch) override {
     return m_delegate.IOHandlerGetControlSequence(ch);
@@ -407,18 +418,21 @@ public:
   void PrintAsync(Stream *stream, const char *s, size_t len) override;
 
 private:
-#ifndef LLDB_DISABLE_LIBEDIT
+#if LLDB_ENABLE_LIBEDIT
   static bool IsInputCompleteCallback(Editline *editline, StringList &lines,
                                       void *baton);
 
   static int FixIndentationCallback(Editline *editline, const StringList &lines,
                                     int cursor_position, void *baton);
 
+  static llvm::Optional<std::string> SuggestionCallback(llvm::StringRef line,
+                                                        void *baton);
+
   static void AutoCompleteCallback(CompletionRequest &request, void *baton);
 #endif
 
 protected:
-#ifndef LLDB_DISABLE_LIBEDIT
+#if LLDB_ENABLE_LIBEDIT
   std::unique_ptr<Editline> m_editline_up;
 #endif
   IOHandlerDelegate &m_delegate;
@@ -432,6 +446,7 @@ protected:
   bool m_interrupt_exits;
   bool m_editing; // Set to true when fetching a line manually (not using
                   // libedit)
+  std::string m_line_buffer;
 };
 
 // The order of base classes is important. Look at the constructor of
@@ -456,48 +471,9 @@ protected:
   bool m_user_response;
 };
 
-class IOHandlerCursesGUI : public IOHandler {
-public:
-  IOHandlerCursesGUI(Debugger &debugger);
-
-  ~IOHandlerCursesGUI() override;
-
-  void Run() override;
-
-  void Cancel() override;
-
-  bool Interrupt() override;
-
-  void GotEOF() override;
-
-  void Activate() override;
-
-  void Deactivate() override;
-
-protected:
-  curses::ApplicationAP m_app_ap;
-};
-
-class IOHandlerCursesValueObjectList : public IOHandler {
-public:
-  IOHandlerCursesValueObjectList(Debugger &debugger,
-                                 ValueObjectList &valobj_list);
-
-  ~IOHandlerCursesValueObjectList() override;
-
-  void Run() override;
-
-  void GotEOF() override;
-
-protected:
-  ValueObjectList m_valobj_list;
-};
-
 class IOHandlerStack {
 public:
-  IOHandlerStack() : m_stack(), m_mutex(), m_top(nullptr) {}
-
-  ~IOHandlerStack() = default;
+  IOHandlerStack() = default;
 
   size_t GetSize() const {
     std::lock_guard<std::recursive_mutex> guard(m_mutex);
@@ -574,12 +550,13 @@ protected:
   typedef std::vector<lldb::IOHandlerSP> collection;
   collection m_stack;
   mutable std::recursive_mutex m_mutex;
-  IOHandler *m_top;
+  IOHandler *m_top = nullptr;
 
 private:
-  DISALLOW_COPY_AND_ASSIGN(IOHandlerStack);
+  IOHandlerStack(const IOHandlerStack &) = delete;
+  const IOHandlerStack &operator=(const IOHandlerStack &) = delete;
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_IOHandler_h_
+#endif // LLDB_CORE_IOHANDLER_H

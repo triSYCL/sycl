@@ -29,11 +29,9 @@ namespace {
 
 using ::testing::AllOf;
 using ::testing::ElementsAre;
-using ::testing::Eq;
 using ::testing::Field;
 using ::testing::IsEmpty;
 using ::testing::Matcher;
-using ::testing::Pointee;
 using ::testing::UnorderedElementsAre;
 
 // GMock helpers for matching TypeHierarchyItem.
@@ -50,7 +48,7 @@ template <class... ChildMatchers>
   return Field(&TypeHierarchyItem::children,
                HasValue(UnorderedElementsAre(ChildrenM...)));
 }
-// Note: "not resolved" is differnt from "resolved but empty"!
+// Note: "not resolved" is different from "resolved but empty"!
 MATCHER(ParentsNotResolved, "") { return !arg.parents; }
 MATCHER(ChildrenNotResolved, "") { return !arg.children; }
 
@@ -60,6 +58,8 @@ struct Ch^ild2 {
   int c;
 };
 
+using A^lias = Child2;
+
 int main() {
   Ch^ild2 ch^ild2;
   ch^ild2.c = 1;
@@ -68,8 +68,6 @@ int main() {
 
   TestTU TU = TestTU::withCode(Source.code());
   auto AST = TU.build();
-
-  ASSERT_TRUE(AST.getDiagnostics().empty());
 
   for (Position Pt : Source.points()) {
     const CXXRecordDecl *RD = findRecordTypeAt(AST, Pt);
@@ -93,8 +91,6 @@ int main() {
   TestTU TU = TestTU::withCode(Source.code());
   auto AST = TU.build();
 
-  ASSERT_TRUE(AST.getDiagnostics().empty());
-
   for (Position Pt : Source.points()) {
     const CXXRecordDecl *RD = findRecordTypeAt(AST, Pt);
     EXPECT_EQ(&findDecl(AST, "Child2"), static_cast<const NamedDecl *>(RD));
@@ -115,8 +111,6 @@ int main() {
 
   TestTU TU = TestTU::withCode(Source.code());
   auto AST = TU.build();
-
-  ASSERT_TRUE(AST.getDiagnostics().empty());
 
   for (Position Pt : Source.points()) {
     const CXXRecordDecl *RD = findRecordTypeAt(AST, Pt);
@@ -144,8 +138,6 @@ struct Child2 : Child1 {
 
   TestTU TU = TestTU::withCode(Source.code());
   auto AST = TU.build();
-
-  ASSERT_TRUE(AST.getDiagnostics().empty());
 
   const CXXRecordDecl *Parent =
       dyn_cast<CXXRecordDecl>(&findDecl(AST, "Parent"));
@@ -181,8 +173,6 @@ struct Child : Parent1, Parent3 {
   TestTU TU = TestTU::withCode(Source.code());
   auto AST = TU.build();
 
-  ASSERT_TRUE(AST.getDiagnostics().empty());
-
   const CXXRecordDecl *Parent1 =
       dyn_cast<CXXRecordDecl>(&findDecl(AST, "Parent1"));
   const CXXRecordDecl *Parent2 =
@@ -207,8 +197,6 @@ struct Child : Parent {};
 
   TestTU TU = TestTU::withCode(Source.code());
   auto AST = TU.build();
-
-  ASSERT_TRUE(AST.getDiagnostics().empty());
 
   const CXXRecordDecl *Parent =
       dyn_cast<CXXRecordDecl>(&findDecl(AST, "Parent"));
@@ -258,8 +246,6 @@ struct Child2 : Parent<int> {};
   TestTU TU = TestTU::withCode(Source.code());
   auto AST = TU.build();
 
-  ASSERT_TRUE(AST.getDiagnostics().empty());
-
   const CXXRecordDecl *Parent =
       dyn_cast<ClassTemplateDecl>(&findDecl(AST, "Parent"))->getTemplatedDecl();
   const CXXRecordDecl *ParentSpec =
@@ -286,8 +272,6 @@ struct Child<int> : Parent {};
 
   TestTU TU = TestTU::withCode(Source.code());
   auto AST = TU.build();
-
-  ASSERT_TRUE(AST.getDiagnostics().empty());
 
   const CXXRecordDecl *Parent =
       dyn_cast<CXXRecordDecl>(&findDecl(AST, "Parent"));
@@ -318,8 +302,6 @@ struct Child3 : T {};
   TestTU TU = TestTU::withCode(Source.code());
   auto AST = TU.build();
 
-  ASSERT_TRUE(AST.getDiagnostics().empty());
-
   const CXXRecordDecl *Parent =
       dyn_cast<ClassTemplateDecl>(&findDecl(AST, "Parent"))->getTemplatedDecl();
   const CXXRecordDecl *Child1 =
@@ -335,6 +317,18 @@ struct Child3 : T {};
   EXPECT_THAT(typeParents(Child2), ElementsAre());
   // Likewise for "T".
   EXPECT_THAT(typeParents(Child3), ElementsAre());
+}
+
+TEST(TypeParents, IncompleteClass) {
+  Annotations Source(R"cpp(
+    class Incomplete;
+  )cpp");
+  TestTU TU = TestTU::withCode(Source.code());
+  auto AST = TU.build();
+
+  const CXXRecordDecl *Incomplete =
+      dyn_cast<CXXRecordDecl>(&findDecl(AST, "Incomplete"));
+  EXPECT_THAT(typeParents(Incomplete), IsEmpty());
 }
 
 // Parts of getTypeHierarchy() are tested in more detail by the
@@ -395,7 +389,7 @@ TEST(TypeHierarchy, RecursiveHierarchyUnbounded) {
   template <int N>
   struct $SDef[[S]] : S<N + 1> {};
 
-  S^<0> s;
+  S^<0> s; // error-ok
   )cpp");
 
   TestTU TU = TestTU::withCode(Source.code());
@@ -407,17 +401,21 @@ TEST(TypeHierarchy, RecursiveHierarchyUnbounded) {
   ASSERT_TRUE(!AST.getDiagnostics().empty());
 
   // Make sure getTypeHierarchy() doesn't get into an infinite recursion.
-  // FIXME(nridge): It would be preferable if the type hierarchy gave us type
-  // names (e.g. "S<0>" for the child and "S<1>" for the parent) rather than
-  // template names (e.g. "S").
+  // The parent is reported as "S" because "S<0>" is an invalid instantiation.
+  // We then iterate once more and find "S" again before detecting the
+  // recursion.
   llvm::Optional<TypeHierarchyItem> Result = getTypeHierarchy(
       AST, Source.points()[0], 0, TypeHierarchyDirection::Parents);
   ASSERT_TRUE(bool(Result));
   EXPECT_THAT(
       *Result,
-      AllOf(WithName("S"), WithKind(SymbolKind::Struct),
-            Parents(AllOf(WithName("S"), WithKind(SymbolKind::Struct),
-                          SelectionRangeIs(Source.range("SDef")), Parents()))));
+      AllOf(WithName("S<0>"), WithKind(SymbolKind::Struct),
+            Parents(
+                AllOf(WithName("S"), WithKind(SymbolKind::Struct),
+                      SelectionRangeIs(Source.range("SDef")),
+                      Parents(AllOf(WithName("S"), WithKind(SymbolKind::Struct),
+                                    SelectionRangeIs(Source.range("SDef")),
+                                    Parents()))))));
 }
 
 TEST(TypeHierarchy, RecursiveHierarchyBounded) {
@@ -438,8 +436,6 @@ TEST(TypeHierarchy, RecursiveHierarchyBounded) {
   TestTU TU = TestTU::withCode(Source.code());
   auto AST = TU.build();
 
-  ASSERT_TRUE(AST.getDiagnostics().empty());
-
   // Make sure getTypeHierarchy() doesn't get into an infinite recursion
   // for either a concrete starting point or a dependent starting point.
   llvm::Optional<TypeHierarchyItem> Result = getTypeHierarchy(
@@ -447,9 +443,12 @@ TEST(TypeHierarchy, RecursiveHierarchyBounded) {
   ASSERT_TRUE(bool(Result));
   EXPECT_THAT(
       *Result,
-      AllOf(WithName("S"), WithKind(SymbolKind::Struct),
-            Parents(AllOf(WithName("S"), WithKind(SymbolKind::Struct),
-                          SelectionRangeIs(Source.range("SDef")), Parents()))));
+      AllOf(WithName("S<2>"), WithKind(SymbolKind::Struct),
+            Parents(AllOf(
+                WithName("S<1>"), WithKind(SymbolKind::Struct),
+                SelectionRangeIs(Source.range("SDef")),
+                Parents(AllOf(WithName("S<0>"), WithKind(SymbolKind::Struct),
+                              Parents()))))));
   Result = getTypeHierarchy(AST, Source.point("SRefDependent"), 0,
                             TypeHierarchyDirection::Parents);
   ASSERT_TRUE(bool(Result));
@@ -460,11 +459,116 @@ TEST(TypeHierarchy, RecursiveHierarchyBounded) {
                           SelectionRangeIs(Source.range("SDef")), Parents()))));
 }
 
+TEST(TypeHierarchy, DeriveFromImplicitSpec) {
+  Annotations Source(R"cpp(
+  template <typename T>
+  struct Parent {};
+
+  struct Child1 : Parent<int> {};
+
+  struct Child2 : Parent<char> {};
+
+  Parent<int> Fo^o;
+  )cpp");
+
+  TestTU TU = TestTU::withCode(Source.code());
+  auto AST = TU.build();
+  auto Index = TU.index();
+
+  llvm::Optional<TypeHierarchyItem> Result = getTypeHierarchy(
+      AST, Source.points()[0], 2, TypeHierarchyDirection::Children, Index.get(),
+      testPath(TU.Filename));
+  ASSERT_TRUE(bool(Result));
+  EXPECT_THAT(*Result,
+              AllOf(WithName("Parent"), WithKind(SymbolKind::Struct),
+                    Children(AllOf(WithName("Child1"),
+                                   WithKind(SymbolKind::Struct), Children()),
+                             AllOf(WithName("Child2"),
+                                   WithKind(SymbolKind::Struct), Children()))));
+}
+
+TEST(TypeHierarchy, DeriveFromPartialSpec) {
+  Annotations Source(R"cpp(
+  template <typename T> struct Parent {};
+  template <typename T> struct Parent<T*> {};
+
+  struct Child : Parent<int*> {};
+
+  Parent<int> Fo^o;
+  )cpp");
+
+  TestTU TU = TestTU::withCode(Source.code());
+  auto AST = TU.build();
+  auto Index = TU.index();
+
+  llvm::Optional<TypeHierarchyItem> Result = getTypeHierarchy(
+      AST, Source.points()[0], 2, TypeHierarchyDirection::Children, Index.get(),
+      testPath(TU.Filename));
+  ASSERT_TRUE(bool(Result));
+  EXPECT_THAT(*Result, AllOf(WithName("Parent"), WithKind(SymbolKind::Struct),
+                             Children()));
+}
+
+TEST(TypeHierarchy, DeriveFromTemplate) {
+  Annotations Source(R"cpp(
+  template <typename T>
+  struct Parent {};
+
+  template <typename T>
+  struct Child : Parent<T> {};
+
+  Parent<int> Fo^o;
+  )cpp");
+
+  TestTU TU = TestTU::withCode(Source.code());
+  auto AST = TU.build();
+  auto Index = TU.index();
+
+  // FIXME: We'd like this to show the implicit specializations Parent<int>
+  //        and Child<int>, but currently libIndex does not expose relationships
+  //        between implicit specializations.
+  llvm::Optional<TypeHierarchyItem> Result = getTypeHierarchy(
+      AST, Source.points()[0], 2, TypeHierarchyDirection::Children, Index.get(),
+      testPath(TU.Filename));
+  ASSERT_TRUE(bool(Result));
+  EXPECT_THAT(*Result,
+              AllOf(WithName("Parent"), WithKind(SymbolKind::Struct),
+                    Children(AllOf(WithName("Child"),
+                                   WithKind(SymbolKind::Struct), Children()))));
+}
+
+TEST(TypeHierarchy, Preamble) {
+  Annotations SourceAnnotations(R"cpp(
+struct Ch^ild : Parent {
+  int b;
+};)cpp");
+
+  Annotations HeaderInPreambleAnnotations(R"cpp(
+struct [[Parent]] {
+  int a;
+};)cpp");
+
+  TestTU TU = TestTU::withCode(SourceAnnotations.code());
+  TU.HeaderCode = HeaderInPreambleAnnotations.code().str();
+  auto AST = TU.build();
+
+  llvm::Optional<TypeHierarchyItem> Result = getTypeHierarchy(
+      AST, SourceAnnotations.point(), 1, TypeHierarchyDirection::Parents);
+
+  ASSERT_TRUE(Result);
+  EXPECT_THAT(
+      *Result,
+      AllOf(WithName("Child"),
+            Parents(AllOf(WithName("Parent"),
+                          SelectionRangeIs(HeaderInPreambleAnnotations.range()),
+                          Parents()))));
+}
+
 SymbolID findSymbolIDByName(SymbolIndex *Index, llvm::StringRef Name,
                             llvm::StringRef TemplateArgs = "") {
   SymbolID Result;
   FuzzyFindRequest Request;
-  Request.Query = Name;
+  Request.Query = std::string(Name);
   Request.AnyScope = true;
   bool GotResult = false;
   Index->fuzzyFind(Request, [&](const Symbol &S) {
@@ -482,7 +586,7 @@ std::vector<SymbolID> collectSubtypes(SymbolID Subject, SymbolIndex *Index) {
   std::vector<SymbolID> Result;
   RelationsRequest Req;
   Req.Subjects.insert(Subject);
-  Req.Predicate = index::SymbolRole::RelationBaseOf;
+  Req.Predicate = RelationKind::BaseOf;
   Index->relations(Req,
                    [&Result](const SymbolID &Subject, const Symbol &Object) {
                      Result.push_back(Object.ID);

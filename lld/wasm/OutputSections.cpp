@@ -12,17 +12,25 @@
 #include "OutputSegment.h"
 #include "WriterUtils.h"
 #include "lld/Common/ErrorHandler.h"
-#include "lld/Common/Threads.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Support/LEB128.h"
+#include "llvm/Support/Parallel.h"
 
 #define DEBUG_TYPE "lld"
 
 using namespace llvm;
 using namespace llvm::wasm;
-using namespace lld;
-using namespace lld::wasm;
 
+namespace lld {
+
+// Returns a string, e.g. "FUNCTION(.text)".
+std::string toString(const wasm::OutputSection &sec) {
+  if (!sec.name.empty())
+    return (sec.getSectionName() + "(" + sec.name + ")").str();
+  return std::string(sec.getSectionName());
+}
+
+namespace wasm {
 static StringRef sectionTypeToString(uint32_t sectionType) {
   switch (sectionType) {
   case WASM_SEC_CUSTOM:
@@ -58,13 +66,6 @@ static StringRef sectionTypeToString(uint32_t sectionType) {
   }
 }
 
-// Returns a string, e.g. "FUNCTION(.text)".
-std::string lld::toString(const OutputSection &sec) {
-  if (!sec.name.empty())
-    return (sec.getSectionName() + "(" + sec.name + ")").str();
-  return sec.getSectionName();
-}
-
 StringRef OutputSection::getSectionName() const {
   return sectionTypeToString(type);
 }
@@ -86,8 +87,11 @@ void CodeSection::finalizeContents() {
   bodySize = codeSectionHeader.size();
 
   for (InputFunction *func : functions) {
+    func->outputSec = this;
     func->outputOffset = bodySize;
     func->calculateSize();
+    // All functions should have a non-empty body at this point
+    assert(func->getSize());
     bodySize += func->getSize();
   }
 
@@ -127,15 +131,27 @@ void CodeSection::writeRelocations(raw_ostream &os) const {
 
 void DataSection::finalizeContents() {
   raw_string_ostream os(dataSectionHeader);
+  unsigned segmentCount =
+      std::count_if(segments.begin(), segments.end(),
+                    [](OutputSegment *segment) { return !segment->isBss; });
 
-  writeUleb128(os, segments.size(), "data segment count");
+#ifndef NDEBUG
+  unsigned activeCount = std::count_if(
+      segments.begin(), segments.end(), [](OutputSegment *segment) {
+        return (segment->initFlags & WASM_SEGMENT_IS_PASSIVE) == 0;
+      });
+#endif
+
+  assert((!config->isPic || activeCount <= 1) &&
+         "Currenly only a single data segment is supported in PIC mode");
+
+  writeUleb128(os, segmentCount, "data segment count");
   os.flush();
   bodySize = dataSectionHeader.size();
 
-  assert((!config->isPic || segments.size() <= 1) &&
-         "Currenly only a single data segment is supported in PIC mode");
-
   for (OutputSegment *segment : segments) {
+    if (segment->isBss)
+      continue;
     raw_string_ostream os(segment->header);
     writeUleb128(os, segment->initFlags, "init flags");
     if (segment->initFlags & WASM_SEGMENT_HAS_MEMINDEX)
@@ -146,6 +162,7 @@ void DataSection::finalizeContents() {
         initExpr.Opcode = WASM_OPCODE_GLOBAL_GET;
         initExpr.Value.Global = WasmSym::memoryBase->getGlobalIndex();
       } else {
+        // FIXME(wvo): I64?
         initExpr.Opcode = WASM_OPCODE_I32_CONST;
         initExpr.Value.Int32 = segment->startVA;
       }
@@ -159,9 +176,11 @@ void DataSection::finalizeContents() {
     log("Data segment: size=" + Twine(segment->size) + ", startVA=" +
         Twine::utohexstr(segment->startVA) + ", name=" + segment->name);
 
-    for (InputSegment *inputSeg : segment->inputSegments)
+    for (InputSegment *inputSeg : segment->inputSegments) {
+      inputSeg->outputSec = this;
       inputSeg->outputOffset = segment->sectionOffset + segment->header.size() +
                                inputSeg->outputSegmentOffset;
+    }
   }
 
   createHeader(bodySize);
@@ -180,6 +199,8 @@ void DataSection::writeTo(uint8_t *buf) {
   memcpy(buf, dataSectionHeader.data(), dataSectionHeader.size());
 
   for (const OutputSegment *segment : segments) {
+    if (segment->isBss)
+      continue;
     // Write data segment header
     uint8_t *segStart = buf + segment->sectionOffset;
     memcpy(segStart, segment->header.data(), segment->header.size());
@@ -204,6 +225,13 @@ void DataSection::writeRelocations(raw_ostream &os) const {
       c->writeRelocations(os);
 }
 
+bool DataSection::isNeeded() const {
+  for (const OutputSegment *seg : segments)
+    if (!seg->isBss)
+      return true;
+  return false;
+}
+
 void CustomSection::finalizeContents() {
   raw_string_ostream os(nameData);
   encodeULEB128(name.size(), os);
@@ -211,8 +239,9 @@ void CustomSection::finalizeContents() {
   os.flush();
 
   for (InputSection *section : inputSections) {
-    section->outputOffset = payloadSize;
+    assert(!section->discarded);
     section->outputSec = this;
+    section->outputOffset = payloadSize;
     payloadSize += section->getSize();
   }
 
@@ -248,3 +277,6 @@ void CustomSection::writeRelocations(raw_ostream &os) const {
   for (const InputSection *s : inputSections)
     s->writeRelocations(os);
 }
+
+} // namespace wasm
+} // namespace lld

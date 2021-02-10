@@ -11,17 +11,16 @@
 
 #include "lldb/Host/common/NativeThreadProtocol.h"
 
-#include "Plugins/Process/NetBSD/NativeProcessNetBSD.h"
 #include "Plugins/Process/Utility/NativeRegisterContextRegisterInfo.h"
 
 namespace lldb_private {
 namespace process_netbsd {
 
-class NativeRegisterContextNetBSD : public NativeRegisterContextRegisterInfo {
-public:
-  NativeRegisterContextNetBSD(NativeThreadProtocol &native_thread,
-                              RegisterInfoInterface *reg_info_interface_p);
+class NativeProcessNetBSD;
 
+class NativeRegisterContextNetBSD
+    : public virtual NativeRegisterContextRegisterInfo {
+public:
   // This function is implemented in the NativeRegisterContextNetBSD_*
   // subclasses to create a new instance of the host specific
   // NativeRegisterContextNetBSD. The implementations can't collide as only one
@@ -30,6 +29,8 @@ public:
   static NativeRegisterContextNetBSD *
   CreateHostNativeRegisterContextNetBSD(const ArchSpec &target_arch,
                                         NativeThreadProtocol &native_thread);
+  virtual llvm::Error
+  CopyHardwareWatchpointsFrom(NativeRegisterContextNetBSD &source) = 0;
 
 protected:
   Status DoRegisterSet(int req, void *buf);

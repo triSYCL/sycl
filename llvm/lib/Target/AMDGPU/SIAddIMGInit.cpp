@@ -80,9 +80,8 @@ bool SIAddIMGInit::runOnMachineFunction(MachineFunction &MF) {
         MachineOperand *LWE = TII->getNamedOperand(MI, AMDGPU::OpName::lwe);
         MachineOperand *D16 = TII->getNamedOperand(MI, AMDGPU::OpName::d16);
 
-        // Check for instructions that don't have tfe or lwe fields
-        // There shouldn't be any at this point.
-        assert( (TFE && LWE) && "Expected tfe and lwe operands in instruction");
+        if (!TFE && !LWE) // intersect_ray
+          continue;
 
         unsigned TFEVal = TFE->getImm();
         unsigned LWEVal = LWE->getImm();
@@ -111,10 +110,6 @@ bool SIAddIMGInit::runOnMachineFunction(MachineFunction &MF) {
           unsigned ActiveLanes =
               TII->isGather4(Opcode) ? 4 : countPopulation(dmask);
 
-          // Subreg indices are counted from 1
-          // When D16 then we want next whole VGPR after write data.
-          static_assert(AMDGPU::sub0 == 1 && AMDGPU::sub4 == 5, "Subreg indices different from expected");
-
           bool Packed = !ST.hasUnpackedD16VMem();
 
           unsigned InitIdx =
@@ -137,7 +132,7 @@ bool SIAddIMGInit::runOnMachineFunction(MachineFunction &MF) {
           // all the result registers to 0, otherwise just the error indication
           // register (VGPRn+1)
           unsigned SizeLeft = ST.usePRTStrictNull() ? InitIdx : 1;
-          unsigned CurrIdx = ST.usePRTStrictNull() ? 1 : InitIdx;
+          unsigned CurrIdx = ST.usePRTStrictNull() ? 0 : (InitIdx - 1);
 
           if (DstSize == 1) {
             // In this case we can just initialize the result directly
@@ -158,7 +153,7 @@ bool SIAddIMGInit::runOnMachineFunction(MachineFunction &MF) {
               BuildMI(MBB, I, DL, TII->get(TargetOpcode::INSERT_SUBREG), NewDst)
                   .addReg(PrevDst)
                   .addReg(SubReg)
-                  .addImm(CurrIdx);
+                  .addImm(SIRegisterInfo::getSubRegFromChannel(CurrIdx));
 
               PrevDst = NewDst;
             }

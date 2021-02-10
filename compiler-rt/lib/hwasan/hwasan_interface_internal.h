@@ -112,6 +112,10 @@ SANITIZER_INTERFACE_ATTRIBUTE
 void __hwasan_tag_mismatch(uptr addr, u8 ts);
 
 SANITIZER_INTERFACE_ATTRIBUTE
+void __hwasan_tag_mismatch4(uptr addr, uptr access_info, uptr *registers_frame,
+                            size_t outsize);
+
+SANITIZER_INTERFACE_ATTRIBUTE
 u8 __hwasan_generate_tag();
 
 // Returns the offset of the first tag mismatch or -1 if the whole range is
@@ -218,6 +222,9 @@ SANITIZER_INTERFACE_ATTRIBUTE
 void *__hwasan_memset(void *s, int c, uptr n);
 SANITIZER_INTERFACE_ATTRIBUTE
 void *__hwasan_memmove(void *dest, const void *src, uptr n);
+
+SANITIZER_INTERFACE_ATTRIBUTE
+void __hwasan_set_error_report_callback(void (*callback)(const char *));
 }  // extern "C"
 
 #endif  // HWASAN_INTERFACE_INTERNAL_H

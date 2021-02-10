@@ -19,6 +19,7 @@
 #include "FuzzerDictionary.h"
 #include "FuzzerExtFunctions.h"
 #include "FuzzerIO.h"
+#include "FuzzerPlatform.h"
 #include "FuzzerUtil.h"
 #include "FuzzerValueBitMap.h"
 #include <set>
@@ -65,45 +66,6 @@ void TracePC::HandleInline8bitCountersInit(uint8_t *Start, uint8_t *Stop) {
   assert(M.Stop() == Stop);
   assert(M.Start() == Start);
   NumInline8bitCounters += M.Size();
-}
-
-// Mark all full page counter regions as PROT_NONE and set Enabled=false.
-// The first time the instrumented code hits such a protected/disabled
-// counter region we should catch a SEGV and call UnprotectLazyCounters,
-// which will mark the page as PROT_READ|PROT_WRITE and set Enabled=true.
-//
-// Whenever other functions iterate over the counters they should ignore
-// regions with Enabled=false.
-void TracePC::ProtectLazyCounters() {
-  size_t NumPagesProtected = 0;
-  IterateCounterRegions([&](Module::Region &R) {
-    if (!R.OneFullPage) return;
-    if (Mprotect(R.Start, R.Stop - R.Start, false)) {
-      R.Enabled = false;
-      NumPagesProtected++;
-    }
-  });
-  if (NumPagesProtected)
-    Printf("INFO: %zd pages of counters where protected;"
-           " libFuzzer's SEGV handler must be installed\n",
-           NumPagesProtected);
-}
-
-bool TracePC::UnprotectLazyCounters(void *CounterPtr) {
-  // Printf("UnprotectLazyCounters: %p\n", CounterPtr);
-  if (!CounterPtr)
-    return false;
-  bool Done = false;
-  uint8_t *Addr = reinterpret_cast<uint8_t *>(CounterPtr);
-  IterateCounterRegions([&](Module::Region &R) {
-    if (!R.OneFullPage || R.Enabled || Done) return;
-    if (Addr >= R.Start && Addr < R.Stop)
-      if (Mprotect(R.Start, R.Stop - R.Start, true)) {
-        R.Enabled = true;
-        Done = true;
-      }
-  });
-  return Done;
 }
 
 void TracePC::HandlePCsInit(const uintptr_t *Start, const uintptr_t *Stop) {
@@ -279,7 +241,9 @@ void TracePC::IterateCoveredFunctions(CallBack CB) {
 void TracePC::SetFocusFunction(const std::string &FuncName) {
   // This function should be called once.
   assert(!FocusFunctionCounterPtr);
-  if (FuncName.empty())
+  // "auto" is not a valid function name. If this function is called with "auto"
+  // that means the auto focus functionality failed.
+  if (FuncName.empty() || FuncName == "auto")
     return;
   for (size_t M = 0; M < NumModules; M++) {
     auto &PCTE = ModulePCTable[M];
@@ -295,13 +259,17 @@ void TracePC::SetFocusFunction(const std::string &FuncName) {
       return;
     }
   }
+
+  Printf("ERROR: Failed to set focus function. Make sure the function name is "
+         "valid (%s) and symbolization is enabled.\n", FuncName.c_str());
+  exit(1);
 }
 
 bool TracePC::ObservedFocusFunction() {
   return FocusFunctionCounterPtr && *FocusFunctionCounterPtr;
 }
 
-void TracePC::PrintCoverage() {
+void TracePC::PrintCoverage(bool PrintAllCounters) {
   if (!EF->__sanitizer_symbolize_pc ||
       !EF->__sanitizer_get_module_and_offset_for_pc) {
     Printf("INFO: __sanitizer_symbolize_pc or "
@@ -309,7 +277,7 @@ void TracePC::PrintCoverage() {
            " not printing coverage\n");
     return;
   }
-  Printf("COVERAGE:\n");
+  Printf(PrintAllCounters ? "FULL COVERAGE:\n" : "COVERAGE:\n");
   auto CoveredFunctionCallback = [&](const PCTableEntry *First,
                                      const PCTableEntry *Last,
                                      uintptr_t Counter) {
@@ -324,17 +292,33 @@ void TracePC::PrintCoverage() {
     std::string LineStr = DescribePC("%l", VisualizePC);
     size_t NumEdges = Last - First;
     Vector<uintptr_t> UncoveredPCs;
+    Vector<uintptr_t> CoveredPCs;
     for (auto TE = First; TE < Last; TE++)
       if (!ObservedPCs.count(TE))
         UncoveredPCs.push_back(TE->PC);
-    Printf("%sCOVERED_FUNC: hits: %zd", Counter ? "" : "UN", Counter);
-    Printf(" edges: %zd/%zd", NumEdges - UncoveredPCs.size(), NumEdges);
-    Printf(" %s %s:%s\n", FunctionStr.c_str(), FileStr.c_str(),
-           LineStr.c_str());
-    if (Counter)
+      else
+        CoveredPCs.push_back(TE->PC);
+
+    if (PrintAllCounters) {
+      Printf("U");
       for (auto PC : UncoveredPCs)
-        Printf("  UNCOVERED_PC: %s\n",
-               DescribePC("%s:%l", GetNextInstructionPc(PC)).c_str());
+        Printf(DescribePC(" %l", GetNextInstructionPc(PC)).c_str());
+      Printf("\n");
+
+      Printf("C");
+      for (auto PC : CoveredPCs)
+        Printf(DescribePC(" %l", GetNextInstructionPc(PC)).c_str());
+      Printf("\n");
+    } else {
+      Printf("%sCOVERED_FUNC: hits: %zd", Counter ? "" : "UN", Counter);
+      Printf(" edges: %zd/%zd", NumEdges - UncoveredPCs.size(), NumEdges);
+      Printf(" %s %s:%s\n", FunctionStr.c_str(), FileStr.c_str(),
+             LineStr.c_str());
+      if (Counter)
+        for (auto PC : UncoveredPCs)
+          Printf("  UNCOVERED_PC: %s\n",
+                 DescribePC("%s:%l", GetNextInstructionPc(PC)).c_str());
+    }
   };
 
   IterateCoveredFunctions(CoveredFunctionCallback);

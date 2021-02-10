@@ -123,3 +123,47 @@ namespace first_param_conversion {
     delete e; // expected-error {{ambiguous conversion from derived class 'first_param_conversion::E' to base class 'first_param_conversion::B':}}
   }
 }
+
+namespace templated {
+  template<typename T> using id_alias = T;
+  template<typename T> struct id_struct { using type = T; };
+
+  template<typename T> struct A {
+    void operator delete(A *, std::destroying_delete_t);
+  };
+  template<typename T> struct B {
+    void operator delete(B<T> *, std::destroying_delete_t);
+  };
+  template<typename T> struct C {
+    void operator delete(id_alias<C> *, std::destroying_delete_t);
+  };
+  template<typename T> struct D {
+    void operator delete(typename id_struct<D>::type *, std::destroying_delete_t); // expected-error {{use 'D<T> *'}}
+  };
+}
+
+namespace dtor_access {
+  struct S {
+    void operator delete(S *p, std::destroying_delete_t);
+  private:
+    ~S(); // expected-note {{here}}
+  };
+
+  // FIXME: PR47474: GCC accepts this, and it seems somewhat reasonable to
+  // allow, even though [expr.delete]p12 says this is ill-formed.
+  void f() { delete new S; } // expected-error {{calling a private destructor}}
+
+  struct T {
+    void operator delete(T *, std::destroying_delete_t);
+  protected:
+    virtual ~T(); // expected-note {{here}}
+  };
+
+  struct U : T {
+    void operator delete(void *);
+  private:
+    ~U() override;
+  };
+
+  void g() { delete (T *)new U; } // expected-error {{calling a protected destructor}}
+}

@@ -158,16 +158,17 @@ static bool readLocationInfo(LocationInfoTy &LocationInfo) {
   if (!Format) {
     handleAllErrors(Format.takeError(), [&](const ErrorInfoBase &PE) {
       PE.log(WithColor::error());
-      WithColor::error() << '\n';
+      errs() << '\n';
     });
     return false;
   }
 
   Expected<std::unique_ptr<remarks::RemarkParser>> MaybeParser =
-      remarks::createRemarkParser(*Format, (*Buf)->getBuffer());
+      remarks::createRemarkParserFromMeta(*Format, (*Buf)->getBuffer());
   if (!MaybeParser) {
     handleAllErrors(MaybeParser.takeError(), [&](const ErrorInfoBase &PE) {
       PE.log(WithColor::error());
+      errs() << '\n';
     });
     return false;
   }
@@ -182,8 +183,9 @@ static bool readLocationInfo(LocationInfoTy &LocationInfo) {
         consumeError(std::move(E));
         break;
       }
-      handleAllErrors(MaybeRemark.takeError(), [&](const ErrorInfoBase &PE) {
+      handleAllErrors(std::move(E), [&](const ErrorInfoBase &PE) {
         PE.log(WithColor::error());
+        errs() << '\n';
       });
       return false;
     }
@@ -223,14 +225,17 @@ static bool readLocationInfo(LocationInfoTy &LocationInfo) {
     };
 
     if (Remark.PassName == "inline") {
-      auto &LI = LocationInfo[File][Line][Remark.FunctionName][Column];
+      auto &LI = LocationInfo[std::string(File)][Line]
+                             [std::string(Remark.FunctionName)][Column];
       UpdateLLII(LI.Inlined);
     } else if (Remark.PassName == "loop-unroll") {
-      auto &LI = LocationInfo[File][Line][Remark.FunctionName][Column];
+      auto &LI = LocationInfo[std::string(File)][Line]
+                             [std::string(Remark.FunctionName)][Column];
       LI.UnrollCount = UnrollCount;
       UpdateLLII(LI.Unrolled);
     } else if (Remark.PassName == "loop-vectorize") {
-      auto &LI = LocationInfo[File][Line][Remark.FunctionName][Column];
+      auto &LI = LocationInfo[std::string(File)][Line]
+                             [std::string(Remark.FunctionName)][Column];
       LI.VectorizationFactor = VectorizationFactor;
       LI.InterleaveCount = InterleaveCount;
       UpdateLLII(LI.Vectorized);

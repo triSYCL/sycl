@@ -8,15 +8,17 @@
 
 #pragma once
 
-#include <CL/cl.h>
 #include <CL/sycl/access/access.hpp>
+#include <CL/sycl/detail/cl.h>
+#include <CL/sycl/detail/export.hpp>
 #include <CL/sycl/detail/sycl_mem_obj_i.hpp>
+#include <CL/sycl/property_list.hpp>
 #include <CL/sycl/range.hpp>
 
 #include <memory>
 #include <vector>
 
-namespace cl {
+__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 namespace detail {
 
@@ -31,26 +33,38 @@ using ContextImplPtr = std::shared_ptr<detail::context_impl>;
 // The class contains methods that work with memory. All operations with
 // device memory should go through MemoryManager.
 
-class MemoryManager {
+class __SYCL_EXPORT MemoryManager {
 public:
   // The following method releases memory allocation of memory object.
   // Depending on the context it releases memory on host or on device.
   static void release(ContextImplPtr TargetContext, SYCLMemObjI *MemObj,
-                      void *MemAllocation, std::vector<RT::PiEvent> DepEvents,
+                      void *MemAllocation, std::vector<EventImplPtr> DepEvents,
                       RT::PiEvent &OutEvent);
 
   // The following method allocates memory allocation of memory object.
   // Depending on the context it allocates memory on host or on device.
   static void *allocate(ContextImplPtr TargetContext, SYCLMemObjI *MemObj,
-                        bool InitFromUserData, std::vector<RT::PiEvent> DepEvents,
+                        bool InitFromUserData, void *HostPtr,
+                        std::vector<EventImplPtr> DepEvents,
                         RT::PiEvent &OutEvent);
+
+  // Allocates memory buffer wrapped into an image. MemObj must be a buffer,
+  // not an image.
+  // TODO not used - remove.
+  static void *wrapIntoImageBuffer(ContextImplPtr TargetContext, void *MemBuf,
+                                   SYCLMemObjI *MemObj);
+
+  // Releases the image buffer created by wrapIntoImageBuffer.
+  // TODO not used - remove.
+  static void releaseImageBuffer(ContextImplPtr TargetContext, void *ImageBuf);
 
   // The following method creates OpenCL sub buffer for specified
   // offset, range, and memory object.
-  static void *createSubBuffer(RT::PiMem ParentMem, size_t ElemSize,
-                               id<3> Offset, range<3> Range,
-                               std::vector<RT::PiEvent> DepEvents,
-                               RT::PiEvent &OutEvent);
+  static void *allocateMemSubBuffer(ContextImplPtr TargetContext,
+                                    void *ParentMemObj, size_t ElemSize,
+                                    size_t Offset, range<3> Range,
+                                    std::vector<EventImplPtr> DepEvents,
+                                    RT::PiEvent &OutEvent);
 
   // Allocates buffer in specified context taking into account situations such
   // as host ptr or cl_mem provided by user. TargetContext should be device
@@ -60,6 +74,7 @@ public:
                                  bool HostPtrReadOnly, size_t Size,
                                  const EventImplPtr &InteropEvent,
                                  const ContextImplPtr &InteropContext,
+                                 const sycl::property_list &PropsList,
                                  RT::PiEvent &OutEventToWait);
 
   // Allocates images in specified context taking into account situations such
@@ -69,7 +84,8 @@ public:
       ContextImplPtr TargetContext, SYCLMemObjI *MemObj, void *UserPtr,
       bool HostPtrReadOnly, size_t Size, const RT::PiMemImageDesc &Desc,
       const RT::PiMemImageFormat &Format, const EventImplPtr &InteropEvent,
-      const ContextImplPtr &InteropContext, RT::PiEvent &OutEventToWait);
+      const ContextImplPtr &InteropContext,
+      const sycl::property_list &PropsList, RT::PiEvent &OutEventToWait);
 
   // Releases memory object(buffer or image). TargetContext should be device
   // one(not host).
@@ -77,21 +93,25 @@ public:
                             void *MemAllocation, void *UserPtr);
 
   static void *allocateHostMemory(SYCLMemObjI *MemObj, void *UserPtr,
-                                  bool HostPtrReadOnly, size_t Size);
+                                  bool HostPtrReadOnly, size_t Size,
+                                  const sycl::property_list &PropsList);
 
   static void *allocateInteropMemObject(ContextImplPtr TargetContext,
                                         void *UserPtr,
                                         const EventImplPtr &InteropEvent,
                                         const ContextImplPtr &InteropContext,
+                                        const sycl::property_list &PropsList,
                                         RT::PiEvent &OutEventToWait);
 
   static void *allocateImageObject(ContextImplPtr TargetContext, void *UserPtr,
                                    bool HostPtrReadOnly,
                                    const RT::PiMemImageDesc &Desc,
-                                   const RT::PiMemImageFormat &Format);
+                                   const RT::PiMemImageFormat &Format,
+                                   const sycl::property_list &PropsList);
 
   static void *allocateBufferObject(ContextImplPtr TargetContext, void *UserPtr,
-                                    bool HostPtrReadOnly, const size_t Size);
+                                    bool HostPtrReadOnly, const size_t Size,
+                                    const sycl::property_list &PropsList);
 
   // Copies memory between: host and device, host and host,
   // device and device if memory objects bound to the one context.
@@ -102,8 +122,7 @@ public:
                    QueueImplPtr TgtQueue, unsigned int DimDst,
                    sycl::range<3> DstSize, sycl::range<3> DstAccessRange,
                    sycl::id<3> DstOffset, unsigned int DstElemSize,
-                   std::vector<RT::PiEvent> DepEvents, bool UseExclusiveQueue,
-                   RT::PiEvent &OutEvent);
+                   std::vector<RT::PiEvent> DepEvents, RT::PiEvent &OutEvent);
 
   static void fill(SYCLMemObjI *SYCLMemObj, void *Mem, QueueImplPtr Queue,
                    size_t PatternSize, const char *Pattern, unsigned int Dim,
@@ -119,17 +138,20 @@ public:
 
   static void unmap(SYCLMemObjI *SYCLMemObj, void *Mem, QueueImplPtr Queue,
                     void *MappedPtr, std::vector<RT::PiEvent> DepEvents,
-                    bool UseExclusiveQueue, RT::PiEvent &OutEvent);
+                    RT::PiEvent &OutEvent);
 
-  static void copy_usm(void *SrcMem, QueueImplPtr Queue, size_t Len,
+  static void copy_usm(const void *SrcMem, QueueImplPtr Queue, size_t Len,
                        void *DstMem, std::vector<RT::PiEvent> DepEvents,
-                       bool UseExclusiveQueue, RT::PiEvent &OutEvent);
+                       RT::PiEvent &OutEvent);
 
   static void fill_usm(void *DstMem, QueueImplPtr Queue, size_t Len,
                        int Pattern, std::vector<RT::PiEvent> DepEvents,
                        RT::PiEvent &OutEvent);
 
+  static void prefetch_usm(void *Ptr, QueueImplPtr Queue, size_t Len,
+                           std::vector<RT::PiEvent> DepEvents,
+                           RT::PiEvent &OutEvent);
 };
 } // namespace detail
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

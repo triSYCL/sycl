@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if defined(__x86_64__)
+#if defined(__i386__) || defined(__x86_64__)
 
 #ifndef lldb_NativeRegisterContextNetBSD_x86_64_h
 #define lldb_NativeRegisterContextNetBSD_x86_64_h
@@ -20,18 +20,17 @@
 
 #include "Plugins/Process/NetBSD/NativeRegisterContextNetBSD.h"
 #include "Plugins/Process/Utility/RegisterContext_x86.h"
+#include "Plugins/Process/Utility/NativeRegisterContextWatchpoint_x86.h"
 #include "Plugins/Process/Utility/lldb-x86-register-enums.h"
-
-#if defined(PT_GETXSTATE) && defined(PT_SETXSTATE)
-#define HAVE_XSTATE
-#endif
 
 namespace lldb_private {
 namespace process_netbsd {
 
 class NativeProcessNetBSD;
 
-class NativeRegisterContextNetBSD_x86_64 : public NativeRegisterContextNetBSD {
+class NativeRegisterContextNetBSD_x86_64
+    : public NativeRegisterContextNetBSD,
+      public NativeRegisterContextWatchpoint_x86 {
 public:
   NativeRegisterContextNetBSD_x86_64(const ArchSpec &target_arch,
                                      NativeThreadProtocol &native_thread);
@@ -49,41 +48,20 @@ public:
 
   Status WriteAllRegisterValues(const lldb::DataBufferSP &data_sp) override;
 
-  Status IsWatchpointHit(uint32_t wp_index, bool &is_hit) override;
-
-  Status GetWatchpointHitIndex(uint32_t &wp_index,
-                               lldb::addr_t trap_addr) override;
-
-  Status IsWatchpointVacant(uint32_t wp_index, bool &is_vacant) override;
-
-  bool ClearHardwareWatchpoint(uint32_t wp_index) override;
-
-  Status ClearAllHardwareWatchpoints() override;
-
-  Status SetHardwareWatchpointWithIndex(lldb::addr_t addr, size_t size,
-                                        uint32_t watch_flags,
-                                        uint32_t wp_index);
-
-  uint32_t SetHardwareWatchpoint(lldb::addr_t addr, size_t size,
-                                 uint32_t watch_flags) override;
-
-  lldb::addr_t GetWatchpointAddress(uint32_t wp_index) override;
-
-  uint32_t NumSupportedHardwareWatchpoints() override;
+  llvm::Error
+  CopyHardwareWatchpointsFrom(NativeRegisterContextNetBSD &source) override;
 
 private:
   // Private member types.
-  enum { GPRegSet, FPRegSet, DBRegSet, XStateRegSet };
+  enum { GPRegSet, XStateRegSet, DBRegSet };
 
   // Private member variables.
-  struct reg m_gpr_x86_64;
-  struct fpreg m_fpr_x86_64;
-  struct dbreg m_dbr_x86_64;
-#ifdef HAVE_XSTATE
-  struct xstate m_xstate_x86_64;
-#endif
+  struct reg m_gpr;
+  struct xstate m_xstate;
+  struct dbreg m_dbr;
 
   int GetSetForNativeRegNum(int reg_num) const;
+  int GetDR(int num) const;
 
   Status ReadRegisterSet(uint32_t set);
   Status WriteRegisterSet(uint32_t set);

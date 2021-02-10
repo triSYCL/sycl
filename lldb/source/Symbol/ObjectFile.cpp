@@ -1,4 +1,4 @@
-//===-- ObjectFile.cpp ------------------------------------------*- C++ -*-===//
+//===-- ObjectFile.cpp ----------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -11,6 +11,7 @@
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/Section.h"
+#include "lldb/Symbol/CallFrameInfo.h"
 #include "lldb/Symbol/ObjectContainer.h"
 #include "lldb/Symbol/SymbolFile.h"
 #include "lldb/Target/Process.h"
@@ -19,7 +20,6 @@
 #include "lldb/Utility/DataBuffer.h"
 #include "lldb/Utility/DataBufferHeap.h"
 #include "lldb/Utility/Log.h"
-#include "lldb/Utility/RegularExpression.h"
 #include "lldb/Utility/Timer.h"
 #include "lldb/lldb-private.h"
 
@@ -47,8 +47,8 @@ ObjectFile::FindPlugin(const lldb::ModuleSP &module_sp, const FileSpec *file,
       FileSpec archive_file;
       ObjectContainerCreateInstance create_object_container_callback;
 
-      const bool file_exists = FileSystem::Instance().Exists(*file);
       if (!data_sp) {
+        const bool file_exists = FileSystem::Instance().Exists(*file);
         // We have an object name which most likely means we have a .o file in
         // a static archive (.a file). Try and see if we have a cached archive
         // first without reading any data first
@@ -83,9 +83,8 @@ ObjectFile::FindPlugin(const lldb::ModuleSP &module_sp, const FileSpec *file,
 
       if (!data_sp || data_sp->GetByteSize() == 0) {
         // Check for archive file with format "/path/to/archive.a(object.o)"
-        char path_with_object[PATH_MAX * 2];
-        module_sp->GetFileSpec().GetPath(path_with_object,
-                                         sizeof(path_with_object));
+        llvm::SmallString<256> path_with_object;
+        module_sp->GetFileSpec().GetPath(path_with_object);
 
         ConstString archive_object;
         const bool must_exist = true;
@@ -208,9 +207,11 @@ ObjectFileSP ObjectFile::FindPlugin(const lldb::ModuleSP &module_sp,
 size_t ObjectFile::GetModuleSpecifications(const FileSpec &file,
                                            lldb::offset_t file_offset,
                                            lldb::offset_t file_size,
-                                           ModuleSpecList &specs) {
-  DataBufferSP data_sp =
-      FileSystem::Instance().CreateDataBuffer(file.GetPath(), 512, file_offset);
+                                           ModuleSpecList &specs,
+                                           DataBufferSP data_sp) {
+  if (!data_sp)
+    data_sp = FileSystem::Instance().CreateDataBuffer(file.GetPath(), 512,
+                                                      file_offset);
   if (data_sp) {
     if (file_size == 0) {
       const lldb::offset_t actual_file_size =
@@ -353,7 +354,9 @@ AddressClass ObjectFile::GetAddressClass(addr_t file_addr) {
           case eSectionTypeDWARFDebugLine:
           case eSectionTypeDWARFDebugLineStr:
           case eSectionTypeDWARFDebugLoc:
+          case eSectionTypeDWARFDebugLocDwo:
           case eSectionTypeDWARFDebugLocLists:
+          case eSectionTypeDWARFDebugLocListsDwo:
           case eSectionTypeDWARFDebugMacInfo:
           case eSectionTypeDWARFDebugMacro:
           case eSectionTypeDWARFDebugNames:
@@ -361,10 +364,12 @@ AddressClass ObjectFile::GetAddressClass(addr_t file_addr) {
           case eSectionTypeDWARFDebugPubTypes:
           case eSectionTypeDWARFDebugRanges:
           case eSectionTypeDWARFDebugRngLists:
+          case eSectionTypeDWARFDebugRngListsDwo:
           case eSectionTypeDWARFDebugStr:
           case eSectionTypeDWARFDebugStrDwo:
           case eSectionTypeDWARFDebugStrOffsets:
           case eSectionTypeDWARFDebugStrOffsetsDwo:
+          case eSectionTypeDWARFDebugTuIndex:
           case eSectionTypeDWARFDebugTypes:
           case eSectionTypeDWARFDebugTypesDwo:
           case eSectionTypeDWARFAppleNames:
@@ -498,6 +503,9 @@ size_t ObjectFile::ReadSectionData(Section *section,
     return section->GetObjectFile()->ReadSectionData(section, section_offset,
                                                      dst, dst_len);
 
+  if (!section->IsRelocated())
+    RelocateSection(section);
+
   if (IsInMemory()) {
     ProcessSP process_sp(m_process_wp.lock());
     if (process_sp) {
@@ -509,9 +517,6 @@ size_t ObjectFile::ReadSectionData(Section *section,
                                       dst_len, error);
     }
   } else {
-    if (!section->IsRelocated())
-      RelocateSection(section);
-
     const lldb::offset_t section_file_size = section->GetFileSize();
     if (section_offset < section_file_size) {
       const size_t section_bytes_left = section_file_size - section_offset;
@@ -542,6 +547,9 @@ size_t ObjectFile::ReadSectionData(Section *section,
   if (section->GetObjectFile() != this)
     return section->GetObjectFile()->ReadSectionData(section, section_data);
 
+  if (!section->IsRelocated())
+    RelocateSection(section);
+
   if (IsInMemory()) {
     ProcessSP process_sp(m_process_wp.lock());
     if (process_sp) {
@@ -558,34 +566,30 @@ size_t ObjectFile::ReadSectionData(Section *section,
         }
       }
     }
-    return GetData(section->GetFileOffset(), section->GetFileSize(),
-                   section_data);
-  } else {
-    // The object file now contains a full mmap'ed copy of the object file
-    // data, so just use this
-    if (!section->IsRelocated())
-      RelocateSection(section);
-
-    return GetData(section->GetFileOffset(), section->GetFileSize(),
-                   section_data);
   }
+
+  // The object file now contains a full mmap'ed copy of the object file
+  // data, so just use this
+  return GetData(section->GetFileOffset(), section->GetFileSize(),
+                  section_data);
 }
 
-bool ObjectFile::SplitArchivePathWithObject(const char *path_with_object,
+bool ObjectFile::SplitArchivePathWithObject(llvm::StringRef path_with_object,
                                             FileSpec &archive_file,
                                             ConstString &archive_object,
                                             bool must_exist) {
-  llvm::SmallVector<llvm::StringRef, 3> matches;
-  RegularExpression g_object_regex(llvm::StringRef("(.*)\\(([^\\)]+)\\)$"));
-  if (g_object_regex.Execute(llvm::StringRef::withNullAsEmpty(path_with_object),
-                             &matches)) {
-    std::string path = matches[1].str();
-    std::string obj = matches[2].str();
-    archive_file.SetFile(path, FileSpec::Style::native);
-    archive_object.SetCString(obj.c_str());
-    return !(must_exist && !FileSystem::Instance().Exists(archive_file));
-  }
-  return false;
+  size_t len = path_with_object.size();
+  if (len < 2 || path_with_object.back() != ')')
+    return false;
+  llvm::StringRef archive = path_with_object.substr(0, path_with_object.rfind('('));
+  if (archive.empty())
+    return false;
+  llvm::StringRef object = path_with_object.substr(archive.size() + 1).drop_back();
+  archive_file.SetFile(archive, FileSpec::Style::native);
+  if (must_exist && !FileSystem::Instance().Exists(archive_file))
+    return false;
+  archive_object.SetString(object);
+  return true;
 }
 
 void ObjectFile::ClearSymtab() {
@@ -669,6 +673,10 @@ ObjectFile::GetLoadableData(Target &target) {
     loadables.push_back(loadable);
   }
   return loadables;
+}
+
+std::unique_ptr<CallFrameInfo> ObjectFile::CreateCallFrameInfo() {
+  return {};
 }
 
 void ObjectFile::RelocateSection(lldb_private::Section *section)

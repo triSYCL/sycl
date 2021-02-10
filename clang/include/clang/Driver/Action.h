@@ -17,6 +17,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/iterator_range.h"
+#include <initializer_list>
 #include <string>
 
 namespace llvm {
@@ -65,19 +66,25 @@ public:
     BackendJobClass,
     AssembleJobClass,
     LinkJobClass,
+    IfsMergeJobClass,
     LipoJobClass,
     DsymutilJobClass,
     VerifyDebugInfoJobClass,
     VerifyPCHJobClass,
     OffloadBundlingJobClass,
     OffloadUnbundlingJobClass,
-    OffloadWrappingJobClass,
+    OffloadWrapperJobClass,
+    OffloadDepsJobClass,
     SPIRVTranslatorJobClass,
     SPIRCheckJobClass,
+    SYCLPostLinkJobClass,
+    PartialLinkJobClass,
     BackendCompileJobClass,
+    FileTableTformJobClass,
+    StaticLibJobClass,
 
     JobClassFirst = PreprocessJobClass,
-    JobClassLast = BackendCompileJobClass
+    JobClassLast = StaticLibJobClass
   };
 
   // The offloading kind determines if this action is binded to a particular
@@ -490,6 +497,17 @@ public:
   }
 };
 
+class IfsMergeJobAction : public JobAction {
+  void anchor() override;
+
+public:
+  IfsMergeJobAction(ActionList &Inputs, types::ID Type);
+
+  static bool classof(const Action *A) {
+    return A->getKind() == IfsMergeJobClass;
+  }
+};
+
 class LinkJobAction : public JobAction {
   void anchor() override;
 
@@ -600,7 +618,8 @@ private:
 
 public:
   // Offloading unbundling doesn't change the type of output.
-  OffloadUnbundlingJobAction(ActionList &Inputs);
+  OffloadUnbundlingJobAction(Action *Input);
+  OffloadUnbundlingJobAction(ActionList &Inputs, types::ID Type);
 
   /// Register information about a dependent action.
   void registerDependentActionInfo(const ToolChain *TC, StringRef BoundArch,
@@ -618,14 +637,69 @@ public:
   }
 };
 
-class OffloadWrappingJobAction : public JobAction {
+class OffloadWrapperJobAction : public JobAction {
   void anchor() override;
 
 public:
-  OffloadWrappingJobAction(Action *Input, types::ID OutputType);
+  OffloadWrapperJobAction(ActionList &Inputs, types::ID Type);
+  OffloadWrapperJobAction(Action *Input, types::ID OutputType);
 
   static bool classof(const Action *A) {
-    return A->getKind() == OffloadWrappingJobClass;
+    return A->getKind() == OffloadWrapperJobClass;
+  }
+};
+
+class OffloadDepsJobAction final : public JobAction {
+  void anchor() override;
+
+public:
+  /// Type that provides information about the actions that depend on this
+  /// offload deps action.
+  struct DependentActionInfo final {
+    /// The tool chain of the dependent action.
+    const ToolChain *DependentToolChain = nullptr;
+
+    /// The bound architecture of the dependent action.
+    StringRef DependentBoundArch;
+
+    /// The offload kind of the dependent action.
+    const OffloadKind DependentOffloadKind = OFK_None;
+
+    DependentActionInfo(const ToolChain *DependentToolChain,
+                        StringRef DependentBoundArch,
+                        const OffloadKind DependentOffloadKind)
+        : DependentToolChain(DependentToolChain),
+          DependentBoundArch(DependentBoundArch),
+          DependentOffloadKind(DependentOffloadKind) {}
+  };
+
+private:
+  /// The host offloading toolchain that should be used with the action.
+  const ToolChain *HostTC = nullptr;
+
+  /// Container that keeps information about each dependence of this deps
+  /// action.
+  SmallVector<DependentActionInfo, 6> DependentActionInfoArray;
+
+public:
+  OffloadDepsJobAction(const OffloadAction::HostDependence &HDep,
+                       types::ID Type);
+
+  /// Register information about a dependent action.
+  void registerDependentActionInfo(const ToolChain *TC, StringRef BoundArch,
+                                   OffloadKind Kind) {
+    DependentActionInfoArray.push_back({TC, BoundArch, Kind});
+  }
+
+  /// Return the information about all depending actions.
+  ArrayRef<DependentActionInfo> getDependentActionsInfo() const {
+    return DependentActionInfoArray;
+  }
+
+  const ToolChain *getHostTC() const { return HostTC; }
+
+  static bool classof(const Action *A) {
+    return A->getKind() == OffloadDepsJobClass;
   }
 };
 
@@ -643,6 +717,7 @@ public:
 // Provides a check of the given input file for the existence of SPIR kernel
 // code.  This is currently only used for FPGA specific tool chains and can
 // be expanded to perform other SPIR checks if needed.
+// TODO: No longer being used for FPGA (or elsewhere), cleanup needed.
 class SPIRCheckJobAction : public JobAction {
   void anchor() override;
 
@@ -654,14 +729,101 @@ public:
   }
 };
 
+class SYCLPostLinkJobAction : public JobAction {
+  void anchor() override;
+
+public:
+  SYCLPostLinkJobAction(Action *Input, types::ID OutputType);
+
+  static bool classof(const Action *A) {
+    return A->getKind() == SYCLPostLinkJobClass;
+  }
+
+  void setRTSetsSpecConstants(bool Val) { RTSetsSpecConsts = Val; }
+
+  bool getRTSetsSpecConstants() const { return RTSetsSpecConsts; }
+
+private:
+  bool RTSetsSpecConsts = true;
+};
+
+class PartialLinkJobAction : public JobAction {
+  void anchor() override;
+
+public:
+  PartialLinkJobAction(Action *Input, types::ID OutputType);
+  PartialLinkJobAction(ActionList &Input, types::ID OutputType);
+
+  static bool classof(const Action *A) {
+    return A->getKind() == PartialLinkJobClass;
+  }
+};
+
 class BackendCompileJobAction : public JobAction {
   void anchor() override;
 
 public:
+  BackendCompileJobAction(ActionList &Inputs, types::ID OutputType);
   BackendCompileJobAction(Action *Input, types::ID OutputType);
 
   static bool classof(const Action *A) {
     return A->getKind() == BackendCompileJobClass;
+  }
+};
+
+// Represents a file table transformation action. The order of inputs to a
+// FileTableTformJobAction at construction time must accord with the tforms
+// added later - some tforms "consume" inputs. For example, "replace column"
+// needs another file to read the replacement column from.
+class FileTableTformJobAction : public JobAction {
+  void anchor() override;
+
+public:
+  struct Tform {
+    enum Kind { EXTRACT, EXTRACT_DROP_TITLE, REPLACE, RENAME };
+
+    Tform() = default;
+    Tform(Kind K, std::initializer_list<StringRef> Args) : TheKind(K) {
+      for (auto A : Args)
+        TheArgs.emplace_back(A.str());
+    }
+
+    Kind TheKind;
+    SmallVector<std::string, 2> TheArgs;
+  };
+
+  FileTableTformJobAction(Action *Input, types::ID OutputType);
+  FileTableTformJobAction(ActionList &Inputs, types::ID OutputType);
+
+  // Deletes all columns except the one with given name.
+  void addExtractColumnTform(StringRef ColumnName, bool WithColTitle = true);
+
+  // Replaces a column with title <From> in this table with a column with title
+  // <To> from another file table passed as input to this action.
+  void addReplaceColumnTform(StringRef From, StringRef To);
+
+  // Renames a column with title <From> in this table with a column with title
+  // <To> passed as input to this action.
+  void addRenameColumnTform(StringRef From, StringRef To);
+
+  static bool classof(const Action *A) {
+    return A->getKind() == FileTableTformJobClass;
+  }
+
+  const ArrayRef<Tform> getTforms() const { return Tforms; }
+
+private:
+  SmallVector<Tform, 2> Tforms; // transformation actions requested
+};
+
+class StaticLibJobAction : public JobAction {
+  void anchor() override;
+
+public:
+  StaticLibJobAction(ActionList &Inputs, types::ID Type);
+
+  static bool classof(const Action *A) {
+    return A->getKind() == StaticLibJobClass;
   }
 };
 

@@ -103,7 +103,9 @@ void netbsd::Assembler::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back(II.getFilename());
 
   const char *Exec = Args.MakeArgString((getToolChain().GetProgramPath("as")));
-  C.addCommand(std::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
+  C.addCommand(std::make_unique<Command>(JA, *this,
+                                         ResponseFileSupport::AtFileCurCP(),
+                                         Exec, CmdArgs, Inputs, Output));
 }
 
 void netbsd::Linker::ConstructJob(Compilation &C, const JobAction &JA,
@@ -337,7 +339,9 @@ void netbsd::Linker::ConstructJob(Compilation &C, const JobAction &JA,
   ToolChain.addProfileRTLibs(Args, CmdArgs);
 
   const char *Exec = Args.MakeArgString(ToolChain.GetLinkerPath());
-  C.addCommand(std::make_unique<Command>(JA, *this, Exec, CmdArgs, Inputs));
+  C.addCommand(std::make_unique<Command>(JA, *this,
+                                         ResponseFileSupport::AtFileCurCP(),
+                                         Exec, CmdArgs, Inputs, Output));
 }
 
 /// NetBSD - NetBSD tool chain which can call as(1) and ld(1) directly.
@@ -489,10 +493,23 @@ SanitizerMask NetBSD::getSupportedSanitizers() const {
   return Res;
 }
 
-void NetBSD::addClangTargetOptions(const ArgList &,
+void NetBSD::addClangTargetOptions(const ArgList &DriverArgs,
                                    ArgStringList &CC1Args,
                                    Action::OffloadKind) const {
   const SanitizerArgs &SanArgs = getSanitizerArgs();
   if (SanArgs.hasAnySanitizer())
     CC1Args.push_back("-D_REENTRANT");
+
+  unsigned Major, Minor, Micro;
+  getTriple().getOSVersion(Major, Minor, Micro);
+  bool UseInitArrayDefault =
+    Major >= 9 || Major == 0 ||
+    getTriple().getArch() == llvm::Triple::aarch64 ||
+    getTriple().getArch() == llvm::Triple::aarch64_be ||
+    getTriple().getArch() == llvm::Triple::arm ||
+    getTriple().getArch() == llvm::Triple::armeb;
+
+  if (!DriverArgs.hasFlag(options::OPT_fuse_init_array,
+                          options::OPT_fno_use_init_array, UseInitArrayDefault))
+    CC1Args.push_back("-fno-use-init-array");
 }

@@ -17,6 +17,7 @@ from six.moves.urllib import parse as urlparse
 # LLDB modules
 from . import configuration
 import lldb
+import lldbsuite.test.lldbplatform as lldbplatform
 
 
 def check_first_register_readable(test_case):
@@ -24,9 +25,9 @@ def check_first_register_readable(test_case):
 
     if arch in ['x86_64', 'i386']:
         test_case.expect("register read eax", substrs=['eax = 0x'])
-    elif arch in ['arm', 'armv7', 'armv7k']:
+    elif arch in ['arm', 'armv7', 'armv7k', 'armv8l', 'armv7l']:
         test_case.expect("register read r0", substrs=['r0 = 0x'])
-    elif arch in ['aarch64', 'arm64']:
+    elif arch in ['aarch64', 'arm64', 'arm64e', 'arm64_32']:
         test_case.expect("register read x0", substrs=['x0 = 0x'])
     elif re.match("mips", arch):
         test_case.expect("register read zero", substrs=['zero = 0x'])
@@ -56,7 +57,7 @@ def _run_adb_command(cmd, device_id):
 
 def target_is_android():
     if not hasattr(target_is_android, 'result'):
-        triple = lldb.DBG.GetSelectedPlatform().GetTriple()
+        triple = lldb.selected_platform.GetTriple()
         match = re.match(".*-.*-.*-android", triple)
         target_is_android.result = match is not None
     return target_is_android.result
@@ -123,17 +124,32 @@ def getHostPlatform():
 
 
 def getDarwinOSTriples():
-    return ['darwin', 'macosx', 'ios', 'watchos', 'tvos', 'bridgeos']
-
+    return lldbplatform.translate(lldbplatform.darwin_all)
 
 def getPlatform():
     """Returns the target platform which the tests are running on."""
-    platform = lldb.DBG.GetSelectedPlatform().GetTriple().split('-')[2]
-    if platform.startswith('freebsd'):
-        platform = 'freebsd'
-    elif platform.startswith('netbsd'):
-        platform = 'netbsd'
-    return platform
+    # Use the Apple SDK to determine the platform if set.
+    if configuration.apple_sdk:
+        platform = configuration.apple_sdk
+        dot = platform.find('.')
+        if dot != -1:
+            platform = platform[:dot]
+        if platform == 'iphoneos':
+            platform = 'ios'
+        return platform
+
+    # Use the triple to determine the platform if set.
+    triple = lldb.selected_platform.GetTriple()
+    if triple:
+        platform = triple.split('-')[2]
+        if platform.startswith('freebsd'):
+            platform = 'freebsd'
+        elif platform.startswith('netbsd'):
+            platform = 'netbsd'
+        return platform
+
+    # It still might be an unconnected remote platform.
+    return ''
 
 
 def platformIsDarwin():
@@ -144,6 +160,9 @@ def platformIsDarwin():
 def findMainThreadCheckerDylib():
     if not platformIsDarwin():
         return ""
+
+    if getPlatform() in lldbplatform.translate(lldbplatform.darwin_embedded):
+        return "/Developer/usr/lib/libMainThreadChecker.dylib"
 
     with os.popen('xcode-select -p') as output:
         xcode_developer_path = output.read().strip()
@@ -157,19 +176,20 @@ def findMainThreadCheckerDylib():
 class _PlatformContext(object):
     """Value object class which contains platform-specific options."""
 
-    def __init__(self, shlib_environment_var, shlib_prefix, shlib_extension):
+    def __init__(self, shlib_environment_var, shlib_path_separator, shlib_prefix, shlib_extension):
         self.shlib_environment_var = shlib_environment_var
+        self.shlib_path_separator = shlib_path_separator
         self.shlib_prefix = shlib_prefix
         self.shlib_extension = shlib_extension
 
 
 def createPlatformContext():
     if platformIsDarwin():
-        return _PlatformContext('DYLD_LIBRARY_PATH', 'lib', 'dylib')
+        return _PlatformContext('DYLD_LIBRARY_PATH', ':', 'lib', 'dylib')
     elif getPlatform() in ("freebsd", "linux", "netbsd"):
-        return _PlatformContext('LD_LIBRARY_PATH', 'lib', 'so')
+        return _PlatformContext('LD_LIBRARY_PATH', ':', 'lib', 'so')
     else:
-        return None
+        return _PlatformContext('PATH', ';', '', 'dll')
 
 
 def hasChattyStderr(test_case):

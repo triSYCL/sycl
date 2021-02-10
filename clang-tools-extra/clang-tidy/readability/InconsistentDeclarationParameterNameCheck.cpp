@@ -73,7 +73,7 @@ bool checkIfFixItHintIsApplicable(
   if (!ParameterSourceDeclaration->isThisDeclarationADefinition())
     return false;
 
-  // Assumption: if parameter is not referenced in function defintion body, it
+  // Assumption: if parameter is not referenced in function definition body, it
   // may indicate that it's outdated, so don't touch it.
   if (!SourceParam->isReferenced())
     return false;
@@ -196,18 +196,16 @@ getParameterSourceDeclaration(const FunctionDecl *OriginalDeclaration) {
 std::string joinParameterNames(
     const DifferingParamsContainer &DifferingParams,
     llvm::function_ref<StringRef(const DifferingParamInfo &)> ChooseParamName) {
-  llvm::SmallVector<char, 40> Buffer;
-  llvm::raw_svector_ostream Str(Buffer);
+  llvm::SmallString<40> Str;
   bool First = true;
   for (const DifferingParamInfo &ParamInfo : DifferingParams) {
     if (First)
       First = false;
     else
-      Str << ", ";
-
-    Str << "'" << ChooseParamName(ParamInfo).str() << "'";
+      Str += ", ";
+    Str.append({"'", ChooseParamName(ParamInfo), "'"});
   }
-  return Str.str().str();
+  return std::string(Str);
 }
 
 void formatDifferingParamsDiagnostic(

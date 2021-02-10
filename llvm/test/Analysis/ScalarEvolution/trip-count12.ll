@@ -1,7 +1,8 @@
-; RUN: opt < %s -analyze -scalar-evolution | FileCheck %s
+; RUN: opt < %s -analyze -enable-new-pm=0 -scalar-evolution | FileCheck %s
+; RUN: opt < %s -disable-output "-passes=print<scalar-evolution>" 2>&1 | FileCheck %s
 
 ; CHECK: Determining loop execution counts for: @test
-; CHECK: Loop %for.body: backedge-taken count is ((-2 + %len)<nsw> /u 2)
+; CHECK: Loop %for.body: backedge-taken count is ((-2 + %len) /u 2)
 ; CHECK: Loop %for.body: max backedge-taken count is 1073741823
 
 define zeroext i16 @test(i16* nocapture %p, i32 %len) nounwind readonly {

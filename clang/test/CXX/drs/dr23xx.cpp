@@ -1,12 +1,61 @@
-// RUN: %clang_cc1 -std=c++98 %s -verify -fexceptions -fcxx-exceptions -pedantic-errors 2>&1 | FileCheck %s
+// RUN: %clang_cc1 -std=c++98 %s -verify -fexceptions -fcxx-exceptions -pedantic-errors 2>&1
 // RUN: %clang_cc1 -std=c++11 %s -verify -fexceptions -fcxx-exceptions -pedantic-errors 2>&1 | FileCheck %s
 // RUN: %clang_cc1 -std=c++14 %s -verify -fexceptions -fcxx-exceptions -pedantic-errors 2>&1 | FileCheck %s
 // RUN: %clang_cc1 -std=c++17 %s -verify -fexceptions -fcxx-exceptions -pedantic-errors 2>&1 | FileCheck %s
 // RUN: %clang_cc1 -std=c++2a %s -verify -fexceptions -fcxx-exceptions -pedantic-errors 2>&1 | FileCheck %s
 
-#if __cplusplus <= 201103L
-// expected-no-diagnostics
+#if __cplusplus >= 201103L
+namespace dr2338 { // dr2338: 12
+namespace B {
+enum E : bool { Zero, One };
+static_assert((int)(E)2 == 1, "");
+} // namespace B
+namespace D {
+enum class E : bool { Zero, One };
+static_assert((int)(E)2 == 1, "");
+} // namespace D
+} // namespace dr2338
 #endif
+
+namespace dr2346 { // dr2346: 11
+  void test() {
+    const int i2 = 0;
+    extern void h2b(int x = i2 + 0); // ok, not odr-use
+  }
+}
+
+namespace dr2352 { // dr2352: 10
+  int **p;
+  const int *const *const &f1() { return p; }
+  int *const *const &f2() { return p; }
+  int **const &f3() { return p; }
+
+  const int **const &f4() { return p; } // expected-error {{reference to type 'const int **const' could not bind to an lvalue of type 'int **'}}
+  const int *const *&f5() { return p; } // expected-error {{binding reference of type 'const int *const *' to value of type 'int **' not permitted due to incompatible qualifiers}}
+
+  // FIXME: We permit this as a speculative defect resolution, allowing
+  // qualification conversions when forming a glvalue conditional expression.
+  const int * const * const q = 0;
+  __typeof(&(true ? p : q)) x = &(true ? p : q);
+
+  // FIXME: Should we compute the composite pointer type here and produce an
+  // lvalue of type 'const int *const * const'?
+  const int * const * r;
+  void *y = &(true ? p : r); // expected-error {{rvalue of type 'const int *const *'}}
+
+  // FIXME: We order these as a speculative defect resolution.
+  void f(const int * const * const &r);
+#if __cplusplus >= 201103L
+  constexpr
+#endif
+  int *const *const &f(int * const * const &r) { return r; }
+
+  // No temporary is created here.
+  int *const *const &check_f = f(p);
+#if __cplusplus >= 201103L
+  static_assert(&p == &check_f, "");
+#endif
+}
 
 namespace dr2353 { // dr2353: 9
   struct X {
@@ -77,3 +126,35 @@ namespace dr2387 { // dr2387: 9
   extern template const int d<const int>;
 #endif
 }
+
+#if __cplusplus >= 201103L
+namespace dr2303 { // dr2303: 12
+template <typename... T>
+struct A;
+template <>
+struct A<> {};
+template <typename T, typename... Ts>
+struct A<T, Ts...> : A<Ts...> {};
+struct B : A<int, int> {};
+struct C : A<int, int>, A<int> {}; // expected-warning {{direct base 'A<int>' is inaccessible}}
+struct D : A<int>, A<int, int> {}; // expected-warning {{direct base 'A<int>' is inaccessible}}
+struct E : A<int, int> {};
+struct F : B, E {};
+
+template <typename... T>
+void f(const A<T...> &) {
+  static_assert(sizeof...(T) == 2, "Should only match A<int,int>");
+}
+template <typename... T>
+void f2(const A<T...> *);
+
+void g() {
+  f(B{}); // This is no longer ambiguous.
+  B b;
+  f2(&b);
+  f(C{});
+  f(D{});
+  f(F{}); // expected-error {{ambiguous conversion from derived class}}
+}
+} //namespace dr2303
+#endif

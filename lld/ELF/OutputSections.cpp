@@ -14,19 +14,21 @@
 #include "Target.h"
 #include "lld/Common/Memory.h"
 #include "lld/Common/Strings.h"
-#include "lld/Common/Threads.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/Support/Compression.h"
 #include "llvm/Support/MD5.h"
 #include "llvm/Support/MathExtras.h"
+#include "llvm/Support/Parallel.h"
 #include "llvm/Support/SHA1.h"
+#include "llvm/Support/TimeProfiler.h"
+#include <regex>
+#include <unordered_set>
 
 using namespace llvm;
 using namespace llvm::dwarf;
 using namespace llvm::object;
 using namespace llvm::support::endian;
 using namespace llvm::ELF;
-
 using namespace lld;
 using namespace lld::elf;
 
@@ -77,25 +79,48 @@ OutputSection::OutputSection(StringRef name, uint32_t type, uint64_t flags)
 // to be allocated for nobits sections. Other ones don't require
 // any special treatment on top of progbits, so there doesn't
 // seem to be a harm in merging them.
+//
+// NOTE: clang since rL252300 emits SHT_X86_64_UNWIND .eh_frame sections. Allow
+// them to be merged into SHT_PROGBITS .eh_frame (GNU as .cfi_*).
 static bool canMergeToProgbits(unsigned type) {
   return type == SHT_NOBITS || type == SHT_PROGBITS || type == SHT_INIT_ARRAY ||
          type == SHT_PREINIT_ARRAY || type == SHT_FINI_ARRAY ||
-         type == SHT_NOTE;
+         type == SHT_NOTE ||
+         (type == SHT_X86_64_UNWIND && config->emachine == EM_X86_64);
 }
 
-void OutputSection::addSection(InputSection *isec) {
+// Record that isec will be placed in the OutputSection. isec does not become
+// permanent until finalizeInputSections() is called. The function should not be
+// used after finalizeInputSections() is called. If you need to add an
+// InputSection post finalizeInputSections(), then you must do the following:
+//
+// 1. Find or create an InputSectionDescription to hold InputSection.
+// 2. Add the InputSection to the InputSectionDescription::sections.
+// 3. Call commitSection(isec).
+void OutputSection::recordSection(InputSectionBase *isec) {
+  partition = isec->partition;
+  isec->parent = this;
+  if (sectionCommands.empty() ||
+      !isa<InputSectionDescription>(sectionCommands.back()))
+    sectionCommands.push_back(make<InputSectionDescription>(""));
+  auto *isd = cast<InputSectionDescription>(sectionCommands.back());
+  isd->sectionBases.push_back(isec);
+}
+
+// Update fields (type, flags, alignment, etc) according to the InputSection
+// isec. Also check whether the InputSection flags and type are consistent with
+// other InputSections.
+void OutputSection::commitSection(InputSection *isec) {
   if (!hasInputSections) {
     // If IS is the first section to be added to this section,
-    // initialize Partition, Type, Entsize and flags from IS.
+    // initialize type, entsize and flags from isec.
     hasInputSections = true;
-    partition = isec->partition;
     type = isec->type;
     entsize = isec->entsize;
     flags = isec->flags;
   } else {
     // Otherwise, check if new type or flags are compatible with existing ones.
-    unsigned mask = SHF_TLS | SHF_LINK_ORDER;
-    if ((flags & mask) != (isec->flags & mask))
+    if ((flags ^ isec->flags) & SHF_TLS)
       error("incompatible section flags for " + name + "\n>>> " + toString(isec) +
             ": 0x" + utohexstr(isec->flags) + "\n>>> output section " + name +
             ": 0x" + utohexstr(flags));
@@ -110,6 +135,8 @@ void OutputSection::addSection(InputSection *isec) {
       type = SHT_PROGBITS;
     }
   }
+  if (noload)
+    type = SHT_NOBITS;
 
   isec->parent = this;
   uint64_t andMask =
@@ -118,6 +145,8 @@ void OutputSection::addSection(InputSection *isec) {
   uint64_t andFlags = (flags & isec->flags) & andMask;
   uint64_t orFlags = (flags | isec->flags) & orMask;
   flags = andFlags | orFlags;
+  if (nonAlloc)
+    flags &= ~(uint64_t)SHF_ALLOC;
 
   alignment = std::max(alignment, isec->alignment);
 
@@ -126,15 +155,69 @@ void OutputSection::addSection(InputSection *isec) {
   // set sh_entsize to 0.
   if (entsize != isec->entsize)
     entsize = 0;
+}
 
-  if (!isec->assigned) {
-    isec->assigned = true;
-    if (sectionCommands.empty() ||
-        !isa<InputSectionDescription>(sectionCommands.back()))
-      sectionCommands.push_back(make<InputSectionDescription>(""));
-    auto *isd = cast<InputSectionDescription>(sectionCommands.back());
-    isd->sections.push_back(isec);
+// This function scans over the InputSectionBase list sectionBases to create
+// InputSectionDescription::sections.
+//
+// It removes MergeInputSections from the input section array and adds
+// new synthetic sections at the location of the first input section
+// that it replaces. It then finalizes each synthetic section in order
+// to compute an output offset for each piece of each input section.
+void OutputSection::finalizeInputSections() {
+  std::vector<MergeSyntheticSection *> mergeSections;
+  for (BaseCommand *base : sectionCommands) {
+    auto *cmd = dyn_cast<InputSectionDescription>(base);
+    if (!cmd)
+      continue;
+    cmd->sections.reserve(cmd->sectionBases.size());
+    for (InputSectionBase *s : cmd->sectionBases) {
+      MergeInputSection *ms = dyn_cast<MergeInputSection>(s);
+      if (!ms) {
+        cmd->sections.push_back(cast<InputSection>(s));
+        continue;
+      }
+
+      // We do not want to handle sections that are not alive, so just remove
+      // them instead of trying to merge.
+      if (!ms->isLive())
+        continue;
+
+      auto i = llvm::find_if(mergeSections, [=](MergeSyntheticSection *sec) {
+        // While we could create a single synthetic section for two different
+        // values of Entsize, it is better to take Entsize into consideration.
+        //
+        // With a single synthetic section no two pieces with different Entsize
+        // could be equal, so we may as well have two sections.
+        //
+        // Using Entsize in here also allows us to propagate it to the synthetic
+        // section.
+        //
+        // SHF_STRINGS section with different alignments should not be merged.
+        return sec->flags == ms->flags && sec->entsize == ms->entsize &&
+               (sec->alignment == ms->alignment || !(sec->flags & SHF_STRINGS));
+      });
+      if (i == mergeSections.end()) {
+        MergeSyntheticSection *syn =
+            createMergeSynthetic(name, ms->type, ms->flags, ms->alignment);
+        mergeSections.push_back(syn);
+        i = std::prev(mergeSections.end());
+        syn->entsize = ms->entsize;
+        cmd->sections.push_back(syn);
+      }
+      (*i)->addSection(ms);
+    }
+
+    // sectionBases should not be used from this point onwards. Clear it to
+    // catch misuses.
+    cmd->sectionBases.clear();
+
+    // Some input sections may be removed from the list after ICF.
+    for (InputSection *s : cmd->sections)
+      commitSection(s);
   }
+  for (auto *ms : mergeSections)
+    ms->finalizeContents();
 }
 
 static void sortByOrder(MutableArrayRef<InputSection *> in,
@@ -165,6 +248,25 @@ void OutputSection::sort(llvm::function_ref<int(InputSectionBase *s)> order) {
       sortByOrder(isd->sections, order);
 }
 
+static void nopInstrFill(uint8_t *buf, size_t size) {
+  if (size == 0)
+    return;
+  unsigned i = 0;
+  if (size == 0)
+    return;
+  std::vector<std::vector<uint8_t>> nopFiller = *target->nopInstrs;
+  unsigned num = size / nopFiller.back().size();
+  for (unsigned c = 0; c < num; ++c) {
+    memcpy(buf + i, nopFiller.back().data(), nopFiller.back().size());
+    i += nopFiller.back().size();
+  }
+  unsigned remaining = size - i;
+  if (!remaining)
+    return;
+  assert(nopFiller[remaining - 1].size() == remaining);
+  memcpy(buf + i, nopFiller[remaining - 1].data(), remaining);
+}
+
 // Fill [Buf, Buf + Size) with Filler.
 // This is used for linker script "=fillexp" command.
 static void fill(uint8_t *buf, size_t size,
@@ -184,6 +286,8 @@ template <class ELFT> void OutputSection::maybeCompress() {
       !name.startswith(".debug_"))
     return;
 
+  llvm::TimeTraceScope timeScope("Compress debug sections");
+
   // Create a section header.
   zDebugHeader.resize(sizeof(Elf_Chdr));
   auto *hdr = reinterpret_cast<Elf_Chdr *>(zDebugHeader.data());
@@ -194,7 +298,12 @@ template <class ELFT> void OutputSection::maybeCompress() {
   // Write section contents to a temporary buffer and compress it.
   std::vector<uint8_t> buf(size);
   writeTo<ELFT>(buf.data());
-  if (Error e = zlib::compress(toStringRef(buf), compressedData))
+  // We chose 1 as the default compression level because it is the fastest. If
+  // -O2 is given, we use level 6 to compress debug info more by ~15%. We found
+  // that level 7 to 9 doesn't make much difference (~1% more compression) while
+  // they take significant amount of time (~2x), so level 6 seems enough.
+  if (Error e = zlib::compress(toStringRef(buf), compressedData,
+                               config->optimize >= 2 ? 6 : 1))
     fatal("compress failed: " + llvm::toString(std::move(e)));
 
   // Update section headers.
@@ -219,7 +328,7 @@ template <class ELFT> void OutputSection::writeTo(uint8_t *buf) {
   if (type == SHT_NOBITS)
     return;
 
-  // If -compress-debug-section is specified and if this is a debug seciton,
+  // If -compress-debug-section is specified and if this is a debug section,
   // we've already compressed section contents. If that's the case,
   // just write it down.
   if (!compressedData.empty()) {
@@ -248,7 +357,11 @@ template <class ELFT> void OutputSection::writeTo(uint8_t *buf) {
         end = buf + size;
       else
         end = buf + sections[i + 1]->outSecOff;
-      fill(start, end - start, filler);
+      if (isec->nopFiller) {
+        assert(target->nopInstrs);
+        nopInstrFill(start, end - start);
+      } else
+        fill(start, end - start, filler);
     }
   });
 
@@ -271,11 +384,19 @@ static void finalizeShtGroup(OutputSection *os,
   // provides signature of the section group.
   ArrayRef<Symbol *> symbols = section->file->getSymbols();
   os->info = in.symTab->getSymbolIndex(symbols[section->info]);
+
+  // Some group members may be combined or discarded, so we need to compute the
+  // new size. The content will be rewritten in InputSection::copyShtGroup.
+  std::unordered_set<uint32_t> seen;
+  ArrayRef<InputSectionBase *> sections = section->file->getSections();
+  for (const uint32_t &idx : section->getDataAs<uint32_t>().slice(1))
+    if (OutputSection *osec = sections[read32(&idx)]->getOutputSection())
+      seen.insert(osec->sectionIndex);
+  os->size = (1 + seen.size()) * sizeof(uint32_t);
 }
 
 void OutputSection::finalize() {
-  std::vector<InputSection *> v = getInputSections(this);
-  InputSection *first = v.empty() ? nullptr : v[0];
+  InputSection *first = getFirstInputSection(this);
 
   if (flags & SHF_LINK_ORDER) {
     // We must preserve the link order dependency of sections with the
@@ -284,8 +405,9 @@ void OutputSection::finalize() {
     // all InputSections in the OutputSection have the same dependency.
     if (auto *ex = dyn_cast<ARMExidxSyntheticSection>(first))
       link = ex->getLinkOrderDep()->getParent()->sectionIndex;
-    else if (auto *d = first->getLinkOrderDep())
-      link = d->getParent()->sectionIndex;
+    else if (first->flags & SHF_LINK_ORDER)
+      if (auto *d = first->getLinkOrderDep())
+        link = d->getParent()->sectionIndex;
   }
 
   if (type == SHT_GROUP) {
@@ -296,7 +418,11 @@ void OutputSection::finalize() {
   if (!config->copyRelocs || (type != SHT_RELA && type != SHT_REL))
     return;
 
-  if (isa<SyntheticSection>(first))
+  // Skip if 'first' is synthetic, i.e. not a section created by --emit-relocs.
+  // Normally 'type' was changed by 'first' so 'first' should be non-null.
+  // However, if the output section is .rela.dyn, 'type' can be set by the empty
+  // synthetic .rela.plt and first can be null.
+  if (!first || isa<SyntheticSection>(first))
     return;
 
   link = in.symTab->getParent()->sectionIndex;
@@ -307,32 +433,37 @@ void OutputSection::finalize() {
   flags |= SHF_INFO_LINK;
 }
 
-// Returns true if S matches /Filename.?\.o$/.
-static bool isCrtBeginEnd(StringRef s, StringRef filename) {
-  if (!s.endswith(".o"))
-    return false;
-  s = s.drop_back(2);
-  if (s.endswith(filename))
-    return true;
-  return !s.empty() && s.drop_back().endswith(filename);
+// Returns true if S is in one of the many forms the compiler driver may pass
+// crtbegin files.
+//
+// Gcc uses any of crtbegin[<empty>|S|T].o.
+// Clang uses Gcc's plus clang_rt.crtbegin[<empty>|S|T][-<arch>|<empty>].o.
+
+static bool isCrtbegin(StringRef s) {
+  static std::regex re(R"((clang_rt\.)?crtbegin[ST]?(-.*)?\.o)");
+  s = sys::path::filename(s);
+  return std::regex_match(s.begin(), s.end(), re);
 }
 
-static bool isCrtbegin(StringRef s) { return isCrtBeginEnd(s, "crtbegin"); }
-static bool isCrtend(StringRef s) { return isCrtBeginEnd(s, "crtend"); }
+static bool isCrtend(StringRef s) {
+  static std::regex re(R"((clang_rt\.)?crtend[ST]?(-.*)?\.o)");
+  s = sys::path::filename(s);
+  return std::regex_match(s.begin(), s.end(), re);
+}
 
-// .ctors and .dtors are sorted by this priority from highest to lowest.
+// .ctors and .dtors are sorted by this order:
 //
-//  1. The section was contained in crtbegin (crtbegin contains
-//     some sentinel value in its .ctors and .dtors so that the runtime
-//     can find the beginning of the sections.)
+// 1. .ctors/.dtors in crtbegin (which contains a sentinel value -1).
+// 2. The section is named ".ctors" or ".dtors" (priority: 65536).
+// 3. The section has an optional priority value in the form of ".ctors.N" or
+//    ".dtors.N" where N is a number in the form of %05u (priority: 65535-N).
+// 4. .ctors/.dtors in crtend (which contains a sentinel value 0).
 //
-//  2. The section has an optional priority value in the form of ".ctors.N"
-//     or ".dtors.N" where N is a number. Unlike .{init,fini}_array,
-//     they are compared as string rather than number.
-//
-//  3. The section is just ".ctors" or ".dtors".
-//
-//  4. The section was contained in crtend, which contains an end marker.
+// For 2 and 3, the sections are sorted by priority from high to low, e.g.
+// .ctors (65536), .ctors.00100 (65436), .ctors.00200 (65336).  In GNU ld's
+// internal linker scripts, the sorting is by string comparison which can
+// achieve the same goal given the optional priority values are of the same
+// length.
 //
 // In an ideal world, we don't need this function because .init_array and
 // .ctors are duplicate features (and .init_array is newer.) However, there
@@ -347,13 +478,7 @@ static bool compCtors(const InputSection *a, const InputSection *b) {
   bool endB = isCrtend(b->file->getName());
   if (endA != endB)
     return endB;
-  StringRef x = a->name;
-  StringRef y = b->name;
-  assert(x.startswith(".ctors") || x.startswith(".dtors"));
-  assert(y.startswith(".ctors") || y.startswith(".dtors"));
-  x = x.substr(6);
-  y = y.substr(6);
-  return x < y;
+  return getPriority(a->name) > getPriority(b->name);
 }
 
 // Sorts input sections by the special rules for .ctors and .dtors.
@@ -365,20 +490,29 @@ void OutputSection::sortCtorsDtors() {
   llvm::stable_sort(isd->sections, compCtors);
 }
 
-// If an input string is in the form of "foo.N" where N is a number,
-// return N. Otherwise, returns 65536, which is one greater than the
-// lowest priority.
+// If an input string is in the form of "foo.N" where N is a number, return N
+// (65535-N if .ctors.N or .dtors.N). Otherwise, returns 65536, which is one
+// greater than the lowest priority.
 int elf::getPriority(StringRef s) {
   size_t pos = s.rfind('.');
   if (pos == StringRef::npos)
     return 65536;
-  int v;
-  if (!to_integer(s.substr(pos + 1), v, 10))
-    return 65536;
+  int v = 65536;
+  if (to_integer(s.substr(pos + 1), v, 10) &&
+      (pos == 6 && (s.startswith(".ctors") || s.startswith(".dtors"))))
+    v = 65535 - v;
   return v;
 }
 
-std::vector<InputSection *> elf::getInputSections(OutputSection *os) {
+InputSection *elf::getFirstInputSection(const OutputSection *os) {
+  for (BaseCommand *base : os->sectionCommands)
+    if (auto *isd = dyn_cast<InputSectionDescription>(base))
+      if (!isd->sections.empty())
+        return isd->sections[0];
+  return nullptr;
+}
+
+std::vector<InputSection *> elf::getInputSections(const OutputSection *os) {
   std::vector<InputSection *> ret;
   for (BaseCommand *base : os->sectionCommands)
     if (auto *isd = dyn_cast<InputSectionDescription>(base))

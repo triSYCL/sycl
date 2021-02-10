@@ -16,21 +16,30 @@
 #include "AggressiveInstCombineInternal.h"
 #include "llvm-c/Initialization.h"
 #include "llvm-c/Transforms/AggressiveInstCombine.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/Analysis/BasicAliasAnalysis.h"
 #include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/PatternMatch.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Transforms/Utils/Local.h"
+
 using namespace llvm;
 using namespace PatternMatch;
 
 #define DEBUG_TYPE "aggressive-instcombine"
+
+STATISTIC(NumAnyOrAllBitsSet, "Number of any/all-bits-set patterns folded");
+STATISTIC(NumGuardedRotates,
+          "Number of guarded rotates transformed into funnel shifts");
+STATISTIC(NumPopCountRecognized, "Number of popcount idioms recognized");
 
 namespace {
 /// Contains expression pattern combiner logic.
@@ -72,29 +81,31 @@ static bool foldGuardedRotateToFunnelShift(Instruction &I) {
   if (!isPowerOf2_32(I.getType()->getScalarSizeInBits()))
     return false;
 
-  // Match V to funnel shift left/right and capture the source operand and
-  // shift amount in X and Y.
-  auto matchRotate = [](Value *V, Value *&X, Value *&Y) {
-    Value *L0, *L1, *R0, *R1;
+  // Match V to funnel shift left/right and capture the source operands and
+  // shift amount.
+  auto matchFunnelShift = [](Value *V, Value *&ShVal0, Value *&ShVal1,
+                             Value *&ShAmt) {
+    Value *SubAmt;
     unsigned Width = V->getType()->getScalarSizeInBits();
-    auto Sub = m_Sub(m_SpecificInt(Width), m_Value(R1));
 
-    // rotate_left(X, Y) == (X << Y) | (X >> (Width - Y))
-    auto RotL = m_OneUse(
-        m_c_Or(m_Shl(m_Value(L0), m_Value(L1)), m_LShr(m_Value(R0), Sub)));
-    if (RotL.match(V) && L0 == R0 && L1 == R1) {
-      X = L0;
-      Y = L1;
-      return Intrinsic::fshl;
+    // fshl(ShVal0, ShVal1, ShAmt)
+    //  == (ShVal0 << ShAmt) | (ShVal1 >> (Width -ShAmt))
+    if (match(V, m_OneUse(m_c_Or(
+                     m_Shl(m_Value(ShVal0), m_Value(ShAmt)),
+                     m_LShr(m_Value(ShVal1),
+                            m_Sub(m_SpecificInt(Width), m_Value(SubAmt))))))) {
+      if (ShAmt == SubAmt) // TODO: Use m_Specific
+        return Intrinsic::fshl;
     }
 
-    // rotate_right(X, Y) == (X >> Y) | (X << (Width - Y))
-    auto RotR = m_OneUse(
-        m_c_Or(m_LShr(m_Value(L0), m_Value(L1)), m_Shl(m_Value(R0), Sub)));
-    if (RotR.match(V) && L0 == R0 && L1 == R1) {
-      X = L0;
-      Y = L1;
-      return Intrinsic::fshr;
+    // fshr(ShVal0, ShVal1, ShAmt)
+    //  == (ShVal0 >> ShAmt) | (ShVal1 << (Width - ShAmt))
+    if (match(V,
+              m_OneUse(m_c_Or(m_Shl(m_Value(ShVal0), m_Sub(m_SpecificInt(Width),
+                                                           m_Value(SubAmt))),
+                              m_LShr(m_Value(ShVal1), m_Value(ShAmt)))))) {
+      if (ShAmt == SubAmt) // TODO: Use m_Specific
+        return Intrinsic::fshr;
     }
 
     return Intrinsic::not_intrinsic;
@@ -102,52 +113,55 @@ static bool foldGuardedRotateToFunnelShift(Instruction &I) {
 
   // One phi operand must be a rotate operation, and the other phi operand must
   // be the source value of that rotate operation:
-  // phi [ rotate(RotSrc, RotAmt), RotBB ], [ RotSrc, GuardBB ]
+  // phi [ rotate(RotSrc, ShAmt), FunnelBB ], [ RotSrc, GuardBB ]
   PHINode &Phi = cast<PHINode>(I);
+  unsigned FunnelOp = 0, GuardOp = 1;
   Value *P0 = Phi.getOperand(0), *P1 = Phi.getOperand(1);
-  Value *RotSrc, *RotAmt;
-  Intrinsic::ID IID = matchRotate(P0, RotSrc, RotAmt);
-  if (IID == Intrinsic::not_intrinsic || RotSrc != P1) {
-    IID = matchRotate(P1, RotSrc, RotAmt);
-    if (IID == Intrinsic::not_intrinsic || RotSrc != P0)
+  Value *ShVal0, *ShVal1, *ShAmt;
+  Intrinsic::ID IID = matchFunnelShift(P0, ShVal0, ShVal1, ShAmt);
+  if (IID == Intrinsic::not_intrinsic || ShVal0 != ShVal1 || ShVal0 != P1) {
+    IID = matchFunnelShift(P1, ShVal0, ShVal1, ShAmt);
+    if (IID == Intrinsic::not_intrinsic || ShVal0 != ShVal1 || ShVal0 != P0)
       return false;
     assert((IID == Intrinsic::fshl || IID == Intrinsic::fshr) &&
            "Pattern must match funnel shift left or right");
+    std::swap(FunnelOp, GuardOp);
   }
+  assert(ShVal0 == ShVal1 && "Rotation funnel shift pattern expected");
 
   // The incoming block with our source operand must be the "guard" block.
   // That must contain a cmp+branch to avoid the rotate when the shift amount
   // is equal to 0. The other incoming block is the block with the rotate.
-  BasicBlock *GuardBB = Phi.getIncomingBlock(RotSrc == P1);
-  BasicBlock *RotBB = Phi.getIncomingBlock(RotSrc != P1);
+  BasicBlock *GuardBB = Phi.getIncomingBlock(GuardOp);
+  BasicBlock *FunnelBB = Phi.getIncomingBlock(FunnelOp);
   Instruction *TermI = GuardBB->getTerminator();
-  BasicBlock *TrueBB, *FalseBB;
   ICmpInst::Predicate Pred;
-  if (!match(TermI, m_Br(m_ICmp(Pred, m_Specific(RotAmt), m_ZeroInt()), TrueBB,
-                         FalseBB)))
+  BasicBlock *PhiBB = Phi.getParent();
+  if (!match(TermI, m_Br(m_ICmp(Pred, m_Specific(ShAmt), m_ZeroInt()),
+                         m_SpecificBB(PhiBB), m_SpecificBB(FunnelBB))))
     return false;
 
-  BasicBlock *PhiBB = Phi.getParent();
-  if (Pred != CmpInst::ICMP_EQ || TrueBB != PhiBB || FalseBB != RotBB)
+  if (Pred != CmpInst::ICMP_EQ)
     return false;
 
   // We matched a variation of this IR pattern:
   // GuardBB:
-  //   %cmp = icmp eq i32 %RotAmt, 0
-  //   br i1 %cmp, label %PhiBB, label %RotBB
-  // RotBB:
-  //   %sub = sub i32 32, %RotAmt
-  //   %shr = lshr i32 %X, %sub
-  //   %shl = shl i32 %X, %RotAmt
+  //   %cmp = icmp eq i32 %ShAmt, 0
+  //   br i1 %cmp, label %PhiBB, label %FunnelBB
+  // FunnelBB:
+  //   %sub = sub i32 32, %ShAmt
+  //   %shr = lshr i32 %RotSrc, %sub
+  //   %shl = shl i32 %RotSrc, %ShAmt
   //   %rot = or i32 %shr, %shl
   //   br label %PhiBB
   // PhiBB:
-  //   %cond = phi i32 [ %rot, %RotBB ], [ %X, %GuardBB ]
+  //   %cond = phi i32 [ %RotSrc, %FunnelBB ], [ %RotSrc, %GuardBB ]
   // -->
-  // llvm.fshl.i32(i32 %X, i32 %RotAmt)
+  // llvm.fshl.i32(i32 %RotSrc, i32 %RotSrc, i32 %ShAmt)
   IRBuilder<> Builder(PhiBB, PhiBB->getFirstInsertionPt());
   Function *F = Intrinsic::getDeclaration(Phi.getModule(), IID, Phi.getType());
-  Phi.replaceAllUsesWith(Builder.CreateCall(F, {RotSrc, RotSrc, RotAmt}));
+  Phi.replaceAllUsesWith(Builder.CreateCall(F, {ShVal0, ShVal1, ShAmt}));
+  ++NumGuardedRotates;
   return true;
 }
 
@@ -194,8 +208,8 @@ static bool matchAndOrChain(Value *V, MaskOps &MOps) {
   // We need a shift-right or a bare value representing a compare of bit 0 of
   // the original source operand.
   Value *Candidate;
-  uint64_t BitIndex = 0;
-  if (!match(V, m_LShr(m_Value(Candidate), m_ConstantInt(BitIndex))))
+  const APInt *BitIndex = nullptr;
+  if (!match(V, m_LShr(m_Value(Candidate), m_APInt(BitIndex))))
     Candidate = V;
 
   // Initialize result source operand.
@@ -203,11 +217,11 @@ static bool matchAndOrChain(Value *V, MaskOps &MOps) {
     MOps.Root = Candidate;
 
   // The shift constant is out-of-range? This code hasn't been simplified.
-  if (BitIndex >= MOps.Mask.getBitWidth())
+  if (BitIndex && BitIndex->uge(MOps.Mask.getBitWidth()))
     return false;
 
   // Fill in the mask bit derived from the shift constant.
-  MOps.Mask.setBit(BitIndex);
+  MOps.Mask.setBit(BitIndex ? BitIndex->getZExtValue() : 0);
   return MOps.Root == Candidate;
 }
 
@@ -248,7 +262,75 @@ static bool foldAnyOrAllBitsSet(Instruction &I) {
                                : Builder.CreateIsNotNull(And);
   Value *Zext = Builder.CreateZExt(Cmp, I.getType());
   I.replaceAllUsesWith(Zext);
+  ++NumAnyOrAllBitsSet;
   return true;
+}
+
+// Try to recognize below function as popcount intrinsic.
+// This is the "best" algorithm from
+// http://graphics.stanford.edu/~seander/bithacks.html#CountBitsSetParallel
+// Also used in TargetLowering::expandCTPOP().
+//
+// int popcount(unsigned int i) {
+//   i = i - ((i >> 1) & 0x55555555);
+//   i = (i & 0x33333333) + ((i >> 2) & 0x33333333);
+//   i = ((i + (i >> 4)) & 0x0F0F0F0F);
+//   return (i * 0x01010101) >> 24;
+// }
+static bool tryToRecognizePopCount(Instruction &I) {
+  if (I.getOpcode() != Instruction::LShr)
+    return false;
+
+  Type *Ty = I.getType();
+  if (!Ty->isIntOrIntVectorTy())
+    return false;
+
+  unsigned Len = Ty->getScalarSizeInBits();
+  // FIXME: fix Len == 8 and other irregular type lengths.
+  if (!(Len <= 128 && Len > 8 && Len % 8 == 0))
+    return false;
+
+  APInt Mask55 = APInt::getSplat(Len, APInt(8, 0x55));
+  APInt Mask33 = APInt::getSplat(Len, APInt(8, 0x33));
+  APInt Mask0F = APInt::getSplat(Len, APInt(8, 0x0F));
+  APInt Mask01 = APInt::getSplat(Len, APInt(8, 0x01));
+  APInt MaskShift = APInt(Len, Len - 8);
+
+  Value *Op0 = I.getOperand(0);
+  Value *Op1 = I.getOperand(1);
+  Value *MulOp0;
+  // Matching "(i * 0x01010101...) >> 24".
+  if ((match(Op0, m_Mul(m_Value(MulOp0), m_SpecificInt(Mask01)))) &&
+       match(Op1, m_SpecificInt(MaskShift))) {
+    Value *ShiftOp0;
+    // Matching "((i + (i >> 4)) & 0x0F0F0F0F...)".
+    if (match(MulOp0, m_And(m_c_Add(m_LShr(m_Value(ShiftOp0), m_SpecificInt(4)),
+                                    m_Deferred(ShiftOp0)),
+                            m_SpecificInt(Mask0F)))) {
+      Value *AndOp0;
+      // Matching "(i & 0x33333333...) + ((i >> 2) & 0x33333333...)".
+      if (match(ShiftOp0,
+                m_c_Add(m_And(m_Value(AndOp0), m_SpecificInt(Mask33)),
+                        m_And(m_LShr(m_Deferred(AndOp0), m_SpecificInt(2)),
+                              m_SpecificInt(Mask33))))) {
+        Value *Root, *SubOp1;
+        // Matching "i - ((i >> 1) & 0x55555555...)".
+        if (match(AndOp0, m_Sub(m_Value(Root), m_Value(SubOp1))) &&
+            match(SubOp1, m_And(m_LShr(m_Specific(Root), m_SpecificInt(1)),
+                                m_SpecificInt(Mask55)))) {
+          LLVM_DEBUG(dbgs() << "Recognized popcount intrinsic\n");
+          IRBuilder<> Builder(&I);
+          Function *Func = Intrinsic::getDeclaration(
+              I.getModule(), Intrinsic::ctpop, I.getType());
+          I.replaceAllUsesWith(Builder.CreateCall(Func, {Root}));
+          ++NumPopCountRecognized;
+          return true;
+        }
+      }
+    }
+  }
+
+  return false;
 }
 
 /// This is the entry point for folds that could be implemented in regular
@@ -269,6 +351,7 @@ static bool foldUnusualPatterns(Function &F, DominatorTree &DT) {
     for (Instruction &I : make_range(BB.rbegin(), BB.rend())) {
       MadeChange |= foldAnyOrAllBitsSet(I);
       MadeChange |= foldGuardedRotateToFunnelShift(I);
+      MadeChange |= tryToRecognizePopCount(I); 
     }
   }
 

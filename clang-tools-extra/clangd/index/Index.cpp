@@ -7,7 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "Index.h"
-#include "Logger.h"
+#include "support/Logger.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
@@ -31,8 +31,9 @@ std::shared_ptr<SymbolIndex> SwapIndex::snapshot() const {
   return Index;
 }
 
-bool fromJSON(const llvm::json::Value &Parameters, FuzzyFindRequest &Request) {
-  llvm::json::ObjectMapper O(Parameters);
+bool fromJSON(const llvm::json::Value &Parameters, FuzzyFindRequest &Request,
+              llvm::json::Path P) {
+  llvm::json::ObjectMapper O(Parameters, P);
   int64_t Limit;
   bool OK =
       O && O.map("Query", Request.Query) && O.map("Scopes", Request.Scopes) &&
@@ -65,7 +66,7 @@ void SwapIndex::lookup(const LookupRequest &R,
                        llvm::function_ref<void(const Symbol &)> CB) const {
   return snapshot()->lookup(R, CB);
 }
-void SwapIndex::refs(const RefsRequest &R,
+bool SwapIndex::refs(const RefsRequest &R,
                      llvm::function_ref<void(const Ref &)> CB) const {
   return snapshot()->refs(R, CB);
 }
@@ -73,6 +74,11 @@ void SwapIndex::relations(
     const RelationsRequest &R,
     llvm::function_ref<void(const SymbolID &, const Symbol &)> CB) const {
   return snapshot()->relations(R, CB);
+}
+
+llvm::unique_function<bool(llvm::StringRef) const>
+SwapIndex::indexedFiles() const {
+  return snapshot()->indexedFiles();
 }
 
 size_t SwapIndex::estimateMemoryUsage() const {

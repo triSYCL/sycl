@@ -32,6 +32,14 @@
 #       files
 # $6 == The name we wish to give our final output .xcl binary, important that it
 #       is consistent with what the driver expects it to be.
+# $7 == The name of the file containing additional args for v++ -c
+# $8 == The name of the file containing additional args for v++ -l
+# $9 == The name of the target hw/hw_emu/sw_emu
+
+set -e # stop on error
+set -x
+CWD=$(pwd)
+set -x
 
 # TODO: Pass an argument through the driver to set options like XILINX_PLATFORM,
 # the environment variables are a quick workaround to swap boards.
@@ -64,6 +72,18 @@ if [[ -z "$6" ]]; then
   usage 6 "no final output file specified"
 fi
 
+if [[ -z "$7" ]]; then
+  usage 7 "no addtional compile args file"
+fi
+
+if [[ -z "$8" ]]; then
+  usage 8 "no addtional link args file"
+fi
+
+if [[ -z "$9" ]]; then
+  usage 9 "no target specified"
+fi
+
 # Setup SDx related env variables
 SDX_BIN_PATH_DIR="$1"
 if [[ ! -d "$SDX_BIN_PATH_DIR" ]]; then
@@ -74,10 +94,19 @@ else
   # ENV variable
 
   SDX_LIB_SPIR="$SDX_BIN_PATH_DIR/../lnx64/lib/libspir64-39-hls.bc"
+  if [[ ! -f "$SDX_LIB_SPIR" ]]; then
+    SDX_LIB_SPIR="$SDX_BIN_PATH_DIR/../../../Vitis_HLS/2*/lnx64/lib/libspir64-39-hls.bc"
+    if [[ ! -f "$SDX_LIB_SPIR" ]]; then
+      usage 9 "could not find SDx's libspir64-39-hls.bc"
+    fi
+  fi
   # It says 3.9, but trust us this is Clang/LLVM 7..
   SDX_CLANG_LLVM_BIN="$SDX_BIN_PATH_DIR/../lnx64/tools/clang-3.9-csynth/bin"
-  if [[ ! -f "$SDX_LIB_SPIR" ]]; then
-    usage 9 "could not find SDx's libspir64-39-hls.bc"
+  if [[ ! -f "$SDX_CLANG_LLVM_BIN/llvm-as" ]]; then
+    SDX_CLANG_LLVM_BIN="$SDX_BIN_PATH_DIR/../../../Vitis_HLS/2*/lnx64/tools/clang-3.9-csynth/bin"
+    if [[ ! -f "$SDX_CLANG_LLVM_BIN/llvm-as" ]]; then
+      usage 9 "could not find SDx's binary directory"
+    fi
   fi
 
   SDX="$SDX_BIN_PATH_DIR/v++"
@@ -111,19 +140,31 @@ else
   fi
 fi
 
+if [[ ! -d "$5" ]]; then
+  usage 14 "the path given for the temporary directory is an invalid directory"
+fi
+
 # excluding file extension e.g. .cpp and path
 SOURCE_FILE_NAME="$3"
 # input file name including extensions and path
 INPUT_FILE_NAME="$4"
 # Should point to whatever Clang has decided is the temporary directory
-TEMPORARY_DIR="$5"
-
-if [[ ! -d "$TEMPORARY_DIR" ]]; then
-  usage 14 "the path given for the temporary directory is an invalid directory"
-fi
+TMP_PATH="$(mktemp $5/sycl-xocc.XXXXXX)"
 
 # output file name including extensions and path
 OUTPUT_FILE_NAME="$6"
+
+set +e
+# allow faillures because empty string is good default
+# This make debugging easier.
+ADDITIONAL_COMPILE_ARGS=$(cat $7)
+ADDITIONAL_LINK_ARGS=$(cat $8)
+set -e
+XCL_EMULATION_MODE=$9
+
+KERNELPROP="${TMP_PATH}_KernelProperties_${SOURCE_FILE_NAME}.bash"
+
+cp "$INPUT_FILE_NAME" "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels.bc"
 
 # -flat-address-space defines the generic address space we wish to deduce to
 # something concrete, used by the infer-address-spaces pass which is slightly
@@ -131,11 +172,12 @@ OUTPUT_FILE_NAME="$6"
 # adding a new LLVM Target that will largelly be unused right now..
 $OPT -asfix -globaldce -O3 -globaldce --infer-address-spaces \
   -flat-address-space=4 -globaldce -inSPIRation -globaldce -kernelPropGen \
-  "$INPUT_FILE_NAME" -o "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.bc"
+  --sycl-kernel-propgen-output $KERNELPROP \
+  "$INPUT_FILE_NAME" -o "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc"
 
 # Link our SDx SPIR binaries in
-$LLVM_LINK "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.bc" \
-  $SDX_LIB_SPIR -o "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
+$LLVM_LINK "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc" \
+  $SDX_LIB_SPIR -o "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
 
 # Using the LLVM Linker will add more incompatible IR so run the downgrader in
 # a second pass afterwards, rather than once before in the first opt pass
@@ -144,9 +186,13 @@ $LLVM_LINK "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.bc" \
 # We also only wish to emit LLVM IR assembly language format and not bitcode
 # format as we currently use the llvm assembler packaged with xocc to generate
 # our final bitcode file.
+$OPT -S -preparesycl -globaldce \
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc" -o \
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.simple.xpirbc"
+
 $OPT -S -O3 -xoccIRDowngrader \
-  "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc" -o \
-  "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.simple.xpirbc" -o \
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc"
 
 # Generate our final bitcode file with the xocc llvm-as (Clang/LLVM 7 for now)
 # this is to work around a problem with the ByVal attribute. The bitcode that
@@ -155,44 +201,61 @@ $OPT -S -O3 -xoccIRDowngrader \
 # it by compiling the IR to BC using the llvm-as from xocc and some minor
 # massaging in the xoccIRDowngrader
 $SDX_CLANG_LLVM_BIN/llvm-as \
-  "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc" -o \
-  "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc" -o \
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc"
 
 # Our bash file containing kernel property environment variables is placed in
 # the systems temporary directory (or wherever the Clang driver is told is the
 # temporary directory) and is postfixed with the source files name. It's
 # generated by the kernelPropertiesGen OPT pass.
-source "$TEMPORARY_DIR/KernelProperties_${SOURCE_FILE_NAME}.bash"
+source $KERNELPROP
 
 if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
+
+  echo "Building ${#KERNEL_NAME_ARRAY[@]} Kernels..."
   # Compile all Kernels in the source file to seperate .xo ("object") files
   # and add them to the list of kernels to be linked
   LINKER_LIST=""
-  for index in "${KERNEL_NAME_ARRAY[@]}"; do
-  if [[ -n "$index" ]]; then
+  for ((i=0;i<${#KERNEL_NAME_ARRAY[@]};++i)); do
+  if [[ -n "${KERNEL_NAME_ARRAY[i]}" ]]; then
     if [[ ! -z "$VERBOSE" ]]; then
       echo "Invoking Kernel Compilation with $SDX"
       echo "--target: $XCL_EMULATION_MODE"
       echo "--platform: $XILINX_PLATFORM"
-      echo "Compiling kernel: $index"
-      echo "Outputting file to: $TEMPORARY_DIR/$index.xo"
-      echo "Input file is: $TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
+      echo "Compiling kernel: ${KERNEL_NAME_ARRAY[i]}"
+      echo "Outputting file to: ${TMP_PATH}_${KERNEL_NAME_ARRAY[i]}.xo"
+      echo "Input file is: ${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc"
     fi
 
     $SDX --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM \
-      --save-temps -c -k "$index" -o "$TEMPORARY_DIR/$index.xo" \
-      "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
-      LINKER_LIST="$TEMPORARY_DIR/$index.xo $LINKER_LIST"
+      --xp param:compiler.hlsDataflowStrictMode=off \
+      --save-temps -c -k "${KERNEL_NAME_ARRAY[i]}" -o "${TMP_PATH}_${KERNEL_NAME_ARRAY[i]}.xo" \
+      "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc" \
+      $ADDITIONAL_COMPILE_ARGS ${EXTRA_KERNEL_PARAMS_ARRAY[i]} &
+      LINKER_LIST="${TMP_PATH}_${KERNEL_NAME_ARRAY[i]}.xo $LINKER_LIST"
   fi
   done
+
+  for job in `jobs -p`
+  do
+    wait $job
+  done
+
+  LINKER_WD=${TMP_PATH}_${SOURCE_FILE_NAME}_linker
+  rm -rf $LINKER_WD
+  mkdir -p $LINKER_WD
+  cd $LINKER_WD
 
   # \todo Revisit removal of hlsDataflowStrictMode in the future to see if we
   # can compile for hw_emu with it on or if it outputs clearer diagnostics so
   # we can track down the problem (when I tested this it seems that the call
   # to log the error was possibly broken)
   $SDX --xp param:compiler.hlsDataflowStrictMode=off $DDR_BANK_ARGS \
-    --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM  -l \
-    --save-temps -o "$OUTPUT_FILE_NAME" $LINKER_LIST
+    --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM -l \
+    --save-temps -o "$OUTPUT_FILE_NAME" $LINKER_LIST $ADDITIONAL_LINK_ARGS
+  
+  cd $CWD
+  cp -rf $LINKER_WD/* .
 
   # This step is unconnected to the generation of the final xcl binary, it dumps
   # useful debug information from the final generated xcl binary into the temp
@@ -210,14 +273,14 @@ fi
 if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   for index in "${KERNEL_NAME_ARRAY[@]}"; do
   if [[ -n "$index" ]]; then
-    rm "$TEMPORARY_DIR/$index.xo"
+    rm "${TMP_PATH}_$index.xo"
   fi
   done
 fi
 
-if [[ ! -z "$VERBOSE" ]]; then
-  rm "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
-  rm "$TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.bc"
-  rm "$TEMPORARY_DIR/KernelProperties_${SOURCE_FILE_NAME}.bash"
-fi
+# if [[ ! -z "$VERBOSE" ]]; then
+#   rm -f "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked*.xpirbc"
+#   rm "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc"
+#   rm "${TMP_PATH}_KernelProperties_${SOURCE_FILE_NAME}.bash"
+# fi
 

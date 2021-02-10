@@ -19,11 +19,12 @@
 
 #include "llvm/CodeGen/LivePhysRegs.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
+#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/ReachingDefAnalysis.h"
 #include "llvm/CodeGen/RegisterClassInfo.h"
-#include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
-
+#include "llvm/InitializePasses.h"
+#include "llvm/Support/Debug.h"
 
 using namespace llvm;
 
@@ -105,10 +106,19 @@ FunctionPass *llvm::createBreakFalseDeps() { return new BreakFalseDeps(); }
 
 bool BreakFalseDeps::pickBestRegisterForUndef(MachineInstr *MI, unsigned OpIdx,
   unsigned Pref) {
+
+  // We can't change tied operands.
+  if (MI->isRegTiedToDefOperand(OpIdx))
+    return false;
+
   MachineOperand &MO = MI->getOperand(OpIdx);
   assert(MO.isUndef() && "Expected undef machine operand");
 
-  Register OriginalReg = MO.getReg();
+  // We can't change registers that aren't renamable.
+  if (!MO.isRenamable())
+    return false;
+
+  MCRegister OriginalReg = MO.getReg().asMCReg();
 
   // Update only undef operands that have reg units that are mapped to one root.
   for (MCRegUnitIterator Unit(OriginalReg, TRI); Unit.isValid(); ++Unit) {
@@ -161,8 +171,8 @@ bool BreakFalseDeps::pickBestRegisterForUndef(MachineInstr *MI, unsigned OpIdx,
 
 bool BreakFalseDeps::shouldBreakDependence(MachineInstr *MI, unsigned OpIdx,
                                            unsigned Pref) {
-  Register reg = MI->getOperand(OpIdx).getReg();
-  unsigned Clearance = RDA->getClearance(MI, reg);
+  MCRegister Reg = MI->getOperand(OpIdx).getReg().asMCReg();
+  unsigned Clearance = RDA->getClearance(MI, Reg);
   LLVM_DEBUG(dbgs() << "Clearance: " << Clearance << ", want " << Pref);
 
   if (Pref > Clearance) {
@@ -176,19 +186,31 @@ bool BreakFalseDeps::shouldBreakDependence(MachineInstr *MI, unsigned OpIdx,
 void BreakFalseDeps::processDefs(MachineInstr *MI) {
   assert(!MI->isDebugInstr() && "Won't process debug values");
 
+  const MCInstrDesc &MCID = MI->getDesc();
+
   // Break dependence on undef uses. Do this before updating LiveRegs below.
-  unsigned OpNum;
-  unsigned Pref = TII->getUndefRegClearance(*MI, OpNum, TRI);
-  if (Pref) {
-    bool HadTrueDependency = pickBestRegisterForUndef(MI, OpNum, Pref);
-    // We don't need to bother trying to break a dependency if this
-    // instruction has a true dependency on that register through another
-    // operand - we'll have to wait for it to be available regardless.
-    if (!HadTrueDependency && shouldBreakDependence(MI, OpNum, Pref))
-      UndefReads.push_back(std::make_pair(MI, OpNum));
+  // This can remove a false dependence with no additional instructions.
+  for (unsigned i = MCID.getNumDefs(), e = MCID.getNumOperands(); i != e; ++i) {
+    MachineOperand &MO = MI->getOperand(i);
+    if (!MO.isReg() || !MO.getReg() || !MO.isUse() || !MO.isUndef())
+      continue;
+
+    unsigned Pref = TII->getUndefRegClearance(*MI, i, TRI);
+    if (Pref) {
+      bool HadTrueDependency = pickBestRegisterForUndef(MI, i, Pref);
+      // We don't need to bother trying to break a dependency if this
+      // instruction has a true dependency on that register through another
+      // operand - we'll have to wait for it to be available regardless.
+      if (!HadTrueDependency && shouldBreakDependence(MI, i, Pref))
+        UndefReads.push_back(std::make_pair(MI, i));
+    }
   }
 
-  const MCInstrDesc &MCID = MI->getDesc();
+  // The code below allows the target to create a new instruction to break the
+  // dependence. That opposes the goal of minimizing size, so bail out now.
+  if (MF->getFunction().hasMinSize())
+    return;
+
   for (unsigned i = 0,
     e = MI->isVariadic() ? MI->getNumOperands() : MCID.getNumDefs();
     i != e; ++i) {
@@ -206,6 +228,11 @@ void BreakFalseDeps::processDefs(MachineInstr *MI) {
 
 void BreakFalseDeps::processUndefReads(MachineBasicBlock *MBB) {
   if (UndefReads.empty())
+    return;
+
+  // The code below allows the target to create a new instruction to break the
+  // dependence. That opposes the goal of minimizing size, so bail out now.
+  if (MF->getFunction().hasMinSize())
     return;
 
   // Collect this block's live out register units.

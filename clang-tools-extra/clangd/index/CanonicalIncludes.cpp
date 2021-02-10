@@ -1,4 +1,4 @@
-//===-- CanonicalIncludes.h - remap #inclue headers--------------*- C++ -*-===//
+//===-- CanonicalIncludes.h - remap #include headers-------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -21,7 +21,7 @@ const char IWYUPragma[] = "// IWYU pragma: private, include ";
 
 void CanonicalIncludes::addMapping(llvm::StringRef Path,
                                    llvm::StringRef CanonicalPath) {
-  FullPathMapping[Path] = CanonicalPath;
+  FullPathMapping[Path] = std::string(CanonicalPath);
 }
 
 /// The maximum number of path components in a key from StdSuffixHeaderMapping.
@@ -90,6 +90,8 @@ void CanonicalIncludes::addSystemHeadersMapping(const LangOptions &Language) {
     static const auto *Symbols = new llvm::StringMap<llvm::StringRef>({
 #define SYMBOL(Name, NameSpace, Header) {#NameSpace #Name, #Header},
 #include "StdSymbolMap.inc"
+        // There are two std::move()s, this is by far the most common.
+        SYMBOL(move, std::, <utility>)
 #undef SYMBOL
     });
     StdSymbolMapping = Symbols;
@@ -418,6 +420,8 @@ void CanonicalIncludes::addSystemHeadersMapping(const LangOptions &Language) {
       {"bits/signum.h", "<csignal>"},
       {"bits/sigset.h", "<csignal>"},
       {"bits/sigstack.h", "<csignal>"},
+      {"bits/stdint-intn.h", "<cstdint>"},
+      {"bits/stdint-uintn.h", "<cstdint>"},
       {"bits/stdio_lim.h", "<cstdio>"},
       {"bits/sys_errlist.h", "<cstdio>"},
       {"bits/time.h", "<ctime>"},
@@ -772,7 +776,10 @@ void CanonicalIncludes::addSystemHeadersMapping(const LangOptions &Language) {
                   MaxSuffixComponents;
          }) != SystemHeaderMap->keys().end());
 
-  StdSuffixHeaderMapping = SystemHeaderMap;
+  // FIXME: Suffix mapping contains invalid entries for C, so only enable it for
+  // CPP.
+  if (Language.CPlusPlus)
+    StdSuffixHeaderMapping = SystemHeaderMap;
 }
 
 } // namespace clangd

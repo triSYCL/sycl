@@ -9,6 +9,10 @@
 #include <CL/sycl/detail/common.hpp>
 #include <CL/sycl/detail/common_info.hpp>
 
+__SYCL_INLINE_NAMESPACE(cl) {
+namespace sycl {
+namespace detail {
+
 const char *stringifyErrorCode(cl_int error) {
   switch (error) {
     case CL_INVALID_ACCELERATOR_INTEL:
@@ -156,14 +160,18 @@ const char *stringifyErrorCode(cl_int error) {
       return "CL_INVALID_LINKER_OPTIONS";
     case CL_INVALID_DEVICE_PARTITION_COUNT:
       return "CL_INVALID_DEVICE_PARTITION_COUNT";
+#ifdef CL_VERSION_2_0
     case CL_INVALID_PIPE_SIZE:
       return "CL_INVALID_PIPE_SIZE";
     case CL_INVALID_DEVICE_QUEUE:
       return "CL_INVALID_DEVICE_QUEUE";
+#endif
+#ifdef CL_VERSION_2_2
     case CL_INVALID_SPEC_ID:
       return "CL_INVALID_SPEC_ID";
     case CL_MAX_SIZE_RESTRICTION_EXCEEDED:
       return "CL_MAX_SIZE_RESTRICTION_EXCEEDED";
+#endif
     /*
         case CL_BUILD_NONE:
           return "CL_BUILD_NONE";
@@ -213,10 +221,6 @@ const char *stringifyErrorCode(cl_int error) {
   }
 }
 
-namespace cl {
-namespace sycl {
-namespace detail {
-
 vector_class<string_class> split_string(const string_class &str,
                                         char delimeter) {
   vector_class<string_class> result;
@@ -239,4 +243,4 @@ vector_class<string_class> split_string(const string_class &str,
 
 } // namespace detail
 } // namespace sycl
-} // namespace cl
+} // __SYCL_INLINE_NAMESPACE(cl)

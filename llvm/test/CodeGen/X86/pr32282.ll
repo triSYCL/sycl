@@ -22,7 +22,6 @@ define void @foo(i64 %x) nounwind {
 ; X86-NEXT:    shrdl $21, %eax, %ecx
 ; X86-NEXT:    shrl $21, %eax
 ; X86-NEXT:    addl $7, %ecx
-; X86-NEXT:    adcl $0, %eax
 ; X86-NEXT:    pushl %eax
 ; X86-NEXT:    pushl %ecx
 ; X86-NEXT:    pushl {{[0-9]+}}(%esp)

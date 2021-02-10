@@ -364,7 +364,7 @@ static void __kmp_stg_parse_int(
     char const
         *name, // I: Name of environment variable (used in warning messages).
     char const *value, // I: Value of environment variable to parse.
-    int min, // I: Miminal allowed value.
+    int min, // I: Minimum allowed value.
     int max, // I: Maximum allowed value.
     int *out // O: Output (parsed) value.
     ) {
@@ -1034,7 +1034,7 @@ static void __kmp_parse_nested_num_threads(const char *var, const char *env,
     }
     // The next character is ','
     if (*next == ',') {
-      // ',' is the fisrt character
+      // ',' is the first character
       if (total == 0 || prev_comma) {
         total++;
       }
@@ -1305,7 +1305,7 @@ static void __kmp_stg_print_max_task_priority(kmp_str_buf_t *buffer,
 } // __kmp_stg_print_max_task_priority
 
 // KMP_TASKLOOP_MIN_TASKS
-// taskloop threashold to switch from recursive to linear tasks creation
+// taskloop threshold to switch from recursive to linear tasks creation
 static void __kmp_stg_parse_taskloop_min_tasks(char const *name,
                                                char const *value, void *data) {
   int tmp;
@@ -2041,7 +2041,7 @@ static void __kmp_parse_affinity_env(char const *name, char const *value,
 // If we see a parse error, emit a warning and scan to the next ",".
 //
 // FIXME - there's got to be a better way to print an error
-// message, hopefully without overwritting peices of buf.
+// message, hopefully without overwriting peices of buf.
 #define EMIT_WARN(skip, errlist)                                               \
   {                                                                            \
     char ch;                                                                   \
@@ -4102,13 +4102,22 @@ static void __kmp_stg_parse_lock_kind(char const *name, char const *value,
   }
 #endif // KMP_USE_ADAPTIVE_LOCKS
 #if KMP_USE_DYNAMIC_LOCK && KMP_USE_TSX
-  else if (__kmp_str_match("rtm", 1, value)) {
+  else if (__kmp_str_match("rtm_queuing", 1, value)) {
     if (__kmp_cpuinfo.rtm) {
-      __kmp_user_lock_kind = lk_rtm;
-      KMP_STORE_LOCK_SEQ(rtm);
+      __kmp_user_lock_kind = lk_rtm_queuing;
+      KMP_STORE_LOCK_SEQ(rtm_queuing);
     } else {
       KMP_WARNING(AdaptiveNotSupported, name, value);
       __kmp_user_lock_kind = lk_queuing;
+      KMP_STORE_LOCK_SEQ(queuing);
+    }
+  } else if (__kmp_str_match("rtm_spin", 1, value)) {
+    if (__kmp_cpuinfo.rtm) {
+      __kmp_user_lock_kind = lk_rtm_spin;
+      KMP_STORE_LOCK_SEQ(rtm_spin);
+    } else {
+      KMP_WARNING(AdaptiveNotSupported, name, value);
+      __kmp_user_lock_kind = lk_tas;
       KMP_STORE_LOCK_SEQ(queuing);
     }
   } else if (__kmp_str_match("hle", 1, value)) {
@@ -4141,8 +4150,12 @@ static void __kmp_stg_print_lock_kind(kmp_str_buf_t *buffer, char const *name,
 #endif
 
 #if KMP_USE_DYNAMIC_LOCK && KMP_USE_TSX
-  case lk_rtm:
-    value = "rtm";
+  case lk_rtm_queuing:
+    value = "rtm_queuing";
+    break;
+
+  case lk_rtm_spin:
+    value = "rtm_spin";
     break;
 
   case lk_hle:
@@ -4205,7 +4218,7 @@ static void __kmp_stg_parse_spin_backoff_params(const char *name,
     }
     // The next character is ','
     if (*next == ',') {
-      // ',' is the fisrt character
+      // ',' is the first character
       if (total == 0 || prev_comma) {
         total++;
       }
@@ -4304,7 +4317,7 @@ static void __kmp_stg_parse_adaptive_lock_props(const char *name,
     }
     // The next character is ','
     if (*next == ',') {
-      // ',' is the fisrt character
+      // ',' is the first character
       if (total == 0 || prev_comma) {
         total++;
       }
@@ -4395,7 +4408,7 @@ static void __kmp_stg_print_speculative_statsfile(kmp_str_buf_t *buffer,
 // -----------------------------------------------------------------------------
 // KMP_HW_SUBSET (was KMP_PLACE_THREADS)
 
-// The longest observable sequense of items is
+// The longest observable sequence of items is
 // Socket-Node-Tile-Core-Thread
 // So, let's limit to 5 levels for now
 // The input string is usually short enough, let's use 512 limit for now
@@ -4621,6 +4634,35 @@ static void __kmp_stg_print_task_throttling(kmp_str_buf_t *buffer,
   __kmp_stg_print_bool(buffer, name, __kmp_enable_task_throttling);
 } // __kmp_stg_print_task_throttling
 
+#if KMP_HAVE_MWAIT || KMP_HAVE_UMWAIT
+// -----------------------------------------------------------------------------
+// KMP_USER_LEVEL_MWAIT
+
+static void __kmp_stg_parse_user_level_mwait(char const *name,
+                                             char const *value, void *data) {
+  __kmp_stg_parse_bool(name, value, &__kmp_user_level_mwait);
+} // __kmp_stg_parse_user_level_mwait
+
+static void __kmp_stg_print_user_level_mwait(kmp_str_buf_t *buffer,
+                                             char const *name, void *data) {
+  __kmp_stg_print_bool(buffer, name, __kmp_user_level_mwait);
+} // __kmp_stg_print_user_level_mwait
+
+// -----------------------------------------------------------------------------
+// KMP_MWAIT_HINTS
+
+static void __kmp_stg_parse_mwait_hints(char const *name, char const *value,
+                                        void *data) {
+  __kmp_stg_parse_int(name, value, 0, INT_MAX, &__kmp_mwait_hints);
+} // __kmp_stg_parse_mwait_hints
+
+static void __kmp_stg_print_mwait_hints(kmp_str_buf_t *buffer, char const *name,
+                                        void *data) {
+  __kmp_stg_print_int(buffer, name, __kmp_mwait_hints);
+} // __kmp_stg_print_mwait_hints
+
+#endif // KMP_HAVE_MWAIT || KMP_HAVE_UMWAIT
+
 // -----------------------------------------------------------------------------
 // OMP_DISPLAY_ENV
 
@@ -4694,6 +4736,27 @@ static void __kmp_stg_print_omp_tool_libraries(kmp_str_buf_t *buffer,
     __kmp_str_buf_print(buffer, ": %s\n", KMP_I18N_STR(NotDefined));
   }
 } // __kmp_stg_print_omp_tool_libraries
+
+static char *__kmp_tool_verbose_init = NULL;
+
+static void __kmp_stg_parse_omp_tool_verbose_init(char const *name,
+                                                  char const *value, void *data) {
+  __kmp_stg_parse_str(name, value, &__kmp_tool_verbose_init);
+} // __kmp_stg_parse_omp_tool_libraries
+
+static void __kmp_stg_print_omp_tool_verbose_init(kmp_str_buf_t *buffer,
+                                                  char const *name, void *data) {
+  if (__kmp_tool_verbose_init)
+    __kmp_stg_print_str(buffer, name, __kmp_tool_libraries);
+  else {
+    if (__kmp_env_format) {
+      KMP_STR_BUF_PRINT_NAME;
+    } else {
+      __kmp_str_buf_print(buffer, "   %s", name);
+    }
+    __kmp_str_buf_print(buffer, ": %s\n", KMP_I18N_STR(NotDefined));
+  }
+} // __kmp_stg_print_omp_tool_verbose_init
 
 #endif
 
@@ -4937,8 +5000,16 @@ static kmp_setting_t __kmp_stg_table[] = {
      0},
     {"OMP_TOOL_LIBRARIES", __kmp_stg_parse_omp_tool_libraries,
      __kmp_stg_print_omp_tool_libraries, NULL, 0, 0},
+    {"OMP_TOOL_VERBOSE_INIT", __kmp_stg_parse_omp_tool_verbose_init,
+     __kmp_stg_print_omp_tool_verbose_init, NULL, 0, 0},
 #endif
 
+#if KMP_HAVE_MWAIT || KMP_HAVE_UMWAIT
+    {"KMP_USER_LEVEL_MWAIT", __kmp_stg_parse_user_level_mwait,
+     __kmp_stg_print_user_level_mwait, NULL, 0, 0},
+    {"KMP_MWAIT_HINTS", __kmp_stg_parse_mwait_hints,
+     __kmp_stg_print_mwait_hints, NULL, 0, 0},
+#endif
     {"", NULL, NULL, NULL, 0, 0}}; // settings
 
 static int const __kmp_stg_count =
@@ -5720,7 +5791,11 @@ void __kmp_env_print() {
 } // __kmp_env_print
 
 void __kmp_env_print_2() {
+  __kmp_display_env_impl(__kmp_display_env, __kmp_display_env_verbose);
+} // __kmp_env_print_2
 
+
+void __kmp_display_env_impl(int display_env, int display_env_verbose) {
   kmp_env_blk_t block;
   kmp_str_buf_t buffer;
 
@@ -5737,9 +5812,9 @@ void __kmp_env_print_2() {
 
   for (int i = 0; i < __kmp_stg_count; ++i) {
     if (__kmp_stg_table[i].print != NULL &&
-        ((__kmp_display_env &&
+        ((display_env &&
           strncmp(__kmp_stg_table[i].name, "OMP_", 4) == 0) ||
-         __kmp_display_env_verbose)) {
+         display_env_verbose)) {
       __kmp_stg_table[i].print(&buffer, __kmp_stg_table[i].name,
                                __kmp_stg_table[i].data);
     }
@@ -5754,7 +5829,6 @@ void __kmp_env_print_2() {
   __kmp_str_buf_free(&buffer);
 
   __kmp_printf("\n");
-
-} // __kmp_env_print_2
+}
 
 // end of file

@@ -1,5 +1,4 @@
 ; RUN: llc -mtriple=powerpc64-unknown-linux-gnu -verify-machineinstrs -mcpu=pwr7 < %s | FileCheck %s
-; RUN: llc -mtriple=powerpc64-unknown-linux-gnu -verify-machineinstrs -mcpu=a2q < %s | FileCheck %s --check-prefix=QPX
 
 declare float @fabsf(float)
 
@@ -36,8 +35,8 @@ loop_exit:
 
 ; CHECK-LABEL: test1:
 ; CHECK-NOT: mtctr
-; CHECK: bl fminf
-; CHECK-NOT: bl fminf
+; CHECK: xsmindp
+; CHECK-NOT: xsmindp
 ; CHECK-NOT: mtctr
 ; CHECK: blr
 
@@ -59,15 +58,10 @@ loop_exit:
 
 ; CHECK-LABEL: test1v:
 ; CHECK: xvminsp
-; CHECK-NOT: bl fminf
+; CHECK-NOT: xsmindp
 ; CHECK: mtctr
-; CHECK-NOT: bl fminf
+; CHECK-NOT: xsmindp
 ; CHECK: blr
-
-; QPX-LABEL: test1v:
-; QPX: mtctr
-; QPX-NOT: bl fminf
-; QPX: blr
 
 define void @test1a(float %f, float* %fp) {
 entry:
@@ -87,8 +81,8 @@ loop_exit:
 
 ; CHECK-LABEL: test1a:
 ; CHECK-NOT: mtctr
-; CHECK: bl fminf
-; CHECK-NOT: bl fminf
+; CHECK: xsmindp
+; CHECK-NOT: xsmindp
 ; CHECK-NOT: mtctr
 ; CHECK: blr
 
@@ -110,8 +104,8 @@ loop_exit:
 
 ; CHECK-LABEL: test2:
 ; CHECK-NOT: mtctr
-; CHECK: bl fmaxf
-; CHECK-NOT: bl fmaxf
+; CHECK: xsmaxdp
+; CHECK-NOT: xsmaxdp
 ; CHECK-NOT: mtctr
 ; CHECK: blr
 
@@ -134,15 +128,10 @@ loop_exit:
 ; CHECK-LABEL: test2v:
 ; CHECK: xvmaxdp
 ; CHECK: xvmaxdp
-; CHECK-NOT: bl fmax
+; CHECK-NOT: xsmaxdp
 ; CHECK: mtctr
-; CHECK-NOT: bl fmax
+; CHECK-NOT: xsmaxdp
 ; CHECK: blr
-
-; QPX-LABEL: test2v:
-; QPX: mtctr
-; QPX-NOT: bl fmax
-; QPX: blr
 
 define void @test2a(float %f, float* %fp) {
 entry:
@@ -162,8 +151,8 @@ loop_exit:
 
 ; CHECK-LABEL: test2a:
 ; CHECK-NOT: mtctr
-; CHECK: bl fmaxf
-; CHECK-NOT: bl fmaxf
+; CHECK: xsmaxdp
+; CHECK-NOT: xsmaxdp
 ; CHECK-NOT: mtctr
 ; CHECK: blr
 
@@ -185,8 +174,8 @@ loop_exit:
 
 ; CHECK-LABEL: test3:
 ; CHECK-NOT: mtctr
-; CHECK: bl fmin
-; CHECK-NOT: bl fmin
+; CHECK: xsmindp
+; CHECK-NOT: xsmindp
 ; CHECK-NOT: mtctr
 ; CHECK: blr
 
@@ -208,8 +197,8 @@ loop_exit:
 
 ; CHECK-LABEL: test3a:
 ; CHECK-NOT: mtctr
-; CHECK: bl fmin
-; CHECK-NOT: bl fmin
+; CHECK: xsmindp
+; CHECK-NOT: xsmindp
 ; CHECK-NOT: mtctr
 ; CHECK: blr
 
@@ -231,8 +220,8 @@ loop_exit:
 
 ; CHECK-LABEL: test4:
 ; CHECK-NOT: mtctr
-; CHECK: bl fmax
-; CHECK-NOT: bl fmax
+; CHECK: xsmaxdp
+; CHECK-NOT: xsmaxdp
 ; CHECK-NOT: mtctr
 ; CHECK: blr
 
@@ -254,8 +243,8 @@ loop_exit:
 
 ; CHECK-LABEL: test4a:
 ; CHECK-NOT: mtctr
-; CHECK: bl fmax
-; CHECK-NOT: bl fmax
+; CHECK: xsmaxdp
+; CHECK-NOT: xsmaxdp
 ; CHECK-NOT: mtctr
 ; CHECK: blr
 

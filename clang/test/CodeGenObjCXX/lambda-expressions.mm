@@ -62,11 +62,11 @@ void take_block(void (^block)()) { block(); }
 }
 @end
 
-// ARC: define void @_ZN13LambdaCapture4foo1ERi(i32* dereferenceable(4) %{{.*}})
+// ARC: define void @_ZN13LambdaCapture4foo1ERi(i32* nonnull align 4 dereferenceable(4) %{{.*}})
 // ARC:   %[[CAPTURE0:.*]] = getelementptr inbounds %[[LAMBDACLASS]], %[[LAMBDACLASS]]* %{{.*}}, i32 0, i32 0
 // ARC:   store i32 %{{.*}}, i32* %[[CAPTURE0]]
 
-// ARC: define internal void @"_ZZN13LambdaCapture4foo1ERiENK3$_3clEv"(%[[LAMBDACLASS]]* %{{.*}})
+// ARC: define internal void @"_ZZN13LambdaCapture4foo1ERiENK3$_3clEv"(%[[LAMBDACLASS]]* {{[^,]*}} %{{.*}})
 // ARC:   %[[BLOCK:.*]] = alloca <{ i8*, i32, i32, i8*, %struct.__block_descriptor*, i32 }>
 // ARC:   %[[CAPTURE1:.*]] = getelementptr inbounds <{ i8*, i32, i32, i8*, %struct.__block_descriptor*, i32 }>, <{ i8*, i32, i32, i8*, %struct.__block_descriptor*, i32 }>* %[[BLOCK]], i32 0, i32 5
 // ARC:   store i32 %{{.*}}, i32* %[[CAPTURE1]]

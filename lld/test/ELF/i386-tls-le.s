@@ -32,7 +32,7 @@ _start:
 
 # DIS:      Disassembly of section test:
 # DIS-EMPTY:
-# DIS-NEXT: _start:
+# DIS-NEXT: <_start>:
 # DIS-NEXT: 402134:       movl    $8, %edx
 # DIS-NEXT: 402139:       movl    %gs:0, %ecx
 # DIS-NEXT: 402140:       subl    %edx, %eax
@@ -49,7 +49,7 @@ _start:
 
 # DISSHARED: Disassembly of section test:
 # DISSHARED-EMPTY:
-# DISSHARED-NEXT: _start:
+# DISSHARED-NEXT: <_start>:
 # DISSHARED-NEXT: 2218:       movl    $0, %edx
 # DISSHARED-NEXT: 221d:       movl    %gs:0, %ecx
 # DISSHARED-NEXT: 2224:       subl    %edx, %eax
@@ -63,9 +63,9 @@ _start:
 
 # RELOCSHARED:      Relocations [
 # RELOCSHARED-NEXT: Section (5) .rel.dyn {
-# RELOCSHARED-NEXT:   0x2219 R_386_TLS_TPOFF32 var 0x0
-# RELOCSHARED-NEXT:   0x223D R_386_TLS_TPOFF var 0x0
-# RELOCSHARED-NEXT:   0x2227 R_386_TLS_TPOFF32 var1 0x0
-# RELOCSHARED-NEXT:   0x224A R_386_TLS_TPOFF var1 0x0
+# RELOCSHARED-NEXT:   0x2219 R_386_TLS_TPOFF32 var
+# RELOCSHARED-NEXT:   0x223D R_386_TLS_TPOFF var
+# RELOCSHARED-NEXT:   0x2227 R_386_TLS_TPOFF32 var1
+# RELOCSHARED-NEXT:   0x224A R_386_TLS_TPOFF var1
 # RELOCSHARED-NEXT:  }
 # RELOCSHARED-NEXT: ]

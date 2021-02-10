@@ -33,7 +33,7 @@ AST_MATCHER(Type, sugaredNullptrType) {
 /// Create a matcher that finds implicit casts as well as the head of a
 /// sequence of zero or more nested explicit casts that have an implicit cast
 /// to null within.
-/// Finding sequences of explict casts is necessary so that an entire sequence
+/// Finding sequences of explicit casts is necessary so that an entire sequence
 /// can be replaced instead of just the inner-most implicit cast.
 StatementMatcher makeCastSequenceMatcher() {
   StatementMatcher ImplicitCastToNull = implicitCastExpr(
@@ -41,10 +41,12 @@ StatementMatcher makeCastSequenceMatcher() {
       unless(hasImplicitDestinationType(qualType(substTemplateTypeParmType()))),
       unless(hasSourceExpression(hasType(sugaredNullptrType()))));
 
-  return castExpr(anyOf(ImplicitCastToNull,
-                        explicitCastExpr(hasDescendant(ImplicitCastToNull))),
-                  unless(hasAncestor(explicitCastExpr())))
-      .bind(CastSequence);
+  return traverse(
+      TK_AsIs,
+      castExpr(anyOf(ImplicitCastToNull,
+                     explicitCastExpr(hasDescendant(ImplicitCastToNull))),
+               unless(hasAncestor(explicitCastExpr())))
+          .bind(CastSequence));
 }
 
 bool isReplaceableRange(SourceLocation StartLoc, SourceLocation EndLoc,
@@ -275,10 +277,9 @@ private:
       return false;
 
     // Step 2: Find the first ancestor that doesn't expand from this macro.
-    ast_type_traits::DynTypedNode ContainingAncestor;
-    if (!findContainingAncestor(
-            ast_type_traits::DynTypedNode::create<Stmt>(*CE), MacroLoc,
-            ContainingAncestor))
+    DynTypedNode ContainingAncestor;
+    if (!findContainingAncestor(DynTypedNode::create<Stmt>(*CE), MacroLoc,
+                                ContainingAncestor))
       return false;
 
     // Step 3:
@@ -307,7 +308,7 @@ private:
   /// SourceLocation pointing within the definition of another macro.
   bool getMacroAndArgLocations(SourceLocation Loc, SourceLocation &ArgLoc,
                                SourceLocation &MacroLoc) {
-    assert(Loc.isMacroID() && "Only reasonble to call this on macros");
+    assert(Loc.isMacroID() && "Only reasonable to call this on macros");
 
     ArgLoc = Loc;
 
@@ -405,9 +406,8 @@ private:
   ///
   /// \pre MacroLoc.isFileID()
   /// \returns true if such an ancestor was found, false otherwise.
-  bool findContainingAncestor(ast_type_traits::DynTypedNode Start,
-                              SourceLocation MacroLoc,
-                              ast_type_traits::DynTypedNode &Result) {
+  bool findContainingAncestor(DynTypedNode Start, SourceLocation MacroLoc,
+                              DynTypedNode &Result) {
     // Below we're only following the first parent back up the AST. This should
     // be fine since for the statements we care about there should only be one
     // parent, except for the case specified below.
@@ -429,7 +429,7 @@ private:
         }
       }
 
-      const ast_type_traits::DynTypedNode &Parent = Parents[0];
+      const DynTypedNode &Parent = Parents[0];
 
       SourceLocation Loc;
       if (const auto *D = Parent.get<Decl>())
@@ -473,11 +473,7 @@ void UseNullptrCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
 }
 
 void UseNullptrCheck::registerMatchers(MatchFinder *Finder) {
-  // Only register the matcher for C++. Because this checker is used for
-  // modernization, it is reasonable to run it on any C++ standard with the
-  // assumption the user is trying to modernize their codebase.
-  if (getLangOpts().CPlusPlus)
-    Finder->addMatcher(makeCastSequenceMatcher(), this);
+  Finder->addMatcher(makeCastSequenceMatcher(), this);
 }
 
 void UseNullptrCheck::check(const MatchFinder::MatchResult &Result) {

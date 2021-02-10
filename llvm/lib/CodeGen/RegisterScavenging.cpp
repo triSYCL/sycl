@@ -31,6 +31,7 @@
 #include "llvm/CodeGen/TargetInstrInfo.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/MC/MCRegisterInfo.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/Debug.h"
@@ -96,12 +97,12 @@ void RegScavenger::enterBasicBlockEnd(MachineBasicBlock &MBB) {
   }
 }
 
-void RegScavenger::addRegUnits(BitVector &BV, Register Reg) {
+void RegScavenger::addRegUnits(BitVector &BV, MCRegister Reg) {
   for (MCRegUnitIterator RUI(Reg, TRI); RUI.isValid(); ++RUI)
     BV.set(*RUI);
 }
 
-void RegScavenger::removeRegUnits(BitVector &BV, Register Reg) {
+void RegScavenger::removeRegUnits(BitVector &BV, MCRegister Reg) {
   for (MCRegUnitIterator RUI(Reg, TRI); RUI.isValid(); ++RUI)
     BV.reset(*RUI);
 }
@@ -133,9 +134,9 @@ void RegScavenger::determineKillsAndDefs() {
     }
     if (!MO.isReg())
       continue;
-    Register Reg = MO.getReg();
-    if (!Register::isPhysicalRegister(Reg) || isReserved(Reg))
+    if (!MO.getReg().isPhysical() || isReserved(MO.getReg()))
       continue;
+    MCRegister Reg = MO.getReg().asMCReg();
 
     if (MO.isUse()) {
       // Ignore undef uses.
@@ -151,25 +152,6 @@ void RegScavenger::determineKillsAndDefs() {
         addRegUnits(DefRegUnits, Reg);
     }
   }
-}
-
-void RegScavenger::unprocess() {
-  assert(Tracking && "Cannot unprocess because we're not tracking");
-
-  MachineInstr &MI = *MBBI;
-  if (!MI.isDebugInstr()) {
-    determineKillsAndDefs();
-
-    // Commit the changes.
-    setUnused(DefRegUnits);
-    setUsed(KillRegUnits);
-  }
-
-  if (MBBI == MBB->begin()) {
-    MBBI = MachineBasicBlock::iterator(nullptr);
-    Tracking = false;
-  } else
-    --MBBI;
 }
 
 void RegScavenger::forward() {
@@ -220,8 +202,8 @@ void RegScavenger::forward() {
         // Ideally we would like a way to model this, but leaving the
         // insert_subreg around causes both correctness and performance issues.
         bool SubUsed = false;
-        for (MCSubRegIterator SubRegs(Reg, TRI); SubRegs.isValid(); ++SubRegs)
-          if (isRegUsed(*SubRegs)) {
+        for (const MCPhysReg &SubReg : TRI->subregs(Reg))
+          if (isRegUsed(SubReg)) {
             SubUsed = true;
             break;
           }
@@ -465,7 +447,7 @@ RegScavenger::spill(Register Reg, const TargetRegisterClass &RC, int SPAdj,
   const MachineFunction &MF = *Before->getMF();
   const MachineFrameInfo &MFI = MF.getFrameInfo();
   unsigned NeedSize = TRI->getSpillSize(RC);
-  unsigned NeedAlign = TRI->getSpillAlignment(RC);
+  Align NeedAlign = TRI->getSpillAlign(RC);
 
   unsigned SI = Scavenged.size(), Diff = std::numeric_limits<unsigned>::max();
   int FIB = MFI.getObjectIndexBegin(), FIE = MFI.getObjectIndexEnd();
@@ -477,7 +459,7 @@ RegScavenger::spill(Register Reg, const TargetRegisterClass &RC, int SPAdj,
     if (FI < FIB || FI >= FIE)
       continue;
     unsigned S = MFI.getObjectSize(FI);
-    unsigned A = MFI.getObjectAlignment(FI);
+    Align A = MFI.getObjectAlign(FI);
     if (NeedSize > S || NeedAlign > A)
       continue;
     // Avoid wasting slots with large size and/or large alignment. Pick one
@@ -486,7 +468,7 @@ RegScavenger::spill(Register Reg, const TargetRegisterClass &RC, int SPAdj,
     // larger register is reserved before a slot for a smaller one. When
     // trying to spill a smaller register, the large slot would be found
     // first, thus making it impossible to spill the larger register later.
-    unsigned D = (S-NeedSize) + (A-NeedAlign);
+    unsigned D = (S - NeedSize) + (A.value() - NeedAlign.value());
     if (D < Diff) {
       SI = I;
       Diff = D;
@@ -591,9 +573,8 @@ Register RegScavenger::scavengeRegisterBackwards(const TargetRegisterClass &RC,
                             RestoreAfter);
   MCPhysReg Reg = P.first;
   MachineBasicBlock::iterator SpillBefore = P.second;
-  assert(Reg != 0 && "No register left to scavenge!");
   // Found an available register?
-  if (SpillBefore == MBB.end()) {
+  if (Reg != 0 && SpillBefore == MBB.end()) {
     LLVM_DEBUG(dbgs() << "Scavenged free register: " << printReg(Reg, TRI)
                << '\n');
     return Reg;
@@ -601,6 +582,8 @@ Register RegScavenger::scavengeRegisterBackwards(const TargetRegisterClass &RC,
 
   if (!AllowSpill)
     return 0;
+
+  assert(Reg != 0 && "No register left to scavenge!");
 
   MachineBasicBlock::iterator ReloadAfter =
     RestoreAfter ? std::next(MBBI) : MBBI;

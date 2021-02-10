@@ -305,13 +305,6 @@ public:
 
     /// Internal helper to remove the edge to the given function.
     bool removeEdgeInternal(Node &ChildN);
-
-    /// Internal helper to replace an edge key with a new one.
-    ///
-    /// This should be used when the function for a particular node in the
-    /// graph gets replaced and we are updating all of the edges to that node
-    /// to use the new function as the key.
-    void replaceEdgeKey(Function &OldTarget, Function &NewTarget);
   };
 
   /// A node in the call graph.
@@ -937,6 +930,9 @@ public:
   LazyCallGraph(LazyCallGraph &&G);
   LazyCallGraph &operator=(LazyCallGraph &&RHS);
 
+  bool invalidate(Module &, const PreservedAnalyses &PA,
+                  ModuleAnalysisManager::Invalidator &);
+
   EdgeSequence::iterator begin() { return EntryEdges.begin(); }
   EdgeSequence::iterator end() { return EntryEdges.end(); }
 
@@ -1005,6 +1001,10 @@ public:
   /// the call graph and even when all IR-level references have been removed
   /// remain active and reachable.
   bool isLibFunction(Function &F) const { return LibFunctions.count(&F); }
+
+  /// Helper to initialize a new node created outside of creating SCCs and add
+  /// it to the NodeMap. e.g. when a function is outlined.
+  Node &initNode(Node &N, LazyCallGraph::SCC &C);
 
   ///@{
   /// \name Pre-SCC Mutation API

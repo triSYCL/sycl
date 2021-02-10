@@ -1,7 +1,7 @@
-; RUN: opt -S -load-store-vectorizer -mattr=-unaligned-buffer-access,+max-private-element-size-16 < %s | FileCheck -check-prefix=ALIGNED -check-prefix=ALL %s
-; RUN: opt -S -load-store-vectorizer -mattr=+unaligned-buffer-access,+unaligned-scratch-access,+max-private-element-size-16 < %s | FileCheck -check-prefix=UNALIGNED -check-prefix=ALL %s
-; RUN: opt -S -passes='function(load-store-vectorizer)' -mattr=-unaligned-buffer-access,+max-private-element-size-16 < %s | FileCheck -check-prefix=ALIGNED -check-prefix=ALL %s
-; RUN: opt -S -passes='function(load-store-vectorizer)' -mattr=+unaligned-buffer-access,+unaligned-scratch-access,+max-private-element-size-16 < %s | FileCheck -check-prefix=UNALIGNED -check-prefix=ALL %s
+; RUN: opt -S -load-store-vectorizer --mcpu=hawaii -mattr=-unaligned-access-mode,+max-private-element-size-16 < %s | FileCheck -check-prefix=ALIGNED -check-prefix=ALL %s
+; RUN: opt -S -load-store-vectorizer --mcpu=hawaii -mattr=+unaligned-access-mode,+unaligned-scratch-access,+max-private-element-size-16 < %s | FileCheck -check-prefix=UNALIGNED -check-prefix=ALL %s
+; RUN: opt -S -passes='function(load-store-vectorizer)' --mcpu=hawaii -mattr=-unaligned-access-mode,+max-private-element-size-16 < %s | FileCheck -check-prefix=ALIGNED -check-prefix=ALL %s
+; RUN: opt -S -passes='function(load-store-vectorizer)' --mcpu=hawaii -mattr=+unaligned-access-mode,+unaligned-scratch-access,+max-private-element-size-16 < %s | FileCheck -check-prefix=UNALIGNED -check-prefix=ALL %s
 
 target triple = "amdgcn--"
 target datalayout = "e-p:64:64-p1:64:64-p2:32:32-p3:32:32-p4:64:64-p5:32:32-p6:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64-S32-A5"
@@ -205,6 +205,57 @@ define amdgpu_kernel void @merge_private_load_4_vector_elts_loads_v4i8() {
   %load2 = load i8, i8 addrspace(5)* %out.gep.2, align 1
   %load3 = load i8, i8 addrspace(5)* %out.gep.3, align 1
   ret void
+}
+
+; Make sure we don't think the alignment will increase if the base address isn't an alloca
+; ALL-LABEL: @private_store_2xi16_align2_not_alloca(
+; ALL: store i16
+; ALL: store i16
+define void @private_store_2xi16_align2_not_alloca(i16 addrspace(5)* %p, i16 addrspace(5)* %r) #0 {
+  %gep.r = getelementptr i16, i16 addrspace(5)* %r, i32 1
+  store i16 1, i16 addrspace(5)* %r, align 2
+  store i16 2, i16 addrspace(5)* %gep.r, align 2
+  ret void
+}
+
+; ALL-LABEL: @private_store_2xi16_align1_not_alloca(
+; ALIGNED: store i16
+; ALIGNED: store i16
+; UNALIGNED: store <2 x i16>
+define void @private_store_2xi16_align1_not_alloca(i16 addrspace(5)* %p, i16 addrspace(5)* %r) #0 {
+  %gep.r = getelementptr i16, i16 addrspace(5)* %r, i32 1
+  store i16 1, i16 addrspace(5)* %r, align 1
+  store i16 2, i16 addrspace(5)* %gep.r, align 1
+  ret void
+}
+
+; ALL-LABEL: @private_load_2xi16_align2_not_alloca(
+; ALL: load i16
+; ALL: load i16
+define i32 @private_load_2xi16_align2_not_alloca(i16 addrspace(5)* %p) #0 {
+  %gep.p = getelementptr i16, i16 addrspace(5)* %p, i64 1
+  %p.0 = load i16, i16 addrspace(5)* %p, align 2
+  %p.1 = load i16, i16 addrspace(5)* %gep.p, align 2
+  %zext.0 = zext i16 %p.0 to i32
+  %zext.1 = zext i16 %p.1 to i32
+  %shl.1 = shl i32 %zext.1, 16
+  %or = or i32 %zext.0, %shl.1
+  ret i32 %or
+}
+
+; ALL-LABEL: @private_load_2xi16_align1_not_alloca(
+; ALIGNED: load i16
+; ALIGNED: load i16
+; UNALIGNED: load <2 x i16>
+define i32 @private_load_2xi16_align1_not_alloca(i16 addrspace(5)* %p) #0 {
+  %gep.p = getelementptr i16, i16 addrspace(5)* %p, i64 1
+  %p.0 = load i16, i16 addrspace(5)* %p, align 1
+  %p.1 = load i16, i16 addrspace(5)* %gep.p, align 1
+  %zext.0 = zext i16 %p.0 to i32
+  %zext.1 = zext i16 %p.1 to i32
+  %shl.1 = shl i32 %zext.1, 16
+  %or = or i32 %zext.0, %shl.1
+  ret i32 %or
 }
 
 attributes #0 = { nounwind }

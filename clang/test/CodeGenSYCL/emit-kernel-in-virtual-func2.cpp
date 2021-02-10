@@ -1,8 +1,8 @@
-// RUN: %clang_cc1 -triple spir64-unknown-linux-sycldevice  -std=c++11 -fsycl-is-device -emit-llvm -x c++ %s -o - | FileCheck %s
+// RUN: %clang_cc1 -fsycl -fsycl-is-device -triple spir64-unknown-unknown-sycldevice -emit-llvm %s -o - | FileCheck %s
 
 template <typename name, typename Func>
-__attribute__((sycl_kernel)) void kernel_single_task(Func kernelFunc) {
-    kernelFunc();
+__attribute__((sycl_kernel)) void kernel_single_task(const Func &kernelFunc) {
+  kernelFunc();
 }
 
 template <class TAR>

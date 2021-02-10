@@ -1,12 +1,17 @@
-add_custom_target(PiUnitTests)
-set_target_properties(PiUnitTests PROPERTIES FOLDER "Tests")
+add_custom_target(SYCLUnitTests)
+set_target_properties(SYCLUnitTests PROPERTIES FOLDER "SYCL tests")
 
-function(add_llvm_unittest test_dirname)
-  add_unittest(PiUnitTests ${test_dirname} ${ARGN})
-endfunction()
+foreach(flag_var
+    CMAKE_CXX_FLAGS CMAKE_CXX_FLAGS_DEBUG CMAKE_CXX_FLAGS_RELEASE
+    CMAKE_CXX_FLAGS_MINSIZEREL CMAKE_CXX_FLAGS_RELWITHDEBINFO)
+string(REGEX REPLACE "/MT" "/MD" ${flag_var} "${${flag_var}}")
+endforeach()
 
-function(add_llvm_unittest_with_input_files test_dirname)
-  add_unittest_with_input_files(PiUnitTests ${test_dirname} ${ARGN})
-endfunction()
+include(AddSYCLUnitTest)
 
+add_subdirectory(misc)
 add_subdirectory(pi)
+add_subdirectory(kernel-and-program)
+add_subdirectory(queue)
+add_subdirectory(scheduler)
+add_subdirectory(thread_safety)

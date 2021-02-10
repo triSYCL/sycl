@@ -159,6 +159,20 @@ public:
     S.Diag(B->getExprLoc(), diag::warn_comparison_bitwise_always)
         << DiagRange << isAlwaysTrue;
   }
+
+  void compareBitwiseOr(const BinaryOperator *B) override {
+    if (HasMacroID(B))
+      return;
+
+    SourceRange DiagRange = B->getSourceRange();
+    S.Diag(B->getExprLoc(), diag::warn_comparison_bitwise_or) << DiagRange;
+  }
+
+  static bool hasActiveDiagnostics(DiagnosticsEngine &Diags,
+                                   SourceLocation Loc) {
+    return !Diags.isIgnored(diag::warn_tautological_overlap_comparison, Loc) ||
+           !Diags.isIgnored(diag::warn_comparison_bitwise_or, Loc);
+  }
 };
 } // anonymous namespace
 
@@ -960,6 +974,14 @@ static void DiagUninitUse(Sema &S, const VarDecl *VD, const UninitUse &Use,
         << Use.getUser()->getSourceRange();
 }
 
+/// Diagnose uninitialized const reference usages.
+static bool DiagnoseUninitializedConstRefUse(Sema &S, const VarDecl *VD,
+                                             const UninitUse &Use) {
+  S.Diag(Use.getUser()->getBeginLoc(), diag::warn_uninit_const_reference)
+      << VD->getDeclName() << Use.getUser()->getSourceRange();
+  return true;
+}
+
 /// DiagnoseUninitializedUse -- Helper function for diagnosing uses of an
 /// uninitialized variable. This manages the different forms of diagnostic
 /// emitted for particular types of uses. Returns true if the use was diagnosed
@@ -1160,7 +1182,7 @@ namespace {
     // We analyze lambda bodies separately. Skip them here.
     bool TraverseLambdaExpr(LambdaExpr *LE) {
       // Traverse the captures, but not the body.
-      for (const auto &C : zip(LE->captures(), LE->capture_inits()))
+      for (const auto C : zip(LE->captures(), LE->capture_inits()))
         TraverseLambdaCapture(LE, &std::get<0>(C), std::get<1>(C));
       return true;
     }
@@ -1492,13 +1514,14 @@ class UninitValsDiagReporter : public UninitVariablesHandler {
   // order of diagnostics when calling flushDiagnostics().
   typedef llvm::MapVector<const VarDecl *, MappedType> UsesMap;
   UsesMap uses;
+  UsesMap constRefUses;
 
 public:
   UninitValsDiagReporter(Sema &S) : S(S) {}
   ~UninitValsDiagReporter() override { flushDiagnostics(); }
 
-  MappedType &getUses(const VarDecl *vd) {
-    MappedType &V = uses[vd];
+  MappedType &getUses(UsesMap &um, const VarDecl *vd) {
+    MappedType &V = um[vd];
     if (!V.getPointer())
       V.setPointer(new UsesVec());
     return V;
@@ -1506,11 +1529,17 @@ public:
 
   void handleUseOfUninitVariable(const VarDecl *vd,
                                  const UninitUse &use) override {
-    getUses(vd).getPointer()->push_back(use);
+    getUses(uses, vd).getPointer()->push_back(use);
+  }
+
+  void handleConstRefUseOfUninitVariable(const VarDecl *vd,
+                                         const UninitUse &use) override {
+    getUses(constRefUses, vd).getPointer()->push_back(use);
   }
 
   void handleSelfInit(const VarDecl *vd) override {
-    getUses(vd).setInt(true);
+    getUses(uses, vd).setInt(true);
+    getUses(constRefUses, vd).setInt(true);
   }
 
   void flushDiagnostics() {
@@ -1557,6 +1586,32 @@ public:
     }
 
     uses.clear();
+
+    // Flush all const reference uses diags.
+    for (const auto &P : constRefUses) {
+      const VarDecl *vd = P.first;
+      const MappedType &V = P.second;
+
+      UsesVec *vec = V.getPointer();
+      bool hasSelfInit = V.getInt();
+
+      if (!vec->empty() && hasSelfInit && hasAlwaysUninitializedUse(vec))
+        DiagnoseUninitializedUse(S, vd,
+                                 UninitUse(vd->getInit()->IgnoreParenCasts(),
+                                           /* isAlwaysUninit */ true),
+                                 /* alwaysReportSelfInit */ true);
+      else {
+        for (const auto &U : *vec) {
+          if (DiagnoseUninitializedConstRefUse(S, vd, U))
+            break;
+        }
+      }
+
+      // Release the uses vector.
+      delete vec;
+    }
+
+    constRefUses.clear();
   }
 
 private:
@@ -1645,6 +1700,14 @@ class ThreadSafetyReporter : public clang::threadSafety::ThreadSafetyHandler {
                : getNotes();
   }
 
+  OptionalNotes makeUnlockedHereNote(SourceLocation LocUnlocked,
+                                     StringRef Kind) {
+    return LocUnlocked.isValid()
+               ? getNotes(PartialDiagnosticAt(
+                     LocUnlocked, S.PDiag(diag::note_unlocked_here) << Kind))
+               : getNotes();
+  }
+
  public:
   ThreadSafetyReporter(Sema &S, SourceLocation FL, SourceLocation FEL)
     : S(S), FunLocation(FL), FunEndLocation(FEL),
@@ -1671,13 +1734,14 @@ class ThreadSafetyReporter : public clang::threadSafety::ThreadSafetyHandler {
     Warnings.emplace_back(std::move(Warning), getNotes());
   }
 
-  void handleUnmatchedUnlock(StringRef Kind, Name LockName,
-                             SourceLocation Loc) override {
+  void handleUnmatchedUnlock(StringRef Kind, Name LockName, SourceLocation Loc,
+                             SourceLocation LocPreviousUnlock) override {
     if (Loc.isInvalid())
       Loc = FunLocation;
     PartialDiagnosticAt Warning(Loc, S.PDiag(diag::warn_unlock_but_no_lock)
                                          << Kind << LockName);
-    Warnings.emplace_back(std::move(Warning), getNotes());
+    Warnings.emplace_back(std::move(Warning),
+                          makeUnlockedHereNote(LocPreviousUnlock, Kind));
   }
 
   void handleIncorrectUnlockKind(StringRef Kind, Name LockName,
@@ -1785,8 +1849,8 @@ class ThreadSafetyReporter : public clang::threadSafety::ThreadSafetyHandler {
                                         << *PossibleMatch);
       if (Verbose && POK == POK_VarAccess) {
         PartialDiagnosticAt VNote(D->getLocation(),
-                                 S.PDiag(diag::note_guarded_by_declared_here)
-                                     << D->getNameAsString());
+                                  S.PDiag(diag::note_guarded_by_declared_here)
+                                      << D->getDeclName());
         Warnings.emplace_back(std::move(Warning), getNotes(Note, VNote));
       } else
         Warnings.emplace_back(std::move(Warning), getNotes(Note));
@@ -1825,6 +1889,13 @@ class ThreadSafetyReporter : public clang::threadSafety::ThreadSafetyHandler {
     PartialDiagnosticAt Warning(Loc,
         S.PDiag(diag::warn_acquire_requires_negative_cap)
         << Kind << LockName << Neg);
+    Warnings.emplace_back(std::move(Warning), getNotes());
+  }
+
+  void handleNegativeNotHeld(const NamedDecl *D, Name LockName,
+                             SourceLocation Loc) override {
+    PartialDiagnosticAt Warning(
+        Loc, S.PDiag(diag::warn_fun_requires_negative_cap) << D << LockName);
     Warnings.emplace_back(std::move(Warning), getNotes());
   }
 
@@ -2025,7 +2096,7 @@ AnalysisBasedWarnings::IssueWarnings(sema::AnalysisBasedWarnings::Policy P,
   if (cast<DeclContext>(D)->isDependentContext())
     return;
 
-  if (Diags.hasUncompilableErrorOccurred()) {
+  if (S.hasUncompilableErrorOccurred()) {
     // Flush out any possibly unreachable diagnostics.
     flushDiagnostics(S, fscope);
     return;
@@ -2070,10 +2141,9 @@ AnalysisBasedWarnings::IssueWarnings(sema::AnalysisBasedWarnings::Policy P,
       .setAlwaysAdd(Stmt::AttributedStmtClass);
   }
 
-  // Install the logical handler for -Wtautological-overlap-compare
+  // Install the logical handler.
   llvm::Optional<LogicalErrorHandler> LEH;
-  if (!Diags.isIgnored(diag::warn_tautological_overlap_comparison,
-                       D->getBeginLoc())) {
+  if (LogicalErrorHandler::hasActiveDiagnostics(Diags, D->getBeginLoc())) {
     LEH.emplace(S);
     AC.getCFGBuildOptions().Observer = &*LEH;
   }
@@ -2171,7 +2241,8 @@ AnalysisBasedWarnings::IssueWarnings(sema::AnalysisBasedWarnings::Policy P,
 
   if (!Diags.isIgnored(diag::warn_uninit_var, D->getBeginLoc()) ||
       !Diags.isIgnored(diag::warn_sometimes_uninit_var, D->getBeginLoc()) ||
-      !Diags.isIgnored(diag::warn_maybe_uninit_var, D->getBeginLoc())) {
+      !Diags.isIgnored(diag::warn_maybe_uninit_var, D->getBeginLoc()) ||
+      !Diags.isIgnored(diag::warn_uninit_const_reference, D->getBeginLoc())) {
     if (CFG *cfg = AC.getCFG()) {
       UninitValsDiagReporter reporter(S);
       UninitVariablesAnalysisStats stats;
@@ -2222,9 +2293,8 @@ AnalysisBasedWarnings::IssueWarnings(sema::AnalysisBasedWarnings::Policy P,
         checkThrowInNonThrowingFunc(S, FD, AC);
 
   // If none of the previous checks caused a CFG build, trigger one here
-  // for -Wtautological-overlap-compare
-  if (!Diags.isIgnored(diag::warn_tautological_overlap_comparison,
-                       D->getBeginLoc())) {
+  // for the logical error handler.
+  if (LogicalErrorHandler::hasActiveDiagnostics(Diags, D->getBeginLoc())) {
     AC.getCFG();
   }
 

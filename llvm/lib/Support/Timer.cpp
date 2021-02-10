@@ -53,6 +53,11 @@ namespace {
   InfoOutputFilename("info-output-file", cl::value_desc("filename"),
                      cl::desc("File to append -stats and -timer output to"),
                    cl::Hidden, cl::location(getLibSupportInfoOutputFilename()));
+
+  static cl::opt<bool>
+  SortTimers("sort-timers", cl::desc("In the report, sort the timers in each group "
+                                     "in wall clock time order"),
+             cl::init(true), cl::Hidden);
 }
 
 std::unique_ptr<raw_fd_ostream> llvm::CreateInfoOutputFile() {
@@ -91,14 +96,15 @@ static TimerGroup *getDefaultTimerGroup() { return &*DefaultTimerGroup; }
 // Timer Implementation
 //===----------------------------------------------------------------------===//
 
-void Timer::init(StringRef Name, StringRef Description) {
-  init(Name, Description, *getDefaultTimerGroup());
+void Timer::init(StringRef TimerName, StringRef TimerDescription) {
+  init(TimerName, TimerDescription, *getDefaultTimerGroup());
 }
 
-void Timer::init(StringRef Name, StringRef Description, TimerGroup &tg) {
+void Timer::init(StringRef TimerName, StringRef TimerDescription,
+                 TimerGroup &tg) {
   assert(!TG && "Timer already initialized");
-  this->Name.assign(Name.begin(), Name.end());
-  this->Description.assign(Description.begin(), Description.end());
+  Name.assign(TimerName.begin(), TimerName.end());
+  Description.assign(TimerDescription.begin(), TimerDescription.end());
   Running = Triggered = false;
   TG = &tg;
   TG->addTimer(*this);
@@ -246,7 +252,8 @@ TimerGroup::TimerGroup(StringRef Name, StringRef Description,
     : TimerGroup(Name, Description) {
   TimersToPrint.reserve(Records.size());
   for (const auto &P : Records)
-    TimersToPrint.emplace_back(P.getValue(), P.getKey(), P.getKey());
+    TimersToPrint.emplace_back(P.getValue(), std::string(P.getKey()),
+                               std::string(P.getKey()));
   assert(TimersToPrint.size() == Records.size() && "Size mismatch");
 }
 
@@ -299,8 +306,9 @@ void TimerGroup::addTimer(Timer &T) {
 }
 
 void TimerGroup::PrintQueuedTimers(raw_ostream &OS) {
-  // Sort the timers in descending order by amount of time taken.
-  llvm::sort(TimersToPrint);
+  // Perhaps sort the timers in descending order by amount of time taken.
+  if (SortTimers)
+    llvm::sort(TimersToPrint);
 
   TimeRecord Total;
   for (const PrintRecord &Record : TimersToPrint)
@@ -439,4 +447,8 @@ const char *TimerGroup::printAllJSONValues(raw_ostream &OS, const char *delim) {
 
 void TimerGroup::ConstructTimerLists() {
   (void)*NamedGroupedTimers;
+}
+
+std::unique_ptr<TimerGroup> TimerGroup::aquireDefaultGroup() {
+  return std::unique_ptr<TimerGroup>(DefaultTimerGroup.claim());
 }

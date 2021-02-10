@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef lldb_MemoryRegionInfo_h
-#define lldb_MemoryRegionInfo_h
+#ifndef LLDB_TARGET_MEMORYREGIONINFO_H
+#define LLDB_TARGET_MEMORYREGIONINFO_H
 
 #include "lldb/Utility/ConstString.h"
 #include "lldb/Utility/RangeMap.h"
@@ -21,17 +21,20 @@ public:
 
   enum OptionalBool { eDontKnow = -1, eNo = 0, eYes = 1 };
 
-  MemoryRegionInfo()
-      : m_range(), m_read(eDontKnow), m_write(eDontKnow), m_execute(eDontKnow),
-        m_mapped(eDontKnow), m_flash(eDontKnow), m_blocksize(0) {}
-
-  ~MemoryRegionInfo() {}
+  MemoryRegionInfo() = default;
+  MemoryRegionInfo(RangeType range, OptionalBool read, OptionalBool write,
+                   OptionalBool execute, OptionalBool mapped, ConstString name,
+                   OptionalBool flash, lldb::offset_t blocksize,
+                   OptionalBool memory_tagged)
+      : m_range(range), m_read(read), m_write(write), m_execute(execute),
+        m_mapped(mapped), m_name(name), m_flash(flash), m_blocksize(blocksize),
+        m_memory_tagged(memory_tagged) {}
 
   RangeType &GetRange() { return m_range; }
 
   void Clear() {
     m_range.Clear();
-    m_read = m_write = m_execute = eDontKnow;
+    m_read = m_write = m_execute = m_memory_tagged = eDontKnow;
   }
 
   const RangeType &GetRange() const { return m_range; }
@@ -45,6 +48,8 @@ public:
   OptionalBool GetMapped() const { return m_mapped; }
 
   ConstString GetName() const { return m_name; }
+
+  OptionalBool GetMemoryTagged() const { return m_memory_tagged; }
 
   void SetReadable(OptionalBool val) { m_read = val; }
 
@@ -63,6 +68,8 @@ public:
   lldb::offset_t GetBlocksize() const { return m_blocksize; }
 
   void SetBlocksize(lldb::offset_t blocksize) { m_blocksize = blocksize; }
+
+  void SetMemoryTagged(OptionalBool val) { m_memory_tagged = val; }
 
   // Get permissions as a uint32_t that is a mask of one or more bits from the
   // lldb::Permissions
@@ -88,20 +95,23 @@ public:
   bool operator==(const MemoryRegionInfo &rhs) const {
     return m_range == rhs.m_range && m_read == rhs.m_read &&
            m_write == rhs.m_write && m_execute == rhs.m_execute &&
-           m_mapped == rhs.m_mapped;
+           m_mapped == rhs.m_mapped && m_name == rhs.m_name &&
+           m_flash == rhs.m_flash && m_blocksize == rhs.m_blocksize &&
+           m_memory_tagged == rhs.m_memory_tagged;
   }
 
   bool operator!=(const MemoryRegionInfo &rhs) const { return !(*this == rhs); }
 
 protected:
   RangeType m_range;
-  OptionalBool m_read;
-  OptionalBool m_write;
-  OptionalBool m_execute;
-  OptionalBool m_mapped;
+  OptionalBool m_read = eDontKnow;
+  OptionalBool m_write = eDontKnow;
+  OptionalBool m_execute = eDontKnow;
+  OptionalBool m_mapped = eDontKnow;
   ConstString m_name;
-  OptionalBool m_flash;
-  lldb::offset_t m_blocksize;
+  OptionalBool m_flash = eDontKnow;
+  lldb::offset_t m_blocksize = 0;
+  OptionalBool m_memory_tagged = eDontKnow;
 };
   
 inline bool operator<(const MemoryRegionInfo &lhs,
@@ -117,6 +127,9 @@ inline bool operator<(lldb::addr_t lhs, const MemoryRegionInfo &rhs) {
   return lhs < rhs.GetRange().GetRangeBase();
 }
 
+llvm::raw_ostream &operator<<(llvm::raw_ostream &OS,
+                              const MemoryRegionInfo &Info);
+
 // Forward-declarable wrapper.
 class MemoryRegionInfos : public std::vector<lldb_private::MemoryRegionInfo> {
 public:
@@ -127,22 +140,14 @@ public:
 
 namespace llvm {
 template <>
+/// If Options is empty, prints a textual representation of the value. If
+/// Options is a single character, it uses that character for the "yes" value,
+/// while "no" is printed as "-", and "don't know" as "?". This can be used to
+/// print the permissions in the traditional "rwx" form.
 struct format_provider<lldb_private::MemoryRegionInfo::OptionalBool> {
   static void format(const lldb_private::MemoryRegionInfo::OptionalBool &B,
-                     raw_ostream &OS, StringRef Options) {
-    switch(B) {
-    case lldb_private::MemoryRegionInfo::eNo:
-      OS << "no";
-      return;
-    case lldb_private::MemoryRegionInfo::eYes:
-      OS << "yes";
-      return;
-    case lldb_private::MemoryRegionInfo::eDontKnow:
-      OS << "don't know";
-      return;
-    }
-  }
+                     raw_ostream &OS, StringRef Options);
 };
 }
 
-#endif // #ifndef lldb_MemoryRegionInfo_h
+#endif // LLDB_TARGET_MEMORYREGIONINFO_H

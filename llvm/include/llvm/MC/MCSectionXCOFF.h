@@ -13,13 +13,11 @@
 #ifndef LLVM_MC_MCSECTIONXCOFF_H
 #define LLVM_MC_MCSECTIONXCOFF_H
 
-#include "llvm/ADT/Twine.h"
 #include "llvm/BinaryFormat/XCOFF.h"
 #include "llvm/MC/MCSection.h"
+#include "llvm/MC/MCSymbolXCOFF.h"
 
 namespace llvm {
-
-class MCSymbol;
 
 // This class represents an XCOFF `Control Section`, more commonly referred to
 // as a csect. A csect represents the smallest possible unit of data/code which
@@ -34,19 +32,31 @@ class MCSymbol;
 class MCSectionXCOFF final : public MCSection {
   friend class MCContext;
 
-  StringRef Name;
   XCOFF::StorageMappingClass MappingClass;
   XCOFF::SymbolType Type;
-  XCOFF::StorageClass StorageClass;
+  MCSymbolXCOFF *const QualName;
+  StringRef SymbolTableName;
+  bool MultiSymbolsAllowed;
+  static constexpr unsigned DefaultAlignVal = 4;
 
-  MCSectionXCOFF(StringRef Section, XCOFF::StorageMappingClass SMC,
-                 XCOFF::SymbolType ST, XCOFF::StorageClass SC, SectionKind K,
-                 MCSymbol *Begin)
-      : MCSection(SV_XCOFF, K, Begin), Name(Section), MappingClass(SMC),
-        Type(ST), StorageClass(SC) {
-    assert((ST == XCOFF::XTY_SD || ST == XCOFF::XTY_CM) &&
+  MCSectionXCOFF(StringRef Name, XCOFF::StorageMappingClass SMC,
+                 XCOFF::SymbolType ST, SectionKind K, MCSymbolXCOFF *QualName,
+                 MCSymbol *Begin, StringRef SymbolTableName,
+                 bool MultiSymbolsAllowed)
+      : MCSection(SV_XCOFF, Name, K, Begin), MappingClass(SMC), Type(ST),
+        QualName(QualName), SymbolTableName(SymbolTableName),
+        MultiSymbolsAllowed(MultiSymbolsAllowed) {
+    assert((ST == XCOFF::XTY_SD || ST == XCOFF::XTY_CM || ST == XCOFF::XTY_ER) &&
            "Invalid or unhandled type for csect.");
+    assert(QualName != nullptr && "QualName is needed.");
+    QualName->setRepresentedCsect(this);
+    QualName->setStorageClass(XCOFF::C_HIDEXT);
+    // A csect is 4 byte aligned by default, except for undefined symbol csects.
+    if (Type != XCOFF::XTY_ER)
+      setAlignment(Align(DefaultAlignVal));
   }
+
+  void printCsectDirective(raw_ostream &OS) const;
 
 public:
   ~MCSectionXCOFF();
@@ -55,15 +65,20 @@ public:
     return S->getVariant() == SV_XCOFF;
   }
 
-  StringRef getSectionName() const { return Name; }
   XCOFF::StorageMappingClass getMappingClass() const { return MappingClass; }
+  XCOFF::StorageClass getStorageClass() const {
+    return QualName->getStorageClass();
+  }
   XCOFF::SymbolType getCSectType() const { return Type; }
+  MCSymbolXCOFF *getQualNameSymbol() const { return QualName; }
 
   void PrintSwitchToSection(const MCAsmInfo &MAI, const Triple &T,
                             raw_ostream &OS,
                             const MCExpr *Subsection) const override;
   bool UseCodeAlign() const override;
   bool isVirtualSection() const override;
+  StringRef getSymbolTableName() const { return SymbolTableName; }
+  bool isMultiSymbolsAllowed() const { return MultiSymbolsAllowed; }
 };
 
 } // end namespace llvm

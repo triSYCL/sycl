@@ -15,17 +15,17 @@
 define void @foo1() {
 ; CHECK-LABEL: foo1:
 ; CHECK:       // %bb.0: // %entry
-; CHECK-NEXT:    adr x8, src
+; CHECK-NEXT:    ldr x8, :got:src
 ; CHECK-NEXT:    ldrb w8, [x8]
-; CHECK-NEXT:    adr x9, dst
+; CHECK-NEXT:    ldr x9, :got:dst
 ; CHECK-NEXT:    strb w8, [x9]
 ; CHECK-NEXT:    ret
 ;
 ; CHECK-GLOBISEL-LABEL: foo1:
 ; CHECK-GLOBISEL:       // %bb.0: // %entry
-; CHECK-GLOBISEL-NEXT:    adr x8, src
+; CHECK-GLOBISEL-NEXT:    ldr x8, :got:src
 ; CHECK-GLOBISEL-NEXT:    ldrb w8, [x8]
-; CHECK-GLOBISEL-NEXT:    adr x9, dst
+; CHECK-GLOBISEL-NEXT:    ldr x9, :got:dst
 ; CHECK-GLOBISEL-NEXT:    strb w8, [x9]
 ; CHECK-GLOBISEL-NEXT:    ret
 ;
@@ -53,16 +53,16 @@ entry:
 define void @foo2() {
 ; CHECK-LABEL: foo2:
 ; CHECK:       // %bb.0: // %entry
-; CHECK-NEXT:    adr x8, ptr
-; CHECK-NEXT:    adr x9, dst
+; CHECK-NEXT:    ldr x8, :got:ptr
+; CHECK-NEXT:    ldr x9, :got:dst
 ; CHECK-NEXT:    str x9, [x8]
 ; CHECK-NEXT:    ret
 ;
 ; CHECK-GLOBISEL-LABEL: foo2:
 ; CHECK-GLOBISEL:       // %bb.0: // %entry
-; CHECK-GLOBISEL-NEXT:    adr x8, dst
-; CHECK-GLOBISEL-NEXT:    adr x9, ptr
-; CHECK-GLOBISEL-NEXT:    str x8, [x9]
+; CHECK-GLOBISEL-NEXT:    ldr x8, :got:ptr
+; CHECK-GLOBISEL-NEXT:    ldr x9, :got:dst
+; CHECK-GLOBISEL-NEXT:    str x9, [x8]
 ; CHECK-GLOBISEL-NEXT:    ret
 ;
 ; CHECK-PIC-LABEL: foo2:
@@ -74,9 +74,9 @@ define void @foo2() {
 ;
 ; CHECK-PIC-GLOBISEL-LABEL: foo2:
 ; CHECK-PIC-GLOBISEL:       // %bb.0: // %entry
-; CHECK-PIC-GLOBISEL-NEXT:    ldr x8, :got:dst
-; CHECK-PIC-GLOBISEL-NEXT:    ldr x9, :got:ptr
-; CHECK-PIC-GLOBISEL-NEXT:    str x8, [x9]
+; CHECK-PIC-GLOBISEL-NEXT:    ldr x8, :got:ptr
+; CHECK-PIC-GLOBISEL-NEXT:    ldr x9, :got:dst
+; CHECK-PIC-GLOBISEL-NEXT:    str x9, [x8]
 ; CHECK-PIC-GLOBISEL-NEXT:    ret
 entry:
   store i8* getelementptr inbounds ([65536 x i8], [65536 x i8]* @dst, i64 0, i64 0), i8** @ptr, align 8
@@ -88,16 +88,17 @@ define void @foo3() {
 ;
 ; CHECK-LABEL: foo3:
 ; CHECK:       // %bb.0: // %entry
-; CHECK-NEXT:    adr x8, src
+; CHECK-NEXT:    ldr x8, :got:src
+; CHECK-NEXT:    ldr x9, :got:ptr
 ; CHECK-NEXT:    ldrb w8, [x8]
-; CHECK-NEXT:    ldr x9, ptr
+; CHECK-NEXT:    ldr x9, [x9]
 ; CHECK-NEXT:    strb w8, [x9]
 ; CHECK-NEXT:    ret
 ;
 ; CHECK-GLOBISEL-LABEL: foo3:
 ; CHECK-GLOBISEL:       // %bb.0: // %entry
-; CHECK-GLOBISEL-NEXT:    adr x8, src
-; CHECK-GLOBISEL-NEXT:    adr x9, ptr
+; CHECK-GLOBISEL-NEXT:    ldr x8, :got:src
+; CHECK-GLOBISEL-NEXT:    ldr x9, :got:ptr
 ; CHECK-GLOBISEL-NEXT:    ldrb w8, [x8]
 ; CHECK-GLOBISEL-NEXT:    ldr x9, [x9]
 ; CHECK-GLOBISEL-NEXT:    strb w8, [x9]
@@ -179,9 +180,9 @@ define void @bar2() {
 ;
 ; CHECK-GLOBISEL-LABEL: bar2:
 ; CHECK-GLOBISEL:       // %bb.0: // %entry
-; CHECK-GLOBISEL-NEXT:    adr x8, ldst
-; CHECK-GLOBISEL-NEXT:    adr x9, lptr
-; CHECK-GLOBISEL-NEXT:    str x8, [x9]
+; CHECK-GLOBISEL-NEXT:    adr x8, lptr
+; CHECK-GLOBISEL-NEXT:    adr x9, ldst
+; CHECK-GLOBISEL-NEXT:    str x9, [x8]
 ; CHECK-GLOBISEL-NEXT:    ret
 ;
 ; CHECK-PIC-LABEL: bar2:
@@ -193,9 +194,9 @@ define void @bar2() {
 ;
 ; CHECK-PIC-GLOBISEL-LABEL: bar2:
 ; CHECK-PIC-GLOBISEL:       // %bb.0: // %entry
-; CHECK-PIC-GLOBISEL-NEXT:    adr x8, ldst
-; CHECK-PIC-GLOBISEL-NEXT:    adr x9, lptr
-; CHECK-PIC-GLOBISEL-NEXT:    str x8, [x9]
+; CHECK-PIC-GLOBISEL-NEXT:    adr x8, lptr
+; CHECK-PIC-GLOBISEL-NEXT:    adr x9, ldst
+; CHECK-PIC-GLOBISEL-NEXT:    str x9, [x8]
 ; CHECK-PIC-GLOBISEL-NEXT:    ret
 entry:
   store i8* @ldst, i8** @lptr, align 8
@@ -297,9 +298,9 @@ define void @baz2() {
 ;
 ; CHECK-GLOBISEL-LABEL: baz2:
 ; CHECK-GLOBISEL:       // %bb.0: // %entry
-; CHECK-GLOBISEL-NEXT:    adr x8, lbdst
-; CHECK-GLOBISEL-NEXT:    adr x9, lptr
-; CHECK-GLOBISEL-NEXT:    str x8, [x9]
+; CHECK-GLOBISEL-NEXT:    adr x8, lptr
+; CHECK-GLOBISEL-NEXT:    adr x9, lbdst
+; CHECK-GLOBISEL-NEXT:    str x9, [x8]
 ; CHECK-GLOBISEL-NEXT:    ret
 ;
 ; CHECK-PIC-LABEL: baz2:
@@ -311,9 +312,9 @@ define void @baz2() {
 ;
 ; CHECK-PIC-GLOBISEL-LABEL: baz2:
 ; CHECK-PIC-GLOBISEL:       // %bb.0: // %entry
-; CHECK-PIC-GLOBISEL-NEXT:    adr x8, lbdst
-; CHECK-PIC-GLOBISEL-NEXT:    adr x9, lptr
-; CHECK-PIC-GLOBISEL-NEXT:    str x8, [x9]
+; CHECK-PIC-GLOBISEL-NEXT:    adr x8, lptr
+; CHECK-PIC-GLOBISEL-NEXT:    adr x9, lbdst
+; CHECK-PIC-GLOBISEL-NEXT:    str x9, [x8]
 ; CHECK-PIC-GLOBISEL-NEXT:    ret
 entry:
   store i8* getelementptr inbounds ([65536 x i8], [65536 x i8]* @lbdst, i64 0, i64 0), i8** @lptr, align 8
@@ -369,12 +370,12 @@ declare void @func(...)
 define i8* @externfuncaddr() {
 ; CHECK-LABEL: externfuncaddr:
 ; CHECK:       // %bb.0: // %entry
-; CHECK-NEXT:    adr x0, func
+; CHECK-NEXT:    ldr x0, :got:func
 ; CHECK-NEXT:    ret
 ;
 ; CHECK-GLOBISEL-LABEL: externfuncaddr:
 ; CHECK-GLOBISEL:       // %bb.0: // %entry
-; CHECK-GLOBISEL-NEXT:    adr x0, func
+; CHECK-GLOBISEL-NEXT:    ldr x0, :got:func
 ; CHECK-GLOBISEL-NEXT:    ret
 ;
 ; CHECK-PIC-LABEL: externfuncaddr:

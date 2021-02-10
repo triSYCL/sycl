@@ -1,4 +1,3 @@
-from __future__ import print_function
 from __future__ import absolute_import
 
 # System modules
@@ -42,7 +41,7 @@ def create_parser():
     group.add_argument('-C', '--compiler', metavar='compiler', dest='compiler', help=textwrap.dedent(
         '''Specify the compiler(s) used to build the inferior executables. The compiler path can be an executable basename or a full path to a compiler executable. This option can be specified multiple times.'''))
     if sys.platform == 'darwin':
-        group.add_argument('--apple-sdk', metavar='apple_sdk', dest='apple_sdk', default="macosx", help=textwrap.dedent(
+        group.add_argument('--apple-sdk', metavar='apple_sdk', dest='apple_sdk', default="", help=textwrap.dedent(
             '''Specify the name of the Apple SDK (macosx, macosx.internal, iphoneos, iphoneos.internal, or path to SDK) and use the appropriate tools from that SDK's toolchain.'''))
     # FIXME? This won't work for different extra flags according to each arch.
     group.add_argument(
@@ -52,7 +51,7 @@ def create_parser():
                                                            suggestions: do not lump the "-A arch1 -A arch2" together such that the -E option applies to only one of the architectures'''))
 
     group.add_argument('--dsymutil', metavar='dsymutil', dest='dsymutil', help=textwrap.dedent('Specify which dsymutil to use.'))
-
+    group.add_argument('--yaml2obj', metavar='yaml2obj', dest='yaml2obj', help=textwrap.dedent('Specify which yaml2obj binary to use.'))
     group.add_argument('--filecheck', metavar='filecheck', dest='filecheck', help=textwrap.dedent('Specify which FileCheck binary to use.'))
 
     # Test filtering options
@@ -61,7 +60,9 @@ def create_parser():
         '-f',
         metavar='filterspec',
         action='append',
-        help='Specify a filter, which consists of the test class name, a dot, followed by the test method, to only admit such test into the test suite')  # FIXME: Example?
+        help=('Specify a filter, which looks like "TestModule.TestClass.test_name".  '+
+            'You may also use shortened filters, such as '+
+            '"TestModule.TestClass", "TestClass.test_name", or just "test_name".'))
     group.add_argument(
         '-p',
         metavar='pattern',
@@ -74,14 +75,20 @@ def create_parser():
         '--category',
         metavar='category',
         action='append',
-        dest='categoriesList',
+        dest='categories_list',
         help=textwrap.dedent('''Specify categories of test cases of interest. Can be specified more than once.'''))
     group.add_argument(
         '--skip-category',
         metavar='category',
         action='append',
-        dest='skipCategories',
+        dest='skip_categories',
         help=textwrap.dedent('''Specify categories of test cases to skip. Takes precedence over -G. Can be specified more than once.'''))
+    group.add_argument(
+        '--xfail-category',
+        metavar='category',
+        action='append',
+        dest='xfail_categories',
+        help=textwrap.dedent('''Specify categories of test cases that are expected to fail. Can be specified more than once.'''))
 
     # Configuration options
     group = parser.add_argument_group('Configuration options')
@@ -109,15 +116,13 @@ def create_parser():
         type=int,
         help='Override the DWARF version.')
     group.add_argument(
-        '-s',
-        metavar='name',
-        help='Specify the name of the dir created to store the session files of tests with errored or failed status. If not specified, the test driver uses the timestamp as the session dir name')
-    group.add_argument(
-        '-S',
-        '--session-file-format',
-        default=configuration.session_file_format,
-        metavar='format',
-        help='Specify session file name format.  See configuration.py for a description.')
+        '--setting',
+        metavar='SETTING=VALUE',
+        dest='settings',
+        type=str,
+        nargs=1,
+        action='append',
+        help='Run "setting set SETTING VALUE" before executing any test.')
     group.add_argument(
         '-y',
         type=int,
@@ -148,10 +153,27 @@ def create_parser():
         default='lldb-test-build.noindex',
         help='The root build directory for the tests. It will be removed before running.')
     group.add_argument(
-        '--module-cache-dir',
-        dest='module_cache_dir',
+        '--lldb-module-cache-dir',
+        dest='lldb_module_cache_dir',
         metavar='The clang module cache directory used by LLDB',
-        help='The clang module cache directory used by LLDB. This is not the one used by the makefiles. Defaults to <test build directory>/module-cache-lldb.')
+        help='The clang module cache directory used by LLDB. Defaults to <test build directory>/module-cache-lldb.')
+    group.add_argument(
+        '--clang-module-cache-dir',
+        dest='clang_module_cache_dir',
+        metavar='The clang module cache directory used by Clang',
+        help='The clang module cache directory used in the Make files by Clang while building tests. Defaults to <test build directory>/module-cache-clang.')
+    group.add_argument(
+        '--lldb-libs-dir',
+        dest='lldb_libs_dir',
+        metavar='path',
+        help='The path to LLDB library directory (containing liblldb)')
+    group.add_argument(
+        '--enable-plugin',
+        dest='enabled_plugins',
+        action='append',
+        type=str,
+        metavar='A plugin whose tests will be enabled',
+        help='A plugin whose tests will be enabled. The only currently supported plugin is intel-pt.')
 
     # Configuration options
     group = parser.add_argument_group('Remote platform options')
@@ -170,6 +192,17 @@ def create_parser():
         dest='lldb_platform_working_dir',
         metavar='platform-working-dir',
         help='The directory to use on the remote platform.')
+
+    # Reproducer options
+    group = parser.add_argument_group('Reproducer options')
+    group.add_argument(
+        '--capture-path',
+        metavar='reproducer path',
+        help='The reproducer capture path')
+    group.add_argument(
+        '--replay-path',
+        metavar='reproducer path',
+        help='The reproducer replay path')
 
     # Test-suite behaviour
     group = parser.add_argument_group('Runtime behaviour options')
@@ -200,38 +233,6 @@ def create_parser():
         action='store_false',
         help='(Windows only) When LLDB crashes, display the Windows crash dialog.')
     group.set_defaults(disable_crash_dialog=True)
-
-    # Test results support.
-    group = parser.add_argument_group('Test results options')
-    group.add_argument(
-        '--results-file',
-        action='store',
-        help=('Specifies the file where test results will be written '
-              'according to the results-formatter class used'))
-    group.add_argument(
-        '--results-formatter',
-        action='store',
-        help=('Specifies the full package/module/class name used to translate '
-              'test events into some kind of meaningful report, written to '
-              'the designated output results file-like object'))
-    group.add_argument(
-        '--results-formatter-option',
-        '-O',
-        action='append',
-        dest='results_formatter_options',
-        help=('Specify an option to pass to the formatter. '
-              'Use --results-formatter-option="--option1=val1" '
-              'syntax.  Note the "=" is critical, don\'t include whitespace.'))
-
-    # Re-run related arguments
-    group = parser.add_argument_group('Test Re-run Options')
-    group.add_argument(
-        '--rerun-all-issues',
-        action='store_true',
-        help=('Re-run all issues that occurred during the test run '
-              'irrespective of the test method\'s marking as flakey. '
-              'Default behavior is to apply re-runs only to flakey '
-              'tests that generate issues.'))
 
     # Remove the reference to our helper function
     del X

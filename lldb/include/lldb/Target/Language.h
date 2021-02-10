@@ -7,8 +7,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_Language_h_
-#define liblldb_Language_h_
+#ifndef LLDB_TARGET_LANGUAGE_H
+#define LLDB_TARGET_LANGUAGE_H
 
 #include <functional>
 #include <memory>
@@ -176,16 +176,9 @@ public:
   virtual HardcodedFormatters::HardcodedSyntheticFinder
   GetHardcodedSynthetics();
 
-  virtual HardcodedFormatters::HardcodedValidatorFinder
-  GetHardcodedValidators();
-
   virtual std::vector<ConstString>
   GetPossibleFormattersMatches(ValueObject &valobj,
                                lldb::DynamicValueType use_dynamic);
-
-  virtual lldb_private::formatters::StringPrinter::EscapingHelper
-      GetStringPrinterEscapingHelper(
-          lldb_private::formatters::StringPrinter::GetPrintableElementType);
 
   virtual std::unique_ptr<TypeScavenger> GetTypeScavenger();
 
@@ -217,6 +210,10 @@ public:
   // for a ValueObject of some "reference type", if the value points to the
   // nil/null object, this method returns true
   virtual bool IsNilReference(ValueObject &valobj);
+
+  /// Returns the summary string for ValueObjects for which IsNilReference() is
+  /// true.
+  virtual llvm::StringRef GetNilReferenceSummaryString() { return {}; }
 
   // for a ValueObject of some "reference type", if the language provides a
   // technique to decide whether the reference has ever been assigned to some
@@ -277,9 +274,10 @@ protected:
   Language();
 
 private:
-  DISALLOW_COPY_AND_ASSIGN(Language);
+  Language(const Language &) = delete;
+  const Language &operator=(const Language &) = delete;
 };
 
 } // namespace lldb_private
 
-#endif // liblldb_Language_h_
+#endif // LLDB_TARGET_LANGUAGE_H

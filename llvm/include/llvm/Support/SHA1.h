@@ -15,10 +15,9 @@
 #ifndef LLVM_SUPPORT_SHA1_H
 #define LLVM_SUPPORT_SHA1_H
 
-#include "llvm/ADT/ArrayRef.h"
-
 #include <array>
 #include <cstdint>
+#include <string>
 
 namespace llvm {
 template <typename T> class ArrayRef;
@@ -36,10 +35,7 @@ public:
   void update(ArrayRef<uint8_t> Data);
 
   /// Digest more data.
-  void update(StringRef Str) {
-    update(ArrayRef<uint8_t>((uint8_t *)const_cast<char *>(Str.data()),
-                             Str.size()));
-  }
+  void update(StringRef Str);
 
   /// Return a reference to the current raw 160-bits SHA1 for the digested data
   /// since the last call to init(). This call will add data to the internal
@@ -55,6 +51,9 @@ public:
 
   /// Returns a raw 160-bit SHA1 hash for the given data.
   static std::array<uint8_t, 20> hash(ArrayRef<uint8_t> Data);
+
+  /// Returns a hash of the input represented using the provided maping.
+  static std::string hashToString(ArrayRef<uint8_t> Data, StringRef Mapping);
 
 private:
   /// Define some constants.

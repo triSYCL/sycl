@@ -27,8 +27,9 @@
 //      offsetA[.discriminator]: fnA:num_of_total_samples
 //       offsetA1[.discriminator]: number_of_samples [fn7:num fn8:num ... ]
 //       ...
+//      !CFGChecksum: num
 //
-// This is a nested tree in which the identation represents the nesting level
+// This is a nested tree in which the indentation represents the nesting level
 // of the inline stack. There are no blank lines in the file. And the spacing
 // within a single line is fixed. Additional spaces will result in an error
 // while reading the file.
@@ -47,10 +48,11 @@
 // in the prologue of the function (second number). This head sample
 // count provides an indicator of how frequently the function is invoked.
 //
-// There are two types of lines in the function body.
+// There are three types of lines in the function body.
 //
 // * Sampled line represents the profile information of a source location.
 // * Callsite line represents the profile information of a callsite.
+// * Metadata line represents extra metadata of the function.
 //
 // Each sampled line may contain several items. Some are optional (marked
 // below):
@@ -113,6 +115,18 @@
 // c. Number of samples. This is an integer quantity representing the
 //    total number of samples collected for the inlined instance at this
 //    callsite
+//
+// Metadata line can occur in lines with one indent only, containing extra
+// information for the top-level function. Furthermore, metadata can only
+// occur after all the body samples and callsite samples.
+// Each metadata line may contain a particular type of metadata, marked by
+// the starting characters annotated with !. We process each metadata line
+// independently, hence each metadata line has to form an independent piece
+// of information that does not require cross-line reference.
+// We support the following types of metadata:
+//
+// a. CFG Checksum (a.k.a. function hash):
+//   !CFGChecksum: 12345
 //
 //
 // Binary format
@@ -208,6 +222,7 @@
 #ifndef LLVM_PROFILEDATA_SAMPLEPROFREADER_H
 #define LLVM_PROFILEDATA_SAMPLEPROFREADER_H
 
+#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
@@ -234,6 +249,65 @@ namespace llvm {
 class raw_ostream;
 
 namespace sampleprof {
+
+class SampleProfileReader;
+
+/// SampleProfileReaderItaniumRemapper remaps the profile data from a
+/// sample profile data reader, by applying a provided set of equivalences
+/// between components of the symbol names in the profile.
+class SampleProfileReaderItaniumRemapper {
+public:
+  SampleProfileReaderItaniumRemapper(std::unique_ptr<MemoryBuffer> B,
+                                     std::unique_ptr<SymbolRemappingReader> SRR,
+                                     SampleProfileReader &R)
+      : Buffer(std::move(B)), Remappings(std::move(SRR)), Reader(R) {
+    assert(Remappings && "Remappings cannot be nullptr");
+  }
+
+  /// Create a remapper from the given remapping file. The remapper will
+  /// be used for profile read in by Reader.
+  static ErrorOr<std::unique_ptr<SampleProfileReaderItaniumRemapper>>
+  create(const std::string Filename, SampleProfileReader &Reader,
+         LLVMContext &C);
+
+  /// Create a remapper from the given Buffer. The remapper will
+  /// be used for profile read in by Reader.
+  static ErrorOr<std::unique_ptr<SampleProfileReaderItaniumRemapper>>
+  create(std::unique_ptr<MemoryBuffer> &B, SampleProfileReader &Reader,
+         LLVMContext &C);
+
+  /// Apply remappings to the profile read by Reader.
+  void applyRemapping(LLVMContext &Ctx);
+
+  bool hasApplied() { return RemappingApplied; }
+
+  /// Insert function name into remapper.
+  void insert(StringRef FunctionName) { Remappings->insert(FunctionName); }
+
+  /// Query whether there is equivalent in the remapper which has been
+  /// inserted.
+  bool exist(StringRef FunctionName) {
+    return Remappings->lookup(FunctionName);
+  }
+
+  /// Return the equivalent name in the profile for \p FunctionName if
+  /// it exists.
+  Optional<StringRef> lookUpNameInProfile(StringRef FunctionName);
+
+private:
+  // The buffer holding the content read from remapping file.
+  std::unique_ptr<MemoryBuffer> Buffer;
+  std::unique_ptr<SymbolRemappingReader> Remappings;
+  // Map remapping key to the name in the profile. By looking up the
+  // key in the remapper, a given new name can be mapped to the
+  // cannonical name using the NameMap.
+  DenseMap<SymbolRemappingReader::Key, StringRef> NameMap;
+  // The Reader the remapper is servicing.
+  SampleProfileReader &Reader;
+  // Indicate whether remapping has been applied to the profile read
+  // by Reader -- by calling applyRemapping.
+  bool RemappingApplied = false;
+};
 
 /// Sample-based profile reader.
 ///
@@ -273,13 +347,23 @@ public:
   /// Read and validate the file header.
   virtual std::error_code readHeader() = 0;
 
-  /// Read sample profiles from the associated file.
-  virtual std::error_code read() = 0;
+  /// The interface to read sample profiles from the associated file.
+  std::error_code read() {
+    if (std::error_code EC = readImpl())
+      return EC;
+    if (Remapper)
+      Remapper->applyRemapping(Ctx);
+    FunctionSamples::UseMD5 = useMD5();
+    return sampleprof_error::success;
+  }
+
+  /// The implementaion to read sample profiles from the associated file.
+  virtual std::error_code readImpl() = 0;
 
   /// Print the profile for \p FName on stream \p OS.
   void dumpFunctionProfile(StringRef FName, raw_ostream &OS = dbgs());
 
-  virtual void collectFuncsToUse(const Module &M) {}
+  virtual void collectFuncsFrom(const Module &M) {}
 
   /// Print all the profiles on stream \p OS.
   void dump(raw_ostream &OS = dbgs());
@@ -293,13 +377,30 @@ public:
     return getSamplesFor(CanonName);
   }
 
+  /// Return the samples collected for function \p F, create empty
+  /// FunctionSamples if it doesn't exist.
+  FunctionSamples *getOrCreateSamplesFor(const Function &F) {
+    std::string FGUID;
+    StringRef CanonName = FunctionSamples::getCanonicalFnName(F);
+    CanonName = getRepInFormat(CanonName, useMD5(), FGUID);
+    return &Profiles[CanonName];
+  }
+
   /// Return the samples collected for function \p F.
   virtual FunctionSamples *getSamplesFor(StringRef Fname) {
     std::string FGUID;
-    Fname = getRepInFormat(Fname, getFormat(), FGUID);
+    Fname = getRepInFormat(Fname, useMD5(), FGUID);
     auto It = Profiles.find(Fname);
     if (It != Profiles.end())
       return &It->second;
+
+    if (Remapper) {
+      if (auto NameInProfile = Remapper->lookUpNameInProfile(Fname)) {
+        auto It = Profiles.find(*NameInProfile);
+        if (It != Profiles.end())
+          return &It->second;
+      }
+    }
     return nullptr;
   }
 
@@ -313,22 +414,44 @@ public:
   }
 
   /// Create a sample profile reader appropriate to the file format.
+  /// Create a remapper underlying if RemapFilename is not empty.
   static ErrorOr<std::unique_ptr<SampleProfileReader>>
-  create(const Twine &Filename, LLVMContext &C);
+  create(const std::string Filename, LLVMContext &C,
+         const std::string RemapFilename = "");
 
   /// Create a sample profile reader from the supplied memory buffer.
+  /// Create a remapper underlying if RemapFilename is not empty.
   static ErrorOr<std::unique_ptr<SampleProfileReader>>
-  create(std::unique_ptr<MemoryBuffer> &B, LLVMContext &C);
+  create(std::unique_ptr<MemoryBuffer> &B, LLVMContext &C,
+         const std::string RemapFilename = "");
 
   /// Return the profile summary.
-  ProfileSummary &getSummary() { return *(Summary.get()); }
+  ProfileSummary &getSummary() const { return *(Summary.get()); }
+
+  MemoryBuffer *getBuffer() const { return Buffer.get(); }
 
   /// \brief Return the profile format.
-  SampleProfileFormat getFormat() { return Format; }
+  SampleProfileFormat getFormat() const { return Format; }
+
+  /// Whether input profile is based on pseudo probes.
+  bool profileIsProbeBased() const { return ProfileIsProbeBased; }
+
+  /// Whether input profile is fully context-sensitive
+  bool profileIsCS() const { return ProfileIsCS; }
 
   virtual std::unique_ptr<ProfileSymbolList> getProfileSymbolList() {
     return nullptr;
   };
+
+  /// It includes all the names that have samples either in outline instance
+  /// or inline instance.
+  virtual std::vector<StringRef> *getNameTable() { return nullptr; }
+  virtual bool dumpSectionInfo(raw_ostream &OS = dbgs()) { return false; };
+
+  /// Return whether names in the profile are all MD5 numbers.
+  virtual bool useMD5() { return false; }
+
+  SampleProfileReaderItaniumRemapper *getRemapper() { return Remapper.get(); }
 
 protected:
   /// Map every function to its associated profile.
@@ -356,6 +479,13 @@ protected:
   /// Compute summary for this profile.
   void computeSummary();
 
+  std::unique_ptr<SampleProfileReaderItaniumRemapper> Remapper;
+
+  /// \brief Whether samples are collected based on pseudo probes.
+  bool ProfileIsProbeBased = false;
+
+  bool ProfileIsCS = false;
+
   /// \brief The format of sample.
   SampleProfileFormat Format = SPF_None;
 };
@@ -369,7 +499,7 @@ public:
   std::error_code readHeader() override { return sampleprof_error::success; }
 
   /// Read sample profiles from the associated file.
-  std::error_code read() override;
+  std::error_code readImpl() override;
 
   /// Return true if \p Buffer is in the format supported by this class.
   static bool hasFormat(const MemoryBuffer &Buffer);
@@ -385,7 +515,11 @@ public:
   virtual std::error_code readHeader() override;
 
   /// Read sample profiles from the associated file.
-  std::error_code read() override;
+  std::error_code readImpl() override;
+
+  /// It includes all the names that have samples either in outline instance
+  /// or inline instance.
+  virtual std::vector<StringRef> *getNameTable() override { return &NameTable; }
 
 protected:
   /// Read a numeric value of type T from the profile.
@@ -415,7 +549,7 @@ protected:
   bool at_eof() const { return Data >= End; }
 
   /// Read the next function profile instance.
-  std::error_code readFuncProfile();
+  std::error_code readFuncProfile(const uint8_t *Start);
 
   /// Read the contents of the given profile instance.
   std::error_code readProfile(FunctionSamples &FProfile);
@@ -479,15 +613,58 @@ public:
 /// possible to define other types of profile inherited from
 /// SampleProfileReaderExtBinaryBase/SampleProfileWriterExtBinaryBase.
 class SampleProfileReaderExtBinaryBase : public SampleProfileReaderBinary {
+private:
+  std::error_code decompressSection(const uint8_t *SecStart,
+                                    const uint64_t SecSize,
+                                    const uint8_t *&DecompressBuf,
+                                    uint64_t &DecompressBufSize);
+
+  BumpPtrAllocator Allocator;
+
 protected:
   std::vector<SecHdrTableEntry> SecHdrTable;
-  std::unique_ptr<ProfileSymbolList> ProfSymList;
-  std::error_code readSecHdrTableEntry();
+  std::error_code readSecHdrTableEntry(uint32_t Idx);
   std::error_code readSecHdrTable();
+
+  std::error_code readFuncMetadata();
+  std::error_code readFuncOffsetTable();
+  std::error_code readFuncProfiles();
+  std::error_code readMD5NameTable();
+  std::error_code readNameTableSec(bool IsMD5);
+  std::error_code readProfileSymbolList();
+
   virtual std::error_code readHeader() override;
   virtual std::error_code verifySPMagic(uint64_t Magic) override = 0;
   virtual std::error_code readOneSection(const uint8_t *Start, uint64_t Size,
-                                         SecType Type) = 0;
+                                         const SecHdrTableEntry &Entry);
+  // placeholder for subclasses to dispatch their own section readers.
+  virtual std::error_code readCustomSection(const SecHdrTableEntry &Entry) = 0;
+  virtual ErrorOr<StringRef> readStringFromTable() override;
+
+  std::unique_ptr<ProfileSymbolList> ProfSymList;
+
+  /// The table mapping from function name to the offset of its FunctionSample
+  /// towards file start.
+  DenseMap<StringRef, uint64_t> FuncOffsetTable;
+  /// The set containing the functions to use when compiling a module.
+  DenseSet<StringRef> FuncsToUse;
+  /// Use all functions from the input profile.
+  bool UseAllFuncs = true;
+
+  /// Use fixed length MD5 instead of ULEB128 encoding so NameTable doesn't
+  /// need to be read in up front and can be directly accessed using index.
+  bool FixedLengthMD5 = false;
+  /// The starting address of NameTable containing fixed length MD5.
+  const uint8_t *MD5NameMemStart = nullptr;
+
+  /// If MD5 is used in NameTable section, the section saves uint64_t data.
+  /// The uint64_t data has to be converted to a string and then the string
+  /// will be used to initialize StringRef in NameTable.
+  /// Note NameTable contains StringRef so it needs another buffer to own
+  /// the string data. MD5StringBuf serves as the string buffer that is
+  /// referenced by NameTable (vector of StringRef). We make sure
+  /// the lifetime of MD5StringBuf is not shorter than that of NameTable.
+  std::unique_ptr<std::vector<std::string>> MD5StringBuf;
 
 public:
   SampleProfileReaderExtBinaryBase(std::unique_ptr<MemoryBuffer> B,
@@ -495,15 +672,32 @@ public:
       : SampleProfileReaderBinary(std::move(B), C, Format) {}
 
   /// Read sample profiles in extensible format from the associated file.
-  std::error_code read() override;
+  std::error_code readImpl() override;
+
+  /// Get the total size of all \p Type sections.
+  uint64_t getSectionSize(SecType Type);
+  /// Get the total size of header and all sections.
+  uint64_t getFileSize();
+  virtual bool dumpSectionInfo(raw_ostream &OS = dbgs()) override;
+
+  /// Collect functions with definitions in Module \p M.
+  void collectFuncsFrom(const Module &M) override;
+
+  /// Return whether names in the profile are all MD5 numbers.
+  virtual bool useMD5() override { return MD5StringBuf.get(); }
+
+  virtual std::unique_ptr<ProfileSymbolList> getProfileSymbolList() override {
+    return std::move(ProfSymList);
+  };
 };
 
 class SampleProfileReaderExtBinary : public SampleProfileReaderExtBinaryBase {
 private:
   virtual std::error_code verifySPMagic(uint64_t Magic) override;
-  virtual std::error_code readOneSection(const uint8_t *Start, uint64_t Size,
-                                         SecType Type) override;
-  std::error_code readProfileSymbolList();
+  virtual std::error_code
+  readCustomSection(const SecHdrTableEntry &Entry) override {
+    return sampleprof_error::success;
+  };
 
 public:
   SampleProfileReaderExtBinary(std::unique_ptr<MemoryBuffer> B, LLVMContext &C,
@@ -512,10 +706,6 @@ public:
 
   /// \brief Return true if \p Buffer is in the format supported by this class.
   static bool hasFormat(const MemoryBuffer &Buffer);
-
-  virtual std::unique_ptr<ProfileSymbolList> getProfileSymbolList() override {
-    return std::move(ProfSymList);
-  };
 };
 
 class SampleProfileReaderCompactBinary : public SampleProfileReaderBinary {
@@ -545,10 +735,13 @@ public:
   static bool hasFormat(const MemoryBuffer &Buffer);
 
   /// Read samples only for functions to use.
-  std::error_code read() override;
+  std::error_code readImpl() override;
 
   /// Collect functions to be used when compiling Module \p M.
-  void collectFuncsToUse(const Module &M) override;
+  void collectFuncsFrom(const Module &M) override;
+
+  /// Return whether names in the profile are all MD5 numbers.
+  virtual bool useMD5() override { return true; }
 };
 
 using InlineCallStack = SmallVector<FunctionSamples *, 10>;
@@ -576,7 +769,7 @@ public:
   std::error_code readHeader() override;
 
   /// Read sample profiles from the associated file.
-  std::error_code read() override;
+  std::error_code readImpl() override;
 
   /// Return true if \p Buffer is in the format supported by this class.
   static bool hasFormat(const MemoryBuffer &Buffer);
@@ -602,44 +795,6 @@ protected:
   /// GCOV tags used to separate sections in the profile file.
   static const uint32_t GCOVTagAFDOFileNames = 0xaa000000;
   static const uint32_t GCOVTagAFDOFunction = 0xac000000;
-};
-
-/// A profile data reader proxy that remaps the profile data from another
-/// sample profile data reader, by applying a provided set of equivalences
-/// between components of the symbol names in the profile.
-class SampleProfileReaderItaniumRemapper : public SampleProfileReader {
-public:
-  SampleProfileReaderItaniumRemapper(
-      std::unique_ptr<MemoryBuffer> B, LLVMContext &C,
-      std::unique_ptr<SampleProfileReader> Underlying)
-      : SampleProfileReader(std::move(B), C, Underlying->getFormat()) {
-    Profiles = std::move(Underlying->getProfiles());
-    Summary = takeSummary(*Underlying);
-    // Keep the underlying reader alive; the profile data may contain
-    // StringRefs referencing names in its name table.
-    UnderlyingReader = std::move(Underlying);
-  }
-
-  /// Create a remapped sample profile from the given remapping file and
-  /// underlying samples.
-  static ErrorOr<std::unique_ptr<SampleProfileReader>>
-  create(const Twine &Filename, LLVMContext &C,
-         std::unique_ptr<SampleProfileReader> Underlying);
-
-  /// Read and validate the file header.
-  std::error_code readHeader() override { return sampleprof_error::success; }
-
-  /// Read remapping file and apply it to the sample profile.
-  std::error_code read() override;
-
-  /// Return the samples collected for function \p F.
-  FunctionSamples *getSamplesFor(StringRef FunctionName) override;
-  using SampleProfileReader::getSamplesFor;
-
-private:
-  SymbolRemappingReader Remappings;
-  DenseMap<SymbolRemappingReader::Key, FunctionSamples*> SampleMap;
-  std::unique_ptr<SampleProfileReader> UnderlyingReader;
 };
 
 } // end namespace sampleprof

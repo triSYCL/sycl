@@ -63,8 +63,9 @@ bool RISCVInstPrinter::applyTargetSpecificCLOption(StringRef Opt) {
   return false;
 }
 
-void RISCVInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
-                                 StringRef Annot, const MCSubtargetInfo &STI) {
+void RISCVInstPrinter::printInst(const MCInst *MI, uint64_t Address,
+                                 StringRef Annot, const MCSubtargetInfo &STI,
+                                 raw_ostream &O) {
   bool Res = false;
   const MCInst *NewMI = MI;
   MCInst UncompressedMI;
@@ -72,8 +73,8 @@ void RISCVInstPrinter::printInst(const MCInst *MI, raw_ostream &O,
     Res = uncompressInst(UncompressedMI, *MI, MRI, STI);
   if (Res)
     NewMI = const_cast<MCInst *>(&UncompressedMI);
-  if (NoAliases || !printAliasInstr(NewMI, STI, O))
-    printInstruction(NewMI, STI, O);
+  if (NoAliases || !printAliasInstr(NewMI, Address, STI, O))
+    printInstruction(NewMI, Address, STI, O);
   printAnnotation(O, Annot);
 }
 
@@ -99,6 +100,24 @@ void RISCVInstPrinter::printOperand(const MCInst *MI, unsigned OpNo,
 
   assert(MO.isExpr() && "Unknown operand kind in printOperand");
   MO.getExpr()->print(O, &MAI);
+}
+
+void RISCVInstPrinter::printBranchOperand(const MCInst *MI, uint64_t Address,
+                                          unsigned OpNo,
+                                          const MCSubtargetInfo &STI,
+                                          raw_ostream &O) {
+  const MCOperand &MO = MI->getOperand(OpNo);
+  if (!MO.isImm())
+    return printOperand(MI, OpNo, STI, O);
+
+  if (PrintBranchImmAsAddress) {
+    uint64_t Target = Address + MO.getImm();
+    if (!STI.hasFeature(RISCV::Feature64Bit))
+      Target &= 0xffffffff;
+    O << formatHex(Target);
+  } else {
+    O << MO.getImm();
+  }
 }
 
 void RISCVInstPrinter::printCSRSystemRegister(const MCInst *MI, unsigned OpNo,
@@ -147,6 +166,34 @@ void RISCVInstPrinter::printAtomicMemOp(const MCInst *MI, unsigned OpNo,
   printRegName(O, MO.getReg());
   O << ")";
   return;
+}
+
+void RISCVInstPrinter::printVTypeI(const MCInst *MI, unsigned OpNo,
+                                   const MCSubtargetInfo &STI, raw_ostream &O) {
+  unsigned Imm = MI->getOperand(OpNo).getImm();
+  RISCVVType::printVType(Imm, O);
+}
+
+void RISCVInstPrinter::printVMaskReg(const MCInst *MI, unsigned OpNo,
+                                     const MCSubtargetInfo &STI,
+                                     raw_ostream &O) {
+  const MCOperand &MO = MI->getOperand(OpNo);
+
+  assert(MO.isReg() && "printVMaskReg can only print register operands");
+  if (MO.getReg() == RISCV::NoRegister)
+    return;
+  O << ", ";
+  printRegName(O, MO.getReg());
+  O << ".t";
+}
+
+void RISCVInstPrinter::printSImm5Plus1(const MCInst *MI, unsigned OpNo,
+                                       const MCSubtargetInfo &STI,
+                                       raw_ostream &O) {
+  const MCOperand &MO = MI->getOperand(OpNo);
+
+  assert(MO.isImm() && "printSImm5Plus1 can only print constant operands");
+  O << MO.getImm() + 1;
 }
 
 const char *RISCVInstPrinter::getRegisterName(unsigned RegNo) {

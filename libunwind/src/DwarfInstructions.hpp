@@ -34,7 +34,7 @@ public:
   typedef typename A::sint_t sint_t;
 
   static int stepWithDwarf(A &addressSpace, pint_t pc, pint_t fdeStart,
-                           R &registers);
+                           R &registers, bool &isSignalFrame);
 
 private:
 
@@ -93,7 +93,8 @@ typename A::pint_t DwarfInstructions<A, R>::getSavedRegister(
 
   case CFI_Parser<A>::kRegisterInRegister:
     return registers.getRegister((int)savedReg.value);
-
+  case CFI_Parser<A>::kRegisterUndefined:
+    return 0;
   case CFI_Parser<A>::kRegisterUnused:
   case CFI_Parser<A>::kRegisterOffsetFromCFA:
     // FIX ME
@@ -117,6 +118,7 @@ double DwarfInstructions<A, R>::getSavedFloatRegister(
 
   case CFI_Parser<A>::kRegisterIsExpression:
   case CFI_Parser<A>::kRegisterUnused:
+  case CFI_Parser<A>::kRegisterUndefined:
   case CFI_Parser<A>::kRegisterOffsetFromCFA:
   case CFI_Parser<A>::kRegisterInRegister:
     // FIX ME
@@ -140,6 +142,7 @@ v128 DwarfInstructions<A, R>::getSavedVectorRegister(
 
   case CFI_Parser<A>::kRegisterIsExpression:
   case CFI_Parser<A>::kRegisterUnused:
+  case CFI_Parser<A>::kRegisterUndefined:
   case CFI_Parser<A>::kRegisterOffsetFromCFA:
   case CFI_Parser<A>::kRegisterInRegister:
     // FIX ME
@@ -150,7 +153,8 @@ v128 DwarfInstructions<A, R>::getSavedVectorRegister(
 
 template <typename A, typename R>
 int DwarfInstructions<A, R>::stepWithDwarf(A &addressSpace, pint_t pc,
-                                           pint_t fdeStart, R &registers) {
+                                           pint_t fdeStart, R &registers,
+                                           bool &isSignalFrame) {
   FDE_Info fdeInfo;
   CIE_Info cieInfo;
   if (CFI_Parser<A>::decodeFDE(addressSpace, fdeStart, &fdeInfo,
@@ -189,12 +193,18 @@ int DwarfInstructions<A, R>::stepWithDwarf(A &addressSpace, pint_t pc,
                                     prolog.savedRegisters[i]));
           else
             return UNW_EBADREG;
+        } else if (i == (int)cieInfo.returnAddressRegister) {
+            // Leaf function keeps the return address in register and there is no
+            // explicit intructions how to restore it.
+            returnAddress = registers.getRegister(cieInfo.returnAddressRegister);
         }
       }
 
       // By definition, the CFA is the stack pointer at the call site, so
       // restoring SP means setting it to CFA.
       newRegisters.setSP(cfa);
+
+      isSignalFrame = cieInfo.isSignalFrame;
 
 #if defined(_LIBUNWIND_TARGET_AARCH64)
       // If the target is aarch64 then the return address may have been signed
@@ -430,7 +440,7 @@ DwarfInstructions<A, R>::evaluateExpression(pint_t expression, A &addressSpace,
       // pick from
       reg = addressSpace.get8(p);
       p += 1;
-      value = sp[-reg];
+      value = sp[-(int)reg];
       *(++sp) = value;
       if (log)
         fprintf(stderr, "duplicate %d in stack\n", reg);

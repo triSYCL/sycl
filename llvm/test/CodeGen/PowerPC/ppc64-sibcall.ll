@@ -1,6 +1,6 @@
 ; RUN: llc < %s -relocation-model=static -O1 -disable-ppc-sco=false -verify-machineinstrs -mtriple=powerpc64-unknown-linux-gnu | FileCheck %s -check-prefix=CHECK-SCO
-; RUN: llc < %s -relocation-model=static -O1 -disable-ppc-sco=false -verify-machineinstrs -mtriple=powerpc64-unknown-linux-gnu -mcpu=pwr8 | FileCheck %s -check-prefix=CHECK-SCO-HASQPX
-; RUN: llc < %s -relocation-model=static -O1 -disable-ppc-sco=false -verify-machineinstrs -mtriple=powerpc64le-unknown-linux-gnu -mcpu=pwr8 | FileCheck %s -check-prefix=CHECK-SCO-HASQPX
+; RUN: llc < %s -relocation-model=static -O1 -disable-ppc-sco=false -verify-machineinstrs -mtriple=powerpc64-unknown-linux-gnu -mcpu=pwr8 | FileCheck %s -check-prefix=CHECK-SCO
+; RUN: llc < %s -relocation-model=static -O1 -disable-ppc-sco=false -verify-machineinstrs -mtriple=powerpc64le-unknown-linux-gnu -mcpu=pwr8 | FileCheck %s -check-prefix=CHECK-SCO
 ; RUN: llc < %s -relocation-model=static -O1 -disable-ppc-sco=false -verify-machineinstrs -mtriple=powerpc64le-unknown-linux-gnu -mcpu=pwr8 -code-model=small | FileCheck %s -check-prefix=SCM
 
 ; No combination of "powerpc64le-unknown-linux-gnu" + "CHECK-SCO", because
@@ -87,15 +87,15 @@ entry:
 ; Struct return test
 
 ; Function Attrs: noinline nounwind
-define void @callee_sret_56(%S_56* noalias sret %agg.result) #0 { ret void }
-define void @callee_sret_32(%S_32* noalias sret %agg.result) #0 { ret void }
+define void @callee_sret_56(%S_56* noalias sret(%S_56) %agg.result) #0 { ret void }
+define void @callee_sret_32(%S_32* noalias sret(%S_32) %agg.result) #0 { ret void }
 
 ; Function Attrs: nounwind
-define void @caller_do_something_sret_32(%S_32* noalias sret %agg.result) #1 {
+define void @caller_do_something_sret_32(%S_32* noalias sret(%S_32) %agg.result) #1 {
   %1 = alloca %S_56, align 4
   %2 = bitcast %S_56* %1 to i8*
-  call void @callee_sret_56(%S_56* nonnull sret %1)
-  tail call void @callee_sret_32(%S_32* sret %agg.result)
+  call void @callee_sret_56(%S_56* nonnull sret(%S_56) %1)
+  tail call void @callee_sret_32(%S_32* sret(%S_32) %agg.result)
   ret void
 
 ; CHECK-SCO-LABEL: caller_do_something_sret_32:
@@ -107,7 +107,7 @@ define void @caller_do_something_sret_32(%S_32* noalias sret %agg.result) #1 {
 
 define void @caller_local_sret_32(%S_32* %a) #1 {
   %tmp = alloca %S_32, align 4
-  tail call void @callee_sret_32(%S_32* nonnull sret %tmp)
+  tail call void @callee_sret_32(%S_32* nonnull sret(%S_32) %tmp)
   ret void
 
 ; CHECK-SCO-LABEL: caller_local_sret_32:
@@ -116,23 +116,6 @@ define void @caller_local_sret_32(%S_32* %a) #1 {
 
 attributes #0 = { noinline nounwind  }
 attributes #1 = { nounwind }
-
-; vector <4 x i1> test
-
-define void @callee_v4i1(i8 %a, <4 x i1> %b, <4 x i1> %c) { ret void }
-define void @caller_v4i1_reorder(i8 %a, <4 x i1> %b, <4 x i1> %c) {
-  tail call void @callee_v4i1(i8 %a, <4 x i1> %c, <4 x i1> %b)
-  ret void
-
-; <4 x i1> is 32 bytes aligned, if subtarget doesn't support qpx, then we can't
-; place b, c to qpx register, so we can't do sco on caller_v4i1_reorder
-
-; CHECK-SCO-LABEL: caller_v4i1_reorder:
-; CHECK-SCO: bl callee_v4i1
-
-; CHECK-SCO-HASQPX-LABEL: caller_v4i1_reorder:
-; CHECK-SCO-HASQPX: b callee_v4i1
-}
 
 define void @f128_callee(i32* %ptr, ppc_fp128 %a, ppc_fp128 %b) { ret void }
 define void @f128_caller(i32* %ptr, ppc_fp128 %a, ppc_fp128 %b) {
@@ -152,7 +135,7 @@ define void @wo_hcaller(%class.T* %this, i8* %c) {
   ret void
 
 ; CHECK-SCO-LABEL: wo_hcaller:
-; CHECK-SCO: b wo_hcallee
+; CHECK-SCO: bl wo_hcallee
 
 ; SCM-LABEL: wo_hcaller:
 ; SCM:       bl wo_hcallee
@@ -164,7 +147,7 @@ define void @wo_pcaller(%class.T* %this, i8* %c) {
   ret void
 
 ; CHECK-SCO-LABEL: wo_pcaller:
-; CHECK-SCO: b wo_pcallee
+; CHECK-SCO: bl wo_pcallee
 
 ; SCM-LABEL: wo_pcaller:
 ; SCM:       bl wo_pcallee
@@ -176,7 +159,7 @@ define void @wo_caller(%class.T* %this, i8* %c) {
   ret void
 
 ; CHECK-SCO-LABEL: wo_caller:
-; CHECK-SCO: b wo_callee
+; CHECK-SCO: bl wo_callee
 
 ; SCM-LABEL: wo_caller:
 ; SCM:       bl wo_callee
@@ -188,7 +171,7 @@ define void @w_pcaller(i8* %ptr) {
   ret void
 
 ; CHECK-SCO-LABEL: w_pcaller:
-; CHECK-SCO: b w_pcallee
+; CHECK-SCO: bl w_pcallee
 
 ; SCM-LABEL: w_pcaller:
 ; SCM:       bl w_pcallee
@@ -200,7 +183,7 @@ define void @w_hcaller(i8* %ptr) {
   ret void
 
 ; CHECK-SCO-LABEL: w_hcaller:
-; CHECK-SCO: b w_hcallee
+; CHECK-SCO: bl w_hcallee
 
 ; SCM-LABEL: w_hcaller:
 ; SCM:       bl w_hcallee
@@ -212,7 +195,7 @@ define void @w_caller(i8* %ptr) {
   ret void
 
 ; CHECK-SCO-LABEL: w_caller:
-; CHECK-SCO: b w_callee
+; CHECK-SCO: bl w_callee
 
 ; SCM-LABEL: w_caller:
 ; SCM:       bl w_callee
@@ -221,9 +204,9 @@ define void @w_caller(i8* %ptr) {
 %struct.byvalTest = type { [8 x i8] }
 @byval = common global %struct.byvalTest zeroinitializer
 
-define void @byval_callee(%struct.byvalTest* byval %ptr) { ret void }
+define void @byval_callee(%struct.byvalTest* byval(%struct.byvalTest) %ptr) { ret void }
 define void @byval_caller() {
-  tail call void @byval_callee(%struct.byvalTest* byval @byval)
+  tail call void @byval_callee(%struct.byvalTest* byval(%struct.byvalTest) @byval)
   ret void
 
 ; CHECK-SCO-LABEL: bl byval_callee

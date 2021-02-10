@@ -20,11 +20,15 @@
 #ifndef SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP
 #define SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP
 
+#include "CL/sycl/detail/defines.hpp"
+#include "CL/sycl/xilinx/fpga/opt_decorate_func.hpp"
+
 #include <array>
 #include <cstddef>
 #include <type_traits>
 
-namespace cl::sycl::xilinx {
+__SYCL_INLINE_NAMESPACE(cl) {
+namespace sycl::xilinx {
 
 /** Kind of array partition
 
@@ -36,13 +40,23 @@ namespace partition {
 
       none represents non partitioned standard array.
   */
-  enum class type {
+  namespace type {
+  enum type : int {
     cyclic,
     block,
     complete,
     none
   };
+  }
 
+  /// This fuction is currently empty but the LowerSYCLMetaData Pass will fill
+  /// it with the required IR.
+  template<typename Ptr>
+#if defined(__SYCL_XILINX_HW_EMU_MODE__) || defined(__SYCL_XILINX_HW_MODE__)
+  __SYCL_DEVICE_ANNOTATE("xilinx_partition_array")
+#endif
+  __SYCL_ALWAYS_INLINE
+  inline void xilinx_partition_array(Ptr, int, int, int) {}
 
   /** Represent a cyclic partition.
 
@@ -167,37 +181,42 @@ struct partition_array {
   static constexpr auto partition_type = PartitionType::partition_type;
   /// Type of array elements
   using element_type = ValueType;
-
+  using iterator = ValueType*;
+  using const_iterator = const ValueType*;
 
   /// Provide iterator
-  auto begin() { return elems; }
-  const auto begin() const { return elems; }
-  auto end() { return elems+Size; }
-  const auto end() const { return elems+Size; }
+  iterator begin() { return elems; }
+  const_iterator begin() const { return elems; }
+  iterator end() { return elems+Size; }
+  const_iterator end() const { return elems+Size; }
 
 
   /// Evaluate size
-  constexpr auto size() const noexcept {
+  constexpr std::size_t size() const noexcept {
     return Size;
   }
-
 
   /// Construct an array
   partition_array() {
     // Add the intrinsic according expressing to the target compiler the
     // partitioning to use
     if constexpr (partition_type == partition::type::cyclic)
-      _ssdm_SpecArrayPartition(&(*this)[0], PartitionType::partition_dim,
-                               "CYCLIC", PartitionType::physical_mem_num, "");
+      partition::xilinx_partition_array(
+          (ValueType __SYCL_DEVICE_ADDRSPACE(0 /*stack*/)(*)[Size])(&elems) &
+              elems,
+          partition_type, PartitionType::physical_mem_num,
+          PartitionType::partition_dim);
     if constexpr (partition_type == partition::type::block)
-      _ssdm_SpecArrayPartition(&(*this)[0], PartitionType::partition_dim,
-                               "BLOCK", PartitionType::ele_in_each_physical_mem,
-                               "");
+      partition::xilinx_partition_array(
+          (ValueType __SYCL_DEVICE_ADDRSPACE(0 /*stack*/)(*)[Size])(&elems) &
+              elems,
+          partition_type, PartitionType::ele_in_each_physical_mem,
+          PartitionType::partition_dim);
     if constexpr (partition_type == partition::type::complete)
-      _ssdm_SpecArrayPartition(&(*this)[0], PartitionType::partition_dim,
-                               "COMPLETE", 0, "");
+      partition::xilinx_partition_array(
+          (ValueType __SYCL_DEVICE_ADDRSPACE(0 /*stack*/)(*)[Size])(&elems),
+          partition_type, 0, PartitionType::partition_dim);
   }
-
 
   /// A constructor from some container
   template <typename SomeContainer>
@@ -214,7 +233,7 @@ struct partition_array {
             // Only use this constructor for a real element-oriented
             // initializer_list we can assign, not for the case
             // partition_array<> a = { some_other_array }
-            typename = std::enable_if_t<std::is_convertible<SourceBasicType,
+            typename = detail::enable_if_t<std::is_convertible<SourceBasicType,
                                                             ValueType>::value>>
   constexpr partition_array(std::initializer_list<SourceBasicType> l)
     : partition_array { } {
@@ -227,7 +246,7 @@ struct partition_array {
 
 
   /// Provide a subscript operator
-  constexpr ValueType& operator[](std::size_t i) {
+  ValueType& operator[](std::size_t i) {
     return elems[i];
   }
 
@@ -238,11 +257,13 @@ struct partition_array {
 
 
   /// Return the partition type of the array
-  constexpr auto get_partition_type() const {
+  constexpr auto get_partition_type() const -> decltype(partition_type) {
     return partition_type;
   }
 };
 
 } // namespace cl::sycl::xilinx
+
+}
 
 #endif// SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP

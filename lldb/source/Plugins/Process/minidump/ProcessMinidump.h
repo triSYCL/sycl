@@ -6,13 +6,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_ProcessMinidump_h_
-#define liblldb_ProcessMinidump_h_
+#ifndef LLDB_SOURCE_PLUGINS_PROCESS_MINIDUMP_PROCESSMINIDUMP_H
+#define LLDB_SOURCE_PLUGINS_PROCESS_MINIDUMP_PROCESSMINIDUMP_H
 
 #include "MinidumpParser.h"
 #include "MinidumpTypes.h"
 
-#include "lldb/Target/Process.h"
+#include "lldb/Target/PostMortemProcess.h"
 #include "lldb/Target/StopInfo.h"
 #include "lldb/Target/Target.h"
 #include "lldb/Utility/ConstString.h"
@@ -26,11 +26,12 @@ namespace lldb_private {
 
 namespace minidump {
 
-class ProcessMinidump : public Process {
+class ProcessMinidump : public PostMortemProcess {
 public:
   static lldb::ProcessSP CreateInstance(lldb::TargetSP target_sp,
                                         lldb::ListenerSP listener_sp,
-                                        const FileSpec *crash_file_path);
+                                        const FileSpec *crash_file_path,
+                                        bool can_connect);
 
   static void Initialize();
 
@@ -102,18 +103,25 @@ protected:
 
   void ReadModuleList();
 
+  lldb::ModuleSP GetOrCreateModule(lldb_private::UUID minidump_uuid,
+                                   llvm::StringRef name,
+                                   lldb_private::ModuleSpec module_spec);
+
   JITLoaderList &GetJITLoaders() override;
 
 private:
   FileSpec m_core_file;
   lldb::DataBufferSP m_core_data;
   llvm::ArrayRef<minidump::Thread> m_thread_list;
-  const MinidumpExceptionStream *m_active_exception;
+  const minidump::ExceptionStream *m_active_exception;
   lldb::CommandObjectSP m_command_sp;
   bool m_is_wow64;
+  llvm::Optional<MemoryRegionInfos> m_memory_regions;
+
+  void BuildMemoryRegions();
 };
 
 } // namespace minidump
 } // namespace lldb_private
 
-#endif // liblldb_ProcessMinidump_h_
+#endif // LLDB_SOURCE_PLUGINS_PROCESS_MINIDUMP_PROCESSMINIDUMP_H

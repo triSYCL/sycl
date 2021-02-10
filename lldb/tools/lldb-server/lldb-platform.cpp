@@ -22,6 +22,7 @@
 
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FileUtilities.h"
+#include "llvm/Support/raw_ostream.h"
 
 #include "Acceptor.h"
 #include "LLDBServerUtilities.h"
@@ -95,7 +96,7 @@ static void display_usage(const char *progname, const char *subcommand) {
 
 static Status save_socket_id_to_file(const std::string &socket_id,
                                      const FileSpec &file_spec) {
-  FileSpec temp_file_spec(file_spec.GetDirectory().AsCString());
+  FileSpec temp_file_spec(file_spec.GetDirectory().GetStringRef());
   Status error(llvm::sys::fs::create_directory(temp_file_spec.GetPath()));
   if (error.Fail())
     return Status("Failed to create directory %s: %s",
@@ -103,29 +104,37 @@ static Status save_socket_id_to_file(const std::string &socket_id,
 
   llvm::SmallString<64> temp_file_path;
   temp_file_spec.AppendPathComponent("port-file.%%%%%%");
-  int FD;
-  auto err_code = llvm::sys::fs::createUniqueFile(temp_file_spec.GetPath(), FD,
-                                                  temp_file_path);
-  if (err_code)
-    return Status("Failed to create temp file: %s", err_code.message().c_str());
+  temp_file_path = temp_file_spec.GetPath();
 
-  llvm::FileRemover tmp_file_remover(temp_file_path);
+  Status status;
+  if (auto Err =
+          handleErrors(llvm::writeFileAtomically(
+                           temp_file_path, file_spec.GetPath(), socket_id),
+                       [&status, &file_spec](const AtomicFileWriteError &E) {
+                         std::string ErrorMsgBuffer;
+                         llvm::raw_string_ostream S(ErrorMsgBuffer);
+                         E.log(S);
 
-  {
-    llvm::raw_fd_ostream temp_file(FD, true);
-    temp_file << socket_id;
-    temp_file.close();
-    if (temp_file.has_error())
-      return Status("Failed to write to port file.");
+                         switch (E.Error) {
+                         case atomic_write_error::failed_to_create_uniq_file:
+                           status = Status("Failed to create temp file: %s",
+                                           ErrorMsgBuffer.c_str());
+                           break;
+                         case atomic_write_error::output_stream_error:
+                           status = Status("Failed to write to port file.");
+                           break;
+                         case atomic_write_error::failed_to_rename_temp_file:
+                           status = Status("Failed to rename file %s to %s: %s",
+                                           ErrorMsgBuffer.c_str(),
+                                           file_spec.GetPath().c_str(),
+                                           ErrorMsgBuffer.c_str());
+                           break;
+                         }
+                       })) {
+    return Status("Failed to atomically write file %s",
+                  file_spec.GetPath().c_str());
   }
-
-  err_code = llvm::sys::fs::rename(temp_file_path, file_spec.GetPath());
-  if (err_code)
-    return Status("Failed to rename file %s to %s: %s", temp_file_path.c_str(),
-                  file_spec.GetPath().c_str(), err_code.message().c_str());
-
-  tmp_file_remover.releaseFile();
-  return Status();
+  return status;
 }
 
 // main
@@ -222,7 +231,7 @@ int main_platform(int argc, char *argv[]) {
         break;
       }
       if (ch == 'P')
-        gdbserver_portmap[portnum] = LLDB_INVALID_PROCESS_ID;
+        gdbserver_portmap.AllowPort(portnum);
       else if (ch == 'm')
         min_gdbserver_port = portnum;
       else
@@ -241,8 +250,8 @@ int main_platform(int argc, char *argv[]) {
 
   // Make a port map for a port range that was specified.
   if (min_gdbserver_port && min_gdbserver_port < max_gdbserver_port) {
-    for (uint16_t port = min_gdbserver_port; port < max_gdbserver_port; ++port)
-      gdbserver_portmap[port] = LLDB_INVALID_PROCESS_ID;
+    gdbserver_portmap = GDBRemoteCommunicationServerPlatform::PortMap(
+        min_gdbserver_port, max_gdbserver_port);
   } else if (min_gdbserver_port || max_gdbserver_port) {
     fprintf(stderr, "error: --min-gdbserver-port (%u) is not lower than "
                     "--max-gdbserver-port (%u)\n",
@@ -335,18 +344,18 @@ int main_platform(int argc, char *argv[]) {
       // connections while a connection is active.
       acceptor_up.reset();
     }
-    platform.SetConnection(conn);
+    platform.SetConnection(std::unique_ptr<Connection>(conn));
 
     if (platform.IsConnected()) {
       if (inferior_arguments.GetArgumentCount() > 0) {
         lldb::pid_t pid = LLDB_INVALID_PROCESS_ID;
-        uint16_t port = 0;
+        llvm::Optional<uint16_t> port = 0;
         std::string socket_name;
         Status error = platform.LaunchGDBServer(inferior_arguments,
                                                 "", // hostname
                                                 pid, port, socket_name);
         if (error.Success())
-          platform.SetPendingGdbServer(pid, port, socket_name);
+          platform.SetPendingGdbServer(pid, *port, socket_name);
         else
           fprintf(stderr, "failed to start gdbserver: %s\n", error.AsCString());
       }

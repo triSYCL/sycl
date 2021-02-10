@@ -51,15 +51,19 @@ def ptx : PTX;
 // Generates list of n sequential register names.
 // E.g. RegNames<3,"r">.ret -> ["r0", "r1", "r2" ]
 class RegSeq<int n, string prefix> {
-  list<string> ret = !if(n, !listconcat(RegSeq<!add(n,-1), prefix>.ret,
-                                        [prefix # !add(n, -1)]),
+  list<string> ret = !if(n, !listconcat(RegSeq<!sub(n, 1), prefix>.ret,
+                                        [prefix # !sub(n, 1)]),
                             []);
+}
+
+class THREADMASK_INFO<bit sync> {
+  list<bit> ret = !if(sync, [0, 1], [0]);
 }
 
 //-----------------------------------
 // Synchronization and shuffle functions
 //-----------------------------------
-let isConvergent = 1 in {
+let isConvergent = true in {
 def INT_BARRIER0 : NVPTXInst<(outs), (ins),
                   "bar.sync \t0;",
       [(int_nvvm_barrier0)]>;
@@ -129,120 +133,63 @@ def INT_BARRIER_SYNC_CNT_II : NVPTXInst<(outs), (ins i32imm:$id, i32imm:$cnt),
                  [(int_nvvm_barrier_sync_cnt imm:$id, imm:$cnt)]>,
         Requires<[hasPTX60, hasSM30]>;
 
-
-// shfl.{up,down,bfly,idx}.b32
-multiclass SHFL<NVPTXRegClass regclass, string mode, Intrinsic IntOp> {
-  // The last two parameters to shfl can be regs or imms.  ptxas is smart
-  // enough to inline constant registers, so strictly speaking we don't need to
-  // handle immediates here.  But it's easy enough, and it makes our ptx more
-  // readable.
-  def reg : NVPTXInst<
-      (outs regclass:$dst),
-      (ins regclass:$src, Int32Regs:$offset, Int32Regs:$mask),
-      !strconcat("shfl.", mode, ".b32 $dst, $src, $offset, $mask;"),
-      [(set regclass:$dst, (IntOp regclass:$src, Int32Regs:$offset, Int32Regs:$mask))]>;
-
-  def imm1 : NVPTXInst<
-      (outs regclass:$dst),
-      (ins regclass:$src, i32imm:$offset, Int32Regs:$mask),
-      !strconcat("shfl.", mode, ".b32 $dst, $src, $offset, $mask;"),
-      [(set regclass:$dst, (IntOp regclass:$src, imm:$offset, Int32Regs:$mask))]>;
-
-  def imm2 : NVPTXInst<
-      (outs regclass:$dst),
-      (ins regclass:$src, Int32Regs:$offset, i32imm:$mask),
-      !strconcat("shfl.", mode, ".b32 $dst, $src, $offset, $mask;"),
-      [(set regclass:$dst, (IntOp regclass:$src, Int32Regs:$offset, imm:$mask))]>;
-
-  def imm3 : NVPTXInst<
-      (outs regclass:$dst),
-      (ins regclass:$src, i32imm:$offset, i32imm:$mask),
-      !strconcat("shfl.", mode, ".b32 $dst, $src, $offset, $mask;"),
-      [(set regclass:$dst, (IntOp regclass:$src, imm:$offset, imm:$mask))]>;
+class SHFL_INSTR<bit sync, string mode, string reg, bit return_pred,
+                 bit offset_imm, bit mask_imm, bit threadmask_imm>
+      : NVPTXInst<(outs), (ins), "?", []> {
+  NVPTXRegClass rc = !cond(
+    !eq(reg, "i32"): Int32Regs,
+    !eq(reg, "f32"): Float32Regs);
+  string IntrName = "int_nvvm_shfl_"
+                    # !if(sync, "sync_", "")
+                    # mode
+                    # "_" # reg
+                    # !if(return_pred, "p", "");
+  Intrinsic Intr = !cast<Intrinsic>(IntrName);
+  let InOperandList = !con(
+    !if(sync,
+        !dag(ins, !if(threadmask_imm, [i32imm], [Int32Regs]), ["threadmask"]),
+        (ins)),
+    (ins rc:$src),
+    !dag(ins, !if(offset_imm, [i32imm], [Int32Regs]), ["offset"]),
+    !dag(ins, !if(mask_imm, [i32imm], [Int32Regs]), ["mask"])
+    );
+  let OutOperandList = !if(return_pred, (outs rc:$dst, Int1Regs:$pred), (outs rc:$dst));
+  let AsmString = "shfl."
+     # !if(sync, "sync.", "")
+     # mode # ".b32\t"
+     # "$dst"
+     # !if(return_pred, "|$pred", "") # ", "
+     # "$src, $offset, $mask"
+     # !if(sync, ", $threadmask", "")
+     # ";"
+     ;
+  let Pattern = [!con(
+      !foreach(tmp, OutOperandList,
+             !subst(outs, set,
+             !subst(i32imm, imm, tmp))),
+      (set !foreach(tmp, InOperandList,
+             !subst(ins, Intr,
+             !subst(i32imm, imm, tmp))))
+  )];
 }
 
-defm INT_SHFL_DOWN_I32 : SHFL<Int32Regs, "down", int_nvvm_shfl_down_i32>;
-defm INT_SHFL_DOWN_F32 : SHFL<Float32Regs, "down", int_nvvm_shfl_down_f32>;
-defm INT_SHFL_UP_I32 : SHFL<Int32Regs, "up", int_nvvm_shfl_up_i32>;
-defm INT_SHFL_UP_F32 : SHFL<Float32Regs, "up", int_nvvm_shfl_up_f32>;
-defm INT_SHFL_BFLY_I32 : SHFL<Int32Regs, "bfly", int_nvvm_shfl_bfly_i32>;
-defm INT_SHFL_BFLY_F32 : SHFL<Float32Regs, "bfly", int_nvvm_shfl_bfly_f32>;
-defm INT_SHFL_IDX_I32 : SHFL<Int32Regs, "idx", int_nvvm_shfl_idx_i32>;
-defm INT_SHFL_IDX_F32 : SHFL<Float32Regs, "idx", int_nvvm_shfl_idx_f32>;
-
-multiclass SHFL_SYNC<NVPTXRegClass regclass, string mode, Intrinsic IntOp> {
-  // Threadmask and the last two parameters to shfl.sync can be regs or imms.
-  // ptxas is smart enough to inline constant registers, so strictly speaking we
-  // don't need to handle immediates here.  But it's easy enough, and it makes
-  // our ptx more readable.
-  def rrr : NVPTXInst<
-      (outs regclass:$dst),
-      (ins Int32Regs:$threadmask, regclass:$src, Int32Regs:$offset, Int32Regs:$mask),
-      !strconcat("shfl.sync.", mode, ".b32 $dst, $src, $offset, $mask, $threadmask;"),
-      [(set regclass:$dst, (IntOp Int32Regs:$threadmask, regclass:$src,
-                            Int32Regs:$offset, Int32Regs:$mask))]>;
-
-  def rri : NVPTXInst<
-      (outs regclass:$dst),
-      (ins Int32Regs:$threadmask, regclass:$src, Int32Regs:$offset, i32imm:$mask),
-      !strconcat("shfl.sync.", mode, ".b32 $dst, $src, $offset, $mask, $threadmask;"),
-      [(set regclass:$dst, (IntOp Int32Regs:$threadmask, regclass:$src,
-                            Int32Regs:$offset, imm:$mask))]>;
-
-  def rir : NVPTXInst<
-      (outs regclass:$dst),
-      (ins Int32Regs:$threadmask, regclass:$src, i32imm:$offset, Int32Regs:$mask),
-      !strconcat("shfl.sync.", mode, ".b32 $dst, $src, $offset, $mask, $threadmask;"),
-      [(set regclass:$dst, (IntOp Int32Regs:$threadmask, regclass:$src,
-                            imm:$offset, Int32Regs:$mask))]>;
-
-  def rii : NVPTXInst<
-      (outs regclass:$dst),
-      (ins Int32Regs:$threadmask, regclass:$src, i32imm:$offset, i32imm:$mask),
-      !strconcat("shfl.sync.", mode, ".b32 $dst, $src, $offset, $mask, $threadmask;"),
-      [(set regclass:$dst, (IntOp Int32Regs:$threadmask, regclass:$src,
-                            imm:$offset, imm:$mask))]>;
-
-  def irr : NVPTXInst<
-      (outs regclass:$dst),
-      (ins i32imm:$threadmask, regclass:$src, Int32Regs:$offset, Int32Regs:$mask),
-      !strconcat("shfl.sync.", mode, ".b32 $dst, $src, $offset, $mask, $threadmask;"),
-      [(set regclass:$dst, (IntOp imm:$threadmask, regclass:$src,
-                            Int32Regs:$offset, Int32Regs:$mask))]>;
-
-  def iri : NVPTXInst<
-      (outs regclass:$dst),
-      (ins i32imm:$threadmask, regclass:$src, Int32Regs:$offset, i32imm:$mask),
-      !strconcat("shfl.sync.", mode, ".b32 $dst, $src, $offset, $mask, $threadmask;"),
-      [(set regclass:$dst, (IntOp imm:$threadmask, regclass:$src,
-                            Int32Regs:$offset, imm:$mask))]>;
-
-  def iir : NVPTXInst<
-      (outs regclass:$dst),
-      (ins i32imm:$threadmask, regclass:$src, i32imm:$offset, Int32Regs:$mask),
-      !strconcat("shfl.sync.", mode, ".b32 $dst, $src, $offset, $mask, $threadmask;"),
-      [(set regclass:$dst, (IntOp imm:$threadmask, regclass:$src,
-                            imm:$offset, Int32Regs:$mask))]>;
-
-  def iii : NVPTXInst<
-      (outs regclass:$dst),
-      (ins i32imm:$threadmask, regclass:$src, i32imm:$offset, i32imm:$mask),
-      !strconcat("shfl.sync.", mode, ".b32 $dst, $src, $offset, $mask, $threadmask;"),
-      [(set regclass:$dst, (IntOp imm:$threadmask, regclass:$src,
-                            imm:$offset, imm:$mask))]>;
+foreach sync = [false, true] in {
+  foreach mode = ["up", "down", "bfly", "idx"] in {
+    foreach regclass = ["i32", "f32"] in {
+      foreach return_pred = [false, true] in {
+        foreach offset_imm = [false, true] in {
+          foreach mask_imm = [false, true] in {
+            foreach threadmask_imm = THREADMASK_INFO<sync>.ret in {
+              def : SHFL_INSTR<sync, mode, regclass, return_pred,
+                               offset_imm, mask_imm, threadmask_imm>,
+                    Requires<!if(sync, [hasSM30], [hasSM30, hasSHFL])>;
+            }
+          }
+        }
+      }
+    }
+  }
 }
-
-// On sm_70 these don't have to be convergent, so we may eventually want to
-// implement non-convergent variant of this intrinsic.
-defm INT_SHFL_SYNC_DOWN_I32 : SHFL_SYNC<Int32Regs, "down", int_nvvm_shfl_sync_down_i32>;
-defm INT_SHFL_SYNC_DOWN_F32 : SHFL_SYNC<Float32Regs, "down", int_nvvm_shfl_sync_down_f32>;
-defm INT_SHFL_SYNC_UP_I32 : SHFL_SYNC<Int32Regs, "up", int_nvvm_shfl_sync_up_i32>;
-defm INT_SHFL_SYNC_UP_F32 : SHFL_SYNC<Float32Regs, "up", int_nvvm_shfl_sync_up_f32>;
-defm INT_SHFL_SYNC_BFLY_I32 : SHFL_SYNC<Int32Regs, "bfly", int_nvvm_shfl_sync_bfly_i32>;
-defm INT_SHFL_SYNC_BFLY_F32 : SHFL_SYNC<Float32Regs, "bfly", int_nvvm_shfl_sync_bfly_f32>;
-defm INT_SHFL_SYNC_IDX_I32 : SHFL_SYNC<Int32Regs, "idx", int_nvvm_shfl_sync_idx_i32>;
-defm INT_SHFL_SYNC_IDX_F32 : SHFL_SYNC<Float32Regs, "idx", int_nvvm_shfl_sync_idx_f32>;
-
 
 // vote.{all,any,uni,ballot}
 multiclass VOTE<NVPTXRegClass regclass, string mode, Intrinsic IntOp> {
@@ -327,7 +274,7 @@ defm MATCH_ALLP_SYNC_32 : MATCH_ALLP_SYNC<Int32Regs, "b32", int_nvvm_match_all_s
 defm MATCH_ALLP_SYNC_64 : MATCH_ALLP_SYNC<Int64Regs, "b64", int_nvvm_match_all_sync_i64p,
                                          i64imm>;
 
-} // isConvergent = 1
+} // isConvergent = true
 
 //-----------------------------------
 // Explicit Memory Fence Functions
@@ -1601,7 +1548,7 @@ multiclass ATOM2N_impl<string OpStr, string IntTypeStr, string TypeStr,
                      !cast<Intrinsic>(
                             "int_nvvm_atomic_" # OpStr
                             # "_" # SpaceStr # "_" # IntTypeStr
-                            # !if(!eq(ScopeStr,""), "", "_" # ScopeStr)),
+                            # !if(!empty(ScopeStr), "", "_" # ScopeStr)),
                      regclass, ImmType, Imm, ImmTy, Preds>;
 }
 multiclass ATOM3N_impl<string OpStr, string IntTypeStr, string TypeStr,
@@ -1615,7 +1562,7 @@ multiclass ATOM3N_impl<string OpStr, string IntTypeStr, string TypeStr,
                      !cast<Intrinsic>(
                             "int_nvvm_atomic_" # OpStr
                             # "_" # SpaceStr # "_" # IntTypeStr
-                            # !if(!eq(ScopeStr,""), "", "_" # ScopeStr)),
+                            # !if(!empty(ScopeStr), "", "_" # ScopeStr)),
                      regclass, ImmType, Imm, ImmTy, Preds>;
 }
 
@@ -2184,7 +2131,7 @@ def : Pat<(int_nvvm_rotate_b32 Int32Regs:$src, Int32Regs:$amt),
           (ROTL32reg_sw Int32Regs:$src, Int32Regs:$amt)>,
       Requires<[noHWROT32]> ;
 
-let hasSideEffects = 0 in {
+let hasSideEffects = false in {
   def GET_LO_INT64 : NVPTXInst<(outs Int32Regs:$dst), (ins Int64Regs:$src),
     !strconcat("{{\n\t",
                ".reg .b32 %dummy;\n\t",
@@ -2200,7 +2147,7 @@ let hasSideEffects = 0 in {
           []> ;
 }
 
-let hasSideEffects = 0 in {
+let hasSideEffects = false in {
   def PACK_TWO_INT32
     : NVPTXInst<(outs Int64Regs:$dst), (ins Int32Regs:$lo, Int32Regs:$hi),
                 "mov.b64 \t$dst, {{$lo, $hi}};", []> ;
@@ -2212,7 +2159,7 @@ def : Pat<(int_nvvm_swap_lo_hi_b64 Int64Regs:$src),
 
 // Funnel shift, requires >= sm_32.  Does not trap if amt is out of range, so
 // no side effects.
-let hasSideEffects = 0 in {
+let hasSideEffects = false in {
   def SHF_L_WRAP_B32_IMM
     : NVPTXInst<(outs Int32Regs:$dst),
                 (ins  Int32Regs:$lo, Int32Regs:$hi, i32imm:$amt),
@@ -2295,7 +2242,7 @@ def : Pat<(int_nvvm_rotate_right_b64 Int64Regs:$src, Int32Regs:$amt),
 // also defined in NVPTXReplaceImageHandles.cpp
 
 // texmode_independent
-let IsTex = 1, IsTexModeUnified = 0 in {
+let IsTex = true, IsTexModeUnified = false in {
 // Texture fetch instructions using handles
 def TEX_1D_F32_S32
   : NVPTXInst<(outs Float32Regs:$r, Float32Regs:$g,
@@ -2978,7 +2925,7 @@ def TLD4_A_2D_U32_F32
 
 
 // texmode_unified
-let IsTex = 1, IsTexModeUnified = 1 in {
+let IsTex = true, IsTexModeUnified = true in {
 // Texture fetch instructions using handles
 def TEX_UNIFIED_1D_F32_S32
   : NVPTXInst<(outs Float32Regs:$r, Float32Regs:$g,
@@ -3663,7 +3610,7 @@ def TLD4_UNIFIED_A_2D_U32_F32
 
 //=== Surface load instructions
 // .clamp variant
-let IsSuld = 1 in {
+let IsSuld = true in {
 def SULD_1D_I8_CLAMP
   : NVPTXInst<(outs Int16Regs:$r),
               (ins Int64Regs:$s, Int32Regs:$x),
@@ -3975,7 +3922,7 @@ def SULD_3D_V4I32_CLAMP
 
 
 // .trap variant
-let IsSuld = 1 in {
+let IsSuld = true in {
 def SULD_1D_I8_TRAP
   : NVPTXInst<(outs Int16Regs:$r),
               (ins Int64Regs:$s, Int32Regs:$x),
@@ -4286,7 +4233,7 @@ def SULD_3D_V4I32_TRAP
 }
 
 // .zero variant
-let IsSuld = 1 in {
+let IsSuld = true in {
 def SULD_1D_I8_ZERO
   : NVPTXInst<(outs Int16Regs:$r),
               (ins Int64Regs:$s, Int32Regs:$x),
@@ -4600,7 +4547,7 @@ def SULD_3D_V4I32_ZERO
 // Texture Query Intrinsics
 //-----------------------------------
 
-let IsSurfTexQuery = 1 in {
+let IsSurfTexQuery = true in {
 def TXQ_CHANNEL_ORDER
   : NVPTXInst<(outs Int32Regs:$d), (ins Int64Regs:$a),
               "txq.channel_order.b32 \t$d, [$a];",
@@ -4657,7 +4604,7 @@ def : Pat<(int_nvvm_txq_num_mipmap_levels Int64Regs:$a),
 // Surface Query Intrinsics
 //-----------------------------------
 
-let IsSurfTexQuery = 1 in {
+let IsSurfTexQuery = true in {
 def SUQ_CHANNEL_ORDER
   : NVPTXInst<(outs Int32Regs:$d), (ins Int64Regs:$a),
               "suq.channel_order.b32 \t$d, [$a];",
@@ -4716,7 +4663,7 @@ def ISTYPEP_TEXTURE
 
 //===- Surface Stores -----------------------------------------------------===//
 
-let IsSust = 1 in {
+let IsSust = true in {
 // Unformatted
 // .clamp variant
 def SUST_B_1D_B8_CLAMP
@@ -7414,16 +7361,13 @@ class WMMA_REGINFO<WMMA_REGS r>
     !eq(ptx_elt_type, "b1") : Int32Regs);
 
   // Instruction input/output arguments for the fragment.
-  list<NVPTXRegClass> ptx_regs = !foreach(tmp, regs, regclass);
+  list<NVPTXRegClass> ptx_regs = !listsplat(regclass, !size(regs));
 
   // List of register names for the fragment -- ["ra0", "ra1",...]
   list<string> reg_names = RegSeq<!size(ptx_regs), "r"#frag>.ret;
 
   // Generates "{{$r0, $r1,.... $rN-1}}" for use in asm string construction.
-  string regstring = "{{$" # !head(reg_names)
-                           # !foldl("", !tail(reg_names), a, b,
-                                    !strconcat(a, ", $", b))
-                     # "}}";
+  string regstring = "{{$" # !interleave(reg_names, ", $") # "}}";
 
   // Predicates for particular fragment variant. Technically those are
   // per-instruction predicates, but currently all fragments that can be used in
@@ -7453,7 +7397,9 @@ class WMMA_REGINFO<WMMA_REGS r>
 
     // u4/s4/b1 -> s32 @ m8n8k32 (u4/s4), m8n8k128(b1)
     !or(!eq(geom,"m8n8k128"),
-        !eq(geom,"m8n8k32")) : [hasSM75, hasPTX63]);
+        !eq(geom,"m8n8k32")) : [hasSM75, hasPTX63],
+
+    !eq(geom, "m8n8k4") : [hasSM70, hasPTX64]);
 
   // template DAGs for instruction inputs/output.
   dag Outs = !dag(outs, ptx_regs, reg_names);
@@ -7504,12 +7450,13 @@ class WMMA_LOAD<WMMA_REGINFO Frag, string Layout, string Space, bit WithStride,
   // To match the right intrinsic, we need to build AS-constrained PatFrag.
   // Operands is a dag equivalent in shape to Args, but using (ops node:$name, .....).
   dag PFOperands = !if(WithStride, (ops node:$src, node:$ldm), (ops node:$src));
+  dag PFOperandsIntr = !if(WithStride, (Intr node:$src, node:$ldm), (Intr node:$src));
   // Build PatFrag that only matches particular address space.
   PatFrag IntrFrag = PatFrag<PFOperands,
-                             !foreach(tmp, PFOperands, !subst(ops, Intr, tmp)),
+                             PFOperandsIntr,
                              !cond(!eq(Space, ".shared"): AS_match.shared,
                                    !eq(Space, ".global"): AS_match.global,
-                                   1: AS_match.generic)>;
+                                   true: AS_match.generic)>;
   // Build AS-constrained pattern.
   let IntrinsicPattern = BuildPatternPF<IntrFrag, Args>.ret;
 
@@ -7544,14 +7491,14 @@ class WMMA_STORE_D<WMMA_REGINFO Frag, string Layout, string Space,
   // To match the right intrinsic, we need to build AS-constrained PatFrag.
   // Operands is a dag equivalent in shape to Args, but using (ops node:$name, .....).
   dag PFOperands = !con((ops node:$dst),
-                        !dag(ops, !foreach(tmp, Frag.regs, node), Frag.reg_names),
+                        !dag(ops, !listsplat(node, !size(Frag.regs)), Frag.reg_names),
                         !if(WithStride, (ops node:$ldm), (ops)));
   // Build PatFrag that only matches particular address space.
   PatFrag IntrFrag = PatFrag<PFOperands,
                              !foreach(tmp, PFOperands, !subst(ops, Intr, tmp)),
                              !cond(!eq(Space, ".shared"): AS_match.shared,
                                    !eq(Space, ".global"): AS_match.global,
-                                   1: AS_match.generic)>;
+                                   true: AS_match.generic)>;
   // Build AS-constrained pattern.
   let IntrinsicPattern = BuildPatternPF<IntrFrag, Args>.ret;
 
@@ -7572,7 +7519,7 @@ class WMMA_STORE_D<WMMA_REGINFO Frag, string Layout, string Space,
 // Create all load/store variants
 defset list<WMMA_INSTR> MMA_LDSTs  = {
   foreach layout = ["row", "col"] in {
-    foreach stride = [0, 1] in {
+    foreach stride = [false, true] in {
       foreach space = [".global", ".shared", ""] in {
         foreach addr = [imem, Int32Regs, Int64Regs, MEMri, MEMri64] in {
           foreach frag = NVVM_MMA_OPS.all_ld_ops in
@@ -7599,25 +7546,37 @@ class WMMA_MMA<WMMA_REGINFO FragA, WMMA_REGINFO FragB,
   let OutOperandList = FragD.Outs;
   let InOperandList  = !con(Args, (ins MmaCode:$ptx));
   string TypeList = !cond(
+    !eq(FragD.geom, "m8n8k4") : "." # FragD.ptx_elt_type
+                                # ".f16.f16."
+                                # FragC.ptx_elt_type,
     !eq(FragD.ptx_elt_type, "s32") : ".s32"
                                      # "." # FragA.ptx_elt_type
                                      # "." # FragB.ptx_elt_type
                                      # ".s32",
     1: "." # FragD.ptx_elt_type # "." # FragC.ptx_elt_type,
   );
-  let AsmString = "wmma.mma"
-                  # !if(!eq(FragA.ptx_elt_type, "b1"), ".xor.popc", "")
-                  # ".sync"
-                  # "${ptx:aligned}"
-                  # "." # ALayout
-                  # "." # BLayout
-                  # "." # FragA.geom
-                  # TypeList
-                  # !if(Satfinite, ".satfinite", "") # "\n\t\t"
-                  # FragD.regstring # ",\n\t\t"
-                  # FragA.regstring # ",\n\t\t"
-                  # FragB.regstring # ",\n\t\t"
-                  # FragC.regstring # ";";
+  let AsmString = !if(!eq(FragA.geom, "m8n8k4"),
+     "mma.sync.aligned.m8n8k4"
+        # "." # ALayout
+        # "." # BLayout
+        # TypeList # "\n\t\t"
+        # FragD.regstring # ",\n\t\t"
+        # FragA.regstring # ",\n\t\t"
+        # FragB.regstring # ",\n\t\t"
+        # FragC.regstring # ";",
+     "wmma.mma"
+        # !if(!eq(FragA.ptx_elt_type, "b1"), ".xor.popc", "")
+        # ".sync"
+        # "${ptx:aligned}"
+        # "." # ALayout
+        # "." # BLayout
+        # "." # FragA.geom
+        # TypeList
+        # !if(Satfinite, ".satfinite", "") # "\n\t\t"
+        # FragD.regstring # ",\n\t\t"
+        # FragA.regstring # ",\n\t\t"
+        # FragB.regstring # ",\n\t\t"
+        # FragC.regstring # ";");
 }
 
 defset list<WMMA_INSTR> MMAs  = {

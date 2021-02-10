@@ -28,8 +28,8 @@ class S3 {
   S3 &operator=(const S3 &s3);
 
 public:
-  S3() : a(0) {} // expected-note {{candidate constructor not viable: requires 0 arguments, but 1 was provided}}
-  S3(S3 &s3) : a(s3.a) {} // expected-note {{candidate constructor not viable: 1st argument ('const S3') would lose const qualifier}}
+  S3() : a(0) {} // expected-note 2 {{candidate constructor not viable: requires 0 arguments, but 1 was provided}}
+  S3(S3 &s3) : a(s3.a) {} // expected-note 2 {{candidate constructor not viable: 1st argument ('const S3') would lose const qualifier}}
 };
 const S3 c;
 const S3 ca[5];
@@ -95,7 +95,7 @@ int main(int argc, char **argv) {
   for (i = 0; i < argc; ++i) foo();
   #pragma omp target
   #pragma omp teams
-  #pragma omp distribute firstprivate (a, b, c, d, f) // expected-error {{firstprivate variable with incomplete type 'S1'}} expected-warning {{Non-trivial type 'const S2' is mapped, only trivial types are guaranteed to be mapped correctly}} expected-warning {{Non-trivial type 'const S3' is mapped, only trivial types are guaranteed to be mapped correctly}} expected-error {{incomplete type 'S1' where a complete type is required}}
+  #pragma omp distribute firstprivate (a, b, c, d, f) // expected-error {{firstprivate variable with incomplete type 'S1'}} expected-warning {{Type 'const S2' is not trivially copyable and not guaranteed to be mapped correctly}} expected-warning {{Type 'const S3' is not trivially copyable and not guaranteed to be mapped correctly}} expected-error {{incomplete type 'S1' where a complete type is required}} expected-error {{no matching constructor for initialization of 'S3'}}
   for (i = 0; i < argc; ++i) foo();
   #pragma omp target
   #pragma omp teams
@@ -103,11 +103,11 @@ int main(int argc, char **argv) {
   for (i = 0; i < argc; ++i) foo();
   #pragma omp target
   #pragma omp teams
-  #pragma omp distribute firstprivate(ba) // expected-warning {{Non-trivial type 'const S2 [5]' is mapped, only trivial types are guaranteed to be mapped correctly}}
+  #pragma omp distribute firstprivate(ba) // expected-warning {{Type 'const S2 [5]' is not trivially copyable and not guaranteed to be mapped correctly}}
   for (i = 0; i < argc; ++i) foo();
   #pragma omp target
   #pragma omp teams
-  #pragma omp distribute firstprivate(ca) // expected-error {{no matching constructor for initialization of 'S3'}} expected-warning {{Non-trivial type 'const S3 [5]' is mapped, only trivial types are guaranteed to be mapped correctly}}
+  #pragma omp distribute firstprivate(ca) // expected-error {{no matching constructor for initialization of 'S3'}} expected-warning {{Type 'const S3 [5]' is not trivially copyable and not guaranteed to be mapped correctly}}
   for (i = 0; i < argc; ++i) foo();
   #pragma omp target
   #pragma omp teams

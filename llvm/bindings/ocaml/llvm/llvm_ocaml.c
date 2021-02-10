@@ -627,6 +627,7 @@ enum ValueKind {
   GlobalIFunc,
   GlobalVariable,
   UndefValue,
+  PoisonValue,
   Instruction
 };
 
@@ -669,6 +670,7 @@ CAMLprim value llvm_classify_value(LLVMValueRef Val) {
   DEFINE_CASE(Val, MDNode);
   DEFINE_CASE(Val, MDString);
   DEFINE_CASE(Val, UndefValue);
+  DEFINE_CASE(Val, PoisonValue);
   failwith("Unknown Value class");
 }
 
@@ -760,6 +762,11 @@ CAMLprim value llvm_is_null(LLVMValueRef Val) {
 /* llvalue -> bool */
 CAMLprim value llvm_is_undef(LLVMValueRef Val) {
   return Val_bool(LLVMIsUndef(Val));
+}
+
+/* llvalue -> bool */
+CAMLprim value llvm_is_poison(LLVMValueRef Val) {
+  return Val_bool(LLVMIsPoison(Val));
 }
 
 /* llvalue -> Opcode.t */
@@ -2449,6 +2456,12 @@ CAMLprim LLVMValueRef llvm_build_is_not_null(LLVMValueRef Val, value Name,
 CAMLprim LLVMValueRef llvm_build_ptrdiff(LLVMValueRef LHS, LLVMValueRef RHS,
                                          value Name, value B) {
   return LLVMBuildPtrDiff(Builder_val(B), LHS, RHS, String_val(Name));
+}
+
+/* llvalue -> string -> llbuilder -> llvalue */
+CAMLprim LLVMValueRef llvm_build_freeze(LLVMValueRef X,
+                                        value Name, value B) {
+  return LLVMBuildFreeze(Builder_val(B), X, String_val(Name));
 }
 
 /*===-- Memory buffers ----------------------------------------------------===*/

@@ -5,6 +5,11 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+///
+/// \file
+/// This file implements the GCNRegPressure class.
+///
+//===----------------------------------------------------------------------===//
 
 #include "GCNRegPressure.h"
 #include "AMDGPUSubtarget.h"
@@ -82,9 +87,9 @@ bool llvm::isEqual(const GCNRPTracker::LiveRegSet &S1,
 ///////////////////////////////////////////////////////////////////////////////
 // GCNRegPressure
 
-unsigned GCNRegPressure::getRegKind(unsigned Reg,
+unsigned GCNRegPressure::getRegKind(Register Reg,
                                     const MachineRegisterInfo &MRI) {
-  assert(Register::isVirtualRegister(Reg));
+  assert(Reg.isVirtual());
   const auto RC = MRI.getRegClass(Reg);
   auto STI = static_cast<const SIRegisterInfo*>(MRI.getTargetRegisterInfo());
   return STI->isSGPRClass(RC) ?
@@ -98,7 +103,8 @@ void GCNRegPressure::inc(unsigned Reg,
                          LaneBitmask PrevMask,
                          LaneBitmask NewMask,
                          const MachineRegisterInfo &MRI) {
-  if (NewMask == PrevMask)
+  if (SIRegisterInfo::getNumCoveredRegs(NewMask) ==
+      SIRegisterInfo::getNumCoveredRegs(PrevMask))
     return;
 
   int Sign = 1;
@@ -106,25 +112,21 @@ void GCNRegPressure::inc(unsigned Reg,
     std::swap(NewMask, PrevMask);
     Sign = -1;
   }
-#ifndef NDEBUG
-  const auto MaxMask = MRI.getMaxLaneMaskForVReg(Reg);
-#endif
+
   switch (auto Kind = getRegKind(Reg, MRI)) {
   case SGPR32:
   case VGPR32:
   case AGPR32:
-    assert(PrevMask.none() && NewMask == MaxMask);
     Value[Kind] += Sign;
     break;
 
   case SGPR_TUPLE:
   case VGPR_TUPLE:
   case AGPR_TUPLE:
-    assert(NewMask < MaxMask || NewMask == MaxMask);
     assert(PrevMask < NewMask);
 
     Value[Kind == SGPR_TUPLE ? SGPR32 : Kind == AGPR_TUPLE ? AGPR32 : VGPR32] +=
-      Sign * (~PrevMask & NewMask).getNumLanes();
+      Sign * SIRegisterInfo::getNumCoveredRegs(~PrevMask & NewMask);
 
     if (PrevMask.none()) {
       assert(NewMask.any());
@@ -197,7 +199,7 @@ void GCNRegPressure::print(raw_ostream &OS, const GCNSubtarget *ST) const {
 
 static LaneBitmask getDefRegMask(const MachineOperand &MO,
                                  const MachineRegisterInfo &MRI) {
-  assert(MO.isDef() && MO.isReg() && Register::isVirtualRegister(MO.getReg()));
+  assert(MO.isDef() && MO.isReg() && MO.getReg().isVirtual());
 
   // We don't rely on read-undef flag because in case of tentative schedule
   // tracking it isn't set correctly yet. This works correctly however since
@@ -210,13 +212,13 @@ static LaneBitmask getDefRegMask(const MachineOperand &MO,
 static LaneBitmask getUsedRegMask(const MachineOperand &MO,
                                   const MachineRegisterInfo &MRI,
                                   const LiveIntervals &LIS) {
-  assert(MO.isUse() && MO.isReg() && Register::isVirtualRegister(MO.getReg()));
+  assert(MO.isUse() && MO.isReg() && MO.getReg().isVirtual());
 
   if (auto SubReg = MO.getSubReg())
     return MRI.getTargetRegisterInfo()->getSubRegIndexLaneMask(SubReg);
 
   auto MaxMask = MRI.getMaxLaneMaskForVReg(MO.getReg());
-  if (MaxMask == LaneBitmask::getLane(0)) // cannot have subregs
+  if (SIRegisterInfo::getNumCoveredRegs(MaxMask) > 1) // cannot have subregs
     return MaxMask;
 
   // For a tentative schedule LIS isn't updated yet but livemask should remain
@@ -231,7 +233,7 @@ collectVirtualRegUses(const MachineInstr &MI, const LiveIntervals &LIS,
                       const MachineRegisterInfo &MRI) {
   SmallVector<RegisterMaskPair, 8> Res;
   for (const auto &MO : MI.operands()) {
-    if (!MO.isReg() || !Register::isVirtualRegister(MO.getReg()))
+    if (!MO.isReg() || !MO.getReg().isVirtual())
       continue;
     if (!MO.isUse() || !MO.readsReg())
       continue;
@@ -327,8 +329,8 @@ void GCNUpwardRPTracker::recede(const MachineInstr &MI) {
   // update max pressure
   MaxPressure = max(AtMIPressure, MaxPressure);
 
-  for (const auto &MO : MI.defs()) {
-    if (!MO.isReg() || !Register::isVirtualRegister(MO.getReg()) || MO.isDead())
+  for (const auto &MO : MI.operands()) {
+    if (!MO.isReg() || !MO.isDef() || !MO.getReg().isVirtual() || MO.isDead())
       continue;
 
     auto Reg = MO.getReg();
@@ -403,11 +405,11 @@ void GCNDownwardRPTracker::advanceToNext() {
   LastTrackedMI = &*NextMI++;
 
   // Add new registers or mask bits.
-  for (const auto &MO : LastTrackedMI->defs()) {
-    if (!MO.isReg())
+  for (const auto &MO : LastTrackedMI->operands()) {
+    if (!MO.isReg() || !MO.isDef())
       continue;
     Register Reg = MO.getReg();
-    if (!Register::isVirtualRegister(Reg))
+    if (!Reg.isVirtual())
       continue;
     auto &LiveMask = LiveRegs[Reg];
     auto PrevMask = LiveMask;

@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef lldb_DynamicRegisterInfo_h_
-#define lldb_DynamicRegisterInfo_h_
+#ifndef LLDB_SOURCE_PLUGINS_PROCESS_UTILITY_DYNAMICREGISTERINFO_H
+#define LLDB_SOURCE_PLUGINS_PROCESS_UTILITY_DYNAMICREGISTERINFO_H
 
 #include <map>
 #include <vector>
@@ -75,7 +75,7 @@ protected:
   typedef std::map<uint32_t, dwarf_opcode> dynamic_reg_size_map;
 
   const lldb_private::RegisterInfo *
-  GetRegisterInfo(lldb_private::ConstString reg_name) const;
+  GetRegisterInfo(llvm::StringRef reg_name) const;
 
   void MoveFrom(DynamicRegisterInfo &&info);
 
@@ -90,4 +90,4 @@ protected:
                                     // all registers
   bool m_finalized = false;
 };
-#endif // lldb_DynamicRegisterInfo_h_
+#endif // LLDB_SOURCE_PLUGINS_PROCESS_UTILITY_DYNAMICREGISTERINFO_H

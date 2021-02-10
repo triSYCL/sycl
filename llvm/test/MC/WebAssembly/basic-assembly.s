@@ -37,7 +37,7 @@ test0:
     loop        i32      # label1:
     call        something1
     i64.const   1234
-    i32.call    something2
+    call        something2
     i32.const   0
     call_indirect (i32, f64) -> ()
     i32.const   1
@@ -55,6 +55,12 @@ test0:
     block       i64
     block       f32
     block       f64
+    block       () -> (i32, i32)
+    i32.const   1
+    i32.const   2
+    end_block
+    drop
+    drop
     br_table {0, 1, 2}   # 2 entries, default
     end_block            # first entry jumps here.
     i32.const   1
@@ -77,7 +83,7 @@ test0:
     i32.trunc_f32_s
     try         exnref
     i32.atomic.load 0
-    atomic.notify 0
+    memory.atomic.notify 0
 .LBB0_3:
     catch
     local.set   0
@@ -115,6 +121,13 @@ test0:
     .ident      "clang version 9.0.0 (trunk 364502) (llvm/trunk 364571)"
     .globaltype __stack_pointer, i32
 
+.tabletype empty_eref_table, externref
+empty_eref_table:       
+
+.tabletype empty_fref_table, funcref
+empty_fref_table:       
+
+        
 # CHECK:           .text
 # CHECK-LABEL: empty_func:
 # CHECK-NEXT:      .functype	empty_func () -> ()
@@ -144,7 +157,7 @@ test0:
 # CHECK-NEXT:      loop        i32     # label1:
 # CHECK-NEXT:      call        something1
 # CHECK-NEXT:      i64.const   1234
-# CHECK-NEXT:      i32.call    something2
+# CHECK-NEXT:      call        something2
 # CHECK-NEXT:      i32.const   0
 # CHECK-NEXT:      call_indirect (i32, f64) -> ()
 # CHECK-NEXT:      i32.const   1
@@ -162,6 +175,12 @@ test0:
 # CHECK-NEXT:      block       i64
 # CHECK-NEXT:      block       f32
 # CHECK-NEXT:      block       f64
+# CHECK-NEXT:      block       () -> (i32, i32)
+# CHECK-NEXT:      i32.const   1
+# CHECK-NEXT:      i32.const   2
+# CHECK-NEXT:      end_block
+# CHECK-NEXT:      drop
+# CHECK-NEXT:      drop
 # CHECK-NEXT:      br_table {0, 1, 2}  # 1: down to label4
 # CHECK-NEXT:                          # 2: down to label3
 # CHECK-NEXT:      end_block           # label5:
@@ -182,7 +201,7 @@ test0:
 # CHECK-NEXT:      i32.trunc_f32_s
 # CHECK-NEXT:      try         exnref
 # CHECK-NEXT:      i32.atomic.load 0
-# CHECK-NEXT:      atomic.notify 0
+# CHECK-NEXT:      memory.atomic.notify 0
 # CHECK-NEXT:  .LBB0_3:
 # CHECK-NEXT:      catch
 # CHECK-NEXT:      local.set   0
@@ -216,3 +235,9 @@ test0:
 # CHECK-NEXT:      .int32      test0
 
 # CHECK:           .globaltype __stack_pointer, i32
+
+# CHECK:           .tabletype empty_eref_table, externref
+# CHECK-NEXT: empty_eref_table:
+        
+# CHECK:           .tabletype empty_fref_table, funcref
+# CHECK-NEXT: empty_fref_table:

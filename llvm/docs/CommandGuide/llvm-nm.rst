@@ -219,7 +219,7 @@ OPTIONS
 
 .. option:: --special-syms
 
- Ignored. For GNU compatibility only.
+ Do not filter special symbols from the output.
 
 .. option:: --undefined-only, -u
 
@@ -227,7 +227,8 @@ OPTIONS
 
 .. option:: --version
 
- Display the version of this program. Does not stack with other commands.
+ Display the version of the :program:`llvm-nm` executable. Does not stack with
+ other commands.
 
 .. option:: --without-aliases
 
@@ -244,6 +245,10 @@ MACH-O SPECIFIC OPTIONS
 
  Add symbols from the dyldinfo, if they are not already in the symbol table.
  This is the default.
+
+.. option:: --add-inlinedinfo
+
+ Add symbols from the inlined libraries, TBD file inputs only.
 
 .. option:: --arch=<arch1[,arch2,...]>
 

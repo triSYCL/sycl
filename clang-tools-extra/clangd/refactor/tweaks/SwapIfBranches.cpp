@@ -5,10 +5,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
-#include "Logger.h"
 #include "ParsedAST.h"
 #include "SourceCode.h"
 #include "refactor/Tweak.h"
+#include "support/Logger.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/RecursiveASTVisitor.h"
 #include "clang/AST/Stmt.h"
@@ -39,7 +39,10 @@ public:
   bool prepare(const Selection &Inputs) override;
   Expected<Effect> apply(const Selection &Inputs) override;
   std::string title() const override { return "Swap if branches"; }
-  Intent intent() const override { return Refactor; }
+  llvm::StringLiteral kind() const override {
+    return CodeAction::REFACTOR_KIND;
+  }
+  bool hidden() const override { return true; }
 
 private:
   const IfStmt *If = nullptr;
@@ -62,21 +65,17 @@ bool SwapIfBranches::prepare(const Selection &Inputs) {
 }
 
 Expected<Tweak::Effect> SwapIfBranches::apply(const Selection &Inputs) {
-  auto &Ctx = Inputs.AST.getASTContext();
-  auto &SrcMgr = Inputs.AST.getSourceManager();
+  auto &Ctx = Inputs.AST->getASTContext();
+  auto &SrcMgr = Inputs.AST->getSourceManager();
 
   auto ThenRng = toHalfOpenFileRange(SrcMgr, Ctx.getLangOpts(),
                                      If->getThen()->getSourceRange());
   if (!ThenRng)
-    return llvm::createStringError(
-        llvm::inconvertibleErrorCode(),
-        "Could not obtain range of the 'then' branch. Macros?");
+    return error("Could not obtain range of the 'then' branch. Macros?");
   auto ElseRng = toHalfOpenFileRange(SrcMgr, Ctx.getLangOpts(),
                                      If->getElse()->getSourceRange());
   if (!ElseRng)
-    return llvm::createStringError(
-        llvm::inconvertibleErrorCode(),
-        "Could not obtain range of the 'else' branch. Macros?");
+    return error("Could not obtain range of the 'else' branch. Macros?");
 
   auto ThenCode = toSourceCode(SrcMgr, *ThenRng);
   auto ElseCode = toSourceCode(SrcMgr, *ElseRng);

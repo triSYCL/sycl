@@ -114,7 +114,7 @@
 // CHECK-LD-STATIC-GOMP: "{{.*}}ld{{(.exe)?}}"
 // CHECK-LD-STATIC-GOMP: "-Bstatic" "-lgomp" "-Bdynamic"
 // CHECK-LD-STATIC-GOMP-RT: "-lrt"
-// CHECK-LD-STATIC-NO-GOMP-RT-NOT: "-lrt"
+// CHECK-LD-STATIC-GOMP-NO-RT-NOT: "-lrt"
 //
 // CHECK-LD-STATIC-IOMP5: "{{.*}}ld{{(.exe)?}}"
 // CHECK-LD-STATIC-IOMP5: "-Bstatic" "-liomp5" "-Bdynamic"
@@ -123,6 +123,12 @@
 // For x86 Gnu, the driver passes -static, while NetBSD and FreeBSD pass -Bstatic
 // CHECK-LD-STATIC-IOMP5-NO-BDYNAMIC: "-{{B?}}static" {{.*}} "-liomp5"
 // CHECK-LD-STATIC-IOMP5-NO-BDYNAMIC-NOT: "-Bdynamic"
+//
+// RUN: %clang -target x86_64-linux-gnu -fopenmp -fopenmp-enable-irbuilder -c %s -### 2>&1 | FileCheck %s --check-prefix=CHECK-CC1-OPENMPIRBUILDER
+//
+// CHECK-CC1-OPENMPIRBUILDER: "-cc1"
+// CHECK-CC1-OPENMPIRBUILDER-SAME: "-fopenmp"
+// CHECK-CC1-OPENMPIRBUILDER-SAME: "-fopenmp-enable-irbuilder"
 //
 // We'd like to check that the default is sane, but until we have the ability
 // to *always* semantically analyze OpenMP without always generating runtime

@@ -1367,12 +1367,12 @@ KMP_LABEL(kmp_1):
 // return:	r3	(always 1/TRUE)
 //
 	.text
-# if KMP_ARCH_PPC64_LE
+# if KMP_ARCH_PPC64_ELFv2
 	.abiversion 2
 # endif
 	.globl	__kmp_invoke_microtask
 
-# if KMP_ARCH_PPC64_LE
+# if KMP_ARCH_PPC64_ELFv2
 	.p2align	4
 # else
 	.p2align	2
@@ -1380,7 +1380,7 @@ KMP_LABEL(kmp_1):
 
 	.type	__kmp_invoke_microtask,@function
 
-# if KMP_ARCH_PPC64_LE
+# if KMP_ARCH_PPC64_ELFv2
 __kmp_invoke_microtask:
 .Lfunc_begin0:
 .Lfunc_gep0:
@@ -1424,7 +1424,7 @@ __kmp_invoke_microtask:
 	.cfi_offset lr, 16
 
 // Compute the size necessary for the local stack frame.
-# if KMP_ARCH_PPC64_LE
+# if KMP_ARCH_PPC64_ELFv2
 	li 12, 72
 # else
 	li 12, 88
@@ -1433,13 +1433,8 @@ __kmp_invoke_microtask:
 	add 12, 0, 12
 	neg 12, 12
 
-// We need to make sure that the stack frame stays aligned (to 16 bytes, except
-// under the BG/Q CNK, where it must be to 32 bytes).
-# if KMP_OS_CNK
-	li 0, -32
-# else
+// We need to make sure that the stack frame stays aligned (to 16 bytes).
 	li 0, -16
-# endif
 	and 12, 0, 12
 
 // Establish the local stack frame.
@@ -1502,7 +1497,7 @@ __kmp_invoke_microtask:
 // for the microtask begins 48 + 8*8 == 112 bytes above r1 for ELFv1 and
 // 32 + 8*8 == 96 bytes above r1 for ELFv2.
 	addi 4, 4, 40
-# if KMP_ARCH_PPC64_LE
+# if KMP_ARCH_PPC64_ELFv2
 	addi 12, 1, 88
 # else
 	addi 12, 1, 104
@@ -1514,7 +1509,7 @@ __kmp_invoke_microtask:
 	bdnz .Lnext
 
 .Lcall:
-# if KMP_ARCH_PPC64_LE
+# if KMP_ARCH_PPC64_ELFv2
 	std 2, 24(1)
 	mr 12, 3
 #else
@@ -1530,7 +1525,7 @@ __kmp_invoke_microtask:
 
 	mtctr 12
 	bctrl
-# if KMP_ARCH_PPC64_LE
+# if KMP_ARCH_PPC64_ELFv2
 	ld 2, 24(1)
 # else
 	ld 2, 40(1)
@@ -1742,14 +1737,19 @@ __kmp_unnamed_critical_addr:
 #endif /* KMP_ARCH_ARM */
 
 #if KMP_ARCH_PPC64 || KMP_ARCH_AARCH64 || KMP_ARCH_MIPS64 || KMP_ARCH_RISCV64
+#ifndef KMP_PREFIX_UNDERSCORE
+# define KMP_PREFIX_UNDERSCORE(x) x
+#endif
     .data
     .comm .gomp_critical_user_,32,8
     .data
     .align 8
-    .global __kmp_unnamed_critical_addr
-__kmp_unnamed_critical_addr:
+    .global KMP_PREFIX_UNDERSCORE(__kmp_unnamed_critical_addr)
+KMP_PREFIX_UNDERSCORE(__kmp_unnamed_critical_addr):
     .8byte .gomp_critical_user_
-    .size __kmp_unnamed_critical_addr,8
+#ifdef __ELF__
+    .size KMP_PREFIX_UNDERSCORE(__kmp_unnamed_critical_addr),8
+#endif
 #endif /* KMP_ARCH_PPC64 || KMP_ARCH_AARCH64 || KMP_ARCH_MIPS64 ||
           KMP_ARCH_RISCV64 */
 

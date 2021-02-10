@@ -1,6 +1,7 @@
 set(LLVM_LINK_COMPONENTS
   support
   BitstreamReader
+  FrontendOpenMP
   )
 
 get_filename_component(CLANG_DOC_SOURCE_DIR
@@ -20,16 +21,19 @@ add_extra_unittest(ClangDocTests
   YAMLGeneratorTest.cpp
   )
 
-target_link_libraries(ClangDocTests
+clang_target_link_libraries(ClangDocTests
   PRIVATE
   clangAST
   clangASTMatchers
   clangBasic
-  clangDoc
   clangFormat
   clangFrontend
   clangRewrite
   clangSerialization
   clangTooling
   clangToolingCore
+  )
+target_link_libraries(ClangDocTests
+  PRIVATE
+  clangDoc
   )

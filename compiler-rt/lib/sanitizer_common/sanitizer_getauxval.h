@@ -17,17 +17,13 @@
 #define SANITIZER_GETAUXVAL_H
 
 #include "sanitizer_platform.h"
+#include "sanitizer_glibc_version.h"
 
 #if SANITIZER_LINUX || SANITIZER_FUCHSIA
 
-# include <features.h>
-
-# ifndef __GLIBC_PREREQ
-#  define __GLIBC_PREREQ(x, y) 0
-# endif
-
-# if __GLIBC_PREREQ(2, 16) || (SANITIZER_ANDROID && __ANDROID_API__ >= 21) || \
-     SANITIZER_FUCHSIA
+# if (__GLIBC_PREREQ(2, 16) || (SANITIZER_ANDROID && __ANDROID_API__ >= 21) || \
+      SANITIZER_FUCHSIA) &&                                                    \
+     !SANITIZER_GO
 #  define SANITIZER_USE_GETAUXVAL 1
 # else
 #  define SANITIZER_USE_GETAUXVAL 0

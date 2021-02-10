@@ -13,8 +13,12 @@
 #ifndef LLVM_OBJECT_XCOFFOBJECTFILE_H
 #define LLVM_OBJECT_XCOFFOBJECTFILE_H
 
+#include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/SmallVector.h"
 #include "llvm/BinaryFormat/XCOFF.h"
 #include "llvm/Object/ObjectFile.h"
+#include "llvm/Support/Endian.h"
+#include <limits>
 
 namespace llvm {
 namespace object {
@@ -47,7 +51,26 @@ struct XCOFFFileHeader64 {
   support::ubig32_t NumberOfSymTableEntries;
 };
 
-struct XCOFFSectionHeader32 {
+template <typename T> struct XCOFFSectionHeader {
+  // Least significant 3 bits are reserved.
+  static constexpr unsigned SectionFlagsReservedMask = 0x7;
+
+  // The low order 16 bits of section flags denotes the section type.
+  static constexpr unsigned SectionFlagsTypeMask = 0xffffu;
+
+public:
+  StringRef getName() const;
+  uint16_t getSectionType() const;
+  bool isReservedSectionType() const;
+};
+
+// Explicit extern template declarations.
+struct XCOFFSectionHeader32;
+struct XCOFFSectionHeader64;
+extern template struct XCOFFSectionHeader<XCOFFSectionHeader32>;
+extern template struct XCOFFSectionHeader<XCOFFSectionHeader64>;
+
+struct XCOFFSectionHeader32 : XCOFFSectionHeader<XCOFFSectionHeader32> {
   char Name[XCOFF::NameSize];
   support::ubig32_t PhysicalAddress;
   support::ubig32_t VirtualAddress;
@@ -58,11 +81,9 @@ struct XCOFFSectionHeader32 {
   support::ubig16_t NumberOfRelocations;
   support::ubig16_t NumberOfLineNumbers;
   support::big32_t Flags;
-
-  StringRef getName() const;
 };
 
-struct XCOFFSectionHeader64 {
+struct XCOFFSectionHeader64 : XCOFFSectionHeader<XCOFFSectionHeader64> {
   char Name[XCOFF::NameSize];
   support::ubig64_t PhysicalAddress;
   support::ubig64_t VirtualAddress;
@@ -74,8 +95,6 @@ struct XCOFFSectionHeader64 {
   support::ubig32_t NumberOfLineNumbers;
   support::big32_t Flags;
   char Padding[4];
-
-  StringRef getName() const;
 };
 
 struct XCOFFSymbolEntry {
@@ -113,13 +132,33 @@ struct XCOFFStringTable {
 };
 
 struct XCOFFCsectAuxEnt32 {
-  support::ubig32_t SectionLen;
+  static constexpr uint8_t SymbolTypeMask = 0x07;
+  static constexpr uint8_t SymbolAlignmentMask = 0xF8;
+  static constexpr size_t SymbolAlignmentBitOffset = 3;
+
+  support::ubig32_t
+      SectionOrLength; // If the symbol type is XTY_SD or XTY_CM, the csect
+                       // length.
+                       // If the symbol type is XTY_LD, the symbol table
+                       // index of the containing csect.
+                       // If the symbol type is XTY_ER, 0.
   support::ubig32_t ParameterHashIndex;
   support::ubig16_t TypeChkSectNum;
   uint8_t SymbolAlignmentAndType;
   XCOFF::StorageMappingClass StorageMappingClass;
   support::ubig32_t StabInfoIndex;
   support::ubig16_t StabSectNum;
+
+  uint16_t getAlignmentLog2() const {
+    return (SymbolAlignmentAndType & SymbolAlignmentMask) >>
+           SymbolAlignmentBitOffset;
+  }
+
+  uint8_t getSymbolType() const {
+    return SymbolAlignmentAndType & SymbolTypeMask;
+  }
+
+  bool isLabel() const { return getSymbolType() == XCOFF::XTY_LD; }
 };
 
 struct XCOFFFileAuxEnt {
@@ -142,6 +181,38 @@ struct XCOFFSectAuxEntForStat {
   support::ubig16_t NumberOfRelocEnt;
   support::ubig16_t NumberOfLineNum;
   uint8_t Pad[10];
+};
+
+struct XCOFFRelocation32 {
+  // Masks for packing/unpacking the r_rsize field of relocations.
+
+  // The msb is used to indicate if the bits being relocated are signed or
+  // unsigned.
+  static constexpr uint8_t XR_SIGN_INDICATOR_MASK = 0x80;
+
+  // The 2nd msb is used to indicate that the binder has replaced/modified the
+  // original instruction.
+  static constexpr uint8_t XR_FIXUP_INDICATOR_MASK = 0x40;
+
+  // The remaining bits specify the bit length of the relocatable reference
+  // minus one.
+  static constexpr uint8_t XR_BIASED_LENGTH_MASK = 0x3f;
+
+public:
+  support::ubig32_t VirtualAddress;
+  support::ubig32_t SymbolIndex;
+
+  // Packed field, see XR_* masks for details of packing.
+  uint8_t Info;
+
+  XCOFF::RelocationType Type;
+
+public:
+  bool isRelocationSigned() const;
+  bool isFixupIndicated() const;
+
+  // Returns the number of bits being relocated.
+  uint8_t getRelocatedLength() const;
 };
 
 class XCOFFObjectFile : public ObjectFile {
@@ -195,9 +266,12 @@ private:
   void checkSectionAddress(uintptr_t Addr, uintptr_t TableAddr) const;
 
 public:
+  static constexpr uint64_t InvalidRelocOffset =
+      std::numeric_limits<uint64_t>::max();
+
   // Interface inherited from base classes.
   void moveSymbolNext(DataRefImpl &Symb) const override;
-  uint32_t getSymbolFlags(DataRefImpl Symb) const override;
+  Expected<uint32_t> getSymbolFlags(DataRefImpl Symb) const override;
   basic_symbol_iterator symbol_begin() const override;
   basic_symbol_iterator symbol_end() const override;
 
@@ -226,6 +300,10 @@ public:
   relocation_iterator section_rel_end(DataRefImpl Sec) const override;
 
   void moveRelocationNext(DataRefImpl &Rel) const override;
+
+  /// \returns the relocation offset with the base address of the containing
+  /// section as zero, or InvalidRelocOffset on errors (such as a relocation
+  /// that does not refer to an address in any section).
   uint64_t getRelocationOffset(DataRefImpl Rel) const override;
   symbol_iterator getRelocationSymbol(DataRefImpl Rel) const override;
   uint64_t getRelocationType(DataRefImpl Rel) const override;
@@ -273,6 +351,7 @@ public:
 
   uint32_t getNumberOfSymbolTableEntries64() const;
   uint32_t getSymbolIndex(uintptr_t SymEntPtr) const;
+  Expected<StringRef> getSymbolNameByIndex(uint32_t SymbolTableIndex) const;
 
   Expected<StringRef> getCFileName(const XCOFFFileAuxEnt *CFileEntPtr) const;
   uint16_t getOptionalHeaderSize() const;
@@ -286,6 +365,15 @@ public:
   Expected<DataRefImpl> getSectionByNum(int16_t Num) const;
 
   void checkSymbolEntryPointer(uintptr_t SymbolEntPtr) const;
+
+  // Relocation-related interfaces.
+  Expected<uint32_t>
+  getLogicalNumberOfRelocationEntries(const XCOFFSectionHeader32 &Sec) const;
+
+  Expected<ArrayRef<XCOFFRelocation32>>
+  relocations(const XCOFFSectionHeader32 &) const;
+
+  static bool classof(const Binary *B) { return B->isXCOFF(); }
 }; // XCOFFObjectFile
 
 class XCOFFSymbolRef {
@@ -307,6 +395,103 @@ public:
   bool isFunction() const;
 };
 
+class TBVectorExt {
+  friend class XCOFFTracebackTable;
+
+  uint16_t Data;
+  uint32_t VecParmsInfo;
+
+  TBVectorExt(StringRef TBvectorStrRef);
+
+public:
+  uint8_t getNumberOfVRSaved() const;
+  bool isVRSavedOnStack() const;
+  bool hasVarArgs() const;
+  uint8_t getNumberOfVectorParms() const;
+  bool hasVMXInstruction() const;
+  SmallString<32> getVectorParmsInfoString() const;
+};
+
+/// This class provides methods to extract traceback table data from a buffer.
+/// The various accessors may reference the buffer provided via the constructor.
+
+class XCOFFTracebackTable {
+  const uint8_t *const TBPtr;
+  Optional<SmallString<32>> ParmsType;
+  Optional<uint32_t> TraceBackTableOffset;
+  Optional<uint32_t> HandlerMask;
+  Optional<uint32_t> NumOfCtlAnchors;
+  Optional<SmallVector<uint32_t, 8>> ControlledStorageInfoDisp;
+  Optional<StringRef> FunctionName;
+  Optional<uint8_t> AllocaRegister;
+  Optional<TBVectorExt> VecExt;
+  Optional<uint8_t> ExtensionTable;
+
+  XCOFFTracebackTable(const uint8_t *Ptr, uint64_t &Size, Error &Err);
+public:
+  /// Parse an XCOFF Traceback Table from \a Ptr with \a Size bytes.
+  /// Returns an XCOFFTracebackTable upon successful parsing, otherwise an
+  /// Error is returned.
+  ///
+  /// \param[in] Ptr
+  ///   A pointer that points just past the initial 4 bytes of zeros at the
+  ///   beginning of an XCOFF Traceback Table.
+  ///
+  /// \param[in, out] Size
+  ///    A pointer that points to the length of the XCOFF Traceback Table.
+  ///    If the XCOFF Traceback Table is not parsed successfully or there are
+  ///    extra bytes that are not recognized, \a Size will be updated to be the
+  ///    size up to the end of the last successfully parsed field of the table.
+  static Expected<XCOFFTracebackTable> create(const uint8_t *Ptr,
+                                              uint64_t &Size);
+  uint8_t getVersion() const;
+  uint8_t getLanguageID() const;
+
+  bool isGlobalLinkage() const;
+  bool isOutOfLineEpilogOrPrologue() const;
+  bool hasTraceBackTableOffset() const;
+  bool isInternalProcedure() const;
+  bool hasControlledStorage() const;
+  bool isTOCless() const;
+  bool isFloatingPointPresent() const;
+  bool isFloatingPointOperationLogOrAbortEnabled() const;
+
+  bool isInterruptHandler() const;
+  bool isFuncNamePresent() const;
+  bool isAllocaUsed() const;
+  uint8_t getOnConditionDirective() const;
+  bool isCRSaved() const;
+  bool isLRSaved() const;
+
+  bool isBackChainStored() const;
+  bool isFixup() const;
+  uint8_t getNumOfFPRsSaved() const;
+
+  bool hasVectorInfo() const;
+  bool hasExtensionTable() const;
+  uint8_t getNumOfGPRsSaved() const;
+
+  uint8_t getNumberOfFixedParms() const;
+
+  uint8_t getNumberOfFPParms() const;
+  bool hasParmsOnStack() const;
+
+  const Optional<SmallString<32>> &getParmsType() const { return ParmsType; }
+  const Optional<uint32_t> &getTraceBackTableOffset() const {
+    return TraceBackTableOffset;
+  }
+  const Optional<uint32_t> &getHandlerMask() const { return HandlerMask; }
+  const Optional<uint32_t> &getNumOfCtlAnchors() { return NumOfCtlAnchors; }
+  const Optional<SmallVector<uint32_t, 8>> &getControlledStorageInfoDisp() {
+    return ControlledStorageInfoDisp;
+  }
+  const Optional<StringRef> &getFunctionName() const { return FunctionName; }
+  const Optional<uint8_t> &getAllocaRegister() const { return AllocaRegister; }
+  const Optional<TBVectorExt> &getVectorExt() const { return VecExt; }
+  const Optional<uint8_t> &getExtensionTable() const { return ExtensionTable; }
+};
+
+bool doesXCOFFTracebackTableBegin(ArrayRef<uint8_t> Bytes);
 } // namespace object
 } // namespace llvm
 

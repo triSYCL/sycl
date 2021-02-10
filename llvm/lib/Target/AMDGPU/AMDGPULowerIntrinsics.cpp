@@ -22,7 +22,15 @@ using namespace llvm;
 
 namespace {
 
-const unsigned MaxStaticSize = 1024;
+static int MaxStaticSize;
+
+static cl::opt<int, true> MemIntrinsicExpandSizeThresholdOpt(
+  "amdgpu-mem-intrinsic-expand-size",
+  cl::desc("Set minimum mem intrinsic size to expand in IR"),
+  cl::location(MaxStaticSize),
+  cl::init(1024),
+  cl::Hidden);
+
 
 class AMDGPULowerIntrinsics : public ModulePass {
 private:
@@ -57,7 +65,7 @@ INITIALIZE_PASS(AMDGPULowerIntrinsics, DEBUG_TYPE, "Lower intrinsics", false,
 // require splitting based on alignment)
 static bool shouldExpandOperationWithSize(Value *Size) {
   ConstantInt *CI = dyn_cast<ConstantInt>(Size);
-  return !CI || (CI->getZExtValue() > MaxStaticSize);
+  return !CI || (CI->getSExtValue() > MaxStaticSize);
 }
 
 bool AMDGPULowerIntrinsics::expandMemIntrinsicUses(Function &F) {
@@ -123,7 +131,9 @@ bool AMDGPULowerIntrinsics::makeLIDRangeMetadata(Function &F) const {
     if (!CI)
       continue;
 
-    Changed |= AMDGPUSubtarget::get(TM, F).makeLIDRangeMetadata(CI);
+    Function *Caller = CI->getParent()->getParent();
+    const AMDGPUSubtarget &ST = AMDGPUSubtarget::get(TM, *Caller);
+    Changed |= ST.makeLIDRangeMetadata(CI);
   }
   return Changed;
 }

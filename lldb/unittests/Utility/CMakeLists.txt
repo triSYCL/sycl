@@ -11,7 +11,6 @@ add_lldb_unittest(UtilityTests
   EventTest.cpp
   FileSpecTest.cpp
   FlagsTest.cpp
-  JSONTest.cpp
   ListenerTest.cpp
   LogTest.cpp
   NameMatchesTest.cpp
@@ -25,6 +24,7 @@ add_lldb_unittest(UtilityTests
   ReproducerInstrumentationTest.cpp
   ReproducerTest.cpp
   ScalarTest.cpp
+  SharedClusterTest.cpp
   StateTest.cpp
   StatusTest.cpp
   StreamTeeTest.cpp
@@ -33,6 +33,7 @@ add_lldb_unittest(UtilityTests
   StringLexerTest.cpp
   StringListTest.cpp
   StructuredDataTest.cpp
+  SubsystemRAIITest.cpp
   TildeExpressionResolverTest.cpp
   TimeoutTest.cpp
   TimerTest.cpp
@@ -41,6 +42,7 @@ add_lldb_unittest(UtilityTests
   UUIDTest.cpp
   VASprintfTest.cpp
   VMRangeTest.cpp
+  XcodeSDKTest.cpp
 
   LINK_LIBS
       lldbUtility

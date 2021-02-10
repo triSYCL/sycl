@@ -25,11 +25,9 @@
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
-#include "llvm/IR/CallSite.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Constant.h"
 #include "llvm/IR/Constants.h"
@@ -42,6 +40,7 @@
 #include "llvm/IR/GlobalAlias.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/GlobalVariable.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
@@ -53,6 +52,7 @@
 #include "llvm/IR/User.h"
 #include "llvm/IR/Value.h"
 #include "llvm/IR/ValueHandle.h"
+#include "llvm/InitializePasses.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/AtomicOrdering.h"
 #include "llvm/Support/Casting.h"
@@ -65,6 +65,7 @@
 #include "llvm/Transforms/Utils/CtorUtils.h"
 #include "llvm/Transforms/Utils/Evaluator.h"
 #include "llvm/Transforms/Utils/GlobalStatus.h"
+#include "llvm/Transforms/Utils/Local.h"
 #include <cassert>
 #include <cstdint>
 #include <utility>
@@ -127,13 +128,16 @@ static bool isLeakCheckerRoot(GlobalVariable *GV) {
     Type *Ty = Types.pop_back_val();
     switch (Ty->getTypeID()) {
       default: break;
-      case Type::PointerTyID: return true;
-      case Type::ArrayTyID:
-      case Type::VectorTyID: {
-        SequentialType *STy = cast<SequentialType>(Ty);
-        Types.push_back(STy->getElementType());
+      case Type::PointerTyID:
+        return true;
+      case Type::FixedVectorTyID:
+      case Type::ScalableVectorTyID:
+        if (cast<VectorType>(Ty)->getElementType()->isPointerTy())
+          return true;
         break;
-      }
+      case Type::ArrayTyID:
+        Types.push_back(cast<ArrayType>(Ty)->getElementType());
+        break;
       case Type::StructTyID: {
         StructType *STy = cast<StructType>(Ty);
         if (STy->isOpaque()) return true;
@@ -141,7 +145,8 @@ static bool isLeakCheckerRoot(GlobalVariable *GV) {
                  E = STy->element_end(); I != E; ++I) {
           Type *InnerTy = *I;
           if (isa<PointerType>(InnerTy)) return true;
-          if (isa<CompositeType>(InnerTy))
+          if (isa<StructType>(InnerTy) || isa<ArrayType>(InnerTy) ||
+              isa<VectorType>(InnerTy))
             Types.push_back(InnerTy);
         }
         break;
@@ -190,10 +195,10 @@ CleanupPointerRootUsers(GlobalVariable *GV,
                         function_ref<TargetLibraryInfo &(Function &)> GetTLI) {
   // A brief explanation of leak checkers.  The goal is to find bugs where
   // pointers are forgotten, causing an accumulating growth in memory
-  // usage over time.  The common strategy for leak checkers is to whitelist the
-  // memory pointed to by globals at exit.  This is popular because it also
-  // solves another problem where the main thread of a C++ program may shut down
-  // before other threads that are still expecting to use those globals.  To
+  // usage over time.  The common strategy for leak checkers is to explicitly
+  // allow the memory pointed to by globals at exit.  This is popular because it
+  // also solves another problem where the main thread of a C++ program may shut
+  // down before other threads that are still expecting to use those globals. To
   // handle that case, we expect the program may create a singleton and never
   // destroy it.
 
@@ -263,6 +268,7 @@ CleanupPointerRootUsers(GlobalVariable *GV,
         I = J;
       } while (true);
       I->eraseFromParent();
+      Changed = true;
     }
   }
 
@@ -432,17 +438,47 @@ static bool GlobalUsersSafeToSRA(GlobalValue *GV) {
   return true;
 }
 
+static bool IsSRASequential(Type *T) {
+  return isa<ArrayType>(T) || isa<VectorType>(T);
+}
+static uint64_t GetSRASequentialNumElements(Type *T) {
+  if (ArrayType *AT = dyn_cast<ArrayType>(T))
+    return AT->getNumElements();
+  return cast<FixedVectorType>(T)->getNumElements();
+}
+static Type *GetSRASequentialElementType(Type *T) {
+  if (ArrayType *AT = dyn_cast<ArrayType>(T))
+    return AT->getElementType();
+  return cast<VectorType>(T)->getElementType();
+}
+static bool CanDoGlobalSRA(GlobalVariable *GV) {
+  Constant *Init = GV->getInitializer();
+
+  if (isa<StructType>(Init->getType())) {
+    // nothing to check
+  } else if (IsSRASequential(Init->getType())) {
+    if (GetSRASequentialNumElements(Init->getType()) > 16 &&
+        GV->hasNUsesOrMore(16))
+      return false; // It's not worth it.
+  } else
+    return false;
+
+  return GlobalUsersSafeToSRA(GV);
+}
+
 /// Copy over the debug info for a variable to its SRA replacements.
 static void transferSRADebugInfo(GlobalVariable *GV, GlobalVariable *NGV,
                                  uint64_t FragmentOffsetInBits,
                                  uint64_t FragmentSizeInBits,
-                                 unsigned NumElements) {
+                                 uint64_t VarSize) {
   SmallVector<DIGlobalVariableExpression *, 1> GVs;
   GV->getDebugInfo(GVs);
   for (auto *GVE : GVs) {
     DIVariable *Var = GVE->getVariable();
     DIExpression *Expr = GVE->getExpression();
-    if (NumElements > 1) {
+    // If the FragmentSize is smaller than the variable,
+    // emit a fragment expression.
+    if (FragmentSizeInBits < VarSize) {
       if (auto E = DIExpression::createFragmentExpression(
               Expr, FragmentOffsetInBits, FragmentSizeInBits))
         Expr = *E;
@@ -461,87 +497,91 @@ static void transferSRADebugInfo(GlobalVariable *GV, GlobalVariable *NGV,
 /// insert so that the caller can reprocess it.
 static GlobalVariable *SRAGlobal(GlobalVariable *GV, const DataLayout &DL) {
   // Make sure this global only has simple uses that we can SRA.
-  if (!GlobalUsersSafeToSRA(GV))
+  if (!CanDoGlobalSRA(GV))
     return nullptr;
 
   assert(GV->hasLocalLinkage());
   Constant *Init = GV->getInitializer();
   Type *Ty = Init->getType();
+  uint64_t VarSize = DL.getTypeSizeInBits(Ty);
 
-  std::vector<GlobalVariable *> NewGlobals;
-  Module::GlobalListType &Globals = GV->getParent()->getGlobalList();
+  std::map<unsigned, GlobalVariable *> NewGlobals;
 
   // Get the alignment of the global, either explicit or target-specific.
-  unsigned StartAlignment = GV->getAlignment();
-  if (StartAlignment == 0)
-    StartAlignment = DL.getABITypeAlignment(GV->getType());
+  Align StartAlignment =
+      DL.getValueOrABITypeAlignment(GV->getAlign(), GV->getType());
 
-  if (StructType *STy = dyn_cast<StructType>(Ty)) {
-    unsigned NumElements = STy->getNumElements();
-    NewGlobals.reserve(NumElements);
-    const StructLayout &Layout = *DL.getStructLayout(STy);
-    for (unsigned i = 0, e = NumElements; i != e; ++i) {
-      Constant *In = Init->getAggregateElement(i);
-      assert(In && "Couldn't get element of initializer?");
-      GlobalVariable *NGV = new GlobalVariable(STy->getElementType(i), false,
-                                               GlobalVariable::InternalLinkage,
-                                               In, GV->getName()+"."+Twine(i),
-                                               GV->getThreadLocalMode(),
-                                              GV->getType()->getAddressSpace());
-      NGV->setExternallyInitialized(GV->isExternallyInitialized());
-      NGV->copyAttributesFrom(GV);
-      Globals.push_back(NGV);
-      NewGlobals.push_back(NGV);
+  // Loop over all users and create replacement variables for used aggregate
+  // elements.
+  for (User *GEP : GV->users()) {
+    assert(((isa<ConstantExpr>(GEP) && cast<ConstantExpr>(GEP)->getOpcode() ==
+                                           Instruction::GetElementPtr) ||
+            isa<GetElementPtrInst>(GEP)) &&
+           "NonGEP CE's are not SRAable!");
+
+    // Ignore the 1th operand, which has to be zero or else the program is quite
+    // broken (undefined).  Get the 2nd operand, which is the structure or array
+    // index.
+    unsigned ElementIdx = cast<ConstantInt>(GEP->getOperand(2))->getZExtValue();
+    if (NewGlobals.count(ElementIdx) == 1)
+      continue; // we`ve already created replacement variable
+    assert(NewGlobals.count(ElementIdx) == 0);
+
+    Type *ElTy = nullptr;
+    if (StructType *STy = dyn_cast<StructType>(Ty))
+      ElTy = STy->getElementType(ElementIdx);
+    else
+      ElTy = GetSRASequentialElementType(Ty);
+    assert(ElTy);
+
+    Constant *In = Init->getAggregateElement(ElementIdx);
+    assert(In && "Couldn't get element of initializer?");
+
+    GlobalVariable *NGV = new GlobalVariable(
+        ElTy, false, GlobalVariable::InternalLinkage, In,
+        GV->getName() + "." + Twine(ElementIdx), GV->getThreadLocalMode(),
+        GV->getType()->getAddressSpace());
+    NGV->setExternallyInitialized(GV->isExternallyInitialized());
+    NGV->copyAttributesFrom(GV);
+    NewGlobals.insert(std::make_pair(ElementIdx, NGV));
+
+    if (StructType *STy = dyn_cast<StructType>(Ty)) {
+      const StructLayout &Layout = *DL.getStructLayout(STy);
 
       // Calculate the known alignment of the field.  If the original aggregate
       // had 256 byte alignment for example, something might depend on that:
       // propagate info to each field.
-      uint64_t FieldOffset = Layout.getElementOffset(i);
-      unsigned NewAlign = (unsigned)MinAlign(StartAlignment, FieldOffset);
-      if (NewAlign > DL.getABITypeAlignment(STy->getElementType(i)))
+      uint64_t FieldOffset = Layout.getElementOffset(ElementIdx);
+      Align NewAlign = commonAlignment(StartAlignment, FieldOffset);
+      if (NewAlign > DL.getABITypeAlign(STy->getElementType(ElementIdx)))
         NGV->setAlignment(NewAlign);
 
       // Copy over the debug info for the variable.
       uint64_t Size = DL.getTypeAllocSizeInBits(NGV->getValueType());
-      uint64_t FragmentOffsetInBits = Layout.getElementOffsetInBits(i);
-      transferSRADebugInfo(GV, NGV, FragmentOffsetInBits, Size, NumElements);
-    }
-  } else if (SequentialType *STy = dyn_cast<SequentialType>(Ty)) {
-    unsigned NumElements = STy->getNumElements();
-    if (NumElements > 16 && GV->hasNUsesOrMore(16))
-      return nullptr; // It's not worth it.
-    NewGlobals.reserve(NumElements);
-    auto ElTy = STy->getElementType();
-    uint64_t EltSize = DL.getTypeAllocSize(ElTy);
-    unsigned EltAlign = DL.getABITypeAlignment(ElTy);
-    uint64_t FragmentSizeInBits = DL.getTypeAllocSizeInBits(ElTy);
-    for (unsigned i = 0, e = NumElements; i != e; ++i) {
-      Constant *In = Init->getAggregateElement(i);
-      assert(In && "Couldn't get element of initializer?");
-
-      GlobalVariable *NGV = new GlobalVariable(STy->getElementType(), false,
-                                               GlobalVariable::InternalLinkage,
-                                               In, GV->getName()+"."+Twine(i),
-                                               GV->getThreadLocalMode(),
-                                              GV->getType()->getAddressSpace());
-      NGV->setExternallyInitialized(GV->isExternallyInitialized());
-      NGV->copyAttributesFrom(GV);
-      Globals.push_back(NGV);
-      NewGlobals.push_back(NGV);
+      uint64_t FragmentOffsetInBits = Layout.getElementOffsetInBits(ElementIdx);
+      transferSRADebugInfo(GV, NGV, FragmentOffsetInBits, Size, VarSize);
+    } else {
+      uint64_t EltSize = DL.getTypeAllocSize(ElTy);
+      Align EltAlign = DL.getABITypeAlign(ElTy);
+      uint64_t FragmentSizeInBits = DL.getTypeAllocSizeInBits(ElTy);
 
       // Calculate the known alignment of the field.  If the original aggregate
       // had 256 byte alignment for example, something might depend on that:
       // propagate info to each field.
-      unsigned NewAlign = (unsigned)MinAlign(StartAlignment, EltSize*i);
+      Align NewAlign = commonAlignment(StartAlignment, EltSize * ElementIdx);
       if (NewAlign > EltAlign)
         NGV->setAlignment(NewAlign);
-      transferSRADebugInfo(GV, NGV, FragmentSizeInBits * i, FragmentSizeInBits,
-                           NumElements);
+      transferSRADebugInfo(GV, NGV, FragmentSizeInBits * ElementIdx,
+                           FragmentSizeInBits, VarSize);
     }
   }
 
   if (NewGlobals.empty())
     return nullptr;
+
+  Module::GlobalListType &Globals = GV->getParent()->getGlobalList();
+  for (auto NewGlobalVar : NewGlobals)
+    Globals.push_back(NewGlobalVar.second);
 
   LLVM_DEBUG(dbgs() << "PERFORMING GLOBAL SRA ON: " << *GV << "\n");
 
@@ -558,11 +598,11 @@ static GlobalVariable *SRAGlobal(GlobalVariable *GV, const DataLayout &DL) {
     // Ignore the 1th operand, which has to be zero or else the program is quite
     // broken (undefined).  Get the 2nd operand, which is the structure or array
     // index.
-    unsigned Val = cast<ConstantInt>(GEP->getOperand(2))->getZExtValue();
-    if (Val >= NewGlobals.size()) Val = 0; // Out of bound array access.
+    unsigned ElementIdx = cast<ConstantInt>(GEP->getOperand(2))->getZExtValue();
+    assert(NewGlobals.count(ElementIdx) == 1);
 
-    Value *NewPtr = NewGlobals[Val];
-    Type *NewTy = NewGlobals[Val]->getValueType();
+    Value *NewPtr = NewGlobals[ElementIdx];
+    Type *NewTy = NewGlobals[ElementIdx]->getValueType();
 
     // Form a shorter GEP if needed.
     if (GEP->getNumOperands() > 3) {
@@ -580,7 +620,8 @@ static GlobalVariable *SRAGlobal(GlobalVariable *GV, const DataLayout &DL) {
         for (unsigned i = 3, e = GEPI->getNumOperands(); i != e; ++i)
           Idxs.push_back(GEPI->getOperand(i));
         NewPtr = GetElementPtrInst::Create(
-            NewTy, NewPtr, Idxs, GEPI->getName() + "." + Twine(Val), GEPI);
+            NewTy, NewPtr, Idxs, GEPI->getName() + "." + Twine(ElementIdx),
+            GEPI);
       }
     }
     GEP->replaceAllUsesWith(NewPtr);
@@ -595,17 +636,8 @@ static GlobalVariable *SRAGlobal(GlobalVariable *GV, const DataLayout &DL) {
   Globals.erase(GV);
   ++NumSRA;
 
-  // Loop over the new globals array deleting any globals that are obviously
-  // dead.  This can arise due to scalarization of a structure or an array that
-  // has elements that are dead.
-  unsigned FirstGlobal = 0;
-  for (unsigned i = 0, e = NewGlobals.size(); i != e; ++i)
-    if (NewGlobals[i]->use_empty()) {
-      Globals.erase(NewGlobals[i]);
-      if (FirstGlobal == i) ++FirstGlobal;
-    }
-
-  return FirstGlobal != NewGlobals.size() ? NewGlobals[FirstGlobal] : nullptr;
+  assert(NewGlobals.size() > 0);
+  return NewGlobals.begin()->second;
 }
 
 /// Return true if all users of the specified value will trap if the value is
@@ -628,12 +660,12 @@ static bool AllUsesOfValueWillTrapIfNull(const Value *V,
         return false;  // Storing the value.
       }
     } else if (const CallInst *CI = dyn_cast<CallInst>(U)) {
-      if (CI->getCalledValue() != V) {
+      if (CI->getCalledOperand() != V) {
         //cerr << "NONTRAPPING USE: " << *U;
         return false;  // Not calling the ptr
       }
     } else if (const InvokeInst *II = dyn_cast<InvokeInst>(U)) {
-      if (II->getCalledValue() != V) {
+      if (II->getCalledOperand() != V) {
         //cerr << "NONTRAPPING USE: " << *U;
         return false;  // Not calling the ptr
       }
@@ -646,9 +678,6 @@ static bool AllUsesOfValueWillTrapIfNull(const Value *V,
       // checked.
       if (PHIs.insert(PN).second && !AllUsesOfValueWillTrapIfNull(PN, PHIs))
         return false;
-    } else if (isa<ICmpInst>(U) &&
-               isa<ConstantPointerNull>(U->getOperand(1))) {
-      // Ignore icmp X, null
     } else {
       //cerr << "NONTRAPPING USE: " << *U;
       return false;
@@ -693,17 +722,17 @@ static bool OptimizeAwayTrappingUsesOfValue(Value *V, Constant *NewV) {
         Changed = true;
       }
     } else if (isa<CallInst>(I) || isa<InvokeInst>(I)) {
-      CallSite CS(I);
-      if (CS.getCalledValue() == V) {
+      CallBase *CB = cast<CallBase>(I);
+      if (CB->getCalledOperand() == V) {
         // Calling through the pointer!  Turn into a direct call, but be careful
         // that the pointer is not also being passed as an argument.
-        CS.setCalledFunction(NewV);
+        CB->setCalledOperand(NewV);
         Changed = true;
         bool PassedAsArg = false;
-        for (unsigned i = 0, e = CS.arg_size(); i != e; ++i)
-          if (CS.getArgument(i) == V) {
+        for (unsigned i = 0, e = CB->arg_size(); i != e; ++i)
+          if (CB->getArgOperand(i) == V) {
             PassedAsArg = true;
-            CS.setArgument(i, NewV);
+            CB->setArgOperand(i, NewV);
           }
 
         if (PassedAsArg) {
@@ -891,8 +920,8 @@ OptimizeGlobalAddressOfMalloc(GlobalVariable *GV, CallInst *CI, Type *AllocTy,
   while (!GV->use_empty()) {
     if (StoreInst *SI = dyn_cast<StoreInst>(GV->user_back())) {
       // The global is initialized when the store to it occurs.
-      new StoreInst(ConstantInt::getTrue(GV->getContext()), InitBool, false, 0,
-                    SI->getOrdering(), SI->getSyncScopeID(), SI);
+      new StoreInst(ConstantInt::getTrue(GV->getContext()), InitBool, false,
+                    Align(1), SI->getOrdering(), SI->getSyncScopeID(), SI);
       SI->eraseFromParent();
       continue;
     }
@@ -909,7 +938,7 @@ OptimizeGlobalAddressOfMalloc(GlobalVariable *GV, CallInst *CI, Type *AllocTy,
       // Replace the cmp X, 0 with a use of the bool value.
       // Sink the load to where the compare was, if atomic rules allow us to.
       Value *LV = new LoadInst(InitBool->getValueType(), InitBool,
-                               InitBool->getName() + ".val", false, 0,
+                               InitBool->getName() + ".val", false, Align(1),
                                LI->getOrdering(), LI->getSyncScopeID(),
                                LI->isUnordered() ? (Instruction *)ICI : LI);
       InitBoolUsed = true;
@@ -1716,7 +1745,7 @@ static bool TryToShrinkGlobalToBoolean(GlobalVariable *GV, Constant *OtherVal) {
           assert(LI->getOperand(0) == GV && "Not a copy!");
           // Insert a new load, to preserve the saved value.
           StoreVal = new LoadInst(NewGV->getValueType(), NewGV,
-                                  LI->getName() + ".b", false, 0,
+                                  LI->getName() + ".b", false, Align(1),
                                   LI->getOrdering(), LI->getSyncScopeID(), LI);
         } else {
           assert((isa<CastInst>(StoredVal) || isa<SelectInst>(StoredVal)) &&
@@ -1726,15 +1755,15 @@ static bool TryToShrinkGlobalToBoolean(GlobalVariable *GV, Constant *OtherVal) {
         }
       }
       StoreInst *NSI =
-          new StoreInst(StoreVal, NewGV, false, 0, SI->getOrdering(),
+          new StoreInst(StoreVal, NewGV, false, Align(1), SI->getOrdering(),
                         SI->getSyncScopeID(), SI);
       NSI->setDebugLoc(SI->getDebugLoc());
     } else {
       // Change the load into a load of bool then a select.
       LoadInst *LI = cast<LoadInst>(UI);
-      LoadInst *NLI =
-          new LoadInst(NewGV->getValueType(), NewGV, LI->getName() + ".b",
-                       false, 0, LI->getOrdering(), LI->getSyncScopeID(), LI);
+      LoadInst *NLI = new LoadInst(NewGV->getValueType(), NewGV,
+                                   LI->getName() + ".b", false, Align(1),
+                                   LI->getOrdering(), LI->getSyncScopeID(), LI);
       Instruction *NSI;
       if (IsOneZero)
         NSI = new ZExtInst(NLI, LI->getType(), "", LI);
@@ -1851,7 +1880,8 @@ static bool isPointerValueDeadOnEntryToFunction(
           // and the number of bits loaded in L is less than or equal to
           // the number of bits stored in S.
           return DT.dominates(S, L) &&
-                 DL.getTypeStoreSize(LTy) <= DL.getTypeStoreSize(STy);
+                 DL.getTypeStoreSize(LTy).getFixedSize() <=
+                     DL.getTypeStoreSize(STy).getFixedSize();
         }))
       return false;
   }
@@ -1961,12 +1991,13 @@ processInternalGlobal(GlobalVariable *GV, const GlobalStatus &GS,
     return true;
   }
 
+  bool Changed = false;
+
   // If the global is never loaded (but may be stored to), it is dead.
   // Delete it now.
   if (!GS.IsLoaded) {
     LLVM_DEBUG(dbgs() << "GLOBAL NEVER LOADED: " << *GV << "\n");
 
-    bool Changed;
     if (isLeakCheckerRoot(GV)) {
       // Delete any constant stores to the global.
       Changed = CleanupPointerRootUsers(GV, GetTLI);
@@ -1992,11 +2023,14 @@ processInternalGlobal(GlobalVariable *GV, const GlobalStatus &GS,
     // Don't actually mark a global constant if it's atomic because atomic loads
     // are implemented by a trivial cmpxchg in some edge-cases and that usually
     // requires write access to the variable even if it's not actually changed.
-    if (GS.Ordering == AtomicOrdering::NotAtomic)
+    if (GS.Ordering == AtomicOrdering::NotAtomic) {
+      assert(!GV->isConstant() && "Expected a non-constant global");
       GV->setConstant(true);
+      Changed = true;
+    }
 
     // Clean up any obviously simplifiable users now.
-    CleanupConstantGlobalUsers(GV, GV->getInitializer(), DL, GetTLI);
+    Changed |= CleanupConstantGlobalUsers(GV, GV->getInitializer(), DL, GetTLI);
 
     // If the global is dead now, just nuke it.
     if (GV->use_empty()) {
@@ -2056,7 +2090,7 @@ processInternalGlobal(GlobalVariable *GV, const GlobalStatus &GS,
     }
   }
 
-  return false;
+  return Changed;
 }
 
 /// Analyze the specified global variable and optimize it if possible.  If we
@@ -2104,8 +2138,7 @@ static void ChangeCalleesToFastCall(Function *F) {
   for (User *U : F->users()) {
     if (isa<BlockAddress>(U))
       continue;
-    CallSite CS(cast<Instruction>(U));
-    CS.setCallingConv(CallingConv::Fast);
+    cast<CallBase>(U)->setCallingConv(CallingConv::Fast);
   }
 }
 
@@ -2122,8 +2155,8 @@ static void RemoveAttribute(Function *F, Attribute::AttrKind A) {
   for (User *U : F->users()) {
     if (isa<BlockAddress>(U))
       continue;
-    CallSite CS(cast<Instruction>(U));
-    CS.setAttributes(StripAttr(F->getContext(), CS.getAttributes(), A));
+    CallBase *CB = cast<CallBase>(U);
+    CB->setAttributes(StripAttr(F->getContext(), CB->getAttributes(), A));
   }
 }
 
@@ -2162,12 +2195,12 @@ static bool hasChangeableCC(Function *F) {
 
 /// Return true if the block containing the call site has a BlockFrequency of
 /// less than ColdCCRelFreq% of the entry block.
-static bool isColdCallSite(CallSite CS, BlockFrequencyInfo &CallerBFI) {
+static bool isColdCallSite(CallBase &CB, BlockFrequencyInfo &CallerBFI) {
   const BranchProbability ColdProb(ColdCCRelFreq, 100);
-  auto CallSiteBB = CS.getInstruction()->getParent();
+  auto *CallSiteBB = CB.getParent();
   auto CallSiteFreq = CallerBFI.getBlockFreq(CallSiteBB);
   auto CallerEntryFreq =
-      CallerBFI.getBlockFreq(&(CS.getCaller()->getEntryBlock()));
+      CallerBFI.getBlockFreq(&(CB.getCaller()->getEntryBlock()));
   return CallSiteFreq < CallerEntryFreq * ColdProb;
 }
 
@@ -2187,13 +2220,12 @@ isValidCandidateForColdCC(Function &F,
     if (isa<BlockAddress>(U))
       continue;
 
-    CallSite CS(cast<Instruction>(U));
-    Function *CallerFunc = CS.getInstruction()->getParent()->getParent();
+    CallBase &CB = cast<CallBase>(*U);
+    Function *CallerFunc = CB.getParent()->getParent();
     BlockFrequencyInfo &CallerBFI = GetBFI(*CallerFunc);
-    if (!isColdCallSite(CS, CallerBFI))
+    if (!isColdCallSite(CB, CallerBFI))
       return false;
-    auto It = std::find(AllCallsCold.begin(), AllCallsCold.end(), CallerFunc);
-    if (It == AllCallsCold.end())
+    if (!llvm::is_contained(AllCallsCold, CallerFunc))
       return false;
   }
   return true;
@@ -2203,8 +2235,7 @@ static void changeCallSitesToColdCC(Function *F) {
   for (User *U : F->users()) {
     if (isa<BlockAddress>(U))
       continue;
-    CallSite CS(cast<Instruction>(U));
-    CS.setCallingConv(CallingConv::Cold);
+    cast<CallBase>(U)->setCallingConv(CallingConv::Cold);
   }
 }
 
@@ -2217,7 +2248,6 @@ hasOnlyColdCalls(Function &F,
   for (BasicBlock &BB : F) {
     for (Instruction &I : BB) {
       if (CallInst *CI = dyn_cast<CallInst>(&I)) {
-        CallSite CS(cast<Instruction>(CI));
         // Skip over isline asm instructions since they aren't function calls.
         if (CI->isInlineAsm())
           continue;
@@ -2234,12 +2264,121 @@ hasOnlyColdCalls(Function &F,
             CalledFn->hasAddressTaken())
           return false;
         BlockFrequencyInfo &CallerBFI = GetBFI(F);
-        if (!isColdCallSite(CS, CallerBFI))
+        if (!isColdCallSite(*CI, CallerBFI))
           return false;
       }
     }
   }
   return true;
+}
+
+static bool hasMustTailCallers(Function *F) {
+  for (User *U : F->users()) {
+    CallBase *CB = dyn_cast<CallBase>(U);
+    if (!CB) {
+      assert(isa<BlockAddress>(U) &&
+             "Expected either CallBase or BlockAddress");
+      continue;
+    }
+    if (CB->isMustTailCall())
+      return true;
+  }
+  return false;
+}
+
+static bool hasInvokeCallers(Function *F) {
+  for (User *U : F->users())
+    if (isa<InvokeInst>(U))
+      return true;
+  return false;
+}
+
+static void RemovePreallocated(Function *F) {
+  RemoveAttribute(F, Attribute::Preallocated);
+
+  auto *M = F->getParent();
+
+  IRBuilder<> Builder(M->getContext());
+
+  // Cannot modify users() while iterating over it, so make a copy.
+  SmallVector<User *, 4> PreallocatedCalls(F->users());
+  for (User *U : PreallocatedCalls) {
+    CallBase *CB = dyn_cast<CallBase>(U);
+    if (!CB)
+      continue;
+
+    assert(
+        !CB->isMustTailCall() &&
+        "Shouldn't call RemotePreallocated() on a musttail preallocated call");
+    // Create copy of call without "preallocated" operand bundle.
+    SmallVector<OperandBundleDef, 1> OpBundles;
+    CB->getOperandBundlesAsDefs(OpBundles);
+    CallBase *PreallocatedSetup = nullptr;
+    for (auto *It = OpBundles.begin(); It != OpBundles.end(); ++It) {
+      if (It->getTag() == "preallocated") {
+        PreallocatedSetup = cast<CallBase>(*It->input_begin());
+        OpBundles.erase(It);
+        break;
+      }
+    }
+    assert(PreallocatedSetup && "Did not find preallocated bundle");
+    uint64_t ArgCount =
+        cast<ConstantInt>(PreallocatedSetup->getArgOperand(0))->getZExtValue();
+
+    assert((isa<CallInst>(CB) || isa<InvokeInst>(CB)) &&
+           "Unknown indirect call type");
+    CallBase *NewCB = CallBase::Create(CB, OpBundles, CB);
+    CB->replaceAllUsesWith(NewCB);
+    NewCB->takeName(CB);
+    CB->eraseFromParent();
+
+    Builder.SetInsertPoint(PreallocatedSetup);
+    auto *StackSave =
+        Builder.CreateCall(Intrinsic::getDeclaration(M, Intrinsic::stacksave));
+
+    Builder.SetInsertPoint(NewCB->getNextNonDebugInstruction());
+    Builder.CreateCall(Intrinsic::getDeclaration(M, Intrinsic::stackrestore),
+                       StackSave);
+
+    // Replace @llvm.call.preallocated.arg() with alloca.
+    // Cannot modify users() while iterating over it, so make a copy.
+    // @llvm.call.preallocated.arg() can be called with the same index multiple
+    // times. So for each @llvm.call.preallocated.arg(), we see if we have
+    // already created a Value* for the index, and if not, create an alloca and
+    // bitcast right after the @llvm.call.preallocated.setup() so that it
+    // dominates all uses.
+    SmallVector<Value *, 2> ArgAllocas(ArgCount);
+    SmallVector<User *, 2> PreallocatedArgs(PreallocatedSetup->users());
+    for (auto *User : PreallocatedArgs) {
+      auto *UseCall = cast<CallBase>(User);
+      assert(UseCall->getCalledFunction()->getIntrinsicID() ==
+                 Intrinsic::call_preallocated_arg &&
+             "preallocated token use was not a llvm.call.preallocated.arg");
+      uint64_t AllocArgIndex =
+          cast<ConstantInt>(UseCall->getArgOperand(1))->getZExtValue();
+      Value *AllocaReplacement = ArgAllocas[AllocArgIndex];
+      if (!AllocaReplacement) {
+        auto AddressSpace = UseCall->getType()->getPointerAddressSpace();
+        auto *ArgType = UseCall
+                            ->getAttribute(AttributeList::FunctionIndex,
+                                           Attribute::Preallocated)
+                            .getValueAsType();
+        auto *InsertBefore = PreallocatedSetup->getNextNonDebugInstruction();
+        Builder.SetInsertPoint(InsertBefore);
+        auto *Alloca =
+            Builder.CreateAlloca(ArgType, AddressSpace, nullptr, "paarg");
+        auto *BitCast = Builder.CreateBitCast(
+            Alloca, Type::getInt8PtrTy(M->getContext()), UseCall->getName());
+        ArgAllocas[AllocArgIndex] = BitCast;
+        AllocaReplacement = BitCast;
+      }
+
+      UseCall->replaceAllUsesWith(AllocaReplacement);
+      UseCall->eraseFromParent();
+    }
+    // Remove @llvm.call.preallocated.setup().
+    cast<Instruction>(PreallocatedSetup)->eraseFromParent();
+  }
 }
 
 static bool
@@ -2306,9 +2445,20 @@ OptimizeFunctions(Module &M,
     // FIXME: We should also hoist alloca affected by this to the entry
     // block if possible.
     if (F->getAttributes().hasAttrSomewhere(Attribute::InAlloca) &&
-        !F->hasAddressTaken()) {
+        !F->hasAddressTaken() && !hasMustTailCallers(F)) {
       RemoveAttribute(F, Attribute::InAlloca);
       Changed = true;
+    }
+
+    // FIXME: handle invokes
+    // FIXME: handle musttail
+    if (F->getAttributes().hasAttrSomewhere(Attribute::Preallocated)) {
+      if (!F->hasAddressTaken() && !hasMustTailCallers(F) &&
+          !hasInvokeCallers(F)) {
+        RemovePreallocated(F);
+        Changed = true;
+      }
+      continue;
     }
 
     if (hasChangeableCC(F) && !F->isVarArg() && !F->hasAddressTaken()) {
@@ -2372,7 +2522,7 @@ OptimizeGlobalVars(Module &M,
         // for that optional parameter, since we don't have a Function to
         // provide GetTLI anyway.
         Constant *New = ConstantFoldConstant(C, DL, /*TLI*/ nullptr);
-        if (New && New != C)
+        if (New != C)
           GV->setInitializer(New);
       }
 
@@ -2414,8 +2564,11 @@ static Constant *EvaluateStoreInto(Constant *Init, Constant *Val,
   }
 
   ConstantInt *CI = cast<ConstantInt>(Addr->getOperand(OpNo));
-  SequentialType *InitTy = cast<SequentialType>(Init->getType());
-  uint64_t NumElts = InitTy->getNumElements();
+  uint64_t NumElts;
+  if (ArrayType *ATy = dyn_cast<ArrayType>(Init->getType()))
+    NumElts = ATy->getNumElements();
+  else
+    NumElts = cast<FixedVectorType>(Init->getType())->getNumElements();
 
   // Break up the array into elements.
   for (uint64_t i = 0, e = NumElts; i != e; ++i)
@@ -2426,7 +2579,7 @@ static Constant *EvaluateStoreInto(Constant *Init, Constant *Val,
     EvaluateStoreInto(Elts[CI->getZExtValue()], Val, Addr, OpNo+1);
 
   if (Init->getType()->isArrayTy())
-    return ConstantArray::get(cast<ArrayType>(InitTy), Elts);
+    return ConstantArray::get(cast<ArrayType>(Init->getType()), Elts);
   return ConstantVector::get(Elts);
 }
 
@@ -2548,8 +2701,10 @@ static void BatchCommitValueTo(const DenseMap<Constant*, Constant*> &Mem) {
       unsigned NumElts;
       if (auto *STy = dyn_cast<StructType>(Ty))
         NumElts = STy->getNumElements();
+      else if (auto *ATy = dyn_cast<ArrayType>(Ty))
+        NumElts = ATy->getNumElements();
       else
-        NumElts = cast<SequentialType>(Ty)->getNumElements();
+        NumElts = cast<FixedVectorType>(Ty)->getNumElements();
       for (unsigned i = 0, e = NumElts; i != e; ++i)
         Elts.push_back(Init->getAggregateElement(i));
     }

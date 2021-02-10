@@ -33,7 +33,8 @@ void ReportErrorSummary(const char *error_type, const AddressInfo &info,
   if (!common_flags()->print_summary) return;
   InternalScopedString buff(kMaxSummaryLength);
   buff.append("%s ", error_type);
-  RenderFrame(&buff, "%L %F", 0, info, common_flags()->symbolize_vs_style,
+  RenderFrame(&buff, "%L %F", 0, info.address, &info,
+              common_flags()->symbolize_vs_style,
               common_flags()->strip_path_prefix);
   ReportErrorSummary(buff.data(), alt_tool_name);
 }
@@ -47,14 +48,14 @@ bool ReportFile::SupportsColors() {
   return SupportsColoredOutput(fd);
 }
 
-static INLINE bool ReportSupportsColors() {
+static inline bool ReportSupportsColors() {
   return report_file.SupportsColors();
 }
 
 #else  // SANITIZER_FUCHSIA
 
 // Fuchsia's logs always go through post-processing that handles colorization.
-static INLINE bool ReportSupportsColors() { return true; }
+static inline bool ReportSupportsColors() { return true; }
 
 #endif  // !SANITIZER_FUCHSIA
 
@@ -191,9 +192,14 @@ static void ReportDeadlySignalImpl(const SignalContext &sig, u32 tid,
   SanitizerCommonDecorator d;
   Printf("%s", d.Warning());
   const char *description = sig.Describe();
-  Report("ERROR: %s: %s on unknown address %p (pc %p bp %p sp %p T%d)\n",
-         SanitizerToolName, description, (void *)sig.addr, (void *)sig.pc,
-         (void *)sig.bp, (void *)sig.sp, tid);
+  if (sig.is_memory_access && !sig.is_true_faulting_addr)
+    Report("ERROR: %s: %s on unknown address (pc %p bp %p sp %p T%d)\n",
+           SanitizerToolName, description, (void *)sig.pc, (void *)sig.bp,
+           (void *)sig.sp, tid);
+  else
+    Report("ERROR: %s: %s on unknown address %p (pc %p bp %p sp %p T%d)\n",
+           SanitizerToolName, description, (void *)sig.addr, (void *)sig.pc,
+           (void *)sig.bp, (void *)sig.sp, tid);
   Printf("%s", d.Default());
   if (sig.pc < GetPageSizeCached())
     Report("Hint: pc points to the zero page.\n");
@@ -203,7 +209,11 @@ static void ReportDeadlySignalImpl(const SignalContext &sig, u32 tid,
             ? "WRITE"
             : (sig.write_flag == SignalContext::READ ? "READ" : "UNKNOWN");
     Report("The signal is caused by a %s memory access.\n", access_type);
-    if (sig.addr < GetPageSizeCached())
+    if (!sig.is_true_faulting_addr)
+      Report("Hint: this fault was caused by a dereference of a high value "
+             "address (see register values below).  Dissassemble the provided "
+             "pc to learn which register was used.\n");
+    else if (sig.addr < GetPageSizeCached())
       Report("Hint: address points to the zero page.\n");
   }
   MaybeReportNonExecRegion(sig.pc);

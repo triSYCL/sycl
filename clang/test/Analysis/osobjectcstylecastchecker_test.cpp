@@ -1,4 +1,4 @@
-// RUN: %clang_analyze_cc1 -analyzer-checker=optin.osx.OSObjectCStyleCast %s -verify
+// RUN: %clang_analyze_cc1 -std=c++14 -analyzer-checker=optin.osx.OSObjectCStyleCast %s -verify
 #include "os_object_base.h"
 
 struct OSArray : public OSObject {
@@ -13,7 +13,7 @@ struct B : public A {
 };
 
 unsigned warn_on_explicit_downcast(OSObject * obj) {
-  OSArray *a = (OSArray *) obj; // expected-warning{{C-style cast of OSObject. Use OSDynamicCast instead}}
+  OSArray *a = (OSArray *) obj; // expected-warning{{C-style cast of an OSObject is prone to type confusion attacks; use 'OSRequiredCast' if the object is definitely of type 'OSArray', or 'OSDynamicCast' followed by a null check if unsure}}
   return a->getCount();
 }
 

@@ -1,8 +1,21 @@
-# RUN: yaml2obj < %s > %t.obj
+# RUN: yaml2obj %s -o %t.obj
 # RUN: lld-link /out:%t.exe /entry:main /align:32 %t.obj
 # RUN: llvm-readobj --file-headers %t.exe | FileCheck %s
 
 # CHECK: SectionAlignment: 32
+
+# RUN: lld-link /out:%t.exe /entry:main /align:32 %t.obj 2>&1 \
+# RUN:   | FileCheck -check-prefix=WARN1 %s
+
+# WARN1: /align specified without /driver; image may not run
+
+# RUN: lld-link /out:%t.exe /entry:main /align:32 %t.obj /driver 2>&1 \
+# RUN:   | FileCheck -check-prefix=WARN2 --allow-empty %s
+
+# RUN: lld-link /out:%t.exe /entry:main %t.obj /driver 2>&1 \
+# RUN:   | FileCheck -check-prefix=WARN2 --allow-empty %s
+
+# WARN2-NOT: /align specified without /driver; image may not run
 
 --- !COFF
 header:

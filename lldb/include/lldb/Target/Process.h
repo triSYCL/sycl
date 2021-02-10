@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef liblldb_Process_h_
-#define liblldb_Process_h_
+#ifndef LLDB_TARGET_PROCESS_H
+#define LLDB_TARGET_PROCESS_H
 
 #include "lldb/Host/Config.h"
 
@@ -37,6 +37,8 @@
 #include "lldb/Target/Memory.h"
 #include "lldb/Target/QueueList.h"
 #include "lldb/Target/ThreadList.h"
+#include "lldb/Target/ThreadPlanStack.h"
+#include "lldb/Target/Trace.h"
 #include "lldb/Utility/ArchSpec.h"
 #include "lldb/Utility/Broadcaster.h"
 #include "lldb/Utility/Event.h"
@@ -46,6 +48,7 @@
 #include "lldb/Utility/Status.h"
 #include "lldb/Utility/StructuredData.h"
 #include "lldb/Utility/TraceOptions.h"
+#include "lldb/Utility/UnimplementedError.h"
 #include "lldb/Utility/UserIDResolver.h"
 #include "lldb/lldb-private.h"
 
@@ -57,7 +60,11 @@ namespace lldb_private {
 
 template <typename B, typename S> struct Range;
 
-// ProcessProperties
+class ProcessExperimentalProperties : public Properties {
+public:
+  ProcessExperimentalProperties();
+};
+
 class ProcessProperties : public Properties {
 public:
   // Pass nullptr for "process" if the ProcessProperties are to be the global
@@ -81,14 +88,16 @@ public:
   bool GetDetachKeepsStopped() const;
   void SetDetachKeepsStopped(bool keep_stopped);
   bool GetWarningsOptimization() const;
+  bool GetWarningsUnsupportedLanguage() const;
   bool GetStopOnExec() const;
   std::chrono::seconds GetUtilityExpressionTimeout() const;
+  bool GetOSPluginReportsAllThreads() const;
+  void SetOSPluginReportsAllThreads(bool does_report);
+  bool GetSteppingRunsAllThreads() const;
 
 protected:
-  static void OptionValueChangedCallback(void *baton,
-                                         OptionValue *option_value);
-
   Process *m_process; // Can be nullptr for global ProcessProperties
+  std::unique_ptr<ProcessExperimentalProperties> m_experimental_properties_up;
 };
 
 typedef std::shared_ptr<ProcessProperties> ProcessPropertiesSP;
@@ -142,7 +151,9 @@ public:
     return (m_plugin_name.empty() ? nullptr : m_plugin_name.c_str());
   }
 
-  void SetProcessPluginName(llvm::StringRef plugin) { m_plugin_name = plugin; }
+  void SetProcessPluginName(llvm::StringRef plugin) {
+    m_plugin_name = std::string(plugin);
+  }
 
   void Clear() {
     ProcessInstanceInfo::Clear();
@@ -318,7 +329,7 @@ public:
   }
 
   void SetStopEventForLastNaturalStopID(lldb::EventSP event_sp) {
-    m_last_natural_stop_event = event_sp;
+    m_last_natural_stop_event = std::move(event_sp);
   }
 
   lldb::EventSP GetStopEventForStopID(uint32_t stop_id) const {
@@ -353,7 +364,6 @@ inline bool operator!=(const ProcessModID &lhs, const ProcessModID &rhs) {
 /// A plug-in interface definition class for debugging a process.
 class Process : public std::enable_shared_from_this<Process>,
                 public ProcessProperties,
-                public UserID,
                 public Broadcaster,
                 public ExecutionContextScope,
                 public PluginInterface {
@@ -383,7 +393,7 @@ public:
   };
 
   /// Process warning types.
-  enum Warnings { eWarningsOptimization = 1 };
+  enum Warnings { eWarningsOptimization = 1, eWarningsUnsupportedLanguage = 2 };
 
   typedef Range<lldb::addr_t, lldb::addr_t> LoadRange;
   // We use a read/write lock to allow on or more clients to access the process
@@ -444,6 +454,8 @@ public:
 
     void Dump(Stream *s) const override;
 
+    virtual bool ShouldStop(Event *event_ptr, bool &found_valid_stopinfo);
+
     void DoOnRemoval(Event *event_ptr) override;
 
     static const Process::ProcessEventData *
@@ -489,7 +501,8 @@ public:
     int m_update_state;
     bool m_interrupted;
 
-    DISALLOW_COPY_AND_ASSIGN(ProcessEventData);
+    ProcessEventData(const ProcessEventData &) = delete;
+    const ProcessEventData &operator=(const ProcessEventData &) = delete;
   };
 
   /// Construct with a shared pointer to a target, and the Process listener.
@@ -520,19 +533,12 @@ public:
   /// Process plug-in interface and returns the first instance that can debug
   /// the file.
   ///
-  /// \param[in] module_sp
-  ///     The module shared pointer that this process will debug.
-  ///
-  /// \param[in] plugin_name
-  ///     If nullptr, select the best plug-in for the binary. If non-nullptr
-  ///     then look for a plugin whose PluginInfo's name matches
-  ///     this string.
-  ///
   /// \see Process::CanDebug ()
   static lldb::ProcessSP FindPlugin(lldb::TargetSP target_sp,
                                     llvm::StringRef plugin_name,
                                     lldb::ListenerSP listener_sp,
-                                    const FileSpec *crash_file_path);
+                                    const FileSpec *crash_file_path,
+                                    bool can_connect);
 
   /// Static function that can be used with the \b host function
   /// Host::StartMonitoringChildProcess ().
@@ -553,6 +559,15 @@ public:
   lldb::ByteOrder GetByteOrder() const;
 
   uint32_t GetAddressByteSize() const;
+
+  /// Sets the stored pid.
+  ///
+  /// This does not change the pid of underlying process.
+  lldb::pid_t GetID() const { return m_pid; }
+
+  /// Returns the pid of the process or LLDB_INVALID_PROCESS_ID if there is
+  /// no known pid.
+  void SetID(lldb::pid_t new_pid) { m_pid = new_pid; }
 
   uint32_t GetUniqueID() const { return m_process_unique_id; }
 
@@ -579,7 +594,7 @@ public:
   /// \return
   ///     Returns \b true if this Process has not been finalized
   ///     and \b false otherwise.
-  bool IsValid() const { return !m_finalize_called; }
+  bool IsValid() const { return !m_finalizing; }
 
   /// Return a multi-word command object that can be used to expose plug-in
   /// specific commands.
@@ -714,8 +729,8 @@ public:
   /// char *) will be called to actually do the attach. If DoAttach returns \b
   /// true, then Process::DidAttach() will be called.
   ///
-  /// \param[in] pid
-  ///     The process ID that we should attempt to attach to.
+  /// \param[in] attach_info
+  ///     The process attach info.
   ///
   /// \return
   ///     Returns \a pid if attaching was successful, or
@@ -724,21 +739,22 @@ public:
 
   /// Attach to a remote system via a URL
   ///
-  /// \param[in] strm
-  ///     A stream where output intended for the user
-  ///     (if the driver has a way to display that) generated during
-  ///     the connection.  This may be nullptr if no output is needed.A
-  ///
   /// \param[in] remote_url
   ///     The URL format that we are connecting to.
   ///
   /// \return
   ///     Returns an error object.
-  virtual Status ConnectRemote(Stream *strm, llvm::StringRef remote_url);
+  virtual Status ConnectRemote(llvm::StringRef remote_url);
 
   bool GetShouldDetach() const { return m_should_detach; }
 
   void SetShouldDetach(bool b) { m_should_detach = b; }
+
+  /// Get the image vector for the current process.
+  ///
+  /// \return
+  ///     The constant reference to the member m_image_tokens.
+  const std::vector<lldb::addr_t>& GetImageTokens() { return m_image_tokens; }
 
   /// Get the image information address for the current process.
   ///
@@ -912,17 +928,12 @@ public:
 
   /// Attach to a remote system via a URL
   ///
-  /// \param[in] strm
-  ///     A stream where output intended for the user
-  ///     (if the driver has a way to display that) generated during
-  ///     the connection.  This may be nullptr if no output is needed.A
-  ///
   /// \param[in] remote_url
   ///     The URL format that we are connecting to.
   ///
   /// \return
   ///     Returns an error object.
-  virtual Status DoConnectRemote(Stream *strm, llvm::StringRef remote_url) {
+  virtual Status DoConnectRemote(llvm::StringRef remote_url) {
     Status error;
     error.SetErrorString("remote connections are not supported");
     return error;
@@ -1276,7 +1287,7 @@ public:
   ///     LLDB_INVALID_ADDRESS.
   ///
   /// \return
-  ///     A StructureDataSP object which, if non-empty, will contain the
+  ///     A StructuredDataSP object which, if non-empty, will contain the
   ///     information the DynamicLoader needs to get the initial scan of
   ///     solibs resolved.
   virtual lldb_private::StructuredData::ObjectSP
@@ -1320,9 +1331,14 @@ public:
   ///     pre-computed.
   void PrintWarningOptimization(const SymbolContext &sc);
 
+  /// Print a user-visible warning about a function written in a
+  /// language that this version of LLDB doesn't support.
+  ///
+  /// \see PrintWarningOptimization
+  void PrintWarningUnsupportedLanguage(const SymbolContext &sc);
+
   virtual bool GetProcessInfo(ProcessInstanceInfo &info);
 
-public:
   /// Get the exit status for a process.
   ///
   /// \return
@@ -1385,6 +1401,8 @@ public:
   ///     otherwise.
   virtual bool IsAlive();
 
+  virtual bool IsLiveDebugSession() const { return true; };
+
   /// Before lldb detaches from a process, it warns the user that they are
   /// about to lose their debug session. In some cases, this warning doesn't
   /// need to be emitted -- for instance, with core file debugging where the
@@ -1392,7 +1410,8 @@ public:
   /// the core file.
   ///
   /// \return
-  //      true if the user should be warned about detaching from this process.
+  ///     Returns \b true if the user should be warned about detaching from
+  ///     this process.
   virtual bool WarnBeforeDetach() const { return true; }
 
   /// Actually do the reading of memory from a process.
@@ -1722,8 +1741,9 @@ public:
   ///     lldb,
   ///     just not by the process itself.
   ///
-  /// \param[in/out] error
+  /// \param[in,out] error
   ///     An error object to fill in if things go wrong.
+  ///
   /// \return
   ///     The address of the allocated buffer in the process, or
   ///     LLDB_INVALID_ADDRESS if the allocation failed.
@@ -2153,7 +2173,7 @@ public:
   public:
     ProcessEventHijacker(Process &process, lldb::ListenerSP listener_sp)
         : m_process(process) {
-      m_process.HijackProcessEvents(listener_sp);
+      m_process.HijackProcessEvents(std::move(listener_sp));
     }
 
     ~ProcessEventHijacker() { m_process.RestoreProcessEvents(); }
@@ -2171,7 +2191,7 @@ public:
   /// WaitFor* calls above.  Be sure to call RestoreProcessEvents when you are
   /// done.
   ///
-  /// \param[in] listener
+  /// \param[in] listener_sp
   ///     This is the new listener to whom all process events will be delivered.
   ///
   /// \return
@@ -2191,11 +2211,9 @@ public:
 
   OperatingSystem *GetOperatingSystem() { return m_os_up.get(); }
 
-  std::vector<LanguageRuntime *>
-  GetLanguageRuntimes(bool retry_if_null = true);
+  std::vector<LanguageRuntime *> GetLanguageRuntimes();
 
-  LanguageRuntime *GetLanguageRuntime(lldb::LanguageType language,
-                                      bool retry_if_null = true);
+  LanguageRuntime *GetLanguageRuntime(lldb::LanguageType language);
 
   bool IsPossibleDynamicValue(ValueObject &in_value);
 
@@ -2206,6 +2224,75 @@ public:
   }
 
   void SetDynamicCheckers(DynamicCheckerFunctions *dynamic_checkers);
+
+/// Prune ThreadPlanStacks for unreported threads.
+///
+/// \param[in] tid
+///     The tid whose Plan Stack we are seeking to prune.
+///
+/// \return
+///     \b true if the TID is found or \b false if not.
+bool PruneThreadPlansForTID(lldb::tid_t tid);
+
+/// Prune ThreadPlanStacks for all unreported threads.
+void PruneThreadPlans();
+
+  /// Find the thread plan stack associated with thread with \a tid.
+  ///
+  /// \param[in] tid
+  ///     The tid whose Plan Stack we are seeking.
+  ///
+  /// \return
+  ///     Returns a ThreadPlan if the TID is found or nullptr if not.
+  ThreadPlanStack *FindThreadPlans(lldb::tid_t tid);
+
+  /// Dump the thread plans associated with thread with \a tid.
+  ///
+  /// \param[in,out] strm
+  ///     The stream to which to dump the output
+  ///
+  /// \param[in] tid
+  ///     The tid whose Plan Stack we are dumping
+  ///
+  /// \param[in] desc_level
+  ///     How much detail to dump
+  ///
+  /// \param[in] internal
+  ///     If \b true dump all plans, if false only user initiated plans
+  ///
+  /// \param[in] condense_trivial
+  ///     If true, only dump a header if the plan stack is just the base plan.
+  ///
+  /// \param[in] skip_unreported_plans
+  ///     If true, only dump a plan if it is currently backed by an
+  ///     lldb_private::Thread *.
+  ///
+  /// \return
+  ///     Returns \b true if TID was found, \b false otherwise
+  bool DumpThreadPlansForTID(Stream &strm, lldb::tid_t tid,
+                             lldb::DescriptionLevel desc_level, bool internal,
+                             bool condense_trivial, bool skip_unreported_plans);
+
+  /// Dump all the thread plans for this process.
+  ///
+  /// \param[in,out] strm
+  ///     The stream to which to dump the output
+  ///
+  /// \param[in] desc_level
+  ///     How much detail to dump
+  ///
+  /// \param[in] internal
+  ///     If \b true dump all plans, if false only user initiated plans
+  ///
+  /// \param[in] condense_trivial
+  ///     If true, only dump a header if the plan stack is just the base plan.
+  ///
+  /// \param[in] skip_unreported_plans
+  ///     If true, skip printing all thread plan stacks that don't currently
+  ///     have a backing lldb_private::Thread *.
+  void DumpThreadPlans(Stream &strm, lldb::DescriptionLevel desc_level,
+                       bool internal, bool condense_trivial,
+                       bool skip_unreported_plans);
 
   /// Call this to set the lldb in the mode where it breaks on new thread
   /// creations, and then auto-restarts.  This is useful when you are trying
@@ -2272,6 +2359,8 @@ public:
   void ClearPreResumeAction(PreResumeActionCallback callback, void *baton);
 
   ProcessRunLock &GetRunLock();
+
+  bool CurrentThreadIsPrivateStateThread();
 
   virtual Status SendEventData(const char *data) {
     Status return_error("Sending an event is not supported for this process.");
@@ -2370,7 +2459,7 @@ public:
   ///     The StructuredData type name as previously discovered by
   ///     the Process-derived instance.
   ///
-  /// \param[in] config
+  /// \param[in] config_sp
   ///     Configuration data for the feature being enabled.  This config
   ///     data, which may be null, will be passed along to the feature
   ///     to process.  The feature will dictate whether this is a dictionary,
@@ -2465,6 +2554,15 @@ public:
   virtual Status GetTraceConfig(lldb::user_id_t uid, TraceOptions &options) {
     return Status("Not implemented");
   }
+
+  ///  Get the processor tracing type supported for this process.
+  ///  Responses might be different depending on the architecture and
+  ///  capabilities of the underlying OS.
+  ///
+  ///  \return
+  ///     The supported trace type or an \a llvm::Error if tracing is
+  ///     not supported for the inferior.
+  virtual llvm::Expected<TraceTypeInfo> GetSupportedTraceType();
 
   // This calls a function of the form "void * (*)(void)".
   bool CallVoidArgVoidPtrReturn(const Address *address,
@@ -2641,6 +2739,7 @@ protected:
 
   // Member variables
   std::weak_ptr<Target> m_target_wp; ///< The target that owns this process.
+  lldb::pid_t m_pid = LLDB_INVALID_PROCESS_ID;
   ThreadSafeValue<lldb::StateType> m_public_state;
   ThreadSafeValue<lldb::StateType>
       m_private_state;                     // The actual state of our process
@@ -2674,6 +2773,10 @@ protected:
                             ///see them. This is usually the same as
   ///< m_thread_list_real, but might be different if there is an OS plug-in
   ///creating memory threads
+  ThreadPlanStackMap m_thread_plans; ///< This is the list of thread plans for
+                                     /// threads in m_thread_list, as well as
+                                     /// threads we knew existed, but haven't
+                                     /// determined that they have died yet.
   ThreadList m_extended_thread_list; ///< Owner for extended threads that may be
                                      ///generated, cleared on natural stops
   uint32_t m_extended_thread_stop_id; ///< The natural stop id when
@@ -2728,10 +2831,11 @@ protected:
                            // m_currently_handling_do_on_removals are true,
                            // Resume will only request a resume, using this
                            // flag to check.
-  bool m_finalizing; // This is set at the beginning of Process::Finalize() to
-                     // stop functions from looking up or creating things
-                     // during a finalize call
-  bool m_finalize_called; // This is set at the end of Process::Finalize()
+
+  /// This is set at the beginning of Process::Finalize() to stop functions
+  /// from looking up or creating things during or after a finalize call.
+  std::atomic<bool> m_finalizing;
+
   bool m_clear_thread_plans_on_stop;
   bool m_force_next_event_delivery;
   lldb::StateType m_last_broadcast_state; /// This helps with the Public event
@@ -2748,7 +2852,7 @@ protected:
   StructuredDataPluginMap m_structured_data_plugin_map;
 
   enum { eCanJITDontKnow = 0, eCanJITYes, eCanJITNo } m_can_jit;
-  
+
   std::unique_ptr<UtilityFunction> m_dlopen_utility_func_up;
   llvm::once_flag m_dlopen_utility_func_flag_once;
 
@@ -2835,6 +2939,8 @@ protected:
   void LoadOperatingSystemPlugin(bool flush);
 
 private:
+  Status DestroyImpl(bool force_kill);
+
   /// This is the part of the event handling that for a process event. It
   /// decides what to do with the event and returns true if the event needs to
   /// be propagated to the user, and false otherwise. If the event is not
@@ -2852,10 +2958,11 @@ private:
 
   void ControlPrivateStateThread(uint32_t signal);
 
-  DISALLOW_COPY_AND_ASSIGN(Process);
+  Process(const Process &) = delete;
+  const Process &operator=(const Process &) = delete;
 };
 
-/// RAII guard that should be aquired when an utility function is called within
+/// RAII guard that should be acquired when an utility function is called within
 /// a given process.
 class UtilityFunctionScope {
   Process *m_process;
@@ -2873,4 +2980,4 @@ public:
 
 } // namespace lldb_private
 
-#endif // liblldb_Process_h_
+#endif // LLDB_TARGET_PROCESS_H

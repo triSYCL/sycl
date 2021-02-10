@@ -20,7 +20,7 @@
 #include "llvm/Support/TargetRegistry.h"
 using namespace llvm;
 
-extern "C" void LLVMInitializeSparcTarget() {
+extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeSparcTarget() {
   // Register the target.
   RegisterTargetMachine<SparcV8TargetMachine> X(getTheSparcTarget());
   RegisterTargetMachine<SparcV9TargetMachine> Y(getTheSparcV9Target());
@@ -99,7 +99,8 @@ SparcTargetMachine::SparcTargetMachine(
                             CM, getEffectiveRelocModel(RM), is64bit, JIT),
                         OL),
       TLOF(std::make_unique<SparcELFTargetObjectFile>()),
-      Subtarget(TT, CPU, FS, *this, is64bit), is64Bit(is64bit) {
+      Subtarget(TT, std::string(CPU), std::string(FS), *this, is64bit),
+      is64Bit(is64bit) {
   initAsmInfo();
 }
 
@@ -110,12 +111,10 @@ SparcTargetMachine::getSubtargetImpl(const Function &F) const {
   Attribute CPUAttr = F.getFnAttribute("target-cpu");
   Attribute FSAttr = F.getFnAttribute("target-features");
 
-  std::string CPU = !CPUAttr.hasAttribute(Attribute::None)
-                        ? CPUAttr.getValueAsString().str()
-                        : TargetCPU;
-  std::string FS = !FSAttr.hasAttribute(Attribute::None)
-                       ? FSAttr.getValueAsString().str()
-                       : TargetFS;
+  std::string CPU =
+      CPUAttr.isValid() ? CPUAttr.getValueAsString().str() : TargetCPU;
+  std::string FS =
+      FSAttr.isValid() ? FSAttr.getValueAsString().str() : TargetFS;
 
   // FIXME: This is related to the code below to reset the target options,
   // we need to know whether or not the soft float flag is set on the

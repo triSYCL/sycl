@@ -120,6 +120,7 @@ entry:
 
 ;CHECK-LABEL: {{^}}buffer_load_x1_offen_merged_and:
 ;CHECK-NEXT: %bb.
+;GFX10-NEXT: s_clause
 ;CHECK-NEXT: buffer_load_dwordx4 v[{{[0-9]}}:{{[0-9]}}], v0, s[0:3], 0 offen offset:4
 ;CHECK-NEXT: buffer_load_dwordx2 v[{{[0-9]}}:{{[0-9]}}], v0, s[0:3], 0 offen offset:28
 ;CHECK: s_waitcnt
@@ -145,6 +146,7 @@ main_body:
 ;CHECK-LABEL: {{^}}buffer_load_x1_offen_merged_or:
 ;CHECK-NEXT: %bb.
 ;CHECK-NEXT: v_lshlrev_b32_e32 v{{[0-9]}}, 6, v0
+;GFX10-NEXT: s_clause
 ;CHECK-NEXT: buffer_load_dwordx4 v[{{[0-9]}}:{{[0-9]}}], v{{[0-9]}}, s[0:3], 0 offen offset:4
 ;CHECK-NEXT: buffer_load_dwordx2 v[{{[0-9]}}:{{[0-9]}}], v{{[0-9]}}, s[0:3], 0 offen offset:28
 ;CHECK: s_waitcnt
@@ -170,6 +172,7 @@ main_body:
 
 ;CHECK-LABEL: {{^}}buffer_load_x1_offen_merged_glc_slc:
 ;CHECK-NEXT: %bb.
+;GFX10-NEXT: s_clause
 ;CHECK-NEXT: buffer_load_dwordx2 v[{{[0-9]}}:{{[0-9]}}], v0, s[0:3], 0 offen offset:4{{$}}
 ;CHECK-NEXT: buffer_load_dwordx2 v[{{[0-9]}}:{{[0-9]}}], v0, s[0:3], 0 offen offset:12 glc{{$}}
 ;CHECK-NEXT: buffer_load_dwordx2 v[{{[0-9]}}:{{[0-9]}}], v0, s[0:3], 0 offen offset:28 glc slc{{$}}
@@ -233,6 +236,7 @@ main_body:
 
 ;CHECK-LABEL: {{^}}buffer_load_x1_offset_merged:
 ;CHECK-NEXT: %bb.
+;GFX10-NEXT: s_clause
 ;CHECK-NEXT: buffer_load_dwordx4 v[{{[0-9]}}:{{[0-9]}}], off, s[0:3], 0 offset:4
 ;CHECK-NEXT: buffer_load_dwordx2 v[{{[0-9]}}:{{[0-9]}}], off, s[0:3], 0 offset:28
 ;CHECK: s_waitcnt
@@ -397,6 +401,48 @@ define amdgpu_ps void @raw_buffer_load_v4i16(<4 x i32> inreg %rsrc, <4 x i16> ad
 main_body:
   %val = call <4 x i16> @llvm.amdgcn.raw.buffer.load.v4i16(<4 x i32> %rsrc, i32 0, i32 0, i32 0)
   store <4 x i16> %val, <4 x i16> addrspace(3)* %ptr
+  ret void
+}
+
+;CHECK-LABEL: {{^}}raw_buffer_load_x1_offset_merged:
+;CHECK-NEXT: %bb.
+;GFX10-NEXT: s_clause
+;CHECK-NEXT: buffer_load_dwordx4 v[{{[0-9]}}:{{[0-9]}}], off, s[0:3], 0 offset:4
+;CHECK-NEXT: buffer_load_dwordx2 v[{{[0-9]}}:{{[0-9]}}], off, s[0:3], 0 offset:28
+;CHECK: s_waitcnt
+define amdgpu_ps void @raw_buffer_load_x1_offset_merged(<4 x i32> inreg %rsrc) {
+main_body:
+  %r1 = call float @llvm.amdgcn.raw.buffer.load.f32(<4 x i32> %rsrc, i32 4, i32 0, i32 0)
+  %r2 = call float @llvm.amdgcn.raw.buffer.load.f32(<4 x i32> %rsrc, i32 8, i32 0, i32 0)
+  %r3 = call float @llvm.amdgcn.raw.buffer.load.f32(<4 x i32> %rsrc, i32 12, i32 0, i32 0)
+  %r4 = call float @llvm.amdgcn.raw.buffer.load.f32(<4 x i32> %rsrc, i32 16, i32 0, i32 0)
+  %r5 = call float @llvm.amdgcn.raw.buffer.load.f32(<4 x i32> %rsrc, i32 28, i32 0, i32 0)
+  %r6 = call float @llvm.amdgcn.raw.buffer.load.f32(<4 x i32> %rsrc, i32 32, i32 0, i32 0)
+  call void @llvm.amdgcn.exp.f32(i32 0, i32 15, float %r1, float %r2, float %r3, float %r4, i1 true, i1 true)
+  call void @llvm.amdgcn.exp.f32(i32 0, i32 15, float %r5, float %r6, float undef, float undef, i1 true, i1 true)
+  ret void
+}
+
+;CHECK-LABEL: {{^}}raw_buffer_load_x1_offset_swizzled_not_merged:
+;CHECK-NEXT: %bb.
+;GFX10-NEXT: s_clause
+;CHECK-NEXT: buffer_load_dword v{{[0-9]}}, off, s[0:3], 0 offset:4
+;CHECK-NEXT: buffer_load_dword v{{[0-9]}}, off, s[0:3], 0 offset:8
+;CHECK-NEXT: buffer_load_dword v{{[0-9]}}, off, s[0:3], 0 offset:12
+;CHECK-NEXT: buffer_load_dword v{{[0-9]}}, off, s[0:3], 0 offset:16
+;CHECK-NEXT: buffer_load_dword v{{[0-9]}}, off, s[0:3], 0 offset:28
+;CHECK-NEXT: buffer_load_dword v{{[0-9]}}, off, s[0:3], 0 offset:32
+;CHECK: s_waitcnt
+define amdgpu_ps void @raw_buffer_load_x1_offset_swizzled_not_merged(<4 x i32> inreg %rsrc) {
+main_body:
+  %r1 = call float @llvm.amdgcn.raw.buffer.load.f32(<4 x i32> %rsrc, i32 4, i32 0, i32 8)
+  %r2 = call float @llvm.amdgcn.raw.buffer.load.f32(<4 x i32> %rsrc, i32 8, i32 0, i32 8)
+  %r3 = call float @llvm.amdgcn.raw.buffer.load.f32(<4 x i32> %rsrc, i32 12, i32 0, i32 8)
+  %r4 = call float @llvm.amdgcn.raw.buffer.load.f32(<4 x i32> %rsrc, i32 16, i32 0, i32 8)
+  %r5 = call float @llvm.amdgcn.raw.buffer.load.f32(<4 x i32> %rsrc, i32 28, i32 0, i32 8)
+  %r6 = call float @llvm.amdgcn.raw.buffer.load.f32(<4 x i32> %rsrc, i32 32, i32 0, i32 8)
+  call void @llvm.amdgcn.exp.f32(i32 0, i32 15, float %r1, float %r2, float %r3, float %r4, i1 true, i1 true)
+  call void @llvm.amdgcn.exp.f32(i32 0, i32 15, float %r5, float %r6, float undef, float undef, i1 true, i1 true)
   ret void
 }
 

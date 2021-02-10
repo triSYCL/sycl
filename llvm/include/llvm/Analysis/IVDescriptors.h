@@ -14,38 +14,25 @@
 #define LLVM_ANALYSIS_IVDESCRIPTORS_H
 
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/ADT/Optional.h"
-#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Analysis/AliasAnalysis.h"
-#include "llvm/Analysis/DemandedBits.h"
-#include "llvm/Analysis/EHPersonalities.h"
-#include "llvm/Analysis/MustExecute.h"
-#include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/IR/Dominators.h"
-#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Operator.h"
 #include "llvm/IR/ValueHandle.h"
 #include "llvm/Support/Casting.h"
 
 namespace llvm {
 
-class AliasSet;
-class AliasSetTracker;
-class BasicBlock;
-class DataLayout;
+class DemandedBits;
+class AssumptionCache;
 class Loop;
-class LoopInfo;
-class OptimizationRemarkEmitter;
 class PredicatedScalarEvolution;
-class PredIteratorCache;
 class ScalarEvolution;
 class SCEV;
-class TargetLibraryInfo;
-class TargetTransformInfo;
+class DominatorTree;
+class ICFLoopSafetyInfo;
 
 /// The RecurrenceDescriptor is used to identify recurrences variables in a
 /// loop. Reduction is a special case of recurrence that has uses of the
@@ -157,7 +144,8 @@ public:
   static InstDesc isConditionalRdxPattern(RecurrenceKind Kind, Instruction *I);
 
   /// Returns identity corresponding to the RecurrenceKind.
-  static Constant *getRecurrenceIdentity(RecurrenceKind K, Type *Tp);
+  static Constant *getRecurrenceIdentity(RecurrenceKind K,
+                                         MinMaxRecurrenceKind MK, Type *Tp);
 
   /// Returns the opcode of binary operation corresponding to the
   /// RecurrenceKind.
@@ -196,22 +184,26 @@ public:
                          DenseMap<Instruction *, Instruction *> &SinkAfter,
                          DominatorTree *DT);
 
-  RecurrenceKind getRecurrenceKind() { return Kind; }
+  RecurrenceKind getRecurrenceKind() const { return Kind; }
 
-  MinMaxRecurrenceKind getMinMaxRecurrenceKind() { return MinMaxKind; }
+  unsigned getRecurrenceBinOp() const {
+    return getRecurrenceBinOp(getRecurrenceKind());
+  }
 
-  FastMathFlags getFastMathFlags() { return FMF; }
+  MinMaxRecurrenceKind getMinMaxRecurrenceKind() const { return MinMaxKind; }
 
-  TrackingVH<Value> getRecurrenceStartValue() { return StartValue; }
+  FastMathFlags getFastMathFlags() const { return FMF; }
 
-  Instruction *getLoopExitInstr() { return LoopExitInstr; }
+  TrackingVH<Value> getRecurrenceStartValue() const { return StartValue; }
+
+  Instruction *getLoopExitInstr() const { return LoopExitInstr; }
 
   /// Returns true if the recurrence has unsafe algebra which requires a relaxed
   /// floating-point model.
-  bool hasUnsafeAlgebra() { return UnsafeAlgebraInst != nullptr; }
+  bool hasUnsafeAlgebra() const { return UnsafeAlgebraInst != nullptr; }
 
   /// Returns first unsafe algebra instruction in the PHI node's use-chain.
-  Instruction *getUnsafeAlgebraInst() { return UnsafeAlgebraInst; }
+  Instruction *getUnsafeAlgebraInst() const { return UnsafeAlgebraInst; }
 
   /// Returns true if the recurrence kind is an integer kind.
   static bool isIntegerRecurrenceKind(RecurrenceKind Kind);
@@ -224,14 +216,19 @@ public:
 
   /// Returns the type of the recurrence. This type can be narrower than the
   /// actual type of the Phi if the recurrence has been type-promoted.
-  Type *getRecurrenceType() { return RecurrenceType; }
+  Type *getRecurrenceType() const { return RecurrenceType; }
 
   /// Returns a reference to the instructions used for type-promoting the
   /// recurrence.
-  SmallPtrSet<Instruction *, 8> &getCastInsts() { return CastInsts; }
+  const SmallPtrSet<Instruction *, 8> &getCastInsts() const { return CastInsts; }
 
   /// Returns true if all source operands of the recurrence are SExtInsts.
-  bool isSigned() { return IsSigned; }
+  bool isSigned() const { return IsSigned; }
+
+  /// Attempts to find a chain of operations from Phi to LoopExitInst that can
+  /// be treated as a set of reductions instructions for in-loop reductions.
+  SmallVector<Instruction *, 4> getReductionOpChain(PHINode *Phi,
+                                                    Loop *L) const;
 
 private:
   // The starting value of the recurrence.
@@ -270,12 +267,6 @@ public:
 public:
   /// Default constructor - creates an invalid induction.
   InductionDescriptor() = default;
-
-  /// Get the consecutive direction. Returns:
-  ///   0 - unknown or non-consecutive.
-  ///   1 - consecutive and increasing.
-  ///  -1 - consecutive and decreasing.
-  int getConsecutiveDirection() const;
 
   Value *getStartValue() const { return StartValue; }
   InductionKind getKind() const { return IK; }

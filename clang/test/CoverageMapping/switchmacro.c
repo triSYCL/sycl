@@ -1,10 +1,10 @@
-// RUN: %clang_cc1 -fprofile-instrument=clang -fcoverage-mapping -dump-coverage-mapping -emit-llvm-only -main-file-name switchmacro.c %s | FileCheck %s
+// RUN: %clang_cc1 -mllvm -emptyline-comment-coverage=false -fprofile-instrument=clang -fcoverage-mapping -dump-coverage-mapping -emit-llvm-only -main-file-name switchmacro.c %s | FileCheck %s
 
 #define FOO(x) (void)x
 
 // CHECK: foo
 int foo(int i) { // CHECK-NEXT: File 0, [[@LINE]]:16 -> {{[0-9]+}}:2 = #0
-  switch (i) {
+  switch (i) {   // CHECK-NEXT: Gap,File 0, [[@LINE]]:14 -> {{[0-9]+}}:11 = 0
   default:       // CHECK-NEXT: File 0, [[@LINE]]:3 -> {{[0-9]+}}:11 = #2
     if (i == 1)  // CHECK-NEXT: File 0, [[@LINE]]:9 -> [[@LINE]]:15 = #2
       return 0;  // CHECK: File 0, [[@LINE]]:7 -> [[@LINE]]:15 = #3

@@ -9,8 +9,11 @@
 #ifndef LLVM_CLANG_TOOLS_EXTRA_CLANGD_GLOBALCOMPILATIONDATABASE_H
 #define LLVM_CLANG_TOOLS_EXTRA_CLANGD_GLOBALCOMPILATIONDATABASE_H
 
-#include "Function.h"
-#include "Path.h"
+#include "CompileCommands.h"
+#include "support/Function.h"
+#include "support/Path.h"
+#include "support/ThreadsafeFS.h"
+#include "clang/Tooling/ArgumentsAdjusters.h"
 #include "clang/Tooling/CompilationDatabase.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringMap.h"
@@ -19,7 +22,6 @@
 #include <vector>
 
 namespace clang {
-
 namespace clangd {
 
 class Logger;
@@ -65,8 +67,22 @@ protected:
 class DirectoryBasedGlobalCompilationDatabase
     : public GlobalCompilationDatabase {
 public:
-  DirectoryBasedGlobalCompilationDatabase(
-      llvm::Optional<Path> CompileCommandsDir);
+  struct Options {
+    Options(const ThreadsafeFS &TFS) : TFS(TFS) {}
+
+    const ThreadsafeFS &TFS;
+    // Frequency to check whether e.g. compile_commands.json has changed.
+    std::chrono::steady_clock::duration RevalidateAfter =
+        std::chrono::seconds(5);
+    // Frequency to check whether e.g. compile_commands.json has been created.
+    // (This is more expensive to check frequently, as we check many locations).
+    std::chrono::steady_clock::duration RevalidateMissingAfter =
+        std::chrono::seconds(30);
+    // Only look for a compilation database in this one fixed directory.
+    llvm::Optional<Path> CompileCommandsDir;
+  };
+
+  DirectoryBasedGlobalCompilationDatabase(const Options &Opts);
   ~DirectoryBasedGlobalCompilationDatabase() override;
 
   /// Scans File's parents looking for compilation databases.
@@ -80,21 +96,33 @@ public:
   llvm::Optional<ProjectInfo> getProjectInfo(PathRef File) const override;
 
 private:
-  /// Caches compilation databases loaded from directories.
-  struct CachedCDB {
-    std::string Path; // Not case-folded.
-    std::unique_ptr<clang::tooling::CompilationDatabase> CDB = nullptr;
-    bool SentBroadcast = false;
-  };
-  CachedCDB &getCDBInDirLocked(PathRef File) const;
+  Options Opts;
+
+  class DirectoryCache;
+  // If there's an explicit CompileCommandsDir, cache of the CDB found there.
+  mutable std::unique_ptr<DirectoryCache> OnlyDirCache;
+
+  // Keyed by possibly-case-folded directory path.
+  // We can hand out pointers as they're stable and entries are never removed.
+  // Empty if CompileCommandsDir is given (OnlyDirCache is used instead).
+  mutable llvm::StringMap<DirectoryCache> DirCaches;
+  // DirCaches access must be locked (unlike OnlyDirCache, which is threadsafe).
+  mutable std::mutex DirCachesMutex;
+
+  std::vector<DirectoryCache *>
+  getDirectoryCaches(llvm::ArrayRef<llvm::StringRef> Dirs) const;
 
   struct CDBLookupRequest {
     PathRef FileName;
     // Whether this lookup should trigger discovery of the CDB found.
     bool ShouldBroadcast = false;
+    // Cached results newer than this are considered fresh and not checked
+    // against disk.
+    std::chrono::steady_clock::time_point FreshTime;
+    std::chrono::steady_clock::time_point FreshTimeMissing;
   };
   struct CDBLookupResult {
-    tooling::CompilationDatabase *CDB = nullptr;
+    std::shared_ptr<const tooling::CompilationDatabase> CDB;
     ProjectInfo PI;
   };
   llvm::Optional<CDBLookupResult> lookupCDB(CDBLookupRequest Request) const;
@@ -102,13 +130,8 @@ private:
   // Performs broadcast on governed files.
   void broadcastCDB(CDBLookupResult Res) const;
 
-  mutable std::mutex Mutex;
-  // Keyed by possibly-case-folded directory path.
-  mutable llvm::StringMap<CachedCDB> CompilationDatabases;
-
-  /// Used for command argument pointing to folder where compile_commands.json
-  /// is located.
-  llvm::Optional<Path> CompileCommandsDir;
+  // cache test calls lookupCDB directly to ensure valid/invalid times.
+  friend class DirectoryBasedGlobalCompilationDatabaseCacheTest;
 };
 
 /// Extracts system include search path from drivers matching QueryDriverGlobs
@@ -124,13 +147,16 @@ class OverlayCDB : public GlobalCompilationDatabase {
 public:
   // Base may be null, in which case no entries are inherited.
   // FallbackFlags are added to the fallback compile command.
+  // Adjuster is applied to all commands, fallback or not.
   OverlayCDB(const GlobalCompilationDatabase *Base,
              std::vector<std::string> FallbackFlags = {},
-             llvm::Optional<std::string> ResourceDir = llvm::None);
+             tooling::ArgumentsAdjuster Adjuster = nullptr);
 
   llvm::Optional<tooling::CompileCommand>
   getCompileCommand(PathRef File) const override;
   tooling::CompileCommand getFallbackCommand(PathRef File) const override;
+  /// Project info is gathered purely from the inner compilation database to
+  /// ensure consistency.
   llvm::Optional<ProjectInfo> getProjectInfo(PathRef File) const override;
 
   /// Sets or clears the compilation command for a particular file.
@@ -142,7 +168,7 @@ private:
   mutable std::mutex Mutex;
   llvm::StringMap<tooling::CompileCommand> Commands; /* GUARDED_BY(Mut) */
   const GlobalCompilationDatabase *Base;
-  std::string ResourceDir;
+  tooling::ArgumentsAdjuster ArgsAdjuster;
   std::vector<std::string> FallbackFlags;
   CommandChanged::Subscription BaseChanged;
 };

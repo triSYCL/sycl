@@ -14,7 +14,6 @@
 #ifndef LLVM_UTILS_TABLEGEN_CODEGENDAGPATTERNS_H
 #define LLVM_UTILS_TABLEGEN_CODEGENDAGPATTERNS_H
 
-#include "CodeGenHwModes.h"
 #include "CodeGenIntrinsics.h"
 #include "CodeGenTarget.h"
 #include "SDNodeProperties.h"
@@ -42,7 +41,6 @@ class SDNodeInfo;
 class TreePattern;
 class TreePatternNode;
 class CodeGenDAGPatterns;
-class ComplexPattern;
 
 /// Shared pointer for TreePatternNode.
 using TreePatternNodePtr = std::shared_ptr<TreePatternNode>;
@@ -190,10 +188,11 @@ private:
 
 struct TypeSetByHwMode : public InfoByHwMode<MachineValueTypeSet> {
   using SetType = MachineValueTypeSet;
-  std::vector<unsigned> AddrSpaces;
+  SmallVector<unsigned, 16> AddrSpaces;
 
   TypeSetByHwMode() = default;
   TypeSetByHwMode(const TypeSetByHwMode &VTS) = default;
+  TypeSetByHwMode &operator=(const TypeSetByHwMode &) = default;
   TypeSetByHwMode(MVT::SimpleValueType VT)
     : TypeSetByHwMode(ValueTypeByHwMode(VT)) {}
   TypeSetByHwMode(ValueTypeByHwMode VT)
@@ -429,15 +428,13 @@ class ScopedName {
   std::string Identifier;
 public:
   ScopedName(unsigned Scope, StringRef Identifier)
-    : Scope(Scope), Identifier(Identifier) {
+      : Scope(Scope), Identifier(std::string(Identifier)) {
     assert(Scope != 0 &&
            "Scope == 0 is used to indicate predicates without arguments");
   }
 
   unsigned getScope() const { return Scope; }
   const std::string &getIdentifier() const { return Identifier; }
-
-  std::string getFullName() const;
 
   bool operator==(const ScopedName &o) const;
   bool operator!=(const ScopedName &o) const;
@@ -1074,8 +1071,9 @@ public:
     // The string will excute in a subclass of SelectionDAGISel.
     // Cast to std::string explicitly to avoid ambiguity with StringRef.
     std::string C = IsHwMode
-        ? std::string("MF->getSubtarget().checkFeatures(\"" + Features + "\")")
-        : std::string(Def->getValueAsString("CondString"));
+                        ? std::string("MF->getSubtarget().checkFeatures(\"" +
+                                      Features + "\")")
+                        : std::string(Def->getValueAsString("CondString"));
     if (C.empty())
       return "";
     return IfCond ? C : "!("+C+')';
@@ -1144,7 +1142,6 @@ class CodeGenDAGPatterns {
   RecordKeeper &Records;
   CodeGenTarget Target;
   CodeGenIntrinsicTable Intrinsics;
-  CodeGenIntrinsicTable TgtIntrinsics;
 
   std::map<Record*, SDNodeInfo, LessRecordByID> SDNodes;
   std::map<Record*, std::pair<Record*, std::string>, LessRecordByID>
@@ -1195,12 +1192,6 @@ public:
     return F->second;
   }
 
-  typedef std::map<Record*, NodeXForm, LessRecordByID>::const_iterator
-          nx_iterator;
-  nx_iterator nx_begin() const { return SDNodeXForms.begin(); }
-  nx_iterator nx_end() const { return SDNodeXForms.end(); }
-
-
   const ComplexPattern &getComplexPattern(Record *R) const {
     auto F = ComplexPatterns.find(R);
     assert(F != ComplexPatterns.end() && "Unknown addressing mode!");
@@ -1210,24 +1201,18 @@ public:
   const CodeGenIntrinsic &getIntrinsic(Record *R) const {
     for (unsigned i = 0, e = Intrinsics.size(); i != e; ++i)
       if (Intrinsics[i].TheDef == R) return Intrinsics[i];
-    for (unsigned i = 0, e = TgtIntrinsics.size(); i != e; ++i)
-      if (TgtIntrinsics[i].TheDef == R) return TgtIntrinsics[i];
     llvm_unreachable("Unknown intrinsic!");
   }
 
   const CodeGenIntrinsic &getIntrinsicInfo(unsigned IID) const {
     if (IID-1 < Intrinsics.size())
       return Intrinsics[IID-1];
-    if (IID-Intrinsics.size()-1 < TgtIntrinsics.size())
-      return TgtIntrinsics[IID-Intrinsics.size()-1];
     llvm_unreachable("Bad intrinsic ID!");
   }
 
   unsigned getIntrinsicID(Record *R) const {
     for (unsigned i = 0, e = Intrinsics.size(); i != e; ++i)
       if (Intrinsics[i].TheDef == R) return i;
-    for (unsigned i = 0, e = TgtIntrinsics.size(); i != e; ++i)
-      if (TgtIntrinsics[i].TheDef == R) return i + Intrinsics.size();
     llvm_unreachable("Unknown intrinsic!");
   }
 
@@ -1283,8 +1268,6 @@ public:
   Record *get_intrinsic_wo_chain_sdnode() const {
     return intrinsic_wo_chain_sdnode;
   }
-
-  bool hasTargetIntrinsics() { return !TgtIntrinsics.empty(); }
 
   unsigned allocateScope() { return ++NumScopes; }
 

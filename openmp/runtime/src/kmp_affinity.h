@@ -67,7 +67,7 @@ public:
     }
     int set_system_affinity(bool abort_on_error) const override {
       KMP_ASSERT2(KMP_AFFINITY_CAPABLE(),
-                  "Illegal get affinity operation when not capable");
+                  "Illegal set affinity operation when not capable");
       int retval =
           hwloc_set_cpubind(__kmp_hwloc_topology, mask, HWLOC_CPUBIND_THREAD);
       if (retval >= 0) {
@@ -79,6 +79,26 @@ public:
       }
       return error;
     }
+#if KMP_OS_WINDOWS
+    int set_process_affinity(bool abort_on_error) const override {
+      KMP_ASSERT2(KMP_AFFINITY_CAPABLE(),
+                  "Illegal set process affinity operation when not capable");
+      int error = 0;
+      const hwloc_topology_support *support =
+          hwloc_topology_get_support(__kmp_hwloc_topology);
+      if (support->cpubind->set_proc_cpubind) {
+        int retval;
+        retval = hwloc_set_cpubind(__kmp_hwloc_topology, mask,
+                                   HWLOC_CPUBIND_PROCESS);
+        if (retval >= 0)
+          return 0;
+        error = errno;
+        if (abort_on_error)
+          __kmp_fatal(KMP_MSG(FatalSysError), KMP_ERR(error), __kmp_msg_null);
+      }
+      return error;
+    }
+#endif
     int get_proc_group() const override {
       int group = -1;
 #if KMP_OS_WINDOWS
@@ -160,6 +180,7 @@ public:
 };
 #endif /* KMP_USE_HWLOC */
 
+#if KMP_OS_LINUX || KMP_OS_FREEBSD
 #if KMP_OS_LINUX
 /* On some of the older OS's that we build on, these constants aren't present
    in <asm/unistd.h> #included from <sys.syscall.h>. They must be the same on
@@ -234,6 +255,10 @@ public:
 #endif /* __NR_sched_getaffinity */
 #error Unknown or unsupported architecture
 #endif /* KMP_ARCH_* */
+#elif KMP_OS_FREEBSD
+#include <pthread.h>
+#include <pthread_np.h>
+#endif
 class KMPNativeAffinity : public KMPAffinity {
   class Mask : public KMPAffinity::Mask {
     typedef unsigned char mask_t;
@@ -294,8 +319,14 @@ class KMPNativeAffinity : public KMPAffinity {
     int get_system_affinity(bool abort_on_error) override {
       KMP_ASSERT2(KMP_AFFINITY_CAPABLE(),
                   "Illegal get affinity operation when not capable");
+#if KMP_OS_LINUX
       int retval =
           syscall(__NR_sched_getaffinity, 0, __kmp_affin_mask_size, mask);
+#elif KMP_OS_FREEBSD
+      int r =
+          pthread_getaffinity_np(pthread_self(), __kmp_affin_mask_size, reinterpret_cast<cpuset_t *>(mask));
+      int retval = (r == 0 ? 0 : -1);
+#endif
       if (retval >= 0) {
         return 0;
       }
@@ -307,9 +338,15 @@ class KMPNativeAffinity : public KMPAffinity {
     }
     int set_system_affinity(bool abort_on_error) const override {
       KMP_ASSERT2(KMP_AFFINITY_CAPABLE(),
-                  "Illegal get affinity operation when not capable");
+                  "Illegal set affinity operation when not capable");
+#if KMP_OS_LINUX
       int retval =
           syscall(__NR_sched_setaffinity, 0, __kmp_affin_mask_size, mask);
+#elif KMP_OS_FREEBSD
+      int r =
+          pthread_setaffinity_np(pthread_self(), __kmp_affin_mask_size, reinterpret_cast<cpuset_t *>(mask));
+      int retval = (r == 0 ? 0 : -1);
+#endif
       if (retval >= 0) {
         return 0;
       }
@@ -347,7 +384,7 @@ class KMPNativeAffinity : public KMPAffinity {
   }
   api_type get_api_type() const override { return NATIVE_OS; }
 };
-#endif /* KMP_OS_LINUX */
+#endif /* KMP_OS_LINUX || KMP_OS_FREEBSD */
 
 #if KMP_OS_WINDOWS
 class KMPNativeAffinity : public KMPAffinity {
@@ -408,6 +445,19 @@ class KMPNativeAffinity : public KMPAffinity {
       while (retval < end() && !is_set(retval))
         ++retval;
       return retval;
+    }
+    int set_process_affinity(bool abort_on_error) const override {
+      if (__kmp_num_proc_groups <= 1) {
+        if (!SetProcessAffinityMask(GetCurrentProcess(), *mask)) {
+          DWORD error = GetLastError();
+          if (abort_on_error) {
+            __kmp_fatal(KMP_MSG(CantSetThreadAffMask), KMP_ERR(error),
+                        __kmp_msg_null);
+          }
+          return error;
+        }
+      }
+      return 0;
     }
     int set_system_affinity(bool abort_on_error) const override {
       if (__kmp_num_proc_groups > 1) {

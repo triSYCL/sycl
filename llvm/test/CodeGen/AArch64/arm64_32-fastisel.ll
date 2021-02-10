@@ -17,12 +17,34 @@ declare [2 x i32] @callee()
 define void @test_struct_return(i32* %addr) {
 ; CHECK-LABEL: test_struct_return:
 ; CHECK: bl _callee
-; CHECK-DAG: lsr [[HI:x[0-9]+]], x0, #32
-; CHECK-DAG: str w0
+; CHECK: x[[COPYX0:[0-9]+]], x0
+; CHECK-DAG: lsr [[HI:x[0-9]+]], x[[COPYX0]], #32
+; CHECK-DAG: str w[[COPYX0]]
   %res = call [2 x i32] @callee()
   %res.0 = extractvalue [2 x i32] %res, 0
   store i32 %res.0, i32* %addr
   %res.1 = extractvalue [2 x i32] %res, 1
   store i32 %res.1, i32* %addr
   ret void
+}
+
+define i8* @test_ret_ptr(i64 %in) {
+; CHECK-LABEL: test_ret_ptr:
+; CHECK: add [[TMP:x[0-9]]], x0, #1
+; CHECK: and x0, [[TMP]], #0xffffffff
+
+  %sum = add i64 %in, 1
+  %res = inttoptr i64 %sum to i8*
+  ret i8* %res
+}
+
+; Handled by SDAG because the struct confuses FastISel, which is fine.
+define {i8*} @test_ret_ptr_struct(i64 %in) {
+; CHECK-LABEL: test_ret_ptr_struct:
+; CHECK: add {{w[0-9]+}}, {{w[0-9]+}}, #1
+
+  %sum = add i64 %in, 1
+  %res.ptr = inttoptr i64 %sum to i8*
+  %res = insertvalue {i8*} undef, i8* %res.ptr, 0
+  ret {i8*} %res
 }

@@ -33,9 +33,11 @@
 #include "llvm/Support/Process.h"
 #include "llvm/Support/Program.h"
 #include "llvm/Support/ScopedPrinter.h"
+#include "llvm/Support/SpecialCaseList.h"
 #include "llvm/Support/ThreadPool.h"
 #include "llvm/Support/Threading.h"
 #include "llvm/Support/ToolOutputFile.h"
+#include "llvm/Support/VirtualFileSystem.h"
 
 #include <functional>
 #include <map>
@@ -128,6 +130,9 @@ private:
   CoverageFiltersMatchAll Filters;
   CoverageFilters IgnoreFilenameFilters;
 
+  /// True if InputSourceFiles are provided.
+  bool HadSourceFiles = false;
+
   /// The path to the indexed profile.
   std::string PGOFilename;
 
@@ -192,6 +197,7 @@ void CodeCoverageTool::addCollectedPath(const std::string &Path) {
   sys::path::remove_dots(EffectivePath, /*remove_dot_dots=*/true);
   if (!IgnoreFilenameFilters.matchesFilename(EffectivePath))
     SourceFiles.emplace_back(EffectivePath.str());
+  HadSourceFiles = !SourceFiles.empty();
 }
 
 void CodeCoverageTool::collectPaths(const std::string &Path) {
@@ -244,7 +250,8 @@ CodeCoverageTool::getSourceFile(StringRef SourceFile) {
     error(EC.message(), SourceFile);
     return EC;
   }
-  LoadedSourceFiles.emplace_back(SourceFile, std::move(Buffer.get()));
+  LoadedSourceFiles.emplace_back(std::string(SourceFile),
+                                 std::move(Buffer.get()));
   return *LoadedSourceFiles.back().second;
 }
 
@@ -392,6 +399,7 @@ void CodeCoverageTool::remapPathNames(const CoverageMapping &Coverage) {
       return "";
     SmallString<128> NativePath;
     sys::path::native(Path, NativePath);
+    sys::path::remove_dots(NativePath, true);
     if (!sys::path::is_separator(NativePath.back()))
       NativePath += sys::path::get_separator();
     return NativePath.c_str();
@@ -403,6 +411,7 @@ void CodeCoverageTool::remapPathNames(const CoverageMapping &Coverage) {
   for (StringRef Filename : Coverage.getUniqueSourceFiles()) {
     SmallString<128> NativeFilename;
     sys::path::native(Filename, NativeFilename);
+    sys::path::remove_dots(NativeFilename, true);
     if (NativeFilename.startswith(RemapFrom)) {
       RemappedFilenames[Filename] =
           RemapTo + NativeFilename.substr(RemapFrom.size()).str();
@@ -412,7 +421,8 @@ void CodeCoverageTool::remapPathNames(const CoverageMapping &Coverage) {
   // Convert input files from local paths to coverage data file paths.
   StringMap<std::string> InvRemappedFilenames;
   for (const auto &RemappedFilename : RemappedFilenames)
-    InvRemappedFilenames[RemappedFilename.getValue()] = RemappedFilename.getKey();
+    InvRemappedFilenames[RemappedFilename.getValue()] =
+        std::string(RemappedFilename.getKey());
 
   for (std::string &Filename : SourceFiles) {
     SmallString<128> NativeFilename;
@@ -509,7 +519,7 @@ void CodeCoverageTool::demangleSymbols(const CoverageMapping &Coverage) {
   for (const auto &Function : Coverage.getCoveredFunctions())
     // On Windows, lines in the demangler's output file end with "\r\n".
     // Splitting by '\n' keeps '\r's, so cut them now.
-    DC.DemangledNames[Function.Name] = Symbols[I++].rtrim();
+    DC.DemangledNames[Function.Name] = std::string(Symbols[I++].rtrim());
 }
 
 void CodeCoverageTool::writeSourceFileView(StringRef SourceFile,
@@ -540,8 +550,11 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
       cl::Positional, cl::desc("Covered executable or object file."));
 
   cl::list<std::string> CovFilenames(
-      "object", cl::desc("Coverage executable or object file"), cl::ZeroOrMore,
-      cl::CommaSeparated);
+      "object", cl::desc("Coverage executable or object file"), cl::ZeroOrMore);
+
+  cl::opt<bool> DebugDumpCollectedObjects(
+      "dump-collected-objects", cl::Optional, cl::Hidden,
+      cl::desc("Show the collected coverage object files"));
 
   cl::list<std::string> InputSourceFiles(
       cl::Positional, cl::desc("<Source files>"), cl::ZeroOrMore);
@@ -664,6 +677,12 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
       ::exit(1);
     }
 
+    if (DebugDumpCollectedObjects) {
+      for (StringRef OF : ObjectFilenames)
+        outs() << OF << '\n';
+      ::exit(0);
+    }
+
     ViewOpts.Format = Format;
     switch (ViewOpts.Format) {
     case CoverageViewOptions::OutputFormat::Text:
@@ -687,7 +706,8 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
     // PathRemapping.
     auto EquivPair = StringRef(PathRemap).split(',');
     if (!(EquivPair.first.empty() && EquivPair.second.empty()))
-      PathRemapping = EquivPair;
+      PathRemapping = {std::string(EquivPair.first),
+                       std::string(EquivPair.second)};
 
     // If a demangler is supplied, check if it exists and register it.
     if (!DemanglerOpts.empty()) {
@@ -704,8 +724,8 @@ int CodeCoverageTool::run(Command Cmd, int argc, const char **argv) {
     // Read in -name-whitelist files.
     if (!NameFilterFiles.empty()) {
       std::string SpecialCaseListErr;
-      NameWhitelist =
-          SpecialCaseList::create(NameFilterFiles, SpecialCaseListErr);
+      NameWhitelist = SpecialCaseList::create(
+          NameFilterFiles, *vfs::getRealFileSystem(), SpecialCaseListErr);
       if (!NameWhitelist)
         error(SpecialCaseListErr);
     }
@@ -863,8 +883,8 @@ int CodeCoverageTool::doShow(int argc, const char **argv,
   }
 
   sys::fs::file_status Status;
-  if (sys::fs::status(PGOFilename, Status)) {
-    error("profdata file error: can not get the file status. \n");
+  if (std::error_code EC = sys::fs::status(PGOFilename, Status)) {
+    error("Could not read profile data!", EC.message());
     return 1;
   }
 
@@ -881,11 +901,11 @@ int CodeCoverageTool::doShow(int argc, const char **argv,
 
   auto Printer = CoveragePrinter::create(ViewOpts);
 
-  if (SourceFiles.empty())
+  if (SourceFiles.empty() && !HadSourceFiles)
     // Get the source files from the function coverage mapping.
     for (StringRef Filename : Coverage->getUniqueSourceFiles()) {
       if (!IgnoreFilenameFilters.matchesFilename(Filename))
-        SourceFiles.push_back(Filename);
+        SourceFiles.push_back(std::string(Filename));
     }
 
   // Create an index out of the source files.
@@ -939,21 +959,21 @@ int CodeCoverageTool::doShow(int argc, const char **argv,
       (SourceFiles.size() != 1) || ViewOpts.hasOutputDirectory() ||
       (ViewOpts.Format == CoverageViewOptions::OutputFormat::HTML);
 
-  auto NumThreads = ViewOpts.NumThreads;
+  ThreadPoolStrategy S = hardware_concurrency(ViewOpts.NumThreads);
+  if (ViewOpts.NumThreads == 0) {
+    // If NumThreads is not specified, create one thread for each input, up to
+    // the number of hardware cores.
+    S = heavyweight_hardware_concurrency(SourceFiles.size());
+    S.Limit = true;
+  }
 
-  // If NumThreads is not specified, auto-detect a good default.
-  if (NumThreads == 0)
-    NumThreads =
-        std::max(1U, std::min(llvm::heavyweight_hardware_concurrency(),
-                              unsigned(SourceFiles.size())));
-
-  if (!ViewOpts.hasOutputDirectory() || NumThreads == 1) {
+  if (!ViewOpts.hasOutputDirectory() || S.ThreadsRequested == 1) {
     for (const std::string &SourceFile : SourceFiles)
       writeSourceFileView(SourceFile, Coverage.get(), Printer.get(),
                           ShowFilenames);
   } else {
     // In -output-dir mode, it's safe to use multiple threads to print files.
-    ThreadPool Pool(NumThreads);
+    ThreadPool Pool(S);
     for (const std::string &SourceFile : SourceFiles)
       Pool.async(&CodeCoverageTool::writeSourceFileView, this, SourceFile,
                  Coverage.get(), Printer.get(), ShowFilenames);

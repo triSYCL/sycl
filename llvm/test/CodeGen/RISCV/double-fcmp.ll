@@ -197,11 +197,11 @@ define i32 @fcmp_ord(double %a, double %b) nounwind {
 ;
 ; RV64IFD-LABEL: fcmp_ord:
 ; RV64IFD:       # %bb.0:
-; RV64IFD-NEXT:    fmv.d.x ft0, a1
-; RV64IFD-NEXT:    feq.d a1, ft0, ft0
 ; RV64IFD-NEXT:    fmv.d.x ft0, a0
-; RV64IFD-NEXT:    feq.d a0, ft0, ft0
-; RV64IFD-NEXT:    and a0, a0, a1
+; RV64IFD-NEXT:    fmv.d.x ft1, a1
+; RV64IFD-NEXT:    feq.d a0, ft1, ft1
+; RV64IFD-NEXT:    feq.d a1, ft0, ft0
+; RV64IFD-NEXT:    and a0, a1, a0
 ; RV64IFD-NEXT:    ret
   %1 = fcmp ord double %a, %b
   %2 = zext i1 %1 to i32
@@ -222,7 +222,7 @@ define i32 @fcmp_ueq(double %a, double %b) nounwind {
 ; RV32IFD-NEXT:    feq.d a1, ft0, ft0
 ; RV32IFD-NEXT:    feq.d a2, ft1, ft1
 ; RV32IFD-NEXT:    and a1, a2, a1
-; RV32IFD-NEXT:    seqz a1, a1
+; RV32IFD-NEXT:    xori a1, a1, 1
 ; RV32IFD-NEXT:    or a0, a0, a1
 ; RV32IFD-NEXT:    addi sp, sp, 16
 ; RV32IFD-NEXT:    ret
@@ -235,7 +235,7 @@ define i32 @fcmp_ueq(double %a, double %b) nounwind {
 ; RV64IFD-NEXT:    feq.d a1, ft0, ft0
 ; RV64IFD-NEXT:    feq.d a2, ft1, ft1
 ; RV64IFD-NEXT:    and a1, a2, a1
-; RV64IFD-NEXT:    seqz a1, a1
+; RV64IFD-NEXT:    xori a1, a1, 1
 ; RV64IFD-NEXT:    or a0, a0, a1
 ; RV64IFD-NEXT:    ret
   %1 = fcmp ueq double %a, %b
@@ -391,18 +391,18 @@ define i32 @fcmp_uno(double %a, double %b) nounwind {
 ; RV32IFD-NEXT:    feq.d a0, ft1, ft1
 ; RV32IFD-NEXT:    feq.d a1, ft0, ft0
 ; RV32IFD-NEXT:    and a0, a1, a0
-; RV32IFD-NEXT:    seqz a0, a0
+; RV32IFD-NEXT:    xori a0, a0, 1
 ; RV32IFD-NEXT:    addi sp, sp, 16
 ; RV32IFD-NEXT:    ret
 ;
 ; RV64IFD-LABEL: fcmp_uno:
 ; RV64IFD:       # %bb.0:
-; RV64IFD-NEXT:    fmv.d.x ft0, a1
-; RV64IFD-NEXT:    feq.d a1, ft0, ft0
 ; RV64IFD-NEXT:    fmv.d.x ft0, a0
-; RV64IFD-NEXT:    feq.d a0, ft0, ft0
-; RV64IFD-NEXT:    and a0, a0, a1
-; RV64IFD-NEXT:    seqz a0, a0
+; RV64IFD-NEXT:    fmv.d.x ft1, a1
+; RV64IFD-NEXT:    feq.d a0, ft1, ft1
+; RV64IFD-NEXT:    feq.d a1, ft0, ft0
+; RV64IFD-NEXT:    and a0, a1, a0
+; RV64IFD-NEXT:    xori a0, a0, 1
 ; RV64IFD-NEXT:    ret
   %1 = fcmp uno double %a, %b
   %2 = zext i1 %1 to i32

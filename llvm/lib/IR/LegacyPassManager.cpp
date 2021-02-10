@@ -20,6 +20,8 @@
 #include "llvm/IR/LegacyPassNameParser.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassTimingInfo.h"
+#include "llvm/IR/PrintPasses.h"
+#include "llvm/IR/StructuralHash.h"
 #include "llvm/Support/Chrono.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -33,7 +35,6 @@
 #include <algorithm>
 #include <unordered_set>
 using namespace llvm;
-using namespace llvm::legacy;
 
 // See PassManagers.h for Pass Manager infrastructure overview.
 
@@ -49,7 +50,7 @@ namespace {
 enum PassDebugLevel {
   Disabled, Arguments, Structure, Executions, Details
 };
-}
+} // namespace
 
 static cl::opt<enum PassDebugLevel>
 PassDebugging("debug-pass", cl::Hidden,
@@ -61,79 +62,6 @@ PassDebugging("debug-pass", cl::Hidden,
   clEnumVal(Executions, "print pass name before it is executed"),
   clEnumVal(Details   , "print pass details when it is executed")));
 
-namespace {
-typedef llvm::cl::list<const llvm::PassInfo *, bool, PassNameParser>
-PassOptionList;
-}
-
-// Print IR out before/after specified passes.
-static PassOptionList
-PrintBefore("print-before",
-            llvm::cl::desc("Print IR before specified passes"),
-            cl::Hidden);
-
-static PassOptionList
-PrintAfter("print-after",
-           llvm::cl::desc("Print IR after specified passes"),
-           cl::Hidden);
-
-static cl::opt<bool> PrintBeforeAll("print-before-all",
-                                    llvm::cl::desc("Print IR before each pass"),
-                                    cl::init(false), cl::Hidden);
-static cl::opt<bool> PrintAfterAll("print-after-all",
-                                   llvm::cl::desc("Print IR after each pass"),
-                                   cl::init(false), cl::Hidden);
-
-static cl::opt<bool>
-    PrintModuleScope("print-module-scope",
-                     cl::desc("When printing IR for print-[before|after]{-all} "
-                              "always print a module IR"),
-                     cl::init(false), cl::Hidden);
-
-static cl::list<std::string>
-    PrintFuncsList("filter-print-funcs", cl::value_desc("function names"),
-                   cl::desc("Only print IR for functions whose name "
-                            "match this for all print-[before|after][-all] "
-                            "options"),
-                   cl::CommaSeparated, cl::Hidden);
-
-/// This is a helper to determine whether to print IR before or
-/// after a pass.
-
-bool llvm::shouldPrintBeforePass() {
-  return PrintBeforeAll || !PrintBefore.empty();
-}
-
-bool llvm::shouldPrintAfterPass() {
-  return PrintAfterAll || !PrintAfter.empty();
-}
-
-static bool ShouldPrintBeforeOrAfterPass(StringRef PassID,
-                                         PassOptionList &PassesToPrint) {
-  for (auto *PassInf : PassesToPrint) {
-    if (PassInf)
-      if (PassInf->getPassArgument() == PassID) {
-        return true;
-      }
-  }
-  return false;
-}
-
-bool llvm::shouldPrintBeforePass(StringRef PassID) {
-  return PrintBeforeAll || ShouldPrintBeforeOrAfterPass(PassID, PrintBefore);
-}
-
-bool llvm::shouldPrintAfterPass(StringRef PassID) {
-  return PrintAfterAll || ShouldPrintBeforeOrAfterPass(PassID, PrintAfter);
-}
-
-bool llvm::forcePrintModuleIR() { return PrintModuleScope; }
-
-bool llvm::isFunctionInPrintList(StringRef FunctionName) {
-  static std::unordered_set<std::string> PrintFuncNames(PrintFuncsList.begin(),
-                                                        PrintFuncsList.end());
-  return PrintFuncNames.empty() || PrintFuncNames.count(FunctionName);
-}
 /// isPassDebuggingExecutionsOrMore - Return true if -debug-pass=Executions
 /// or higher is specified.
 bool PMDataManager::isPassDebuggingExecutionsOrMore() const {
@@ -239,7 +167,7 @@ void PMDataManager::emitInstrCountChangedRemark(
 
   // Helper lambda that emits a remark when the size of a function has changed.
   auto EmitFunctionSizeChangedRemark = [&FunctionToInstrCount, &F, &BB,
-                                        &PassName](const std::string &Fname) {
+                                        &PassName](StringRef Fname) {
     unsigned FnCountBefore, FnCountAfter;
     std::pair<unsigned, unsigned> &Change = FunctionToInstrCount[Fname];
     std::tie(FnCountBefore, FnCountAfter) = Change;
@@ -314,64 +242,6 @@ void PassManagerPrettyStackEntry::print(raw_ostream &OS) const {
   OS << "'\n";
 }
 
-
-namespace {
-//===----------------------------------------------------------------------===//
-// BBPassManager
-//
-/// BBPassManager manages BasicBlockPass. It batches all the
-/// pass together and sequence them to process one basic block before
-/// processing next basic block.
-class BBPassManager : public PMDataManager, public FunctionPass {
-
-public:
-  static char ID;
-  explicit BBPassManager()
-    : PMDataManager(), FunctionPass(ID) {}
-
-  /// Execute all of the passes scheduled for execution.  Keep track of
-  /// whether any of the passes modifies the function, and if so, return true.
-  bool runOnFunction(Function &F) override;
-
-  /// Pass Manager itself does not invalidate any analysis info.
-  void getAnalysisUsage(AnalysisUsage &Info) const override {
-    Info.setPreservesAll();
-  }
-
-  bool doInitialization(Module &M) override;
-  bool doInitialization(Function &F);
-  bool doFinalization(Module &M) override;
-  bool doFinalization(Function &F);
-
-  PMDataManager *getAsPMDataManager() override { return this; }
-  Pass *getAsPass() override { return this; }
-
-  StringRef getPassName() const override { return "BasicBlock Pass Manager"; }
-
-  // Print passes managed by this manager
-  void dumpPassStructure(unsigned Offset) override {
-    dbgs().indent(Offset*2) << "BasicBlockPass Manager\n";
-    for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index) {
-      BasicBlockPass *BP = getContainedPass(Index);
-      BP->dumpPassStructure(Offset + 1);
-      dumpLastUses(BP, Offset+1);
-    }
-  }
-
-  BasicBlockPass *getContainedPass(unsigned N) {
-    assert(N < PassVector.size() && "Pass number out of range!");
-    BasicBlockPass *BP = static_cast<BasicBlockPass *>(PassVector[N]);
-    return BP;
-  }
-
-  PassManagerType getPassManagerType() const override {
-    return PMT_BasicBlockPassManager;
-  }
-};
-
-char BBPassManager::ID = 0;
-} // End anonymous namespace
-
 namespace llvm {
 namespace legacy {
 //===----------------------------------------------------------------------===//
@@ -434,13 +304,78 @@ public:
     FPPassManager *FP = static_cast<FPPassManager *>(PassManagers[N]);
     return FP;
   }
+
+  void dumpPassStructure(unsigned Offset) override {
+    for (unsigned I = 0; I < getNumContainedManagers(); ++I)
+      getContainedManager(I)->dumpPassStructure(Offset);
+  }
 };
 
 void FunctionPassManagerImpl::anchor() {}
 
 char FunctionPassManagerImpl::ID = 0;
-} // End of legacy namespace
-} // End of llvm namespace
+
+//===----------------------------------------------------------------------===//
+// FunctionPassManagerImpl implementation
+//
+bool FunctionPassManagerImpl::doInitialization(Module &M) {
+  bool Changed = false;
+
+  dumpArguments();
+  dumpPasses();
+
+  for (ImmutablePass *ImPass : getImmutablePasses())
+    Changed |= ImPass->doInitialization(M);
+
+  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index)
+    Changed |= getContainedManager(Index)->doInitialization(M);
+
+  return Changed;
+}
+
+bool FunctionPassManagerImpl::doFinalization(Module &M) {
+  bool Changed = false;
+
+  for (int Index = getNumContainedManagers() - 1; Index >= 0; --Index)
+    Changed |= getContainedManager(Index)->doFinalization(M);
+
+  for (ImmutablePass *ImPass : getImmutablePasses())
+    Changed |= ImPass->doFinalization(M);
+
+  return Changed;
+}
+
+void FunctionPassManagerImpl::releaseMemoryOnTheFly() {
+  if (!wasRun)
+    return;
+  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index) {
+    FPPassManager *FPPM = getContainedManager(Index);
+    for (unsigned Index = 0; Index < FPPM->getNumContainedPasses(); ++Index) {
+      FPPM->getContainedPass(Index)->releaseMemory();
+    }
+  }
+  wasRun = false;
+}
+
+// Execute all the passes managed by this top level manager.
+// Return true if any function is modified by a pass.
+bool FunctionPassManagerImpl::run(Function &F) {
+  bool Changed = false;
+
+  initializeAllAnalysisInfo();
+  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index) {
+    Changed |= getContainedManager(Index)->runOnFunction(F);
+    F.getContext().yield();
+  }
+
+  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index)
+    getContainedManager(Index)->cleanup();
+
+  wasRun = true;
+  return Changed;
+}
+} // namespace legacy
+} // namespace llvm
 
 namespace {
 //===----------------------------------------------------------------------===//
@@ -458,7 +393,7 @@ public:
   // Delete on the fly managers.
   ~MPPassManager() override {
     for (auto &OnTheFlyManager : OnTheFlyManagers) {
-      FunctionPassManagerImpl *FPP = OnTheFlyManager.second;
+      legacy::FunctionPassManagerImpl *FPP = OnTheFlyManager.second;
       delete FPP;
     }
   }
@@ -489,7 +424,8 @@ public:
   /// Return function pass corresponding to PassInfo PI, that is
   /// required by module pass MP. Instantiate analysis pass, by using
   /// its runOnFunction() for function F.
-  Pass* getOnTheFlyPass(Pass *MP, AnalysisID PI, Function &F) override;
+  std::tuple<Pass *, bool> getOnTheFlyPass(Pass *MP, AnalysisID PI,
+                                           Function &F) override;
 
   StringRef getPassName() const override { return "Module Pass Manager"; }
 
@@ -502,7 +438,7 @@ public:
     for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index) {
       ModulePass *MP = getContainedPass(Index);
       MP->dumpPassStructure(Offset + 1);
-      MapVector<Pass *, FunctionPassManagerImpl *>::const_iterator I =
+      MapVector<Pass *, legacy::FunctionPassManagerImpl *>::const_iterator I =
           OnTheFlyManagers.find(MP);
       if (I != OnTheFlyManagers.end())
         I->second->dumpPassStructure(Offset + 2);
@@ -522,7 +458,7 @@ public:
  private:
   /// Collection of on the fly FPPassManagers. These managers manage
   /// function passes that are required by module passes.
-   MapVector<Pass *, FunctionPassManagerImpl *> OnTheFlyManagers;
+   MapVector<Pass *, legacy::FunctionPassManagerImpl *> OnTheFlyManagers;
 };
 
 char MPPassManager::ID = 0;
@@ -585,8 +521,35 @@ public:
 void PassManagerImpl::anchor() {}
 
 char PassManagerImpl::ID = 0;
-} // End of legacy namespace
-} // End of llvm namespace
+
+//===----------------------------------------------------------------------===//
+// PassManagerImpl implementation
+
+//
+/// run - Execute all of the passes scheduled for execution.  Keep track of
+/// whether any of the passes modifies the module, and if so, return true.
+bool PassManagerImpl::run(Module &M) {
+  bool Changed = false;
+
+  dumpArguments();
+  dumpPasses();
+
+  for (ImmutablePass *ImPass : getImmutablePasses())
+    Changed |= ImPass->doInitialization(M);
+
+  initializeAllAnalysisInfo();
+  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index) {
+    Changed |= getContainedManager(Index)->runOnModule(M);
+    M.getContext().yield();
+  }
+
+  for (ImmutablePass *ImPass : getImmutablePasses())
+    Changed |= ImPass->doFinalization(M);
+
+  return Changed;
+}
+} // namespace legacy
+} // namespace llvm
 
 //===----------------------------------------------------------------------===//
 // PMTopLevelManager implementation
@@ -639,11 +602,9 @@ PMTopLevelManager::setLastUser(ArrayRef<Pass*> AnalysisPasses, Pass *P) {
 
     // If AP is the last user of other passes then make P last user of
     // such passes.
-    for (auto LU : LastUser) {
+    for (auto &LU : LastUser) {
       if (LU.second == AP)
-        // DenseMap iterator is not invalidated here because
-        // this is just updating existing entries.
-        LastUser[LU.first] = P;
+        LU.second = P;
     }
   }
 }
@@ -651,16 +612,12 @@ PMTopLevelManager::setLastUser(ArrayRef<Pass*> AnalysisPasses, Pass *P) {
 /// Collect passes whose last user is P
 void PMTopLevelManager::collectLastUses(SmallVectorImpl<Pass *> &LastUses,
                                         Pass *P) {
-  DenseMap<Pass *, SmallPtrSet<Pass *, 8> >::iterator DMI =
-    InversedLastUser.find(P);
+  auto DMI = InversedLastUser.find(P);
   if (DMI == InversedLastUser.end())
     return;
 
-  SmallPtrSet<Pass *, 8> &LU = DMI->second;
-  for (Pass *LUP : LU) {
-    LastUses.push_back(LUP);
-  }
-
+  auto &LU = DMI->second;
+  LastUses.append(LU.begin(), LU.end());
 }
 
 AnalysisUsage *PMTopLevelManager::findAnalysisUsage(Pass *P) {
@@ -1249,9 +1206,6 @@ void PMDataManager::dumpPassInfo(Pass *P, enum PassDebuggingString S1,
     break;
   }
   switch (S2) {
-  case ON_BASICBLOCK_MSG:
-    dbgs() << "' on BasicBlock '" << Msg << "'...\n";
-    break;
   case ON_FUNCTION_MSG:
     dbgs() << "' on Function '" << Msg << "'...\n";
     break;
@@ -1345,7 +1299,8 @@ void PMDataManager::addLowerLevelRequiredPass(Pass *P, Pass *RequiredPass) {
   llvm_unreachable("Unable to schedule pass");
 }
 
-Pass *PMDataManager::getOnTheFlyPass(Pass *P, AnalysisID PI, Function &F) {
+std::tuple<Pass *, bool> PMDataManager::getOnTheFlyPass(Pass *P, AnalysisID PI,
+                                                        Function &F) {
   llvm_unreachable("Unable to find on the fly pass");
 }
 
@@ -1358,132 +1313,24 @@ PMDataManager::~PMDataManager() {
 //===----------------------------------------------------------------------===//
 // NOTE: Is this the right place to define this method ?
 // getAnalysisIfAvailable - Return analysis result or null if it doesn't exist.
-Pass *AnalysisResolver::getAnalysisIfAvailable(AnalysisID ID, bool dir) const {
-  return PM.findAnalysisPass(ID, dir);
+Pass *AnalysisResolver::getAnalysisIfAvailable(AnalysisID ID) const {
+  return PM.findAnalysisPass(ID, true);
 }
 
-Pass *AnalysisResolver::findImplPass(Pass *P, AnalysisID AnalysisPI,
-                                     Function &F) {
+std::tuple<Pass *, bool>
+AnalysisResolver::findImplPass(Pass *P, AnalysisID AnalysisPI, Function &F) {
   return PM.getOnTheFlyPass(P, AnalysisPI, F);
 }
 
-//===----------------------------------------------------------------------===//
-// BBPassManager implementation
-
-/// Execute all of the passes scheduled for execution by invoking
-/// runOnBasicBlock method.  Keep track of whether any of the passes modifies
-/// the function, and if so, return true.
-bool BBPassManager::runOnFunction(Function &F) {
-  if (F.isDeclaration())
-    return false;
-
-  bool Changed = doInitialization(F);
-  Module &M = *F.getParent();
-
-  unsigned InstrCount, BBSize = 0;
-  StringMap<std::pair<unsigned, unsigned>> FunctionToInstrCount;
-  bool EmitICRemark = M.shouldEmitInstrCountChangedRemark();
-  if (EmitICRemark)
-    InstrCount = initSizeRemarkInfo(M, FunctionToInstrCount);
-
-  for (BasicBlock &BB : F) {
-    // Collect the initial size of the basic block.
-    if (EmitICRemark)
-      BBSize = BB.size();
-    for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index) {
-      BasicBlockPass *BP = getContainedPass(Index);
-      bool LocalChanged = false;
-
-      dumpPassInfo(BP, EXECUTION_MSG, ON_BASICBLOCK_MSG, BB.getName());
-      dumpRequiredSet(BP);
-
-      initializeAnalysisImpl(BP);
-
-      {
-        // If the pass crashes, remember this.
-        PassManagerPrettyStackEntry X(BP, BB);
-        TimeRegion PassTimer(getPassTimer(BP));
-        LocalChanged |= BP->runOnBasicBlock(BB);
-        if (EmitICRemark) {
-          unsigned NewSize = BB.size();
-          // Update the size of the basic block, emit a remark, and update the
-          // size of the module.
-          if (NewSize != BBSize) {
-            int64_t Delta =
-                static_cast<int64_t>(NewSize) - static_cast<int64_t>(BBSize);
-            emitInstrCountChangedRemark(BP, M, Delta, InstrCount,
-                                        FunctionToInstrCount, &F);
-            InstrCount = static_cast<int64_t>(InstrCount) + Delta;
-            BBSize = NewSize;
-          }
-        }
-      }
-
-      Changed |= LocalChanged;
-      if (LocalChanged)
-        dumpPassInfo(BP, MODIFICATION_MSG, ON_BASICBLOCK_MSG,
-                     BB.getName());
-      dumpPreservedSet(BP);
-      dumpUsedSet(BP);
-
-      verifyPreservedAnalysis(BP);
-      removeNotPreservedAnalysis(BP);
-      recordAvailableAnalysis(BP);
-      removeDeadPasses(BP, BB.getName(), ON_BASICBLOCK_MSG);
-    }
-  }
-
-  return doFinalization(F) || Changed;
-}
-
-// Implement doInitialization and doFinalization
-bool BBPassManager::doInitialization(Module &M) {
-  bool Changed = false;
-
-  for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index)
-    Changed |= getContainedPass(Index)->doInitialization(M);
-
-  return Changed;
-}
-
-bool BBPassManager::doFinalization(Module &M) {
-  bool Changed = false;
-
-  for (int Index = getNumContainedPasses() - 1; Index >= 0; --Index)
-    Changed |= getContainedPass(Index)->doFinalization(M);
-
-  return Changed;
-}
-
-bool BBPassManager::doInitialization(Function &F) {
-  bool Changed = false;
-
-  for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index) {
-    BasicBlockPass *BP = getContainedPass(Index);
-    Changed |= BP->doInitialization(F);
-  }
-
-  return Changed;
-}
-
-bool BBPassManager::doFinalization(Function &F) {
-  bool Changed = false;
-
-  for (unsigned Index = 0; Index < getNumContainedPasses(); ++Index) {
-    BasicBlockPass *BP = getContainedPass(Index);
-    Changed |= BP->doFinalization(F);
-  }
-
-  return Changed;
-}
-
+namespace llvm {
+namespace legacy {
 
 //===----------------------------------------------------------------------===//
 // FunctionPassManager implementation
 
 /// Create new Function pass manager
 FunctionPassManager::FunctionPassManager(Module *m) : M(m) {
-  FPM = new FunctionPassManagerImpl();
+  FPM = new legacy::FunctionPassManagerImpl();
   // FPM is the top level manager.
   FPM->setTopLevelManager(FPM);
 
@@ -1522,36 +1369,8 @@ bool FunctionPassManager::doInitialization() {
 bool FunctionPassManager::doFinalization() {
   return FPM->doFinalization(*M);
 }
-
-//===----------------------------------------------------------------------===//
-// FunctionPassManagerImpl implementation
-//
-bool FunctionPassManagerImpl::doInitialization(Module &M) {
-  bool Changed = false;
-
-  dumpArguments();
-  dumpPasses();
-
-  for (ImmutablePass *ImPass : getImmutablePasses())
-    Changed |= ImPass->doInitialization(M);
-
-  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index)
-    Changed |= getContainedManager(Index)->doInitialization(M);
-
-  return Changed;
-}
-
-bool FunctionPassManagerImpl::doFinalization(Module &M) {
-  bool Changed = false;
-
-  for (int Index = getNumContainedManagers() - 1; Index >= 0; --Index)
-    Changed |= getContainedManager(Index)->doFinalization(M);
-
-  for (ImmutablePass *ImPass : getImmutablePasses())
-    Changed |= ImPass->doFinalization(M);
-
-  return Changed;
-}
+} // namespace legacy
+} // namespace llvm
 
 /// cleanup - After running all passes, clean up pass manager cache.
 void FPPassManager::cleanup() {
@@ -1563,35 +1382,6 @@ void FPPassManager::cleanup() {
  }
 }
 
-void FunctionPassManagerImpl::releaseMemoryOnTheFly() {
-  if (!wasRun)
-    return;
-  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index) {
-    FPPassManager *FPPM = getContainedManager(Index);
-    for (unsigned Index = 0; Index < FPPM->getNumContainedPasses(); ++Index) {
-      FPPM->getContainedPass(Index)->releaseMemory();
-    }
-  }
-  wasRun = false;
-}
-
-// Execute all the passes managed by this top level manager.
-// Return true if any function is modified by a pass.
-bool FunctionPassManagerImpl::run(Function &F) {
-  bool Changed = false;
-
-  initializeAllAnalysisInfo();
-  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index) {
-    Changed |= getContainedManager(Index)->runOnFunction(F);
-    F.getContext().yield();
-  }
-
-  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index)
-    getContainedManager(Index)->cleanup();
-
-  wasRun = true;
-  return Changed;
-}
 
 //===----------------------------------------------------------------------===//
 // FPPassManager implementation
@@ -1606,7 +1396,6 @@ void FPPassManager::dumpPassStructure(unsigned Offset) {
     dumpLastUses(FP, Offset+1);
   }
 }
-
 
 /// Execute all of the passes scheduled for execution by invoking
 /// runOnFunction method.  Keep track of whether any of the passes modifies
@@ -1645,7 +1434,19 @@ bool FPPassManager::runOnFunction(Function &F) {
     {
       PassManagerPrettyStackEntry X(FP, F);
       TimeRegion PassTimer(getPassTimer(FP));
+#ifdef EXPENSIVE_CHECKS
+      uint64_t RefHash = StructuralHash(F);
+#endif
       LocalChanged |= FP->runOnFunction(F);
+
+#if defined(EXPENSIVE_CHECKS) && !defined(NDEBUG)
+      if (!LocalChanged && (RefHash != StructuralHash(F))) {
+        llvm::errs() << "Pass modifies its input and doesn't report it: "
+                     << FP->getPassName() << "\n";
+        llvm_unreachable("Pass modifies its input and doesn't report it");
+      }
+#endif
+
       if (EmitICRemark) {
         unsigned NewSize = F.getInstructionCount();
 
@@ -1669,7 +1470,8 @@ bool FPPassManager::runOnFunction(Function &F) {
     dumpUsedSet(FP);
 
     verifyPreservedAnalysis(FP);
-    removeNotPreservedAnalysis(FP);
+    if (LocalChanged)
+      removeNotPreservedAnalysis(FP);
     recordAvailableAnalysis(FP);
     removeDeadPasses(FP, F.getName(), ON_FUNCTION_MSG);
   }
@@ -1680,7 +1482,6 @@ bool FPPassManager::runOnFunction(Function &F) {
 bool FPPassManager::runOnModule(Module &M) {
   bool Changed = false;
 
-  llvm::TimeTraceScope TimeScope("OptModule", M.getName());
   for (Function &F : M)
     Changed |= runOnFunction(F);
 
@@ -1719,7 +1520,7 @@ MPPassManager::runOnModule(Module &M) {
 
   // Initialize on-the-fly passes
   for (auto &OnTheFlyManager : OnTheFlyManagers) {
-    FunctionPassManagerImpl *FPP = OnTheFlyManager.second;
+    legacy::FunctionPassManagerImpl *FPP = OnTheFlyManager.second;
     Changed |= FPP->doInitialization(M);
   }
 
@@ -1747,7 +1548,17 @@ MPPassManager::runOnModule(Module &M) {
       PassManagerPrettyStackEntry X(MP, M);
       TimeRegion PassTimer(getPassTimer(MP));
 
+#ifdef EXPENSIVE_CHECKS
+      uint64_t RefHash = StructuralHash(M);
+#endif
+
       LocalChanged |= MP->runOnModule(M);
+
+#ifdef EXPENSIVE_CHECKS
+      assert((LocalChanged || (RefHash == StructuralHash(M))) &&
+             "Pass modifies its input and doesn't report it.");
+#endif
+
       if (EmitICRemark) {
         // Update the size of the module.
         unsigned ModuleCount = M.getInstructionCount();
@@ -1769,7 +1580,8 @@ MPPassManager::runOnModule(Module &M) {
     dumpUsedSet(MP);
 
     verifyPreservedAnalysis(MP);
-    removeNotPreservedAnalysis(MP);
+    if (LocalChanged)
+      removeNotPreservedAnalysis(MP);
     recordAvailableAnalysis(MP);
     removeDeadPasses(MP, M.getModuleIdentifier(), ON_MODULE_MSG);
   }
@@ -1780,7 +1592,7 @@ MPPassManager::runOnModule(Module &M) {
 
   // Finalize on-the-fly passes
   for (auto &OnTheFlyManager : OnTheFlyManagers) {
-    FunctionPassManagerImpl *FPP = OnTheFlyManager.second;
+    legacy::FunctionPassManagerImpl *FPP = OnTheFlyManager.second;
     // We don't know when is the last time an on-the-fly pass is run,
     // so we need to releaseMemory / finalize here
     FPP->releaseMemoryOnTheFly();
@@ -1794,17 +1606,16 @@ MPPassManager::runOnModule(Module &M) {
 /// RequiredPass is run on the fly by Pass Manager when P requests it
 /// through getAnalysis interface.
 void MPPassManager::addLowerLevelRequiredPass(Pass *P, Pass *RequiredPass) {
+  assert(RequiredPass && "No required pass?");
   assert(P->getPotentialPassManagerType() == PMT_ModulePassManager &&
          "Unable to handle Pass that requires lower level Analysis pass");
   assert((P->getPotentialPassManagerType() <
           RequiredPass->getPotentialPassManagerType()) &&
          "Unable to handle Pass that requires lower level Analysis pass");
-  if (!RequiredPass)
-    return;
 
-  FunctionPassManagerImpl *FPP = OnTheFlyManagers[P];
+  legacy::FunctionPassManagerImpl *FPP = OnTheFlyManagers[P];
   if (!FPP) {
-    FPP = new FunctionPassManagerImpl();
+    FPP = new legacy::FunctionPassManagerImpl();
     // FPP is the top level manager.
     FPP->setTopLevelManager(FPP);
 
@@ -1833,42 +1644,19 @@ void MPPassManager::addLowerLevelRequiredPass(Pass *P, Pass *RequiredPass) {
 /// Return function pass corresponding to PassInfo PI, that is
 /// required by module pass MP. Instantiate analysis pass, by using
 /// its runOnFunction() for function F.
-Pass* MPPassManager::getOnTheFlyPass(Pass *MP, AnalysisID PI, Function &F){
-  FunctionPassManagerImpl *FPP = OnTheFlyManagers[MP];
+std::tuple<Pass *, bool> MPPassManager::getOnTheFlyPass(Pass *MP, AnalysisID PI,
+                                                        Function &F) {
+  legacy::FunctionPassManagerImpl *FPP = OnTheFlyManagers[MP];
   assert(FPP && "Unable to find on the fly pass");
 
   FPP->releaseMemoryOnTheFly();
-  FPP->run(F);
-  return ((PMTopLevelManager*)FPP)->findAnalysisPass(PI);
+  bool Changed = FPP->run(F);
+  return std::make_tuple(((PMTopLevelManager *)FPP)->findAnalysisPass(PI),
+                         Changed);
 }
 
-
-//===----------------------------------------------------------------------===//
-// PassManagerImpl implementation
-
-//
-/// run - Execute all of the passes scheduled for execution.  Keep track of
-/// whether any of the passes modifies the module, and if so, return true.
-bool PassManagerImpl::run(Module &M) {
-  bool Changed = false;
-
-  dumpArguments();
-  dumpPasses();
-
-  for (ImmutablePass *ImPass : getImmutablePasses())
-    Changed |= ImPass->doInitialization(M);
-
-  initializeAllAnalysisInfo();
-  for (unsigned Index = 0; Index < getNumContainedManagers(); ++Index) {
-    Changed |= getContainedManager(Index)->runOnModule(M);
-    M.getContext().yield();
-  }
-
-  for (ImmutablePass *ImPass : getImmutablePasses())
-    Changed |= ImPass->doFinalization(M);
-
-  return Changed;
-}
+namespace llvm {
+namespace legacy {
 
 //===----------------------------------------------------------------------===//
 // PassManager implementation
@@ -1893,6 +1681,8 @@ void PassManager::add(Pass *P) {
 bool PassManager::run(Module &M) {
   return PM->run(M);
 }
+} // namespace legacy
+} // namespace llvm
 
 //===----------------------------------------------------------------------===//
 // PMStack implementation
@@ -1945,95 +1735,42 @@ LLVM_DUMP_METHOD void PMStack::dump() const {
 void ModulePass::assignPassManager(PMStack &PMS,
                                    PassManagerType PreferredType) {
   // Find Module Pass Manager
-  while (!PMS.empty()) {
-    PassManagerType TopPMType = PMS.top()->getPassManagerType();
-    if (TopPMType == PreferredType)
-      break; // We found desired pass manager
-    else if (TopPMType > PMT_ModulePassManager)
-      PMS.pop();    // Pop children pass managers
-    else
-      break;
-  }
-  assert(!PMS.empty() && "Unable to find appropriate Pass Manager");
+  PassManagerType T;
+  while ((T = PMS.top()->getPassManagerType()) > PMT_ModulePassManager &&
+         T != PreferredType)
+    PMS.pop();
   PMS.top()->add(this);
 }
 
 /// Find appropriate Function Pass Manager or Call Graph Pass Manager
 /// in the PM Stack and add self into that manager.
 void FunctionPass::assignPassManager(PMStack &PMS,
-                                     PassManagerType PreferredType) {
-
+                                     PassManagerType /*PreferredType*/) {
   // Find Function Pass Manager
-  while (!PMS.empty()) {
-    if (PMS.top()->getPassManagerType() > PMT_FunctionPassManager)
-      PMS.pop();
-    else
-      break;
-  }
+  PMDataManager *PM;
+  while (PM = PMS.top(), PM->getPassManagerType() > PMT_FunctionPassManager)
+    PMS.pop();
 
   // Create new Function Pass Manager if needed.
-  FPPassManager *FPP;
-  if (PMS.top()->getPassManagerType() == PMT_FunctionPassManager) {
-    FPP = (FPPassManager *)PMS.top();
-  } else {
-    assert(!PMS.empty() && "Unable to create Function Pass Manager");
-    PMDataManager *PMD = PMS.top();
-
+  if (PM->getPassManagerType() != PMT_FunctionPassManager) {
     // [1] Create new Function Pass Manager
-    FPP = new FPPassManager();
+    auto *FPP = new FPPassManager;
     FPP->populateInheritedAnalysis(PMS);
 
     // [2] Set up new manager's top level manager
-    PMTopLevelManager *TPM = PMD->getTopLevelManager();
-    TPM->addIndirectPassManager(FPP);
+    PM->getTopLevelManager()->addIndirectPassManager(FPP);
 
     // [3] Assign manager to manage this new manager. This may create
     // and push new managers into PMS
-    FPP->assignPassManager(PMS, PMD->getPassManagerType());
+    FPP->assignPassManager(PMS, PM->getPassManagerType());
 
     // [4] Push new manager into PMS
     PMS.push(FPP);
+    PM = FPP;
   }
 
   // Assign FPP as the manager of this pass.
-  FPP->add(this);
+  PM->add(this);
 }
 
-/// Find appropriate Basic Pass Manager or Call Graph Pass Manager
-/// in the PM Stack and add self into that manager.
-void BasicBlockPass::assignPassManager(PMStack &PMS,
-                                       PassManagerType PreferredType) {
-  BBPassManager *BBP;
-
-  // Basic Pass Manager is a leaf pass manager. It does not handle
-  // any other pass manager.
-  if (!PMS.empty() &&
-      PMS.top()->getPassManagerType() == PMT_BasicBlockPassManager) {
-    BBP = (BBPassManager *)PMS.top();
-  } else {
-    // If leaf manager is not Basic Block Pass manager then create new
-    // basic Block Pass manager.
-    assert(!PMS.empty() && "Unable to create BasicBlock Pass Manager");
-    PMDataManager *PMD = PMS.top();
-
-    // [1] Create new Basic Block Manager
-    BBP = new BBPassManager();
-
-    // [2] Set up new manager's top level manager
-    // Basic Block Pass Manager does not live by itself
-    PMTopLevelManager *TPM = PMD->getTopLevelManager();
-    TPM->addIndirectPassManager(BBP);
-
-    // [3] Assign manager to manage this new manager. This may create
-    // and push new managers into PMS
-    BBP->assignPassManager(PMS, PreferredType);
-
-    // [4] Push new manager into PMS
-    PMS.push(BBP);
-  }
-
-  // Assign BBP as the manager of this pass.
-  BBP->add(this);
-}
-
-PassManagerBase::~PassManagerBase() {}
+legacy::PassManagerBase::~PassManagerBase() {}

@@ -1,23 +1,23 @@
 // REQUIRES: x86
 // RUN: llvm-mc -filetype=obj -triple=x86_64-unknown-linux %s -o %t
 // RUN: ld.lld %t -o %t.so -shared
-// RUN: llvm-objdump -d --no-show-raw-insn %t.so | FileCheck -check-prefix=DISASM %s
+// RUN: llvm-objdump -d --no-show-raw-insn %t.so | FileCheck --check-prefix=DISASM %s
 // RUN: llvm-readobj --symbols -r %t.so | FileCheck -check-prefix=SYMBOL %s
 
-// DISASM: _start:
-// DISASM:    1000:       callq   10 <__start_foo>
-// DISASM:    1005:       callq   8 <__start_bar>
-// DISASM:    100a:       callq   3 <__start_bar>
+// DISASM: <_start>:
+// DISASM:    1330:       callq   0x133f <__start_foo>
+// DISASM:    1335:       callq   0x1342 <__start_bar>
+// DISASM:    133a:       callq   0x1342 <__start_bar>
 // DISASM: Disassembly of section foo:
 // DISASM-EMPTY:
-// DISASM: __start_foo:
-// DISASM:    100f:       nop
+// DISASM: <__start_foo>:
+// DISASM:    133f:       nop
 // DISASM:                nop
 // DISASM:                nop
 // DISASM: Disassembly of section bar:
 // DISASM-EMPTY:
-// DISASM: __start_bar:
-// DISASM:    1012:       nop
+// DISASM: <__start_bar>:
+// DISASM:    1342:       nop
 // DISASM:                nop
 // DISASM:                nop
 
@@ -32,33 +32,33 @@
 
 // SYMBOL: Symbol {
 // SYMBOL:   Name: __start_bar
-// SYMBOL:   Value: 0x1012
+// SYMBOL:   Value: 0x1342
 // SYMBOL:   STV_HIDDEN
 // SYMBOL:   Section: bar
 // SYMBOL: }
 // SYMBOL-NOT:   Section: __stop_bar
 // SYMBOL: Symbol {
 // SYMBOL:   Name: __start_foo
-// SYMBOL:   Value: 0x100F
+// SYMBOL:   Value: 0x133F
 // SYMBOL:   STV_HIDDEN
 // SYMBOL:   Section: foo
 // SYMBOL: }
 // SYMBOL: Symbol {
 // SYMBOL:   Name: __stop_foo
-// SYMBOL:   Value: 0x1012
+// SYMBOL:   Value: 0x1342
 // SYMBOL:   STV_HIDDEN
 // SYMBOL:   Section: foo
 // SYMBOL: }
 
 // SYMBOL: Symbol {
 // SYMBOL:   Name: __stop_zed1
-// SYMBOL:   Value: 0x3010
+// SYMBOL:   Value: 0x3408
 // SYMBOL:   STV_PROTECTED
 // SYMBOL:   Section: zed1
 // SYMBOL: }
 // SYMBOL: Symbol {
 // SYMBOL:   Name: __stop_zed2
-// SYMBOL:   Value: 0x3020
+// SYMBOL:   Value: 0x3418
 // SYMBOL:   STV_PROTECTED
 // SYMBOL:   Section: zed2
 // SYMBOL: }

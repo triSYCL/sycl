@@ -13,6 +13,9 @@
 #include "clang/Driver/Driver.h"
 #include "clang/Driver/DriverDiagnostic.h"
 #include "clang/Driver/Options.h"
+#include "llvm/ADT/Triple.h"
+#include "llvm/ADT/Twine.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Option/ArgList.h"
@@ -41,16 +44,16 @@ XOCCInstallationDetector::XOCCInstallationDetector(
       SmallString<256> programsAbsolutePath;
       fs::real_path(*program, programsAbsolutePath);
 
-      BinaryPath = programsAbsolutePath.str();
+      BinaryPath = programsAbsolutePath.str().str();
 
       StringRef programDir = path::parent_path(programsAbsolutePath);
 
       if (path::filename(programDir) == "bin")
-        BinPath = programDir;
+        BinPath = programDir.str();
 
       // TODO: Check if this assumption is correct in all installations and give
       // environment variable specifier option or an argument to the Driver
-      SDXPath = path::parent_path(programDir);
+      SDXPath = path::parent_path(programDir).str();
       LibPath = SDXPath + "/lnx64/lib";
 
       // TODO: slightly stricter IsValid test... check all strings aren't empty
@@ -75,6 +78,62 @@ void SYCL::LinkerXOCC::ConstructJob(Compilation &C, const JobAction &JA,
   constructSYCLXOCCCommand(C, JA, Output, Inputs, Args);
 }
 
+// Expects a specific type of option (e.g. -Xsycl-target-backend) and will
+// extract the arguments.
+void AddForwardedOptions(const llvm::opt::ArgList &Args,
+                         llvm::opt::ArgStringList &CmdArgs, OptSpecifier Opt,
+                         OptSpecifier Opt_EQ, const llvm::Triple& T, const Driver& D) {
+  llvm::BumpPtrAllocator Allocator;
+  llvm::StringSaver SS(Allocator);
+
+  Opt.getID();
+  SmallVector<char, 128> TmpPath;
+  int FD;
+  std::error_code ec = fs::createTemporaryFile(llvm::Twine("sycl-xocc-args") +
+                                                   llvm::Twine(Opt.getID()),
+                                               "", FD, TmpPath);
+  assert(!ec);
+  llvm::raw_fd_ostream Os(FD, true);
+
+  for (auto *A : Args) {
+    bool OptNoTriple;
+    OptNoTriple = A->getOption().matches(Opt);
+    if (A->getOption().matches(Opt_EQ)) {
+      // Passing device args: -X<Opt>=<triple> -opt=val.
+      if (A->getValue() != T.str())
+        // Provided triple does not match current tool chain.
+        continue;
+    } else if (!OptNoTriple)
+      // Don't worry about any of the other args, we only want to pass what is
+      // passed in -X<Opt>
+      continue;
+
+    // Add the argument from -X<Opt>
+    StringRef ArgString;
+    if (OptNoTriple) {
+      // With multiple -fsycl-targets, a triple is required so we know where
+      // the options should go.
+      if (Args.getAllArgValues(options::OPT_fsycl_targets_EQ).size() != 1) {
+        D.Diag(diag::err_drv_Xsycl_target_missing_triple)
+            << A->getSpelling();
+        continue;
+      }
+      // No triple, so just add the argument.
+      ArgString = A->getValue();
+    } else
+      // Triple found, add the next argument in line.
+      ArgString = A->getValue(1);
+
+    // Tokenize the string.
+    SmallVector<const char *, 8> TargetArgs;
+    llvm::cl::TokenizeGNUCommandLine(ArgString, SS, TargetArgs);
+    for (StringRef TA : TargetArgs)
+      Os << Args.MakeArgString(TA) << " ";
+    A->claim();
+  }
+  CmdArgs.push_back(Args.MakeArgString(TmpPath));
+}
+
 // \todo: Extend to support the possibility of more than one file being passed
 // to the linker stage
 // \todo: Add additional modifications that were added to the SYCL ToolChain
@@ -88,10 +147,12 @@ void SYCL::LinkerXOCC::constructSYCLXOCCCommand(
   ArgStringList CmdArgs;
 
   // Script Arg $1, directory of xocc binary (SDx's bin)
+  assert(!TC.XOCCInstallation.getBinPath().empty());
   CmdArgs.push_back(Args.MakeArgString(TC.XOCCInstallation.getBinPath()));
 
   // Script Arg $2, directory of the Clang driver, where the sycl-xocc script
   // opt binary and llvm-linker binary should be contained among other things
+  assert(!C.getDriver().Dir.empty());
   CmdArgs.push_back(Args.MakeArgString(C.getDriver().Dir));
 
   // Script Arg $3, the original source file name minus the file extension
@@ -99,6 +160,7 @@ void SYCL::LinkerXOCC::constructSYCLXOCCCommand(
   SmallString<256> SrcName =
     llvm::sys::path::filename(Inputs[0].getBaseInput());
   llvm::sys::path::replace_extension(SrcName, "");
+  assert(!SrcName.empty());
   CmdArgs.push_back(Args.MakeArgString(SrcName));
 
   // Script Arg $4, input file name, distinct from Arg $3 as this is the .o
@@ -106,17 +168,43 @@ void SYCL::LinkerXOCC::constructSYCLXOCCCommand(
   // mangled temporary name
   // \todo support more than one input, there may be multiple in some cases as
   // this is a "linker" stage, can refer to SYCL.cpp for an example
+  assert(Inputs[0].getFilename()[0]);
   CmdArgs.push_back(Args.MakeArgString(Inputs[0].getFilename()));
 
   // Script Arg $5, temporary directory path, used to dump a lot of intermediate
   // files that no one needs to know about unless they're debugging
   SmallString<256> TmpDir;
   llvm::sys::path::system_temp_directory(true, TmpDir);
+  assert(!TmpDir.empty());
   CmdArgs.push_back(Args.MakeArgString(TmpDir));
 
   // Script Arg $6, the name of the final output .xcl binary file after
   // compilation and linking is complete
+  assert(Output.getFilename()[0]);
   CmdArgs.push_back(Output.getFilename());
+
+  // Script Arg $7
+  AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_backend,
+      options::OPT_Xsycl_backend_EQ, TC.getTriple(), C.getDriver());
+
+  // Script Arg $8
+  AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_linker,
+      options::OPT_Xsycl_linker_EQ, TC.getTriple(), C.getDriver());
+
+  switch (TC.getTriple().getSubArch()) {
+    case llvm::Triple::FPGASubArch_hw: CmdArgs.push_back("hw"); break;
+    case llvm::Triple::FPGASubArch_hw_emu: CmdArgs.push_back("hw_emu"); break;
+    case llvm::Triple::FPGASubArch_sw_emu: CmdArgs.push_back("sw_emu"); break;
+    // case llvm::Triple::NoSubArch: {
+    //   if (const char* Mode = std::getenv("XCL_EMULATION_MODE")) {
+    //     CmdArgs.push_back(Mode);
+    //     break;
+    //   }
+    //   CmdArgs.push_back("hw");
+    // }
+    default:
+      llvm_unreachable("invalid subarch");
+  }
 
   // Path to sycl-xocc script
   SmallString<128> ExecPath(C.getDriver().Dir);
@@ -125,8 +213,8 @@ void SYCL::LinkerXOCC::constructSYCLXOCCCommand(
 
   // Generate our command to sycl-xocc using the arguments we've made
   // Note: Inputs that the shell script doesn't use should be ignored
-  C.addCommand(std::make_unique<Command>(JA, *this,
-               Exec, CmdArgs, Inputs));
+  C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
+                                         Exec, CmdArgs, Inputs));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -140,7 +228,7 @@ XOCCToolChain::XOCCToolChain(const Driver &D, const llvm::Triple &Triple,
 {
 
   if (XOCCInstallation.isValid())
-    getProgramPaths().push_back(XOCCInstallation.getBinPath());
+    getProgramPaths().push_back(XOCCInstallation.getBinPath().str());
 
   // Lookup binaries into the driver directory, this is used to
   // discover the clang-offload-bundler executable.

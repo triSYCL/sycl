@@ -16,8 +16,8 @@ Sections:
   - Type:            TYPE
     Signatures:
       - Index:           0
-        ReturnType:      NORESULT
         ParamTypes:      []
+        ReturnTypes:     []
   - Type:            IMPORT
     Imports:
       - Module:          env
@@ -29,6 +29,7 @@ Sections:
         Field:           __indirect_function_table
         Kind:            TABLE
         Table:
+          Index:           0
           ElemType:        FUNCREF
           Limits:
             Initial:         0x00000000
