@@ -26,6 +26,22 @@ __SYCL_INLINE_NAMESPACE(cl) {
 
   namespace detail {
 
+#ifdef __clang__
+  template <std::size_t I, typename... Ts>
+  using type_at = __type_pack_element<I, Ts...>;
+#else
+  template <unsigned I, typename T, typename... Ts> struct type_at_impl {
+    using type = typename type_at_impl<I - 1, Ts...>::type;
+  };
+
+  template <typename T, typename... Ts> struct type_at_impl<0, T, Ts...> {
+    using type = T;
+  };
+
+  template <unsigned I, typename... Ts>
+  using type_at = typename type_at_impl<I, Ts...>::type;
+#endif
+
   /// Utility to make any functor's operator() be const even if it originally
   /// wasn't. This is useful to bypass the restriction that kernel operator()
   /// must be const.
@@ -47,12 +63,17 @@ __SYCL_INLINE_NAMESPACE(cl) {
   template<typename> struct StrPacker {};
 
   /// Utility type to manipulate string in constant context
-  template<typename CharT, CharT... charpack> struct cstr {
+  template <typename CharT, CharT... charpack> struct cstr {
     using Char = CharT;
     static constexpr unsigned size = sizeof...(charpack);
     /// Access character at position Idx in the string
-    template<unsigned Idx>
-    using at = __type_pack_element<Idx, cstr<CharT, charpack>...>;
+    template <unsigned Idx> using at = type_at<Idx, cstr<CharT, charpack>...>;
+  };
+
+  template <typename CharT>
+  struct cstr<CharT> {
+    using Char = CharT;
+    static constexpr unsigned size = 0;
   };
 
   template<typename CharT, CharT... P1> struct StrPacker<cstr<CharT, P1...>> {
