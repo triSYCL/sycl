@@ -460,6 +460,7 @@ void initializeKernelPropGenPass(PassRegistry&);
 void initializeXOCCIRDowngraderPass(PassRegistry&);
 void initializeChessMassagePass(PassRegistry&);
 void initializePrepareSYCLOptPass(PassRegistry&);
+void initializePrepareSyclChessOptPass(PassRegistry&);
 void initializeLowerSYCLMetaDataPass(PassRegistry&);
 
 } // end namespace llvm

@@ -573,6 +573,7 @@ int main(int argc, char **argv) {
   initializeXOCCIRDowngraderPass(Registry);
   initializeChessMassagePass(Registry);
   initializePrepareSYCLOptPass(Registry);
+  initializePrepareSyclChessOptPass(Registry);
   initializeLowerSYCLMetaDataPass(Registry);
   initializeHardwareLoopsPass(Registry);
   initializeTypePromotionPass(Registry);

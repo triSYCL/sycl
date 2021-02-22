@@ -116,11 +116,11 @@ UNMERGED_PROP=$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}
 # The order of opt passes matters: ChessMassage -> mergefunc ->kernelPropGen
 # Maybe passes can be renamed to describe stages better.
 cp $INPUT_FILE_NAME $INPUT_FILE_NAME.saved.bc
-$OPT -O3 -instnamer \
+$OPT -S -O3 -instnamer \
   -xoccIRDowngrader -ChessMassage -mergefunc -kernelPropGen \
   "$INPUT_FILE_NAME" --sycl-kernel-propgen-output $KERNELPROP \
   --sycl-kernel-unmerged-prop-out $UNMERGED_PROP -o \
-  "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.bc"
+  "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
 
 # Our bash file containing kernel property environment variables is placed in
 # the systems temporary directory (or wherever the Clang driver is told is the
@@ -140,7 +140,7 @@ source "$UNMERGED_PROP"
 # AI Engine .o file containing all kernels for the module
 $XCHESSCC +P $(nproc) -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c \
   -o "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
-  "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.bc"
+  "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
 
 # A function we can fork into child processes to achieve some form of
 # parallelism at a higher level than chess itself provides with it's own
@@ -172,9 +172,10 @@ chess_kernel_compile () {
     $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c \
       -o "$SOURCE_TEMPORARY_DIR/$0.main.o" "$SOURCE_TEMPORARY_DIR/$0.cpp"
 
+    eval LINKER_SCRIPT="$1"
+
     $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f \
-      +l$DRIVER_PATH_DIR/chesswrappers/linker_script_$1.bcf \
-      -o "$SOURCE_TEMPORARY_DIR/$0.elf.o" \
+      +l$LINKER_SCRIPT -o "$SOURCE_TEMPORARY_DIR/$0.elf.o" \
       "$SOURCE_TEMPORARY_DIR/$0.main.o" \
       "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o"
 }

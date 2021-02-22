@@ -19,8 +19,8 @@ endforeach()
 # \TODO: Might be able to refactor this into a single foreach
 set(ChessWrapperFiles
       chesswrappers/chess-clang
-      chesswrappers/linker_script_even.bcf
-      chesswrappers/linker_script_odd.bcf
+      chesswrappers/linker_script_east.bcf
+      chesswrappers/linker_script_west.bcf
   )
 
 foreach(ChessWrapper ${ChessWrapperFiles})

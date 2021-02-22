@@ -55,6 +55,7 @@ struct ChessMassage : public ModulePass {
     return StringRef(Str, strlen(Str) + 1);
   }
   DenseMap<Function *, Loc> FuncLocCache;
+  GlobalNumberState GNS;
 
   Loc getKernelLoc(Function *Kernel) {
     auto It = FuncLocCache.find(Kernel);
@@ -100,52 +101,46 @@ struct ChessMassage : public ModulePass {
   // And this indicates that func2 and func3 are merged into func1
   // Note, since it's from MergeFunctions, if MergeFunctions changes in some
   // way, it may break, ex identifying merged function incorrectly.
-  void reorderFunctions(Module &M, llvm::raw_fd_ostream &O) {
+  void prepareForMerging(Module &M, llvm::raw_fd_ostream &O) {
     std::vector<Function *> Funcs;
     DenseMap<Function*, FunctionComparator::FunctionHash> FuncHashCache;
     DenseMap<std::pair<Function*, Function*>, int> FuncCompareCache;
-    llvm::SmallString<512> kernelNames;
-
-    for (auto &F : M.functions()) {
-      // Collect the kernel functions
-      if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
-        Funcs.emplace_back(&F);
-        if (getKernelLoc(&F).y & 1)
-          F.addFnAttr("xilinx_acap_tile_odd");
-        else
-          F.addFnAttr("xilinx_acap_tile_even");
-      }
-    }
-
-    // Sort collected kernel functions with hash values
-    llvm::stable_sort(Funcs, [&](Function *LHS, Function *RHS) {
-      FunctionComparator::FunctionHash& LHSHash = FuncHashCache[LHS];
-      if (!LHSHash)
-        LHSHash = FunctionComparator::functionHash(*LHS);
-      FunctionComparator::FunctionHash& RHSHash = FuncHashCache[RHS];
-      if (!RHSHash)
-        LHSHash = FunctionComparator::functionHash(*LHS);
-      if (LHSHash != RHSHash)
-        return LHSHash < RHSHash;
+    auto ComapreFunc = [&](Function *LHS, Function *RHS) {
       auto Lookup = FuncCompareCache.find({LHS, RHS});
       int Compare = 0;
       if (Lookup != FuncCompareCache.end())
         Compare = Lookup->second;
       else {
-        GlobalNumberState GNS;
         Compare = FunctionComparator(LHS, RHS, &GNS).compare();
         FuncCompareCache[{LHS, RHS}] = Compare;
         FuncCompareCache[{RHS, LHS}] = -Compare;
       }
-      return Compare < 0;
+      return Compare;
+    };
+    llvm::SmallString<512> kernelNames;
+
+    for (auto &F : M.functions()) {
+      // Collect the kernel functions
+      if (F.getCallingConv() == CallingConv::SPIR_KERNEL)
+        Funcs.emplace_back(&F);
+    }
+
+    // Sort collected kernel functions with hash values
+    llvm::sort(Funcs, [&](Function *LHS, Function *RHS) {
+      return ComapreFunc(LHS, RHS) < 0;
     });
 
     // Put sorted kernel functions back to the Modules's function list
+    // Set linkages such that only one of each function comparing equal will survive globaldce
     for (auto I = Funcs.begin(), IE = Funcs.end(); I != IE; ++I) {
-      Function* F = *I;
+      Function *F = *I;
       F->removeFromParent();
       M.getFunctionList().push_back(F);
-      kernelNames += (" \"" + F->getName() + "\" ").str();
+      if (I != Funcs.begin() && ComapreFunc(*std::prev(I), F) == 0)
+        F->setLinkage(llvm::GlobalValue::PrivateLinkage);
+      else
+        F->setLinkage(llvm::GlobalValue::ExternalLinkage);
+      kernelNames += (" \"" + F->getName() + "\" \n").str();
       F->replaceAllUsesWith(UndefValue::get(F->getType()));
     }
 
@@ -177,25 +172,16 @@ struct ChessMassage : public ModulePass {
     }
   }
 
-  // This is to make function-merge work. The kernel functions are set
-  // with GlobalValue::WeakODRLinkage, which doesn't allow to merge functions.
-  // So detect the kernel functions and change the linkage to mergerable one.
-  // The linkage has to be recovered back to original one before compiling.
-  // It can be done when generating the kernel properties in KernelPropGen
-  void modifyKernelLinkageToLinkOnceODR(Module &M) {
-    for (auto &F : M.functions()) {
-      if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
-	F.setLinkage(GlobalValue::LinkOnceODRLinkage);
-      }
-    }
-  }
-
   /// Removes SPIR_FUNC/SPIR_KERNEL calling conventions from functions and
   /// replace them with the default C calling convention for now
   void modifySPIRCallingConv(Module &M) {
     for (auto &F : M.functions()) {
       if (F.getCallingConv() == CallingConv::SPIR_KERNEL ||
           F.getCallingConv() == CallingConv::SPIR_FUNC) {
+        if (F.getCallingConv() == CallingConv::SPIR_KERNEL &&
+            F.getLinkage() != llvm::GlobalValue::InternalLinkage)
+          F.addFnAttr("chess_sycl_kernel");
+
         // C - The default llvm calling convention, compatible with C.  This
         // convention is the only calling convention that supports varargs calls.
         // As with typical C calling conventions, the callee/caller have to
@@ -204,8 +190,6 @@ struct ChessMassage : public ModulePass {
         // https://llvm.org/doxygen/CallingConv_8h_source.html#l00029
         // Changing top level function defintiion/declaration, not call sites
         F.setCallingConv(CallingConv::C);
-
-        F.addFnAttr("chess_sycl_kernel");
 
         // setCallingConv on the function won't change all the call sites,
         // we must replicate the calling convention across it's Uses. Another
@@ -250,10 +234,21 @@ struct ChessMassage : public ModulePass {
     if (O.has_error())
       return false;
 
-    reorderFunctions(M, O);
+    for (auto &F : M.functions()) {
+      // Collect the kernel functions
+      if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
+        if (getKernelLoc(&F).y & 1)
+          F.addFnAttr("xilinx_acap_linker_script",
+                      "$DRIVER_PATH_DIR/chesswrappers/linker_script_west.bcf");
+        else
+          F.addFnAttr("xilinx_acap_linker_script",
+                      "$DRIVER_PATH_DIR/chesswrappers/linker_script_east.bcf");
+      }
+    }
+
+    prepareForMerging(M, O);
     removeImmarg(M);
     // This has to be done before changing the calling convention
-    modifyKernelLinkageToLinkOnceODR(M);
     modifySPIRCallingConv(M);
     // This causes some problems with Tale when we generate a .sfg from a kernel
     // that contains this piece of IR, perhaps it's fine not to delete it

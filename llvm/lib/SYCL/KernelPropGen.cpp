@@ -268,21 +268,23 @@ struct KernelPropGen : public ModulePass {
   }
 
   void GenerateChessPropertyScript(Module &M, llvm::raw_fd_ostream& O) {
-    
+
     llvm::SmallString<512> kernelNames;
     llvm::SmallString<512> kernelParity;
     for (auto &F : M.functions()) {
       if (isKernel(F)) {
         F.setLinkage(GlobalValue::WeakODRLinkage);
-        kernelNames += (" \"" + F.getName() + "\" ").str();
+        kernelNames += (" \"" + F.getName() + "\" \n").str();
         kernelParity += (" \"" + F.getName() + "\" ").str();
         // Revert the linkage back to original, which was changed by
         // ChessMassage for function merge
         F.setLinkage(GlobalValue::WeakODRLinkage);
-        if (F.hasFnAttribute("xilinx_acap_tile_even"))
-          kernelParity += " \"" + std::string("even") + "\" ";
-        else
-          kernelParity += " \"" + std::string("odd") + "\" ";
+        if (F.hasFnAttribute("xilinx_acap_linker_script"))
+          kernelParity += " \"" +
+                          F.getFnAttribute("xilinx_acap_linker_script")
+                              .getValueAsString()
+                              .str() +
+                          "\" ";
       }
     }
 

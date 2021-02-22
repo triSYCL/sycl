@@ -982,11 +982,6 @@ static void populateMainEntryPoint(Sema& S, const StringRef Name,
   Out << "#include <stdint.h>\n";
 
   Out << "// SYCL generated kernel wrapper function \n";
-  // Output Kernel Wrapper Function Declaracation
-  // e.g.
-  // void f(uint16_t *input, uint8_t *output, uint32_t width, uint32_t height);
-  // FIXME: We can probably mangle this eventually if we'd like, but extern C
-  // makes life simpler for now
   Out << "extern \"C\" void " << Name << "(void*);\n";
 
   // TODO: Declare Kernel objects and external arrays
@@ -1000,7 +995,6 @@ static void populateMainEntryPoint(Sema& S, const StringRef Name,
   Out << "// SYCL Tile Address Register \n";
   Out << "uint32_t args[64];\n";
   Out << "int main(void) {\n";
-  // Out << "  args[0] += 2;\n";
   Out << "  "<< Name << "((void*)&args);\n";
   Out << "  return 0;\n";
   Out << "}\n";
@@ -2071,10 +2065,8 @@ public:
     if (Ctx.getTargetInfo().getTriple().isXilinxAIE()) {
       Params.clear();
 
-      std::string Name = (Twine("_arg_")).str();
       QualType Ty = OldDecl->getParamDecl(0)->getType();
-      addParam(std::make_tuple(Ty, &Ctx.Idents.get(Name),
-                               Ctx.getTrivialTypeSourceInfo(Ty)),
+      addParam({Ty, &Ctx.Idents.get("_arg_"), Ctx.getTrivialTypeSourceInfo(Ty)},
                Ty);
     }
     SmallVector<QualType, 8> ArgTys;
@@ -2086,7 +2078,7 @@ public:
     KernelDecl->setType(FuncType);
     KernelDecl->setParams(Params);
     if (Ctx.getTargetInfo().getTriple().isXilinxAIE()) {
-      auto P = std::pair<DeclaratorDecl *, DeclaratorDecl *>{
+      std::pair<DeclaratorDecl *, DeclaratorDecl *> P{
           OldDecl->param_begin()[0], KernelDecl->param_begin()[0]};
       KernelBodyTransform KBT(P, SemaRef);
       Stmt *NewBody = KBT.TransformStmt(OldDecl->getBody()).get();

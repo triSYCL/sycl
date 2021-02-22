@@ -4,6 +4,7 @@ add_llvm_component_library(LLVMSYCL
   InSPIRation.cpp
   KernelPropGen.cpp
   PrepareSYCLOpt.cpp
+  PrepareSyclChessOpt.cpp
   LowerSYCLMetaData.cpp
   ChessMassage.cpp
 
