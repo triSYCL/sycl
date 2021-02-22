@@ -761,8 +761,6 @@ def canRunLibcxxTests():
         return True, "libc++ always present"
 
     if platform == "linux":
-        if os.path.isdir("/usr/include/c++/v1"):
-            return True, "Headers found, let's hope they work"
         with tempfile.NamedTemporaryFile() as f:
             cmd = [configuration.compiler, "-xc++", "-stdlib=libc++", "-o", f.name, "-"]
             p = subprocess.Popen(cmd, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
@@ -852,11 +850,20 @@ def checkDebugInfoSupport():
 
 def checkDebugServerSupport():
     from lldbsuite.test import lldbplatformutil
+    import lldb
 
+    skip_msg = "Skipping %s tests, as they are not compatible with remote testing on this platform"
     if lldbplatformutil.platformIsDarwin():
         configuration.skip_categories.append("llgs")
+        if lldb.remote_platform:
+            # <rdar://problem/34539270>
+            configuration.skip_categories.append("debugserver")
+            print(skip_msg%"debugserver");
     else:
         configuration.skip_categories.append("debugserver")
+        if lldb.remote_platform and lldbplatformutil.getPlatform() == "windows":
+            configuration.skip_categories.append("llgs")
+            print(skip_msg%"lldb-server");
 
 def run_suite():
     # On MacOS X, check to make sure that domain for com.apple.DebugSymbols defaults

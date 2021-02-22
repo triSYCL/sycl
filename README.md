@@ -77,4 +77,4 @@ oneAPI DPC++ is an open, cross-architecture language built upon the ISO C++ and 
 SYCL\* standards. DPC++ extends these standards with a number of extensions,
 which can be found in [sycl/doc/extensions](sycl/doc/extensions) directory.
 
-\*Other names and brands may be claimed as the property of others.
+*\*Other names and brands may be claimed as the property of others.*

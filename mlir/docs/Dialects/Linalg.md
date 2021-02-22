@@ -21,8 +21,8 @@ Linalg. They are all implemented in terms of the properties of the
 one-off op knowledge.
 
 The textual form description of these transformations is left for future work.
-Still, it is useful to at least the key transformations that are performed on
-the Linalg IR and that have influenced its design:
+Still, it is useful to list the key transformations that are performed on the
+Linalg IR and that have influenced its design:
 
 1.  Progressive Buffer Allocation.
 1.  Parametric Tiling.
@@ -42,8 +42,25 @@ Linalg takes at least some inspiration from all previously
 [key transformations](#key_transformations), including lowering to scalar
 load/store and other operations or to external library calls and intrinsics.
 
-These ops can have ***either tensor or buffer operands***, subject to
-[conventions and limitations](#tensors_and_buffers).
+These ops can have ***either tensor or buffer*** as both input and output
+operands. Output tensors operands serve the purpose of providing a unifying
+abstraction and give a shape to the results. Output tensors can come in 2
+flavors and are always associated with a corresponding op result:
+
+1.  an "init tensor" output value which provides an initial value for a tensor
+    that is created by iteratively updating the result (also called "destructive
+    updates"). Such tensor is always materialized in some form. If enough fusion
+    occurs it may end up being materialized only as a register-level SSA value.
+    It is expected (but not required) that the destructive update pattern can be
+    rewritten as an inplace update on buffers.
+
+2.  a "shape-only" tensor output value whose underlying elements are not used in
+    the payload computation and only serves the purpose of carrying shape
+    information to lower levels of abstraction. In the future this will be
+    replaced by an appropriate shape type when it is available as a builtin type
+    (see the discourse discussion
+    [Linalg and Shapes](https://llvm.discourse.group/t/linalg-and-shapes/2421)
+    for more details).
 
 ### Payload-Carrying Ops<a name="payload_ops"></a>
 
@@ -77,22 +94,24 @@ layout, and the second one is a `memref` of 4-element vectors with a 2-strided,
   affine_map<(m) -> (m)>,
   affine_map<(m) -> (m)>
 ]
+
 #attrs = {
-  args_in = 1,
-  args_out = 1,
   indexing_maps = #accesses,
   iterator_types = ["parallel"]
 }
+
 // memory layouts
 #identity = affine_map<(d0) -> (d0)>
 
 func @example(%A: memref<?xf32, #identity>,
               %B: memref<?xvector<4xf32>, offset: 1, strides: [2]>) {
-  linalg.generic #attrs %A, %B {
+  linalg.generic #attrs
+  ins(%A: memref<?xf32, #identity>)
+  outs(%B: memref<?xvector<4xf32>, offset: 1, strides: [2]>) {
   ^bb0(%a: f32, %b: vector<4xf32>):
     %c = "some_compute"(%a, %b): (f32, vector<4xf32>) -> (vector<4xf32>)
     linalg.yield %c: vector<4xf32>
-  } : memref<?xf32, #identity>, memref<?xvector<4xf32>, offset: 1, strides: [2]>
+  }
   return
 }
 ```
@@ -125,14 +144,15 @@ instance, it guarantees no out-of bounds access can occur by construction
 (assuming dynamic operand dimensions agree with each other, which is the purpose
 of the `assert` runtime check).
 
-Before lowering to loop form, loop induction variables and iterators are *not
-yet materialized*. This is a necessary property if we want an abstraction that
-works on both tensor values and buffers because ***values don’t escape
-loops/nesting***.
+Before lowering to loop form, loop induction variables and iterators are
+implicit (i.e. *not yet materialized*).
 
-The main implications are that: 1. The semantics of the ops are *restricted to
-operate on structured data types*, on which we can define an iterator. 2. This
-does not model arbitrary code with side-effects.
+The main implications are that:
+
+1.  The semantics of the ops are *restricted to operate on structured data
+    types*, on which we can define an iterator.
+
+2.  This does not model arbitrary code with side-effects.
 
 We do not think these are serious limitations in practice because MLIR is all
 about mixing different levels of abstractions in the same IR. As long as Linalg
@@ -155,26 +175,27 @@ Consider the following fully specified `linalg.generic` example. Here, the first
 `memref` is a 2-strided one on both of its dimensions, and the second `memref`
 uses an identity layout.
 
-```
+```mlir
 // File name: example2.mlir
 #indexing_maps = [
   affine_map<(i, j) -> (j, i)>,
   affine_map<(i, j) -> (j)>
 ]
+
 #attrs = {
-  args_in = 1,
-  args_out = 1,
   indexing_maps = #indexing_maps,
   iterator_types = ["parallel", "parallel"]
 }
 
 func @example(%A: memref<8x?xf32, offset: 0, strides: [2, 2]>,
               %B: memref<?xvector<4xf32>>) {
-  linalg.generic #attrs %A, %B {
+  linalg.generic #attrs
+  ins(%A: memref<8x?xf32, offset: 0, strides: [2, 2]>)
+  outs(%B: memref<?xvector<4xf32>>) {
   ^bb0(%a: f32, %b: vector<4xf32>):
     %c = "some_compute"(%a, %b): (f32, vector<4xf32>) -> (vector<4xf32>)
     linalg.yield %c: vector<4xf32>
-  }: memref<8x?xf32 , offset: 0, strides: [2, 2]>, memref<?xvector<4xf32>>
+  }
   return
 }
 ```
@@ -182,7 +203,7 @@ func @example(%A: memref<8x?xf32, offset: 0, strides: [2, 2]>,
 The property "*Reversible Mappings Between Control and Data Structures*" is
 materialized by a lowering into a form that will resemble:
 
-```
+```mlir
 // Run: mlir-opt example2.mlir -allow-unregistered-dialect -convert-linalg-to-loops
 #map0 = affine_map<(d0, d1) -> (d0 * 2 + d1 * 2)>
 
@@ -280,25 +301,24 @@ Previous examples already elaborate compute payloads with an unregistered
 function `"some_compute"`. The following code snippet shows what the result will
 be when using a concrete operation `addf`:
 
-```
+```mlir
 // File name: example3.mlir
-#indexing_maps = [
-  affine_map<(i, j) -> (i, j)>,
-  affine_map<(i, j) -> (i, j)>,
-  affine_map<(i, j) -> (i, j)>
-]
+#map = affine_map<(i, j) -> (i, j)>
+
 #attrs = {
-  args_in = 2,
-  args_out = 1,
-  indexing_maps = #indexing_maps,
+  indexing_maps = [#map, #map, #map],
   iterator_types = ["parallel", "parallel"]
 }
+
 func @example(%A: memref<?x?xf32>, %B: memref<?x?xf32>, %C: memref<?x?xf32>) {
-  linalg.generic #attrs %A, %B, %C {
-  ^bb0(%a: f32, %b: f32, %c: f32):
-    %d = addf %a, %b : f32
-    linalg.yield %d : f32
-  }: memref<?x?xf32>, memref<?x?xf32>, memref<?x?xf32>
+  linalg.generic #attrs
+  ins(%A, %B: memref<?x?xf32>, memref<?x?xf32>)
+  outs(%C: memref<?x?xf32>) {
+    ^bb0(%a: f32, %b: f32, %c: f32):
+      %d = addf %a, %b : f32
+      linalg.yield %d : f32
+  }
+
   return
 }
 ```
@@ -309,25 +329,20 @@ stores the result into another one (`%C`).
 The property "*The Compute Payload is Specified With a Region*" is materialized
 by a lowering into a form that will resemble:
 
-```
-// Run: mlir-opt example3.mlir -convert-linalg-to-loops
-#indexing_maps = [
-  affine_map<(i, j) -> (i, j)>,
-  affine_map<(i, j) -> (i, j)>,
-  affine_map<(i, j) -> (i, j)>
-]
-#attrs = {
-  args_in = 2,
-  args_out = 1,
-  indexing_maps = #indexing_maps,
-  iterator_types = ["parallel", "parallel"]
-}
-func @example(%A: memref<?x?xf32>, %B: memref<?x?xf32>, %C: memref<?x?xf32>) {
-  linalg.generic #attrs %A, %B, %C {
-  ^bb0(%a: f32, %b: f32, %c: f32):
-    %d = addf %a, %b : f32
-    linalg.yield %d : f32
-  }: memref<?x?xf32>, memref<?x?xf32>, memref<?x?xf32>
+```mlir
+func @example(%arg0: memref<?x?xf32>, %arg1: memref<?x?xf32>, %arg2: memref<?x?xf32>) {
+  %c0 = constant 0 : index
+  %c1 = constant 1 : index
+  %0 = dim %arg0, %c0 : memref<?x?xf32>
+  %1 = dim %arg0, %c1 : memref<?x?xf32>
+  scf.for %arg3 = %c0 to %0 step %c1 {
+    scf.for %arg4 = %c0 to %1 step %c1 {
+      %2 = load %arg0[%arg3, %arg4] : memref<?x?xf32>
+      %3 = load %arg1[%arg3, %arg4] : memref<?x?xf32>
+      %4 = addf %2, %3 : f32
+      store %4, %arg2[%arg3, %arg4] : memref<?x?xf32>
+    }
+  }
   return
 }
 ```
@@ -354,26 +369,28 @@ Consider the following example that adds an additional attribute
 `library_call="pointwise_add"` that specifies the name of an external library
 call we intend to use:
 
-```
+```mlir
 // File name: example4.mlir
 #indexing_maps = [
   affine_map<(i, j) -> (i, j)>,
   affine_map<(i, j) -> (i, j)>,
   affine_map<(i, j) -> (i, j)>
 ]
+
 #attrs = {
-  args_in = 2,
-  args_out = 1,
   indexing_maps = #indexing_maps,
   iterator_types = ["parallel", "parallel"],
   library_call = "pointwise_add"
 }
+
 func @example(%A: memref<?x?xf32>, %B: memref<?x?xf32>, %C: memref<?x?xf32>) {
-  linalg.generic #attrs %A, %B, %C {
+  linalg.generic #attrs
+  ins(%A, %B: memref<?x?xf32>, memref<?x?xf32>)
+  outs(%C: memref<?x?xf32>) {
   ^bb0(%a: f32, %b: f32, %c: f32):
     %d = addf %a, %b : f32
     linalg.yield %d : f32
-  }: memref<?x?xf32>, memref<?x?xf32>, memref<?x?xf32>
+  }
   return
 }
 ```
@@ -381,7 +398,7 @@ func @example(%A: memref<?x?xf32>, %B: memref<?x?xf32>, %C: memref<?x?xf32>) {
 The property "*Map To an External Library Call*" is materialized by a lowering
 into a form that will resemble:
 
-```
+```mlir
 // Run: mlir-opt example4.mlir -convert-linalg-to-std
 // Note that we lower the Linalg dialect directly to the Standard dialect.
 // See this doc: https://mlir.llvm.org/docs/Dialects/Standard/
@@ -400,7 +417,7 @@ func @pointwise_add(memref<?x?xf32, #map0>, memref<?x?xf32, #map0>, memref<?x?xf
 
 Which, after lowering to LLVM resembles:
 
-```
+```mlir
 // Run: mlir-opt example4.mlir -convert-linalg-to-std | mlir-opt -convert-std-to-llvm
 // Some generated code are omitted here.
 func @example(%arg0: !llvm<"float*">, ...) {
@@ -411,11 +428,11 @@ func @example(%arg0: !llvm<"float*">, ...) {
 
 llvm.func @pointwise_add(%arg0: !llvm<"float*">, ...) attributes {llvm.emit_c_interface} {
   ...
-  llvm.call @_mlir_ciface_pointwise_add(%9, %19, %29) : (!llvm<"{ float*, float*, i64, [2 x i64], [2 x i64] }*">, !llvm<"{ float*, float*, i64, [2 x i64], [2 x i64] }*">, !llvm<"{ float*, float*, i64, [2 x i64], [2 x i64] }
+  llvm.call @_mlir_ciface_pointwise_add(%9, %19, %29) : (!llvm."{ float*, float*, i64, [2 x i64], [2 x i64] }*">, !llvm<"{ f32*, f32*, i64, [2 x i64], [2 x i64] }*">, !llvm<"{ float*, float*, i64, [2 x i64], [2 x i64] }
 *">) -> ()
   llvm.return
 }
-llvm.func @_mlir_ciface_pointwise_add(!llvm<"{ float*, float*, i64, [2 x i64], [2 x i64] }*">, !llvm<"{ float*, float*, i64, [2 x i64], [2 x i64] }*">, !llvm<"{ float*, float*, i64, [2 x i64], [2 x i64] }*">) attributes {llvm.emit_c_interface}
+llvm.func @_mlir_ciface_pointwise_add(!llvm."{ float*, float*, i64, [2 x i64], [2 x i64] }*">, !llvm<"{ f32*, f32*, i64, [2 x i64], [2 x i64] }*">, !llvm<"{ f32*, f32*, i64, [2 x i64], [2 x i64] }*">) attributes {llvm.emit_c_interface}
 ```
 
 ##### Convention For External Library Interoperability
@@ -482,76 +499,6 @@ For the time being, we have settled on the combination of these properties
 because of empirical evidence building and working on multiple high-level
 compilers. As we lay those down and engage more with the community, we expect
 multiple rounds of discussions and design changes to the original architecture.
-
-### Tensors and Buffers: Conventions and Limitations <a name="tensors_and_buffers"></a>
-
-Tensors are immutable SSA values, buffers are mutable regions of memory subject
-to side-effects and aliasing. As a consequence, output buffers are passed as
-operands whereas output tensors are new SSA values corresponding to op results.
-Inputs can be arbitrary tensors or buffers and are always passed as operands.
-
-The following convention is currently in-flight and is in the process of
-replacing other existing conventions. The following convention currently applies
-to "named" structured ops which are auto-generated by the linalg-ods tool.
-
-The convention adopted is as follows:
-
-1.  A first block of `ins` op operands hold read-only inputs of ShapedType.
-2.  An optional second block of `outs` op operands hold read-write output
-    buffers of MemRefType.
-3.  An optional third block of `init` operands hold initialization tensors of
-    RankedTensorType. Such tensors can appear when the op performs a reduction
-    and returns a tensor.
-
-Structured ops with fully parallel semantics, have empty `init`. They may either
-write in-place into `outs` buffers or return new tensors.
-
-Structured ops with reduction semantics and output tensor(s) however have
-additional restrictions:
-
-1.  They can only return a single tensor for now.
-2.  They cannot have any output buffer operand (i.e. `outs` is empty).
-3.  They have exactly one `init` tensor of the same type as the unique output
-    tensor. Such an `init` tensor does not have an explicit associate indexing
-    map. Instead the map of the result tensor is used to signify that the `init`
-    and the `result` are "tied".
-
-Points 1. and 2. keep complexity of the representation in check by allowing only
-a single result tensor, when reductions are present.
-
-Point 3. is related to the fact that SSA values cannot represent in-place
-updates. Instead, linalg adopts a similar convention that exists in e.g.
-`vector.outerproduct`: the value that is reduced into is passed as an explicit
-argument and a new result of the same shape is produced.
-
-It is expected buffer allocation will fold this last input onto the result in a
-single output buffer argument, which is why the same indexing map is required:
-the last input operand is said to be "tied" to the result.
-
-Alternative, more complex representations, would allow for:
-
-1.  Multiple results and `init` tensors in arbitrary orders, which could be
-    captured by an extra ArrayAttr of position pairs.
-2.  Relaxing the conditions on the indexing map equalities on the each pair and
-    e.g. allow implicit broadcasts of the input.
-
-These representations are deemed unnecessarily complex for now and are left for
-future discussion.
-
-As an illustration, the syntax for a `linalg.matmul` writing into a buffer is:
-
-```
-linalg.matmul ins(%a, %b : memref<?x?xf32>, tensor<?x?xf32>)
-             outs(%c : memref<?x?xf32>)
-```
-
-, whereas the syntax for a `linalg.matmul` returning a new tensor is:
-
-```
-%d = linalg.matmul ins(%a, %b : tensor<?x?xf32>, memref<?x?xf32>)
-                  init(%c : tensor<?x?xf32>)
-                    -> tensor<?x?xf32>
-```
 
 ### Data Representation: Views<a name="views"></a>
 
@@ -642,6 +589,12 @@ better adapt to Linalg:
     `i` (resp. `j`) is a parallel iterator encoded by affine dimension of
     position `0` (resp. `1`); `k` (resp. `l`) is a reduction iterator encoded by
     an affine dimension of position `2` (resp. `3`).
+1.  A list of attributes can be defined for the op with the format of `attr(
+    strides: 2xi32)` and referenced in comprehension like `strides[0]`. These
+    attribute uses will be parsed as affine symbols to generate op definition
+    and implementation. For a concrete op instance, the runtime constant values
+    from the attributes will be used to replace the affine symbols and simplify
+    the indexing maps.
 
 These decisions and syntax are subject to evolution and change. In particular,
 op-specific attributes, dynamic ranks, some form of templating, shape
@@ -654,10 +607,18 @@ semantics:
     perform multiple updates.
 2.  Each tensor may only be used with a single indexing expression.
 
+A `"""`-wrapped doc string can be attached to the named op. It should contain a
+oneliner for summary first, followed by lengthy description.
+
 The following specification may be used to define a named `batchmatmul` op:
 
 ```
-def batchmatmul(A: f32(Batch, M, K), B: f32(K, N)) -> (C: f32(Batch, M, N)) {
+def batchmatmul(A: f32(Batch, M, K), B: f32(K, N)) -> (C: f32(Batch, M, N))
+"""Batch matrix-multiply operation.
+
+This operation performs batch matrix-multiply over ...
+"""
+{
   C(b, m, n) = std_addf<k>(std_mulf(A(b, m, k), B(k, n)));
 }
 ```
