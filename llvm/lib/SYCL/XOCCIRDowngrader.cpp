@@ -97,7 +97,8 @@ struct XOCCIRDowngrader : public ModulePass {
       for (auto &P : F.args()) {
          if (P.hasAttribute(llvm::Attribute::ByVal)) {
              P.removeAttr(llvm::Attribute::ByVal);
-             P.addAttr(llvm::Attribute::ByVal);
+             P.addAttr(Attribute::get(M.getContext(), llvm::Attribute::ByVal,
+                                      nullptr));
          }
       }
 
@@ -107,7 +108,9 @@ struct XOCCIRDowngrader : public ModulePass {
           for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
             if (CB->paramHasAttr(i, llvm::Attribute::ByVal)) {
               CB->removeParamAttr(i, llvm::Attribute::ByVal);
-              CB->addParamAttr(i, llvm::Attribute::ByVal);
+              CB->addParamAttr(i,
+                               Attribute::get(M.getContext(),
+                                              llvm::Attribute::ByVal, nullptr));
             }
           }
         }
