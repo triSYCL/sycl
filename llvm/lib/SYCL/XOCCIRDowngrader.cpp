@@ -237,16 +237,27 @@ struct XOCCIRDowngrader : public ModulePass {
       I->eraseFromParent();
   }
 
+  void convertPoinsonToZero(Module &M) {
+    for (auto &F : M.functions())
+      for (auto &I : instructions(F))
+        for (auto &V : I.operands())
+          if (auto *P = dyn_cast<PoisonValue>(V.get()))
+            P->replaceAllUsesWith(Constant::getNullValue(V->getType()));
+  }
+
   bool runOnModule(Module &M) override {
     resetByVal(M);
     removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
-                         Attribute::ImmArg, Attribute::NoSync});
+                         Attribute::ImmArg, Attribute::NoSync,
+                         Attribute::MustProgress});
     renameBasicBlocks(M);
     removeFreezeInst(M);
     removeFNegInst(M);
     removeMemIntrAlign(M);
 
     lowerIntrinsic(M);
+
+    convertPoinsonToZero(M);
     // The module probably changed
     return true;
   }
