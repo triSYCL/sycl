@@ -41,7 +41,7 @@ static const unsigned SPIRAddrSpaceMap[] = {
 };
 
 static const unsigned SYCLAddrSpaceMap[] = {
-    4, // Default
+    0, // Default
     1, // opencl_global
     3, // opencl_local
     2, // opencl_constant
