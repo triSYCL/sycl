@@ -249,7 +249,7 @@ struct XOCCIRDowngrader : public ModulePass {
     resetByVal(M);
     removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
                          Attribute::ImmArg, Attribute::NoSync,
-                         Attribute::MustProgress});
+                         Attribute::MustProgress, Attribute::NoUndef});
     renameBasicBlocks(M);
     removeFreezeInst(M);
     removeFNegInst(M);
