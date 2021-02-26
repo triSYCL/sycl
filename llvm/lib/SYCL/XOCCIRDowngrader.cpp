@@ -30,6 +30,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/../../lib/IR/LLVMContextImpl.h"
 
 using namespace llvm;
 
@@ -238,11 +239,9 @@ struct XOCCIRDowngrader : public ModulePass {
   }
 
   void convertPoinsonToZero(Module &M) {
-    for (auto &F : M.functions())
-      for (auto &I : instructions(F))
-        for (auto &V : I.operands())
-          if (auto *P = dyn_cast<PoisonValue>(V.get()))
-            P->replaceAllUsesWith(Constant::getNullValue(V->getType()));
+    for (auto &PV : M.getContext().pImpl->PVConstants)
+      PV.second.get()->replaceAllUsesWith(
+          Constant::getNullValue(PV.second.get()->getType()));
   }
 
   bool runOnModule(Module &M) override {
