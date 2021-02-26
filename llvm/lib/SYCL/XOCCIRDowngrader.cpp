@@ -99,7 +99,8 @@ struct XOCCIRDowngrader : public ModulePass {
       for (auto &P : F.args()) {
          if (P.hasAttribute(llvm::Attribute::ByVal)) {
              P.removeAttr(llvm::Attribute::ByVal);
-             P.addAttr(llvm::Attribute::ByVal);
+             P.addAttr(Attribute::get(M.getContext(), llvm::Attribute::ByVal,
+                                      nullptr));
          }
       }
 
@@ -109,7 +110,9 @@ struct XOCCIRDowngrader : public ModulePass {
           for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
             if (CB->paramHasAttr(i, llvm::Attribute::ByVal)) {
               CB->removeParamAttr(i, llvm::Attribute::ByVal);
-              CB->addParamAttr(i, llvm::Attribute::ByVal);
+              CB->addParamAttr(i,
+                               Attribute::get(M.getContext(),
+                                              llvm::Attribute::ByVal, nullptr));
             }
           }
         }
@@ -197,16 +200,27 @@ struct XOCCIRDowngrader : public ModulePass {
       I->eraseFromParent();
   }
 
+  void convertPoinsonToZero(Module &M) {
+    for (auto &F : M.functions())
+      for (auto &I : instructions(F))
+        for (auto &V : I.operands())
+          if (auto *P = dyn_cast<PoisonValue>(V.get()))
+            P->replaceAllUsesWith(Constant::getNullValue(V->getType()));
+  }
+
   bool runOnModule(Module &M) override {
     resetByVal(M);
     llvm::removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
-                               Attribute::ImmArg, Attribute::NoSync});
+                         Attribute::ImmArg, Attribute::NoSync,
+                         Attribute::MustProgress, Attribute::NoUndef});
     renameBasicBlocks(M);
     removeFreezeInst(M);
     removeFNegInst(M);
     removeMemIntrAlign(M);
 
     lowerIntrinsic(M);
+
+    convertPoinsonToZero(M);
     // The module probably changed
     return true;
   }

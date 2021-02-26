@@ -1672,7 +1672,7 @@ define amdgpu_kernel void @dyn_extract_v5f64_s_s(double addrspace(1)* %out, i32 
 ; GPRIDX-NEXT:     is_ptr64 = 1
 ; GPRIDX-NEXT:     is_dynamic_callstack = 0
 ; GPRIDX-NEXT:     is_debug_enabled = 0
-; GPRIDX-NEXT:     is_xnack_enabled = 0
+; GPRIDX-NEXT:     is_xnack_enabled = 1
 ; GPRIDX-NEXT:     workitem_private_segment_byte_size = 0
 ; GPRIDX-NEXT:     workgroup_group_segment_byte_size = 0
 ; GPRIDX-NEXT:     gds_segment_byte_size = 0
@@ -2186,7 +2186,7 @@ define amdgpu_kernel void @dyn_extract_v4f32_s_s_s(float addrspace(1)* %out, i32
 ; GPRIDX-NEXT:     is_ptr64 = 1
 ; GPRIDX-NEXT:     is_dynamic_callstack = 0
 ; GPRIDX-NEXT:     is_debug_enabled = 0
-; GPRIDX-NEXT:     is_xnack_enabled = 0
+; GPRIDX-NEXT:     is_xnack_enabled = 1
 ; GPRIDX-NEXT:     workitem_private_segment_byte_size = 0
 ; GPRIDX-NEXT:     workgroup_group_segment_byte_size = 0
 ; GPRIDX-NEXT:     gds_segment_byte_size = 0
@@ -2361,7 +2361,7 @@ define amdgpu_kernel void @dyn_extract_v4f64_s_s_s(double addrspace(1)* %out, i3
 ; GPRIDX-NEXT:     is_ptr64 = 1
 ; GPRIDX-NEXT:     is_dynamic_callstack = 0
 ; GPRIDX-NEXT:     is_debug_enabled = 0
-; GPRIDX-NEXT:     is_xnack_enabled = 0
+; GPRIDX-NEXT:     is_xnack_enabled = 1
 ; GPRIDX-NEXT:     workitem_private_segment_byte_size = 0
 ; GPRIDX-NEXT:     workgroup_group_segment_byte_size = 0
 ; GPRIDX-NEXT:     gds_segment_byte_size = 0
@@ -2520,13 +2520,7 @@ define i32 @v_extract_v64i32_32(<64 x i32> addrspace(1)* %ptr) {
 ; GPRIDX-LABEL: v_extract_v64i32_32:
 ; GPRIDX:       ; %bb.0:
 ; GPRIDX-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; GPRIDX-NEXT:    s_movk_i32 s4, 0x80
-; GPRIDX-NEXT:    s_mov_b32 s5, 0
-; GPRIDX-NEXT:    v_mov_b32_e32 v2, s4
-; GPRIDX-NEXT:    v_mov_b32_e32 v3, s5
-; GPRIDX-NEXT:    v_add_co_u32_e32 v0, vcc, v0, v2
-; GPRIDX-NEXT:    v_addc_co_u32_e32 v1, vcc, v1, v3, vcc
-; GPRIDX-NEXT:    global_load_dwordx4 v[0:3], v[0:1], off
+; GPRIDX-NEXT:    global_load_dwordx4 v[0:3], v[0:1], off offset:128
 ; GPRIDX-NEXT:    s_waitcnt vmcnt(0)
 ; GPRIDX-NEXT:    s_setpc_b64 s[30:31]
 ;
@@ -2551,13 +2545,7 @@ define i32 @v_extract_v64i32_33(<64 x i32> addrspace(1)* %ptr) {
 ; GPRIDX-LABEL: v_extract_v64i32_33:
 ; GPRIDX:       ; %bb.0:
 ; GPRIDX-NEXT:    s_waitcnt vmcnt(0) expcnt(0) lgkmcnt(0)
-; GPRIDX-NEXT:    s_movk_i32 s4, 0x80
-; GPRIDX-NEXT:    s_mov_b32 s5, 0
-; GPRIDX-NEXT:    v_mov_b32_e32 v2, s4
-; GPRIDX-NEXT:    v_mov_b32_e32 v3, s5
-; GPRIDX-NEXT:    v_add_co_u32_e32 v0, vcc, v0, v2
-; GPRIDX-NEXT:    v_addc_co_u32_e32 v1, vcc, v1, v3, vcc
-; GPRIDX-NEXT:    global_load_dwordx4 v[0:3], v[0:1], off
+; GPRIDX-NEXT:    global_load_dwordx4 v[0:3], v[0:1], off offset:128
 ; GPRIDX-NEXT:    s_waitcnt vmcnt(0)
 ; GPRIDX-NEXT:    v_mov_b32_e32 v0, v1
 ; GPRIDX-NEXT:    s_setpc_b64 s[30:31]

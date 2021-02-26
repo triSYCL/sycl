@@ -64,12 +64,12 @@ static const unsigned SPIRAddrSpaceMap[] = {
 };
 
 static const unsigned SYCLAddrSpaceMap[] = {
-    4, // Default
+    0, // Default
     1, // opencl_global
     3, // opencl_local
     2, // opencl_constant
     0, // opencl_private
-    4, // opencl_generic
+    0, // opencl_generic
     5, // opencl_global_device
     6, // opencl_global_host
     0, // cuda_device
@@ -142,10 +142,20 @@ public:
     return CC_SpirFunction;
   }
 
+  llvm::Optional<LangAS> getConstantAddressSpace() const override {
+    // If we assign "opencl_constant" address space the following code becomes
+    // illegal, because it can't be cast to any other address space:
+    //
+    //   const char *getLiteral() {
+    //     return "AB";
+    //   }
+    return LangAS::opencl_global;
+  }
+
   void setSupportedOpenCLOpts() override {
     // Assume all OpenCL extensions and optional core features are supported
     // for SPIR since it is a generic target.
-    getSupportedOpenCLOpts().supportAll();
+    supportAllOpenCLOpts();
   }
 
   bool hasExtIntType() const override { return true; }
