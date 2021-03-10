@@ -353,7 +353,6 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
     .Case("fpga_dep", fpga_dep)
     .Case("ve", ve)
     .Case("csky", csky)
-    .Default(UnknownArch);
 }
 
 static Triple::ArchType parseARMArch(StringRef ArchName) {
@@ -431,12 +430,12 @@ static Triple::ArchType parseArch(StringRef ArchName) {
     .Cases("powerpcle", "ppcle", "ppc32le", Triple::ppcle)
     .Cases("powerpc64", "ppu", "ppc64", Triple::ppc64)
     .Cases("powerpc64le", "ppc64le", Triple::ppc64le)
+    .Case("aie32", Triple::aie32)
     .Case("xscale", Triple::arm)
     .Case("xscaleeb", Triple::armeb)
     .Case("aarch64", Triple::aarch64)
     .Case("aarch64_be", Triple::aarch64_be)
     .Case("aarch64_32", Triple::aarch64_32)
-    .Case("aie32", Triple::aie32)
     .Case("arc", Triple::arc)
     .Case("arm64", Triple::aarch64)
     .Case("arm64_32", Triple::aarch64_32)
@@ -485,9 +484,9 @@ static Triple::ArchType parseArch(StringRef ArchName) {
     .Case("fpga_aocr", Triple::fpga_aocr)
     .Case("fpga_aocx", Triple::fpga_aocx)
     .Case("fpga_dep", Triple::fpga_dep)
-    .Case("shave", Triple::shave)
     .StartsWith("fpga32", Triple::fpga32)
     .StartsWith("fpga64", Triple::fpga64)
+    .Case("shave", Triple::shave)
     .Case("ve", Triple::ve)
     .Case("wasm32", Triple::wasm32)
     .Case("wasm64", Triple::wasm64)
