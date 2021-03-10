@@ -2813,7 +2813,7 @@ bool Driver::checkForOffloadStaticLib(Compilation &C,
     if (P.second->getTriple().isXilinxFPGA())
       return false;
 
-  // Right off the bat, assume the presense of -foffload-static-lib means
+  // Right off the bat, assume the presence of -foffload-static-lib means
   // the need to perform linking steps for fat static archive offloading.
   // TODO: remove when -foffload-static-lib support is dropped.
   if (Args.hasArg(options::OPT_offload_lib_Group))

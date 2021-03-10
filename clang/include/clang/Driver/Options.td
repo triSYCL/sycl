@@ -5352,8 +5352,7 @@ def fdefault_calling_conv_EQ : Joined<["-"], "fdefault-calling-conv=">,
 
 // These options cannot be marshalled, because they are used to set up the LangOptions defaults.
 def finclude_default_header : Flag<["-"], "finclude-default-header">,
-  HelpText<"Include default header file for OpenCL">,
-  MarshallingInfoFlag<LangOpts<"IncludeDefaultHeader">>;
+  HelpText<"Include default header file for OpenCL">;
 def fsycl_allow_variadic_func : Flag<["-"], "fsycl-allow-variadic-func">,
   HelpText<"Allow variadic functions in SYCL device.">;
 def fno_sycl_allow_variadic_func : Flag<["-"], "fno-sycl-allow-variadic-func">;
@@ -5364,6 +5363,7 @@ def fdeclare_opencl_builtins : Flag<["-"], "fdeclare-opencl-builtins">,
   HelpText<"Add OpenCL builtin function declarations (experimental)">;
 def fdeclare_spirv_builtins : Flag<["-"], "fdeclare-spirv-builtins">,
   HelpText<"Add SPIR-V builtin function declarations (experimental)">;
+  
 def fpreserve_vec3_type : Flag<["-"], "fpreserve-vec3-type">,
   HelpText<"Preserve 3-component vector type">,
   MarshallingInfoFlag<CodeGenOpts<"PreserveVec3Type">>;
