@@ -353,6 +353,7 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
     .Case("fpga_dep", fpga_dep)
     .Case("ve", ve)
     .Case("csky", csky)
+    .Default(UnknownArch);
 }
 
 static Triple::ArchType parseARMArch(StringRef ArchName) {
