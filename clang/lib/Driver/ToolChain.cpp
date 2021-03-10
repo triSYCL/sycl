@@ -241,6 +241,8 @@ StringRef ToolChain::getDefaultUniversalArchName() const {
     return "arm64_32";
   case llvm::Triple::ppc:
     return "ppc";
+  case llvm::Triple::ppcle:
+    return "ppcle";
   case llvm::Triple::ppc64:
     return "ppc64";
   case llvm::Triple::ppc64le:
@@ -352,12 +354,6 @@ Tool *ToolChain::getSYCLPostLink() const {
   return SYCLPostLink.get();
 }
 
-Tool *ToolChain::getPartialLink() const {
-  if (!PartialLink)
-    PartialLink.reset(new tools::PartialLink(*this));
-  return PartialLink.get();
-}
-
 Tool *ToolChain::getBackendCompiler() const {
   if (!BackendCompiler)
     BackendCompiler.reset(buildBackendCompiler());
@@ -420,9 +416,6 @@ Tool *ToolChain::getTool(Action::ActionClass AC) const {
 
   case Action::SYCLPostLinkJobClass:
     return getSYCLPostLink();
-
-  case Action::PartialLinkJobClass:
-    return getPartialLink();
 
   case Action::BackendCompileJobClass:
     return getBackendCompiler();

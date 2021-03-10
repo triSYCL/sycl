@@ -581,8 +581,7 @@ public:
 DataFlowSanitizer::DataFlowSanitizer(
     const std::vector<std::string> &ABIListFiles) {
   std::vector<std::string> AllABIListFiles(std::move(ABIListFiles));
-  AllABIListFiles.insert(AllABIListFiles.end(), ClABIListFiles.begin(),
-                         ClABIListFiles.end());
+  llvm::append_range(AllABIListFiles, ClABIListFiles);
   // FIXME: should we propagate vfs::FileSystem to this constructor?
   ABIList.set(
       SpecialCaseList::createOrDie(AllABIListFiles, *vfs::getRealFileSystem()));
@@ -2052,8 +2051,7 @@ void DFSanVisitor::visitCallBase(CallBase &CB) {
           Args.push_back(DFSF.LabelReturnAlloca);
         }
 
-        for (i = CB.arg_begin() + FT->getNumParams(); i != CB.arg_end(); ++i)
-          Args.push_back(*i);
+        append_range(Args, drop_begin(CB.args(), FT->getNumParams()));
 
         CallInst *CustomCI = IRB.CreateCall(CustomF, Args);
         CustomCI->setCallingConv(CI->getCallingConv());

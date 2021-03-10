@@ -226,16 +226,6 @@ namespace test16 {
 namespace cxx20 {
   template<auto> struct A {};
   template<typename T, T V> struct B {};
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1AILf3f800000EEE(
-  void f(A<1.0f>) {}
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1AILd3ff0000000000000EEE(
-  void f(A<1.0>) {}
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1AILe3fff8000000000000000EEE(
-  void f(A<1.0l>) {}
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1AIXtlCiLi0ELi1EEEEE(
-  void f(A<1i>) {}
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1AIXtlCdLd0000000000000000ELd3ff0000000000000EEEEE(
-  void f(A<1.0i>) {}
 
   int x;
   // CXX20: define {{.*}} @_ZN5cxx201fENS_1AIXadL_ZNS_1xEEEEE(
@@ -255,24 +245,7 @@ namespace cxx20 {
   // CXX20: define {{.*}} @_ZN5cxx201fENS_1BIPKvXadL_ZNS_1xEEEEE(
   void f(B<const void*, (const void*)&x>) {}
 
-  struct Q { int x; } q;
-
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1AIXadsoiL_ZNS_1qEEEEEE(
-  void f(A<&q.x>) {}
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1BIPiXadsoiL_ZNS_1qEEEEEE(
-  void f(B<int*, &q.x>) {}
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1AIXadsoKiL_ZNS_1qEEEEEE(
-  void f(A<(const int*)&q.x>) {}
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1BIPKiXadsoS1_L_ZNS_1qEEEEEE
-  void f(B<const int*, (const int*)&q.x>) {}
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1AIXcvPvadsoiL_ZNS_1qEEEEEE(
-  void f(A<(void*)&q.x>) {}
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1BIPvXadsoiL_ZNS_1qEEEEEE(
-  void f(B<void*, (void*)&q.x>) {}
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1AIXcvPKvadsoiL_ZNS_1qEEEEEE(
-  void f(A<(const void*)&q.x>) {}
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1BIPKvXadsoiL_ZNS_1qEEEEEE(
-  void f(B<const void*, (const void*)&q.x>) {}
+  struct Q { int x; };
 
   // CXX20: define {{.*}} @_ZN5cxx201fENS_1AIXadL_ZNS_1Q1xEEEEE(
   void f(A<&Q::x>) {}
@@ -282,17 +255,6 @@ namespace cxx20 {
   void f(A<(const int Q::*)&Q::x>) {}
   // CXX20: define {{.*}} @_ZN5cxx201fENS_1BIMNS_1QEKiXadL_ZNS1_1xEEEEE(
   void f(B<const int Q::*, (const int Q::*)&Q::x>) {}
-
-  struct R : Q {};
-
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1AIXmcMNS_1REiadL_ZNS_1Q1xEEEEEE(
-  void f(A<(int R::*)&Q::x>) {}
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1BIMNS_1REiXmcS2_adL_ZNS_1Q1xEEEEEE(
-  void f(B<int R::*, (int R::*)&Q::x>) {}
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1AIXmcMNS_1REKiadL_ZNS_1Q1xEEEEEE(
-  void f(A<(const int R::*)&Q::x>) {}
-  // CXX20: define {{.*}} @_ZN5cxx201fENS_1BIMNS_1REKiXmcS3_adL_ZNS_1Q1xEEEEEE(
-  void f(B<const int R::*, (const int R::*)&Q::x>) {}
 }
 #endif
 
@@ -308,7 +270,7 @@ namespace test17 {
   // Note: there is no J...E here, because we can't form a pack argument, and
   // the 5u and 6u are mangled with the original type 'j' (unsigned int) not
   // with the resolved type 'i' (signed int).
-  // CHECK: define {{.*}} @_ZN6test171hILi4EJLi1ELi2ELi3EEEEvNS_1XIXspT0_EXLj5EEXT_EXLj6EEEE
+  // CHECK: define {{.*}} @_ZN6test171hILi4EJLi1ELi2ELi3EEEEvNS_1XIXspT0_ELj5EXT_ELj6EEE
   template<int D, int ...C> void h(X<C..., 5u, D, 6u>) {}
   void i() { h<4, 1, 2, 3>({}); }
 
@@ -361,7 +323,7 @@ namespace partially_dependent_template_args {
     // callee is unresolved, the rest mangle the converted argument Lj0E
     // because the callee is resolved.
     void h() {
-      // CHECK: @_ZN33partially_dependent_template_args5test22g1INS0_1XEEEvDTcl1fIXLi0EEEcvT__EEE
+      // CHECK: @_ZN33partially_dependent_template_args5test22g1INS0_1XEEEvDTcl1fILi0EEcvT__EEE
       g1<X>({});
       // CHECK: @_ZN33partially_dependent_template_args5test22g2IiEEvDTplclL_ZNS0_1fILj0EEEiNS0_1XEEilEEcvT__EE
       g2<int>({});

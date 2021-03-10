@@ -68,7 +68,7 @@ def lldltocache : P<"lldltocache",
 def lldltocachepolicy : P<"lldltocachepolicy",
     "Pruning policy for the ThinLTO cache">;
 def lldsavetemps : F<"lldsavetemps">,
-    HelpText<"Save temporary files instead of deleting them">;
+    HelpText<"Save intermediate LTO compilation results">;
 def machine : P<"machine", "Specify target platform">;
 def merge   : P<"merge", "Combine sections">;
 def mllvm   : P<"mllvm", "Options to pass to LLVM">;
@@ -240,7 +240,7 @@ def lto_obj_path : P<
     "lto-obj-path",
     "output native object for merged LTO unit to this path">;
 def dash_dash_version : Flag<["--"], "version">,
-  HelpText<"Print version information">;
+  HelpText<"Display the version number and exit">;
 def threads
     : P<"threads", "Number of threads. '1' disables multi-threading. By "
                    "default all available hardware threads are used">;
