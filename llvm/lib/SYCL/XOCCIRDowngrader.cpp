@@ -30,6 +30,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/../../lib/IR/LLVMContextImpl.h"
 
 using namespace llvm;
 
@@ -97,7 +98,8 @@ struct XOCCIRDowngrader : public ModulePass {
       for (auto &P : F.args()) {
          if (P.hasAttribute(llvm::Attribute::ByVal)) {
              P.removeAttr(llvm::Attribute::ByVal);
-             P.addAttr(llvm::Attribute::ByVal);
+             P.addAttr(Attribute::get(M.getContext(), llvm::Attribute::ByVal,
+                                      nullptr));
          }
       }
 
@@ -107,7 +109,9 @@ struct XOCCIRDowngrader : public ModulePass {
           for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
             if (CB->paramHasAttr(i, llvm::Attribute::ByVal)) {
               CB->removeParamAttr(i, llvm::Attribute::ByVal);
-              CB->addParamAttr(i, llvm::Attribute::ByVal);
+              CB->addParamAttr(i,
+                               Attribute::get(M.getContext(),
+                                              llvm::Attribute::ByVal, nullptr));
             }
           }
         }
@@ -234,16 +238,25 @@ struct XOCCIRDowngrader : public ModulePass {
       I->eraseFromParent();
   }
 
+  void convertPoinsonToZero(Module &M) {
+    for (auto &PV : M.getContext().pImpl->PVConstants)
+      PV.second.get()->replaceAllUsesWith(
+          Constant::getNullValue(PV.second.get()->getType()));
+  }
+
   bool runOnModule(Module &M) override {
     resetByVal(M);
     removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
-                         Attribute::ImmArg, Attribute::NoSync});
+                         Attribute::ImmArg, Attribute::NoSync,
+                         Attribute::MustProgress, Attribute::NoUndef});
     renameBasicBlocks(M);
     removeFreezeInst(M);
     removeFNegInst(M);
     removeMemIntrAlign(M);
 
     lowerIntrinsic(M);
+
+    convertPoinsonToZero(M);
     // The module probably changed
     return true;
   }

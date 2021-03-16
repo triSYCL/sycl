@@ -27,7 +27,6 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/SHA1.h"
 
 #include <array>
 #include <functional>
@@ -179,20 +178,8 @@ static bool IsSyclMathFunc(unsigned BuiltinID) {
   case Builtin::BI__builtin_truncl:
   case Builtin::BIlroundl:
   case Builtin::BI__builtin_lroundl:
-  case Builtin::BIfmax:
-  case Builtin::BI__builtin_fmax:
-  case Builtin::BIfmin:
-  case Builtin::BI__builtin_fmin:
-  case Builtin::BIfmaxf:
-  case Builtin::BI__builtin_fmaxf:
-  case Builtin::BIfminf:
-  case Builtin::BI__builtin_fminf:
   case Builtin::BIlroundf:
   case Builtin::BI__builtin_lroundf:
-  case Builtin::BI__builtin_fpclassify:
-  case Builtin::BI__builtin_isfinite:
-  case Builtin::BI__builtin_isinf:
-  case Builtin::BI__builtin_isnormal:
     return false;
   default:
     break;
@@ -565,12 +552,6 @@ public:
         }
       }
 
-      // Propagate the explicit SIMD attribute through call graph - it is used
-      // to distinguish ESIMD code in ESIMD LLVM passes.
-      if (KernelBody && KernelBody->hasAttr<SYCLSimdAttr>() &&
-          (KernelBody != FD) && !FD->hasAttr<SYCLSimdAttr>())
-        FD->addAttr(SYCLSimdAttr::CreateImplicit(SemaRef.getASTContext()));
-
       // Attribute "loop_fuse" can be applied explicitly on kernel function.
       // Attribute should not be propagated from device functions to kernel.
       if (auto *A = FD->getAttr<SYCLIntelLoopFuseAttr>()) {
@@ -768,72 +749,6 @@ static target getAccessTarget(const ClassTemplateSpecializationDecl *AccTy) {
       AccTy->getTemplateArgs()[3].getAsIntegral().getExtValue());
 }
 
-/// Compute a unique name that is consumable by sycl-xocc
-static std::string computeUniqueSYCLXOCCName(StringRef Name,
-                                             StringRef Demangle) {
-  /// XOCC has a maximum of 64 character for the name of the kernel function
-  /// plus the name of one parameter.
-  /// Those characters need to be used wisely to prevent name collisions.
-  /// It is also useful to use a name that is understandable by the user,
-  /// so we add only 8 character of hash and only if needed.
-  /// The first character cannot be an underscore or a digit.
-  /// An underscore can't be followed by an other underscore.
-  constexpr unsigned MaxXOCCSize = 30;
-  /// Some transformations might make 2 kernel identifiers the same.
-  /// Allow adding a hash when such transformations are made to avoid possible
-  /// name conflict.
-  bool ForceHash = false;
-
-  std::string Result;
-  Result.reserve(Demangle.size());
-
-  for (char c : Demangle) {
-    if (!isAlphanumeric(c)) {
-      // Do not repeat _ in the cleaned-up name
-      if (!Result.empty() && Result.back() == '_')
-        continue;
-      c = '_';
-    }
-    Result.push_back(c);
-  }
-
-  // Replace first kernel character name by a 'k' to be compatible with SPIR
-  if ((Result.front() == '_' || isDigit(Result.front()))) {
-    Result.front() = 'k';
-    ForceHash = true;
-  }
-
-  /// The name alone is guaranteed to be unique, so if fits in the size, it is
-  /// enough.
-  if (Result.size() < MaxXOCCSize && !ForceHash)
-    return Result;
-
-  /// 9 for 8 characters of hash and an '_'.
-  Result.erase(0, Result.size() - (MaxXOCCSize - 9));
-
-  if ((Result.front() == '_' || isDigit(Result.front())))
-    Result.front() = 'k';
-
-  if (Result.back() != '_')
-    Result.push_back('_');
-
-  /// Sadly there is only 63 valid characters in C identifiers and v++ doesn't
-  /// deal well with double underscores in identifiers. So A and B are
-  /// repeated. This doesn't hurt entropy too much because it is just 2 out
-  /// of 64.
-  Result += llvm::SHA1::hashToString(
-      llvm::ArrayRef<uint8_t>{reinterpret_cast<const uint8_t *>(Name.data()),
-                              Name.size()},
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-      "abcdefghijklmnopqrstuvwxyz"
-      "0123456789AB");
-
-  if (Result.size() > MaxXOCCSize)
-    Result.resize(MaxXOCCSize);
-
-  return Result;
-}
-
 // The first template argument to the kernel caller function is used to identify
 // the kernel itself.
 static QualType calculateKernelNameType(ASTContext &Ctx,
@@ -843,6 +758,8 @@ static QualType calculateKernelNameType(ASTContext &Ctx,
   assert(TAL && "No template argument info");
   return TAL->get(0).getAsType().getCanonicalType();
 }
+
+std::string computeUniqueSYCLXOCCName(StringRef Name, StringRef Demangle);
 
 // Gets a name for the OpenCL kernel function, calculated from the first
 // template argument of the kernel caller function.
@@ -861,7 +778,6 @@ constructKernelName(Sema &S, FunctionDecl *KernelCallerFunc,
   std::string Str = PredefinedExpr::ComputeName(
       S.getASTContext(), PredefinedExpr::UniqueStableNameType, KernelNameType);
   Res = computeUniqueSYCLXOCCName(Res, KernelNameType.getAsString());
-  Str = computeUniqueSYCLXOCCName(Str, KernelNameType.getAsString());
   return {Res, Str};
 }
 
@@ -1547,12 +1463,12 @@ public:
     return isValid();
   }
 
-  bool enterUnion(const CXXRecordDecl *RD, FieldDecl *FD) {
+  bool enterUnion(const CXXRecordDecl *RD, FieldDecl *FD) override {
     ++UnionCount;
     return true;
   }
 
-  bool leaveUnion(const CXXRecordDecl *RD, FieldDecl *FD) {
+  bool leaveUnion(const CXXRecordDecl *RD, FieldDecl *FD) override {
     --UnionCount;
     return true;
   }
@@ -2832,13 +2748,8 @@ class SyclKernelIntHeaderCreator : public SyclKernelFieldHandler {
 
   // Sets a flag if the kernel is a parallel_for that calls the
   // free function API "this_item".
-  void setThisItemIsCalled(const CXXRecordDecl *KernelObj,
-                           FunctionDecl *KernelFunc) {
+  void setThisItemIsCalled(FunctionDecl *KernelFunc) {
     if (getKernelInvocationKind(KernelFunc) != InvokeParallelFor)
-      return;
-
-    const CXXMethodDecl *WGLambdaFn = getOperatorParens(KernelObj);
-    if (!WGLambdaFn)
       return;
 
     // The call graph for this translation unit.
@@ -2848,7 +2759,7 @@ class SyclKernelIntHeaderCreator : public SyclKernelFieldHandler {
         std::pair<const FunctionDecl *, const FunctionDecl *>;
     llvm::SmallPtrSet<const FunctionDecl *, 16> Visited;
     llvm::SmallVector<ChildParentPair, 16> WorkList;
-    WorkList.push_back({WGLambdaFn, nullptr});
+    WorkList.push_back({KernelFunc, nullptr});
 
     while (!WorkList.empty()) {
       const FunctionDecl *FD = WorkList.back().first;
@@ -2899,7 +2810,7 @@ public:
     bool IsSIMDKernel = isESIMDKernelType(KernelObj);
     Header.startKernel(Name, NameType, StableName, KernelObj->getLocation(),
                        IsSIMDKernel);
-    setThisItemIsCalled(KernelObj, KernelFunc);
+    setThisItemIsCalled(KernelFunc);
   }
 
   bool handleSyclAccessorType(const CXXRecordDecl *RD,
@@ -3354,27 +3265,6 @@ void Sema::ConstructOpenCLKernel(FunctionDecl *KernelCallerFunc,
   Visitor.VisitRecordFields(KernelObj, kernel_decl, kernel_body, int_header);
 }
 
-// This function marks all the callees of explicit SIMD kernel
-// with !sycl_explicit_simd. We want to have different semantics
-// for functions that are called from SYCL and E-SIMD contexts.
-// Later, functions marked with !sycl_explicit_simd will be cloned
-// to maintain two different semantics.
-void Sema::MarkSyclSimd() {
-  for (Decl *D : syclDeviceDecls())
-    if (auto SYCLKernel = dyn_cast<FunctionDecl>(D))
-      if (SYCLKernel->hasAttr<SYCLSimdAttr>()) {
-        MarkDeviceFunction Marker(*this);
-        Marker.SYCLCG.addToCallGraph(getASTContext().getTranslationUnitDecl());
-        llvm::SmallPtrSet<FunctionDecl *, 10> VisitedSet;
-        Marker.CollectKernelSet(SYCLKernel, SYCLKernel, VisitedSet);
-        for (const auto &elt : Marker.KernelSet) {
-          if (FunctionDecl *Def = elt->getDefinition())
-            if (!Def->hasAttr<SYCLSimdAttr>())
-              Def->addAttr(SYCLSimdAttr::CreateImplicit(getASTContext()));
-        }
-      }
-}
-
 void Sema::MarkDevice(void) {
   // Create the call graph so we can detect recursion and check the validity
   // of new operator overrides. Add the kernel function itself in case
@@ -3429,32 +3319,28 @@ void Sema::MarkDevice(void) {
           break;
         }
         case attr::Kind::ReqdWorkGroupSize: {
-          auto *Attr = cast<ReqdWorkGroupSizeAttr>(A);
+          auto *RWGSA = cast<ReqdWorkGroupSizeAttr>(A);
           if (auto *Existing = SYCLKernel->getAttr<ReqdWorkGroupSizeAttr>()) {
-            if ((getIntExprValue(Existing->getXDim(), getASTContext()) !=
-                 getIntExprValue(Attr->getXDim(), getASTContext())) ||
-                (getIntExprValue(Existing->getYDim(), getASTContext()) !=
-                 getIntExprValue(Attr->getYDim(), getASTContext())) ||
-                (getIntExprValue(Existing->getZDim(), getASTContext()) !=
-                 getIntExprValue(Attr->getZDim(), getASTContext()))) {
+            ASTContext &Ctx = getASTContext();
+            if (Existing->getXDimVal(Ctx) != RWGSA->getXDimVal(Ctx) ||
+                Existing->getYDimVal(Ctx) != RWGSA->getYDimVal(Ctx) ||
+                Existing->getZDimVal(Ctx) != RWGSA->getZDimVal(Ctx)) {
               Diag(SYCLKernel->getLocation(),
                    diag::err_conflicting_sycl_kernel_attributes);
               Diag(Existing->getLocation(), diag::note_conflicting_attribute);
-              Diag(Attr->getLocation(), diag::note_conflicting_attribute);
+              Diag(RWGSA->getLocation(), diag::note_conflicting_attribute);
               SYCLKernel->setInvalidDecl();
             }
           } else if (auto *Existing =
                          SYCLKernel->getAttr<SYCLIntelMaxWorkGroupSizeAttr>()) {
-            if ((getIntExprValue(Existing->getXDim(), getASTContext()) <
-                 getIntExprValue(Attr->getXDim(), getASTContext())) ||
-                (getIntExprValue(Existing->getYDim(), getASTContext()) <
-                 getIntExprValue(Attr->getYDim(), getASTContext())) ||
-                (getIntExprValue(Existing->getZDim(), getASTContext()) <
-                 getIntExprValue(Attr->getZDim(), getASTContext()))) {
+            ASTContext &Ctx = getASTContext();
+            if (Existing->getXDimVal(Ctx) < RWGSA->getXDimVal(Ctx) ||
+                Existing->getYDimVal(Ctx) < RWGSA->getYDimVal(Ctx) ||
+                Existing->getZDimVal(Ctx) < RWGSA->getZDimVal(Ctx)) {
               Diag(SYCLKernel->getLocation(),
                    diag::err_conflicting_sycl_kernel_attributes);
               Diag(Existing->getLocation(), diag::note_conflicting_attribute);
-              Diag(Attr->getLocation(), diag::note_conflicting_attribute);
+              Diag(RWGSA->getLocation(), diag::note_conflicting_attribute);
               SYCLKernel->setInvalidDecl();
             } else {
               SYCLKernel->addAttr(A);
@@ -3465,18 +3351,16 @@ void Sema::MarkDevice(void) {
           break;
         }
         case attr::Kind::SYCLIntelMaxWorkGroupSize: {
-          auto *Attr = cast<SYCLIntelMaxWorkGroupSizeAttr>(A);
+          auto *SIMWGSA = cast<SYCLIntelMaxWorkGroupSizeAttr>(A);
           if (auto *Existing = SYCLKernel->getAttr<ReqdWorkGroupSizeAttr>()) {
-            if ((getIntExprValue(Existing->getXDim(), getASTContext()) >
-                 getIntExprValue(Attr->getXDim(), getASTContext())) ||
-                (getIntExprValue(Existing->getYDim(), getASTContext()) >
-                 getIntExprValue(Attr->getYDim(), getASTContext())) ||
-                (getIntExprValue(Existing->getZDim(), getASTContext()) >
-                 getIntExprValue(Attr->getZDim(), getASTContext()))) {
+            ASTContext &Ctx = getASTContext();
+            if (Existing->getXDimVal(Ctx) > SIMWGSA->getXDimVal(Ctx) ||
+                Existing->getYDimVal(Ctx) > SIMWGSA->getYDimVal(Ctx) ||
+                Existing->getZDimVal(Ctx) > SIMWGSA->getZDimVal(Ctx)) {
               Diag(SYCLKernel->getLocation(),
                    diag::err_conflicting_sycl_kernel_attributes);
               Diag(Existing->getLocation(), diag::note_conflicting_attribute);
-              Diag(Attr->getLocation(), diag::note_conflicting_attribute);
+              Diag(SIMWGSA->getLocation(), diag::note_conflicting_attribute);
               SYCLKernel->setInvalidDecl();
             } else {
               SYCLKernel->addAttr(A);
@@ -3627,9 +3511,9 @@ static const char *paramKind2Str(KernelParamKind K) {
     CASE(std_layout);
     CASE(sampler);
     CASE(pointer);
-  default:
-    return "<ERROR>";
   }
+  return "<ERROR>";
+
 #undef CASE
 }
 

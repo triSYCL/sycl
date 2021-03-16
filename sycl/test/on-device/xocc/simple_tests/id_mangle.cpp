@@ -105,10 +105,10 @@ int main() {
   // at the moment
 #ifdef __SYCL_HAS_XILINX_DEVICE__
   std::cout << "sum of all id's, sizes and offsets and user get_global_id call "
-            <<  sum + get_global_id(0) << "\n";
+            <<  sum + get_global_id(0) << std::endl;
   assert((sum + get_global_id(0)) == 9172);
 #else
-  std::cout << "sum of all id's, sizes and offsets: " <<  sum << "\n";
+  std::cout << "sum of all id's, sizes and offsets: " <<  sum << std::endl;
   assert(sum == 172);
 #endif
 
