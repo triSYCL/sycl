@@ -245,6 +245,25 @@ struct XOCCIRDowngrader : public ModulePass {
           Constant::getNullValue(PV.second.get()->getType()));
   }
 
+  void removeMetaDataValues(Module &M) {
+    SmallVector<Instruction *, 16> ToDelete;
+    for (auto &F : M.functions()) {
+      if (llvm::none_of(F.args(), [&](Argument &A) {
+            return A.getType()->isMetadataTy();
+          }))
+        continue;
+      for (auto &U : F.uses()) {
+        CallBase *CB = cast<CallBase>(U.getUser());
+        assert(cast<FunctionType>(CB->getCalledFunction()->getType()->getPointerElementType())
+                   ->getReturnType()
+                   ->isVoidTy());
+        ToDelete.push_back(CB);
+      }
+    }
+    for (auto *I : ToDelete)
+      I->eraseFromParent();
+  }
+
   bool runOnModule(Module &M) override {
     resetByVal(M);
     removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
@@ -256,6 +275,7 @@ struct XOCCIRDowngrader : public ModulePass {
     removeMemIntrAlign(M);
 
     lowerIntrinsic(M);
+    removeMetaDataValues(M);
 
     convertPoinsonToZero(M);
     // The module probably changed

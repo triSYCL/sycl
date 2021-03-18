@@ -192,7 +192,7 @@ $OPT -S -preparesycl -globaldce \
 
 $OPT -S -O3 -xoccIRDowngrader \
   "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.simple.xpirbc" -o \
-  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc"
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.ll"
 
 # Generate our final bitcode file with the xocc llvm-as (Clang/LLVM 7 for now)
 # this is to work around a problem with the ByVal attribute. The bitcode that
@@ -201,7 +201,7 @@ $OPT -S -O3 -xoccIRDowngrader \
 # it by compiling the IR to BC using the llvm-as from xocc and some minor
 # massaging in the xoccIRDowngrader
 $SDX_CLANG_LLVM_BIN/llvm-as \
-  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc" -o \
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.ll" -o \
   "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc"
 
 # Our bash file containing kernel property environment variables is placed in
