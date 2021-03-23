@@ -2,7 +2,7 @@
 // RUN: env SYCL_DEVICE_FILTER=level_zero:gpu %t.out
 // RUN: env SYCL_DEVICE_FILTER=opencl:gpu %t.out
 //
-// REQUIRES: gpu
+// REQUIRES: gpu && !xocc
 
 //==--------- intel-ext-device.cpp - SYCL device test ------------==//
 //
