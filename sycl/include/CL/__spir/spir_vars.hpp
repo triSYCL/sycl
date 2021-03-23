@@ -27,6 +27,7 @@ SYCL_EXTERNAL size_t __spir_ocl_get_global_offset(unsigned int dimindx);
 SYCL_EXTERNAL size_t __spir_ocl_get_group_id(unsigned int dimindx);
 SYCL_EXTERNAL size_t __spir_ocl_get_num_groups(unsigned int dimindx);
 
+namespace __spir {
 enum class SYCLBuiltinTypes {
    SYCLBuiltinGlobalSize,
    SYCLBuiltinGlobalInvocationId,
@@ -46,7 +47,7 @@ enum class SYCLBuiltinTypes {
 constexpr size_t MapTo(SYCLBuiltinTypes builtin, int ID) {
   switch (builtin) {
     case SYCLBuiltinTypes::SYCLBuiltinGlobalSize:
-        return __spir_ocl_get_global_size(ID);
+      return __spir_ocl_get_global_size(ID);
     break;
     case SYCLBuiltinTypes::SYCLBuiltinGlobalInvocationId:
       return __spir_ocl_get_global_id(ID);
@@ -74,8 +75,6 @@ constexpr size_t MapTo(SYCLBuiltinTypes builtin, int ID) {
     return MapTo(SYCLBuiltinTypes::SYCLBuiltin##POSTFIX, ID);               \
   }
 
-namespace __spir {
-
 DEFINE_SYCL_SPIR_CONVERTER(GlobalSize);
 DEFINE_SYCL_SPIR_CONVERTER(GlobalInvocationId)
 DEFINE_SYCL_SPIR_CONVERTER(WorkgroupSize)
@@ -84,9 +83,9 @@ DEFINE_SYCL_SPIR_CONVERTER(LocalInvocationId)
 DEFINE_SYCL_SPIR_CONVERTER(WorkgroupId)
 DEFINE_SYCL_SPIR_CONVERTER(GlobalOffset)
 
-}
-
 #undef DEFINE_SYCL_SPIR_CONVERTER
+
+} // namespace __spir
 
 // SPIRV intrinsics/builtins that we currently don't map for yet (unsure if
 // they have equivalent SPIR or HLS mappings).
