@@ -1,9 +1,9 @@
 // REQUIRES: xocc
 
-// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out 2>&1 | tee
-// %t.dump RUN: %ACC_RUN_PLACEHOLDER %t.out RUN: cat %t.dump | FileCheck
-// --check-prefix=CHECK1 %s RUN: cat %t.dump | FileCheck --check-prefix=CHECK2
-// %s
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out 2>&1 | tee %t.dump
+// RUN: %ACC_RUN_PLACEHOLDER %t.out
+// RUN: cat %t.dump | FileCheck --check-prefix=CHECK1 %s
+// RUN: cat %t.dump | FileCheck --check-prefix=CHECK2 %s
 
 #include <CL/sycl.hpp>
 #include <CL/sycl/xilinx/fpga.hpp>
