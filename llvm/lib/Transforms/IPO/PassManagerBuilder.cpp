@@ -51,6 +51,8 @@
 
 using namespace llvm;
 
+static cl::opt<bool> SyclXOCC("sycl-xocc", cl::Hidden, cl::init(false));
+
 cl::opt<bool> RunPartialInlining("enable-partial-inlining", cl::init(false),
                                  cl::Hidden, cl::ZeroOrMore,
                                  cl::desc("Run Partial inlinining pass"));
@@ -836,7 +838,7 @@ void PassManagerBuilder::populateModulePassManager(
                                           .hoistCommonInsts(true)
                                           .sinkCommonInsts(true)));
 
-  if (SLPVectorize) {
+  if (SLPVectorize && !SyclXOCC) {
     MPM.add(createSLPVectorizerPass()); // Vectorize parallel scalar chains.
     if (OptLevel > 1 && ExtraVectorizerPasses) {
       MPM.add(createEarlyCSEPass());
@@ -1103,7 +1105,7 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   PM.add(createBitTrackingDCEPass());
 
   // More scalar chains could be vectorized due to more alias information
-  if (SLPVectorize)
+  if (SLPVectorize && !SyclXOCC)
     PM.add(createSLPVectorizerPass()); // Vectorize parallel scalar chains.
 
   PM.add(createVectorCombinePass()); // Clean up partial vectorization.

@@ -1032,15 +1032,6 @@ Instruction *InstCombinerImpl::visitLoadInst(LoadInst &LI) {
     }
   }
 
-  if (Triple(LI.getModule()->getTargetTriple()).isXilinxFPGA()) {
-    if (auto *ASC = dyn_cast<AddrSpaceCastInst>(LI.getPointerOperand()))
-      return new LoadInst(LI.getType(), ASC->getPointerOperand(), Twine(),
-                          LI.isVolatile(), LI.getAlign());
-    if (auto *ASC = dyn_cast<AddrSpaceCastOperator>(LI.getPointerOperand()))
-      return new LoadInst(LI.getType(), ASC->getPointerOperand(), Twine(),
-                          LI.isVolatile(), LI.getAlign());
-  }
-
   return nullptr;
 }
 
@@ -1456,15 +1447,6 @@ Instruction *InstCombinerImpl::visitStoreInst(StoreInst &SI) {
   // store undef, Ptr -> noop
   if (isa<UndefValue>(Val))
     return eraseInstFromFunction(SI);
-
-  if (Triple(SI.getModule()->getTargetTriple()).isXilinxFPGA()) {
-    if (auto *ASC = dyn_cast<AddrSpaceCastInst>(Ptr))
-      return new StoreInst(Val, ASC->getPointerOperand(), SI.isVolatile(),
-                           SI.getAlign());
-    if (auto *ASC = dyn_cast<AddrSpaceCastOperator>(Ptr))
-      return new StoreInst(Val, ASC->getPointerOperand(), SI.isVolatile(),
-                           SI.getAlign());
-  }
 
   return nullptr;
 }

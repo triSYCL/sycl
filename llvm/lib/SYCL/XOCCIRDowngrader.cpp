@@ -278,6 +278,10 @@ struct XOCCIRDowngrader : public ModulePass {
     removeMetaDataValues(M);
 
     convertPoinsonToZero(M);
+    if (Triple(M.getTargetTriple()).getArch() == llvm::Triple::fpga64)
+      M.setTargetTriple("fpga64-xilinx-none");
+    else
+      M.setTargetTriple("fpga32-xilinx-none");
     // The module probably changed
     return true;
   }
