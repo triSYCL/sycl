@@ -101,11 +101,15 @@ else
     fi
   fi
   # It says 3.9, but trust us this is Clang/LLVM 7..
-  SDX_CLANG_LLVM_BIN="$SDX_BIN_PATH_DIR/../lnx64/tools/clang-3.9-csynth/bin"
-  if [[ ! -f "$SDX_CLANG_LLVM_BIN/llvm-as" ]]; then
-    SDX_CLANG_LLVM_BIN="$SDX_BIN_PATH_DIR/../../../Vitis_HLS/$VITIS_VERSION/lnx64/tools/clang-3.9-csynth/bin"
+  if [[ ! -z "$XILINX_CLANG_39_BUILD_PATH" ]]; then
+    SDX_CLANG_LLVM_BIN=$XILINX_CLANG_39_BUILD_PATH
+  else
+    SDX_CLANG_LLVM_BIN="$SDX_BIN_PATH_DIR/../lnx64/tools/clang-3.9-csynth/bin"
     if [[ ! -f "$SDX_CLANG_LLVM_BIN/llvm-as" ]]; then
-      usage 9 "could not find SDx's binary directory"
+      SDX_CLANG_LLVM_BIN="$SDX_BIN_PATH_DIR/../../../Vitis_HLS/$VITIS_VERSION/lnx64/tools/clang-3.9-csynth/bin"
+      if [[ ! -f "$SDX_CLANG_LLVM_BIN/llvm-as" ]]; then
+        usage 9 "could not find SDx's binary directory"
+      fi
     fi
   fi
 
@@ -118,6 +122,15 @@ else
       usage 10 "could not find xocc or v++ in $SDX_BIN_PATH_DIR"
     fi
   fi
+fi
+
+if [[ -f "$SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer" ]];then
+  function cleanup {
+    umount $SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer || sudo umount $SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer
+  }
+
+  trap cleanup EXIT
+  mount --bind $(which echo) $SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer || sudo mount --bind $(which echo) $SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer
 fi
 
 # Setup Clang/LLVM related env variables

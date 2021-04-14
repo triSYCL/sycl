@@ -481,7 +481,7 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   if (OptLevel > 1) {
     MPM.add(createMergedLoadStoreMotionPass()); // Merge ld/st in diamonds
     MPM.add(NewGVN ? createNewGVNPass()
-                   : createGVNPass(DisableGVNLoadPRE)); // Remove redundancies
+                   : createGVNPass(!SyclXOCC && DisableGVNLoadPRE)); // Remove redundancies
   }
   MPM.add(createMemCpyOptPass());             // Remove memcpy / form memset
   MPM.add(createSCCPPass());                  // Constant prop with SCCP
@@ -1065,7 +1065,7 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
 
   PM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap));
   PM.add(NewGVN ? createNewGVNPass()
-                : createGVNPass(DisableGVNLoadPRE)); // Remove redundancies.
+                : createGVNPass(!SyclXOCC &&DisableGVNLoadPRE)); // Remove redundancies.
   PM.add(createMemCpyOptPass());            // Remove dead memcpys.
 
   // Nuke dead stores.

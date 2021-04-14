@@ -1447,7 +1447,8 @@ bool GVN::processNonLocalLoad(LoadInst *LI) {
   if (LI->getParent()->getParent()->hasFnAttribute(
           Attribute::SanitizeAddress) ||
       LI->getParent()->getParent()->hasFnAttribute(
-          Attribute::SanitizeHWAddress))
+          Attribute::SanitizeHWAddress) ||
+      Triple(LI->getModule()->getTargetTriple()).isXilinxFPGA())
     return false;
 
   // Step 1: Find the non-local dependencies of the load.
