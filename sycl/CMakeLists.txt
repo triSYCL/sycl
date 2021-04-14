@@ -338,6 +338,7 @@ add_custom_target( sycl-toolchain
           llvm-link
           sycl-xocc
           sycl-chess
+          acap-intrinsic
           opt
           llvm-objcopy
           sycl-post-link

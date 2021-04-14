@@ -74,6 +74,8 @@ else
   fi
 fi
 
+export SYCL_LIB_PATH="$(realpath $DRIVER_PATH_DIR/../lib)"
+
 # excluding file extension e.g. .cpp
 export SOURCE_FILE_NAME="$3"
 # input file name including extensions and path
@@ -177,7 +179,8 @@ chess_kernel_compile () {
     $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f \
       +l$LINKER_SCRIPT -o "$SOURCE_TEMPORARY_DIR/$0.elf.o" \
       "$SOURCE_TEMPORARY_DIR/$0.main.o" \
-      "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o"
+      "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
+      "$SYCL_LIB_PATH/acap-intrinsic.o"
 }
 
 # export the bash function so xargs can use it
