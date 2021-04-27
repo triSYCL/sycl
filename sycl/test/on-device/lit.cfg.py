@@ -113,7 +113,7 @@ def getDeviceCount(device_type, be = backend):
     (output, err) = process.communicate()
     exit_code = process.wait()
 
-    if exit_code != 0:
+    if exit_code != 0 and be == backend:
         lit_config.error("getDeviceCount {TYPE} {BACKEND}: Non-zero exit code {CODE}".format(
             TYPE=device_type, BACKEND=be, CODE=exit_code))
         return [0,False,False]
