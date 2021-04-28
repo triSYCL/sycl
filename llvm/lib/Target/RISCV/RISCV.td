@@ -41,12 +41,28 @@ def HasStdExtD : Predicate<"Subtarget->hasStdExtD()">,
                            AssemblerPredicate<(all_of FeatureStdExtD),
                            "'D' (Double-Precision Floating-Point)">;
 
+def FeatureExtZfh
+    : SubtargetFeature<"experimental-zfh", "HasStdExtZfh", "true",
+                       "'Zfh' (Half-Precision Floating-Point)",
+                       [FeatureStdExtF]>;
+def HasStdExtZfh : Predicate<"Subtarget->hasStdExtZfh()">,
+                             AssemblerPredicate<(all_of FeatureExtZfh),
+                             "'Zfh' (Half-Precision Floating-Point)">;
+
 def FeatureStdExtC
     : SubtargetFeature<"c", "HasStdExtC", "true",
                        "'C' (Compressed Instructions)">;
 def HasStdExtC : Predicate<"Subtarget->hasStdExtC()">,
                            AssemblerPredicate<(all_of FeatureStdExtC),
                            "'C' (Compressed Instructions)">;
+
+def FeatureExtZba
+    : SubtargetFeature<"experimental-zba", "HasStdExtZba", "true",
+                       "'Zba' (Address calculation 'B' Instructions)">;
+def HasStdExtZba : Predicate<"Subtarget->hasStdExtZba()">,
+                             AssemblerPredicate<(all_of FeatureExtZba),
+                             "'Zba' (Address calculation 'B' Instructions)">;
+def NotHasStdExtZba : Predicate<"!Subtarget->hasStdExtZba()">;
 
 def FeatureExtZbb
     : SubtargetFeature<"experimental-zbb", "HasStdExtZbb", "true",
@@ -115,7 +131,9 @@ def HasStdExtZbt : Predicate<"Subtarget->hasStdExtZbt()">,
 // subextensions. They should be enabled if either has been specified.
 def HasStdExtZbbOrZbp
     : Predicate<"Subtarget->hasStdExtZbb() || Subtarget->hasStdExtZbp()">,
-                AssemblerPredicate<(any_of FeatureExtZbb, FeatureExtZbp)>;
+                AssemblerPredicate<(any_of FeatureExtZbb, FeatureExtZbp),
+                                   "'Zbb' (Base 'B' Instructions) or "
+                                   "'Zbp' (Permutation 'B' Instructions)">;
 
 def FeatureExtZbproposedc
     : SubtargetFeature<"experimental-zbproposedc", "HasStdExtZbproposedc", "true",
@@ -127,7 +145,8 @@ def HasStdExtZbproposedc : Predicate<"Subtarget->hasStdExtZbproposedc()">,
 def FeatureStdExtB
     : SubtargetFeature<"experimental-b", "HasStdExtB", "true",
                        "'B' (Bit Manipulation Instructions)",
-                       [FeatureExtZbb,
+                       [FeatureExtZba,
+                        FeatureExtZbb,
                         FeatureExtZbc,
                         FeatureExtZbe,
                         FeatureExtZbf,
@@ -149,8 +168,7 @@ def HasRVCHints : Predicate<"Subtarget->enableRVCHintInstrs()">,
 
 def FeatureStdExtV
     : SubtargetFeature<"experimental-v", "HasStdExtV", "true",
-                       "'V' (Vector Instructions)",
-                       [FeatureStdExtF]>;
+                       "'V' (Vector Instructions)">;
 def HasStdExtV : Predicate<"Subtarget->hasStdExtV()">,
                            AssemblerPredicate<(all_of FeatureStdExtV),
                            "'V' (Vector Instructions)">;
@@ -179,8 +197,8 @@ def IsRV32 : Predicate<"!Subtarget->is64Bit()">,
                        AssemblerPredicate<(all_of (not Feature64Bit)),
                        "RV32I Base Instruction Set">;
 
+defvar RV32 = DefaultMode;
 def RV64           : HwMode<"+64bit">;
-def RV32           : HwMode<"-64bit">;
 
 def FeatureRV32E
     : SubtargetFeature<"e", "IsRV32E", "true",
@@ -216,7 +234,7 @@ include "RISCVCallingConv.td"
 include "RISCVInstrInfo.td"
 include "RISCVRegisterBanks.td"
 include "RISCVSchedRocket.td"
-include "RISCVSchedBullet.td"
+include "RISCVSchedSiFive7.td"
 
 //===----------------------------------------------------------------------===//
 // RISC-V processors supported.
@@ -228,8 +246,8 @@ def : ProcessorModel<"generic-rv64", NoSchedModel, [Feature64Bit]>;
 def : ProcessorModel<"rocket-rv32", RocketModel, []>;
 def : ProcessorModel<"rocket-rv64", RocketModel, [Feature64Bit]>;
 
-def : ProcessorModel<"sifive-7-rv32", BulletModel, []>;
-def : ProcessorModel<"sifive-7-rv64", BulletModel, [Feature64Bit]>;
+def : ProcessorModel<"sifive-7-rv32", SiFive7Model, []>;
+def : ProcessorModel<"sifive-7-rv64", SiFive7Model, [Feature64Bit]>;
 
 def : ProcessorModel<"sifive-e31", RocketModel, [FeatureStdExtM,
                                                  FeatureStdExtA,
@@ -242,17 +260,17 @@ def : ProcessorModel<"sifive-u54", RocketModel, [Feature64Bit,
                                                  FeatureStdExtD,
                                                  FeatureStdExtC]>;
 
-def : ProcessorModel<"sifive-e76", BulletModel, [FeatureStdExtM,
-                                                 FeatureStdExtA,
-                                                 FeatureStdExtF,
-                                                 FeatureStdExtC]>;
+def : ProcessorModel<"sifive-e76", SiFive7Model, [FeatureStdExtM,
+                                                  FeatureStdExtA,
+                                                  FeatureStdExtF,
+                                                  FeatureStdExtC]>;
 
-def : ProcessorModel<"sifive-u74", BulletModel, [Feature64Bit,
-                                                 FeatureStdExtM,
-                                                 FeatureStdExtA,
-                                                 FeatureStdExtF,
-                                                 FeatureStdExtD,
-                                                 FeatureStdExtC]>;
+def : ProcessorModel<"sifive-u74", SiFive7Model, [Feature64Bit,
+                                                  FeatureStdExtM,
+                                                  FeatureStdExtA,
+                                                  FeatureStdExtF,
+                                                  FeatureStdExtD,
+                                                  FeatureStdExtC]>;
 
 //===----------------------------------------------------------------------===//
 // Define the RISC-V target.

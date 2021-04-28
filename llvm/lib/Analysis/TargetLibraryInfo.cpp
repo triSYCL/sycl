@@ -24,6 +24,8 @@ static cl::opt<TargetLibraryInfoImpl::VectorLibrary> ClVectorLibrary(
                           "No vector functions library"),
                clEnumValN(TargetLibraryInfoImpl::Accelerate, "Accelerate",
                           "Accelerate framework"),
+               clEnumValN(TargetLibraryInfoImpl::LIBMVEC_X86, "LIBMVEC-X86",
+                          "GLIBC Vector Math library"),
                clEnumValN(TargetLibraryInfoImpl::MASSV, "MASSV",
                           "IBM MASS vector library"),
                clEnumValN(TargetLibraryInfoImpl::SVML, "SVML",
@@ -549,6 +551,14 @@ static void initialize(TargetLibraryInfoImpl &TLI, const Triple &T,
     TLI.setUnavailable(LibFunc_nvvm_reflect);
   }
 
+  // These vec_malloc/free routines are only available on AIX.
+  if (!T.isOSAIX()) {
+    TLI.setUnavailable(LibFunc_vec_calloc);
+    TLI.setUnavailable(LibFunc_vec_malloc);
+    TLI.setUnavailable(LibFunc_vec_realloc);
+    TLI.setUnavailable(LibFunc_vec_free);
+  }
+
   TLI.addVectorizableFunctionsFromVecLib(ClVectorLibrary);
 }
 
@@ -829,6 +839,7 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
   case LibFunc_system:
     return (NumParams == 1 && FTy.getParamType(0)->isPointerTy());
   case LibFunc_malloc:
+  case LibFunc_vec_malloc:
     return (NumParams == 1 && FTy.getReturnType()->isPointerTy());
   case LibFunc_memcmp:
     return (NumParams == 3 && FTy.getReturnType()->isIntegerTy(32) &&
@@ -883,6 +894,7 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
     return (FTy.getReturnType()->isPointerTy());
   case LibFunc_realloc:
   case LibFunc_reallocf:
+  case LibFunc_vec_realloc:
     return (NumParams == 2 && FTy.getReturnType() == PCharTy &&
             FTy.getParamType(0) == FTy.getReturnType() &&
             IsSizeTTy(FTy.getParamType(1)));
@@ -910,6 +922,7 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
   case LibFunc_bzero:
     return (NumParams == 2 && FTy.getParamType(0)->isPointerTy());
   case LibFunc_calloc:
+  case LibFunc_vec_calloc:
     return (NumParams == 2 && FTy.getReturnType()->isPointerTy());
 
   case LibFunc_atof:
@@ -960,6 +973,7 @@ bool TargetLibraryInfoImpl::isValidProtoForLibFunc(const FunctionType &FTy,
   case LibFunc_mkdir:
   case LibFunc_mktime:
   case LibFunc_times:
+  case LibFunc_vec_free:
     return (NumParams != 0 && FTy.getParamType(0)->isPointerTy());
 
   case LibFunc_fopen:
@@ -1541,10 +1555,10 @@ static bool compareWithVectorFnName(const VecDesc &LHS, StringRef S) {
 }
 
 void TargetLibraryInfoImpl::addVectorizableFunctions(ArrayRef<VecDesc> Fns) {
-  VectorDescs.insert(VectorDescs.end(), Fns.begin(), Fns.end());
+  llvm::append_range(VectorDescs, Fns);
   llvm::sort(VectorDescs, compareByScalarFnName);
 
-  ScalarDescs.insert(ScalarDescs.end(), Fns.begin(), Fns.end());
+  llvm::append_range(ScalarDescs, Fns);
   llvm::sort(ScalarDescs, compareByVectorFnName);
 }
 
@@ -1554,6 +1568,14 @@ void TargetLibraryInfoImpl::addVectorizableFunctionsFromVecLib(
   case Accelerate: {
     const VecDesc VecFuncs[] = {
     #define TLI_DEFINE_ACCELERATE_VECFUNCS
+    #include "llvm/Analysis/VecFuncs.def"
+    };
+    addVectorizableFunctions(VecFuncs);
+    break;
+  }
+  case LIBMVEC_X86: {
+    const VecDesc VecFuncs[] = {
+    #define TLI_DEFINE_LIBMVEC_X86_VECFUNCS
     #include "llvm/Analysis/VecFuncs.def"
     };
     addVectorizableFunctions(VecFuncs);

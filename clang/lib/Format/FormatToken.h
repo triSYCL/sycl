@@ -40,6 +40,7 @@ namespace format {
   TYPE(ConflictAlternative)                                                    \
   TYPE(ConflictEnd)                                                            \
   TYPE(ConflictStart)                                                          \
+  TYPE(ConstraintJunctions)                                                    \
   TYPE(CtorInitializerColon)                                                   \
   TYPE(CtorInitializerComma)                                                   \
   TYPE(DesignatedInitializerLSquare)                                           \
@@ -68,6 +69,9 @@ namespace format {
   TYPE(JsTypeColon)                                                            \
   TYPE(JsTypeOperator)                                                         \
   TYPE(JsTypeOptionalQuestion)                                                 \
+  TYPE(JsAndAndEqual)                                                          \
+  TYPE(JsPipePipeEqual)                                                        \
+  TYPE(JsNullishCoalescingEqual)                                               \
   TYPE(LambdaArrow)                                                            \
   TYPE(LambdaLBrace)                                                           \
   TYPE(LambdaLSquare)                                                          \
@@ -92,6 +96,7 @@ namespace format {
   TYPE(RegexLiteral)                                                           \
   TYPE(SelectorName)                                                           \
   TYPE(StartOfName)                                                            \
+  TYPE(StatementAttributeLikeMacro)                                            \
   TYPE(StatementMacro)                                                         \
   TYPE(StructuredBindingLSquare)                                               \
   TYPE(TemplateCloser)                                                         \
@@ -206,12 +211,11 @@ class AnnotatedLine;
 struct FormatToken {
   FormatToken()
       : HasUnescapedNewline(false), IsMultiline(false), IsFirst(false),
-        MustBreakBefore(false), MustBreakAlignBefore(false),
-        IsUnterminatedLiteral(false), CanBreakBefore(false),
-        ClosesTemplateDeclaration(false), StartsBinaryExpression(false),
-        EndsBinaryExpression(false), PartOfMultiVariableDeclStmt(false),
-        ContinuesLineCommentSection(false), Finalized(false),
-        BlockKind(BK_Unknown), Decision(FD_Unformatted),
+        MustBreakBefore(false), IsUnterminatedLiteral(false),
+        CanBreakBefore(false), ClosesTemplateDeclaration(false),
+        StartsBinaryExpression(false), EndsBinaryExpression(false),
+        PartOfMultiVariableDeclStmt(false), ContinuesLineCommentSection(false),
+        Finalized(false), BlockKind(BK_Unknown), Decision(FD_Unformatted),
         PackingKind(PPK_Inconclusive), Type(TT_Unknown) {}
 
   /// The \c Token.
@@ -247,12 +251,6 @@ struct FormatToken {
   /// This happens for example when a preprocessor directive ended directly
   /// before the token.
   unsigned MustBreakBefore : 1;
-
-  /// Whether to not align across this token
-  ///
-  /// This happens for example when a preprocessor directive ended directly
-  /// before the token, but very rarely otherwise.
-  unsigned MustBreakAlignBefore : 1;
 
   /// Set to \c true if this token is an unterminated literal.
   unsigned IsUnterminatedLiteral : 1;
@@ -594,6 +592,7 @@ public:
     case tok::kw__Atomic:
     case tok::kw___attribute:
     case tok::kw___underlying_type:
+    case tok::kw_requires:
       return true;
     default:
       return false;

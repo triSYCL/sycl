@@ -92,6 +92,8 @@ void CanonicalIncludes::addSystemHeadersMapping(const LangOptions &Language) {
 #include "StdSymbolMap.inc"
         // There are two std::move()s, this is by far the most common.
         SYMBOL(move, std::, <utility>)
+        // There are multiple headers for size_t, pick one.
+        SYMBOL(size_t, std::, <cstddef>)
 #undef SYMBOL
     });
     StdSymbolMapping = Symbols;
@@ -99,6 +101,8 @@ void CanonicalIncludes::addSystemHeadersMapping(const LangOptions &Language) {
     static const auto *CSymbols = new llvm::StringMap<llvm::StringRef>({
 #define SYMBOL(Name, NameSpace, Header) {#Name, #Header},
 #include "CSymbolMap.inc"
+        // There are multiple headers for size_t, pick one.
+        SYMBOL(size_t, None, <stddef.h>)
 #undef SYMBOL
     });
     StdSymbolMapping = CSymbols;
@@ -420,6 +424,8 @@ void CanonicalIncludes::addSystemHeadersMapping(const LangOptions &Language) {
       {"bits/signum.h", "<csignal>"},
       {"bits/sigset.h", "<csignal>"},
       {"bits/sigstack.h", "<csignal>"},
+      {"bits/stdint-intn.h", "<cstdint>"},
+      {"bits/stdint-uintn.h", "<cstdint>"},
       {"bits/stdio_lim.h", "<cstdio>"},
       {"bits/sys_errlist.h", "<cstdio>"},
       {"bits/time.h", "<ctime>"},

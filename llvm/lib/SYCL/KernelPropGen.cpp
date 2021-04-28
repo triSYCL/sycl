@@ -56,6 +56,7 @@ struct KernelPropGen : public ModulePass {
   static char ID; // Pass identification, replacement for typeid
 
   llvm::SmallDenseMap<llvm::AllocaInst *, unsigned, 8> UserSpecifiedDDRBanks;
+  llvm::SmallDenseMap<llvm::Function *, std::string, 8> ExtraArgsMap;
 
   KernelPropGen() : ModulePass(ID) {}
 
@@ -77,8 +78,11 @@ struct KernelPropGen : public ModulePass {
     return FileFD;
   }
 
+  static StringRef KindOf(const char *Str) {
+    return StringRef(Str, strlen(Str) + 1);
+  }
+
   void CollectUserSpecifiedDDRBanks(Function &F) {
-    constexpr StringRef Prefix = "xilinx_ddr_bank_";
     for (Instruction &I : instructions(F)) {
       auto *CB = dyn_cast<CallBase>(&I);
       if (!CB || CB->getIntrinsicID() != Intrinsic::var_annotation)
@@ -90,13 +94,17 @@ struct KernelPropGen : public ModulePass {
               ->getOperand(0));
       if (!Alloca)
         continue;
-      StringRef Annot = Str->getRawDataValues();
-      if (!Annot.startswith(Prefix))
+      if (Str->getRawDataValues() != KindOf("xilinx_ddr_bank"))
         continue;
-      Annot = Annot.drop_front(Prefix.size()).drop_back();
-      unsigned Bank = 0;
-      if (Annot.getAsInteger(10, Bank))
-        continue;
+      Constant *Args = (
+          cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(4)))
+              ->getInitializer());
+      unsigned Bank;
+      if (auto* ZeroData = dyn_cast<ConstantAggregateZero>(Args))
+        Bank = 0;
+      else
+        Bank = cast<ConstantInt>(Args->getOperand(0))->getZExtValue();
+
       UserSpecifiedDDRBanks[Alloca] = Bank;
     }
   }
@@ -115,13 +123,76 @@ struct KernelPropGen : public ModulePass {
     return 0;
   }
 
+  /// Add the provided string as argument to all kernel functions that can reach
+  /// the original function.
+  void AddExtraArgsToCallers(Function *Original, std::string Additional) {
+    SmallVector<llvm::Function *, 8> Stack;
+    SmallPtrSet<llvm::Function *, 8> Visited;
+    Stack.push_back(Original);
+    while (!Stack.empty()) {
+      llvm::Function *F = Stack.pop_back_val();
+      if (!Visited.insert(F).second)
+        continue;
+      if (isKernel(*F)) {
+        ExtraArgsMap[F] += Additional;
+        continue;
+      }
+      for (User *U : F->users())
+        if (auto *I = dyn_cast<Instruction>(U))
+          Stack.push_back(I->getFunction());
+    }
+  }
+
+  /// Find xilinx_kernel_param annotations, and record all provided arguments
+  /// into ExtraArgsMap
+  void CollectExtraArgs(Module &M) {
+    SmallVector<User *, 8> Stack;
+    for (GlobalVariable &V : M.globals()) {
+      if (!isa<ConstantDataArray>(V.getInitializer()))
+        continue;
+      auto *Str = cast<ConstantDataArray>(V.getInitializer());
+      if (Str->getRawDataValues() != KindOf("xilinx_kernel_param"))
+        continue;
+      Stack.clear();
+      Stack.push_back(&V);
+      while (!Stack.empty()) {
+        User *U = Stack.pop_back_val();
+        if (!isa<Instruction>(U)) {
+          Stack.append(U->user_begin(), U->user_end());
+          continue;
+        }
+        if (auto *CB = dyn_cast<CallBase>(U))
+          if (CB->getIntrinsicID() == Intrinsic::var_annotation) {
+            Constant *Args =
+                (cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(4)))
+                     ->getInitializer());
+            if (auto *C = dyn_cast<ConstantStruct>(Args)) {
+              std::string ArgsStr;
+              for (auto *V : C->operand_values()) {
+                GlobalVariable *GV =
+                    cast<GlobalVariable>(getUnderlyingObject(V));
+                ArgsStr += cast<ConstantDataArray>(GV->getInitializer())
+                               ->getRawDataValues()
+                               .str() +
+                           ' ';
+              }
+              AddExtraArgsToCallers(CB->getFunction(), ArgsStr);
+            }
+          }
+      }
+    }
+  }
+
   void GenerateXOCCPropertyScript(Module &M, llvm::raw_fd_ostream &O) {
     llvm::SmallString<512> kernelNames;
     llvm::SmallString<512> DDRArgs;
+    llvm::SmallString<512> ExtraArgs;
+    CollectExtraArgs(M);
     for (auto &F : M.functions()) {
       if (isKernel(F)) {
         CollectUserSpecifiedDDRBanks(F);
         kernelNames += (" \"" + F.getName() + "\" ").str();
+        ExtraArgs += " \"" + ExtraArgsMap[&F] + "\" ";
 
         for (auto& Arg : F.args()) {
           if (Arg.getType()->isPointerTy())
@@ -174,6 +245,14 @@ struct KernelPropGen : public ModulePass {
               "# in the global and constant address spaces, passed to the\n"
               "# xocc linker phase\n";
        O << "DDR_BANK_ARGS=\"" << DDRArgs.str() << "\"\n";
+    }
+
+    /// Output the list of user specified extra parameter that need to be
+    /// forwarded to v++ during a specific kernel compilation.
+    if (!ExtraArgs.empty()) {
+      O << "# array of additional kernel parameters\n";
+      O << "declare -a EXTRA_KERNEL_PARAMS_ARRAY=(" << ExtraArgs.str()
+        << ")\n\n";
     }
   }
 

@@ -676,7 +676,7 @@ private:
   /// Read a value out of the specified record from slot 'Slot'. Increment Slot
   /// past the number of slots used by the value in the record. Return true if
   /// there is an error.
-  bool popValue(SmallVectorImpl<uint64_t> &Record, unsigned &Slot,
+  bool popValue(const SmallVectorImpl<uint64_t> &Record, unsigned &Slot,
                 unsigned InstNum, Type *Ty, Value *&ResVal) {
     if (getValue(Record, Slot, InstNum, Ty, ResVal))
       return true;
@@ -715,9 +715,9 @@ private:
     return getFnValueByID(ValNo, Ty);
   }
 
-  /// Upgrades old-style typeless byval attributes by adding the corresponding
-  /// argument's pointee type.
-  void propagateByValTypes(CallBase *CB, ArrayRef<Type *> ArgsFullTys);
+  /// Upgrades old-style typeless byval or sret attributes by adding the
+  /// corresponding argument's pointee type.
+  void propagateByValSRetTypes(CallBase *CB, ArrayRef<Type *> ArgsFullTys);
 
   /// Converts alignment exponent (i.e. power of two (or zero)) to the
   /// corresponding alignment to use. If alignment is too large, returns
@@ -968,13 +968,17 @@ static FunctionSummary::FFlags getDecodedFFlags(uint64_t RawFlags) {
   return Flags;
 }
 
-/// Decode the flags for GlobalValue in the summary.
+// Decode the flags for GlobalValue in the summary. The bits for each attribute:
+//
+// linkage: [0,4), notEligibleToImport: 4, live: 5, local: 6, canAutoHide: 7,
+// visibility: [8, 10).
 static GlobalValueSummary::GVFlags getDecodedGVSummaryFlags(uint64_t RawFlags,
                                                             uint64_t Version) {
   // Summary were not emitted before LLVM 3.9, we don't need to upgrade Linkage
   // like getDecodedLinkage() above. Any future change to the linkage enum and
   // to getDecodedLinkage() will need to be taken into account here as above.
   auto Linkage = GlobalValue::LinkageTypes(RawFlags & 0xF); // 4 bits
+  auto Visibility = GlobalValue::VisibilityTypes((RawFlags >> 8) & 3); // 2 bits
   RawFlags = RawFlags >> 4;
   bool NotEligibleToImport = (RawFlags & 0x1) || Version < 3;
   // The Live flag wasn't introduced until version 3. For dead stripping
@@ -984,7 +988,8 @@ static GlobalValueSummary::GVFlags getDecodedGVSummaryFlags(uint64_t RawFlags,
   bool Local = (RawFlags & 0x4);
   bool AutoHide = (RawFlags & 0x8);
 
-  return GlobalValueSummary::GVFlags(Linkage, NotEligibleToImport, Live, Local, AutoHide);
+  return GlobalValueSummary::GVFlags(Linkage, Visibility, NotEligibleToImport,
+                                     Live, Local, AutoHide);
 }
 
 // Decode the flags for GlobalVariable in the summary
@@ -1433,6 +1438,8 @@ static Attribute::AttrKind getAttrFromCode(uint64_t Code) {
     return Attribute::NoAlias;
   case bitc::ATTR_KIND_NO_BUILTIN:
     return Attribute::NoBuiltin;
+  case bitc::ATTR_KIND_NO_CALLBACK:
+    return Attribute::NoCallback;
   case bitc::ATTR_KIND_NO_CAPTURE:
     return Attribute::NoCapture;
   case bitc::ATTR_KIND_NO_DUPLICATE:
@@ -1535,6 +1542,10 @@ static Attribute::AttrKind getAttrFromCode(uint64_t Code) {
     return Attribute::NoUndef;
   case bitc::ATTR_KIND_BYREF:
     return Attribute::ByRef;
+  case bitc::ATTR_KIND_MUSTPROGRESS:
+    return Attribute::MustProgress;
+  case bitc::ATTR_KIND_HOT:
+    return Attribute::Hot;
   }
 }
 
@@ -1609,6 +1620,8 @@ Error BitcodeReader::parseAttributeGroupBlock() {
           // this AttributeList with a function.
           if (Kind == Attribute::ByVal)
             B.addByValAttr(nullptr);
+          else if (Kind == Attribute::StructRet)
+            B.addStructRetAttr(nullptr);
 
           B.addAttribute(Kind);
         } else if (Record[i] == 1) { // Integer attribute
@@ -1652,6 +1665,8 @@ Error BitcodeReader::parseAttributeGroupBlock() {
             return Err;
           if (Kind == Attribute::ByVal) {
             B.addByValAttr(HasType ? getTypeByID(Record[++i]) : nullptr);
+          } else if (Kind == Attribute::StructRet) {
+            B.addStructRetAttr(HasType ? getTypeByID(Record[++i]) : nullptr);
           } else if (Kind == Attribute::ByRef) {
             B.addByRefAttr(getTypeByID(Record[++i]));
           } else if (Kind == Attribute::Preallocated) {
@@ -1752,6 +1767,9 @@ Error BitcodeReader::parseTypeTableBody() {
       break;
     case bitc::TYPE_CODE_X86_MMX:   // X86_MMX
       ResultTy = Type::getX86_MMXTy(Context);
+      break;
+    case bitc::TYPE_CODE_X86_AMX:   // X86_AMX
+      ResultTy = Type::getX86_AMXTy(Context);
       break;
     case bitc::TYPE_CODE_TOKEN:     // TOKEN
       ResultTy = Type::getTokenTy(Context);
@@ -2404,6 +2422,9 @@ Error BitcodeReader::parseConstants() {
     case bitc::CST_CODE_UNDEF:     // UNDEF
       V = UndefValue::get(CurTy);
       break;
+    case bitc::CST_CODE_POISON:    // POISON
+      V = PoisonValue::get(CurTy);
+      break;
     case bitc::CST_CODE_SETTYPE:   // SETTYPE: [typeid]
       if (Record.empty())
         return error("Invalid record");
@@ -2917,8 +2938,7 @@ Error BitcodeReader::parseUseLists() {
       if (RecordLength < 3)
         // Records should have at least an ID and two indexes.
         return error("Invalid record");
-      unsigned ID = Record.back();
-      Record.pop_back();
+      unsigned ID = Record.pop_back_val();
 
       Value *V;
       if (IsBB) {
@@ -3286,17 +3306,24 @@ Error BitcodeReader::parseFunctionRecord(ArrayRef<uint64_t> Record) {
   Func->setLinkage(getDecodedLinkage(RawLinkage));
   Func->setAttributes(getAttributes(Record[4]));
 
-  // Upgrade any old-style byval without a type by propagating the argument's
-  // pointee type. There should be no opaque pointers where the byval type is
-  // implicit.
+  // Upgrade any old-style byval or sret without a type by propagating the
+  // argument's pointee type. There should be no opaque pointers where the byval
+  // type is implicit.
   for (unsigned i = 0; i != Func->arg_size(); ++i) {
-    if (!Func->hasParamAttribute(i, Attribute::ByVal))
-      continue;
+    for (Attribute::AttrKind Kind : {Attribute::ByVal, Attribute::StructRet}) {
+      if (!Func->hasParamAttribute(i, Kind))
+        continue;
 
-    Type *PTy = cast<FunctionType>(FullFTy)->getParamType(i);
-    Func->removeParamAttr(i, Attribute::ByVal);
-    Func->addParamAttr(i, Attribute::getWithByValType(
-                              Context, getPointerElementFlatType(PTy)));
+      Func->removeParamAttr(i, Kind);
+
+      Type *PTy = cast<FunctionType>(FullFTy)->getParamType(i);
+      Type *PtrEltTy = getPointerElementFlatType(PTy);
+      Attribute NewAttr =
+          Kind == Attribute::ByVal
+              ? Attribute::getWithByValType(Context, PtrEltTy)
+              : Attribute::getWithStructRetType(Context, PtrEltTy);
+      Func->addParamAttr(i, NewAttr);
+    }
   }
 
   MaybeAlign Alignment;
@@ -3757,16 +3784,22 @@ Error BitcodeReader::typeCheckLoadStoreInst(Type *ValType, Type *PtrType) {
   return Error::success();
 }
 
-void BitcodeReader::propagateByValTypes(CallBase *CB,
-                                        ArrayRef<Type *> ArgsFullTys) {
+void BitcodeReader::propagateByValSRetTypes(CallBase *CB,
+                                            ArrayRef<Type *> ArgsFullTys) {
   for (unsigned i = 0; i != CB->arg_size(); ++i) {
-    if (!CB->paramHasAttr(i, Attribute::ByVal))
-      continue;
+    for (Attribute::AttrKind Kind : {Attribute::ByVal, Attribute::StructRet}) {
+      if (!CB->paramHasAttr(i, Kind))
+        continue;
 
-    CB->removeParamAttr(i, Attribute::ByVal);
-    CB->addParamAttr(
-        i, Attribute::getWithByValType(
-               Context, getPointerElementFlatType(ArgsFullTys[i])));
+      CB->removeParamAttr(i, Kind);
+
+      Type *PtrEltTy = getPointerElementFlatType(ArgsFullTys[i]);
+      Attribute NewAttr =
+          Kind == Attribute::ByVal
+              ? Attribute::getWithByValType(Context, PtrEltTy)
+              : Attribute::getWithStructRetType(Context, PtrEltTy);
+      CB->addParamAttr(i, NewAttr);
+    }
   }
 }
 
@@ -3937,7 +3970,8 @@ Error BitcodeReader::parseFunctionBody(Function *F) {
         if (!IA)
           return error("Invalid record");
       }
-      LastLoc = DebugLoc::get(Line, Col, Scope, IA, isImplicitCode);
+      LastLoc = DILocation::get(Scope->getContext(), Line, Col, Scope, IA,
+                                isImplicitCode);
       I->setDebugLoc(LastLoc);
       I = nullptr;
       continue;
@@ -4618,7 +4652,7 @@ Error BitcodeReader::parseFunctionBody(Function *F) {
       cast<InvokeInst>(I)->setCallingConv(
           static_cast<CallingConv::ID>(CallingConv::MaxID & CCInfo));
       cast<InvokeInst>(I)->setAttributes(PAL);
-      propagateByValTypes(cast<CallBase>(I), ArgsFullTys);
+      propagateByValSRetTypes(cast<CallBase>(I), ArgsFullTys);
 
       break;
     }
@@ -5225,7 +5259,7 @@ Error BitcodeReader::parseFunctionBody(Function *F) {
         TCK = CallInst::TCK_NoTail;
       cast<CallInst>(I)->setTailCallKind(TCK);
       cast<CallInst>(I)->setAttributes(PAL);
-      propagateByValTypes(cast<CallBase>(I), ArgsFullTys);
+      propagateByValSRetTypes(cast<CallBase>(I), ArgsFullTys);
       if (FMF.any()) {
         if (!isa<FPMathOperator>(I))
           return error("Fast-math-flags specified for call without "
@@ -6328,8 +6362,7 @@ Error ModuleSummaryIndexBitcodeReader::parseEntireSummary(unsigned ID) {
     }
     case bitc::FS_TYPE_TESTS:
       assert(PendingTypeTests.empty());
-      PendingTypeTests.insert(PendingTypeTests.end(), Record.begin(),
-                              Record.end());
+      llvm::append_range(PendingTypeTests, Record);
       break;
 
     case bitc::FS_TYPE_TEST_ASSUME_VCALLS:

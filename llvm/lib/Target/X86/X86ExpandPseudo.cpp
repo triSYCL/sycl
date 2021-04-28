@@ -346,7 +346,9 @@ bool X86ExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
 
     // Copy the input argument of the pseudo into the argument of the
     // actual instruction.
-    TII->copyPhysReg(MBB, MBBI, DL, X86::RBX, InArg.getReg(), InArg.isKill());
+    // NOTE: We don't copy the kill flag since the input might be the same reg
+    // as one of the other operands of LCMPXCHG16B.
+    TII->copyPhysReg(MBB, MBBI, DL, X86::RBX, InArg.getReg(), false);
     // Create the actual instruction.
     MachineInstr *NewInstr = BuildMI(MBB, MBBI, DL, TII->get(X86::LCMPXCHG16B));
     // Copy the operands related to the address.
@@ -459,6 +461,45 @@ bool X86ExpandPseudo::ExpandMI(MachineBasicBlock &MBB,
   case TargetOpcode::ICALL_BRANCH_FUNNEL:
     ExpandICallBranchFunnel(&MBB, MBBI);
     return true;
+  case X86::PLDTILECFG: {
+    MI.RemoveOperand(0);
+    MI.setDesc(TII->get(X86::LDTILECFG));
+    return true;
+  }
+  case X86::PSTTILECFG: {
+    MI.RemoveOperand(MI.getNumOperands() - 1); // Remove $tmmcfg
+    MI.setDesc(TII->get(X86::STTILECFG));
+    return true;
+  }
+  case X86::PTILELOADDV: {
+    MI.RemoveOperand(8); // Remove $tmmcfg
+    for (unsigned i = 2; i > 0; --i)
+      MI.RemoveOperand(i);
+    MI.setDesc(TII->get(X86::TILELOADD));
+    return true;
+  }
+  case X86::PTDPBSSDV: {
+    MI.RemoveOperand(7); // Remove $tmmcfg
+    MI.untieRegOperand(4);
+    for (unsigned i = 3; i > 0; --i)
+      MI.RemoveOperand(i);
+    MI.setDesc(TII->get(X86::TDPBSSD));
+    MI.tieOperands(0, 1);
+    return true;
+  }
+  case X86::PTILESTOREDV: {
+    MI.RemoveOperand(8); // Remove $tmmcfg
+    for (int i = 1; i >= 0; --i)
+      MI.RemoveOperand(i);
+    MI.setDesc(TII->get(X86::TILESTORED));
+    return true;
+  }
+  case X86::PTILEZEROV: {
+    for (int i = 3; i > 0; --i) // Remove row, col, $tmmcfg
+      MI.RemoveOperand(i);
+    MI.setDesc(TII->get(X86::TILEZERO));
+    return true;
+  }
   }
   llvm_unreachable("Previous switch has a fallthrough?");
 }

@@ -33,6 +33,7 @@
 #include "clang/Lex/LiteralSupport.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/SHA1.h"
 #include <algorithm>
 #include <cstring>
 using namespace clang;
@@ -117,7 +118,8 @@ const Expr *Expr::skipRValueSubobjectAdjustments(
           BO->getRHS()->getType()->getAs<MemberPointerType>();
         Adjustments.push_back(SubobjectAdjustment(MPT, BO->getRHS()));
         continue;
-      } else if (BO->getOpcode() == BO_Comma) {
+      }
+      if (BO->getOpcode() == BO_Comma) {
         CommaLHSs.push_back(BO->getLHS());
         E = BO->getRHS();
         continue;
@@ -360,7 +362,6 @@ llvm::APSInt ConstantExpr::getResultAsAPSInt() const {
 }
 
 APValue ConstantExpr::getAPValueResult() const {
-  assert(hasAPValueResult());
 
   switch (ConstantExprBits.ResultKind) {
   case ConstantExpr::RSK_APValue:
@@ -370,6 +371,8 @@ APValue ConstantExpr::getAPValueResult() const {
         llvm::APSInt(llvm::APInt(ConstantExprBits.BitWidth, Int64Result()),
                      ConstantExprBits.IsUnsigned));
   case ConstantExpr::RSK_None:
+    if (ConstantExprBits.APValueKind == APValue::Indeterminate)
+      return APValue::IndeterminateValue();
     return APValue();
   }
   llvm_unreachable("invalid ResultKind");
@@ -483,6 +486,11 @@ DeclRefExpr *DeclRefExpr::CreateEmpty(const ASTContext &Context,
           NumTemplateArgs);
   void *Mem = Context.Allocate(Size, alignof(DeclRefExpr));
   return new (Mem) DeclRefExpr(EmptyShell());
+}
+
+void DeclRefExpr::setDecl(ValueDecl *NewD) {
+  D = NewD;
+  setDependence(computeDependence(this, NewD->getASTContext()));
 }
 
 SourceLocation DeclRefExpr::getBeginLoc() const {
@@ -613,6 +621,72 @@ StringRef PredefinedExpr::getIdentKindName(PredefinedExpr::IdentKind IK) {
   llvm_unreachable("Unknown ident kind for PredefinedExpr");
 }
 
+/// Compute a unique name that is consumable by sycl-xocc
+std::string computeUniqueSYCLXOCCName(StringRef Name, StringRef Demangle) {
+  /// XOCC has a maximum of 64 character for the name of the kernel function
+  /// plus the name of one parameter.
+  /// Those characters need to be used wisely to prevent name collisions.
+  /// It is also useful to use a name that is understandable by the user,
+  /// so we add only 8 character of hash and only if needed.
+  /// The first character cannot be an underscore or a digit.
+  /// An underscore can't be followed by an other underscore.
+  constexpr unsigned MaxXOCCSize = 30;
+  /// Some transformations might make 2 kernel identifiers the same.
+  /// Allow adding a hash when such transformations are made to avoid possible
+  /// name conflict.
+  bool ForceHash = false;
+
+  std::string Result;
+  Result.reserve(Demangle.size());
+
+  for (char c : Demangle) {
+    if (!isAlphanumeric(c)) {
+      // Do not repeat _ in the cleaned-up name
+      if (!Result.empty() && Result.back() == '_')
+        continue;
+      c = '_';
+    }
+    Result.push_back(c);
+  }
+
+  // Replace first kernel character name by a 'k' to be compatible with SPIR
+  if ((Result.front() == '_' || isDigit(Result.front()))) {
+    Result.front() = 'k';
+    ForceHash = true;
+  }
+
+  /// The name alone is guaranteed to be unique, so if fits in the size, it is
+  /// enough.
+  if (Result.size() < MaxXOCCSize && !ForceHash) {
+    return Result;
+  }
+
+  /// 9 for 8 characters of hash and an '_'.
+  Result.erase(0, Result.size() - (MaxXOCCSize - 9));
+
+  if ((Result.front() == '_' || isDigit(Result.front())))
+    Result.front() = 'k';
+
+  if (Result.back() != '_')
+    Result.push_back('_');
+
+  /// Sadly there is only 63 valid characters in C identifiers and v++ doesn't
+  /// deal well with double underscores in identifiers. So A and B are
+  /// repeated. This doesn't hurt entropy too much because it is just 2 out
+  /// of 64.
+  Result += llvm::SHA1::hashToString(
+      llvm::ArrayRef<uint8_t>{reinterpret_cast<const uint8_t *>(Name.data()),
+                              Name.size()},
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+      "abcdefghijklmnopqrstuvwxyz"
+      "0123456789AB");
+
+  if (Result.size() > MaxXOCCSize)
+    Result.resize(MaxXOCCSize);
+
+  return Result;
+}
+
 std::string PredefinedExpr::ComputeName(ASTContext &Context, IdentKind IK,
                                         QualType Ty) {
   std::unique_ptr<MangleContext> Ctx{ItaniumMangleContext::create(
@@ -623,7 +697,7 @@ std::string PredefinedExpr::ComputeName(ASTContext &Context, IdentKind IK,
   SmallString<256> Buffer;
   llvm::raw_svector_ostream Out(Buffer);
   Ctx->mangleTypeName(Ty, Out);
-  return std::string(Buffer.str());
+  return computeUniqueSYCLXOCCName(Buffer.str(), Ty.getAsString());
 }
 
 // FIXME: Maybe this should use DeclPrinter with a special "print predefined
@@ -653,8 +727,8 @@ std::string PredefinedExpr::ComputeName(IdentKind IK, const Decl *CurrentDecl) {
         if (!Buffer.empty() && Buffer.front() == '\01')
           return std::string(Buffer.substr(1));
         return std::string(Buffer.str());
-      } else
-        return std::string(ND->getIdentifier()->getName());
+      }
+      return std::string(ND->getIdentifier()->getName());
     }
     return "";
   }
@@ -1644,6 +1718,11 @@ MemberExpr *MemberExpr::CreateEmpty(const ASTContext &Context,
   return new (Mem) MemberExpr(EmptyShell());
 }
 
+void MemberExpr::setMemberDecl(ValueDecl *D) {
+  MemberDecl = D;
+  setDependence(computeDependence(this));
+}
+
 SourceLocation MemberExpr::getBeginLoc() const {
   if (isImplicitAccess()) {
     if (hasQualifier())
@@ -1764,6 +1843,8 @@ bool CastExpr::CastConsistency() const {
   case CK_ARCExtendBlockObject:
   case CK_ZeroToOCLOpaqueType:
   case CK_IntToOCLSampler:
+  case CK_FloatingToFixedPoint:
+  case CK_FixedPointToFloating:
   case CK_FixedPointCast:
   case CK_FixedPointToIntegral:
   case CK_IntegralToFixedPoint:
@@ -1825,7 +1906,7 @@ Expr *CastExpr::getSubExprAsWritten() {
     // subexpression describing the call; strip it off.
     if (E->getCastKind() == CK_ConstructorConversion)
       SubExpr =
-        skipImplicitTemporary(cast<CXXConstructExpr>(SubExpr)->getArg(0));
+        skipImplicitTemporary(cast<CXXConstructExpr>(SubExpr->IgnoreImplicit())->getArg(0));
     else if (E->getCastKind() == CK_UserDefinedConversion) {
       assert((isa<CXXMemberCallExpr>(SubExpr) ||
               isa<BlockExpr>(SubExpr)) &&
@@ -2886,13 +2967,18 @@ Expr *Expr::IgnoreParenNoopCasts(const ASTContext &Ctx) {
 
 Expr *Expr::IgnoreUnlessSpelledInSource() {
   auto IgnoreImplicitConstructorSingleStep = [](Expr *E) {
+    if (auto *Cast = dyn_cast<CXXFunctionalCastExpr>(E)) {
+      auto *SE = Cast->getSubExpr();
+      if (SE->getSourceRange() == E->getSourceRange())
+        return SE;
+    }
+
     if (auto *C = dyn_cast<CXXConstructExpr>(E)) {
       auto NumArgs = C->getNumArgs();
       if (NumArgs == 1 ||
           (NumArgs > 1 && isa<CXXDefaultArgExpr>(C->getArg(1)))) {
         Expr *A = C->getArg(0);
-        if (A->getSourceRange() == E->getSourceRange() ||
-            !isa<CXXTemporaryObjectExpr>(C))
+        if (A->getSourceRange() == E->getSourceRange() || C->isElidable())
           return A;
       }
     }
@@ -3298,9 +3384,6 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
   if (!IncludePossibleEffects && getExprLoc().isMacroID())
     return false;
 
-  if (isInstantiationDependent())
-    return IncludePossibleEffects;
-
   switch (getStmtClass()) {
   case NoStmtClass:
   #define ABSTRACT_STMT(Type)
@@ -3320,7 +3403,8 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
   case TypoExprClass:
   case RecoveryExprClass:
   case CXXFoldExprClass:
-    llvm_unreachable("shouldn't see dependent / unresolved nodes here");
+    // Make a conservative assumption for dependent nodes.
+    return IncludePossibleEffects;
 
   case DeclRefExprClass:
   case ObjCIvarRefExprClass:
@@ -3757,7 +3841,7 @@ Expr::isNullPointerConstant(ASTContext &Ctx,
     const IntegerLiteral *Lit = dyn_cast<IntegerLiteral>(this);
     if (Lit && !Lit->getValue())
       return NPCK_ZeroLiteral;
-    else if (!Ctx.getLangOpts().MSVCCompat || !isCXX98IntegralConstantExpr(Ctx))
+    if (!Ctx.getLangOpts().MSVCCompat || !isCXX98IntegralConstantExpr(Ctx))
       return NPCK_NotNull;
   } else {
     // If we have an integer constant expression, we need to *evaluate* it and
@@ -4186,9 +4270,8 @@ GenericSelectionExpr::CreateEmpty(const ASTContext &Context,
 IdentifierInfo *DesignatedInitExpr::Designator::getFieldName() const {
   assert(Kind == FieldDesignator && "Only valid on a field designator");
   if (Field.NameOrField & 0x01)
-    return reinterpret_cast<IdentifierInfo *>(Field.NameOrField&~0x01);
-  else
-    return getField()->getIdentifier();
+    return reinterpret_cast<IdentifierInfo *>(Field.NameOrField & ~0x01);
+  return getField()->getIdentifier();
 }
 
 DesignatedInitExpr::DesignatedInitExpr(const ASTContext &C, QualType Ty,
@@ -4266,14 +4349,10 @@ SourceLocation DesignatedInitExpr::getBeginLoc() const {
   SourceLocation StartLoc;
   auto *DIE = const_cast<DesignatedInitExpr *>(this);
   Designator &First = *DIE->getDesignator(0);
-  if (First.isFieldDesignator()) {
-    if (GNUSyntax)
-      StartLoc = SourceLocation::getFromRawEncoding(First.Field.FieldLoc);
-    else
-      StartLoc = SourceLocation::getFromRawEncoding(First.Field.DotLoc);
-  } else
-    StartLoc =
-      SourceLocation::getFromRawEncoding(First.ArrayOrRange.LBracketLoc);
+  if (First.isFieldDesignator())
+    StartLoc = GNUSyntax ? First.Field.FieldLoc : First.Field.DotLoc;
+  else
+    StartLoc = First.ArrayOrRange.LBracketLoc;
   return StartLoc;
 }
 
@@ -4310,7 +4389,8 @@ void DesignatedInitExpr::ExpandDesignator(const ASTContext &C, unsigned Idx,
                        Designators + Idx);
     --NumNewDesignators;
     return;
-  } else if (NumNewDesignators == 1) {
+  }
+  if (NumNewDesignators == 1) {
     Designators[Idx] = *First;
     return;
   }
@@ -4477,7 +4557,7 @@ UnaryOperator::UnaryOperator(const ASTContext &Ctx, Expr *input, Opcode opc,
   UnaryOperatorBits.HasFPFeatures = FPFeatures.requiresTrailingStorage();
   if (hasStoredFPFeatures())
     setStoredFPFeatures(FPFeatures);
-  setDependence(computeDependence(this));
+  setDependence(computeDependence(this, Ctx));
 }
 
 UnaryOperator *UnaryOperator::Create(const ASTContext &C, Expr *input,

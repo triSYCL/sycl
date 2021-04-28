@@ -17,11 +17,15 @@
 #include "Protocol.h"
 #include "Transport.h"
 #include "support/Context.h"
+#include "support/MemoryTree.h"
 #include "support/Path.h"
+#include "support/Threading.h"
 #include "clang/Tooling/Core/Replacement.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringSet.h"
 #include "llvm/Support/JSON.h"
+#include <chrono>
+#include <cstddef>
 #include <memory>
 
 namespace clang {
@@ -37,6 +41,8 @@ class SymbolIndex;
 class ClangdLSPServer : private ClangdServer::Callbacks {
 public:
   struct Options : ClangdServer::Options {
+    /// Supplies configuration (overrides ClangdServer::ContextProvider).
+    config::Provider *ConfigProvider = nullptr;
     /// Look for compilation databases, rather than using compile commands
     /// set via LSP (extensions) only.
     bool UseDirBasedCDB = true;
@@ -45,11 +51,18 @@ public:
     llvm::Optional<Path> CompileCommandsDir;
     /// The offset-encoding to use, or None to negotiate it over LSP.
     llvm::Optional<OffsetEncoding> Encoding;
+    /// If set, periodically called to release memory.
+    /// Consider malloc_trim(3)
+    std::function<void()> MemoryCleanup = nullptr;
 
     /// Per-feature options. Generally ClangdServer lets these vary
     /// per-request, but LSP allows limited/no customizations.
     clangd::CodeCompleteOptions CodeComplete;
     clangd::RenameOptions Rename;
+    /// Returns true if the tweak should be enabled.
+    std::function<bool(const Tweak &)> TweakFilter = [](const Tweak &T) {
+      return !T.hidden(); // only enable non-hidden tweaks.
+    };
   };
 
   ClangdLSPServer(Transport &Transp, const ThreadsafeFS &TFS,
@@ -62,6 +75,9 @@ public:
   ///
   /// \return Whether we shut down cleanly with a 'shutdown' -> 'exit' sequence.
   bool run();
+
+  /// Profiles resource-usage.
+  void profile(MemoryTree &MT) const;
 
 private:
   // Implement ClangdServer::Callbacks.
@@ -77,12 +93,13 @@ private:
   // Calls have signature void(const Params&, Callback<Response>).
   void onInitialize(const InitializeParams &, Callback<llvm::json::Value>);
   void onInitialized(const InitializedParams &);
-  void onShutdown(const ShutdownParams &, Callback<std::nullptr_t>);
-  void onSync(const NoParams &, Callback<std::nullptr_t>);
+  void onShutdown(Callback<std::nullptr_t>);
+  void onSync(Callback<std::nullptr_t>);
   void onDocumentDidOpen(const DidOpenTextDocumentParams &);
   void onDocumentDidChange(const DidChangeTextDocumentParams &);
   void onDocumentDidClose(const DidCloseTextDocumentParams &);
   void onDocumentDidSave(const DidSaveTextDocumentParams &);
+  void onAST(const ASTParams &, Callback<llvm::Optional<ASTNode>>);
   void onDocumentOnTypeFormatting(const DocumentOnTypeFormattingParams &,
                                   Callback<std::vector<TextEdit>>);
   void onDocumentRangeFormatting(const DocumentRangeFormattingParams &,
@@ -104,6 +121,8 @@ private:
                          Callback<std::vector<Location>>);
   void onGoToDefinition(const TextDocumentPositionParams &,
                         Callback<std::vector<Location>>);
+  void onGoToImplementation(const TextDocumentPositionParams &,
+                            Callback<std::vector<Location>>);
   void onReference(const ReferenceParams &, Callback<std::vector<Location>>);
   void onSwitchSourceHeader(const TextDocumentIdentifier &,
                             Callback<llvm::Optional<URIForFile>>);
@@ -122,6 +141,14 @@ private:
                        Callback<llvm::Optional<TypeHierarchyItem>>);
   void onResolveTypeHierarchy(const ResolveTypeHierarchyItemParams &,
                               Callback<llvm::Optional<TypeHierarchyItem>>);
+  void onPrepareCallHierarchy(const CallHierarchyPrepareParams &,
+                              Callback<std::vector<CallHierarchyItem>>);
+  void onCallHierarchyIncomingCalls(
+      const CallHierarchyIncomingCallsParams &,
+      Callback<std::vector<CallHierarchyIncomingCall>>);
+  void onCallHierarchyOutgoingCalls(
+      const CallHierarchyOutgoingCallsParams &,
+      Callback<std::vector<CallHierarchyOutgoingCall>>);
   void onChangeConfiguration(const DidChangeConfigurationParams &);
   void onSymbolInfo(const TextDocumentPositionParams &,
                     Callback<std::vector<SymbolDetails>>);
@@ -132,6 +159,9 @@ private:
   void onSemanticTokens(const SemanticTokensParams &, Callback<SemanticTokens>);
   void onSemanticTokensDelta(const SemanticTokensDeltaParams &,
                              Callback<SemanticTokensOrDelta>);
+  /// This is a clangd extension. Provides a json tree representing memory usage
+  /// hierarchy.
+  void onMemoryUsage(Callback<MemoryTree>);
 
   std::vector<Fix> getFixes(StringRef File, const clangd::Diagnostic &D);
 
@@ -155,6 +185,16 @@ private:
 
   /// Sends a "publishDiagnostics" notification to the LSP client.
   void publishDiagnostics(const PublishDiagnosticsParams &);
+
+  /// Runs profiling and exports memory usage metrics if tracing is enabled and
+  /// profiling hasn't happened recently.
+  void maybeExportMemoryProfile();
+  PeriodicThrottler ShouldProfile;
+
+  /// Run the MemoryCleanup callback if it's time.
+  /// This method is thread safe.
+  void maybeCleanupMemory();
+  PeriodicThrottler ShouldCleanupMemory;
 
   /// Since initialization of CDBs and ClangdServer is done lazily, the
   /// following context captures the one used while creating ClangdLSPServer and

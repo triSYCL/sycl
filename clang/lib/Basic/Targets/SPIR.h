@@ -41,7 +41,7 @@ static const unsigned SPIRAddrSpaceMap[] = {
 };
 
 static const unsigned SYCLAddrSpaceMap[] = {
-    4, // Default
+    0, // Default
     1, // opencl_global
     3, // opencl_local
     2, // opencl_constant
@@ -114,13 +114,25 @@ public:
     return CC_SpirFunction;
   }
 
+  llvm::Optional<LangAS> getConstantAddressSpace() const override {
+    // If we assign "opencl_constant" address space the following code becomes
+    // illegal, because it can't be cast to any other address space:
+    //
+    //   const char *getLiteral() {
+    //     return "AB";
+    //   }
+    return LangAS::opencl_global;
+  }
+
   void setSupportedOpenCLOpts() override {
     // Assume all OpenCL extensions and optional core features are supported
     // for SPIR since it is a generic target.
-    getSupportedOpenCLOpts().supportAll();
+    supportAllOpenCLOpts();
   }
 
   bool hasExtIntType() const override { return true; }
+
+  bool hasInt128Type() const override { return false; }
 };
 class LLVM_LIBRARY_VISIBILITY SPIR32TargetInfo : public SPIRTargetInfo {
 public:
@@ -129,9 +141,15 @@ public:
     PointerWidth = PointerAlign = 32;
     SizeType = TargetInfo::UnsignedInt;
     PtrDiffType = IntPtrType = TargetInfo::SignedInt;
-    resetDataLayout(
-        "e-p:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-"
-        "v96:128-v192:256-v256:256-v512:512-v1024:1024-n8:16:32:64");
+    if (Triple.isXilinxFPGA())
+      resetDataLayout(
+          "e-m:e-p:32:32-i64:64-i128:128-i256:256-i512:512-i1024:1024-i2048:"
+          "2048-i4096:4096-n8:16:32:64-S128-v16:16-v24:32-v32:32-v48:64-v96:"
+          "128-v192:256-v256:256-v512:512-v1024:1024");
+    else
+      resetDataLayout(
+          "e-i64:64-v16:16-v24:32-v32:32-v48:64-"
+          "v96:128-v192:256-v256:256-v512:512-v1024:1024-n8:16:32:64");
   }
 
   void getTargetDefines(const LangOptions &Opts,
@@ -146,9 +164,15 @@ public:
     SizeType = TargetInfo::UnsignedLong;
     PtrDiffType = IntPtrType = TargetInfo::SignedLong;
 
-    resetDataLayout(
-        "e-i64:64-v16:16-v24:32-v32:32-v48:64-"
-        "v96:128-v192:256-v256:256-v512:512-v1024:1024-n8:16:32:64");
+    if (Triple.isXilinxFPGA())
+      resetDataLayout(
+          "e-m:e-i64:64-i128:128-i256:256-i512:512-i1024:1024-i2048:2048-i4096:"
+          "4096-n8:16:32:64-S128-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-"
+          "v256:256-v512:512-v1024:1024");
+    else
+      resetDataLayout(
+          "e-i64:64-v16:16-v24:32-v32:32-v48:64-"
+          "v96:128-v192:256-v256:256-v512:512-v1024:1024-n8:16:32:64");
   }
 
   void getTargetDefines(const LangOptions &Opts,

@@ -1,4 +1,4 @@
-// RUN: %check_clang_tidy %s readability-function-cognitive-complexity %t -- -config='{CheckOptions: [{key: readability-function-cognitive-complexity.Threshold, value: 0}]}' -- -std=c++11 -fblocks -w
+// RUN: %check_clang_tidy %s readability-function-cognitive-complexity %t -- -config='{CheckOptions: [{key: readability-function-cognitive-complexity.Threshold, value: 0}]}' -- -std=c++11 -fblocks -fexceptions -w
 
 // any function should be checked.
 
@@ -1013,3 +1013,5 @@ void functionThatCallsTemplatedFunctions() {
 
   templatedFunction<void*>();
 }
+
+static void pr47779_dont_crash_on_weak() __attribute__((__weakref__("__pr47779_dont_crash_on_weak")));

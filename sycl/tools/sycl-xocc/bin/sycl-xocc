@@ -85,6 +85,7 @@ fi
 
 # Setup SDx related env variables
 SDX_BIN_PATH_DIR="$1"
+VITIS_VERSION=$(realpath $SDX_BIN_PATH_DIR/.. | xargs basename)
 if [[ ! -d "$SDX_BIN_PATH_DIR" ]]; then
   usage 8 "path to SDx bin directory is not a valid directory"
 else
@@ -94,17 +95,21 @@ else
 
   SDX_LIB_SPIR="$SDX_BIN_PATH_DIR/../lnx64/lib/libspir64-39-hls.bc"
   if [[ ! -f "$SDX_LIB_SPIR" ]]; then
-    SDX_LIB_SPIR="$SDX_BIN_PATH_DIR/../../../Vitis_HLS/2*/lnx64/lib/libspir64-39-hls.bc"
+    SDX_LIB_SPIR="$SDX_BIN_PATH_DIR/../../../Vitis_HLS/$VITIS_VERSION/lnx64/lib/libspir64-39-hls.bc"
     if [[ ! -f "$SDX_LIB_SPIR" ]]; then
       usage 9 "could not find SDx's libspir64-39-hls.bc"
     fi
   fi
   # It says 3.9, but trust us this is Clang/LLVM 7..
-  SDX_CLANG_LLVM_BIN="$SDX_BIN_PATH_DIR/../lnx64/tools/clang-3.9-csynth/bin"
-  if [[ ! -f "$SDX_CLANG_LLVM_BIN/llvm-as" ]]; then
-    SDX_CLANG_LLVM_BIN="$SDX_BIN_PATH_DIR/../../../Vitis_HLS/2*/lnx64/tools/clang-3.9-csynth/bin"
+  if [[ ! -z "$XILINX_CLANG_39_BUILD_PATH" ]]; then
+    SDX_CLANG_LLVM_BIN=$XILINX_CLANG_39_BUILD_PATH
+  else
+    SDX_CLANG_LLVM_BIN="$SDX_BIN_PATH_DIR/../lnx64/tools/clang-3.9-csynth/bin"
     if [[ ! -f "$SDX_CLANG_LLVM_BIN/llvm-as" ]]; then
-      usage 9 "could not find SDx's binary directory"
+      SDX_CLANG_LLVM_BIN="$SDX_BIN_PATH_DIR/../../../Vitis_HLS/$VITIS_VERSION/lnx64/tools/clang-3.9-csynth/bin"
+      if [[ ! -f "$SDX_CLANG_LLVM_BIN/llvm-as" ]]; then
+        usage 9 "could not find SDx's binary directory"
+      fi
     fi
   fi
 
@@ -117,6 +122,15 @@ else
       usage 10 "could not find xocc or v++ in $SDX_BIN_PATH_DIR"
     fi
   fi
+fi
+
+if [[ -f "$SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer" ]];then
+  function cleanup {
+    umount $SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer || sudo umount $SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer
+  }
+
+  trap cleanup EXIT
+  mount --bind $(which echo) $SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer || sudo mount --bind $(which echo) $SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer
 fi
 
 # Setup Clang/LLVM related env variables
@@ -153,8 +167,12 @@ TMP_PATH="$(mktemp $5/sycl-xocc.XXXXXX)"
 # output file name including extensions and path
 OUTPUT_FILE_NAME="$6"
 
+set +e
+# allow faillures because empty string is good default
+# This make debugging easier.
 ADDITIONAL_COMPILE_ARGS=$(cat $7)
 ADDITIONAL_LINK_ARGS=$(cat $8)
+set -e
 XCL_EMULATION_MODE=$9
 
 KERNELPROP="${TMP_PATH}_KernelProperties_${SOURCE_FILE_NAME}.bash"
@@ -165,14 +183,14 @@ cp "$INPUT_FILE_NAME" "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels.bc"
 # something concrete, used by the infer-address-spaces pass which is slightly
 # modified from the upstream implementation to take this argument to avoid
 # adding a new LLVM Target that will largelly be unused right now..
-$OPT -asfix -globaldce -O3 -globaldce --infer-address-spaces \
-  -flat-address-space=4 -globaldce -inSPIRation -globaldce -kernelPropGen \
+$OPT --sycl-xocc -preparesycl -globaldce -inline -infer-address-spaces -globaldce -O3 -globaldce\
+  -flat-address-space=0 -globaldce -inSPIRation -globaldce -kernelPropGen \
   --sycl-kernel-propgen-output $KERNELPROP \
-  "$INPUT_FILE_NAME" -o "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc"
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels.bc" -o "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc"
 
 # Link our SDx SPIR binaries in
 $LLVM_LINK "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc" \
-  $SDX_LIB_SPIR -o "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
+  --only-needed $SDX_LIB_SPIR -o "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
 
 # Using the LLVM Linker will add more incompatible IR so run the downgrader in
 # a second pass afterwards, rather than once before in the first opt pass
@@ -181,13 +199,13 @@ $LLVM_LINK "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc" \
 # We also only wish to emit LLVM IR assembly language format and not bitcode
 # format as we currently use the llvm assembler packaged with xocc to generate
 # our final bitcode file.
-$OPT -S -preparesycl -globaldce \
+$OPT --sycl-xocc --sycl-remove-annotations -S -preparesycl -globaldce \
   "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc" -o \
   "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.simple.xpirbc"
 
-$OPT -S -O3 -xoccIRDowngrader \
+$OPT --sycl-xocc -S -O3 -xoccIRDowngrader \
   "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.simple.xpirbc" -o \
-  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc"
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.ll"
 
 # Generate our final bitcode file with the xocc llvm-as (Clang/LLVM 7 for now)
 # this is to work around a problem with the ByVal attribute. The bitcode that
@@ -196,7 +214,7 @@ $OPT -S -O3 -xoccIRDowngrader \
 # it by compiling the IR to BC using the llvm-as from xocc and some minor
 # massaging in the xoccIRDowngrader
 $SDX_CLANG_LLVM_BIN/llvm-as \
-  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc" -o \
+  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.ll" -o \
   "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc"
 
 # Our bash file containing kernel property environment variables is placed in
@@ -211,23 +229,23 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   # Compile all Kernels in the source file to seperate .xo ("object") files
   # and add them to the list of kernels to be linked
   LINKER_LIST=""
-  for index in "${KERNEL_NAME_ARRAY[@]}"; do
-  if [[ -n "$index" ]]; then
+  for ((i=0;i<${#KERNEL_NAME_ARRAY[@]};++i)); do
+  if [[ -n "${KERNEL_NAME_ARRAY[i]}" ]]; then
     if [[ ! -z "$VERBOSE" ]]; then
       echo "Invoking Kernel Compilation with $SDX"
       echo "--target: $XCL_EMULATION_MODE"
       echo "--platform: $XILINX_PLATFORM"
-      echo "Compiling kernel: $index"
-      echo "Outputting file to: ${TMP_PATH}_$index.xo"
+      echo "Compiling kernel: ${KERNEL_NAME_ARRAY[i]}"
+      echo "Outputting file to: ${TMP_PATH}_${KERNEL_NAME_ARRAY[i]}.xo"
       echo "Input file is: ${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc"
     fi
 
     $SDX --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM \
-      --xp param:compiler.hlsDataflowStrictMode=off \
-      --save-temps -c -k "$index" -o "${TMP_PATH}_$index.xo" \
+      --advanced.param param:compiler.hlsDataflowStrictMode=off \
+      --save-temps -c -k "${KERNEL_NAME_ARRAY[i]}" -o "${TMP_PATH}_${KERNEL_NAME_ARRAY[i]}.xo" \
       "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.opt.xpirbc" \
-      $ADDITIONAL_COMPILE_ARGS &
-      LINKER_LIST="${TMP_PATH}_$index.xo $LINKER_LIST"
+      $ADDITIONAL_COMPILE_ARGS ${EXTRA_KERNEL_PARAMS_ARRAY[i]} &
+      LINKER_LIST="${TMP_PATH}_${KERNEL_NAME_ARRAY[i]}.xo $LINKER_LIST"
   fi
   done
 

@@ -45,13 +45,10 @@ using namespace llvm;
 namespace {
 // avoid recreation of regex's we won't alter at runtime
 
-// matches __spirv_ocl_ which is the transformed namespace of certain builtins
-// in the cl::__spirv namespace after translation by the reflower (e.g. math
-// functions like sqrt)
-static const std::regex matchSPIROCL {R"((_Z\d+__spir_ocl_))"};
-static const std::regex matchSPIRVOCL {R"((_Z\d+__spirv_ocl_))"};
-static const std::regex matchSPIRVOCLS {R"((_Z\d+__spirv_ocl_s_))"};
-static const std::regex matchSPIRVOCLU {R"((_Z\d+__spirv_ocl_u_))"};
+struct Prefix {
+  std::string Str;
+  std::regex Matcher;
+};
 
 // matches number between Z and _ (\d+)(?=_)
 static const std::regex matchZVal {R"((\d+)(?=_))"};
@@ -65,14 +62,6 @@ static const std::regex matchReqdWorkGroupSize {
 
 // Just matches integers
 static const std::regex matchSomeNaturalInteger {R"(\d+)"};
-
-// This is to give clarity to why we negate a value from the Z mangle component
-// rather than having a magical number, we have the size of the string we've
-// removed from the mangling.
-static const std::string SPIROCL {"__spir_ocl_"};
-static const std::string SPIRVOCL{"__spirv_ocl_"};
-static const std::string SPIRVOCLS{"__spirv_ocl_s_"};
-static const std::string SPIRVOCLU{"__spirv_ocl_u_"};
 
 /// Transform the SYCL kernel functions into xocc SPIR-compatible kernels
 struct InSPIRation : public ModulePass {
@@ -117,6 +106,22 @@ struct InSPIRation : public ModulePass {
                  + regexName);
       }
     }
+  }
+
+  /// remap spirv builtins towards function present in vitis libspir.
+  void remapBuiltin(Function *F) {
+    /// according to the opencl 2.1 spec fmax_common and max are the same except
+    /// on nans and infinity where fmax_common will output undefined value
+    /// whereas fmax has rules to follow.
+    /// because of this it is legal to replace a fmax_common by fmax.
+    static std::pair<StringRef, StringRef> Mapping[] = {
+        {"_Z11fmax_common", "_Z4fmax"},
+        {"_Z3Dot", "_Z3dot"},
+    };
+    for (std::pair<StringRef, StringRef> Elem : Mapping)
+      if (F->getName().startswith(Elem.first))
+        return F->setName(Elem.second +
+                          F->getName().drop_front(Elem.first.size()));
   }
 
   bool doInitialization(Module &M) override {
@@ -332,6 +337,7 @@ struct InSPIRation : public ModulePass {
         // containing $ sign
 
         // Rename function name
+        F.addFnAttr("src_name", F.getName());
         F.setName("sycl_func_" + Twine{funcCount++});
 
         // While functions do come "named" it's in the form %0, %1 and XOCC
@@ -355,6 +361,15 @@ struct InSPIRation : public ModulePass {
       }
     }
 
+    static Prefix prefix[] = {
+      {"__spirv_ocl_u_", std::regex(R"((_Z\d+__spirv_ocl_u_))")},
+      {"__spirv_ocl_s_", std::regex(R"((_Z\d+__spirv_ocl_s_))")},
+      {"__spirv_ocl_", std::regex(R"((_Z\d+__spirv_ocl_))")},
+      {"__spir_ocl_", std::regex(R"((_Z\d+__spir_ocl_))")},
+      {"__spirv_", std::regex(R"((_Z\d+__spirv_))")},
+      {"__spir_", std::regex(R"((_Z\d+__spir_))")},
+    };
+
     for (auto F : declarations) {
       // aims to catch things preceded by a namespace of the style:
       // _Z16__spirv_ocl_ and use the end section as a SPIR call
@@ -366,10 +381,10 @@ struct InSPIRation : public ModulePass {
       // Perhaps there is a more elegant solution that can be implemented in the
       // future. I don't believe too much effort should be put into this until
       // the builtin implementation stabilizes
-      removePrefixFromMangling(*F, matchSPIRVOCLU, SPIRVOCLU);
-      removePrefixFromMangling(*F, matchSPIRVOCLS, SPIRVOCLS);
-      removePrefixFromMangling(*F, matchSPIRVOCL, SPIRVOCL);
-      removePrefixFromMangling(*F, matchSPIROCL, SPIROCL);
+      for (Prefix p : prefix)
+        removePrefixFromMangling(*F, p.Matcher, p.Str);
+
+      remapBuiltin(F);
     }
 
     setSPIRVersion(M);

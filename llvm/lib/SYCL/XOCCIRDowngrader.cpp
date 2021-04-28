@@ -18,8 +18,10 @@
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/IRBuilder.h"
 #include "llvm/SYCL/XOCCIRDowngrader.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
@@ -29,6 +31,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/../../lib/IR/LLVMContextImpl.h"
 
 using namespace llvm;
 
@@ -44,40 +47,6 @@ struct XOCCIRDowngrader : public ModulePass {
   static char ID; // Pass identification, replacement for typeid
 
   XOCCIRDowngrader() : ModulePass(ID) {}
-
-  /// Removes immarg (immutable arg) bitcode attribute that is applied to
-  /// function parameters. It was added in LLVM-9 (D57825), so as xocc catches
-  /// up it can be removed
-  void removeImmarg(Module &M) {
-    for (auto &F : M.functions()) {
-      for (auto &P : F.args()) {
-          if (P.hasAttribute(llvm::Attribute::ImmArg)) {
-              P.removeAttr(llvm::Attribute::ImmArg);
-          }
-      }
-    }
-  }
-
-  /// Removes WillReturn LLVM bitcode attribute from llvm/Doc/LangRef:
-  ///
-  /// "This function attribute indicates that a call of this function will
-  ///  either exhibit undefined behavior or comes back and continues execution
-  ///  at a point in the existing call stack that includes the current
-  ///  invocation.
-  ///  Annotated functions may still raise an exception, i.a., ``nounwind``
-  ///  is not implied.
-  ///  If an invocation of an annotated function does not return control back
-  ///  to a point in the call stack, the behavior is undefined."
-  ///
-  /// Added in LLVM-10: rL364555 + D62801, this removal can be reverted as the
-  /// xocc backend catches up. It seems unlikely removal will cause any problems
-  /// as it appears to be an attribute that helps carry information to
-  /// backends/other passes for further transformations.
-  void removeWillReturn(Module &M) {
-    for (auto &F : M.functions())
-      if (F.hasFnAttribute(llvm::Attribute::WillReturn))
-        F.removeFnAttr(llvm::Attribute::WillReturn);
-  }
 
   /// Removes byval bitcode function parameter attribute that is applied to
   /// pointer arguments of functions to state that they should technically be
@@ -130,7 +99,8 @@ struct XOCCIRDowngrader : public ModulePass {
       for (auto &P : F.args()) {
          if (P.hasAttribute(llvm::Attribute::ByVal)) {
              P.removeAttr(llvm::Attribute::ByVal);
-             P.addAttr(llvm::Attribute::ByVal);
+             P.addAttr(Attribute::get(M.getContext(), llvm::Attribute::ByVal,
+                                      nullptr));
          }
       }
 
@@ -140,7 +110,9 @@ struct XOCCIRDowngrader : public ModulePass {
           for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
             if (CB->paramHasAttr(i, llvm::Attribute::ByVal)) {
               CB->removeParamAttr(i, llvm::Attribute::ByVal);
-              CB->addParamAttr(i, llvm::Attribute::ByVal);
+              CB->addParamAttr(i,
+                               Attribute::get(M.getContext(),
+                                              llvm::Attribute::ByVal, nullptr));
             }
           }
         }
@@ -163,10 +135,40 @@ struct XOCCIRDowngrader : public ModulePass {
   /// Removes nofree bitcode function attribute that is applied to
   /// functions to indicate that they do not deallocate memory.
   /// It was added in LLVM-9 (D49165), so as xocc catches up it can be removed
-  void removeNoFree(Module &M) {
-    for (auto &F : M.functions()) {
-      F.removeFnAttr(llvm::Attribute::NoFree);
-    }
+  /// Removes immarg (immutable arg) bitcode attribute that is applied to
+  /// function parameters. It was added in LLVM-9 (D57825), so as xocc catches
+  /// up it can be removed
+  /// Removes WillReturn LLVM bitcode attribute from llvm/Doc/LangRef:
+  ///
+  /// "This function attribute indicates that a call of this function will
+  ///  either exhibit undefined behavior or comes back and continues execution
+  ///  at a point in the existing call stack that includes the current
+  ///  invocation.
+  ///  Annotated functions may still raise an exception, i.a., ``nounwind``
+  ///  is not implied.
+  ///  If an invocation of an annotated function does not return control back
+  ///  to a point in the call stack, the behavior is undefined."
+  ///
+  /// Added in LLVM-10: rL364555 + D62801, this removal can be reverted as the
+  /// xocc backend catches up. It seems unlikely removal will cause any problems
+  /// as it appears to be an attribute that helps carry information to
+  /// backends/other passes for further transformations.
+  void removeAttributes(Module &M, ArrayRef<Attribute::AttrKind> Kinds) {
+    for (auto &F : M.functions())
+      for (auto Kind : Kinds) {
+        F.removeAttribute(AttributeList::FunctionIndex, Kind);
+        F.removeAttribute(AttributeList::ReturnIndex, Kind);
+        for (auto &P : F.args())
+          P.removeAttr(Kind);
+        for (User *U : F.users())
+          if (CallBase *CB = dyn_cast<CallBase>(U)) {
+            CB->removeAttribute(AttributeList::FunctionIndex, Kind);
+            CB->removeAttribute(AttributeList::ReturnIndex, Kind);
+            for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
+              CB->removeParamAttr(i, Kind);
+            }
+          }
+      }
   }
 
   /// Remove Freeze instruction because xocc can't deal with them.
@@ -214,16 +216,72 @@ struct XOCCIRDowngrader : public ModulePass {
                                 Attribute::AttrKind::Alignment);
   }
 
+  void lowerIntrinsic(Module &M) {
+    IRBuilder<> B(M.getContext());
+    SmallVector<Instruction *, 16> ToRemove;
+    for (auto &F : M.functions())
+      for (auto &I : instructions(F))
+        if (auto *CI = dyn_cast<CallBase>(&I)) {
+          if (CI->getIntrinsicID() == Intrinsic::abs) {
+            B.SetInsertPoint(CI->getNextNode());
+            Value *Cmp = B.CreateICmpSLT(
+                CI->getArgOperand(0),
+                ConstantInt::getNullValue(CI->getArgOperand(0)->getType()));
+            Value *Sub = B.CreateSub(
+                CI->getArgOperand(0),
+                ConstantInt::getNullValue(CI->getArgOperand(0)->getType()));
+            Value *ABS = B.CreateSelect(Cmp, Sub, CI->getArgOperand(0));
+            CI->replaceAllUsesWith(ABS);
+            ToRemove.push_back(CI);
+          }
+        }
+    for (auto *I : ToRemove)
+      I->eraseFromParent();
+  }
+
+  void convertPoinsonToZero(Module &M) {
+    for (auto &PV : M.getContext().pImpl->PVConstants)
+      PV.second.get()->replaceAllUsesWith(
+          Constant::getNullValue(PV.second.get()->getType()));
+  }
+
+  void removeMetaDataValues(Module &M) {
+    SmallVector<Instruction *, 16> ToDelete;
+    for (auto &F : M.functions()) {
+      if (llvm::none_of(F.args(), [&](Argument &A) {
+            return A.getType()->isMetadataTy();
+          }))
+        continue;
+      for (auto &U : F.uses()) {
+        CallBase *CB = cast<CallBase>(U.getUser());
+        assert(cast<FunctionType>(CB->getCalledFunction()->getType()->getPointerElementType())
+                   ->getReturnType()
+                   ->isVoidTy());
+        ToDelete.push_back(CB);
+      }
+    }
+    for (auto *I : ToDelete)
+      I->eraseFromParent();
+  }
+
   bool runOnModule(Module &M) override {
-    removeImmarg(M);
-    removeWillReturn(M);
-    removeNoFree(M);
     resetByVal(M);
+    removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
+                         Attribute::ImmArg, Attribute::NoSync,
+                         Attribute::MustProgress, Attribute::NoUndef});
     renameBasicBlocks(M);
     removeFreezeInst(M);
     removeFNegInst(M);
     removeMemIntrAlign(M);
 
+    lowerIntrinsic(M);
+    removeMetaDataValues(M);
+
+    convertPoinsonToZero(M);
+    if (Triple(M.getTargetTriple()).getArch() == llvm::Triple::fpga64)
+      M.setTargetTriple("fpga64-xilinx-none");
+    else
+      M.setTargetTriple("fpga32-xilinx-none");
     // The module probably changed
     return true;
   }

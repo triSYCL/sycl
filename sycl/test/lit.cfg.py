@@ -27,12 +27,10 @@ config.test_format = lit.formats.ShTest()
 config.suffixes = ['.c', '.cpp', '.dump'] #add .spv. Currently not clear what to do with those
 
 # feature tests are considered not so lightweight, so, they are excluded by default
-config.excludes = ['Inputs', 'feature-tests', 'disabled', '_x', '.Xil', '.run']
+config.excludes = ['Inputs', 'feature-tests', 'on-device']
 
 # test_source_root: The root path where tests are located.
 config.test_source_root = os.path.dirname(__file__)
-
-timeout=600
 
 # test_exec_root: The root path where tests should be run.
 config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
@@ -41,8 +39,13 @@ config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
 llvm_config.with_system_environment(['PATH', 'OCL_ICD_FILENAMES', 'SYCL_DEVICE_ALLOWLIST', 'SYCL_CONFIG_FILE_NAME'])
 
 # Configure LD_LIBRARY_PATH or corresponding os-specific alternatives
+# Add 'libcxx' feature to filter out all SYCL abi tests when SYCL runtime
+# is built with llvm libcxx. This feature is added for Linux only since MSVC
+# CL compiler doesn't support to use llvm libcxx instead of MSVC STL.
 if platform.system() == "Linux":
     config.available_features.add('linux')
+    if config.sycl_use_libcxx == "ON":
+        config.available_features.add('libcxx')
     llvm_config.with_system_environment('LD_LIBRARY_PATH')
     llvm_config.with_environment('LD_LIBRARY_PATH', config.sycl_libs_dir, append_path=True)
     llvm_config.with_system_environment('CFLAGS')
@@ -81,224 +84,20 @@ backend=lit_config.params.get('SYCL_BE', "PI_OPENCL")
 lit_config.note("Backend (SYCL_BE): {}".format(backend))
 config.substitutions.append( ('%sycl_be', backend) )
 
-xocc=lit_config.params.get('XOCC', "off")
-xocc_target = "hw"
-if "XCL_EMULATION_MODE" in os.environ:
-    xocc_target = os.environ["XCL_EMULATION_MODE"]
-
-get_device_count_by_type_path = os.path.join(config.llvm_tools_dir, "get_device_count_by_type")
-
-def getDeviceCount(device_type):
-    is_cuda = False;
-    is_level_zero = False;
-    device_count_env = os.environ.copy()
-    if "XCL_EMULATION_MODE" in os.environ:
-        if os.environ["XCL_EMULATION_MODE"] == "hw":
-            device_count_env.pop("XCL_EMULATION_MODE")
-    process = subprocess.Popen([get_device_count_by_type_path, device_type, backend],
-        stdout=subprocess.PIPE, env=device_count_env)
-    (output, err) = process.communicate()
-    exit_code = process.wait()
-
-    if exit_code != 0:
-        lit_config.error("getDeviceCount {TYPE} {BACKEND}: Non-zero exit code {CODE}".format(
-            TYPE=device_type, BACKEND=backend, CODE=exit_code))
-        return [0,False,False]
-
-    result = output.decode().replace('\n', '').split(':', 1)
-    try:
-        value = int(result[0])
-    except ValueError:
-        value = 0
-        lit_config.error("getDeviceCount {TYPE} {BACKEND}: Cannot get value from output: {OUT}".format(
-            TYPE=device_type, BACKEND=backend, OUT=result[0]))
-
-    # if we have found gpu and there is additional information, let's check
-    # whether this is CUDA device or Level Zero device or none of these.
-    if device_type == "gpu" and value > 0 and len(result[1]):
-        if re.match(r".*cuda", result[1]):
-            is_cuda = True;
-        if re.match(r".*level zero", result[1]):
-            is_level_zero = True;
-
-    if err:
-        lit_config.warning("getDeviceCount {TYPE} {BACKEND} stderr:{ERR}".format(
-            TYPE=device_type, BACKEND=backend, ERR=err))
-    return [value,is_cuda,is_level_zero]
+config.substitutions.append( ('%RUN_ON_HOST', "env SYCL_DEVICE_FILTER=host ") )
 
 # Every SYCL implementation provides a host implementation.
 config.available_features.add('host')
+triple=lit_config.params.get('SYCL_TRIPLE', 'spir64-unknown-linux-sycldevice')
+lit_config.note("Triple: {}".format(triple))
+config.substitutions.append( ('%sycl_triple',  triple ) )
 
-# Configure device-specific substitutions based on availability of corresponding
-# devices/runtimes
-
-found_at_least_one_device = False
-
-cpu_run_substitute = "true"
-cpu_run_on_linux_substitute = "true "
-cpu_check_substitute = ""
-cpu_check_on_linux_substitute = ""
-
-if getDeviceCount("cpu")[0]:
-    found_at_least_one_device = True
-    lit_config.note("Found available CPU device")
-    cpu_run_substitute = "env SYCL_DEVICE_TYPE=CPU SYCL_BE={SYCL_BE} ".format(SYCL_BE=backend)
-    cpu_check_substitute = "| FileCheck %s"
-    config.available_features.add('cpu')
-    if platform.system() == "Linux":
-        cpu_run_on_linux_substitute = "env SYCL_DEVICE_TYPE=CPU SYCL_BE={SYCL_BE} ".format(SYCL_BE=backend)
-        cpu_check_on_linux_substitute = "| FileCheck %s"
-else:
-    lit_config.warning("CPU device not found")
-
-config.substitutions.append( ('%CPU_RUN_PLACEHOLDER',  cpu_run_substitute) )
-config.substitutions.append( ('%CPU_RUN_ON_LINUX_PLACEHOLDER',  cpu_run_on_linux_substitute) )
-config.substitutions.append( ('%CPU_CHECK_PLACEHOLDER',  cpu_check_substitute) )
-config.substitutions.append( ('%CPU_CHECK_ON_LINUX_PLACEHOLDER',  cpu_check_on_linux_substitute) )
-
-gpu_run_substitute = "true"
-gpu_run_on_linux_substitute = "true "
-gpu_check_substitute = ""
-gpu_check_on_linux_substitute = ""
-
-cuda = False
-level_zero = False
-[gpu_count, cuda, level_zero] = getDeviceCount("gpu")
-
-if gpu_count > 0:
-    found_at_least_one_device = True
-    lit_config.note("Found available GPU device")
-    gpu_run_substitute = " env SYCL_DEVICE_TYPE=GPU SYCL_BE={SYCL_BE} ".format(SYCL_BE=backend)
-    gpu_check_substitute = "| FileCheck %s"
-    config.available_features.add('gpu')
-    if cuda:
-       config.available_features.add('cuda')
-    elif level_zero:
-       config.available_features.add('level_zero')
-
-    if platform.system() == "Linux":
-        gpu_run_on_linux_substitute = "env SYCL_DEVICE_TYPE=GPU SYCL_BE={SYCL_BE} ".format(SYCL_BE=backend)
-        gpu_check_on_linux_substitute = "| FileCheck %s"
-    # ESIMD-specific setup. Requires OpenCL for now.
-    esimd_run_substitute = " env SYCL_BE=PI_OPENCL SYCL_DEVICE_TYPE=GPU SYCL_PROGRAM_COMPILE_OPTIONS=-vc-codegen"
-    config.substitutions.append( ('%ESIMD_RUN_PLACEHOLDER',  esimd_run_substitute) )
-    config.substitutions.append( ('%clangxx-esimd',  "clang++ -fsycl-explicit-simd" ) )
-else:
-    lit_config.warning("GPU device not found")
-
-config.substitutions.append( ('%GPU_RUN_PLACEHOLDER',  gpu_run_substitute) )
-config.substitutions.append( ('%GPU_RUN_ON_LINUX_PLACEHOLDER',  gpu_run_on_linux_substitute) )
-config.substitutions.append( ('%GPU_CHECK_PLACEHOLDER',  gpu_check_substitute) )
-config.substitutions.append( ('%GPU_CHECK_ON_LINUX_PLACEHOLDER',  gpu_check_on_linux_substitute) )
-
-acc_run_substitute = "true"
-acc_check_substitute = ""
-if getDeviceCount("accelerator")[0]:
-    found_at_least_one_device = True
-    lit_config.note("Found available accelerator device")
-    acc_run_substitute = " env SYCL_DEVICE_TYPE=ACC "
-    acc_check_substitute = "| FileCheck %s"
-    config.available_features.add('accelerator')
-else:
-    lit_config.warning("Accelerator device not found")
-
-if xocc != "off":
-    # xrt doesn't deal well with multiple executables using it concurrently (at the time of writing).
-    # The details are at https://xilinx.github.io/XRT/master/html/multiprocess.html
-    # so we wrap every use of XRT inside an file lock.
-    # We also wrap invocation of executable in an setsid to prevent
-    # a single program failure from ending all the tests.
-    xrt_lock = "/tmp/xrt.lock"
-    acc_run_substitute+= "setsid flock --exclusive " + xrt_lock + " "
-    if os.path.exists(xrt_lock):
-        os.remove(xrt_lock)
-    # XCL_EMULATION_MODE = hw is only valid for our SYCL driver, 
-    # for XRT XCL_EMULATION_MODE should only be used when using either hw_emu or sw_emu
-    # if xocc_target == "hw":
-    acc_run_substitute="env --unset=XCL_EMULATION_MODE " + acc_run_substitute
-    # hw_emu is very slow so it has a higher timeout.
-    if xocc_target != "hw_emu":
-        acc_run_substitute+= "timeout 30 env "
-    else:
-        acc_run_substitute+= "timeout 300 env "
-
-config.substitutions.append( ('%ACC_RUN_PLACEHOLDER',  acc_run_substitute) )
-config.substitutions.append( ('%ACC_CHECK_PLACEHOLDER',  acc_check_substitute) )
-
-# LIT testing either supports OpenCL or CUDA or Level Zero.
-if not cuda and not level_zero and found_at_least_one_device:
-    config.available_features.add('opencl')
-
-if cuda:
-    config.substitutions.append( ('%sycl_triple',  "nvptx64-nvidia-cuda-sycldevice" ) )
-elif xocc != "off":
-    config.substitutions.append( ('%sycl_triple',  "fpga64-xilinx-unknown-sycldevice" ) )
-else:
-    config.substitutions.append( ('%sycl_triple',  "spir64-unknown-linux-sycldevice" ) )
-
-if "opencl-aot" in config.llvm_enable_projects:
-    lit_config.note("Using opencl-aot version which is built as part of the project")
-    config.available_features.add("opencl-aot")
-    llvm_config.add_tool_substitutions(['opencl-aot'], [config.sycl_tools_dir])
-
-# Device AOT compilation tools aren't part of the SYCL project,
-# so they need to be pre-installed on the machine
-aot_tools = ["ocloc", "aoc"]
-if "opencl-aot" not in config.llvm_enable_projects:
-    aot_tools.append('opencl-aot')
-
-for aot_tool in aot_tools:
-    if find_executable(aot_tool) is not None:
-        lit_config.note("Found pre-installed AOT device compiler " + aot_tool)
-        config.available_features.add(aot_tool)
-    else:
-        lit_config.warning("Couldn't find pre-installed AOT device compiler " + aot_tool)
-
-if xocc != "off":
-    llvm_config.with_environment('XCL_EMULATION_MODE', xocc_target, append_path=False)
-    lit_config.note("XOCC target: {}".format(xocc_target))
-    required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]
-    has_error=False
-    config.available_features.add("xocc")
-    config.available_features.add(xocc_target)
-    pkg_opencv4 = subprocess.run(["pkg-config", "--libs", "--cflags", "opencv4"], stdout=subprocess.PIPE)
-    has_opencv4 = not pkg_opencv4.returncode
-    lit_config.note("has opencv4: {}".format(has_opencv4))
-    if has_opencv4:
-        config.available_features.add("opencv4")
-        config.substitutions.append( ('%opencv4_flags', pkg_opencv4.stdout.decode('utf-8')[:-1]) )
-    for env in required_env:
-        if env not in os.environ:
-            lit_config.note("missing environnement variable: {}".format(env))
-            has_error=True
-    if has_error:
-        lit_config.error("Can't configure tests for XOCC")
-    llvm_config.with_system_environment(required_env)
-    if xocc == "only":
-        config.name = 'SYCL-XOCC'
-        config.test_source_root = config.test_source_root + "/xocc_tests"
-    # run_if_* defaults to a simple echo to print the comand instead of running it.
-    # it will be replaced by and empty string to actually run the command.
-    run_if_hw="echo"
-    run_if_hw_emu="echo"
-    run_if_sw_emu="echo"
-    if xocc_target == "hw":
-        timeout = 10800 # 3h
-        run_if_hw=""
-    if xocc_target == "hw_emu":
-        timeout = 3600 # 1h
-        run_if_hw_emu=""
-    if xocc_target == "sw_emu":
-        timeout = 1200 # 20min
-        run_if_sw_emu=""
-    config.substitutions.append( ('%run_if_hw', run_if_hw) )
-    config.substitutions.append( ('%run_if_hw_emu', run_if_hw_emu) )
-    config.substitutions.append( ('%run_if_sw_emu', run_if_sw_emu) )
-
+if triple == 'nvptx64-nvidia-cuda-sycldevice':
+    config.available_features.add('cuda')
 
 # Set timeout for test = 10 mins
 try:
     import psutil
-    lit_config.maxIndividualTestTime = timeout
+    lit_config.maxIndividualTestTime = 600
 except ImportError:
     pass
