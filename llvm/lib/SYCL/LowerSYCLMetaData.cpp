@@ -92,12 +92,15 @@ struct LSMDState {
         else
           ResultMD.push_back(MDNode::getTemporary(Ctx, None).get());
         ResultMD.push_back(MDNode::get(
-            Ctx, {MDString::get(Ctx, "llvm.loop.pipeline.enable"),
-                   ConstantAsMetadata::get(
-                       ConstantInt::get(Type::getInt32Ty(Ctx), -1)),
-                   ConstantAsMetadata::get(
-                       ConstantInt::getFalse(Type::getInt1Ty(Ctx))),
-                }));
+            Ctx, {
+                     MDString::get(Ctx, "llvm.loop.pipeline.enable"),
+                     ConstantAsMetadata::get(
+                         ConstantInt::get(Type::getInt32Ty(Ctx), -1)),
+                     ConstantAsMetadata::get(
+                         ConstantInt::getFalse(Type::getInt1Ty(Ctx))),
+                     ConstantAsMetadata::get(
+                         ConstantInt::get(Type::getInt32Ty(Ctx), 0)),
+                 }));
         MDNode *MDN = MDNode::getDistinct(Ctx, ResultMD);
         BB->getTerminator()->setMetadata(LLVMContext::MD_loop, MDN);
         BB->getTerminator()

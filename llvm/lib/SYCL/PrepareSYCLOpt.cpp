@@ -21,10 +21,14 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/SYCL/PrepareSYCLOpt.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
 
 namespace {
+
+cl::opt<bool> RemoveAnnotations("sycl-remove-annotations", cl::Hidden,
+                                cl::init(false));
 
 struct PrepareSYCLOpt : public ModulePass {
 
@@ -39,6 +43,7 @@ struct PrepareSYCLOpt : public ModulePass {
           continue;
       if (G.isDeclaration())
         continue;
+      G.setComdat(nullptr);
       G.setLinkage(llvm::GlobalValue::PrivateLinkage);
     }
   }
@@ -112,11 +117,21 @@ struct PrepareSYCLOpt : public ModulePass {
     }
   }
 
+  void forceInlining(Module &M) {
+    for (auto& F : M.functions()) {
+      if (F.isDeclaration() || F.getCallingConv() == CallingConv::SPIR_KERNEL)
+        continue;
+      F.addFnAttr(Attribute::AlwaysInline);
+    }
+  }
+
   bool runOnModule(Module &M) override {
     turnNonKernelsIntoPrivate(M);
     setCallingConventions(M);
     lowerArrayPartition(M);
-    removeAnnotations(M);
+    if (RemoveAnnotations)
+      removeAnnotations(M);
+    forceInlining(M);
     return true;
   }
 };

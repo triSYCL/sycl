@@ -141,9 +141,15 @@ public:
     PointerWidth = PointerAlign = 32;
     SizeType = TargetInfo::UnsignedInt;
     PtrDiffType = IntPtrType = TargetInfo::SignedInt;
-    resetDataLayout(
-        "e-p:32:32-i64:64-v16:16-v24:32-v32:32-v48:64-"
-        "v96:128-v192:256-v256:256-v512:512-v1024:1024-n8:16:32:64");
+    if (Triple.isXilinxFPGA())
+      resetDataLayout(
+          "e-m:e-p:32:32-i64:64-i128:128-i256:256-i512:512-i1024:1024-i2048:"
+          "2048-i4096:4096-n8:16:32:64-S128-v16:16-v24:32-v32:32-v48:64-v96:"
+          "128-v192:256-v256:256-v512:512-v1024:1024");
+    else
+      resetDataLayout(
+          "e-i64:64-v16:16-v24:32-v32:32-v48:64-"
+          "v96:128-v192:256-v256:256-v512:512-v1024:1024-n8:16:32:64");
   }
 
   void getTargetDefines(const LangOptions &Opts,
@@ -158,9 +164,15 @@ public:
     SizeType = TargetInfo::UnsignedLong;
     PtrDiffType = IntPtrType = TargetInfo::SignedLong;
 
-    resetDataLayout(
-        "e-i64:64-v16:16-v24:32-v32:32-v48:64-"
-        "v96:128-v192:256-v256:256-v512:512-v1024:1024-n8:16:32:64");
+    if (Triple.isXilinxFPGA())
+      resetDataLayout(
+          "e-m:e-i64:64-i128:128-i256:256-i512:512-i1024:1024-i2048:2048-i4096:"
+          "4096-n8:16:32:64-S128-v16:16-v24:32-v32:32-v48:64-v96:128-v192:256-"
+          "v256:256-v512:512-v1024:1024");
+    else
+      resetDataLayout(
+          "e-i64:64-v16:16-v24:32-v32:32-v48:64-"
+          "v96:128-v192:256-v256:256-v512:512-v1024:1024-n8:16:32:64");
   }
 
   void getTargetDefines(const LangOptions &Opts,
