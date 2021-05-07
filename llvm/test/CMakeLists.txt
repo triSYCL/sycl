@@ -29,7 +29,7 @@ configure_lit_site_cfg(
   "LLVM_SOURCE_DIR"
   "LLVM_BINARY_DIR"
   "LLVM_TOOLS_DIR"
-  "LLVM_LIBRARY_DIR"
+  "LLVM_LIBS_DIR"
   "SHLIBDIR"
   )
 configure_lit_site_cfg(
@@ -103,6 +103,7 @@ set(LLVM_TEST_DEPENDS
           llvm-objdump
           llvm-opt-fuzzer
           llvm-opt-report
+          llvm-otool
           llvm-pdbutil
           llvm-profdata
           llvm-profgen
@@ -162,6 +163,11 @@ if(LLVM_BUILD_EXAMPLES)
     Kaleidoscope-Ch7
     LLJITWithThinLTOSummaries
     )
+  if(CMAKE_HOST_UNIX)
+    list(APPEND LLVM_TEST_DEPENDS
+      LLJITWithRemoteDebugging
+      )
+  endif()
   if (NOT WIN32)
     list(APPEND LLVM_TEST_DEPENDS
       Bye

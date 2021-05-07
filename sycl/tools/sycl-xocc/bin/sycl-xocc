@@ -124,14 +124,14 @@ else
   fi
 fi
 
-if [[ -f "$SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer" ]];then
-  function cleanup {
-    umount $SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer || sudo umount $SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer
-  }
+# if [[ -f "$SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer" ]];then
+#   function cleanup {
+#     umount $SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer || sudo umount $SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer
+#   }
 
-  trap cleanup EXIT
-  mount --bind $(which echo) $SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer || sudo mount --bind $(which echo) $SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer
-fi
+#   trap cleanup EXIT
+#   mount --bind $(which echo) $SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer || sudo mount --bind $(which echo) $SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer
+# fi
 
 # Setup Clang/LLVM related env variables
 DRIVER_PATH_DIR="$2"

@@ -88,9 +88,10 @@ private:
                       codegenoptions::DebugInfoKind *DebugInfoKind,
                       bool *EmitCodeView) const;
 
-  visualstudio::Compiler *getCLFallback() const;
-
-  mutable std::unique_ptr<visualstudio::Compiler> CLFallback;
+  void ConstructHostCompilerJob(Compilation &C, const JobAction &JA,
+                                const InputInfo &Output,
+                                const InputInfoList &Inputs,
+                                const llvm::opt::ArgList &TCArgs) const;
 
   mutable std::unique_ptr<llvm::raw_fd_ostream> CompilationDatabase = nullptr;
   void DumpCompilationDatabase(Compilation &C, StringRef Filename,

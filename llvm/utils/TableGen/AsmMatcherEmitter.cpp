@@ -1100,8 +1100,8 @@ bool MatchableInfo::validate(StringRef CommentDelimiter, bool IsAlias) const {
 static std::string getEnumNameForToken(StringRef Str) {
   std::string Res;
 
-  for (StringRef::iterator it = Str.begin(), ie = Str.end(); it != ie; ++it) {
-    switch (*it) {
+  for (char C : Str) {
+    switch (C) {
     case '*': Res += "_STAR_"; break;
     case '%': Res += "_PCT_"; break;
     case ':': Res += "_COLON_"; break;
@@ -1112,10 +1112,10 @@ static std::string getEnumNameForToken(StringRef Str) {
     case '-': Res += "_MINUS_"; break;
     case '#': Res += "_HASH_"; break;
     default:
-      if (isAlnum(*it))
-        Res += *it;
+      if (isAlnum(C))
+        Res += C;
       else
-        Res += "_" + utostr((unsigned) *it) + "_";
+        Res += "_" + utostr((unsigned)C) + "_";
     }
   }
 
@@ -2726,7 +2726,7 @@ static void emitMnemonicAliasVariant(raw_ostream &OS,const AsmMatcherInfo &Info,
     StringRef AsmVariantName = R->getValueAsString("AsmVariantName");
     if (AsmVariantName != AsmParserVariantName)
       continue;
-    AliasesFromMnemonic[std::string(R->getValueAsString("FromMnemonic"))]
+    AliasesFromMnemonic[R->getValueAsString("FromMnemonic").lower()]
         .push_back(R);
   }
   if (AliasesFromMnemonic.empty())
@@ -2768,7 +2768,7 @@ static void emitMnemonicAliasVariant(raw_ostream &OS,const AsmMatcherInfo &Info,
         MatchCode += "else ";
       MatchCode += "if (" + FeatureMask + ")\n";
       MatchCode += "  Mnemonic = \"";
-      MatchCode += R->getValueAsString("ToMnemonic");
+      MatchCode += R->getValueAsString("ToMnemonic").lower();
       MatchCode += "\";\n";
     }
 
@@ -2777,7 +2777,7 @@ static void emitMnemonicAliasVariant(raw_ostream &OS,const AsmMatcherInfo &Info,
       if (!MatchCode.empty())
         MatchCode += "else\n  ";
       MatchCode += "Mnemonic = \"";
-      MatchCode += R->getValueAsString("ToMnemonic");
+      MatchCode += R->getValueAsString("ToMnemonic").lower();
       MatchCode += "\";\n";
     }
 
@@ -2883,14 +2883,10 @@ static void emitCustomOperandParsing(raw_ostream &OS, CodeGenTarget &Target,
 
     OS << OMI.OperandMask;
     OS << " /* ";
-    bool printComma = false;
+    ListSeparator LS;
     for (int i = 0, e = 31; i !=e; ++i)
-      if (OMI.OperandMask & (1 << i)) {
-        if (printComma)
-          OS << ", ";
-        OS << i;
-        printComma = true;
-      }
+      if (OMI.OperandMask & (1 << i))
+        OS << LS << i;
     OS << " */, ";
 
     OS << OMI.CI->Name;
@@ -3513,12 +3509,9 @@ void AsmMatcherEmitter::run(raw_ostream &OS) {
           OS << '_' << MI->RequiredFeatures[i]->TheDef->getName();
 
       OS << ", { ";
-      for (unsigned i = 0, e = MI->AsmOperands.size(); i != e; ++i) {
-        const MatchableInfo::AsmOperand &Op = MI->AsmOperands[i];
-
-        if (i) OS << ", ";
-        OS << Op.Class->Name;
-      }
+      ListSeparator LS;
+      for (const MatchableInfo::AsmOperand &Op : MI->AsmOperands)
+        OS << LS << Op.Class->Name;
       OS << " }, },\n";
     }
 

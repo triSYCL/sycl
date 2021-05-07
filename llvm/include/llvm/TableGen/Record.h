@@ -301,6 +301,7 @@ protected:
     IK_CondOpInit,
     IK_FoldOpInit,
     IK_IsAOpInit,
+    IK_AnonymousNameInit,
     IK_StringInit,
     IK_VarInit,
     IK_VarListElementInit,
@@ -576,6 +577,36 @@ public:
   }
 };
 
+/// "anonymous_n" - Represent an anonymous record name
+class AnonymousNameInit : public TypedInit {
+  unsigned Value;
+
+  explicit AnonymousNameInit(unsigned V)
+      : TypedInit(IK_AnonymousNameInit, StringRecTy::get()), Value(V) {}
+
+public:
+  AnonymousNameInit(const AnonymousNameInit &) = delete;
+  AnonymousNameInit &operator=(const AnonymousNameInit &) = delete;
+
+  static bool classof(const Init *I) {
+    return I->getKind() == IK_AnonymousNameInit;
+  }
+
+  static AnonymousNameInit *get(unsigned);
+
+  unsigned getValue() const { return Value; }
+
+  StringInit *getNameInit() const;
+
+  std::string getAsString() const override;
+
+  Init *resolveReferences(Resolver &R) const override;
+
+  Init *getBit(unsigned Bit) const override {
+    llvm_unreachable("Illegal bit reference off string");
+  }
+};
+
 /// "foo" - Represent an initialization by a string value.
 class StringInit : public TypedInit {
 public:
@@ -677,6 +708,7 @@ public:
   ///
   Init *resolveReferences(Resolver &R) const override;
 
+  bool isComplete() const override;
   bool isConcrete() const override;
   std::string getAsString() const override;
 
@@ -1438,6 +1470,10 @@ inline raw_ostream &operator<<(raw_ostream &OS, const RecordVal &RV) {
 }
 
 class Record {
+public:
+  using AssertionTuple = std::tuple<SMLoc, Init *, Init *>;
+
+private:
   static unsigned LastID;
 
   Init *Name;
@@ -1447,7 +1483,7 @@ class Record {
   SmallVector<Init *, 0> TemplateArgs;
   SmallVector<RecordVal, 0> Values;
   // Vector of [source location, condition Init, message Init].
-  SmallVector<std::tuple<SMLoc, Init *, Init *>, 0> Assertions;
+  SmallVector<AssertionTuple, 0> Assertions;
 
   // All superclasses in the inheritance forest in post-order (yes, it
   // must be a forest; diamond-shaped inheritance is not allowed).
@@ -1522,9 +1558,7 @@ public:
 
   ArrayRef<RecordVal> getValues() const { return Values; }
 
-  ArrayRef<std::tuple<SMLoc, Init *, Init *>> getAssertions() const {
-    return Assertions;
-  }
+  ArrayRef<AssertionTuple> getAssertions() const { return Assertions; }
 
   ArrayRef<std::pair<Record *, SMRange>>  getSuperClasses() const {
     return SuperClasses;
@@ -1537,9 +1571,7 @@ public:
   void getDirectSuperClasses(SmallVectorImpl<Record *> &Classes) const;
 
   bool isTemplateArg(Init *Name) const {
-    for (Init *TA : TemplateArgs)
-      if (TA == Name) return true;
-    return false;
+    return llvm::is_contained(TemplateArgs, Name);
   }
 
   const RecordVal *getValue(const Init *Name) const {
@@ -1587,6 +1619,12 @@ public:
     Assertions.push_back(std::make_tuple(Loc, Condition, Message));
   }
 
+  void appendAssertions(const Record *Rec) {
+    Assertions.append(Rec->Assertions);
+  }
+
+  void checkRecordAssertions();
+
   bool isSubClassOf(const Record *R) const {
     for (const auto &SCPair : SuperClasses)
       if (SCPair.first == R)
@@ -1618,7 +1656,7 @@ public:
   ///
   /// This is a final resolve: any error messages, e.g. due to undefined
   /// !cast references, are generated now.
-  void resolveReferences();
+  void resolveReferences(Init *NewName = nullptr);
 
   /// Apply the resolver to the name of the record as well as to the
   /// initializers of all fields of the record except SkipVal.
@@ -1995,6 +2033,12 @@ public:
 
   void set(Init *Key, Init *Value) { Map[Key] = {Value, false}; }
 
+  bool isComplete(Init *VarName) const {
+    auto It = Map.find(VarName);
+    assert(It != Map.end() && "key must be present in map");
+    return It->second.V->isComplete();
+  }
+
   Init *resolve(Init *VarName) override;
 };
 
@@ -2002,9 +2046,12 @@ public:
 class RecordResolver final : public Resolver {
   DenseMap<Init *, Init *> Cache;
   SmallVector<Init *, 4> Stack;
+  Init *Name = nullptr;
 
 public:
   explicit RecordResolver(Record &R) : Resolver(&R) {}
+
+  void setName(Init *NewName) { Name = NewName; }
 
   Init *resolve(Init *VarName) override;
 
