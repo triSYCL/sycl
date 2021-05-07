@@ -254,21 +254,43 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
     wait $job
   done
 
-  LINKER_WD=${TMP_PATH}_${SOURCE_FILE_NAME}_linker
-  rm -rf $LINKER_WD
-  mkdir -p $LINKER_WD
-  cd $LINKER_WD
-
-  # \todo Revisit removal of hlsDataflowStrictMode in the future to see if we
-  # can compile for hw_emu with it on or if it outputs clearer diagnostics so
-  # we can track down the problem (when I tested this it seems that the call
-  # to log the error was possibly broken)
-  $SDX --xp param:compiler.hlsDataflowStrictMode=off $DDR_BANK_ARGS \
-    --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM -l \
-    --save-temps -o "$OUTPUT_FILE_NAME" $LINKER_LIST $ADDITIONAL_LINK_ARGS
-  
-  cd $CWD
-  cp -rf $LINKER_WD/* .
+  if [[ ! -z "$SYCL_XOCC_REMOTE_LINK_HOST" ]]; then
+    if [[ -z "$SYCL_XOCC_REMOTE_TMP" ]]; then 
+      SYCL_XOCC_REMOTE_TMP_DIR="/tmp/sycl_xoccc_remote_linker"
+    else
+      SYCL_XOCC_REMOTE_TMP_DIR="$SYCL_XOCC_REMOTE_TMP/sycl_xocc_remote_linker"
+    fi
+    REMOTE_CMD="rm -rf $SYCL_XOCC_REMOTE_TMP_DIR ; mkdir -p $SYCL_XOCC_REMOTE_TMP_DIR"
+    ssh -t $SYCL_XOCC_REMOTE_LINK_HOST "$REMOTE_CMD"
+    REMOTE_LINKER_LIST=""
+    for OBJECT in $LINKER_LIST ; do
+      REMOTE_LINKER_LIST="$(basename -- $OBJECT) $REMOTE_LINKER_LIST"
+    done
+    REMOTE_OUT="$(basename -- $OUTPUT_FILE_NAME)"
+    TMP_SCRIPT=${TMP_PATH}_linker_script.sh
+    echo "cd $SYCL_XOCC_REMOTE_TMP_DIR" > $TMP_SCRIPT
+    echo "export PLATFORM_REPO_PATHS=$SYCL_XOCC_REMOTE_LINKER_PLATFORM_PATHS" >> $TMP_SCRIPT
+    echo "$SDX --xp param:compiler.hlsDataflowStrictMode=off $DDR_BANK_ARGS --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM -l --save-temps -o "$REMOTE_OUT" $REMOTE_LINKER_LIST $ADDITIONAL_LINK_ARGS" >> $TMP_SCRIPT
+    scp $TMP_SCRIPT $LINKER_LIST $SYCL_XOCC_REMOTE_LINK_HOST:$SYCL_XOCC_REMOTE_TMP_DIR
+    REMOTE_CMD="bash ${SYCL_XOCC_REMOTE_TMP_DIR}/$(basename -- $TMP_SCRIPT)"
+    ssh $SYCL_XOCC_REMOTE_LINK_HOST "$REMOTE_CMD"
+    scp $SYCL_XOCC_REMOTE_LINK_HOST:$SYCL_XOCC_REMOTE_TMP_DIR/$REMOTE_OUT $OUTPUT_FILE_NAME
+  else 
+    LINKER_WD=${TMP_PATH}_${SOURCE_FILE_NAME}_linker
+    rm -rf $LINKER_WD
+    mkdir -p $LINKER_WD
+      cd $LINKER_WD
+    # \todo Revisit removal of hlsDataflowStrictMode in the future to see if we
+    # can compile for hw_emu with it on or if it outputs clearer diagnostics so
+    # we can track down the problem (when I tested this it seems that the call
+    # to log the error was possibly broken)
+    $SDX --xp param:compiler.hlsDataflowStrictMode=off $DDR_BANK_ARGS \
+      --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM -l \
+      --save-temps -o "$OUTPUT_FILE_NAME" $LINKER_LIST $ADDITIONAL_LINK_ARGS
+    
+    cd $CWD
+    cp -rf $LINKER_WD/* .
+  fi
 
   # This step is unconnected to the generation of the final xcl binary, it dumps
   # useful debug information from the final generated xcl binary into the temp
