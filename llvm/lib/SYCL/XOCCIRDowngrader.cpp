@@ -12,9 +12,12 @@
 // ===---------------------------------------------------------------------===//
 
 #include <cstddef>
+#include <functional>
 #include <regex>
 #include <string>
 
+#include "llvm/ADT/MapVector.h"
+#include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
@@ -31,6 +34,10 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+
+/// This should theoretically not be accessed from outside of the IR directory.
+/// But using it is the most reliable way to do some of the IR transformation we
+/// are doing in this file.
 #include "llvm/../../lib/IR/LLVMContextImpl.h"
 
 using namespace llvm;
@@ -264,6 +271,67 @@ struct XOCCIRDowngrader : public ModulePass {
       I->eraseFromParent();
   }
 
+  /// This will remove every call to the function named Str assuming it returns
+  /// void. and erase the function form the module.
+  void removeFunction(Module &M, StringRef Str) {
+    Function *F = M.getFunction(Str);
+    if (!F)
+      return;
+    SmallVector<std::reference_wrapper<Use>, 16> ToDelete;
+    ToDelete.append(F->use_begin(), F->use_end());
+    for (Use &U : ToDelete) {
+      assert(U.getUser()->use_empty() &&
+             "this should only be used on functions returning void");
+      if (auto *I = dyn_cast<Instruction>(U.getUser()))
+        I->eraseFromParent();
+      else
+        U.set(UndefValue::get(U->getType()));
+    }
+    F->eraseFromParent();
+  }
+
+  /// Visit the IR and emit warnings about construct not handled by the backend
+  /// The IR has no debug info so we cannot say where in the source code the
+  /// error happend.
+  struct WarnVisitor : InstVisitor<WarnVisitor> {
+    /// This is used for dedupping warnings.
+    MapVector<std::string, int, StringMap<int>> DiagMap;
+    /// Add a warning to be emmitted
+    template <typename T, typename... Ts> void warn(T P, Ts... Ps) {
+      std::string str;
+      raw_string_ostream os(str);
+      os << P;
+      (void)std::initializer_list<int>{(os << Ps, 0)...};
+      DiagMap[str]++;
+    }
+    /// This will be called by the visitor on every instruction in the module.
+    void visitInstruction(Instruction& I) {
+      switch (I.getOpcode()) {
+      case Instruction::IntToPtr:
+      case Instruction::PtrToInt:
+      case Instruction::AddrSpaceCast:
+        warn("instruction not supported by backend: \"", I.getOpcodeName(), "\"");
+      }
+    }
+    /// This will do the actual printing of warnings to the console.
+    void emit() {
+      if (DiagMap.empty())
+        return;
+      llvm::errs() << "\n";
+      for (auto &Elem : DiagMap)
+        llvm::errs() << raw_ostream::MAGENTA << "warning:" << raw_ostream::RESET
+                     << " " << Elem.first << " : " << Elem.second
+                     << " occurrences\n";
+      llvm::errs() << "\n";
+    }
+  };
+
+  void warnForIssues(Module &M) {
+    WarnVisitor Visitor;
+    Visitor.visit(M);
+    Visitor.emit();
+  }
+
   bool runOnModule(Module &M) override {
     resetByVal(M);
     removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
@@ -276,6 +344,9 @@ struct XOCCIRDowngrader : public ModulePass {
 
     lowerIntrinsic(M);
     removeMetaDataValues(M);
+    /// __assert_fail doesn't exist on device and takes its arguments in
+    /// addressspace 0 causing addresspace cast.
+    removeFunction(M, "__assert_fail");
 
     convertPoinsonToZero(M);
     if (Triple(M.getTargetTriple()).getArch() == llvm::Triple::fpga64)
@@ -283,6 +354,9 @@ struct XOCCIRDowngrader : public ModulePass {
     else
       M.setTargetTriple("fpga32-xilinx-none");
     // The module probably changed
+
+    warnForIssues(M);
+
     return true;
   }
 };
