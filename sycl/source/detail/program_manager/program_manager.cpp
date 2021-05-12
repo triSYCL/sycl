@@ -904,6 +904,9 @@ static void setupEnvironmentForKernels(RTDeviceBinaryImage *Img) {
   if (strncmp("fpga64_", target, 7) == 0 ||
       strncmp("fpga32_", target, 7) == 0) {
     target += 7;
+    auto remaining_len = strlen(target);
+    if ((remaining_len > 4) && (strncmp("hls_", target, 4) == 0))
+      target += 4;
     if (strcmp(target, "hw") == 0) {
       if (has_been_invoked)
         if (const char *mode = std::getenv(env_var))
