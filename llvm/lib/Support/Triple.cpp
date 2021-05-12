@@ -625,6 +625,12 @@ static Triple::SubArchType parseSubArch(StringRef SubArchName) {
   if (SubArchName.startswith("fpga")) {
     StringRef SA(SubArchName);
     if (SA.consume_front("fpga64_") || SA.consume_front("fpga32_")) {
+      if (SubArchName.endswith("hls_hw"))
+        return llvm::Triple::FPGASubArch_hls_hw;
+      if (SubArchName.endswith("hls_hw_emu"))
+        return llvm::Triple::FPGASubArch_hls_hw_emu;
+      if (SubArchName.endswith("hls_sw_emu"))
+        return llvm::Triple::FPGASubArch_hls_sw_emu;
       if (SubArchName.endswith("hw"))
         return llvm::Triple::FPGASubArch_hw;
       if (SubArchName.endswith("hw_emu"))

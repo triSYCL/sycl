@@ -34,6 +34,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -44,6 +45,7 @@ using namespace llvm;
 // namespace
 namespace {
 // avoid recreation of regex's we won't alter at runtime
+cl::opt<bool> SYCLCLMeta("sycl-xlx-oclmd", cl::Hidden, cl::init(false));
 
 struct Prefix {
   std::string Str;
@@ -387,20 +389,23 @@ struct InSPIRation : public ModulePass {
       remapBuiltin(F);
     }
 
-    setSPIRVersion(M);
+    if (SYCLCLMeta) {
 
-    setOpenCLVersion(M);
+      setSPIRVersion(M);
 
-    // setSPIRTriple(M);
+      setOpenCLVersion(M);
 
-    /// TODO: Set appropriate layout so the linker doesn't always complain, this
-    /// change may be better/more easily applied as something in the Frontend as
-    /// we'd be lying about the layout if we didn't enforce it accurately in
-    /// this pass. Which is potentially a good way to come across some weird
-    /// runtime bugs.
-    //setSPIRLayout(M);
+      // setSPIRTriple(M);
 
-    removeOldMetadata(M);
+      /// TODO: Set appropriate layout so the linker doesn't always complain,
+      /// this change may be better/more easily applied as something in the
+      /// Frontend as we'd be lying about the layout if we didn't enforce it
+      /// accurately in this pass. Which is potentially a good way to come
+      /// across some weird runtime bugs.
+      // setSPIRLayout(M);
+
+      removeOldMetadata(M);
+    }
 
     // The module probably changed
     return true;

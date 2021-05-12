@@ -20,21 +20,22 @@
 # kernel.
 #
 # Arguments:
-# $1 == SDx's SDx bin directory where the real shell invocation that invokes
-#       the SDx compiler resides
-# $2 == path to the clang driver that's executing the shell script (e.g.
-#        your compiled Clang's build/bin)
-# $3 == The name of the source file without file extensions or temporary
-#       manglings, mostly used to generate some intermediate file names
-# $4 == The initial input file name, currently a .o file that's actually a .bc
-#       file in disguise
-# $5 == The systems temporary directory where we'll deposit some intermediate
-#       files
-# $6 == The name we wish to give our final output .xcl binary, important that it
+# $1  == SDx's SDx bin directory where the real shell invocation that invokes
+#        the SDx compiler resides
+# $2  == path to the clang driver that's executing the shell script (e.g.
+#         your compiled Clang's build/bin)
+# $3  == The name of the source file without file extensions or temporary
+#        manglings, mostly used to generate some intermediate file names
+# $4  == The initial input file name, currently a .o file that's actually a .bc
+#        file in disguise
+# $5  == The systems temporary directory where we'll deposit some intermediate
+#        files
+# $6  == The name we wish to give our final output .xcl binary, important that it
 #       is consistent with what the driver expects it to be.
-# $7 == The name of the file containing additional args for v++ -c
-# $8 == The name of the file containing additional args for v++ -l
-# $9 == The name of the target hw/hw_emu/sw_emu
+# $7  == The name of the file containing additional args for v++ -c
+# $8  == The name of the file containing additional args for v++ -l
+# $9  == The name of the target hw/hw_emu/sw_emu
+# $10 == The flow to use hls/spir
 
 set -e # stop on error
 set -x
@@ -44,47 +45,67 @@ CWD=$(pwd)
 # the environment variables are a quick workaround to swap boards.
 usage() { echo $0: error: $2 >&2; exit $1; }
 
+SDX_BIN_PATH_DIR="$1"
+DRIVER_PATH_DIR="$2"
+# excluding file extension e.g. .cpp and path
+SOURCE_FILE_NAME="$3"
+# input file name including extensions and path
+INPUT_FILE_NAME="$4"
+TMP_DIR="$5"
+# output file name including extensions and path
+OUTPUT_FILE_NAME="$6"
+ADDITIONAL_COMPILE_FILE="$7"
+ADDITIONAL_LINK_FILE="$8"
+XCL_EMULATION_MODE=$9
+shift
+XLX_COMPILE_FLOW=$9
+
+echo "COMPILE FLOW: ${XLX_COMPILE_FLOW}"
+
 # Make this a parameter passed in from Clang at some point
 export VERBOSE=1
 
-if [[ -z "$1" ]]; then
+if [[ -z "${SDX_BIN_PATH_DIR}" ]]; then
   usage 1 "no SDx bin directory"
 fi
 
-if [[ -z "$2" ]]; then
+if [[ -z "${DRIVER_PATH_DIR}" ]]; then
   usage 2 "no driver path specified"
 fi
 
-if [[ -z "$3" ]]; then
+if [[ -z "${SOURCE_FILE_NAME}" ]]; then
   usage 3 "no source file name"
 fi
 
-if [[ -z "$4" ]]; then
+if [[ -z "${INPUT_FILE_NAME}" ]]; then
   usage 4 "no input file name"
 fi
 
-if [[ -z "$5" ]]; then
+if [[ -z "${TMP_DIR}" ]]; then
   usage 5 "no temporary directory specified"
 fi
 
-if [[ -z "$6" ]]; then
+if [[ -z "${OUTPUT_FILE_NAME}" ]]; then
   usage 6 "no final output file specified"
 fi
 
-if [[ -z "$7" ]]; then
-  usage 7 "no addtional compile args file"
+if [[ -z "${ADDITIONAL_COMPILE_FILE}" ]]; then
+  usage 7 "no additional compile args file"
 fi
 
-if [[ -z "$8" ]]; then
-  usage 8 "no addtional link args file"
+if [[ -z "${ADDITIONAL_LINK_FILE}" ]]; then
+  usage 8 "no additional link args file"
 fi
 
-if [[ -z "$9" ]]; then
+if [[ -z "${XCL_EMULATION_MODE}" ]]; then
   usage 9 "no target specified"
 fi
 
+if [[ -z "${XLX_COMPILE_FLOW}" ]]; then
+  usage 10 "no compile flow specified"
+fi
+
 # Setup SDx related env variables
-SDX_BIN_PATH_DIR="$1"
 VITIS_VERSION=$(realpath $SDX_BIN_PATH_DIR/.. | xargs basename)
 if [[ ! -d "$SDX_BIN_PATH_DIR" ]]; then
   usage 8 "path to SDx bin directory is not a valid directory"
@@ -134,7 +155,6 @@ if [[ -f "$SDX_CLANG_LLVM_BIN/xilinx-dataflow-lawyer" ]];then
 fi
 
 # Setup Clang/LLVM related env variables
-DRIVER_PATH_DIR="$2"
 if [[ ! -d "$DRIVER_PATH_DIR" ]]; then
   usage 11 "path to driver directory is not a valid directory"
 else
@@ -153,45 +173,50 @@ else
   fi
 fi
 
-if [[ ! -d "$5" ]]; then
+if [[ ! -d "${TMP_DIR}" ]]; then
   usage 14 "the path given for the temporary directory is an invalid directory"
 fi
 
-# excluding file extension e.g. .cpp and path
-SOURCE_FILE_NAME="$3"
-# input file name including extensions and path
-INPUT_FILE_NAME="$4"
 # Should point to whatever Clang has decided is the temporary directory
-TMP_PATH="$(mktemp $5/sycl-xocc.XXXXXX)"
+TMP_PATH="$(mktemp ${TMP_DIR}/sycl-xocc.XXXXXX)"
 
-# output file name including extensions and path
-OUTPUT_FILE_NAME="$6"
+
 
 set +e
 # allow faillures because empty string is good default
 # This make debugging easier.
-ADDITIONAL_COMPILE_ARGS=$(cat $7)
-ADDITIONAL_LINK_ARGS=$(cat $8)
+ADDITIONAL_COMPILE_ARGS=$(cat ${ADDITIONAL_COMPILE_FILE})
+ADDITIONAL_LINK_ARGS=$(cat ${ADDITIONAL_LINK_FILE})
 set -e
-XCL_EMULATION_MODE=$9
 
 KERNELPROP="${TMP_PATH}_KernelProperties_${SOURCE_FILE_NAME}.bash"
 
 cp "$INPUT_FILE_NAME" "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels.bc"
 
-# -flat-address-space defines the generic address space we wish to deduce to
-# something concrete, used by the infer-address-spaces pass which is slightly
-# modified from the upstream implementation to take this argument to avoid
-# adding a new LLVM Target that will largelly be unused right now..
-$OPT --sycl-xocc -preparesycl -globaldce -inline -infer-address-spaces -globaldce -O3 -globaldce\
-  -flat-address-space=0 -globaldce  -globaldce -kernelPropGen \
-  --sycl-kernel-propgen-output $KERNELPROP \
-  #-inSPIRation \
-  "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels.bc" -o "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc"
+if [[ "${XLX_COMPILE_FLOW}" == "hls" ]]; then
+  echo "Using HLS flow"
+  $OPT --sycl-xocc -preparesycl -globaldce -O3 -globaldce -globaldce -kernelPropGen \
+    --sycl-kernel-propgen-output $KERNELPROP \
+    -inSPIRation \
+    "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels.bc" -o "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
+  EXTRA_LD_ARGS='--sycl-xlx-hls'
+else
+  # -flat-address-space defines the generic address space we wish to deduce to
+  # something concrete, used by the infer-address-spaces pass which is slightly
+  # modified from the upstream implementation to take this argument to avoid
+  # adding a new LLVM Target that will largelly be unused right now..
+  $OPT --sycl-xocc -preparesycl -globaldce -inline -infer-address-spaces -globaldce -O3 -globaldce\
+    -flat-address-space=0 -globaldce  -globaldce -kernelPropGen \
+    --sycl-kernel-propgen-output $KERNELPROP \
+    --sycl-xlx-oclmd -inSPIRation \
+    "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels.bc" -o "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc"
 
-# Link our SDx SPIR binaries in
-$LLVM_LINK "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc" \
-  --only-needed $SDX_LIB_SPIR -o "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
+  # Link our SDx SPIR binaries in
+  $LLVM_LINK "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc" \
+    --only-needed $SDX_LIB_SPIR -o "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc"
+
+  EXTRA_LD_ARGS=''
+fi
 
 # Using the LLVM Linker will add more incompatible IR so run the downgrader in
 # a second pass afterwards, rather than once before in the first opt pass
@@ -200,7 +225,7 @@ $LLVM_LINK "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-optimized.bc" \
 # We also only wish to emit LLVM IR assembly language format and not bitcode
 # format as we currently use the llvm assembler packaged with xocc to generate
 # our final bitcode file.
-$OPT --sycl-xocc --sycl-remove-annotations -S -preparesycl -globaldce \
+$OPT --sycl-xocc --sycl-remove-annotations ${EXTRA_LD_ARGS} -S -preparesycl -globaldce \
   "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.xpirbc" -o \
   "${TMP_PATH}_${SOURCE_FILE_NAME}_kernels-linked.simple.xpirbc"
 

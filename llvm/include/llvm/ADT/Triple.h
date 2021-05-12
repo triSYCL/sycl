@@ -152,6 +152,9 @@ public:
     FPGASubArch_hw,
     FPGASubArch_hw_emu,
     FPGASubArch_sw_emu,
+    FPGASubArch_hls_hw,
+    FPGASubArch_hls_hw_emu,
+    FPGASubArch_hls_sw_emu,
 
     PPCSubArch_spe
   };

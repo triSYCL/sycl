@@ -37,6 +37,7 @@
 #include "Targets/WebAssembly.h"
 #include "Targets/X86.h"
 #include "Targets/XCore.h"
+#include "Targets/XLXHLS.h"
 #include "clang/Basic/Diagnostic.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Triple.h"
@@ -586,30 +587,56 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
 
   case llvm::Triple::fpga32: {
     // Triple example: fpga32-xilinx-unknown-sycldevice
-    if (Triple.getVendor() == llvm::Triple::Xilinx
-     && Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
-       switch (os) {
-       case llvm::Triple::Linux:
-         return new LinuxTargetInfo<SPIR32SYCLDeviceTargetInfo>(Triple, Opts);
-       default:
-         return new SPIR32SYCLDeviceTargetInfo(Triple, Opts);
-       }
-     }
+    if (Triple.getVendor() == llvm::Triple::Xilinx &&
+        Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
+      switch (Triple.getSubArch()) {
+      case llvm::Triple::FPGASubArch_hls_hw:
+      case llvm::Triple::FPGASubArch_hls_hw_emu:
+      case llvm::Triple::FPGASubArch_hls_sw_emu:
+        switch (os) {
+        case llvm::Triple::Linux:
+          return new LinuxTargetInfo<XLXHLS32TargetInfo>(Triple, Opts);
+        default:
+          return new XLXHLS32TargetInfo(Triple, Opts);
+        }
+        break;
+      default:
+        switch (os) {
+        case llvm::Triple::Linux:
+          return new LinuxTargetInfo<SPIR32SYCLDeviceTargetInfo>(Triple, Opts);
+        default:
+          return new SPIR32SYCLDeviceTargetInfo(Triple, Opts);
+        }
+      }
+    }
     return nullptr;
   }
 
   case llvm::Triple::fpga64: {
     // Triple example: fpga64-xilinx-unknown-sycldevice
-    if (Triple.getVendor() == llvm::Triple::Xilinx
-     && Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
-       switch (os) {
-       case llvm::Triple::Linux:
-         return new LinuxTargetInfo<SPIR64SYCLDeviceTargetInfo>(Triple, Opts);
-       default:
-         return new SPIR64SYCLDeviceTargetInfo(Triple, Opts);
-       }
-     }
-     return nullptr;
+    if (Triple.getVendor() == llvm::Triple::Xilinx &&
+        Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
+      switch (Triple.getSubArch()) {
+      case llvm::Triple::FPGASubArch_hls_hw:
+      case llvm::Triple::FPGASubArch_hls_hw_emu:
+      case llvm::Triple::FPGASubArch_hls_sw_emu:
+        switch (os) {
+        case llvm::Triple::Linux:
+          return new LinuxTargetInfo<XLXHLS64TargetInfo>(Triple, Opts);
+        default:
+          return new XLXHLS64TargetInfo(Triple, Opts);
+        }
+        break;
+      default:
+        switch (os) {
+        case llvm::Triple::Linux:
+          return new LinuxTargetInfo<SPIR64SYCLDeviceTargetInfo>(Triple, Opts);
+        default:
+          return new SPIR64SYCLDeviceTargetInfo(Triple, Opts);
+        }
+      }
+    }
+    return nullptr;
   }
 
   case llvm::Triple::spir: {

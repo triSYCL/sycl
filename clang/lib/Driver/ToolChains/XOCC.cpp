@@ -215,11 +215,35 @@ void SYCL::LinkerXOCC::constructSYCLXOCCCommand(
       options::OPT_Xsycl_linker_EQ, TC.getTriple(), C.getDriver());
 
   switch (TC.getTriple().getSubArch()) {
-    case llvm::Triple::FPGASubArch_hw: CmdArgs.push_back("hw"); break;
-    case llvm::Triple::FPGASubArch_hw_emu: CmdArgs.push_back("hw_emu"); break;
-    case llvm::Triple::FPGASubArch_sw_emu: CmdArgs.push_back("sw_emu"); break;
-    default:
-      llvm_unreachable("invalid subarch");
+  case llvm::Triple::FPGASubArch_hw:
+  case llvm::Triple::FPGASubArch_hls_hw:
+    CmdArgs.push_back("hw");
+    break;
+  case llvm::Triple::FPGASubArch_hw_emu:
+  case llvm::Triple::FPGASubArch_hls_hw_emu:
+    CmdArgs.push_back("hw_emu");
+    break;
+  case llvm::Triple::FPGASubArch_sw_emu:
+  case llvm::Triple::FPGASubArch_hls_sw_emu:
+    CmdArgs.push_back("sw_emu");
+    break;
+  default:
+    llvm_unreachable("invalid subarch");
+  }
+
+  switch (TC.getTriple().getSubArch()) {
+  case llvm::Triple::FPGASubArch_hw:
+  case llvm::Triple::FPGASubArch_hw_emu:
+  case llvm::Triple::FPGASubArch_sw_emu:
+    CmdArgs.push_back("spir");
+    break;
+  case llvm::Triple::FPGASubArch_hls_hw:
+  case llvm::Triple::FPGASubArch_hls_hw_emu:
+  case llvm::Triple::FPGASubArch_hls_sw_emu:
+    CmdArgs.push_back("hls");
+    break;
+  default:
+    llvm_unreachable("invalid subarch");
   }
 
   // Path to sycl-xocc script

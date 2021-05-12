@@ -29,6 +29,7 @@ namespace {
 
 cl::opt<bool> RemoveAnnotations("sycl-remove-annotations", cl::Hidden,
                                 cl::init(false));
+cl::opt<bool> SyclHLSFlow("sycl-xlx-hls", cl::Hidden, cl::init(false));
 
 struct PrepareSYCLOpt : public ModulePass {
 
@@ -45,6 +46,16 @@ struct PrepareSYCLOpt : public ModulePass {
         continue;
       G.setComdat(nullptr);
       G.setLinkage(llvm::GlobalValue::PrivateLinkage);
+    }
+  }
+
+  void setHLSCallingConvention(Module& M) {
+    for (Function &F : M.functions()) {
+      if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
+        assert(F.use_empty());
+        F.addFnAttr("fpga.top.func", F.getName());
+        F.setCallingConv(CallingConv::C);
+      }
     }
   }
 
@@ -127,7 +138,10 @@ struct PrepareSYCLOpt : public ModulePass {
 
   bool runOnModule(Module &M) override {
     turnNonKernelsIntoPrivate(M);
-    setCallingConventions(M);
+    if (SyclHLSFlow)
+      setHLSCallingConvention(M);
+    else
+      setCallingConventions(M);
     lowerArrayPartition(M);
     if (RemoveAnnotations)
       removeAnnotations(M);
