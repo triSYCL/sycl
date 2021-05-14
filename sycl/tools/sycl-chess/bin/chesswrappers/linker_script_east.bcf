@@ -25,6 +25,9 @@
 // are using explicit read/write operations but perhaps AXI streaming is
 // different and more generic/friendly).
 
+
+// /!\ Any change to the linker script need to be reflected in the runtime's hardware.hpp
+
 // Linker script for internal stream test core0
 _entry_point _main_init
 _symbol      _main _after _main_init
@@ -47,5 +50,5 @@ _reserved   DMb                        0x30000   0x08000
 
 //East-------------------------------------------------
 _stack DM_stack                        0x38000   0x01000
-_symbol args                           0x39000   0x01000
+_symbol args                           0x39000   0x04000
 

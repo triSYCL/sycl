@@ -975,7 +975,7 @@ static void populateMainEntryPoint(Sema& S, const StringRef Name,
   Out << "\n";
 
   Out << "// SYCL Tile Address Register \n";
-  Out << "uint32_t args[0x400];\n";
+  Out << "uint32_t args[0x1000];\n";
   Out << "int main(void) {\n";
   Out << "  "<< Name << "((void*)&args);\n";
   Out << "  return 0;\n";

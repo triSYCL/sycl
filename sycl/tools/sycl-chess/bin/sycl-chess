@@ -119,7 +119,7 @@ UNMERGED_PROP=$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}
 # Maybe passes can be renamed to describe stages better.
 cp $INPUT_FILE_NAME $INPUT_FILE_NAME.saved.bc
 $OPT -S -O3 -instnamer \
-  -xoccIRDowngrader -ChessMassage -mergefunc -kernelPropGen \
+  -ChessMassage -mergefunc -kernelPropGen \
   "$INPUT_FILE_NAME" --sycl-kernel-propgen-output $KERNELPROP \
   --sycl-kernel-unmerged-prop-out $UNMERGED_PROP -o \
   "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
@@ -191,6 +191,7 @@ export -f chess_kernel_compile
 # variable. We invoke xargs for the maximum number of cores available on the
 # system.
 if [[ ! ${#KERNEL_PARITY_ARRAY[@]} -eq 0 ]]; then
+  echo "Building ${#KERNEL_PARITY_ARRAY[@]} Kernels..."
   echo "${KERNEL_PARITY_ARRAY[@]}" | xargs -n2 -P$(nproc) \
     bash -c 'chess_kernel_compile "$@"'
 fi
