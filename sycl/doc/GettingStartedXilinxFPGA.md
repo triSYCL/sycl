@@ -91,23 +91,22 @@ sudo apt install --reinstall ./xrt_202110.2.11.0_20.10-amd64-xrt.deb
 Check that the FPGA board is detected:
 ```bash
 sudo /opt/xilinx/xrt/bin/xbutil flash scan -v
-XBFLASH -- Xilinx Card Flash Utility
-Card [0]
-	Card BDF:		0000:04:00.0
-	Card type:		u200
-	Flash type:		SPI
-	Shell running on FPGA:
-		xilinx_u200_GOLDEN_2,[SC=1.8]
-	Shell package installed in system:	(None)
-	Card name		AU200P64G
-	Card S/N: 		2130048BQ00H
-	Config mode: 		7
-	Fan presence:		P
-	Max power level:	75W
-	MAC address0:		00:0A:35:05:EF:0E
-	MAC address1:		00:0A:35:05:EF:0F
-	MAC address2:		FF:FF:FF:FF:FF:FF
-	MAC address3:		FF:FF:FF:FF:FF:FF
+```
+
+which should display something similar to
+```
+---------------------------------------------------------------------
+Legacy xbutil is being deprecated, consider moving to next-gen xbutil
+---------------------------------------------------------------------
+WARNING: The xbutil sub-command flash has been deprecated. Please use the xbmgmt utility with flash sub-command for equivalent functionality.
+
+Card [0000:04:00.0]
+    Card type:		u200
+    Flash type:		SPI
+    Flashable partition running on FPGA:
+        xilinx_u200_GOLDEN_5,[SC=INACTIVE]
+    Flashable partitions installed in system:	
+        xilinx_u200_xdma_201830_2,[ID=0x5d1211e8],[SC=4.2.0]
 ```
 
 
@@ -172,10 +171,11 @@ from where they have been downloaded or adapt the paths to them.
 
 ### Flash the board
 
-If you do not want to use a real board, skip this section.
+If you do not want to use a real board or if you have access to a
+machine with a board which is already configured, like an XACC cluster
+https://xilinx.github.io/xacc, skip this section.
 
-If you want to use a real board, follow the recipe "Generating the
-xbutil flash Command" from
+If you want to install a real board, follow the recipe from
 https://www.xilinx.com/support/documentation/boards_and_kits/accelerator-cards/1_9/ug1301-getting-started-guide-alveo-accelerator-cards.pdf
 about how to correctly generate the exact flashing command.
 
@@ -197,11 +197,15 @@ translate this into a flashing command according to the parameters
 above or just follow the information you got when installing
 previously the deployment target platform:
 ```bash
+rkeryell@xsjsycl41:~$ sudo /opt/xilinx/xrt/bin/xbutil flash -a xilinx_u200_xdma_201830_2 -t 1561465320
+---------------------------------------------------------------------
+Legacy xbutil is being deprecated, consider moving to next-gen xbutil
+---------------------------------------------------------------------
 WARNING: The xbutil sub-command flash has been deprecated. Please use the xbmgmt utility with flash sub-command for equivalent functionality.
 
-         Status: shell needs updating
-         Current shell: xilinx_u200_xdma_201830_2
-         Shell to be flashed: xilinx_u200_xdma_201830_2
+	 Status: shell needs updating
+	 Current shell: xilinx_u200_GOLDEN_5
+	 Shell to be flashed: xilinx_u200_xdma_201830_2
 Are you sure you wish to proceed? [y/n]: y
 
 Updating shell on card[0000:04:00.0]
