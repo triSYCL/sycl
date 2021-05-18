@@ -9,6 +9,8 @@ from distutils.spawn import find_executable
 
 import lit.formats
 import lit.util
+import getpass
+import tempfile
 
 from lit.llvm import llvm_config
 
@@ -99,21 +101,21 @@ get_device_count_by_type_path = lit_config.params.get('GET_DEVICE_TOOL', os.path
 if 'GET_DEVICE_TOOL' in lit_config.params.keys():
     lit_config.warning("The tool from none-default path is used: "+get_device_count_by_type_path)
 
-def getDeviceCount(device_type):
+def getDeviceCount(device_type, be = backend):
     is_cuda = False;
     is_level_zero = False;
     device_count_env = os.environ.copy()
     if "XCL_EMULATION_MODE" in os.environ:
         if os.environ["XCL_EMULATION_MODE"] == "hw":
             device_count_env.pop("XCL_EMULATION_MODE")
-    process = subprocess.Popen([get_device_count_by_type_path, device_type, backend],
+    process = subprocess.Popen([get_device_count_by_type_path, device_type, be],
         stdout=subprocess.PIPE, env=device_count_env)
     (output, err) = process.communicate()
     exit_code = process.wait()
 
     if exit_code != 0:
         lit_config.error("getDeviceCount {TYPE} {BACKEND}: Non-zero exit code {CODE}".format(
-            TYPE=device_type, BACKEND=backend, CODE=exit_code))
+            TYPE=device_type, BACKEND=be, CODE=exit_code))
         return [0,False,False]
 
     result = output.decode().replace('\n', '').split(':', 1)
@@ -122,7 +124,7 @@ def getDeviceCount(device_type):
     except ValueError:
         value = 0
         lit_config.error("getDeviceCount {TYPE} {BACKEND}: Cannot get value from output: {OUT}".format(
-            TYPE=device_type, BACKEND=backend, OUT=result[0]))
+            TYPE=device_type, BACKEND=be, OUT=result[0]))
 
     # if we have found gpu and there is additional information, let's check
     # whether this is CUDA device or Level Zero device or none of these.
@@ -134,7 +136,7 @@ def getDeviceCount(device_type):
 
     if err:
         lit_config.warning("getDeviceCount {TYPE} {BACKEND} stderr:{ERR}".format(
-            TYPE=device_type, BACKEND=backend, ERR=err))
+            TYPE=device_type, BACKEND=be, ERR=err))
     return [value,is_cuda,is_level_zero]
 
 # Every SYCL implementation provides a host implementation.
@@ -219,7 +221,7 @@ if xocc != "off":
     # so we wrap every use of XRT inside an file lock.
     # We also wrap invocation of executable in an setsid to prevent
     # a single program failure from ending all the tests.
-    xrt_lock = "/tmp/xrt.lock"
+    xrt_lock = f"{tempfile.gettempdir()}/xrt-{getpass.getuser()}.lock"
     acc_run_substitute+= "setsid flock --exclusive " + xrt_lock + " "
     if os.path.exists(xrt_lock):
         os.remove(xrt_lock)
@@ -268,6 +270,9 @@ for aot_tool in aot_tools:
 if xocc == "off":
     config.excludes += ['xocc']
 else:
+    if getDeviceCount("gpu", "cuda")[1]:
+        lit_config.note("found secondary cuda target")
+        config.available_features.add("has_secondary_cuda")
     llvm_config.with_environment('XCL_EMULATION_MODE', xocc_target, append_path=False)
     lit_config.note("XOCC target: {}".format(xocc_target))
     required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]

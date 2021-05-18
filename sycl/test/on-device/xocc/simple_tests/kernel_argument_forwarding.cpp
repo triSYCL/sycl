@@ -1,9 +1,9 @@
 // REQUIRES: xocc
 
-// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out 2>&1 | tee out
-// RUN: cat out | FileCheck %s -check-prefix=CHECK1
-// RUN: cat out | FileCheck %s -check-prefix=CHECK2
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out 2>&1 | tee %t.dump
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
+// RUN: cat %t.dump | FileCheck --check-prefix=CHECK1 %s
+// RUN: cat %t.dump | FileCheck --check-prefix=CHECK2 %s
 
 #include <CL/sycl.hpp>
 #include <CL/sycl/xilinx/fpga.hpp>
@@ -23,17 +23,11 @@ int main() {
     auto Accessor = Buffer.get_access<sycl::access_mode::write>(cgh);
     cgh.single_task<class FirstKernel>(
         sycl::xilinx::kernel_param("--optimize 2"_cstr, [=] {
-    // CHECK1: v++ {{.*}}class_FirstKernel{{.*}} --optimize 2
+          // CHECK1: v++ {{.*}}class_FirstKernel{{.*}} --optimize 2
           Accessor[0] = 0;
-        }));
-  });
-
-  Queue.submit([&](sycl::handler &cgh) {
-    auto Accessor = Buffer.get_access<sycl::access_mode::write>(cgh);
     cgh.single_task<class SecondKernel>(sycl::xilinx::kernel_param(
-        "--kernel_frequency"_cstr,
         sycl::xilinx::number<0x100 + 0x200, sycl::detail::Base16>::str, [=] {
-    // CHECK2: v++ {{.*}}class_SecondKernel{{.*}} --kernel_frequency 300
+          // CHECK2: v++ {{.*}}class_SecondKernel{{.*}} --kernel_frequency 300
           Accessor[1] = 1;
         }));
   });

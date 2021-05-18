@@ -28,7 +28,6 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/SHA1.h"
 
 #include <array>
 #include <functional>
@@ -754,72 +753,6 @@ static target getAccessTarget(const ClassTemplateSpecializationDecl *AccTy) {
       AccTy->getTemplateArgs()[3].getAsIntegral().getExtValue());
 }
 
-/// Compute a unique name that is consumable by sycl-xocc
-static std::string computeUniqueSYCLXOCCName(StringRef Name,
-                                             StringRef Demangle) {
-  /// XOCC has a maximum of 64 character for the name of the kernel function
-  /// plus the name of one parameter.
-  /// Those characters need to be used wisely to prevent name collisions.
-  /// It is also useful to use a name that is understandable by the user,
-  /// so we add only 8 character of hash and only if needed.
-  /// The first character cannot be an underscore or a digit.
-  /// An underscore can't be followed by an other underscore.
-  constexpr unsigned MaxXOCCSize = 30;
-  /// Some transformations might make 2 kernel identifiers the same.
-  /// Allow adding a hash when such transformations are made to avoid possible
-  /// name conflict.
-  bool ForceHash = false;
-
-  std::string Result;
-  Result.reserve(Demangle.size());
-
-  for (char c : Demangle) {
-    if (!isAlphanumeric(c)) {
-      // Do not repeat _ in the cleaned-up name
-      if (!Result.empty() && Result.back() == '_')
-        continue;
-      c = '_';
-    }
-    Result.push_back(c);
-  }
-
-  // Replace first kernel character name by a 'k' to be compatible with SPIR
-  if ((Result.front() == '_' || isDigit(Result.front()))) {
-    Result.front() = 'k';
-    ForceHash = true;
-  }
-
-  /// The name alone is guaranteed to be unique, so if fits in the size, it is
-  /// enough.
-  if (Result.size() < MaxXOCCSize && !ForceHash)
-    return Result;
-
-  /// 9 for 8 characters of hash and an '_'.
-  Result.erase(0, Result.size() - (MaxXOCCSize - 9));
-
-  if ((Result.front() == '_' || isDigit(Result.front())))
-    Result.front() = 'k';
-
-  if (Result.back() != '_')
-    Result.push_back('_');
-
-  /// Sadly there is only 63 valid characters in C identifiers and v++ doesn't
-  /// deal well with double underscores in identifiers. So A and B are
-  /// repeated. This doesn't hurt entropy too much because it is just 2 out
-  /// of 64.
-  Result += llvm::SHA1::hashToString(
-      llvm::ArrayRef<uint8_t>{reinterpret_cast<const uint8_t *>(Name.data()),
-                              Name.size()},
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-      "abcdefghijklmnopqrstuvwxyz"
-      "0123456789AB");
-
-  if (Result.size() > MaxXOCCSize)
-    Result.resize(MaxXOCCSize);
-
-  return Result;
-}
-
 // The first template argument to the kernel caller function is used to identify
 // the kernel itself.
 static QualType calculateKernelNameType(ASTContext &Ctx,
@@ -867,6 +800,8 @@ static std::string AIENameGen(std::string S) {
   return S;
 }
 
+std::string computeUniqueSYCLXOCCName(StringRef Name, StringRef Demangle);
+
 // Gets a name for the OpenCL kernel function, calculated from the first
 // template argument of the kernel caller function.
 static std::pair<std::string, std::string>
@@ -890,7 +825,6 @@ constructKernelName(Sema &S, FunctionDecl *KernelCallerFunc,
   std::string Str = PredefinedExpr::ComputeName(
       S.getASTContext(), PredefinedExpr::UniqueStableNameType, KernelNameType);
   Res = computeUniqueSYCLXOCCName(Res, KernelNameType.getAsString());
-  Str = computeUniqueSYCLXOCCName(Str, KernelNameType.getAsString());
   return {Res, Str};
 }
 
