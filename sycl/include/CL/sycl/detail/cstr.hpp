@@ -45,17 +45,21 @@ __SYCL_INLINE_NAMESPACE(cl) {
   /// Utility to make any functor's operator() be const even if it originally
   /// wasn't. This is useful to bypass the restriction that kernel operator()
   /// must be const.
-  template<typename T> struct const_cheating_wrapper {
+  template<typename T, int Param> struct const_cheating_wrapper {
     mutable std::decay_t<T> t;
-    template<typename... Ts> auto operator()(Ts &&... ts) const & {
+    template <typename... Ts,
+              typename std::enable_if<sizeof...(Ts) == Param, int>::type = 0>
+    auto operator()(Ts &&...ts) const & {
       return std::forward<T &>(t)(std::forward<Ts>(ts)...);
     }
-    template<typename... Ts> auto operator()(Ts &&... ts) const && {
+    template <typename... Ts,
+              typename std::enable_if<sizeof...(Ts) == Param, int>::type = 0>
+    auto operator()(Ts &&...ts) const && {
       return std::forward<T &&>(t)(std::forward<Ts>(ts)...);
     }
   };
-  template<typename T> auto make_const_cheater(T &&t) {
-    return const_cheating_wrapper<T>{std::forward<T>(t)};
+  template<int Param, typename T> auto make_const_cheater(T &&t) {
+    return const_cheating_wrapper<T, Param>{std::forward<T>(t)};
   }
 
   /// Transform a type like: cstr<char, 'a', 'b'>
