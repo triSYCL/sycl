@@ -184,16 +184,24 @@ struct KernelPropGen : public ModulePass {
   }
 
   void GenerateXOCCPropertyScript(Module &M, llvm::raw_fd_ostream &O) {
-    llvm::SmallString<512> kernelNames;
-    llvm::SmallString<512> DDRArgs;
-    llvm::SmallString<512> ExtraArgs;
     CollectExtraArgs(M);
+    O << "{\n";
+    O << "  \"kernels\": [\n" ;
+    bool has_kernel = false;
     for (auto &F : M.functions()) {
       if (isKernel(F)) {
-        CollectUserSpecifiedDDRBanks(F);
-        kernelNames += (" \"" + F.getName() + "\" ").str();
-        ExtraArgs += " \"" + ExtraArgsMap[&F] + "\" ";
+        if (has_kernel) 
+          O << ",\n";
+        has_kernel = true;
+        O << "    {\n";
+        O << ("      \"name\": \"" + F.getName() + "\",\n").str();
+        O << ("      \"extra_args\": \""+ ExtraArgsMap[&F] + "\",\n");
 
+        CollectUserSpecifiedDDRBanks(F);
+        //kernelNames += (" \"" + F.getName() + "\" ").str();
+        //ExtraArgs += " \"" + ExtraArgsMap[&F] + "\" ";
+        O << "      \"memory_assignment\": [\n";
+        bool has_assignment = false;
         for (auto& Arg : F.args()) {
           if (Arg.getType()->isPointerTy())
           // if the argument is a pointer in the global or constant
@@ -223,37 +231,23 @@ struct KernelPropGen : public ModulePass {
               // default compute unit name. If more than one CU is generated
               // (which we don't support yet in any case) then they would be
               // KernelName_2..KernelName_3 etc.
-              DDRArgs += ("--sp " + F.getName() + "_1." + Arg.getName() +
+              if (has_assignment) 
+                O << ",\n";
+              has_assignment = true;
+              O << "        {";
+              O << ("          \"arg_name\": \"" + Arg.getName() + "\",\n").str();
+              O << ("          \"bank_id\": " + std::to_string(findDDRBankFor(&Arg)) +"\n");
+              O << "        }";
+              /*DDRArgs += ("--sp " + F.getName() + "_1." + Arg.getName() +
                           ":DDR[" + std::to_string(findDDRBankFor(&Arg)) + "] ")
-                             .str();
+                             .str();*/
           }
         }
-        O << "\n"; // line break for new set of kernel properties
+        O << "\n      ]\n"; // line break for new set of kernel properties
+        O << "    }";
       }
     }
-
-    // output our list of kernel names as a bash array we can iterate over
-    if (!kernelNames.empty()) {
-       O << "# array of kernel names found in the current module\n";
-       O << "declare -a KERNEL_NAME_ARRAY=(" << kernelNames.str() << ")\n\n";
-    }
-
-    // output our --sp args containing DDR assignments.
-    // Should look something like: --sp kernelName_1.arg_0:DDR[0] --sp ...
-    if (!DDRArgs.empty()) {
-       O <<   "# list of kernel arguments to ddr bank mappings for arguments\n"
-              "# in the global and constant address spaces, passed to the\n"
-              "# xocc linker phase\n";
-       O << "DDR_BANK_ARGS=\"" << DDRArgs.str() << "\"\n";
-    }
-
-    /// Output the list of user specified extra parameter that need to be
-    /// forwarded to v++ during a specific kernel compilation.
-    if (!ExtraArgs.empty()) {
-      O << "# array of additional kernel parameters\n";
-      O << "declare -a EXTRA_KERNEL_PARAMS_ARRAY=(" << ExtraArgs.str()
-        << ")\n\n";
-    }
+    O << "\n  ]\n}\n";
   }
 
   /// Visit all the functions of the module
@@ -263,11 +257,6 @@ struct KernelPropGen : public ModulePass {
 
     if (O.has_error())
       return false;
-
-    // Script header/comment
-    O << "# This is a generated bash script to inject environment information\n"
-         "# containing kernel properties that we need so we can compile.\n"
-         "# This script is called from sycl-xocc.\n";
 
     GenerateXOCCPropertyScript(M, O);
 

@@ -145,7 +145,8 @@ struct PrepareSYCLOpt : public ModulePass {
     lowerArrayPartition(M);
     if (RemoveAnnotations)
       removeAnnotations(M);
-    forceInlining(M);
+    if (!SyclHLSFlow)
+      forceInlining(M);
     return true;
   }
 };

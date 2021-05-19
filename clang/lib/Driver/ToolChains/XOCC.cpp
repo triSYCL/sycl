@@ -145,75 +145,43 @@ void SYCL::LinkerXOCC::constructSYCLXOCCCommand(
     static_cast<const toolchains::XOCCToolChain &>(getToolChain());
   InputInfoList SyclXoccArg = Inputs;
 
-  /// When there is more inputs than what sycl-xocc can handle(1) we llvm-link
-  /// all those inputs together before invoking sycl-xocc.
-  if (Inputs.size() > 1) {
-    SmallString<128> ExecPath(C.getDriver().Dir);
-    llvm::sys::path::append(ExecPath, "llvm-link");
-    ArgStringList CmdArgs;
-    for (auto& In : Inputs)
-      CmdArgs.push_back(Args.MakeArgString(In.getFilename()));
-    CmdArgs.push_back("-o");
-    std::string TmpFileName = C.getDriver().GetTemporaryPath(
-        llvm::sys::path::stem(SyclXoccArg[0].getBaseInput()), "bc");
-    const char* Tmp = C.addTempFile(C.getArgs().MakeArgString(TmpFileName));
-    CmdArgs.push_back(Args.MakeArgString(Tmp));
-
-    SyclXoccArg.resize(1);
-    SyclXoccArg[0] = InputInfo(&JA, Tmp, Tmp);
-
-    C.addCommand(std::make_unique<Command>(
-        JA, *this, ResponseFileSupport::None(),
-        Args.MakeArgString(ExecPath.str()), CmdArgs, Inputs));
-  }
-
   ArgStringList CmdArgs;
 
   // Script Arg $1, directory of xocc binary (SDx's bin)
   assert(!TC.XOCCInstallation.getBinPath().empty());
+  CmdArgs.push_back("--vitis_bin_dir");
   CmdArgs.push_back(Args.MakeArgString(TC.XOCCInstallation.getBinPath()));
 
   // Script Arg $2, directory of the Clang driver, where the sycl-xocc script
   // opt binary and llvm-linker binary should be contained among other things
   assert(!C.getDriver().Dir.empty());
+  CmdArgs.push_back("--clang_path");
   CmdArgs.push_back(Args.MakeArgString(C.getDriver().Dir));
-
-  // Script Arg $3, the original source file name minus the file extension
-  // (.h/.cpp etc)
-  SmallString<256> SrcName =
-    llvm::sys::path::filename(SyclXoccArg[0].getFilename());
-  llvm::sys::path::replace_extension(SrcName, "");
-  assert(!SrcName.empty());
-  CmdArgs.push_back(Args.MakeArgString(SrcName));
-
-  // Script Arg $4, input file name, distinct from Arg $3 as this is the .o
-  // (it's actually a .bc file in disguise at the moment) input file with a
-  // mangled temporary name
-  // \todo support more than one input, there may be multiple in some cases as
-  // this is a "linker" stage, can refer to SYCL.cpp for an example
-  assert(SyclXoccArg[0].getFilename());
-  CmdArgs.push_back(Args.MakeArgString(SyclXoccArg[0].getFilename()));
 
   // Script Arg $5, temporary directory path, used to dump a lot of intermediate
   // files that no one needs to know about unless they're debugging
   SmallString<256> TmpDir;
   llvm::sys::path::system_temp_directory(true, TmpDir);
   assert(!TmpDir.empty());
+  CmdArgs.push_back("--tmp_root");
   CmdArgs.push_back(Args.MakeArgString(TmpDir));
 
   // Script Arg $6, the name of the final output .xcl binary file after
   // compilation and linking is complete
   assert(Output.getFilename()[0]);
+  CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
 
-  // Script Arg $7
+  CmdArgs.push_back("--vitis_comp_argfile");
   AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_backend,
       options::OPT_Xsycl_backend_EQ, TC.getTriple(), C.getDriver());
 
-  // Script Arg $8
+  
+  CmdArgs.push_back("--vitis_link_argfile");
   AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_linker,
       options::OPT_Xsycl_linker_EQ, TC.getTriple(), C.getDriver());
 
+  CmdArgs.push_back("--target");
   switch (TC.getTriple().getSubArch()) {
   case llvm::Triple::FPGASubArch_hw:
   case llvm::Triple::FPGASubArch_hls_hw:
@@ -235,20 +203,24 @@ void SYCL::LinkerXOCC::constructSYCLXOCCCommand(
   case llvm::Triple::FPGASubArch_hw:
   case llvm::Triple::FPGASubArch_hw_emu:
   case llvm::Triple::FPGASubArch_sw_emu:
-    CmdArgs.push_back("spir");
     break;
   case llvm::Triple::FPGASubArch_hls_hw:
   case llvm::Triple::FPGASubArch_hls_hw_emu:
   case llvm::Triple::FPGASubArch_hls_sw_emu:
-    CmdArgs.push_back("hls");
+    CmdArgs.push_back("--hls");
     break;
   default:
     llvm_unreachable("invalid subarch");
   }
 
+   /// When there is more inputs than what sycl-xocc can handle(1) we llvm-link
+  /// all those inputs together before invoking sycl-xocc.
+  for (auto& In : Inputs)
+    CmdArgs.push_back(Args.MakeArgString(In.getFilename()));
+
   // Path to sycl-xocc script
   SmallString<128> ExecPath(C.getDriver().Dir);
-  path::append(ExecPath, "sycl-xocc");
+  path::append(ExecPath, "sycl_xocc.py");
   const char *Exec = C.getArgs().MakeArgString(ExecPath);
 
   // Generate our command to sycl-xocc using the arguments we've made

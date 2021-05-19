@@ -389,6 +389,7 @@ struct InSPIRation : public ModulePass {
       remapBuiltin(F);
     }
 
+    removeOldMetadata(M);
     if (SYCLCLMeta) {
 
       setSPIRVersion(M);
@@ -403,8 +404,6 @@ struct InSPIRation : public ModulePass {
       /// accurately in this pass. Which is potentially a good way to come
       /// across some weird runtime bugs.
       // setSPIRLayout(M);
-
-      removeOldMetadata(M);
     }
 
     // The module probably changed
