@@ -279,12 +279,6 @@ struct KernelPropGen : public ModulePass {
         // Revert the linkage back to original, which was changed by
         // ChessMassage for function merge
         F.setLinkage(GlobalValue::WeakODRLinkage);
-        if (F.hasFnAttribute("xilinx_acap_linker_script"))
-          kernelParity += " \"" +
-                          F.getFnAttribute("xilinx_acap_linker_script")
-                              .getValueAsString()
-                              .str() +
-                          "\" ";
       }
     }
 
@@ -292,11 +286,6 @@ struct KernelPropGen : public ModulePass {
     if (!kernelNames.empty()) {
        O << "# array of kernel names found in the current module\n";
        O << "declare -a KERNEL_NAME_ARRAY=(" << kernelNames.str() << ")\n\n";
-    }
-
-    if (!kernelParity.empty()) {
-      O << "# array of kernel names found in the current module\n";
-      O << "declare -a KERNEL_PARITY_ARRAY=(" << kernelParity.str() << ")\n\n";
     }
   }
 

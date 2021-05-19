@@ -46,51 +46,7 @@ struct ChessMassage : public ModulePass {
 
   ChessMassage() : ModulePass(ID) {}
 
-  struct Loc {
-    int x;
-    int y;
-  };
-
-  static StringRef KindOf(const char *Str) {
-    return StringRef(Str, strlen(Str) + 1);
-  }
-  DenseMap<Function *, Loc> FuncLocCache;
   GlobalNumberState GNS;
-
-  Loc getKernelLoc(Function *Kernel) {
-    auto It = FuncLocCache.find(Kernel);
-    if (It != FuncLocCache.end())
-      return It->second;
-    Module *M = Kernel->getParent();
-    GlobalVariable *Annots = M->getGlobalVariable("llvm.global.annotations");
-    auto *Array = cast<ConstantArray>(Annots->getOperand(0));
-    for (auto *E : Array->operand_values()) {
-      auto *CS = cast<ConstantStruct>(E);
-      if (getUnderlyingObject(CS->getAggregateElement(0u)) != Kernel)
-        continue;
-
-      StringRef AnnotKind =
-          cast<ConstantDataArray>(
-              cast<GlobalVariable>(
-                  getUnderlyingObject(CS->getAggregateElement(1)))
-                  ->getOperand(0))
-              ->getRawDataValues();
-      if (AnnotKind != KindOf("xilinx_acap_tile"))
-        continue;
-      Constant *Args =
-          (cast<GlobalVariable>(getUnderlyingObject(CS->getAggregateElement(4)))
-               ->getInitializer());
-      Loc r;
-      if (isa<ConstantAggregateZero>(Args))
-        r = {0, 0};
-      else
-        r = {(int)cast<ConstantInt>(Args->getOperand(0))->getZExtValue(),
-             (int)cast<ConstantInt>(Args->getOperand(1))->getZExtValue()};
-      FuncLocCache[Kernel] = r;
-      return r;
-    }
-    llvm_unreachable("not a acap kernel");
-  }
 
   // Re-order functions with hash values. This is taken from MergeFunctions
   // and required to correctly identifie to which one the functions are
@@ -233,18 +189,6 @@ struct ChessMassage : public ModulePass {
 
     if (O.has_error())
       return false;
-
-    for (auto &F : M.functions()) {
-      // Collect the kernel functions
-      if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
-        if (getKernelLoc(&F).y & 1)
-          F.addFnAttr("xilinx_acap_linker_script",
-                      "$DRIVER_PATH_DIR/chesswrappers/linker_script_west.bcf");
-        else
-          F.addFnAttr("xilinx_acap_linker_script",
-                      "$DRIVER_PATH_DIR/chesswrappers/linker_script_east.bcf");
-      }
-    }
 
     prepareForMerging(M, O);
     removeImmarg(M);

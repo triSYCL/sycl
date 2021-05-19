@@ -163,7 +163,6 @@ chess_kernel_compile () {
     set -x
     echo "Linking Kernel: $0"
     echo "Tile Main File: $SOURCE_TEMPORARY_DIR/$0.cpp"
-    echo "Kernel Parity: $1"
 
     # TODO: Look into the fact that SemaSYCL generates the main files twice
     # once pre-linker phase and once after. This is probably normal behaviour
@@ -174,10 +173,17 @@ chess_kernel_compile () {
     $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c \
       -o "$SOURCE_TEMPORARY_DIR/$0.main.o" "$SOURCE_TEMPORARY_DIR/$0.cpp"
 
-    eval LINKER_SCRIPT="$1"
+    # link the same kernel for west tiles and east tiles
+    $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f \
+      +l$DRIVER_PATH_DIR/chesswrappers/linker_script_east.bcf \
+      -o "$SOURCE_TEMPORARY_DIR/$0.elf.o_east" \
+      "$SOURCE_TEMPORARY_DIR/$0.main.o" \
+      "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
+      "$SYCL_LIB_PATH/acap-intrinsic.o"
 
     $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f \
-      +l$LINKER_SCRIPT -o "$SOURCE_TEMPORARY_DIR/$0.elf.o" \
+      +l$DRIVER_PATH_DIR/chesswrappers/linker_script_west.bcf \
+      -o "$SOURCE_TEMPORARY_DIR/$0.elf.o_west" \
       "$SOURCE_TEMPORARY_DIR/$0.main.o" \
       "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
       "$SYCL_LIB_PATH/acap-intrinsic.o"
@@ -190,9 +196,9 @@ export -f chess_kernel_compile
 # and only consume 1 argument per invocation. This is passed in as the $0'th
 # variable. We invoke xargs for the maximum number of cores available on the
 # system.
-if [[ ! ${#KERNEL_PARITY_ARRAY[@]} -eq 0 ]]; then
-  echo "Building ${#KERNEL_PARITY_ARRAY[@]} Kernels..."
-  echo "${KERNEL_PARITY_ARRAY[@]}" | xargs -n2 -P$(nproc) \
+if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
+  echo "Building ${#KERNEL_NAME_ARRAY[@]} Kernels..."
+  echo "${KERNEL_NAME_ARRAY[@]}" | xargs -n1 -P$(nproc) \
     bash -c 'chess_kernel_compile "$@"'
 fi
 
@@ -219,13 +225,6 @@ if [[ ! ${#KERNEL_NAME_ARRAY_UNMERGED[@]} -eq 0 ]]; then
   merged_index=-1;
   for index in "${KERNEL_NAME_ARRAY_UNMERGED[@]}"; do
     if [[ -n "$index" ]]; then
-      # Name of ELF binary and kernel function that we will synch with
-      # integration header to retrieve our binary, it will be packaged as part
-      # of the final image data.
-      # The name is also used by the Offload Wrapper to identify the image to
-      # wrap into the host binary after its loaded into memory.
-      echo "${index}" >> "$OUTPUT_FILE_NAME"
-
       # Search for the corresponding elf file. If the file doesn't exist,
       # that means the kernel has been merged into previous matched one.
       # This is valid because all in KERNEL_NAME_ARRAY* are identically sorted
@@ -239,9 +238,18 @@ if [[ ! ${#KERNEL_NAME_ARRAY_UNMERGED[@]} -eq 0 ]]; then
         set -e
       fi
 
-      # Size of file in bytes
-      echo "`ls -lrt "$ELF" | nawk '{print $5}'`" >> "$OUTPUT_FILE_NAME"
-      cat $ELF >> "$OUTPUT_FILE_NAME"
+      for POSTFIX in _east _west; do
+        # Name of ELF binary and kernel function that we will synch with
+        # integration header to retrieve our binary, it will be packaged as part
+        # of the final image data.
+        # The name is also used by the Offload Wrapper to identify the image to
+        # wrap into the host binary after its loaded into memory.
+        echo "${index}$POSTFIX" >> "$OUTPUT_FILE_NAME"
+        
+        # Size of file in bytes
+        echo "`ls -lrt "$ELF$POSTFIX" | nawk '{print $5}'`" >> "$OUTPUT_FILE_NAME"
+        cat $ELF$POSTFIX >> "$OUTPUT_FILE_NAME"
+      done
     fi
   done
 fi
