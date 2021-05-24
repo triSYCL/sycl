@@ -1,4 +1,4 @@
-# SYCL for Vitis 2020.3: experimental melting pot with Intel oneAPI DPC++ SYCL and triSYCL for Xilinx FPGA
+# SYCL for Vitis 2020.2: experimental melting pot with Intel oneAPI DPC++ SYCL and triSYCL for Xilinx FPGA
 
 ## Introduction
 
