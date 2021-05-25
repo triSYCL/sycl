@@ -28,6 +28,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import zipfile
 
 
 class TmpDirManager:
@@ -43,31 +44,38 @@ class TmpDirManager:
             ))
         return self.dir
 
-    def __exit__(self, type, value, traceback):
+    def __exit__(self, *_):
         if (self.autodelete):
             shutil.rmtree(self.dir)
 
 
-class DataflowLawyerManager:
-    def __init__(self, vitis_clang_bin_dir: Path):
-        self.vitis_clang_bin_dir = vitis_clang_bin_dir
+class DoNothingManager:
+    def __enter__(_):
+        pass
+
+    def __exit__(*_):
+        pass
+
+
+class BindMountManager:
+    def __init__(self, source: Path, dest: Path):
+        self.source = source
+        self.dest = dest
         self.mounted = False
 
     def __enter__(self):
-        self.dflawyer = self.vitis_clang_bin_dir / "xilinx-dataflow-lawyer"
-        echo = Path(shutil.which("echo"))
-        if self.dflawyer.is_file():
-            print(f"Binding {self.dflawyer} to {echo}")
+        if self.source.is_file() and self.dest.is_file():
+            print(f"Binding {self.source} to {self.dest}")
             subprocess.run([
-                "sudo", "mount", "--bind", echo, self.dflawyer
+                "sudo", "mount", "--bind", self.dest, self.source
             ])
             self.mounted = True
 
     def __exit__(self, _, __, ___):
         if self.mounted:
-            print(f"Unbinding {self.dflawyer}")
+            print(f"Unbinding {self.source}")
             subprocess.run([
-                "sudo", "umount", self.dflawyer
+                "sudo", "umount", self.source
             ])
 
 
@@ -134,23 +142,14 @@ class CompilationDriver:
         opt_options = ["--sycl-xocc", "-preparesycl", "-globaldce"]
         if not self.hls_flow:
             opt_options.extend([
-                "-inline", "-infer-address-spaces", "-globaldce"
+                "-inline", "-infer-address-spaces",
+                "-flat-address-space=0", "-globaldce",
+                "--sycl-xlx-oclmd"
             ])
-        opt_options.append("-O3")
-        if not self.hls_flow:
-            opt_options.extend([
-                "-globaldce", "-flat-address-space=0"
-                ])
         opt_options.extend([
-            "-globaldce", "-globaldce", "-kernelPropGen",
-            "--sycl-kernel-propgen-output", f"{kernel_prop}"
-        ])
-        if not self.hls_flow:
-            opt_options.append('--sycl-xlx-hls')
-        opt_options.extend([
-            "-inSPIRation",
-            "-o",
-            f"{self.optimised_bc}"
+            "-O3", "-globaldce", "-globaldce", "-kernelPropGen",
+            "--sycl-kernel-propgen-output", f"{kernel_prop}", "-inSPIRation",
+            "-o", f"{self.optimised_bc}"
         ])
 
         opt = self.clang_path / "opt"
@@ -208,6 +207,26 @@ class CompilationDriver:
             "-o",
             self.vpp_llvm_input
         ])
+        if self.hls_flow and self.vitis_mode == "sw_emu":
+            # assemble the xpirbc due to bug in v++ when provided with llvm IR
+            proc = subprocess.run([
+                self.vitis_clang_bin / 'llvm-config',
+                '--host-target'
+            ], capture_output=True)
+            host_triple = proc.stdout.decode('utf-8')
+            self.assembled_xpirbc = self.tmpdir / f"{self.outstem}.S"
+            self.host_native_code = self.tmpdir / f"{self.outstem}.o"
+            subprocess.run([
+                self.vitis_clang_bin / "llc", f"-mtriple={host_triple}",
+                "-o", self.assembled_xpirbc,
+                self.vpp_llvm_input
+            ])
+            subprocess.run([
+                self.vitis_clang_bin / "llc", f"-mtriple={host_triple}",
+                "-o", self.host_native_code,
+                "--filetype=obj",
+                self.vpp_llvm_input
+            ])
 
     def _compile_kernel(self, kernel):
         """Generate .xo from kernel"""
@@ -230,16 +249,26 @@ class CompilationDriver:
             f.write(' '.join(map(str, command)))
             f.write(f"\n\nSource command (dbg):\n{command}\n")
         subprocess.run(command)
+        if self.vitis_mode == "sw_emu" and self.hls_flow:
+            # We need to manually replace llvm IR source with asm as 
+            # there is a bug in this case that makes vitis try to compile
+            # llvm bitcode with gcc
+            unzip_path = self.tmpdir / f"{kernel['name']}_xo_extracted"
+            shutil.copy2(kernel_output, f"{kernel_output}.old")
+            kernel_xo = zipfile.ZipFile(kernel_output, 'r')
+            kernel_xo.extractall(unzip_path)
+            kernel_xo.close()
+            zip_cpu_sources = unzip_path / kernel["name"] / "cpu_sources"
+            source_xpir = zip_cpu_sources / self.vpp_llvm_input.name
+            source_xpir.write_bytes(self.host_native_code.read_bytes())
+            kernel_xo = zipfile.ZipFile(kernel_output, 'w')
+            for sub_path in unzip_path.rglob("*"):
+                kernel_xo.write(sub_path, sub_path.relative_to(unzip_path))
+            kernel_xo.close()
         self.compiled_kernels.append(kernel_output)
 
     def _link_kernels(self):
         """Call v++ to link all kernel in one .xclbin"""
-        if self.vitis_mode == "sw_emu" and self.hls_flow:
-            # We need to manually generate asm as there is a
-            # bug in this case that makes vitis try to compile
-            # llvm bitcode with gcc
-            # TODO
-            pass
         vpp = self.vitis_bin_dir / "v++"
         command = [
             vpp, "--target", self.vitis_mode,
@@ -265,35 +294,51 @@ class CompilationDriver:
         with (self.tmpdir / "vxxlink.cmd").open("w") as f:
             f.write(' '.join(map(str, command)))
             f.write(f"\n\nSource command (dbg):\n{command}\n")
-        subprocess.run(command)
+        vivado_gcc_bin_dir = list((
+            self.vitis_bin_dir /
+            f"../../../Vivado/{self.vitis_version}/tps/lnx64"
+            ).resolve().glob("gcc*"))[0] / "bin"
+        vivado_gcc = vivado_gcc_bin_dir / "gcc"
+        hls_sw_emu = self.hls_flow and self.vitis_mode == "sw_emu"
+        gcc_bind_manager = BindMountManager(
+            vivado_gcc,
+            self.clang_path / "sycl_vitis_gcc.py"
+        ) if hls_sw_emu else DoNothingManager()
+        with gcc_bind_manager:
+            subprocess.run(command)
 
     def drive_compilation(self):
         autodelete = environ.get("SYCL_XOCC_KEEP_CLUTTER") is None
         outstem = self.outstem
         tmp_root = self.tmp_root
-        with DataflowLawyerManager(self.vitis_clang_bin):
-            with TmpDirManager(tmp_root, outstem, autodelete) as self.tmpdir:
-                tmpdir = self.tmpdir
-                if not autodelete:
-                    print(f"Temporary clutter in {tmpdir} will not be cleaned")
-                self.before_opt_src = self.tmpdir / f"{outstem}-before-opt.bc"
-                if len(self.inputs) > 1:
-                    self._link_multi_inputs()
-                else:
-                    shutil.copy2(self.inputs[0], self.before_opt_src)
-                self._run_optimisation()
-                self._link_spir()
-                self._prepare_and_downgrade()
-                if environ.get("SYCL_XOCC_MANUAL_EDIT") is not None:
-                    print("Please edit", self.downgraded_ir)
-                    input("Press enter to resume the compilation")
-                self.vpp_llvm_input = (tmpdir / f"{outstem}_kernels.opt.xpirbc")
-                self._asm_ir()
-                self.compiled_kernels = []
-                for kernel in self.kernel_properties["kernels"]:
-                    self._compile_kernel(kernel)
-                if self.compiled_kernels:
-                    self._link_kernels()
+        dataflow_lawyer_manager = BindMountManager(
+            self.vitis_clang_bin / 'xilinx-dataflow-lawyer',
+            Path(shutil.which('echo'))
+        )
+        tmp_manager = TmpDirManager(tmp_root, outstem, autodelete)
+        with dataflow_lawyer_manager, tmp_manager as self.tmpdir:
+            tmpdir = self.tmpdir
+            if not autodelete:
+                print(f"Temporary clutter in {tmpdir} will not be cleaned")
+            self.before_opt_src = self.tmpdir / f"{outstem}-before-opt.bc"
+            if len(self.inputs) > 1:
+                self._link_multi_inputs()
+            else:
+                shutil.copy2(self.inputs[0], self.before_opt_src)
+            self._run_optimisation()
+            self._link_spir()
+            self._prepare_and_downgrade()
+            if environ.get("SYCL_XOCC_MANUAL_EDIT") is not None:
+                print("Please edit", self.downgraded_ir)
+                input("Press enter to resume the compilation")
+            self.vpp_llvm_input = (
+                tmpdir / f"{outstem}_kernels.opt.xpirbc")
+            self._asm_ir()
+            self.compiled_kernels = []
+            for kernel in self.kernel_properties["kernels"]:
+                self._compile_kernel(kernel)
+            if self.compiled_kernels:
+                self._link_kernels()
 
 
 def main():

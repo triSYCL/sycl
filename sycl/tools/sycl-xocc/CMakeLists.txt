@@ -2,7 +2,8 @@
 # require a windows compliant variation of the shell script that will be
 # selected based on the compile target similar to scan-build.
 set(BinFiles
-      sycl_xocc.py)
+      sycl_xocc.py
+      sycl_vitis_gcc.py)
 
 foreach(BinFile ${BinFiles})
   add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/bin/${BinFile}
