@@ -1,5 +1,5 @@
 add_llvm_component_library(LLVMSYCL
-  XOCCIRDowngrader.cpp
+  VXXIRDowngrader.cpp
   ASFixer.cpp
   InSPIRation.cpp
   KernelPropGen.cpp

@@ -2,7 +2,7 @@
 # require a windows compliant variation of the shell script that will be
 # selected based on the compile target similar to scan-build.
 set(BinFiles
-      sycl_xocc.py
+      sycl_vxx.py
       sycl_vitis_gcc.py)
 
 foreach(BinFile ${BinFiles})
@@ -17,4 +17,4 @@ foreach(BinFile ${BinFiles})
   install(PROGRAMS bin/${BinFile} DESTINATION bin)
 endforeach()
 
-add_custom_target(sycl-xocc ALL DEPENDS ${Depends})
+add_custom_target(sycl-vxx ALL DEPENDS ${Depends})

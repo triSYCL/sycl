@@ -3795,7 +3795,7 @@ static void renderDebugOptions(const ToolChain &TC, const Driver &D,
                                codegenoptions::DebugInfoKind &DebugInfoKind,
                                DwarfFissionKind &DwarfFission) {
   
-  /// The XOCC backend currently doesn't deal properly with some debug metadata.
+  /// The VXX backend currently doesn't deal properly with some debug metadata.
   /// and there is currently no support for any debugability of device code.
   /// so we disable emition of debug info for device code.
   if (T.isXilinxFPGA())
@@ -4284,7 +4284,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-fsycl");
     CmdArgs.push_back("-fsycl-is-device");
 
-    /// -fdeclare-spirv-builtins should be disabled when building for XOCC since
+    /// -fdeclare-spirv-builtins should be disabled when building for v++ since
     /// we clang emits spir and not spirv. but the InSPIRation pass will
     /// translate spirv builtins into function of the hls runtime.
     CmdArgs.push_back("-fdeclare-spirv-builtins");
@@ -4292,7 +4292,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     if (RawTriple.isXilinxSYCLDevice()) {
       /// -O3 to generate all the necessary information for proper optimization.
       CmdArgs.push_back("-O3");
-      /// -disable-llvm-passes because we want sycl-xocc and v++ to have full
+      /// -disable-llvm-passes because we want sycl_vxx and v++ to have full
       /// control over the IR. so we disable any optimization that could run
       /// before them.
       CmdArgs.push_back("-disable-llvm-passes");

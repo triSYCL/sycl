@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
-"""sycl_xocc
+"""sycl_vxx
 This is an extra layer of abstraction on top of the shell invocing the
-SDx compiler. As SPIR/LLVM-IR is a second class citizen in SDx for the
+vitis compiler. As SPIR/LLVM-IR is a second class citizen in vitis for the
 moment it has some little niggling details that need worked on and the idea
 is that this script will work around those with some aid from Clang/LLVM.
 
-One of the main examples is that SDx can only compile one kernel from LLVM-BC
+One of the main examples is that vitis can only compile one kernel from LLVM-BC
 at a time and it requires the kernels name (also required for kernel specific
 optimizations). This poses a problem as there can be multiple kernels in a
-file. And when making a normal naked SDx -c command in the driver
+file. And when making a normal naked v++ -c command in the driver
 you won't have the neccesarry information as the command is generated before
 the file's have even started to be compiled (Perhaps there is that I am
-unaware of). So no kernel names and no idea how many SDx commands you'd need
+unaware of). So no kernel names and no idea how many vitis commands you'd need
 to generate per file (no idea how many kernels are in a file).
 
 This works around that by using an opt (kernelNameGen) pass that generates
@@ -139,7 +139,7 @@ class CompilationDriver:
             self.tmpdir /
             f"{outstem}-kernels-optimized.bc"
         )
-        opt_options = ["--sycl-xocc", "-preparesycl", "-globaldce"]
+        opt_options = ["--sycl-vxx", "-preparesycl", "-globaldce"]
         if not self.hls_flow:
             opt_options.extend([
                 "-inline", "-infer-address-spaces",
@@ -182,7 +182,7 @@ class CompilationDriver:
         opt = self.clang_path / "opt"
         prepared_kernels = self.tmpdir / f"{self.outstem}_linked.simple.bc"
         opt_options = [
-            "--sycl-xocc",
+            "--sycl-vxx",
             "--sycl-remove-annotations"]
         if self.hls_flow:
             opt_options.append("--sycl-xlx-hls")
@@ -191,7 +191,7 @@ class CompilationDriver:
             "-o", prepared_kernels
         ])
         subprocess.run([opt, *opt_options])
-        opt_options = ["--sycl-xocc", "-S", "-O3", "-xoccIRDowngrader"]
+        opt_options = ["--sycl-vxx", "-S", "-O3", "-vxxIRDowngrader"]
         self.downgraded_ir = (
             self.tmpdir / f"{self.outstem}_kernels-linked.opt.ll")
         subprocess.run([
@@ -308,7 +308,7 @@ class CompilationDriver:
             subprocess.run(command)
 
     def drive_compilation(self):
-        autodelete = environ.get("SYCL_XOCC_KEEP_CLUTTER") is None
+        autodelete = environ.get("SYCL_VXX_KEEP_CLUTTER") is None
         outstem = self.outstem
         tmp_root = self.tmp_root
         dataflow_lawyer_manager = BindMountManager(
@@ -328,7 +328,7 @@ class CompilationDriver:
             self._run_optimisation()
             self._link_spir()
             self._prepare_and_downgrade()
-            if environ.get("SYCL_XOCC_MANUAL_EDIT") is not None:
+            if environ.get("SYCL_VXX_MANUAL_EDIT") is not None:
                 print("Please edit", self.downgraded_ir)
                 input("Press enter to resume the compilation")
             self.vpp_llvm_input = (

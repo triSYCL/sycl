@@ -51,7 +51,7 @@
 
 using namespace llvm;
 
-static cl::opt<bool> SyclXOCC("sycl-xocc", cl::Hidden, cl::init(false));
+static cl::opt<bool> SyclVXX("sycl-vxx", cl::Hidden, cl::init(false));
 
 cl::opt<bool> RunPartialInlining("enable-partial-inlining", cl::init(false),
                                  cl::Hidden, cl::ZeroOrMore,
@@ -481,7 +481,7 @@ void PassManagerBuilder::addFunctionSimplificationPasses(
   if (OptLevel > 1) {
     MPM.add(createMergedLoadStoreMotionPass()); // Merge ld/st in diamonds
     MPM.add(NewGVN ? createNewGVNPass()
-                   : createGVNPass(!SyclXOCC && DisableGVNLoadPRE)); // Remove redundancies
+                   : createGVNPass(!SyclVXX && DisableGVNLoadPRE)); // Remove redundancies
   }
   MPM.add(createMemCpyOptPass());             // Remove memcpy / form memset
   MPM.add(createSCCPPass());                  // Constant prop with SCCP
@@ -838,7 +838,7 @@ void PassManagerBuilder::populateModulePassManager(
                                           .hoistCommonInsts(true)
                                           .sinkCommonInsts(true)));
 
-  if (SLPVectorize && !SyclXOCC) {
+  if (SLPVectorize && !SyclVXX) {
     MPM.add(createSLPVectorizerPass()); // Vectorize parallel scalar chains.
     if (OptLevel > 1 && ExtraVectorizerPasses) {
       MPM.add(createEarlyCSEPass());
@@ -1065,7 +1065,7 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
 
   PM.add(createLICMPass(LicmMssaOptCap, LicmMssaNoAccForPromotionCap));
   PM.add(NewGVN ? createNewGVNPass()
-                : createGVNPass(!SyclXOCC &&DisableGVNLoadPRE)); // Remove redundancies.
+                : createGVNPass(!SyclVXX &&DisableGVNLoadPRE)); // Remove redundancies.
   PM.add(createMemCpyOptPass());            // Remove dead memcpys.
 
   // Nuke dead stores.
@@ -1105,7 +1105,7 @@ void PassManagerBuilder::addLTOOptimizationPasses(legacy::PassManagerBase &PM) {
   PM.add(createBitTrackingDCEPass());
 
   // More scalar chains could be vectorized due to more alias information
-  if (SLPVectorize && !SyclXOCC)
+  if (SLPVectorize && !SyclVXX)
     PM.add(createSLPVectorizerPass()); // Vectorize parallel scalar chains.
 
   PM.add(createVectorCombinePass()); // Clean up partial vectorization.

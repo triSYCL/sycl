@@ -1,4 +1,4 @@
-//===--- XOCC.h - XOCC ToolChain Implementations ----------------*- C++ -*-===//
+//===--- VXX.h - V++ ToolChain Implementations ----------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_XOCC_H
-#define LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_XOCC_H
+#ifndef LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_VXX_H
+#define LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_VXX_H
 
 #include "clang/Driver/ToolChain.h"
 #include "clang/Driver/Tool.h"
@@ -17,39 +17,39 @@ namespace clang {
 namespace driver {
 
 /// Based loosely on CudaInstallationDetector
-class XOCCInstallationDetector {
+class VXXInstallationDetector {
 private:
   const Driver &D;
   bool IsValid = false;
   std::string BinPath;
   std::string BinaryPath;
-  std::string SDXPath;
+  std::string VitisPath;
   std::string LibPath;
 
 public:
-  XOCCInstallationDetector(const Driver &D, const llvm::Triple &HostTriple,
+  VXXInstallationDetector(const Driver &D, const llvm::Triple &HostTriple,
                            const llvm::opt::ArgList &Args);
 
-  /// Check whether we detected a valid XOCC Install
+  /// Check whether we detected a valid V++ Install
   bool isValid() const { return IsValid; }
 
-  /// Get the path to the xocc binary
+  /// Get the path to the v++ binary
   StringRef getBinaryPath() const { return BinaryPath; }
 
-  /// Get the detected path to xocc's bin directory.
+  /// Get the detected path to v++'s bin directory.
   StringRef getBinPath() const { return BinPath; }
 
-  /// Get the path to SDX's root, the xocc drivers parent project
-  StringRef getSDXPath() const { return SDXPath; }
+  /// Get the path to Vitis's root, the v++ drivers parent project
+  StringRef getVitisPath() const { return VitisPath; }
 
-  /// Get the detected path to xocc's lib directory.
+  /// Get the detected path to v++'s lib directory.
   /// FIXME: This currently assumes lnx64
   StringRef getLibPath() const { return LibPath; }
 
 };
 
-// \todo come up with a better name like,  SYCLAssemblerXOCC/Linker for the
-// tools? Or should the tool just be SYCLXOCCToolchain?
+// \todo come up with a better name like,  SYCLAssemblerVXX/Linker for the
+// tools? Or should the tool just be SYCLVXXToolchain?
 namespace tools {
 namespace SYCL {
 
@@ -64,9 +64,9 @@ namespace SYCL {
 // (individual kernels) into a final binary blob that can be offloaded and
 // wrapped into the final binary. Which XRT can then loaded and execute like a
 // normal pre-compiled OpenCL binary.
-class LLVM_LIBRARY_VISIBILITY LinkerXOCC : public Tool {
+class LLVM_LIBRARY_VISIBILITY LinkerVXX : public Tool {
 public:
-  LinkerXOCC(const ToolChain &TC) : Tool("XOCC::LinkerXOCC", "sycl-link-xocc", TC) {}
+  LinkerVXX(const ToolChain &TC) : Tool("VXX::LinkerVXX", "sycl-link-vxx", TC) {}
 
   // technically true, but we don't care about it having integrated C++ for now
   bool hasIntegratedCPP() const override { return false; }
@@ -77,7 +77,7 @@ public:
                     const char *LinkingOutput) const override;
 
   private:
-    void constructSYCLXOCCCommand(Compilation &C, const JobAction &JA,
+    void constructSYCLVXXCommand(Compilation &C, const JobAction &JA,
                                   const InputInfo &Output,
                                   const InputInfoList &Inputs,
                                   const llvm::opt::ArgList &Args) const;
@@ -88,9 +88,9 @@ public:
 
 namespace toolchains {
 
-class LLVM_LIBRARY_VISIBILITY XOCCToolChain : public ToolChain {
+class LLVM_LIBRARY_VISIBILITY VXXToolChain : public ToolChain {
 public:
-  XOCCToolChain(const Driver &D, const llvm::Triple &Triple,
+  VXXToolChain(const Driver &D, const llvm::Triple &Triple,
                 const ToolChain &HostTC, const llvm::opt::ArgList &Args);
 
   const llvm::Triple *getAuxTriple() const override {
@@ -121,7 +121,7 @@ public:
   // Tool *SelectTool(const JobAction &JA) const override;
 
   const ToolChain &HostTC;
-  XOCCInstallationDetector XOCCInstallation;
+  VXXInstallationDetector VXXInstallation;
 
 protected:
   Tool *buildLinker() const override;
@@ -132,4 +132,4 @@ protected:
 } // end namespace clang
 
 
-#endif // LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_XOCC_H
+#endif // LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_VXX_H

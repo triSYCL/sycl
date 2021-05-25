@@ -579,7 +579,7 @@ int main(int argc, char **argv) {
   initializeASFixerPass(Registry);
   initializeInSPIRationPass(Registry);
   initializeKernelPropGenPass(Registry);
-  initializeXOCCIRDowngraderPass(Registry);
+  initializeVXXIRDowngraderPass(Registry);
   initializePrepareSYCLOptPass(Registry);
   initializeLowerSYCLMetaDataPass(Registry);
   initializeHardwareLoopsPass(Registry);

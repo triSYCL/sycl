@@ -1608,7 +1608,7 @@ void ExecCGCommand::printDot(std::ostream &Stream) const {
 //
 // 2) if you pass a nullptr when the reqd_work_group_size attribute is on AoT
 // compiled kernel, it is an OpenCL runtime error, since when we're compiling
-// for xocc we always apply the reqd_work_group_size attribute to single_task
+// for v++ we always apply the reqd_work_group_size attribute to single_task
 // we must make sure we define a local work group size when we can justify the
 // kernel is a single task.
 static void adjustNDRangePerKernel(NDRDescT &NDR, RT::PiKernel Kernel,

@@ -46,7 +46,7 @@
 #include "ToolChains/VEToolchain.h"
 #include "ToolChains/WebAssembly.h"
 #include "ToolChains/XCore.h"
-#include "ToolChains/XOCC.h"
+#include "ToolChains/VXX.h"
 #include "ToolChains/ZOS.h"
 #include "clang/Basic/TargetID.h"
 #include "clang/Basic/Version.h"
@@ -7019,7 +7019,7 @@ const ToolChain &Driver::getOffloadingDeviceToolChain(const ArgList &Args,
             break;
           case llvm::Triple::fpga32:
           case llvm::Triple::fpga64:
-            TC = std::make_unique<toolchains::XOCCToolChain>(
+            TC = std::make_unique<toolchains::VXXToolChain>(
               *this, Target, HostTC, Args);
             break;
           case llvm::Triple::nvptx:

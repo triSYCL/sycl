@@ -1,4 +1,4 @@
-//===- KernelPropGen.cpp                                      ---------------===//
+//===- KernelPropGen.cpp ---------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -16,21 +16,22 @@
 #include <regex>
 #include <string>
 
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/SYCL/KernelPropGen.h"
-#include "llvm/ADT/StringRef.h"
-#include "llvm/IR/Function.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
+#include "llvm/SYCL/KernelPropGen.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/JSON.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/SHA1.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
 
@@ -69,8 +70,7 @@ struct KernelPropGen : public ModulePass {
 
   int GetWriteStreamID(StringRef Path) {
     int FileFD = 0;
-    std::error_code EC =
-          llvm::sys::fs::openFileForWrite(Path, FileFD);
+    std::error_code EC = llvm::sys::fs::openFileForWrite(Path, FileFD);
     if (EC) {
       llvm::errs() << "Error in KernelPropGen Pass: " << EC.message() << "\n";
     }
@@ -96,11 +96,11 @@ struct KernelPropGen : public ModulePass {
         continue;
       if (Str->getRawDataValues() != KindOf("xilinx_ddr_bank"))
         continue;
-      Constant *Args = (
-          cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(4)))
-              ->getInitializer());
+      Constant *Args =
+          (cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(4)))
+               ->getInitializer());
       unsigned Bank;
-      if (auto* ZeroData = dyn_cast<ConstantAggregateZero>(Args))
+      if (auto *ZeroData = dyn_cast<ConstantAggregateZero>(Args))
         Bank = 0;
       else
         Bank = cast<ConstantInt>(Args->getOperand(0))->getZExtValue();
@@ -183,41 +183,38 @@ struct KernelPropGen : public ModulePass {
     }
   }
 
-  void GenerateXOCCPropertyScript(Module &M, llvm::raw_fd_ostream &O) {
+  void GenerateVPPPropertyFile(Module &M, llvm::raw_fd_ostream &O) {
     CollectExtraArgs(M);
-    O << "{\n";
-    O << "  \"kernels\": [\n" ;
-    bool has_kernel = false;
+    json::OStream J(O, 2);
+    llvm::json::Array kernels{};
+
+    J.objectBegin();
+    J.attributeBegin("kernels");
+    J.arrayBegin();
     for (auto &F : M.functions()) {
       if (isKernel(F)) {
-        if (has_kernel) 
-          O << ",\n";
-        has_kernel = true;
-        O << "    {\n";
-        O << ("      \"name\": \"" + F.getName() + "\",\n").str();
-        O << ("      \"extra_args\": \""+ ExtraArgsMap[&F] + "\",\n");
-
         CollectUserSpecifiedDDRBanks(F);
-        //kernelNames += (" \"" + F.getName() + "\" ").str();
-        //ExtraArgs += " \"" + ExtraArgsMap[&F] + "\" ";
-        O << "      \"memory_assignment\": [\n";
-        bool has_assignment = false;
-        for (auto& Arg : F.args()) {
+        J.objectBegin();
+        J.attribute("name", F.getName());
+        J.attribute("extra_args", ExtraArgsMap[&F]);
+        J.attributeBegin("memory_assignment");
+        J.arrayBegin();
+        for (auto &Arg : F.args()) {
           if (Arg.getType()->isPointerTy())
-          // if the argument is a pointer in the global or constant
-          // address space it should be assigned to an explicit default DDR
-          // Bank of 0 to prevent assignment to DDR banks that are not 0.
-          // This is to prevent mismatches between the SYCL runtime when
-          // declaring OpenCL buffers and the pre-compiled kernel, XRT will
-          // error out if there is a mismatch. Only OpenCL global memory is
-          // assigned to a DDR bank, this includes constant as it's just
-          // read-only global memory.
-          // \todo When adding an explicit way for users to specify DDR banks
-          // from the SYCL runtime this should be modified as well as the buffer
-          // XRT extensions.
-          if (Arg.getType()->isPointerTy()
-              && (Arg.getType()->getPointerAddressSpace() == SPIRAS_Global
-              || Arg.getType()->getPointerAddressSpace() == SPIRAS_Constant)) {
+            // if the argument is a pointer in the global or constant
+            // address space it should be assigned to an explicit default DDR
+            // Bank of 0 to prevent assignment to DDR banks that are not 0.
+            // This is to prevent mismatches between the SYCL runtime when
+            // declaring OpenCL buffers and the pre-compiled kernel, XRT will
+            // error out if there is a mismatch. Only OpenCL global memory is
+            // assigned to a DDR bank, this includes constant as it's just
+            // read-only global memory.
+            // \todo When adding an explicit way for users to specify DDR banks
+            // from the SYCL runtime this should be modified as well as the
+            // buffer XRT extensions.
+            if (Arg.getType()->isPointerTy() &&
+                (Arg.getType()->getPointerAddressSpace() == SPIRAS_Global ||
+                 Arg.getType()->getPointerAddressSpace() == SPIRAS_Constant)) {
               // This currently forces a default assignment of DDR banks to 0
               // as some platforms have different Default DDR banks and buffers
               // default to DDR Bank 0. Perhaps it is possible to query the
@@ -231,23 +228,20 @@ struct KernelPropGen : public ModulePass {
               // default compute unit name. If more than one CU is generated
               // (which we don't support yet in any case) then they would be
               // KernelName_2..KernelName_3 etc.
-              if (has_assignment) 
-                O << ",\n";
-              has_assignment = true;
-              O << "        {";
-              O << ("          \"arg_name\": \"" + Arg.getName() + "\",\n").str();
-              O << ("          \"bank_id\": " + std::to_string(findDDRBankFor(&Arg)) +"\n");
-              O << "        }";
-              /*DDRArgs += ("--sp " + F.getName() + "_1." + Arg.getName() +
-                          ":DDR[" + std::to_string(findDDRBankFor(&Arg)) + "] ")
-                             .str();*/
-          }
+              J.objectBegin();
+              J.attribute("arg_name", Arg.getName());
+              J.attribute("bank_id", std::to_string(findDDRBankFor(&Arg)));
+              J.objectEnd();
+            }
         }
-        O << "\n      ]\n"; // line break for new set of kernel properties
-        O << "    }";
+        J.arrayEnd();
+        J.attributeEnd();
+        J.objectEnd();
       }
     }
-    O << "\n  ]\n}\n";
+    J.arrayEnd();
+    J.attributeEnd();
+    J.objectEnd();
   }
 
   /// Visit all the functions of the module
@@ -258,21 +252,22 @@ struct KernelPropGen : public ModulePass {
     if (O.has_error())
       return false;
 
-    GenerateXOCCPropertyScript(M, O);
+    GenerateVPPPropertyFile(M, O);
 
     // The module probably changed
     return true;
   }
 };
 
-}
+} // namespace
 
 namespace llvm {
 void initializeKernelPropGenPass(PassRegistry &Registry);
 }
 
 INITIALIZE_PASS(KernelPropGen, "kernelPropGen",
-  "pass that finds kernel names and places them into a text file", false, false)
+                "pass that finds kernel names and places them into a text file",
+                false, false)
 ModulePass *llvm::createKernelPropGenPass() { return new KernelPropGen(); }
 
 char KernelPropGen::ID = 0;

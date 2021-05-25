@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Pass for modifying certain LLVM IR incompatabilities with the Xilinx xocc
+// Pass for modifying certain LLVM IR incompatabilities with the Xilinx v++
 // backend we use for SYCL
 //
 // ===---------------------------------------------------------------------===//

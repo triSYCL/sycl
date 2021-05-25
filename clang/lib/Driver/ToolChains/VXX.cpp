@@ -1,4 +1,4 @@
-//===--- XOCC.cpp - XOCC Tool and ToolChain Implementations -----*- C++ -*-===//
+//===--- VXX.cpp - V++ Tool and ToolChain Implementations -----*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "XOCC.h"
+#include "VXX.h"
 #include "CommonArgs.h"
 #include "InputInfo.h"
 #include "clang/Driver/Compilation.h"
@@ -28,10 +28,10 @@ using namespace llvm::opt;
 using namespace llvm::sys;
 
 ///////////////////////////////////////////////////////////////////////////////
-////                            XOCC Installation Detector
+////                            V++ Installation Detector
 ///////////////////////////////////////////////////////////////////////////////
 
-XOCCInstallationDetector::XOCCInstallationDetector(
+VXXInstallationDetector::VXXInstallationDetector(
     const Driver &D, const llvm::Triple &HostTriple,
     const llvm::opt::ArgList &Args)
     : D(D) {
@@ -53,8 +53,8 @@ XOCCInstallationDetector::XOCCInstallationDetector(
 
       // TODO: Check if this assumption is correct in all installations and give
       // environment variable specifier option or an argument to the Driver
-      SDXPath = path::parent_path(programDir).str();
-      LibPath = SDXPath + "/lnx64/lib";
+      VitisPath = path::parent_path(programDir).str();
+      LibPath = VitisPath + "/lnx64/lib";
 
       // TODO: slightly stricter IsValid test... check all strings aren't empty
       IsValid = true;
@@ -67,15 +67,15 @@ XOCCInstallationDetector::XOCCInstallationDetector(
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-////                            XOCC Linker
+////                            V++ Linker
 ///////////////////////////////////////////////////////////////////////////////
 
-void SYCL::LinkerXOCC::ConstructJob(Compilation &C, const JobAction &JA,
+void SYCL::LinkerVXX::ConstructJob(Compilation &C, const JobAction &JA,
                                    const InputInfo &Output,
                                    const InputInfoList &Inputs,
                                    const ArgList &Args,
                                    const char *LinkingOutput) const {
-  constructSYCLXOCCCommand(C, JA, Output, Inputs, Args);
+  constructSYCLVXXCommand(C, JA, Output, Inputs, Args);
 }
 
 // Expects a specific type of option (e.g. -Xsycl-target-backend) and will
@@ -89,7 +89,7 @@ void AddForwardedOptions(const llvm::opt::ArgList &Args,
   Opt.getID();
   SmallVector<char, 128> TmpPath;
   int FD;
-  std::error_code ec = fs::createTemporaryFile(llvm::Twine("sycl-xocc-args") +
+  std::error_code ec = fs::createTemporaryFile(llvm::Twine("sycl-vxx-args") +
                                                    llvm::Twine(Opt.getID()),
                                                "", FD, TmpPath);
   assert(!ec);
@@ -138,21 +138,21 @@ void AddForwardedOptions(const llvm::opt::ArgList &Args,
 // to the linker stage
 // \todo: Add additional modifications that were added to the SYCL ToolChain
 // recently if feasible
-void SYCL::LinkerXOCC::constructSYCLXOCCCommand(
+void SYCL::LinkerVXX::constructSYCLVXXCommand(
     Compilation &C, const JobAction &JA, const InputInfo &Output,
     const InputInfoList &Inputs, const llvm::opt::ArgList &Args) const {
   const auto &TC =
-    static_cast<const toolchains::XOCCToolChain &>(getToolChain());
-  InputInfoList SyclXoccArg = Inputs;
+    static_cast<const toolchains::VXXToolChain &>(getToolChain());
+  InputInfoList SyclVxxArg = Inputs;
 
   ArgStringList CmdArgs;
 
-  // Script Arg $1, directory of xocc binary (SDx's bin)
-  assert(!TC.XOCCInstallation.getBinPath().empty());
+  // Script Arg $1, directory of v++ binary (Vitis's bin)
+  assert(!TC.VXXInstallation.getBinPath().empty());
   CmdArgs.push_back("--vitis_bin_dir");
-  CmdArgs.push_back(Args.MakeArgString(TC.XOCCInstallation.getBinPath()));
+  CmdArgs.push_back(Args.MakeArgString(TC.VXXInstallation.getBinPath()));
 
-  // Script Arg $2, directory of the Clang driver, where the sycl-xocc script
+  // Script Arg $2, directory of the Clang driver, where the sycl-vxx script
   // opt binary and llvm-linker binary should be contained among other things
   assert(!C.getDriver().Dir.empty());
   CmdArgs.push_back("--clang_path");
@@ -213,41 +213,41 @@ void SYCL::LinkerXOCC::constructSYCLXOCCCommand(
     llvm_unreachable("invalid subarch");
   }
 
-   /// When there is more inputs than what sycl-xocc can handle(1) we llvm-link
-  /// all those inputs together before invoking sycl-xocc.
+   /// When there is more inputs than what sycl_vxx can handle(1) we llvm-link
+  /// all those inputs together before invoking sycl_vxx.
   for (auto& In : Inputs)
     CmdArgs.push_back(Args.MakeArgString(In.getFilename()));
 
-  // Path to sycl-xocc script
+  // Path to sycl_vxx.py script
   SmallString<128> ExecPath(C.getDriver().Dir);
-  path::append(ExecPath, "sycl_xocc.py");
+  path::append(ExecPath, "sycl_vxx.py");
   const char *Exec = C.getArgs().MakeArgString(ExecPath);
 
-  // Generate our command to sycl-xocc using the arguments we've made
+  // Generate our command to sycl_vxx.py using the arguments we've made
   // Note: Inputs that the shell script doesn't use should be ignored
   C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
                                          Exec, CmdArgs, Inputs, Output));
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-////                            XOCC Toolchain
+////                            V++ Toolchain
 ///////////////////////////////////////////////////////////////////////////////
 
-XOCCToolChain::XOCCToolChain(const Driver &D, const llvm::Triple &Triple,
+VXXToolChain::VXXToolChain(const Driver &D, const llvm::Triple &Triple,
                              const ToolChain &HostTC, const ArgList &Args)
     : ToolChain(D, Triple, Args), HostTC(HostTC),
-      XOCCInstallation(D, HostTC.getTriple(), Args)
+      VXXInstallation(D, HostTC.getTriple(), Args)
 {
 
-  if (XOCCInstallation.isValid())
-    getProgramPaths().push_back(XOCCInstallation.getBinPath().str());
+  if (VXXInstallation.isValid())
+    getProgramPaths().push_back(VXXInstallation.getBinPath().str());
 
   // Lookup binaries into the driver directory, this is used to
   // discover the clang-offload-bundler executable.
   getProgramPaths().push_back(getDriver().Dir);
 }
 
-void XOCCToolChain::addClangTargetOptions(
+void VXXToolChain::addClangTargetOptions(
     const llvm::opt::ArgList &DriverArgs,
     llvm::opt::ArgStringList &CC1Args,
     Action::OffloadKind DeviceOffloadingKind) const {
@@ -260,7 +260,7 @@ void XOCCToolChain::addClangTargetOptions(
 }
 
 llvm::opt::DerivedArgList *
-XOCCToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
+VXXToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
                              StringRef BoundArch,
                              Action::OffloadKind DeviceOffloadKind) const {
   DerivedArgList *DAL =
@@ -282,26 +282,26 @@ XOCCToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
   return DAL;
 }
 
-Tool *XOCCToolChain::buildLinker() const {
+Tool *VXXToolChain::buildLinker() const {
   assert(getTriple().isXilinxFPGA());
-  return new tools::SYCL::LinkerXOCC(*this);
+  return new tools::SYCL::LinkerVXX(*this);
 }
 
-void XOCCToolChain::addClangWarningOptions(ArgStringList &CC1Args) const {
+void VXXToolChain::addClangWarningOptions(ArgStringList &CC1Args) const {
   HostTC.addClangWarningOptions(CC1Args);
 }
 
 ToolChain::CXXStdlibType
-XOCCToolChain::GetCXXStdlibType(const ArgList &Args) const {
+VXXToolChain::GetCXXStdlibType(const ArgList &Args) const {
   return HostTC.GetCXXStdlibType(Args);
 }
 
-void XOCCToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
+void VXXToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
                                               ArgStringList &CC1Args) const {
   HostTC.AddClangSystemIncludeArgs(DriverArgs, CC1Args);
 }
 
-void XOCCToolChain::AddClangCXXStdlibIncludeArgs(const ArgList &Args,
+void VXXToolChain::AddClangCXXStdlibIncludeArgs(const ArgList &Args,
                                                  ArgStringList &CC1Args) const {
   HostTC.AddClangCXXStdlibIncludeArgs(Args, CC1Args);
 }

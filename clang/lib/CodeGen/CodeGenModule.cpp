@@ -1515,7 +1515,7 @@ void CodeGenModule::GenOpenCLArgMetadata(llvm::Function *Fn,
   SmallVector<llvm::Metadata *, 8> argNames;
 
   auto Mangle = [&](QualType ty) {
-    /// When using XOCC in hw_emu mode this metadata is stored in an XML
+    /// When using v++ in hw_emu mode this metadata is stored in an XML
     /// file so we need to remove '<' and '>' because they aren't parsed
     /// correctly
     std::unique_ptr<MangleContext> Ctx{ItaniumMangleContext::create(

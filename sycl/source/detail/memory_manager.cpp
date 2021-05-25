@@ -181,7 +181,7 @@ MemoryManager::allocateBufferObject(ContextImplPtr TargetContext, void *UserPtr,
 #ifdef __SYCL_XILINX_ONLY__
   // This currently enforces assignment of all buffers to DDR bank 0 via
   // Xilinx OpenCL extensions, which we also enforce when compiling the
-  // kernels via xocc (0 is usually the default inferred space, but some get
+  // kernels via v++ (0 is usually the default inferred space, but some get
   // inferred to bank 1, notably Alveo U200 boards). XRT seems to have slowly
   // gotten stricter with these assignments when compiling for hw_emu, so it's
   // something we have to do to conform for the moment (but generally a good
