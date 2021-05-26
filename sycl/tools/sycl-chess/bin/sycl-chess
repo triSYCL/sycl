@@ -230,7 +230,10 @@ if [[ ! ${#KERNEL_NAME_ARRAY_UNMERGED[@]} -eq 0 ]]; then
       # This is valid because all in KERNEL_NAME_ARRAY* are identically sorted
       # with hash values.
       ELF="$SOURCE_TEMPORARY_DIR/${index}.elf.o"
-      if [ ! -f "$ELF" ]; then
+
+      # both ${ELF}_east and ${ELF}_west are always created at the same time
+      # so checking for one of them check that both are here.
+      if [ ! -f "${ELF}_east" ]; then
         ELF="$SOURCE_TEMPORARY_DIR/${KERNEL_NAME_ARRAY[$merged_index]}.elf.o"
       else
         set +e
@@ -247,8 +250,8 @@ if [[ ! ${#KERNEL_NAME_ARRAY_UNMERGED[@]} -eq 0 ]]; then
         echo "${index}$POSTFIX" >> "$OUTPUT_FILE_NAME"
         
         # Size of file in bytes
-        echo "`ls -lrt "$ELF$POSTFIX" | nawk '{print $5}'`" >> "$OUTPUT_FILE_NAME"
-        cat $ELF$POSTFIX >> "$OUTPUT_FILE_NAME"
+        echo "`ls -lrt "${ELF}$POSTFIX" | nawk '{print $5}'`" >> "$OUTPUT_FILE_NAME"
+        cat ${ELF}$POSTFIX >> "$OUTPUT_FILE_NAME"
       done
     fi
   done
