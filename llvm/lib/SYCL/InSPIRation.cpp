@@ -45,7 +45,6 @@ using namespace llvm;
 // namespace
 namespace {
 // avoid recreation of regex's we won't alter at runtime
-cl::opt<bool> SYCLCLMeta("sycl-xlx-oclmd", cl::Hidden, cl::init(false));
 
 struct Prefix {
   std::string Str;
@@ -255,9 +254,8 @@ struct InSPIRation : public ModulePass {
 
   /// Test if a function is a SPIR kernel
   bool isKernel(const Function &F) {
-    if (F.getCallingConv() == CallingConv::SPIR_KERNEL)
-      return true;
-    return false;
+    return F.getCallingConv() == CallingConv::SPIR_KERNEL
+           || F.hasFnAttribute("fpga.top.func");
   }
 
   /// Test if a function is a non-intrinsic SPIR function, indicating that it is
@@ -390,7 +388,7 @@ struct InSPIRation : public ModulePass {
     }
 
     removeOldMetadata(M);
-    if (SYCLCLMeta) {
+    if (!Triple(M.getTargetTriple()).isXilinxHLS()) {
 
       setSPIRVersion(M);
 

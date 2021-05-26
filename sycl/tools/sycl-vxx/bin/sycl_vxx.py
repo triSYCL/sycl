@@ -139,16 +139,17 @@ class CompilationDriver:
             self.tmpdir /
             f"{outstem}-kernels-optimized.bc"
         )
-        opt_options = ["--sycl-vxx", "-preparesycl", "-globaldce"]
+        opt_options = ["--sycl-vxx",
+                       "-kernelPropGen", 
+                       "--sycl-kernel-propgen-output", f"{kernel_prop}",
+                       "-preparesycl", "-globaldce"]
         if not self.hls_flow:
             opt_options.extend([
                 "-inline", "-infer-address-spaces",
-                "-flat-address-space=0", "-globaldce",
-                "--sycl-xlx-oclmd"
+                "-flat-address-space=0", "-globaldce"
             ])
         opt_options.extend([
-            "-O3", "-globaldce", "-globaldce", "-kernelPropGen",
-            "--sycl-kernel-propgen-output", f"{kernel_prop}", "-inSPIRation",
+            "-O3", "-globaldce", "-globaldce", "-inSPIRation",
             "-o", f"{self.optimised_bc}"
         ])
 
@@ -182,14 +183,10 @@ class CompilationDriver:
         opt = self.clang_path / "opt"
         prepared_kernels = self.tmpdir / f"{self.outstem}_linked.simple.bc"
         opt_options = [
-            "--sycl-vxx",
-            "--sycl-remove-annotations"]
-        if self.hls_flow:
-            opt_options.append("--sycl-xlx-hls")
-        opt_options.extend([
-            "-S", "-preparesycl", "-globaldce", self.linked_kernels,
+            "--sycl-vxx", "--sycl-remove-annotations", "-S", "-preparesycl",
+            "-globaldce", self.linked_kernels,
             "-o", prepared_kernels
-        ])
+        ]
         subprocess.run([opt, *opt_options])
         opt_options = ["--sycl-vxx", "-S", "-O3", "-vxxIRDowngrader"]
         self.downgraded_ir = (
@@ -318,6 +315,8 @@ class CompilationDriver:
         tmp_manager = TmpDirManager(tmp_root, outstem, autodelete)
         with dataflow_lawyer_manager, tmp_manager as self.tmpdir:
             tmpdir = self.tmpdir
+            import pdb
+            pdb.set_trace()
             if not autodelete:
                 print(f"Temporary clutter in {tmpdir} will not be cleaned")
             self.before_opt_src = self.tmpdir / f"{outstem}-before-opt.bc"

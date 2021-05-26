@@ -19,6 +19,7 @@
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/SYCL/PrepareSYCLOpt.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
@@ -29,7 +30,6 @@ namespace {
 
 cl::opt<bool> RemoveAnnotations("sycl-remove-annotations", cl::Hidden,
                                 cl::init(false));
-cl::opt<bool> SyclHLSFlow("sycl-xlx-hls", cl::Hidden, cl::init(false));
 
 struct PrepareSYCLOpt : public ModulePass {
 
@@ -40,7 +40,8 @@ struct PrepareSYCLOpt : public ModulePass {
   void turnNonKernelsIntoPrivate(Module &M) {
     for (GlobalObject &G : M.global_objects()) {
       if (auto *F = dyn_cast<Function>(&G))
-        if (F->getCallingConv() == CallingConv::SPIR_KERNEL)
+        if (F->getCallingConv() == CallingConv::SPIR_KERNEL ||
+            F->hasFnAttribute("fpga.top.func"))
           continue;
       if (G.isDeclaration())
         continue;
@@ -54,7 +55,9 @@ struct PrepareSYCLOpt : public ModulePass {
       if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
         assert(F.use_empty());
         F.addFnAttr("fpga.top.func", F.getName());
+        F.addFnAttr("fpga.demangled.name", F.getName());
         F.setCallingConv(CallingConv::C);
+        F.setLinkage(llvm::GlobalValue::ExternalLinkage);
       }
     }
   }
@@ -137,6 +140,8 @@ struct PrepareSYCLOpt : public ModulePass {
   }
 
   bool runOnModule(Module &M) override {
+    // When using the HLS flow instead of spir default
+    bool SyclHLSFlow = Triple(M.getTargetTriple()).isXilinxHLS();
     turnNonKernelsIntoPrivate(M);
     if (SyclHLSFlow)
       setHLSCallingConvention(M);

@@ -63,7 +63,8 @@ struct KernelPropGen : public ModulePass {
 
   /// Test if a function is a SPIR kernel
   bool isKernel(const Function &F) {
-    if (F.getCallingConv() == CallingConv::SPIR_KERNEL)
+    if (F.getCallingConv() == CallingConv::SPIR_KERNEL ||
+        F.hasFnAttribute("fpga.top.func"))
       return true;
     return false;
   }
