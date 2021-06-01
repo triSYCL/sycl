@@ -37,15 +37,17 @@ config.test_source_root = os.path.dirname(__file__)
 # test_exec_root: The root path where tests should be run.
 config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
 
+config.environment['SYCL_VXX_KEEP_CLUTTER'] = 'True'
+
 # Propagate some variables from the host environment.
 llvm_config.with_system_environment(['PATH', 'OCL_ICD_FILENAMES', 'SYCL_DEVICE_ALLOWLIST', 'SYCL_CONFIG_FILE_NAME'])
 
 timeout=600
 
 xocc=lit_config.params.get('XOCC', "off")
-xocc_target = "hw"
+xocc_target = "hls_hw_emu"
 if "XCL_EMULATION_MODE" in os.environ:
-    xocc_target = os.environ["XCL_EMULATION_MODE"]
+    xocc_target = f"hls_{os.environ['XCL_EMULATION_MODE']}"
 
 # Configure LD_LIBRARY_PATH or corresponding os-specific alternatives
 if platform.system() == "Linux":
@@ -230,10 +232,10 @@ if xocc != "off":
     # if xocc_target == "hw":
     acc_run_substitute="env --unset=XCL_EMULATION_MODE " + acc_run_substitute
     # hw_emu is very slow so it has a higher timeout.
-    if xocc_target != "hw_emu":
-        acc_run_substitute+= "timeout 30 env "
+    if xocc_target != "hls_hw_emu":
+        acc_run_substitute+= "timeout 3000 env "
     else:
-        acc_run_substitute+= "timeout 300 env "
+        acc_run_substitute+= "timeout 3000 env "
 
 config.substitutions.append( ('%ACC_RUN_PLACEHOLDER',  acc_run_substitute) )
 config.substitutions.append( ('%ACC_CHECK_PLACEHOLDER',  acc_check_substitute) )
@@ -245,7 +247,7 @@ if not cuda and not level_zero and found_at_least_one_device:
 if cuda:
     config.substitutions.append( ('%sycl_triple',  "nvptx64-nvidia-cuda-sycldevice" ) )
 elif xocc != "off":
-    config.substitutions.append( ('%sycl_triple',  "fpga64-xilinx-unknown-sycldevice" ) )
+    config.substitutions.append( ('%sycl_triple',  f"fpga64_{xocc_target}-xilinx-unknown-sycldevice" ) )
 else:
     config.substitutions.append( ('%sycl_triple',  "spir64-unknown-linux-sycldevice" ) )
 
@@ -273,7 +275,7 @@ else:
     if getDeviceCount("gpu", "cuda")[1]:
         lit_config.note("found secondary cuda target")
         config.available_features.add("has_secondary_cuda")
-    llvm_config.with_environment('XCL_EMULATION_MODE', xocc_target, append_path=False)
+    #llvm_config.with_environment('XCL_EMULATION_MODE', xocc_target, append_path=False)
     lit_config.note("XOCC target: {}".format(xocc_target))
     required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]
     has_error=False
@@ -299,13 +301,13 @@ else:
     run_if_hw="echo"
     run_if_hw_emu="echo"
     run_if_sw_emu="echo"
-    if xocc_target == "hw":
+    if xocc_target == "hls_hw":
         timeout = 10800 # 3h
         run_if_hw=""
-    if xocc_target == "hw_emu":
+    if xocc_target == "hls_hw_emu":
         timeout = 3600 # 1h
         run_if_hw_emu=""
-    if xocc_target == "sw_emu":
+    if xocc_target == "hls_sw_emu":
         timeout = 1200 # 20min
         run_if_sw_emu=""
     config.substitutions.append( ('%run_if_hw', run_if_hw) )
@@ -315,6 +317,6 @@ else:
 # Set timeout for test = 10 mins
 try:
     import psutil
-    lit_config.maxIndividualTestTime = timeout
+    lit_config.maxIndividualTestTime = 10800
 except ImportError:
     pass

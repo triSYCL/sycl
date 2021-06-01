@@ -183,7 +183,7 @@ class CompilationDriver:
         opt = self.clang_path / "opt"
         prepared_kernels = self.tmpdir / f"{self.outstem}_linked.simple.bc"
         opt_options = [
-            "--sycl-vxx", "--sycl-remove-annotations", "-S", "-preparesycl",
+            "--sycl-vxx", "--sycl-prepare-afterlink", "-S", "-preparesycl",
             "-globaldce", self.linked_kernels,
             "-o", prepared_kernels
         ]
@@ -315,8 +315,6 @@ class CompilationDriver:
         tmp_manager = TmpDirManager(tmp_root, outstem, autodelete)
         with dataflow_lawyer_manager, tmp_manager as self.tmpdir:
             tmpdir = self.tmpdir
-            import pdb
-            pdb.set_trace()
             if not autodelete:
                 print(f"Temporary clutter in {tmpdir} will not be cleaned")
             self.before_opt_src = self.tmpdir / f"{outstem}-before-opt.bc"

@@ -1,4 +1,5 @@
 // REQUIRES: xocc
+// REQUIRES: spir
 
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.out

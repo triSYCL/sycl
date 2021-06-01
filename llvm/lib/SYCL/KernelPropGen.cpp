@@ -17,6 +17,7 @@
 #include <string>
 
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
@@ -25,6 +26,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
+#include "llvm/SYCL/KernelProperties.h"
 #include "llvm/SYCL/KernelPropGen.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
@@ -81,47 +83,6 @@ struct KernelPropGen : public ModulePass {
 
   static StringRef KindOf(const char *Str) {
     return StringRef(Str, strlen(Str) + 1);
-  }
-
-  void CollectUserSpecifiedDDRBanks(Function &F) {
-    for (Instruction &I : instructions(F)) {
-      auto *CB = dyn_cast<CallBase>(&I);
-      if (!CB || CB->getIntrinsicID() != Intrinsic::var_annotation)
-        continue;
-      auto *Alloca =
-          dyn_cast_or_null<AllocaInst>(getUnderlyingObject(CB->getOperand(0)));
-      auto *Str = cast<ConstantDataArray>(
-          cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(1)))
-              ->getOperand(0));
-      if (!Alloca)
-        continue;
-      if (Str->getRawDataValues() != KindOf("xilinx_ddr_bank"))
-        continue;
-      Constant *Args =
-          (cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(4)))
-               ->getInitializer());
-      unsigned Bank;
-      if (auto *ZeroData = dyn_cast<ConstantAggregateZero>(Args))
-        Bank = 0;
-      else
-        Bank = cast<ConstantInt>(Args->getOperand(0))->getZExtValue();
-
-      UserSpecifiedDDRBanks[Alloca] = Bank;
-    }
-  }
-
-  unsigned findDDRBankFor(Argument *Arg) {
-    for (User *U : Arg->users()) {
-      if (auto *Store = dyn_cast<StoreInst>(U))
-        if (Store->getValueOperand() == Arg) {
-          auto Lookup = UserSpecifiedDDRBanks.find(dyn_cast_or_null<AllocaInst>(
-              getUnderlyingObject(Store->getPointerOperand())));
-          if (Lookup == UserSpecifiedDDRBanks.end())
-            continue;
-          return Lookup->second;
-        }
-    }
-    return 0;
   }
 
   /// Add the provided string as argument to all kernel functions that can reach
@@ -188,13 +149,14 @@ struct KernelPropGen : public ModulePass {
     CollectExtraArgs(M);
     json::OStream J(O, 2);
     llvm::json::Array kernels{};
+    bool syclHLSFlow = Triple(M.getTargetTriple()).isXilinxHLS();
 
     J.objectBegin();
     J.attributeBegin("kernels");
     J.arrayBegin();
     for (auto &F : M.functions()) {
       if (isKernel(F)) {
-        CollectUserSpecifiedDDRBanks(F);
+        KernelProperties kernel_prop(F);
         J.objectBegin();
         J.attribute("name", F.getName());
         J.attribute("extra_args", ExtraArgsMap[&F]);
@@ -214,7 +176,7 @@ struct KernelPropGen : public ModulePass {
             // from the SYCL runtime this should be modified as well as the
             // buffer XRT extensions.
             if (Arg.getType()->isPointerTy() &&
-                (Arg.getType()->getPointerAddressSpace() == SPIRAS_Global ||
+                (syclHLSFlow || Arg.getType()->getPointerAddressSpace() == SPIRAS_Global ||
                  Arg.getType()->getPointerAddressSpace() == SPIRAS_Constant)) {
               // This currently forces a default assignment of DDR banks to 0
               // as some platforms have different Default DDR banks and buffers
@@ -231,7 +193,10 @@ struct KernelPropGen : public ModulePass {
               // KernelName_2..KernelName_3 etc.
               J.objectBegin();
               J.attribute("arg_name", Arg.getName());
-              J.attribute("bank_id", std::to_string(findDDRBankFor(&Arg)));
+
+              J.attribute(
+                  "bank_id",
+                  std::to_string(kernel_prop.getUserSpecifiedDDRBank(&Arg)));
               J.objectEnd();
             }
         }

@@ -8,33 +8,33 @@
 int main() {
   cl::sycl::buffer<cl::sycl::cl_int, 1> Buffer(4);
   cl::sycl::queue Queue;
-  cl::sycl::range<1> NumOfWorkItems{Buffer.get_count()};
+  const cl::sycl::cl_int buf_size = Buffer.get_count();
 
   Queue.submit([&](cl::sycl::handler &cgh) {
     sycl::ONEAPI::accessor_property_list PL{sycl::xilinx::ddr_bank<1>};
     // CHECK: :DDR[1]
     sycl::accessor Accessor(Buffer, cgh, sycl::write_only, PL);
-    cgh.parallel_for<class SmallerTesta>(
-        NumOfWorkItems, [=](cl::sycl::id<1> WIid) {
-          Accessor[WIid] = (cl::sycl::cl_int)WIid.get(0);
+    cgh.single_task<class SmallerTesta>([=]{
+          for (cl::sycl::cl_int i = 0 ; i < buf_size ; ++i)
+            Accessor[i] = i;
         });
   });
   Queue.submit([&](cl::sycl::handler &cgh) {
     sycl::ONEAPI::accessor_property_list PL{sycl::xilinx::ddr_bank<3>};
     // CHECK: :DDR[3]
     sycl::accessor Accessor(Buffer, cgh, sycl::write_only, PL);
-    cgh.parallel_for<class SmallerTestb>(
-        NumOfWorkItems, [=](cl::sycl::id<1> WIid) {
-          Accessor[WIid] = (cl::sycl::cl_int)WIid.get(0);
+    cgh.single_task<class SmallerTestb>([=]{
+          for (cl::sycl::cl_int i = 0 ; i < buf_size ; ++i)
+            Accessor[i] = i;
         });
   });
   Queue.submit([&](cl::sycl::handler &cgh) {
     sycl::ONEAPI::accessor_property_list PL{sycl::xilinx::ddr_bank<0>};
     // CHECK: :DDR[0]
     sycl::accessor Accessor(Buffer, cgh, sycl::write_only, PL);
-    cgh.parallel_for<class SmallerTestc>(
-        NumOfWorkItems, [=](cl::sycl::id<1> WIid) {
-          Accessor[WIid] = (cl::sycl::cl_int)WIid.get(0);
+    cgh.single_task<class SmallerTestc>([=]{
+          for (cl::sycl::cl_int i = 0 ; i < buf_size ; ++i)
+            Accessor[i] = i;
         });
   });
 }

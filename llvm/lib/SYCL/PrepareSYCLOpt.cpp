@@ -28,7 +28,7 @@ using namespace llvm;
 
 namespace {
 
-cl::opt<bool> RemoveAnnotations("sycl-remove-annotations", cl::Hidden,
+cl::opt<bool> AfterLink("sycl-prepare-afterlink", cl::Hidden,
                                 cl::init(false));
 
 struct PrepareSYCLOpt : public ModulePass {
@@ -52,12 +52,24 @@ struct PrepareSYCLOpt : public ModulePass {
 
   void setHLSCallingConvention(Module& M) {
     for (Function &F : M.functions()) {
+      if (F.hasFnAttribute("fpga.top.func") || F.isIntrinsic()) {
+        continue;
+      }
       if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
         assert(F.use_empty());
         F.addFnAttr("fpga.top.func", F.getName());
         F.addFnAttr("fpga.demangled.name", F.getName());
         F.setCallingConv(CallingConv::C);
         F.setLinkage(llvm::GlobalValue::ExternalLinkage);
+      } else {
+        // We need to call intrinsec with spir_func calling conv
+        // For correct linkage with vitis spirv builtins lib 
+        auto cc = (AfterLink) ? CallingConv::C : CallingConv::SPIR_FUNC;
+        F.setCallingConv(cc);
+        for (Value *V : F.users()) {
+          if (auto *Call = dyn_cast<CallBase>(V))
+            Call->setCallingConv(cc);
+        }
       }
     }
   }
@@ -139,16 +151,37 @@ struct PrepareSYCLOpt : public ModulePass {
     }
   }
 
+  void cleanSpirBuiltins(Module &M) {
+    /// Find function
+    auto *spirid = M.getFunction("llvm.spir.get.global.id.i64");
+    if (spirid != nullptr && spirid->isDeclaration()) {
+      /// Create replcement
+      auto *replacement = ConstantInt::get(spirid->getReturnType(), 1);
+      for (auto *user : spirid->users())
+        if (auto *call = dyn_cast<CallBase>(user)) {
+          /// replace calls by constant
+          call->replaceAllUsesWith(replacement);
+          call->eraseFromParent();
+        }
+      assert(spirid->use_empty());
+      /// erase the fontion from the module.
+      spirid->eraseFromParent();
+    }
+  }
+
   bool runOnModule(Module &M) override {
     // When using the HLS flow instead of spir default
     bool SyclHLSFlow = Triple(M.getTargetTriple()).isXilinxHLS();
     turnNonKernelsIntoPrivate(M);
-    if (SyclHLSFlow)
+    if (SyclHLSFlow) {
       setHLSCallingConvention(M);
-    else
+      if (AfterLink) 
+        cleanSpirBuiltins(M);
+    } else {
       setCallingConventions(M);
+    }
     lowerArrayPartition(M);
-    if (RemoveAnnotations)
+    if (AfterLink)
       removeAnnotations(M);
     if (!SyclHLSFlow)
       forceInlining(M);
