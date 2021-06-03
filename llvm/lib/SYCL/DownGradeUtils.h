@@ -35,7 +35,7 @@ inline void removeAttributes(Module &M, ArrayRef<Attribute::AttrKind> Kinds) {
           CB->removeAttribute(AttributeList::FunctionIndex, Kind);
           CB->removeAttribute(AttributeList::ReturnIndex, Kind);
           for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
-            CB->removeParamAttr(i, llvm::Attribute::ByVal);
+            CB->removeParamAttr(i, Kind);
           }
         }
     }

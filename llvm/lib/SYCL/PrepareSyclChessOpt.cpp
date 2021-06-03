@@ -21,6 +21,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/SYCL/PrepareSyclChessOpt.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/ScopedPrinter.h"
 
 using namespace llvm;
 
@@ -44,8 +45,22 @@ struct PrepareSyclChessOpt : public ModulePass {
     }
   }
 
+  void makeKernelsUnmergable(Module &M) {
+    /// we give a attribute with a unique id to every kenrels such that
+    /// mergefunc dont merge them.
+    int id = 0;
+    for (GlobalObject &G : M.global_objects()) {
+      if (auto *F = dyn_cast<Function>(&G)) {
+        if (F->getCallingConv() == CallingConv::SPIR_KERNEL)
+          F->addFnAttr("unmergable-kernel-id",
+                       StringRef(llvm::to_string(id++)));
+      }
+    }
+  }
+
   bool runOnModule(Module &M) override {
     turnNonKernelsIntoPrivate(M);
+    makeKernelsUnmergable(M);
     return true;
   }
 };

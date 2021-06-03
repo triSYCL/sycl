@@ -26,9 +26,12 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/Debug.h"
 #include "llvm/Transforms/Utils/FunctionComparator.h"
 
 #include "DownGradeUtils.h"
+
+#define DEBUG_TYPE "chess-massage"
 
 using namespace llvm;
 
@@ -47,6 +50,12 @@ struct ChessMassage : public ModulePass {
   ChessMassage() : ModulePass(ID) {}
 
   GlobalNumberState GNS;
+
+  void removeMetadataForUnmergability(Module &M) {
+    for (auto &F : M.functions())
+      if (F.getCallingConv() == CallingConv::SPIR_KERNEL)
+        F.removeFnAttr("unmergable-kernel-id");
+  }
 
   // Re-order functions with hash values. This is taken from MergeFunctions
   // and required to correctly identifie to which one the functions are
@@ -68,6 +77,9 @@ struct ChessMassage : public ModulePass {
         Compare = Lookup->second;
       else {
         Compare = FunctionComparator(LHS, RHS, &GNS).compare();
+        LLVM_DEBUG(llvm::dbgs()
+                   << "chess-massage: " << LHS->getName() << " <=> "
+                   << RHS->getName() << " == " << Compare << "\n");
         FuncCompareCache[{LHS, RHS}] = Compare;
         FuncCompareCache[{RHS, LHS}] = -Compare;
       }
@@ -190,6 +202,7 @@ struct ChessMassage : public ModulePass {
     if (O.has_error())
       return false;
 
+    removeMetadataForUnmergability(M);
     prepareForMerging(M, O);
     removeImmarg(M);
     // This has to be done before changing the calling convention
@@ -200,7 +213,8 @@ struct ChessMassage : public ModulePass {
     // doesn't know how to handle it.
     removeMetadata(M, "llvm.linker.options");
 
-    llvm::removeAttributes(M, {Attribute::MustProgress, Attribute::ByVal});
+    llvm::removeAttributes(
+        M, {Attribute::MustProgress, Attribute::ByVal, Attribute::StructRet});
 
     // The module probably changed
     return true;

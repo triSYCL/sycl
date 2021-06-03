@@ -112,17 +112,28 @@ export SOURCE_TEMPORARY_DIR="$(mktemp -d $5/sycl-chess.XXXXXX.${SOURCE_FILE_NAME
 
 KERNELPROP="${SOURCE_TEMPORARY_DIR}KernelProperties_${SOURCE_FILE_NAME}.bash"
 UNMERGED_PROP=$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}.bash
-# -O3 causes over optimization with a simple hello_world.cpp and we end up
-# with a trap...
-# Run Opt pass to convert our IR into something the chess toolchain can support
-# The order of opt passes matters: ChessMassage -> mergefunc ->kernelPropGen
-# Maybe passes can be renamed to describe stages better.
+
+# The kernel merging process:
+#  -preparechess  will setup metadata to prevent kernels from being merged by mergefunc and
+#                 set the linkage of non-kernel to private such that they can be discard when unused.
+#  -mergefunc     will merge identical function except kernels, this makes spotting identical kernels much easier
+#  -ChessMassage  will generate reorder kernel to be cluster by mergability,
+#                 generate an ordered list of kernels before the merge and
+#                 make mergable kernels as private
+#  -globaldce     will eliminate redondant kernels
+#  -kernelPropGen will generate and ordered list of kernels after the merge
+#  and finally this script will compile each unique kernel via chess and duplicate the output for equivalent kernels.
+
 cp $INPUT_FILE_NAME $INPUT_FILE_NAME.saved.bc
 $OPT -S -O3 -instnamer \
   -ChessMassage -mergefunc -kernelPropGen \
   "$INPUT_FILE_NAME" --sycl-kernel-propgen-output $KERNELPROP \
   --sycl-kernel-unmerged-prop-out $UNMERGED_PROP -o \
   "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
+# $OPT -S -preparechess -O3 -mergefunc -ChessMassage -globaldce -kernelPropGen \
+#   "$INPUT_FILE_NAME" --sycl-kernel-propgen-output $KERNELPROP \
+#   --sycl-kernel-unmerged-prop-out $UNMERGED_PROP -o \
+#   "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
 
 # Our bash file containing kernel property environment variables is placed in
 # the systems temporary directory (or wherever the Clang driver is told is the

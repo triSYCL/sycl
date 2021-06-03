@@ -50,5 +50,5 @@ _reserved   DMb                        0x30000   0x08000
 
 //East-------------------------------------------------
 _stack DM_stack                        0x38000   0x01000
-_symbol args                           0x39000   0x04000
+_symbol args                           0x39000   0x06000
 
