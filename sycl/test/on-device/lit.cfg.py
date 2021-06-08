@@ -14,6 +14,12 @@ import tempfile
 
 from lit.llvm import llvm_config
 
+def split_target(target):
+    if target.startswith("hls_"):
+        return ("hls", target[4:])
+    else:
+        return ("spir", target)
+
 # Configuration file for the 'lit' test runner.
 
 # name: The name of this test suite.
@@ -273,6 +279,8 @@ else:
     required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]
     has_error=False
     config.available_features.add("xocc")
+    for feature in split_target(xocc_target):
+        config.available_features.add(feature) 
     config.available_features.add(xocc_target)
     pkg_opencv4 = subprocess.run(["pkg-config", "--libs", "--cflags", "opencv4"], stdout=subprocess.PIPE)
     has_opencv4 = not pkg_opencv4.returncode
