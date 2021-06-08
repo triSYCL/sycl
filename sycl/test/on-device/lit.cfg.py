@@ -46,8 +46,8 @@ timeout=600
 
 xocc=lit_config.params.get('XOCC', "off")
 xocc_target = "hls_hw_emu"
-if "XCL_EMULATION_MODE" in os.environ:
-    xocc_target = f"hls_{os.environ['XCL_EMULATION_MODE']}"
+if "XOCC_TARGET" in os.environ:
+    xocc_target = f"hls_{os.environ['XOCC_TARGET']}"
 
 # Configure LD_LIBRARY_PATH or corresponding os-specific alternatives
 if platform.system() == "Linux":
@@ -107,9 +107,6 @@ def getDeviceCount(device_type, be = backend):
     is_cuda = False;
     is_level_zero = False;
     device_count_env = os.environ.copy()
-    if "XCL_EMULATION_MODE" in os.environ:
-        if os.environ["XCL_EMULATION_MODE"] == "hw":
-            device_count_env.pop("XCL_EMULATION_MODE")
     process = subprocess.Popen([get_device_count_by_type_path, device_type, be],
         stdout=subprocess.PIPE, env=device_count_env)
     (output, err) = process.communicate()
@@ -227,12 +224,9 @@ if xocc != "off":
     acc_run_substitute+= "setsid flock --exclusive " + xrt_lock + " "
     if os.path.exists(xrt_lock):
         os.remove(xrt_lock)
-    # XCL_EMULATION_MODE = hw is only valid for our SYCL driver, 
-    # for XRT XCL_EMULATION_MODE should only be used when using either hw_emu or sw_emu
-    # if xocc_target == "hw":
     acc_run_substitute="env --unset=XCL_EMULATION_MODE " + acc_run_substitute
     # hw_emu is very slow so it has a higher timeout.
-    if xocc_target != "hls_hw_emu":
+    if not xocc_target.endswith("hw_emu"):
         acc_run_substitute+= "timeout 3000 env "
     else:
         acc_run_substitute+= "timeout 3000 env "
@@ -275,7 +269,6 @@ else:
     if getDeviceCount("gpu", "cuda")[1]:
         lit_config.note("found secondary cuda target")
         config.available_features.add("has_secondary_cuda")
-    #llvm_config.with_environment('XCL_EMULATION_MODE', xocc_target, append_path=False)
     lit_config.note("XOCC target: {}".format(xocc_target))
     required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]
     has_error=False
@@ -301,13 +294,13 @@ else:
     run_if_hw="echo"
     run_if_hw_emu="echo"
     run_if_sw_emu="echo"
-    if xocc_target == "hls_hw":
+    if xocc_target.endswith("_hw"):
         timeout = 10800 # 3h
         run_if_hw=""
-    if xocc_target == "hls_hw_emu":
+    if xocc_target.endswith("_hw_emu"):
         timeout = 3600 # 1h
         run_if_hw_emu=""
-    if xocc_target == "hls_sw_emu":
+    if xocc_target.endswith("_sw_emu"):
         timeout = 1200 # 20min
         run_if_sw_emu=""
     config.substitutions.append( ('%run_if_hw', run_if_hw) )
