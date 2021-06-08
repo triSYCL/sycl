@@ -118,6 +118,10 @@ class CompilationDriver:
                 if content:
                     self.extra_link_args.extend(content.split(' '))
 
+    def _dump_cmd(self, filename, args):
+        with (self.tmpdir / filename).open("w") as f:
+            f.write(" ".join(map(str, args)) + "\n")
+
     def _link_multi_inputs(self):
         """Link all input files into a single .bc"""
         llvm_link = self.clang_path / "llvm-link"
@@ -126,6 +130,7 @@ class CompilationDriver:
                 "-o",
                 str(self.before_opt_src)
                 ]
+        self._dump_cmd("00-link_multi_inputs.cmd", args)
         subprocess.run(args)
 
     def _run_optimisation(self):
@@ -140,7 +145,7 @@ class CompilationDriver:
             f"{outstem}-kernels-optimized.bc"
         )
         opt_options = ["--sycl-vxx",
-                       "-kernelPropGen", 
+                       "-kernelPropGen",
                        "--sycl-kernel-propgen-output", f"{kernel_prop}",
                        "-preparesycl", "-globaldce"]
         if not self.hls_flow:
@@ -154,7 +159,9 @@ class CompilationDriver:
         ])
 
         opt = self.clang_path / "opt"
-        subprocess.run([opt, *opt_options, self.before_opt_src])
+        args = [opt, *opt_options, self.before_opt_src]
+        self._dump_cmd("01-run_optimisations.cmd", args)
+        subprocess.run(args)
         with kernel_prop.open('r') as kp_fp:
             self.kernel_properties = json.load(kp_fp)
 
@@ -170,14 +177,16 @@ class CompilationDriver:
             ).resolve()
         llvm_link = self.clang_path / 'llvm-link'
         self.linked_kernels = self.tmpdir / f"{self.outstem}_kernels-linked.bc"
-        subprocess.run([
+        args = [
             llvm_link,
             self.optimised_bc,
             "--only-needed",
             vitis_lib_spir,
             "-o",
             self.linked_kernels
-        ])
+        ]
+        self._dump_cmd("02-link_spir.cmd", args)
+        subprocess.run(args)
 
     def _prepare_and_downgrade(self):
         opt = self.clang_path / "opt"
@@ -187,23 +196,29 @@ class CompilationDriver:
             "-globaldce", self.linked_kernels,
             "-o", prepared_kernels
         ]
-        subprocess.run([opt, *opt_options])
+        args = [opt, *opt_options]
+        self._dump_cmd("03-prepare.cmd", args)
+        subprocess.run(args)
         opt_options = ["--sycl-vxx", "-S", "-O3", "-vxxIRDowngrader"]
         self.downgraded_ir = (
             self.tmpdir / f"{self.outstem}_kernels-linked.opt.ll")
-        subprocess.run([
+        args = [
             opt, *opt_options, prepared_kernels,
             "-o", self.downgraded_ir
-        ])
+        ]
+        self._dump_cmd("04-downgrade.cmd", args)
+        subprocess.run(args)
 
     def _asm_ir(self):
         """Assemble downgraded IR to bitcode using vitis llvm-as"""
-        subprocess.run([
+        args = [
             self.vitis_clang_bin / "llvm-as",
             self.downgraded_ir,
             "-o",
             self.vpp_llvm_input
-        ])
+        ]
+        self._dump_cmd("05-asm_ir.cmd", args)
+        subprocess.run(args)
         if self.hls_flow and self.vitis_mode == "sw_emu":
             # assemble the xpirbc due to bug in v++ when provided with llvm IR
             proc = subprocess.run([
@@ -231,7 +246,7 @@ class CompilationDriver:
         kernel_output = self.tmpdir / f"{kernel['name']}.xo"
         command = [
             vxx, "--target", self.vitis_mode,
-            "--advanced.param", "param:compiler.hlsDataflowStrictMode=off",
+            "--advanced.param", "compiler.hlsDataflowStrictMode=off",
             "--platform", self.xilinx_platform,
             "--temp_dir", self.tmpdir / 'vxx_comp_tmp',
             "--log_dir", self.tmpdir / 'vxx_comp_log',
@@ -242,9 +257,7 @@ class CompilationDriver:
         if kernel['extra_args'].strip():
             command.extend(kernel['extra_args'].split(' '))
         command.extend(self.extra_comp_args)
-        with (self.tmpdir / f"vxxcomp-{kernel['name']}.cmd").open("w") as f:
-            f.write(' '.join(map(str, command)))
-            f.write(f"\n\nSource command (dbg):\n{command}\n")
+        self._dump_cmd(f"06-vxxcomp-{kernel['name']}.cmd", command)
         subprocess.run(command)
         if self.vitis_mode == "sw_emu" and self.hls_flow:
             # We need to manually replace llvm IR source with asm as 
@@ -269,7 +282,7 @@ class CompilationDriver:
         vpp = self.vitis_bin_dir / "v++"
         command = [
             vpp, "--target", self.vitis_mode,
-            "--advanced.param", "param:compiler.hlsDataflowStrictMode=off",
+            "--advanced.param", "compiler.hlsDataflowStrictMode=off",
             "--platform", self.xilinx_platform,
             "--temp_dir", self.tmpdir / 'vxx_link_tmp',
             "--log_dir", self.tmpdir / 'vxx_link_log',
@@ -277,20 +290,18 @@ class CompilationDriver:
             "--save-temps", "-l", "-o", self.outpath
             ]
         for kernelprop in self.kernel_properties['kernels']:
-            for mem_assign in kernelprop["memory_assignment"]:
+            for mem_assign in kernelprop["bundle_hw_mapping"]:
                 command.extend((
                     "--connectivity.sp",
-                    "{}_1.{}:DDR[{}]".format(
+                    "{}_1.m_axi_{}:{}".format(
                         kernelprop["name"],
-                        mem_assign["arg_name"],
-                        mem_assign["bank_id"]
+                        mem_assign["maxi_bundle_name"],
+                        mem_assign["target_bank"]
                     )
                 ))
         command.extend(self.extra_link_args)
         command.extend(self.compiled_kernels)
-        with (self.tmpdir / "vxxlink.cmd").open("w") as f:
-            f.write(' '.join(map(str, command)))
-            f.write(f"\n\nSource command (dbg):\n{command}\n")
+        self._dump_cmd("07-vxxlink.cmd", command)
         vivado_gcc_bin_dir = list((
             self.vitis_bin_dir /
             f"../../../Vivado/{self.vitis_version}/tps/lnx64"

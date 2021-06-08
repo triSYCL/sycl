@@ -1,4 +1,4 @@
-//===- KernelProperties.h - Functions for extracting sycl kernel properties ------===//
+//===- KernelProperties.h - Tools for extracting sycl kernel properties ---===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -13,21 +13,32 @@
 #ifndef LLVM_SYCL_KERNELPROPERTIES_H
 #define LLVM_SYCL_KERNELPROPERTIES_H
 
+#include "llvm/ADT/APInt.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
+#include "llvm/Support/FormatVariadic.h"
 
 namespace llvm {
 class KernelProperties {
+private:
+  struct MAXIBundle {
+    std::string bundleName;
+  };
+  SmallDenseMap<unsigned, MAXIBundle, 4> maxiBundles;
+  SmallDenseMap<AllocaInst *, unsigned, 8> userSpecifiedDDRBanks;
+
 public:
   KernelProperties(Function &F);
   KernelProperties(KernelProperties &orig) = delete;
 
-  unsigned getUserSpecifiedDDRBank(Argument *Arg);
-
-private:
-  SmallDenseMap<AllocaInst *, unsigned, 8> userSpecifiedDDRBanks;
+  Optional<unsigned> getUserSpecifiedDDRBank(Argument *Arg);
+  Optional<StringRef> getArgumentMAXIBundle(Argument *Arg);
+  SmallDenseMap<unsigned, MAXIBundle, 4> const &getMAXIBundles() {
+    return maxiBundles;
+  };
 };
 } // namespace llvm
 

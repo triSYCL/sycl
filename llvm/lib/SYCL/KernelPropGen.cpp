@@ -156,11 +156,21 @@ struct KernelPropGen : public ModulePass {
     J.arrayBegin();
     for (auto &F : M.functions()) {
       if (isKernel(F)) {
-        KernelProperties kernel_prop(F);
+        KernelProperties KProp(F);
         J.objectBegin();
         J.attribute("name", F.getName());
         J.attribute("extra_args", ExtraArgsMap[&F]);
-        J.attributeBegin("memory_assignment");
+        J.attributeBegin("bundle_hw_mapping");
+        J.arrayBegin();
+        for (auto& Bundle: KProp.getMAXIBundles()) {
+          J.objectBegin();
+          J.attribute("maxi_bundle_name", Bundle.second.bundleName);
+          J.attribute("target_bank", formatv("DDR[{0}]", Bundle.first));
+          J.objectEnd();
+        }
+        J.arrayEnd();
+        J.attributeEnd();
+        J.attributeBegin("arg_bundle_mapping");
         J.arrayBegin();
         for (auto &Arg : F.args()) {
           if (Arg.getType()->isPointerTy())
@@ -186,18 +196,13 @@ struct KernelPropGen : public ModulePass {
               // change for every new platform. In either case, this puts in
               // infrastructure to assign DDR banks at compile time for a CU
               // if the information is passed down.
-              // This: Assigns a Default 0 DDR bank to all initial compute
-              // unit's, the _1 post-fix to the kernel name represents the
-              // default compute unit name. If more than one CU is generated
-              // (which we don't support yet in any case) then they would be
-              // KernelName_2..KernelName_3 etc.
-              J.objectBegin();
-              J.attribute("arg_name", Arg.getName());
-
-              J.attribute(
-                  "bank_id",
-                  std::to_string(kernel_prop.getUserSpecifiedDDRBank(&Arg)));
-              J.objectEnd();
+              auto bundle = KProp.getArgumentMAXIBundle(&Arg);
+              if (bundle) {
+                J.objectBegin();
+                J.attribute("arg_name", Arg.getName());
+                J.attribute("maxi_bundle_name", bundle.getValue());
+                J.objectEnd();
+              }
             }
         }
         J.arrayEnd();

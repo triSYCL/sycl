@@ -12,23 +12,104 @@
 // ===---------------------------------------------------------------------===//
 
 #include <cstddef>
+#include <iostream>
 #include <regex>
 #include <string>
 
-#include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/ValueTracking.h"
-#include "llvm/IR/Dominators.h"
-#include "llvm/IR/CallingConv.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/SYCL/LowerSYCLMetaData.h"
-#include "llvm/Support/Casting.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/Argument.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Dominators.h"
+#include "llvm/IR/InstVisitor.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/SYCL/LowerSYCLMetaData.h"
+#include "llvm/Support/Casting.h"
 
 using namespace llvm;
 
 namespace {
+
+static StringRef kindOf(const char* Str) {
+  return StringRef(Str, strlen(Str) + 1);
+}
+
+class LocalAnnotationVisitor : public InstVisitor<LocalAnnotationVisitor> {
+  Module &M;
+  LLVMContext &C;
+  bool HasChanged;
+
+  void processMemBankAssign(CallInst &I) {
+    HasChanged = true;
+    Constant *Bank =
+        (cast<GlobalVariable>(getUnderlyingObject(I.getOperand(4)))
+             ->getInitializer());
+    auto BankMem = isa<ConstantAggregateZero>(Bank)
+                       ? 0
+                       : cast<ConstantInt>(Bank->getOperand(0))->getZExtValue();
+    auto BundleIdentifier = "ddrmem" + std::to_string(BankMem);
+    auto *BundleIDConstant = ConstantDataArray::getString(C, BundleIdentifier, false);
+    auto *MinusOne = ConstantInt::getSigned(IntegerType::get(C, 64), -1);
+    auto *AnnotatedInstr = dyn_cast_or_null<AllocaInst>(getUnderlyingObject(I.getOperand(0)));
+    Argument* Annotated = nullptr;
+    for (Argument *Arg = I.getCaller()->arg_begin();
+         Arg != I.getCaller()->arg_end(); ++Arg) {
+      for (User *U : Arg->users()) {
+        if (auto *Store = dyn_cast<StoreInst>(U))
+          if (getUnderlyingObject(Store->getPointerOperand()) == AnnotatedInstr) {
+            Annotated = Arg;
+          }
+      }
+    }
+
+    auto *CAZ = ConstantAggregateZero::get(ArrayType::get(IntegerType::get(C, 8), 0));
+    Function *SideEffect = Intrinsic::getDeclaration(&M, Intrinsic::sideeffect);
+    SideEffect->addFnAttr(Attribute::NoUnwind);
+    SideEffect->addFnAttr(Attribute::InaccessibleMemOnly);
+    //TODO Adapt
+    SideEffect->addFnAttr("xlx.port.bitwidth", "4096");
+
+    OperandBundleDef OpBundle(
+        "xlx_m_axi", ArrayRef<Value *>{Annotated, BundleIDConstant, MinusOne,
+                                       CAZ, CAZ, MinusOne, MinusOne, MinusOne,
+                                       MinusOne, MinusOne, MinusOne});
+    Instruction *Instr = CallInst::Create(SideEffect, {}, {OpBundle});
+    Instr->insertBefore(I.getCaller()->getEntryBlock().getTerminator());
+  }
+
+  void processLocalAnnotation(IntrinsicInst &I) {
+    StringRef Annotation =
+        cast<ConstantDataArray>(
+            cast<GlobalVariable>(getUnderlyingObject(I.getOperand(1)))
+                ->getInitializer())
+            ->getRawDataValues();
+    if (Annotation == kindOf("xilinx_ddr_bank")) {
+      processMemBankAssign(I);
+    }
+  }
+
+public:
+  LocalAnnotationVisitor(Module &M) : M(M), C(M.getContext()), HasChanged(false) {}
+  void visitIntrinsicInst(IntrinsicInst &I) {
+    if (I.getIntrinsicID() != Intrinsic::var_annotation)
+      return;
+    processLocalAnnotation(I);
+  }
+
+  bool hasChanged() {
+    return HasChanged;
+  }
+};
 
 struct LSMDState {
   LSMDState(Module& M) : M(M), Ctx(M.getContext()) {}
@@ -125,11 +206,9 @@ struct LSMDState {
     I->insertBefore(F->getEntryBlock().getTerminator());
   }
 
-  static StringRef KindOf(const char* Str) {
-    return StringRef(Str, strlen(Str) + 1);
-  }
 
-  void processAnnotation(llvm::Value *Annot) {
+
+  void processGlobalAnnotation(llvm::Value *Annot) {
     auto* CS = cast<ConstantStruct>(Annot);
     StringRef AnnotKind =
         cast<ConstantDataArray>(
@@ -137,9 +216,9 @@ struct LSMDState {
                 getUnderlyingObject(CS->getAggregateElement(1)))
                 ->getOperand(0))
             ->getRawDataValues();
-    if (AnnotKind == KindOf("xilinx_pipeline"))
+    if (AnnotKind == kindOf("xilinx_pipeline"))
       lowerPipeline(getUnderlyingObject(CS->getAggregateElement(0u)));
-    else if (AnnotKind == KindOf("xilinx_partition_array"))
+    else if (AnnotKind == kindOf("xilinx_partition_array"))
       lowerArrayPartition(getUnderlyingObject(CS->getAggregateElement(0u)));
     return;
   }
@@ -151,7 +230,7 @@ struct LSMDState {
     
     auto * Array = cast<ConstantArray>(Annots->getOperand(0));
     for (auto* E : Array->operand_values())
-      processAnnotation(E);
+      processGlobalAnnotation(E);
 
     return HasChanged;
   }
@@ -162,17 +241,21 @@ struct LowerSYCLMetaData : public ModulePass {
   static char ID; // Pass identification, replacement for typeid
   LowerSYCLMetaData() : ModulePass(ID) {}
   bool runOnModule(Module &M) override {
-    return LSMDState(M).run();
+    bool GlobalChanges = LSMDState(M).run();
+    LocalAnnotationVisitor LV(M);
+    LV.visit(M);
+    bool LocalChanges = LV.hasChanged();
+    return GlobalChanges or LocalChanges;
   }
   virtual StringRef getPassName() const override {
     return "LowerSYCLMetaData";
   }
 };
-}
+} // namespace
 
 namespace llvm {
 void initializeLowerSYCLMetaDataPass(PassRegistry &Registry);
-}
+} // namespace llvm
 
 INITIALIZE_PASS(LowerSYCLMetaData, "lower-sycl-metadata",
   "prepare SYCL device code to optimizations", false, false)

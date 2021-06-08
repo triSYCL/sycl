@@ -47,10 +47,14 @@ KernelProperties::KernelProperties(Function &F) {
       Bank = cast<ConstantInt>(Args->getOperand(0))->getZExtValue();
 
     userSpecifiedDDRBanks[Alloca] = Bank;
+    auto Lookup = maxiBundles.find(Bank);
+    if (Lookup == maxiBundles.end()) {
+      maxiBundles[Bank] = {formatv("ddrmem{0}", Bank)};
+    }
   }
 }
 
-unsigned KernelProperties::getUserSpecifiedDDRBank(Argument *Arg) {
+Optional<unsigned> KernelProperties::getUserSpecifiedDDRBank(Argument *Arg) {
   for (User *U : Arg->users()) {
     if (auto *Store = dyn_cast<StoreInst>(U))
       if (Store->getValueOperand() == Arg) {
@@ -58,9 +62,17 @@ unsigned KernelProperties::getUserSpecifiedDDRBank(Argument *Arg) {
             getUnderlyingObject(Store->getPointerOperand())));
         if (Lookup == userSpecifiedDDRBanks.end())
           continue;
-        return Lookup->second;
+        return {Lookup->second};
       }
   }
-  return 0;
+  return {};
+}
+
+Optional<StringRef> KernelProperties::getArgumentMAXIBundle(Argument *Arg) {
+  auto ddr_id = getUserSpecifiedDDRBank(Arg);
+  if (ddr_id) {
+    return {maxiBundles[ddr_id.getValue()].bundleName};
+  }
+  return {};
 }
 }
