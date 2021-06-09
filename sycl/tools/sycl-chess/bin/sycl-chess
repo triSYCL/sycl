@@ -124,9 +124,12 @@ UNMERGED_PROP=$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}
 #  -kernelPropGen will generate and ordered list of kernels after the merge
 #  and finally this script will compile each unique kernel via chess and duplicate the output for equivalent kernels.
 
+# We use xoccIRDowngrader because some of the transfromation it does are needed.
+# but most aren't so using a new better addapted passe would be better.
+
 cp $INPUT_FILE_NAME $INPUT_FILE_NAME.saved.bc
 $OPT -S -O3 -instnamer \
-  -ChessMassage -mergefunc -kernelPropGen \
+  -ChessMassage -mergefunc -kernelPropGen -xoccIRDowngrader \
   "$INPUT_FILE_NAME" --sycl-kernel-propgen-output $KERNELPROP \
   --sycl-kernel-unmerged-prop-out $UNMERGED_PROP -o \
   "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
@@ -190,14 +193,15 @@ chess_kernel_compile () {
       -o "$SOURCE_TEMPORARY_DIR/$0.elf.o_east" \
       "$SOURCE_TEMPORARY_DIR/$0.main.o" \
       "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
-      "$SYCL_LIB_PATH/acap-intrinsic.o"
+      "$SYCL_LIB_PATH/acap-intrinsic.o" &
 
     $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f \
       +l$DRIVER_PATH_DIR/chesswrappers/linker_script_west.bcf \
       -o "$SOURCE_TEMPORARY_DIR/$0.elf.o_west" \
       "$SOURCE_TEMPORARY_DIR/$0.main.o" \
       "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
-      "$SYCL_LIB_PATH/acap-intrinsic.o"
+      "$SYCL_LIB_PATH/acap-intrinsic.o" &
+    wait
 }
 
 # export the bash function so xargs can use it
