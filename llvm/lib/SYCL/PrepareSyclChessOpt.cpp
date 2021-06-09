@@ -17,6 +17,7 @@
 
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CallingConv.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/SYCL/PrepareSyclChessOpt.h"
@@ -45,22 +46,28 @@ struct PrepareSyclChessOpt : public ModulePass {
     }
   }
 
-  void makeKernelsUnmergable(Module &M) {
-    /// we give a attribute with a unique id to every kenrels such that
-    /// mergefunc dont merge them.
+  void prepareForMerging(Module &M) {
+    /// we give a attribute with a unique id to every kenrels such
+    /// that mergefunc dont merge them.
+    /// the first level of call in the kernel (which is introduced by the
+    /// runtime) Will be inlined into the kernel function.
     int id = 0;
     for (GlobalObject &G : M.global_objects()) {
       if (auto *F = dyn_cast<Function>(&G)) {
-        if (F->getCallingConv() == CallingConv::SPIR_KERNEL)
+        if (F->getCallingConv() == CallingConv::SPIR_KERNEL) {
           F->addFnAttr("unmergable-kernel-id",
                        StringRef(llvm::to_string(id++)));
+          for (auto &I : instructions(F))
+            if (auto *CB = dyn_cast<CallBase>(&I))
+              CB->getCalledFunction()->addFnAttr(Attribute::AlwaysInline);
+        }
       }
     }
   }
 
   bool runOnModule(Module &M) override {
     turnNonKernelsIntoPrivate(M);
-    makeKernelsUnmergable(M);
+    prepareForMerging(M);
     return true;
   }
 };
