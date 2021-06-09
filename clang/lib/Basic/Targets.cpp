@@ -37,7 +37,7 @@
 #include "Targets/WebAssembly.h"
 #include "Targets/X86.h"
 #include "Targets/XCore.h"
-#include "Targets/XLXHLS.h"
+#include "Targets/XilinxHLS.h"
 #include "clang/Basic/Diagnostic.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Triple.h"
@@ -595,9 +595,9 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
       case llvm::Triple::FPGASubArch_hls_sw_emu:
         switch (os) {
         case llvm::Triple::Linux:
-          return new LinuxTargetInfo<XLXHLS32TargetInfo>(Triple, Opts);
+          return new LinuxTargetInfo<XilinxHLS32TargetInfo>(Triple, Opts);
         default:
-          return new XLXHLS32TargetInfo(Triple, Opts);
+          return new XilinxHLS32TargetInfo(Triple, Opts);
         }
         break;
       default:
@@ -622,9 +622,9 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
       case llvm::Triple::FPGASubArch_hls_sw_emu:
         switch (os) {
         case llvm::Triple::Linux:
-          return new LinuxTargetInfo<XLXHLS64TargetInfo>(Triple, Opts);
+          return new LinuxTargetInfo<XilinxHLS64TargetInfo>(Triple, Opts);
         default:
-          return new XLXHLS64TargetInfo(Triple, Opts);
+          return new XilinxHLS64TargetInfo(Triple, Opts);
         }
         break;
       default:

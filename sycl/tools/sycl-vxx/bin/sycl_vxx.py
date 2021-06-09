@@ -96,13 +96,13 @@ class CompilationDriver:
             vitis_clang_bin = Path(environ["XILINX_CLANG_39_BUILD_PATH"])
         else:
             vitis_clang_bin = (
-                self.vitis_bin_dir /
-                "/../lnx64/tools/clang-3.9-csynth/bin"
+                self.vitis_bin_dir.parent /
+                "/lnx64/tools/clang-3.9-csynth/bin"
             ).resolve()
             if not (vitis_clang_bin / "llvm-as").is_file():
                 vitis_clang_bin = (
-                    self.vitis_bin_dir /
-                    f"../../../Vitis_HLS/{self.vitis_version}/lnx64/tools/clang-3.9-csynth/bin"
+                    self.vitis_bin_dir.parents[2] /
+                    f"Vitis_HLS/{self.vitis_version}/lnx64/tools/clang-3.9-csynth/bin"
                 ).resolve()
         self.vitis_clang_bin = vitis_clang_bin
         self.extra_comp_args = []
@@ -167,13 +167,13 @@ class CompilationDriver:
 
     def _link_spir(self):
         vitis_lib_spir = (
-            self.vitis_bin_dir /
-            "../lnx64/lib/libspir64-39-hls.bc"
+            self.vitis_bin_dir.parent /
+            "lnx64/lib/libspir64-39-hls.bc"
         ).resolve()
         if not vitis_lib_spir.is_file():
             vitis_lib_spir = (
-                self.vitis_bin_dir /
-                f"../../../Vitis_HLS/{self.vitis_version}/lnx64/lib/libspir64-39-hls.bc"
+                self.vitis_bin_dir.parents[2] /
+                f"Vitis_HLS/{self.vitis_version}/lnx64/lib/libspir64-39-hls.bc"
             ).resolve()
         llvm_link = self.clang_path / 'llvm-link'
         self.linked_kernels = self.tmpdir / f"{self.outstem}_kernels-linked.bc"
@@ -303,9 +303,9 @@ class CompilationDriver:
         command.extend(self.compiled_kernels)
         self._dump_cmd("07-vxxlink.cmd", command)
         vivado_gcc_bin_dir = list((
-            self.vitis_bin_dir /
-            f"../../../Vivado/{self.vitis_version}/tps/lnx64"
-            ).resolve().glob("gcc*"))[0] / "bin"
+            self.vitis_bin_dir.parents[2] /
+            f"Vivado/{self.vitis_version}/tps/lnx64"
+        ).resolve().glob("gcc*"))[0] / "bin"
         vivado_gcc = vivado_gcc_bin_dir / "gcc"
         hls_sw_emu = self.hls_flow and self.vitis_mode == "sw_emu"
         gcc_bind_manager = BindMountManager(

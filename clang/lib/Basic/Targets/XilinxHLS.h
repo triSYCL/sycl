@@ -1,4 +1,4 @@
-//===--- XLXHLS.h - Declare FPGA HLS target feature support -----*- C++ -*-===//
+//===--- XilinxHLS.h - Declare FPGA HLS target feature support -----*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,12 +6,12 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file declares XLXHLS TargetInfo objects.
+// This file declares XilinxHLS TargetInfo objects.
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_LIB_BASIC_TARGETS_XLXHLS_H
-#define LLVM_CLANG_LIB_BASIC_TARGETS_XLXHLS_H
+#ifndef LLVM_CLANG_LIB_BASIC_TARGETS_XilinxHLS_H
+#define LLVM_CLANG_LIB_BASIC_TARGETS_XilinxHLS_H
 
 #include "clang/Basic/TargetInfo.h"
 #include "clang/Basic/TargetOptions.h"
@@ -40,9 +40,9 @@ static const unsigned HLSAddrSpaceMap[] = {
     0  // ptr64
 };
 
-class LLVM_LIBRARY_VISIBILITY XLXHLSTargetInfo : public TargetInfo {
+class LLVM_LIBRARY_VISIBILITY XilinxHLSTargetInfo : public TargetInfo {
 public:
-  XLXHLSTargetInfo(const llvm::Triple &Triple, const TargetOptions &)
+  XilinxHLSTargetInfo(const llvm::Triple &Triple, const TargetOptions &)
       : TargetInfo(Triple) {
     TLSSupported = false;
     VLASupported = false;
@@ -61,7 +61,7 @@ public:
                         MacroBuilder &Builder) const override;
 
   bool hasFeature(StringRef Feature) const override {
-    return Feature == "XLXHLS";
+    return Feature == "XilinxHLS";
   }
 
   bool useFP16ConversionIntrinsics() const override { return true; }
@@ -106,7 +106,7 @@ public:
 
   void setSupportedOpenCLOpts() override {
     // Assume all OpenCL extensions and optional core features are supported
-    // for XLXHLS since it is a generic target.
+    // for XilinxHLS since it is a generic target.
     supportAllOpenCLOpts();
   }
 
@@ -115,17 +115,17 @@ public:
   bool hasInt128Type() const override { return true; }
 };
 
-class LLVM_LIBRARY_VISIBILITY XLXHLS32TargetInfo : public XLXHLSTargetInfo {
+class LLVM_LIBRARY_VISIBILITY XilinxHLS32TargetInfo : public XilinxHLSTargetInfo {
 public:
-  XLXHLS32TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts);
+  XilinxHLS32TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts);
 
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override;
 };
 
-class LLVM_LIBRARY_VISIBILITY XLXHLS64TargetInfo : public XLXHLSTargetInfo {
+class LLVM_LIBRARY_VISIBILITY XilinxHLS64TargetInfo : public XilinxHLSTargetInfo {
 public:
-  XLXHLS64TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts);
+  XilinxHLS64TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts);
 
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override;
@@ -133,4 +133,4 @@ public:
 
 } // namespace targets
 } // namespace clang
-#endif // LLVM_CLANG_LIB_BASIC_TARGETS_XLXHLS_H
+#endif // LLVM_CLANG_LIB_BASIC_TARGETS_XilinxHLS_H

@@ -1,4 +1,5 @@
-//===--- XLXHLS.cpp - Implement XLXHLS target feature support -----------------===//
+//===--- XilinxHLS.cpp - Implement XilinxHLS target feature support
+//-----------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,24 +7,24 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// This file implements XLXHLS TargetInfo objects.
+// This file implements XilinxHLS TargetInfo objects.
 //
 //===----------------------------------------------------------------------===//
 
-#include "XLXHLS.h"
+#include "XilinxHLS.h"
 #include "Targets.h"
 
 using namespace clang;
 using namespace clang::targets;
 
-void XLXHLSTargetInfo::getTargetDefines(const LangOptions &Opts,
-                                      MacroBuilder &Builder) const {
-  DefineStd(Builder, "XLXHLS", Opts);
+void XilinxHLSTargetInfo::getTargetDefines(const LangOptions &Opts,
+                                           MacroBuilder &Builder) const {
+  DefineStd(Builder, "XilinxHLS", Opts);
 }
 
-XLXHLS32TargetInfo::XLXHLS32TargetInfo(const llvm::Triple &Triple,
-                                   const TargetOptions &Opts)
-    : XLXHLSTargetInfo(Triple, Opts) {
+XilinxHLS32TargetInfo::XilinxHLS32TargetInfo(const llvm::Triple &Triple,
+                                             const TargetOptions &Opts)
+    : XilinxHLSTargetInfo(Triple, Opts) {
   PointerWidth = PointerAlign = 32;
   SizeType = TargetInfo::UnsignedInt;
   PtrDiffType = IntPtrType = TargetInfo::SignedInt;
@@ -35,15 +36,15 @@ XLXHLS32TargetInfo::XLXHLS32TargetInfo(const llvm::Triple &Triple,
       "1024");
 }
 
-void XLXHLS32TargetInfo::getTargetDefines(const LangOptions &Opts,
-                                        MacroBuilder &Builder) const {
-  XLXHLSTargetInfo::getTargetDefines(Opts, Builder);
-  DefineStd(Builder, "XLXHLS32", Opts);
+void XilinxHLS32TargetInfo::getTargetDefines(const LangOptions &Opts,
+                                             MacroBuilder &Builder) const {
+  XilinxHLSTargetInfo::getTargetDefines(Opts, Builder);
+  DefineStd(Builder, "XilinxHLS32", Opts);
 }
 
-XLXHLS64TargetInfo::XLXHLS64TargetInfo(const llvm::Triple &Triple,
-                                   const TargetOptions &Opts)
-    : XLXHLSTargetInfo(Triple, Opts) {
+XilinxHLS64TargetInfo::XilinxHLS64TargetInfo(const llvm::Triple &Triple,
+                                             const TargetOptions &Opts)
+    : XilinxHLSTargetInfo(Triple, Opts) {
   PointerWidth = PointerAlign = 64;
   SizeType = TargetInfo::UnsignedLong;
   PtrDiffType = IntPtrType = TargetInfo::SignedLong;
@@ -55,9 +56,9 @@ XLXHLS64TargetInfo::XLXHLS64TargetInfo(const llvm::Triple &Triple,
       "1024");
 }
 
-void XLXHLS64TargetInfo::getTargetDefines(const LangOptions &Opts,
-                                        MacroBuilder &Builder) const {
-  XLXHLSTargetInfo::getTargetDefines(Opts, Builder);
-  DefineStd(Builder, "XLXHLS64", Opts);
+void XilinxHLS64TargetInfo::getTargetDefines(const LangOptions &Opts,
+                                             MacroBuilder &Builder) const {
+  XilinxHLSTargetInfo::getTargetDefines(Opts, Builder);
+  DefineStd(Builder, "XilinxHLS64", Opts);
   DefineStd(Builder, "x86_64", Opts);
 }
