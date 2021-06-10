@@ -76,7 +76,7 @@ class LocalAnnotationVisitor : public InstVisitor<LocalAnnotationVisitor> {
     Function *SideEffect = Intrinsic::getDeclaration(&M, Intrinsic::sideeffect);
     SideEffect->addFnAttr(Attribute::NoUnwind);
     SideEffect->addFnAttr(Attribute::InaccessibleMemOnly);
-    //TODO Adapt
+    //TODO find a clever default value, allow user customisation via properties
     SideEffect->addFnAttr("xlx.port.bitwidth", "4096");
 
     OperandBundleDef OpBundle(

@@ -192,7 +192,7 @@ class CompilationDriver:
         opt = self.clang_path / "opt"
         prepared_kernels = self.tmpdir / f"{self.outstem}_linked.simple.bc"
         opt_options = [
-            "--sycl-vxx", "--sycl-prepare-afterlink", "-S", "-preparesycl",
+            "--sycl-vxx", "--sycl-prepare-clearspir", "-S", "-preparesycl",
             "-globaldce", self.linked_kernels,
             "-o", prepared_kernels
         ]

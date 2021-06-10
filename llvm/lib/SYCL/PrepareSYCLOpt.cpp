@@ -28,7 +28,7 @@ using namespace llvm;
 
 namespace {
 
-cl::opt<bool> AfterLink("sycl-prepare-afterlink", cl::Hidden,
+cl::opt<bool> ClearSpir("sycl-prepare-clearspir", cl::Hidden,
                                 cl::init(false));
 
 struct PrepareSYCLOpt : public ModulePass {
@@ -52,9 +52,11 @@ struct PrepareSYCLOpt : public ModulePass {
 
   void setHLSCallingConvention(Module& M) {
     for (Function &F : M.functions()) {
+      // If the function is a kernel or an intrinsic, keep the current CC
       if (F.hasFnAttribute("fpga.top.func") || F.isIntrinsic()) {
         continue;
       }
+      // Annotate kernels for HLS backend being able to identify them
       if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
         assert(F.use_empty());
         F.addFnAttr("fpga.top.func", F.getName());
@@ -62,9 +64,9 @@ struct PrepareSYCLOpt : public ModulePass {
         F.setCallingConv(CallingConv::C);
         F.setLinkage(llvm::GlobalValue::ExternalLinkage);
       } else {
-        // We need to call intrinsec with spir_func calling conv
-        // For correct linkage with vitis spirv builtins lib 
-        auto cc = (AfterLink) ? CallingConv::C : CallingConv::SPIR_FUNC;
+        // We need to call intrinsic with SPIR_FUNC calling conv
+        // for correct linkage with Vitis SPIR builtins lib 
+        auto cc = (ClearSpir) ? CallingConv::C : CallingConv::SPIR_FUNC;
         F.setCallingConv(cc);
         for (Value *V : F.users()) {
           if (auto *Call = dyn_cast<CallBase>(V))
@@ -175,13 +177,13 @@ struct PrepareSYCLOpt : public ModulePass {
     turnNonKernelsIntoPrivate(M);
     if (SyclHLSFlow) {
       setHLSCallingConvention(M);
-      if (AfterLink) 
+      if (ClearSpir) 
         cleanSpirBuiltins(M);
     } else {
       setCallingConventions(M);
     }
     lowerArrayPartition(M);
-    if (AfterLink)
+    if (ClearSpir)
       removeAnnotations(M);
     if (!SyclHLSFlow)
       forceInlining(M);

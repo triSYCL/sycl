@@ -17,10 +17,10 @@
 
 using namespace llvm;
 namespace {
-  static StringRef KindOf(const char *Str) {
+  static StringRef kindOf(const char *Str) {
     return StringRef(Str, strlen(Str) + 1);
   }
-}
+} // namespace
 
 namespace llvm {
 KernelProperties::KernelProperties(Function &F) {
@@ -30,13 +30,17 @@ KernelProperties::KernelProperties(Function &F) {
       continue;
     auto *Alloca =
         dyn_cast_or_null<AllocaInst>(getUnderlyingObject(CB->getOperand(0)));
+    // sycl buffer's property for ddr bank association is lowered
+    // as an annotation. As the signature of 
+    // llvm.var.annotate takes an i8* as first argument, cast from original 
+    // argument type to i8* is done, and the final bitcast is annotated. 
+    if (!Alloca)
+      continue;
     auto *Str = cast<ConstantDataArray>(
         cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(1)))
             ->getOperand(0));
-    if (!Alloca)
-      continue;
-    if (Str->getRawDataValues() != KindOf("xilinx_ddr_bank"))
-      continue;
+    if (Str->getRawDataValues() != kindOf("xilinx_ddr_bank"))
+      continue; 
     Constant *Args =
         (cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(4)))
              ->getInitializer());
@@ -47,8 +51,7 @@ KernelProperties::KernelProperties(Function &F) {
       Bank = cast<ConstantInt>(Args->getOperand(0))->getZExtValue();
 
     userSpecifiedDDRBanks[Alloca] = Bank;
-    auto Lookup = maxiBundles.find(Bank);
-    if (Lookup == maxiBundles.end()) {
+    if (maxiBundles.find(Bank) == maxiBundles.end()) {
       maxiBundles[Bank] = {formatv("ddrmem{0}", Bank)};
     }
   }
@@ -69,10 +72,10 @@ Optional<unsigned> KernelProperties::getUserSpecifiedDDRBank(Argument *Arg) {
 }
 
 Optional<StringRef> KernelProperties::getArgumentMAXIBundle(Argument *Arg) {
-  auto ddr_id = getUserSpecifiedDDRBank(Arg);
-  if (ddr_id) {
-    return {maxiBundles[ddr_id.getValue()].bundleName};
+  auto DdrId = getUserSpecifiedDDRBank(Arg);
+  if (DdrId) {
+    return {maxiBundles[DdrId.getValue()].bundleName};
   }
   return {};
 }
-}
+} // namespace llvm

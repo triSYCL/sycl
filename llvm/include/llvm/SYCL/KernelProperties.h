@@ -24,6 +24,12 @@
 namespace llvm {
 class KernelProperties {
 private:
+  // In HLS, array-like arguments are groupped together in bundles.
+  // One bundle correspond to one memory controller, and this is 
+  // the bundle that can be associated to a specific DDR Bank.
+  //
+  // As of now, all arguments sharing the same memory bank share the 
+  // same bundle.
   struct MAXIBundle {
     std::string bundleName;
   };
