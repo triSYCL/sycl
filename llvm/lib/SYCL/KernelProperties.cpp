@@ -30,7 +30,7 @@ KernelProperties::KernelProperties(Function &F) {
       continue;
     auto *Alloca =
         dyn_cast_or_null<AllocaInst>(getUnderlyingObject(CB->getOperand(0)));
-    // sycl buffer's property for ddr bank association is lowered
+    // SYCL buffer's property for DDR bank association is lowered
     // as an annotation. As the signature of 
     // llvm.var.annotate takes an i8* as first argument, cast from original 
     // argument type to i8* is done, and the final bitcast is annotated. 
