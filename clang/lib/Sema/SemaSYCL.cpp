@@ -33,6 +33,8 @@
 #include <functional>
 #include <initializer_list>
 
+#define DEBUG_TYPE "sema-sycl"
+
 using namespace clang;
 using namespace std::placeholders;
 
@@ -445,6 +447,9 @@ public:
   // diagnostic notes on each function as the callstack is unwound.
   void CollectKernelSet(FunctionDecl *CalleeNode, FunctionDecl *FD,
                         llvm::SmallPtrSet<FunctionDecl *, 10> VisitedSet) {
+#ifndef NDEBUG
+    static unsigned indent = 0;
+#endif
     // We're currently checking CalleeNode on a different
     // trace through the CallGraph, we avoid infinite recursion
     // by using KernelSet to keep track of this.
@@ -455,6 +460,9 @@ public:
       for (const CallGraphNode *CI : *N) {
         if (FunctionDecl *Callee = dyn_cast<FunctionDecl>(CI->getDecl())) {
           Callee = Callee->getCanonicalDecl();
+          LLVM_DEBUG(for (int i = 0; i < indent; i++) llvm::dbgs() << "  ";
+                     llvm::dbgs()
+                     << Callee->getQualifiedNameAsString() << "\n");
           if (VisitedSet.count(Callee)) {
             // There's a stack frame to visit this Callee above
             // this invocation. Do not recurse here.
@@ -462,7 +470,9 @@ public:
             RecursiveSet.insert(CalleeNode);
           } else {
             VisitedSet.insert(Callee);
+            LLVM_DEBUG(indent++;);
             CollectKernelSet(Callee, FD, VisitedSet);
+            LLVM_DEBUG(indent--;);
             VisitedSet.erase(Callee);
           }
         }

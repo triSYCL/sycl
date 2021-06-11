@@ -4289,6 +4289,15 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     /// translate spirv builtins into function of the hls runtime.
     CmdArgs.push_back("-fdeclare-spirv-builtins");
 
+    if (RawTriple.isXilinxSYCLDevice()) {
+      /// -O3 to generate all the necessary information for proper optimization.
+      CmdArgs.push_back("-Oz");
+      /// -disable-llvm-passes because we want sycl-xocc and v++ to have full
+      /// control over the IR. so we disable any optimization that could run
+      /// before them.
+      CmdArgs.push_back("-disable-llvm-passes");
+    }
+
     if (Args.hasFlag(options::OPT_fsycl_esimd, options::OPT_fno_sycl_esimd,
                      false))
       CmdArgs.push_back("-fsycl-explicit-simd");
