@@ -287,8 +287,6 @@ XILINX_ROOT=/opt/xilinx
 SYCL_BIN_DIR=$SYCL_HOME/llvm/build/bin
 export XILINX_XRT=$XILINX_ROOT/xrt
 export XILINX_VITIS=$XILINX_ROOT/Vitis/$XILINX_VERSION
-# For some tests? FIXME
-export XILINX_SDX=$XILINX_VITIS
 export XILINX_VIVADO=$XILINX_ROOT/Vivado/$XILINX_VERSION
 # Add the various tools in the PATH
 PATH=$PATH:$SYCL_BIN_DIR:$XILINX_XRT/bin:$XILINX_SDX/bin:$XILINX_VIVADO/bin
@@ -309,6 +307,11 @@ runtime on CPU) or hardware emulation (the SYCL device code is
 synthesized into RTL Verilog and run by an RTL simulator such as
 `xsim`).
 
+In addition, two compilation flows for compiling sycl kernels are provided.
+The SPIR flow is the first to have been supported by the tool.
+An alternative HLS flow is now developped, that aims at compilinf kernels to 
+llvm bitcode similar to what is produced by the open source Xilinx HLS frontend. 
+
 Note that the software and hardware emulation might not work for some
 system incompatibility reasons because Vitis comes with a lot of
 system-specific assumptions with a lot of old compilers and libraries
@@ -317,8 +320,15 @@ might be wrong on your current system... But the hardware execution
 just requires the open-source XRT that should have been compiled just
 using what is available on the system.
 
-The `XCL_EMULATION_MODE` environment variable selects the compilation &
-execution mode and is used by the SYCL compiler and XRT runtime.
+Architecture provided to the `sycl-targets` clang flag selects the 
+compilation mode. Supported architectures are : 
+
+|                       | Software simulation | Hardware emulation  | Hardware        |
+|-----------------------|---------------------|---------------------|-----------------|
+| SPIR compilation flow | `fpga64_sw_emu`     | `fpga64_hw_emu`     | `fpga64_hw`     |
+| HLS compilation flow  | Yet unsupported | `fpga64_hls_hw_emu` | `fpga64_hls_hw` |
+
+Only one `fpga64_*` architecture is allowed in the `sycl-targets` flag.
 
 ### Small examples
 
@@ -326,10 +336,9 @@ To run an example from the provided examples:
 - with software emulation:
   ```bash
   cd $SYCL_HOME/llvm/sycl/test/xocc_tests/simple_tests
-  # Instruct the compiler and runtime to use FPGA software emulation
-  export XCL_EMULATION_MODE=sw_emu
+  # Instruct the compiler and runtime to use FPGA software emulation with SPIR flow
   # Compile the SYCL program down to a host fat binary including device code for CPU
-  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
+  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_sw_emu \
     parallel_for_ND_range.cpp -o parallel_for_ND_range
   # Run the software emulation
   ./parallel_for_ND_range
@@ -337,10 +346,9 @@ To run an example from the provided examples:
 
 - with hardware emulation:
   ```bash
-  # Instruct the compiler and runtime to use FPGA hardware emulation
-  export XCL_EMULATION_MODE=hw_emu
+  # Instruct the compiler and runtime to use FPGA hardware emulation with HLS flow
   # Compile the SYCL program down to a host fat binary including the RTL for simulation
-  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
+  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw_emu \
     parallel_for_ND_range.cpp -o parallel_for_ND_range
   # Run the hardware emulation
   ./parallel_for_ND_range
@@ -348,52 +356,49 @@ To run an example from the provided examples:
 
 - with real hardware execution on FPGA:
   ```bash
-  # Instruct the compiler to use real FPGA hardware execution
-  export XCL_EMULATION_MODE=hw
+  # Instruct the compiler to use real FPGA hardware execution with SPIR flow
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
-  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64-xilinx-unknown-sycldevice \
+  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hw \
     parallel_for_ND_range.cpp -o parallel_for_ND_range
   # Run on the real FPGA board
   ./parallel_for_ND_range
   ```
-Note that in the previous examples, the compilation line does not
-change, only the environment ``XCL_EMULATION_MODE`` variable.
-
-it is possible to not use `XCL_EMULATION_MODE` and specify only the beginning of the triple:
-  ```bash
-  # Software emulation
-  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_sw_emu parallel_for_ND_range.cpp -o parallel_for_ND_range
-  # Hardware emulation
-  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hw_emu parallel_for_ND_range.cpp -o parallel_for_ND_range
-  # Hardware
-  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hw parallel_for_ND_range.cpp -o parallel_for_ND_range
-  ```
-
+Note that only the flag `-fsycl-targets` is changed accross the previous examples.
 
 ### Running the test suite
 
-setting XCL_EMULATION_MODE is needed to run tests or it defaults to hw
+Selecting the target for which the tests are run is done using 
+the `VXX_TARGET` environment variable. It defaults to `hls_hw_emu`. 
+The value to give is the same as the associated sycl target, with
+the `fpga64_` prefix trimmed. Namely:
 
-- Run the test suite with software emulation:
+|                       | Software simulation | Hardware emulation  | Hardware        |
+|-----------------------|---------------------|---------------------|-----------------|
+| SPIR compilation flow | `sw_emu`     | `hw_emu`     | `hw`     |
+| HLS compilation flow  | Yet unsupported | `hls_hw_emu` | `hls_hw` |
+
+
+
+- Run the test suite with software emulation (SPIR flow):
   ```bash
   cd $SYCL_HOME/llvm/build
-  export XCL_EMULATION_MODE=sw_emu
+  export VXX_TARGET=sw_emu
   cmake --build . --parallel `nproc` --target check-sycl-xocc-jmax
   ```
   This takes usually 4-6 minutes with a good CPU.
 
-- Run the test suite with hardware emulation:
+- Run the test suite with hardware emulation (HLS flow):
   ```bash
   cd $SYCL_HOME/llvm/build
-  export XCL_EMULATION_MODE=hw_emu
+  export VXX_TARGET=hls_hw_emu
   cmake --build . --parallel `nproc` --target check-sycl-xocc-j4
   ```
   This takes usually 15-30 minutes with a good CPU.
 
-- run the test suite with real hardware execution on FPGA:
+- run the test suite with real hardware execution on FPGA (HLS flow):
   ```bash
   cd $SYCL_HOME/llvm/build
-  export XCL_EMULATION_MODE=hw
+  export VXX_TARGET=hls_hw
   cmake --build . --parallel `nproc` --target check-sycl-xocc-j4
   ```
   This takes usually 8+ hours.
@@ -412,12 +417,9 @@ https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
 ```bash
 cd $SYCL_HOME/llvm/sycl/test/xocc_tests/edge_detection
 # Instruct the compiler and runtime to use real FPGA hardware execution
-export XCL_EMULATION_MODE=hw
 $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
-    -fsycl-targets=fpga64-xilinx-unknown-sycldevice edge_detection.cpp \
+    -fsycl-targets=fpga64_hw edge_detection.cpp \
     -o edge_detection `pkg-config --libs --cflags opencv4`
-  # Do not forget about unset the variable for real hardware execution
-  unset XCL_EMULATION_MODE
 # Execute on one of the images
 ./edge_detection data/input/eiffel.bmp
 ```

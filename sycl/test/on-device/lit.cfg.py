@@ -51,9 +51,9 @@ llvm_config.with_system_environment(['PATH', 'OCL_ICD_FILENAMES', 'SYCL_DEVICE_A
 timeout=600
 
 xocc=lit_config.params.get('XOCC', "off")
-xocc_target = "hls_hw_emu"
-if "XOCC_TARGET" in os.environ:
-    xocc_target = f"hls_{os.environ['XOCC_TARGET']}"
+vxx_target = "hls_hw_emu"
+if "VXX_TARGET" in os.environ:
+    vxx_target = f"hls_{os.environ['VXX_TARGET']}"
 
 # Configure LD_LIBRARY_PATH or corresponding os-specific alternatives
 if platform.system() == "Linux":
@@ -232,7 +232,7 @@ if xocc != "off":
         os.remove(xrt_lock)
     acc_run_substitute="env --unset=XCL_EMULATION_MODE " + acc_run_substitute
     # hw_emu is very slow so it has a higher timeout.
-    if not xocc_target.endswith("hw_emu"):
+    if not vxx_target.endswith("hw_emu"):
         acc_run_substitute+= "timeout 3000 env "
     else:
         acc_run_substitute+= "timeout 3000 env "
@@ -247,7 +247,7 @@ if not cuda and not level_zero and found_at_least_one_device:
 if cuda:
     config.substitutions.append( ('%sycl_triple',  "nvptx64-nvidia-cuda-sycldevice" ) )
 elif xocc != "off":
-    config.substitutions.append( ('%sycl_triple',  f"fpga64_{xocc_target}-xilinx-unknown-sycldevice" ) )
+    config.substitutions.append( ('%sycl_triple',  f"fpga64_{vxx_target}-xilinx-unknown-sycldevice" ) )
 else:
     config.substitutions.append( ('%sycl_triple',  "spir64-unknown-linux-sycldevice" ) )
 
@@ -275,13 +275,13 @@ else:
     if getDeviceCount("gpu", "cuda")[1]:
         lit_config.note("found secondary cuda target")
         config.available_features.add("has_secondary_cuda")
-    lit_config.note("XOCC target: {}".format(xocc_target))
+    lit_config.note("XOCC target: {}".format(vxx_target))
     required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]
     has_error=False
     config.available_features.add("xocc")
-    for feature in split_target(xocc_target):
+    for feature in split_target(vxx_target):
         config.available_features.add(feature) 
-    config.available_features.add(xocc_target)
+    config.available_features.add(vxx_target)
     pkg_opencv4 = subprocess.run(["pkg-config", "--libs", "--cflags", "opencv4"], stdout=subprocess.PIPE)
     has_opencv4 = not pkg_opencv4.returncode
     lit_config.note("has opencv4: {}".format(has_opencv4))
@@ -302,13 +302,13 @@ else:
     run_if_hw="echo"
     run_if_hw_emu="echo"
     run_if_sw_emu="echo"
-    if xocc_target.endswith("_hw"):
+    if vxx_target.endswith("_hw"):
         timeout = 10800 # 3h
         run_if_hw=""
-    if xocc_target.endswith("_hw_emu"):
+    if vxx_target.endswith("_hw_emu"):
         timeout = 3600 # 1h
         run_if_hw_emu=""
-    if xocc_target.endswith("_sw_emu"):
+    if vxx_target.endswith("_sw_emu"):
         timeout = 1200 # 20min
         run_if_sw_emu=""
     config.substitutions.append( ('%run_if_hw', run_if_hw) )
