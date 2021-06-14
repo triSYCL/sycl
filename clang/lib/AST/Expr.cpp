@@ -1531,8 +1531,15 @@ QualType CallExpr::getCallReturnType(const ASTContext &Ctx) const {
     if (isa<CXXPseudoDestructorExpr>(Callee->IgnoreParens()))
       return Ctx.VoidTy;
 
+    if (isa<UnresolvedMemberExpr>(Callee->IgnoreParens()))
+      return Ctx.DependentTy;
+
     // This should never be overloaded and so should never return null.
     CalleeType = Expr::findBoundMemberType(Callee);
+    assert(!CalleeType.isNull());
+  } else if (CalleeType->isDependentType() ||
+             CalleeType->isSpecificPlaceholderType(BuiltinType::Overload)) {
+    return Ctx.DependentTy;
   }
 
   const FunctionType *FnType = CalleeType->castAs<FunctionType>();
@@ -1848,6 +1855,7 @@ bool CastExpr::CastConsistency() const {
   case CK_FixedPointCast:
   case CK_FixedPointToIntegral:
   case CK_IntegralToFixedPoint:
+  case CK_MatrixCast:
     assert(!getType()->isBooleanType() && "unheralded conversion to bool");
     goto CheckNoBasePath;
 

@@ -3,6 +3,7 @@ add_llvm_component_library(LLVMTransformUtils
   AMDGPUEmitPrintf.cpp
   ASanStackFrameLayout.cpp
   AssumeBundleBuilder.cpp
+  AutoInitRemark.cpp
   BasicBlockUtils.cpp
   BreakCriticalEdges.cpp
   BuildLibCalls.cpp
@@ -27,6 +28,7 @@ add_llvm_component_library(LLVMTransformUtils
   FunctionImportUtils.cpp
   GlobalStatus.cpp
   GuardUtils.cpp
+  HelloWorld.cpp
   InlineFunction.cpp
   InjectTLIMappings.cpp
   InstructionNamer.cpp
@@ -52,10 +54,13 @@ add_llvm_component_library(LLVMTransformUtils
   NameAnonGlobals.cpp
   PredicateInfo.cpp
   PromoteMemoryToRegister.cpp
+  RelLookupTableConverter.cpp
   ScalarEvolutionExpander.cpp
+  SCCPSolver.cpp
   StripGCRelocates.cpp
   SSAUpdater.cpp
   SSAUpdaterBulk.cpp
+  SampleProfileLoaderBaseUtil.cpp
   SanitizerStats.cpp
   SimplifyCFG.cpp
   SimplifyIndVar.cpp
@@ -66,7 +71,6 @@ add_llvm_component_library(LLVMTransformUtils
   SymbolRewriter.cpp
   UnifyFunctionExitNodes.cpp
   UnifyLoopExits.cpp
-  UniqueInternalLinkageNames.cpp
   Utils.cpp
   ValueMapper.cpp
   VNCoercion.cpp
