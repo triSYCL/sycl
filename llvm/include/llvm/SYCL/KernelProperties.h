@@ -15,6 +15,8 @@
 
 #include "llvm/ADT/APInt.h"
 #include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Function.h"
@@ -23,6 +25,11 @@
 
 namespace llvm {
 class KernelProperties {
+public:
+  struct MAXIBundle {
+    std::string BundleName;
+    unsigned TargetId;
+  };
 private:
   // In HLS, array-like arguments are groupped together in bundles.
   // One bundle correspond to one memory controller, and this is 
@@ -30,20 +37,19 @@ private:
   //
   // As of now, all arguments sharing the same memory bank share the 
   // same bundle.
-  struct MAXIBundle {
-    std::string bundleName;
-  };
-  SmallDenseMap<unsigned, MAXIBundle, 4> maxiBundles;
-  SmallDenseMap<AllocaInst *, unsigned, 8> userSpecifiedDDRBanks;
+  SmallDenseMap<unsigned, StringMap<unsigned>, 4> BundlesByIDName;
+  SmallDenseMap<Argument *, unsigned, 16> BundleForArgument;
+  StringMap<unsigned> BundlesByName;
+  SmallVector<MAXIBundle, 8> Bundles;
 
 public:
-  KernelProperties(Function &F);
-  KernelProperties(KernelProperties &orig) = delete;
+  static bool isArgBuffer(Argument* Arg, bool SyclHLSFlow);
+  KernelProperties(Function &F, bool SyclHlsFlow);
+  KernelProperties(KernelProperties &) = delete;
 
-  Optional<unsigned> getUserSpecifiedDDRBank(Argument *Arg);
-  Optional<StringRef> getArgumentMAXIBundle(Argument *Arg);
-  SmallDenseMap<unsigned, MAXIBundle, 4> const &getMAXIBundles() {
-    return maxiBundles;
+  MAXIBundle const * getArgumentMAXIBundle(Argument *Arg);
+  SmallVector<MAXIBundle, 8> const &getMAXIBundles() {
+    return Bundles;
   };
 };
 } // namespace llvm

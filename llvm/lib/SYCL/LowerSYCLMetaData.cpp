@@ -44,73 +44,6 @@ static StringRef kindOf(const char* Str) {
   return StringRef(Str, strlen(Str) + 1);
 }
 
-class LocalAnnotationVisitor : public InstVisitor<LocalAnnotationVisitor> {
-  Module &M;
-  LLVMContext &C;
-  bool HasChanged;
-
-  void processMemBankAssign(CallInst &I) {
-    HasChanged = true;
-    Constant *Bank =
-        (cast<GlobalVariable>(getUnderlyingObject(I.getOperand(4)))
-             ->getInitializer());
-    auto BankMem = isa<ConstantAggregateZero>(Bank)
-                       ? 0
-                       : cast<ConstantInt>(Bank->getOperand(0))->getZExtValue();
-    auto BundleIdentifier = "ddrmem" + std::to_string(BankMem);
-    auto *BundleIDConstant = ConstantDataArray::getString(C, BundleIdentifier, false);
-    auto *MinusOne = ConstantInt::getSigned(IntegerType::get(C, 64), -1);
-    auto *AnnotatedInstr = dyn_cast_or_null<AllocaInst>(getUnderlyingObject(I.getOperand(0)));
-    Argument* Annotated = nullptr;
-    for (Argument *Arg = I.getCaller()->arg_begin();
-         Arg != I.getCaller()->arg_end(); ++Arg) {
-      for (User *U : Arg->users()) {
-        if (auto *Store = dyn_cast<StoreInst>(U))
-          if (getUnderlyingObject(Store->getPointerOperand()) == AnnotatedInstr) {
-            Annotated = Arg;
-          }
-      }
-    }
-
-    auto *CAZ = ConstantAggregateZero::get(ArrayType::get(IntegerType::get(C, 8), 0));
-    Function *SideEffect = Intrinsic::getDeclaration(&M, Intrinsic::sideeffect);
-    SideEffect->addFnAttr(Attribute::NoUnwind);
-    SideEffect->addFnAttr(Attribute::InaccessibleMemOnly);
-    //TODO find a clever default value, allow user customisation via properties
-    SideEffect->addFnAttr("xlx.port.bitwidth", "4096");
-
-    OperandBundleDef OpBundle(
-        "xlx_m_axi", ArrayRef<Value *>{Annotated, BundleIDConstant, MinusOne,
-                                       CAZ, CAZ, MinusOne, MinusOne, MinusOne,
-                                       MinusOne, MinusOne, MinusOne});
-    Instruction *Instr = CallInst::Create(SideEffect, {}, {OpBundle});
-    Instr->insertBefore(I.getCaller()->getEntryBlock().getTerminator());
-  }
-
-  void processLocalAnnotation(IntrinsicInst &I) {
-    StringRef Annotation =
-        cast<ConstantDataArray>(
-            cast<GlobalVariable>(getUnderlyingObject(I.getOperand(1)))
-                ->getInitializer())
-            ->getRawDataValues();
-    if (Annotation == kindOf("xilinx_ddr_bank")) {
-      processMemBankAssign(I);
-    }
-  }
-
-public:
-  LocalAnnotationVisitor(Module &M) : M(M), C(M.getContext()), HasChanged(false) {}
-  void visitIntrinsicInst(IntrinsicInst &I) {
-    if (I.getIntrinsicID() != Intrinsic::var_annotation)
-      return;
-    processLocalAnnotation(I);
-  }
-
-  bool hasChanged() {
-    return HasChanged;
-  }
-};
-
 struct LSMDState {
   LSMDState(Module& M) : M(M), Ctx(M.getContext()) {}
   Module& M;
@@ -242,10 +175,7 @@ struct LowerSYCLMetaData : public ModulePass {
   LowerSYCLMetaData() : ModulePass(ID) {}
   bool runOnModule(Module &M) override {
     bool GlobalChanges = LSMDState(M).run();
-    LocalAnnotationVisitor LV(M);
-    LV.visit(M);
-    bool LocalChanges = LV.hasChanged();
-    return GlobalChanges or LocalChanges;
+    return GlobalChanges;
   }
   virtual StringRef getPassName() const override {
     return "LowerSYCLMetaData";
