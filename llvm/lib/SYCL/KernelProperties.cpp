@@ -21,6 +21,7 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/SYCL/KernelProperties.h"
 #include "llvm/Support/Casting.h"
+#include <string>
 
 using namespace llvm;
 namespace {
@@ -112,12 +113,14 @@ KernelProperties::KernelProperties(Function &F, bool SyclHlsFlow) {
     auto LookUp = BundlesByIDName.find(ArgBank.second);
     if (LookUp == BundlesByIDName.end()) {
       // We need to create a bundle for this bank
-      auto BundleName = formatv("ddrmem{0}", ArgBank.second);
-      Bundles.push_back({ BundleName, ArgBank.second});
+      std::string BundleName =
+          (ArgBank.second) ? std::string{formatv("ddrmem{0}", ArgBank.second)}
+                           : "gmem";
+      Bundles.push_back({BundleName, ArgBank.second});
       unsigned BundleIdx = Bundles.size() - 1;
-      BundlesByName[ {BundleName} ] = BundleIdx;
+      BundlesByName[BundleName] = BundleIdx;
       BundleForArgument[ArgBank.first] = BundleIdx;
-      BundlesByIDName[ArgBank.second][ {BundleName} ] = BundleIdx;
+      BundlesByIDName[ArgBank.second][BundleName] = BundleIdx;
     } else {
       BundleForArgument[ArgBank.first] = LookUp->getSecond().begin()->second;
     }

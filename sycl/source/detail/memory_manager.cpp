@@ -219,7 +219,7 @@ MemoryManager::allocateBufferObject(ContextImplPtr TargetContext, void *UserPtr,
     /// out a better way to enforce buffer DDR bank assignments, lazy rather
     /// than eager buffer creation?
     cl_mem_ext_ptr_t mext = {0};
-    mext.banks = 0 | XCL_MEM_TOPOLOGY;
+    //mext.banks = 0 | XCL_MEM_TOPOLOGY;
     mext.host_ptr = UserPtr;
     Plugin.call<PiApiKind::piMemBufferCreate>(
         TargetContext->getHandleRef(), CreationFlags | CL_MEM_EXT_PTR_XILINX,

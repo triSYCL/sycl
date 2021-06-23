@@ -638,6 +638,21 @@ This will make the debug compiler select the dynamic libraries of the release co
 
 ### Debugging
 
+#### Debugging the driver and intermediate steps
+
+During the compilation, an temporary directory is created in which all vitis inputs, commands, outputs and logs are stored.
+By default, this directory is deleted as soon as the compilation ends (even when it fails).
+
+In order to keep it, set the `SYCL_VXX_KEEP_CLUTTER` environment variable to True.
+
+The compiler will output a resembling to 
+
+```
+Temporary clutter in /tmp/EXECNAME-e5ece1pxk5rz43 will not be cleaned
+```
+
+Informing you of where those file are kept (`/tmp/EXECNAME-e5ece1pxk5rz43` in this case).
+
 #### Environnement variables
 
 Some environment variables are very useful for debugging:
@@ -672,15 +687,16 @@ where all tests utilities must have been build for this to work.
 #### v++ Logs
 The kinds of following errors are typical of a back-end issue:
 ```
-ERROR: [v++ 60-300] Failed to build kernel(ip) kernel_name, see log for details: ROOT/_x/sycl-xocc.ppArYN_kernel_name/kernel_name/vitis_hls.log
+ERROR: [v++ 60-300] Failed to build kernel(ip) kernel_name, see log for details: [...]/vitis_hls.log
 ERROR: [v++ 60-599] Kernel compilation failed to complete
 ERROR: [v++ 60-592] Failed to finish compilation
 ```
-the path contains a hash and kernel names so they won't match exactly.
+the path `[...]` contains a hash and kernel names.
 
-Sometimes the log file in `ROOT/_x/sycl-xocc.ppArYN_kernel_name/kernel_name/vitis_hls.log` contains useful information
-but the more detailed log file `ROOT/_x/sycl-xocc.ppArYN_kernel_name/kernel_name/kernel_name/solution/.autopilot/db/autopilot.flow.log`
-in the second log we can find the specific `v++` command that has an issue.
+Please follow the log chain to identify the cause of this issue. 
+Keep in mind that if the `SYCL_VXX_KEEP_CLUTTER` environment variable is not set, 
+log files will be deleted as soon as the compilation process exit, meaning that they are 
+probably already gone when you get this error message.
 
 #### llvm-reduce
 

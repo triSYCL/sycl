@@ -28,7 +28,6 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
-import zipfile
 
 
 class TmpDirManager:
@@ -41,7 +40,7 @@ class TmpDirManager:
         self.dir = Path(tempfile.mkdtemp(
             dir=self.tmpdir,
             prefix=self.prefix
-            ))
+        ))
         return self.dir
 
     def __exit__(self, *_):
@@ -102,7 +101,8 @@ class CompilationDriver:
             if not (vitis_clang_bin / "llvm-as").is_file():
                 vitis_clang_bin = (
                     self.vitis_bin_dir.parents[2] /
-                    f"Vitis_HLS/{self.vitis_version}/lnx64/tools/clang-3.9-csynth/bin"
+                    f"Vitis_HLS/{self.vitis_version}" /
+                    "lnx64/tools/clang-3.9-csynth/bin"
                 ).resolve()
         self.vitis_clang_bin = vitis_clang_bin
         self.extra_comp_args = []
@@ -253,28 +253,12 @@ class CompilationDriver:
             "--report_dir", self.tmpdir / 'vxx_comp_report',
             "--save-temps", "-c", "-k", kernel['name'], '-o', kernel_output,
             self.vpp_llvm_input
-            ]
+        ]
         if kernel['extra_args'].strip():
             command.extend(kernel['extra_args'].split(' '))
         command.extend(self.extra_comp_args)
         self._dump_cmd(f"06-vxxcomp-{kernel['name']}.cmd", command)
         subprocess.run(command)
-        if self.vitis_mode == "sw_emu" and self.hls_flow:
-            # We need to manually replace llvm IR source with asm as 
-            # there is a bug in this case that makes vitis try to compile
-            # llvm bitcode with gcc
-            unzip_path = self.tmpdir / f"{kernel['name']}_xo_extracted"
-            shutil.copy2(kernel_output, f"{kernel_output}.old")
-            kernel_xo = zipfile.ZipFile(kernel_output, 'r')
-            kernel_xo.extractall(unzip_path)
-            kernel_xo.close()
-            zip_cpu_sources = unzip_path / kernel["name"] / "cpu_sources"
-            source_xpir = zip_cpu_sources / self.vpp_llvm_input.name
-            source_xpir.write_bytes(self.host_native_code.read_bytes())
-            kernel_xo = zipfile.ZipFile(kernel_output, 'w')
-            for sub_path in unzip_path.rglob("*"):
-                kernel_xo.write(sub_path, sub_path.relative_to(unzip_path))
-            kernel_xo.close()
         self.compiled_kernels.append(kernel_output)
 
     def _link_kernels(self):
@@ -288,8 +272,9 @@ class CompilationDriver:
             "--log_dir", self.tmpdir / 'vxx_link_log',
             "--report_dir", self.tmpdir / 'vxx_link_report',
             "--save-temps", "-l", "-o", self.outpath
-            ]
+        ]
         for kernelprop in self.kernel_properties['kernels']:
+            targets = dict()
             for mem_assign in kernelprop["bundle_hw_mapping"]:
                 command.extend((
                     "--connectivity.sp",
@@ -299,30 +284,36 @@ class CompilationDriver:
                         mem_assign["target_bank"]
                     )
                 ))
+                targets[mem_assign["maxi_bundle_name"]
+                        ] = mem_assign["target_bank"]
+            for arg_assign in kernelprop["arg_bundle_mapping"]:
+                arg_name = arg_assign["arg_name"]
+                target = targets[arg_assign["maxi_bundle_name"]]
+                command.extend((
+                    "--connectivity.sp",
+                    "{}_1.{}:{}".format(
+                        kernelprop["name"],
+                        arg_name,
+                        target
+                    )
+                ))
         command.extend(self.extra_link_args)
         command.extend(self.compiled_kernels)
         self._dump_cmd("07-vxxlink.cmd", command)
-        vivado_gcc_bin_dir = list((
-            self.vitis_bin_dir.parents[2] /
-            f"Vivado/{self.vitis_version}/tps/lnx64"
-        ).resolve().glob("gcc*"))[0] / "bin"
-        vivado_gcc = vivado_gcc_bin_dir / "gcc"
-        hls_sw_emu = self.hls_flow and self.vitis_mode == "sw_emu"
-        gcc_bind_manager = BindMountManager(
-            vivado_gcc,
-            self.clang_path / "sycl_vitis_gcc.py"
-        ) if hls_sw_emu else DoNothingManager()
-        with gcc_bind_manager:
-            subprocess.run(command)
+        subprocess.run(command)
 
     def drive_compilation(self):
+        if self.hls_flow and (self.vitis_mode == "sw_emu"):
+            raise Exception("sw_emu is not compatible with the HLS flow")
         autodelete = environ.get("SYCL_VXX_KEEP_CLUTTER") is None
         outstem = self.outstem
         tmp_root = self.tmp_root
         dataflow_lawyer_manager = BindMountManager(
             self.vitis_clang_bin / 'xilinx-dataflow-lawyer',
             Path(shutil.which('echo'))
-        )
+        ) if environ.get(
+            "SYCL_VXX_VITIS_ON_TREE"
+        ) is not None else DoNothingManager()
         tmp_manager = TmpDirManager(tmp_root, outstem, autodelete)
         with dataflow_lawyer_manager, tmp_manager as self.tmpdir:
             tmpdir = self.tmpdir
