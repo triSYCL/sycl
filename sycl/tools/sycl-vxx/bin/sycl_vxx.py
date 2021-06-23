@@ -48,36 +48,6 @@ class TmpDirManager:
             shutil.rmtree(self.dir)
 
 
-class DoNothingManager:
-    def __enter__(_):
-        pass
-
-    def __exit__(*_):
-        pass
-
-
-class BindMountManager:
-    def __init__(self, source: Path, dest: Path):
-        self.source = source
-        self.dest = dest
-        self.mounted = False
-
-    def __enter__(self):
-        if self.source.is_file() and self.dest.is_file():
-            print(f"Binding {self.source} to {self.dest}")
-            subprocess.run([
-                "sudo", "mount", "--bind", self.dest, self.source
-            ])
-            self.mounted = True
-
-    def __exit__(self, _, __, ___):
-        if self.mounted:
-            print(f"Unbinding {self.source}")
-            subprocess.run([
-                "sudo", "umount", self.source
-            ])
-
-
 class CompilationDriver:
     def __init__(self, arguments):
         self.outpath = Path(arguments.o)
@@ -308,14 +278,8 @@ class CompilationDriver:
         autodelete = environ.get("SYCL_VXX_KEEP_CLUTTER") is None
         outstem = self.outstem
         tmp_root = self.tmp_root
-        dataflow_lawyer_manager = BindMountManager(
-            self.vitis_clang_bin / 'xilinx-dataflow-lawyer',
-            Path(shutil.which('echo'))
-        ) if environ.get(
-            "SYCL_VXX_VITIS_ON_TREE"
-        ) is not None else DoNothingManager()
         tmp_manager = TmpDirManager(tmp_root, outstem, autodelete)
-        with dataflow_lawyer_manager, tmp_manager as self.tmpdir:
+        with tmp_manager as self.tmpdir:
             tmpdir = self.tmpdir
             if not autodelete:
                 print(f"Temporary clutter in {tmpdir} will not be cleaned")
