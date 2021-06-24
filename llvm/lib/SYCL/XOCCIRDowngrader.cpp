@@ -272,7 +272,7 @@ struct XOCCIRDowngrader : public ModulePass {
   }
 
   /// This will remove every call to the function named Str assuming it returns
-  /// void. and erase the function form the module.
+  /// void. Also erase the function from the module.
   void removeFunction(Module &M, StringRef Str) {
     Function *F = M.getFunction(Str);
     if (!F)
@@ -326,10 +326,30 @@ struct XOCCIRDowngrader : public ModulePass {
     }
   };
 
+  /// Traverse the IR in the module and warn about IR constructs unsupported by
+  /// the backend.
   void warnForIssues(Module &M) {
     WarnVisitor Visitor;
     Visitor.visit(M);
     Visitor.emit();
+  }
+
+  void cleanSpirBuiltins(Module &M) {
+    /// Find function
+    auto *spirid = M.getFunction("llvm.spir.get.global.id.64");
+    /// Create replcement
+    auto *replacement = ConstantInt::get(spirid->getReturnType(), 0);
+    if (spirid != nullptr && spirid->isDeclaration())
+      for (auto *user : spirid->users())
+        /// find all users
+        if (auto *call = dyn_cast<CallBase>(user)) {
+          /// replace calls by constant
+          call->replaceAllUsesWith(replacement);
+          call->eraseFromParent();
+        }
+    assert(spirid->use_empty());
+    /// erase the fontion from the module.
+    spirid->eraseFromParent();
   }
 
   bool runOnModule(Module &M) override {
