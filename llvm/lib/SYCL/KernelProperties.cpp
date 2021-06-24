@@ -1,4 +1,5 @@
-//===- KernelProperties.cpp -----------------------------------------------------===//
+//===- KernelProperties.cpp
+//-----------------------------------------------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -10,6 +11,7 @@
 // Contains utility functions that read sycl kernel properties
 // ===---------------------------------------------------------------------===//
 
+#include "llvm/SYCL/KernelProperties.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -19,7 +21,6 @@
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/SYCL/KernelProperties.h"
 #include "llvm/Support/Casting.h"
 #include <string>
 
@@ -35,42 +36,48 @@ enum SPIRAddressSpace {
 
 static StringRef kindOf(const char *Str) {
   return StringRef(Str, strlen(Str) + 1);
+}
+
+/// Search for the annotation specifying user specified DDR bank for all
+/// arguments of F and populates UserSpecifiedDDRBanks accordingly
+void collectUserSpecifiedDDRBanks(
+    Function &F,
+    SmallDenseMap<llvm::AllocaInst *, unsigned, 16> &UserSpecifiedDDRBanks) {
+  for (Instruction &I : instructions(F)) {
+    auto *CB = dyn_cast<CallBase>(&I);
+    if (!CB || CB->getIntrinsicID() != Intrinsic::var_annotation)
+      continue;
+    auto *Alloca =
+        dyn_cast_or_null<AllocaInst>(getUnderlyingObject(CB->getOperand(0)));
+    // SYCL buffer's property for DDR bank association is lowered
+    // as an annotation. As the signature of
+    // llvm.var.annotate takes an i8* as first argument, cast from original
+    // argument type to i8* is done, and the final bitcast is annotated.
+    if (!Alloca)
+      continue;
+    auto *Str = cast<ConstantDataArray>(
+        cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(1)))
+            ->getOperand(0));
+    if (Str->getRawDataValues() != kindOf("xilinx_ddr_bank"))
+      continue;
+    Constant *Args =
+        (cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(4)))
+             ->getInitializer());
+    unsigned Bank;
+    if (auto *ZeroData = dyn_cast<ConstantAggregateZero>(Args))
+      Bank = 0;
+    else
+      Bank = cast<ConstantInt>(Args->getOperand(0))->getZExtValue();
+
+    UserSpecifiedDDRBanks[Alloca] = Bank;
   }
+}
 
-  void collectUserSpecifiedDDRBanks(
-      Function &F,
-      SmallDenseMap<llvm::AllocaInst *, unsigned, 16> &UserSpecifiedDDRBanks) {
-    for (Instruction &I : instructions(F)) {
-      auto *CB = dyn_cast<CallBase>(&I);
-      if (!CB || CB->getIntrinsicID() != Intrinsic::var_annotation)
-        continue;
-      auto *Alloca =
-          dyn_cast_or_null<AllocaInst>(getUnderlyingObject(CB->getOperand(0)));
-      // SYCL buffer's property for DDR bank association is lowered
-      // as an annotation. As the signature of
-      // llvm.var.annotate takes an i8* as first argument, cast from original
-      // argument type to i8* is done, and the final bitcast is annotated.
-      if (!Alloca)
-        continue;
-      auto *Str = cast<ConstantDataArray>(
-          cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(1)))
-              ->getOperand(0));
-      if (Str->getRawDataValues() != kindOf("xilinx_ddr_bank"))
-        continue;
-      Constant *Args =
-          (cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(4)))
-               ->getInitializer());
-      unsigned Bank;
-      if (auto *ZeroData = dyn_cast<ConstantAggregateZero>(Args))
-        Bank = 0;
-      else
-        Bank = cast<ConstantInt>(Args->getOperand(0))->getZExtValue();
-
-      UserSpecifiedDDRBanks[Alloca] = Bank;
-    }
-  }
-
-  Optional<unsigned> getUserSpecifiedDDRBank(Argument *Arg, SmallDenseMap<llvm::AllocaInst *, unsigned, 16> &UserSpecifiedDDRBanks) {
+/// Check if the argument has a user specified DDR bank corresponding to it in
+/// UserSpecifiedDDRBank
+Optional<unsigned> getUserSpecifiedDDRBank(
+    Argument *Arg,
+    SmallDenseMap<llvm::AllocaInst *, unsigned, 16> &UserSpecifiedDDRBanks) {
   for (User *U : Arg->users()) {
     if (auto *Store = dyn_cast<StoreInst>(U))
       if (Store->getValueOperand() == Arg) {
@@ -86,7 +93,7 @@ static StringRef kindOf(const char *Str) {
 } // namespace
 
 namespace llvm {
-bool KernelProperties::isArgBuffer(Argument* Arg, bool SyclHLSFlow) {
+bool KernelProperties::isArgBuffer(Argument *Arg, bool SyclHLSFlow) {
   if (Arg->getType()->isPointerTy() &&
       (SyclHLSFlow ||
        Arg->getType()->getPointerAddressSpace() == SPIRAS_Global ||
@@ -98,17 +105,26 @@ bool KernelProperties::isArgBuffer(Argument* Arg, bool SyclHLSFlow) {
 
 KernelProperties::KernelProperties(Function &F, bool SyclHlsFlow) {
 
-  SmallDenseMap<llvm::AllocaInst*, unsigned, 16> UserSpecifiedDDRBanks{};
+  SmallDenseMap<llvm::AllocaInst *, unsigned, 16> UserSpecifiedDDRBanks{};
+  // Collect user specified DDR banks for F in DDRBanks
   collectUserSpecifiedDDRBanks(F, UserSpecifiedDDRBanks);
 
   SmallDenseMap<Argument *, unsigned, 16> DDRAssignment{};
+
+  // For each argument A of F which is a buffer, if it has no user specified DDR
+  // Bank, default to 0
   for (auto &Arg : F.args()) {
     if (isArgBuffer(&Arg, SyclHlsFlow)) {
-           auto Assignment = getUserSpecifiedDDRBank(&Arg, UserSpecifiedDDRBanks);
-           DDRAssignment[&Arg] = (Assignment) ? Assignment.getValue() : 0;
-         }
+      auto Assignment = getUserSpecifiedDDRBank(&Arg, UserSpecifiedDDRBanks);
+      DDRAssignment[&Arg] = (Assignment) ? Assignment.getValue() : 0;
+    }
   }
 
+  // For each buffer, check if a bundle associated ith associated DDR bank exists, 
+  // otherwise create it.
+  // gmem is used for bank 0 as it is the defaut name which is generated by vitis 
+  // when nothing is specified or in the SPIR case (as Vitis ignore the annotation
+  // in this case).
   for (auto &ArgBank : DDRAssignment) {
     auto LookUp = BundlesByIDName.find(ArgBank.second);
     if (LookUp == BundlesByIDName.end()) {
@@ -127,11 +143,12 @@ KernelProperties::KernelProperties(Function &F, bool SyclHlsFlow) {
   }
 }
 
- KernelProperties::MAXIBundle const * KernelProperties::getArgumentMAXIBundle(Argument *Arg) {
-   auto LookUp = BundleForArgument.find(Arg);
-   if (LookUp != BundleForArgument.end()) {
-     return &(Bundles[LookUp->second]);
-   } 
-   return nullptr;
+KernelProperties::MAXIBundle const *
+KernelProperties::getArgumentMAXIBundle(Argument *Arg) {
+  auto LookUp = BundleForArgument.find(Arg);
+  if (LookUp != BundleForArgument.end()) {
+    return &(Bundles[LookUp->second]);
+  }
+  return nullptr;
 }
 } // namespace llvm

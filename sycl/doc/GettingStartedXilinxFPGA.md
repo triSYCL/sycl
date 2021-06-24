@@ -645,13 +645,13 @@ By default, this directory is deleted as soon as the compilation ends (even when
 
 In order to keep it, set the `SYCL_VXX_KEEP_CLUTTER` environment variable to True.
 
-The compiler will output a resembling to 
+The compiler will output a similar to 
 
 ```
-Temporary clutter in /tmp/EXECNAME-e5ece1pxk5rz43 will not be cleaned
+Temporary clutter in /tmp/EXECNAME-e5ece1pxk5rz43 will not be deleted
 ```
 
-Informing you of where those file are kept (`/tmp/EXECNAME-e5ece1pxk5rz43` in this case).
+Informing you of where those files are kept (`/tmp/EXECNAME-e5ece1pxk5rz43` in this case).
 
 #### Environnement variables
 

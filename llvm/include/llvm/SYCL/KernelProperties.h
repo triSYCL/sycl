@@ -25,18 +25,24 @@
 
 namespace llvm {
 class KernelProperties {
+  // Regroup sycl kernel properties that can be of use for downstream tools
+  // currently, retrieve annotation for DDR bank assignment to kernel arguments
 public:
-  struct MAXIBundle {
-    std::string BundleName;
-    unsigned TargetId;
-  };
-private:
   // In HLS, array-like arguments are groupped together in bundles.
   // One bundle correspond to one memory controller, and this is 
-  // the bundle that can be associated to a specific DDR Bank.
+  // the bundle that can be associated to a specific DDR Bank/HBM.
   //
   // As of now, all arguments sharing the same memory bank share the 
   // same bundle.
+  struct MAXIBundle {
+    // Represents one m_axi bundle and its associated memory bank
+    // This structure should evolve once we provide support for other 
+    // m_axi memory such as HBM.
+    std::string BundleName; // Vitis bundle name
+    unsigned TargetId; // Associated DDR bank ID
+  };
+private:
+  
   SmallDenseMap<unsigned, StringMap<unsigned>, 4> BundlesByIDName;
   SmallDenseMap<Argument *, unsigned, 16> BundleForArgument;
   StringMap<unsigned> BundlesByName;

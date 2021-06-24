@@ -282,7 +282,7 @@ class CompilationDriver:
         with tmp_manager as self.tmpdir:
             tmpdir = self.tmpdir
             if not autodelete:
-                print(f"Temporary clutter in {tmpdir} will not be cleaned")
+                print(f"Temporary clutter in {tmpdir} will not be deleted")
             self.before_opt_src = self.tmpdir / f"{outstem}-before-opt.bc"
             if len(self.inputs) > 1:
                 self._link_multi_inputs()

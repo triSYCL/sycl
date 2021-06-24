@@ -55,7 +55,8 @@ enum SPIRAddressSpace {
   SPIRAS_Generic,  // Address space: 4
 };
 
-/// Retrieve the names for all kernels in the module and place them into a file
+/// Retrieve the names and properties for all kernels in the module and place them into a file
+/// Generates the vitis HLS IR for kernel interface control
 struct KernelPropGen : public ModulePass {
 
   static char ID; // Pass identification, replacement for typeid
@@ -147,6 +148,8 @@ struct KernelPropGen : public ModulePass {
     }
   }
 
+  /// Insert calls to sideeffect that will instruct Vitis HLS to put 
+  /// Arg in the bundle Bundle
   void generateBundleSE(Argument &Arg,
                         KernelProperties::MAXIBundle const *Bundle,
                         Function &F,
@@ -159,7 +162,7 @@ struct KernelPropGen : public ModulePass {
     Function *SideEffect = Intrinsic::getDeclaration(&M, Intrinsic::sideeffect);
     SideEffect->addFnAttr(Attribute::NoUnwind);
     SideEffect->addFnAttr(Attribute::InaccessibleMemOnly);
-    // TODO find a clever default value, allow user customisation via properties
+    // TODO find a clever default value, allow user customization via properties
     SideEffect->addFnAttr("xlx.port.bitwidth", "4096");
 
     OperandBundleDef OpBundle(
@@ -170,6 +173,7 @@ struct KernelPropGen : public ModulePass {
     Instr->insertBefore(F.getEntryBlock().getTerminator());
   }
 
+  /// Print in O the property file for all kernels of M
   void generateProperties(Module &M, llvm::raw_fd_ostream &O) {
     collectExtraArgs(M);
     json::OStream J(O, 2);
@@ -255,7 +259,7 @@ struct KernelPropGen : public ModulePass {
 
 namespace llvm {
 void initializeKernelPropGenPass(PassRegistry &Registry);
-}
+} // namespace llvm
 
 INITIALIZE_PASS(KernelPropGen, "kernelPropGen",
                 "pass that finds kernel names and places them into a text file",
