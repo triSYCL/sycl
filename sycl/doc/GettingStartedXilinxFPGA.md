@@ -307,10 +307,10 @@ runtime on CPU) or hardware emulation (the SYCL device code is
 synthesized into RTL Verilog and run by an RTL simulator such as
 `xsim`).
 
-In addition, two compilation flows for compiling sycl kernels are provided.
+In addition, two compilation flows for compiling SYCL kernels are provided.
 The SPIR flow is the first to have been supported by the tool.
-An alternative HLS flow is now developped, that aims at compilinf kernels to 
-llvm bitcode similar to what is produced by the open source Xilinx HLS frontend. 
+An alternative HLS flow is now developed, that aims at compiling kernels to 
+LLVM bitcode similar to what is produced by the open source Xilinx HLS frontend. 
 
 Note that the software and hardware emulation might not work for some
 system incompatibility reasons because Vitis comes with a lot of
@@ -326,7 +326,7 @@ compilation mode. Supported architectures are :
 |                       | Software simulation | Hardware emulation  | Hardware        |
 |-----------------------|---------------------|---------------------|-----------------|
 | SPIR compilation flow | `fpga64_sw_emu`     | `fpga64_hw_emu`     | `fpga64_hw`     |
-| HLS compilation flow  | Yet unsupported | `fpga64_hls_hw_emu` | `fpga64_hls_hw` |
+| HLS compilation flow  | Unsupported yet | `fpga64_hls_hw_emu` | `fpga64_hls_hw` |
 
 Only one `fpga64_*` architecture is allowed in the `sycl-targets` flag.
 
@@ -363,7 +363,7 @@ To run an example from the provided examples:
   # Run on the real FPGA board
   ./parallel_for_ND_range
   ```
-Note that only the flag `-fsycl-targets` is changed accross the previous examples.
+Note that only the flag `-fsycl-targets` is changed across the previous examples.
 
 ### Running the test suite
 
@@ -375,7 +375,7 @@ the `fpga64_` prefix trimmed. Namely:
 |                       | Software simulation | Hardware emulation  | Hardware        |
 |-----------------------|---------------------|---------------------|-----------------|
 | SPIR compilation flow | `sw_emu`     | `hw_emu`     | `hw`     |
-| HLS compilation flow  | Yet unsupported | `hls_hw_emu` | `hls_hw` |
+| HLS compilation flow  | Unsupported yet | `hls_hw_emu` | `hls_hw` |
 
 
 
@@ -442,7 +442,7 @@ sharing across different processes, if required. The OpenCL buffer
 creation and destruction APIs handle this and fortunately this is
 hidden by the higher-level SYCL framework.
 
-But if a SYCL program crashes before deallocating the OpenCL buffer
+But if a SYCL program crashes before freeing the OpenCL buffer
 and the user tries to allocate some other buffers at the same place on
 the FPGA board with another program, then the runtime refuses to load
 the program, with some error like:
@@ -461,7 +461,7 @@ like:
 [256564.482287] xocl 0000:04:00.1: xocl_read_axlf_helper: err: -1
 ```
 
-Then you need to explicitly deallocate the buffer because the device
+Then you need to free the buffer explicitly because the device
 driver still has the hope a program wants to use the data of the
 allocated buffer in the future...
 
