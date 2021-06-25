@@ -23,6 +23,7 @@ kernel.
 
 from argparse import ArgumentParser
 import json
+from multiprocessing import Pool
 from os import environ
 from pathlib import Path
 import shutil
@@ -229,7 +230,7 @@ class CompilationDriver:
         command.extend(self.extra_comp_args)
         self._dump_cmd(f"06-vxxcomp-{kernel['name']}.cmd", command)
         subprocess.run(command)
-        self.compiled_kernels.append(kernel_output)
+        return kernel_output
 
     def _link_kernels(self):
         """Call v++ to link all kernel in one .xclbin"""
@@ -297,9 +298,9 @@ class CompilationDriver:
             self.vpp_llvm_input = (
                 tmpdir / f"{outstem}_kernels.opt.xpirbc")
             self._asm_ir()
-            self.compiled_kernels = []
-            for kernel in self.kernel_properties["kernels"]:
-                self._compile_kernel(kernel)
+            with Pool() as p:
+                self.compiled_kernels = list(p.map(self._compile_kernel, list(
+                    k for k in self.kernel_properties["kernels"])))
             if self.compiled_kernels:
                 self._link_kernels()
 
