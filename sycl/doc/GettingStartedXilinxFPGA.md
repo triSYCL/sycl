@@ -415,7 +415,7 @@ the `fpga64_` prefix trimmed. Namely:
   ```
   This takes usually 15-30 minutes with a good CPU.
 
-- run the test suite with real hardware execution on FPGA (HLS flow):
+- Run the test suite with real hardware execution on FPGA (HLS flow):
   ```bash
   cd $SYCL_HOME/llvm/build
   export VXX_TARGET=hls_hw
@@ -660,7 +660,7 @@ This will make the debug compiler select the dynamic libraries of the release co
 
 #### Debugging the driver and intermediate steps
 
-During the compilation, an temporary directory is created in which all vitis inputs, commands, outputs and logs are stored.
+During the compilation, an temporary directory is created in which all Vitis inputs, commands, outputs and logs are stored.
 By default, this directory is deleted as soon as the compilation ends (even when it fails).
 
 In order to keep it, set the `SYCL_VXX_KEEP_CLUTTER` environment variable to True.

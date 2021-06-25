@@ -55,8 +55,8 @@ enum SPIRAddressSpace {
   SPIRAS_Generic,  // Address space: 4
 };
 
-/// Retrieve the names and properties for all kernels in the module and place them into a file
-/// Generates the vitis HLS IR for kernel interface control
+/// Retrieve the names and properties for all kernels in the module and place them into a file.
+/// Generates the vitis HLS IR for kernel interface control.
 struct KernelPropGen : public ModulePass {
 
   static char ID; // Pass identification, replacement for typeid

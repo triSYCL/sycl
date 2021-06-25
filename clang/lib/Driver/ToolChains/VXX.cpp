@@ -213,8 +213,6 @@ void SYCL::LinkerVXX::constructSYCLVXXCommand(
     llvm_unreachable("invalid subarch");
   }
 
-   /// When there is more inputs than what sycl_vxx can handle(1) we llvm-link
-  /// all those inputs together before invoking sycl_vxx.
   for (auto& In : Inputs)
     CmdArgs.push_back(Args.MakeArgString(In.getFilename()));
 

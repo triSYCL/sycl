@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """sycl_vxx
-This is an extra layer of abstraction on top of the shell invocing the
-vitis compiler. As SPIR/LLVM-IR is a second class citizen in vitis for the
+This is an extra layer of abstraction on top of the shell invoking the
+Vitis compiler. As SPIR/LLVM-IR is a second class citizen in Vitis for the
 moment it has some little niggling details that need worked on and the idea
 is that this script will work around those with some aid from Clang/LLVM.
 
-One of the main examples is that vitis can only compile one kernel from LLVM-BC
-at a time and it requires the kernels name (also required for kernel specific
+One of the main examples is that Vitis can only compile one kernel from LLVM-BC
+at a time and it requires the kernel name (also required for kernel-specific
 optimizations). This poses a problem as there can be multiple kernels in a
-file. And when making a normal naked v++ -c command in the driver
-you won't have the neccesarry information as the command is generated before
-the file's have even started to be compiled (Perhaps there is that I am
-unaware of). So no kernel names and no idea how many vitis commands you'd need
+file. And when making a normal naked v++ -c command in the driver,
+you won't have the necessary information as the command is generated before
+the file has have even started to be compiled (perhaps there is, but I am
+unaware of). So, no kernel name and no idea how many Vitis commands you'd need
 to generate per file (no idea how many kernels are in a file).
 
 This works around that by using an opt (kernelNameGen) pass that generates
 an intermediate file with the needed information that we eat up and can then
-loop over each kernel in a file. It's simple at the moment just kernel names,
+loop over each kernel in a file. It's simple at the moment: just kernel names,
 but could expand in the future to include optimization information for each
 kernel.
 """
@@ -180,7 +180,7 @@ class CompilationDriver:
         subprocess.run(args)
 
     def _asm_ir(self):
-        """Assemble downgraded IR to bitcode using vitis llvm-as"""
+        """Assemble downgraded IR to bitcode using Vitis llvm-as"""
         args = [
             self.vitis_clang_bin / "llvm-as",
             self.downgraded_ir,

@@ -1,4 +1,4 @@
-//===- KernelProperties.h - Tools for extracting sycl kernel properties ---===//
+//===- KernelProperties.h - Tools for extracting SYCL kernel properties ---===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Contains utility functions that read sycl kernel properties
+// Contains utility functions that read SYCL kernel properties
 // ===---------------------------------------------------------------------===//
 
 #ifndef LLVM_SYCL_KERNELPROPERTIES_H
@@ -25,17 +25,17 @@
 
 namespace llvm {
 class KernelProperties {
-  // Regroup sycl kernel properties that can be of use for downstream tools
+  // Regroup SYCL kernel properties that can be of use for downstream tools
   // currently, retrieve annotation for DDR bank assignment to kernel arguments
 public:
-  // In HLS, array-like arguments are groupped together in bundles.
-  // One bundle correspond to one memory controller, and this is 
+  // In HLS, array-like arguments are grouped together in bundles.
+  // One bundle corresponds to one memory controller, and this is 
   // the bundle that can be associated to a specific DDR Bank/HBM.
   //
   // As of now, all arguments sharing the same memory bank share the 
   // same bundle.
   struct MAXIBundle {
-    // Represents one m_axi bundle and its associated memory bank
+    // Represents one m_axi bundle and its associated memory bank.
     // This structure should evolve once we provide support for other 
     // m_axi memory such as HBM.
     std::string BundleName; // Vitis bundle name

@@ -523,7 +523,7 @@ public:
         && getVendor() == Triple::Xilinx;
   }
 
-   bool isXilinxHLS() const {
+  bool isXilinxHLS() const {
     assert(isXilinxFPGA() && "Not a Xilinx FPGA architecture");
     return getSubArch() == SubArchType::FPGASubArch_hls_hw
         || getSubArch() == SubArchType::FPGASubArch_hls_hw_emu

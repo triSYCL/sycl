@@ -30,7 +30,7 @@ public:
   VXXInstallationDetector(const Driver &D, const llvm::Triple &HostTriple,
                            const llvm::opt::ArgList &Args);
 
-  /// Check whether we detected a valid V++ Install
+  /// Check whether we detected a valid v++ installation
   bool isValid() const { return IsValid; }
 
   /// Get the path to the v++ binary
@@ -62,7 +62,7 @@ namespace SYCL {
 //
 // Compiles all the kernels into .xo files and then links all of the .xo files
 // (individual kernels) into a final binary blob that can be offloaded and
-// wrapped into the final binary. Which XRT can then loaded and execute like a
+// wrapped into the final binary. Which XRT can then load and execute like a
 // normal pre-compiled OpenCL binary.
 class LLVM_LIBRARY_VISIBILITY LinkerVXX : public Tool {
 public:
@@ -78,9 +78,9 @@ public:
 
   private:
     void constructSYCLVXXCommand(Compilation &C, const JobAction &JA,
-                                  const InputInfo &Output,
-                                  const InputInfoList &Inputs,
-                                  const llvm::opt::ArgList &Args) const;
+                                 const InputInfo &Output,
+                                 const InputInfoList &Inputs,
+                                 const llvm::opt::ArgList &Args) const;
 };
 
 } // end namespace SYCL
@@ -91,7 +91,7 @@ namespace toolchains {
 class LLVM_LIBRARY_VISIBILITY VXXToolChain : public ToolChain {
 public:
   VXXToolChain(const Driver &D, const llvm::Triple &Triple,
-                const ToolChain &HostTC, const llvm::opt::ArgList &Args);
+               const ToolChain &HostTC, const llvm::opt::ArgList &Args);
 
   const llvm::Triple *getAuxTriple() const override {
     return &HostTC.getTriple();

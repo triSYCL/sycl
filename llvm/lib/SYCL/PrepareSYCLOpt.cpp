@@ -157,7 +157,7 @@ struct PrepareSYCLOpt : public ModulePass {
     /// Find function
     auto *spirid = M.getFunction("llvm.spir.get.global.id.i64");
     if (spirid != nullptr && spirid->isDeclaration()) {
-      /// Create replcement
+      /// Create replacement
       auto *replacement = ConstantInt::get(spirid->getReturnType(), 1);
       for (auto *user : spirid->users())
         if (auto *call = dyn_cast<CallBase>(user)) {
@@ -172,7 +172,7 @@ struct PrepareSYCLOpt : public ModulePass {
   }
 
   bool runOnModule(Module &M) override {
-    // When using the HLS flow instead of spir default
+    // When using the HLS flow instead of SPIR default
     bool SyclHLSFlow = Triple(M.getTargetTriple()).isXilinxHLS();
     turnNonKernelsIntoPrivate(M);
     if (SyclHLSFlow) {
