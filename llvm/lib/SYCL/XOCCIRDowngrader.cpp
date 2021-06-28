@@ -337,18 +337,18 @@ struct XOCCIRDowngrader : public ModulePass {
   void cleanSpirBuiltins(Module &M) {
     /// Find function
     auto *spirid = M.getFunction("llvm.spir.get.global.id.64");
-    /// Create replcement
+    /// Create replacement
     auto *replacement = ConstantInt::get(spirid->getReturnType(), 0);
     if (spirid != nullptr && spirid->isDeclaration())
       for (auto *user : spirid->users())
         /// find all users
         if (auto *call = dyn_cast<CallBase>(user)) {
-          /// replace calls by constant
+          /// Replace calls by constant
           call->replaceAllUsesWith(replacement);
           call->eraseFromParent();
         }
     assert(spirid->use_empty());
-    /// erase the fontion from the module.
+    /// Erase the function from the module.
     spirid->eraseFromParent();
   }
 

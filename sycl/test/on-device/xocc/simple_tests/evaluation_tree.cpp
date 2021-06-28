@@ -16,7 +16,7 @@ template <typename... Tys> struct variant_trait<std::variant<Tys...>> {
   using indexes = std::make_index_sequence<sizeof...(Tys)>;
 };
 
-// // This could be a replacement for visit_single_impl but causes addrespace casts
+// // This could be a replacement for visit_single_impl but causes address space casts
 // template <typename ret_type, typename Func, typename Var, auto... Idx>
 // inline ret_type
 // visit_single_impl(Func &&f, std::integer_sequence<size_t, Idx...>, Var &&var) {
@@ -74,7 +74,7 @@ decltype(auto) visit_single(Func&& f, Var&& var) {
 } // namespace detail
 
 /// dev_visit is std::visit implementation suitable to be used in device code.
-/// this version of visit doesn't use any function pointer but uses if series
+/// This version of visit doesn't use any function pointer but uses if series
 /// which will be turned into switch case by the optimizer.
 template <typename Func, typename Var, typename... Rest>
 auto dev_visit(Func&& f, Var&& var, Rest&&... rest) {
@@ -96,19 +96,19 @@ auto dev_visit(Func&& f, Var&& var, Rest&&... rest) {
 
 
 /// This is a relative pointer behaving mostly like T*. It doesn't manage the
-/// lifetime of the data pointed to. Also this class have shalow const semantic
+/// lifetime of the data pointed to. Also this class have shallow const semantic
 /// meaning that const rel_ptr<T> is equivalent to T* const not const T *. This
 /// pointer should behave like T* for any operation except memcpy or bitcasting
-/// the representation of the pointer. When memcpy'ed to an other place the
+/// the representation of the pointer. When memcpy'ed to another place the
 /// offset between the pointer's address and the data it is pointed to will stay
-/// constant. this means that if the data is copied with the same memcpy the
+/// constant. This means that if the data is copied with the same memcpy the
 /// pointer is still pointing to the memcpy'ed data.
 /// This pointer can also be used to store pointers into files.
 template <typename T, typename IntTy = std::ptrdiff_t> class rel_ptr {
   IntTy offset;
 
-  char *get_this() const {
-    return reinterpret_cast<char *>(const_cast<rel_ptr *>(this));
+  char* get_this() const {
+    return reinterpret_cast<char*>(const_cast<rel_ptr*>(this));
   }
   IntTy get_offset(T *t) const {
     return (reinterpret_cast<char *>(t) - get_this());
@@ -141,10 +141,10 @@ public:
   bool operator==(const rel_ptr &other) const { return get() == other.get(); }
   friend bool operator==(const rel_ptr &p1, T *p2) { return p1.get() == p2; }
 
-  /// we use weak_ordering because the bitcasted representation of equal pointer
-  /// is different. because 2 pointers are equal if they point to the same
-  /// object and in order to pointe to the same object they have different
-  /// offsets to it so there representation is different.
+  /// We use weak_ordering because the bitcasted representation of equal pointer
+  /// is different. 2 pointers are equal if they point to the same
+  /// object and in order to point to the same object they have different
+  /// offsets to it, so their representations are different.
   std::weak_ordering operator<=>(const rel_ptr &other) {
     return get() <=> other.get();
   }
