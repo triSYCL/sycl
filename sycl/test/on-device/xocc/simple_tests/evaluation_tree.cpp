@@ -44,7 +44,8 @@ template <typename... Tys> struct variant_trait<std::variant<Tys...>> {
 template <typename ret_type, typename Func, typename Var>
 [[noreturn]] inline ret_type
 visit_single_impl(Func&&, std::integer_sequence<size_t>, Var&&) {
-  // assert(false && "unreachable");
+  /// assert is a noop on device
+  assert(false && "unreachable");
   __builtin_unreachable();
 }
 
@@ -94,7 +95,6 @@ auto dev_visit(Func&& f, Var&& var, Rest&&... rest) {
         std::forward<Var>(var));
 }
 
-
 /// This is a relative pointer behaving mostly like T*. It doesn't manage the
 /// lifetime of the data pointed to. Also this class have shallow const semantic
 /// meaning that const rel_ptr<T> is equivalent to T* const not const T *. This
@@ -102,8 +102,13 @@ auto dev_visit(Func&& f, Var&& var, Rest&&... rest) {
 /// the representation of the pointer. When memcpy'ed to another place the
 /// offset between the pointer's address and the data it is pointed to will stay
 /// constant. This means that if the data is copied with the same memcpy the
-/// pointer is still pointing to the memcpy'ed data.
-/// This pointer can also be used to store pointers into files.
+/// pointer is still pointing to the same data.
+/// storing data to files by reinterpreting it in bytes and reading it by
+/// reinterpreting bytes into structured data is kind of equivalent to a memcpy
+/// across address space. if you simply mmap the file into memory you can use
+/// rel_ptr to follow references between different parts of the file. This
+/// pointer can also be used to store references between various parts of the
+/// same file.
 template <typename T, typename IntTy = std::ptrdiff_t> class rel_ptr {
   IntTy offset;
 
@@ -142,8 +147,8 @@ public:
   friend bool operator==(const rel_ptr &p1, T *p2) { return p1.get() == p2; }
 
   /// We use weak_ordering because the bitcasted representation of equal pointer
-  /// is different. 2 pointers are equal if they point to the same
-  /// object and in order to point to the same object they have different
+  /// are different. 2 pointers are equal if they point to the same
+  /// object and if they point to the same object, they must have have different
   /// offsets to it, so their representations are different.
   std::weak_ordering operator<=>(const rel_ptr &other) {
     return get() <=> other.get();
