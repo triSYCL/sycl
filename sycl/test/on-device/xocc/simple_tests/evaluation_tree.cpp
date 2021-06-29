@@ -101,14 +101,12 @@ auto dev_visit(Func&& f, Var&& var, Rest&&... rest) {
 /// pointer should behave like T* for any operation except memcpy or bitcasting
 /// the representation of the pointer. When memcpy'ed to another place the
 /// offset between the pointer's address and the data it is pointed to will stay
-/// constant. This means that if the data is copied with the same memcpy the
-/// pointer is still pointing to the same data.
-/// storing data to files by reinterpreting it in bytes and reading it by
-/// reinterpreting bytes into structured data is kind of equivalent to a memcpy
-/// across address space. if you simply mmap the file into memory you can use
-/// rel_ptr to follow references between different parts of the file. This
-/// pointer can also be used to store references between various parts of the
-/// same file.
+/// constant. This means that, if a pointer and its pointed data are copied with
+/// the same memcpy, the pointer is still pointing to the same data. storing
+/// data to files by reinterpreting it in bytes and reading it by reinterpreting
+/// bytes into structured data is kind of equivalent to a memcpy across address
+/// space. if you simply mmap the file into memory you can use rel_ptr to follow
+/// references between different parts of the file.
 template <typename T, typename IntTy = std::ptrdiff_t> class rel_ptr {
   IntTy offset;
 
