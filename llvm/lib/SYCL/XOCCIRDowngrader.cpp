@@ -334,24 +334,6 @@ struct XOCCIRDowngrader : public ModulePass {
     Visitor.emit();
   }
 
-  void cleanSpirBuiltins(Module &M) {
-    /// Find function
-    auto *spirid = M.getFunction("llvm.spir.get.global.id.64");
-    /// Create replacement
-    auto *replacement = ConstantInt::get(spirid->getReturnType(), 0);
-    if (spirid != nullptr && spirid->isDeclaration())
-      for (auto *user : spirid->users())
-        /// find all users
-        if (auto *call = dyn_cast<CallBase>(user)) {
-          /// Replace calls by constant
-          call->replaceAllUsesWith(replacement);
-          call->eraseFromParent();
-        }
-    assert(spirid->use_empty());
-    /// Erase the function from the module.
-    spirid->eraseFromParent();
-  }
-
   bool runOnModule(Module &M) override {
     resetByVal(M);
     removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
