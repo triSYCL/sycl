@@ -263,7 +263,7 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   # can compile for hw_emu with it on or if it outputs clearer diagnostics so
   # we can track down the problem (when I tested this it seems that the call
   # to log the error was possibly broken)
-  $SDX --xp param:compiler.hlsDataflowStrictMode=off $DDR_BANK_ARGS \
+  $SDX --advanced.param param:compiler.hlsDataflowStrictMode=off $DDR_BANK_ARGS \
     --target $XCL_EMULATION_MODE --platform $XILINX_PLATFORM -l \
     --save-temps -o "$OUTPUT_FILE_NAME" $LINKER_LIST $ADDITIONAL_LINK_ARGS
   

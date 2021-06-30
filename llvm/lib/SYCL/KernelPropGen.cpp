@@ -223,7 +223,7 @@ struct KernelPropGen : public ModulePass {
               // default compute unit name. If more than one CU is generated
               // (which we don't support yet in any case) then they would be
               // KernelName_2..KernelName_3 etc.
-              DDRArgs += ("--sp " + F.getName() + "_1." + Arg.getName() +
+              DDRArgs += ("--connectivity.sp " + F.getName() + "_1." + Arg.getName() +
                           ":DDR[" + std::to_string(findDDRBankFor(&Arg)) + "] ")
                              .str();
           }
