@@ -28,8 +28,8 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
-#include "llvm/SYCL/KernelProperties.h"
 #include "llvm/SYCL/KernelPropGen.h"
+#include "llvm/SYCL/KernelProperties.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/JSON.h"
@@ -55,8 +55,8 @@ enum SPIRAddressSpace {
   SPIRAS_Generic,  // Address space: 4
 };
 
-/// Retrieve the names and properties for all kernels in the module and place them into a file.
-/// Generates the vitis HLS IR for kernel interface control.
+/// Retrieve the names and properties for all kernels in the module and place
+/// them into a file. Generates the vitis HLS IR for kernel interface control.
 struct KernelPropGen : public ModulePass {
 
   static char ID; // Pass identification, replacement for typeid
@@ -148,14 +148,14 @@ struct KernelPropGen : public ModulePass {
     }
   }
 
-  /// Insert calls to sideeffect that will instruct Vitis HLS to put 
+  /// Insert calls to sideeffect that will instruct Vitis HLS to put
   /// Arg in the bundle Bundle
   void generateBundleSE(Argument &Arg,
-                        KernelProperties::MAXIBundle const *Bundle,
-                        Function &F,
-                        Module& M) {
+                        KernelProperties::MAXIBundle const *Bundle, Function &F,
+                        Module &M) {
     LLVMContext &C = F.getContext();
-    auto *BundleIDConstant = ConstantDataArray::getString(C, Bundle->BundleName, false);
+    auto *BundleIDConstant =
+        ConstantDataArray::getString(C, Bundle->BundleName, false);
     auto *MinusOne = ConstantInt::getSigned(IntegerType::get(C, 64), -1);
     auto *CAZ =
         ConstantAggregateZero::get(ArrayType::get(IntegerType::get(C, 8), 0));
@@ -166,9 +166,9 @@ struct KernelPropGen : public ModulePass {
     SideEffect->addFnAttr("xlx.port.bitwidth", "4096");
 
     OperandBundleDef OpBundle(
-        "xlx_m_axi", ArrayRef<Value *>{&Arg, BundleIDConstant, MinusOne,
-                                       CAZ, CAZ, MinusOne, MinusOne, MinusOne,
-                                       MinusOne, MinusOne, MinusOne});
+        "xlx_m_axi",
+        ArrayRef<Value *>{&Arg, BundleIDConstant, MinusOne, CAZ, CAZ, MinusOne,
+                          MinusOne, MinusOne, MinusOne, MinusOne, MinusOne});
     Instruction *Instr = CallInst::Create(SideEffect, {}, {OpBundle});
     Instr->insertBefore(F.getEntryBlock().getTerminator());
   }
@@ -191,7 +191,7 @@ struct KernelPropGen : public ModulePass {
         J.attribute("extra_args", ExtraArgsMap[&F]);
         J.attributeBegin("bundle_hw_mapping");
         J.arrayBegin();
-        for (auto& Bundle: KProp.getMAXIBundles()) {
+        for (auto &Bundle : KProp.getMAXIBundles()) {
           J.objectBegin();
           J.attribute("maxi_bundle_name", Bundle.BundleName);
           J.attribute("target_bank", formatv("DDR[{0}]", Bundle.TargetId));
@@ -202,17 +202,6 @@ struct KernelPropGen : public ModulePass {
         J.attributeBegin("arg_bundle_mapping");
         J.arrayBegin();
         for (auto &Arg : F.args()) {
-          // if the argument is a pointer in the global or constant
-          // address space it should be assigned to an explicit default DDR
-          // Bank of 0 to prevent assignment to DDR banks that are not 0.
-          // This is to prevent mismatches between the SYCL runtime when
-          // declaring OpenCL buffers and the pre-compiled kernel, XRT will
-          // error out if there is a mismatch. Only OpenCL global memory is
-          // assigned to a DDR bank, this includes constant as it's just
-          // read-only global memory.
-          // \todo When adding an explicit way for users to specify DDR banks
-          // from the SYCL runtime this should be modified as well as the
-          // buffer XRT extensions.
           if (KernelProperties::isArgBuffer(&Arg, SyclHlsFlow)) {
             // This currently forces a default assignment of DDR banks to 0
             // as some platforms have different Default DDR banks and buffers
