@@ -126,20 +126,19 @@ it.
 
 Materialize the installer files with
 ```bash
-cd /opt/xilinx
-tar zxvf .../Xilinx_Unified_2021.1_0610_2318.tar
+tar zxvf .../Xilinx_Unified_2021.1_0610_2318.tar.gz
 ```
 
 Since the graphics Java installer does not work on modern Linux
 distributions like Ubuntu 20.10, use the batch-mode version:
 ```bash
-/opt/xilinx/Xilinx_Unified_2021.1_0610_2318/xsetup --batch Install --location /opt/xilinx --agree 3rdPartyEULA,WebTalkTerms,XilinxEULA --edition "Vitis Unified Software Platform"
+Xilinx_Unified_2021.1_0610_2318/xsetup --batch Install --location /opt/xilinx --agree 3rdPartyEULA,WebTalkTerms,XilinxEULA --edition "Vitis Unified Software Platform"
 ```
 and select `Vitis`.
 
 Note that if you want to uninstall this later, you can typically use:
 ```bash
-/opt/xilinx/.xinstall/Vitis_2020.2/xsetup --batch Uninstall
+/opt/xilinx/.xinstall/Vitis_2021.1/xsetup --batch Uninstall
 ```
 
 ## Install the target platform for the FPGA board

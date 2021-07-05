@@ -161,12 +161,12 @@ struct PrepareSYCLOpt : public ModulePass {
       auto *replacement = ConstantInt::get(spirid->getReturnType(), 1);
       for (auto *user : spirid->users())
         if (auto *call = dyn_cast<CallBase>(user)) {
-          /// replace calls by constant
+          /// Replace calls by constant
           call->replaceAllUsesWith(replacement);
           call->eraseFromParent();
         }
       assert(spirid->use_empty());
-      /// erase the fontion from the module.
+      /// Erase the function from the module.
       spirid->eraseFromParent();
     }
   }
