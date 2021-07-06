@@ -34,6 +34,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -63,7 +64,7 @@ static const std::regex matchReqdWorkGroupSize {
 // Just matches integers
 static const std::regex matchSomeNaturalInteger {R"(\d+)"};
 
-/// Transform the SYCL kernel functions into xocc SPIR-compatible kernels
+/// Transform the SYCL kernel functions into v++ SPIR-compatible kernels
 struct InSPIRation : public ModulePass {
 
   static char ID; // Pass identification, replacement for typeid
@@ -235,7 +236,7 @@ struct InSPIRation : public ModulePass {
     OCLVerMD->addOperand(llvm::MDNode::get(Ctx, OCLVerElts));
   }
 
-  /// Remove extra SPIRV metadata for now, doesn't really crash xocc but its
+  /// Remove extra SPIRV metadata for now, doesn't really crash v++ but its
   /// not required. Another method would just be to modify the SYCL Clang
   /// frontend to generate the actual SPIR/OCL metadata we need rather than
   /// always SPIRV/CL++ metadata
@@ -253,9 +254,8 @@ struct InSPIRation : public ModulePass {
 
   /// Test if a function is a SPIR kernel
   bool isKernel(const Function &F) {
-    if (F.getCallingConv() == CallingConv::SPIR_KERNEL)
-      return true;
-    return false;
+    return F.getCallingConv() == CallingConv::SPIR_KERNEL
+           || F.hasFnAttribute("fpga.top.func");
   }
 
   /// Test if a function is a non-intrinsic SPIR function, indicating that it is
@@ -271,7 +271,7 @@ struct InSPIRation : public ModulePass {
   /// This function gives llvm::function arguments with no name
   /// a default name e.g. arg_0, arg_1..
   ///
-  /// This is because if your arguments have no name xocc will commit sepuku
+  /// This is because if your arguments have no name v++ will commit seppuku
   /// when generating XML. Perhaps it's possible to move this to the Clang
   /// Frontend by generating the name from the accessor/capture the arguments
   /// come from, but I believe it requires a special compiler invocation option
@@ -284,7 +284,7 @@ struct InSPIRation : public ModulePass {
     }
   }
 
-  // Hopeful list/probably impractical asks for xocc:
+  // Hopeful list/probably impractical asks for v++:
   // 1) Make XML generator/reader a little kinder towards arguments with no
   //   names if possible
   // 2) Allow -k all for LLVM IR input/SPIR-df so it can search for all
@@ -319,7 +319,7 @@ struct InSPIRation : public ModulePass {
           /// to modify declarations in someway then the best way to do it would
           /// be to have a comprehensive list of mangled SPIR intrinsic names
           /// and check against it. Note: This is only relevant if we still
-          /// modify the name of every function to be sycl_func_x, if xocc ever
+          /// modify the name of every function to be sycl_func_x, if v++ ever
           /// gets a little friendlier to spir input, probably not required.
         } else if (isTransitiveNonIntrinsicFunc(F)
                    && !F.isDeclaration()) {
@@ -329,8 +329,8 @@ struct InSPIRation : public ModulePass {
         kernelCallFuncSPIRify(F);
 
         // Modify the name of funcions called by SYCL kernel since function
-        // names with $ sign would choke Xilinx xocc.
-        // And in Xilinx xocc, there are passes splitting a function to new
+        // names with $ sign would choke Xilinx v++.
+        // And in Xilinx v++, there are passes splitting a function to new
         // functions. These new function names will come from some of the
         // basic block names in the original function.
         // So function and basic block names need to be modified to avoid
@@ -340,8 +340,8 @@ struct InSPIRation : public ModulePass {
         F.addFnAttr("src_name", F.getName());
         F.setName("sycl_func_" + Twine{funcCount++});
 
-        // While functions do come "named" it's in the form %0, %1 and XOCC
-        // doesn't like this for the moment. XOCC demands function arguments
+        // While functions do come "named" it's in the form %0, %1 and v++
+        // doesn't like this for the moment. v++ demands function arguments
         // be either unnamed or named non-numerically. This is a separate
         // issue from the reason we name kernel arguments (which is more
         // related to HLS needing names to generate XML).
@@ -387,20 +387,22 @@ struct InSPIRation : public ModulePass {
       remapBuiltin(F);
     }
 
-    setSPIRVersion(M);
-
-    setOpenCLVersion(M);
-
-    // setSPIRTriple(M);
-
-    /// TODO: Set appropriate layout so the linker doesn't always complain, this
-    /// change may be better/more easily applied as something in the Frontend as
-    /// we'd be lying about the layout if we didn't enforce it accurately in
-    /// this pass. Which is potentially a good way to come across some weird
-    /// runtime bugs.
-    //setSPIRLayout(M);
-
     removeOldMetadata(M);
+    if (!Triple(M.getTargetTriple()).isXilinxHLS()) {
+
+      setSPIRVersion(M);
+
+      setOpenCLVersion(M);
+
+      // setSPIRTriple(M);
+
+      /// TODO: Set appropriate layout so the linker doesn't always complain,
+      /// this change may be better/more easily applied as something in the
+      /// Frontend as we'd be lying about the layout if we didn't enforce it
+      /// accurately in this pass. Which is potentially a good way to come
+      /// across some weird runtime bugs.
+      // setSPIRLayout(M);
+    }
 
     // The module probably changed
     return true;

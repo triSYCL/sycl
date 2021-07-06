@@ -3924,9 +3924,9 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
   Opts.SYCLAllowVirtual = Args.hasFlag(options::OPT_fsycl_allow_virtual,
                                        options::OPT_fno_sycl_allow_virtual,
                                        false);
-  // Variadic functions are on by default for XOCC compilation and off by default
-  // for anything else..For example you have to specify that you wish variadics
-  // off for xocc if you wish to emit diagnostics for them and you have to
+  // Variadic functions are on by default for v++ compilation and off by default
+  // for anything else. For example, you have to specify that you wish variadics
+  // off for v++ if you wish to emit diagnostics for them and you have to
   // specify if you wish no diagnostics for other devices.
   Opts.SYCLAllowVariadicFunc =
       T.isXilinxFPGA()

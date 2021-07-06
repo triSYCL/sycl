@@ -621,7 +621,7 @@ StringRef PredefinedExpr::getIdentKindName(PredefinedExpr::IdentKind IK) {
   llvm_unreachable("Unknown ident kind for PredefinedExpr");
 }
 
-/// Compute a unique name that is consumable by sycl-xocc
+/// Compute a unique name that is consumable by sycl_vxx
 std::string computeUniqueSYCLXOCCName(StringRef Name, StringRef Demangle) {
   /// XOCC has a maximum of 64 character for the name of the kernel function
   /// plus the name of one parameter.

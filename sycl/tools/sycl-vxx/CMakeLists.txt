@@ -2,7 +2,8 @@
 # require a windows compliant variation of the shell script that will be
 # selected based on the compile target similar to scan-build.
 set(BinFiles
-      sycl-xocc)
+      sycl_vxx.py
+    )
 
 foreach(BinFile ${BinFiles})
   add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/bin/${BinFile}
@@ -16,4 +17,4 @@ foreach(BinFile ${BinFiles})
   install(PROGRAMS bin/${BinFile} DESTINATION bin)
 endforeach()
 
-add_custom_target(sycl-xocc ALL DEPENDS ${Depends})
+add_custom_target(sycl-vxx ALL DEPENDS ${Depends})

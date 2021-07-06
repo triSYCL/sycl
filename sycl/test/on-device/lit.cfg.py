@@ -14,6 +14,12 @@ import tempfile
 
 from lit.llvm import llvm_config
 
+def split_target(target):
+    if target.startswith("hls_"):
+        return ("hls", target[4:])
+    else:
+        return ("spir", target)
+
 # Configuration file for the 'lit' test runner.
 
 # name: The name of this test suite.
@@ -37,6 +43,7 @@ config.test_source_root = os.path.dirname(__file__)
 # test_exec_root: The root path where tests should be run.
 config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
 
+config.environment['SYCL_VXX_KEEP_CLUTTER'] = 'True'
 llvm_config.use_clang()
 
 # Propagate some variables from the host environment.
@@ -45,9 +52,9 @@ llvm_config.with_system_environment(['PATH', 'OCL_ICD_FILENAMES', 'SYCL_DEVICE_A
 timeout=600
 
 xocc=lit_config.params.get('XOCC', "off")
-xocc_target = "hw"
-if "XCL_EMULATION_MODE" in os.environ:
-    xocc_target = os.environ["XCL_EMULATION_MODE"]
+vxx_target = "hls_hw_emu"
+if "VXX_TARGET" in os.environ:
+    vxx_target = f"hls_{os.environ['VXX_TARGET']}"
 
 # Propagate extra environment variables
 if config.extra_environment:
@@ -116,9 +123,6 @@ def getDeviceCount(device_type, be = backend):
     is_cuda = False;
     is_level_zero = False;
     device_count_env = os.environ.copy()
-    if "XCL_EMULATION_MODE" in os.environ:
-        if os.environ["XCL_EMULATION_MODE"] == "hw":
-            device_count_env.pop("XCL_EMULATION_MODE")
     process = subprocess.Popen([get_device_count_by_type_path, device_type, be],
         stdout=subprocess.PIPE, env=device_count_env)
     (output, err) = process.communicate()
@@ -279,15 +283,12 @@ if xocc != "off":
     acc_run_substitute+= "setsid flock --exclusive " + xrt_lock + " "
     if os.path.exists(xrt_lock):
         os.remove(xrt_lock)
-    # XCL_EMULATION_MODE = hw is only valid for our SYCL driver, 
-    # for XRT XCL_EMULATION_MODE should only be used when using either hw_emu or sw_emu
-    # if xocc_target == "hw":
     acc_run_substitute="env --unset=XCL_EMULATION_MODE " + acc_run_substitute
     # hw_emu is very slow so it has a higher timeout.
-    if xocc_target != "hw_emu":
-        acc_run_substitute+= "timeout 30 env "
+    if not vxx_target.endswith("hw_emu"):
+        acc_run_substitute+= "timeout 3000 env "
     else:
-        acc_run_substitute+= "timeout 300 env "
+        acc_run_substitute+= "timeout 3000 env "
 
 config.substitutions.append( ('%ACC_RUN_PLACEHOLDER',  acc_run_substitute) )
 config.substitutions.append( ('%ACC_CHECK_PLACEHOLDER',  acc_check_substitute) )
@@ -299,7 +300,7 @@ if not cuda and not level_zero and found_at_least_one_device:
 if cuda:
     config.substitutions.append( ('%sycl_triple',  "nvptx64-nvidia-cuda-sycldevice" ) )
 elif xocc != "off":
-    config.substitutions.append( ('%sycl_triple',  "fpga64-xilinx-unknown-sycldevice" ) )
+    config.substitutions.append( ('%sycl_triple',  f"fpga64_{vxx_target}-xilinx-unknown-sycldevice" ) )
 else:
     config.substitutions.append( ('%sycl_triple',  "spir64-unknown-unknown-sycldevice" ) )
 
@@ -327,12 +328,13 @@ else:
     if getDeviceCount("gpu", "cuda")[1]:
         lit_config.note("found secondary cuda target")
         config.available_features.add("has_secondary_cuda")
-    llvm_config.with_environment('XCL_EMULATION_MODE', xocc_target, append_path=False)
-    lit_config.note("XOCC target: {}".format(xocc_target))
+    lit_config.note("XOCC target: {}".format(vxx_target))
     required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]
     has_error=False
     config.available_features.add("xocc")
-    config.available_features.add(xocc_target)
+    for feature in split_target(vxx_target):
+        config.available_features.add(feature) 
+    config.available_features.add(vxx_target)
     pkg_opencv4 = subprocess.run(["pkg-config", "--libs", "--cflags", "opencv4"], stdout=subprocess.PIPE)
     has_opencv4 = not pkg_opencv4.returncode
     lit_config.note("has opencv4: {}".format(has_opencv4))
@@ -353,13 +355,13 @@ else:
     run_if_hw="echo"
     run_if_hw_emu="echo"
     run_if_sw_emu="echo"
-    if xocc_target == "hw":
+    if vxx_target.endswith("_hw"):
         timeout = 10800 # 3h
         run_if_hw=""
-    if xocc_target == "hw_emu":
+    if vxx_target.endswith("_hw_emu"):
         timeout = 3600 # 1h
         run_if_hw_emu=""
-    if xocc_target == "sw_emu":
+    if vxx_target.endswith("_sw_emu"):
         timeout = 1200 # 20min
         run_if_sw_emu=""
     config.substitutions.append( ('%run_if_hw', run_if_hw) )
@@ -369,6 +371,6 @@ else:
 # Set timeout for test = 10 mins
 try:
     import psutil
-    lit_config.maxIndividualTestTime = timeout
+    lit_config.maxIndividualTestTime = 10800
 except ImportError:
     pass

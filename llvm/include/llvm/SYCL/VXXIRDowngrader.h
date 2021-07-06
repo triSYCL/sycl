@@ -1,4 +1,4 @@
-//===- XOCCIRDowngrader.h - SYCL XOCC IR Downgrader pass  -----------===//
+//===- VXXIRDowngrader.h - SYCL V++ IR Downgrader pass  -----------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,20 +7,20 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Pass for modifying certain LLVM IR incompatabilities with the Xilinx xocc
+// Pass for modifying certain LLVM IR incompatabilities with the Xilinx v++
 // backend we use for SYCL
 //
 // ===---------------------------------------------------------------------===//
 
-#ifndef LLVM_SYCL_XOCC_IR_DOWNGRADER_H
-#define LLVM_SYCL_XOCC_IR_DOWNGRADER_H
+#ifndef LLVM_SYCL_VXX_IR_DOWNGRADER_H
+#define LLVM_SYCL_VXX_IR_DOWNGRADER_H
 
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 
 namespace llvm {
 
-ModulePass *createXOCCIRDowngraderPass();
+ModulePass *createVXXIRDowngraderPass();
 
 }
 

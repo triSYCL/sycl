@@ -459,7 +459,7 @@ void initializeWriteThinLTOBitcodePass(PassRegistry&);
 void initializeXRayInstrumentationPass(PassRegistry&);
 void initializeInSPIRationPass(PassRegistry&);
 void initializeKernelPropGenPass(PassRegistry&);
-void initializeXOCCIRDowngraderPass(PassRegistry&);
+void initializeVXXIRDowngraderPass(PassRegistry&);
 void initializePrepareSYCLOptPass(PassRegistry&);
 void initializeLowerSYCLMetaDataPass(PassRegistry&);
 

@@ -601,7 +601,7 @@ int main(int argc, char **argv) {
   // (e.g. initializeTransformUtils(Registry) etc. above)
   initializeInSPIRationPass(Registry);
   initializeKernelPropGenPass(Registry);
-  initializeXOCCIRDowngraderPass(Registry);
+  initializeVXXIRDowngraderPass(Registry);
   initializePrepareSYCLOptPass(Registry);
   initializeLowerSYCLMetaDataPass(Registry);
   initializeHardwareLoopsPass(Registry);
