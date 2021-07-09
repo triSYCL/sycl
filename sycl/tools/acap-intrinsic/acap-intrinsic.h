@@ -34,10 +34,13 @@ namespace acap_intr {
 DECL_PREFIX int get_coreid(void) DECL_POSTFIX
 
 DECL_PREFIX void memory_fence(void) DECL_POSTFIX
+DECL_PREFIX void separator_scheduler(void) DECL_POSTFIX
 
 DECL_PREFIX void acquire(unsigned id, unsigned val) DECL_POSTFIX
 DECL_PREFIX void release(unsigned id, unsigned val) DECL_POSTFIX
 DECL_PREFIX void acquire(unsigned id) DECL_POSTFIX
 DECL_PREFIX void release(unsigned id) DECL_POSTFIX
+
+DECL_PREFIX void core_done() DECL_POSTFIX
 
 }

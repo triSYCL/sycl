@@ -18,6 +18,7 @@
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/SYCL/PrepareSyclChessOpt.h"
@@ -65,9 +66,22 @@ struct PrepareSyclChessOpt : public ModulePass {
     }
   }
 
+  struct MakeVolatileVisitor : InstVisitor<MakeVolatileVisitor> {
+    void visitLoadInst(LoadInst &I) { I.setVolatile(true); }
+    void visitStoreInst(StoreInst &I) { I.setVolatile(true); }
+  };
+
+  /// Make every store or load of unknow volatile.
+  /// TODO we could only change lod and store of unknow provenance.
+  void makeVolatile(Module &M) {
+    MakeVolatileVisitor Visitor;
+    Visitor.visit(M);
+  }
+
   bool runOnModule(Module &M) override {
     turnNonKernelsIntoPrivate(M);
     prepareForMerging(M);
+    // makeVolatile(M);
     return true;
   }
 };
