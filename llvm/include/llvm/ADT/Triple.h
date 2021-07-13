@@ -46,8 +46,6 @@ class Triple {
 public:
   enum ArchType {
     UnknownArch,
-
-    aie32,          // Xilinx AI Engine 32-bit
     arm,            // ARM (little endian): arm, armv.*, xscale
     armeb,          // ARM (big endian): armeb
     aarch64,        // AArch64 (little endian): aarch64
@@ -55,10 +53,12 @@ public:
     aarch64_32,     // AArch64 (little endian) ILP32: aarch64_32
     arc,            // ARC: Synopsys ARC
     avr,            // AVR: Atmel AVR microcontroller
+    aie32,          // Xilinx AI Engine 32-bit
     bpfel,          // eBPF or extended BPF or 64-bit BPF (little endian)
     bpfeb,          // eBPF or extended BPF or 64-bit BPF (big endian)
     csky,           // CSKY: csky
     hexagon,        // Hexagon: hexagon
+    m68k,           // M68k: Motorola 680x0 family
     mips,           // MIPS: mips, mipsallegrex, mipsr6
     mipsel,         // MIPSEL: mipsel, mipsallegrexe, mipsr6el
     mips64,         // MIPS64: mips64, mips64r6, mipsn32, mipsn32r6
@@ -100,10 +100,7 @@ public:
     wasm64,         // WebAssembly with 64-bit pointers
     renderscript32, // 32-bit RenderScript
     renderscript64, // 64-bit RenderScript
-    fpga_aoco,      // Intel FPGA: unlinked object file
-    fpga_aocr,      // Intel FPGA: linked early image
-    fpga_aocx,      // Intel FPGA: linked image
-    fpga_dep,       // Intel FPGA: dependency file
+    fpga,           // Intel FPGA
     fpga32,         // 32-bit Xilinx FPGA
     fpga64,         // 64-bit Xilinx FPGA
     ve,             // NEC SX-Aurora Vector Engine
@@ -153,6 +150,9 @@ public:
     FPGASubArch_hw,
     FPGASubArch_hw_emu,
     FPGASubArch_sw_emu,
+    FPGASubArch_hls_hw,
+    FPGASubArch_hls_hw_emu,
+    FPGASubArch_hls_sw_emu,
 
     PPCSubArch_spe
   };
@@ -234,6 +234,7 @@ public:
     Musl,
     MuslEABI,
     MuslEABIHF,
+    MuslX32,
 
     MSVC,
     Itanium,
@@ -528,6 +529,13 @@ public:
         && getVendor() == Triple::Xilinx;
   }
 
+  bool isXilinxHLS() const {
+    assert(isXilinxFPGA() && "Not a Xilinx FPGA architecture");
+    return getSubArch() == SubArchType::FPGASubArch_hls_hw
+        || getSubArch() == SubArchType::FPGASubArch_hls_hw_emu
+        || getSubArch() == SubArchType::FPGASubArch_hls_sw_emu;
+  }
+
   bool isMacCatalystEnvironment() const {
     return getEnvironment() == Triple::MacABI;
   }
@@ -728,7 +736,8 @@ public:
   bool isMusl() const {
     return getEnvironment() == Triple::Musl ||
            getEnvironment() == Triple::MuslEABI ||
-           getEnvironment() == Triple::MuslEABIHF;
+           getEnvironment() == Triple::MuslEABIHF ||
+           getEnvironment() == Triple::MuslX32;
   }
 
   /// Tests whether the target is SPIR (32- or 64-bit).

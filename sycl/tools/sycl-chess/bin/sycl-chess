@@ -125,12 +125,12 @@ UNMERGED_PROP=$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}
 #  and finally this script will compile each unique kernel via chess and duplicate the output for equivalent kernels.
 #  since the addresses of data is not the same for east tiles and west tiles east and west tiles a generally not merged.
 
-# We use xoccIRDowngrader because some of the transfromation it does are needed.
+# We use vxxIRDowngrader because some of the transfromation it does are needed.
 # but most aren't so using a new better addapted passe would be better.
 
 cp $INPUT_FILE_NAME $INPUT_FILE_NAME.saved.bc
 
-$OPT -S -preparechess -Oz -mergefunc -ChessMassage -globaldce -kernelPropGen -xoccIRDowngrader \
+$OPT -S -preparechess -Oz -mergefunc -ChessMassage -globaldce -kernelPropGen -vxxIRDowngrader \
   "$INPUT_FILE_NAME" --sycl-kernel-propgen-output $KERNELPROP \
   --sycl-kernel-unmerged-prop-out $UNMERGED_PROP -o \
   "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"

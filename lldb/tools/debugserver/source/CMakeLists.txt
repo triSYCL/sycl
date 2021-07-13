@@ -83,6 +83,30 @@ if (CXX_SUPPORTS_NO_EXTENDED_OFFSETOF)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-extended-offsetof")
 endif ()
 
+# When compiling for arm, build debugserver 2 way fat with an arm64 and arm64e
+# slice. You can only debug arm64e processes using an arm64e debugserver.
+include(CheckCSourceCompiles)
+check_c_source_compiles(
+    "
+    #include <TargetConditionals.h>
+    #if TARGET_CPU_ARM
+    #if TARGET_OS_OSX
+    #warning Building for macOS
+    #else
+    #error Not building for macOS
+    #endif
+    #else
+    #error Not building for ARM
+    #endif
+    int main() { return 0; }
+    "
+    BUILDING_FOR_ARM_OSX
+)
+
+if (BUILDING_FOR_ARM_OSX)
+  set(CMAKE_OSX_ARCHITECTURES "arm64;arm64e")
+endif ()
+
 check_library_exists(compression compression_encode_buffer "" HAVE_LIBCOMPRESSION)
 
 find_library(SECURITY_LIBRARY Security)
@@ -129,7 +153,7 @@ endif()
 
 if(LLDB_USE_ENTITLEMENTS)
   if(APPLE_EMBEDDED)
-    set(entitlements ${CMAKE_CURRENT_SOURCE_DIR}/debugserver-entitlements.plist)
+    set(entitlements ${DEBUGSERVER_RESOURCE_DIR}/debugserver-entitlements.plist)
   else()
     if (LLDB_USE_PRIVATE_ENTITLEMENTS)
       set(entitlements ${DEBUGSERVER_RESOURCE_DIR}/debugserver-macosx-private-entitlements.plist)

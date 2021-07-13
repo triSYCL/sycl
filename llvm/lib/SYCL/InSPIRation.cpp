@@ -34,6 +34,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
@@ -45,13 +46,10 @@ using namespace llvm;
 namespace {
 // avoid recreation of regex's we won't alter at runtime
 
-// matches __spirv_ocl_ which is the transformed namespace of certain builtins
-// in the cl::__spirv namespace after translation by the reflower (e.g. math
-// functions like sqrt)
-static const std::regex matchSPIROCL {R"((_Z\d+__spir_ocl_))"};
-static const std::regex matchSPIRVOCL {R"((_Z\d+__spirv_ocl_))"};
-static const std::regex matchSPIRVOCLS {R"((_Z\d+__spirv_ocl_s_))"};
-static const std::regex matchSPIRVOCLU {R"((_Z\d+__spirv_ocl_u_))"};
+struct Prefix {
+  std::string Str;
+  std::regex Matcher;
+};
 
 // matches number between Z and _ (\d+)(?=_)
 static const std::regex matchZVal {R"((\d+)(?=_))"};
@@ -66,15 +64,7 @@ static const std::regex matchReqdWorkGroupSize {
 // Just matches integers
 static const std::regex matchSomeNaturalInteger {R"(\d+)"};
 
-// This is to give clarity to why we negate a value from the Z mangle component
-// rather than having a magical number, we have the size of the string we've
-// removed from the mangling.
-static const std::string SPIROCL {"__spir_ocl_"};
-static const std::string SPIRVOCL{"__spirv_ocl_"};
-static const std::string SPIRVOCLS{"__spirv_ocl_s_"};
-static const std::string SPIRVOCLU{"__spirv_ocl_u_"};
-
-/// Transform the SYCL kernel functions into xocc SPIR-compatible kernels
+/// Transform the SYCL kernel functions into v++ SPIR-compatible kernels
 struct InSPIRation : public ModulePass {
 
   static char ID; // Pass identification, replacement for typeid
@@ -117,6 +107,22 @@ struct InSPIRation : public ModulePass {
                  + regexName);
       }
     }
+  }
+
+  /// remap spirv builtins towards function present in vitis libspir.
+  void remapBuiltin(Function *F) {
+    /// according to the opencl 2.1 spec fmax_common and max are the same except
+    /// on nans and infinity where fmax_common will output undefined value
+    /// whereas fmax has rules to follow.
+    /// because of this it is legal to replace a fmax_common by fmax.
+    static std::pair<StringRef, StringRef> Mapping[] = {
+        {"_Z11fmax_common", "_Z4fmax"},
+        {"_Z3Dot", "_Z3dot"},
+    };
+    for (std::pair<StringRef, StringRef> Elem : Mapping)
+      if (F->getName().startswith(Elem.first))
+        return F->setName(Elem.second +
+                          F->getName().drop_front(Elem.first.size()));
   }
 
   bool doInitialization(Module &M) override {
@@ -230,7 +236,7 @@ struct InSPIRation : public ModulePass {
     OCLVerMD->addOperand(llvm::MDNode::get(Ctx, OCLVerElts));
   }
 
-  /// Remove extra SPIRV metadata for now, doesn't really crash xocc but its
+  /// Remove extra SPIRV metadata for now, doesn't really crash v++ but its
   /// not required. Another method would just be to modify the SYCL Clang
   /// frontend to generate the actual SPIR/OCL metadata we need rather than
   /// always SPIRV/CL++ metadata
@@ -248,9 +254,8 @@ struct InSPIRation : public ModulePass {
 
   /// Test if a function is a SPIR kernel
   bool isKernel(const Function &F) {
-    if (F.getCallingConv() == CallingConv::SPIR_KERNEL)
-      return true;
-    return false;
+    return F.getCallingConv() == CallingConv::SPIR_KERNEL
+           || F.hasFnAttribute("fpga.top.func");
   }
 
   /// Test if a function is a non-intrinsic SPIR function, indicating that it is
@@ -266,7 +271,7 @@ struct InSPIRation : public ModulePass {
   /// This function gives llvm::function arguments with no name
   /// a default name e.g. arg_0, arg_1..
   ///
-  /// This is because if your arguments have no name xocc will commit sepuku
+  /// This is because if your arguments have no name v++ will commit seppuku
   /// when generating XML. Perhaps it's possible to move this to the Clang
   /// Frontend by generating the name from the accessor/capture the arguments
   /// come from, but I believe it requires a special compiler invocation option
@@ -279,7 +284,7 @@ struct InSPIRation : public ModulePass {
     }
   }
 
-  // Hopeful list/probably impractical asks for xocc:
+  // Hopeful list/probably impractical asks for v++:
   // 1) Make XML generator/reader a little kinder towards arguments with no
   //   names if possible
   // 2) Allow -k all for LLVM IR input/SPIR-df so it can search for all
@@ -314,7 +319,7 @@ struct InSPIRation : public ModulePass {
           /// to modify declarations in someway then the best way to do it would
           /// be to have a comprehensive list of mangled SPIR intrinsic names
           /// and check against it. Note: This is only relevant if we still
-          /// modify the name of every function to be sycl_func_x, if xocc ever
+          /// modify the name of every function to be sycl_func_x, if v++ ever
           /// gets a little friendlier to spir input, probably not required.
         } else if (isTransitiveNonIntrinsicFunc(F)
                    && !F.isDeclaration()) {
@@ -324,18 +329,19 @@ struct InSPIRation : public ModulePass {
         kernelCallFuncSPIRify(F);
 
         // Modify the name of funcions called by SYCL kernel since function
-        // names with $ sign would choke Xilinx xocc.
-        // And in Xilinx xocc, there are passes splitting a function to new
+        // names with $ sign would choke Xilinx v++.
+        // And in Xilinx v++, there are passes splitting a function to new
         // functions. These new function names will come from some of the
         // basic block names in the original function.
         // So function and basic block names need to be modified to avoid
         // containing $ sign
 
         // Rename function name
+        F.addFnAttr("src_name", F.getName());
         F.setName("sycl_func_" + Twine{funcCount++});
 
-        // While functions do come "named" it's in the form %0, %1 and XOCC
-        // doesn't like this for the moment. XOCC demands function arguments
+        // While functions do come "named" it's in the form %0, %1 and v++
+        // doesn't like this for the moment. v++ demands function arguments
         // be either unnamed or named non-numerically. This is a separate
         // issue from the reason we name kernel arguments (which is more
         // related to HLS needing names to generate XML).
@@ -355,6 +361,15 @@ struct InSPIRation : public ModulePass {
       }
     }
 
+    static Prefix prefix[] = {
+      {"__spirv_ocl_u_", std::regex(R"((_Z\d+__spirv_ocl_u_))")},
+      {"__spirv_ocl_s_", std::regex(R"((_Z\d+__spirv_ocl_s_))")},
+      {"__spirv_ocl_", std::regex(R"((_Z\d+__spirv_ocl_))")},
+      {"__spir_ocl_", std::regex(R"((_Z\d+__spir_ocl_))")},
+      {"__spirv_", std::regex(R"((_Z\d+__spirv_))")},
+      {"__spir_", std::regex(R"((_Z\d+__spir_))")},
+    };
+
     for (auto F : declarations) {
       // aims to catch things preceded by a namespace of the style:
       // _Z16__spirv_ocl_ and use the end section as a SPIR call
@@ -366,26 +381,28 @@ struct InSPIRation : public ModulePass {
       // Perhaps there is a more elegant solution that can be implemented in the
       // future. I don't believe too much effort should be put into this until
       // the builtin implementation stabilizes
-      removePrefixFromMangling(*F, matchSPIRVOCLU, SPIRVOCLU);
-      removePrefixFromMangling(*F, matchSPIRVOCLS, SPIRVOCLS);
-      removePrefixFromMangling(*F, matchSPIRVOCL, SPIRVOCL);
-      removePrefixFromMangling(*F, matchSPIROCL, SPIROCL);
+      for (Prefix p : prefix)
+        removePrefixFromMangling(*F, p.Matcher, p.Str);
+
+      remapBuiltin(F);
     }
 
-    setSPIRVersion(M);
-
-    setOpenCLVersion(M);
-
-    // setSPIRTriple(M);
-
-    /// TODO: Set appropriate layout so the linker doesn't always complain, this
-    /// change may be better/more easily applied as something in the Frontend as
-    /// we'd be lying about the layout if we didn't enforce it accurately in
-    /// this pass. Which is potentially a good way to come across some weird
-    /// runtime bugs.
-    //setSPIRLayout(M);
-
     removeOldMetadata(M);
+    if (!Triple(M.getTargetTriple()).isXilinxHLS()) {
+
+      setSPIRVersion(M);
+
+      setOpenCLVersion(M);
+
+      // setSPIRTriple(M);
+
+      /// TODO: Set appropriate layout so the linker doesn't always complain,
+      /// this change may be better/more easily applied as something in the
+      /// Frontend as we'd be lying about the layout if we didn't enforce it
+      /// accurately in this pass. Which is potentially a good way to come
+      /// across some weird runtime bugs.
+      // setSPIRLayout(M);
+    }
 
     // The module probably changed
     return true;

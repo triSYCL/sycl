@@ -1,6 +1,7 @@
 // REQUIRES: xocc && has_secondary_cuda
 
-// RUN: %clangxx -fsycl -fsycl-targets=nvptx64-nvidia-cuda-sycldevice,%sycl_triple %s -o %t.out
+// RUN: %clangxx -fsycl -fsycl-targets=nvptx64-nvidia-cuda-sycldevice,%sycl_triple %s -o %t.out -###
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple,nvptx64-nvidia-cuda-sycldevice %s -o %t.out
 
 // RUN: %ACC_RUN_PLACEHOLDER env --unset=SYCL_DEVICE_FILTER SYCL_DISABLE_PARALLEL_FOR_RANGE_ROUNDING=1 %t.out
 

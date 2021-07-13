@@ -54,7 +54,7 @@ set_target_properties(check-sycl-deploy PROPERTIES FOLDER "SYCL tests")
 add_lit_testsuite(check-sycl-spirv "Running device-agnostic SYCL regression tests for SPIR-V"
   ${CMAKE_CURRENT_BINARY_DIR}
   ARGS ${RT_TEST_ARGS}
-  PARAMS "SYCL_TRIPLE=spir64-unknown-linux-sycldevice"
+  PARAMS "SYCL_TRIPLE=spir64-unknown-unknown-sycldevice"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )
@@ -68,14 +68,14 @@ add_lit_testsuite(check-sycl-xocc-jmax "Running the SYCL regression tests for sy
   )
 set_target_properties(check-sycl-xocc-jmax PROPERTIES FOLDER "SYCL tests")
 
-add_lit_testsuite(check-sycl-xocc-j4 "Running the SYCL regression tests for sycl-xocc in j4"
-  ${CMAKE_CURRENT_BINARY_DIR}/on-device "-j 4"
+add_lit_testsuite(check-sycl-xocc-j2 "Running the SYCL regression tests for sycl-xocc in j2"
+  ${CMAKE_CURRENT_BINARY_DIR}/on-device "-j 2"
   ARGS ${RT_TEST_ARGS}
   PARAMS "XOCC=only"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )
-set_target_properties(check-sycl-xocc-j4 PROPERTIES FOLDER "SYCL tests")
+set_target_properties(check-sycl-xocc-j2 PROPERTIES FOLDER "SYCL tests")
 
 add_lit_testsuite(check-sycl-xocc-all-jmax "Running the SYCL regression tests for SYCL on v++"
   ${CMAKE_CURRENT_BINARY_DIR}/on-device

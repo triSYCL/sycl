@@ -621,7 +621,7 @@ StringRef PredefinedExpr::getIdentKindName(PredefinedExpr::IdentKind IK) {
   llvm_unreachable("Unknown ident kind for PredefinedExpr");
 }
 
-/// Compute a unique name that is consumable by sycl-xocc
+/// Compute a unique name that is consumable by sycl_vxx
 std::string computeUniqueSYCLXOCCName(StringRef Name, StringRef Demangle) {
   /// XOCC has a maximum of 64 character for the name of the kernel function
   /// plus the name of one parameter.
@@ -1531,8 +1531,15 @@ QualType CallExpr::getCallReturnType(const ASTContext &Ctx) const {
     if (isa<CXXPseudoDestructorExpr>(Callee->IgnoreParens()))
       return Ctx.VoidTy;
 
+    if (isa<UnresolvedMemberExpr>(Callee->IgnoreParens()))
+      return Ctx.DependentTy;
+
     // This should never be overloaded and so should never return null.
     CalleeType = Expr::findBoundMemberType(Callee);
+    assert(!CalleeType.isNull());
+  } else if (CalleeType->isDependentType() ||
+             CalleeType->isSpecificPlaceholderType(BuiltinType::Overload)) {
+    return Ctx.DependentTy;
   }
 
   const FunctionType *FnType = CalleeType->castAs<FunctionType>();
@@ -1848,6 +1855,7 @@ bool CastExpr::CastConsistency() const {
   case CK_FixedPointCast:
   case CK_FixedPointToIntegral:
   case CK_IntegralToFixedPoint:
+  case CK_MatrixCast:
     assert(!getType()->isBooleanType() && "unheralded conversion to bool");
     goto CheckNoBasePath;
 

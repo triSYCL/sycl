@@ -4,6 +4,7 @@
 // RUN: cat %t | FileCheck %s --check-prefix DISABLE
 
 void enable() {
+  // CHECK-LABEL: define dso_local spir_func void @_Z6enablev()
   int i = 1000;
   // ENABLE: br i1 %{{.*}}, label %do.body, label %do.end, !llvm.loop ![[ENABLE:[0-9]+]]
   [[clang::loop_unroll]]
@@ -12,6 +13,7 @@ void enable() {
 
 template <int A>
 void count() {
+  // COUNT-LABEL: define linkonce_odr spir_func void @_Z5countILi4EEvv()
   // COUNT: br label %for.cond, !llvm.loop ![[COUNT:[0-9]+]]
   [[clang::loop_unroll(8)]]
   for (int i = 0; i < 1000; ++i);
@@ -22,6 +24,7 @@ void count() {
 
 template <int A>
 void disable() {
+  // CHECK-LABEL: define linkonce_odr spir_func void @_Z7disableILi1EEvv()
   int i = 1000, j = 100;
   // DISABLE: br label %while.cond, !llvm.loop ![[DISABLE:[0-9]+]]
   [[clang::loop_unroll(1)]]
@@ -38,9 +41,9 @@ __attribute__((sycl_kernel)) void kernel_single_task(const Func &kernelFunc) {
 
 int main() {
   kernel_single_task<class kernel_function>([]() {
+    enable();
     count<4>();
     disable<1>();
-    enable();
   });
   return 0;
 }
@@ -54,4 +57,4 @@ int main() {
 // COUNT-NEXT: ![[COUNT_TEMPLATE_A]] = !{!"llvm.loop.unroll.count", i32 4}
 // DISABLE: ![[DISABLE]] = distinct !{![[DISABLE]], ![[MP]], ![[DISABLE_A:[0-9]+]]}
 // DISABLE-NEXT: ![[DISABLE_A]] = !{!"llvm.loop.unroll.disable"}
-// DISABLEL ![[DISABLE_TEMPLATE]] = distinct !{!![[DISABLE_TEMPLATE]], ![[MP]], ![[DISABLE_A]]}
+// DISABLE: ![[DISABLE_TEMPLATE]] = distinct !{![[DISABLE_TEMPLATE]], ![[MP]], ![[DISABLE_A]]}

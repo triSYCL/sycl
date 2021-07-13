@@ -22,6 +22,7 @@
 #include "Targets/Hexagon.h"
 #include "Targets/Lanai.h"
 #include "Targets/Le64.h"
+#include "Targets/M68k.h"
 #include "Targets/MSP430.h"
 #include "Targets/Mips.h"
 #include "Targets/NVPTX.h"
@@ -37,6 +38,7 @@
 #include "Targets/WebAssembly.h"
 #include "Targets/X86.h"
 #include "Targets/XCore.h"
+#include "Targets/XilinxHLS.h"
 #include "clang/Basic/Diagnostic.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/Triple.h"
@@ -301,6 +303,16 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
       return new OpenBSDTargetInfo<MipsTargetInfo>(Triple, Opts);
     default:
       return new MipsTargetInfo(Triple, Opts);
+    }
+
+  case llvm::Triple::m68k:
+    switch (os) {
+    case llvm::Triple::Linux:
+      return new LinuxTargetInfo<M68kTargetInfo>(Triple, Opts);
+    case llvm::Triple::NetBSD:
+      return new NetBSDTargetInfo<M68kTargetInfo>(Triple, Opts);
+    default:
+      return new M68kTargetInfo(Triple, Opts);
     }
 
   case llvm::Triple::le32:
@@ -599,30 +611,56 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
 
   case llvm::Triple::fpga32: {
     // Triple example: fpga32-xilinx-unknown-sycldevice
-    if (Triple.getVendor() == llvm::Triple::Xilinx
-      && Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
-       switch (os) {
-       case llvm::Triple::Linux:
-         return new LinuxTargetInfo<SPIR32SYCLDeviceTargetInfo>(Triple, Opts);
-       default:
-         return new SPIR32SYCLDeviceTargetInfo(Triple, Opts);
-       }
-     }
+    if (Triple.getVendor() == llvm::Triple::Xilinx &&
+        Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
+      switch (Triple.getSubArch()) {
+      case llvm::Triple::FPGASubArch_hls_hw:
+      case llvm::Triple::FPGASubArch_hls_hw_emu:
+      case llvm::Triple::FPGASubArch_hls_sw_emu:
+        switch (os) {
+        case llvm::Triple::Linux:
+          return new LinuxTargetInfo<XilinxHLS32TargetInfo>(Triple, Opts);
+        default:
+          return new XilinxHLS32TargetInfo(Triple, Opts);
+        }
+        break;
+      default:
+        switch (os) {
+        case llvm::Triple::Linux:
+          return new LinuxTargetInfo<SPIR32SYCLDeviceTargetInfo>(Triple, Opts);
+        default:
+          return new SPIR32SYCLDeviceTargetInfo(Triple, Opts);
+        }
+      }
+    }
     return nullptr;
   }
 
   case llvm::Triple::fpga64: {
     // Triple example: fpga64-xilinx-unknown-sycldevice
-    if (Triple.getVendor() == llvm::Triple::Xilinx
-      && Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
-       switch (os) {
-       case llvm::Triple::Linux:
-         return new LinuxTargetInfo<SPIR64SYCLDeviceTargetInfo>(Triple, Opts);
-       default:
-         return new SPIR64SYCLDeviceTargetInfo(Triple, Opts);
-       }
-     }
-     return nullptr;
+    if (Triple.getVendor() == llvm::Triple::Xilinx &&
+        Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
+      switch (Triple.getSubArch()) {
+      case llvm::Triple::FPGASubArch_hls_hw:
+      case llvm::Triple::FPGASubArch_hls_hw_emu:
+      case llvm::Triple::FPGASubArch_hls_sw_emu:
+        switch (os) {
+        case llvm::Triple::Linux:
+          return new LinuxTargetInfo<XilinxHLS64TargetInfo>(Triple, Opts);
+        default:
+          return new XilinxHLS64TargetInfo(Triple, Opts);
+        }
+        break;
+      default:
+        switch (os) {
+        case llvm::Triple::Linux:
+          return new LinuxTargetInfo<SPIR64SYCLDeviceTargetInfo>(Triple, Opts);
+        default:
+          return new SPIR64SYCLDeviceTargetInfo(Triple, Opts);
+        }
+      }
+    }
+    return nullptr;
   }
 
   case llvm::Triple::spir: {
@@ -672,7 +710,7 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
         Triple.getVendor() != llvm::Triple::UnknownVendor ||
         !Triple.isOSBinFormatWasm())
       return nullptr;
-    switch (Triple.getOS()) {
+    switch (os) {
       case llvm::Triple::WASI:
         return new WASITargetInfo<WebAssembly32TargetInfo>(Triple, Opts);
       case llvm::Triple::Emscripten:
@@ -687,7 +725,7 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
         Triple.getVendor() != llvm::Triple::UnknownVendor ||
         !Triple.isOSBinFormatWasm())
       return nullptr;
-    switch (Triple.getOS()) {
+    switch (os) {
       case llvm::Triple::WASI:
         return new WASITargetInfo<WebAssembly64TargetInfo>(Triple, Opts);
       case llvm::Triple::Emscripten:
@@ -792,7 +830,9 @@ TargetInfo::CreateTargetInfo(DiagnosticsEngine &Diags,
 /// and language version
 void TargetInfo::getOpenCLFeatureDefines(const LangOptions &Opts,
                                          MacroBuilder &Builder) const {
-
+  // FIXME: OpenCL options which affect language semantics/syntax
+  // should be moved into LangOptions, thus macro definitions of
+  // such options is better to be done in clang::InitializePreprocessor.
   auto defineOpenCLExtMacro = [&](llvm::StringRef Name, unsigned AvailVer,
                                   unsigned CoreVersions,
                                   unsigned OptionalVersions) {
@@ -800,16 +840,15 @@ void TargetInfo::getOpenCLFeatureDefines(const LangOptions &Opts,
     // OpenCL version
     auto It = getTargetOpts().OpenCLFeaturesMap.find(Name);
     if ((It != getTargetOpts().OpenCLFeaturesMap.end()) && It->getValue() &&
-        OpenCLOptions::OpenCLOptionInfo(AvailVer, CoreVersions,
+        OpenCLOptions::OpenCLOptionInfo(false, AvailVer, CoreVersions,
                                         OptionalVersions)
             .isAvailableIn(Opts))
       Builder.defineMacro(Name);
   };
-#define OPENCL_GENERIC_EXTENSION(Ext, Avail, Core, Opt)                        \
+#define OPENCL_GENERIC_EXTENSION(Ext, WithPragma, Avail, Core, Opt)            \
   defineOpenCLExtMacro(#Ext, Avail, Core, Opt);
 #include "clang/Basic/OpenCLExtensions.def"
 
-  // FIXME: OpenCL options which affect language semantics/syntax
-  // should be moved into LangOptions, thus macro definitions of
-  // such options is better to be done in clang::InitializePreprocessor
+  // Assume compiling for FULL profile
+  Builder.defineMacro("__opencl_c_int64");
 }

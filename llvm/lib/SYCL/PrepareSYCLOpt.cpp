@@ -19,12 +19,17 @@
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/SYCL/PrepareSYCLOpt.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
 
 using namespace llvm;
 
 namespace {
+
+cl::opt<bool> ClearSpir("sycl-prepare-clearspir", cl::Hidden,
+                                cl::init(false));
 
 struct PrepareSYCLOpt : public ModulePass {
 
@@ -35,11 +40,39 @@ struct PrepareSYCLOpt : public ModulePass {
   void turnNonKernelsIntoPrivate(Module &M) {
     for (GlobalObject &G : M.global_objects()) {
       if (auto *F = dyn_cast<Function>(&G))
-        if (F->getCallingConv() == CallingConv::SPIR_KERNEL)
+        if (F->getCallingConv() == CallingConv::SPIR_KERNEL ||
+            F->hasFnAttribute("fpga.top.func"))
           continue;
       if (G.isDeclaration())
         continue;
+      G.setComdat(nullptr);
       G.setLinkage(llvm::GlobalValue::PrivateLinkage);
+    }
+  }
+
+  void setHLSCallingConvention(Module& M) {
+    for (Function &F : M.functions()) {
+      // If the function is a kernel or an intrinsic, keep the current CC
+      if (F.hasFnAttribute("fpga.top.func") || F.isIntrinsic()) {
+        continue;
+      }
+      // Annotate kernels for HLS backend being able to identify them
+      if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
+        assert(F.use_empty());
+        F.addFnAttr("fpga.top.func", F.getName());
+        F.addFnAttr("fpga.demangled.name", F.getName());
+        F.setCallingConv(CallingConv::C);
+        F.setLinkage(llvm::GlobalValue::ExternalLinkage);
+      } else {
+        // We need to call intrinsic with SPIR_FUNC calling conv
+        // for correct linkage with Vitis SPIR builtins lib 
+        auto cc = (ClearSpir) ? CallingConv::C : CallingConv::SPIR_FUNC;
+        F.setCallingConv(cc);
+        for (Value *V : F.users()) {
+          if (auto *Call = dyn_cast<CallBase>(V))
+            Call->setCallingConv(cc);
+        }
+      }
     }
   }
 
@@ -112,11 +145,48 @@ struct PrepareSYCLOpt : public ModulePass {
     }
   }
 
+  void forceInlining(Module &M) {
+    for (auto& F : M.functions()) {
+      if (F.isDeclaration() || F.getCallingConv() == CallingConv::SPIR_KERNEL)
+        continue;
+      F.addFnAttr(Attribute::AlwaysInline);
+    }
+  }
+
+  void cleanSpirBuiltins(Module &M) {
+    /// Find function
+    auto *spirid = M.getFunction("llvm.spir.get.global.id.i64");
+    if (spirid != nullptr && spirid->isDeclaration()) {
+      /// Create replacement
+      auto *replacement = ConstantInt::get(spirid->getReturnType(), 1);
+      for (auto *user : spirid->users())
+        if (auto *call = dyn_cast<CallBase>(user)) {
+          /// Replace calls by constant
+          call->replaceAllUsesWith(replacement);
+          call->eraseFromParent();
+        }
+      assert(spirid->use_empty());
+      /// Erase the function from the module.
+      spirid->eraseFromParent();
+    }
+  }
+
   bool runOnModule(Module &M) override {
+    // When using the HLS flow instead of SPIR default
+    bool SyclHLSFlow = Triple(M.getTargetTriple()).isXilinxHLS();
     turnNonKernelsIntoPrivate(M);
-    setCallingConventions(M);
+    if (SyclHLSFlow) {
+      setHLSCallingConvention(M);
+      if (ClearSpir) 
+        cleanSpirBuiltins(M);
+    } else {
+      setCallingConventions(M);
+    }
     lowerArrayPartition(M);
-    removeAnnotations(M);
+    if (ClearSpir)
+      removeAnnotations(M);
+    if (!SyclHLSFlow)
+      forceInlining(M);
     return true;
   }
 };

@@ -92,21 +92,13 @@ private:
     if (auto constValue{evaluate::ToInt64(expr)}) {
       return PackageIntValue(explicitEnum_, *constValue);
     }
-    if (parameters) {
-      if (const auto *typeParam{
-              evaluate::UnwrapExpr<evaluate::TypeParamInquiry>(expr)}) {
-        if (!typeParam->base()) {
-          const Symbol &symbol{typeParam->parameter()};
-          if (const auto *tpd{symbol.detailsIf<TypeParamDetails>()}) {
-            if (tpd->attr() == common::TypeParamAttr::Len) {
-              return PackageIntValue(lenParameterEnum_,
-                  FindLenParameterIndex(*parameters, symbol));
-            }
-          }
+    if (expr) {
+      if (parameters) {
+        if (const Symbol * lenParam{evaluate::ExtractBareLenParameter(*expr)}) {
+          return PackageIntValue(
+              lenParameterEnum_, FindLenParameterIndex(*parameters, *lenParam));
         }
       }
-    }
-    if (expr) {
       context_.Say(location_,
           "Specification expression '%s' is neither constant nor a length type parameter"_err_en_US,
           expr->AsFortran());
@@ -616,7 +608,7 @@ evaluate::StructureConstructor RuntimeTableBuilder::DescribeComponent(
     const std::string &distinctName, const SymbolVector *parameters) {
   evaluate::StructureConstructorValues values;
   auto typeAndShape{evaluate::characteristics::TypeAndShape::Characterize(
-      object, context_.foldingContext())};
+      symbol, context_.foldingContext())};
   CHECK(typeAndShape.has_value());
   auto dyType{typeAndShape->type()};
   const auto &shape{typeAndShape->shape()};
@@ -687,7 +679,7 @@ evaluate::StructureConstructor RuntimeTableBuilder::DescribeComponent(
   // Shape information
   int rank{evaluate::GetRank(shape)};
   AddValue(values, componentSchema_, "rank"s, IntExpr<1>(rank));
-  if (rank > 0) {
+  if (rank > 0 && !IsAllocatable(symbol) && !IsPointer(symbol)) {
     std::vector<evaluate::StructureConstructor> bounds;
     evaluate::NamedEntity entity{symbol};
     auto &foldingContext{context_.foldingContext()};
