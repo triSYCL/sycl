@@ -333,7 +333,7 @@ using ScalarDefaultCharExpr = Scalar<DefaultCharExpr>;
 using ScalarDefaultCharConstantExpr = Scalar<DefaultChar<ConstantExpr>>;
 
 // R611 label -> digit [digit]...
-using Label = std::uint64_t; // validated later, must be in [1..99999]
+using Label = common::Label; // validated later, must be in [1..99999]
 
 // A wrapper for xzy-stmt productions that are statements, so that
 // source provenances and labels have a uniform representation.
@@ -1836,6 +1836,7 @@ struct ArrayElement {
 // R933 allocate-object -> variable-name | structure-component
 struct AllocateObject {
   UNION_CLASS_BOILERPLATE(AllocateObject);
+  mutable TypedExpr typedExpr;
   std::variant<Name, StructureComponent> u;
 };
 
@@ -1907,6 +1908,7 @@ struct AllocateStmt {
 //        variable-name | structure-component | proc-pointer-name
 struct PointerObject {
   UNION_CLASS_BOILERPLATE(PointerObject);
+  mutable TypedExpr typedExpr;
   std::variant<Name, StructureComponent> u;
 };
 
@@ -3415,7 +3417,7 @@ struct OmpReductionOperator {
 //                                         variable-name-list)
 struct OmpReductionClause {
   TUPLE_CLASS_BOILERPLATE(OmpReductionClause);
-  std::tuple<OmpReductionOperator, std::list<Designator>> t;
+  std::tuple<OmpReductionOperator, OmpObjectList> t;
 };
 
 // OMP 5.0 2.11.4 allocate-clause -> ALLOCATE ([allocator:] variable-name-list)
@@ -3455,13 +3457,6 @@ struct OmpDependClause {
   };
   std::variant<Source, Sink, InOut> u;
 };
-
-// 2.7.1 nowait-clause -> NOWAIT
-EMPTY_CLASS(OmpNowait);
-
-// dist_schedule clause does not fit in generic clause class for tablegen.
-// Therefore it is declared separatly here.
-WRAPPER_CLASS(OmpDistScheduleClause, std::optional<ScalarIntExpr>);
 
 // OpenMP Clauses
 struct OmpClause {
@@ -3810,7 +3805,7 @@ struct OpenMPConstruct {
   UNION_CLASS_BOILERPLATE(OpenMPConstruct);
   std::variant<OpenMPStandaloneConstruct, OpenMPSectionsConstruct,
       OpenMPLoopConstruct, OpenMPBlockConstruct, OpenMPAtomicConstruct,
-      OpenMPExecutableAllocate, OpenMPDeclarativeAllocate,
+      OpenMPDeclarativeAllocate, OpenMPExecutableAllocate,
       OpenMPCriticalConstruct>
       u;
 };
@@ -3859,8 +3854,7 @@ struct AccBindClause {
 };
 
 struct AccDefaultClause {
-  ENUM_CLASS(Arg, None, Present)
-  WRAPPER_CLASS_BOILERPLATE(AccDefaultClause, Arg);
+  WRAPPER_CLASS_BOILERPLATE(AccDefaultClause, llvm::acc::DefaultValue);
   CharBlock source;
 };
 
@@ -3928,13 +3922,13 @@ struct AccClause {
   UNION_CLASS_BOILERPLATE(AccClause);
 
 #define GEN_FLANG_CLAUSE_PARSER_CLASSES
-#include "llvm/Frontend/OpenACC/ACC.cpp.inc"
+#include "llvm/Frontend/OpenACC/ACC.inc"
 
   CharBlock source;
 
   std::variant<
 #define GEN_FLANG_CLAUSE_PARSER_CLASSES_LIST
-#include "llvm/Frontend/OpenACC/ACC.cpp.inc"
+#include "llvm/Frontend/OpenACC/ACC.inc"
       >
       u;
 };

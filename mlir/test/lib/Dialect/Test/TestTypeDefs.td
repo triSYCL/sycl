@@ -15,15 +15,14 @@
 
 // To get the test dialect def.
 include "TestOps.td"
+include "mlir/Interfaces/DataLayoutInterfaces.td"
 
 // All of the types will extend this class.
-class Test_Type<string name> : TypeDef<Test_Dialect, name> { }
+class Test_Type<string name, list<Trait> traits = []>
+  : TypeDef<Test_Dialect, name, traits>;
 
 def SimpleTypeA : Test_Type<"SimpleA"> {
   let mnemonic = "smpla";
-
-  let printer = [{ $_printer << "smpla"; }];
-  let parser = [{ return get($_ctxt); }];
 }
 
 // A more complex parameterized type.
@@ -51,12 +50,12 @@ def CompoundTypeA : Test_Type<"CompoundA"> {
 // An example of how one could implement a standard integer.
 def IntegerType : Test_Type<"TestInteger"> {
   let mnemonic = "int";
-  let genVerifyInvariantsDecl = 1;
+  let genVerifyDecl = 1;
   let parameters = (
     ins
+    "unsigned":$width,
     // SignednessSemantics is defined below.
-    "::mlir::test::TestIntegerType::SignednessSemantics":$signedness,
-    "unsigned":$width
+    "::mlir::test::TestIntegerType::SignednessSemantics":$signedness
   );
 
   // We define the printer inline.
@@ -65,6 +64,15 @@ def IntegerType : Test_Type<"TestInteger"> {
     printSignedness($_printer, getImpl()->signedness);
     $_printer << ", " << getImpl()->width << ">";
   }];
+
+  // Define custom builder methods.
+  let builders = [
+    TypeBuilder<(ins "unsigned":$width,
+                     CArg<"SignednessSemantics", "Signless">:$signedness), [{
+      return $_get($_ctxt, width, signedness);
+    }]>
+  ];
+  let skipDefaultBuilders = 1;
 
   // The parser is defined here also.
   let parser = [{
@@ -76,7 +84,7 @@ def IntegerType : Test_Type<"TestInteger"> {
     if ($_parser.parseInteger(width)) return Type();
     if ($_parser.parseGreater()) return Type();
     Location loc = $_parser.getEncodedSourceLoc($_parser.getNameLoc());
-    return getChecked(loc, signedness, width);
+    return getChecked(loc, loc.getContext(), width, signedness);
   }];
 
   // Any extra code one wants in the type's class declaration.
@@ -87,9 +95,6 @@ def IntegerType : Test_Type<"TestInteger"> {
       Signed,   /// Signed integer
       Unsigned, /// Unsigned integer
     };
-
-    /// This extra function is necessary since it doesn't include signedness
-    static IntegerType getChecked(unsigned width, Location location);
 
     /// Return true if this is a signless integer type.
     bool isSignless() const { return getSignedness() == Signless; }
@@ -146,6 +151,29 @@ class FieldInfo_Type<string name> : Test_Type<name> {
 
 def StructType : FieldInfo_Type<"Struct"> {
     let mnemonic = "struct";
+}
+
+def TestType : Test_Type<"Test", [
+  DeclareTypeInterfaceMethods<TestTypeInterface>
+]> {
+  let mnemonic = "test_type";
+}
+
+def TestTypeWithLayoutType : Test_Type<"TestTypeWithLayout", [
+  DeclareTypeInterfaceMethods<DataLayoutTypeInterface, ["areCompatible"]>
+]> {
+  let mnemonic = "test_type_with_layout";
+  let parameters = (ins "unsigned":$key);
+  let extraClassDeclaration = [{
+    LogicalResult verifyEntries(DataLayoutEntryListRef params,
+                                Location loc) const;
+
+  private:
+    unsigned extractKind(DataLayoutEntryListRef params,
+                         StringRef expectedKind) const;
+
+  public:
+  }];
 }
 
 #endif // TEST_TYPEDEFS

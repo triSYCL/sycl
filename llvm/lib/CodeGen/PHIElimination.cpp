@@ -394,8 +394,7 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
     }
 
     LiveInterval &DestLI = LIS->getInterval(DestReg);
-    assert(DestLI.begin() != DestLI.end() &&
-           "PHIs should have nonempty LiveIntervals.");
+    assert(!DestLI.empty() && "PHIs should have nonempty LiveIntervals.");
     if (DestLI.endIndex().isDead()) {
       // A dead PHI's live range begins and ends at the start of the MBB, but
       // the lowered copy, which will still be dead, needs to begin and end at
@@ -476,9 +475,10 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
           if (DefMI->isImplicitDef())
             ImpDefs.insert(DefMI);
       } else {
-        NewSrcInstr =
-            TII->createPHISourceCopy(opBlock, InsertPos, MPhi->getDebugLoc(),
-                                     SrcReg, SrcSubReg, IncomingReg);
+        // Delete the debug location, since the copy is inserted into a
+        // different basic block.
+        NewSrcInstr = TII->createPHISourceCopy(opBlock, InsertPos, nullptr,
+                                               SrcReg, SrcSubReg, IncomingReg);
       }
     }
 
@@ -551,9 +551,8 @@ void PHIElimination::LowerPHINode(MachineBasicBlock &MBB,
         LiveInterval &SrcLI = LIS->getInterval(SrcReg);
 
         bool isLiveOut = false;
-        for (MachineBasicBlock::succ_iterator SI = opBlock.succ_begin(),
-             SE = opBlock.succ_end(); SI != SE; ++SI) {
-          SlotIndex startIdx = LIS->getMBBStartIdx(*SI);
+        for (MachineBasicBlock *Succ : opBlock.successors()) {
+          SlotIndex startIdx = LIS->getMBBStartIdx(Succ);
           VNInfo *VNI = SrcLI.getVNInfoAt(startIdx);
 
           // Definitions by other PHIs are not truly live-in for our purposes.

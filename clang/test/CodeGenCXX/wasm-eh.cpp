@@ -63,7 +63,7 @@ void test0() {
 // CHECK-NEXT:   br label %[[TRY_CONT_BB]]
 
 // CHECK: [[RETHROW_BB]]:
-// CHECK-NEXT:   call void @llvm.wasm.rethrow.in.catch() {{.*}} [ "funclet"(token %[[CATCHPAD]]) ]
+// CHECK-NEXT:   call void @llvm.wasm.rethrow() {{.*}} [ "funclet"(token %[[CATCHPAD]]) ]
 // CHECK-NEXT:   unreachable
 
 // Single catch-all
@@ -188,13 +188,7 @@ void test5() {
 
 // CHECK: [[TERMINATE_BB]]:
 // CHECK-NEXT:   %[[CLEANUPPAD1:.*]] = cleanuppad within %[[CLEANUPPAD0]] []
-// CHECK-NEXT:   %[[EXN:.*]] = call i8* @llvm.wasm.get.exception(token %[[CLEANUPPAD1]])
-// CHECK-NEXT:   call void @__clang_call_terminate(i8* %[[EXN]]) {{.*}} [ "funclet"(token %[[CLEANUPPAD1]]) ]
-// CHECK-NEXT:   unreachable
-
-// CHECK-LABEL: define {{.*}} void @__clang_call_terminate(i8* %0)
-// CHECK-NEXT:   call i8* @__cxa_begin_catch(i8* %{{.*}})
-// CHECK-NEXT:   call void @_ZSt9terminatev()
+// CHECK-NEXT:   call void @_ZSt9terminatev() {{.*}} [ "funclet"(token %[[CLEANUPPAD1]]) ]
 // CHECK-NEXT:   unreachable
 
 // Try-catch with cleanups
@@ -233,7 +227,7 @@ void test6() {
 // CHECK:   catchret from %[[CATCHPAD]] to label %{{.*}}
 
 // CHECK: [[RETHROW_BB]]:
-// CHECK-NEXT:   invoke void @llvm.wasm.rethrow.in.catch() {{.*}} [ "funclet"(token %[[CATCHPAD]]) ]
+// CHECK-NEXT:   invoke void @llvm.wasm.rethrow() {{.*}} [ "funclet"(token %[[CATCHPAD]]) ]
 // CHECK-NEXT:          to label %[[UNREACHABLE_BB:.*]] unwind label %[[EHCLEANUP_BB1:.*]]
 
 // CHECK: [[EHCLEANUP_BB2]]:
@@ -297,7 +291,7 @@ void test7() {
 
 // CHECK:   catchret from %[[CATCHPAD0]] to label
 
-// CHECK:   invoke void @llvm.wasm.rethrow.in.catch() {{.*}} [ "funclet"(token %[[CATCHPAD0]]) ]
+// CHECK:   invoke void @llvm.wasm.rethrow() {{.*}} [ "funclet"(token %[[CATCHPAD0]]) ]
 
 // CHECK:   %[[CLEANUPPAD1:.*]] = cleanuppad within %[[CATCHPAD0]] []
 // CHECK:   cleanupret from %[[CLEANUPPAD1]] unwind label
@@ -336,7 +330,7 @@ void test7() {
 // CHECK:   unreachable
 
 // CHECK:   %[[CLEANUPPAD7:.*]] = cleanuppad within %[[CLEANUPPAD4]] []
-// CHECK:   call void @__clang_call_terminate(i8* %{{.*}}) {{.*}} [ "funclet"(token %[[CLEANUPPAD7]]) ]
+// CHECK:   call void @_ZSt9terminatev() {{.*}} [ "funclet"(token %[[CLEANUPPAD7]]) ]
 // CHECK:   unreachable
 
 // Nested try-catches within a catch
@@ -369,11 +363,11 @@ void test8() {
 
 // CHECK:   catchret from %[[CATCHPAD1]] to label
 
-// CHECK:   invoke void @llvm.wasm.rethrow.in.catch() {{.*}} [ "funclet"(token %[[CATCHPAD1]]) ]
+// CHECK:   invoke void @llvm.wasm.rethrow() {{.*}} [ "funclet"(token %[[CATCHPAD1]]) ]
 
 // CHECK:   catchret from %[[CATCHPAD0]] to label
 
-// CHECK:   call void @llvm.wasm.rethrow.in.catch() {{.*}} [ "funclet"(token %[[CATCHPAD0]]) ]
+// CHECK:   call void @llvm.wasm.rethrow() {{.*}} [ "funclet"(token %[[CATCHPAD0]]) ]
 // CHECK:   unreachable
 
 // CHECK:   %[[CLEANUPPAD0:.*]] = cleanuppad within %[[CATCHPAD1]] []
@@ -411,7 +405,8 @@ void test10() throw() {
 // Here we only check if the command enables wasm exception handling in the
 // backend so that exception handling instructions can be generated in .s file.
 
-// RUN: %clang_cc1 %s -triple wasm32-unknown-unknown -fms-extensions -fexceptions -fcxx-exceptions -exception-model=wasm -target-feature +exception-handling -S -o - -std=c++11 | FileCheck %s --check-prefix=ASSEMBLY
+// TODO Reenable these lines after updating the backend to the new spec
+// R UN: %clang_cc1 %s -triple wasm32-unknown-unknown -fms-extensions -fexceptions -fcxx-exceptions -exception-model=wasm -target-feature +exception-handling -S -o - -std=c++11 | FileCheck %s --check-prefix=ASSEMBLY
 
 // ASSEMBLY: try
 // ASSEMBLY: catch

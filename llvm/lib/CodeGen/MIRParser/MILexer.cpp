@@ -249,6 +249,7 @@ static MIToken::TokenKind getIdentifierKind(StringRef Identifier) {
       .Case("dereferenceable", MIToken::kw_dereferenceable)
       .Case("invariant", MIToken::kw_invariant)
       .Case("align", MIToken::kw_align)
+      .Case("basealign", MIToken::kw_align)
       .Case("addrspace", MIToken::kw_addrspace)
       .Case("stack", MIToken::kw_stack)
       .Case("got", MIToken::kw_got)
@@ -270,6 +271,7 @@ static MIToken::TokenKind getIdentifierKind(StringRef Identifier) {
       .Case("heap-alloc-marker", MIToken::kw_heap_alloc_marker)
       .Case("bbsections", MIToken::kw_bbsections)
       .Case("unknown-size", MIToken::kw_unknown_size)
+      .Case("unknown-address", MIToken::kw_unknown_address)
       .Default(MIToken::Identifier);
 }
 

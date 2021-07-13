@@ -59,7 +59,7 @@ module attributes {gpu.container_module} {
       "gpu.barrier"() : () -> ()
 
       "some_op"(%bIdX, %tIdX) : (index, index) -> ()
-      %42 = load %arg1[%bIdX] : memref<?xf32, 1>
+      %42 = memref.load %arg1[%bIdX] : memref<?xf32, 1>
       gpu.return
     }
 
@@ -181,6 +181,17 @@ module attributes {gpu.container_module} {
     // CHECK: gpu.wait
     // CHECK-NOT: async
     gpu.wait // Valid, but a no-op.
+    return
+  }
+
+  func @memcpy(%dst : memref<3x7xf32>, %src : memref<3x7xf32, 1>) {
+    // CHECK-LABEL: func @memcpy
+    // CHECK: gpu.memcpy {{.*}}, {{.*}} : memref<3x7xf32>, memref<3x7xf32, 1>
+    gpu.memcpy %dst, %src : memref<3x7xf32>, memref<3x7xf32, 1>
+    // CHECK: %[[t0:.*]] = gpu.wait async
+    %0 = gpu.wait async
+    // CHECK: {{.*}} = gpu.memcpy async [%[[t0]]] {{.*}}, {{.*}} : memref<3x7xf32>, memref<3x7xf32, 1>
+    %1 = gpu.memcpy async [%0] %dst, %src : memref<3x7xf32>, memref<3x7xf32, 1>
     return
   }
 }

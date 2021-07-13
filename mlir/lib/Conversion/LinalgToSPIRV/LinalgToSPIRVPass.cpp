@@ -1,4 +1,4 @@
-//===- LinalgToSPIRVPass.cpp - Linalg to SPIR-V conversion pass -----------===//
+//===- LinalgToSPIRVPass.cpp - Linalg to SPIR-V Passes --------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -27,15 +27,15 @@ void LinalgToSPIRVPass::runOnOperation() {
 
   auto targetAttr = spirv::lookupTargetEnvOrDefault(module);
   std::unique_ptr<ConversionTarget> target =
-      spirv::SPIRVConversionTarget::get(targetAttr);
+      SPIRVConversionTarget::get(targetAttr);
 
   SPIRVTypeConverter typeConverter(targetAttr);
-  OwningRewritePatternList patterns;
-  populateLinalgToSPIRVPatterns(context, typeConverter, patterns);
-  populateBuiltinFuncToSPIRVPatterns(context, typeConverter, patterns);
+  RewritePatternSet patterns(context);
+  populateLinalgToSPIRVPatterns(typeConverter, patterns);
+  populateBuiltinFuncToSPIRVPatterns(typeConverter, patterns);
 
   // Allow builtin ops.
-  target->addLegalOp<ModuleOp, ModuleTerminatorOp>();
+  target->addLegalOp<ModuleOp>();
   target->addDynamicallyLegalOp<FuncOp>([&](FuncOp op) {
     return typeConverter.isSignatureLegal(op.getType()) &&
            typeConverter.isLegal(&op.getBody());

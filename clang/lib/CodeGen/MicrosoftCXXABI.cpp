@@ -771,6 +771,9 @@ public:
   LoadVTablePtr(CodeGenFunction &CGF, Address This,
                 const CXXRecordDecl *RD) override;
 
+  virtual bool
+  isPermittedToBeHomogeneousAggregate(const CXXRecordDecl *RD) const override;
+
 private:
   typedef std::pair<const CXXRecordDecl *, CharUnits> VFTableIdTy;
   typedef llvm::DenseMap<VFTableIdTy, llvm::GlobalVariable *> VTablesMapTy;
@@ -934,7 +937,8 @@ MicrosoftCXXABI::performBaseAdjustment(CodeGenFunction &CGF, Address Value,
 
   llvm::Value *Offset =
     GetVirtualBaseClassOffset(CGF, Value, SrcDecl, PolymorphicBase);
-  llvm::Value *Ptr = CGF.Builder.CreateInBoundsGEP(Value.getPointer(), Offset);
+  llvm::Value *Ptr = CGF.Builder.CreateInBoundsGEP(
+      Value.getElementType(), Value.getPointer(), Offset);
   CharUnits VBaseAlign =
     CGF.CGM.getVBaseAlignment(Value.getAlignment(), SrcDecl, PolymorphicBase);
   return std::make_tuple(Address(Ptr, VBaseAlign), Offset, PolymorphicBase);
@@ -1070,7 +1074,7 @@ bool MicrosoftCXXABI::hasMostDerivedReturn(GlobalDecl GD) const {
   return isDeletingDtor(GD);
 }
 
-static bool isCXX14Aggregate(const CXXRecordDecl *RD) {
+static bool isTrivialForAArch64MSVC(const CXXRecordDecl *RD) {
   // For AArch64, we use the C++14 definition of an aggregate, so we also
   // check for:
   //   No private or protected non static data members.
@@ -1107,7 +1111,7 @@ bool MicrosoftCXXABI::classifyReturnType(CGFunctionInfo &FI) const {
   bool isTrivialForABI = RD->isPOD();
   bool isAArch64 = CGM.getTarget().getTriple().isAArch64();
   if (isAArch64)
-    isTrivialForABI = RD->canPassInRegisters() && isCXX14Aggregate(RD);
+    isTrivialForABI = RD->canPassInRegisters() && isTrivialForAArch64MSVC(RD);
 
   // MSVC always returns structs indirectly from C++ instance methods.
   bool isIndirectReturn = !isTrivialForABI || FI.isInstanceMethod();
@@ -1216,7 +1220,8 @@ void MicrosoftCXXABI::initializeHiddenVirtualInheritanceMembers(
     if (!Int8This)
       Int8This = Builder.CreateBitCast(getThisValue(CGF),
                                        CGF.Int8Ty->getPointerTo(AS));
-    llvm::Value *VtorDispPtr = Builder.CreateInBoundsGEP(Int8This, VBaseOffset);
+    llvm::Value *VtorDispPtr =
+        Builder.CreateInBoundsGEP(CGF.Int8Ty, Int8This, VBaseOffset);
     // vtorDisp is always the 32-bits before the vbase in the class layout.
     VtorDispPtr = Builder.CreateConstGEP1_32(VtorDispPtr, -4);
     VtorDispPtr = Builder.CreateBitCast(
@@ -1454,8 +1459,8 @@ Address MicrosoftCXXABI::adjustThisArgumentForVirtualFunctionCall(
     const CXXRecordDecl *VBase = ML.VBase;
     llvm::Value *VBaseOffset =
       GetVirtualBaseClassOffset(CGF, Result, Derived, VBase);
-    llvm::Value *VBasePtr =
-      CGF.Builder.CreateInBoundsGEP(Result.getPointer(), VBaseOffset);
+    llvm::Value *VBasePtr = CGF.Builder.CreateInBoundsGEP(
+        Result.getElementType(), Result.getPointer(), VBaseOffset);
     CharUnits VBaseAlign =
       CGF.CGM.getVBaseAlignment(Result.getAlignment(), Derived, VBase);
     Result = Address(VBasePtr, VBaseAlign);
@@ -1908,12 +1913,13 @@ CGCallee MicrosoftCXXABI::getVirtualFunctionPointer(CodeGenFunction &CGF,
                                                     SourceLocation Loc) {
   CGBuilderTy &Builder = CGF.Builder;
 
-  Ty = Ty->getPointerTo()->getPointerTo();
+  Ty = Ty->getPointerTo();
   Address VPtr =
       adjustThisArgumentForVirtualFunctionCall(CGF, GD, This, true);
 
   auto *MethodDecl = cast<CXXMethodDecl>(GD.getDecl());
-  llvm::Value *VTable = CGF.GetVTablePtr(VPtr, Ty, MethodDecl->getParent());
+  llvm::Value *VTable = CGF.GetVTablePtr(VPtr, Ty->getPointerTo(),
+                                         MethodDecl->getParent());
 
   MicrosoftVTableContext &VFTContext = CGM.getMicrosoftVTableContext();
   MethodVFTableLocation ML = VFTContext.getMethodVFTableLocation(GD);
@@ -1941,7 +1947,7 @@ CGCallee MicrosoftCXXABI::getVirtualFunctionPointer(CodeGenFunction &CGF,
 
     llvm::Value *VFuncPtr =
         Builder.CreateConstInBoundsGEP1_64(VTable, ML.Index, "vfn");
-    VFunc = Builder.CreateAlignedLoad(VFuncPtr, CGF.getPointerAlign());
+    VFunc = Builder.CreateAlignedLoad(Ty, VFuncPtr, CGF.getPointerAlign());
   }
 
   CGCallee Callee(GD, VFunc);
@@ -2075,7 +2081,8 @@ MicrosoftCXXABI::EmitVirtualMemPtrThunk(const CXXMethodDecl *MD,
   llvm::Value *VFuncPtr =
       CGF.Builder.CreateConstInBoundsGEP1_64(VTable, ML.Index, "vfn");
   llvm::Value *Callee =
-    CGF.Builder.CreateAlignedLoad(VFuncPtr, CGF.getPointerAlign());
+    CGF.Builder.CreateAlignedLoad(ThunkTy->getPointerTo(), VFuncPtr,
+                                  CGF.getPointerAlign());
 
   CGF.EmitMustTailThunk(MD, getThisValue(CGF), {ThunkTy, Callee});
 
@@ -2208,7 +2215,7 @@ llvm::Value *MicrosoftCXXABI::performThisAdjustment(CodeGenFunction &CGF,
           GetVBaseOffsetFromVBPtr(CGF, Address(V, CGF.getPointerAlign()),
                                   -TA.Virtual.Microsoft.VBPtrOffset,
                                   TA.Virtual.Microsoft.VBOffsetOffset, &VBPtr);
-      V = CGF.Builder.CreateInBoundsGEP(VBPtr, VBaseOffset);
+      V = CGF.Builder.CreateInBoundsGEP(CGF.Int8Ty, VBPtr, VBaseOffset);
     }
   }
 
@@ -2240,7 +2247,7 @@ MicrosoftCXXABI::performReturnAdjustment(CodeGenFunction &CGF, Address Ret,
     llvm::Value *VBaseOffset =
         GetVBaseOffsetFromVBPtr(CGF, Ret, RA.Virtual.Microsoft.VBPtrOffset,
                                 IntSize * RA.Virtual.Microsoft.VBIndex, &VBPtr);
-    V = CGF.Builder.CreateInBoundsGEP(VBPtr, VBaseOffset);
+    V = CGF.Builder.CreateInBoundsGEP(CGF.Int8Ty, VBPtr, VBaseOffset);
   }
 
   if (RA.NonVirtual)
@@ -3005,8 +3012,8 @@ MicrosoftCXXABI::GetVBaseOffsetFromVBPtr(CodeGenFunction &CGF,
   CGBuilderTy &Builder = CGF.Builder;
   // Load the vbtable pointer from the vbptr in the instance.
   This = Builder.CreateElementBitCast(This, CGM.Int8Ty);
-  llvm::Value *VBPtr =
-    Builder.CreateInBoundsGEP(This.getPointer(), VBPtrOffset, "vbptr");
+  llvm::Value *VBPtr = Builder.CreateInBoundsGEP(
+      This.getElementType(), This.getPointer(), VBPtrOffset, "vbptr");
   if (VBPtrOut) *VBPtrOut = VBPtr;
   VBPtr = Builder.CreateBitCast(VBPtr,
             CGM.Int32Ty->getPointerTo(0)->getPointerTo(This.getAddressSpace()));
@@ -3019,7 +3026,8 @@ MicrosoftCXXABI::GetVBaseOffsetFromVBPtr(CodeGenFunction &CGF,
     VBPtrAlign = CGF.getPointerAlign();
   }
 
-  llvm::Value *VBTable = Builder.CreateAlignedLoad(VBPtr, VBPtrAlign, "vbtable");
+  llvm::Value *VBTable = Builder.CreateAlignedLoad(
+      CGM.Int32Ty->getPointerTo(0), VBPtr, VBPtrAlign, "vbtable");
 
   // Translate from byte offset to table index. It improves analyzability.
   llvm::Value *VBTableIndex = Builder.CreateAShr(
@@ -3027,10 +3035,11 @@ MicrosoftCXXABI::GetVBaseOffsetFromVBPtr(CodeGenFunction &CGF,
       "vbtindex", /*isExact=*/true);
 
   // Load an i32 offset from the vb-table.
-  llvm::Value *VBaseOffs = Builder.CreateInBoundsGEP(VBTable, VBTableIndex);
+  llvm::Value *VBaseOffs =
+      Builder.CreateInBoundsGEP(CGM.Int32Ty, VBTable, VBTableIndex);
   VBaseOffs = Builder.CreateBitCast(VBaseOffs, CGM.Int32Ty->getPointerTo(0));
-  return Builder.CreateAlignedLoad(VBaseOffs, CharUnits::fromQuantity(4),
-                                   "vbase_offs");
+  return Builder.CreateAlignedLoad(CGM.Int32Ty, VBaseOffs,
+                                   CharUnits::fromQuantity(4), "vbase_offs");
 }
 
 // Returns an adjusted base cast to i8*, since we do more address arithmetic on
@@ -3077,7 +3086,8 @@ llvm::Value *MicrosoftCXXABI::AdjustVirtualBase(
   llvm::Value *VBPtr = nullptr;
   llvm::Value *VBaseOffs =
     GetVBaseOffsetFromVBPtr(CGF, Base, VBPtrOffset, VBTableOffset, &VBPtr);
-  llvm::Value *AdjustedBase = Builder.CreateInBoundsGEP(VBPtr, VBaseOffs);
+  llvm::Value *AdjustedBase =
+    Builder.CreateInBoundsGEP(CGM.Int8Ty, VBPtr, VBaseOffs);
 
   // Merge control flow with the case where we didn't have to adjust.
   if (VBaseAdjustBB) {
@@ -3129,7 +3139,8 @@ llvm::Value *MicrosoftCXXABI::EmitMemberDataPointerAddress(
   Addr = Builder.CreateBitCast(Addr, CGF.Int8Ty->getPointerTo(AS));
 
   // Apply the offset, which we assume is non-null.
-  Addr = Builder.CreateInBoundsGEP(Addr, FieldOffset, "memptr.offset");
+  Addr = Builder.CreateInBoundsGEP(CGF.Int8Ty, Addr, FieldOffset,
+                                   "memptr.offset");
 
   // Cast the address to the appropriate pointer type, adopting the address
   // space of the base pointer.
@@ -3291,9 +3302,10 @@ llvm::Value *MicrosoftCXXABI::EmitNonNullMemberPointerConversion(
             Mapping->getAggregateElement(cast<llvm::Constant>(VBIndex));
       } else {
         llvm::Value *Idxs[] = {getZeroInt(), VBIndex};
-        VirtualBaseAdjustmentOffset =
-            Builder.CreateAlignedLoad(Builder.CreateInBoundsGEP(VDispMap, Idxs),
-                                      CharUnits::fromQuantity(4));
+        VirtualBaseAdjustmentOffset = Builder.CreateAlignedLoad(
+            CGM.IntTy, Builder.CreateInBoundsGEP(VDispMap->getValueType(),
+                                                 VDispMap, Idxs),
+            CharUnits::fromQuantity(4));
       }
 
       DstVBIndexEqZero =
@@ -3423,7 +3435,7 @@ CGCallee MicrosoftCXXABI::EmitLoadOfMemberFunctionPointer(
   if (NonVirtualBaseAdjustment) {
     // Apply the adjustment and cast back to the original struct type.
     llvm::Value *Ptr = Builder.CreateBitCast(ThisPtrForCall, CGF.Int8PtrTy);
-    Ptr = Builder.CreateInBoundsGEP(Ptr, NonVirtualBaseAdjustment);
+    Ptr = Builder.CreateInBoundsGEP(CGF.Int8Ty, Ptr, NonVirtualBaseAdjustment);
     ThisPtrForCall = Builder.CreateBitCast(Ptr, ThisPtrForCall->getType(),
                                            "this.adjusted");
   }
@@ -4357,4 +4369,13 @@ MicrosoftCXXABI::LoadVTablePtr(CodeGenFunction &CGF, Address This,
   std::tie(This, std::ignore, RD) =
       performBaseAdjustment(CGF, This, QualType(RD->getTypeForDecl(), 0));
   return {CGF.GetVTablePtr(This, CGM.Int8PtrTy, RD), RD};
+}
+
+bool MicrosoftCXXABI::isPermittedToBeHomogeneousAggregate(
+    const CXXRecordDecl *CXXRD) const {
+  // MSVC Windows on Arm64 considers a type not HFA if it is not an
+  // aggregate according to the C++14 spec. This is not consistent with the
+  // AAPCS64, but is defacto spec on that platform.
+  return !CGM.getTarget().getTriple().isAArch64() ||
+         isTrivialForAArch64MSVC(CXXRD);
 }

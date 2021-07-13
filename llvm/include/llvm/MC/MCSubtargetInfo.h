@@ -89,6 +89,7 @@ class MCSubtargetInfo {
   const unsigned *OperandCycles;       // Itinerary operand cycles
   const unsigned *ForwardingPaths;
   FeatureBitset FeatureBits;           // Feature bits for current CPU + FS
+  std::string FeatureString;           // Feature string
 
 public:
   MCSubtargetInfo(const MCSubtargetInfo &) = default;
@@ -111,6 +112,8 @@ public:
   void setFeatureBits(const FeatureBitset &FeatureBits_) {
     FeatureBits = FeatureBits_;
   }
+
+  StringRef getFeatureString() const { return FeatureString; }
 
   bool hasFeature(unsigned Feature) const {
     return FeatureBits[Feature];
@@ -222,7 +225,7 @@ public:
 
   /// Check whether the CPU string is valid.
   bool isCPUStringValid(StringRef CPU) const {
-    auto Found = std::lower_bound(ProcDesc.begin(), ProcDesc.end(), CPU);
+    auto Found = llvm::lower_bound(ProcDesc, CPU);
     return Found != ProcDesc.end() && StringRef(Found->Key) == CPU;
   }
 

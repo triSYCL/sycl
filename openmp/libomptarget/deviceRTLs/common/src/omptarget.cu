@@ -9,6 +9,7 @@
 // This file contains the initialization code for the GPU
 //
 //===----------------------------------------------------------------------===//
+#pragma omp declare target
 
 #include "common/omptarget.h"
 #include "target_impl.h"
@@ -17,9 +18,9 @@
 // global data tables
 ////////////////////////////////////////////////////////////////////////////////
 
-extern DEVICE
-    omptarget_nvptx_Queue<omptarget_nvptx_ThreadPrivateContext, OMP_STATE_COUNT>
-        omptarget_nvptx_device_State[MAX_SM];
+extern omptarget_nvptx_Queue<omptarget_nvptx_ThreadPrivateContext,
+                             OMP_STATE_COUNT>
+    omptarget_nvptx_device_State[MAX_SM];
 
 ////////////////////////////////////////////////////////////////////////////////
 // init entry points
@@ -78,7 +79,8 @@ EXTERN void __kmpc_kernel_deinit(int16_t IsOMPRuntimeInitialized) {
   omptarget_nvptx_workFn = 0;
 }
 
-EXTERN void __kmpc_spmd_kernel_init(int ThreadLimit, int16_t RequiresOMPRuntime) {
+EXTERN void __kmpc_spmd_kernel_init(int ThreadLimit,
+                                    int16_t RequiresOMPRuntime) {
   PRINT0(LD_IO, "call to __kmpc_spmd_kernel_init\n");
 
   setExecutionParameters(Spmd, RequiresOMPRuntime ? RuntimeInitialized
@@ -86,11 +88,6 @@ EXTERN void __kmpc_spmd_kernel_init(int ThreadLimit, int16_t RequiresOMPRuntime)
   int threadId = GetThreadIdInBlock();
   if (threadId == 0) {
     usedSlotIdx = __kmpc_impl_smid() % MAX_SM;
-    parallelLevel[0] =
-        1 + (GetNumberOfThreadsInBlock() > 1 ? OMP_ACTIVE_PARALLEL_LEVEL : 0);
-  } else if (GetLaneId() == 0) {
-    parallelLevel[GetWarpId()] =
-        1 + (GetNumberOfThreadsInBlock() > 1 ? OMP_ACTIVE_PARALLEL_LEVEL : 0);
   }
   if (!RequiresOMPRuntime) {
     // Runtime is not required - exit.
@@ -157,3 +154,5 @@ EXTERN int8_t __kmpc_is_spmd_exec_mode() {
   PRINT0(LD_IO | LD_PAR, "call to __kmpc_is_spmd_exec_mode\n");
   return isSPMDMode();
 }
+
+#pragma omp end declare target

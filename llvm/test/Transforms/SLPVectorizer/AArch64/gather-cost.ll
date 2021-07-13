@@ -10,13 +10,13 @@ target triple = "aarch64--linux-gnu"
 ; REMARK-LABEL: Function: gather_multiple_use
 ; REMARK:       Args:
 ; REMARK-NEXT:    - String: 'Vectorized horizontal reduction with cost '
-; REMARK-NEXT:    - Cost: '-7'
+; REMARK-NEXT:    - Cost: '-16'
 ;
 ; REMARK-NOT: Function: gather_load
 
 define internal i32 @gather_multiple_use(i32 %a, i32 %b, i32 %c, i32 %d) {
 ; CHECK-LABEL: @gather_multiple_use(
-; CHECK-NEXT:    [[TMP1:%.*]] = insertelement <4 x i32> undef, i32 [[C:%.*]], i32 0
+; CHECK-NEXT:    [[TMP1:%.*]] = insertelement <4 x i32> poison, i32 [[C:%.*]], i32 0
 ; CHECK-NEXT:    [[TMP2:%.*]] = insertelement <4 x i32> [[TMP1]], i32 [[A:%.*]], i32 1
 ; CHECK-NEXT:    [[TMP3:%.*]] = insertelement <4 x i32> [[TMP2]], i32 [[B:%.*]], i32 2
 ; CHECK-NEXT:    [[TMP4:%.*]] = insertelement <4 x i32> [[TMP3]], i32 [[D:%.*]], i32 3

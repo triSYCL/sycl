@@ -38,6 +38,7 @@
 #include "llvm/Analysis/ScalarEvolution.h"
 #include "llvm/Analysis/ScalarEvolutionAliasAnalysis.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Dominators.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
@@ -48,7 +49,6 @@
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/Utils.h"
-#include "llvm/Transforms/Utils/Local.h"
 #include "llvm/Transforms/Utils/LoopUtils.h"
 #include "llvm/Transforms/Utils/SSAUpdater.h"
 using namespace llvm;
@@ -236,7 +236,6 @@ bool llvm::formLCSSAForInstructions(SmallVectorImpl<Instruction *> &Worklist,
     llvm::findDbgValues(DbgValues, I);
 
     // Update pre-existing debug value uses that reside outside the loop.
-    auto &Ctx = I->getContext();
     for (auto DVI : DbgValues) {
       BasicBlock *UserBB = DVI->getParent();
       if (InstBB == UserBB || L->contains(UserBB))
@@ -247,7 +246,7 @@ bool llvm::formLCSSAForInstructions(SmallVectorImpl<Instruction *> &Worklist,
       Value *V = AddedPHIs.size() == 1 ? AddedPHIs[0]
                                        : SSAUpdate.FindValueForBlock(UserBB);
       if (V)
-        DVI->setOperand(0, MetadataAsValue::get(Ctx, ValueAsMetadata::get(V)));
+        DVI->replaceVariableLocationOp(I, V);
     }
 
     // SSAUpdater might have inserted phi-nodes inside other loops. We'll need
@@ -295,12 +294,9 @@ bool llvm::formLCSSAForInstructions(SmallVectorImpl<Instruction *> &Worklist,
 static void computeBlocksDominatingExits(
     Loop &L, const DominatorTree &DT, SmallVector<BasicBlock *, 8> &ExitBlocks,
     SmallSetVector<BasicBlock *, 8> &BlocksDominatingExits) {
-  SmallVector<BasicBlock *, 8> BBWorklist;
-
   // We start from the exit blocks, as every block trivially dominates itself
   // (not strictly).
-  for (BasicBlock *BB : ExitBlocks)
-    BBWorklist.push_back(BB);
+  SmallVector<BasicBlock *, 8> BBWorklist(ExitBlocks);
 
   while (!BBWorklist.empty()) {
     BasicBlock *BB = BBWorklist.pop_back_val();

@@ -107,9 +107,10 @@ public:
         SetTagZeroFn(SetTagZeroFn), StgpFn(StgpFn) {}
 
   bool addRange(uint64_t Start, uint64_t End, Instruction *Inst) {
-    auto I = std::lower_bound(
-        Ranges.begin(), Ranges.end(), Start,
-        [](const Range &LHS, uint64_t RHS) { return LHS.End <= RHS; });
+    auto I =
+        llvm::lower_bound(Ranges, Start, [](const Range &LHS, uint64_t RHS) {
+          return LHS.End <= RHS;
+        });
     if (I != Ranges.end() && End > I->Start) {
       // Overlap - bail.
       return false;
@@ -283,6 +284,7 @@ public:
 class AArch64StackTagging : public FunctionPass {
   struct AllocaInfo {
     AllocaInst *AI;
+    TrackingVH<Instruction> OldAI; // Track through RAUW to replace debug uses.
     SmallVector<IntrinsicInst *, 2> LifetimeStart;
     SmallVector<IntrinsicInst *, 2> LifetimeEnd;
     SmallVector<DbgVariableIntrinsic *, 2> DbgVariableIntrinsics;
@@ -556,14 +558,14 @@ bool AArch64StackTagging::runOnFunction(Function &Fn) {
       Instruction *I = &*IT;
       if (auto *AI = dyn_cast<AllocaInst>(I)) {
         Allocas[AI].AI = AI;
+        Allocas[AI].OldAI = AI;
         continue;
       }
 
       if (auto *DVI = dyn_cast<DbgVariableIntrinsic>(I)) {
-        if (auto *AI =
-                dyn_cast_or_null<AllocaInst>(DVI->getVariableLocation())) {
-          Allocas[AI].DbgVariableIntrinsics.push_back(DVI);
-        }
+        for (Value *V : DVI->location_ops())
+          if (auto *AI = dyn_cast_or_null<AllocaInst>(V))
+            Allocas[AI].DbgVariableIntrinsics.push_back(DVI);
         continue;
       }
 
@@ -704,9 +706,7 @@ bool AArch64StackTagging::runOnFunction(Function &Fn) {
 
     // Fixup debug intrinsics to point to the new alloca.
     for (auto DVI : Info.DbgVariableIntrinsics)
-      DVI->setArgOperand(
-          0,
-          MetadataAsValue::get(F->getContext(), LocalAsMetadata::get(Info.AI)));
+      DVI->replaceVariableLocationOp(Info.OldAI, Info.AI);
   }
 
   // If we have instrumented at least one alloca, all unrecognized lifetime

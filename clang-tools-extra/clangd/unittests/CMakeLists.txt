@@ -35,6 +35,7 @@ add_custom_target(ClangdUnitTests)
 add_unittest(ClangdUnitTests ClangdTests
   Annotations.cpp
   ASTTests.cpp
+  ASTSignalsTests.cpp
   BackgroundIndexTests.cpp
   CallHierarchyTests.cpp
   CanonicalIncludesTests.cpp
@@ -54,6 +55,7 @@ add_unittest(ClangdUnitTests ClangdTests
   DraftStoreTests.cpp
   DumpASTTests.cpp
   ExpectedTypeTest.cpp
+  FeatureModulesTests.cpp
   FileDistanceTests.cpp
   FileIndexTests.cpp
   FindSymbolsTests.cpp
@@ -67,8 +69,10 @@ add_unittest(ClangdUnitTests ClangdTests
   HoverTests.cpp
   IndexActionTests.cpp
   IndexTests.cpp
+  InlayHintTests.cpp
   JSONTransportTests.cpp
   LoggerTests.cpp
+  LSPBinderTests.cpp
   LSPClient.cpp
   ModulesTests.cpp
   ParsedASTTests.cpp
@@ -92,6 +96,7 @@ add_unittest(ClangdUnitTests ClangdTests
   TestIndex.cpp
   TestTU.cpp
   TestWorkspace.cpp
+  TidyProviderTests.cpp
   TypeHierarchyTests.cpp
   URITests.cpp
   XRefsTests.cpp
@@ -102,6 +107,7 @@ add_unittest(ClangdUnitTests ClangdTests
   support/FunctionTests.cpp
   support/MarkupTests.cpp
   support/MemoryTreeTests.cpp
+  support/PathTests.cpp
   support/ThreadingTests.cpp
   support/TestTracer.cpp
   support/TraceTests.cpp

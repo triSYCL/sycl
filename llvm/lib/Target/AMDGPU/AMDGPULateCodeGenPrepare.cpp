@@ -16,15 +16,12 @@
 #include "llvm/Analysis/AssumptionCache.h"
 #include "llvm/Analysis/LegacyDivergenceAnalysis.h"
 #include "llvm/Analysis/ValueTracking.h"
-#include "llvm/CodeGen/Passes.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/InitializePasses.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/KnownBits.h"
 #include "llvm/Transforms/Utils/Local.h"
-#include <cassert>
-#include <iterator>
 
 #define DEBUG_TYPE "amdgpu-late-codegenprepare"
 
@@ -171,7 +168,7 @@ bool AMDGPULateCodeGenPrepare::visitLoadInst(LoadInst &LI) {
       IRB.CreateConstGEP1_64(IRB.CreateBitCast(Base, Int8PtrTy),
                              Offset - Adjust),
       Int32PtrTy);
-  LoadInst *NewLd = IRB.CreateAlignedLoad(NewPtr, Align(4));
+  LoadInst *NewLd = IRB.CreateAlignedLoad(IRB.getInt32Ty(), NewPtr, Align(4));
   NewLd->copyMetadata(LI);
   NewLd->setMetadata(LLVMContext::MD_range, nullptr);
 

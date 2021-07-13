@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fsycl -fsycl-is-device -internal-isystem %S/Inputs -triple spir64-unknown-unknown-sycldevice -disable-llvm-passes -emit-llvm -o - %s | FileCheck %s
+// RUN: %clang_cc1 -fsycl-is-device -internal-isystem %S/Inputs -triple spir64-unknown-unknown-sycldevice -disable-llvm-passes -emit-llvm -o - %s | FileCheck %s
 
 #include "sycl.hpp"
 
@@ -42,10 +42,10 @@ int main() {
   return 0;
 }
 
-// CHECK: define spir_kernel void @{{.*}}kernel_name1"() #0 {{.*}} !reqd_work_group_size ![[WGSIZE:[0-9]+]] !intel_reqd_sub_group_size ![[SGSIZE:[0-9]+]]
-// CHECK: define spir_kernel void @{{.*}}kernel_name2"() #0 {{.*}} !reqd_work_group_size ![[WGSIZE1:[0-9]+]] !intel_reqd_sub_group_size ![[SGSIZE1:[0-9]+]]
-// CHECK: define spir_kernel void @{{.*}}kernel_name3"() #0 {{.*}} !reqd_work_group_size ![[WGSIZE2:[0-9]+]]
-// CHECK: define spir_kernel void @{{.*}}kernel_name4"() #0 {{.*}} !reqd_work_group_size ![[WGSIZE3:[0-9]+]]
+// CHECK: define {{.*}}spir_kernel void @{{.*}}kernel_name1"() #0 {{.*}} !reqd_work_group_size ![[WGSIZE:[0-9]+]] !intel_reqd_sub_group_size ![[SGSIZE:[0-9]+]]
+// CHECK: define {{.*}}spir_kernel void @{{.*}}kernel_name2"() #0 {{.*}} !reqd_work_group_size ![[WGSIZE1:[0-9]+]] !intel_reqd_sub_group_size ![[SGSIZE1:[0-9]+]]
+// CHECK: define {{.*}}spir_kernel void @{{.*}}kernel_name3"() #0 {{.*}} !reqd_work_group_size ![[WGSIZE2:[0-9]+]]
+// CHECK: define {{.*}}spir_kernel void @{{.*}}kernel_name4"() #0 {{.*}} !reqd_work_group_size ![[WGSIZE3:[0-9]+]]
 // CHECK: ![[WGSIZE]] = !{i32 16, i32 16, i32 32}
 // CHECK: ![[SGSIZE]] = !{i32 4}
 // CHECK: ![[WGSIZE1]] = !{i32 32, i32 32, i32 64}

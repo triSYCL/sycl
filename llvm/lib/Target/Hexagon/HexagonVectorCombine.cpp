@@ -117,8 +117,11 @@ public:
   const HexagonSubtarget &HST;
 
 private:
+#ifndef NDEBUG
+  // These two functions are only used for assertions at the moment.
   bool isByteVecTy(Type *Ty) const;
   bool isSectorTy(Type *Ty) const;
+#endif
   Value *getElementRange(IRBuilder<> &Builder, Value *Lo, Value *Hi, int Start,
                          int Length) const;
 };
@@ -195,7 +198,7 @@ private:
 
     int extent() const;
     ByteSpan section(int Start, int Length) const;
-    ByteSpan &normalize();
+    ByteSpan &shift(int Offset);
 
     int size() const { return Blocks.size(); }
     Block &operator[](int i) { return Blocks[i]; }
@@ -345,16 +348,9 @@ auto AlignVectors::ByteSpan::section(int Start, int Length) const -> ByteSpan {
   return Section;
 }
 
-auto AlignVectors::ByteSpan::normalize() -> ByteSpan & {
-  if (size() == 0)
-    return *this;
-  int Min = Blocks[0].Pos;
-  for (int i = 1, e = size(); i != e; ++i)
-    Min = std::min(Min, Blocks[i].Pos);
-  if (Min != 0) {
-    for (Block &B : Blocks)
-      B.Pos -= Min;
-  }
+auto AlignVectors::ByteSpan::shift(int Offset) -> ByteSpan & {
+  for (Block &B : Blocks)
+    B.Pos += Offset;
   return *this;
 }
 
@@ -525,11 +521,6 @@ auto AlignVectors::createAddressGroups() -> bool {
     return !llvm::any_of(
         G.second, [&](auto &I) { return HVC.HST.isTypeForHVX(I.ValTy); });
   });
-  // Remove groups where everything is properly aligned.
-  erase_if(AddrGroups, [&](auto &G) {
-    return llvm::all_of(G.second,
-                        [&](auto &I) { return I.HaveAlign >= I.NeedAlign; });
-  });
 
   return !AddrGroups.empty();
 }
@@ -585,7 +576,7 @@ auto AlignVectors::createLoadGroups(const AddrList &Group) const -> MoveList {
     if (llvm::any_of(Deps, inAddrMap))
       return false;
     Move.Main.push_back(Info.Inst);
-    Move.Deps.insert(Move.Deps.end(), Deps.begin(), Deps.end());
+    llvm::append_range(Move.Deps, Deps);
     return true;
   };
 
@@ -791,7 +782,7 @@ auto AlignVectors::realignGroup(const MoveGroup &Move) const -> bool {
     }
 
     for (ByteSpan::Block &B : VSpan) {
-      ByteSpan Section = ASpan.section(B.Pos, B.Seg.Size).normalize();
+      ByteSpan Section = ASpan.section(B.Pos, B.Seg.Size).shift(-B.Pos);
       Value *Accum = UndefValue::get(HVC.getByteTy(B.Seg.Size));
       for (ByteSpan::Block &S : Section) {
         Value *Pay = HVC.vbytes(Builder, getPayload(S.Seg.Val));
@@ -827,7 +818,9 @@ auto AlignVectors::realignGroup(const MoveGroup &Move) const -> bool {
     // Create an extra "undef" sector at the beginning and at the end.
     // They will be used as the left/right filler in the vlalign step.
     for (int i = -1; i != NumSectors + 1; ++i) {
-      ByteSpan Section = VSpan.section(i * ScLen, ScLen).normalize();
+      // For stores, the size of each section is an aligned vector length.
+      // Adjust the store offsets relative to the section start offset.
+      ByteSpan Section = VSpan.section(i * ScLen, ScLen).shift(-i * ScLen);
       Value *AccumV = UndefValue::get(SecTy);
       Value *AccumM = HVC.getNullValue(SecTy);
       for (ByteSpan::Block &S : Section) {
@@ -1104,8 +1097,7 @@ auto HexagonVectorCombine::concat(IRBuilder<> &Builder,
   SMask.resize(Vecs.size() * getSizeOf(Vecs.front()->getType()));
   std::iota(SMask.begin(), SMask.end(), 0);
   Value *Total = Work[OtherW].front();
-  return Builder.CreateShuffleVector(Total, UndefValue::get(Total->getType()),
-                                     SMask);
+  return Builder.CreateShuffleVector(Total, SMask);
 }
 
 auto HexagonVectorCombine::vresize(IRBuilder<> &Builder, Value *Val,
@@ -1385,6 +1377,11 @@ auto HexagonVectorCombine::isSafeToMoveBeforeInBB(const Instruction &In,
     const Instruction &I = *It;
     if (llvm::is_contained(Ignore, &I))
       continue;
+    // assume intrinsic can be ignored
+    if (auto *II = dyn_cast<IntrinsicInst>(&I)) {
+      if (II->getIntrinsicID() == Intrinsic::assume)
+        continue;
+    }
     // Parts based on isSafeToMoveBefore from CoveMoverUtils.cpp.
     if (I.mayThrow())
       return false;
@@ -1407,6 +1404,7 @@ auto HexagonVectorCombine::isSafeToMoveBeforeInBB(const Instruction &In,
   return true;
 }
 
+#ifndef NDEBUG
 auto HexagonVectorCombine::isByteVecTy(Type *Ty) const -> bool {
   if (auto *VecTy = dyn_cast<VectorType>(Ty))
     return VecTy->getElementType() == getByteTy();
@@ -1421,6 +1419,7 @@ auto HexagonVectorCombine::isSectorTy(Type *Ty) const -> bool {
     return Size == static_cast<int>(HST.getVectorLength());
   return Size == 4 || Size == 8;
 }
+#endif
 
 auto HexagonVectorCombine::getElementRange(IRBuilder<> &Builder, Value *Lo,
                                            Value *Hi, int Start,

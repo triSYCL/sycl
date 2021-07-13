@@ -187,9 +187,7 @@ namespace llvm {
 } // end namespace llvm;
 
 static Reloc::Model getEffectiveRelocModel(Optional<Reloc::Model> RM) {
-  if (!RM.hasValue())
-    return Reloc::Static;
-  return *RM;
+  return RM.getValueOr(Reloc::Static);
 }
 
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeHexagonTarget() {
@@ -253,8 +251,7 @@ HexagonTargetMachine::getSubtargetImpl(const Function &F) const {
   // Creating a separate target feature is not strictly necessary, it only
   // exists to make "unsafe-fp-math" force creating a new subtarget.
 
-  if (FnAttrs.hasFnAttribute("unsafe-fp-math") &&
-      F.getFnAttribute("unsafe-fp-math").getValueAsString() == "true")
+  if (F.getFnAttribute("unsafe-fp-math").getValueAsBool())
     FS = FS.empty() ? "+unsafe-fp" : "+unsafe-fp," + FS;
 
   auto &I = SubtargetMap[CPU + FS];
@@ -287,13 +284,9 @@ void HexagonTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB,
       [=](LoopPassManager &LPM, PassBuilder::OptimizationLevel Level) {
         LPM.addPass(HexagonLoopIdiomRecognitionPass());
       });
-  PB.registerOptimizerLastEPCallback(
-      [=](ModulePassManager &MPM, PassBuilder::OptimizationLevel Level) {
-        LoopPassManager LPM(DebugPassManager);
-        FunctionPassManager FPM(DebugPassManager);
+  PB.registerLoopOptimizerEndEPCallback(
+      [=](LoopPassManager &LPM, PassBuilder::OptimizationLevel Level) {
         LPM.addPass(HexagonVectorLoopCarriedReusePass());
-        FPM.addPass(createFunctionToLoopPassAdaptor(std::move(LPM)));
-        MPM.addPass(createModuleToFunctionPassAdaptor(std::move(FPM)));
       });
 }
 

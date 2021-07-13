@@ -1,10 +1,10 @@
-// RUN: %clang_cc1 -fsycl -fsycl-is-host -triple spir64 -disable-llvm-passes %s -emit-llvm -o -  | FileCheck %s
+// RUN: %clang_cc1 -fsycl-is-host -triple spir64 -disable-llvm-passes %s -emit-llvm -o -  | FileCheck %s
 // Test that the kernel implementation routine marked with 'sycl_kernel'
 // has the attribute 'sycl_kernel' in the generated LLVM IR and that the
 // function object passed to the sycl kernel is marked 'alwaysinline'
 // on the host.
 
-// CHECK: define spir_func void @{{.*}}func{{.*}}() #[[NOSKA:[0-9]+]] {
+// CHECK: define {{.*}}spir_func void @{{.*}}func{{.*}}() #[[NOSKA:[0-9]+]] {
 // CHECK: define internal spir_func void @{{.*}}Kernel{{.*}}Foo{{.*}}({{.*}}) #[[SKA:[0-9]+]] {
 // CHECK: call spir_func void @{{.*}}KernelImpl{{.*}}({{.*}}, i32 1, double 2.000000e+00)
 // CHECK: define internal spir_func void @{{.*}}Kernel{{.*}}Bar{{.*}}({{.*}}) #[[SKA]] {

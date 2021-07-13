@@ -30,11 +30,16 @@ public:
   IsConstantExprHelper() : Base{*this} {}
   using Base::operator();
 
+  // A missing expression is not considered to be constant.
+  template <typename A> bool operator()(const std::optional<A> &x) const {
+    return x && (*this)(*x);
+  }
+
   bool operator()(const TypeParamInquiry &inq) const {
     return semantics::IsKindTypeParameter(inq.parameter());
   }
   bool operator()(const semantics::Symbol &symbol) const {
-    const auto &ultimate{symbol.GetUltimate()};
+    const auto &ultimate{GetAssociationRoot(symbol)};
     return IsNamedConstant(ultimate) || IsImpliedDoIndex(ultimate) ||
         IsInitialProcedureTarget(ultimate);
   }
@@ -42,17 +47,7 @@ public:
   bool operator()(const semantics::ParamValue &param) const {
     return param.isExplicit() && (*this)(param.GetExplicit());
   }
-  template <typename T> bool operator()(const FunctionRef<T> &call) const {
-    if (const auto *intrinsic{std::get_if<SpecificIntrinsic>(&call.proc().u)}) {
-      // kind is always a constant, and we avoid cascading errors by calling
-      // invalid calls to intrinsics constant
-      return intrinsic->name == "kind" ||
-          intrinsic->name == IntrinsicProcTable::InvalidName;
-      // TODO: other inquiry intrinsics
-    } else {
-      return false;
-    }
-  }
+  bool operator()(const ProcedureRef &) const;
   bool operator()(const StructureConstructor &constructor) const {
     for (const auto &[symRef, expr] : constructor) {
       if (!IsConstantStructureConstructorComponent(*symRef, expr.value())) {
@@ -77,20 +72,64 @@ public:
   }
 
   bool operator()(const Constant<SomeDerived> &) const { return true; }
+  bool operator()(const DescriptorInquiry &) const { return false; }
 
 private:
   bool IsConstantStructureConstructorComponent(
-      const Symbol &component, const Expr<SomeType> &expr) const {
-    if (IsAllocatable(component)) {
-      return IsNullPointer(expr);
-    } else if (IsPointer(component)) {
-      return IsNullPointer(expr) || IsInitialDataTarget(expr) ||
-          IsInitialProcedureTarget(expr);
-    } else {
-      return (*this)(expr);
+      const Symbol &, const Expr<SomeType> &) const;
+  bool IsConstantExprShape(const Shape &) const;
+};
+
+bool IsConstantExprHelper::IsConstantStructureConstructorComponent(
+    const Symbol &component, const Expr<SomeType> &expr) const {
+  if (IsAllocatable(component)) {
+    return IsNullPointer(expr);
+  } else if (IsPointer(component)) {
+    return IsNullPointer(expr) || IsInitialDataTarget(expr) ||
+        IsInitialProcedureTarget(expr);
+  } else {
+    return (*this)(expr);
+  }
+}
+
+bool IsConstantExprHelper::operator()(const ProcedureRef &call) const {
+  // LBOUND, UBOUND, and SIZE with DIM= arguments will have been reritten
+  // into DescriptorInquiry operations.
+  if (const auto *intrinsic{std::get_if<SpecificIntrinsic>(&call.proc().u)}) {
+    if (intrinsic->name == "kind" ||
+        intrinsic->name == IntrinsicProcTable::InvalidName) {
+      // kind is always a constant, and we avoid cascading errors by considering
+      // invalid calls to intrinsics to be constant
+      return true;
+    } else if (intrinsic->name == "lbound" && call.arguments().size() == 1) {
+      // LBOUND(x) without DIM=
+      auto base{ExtractNamedEntity(call.arguments()[0]->UnwrapExpr())};
+      return base && IsConstantExprShape(GetLowerBounds(*base));
+    } else if (intrinsic->name == "ubound" && call.arguments().size() == 1) {
+      // UBOUND(x) without DIM=
+      auto base{ExtractNamedEntity(call.arguments()[0]->UnwrapExpr())};
+      return base && IsConstantExprShape(GetUpperBounds(*base));
+    } else if (intrinsic->name == "shape") {
+      auto shape{GetShape(call.arguments()[0]->UnwrapExpr())};
+      return shape && IsConstantExprShape(*shape);
+    } else if (intrinsic->name == "size" && call.arguments().size() == 1) {
+      // SIZE(x) without DIM
+      auto shape{GetShape(call.arguments()[0]->UnwrapExpr())};
+      return shape && IsConstantExprShape(*shape);
+    }
+    // TODO: STORAGE_SIZE
+  }
+  return false;
+}
+
+bool IsConstantExprHelper::IsConstantExprShape(const Shape &shape) const {
+  for (const auto &extent : shape) {
+    if (!(*this)(extent)) {
+      return false;
     }
   }
-};
+  return true;
+}
 
 template <typename A> bool IsConstantExpr(const A &x) {
   return IsConstantExprHelper{}(x);
@@ -141,21 +180,19 @@ public:
     return false;
   }
   bool operator()(const semantics::Symbol &symbol) {
+    // This function checks only base symbols, not components.
     const Symbol &ultimate{symbol.GetUltimate()};
-    if (IsAllocatable(ultimate)) {
-      if (messages_) {
-        messages_->Say(
-            "An initial data target may not be a reference to an ALLOCATABLE '%s'"_err_en_US,
-            ultimate.name());
-        emittedMessage_ = true;
-      }
-      return false;
-    } else if (ultimate.Corank() > 0) {
-      if (messages_) {
-        messages_->Say(
-            "An initial data target may not be a reference to a coarray '%s'"_err_en_US,
-            ultimate.name());
-        emittedMessage_ = true;
+    if (const auto *assoc{
+            ultimate.detailsIf<semantics::AssocEntityDetails>()}) {
+      if (const auto &expr{assoc->expr()}) {
+        if (IsVariable(*expr)) {
+          return (*this)(*expr);
+        } else if (messages_) {
+          messages_->Say(
+              "An initial data target may not be an associated expression ('%s')"_err_en_US,
+              ultimate.name());
+          emittedMessage_ = true;
+        }
       }
       return false;
     } else if (!ultimate.attrs().test(semantics::Attr::TARGET)) {
@@ -174,8 +211,9 @@ public:
         emittedMessage_ = true;
       }
       return false;
+    } else {
+      return CheckVarOrComponent(ultimate);
     }
-    return true;
   }
   bool operator()(const StaticDataObject &) const { return false; }
   bool operator()(const TypeParamInquiry &) const { return false; }
@@ -194,6 +232,9 @@ public:
         x.u);
   }
   bool operator()(const CoarrayRef &) const { return false; }
+  bool operator()(const Component &x) {
+    return CheckVarOrComponent(x.GetLastSymbol()) && (*this)(x.base());
+  }
   bool operator()(const Substring &x) const {
     return IsConstantExpr(x.lower()) && IsConstantExpr(x.upper()) &&
         (*this)(x.parent());
@@ -219,6 +260,28 @@ public:
   bool operator()(const Relational<SomeType> &) const { return false; }
 
 private:
+  bool CheckVarOrComponent(const semantics::Symbol &symbol) {
+    const Symbol &ultimate{symbol.GetUltimate()};
+    if (IsAllocatable(ultimate)) {
+      if (messages_) {
+        messages_->Say(
+            "An initial data target may not be a reference to an ALLOCATABLE '%s'"_err_en_US,
+            ultimate.name());
+        emittedMessage_ = true;
+      }
+      return false;
+    } else if (ultimate.Corank() > 0) {
+      if (messages_) {
+        messages_->Say(
+            "An initial data target may not be a reference to a coarray '%s'"_err_en_US,
+            ultimate.name());
+        emittedMessage_ = true;
+      }
+      return false;
+    }
+    return true;
+  }
+
   parser::ContextualMessages *messages_;
   bool emittedMessage_{false};
 };
@@ -266,26 +329,30 @@ bool IsInitialProcedureTarget(const Expr<SomeType> &expr) {
   }
 }
 
-class ScalarExpansionVisitor : public AnyTraverse<ScalarExpansionVisitor,
-                                   std::optional<Expr<SomeType>>> {
+class ArrayConstantBoundChanger {
 public:
-  using Result = std::optional<Expr<SomeType>>;
-  using Base = AnyTraverse<ScalarExpansionVisitor, Result>;
-  ScalarExpansionVisitor(
-      ConstantSubscripts &&shape, std::optional<ConstantSubscripts> &&lb)
-      : Base{*this}, shape_{std::move(shape)}, lbounds_{std::move(lb)} {}
-  using Base::operator();
-  template <typename T> Result operator()(const Constant<T> &x) {
-    auto expanded{x.Reshape(std::move(shape_))};
-    if (lbounds_) {
-      expanded.set_lbounds(std::move(*lbounds_));
-    }
-    return AsGenericExpr(std::move(expanded));
+  ArrayConstantBoundChanger(ConstantSubscripts &&lbounds)
+      : lbounds_{std::move(lbounds)} {}
+
+  template <typename A> A ChangeLbounds(A &&x) const {
+    return std::move(x); // default case
+  }
+  template <typename T> Constant<T> ChangeLbounds(Constant<T> &&x) {
+    x.set_lbounds(std::move(lbounds_));
+    return std::move(x);
+  }
+  template <typename T> Expr<T> ChangeLbounds(Parentheses<T> &&x) {
+    return ChangeLbounds(
+        std::move(x.left())); // Constant<> can be parenthesized
+  }
+  template <typename T> Expr<T> ChangeLbounds(Expr<T> &&x) {
+    return std::visit(
+        [&](auto &&x) { return Expr<T>{ChangeLbounds(std::move(x))}; },
+        std::move(x.u)); // recurse until we hit a constant
   }
 
 private:
-  ConstantSubscripts shape_;
-  std::optional<ConstantSubscripts> lbounds_;
+  ConstantSubscripts &&lbounds_;
 };
 
 // Converts, folds, and then checks type, rank, and shape of an
@@ -312,7 +379,11 @@ std::optional<Expr<SomeType>> NonPointerInitializationExpr(const Symbol &symbol,
                 symbol.name(), symRank, folded.Rank());
           }
         } else if (auto extents{AsConstantExtents(context, symTS->shape())}) {
-          if (folded.Rank() == 0 && symRank > 0) {
+          if (folded.Rank() == 0 && symRank == 0) {
+            // symbol and constant are both scalars
+            return {std::move(folded)};
+          } else if (folded.Rank() == 0 && symRank > 0) {
+            // expand the scalar constant to an array
             return ScalarConstantExpander{std::move(*extents),
                 AsConstantExtents(
                     context, GetLowerBounds(context, NamedEntity{symbol}))}
@@ -321,7 +392,11 @@ std::optional<Expr<SomeType>> NonPointerInitializationExpr(const Symbol &symbol,
             if (CheckConformance(context.messages(), symTS->shape(),
                     *resultShape, "initialized object",
                     "initialization expression", false, false)) {
-              return {std::move(folded)};
+              // make a constant array with adjusted lower bounds
+              return ArrayConstantBoundChanger{
+                  std::move(*AsConstantExtents(
+                      context, GetLowerBounds(context, NamedEntity{symbol})))}
+                  .ChangeLbounds(std::move(folded));
             }
           }
         } else if (IsNamedConstant(symbol)) {
@@ -389,8 +464,11 @@ public:
 
   Result operator()(const semantics::Symbol &symbol) const {
     const auto &ultimate{symbol.GetUltimate()};
-    if (semantics::IsNamedConstant(ultimate) || ultimate.owner().IsModule() ||
-        ultimate.owner().IsSubmodule()) {
+    if (const auto *assoc{
+            ultimate.detailsIf<semantics::AssocEntityDetails>()}) {
+      return (*this)(assoc->expr());
+    } else if (semantics::IsNamedConstant(ultimate) ||
+        ultimate.owner().IsModule() || ultimate.owner().IsSubmodule()) {
       return std::nullopt;
     } else if (scope_.IsDerivedType() &&
         IsVariableName(ultimate)) { // C750, C754
@@ -446,16 +524,17 @@ public:
 
   template <typename T> Result operator()(const FunctionRef<T> &x) const {
     if (const auto *symbol{x.proc().GetSymbol()}) {
-      if (!semantics::IsPureProcedure(*symbol)) {
-        return "reference to impure function '"s + symbol->name().ToString() +
+      const Symbol &ultimate{symbol->GetUltimate()};
+      if (!semantics::IsPureProcedure(ultimate)) {
+        return "reference to impure function '"s + ultimate.name().ToString() +
             "'";
       }
-      if (semantics::IsStmtFunction(*symbol)) {
+      if (semantics::IsStmtFunction(ultimate)) {
         return "reference to statement function '"s +
-            symbol->name().ToString() + "'";
+            ultimate.name().ToString() + "'";
       }
       if (scope_.IsDerivedType()) { // C750, C754
-        return "reference to function '"s + symbol->name().ToString() +
+        return "reference to function '"s + ultimate.name().ToString() +
             "' not allowed for derived type components or type parameter"
             " values";
       }
@@ -532,16 +611,19 @@ public:
   using Base::operator();
 
   Result operator()(const semantics::Symbol &symbol) const {
-    if (symbol.attrs().test(semantics::Attr::CONTIGUOUS) ||
-        symbol.Rank() == 0) {
+    const auto &ultimate{symbol.GetUltimate()};
+    if (ultimate.attrs().test(semantics::Attr::CONTIGUOUS) ||
+        ultimate.Rank() == 0) {
       return true;
-    } else if (semantics::IsPointer(symbol)) {
+    } else if (semantics::IsPointer(ultimate)) {
       return false;
     } else if (const auto *details{
-                   symbol.detailsIf<semantics::ObjectEntityDetails>()}) {
+                   ultimate.detailsIf<semantics::ObjectEntityDetails>()}) {
       // N.B. ALLOCATABLEs are deferred shape, not assumed, and
       // are obviously contiguous.
       return !details->IsAssumedShape() && !details->IsAssumedRank();
+    } else if (auto assoc{Base::operator()(ultimate)}) {
+      return assoc;
     } else {
       return false;
     }

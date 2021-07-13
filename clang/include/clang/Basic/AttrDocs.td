@@ -57,6 +57,55 @@ global variable or function should be in after translation.
   let Heading = "section, __declspec(allocate)";
 }
 
+def UsedDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+This attribute, when attached to a function or variable definition, indicates
+that there may be references to the entity which are not apparent in the source
+code.  For example, it may be referenced from inline ``asm``, or it may be
+found through a dynamic symbol or section lookup.
+
+The compiler must emit the definition even if it appears to be unused, and it
+must not apply optimizations which depend on fully understanding how the entity
+is used.
+
+Whether this attribute has any effect on the linker depends on the target and
+the linker. Most linkers support the feature of section garbage collection
+(``--gc-sections``), also known as "dead stripping" (``ld64 -dead_strip``) or
+discarding unreferenced sections (``link.exe /OPT:REF``). On COFF and Mach-O
+targets (Windows and Apple platforms), the `used` attribute prevents symbols
+from being removed by linker section GC. On ELF targets, it has no effect on its
+own, and the linker may remove the definition if it is not otherwise referenced.
+This linker GC can be avoided by also adding the ``retain`` attribute.  Note
+that ``retain`` requires special support from the linker; see that attribute's
+documentation for further information.
+  }];
+}
+
+def RetainDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+This attribute, when attached to a function or variable definition, prevents
+section garbage collection in the linker. It does not prevent other discard
+mechanisms, such as archive member selection, and COMDAT group resolution.
+
+If the compiler does not emit the definition, e.g. because it was not used in
+the translation unit or the compiler was able to eliminate all of the uses,
+this attribute has no effect.  This attribute is typically combined with the
+``used`` attribute to force the definition to be emitted and preserved into the
+final linked image.
+
+This attribute is only necessary on ELF targets; other targets prevent section
+garbage collection by the linker when using the ``used`` attribute alone.
+Using the attributes together should result in consistent behavior across
+targets.
+
+This attribute requires the linker to support the ``SHF_GNU_RETAIN`` extension.
+This support is available in GNU ``ld`` and ``gold`` as of binutils 2.36, as
+well as in ``ld.lld`` 13.
+  }];
+}
+
 def InitPriorityDocs : Documentation {
   let Category = DocCatVariable;
   let Content = [{
@@ -360,12 +409,12 @@ def SYCLSimdDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{
     The ``__attribute__((sycl_explicit_simd))`` attribute is used by the device
-    compiler front end to mark kernels and functions to be compiled and executed
-    in the explicit SIMD mode. In this mode subgroup size is always 1 and
-    explicit SIMD extensions - such as manual vectorization using wide vector
-    data types and operations can be used. Compiler may decide to compile such
-    functions using different optimization and code generation
-    pipeline.
+    compiler front end to mark ESIMD kernels and functions. In this mode,
+    subgroup size is always equal to 1 and explicit SIMD extensions, such as
+    manual vectorization using wide vector data types and operations can be used.
+    The compiler may decide to compile such functions using different optimization
+    and code generation pipeline. Also, this attribute is used to distinguish
+    ESIMD private globals from regular SYCL global variables.
   }];
 }
 
@@ -377,18 +426,6 @@ def SYCLRegisterNumDocs : Documentation {
     scope) to a particular register with number 'n'. Actual mapping of registers
     to numbers is target-specific. For Intel GPUs 'n' is a byte offset in the
     GRF.
-  }];
-}
-
-def SYCLSimdAccessorPtrDocs : Documentation {
-  let Category = DocCatVariable;
-  let Content = [{
-    The ``__attribute__((esimd_acc_ptr))`` attribute is used by FE to mark ESIMD
-    kernel pointer parameters which correspond to the original
-    lambda's captured accessors. FE turns the attribute to some metadata
-    required by the ESIMD Back-End.
-    Not supposed to be used directly in the source - SYCL device compiler FE
-    automatically adds it for ESIMD kernels.
   }];
 }
 
@@ -427,6 +464,32 @@ over the tradeoff between code size and debug information precision.
 ``nomerge`` attribute can also be used as function attribute to prevent all 
 calls to the specified function from merging. It has no effect on indirect 
 calls.
+  }];
+}
+
+def MustTailDocs : Documentation {
+  let Category = DocCatStmt;
+  let Content = [{
+If a ``return`` statement is marked ``musttail``, this indicates that the
+compiler must generate a tail call for the program to be correct, even when
+optimizations are disabled. This guarantees that the call will not cause
+unbounded stack growth if it is part of a recursive cycle in the call graph.
+
+If the callee is a virtual function that is implemented by a thunk, there is
+no guarantee in general that the thunk tail-calls the implementation of the
+virtual function, so such a call in a recursive cycle can still result in
+unbounded stack growth.
+
+``clang::musttail`` can only be applied to a ``return`` statement whose value
+is the result of a function call (even functions returning void must use
+``return``, although no value is returned). The target function must have the
+same number of arguments as the caller. The types of the return value and all
+arguments must be similar according to C++ rules (differing only in cv
+qualifiers or array size), including the implicit "this" argument, if any.
+Any variables in scope, including all arguments to the function and the
+return value must be trivially destructible. The calling convention of the
+caller and callee must match, and they must not be variadic functions or have
+old style K&R C function declarations.
   }];
 }
 
@@ -1084,8 +1147,18 @@ def NoDebugDocs : Documentation {
   let Category = DocCatVariable;
   let Content = [{
 The ``nodebug`` attribute allows you to suppress debugging information for a
-function or method, or for a variable that is not a parameter or a non-static
-data member.
+function or method, for a variable that is not a parameter or a non-static
+data member, or for a typedef or using declaration.
+  }];
+}
+
+def StandaloneDebugDocs : Documentation {
+  let Category = DocCatVariable;
+  let Content = [{
+The ``standalone_debug`` attribute causes debug info to be emitted for a record
+type regardless of the debug info optimizations that are enabled with
+-fno-standalone-debug. This attribute only has an effect when debug info
+optimizations are enabled (e.g. with -fno-standalone-debug), and is C++-only.
   }];
 }
 
@@ -2067,6 +2140,17 @@ let Category = DocCatVariable;
 This attribute may be attached to a variable or struct member declaration and
 instructs the backend to implement the variable or struct member in a memory
 that is clocked at twice the rate of its accessors.
+
+.. code-block:: c++
+
+  void bar() {
+    [[intel::doublepump]] int var_doublepump;
+  }
+
+  struct foo {
+    [[intel::doublepump]] unsigned int doublepump[64];
+  };
+
   }];
 }
 
@@ -2077,6 +2161,17 @@ let Category = DocCatVariable;
 This attribute may be attached to a variable or struct member declaration and
 instructs the backend to implement the variable or struct member in a memory
 that is clocked at the same rate as its accessors.
+
+.. code-block:: c++
+
+  void bar() {
+    [[intel::singlepump]] int var_singlepump;
+  }
+
+  struct foo {
+    [[intel::singlepump]] unsigned int singlepump[64];
+  };
+
   }];
 }
 
@@ -2088,6 +2183,19 @@ This attribute may be attached to a variable or struct member declaration and
 instructs the backend to implement the variable or struct member in memory
 rather than promoting to register(s).  If the optional parameter is specified
 it indicates what type of memory to use.
+
+.. code-block:: c++
+
+  void bar() {
+    [[intel::fpga_memory]] int memory;
+  }
+
+  struct foo {
+    [[intel::fpga_memory]] unsigned int memory[64];
+    [[intel::fpga_memory("MLAB")]] unsigned int memory_mlab[64];
+    [[intel::fpga_memory("BLOCK_RAM")]] unsigned int mem_blockram[32];
+  };
+
   }];
 }
 
@@ -2098,6 +2206,17 @@ def IntelFPGARegisterAttrDocs : Documentation {
 This attribute may be attached to a variable or struct member declaration and
 instructs the backend to promote the variable or struct member to register(s)
 if possible.
+
+.. code-block:: c++
+
+  void bar() {
+    [[intel::fpga_register]] int var_reg;
+  }
+
+  struct foo {
+    [[intel::fpga_register]] unsigned int reg[64];
+  };
+
   }];
 }
 
@@ -2108,6 +2227,18 @@ def IntelFPGABankWidthAttrDocs : Documentation {
 This attribute may be attached to a variable or struct member declaration and
 instructs the backend to implement the variable or struct member in a memory
 with banks that are N bytes wide.
+
+.. code-block:: c++
+
+  struct foo {
+    [[intel::bankwidth(4)]] unsigned int bankwidth[32];
+  };
+
+  template <int N>
+  void bar() {
+    [[intel::bankwidth(N)]] unsigned int bank_bits_width;
+  }
+
   }];
 }
 
@@ -2118,6 +2249,18 @@ def IntelFPGANumBanksAttrDocs : Documentation {
 This attribute may be attached to a variable or struct member declaration and
 instructs the backend to implement the variable or struct member in a memory
 with N banks.
+
+.. code-block:: c++
+
+  struct foo {
+    [[intel::numbanks(8)]] unsigned int numbanks[64];
+  };
+
+  template <int N>
+  void bar() {
+    [[intel::numbanks(N)]] unsigned int numbanks;
+  }
+
   }];
 }
 
@@ -2129,6 +2272,18 @@ This attribute may be attached to a variable or struct member declaration and
 instructs the backend to replicate the memory generated for the variable or
 struct member sufficiently to enable the specified number of simultaneous
 threads or loop iterations.
+
+.. code-block:: c++
+
+  struct foo {
+    [[intel::private_copies(4)]] unsigned int private_copies[64];
+  };
+
+  template <int N>
+  void bar() {
+    [[intel::private_copies(N)]] unsigned int private_copies;
+  }
+
   }];
 }
 
@@ -2141,6 +2296,19 @@ instructs the backend to merge the memories used to implement any variable or
 struct members that are annotated with this attribute and the same first
 argument. The second argument indicates if the memories should be merged in a
 depth-wise or width-wise manner.
+
+.. code-block:: c++
+
+  void bar() {
+    [[intel::merge("mrg1", "depth")]] int merge_depth;
+    [[intel::merge("mrg2", "width")]] int merge_width;
+  }
+
+  struct foo {
+    [[intel::merge("mrg1", "depth")]] unsigned int merge_depth[64];
+    [[intel::merge("mrg2", "width")]] unsigned int merge_width[64];
+  };
+
   }];
 }
 
@@ -2152,6 +2320,18 @@ This attribute may be attached to a variable or struct member declaration and
 instructs the backend to replicate the memory generated for the variable or
 struct member no more than the specified maximum number of times to enable
 simultaneous accesses from different load/store sites in the program.
+
+.. code-block:: c++
+
+  struct foo {
+    [[intel::max_replicates(2)]] unsigned int max_replicates[64];
+  };
+
+  template <int N>
+  void bar() {
+    [[intel::max_replicates(N)]] unsigned int max_replicates;
+  }
+
   }];
 }
 
@@ -2163,6 +2343,17 @@ This attribute may be attached to a variable or struct member declaration and
 instructs the backend to implement the variable or struct member in a memory
 with simple dual port configuration (no memory port services both stores and
 loads).
+
+.. code-block:: c++
+
+  void bar() {
+    [[intel::simple_dual_port]] int var_dual_port;
+  }
+
+  struct foo {
+    [[intel::simple_dual_port]] unsigned int dual_port[64];
+  };
+
   }];
 }
 
@@ -2174,6 +2365,23 @@ This attribute may be attached to a variable or struct member declaration and
 instructs the backend to implement the variable or struct member in a banked
 memory with 2^(N+1) banks, where the (b0, ..., bn) bits specified determine the
 pointer address bits to bank on.
+
+.. code-block:: c++
+
+  void bar() {
+    [[intel::bank_bits(2, 3)]] int var_bank_bits;
+  }
+
+  struct foo {
+    [[intel::bank_bits(1, 2)]] unsigned int bb_bb[4]
+    [[intel::bank_bits(2, 3, 4, 5)]] unsigned int bankbits[64];
+  };
+
+  template <int N>
+  void bar() {
+    [[intel::bank_bits(N, 3)]] unsigned int bank_bits;
+  }
+
   }];
 }
 
@@ -2185,15 +2393,40 @@ This attribute may be attached to a variable or struct member declaration and
 provides explicit control over the geometry of memory blocks used in a given
 memory system.
 
+.. code-block:: c++
+
+  struct foo {
+    [[intel::force_pow2_depth(1)]] int var_force_p2d;
+    [[intel::force_pow2_depth(1)]] const int const_force_p2d[64] = {0, 1};
+  };
+
+  template <int N>
+  void bar() {
+    [[intel::force_pow2_depth(N)]] unsigned int reg_force_p2d[64];
+  }
+
 In the presence of this attribute, the compiler:
 
 1. Will automatically size the memory depth to the next largest power of 2 if
 force_pow2_depth is set to 1, and will prefer width-stitching of RAM blocks
 over depth-stitching.
 
+.. code-block:: c++
+
+  void func() {
+    [[intel::force_pow2_depth(1)]] unsigned int arr_force_p2d_1[64];
+  }
+
 2. Will not size the memory to the next largest power of 2 if force_pow2_depth
 is set to 0, and will prefer depth-stitching over width-stitching if RAM usage
 can be lowered.
+
+.. code-block:: c++
+
+  void func() {
+    [[intel::force_pow2_depth(0)]] unsigned int arr_force_p2d_0[64];
+  }
+
   }];
 }
 
@@ -2211,7 +2444,7 @@ attribute was applied. This effect is equivalent to annotating restrict on
 **all** kernel pointer arguments in an OpenCL or SPIR-V kernel.
 
 If ``intel::kernel_args_restrict`` is applied to a function called from a device
-kernel, the attribute is ignored and it is not propagated to a kernel.
+kernel, the attribute is not ignored and it is propagated to the kernel.
 
 The attribute forms an unchecked assertion, in that implementations
 do not need to check/confirm the pre-condition in any way. If a user applies
@@ -2231,6 +2464,15 @@ program is ill-formed and no diagnostic is required.
 
 The ``intel::kernel_args_restrict`` attribute has an effect when applied to a
 function, and no effect otherwise.
+
+.. code-block:: c++
+
+  [[intel::kernel_args_restrict]] void func() {}
+
+  struct bar {
+    [[intel::kernel_args_restrict]] void operator()() const {}
+  };
+
   }];
 }
 
@@ -2241,7 +2483,46 @@ def SYCLIntelNumSimdWorkItemsAttrDocs : Documentation {
 Applies to a device function/lambda function. Indicates the number of work
 items that should be processed in parallel. Valid values are positive integers.
 If ``intel::num_simd_work_items`` is applied to a function called from a
-device kernel, the attribute is ignored and it is not propagated to a kernel.
+device kernel, the attribute is not ignored and it is propagated to the kernel.
+
+.. code-block:: c++
+
+  [[intel::num_simd_work_items(4)]] void foo() {}
+
+  template<int N>
+  [[intel::num_simd_work_items(N)]] void bar() {}
+
+  class Foo {
+  public:
+    [[intel::num_simd_work_items(6)]] void operator()() const {}
+  };
+
+  template <int N>
+  class Functor {
+  public:
+    [[intel::num_simd_work_items(N)]] void operator()() const {}
+  };
+
+If the`` intel::reqd_work_group_size`` or ``cl::reqd_work_group_size``
+attribute is specified on a declaration along with a
+intel::num_simd_work_items attribute, the work group size attribute
+argument (the first argument) must be evenly divisible by the argument specified
+in the ``intel::num_simd_work_items`` attribute.
+
+.. code-block:: c++
+
+  struct func {
+    [[intel::num_simd_work_items(4)]]
+    [[intel::reqd_work_group_size(64, 64, 64)]]
+    void operator()() const {}
+  };
+
+  struct bar {
+    [[intel::reqd_work_group_size(64, 64, 64)]]
+    [[intel::num_simd_work_items(4)]]
+    void operator()() const {}
+  };
+
   }];
 }
 
@@ -2255,7 +2536,7 @@ clusters handle stalls using a stall-enable signal to freeze computation
 within the cluster. This attribute is ignored on the host.
 
 If ``intel::use_stall_enable_clusters`` is applied to a function called from a device
-kernel, the attribute is ignored and it is not propagated to a kernel.
+kernel, the attribute is ignored and it is not propagated to the kernel.
 
 The ``intel::use_stall_enable_clusters`` attribute takes no argument and has an effect
 when applied to a function, and no effect otherwise.
@@ -2297,14 +2578,64 @@ those device functions, such that the kernel attributes are the sum of all
 attributes of all device functions called in this kernel.
 See section 6.7 Attributes for more details.
 
-As Intel extension, ``[[intel::reqd_work_group_size(X, Y, Z)]]`` spelling is allowed
-which features optional arguments `Y` and `Z`, those simplifies its usage if
-only 1- or 2-dimensional ND-range is assumed by a programmer. These arguments
-defaults to ``1``.
+.. code-block:: c++
+
+  [[cl::reqd_work_group_size(4, 4, 4)]] void foo() {}
+
+  class Foo {
+  public:
+    [[cl::reqd_work_group_size(2, 2, 2)]] void operator()() const {}
+  };
+
+  template <int N, int N1, int N2>
+  class Functor {
+  public:
+    [[cl::reqd_work_group_size(N, N1, N2)]] void operator()() const {}
+  };
+
+  template <int N, int N1, int N2>
+  [[cl::reqd_work_group_size(N, N1, N2)]] void func() {}
+
+As an Intel extension, the ``[[intel::reqd_work_group_size(X, Y, Z)]]``
+spelling is supported. This spelling allows the Y and Z arguments to be
+optional. If not provided by the user, the value of Y and Z defaults to 1.
+This simplifies usage of the attribute when a 1- or 2-dimensional ND-range
+is assumed.
+
+.. code-block:: c++
+
+  [[intel::reqd_work_group_size(5)]]
+  // identical to [[intel::reqd_work_group_size(5, 1, 1)]]
+  void quux() {}
+
+  [[intel::reqd_work_group_size(5, 5)]]
+  // identical to [[intel::reqd_work_group_size(5, 5, 1)]]
+  void qux() {}
+
+  [[intel::reqd_work_group_size(4, 4, 4)]] void foo() {}
+
+  class Foo {
+  public:
+    [[intel::reqd_work_group_size(2, 2, 2)]] void operator()() const {}
+  };
+
+  template <int X, int Y, int Z>
+  class Functor {
+  public:
+    [[intel::reqd_work_group_size(X, Y, Z)]] void operator()() const {}
+  };
+
+  template <int X, int Y, int Z>
+  [[intel::reqd_work_group_size(X, Y, Z)]] void func() {}
 
 In OpenCL C, this attribute is available in GNU spelling
 (``__attribute__((reqd_work_group_size(X, Y, Z)))``), see section
 6.7.2 Optional Attribute Qualifiers of OpenCL 1.2 specification for details.
+
+.. code-block:: c++
+
+  __kernel __attribute__((reqd_work_group_size(8, 16, 32))) void test() {}
+
   }];
 }
 
@@ -2317,7 +2648,26 @@ of a work group. Values must be positive integers. This is similar to
 reqd_work_group_size, but allows work groups that are smaller or equal to the
 specified sizes.
 If ``intel::max_work_group_size`` is applied to a function called from a
-device kernel, the attribute is ignored and it is not propagated to a kernel.
+device kernel, the attribute is not ignored and it is propagated to the kernel.
+
+.. code-block:: c++
+
+  [[intel::max_work_group_size(4, 4, 4)]] void foo() {}
+
+  class Foo {
+  public:
+    [[intel::max_work_group_size(2, 2, 2)]] void operator()() const {}
+  };
+
+  template <int N, int N1, int N2>
+  class Functor {
+  public:
+    [[intel::max_work_group_size(N, N1, N2)]] void operator()() const {}
+  };
+
+  template <int N, int N1, int N2>
+  [[intel::max_work_group_size(N, N1, N2)]] void func() {}
+
   }];
 }
 
@@ -2328,12 +2678,42 @@ def SYCLIntelMaxGlobalWorkDimAttrDocs : Documentation {
 Applies to a device function/lambda function or function call operator (of a
 function object). Indicates the largest valid global work dimension that will be
 accepted when running the kernel on a device. Valid values are integers in a
-range of [0, 3]. A kernel with max_global_work_dim(0) must be invoked with a
+range of [0, 3].
+If ``intel::max_global_work_dim`` is applied to a function called from a
+device kernel, the attribute is not ignored and it is propagated to the kernel.
+
+.. code-block:: c++
+
+  [[intel::max_global_work_dim(1)]] void foo() {}
+
+  template<int N>
+  [[intel::max_global_work_dim(N)]] void bar() {}
+
+  class Foo {
+  public:
+    [[intel::max_global_work_dim(1)]] void operator()() const {}
+  };
+
+  template <int N>
+  class Functor {
+  public:
+    [[intel::max_global_work_dim(N)]] void operator()() const {}
+  };
+
+A kernel with ``intel::max_global_work_dim(0)`` must be invoked with a
 'single_task' and if ``intel::max_work_group_size`` or
 ``cl::reqd_work_group_size`` are applied to the kernel as well - they shall
 have arguments of (1, 1, 1).
-If ``intel::max_global_work_dim`` is applied to a function called from a
-device kernel, the attribute is ignored and it is not propagated to a kernel.
+
+.. code-block:: c++
+
+  struct TRIFuncObjGood {
+    [[intel::max_global_work_dim(0)]]
+    [[intel::max_work_group_size(1, 1, 1)]]
+    [[cl::reqd_work_group_size(1, 1, 1)]]
+    void operator()() const {}
+  };
+
   }];
 }
 
@@ -2356,6 +2736,25 @@ This attribute enables communication of the desired maximum frequency of the
 device operation, guiding the FPGA backend to insert the appropriate number of
 registers to break-up the combinational logic circuit, and thereby controlling
 the length of the longest combinational path.
+
+.. code-block:: c++
+
+  [[intel::scheduler_target_fmax_mhz(4)]] void foo() {}
+
+  template<int N>
+  [[intel::scheduler_target_fmax_mhz(N)]] void bar() {}
+
+  class Foo {
+  public:
+    [[intel::scheduler_target_fmax_mhz(6)]] void operator()() const {}
+  };
+
+  template <int N>
+  class Functor {
+  public:
+    [[intel::scheduler_target_fmax_mhz(N)]] void operator()() const {}
+  };
+
   }];
 }
 
@@ -2367,6 +2766,29 @@ Applies to a device function/lambda function or function call operator (of a
 function object). If 1, compiler doesn't use the global work offset values for
 the device function. Valid values are 0 and 1. If used without argument, value
 of 1 is set implicitly.
+
+.. code-block:: c++
+
+  [[intel::no_global_work_offset]]
+  // identical to [[intel::no_global_work_offset(1)]]
+  void quux() {}
+
+  [[intel::no_global_work_offset(0)]] void foo() {}
+
+  class Foo {
+  public:
+    [[intel::no_global_work_offset(1)]] void operator()() const {}
+  };
+
+  template <int N>
+  class Functor {
+  public:
+    [[intel::no_global_work_offset(N)]] void operator()() const {}
+  };
+
+  template <int N>
+  [[intel::no_global_work_offset(N)]] void func() {}
+
   }];
 }
 
@@ -2432,25 +2854,35 @@ the no-array ivdep's safelen, with the correspondent treatment by the backend.
   }];
 }
 
-def SYCLIntelFPGAIIAttrDocs : Documentation {
+def SYCLIntelFPGAInitiationIntervalAttrDocs : Documentation {
   let Category = DocCatVariable;
-  let Heading = "intel::ii";
+  let Heading = "intel::initiation_interval";
   let Content = [{
-This attribute applies to a loop. Indicates that the loop should be pipelined
-with an initiation interval of N. N must be a positive integer. Cannot be
-applied multiple times to the same loop.
+This attribute applies to a loop or a function. Indicates that the loop or
+function should be pipelined with an initiation interval of N. N must be a
+positive integer. Cannot be applied multiple times to the same loop or function.
+Cannot be used on the same loop or function in conjunction with
+disable_loop_pipelining.
+
+The ``[[intel::ii]]`` attribute spelling is a deprecated synonym for
+``[[intel::initiation_interval]]`` and will be removed in the future.
 
 .. code-block:: c++
 
   void foo() {
     int var = 0;
-    [[intel::ii(4)]] for (int i = 0; i < 10; ++i) var++;
+    [[intel::initiation_interval(4)]] for (int i = 0; i < 10; ++i) var++;
   }
+
+  [[intel::initiation_interval(4)]] void foo1 { }
 
   template<int N>
   void bar() {
-    [[intel::ii(N)]] for(;;) { }
+    [[intel::initiation_interval(N)]] for(;;) { }
   }
+
+  template<int N>
+  [[intel::initiation_interval(N)]] void bar1 { }
 
   }];
 }
@@ -2459,10 +2891,11 @@ def SYCLIntelFPGAMaxConcurrencyAttrDocs : Documentation {
   let Category = DocCatVariable;
   let Heading = "intel::max_concurrency";
   let Content = [{
-This attribute applies to a loop. Indicates that the loop should allow no more
-than N threads or iterations to execute it simultaneously. N must be a non
-negative integer. '0' indicates the max_concurrency case to be unbounded. Cannot
-be applied multiple times to the same loop.
+This attribute applies to a loop or a function. It indicates that the
+loop/function should allow no more than N threads or iterations to execute it
+simultaneously. N must be a non negative integer. '0' indicates the
+max_concurrency case to be unbounded. Cannot be applied multiple times to the
+same loop or function, or in conjunction with ``disable_loop_pipelining``.
 
 .. code-block:: c++
 
@@ -2471,10 +2904,13 @@ be applied multiple times to the same loop.
     [[intel::max_concurrency(2)]] for (int i = 0; i != 10; ++i) a[i] = 0;
   }
 
+  [[intel::max_concurrency(2)]] void foo1 { }
   template<int N>
   void bar() {
     [[intel::max_concurrency(N)]] for(;;) { }
   }
+  template<int N>
+  [[intel::max_concurrency(N)]] void bar1() { }
 
   }];
 }
@@ -2522,16 +2958,55 @@ def SYCLIntelFPGADisableLoopPipeliningAttrDocs : Documentation {
   let Category = DocCatVariable;
   let Heading = "intel::disable_loop_pipelining";
   let Content = [{
-This attribute applies to a loop. Disables pipelining of the loop data path,
-causing the loop to be executed serially. Cannot be used on the same loop in
-conjunction with max_interleaving, speculated_iterations, max_concurrency, ii
-or ivdep.
+This attribute applies to a loop or a function. Takes no arguments and
+disables pipelining of the loop or function data path, causing the loop
+or function to be executed serially. Cannot be used on the same loop or
+function, or in conjunction with ``max_interleaving``,
+``speculated_iterations``, ``max_concurrency``, ``initiation_interval``,
+or ``ivdep``.
 
 .. code-block:: c++
 
   void foo() {
     int var = 0;
-    [[intel::disable_loop_pipelining] for (int i = 0; i < 10; ++i) var++;
+    [[intel::disable_loop_pipelining]] for (int i = 0; i < 10; ++i) var++;
+  }
+
+  [[intel::disable_loop_pipelining]] void foo1() { }
+
+  }];
+}
+
+def SYCLIntelFPGALoopCountAttrDocs : Documentation {
+  let Category = DocCatVariable;
+  let Heading = "intel::loop_count_min, intel::loop_count_max, intel::loop_count_avg";
+  let Content = [{
+The loop count attributes specify the minimum, maximum, or average number of
+iterations for a ``for`` loop. These are hints that the user specify that can be
+used by some of the loop optimization to make decisions such as if the loop
+should be unrolled. It is a way for the user to provide some information without
+using PGO.
+
+.. code-block:: c++
+
+  void foo(int *array, size_t n) {
+    [[intel::loop_count_min(4)]] for (int i = 0; i < n; ++i) array[i] = 0;
+  }
+
+  void zoo(int *array, size_t n) {
+    [[intel::loop_count_max(10)]] for (int i = 0; i < n; ++i) array[i] = 0;
+  }
+
+  void goo(int *array, size_t n) {
+    [[intel::loop_count_min(3)]]
+    [[intel::loop_count_max(10)]]
+    [[intel::loop_count_avg(5)]]
+    for (int i = 0; i < n; ++i) array[i] = 0;
+  }
+
+  template<int N>
+  void bar() {
+    [[intel::loop_count_avg(N)]] for(;;) { }
   }
 
   }];
@@ -2657,6 +3132,15 @@ optimization.
 This attribute allows to pass name and address of the function to a special
 ``cl::sycl::intel::get_device_func_ptr`` API call which extracts the device
 function pointer for the specified function.
+
+.. code-block:: c++
+
+  [[intel::device_indirectly_callable]] int func3() {}
+
+  class A {
+    [[intel::device_indirectly_callable]] A() {}
+  };
+
   }];
 }
 
@@ -3614,16 +4098,55 @@ It is only supported when using the Microsoft C++ ABI.
 def LifetimeBoundDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{
-The ``lifetimebound`` attribute indicates that a resource owned by
-a function parameter or implicit object parameter
-is retained by the return value of the annotated function
-(or, for a parameter of a constructor, in the value of the constructed object).
-It is only supported in C++.
+The ``lifetimebound`` attribute on a function parameter or implicit object
+parameter indicates that objects that are referred to by that parameter may
+also be referred to by the return value of the annotated function (or, for a
+parameter of a constructor, by the value of the constructed object). It is only
+supported in C++.
 
-This attribute provides an experimental implementation of the facility
-described in the C++ committee paper `P0936R0 <http://wg21.link/p0936r0>`_,
-and is subject to change as the design of the corresponding functionality
-changes.
+By default, a reference is considered to refer to its referenced object, a
+pointer is considered to refer to its pointee, a ``std::initializer_list<T>``
+is considered to refer to its underlying array, and aggregates (arrays and
+simple ``struct``\s) are considered to refer to all objects that their
+transitive subobjects refer to.
+
+Clang warns if it is able to detect that an object or reference refers to
+another object with a shorter lifetime. For example, Clang will warn if a
+function returns a reference to a local variable, or if a reference is bound to
+a temporary object whose lifetime is not extended. By using the
+``lifetimebound`` attribute, this determination can be extended to look through
+user-declared functions. For example:
+
+.. code-block:: c++
+
+    // Returns m[key] if key is present, or default_value if not.
+    template<typename T, typename U>
+    const U &get_or_default(const std::map<T, U> &m [[clang::lifetimebound]],
+                            const T &key, /* note, not lifetimebound */
+                            const U &default_value [[clang::lifetimebound]]);
+
+    std::map<std::string, std::string> m;
+    // warning: temporary "bar"s that might be bound to local reference 'val'
+    // will be destroyed at the end of the full-expression
+    const std::string &val = get_or_default(m, "foo"s, "bar"s);
+
+    // No warning in this case.
+    std::string def_val = "bar"s;
+    const std::string &val = get_or_default(m, "foo"s, def_val);
+
+The attribute can be applied to the implicit ``this`` parameter of a member
+function by writing the attribute after the function type:
+
+.. code-block:: c++
+
+    struct string {
+      // The returned pointer should not outlive ``*this``.
+      const char *data() const [[clang::lifetimebound]];
+    };
+
+This attribute is inspired by the C++ committee paper `P0936R0
+<http://wg21.link/p0936r0>`_, but does not affect whether temporary objects
+have their lifetimes extended.
   }];
 }
 
@@ -3766,7 +4289,9 @@ def UnrollHintDocs : Documentation {
   let Content = [{
 Loop unrolling optimization hints can be specified with ``#pragma unroll`` and
 ``#pragma nounroll``. The pragma is placed immediately before a for, while,
-do-while, or c++11 range-based for loop.
+do-while, or c++11 range-based for loop. GCC's loop unrolling hints
+``#pragma GCC unroll`` and ``#pragma GCC nounroll`` are also supported and have
+identical semantics to ``#pragma unroll`` and ``#pragma nounroll``.
 
 Specifying ``#pragma unroll`` without a parameter directs the loop unroller to
 attempt to fully unroll the loop if the trip count is known at compile time and
@@ -3892,9 +4417,9 @@ This attribute can be used in both OpenCL and SYCL.
 
 OpenCL documentation:
 The optional attribute intel_reqd_sub_group_size can be used to indicate that
-the kernel must be compiled and executed with the specified subgroup size. When
+the kernel must be compiled and executed with the specified sub group size. When
 this attribute is present, get_max_sub_group_size() is guaranteed to return the
-specified integer value. This is important for the correctness of many subgroup
+specified integer value. This is important for the correctness of many sub group
 algorithms, and in some cases may be used by the compiler to generate more optimal
 code. See `cl_intel_required_subgroup_size
 <https://www.khronos.org/registry/OpenCL/extensions/intel/cl_intel_required_subgroup_size.txt>`
@@ -3904,6 +4429,13 @@ SYCL documentation:
 The [[intel::reqd_sub_group_size(n)]] attribute indicates that the kernel must
 be compiled and executed with a sub-group of size n. The value of n must be set
 to a sub-group size supported by the device, or device compilation will fail.
+
+The ``[[intel::sub_group_size(n)]]`` attribute has the same effect as the other
+attribute spellings, except that it follows the SYCL 2020 Attribute Rules. See
+ the ``[[intel::named_sub_group_size(NAME)]]`` documentation for clarification.
+
+This attribute is mutually exclusive with ``[[intel::named_sub_group_size(NAME)]]``
+and ``[[intel::sycl_explicit_simd]]``.
 
 In addition to device functions, the required sub-group size attribute may also
 be specified in the definition of a named functor object and lambda functions,
@@ -3926,6 +4458,47 @@ as in the examples below:
 
 See Sub-groups for NDRange Parallelism proposal in sycl/doc/extensions/sub_group_ndrange/sub_group_ndrange.md
   }];
+}
+
+def IntelNamedSubGroupSizeDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+The ``[[intel::named_sub_group_size(NAME)]]`` attribute works similar to
+``[[intel::sub_group_size(N)]]`` attribute in that it defines the specific
+sub group size for the kernel. The ``[[intel::named_sub_group_size(NAME)]]``
+form accepts a required parameter of either ``automatic`` or ``primary``.
+
+``automatic`` specifies that the implementation is free to select any of the
+valid sub-group sizes associated with the device to which the kernel is
+submitted.  ``primary`` specifies that the implementation should select the
+device's primary sub-group size as reported by
+``info::device::primary_sub_group_size``.
+
+This attribute may not be combined with ``[[intel::sub_group_size(N)]]``, as
+the two attributes have different meanings. It is also mutually exclusive with
+``[[intel::sycl_explicit_simd]]``.
+
+In addition to the attributes, a default sub-group size strategy may be
+specified by the ``-fsycl-default-sub-group-size`` command line option, which
+accepts either ``automatic``, ``primary``, or a default size as an integer.
+These values match and have the same behavior as the ``automatic``, ``primary``,
+and ``[[intel::sub_group_size(N)]]`` values respectively.
+
+SYCL 2020 Attribute Rules:
+SYCL 2020 specifies that kernel-type attributes should only be specified on the
+kernel or a ``SYCL_EXTERNAL`` function. This implementation permits these
+attributes to appear on all function declarations for the purposes of
+self-documenting declarations. However, these attributes must match the kernel's
+sub-group size as configured by the command line, or via an attribute
+specifically.
+
+In addition to the SYCL 2020 Attribute Rules, this attribute and the
+``[[intel::sub_group_size(N)]]`` attribute also require that any
+``SYCL_EXTERNAL`` functions defined in a different translation unit must have a
+matching sub-group size specification, so ``SYCL_EXTERNAL`` functions not
+defined in this translation unit must also have a matching sub-group
+specification to the kernel function that calls it.
+}];
 }
 
 def OpenCLAccessDocs : Documentation {
@@ -4743,9 +5316,8 @@ def NotTailCalledDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{
 The ``not_tail_called`` attribute prevents tail-call optimization on statically
-bound calls. It has no effect on indirect calls. Virtual functions, objective-c
-methods, and functions marked as ``always_inline`` cannot be marked as
-``not_tail_called``.
+bound calls. Objective-c methods, and functions marked as ``always_inline``
+cannot be marked as ``not_tail_called``.
 
 For example, it prevents tail-call optimization in the following case:
 
@@ -4771,28 +5343,25 @@ However, it doesn't prevent tail-call optimization in this case:
       return (*fn)(a);
     }
 
-Marking virtual functions as ``not_tail_called`` is an error:
+Generally, marking an overriding virtual function as ``not_tail_called`` is
+not useful, because this attribute is a property of the static type. Calls
+made through a pointer or reference to the base class type will respect
+the ``not_tail_called`` attribute of the base class's member function,
+regardless of the runtime destination of the call:
 
   .. code-block:: c++
 
-    class Base {
-    public:
-      // not_tail_called on a virtual function is an error.
-      [[clang::not_tail_called]] virtual int foo1();
-
-      virtual int foo2();
-
-      // Non-virtual functions can be marked ``not_tail_called``.
-      [[clang::not_tail_called]] int foo3();
+    struct Foo { virtual void f(); };
+    struct Bar : Foo {
+      [[clang::not_tail_called]] void f() override;
     };
-
-    class Derived1 : public Base {
-    public:
-      int foo1() override;
-
-      // not_tail_called on a virtual function is an error.
-      [[clang::not_tail_called]] int foo2() override;
-    };
+    void callera(Bar& bar) {
+      Foo& foo = bar;
+      // not_tail_called has no effect on here, even though the
+      // underlying method is f from Bar.
+      foo.f();
+      bar.f(); // No tail-call optimization on here.
+    }
   }];
 }
 
@@ -5172,6 +5741,47 @@ argument is the index of the completion handler parameter.
   }];
 }
 
+def SwiftAsyncErrorDocs : Documentation {
+  let Category = SwiftDocs;
+  let Heading = "swift_async_error";
+  let Content = [{
+The ``swift_async_error`` attribute specifies how an error state will be
+represented in a swift async method. It's a bit analogous to the ``swift_error``
+attribute for the generated async method. The ``swift_async_error`` attribute
+can indicate a variety of different ways of representing an error.
+
+- ``__attribute__((swift_async_error(zero_argument, N)))``, specifies that the
+  async method is considered to have failed if the Nth argument to the
+  completion handler is zero.
+
+- ``__attribute__((swift_async_error(nonzero_argument, N)))``, specifies that
+  the async method is considered to have failed if the Nth argument to the
+  completion handler is non-zero.
+
+- ``__attribute__((swift_async_error(nonnull_error)))``, specifies that the
+  async method is considered to have failed if the ``NSError *`` argument to the
+  completion handler is non-null.
+
+- ``__attribute__((swift_async_error(none)))``, specifies that the async method
+  cannot fail.
+
+
+For instance:
+
+.. code-block:: objc
+
+  @interface MyClass : NSObject
+  -(void)asyncMethod:(void (^)(char, int, float))handler
+      __attribute__((swift_async(swift_private, 1)))
+      __attribute__((swift_async_error(zero_argument, 2)));
+  @end
+
+Here, the ``swift_async`` attribute specifies that ``handler`` is the completion
+handler for this method, and the ``swift_async_error`` attribute specifies that
+the ``int`` parameter is the one that represents the error.
+}];
+}
+
 def SuppressDocs : Documentation {
   let Category = DocCatStmt;
   let Content = [{
@@ -5400,6 +6010,9 @@ def PatchableFunctionEntryDocs : Documentation {
 before the function entry and N-M NOPs after the function entry. This attribute
 takes precedence over the command line option ``-fpatchable-function-entry=N,M``.
 ``M`` defaults to 0 if omitted.
+
+This attribute is only supported on
+aarch64/aarch64-be/riscv32/riscv64/i386/x86-64 targets.
 }];
 }
 
@@ -5848,6 +6461,59 @@ in the future.
   }];
 }
 
+def CalledOnceDocs : Documentation {
+  let Category = DocCatVariable;
+  let Content = [{
+The ``called_once`` attribute specifies that the annotated function or method
+parameter is invoked exactly once on all execution paths. It only applies
+to parameters with function-like types, i.e. function pointers or blocks. This
+concept is particularly useful for asynchronous programs.
+
+Clang implements a check for ``called_once`` parameters,
+``-Wcalled-once-parameter``. It is on by default and finds the following
+violations:
+
+* Parameter is not called at all.
+
+* Parameter is called more than once.
+
+* Parameter is not called on one of the execution paths.
+
+In the latter case, Clang pinpoints the path where parameter is not invoked
+by showing the control-flow statement where the path diverges.
+
+.. code-block:: objc
+
+  void fooWithCallback(void (^callback)(void) __attribute__((called_once))) {
+    if (somePredicate()) {
+      ...
+      callback();
+    } esle {
+      callback(); // OK: callback is called on every path
+    }
+  }
+
+  void barWithCallback(void (^callback)(void) __attribute__((called_once))) {
+    if (somePredicate()) {
+      ...
+      callback(); // note: previous call is here
+    }
+    callback(); // warning: callback is called twice
+  }
+
+  void foobarWithCallback(void (^callback)(void) __attribute__((called_once))) {
+    if (somePredicate()) {  // warning: callback is not called when condition is false
+      ...
+      callback();
+    }
+  }
+
+This attribute is useful for API developers who want to double-check if they
+implemented their method correctly.
+
+  }];
+}
+
 def GnuInlineDocs : Documentation {
   let Category = DocCatFunction;
   let Content = [{
@@ -6049,6 +6715,17 @@ template when declaring the texture reference. A texture reference variable
 could be accessed on the host side and, on the device side, might be translated
 into an internal texture object, which is established through texture bind and
 unbind runtime APIs.
+  }];
+}
+
+def HIPManagedAttrDocs : Documentation {
+  let Category = DocCatDecl;
+  let Content = [{
+The ``__managed__`` attribute can be applied to a global variable declaration in HIP.
+A managed variable is emitted as an undefined global symbol in the device binary and is
+registered by ``__hipRegisterManagedVariable`` in init functions. The HIP runtime allocates
+managed memory and uses it to define the symbol when loading the device binary.
+A managed variable can be accessed in both device and host code.
   }];
 }
 
@@ -6357,4 +7034,29 @@ Attribute docs`_, and `the GCC Inline docs`_.
 
 }];
   let Heading = "always_inline, __force_inline";
+}
+
+def EnforceTCBDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+  The ``enforce_tcb`` attribute can be placed on functions to enforce that a
+  trusted compute base (TCB) does not call out of the TCB. This generates a
+  warning every time a function not marked with an ``enforce_tcb`` attribute is
+  called from a function with the ``enforce_tcb`` attribute. A function may be a
+  part of multiple TCBs. Invocations through function pointers are currently
+  not checked. Builtins are considered to a part of every TCB.
+
+  - ``enforce_tcb(Name)`` indicates that this function is a part of the TCB named ``Name``
+  }];
+}
+
+def EnforceTCBLeafDocs : Documentation {
+  let Category = DocCatFunction;
+  let Content = [{
+  The ``enforce_tcb_leaf`` attribute satisfies the requirement enforced by
+  ``enforce_tcb`` for the marked function to be in the named TCB but does not
+  continue to check the functions called from within the leaf function.
+
+  - ``enforce_tcb_leaf(Name)`` indicates that this function is a part of the TCB named ``Name``
+  }];
 }

@@ -1644,11 +1644,18 @@ void PPCFrameLowering::emitEpilogue(MachineFunction &MF,
     // offset by the STDU/STDUX/STWU/STWUX instruction. For targets with red
     // zone add this offset back now.
 
+    // If the function has a base pointer, the stack pointer has been copied
+    // to it so we can restore it by copying in the other direction.
+    if (HasRedZone && HasBP) {
+      BuildMI(MBB, MBBI, dl, OrInst, RBReg).
+        addReg(BPReg).
+        addReg(BPReg);
+    }
     // If this function contained a fastcc call and GuaranteedTailCallOpt is
     // enabled (=> hasFastCall()==true) the fastcc call might contain a tail
     // call which invalidates the stack pointer value in SP(0). So we use the
     // value of R31 in this case. Similar situation exists with setjmp.
-    if (FI->hasFastCall() || MF.exposesReturnsTwice()) {
+    else if (FI->hasFastCall() || MF.exposesReturnsTwice()) {
       assert(HasFP && "Expecting a valid frame pointer.");
       if (!HasRedZone)
         RBReg = FPReg;
@@ -2241,30 +2248,39 @@ bool PPCFrameLowering::assignCalleeSavedSpillSlots(
     BVCalleeSaved.set(CSRegs[i]);
 
   for (unsigned Reg : BVAllocatable.set_bits()) {
-    // Set to 0 if the register is not a volatile VF/F8 register, or if it is
+    // Set to 0 if the register is not a volatile VSX register, or if it is
     // used in the function.
-    if (BVCalleeSaved[Reg] ||
-        (!PPC::F8RCRegClass.contains(Reg) &&
-         !PPC::VFRCRegClass.contains(Reg)) ||
-        (MF.getRegInfo().isPhysRegUsed(Reg)))
+    if (BVCalleeSaved[Reg] || !PPC::VSRCRegClass.contains(Reg) ||
+        MF.getRegInfo().isPhysRegUsed(Reg))
       BVAllocatable.reset(Reg);
   }
 
   bool AllSpilledToReg = true;
+  unsigned LastVSRUsedForSpill = 0;
   for (auto &CS : CSI) {
     if (BVAllocatable.none())
       return false;
 
     unsigned Reg = CS.getReg();
-    if (!PPC::G8RCRegClass.contains(Reg) && !PPC::GPRCRegClass.contains(Reg)) {
+
+    if (!PPC::G8RCRegClass.contains(Reg)) {
       AllSpilledToReg = false;
+      continue;
+    }
+
+    // For P9, we can reuse LastVSRUsedForSpill to spill two GPRs
+    // into one VSR using the mtvsrdd instruction.
+    if (LastVSRUsedForSpill != 0) {
+      CS.setDstReg(LastVSRUsedForSpill);
+      BVAllocatable.reset(LastVSRUsedForSpill);
+      LastVSRUsedForSpill = 0;
       continue;
     }
 
     unsigned VolatileVFReg = BVAllocatable.find_first();
     if (VolatileVFReg < BVAllocatable.size()) {
       CS.setDstReg(VolatileVFReg);
-      BVAllocatable.reset(VolatileVFReg);
+      LastVSRUsedForSpill = VolatileVFReg;
     } else {
       AllSpilledToReg = false;
     }
@@ -2283,6 +2299,24 @@ bool PPCFrameLowering::spillCalleeSavedRegisters(
   DebugLoc DL;
   bool CRSpilled = false;
   MachineInstrBuilder CRMIB;
+  BitVector Spilled(TRI->getNumRegs());
+
+  VSRContainingGPRs.clear();
+
+  // Map each VSR to GPRs to be spilled with into it. Single VSR can contain one
+  // or two GPRs, so we need table to record information for later save/restore.
+  llvm::for_each(CSI, [&](const CalleeSavedInfo &Info) {
+    if (Info.isSpilledToReg()) {
+      auto &SpilledVSR =
+          VSRContainingGPRs.FindAndConstruct(Info.getDstReg()).second;
+      assert(SpilledVSR.second == 0 &&
+             "Can't spill more than two GPRs into VSR!");
+      if (SpilledVSR.first == 0)
+        SpilledVSR.first = Info.getReg();
+      else
+        SpilledVSR.second = Info.getReg();
+    }
+  });
 
   for (unsigned i = 0, e = CSI.size(); i != e; ++i) {
     unsigned Reg = CSI[i].getReg();
@@ -2332,9 +2366,31 @@ bool PPCFrameLowering::spillCalleeSavedRegisters(
       }
     } else {
       if (CSI[i].isSpilledToReg()) {
-        NumPESpillVSR++;
-        BuildMI(MBB, MI, DL, TII.get(PPC::MTVSRD), CSI[i].getDstReg())
-          .addReg(Reg, getKillRegState(true));
+        unsigned Dst = CSI[i].getDstReg();
+
+        if (Spilled[Dst])
+          continue;
+
+        if (VSRContainingGPRs[Dst].second != 0) {
+          assert(Subtarget.hasP9Vector() &&
+                 "mtvsrdd is unavailable on pre-P9 targets.");
+
+          NumPESpillVSR += 2;
+          BuildMI(MBB, MI, DL, TII.get(PPC::MTVSRDD), Dst)
+              .addReg(VSRContainingGPRs[Dst].first, getKillRegState(true))
+              .addReg(VSRContainingGPRs[Dst].second, getKillRegState(true));
+        } else if (VSRContainingGPRs[Dst].second == 0) {
+          assert(Subtarget.hasP8Vector() &&
+                 "Can't move GPR to VSR on pre-P8 targets.");
+
+          ++NumPESpillVSR;
+          BuildMI(MBB, MI, DL, TII.get(PPC::MTVSRD),
+                  TRI->getSubReg(Dst, PPC::sub_64))
+              .addReg(VSRContainingGPRs[Dst].first, getKillRegState(true));
+        } else {
+          llvm_unreachable("More than two GPRs spilled to a VSR!");
+        }
+        Spilled.set(Dst);
       } else {
         const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(Reg);
         // Use !IsLiveIn for the kill flag.
@@ -2438,6 +2494,7 @@ bool PPCFrameLowering::restoreCalleeSavedRegisters(
   bool CR3Spilled = false;
   bool CR4Spilled = false;
   unsigned CSIIndex = 0;
+  BitVector Restored(TRI->getNumRegs());
 
   // Initialize insertion-point logic; we will be restoring in reverse
   // order of spill.
@@ -2482,9 +2539,32 @@ bool PPCFrameLowering::restoreCalleeSavedRegisters(
 
       if (CSI[i].isSpilledToReg()) {
         DebugLoc DL;
-        NumPEReloadVSR++;
-        BuildMI(MBB, I, DL, TII.get(PPC::MFVSRD), Reg)
-            .addReg(CSI[i].getDstReg(), getKillRegState(true));
+        unsigned Dst = CSI[i].getDstReg();
+
+        if (Restored[Dst])
+          continue;
+
+        if (VSRContainingGPRs[Dst].second != 0) {
+          assert(Subtarget.hasP9Vector());
+          NumPEReloadVSR += 2;
+          BuildMI(MBB, I, DL, TII.get(PPC::MFVSRLD),
+                  VSRContainingGPRs[Dst].second)
+              .addReg(Dst);
+          BuildMI(MBB, I, DL, TII.get(PPC::MFVSRD),
+                  VSRContainingGPRs[Dst].first)
+              .addReg(TRI->getSubReg(Dst, PPC::sub_64), getKillRegState(true));
+        } else if (VSRContainingGPRs[Dst].second == 0) {
+          assert(Subtarget.hasP8Vector());
+          ++NumPEReloadVSR;
+          BuildMI(MBB, I, DL, TII.get(PPC::MFVSRD),
+                  VSRContainingGPRs[Dst].first)
+              .addReg(TRI->getSubReg(Dst, PPC::sub_64), getKillRegState(true));
+        } else {
+          llvm_unreachable("More than two GPRs spilled to a VSR!");
+        }
+
+        Restored.set(Dst);
+
       } else {
        // Default behavior for non-CR saves.
         const TargetRegisterClass *RC = TRI->getMinimalPhysRegClass(Reg);
@@ -2538,6 +2618,5 @@ unsigned PPCFrameLowering::getBasePointerSaveOffset() const {
 bool PPCFrameLowering::enableShrinkWrapping(const MachineFunction &MF) const {
   if (MF.getInfo<PPCFunctionInfo>()->shrinkWrapDisabled())
     return false;
-  return (MF.getSubtarget<PPCSubtarget>().isSVR4ABI() &&
-          MF.getSubtarget<PPCSubtarget>().isPPC64());
+  return !MF.getSubtarget<PPCSubtarget>().is32BitELFABI();
 }

@@ -167,6 +167,20 @@ void baz() {
 #pragma omp target update to(t) nowait
 }
 
+struct S3 {
+  double Z[64];
+};
+
+#pragma omp declare mapper(id: S3 s) map(s.Z[0:64])
+
+void qux() {
+  S3 s;
+#pragma omp target map(mapper(id), to:s)
+  { }
+}
+
+// DEBUG: @{{[0-9]+}} = private unnamed_addr constant [{{[0-9]+}} x i8] c";s.Z[0:64];{{.*}}.cpp;{{[0-9]+}};{{[0-9]+}};;\00"
+
 // DEBUG: %{{.+}} = call i32 @__tgt_target_mapper(%struct.ident_t* @{{.+}}, i64 -1, i8* @{{.+}}, i32 1, i8** %{{.+}}, i8** %{{.+}}, i64* {{.+}}, i64* {{.+}}, i8** getelementptr inbounds ([{{[0-9]+}} x i8*], [{{[0-9]+}} x i8*]* @.offload_mapnames{{.*}}, i32 0, i32 0), i8** {{.+}})
 // DEBUG: %{{.+}} = call i32 @__tgt_target_teams_mapper(%struct.ident_t* @{{.+}}, i64 -1, i8* @{{.+}}, i32 1, i8** %{{.+}}, i8** %{{.+}}, i64* {{.+}}, i64* {{.+}}, i8** getelementptr inbounds ([{{[0-9]+}} x i8*], [{{[0-9]+}} x i8*]* @.offload_mapnames{{.*}}, i32 0, i32 0), i8** {{.+}}, i32 {{.+}}, i32 {{.+}})
 // DEBUG: call void @__tgt_target_data_begin_mapper(%struct.ident_t* @{{.+}}, i64 -1, i32 1, i8** %{{.+}}, i8** %{{.+}}, i64* {{.+}}, i64* {{.+}}, i8** getelementptr inbounds ([{{[0-9]+}} x i8*], [{{[0-9]+}} x i8*]* @.offload_mapnames{{.*}}, i32 0, i32 0), i8** {{.+}})
@@ -188,5 +202,11 @@ void baz() {
 // CHECK: call void @__tgt_target_data_begin_nowait_mapper(%struct.ident_t* @{{.+}}, i64 -1, i32 1, i8** %{{.+}}, i8** %{{.+}}, i64* {{.+}}, i64* {{.+}}, i8** null, i8** {{.+}})
 // CHECK: call void @__tgt_target_data_end_nowait_mapper(%struct.ident_t* @{{.+}}, i64 -1, i32 1, i8** %{{.+}}, i8** %{{.+}}, i64* {{.+}}, i64* {{.+}}, i8** null, i8** {{.+}})
 // CHECK: call void @__tgt_target_data_update_nowait_mapper(%struct.ident_t* @{{.+}}, i64 -1, i32 1, i8** %{{.+}}, i8** %{{.+}}, i64* {{.+}}, i64* {{.+}}, i8** null, i8** {{.+}})
+
+
+// DEBUG: void @.omp_mapper._ZTS2S3.id(i8* {{.*}}, i8* {{.*}}, i8* {{.*}}, i64 {{.*}}, i64 {{.*}}, i8* [[NAME_ARG:%.+]])
+// DEBUG: store i8* [[NAME_ARG]], i8** [[NAME_STACK:%.+]]
+// DEBUG: [[MAPPER_NAME:%.+]] = load i8*, i8** [[NAME_STACK]]
+// DEBUG: call void @__tgt_push_mapper_component(i8* %{{.*}}, i8* %{{.*}}, i8* %{{.*}}, i64 %{{.*}}, i64 %{{.*}}, i8* [[MAPPER_NAME]])
 
 #endif

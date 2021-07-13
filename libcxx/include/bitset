@@ -202,7 +202,7 @@ private:
     void __init(unsigned long long __v, false_type) _NOEXCEPT;
     _LIBCPP_INLINE_VISIBILITY
     void __init(unsigned long long __v, true_type) _NOEXCEPT;
-#endif  // _LIBCPP_CXX03_LANG
+#endif // _LIBCPP_CXX03_LANG
     unsigned long to_ulong(false_type) const;
     _LIBCPP_INLINE_VISIBILITY
     unsigned long to_ulong(true_type) const;
@@ -258,7 +258,7 @@ __bitset<_N_words, _Size>::__init(unsigned long long __v, true_type) _NOEXCEPT
     _VSTD::fill(__first_ + 1, __first_ + sizeof(__first_)/sizeof(__first_[0]), __storage_type(0));
 }
 
-#endif  // _LIBCPP_CXX03_LANG
+#endif // _LIBCPP_CXX03_LANG
 
 template <size_t _N_words, size_t _Size>
 inline
@@ -990,7 +990,7 @@ inline
 size_t
 bitset<_Size>::count() const _NOEXCEPT
 {
-    return static_cast<size_t>(__count_bool_true(base::__make_iter(0), _Size));
+    return static_cast<size_t>(_VSTD::__count_bool_true(base::__make_iter(0), _Size));
 }
 
 template <size_t _Size>
@@ -1106,4 +1106,4 @@ _LIBCPP_END_NAMESPACE_STD
 
 _LIBCPP_POP_MACROS
 
-#endif  // _LIBCPP_BITSET
+#endif // _LIBCPP_BITSET

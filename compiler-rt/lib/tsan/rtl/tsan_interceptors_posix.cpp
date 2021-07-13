@@ -54,10 +54,6 @@ using namespace __tsan;
 #define vfork __vfork14
 #endif
 
-#if SANITIZER_ANDROID
-#define mallopt(a, b)
-#endif
-
 #ifdef __mips__
 const int kSigCount = 129;
 #else
@@ -97,7 +93,7 @@ extern "C" void _exit(int status);
 extern "C" int fileno_unlocked(void *stream);
 extern "C" int dirfd(void *dirp);
 #endif
-#if !SANITIZER_FREEBSD && !SANITIZER_ANDROID && !SANITIZER_NETBSD
+#if SANITIZER_GLIBC
 extern "C" int mallopt(int param, int value);
 #endif
 #if SANITIZER_NETBSD
@@ -659,8 +655,11 @@ TSAN_INTERCEPTOR(void*, malloc, uptr size) {
   return p;
 }
 
+// In glibc<2.25, dynamic TLS blocks are allocated by __libc_memalign. Intercept
+// __libc_memalign so that (1) we can detect races (2) free will not be called
+// on libc internally allocated blocks.
 TSAN_INTERCEPTOR(void*, __libc_memalign, uptr align, uptr sz) {
-  SCOPED_TSAN_INTERCEPTOR(__libc_memalign, align, sz);
+  SCOPED_INTERCEPTOR_RAW(__libc_memalign, align, sz);
   return user_memalign(thr, pc, align, sz);
 }
 
@@ -773,6 +772,11 @@ static void *mmap_interceptor(ThreadState *thr, uptr pc, Mmap real_mmap,
   if (!fix_mmap_addr(&addr, sz, flags)) return MAP_FAILED;
   void *res = real_mmap(addr, sz, prot, flags, fd, off);
   if (res != MAP_FAILED) {
+    if (!IsAppMem((uptr)res) || !IsAppMem((uptr)res + sz - 1)) {
+      Report("ThreadSanitizer: mmap at bad address: addr=%p size=%p res=%p\n",
+             addr, (void*)sz, res);
+      Die();
+    }
     if (fd > 0) FdAccess(thr, pc, fd);
     MemoryRangeImitateWriteOrResetRange(thr, pc, (uptr)res, sz);
   }
@@ -2262,6 +2266,8 @@ static void HandleRecvmsg(ThreadState *thr, uptr pc,
 #define COMMON_INTERCEPT_FUNCTION(name) INTERCEPT_FUNCTION(name)
 #define COMMON_INTERCEPT_FUNCTION_VER(name, ver)                          \
   INTERCEPT_FUNCTION_VER(name, ver)
+#define COMMON_INTERCEPT_FUNCTION_VER_UNVERSIONED_FALLBACK(name, ver) \
+  (INTERCEPT_FUNCTION_VER(name, ver) || INTERCEPT_FUNCTION(name))
 
 #define COMMON_INTERCEPTOR_WRITE_RANGE(ctx, ptr, size)                    \
   MemoryAccessRange(((TsanInterceptorContext *)ctx)->thr,                 \
@@ -2668,7 +2674,7 @@ void InitializeInterceptors() {
 #endif
 
   // Instruct libc malloc to consume less memory.
-#if SANITIZER_LINUX
+#if SANITIZER_GLIBC
   mallopt(1, 0);  // M_MXFAST
   mallopt(-3, 32*1024);  // M_MMAP_THRESHOLD
 #endif

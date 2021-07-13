@@ -579,17 +579,23 @@ size_t UnwrappedLineParser::computePPHash() const {
   return h;
 }
 
-void UnwrappedLineParser::parseBlock(bool MustBeDeclaration, bool AddLevel,
-                                     bool MunchSemi) {
+void UnwrappedLineParser::parseBlock(bool MustBeDeclaration, unsigned AddLevels,
+                                     bool MunchSemi,
+                                     bool UnindentWhitesmithsBraces) {
   assert(FormatTok->isOneOf(tok::l_brace, TT_MacroBlockBegin) &&
          "'{' or macro block token expected");
   const bool MacroBlock = FormatTok->is(TT_MacroBlockBegin);
   FormatTok->setBlockKind(BK_Block);
 
+  // For Whitesmiths mode, jump to the next level prior to skipping over the
+  // braces.
+  if (AddLevels > 0 && Style.BreakBeforeBraces == FormatStyle::BS_Whitesmiths)
+    ++Line->Level;
+
   size_t PPStartHash = computePPHash();
 
   unsigned InitialLevel = Line->Level;
-  nextToken(/*LevelDifference=*/AddLevel ? 1 : 0);
+  nextToken(/*LevelDifference=*/AddLevels);
 
   if (MacroBlock && FormatTok->is(tok::l_paren))
     parseParens();
@@ -602,10 +608,16 @@ void UnwrappedLineParser::parseBlock(bool MustBeDeclaration, bool AddLevel,
           ? (UnwrappedLine::kInvalidIndex)
           : (CurrentLines->size() - 1 - NbPreprocessorDirectives);
 
+  // Whitesmiths is weird here. The brace needs to be indented for the namespace
+  // block, but the block itself may not be indented depending on the style
+  // settings. This allows the format to back up one level in those cases.
+  if (UnindentWhitesmithsBraces)
+    --Line->Level;
+
   ScopedDeclarationState DeclarationState(*Line, DeclarationScopeStack,
                                           MustBeDeclaration);
-  if (AddLevel)
-    ++Line->Level;
+  if (AddLevels > 0u && Style.BreakBeforeBraces != FormatStyle::BS_Whitesmiths)
+    Line->Level += AddLevels;
   parseLevel(/*HasOpeningBrace=*/true);
 
   if (eof())
@@ -621,7 +633,7 @@ void UnwrappedLineParser::parseBlock(bool MustBeDeclaration, bool AddLevel,
   size_t PPEndHash = computePPHash();
 
   // Munch the closing brace.
-  nextToken(/*LevelDifference=*/AddLevel ? -1 : 0);
+  nextToken(/*LevelDifference=*/-AddLevels);
 
   if (MacroBlock && FormatTok->is(tok::l_paren))
     parseParens();
@@ -714,7 +726,7 @@ void UnwrappedLineParser::parseChildBlock() {
   nextToken();
 }
 
-void UnwrappedLineParser::parsePPDirective(unsigned Level) {
+void UnwrappedLineParser::parsePPDirective() {
   assert(FormatTok->Tok.is(tok::hash) && "'#' expected");
   ScopedMacroState MacroState(*Line, Tokens, FormatTok);
 
@@ -745,17 +757,6 @@ void UnwrappedLineParser::parsePPDirective(unsigned Level) {
   case tok::pp_endif:
     parsePPEndIf();
     break;
-  case tok::pp_pragma: {
-    bool IndentPPDirectives =
-        Style.IndentPPDirectives != FormatStyle::PPDIS_None;
-    unsigned CurrentLevel = Line->Level;
-    Line->Level =
-        Style.IndentPragmas
-            ? (IndentPPDirectives ? (Level - (PPBranchLevel + 1)) : Level)
-            : CurrentLevel;
-    parsePPUnknown();
-    Line->Level = CurrentLevel;
-  } break;
   default:
     parsePPUnknown();
     break;
@@ -1136,12 +1137,12 @@ void UnwrappedLineParser::parseStructuralElement() {
           if (Style.BraceWrapping.AfterExternBlock) {
             addUnwrappedLine();
           }
-          parseBlock(/*MustBeDeclaration=*/true,
-                     /*AddLevel=*/Style.BraceWrapping.AfterExternBlock);
+          unsigned AddLevels = Style.BraceWrapping.AfterExternBlock ? 1u : 0u;
+          parseBlock(/*MustBeDeclaration=*/true, AddLevels);
         } else {
-          parseBlock(/*MustBeDeclaration=*/true,
-                     /*AddLevel=*/Style.IndentExternBlock ==
-                         FormatStyle::IEBS_Indent);
+          unsigned AddLevels =
+              Style.IndentExternBlock == FormatStyle::IEBS_Indent ? 1u : 0u;
+          parseBlock(/*MustBeDeclaration=*/true, AddLevels);
         }
         addUnwrappedLine();
         return;
@@ -1170,7 +1171,7 @@ void UnwrappedLineParser::parseStructuralElement() {
       return;
     }
     if (FormatTok->is(TT_MacroBlockBegin)) {
-      parseBlock(/*MustBeDeclaration=*/false, /*AddLevel=*/true,
+      parseBlock(/*MustBeDeclaration=*/false, /*AddLevels=*/1u,
                  /*MunchSemi=*/false);
       return;
     }
@@ -2139,15 +2140,34 @@ void UnwrappedLineParser::parseNamespace() {
     if (ShouldBreakBeforeBrace(Style, InitialToken))
       addUnwrappedLine();
 
-    bool AddLevel = Style.NamespaceIndentation == FormatStyle::NI_All ||
-                    (Style.NamespaceIndentation == FormatStyle::NI_Inner &&
-                     DeclarationScopeStack.size() > 1);
-    parseBlock(/*MustBeDeclaration=*/true, AddLevel);
+    unsigned AddLevels =
+        Style.NamespaceIndentation == FormatStyle::NI_All ||
+                (Style.NamespaceIndentation == FormatStyle::NI_Inner &&
+                 DeclarationScopeStack.size() > 1)
+            ? 1u
+            : 0u;
+    bool ManageWhitesmithsBraces =
+        AddLevels == 0u &&
+        Style.BreakBeforeBraces == FormatStyle::BS_Whitesmiths;
+
+    // If we're in Whitesmiths mode, indent the brace if we're not indenting
+    // the whole block.
+    if (ManageWhitesmithsBraces)
+      ++Line->Level;
+
+    parseBlock(/*MustBeDeclaration=*/true, AddLevels,
+               /*MunchSemi=*/true,
+               /*UnindentWhitesmithsBraces=*/ManageWhitesmithsBraces);
+
     // Munch the semicolon after a namespace. This is more common than one would
     // think. Putting the semicolon into its own line is very ugly.
     if (FormatTok->Tok.is(tok::semi))
       nextToken();
-    addUnwrappedLine();
+
+    addUnwrappedLine(AddLevels > 0 ? LineLevel::Remove : LineLevel::Keep);
+
+    if (ManageWhitesmithsBraces)
+      --Line->Level;
   }
   // FIXME: Add error handling.
 }
@@ -2233,6 +2253,11 @@ void UnwrappedLineParser::parseDoWhile() {
     return;
   }
 
+  // If in Whitesmiths mode, the line with the while() needs to be indented
+  // to the same level as the block.
+  if (Style.BreakBeforeBraces == FormatStyle::BS_Whitesmiths)
+    ++Line->Level;
+
   nextToken();
   parseStructuralElement();
 }
@@ -2244,8 +2269,10 @@ void UnwrappedLineParser::parseLabel(bool LeftAlignLabel) {
     --Line->Level;
   if (LeftAlignLabel)
     Line->Level = 0;
+
   if (!Style.IndentCaseBlocks && CommentsBeforeNextToken.empty() &&
       FormatTok->Tok.is(tok::l_brace)) {
+
     CompoundStatementIndenter Indenter(this, Line->Level,
                                        Style.BraceWrapping.AfterCaseLabel,
                                        Style.BraceWrapping.IndentBraces);
@@ -2276,6 +2303,7 @@ void UnwrappedLineParser::parseLabel(bool LeftAlignLabel) {
 
 void UnwrappedLineParser::parseCaseLabel() {
   assert(FormatTok->Tok.is(tok::kw_case) && "'case' expected");
+
   // FIXME: fix handling of complex expressions here.
   do {
     nextToken();
@@ -2579,7 +2607,7 @@ void UnwrappedLineParser::parseJavaEnumBody() {
   while (FormatTok) {
     if (FormatTok->is(tok::l_brace)) {
       // Parse the constant's class body.
-      parseBlock(/*MustBeDeclaration=*/true, /*AddLevel=*/true,
+      parseBlock(/*MustBeDeclaration=*/true, /*AddLevels=*/1u,
                  /*MunchSemi=*/false);
     } else if (FormatTok->is(tok::l_paren)) {
       parseParens();
@@ -2681,8 +2709,8 @@ void UnwrappedLineParser::parseRecord(bool ParseAsExpr) {
       if (ShouldBreakBeforeBrace(Style, InitialToken))
         addUnwrappedLine();
 
-      parseBlock(/*MustBeDeclaration=*/true, /*AddLevel=*/true,
-                 /*MunchSemi=*/false);
+      unsigned AddLevels = Style.IndentAccessModifiers ? 2u : 1u;
+      parseBlock(/*MustBeDeclaration=*/true, AddLevels, /*MunchSemi=*/false);
     }
   }
   // There is no addUnwrappedLine() here so that we fall through to parsing a
@@ -2922,17 +2950,29 @@ LLVM_ATTRIBUTE_UNUSED static void printDebugInfo(const UnwrappedLine &Line,
   llvm::dbgs() << "\n";
 }
 
-void UnwrappedLineParser::addUnwrappedLine() {
+void UnwrappedLineParser::addUnwrappedLine(LineLevel AdjustLevel) {
   if (Line->Tokens.empty())
     return;
   LLVM_DEBUG({
     if (CurrentLines == &Lines)
       printDebugInfo(*Line);
   });
+
+  // If this line closes a block when in Whitesmiths mode, remember that
+  // information so that the level can be decreased after the line is added.
+  // This has to happen after the addition of the line since the line itself
+  // needs to be indented.
+  bool ClosesWhitesmithsBlock =
+      Line->MatchingOpeningBlockLineIndex != UnwrappedLine::kInvalidIndex &&
+      Style.BreakBeforeBraces == FormatStyle::BS_Whitesmiths;
+
   CurrentLines->push_back(std::move(*Line));
   Line->Tokens.clear();
   Line->MatchingOpeningBlockLineIndex = UnwrappedLine::kInvalidIndex;
   Line->FirstStartColumn = 0;
+
+  if (ClosesWhitesmithsBlock && AdjustLevel == LineLevel::Remove)
+    --Line->Level;
   if (CurrentLines == &Lines && !PreprocessorDirectives.empty()) {
     CurrentLines->append(
         std::make_move_iterator(PreprocessorDirectives.begin()),
@@ -3175,7 +3215,7 @@ void UnwrappedLineParser::readToken(int LevelDifference) {
           PPBranchLevel > 0)
         Line->Level += PPBranchLevel;
       flushComments(isOnNewLine(*FormatTok));
-      parsePPDirective(Line->Level);
+      parsePPDirective();
     }
     while (FormatTok->getType() == TT_ConflictStart ||
            FormatTok->getType() == TT_ConflictEnd ||

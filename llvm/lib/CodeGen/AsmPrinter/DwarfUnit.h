@@ -147,10 +147,8 @@ public:
   void addString(DIE &Die, dwarf::Attribute Attribute, StringRef Str);
 
   /// Add a Dwarf label attribute data and value.
-  DIEValueList::value_iterator addLabel(DIEValueList &Die,
-                                        dwarf::Attribute Attribute,
-                                        dwarf::Form Form,
-                                        const MCSymbol *Label);
+  void addLabel(DIEValueList &Die, dwarf::Attribute Attribute, dwarf::Form Form,
+                const MCSymbol *Label);
 
   void addLabel(DIELoc &Die, dwarf::Form Form, const MCSymbol *Label);
 
@@ -160,10 +158,11 @@ public:
   /// Add a dwarf op address data and value using the form given and an
   /// op of either DW_FORM_addr or DW_FORM_GNU_addr_index.
   void addOpAddress(DIELoc &Die, const MCSymbol *Sym);
+  void addPoolOpAddress(DIEValueList &Die, const MCSymbol *Label);
 
   /// Add a label delta attribute data and value.
-  void addLabelDelta(DIE &Die, dwarf::Attribute Attribute, const MCSymbol *Hi,
-                     const MCSymbol *Lo);
+  void addLabelDelta(DIEValueList &Die, dwarf::Attribute Attribute,
+                     const MCSymbol *Hi, const MCSymbol *Lo);
 
   /// Add a DIE attribute data and value.
   void addDIEEntry(DIE &Die, dwarf::Attribute Attribute, DIE &Entry);
@@ -179,6 +178,8 @@ public:
 
   /// Add block data.
   void addBlock(DIE &Die, dwarf::Attribute Attribute, DIEBlock *Block);
+  void addBlock(DIE &Die, dwarf::Attribute Attribute, dwarf::Form Form,
+                DIEBlock *Block);
 
   /// Add location information to specified debug information entry.
   void addSourceLine(DIE &Die, unsigned Line, const DIFile *File);
@@ -269,13 +270,12 @@ public:
   void constructTypeDIE(DIE &Buffer, const DICompositeType *CTy);
 
   /// addSectionDelta - Add a label delta attribute data and value.
-  DIE::value_iterator addSectionDelta(DIE &Die, dwarf::Attribute Attribute,
-                                      const MCSymbol *Hi, const MCSymbol *Lo);
+  void addSectionDelta(DIE &Die, dwarf::Attribute Attribute, const MCSymbol *Hi,
+                       const MCSymbol *Lo);
 
   /// Add a Dwarf section label attribute data and value.
-  DIE::value_iterator addSectionLabel(DIE &Die, dwarf::Attribute Attribute,
-                                      const MCSymbol *Label,
-                                      const MCSymbol *Sec);
+  void addSectionLabel(DIE &Die, dwarf::Attribute Attribute,
+                       const MCSymbol *Label, const MCSymbol *Sec);
 
   /// Get context owner's DIE.
   DIE *createTypeDIE(const DICompositeType *Ty);

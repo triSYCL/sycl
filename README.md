@@ -1,4 +1,4 @@
-# SYCL for Vitis 2020.1: experimental melting pot with Intel oneAPI DPC++ SYCL and triSYCL for Xilinx FPGA
+# SYCL for Vitis 2020.2: experimental melting pot with Intel oneAPI DPC++ SYCL and triSYCL for Xilinx FPGA
 
 ## Introduction
 
@@ -25,7 +25,7 @@ facilitating the programming of heterogeneous accelerators.
 Some LLVM passes and some C++ SYCL runtime from
 https://github.com/triSYCL/triSYCL are merged-in with a new Clang
 driver and scripts to use Xilinx Vitis
-[v++](https://www.xilinx.com/html_docs/xilinx2020_1/vitis_doc/vitiscommandcompiler.html)
+[v++](https://www.xilinx.com/html_docs/xilinx2020_2/vitis_doc/vitiscommandcompiler.html)
 as a back-end for Xilinx FPGA using the open-source runtime and
 device-driver https://github.com/Xilinx/XRT
 
@@ -76,4 +76,4 @@ oneAPI DPC++ is an open, cross-architecture language built upon the ISO C++ and 
 SYCL\* standards. DPC++ extends these standards with a number of extensions,
 which can be found in [sycl/doc/extensions](sycl/doc/extensions) directory.
 
-\*Other names and brands may be claimed as the property of others.
+*\*Other names and brands may be claimed as the property of others.*

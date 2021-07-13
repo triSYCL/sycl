@@ -147,7 +147,8 @@ public:
 
   bool isLittleEndian() const {
     return !(TypeID == ID_ELF32B || TypeID == ID_ELF64B ||
-             TypeID == ID_MachO32B || TypeID == ID_MachO64B);
+             TypeID == ID_MachO32B || TypeID == ID_MachO64B ||
+             TypeID == ID_XCOFF32 || TypeID == ID_XCOFF64);
   }
 
   bool isWinRes() const { return TypeID == ID_WinRes; }
@@ -165,8 +166,8 @@ public:
   static Error checkOffset(MemoryBufferRef M, uintptr_t Addr,
                            const uint64_t Size) {
     if (Addr + Size < Addr || Addr + Size < Size ||
-        Addr + Size > uintptr_t(M.getBufferEnd()) ||
-        Addr < uintptr_t(M.getBufferStart())) {
+        Addr + Size > reinterpret_cast<uintptr_t>(M.getBufferEnd()) ||
+        Addr < reinterpret_cast<uintptr_t>(M.getBufferStart())) {
       return errorCodeToError(object_error::unexpected_eof);
     }
     return Error::success();

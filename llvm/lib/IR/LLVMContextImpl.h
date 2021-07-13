@@ -784,10 +784,10 @@ template <> struct MDNodeSubsetEqualImpl<DISubprogram> {
 
     // Compare to the RHS.
     // FIXME: We need to compare template parameters here to avoid incorrect
-    // collisions in mapMetadata when RF_MoveDistinctMDs and a ODR-DISubprogram
-    // has a non-ODR template parameter (i.e., a DICompositeType that does not
-    // have an identifier). Eventually we should decouple ODR logic from
-    // uniquing logic.
+    // collisions in mapMetadata when RF_ReuseAndMutateDistinctMDs and a
+    // ODR-DISubprogram has a non-ODR template parameter (i.e., a
+    // DICompositeType that does not have an identifier). Eventually we should
+    // decouple ODR logic from uniquing logic.
     return IsDefinition == RHS->isDefinition() && Scope == RHS->getRawScope() &&
            LinkageName == RHS->getRawLinkageName() &&
            TemplateParams == RHS->getRawTemplateParams();
@@ -1220,6 +1220,19 @@ template <> struct MDNodeKeyImpl<DIMacroFile> {
   }
 };
 
+template <> struct MDNodeKeyImpl<DIArgList> {
+  ArrayRef<ValueAsMetadata *> Args;
+
+  MDNodeKeyImpl(ArrayRef<ValueAsMetadata *> Args) : Args(Args) {}
+  MDNodeKeyImpl(const DIArgList *N) : Args(N->getArgs()) {}
+
+  bool isKeyOf(const DIArgList *RHS) const { return Args == RHS->getArgs(); }
+
+  unsigned getHashValue() const {
+    return hash_combine_range(Args.begin(), Args.end());
+  }
+};
+
 /// DenseMapInfo for MDNode subclasses.
 template <class NodeTy> struct MDNodeInfo {
   using KeyTy = MDNodeKeyImpl<NodeTy>;
@@ -1313,9 +1326,6 @@ public:
   /// OwnedModules - The set of modules instantiated in this context, and which
   /// will be automatically deleted if this context is deleted.
   SmallPtrSet<Module*, 4> OwnedModules;
-
-  LLVMContext::InlineAsmDiagHandlerTy InlineAsmDiagHandler = nullptr;
-  void *InlineAsmDiagContext = nullptr;
 
   /// The main remark streamer used by all the other streamers (e.g. IR, MIR,
   /// frontends, etc.). This should only be used by the specific streamers, and
@@ -1418,7 +1428,7 @@ public:
   // Basic type instances.
   Type VoidTy, LabelTy, HalfTy, BFloatTy, FloatTy, DoubleTy, MetadataTy,
       TokenTy;
-  Type X86_FP80Ty, FP128Ty, PPC_FP128Ty, X86_MMXTy;
+  Type X86_FP80Ty, FP128Ty, PPC_FP128Ty, X86_MMXTy, X86_AMXTy;
   IntegerType Int1Ty, Int8Ty, Int16Ty, Int32Ty, Int64Ty, Int128Ty;
 
   BumpPtrAllocator Alloc;

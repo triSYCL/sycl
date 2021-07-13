@@ -372,11 +372,11 @@ __kmp_acquire_futex_lock_timed_template(kmp_futex_lock_t *lck, kmp_int32 gtid) {
         ("__kmp_acquire_futex_lock: lck:%p, T#%d before futex_wait(0x%x)\n",
          lck, gtid, poll_val));
 
-    kmp_int32 rc;
+    long rc;
     if ((rc = syscall(__NR_futex, &(lck->lk.poll), FUTEX_WAIT, poll_val, NULL,
                       NULL, 0)) != 0) {
       KA_TRACE(1000, ("__kmp_acquire_futex_lock: lck:%p, T#%d futex_wait(0x%x) "
-                      "failed (rc=%d errno=%d)\n",
+                      "failed (rc=%ld errno=%d)\n",
                       lck, gtid, poll_val, rc, errno));
       continue;
     }
@@ -1490,8 +1490,8 @@ int __kmp_release_queuing_lock(kmp_queuing_lock_t *lck, kmp_int32 gtid) {
 #endif
       return KMP_LOCK_RELEASED;
     }
-/* KMP_CPU_PAUSE(); don't want to make releasing thread hold up acquiring
-   threads */
+    /* KMP_CPU_PAUSE(); don't want to make releasing thread hold up acquiring
+       threads */
 
 #ifdef DEBUG_QUEUING_LOCKS
     TRACE_LOCK(gtid + 1, "rel retry");
@@ -1919,9 +1919,10 @@ void __kmp_print_speculative_stats() {
   }
 
   fprintf(statsFile, "Speculative lock statistics (all approximate!)\n");
-  fprintf(statsFile, " Lock parameters: \n"
-                     "   max_soft_retries               : %10d\n"
-                     "   max_badness                    : %10d\n",
+  fprintf(statsFile,
+          " Lock parameters: \n"
+          "   max_soft_retries               : %10d\n"
+          "   max_badness                    : %10d\n",
           __kmp_adaptive_backoff_params.max_soft_retries,
           __kmp_adaptive_backoff_params.max_badness);
   fprintf(statsFile, " Non-speculative acquire attempts : %10d\n",

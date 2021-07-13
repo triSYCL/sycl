@@ -122,6 +122,9 @@ bool llvm::LowerRISCVMachineOperandToMCOperand(const MachineOperand &MO,
   case MachineOperand::MO_ConstantPoolIndex:
     MCOp = lowerSymbolOperand(MO, AP.GetCPISymbol(MO.getIndex()), AP);
     break;
+  case MachineOperand::MO_JumpTableIndex:
+    MCOp = lowerSymbolOperand(MO, AP.GetJTISymbol(MO.getIndex()), AP);
+    break;
   }
   return true;
 }
@@ -144,14 +147,24 @@ static bool lowerRISCVVMachineInstrToMCInst(const MachineInstr *MI,
       MF->getSubtarget<RISCVSubtarget>().getRegisterInfo();
   assert(TRI && "TargetRegisterInfo expected");
 
+  uint64_t TSFlags = MI->getDesc().TSFlags;
+  int NumOps = MI->getNumExplicitOperands();
+
   for (const MachineOperand &MO : MI->explicit_operands()) {
     int OpNo = (int)MI->getOperandNo(&MO);
     assert(OpNo >= 0 && "Operand number doesn't fit in an 'int' type");
 
-    // Skip VL, SEW and MergeOp operands
-    if (OpNo == RVV->getVLIndex() || OpNo == RVV->getSEWIndex() ||
-        OpNo == RVV->getMergeOpIndex())
+    // Skip VL and SEW operands which are the last two operands if present.
+    if ((TSFlags & RISCVII::HasVLOpMask) && OpNo == (NumOps - 2))
       continue;
+    if ((TSFlags & RISCVII::HasSEWOpMask) && OpNo == (NumOps - 1))
+      continue;
+
+    // Skip merge op. It should be the first operand after the result.
+    if ((TSFlags & RISCVII::HasMergeOpMask) && OpNo == 1) {
+      assert(MI->getNumExplicitDefs() == 1);
+      continue;
+    }
 
     MCOperand MCOp;
     switch (MO.getType()) {
@@ -163,8 +176,14 @@ static bool lowerRISCVVMachineInstrToMCInst(const MachineInstr *MI,
       if (RISCV::VRM2RegClass.contains(Reg) ||
           RISCV::VRM4RegClass.contains(Reg) ||
           RISCV::VRM8RegClass.contains(Reg)) {
-        Reg = TRI->getSubReg(Reg, RISCV::sub_vrm2);
+        Reg = TRI->getSubReg(Reg, RISCV::sub_vrm1_0);
         assert(Reg && "Subregister does not exist");
+      } else if (RISCV::FPR16RegClass.contains(Reg)) {
+        Reg = TRI->getMatchingSuperReg(Reg, RISCV::sub_16, &RISCV::FPR32RegClass);
+        assert(Reg && "Subregister does not exist");
+      } else if (RISCV::FPR64RegClass.contains(Reg)) {
+        Reg = TRI->getSubReg(Reg, RISCV::sub_32);
+        assert(Reg && "Superregister does not exist");
       }
 
       MCOp = MCOperand::createReg(Reg);
@@ -179,16 +198,16 @@ static bool lowerRISCVVMachineInstrToMCInst(const MachineInstr *MI,
 
   // Unmasked pseudo instructions need to append dummy mask operand to
   // V instructions. All V instructions are modeled as the masked version.
-  if (RVV->hasDummyMask())
+  if (TSFlags & RISCVII::HasDummyMaskOpMask)
     OutMI.addOperand(MCOperand::createReg(RISCV::NoRegister));
 
   return true;
 }
 
-void llvm::LowerRISCVMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
-                                          const AsmPrinter &AP) {
+bool llvm::lowerRISCVMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
+                                          AsmPrinter &AP) {
   if (lowerRISCVVMachineInstrToMCInst(MI, OutMI))
-    return;
+    return false;
 
   OutMI.setOpcode(MI->getOpcode());
 
@@ -197,4 +216,33 @@ void llvm::LowerRISCVMachineInstrToMCInst(const MachineInstr *MI, MCInst &OutMI,
     if (LowerRISCVMachineOperandToMCOperand(MO, MCOp, AP))
       OutMI.addOperand(MCOp);
   }
+
+  switch (OutMI.getOpcode()) {
+  case TargetOpcode::PATCHABLE_FUNCTION_ENTER: {
+    const Function &F = MI->getParent()->getParent()->getFunction();
+    if (F.hasFnAttribute("patchable-function-entry")) {
+      unsigned Num;
+      if (F.getFnAttribute("patchable-function-entry")
+              .getValueAsString()
+              .getAsInteger(10, Num))
+        return false;
+      AP.emitNops(Num);
+      return true;
+    }
+    break;
+  }
+  case RISCV::PseudoReadVLENB:
+    OutMI.setOpcode(RISCV::CSRRS);
+    OutMI.addOperand(MCOperand::createImm(
+        RISCVSysReg::lookupSysRegByName("VLENB")->Encoding));
+    OutMI.addOperand(MCOperand::createReg(RISCV::X0));
+    break;
+  case RISCV::PseudoReadVL:
+    OutMI.setOpcode(RISCV::CSRRS);
+    OutMI.addOperand(
+        MCOperand::createImm(RISCVSysReg::lookupSysRegByName("VL")->Encoding));
+    OutMI.addOperand(MCOperand::createReg(RISCV::X0));
+    break;
+  }
+  return false;
 }

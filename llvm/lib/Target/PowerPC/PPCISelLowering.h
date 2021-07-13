@@ -152,8 +152,7 @@ namespace llvm {
     /// probed.
     PROBED_ALLOCA,
 
-    /// GlobalBaseReg - On Darwin, this node represents the result of the mflr
-    /// at function entry, used for PIC code.
+    /// The result of the mflr at function entry, used for PIC code.
     GlobalBaseReg,
 
     /// These nodes represent PPC shifts.
@@ -355,6 +354,15 @@ namespace llvm {
     /// combines ADDI_TLSGD_L and GET_TLS_ADDR until expansion following
     /// register assignment.
     ADDI_TLSGD_L_ADDR,
+
+    /// GPRC = TLSGD_AIX, TOC_ENTRY, TOC_ENTRY
+    /// G8RC = TLSGD_AIX, TOC_ENTRY, TOC_ENTRY
+    /// Op that combines two register copies of TOC entries
+    /// (region handle into R3 and variable offset into R4) followed by a
+    /// GET_TLS_ADDR node which will be expanded to a call to __get_tls_addr.
+    /// This node is used in 64-bit mode as well (in which case the result is
+    /// G8RC and inputs are X3/X4).
+    TLSGD_AIX,
 
     /// G8RC = ADDIS_TLSLD_HA %x2, Symbol - For the local-dynamic TLS
     /// model, produces an ADDIS8 instruction that adds the GOT base
@@ -663,10 +671,6 @@ namespace llvm {
     /// the number of bytes of each element [124] -> [bhw].
     SDValue get_VSPLTI_elt(SDNode *N, unsigned ByteSize, SelectionDAG &DAG);
 
-    /// If this is a qvaligni shuffle mask, return the shift
-    /// amount, otherwise return -1.
-    int isQVALIGNIShuffleMask(SDNode *N);
-
   } // end namespace PPC
 
   class PPCTargetLowering : public TargetLowering {
@@ -742,7 +746,7 @@ namespace llvm {
     EVT getSetCCResultType(const DataLayout &DL, LLVMContext &Context,
                            EVT VT) const override;
 
-    /// Return true if target always beneficiates from combining into FMA for a
+    /// Return true if target always benefits from combining into FMA for a
     /// given value type. This must typically return false on targets where FMA
     /// takes more cycles to execute than FADD.
     bool enableAggressiveFMAFusion(EVT VT) const override;
@@ -885,8 +889,6 @@ namespace llvm {
     getInlineAsmMemConstraint(StringRef ConstraintCode) const override {
       if (ConstraintCode == "es")
         return InlineAsm::Constraint_es;
-      else if (ConstraintCode == "o")
-        return InlineAsm::Constraint_o;
       else if (ConstraintCode == "Q")
         return InlineAsm::Constraint_Q;
       else if (ConstraintCode == "Z")
@@ -966,7 +968,7 @@ namespace llvm {
     /// Is unaligned memory access allowed for the given type, and is it fast
     /// relative to software emulation.
     bool allowsMisalignedMemoryAccesses(
-        EVT VT, unsigned AddrSpace, unsigned Align = 1,
+        EVT VT, unsigned AddrSpace, Align Alignment = Align(1),
         MachineMemOperand::Flags Flags = MachineMemOperand::MONone,
         bool *Fast = nullptr) const override;
 
@@ -991,6 +993,9 @@ namespace llvm {
     bool
     shouldExpandBuildVectorWithShuffles(EVT VT,
                                         unsigned DefinedValues) const override;
+
+    // Keep the zero-extensions for arguments to libcalls.
+    bool shouldKeepZExtForFP16Conv() const override { return true; }
 
     /// createFastISel - This method returns a target-specific FastISel object,
     /// or null if the target does not support "fast" instruction selection.
@@ -1125,6 +1130,8 @@ namespace llvm {
     SDValue LowerConstantPool(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBlockAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalTLSAddress(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerGlobalTLSAddressAIX(SDValue Op, SelectionDAG &DAG) const;
+    SDValue LowerGlobalTLSAddressLinux(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerGlobalAddress(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerJumpTable(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSETCC(SDValue Op, SelectionDAG &DAG) const;
@@ -1152,13 +1159,11 @@ namespace llvm {
     SDValue LowerBUILD_VECTOR(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerVECTOR_SHUFFLE(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINSERT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerEXTRACT_VECTOR_ELT(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINTRINSIC_WO_CHAIN(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerINTRINSIC_VOID(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerBSWAP(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerATOMIC_CMP_SWAP(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerSCALAR_TO_VECTOR(SDValue Op, SelectionDAG &DAG) const;
-    SDValue LowerSIGN_EXTEND_INREG(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerMUL(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFP_EXTEND(SDValue Op, SelectionDAG &DAG) const;
     SDValue LowerFP_ROUND(SDValue Op, SelectionDAG &DAG) const;
@@ -1208,10 +1213,6 @@ namespace llvm {
         SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
         const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &dl,
         SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const;
-    SDValue LowerFormalArguments_Darwin(
-        SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
-        const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &dl,
-        SelectionDAG &DAG, SmallVectorImpl<SDValue> &InVals) const;
     SDValue LowerFormalArguments_64SVR4(
         SDValue Chain, CallingConv::ID CallConv, bool isVarArg,
         const SmallVectorImpl<ISD::InputArg> &Ins, const SDLoc &dl,
@@ -1226,13 +1227,6 @@ namespace llvm {
                                        ISD::ArgFlagsTy Flags, SelectionDAG &DAG,
                                        const SDLoc &dl) const;
 
-    SDValue LowerCall_Darwin(SDValue Chain, SDValue Callee, CallFlags CFlags,
-                             const SmallVectorImpl<ISD::OutputArg> &Outs,
-                             const SmallVectorImpl<SDValue> &OutVals,
-                             const SmallVectorImpl<ISD::InputArg> &Ins,
-                             const SDLoc &dl, SelectionDAG &DAG,
-                             SmallVectorImpl<SDValue> &InVals,
-                             const CallBase *CB) const;
     SDValue LowerCall_64SVR4(SDValue Chain, SDValue Callee, CallFlags CFlags,
                              const SmallVectorImpl<ISD::OutputArg> &Outs,
                              const SmallVectorImpl<SDValue> &OutVals,
@@ -1336,6 +1330,7 @@ namespace llvm {
 
   bool convertToNonDenormSingle(APInt &ArgAPInt);
   bool convertToNonDenormSingle(APFloat &ArgAPFloat);
+  bool checkConvertToNonDenormSingle(APFloat &ArgAPFloat);
 
 } // end namespace llvm
 

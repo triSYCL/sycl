@@ -119,8 +119,7 @@ public:
   // run the LowerWGScope pass on the specified module
   bool runOnFunction(Function &F) override {
     FunctionAnalysisManager FAM;
-    auto TT = llvm::Triple(F.getParent()->getTargetTriple());
-    auto PA = Impl.run(F, TT, FAM);
+    auto PA = Impl.run(F, FAM);
     return !PA.areAllPreserved();
   }
 
@@ -237,6 +236,8 @@ static bool mayHaveSideEffects(const Instruction *I) {
   case Instruction::Call:
     assert(!isPFWICall(I) && "pfwi must have been handled separately");
     return true;
+  case Instruction::AddrSpaceCast:
+    return false;
   default:
     return true;
   }
@@ -302,7 +303,7 @@ shareOutputViaLocalMem(Instruction &I, BasicBlock &BBa, BasicBlock &BBb,
   Bld.CreateStore(&I, WGLocal);
   // 3) Generate a load in the "worker" BB of the value stored by the leader
   Bld.SetInsertPoint(&BBb.front());
-  auto *WGVal = Bld.CreateLoad(WGLocal, "wg_val_" + Twine(I.getName()));
+  auto *WGVal = Bld.CreateLoad(T, WGLocal, "wg_val_" + Twine(I.getName()));
   // 4) Finally, replace usages of I outside the scope
   for (auto *U : Users)
     U->replaceUsesOfWith(&I, WGVal);
@@ -415,7 +416,7 @@ static void copyBetweenPrivateAndShadow(Value *L, GlobalVariable *Shadow,
 
     if (!Loc2Shadow)
       std::swap(Src, Dst);
-    Value *LocalVal = Builder.CreateLoad(Src, "mat_ld");
+    Value *LocalVal = Builder.CreateLoad(T, Src, "mat_ld");
     Builder.CreateStore(LocalVal, Dst);
   }
 }
@@ -630,6 +631,10 @@ static void fixupPrivateMemoryPFWILambdaCaptures(CallInst *PFWICall) {
   // whether it is an alloca with "work_item_scope"
   SmallVector<CaptureDesc, 4> PrivMemCaptures;
 
+  // Look through cast
+  if (auto *Cast = dyn_cast<AddrSpaceCastInst>(LambdaObj))
+    LambdaObj = Cast->getOperand(0);
+
   for (auto *U : LambdaObj->users()) {
     GetElementPtrInst *GEP = dyn_cast<GetElementPtrInst>(U);
 
@@ -755,11 +760,12 @@ static void sharePFWGPrivateObjects(Function &F, const Triple &TT) {
   spirv::genWGBarrier(MergeBB->front(), TT);
 }
 
-PreservedAnalyses SYCLLowerWGScopePass::run(Function &F, const llvm::Triple &TT,
+PreservedAnalyses SYCLLowerWGScopePass::run(Function &F,
                                             FunctionAnalysisManager &FAM) {
   if (!F.getMetadata(WG_SCOPE_MD))
     return PreservedAnalyses::all();
   bool Changed = false;
+  const auto &TT = llvm::Triple(F.getParent()->getTargetTriple());
   // Ranges of "side effect" instructions
   SmallVector<InstrRange, 16> Ranges;
   SmallPtrSet<AllocaInst *, 16> Allocas;
@@ -773,19 +779,22 @@ PreservedAnalyses SYCLLowerWGScopePass::run(Function &F, const llvm::Triple &TT,
     Instruction *First = nullptr;
     Instruction *Last = nullptr;
 
-    // Skip PHIs and allocas, as they don't have side effects and must never be
-    // guarded with the WG leader test. Note that there should be no allocas in
-    // local address space at this point - they must have been converted to
-    // globals.
+    // Skip PHIs, allocas and addrspacecasts associated with allocas, as they
+    // don't have side effects and must never be guarded with the WG leader
+    // test. Note that there should be no allocas in local address space at this
+    // point - they must have been converted to globals.
     Instruction *I = BB.getFirstNonPHI();
 
-    for (; I->getOpcode() == Instruction::Alloca; I = I->getNextNode()) {
+    for (; I->getOpcode() == Instruction::Alloca ||
+           I->getOpcode() == Instruction::AddrSpaceCast ||
+           I->isDebugOrPseudoInst();
+         I = I->getNextNode()) {
       auto *AllocaI = dyn_cast<AllocaInst>(I);
       // Allocas marked with "work_item_scope" are those originating from
       // cl::sycl::private_memory<T> variables, which must be in private memory.
       // No shadows/materialization is needed for them because they can be
       // updated only within PFWIs
-      if (!AllocaI->getMetadata(WI_SCOPE_MD))
+      if (AllocaI && !AllocaI->getMetadata(WI_SCOPE_MD))
         Allocas.insert(AllocaI);
     }
     for (; I && (I != BB.getTerminator()); I = I->getNextNode()) {

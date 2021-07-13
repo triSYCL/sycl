@@ -20,6 +20,7 @@
 #include "ARMISelLowering.h"
 #include "ARMSelectionDAGInfo.h"
 #include "llvm/ADT/Triple.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/GlobalISel/CallLowering.h"
 #include "llvm/CodeGen/GlobalISel/InstructionSelector.h"
 #include "llvm/CodeGen/GlobalISel/LegalizerInfo.h"
@@ -63,9 +64,11 @@ protected:
     CortexA76,
     CortexA77,
     CortexA78,
+    CortexA78C,
     CortexA8,
     CortexA9,
     CortexM3,
+    CortexM7,
     CortexR4,
     CortexR4F,
     CortexR5,
@@ -115,6 +118,7 @@ protected:
     ARMv84a,
     ARMv85a,
     ARMv86a,
+    ARMv87a,
     ARMv8a,
     ARMv8mBaseline,
     ARMv8mMainline,
@@ -625,6 +629,7 @@ public:
   bool isCortexA15() const { return ARMProcFamily == CortexA15; }
   bool isSwift()    const { return ARMProcFamily == Swift; }
   bool isCortexM3() const { return ARMProcFamily == CortexM3; }
+  bool isCortexM7() const { return ARMProcFamily == CortexM7; }
   bool isLikeA9() const { return isCortexA9() || isCortexA15() || isKrait(); }
   bool isCortexR5() const { return ARMProcFamily == CortexR5; }
   bool isKrait() const { return ARMProcFamily == Krait; }
@@ -907,7 +912,12 @@ public:
 
   unsigned getPrefLoopLogAlignment() const { return PrefLoopLogAlignment; }
 
-  unsigned getMVEVectorCostFactor() const { return MVEVectorCostFactor; }
+  unsigned
+  getMVEVectorCostFactor(TargetTransformInfo::TargetCostKind CostKind) const {
+    if (CostKind == TargetTransformInfo::TCK_CodeSize)
+      return 1;
+    return MVEVectorCostFactor;
+  }
 
   bool ignoreCSRForAllocationOrder(const MachineFunction &MF,
                                    unsigned PhysReg) const override;

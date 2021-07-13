@@ -35,7 +35,8 @@ __SYCL_INLINE_NAMESPACE(cl) {
   /// kernel properties that can be pickup by the KernelPropGen pass.
   template<typename Func, typename... CharPacks>
   auto kernel_param_impl(Func &&f, CharPacks...) {
-    return sycl::detail::make_const_cheater(
+    /// 0 here is no generic the optimal would be to check how many parameter le 
+    return sycl::detail::make_const_cheater<0>(
         [internal_f = std::forward<Func>(f)](auto &&... args) mutable {
           /// Generate an annotation with as argument all the provided
           /// properties concatenated and separeted by a space. The annotation

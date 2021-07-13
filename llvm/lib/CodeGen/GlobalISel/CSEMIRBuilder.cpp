@@ -130,7 +130,7 @@ bool CSEMIRBuilder::checkCopyToDefsPossible(ArrayRef<DstOp> DstOps) {
   if (DstOps.size() == 1)
     return true; // always possible to emit copy to just 1 vreg.
 
-  return std::all_of(DstOps.begin(), DstOps.end(), [](const DstOp &Op) {
+  return llvm::all_of(DstOps, [](const DstOp &Op) {
     DstOp::DstType DT = Op.getDstOpKind();
     return DT == DstOp::DstType::Ty_LLT || DT == DstOp::DstType::Ty_RC;
   });
@@ -189,7 +189,7 @@ MachineInstrBuilder CSEMIRBuilder::buildInstr(unsigned Opc,
     assert(DstOps.size() == 1 && "Invalid dsts");
     if (Optional<APInt> Cst = ConstantFoldBinOp(Opc, SrcOps[0].getReg(),
                                                 SrcOps[1].getReg(), *getMRI()))
-      return buildConstant(DstOps[0], Cst->getSExtValue());
+      return buildConstant(DstOps[0], *Cst);
     break;
   }
   case TargetOpcode::G_SEXT_INREG: {
@@ -200,7 +200,7 @@ MachineInstrBuilder CSEMIRBuilder::buildInstr(unsigned Opc,
     const SrcOp &Src1 = SrcOps[1];
     if (auto MaybeCst =
             ConstantFoldExtOp(Opc, Src0.getReg(), Src1.getImm(), *getMRI()))
-      return buildConstant(Dst, MaybeCst->getSExtValue());
+      return buildConstant(Dst, *MaybeCst);
     break;
   }
   }

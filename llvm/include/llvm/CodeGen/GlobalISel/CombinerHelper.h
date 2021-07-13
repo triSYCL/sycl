@@ -5,19 +5,20 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===--------------------------------------------------------------------===//
-//
+/// \file
 /// This contains common combine transformations that may be used in a combine
 /// pass,or by the target elsewhere.
 /// Targets can pick individual opcode transformations from the helper or use
 /// tryCombine which invokes all transformations. All of the transformations
 /// return true if the MachineInstruction changed and false otherwise.
-//
+///
 //===--------------------------------------------------------------------===//
 
-#ifndef LLVM_CODEGEN_GLOBALISEL_COMBINER_HELPER_H
-#define LLVM_CODEGEN_GLOBALISEL_COMBINER_HELPER_H
+#ifndef LLVM_CODEGEN_GLOBALISEL_COMBINERHELPER_H
+#define LLVM_CODEGEN_GLOBALISEL_COMBINERHELPER_H
 
 #include "llvm/ADT/APFloat.h"
+#include "llvm/ADT/DenseMap.h"
 #include "llvm/CodeGen/LowLevelType.h"
 #include "llvm/CodeGen/Register.h"
 #include "llvm/Support/Alignment.h"
@@ -154,6 +155,11 @@ public:
   /// Match sext_inreg(load p), imm -> sextload p
   bool matchSextInRegOfLoad(MachineInstr &MI, std::tuple<Register, unsigned> &MatchInfo);
   bool applySextInRegOfLoad(MachineInstr &MI, std::tuple<Register, unsigned> &MatchInfo);
+
+  /// Try to combine G_[SU]DIV and G_[SU]REM into a single G_[SU]DIVREM
+  /// when their source operands are identical.
+  bool matchCombineDivRem(MachineInstr &MI, MachineInstr *&OtherMI);
+  void applyCombineDivRem(MachineInstr &MI, MachineInstr *&OtherMI);
 
   /// If a brcond's true block is not the fallthrough, make it so by inverting
   /// the condition and swapping operands.
@@ -315,6 +321,9 @@ public:
   bool matchCombineAnyExtTrunc(MachineInstr &MI, Register &Reg);
   bool applyCombineAnyExtTrunc(MachineInstr &MI, Register &Reg);
 
+  /// Transform zext(trunc(x)) to x.
+  bool matchCombineZextTrunc(MachineInstr &MI, Register &Reg);
+
   /// Transform [asz]ext([asz]ext(x)) to [asz]ext x.
   bool matchCombineExtOfExt(MachineInstr &MI,
                             std::tuple<Register, unsigned> &MatchInfo);
@@ -400,6 +409,9 @@ public:
   /// Check if operand \p OpIdx is undef.
   bool matchOperandIsUndef(MachineInstr &MI, unsigned OpIdx);
 
+  /// Check if operand \p OpIdx is known to be a power of 2.
+  bool matchOperandIsKnownToBeAPowerOfTwo(MachineInstr &MI, unsigned OpIdx);
+
   /// Erase \p MI
   bool eraseInst(MachineInstr &MI);
 
@@ -459,11 +471,45 @@ public:
   bool matchPtrAddZero(MachineInstr &MI);
   bool applyPtrAddZero(MachineInstr &MI);
 
+  /// Combine G_UREM x, (known power of 2) to an add and bitmasking.
+  bool applySimplifyURemByPow2(MachineInstr &MI);
+
   bool matchCombineInsertVecElts(MachineInstr &MI,
                                  SmallVectorImpl<Register> &MatchInfo);
 
   bool applyCombineInsertVecElts(MachineInstr &MI,
                              SmallVectorImpl<Register> &MatchInfo);
+
+  /// Match expression trees of the form
+  ///
+  /// \code
+  ///  sN *a = ...
+  ///  sM val = a[0] | (a[1] << N) | (a[2] << 2N) | (a[3] << 3N) ...
+  /// \endcode
+  ///
+  /// And check if the tree can be replaced with a M-bit load + possibly a
+  /// bswap.
+  bool matchLoadOrCombine(MachineInstr &MI,
+                          std::function<void(MachineIRBuilder &)> &MatchInfo);
+
+  bool matchExtendThroughPhis(MachineInstr &MI, MachineInstr *&ExtMI);
+  bool applyExtendThroughPhis(MachineInstr &MI, MachineInstr *&ExtMI);
+
+  bool matchExtractVecEltBuildVec(MachineInstr &MI, Register &Reg);
+  void applyExtractVecEltBuildVec(MachineInstr &MI, Register &Reg);
+
+  bool matchExtractAllEltsFromBuildVector(
+      MachineInstr &MI,
+      SmallVectorImpl<std::pair<Register, MachineInstr *>> &MatchInfo);
+  void applyExtractAllEltsFromBuildVector(
+      MachineInstr &MI,
+      SmallVectorImpl<std::pair<Register, MachineInstr *>> &MatchInfo);
+
+  /// Use a function which takes in a MachineIRBuilder to perform a combine.
+  bool applyBuildFn(MachineInstr &MI,
+                    std::function<void(MachineIRBuilder &)> &MatchInfo);
+  bool matchFunnelShiftToRotate(MachineInstr &MI);
+  void applyFunnelShiftToRotate(MachineInstr &MI);
 
   /// Try to transform \p MI by using all of the above
   /// combine functions. Returns true if changed.
@@ -493,6 +539,30 @@ private:
   /// \returns true if a candidate is found.
   bool findPreIndexCandidate(MachineInstr &MI, Register &Addr, Register &Base,
                              Register &Offset);
+
+  /// Helper function for matchLoadOrCombine. Searches for Registers
+  /// which may have been produced by a load instruction + some arithmetic.
+  ///
+  /// \param [in] Root - The search root.
+  ///
+  /// \returns The Registers found during the search.
+  Optional<SmallVector<Register, 8>>
+  findCandidatesForLoadOrCombine(const MachineInstr *Root) const;
+
+  /// Helper function for matchLoadOrCombine.
+  ///
+  /// Checks if every register in \p RegsToVisit is defined by a load
+  /// instruction + some arithmetic.
+  ///
+  /// \param [out] MemOffset2Idx - Maps the byte positions each load ends up
+  /// at to the index of the load.
+  /// \param [in] MemSizeInBits - The number of bits each load should produce.
+  ///
+  /// \returns The lowest-index load found and the lowest index on success.
+  Optional<std::pair<MachineInstr *, int64_t>> findLoadOffsetsForLoadOrCombine(
+      SmallDenseMap<int64_t, int64_t, 8> &MemOffset2Idx,
+      const SmallVector<Register, 8> &RegsToVisit,
+      const unsigned MemSizeInBits);
 };
 } // namespace llvm
 

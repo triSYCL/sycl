@@ -231,7 +231,9 @@ extern "C" void TestScalar() {
 
   int Val = co_await ScalarAwaiter{};
   // CHECK: %[[Result2:.+]] = call i32 @_ZN13ScalarAwaiter12await_resumeEv(%struct.ScalarAwaiter*
-  // CHECK: store i32 %[[Result2]], i32* %Val
+  // CHECK: store i32 %[[Result2]], i32* %[[TMP_EXPRCLEANUP:.+]],
+  // CHECK: %[[TMP:.+]] = load i32, i32* %[[TMP_EXPRCLEANUP]],
+  // CHECK: store i32 %[[TMP]], i32* %Val,
 
   co_await ScalarAwaiter{};
   // CHECK: call i32 @_ZN13ScalarAwaiter12await_resumeEv(%struct.ScalarAwaiter*
@@ -303,7 +305,7 @@ struct std::experimental::coroutine_traits<void,double> {
 
 // Verifies that we don't crash when returning an lvalue from an await_resume()
 // expression.
-// CHECK-LABEL:  define void @_Z18AwaitReturnsLValued(double %0)
+// CHECK-LABEL:  define{{.*}} void @_Z18AwaitReturnsLValued(double %0)
 void AwaitReturnsLValue(double) {
   AwaitResumeReturnsLValue a;
   // CHECK: %[[AVAR:.+]] = alloca %struct.AwaitResumeReturnsLValue,
@@ -312,19 +314,25 @@ void AwaitReturnsLValue(double) {
   // CHECK: %[[YVAR:.+]] = alloca %struct.RefTag*,
   // CHECK-NEXT: %[[TMP1:.+]] = alloca %struct.AwaitResumeReturnsLValue,
 
+  // CHECK: %[[TMP_EXPRCLEANUP1:.+]] = alloca %struct.RefTag*,
   // CHECK: %[[ZVAR:.+]] = alloca %struct.RefTag*,
   // CHECK-NEXT: %[[TMP2:.+]] = alloca %struct.AwaitResumeReturnsLValue,
+  // CHECK: %[[TMP_EXPRCLEANUP2:.+]] = alloca %struct.RefTag*,
 
   // CHECK: %[[RES1:.+]] = call nonnull align 1 dereferenceable({{.*}}) %struct.RefTag* @_ZN24AwaitResumeReturnsLValue12await_resumeEv(%struct.AwaitResumeReturnsLValue* {{[^,]*}} %[[AVAR]])
   // CHECK-NEXT: store %struct.RefTag* %[[RES1]], %struct.RefTag** %[[XVAR]],
   RefTag& x = co_await a;
 
   // CHECK: %[[RES2:.+]] = call nonnull align 1 dereferenceable({{.*}}) %struct.RefTag* @_ZN24AwaitResumeReturnsLValue12await_resumeEv(%struct.AwaitResumeReturnsLValue* {{[^,]*}} %[[TMP1]])
-  // CHECK-NEXT: store %struct.RefTag* %[[RES2]], %struct.RefTag** %[[YVAR]],
+  // CHECK-NEXT: store %struct.RefTag* %[[RES2]], %struct.RefTag** %[[TMP_EXPRCLEANUP1]],
+  // CHECK: %[[LOAD_TMP1:.+]] = load %struct.RefTag*, %struct.RefTag** %[[TMP_EXPRCLEANUP1]],
+  // CHECK: store %struct.RefTag* %[[LOAD_TMP1]], %struct.RefTag** %[[YVAR]],
 
   RefTag& y = co_await AwaitResumeReturnsLValue{};
   // CHECK: %[[RES3:.+]] = call nonnull align 1 dereferenceable({{.*}}) %struct.RefTag* @_ZN24AwaitResumeReturnsLValue12await_resumeEv(%struct.AwaitResumeReturnsLValue* {{[^,]*}} %[[TMP2]])
-  // CHECK-NEXT: store %struct.RefTag* %[[RES3]], %struct.RefTag** %[[ZVAR]],
+  // CHECK-NEXT: store %struct.RefTag* %[[RES3]], %struct.RefTag** %[[TMP_EXPRCLEANUP2]],
+  // CHECK: %[[LOAD_TMP2:.+]] = load %struct.RefTag*, %struct.RefTag** %[[TMP_EXPRCLEANUP2]],
+  // CHECK: store %struct.RefTag* %[[LOAD_TMP2]], %struct.RefTag** %[[ZVAR]],
   RefTag& z = co_yield 42;
 }
 

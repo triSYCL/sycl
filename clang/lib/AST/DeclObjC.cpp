@@ -826,7 +826,8 @@ ObjCMethodDecl *ObjCMethodDecl::CreateDeserialized(ASTContext &C, unsigned ID) {
 }
 
 bool ObjCMethodDecl::isDirectMethod() const {
-  return hasAttr<ObjCDirectAttr>();
+  return hasAttr<ObjCDirectAttr>() &&
+         !getASTContext().getLangOpts().ObjCDisableDirectMethodsForTesting;
 }
 
 bool ObjCMethodDecl::isThisDeclarationADesignatedInitializer() const {
@@ -1461,9 +1462,7 @@ SourceRange ObjCTypeParamDecl::getSourceRange() const {
 ObjCTypeParamList::ObjCTypeParamList(SourceLocation lAngleLoc,
                                      ArrayRef<ObjCTypeParamDecl *> typeParams,
                                      SourceLocation rAngleLoc)
-    : NumParams(typeParams.size()) {
-  Brackets.Begin = lAngleLoc.getRawEncoding();
-  Brackets.End = rAngleLoc.getRawEncoding();
+    : Brackets(lAngleLoc, rAngleLoc), NumParams(typeParams.size()) {
   std::copy(typeParams.begin(), typeParams.end(), begin());
 }
 
@@ -2295,6 +2294,11 @@ ObjCPropertyDecl *ObjCPropertyDecl::CreateDeserialized(ASTContext &C,
 QualType ObjCPropertyDecl::getUsageType(QualType objectType) const {
   return DeclType.substObjCMemberType(objectType, getDeclContext(),
                                       ObjCSubstitutionContext::Property);
+}
+
+bool ObjCPropertyDecl::isDirectProperty() const {
+  return (PropertyAttributes & ObjCPropertyAttribute::kind_direct) &&
+         !getASTContext().getLangOpts().ObjCDisableDirectMethodsForTesting;
 }
 
 //===----------------------------------------------------------------------===//

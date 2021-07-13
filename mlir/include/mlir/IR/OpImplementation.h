@@ -92,8 +92,13 @@ public:
   virtual void printGenericOp(Operation *op) = 0;
 
   /// Prints a region.
+  /// If 'printEntryBlockArgs' is false, the arguments of the
+  /// block are not printed. If 'printBlockTerminator' is false, the terminator
+  /// operation of the block is not printed. If printEmptyBlock is true, then
+  /// the block header is printed even if the block is empty.
   virtual void printRegion(Region &blocks, bool printEntryBlockArgs = true,
-                           bool printBlockTerminators = true) = 0;
+                           bool printBlockTerminators = true,
+                           bool printEmptyBlock = false) = 0;
 
   /// Renumber the arguments for the specified region to the same names as the
   /// SSA values in namesToUse.  This may only be used for IsolatedFromAbove
@@ -128,16 +133,15 @@ public:
   }
 
   /// Print the complete type of an operation in functional form.
-  void printFunctionalType(Operation *op) {
-    printFunctionalType(op->getOperandTypes(), op->getResultTypes());
-  }
+  void printFunctionalType(Operation *op);
+
   /// Print the two given type ranges in a functional form.
   template <typename InputRangeT, typename ResultRangeT>
   void printFunctionalType(InputRangeT &&inputs, ResultRangeT &&results) {
     auto &os = getStream();
-    os << "(";
+    os << '(';
     llvm::interleaveComma(inputs, *this);
-    os << ")";
+    os << ')';
     printArrowTypeList(results);
   }
 
@@ -414,7 +418,8 @@ public:
   virtual ParseResult parseOptionalEllipsis() = 0;
 
   /// Parse an integer value from the stream.
-  template <typename IntT> ParseResult parseInteger(IntT &result) {
+  template <typename IntT>
+  ParseResult parseInteger(IntT &result) {
     auto loc = getCurrentLocation();
     OptionalParseResult parseResult = parseOptionalInteger(result);
     if (!parseResult.hasValue())

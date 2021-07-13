@@ -20,8 +20,8 @@
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/Instruction.h"
 #include "llvm/IR/InstVisitor.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IntrinsicsAArch64.h"
@@ -548,6 +548,11 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
                                         F->arg_begin()->getType());
       return true;
     }
+    if (Name.startswith("aarch64.neon.frintn")) {
+      NewFn = Intrinsic::getDeclaration(F->getParent(), Intrinsic::roundeven,
+                                        F->arg_begin()->getType());
+      return true;
+    }
     if (Name.startswith("arm.neon.vclz")) {
       Type* args[2] = {
         F->arg_begin()->getType(),
@@ -937,6 +942,12 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
             Intrinsic::getDeclaration(F->getParent(), Intrinsic::prefetch, Tys);
         return true;
       }
+    } else if (Name.startswith("ptr.annotation.") && F->arg_size() == 4) {
+      rename(F);
+      NewFn = Intrinsic::getDeclaration(F->getParent(),
+                                        Intrinsic::ptr_annotation,
+                                        F->arg_begin()->getType());
+      return true;
     }
     break;
 
@@ -946,6 +957,16 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
       return true;
     }
     break;
+
+  case 'v': {
+    if (Name == "var.annotation" && F->arg_size() == 4) {
+      rename(F);
+      NewFn = Intrinsic::getDeclaration(F->getParent(),
+                                        Intrinsic::var_annotation);
+      return true;
+    }
+    break;
+  }
 
   case 'x':
     if (UpgradeX86IntrinsicFunction(F, Name, NewFn))
@@ -1769,7 +1790,6 @@ void llvm::UpgradeInlineAsmString(std::string *AsmStr) {
       (Pos = AsmStr->find("# marker")) != std::string::npos) {
     AsmStr->replace(Pos, 1, ";");
   }
-  return;
 }
 
 /// Upgrade a call to an old intrinsic. All argument and return casting must be
@@ -2397,7 +2417,6 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
                          Name.startswith("avx2.pmovzx") ||
                          Name.startswith("avx512.mask.pmovsx") ||
                          Name.startswith("avx512.mask.pmovzx"))) {
-      auto *SrcTy = cast<FixedVectorType>(CI->getArgOperand(0)->getType());
       auto *DstTy = cast<FixedVectorType>(CI->getType());
       unsigned NumDstElts = DstTy->getNumElements();
 
@@ -2406,8 +2425,8 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
       for (unsigned i = 0; i != NumDstElts; ++i)
         ShuffleMask[i] = i;
 
-      Value *SV = Builder.CreateShuffleVector(
-          CI->getArgOperand(0), UndefValue::get(SrcTy), ShuffleMask);
+      Value *SV =
+          Builder.CreateShuffleVector(CI->getArgOperand(0), ShuffleMask);
 
       bool DoSext = (StringRef::npos != Name.find("pmovsx"));
       Rep = DoSext ? Builder.CreateSExt(SV, DstTy)
@@ -2434,12 +2453,10 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
                                             PointerType::getUnqual(VT));
       Value *Load = Builder.CreateAlignedLoad(VT, Op, Align(1));
       if (NumSrcElts == 2)
-        Rep = Builder.CreateShuffleVector(
-            Load, UndefValue::get(Load->getType()), ArrayRef<int>{0, 1, 0, 1});
+        Rep = Builder.CreateShuffleVector(Load, ArrayRef<int>{0, 1, 0, 1});
       else
-        Rep =
-            Builder.CreateShuffleVector(Load, UndefValue::get(Load->getType()),
-                                        ArrayRef<int>{0, 1, 2, 3, 0, 1, 2, 3});
+        Rep = Builder.CreateShuffleVector(
+            Load, ArrayRef<int>{0, 1, 2, 3, 0, 1, 2, 3});
     } else if (IsX86 && (Name.startswith("avx512.mask.shuf.i") ||
                          Name.startswith("avx512.mask.shuf.f"))) {
       unsigned Imm = cast<ConstantInt>(CI->getArgOperand(2))->getZExtValue();
@@ -2487,8 +2504,9 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
       Value *Op = CI->getArgOperand(0);
       ElementCount EC = cast<VectorType>(CI->getType())->getElementCount();
       Type *MaskTy = VectorType::get(Type::getInt32Ty(C), EC);
-      Rep = Builder.CreateShuffleVector(Op, UndefValue::get(Op->getType()),
-                                        Constant::getNullValue(MaskTy));
+      SmallVector<int, 8> M;
+      ShuffleVectorInst::getShuffleMask(Constant::getNullValue(MaskTy), M);
+      Rep = Builder.CreateShuffleVector(Op, M);
 
       if (CI->getNumArgOperands() == 3)
         Rep = EmitX86Select(Builder, CI->getArgOperand(2), Rep,
@@ -2581,13 +2599,12 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
       Imm = Imm % Scale;
 
       // Extend the second operand into a vector the size of the destination.
-      Value *UndefV = UndefValue::get(Op1->getType());
       SmallVector<int, 8> Idxs(DstNumElts);
       for (unsigned i = 0; i != SrcNumElts; ++i)
         Idxs[i] = i;
       for (unsigned i = SrcNumElts; i != DstNumElts; ++i)
         Idxs[i] = SrcNumElts;
-      Rep = Builder.CreateShuffleVector(Op1, UndefV, Idxs);
+      Rep = Builder.CreateShuffleVector(Op1, Idxs);
 
       // Insert the second operand into the first operand.
 
@@ -3582,7 +3599,7 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
                           Name.startswith("atomic.load.add.f64.p"))) {
       Value *Ptr = CI->getArgOperand(0);
       Value *Val = CI->getArgOperand(1);
-      Rep = Builder.CreateAtomicRMW(AtomicRMWInst::FAdd, Ptr, Val,
+      Rep = Builder.CreateAtomicRMW(AtomicRMWInst::FAdd, Ptr, Val, MaybeAlign(),
                                     AtomicOrdering::SequentiallyConsistent);
     } else if (IsNVVM && (Name == "max.i" || Name == "max.ll" ||
                           Name == "max.ui" || Name == "max.ull")) {
@@ -3731,6 +3748,32 @@ void llvm::UpgradeIntrinsicCall(CallInst *CI, Function *NewFn) {
             {CI->getArgOperand(0), CI->getArgOperand(2), CI->getArgOperand(3)});
         break;
       }
+    CI->eraseFromParent();
+    return;
+
+  case Intrinsic::ptr_annotation:
+    // Upgrade from versions that lacked the annotation attribute argument.
+    assert(CI->getNumArgOperands() == 4 &&
+           "Before LLVM 12.0 this intrinsic took four arguments");
+    // Create a new call with an added null annotation attribute argument.
+    NewCall = Builder.CreateCall(
+        NewFn,
+        {CI->getArgOperand(0), CI->getArgOperand(1), CI->getArgOperand(2),
+         CI->getArgOperand(3), Constant::getNullValue(Builder.getInt8PtrTy())});
+    NewCall->takeName(CI);
+    CI->replaceAllUsesWith(NewCall);
+    CI->eraseFromParent();
+    return;
+
+  case Intrinsic::var_annotation:
+    // Upgrade from versions that lacked the annotation attribute argument.
+    assert(CI->getNumArgOperands() == 4 &&
+           "Before LLVM 12.0 this intrinsic took four arguments");
+    // Create a new call with an added null annotation attribute argument.
+    NewCall = Builder.CreateCall(
+        NewFn,
+        {CI->getArgOperand(0), CI->getArgOperand(1), CI->getArgOperand(2),
+         CI->getArgOperand(3), Constant::getNullValue(Builder.getInt8PtrTy())});
     CI->eraseFromParent();
     return;
 
@@ -3897,8 +3940,8 @@ void llvm::UpgradeCallsToIntrinsic(Function *F) {
   if (UpgradeIntrinsicFunction(F, NewFn)) {
     // Replace all users of the old function with the new function or new
     // instructions. This is not a range loop because the call is deleted.
-    for (auto UI = F->user_begin(), UE = F->user_end(); UI != UE; )
-      if (CallInst *CI = dyn_cast<CallInst>(*UI++))
+    for (User *U : make_early_inc_range(F->users()))
+      if (CallInst *CI = dyn_cast<CallInst>(U))
         UpgradeIntrinsicCall(CI, NewFn);
 
     // Remove old function, no longer used, from the module.
@@ -4034,8 +4077,8 @@ void llvm::UpgradeARCRuntime(Module &M) {
 
     Function *NewFn = llvm::Intrinsic::getDeclaration(&M, IntrinsicFunc);
 
-    for (auto I = Fn->user_begin(), E = Fn->user_end(); I != E;) {
-      CallInst *CI = dyn_cast<CallInst>(*I++);
+    for (User *U : make_early_inc_range(Fn->users())) {
+      CallInst *CI = dyn_cast<CallInst>(U);
       if (!CI || CI->getCalledFunction() != Fn)
         continue;
 

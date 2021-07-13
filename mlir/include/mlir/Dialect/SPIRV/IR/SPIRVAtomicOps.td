@@ -49,7 +49,7 @@ class SPV_AtomicUpdateWithValueOp<string mnemonic, list<OpTrait> traits = []> :
   );
 
   let builders = [
-    OpBuilderDAG<(ins "Value":$pointer, "::mlir::spirv::Scope":$scope,
+    OpBuilder<(ins "Value":$pointer, "::mlir::spirv::Scope":$scope,
       "::mlir::spirv::MemorySemantics":$memory, "Value":$value),
     [{build($_builder, $_state, value.getType(), pointer, scope, memory, value);}]>
   ];
@@ -438,7 +438,7 @@ def SPV_AtomicSMinOp : SPV_AtomicUpdateWithValueOp<"AtomicSMin", []> {
 
 // -----
 
-def SPV_AtomicUMaxOp : SPV_AtomicUpdateWithValueOp<"AtomicUMax", []> {
+def SPV_AtomicUMaxOp : SPV_AtomicUpdateWithValueOp<"AtomicUMax", [UnsignedOp]> {
   let summary = [{
     Perform the following steps atomically with respect to any other atomic
     accesses within Scope to the same location:
@@ -480,7 +480,7 @@ def SPV_AtomicUMaxOp : SPV_AtomicUpdateWithValueOp<"AtomicUMax", []> {
 
 // -----
 
-def SPV_AtomicUMinOp : SPV_AtomicUpdateWithValueOp<"AtomicUMin", []> {
+def SPV_AtomicUMinOp : SPV_AtomicUpdateWithValueOp<"AtomicUMin", [UnsignedOp]> {
   let summary = [{
     Perform the following steps atomically with respect to any other atomic
     accesses within Scope to the same location:

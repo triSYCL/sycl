@@ -93,7 +93,7 @@ def ParallelOp : OpenMP_Op<"parallel", [AttrSizedOperandSegments]> {
   let regions = (region AnyRegion:$region);
 
   let builders = [
-    OpBuilderDAG<(ins CArg<"ArrayRef<NamedAttribute>", "{}">:$attributes)>
+    OpBuilder<(ins CArg<"ArrayRef<NamedAttribute>", "{}">:$attributes)>
   ];
   let parser = [{ return parseParallelOp(parser, result); }];
   let printer = [{ return printParallelOp(p, *this); }];
@@ -116,25 +116,28 @@ def TerminatorOp : OpenMP_Op<"terminator", [Terminator]> {
 // 2.9.2 Workshare Loop Construct
 //===----------------------------------------------------------------------===//
 
-def WsLoopOp : OpenMP_Op<"wsloop", [AttrSizedOperandSegments]> {
+def WsLoopOp : OpenMP_Op<"wsloop", [AttrSizedOperandSegments,
+                         AllTypesMatch<["lowerBound", "upperBound", "step"]>]> {
   let summary = "workshare loop construct";
   let description = [{
     The workshare loop construct specifies that the iterations of the loop(s)
     will be executed in parallel by threads in the current context. These
     iterations are spread across threads that already exist in the enclosing
-    parallel region.
+    parallel region. The lower and upper bounds specify a half-open range: the
+    range includes the lower bound but does not include the upper bound. If the
+    `inclusive` attribute is specified then the upper bound is also included.
 
     The body region can contain any number of blocks. The region is terminated
     by "omp.yield" instruction without operands.
 
     ```
-      omp.wsloop (%i1, %i2) = (%c0, %c0) to (%c10, %c10) step (%c1, %c1) {
-        %a = load %arrA[%i1, %i2] : memref<?x?xf32>
-        %b = load %arrB[%i1, %i2] : memref<?x?xf32>
-        %sum = addf %a, %b : f32
-        store %sum, %arrC[%i1, %i2] : memref<?x?xf32>
-        omp.yield
-      }
+    omp.wsloop (%i1, %i2) : index = (%c0, %c0) to (%c10, %c10) step (%c1, %c1) {
+      %a = load %arrA[%i1, %i2] : memref<?x?xf32>
+      %b = load %arrB[%i1, %i2] : memref<?x?xf32>
+      %sum = addf %a, %b : f32
+      store %sum, %arrC[%i1, %i2] : memref<?x?xf32>
+      omp.yield
+    }
     ```
 
     `private_vars`, `firstprivate_vars`, `lastprivate_vars` and `linear_vars`
@@ -174,17 +177,38 @@ def WsLoopOp : OpenMP_Op<"wsloop", [AttrSizedOperandSegments]> {
              OptionalAttr<ScheduleKind>:$schedule_val,
              Optional<AnyType>:$schedule_chunk_var,
              Confined<OptionalAttr<I64Attr>, [IntMinValue<0>]>:$collapse_val,
-             OptionalAttr<UnitAttr>:$nowait,
+             UnitAttr:$nowait,
              Confined<OptionalAttr<I64Attr>, [IntMinValue<0>]>:$ordered_val,
-             OptionalAttr<OrderKind>:$order_val);
+             OptionalAttr<OrderKind>:$order_val,
+             UnitAttr:$inclusive);
+
+  let skipDefaultBuilders = 1;
 
   let builders = [
-    OpBuilderDAG<(ins "ValueRange":$lowerBound, "ValueRange":$upperBound,
-                  "ValueRange":$step,
-                  CArg<"ArrayRef<NamedAttribute>", "{}">:$attributes)>
+    OpBuilder<(ins "ValueRange":$lowerBound, "ValueRange":$upperBound,
+               "ValueRange":$step,
+               CArg<"ArrayRef<NamedAttribute>", "{}">:$attributes)>,
+    OpBuilder<(ins "TypeRange":$resultTypes, "ValueRange":$lowerBound,
+               "ValueRange":$upperBound, "ValueRange":$step,
+               "ValueRange":$privateVars, "ValueRange":$firstprivateVars,
+               "ValueRange":$lastprivate_vars, "ValueRange":$linear_vars,
+               "ValueRange":$linear_step_vars, "StringAttr":$schedule_val,
+               "Value":$schedule_chunk_var, "IntegerAttr":$collapse_val,
+               "UnitAttr":$nowait, "IntegerAttr":$ordered_val,
+               "StringAttr":$order_val, "UnitAttr":$inclusive, CArg<"bool",
+               "true">:$buildBody)>,
+    OpBuilder<(ins "TypeRange":$resultTypes, "ValueRange":$operands,
+               CArg<"ArrayRef<NamedAttribute>", "{}">:$attributes)>
   ];
 
   let regions = (region AnyRegion:$region);
+
+  let extraClassDeclaration = [{
+    /// Returns the number of loops in the workshape loop nest.
+    unsigned getNumLoops() { return lowerBound().size(); }
+  }];
+  let parser = [{ return parseWsLoopOp(parser, result); }];
+  let printer = [{ return printWsLoopOp(p, *this); }];
 }
 
 def YieldOp : OpenMP_Op<"yield", [NoSideEffect, ReturnLike, Terminator,

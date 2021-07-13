@@ -26,6 +26,7 @@
 #include "llvm/Support/Allocator.h"
 #include "llvm/Support/Capacity.h"
 #include "llvm/Support/Compiler.h"
+#include "llvm/Support/Endian.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/MathExtras.h"
@@ -115,23 +116,6 @@ ContentCache::getBufferOrNone(DiagnosticsEngine &Diag, FileManager &FM,
   // return paths.
   IsBufferInvalid = true;
 
-  // Check that the file's size fits in an 'unsigned' (with room for a
-  // past-the-end value). This is deeply regrettable, but various parts of
-  // Clang (including elsewhere in this file!) use 'unsigned' to represent file
-  // offsets, line numbers, string literal lengths, and so on, and fail
-  // miserably on large source files.
-  if ((uint64_t)ContentsEntry->getSize() >=
-      std::numeric_limits<unsigned>::max()) {
-    if (Diag.isDiagnosticInFlight())
-      Diag.SetDelayedDiagnostic(diag::err_file_too_large,
-                                ContentsEntry->getName());
-    else
-      Diag.Report(Loc, diag::err_file_too_large)
-        << ContentsEntry->getName();
-
-    return None;
-  }
-
   auto BufferOrError = FM.getBufferForFile(ContentsEntry, IsFileVolatile);
 
   // If we were unable to open the file, then we are in an inconsistent
@@ -153,9 +137,31 @@ ContentCache::getBufferOrNone(DiagnosticsEngine &Diag, FileManager &FM,
 
   Buffer = std::move(*BufferOrError);
 
-  // Check that the file's size is the same as in the file entry (which may
+  // Check that the file's size fits in an 'unsigned' (with room for a
+  // past-the-end value). This is deeply regrettable, but various parts of
+  // Clang (including elsewhere in this file!) use 'unsigned' to represent file
+  // offsets, line numbers, string literal lengths, and so on, and fail
+  // miserably on large source files.
+  //
+  // Note: ContentsEntry could be a named pipe, in which case
+  // ContentsEntry::getSize() could have the wrong size. Use
+  // MemoryBuffer::getBufferSize() instead.
+  if (Buffer->getBufferSize() >= std::numeric_limits<unsigned>::max()) {
+    if (Diag.isDiagnosticInFlight())
+      Diag.SetDelayedDiagnostic(diag::err_file_too_large,
+                                ContentsEntry->getName());
+    else
+      Diag.Report(Loc, diag::err_file_too_large)
+        << ContentsEntry->getName();
+
+    return None;
+  }
+
+  // Unless this is a named pipe (in which case we can handle a mismatch),
+  // check that the file's size is the same as in the file entry (which may
   // have come from a stat cache).
-  if (Buffer->getBufferSize() != (size_t)ContentsEntry->getSize()) {
+  if (!ContentsEntry->isNamedPipe() &&
+      Buffer->getBufferSize() != (size_t)ContentsEntry->getSize()) {
     if (Diag.isDiagnosticInFlight())
       Diag.SetDelayedDiagnostic(diag::err_file_modified,
                                 ContentsEntry->getName());
@@ -380,10 +386,8 @@ void SourceManager::initializeForReplay(const SourceManager &Old) {
   }
 }
 
-ContentCache &SourceManager::getOrCreateContentCache(const FileEntry *FileEnt,
+ContentCache &SourceManager::getOrCreateContentCache(FileEntryRef FileEnt,
                                                      bool isSystemFile) {
-  assert(FileEnt && "Didn't specify a file entry to use?");
-
   // Do we already have information about this file?
   ContentCache *&Entry = FileInfos[FileEnt];
   if (Entry)
@@ -409,6 +413,7 @@ ContentCache &SourceManager::getOrCreateContentCache(const FileEntry *FileEnt,
 
   Entry->IsFileVolatile = UserFilesAreVolatile && !isSystemFile;
   Entry->IsTransient = FilesAreTransient;
+  Entry->BufferOverridden |= FileEnt.isNamedPipe();
 
   return *Entry;
 }
@@ -528,19 +533,22 @@ FileID SourceManager::createFileID(const FileEntry *SourceFile,
                                    SourceLocation IncludePos,
                                    SrcMgr::CharacteristicKind FileCharacter,
                                    int LoadedID, unsigned LoadedOffset) {
-  assert(SourceFile && "Null source file!");
-  SrcMgr::ContentCache &IR =
-      getOrCreateContentCache(SourceFile, isSystem(FileCharacter));
-  return createFileIDImpl(IR, SourceFile->getName(), IncludePos, FileCharacter,
-                          LoadedID, LoadedOffset);
+  return createFileID(SourceFile->getLastRef(), IncludePos, FileCharacter,
+                      LoadedID, LoadedOffset);
 }
 
 FileID SourceManager::createFileID(FileEntryRef SourceFile,
                                    SourceLocation IncludePos,
                                    SrcMgr::CharacteristicKind FileCharacter,
                                    int LoadedID, unsigned LoadedOffset) {
-  SrcMgr::ContentCache &IR = getOrCreateContentCache(&SourceFile.getFileEntry(),
+  SrcMgr::ContentCache &IR = getOrCreateContentCache(SourceFile,
                                                      isSystem(FileCharacter));
+
+  // If this is a named pipe, immediately load the buffer to ensure subsequent
+  // calls to ContentCache::getSize() are accurate.
+  if (IR.ContentsEntry->isNamedPipe())
+    (void)IR.getBufferOrNone(Diag, getFileManager(), SourceLocation());
+
   return createFileIDImpl(IR, SourceFile.getName(), IncludePos, FileCharacter,
                           LoadedID, LoadedOffset);
 }
@@ -673,13 +681,13 @@ SourceManager::createExpansionLocImpl(const ExpansionInfo &Info,
 
 llvm::Optional<llvm::MemoryBufferRef>
 SourceManager::getMemoryBufferForFileOrNone(const FileEntry *File) {
-  SrcMgr::ContentCache &IR = getOrCreateContentCache(File);
+  SrcMgr::ContentCache &IR = getOrCreateContentCache(File->getLastRef());
   return IR.getBufferOrNone(Diag, getFileManager(), SourceLocation());
 }
 
 void SourceManager::overrideFileContents(
     const FileEntry *SourceFile, std::unique_ptr<llvm::MemoryBuffer> Buffer) {
-  SrcMgr::ContentCache &IR = getOrCreateContentCache(SourceFile);
+  SrcMgr::ContentCache &IR = getOrCreateContentCache(SourceFile->getLastRef());
 
   IR.setBuffer(std::move(Buffer));
   IR.BufferOverridden = true;
@@ -707,12 +715,12 @@ SourceManager::bypassFileContentsOverride(FileEntryRef File) {
   if (!BypassFile)
     return None;
 
-  (void)getOrCreateContentCache(&BypassFile->getFileEntry());
+  (void)getOrCreateContentCache(*BypassFile);
   return BypassFile;
 }
 
 void SourceManager::setFileIsTransient(const FileEntry *File) {
-  getOrCreateContentCache(File).IsTransient = true;
+  getOrCreateContentCache(File->getLastRef()).IsTransient = true;
 }
 
 Optional<StringRef>
@@ -1245,12 +1253,22 @@ unsigned SourceManager::getPresumedColumnNumber(SourceLocation Loc,
   return PLoc.getColumn();
 }
 
-#ifdef __SSE2__
-#include <emmintrin.h>
-#endif
+// Check if mutli-byte word x has bytes between m and n, included. This may also
+// catch bytes equal to n + 1.
+// The returned value holds a 0x80 at each byte position that holds a match.
+// see http://graphics.stanford.edu/~seander/bithacks.html#HasBetweenInWord
+template <class T>
+static constexpr inline T likelyhasbetween(T x, unsigned char m,
+                                           unsigned char n) {
+  return ((x - ~static_cast<T>(0) / 255 * (n + 1)) & ~x &
+          ((x & ~static_cast<T>(0) / 255 * 127) +
+           (~static_cast<T>(0) / 255 * (127 - (m - 1))))) &
+         ~static_cast<T>(0) / 255 * 128;
+}
 
 LineOffsetMapping LineOffsetMapping::get(llvm::MemoryBufferRef Buffer,
                                          llvm::BumpPtrAllocator &Alloc) {
+
   // Find the file offsets of all of the *physical* source lines.  This does
   // not look at trigraphs, escaped newlines, or anything else tricky.
   SmallVector<unsigned, 256> LineOffsets;
@@ -1261,7 +1279,43 @@ LineOffsetMapping LineOffsetMapping::get(llvm::MemoryBufferRef Buffer,
   const unsigned char *Buf = (const unsigned char *)Buffer.getBufferStart();
   const unsigned char *End = (const unsigned char *)Buffer.getBufferEnd();
   const std::size_t BufLen = End - Buf;
+
   unsigned I = 0;
+  uint64_t Word;
+
+  // scan sizeof(Word) bytes at a time for new lines.
+  // This is much faster than scanning each byte independently.
+  if (BufLen > sizeof(Word)) {
+    do {
+      Word = llvm::support::endian::read64(Buf + I, llvm::support::little);
+      // no new line => jump over sizeof(Word) bytes.
+      auto Mask = likelyhasbetween(Word, '\n', '\r');
+      if (!Mask) {
+        I += sizeof(Word);
+        continue;
+      }
+
+      // At that point, Mask contains 0x80 set at each byte that holds a value
+      // in [\n, \r + 1 [
+
+      // Scan for the next newline - it's very likely there's one.
+      unsigned N =
+          llvm::countTrailingZeros(Mask) - 7; // -7 because 0x80 is the marker
+      Word >>= N;
+      I += N / 8 + 1;
+      unsigned char Byte = Word;
+      if (Byte == '\n') {
+        LineOffsets.push_back(I);
+      } else if (Byte == '\r') {
+        // If this is \r\n, skip both characters.
+        if (Buf[I] == '\n')
+          ++I;
+        LineOffsets.push_back(I);
+      }
+    } while (I < BufLen - sizeof(Word) - 1);
+  }
+
+  // Handle tail using a regular check.
   while (I < BufLen) {
     if (Buf[I] == '\n') {
       LineOffsets.push_back(I + 1);

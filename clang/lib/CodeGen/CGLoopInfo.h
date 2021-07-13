@@ -59,6 +59,9 @@ struct LoopAttributes {
   /// Value for llvm.loop.vectorize.width metadata.
   unsigned VectorizeWidth;
 
+  // Value for llvm.loop.vectorize.scalable.enable
+  LVEnableState VectorizeScalable;
+
   /// Value for llvm.loop.interleave.count metadata.
   unsigned InterleaveCount;
 
@@ -113,6 +116,10 @@ struct LoopAttributes {
 
   /// Value for llvm.loop.max_concurrency.count metadata.
   unsigned SYCLMaxConcurrencyNThreads;
+
+  /// Value for count variant (min/max/avg) and count metadata.
+  llvm::SmallVector<std::pair<const char *, unsigned int>, 2>
+      SYCLIntelFPGAVariantCount;
 
   /// Flag for llvm.loop.coalesce metadata.
   bool SYCLLoopCoalesceEnable;
@@ -340,6 +347,10 @@ public:
   /// Set the vectorize width for the next loop pushed.
   void setVectorizeWidth(unsigned W) { StagedAttrs.VectorizeWidth = W; }
 
+  void setVectorizeScalable(const LoopAttributes::LVEnableState &State) {
+    StagedAttrs.VectorizeScalable = State;
+  }
+
   /// Set the interleave count for the next loop pushed.
   void setInterleaveCount(unsigned C) { StagedAttrs.InterleaveCount = C; }
 
@@ -395,6 +406,11 @@ public:
   /// Set value of concurrent speculated iterations for the next loop pushed.
   void setSYCLSpeculatedIterationsNIterations(unsigned C) {
     StagedAttrs.SYCLSpeculatedIterationsNIterations = C;
+  }
+
+  /// Set value of variant and loop count for the next loop pushed.
+  void setSYCLIntelFPGAVariantCount(const char *Var, unsigned int Count) {
+    StagedAttrs.SYCLIntelFPGAVariantCount.push_back({Var, Count});
   }
 
   /// Set the unroll count for the next loop pushed.

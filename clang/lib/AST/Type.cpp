@@ -125,7 +125,8 @@ ArrayType::ArrayType(TypeClass tc, QualType et, QualType can,
     //   template<int ...N> int arr[] = {N...};
     : Type(tc, can,
            et->getDependence() |
-               (sz ? toTypeDependence(sz->getDependence())
+               (sz ? toTypeDependence(
+                         turnValueToTypeDependence(sz->getDependence()))
                    : TypeDependence::None) |
                (tc == VariableArray ? TypeDependence::VariablyModified
                                     : TypeDependence::None) |
@@ -2085,8 +2086,9 @@ bool Type::isUnsignedIntegerOrEnumerationType() const {
 bool Type::hasUnsignedIntegerRepresentation() const {
   if (const auto *VT = dyn_cast<VectorType>(CanonicalType))
     return VT->getElementType()->isUnsignedIntegerOrEnumerationType();
-  else
-    return isUnsignedIntegerOrEnumerationType();
+  if (const auto *VT = dyn_cast<MatrixType>(CanonicalType))
+    return VT->getElementType()->isUnsignedIntegerOrEnumerationType();
+  return isUnsignedIntegerOrEnumerationType();
 }
 
 bool Type::isFloatingType() const {
@@ -2227,10 +2229,11 @@ bool Type::isIncompleteType(NamedDecl **Def) const {
     return !Rec->isCompleteDefinition();
   }
   case ConstantArray:
+  case VariableArray:
     // An array is incomplete if its element type is incomplete
     // (C++ [dcl.array]p1).
-    // We don't handle variable arrays (they're not allowed in C++) or
-    // dependent-sized arrays (dependent types are never treated as incomplete).
+    // We don't handle dependent-sized arrays (dependent types are never treated
+    // as incomplete).
     return cast<ArrayType>(CanonicalType)->getElementType()
              ->isIncompleteType(Def);
   case IncompleteArray:
@@ -2278,6 +2281,8 @@ bool Type::isSizelessBuiltinType() const {
       // SVE Types
 #define SVE_TYPE(Name, Id, SingletonId) case BuiltinType::Id:
 #include "clang/Basic/AArch64SVEACLETypes.def"
+#define RVV_TYPE(Name, Id, SingletonId) case BuiltinType::Id:
+#include "clang/Basic/RISCVVTypes.def"
       return true;
     default:
       return false;
@@ -3093,6 +3098,10 @@ StringRef BuiltinType::getName(const PrintingPolicy &Policy) const {
   case Id: \
     return #Name;
 #include "clang/Basic/PPCTypes.def"
+#define RVV_TYPE(Name, Id, SingletonId)                                        \
+  case Id:                                                                     \
+    return Name;
+#include "clang/Basic/RISCVVTypes.def"
   }
 
   llvm_unreachable("Invalid builtin type.");
@@ -3401,8 +3410,9 @@ QualType MacroQualifiedType::getModifiedType() const {
 
 TypeOfExprType::TypeOfExprType(Expr *E, QualType can)
     : Type(TypeOfExpr, can,
-           typeToTypeDependence(E->getDependence(),
-                                E->getType()->getDependence())),
+           toTypeDependence(E->getDependence()) |
+               (E->getType()->getDependence() &
+                TypeDependence::VariablyModified)),
       TOExpr(E) {}
 
 bool TypeOfExprType::isSugared() const {
@@ -3422,12 +3432,18 @@ void DependentTypeOfExprType::Profile(llvm::FoldingSetNodeID &ID,
 }
 
 DecltypeType::DecltypeType(Expr *E, QualType underlyingType, QualType can)
+    // C++11 [temp.type]p2: "If an expression e involves a template parameter,
+    // decltype(e) denotes a unique dependent type." Hence a decltype type is
+    // type-dependent even if its expression is only instantiation-dependent.
     : Type(Decltype, can,
-           typeToTypeDependence(E->getDependence(),
-                                E->getType()->getDependence())),
+           toTypeDependence(E->getDependence()) |
+               (E->isInstantiationDependent() ? TypeDependence::Dependent
+                                              : TypeDependence::None) |
+               (E->getType()->getDependence() &
+                TypeDependence::VariablyModified)),
       E(E), UnderlyingType(underlyingType) {}
 
-bool DecltypeType::isSugared() const { return !E->isTypeDependent(); }
+bool DecltypeType::isSugared() const { return !E->isInstantiationDependent(); }
 
 QualType DecltypeType::desugar() const {
   if (isSugared())
@@ -4113,6 +4129,8 @@ bool Type::canHaveNullability(bool ResultIfUnknown) const {
 #define PPC_VECTOR_TYPE(Name, Id, Size) \
     case BuiltinType::Id:
 #include "clang/Basic/PPCTypes.def"
+#define RVV_TYPE(Name, Id, SingletonId) case BuiltinType::Id:
+#include "clang/Basic/RISCVVTypes.def"
     case BuiltinType::BuiltinFn:
     case BuiltinType::NullPtr:
     case BuiltinType::IncompleteMatrixIdx:

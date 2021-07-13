@@ -182,6 +182,7 @@ void AArch64TargetInfo::getTargetDefinesARMV84A(const LangOptions &Opts,
 
 void AArch64TargetInfo::getTargetDefinesARMV85A(const LangOptions &Opts,
                                                 MacroBuilder &Builder) const {
+  Builder.defineMacro("__ARM_FEATURE_FRINT", "1");
   // Also include the Armv8.4 defines
   getTargetDefinesARMV84A(Opts, Builder);
 }
@@ -356,6 +357,12 @@ void AArch64TargetInfo::getTargetDefines(const LangOptions &Opts,
   if (Opts.BranchTargetEnforcement)
     Builder.defineMacro("__ARM_FEATURE_BTI_DEFAULT", "1");
 
+  if (HasLS64)
+    Builder.defineMacro("__ARM_FEATURE_LS64", "1");
+
+  if (HasRandGen)
+    Builder.defineMacro("__ARM_FEATURE_RNG", "1");
+
   switch (ArchKind) {
   default:
     break;
@@ -421,6 +428,7 @@ bool AArch64TargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
   HasMTE = false;
   HasTME = false;
   HasLS64 = false;
+  HasRandGen = false;
   HasMatMul = false;
   HasBFloat16 = false;
   HasSVE2 = false;
@@ -510,6 +518,8 @@ bool AArch64TargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
       HasMTE = true;
     if (Feature == "+tme")
       HasTME = true;
+    if (Feature == "+pauth")
+      HasPAuth = true;
     if (Feature == "+i8mm")
       HasMatMul = true;
     if (Feature == "+bf16")
@@ -518,6 +528,10 @@ bool AArch64TargetInfo::handleTargetFeatures(std::vector<std::string> &Features,
       HasLSE = true;
     if (Feature == "+ls64")
       HasLS64 = true;
+    if (Feature == "+rand")
+      HasRandGen = true;
+    if (Feature == "+flagm")
+      HasFlagM = true;
   }
 
   setDataLayout();

@@ -16,6 +16,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "MCTargetDesc/WebAssemblyMCTargetDesc.h"
+#include "Utils/WebAssemblyUtilities.h"
 #include "WebAssembly.h"
 #include "WebAssemblyMachineFunctionInfo.h"
 #include "WebAssemblySubtarget.h"
@@ -26,6 +27,7 @@
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
+#include "llvm/CodeGen/MachineModuleInfo.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/IR/DataLayout.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -128,7 +130,6 @@ private:
     case MVT::i64:
     case MVT::f32:
     case MVT::f64:
-    case MVT::exnref:
     case MVT::funcref:
     case MVT::externref:
       return VT;
@@ -138,12 +139,9 @@ private:
     case MVT::v8i16:
     case MVT::v4i32:
     case MVT::v4f32:
-      if (Subtarget->hasSIMD128())
-        return VT;
-      break;
     case MVT::v2i64:
     case MVT::v2f64:
-      if (Subtarget->hasUnimplementedSIMD128())
+      if (Subtarget->hasSIMD128())
         return VT;
       break;
     default:
@@ -714,10 +712,6 @@ bool WebAssemblyFastISel::fastLowerArguments() {
       Opc = WebAssembly::ARGUMENT_externref;
       RC = &WebAssembly::EXTERNREFRegClass;
       break;
-    case MVT::exnref:
-      Opc = WebAssembly::ARGUMENT_exnref;
-      RC = &WebAssembly::EXNREFRegClass;
-      break;
     default:
       return false;
     }
@@ -816,9 +810,6 @@ bool WebAssemblyFastISel::selectCall(const Instruction *I) {
     case MVT::v2f64:
       ResultReg = createResultReg(&WebAssembly::V128RegClass);
       break;
-    case MVT::exnref:
-      ResultReg = createResultReg(&WebAssembly::EXNREFRegClass);
-      break;
     case MVT::funcref:
       ResultReg = createResultReg(&WebAssembly::FUNCREFRegClass);
       break;
@@ -875,9 +866,32 @@ bool WebAssemblyFastISel::selectCall(const Instruction *I) {
   if (IsDirect) {
     MIB.addGlobalAddress(Func);
   } else {
-    // Add placeholders for the type index and immediate flags
+    // Placeholder for the type index.
     MIB.addImm(0);
-    MIB.addImm(0);
+    // The table into which this call_indirect indexes.
+    MCSymbolWasm *Table = WebAssembly::getOrCreateFunctionTableSymbol(
+        MF->getMMI().getContext(), Subtarget);
+    if (Subtarget->hasReferenceTypes()) {
+      MIB.addSym(Table);
+    } else {
+      // Otherwise for the MVP there is at most one table whose number is 0, but
+      // we can't write a table symbol or issue relocations.  Instead we just
+      // ensure the table is live.
+      Table->setNoStrip();
+      MIB.addImm(0);
+    }
+    // See if we must truncate the function pointer.
+    // CALL_INDIRECT takes an i32, but in wasm64 we represent function pointers
+    // as 64-bit for uniformity with other pointer types.
+    // See also: WebAssemblyISelLowering.cpp: LowerCallResults
+    if (Subtarget->hasAddr64()) {
+      auto Wrap = BuildMI(*FuncInfo.MBB, std::prev(FuncInfo.InsertPt), DbgLoc,
+                          TII.get(WebAssembly::I32_WRAP_I64));
+      unsigned Reg32 = createResultReg(&WebAssembly::I32RegClass);
+      Wrap.addReg(Reg32, RegState::Define);
+      Wrap.addReg(CalleeReg);
+      CalleeReg = Reg32;
+    }
   }
 
   for (unsigned ArgReg : Args)
@@ -931,10 +945,6 @@ bool WebAssemblyFastISel::selectSelect(const Instruction *I) {
   case MVT::f64:
     Opc = WebAssembly::SELECT_F64;
     RC = &WebAssembly::F64RegClass;
-    break;
-  case MVT::exnref:
-    Opc = WebAssembly::SELECT_EXNREF;
-    RC = &WebAssembly::EXNREFRegClass;
     break;
   case MVT::funcref:
     Opc = WebAssembly::SELECT_FUNCREF;
@@ -1157,7 +1167,7 @@ bool WebAssemblyFastISel::selectBitCast(const Instruction *I) {
   }
 
   Register Reg = fastEmit_ISD_BITCAST_r(VT.getSimpleVT(), RetVT.getSimpleVT(),
-                                        In, I->getOperand(0)->hasOneUse());
+                                        In);
   if (!Reg)
     return false;
   MachineBasicBlock::iterator Iter = FuncInfo.InsertPt;
@@ -1347,7 +1357,6 @@ bool WebAssemblyFastISel::selectRet(const Instruction *I) {
   case MVT::v2f64:
   case MVT::funcref:
   case MVT::externref:
-  case MVT::exnref:
     break;
   default:
     return false;

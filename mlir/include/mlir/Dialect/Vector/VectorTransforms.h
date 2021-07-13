@@ -16,8 +16,9 @@
 
 namespace mlir {
 class MLIRContext;
-class OwningRewritePatternList;
 class VectorTransferOpInterface;
+class RewritePatternSet;
+using OwningRewritePatternList = RewritePatternSet;
 
 namespace scf {
 class IfOp;
@@ -26,7 +27,7 @@ class IfOp;
 /// Collect a set of patterns to convert from the Vector dialect to itself.
 /// Should be merged with populateVectorToSCFLoweringPattern.
 void populateVectorToVectorConversionPatterns(
-    MLIRContext *context, OwningRewritePatternList &patterns,
+    MLIRContext *context, RewritePatternSet &patterns,
     ArrayRef<int64_t> coarseVectorShape = {},
     ArrayRef<int64_t> fineVectorShape = {});
 
@@ -71,7 +72,8 @@ SmallVector<Value, 1> unrollSingleResultVectorOp(OpBuilder &builder,
 
 /// Unroll a transfer_write op. Break up the vector source into a tuple of
 /// vectors matching the given shape. Then store each element with its own
-/// transfer_write.
+/// transfer_write. If the transfer_write takes a tensor source, return the
+/// unrolled Value in result.
 ///
 /// Example:
 /// vector.transfer_write %A, %M[%c0, %c0] : vector<4x4xf32>, memref<4x4xf32>
@@ -83,7 +85,8 @@ SmallVector<Value, 1> unrollSingleResultVectorOp(OpBuilder &builder,
 /// %2 = vector.tuple_get %0, 1 : tuple<vector<2x4xf32>, vector<2x4xf32>>
 /// vector.transfer_write %2, %M[%c2, %c0] : vector<2x4xf32>, memref<4x4xf32>
 LogicalResult unrollTransferWriteOp(OpBuilder &builder, Operation *op,
-                                    ArrayRef<int64_t> targetShape);
+                                    ArrayRef<int64_t> targetShape,
+                                    SmallVector<Value, 1> &result);
 
 /// Options that control the vector unrolling.
 struct UnrollVectorOptions {
@@ -120,7 +123,8 @@ struct UnrollVectorOptions {
 struct UnrollVectorPattern : public RewritePattern {
   using FilterConstraintType = std::function<LogicalResult(Operation *op)>;
   UnrollVectorPattern(MLIRContext *context, UnrollVectorOptions options)
-      : RewritePattern(/*benefit=*/1, MatchAnyOpTypeTag()), options(options) {}
+      : RewritePattern(MatchAnyOpTypeTag(), /*benefit=*/1, context),
+        options(options) {}
   LogicalResult matchAndRewrite(Operation *op,
                                 PatternRewriter &rewriter) const override {
     if (options.filterConstraint && failed(options.filterConstraint(op)))
@@ -143,9 +147,10 @@ struct UnrollVectorPattern : public RewritePattern {
         llvm::all_of(*maybeShapeRatio, [](int64_t v) { return v == 1; }))
       return failure();
     if (isa<TransferWriteOp>(op)) {
-      if (failed(unrollTransferWriteOp(rewriter, op, *targetShape)))
+      SmallVector<Value, 1> result;
+      if (failed(unrollTransferWriteOp(rewriter, op, *targetShape, result)))
         return failure();
-      rewriter.eraseOp(op);
+      rewriter.replaceOp(op, result);
       return success();
     }
     if (op->getNumResults() != 1)
@@ -161,7 +166,8 @@ private:
   UnrollVectorOptions options;
 };
 
-/// Split a vector.transfer operation into an unmasked fastpath and a slowpath.
+/// Split a vector.transfer operation into an in-bounds (i.e., no out-of-bounds
+/// masking) fastpath and a slowpath.
 /// If `ifOp` is not null and the result is `success, the `ifOp` points to the
 /// newly created conditional upon function return.
 /// To accomodate for the fact that the original vector.transfer indexing may be
@@ -177,14 +183,14 @@ private:
 /// ```
 ///    %1:3 = scf.if (%inBounds) {
 ///      // fastpath, direct cast
-///      memref_cast %A: memref<A...> to compatibleMemRefType
+///      memref.cast %A: memref<A...> to compatibleMemRefType
 ///      scf.yield %view : compatibleMemRefType, index, index
 ///    } else {
-///      // slowpath, masked vector.transfer or linalg.copy.
-///      memref_cast %alloc: memref<B...> to compatibleMemRefType
+///      // slowpath, not in-bounds vector.transfer or linalg.copy.
+///      memref.cast %alloc: memref<B...> to compatibleMemRefType
 ///      scf.yield %4 : compatibleMemRefType, index, index
 //     }
-///    %0 = vector.transfer_read %1#0[%1#1, %1#2] {masked = [false ... false]}
+///    %0 = vector.transfer_read %1#0[%1#1, %1#2] {in_bounds = [true ... true]}
 /// ```
 /// where `alloc` is a top of the function alloca'ed buffer of one vector.
 ///
@@ -212,7 +218,7 @@ struct VectorTransferFullPartialRewriter : public RewritePattern {
       FilterConstraintType filter =
           [](VectorTransferOpInterface op) { return success(); },
       PatternBenefit benefit = 1)
-      : RewritePattern(benefit, MatchAnyOpTypeTag()), options(options),
+      : RewritePattern(MatchAnyOpTypeTag(), benefit, context), options(options),
         filter(filter) {}
 
   /// Performs the rewrite.

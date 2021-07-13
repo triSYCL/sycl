@@ -646,7 +646,7 @@ def VABS    : SInst<"vabs", "..", "csifQcQsQiQf">;
 def VQABS   : SInst<"vqabs", "..", "csiQcQsQi">;
 def VNEG    : SOpInst<"vneg", "..", "csifQcQsQiQf", OP_NEG>;
 def VQNEG   : SInst<"vqneg", "..", "csiQcQsQi">;
-def VCLS    : SInst<"vcls", "..", "csiQcQsQi">;
+def VCLS    : SInst<"vcls", "S.", "csiUcUsUiQcQsQiQUcQUsQUi">;
 def VCLZ    : IInst<"vclz", "..", "csiUcUsUiQcQsQiQUcQUsQUi">;
 def VCNT    : WInst<"vcnt", "..", "UccPcQUcQcQPc">;
 def VRECPE  : SInst<"vrecpe", "..", "fUiQfQUi">;
@@ -1134,7 +1134,33 @@ def SHA1SU0 : SInst<"vsha1su0", "....", "QUi">;
 def SHA256H : SInst<"vsha256h", "....", "QUi">;
 def SHA256H2 : SInst<"vsha256h2", "....", "QUi">;
 def SHA256SU1 : SInst<"vsha256su1", "....", "QUi">;
+
+def BCAX : SInst<"vbcax", "....", "QUcQUsQUiQUlQcQsQiQl">;
+def EOR3 : SInst<"veor3", "....", "QUcQUsQUiQUlQcQsQiQl">;
+def RAX1 : SInst<"vrax1", "...", "QUl">;
+
+let isVXAR = 1 in {
+def XAR :  SInst<"vxar", "...I", "QUl">;
 }
+
+def SHA512SU0 : SInst<"vsha512su0", "...", "QUl">;
+def SHA512su1 : SInst<"vsha512su1", "....", "QUl">;
+def SHA512H : SInst<"vsha512h", "....", "QUl">;
+def SHA512H2 : SInst<"vsha512h2", "....", "QUl">;
+
+def SM3SS1 : SInst<"vsm3ss1", "....", "QUi">;
+def SM3TT1A : SInst<"vsm3tt1a", "....I", "QUi">;
+def SM3TT1B : SInst<"vsm3tt1b", "....I", "QUi">;
+def SM3TT2A : SInst<"vsm3tt2a", "....I", "QUi">;
+def SM3TT2B : SInst<"vsm3tt2b", "....I", "QUi">;
+def SM3PARTW1 : SInst<"vsm3partw1", "....", "QUi">;
+def SM3PARTW2 : SInst<"vsm3partw2", "....", "QUi">;
+
+def SM4E : SInst<"vsm4e", "...", "QUi">;
+def SM4EKEY : SInst<"vsm4ekey", "...", "QUi">;
+}
+
+def VADDP   : WInst<"vadd", "...", "PcPsPlQPcQPsQPlQPk">;
 
 ////////////////////////////////////////////////////////////////////////////////
 // Float -> Int conversions with explicit rounding mode
@@ -1182,6 +1208,13 @@ def FRINTM_S64 : SInst<"vrndm", "..", "dQd">;
 def FRINTX_S64 : SInst<"vrndx", "..", "dQd">;
 def FRINTZ_S64 : SInst<"vrnd", "..", "dQd">;
 def FRINTI_S64 : SInst<"vrndi", "..", "dQd">;
+}
+
+let ArchGuard = "__ARM_ARCH >= 8 && defined(__aarch64__) && defined(__ARM_FEATURE_FRINT)" in {
+def FRINT32X_S32 : SInst<"vrnd32x", "..", "fQf">;
+def FRINT32Z_S32 : SInst<"vrnd32z", "..", "fQf">;
+def FRINT64X_S32 : SInst<"vrnd64x", "..", "fQf">;
+def FRINT64Z_S32 : SInst<"vrnd64z", "..", "fQf">;
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1902,6 +1935,24 @@ let ArchGuard = "defined(__ARM_FEATURE_BF16_VECTOR_ARITHMETIC)" in {
 multiclass VCMLA_ROTS<string type, string lanety, string laneqty> {
   foreach ROT = ["", "_rot90", "_rot180", "_rot270" ] in {
     def   : SInst<"vcmla" # ROT, "....", type # "Q" # type>;
+
+    // vcmla{ROT}_lane
+    def : SOpInst<"vcmla" # ROT # "_lane", "...qI", type, Op<(call "vcmla" # ROT, $p0, $p1,
+           (bitcast $p0, (dup_typed lanety , (call "vget_lane", (bitcast lanety, $p2), $p3))))>>;
+
+    // vcmlaq{ROT}_lane
+    def : SOpInst<"vcmla" # ROT # "_lane", "...qI", "Q" # type, Op<(call "vcmla" # ROT, $p0, $p1,
+           (bitcast $p0, (dup_typed laneqty , (call "vget_lane", (bitcast lanety, $p2), $p3))))>>;
+
+    let isLaneQ = 1 in  {
+      // vcmla{ROT}_laneq
+      def : SOpInst<"vcmla" # ROT # "_laneq", "...QI", type,  Op<(call "vcmla" # ROT, $p0, $p1,
+              (bitcast $p0, (dup_typed lanety, (call "vget_lane", (bitcast laneqty, $p2), $p3))))>>;
+
+      // vcmlaq{ROT}_laneq
+      def : SOpInst<"vcmla" # ROT # "_laneq", "...QI", "Q" # type, Op<(call "vcmla" # ROT, $p0, $p1,
+             (bitcast $p0, (dup_typed laneqty , (call "vget_lane", (bitcast laneqty, $p2), $p3))))>>;
+    }
   }
 }
 

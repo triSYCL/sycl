@@ -59,6 +59,8 @@ class LLVM_LIBRARY_VISIBILITY PPCTargetInfo : public TargetInfo {
   // Target cpu features.
   bool HasAltivec = false;
   bool HasMMA = false;
+  bool HasROPProtect = false;
+  bool HasPrivileged = false;
   bool HasVSX = false;
   bool HasP8Vector = false;
   bool HasP8Crypto = false;
@@ -355,6 +357,8 @@ public:
       : PPCTargetInfo(Triple, Opts) {
     if (Triple.isOSAIX())
       resetDataLayout("E-m:a-p:32:32-i64:64-n32");
+    else if (Triple.getArch() == llvm::Triple::ppcle)
+      resetDataLayout("e-m:e-p:32:32-i64:64-n32");
     else
       resetDataLayout("E-m:e-p:32:32-i64:64-n32");
 
@@ -425,7 +429,7 @@ public:
     }
 
     if (Triple.isOSAIX() || Triple.isOSLinux())
-      DataLayout += "-v256:256:256-v512:512:512";
+      DataLayout += "-S128-v256:256:256-v512:512:512";
     resetDataLayout(DataLayout);
 
     // PPC64 supports atomics up to 8 bytes.

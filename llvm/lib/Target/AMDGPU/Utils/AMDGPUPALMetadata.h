@@ -13,12 +13,11 @@
 
 #ifndef LLVM_LIB_TARGET_AMDGPU_AMDGPUPALMETADATA_H
 #define LLVM_LIB_TARGET_AMDGPU_AMDGPUPALMETADATA_H
-
 #include "llvm/BinaryFormat/MsgPackDocument.h"
-#include "llvm/CodeGen/MachineFunction.h"
 
 namespace llvm {
 
+class MachineFunction;
 class Module;
 class StringRef;
 
@@ -96,7 +95,7 @@ public:
   const char *getVendor() const;
 
   // Get .note record type of metadata blob to be emitted:
-  // ELF::NT_AMD_AMDGPU_PAL_METADATA (legacy key=val format), or
+  // ELF::NT_AMD_PAL_METADATA (legacy key=val format), or
   // ELF::NT_AMDGPU_METADATA (MsgPack format), or
   // 0 (no PAL metadata).
   unsigned getType() const;

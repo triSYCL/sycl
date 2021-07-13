@@ -99,6 +99,8 @@ STATISTIC(NonEmptyExitBlock, "Candidate has a non-empty exit block with "
 STATISTIC(NonEmptyGuardBlock, "Candidate has a non-empty guard block with "
                               "instructions that cannot be moved");
 STATISTIC(NotRotated, "Candidate is not rotated");
+STATISTIC(OnlySecondCandidateIsGuarded,
+          "The second candidate is guarded while the first one is not");
 
 enum FusionDependenceAnalysisChoice {
   FUSION_DEPENDENCE_ANALYSIS_SCEV,
@@ -891,6 +893,14 @@ private:
             continue;
           }
 
+          if (!FC0->GuardBranch && FC1->GuardBranch) {
+            LLVM_DEBUG(dbgs() << "The second candidate is guarded while the "
+                                 "first one is not. Not fusing.\n");
+            reportLoopFusion<OptimizationRemarkMissed>(
+                *FC0, *FC1, OnlySecondCandidateIsGuarded);
+            continue;
+          }
+
           // Ensure that FC0 and FC1 have identical guards.
           // If one (or both) are not guarded, this check is not necessary.
           if (FC0->GuardBranch && FC1->GuardBranch &&
@@ -1474,8 +1484,7 @@ private:
     mergeLatch(FC0, FC1);
 
     // Merge the loops.
-    SmallVector<BasicBlock *, 8> Blocks(FC1.L->block_begin(),
-                                        FC1.L->block_end());
+    SmallVector<BasicBlock *, 8> Blocks(FC1.L->blocks());
     for (BasicBlock *BB : Blocks) {
       FC0.L->addBlockEntry(BB);
       FC1.L->removeBlockFromLoop(BB);
@@ -1765,8 +1774,7 @@ private:
     mergeLatch(FC0, FC1);
 
     // Merge the loops.
-    SmallVector<BasicBlock *, 8> Blocks(FC1.L->block_begin(),
-                                        FC1.L->block_end());
+    SmallVector<BasicBlock *, 8> Blocks(FC1.L->blocks());
     for (BasicBlock *BB : Blocks) {
       FC0.L->addBlockEntry(BB);
       FC1.L->removeBlockFromLoop(BB);

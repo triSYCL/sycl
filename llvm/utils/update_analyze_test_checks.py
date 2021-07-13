@@ -110,7 +110,11 @@ def main():
 
     builder = common.FunctionTestBuilder(
       run_list = prefix_list,
-      flags = args,
+      flags = type('', (object,), {
+            'verbose': args.verbose,
+            'function_signature': False,
+            'check_attributes': False,
+            'replace_function_regex': []}),
       scrubber_args = [])
 
     for prefixes, opt_args in prefix_list:

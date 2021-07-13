@@ -118,7 +118,7 @@ access to derived objects by providing a virtual interface that must be
 implemented. As an example, many analyses and transformations want to reason
 about the side effects of an operation to improve performance and correctness.
 The side effects of an operation are generally tied to the semantics of a
-specific operation, for example an `affine.load` operation has a `write` effect
+specific operation, for example an `affine.load` operation has a `read` effect
 (as the name may suggest).
 
 These interfaces are defined by overriding the
@@ -205,6 +205,45 @@ public:
 Operation *op = ...;
 if (ExampleOpInterface example = dyn_cast<ExampleOpInterface>(op))
   llvm::errs() << "hook returned = " << example.exampleInterfaceHook() << "\n";
+```
+
+#### Dialect Fallback for OpInterface
+
+Some dialects have an open ecosystem and don't register all of the possible
+operations. In such cases it is still possible to provide support for
+implementing an `OpInterface` for these operation. When an operation isn't
+registered or does not provide an implementation for an interface, the query
+will fallback to the dialect itself.
+
+A second model is used for such cases and automatically generated when
+using ODS (see below) with the name `FallbackModel`. This model can be implemented
+for a particular dialect:
+
+```c++
+// This is the implementation of a dialect fallback for `ExampleOpInterface`.
+struct FallbackExampleOpInterface
+    : public ExampleOpInterface::FallbackModel<
+          FallbackExampleOpInterface> {
+  static bool classof(Operation *op) { return true; }
+
+  unsigned exampleInterfaceHook(Operation *op) const;
+  unsigned exampleStaticInterfaceHook() const;
+};
+```
+
+A dialect can then instantiate this implementation and returns it on specific
+operations by overriding the `getRegisteredInterfaceForOp` method :
+
+```c++
+void *TestDialect::getRegisteredInterfaceForOp(TypeID typeID,
+                                               Identifier opName) {
+  if (typeID == TypeID::get<ExampleOpInterface>()) {
+    if (isSupported(opName))
+      return fallbackExampleOpInterface;
+    return nullptr;
+  }
+  return nullptr;
+}
 ```
 
 #### Utilizing the ODS Framework

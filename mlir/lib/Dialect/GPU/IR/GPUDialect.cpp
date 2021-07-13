@@ -22,6 +22,7 @@
 #include "mlir/IR/FunctionImplementation.h"
 #include "mlir/IR/OpImplementation.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/TypeUtilities.h"
 #include "llvm/ADT/TypeSwitch.h"
 
 using namespace mlir;
@@ -343,7 +344,7 @@ static void printLaunchOp(OpAsmPrinter &p, LaunchOp op) {
                       op.getThreadIds());
 
   p.printRegion(op.body(), /*printEntryBlockArgs=*/false);
-  p.printOptionalAttrDict(op.getAttrs());
+  p.printOptionalAttrDict(op->getAttrs());
 }
 
 // Parse the size assignment blocks for blocks and threads.  These have the form
@@ -700,7 +701,7 @@ void GPUFuncOp::setType(FunctionType newType) {
 
   SmallVector<char, 16> nameBuf;
   for (int i = newType.getNumInputs(), e = oldType.getNumInputs(); i < e; i++)
-    removeAttr(getArgAttrName(i, nameBuf));
+    (*this)->removeAttr(getArgAttrName(i, nameBuf));
 
   (*this)->setAttr(getTypeAttrName(), TypeAttr::get(newType));
 }
@@ -726,7 +727,7 @@ static LogicalResult verifyAttributions(Operation *op,
     if (!type)
       return op->emitOpError() << "expected memref type in attribution";
 
-    if (type.getMemorySpace() != memorySpace) {
+    if (type.getMemorySpaceAsInt() != memorySpace) {
       return op->emitOpError()
              << "expected memory space " << memorySpace << " in attribution";
     }
@@ -836,10 +837,27 @@ static ParseResult parseGPUModuleOp(OpAsmParser &parser,
 static void print(OpAsmPrinter &p, GPUModuleOp op) {
   p << op.getOperationName() << ' ';
   p.printSymbolName(op.getName());
-  p.printOptionalAttrDictWithKeyword(op.getAttrs(),
+  p.printOptionalAttrDictWithKeyword(op->getAttrs(),
                                      {SymbolTable::getSymbolAttrName()});
   p.printRegion(op->getRegion(0), /*printEntryBlockArgs=*/false,
                 /*printBlockTerminators=*/false);
+}
+
+//===----------------------------------------------------------------------===//
+// GPUMemcpyOp
+//===----------------------------------------------------------------------===//
+
+static LogicalResult verify(MemcpyOp op) {
+  auto srcType = op.src().getType();
+  auto dstType = op.dst().getType();
+
+  if (getElementTypeOrSelf(srcType) != getElementTypeOrSelf(dstType))
+    return op.emitOpError("arguments have incompatible element type");
+
+  if (failed(verifyCompatibleShape(srcType, dstType)))
+    return op.emitOpError("arguments have incompatible shape");
+
+  return success();
 }
 
 static ParseResult parseAsyncDependencies(

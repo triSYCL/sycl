@@ -67,7 +67,7 @@
 __SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 
-enum class rounding_mode { automatic, rte, rtz, rtp, rtn };
+enum class rounding_mode { automatic = 0, rte = 1, rtz = 2, rtp = 3, rtn = 4 };
 struct elem {
   static constexpr int x = 0;
   static constexpr int y = 1;
@@ -242,9 +242,8 @@ using is_float_to_float =
     std::integral_constant<bool, detail::is_floating_point<T>::value &&
                                      detail::is_floating_point<R>::value>;
 template <typename T>
-using is_standard_type = std::integral_constant<
-    bool, detail::is_sgentype<T>::value && !std::is_same<T, long long>::value &&
-              !std::is_same<T, unsigned long long>::value>;
+using is_standard_type =
+    std::integral_constant<bool, detail::is_sgentype<T>::value>;
 
 template <typename T, typename R, rounding_mode roundingMode, typename OpenCLT,
           typename OpenCLR>
@@ -330,7 +329,7 @@ convertImpl(T Value) {
             typename OpenCLT, typename OpenCLR>                                \
   detail::enable_if_t<is_sint_to_sint<T, R>::value &&                          \
                           !std::is_same<OpenCLT, OpenCLR>::value &&            \
-                          (std::is_same<OpenCLR, DestType>::value ||           \
+                          (std::is_same<OpenCLR, cl_##DestType>::value ||      \
                            (std::is_same<OpenCLR, signed char>::value &&       \
                             std::is_same<DestType, char>::value)),             \
                       R>                                                       \
@@ -352,7 +351,7 @@ __SYCL_GENERATE_CONVERT_IMPL(long)
             typename OpenCLT, typename OpenCLR>                                \
   detail::enable_if_t<is_uint_to_uint<T, R>::value &&                          \
                           !std::is_same<OpenCLT, OpenCLR>::value &&            \
-                          std::is_same<OpenCLR, DestType>::value,              \
+                          std::is_same<OpenCLR, cl_##DestType>::value,         \
                       R>                                                       \
   convertImpl(T Value) {                                                       \
     OpenCLT OpValue = cl::sycl::detail::convertDataToType<T, OpenCLT>(Value);  \
@@ -454,7 +453,7 @@ __SYCL_GENERATE_CONVERT_IMPL_FOR_ROUNDING_MODE(rtn, Rtn)
   template <typename T, typename R, rounding_mode roundingMode,                \
             typename OpenCLT, typename OpenCLR>                                \
   detail::enable_if_t<is_float_to_int<T, R>::value &&                          \
-                          (std::is_same<OpenCLR, DestType>::value ||           \
+                          (std::is_same<OpenCLR, cl_##DestType>::value ||      \
                            std::is_same<OpenCLR, signed char>::value &&        \
                                std::is_same<DestType, char>::value) &&         \
                           RoundingModeCondition<roundingMode>::value,          \
@@ -1817,11 +1816,16 @@ public:
     return Tmp.template convert<convertT, roundingMode>();
   }
 
-  template <typename asT>
-  typename detail::enable_if_t<asT::getNumElements() == getNumElements(), asT>
-  as() const {
+  template <typename asT> asT as() const {
     // First materialize the swizzle to vec_t and then apply as() to it.
     vec_t Tmp = *this;
+    static_assert((sizeof(Tmp) == sizeof(asT)),
+                  "The new SYCL vec type must have the same storage size in "
+                  "bytes as this SYCL swizzled vec");
+    static_assert(
+        detail::is_contained<asT, detail::gtl::vector_basic_list>::value,
+        "asT must be SYCL vec of a different element type and "
+        "number of elements specified by asT");
     return Tmp.template as<asT>();
   }
 
@@ -2032,21 +2036,21 @@ __SYCL_RELLOGOP(||)
   using __##type##16_vec_t =                                                   \
       cl::sycl::type __attribute__((ext_vector_type(16)));
 
-__SYCL_DECLARE_TYPE_VIA_CL_T(char);
-__SYCL_DECLARE_TYPE_T(schar);
-__SYCL_DECLARE_TYPE_VIA_CL_T(uchar);
-__SYCL_DECLARE_TYPE_VIA_CL_T(short);
-__SYCL_DECLARE_TYPE_VIA_CL_T(ushort);
-__SYCL_DECLARE_TYPE_VIA_CL_T(int);
-__SYCL_DECLARE_TYPE_VIA_CL_T(uint);
-__SYCL_DECLARE_TYPE_VIA_CL_T(long);
-__SYCL_DECLARE_TYPE_VIA_CL_T(ulong);
-__SYCL_DECLARE_TYPE_T(longlong);
-__SYCL_DECLARE_TYPE_T(ulonglong);
+__SYCL_DECLARE_TYPE_VIA_CL_T(char)
+__SYCL_DECLARE_TYPE_T(schar)
+__SYCL_DECLARE_TYPE_VIA_CL_T(uchar)
+__SYCL_DECLARE_TYPE_VIA_CL_T(short)
+__SYCL_DECLARE_TYPE_VIA_CL_T(ushort)
+__SYCL_DECLARE_TYPE_VIA_CL_T(int)
+__SYCL_DECLARE_TYPE_VIA_CL_T(uint)
+__SYCL_DECLARE_TYPE_VIA_CL_T(long)
+__SYCL_DECLARE_TYPE_VIA_CL_T(ulong)
+__SYCL_DECLARE_TYPE_T(longlong)
+__SYCL_DECLARE_TYPE_T(ulonglong)
 // Note: halfs are not declared here, because they have different representation
 // between host and device, see separate handling below
-__SYCL_DECLARE_TYPE_VIA_CL_T(float);
-__SYCL_DECLARE_TYPE_VIA_CL_T(double);
+__SYCL_DECLARE_TYPE_VIA_CL_T(float)
+__SYCL_DECLARE_TYPE_VIA_CL_T(double)
 
 #define __SYCL_GET_CL_TYPE(target, num) __##target##num##_vec_t
 #define __SYCL_GET_SCALAR_CL_TYPE(target) target

@@ -129,38 +129,9 @@ enum TOF {
 namespace llvm {
 namespace WebAssembly {
 
-/// Used as immediate MachineOperands for block signatures
-enum class BlockType : unsigned {
-  Invalid = 0x00,
-  Void = 0x40,
-  I32 = unsigned(wasm::ValType::I32),
-  I64 = unsigned(wasm::ValType::I64),
-  F32 = unsigned(wasm::ValType::F32),
-  F64 = unsigned(wasm::ValType::F64),
-  V128 = unsigned(wasm::ValType::V128),
-  Externref = unsigned(wasm::ValType::EXTERNREF),
-  Funcref = unsigned(wasm::ValType::FUNCREF),
-  Exnref = unsigned(wasm::ValType::EXNREF),
-  // Multivalue blocks (and other non-void blocks) are only emitted when the
-  // blocks will never be exited and are at the ends of functions (see
-  // WebAssemblyCFGStackify::fixEndsAtEndOfFunction). They also are never made
-  // to pop values off the stack, so the exact multivalue signature can always
-  // be inferred from the return type of the parent function in MCInstLower.
-  Multivalue = 0xffff,
-};
-
-/// Used as immediate MachineOperands for heap types, e.g. for ref.null.
-enum class HeapType : unsigned {
-  Invalid = 0x00,
-  Externref = unsigned(wasm::ValType::EXTERNREF),
-  Funcref = unsigned(wasm::ValType::FUNCREF),
-};
-
 /// Instruction opcodes emitted via means other than CodeGen.
 static const unsigned Nop = 0x01;
 static const unsigned End = 0x0b;
-
-wasm::ValType toValType(const MVT &Ty);
 
 /// Return the default p2align value for a load or store with the given opcode.
 inline unsigned GetDefaultP2AlignAny(unsigned Opc) {
@@ -194,9 +165,9 @@ inline unsigned GetDefaultP2AlignAny(unsigned Opc) {
   WASM_LOAD_STORE(ATOMIC_RMW8_U_XCHG_I64)
   WASM_LOAD_STORE(ATOMIC_RMW8_U_CMPXCHG_I32)
   WASM_LOAD_STORE(ATOMIC_RMW8_U_CMPXCHG_I64)
-  WASM_LOAD_STORE(LOAD_SPLAT_v8x16)
-  WASM_LOAD_STORE(LOAD_LANE_v16i8)
-  WASM_LOAD_STORE(STORE_LANE_v16i8)
+  WASM_LOAD_STORE(LOAD8_SPLAT)
+  WASM_LOAD_STORE(LOAD_LANE_I8x16)
+  WASM_LOAD_STORE(STORE_LANE_I8x16)
   return 0;
   WASM_LOAD_STORE(LOAD16_S_I32)
   WASM_LOAD_STORE(LOAD16_U_I32)
@@ -222,9 +193,9 @@ inline unsigned GetDefaultP2AlignAny(unsigned Opc) {
   WASM_LOAD_STORE(ATOMIC_RMW16_U_XCHG_I64)
   WASM_LOAD_STORE(ATOMIC_RMW16_U_CMPXCHG_I32)
   WASM_LOAD_STORE(ATOMIC_RMW16_U_CMPXCHG_I64)
-  WASM_LOAD_STORE(LOAD_SPLAT_v16x8)
-  WASM_LOAD_STORE(LOAD_LANE_v8i16)
-  WASM_LOAD_STORE(STORE_LANE_v8i16)
+  WASM_LOAD_STORE(LOAD16_SPLAT)
+  WASM_LOAD_STORE(LOAD_LANE_I16x8)
+  WASM_LOAD_STORE(STORE_LANE_I16x8)
   return 1;
   WASM_LOAD_STORE(LOAD_I32)
   WASM_LOAD_STORE(LOAD_F32)
@@ -253,10 +224,10 @@ inline unsigned GetDefaultP2AlignAny(unsigned Opc) {
   WASM_LOAD_STORE(ATOMIC_RMW32_U_CMPXCHG_I64)
   WASM_LOAD_STORE(MEMORY_ATOMIC_NOTIFY)
   WASM_LOAD_STORE(MEMORY_ATOMIC_WAIT32)
-  WASM_LOAD_STORE(LOAD_SPLAT_v32x4)
-  WASM_LOAD_STORE(LOAD_ZERO_v4i32)
-  WASM_LOAD_STORE(LOAD_LANE_v4i32)
-  WASM_LOAD_STORE(STORE_LANE_v4i32)
+  WASM_LOAD_STORE(LOAD32_SPLAT)
+  WASM_LOAD_STORE(LOAD_ZERO_I32x4)
+  WASM_LOAD_STORE(LOAD_LANE_I32x4)
+  WASM_LOAD_STORE(STORE_LANE_I32x4)
   return 2;
   WASM_LOAD_STORE(LOAD_I64)
   WASM_LOAD_STORE(LOAD_F64)
@@ -272,16 +243,16 @@ inline unsigned GetDefaultP2AlignAny(unsigned Opc) {
   WASM_LOAD_STORE(ATOMIC_RMW_XCHG_I64)
   WASM_LOAD_STORE(ATOMIC_RMW_CMPXCHG_I64)
   WASM_LOAD_STORE(MEMORY_ATOMIC_WAIT64)
-  WASM_LOAD_STORE(LOAD_SPLAT_v64x2)
-  WASM_LOAD_STORE(LOAD_EXTEND_S_v8i16)
-  WASM_LOAD_STORE(LOAD_EXTEND_U_v8i16)
-  WASM_LOAD_STORE(LOAD_EXTEND_S_v4i32)
-  WASM_LOAD_STORE(LOAD_EXTEND_U_v4i32)
-  WASM_LOAD_STORE(LOAD_EXTEND_S_v2i64)
-  WASM_LOAD_STORE(LOAD_EXTEND_U_v2i64)
-  WASM_LOAD_STORE(LOAD_ZERO_v2i64)
-  WASM_LOAD_STORE(LOAD_LANE_v2i64)
-  WASM_LOAD_STORE(STORE_LANE_v2i64)
+  WASM_LOAD_STORE(LOAD64_SPLAT)
+  WASM_LOAD_STORE(LOAD_EXTEND_S_I16x8)
+  WASM_LOAD_STORE(LOAD_EXTEND_U_I16x8)
+  WASM_LOAD_STORE(LOAD_EXTEND_S_I32x4)
+  WASM_LOAD_STORE(LOAD_EXTEND_U_I32x4)
+  WASM_LOAD_STORE(LOAD_EXTEND_S_I64x2)
+  WASM_LOAD_STORE(LOAD_EXTEND_U_I64x2)
+  WASM_LOAD_STORE(LOAD_ZERO_I64x2)
+  WASM_LOAD_STORE(LOAD_LANE_I64x2)
+  WASM_LOAD_STORE(STORE_LANE_I64x2)
   return 3;
   WASM_LOAD_STORE(LOAD_V128)
   WASM_LOAD_STORE(STORE_V128)
@@ -326,8 +297,6 @@ inline bool isArgument(unsigned Opc) {
   case WebAssembly::ARGUMENT_funcref_S:
   case WebAssembly::ARGUMENT_externref:
   case WebAssembly::ARGUMENT_externref_S:
-  case WebAssembly::ARGUMENT_exnref:
-  case WebAssembly::ARGUMENT_exnref_S:
     return true;
   default:
     return false;
@@ -350,8 +319,6 @@ inline bool isCopy(unsigned Opc) {
   case WebAssembly::COPY_FUNCREF_S:
   case WebAssembly::COPY_EXTERNREF:
   case WebAssembly::COPY_EXTERNREF_S:
-  case WebAssembly::COPY_EXNREF:
-  case WebAssembly::COPY_EXNREF_S:
     return true;
   default:
     return false;
@@ -374,8 +341,6 @@ inline bool isTee(unsigned Opc) {
   case WebAssembly::TEE_FUNCREF_S:
   case WebAssembly::TEE_EXTERNREF:
   case WebAssembly::TEE_EXTERNREF_S:
-  case WebAssembly::TEE_EXNREF:
-  case WebAssembly::TEE_EXNREF_S:
     return true;
   default:
     return false;
@@ -432,6 +397,18 @@ inline bool isMarker(unsigned Opc) {
   case WebAssembly::TRY_S:
   case WebAssembly::END_TRY:
   case WebAssembly::END_TRY_S:
+    return true;
+  default:
+    return false;
+  }
+}
+
+inline bool isCatch(unsigned Opc) {
+  switch (Opc) {
+  case WebAssembly::CATCH:
+  case WebAssembly::CATCH_S:
+  case WebAssembly::CATCH_ALL:
+  case WebAssembly::CATCH_ALL_S:
     return true;
   default:
     return false;

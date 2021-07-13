@@ -104,6 +104,7 @@ struct MIToken {
     kw_non_temporal,
     kw_invariant,
     kw_align,
+    kw_basealign,
     kw_addrspace,
     kw_stack,
     kw_got,
@@ -125,6 +126,7 @@ struct MIToken {
     kw_heap_alloc_marker,
     kw_bbsections,
     kw_unknown_size,
+    kw_unknown_address,
 
     // Named metadata keywords
     md_tbaa,

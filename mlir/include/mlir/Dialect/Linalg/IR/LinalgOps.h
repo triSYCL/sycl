@@ -9,7 +9,6 @@
 #ifndef MLIR_DIALECT_LINALG_LINALGOPS_H_
 #define MLIR_DIALECT_LINALG_LINALGOPS_H_
 
-#include "mlir/Dialect/Linalg/IR/LinalgTraits.h"
 #include "mlir/Dialect/Linalg/IR/LinalgTypes.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/Dialect/Utils/StructuredOpsUtils.h"
@@ -23,6 +22,7 @@
 #include "mlir/IR/TypeUtilities.h"
 #include "mlir/IR/Types.h"
 #include "mlir/Interfaces/CopyOpInterface.h"
+#include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 #include "mlir/Interfaces/ViewLikeInterface.h"
 #include "mlir/Support/LLVM.h"
@@ -43,10 +43,6 @@ class PoolingSumOp;
 using LoopRangeBuilder =
     std::function<SmallVector<Range, 4>(OpBuilder &, Location)>;
 
-/// Returns the values obtained by applying `map` to the list of values.
-SmallVector<Value, 4> applyMapToValues(OpBuilder &b, Location loc,
-                                       AffineMap map, ValueRange values);
-
 /// Provide a very simple inference procedure to build the loop ranges from the
 /// op and its operands. This only works with permutation affine maps and
 /// patterns of the form `(m, n)[s] -> (m + n - s floordiv 2)`.
@@ -57,6 +53,7 @@ SmallVector<Value, 4> applyMapToValues(OpBuilder &b, Location loc,
 LoopRangeBuilder defaultLoopRangesBuilder(LinalgOp op);
 
 using ReassociationIndices = SmallVector<int64_t, 2>;
+using ReassociationIndicesRef = ArrayRef<int64_t>;
 using ReassociationExprs = SmallVector<AffineExpr, 2>;
 
 /// Returns the name mangled library call name to disambiguate between different
@@ -111,15 +108,26 @@ SmallVector<AffineExpr, 4> concat(ArrayRef<AffineExpr> a,
 void getDimsOfType(Operation *op, StringRef iteratorTypeName,
                    SmallVectorImpl<AffineExpr> &res);
 
+namespace detail {
+LogicalResult verifyStructuredOpInterface(Operation *op);
+} // namespace detail
 } // namespace linalg
 } // namespace mlir
 
-#include "mlir/Dialect/Linalg/IR/LinalgStructuredOpsInterfaces.h.inc"
+namespace mlir {
+namespace linalg {
+class IndexedGenericOp;
+} // namespace linalg
+} // namespace mlir
+#include "mlir/Dialect/Linalg/IR/LinalgInterfaces.h"
 
 #define GET_OP_CLASSES
 #include "mlir/Dialect/Linalg/IR/LinalgOps.h.inc"
 
 #define GET_OP_CLASSES
 #include "mlir/Dialect/Linalg/IR/LinalgStructuredOps.h.inc"
+
+#define GET_OP_CLASSES
+#include "mlir/Dialect/Linalg/IR/LinalgSparseOps.h.inc"
 
 #endif // MLIR_DIALECT_LINALG_LINALGOPS_H_

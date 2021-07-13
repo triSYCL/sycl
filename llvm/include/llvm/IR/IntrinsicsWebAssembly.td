@@ -50,9 +50,10 @@ def int_wasm_trunc_saturate_unsigned : Intrinsic<[llvm_anyint_ty],
 //===----------------------------------------------------------------------===//
 
 // throw / rethrow
+// The immediate argument is an index to a tag, which is 0 for C++.
 def int_wasm_throw : Intrinsic<[], [llvm_i32_ty, llvm_ptr_ty],
                                [Throws, IntrNoReturn, ImmArg<ArgIndex<0>>]>;
-def int_wasm_rethrow_in_catch : Intrinsic<[], [], [Throws, IntrNoReturn]>;
+def int_wasm_rethrow : Intrinsic<[], [], [Throws, IntrNoReturn]>;
 
 // Since wasm does not use landingpad instructions, these instructions return
 // exception pointer and selector values until we lower them in WasmEHPrepare.
@@ -60,10 +61,12 @@ def int_wasm_get_exception : Intrinsic<[llvm_ptr_ty], [llvm_token_ty],
                                        [IntrHasSideEffects]>;
 def int_wasm_get_ehselector : Intrinsic<[llvm_i32_ty], [llvm_token_ty],
                                         [IntrHasSideEffects]>;
-// This is the same as llvm.wasm.get.exception except that it does not take a
-// token operand. This is only for instruction selection purpose.
-def int_wasm_extract_exception : Intrinsic<[llvm_ptr_ty], [],
-                                           [IntrHasSideEffects]>;
+
+// wasm.catch returns the pointer to the exception object caught by wasm 'catch'
+// instruction. This returns a single pointer, which is sufficient for C++
+// support. The immediate argument is an index to for a tag, which is 0 for C++.
+def int_wasm_catch : Intrinsic<[llvm_ptr_ty], [llvm_i32_ty],
+                               [IntrHasSideEffects, ImmArg<ArgIndex<0>>]>;
 
 // WebAssembly EH must maintain the landingpads in the order assigned to them
 // by WasmEHPrepare pass to generate landingpad table in EHStreamer. This is
@@ -112,11 +115,11 @@ def int_wasm_shuffle :
              llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty,
              llvm_i32_ty, llvm_i32_ty, llvm_i32_ty, llvm_i32_ty],
             [IntrNoMem, IntrSpeculatable]>;
-def int_wasm_sub_saturate_signed :
+def int_wasm_sub_sat_signed :
   Intrinsic<[llvm_anyvector_ty],
             [LLVMMatchType<0>, LLVMMatchType<0>],
             [IntrNoMem, IntrSpeculatable]>;
-def int_wasm_sub_saturate_unsigned :
+def int_wasm_sub_sat_unsigned :
   Intrinsic<[llvm_anyvector_ty],
             [LLVMMatchType<0>, LLVMMatchType<0>],
             [IntrNoMem, IntrSpeculatable]>;
@@ -140,14 +143,6 @@ def int_wasm_bitmask :
   Intrinsic<[llvm_i32_ty],
             [llvm_anyvector_ty],
             [IntrNoMem, IntrSpeculatable]>;
-def int_wasm_qfma :
-  Intrinsic<[llvm_anyvector_ty],
-            [LLVMMatchType<0>, LLVMMatchType<0>, LLVMMatchType<0>],
-            [IntrNoMem, IntrSpeculatable]>;
-def int_wasm_qfms :
-  Intrinsic<[llvm_anyvector_ty],
-            [LLVMMatchType<0>, LLVMMatchType<0>, LLVMMatchType<0>],
-            [IntrNoMem, IntrSpeculatable]>;
 def int_wasm_dot :
   Intrinsic<[llvm_v4i32_ty],
             [llvm_v8i16_ty, llvm_v8i16_ty],
@@ -162,18 +157,7 @@ def int_wasm_narrow_unsigned :
             [llvm_anyvector_ty, LLVMMatchType<1>],
             [IntrNoMem, IntrSpeculatable]>;
 
-// TODO: Replace these intrinsics with normal ISel patterns once i32x4 to i64x2
-// widening is merged to the proposal.
-def int_wasm_widen_low_signed :
-  Intrinsic<[llvm_v2i64_ty], [llvm_v4i32_ty], [IntrNoMem, IntrSpeculatable]>;
-def int_wasm_widen_high_signed :
-  Intrinsic<[llvm_v2i64_ty], [llvm_v4i32_ty], [IntrNoMem, IntrSpeculatable]>;
-def int_wasm_widen_low_unsigned :
-  Intrinsic<[llvm_v2i64_ty], [llvm_v4i32_ty], [IntrNoMem, IntrSpeculatable]>;
-def int_wasm_widen_high_unsigned :
-  Intrinsic<[llvm_v2i64_ty], [llvm_v4i32_ty], [IntrNoMem, IntrSpeculatable]>;
-
-def int_wasm_q15mulr_saturate_signed :
+def int_wasm_q15mulr_sat_signed :
   Intrinsic<[llvm_v8i16_ty],
             [llvm_v8i16_ty, llvm_v8i16_ty],
             [IntrNoMem, IntrSpeculatable]>;
@@ -186,26 +170,6 @@ def int_wasm_pmin :
 def int_wasm_pmax :
   Intrinsic<[llvm_anyvector_ty],
             [LLVMMatchType<0>, LLVMMatchType<0>],
-            [IntrNoMem, IntrSpeculatable]>;
-
-// TODO: Replace these instrinsics with normal ISel patterns once the
-// rounding instructions are merged to the proposal
-// (https://github.com/WebAssembly/simd/pull/232).
-def int_wasm_ceil :
-  Intrinsic<[llvm_anyvector_ty],
-            [LLVMMatchType<0>],
-            [IntrNoMem, IntrSpeculatable]>;
-def int_wasm_floor :
-  Intrinsic<[llvm_anyvector_ty],
-            [LLVMMatchType<0>],
-            [IntrNoMem, IntrSpeculatable]>;
-def int_wasm_trunc :
-  Intrinsic<[llvm_anyvector_ty],
-            [LLVMMatchType<0>],
-            [IntrNoMem, IntrSpeculatable]>;
-def int_wasm_nearest :
-  Intrinsic<[llvm_anyvector_ty],
-            [LLVMMatchType<0>],
             [IntrNoMem, IntrSpeculatable]>;
 
 // TODO: Replace these intrinsic with normal ISel patterns once the
@@ -290,16 +254,21 @@ def int_wasm_extmul_high_unsigned :
             [LLVMSubdivide2VectorType<0>, LLVMSubdivide2VectorType<0>],
             [IntrNoMem, IntrSpeculatable]>;
 
-def int_wasm_signselect :
+def int_wasm_extadd_pairwise_signed :
   Intrinsic<[llvm_anyvector_ty],
-            [LLVMMatchType<0>, LLVMMatchType<0>, LLVMMatchType<0>],
+            [LLVMSubdivide2VectorType<0>],
+            [IntrNoMem, IntrSpeculatable]>;
+def int_wasm_extadd_pairwise_unsigned :
+  Intrinsic<[llvm_anyvector_ty],
+            [LLVMSubdivide2VectorType<0>],
             [IntrNoMem, IntrSpeculatable]>;
 
-// TODO: Remove this intrinsic and the associated builtin if i64x2.eq gets
-// merged to the proposal.
-def int_wasm_eq :
-  Intrinsic<[llvm_v2i64_ty],
-            [llvm_v2i64_ty, llvm_v2i64_ty],
+// TODO: Remove these if possible if they are merged to the spec.
+def int_wasm_demote_zero :
+  Intrinsic<[llvm_v4f32_ty], [llvm_v2f64_ty],
+            [IntrNoMem, IntrSpeculatable]>;
+def int_wasm_promote_low :
+  Intrinsic<[llvm_v2f64_ty], [llvm_v4f32_ty],
             [IntrNoMem, IntrSpeculatable]>;
 
 //===----------------------------------------------------------------------===//

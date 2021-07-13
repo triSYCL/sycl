@@ -365,6 +365,7 @@ tgtok::TokKind TGLexer::LexIdentifier() {
     .Case("if", tgtok::If)
     .Case("then", tgtok::Then)
     .Case("else", tgtok::ElseKW)
+    .Case("assert", tgtok::Assert)
     .Default(tgtok::Id);
 
   // A couple of tokens require special processing.
@@ -589,6 +590,7 @@ tgtok::TokKind TGLexer::LexExclaim() {
     .Case("listsplat", tgtok::XListSplat)
     .Case("strconcat", tgtok::XStrConcat)
     .Case("interleave", tgtok::XInterleave)
+    .Case("substr", tgtok::XSubstr)
     .Cases("setdagop", "setop", tgtok::XSetDagOp) // !setop is deprecated.
     .Cases("getdagop", "getop", tgtok::XGetDagOp) // !getop is deprecated.
     .Default(tgtok::Error);
@@ -624,12 +626,12 @@ bool TGLexer::prepExitInclude(bool IncludeStackMustBeEmpty) {
 }
 
 tgtok::TokKind TGLexer::prepIsDirective() const {
-  for (unsigned ID = 0; ID < llvm::array_lengthof(PreprocessorDirs); ++ID) {
+  for (const auto &PD : PreprocessorDirs) {
     int NextChar = *CurPtr;
     bool Match = true;
     unsigned I = 0;
-    for (; I < strlen(PreprocessorDirs[ID].Word); ++I) {
-      if (NextChar != PreprocessorDirs[ID].Word[I]) {
+    for (; I < strlen(PD.Word); ++I) {
+      if (NextChar != PD.Word[I]) {
         Match = false;
         break;
       }
@@ -640,7 +642,7 @@ tgtok::TokKind TGLexer::prepIsDirective() const {
     // Check for whitespace after the directive.  If there is no whitespace,
     // then we do not recognize it as a preprocessing directive.
     if (Match) {
-      tgtok::TokKind Kind = PreprocessorDirs[ID].Kind;
+      tgtok::TokKind Kind = PD.Kind;
 
       // New line and EOF may follow only #else/#endif.  It will be reported
       // as an error for #ifdef/#define after the call to prepLexMacroName().
@@ -681,10 +683,10 @@ tgtok::TokKind TGLexer::prepIsDirective() const {
 bool TGLexer::prepEatPreprocessorDirective(tgtok::TokKind Kind) {
   TokStart = CurPtr;
 
-  for (unsigned ID = 0; ID < llvm::array_lengthof(PreprocessorDirs); ++ID)
-    if (PreprocessorDirs[ID].Kind == Kind) {
+  for (const auto &PD : PreprocessorDirs)
+    if (PD.Kind == Kind) {
       // Advance CurPtr to the end of the preprocessing word.
-      CurPtr += strlen(PreprocessorDirs[ID].Word);
+      CurPtr += strlen(PD.Word);
       return true;
     }
 

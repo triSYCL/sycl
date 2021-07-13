@@ -49,14 +49,43 @@ namespace dr2026 { // dr2026: 11
   }
 }
 
-namespace dr2064 { // dr2064: 12
+namespace dr2076 { // dr2076: 13
 #if __cplusplus >= 201103L
-  template<typename T> struct X {
-    template<typename U> struct Y {};
+  namespace std_example {
+    struct A { A(int); };
+    struct B { B(A); };
+    B b{{0}};
+
+    struct Params { int a; int b; };
+    struct Foo {
+      Foo(Params);
+    };
+    Foo foo{{1, 2}};
+  }
+
+  struct string_view {
+    string_view(int); // not an aggregate
   };
-  template<typename T> void f() {
-    X<decltype(sizeof(T))>::Y<int> y; // ok
-    return X<decltype(sizeof(T))>::f(); // expected-error {{no member named 'f' in 'dr2064::X<unsigned}}
+  struct string {
+    string(int); // not an aggregate
+    operator string_view() const;
+  };
+
+  void foo(const string &); // expected-note {{cannot convert initializer list}}
+  void bar(string_view); // expected-note 2{{cannot convert initializer list}}
+
+  void func(const string &arg) {
+    // An argument in one set of braces is subject to user-defined conversions;
+    // an argument in two sets of braces is not, but an identity conversion is
+    // still OK.
+    foo(arg);
+    foo({arg});
+    foo({{arg}});
+    foo({{{arg}}}); // expected-error {{no matching function}}
+    bar(arg);
+    bar({arg});
+    bar({{arg}}); // expected-error {{no matching function}}
+    bar({{{arg}}}); // expected-error {{no matching function}}
   }
 #endif
 }

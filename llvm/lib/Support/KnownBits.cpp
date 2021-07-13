@@ -12,6 +12,8 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Support/KnownBits.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/Support/raw_ostream.h"
 #include <cassert>
 
 using namespace llvm;
@@ -85,36 +87,18 @@ KnownBits KnownBits::computeForAddSub(bool Add, bool NSW,
 
 KnownBits KnownBits::sextInReg(unsigned SrcBitWidth) const {
   unsigned BitWidth = getBitWidth();
-  assert(BitWidth >= SrcBitWidth && "Illegal sext-in-register");
+  assert(0 < SrcBitWidth && SrcBitWidth <= BitWidth &&
+         "Illegal sext-in-register");
 
-  // Sign extension.  Compute the demanded bits in the result that are not
-  // present in the input.
-  APInt NewBits = APInt::getHighBitsSet(BitWidth, BitWidth - SrcBitWidth);
+  if (SrcBitWidth == BitWidth)
+    return *this;
 
-  // If the sign extended bits are demanded, we know that the sign
-  // bit is demanded.
-  APInt InSignMask = APInt::getSignMask(SrcBitWidth).zext(BitWidth);
-  APInt InDemandedBits = APInt::getLowBitsSet(BitWidth, SrcBitWidth);
-  if (NewBits.getBoolValue())
-    InDemandedBits |= InSignMask;
-
+  unsigned ExtBits = BitWidth - SrcBitWidth;
   KnownBits Result;
-  Result.One = One & InDemandedBits;
-  Result.Zero = Zero & InDemandedBits;
-
-  // If the sign bit of the input is known set or clear, then we know the
-  // top bits of the result.
-  if (Result.Zero.intersects(InSignMask)) { // Input sign bit known clear
-    Result.Zero |= NewBits;
-    Result.One &= ~NewBits;
-  } else if (Result.One.intersects(InSignMask)) { // Input sign bit known set
-    Result.One |= NewBits;
-    Result.Zero &= ~NewBits;
-  } else { // Input sign bit unknown
-    Result.Zero &= ~NewBits;
-    Result.One &= ~NewBits;
-  }
-
+  Result.One = One << ExtBits;
+  Result.Zero = Zero << ExtBits;
+  Result.One.ashrInPlace(ExtBits);
+  Result.Zero.ashrInPlace(ExtBits);
   return Result;
 }
 
@@ -199,9 +183,35 @@ KnownBits KnownBits::shl(const KnownBits &LHS, const KnownBits &RHS) {
   unsigned MinTrailingZeros = LHS.countMinTrailingZeros();
 
   // Minimum shift amount low bits are known zero.
-  if (RHS.getMinValue().ult(BitWidth)) {
-    MinTrailingZeros += RHS.getMinValue().getZExtValue();
+  APInt MinShiftAmount = RHS.getMinValue();
+  if (MinShiftAmount.ult(BitWidth)) {
+    MinTrailingZeros += MinShiftAmount.getZExtValue();
     MinTrailingZeros = std::min(MinTrailingZeros, BitWidth);
+  }
+
+  // If the maximum shift is in range, then find the common bits from all
+  // possible shifts.
+  APInt MaxShiftAmount = RHS.getMaxValue();
+  if (MaxShiftAmount.ult(BitWidth) && !LHS.isUnknown()) {
+    uint64_t ShiftAmtZeroMask = (~RHS.Zero).getZExtValue();
+    uint64_t ShiftAmtOneMask = RHS.One.getZExtValue();
+    assert(MinShiftAmount.ult(MaxShiftAmount) && "Illegal shift range");
+    Known.Zero.setAllBits();
+    Known.One.setAllBits();
+    for (uint64_t ShiftAmt = MinShiftAmount.getZExtValue(),
+                  MaxShiftAmt = MaxShiftAmount.getZExtValue();
+         ShiftAmt <= MaxShiftAmt; ++ShiftAmt) {
+      // Skip if the shift amount is impossible.
+      if ((ShiftAmtZeroMask & ShiftAmt) != ShiftAmt ||
+          (ShiftAmtOneMask | ShiftAmt) != ShiftAmt)
+        continue;
+      KnownBits SpecificShift;
+      SpecificShift.Zero = LHS.Zero << ShiftAmt;
+      SpecificShift.One = LHS.One << ShiftAmt;
+      Known = KnownBits::commonBits(Known, SpecificShift);
+      if (Known.isUnknown())
+        break;
+    }
   }
 
   Known.Zero.setLowBits(MinTrailingZeros);
@@ -226,9 +236,35 @@ KnownBits KnownBits::lshr(const KnownBits &LHS, const KnownBits &RHS) {
   unsigned MinLeadingZeros = LHS.countMinLeadingZeros();
 
   // Minimum shift amount high bits are known zero.
-  if (RHS.getMinValue().ult(BitWidth)) {
-    MinLeadingZeros += RHS.getMinValue().getZExtValue();
+  APInt MinShiftAmount = RHS.getMinValue();
+  if (MinShiftAmount.ult(BitWidth)) {
+    MinLeadingZeros += MinShiftAmount.getZExtValue();
     MinLeadingZeros = std::min(MinLeadingZeros, BitWidth);
+  }
+
+  // If the maximum shift is in range, then find the common bits from all
+  // possible shifts.
+  APInt MaxShiftAmount = RHS.getMaxValue();
+  if (MaxShiftAmount.ult(BitWidth) && !LHS.isUnknown()) {
+    uint64_t ShiftAmtZeroMask = (~RHS.Zero).getZExtValue();
+    uint64_t ShiftAmtOneMask = RHS.One.getZExtValue();
+    assert(MinShiftAmount.ult(MaxShiftAmount) && "Illegal shift range");
+    Known.Zero.setAllBits();
+    Known.One.setAllBits();
+    for (uint64_t ShiftAmt = MinShiftAmount.getZExtValue(),
+                  MaxShiftAmt = MaxShiftAmount.getZExtValue();
+         ShiftAmt <= MaxShiftAmt; ++ShiftAmt) {
+      // Skip if the shift amount is impossible.
+      if ((ShiftAmtZeroMask & ShiftAmt) != ShiftAmt ||
+          (ShiftAmtOneMask | ShiftAmt) != ShiftAmt)
+        continue;
+      KnownBits SpecificShift = LHS;
+      SpecificShift.Zero.lshrInPlace(ShiftAmt);
+      SpecificShift.One.lshrInPlace(ShiftAmt);
+      Known = KnownBits::commonBits(Known, SpecificShift);
+      if (Known.isUnknown())
+        break;
+    }
   }
 
   Known.Zero.setHighBits(MinLeadingZeros);
@@ -252,20 +288,108 @@ KnownBits KnownBits::ashr(const KnownBits &LHS, const KnownBits &RHS) {
   unsigned MinLeadingOnes = LHS.countMinLeadingOnes();
 
   // Minimum shift amount high bits are known sign bits.
-  if (RHS.getMinValue().ult(BitWidth)) {
+  APInt MinShiftAmount = RHS.getMinValue();
+  if (MinShiftAmount.ult(BitWidth)) {
     if (MinLeadingZeros) {
-      MinLeadingZeros += RHS.getMinValue().getZExtValue();
+      MinLeadingZeros += MinShiftAmount.getZExtValue();
       MinLeadingZeros = std::min(MinLeadingZeros, BitWidth);
     }
     if (MinLeadingOnes) {
-      MinLeadingOnes += RHS.getMinValue().getZExtValue();
+      MinLeadingOnes += MinShiftAmount.getZExtValue();
       MinLeadingOnes = std::min(MinLeadingOnes, BitWidth);
+    }
+  }
+
+  // If the maximum shift is in range, then find the common bits from all
+  // possible shifts.
+  APInt MaxShiftAmount = RHS.getMaxValue();
+  if (MaxShiftAmount.ult(BitWidth) && !LHS.isUnknown()) {
+    uint64_t ShiftAmtZeroMask = (~RHS.Zero).getZExtValue();
+    uint64_t ShiftAmtOneMask = RHS.One.getZExtValue();
+    assert(MinShiftAmount.ult(MaxShiftAmount) && "Illegal shift range");
+    Known.Zero.setAllBits();
+    Known.One.setAllBits();
+    for (uint64_t ShiftAmt = MinShiftAmount.getZExtValue(),
+                  MaxShiftAmt = MaxShiftAmount.getZExtValue();
+         ShiftAmt <= MaxShiftAmt; ++ShiftAmt) {
+      // Skip if the shift amount is impossible.
+      if ((ShiftAmtZeroMask & ShiftAmt) != ShiftAmt ||
+          (ShiftAmtOneMask | ShiftAmt) != ShiftAmt)
+        continue;
+      KnownBits SpecificShift = LHS;
+      SpecificShift.Zero.ashrInPlace(ShiftAmt);
+      SpecificShift.One.ashrInPlace(ShiftAmt);
+      Known = KnownBits::commonBits(Known, SpecificShift);
+      if (Known.isUnknown())
+        break;
     }
   }
 
   Known.Zero.setHighBits(MinLeadingZeros);
   Known.One.setHighBits(MinLeadingOnes);
   return Known;
+}
+
+Optional<bool> KnownBits::eq(const KnownBits &LHS, const KnownBits &RHS) {
+  if (LHS.isConstant() && RHS.isConstant())
+    return Optional<bool>(LHS.getConstant() == RHS.getConstant());
+  if (LHS.One.intersects(RHS.Zero) || RHS.One.intersects(LHS.Zero))
+    return Optional<bool>(false);
+  return None;
+}
+
+Optional<bool> KnownBits::ne(const KnownBits &LHS, const KnownBits &RHS) {
+  if (Optional<bool> KnownEQ = eq(LHS, RHS))
+    return Optional<bool>(!KnownEQ.getValue());
+  return None;
+}
+
+Optional<bool> KnownBits::ugt(const KnownBits &LHS, const KnownBits &RHS) {
+  // LHS >u RHS -> false if umax(LHS) <= umax(RHS)
+  if (LHS.getMaxValue().ule(RHS.getMinValue()))
+    return Optional<bool>(false);
+  // LHS >u RHS -> true if umin(LHS) > umax(RHS)
+  if (LHS.getMinValue().ugt(RHS.getMaxValue()))
+    return Optional<bool>(true);
+  return None;
+}
+
+Optional<bool> KnownBits::uge(const KnownBits &LHS, const KnownBits &RHS) {
+  if (Optional<bool> IsUGT = ugt(RHS, LHS))
+    return Optional<bool>(!IsUGT.getValue());
+  return None;
+}
+
+Optional<bool> KnownBits::ult(const KnownBits &LHS, const KnownBits &RHS) {
+  return ugt(RHS, LHS);
+}
+
+Optional<bool> KnownBits::ule(const KnownBits &LHS, const KnownBits &RHS) {
+  return uge(RHS, LHS);
+}
+
+Optional<bool> KnownBits::sgt(const KnownBits &LHS, const KnownBits &RHS) {
+  // LHS >s RHS -> false if smax(LHS) <= smax(RHS)
+  if (LHS.getSignedMaxValue().sle(RHS.getSignedMinValue()))
+    return Optional<bool>(false);
+  // LHS >s RHS -> true if smin(LHS) > smax(RHS)
+  if (LHS.getSignedMinValue().sgt(RHS.getSignedMaxValue()))
+    return Optional<bool>(true);
+  return None;
+}
+
+Optional<bool> KnownBits::sge(const KnownBits &LHS, const KnownBits &RHS) {
+  if (Optional<bool> KnownSGT = sgt(RHS, LHS))
+    return Optional<bool>(!KnownSGT.getValue());
+  return None;
+}
+
+Optional<bool> KnownBits::slt(const KnownBits &LHS, const KnownBits &RHS) {
+  return sgt(RHS, LHS);
+}
+
+Optional<bool> KnownBits::sle(const KnownBits &LHS, const KnownBits &RHS) {
+  return sge(RHS, LHS);
 }
 
 KnownBits KnownBits::abs(bool IntMinIsPoison) const {
@@ -288,10 +412,11 @@ KnownBits KnownBits::abs(bool IntMinIsPoison) const {
   return KnownAbs;
 }
 
-KnownBits KnownBits::computeForMul(const KnownBits &LHS, const KnownBits &RHS) {
+KnownBits KnownBits::mul(const KnownBits &LHS, const KnownBits &RHS) {
   unsigned BitWidth = LHS.getBitWidth();
+  assert(BitWidth == RHS.getBitWidth() && !LHS.hasConflict() &&
+         !RHS.hasConflict() && "Operand mismatch");
 
-  assert(!LHS.hasConflict() && !RHS.hasConflict());
   // Compute a conservative estimate for high known-0 bits.
   unsigned LeadZ =
       std::max(LHS.countMinLeadingZeros() + RHS.countMinLeadingZeros(),
@@ -367,6 +492,24 @@ KnownBits KnownBits::computeForMul(const KnownBits &LHS, const KnownBits &RHS) {
   return Res;
 }
 
+KnownBits KnownBits::mulhs(const KnownBits &LHS, const KnownBits &RHS) {
+  unsigned BitWidth = LHS.getBitWidth();
+  assert(BitWidth == RHS.getBitWidth() && !LHS.hasConflict() &&
+         !RHS.hasConflict() && "Operand mismatch");
+  KnownBits WideLHS = LHS.sext(2 * BitWidth);
+  KnownBits WideRHS = RHS.sext(2 * BitWidth);
+  return mul(WideLHS, WideRHS).extractBits(BitWidth, BitWidth);
+}
+
+KnownBits KnownBits::mulhu(const KnownBits &LHS, const KnownBits &RHS) {
+  unsigned BitWidth = LHS.getBitWidth();
+  assert(BitWidth == RHS.getBitWidth() && !LHS.hasConflict() &&
+         !RHS.hasConflict() && "Operand mismatch");
+  KnownBits WideLHS = LHS.zext(2 * BitWidth);
+  KnownBits WideRHS = RHS.zext(2 * BitWidth);
+  return mul(WideLHS, WideRHS).extractBits(BitWidth, BitWidth);
+}
+
 KnownBits KnownBits::udiv(const KnownBits &LHS, const KnownBits &RHS) {
   unsigned BitWidth = LHS.getBitWidth();
   assert(!LHS.hasConflict() && !RHS.hasConflict());
@@ -430,9 +573,10 @@ KnownBits KnownBits::srem(const KnownBits &LHS, const KnownBits &RHS) {
   }
 
   // The sign bit is the LHS's sign bit, except when the result of the
-  // remainder is zero. If it's known zero, our sign bit is also zero.
-  if (LHS.isNonNegative())
-    Known.makeNonNegative();
+  // remainder is zero. The magnitude of the result should be less than or
+  // equal to the magnitude of the LHS. Therefore any leading zeros that exist
+  // in the left hand side must also exist in the result.
+  Known.Zero.setHighBits(LHS.countMinLeadingZeros());
   return Known;
 }
 
@@ -459,4 +603,12 @@ KnownBits &KnownBits::operator^=(const KnownBits &RHS) {
   One = (Zero & RHS.One) | (One & RHS.Zero);
   Zero = std::move(Z);
   return *this;
+}
+
+void KnownBits::print(raw_ostream &OS) const {
+  OS << "{Zero=" << Zero << ", One=" << One << "}";
+}
+void KnownBits::dump() const {
+  print(dbgs());
+  dbgs() << "\n";
 }

@@ -77,6 +77,12 @@ def AOp : NS_Op<"a_op", []> {
 // DEF:      void AOp::cAttrAttr(some-attr-kind attr) {
 // DEF-NEXT:   (*this)->setAttr("cAttr", attr);
 
+// Test remove methods
+// ---
+
+// DEF: ::mlir::Attribute AOp::removeCAttrAttr() {
+// DEF-NEXT: return (*this)->removeAttr("cAttr");
+
 // Test build methods
 // ---
 
@@ -130,7 +136,7 @@ def BOp : NS_Op<"b_op", []> {
 // DEF: if (!((tblgen_function_attr.isa<::mlir::FlatSymbolRefAttr>())))
 // DEF: if (!(((tblgen_some_type_attr.isa<::mlir::TypeAttr>())) && ((tblgen_some_type_attr.cast<::mlir::TypeAttr>().getValue().isa<SomeType>()))))
 // DEF: if (!((tblgen_array_attr.isa<::mlir::ArrayAttr>())))
-// DEF: if (!(((tblgen_some_attr_array.isa<::mlir::ArrayAttr>())) && (::llvm::all_of(tblgen_some_attr_array.cast<::mlir::ArrayAttr>(), [](::mlir::Attribute attr) { return (some-condition); }))))
+// DEF: if (!(((tblgen_some_attr_array.isa<::mlir::ArrayAttr>())) && (::llvm::all_of(tblgen_some_attr_array.cast<::mlir::ArrayAttr>(), [&](::mlir::Attribute attr) { return (some-condition); }))))
 // DEF: if (!(((tblgen_type_attr.isa<::mlir::TypeAttr>())) && ((tblgen_type_attr.cast<::mlir::TypeAttr>().getValue().isa<::mlir::Type>()))))
 
 // Test common attribute kind getters' return types
@@ -265,6 +271,9 @@ def UnitAttrOp : NS_Op<"unit_attr_op", []> {
 // DEF: bool UnitAttrOp::attr() {
 // DEF:   return {{.*}} != nullptr
 
+// DEF: ::mlir::Attribute UnitAttrOp::removeAttrAttr() {
+// DEF-NEXT:   (*this)->removeAttr("attr");
+
 // DEF: build(::mlir::OpBuilder &odsBuilder, ::mlir::OperationState &odsState, /*optional*/::mlir::UnitAttr attr)
 
 
@@ -279,9 +288,9 @@ def SomeTypedArrayAttr : TypedArrayAttrBase<SomeAttr, "SomeAttr array">;
 def Test_Dialect_2 : Dialect {
   let name = "dialect_2";
 }
-def MyStruct : StructAttr<"MyStruct", Test_Dialect_2, 
+def MyStruct : StructAttr<"MyStruct", Test_Dialect_2,
 [StructFieldAttr<"potatoes", I64ElementsAttr>]> {
-  let description = "A structure describing a number of potatoes.";
+  let summary = "A structure describing a number of potatoes.";
 }
 
 def StructAttrOp : NS_Op<"struct_attr_op", []> {

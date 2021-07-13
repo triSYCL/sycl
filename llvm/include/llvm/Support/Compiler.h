@@ -97,7 +97,8 @@
 /// Sadly, this is separate from just rvalue reference support because GCC
 /// and MSVC implemented this later than everything else. This appears to be
 /// corrected in MSVC 2019 but not MSVC 2017.
-#if __has_feature(cxx_rvalue_references) || LLVM_GNUC_PREREQ(4, 8, 1)
+#if __has_feature(cxx_rvalue_references) || LLVM_GNUC_PREREQ(4, 8, 1) ||       \
+    LLVM_MSC_PREREQ(1920)
 #define LLVM_HAS_RVALUE_REFERENCE_THIS 1
 #else
 #define LLVM_HAS_RVALUE_REFERENCE_THIS 0
@@ -314,19 +315,9 @@
 #endif
 
 // LLVM_ATTRIBUTE_DEPRECATED(decl, "message")
-#if __has_feature(attribute_deprecated_with_message)
-# define LLVM_ATTRIBUTE_DEPRECATED(decl, message) \
-  decl __attribute__((deprecated(message)))
-#elif defined(__GNUC__)
-# define LLVM_ATTRIBUTE_DEPRECATED(decl, message) \
-  decl __attribute__((deprecated))
-#elif defined(_MSC_VER)
-# define LLVM_ATTRIBUTE_DEPRECATED(decl, message) \
-  __declspec(deprecated(message)) decl
-#else
-# define LLVM_ATTRIBUTE_DEPRECATED(decl, message) \
-  decl
-#endif
+// This macro will be removed.
+// Use C++14's attribute instead: [[deprecated("message")]]
+#define LLVM_ATTRIBUTE_DEPRECATED(decl, message) [[deprecated(message)]] decl
 
 /// LLVM_BUILTIN_UNREACHABLE - On compilers which support it, expands
 /// to an expression which states that it is undefined behavior for the

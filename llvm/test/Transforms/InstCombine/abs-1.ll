@@ -102,9 +102,9 @@ define i8 @abs_canonical_4(i8 %x) {
 
 define i32 @abs_canonical_5(i8 %x) {
 ; CHECK-LABEL: @abs_canonical_5(
-; CHECK-NEXT:    [[CONV:%.*]] = sext i8 [[X:%.*]] to i32
-; CHECK-NEXT:    [[TMP1:%.*]] = call i32 @llvm.abs.i32(i32 [[CONV]], i1 true)
-; CHECK-NEXT:    ret i32 [[TMP1]]
+; CHECK-NEXT:    [[TMP1:%.*]] = call i8 @llvm.abs.i8(i8 [[X:%.*]], i1 false)
+; CHECK-NEXT:    [[TMP2:%.*]] = zext i8 [[TMP1]] to i32
+; CHECK-NEXT:    ret i32 [[TMP2]]
 ;
   %cmp = icmp sgt i8 %x, 0
   %conv = sext i8 %x to i32
@@ -226,8 +226,8 @@ define <2 x i8> @nabs_canonical_2_vec_undef_elts(<2 x i8> %x) {
 
 define i8 @nabs_canonical_3(i8 %x) {
 ; CHECK-LABEL: @nabs_canonical_3(
-; CHECK-NEXT:    [[TMP1:%.*]] = call i8 @llvm.abs.i8(i8 [[X:%.*]], i1 true)
-; CHECK-NEXT:    [[ABS:%.*]] = sub nsw i8 0, [[TMP1]]
+; CHECK-NEXT:    [[TMP1:%.*]] = call i8 @llvm.abs.i8(i8 [[X:%.*]], i1 false)
+; CHECK-NEXT:    [[ABS:%.*]] = sub i8 0, [[TMP1]]
 ; CHECK-NEXT:    ret i8 [[ABS]]
 ;
   %cmp = icmp slt i8 %x, 0
@@ -250,9 +250,9 @@ define i8 @nabs_canonical_4(i8 %x) {
 
 define i32 @nabs_canonical_5(i8 %x) {
 ; CHECK-LABEL: @nabs_canonical_5(
-; CHECK-NEXT:    [[CONV:%.*]] = sext i8 [[X:%.*]] to i32
-; CHECK-NEXT:    [[TMP1:%.*]] = call i32 @llvm.abs.i32(i32 [[CONV]], i1 true)
-; CHECK-NEXT:    [[ABS:%.*]] = sub nsw i32 0, [[TMP1]]
+; CHECK-NEXT:    [[TMP1:%.*]] = call i8 @llvm.abs.i8(i8 [[X:%.*]], i1 false)
+; CHECK-NEXT:    [[TMP2:%.*]] = zext i8 [[TMP1]] to i32
+; CHECK-NEXT:    [[ABS:%.*]] = sub nsw i32 0, [[TMP2]]
 ; CHECK-NEXT:    ret i32 [[ABS]]
 ;
   %cmp = icmp sgt i8 %x, 0
@@ -305,9 +305,9 @@ define i32 @nabs_canonical_8(i32 %a) {
 define i32 @nabs_canonical_9(i32 %a, i32 %b) {
 ; CHECK-LABEL: @nabs_canonical_9(
 ; CHECK-NEXT:    [[T1:%.*]] = sub i32 [[A:%.*]], [[B:%.*]]
-; CHECK-NEXT:    [[T2:%.*]] = sub i32 [[B]], [[A]]
 ; CHECK-NEXT:    [[TMP1:%.*]] = call i32 @llvm.abs.i32(i32 [[T1]], i1 false)
-; CHECK-NEXT:    [[ADD:%.*]] = sub i32 [[T2]], [[TMP1]]
+; CHECK-NEXT:    [[TMP2:%.*]] = add i32 [[TMP1]], [[A]]
+; CHECK-NEXT:    [[ADD:%.*]] = sub i32 [[B]], [[TMP2]]
 ; CHECK-NEXT:    ret i32 [[ADD]]
 ;
   %t1 = sub i32 %a, %b

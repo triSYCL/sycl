@@ -720,7 +720,7 @@ bool FunctionAnalysisManagerCGSCCProxy::Result::invalidate(
   auto PAC = PA.getChecker<FunctionAnalysisManagerCGSCCProxy>();
   if (!PAC.preserved() && !PAC.preservedSet<AllAnalysesOn<LazyCallGraph::SCC>>()) {
     for (LazyCallGraph::Node &N : C)
-      FAM->clear(N.getFunction(), N.getFunction().getName());
+      FAM->invalidate(N.getFunction(), PA);
 
     return false;
   }
@@ -833,7 +833,7 @@ incorporateNewSCCRange(const SCCRangeT &NewSCCRange, LazyCallGraph &G,
                        CGSCCAnalysisManager &AM, CGSCCUpdateResult &UR) {
   using SCC = LazyCallGraph::SCC;
 
-  if (NewSCCRange.begin() == NewSCCRange.end())
+  if (NewSCCRange.empty())
     return C;
 
   // Add the current SCC to the worklist as its shape has changed.
@@ -872,8 +872,7 @@ incorporateNewSCCRange(const SCCRangeT &NewSCCRange, LazyCallGraph &G,
   if (FAM)
     updateNewSCCFunctionAnalyses(*C, G, AM, *FAM);
 
-  for (SCC &NewC : llvm::reverse(make_range(std::next(NewSCCRange.begin()),
-                                            NewSCCRange.end()))) {
+  for (SCC &NewC : llvm::reverse(llvm::drop_begin(NewSCCRange))) {
     assert(C != &NewC && "No need to re-visit the current SCC!");
     assert(OldC != &NewC && "Already handled the original SCC!");
     UR.CWorklist.insert(&NewC);
@@ -913,7 +912,6 @@ static LazyCallGraph::SCC &updateCGAndAnalysisManagerForPass(
   SmallSetVector<Node *, 4> DemotedCallTargets;
   SmallSetVector<Node *, 4> NewCallEdges;
   SmallSetVector<Node *, 4> NewRefEdges;
-  SmallSetVector<Node *, 4> NewNodes;
 
   // First walk the function and handle all called functions. We do this first
   // because if there is a single call edge, whether there are ref edges is
@@ -923,10 +921,8 @@ static LazyCallGraph::SCC &updateCGAndAnalysisManagerForPass(
       if (Function *Callee = CB->getCalledFunction()) {
         if (Visited.insert(Callee).second && !Callee->isDeclaration()) {
           Node *CalleeN = G.lookup(*Callee);
-          if (!CalleeN) {
-            CalleeN = &G.get(*Callee);
-            NewNodes.insert(CalleeN);
-          }
+          assert(CalleeN &&
+                 "Visited function should already have an associated node");
           Edge *E = N->lookup(*CalleeN);
           assert((E || !FunctionPass) &&
                  "No function transformations should introduce *new* "
@@ -961,10 +957,8 @@ static LazyCallGraph::SCC &updateCGAndAnalysisManagerForPass(
 
   auto VisitRef = [&](Function &Referee) {
     Node *RefereeN = G.lookup(Referee);
-    if (!RefereeN) {
-      RefereeN = &G.get(Referee);
-      NewNodes.insert(RefereeN);
-    }
+    assert(RefereeN &&
+           "Visited function should already have an associated node");
     Edge *E = N->lookup(*RefereeN);
     assert((E || !FunctionPass) &&
            "No function transformations should introduce *new* ref "
@@ -980,17 +974,16 @@ static LazyCallGraph::SCC &updateCGAndAnalysisManagerForPass(
   };
   LazyCallGraph::visitReferences(Worklist, Visited, VisitRef);
 
-  for (Node *NewNode : NewNodes)
-    G.initNode(*NewNode, *C);
-
   // Handle new ref edges.
   for (Node *RefTarget : NewRefEdges) {
     SCC &TargetC = *G.lookupSCC(*RefTarget);
     RefSCC &TargetRC = TargetC.getOuterRefSCC();
     (void)TargetRC;
     // TODO: This only allows trivial edges to be added for now.
+#ifdef EXPENSIVE_CHECKS
     assert((RC == &TargetRC ||
            RC->isAncestorOf(TargetRC)) && "New ref edge is not trivial!");
+#endif
     RC->insertTrivialRefEdge(N, *RefTarget);
   }
 
@@ -1000,8 +993,10 @@ static LazyCallGraph::SCC &updateCGAndAnalysisManagerForPass(
     RefSCC &TargetRC = TargetC.getOuterRefSCC();
     (void)TargetRC;
     // TODO: This only allows trivial edges to be added for now.
+#ifdef EXPENSIVE_CHECKS
     assert((RC == &TargetRC ||
            RC->isAncestorOf(TargetRC)) && "New call edge is not trivial!");
+#endif
     // Add a trivial ref edge to be promoted later on alongside
     // PromotedRefTargets.
     RC->insertTrivialRefEdge(N, *CallTarget);
@@ -1048,9 +1043,9 @@ static LazyCallGraph::SCC &updateCGAndAnalysisManagerForPass(
     if (&TargetRC == RC)
       return false;
 
-    RC->removeOutgoingEdge(N, *TargetN);
     LLVM_DEBUG(dbgs() << "Deleting outgoing edge from '" << N << "' to '"
-                      << TargetN << "'\n");
+                      << *TargetN << "'\n");
+    RC->removeOutgoingEdge(N, *TargetN);
     return true;
   });
 
@@ -1075,8 +1070,7 @@ static LazyCallGraph::SCC &updateCGAndAnalysisManagerForPass(
     // "bottom" we will continue processing in the bottom-up walk.
     assert(NewRefSCCs.front() == RC &&
            "New current RefSCC not first in the returned list!");
-    for (RefSCC *NewRC : llvm::reverse(make_range(std::next(NewRefSCCs.begin()),
-                                                  NewRefSCCs.end()))) {
+    for (RefSCC *NewRC : llvm::reverse(llvm::drop_begin(NewRefSCCs))) {
       assert(NewRC != RC && "Should not encounter the current RefSCC further "
                             "in the postorder list of new RefSCCs.");
       UR.RCWorklist.insert(NewRC);
@@ -1095,8 +1089,10 @@ static LazyCallGraph::SCC &updateCGAndAnalysisManagerForPass(
     // The easy case is when the target RefSCC is not this RefSCC. This is
     // only supported when the target RefSCC is a child of this RefSCC.
     if (&TargetRC != RC) {
+#ifdef EXPENSIVE_CHECKS
       assert(RC->isAncestorOf(TargetRC) &&
              "Cannot potentially form RefSCC cycles here!");
+#endif
       RC->switchOutgoingEdgeToRef(N, *RefTarget);
       LLVM_DEBUG(dbgs() << "Switch outgoing call edge to a ref edge from '" << N
                         << "' to '" << *RefTarget << "'\n");
@@ -1129,8 +1125,10 @@ static LazyCallGraph::SCC &updateCGAndAnalysisManagerForPass(
     // The easy case is when the target RefSCC is not this RefSCC. This is
     // only supported when the target RefSCC is a child of this RefSCC.
     if (&TargetRC != RC) {
+#ifdef EXPENSIVE_CHECKS
       assert(RC->isAncestorOf(TargetRC) &&
              "Cannot potentially form RefSCC cycles here!");
+#endif
       RC->switchOutgoingEdgeToCall(N, *CallTarget);
       LLVM_DEBUG(dbgs() << "Switch outgoing ref edge to a call edge from '" << N
                         << "' to '" << *CallTarget << "'\n");

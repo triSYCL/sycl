@@ -191,28 +191,29 @@ DeclaratorChunk DeclaratorChunk::getFunction(bool hasProto,
   I.Kind                        = Function;
   I.Loc                         = LocalRangeBegin;
   I.EndLoc                      = LocalRangeEnd;
+  new (&I.Fun) FunctionTypeInfo;
   I.Fun.hasPrototype            = hasProto;
   I.Fun.isVariadic              = EllipsisLoc.isValid();
   I.Fun.isAmbiguous             = isAmbiguous;
-  I.Fun.LParenLoc               = LParenLoc.getRawEncoding();
-  I.Fun.EllipsisLoc             = EllipsisLoc.getRawEncoding();
-  I.Fun.RParenLoc               = RParenLoc.getRawEncoding();
+  I.Fun.LParenLoc               = LParenLoc;
+  I.Fun.EllipsisLoc             = EllipsisLoc;
+  I.Fun.RParenLoc               = RParenLoc;
   I.Fun.DeleteParams            = false;
   I.Fun.NumParams               = NumParams;
   I.Fun.Params                  = nullptr;
   I.Fun.RefQualifierIsLValueRef = RefQualifierIsLvalueRef;
-  I.Fun.RefQualifierLoc         = RefQualifierLoc.getRawEncoding();
-  I.Fun.MutableLoc              = MutableLoc.getRawEncoding();
+  I.Fun.RefQualifierLoc         = RefQualifierLoc;
+  I.Fun.MutableLoc              = MutableLoc;
   I.Fun.ExceptionSpecType       = ESpecType;
-  I.Fun.ExceptionSpecLocBeg     = ESpecRange.getBegin().getRawEncoding();
-  I.Fun.ExceptionSpecLocEnd     = ESpecRange.getEnd().getRawEncoding();
+  I.Fun.ExceptionSpecLocBeg     = ESpecRange.getBegin();
+  I.Fun.ExceptionSpecLocEnd     = ESpecRange.getEnd();
   I.Fun.NumExceptionsOrDecls    = 0;
   I.Fun.Exceptions              = nullptr;
   I.Fun.NoexceptExpr            = nullptr;
   I.Fun.HasTrailingReturnType   = TrailingReturnType.isUsable() ||
                                   TrailingReturnType.isInvalid();
   I.Fun.TrailingReturnType      = TrailingReturnType.get();
-  I.Fun.TrailingReturnTypeLoc   = TrailingReturnTypeLoc.getRawEncoding();
+  I.Fun.TrailingReturnTypeLoc   = TrailingReturnTypeLoc;
   I.Fun.MethodQualifiers        = nullptr;
   I.Fun.QualAttrFactory         = nullptr;
 
@@ -624,7 +625,8 @@ bool DeclSpec::SetStorageClassSpec(Sema &S, SCS SC, SourceLocation Loc,
   // OpenCL v1.2 s6.8 changes this to "The auto and register storage-class
   // specifiers are not supported."
   if (S.getLangOpts().OpenCL &&
-      !S.getOpenCLOptions().isEnabled("cl_clang_storage_class_specifiers")) {
+      !S.getOpenCLOptions().isAvailableOption(
+          "cl_clang_storage_class_specifiers", S.getLangOpts())) {
     switch (SC) {
     case SCS_extern:
     case SCS_private_extern:
@@ -1443,9 +1445,10 @@ void UnqualifiedId::setOperatorFunctionId(SourceLocation OperatorLoc,
   Kind = UnqualifiedIdKind::IK_OperatorFunctionId;
   StartLocation = OperatorLoc;
   EndLocation = OperatorLoc;
+  new (&OperatorFunctionId) struct OFI;
   OperatorFunctionId.Operator = Op;
   for (unsigned I = 0; I != 3; ++I) {
-    OperatorFunctionId.SymbolLocations[I] = SymbolLocations[I].getRawEncoding();
+    OperatorFunctionId.SymbolLocations[I] = SymbolLocations[I];
 
     if (SymbolLocations[I].isValid())
       EndLocation = SymbolLocations[I];

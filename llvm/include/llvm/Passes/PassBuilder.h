@@ -19,6 +19,7 @@
 #include "llvm/Analysis/CGSCCPassManager.h"
 #include "llvm/IR/PassManager.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO/Inliner.h"
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
@@ -154,18 +155,6 @@ public:
   struct PipelineElement {
     StringRef Name;
     std::vector<PipelineElement> InnerPipeline;
-  };
-
-  /// ThinLTO phase.
-  ///
-  /// This enumerates the LLVM ThinLTO optimization phases.
-  enum class ThinLTOPhase {
-    /// No ThinLTO behavior needed.
-    None,
-    /// ThinLTO prelink (summary) phase.
-    PreLink,
-    /// ThinLTO postlink (backend compile) phase.
-    PostLink
   };
 
   /// LLVM-provided high-level optimization levels.
@@ -339,7 +328,7 @@ public:
   /// \p Phase indicates the current ThinLTO phase.
   FunctionPassManager
   buildFunctionSimplificationPipeline(OptimizationLevel Level,
-                                      ThinLTOPhase Phase);
+                                      ThinOrFullLTOPhase Phase);
 
   /// Construct the core LLVM module canonicalization and simplification
   /// pipeline.
@@ -357,13 +346,12 @@ public:
   ///
   /// \p Phase indicates the current ThinLTO phase.
   ModulePassManager buildModuleSimplificationPipeline(OptimizationLevel Level,
-                                                      ThinLTOPhase Phase);
+                                                      ThinOrFullLTOPhase Phase);
 
   /// Construct the module pipeline that performs inlining as well as
   /// the inlining-driven cleanups.
   ModuleInlinerWrapperPass buildInlinerPipeline(OptimizationLevel Level,
-                                                ThinLTOPhase Phase,
-                                                bool MandatoryOnly);
+                                                ThinOrFullLTOPhase Phase);
 
   /// Construct the core LLVM module optimization pipeline.
   ///
@@ -460,6 +448,9 @@ public:
 
   /// Build the default `AAManager` with the default alias analysis pipeline
   /// registered.
+  ///
+  /// This also adds target-specific alias analyses registered via
+  /// TargetMachine::registerDefaultAliasAnalyses().
   AAManager buildDefaultAAPipeline();
 
   /// Parse a textual pass pipeline description into a \c
@@ -538,6 +529,9 @@ public:
 
   /// Returns true if the pass name is the name of a (non-alias) analysis pass.
   bool isAnalysisPassName(StringRef PassName);
+
+  /// Print pass names.
+  void printPassNames(raw_ostream &OS);
 
   /// Register a callback for a default optimizer pipeline extension
   /// point
@@ -712,7 +706,7 @@ private:
   // O1 pass pipeline
   FunctionPassManager
   buildO1FunctionSimplificationPipeline(OptimizationLevel Level,
-                                        ThinLTOPhase Phase);
+                                        ThinOrFullLTOPhase Phase);
 
   void addRequiredLTOPreLinkPasses(ModulePassManager &MPM);
 

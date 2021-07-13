@@ -9,6 +9,7 @@
 #include "lldb/Utility/Reproducer.h"
 #include "lldb/Utility/LLDBAssert.h"
 #include "lldb/Utility/ReproducerProvider.h"
+#include "lldb/Utility/Timer.h"
 
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Threading.h"
@@ -19,31 +20,12 @@ using namespace lldb_private::repro;
 using namespace llvm;
 using namespace llvm::yaml;
 
-static llvm::Optional<bool> GetEnv(const char *var) {
-  std::string val = llvm::StringRef(getenv(var)).lower();
-  if (val == "0" || val == "off")
-    return false;
-  if (val == "1" || val == "on")
-    return true;
-  return {};
-}
-
 Reproducer &Reproducer::Instance() { return *InstanceImpl(); }
 
 llvm::Error Reproducer::Initialize(ReproducerMode mode,
                                    llvm::Optional<FileSpec> root) {
   lldbassert(!InstanceImpl() && "Already initialized.");
   InstanceImpl().emplace();
-
-  // The environment can override the capture mode.
-  if (mode != ReproducerMode::Replay) {
-    if (llvm::Optional<bool> override = GetEnv("LLDB_CAPTURE_REPRODUCER")) {
-      if (*override)
-        mode = ReproducerMode::Capture;
-      else
-        mode = ReproducerMode::Off;
-    }
-  }
 
   switch (mode) {
   case ReproducerMode::Capture: {
@@ -194,6 +176,7 @@ ProviderBase *Generator::Register(std::unique_ptr<ProviderBase> provider) {
 }
 
 void Generator::Keep() {
+  LLDB_SCOPED_TIMER();
   assert(!m_done);
   m_done = true;
 
@@ -204,6 +187,7 @@ void Generator::Keep() {
 }
 
 void Generator::Discard() {
+  LLDB_SCOPED_TIMER();
   assert(!m_done);
   m_done = true;
 
@@ -371,7 +355,7 @@ static llvm::Error addPaths(StringRef path,
   SmallVector<StringRef, 0> paths;
   (*buffer)->getBuffer().split(paths, '\0');
   for (StringRef p : paths) {
-    if (!p.empty())
+    if (!p.empty() && llvm::sys::fs::exists(p))
       callback(p);
   }
 

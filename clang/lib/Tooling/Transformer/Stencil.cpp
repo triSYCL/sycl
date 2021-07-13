@@ -195,6 +195,24 @@ Error evalData(const DebugPrintNodeData &Data,
   return printNode(Data.Id, Match, Result);
 }
 
+// FIXME: Consider memoizing this function using the `ASTContext`.
+static bool isSmartPointerType(QualType Ty, ASTContext &Context) {
+  using namespace ::clang::ast_matchers;
+
+  // Optimization: hard-code common smart-pointer types. This can/should be
+  // removed if we start caching the results of this function.
+  auto KnownSmartPointer =
+      cxxRecordDecl(hasAnyName("::std::unique_ptr", "::std::shared_ptr"));
+  const auto QuacksLikeASmartPointer = cxxRecordDecl(
+      hasMethod(cxxMethodDecl(hasOverloadedOperatorName("->"),
+                              returns(qualType(pointsTo(type()))))),
+      hasMethod(cxxMethodDecl(hasOverloadedOperatorName("*"),
+                              returns(qualType(references(type()))))));
+  const auto SmartPointer = qualType(hasDeclaration(
+      cxxRecordDecl(anyOf(KnownSmartPointer, QuacksLikeASmartPointer))));
+  return match(SmartPointer, Ty, Context).size() > 0;
+}
+
 Error evalData(const UnaryOperationData &Data,
                const MatchFinder::MatchResult &Match, std::string *Result) {
   // The `Describe` operation can be applied to any node, not just expressions,
@@ -215,17 +233,37 @@ Error evalData(const UnaryOperationData &Data,
     Source = tooling::buildDereference(*E, *Match.Context);
     break;
   case UnaryNodeOperator::MaybeDeref:
-    if (!E->getType()->isAnyPointerType()) {
-      *Result += tooling::getText(*E, *Match.Context);
-      return Error::success();
+    if (E->getType()->isAnyPointerType() ||
+        isSmartPointerType(E->getType(), *Match.Context)) {
+      // Strip off any operator->. This can only occur inside an actual arrow
+      // member access, so we treat it as equivalent to an actual object
+      // expression.
+      if (const auto *OpCall = dyn_cast<clang::CXXOperatorCallExpr>(E)) {
+        if (OpCall->getOperator() == clang::OO_Arrow &&
+            OpCall->getNumArgs() == 1) {
+          E = OpCall->getArg(0);
+        }
+      }
+      Source = tooling::buildDereference(*E, *Match.Context);
+      break;
     }
-    Source = tooling::buildDereference(*E, *Match.Context);
-    break;
+    *Result += tooling::getText(*E, *Match.Context);
+    return Error::success();
   case UnaryNodeOperator::AddressOf:
     Source = tooling::buildAddressOf(*E, *Match.Context);
     break;
   case UnaryNodeOperator::MaybeAddressOf:
-    if (E->getType()->isAnyPointerType()) {
+    if (E->getType()->isAnyPointerType() ||
+        isSmartPointerType(E->getType(), *Match.Context)) {
+      // Strip off any operator->. This can only occur inside an actual arrow
+      // member access, so we treat it as equivalent to an actual object
+      // expression.
+      if (const auto *OpCall = dyn_cast<clang::CXXOperatorCallExpr>(E)) {
+        if (OpCall->getOperator() == clang::OO_Arrow &&
+            OpCall->getNumArgs() == 1) {
+          E = OpCall->getArg(0);
+        }
+      }
       *Result += tooling::getText(*E, *Match.Context);
       return Error::success();
     }
@@ -285,10 +323,23 @@ Error evalData(const AccessData &Data, const MatchFinder::MatchResult &Match,
     return llvm::make_error<StringError>(errc::invalid_argument,
                                          "Id not bound: " + Data.BaseId);
   if (!E->isImplicitCXXThis()) {
-    if (llvm::Optional<std::string> S =
-            E->getType()->isAnyPointerType()
-                ? tooling::buildArrow(*E, *Match.Context)
-                : tooling::buildDot(*E, *Match.Context))
+    llvm::Optional<std::string> S;
+    if (E->getType()->isAnyPointerType() ||
+        isSmartPointerType(E->getType(), *Match.Context)) {
+      // Strip off any operator->. This can only occur inside an actual arrow
+      // member access, so we treat it as equivalent to an actual object
+      // expression.
+      if (const auto *OpCall = dyn_cast<clang::CXXOperatorCallExpr>(E)) {
+        if (OpCall->getOperator() == clang::OO_Arrow &&
+            OpCall->getNumArgs() == 1) {
+          E = OpCall->getArg(0);
+        }
+      }
+      S = tooling::buildArrow(*E, *Match.Context);
+    } else {
+      S = tooling::buildDot(*E, *Match.Context);
+    }
+    if (S.hasValue())
       *Result += *S;
     else
       return llvm::make_error<StringError>(

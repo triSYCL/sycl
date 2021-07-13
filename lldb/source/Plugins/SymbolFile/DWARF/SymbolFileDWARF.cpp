@@ -16,6 +16,7 @@
 #include "lldb/Core/ModuleList.h"
 #include "lldb/Core/ModuleSpec.h"
 #include "lldb/Core/PluginManager.h"
+#include "lldb/Core/Progress.h"
 #include "lldb/Core/Section.h"
 #include "lldb/Core/StreamFile.h"
 #include "lldb/Core/Value.h"
@@ -35,6 +36,7 @@
 #include "lldb/Interpreter/OptionValueProperties.h"
 
 #include "Plugins/ExpressionParser/Clang/ClangUtil.h"
+#include "Plugins/SymbolFile/DWARF/DWARFDebugInfoEntry.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
 #include "lldb/Symbol/Block.h"
 #include "lldb/Symbol/CompileUnit.h"
@@ -73,6 +75,7 @@
 
 #include "llvm/DebugInfo/DWARF/DWARFContext.h"
 #include "llvm/Support/FileSystem.h"
+#include "llvm/Support/FormatVariadic.h"
 
 #include <algorithm>
 #include <map>
@@ -466,22 +469,32 @@ void SymbolFileDWARF::InitializeObject() {
   Log *log = LogChannelDWARF::GetLogIfAll(DWARF_LOG_DEBUG_INFO);
 
   if (!GetGlobalPluginProperties()->IgnoreFileIndexes()) {
+    StreamString module_desc;
+    GetObjectFile()->GetModule()->GetDescription(module_desc.AsRawOstream(),
+                                                 lldb::eDescriptionLevelBrief);
     DWARFDataExtractor apple_names, apple_namespaces, apple_types, apple_objc;
     LoadSectionData(eSectionTypeDWARFAppleNames, apple_names);
     LoadSectionData(eSectionTypeDWARFAppleNamespaces, apple_namespaces);
     LoadSectionData(eSectionTypeDWARFAppleTypes, apple_types);
     LoadSectionData(eSectionTypeDWARFAppleObjC, apple_objc);
 
-    m_index = AppleDWARFIndex::Create(
-        *GetObjectFile()->GetModule(), apple_names, apple_namespaces,
-        apple_types, apple_objc, m_context.getOrLoadStrData());
+    if (apple_names.GetByteSize() > 0 || apple_namespaces.GetByteSize() > 0 ||
+        apple_types.GetByteSize() > 0 || apple_objc.GetByteSize() > 0) {
+      Progress progress(llvm::formatv("Loading Apple DWARF index for {0}",
+                                      module_desc.GetData()));
+      m_index = AppleDWARFIndex::Create(
+          *GetObjectFile()->GetModule(), apple_names, apple_namespaces,
+          apple_types, apple_objc, m_context.getOrLoadStrData());
 
-    if (m_index)
-      return;
+      if (m_index)
+        return;
+    }
 
     DWARFDataExtractor debug_names;
     LoadSectionData(eSectionTypeDWARFDebugNames, debug_names);
     if (debug_names.GetByteSize() > 0) {
+      Progress progress(
+          llvm::formatv("Loading DWARF5 index for {0}", module_desc.GetData()));
       llvm::Expected<std::unique_ptr<DebugNamesDWARFIndex>> index_or =
           DebugNamesDWARFIndex::Create(*GetObjectFile()->GetModule(),
                                        debug_names,
@@ -623,8 +636,7 @@ DWARFDebugAbbrev *SymbolFileDWARF::DebugAbbrev() {
 
 DWARFDebugInfo &SymbolFileDWARF::DebugInfo() {
   llvm::call_once(m_info_once_flag, [&] {
-    static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
-    Timer scoped_timer(func_cat, "%s this = %p", LLVM_PRETTY_FUNCTION,
+    LLDB_SCOPED_TIMERF("%s this = %p", LLVM_PRETTY_FUNCTION,
                        static_cast<void *>(this));
     m_info = std::make_unique<DWARFDebugInfo>(*this, m_context);
   });
@@ -646,8 +658,7 @@ DWARFCompileUnit *SymbolFileDWARF::GetDWARFCompileUnit(CompileUnit *comp_unit) {
 
 DWARFDebugRanges *SymbolFileDWARF::GetDebugRanges() {
   if (!m_ranges) {
-    static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
-    Timer scoped_timer(func_cat, "%s this = %p", LLVM_PRETTY_FUNCTION,
+    LLDB_SCOPED_TIMERF("%s this = %p", LLVM_PRETTY_FUNCTION,
                        static_cast<void *>(this));
 
     if (m_context.getOrLoadRangesData().GetByteSize() > 0)
@@ -829,8 +840,7 @@ XcodeSDK SymbolFileDWARF::ParseXcodeSDK(CompileUnit &comp_unit) {
 }
 
 size_t SymbolFileDWARF::ParseFunctions(CompileUnit &comp_unit) {
-  static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
-  Timer scoped_timer(func_cat, "SymbolFileDWARF::ParseFunctions");
+  LLDB_SCOPED_TIMER();
   std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
   DWARFUnit *dwarf_cu = GetDWARFCompileUnit(&comp_unit);
   if (!dwarf_cu)
@@ -1641,6 +1651,13 @@ SymbolFileDWARF::GetDwoSymbolFileForCompileUnit(
       return nullptr;
 
     dwo_file.SetFile(comp_dir, FileSpec::Style::native);
+    if (dwo_file.IsRelative()) {
+      // if DW_AT_comp_dir is relative, it should be relative to the location
+      // of the executable, not to the location from which the debugger was
+      // launched.
+      dwo_file.PrependPathComponent(
+          m_objfile_sp->GetFileSpec().GetDirectory().GetStringRef());
+    }
     FileSystem::Instance().Resolve(dwo_file);
     dwo_file.AppendPathComponent(dwo_name);
   }
@@ -1786,7 +1803,7 @@ SymbolFileDWARF::GlobalVariableMap &SymbolFileDWARF::GetGlobalAranges() {
                 if (location.Evaluate(nullptr, LLDB_INVALID_ADDRESS, nullptr,
                                       nullptr, location_result, &error)) {
                   if (location_result.GetValueType() ==
-                      Value::eValueTypeFileAddress) {
+                      Value::ValueType::FileAddress) {
                     lldb::addr_t file_addr =
                         location_result.GetScalar().ULongLong();
                     lldb::addr_t byte_size = 1;
@@ -1839,9 +1856,7 @@ uint32_t SymbolFileDWARF::ResolveSymbolContext(const Address &so_addr,
                                                SymbolContextItem resolve_scope,
                                                SymbolContext &sc) {
   std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
-  static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
-  Timer scoped_timer(func_cat,
-                     "SymbolFileDWARF::"
+  LLDB_SCOPED_TIMERF("SymbolFileDWARF::"
                      "ResolveSymbolContext (so_addr = { "
                      "section = %p, offset = 0x%" PRIx64
                      " }, resolve_scope = 0x%8.8x)",
@@ -1854,17 +1869,8 @@ uint32_t SymbolFileDWARF::ResolveSymbolContext(const Address &so_addr,
     lldb::addr_t file_vm_addr = so_addr.GetFileAddress();
 
     DWARFDebugInfo &debug_info = DebugInfo();
-    llvm::Expected<DWARFDebugAranges &> aranges =
-        debug_info.GetCompileUnitAranges();
-    if (!aranges) {
-      Log *log = LogChannelDWARF::GetLogIfAll(DWARF_LOG_DEBUG_INFO);
-      LLDB_LOG_ERROR(log, aranges.takeError(),
-                     "SymbolFileDWARF::ResolveSymbolContext failed to get cu "
-                     "aranges.  {0}");
-      return 0;
-    }
-
-    const dw_offset_t cu_offset = aranges->FindAddress(file_vm_addr);
+    const DWARFDebugAranges &aranges = debug_info.GetCompileUnitAranges();
+    const dw_offset_t cu_offset = aranges.FindAddress(file_vm_addr);
     if (cu_offset == DW_INVALID_OFFSET) {
       // Global variables are not in the compile unit address ranges. The only
       // way to currently find global variables is to iterate over the
@@ -1970,66 +1976,8 @@ uint32_t SymbolFileDWARF::ResolveSymbolContext(const FileSpec &file_spec,
       bool file_spec_matches_cu_file_spec =
           FileSpec::Match(file_spec, dc_cu->GetPrimaryFile());
       if (check_inlines || file_spec_matches_cu_file_spec) {
-        SymbolContext sc(m_objfile_sp->GetModule());
-        sc.comp_unit = dc_cu;
-        uint32_t file_idx = UINT32_MAX;
-
-        // If we are looking for inline functions only and we don't find it
-        // in the support files, we are done.
-        if (check_inlines) {
-          file_idx =
-              sc.comp_unit->GetSupportFiles().FindFileIndex(1, file_spec, true);
-          if (file_idx == UINT32_MAX)
-            continue;
-        }
-
-        if (line != 0) {
-          LineTable *line_table = sc.comp_unit->GetLineTable();
-
-          if (line_table != nullptr && line != 0) {
-            // We will have already looked up the file index if we are
-            // searching for inline entries.
-            if (!check_inlines)
-              file_idx = sc.comp_unit->GetSupportFiles().FindFileIndex(
-                  1, file_spec, true);
-
-            if (file_idx != UINT32_MAX) {
-              uint32_t found_line;
-              uint32_t line_idx = line_table->FindLineEntryIndexByFileIndex(
-                  0, file_idx, line, false, &sc.line_entry);
-              found_line = sc.line_entry.line;
-
-              while (line_idx != UINT32_MAX) {
-                sc.function = nullptr;
-                sc.block = nullptr;
-                if (resolve_scope &
-                    (eSymbolContextFunction | eSymbolContextBlock)) {
-                  const lldb::addr_t file_vm_addr =
-                      sc.line_entry.range.GetBaseAddress().GetFileAddress();
-                  if (file_vm_addr != LLDB_INVALID_ADDRESS) {
-                    ResolveFunctionAndBlock(
-                        file_vm_addr, resolve_scope & eSymbolContextBlock, sc);
-                  }
-                }
-
-                sc_list.Append(sc);
-                line_idx = line_table->FindLineEntryIndexByFileIndex(
-                    line_idx + 1, file_idx, found_line, true, &sc.line_entry);
-              }
-            }
-          } else if (file_spec_matches_cu_file_spec && !check_inlines) {
-            // only append the context if we aren't looking for inline call
-            // sites by file and line and if the file spec matches that of
-            // the compile unit
-            sc_list.Append(sc);
-          }
-        } else if (file_spec_matches_cu_file_spec && !check_inlines) {
-          // only append the context if we aren't looking for inline call
-          // sites by file and line and if the file spec matches that of
-          // the compile unit
-          sc_list.Append(sc);
-        }
-
+        dc_cu->ResolveSymbolContext(file_spec, line, check_inlines, false,
+                                    resolve_scope, sc_list);
         if (!check_inlines)
           break;
       }
@@ -2277,8 +2225,7 @@ void SymbolFileDWARF::FindFunctions(ConstString name,
                                     bool include_inlines,
                                     SymbolContextList &sc_list) {
   std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
-  static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
-  Timer scoped_timer(func_cat, "SymbolFileDWARF::FindFunctions (name = '%s')",
+  LLDB_SCOPED_TIMERF("SymbolFileDWARF::FindFunctions (name = '%s')",
                      name.AsCString());
 
   // eFunctionNameTypeAuto should be pre-resolved by a call to
@@ -2332,8 +2279,7 @@ void SymbolFileDWARF::FindFunctions(const RegularExpression &regex,
                                     bool include_inlines,
                                     SymbolContextList &sc_list) {
   std::lock_guard<std::recursive_mutex> guard(GetModuleMutex());
-  static Timer::Category func_cat(LLVM_PRETTY_FUNCTION);
-  Timer scoped_timer(func_cat, "SymbolFileDWARF::FindFunctions (regex = '%s')",
+  LLDB_SCOPED_TIMERF("SymbolFileDWARF::FindFunctions (regex = '%s')",
                      regex.GetText().str().c_str());
 
   Log *log(LogChannelDWARF::GetLogIfAll(DWARF_LOG_LOOKUPS));
@@ -3047,8 +2993,12 @@ size_t SymbolFileDWARF::ParseVariablesForContext(const SymbolContext &sc) {
     if (sc.function) {
       DWARFDIE function_die = GetDIE(sc.function->GetID());
 
-      const dw_addr_t func_lo_pc = function_die.GetAttributeValueAsAddress(
-          DW_AT_low_pc, LLDB_INVALID_ADDRESS);
+      dw_addr_t func_lo_pc = LLDB_INVALID_ADDRESS;
+      DWARFRangeList ranges;
+      if (function_die.GetDIE()->GetAttributeAddressRanges(
+              function_die.GetCU(), ranges,
+              /*check_hi_lo_pc=*/true))
+        func_lo_pc = ranges.GetMinRangeBase(0);
       if (func_lo_pc != LLDB_INVALID_ADDRESS) {
         const size_t num_variables = ParseVariables(
             sc, function_die.GetFirstChild(), func_lo_pc, true, true);
@@ -3128,8 +3078,8 @@ VariableSP SymbolFileDWARF::ParseVariableDIE(const SymbolContext &sc,
       continue;
     switch (attr) {
     case DW_AT_decl_file:
-      decl.SetFile(sc.comp_unit->GetSupportFiles().GetFileSpecAtIndex(
-          form_value.Unsigned()));
+      decl.SetFile(
+          attributes.CompileUnitAtIndex(i)->GetFile(form_value.Unsigned()));
       break;
     case DW_AT_decl_line:
       decl.SetLine(form_value.Unsigned());

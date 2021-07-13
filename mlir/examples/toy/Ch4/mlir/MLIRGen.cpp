@@ -93,7 +93,7 @@ private:
 
   /// Helper conversion for a Toy AST location to an MLIR location.
   mlir::Location loc(Location loc) {
-    return builder.getFileLineColLoc(builder.getIdentifier(*loc.file), loc.line,
+    return mlir::FileLineColLoc::get(builder.getIdentifier(*loc.file), loc.line,
                                      loc.col);
   }
 
@@ -136,10 +136,10 @@ private:
     auto protoArgs = funcAST.getProto()->getArgs();
 
     // Declare all the function arguments in the symbol table.
-    for (const auto &name_value :
+    for (const auto nameValue :
          llvm::zip(protoArgs, entryBlock.getArguments())) {
-      if (failed(declare(std::get<0>(name_value)->getName(),
-                         std::get<1>(name_value))))
+      if (failed(declare(std::get<0>(nameValue)->getName(),
+                         std::get<1>(nameValue))))
         return nullptr;
     }
 

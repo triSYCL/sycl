@@ -40,25 +40,18 @@ namespace scudo {
 // The memory used by this allocator is never unmapped, but can be partially
 // released if the platform allows for it.
 
-template <class SizeClassMapT, uptr RegionSizeLog,
-          s32 MinReleaseToOsIntervalMs = INT32_MIN,
-          s32 MaxReleaseToOsIntervalMs = INT32_MAX,
-          bool MaySupportMemoryTagging = false>
-class SizeClassAllocator64 {
+template <typename Config> class SizeClassAllocator64 {
 public:
-  typedef SizeClassMapT SizeClassMap;
-  typedef SizeClassAllocator64<
-      SizeClassMap, RegionSizeLog, MinReleaseToOsIntervalMs,
-      MaxReleaseToOsIntervalMs, MaySupportMemoryTagging>
-      ThisT;
+  typedef typename Config::PrimaryCompactPtrT CompactPtrT;
+  static const uptr CompactPtrScale = Config::PrimaryCompactPtrScale;
+  typedef typename Config::SizeClassMap SizeClassMap;
+  typedef SizeClassAllocator64<Config> ThisT;
   typedef SizeClassAllocatorLocalCache<ThisT> CacheT;
   typedef typename CacheT::TransferBatch TransferBatch;
-  static const bool SupportsMemoryTagging =
-      MaySupportMemoryTagging && archSupportsMemoryTagging();
 
   static uptr getSizeByClassId(uptr ClassId) {
     return (ClassId == SizeClassMap::BatchClassId)
-               ? sizeof(TransferBatch)
+               ? roundUpTo(sizeof(TransferBatch), 1U << CompactPtrScale)
                : SizeClassMap::getSizeByClassId(ClassId);
   }
 
@@ -67,11 +60,11 @@ public:
   void initLinkerInitialized(s32 ReleaseToOsInterval) {
     // Reserve the space required for the Primary.
     PrimaryBase = reinterpret_cast<uptr>(
-        map(nullptr, PrimarySize, "scudo:primary", MAP_NOACCESS, &Data));
+        map(nullptr, PrimarySize, nullptr, MAP_NOACCESS, &Data));
 
     u32 Seed;
     const u64 Time = getMonotonicTime();
-    if (UNLIKELY(!getRandom(reinterpret_cast<void *>(&Seed), sizeof(Seed))))
+    if (!getRandom(reinterpret_cast<void *>(&Seed), sizeof(Seed)))
       Seed = static_cast<u32>(Time ^ (PrimaryBase >> 12));
     const uptr PageSize = getPageSizeCached();
     for (uptr I = 0; I < NumClasses; I++) {
@@ -83,9 +76,6 @@ public:
       Region->ReleaseInfo.LastReleaseAtNs = Time;
     }
     setOption(Option::ReleaseInterval, static_cast<sptr>(ReleaseToOsInterval));
-
-    if (SupportsMemoryTagging && systemSupportsMemoryTagging())
-      Options.set(OptionBit::UseMemoryTagging);
   }
   void init(s32 ReleaseToOsInterval) {
     memset(this, 0, sizeof(*this));
@@ -178,9 +168,9 @@ public:
 
   bool setOption(Option O, sptr Value) {
     if (O == Option::ReleaseInterval) {
-      const s32 Interval =
-          Max(Min(static_cast<s32>(Value), MaxReleaseToOsIntervalMs),
-              MinReleaseToOsIntervalMs);
+      const s32 Interval = Max(
+          Min(static_cast<s32>(Value), Config::PrimaryMaxReleaseToOsIntervalMs),
+          Config::PrimaryMinReleaseToOsIntervalMs);
       atomic_store_relaxed(&ReleaseToOsIntervalMs, Interval);
       return true;
     }
@@ -200,16 +190,29 @@ public:
     return TotalReleasedBytes;
   }
 
-  static bool useMemoryTagging(Options Options) {
-    return SupportsMemoryTagging && Options.get(OptionBit::UseMemoryTagging);
-  }
-  void disableMemoryTagging() { Options.clear(OptionBit::UseMemoryTagging); }
-
   const char *getRegionInfoArrayAddress() const {
     return reinterpret_cast<const char *>(RegionInfoArray);
   }
 
   static uptr getRegionInfoArraySize() { return sizeof(RegionInfoArray); }
+
+  uptr getCompactPtrBaseByClassId(uptr ClassId) {
+    // If we are not compacting pointers, base everything off of 0.
+    if (sizeof(CompactPtrT) == sizeof(uptr) && CompactPtrScale == 0)
+      return 0;
+    return getRegionInfo(ClassId)->RegionBeg;
+  }
+
+  CompactPtrT compactPtr(uptr ClassId, uptr Ptr) {
+    DCHECK_LE(ClassId, SizeClassMap::LargestClassId);
+    return compactPtrInternal(getCompactPtrBaseByClassId(ClassId), Ptr);
+  }
+
+  void *decompactPtr(uptr ClassId, CompactPtrT CompactPtr) {
+    DCHECK_LE(ClassId, SizeClassMap::LargestClassId);
+    return reinterpret_cast<void *>(
+        decompactPtrInternal(getCompactPtrBaseByClassId(ClassId), CompactPtr));
+  }
 
   static BlockInfo findNearestBlock(const char *RegionInfoData, uptr Ptr) {
     const RegionInfo *RegionInfoArray =
@@ -258,7 +261,7 @@ public:
   AtomicOptions Options;
 
 private:
-  static const uptr RegionSize = 1UL << RegionSizeLog;
+  static const uptr RegionSize = 1UL << Config::PrimaryRegionSizeLog;
   static const uptr NumClasses = SizeClassMap::NumClasses;
   static const uptr PrimarySize = RegionSize * NumClasses;
 
@@ -282,14 +285,14 @@ private:
   struct UnpaddedRegionInfo {
     HybridMutex Mutex;
     SinglyLinkedList<TransferBatch> FreeList;
-    RegionStats Stats;
-    bool Exhausted;
-    u32 RandState;
     uptr RegionBeg;
+    RegionStats Stats;
+    u32 RandState;
     uptr MappedUser;    // Bytes mapped for user memory.
     uptr AllocatedUser; // Bytes allocated for user memory.
     MapPlatformData Data;
     ReleaseToOsInfo ReleaseInfo;
+    bool Exhausted;
   };
   struct RegionInfo : UnpaddedRegionInfo {
     char Padding[SCUDO_CACHE_LINE_SIZE -
@@ -308,7 +311,15 @@ private:
   }
 
   uptr getRegionBaseByClassId(uptr ClassId) const {
-    return PrimaryBase + (ClassId << RegionSizeLog);
+    return PrimaryBase + (ClassId << Config::PrimaryRegionSizeLog);
+  }
+
+  static CompactPtrT compactPtrInternal(uptr Base, uptr Ptr) {
+    return static_cast<CompactPtrT>((Ptr - Base) >> CompactPtrScale);
+  }
+
+  static uptr decompactPtrInternal(uptr Base, CompactPtrT CompactPtr) {
+    return Base + (static_cast<uptr>(CompactPtr) << CompactPtrScale);
   }
 
   NOINLINE TransferBatch *populateFreeList(CacheT *C, uptr ClassId,
@@ -320,12 +331,12 @@ private:
     const uptr MappedUser = Region->MappedUser;
     const uptr TotalUserBytes = Region->AllocatedUser + MaxCount * Size;
     // Map more space for blocks, if necessary.
-    if (UNLIKELY(TotalUserBytes > MappedUser)) {
+    if (TotalUserBytes > MappedUser) {
       // Do the mmap for the user memory.
-      const uptr UserMapSize =
+      const uptr MapSize =
           roundUpTo(TotalUserBytes - MappedUser, MapSizeIncrement);
       const uptr RegionBase = RegionBeg - getRegionBaseByClassId(ClassId);
-      if (RegionBase + MappedUser + UserMapSize > RegionSize) {
+      if (UNLIKELY(RegionBase + MappedUser + MapSize > RegionSize)) {
         if (!Region->Exhausted) {
           Region->Exhausted = true;
           ScopedString Str(1024);
@@ -339,14 +350,15 @@ private:
       }
       if (MappedUser == 0)
         Region->Data = Data;
-      if (!map(reinterpret_cast<void *>(RegionBeg + MappedUser), UserMapSize,
-               "scudo:primary",
-               MAP_ALLOWNOMEM | MAP_RESIZABLE |
-                   (useMemoryTagging(Options.load()) ? MAP_MEMTAG : 0),
-               &Region->Data))
+      if (UNLIKELY(!map(
+              reinterpret_cast<void *>(RegionBeg + MappedUser), MapSize,
+              "scudo:primary",
+              MAP_ALLOWNOMEM | MAP_RESIZABLE |
+                  (useMemoryTagging<Config>(Options.load()) ? MAP_MEMTAG : 0),
+              &Region->Data)))
         return nullptr;
-      Region->MappedUser += UserMapSize;
-      C->getStats().add(StatMapped, UserMapSize);
+      Region->MappedUser += MapSize;
+      C->getStats().add(StatMapped, MapSize);
     }
 
     const u32 NumberOfBlocks = Min(
@@ -356,17 +368,20 @@ private:
 
     constexpr u32 ShuffleArraySize =
         MaxNumBatches * TransferBatch::MaxNumCached;
-    void *ShuffleArray[ShuffleArraySize];
+    CompactPtrT ShuffleArray[ShuffleArraySize];
     DCHECK_LE(NumberOfBlocks, ShuffleArraySize);
 
+    const uptr CompactPtrBase = getCompactPtrBaseByClassId(ClassId);
     uptr P = RegionBeg + Region->AllocatedUser;
     for (u32 I = 0; I < NumberOfBlocks; I++, P += Size)
-      ShuffleArray[I] = reinterpret_cast<void *>(P);
+      ShuffleArray[I] = compactPtrInternal(CompactPtrBase, P);
     // No need to shuffle the batches size class.
     if (ClassId != SizeClassMap::BatchClassId)
       shuffle(ShuffleArray, NumberOfBlocks, &Region->RandState);
     for (u32 I = 0; I < NumberOfBlocks;) {
-      TransferBatch *B = C->createBatch(ClassId, ShuffleArray[I]);
+      TransferBatch *B =
+          C->createBatch(ClassId, reinterpret_cast<void *>(decompactPtrInternal(
+                                      CompactPtrBase, ShuffleArray[I])));
       if (UNLIKELY(!B))
         return nullptr;
       const u32 N = Min(MaxCount, NumberOfBlocks - I);
@@ -426,7 +441,7 @@ private:
     if (BlockSize < PageSize / 16U) {
       if (!Force && BytesPushed < Region->AllocatedUser / 16U)
         return 0;
-      // We want 8x% to 9x% free bytes (the larger the bock, the lower the %).
+      // We want 8x% to 9x% free bytes (the larger the block, the lower the %).
       if ((BytesInFreeList * 100U) / Region->AllocatedUser <
           (100U - 1U - BlockSize / 16U))
         return 0;
@@ -443,11 +458,14 @@ private:
       }
     }
 
-    auto SkipRegion = [](UNUSED uptr RegionIndex) { return false; };
     ReleaseRecorder Recorder(Region->RegionBeg, &Region->Data);
-    releaseFreeMemoryToOS(Region->FreeList, Region->RegionBeg,
-                          Region->AllocatedUser, 1U, BlockSize, &Recorder,
-                          SkipRegion);
+    const uptr CompactPtrBase = getCompactPtrBaseByClassId(ClassId);
+    auto DecompactPtr = [CompactPtrBase](CompactPtrT CompactPtr) {
+      return decompactPtrInternal(CompactPtrBase, CompactPtr);
+    };
+    auto SkipRegion = [](UNUSED uptr RegionIndex) { return false; };
+    releaseFreeMemoryToOS(Region->FreeList, Region->AllocatedUser, 1U,
+                          BlockSize, &Recorder, DecompactPtr, SkipRegion);
 
     if (Recorder.getReleasedRangesCount() > 0) {
       Region->ReleaseInfo.PushedBlocksAtLastRelease =

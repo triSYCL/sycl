@@ -63,7 +63,7 @@ struct WasmExport {
 
 struct WasmLimits {
   uint8_t Flags;
-  uint64_t Initial;
+  uint64_t Minimum;
   uint64_t Maximum;
 };
 
@@ -146,8 +146,11 @@ struct WasmFunction {
 
 struct WasmDataSegment {
   uint32_t InitFlags;
-  uint32_t MemoryIndex; // present if InitFlags & WASM_SEGMENT_HAS_MEMINDEX
-  WasmInitExpr Offset; // present if InitFlags & WASM_SEGMENT_IS_PASSIVE == 0
+  // Present if InitFlags & WASM_DATA_SEGMENT_HAS_MEMINDEX.
+  uint32_t MemoryIndex;
+  // Present if InitFlags & WASM_DATA_SEGMENT_IS_PASSIVE == 0.
+  WasmInitExpr Offset;
+
   ArrayRef<uint8_t> Content;
   StringRef Name; // from the "segment info" section
   uint32_t Alignment;
@@ -156,7 +159,9 @@ struct WasmDataSegment {
 };
 
 struct WasmElemSegment {
-  uint32_t TableIndex;
+  uint32_t Flags;
+  uint32_t TableNumber;
+  uint8_t ElemKind;
   WasmInitExpr Offset;
   std::vector<uint32_t> Functions;
 };
@@ -192,8 +197,8 @@ struct WasmSymbolInfo {
   // For symbols to be exported from the final module
   Optional<StringRef> ExportName;
   union {
-    // For function or global symbols, the index in function or global index
-    // space.
+    // For function, table, or global symbols, the index in function, table, or
+    // global index space.
     uint32_t ElementIndex;
     // For a data symbols, the address of the data relative to segment.
     WasmDataReference DataRef;
@@ -244,7 +249,6 @@ enum : unsigned {
   WASM_TYPE_F64 = 0x7C,
   WASM_TYPE_V128 = 0x7B,
   WASM_TYPE_FUNCREF = 0x70,
-  WASM_TYPE_EXNREF = 0x68,
   WASM_TYPE_EXTERNREF = 0x6F,
   WASM_TYPE_FUNC = 0x60,
   WASM_TYPE_NORESULT = 0x40, // for blocks with no result values
@@ -301,9 +305,16 @@ enum : unsigned {
 };
 
 enum : unsigned {
-  WASM_SEGMENT_IS_PASSIVE = 0x01,
-  WASM_SEGMENT_HAS_MEMINDEX = 0x02,
+  WASM_DATA_SEGMENT_IS_PASSIVE = 0x01,
+  WASM_DATA_SEGMENT_HAS_MEMINDEX = 0x02,
 };
+
+enum : unsigned {
+  WASM_ELEM_SEGMENT_IS_PASSIVE = 0x01,
+  WASM_ELEM_SEGMENT_HAS_TABLE_NUMBER = 0x02,
+  WASM_ELEM_SEGMENT_HAS_INIT_EXPRS = 0x04,
+};
+const unsigned WASM_ELEM_SEGMENT_MASK_HAS_ELEM_KIND = 0x3;
 
 // Feature policy prefixes used in the custom "target_features" section
 enum : uint8_t {
@@ -379,7 +390,6 @@ enum class ValType {
   F32 = WASM_TYPE_F32,
   F64 = WASM_TYPE_F64,
   V128 = WASM_TYPE_V128,
-  EXNREF = WASM_TYPE_EXNREF,
   FUNCREF = WASM_TYPE_FUNCREF,
   EXTERNREF = WASM_TYPE_EXTERNREF,
 };

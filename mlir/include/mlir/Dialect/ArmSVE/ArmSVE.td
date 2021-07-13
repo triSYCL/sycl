@@ -14,6 +14,8 @@
 #define ARMSVE_OPS
 
 include "mlir/Interfaces/SideEffectInterfaces.td"
+include "mlir/Dialect/LLVMIR/LLVMOpBase.td"
+include "mlir/Dialect/ArmSVE/ArmSVEOpBase.td"
 
 //===----------------------------------------------------------------------===//
 // ArmSVE dialect definition
@@ -38,7 +40,7 @@ def ArmSVE_ScalableVectorType : DialectType<ArmSVE_Dialect,
     CPred<"$_self.isa<ScalableVectorType>()">,
               "scalable vector type">,
     BuildableType<"$_builder.getType<ScalableVectorType>()"> {
-  let typeDescription = [{
+  let description = [{
     `arm_sve.vector` represents vectors that will be processed by a scalable
     vector architecture.
   }];
@@ -74,7 +76,7 @@ def ScalableVectorType : ArmSVE_Type<"ScalableVector"> {
     VectorType vector;
     if ($_parser.parseType(vector))
       return Type();
-    return get(ctxt, vector.getShape(), vector.getElementType());
+    return get($_ctxt, vector.getShape(), vector.getElementType());
   }];
 
   let extraClassDeclaration = [{
@@ -94,40 +96,31 @@ def ScalableVectorType : ArmSVE_Type<"ScalableVector"> {
 }
 
 //===----------------------------------------------------------------------===//
-// ArmSVE type traits
-//===----------------------------------------------------------------------===//
-
-def IsScalableVectorTypePred :
-    CPred<"$_self.isa<::mlir::arm_sve::ScalableVectorType>()">;
-
-class ScalableVectorOf<list<Type> allowedTypes> :
-    ContainerType<AnyTypeOf<allowedTypes>, IsScalableVectorTypePred,
-          "$_self.cast<::mlir::arm_sve::ScalableVectorType>().getElementType()",
-          "scalable vector">;
-
-class IsScalableVectorOfLengthPred<list<int> allowedLengths> :
-  And<[IsScalableVectorTypePred,
-       Or<!foreach(allowedlength, allowedLengths, CPred<
-          [{$_self.cast<::mlir::arm_sve::ScalableVectorType>().getNumElements() == }]
-          # allowedlength>)>]>;
-
-class ScalableVectorOfLength<list<int> allowedLengths> : Type<
-  IsScalableVectorOfLengthPred<allowedLengths>,
-  " of length " # StrJoinInt<allowedLengths, "/">.result>;
-
-class ScalableVectorOfLengthAndType<list<int> allowedLengths,
-                                    list<Type> allowedTypes> : Type<
-  And<[ScalableVectorOf<allowedTypes>.predicate,
-       ScalableVectorOfLength<allowedLengths>.predicate]>,
-  ScalableVectorOf<allowedTypes>.description #
-  ScalableVectorOfLength<allowedLengths>.description>;
-
-//===----------------------------------------------------------------------===//
 // ArmSVE op definitions
 //===----------------------------------------------------------------------===//
 
 class ArmSVE_Op<string mnemonic, list<OpTrait> traits = []> :
   Op<ArmSVE_Dialect, mnemonic, traits> {}
+
+class ArmSVE_NonSVEIntrUnaryOverloadedOp<string mnemonic,
+                                         list<OpTrait> traits =[]> :
+  LLVM_IntrOpBase</*Dialect dialect=*/ArmSVE_Dialect,
+                  /*string opName=*/mnemonic,
+                  /*string enumName=*/mnemonic,
+                  /*list<int> overloadedResults=*/[0],
+                  /*list<int> overloadedOperands=*/[], // defined by result overload
+                  /*list<OpTrait> traits=*/traits,
+                  /*int numResults=*/1>;
+
+class ArmSVE_IntrBinaryOverloadedOp<string mnemonic,
+                                    list<OpTrait> traits = []> :
+  LLVM_IntrOpBase</*Dialect dialect=*/ArmSVE_Dialect,
+                  /*string opName=*/"intr." # mnemonic,
+                  /*string enumName=*/"aarch64_sve_" # !subst(".", "_", mnemonic),
+                  /*list<int> overloadedResults=*/[0],
+                  /*list<int> overloadedOperands=*/[], // defined by result overload
+                  /*list<OpTrait> traits=*/traits,
+                  /*int numResults=*/1>;
 
 def SdotOp : ArmSVE_Op<"sdot",
                [NoSideEffect,
@@ -165,7 +158,7 @@ def SmmlaOp : ArmSVE_Op<"smmla",
                 AllTypesMatch<["src1", "src2"]>,
                 AllTypesMatch<["acc", "dst"]>,
               ]> {
-  let summary = "Matrix-matrix mutiply and accumulate op";
+  let summary = "Matrix-matrix multiply and accumulate op";
   let description = [{
     SMMLA: Signed integer matrix multiply-accumulate.
 
@@ -228,7 +221,7 @@ def UmmlaOp : ArmSVE_Op<"ummla",
                 AllTypesMatch<["src1", "src2"]>,
                 AllTypesMatch<["acc", "dst"]>,
               ]> {
-  let summary = "Matrix-matrix mutiply and accumulate op";
+  let summary = "Matrix-matrix multiply and accumulate op";
   let description = [{
     UMMLA: Unsigned integer matrix multiply-accumulate.
 
@@ -272,5 +265,24 @@ def VectorScaleOp : ArmSVE_Op<"vector_scale",
   let assemblyFormat =
     "attr-dict `:` type($res)";
 }
+
+def UmmlaIntrOp :
+  ArmSVE_IntrBinaryOverloadedOp<"ummla">,
+  Arguments<(ins LLVM_AnyVector, LLVM_AnyVector, LLVM_AnyVector)>;
+
+def SmmlaIntrOp :
+  ArmSVE_IntrBinaryOverloadedOp<"smmla">,
+  Arguments<(ins LLVM_AnyVector, LLVM_AnyVector, LLVM_AnyVector)>;
+
+def SdotIntrOp :
+  ArmSVE_IntrBinaryOverloadedOp<"sdot">,
+  Arguments<(ins LLVM_AnyVector, LLVM_AnyVector, LLVM_AnyVector)>;
+
+def UdotIntrOp :
+  ArmSVE_IntrBinaryOverloadedOp<"udot">,
+  Arguments<(ins LLVM_AnyVector, LLVM_AnyVector, LLVM_AnyVector)>;
+
+def VectorScaleIntrOp:
+  ArmSVE_NonSVEIntrUnaryOverloadedOp<"vscale">;
 
 #endif // ARMSVE_OPS

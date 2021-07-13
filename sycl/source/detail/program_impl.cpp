@@ -11,6 +11,7 @@
 #include <CL/sycl/detail/pi.h>
 #include <CL/sycl/kernel.hpp>
 #include <CL/sycl/property_list.hpp>
+#include <detail/config.hpp>
 #include <detail/kernel_impl.hpp>
 #include <detail/program_impl.hpp>
 #include <detail/spec_constant_impl.hpp>
@@ -122,14 +123,6 @@ program_impl::program_impl(ContextImplPtr Context,
                            pi_native_handle InteropProgram,
                            RT::PiProgram Program)
     : MProgram(Program), MContext(Context), MLinkable(true) {
-
-  if (Context->getDevices().size() > 1) {
-    throw feature_not_supported(
-        "multiple devices within a context are not supported with "
-        "sycl::program and sycl::kernel",
-        PI_INVALID_OPERATION);
-  }
-
   const detail::plugin &Plugin = getPlugin();
   if (MProgram == nullptr) {
     assert(InteropProgram &&
@@ -171,6 +164,12 @@ program_impl::program_impl(ContextImplPtr Context,
   Plugin.call<PiApiKind::piProgramGetBuildInfo>(
       MProgram, Device, CL_PROGRAM_BINARY_TYPE, sizeof(cl_program_binary_type),
       &BinaryType, nullptr);
+  if (BinaryType == CL_PROGRAM_BINARY_TYPE_NONE) {
+    throw invalid_object_error(
+        "The native program passed to the program constructor has to be either "
+        "compiled or linked",
+        PI_INVALID_PROGRAM);
+  }
   size_t Size = 0;
   Plugin.call<PiApiKind::piProgramGetBuildInfo>(
       MProgram, Device, CL_PROGRAM_BUILD_OPTIONS, 0, nullptr, &Size);
@@ -181,7 +180,7 @@ program_impl::program_impl(ContextImplPtr Context,
   string_class Options(OptionsVector.begin(), OptionsVector.end());
   switch (BinaryType) {
   case CL_PROGRAM_BINARY_TYPE_NONE:
-    MState = program_state::none;
+    assert(false);
     break;
   case CL_PROGRAM_BINARY_TYPE_COMPILED_OBJECT:
     MState = program_state::compiled;
@@ -212,11 +211,11 @@ program_impl::~program_impl() {
 cl_program program_impl::get() const {
   throw_if_state_is(program_state::none);
   if (is_host()) {
-    throw invalid_object_error("This instance of program is a host instance",
-                               PI_INVALID_PROGRAM);
+    throw invalid_object_error(
+        "This instance of program doesn't support OpenCL interoperability.",
+        PI_INVALID_PROGRAM);
   }
-  const detail::plugin &Plugin = getPlugin();
-  Plugin.call<PiApiKind::piProgramRetain>(MProgram);
+  getPlugin().call<PiApiKind::piProgramRetain>(MProgram);
   return pi::cast<cl_program>(MProgram);
 }
 
@@ -254,20 +253,13 @@ void program_impl::build_with_kernel_name(string_class KernelName,
   throw_if_state_is_not(program_state::none);
   MProgramModuleHandle = Module;
   if (!is_host()) {
-    // If there are no build options, program can be safely cached
-    if (is_cacheable_with_options(BuildOptions)) {
-      MProgramAndKernelCachingAllowed = true;
-      MProgram = ProgramManager::getInstance().getBuiltPIProgram(
-          Module, get_context(), get_devices()[0], KernelName, this,
-          /*JITCompilationIsRequired=*/(!BuildOptions.empty()));
-      const detail::plugin &Plugin = getPlugin();
-      Plugin.call<PiApiKind::piProgramRetain>(MProgram);
-    } else {
-      create_pi_program_with_kernel_name(
-          Module, KernelName,
-          /*JITCompilationIsRequired=*/(!BuildOptions.empty()));
-      build(BuildOptions);
-    }
+    MProgramAndKernelCachingAllowed = true;
+    MBuildOptions = BuildOptions;
+    MProgram = ProgramManager::getInstance().getBuiltPIProgram(
+        Module, get_context(), get_devices()[0], KernelName, this,
+        /*JITCompilationIsRequired=*/(!BuildOptions.empty()));
+    const detail::plugin &Plugin = getPlugin();
+    Plugin.call<PiApiKind::piProgramRetain>(MProgram);
   }
   MState = program_state::linked;
 }
@@ -291,9 +283,13 @@ void program_impl::link(string_class LinkOptions) {
     check_device_feature_support<info::device::is_linker_available>(MDevices);
     vector_class<RT::PiDevice> Devices(get_pi_devices());
     const detail::plugin &Plugin = getPlugin();
+    const char *LinkOpts = SYCLConfig<SYCL_PROGRAM_LINK_OPTIONS>::get();
+    if (!LinkOpts) {
+      LinkOpts = LinkOptions.c_str();
+    }
     RT::PiResult Err = Plugin.call_nocheck<PiApiKind::piProgramLink>(
-        MContext->getHandleRef(), Devices.size(), Devices.data(),
-        LinkOptions.c_str(), 1, &MProgram, nullptr, nullptr, &MProgram);
+        MContext->getHandleRef(), Devices.size(), Devices.data(), LinkOpts,
+        /*num_input_programs*/ 1, &MProgram, nullptr, nullptr, &MProgram);
     Plugin.checkPiResult<compile_program_error>(Err);
     MLinkOptions = LinkOptions;
     MBuildOptions = LinkOptions;
@@ -355,16 +351,27 @@ void program_impl::create_cl_program_with_source(const string_class &Source) {
   const char *Src = Source.c_str();
   size_t Size = Source.size();
   const detail::plugin &Plugin = getPlugin();
-  Plugin.call<PiApiKind::piclProgramCreateWithSource>(
-      MContext->getHandleRef(), 1, &Src, &Size, &MProgram);
+  RT::PiResult Err =
+      Plugin.call_nocheck<PiApiKind::piclProgramCreateWithSource>(
+          MContext->getHandleRef(), 1, &Src, &Size, &MProgram);
+
+  if (Err == PI_INVALID_OPERATION) {
+    throw feature_not_supported(
+        "program::compile_with_source is not supported by the selected backend",
+        PI_INVALID_OPERATION);
+  }
 }
 
 void program_impl::compile(const string_class &Options) {
   check_device_feature_support<info::device::is_compiler_available>(MDevices);
   vector_class<RT::PiDevice> Devices(get_pi_devices());
   const detail::plugin &Plugin = getPlugin();
+  const char *CompileOpts = SYCLConfig<SYCL_PROGRAM_COMPILE_OPTIONS>::get();
+  if (!CompileOpts) {
+    CompileOpts = Options.c_str();
+  }
   RT::PiResult Err = Plugin.call_nocheck<PiApiKind::piProgramCompile>(
-      MProgram, Devices.size(), Devices.data(), Options.c_str(), 0, nullptr,
+      MProgram, Devices.size(), Devices.data(), CompileOpts, 0, nullptr,
       nullptr, nullptr, nullptr);
 
   if (Err != PI_SUCCESS) {
@@ -482,7 +489,7 @@ void program_impl::create_pi_program_with_kernel_name(
   const device FirstDevice = get_devices()[0];
   RTDeviceBinaryImage &Img = PM.getDeviceImage(
       Module, KernelName, get_context(), FirstDevice, JITCompilationIsRequired);
-  MProgram = PM.createPIProgram(Img, get_context(), FirstDevice);
+  MProgram = PM.createPIProgram(Img, get_context(), {FirstDevice});
 }
 
 template <>
@@ -523,29 +530,14 @@ void program_impl::flush_spec_constants(const RTDeviceBinaryImage &Img,
                                         RT::PiProgram NativePrg) const {
   // iterate via all specialization constants the program's image depends on,
   // and set each to current runtime value (if any)
-  const pi::DeviceBinaryImage::PropertyRange &ScalarSCRange =
-      Img.getScalarSpecConstants();
-  const pi::DeviceBinaryImage::PropertyRange &CompositeSCRange =
-      Img.getCompositeSpecConstants();
+  const pi::DeviceBinaryImage::PropertyRange &SCRange = Img.getSpecConstants();
   ContextImplPtr Ctx = getSyclObjImpl(get_context());
   using SCItTy = pi::DeviceBinaryImage::PropertyRange::ConstIterator;
 
   auto LockGuard = Ctx->getKernelProgramCache().acquireCachedPrograms();
   NativePrg = NativePrg ? NativePrg : getHandleRef();
 
-  for (SCItTy SCIt : ScalarSCRange) {
-    auto SCEntry = SpecConstRegistry.find((*SCIt)->Name);
-    if (SCEntry == SpecConstRegistry.end())
-      // spec constant has not been set in user code - SPIR-V will use default
-      continue;
-    const spec_constant_impl &SC = SCEntry->second;
-    assert(SC.isSet() && "uninitialized spec constant");
-    pi_uint32 ID = pi::DeviceBinaryProperty(*SCIt).asUint32();
-    Ctx->getPlugin().call<PiApiKind::piextProgramSetSpecializationConstant>(
-        NativePrg, ID, SC.getSize(), SC.getValuePtr());
-  }
-
-  for (SCItTy SCIt : CompositeSCRange) {
+  for (SCItTy SCIt : SCRange) {
     auto SCEntry = SpecConstRegistry.find((*SCIt)->Name);
     if (SCEntry == SpecConstRegistry.end())
       // spec constant has not been set in user code - SPIR-V will use default
@@ -557,9 +549,9 @@ void program_impl::flush_spec_constants(const RTDeviceBinaryImage &Img,
     assert(Descriptors.size() > 8 && "Unexpected property size");
     // Expected layout is vector of 3-component tuples (flattened into a vector
     // of scalars), where each tuple consists of: ID of a scalar spec constant,
-    // which is a member of the composite; offset, which is used to calculate
-    // location of scalar member within the composite; size of a scalar member
-    // of the composite.
+    // (which might be a member of the composite); offset, which is used to
+    // calculate location of scalar member within the composite or zero for
+    // scalar spec constants; size of a spec constant
     assert(((Descriptors.size() - 8) / sizeof(std::uint32_t)) % 3 == 0 &&
            "unexpected layout of composite spec const descriptors");
     auto *It = reinterpret_cast<const std::uint32_t *>(&Descriptors[8]);
@@ -576,6 +568,8 @@ void program_impl::flush_spec_constants(const RTDeviceBinaryImage &Img,
 
 pi_native_handle program_impl::getNative() const {
   const auto &Plugin = getPlugin();
+  if (Plugin.getBackend() == backend::opencl)
+    Plugin.call<PiApiKind::piProgramRetain>(MProgram);
   pi_native_handle Handle;
   Plugin.call<PiApiKind::piextProgramGetNativeHandle>(MProgram, &Handle);
   return Handle;

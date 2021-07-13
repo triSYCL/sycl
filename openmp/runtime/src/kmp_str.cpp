@@ -77,7 +77,7 @@ void __kmp_str_buf_clear(kmp_str_buf_t *buffer) {
   KMP_STR_BUF_INVARIANT(buffer);
 } // __kmp_str_buf_clear
 
-void __kmp_str_buf_reserve(kmp_str_buf_t *buffer, int size) {
+void __kmp_str_buf_reserve(kmp_str_buf_t *buffer, size_t size) {
   KMP_STR_BUF_INVARIANT(buffer);
   KMP_DEBUG_ASSERT(size >= 0);
 
@@ -131,14 +131,15 @@ void __kmp_str_buf_free(kmp_str_buf_t *buffer) {
   KMP_STR_BUF_INVARIANT(buffer);
 } // __kmp_str_buf_free
 
-void __kmp_str_buf_cat(kmp_str_buf_t *buffer, char const *str, int len) {
+void __kmp_str_buf_cat(kmp_str_buf_t *buffer, char const *str, size_t len) {
   KMP_STR_BUF_INVARIANT(buffer);
   KMP_DEBUG_ASSERT(str != NULL);
   KMP_DEBUG_ASSERT(len >= 0);
+
   __kmp_str_buf_reserve(buffer, buffer->used + len + 1);
   KMP_MEMCPY(buffer->str + buffer->used, str, len);
   buffer->str[buffer->used + len] = 0;
-  buffer->used += len;
+  __kmp_type_convert(buffer->used + len, &(buffer->used));
   KMP_STR_BUF_INVARIANT(buffer);
 } // __kmp_str_buf_cat
 
@@ -168,14 +169,15 @@ int __kmp_str_buf_vprint(kmp_str_buf_t *buffer, char const *format,
 
     // Try to format string.
     {
-/* On Linux* OS Intel(R) 64, vsnprintf() modifies args argument, so vsnprintf()
-   crashes if it is called for the second time with the same args. To prevent
-   the crash, we have to pass a fresh intact copy of args to vsnprintf() on each
-   iteration.
+      /* On Linux* OS Intel(R) 64, vsnprintf() modifies args argument, so
+         vsnprintf() crashes if it is called for the second time with the same
+         args. To prevent the crash, we have to pass a fresh intact copy of args
+         to vsnprintf() on each iteration.
 
-   Unfortunately, standard va_copy() macro is not available on Windows* OS.
-   However, it seems vsnprintf() does not modify args argument on Windows* OS.
-*/
+         Unfortunately, standard va_copy() macro is not available on Windows*
+         OS. However, it seems vsnprintf() does not modify args argument on
+         Windows* OS.
+      */
 
 #if !KMP_OS_WINDOWS
       va_list _args;
@@ -260,7 +262,7 @@ void __kmp_str_fname_init(kmp_str_fname_t *fname, char const *path) {
     slash = strrchr(fname->dir, '/');
     if (KMP_OS_WINDOWS &&
         slash == NULL) { // On Windows* OS, if slash not found,
-      char first = TOLOWER(fname->dir[0]); // look for drive.
+      char first = (char)TOLOWER(fname->dir[0]); // look for drive.
       if ('a' <= first && first <= 'z' && fname->dir[1] == ':') {
         slash = &fname->dir[1];
       }
@@ -402,7 +404,7 @@ void __kmp_str_loc_free(kmp_str_loc_t *loc) {
 int __kmp_str_eqf( // True, if strings are equal, false otherwise.
     char const *lhs, // First string.
     char const *rhs // Second string.
-    ) {
+) {
   int result;
 #if KMP_OS_WINDOWS
   result = (_stricmp(lhs, rhs) == 0);
@@ -446,7 +448,7 @@ int __kmp_str_eqf( // True, if strings are equal, false otherwise.
 char *__kmp_str_format( // Allocated string.
     char const *format, // Format string.
     ... // Other parameters.
-    ) {
+) {
   va_list args;
   int size = 512;
   char *buffer = NULL;
@@ -545,7 +547,7 @@ void __kmp_str_split(char *str, // I: String to split.
                      char delim, // I: Character to split on.
                      char **head, // O: Pointer to head (may be NULL).
                      char **tail // O: Pointer to tail (may be NULL).
-                     ) {
+) {
   char *h = str;
   char *t = NULL;
   if (str != NULL) {
@@ -569,7 +571,7 @@ char *__kmp_str_token(
     char *str, // String to split into tokens. Note: String *is* modified!
     char const *delim, // Delimiters.
     char **buf // Internal buffer.
-    ) {
+) {
   char *token = NULL;
 #if KMP_OS_WINDOWS
   // On Windows* OS there is no strtok_r() function. Let us implement it.
@@ -651,7 +653,7 @@ void __kmp_str_to_size( // R: Error code.
     size_t *out, // O: Parsed number.
     size_t dfactor, // I: The factor if none of the letters specified.
     char const **error // O: Null if everything is ok, error message otherwise.
-    ) {
+) {
 
   size_t value = 0;
   size_t factor = 0;
@@ -750,7 +752,7 @@ void __kmp_str_to_uint( // R: Error code.
     char const *str, // I: String of characters, unsigned number.
     kmp_uint64 *out, // O: Parsed number.
     char const **error // O: Null if everything is ok, error message otherwise.
-    ) {
+) {
   size_t value = 0;
   int overflow = 0;
   int i = 0;

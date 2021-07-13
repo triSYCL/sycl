@@ -649,7 +649,9 @@ GotSection::GotSection()
   // If ElfSym::globalOffsetTable is relative to .got and is referenced,
   // increase numEntries by the number of entries used to emit
   // ElfSym::globalOffsetTable.
-  if (ElfSym::globalOffsetTable && !target->gotBaseSymInGotPlt)
+  // On PP64 we always add the header at the start.
+  if ((ElfSym::globalOffsetTable && !target->gotBaseSymInGotPlt) ||
+      config->emachine == EM_PPC64)
     numEntries += target->gotHeaderEntriesNum;
 }
 
@@ -686,12 +688,23 @@ uint64_t GotSection::getGlobalDynOffset(const Symbol &b) const {
 }
 
 void GotSection::finalizeContents() {
-  size = numEntries * config->wordsize;
+  if (config->emachine == EM_PPC64 &&
+      numEntries <= target->gotHeaderEntriesNum && !ElfSym::globalOffsetTable)
+    size = 0;
+  else
+    size = numEntries * config->wordsize;
 }
 
 bool GotSection::isNeeded() const {
   // We need to emit a GOT even if it's empty if there's a relocation that is
   // relative to GOT(such as GOTOFFREL).
+
+  // On PPC64 we need to check that the number of entries is more than just the
+  // size of the header since the header is always added. A GOT with just the
+  // header may not actually be needed.
+  if (config->emachine == EM_PPC64)
+    return numEntries > target->gotHeaderEntriesNum || hasGotOffRel;
+
   return numEntries || hasGotOffRel;
 }
 
@@ -2879,6 +2892,13 @@ template <class ELFT> GdbIndexSection *GdbIndexSection::create() {
     else if (isec->name == ".debug_info")
       files.insert(isec->file);
   }
+  // Drop .rel[a].debug_gnu_pub{names,types} for --emit-relocs.
+  llvm::erase_if(inputSections, [](InputSectionBase *s) {
+    if (auto *isec = dyn_cast<InputSection>(s))
+      if (InputSectionBase *rel = isec->getRelocatedSection())
+        return !rel->isLive();
+    return !s->isLive();
+  });
 
   std::vector<GdbChunk> chunks(files.size());
   std::vector<std::vector<NameAttrEntry>> nameAttrs(files.size());
@@ -3103,7 +3123,10 @@ size_t VersionTableSection::getSize() const {
 void VersionTableSection::writeTo(uint8_t *buf) {
   buf += 2;
   for (const SymbolTableEntry &s : getPartition().dynSymTab->getSymbols()) {
-    write16(buf, s.sym->versionId);
+    // Use the original versionId for an unfetched lazy symbol (undefined weak),
+    // which must be VER_NDX_GLOBAL (an undefined versioned symbol is an error).
+    write16(buf, s.sym->isLazy() ? static_cast<uint16_t>(VER_NDX_GLOBAL)
+                                 : s.sym->versionId);
     buf += 2;
   }
 }

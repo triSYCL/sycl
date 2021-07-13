@@ -14,9 +14,13 @@ if (NOT DEFINED CLANGD_BUILD_XPC)
   unset(CLANGD_BUILD_XPC_DEFAULT)
 endif ()
 
+option(CLANGD_MALLOC_TRIM "Call malloc_trim(3) periodically in Clangd. (only takes effect when using glibc)" ON)
+
 llvm_canonicalize_cmake_booleans(
   CLANGD_BUILD_XPC
   CLANGD_ENABLE_REMOTE
+  ENABLE_GRPC_REFLECTION
+  CLANGD_MALLOC_TRIM
   LLVM_ENABLE_ZLIB
 )
 
@@ -43,6 +47,7 @@ include_directories(BEFORE "${CMAKE_CURRENT_BINARY_DIR}/../clang-tidy")
 
 add_clang_library(clangDaemon
   AST.cpp
+  ASTSignals.cpp
   ClangdLSPServer.cpp
   ClangdServer.cpp
   CodeComplete.cpp
@@ -58,6 +63,7 @@ add_clang_library(clangDaemon
   DraftStore.cpp
   DumpAST.cpp
   ExpectedTypes.cpp
+  FeatureModule.cpp
   FindSymbols.cpp
   FindTarget.cpp
   FileDistance.cpp
@@ -67,8 +73,10 @@ add_clang_library(clangDaemon
   GlobalCompilationDatabase.cpp
   Headers.cpp
   HeaderSourceSwitch.cpp
+  HeuristicResolver.cpp
   Hover.cpp
   IncludeFixer.cpp
+  InlayHints.cpp
   JSONTransport.cpp
   PathMapping.cpp
   Protocol.cpp

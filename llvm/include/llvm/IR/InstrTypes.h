@@ -802,8 +802,8 @@ public:
   void setPredicate(Predicate P) { setSubclassData<PredicateField>(P); }
 
   static bool isFPPredicate(Predicate P) {
-    assert(FIRST_FCMP_PREDICATE == 0 &&
-           "FIRST_FCMP_PREDICATE is required to be 0");
+    static_assert(FIRST_FCMP_PREDICATE == 0,
+                  "FIRST_FCMP_PREDICATE is required to be 0");
     return P <= LAST_FCMP_PREDICATE;
   }
 
@@ -1126,7 +1126,7 @@ public:
 
   explicit OperandBundleDefT(const OperandBundleUse &OBU) {
     Tag = std::string(OBU.getTagName());
-    Inputs.insert(Inputs.end(), OBU.Inputs.begin(), OBU.Inputs.end());
+    llvm::append_range(Inputs, OBU.Inputs);
   }
 
   ArrayRef<InputTy> inputs() const { return Inputs; }
@@ -1213,6 +1213,24 @@ public:
   /// in \p Bundles.
   static CallBase *Create(CallBase *CB, ArrayRef<OperandBundleDef> Bundles,
                           Instruction *InsertPt = nullptr);
+
+  /// Create a clone of \p CB with the operand bundle with the tag matching
+  /// \p Bundle's tag replaced with Bundle, and insert it before \p InsertPt.
+  ///
+  /// The returned call instruction is identical \p CI in every way except that
+  /// the specified operand bundle has been replaced.
+  static CallBase *Create(CallBase *CB,
+                          OperandBundleDef Bundle,
+                          Instruction *InsertPt = nullptr);
+
+  /// Create a clone of \p CB with operand bundle \p OB added.
+  static CallBase *addOperandBundle(CallBase *CB, uint32_t ID,
+                                    OperandBundleDef OB,
+                                    Instruction *InsertPt = nullptr);
+
+  /// Create a clone of \p CB with operand bundle \p ID removed.
+  static CallBase *removeOperandBundle(CallBase *CB, uint32_t ID,
+                                       Instruction *InsertPt = nullptr);
 
   static bool classof(const Instruction *I) {
     return I->getOpcode() == Instruction::Call ||
@@ -1537,6 +1555,15 @@ public:
     setAttributes(PAL);
   }
 
+  /// Removes noundef and other attributes that imply undefined behavior if a
+  /// `undef` or `poison` value is passed from the given argument.
+  void removeParamUndefImplyingAttrs(unsigned ArgNo) {
+    assert(ArgNo < getNumArgOperands() && "Out of bounds");
+    AttributeList PAL = getAttributes();
+    PAL = PAL.removeParamUndefImplyingAttributes(getContext(), ArgNo);
+    setAttributes(PAL);
+  }
+
   /// adds the dereferenceable attribute to the list of attributes.
   void addDereferenceableAttr(unsigned i, uint64_t Bytes) {
     AttributeList PAL = getAttributes();
@@ -1644,6 +1671,17 @@ public:
            paramHasAttr(ArgNo, Attribute::Preallocated);
   }
 
+  /// Determine whether passing undef to this argument is undefined behavior.
+  /// If passing undef to this argument is UB, passing poison is UB as well
+  /// because poison is more undefined than undef.
+  bool isPassingUndefUB(unsigned ArgNo) const {
+    return paramHasAttr(ArgNo, Attribute::NoUndef) ||
+           // dereferenceable implies noundef.
+           paramHasAttr(ArgNo, Attribute::Dereferenceable) ||
+           // dereferenceable implies noundef, and null is a well-defined value.
+           paramHasAttr(ArgNo, Attribute::DereferenceableOrNull);
+  }
+
   /// Determine if there are is an inalloca argument. Only the last argument can
   /// have the inalloca attribute.
   bool hasInAllocaArgument() const {
@@ -1691,6 +1729,10 @@ public:
   /// Extract the alignment for a call or parameter (0=unknown).
   MaybeAlign getParamAlign(unsigned ArgNo) const {
     return Attrs.getParamAlignment(ArgNo);
+  }
+
+  MaybeAlign getParamStackAlign(unsigned ArgNo) const {
+    return Attrs.getParamStackAlignment(ArgNo);
   }
 
   /// Extract the byval type for a call or parameter.
@@ -1756,6 +1798,7 @@ public:
   bool onlyReadsMemory() const {
     return doesNotAccessMemory() || hasFnAttr(Attribute::ReadOnly);
   }
+
   void setOnlyReadsMemory() {
     addAttribute(AttributeList::FunctionIndex, Attribute::ReadOnly);
   }
@@ -1983,12 +2026,7 @@ public:
 
   /// Return true if this operand bundle user has operand bundles that
   /// may read from the heap.
-  bool hasReadingOperandBundles() const {
-    // Implementation note: this is a conservative implementation of operand
-    // bundle semantics, where *any* operand bundle forces a callsite to be at
-    // least readonly.
-    return hasOperandBundles();
-  }
+  bool hasReadingOperandBundles() const;
 
   /// Return true if this operand bundle user has operand bundles that
   /// may write to the heap.

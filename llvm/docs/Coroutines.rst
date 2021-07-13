@@ -190,7 +190,7 @@ coroutine. Therefore an async coroutine returns `void`.
   define swiftcc void @async_coroutine(i8* %async.ctxt, i8*, i8*) {
   }
 
-Values live accross a suspend point need to be stored in the coroutine frame to
+Values live across a suspend point need to be stored in the coroutine frame to
 be available in the continuation function. This frame is stored as a tail to the
 `async context`.
 
@@ -1206,7 +1206,7 @@ The third argument is the `async context` argument in the current coroutine.
 The fourth argument is the address of the `async function pointer` struct.
 Lowering will update the context size requirement in this struct by adding the
 coroutine frame size requirement to the initial size requirement as specified by
-the first argument of this intrinisc.
+the first argument of this intrinsic.
 
 
 Semantics:
@@ -1389,6 +1389,48 @@ The following table summarizes the handling of `coro.end`_ intrinsic.
 |            | Landingpad  | nothing           | nothing                       |
 +------------+-------------+-------------------+-------------------------------+
 
+
+'llvm.coro.end.async' Intrinsic
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+::
+
+  declare i1 @llvm.coro.end.async(i8* <handle>, i1 <unwind>, ...)
+
+Overview:
+"""""""""
+
+The '``llvm.coro.end.async``' marks the point where execution of the resume part
+of the coroutine should end and control should return to the caller. As part of
+its variable tail arguments this instruction allows to specify a function and
+the function's arguments that are to be tail called as the last action before
+returning.
+
+
+Arguments:
+""""""""""
+
+The first argument should refer to the coroutine handle of the enclosing
+coroutine. A frontend is allowed to supply null as the first parameter, in this
+case `coro-early` pass will replace the null with an appropriate coroutine
+handle value.
+
+The second argument should be `true` if this coro.end is in the block that is
+part of the unwind sequence leaving the coroutine body due to an exception and
+`false` otherwise.
+
+The third argument if present should specify a function to be called.
+
+If the third argument is present, the remaining arguments are the arguments to
+the function call.
+
+.. code-block:: llvm
+
+  call i1 (i8*, i1, ...) @llvm.coro.end.async(
+                           i8* %hdl, i1 0,
+                           void (i8*, %async.task*, %async.actor*)* @must_tail_call_return,
+                           i8* %ctxt, %async.task* %task, %async.actor* %actor)
+  unreachable
+
 .. _coro.suspend:
 .. _suspend points:
 
@@ -1530,7 +1572,7 @@ The second argument is the `context projection function`. It should describe
 how-to restore the `async context` in the continuation function from the first
 argument of the continuation function. Its type is `i8* (i8*)`.
 
-The third argument is the function that models tranfer to the callee at the
+The third argument is the function that models transfer to the callee at the
 suspend point. It should take 3 arguments. Lowering will `musttail` call this
 function.
 
@@ -1718,6 +1760,14 @@ earlier passes.
 
 Areas Requiring Attention
 =========================
+#. When coro.suspend returns -1, the coroutine is suspended, and it's possible
+   that the coroutine has already been destroyed (hence the frame has been freed).
+   We cannot access anything on the frame on the suspend path.
+   However there is nothing that prevents the compiler from moving instructions
+   along that path (e.g. LICM), which can lead to use-after-free. At the moment
+   we disabled LICM for loops that have coro.suspend, but the general problem still
+   exists and requires a general solution.
+
 #. Take advantage of the lifetime intrinsics for the data that goes into the
    coroutine frame. Leave lifetime intrinsics as is for the data that stays in
    allocas.

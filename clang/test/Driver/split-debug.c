@@ -7,8 +7,8 @@
 /// -gsplit-dwarf=split is equivalent to -gsplit-dwarf.
 // RUN: %clang -### -c -target x86_64 -gsplit-dwarf=split -g %s 2>&1 | FileCheck %s --check-prefixes=NOINLINE,SPLIT
 
-// INLINE-NOT: "-fno-split-dwarf-inlining"
-// NOINLINE:   "-fno-split-dwarf-inlining"
+// INLINE:     "-fsplit-dwarf-inlining"
+// NOINLINE-NOT: "-fsplit-dwarf-inlining"
 // SPLIT:      "-debug-info-kind=limited"
 // SPLIT-SAME: "-ggnu-pubnames"
 // SPLIT-SAME: "-split-dwarf-file" "split-debug.dwo" "-split-dwarf-output" "split-debug.dwo"
@@ -23,6 +23,15 @@
 
 /// -gsplit-dwarf is a no-op if no -g is specified.
 // RUN: %clang -### -c -target x86_64 -gsplit-dwarf %s 2>&1 | FileCheck %s --check-prefix=G0
+
+/// ... unless -fthinlto-index= is specified.
+// RUN: echo > %t.bc
+// RUN: %clang -### -c -target x86_64 -fthinlto-index=dummy -gsplit-dwarf %t.bc 2>&1 | FileCheck %s --check-prefix=IR
+// RUN: %clang -### -c -target x86_64 -gsplit-dwarf -x ir %t.bc 2>&1 | FileCheck %s --check-prefix=IR
+
+// IR-NOT:  "-debug-info-kind=
+// IR:      "-ggnu-pubnames"
+// IR-SAME: "-split-dwarf-file" "{{.*}}.dwo" "-split-dwarf-output" "{{.*}}.dwo"
 
 /// -gno-split-dwarf disables debug fission.
 // RUN: %clang -### -c -target x86_64 -gsplit-dwarf -g -gno-split-dwarf %s 2>&1 | FileCheck %s --check-prefix=NOSPLIT

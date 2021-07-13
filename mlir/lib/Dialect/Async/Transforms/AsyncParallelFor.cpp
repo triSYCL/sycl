@@ -100,7 +100,7 @@ struct AsyncParallelForPass
     assert(numWorkerThreads >= 1);
     numConcurrentAsyncExecute = numWorkerThreads;
   }
-  void runOnFunction() override;
+  void runOnOperation() override;
 };
 
 } // namespace
@@ -185,7 +185,7 @@ AsyncParallelForRewrite::matchAndRewrite(scf::ParallelOp op,
     return [&, loopIdx](OpBuilder &b, Location loc, Value iv, ValueRange args) {
       blockInductionVars[loopIdx] = iv;
 
-      // Continute building async loop nest.
+      // Continue building async loop nest.
       if (loopIdx < op.getNumLoops() - 1) {
         b.create<scf::ForOp>(
             loc, blockLowerBounds[loopIdx + 1], blockUpperBounds[loopIdx + 1],
@@ -267,21 +267,20 @@ AsyncParallelForRewrite::matchAndRewrite(scf::ParallelOp op,
   return success();
 }
 
-void AsyncParallelForPass::runOnFunction() {
+void AsyncParallelForPass::runOnOperation() {
   MLIRContext *ctx = &getContext();
 
-  OwningRewritePatternList patterns;
-  patterns.insert<AsyncParallelForRewrite>(ctx, numConcurrentAsyncExecute);
+  RewritePatternSet patterns(ctx);
+  patterns.add<AsyncParallelForRewrite>(ctx, numConcurrentAsyncExecute);
 
-  if (failed(applyPatternsAndFoldGreedily(getFunction(), std::move(patterns))))
+  if (failed(applyPatternsAndFoldGreedily(getOperation(), std::move(patterns))))
     signalPassFailure();
 }
 
-std::unique_ptr<OperationPass<FuncOp>> mlir::createAsyncParallelForPass() {
+std::unique_ptr<Pass> mlir::createAsyncParallelForPass() {
   return std::make_unique<AsyncParallelForPass>();
 }
 
-std::unique_ptr<OperationPass<FuncOp>>
-mlir::createAsyncParallelForPass(int numWorkerThreads) {
+std::unique_ptr<Pass> mlir::createAsyncParallelForPass(int numWorkerThreads) {
   return std::make_unique<AsyncParallelForPass>(numWorkerThreads);
 }

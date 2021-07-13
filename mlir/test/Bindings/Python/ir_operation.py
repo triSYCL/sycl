@@ -31,6 +31,10 @@ def testTraverseOpRegionBlockIterators():
   # CHECK: MODULE REGIONS=1 BLOCKS=1
   print(f"MODULE REGIONS={len(regions)} BLOCKS={len(blocks)}")
 
+  # Should verify.
+  # CHECK: .verify = True
+  print(f".verify = {module.operation.verify()}")
+
   # Get the regions and blocks from the default collections.
   default_regions = list(op)
   default_blocks = list(default_regions[0])
@@ -60,7 +64,6 @@ def testTraverseOpRegionBlockIterators():
   # CHECK:         BLOCK 0:
   # CHECK:           OP 0: %0 = "custom.addi"
   # CHECK:           OP 1: return
-  # CHECK:    OP 1: module_terminator
   walk_operations("", op)
 
 run(testTraverseOpRegionBlockIterators)
@@ -97,7 +100,6 @@ def testTraverseOpRegionBlockIndices():
   # CHECK:         BLOCK 0:
   # CHECK:           OP 0: %0 = "custom.addi"
   # CHECK:           OP 1: return
-  # CHECK:    OP 1: module_terminator
   walk_operations("", module.operation)
 
 run(testTraverseOpRegionBlockIndices)
@@ -466,7 +468,7 @@ def testOperationPrint():
   print(bytes_value)
 
   # Test get_asm with options.
-  # CHECK: value = opaque<"", "0xDEADBEEF"> : tensor<4xi32>
+  # CHECK: value = opaque<"_", "0xDEADBEEF"> : tensor<4xi32>
   # CHECK: "std.return"(%arg0) : (i32) -> () -:4:7
   module.operation.print(large_elements_limit=2, enable_debug_info=True,
       pretty_debug_info=True, print_generic_op_form=True, use_local_scope=True)
@@ -488,7 +490,7 @@ def testKnownOpView():
     # addf should map to a known OpView class in the std dialect.
     # We know the OpView for it defines an 'lhs' attribute.
     addf = module.body.operations[2]
-    # CHECK: <mlir.dialects.std._AddFOp object
+    # CHECK: <mlir.dialects._std_ops_gen._AddFOp object
     print(repr(addf))
     # CHECK: "custom.f32"()
     print(addf.lhs)
@@ -542,14 +544,16 @@ run(testSingleResultProperty)
 def testPrintInvalidOperation():
   ctx = Context()
   with Location.unknown(ctx):
-    module = Operation.create("module", regions=1)
-    # This block does not have a terminator, it may crash the custom printer.
-    # Verify that we fallback to the generic printer for safety.
+    module = Operation.create("module", regions=2)
+    # This module has two region and is invalid verify that we fallback
+    # to the generic printer for safety.
     block = module.regions[0].blocks.append()
-    print(module)
     # CHECK: // Verification failed, printing generic form
     # CHECK: "module"() ( {
     # CHECK: }) : () -> ()
+    print(module)
+    # CHECK: .verify = False
+    print(f".verify = {module.operation.verify()}")
 run(testPrintInvalidOperation)
 
 
@@ -560,17 +564,17 @@ def testCreateWithInvalidAttributes():
     try:
       Operation.create("module", attributes={None:StringAttr.get("name")})
     except Exception as e:
-      # CHECK: Invalid attribute key (not a string) when attempting to create the operation "module" (Unable to cast Python instance of type <class 'NoneType'> to C++ type
+      # CHECK: Invalid attribute key (not a string) when attempting to create the operation "module"
       print(e)
     try:
       Operation.create("module", attributes={42:StringAttr.get("name")})
     except Exception as e:
-      # CHECK: Invalid attribute key (not a string) when attempting to create the operation "module" (Unable to cast Python instance of type <class 'int'> to C++ type
+      # CHECK: Invalid attribute key (not a string) when attempting to create the operation "module"
       print(e)
     try:
       Operation.create("module", attributes={"some_key":ctx})
     except Exception as e:
-      # CHECK: Invalid attribute value for the key "some_key" when attempting to create the operation "module" (Unable to cast Python instance of type <class '_mlir.ir.Context'> to C++ type 'mlir::python::PyAttribute')
+      # CHECK: Invalid attribute value for the key "some_key" when attempting to create the operation "module"
       print(e)
     try:
       Operation.create("module", attributes={"some_key":None})
@@ -578,3 +582,35 @@ def testCreateWithInvalidAttributes():
       # CHECK: Found an invalid (`None`?) attribute value for the key "some_key" when attempting to create the operation "module"
       print(e)
 run(testCreateWithInvalidAttributes)
+
+
+# CHECK-LABEL: TEST: testOperationName
+def testOperationName():
+  ctx = Context()
+  ctx.allow_unregistered_dialects = True
+  module = Module.parse(r"""
+    %0 = "custom.op1"() : () -> f32
+    %1 = "custom.op2"() : () -> i32
+    %2 = "custom.op1"() : () -> f32
+  """, ctx)
+
+  # CHECK: custom.op1
+  # CHECK: custom.op2
+  # CHECK: custom.op1
+  for op in module.body.operations:
+    print(op.operation.name)
+
+run(testOperationName)
+
+# CHECK-LABEL: TEST: testCapsuleConversions
+def testCapsuleConversions():
+  ctx = Context()
+  ctx.allow_unregistered_dialects = True
+  with Location.unknown(ctx):
+    m = Operation.create("custom.op1").operation
+    m_capsule = m._CAPIPtr
+    assert '"mlir.ir.Operation._CAPIPtr"' in repr(m_capsule)
+    m2 = Operation._CAPICreate(m_capsule)
+    assert m2 is m
+
+run(testCapsuleConversions)

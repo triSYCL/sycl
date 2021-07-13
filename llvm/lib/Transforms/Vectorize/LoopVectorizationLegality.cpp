@@ -37,11 +37,8 @@ static cl::opt<bool>
     EnableIfConversion("enable-if-conversion", cl::init(true), cl::Hidden,
                        cl::desc("Enable if-conversion during vectorization."));
 
-static cl::opt<unsigned> PragmaVectorizeMemoryCheckThreshold(
-    "pragma-vectorize-memory-check-threshold", cl::init(128), cl::Hidden,
-    cl::desc("The maximum allowed number of runtime memory checks with a "
-             "vectorize(enable) pragma."));
-
+// TODO: Move size-based thresholds out of legality checking, make cost based
+// decisions instead of hard thresholds.
 static cl::opt<unsigned> VectorizeSCEVCheckThreshold(
     "vectorize-scev-check-threshold", cl::init(16), cl::Hidden,
     cl::desc("The maximum number of SCEV checks allowed."));
@@ -244,42 +241,6 @@ void LoopVectorizeHints::setHint(StringRef Name, Metadata *Arg) {
       break;
     }
   }
-}
-
-bool LoopVectorizationRequirements::doesNotMeet(
-    Function *F, Loop *L, const LoopVectorizeHints &Hints) {
-  const char *PassName = Hints.vectorizeAnalysisPassName();
-  bool Failed = false;
-  if (UnsafeAlgebraInst && !Hints.allowReordering()) {
-    ORE.emit([&]() {
-      return OptimizationRemarkAnalysisFPCommute(
-                 PassName, "CantReorderFPOps", UnsafeAlgebraInst->getDebugLoc(),
-                 UnsafeAlgebraInst->getParent())
-             << "loop not vectorized: cannot prove it is safe to reorder "
-                "floating-point operations";
-    });
-    Failed = true;
-  }
-
-  // Test if runtime memcheck thresholds are exceeded.
-  bool PragmaThresholdReached =
-      NumRuntimePointerChecks > PragmaVectorizeMemoryCheckThreshold;
-  bool ThresholdReached =
-      NumRuntimePointerChecks > VectorizerParams::RuntimeMemoryCheckThreshold;
-  if ((ThresholdReached && !Hints.allowReordering()) ||
-      PragmaThresholdReached) {
-    ORE.emit([&]() {
-      return OptimizationRemarkAnalysisAliasing(PassName, "CantReorderMemOps",
-                                                L->getStartLoc(),
-                                                L->getHeader())
-             << "loop not vectorized: cannot prove it is safe to reorder "
-                "memory operations";
-    });
-    LLVM_DEBUG(dbgs() << "LV: Too many memory checks needed.\n");
-    Failed = true;
-  }
-
-  return Failed;
 }
 
 // Return true if the inner loop \p Lp is uniform with regard to the outer loop
@@ -594,21 +555,23 @@ static bool isTLIScalarize(const TargetLibraryInfo &TLI, const CallInst &CI) {
   bool Scalarize = TLI.isFunctionVectorizable(ScalarName);
   // Check that all known VFs are not associated to a vector
   // function, i.e. the vector name is emty.
-  if (Scalarize)
-    for (unsigned VF = 2, WidestVF = TLI.getWidestVF(ScalarName);
-         VF <= WidestVF; VF *= 2) {
+  if (Scalarize) {
+    ElementCount WidestFixedVF, WidestScalableVF;
+    TLI.getWidestVF(ScalarName, WidestFixedVF, WidestScalableVF);
+    for (ElementCount VF = ElementCount::getFixed(2);
+         ElementCount::isKnownLE(VF, WidestFixedVF); VF *= 2)
       Scalarize &= !TLI.isFunctionVectorizable(ScalarName, VF);
-    }
+    for (ElementCount VF = ElementCount::getScalable(1);
+         ElementCount::isKnownLE(VF, WidestScalableVF); VF *= 2)
+      Scalarize &= !TLI.isFunctionVectorizable(ScalarName, VF);
+    assert((WidestScalableVF.isZero() || !Scalarize) &&
+           "Caller may decide to scalarize a variant using a scalable VF");
+  }
   return Scalarize;
 }
 
 bool LoopVectorizationLegality::canVectorizeInstrs() {
   BasicBlock *Header = TheLoop->getHeader();
-
-  // Look for the attribute signaling the absence of NaNs.
-  Function &F = *Header->getParent();
-  HasFunNoNaNAttr =
-      F.getFnAttribute("no-nans-fp-math").getValueAsString() == "true";
 
   // For each block in the loop.
   for (BasicBlock *BB : TheLoop->blocks()) {
@@ -649,8 +612,7 @@ bool LoopVectorizationLegality::canVectorizeInstrs() {
         RecurrenceDescriptor RedDes;
         if (RecurrenceDescriptor::isReductionPHI(Phi, TheLoop, RedDes, DB, AC,
                                                  DT)) {
-          if (RedDes.hasUnsafeAlgebra())
-            Requirements->addUnsafeAlgebraInst(RedDes.getUnsafeAlgebraInst());
+          Requirements->addExactFPMathInst(RedDes.getExactFPMathInst());
           AllowedExit.insert(RedDes.getLoopExitInstr());
           Reductions[Phi] = RedDes;
           continue;
@@ -673,8 +635,7 @@ bool LoopVectorizationLegality::canVectorizeInstrs() {
         InductionDescriptor ID;
         if (InductionDescriptor::isInductionPHI(Phi, TheLoop, PSE, ID)) {
           addInductionPhi(Phi, ID, AllowedExit);
-          if (ID.hasUnsafeAlgebra() && !HasFunNoNaNAttr)
-            Requirements->addUnsafeAlgebraInst(ID.getUnsafeAlgebraInst());
+          Requirements->addExactFPMathInst(ID.getExactFPMathInst());
           continue;
         }
 
@@ -944,6 +905,12 @@ bool LoopVectorizationLegality::blockCanBePredicated(
       continue;
     }
 
+    // Do not let llvm.experimental.noalias.scope.decl block the vectorization.
+    // TODO: there might be cases that it should block the vectorization. Let's
+    // ignore those for now.
+    if (isa<NoAliasScopeDeclInst>(&I))
+      continue;
+
     // We might be able to hoist the load.
     if (I.mayReadFromMemory()) {
       auto *LI = dyn_cast<LoadInst>(&I);
@@ -1095,9 +1062,14 @@ bool LoopVectorizationLegality::canVectorizeLoopCFG(Loop *Lp,
       return false;
   }
 
-  // We must have a single exiting block.
-  if (!Lp->getExitingBlock()) {
-    reportVectorizationFailure("The loop must have an exiting block",
+  // We currently must have a single "exit block" after the loop. Note that
+  // multiple "exiting blocks" inside the loop are allowed, provided they all
+  // reach the single exit block.
+  // TODO: This restriction can be relaxed in the near future, it's here solely
+  // to allow separation of changes for review. We need to generalize the phi
+  // update logic in a number of places.
+  if (!Lp->getUniqueExitBlock()) {
+    reportVectorizationFailure("The loop must have a unique exit block",
         "loop control flow is not understood by vectorizer",
         "CFGNotUnderstood", ORE, TheLoop);
     if (DoExtraAnalysis)
@@ -1105,20 +1077,6 @@ bool LoopVectorizationLegality::canVectorizeLoopCFG(Loop *Lp,
     else
       return false;
   }
-
-  // We only handle bottom-tested loops, i.e. loop in which the condition is
-  // checked at the end of each iteration. With that we can assume that all
-  // instructions in the loop are executed the same number of times.
-  if (Lp->getExitingBlock() != Lp->getLoopLatch()) {
-    reportVectorizationFailure("The exiting block is not the loop latch",
-        "loop control flow is not understood by vectorizer",
-        "CFGNotUnderstood", ORE, TheLoop);
-    if (DoExtraAnalysis)
-      Result = false;
-    else
-      return false;
-  }
-
   return Result;
 }
 

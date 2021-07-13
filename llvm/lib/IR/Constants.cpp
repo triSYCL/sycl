@@ -304,22 +304,34 @@ bool Constant::isElementWiseEqual(Value *Y) const {
   return isa<UndefValue>(CmpEq) || match(CmpEq, m_One());
 }
 
-bool Constant::containsUndefElement() const {
-  if (auto *VTy = dyn_cast<VectorType>(getType())) {
-    if (isa<UndefValue>(this))
+static bool
+containsUndefinedElement(const Constant *C,
+                         function_ref<bool(const Constant *)> HasFn) {
+  if (auto *VTy = dyn_cast<VectorType>(C->getType())) {
+    if (HasFn(C))
       return true;
-    if (isa<ConstantAggregateZero>(this))
+    if (isa<ConstantAggregateZero>(C))
       return false;
-    if (isa<ScalableVectorType>(getType()))
+    if (isa<ScalableVectorType>(C->getType()))
       return false;
 
     for (unsigned i = 0, e = cast<FixedVectorType>(VTy)->getNumElements();
          i != e; ++i)
-      if (isa<UndefValue>(getAggregateElement(i)))
+      if (HasFn(C->getAggregateElement(i)))
         return true;
   }
 
   return false;
+}
+
+bool Constant::containsUndefOrPoisonElement() const {
+  return containsUndefinedElement(
+      this, [&](const auto *C) { return isa<UndefValue>(C); });
+}
+
+bool Constant::containsPoisonElement() const {
+  return containsUndefinedElement(
+      this, [&](const auto *C) { return isa<PoisonValue>(C); });
 }
 
 bool Constant::containsConstantExpression() const {
@@ -328,7 +340,6 @@ bool Constant::containsConstantExpression() const {
       if (isa<ConstantExpr>(getAggregateElement(i)))
         return true;
   }
-
   return false;
 }
 
@@ -408,6 +419,9 @@ Constant *Constant::getAllOnesValue(Type *Ty) {
 }
 
 Constant *Constant::getAggregateElement(unsigned Elt) const {
+  assert((getType()->isAggregateType() || getType()->isVectorTy()) &&
+         "Must be an aggregate/vector constant");
+
   if (const auto *CC = dyn_cast<ConstantAggregate>(this))
     return Elt < CC->getNumOperands() ? CC->getOperand(Elt) : nullptr;
 
@@ -641,12 +655,20 @@ bool Constant::isConstantUsed() const {
   return false;
 }
 
+bool Constant::needsDynamicRelocation() const {
+  return getRelocationInfo() == GlobalRelocation;
+}
+
 bool Constant::needsRelocation() const {
+  return getRelocationInfo() != NoRelocation;
+}
+
+Constant::PossibleRelocationsTy Constant::getRelocationInfo() const {
   if (isa<GlobalValue>(this))
-    return true; // Global reference.
+    return GlobalRelocation; // Global reference.
 
   if (const BlockAddress *BA = dyn_cast<BlockAddress>(this))
-    return BA->getFunction()->needsRelocation();
+    return BA->getFunction()->getRelocationInfo();
 
   if (const ConstantExpr *CE = dyn_cast<ConstantExpr>(this)) {
     if (CE->getOpcode() == Instruction::Sub) {
@@ -664,7 +686,7 @@ bool Constant::needsRelocation() const {
         if (isa<BlockAddress>(LHSOp0) && isa<BlockAddress>(RHSOp0) &&
             cast<BlockAddress>(LHSOp0)->getFunction() ==
                 cast<BlockAddress>(RHSOp0)->getFunction())
-          return false;
+          return NoRelocation;
 
         // Relative pointers do not need to be dynamically relocated.
         if (auto *RHSGV =
@@ -672,19 +694,20 @@ bool Constant::needsRelocation() const {
           auto *LHS = LHSOp0->stripInBoundsConstantOffsets();
           if (auto *LHSGV = dyn_cast<GlobalValue>(LHS)) {
             if (LHSGV->isDSOLocal() && RHSGV->isDSOLocal())
-              return false;
+              return LocalRelocation;
           } else if (isa<DSOLocalEquivalent>(LHS)) {
             if (RHSGV->isDSOLocal())
-              return false;
+              return LocalRelocation;
           }
         }
       }
     }
   }
 
-  bool Result = false;
+  PossibleRelocationsTy Result = NoRelocation;
   for (unsigned i = 0, e = getNumOperands(); i != e; ++i)
-    Result |= cast<Constant>(getOperand(i))->needsRelocation();
+    Result =
+        std::max(cast<Constant>(getOperand(i))->getRelocationInfo(), Result);
 
   return Result;
 }
@@ -701,6 +724,12 @@ static bool removeDeadUsersOfConstant(const Constant *C) {
       return false; // Constant wasn't dead
   }
 
+  // If C is only used by metadata, it should not be preserved but should have
+  // its uses replaced.
+  if (C->isUsedByMetadata()) {
+    const_cast<Constant *>(C)->replaceAllUsesWith(
+        UndefValue::get(C->getType()));
+  }
   const_cast<Constant*>(C)->destroyConstant();
   return true;
 }
@@ -815,6 +844,10 @@ ConstantInt *ConstantInt::getFalse(LLVMContext &Context) {
   return pImpl->TheFalseVal;
 }
 
+ConstantInt *ConstantInt::getBool(LLVMContext &Context, bool V) {
+  return V ? getTrue(Context) : getFalse(Context);
+}
+
 Constant *ConstantInt::getTrue(Type *Ty) {
   assert(Ty->isIntOrIntVectorTy(1) && "Type not i1 or vector of i1.");
   ConstantInt *TrueC = ConstantInt::getTrue(Ty->getContext());
@@ -829,6 +862,10 @@ Constant *ConstantInt::getFalse(Type *Ty) {
   if (auto *VTy = dyn_cast<VectorType>(Ty))
     return ConstantVector::getSplat(VTy->getElementCount(), FalseC);
   return FalseC;
+}
+
+Constant *ConstantInt::getBool(Type *Ty, bool V) {
+  return V ? getTrue(Ty) : getFalse(Ty);
 }
 
 // Get a ConstantInt from an APInt.
@@ -1228,6 +1265,9 @@ Constant *ConstantArray::getImpl(ArrayType *Ty, ArrayRef<Constant*> V) {
   // all undef, return an UndefValue, if "all simple", then return a
   // ConstantDataArray.
   Constant *C = V[0];
+  if (isa<PoisonValue>(C) && rangeOnlyContains(V.begin(), V.end(), C))
+    return PoisonValue::get(Ty);
+
   if (isa<UndefValue>(C) && rangeOnlyContains(V.begin(), V.end(), C))
     return UndefValue::get(Ty);
 
@@ -1276,21 +1316,28 @@ Constant *ConstantStruct::get(StructType *ST, ArrayRef<Constant*> V) {
   // Create a ConstantAggregateZero value if all elements are zeros.
   bool isZero = true;
   bool isUndef = false;
+  bool isPoison = false;
 
   if (!V.empty()) {
     isUndef = isa<UndefValue>(V[0]);
+    isPoison = isa<PoisonValue>(V[0]);
     isZero = V[0]->isNullValue();
+    // PoisonValue inherits UndefValue, so its check is not necessary.
     if (isUndef || isZero) {
       for (unsigned i = 0, e = V.size(); i != e; ++i) {
         if (!V[i]->isNullValue())
           isZero = false;
-        if (!isa<UndefValue>(V[i]))
+        if (!isa<PoisonValue>(V[i]))
+          isPoison = false;
+        if (isa<PoisonValue>(V[i]) || !isa<UndefValue>(V[i]))
           isUndef = false;
       }
     }
   }
   if (isZero)
     return ConstantAggregateZero::get(ST);
+  if (isPoison)
+    return PoisonValue::get(ST);
   if (isUndef)
     return UndefValue::get(ST);
 
@@ -1320,17 +1367,20 @@ Constant *ConstantVector::getImpl(ArrayRef<Constant*> V) {
   Constant *C = V[0];
   bool isZero = C->isNullValue();
   bool isUndef = isa<UndefValue>(C);
+  bool isPoison = isa<PoisonValue>(C);
 
   if (isZero || isUndef) {
     for (unsigned i = 1, e = V.size(); i != e; ++i)
       if (V[i] != C) {
-        isZero = isUndef = false;
+        isZero = isUndef = isPoison = false;
         break;
       }
   }
 
   if (isZero)
     return ConstantAggregateZero::get(T);
+  if (isPoison)
+    return PoisonValue::get(T);
   if (isUndef)
     return UndefValue::get(T);
 
@@ -1656,7 +1706,7 @@ Constant *Constant::getSplatValue(bool AllowUndefs) const {
       ConstantInt *Index = dyn_cast<ConstantInt>(IElt->getOperand(2));
 
       if (Index && Index->getValue() == 0 &&
-          std::all_of(Mask.begin(), Mask.end(), [](int I) { return I == 0; }))
+          llvm::all_of(Mask, [](int I) { return I == 0; }))
         return SplatVal;
     }
   }
@@ -1718,9 +1768,6 @@ void ConstantPointerNull::destroyConstantImpl() {
 }
 
 UndefValue *UndefValue::get(Type *Ty) {
-  if (Ty->isPointerTy() && Ty->getPointerElementType()->isIntegerTy(1)) {
-    llvm::errs() << "HERE\n";
-  }
   std::unique_ptr<UndefValue> &Entry = Ty->getContext().pImpl->UVConstants[Ty];
   if (!Entry)
     Entry.reset(new UndefValue(Ty));
@@ -1880,6 +1927,12 @@ Value *DSOLocalEquivalent::handleOperandChangeImpl(Value *From, Value *To) {
   getContext().pImpl->DSOLocalEquivalents.erase(getGlobalValue());
   NewEquiv = this;
   setOperand(0, Func);
+
+  if (Func->getType() != getType()) {
+    // It is ok to mutate the type here because this constant should always
+    // reflect the type of the function it's holding.
+    mutateType(Func->getType());
+  }
   return nullptr;
 }
 
@@ -3414,7 +3467,7 @@ Value *ConstantExpr::handleOperandChangeImpl(Value *From, Value *ToV) {
 }
 
 Instruction *ConstantExpr::getAsInstruction() const {
-  SmallVector<Value *, 4> ValueOperands(op_begin(), op_end());
+  SmallVector<Value *, 4> ValueOperands(operands());
   ArrayRef<Value*> Ops(ValueOperands);
 
   switch (getOpcode()) {

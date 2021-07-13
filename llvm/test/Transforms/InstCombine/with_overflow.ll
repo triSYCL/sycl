@@ -61,7 +61,7 @@ define i8 @uaddtest3(i8 %A, i8 %B, i1* %overflowPtr) {
 define i8 @uaddtest4(i8 %A, i1* %overflowPtr) {
 ; CHECK-LABEL: @uaddtest4(
 ; CHECK-NEXT:    store i1 false, i1* [[OVERFLOWPTR:%.*]], align 1
-; CHECK-NEXT:    ret i8 undef
+; CHECK-NEXT:    ret i8 -1
 ;
   %x = call { i8, i1 } @llvm.uadd.with.overflow.i8(i8 undef, i8 %A)
   %y = extractvalue { i8, i1 } %x, 0
@@ -325,6 +325,17 @@ define i1 @overflow_mod_overflow_mul(i32 %v1, i32 %v2) nounwind {
   %rem = srem i32 %v1, 65537
   ; This may overflow because the result of the mul operands may be greater than 16bits
   ; and the result greater than 32.
+  %t = call { i32, i1 } @llvm.smul.with.overflow.i32(i32 %rem, i32 %rem)
+  %obit = extractvalue { i32, i1 } %t, 1
+  ret i1 %obit
+}
+
+define i1 @overflow_mod_mul2(i16 %v1, i32 %v2) nounwind {
+; CHECK-LABEL: @overflow_mod_mul2(
+; CHECK-NEXT:    ret i1 false
+;
+  %a = sext i16 %v1 to i32
+  %rem = srem i32 %a, %v2
   %t = call { i32, i1 } @llvm.smul.with.overflow.i32(i32 %rem, i32 %rem)
   %obit = extractvalue { i32, i1 } %t, 1
   ret i1 %obit

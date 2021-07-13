@@ -14,16 +14,60 @@
 #define LLVMIR_OPS
 
 include "mlir/Dialect/LLVMIR/LLVMOpBase.td"
+include "mlir/Dialect/LLVMIR/LLVMOpsInterfaces.td"
 include "mlir/IR/SymbolInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
+
+def FMFnnan     : BitEnumAttrCase<"nnan", 0x1>;
+def FMFninf     : BitEnumAttrCase<"ninf", 0x2>;
+def FMFnsz      : BitEnumAttrCase<"nsz", 0x4>;
+def FMFarcp     : BitEnumAttrCase<"arcp", 0x8>;
+def FMFcontract : BitEnumAttrCase<"contract", 0x10>;
+def FMFafn      : BitEnumAttrCase<"afn", 0x20>;
+def FMFreassoc  : BitEnumAttrCase<"reassoc", 0x40>;
+def FMFfast     : BitEnumAttrCase<"fast", 0x80>;
+
+def FastmathFlags : BitEnumAttr<
+    "FastmathFlags",
+    "LLVM fastmath flags",
+    [FMFnnan, FMFninf, FMFnsz, FMFarcp, FMFcontract, FMFafn, FMFreassoc, FMFfast
+    ]> {
+  let cppNamespace = "::mlir::LLVM";
+}
+
+def LLVM_FMFAttr : DialectAttr<
+    LLVM_Dialect,
+    CPred<"$_self.isa<::mlir::LLVM::FMFAttr>()">,
+    "LLVM fastmath flags"> {
+  let storageType = "::mlir::LLVM::FMFAttr";
+  let returnType = "::mlir::LLVM::FastmathFlags";
+  let convertFromStorage = "$_self.getFlags()";
+  let constBuilderCall =
+          "::mlir::LLVM::FMFAttr::get($_builder.getContext(), $0)";
+}
+
+def LOptDisableUnroll : I32EnumAttrCase<"disable_unroll", 1>;
+def LOptDisableLICM : I32EnumAttrCase<"disable_licm", 2>;
+def LOptInterleaveCount : I32EnumAttrCase<"interleave_count", 3>;
+def LOptDisablePipeline : I32EnumAttrCase<"disable_pipeline", 4>;
+def LOptPipelineInitiationInterval : I32EnumAttrCase<"pipeline_initiation_interval", 5>;
+
+def LoopOptionCase : I32EnumAttr<
+    "LoopOptionCase",
+    "LLVM loop option",
+    [LOptDisableUnroll, LOptDisableLICM, LOptInterleaveCount,
+     LOptDisablePipeline, LOptPipelineInitiationInterval
+    ]> {
+  let cppNamespace = "::mlir::LLVM";
+}
 
 class LLVM_Builder<string builder> {
   string llvmBuilder = builder;
 }
 
 def LLVM_OneResultOpBuilder :
-  OpBuilderDAG<(ins "Type":$resultType, "ValueRange":$operands,
+  OpBuilder<(ins "Type":$resultType, "ValueRange":$operands,
     CArg<"ArrayRef<NamedAttribute>", "{}">:$attributes),
   [{
     if (resultType) $_state.addTypes(resultType);
@@ -34,7 +78,7 @@ def LLVM_OneResultOpBuilder :
   }]>;
 
 def LLVM_ZeroResultOpBuilder :
-  OpBuilderDAG<(ins "ValueRange":$operands,
+  OpBuilder<(ins "ValueRange":$operands,
     CArg<"ArrayRef<NamedAttribute>", "{}">:$attributes),
   [{
     $_state.addOperands(operands);
@@ -46,12 +90,11 @@ def LLVM_ZeroResultOpBuilder :
 // Compatibility builder that takes an instance of wrapped llvm::VoidType
 // to indicate no result.
 def LLVM_VoidResultTypeOpBuilder :
-  OpBuilderDAG<(ins "Type":$resultType, "ValueRange":$operands,
+  OpBuilder<(ins "Type":$resultType, "ValueRange":$operands,
     CArg<"ArrayRef<NamedAttribute>", "{}">:$attributes),
   [{
-    auto llvmType = resultType.dyn_cast<LLVMType>(); (void)llvmType;
-    assert(llvmType && "result must be an LLVM type");
-    assert(llvmType.isVoidTy() &&
+    assert(isCompatibleType(resultType) && "result must be an LLVM type");
+    assert(resultType.isa<LLVMVoidType>() &&
            "for zero-result operands, only 'void' is accepted as result type");
     build($_builder, $_state, operands, attributes);
   }]>;
@@ -59,7 +102,7 @@ def LLVM_VoidResultTypeOpBuilder :
 
 // Opaque builder used for terminator operations that contain successors.
 def LLVM_TerminatorPassthroughOpBuilder :
-  OpBuilderDAG<(ins "ValueRange":$operands, "SuccessorRange":$destinations,
+  OpBuilder<(ins "ValueRange":$operands, "SuccessorRange":$destinations,
     CArg<"ArrayRef<NamedAttribute>", "{}">:$attributes),
   [{
     $_state.addOperands(operands);
@@ -78,29 +121,35 @@ class LLVM_ArithmeticOpBase<Type type, string mnemonic,
     LLVM_Op<mnemonic,
            !listconcat([NoSideEffect, SameOperandsAndResultType], traits)>,
     LLVM_Builder<"$res = builder." # builderFunc # "($lhs, $rhs);"> {
-  let arguments = (ins LLVM_ScalarOrVectorOf<type>:$lhs,
-                   LLVM_ScalarOrVectorOf<type>:$rhs);
+  dag commonArgs = (ins LLVM_ScalarOrVectorOf<type>:$lhs,
+                    LLVM_ScalarOrVectorOf<type>:$rhs);
   let results = (outs LLVM_ScalarOrVectorOf<type>:$res);
   let builders = [LLVM_OneResultOpBuilder];
-  let assemblyFormat = "$lhs `,` $rhs attr-dict `:` type($res)";
+  let assemblyFormat = "$lhs `,` $rhs custom<LLVMOpAttrs>(attr-dict) `:` type($res)";
 }
 class LLVM_IntArithmeticOp<string mnemonic, string builderFunc,
                            list<OpTrait> traits = []> :
-    LLVM_ArithmeticOpBase<LLVM_AnyInteger, mnemonic, builderFunc, traits>;
+    LLVM_ArithmeticOpBase<LLVM_AnyInteger, mnemonic, builderFunc, traits> {
+  let arguments = commonArgs;
+}
 class LLVM_FloatArithmeticOp<string mnemonic, string builderFunc,
                              list<OpTrait> traits = []> :
-    LLVM_ArithmeticOpBase<LLVM_AnyFloat, mnemonic, builderFunc, traits>;
+    LLVM_ArithmeticOpBase<LLVM_AnyFloat, mnemonic, builderFunc,
+    !listconcat([DeclareOpInterfaceMethods<FastmathFlagsInterface>], traits)> {
+  dag fmfArg = (ins DefaultValuedAttr<LLVM_FMFAttr, "{}">:$fastmathFlags);
+  let arguments = !con(commonArgs, fmfArg);
+}
 
 // Class for arithmetic unary operations.
-class LLVM_UnaryArithmeticOp<Type type, string mnemonic,
+class LLVM_UnaryFloatArithmeticOp<Type type, string mnemonic,
                              string builderFunc, list<OpTrait> traits = []> :
     LLVM_Op<mnemonic,
-           !listconcat([NoSideEffect, SameOperandsAndResultType], traits)>,
+           !listconcat([NoSideEffect, SameOperandsAndResultType, DeclareOpInterfaceMethods<FastmathFlagsInterface>], traits)>,
     LLVM_Builder<"$res = builder." # builderFunc # "($operand);"> {
-  let arguments = (ins type:$operand);
+  let arguments = (ins type:$operand, DefaultValuedAttr<LLVM_FMFAttr, "{}">:$fastmathFlags);
   let results = (outs type:$res);
   let builders = [LLVM_OneResultOpBuilder];
-  let assemblyFormat = "$operand attr-dict `:` type($res)";
+  let assemblyFormat = "$operand custom<LLVMOpAttrs>(attr-dict) `:` type($res)";
 }
 
 // Integer binary operations.
@@ -143,15 +192,15 @@ def LLVM_ICmpOp : LLVM_Op<"icmp", [NoSideEffect]> {
   let arguments = (ins ICmpPredicate:$predicate,
                    LLVM_ScalarOrVectorOf<LLVM_AnyInteger>:$lhs,
                    LLVM_ScalarOrVectorOf<LLVM_AnyInteger>:$rhs);
-  let results = (outs LLVM_ScalarOrVectorOf<LLVM_i1>:$res);
+  let results = (outs LLVM_ScalarOrVectorOf<I1>:$res);
   let llvmBuilder = [{
     $res = builder.CreateICmp(getLLVMCmpPredicate($predicate), $lhs, $rhs);
   }];
   let builders = [
-    OpBuilderDAG<(ins "ICmpPredicate":$predicate, "Value":$lhs, "Value":$rhs),
+    OpBuilder<(ins "ICmpPredicate":$predicate, "Value":$lhs, "Value":$rhs),
     [{
-      build($_builder, $_state, LLVMType::getInt1Ty(lhs.getType().getContext()),
-            $_builder.getI64IntegerAttr(static_cast<int64_t>(predicate)), lhs, rhs);
+      build($_builder, $_state, IntegerType::get(lhs.getType().getContext(), 1),
+            predicate, lhs, rhs);
     }]>];
   let parser = [{ return parseCmpOp<ICmpPredicate>(parser, result); }];
   let printer = [{ printICmpOp(p, *this); }];
@@ -186,21 +235,17 @@ def FCmpPredicate : I64EnumAttr<
   let cppNamespace = "::mlir::LLVM";
 }
 
-// Other integer operations.
-def LLVM_FCmpOp : LLVM_Op<"fcmp", [NoSideEffect]> {
+// Other floating-point operations.
+def LLVM_FCmpOp : LLVM_Op<"fcmp", [
+    NoSideEffect, DeclareOpInterfaceMethods<FastmathFlagsInterface>]> {
   let arguments = (ins FCmpPredicate:$predicate,
                    LLVM_ScalarOrVectorOf<LLVM_AnyFloat>:$lhs,
-                   LLVM_ScalarOrVectorOf<LLVM_AnyFloat>:$rhs);
-  let results = (outs LLVM_ScalarOrVectorOf<LLVM_i1>:$res);
+                   LLVM_ScalarOrVectorOf<LLVM_AnyFloat>:$rhs,
+                   DefaultValuedAttr<LLVM_FMFAttr, "{}">:$fastmathFlags);
+  let results = (outs LLVM_ScalarOrVectorOf<I1>:$res);
   let llvmBuilder = [{
     $res = builder.CreateFCmp(getLLVMCmpPredicate($predicate), $lhs, $rhs);
   }];
-  let builders = [
-    OpBuilderDAG<(ins "FCmpPredicate":$predicate, "Value":$lhs, "Value":$rhs),
-    [{
-      build($_builder, $_state, LLVMType::getInt1Ty(lhs.getType().getContext()),
-            $_builder.getI64IntegerAttr(static_cast<int64_t>(predicate)), lhs, rhs);
-    }]>];
   let parser = [{ return parseCmpOp<FCmpPredicate>(parser, result); }];
   let printer = [{ printFCmpOp(p, *this); }];
 }
@@ -211,8 +256,8 @@ def LLVM_FSubOp : LLVM_FloatArithmeticOp<"fsub", "CreateFSub">;
 def LLVM_FMulOp : LLVM_FloatArithmeticOp<"fmul", "CreateFMul">;
 def LLVM_FDivOp : LLVM_FloatArithmeticOp<"fdiv", "CreateFDiv">;
 def LLVM_FRemOp : LLVM_FloatArithmeticOp<"frem", "CreateFRem">;
-def LLVM_FNegOp : LLVM_UnaryArithmeticOp<LLVM_ScalarOrVectorOf<LLVM_AnyFloat>,
-                                         "fneg", "CreateFNeg">;
+def LLVM_FNegOp : LLVM_UnaryFloatArithmeticOp<
+  LLVM_ScalarOrVectorOf<LLVM_AnyFloat>, "fneg", "CreateFNeg">;
 
 // Common code definition that is used to verify and set the alignment attribute
 // of LLVM ops that accept such an attribute.
@@ -237,6 +282,10 @@ class MemoryOpWithAlignmentAndAttributes : MemoryOpWithAlignmentBase {
       inst->setMetadata(module->getMDKindID("nontemporal"), metadata);
     }
   }];
+
+  code setAccessGroupsMetadataCode = [{
+    moduleTranslation.setAccessGroupsMetadata(op, inst);
+  }];
 }
 
 // Memory-related operations.
@@ -251,7 +300,7 @@ def LLVM_AllocaOp : LLVM_Op<"alloca">, MemoryOpWithAlignmentBase {
     $res = inst;
   }];
   let builders = [
-    OpBuilderDAG<(ins "Type":$resultType, "Value":$arraySize,
+    OpBuilder<(ins "Type":$resultType, "Value":$arraySize,
       "unsigned":$alignment),
     [{
       if (alignment == 0)
@@ -263,8 +312,11 @@ def LLVM_AllocaOp : LLVM_Op<"alloca">, MemoryOpWithAlignmentBase {
   let printer = [{ printAllocaOp(p, *this); }];
 }
 
-def LLVM_GEPOp : LLVM_Op<"getelementptr", [NoSideEffect]>,
-                 LLVM_Builder<"$res = builder.CreateGEP($base, $indices);"> {
+def LLVM_GEPOp
+    : LLVM_Op<"getelementptr", [NoSideEffect]>,
+      LLVM_Builder<
+          "$res = builder.CreateGEP("
+          " $base->getType()->getPointerElementType(), $base, $indices);"> {
   let arguments = (ins LLVM_ScalarOrVectorOf<LLVM_AnyPointer>:$base,
                    Variadic<LLVM_ScalarOrVectorOf<LLVM_AnyInteger>>:$indices);
   let results = (outs LLVM_ScalarOrVectorOf<LLVM_AnyPointer>:$res);
@@ -276,43 +328,48 @@ def LLVM_GEPOp : LLVM_Op<"getelementptr", [NoSideEffect]>,
 
 def LLVM_LoadOp : LLVM_Op<"load">, MemoryOpWithAlignmentAndAttributes {
   let arguments = (ins LLVM_PointerTo<LLVM_LoadableType>:$addr,
+                   OptionalAttr<SymbolRefArrayAttr>:$access_groups,
                    OptionalAttr<I64Attr>:$alignment, UnitAttr:$volatile_,
                    UnitAttr:$nontemporal);
   let results = (outs LLVM_Type:$res);
   string llvmBuilder = [{
-    auto *inst = builder.CreateLoad($addr, $volatile_);
-  }] # setAlignmentCode # setNonTemporalMetadataCode # [{
+    auto *inst = builder.CreateLoad(
+      $addr->getType()->getPointerElementType(), $addr, $volatile_);
+  }] # setAlignmentCode # setNonTemporalMetadataCode # setAccessGroupsMetadataCode # [{
     $res = inst;
   }];
   let builders = [
-    OpBuilderDAG<(ins "Value":$addr, CArg<"unsigned", "0">:$alignment,
+    OpBuilder<(ins "Value":$addr, CArg<"unsigned", "0">:$alignment,
       CArg<"bool", "false">:$isVolatile, CArg<"bool", "false">:$isNonTemporal),
     [{
-      auto type = addr.getType().cast<LLVMType>().getPointerElementTy();
+      auto type = addr.getType().cast<LLVMPointerType>().getElementType();
       build($_builder, $_state, type, addr, alignment, isVolatile, isNonTemporal);
     }]>,
-    OpBuilderDAG<(ins "Type":$t, "Value":$addr,
+    OpBuilder<(ins "Type":$t, "Value":$addr,
       CArg<"unsigned", "0">:$alignment, CArg<"bool", "false">:$isVolatile,
       CArg<"bool", "false">:$isNonTemporal)>];
   let parser = [{ return parseLoadOp(parser, result); }];
   let printer = [{ printLoadOp(p, *this); }];
+  let verifier = [{ return ::verify(*this);  }];
 }
 
 def LLVM_StoreOp : LLVM_Op<"store">, MemoryOpWithAlignmentAndAttributes {
   let arguments = (ins LLVM_LoadableType:$value,
                    LLVM_PointerTo<LLVM_LoadableType>:$addr,
+                   OptionalAttr<SymbolRefArrayAttr>:$access_groups,
                    OptionalAttr<I64Attr>:$alignment, UnitAttr:$volatile_,
                    UnitAttr:$nontemporal);
   string llvmBuilder = [{
     auto *inst = builder.CreateStore($value, $addr, $volatile_);
-  }] # setAlignmentCode # setNonTemporalMetadataCode;
+  }] # setAlignmentCode # setNonTemporalMetadataCode # setAccessGroupsMetadataCode;
   let builders = [
-    OpBuilderDAG<(ins "Value":$value, "Value":$addr,
+    OpBuilder<(ins "Value":$value, "Value":$addr,
       CArg<"unsigned", "0">:$alignment, CArg<"bool", "false">:$isVolatile,
       CArg<"bool", "false">:$isNonTemporal)>
     ];
   let parser = [{ return parseStoreOp(parser, result); }];
   let printer = [{ printStoreOp(p, *this); }];
+  let verifier = [{ return ::verify(*this);  }];
 }
 
 // Casts.
@@ -379,14 +436,14 @@ def LLVM_InvokeOp : LLVM_Op<"invoke", [
                               AnySuccessor:$unwindDest);
 
   let builders = [
-    OpBuilderDAG<(ins "TypeRange":$tys, "FlatSymbolRefAttr":$callee,
+    OpBuilder<(ins "TypeRange":$tys, "FlatSymbolRefAttr":$callee,
       "ValueRange":$ops, "Block*":$normal, "ValueRange":$normalOps,
       "Block*":$unwind, "ValueRange":$unwindOps),
     [{
       $_state.addAttribute("callee", callee);
       build($_builder, $_state, tys, ops, normal, normalOps, unwind, unwindOps);
     }]>,
-    OpBuilderDAG<(ins "TypeRange":$tys, "ValueRange":$ops, "Block*":$normal,
+    OpBuilder<(ins "TypeRange":$tys, "ValueRange":$ops, "Block*":$normal,
       "ValueRange":$normalOps, "Block*":$unwind, "ValueRange":$unwindOps),
     [{
       build($_builder, $_state, tys, /*callee=*/FlatSymbolRefAttr(), ops, normalOps,
@@ -406,7 +463,8 @@ def LLVM_LandingpadOp : LLVM_Op<"landingpad"> {
   let printer = [{ printLandingpadOp(p, *this); }];
 }
 
-def LLVM_CallOp : LLVM_Op<"call"> {
+def LLVM_CallOp : LLVM_Op<"call",
+                          [DeclareOpInterfaceMethods<FastmathFlagsInterface>]> {
   let summary = "Call to an LLVM function.";
   let description = [{
 
@@ -427,24 +485,25 @@ def LLVM_CallOp : LLVM_Op<"call"> {
 
     ```mlir
     // Direct call without arguments and with one result.
-    %0 = llvm.call @foo() : () -> (!llvm.float)
+    %0 = llvm.call @foo() : () -> (f32)
 
     // Direct call with arguments and without a result.
-    llvm.call @bar(%0) : (!llvm.float) -> ()
+    llvm.call @bar(%0) : (f32) -> ()
 
     // Indirect call with an argument and without a result.
-    llvm.call %1(%0) : (!llvm.float) -> ()
+    llvm.call %1(%0) : (f32) -> ()
     ```
   }];
   let arguments = (ins OptionalAttr<FlatSymbolRefAttr>:$callee,
-                   Variadic<LLVM_Type>);
+                   Variadic<LLVM_Type>,
+                   DefaultValuedAttr<LLVM_FMFAttr, "{}">:$fastmathFlags);
   let results = (outs Variadic<LLVM_Type>);
   let builders = [
-    OpBuilderDAG<(ins "LLVMFuncOp":$func, "ValueRange":$operands,
+    OpBuilder<(ins "LLVMFuncOp":$func, "ValueRange":$operands,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attributes),
     [{
-      LLVMType resultType = func.getType().getFunctionResultType();
-      if (!resultType.isVoidTy())
+      Type resultType = func.getType().getReturnType();
+      if (!resultType.isa<LLVM::LLVMVoidType>())
         $_state.addTypes(resultType);
       $_state.addAttribute("callee", $_builder.getSymbolRefAttr(func));
       $_state.addAttributes(attributes);
@@ -461,7 +520,7 @@ def LLVM_ExtractElementOp : LLVM_Op<"extractelement", [NoSideEffect]> {
     $res = builder.CreateExtractElement($vector, $position);
   }];
   let builders = [
-    OpBuilderDAG<(ins "Value":$vector, "Value":$position,
+    OpBuilder<(ins "Value":$vector, "Value":$position,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)>];
   let parser = [{ return parseExtractElementOp(parser, result); }];
   let printer = [{ printExtractElementOp(p, *this); }];
@@ -496,7 +555,7 @@ def LLVM_InsertValueOp : LLVM_Op<"insertvalue", [NoSideEffect]> {
                                      extractPosition($position));
   }];
   let builders = [
-    OpBuilderDAG<(ins "Value":$container, "Value":$value, "ArrayAttr":$position),
+    OpBuilder<(ins "Value":$container, "Value":$value, "ArrayAttr":$position),
     [{
       build($_builder, $_state, container.getType(), container, value, position);
     }]>];
@@ -512,15 +571,13 @@ def LLVM_ShuffleVectorOp : LLVM_Op<"shufflevector", [NoSideEffect]> {
       $res = builder.CreateShuffleVector($v1, $v2, mask);
   }];
   let builders = [
-    OpBuilderDAG<(ins "Value":$v1, "Value":$v2, "ArrayAttr":$mask,
+    OpBuilder<(ins "Value":$v1, "Value":$v2, "ArrayAttr":$mask,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)>];
   let verifier = [{
-    auto wrappedVectorType1 = v1().getType().cast<LLVMType>();
-    auto wrappedVectorType2 = v2().getType().cast<LLVMType>();
-    if (!wrappedVectorType2.isVectorTy())
-      return emitOpError("expected LLVM IR Dialect vector type for operand #2");
-    if (wrappedVectorType1.getVectorElementType() !=
-        wrappedVectorType2.getVectorElementType())
+    auto type1 = v1().getType();
+    auto type2 = v2().getType();
+    if (::mlir::LLVM::getVectorElementType(type1) !=
+            ::mlir::LLVM::getVectorElementType(type2))
       return emitOpError("expected matching LLVM IR Dialect element types");
     return success();
   }];
@@ -534,11 +591,11 @@ def LLVM_SelectOp
           [NoSideEffect, AllTypesMatch<["trueValue", "falseValue", "res"]>]>,
       LLVM_Builder<
           "$res = builder.CreateSelect($condition, $trueValue, $falseValue);"> {
-  let arguments = (ins LLVM_ScalarOrVectorOf<LLVM_i1>:$condition,
+  let arguments = (ins LLVM_ScalarOrVectorOf<I1>:$condition,
                    LLVM_Type:$trueValue, LLVM_Type:$falseValue);
   let results = (outs LLVM_Type:$res);
   let builders = [
-    OpBuilderDAG<(ins "Value":$condition, "Value":$lhs, "Value":$rhs),
+    OpBuilder<(ins "Value":$condition, "Value":$lhs, "Value":$rhs),
     [{
       build($_builder, $_state, lhs.getType(), condition, lhs, rhs);
     }]>];
@@ -565,7 +622,7 @@ def LLVM_BrOp : LLVM_TerminatorOp<"br",
 def LLVM_CondBrOp : LLVM_TerminatorOp<"cond_br",
     [AttrSizedOperandSegments, DeclareOpInterfaceMethods<BranchOpInterface>,
      NoSideEffect]> {
-  let arguments = (ins LLVM_i1:$condition,
+  let arguments = (ins I1:$condition,
                    Variadic<LLVM_Type>:$trueDestOperands,
                    Variadic<LLVM_Type>:$falseDestOperands,
                    OptionalAttr<ElementsAttr>:$branch_weights);
@@ -578,7 +635,7 @@ def LLVM_CondBrOp : LLVM_TerminatorOp<"cond_br",
   }];
 
   let builders = [
-    OpBuilderDAG<(ins "Value":$condition, "Block *":$trueDest,
+    OpBuilder<(ins "Value":$condition, "Block *":$trueDest,
       "ValueRange":$trueOperands, "Block *":$falseDest,
       "ValueRange":$falseOperands,
       CArg<"Optional<std::pair<uint32_t, uint32_t>>", "{}">:$weights),
@@ -592,7 +649,7 @@ def LLVM_CondBrOp : LLVM_TerminatorOp<"cond_br",
         build($_builder, $_state, condition, trueOperands, falseOperands, weightsAttr,
               trueDest, falseDest);
   }]>,
-  OpBuilderDAG<(ins "Value":$condition, "Block *":$trueDest,
+  OpBuilder<(ins "Value":$condition, "Block *":$trueDest,
     "Block *":$falseDest, CArg<"ValueRange", "{}">:$falseOperands),
   [{
       build($_builder, $_state, condition, trueDest, ValueRange(), falseDest,
@@ -616,6 +673,7 @@ def LLVM_ReturnOp : LLVM_TerminatorOp<"return", [NoSideEffect]> {
 
   let parser = [{ return parseReturnOp(parser, result); }];
   let printer = [{ printReturnOp(p, *this); }];
+  let verifier = [{ return ::verify(*this); }];
 }
 def LLVM_ResumeOp : LLVM_TerminatorOp<"resume", []> {
   let arguments = (ins LLVM_Type:$value);
@@ -638,7 +696,7 @@ def LLVM_UnreachableOp : LLVM_TerminatorOp<"unreachable", []> {
 def LLVM_SwitchOp : LLVM_TerminatorOp<"switch",
     [AttrSizedOperandSegments, DeclareOpInterfaceMethods<BranchOpInterface>,
      NoSideEffect]> {
-  let arguments = (ins LLVM_i32:$value,
+  let arguments = (ins I32:$value,
                    Variadic<AnyType>:$defaultOperands,
                    Variadic<AnyType>:$caseOperands,
                    OptionalAttr<ElementsAttr>:$case_values,
@@ -659,7 +717,7 @@ def LLVM_SwitchOp : LLVM_TerminatorOp<"switch",
   }];
 
   let builders = [
-    OpBuilderDAG<(ins "Value":$value,
+    OpBuilder<(ins "Value":$value,
       "Block *":$defaultDestination,
       "ValueRange":$defaultOperands,
       CArg<"ArrayRef<int32_t>", "{}">:$caseValues,
@@ -722,6 +780,17 @@ def Linkage : LLVM_EnumAttr<
   let cppNamespace = "::mlir::LLVM";
 }
 
+def UnnamedAddrNone : LLVM_EnumAttrCase<"None", "", "None", 0>;
+def UnnamedAddrLocal : LLVM_EnumAttrCase<"Local", "local_unnamed_addr", "Local", 1>;
+def UnnamedAddrGlobal : LLVM_EnumAttrCase<"Global", "unnamed_addr", "Global", 2>;
+
+def UnnamedAddr : LLVM_EnumAttr<
+    "UnnamedAddr",
+    "::llvm::GlobalValue::UnnamedAddr",
+    "LLVM GlobalValue UnnamedAddr",
+    [UnnamedAddrNone, UnnamedAddrLocal, UnnamedAddrGlobal]> {
+  let cppNamespace = "::mlir::LLVM";
+}
 
 def LLVM_AddressOfOp : LLVM_Op<"mlir.addressof"> {
   let arguments = (ins FlatSymbolRefAttr:$global_name);
@@ -753,28 +822,26 @@ def LLVM_AddressOfOp : LLVM_Op<"mlir.addressof"> {
     }
 
     // Define the global.
-    llvm.mlir.global @const(42 : i32) : !llvm.i32
+    llvm.mlir.global @const(42 : i32) : i32
     ```
   }];
 
   let builders = [
-    OpBuilderDAG<(ins "LLVMType":$resType, "StringRef":$name,
+    OpBuilder<(ins "GlobalOp":$global,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs),
     [{
-      $_state.addAttribute("global_name",$_builder.getSymbolRefAttr(name));
+      build($_builder, $_state,
+            LLVM::LLVMPointerType::get(global.getType(), global.addr_space()),
+            global.sym_name());
       $_state.addAttributes(attrs);
-      $_state.addTypes(resType);}]>,
-    OpBuilderDAG<(ins "GlobalOp":$global,
+    }]>,
+    OpBuilder<(ins "LLVMFuncOp":$func,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs),
     [{
       build($_builder, $_state,
-            global.getType().getPointerTo(global.addr_space()),
-            global.sym_name(), attrs);}]>,
-    OpBuilderDAG<(ins "LLVMFuncOp":$func,
-      CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs),
-    [{
-      build($_builder, $_state,
-            func.getType().getPointerTo(), func.getName(), attrs);}]>
+            LLVM::LLVMPointerType::get(func.getType()), func.getName());
+      $_state.addAttributes(attrs);
+    }]>
   ];
 
   let extraClassDeclaration = [{
@@ -790,6 +857,48 @@ def LLVM_AddressOfOp : LLVM_Op<"mlir.addressof"> {
   let verifier = "return ::verify(*this);";
 }
 
+def LLVM_MetadataOp : LLVM_Op<"metadata", [
+   NoRegionArguments, SymbolTable, Symbol
+]> {
+  let arguments = (ins
+    SymbolNameAttr:$sym_name
+  );
+  let summary = "LLVM dialect metadata.";
+  let description = [{
+    llvm.metadata op defines one or more metadata nodes. Currently the
+    llvm.access_group metadata op is supported.
+
+    Example:
+      llvm.metadata @metadata {
+        llvm.access_group @group1
+        llvm.access_group @group2
+        llvm.return
+      }
+  }];
+  let regions = (region SizedRegion<1>:$body);
+  let assemblyFormat = "$sym_name attr-dict-with-keyword $body";
+}
+
+def LLVM_AccessGroupMetadataOp : LLVM_Op<"access_group", [
+  HasParent<"MetadataOp">, Symbol
+]> {
+  let arguments = (ins
+    SymbolNameAttr:$sym_name
+  );
+  let summary = "LLVM dialect access group metadata.";
+  let description = [{
+    Defines an access group metadata that can be attached to any instruction
+    that potentially accesses memory. The access group may be attached to a
+    memory accessing instruction via the `llvm.access.group` metadata and
+    a branch instruction in the loop latch block via the
+    `llvm.loop.parallel_accesses` metadata.
+
+    See the following link for more details:
+    https://llvm.org/docs/LangRef.html#llvm-access-group-metadata
+  }];
+  let assemblyFormat = "$sym_name attr-dict";
+}
+
 def LLVM_GlobalOp : LLVM_Op<"mlir.global",
     [IsolatedFromAbove, SingleBlockImplicitTerminator<"ReturnOp">, Symbol]> {
   let arguments = (ins
@@ -798,7 +907,8 @@ def LLVM_GlobalOp : LLVM_Op<"mlir.global",
     StrAttr:$sym_name,
     Linkage:$linkage,
     OptionalAttr<AnyAttr>:$value,
-    DefaultValuedAttr<Confined<I32Attr, [IntNonNegative]>, "0">:$addr_space
+    DefaultValuedAttr<Confined<I32Attr, [IntNonNegative]>, "0">:$addr_space,
+    OptionalAttr<UnnamedAddr>:$unnamed_addr
   );
   let summary = "LLVM dialect global.";
   let description = [{
@@ -811,7 +921,7 @@ def LLVM_GlobalOp : LLVM_Op<"mlir.global",
     represented as MLIR attributes can be given in-line:
 
     ```mlir
-    llvm.mlir.global @variable(32.0 : f32) : !llvm.float
+    llvm.mlir.global @variable(32.0 : f32) : f32
     ```
 
     This initialization and type syntax is similar to `llvm.mlir.constant` and
@@ -826,9 +936,9 @@ def LLVM_GlobalOp : LLVM_Op<"mlir.global",
     //   i32* getelementptr (i32* @g2, i32 2)
     llvm.mlir.global constant @int_gep() : !llvm.ptr<i32> {
       %0 = llvm.mlir.addressof @g2 : !llvm.ptr<i32>
-      %1 = llvm.mlir.constant(2 : i32) : !llvm.i32
+      %1 = llvm.mlir.constant(2 : i32) : i32
       %2 = llvm.getelementptr %0[%1]
-         : (!llvm.ptr<i32>, !llvm.i32) -> !llvm.ptr<i32>
+         : (!llvm.ptr<i32>, i32) -> !llvm.ptr<i32>
       // The initializer region must end with `llvm.return`.
       llvm.return %2 : !llvm.ptr<i32>
     }
@@ -844,10 +954,10 @@ def LLVM_GlobalOp : LLVM_Op<"mlir.global",
 
     ```mlir
     // Global values use @-identifiers.
-    llvm.mlir.global constant @cst(42 : i32) : !llvm.i32
+    llvm.mlir.global constant @cst(42 : i32) : i32
 
     // Non-constant values must also be initialized.
-    llvm.mlir.global @variable(32.0 : f32) : !llvm.float
+    llvm.mlir.global @variable(32.0 : f32) : f32
 
     // Strings are expected to be of wrapped LLVM i8 array type and do not
     // automatically include the trailing zero.
@@ -859,9 +969,9 @@ def LLVM_GlobalOp : LLVM_Op<"mlir.global",
     // A complex initializer is constructed with an initializer region.
     llvm.mlir.global constant @int_gep() : !llvm.ptr<i32> {
       %0 = llvm.mlir.addressof @g2 : !llvm.ptr<i32>
-      %1 = llvm.mlir.constant(2 : i32) : !llvm.i32
+      %1 = llvm.mlir.constant(2 : i32) : i32
       %2 = llvm.getelementptr %0[%1]
-         : (!llvm.ptr<i32>, !llvm.i32) -> !llvm.ptr<i32>
+         : (!llvm.ptr<i32>, i32) -> !llvm.ptr<i32>
       llvm.return %2 : !llvm.ptr<i32>
     }
     ```
@@ -875,25 +985,25 @@ def LLVM_GlobalOp : LLVM_Op<"mlir.global",
 
     ```mlir
     // A constant with internal linkage will not participate in linking.
-    llvm.mlir.global internal constant @cst(42 : i32) : !llvm.i32
+    llvm.mlir.global internal constant @cst(42 : i32) : i32
 
     // By default, "external" linkage is assumed and the global participates in
     // symbol resolution at link-time.
-    llvm.mlir.global @glob(0 : f32) : !llvm.float
+    llvm.mlir.global @glob(0 : f32) : f32
     ```
   }];
   let regions = (region AnyRegion:$initializer);
 
   let builders = [
-    OpBuilderDAG<(ins "LLVMType":$type, "bool":$isConstant, "Linkage":$linkage,
+    OpBuilder<(ins "Type":$type, "bool":$isConstant, "Linkage":$linkage,
       "StringRef":$name, "Attribute":$value, CArg<"unsigned", "0">:$addrSpace,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs)>
   ];
 
   let extraClassDeclaration = [{
     /// Return the LLVM type of the global.
-    LLVMType getType() {
-      return type().cast<LLVMType>();
+    Type getType() {
+      return type();
     }
     /// Return the initializer attribute if it exists, or a null attribute.
     Attribute getValueOrNull() {
@@ -933,13 +1043,13 @@ def LLVM_LLVMFuncOp : LLVM_Op<"func",
 
     ```mlir
     // The type of @bar is !llvm<"i64 (i64)">
-    llvm.func @bar(%arg0: !llvm.i64) -> !llvm.i64 {
-      llvm.return %arg0 : !llvm.i64
+    llvm.func @bar(%arg0: i64) -> i64 {
+      llvm.return %arg0 : i64
     }
 
     // Type type of @foo is !llvm<"void (i64)">
     // !llvm.void type is omitted
-    llvm.func @foo(%arg0: !llvm.i64) {
+    llvm.func @foo(%arg0: i64) {
       llvm.return
     }
 
@@ -959,7 +1069,7 @@ def LLVM_LLVMFuncOp : LLVM_Op<"func",
   let skipDefaultBuilders = 1;
 
   let builders = [
-    OpBuilderDAG<(ins "StringRef":$name, "LLVMType":$type,
+    OpBuilder<(ins "StringRef":$name, "Type":$type,
       CArg<"Linkage", "Linkage::External">:$linkage,
       CArg<"ArrayRef<NamedAttribute>", "{}">:$attrs,
       CArg<"ArrayRef<DictionaryAttr>", "{}">:$argAttrs)>
@@ -970,12 +1080,12 @@ def LLVM_LLVMFuncOp : LLVM_Op<"func",
     // to match the signature of the function.
     Block *addEntryBlock();
 
-    LLVMType getType() {
+    LLVMFunctionType getType() {
       return (*this)->getAttrOfType<TypeAttr>(getTypeAttrName())
-          .getValue().cast<LLVMType>();
+          .getValue().cast<LLVMFunctionType>();
     }
     bool isVarArg() {
-      return getType().isFunctionVarArg();
+      return getType().isVarArg();
     }
 
     // Hook for OpTrait::FunctionLike, returns the number of function arguments`.
@@ -1037,7 +1147,7 @@ def LLVM_UndefOp : LLVM_Op<"mlir.undef", [NoSideEffect]>,
 
     ```mlir
     // Create a structure with a 32-bit integer followed by a float.
-    %0 = llvm.mlir.undef : !llvm.struct<(i32, float)>
+    %0 = llvm.mlir.undef : !llvm.struct<(i32, f32)>
     ```
   }];
   let results = (outs LLVM_Type:$res);
@@ -1047,7 +1157,8 @@ def LLVM_UndefOp : LLVM_Op<"mlir.undef", [NoSideEffect]>,
 
 def LLVM_ConstantOp
     : LLVM_Op<"mlir.constant", [NoSideEffect]>,
-      LLVM_Builder<"$res = getLLVMConstant($_resultType, $value, $_location);">
+      LLVM_Builder<[{$res = getLLVMConstant($_resultType, $value, $_location,
+                                            moduleTranslation);}]>
 {
   let summary = "Defines a constant of LLVM type.";
   let description = [{
@@ -1066,16 +1177,16 @@ def LLVM_ConstantOp
 
     ```mlir
     // Integer constant, internal i32 is mandatory
-    %0 = llvm.mlir.constant(42 : i32) : !llvm.i32
+    %0 = llvm.mlir.constant(42 : i32) : i32
 
     // It's okay to omit i64.
-    %1 = llvm.mlir.constant(42) : !llvm.i64
+    %1 = llvm.mlir.constant(42) : i64
 
     // Floating point constant.
-    %2 = llvm.mlir.constant(42.0 : f32) : !llvm.float
+    %2 = llvm.mlir.constant(42.0 : f32) : f32
 
     // Splat dense vector constant.
-    %3 = llvm.mlir.constant(dense<1.0> : vector<4xf32>) : !llvm.vec<4 x float>
+    %3 = llvm.mlir.constant(dense<1.0> : vector<4xf32>) : vector<4xf32>
     ```
   }];
 
@@ -1097,7 +1208,7 @@ def LLVM_DialectCastOp : LLVM_Op<"mlir.cast", [NoSideEffect]> {
     Example:
       llvm.mlir.cast %v : f16 to llvm.half
       llvm.mlir.cast %v : llvm.float to f32
-      llvm.mlir.cast %v : !llvm<"<2 x float>"> to vector<2xf32>
+      llvm.mlir.cast %v : !llvm."<2 x f32>"> to vector<2xf32>
   }];
   let arguments = (ins AnyType:$in);
   let results = (outs AnyType:$res);
@@ -1151,6 +1262,8 @@ def LLVM_BitReverseOp : LLVM_UnaryIntrinsicOp<"bitreverse">;
 def LLVM_CtPopOp : LLVM_UnaryIntrinsicOp<"ctpop">;
 def LLVM_MaxNumOp : LLVM_BinarySameArgsIntrinsicOp<"maxnum">;
 def LLVM_MinNumOp : LLVM_BinarySameArgsIntrinsicOp<"minnum">;
+def LLVM_MaximumOp : LLVM_BinarySameArgsIntrinsicOp<"maximum">;
+def LLVM_MinimumOp : LLVM_BinarySameArgsIntrinsicOp<"minimum">;
 def LLVM_SMaxOp : LLVM_BinarySameArgsIntrinsicOp<"smax">;
 def LLVM_SMinOp : LLVM_BinarySameArgsIntrinsicOp<"smin">;
 
@@ -1188,6 +1301,70 @@ def LLVM_SMulWithOverflowOp
 def LLVM_UMulWithOverflowOp
     : LLVM_IntrOp<"umul.with.overflow", [0], [], [], 2> {
   let arguments = (ins LLVM_Type, LLVM_Type);
+}
+
+//
+// Coroutine intrinsics.
+//
+
+def LLVM_CoroIdOp : LLVM_IntrOp<"coro.id", [], [], [], 1> {
+  let arguments = (ins I32:$align,
+                       LLVM_i8Ptr:$promise,
+                       LLVM_i8Ptr:$coroaddr,
+                       LLVM_i8Ptr:$fnaddrs);
+  let assemblyFormat = "$align `,` $promise `,` $coroaddr `,` $fnaddrs"
+    " attr-dict `:` type($res)";
+}
+
+def LLVM_CoroBeginOp : LLVM_IntrOp<"coro.begin", [], [], [], 1> {
+  let arguments = (ins LLVM_TokenType:$token,
+                       LLVM_i8Ptr:$mem);
+  let assemblyFormat = "$token `,` $mem attr-dict `:` type($res)";
+}
+
+def LLVM_CoroSizeOp : LLVM_IntrOp<"coro.size", [0], [], [], 1> {
+  let assemblyFormat = "attr-dict `:` type($res)";
+}
+
+def LLVM_CoroSaveOp : LLVM_IntrOp<"coro.save", [], [], [], 1> {
+  let arguments = (ins LLVM_i8Ptr:$handle);
+  let assemblyFormat = "$handle attr-dict `:` type($res)";
+}
+
+def LLVM_CoroSuspendOp : LLVM_IntrOp<"coro.suspend", [], [], [], 1> {
+  let arguments = (ins LLVM_TokenType:$save,
+                       I1:$final);
+  let assemblyFormat = "$save `,` $final attr-dict `:` type($res)";
+}
+
+def LLVM_CoroEndOp : LLVM_IntrOp<"coro.end", [], [], [], 1> {
+  let arguments = (ins LLVM_i8Ptr:$handle,
+                       I1:$unwind);
+  let assemblyFormat = "$handle `,` $unwind attr-dict `:` type($res)";
+}
+
+def LLVM_CoroFreeOp : LLVM_IntrOp<"coro.free", [], [], [], 1> {
+  let arguments = (ins LLVM_TokenType:$id,
+                       LLVM_i8Ptr:$handle);
+  let assemblyFormat = "$id `,` $handle attr-dict `:` type($res)";
+}
+
+def LLVM_CoroResumeOp : LLVM_IntrOp<"coro.resume", [], [], [], 0> {
+  let arguments = (ins LLVM_i8Ptr:$handle);
+  let assemblyFormat = "$handle attr-dict";
+}
+
+//
+// Stack save/restore intrinsics.
+//
+
+def LLVM_StackSaveOp : LLVM_OneResultIntrOp<"stacksave"> {
+  let assemblyFormat = "attr-dict `:` type($res)";
+}
+
+def LLVM_StackRestoreOp : LLVM_ZeroResultIntrOp<"stackrestore"> {
+  let arguments = (ins LLVM_i8Ptr:$ptr);
+  let assemblyFormat = "$ptr attr-dict";
 }
 
 //
@@ -1422,6 +1599,7 @@ def AtomicOrdering : I64EnumAttr<
 
 def LLVM_AtomicRMWType : AnyTypeOf<[LLVM_AnyFloat, LLVM_AnyInteger]>;
 
+// FIXME: Need to add alignment attribute to MLIR atomicrmw operation.
 def LLVM_AtomicRMWOp : LLVM_Op<"atomicrmw"> {
   let arguments = (ins AtomicBinOp:$bin_op,
                    LLVM_PointerTo<LLVM_AtomicRMWType>:$ptr,
@@ -1429,6 +1607,7 @@ def LLVM_AtomicRMWOp : LLVM_Op<"atomicrmw"> {
   let results = (outs LLVM_AtomicRMWType:$res);
   let llvmBuilder = [{
     $res = builder.CreateAtomicRMW(getLLVMAtomicBinOp($bin_op), $ptr, $val,
+                                   llvm::MaybeAlign(),
                                    getLLVMAtomicOrdering($ordering));
   }];
   let parser = [{ return parseAtomicRMWOp(parser, result); }];
@@ -1445,10 +1624,11 @@ def LLVM_AtomicCmpXchgResultType : Type<And<[
               LLVM_AtomicCmpXchgType.predicate>,
   SubstLeaves<"$_self",
               "$_self.cast<::mlir::LLVM::LLVMStructType>().getBody()[1]",
-              LLVM_i1.predicate>]>,
+              I1.predicate>]>,
  "an LLVM struct type with any integer or pointer followed by a single-bit "
  "integer">;
 
+// FIXME: Need to add alignment attribute to MLIR cmpxchg operation.
 def LLVM_AtomicCmpXchgOp : LLVM_Op<"cmpxchg"> {
   let arguments = (ins LLVM_PointerTo<LLVM_AtomicCmpXchgType>:$ptr,
                    LLVM_AtomicCmpXchgType:$cmp, LLVM_AtomicCmpXchgType:$val,
@@ -1456,7 +1636,7 @@ def LLVM_AtomicCmpXchgOp : LLVM_Op<"cmpxchg"> {
                    AtomicOrdering:$failure_ordering);
   let results = (outs LLVM_AtomicCmpXchgResultType:$res);
   let llvmBuilder = [{
-    $res = builder.CreateAtomicCmpXchg($ptr, $cmp, $val,
+    $res = builder.CreateAtomicCmpXchg($ptr, $cmp, $val, llvm::MaybeAlign(),
                    getLLVMAtomicOrdering($success_ordering),
                    getLLVMAtomicOrdering($failure_ordering));
   }];

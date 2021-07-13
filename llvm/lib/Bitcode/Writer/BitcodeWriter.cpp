@@ -335,6 +335,8 @@ private:
                     unsigned Abbrev);
   void writeDIMacroFile(const DIMacroFile *N, SmallVectorImpl<uint64_t> &Record,
                         unsigned Abbrev);
+  void writeDIArgList(const DIArgList *N, SmallVectorImpl<uint64_t> &Record,
+                      unsigned Abbrev);
   void writeDIModule(const DIModule *N, SmallVectorImpl<uint64_t> &Record,
                      unsigned Abbrev);
   void writeDITemplateTypeParameter(const DITemplateTypeParameter *N,
@@ -680,6 +682,8 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
     return bitc::ATTR_KIND_NOSYNC;
   case Attribute::NoCfCheck:
     return bitc::ATTR_KIND_NOCF_CHECK;
+  case Attribute::NoProfile:
+    return bitc::ATTR_KIND_NO_PROFILE;
   case Attribute::NoUnwind:
     return bitc::ATTR_KIND_NO_UNWIND;
   case Attribute::NullPointerIsValid:
@@ -734,6 +738,8 @@ static uint64_t getAttrKindEncoding(Attribute::AttrKind Kind) {
     return bitc::ATTR_KIND_SWIFT_SELF;
   case Attribute::UWTable:
     return bitc::ATTR_KIND_UW_TABLE;
+  case Attribute::VScaleRange:
+    return bitc::ATTR_KIND_VSCALE_RANGE;
   case Attribute::WillReturn:
     return bitc::ATTR_KIND_WILLRETURN;
   case Attribute::WriteOnly:
@@ -913,6 +919,7 @@ void ModuleBitcodeWriter::writeTypeTable() {
     case Type::LabelTyID:     Code = bitc::TYPE_CODE_LABEL;     break;
     case Type::MetadataTyID:  Code = bitc::TYPE_CODE_METADATA;  break;
     case Type::X86_MMXTyID:   Code = bitc::TYPE_CODE_X86_MMX;   break;
+    case Type::X86_AMXTyID:   Code = bitc::TYPE_CODE_X86_AMX;   break;
     case Type::TokenTyID:     Code = bitc::TYPE_CODE_TOKEN;     break;
     case Type::IntegerTyID:
       // INTEGER: [width]
@@ -1041,7 +1048,8 @@ static uint64_t getEncodedFFlags(FunctionSummary::FFlags Flags) {
   return RawFlags;
 }
 
-// Decode the flags for GlobalValue in the summary
+// Decode the flags for GlobalValue in the summary. See getDecodedGVSummaryFlags
+// in BitcodeReader.cpp.
 static uint64_t getEncodedGVSummaryFlags(GlobalValueSummary::GVFlags Flags) {
   uint64_t RawFlags = 0;
 
@@ -1054,6 +1062,8 @@ static uint64_t getEncodedGVSummaryFlags(GlobalValueSummary::GVFlags Flags) {
   // change to the getEncodedLinkage() function will need to be taken into
   // account here as well.
   RawFlags = (RawFlags << 4) | Flags.Linkage; // 4 bits
+
+  RawFlags |= (Flags.Visibility << 8); // 2 bits
 
   return RawFlags;
 }
@@ -1861,6 +1871,17 @@ void ModuleBitcodeWriter::writeDIMacroFile(const DIMacroFile *N,
   Record.clear();
 }
 
+void ModuleBitcodeWriter::writeDIArgList(const DIArgList *N,
+                                         SmallVectorImpl<uint64_t> &Record,
+                                         unsigned Abbrev) {
+  Record.reserve(N->getArgs().size());
+  for (ValueAsMetadata *MD : N->getArgs())
+    Record.push_back(VE.getMetadataID(MD));
+
+  Stream.EmitRecord(bitc::METADATA_ARG_LIST, Record, Abbrev);
+  Record.clear();
+}
+
 void ModuleBitcodeWriter::writeDIModule(const DIModule *N,
                                         SmallVectorImpl<uint64_t> &Record,
                                         unsigned Abbrev) {
@@ -2603,6 +2624,10 @@ void ModuleBitcodeWriter::writeConstants(unsigned FirstVal, unsigned LastVal,
       Record.push_back(VE.getTypeID(BA->getFunction()->getType()));
       Record.push_back(VE.getValueID(BA->getFunction()));
       Record.push_back(VE.getGlobalBasicBlockID(BA->getBasicBlock()));
+    } else if (const auto *Equiv = dyn_cast<DSOLocalEquivalent>(C)) {
+      Code = bitc::CST_CODE_DSO_LOCAL_EQUIVALENT;
+      Record.push_back(VE.getTypeID(Equiv->getGlobalValue()->getType()));
+      Record.push_back(VE.getValueID(Equiv->getGlobalValue()));
     } else {
 #ifndef NDEBUG
       C->dump();
@@ -3054,6 +3079,7 @@ void ModuleBitcodeWriter::writeInstruction(const Instruction &I,
     Vals.push_back(
         getEncodedOrdering(cast<AtomicCmpXchgInst>(I).getFailureOrdering()));
     Vals.push_back(cast<AtomicCmpXchgInst>(I).isWeak());
+    Vals.push_back(getEncodedAlign(cast<AtomicCmpXchgInst>(I).getAlign()));
     break;
   case Instruction::AtomicRMW:
     Code = bitc::FUNC_CODE_INST_ATOMICRMW;
@@ -3065,6 +3091,7 @@ void ModuleBitcodeWriter::writeInstruction(const Instruction &I,
     Vals.push_back(getEncodedOrdering(cast<AtomicRMWInst>(I).getOrdering()));
     Vals.push_back(
         getEncodedSyncScopeID(cast<AtomicRMWInst>(I).getSyncScopeID()));
+    Vals.push_back(getEncodedAlign(cast<AtomicRMWInst>(I).getAlign()));
     break;
   case Instruction::Fence:
     Code = bitc::FUNC_CODE_INST_FENCE;
@@ -3628,7 +3655,7 @@ static void writeFunctionTypeMetadataRecords(BitstreamWriter &Stream,
       Record.clear();
       Record.push_back(VC.VFunc.GUID);
       Record.push_back(VC.VFunc.Offset);
-      Record.insert(Record.end(), VC.Args.begin(), VC.Args.end());
+      llvm::append_range(Record, VC.Args);
       Stream.EmitRecord(Ty, Record);
     }
   };
@@ -3702,7 +3729,7 @@ static void writeWholeProgramDevirtResolutionByArg(
     SmallVector<uint64_t, 64> &NameVals, const std::vector<uint64_t> &args,
     const WholeProgramDevirtResolution::ByArg &ByArg) {
   NameVals.push_back(args.size());
-  NameVals.insert(NameVals.end(), args.begin(), args.end());
+  llvm::append_range(NameVals, args);
 
   NameVals.push_back(ByArg.TheKind);
   NameVals.push_back(ByArg.Info);
@@ -3829,7 +3856,7 @@ void ModuleBitcodeWriterBase::writeModuleLevelReferences(
     NameVals.push_back(VE.getValueID(RI.getValue()));
   // Sort the refs for determinism output, the vector returned by FS->refs() has
   // been initialized from a DenseSet.
-  llvm::sort(NameVals.begin() + SizeBeforeRefs, NameVals.end());
+  llvm::sort(drop_begin(NameVals, SizeBeforeRefs));
 
   if (VTableFuncs.empty())
     Stream.EmitRecord(bitc::FS_PERMODULE_GLOBALVAR_INIT_REFS, NameVals,
@@ -4843,7 +4870,7 @@ void llvm::EmbedBitcodeInModule(llvm::Module &M, llvm::MemoryBufferRef Buf,
                                 const std::vector<uint8_t> &CmdArgs) {
   // Save llvm.compiler.used and remove it.
   SmallVector<Constant *, 2> UsedArray;
-  SmallPtrSet<GlobalValue *, 4> UsedGlobals;
+  SmallVector<GlobalValue *, 4> UsedGlobals;
   Type *UsedElementType = Type::getInt8Ty(M.getContext())->getPointerTo(0);
   GlobalVariable *Used = collectUsedGlobalVariables(M, UsedGlobals, true);
   for (auto *GV : UsedGlobals) {

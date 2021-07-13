@@ -94,14 +94,12 @@ void TransferOptimization::deadStoreOp(vector::TransferWriteOp write) {
                     << "\n");
   llvm::SmallVector<Operation *, 8> reads;
   Operation *firstOverwriteCandidate = nullptr;
-  for (auto *user : write.memref().getUsers()) {
+  for (auto *user : write.source().getUsers()) {
     if (user == write.getOperation())
       continue;
     if (auto nextWrite = dyn_cast<vector::TransferWriteOp>(user)) {
       // Check candidate that can override the store.
-      if (write.indices() == nextWrite.indices() &&
-          write.getVectorType() == nextWrite.getVectorType() &&
-          write.permutation_map() == write.permutation_map() &&
+      if (checkSameValueWAW(nextWrite, write) &&
           postDominators.postDominates(nextWrite, write)) {
         if (firstOverwriteCandidate == nullptr ||
             postDominators.postDominates(firstOverwriteCandidate, nextWrite))
@@ -157,13 +155,13 @@ void TransferOptimization::deadStoreOp(vector::TransferWriteOp write) {
 /// potentially aliasing ops that may reach the transfer_read are post-dominated
 /// by the transfer_write.
 void TransferOptimization::storeToLoadForwarding(vector::TransferReadOp read) {
-  if (read.hasMaskedDim())
+  if (read.hasOutOfBoundsDim())
     return;
   LLVM_DEBUG(DBGS() << "Candidate for Forwarding: " << *read.getOperation()
                     << "\n");
   SmallVector<Operation *, 8> blockingWrites;
   vector::TransferWriteOp lastwrite = nullptr;
-  for (Operation *user : read.memref().getUsers()) {
+  for (Operation *user : read.source().getUsers()) {
     if (isa<vector::TransferReadOp>(user))
       continue;
     if (auto write = dyn_cast<vector::TransferWriteOp>(user)) {
@@ -173,10 +171,7 @@ void TransferOptimization::storeToLoadForwarding(vector::TransferReadOp read) {
               cast<VectorTransferOpInterface>(write.getOperation()),
               cast<VectorTransferOpInterface>(read.getOperation())))
         continue;
-      if (dominators.dominates(write, read) && !write.hasMaskedDim() &&
-          write.indices() == read.indices() &&
-          write.getVectorType() == read.getVectorType() &&
-          write.permutation_map() == read.permutation_map()) {
+      if (dominators.dominates(write, read) && checkSameValueRAW(write, read)) {
         if (lastwrite == nullptr || dominators.dominates(lastwrite, write))
           lastwrite = write;
         else
@@ -220,9 +215,14 @@ void mlir::vector::transferOpflowOpt(FuncOp func) {
   TransferOptimization opt(func);
   // Run store to load forwarding first since it can expose more dead store
   // opportunity.
-  func.walk(
-      [&](vector::TransferReadOp read) { opt.storeToLoadForwarding(read); });
+  func.walk([&](vector::TransferReadOp read) {
+    if (read.getShapedType().isa<MemRefType>())
+      opt.storeToLoadForwarding(read);
+  });
   opt.removeDeadOp();
-  func.walk([&](vector::TransferWriteOp write) { opt.deadStoreOp(write); });
+  func.walk([&](vector::TransferWriteOp write) {
+    if (write.getShapedType().isa<MemRefType>())
+      opt.deadStoreOp(write);
+  });
   opt.removeDeadOp();
 }

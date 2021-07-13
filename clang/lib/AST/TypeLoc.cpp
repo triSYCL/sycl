@@ -411,6 +411,8 @@ TypeSpecifierType BuiltinTypeLoc::getWrittenTypeSpec() const {
 #define PPC_VECTOR_TYPE(Name, Id, Size) \
   case BuiltinType::Id:
 #include "clang/Basic/PPCTypes.def"
+#define RVV_TYPE(Name, Id, SingletonId) case BuiltinType::Id:
+#include "clang/Basic/RISCVVTypes.def"
   case BuiltinType::BuiltinFn:
   case BuiltinType::IncompleteMatrixIdx:
   case BuiltinType::OMPArraySection:
@@ -567,7 +569,6 @@ void TemplateSpecializationTypeLoc::initializeArgLocs(ASTContext &Context,
     case TemplateArgument::Integral:
     case TemplateArgument::Declaration:
     case TemplateArgument::NullPtr:
-    case TemplateArgument::UncommonValue:
       ArgInfos[i] = TemplateArgumentLocInfo();
       break;
 

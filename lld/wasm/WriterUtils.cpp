@@ -30,8 +30,6 @@ std::string toString(ValType type) {
     return "f64";
   case ValType::V128:
     return "v128";
-  case ValType::EXNREF:
-    return "exnref";
   case ValType::FUNCREF:
     return "funcref";
   case ValType::EXTERNREF:
@@ -64,6 +62,21 @@ std::string toString(const WasmEventType &type) {
   if (type.Attribute == WASM_EVENT_ATTRIBUTE_EXCEPTION)
     return "exception";
   return "unknown";
+}
+
+static std::string toString(const llvm::wasm::WasmLimits &limits) {
+  std::string ret;
+  ret += "flags=0x" + std::to_string(limits.Flags);
+  ret += "; min=" + std::to_string(limits.Minimum);
+  if (limits.Flags & WASM_LIMITS_FLAG_HAS_MAX)
+    ret += "; max=" + std::to_string(limits.Maximum);
+  return ret;
+}
+
+std::string toString(const WasmTableType &type) {
+  SmallString<128> ret("");
+  return "type=" + toString(static_cast<ValType>(type.ElemType)) +
+         "; limits=[" + toString(type.Limits) + "]";
 }
 
 namespace wasm {
@@ -178,7 +191,7 @@ void writeInitExpr(raw_ostream &os, const WasmInitExpr &initExpr) {
 
 void writeLimits(raw_ostream &os, const WasmLimits &limits) {
   writeU8(os, limits.Flags, "limits flags");
-  writeUleb128(os, limits.Initial, "limits initial");
+  writeUleb128(os, limits.Minimum, "limits min");
   if (limits.Flags & WASM_LIMITS_FLAG_HAS_MAX)
     writeUleb128(os, limits.Maximum, "limits max");
 }
@@ -187,11 +200,6 @@ void writeGlobalType(raw_ostream &os, const WasmGlobalType &type) {
   // TODO: Update WasmGlobalType to use ValType and remove this cast.
   writeValueType(os, ValType(type.Type), "global type");
   writeU8(os, type.Mutable, "global mutable");
-}
-
-void writeGlobal(raw_ostream &os, const WasmGlobal &global) {
-  writeGlobalType(os, global.Type);
-  writeInitExpr(os, global.InitExpr);
 }
 
 void writeEventType(raw_ostream &os, const WasmEventType &type) {
@@ -204,7 +212,7 @@ void writeEvent(raw_ostream &os, const WasmEvent &event) {
 }
 
 void writeTableType(raw_ostream &os, const WasmTableType &type) {
-  writeU8(os, WASM_TYPE_FUNCREF, "table type");
+  writeValueType(os, ValType(type.ElemType), "table type");
   writeLimits(os, type.Limits);
 }
 

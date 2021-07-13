@@ -288,7 +288,7 @@ protected:
                  DeleteValueTy DeleteValue, Instruction *MI, BasicBlock *BB,
                  unsigned NumOperands)
       : MemoryAccess(C, Vty, DeleteValue, BB, NumOperands),
-        MemoryInstruction(MI), OptimizedAccessAlias(MayAlias) {
+        MemoryInstruction(MI), OptimizedAccessAlias(AliasResult::MayAlias) {
     setDefiningAccess(DMA);
   }
 
@@ -299,8 +299,9 @@ protected:
     OptimizedAccessAlias = AR;
   }
 
-  void setDefiningAccess(MemoryAccess *DMA, bool Optimized = false,
-                         Optional<AliasResult> AR = MayAlias) {
+  void setDefiningAccess(
+      MemoryAccess *DMA, bool Optimized = false,
+      Optional<AliasResult> AR = AliasResult(AliasResult::MayAlias)) {
     if (!Optimized) {
       setOperand(0, DMA);
       return;
@@ -850,7 +851,6 @@ private:
   using DefsMap = DenseMap<const BasicBlock *, std::unique_ptr<DefsList>>;
 
   void markUnreachableAsLiveOnEntry(BasicBlock *BB);
-  bool dominatesUse(const MemoryAccess *, const MemoryAccess *) const;
   MemoryPhi *createMemoryPhi(BasicBlock *BB);
   template <typename AliasAnalysisType>
   MemoryUseOrDef *createNewAccess(Instruction *, AliasAnalysisType *,
@@ -1100,7 +1100,7 @@ public:
     return MP->getIncomingBlock(ArgNo);
   }
 
-  typename BaseT::iterator::pointer operator*() const {
+  typename std::iterator_traits<BaseT>::pointer operator*() const {
     assert(Access && "Tried to access past the end of our iterator");
     // Go to the first argument for phis, and the defining access for everything
     // else.
@@ -1196,7 +1196,7 @@ public:
     return DefIterator == Other.DefIterator;
   }
 
-  BaseT::iterator::reference operator*() const {
+  typename std::iterator_traits<BaseT>::reference operator*() const {
     assert(DefIterator != OriginalAccess->defs_end() &&
            "Tried to access past the end of our iterator");
     return CurrentPair;
