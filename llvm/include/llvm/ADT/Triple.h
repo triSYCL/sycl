@@ -47,7 +47,6 @@ public:
   enum ArchType {
     UnknownArch,
 
-    aie32,      // Xilinx AI Engine 32-bit
     arm,            // ARM (little endian): arm, armv.*, xscale
     armeb,          // ARM (big endian): armeb
     aarch64,        // AArch64 (little endian): aarch64
@@ -55,6 +54,7 @@ public:
     aarch64_32,     // AArch64 (little endian) ILP32: aarch64_32
     arc,            // ARC: Synopsys ARC
     avr,            // AVR: Atmel AVR microcontroller
+    aie32,          // Xilinx AI Engine 32-bit
     bpfel,          // eBPF or extended BPF or 64-bit BPF (little endian)
     bpfeb,          // eBPF or extended BPF or 64-bit BPF (big endian)
     csky,           // CSKY: csky
