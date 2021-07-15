@@ -15,7 +15,7 @@
 namespace clang {
 namespace driver {
 
-/// Based loosely on CudaInstallationDetector/XOCCInstallationDetector
+/// Based loosely on CudaInstallationDetector/VXXInstallationDetector
 class ChessInstallationDetector {
 private:
   const Driver &D;

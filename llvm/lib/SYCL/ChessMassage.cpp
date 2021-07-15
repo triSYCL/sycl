@@ -1,4 +1,4 @@
-//===- ChessMassage.cpp                                      ---------------===//
+//===- ChessMassage.cpp ---------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -8,6 +8,8 @@
 //===----------------------------------------------------------------------===//
 //
 // Erases and modifies IR incompatabilities with chess-clang backend
+// And triage which kernel are actually needed to be compiled by the backend and
+// which are redundant.
 //
 // ===---------------------------------------------------------------------===//
 
@@ -57,16 +59,13 @@ struct ChessMassage : public ModulePass {
         F.removeFnAttr("unmergable-kernel-id");
   }
 
-  // Re-order functions with hash values. This is taken from MergeFunctions
-  // and required to correctly identifie to which one the functions are
-  // merged into. This means, the original list is sorted as:
+  // Re-order functions with hash values. This means, the original list is
+  // sorted as:
   //   func1 - func2 - func3 - func4 - func5 - ...
   // The merged one looks like:
   //   func1 - func4 - ...
   // And this indicates that func2 and func3 are merged into func1
-  // Note, since it's from MergeFunctions, if MergeFunctions changes in some
-  // way, it may break, ex identifying merged function incorrectly.
-  void prepareForMerging(Module &M, llvm::raw_fd_ostream &O) {
+  void TriageKernelForMerging(Module &M, llvm::raw_fd_ostream &O) {
     std::vector<Function *> Funcs;
     DenseMap<Function*, FunctionComparator::FunctionHash> FuncHashCache;
     DenseMap<std::pair<Function*, Function*>, int> FuncCompareCache;
@@ -105,8 +104,10 @@ struct ChessMassage : public ModulePass {
       F->removeFromParent();
       M.getFunctionList().push_back(F);
       if (I != Funcs.begin() && ComapreFunc(*std::prev(I), F) == 0)
+        /// This kenrel will be removed because it is redondant.
         F->setLinkage(llvm::GlobalValue::PrivateLinkage);
       else
+        /// This kenrel will be kept.
         F->setLinkage(llvm::GlobalValue::ExternalLinkage);
       kernelNames += (" \"" + F->getName() + "\" \n").str();
       F->replaceAllUsesWith(UndefValue::get(F->getType()));
@@ -114,14 +115,15 @@ struct ChessMassage : public ModulePass {
 
     // output our list of kernel names as a bash array we can iterate over
     if (!kernelNames.empty()) {
-       O << "# array of unmerged kernel names found in the current module\n";
-       O << "declare -a KERNEL_NAME_ARRAY_UNMERGED=(" << kernelNames.str()
-         << ")\n\n";
+      O << "# ordered array of unmerged kernel names found in the current "
+           "module\n";
+      O << "declare -a KERNEL_NAME_ARRAY_UNMERGED=(" << kernelNames.str()
+        << ")\n\n";
     }
   }
 
   /// Removes immarg (immutable arg) bitcode attribute that is applied to
-  /// function parameters. It was added in LLVM-9 (D57825), so as xocc catches
+  /// function parameters. It was added in LLVM-9 (D57825), so as Vitis catches
   /// up it can be removed
   /// Note: If you llvm-dis the output Opt .bc file with an LLVM that has the
   /// ImmArg attribute, it will reapply all of the ImmArg attributes to the
@@ -192,18 +194,18 @@ struct ChessMassage : public ModulePass {
 
   bool runOnModule(Module &M) override {
     llvm::raw_fd_ostream O(GetWriteStreamID(KernelUnmergedProperties),
-                            true /*close in destructor*/);
+                           true /*close in destructor*/);
 
-   // Script header/comment
+    // Script header/comment
     O << "# This is a generated bash script to inject environment information\n"
          "# containing kernel properties that we need so we can compile.\n"
-         "# This script is called from the sycl-xocc and sycl-chess scripts.\n";
+         "# This script is called from sycl-chess scripts.\n";
 
     if (O.has_error())
       return false;
 
     removeMetadataForUnmergability(M);
-    prepareForMerging(M, O);
+    TriageKernelForMerging(M, O);
     removeImmarg(M);
     // This has to be done before changing the calling convention
     modifySPIRCallingConv(M);

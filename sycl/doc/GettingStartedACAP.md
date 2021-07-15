@@ -21,7 +21,7 @@ The runtime you'll require for now is the ACAP++ library for AI Engine found
 here: https://gitenterprise.xilinx.com/gauthier/acappp/tree/Merging
 
 The ACAP++ library is usable as a standalone SYCL runtime library without the
-device compiler it defaults to a multi-threaded CPU application (all kernels are 
+device compiler and defaults to a multi-threaded CPU application (all kernels are 
 executed on the host). This makes it superb for debugging your applications 
 before trying to target your application on a more complex heterogeneous 
 architecture like ACAP.
@@ -35,13 +35,13 @@ equally use the compilation steps for FPGA if you wish.
 
 For some information on what the device compiler actually does please look at
 the following documentation:
-- [SYCL Compiler and Runtime Design](sycl/doc/SYCL_compiler_and_runtime_design.md)
-- [SYCL Compiler for Xilinx FPGA](sycl/doc/doc_sycl_compiler.rst)
+- [SYCL Compiler and Runtime Design](sycl/doc/CompilerAndRuntimeDesign.md)
+- [SYCL Compiler for Xilinx FPGA](sycl/doc/Xilinx_sycl_compiler_architecture.rst)
 
 The AI Engine compilation flow is slightly different when it comes down to the 
 nitty gritty details. However, the basic concepts still apply.
 
-But in essence the device compiler, is what will compile your SYCL kernels for a
+But in essence, the device compiler is what will compile your SYCL kernels for a
 particular device target and package it into the final binary for consumption
 by the SYCL runtime.
 
@@ -96,12 +96,12 @@ sudo cp -r ../include/* /usr/local/include/
 ```
 
 
-## Cardano and Chess
+## AIE SDF and Chess compilers
 
 To use the SYCL device compiler you will need an installation of the Xilinx 
-Scout tool that contains Cardano.
+Vitis framework that contains AIE development environment.
 
-While we don't really have any interest in Cardano, we make use of the tools it
+While we do not really use AIE SDF tools, we make use of the tools it
 relies on for our AI Engine kernel compilation. In this case the `xchesscc` 
 compiler which compiles our kernels to an ELF binary loadable by the AI Engine 
 using Synopsis's `chess` compiler toolchain.
@@ -110,18 +110,20 @@ The following environment setup recipe is specifically for Xilinx Internal use
 and should be modified before this project is open sourced:
 
 ```bash
+# Generic parameters.
+XILINX_ROOT=/proj/xbuilds/2020.2_qualified_latest/installs/lin64
+VITIS_VERSION=2020.2
+AIE_NAME=cardano
+
+# Configuration from parameters.
 export XILINXD_LICENSE_FILE=2100@aiengine-eng
 export LM_LICENSE_FILE=2100@aiengine-eng
 export RDI_INTERNAL_ALLOW_PARTIAL_DATA=yes
-
-declare RELEASE="HEAD"
-declare KIND="daily_latest"
-
-export PATH=/proj/xbuilds/${RELEASE}_${KIND}/installs/lin64/Scout/$RELEASE/cardano/bin/unwrapped/lnx64.o/:$PATH
-export CARDANO_ROOT="/proj/xbuilds/${RELEASE}_${KIND}/installs/lin64/Scout/$RELEASE/cardano"
-source $CARDANO_ROOT/scripts/cardano_env.sh
-
-export CHESSROOT=/proj/xbuilds/${RELEASE}_${KIND}/installs/lin64/Scout/$RELEASE/cardano/tps/lnx64/
+export AIE_ROOT="$XILINX_ROOT/Vitis/$VITIS_VERSION/$AIE_NAME"
+export XILINX_VITIS_AIETOOLS=$AIE_ROOT
+export PATH="$PATH:$AIE_ROOT/bin/unwrapped/lnx64.o/"
+source $AIE_ROOT/scripts/cardano_env.sh
+export CHESSROOT=$AIE_ROOT/tps/lnx64/
 ```
 
 This environnement should be in addition to the normal Vitis one.
@@ -154,6 +156,7 @@ export EMCONFIG_PATH=/storage/gauthier/
 export LD_LIBRARY_PATH="$LIBRARY_PATH:$LD_LIBRARY_PATH"
 export PLATFORM_REPO_PATHS=/opt/xilinx/platforms/xilinx_u200_xdma_201830_2
 export TMP="/storage/gauthier/tmp"
+export LD_LIBRARY_PATH="/lib/x86_64-linux-gnu/:$LD_LIBRARY_PATH"
 
 export XILINXD_LICENSE_FILE=2100@aiengine-eng
 export LM_LICENSE_FILE=2100@aiengine-eng
@@ -163,7 +166,6 @@ export XILINX_VITIS_AIETOOLS=$AIE_ROOT
 export PATH="$PATH:$AIE_ROOT/bin/unwrapped/lnx64.o/"
 source $AIE_ROOT/scripts/cardano_env.sh
 export CHESSROOT=$AIE_ROOT/tps/lnx64/
-export LD_LIBRARY_PATH="/lib/x86_64-linux-gnu/:$LD_LIBRARY_PATH"
 ```
 
 ## Several flavors for compiling a basic ACAP++ Hello World
