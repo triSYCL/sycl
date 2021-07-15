@@ -25,6 +25,7 @@
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
@@ -69,7 +70,8 @@ struct KernelPropGen : public ModulePass {
   /// Test if a function is a SPIR kernel
   bool isKernel(const Function &F) {
     if (F.getCallingConv() == CallingConv::SPIR_KERNEL ||
-        F.hasFnAttribute("fpga.top.func"))
+        F.hasFnAttribute("fpga.top.func") ||
+        F.hasFnAttribute("chess_sycl_kernel"))
       return true;
     return false;
   }
@@ -230,6 +232,26 @@ struct KernelPropGen : public ModulePass {
     J.objectEnd();
   }
 
+  void GenerateChessPropertyScript(Module &M, llvm::raw_fd_ostream& O) {
+    
+    llvm::SmallString<512> kernelNames;
+    for (auto &F : M.functions()) {
+      if (isKernel(F)) {
+        F.setLinkage(GlobalValue::WeakODRLinkage);
+        kernelNames += (" \"" + F.getName() + "\" ").str();
+        // Revert the linkage back to original, which was changed by
+        // ChessMassage for function merge
+        F.setLinkage(GlobalValue::WeakODRLinkage);
+      }
+    }
+
+    // output our list of kernel names as a bash array we can iterate over
+    if (!kernelNames.empty()) {
+       O << "# array of kernel names found in the current module\n";
+       O << "declare -a KERNEL_NAME_ARRAY=(" << kernelNames.str() << ")\n\n";
+    }
+  }
+
   /// Visit all the functions of the module
   bool runOnModule(Module &M) override {
     llvm::raw_fd_ostream O(getWriteStreamId(KernelPropGenOutput),
@@ -237,7 +259,11 @@ struct KernelPropGen : public ModulePass {
 
     if (O.has_error())
       return false;
-    generateProperties(M, O);
+    auto T = llvm::Triple(M.getTargetTriple());
+    if (T.isXilinxAIE())
+      GenerateChessPropertyScript(M, O);
+    else
+      generateProperties(M, O);
 
     // The module probably changed
     return true;

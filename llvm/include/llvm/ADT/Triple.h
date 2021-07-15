@@ -54,6 +54,7 @@ public:
     aarch64_32,     // AArch64 (little endian) ILP32: aarch64_32
     arc,            // ARC: Synopsys ARC
     avr,            // AVR: Atmel AVR microcontroller
+    aie32,          // Xilinx AI Engine 32-bit
     bpfel,          // eBPF or extended BPF or 64-bit BPF (little endian)
     bpfeb,          // eBPF or extended BPF or 64-bit BPF (big endian)
     csky,           // CSKY: csky
@@ -511,15 +512,21 @@ public:
   }
 
   bool isXilinxSYCLDevice() const {
-    return (getArch() == Triple::fpga64
-        || getArch() == Triple::fpga32)
-        && getVendor() == Triple::Xilinx
-        && isSYCLDeviceEnvironment();
+    return (getArch() == Triple::fpga64 ||
+            getArch() == Triple::fpga32 ||
+            getArch() == Triple::aie32) &&
+            getVendor() == Triple::Xilinx &&
+            isSYCLDeviceEnvironment();
   }
 
   bool isXilinxFPGA() const {
     return (getArch() == Triple::fpga64
         || getArch() == Triple::fpga32)
+        && getVendor() == Triple::Xilinx;
+  }
+
+  bool isXilinxAIE() const {
+    return getArch() == Triple::aie32
         && getVendor() == Triple::Xilinx;
   }
 

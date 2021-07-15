@@ -23,6 +23,29 @@
 namespace clang {
 namespace targets {
 
+/// Nullary address space map hack for AIE
+/// \TODO: Either a less hacky implementation, like having an AIE target/target
+///   info rather than using the SPIR target
+///   OR AIE has some of it's own address spaces so perhaps this can be
+///   used for that. However, it's advisable to move towards AIE having its own
+///  target info.
+static const unsigned AIEAddrSpaceMap[] = {
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+    0,
+};
+
 static const unsigned SPIRAddrSpaceMap[] = {
     0, // Default
     1, // opencl_global
@@ -64,9 +87,14 @@ public:
     TLSSupported = false;
     VLASupported = false;
     LongWidth = LongAlign = 64;
-    AddrSpaceMap = (Triple.getEnvironment() == llvm::Triple::SYCLDevice)
-                       ? &SYCLAddrSpaceMap
-                       : &SPIRAddrSpaceMap;
+    if (Triple.isXilinxAIE()) {
+      AddrSpaceMap = &AIEAddrSpaceMap;
+    } else if (Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
+      AddrSpaceMap = &SYCLAddrSpaceMap;
+    } else {
+      AddrSpaceMap = &SPIRAddrSpaceMap;
+    }
+
     UseAddrSpaceMapMangling = true;
     HasLegalHalfType = true;
     HasFloat16 = true;

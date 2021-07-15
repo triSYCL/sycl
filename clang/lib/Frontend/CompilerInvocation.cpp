@@ -3929,7 +3929,7 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
   // off for v++ if you wish to emit diagnostics for them and you have to
   // specify if you wish no diagnostics for other devices.
   Opts.SYCLAllowVariadicFunc =
-      T.isXilinxFPGA()
+      T.isXilinxSYCLDevice()
           ? Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
                          options::OPT_fno_sycl_allow_variadic_func)
           : Args.hasFlag(options::OPT_fsycl_allow_variadic_func,

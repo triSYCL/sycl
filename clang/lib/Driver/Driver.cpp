@@ -13,6 +13,7 @@
 #include "ToolChains/AVR.h"
 #include "ToolChains/Ananas.h"
 #include "ToolChains/BareMetal.h"
+#include "ToolChains/Chess.h"
 #include "ToolChains/Clang.h"
 #include "ToolChains/CloudABI.h"
 #include "ToolChains/Contiki.h"
@@ -666,7 +667,8 @@ Driver::OpenMPRuntimeKind Driver::getOpenMPRuntime(const ArgList &Args) const {
 
 static bool isValidSYCLTriple(llvm::Triple T) {
   // NVPTX is valid for SYCL.
-  if (T.isNVPTX() || T.getArch() == llvm::Triple::fpga64)
+  if (T.isNVPTX() || T.getArch() == llvm::Triple::fpga64 ||
+      T.getArch() == llvm::Triple::aie32)
     return true;
   // Check for invalid SYCL device triple values.
   // Non-SPIR arch.
@@ -4382,7 +4384,7 @@ class OffloadingActionBuilder final {
         // process specialization constants
         types::ID PostLinkOutType =
             isNVPTX ? types::TY_LLVM_BC : types::TY_Tempfiletable;
-        if ((*TC)->getTriple().isXilinxFPGA()) {
+        if (TripleIt->isXilinxSYCLDevice()) {
           WrapperInputs.push_back(DeviceLinkAction);
         } else {
         auto *PostLinkAction = C.MakeAction<SYCLPostLinkJobAction>(
@@ -7202,6 +7204,10 @@ const ToolChain &Driver::getOffloadingDeviceToolChain(const ArgList &Args,
           case llvm::Triple::fpga32:
           case llvm::Triple::fpga64:
             TC = std::make_unique<toolchains::VXXToolChain>(
+              *this, Target, HostTC, Args);
+            break;
+          case llvm::Triple::aie32:
+            TC = std::make_unique<toolchains::ChessToolChain>(
               *this, Target, HostTC, Args);
             break;
           case llvm::Triple::nvptx:

@@ -140,7 +140,7 @@ def opencl_Group : OptionGroup<"<opencl group>">, Group<f_Group>,
                    DocName<"OpenCL flags">;
 
 def sycl_Group : OptionGroup<"<SYCL group>">, Group<f_Group>,
-                 DocName<"SYCL flags">;
+                  DocName<"SYCL flags">;
 
 def m_Group : OptionGroup<"<m group>">, Group<CompileOnly_Group>,
               DocName<"Target-dependent compilation options">;
@@ -2522,6 +2522,11 @@ def fsycl_link_EQ : Joined<["-"], "fsycl-link=">,
 def fsycl_link : Flag<["-"], "fsycl-link">, Alias<fsycl_link_EQ>,
   AliasArgs<["early"]>, Flags<[CC1Option, CoreOption]>,
   HelpText<"Generate partially linked device object to be used with the host link">;
+def fsycl_header_only_library : Flag<["-"], "fsycl-header-only-library">,
+  Group<f_Group>, Flags<[CC1Option, NoArgumentUnused]>,
+  HelpText<"Tells the SYCL host compilation not to implicitly add -lsycl and "
+           "look for a SYCL library as we will use a header only runtime "
+           "library.">;
 def fsycl_unnamed_lambda : Flag<["-"], "fsycl-unnamed-lambda">,
   Flags<[CC1Option, CoreOption]>, HelpText<"Allow unnamed SYCL lambda kernels">,
   MarshallingInfoFlag<LangOpts<"SYCLUnnamedLambda">>;
