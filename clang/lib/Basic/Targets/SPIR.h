@@ -169,7 +169,11 @@ public:
     PointerWidth = PointerAlign = 32;
     SizeType = TargetInfo::UnsignedInt;
     PtrDiffType = IntPtrType = TargetInfo::SignedInt;
-    if (Triple.isXilinxFPGA())
+    if (Triple.isXilinxAIE())
+      resetDataLayout(
+          "e-i8:8:8-i16:16:16-i32:32:32-i64:32:32-f32:32:32-f64:32:32-p:32:32:"
+          "32:32:8");
+    else if (Triple.isXilinxFPGA())
       resetDataLayout(
           "e-m:e-p:32:32-i64:64-i128:128-i256:256-i512:512-i1024:1024-i2048:"
           "2048-i4096:4096-n8:16:32:64-S128-v16:16-v24:32-v32:32-v48:64-v96:"
@@ -192,6 +196,7 @@ public:
     SizeType = TargetInfo::UnsignedLong;
     PtrDiffType = IntPtrType = TargetInfo::SignedLong;
 
+    assert(!Triple.isXilinxAIE() && "there is no 64bit aie targets");
     if (Triple.isXilinxFPGA())
       resetDataLayout(
           "e-m:e-i64:64-i128:128-i256:256-i512:512-i1024:1024-i2048:2048-i4096:"
