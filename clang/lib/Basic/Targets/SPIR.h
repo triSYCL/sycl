@@ -170,6 +170,8 @@ public:
     SizeType = TargetInfo::UnsignedInt;
     PtrDiffType = IntPtrType = TargetInfo::SignedInt;
     if (Triple.isXilinxAIE())
+      /// This is only a part of the datalayout used by chess because chess's
+      /// datalayout contains bitwidth that are not multiple of bytes
       resetDataLayout(
           "e-i8:8:8-i16:16:16-i32:32:32-i64:32:32-f32:32:32-f64:32:32-p:32:32:"
           "32:32:8");
