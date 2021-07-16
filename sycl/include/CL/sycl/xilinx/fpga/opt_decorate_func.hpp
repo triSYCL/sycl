@@ -1,4 +1,4 @@
-//==- opt_decorate_func.hpp --- SYCL Xilinx extension         ---------------==//
+//==- opt_decorate_func.hpp --- SYCL Xilinx extension ---------------==//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -7,16 +7,17 @@
 //===----------------------------------------------------------------------===//
 ///
 /// \file
-/// This file includes some decorating functions for some optimizations supported
-/// by Xilinx tools.
+/// This file includes some decorating functions for some optimizations
+/// supported by Xilinx tools.
 ///
 //===----------------------------------------------------------------------===//
 
 #ifndef SYCL_XILINX_FPGA_OPT_DECORATE_FUNC_HPP
 #define SYCL_XILINX_FPGA_OPT_DECORATE_FUNC_HPP
 
-#include "CL/sycl/xilinx/fpga/ssdm_inst.hpp"
 #include "CL/sycl/detail/defines.hpp"
+#include "CL/sycl/xilinx/fpga/ssdm_inst.hpp"
+#include <cstdint>
 #include <utility>
 
 __SYCL_INLINE_NAMESPACE(cl) {
@@ -38,32 +39,16 @@ namespace sycl::xilinx {
     in a dataflow manner.
 */
 
-template <typename T>
-void dataflow(T&& functor) {
+template <typename T> void dataflow(T &&functor) {
   _ssdm_op_SpecDataflowPipeline(-1, "");
-  /// the std::forward can make a difference when the operator() is l or r value
-  /// specified.
+  /// the std::forward can make a difference when the operator() is l or r
+  /// value specified.
   std::forward<T>(functor)();
 }
 
-/** Execute loops in a pipelined manner
 
-    A loop with pipeline mode processes a new input every clock
-    cycle. This allows the operations of different iterations of the
-    loop to be executed in a concurrent manner to reduce latency.
 
-    \param[in] f is a function with an innermost loop to be executed in a
-    pipeline way.
-*/
-template<typename T>
-__SYCL_DEVICE_ANNOTATE("xilinx_pipeline")
-__SYCL_ALWAYS_INLINE void pipeline(T&& functor) {
-  /// the std::forward can make a difference when the operator() is l or r value
-  /// specified.
-  std::forward<T>(functor)();
-}
-}
-
-}
+} // namespace sycl::xilinx
+} // __SYCL_INLINE_NAMESPACE(cl)
 
 #endif // SYCL_XILINX_FPGA_OPT_DECORATE_FUNC_HPP
