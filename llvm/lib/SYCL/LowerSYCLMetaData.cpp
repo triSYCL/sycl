@@ -29,6 +29,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Dominators.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
@@ -37,6 +38,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/SYCL/LowerSYCLMetaData.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/FormatVariadic.h"
 
 using namespace llvm;
 
@@ -102,12 +104,12 @@ struct LSMDState {
     auto *CSArgs = cast<Constant>(
         cast<GlobalVariable>(getUnderlyingObject(CS->getAggregateElement(4)))
             ->getOperand(0));
-    auto *IIInitializer = cast<ConstantInt>(
-            getUnderlyingObject(CSArgs->getAggregateElement(0u)));
-    auto *RewindInitializer = cast<ConstantInt>(
-            getUnderlyingObject(CSArgs->getAggregateElement(1u)));
-    auto *PipelineType = cast<ConstantInt>(
-            getUnderlyingObject(CSArgs->getAggregateElement(2u)));
+    auto *IIInitializer =
+        cast<ConstantInt>(getUnderlyingObject(CSArgs->getAggregateElement(0u)));
+    auto *RewindInitializer =
+        cast<ConstantInt>(getUnderlyingObject(CSArgs->getAggregateElement(1u)));
+    auto *PipelineType =
+        cast<ConstantInt>(getUnderlyingObject(CSArgs->getAggregateElement(2u)));
 
     findLoopAroundFunction(F, [=](Loop *L) {
       SmallVector<BasicBlock *, 4> LoopLatches;
@@ -126,9 +128,8 @@ struct LSMDState {
             Ctx,
             {
                 MDString::get(Ctx, "llvm.loop.pipeline.enable"),
-                ConstantAsMetadata::get(
-                    ConstantInt::get(Type::getInt32Ty(Ctx),
-                                     IIInitializer->getSExtValue())),
+                ConstantAsMetadata::get(ConstantInt::get(
+                    Type::getInt32Ty(Ctx), IIInitializer->getSExtValue())),
                 ConstantAsMetadata::get(ConstantInt::get(
                     Type::getInt1Ty(Ctx), RewindInitializer->getSExtValue())),
                 ConstantAsMetadata::get(ConstantInt::get(
@@ -141,6 +142,17 @@ struct LSMDState {
             ->replaceOperandWith(0, MDN);
       }
     });
+  }
+
+  void lowerPipelineKernel(llvm::Function *F,
+                           llvm::ConstantStruct *Parameters) {
+    auto *IIInitializer = cast<ConstantInt>(
+        getUnderlyingObject(Parameters->getAggregateElement(0u)));
+    auto *PipelineType = cast<ConstantInt>(
+        getUnderlyingObject(Parameters->getAggregateElement(1u)));
+    std::string S = formatv("{0}.{1}", IIInitializer->getSExtValue(),
+                            PipelineType->getSExtValue());
+    F->addFnAttr("fpga.static.pipeline", S);
   }
 
   void lowerArrayPartition(llvm::Value *V) {
@@ -158,6 +170,42 @@ struct LSMDState {
     I->insertBefore(F->getEntryBlock().getTerminator());
   }
 
+  void dispatchKernelProperty(llvm::ConstantStruct *CS) {
+    auto *F =
+        dyn_cast<Function>(getUnderlyingObject(CS->getAggregateElement(0u)));
+
+    if (!F)
+      return;
+    auto *CSArgs = cast<Constant>(
+        cast<GlobalVariable>(getUnderlyingObject(CS->getAggregateElement(4)))
+            ->getOperand(0));
+    StringRef PropertyType =
+        cast<ConstantDataArray>(
+            cast<GlobalVariable>(
+                getUnderlyingObject(CSArgs->getAggregateElement(0u)))
+                ->getOperand(0))
+            ->getRawDataValues();
+    auto *PropertyPayload = cast<ConstantStruct>(
+        getUnderlyingObject(CSArgs->getAggregateElement(1u)));
+    bool isWrapper = false;
+    if (PropertyType == "kernel_pipeline") {
+      lowerPipelineKernel(F, PropertyPayload);
+      isWrapper = true;
+    }
+
+    if (isWrapper) {
+        F->addFnAttr("fpga.propertywrapper", "true");
+    }
+
+    //   cast<ConstantInt>(getUnderlyingObject(CSArgs->getAggregateElement(0u)));
+    /*auto *RewindInitializer =
+        cast<ConstantInt>(getUnderlyingObject(CSArgs->getAggregateElement(1u)));
+    auto *PipelineType =
+        cast<ConstantInt>(getUnderlyingObject(CSArgs->getAggregateElement(2u)));*/
+
+    // std::cerr << "Youhou " << std::string(PropertyType) << std::endl;
+  }
+
   void processGlobalAnnotation(llvm::Value *Annot) {
     auto *CS = cast<ConstantStruct>(Annot);
     StringRef AnnotKind =
@@ -168,8 +216,12 @@ struct LSMDState {
             ->getRawDataValues();
     if (AnnotKind == kindOf("xilinx_pipeline")) {
       lowerPipeline(CS);
-    } else if (AnnotKind == kindOf("xilinx_partition_array"))
+    } else if (AnnotKind == kindOf("xilinx_partition_array")) {
       lowerArrayPartition(getUnderlyingObject(CS->getAggregateElement(0u)));
+    } else if (AnnotKind == kindOf("xilinx_kernel_property")) {
+      dispatchKernelProperty(CS);
+    }
+    
     return;
   }
 
@@ -177,7 +229,6 @@ struct LSMDState {
     GlobalVariable *Annots = M.getGlobalVariable("llvm.global.annotations");
     if (!Annots)
       return false;
-
     auto *Array = cast<ConstantArray>(Annots->getOperand(0));
     for (auto *E : Array->operand_values())
       processGlobalAnnotation(E);

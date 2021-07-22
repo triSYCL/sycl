@@ -92,6 +92,8 @@ class CompilationDriver:
     def _dump_cmd(self, filename, args):
         with (self.tmpdir / filename).open("w") as f:
             f.write(" ".join(map(str, args)) + "\n")
+            if environ.get("SYCL_VXX_DBG_CMD_DUMP") is not None:
+                f.write(f"\nOriginal command list: {args}")
 
     def _link_multi_inputs(self):
         """Link all input files into a single .bc"""
@@ -226,7 +228,7 @@ class CompilationDriver:
             self.vpp_llvm_input
         ]
         if kernel['extra_args'].strip():
-            command.extend(kernel['extra_args'].split(' '))
+            command.extend(kernel['extra_args'].strip().split(' '))
         command.extend(self.extra_comp_args)
         self._dump_cmd(f"06-vxxcomp-{kernel['name']}.cmd", command)
         subprocess.run(command)
