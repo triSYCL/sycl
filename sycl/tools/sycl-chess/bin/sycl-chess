@@ -94,7 +94,9 @@ xchesscc_wrapper() {
 # chesswrapper folder so we don't have to add the bin to the path. Doing that
 # may run the risk of breaking chess tools in weird ways (e.g. finding the
 # incorrect assembler).
-  export PATH=$DRIVER_PATH_DIR/chesswrappers:$PATH
+  CHESSCC=$(realpath $CARDANO_BIN_PATH_DIR/../tps/lnx64/target/bin/LNa64bin)
+  echo $CHESSCC
+  export PATH=$DRIVER_PATH_DIR/chesswrappers:$CHESSCC:$PATH
   CARDANO=$(realpath $CARDANO_BIN_PATH_DIR/../)
   export RDI_DATADIR=$CARDANO/data
   export LD_LIBRARY_PATH=$CARDANO/lib/lnx64.o:$CARDANO_BIN_PATH_DIR/../lnx64/tools/dot/lib:$LD_LIBRARY_PATH
@@ -130,7 +132,7 @@ UNMERGED_PROP=$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}
 
 cp $INPUT_FILE_NAME $INPUT_FILE_NAME.saved.bc
 
-$OPT -S -preparechess -Oz -mergefunc -ChessMassage -globaldce -kernelPropGen -vxxIRDowngrader \
+$OPT -S -preparechess -Os -mergefunc -ChessMassage -globaldce -kernelPropGen -vxxIRDowngrader \
   "$INPUT_FILE_NAME" --sycl-kernel-propgen-output $KERNELPROP \
   --sycl-kernel-unmerged-prop-out $UNMERGED_PROP -o \
   "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"

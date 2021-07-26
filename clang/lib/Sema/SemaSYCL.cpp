@@ -1009,7 +1009,7 @@ static void populateMainEntryPoint(Sema& S, const StringRef Name,
   Out << "#include <stdint.h>\n";
 
   Out << "// SYCL generated kernel wrapper function \n";
-  Out << "extern \"C\" void " << Name << "(void*);\n";
+  Out << "extern \"C\" void " << Name << "();\n";
 
   // TODO: Declare Kernel objects and external arrays
   Out << "// Declare Kernel objects and external arrays \n";
@@ -1020,9 +1020,8 @@ static void populateMainEntryPoint(Sema& S, const StringRef Name,
   Out << "\n";
 
   Out << "// SYCL Tile Address Register \n";
-  Out << "uint32_t args[0x1];\n";
   Out << "int main(void) {\n";
-  Out << "  "<< Name << "((void*)&args);\n";
+  Out << "  "<< Name << "();\n";
   Out << "  return 0;\n";
   Out << "}\n";
 }
