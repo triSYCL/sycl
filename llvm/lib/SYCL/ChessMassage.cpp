@@ -55,7 +55,7 @@ struct ChessMassage : public ModulePass {
 
   void removeMetadataForUnmergability(Module &M) {
     for (auto &F : M.functions())
-      if (F.getCallingConv() == CallingConv::SPIR_KERNEL)
+      if (F.hasFnAttribute("unmergable-kernel-id"))
         F.removeFnAttr("unmergable-kernel-id");
   }
 
@@ -88,7 +88,7 @@ struct ChessMassage : public ModulePass {
 
     for (auto &F : M.functions()) {
       // Collect the kernel functions
-      if (F.getCallingConv() == CallingConv::SPIR_KERNEL)
+      if (F.hasFnAttribute("chess_sycl_kernel"))
         Funcs.emplace_back(&F);
     }
 
@@ -142,37 +142,6 @@ struct ChessMassage : public ModulePass {
     }
   }
 
-  /// Removes SPIR_FUNC/SPIR_KERNEL calling conventions from functions and
-  /// replace them with the default C calling convention for now
-  void modifySPIRCallingConv(Module &M) {
-    for (auto &F : M.functions()) {
-      if (F.getCallingConv() == CallingConv::SPIR_KERNEL ||
-          F.getCallingConv() == CallingConv::SPIR_FUNC) {
-        if (F.getCallingConv() == CallingConv::SPIR_KERNEL &&
-            F.getLinkage() != llvm::GlobalValue::InternalLinkage)
-          F.addFnAttr("chess_sycl_kernel");
-
-        // C - The default llvm calling convention, compatible with C.  This
-        // convention is the only calling convention that supports varargs calls.
-        // As with typical C calling conventions, the callee/caller have to
-        // tolerate certain amounts of prototype mismatch.
-        // Calling Convention List For Reference:
-        // https://llvm.org/doxygen/CallingConv_8h_source.html#l00029
-        // Changing top level function defintiion/declaration, not call sites
-        F.setCallingConv(CallingConv::C);
-
-        // setCallingConv on the function won't change all the call sites,
-        // we must replicate the calling convention across it's Uses. Another
-        // method would be to go through each basic block and check each
-        // instruction, but this seems more optimal
-        for (auto U : F.users()) {
-          if (auto CB = dyn_cast<CallBase>(U))\
-            CB->setCallingConv(CallingConv::C);
-         }
-      }
-    }
-  }
-
   /// Remove a piece of metadata we don't want
   void removeMetadata(Module &M, StringRef MetadataName) {
     llvm::NamedMDNode *Old =
@@ -207,8 +176,6 @@ struct ChessMassage : public ModulePass {
     removeMetadataForUnmergability(M);
     TriageKernelForMerging(M, O);
     removeImmarg(M);
-    // This has to be done before changing the calling convention
-    modifySPIRCallingConv(M);
     // This causes some problems with Tale when we generate a .sfg from a kernel
     // that contains this piece of IR, perhaps it's fine not to delete it
     // provided it's not empty. But at least for the moment it's empty and Tale

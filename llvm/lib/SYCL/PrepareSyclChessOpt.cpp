@@ -78,9 +78,42 @@ struct PrepareSyclChessOpt : public ModulePass {
     Visitor.visit(M);
   }
 
+
+  /// Removes SPIR_FUNC/SPIR_KERNEL calling conventions from functions and
+  /// replace them with the default C calling convention for now
+  void modifySPIRCallingConv(Module &M) {
+    for (auto &F : M.functions()) {
+      if (F.getCallingConv() == CallingConv::SPIR_KERNEL ||
+          F.getCallingConv() == CallingConv::SPIR_FUNC) {
+        if (F.getCallingConv() == CallingConv::SPIR_KERNEL)
+          F.addFnAttr("chess_sycl_kernel");
+
+        // C - The default llvm calling convention, compatible with C.  This
+        // convention is the only calling convention that supports varargs calls.
+        // As with typical C calling conventions, the callee/caller have to
+        // tolerate certain amounts of prototype mismatch.
+        // Calling Convention List For Reference:
+        // https://llvm.org/doxygen/CallingConv_8h_source.html#l00029
+        // Changing top level function defintiion/declaration, not call sites
+        F.setCallingConv(CallingConv::C);
+
+        // setCallingConv on the function won't change all the call sites,
+        // we must replicate the calling convention across it's Uses. Another
+        // method would be to go through each basic block and check each
+        // instruction, but this seems more optimal
+        for (auto U : F.users()) {
+          if (auto CB = dyn_cast<CallBase>(U))\
+            CB->setCallingConv(CallingConv::C);
+         }
+      }
+    }
+  }
+
   bool runOnModule(Module &M) override {
     turnNonKernelsIntoPrivate(M);
     prepareForMerging(M);
+    // This has to be done before changing the calling convention
+    modifySPIRCallingConv(M);
     // makeVolatile(M);
     return true;
   }

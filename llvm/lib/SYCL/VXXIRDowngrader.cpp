@@ -329,6 +329,9 @@ struct VXXIRDowngrader : public ModulePass {
   /// Traverse the IR in the module and warn about IR constructs unsupported by
   /// the backend.
   void warnForIssues(Module &M) {
+    /// ACAP cores do not have the same restriction as FPGA.
+    if (Triple(M.getTargetTriple()).isXilinxAIE())
+      return;
     WarnVisitor Visitor;
     Visitor.visit(M);
     Visitor.emit();
