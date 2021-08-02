@@ -345,8 +345,8 @@ might be wrong on your current system... But the hardware execution
 just requires the open-source XRT that should have been compiled just
 using what is available on the system.
 
-Architecture provided to the `sycl-targets` clang flag selects the 
-compilation mode. Supported architectures are : 
+Architecture provided to the `sycl-targets` Clang flag selects the
+compilation mode. Supported architectures are:
 
 |                       | Software simulation | Hardware emulation  | Hardware        |
 |-----------------------|---------------------|---------------------|-----------------|
@@ -360,7 +360,7 @@ Only one `fpga64_*` architecture is allowed in the `sycl-targets` flag.
 To run an example from the provided examples:
 - with software emulation:
   ```bash
-  cd $SYCL_HOME/llvm/sycl/test/xocc_tests/simple_tests
+  cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/simple_tests
   # Instruct the compiler and runtime to use FPGA software emulation with SPIR flow
   # Compile the SYCL program down to a host fat binary including device code for CPU
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_sw_emu \
@@ -440,7 +440,7 @@ parallel.
 To run a SYCL translation of
 https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
 ```bash
-cd $SYCL_HOME/llvm/sycl/test/xocc_tests/edge_detection
+cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/edge_detection
 # Instruct the compiler and runtime to use real FPGA hardware execution
 $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
     -fsycl-targets=fpga64_hw edge_detection.cpp \
@@ -575,8 +575,8 @@ mkdir -p "build-Release" && cd "build-Release" && cmake \
  -DCMAKE_CXX_FLAGS_RELEASE="-O3 -march=native -fno-omit-frame-pointer" \
  -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
  -G Ninja \
- -DCMAKE_C_COMPILER="/usr/bin/clang-11" \
- -DCMAKE_CXX_COMPILER="/usr/bin/clang++-11" \
+ -DCMAKE_C_COMPILER="/usr/bin/clang-13" \
+ -DCMAKE_CXX_COMPILER="/usr/bin/clang++-13" \
  -DLLVM_USE_LINKER="lld-11" \
  -DCMAKE_BUILD_TYPE=Release \
  -DLLVM_ENABLE_ASSERTIONS=ON \
@@ -615,8 +615,8 @@ mkdir -p "build-Debug" && cd "build-Debug" && cmake \
  -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
  -G Ninja \
  -DLLVM_ENABLE_ASSERTIONS=ON \
- -DCMAKE_C_COMPILER="/usr/bin/clang-11" \
- -DCMAKE_CXX_COMPILER="/usr/bin/clang++-11" \
+ -DCMAKE_C_COMPILER="/usr/bin/clang-13" \
+ -DCMAKE_CXX_COMPILER="/usr/bin/clang++-13" \
  -DLLVM_USE_LINKER="lld-11" \
  -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
  -DLLVM_EXTERNAL_PROJECTS="sycl;llvm-spirv;opencl-aot;xpti;libdevice" \
@@ -762,7 +762,7 @@ fi
 ```
 then we can run `llvm-reduce` by doing the following:
 ```bash
-# Disassemble the file that crashed Vitis's clang
+# Disassemble the file that crashed Vitis's Clang
 ./build-Release/bin/opt -S file_that_crashed_vitis_clang.bc -o tmp.ll
 
 # Run llvm-reduce
