@@ -314,7 +314,7 @@ export XILINX_XRT=$XILINX_ROOT/xrt
 export XILINX_VITIS=$XILINX_ROOT/Vitis/$XILINX_VERSION
 export XILINX_VIVADO=$XILINX_ROOT/Vivado/$XILINX_VERSION
 # Add the various tools in the PATH
-PATH=$PATH:$SYCL_BIN_DIR:$XILINX_XRT/bin:$XILINX_SDX/bin:$XILINX_VIVADO/bin
+PATH=$PATH:$SYCL_BIN_DIR:$XILINX_XRT/bin:$XILINX_VITIS/bin:$XILINX_VIVADO/bin
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$XILINX_XRT/lib:$SYCL_HOME/llvm/build/lib
 # Setup LIBRARY_PATH used in hw and hw_emu mode
 # Ask ldconfig about the list of system library directories
