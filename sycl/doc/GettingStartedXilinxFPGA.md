@@ -17,6 +17,12 @@ https://github.com/Xilinx/XRT/issues/5168 up to its resolution.  In
 the meantime you can always help fixing the bug or install explicitly
 an older Linux kernel package and boot on it.
 
+## What's new?
+
+- 2021/06/24: there is a new HLS target along the OpenCL/SPIR compiler
+  flow for Xilinx FPGA. The HLS target relies on direct LLVM IR
+  feeding and allows finer control by using HLS extensions.
+  
 ## Installing the Alveo U200 board
 
 If you do not have a real board and want to use only software or
