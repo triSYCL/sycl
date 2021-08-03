@@ -22,7 +22,8 @@ an older Linux kernel package and boot on it.
 - 2021/06/24: there is a new HLS target along the OpenCL/SPIR compiler
   flow for Xilinx FPGA. The HLS target relies on direct LLVM IR
   feeding and allows finer control by using HLS extensions.
-  
+
+
 ## Installing the Alveo U200 board
 
 If you do not have a real board and want to use only software or
@@ -364,9 +365,9 @@ To run an example from the provided examples:
   # Instruct the compiler and runtime to use FPGA software emulation with SPIR flow
   # Compile the SYCL program down to a host fat binary including device code for CPU
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_sw_emu \
-    parallel_for_ND_range.cpp -o parallel_for_ND_range
+    single_task_vector_add.cpp -o single_task_vector_add
   # Run the software emulation
-  ./parallel_for_ND_range
+  ./single_task_vector_add
   ```
 
 - with hardware emulation:
@@ -374,9 +375,9 @@ To run an example from the provided examples:
   # Instruct the compiler and runtime to use FPGA hardware emulation with HLS flow
   # Compile the SYCL program down to a host fat binary including the RTL for simulation
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw_emu \
-    parallel_for_ND_range.cpp -o parallel_for_ND_range
+    single_task_vector_add.cpp -o single_task_vector_add
   # Run the hardware emulation
-  ./parallel_for_ND_range
+  ./single_task_vector_add
   ```
 
 - with real hardware execution on FPGA:
@@ -384,16 +385,16 @@ To run an example from the provided examples:
   # Instruct the compiler to use real FPGA hardware execution with SPIR flow
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hw \
-    parallel_for_ND_range.cpp -o parallel_for_ND_range
+    single_task_vector_add.cpp -o single_task_vector_add
   # Run on the real FPGA board
-  ./parallel_for_ND_range
+  ./single_task_vector_add
   ```
 Note that only the flag `-fsycl-targets` is changed across the previous examples.
 
 ### Running the test suite
 
-Selecting the target for which the tests are run is done using 
-the `VXX_TARGET` environment variable. It defaults to `hls_hw_emu`. 
+Selecting the target for which the tests are run is done using
+the `VXX_TARGET` environment variable. It defaults to `hls_hw_emu`.
 The value to give is the same as the associated sycl target, with
 the `fpga64_` prefix trimmed. Namely:
 
