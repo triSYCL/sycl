@@ -548,12 +548,7 @@ the insane! Hopefully...
   `Vitis` installation. For example, it assumes that `v++` is inside
   Vitis's bin folder and that the lib folder containing `SPIR`
   builtins that kernels are linked against are in a `/lnx64/lib`
-  directory relative to the bin folders parent.  This can be seen and
-  altered in `XOCC.cpp` if so desired. A future, aim is to allow the
-  user to pass arguments through the compiler to assign these if the
-  assumptions are false. However, in the basic 2018.3 release the
-  standard directory structure that is assumed is correct without
-  alterations.
+  directory relative to the bin folders parent.
 
 ## Debugging the SYCL implementation
 
@@ -578,7 +573,7 @@ mkdir -p "build-Release" && cd "build-Release" && cmake \
  -G Ninja \
  -DCMAKE_C_COMPILER="/usr/bin/clang-13" \
  -DCMAKE_CXX_COMPILER="/usr/bin/clang++-13" \
- -DLLVM_USE_LINKER="lld-11" \
+ -DLLVM_USE_LINKER="lld-13" \
  -DCMAKE_BUILD_TYPE=Release \
  -DLLVM_ENABLE_ASSERTIONS=ON \
  -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
@@ -618,7 +613,7 @@ mkdir -p "build-Debug" && cd "build-Debug" && cmake \
  -DLLVM_ENABLE_ASSERTIONS=ON \
  -DCMAKE_C_COMPILER="/usr/bin/clang-13" \
  -DCMAKE_CXX_COMPILER="/usr/bin/clang++-13" \
- -DLLVM_USE_LINKER="lld-11" \
+ -DLLVM_USE_LINKER="lld-13" \
  -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
  -DLLVM_EXTERNAL_PROJECTS="sycl;llvm-spirv;opencl-aot;xpti;libdevice" \
  -DLLVM_EXTERNAL_SYCL_SOURCE_DIR=$SYCL_HOME/sycl \
@@ -644,7 +639,7 @@ ninja -C build-Debug sycl-toolchain
 
 * `-CMAKE_CXX_FLAGS_RELEASE="-O3 -march=native -fno-omit-frame-pointer"` to have an optimized build with relatively accurate stack traces;
 * `-G Ninja` use `ninja` instead of `make` to speedup builds;
-* `-DLLVM_USE_LINKER="lld-11"` select `lld` or `gold` instead of `ld` to speedup builds;
+* `-DLLVM_USE_LINKER="lld-13"` select `lld` or `gold` instead of `ld` to speedup builds;
 * `-DLLVM_TARGETS_TO_BUILD="X86;NVPTX"` to build only the targets needed, like NVPTX for CUDA support;
 * `-DLIBCLC_TARGETS_TO_BUILD="nvptx64--;nvptx64--nvidiacl"` needed for CUDA support;
 * `-DSYCL_ENABLE_XPTI_TRACING=ON` adds useful debugging capabilities;
