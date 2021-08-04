@@ -17,6 +17,13 @@ https://github.com/Xilinx/XRT/issues/5168 up to its resolution.  In
 the meantime you can always help fixing the bug or install explicitly
 an older Linux kernel package and boot on it.
 
+## What's new?
+
+- 2021/06/24: there is a new HLS target along the OpenCL/SPIR compiler
+  flow for Xilinx FPGA. The HLS target relies on direct LLVM IR
+  feeding and allows finer control by using HLS extensions.
+
+
 ## Installing the Alveo U200 board
 
 If you do not have a real board and want to use only software or
@@ -308,8 +315,8 @@ export XILINX_XRT=$XILINX_ROOT/xrt
 export XILINX_VITIS=$XILINX_ROOT/Vitis/$XILINX_VERSION
 export XILINX_VIVADO=$XILINX_ROOT/Vivado/$XILINX_VERSION
 # Add the various tools in the PATH
-PATH=$PATH:$SYCL_BIN_DIR:$XILINX_XRT/bin:$XILINX_SDX/bin:$XILINX_VIVADO/bin
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$XILINX_XRT/lib:$SYCL_HOME/llvm/build/lib
+PATH=$PATH:$SYCL_BIN_DIR:$XILINX_XRT/bin:$XILINX_VITIS/bin:$XILINX_VIVADO/bin
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$XILINX_XRT/lib:$XILINX_VITIS/lib/lnx64.o:$SYCL_HOME/llvm/build/lib
 # Setup LIBRARY_PATH used in hw and hw_emu mode
 # Ask ldconfig about the list of system library directories
 export LIBRARY_PATH=$(ldconfig --verbose 2>/dev/null | grep ':$' | tr -d '\n')
@@ -339,8 +346,8 @@ might be wrong on your current system... But the hardware execution
 just requires the open-source XRT that should have been compiled just
 using what is available on the system.
 
-Architecture provided to the `sycl-targets` clang flag selects the 
-compilation mode. Supported architectures are : 
+Architecture provided to the `sycl-targets` Clang flag selects the
+compilation mode. Supported architectures are:
 
 |                       | Software simulation | Hardware emulation  | Hardware        |
 |-----------------------|---------------------|---------------------|-----------------|
@@ -354,13 +361,13 @@ Only one `fpga64_*` architecture is allowed in the `sycl-targets` flag.
 To run an example from the provided examples:
 - with software emulation:
   ```bash
-  cd $SYCL_HOME/llvm/sycl/test/xocc_tests/simple_tests
+  cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/simple_tests
   # Instruct the compiler and runtime to use FPGA software emulation with SPIR flow
   # Compile the SYCL program down to a host fat binary including device code for CPU
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_sw_emu \
-    parallel_for_ND_range.cpp -o parallel_for_ND_range
+    single_task_vector_add.cpp -o single_task_vector_add
   # Run the software emulation
-  ./parallel_for_ND_range
+  ./single_task_vector_add
   ```
 
 - with hardware emulation:
@@ -368,9 +375,9 @@ To run an example from the provided examples:
   # Instruct the compiler and runtime to use FPGA hardware emulation with HLS flow
   # Compile the SYCL program down to a host fat binary including the RTL for simulation
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw_emu \
-    parallel_for_ND_range.cpp -o parallel_for_ND_range
+    single_task_vector_add.cpp -o single_task_vector_add
   # Run the hardware emulation
-  ./parallel_for_ND_range
+  ./single_task_vector_add
   ```
 
 - with real hardware execution on FPGA:
@@ -378,16 +385,16 @@ To run an example from the provided examples:
   # Instruct the compiler to use real FPGA hardware execution with SPIR flow
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hw \
-    parallel_for_ND_range.cpp -o parallel_for_ND_range
+    single_task_vector_add.cpp -o single_task_vector_add
   # Run on the real FPGA board
-  ./parallel_for_ND_range
+  ./single_task_vector_add
   ```
 Note that only the flag `-fsycl-targets` is changed across the previous examples.
 
 ### Running the test suite
 
-Selecting the target for which the tests are run is done using 
-the `VXX_TARGET` environment variable. It defaults to `hls_hw_emu`. 
+Selecting the target for which the tests are run is done using
+the `VXX_TARGET` environment variable. It defaults to `hls_hw_emu`.
 The value to give is the same as the associated sycl target, with
 the `fpga64_` prefix trimmed. Namely:
 
@@ -434,7 +441,7 @@ parallel.
 To run a SYCL translation of
 https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
 ```bash
-cd $SYCL_HOME/llvm/sycl/test/xocc_tests/edge_detection
+cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/edge_detection
 # Instruct the compiler and runtime to use real FPGA hardware execution
 $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
     -fsycl-targets=fpga64_hw edge_detection.cpp \
@@ -541,12 +548,7 @@ the insane! Hopefully...
   `Vitis` installation. For example, it assumes that `v++` is inside
   Vitis's bin folder and that the lib folder containing `SPIR`
   builtins that kernels are linked against are in a `/lnx64/lib`
-  directory relative to the bin folders parent.  This can be seen and
-  altered in `XOCC.cpp` if so desired. A future, aim is to allow the
-  user to pass arguments through the compiler to assign these if the
-  assumptions are false. However, in the basic 2018.3 release the
-  standard directory structure that is assumed is correct without
-  alterations.
+  directory relative to the bin folders parent.
 
 ## Debugging the SYCL implementation
 
@@ -569,9 +571,9 @@ mkdir -p "build-Release" && cd "build-Release" && cmake \
  -DCMAKE_CXX_FLAGS_RELEASE="-O3 -march=native -fno-omit-frame-pointer" \
  -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
  -G Ninja \
- -DCMAKE_C_COMPILER="/usr/bin/clang-11" \
- -DCMAKE_CXX_COMPILER="/usr/bin/clang++-11" \
- -DLLVM_USE_LINKER="lld-11" \
+ -DCMAKE_C_COMPILER="/usr/bin/clang-13" \
+ -DCMAKE_CXX_COMPILER="/usr/bin/clang++-13" \
+ -DLLVM_USE_LINKER="lld-13" \
  -DCMAKE_BUILD_TYPE=Release \
  -DLLVM_ENABLE_ASSERTIONS=ON \
  -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
@@ -609,9 +611,9 @@ mkdir -p "build-Debug" && cd "build-Debug" && cmake \
  -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
  -G Ninja \
  -DLLVM_ENABLE_ASSERTIONS=ON \
- -DCMAKE_C_COMPILER="/usr/bin/clang-11" \
- -DCMAKE_CXX_COMPILER="/usr/bin/clang++-11" \
- -DLLVM_USE_LINKER="lld-11" \
+ -DCMAKE_C_COMPILER="/usr/bin/clang-13" \
+ -DCMAKE_CXX_COMPILER="/usr/bin/clang++-13" \
+ -DLLVM_USE_LINKER="lld-13" \
  -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
  -DLLVM_EXTERNAL_PROJECTS="sycl;llvm-spirv;opencl-aot;xpti;libdevice" \
  -DLLVM_EXTERNAL_SYCL_SOURCE_DIR=$SYCL_HOME/sycl \
@@ -637,7 +639,7 @@ ninja -C build-Debug sycl-toolchain
 
 * `-CMAKE_CXX_FLAGS_RELEASE="-O3 -march=native -fno-omit-frame-pointer"` to have an optimized build with relatively accurate stack traces;
 * `-G Ninja` use `ninja` instead of `make` to speedup builds;
-* `-DLLVM_USE_LINKER="lld-11"` select `lld` or `gold` instead of `ld` to speedup builds;
+* `-DLLVM_USE_LINKER="lld-13"` select `lld` or `gold` instead of `ld` to speedup builds;
 * `-DLLVM_TARGETS_TO_BUILD="X86;NVPTX"` to build only the targets needed, like NVPTX for CUDA support;
 * `-DLIBCLC_TARGETS_TO_BUILD="nvptx64--;nvptx64--nvidiacl"` needed for CUDA support;
 * `-DSYCL_ENABLE_XPTI_TRACING=ON` adds useful debugging capabilities;
@@ -664,7 +666,7 @@ By default, this directory is deleted as soon as the compilation ends (even when
 
 In order to keep it, set the `SYCL_VXX_KEEP_CLUTTER` environment variable to True.
 
-The compiler will output a similar to 
+The compiler will output a similar to
 
 ```
 Temporary clutter in /tmp/EXECNAME-e5ece1pxk5rz43 will not be deleted
@@ -756,7 +758,7 @@ fi
 ```
 then we can run `llvm-reduce` by doing the following:
 ```bash
-# Disassemble the file that crashed Vitis's clang
+# Disassemble the file that crashed Vitis's Clang
 ./build-Release/bin/opt -S file_that_crashed_vitis_clang.bc -o tmp.ll
 
 # Run llvm-reduce
