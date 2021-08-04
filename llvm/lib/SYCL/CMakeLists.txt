@@ -1,7 +1,7 @@
 add_llvm_component_library(LLVMSYCL
-  XOCCIRDowngrader.cpp
-  ASFixer.cpp
+  VXXIRDowngrader.cpp
   InSPIRation.cpp
+  KernelProperties.cpp
   KernelPropGen.cpp
   PrepareSYCLOpt.cpp
   LowerSYCLMetaData.cpp

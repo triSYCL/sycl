@@ -12,23 +12,37 @@
 // ===---------------------------------------------------------------------===//
 
 #include <cstddef>
+#include <iostream>
 #include <regex>
 #include <string>
 
-#include "llvm/Analysis/LoopInfo.h"
-#include "llvm/Analysis/ValueTracking.h"
-#include "llvm/IR/Dominators.h"
-#include "llvm/IR/CallingConv.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/SYCL/LowerSYCLMetaData.h"
-#include "llvm/Support/Casting.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/Analysis/LoopInfo.h"
+#include "llvm/Analysis/ValueTracking.h"
+#include "llvm/IR/Argument.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/CallingConv.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/IR/DerivedTypes.h"
+#include "llvm/IR/Dominators.h"
+#include "llvm/IR/InstVisitor.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/IntrinsicInst.h"
+#include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/SYCL/LowerSYCLMetaData.h"
+#include "llvm/Support/Casting.h"
 
 using namespace llvm;
 
 namespace {
+
+static StringRef kindOf(const char* Str) {
+  return StringRef(Str, strlen(Str) + 1);
+}
 
 struct LSMDState {
   LSMDState(Module& M) : M(M), Ctx(M.getContext()) {}
@@ -125,11 +139,9 @@ struct LSMDState {
     I->insertBefore(F->getEntryBlock().getTerminator());
   }
 
-  static StringRef KindOf(const char* Str) {
-    return StringRef(Str, strlen(Str) + 1);
-  }
 
-  void processAnnotation(llvm::Value *Annot) {
+
+  void processGlobalAnnotation(llvm::Value *Annot) {
     auto* CS = cast<ConstantStruct>(Annot);
     StringRef AnnotKind =
         cast<ConstantDataArray>(
@@ -137,9 +149,9 @@ struct LSMDState {
                 getUnderlyingObject(CS->getAggregateElement(1)))
                 ->getOperand(0))
             ->getRawDataValues();
-    if (AnnotKind == KindOf("xilinx_pipeline"))
+    if (AnnotKind == kindOf("xilinx_pipeline"))
       lowerPipeline(getUnderlyingObject(CS->getAggregateElement(0u)));
-    else if (AnnotKind == KindOf("xilinx_partition_array"))
+    else if (AnnotKind == kindOf("xilinx_partition_array"))
       lowerArrayPartition(getUnderlyingObject(CS->getAggregateElement(0u)));
     return;
   }
@@ -151,7 +163,7 @@ struct LSMDState {
     
     auto * Array = cast<ConstantArray>(Annots->getOperand(0));
     for (auto* E : Array->operand_values())
-      processAnnotation(E);
+      processGlobalAnnotation(E);
 
     return HasChanged;
   }
@@ -162,17 +174,18 @@ struct LowerSYCLMetaData : public ModulePass {
   static char ID; // Pass identification, replacement for typeid
   LowerSYCLMetaData() : ModulePass(ID) {}
   bool runOnModule(Module &M) override {
-    return LSMDState(M).run();
+    bool GlobalChanges = LSMDState(M).run();
+    return GlobalChanges;
   }
   virtual StringRef getPassName() const override {
     return "LowerSYCLMetaData";
   }
 };
-}
+} // namespace
 
 namespace llvm {
 void initializeLowerSYCLMetaDataPass(PassRegistry &Registry);
-}
+} // namespace llvm
 
 INITIALIZE_PASS(LowerSYCLMetaData, "lower-sycl-metadata",
   "prepare SYCL device code to optimizations", false, false)
