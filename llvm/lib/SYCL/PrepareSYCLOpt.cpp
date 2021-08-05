@@ -12,11 +12,13 @@
 // ===---------------------------------------------------------------------===//
 
 #include <cstddef>
+#include <iostream>
 #include <regex>
 #include <string>
 
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/Demangle/Demangle.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
@@ -220,6 +222,23 @@ struct PrepareSYCLOpt : public ModulePass {
     }
   }
 
+  struct CheckUnsupportedBuiltinsVisitor
+      : public llvm::InstVisitor<CheckUnsupportedBuiltinsVisitor> {
+    void visitCallInst(CallInst &I) {
+      auto *F = I.getCalledFunction();
+      assert(!(llvm::demangle(std::string(F->getName()))
+                   .rfind("__spir_ocl_get", 0) == 0) &&
+             "Unsupported SPIR builtin in HLS flow");
+    }
+  };
+
+  void checkSPIRBuiltins(Module &M) {
+    CheckUnsupportedBuiltinsVisitor CUBV{};
+    for (auto &F : M.functions()) {
+      CUBV.visit(F);
+    }
+  }
+
   bool runOnModule(Module &M) override {
     // When using the HLS flow instead of SPIR default
     bool SyclHLSFlow = Triple(M.getTargetTriple()).isXilinxHLS();
@@ -227,6 +246,7 @@ struct PrepareSYCLOpt : public ModulePass {
     turnNonKernelsIntoPrivate(M);
     if (SyclHLSFlow) {
       setHLSCallingConvention(M);
+      checkSPIRBuiltins(M);
       if (ClearSpir)
         cleanSpirBuiltins(M);
     } else {
