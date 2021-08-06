@@ -93,14 +93,18 @@ struct LSMDState {
     }
   }
 
+  /// @brief Add HLS compatible pipeline annotation to surrounding loop
+  ///
+  /// @param CS Payload of the original annotation
   void lowerPipeline(llvm::ConstantStruct *CS) {
-    //__SYCL_DEVICE_ANNOTATE("xilinx_pipeline", II, rewind, pipelineType);
     auto *F =
         dyn_cast<Function>(getUnderlyingObject(CS->getAggregateElement(0u)));
 
     if (!F)
       return;
 
+    // 4th element of the annotation is the payload (first three are pointer
+    // to annotated, source file, line number)
     auto *CSArgs = cast<Constant>(
         cast<GlobalVariable>(getUnderlyingObject(CS->getAggregateElement(4)))
             ->getOperand(0));
@@ -124,6 +128,8 @@ struct LSMDState {
               BB->getTerminator()->getMetadata(LLVMContext::MD_loop)->op_end());
         else
           ResultMD.push_back(MDNode::getTemporary(Ctx, None).get());
+        // HLS pipeline take 3 values : the required II, a bool
+        // indicating if the loop should rewind, and the pipeline type.
         ResultMD.push_back(MDNode::get(
             Ctx,
             {
@@ -170,15 +176,19 @@ struct LSMDState {
     I->insertBefore(F->getEntryBlock().getTerminator());
   }
 
-  void dispatchKernelProperty(llvm::ConstantStruct *CS) {
+  void dispatchKernelPropertyToHandler(llvm::ConstantStruct *CS) {
     auto *F =
         dyn_cast<Function>(getUnderlyingObject(CS->getAggregateElement(0u)));
 
     if (!F)
       return;
+    // 4th element of the annotation is the payload (first three are pointer
+    // to annotated, source file, line number)
     auto *CSArgs = cast<Constant>(
         cast<GlobalVariable>(getUnderlyingObject(CS->getAggregateElement(4)))
             ->getOperand(0));
+    // Property is always constituted by a string for the property type,
+    // and a (possibly empty) struct for the payload
     StringRef PropertyType =
         cast<ConstantDataArray>(
             cast<GlobalVariable>(
@@ -194,18 +204,15 @@ struct LSMDState {
     }
 
     if (isWrapper) {
-        F->addFnAttr("fpga.propertywrapper", "true");
+      F->addFnAttr("fpga.propertywrapper", "true");
     }
-
-    //   cast<ConstantInt>(getUnderlyingObject(CSArgs->getAggregateElement(0u)));
-    /*auto *RewindInitializer =
-        cast<ConstantInt>(getUnderlyingObject(CSArgs->getAggregateElement(1u)));
-    auto *PipelineType =
-        cast<ConstantInt>(getUnderlyingObject(CSArgs->getAggregateElement(2u)));*/
-
-    // std::cerr << "Youhou " << std::string(PropertyType) << std::endl;
   }
 
+  ///
+  /// @brief Check if a global annotation (from llvm.global.annotations)
+  /// corresponds to a marker that has to be converted to an HLS compatible
+  /// annotation
+  ///
   void processGlobalAnnotation(llvm::Value *Annot) {
     auto *CS = cast<ConstantStruct>(Annot);
     StringRef AnnotKind =
@@ -219,9 +226,9 @@ struct LSMDState {
     } else if (AnnotKind == kindOf("xilinx_partition_array")) {
       lowerArrayPartition(getUnderlyingObject(CS->getAggregateElement(0u)));
     } else if (AnnotKind == kindOf("xilinx_kernel_property")) {
-      dispatchKernelProperty(CS);
+      dispatchKernelPropertyToHandler(CS);
     }
-    
+
     return;
   }
 

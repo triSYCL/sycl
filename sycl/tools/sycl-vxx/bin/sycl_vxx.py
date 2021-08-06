@@ -228,6 +228,8 @@ class CompilationDriver:
             self.vpp_llvm_input
         ]
         if kernel['extra_args'].strip():
+            # We should remove terminal spaces to prevent v++ searching
+            # non existant file with name ''
             command.extend(kernel['extra_args'].strip().split(' '))
         command.extend(self.extra_comp_args)
         self._dump_cmd(f"06-vxxcomp-{kernel['name']}.cmd", command)

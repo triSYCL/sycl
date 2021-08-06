@@ -1,4 +1,4 @@
-//===- PrepareSYCLOpt.cpp ---------------===//
+//===- PrepareSYCLOpt.cpp - Perform some code janitoring -----------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -173,6 +173,11 @@ struct PrepareSYCLOpt : public ModulePass {
     }
   }
 
+  /// Visit call instruction to check if the called function is a property
+  /// wrapper, i.e. a function that just call another function and has
+  /// interesting HLS annotation.
+  /// When a property wrapper is found, it moves its annotation to the caller 
+  /// and inline it.
   struct UnwrapperVisitor : public llvm::InstVisitor<UnwrapperVisitor> {
     void visitCallInst(CallInst &I) {
       auto *ParentF = I.getFunction();
@@ -199,7 +204,13 @@ struct PrepareSYCLOpt : public ModulePass {
       llvm::InlineFunction(I, IFI);
     }
   };
-
+  
+  /// Kernel level property are marked using a KernelDecorator, 
+  /// a functor that wrap the kernel in a function which is annotated 
+  /// in a way that is later transformed to HLS compatible annotations.
+  /// 
+  /// This function inline the wrapping (decorator) function while
+  /// preserving the HLS annotations (by annotating the caller). 
   void unwrapFPGAProperties(Module &M) {
     UnwrapperVisitor UWV{};
     for (auto &F : M.functions()) {

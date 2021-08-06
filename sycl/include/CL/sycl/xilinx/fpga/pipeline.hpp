@@ -54,9 +54,7 @@ enum struct PipelineStyle : std::uint8_t {
 template <int II = -1, bool rewind = false,
           PipelineStyle pipelineType = PipelineStyle::stall, typename T>
 __SYCL_DEVICE_ANNOTATE("xilinx_pipeline", II, rewind, pipelineType)
-__SYCL_ALWAYS_INLINE void pipeline(T &&functor) {
-  std::forward<T>(functor)();
-}
+__SYCL_ALWAYS_INLINE void pipeline(T &&functor) { std::forward<T>(functor)(); }
 
 template <typename T>
 __SYCL_DEVICE_ANNOTATE("xilinx_pipeline", 0, false, PipelineStyle::stall)
@@ -70,14 +68,16 @@ template <int II = -1, PipelineStyle pipelineType = PipelineStyle::stall>
 auto pipeline_kernel(auto kernel) {
   using namespace detail::literals;
   using kernelType = std::remove_cvref_t<decltype(kernel)>;
-  return detail::KernelDecorator<kernelType, decltype(&kernelType::operator()), decltype("kernel_pipeline"_cstr), pipelineType, II>{
-      kernel};
+  return detail::KernelDecorator<kernelType, decltype(&kernelType::operator()),
+                                 decltype("kernel_pipeline"_cstr), pipelineType,
+                                 II>{kernel};
 }
 
 auto unpipeline_kernel(auto kernel) {
   using namespace detail::literals;
   using kernelType = std::remove_cvref_t<decltype(kernel)>;
-  return detail::KernelDecorator<kernelType, decltype(&kernelType::operator()), decltype("kernel_pipeline"_cstr), 0, 0>{
+  return detail::KernelDecorator<kernelType, decltype(&kernelType::operator()),
+                                 decltype("kernel_pipeline"_cstr), 0, 0>{
       kernel};
 }
 } // namespace xilinx
