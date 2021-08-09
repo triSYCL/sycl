@@ -12,7 +12,7 @@
 #include <tuple>
 #include <utility>
 
-using namespace sycl::xilinx::literal;
+using namespace sycl::detail::literals;
 
 int main() {
   sycl::buffer<sycl::cl_int, 1> Buffer(4);
@@ -22,19 +22,18 @@ int main() {
   Queue.submit([&](sycl::handler &cgh) {
     auto Accessor = Buffer.get_access<sycl::access_mode::write>(cgh);
     cgh.single_task<class FirstKernel>(
-        sycl::xilinx::kernel_param("--optimize 2"_cstr, [=] {
+        sycl::xilinx::kernel_param([=] {
           // CHECK1: v++ {{.*}}class_FirstKernel{{.*}} --optimize 2
           Accessor[0] = 0;
-        }));
+        }, "--optimize 2"_cstr));
   });
 
   Queue.submit([&](sycl::handler &cgh) {
     auto Accessor = Buffer.get_access<sycl::access_mode::write>(cgh);
-    cgh.single_task<class SecondKernel>(sycl::xilinx::kernel_param(
-        "--kernel_frequency"_cstr,
-        sycl::xilinx::number<0x100 + 0x200, sycl::detail::Base16>::str, [=] {
+    cgh.single_task<class SecondKernel>(sycl::xilinx::kernel_param([=] {
           // CHECK2: v++ {{.*}}class_SecondKernel{{.*}} --kernel_frequency 300
           Accessor[1] = 1;
-        }));
+        }, "--kernel_frequency"_cstr,
+        sycl::xilinx::number<0x100 + 0x200, sycl::detail::Base16>::str));
   });
 }

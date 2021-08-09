@@ -161,6 +161,17 @@ struct LSMDState {
     F->addFnAttr("fpga.static.pipeline", S);
   }
 
+  void lowerKernelParam(llvm::Function *F,
+                           llvm::ConstantStruct *Parameters) {
+    StringRef ExtrtaArgs =
+        cast<ConstantDataArray>(
+            cast<GlobalVariable>(
+                getUnderlyingObject(Parameters->getAggregateElement(0u)))
+                ->getOperand(0))
+            ->getRawDataValues();
+    F->addFnAttr("fpga.vpp.extraargs", ExtrtaArgs);
+  }
+
   void lowerArrayPartition(llvm::Value *V) {
     auto *F = dyn_cast<Function>(V);
     if (!F)
@@ -200,6 +211,9 @@ struct LSMDState {
     bool isWrapper = false;
     if (PropertyType == "kernel_pipeline") {
       lowerPipelineKernel(F, PropertyPayload);
+      isWrapper = true;
+    } else if (PropertyType == "kernel_param") {
+      lowerKernelParam(F, PropertyPayload);
       isWrapper = true;
     }
 

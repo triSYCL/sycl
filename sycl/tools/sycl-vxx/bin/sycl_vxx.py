@@ -109,17 +109,11 @@ class CompilationDriver:
     def _run_optimisation(self):
         """Run the various sycl->HLS conversion passes"""
         outstem = self.outstem
-        kernel_prop = (
-            self.tmpdir /
-            f"{outstem}-kernels_properties.json"
-        )
         self.optimised_bc = (
             self.tmpdir /
             f"{outstem}-kernels-optimized.bc"
         )
         opt_options = ["--sycl-vxx",
-                       "-kernelPropGen",
-                       "--sycl-kernel-propgen-output", f"{kernel_prop}",
                        "-preparesycl", "-globaldce"]
         if not self.hls_flow:
             opt_options.extend([
@@ -135,8 +129,6 @@ class CompilationDriver:
         args = [opt, *opt_options, self.before_opt_src]
         self._dump_cmd("01-run_optimisations.cmd", args)
         subprocess.run(args)
-        with kernel_prop.open('r') as kp_fp:
-            self.kernel_properties = json.load(kp_fp)
 
     def _link_spir(self):
         vitis_lib_spir = (
@@ -164,14 +156,22 @@ class CompilationDriver:
     def _prepare_and_downgrade(self):
         opt = self.clang_path / "opt"
         prepared_kernels = self.tmpdir / f"{self.outstem}_linked.simple.bc"
+        kernel_prop = (
+            self.tmpdir /
+            f"{self.outstem}-kernels_properties.json"
+        )
         opt_options = [
             "--sycl-vxx", "--sycl-prepare-clearspir", "-S", "-preparesycl",
+            "-kernelPropGen",
+            "--sycl-kernel-propgen-output", f"{kernel_prop}",
             "-globaldce", self.linked_kernels,
             "-o", prepared_kernels
         ]
         args = [opt, *opt_options]
         self._dump_cmd("03-prepare.cmd", args)
         subprocess.run(args)
+        with kernel_prop.open('r') as kp_fp:
+            self.kernel_properties = json.load(kp_fp)
         opt_options = ["--sycl-vxx", "-S", "-O3", "-vxxIRDowngrader"]
         self.downgraded_ir = (
             self.tmpdir / f"{self.outstem}_kernels-linked.opt.ll")

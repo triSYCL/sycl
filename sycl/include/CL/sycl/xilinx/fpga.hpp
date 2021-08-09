@@ -14,6 +14,8 @@
 #ifndef SYCL_XILINX_FPGA_HPP
 #define SYCL_XILINX_FPGA_HPP
 
+
+#include "CL/sycl/xilinx/fpga/kernel_param.hpp"
 #include "CL/sycl/xilinx/fpga/kernel_properties.hpp"
 #include "CL/sycl/xilinx/fpga/memory_properties.hpp"
 #include "CL/sycl/xilinx/fpga/opt_decorate_func.hpp"

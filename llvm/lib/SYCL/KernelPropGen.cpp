@@ -16,6 +16,7 @@
 #include <regex>
 #include <string>
 
+#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -61,9 +62,6 @@ struct KernelPropGen : public ModulePass {
 
   static char ID; // Pass identification, replacement for typeid
 
-  llvm::SmallDenseMap<llvm::AllocaInst *, unsigned, 8> UserSpecifiedDDRBanks;
-  llvm::SmallDenseMap<llvm::Function *, std::string, 8> ExtraArgsMap;
-
   KernelPropGen() : ModulePass(ID) {}
 
   /// Test if a function is a SPIR kernel
@@ -86,66 +84,6 @@ struct KernelPropGen : public ModulePass {
 
   static StringRef kindOf(const char *Str) {
     return StringRef(Str, strlen(Str) + 1);
-  }
-
-  /// Add the provided string as argument to all kernel functions that can reach
-  /// the original function.
-  void addExtraArgsToCallers(Function *Original, std::string Additional) {
-    SmallVector<llvm::Function *, 8> Stack;
-    SmallPtrSet<llvm::Function *, 8> Visited;
-    Stack.push_back(Original);
-    while (!Stack.empty()) {
-      llvm::Function *F = Stack.pop_back_val();
-      if (!Visited.insert(F).second)
-        continue;
-      if (isKernel(*F)) {
-        ExtraArgsMap[F] += Additional;
-        continue;
-      }
-      for (User *U : F->users())
-        if (auto *I = dyn_cast<Instruction>(U))
-          Stack.push_back(I->getFunction());
-    }
-  }
-
-  /// Find xilinx_kernel_param annotations, and record all provided arguments
-  /// into ExtraArgsMap
-  void collectExtraArgs(Module &M) {
-    SmallVector<User *, 8> Stack;
-    for (GlobalVariable &V : M.globals()) {
-      if (!isa<ConstantDataArray>(V.getInitializer()))
-        continue;
-      auto *Str = cast<ConstantDataArray>(V.getInitializer());
-      if (Str->getRawDataValues() != kindOf("xilinx_kernel_param"))
-        continue;
-      Stack.clear();
-      Stack.push_back(&V);
-      while (!Stack.empty()) {
-        User *U = Stack.pop_back_val();
-        if (!isa<Instruction>(U)) {
-          Stack.append(U->user_begin(), U->user_end());
-          continue;
-        }
-        if (auto *CB = dyn_cast<CallBase>(U))
-          if (CB->getIntrinsicID() == Intrinsic::var_annotation) {
-            Constant *Args =
-                (cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(4)))
-                     ->getInitializer());
-            if (auto *C = dyn_cast<ConstantStruct>(Args)) {
-              std::string ArgsStr;
-              for (auto *V : C->operand_values()) {
-                GlobalVariable *GV =
-                    cast<GlobalVariable>(getUnderlyingObject(V));
-                ArgsStr += cast<ConstantDataArray>(GV->getInitializer())
-                               ->getRawDataValues()
-                               .str() +
-                           ' ';
-              }
-              addExtraArgsToCallers(CB->getFunction(), ArgsStr);
-            }
-          }
-      }
-    }
   }
 
   /// Insert calls to sideeffect that will instruct Vitis HLS to put
@@ -173,9 +111,16 @@ struct KernelPropGen : public ModulePass {
     Instr->insertBefore(F.getEntryBlock().getTerminator());
   }
 
+  Optional<std::string> getExtraArgs(Function &F) {
+    if (F.hasFnAttribute("fpga.vpp.extraargs")) {
+      return std::string{
+          F.getFnAttribute("fpga.vpp.extraargs").getValueAsString()};
+    }
+    return {};
+  }
+
   /// Print in O the property file for all kernels of M
   void generateProperties(Module &M, llvm::raw_fd_ostream &O) {
-    collectExtraArgs(M);
     json::OStream J(O, 2);
     llvm::json::Array Kernels{};
     bool SyclHlsFlow = Triple(M.getTargetTriple()).isXilinxHLS();
@@ -188,7 +133,9 @@ struct KernelPropGen : public ModulePass {
         KernelProperties KProp(F, SyclHlsFlow);
         J.objectBegin();
         J.attribute("name", F.getName());
-        J.attribute("extra_args", ExtraArgsMap[&F]);
+        auto extraArgs = getExtraArgs(F);
+        if (extraArgs)
+            J.attribute("extra_args", extraArgs.getValue());
         J.attributeBegin("bundle_hw_mapping");
         J.arrayBegin();
         for (auto &Bundle : KProp.getMAXIBundles()) {

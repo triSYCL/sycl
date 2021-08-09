@@ -47,35 +47,6 @@ struct KernelDecorator<KernelType, Ret (Functor::*)(Args...) const,
   Ret operator()(Args... args) const { return kernel(args...); }
 };
 
-/// The actual implementation of kernel_param
-/// This will return a new kernel that will invoke the provided kernel and add
-/// kernel properties that can be pickup by the KernelPropGen pass.
-template <typename Func, typename... CharPacks>
-auto kernel_param_impl(Func &&f, CharPacks...) {
-  /// 0 here is no generic the optimal would be to check how many parameter le
-  return sycl::detail::make_const_cheater<0>(
-      [internal_f = std::forward<Func>(f)](auto &&...args) mutable {
-        /// Generate an annotation with as argument all the provided
-        /// properties concatenated and separeted by a space. The annotation
-        /// is associated to the following int but this int isn't used.
-        __SYCL_DEVICE_ANNOTATE(
-            "xilinx_kernel_param",
-            sycl::detail::StrPacker<sycl::detail::concat_t<
-                sycl::detail::cstr<char, ' '>, CharPacks...>>::Str)
-        int decoratorAnnotationAnchor;
-        (void)decoratorAnnotationAnchor;
-        return std::forward<Func>(internal_f)(
-            std::forward<decltype(args)>(args)...);
-      });
-}
-
-template <typename... Params, size_t... ParamIdx>
-auto kernel_param(std::tuple<Params...> params,
-                  std::index_sequence<ParamIdx...>) {
-  return detail::kernel_param_impl(std::get<sizeof...(Params) - 1>(params),
-                                   std::get<ParamIdx>(params)...);
-}
-
 } // namespace detail
 
 namespace xilinx {
@@ -85,12 +56,6 @@ using number = sycl::detail::number<N, Base>;
 using detail::Base10;
 using detail::Base16;
 using detail::Base2;
-
-template <typename... Params> auto kernel_param(Params &&...params) {
-  return sycl::detail::kernel_param(
-      std::forward_as_tuple(params...),
-      std::make_index_sequence<sizeof...(params) - 1>{});
-}
 
 /// This is the reqd_work_group_size property that you can wrap around SYCL
 /// kernel names (defined as classes or structs). It applies the OpenCL
