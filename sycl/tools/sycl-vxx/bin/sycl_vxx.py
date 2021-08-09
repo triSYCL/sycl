@@ -227,10 +227,12 @@ class CompilationDriver:
             "--save-temps", "-c", "-k", kernel['name'], '-o', kernel_output,
             self.vpp_llvm_input
         ]
-        if kernel['extra_args'].strip():
-            # We should remove terminal spaces to prevent v++ searching
-            # non existant file with name ''
-            command.extend(kernel['extra_args'].strip().split(' '))
+        if 'extra_args' in kernel and kernel['extra_args'].strip():
+            # User provided kernel arguments can contain many spaces,
+            # leading split to give empty string that are incorrectly
+            # interpreted as file name by v++ : filter remove them
+            command.extend(
+                filter(lambda x: x != '', kernel['extra_args'].split(' ')))
         command.extend(self.extra_comp_args)
         self._dump_cmd(f"06-vxxcomp-{kernel['name']}.cmd", command)
         subprocess.run(command)

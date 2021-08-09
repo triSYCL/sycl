@@ -93,7 +93,7 @@ struct LSMDState {
     }
   }
 
-  /// @brief Add HLS compatible pipeline annotation to surrounding loop
+  /// @brief Add HLS-compatible pipeline annotation to surrounding loop
   ///
   /// @param CS Payload of the original annotation
   void lowerPipeline(llvm::ConstantStruct *CS) {
@@ -208,11 +208,9 @@ struct LSMDState {
     }
   }
 
-  ///
   /// @brief Check if a global annotation (from llvm.global.annotations)
-  /// corresponds to a marker that has to be converted to an HLS compatible
+  /// corresponds to a marker that has to be converted to an HLS-compatible
   /// annotation
-  ///
   void processGlobalAnnotation(llvm::Value *Annot) {
     auto *CS = cast<ConstantStruct>(Annot);
     StringRef AnnotKind =
