@@ -1,9 +1,6 @@
 // REQUIRES: xocc
 
-// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out 2>&1 | tee %t.dump
-// RUN: %ACC_RUN_PLACEHOLDER %t.out
-// RUN: cat %t.dump | FileCheck --check-prefix=CHECK1 %s
-// RUN: cat %t.dump | FileCheck --check-prefix=CHECK2 %s
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -std=c++20 %s -o %t.out 2>&1 | tee %t.dump | FileCheck %s
 
 #include <CL/sycl.hpp>
 #include <CL/sycl/xilinx/fpga.hpp>
@@ -21,19 +18,31 @@ int main() {
 
   Queue.submit([&](sycl::handler &cgh) {
     auto Accessor = Buffer.get_access<sycl::access_mode::write>(cgh);
-    cgh.single_task<class FirstKernel>(
-        sycl::xilinx::kernel_param([=] {
-          // CHECK1: v++ {{.*}}class_FirstKernel{{.*}} --optimize 2
+    cgh.single_task<class FirstKernel>(sycl::xilinx::kernel_param(
+        [=] {
+          // CHECK-DAG:  {{.*}}v++ {{.*}}class_FirstKernel{{.*}} --optimize 2
           Accessor[0] = 0;
-        }, "--optimize 2"_cstr));
+        },
+        "--optimize 2"_cstr));
   });
 
   Queue.submit([&](sycl::handler &cgh) {
     auto Accessor = Buffer.get_access<sycl::access_mode::write>(cgh);
-    cgh.single_task<class SecondKernel>(sycl::xilinx::kernel_param([=] {
-          // CHECK2: v++ {{.*}}class_SecondKernel{{.*}} --kernel_frequency 300
+    cgh.single_task<class SecondKernel>(sycl::xilinx::kernel_param(
+        [=] {
+          // CHECK-DAG: {{.*}}v++ {{.*}}class_SecondKernel{{.*}} --kernel_frequency 300
           Accessor[1] = 1;
-        }, "--kernel_frequency"_cstr,
+        },
+        "--kernel_frequency"_cstr ,
         sycl::xilinx::number<0x100 + 0x200, sycl::detail::Base16>::str));
+  });
+
+  Queue.submit([&](sycl::handler &cgh) {
+    using namespace sycl::xilinx::literals;
+    auto Accessor = Buffer.get_access<sycl::access_mode::write>(cgh);
+    cgh.single_task<class ThirdKernel>("--optimize 2"_vitis_option([=] {
+      // CHECK-DAG:  {{.*}}v++ {{.*}}class_ThirdKernel{{.*}} --optimize 2
+      Accessor[0] = 0;
+    }));
   });
 }

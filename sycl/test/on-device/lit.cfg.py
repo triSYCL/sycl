@@ -44,6 +44,7 @@ config.test_source_root = os.path.dirname(__file__)
 config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
 
 config.environment['SYCL_VXX_KEEP_CLUTTER'] = 'True'
+config.environment['SYCL_VXX_PRINT_CMD'] = 'True'
 llvm_config.use_clang()
 
 # Propagate some variables from the host environment.

@@ -90,10 +90,13 @@ class CompilationDriver:
                     self.extra_link_args.extend(content.split(' '))
 
     def _dump_cmd(self, filename, args):
+        cmdline = " ".join(map(str, args))
         with (self.tmpdir / filename).open("w") as f:
-            f.write(" ".join(map(str, args)) + "\n")
+            f.write(cmdline + "\n")
             if environ.get("SYCL_VXX_DBG_CMD_DUMP") is not None:
                 f.write(f"\nOriginal command list: {args}")
+            if environ.get("SYCL_VXX_PRINT_CMD") is not None:
+                print("SYCL_VXX_CMD:", cmdline)
 
     def _link_multi_inputs(self):
         """Link all input files into a single .bc"""
@@ -213,8 +216,8 @@ class CompilationDriver:
                 self.vpp_llvm_input
             ])
 
-    def _compile_kernel(self, kernel):
-        """Generate .xo from kernel"""
+    def _get_compile_kernel_cmd_out(self, kernel):
+        """Create command to compile kernel"""
         vxx = self.vitis_bin_dir / "v++"
         kernel_output = self.tmpdir / f"{kernel['name']}.xo"
         command = [
@@ -235,8 +238,12 @@ class CompilationDriver:
                 filter(lambda x: x != '', kernel['extra_args'].split(' ')))
         command.extend(self.extra_comp_args)
         self._dump_cmd(f"06-vxxcomp-{kernel['name']}.cmd", command)
+        return (kernel_output, command)
+
+    def _compile_kernel(self, outname, command):
+        """Execute a kernel compilation command"""
         subprocess.run(command)
-        return kernel_output
+        return outname
 
     def _link_kernels(self):
         """Call v++ to link all kernel in one .xclbin"""
@@ -304,9 +311,13 @@ class CompilationDriver:
             self.vpp_llvm_input = (
                 tmpdir / f"{outstem}_kernels.opt.xpirbc")
             self._asm_ir()
+            # Compilation commands are generated in main process to ensure
+            # they are printed on main process stdout if command dump is set
+            compile_commands = map(self._get_compile_kernel_cmd_out, list(
+                k for k in self.kernel_properties["kernels"]))
             with Pool() as p:
-                self.compiled_kernels = list(p.map(self._compile_kernel, list(
-                    k for k in self.kernel_properties["kernels"])))
+                self.compiled_kernels = list(
+                    p.starmap(self._compile_kernel, compile_commands))
             if self.compiled_kernels:
                 self._link_kernels()
 
