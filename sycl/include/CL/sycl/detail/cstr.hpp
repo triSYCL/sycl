@@ -43,26 +43,6 @@ template <unsigned I, typename... Ts>
 using type_at = typename type_at_impl<I, Ts...>::type;
 #endif
 
-/// Utility to make any functor's operator() be const even if it originally
-/// wasn't. This is useful to bypass the restriction that kernel operator()
-/// must be const.
-template <typename T, int Param> struct const_cheating_wrapper {
-  mutable std::decay_t<T> t;
-  template <typename... Ts,
-            typename std::enable_if<sizeof...(Ts) == Param, int>::type = 0>
-  auto operator()(Ts &&...ts) const & {
-    return std::forward<T &>(t)(std::forward<Ts>(ts)...);
-  }
-  template <typename... Ts,
-            typename std::enable_if<sizeof...(Ts) == Param, int>::type = 0>
-  auto operator()(Ts &&...ts) const && {
-    return std::forward<T &&>(t)(std::forward<Ts>(ts)...);
-  }
-};
-template <int Param, typename T> auto make_const_cheater(T &&t) {
-  return const_cheating_wrapper<T, Param>{std::forward<T>(t)};
-}
-
 /// Transform a type like: cstr<char, 'a', 'b'>
 /// into a string "ab"
 template <typename> struct StrPacker {};

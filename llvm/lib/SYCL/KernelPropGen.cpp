@@ -135,7 +135,7 @@ struct KernelPropGen : public ModulePass {
         J.attribute("name", F.getName());
         auto extraArgs = getExtraArgs(F);
         if (extraArgs)
-            J.attribute("extra_args", extraArgs.getValue());
+          J.attribute("extra_args", extraArgs.getValue());
         J.attributeBegin("bundle_hw_mapping");
         J.arrayBegin();
         for (auto &Bundle : KProp.getMAXIBundles()) {
