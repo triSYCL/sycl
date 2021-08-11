@@ -313,8 +313,9 @@ class CompilationDriver:
             self._asm_ir()
             # Compilation commands are generated in main process to ensure
             # they are printed on main process stdout if command dump is set
-            compile_commands = map(self._get_compile_kernel_cmd_out, list(
-                k for k in self.kernel_properties["kernels"]))
+            compile_commands = map(
+                self._get_compile_kernel_cmd_out,
+                self.kernel_properties["kernels"])
             with Pool() as p:
                 self.compiled_kernels = list(
                     p.starmap(self._compile_kernel, compile_commands))

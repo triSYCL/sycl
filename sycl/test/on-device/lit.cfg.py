@@ -102,6 +102,7 @@ config.substitutions.append( ('%cuda_toolkit_include',  config.cuda_toolkit_incl
 config.substitutions.append( ('%sycl_tools_src_dir',  config.sycl_tools_src_dir ) )
 config.substitutions.append( ('%llvm_build_lib_dir',  config.llvm_build_lib_dir ) )
 config.substitutions.append( ('%llvm_build_bin_dir',  config.llvm_build_bin_dir ) )
+config.substitutions.append( ('%clang_offload_bundler', f'{config.llvm_build_bin_dir}clang-offload-bundler') )
 
 if config.level_zero_include_dir:
     config.available_features.add("level_zero_headers")
