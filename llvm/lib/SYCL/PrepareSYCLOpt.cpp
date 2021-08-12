@@ -178,7 +178,7 @@ struct PrepareSYCLOpt : public ModulePass {
   /// Visit call instruction to check if the called function is a property
   /// wrapper, i.e. a function that just call another function and has
   /// interesting HLS annotation.
-  /// When a property wrapper is found, it moves its annotation to the caller 
+  /// When a property wrapper is found, it moves its annotation to the caller
   /// and inline it.
   struct UnwrapperVisitor : public llvm::InstVisitor<UnwrapperVisitor> {
     void visitCallInst(CallInst &I) {
@@ -206,13 +206,13 @@ struct PrepareSYCLOpt : public ModulePass {
       llvm::InlineFunction(I, IFI);
     }
   };
-  
-  /// Kernel level property are marked using a KernelDecorator, 
-  /// a functor that wrap the kernel in a function which is annotated 
+
+  /// Kernel level property are marked using a KernelDecorator,
+  /// a functor that wrap the kernel in a function which is annotated
   /// in a way that is later transformed to HLS compatible annotations.
-  /// 
+  ///
   /// This function inline the wrapping (decorator) function while
-  /// preserving the HLS annotations (by annotating the caller). 
+  /// preserving the HLS annotations (by annotating the caller).
   void unwrapFPGAProperties(Module &M) {
     UnwrapperVisitor UWV{};
     for (auto &F : M.functions()) {
@@ -226,9 +226,10 @@ struct PrepareSYCLOpt : public ModulePass {
       : public llvm::InstVisitor<CheckUnsupportedBuiltinsVisitor> {
     void visitCallInst(CallInst &I) {
       auto *F = I.getCalledFunction();
-      assert(!(llvm::demangle(std::string(F->getName()))
-                   .rfind("__spir_ocl_get", 0) == 0) &&
-             "Unsupported SPIR builtin in HLS flow");
+      if (llvm::demangle(std::string(F->getName()))
+              .rfind("__spir_ocl_get", 0) == 0) {
+        std::cerr << "SYCL_VXX_UNSUPPORTED_SPIR_BUILTINS" << std::endl;
+      }
     }
   };
 
