@@ -233,7 +233,7 @@ struct PrepareSYCLOpt : public ModulePass {
     }
   };
 
-  void searchUnsupportedSPIRBuiltins(Module &M) {
+  void signalUnsupportedSPIRBuiltins(Module &M) {
     CheckUnsupportedBuiltinsVisitor CUBV{};
     for (auto &F : M.functions()) {
       CUBV.visit(F);
@@ -247,7 +247,7 @@ struct PrepareSYCLOpt : public ModulePass {
     turnNonKernelsIntoPrivate(M);
     if (SyclHLSFlow) {
       setHLSCallingConvention(M);
-      searchUnsupportedSPIRBuiltins(M);
+      signalUnsupportedSPIRBuiltins(M);
       if (ClearSpir)
         cleanSpirBuiltins(M);
     } else {

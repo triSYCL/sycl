@@ -153,7 +153,7 @@ class CompilationDriver:
         self._dump_cmd("01-run_optimisations.cmd", args)
         proc = subprocess.run(args, check=True, capture_output=True)
         if bytes("SYCL_VXX_UNSUPPORTED_SPIR_BUILTINS", "ascii") in proc.stderr:
-            print("Unsupported SPIR builtins found : stoping compilation")
+            print("Unsupported SPIR builtins found : stopping compilation")
             self.ok = False
 
     @subprocess_error_handler("Error when linking with HLS SPIR library")
