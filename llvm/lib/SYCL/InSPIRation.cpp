@@ -18,22 +18,22 @@
 #include <regex>
 #include <string>
 
-#include "llvm/IR/Intrinsics.h"
-#include "llvm/SYCL/InSPIRation.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/Demangle/Demangle.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/CallingConv.h"
-#include "llvm/IR/Instructions.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
+#include "llvm/IR/Instructions.h"
+#include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/Metadata.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Type.h"
 #include "llvm/Pass.h"
+#include "llvm/SYCL/InSPIRation.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
@@ -52,17 +52,17 @@ struct Prefix {
 };
 
 // matches number between Z and _ (\d+)(?=_)
-static const std::regex matchZVal {R"((\d+)(?=_))"};
+static const std::regex matchZVal{R"((\d+)(?=_))"};
 
 // matches reqd_work_group_size based on it's current template parameter list of
 // 3 digits, doesn't care what the next adjoining type is or however many there
 // are in this case. Technically the demangler enforces spacing between the
 // commas but just in case it ever changes.
-static const std::regex matchReqdWorkGroupSize {
+static const std::regex matchReqdWorkGroupSize{
     R"(cl::sycl::xilinx::reqd_work_group_size<\d+,\s?\d+,\s?\d+,)"};
 
 // Just matches integers
-static const std::regex matchSomeNaturalInteger {R"(\d+)"};
+static const std::regex matchSomeNaturalInteger{R"(\d+)"};
 
 /// Transform the SYCL kernel functions into v++ SPIR-compatible kernels
 struct InSPIRation : public ModulePass {
@@ -86,9 +86,7 @@ struct InSPIRation : public ModulePass {
                                 const std::string Namespace) {
     const auto funcName = F.getName().str();
 
-    auto regexName = std::regex_replace(funcName,
-                                        Match,
-                                        "");
+    auto regexName = std::regex_replace(funcName, Match, "");
     if (funcName != regexName) {
       std::smatch capture;
       if (std::regex_search(funcName, capture, matchZVal)) {
@@ -103,8 +101,7 @@ struct InSPIRation : public ModulePass {
         // or from the original mangled names _Z value SPIR manglings for
         // reference:
         // https://github.com/KhronosGroup/SPIR-Tools/wiki/SPIR-2.0-built-in-functions
-        F.setName("_Z" + std::to_string(zVal - Namespace.size())
-                 + regexName);
+        F.setName("_Z" + std::to_string(zVal - Namespace.size()) + regexName);
       }
     }
   }
@@ -132,7 +129,6 @@ struct InSPIRation : public ModulePass {
     return false;
   }
 
-
   bool doFinalization(Module &M) override {
     // LLVM_DEBUG(dbgs() << "Exit: " << M.getModuleIdentifier() << "\n\n");
     // Do not change the code
@@ -152,7 +148,7 @@ struct InSPIRation : public ModulePass {
   /// Retrieves the ReqdWorkGroupSize values from a demangled function name
   /// using regex.
   SmallVector<llvm::Metadata *, 8>
-  getReqdWorkGroupSize(const std::string& demangledName, LLVMContext &Ctx) {
+  getReqdWorkGroupSize(const std::string &demangledName, LLVMContext &Ctx) {
     SmallVector<llvm::Metadata *, 8> reqdWorkGroupSize;
     std::smatch capture;
 
@@ -160,20 +156,19 @@ struct InSPIRation : public ModulePass {
     // we only really care about the first application, because multiple
     // uses of this property on one kernel are invalid.
     if (std::regex_search(demangledName, capture, matchReqdWorkGroupSize)) {
-      /// \todo: Enforce the use of a single reqd_work_group_size in the template
-      /// interface in someway at compile time
+      /// \todo: Enforce the use of a single reqd_work_group_size in the
+      /// template interface in someway at compile time
       auto Int32Ty = llvm::Type::getInt32Ty(Ctx);
       std::string s = capture[0];
       std::sregex_token_iterator workGroupSizes{s.begin(), s.end(),
-                                            matchSomeNaturalInteger};
+                                                matchSomeNaturalInteger};
       // only really care about the first 3 values, anymore and the
       // reqd_work_group_size interface is incorrect
       for (unsigned i = 0;
            i < 3 && workGroupSizes != std::sregex_token_iterator{};
            ++i, ++workGroupSizes) {
-        reqdWorkGroupSize.push_back(
-            llvm::ConstantAsMetadata::get(
-                llvm::ConstantInt::get(Int32Ty, std::stoi(*workGroupSizes))));
+        reqdWorkGroupSize.push_back(llvm::ConstantAsMetadata::get(
+            llvm::ConstantInt::get(Int32Ty, std::stoi(*workGroupSizes))));
       }
 
       if (reqdWorkGroupSize.size() != 3)
@@ -213,13 +208,11 @@ struct InSPIRation : public ModulePass {
     // SPIR v2.0 s2.12 - The SPIR version used by the module is stored in the
     // opencl.spir.version named metadata.
     llvm::Metadata *SPIRVerElts[] = {
-      llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(Int32Ty, 2)),
-      llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(Int32Ty, 0))
-    };
+        llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(Int32Ty, 2)),
+        llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(Int32Ty, 0))};
     M.getOrInsertNamedMetadata("opencl.spir.version")
-      ->addOperand(llvm::MDNode::get(Ctx, SPIRVerElts));
+        ->addOperand(llvm::MDNode::get(Ctx, SPIRVerElts));
   }
-
 
   /// Add metadata for the OpenCL 1.2 version
   void setOpenCLVersion(Module &M) {
@@ -228,11 +221,10 @@ struct InSPIRation : public ModulePass {
     // SPIR v2.0 s2.13 - The OpenCL version used by the module is stored in the
     // opencl.ocl.version named metadata node.
     llvm::Metadata *OCLVerElts[] = {
-      llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(Int32Ty, 1)),
-      llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(Int32Ty, 2))
-    };
+        llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(Int32Ty, 1)),
+        llvm::ConstantAsMetadata::get(llvm::ConstantInt::get(Int32Ty, 2))};
     llvm::NamedMDNode *OCLVerMD =
-      M.getOrInsertNamedMetadata("opencl.ocl.version");
+        M.getOrInsertNamedMetadata("opencl.ocl.version");
     OCLVerMD->addOperand(llvm::MDNode::get(Ctx, OCLVerElts));
   }
 
@@ -241,21 +233,18 @@ struct InSPIRation : public ModulePass {
   /// frontend to generate the actual SPIR/OCL metadata we need rather than
   /// always SPIRV/CL++ metadata
   void removeOldMetadata(Module &M) {
-    llvm::NamedMDNode *Old =
-      M.getOrInsertNamedMetadata("spirv.Source");
+    llvm::NamedMDNode *Old = M.getOrInsertNamedMetadata("spirv.Source");
     if (Old)
       M.eraseNamedMetadata(Old);
   }
 
   /// Set the output Triple to SPIR
-  void setSPIRTriple(Module &M) {
-    M.setTargetTriple("spir64");
-  }
+  void setSPIRTriple(Module &M) { M.setTargetTriple("spir64"); }
 
   /// Test if a function is a SPIR kernel
   bool isKernel(const Function &F) {
-    return F.getCallingConv() == CallingConv::SPIR_KERNEL
-           || F.hasFnAttribute("fpga.top.func");
+    return F.getCallingConv() == CallingConv::SPIR_KERNEL ||
+           F.hasFnAttribute("fpga.top.func");
   }
 
   /// Test if a function is a non-intrinsic SPIR function, indicating that it is
@@ -277,10 +266,10 @@ struct InSPIRation : public ModulePass {
   /// come from, but I believe it requires a special compiler invocation option
   /// to keep arg names from the frontend in the LLVM bitcode.
   void giveNameToArguments(Function &F) {
-    int counter = 0;
+    int Counter = 0;
     for (auto &Arg : F.args()) {
       if (!Arg.hasName())
-        Arg.setName("arg_" + Twine{counter++});
+        Arg.setName("arg_" + Twine{Counter++});
     }
   }
 
@@ -303,26 +292,24 @@ struct InSPIRation : public ModulePass {
   /// script.
   bool runOnModule(Module &M) override {
     // funcCount is for naming new name for each function called in kernel
-    int funcCount = 0;
+    int FuncCount = 0;
 
-    std::vector<Function*> declarations;
-
+    std::vector<Function *> Declarations;
     for (auto &F : M.functions()) {
-        if (isKernel(F)) {
-          kernelSPIRify(F);
-          applyKernelProperties(F);
-          giveNameToArguments(F);
+      if (isKernel(F)) {
+        kernelSPIRify(F);
+        applyKernelProperties(F);
+        giveNameToArguments(F);
 
-          /// \todo Possible: We don't modify declarations right now as this
-          /// will destroy the names of SPIR/CL intrinsics as they aren't
-          /// actually considered intrinsics by LLVM IR. If there is ever a need
-          /// to modify declarations in someway then the best way to do it would
-          /// be to have a comprehensive list of mangled SPIR intrinsic names
-          /// and check against it. Note: This is only relevant if we still
-          /// modify the name of every function to be sycl_func_x, if v++ ever
-          /// gets a little friendlier to spir input, probably not required.
-        } else if (isTransitiveNonIntrinsicFunc(F)
-                   && !F.isDeclaration()) {
+        /// \todo Possible: We don't modify declarations right now as this
+        /// will destroy the names of SPIR/CL intrinsics as they aren't
+        /// actually considered intrinsics by LLVM IR. If there is ever a need
+        /// to modify declarations in someway then the best way to do it would
+        /// be to have a comprehensive list of mangled SPIR intrinsic names
+        /// and check against it. Note: This is only relevant if we still
+        /// modify the name of every function to be sycl_func_x, if v++ ever
+        /// gets a little friendlier to spir input, probably not required.
+      } else if (isTransitiveNonIntrinsicFunc(F) && !F.isDeclaration()) {
         // After kernels code selection, there are only two kinds of functions
         // left: funcions called by kernels or LLVM intrinsic functions.
         // For functions called in SYCL kernels, put SPIR calling convention.
@@ -338,7 +325,7 @@ struct InSPIRation : public ModulePass {
 
         // Rename function name
         F.addFnAttr("src_name", F.getName());
-        F.setName("sycl_func_" + Twine{funcCount++});
+        F.setName("sycl_func_" + Twine{FuncCount++});
 
         // While functions do come "named" it's in the form %0, %1 and v++
         // doesn't like this for the moment. v++ demands function arguments
@@ -349,28 +336,27 @@ struct InSPIRation : public ModulePass {
         // It doesn't require application to the SPIR intrinsics as we're
         // linking against the HLS SPIR library, which is already conformant.
         giveNameToArguments(F);
-      } else if (isTransitiveNonIntrinsicFunc(F)
-                 && F.isDeclaration()) {
+      } else if (isTransitiveNonIntrinsicFunc(F) && F.isDeclaration()) {
         // push back intrinsics to make sure we handle naming after changing the
         // name of all functions to sycl_func.
         // Note: if we do not rename all the functions to sycl_func_N, a more
         // complex modification to this pass may be required that makes sure all
         // functions on the device with the same name as a built-in are changed
         // so they have no conflict with the built-in functions.
-        declarations.push_back(&F);
+        Declarations.push_back(&F);
       }
     }
 
     static Prefix prefix[] = {
-      {"__spirv_ocl_u_", std::regex(R"((_Z\d+__spirv_ocl_u_))")},
-      {"__spirv_ocl_s_", std::regex(R"((_Z\d+__spirv_ocl_s_))")},
-      {"__spirv_ocl_", std::regex(R"((_Z\d+__spirv_ocl_))")},
-      {"__spir_ocl_", std::regex(R"((_Z\d+__spir_ocl_))")},
-      {"__spirv_", std::regex(R"((_Z\d+__spirv_))")},
-      {"__spir_", std::regex(R"((_Z\d+__spir_))")},
+        {"__spirv_ocl_u_", std::regex(R"((_Z\d+__spirv_ocl_u_))")},
+        {"__spirv_ocl_s_", std::regex(R"((_Z\d+__spirv_ocl_s_))")},
+        {"__spirv_ocl_", std::regex(R"((_Z\d+__spirv_ocl_))")},
+        {"__spir_ocl_", std::regex(R"((_Z\d+__spir_ocl_))")},
+        {"__spirv_", std::regex(R"((_Z\d+__spirv_))")},
+        {"__spir_", std::regex(R"((_Z\d+__spir_))")},
     };
 
-    for (auto F : declarations) {
+    for (auto F : Declarations) {
       // aims to catch things preceded by a namespace of the style:
       // _Z16__spirv_ocl_ and use the end section as a SPIR call
       // _Z24__spir_ocl_
@@ -409,14 +395,15 @@ struct InSPIRation : public ModulePass {
   }
 };
 
-}
+} // namespace
 
 namespace llvm {
 void initializeInSPIRationPass(PassRegistry &Registry);
 }
 
 INITIALIZE_PASS(InSPIRation, "inSPIRation",
-  "pass to make functions and kernels SPIR-compatible", false, false)
+                "pass to make functions and kernels SPIR-compatible", false,
+                false)
 ModulePass *llvm::createInSPIRationPass() { return new InSPIRation(); }
 
 char InSPIRation::ID = 0;

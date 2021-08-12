@@ -1,4 +1,4 @@
-//===- PrepareSYCLOpt.cpp                                    ---------------===//
+//===- PrepareSYCLOpt.cpp - Perform some code janitoring -----------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -15,21 +15,22 @@
 #include <regex>
 #include <string>
 
+#include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CallingConv.h"
+#include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/ADT/Triple.h"
 #include "llvm/SYCL/PrepareSYCLOpt.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Transforms/Utils/Cloning.h"
 
 using namespace llvm;
 
 namespace {
 
-cl::opt<bool> ClearSpir("sycl-prepare-clearspir", cl::Hidden,
-                                cl::init(false));
+cl::opt<bool> ClearSpir("sycl-prepare-clearspir", cl::Hidden, cl::init(false));
 
 struct PrepareSYCLOpt : public ModulePass {
 
@@ -50,7 +51,7 @@ struct PrepareSYCLOpt : public ModulePass {
     }
   }
 
-  void setHLSCallingConvention(Module& M) {
+  void setHLSCallingConvention(Module &M) {
     for (Function &F : M.functions()) {
       // If the function is a kernel or an intrinsic, keep the current CC
       if (F.hasFnAttribute("fpga.top.func") || F.isIntrinsic()) {
@@ -65,7 +66,7 @@ struct PrepareSYCLOpt : public ModulePass {
         F.setLinkage(llvm::GlobalValue::ExternalLinkage);
       } else {
         // We need to call intrinsic with SPIR_FUNC calling conv
-        // for correct linkage with Vitis SPIR builtins lib 
+        // for correct linkage with Vitis SPIR builtins lib
         auto cc = (ClearSpir) ? CallingConv::C : CallingConv::SPIR_FUNC;
         F.setCallingConv(cc);
         for (Value *V : F.users()) {
@@ -76,7 +77,7 @@ struct PrepareSYCLOpt : public ModulePass {
     }
   }
 
-  void setCallingConventions(Module& M) {
+  void setCallingConventions(Module &M) {
     for (Function &F : M.functions()) {
       if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
         assert(F.use_empty());
@@ -85,8 +86,8 @@ struct PrepareSYCLOpt : public ModulePass {
       if (F.isIntrinsic())
         continue;
       F.setCallingConv(CallingConv::SPIR_FUNC);
-      for (Value* V : F.users()) {
-        if (auto* Call = dyn_cast<CallBase>(V))
+      for (Value *V : F.users()) {
+        if (auto *Call = dyn_cast<CallBase>(V))
           Call->setCallingConv(CallingConv::SPIR_FUNC);
       }
     }
@@ -117,36 +118,37 @@ struct PrepareSYCLOpt : public ModulePass {
   /// into an array. and change the argument received by xlx_array_partition
   /// into a pointer on an array.
   void lowerArrayPartition(Module &M) {
-    Function* Func = Intrinsic::getDeclaration(&M, Intrinsic::sideeffect);
-    for (Use& U : Func->uses()) {
-      auto* Usr = dyn_cast<CallBase>(U.getUser());
+    Function *Func = Intrinsic::getDeclaration(&M, Intrinsic::sideeffect);
+    for (Use &U : Func->uses()) {
+      auto *Usr = dyn_cast<CallBase>(U.getUser());
       if (!Usr)
         continue;
       if (!Usr->getOperandBundle("xlx_array_partition"))
         continue;
-      Use& Ptr = U.getUser()->getOperandUse(0);
-      Value* Obj = getUnderlyingObject(Ptr);
+      Use &Ptr = U.getUser()->getOperandUse(0);
+      Value *Obj = getUnderlyingObject(Ptr);
       if (!isa<AllocaInst>(Obj))
         return;
-      auto* Alloca = cast<AllocaInst>(Obj);
+      auto *Alloca = cast<AllocaInst>(Obj);
       auto *Replacement =
           new AllocaInst(Ptr->getType()->getPointerElementType(), 0,
                          ConstantInt::get(Type::getInt32Ty(M.getContext()), 1),
                          Align(128), "");
       Replacement->insertAfter(Alloca);
-      Instruction* Cast = BitCastInst::Create(
-          Instruction::BitCast, Replacement, Alloca->getType());
+      Instruction *Cast = BitCastInst::Create(Instruction::BitCast, Replacement,
+                                              Alloca->getType());
       Cast->insertAfter(Replacement);
       Alloca->replaceAllUsesWith(Cast);
-      Value* Zero = ConstantInt::get(Type::getInt32Ty(M.getContext()), 0);
-      Instruction* GEP = GetElementPtrInst::Create(nullptr, Replacement, {Zero});
+      Value *Zero = ConstantInt::get(Type::getInt32Ty(M.getContext()), 0);
+      Instruction *GEP =
+          GetElementPtrInst::Create(nullptr, Replacement, {Zero});
       GEP->insertAfter(Cast);
       Ptr.set(GEP);
     }
   }
 
   void forceInlining(Module &M) {
-    for (auto& F : M.functions()) {
+    for (auto &F : M.functions()) {
       if (F.isDeclaration() || F.getCallingConv() == CallingConv::SPIR_KERNEL)
         continue;
       F.addFnAttr(Attribute::AlwaysInline);
@@ -171,13 +173,61 @@ struct PrepareSYCLOpt : public ModulePass {
     }
   }
 
+  /// Visit call instruction to check if the called function is a property
+  /// wrapper, i.e. a function that just call another function and has
+  /// interesting HLS annotation.
+  /// When a property wrapper is found, it moves its annotation to the caller 
+  /// and inline it.
+  struct UnwrapperVisitor : public llvm::InstVisitor<UnwrapperVisitor> {
+    void visitCallInst(CallInst &I) {
+      auto *ParentF = I.getFunction();
+      auto *F = I.getCalledFunction();
+      if (!F->hasFnAttribute("fpga.propertywrapper"))
+        return;
+      // We have a property wrapper.
+      // First, unwrap all wrapper inside F
+      visit(*F);
+
+      // Now copy fpga attributes to parent
+      auto FnAttr = F->getAttributes().getFnAttributes();
+      for (auto &Attr : FnAttr) {
+        if (Attr.isStringAttribute()) {
+          StringRef AttrKind = Attr.getKindAsString();
+          if (AttrKind.startswith("fpga.") &&
+              AttrKind != "fpga.propertywrapper") {
+            ParentF->addFnAttr(Attr);
+          }
+        }
+      }
+      // And inline the wrapper inside the caller
+      llvm::InlineFunctionInfo IFI;
+      llvm::InlineFunction(I, IFI);
+    }
+  };
+  
+  /// Kernel level property are marked using a KernelDecorator, 
+  /// a functor that wrap the kernel in a function which is annotated 
+  /// in a way that is later transformed to HLS compatible annotations.
+  /// 
+  /// This function inline the wrapping (decorator) function while
+  /// preserving the HLS annotations (by annotating the caller). 
+  void unwrapFPGAProperties(Module &M) {
+    UnwrapperVisitor UWV{};
+    for (auto &F : M.functions()) {
+      if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
+        UWV.visit(F);
+      }
+    }
+  }
+
   bool runOnModule(Module &M) override {
     // When using the HLS flow instead of SPIR default
     bool SyclHLSFlow = Triple(M.getTargetTriple()).isXilinxHLS();
+    unwrapFPGAProperties(M);
     turnNonKernelsIntoPrivate(M);
     if (SyclHLSFlow) {
       setHLSCallingConvention(M);
-      if (ClearSpir) 
+      if (ClearSpir)
         cleanSpirBuiltins(M);
     } else {
       setCallingConventions(M);
@@ -190,14 +240,14 @@ struct PrepareSYCLOpt : public ModulePass {
     return true;
   }
 };
-}
+} // namespace
 
 namespace llvm {
 void initializePrepareSYCLOptPass(PassRegistry &Registry);
 }
 
 INITIALIZE_PASS(PrepareSYCLOpt, "preparesycl",
-  "prepare SYCL device code to optimizations", false, false)
-ModulePass *llvm::createPrepareSYCLOptPass() {return new PrepareSYCLOpt();}
+                "prepare SYCL device code to optimizations", false, false)
+ModulePass *llvm::createPrepareSYCLOptPass() { return new PrepareSYCLOpt(); }
 
 char PrepareSYCLOpt::ID = 0;
