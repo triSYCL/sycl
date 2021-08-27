@@ -30,7 +30,7 @@ namespace ext::xilinx {
 
 
 
-/** 
+/**
   Turn on dataflow optimisation for a loop
 */
 template <typename T>
@@ -41,8 +41,8 @@ __SYCL_ALWAYS_INLINE void dataflow(T &&functor) {
 
 auto dataflow_kernel(auto kernel) {
   using kernelType = std::remove_cvref_t<decltype(kernel)>;
-  return detail::KernelDecorator<kernelType, decltype(&kernelType::operator()), decltype("kernel_dataflow"_cstr), 0>{
-      kernel};
+  return detail::KernelDecorator<kernelType, decltype(&kernelType::operator()),
+                                 decltype("kernel_dataflow"_cstr), 0>{kernel};
 }
 } // namespace xilinx
 } // namespace sycl

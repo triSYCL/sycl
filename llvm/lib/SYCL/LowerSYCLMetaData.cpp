@@ -25,6 +25,7 @@
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Attributes.h"
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
@@ -32,17 +33,21 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/InstVisitor.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/SYCL/LowerSYCLMetaData.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FormatVariadic.h"
 
 using namespace llvm;
 
 namespace {
+cl::opt<bool> AfterO3("lower-delayed-sycl-metadata", cl::Hidden,
+                      cl::init(false));
 
 static StringRef kindOf(const char *Str) {
   return StringRef(Str, strlen(Str) + 1);
@@ -200,6 +205,56 @@ public:
     F->addFnAttr("fpga.dataflow.func", "0");
   }
 
+  /// @brief Add HLS-compatible pipeline annotation to surrounding loop
+  ///
+  /// @param CS Payload of the original annotation
+  void lowerUnrollDecoration(llvm::CallBase &CB, llvm::ConstantStruct *Payload) {
+    auto *F = CB.getCaller();
+
+    // Metadata payload is unroll factor (first argument) and boolean indicating 
+    // whether the unrolling should be checked (in case of iteration not a multiple
+    // of the unroll factor). 
+    // Using u suffix to avoid ambiguity with overloads of getAggregateElement.
+    auto UnrollFactor =
+        cast<ConstantInt>(getUnderlyingObject(Payload->getAggregateElement(0u)))
+            ->getZExtValue();
+    auto CheckUnroll =
+        cast<ConstantInt>(getUnderlyingObject(Payload->getAggregateElement(1u)))
+            ->getZExtValue();
+
+    LoopInfo LI{DominatorTree{*F}};
+
+    auto *Parent = CB.getParent();
+    auto *EnclosingLoop = LI.getLoopFor(Parent);
+    assert(EnclosingLoop != nullptr &&
+           "Unroll annotation is not enclosed in loop");
+
+    MDTuple *Annot;
+    if (UnrollFactor == 0) {
+      // Full unrolling
+      Annot = MDNode::get(Ctx, {
+                                   MDString::get(Ctx, "llvm.loop.unroll.full"),
+                               });
+    } else if (CheckUnroll) {
+      // Checked partial unrolling
+      Annot = MDNode::get(Ctx, {
+                                   MDString::get(Ctx, "llvm.loop.unroll.count"),
+                                   ConstantAsMetadata::get(ConstantInt::get(
+                                       Type::getInt32Ty(Ctx), UnrollFactor)),
+                               });
+    } else {
+      // Unchecked partial unrolling
+      Annot = MDNode::get(
+          Ctx, {
+                   MDString::get(Ctx, "llvm.loop.unroll.withoutcheck"),
+                   ConstantAsMetadata::get(
+                       ConstantInt::get(Type::getInt32Ty(Ctx), UnrollFactor)),
+               });
+    }
+
+    annotateLoop(EnclosingLoop, Annot);
+  }
+
   void lowerArrayPartition(llvm::Value *V) {
     auto *F = dyn_cast<Function>(V);
     if (!F)
@@ -237,19 +292,21 @@ public:
     auto *PropertyPayload =
         getUnderlyingObject(CSArgs->getAggregateElement(1u));
     bool IsWrapper = false;
-    if (PropertyType == "kernel_pipeline") {
-      lowerPipelineKernelDecoration(F, PropertyPayload);
-      IsWrapper = true;
-    } else if (PropertyType == "kernel_param") {
-      lowerKernelParam(F, PropertyPayload);
-      IsWrapper = true;
-    } else if (PropertyType == "kernel_dataflow") {
-      lowerDataflowKernelDecoration(F, PropertyPayload);
-      IsWrapper = true;
-    }
+    if (!AfterO3) {
+      if (PropertyType == "kernel_pipeline") {
+        lowerPipelineKernelDecoration(F, PropertyPayload);
+        IsWrapper = true;
+      } else if (PropertyType == "kernel_param") {
+        lowerKernelParam(F, PropertyPayload);
+        IsWrapper = true;
+      } else if (PropertyType == "kernel_dataflow") {
+        lowerDataflowKernelDecoration(F, PropertyPayload);
+        IsWrapper = true;
+      }
 
-    if (IsWrapper) {
-      F->addFnAttr("fpga.propertywrapper", "true");
+      if (IsWrapper) {
+        F->addFnAttr("fpga.propertywrapper", "true");
+      }
     }
   }
 
@@ -264,26 +321,76 @@ public:
                 getUnderlyingObject(CS->getAggregateElement(1)))
                 ->getOperand(0))
             ->getRawDataValues();
-    if (AnnotKind == kindOf("xilinx_pipeline")) {
-      lowerPipelineDecoration(CS);
-    } else if (AnnotKind == kindOf("xilinx_partition_array")) {
-      lowerArrayPartition(getUnderlyingObject(CS->getAggregateElement(0u)));
-    } else if (AnnotKind == kindOf("xilinx_kernel_property")) {
+    if (AnnotKind == kindOf("xilinx_kernel_property")) {
       dispatchKernelPropertyToHandler(CS);
-    } else if (AnnotKind == kindOf("xilinx_dataflow")) {
+    } else if (!AfterO3) { // Annotations that should be lowered before -O3
+      if (AnnotKind == kindOf("xilinx_pipeline")) {
+        lowerPipelineDecoration(CS);
+      } else if (AnnotKind == kindOf("xilinx_partition_array")) {
+        lowerArrayPartition(getUnderlyingObject(CS->getAggregateElement(0u)));
+      } else if (AnnotKind == kindOf("xilinx_dataflow")) {
         lowerDataflowDecoration(CS);
+      }
     }
+  }
 
+  void dispatchLocalAnnotation(llvm::CallBase &CB,
+                               llvm::ConstantDataArray *KindInit,
+                               llvm::ConstantStruct *Payload) {
+    auto Kind = KindInit->getRawDataValues();
+    bool processed = false;
+    if (AfterO3) { // Annotation that should wait after optimisation to be
+                   // lowered
+      if (Kind == kindOf("xilinx_unroll")) {
+        lowerUnrollDecoration(CB, Payload);
+        processed = true;
+      }
+    }
+    if (processed) {
+      CB.eraseFromParent();
+      HasChanged = true;
+    }
+  }
+
+  struct LocalAnnotationVisitor
+      : public llvm::InstVisitor<LocalAnnotationVisitor> {
+    LSMDState &Parent;
+
+    LocalAnnotationVisitor(LSMDState &P) : Parent(P) {}
+
+    void visitCallBase(CallBase &CB) {
+      // Search for var_annotation having payload
+      if (CB.getIntrinsicID() != Intrinsic::var_annotation || CB.arg_size() < 5)
+        return;
+
+      auto *KindInit =
+          cast<GlobalVariable>(getUnderlyingObject(CB.getOperand(1)))
+              ->getInitializer();
+      if (!isa<ConstantDataArray>(KindInit))
+        return;
+
+      auto *Payload = cast<ConstantStruct>(
+          cast<GlobalVariable>(getUnderlyingObject(CB.getOperand(4)))
+              ->getInitializer());
+
+      Parent.dispatchLocalAnnotation(CB, cast<ConstantDataArray>(KindInit),
+                                     Payload);
+    }
+  };
+
+  void processLocalAnnotations() {
+    LocalAnnotationVisitor LAV{*this};
+    LAV.visit(M);
   }
 
   bool run() {
+    processLocalAnnotations();
     GlobalVariable *Annots = M.getGlobalVariable("llvm.global.annotations");
-    if (!Annots)
-      return false;
-    auto *Array = cast<ConstantArray>(Annots->getOperand(0));
-    for (auto *E : Array->operand_values())
-      processGlobalAnnotation(E);
-
+    if (Annots) {
+      auto *Array = cast<ConstantArray>(Annots->getOperand(0));
+      for (auto *E : Array->operand_values())
+        processGlobalAnnotation(E);
+    }
     return HasChanged;
   }
 };
