@@ -96,7 +96,7 @@ public:
     return LI->getLoopFor(I->getParent());
   }
 
-  void findLoopAroundFunction(Function *Start,
+  void applyOnEnclosingLoop(Function *Start,
                               function_ref<void(Loop *)> Functor) {
     llvm::SmallSetVector<Function *, 8> Stack;
     Stack.insert(Start);
@@ -122,7 +122,7 @@ public:
   /// @brief Add HLS-compatible pipeline annotation to surrounding loop
   ///
   /// @param CS Payload of the original annotation
-  void lowerPipeline(llvm::ConstantStruct *CS) {
+  void lowerPipelineDecoration(llvm::ConstantStruct *CS) {
     auto *F =
         dyn_cast<Function>(getUnderlyingObject(CS->getAggregateElement(0u)));
 
@@ -141,7 +141,7 @@ public:
     auto *PipelineType =
         cast<ConstantInt>(getUnderlyingObject(CSArgs->getAggregateElement(2u)));
 
-    findLoopAroundFunction(F, [=](Loop *L) {
+    applyOnEnclosingLoop(F, [=](Loop *L) {
       annotateLoop(
           L,
           MDNode::get(
@@ -158,7 +158,7 @@ public:
     });
   }
 
-  void lowerPipelineKernel(llvm::Function *F,
+  void lowerPipelineKernelDecoration(llvm::Function *F,
                            llvm::ConstantStruct *Parameters) {
     auto *IIInitializer = cast<ConstantInt>(
         getUnderlyingObject(Parameters->getAggregateElement(0u)));
@@ -218,7 +218,7 @@ public:
         getUnderlyingObject(CSArgs->getAggregateElement(1u)));
     bool isWrapper = false;
     if (PropertyType == "kernel_pipeline") {
-      lowerPipelineKernel(F, PropertyPayload);
+      lowerPipelineKernelDecoration(F, PropertyPayload);
       isWrapper = true;
     } else if (PropertyType == "kernel_param") {
       lowerKernelParam(F, PropertyPayload);
@@ -242,7 +242,7 @@ public:
                 ->getOperand(0))
             ->getRawDataValues();
     if (AnnotKind == kindOf("xilinx_pipeline")) {
-      lowerPipeline(CS);
+      lowerPipelineDecoration(CS);
     } else if (AnnotKind == kindOf("xilinx_partition_array")) {
       lowerArrayPartition(getUnderlyingObject(CS->getAggregateElement(0u)));
     } else if (AnnotKind == kindOf("xilinx_kernel_property")) {

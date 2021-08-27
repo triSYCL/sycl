@@ -37,24 +37,35 @@ enum struct PipelineStyle : std::uint8_t {
       2, ///< Runs without stalling even when there is no input data available
 };
 
+using RewindPipeline = std::true_type;
+using NoRewindPipeline = std::false_type;
+
+template<int II>
+struct ConstrainedII {
+    static_assert(II > 0, "II requirement should be strictly greater than 0");
+    static constexpr int value = II;
+};
+
+using AutoII = std::integral_constant<int, -1>;
+using DisablePipeline = std::integral_constant<int, 0>;
+
 /** Xilinx pipeline.
 
-  Can be used as a kernel propertie or to decorate a loop
+  Pipeline a loop
 
- \tparam rewind if set to true, the pipelined will not be flushed
- between two complete loop executions. This parameter is unused on
- kernel properties.
+ \tparam rewindType determine whether the pipeline will be flushed
+ between two complete loop executions (NoRewindPipeline) or not (RewindPipeline).
 
- \tparam II the desired Initiation Interval for the loop.
- Special values : -1 for default, 0 for pipeline desactivation.
+ \tparam IIType the desired Initiation Interval for the loop.
+ Special values : AutoII for default, 0 for pipeline desactivation.
 
  \tparam pipelineType which pipeline style to use
 
   \tparam T type of the functor to execute
 */
-template <int II = -1, bool rewind = false,
+template <typename IIType = AutoII, typename rewindtype = NoRewindPipeline,
           PipelineStyle pipelineType = PipelineStyle::stall, typename T>
-__SYCL_DEVICE_ANNOTATE("xilinx_pipeline", II, rewind, pipelineType)
+__SYCL_DEVICE_ANNOTATE("xilinx_pipeline", IIType::value, rewindtype::value, pipelineType)
 __SYCL_ALWAYS_INLINE void pipeline(T &&functor) { std::forward<T>(functor)(); }
 
 template <typename T>
@@ -63,12 +74,12 @@ __SYCL_ALWAYS_INLINE void noPipeline(T &&functor) {
   std::forward<T>(functor)();
 }
 
-template <int II = -1, PipelineStyle pipelineType = PipelineStyle::stall>
+template <typename IIType, PipelineStyle pipelineType = PipelineStyle::stall>
 auto pipeline_kernel(auto kernel) {
   using kernelType = std::remove_cvref_t<decltype(kernel)>;
   return detail::KernelDecorator<kernelType, decltype(&kernelType::operator()),
                                  decltype("kernel_pipeline"_cstr), pipelineType,
-                                 II>{kernel};
+                                 IIType::value>{kernel};
 }
 
 auto unpipeline_kernel(auto kernel) {
