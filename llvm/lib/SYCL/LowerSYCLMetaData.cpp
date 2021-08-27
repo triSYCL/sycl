@@ -158,8 +158,8 @@ public:
     });
   }
 
-  void lowerPipelineKernelDecoration(llvm::Function *F,
-                           llvm::ConstantStruct *Parameters) {
+  void lowerPipelineKernelDecoration(llvm::Function *F, llvm::Value *Payload) {
+    auto *Parameters = cast<ConstantStruct>(Payload);
     auto *IIInitializer = cast<ConstantInt>(
         getUnderlyingObject(Parameters->getAggregateElement(0u)));
     auto *PipelineType = cast<ConstantInt>(
@@ -169,8 +169,8 @@ public:
     F->addFnAttr("fpga.static.pipeline", S);
   }
 
-  void lowerKernelParam(llvm::Function *F,
-                           llvm::ConstantStruct *Parameters) {
+  void lowerKernelParam(llvm::Function *F, llvm::Value *Payload) {
+    auto *Parameters = cast<ConstantStruct>(Payload);
     StringRef ExtrtaArgs =
         cast<ConstantDataArray>(
             cast<GlobalVariable>(
@@ -178,6 +178,26 @@ public:
                 ->getOperand(0))
             ->getRawDataValues();
     F->addFnAttr("fpga.vpp.extraargs", ExtrtaArgs);
+  }
+
+  void lowerDataflowDecoration(llvm::ConstantStruct *CS) {
+    auto *F =
+        dyn_cast<Function>(getUnderlyingObject(CS->getAggregateElement(0u)));
+
+    if (!F)
+      return;
+
+    applyOnEnclosingLoop(F, [=](Loop *L) {
+      annotateLoop(
+          L,
+          MDNode::get(Ctx, {
+                               MDString::get(Ctx, "llvm.loop.dataflow.enable"),
+                           }));
+    });
+  }
+
+  void lowerDataflowKernelDecoration(llvm::Function *F, llvm::Value *) {
+    F->addFnAttr("fpga.dataflow.func", "0");
   }
 
   void lowerArrayPartition(llvm::Value *V) {
@@ -206,26 +226,29 @@ public:
     auto *CSArgs = cast<Constant>(
         cast<GlobalVariable>(getUnderlyingObject(CS->getAggregateElement(4)))
             ->getOperand(0));
-    // Property is always constituted by a string for the property type,
-    // and a (possibly empty) struct for the payload
+    // Property is always constituted by a string for the property type (first argument),
+    // and a payload (second argument)
     StringRef PropertyType =
         cast<ConstantDataArray>(
             cast<GlobalVariable>(
                 getUnderlyingObject(CSArgs->getAggregateElement(0u)))
                 ->getOperand(0))
             ->getRawDataValues();
-    auto *PropertyPayload = cast<ConstantStruct>(
-        getUnderlyingObject(CSArgs->getAggregateElement(1u)));
-    bool isWrapper = false;
+    auto *PropertyPayload =
+        getUnderlyingObject(CSArgs->getAggregateElement(1u));
+    bool IsWrapper = false;
     if (PropertyType == "kernel_pipeline") {
       lowerPipelineKernelDecoration(F, PropertyPayload);
-      isWrapper = true;
+      IsWrapper = true;
     } else if (PropertyType == "kernel_param") {
       lowerKernelParam(F, PropertyPayload);
-      isWrapper = true;
+      IsWrapper = true;
+    } else if (PropertyType == "kernel_dataflow") {
+      lowerDataflowKernelDecoration(F, PropertyPayload);
+      IsWrapper = true;
     }
 
-    if (isWrapper) {
+    if (IsWrapper) {
       F->addFnAttr("fpga.propertywrapper", "true");
     }
   }
@@ -247,9 +270,10 @@ public:
       lowerArrayPartition(getUnderlyingObject(CS->getAggregateElement(0u)));
     } else if (AnnotKind == kindOf("xilinx_kernel_property")) {
       dispatchKernelPropertyToHandler(CS);
+    } else if (AnnotKind == kindOf("xilinx_dataflow")) {
+        lowerDataflowDecoration(CS);
     }
 
-    return;
   }
 
   bool run() {
