@@ -49,6 +49,32 @@ static StringRef kindOf(const char *Str) {
 }
 
 struct LSMDState {
+private:
+  /// @brief Add annotation on Loop backedge (where HLS search for it)
+  void annotateLoop(Loop *L, MDTuple *Annotation) {
+    SmallVector<BasicBlock *, 4> LoopLatches;
+    L->getLoopLatches(LoopLatches);
+    for (BasicBlock *BB : LoopLatches) {
+      SmallVector<Metadata *, 4> ResultMD;
+      if (BB->getTerminator()->hasMetadata(LLVMContext::MD_loop))
+        ResultMD.append(
+            BB->getTerminator()->getMetadata(LLVMContext::MD_loop)->op_begin(),
+            BB->getTerminator()->getMetadata(LLVMContext::MD_loop)->op_end());
+      else
+        ResultMD.push_back(MDNode::getTemporary(Ctx, None).get());
+
+      ResultMD.push_back(Annotation);
+      MDNode *MDN = MDNode::getDistinct(Ctx, ResultMD);
+      BB->getTerminator()->setMetadata(LLVMContext::MD_loop, MDN);
+      BB->getTerminator()
+          ->getMetadata(LLVMContext::MD_loop)
+          ->replaceOperandWith(0, MDN);
+    }
+
+    HasChanged = true;
+  }
+
+public:
   LSMDState(Module &M) : M(M), Ctx(M.getContext()) {}
   Module &M;
   LLVMContext &Ctx;
@@ -116,37 +142,19 @@ struct LSMDState {
         cast<ConstantInt>(getUnderlyingObject(CSArgs->getAggregateElement(2u)));
 
     findLoopAroundFunction(F, [=](Loop *L) {
-      SmallVector<BasicBlock *, 4> LoopLatches;
-      L->getLoopLatches(LoopLatches);
-      for (BasicBlock *BB : LoopLatches) {
-        SmallVector<Metadata *, 4> ResultMD;
-        if (BB->getTerminator()->hasMetadata(LLVMContext::MD_loop))
-          ResultMD.append(
-              BB->getTerminator()
-                  ->getMetadata(LLVMContext::MD_loop)
-                  ->op_begin(),
-              BB->getTerminator()->getMetadata(LLVMContext::MD_loop)->op_end());
-        else
-          ResultMD.push_back(MDNode::getTemporary(Ctx, None).get());
-        // HLS pipeline take 3 values : the required II, a bool
-        // indicating if the loop should rewind, and the pipeline type.
-        ResultMD.push_back(MDNode::get(
-            Ctx,
-            {
-                MDString::get(Ctx, "llvm.loop.pipeline.enable"),
-                ConstantAsMetadata::get(ConstantInt::get(
-                    Type::getInt32Ty(Ctx), IIInitializer->getSExtValue())),
-                ConstantAsMetadata::get(ConstantInt::get(
-                    Type::getInt1Ty(Ctx), RewindInitializer->getSExtValue())),
-                ConstantAsMetadata::get(ConstantInt::get(
-                    Type::getIntNTy(Ctx, 2), PipelineType->getSExtValue())),
-            }));
-        MDNode *MDN = MDNode::getDistinct(Ctx, ResultMD);
-        BB->getTerminator()->setMetadata(LLVMContext::MD_loop, MDN);
-        BB->getTerminator()
-            ->getMetadata(LLVMContext::MD_loop)
-            ->replaceOperandWith(0, MDN);
-      }
+      annotateLoop(
+          L,
+          MDNode::get(
+              Ctx,
+              {
+                  MDString::get(Ctx, "llvm.loop.pipeline.enable"),
+                  ConstantAsMetadata::get(ConstantInt::get(
+                      Type::getInt32Ty(Ctx), IIInitializer->getSExtValue())),
+                  ConstantAsMetadata::get(ConstantInt::get(
+                      Type::getInt1Ty(Ctx), RewindInitializer->getSExtValue())),
+                  ConstantAsMetadata::get(ConstantInt::get(
+                      Type::getIntNTy(Ctx, 2), PipelineType->getSExtValue())),
+              }));
     });
   }
 
