@@ -50,9 +50,9 @@ class TmpDirManager:
 
 
 def subprocess_error_handler(msg: str):
-    """ Build decorator that print an error message and prevent
+    """ Build decorator that prints an error message and prevents
         CompilationDriver from continuing when a called subprocess
-        exit with non-zero status
+        exits with non-zero status
     """
     def decorator(func):
         def decorated(self, *args, **kwargs):

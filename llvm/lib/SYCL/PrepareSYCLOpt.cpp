@@ -208,7 +208,7 @@ struct PrepareSYCLOpt : public ModulePass {
   };
 
   /// Kernel level property are marked using a KernelDecorator,
-  /// a functor that wrap the kernel in a function which is annotated
+  /// a functor that wraps the kernel in a function which is annotated
   /// in a way that is later transformed to HLS compatible annotations.
   ///
   /// This function inline the wrapping (decorator) function while
