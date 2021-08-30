@@ -49,6 +49,23 @@ class TmpDirManager:
             shutil.rmtree(self.dir)
 
 
+def subprocess_error_handler(msg: str):
+    """ Build decorator that prints an error message and prevents
+        CompilationDriver from continuing when a called subprocess
+        exits with non-zero status
+    """
+    def decorator(func):
+        def decorated(self, *args, **kwargs):
+            if self.ok:
+                try:
+                    return func(self, *args, **kwargs)
+                except subprocess.CalledProcessError:
+                    print(msg, file=sys.stderr)
+                    self.ok = False
+        return decorated
+    return decorator
+
+
 class CompilationDriver:
     def __init__(self, arguments):
         self.outpath = Path(arguments.o)
@@ -60,6 +77,7 @@ class CompilationDriver:
         self.vitis_version = self.vitis_bin_dir.parent.name
         self.outstem = self.outpath.stem
         self.vitis_mode = arguments.target
+        self.ok = True
         # TODO: XILINX_PLATFORM should be passed by clang driver instead
         self.xilinx_platform = environ['XILINX_PLATFORM']
         if environ.get("XILINX_CLANG_39_BUILD_PATH") is not None:
@@ -98,6 +116,7 @@ class CompilationDriver:
             if environ.get("SYCL_VXX_PRINT_CMD") is not None:
                 print("SYCL_VXX_CMD:", cmdline)
 
+    @subprocess_error_handler("Linkage of multiple inputs failed")
     def _link_multi_inputs(self):
         """Link all input files into a single .bc"""
         llvm_link = self.clang_path / "llvm-link"
@@ -107,8 +126,9 @@ class CompilationDriver:
                 str(self.before_opt_src)
                 ]
         self._dump_cmd("00-link_multi_inputs.cmd", args)
-        subprocess.run(args)
+        subprocess.run(args, check=True)
 
+    @subprocess_error_handler("Error in sycl->HLS conversion")
     def _run_optimisation(self):
         """Run the various sycl->HLS conversion passes"""
         outstem = self.outstem
@@ -131,8 +151,12 @@ class CompilationDriver:
         opt = self.clang_path / "opt"
         args = [opt, *opt_options, self.before_opt_src]
         self._dump_cmd("01-run_optimisations.cmd", args)
-        subprocess.run(args)
+        proc = subprocess.run(args, check=True, capture_output=True)
+        if bytes("SYCL_VXX_UNSUPPORTED_SPIR_BUILTINS", "ascii") in proc.stderr:
+            print("Unsupported SPIR builtins found : stopping compilation")
+            self.ok = False
 
+    @subprocess_error_handler("Error when linking with HLS SPIR library")
     def _link_spir(self):
         vitis_lib_spir = (
             self.vitis_bin_dir.parent /
@@ -154,8 +178,9 @@ class CompilationDriver:
             self.linked_kernels
         ]
         self._dump_cmd("02-link_spir.cmd", args)
-        subprocess.run(args)
+        subprocess.run(args, check=True)
 
+    @subprocess_error_handler("Error in")
     def _prepare_and_downgrade(self):
         opt = self.clang_path / "opt"
         prepared_kernels = self.tmpdir / f"{self.outstem}_linked.simple.bc"
@@ -172,7 +197,7 @@ class CompilationDriver:
         ]
         args = [opt, *opt_options]
         self._dump_cmd("03-prepare.cmd", args)
-        subprocess.run(args)
+        subprocess.run(args, check=True)
         with kernel_prop.open('r') as kp_fp:
             self.kernel_properties = json.load(kp_fp)
         opt_options = ["--sycl-vxx", "-S", "-O3", "-vxxIRDowngrader"]
@@ -183,8 +208,9 @@ class CompilationDriver:
             "-o", self.downgraded_ir
         ]
         self._dump_cmd("04-downgrade.cmd", args)
-        subprocess.run(args)
+        subprocess.run(args, check=True)
 
+    @subprocess_error_handler("Downgrading of llvm IR -> Vitis old llvm bitcode failed")
     def _asm_ir(self):
         """Assemble downgraded IR to bitcode using Vitis llvm-as"""
         args = [
@@ -194,27 +220,7 @@ class CompilationDriver:
             self.vpp_llvm_input
         ]
         self._dump_cmd("05-asm_ir.cmd", args)
-        subprocess.run(args)
-        if self.hls_flow and self.vitis_mode == "sw_emu":
-            # assemble the xpirbc due to bug in v++ when provided with llvm IR
-            proc = subprocess.run([
-                self.vitis_clang_bin / 'llvm-config',
-                '--host-target'
-            ], capture_output=True)
-            host_triple = proc.stdout.decode('utf-8')
-            self.assembled_xpirbc = self.tmpdir / f"{self.outstem}.S"
-            self.host_native_code = self.tmpdir / f"{self.outstem}.o"
-            subprocess.run([
-                self.vitis_clang_bin / "llc", f"-mtriple={host_triple}",
-                "-o", self.assembled_xpirbc,
-                self.vpp_llvm_input
-            ])
-            subprocess.run([
-                self.vitis_clang_bin / "llc", f"-mtriple={host_triple}",
-                "-o", self.host_native_code,
-                "--filetype=obj",
-                self.vpp_llvm_input
-            ])
+        subprocess.run(args, check=True)
 
     def _get_compile_kernel_cmd_out(self, kernel):
         """Create command to compile kernel"""
@@ -242,9 +248,10 @@ class CompilationDriver:
 
     def _compile_kernel(self, outname, command):
         """Execute a kernel compilation command"""
-        subprocess.run(command)
+        subprocess.run(command, check=True)
         return outname
 
+    @subprocess_error_handler("Vitis linkage stage failed")
     def _link_kernels(self):
         """Call v++ to link all kernel in one .xclbin"""
         vpp = self.vitis_bin_dir / "v++"
@@ -284,7 +291,17 @@ class CompilationDriver:
         command.extend(self.extra_link_args)
         command.extend(self.compiled_kernels)
         self._dump_cmd("07-vxxlink.cmd", command)
-        subprocess.run(command)
+        subprocess.run(command, check=True)
+
+    @subprocess_error_handler("Vitis compilation stage failed")
+    def _launch_parallel_compilation(self):
+        # Compilation commands are generated in main process to ensure
+        # they are printed on main process stdout if command dump is set
+        compile_commands = map(
+            self._get_compile_kernel_cmd_out, self.kernel_properties["kernels"])
+        with Pool() as p:
+            self.compiled_kernels = list(
+                p.starmap(self._compile_kernel, compile_commands))
 
     def drive_compilation(self):
         if self.hls_flow and (self.vitis_mode == "sw_emu"):
@@ -311,16 +328,9 @@ class CompilationDriver:
             self.vpp_llvm_input = (
                 tmpdir / f"{outstem}_kernels.opt.xpirbc")
             self._asm_ir()
-            # Compilation commands are generated in main process to ensure
-            # they are printed on main process stdout if command dump is set
-            compile_commands = map(
-                self._get_compile_kernel_cmd_out,
-                self.kernel_properties["kernels"])
-            with Pool() as p:
-                self.compiled_kernels = list(
-                    p.starmap(self._compile_kernel, compile_commands))
-            if self.compiled_kernels:
-                self._link_kernels()
+            self._launch_parallel_compilation()
+            self._link_kernels()
+            return self.ok
 
 
 def main():
@@ -362,10 +372,11 @@ def main():
     parser.add_argument("inputs", nargs="+")
     args = parser.parse_args()
     cd = CompilationDriver(args)
-    cd.drive_compilation()
+    return cd.drive_compilation()
 
 
 if __name__ == "__main__":
     import sys
     print(sys.argv)
-    main()
+    if (not main()):
+        sys.exit(-1)

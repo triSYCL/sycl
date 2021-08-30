@@ -12,11 +12,13 @@
 // ===---------------------------------------------------------------------===//
 
 #include <cstddef>
+#include <iostream>
 #include <regex>
 #include <string>
 
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/Demangle/Demangle.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
@@ -176,7 +178,7 @@ struct PrepareSYCLOpt : public ModulePass {
   /// Visit call instruction to check if the called function is a property
   /// wrapper, i.e. a function that just call another function and has
   /// interesting HLS annotation.
-  /// When a property wrapper is found, it moves its annotation to the caller 
+  /// When a property wrapper is found, it moves its annotation to the caller
   /// and inline it.
   struct UnwrapperVisitor : public llvm::InstVisitor<UnwrapperVisitor> {
     void visitCallInst(CallInst &I) {
@@ -204,19 +206,37 @@ struct PrepareSYCLOpt : public ModulePass {
       llvm::InlineFunction(I, IFI);
     }
   };
-  
-  /// Kernel level property are marked using a KernelDecorator, 
-  /// a functor that wrap the kernel in a function which is annotated 
+
+  /// Kernel level property are marked using a KernelDecorator,
+  /// a functor that wraps the kernel in a function which is annotated
   /// in a way that is later transformed to HLS compatible annotations.
-  /// 
+  ///
   /// This function inline the wrapping (decorator) function while
-  /// preserving the HLS annotations (by annotating the caller). 
+  /// preserving the HLS annotations (by annotating the caller).
   void unwrapFPGAProperties(Module &M) {
     UnwrapperVisitor UWV{};
     for (auto &F : M.functions()) {
       if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
         UWV.visit(F);
       }
+    }
+  }
+
+  struct CheckUnsupportedBuiltinsVisitor
+      : public llvm::InstVisitor<CheckUnsupportedBuiltinsVisitor> {
+    void visitCallInst(CallInst &I) {
+      auto *F = I.getCalledFunction();
+      if (llvm::demangle(std::string(F->getName()))
+              .rfind("__spir_ocl_get", 0) == 0) {
+        std::cerr << "SYCL_VXX_UNSUPPORTED_SPIR_BUILTINS" << std::endl;
+      }
+    }
+  };
+
+  void signalUnsupportedSPIRBuiltins(Module &M) {
+    CheckUnsupportedBuiltinsVisitor CUBV{};
+    for (auto &F : M.functions()) {
+      CUBV.visit(F);
     }
   }
 
@@ -227,6 +247,7 @@ struct PrepareSYCLOpt : public ModulePass {
     turnNonKernelsIntoPrivate(M);
     if (SyclHLSFlow) {
       setHLSCallingConvention(M);
+      signalUnsupportedSPIRBuiltins(M);
       if (ClearSpir)
         cleanSpirBuiltins(M);
     } else {
