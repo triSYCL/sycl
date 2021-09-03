@@ -50,6 +50,8 @@ Operator::Operator(const llvm::Record &def)
     cppClassName = prefix;
   }
 
+  cppNamespace = def.getValueAsString("cppNamespace");
+
   populateOpStructure();
 }
 
@@ -70,11 +72,12 @@ StringRef Operator::getDialectName() const { return dialect.getName(); }
 StringRef Operator::getCppClassName() const { return cppClassName; }
 
 std::string Operator::getQualCppClassName() const {
-  auto prefix = dialect.getCppNamespace();
-  if (prefix.empty())
+  if (cppNamespace.empty())
     return std::string(cppClassName);
-  return std::string(llvm::formatv("{0}::{1}", prefix, cppClassName));
+  return std::string(llvm::formatv("{0}::{1}", cppNamespace, cppClassName));
 }
+
+StringRef Operator::getCppNamespace() const { return cppNamespace; }
 
 int Operator::getNumResults() const {
   DagInit *results = def.getValueAsDag("results");
@@ -486,11 +489,21 @@ void Operator::populateOpStructure() {
     // This is uniquing based on pointers of the trait.
     SmallPtrSet<const llvm::Init *, 32> traitSet;
     traits.reserve(traitSet.size());
-    for (auto *traitInit : *traitList) {
-      // Keep traits in the same order while skipping over duplicates.
-      if (traitSet.insert(traitInit).second)
-        traits.push_back(Trait::create(traitInit));
-    }
+
+    std::function<void(llvm::ListInit *)> insert;
+    insert = [&](llvm::ListInit *traitList) {
+      for (auto *traitInit : *traitList) {
+        auto *def = cast<DefInit>(traitInit)->getDef();
+        if (def->isSubClassOf("OpTraitList")) {
+          insert(def->getValueAsListInit("traits"));
+          continue;
+        }
+        // Keep traits in the same order while skipping over duplicates.
+        if (traitSet.insert(traitInit).second)
+          traits.push_back(Trait::create(traitInit));
+      }
+    };
+    insert(traitList);
   }
 
   populateTypeInferenceInfo(argumentsAndResultsIndex);

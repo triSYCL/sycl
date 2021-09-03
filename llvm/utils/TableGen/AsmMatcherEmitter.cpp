@@ -612,7 +612,7 @@ struct MatchableInfo {
   /// operator< - Compare two matchables.
   bool operator<(const MatchableInfo &RHS) const {
     // The primary comparator is the instruction mnemonic.
-    if (int Cmp = Mnemonic.compare_lower(RHS.Mnemonic))
+    if (int Cmp = Mnemonic.compare_insensitive(RHS.Mnemonic))
       return Cmp == -1;
 
     if (AsmOperands.size() != RHS.AsmOperands.size())
@@ -1322,9 +1322,8 @@ buildRegisterClasses(SmallPtrSetImpl<Record*> &SingletonRegisters) {
   }
 
   // Populate the map for individual registers.
-  for (std::map<Record*, RegisterSet>::iterator it = RegisterMap.begin(),
-         ie = RegisterMap.end(); it != ie; ++it)
-    RegisterClasses[it->first] = RegisterSetClasses[it->second];
+  for (auto &It : RegisterMap)
+    RegisterClasses[It.first] = RegisterSetClasses[It.second];
 
   // Name the register classes which correspond to singleton registers.
   for (Record *Rec : SingletonRegisters) {
@@ -1529,9 +1528,8 @@ void AsmMatcherInfo::buildInfo() {
     // matchables.
     std::vector<Record*> AllInstAliases =
       Records.getAllDerivedDefinitions("InstAlias");
-    for (unsigned i = 0, e = AllInstAliases.size(); i != e; ++i) {
-      auto Alias = std::make_unique<CodeGenInstAlias>(AllInstAliases[i],
-                                                       Target);
+    for (Record *InstAlias : AllInstAliases) {
+      auto Alias = std::make_unique<CodeGenInstAlias>(InstAlias, Target);
 
       // If the tblgen -match-prefix option is specified (for tblgen hackers),
       // filter the set of instruction aliases we consider, based on the target
@@ -2751,10 +2749,14 @@ static void emitMnemonicAliasVariant(raw_ostream &OS,const AsmMatcherInfo &Info,
       // If this unconditionally matches, remember it for later and diagnose
       // duplicates.
       if (FeatureMask.empty()) {
-        if (AliasWithNoPredicate != -1) {
-          // We can't have two aliases from the same mnemonic with no predicate.
-          PrintError(ToVec[AliasWithNoPredicate]->getLoc(),
-                     "two MnemonicAliases with the same 'from' mnemonic!");
+        if (AliasWithNoPredicate != -1 &&
+            R->getValueAsString("ToMnemonic") !=
+                ToVec[AliasWithNoPredicate]->getValueAsString("ToMnemonic")) {
+          // We can't have two different aliases from the same mnemonic with no
+          // predicate.
+          PrintError(
+              ToVec[AliasWithNoPredicate]->getLoc(),
+              "two different MnemonicAliases with the same 'from' mnemonic!");
           PrintFatalError(R->getLoc(), "this is the other MnemonicAlias.");
         }
 

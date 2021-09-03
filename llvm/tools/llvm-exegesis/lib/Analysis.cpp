@@ -116,7 +116,7 @@ void Analysis::writeSnippet(raw_ostream &OS, ArrayRef<uint8_t> Bytes,
     raw_svector_ostream OSS(InstPrinterStr);
     InstPrinter_->printInst(&MI, 0, "", *SubtargetInfo_, OSS);
     Bytes = Bytes.drop_front(MISize);
-    Lines.emplace_back(StringRef(InstPrinterStr).trim());
+    Lines.emplace_back(InstPrinterStr.str().trim());
   }
   writeEscaped<Tag>(OS, join(Lines, Separator));
 }
@@ -176,8 +176,9 @@ Analysis::Analysis(const Target &Target, std::unique_ptr<MCInstrInfo> InstrInfo,
       Triple(FirstPoint.LLVMTriple), 0 /*default variant*/, *AsmInfo_,
       *InstrInfo_, *RegInfo_));
 
-  Context_ = std::make_unique<MCContext>(AsmInfo_.get(), RegInfo_.get(),
-                                         &ObjectFileInfo_);
+  Context_ =
+      std::make_unique<MCContext>(Triple(FirstPoint.LLVMTriple), AsmInfo_.get(),
+                                  RegInfo_.get(), SubtargetInfo_.get());
   Disasm_.reset(Target.createMCDisassembler(*SubtargetInfo_, *Context_));
   assert(Disasm_ && "cannot create MCDisassembler. missing call to "
                     "InitializeXXXTargetDisassembler ?");

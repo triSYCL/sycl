@@ -31,16 +31,17 @@
 #include <algorithm>
 #include <atomic>
 #include <bitset>
+#include <clocale>
 #include <csignal>
 #include <string>
 #include <thread>
 #include <utility>
 
+#include <climits>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <fcntl.h>
-#include <limits.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 // Includes for pipe()
 #if defined(_WIN32)
@@ -740,7 +741,7 @@ void reproducer_handler(void *finalize_cmd) {
 
 static void printHelp(LLDBOptTable &table, llvm::StringRef tool_name) {
   std::string usage_str = tool_name.str() + " [options]";
-  table.PrintHelp(llvm::outs(), usage_str.c_str(), "LLDB", false);
+  table.printHelp(llvm::outs(), usage_str.c_str(), "LLDB", false);
 
   std::string examples = R"___(
 EXAMPLES:
@@ -751,11 +752,11 @@ EXAMPLES:
   arguments passed to the debugged executable, arguments starting with a - must
   be passed after --.
 
-    lldb --arch x86_64 /path/to/program program argument -- --arch arvm7
+    lldb --arch x86_64 /path/to/program program argument -- --arch armv7
 
   For convenience, passing the executable after -- is also supported.
 
-    lldb --arch x86_64 -- /path/to/program program argument --arch arvm7
+    lldb --arch x86_64 -- /path/to/program program argument --arch armv7
 
   Passing one of the attach options causes lldb to immediately attach to the
   given process.
@@ -867,6 +868,10 @@ static llvm::Optional<int> InitializeReproducer(llvm::StringRef argv0,
 }
 
 int main(int argc, char const *argv[]) {
+  // Editline uses for example iswprint which is dependent on LC_CTYPE.
+  std::setlocale(LC_ALL, "");
+  std::setlocale(LC_CTYPE, "");
+
   // Setup LLVM signal handlers and make sure we call llvm_shutdown() on
   // destruction.
   llvm::InitLLVM IL(argc, argv, /*InstallPipeSignalExitHandler=*/false);

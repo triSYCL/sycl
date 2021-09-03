@@ -180,7 +180,7 @@ class CompilationDriver:
         self._dump_cmd("02-link_spir.cmd", args)
         subprocess.run(args, check=True)
 
-    @subprocess_error_handler("Error in")
+    @subprocess_error_handler("Error in preparing and downgrading IR")
     def _prepare_and_downgrade(self):
         opt = self.clang_path / "opt"
         prepared_kernels = self.tmpdir / f"{self.outstem}_linked.simple.bc"
@@ -299,9 +299,13 @@ class CompilationDriver:
         # they are printed on main process stdout if command dump is set
         compile_commands = map(
             self._get_compile_kernel_cmd_out, self.kernel_properties["kernels"])
-        with Pool() as p:
-            self.compiled_kernels = list(
-                p.starmap(self._compile_kernel, compile_commands))
+        p = Pool()
+        try:
+            future = p.starmap_async(self._compile_kernel, compile_commands)
+            self.compiled_kernels = list(future.get())
+        except KeyboardInterrupt:
+            p.terminate()
+            raise KeyboardInterrupt
 
     def drive_compilation(self):
         if self.hls_flow and (self.vitis_mode == "sw_emu"):
@@ -377,6 +381,9 @@ def main():
 
 if __name__ == "__main__":
     import sys
-    print(sys.argv)
-    if (not main()):
-        sys.exit(-1)
+    try:
+        if (not main()):
+            sys.exit(-1)
+    except KeyboardInterrupt:
+        print("Received keyboard interrupt, will stop")
+        sys.exit(-2)

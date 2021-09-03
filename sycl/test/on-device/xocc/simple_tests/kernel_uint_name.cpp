@@ -49,7 +49,7 @@ auto main() -> int
 
     auto rb = buf.get_access<cl::sycl::access::mode::read>();
 
-    for (int i = 0; i < buf.get_count(); ++i) {
+    for (int i = 0; i < buf.size(); ++i) {
       assert(rb[i] == 42 && " execution of kernel is invalid");
     }
 }

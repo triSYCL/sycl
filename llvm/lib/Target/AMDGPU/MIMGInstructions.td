@@ -713,8 +713,11 @@ class MIMGAddrSize<int dw, bit enable_disasm> {
                            !if(!eq(NumWords, 2), VReg_64,
                            !if(!eq(NumWords, 3), VReg_96,
                            !if(!eq(NumWords, 4), VReg_128,
+                           !if(!eq(NumWords, 5), VReg_160,
+                           !if(!eq(NumWords, 6), VReg_192,
+                           !if(!eq(NumWords, 7), VReg_224,
                            !if(!le(NumWords, 8), VReg_256,
-                           !if(!le(NumWords, 16), VReg_512, ?)))))));
+                           !if(!le(NumWords, 16), VReg_512, ?))))))))));
 
   // Whether the instruction variant with this vaddr size should be enabled for
   // the auto-generated disassembler.
@@ -732,9 +735,9 @@ class isRangeInList<int min, int max, list<int> lst> {
   bit ret = !foldl(0, lst, lhs, y, !or(lhs, !and(!le(min, y), !le(y, max))));
 }
 
-class MIMGAddrSizes_tmp<list<MIMGAddrSize> lst, int min> {
-  list<MIMGAddrSize> List = lst;
-  int Min = min;
+class MIMGAddrSizes_dw_range<list<int> range> {
+  int Min = !head(range);
+  int Max = !if(!empty(!tail(range)), Min, !head(!tail(range)));
 }
 
 class MIMG_Sampler_AddrSizes<AMDGPUSampleVariant sample> {
@@ -744,8 +747,8 @@ class MIMG_Sampler_AddrSizes<AMDGPUSampleVariant sample> {
   list<int> AllNumAddrWords =
     !foreach(dw, !if(sample.Gradients,
                      !if(!eq(sample.LodOrClamp, ""),
-                         [2, 3, 4, 5, 6, 7, 9],
-                         [2, 3, 4, 5, 7, 8, 10]),
+                         [2, 3, 4, 5, 6, 7, 8, 9],
+                         [2, 3, 4, 5, 6, 7, 8, 9, 10]),
                      !if(!eq(sample.LodOrClamp, ""),
                          [1, 2, 3],
                          [1, 2, 3, 4])),
@@ -755,12 +758,17 @@ class MIMG_Sampler_AddrSizes<AMDGPUSampleVariant sample> {
   // required numbers of address words. The disassembler defaults to the
   // smallest register class.
   list<MIMGAddrSize> MachineInstrs =
-    !foldl(MIMGAddrSizes_tmp<[], 0>, [1, 2, 3, 4, 8, 16], lhs, dw,
-           !if(isRangeInList<lhs.Min, dw, AllNumAddrWords>.ret,
-               MIMGAddrSizes_tmp<
-                  !listconcat(lhs.List, [MIMGAddrSize<dw, !empty(lhs.List)>]),
-                  !if(!eq(dw, 3), 3, !add(dw, 1))>, // we still need _V4 for codegen w/ 3 dwords
-               lhs)).List;
+    !foldl([]<MIMGAddrSize>,
+           !foreach(range,
+                    // V4 is generated for V3 and V4
+                    // V8 is generated for V5 through V8
+                    // V16 is generated for V9 through V16
+                    [[1],[2],[3],[3,4],[5],[6],[7],[5,8],[9,16]],
+                    MIMGAddrSizes_dw_range<range>),
+           lhs, dw,
+           !if(isRangeInList<dw.Min, dw.Max, AllNumAddrWords>.ret,
+               !listconcat(lhs, [MIMGAddrSize<dw.Max, !empty(lhs)>]),
+               lhs));
 
   // For NSA, generate machine instructions for all possible numbers of words
   // except 1 (which is already covered by the non-NSA case).
@@ -884,8 +892,8 @@ class MIMG_IntersectRay_nsa_gfx10<mimgopc op, string opcode, int num_addrs, bit 
 
 multiclass MIMG_IntersectRay<mimgopc op, string opcode, int num_addrs, bit A16> {
   def "" : MIMGBaseOpcode;
-  let SubtargetPredicate = HasGFX10_BEncoding,
-      AssemblerPredicate = HasGFX10_BEncoding,
+  let SubtargetPredicate = HasGFX10_AEncoding,
+      AssemblerPredicate = HasGFX10_AEncoding,
       AsmMatchConverter = !if(A16, "cvtIntersectRay", ""),
       dmask = 0xf,
       unorm = 1,
@@ -1034,7 +1042,7 @@ defm IMAGE_SAMPLE_C_CD_CL_O_G16 : MIMG_Sampler <mimgopc<0xef>, AMDGPUSample_c_cd
 //def IMAGE_RSRC256 : MIMG_NoPattern_RSRC256 <"image_rsrc256", 0x0000007e>;
 //def IMAGE_SAMPLER : MIMG_NoPattern_ <"image_sampler", 0x0000007f>;
 
-let SubtargetPredicate = HasGFX10_BEncoding in
+let SubtargetPredicate = HasGFX10_AEncoding in
 defm IMAGE_MSAA_LOAD_X : MIMG_NoSampler <mimgopc<0x80>, "image_msaa_load", 1, 0, 0, 1>;
 
 defm IMAGE_BVH_INTERSECT_RAY       : MIMG_IntersectRay<mimgopc<0xe6>, "image_bvh_intersect_ray", 11, 0>;

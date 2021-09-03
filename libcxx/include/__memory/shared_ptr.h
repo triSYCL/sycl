@@ -10,20 +10,25 @@
 #ifndef _LIBCPP___MEMORY_SHARED_PTR_H
 #define _LIBCPP___MEMORY_SHARED_PTR_H
 
-#include <__config>
 #include <__availability>
-#include <__functional_base> // std::less, std::binary_function
+#include <__config>
+#include <__functional_base>
+#include <__functional/binary_function.h>
+#include <__functional/operations.h>
+#include <__functional/reference_wrapper.h>
 #include <__memory/addressof.h>
 #include <__memory/allocation_guard.h>
-#include <__memory/allocator.h>
 #include <__memory/allocator_traits.h>
+#include <__memory/allocator.h>
 #include <__memory/compressed_pair.h>
 #include <__memory/pointer_traits.h>
 #include <__memory/unique_ptr.h>
+#include <__utility/forward.h>
 #include <cstddef>
 #include <cstdlib> // abort
 #include <iosfwd>
 #include <stdexcept>
+#include <typeinfo>
 #include <type_traits>
 #include <utility>
 #if !defined(_LIBCPP_HAS_NO_ATOMIC_HEADER)
@@ -382,15 +387,15 @@ struct __compatible_with
 template <class _Ptr, class = void>
 struct __is_deletable : false_type { };
 template <class _Ptr>
-struct __is_deletable<_Ptr, decltype(delete _VSTD::declval<_Ptr>())> : true_type { };
+struct __is_deletable<_Ptr, decltype(delete declval<_Ptr>())> : true_type { };
 
 template <class _Ptr, class = void>
 struct __is_array_deletable : false_type { };
 template <class _Ptr>
-struct __is_array_deletable<_Ptr, decltype(delete[] _VSTD::declval<_Ptr>())> : true_type { };
+struct __is_array_deletable<_Ptr, decltype(delete[] declval<_Ptr>())> : true_type { };
 
 template <class _Dp, class _Pt,
-    class = decltype(_VSTD::declval<_Dp>()(_VSTD::declval<_Pt>()))>
+    class = decltype(declval<_Dp>()(declval<_Pt>()))>
 static true_type __well_formed_deleter_test(int);
 
 template <class, class>
@@ -579,7 +584,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     element_type* operator->() const _NOEXCEPT
     {
-        static_assert(!_VSTD::is_array<_Tp>::value,
+        static_assert(!is_array<_Tp>::value,
                       "std::shared_ptr<T>::operator-> is only valid when T is not an array type.");
         return __ptr_;
     }
@@ -588,7 +593,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     bool unique() const _NOEXCEPT {return use_count() == 1;}
     _LIBCPP_INLINE_VISIBILITY
-    _LIBCPP_EXPLICIT operator bool() const _NOEXCEPT {return get() != nullptr;}
+    explicit operator bool() const _NOEXCEPT {return get() != nullptr;}
     template <class _Up>
         _LIBCPP_INLINE_VISIBILITY
         bool owner_before(shared_ptr<_Up> const& __p) const _NOEXCEPT
@@ -607,7 +612,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     operator[](ptrdiff_t __i) const
     {
-            static_assert(_VSTD::is_array<_Tp>::value,
+            static_assert(is_array<_Tp>::value,
                           "std::shared_ptr<T>::operator[] is only valid when T is an array type.");
             return __ptr_[__i];
     }
@@ -1594,11 +1599,20 @@ template <class _Tp = void> struct owner_less;
 template <class _Tp> struct owner_less;
 #endif
 
+
+_LIBCPP_SUPPRESS_DEPRECATED_PUSH
 template <class _Tp>
 struct _LIBCPP_TEMPLATE_VIS owner_less<shared_ptr<_Tp> >
+#if !defined(_LIBCPP_ABI_NO_BINDER_BASES)
     : binary_function<shared_ptr<_Tp>, shared_ptr<_Tp>, bool>
+#endif
 {
-    typedef bool result_type;
+_LIBCPP_SUPPRESS_DEPRECATED_POP
+#if _LIBCPP_STD_VER <= 17 || defined(_LIBCPP_ENABLE_CXX20_REMOVED_BINDER_TYPEDEFS)
+    _LIBCPP_DEPRECATED_IN_CXX17 typedef bool result_type;
+    _LIBCPP_DEPRECATED_IN_CXX17 typedef shared_ptr<_Tp> first_argument_type;
+    _LIBCPP_DEPRECATED_IN_CXX17 typedef shared_ptr<_Tp> second_argument_type;
+#endif
     _LIBCPP_INLINE_VISIBILITY
     bool operator()(shared_ptr<_Tp> const& __x, shared_ptr<_Tp> const& __y) const _NOEXCEPT
         {return __x.owner_before(__y);}
@@ -1610,11 +1624,19 @@ struct _LIBCPP_TEMPLATE_VIS owner_less<shared_ptr<_Tp> >
         {return __x.owner_before(__y);}
 };
 
+_LIBCPP_SUPPRESS_DEPRECATED_PUSH
 template <class _Tp>
 struct _LIBCPP_TEMPLATE_VIS owner_less<weak_ptr<_Tp> >
+#if !defined(_LIBCPP_ABI_NO_BINDER_BASES)
     : binary_function<weak_ptr<_Tp>, weak_ptr<_Tp>, bool>
+#endif
 {
-    typedef bool result_type;
+_LIBCPP_SUPPRESS_DEPRECATED_POP
+#if _LIBCPP_STD_VER <= 17 || defined(_LIBCPP_ENABLE_CXX20_REMOVED_BINDER_TYPEDEFS)
+    _LIBCPP_DEPRECATED_IN_CXX17 typedef bool result_type;
+    _LIBCPP_DEPRECATED_IN_CXX17 typedef weak_ptr<_Tp> first_argument_type;
+    _LIBCPP_DEPRECATED_IN_CXX17 typedef weak_ptr<_Tp> second_argument_type;
+#endif
     _LIBCPP_INLINE_VISIBILITY
     bool operator()(  weak_ptr<_Tp> const& __x,   weak_ptr<_Tp> const& __y) const _NOEXCEPT
         {return __x.owner_before(__y);}
@@ -1690,11 +1712,13 @@ template <class _Tp> struct _LIBCPP_TEMPLATE_VIS hash;
 template <class _Tp>
 struct _LIBCPP_TEMPLATE_VIS hash<shared_ptr<_Tp> >
 {
-    typedef shared_ptr<_Tp>      argument_type;
-    typedef size_t               result_type;
+#if _LIBCPP_STD_VER <= 17 || defined(_LIBCPP_ENABLE_CXX20_REMOVED_BINDER_TYPEDEFS)
+    _LIBCPP_DEPRECATED_IN_CXX17 typedef shared_ptr<_Tp> argument_type;
+    _LIBCPP_DEPRECATED_IN_CXX17 typedef size_t          result_type;
+#endif
 
     _LIBCPP_INLINE_VISIBILITY
-    result_type operator()(const argument_type& __ptr) const _NOEXCEPT
+    size_t operator()(const shared_ptr<_Tp>& __ptr) const _NOEXCEPT
     {
         return hash<typename shared_ptr<_Tp>::element_type*>()(__ptr.get());
     }

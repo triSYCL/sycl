@@ -66,7 +66,9 @@ static const opt::OptTable::Info InfoTable[] = {
 
 class SymbolizerOptTable : public opt::OptTable {
 public:
-  SymbolizerOptTable() : OptTable(InfoTable, true) {}
+  SymbolizerOptTable() : OptTable(InfoTable) {
+    setGroupedShortOptions(true);
+  }
 };
 } // namespace
 
@@ -91,7 +93,7 @@ static void print(const Request &Request, Expected<T> &ResOrErr,
     Printer.print(Request, T());
 }
 
-enum class OutputStyle { LLVM, GNU };
+enum class OutputStyle { LLVM, GNU, JSON };
 
 enum class Command {
   Code,
@@ -154,10 +156,7 @@ static void symbolizeInput(const opt::InputArgList &Args, uint64_t AdjustVMA,
   uint64_t Offset = 0;
   if (!parseCommand(Args.getLastArgValue(OPT_obj_EQ), IsAddr2Line,
                     StringRef(InputString), Cmd, ModuleName, Offset)) {
-    Printer.printInvalidCommand(
-        {ModuleName, Offset},
-        StringError(InputString,
-                    std::make_error_code(std::errc::invalid_argument)));
+    Printer.printInvalidCommand({ModuleName, None}, InputString);
     return;
   }
 
@@ -199,7 +198,7 @@ static void symbolizeInput(const opt::InputArgList &Args, uint64_t AdjustVMA,
 static void printHelp(StringRef ToolName, const SymbolizerOptTable &Tbl,
                       raw_ostream &OS) {
   const char HelpText[] = " [options] addresses...";
-  Tbl.PrintHelp(OS, (ToolName + HelpText).str().c_str(),
+  Tbl.printHelp(OS, (ToolName + HelpText).str().c_str(),
                 ToolName.str().c_str());
   // TODO Replace this with OptTable API once it adds extrahelp support.
   OS << "\nPass @FILE as argument to read options from FILE.\n";
@@ -209,7 +208,6 @@ static opt::InputArgList parseOptions(int Argc, char *Argv[], bool IsAddr2Line,
                                       StringSaver &Saver,
                                       SymbolizerOptTable &Tbl) {
   StringRef ToolName = IsAddr2Line ? "llvm-addr2line" : "llvm-symbolizer";
-  Tbl.setGroupedShortOptions(true);
   // The environment variable specifies initial options which can be overridden
   // by commnad line options.
   Tbl.setInitialOptionsFromEnvironment(IsAddr2Line ? "LLVM_ADDR2LINE_OPTS"
@@ -320,14 +318,20 @@ int main(int argc, char **argv) {
 
   auto Style = IsAddr2Line ? OutputStyle::GNU : OutputStyle::LLVM;
   if (const opt::Arg *A = Args.getLastArg(OPT_output_style_EQ)) {
-    Style = strcmp(A->getValue(), "GNU") == 0 ? OutputStyle::GNU
-                                              : OutputStyle::LLVM;
+    if (strcmp(A->getValue(), "GNU") == 0)
+      Style = OutputStyle::GNU;
+    else if (strcmp(A->getValue(), "JSON") == 0)
+      Style = OutputStyle::JSON;
+    else
+      Style = OutputStyle::LLVM;
   }
 
   LLVMSymbolizer Symbolizer(Opts);
   std::unique_ptr<DIPrinter> Printer;
   if (Style == OutputStyle::GNU)
     Printer = std::make_unique<GNUPrinter>(outs(), errs(), Config);
+  else if (Style == OutputStyle::JSON)
+    Printer = std::make_unique<JSONPrinter>(outs(), Config);
   else
     Printer = std::make_unique<LLVMPrinter>(outs(), errs(), Config);
 
@@ -346,9 +350,11 @@ int main(int argc, char **argv) {
       outs().flush();
     }
   } else {
+    Printer->listBegin();
     for (StringRef Address : InputAddresses)
       symbolizeInput(Args, AdjustVMA, IsAddr2Line, Style, Address, Symbolizer,
                      *Printer);
+    Printer->listEnd();
   }
 
   return 0;

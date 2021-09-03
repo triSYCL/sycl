@@ -73,6 +73,30 @@ using llvm::Twine;
 using namespace mlir;
 
 //===----------------------------------------------------------------------===//
+// Special "op aliases" substitutions.
+//===----------------------------------------------------------------------===//
+
+/// Perform substitutions of known special ops.
+/// This is a poor man's way of achieving "op aliases": i.e. giving an op a
+/// name.
+/// This is hacky and temporary until migration to the python opdsl is complete.
+static void substituteOpAliases(std::string &expressionsStr) {
+  for (auto kvp : SmallVector<std::pair<std::string, std::string>>{
+           {"b.create<CmpIOpSGT>(", "b.create<CmpIOp>(CmpIPredicate::sgt, "},
+           {"b.create<CmpFOpOGT>(", "b.create<CmpFOp>(CmpFPredicate::OGT, "},
+           {"b.create<CmpFOpOLT>(", "b.create<CmpFOp>(CmpFPredicate::OLT, "},
+           {"b.create<SignExtendIOp32>(",
+            "b.create<SignExtendIOp>(b.getI32Type(), "},
+       }) {
+    size_t pos = 0;
+    while ((pos = expressionsStr.find(kvp.first, pos)) != std::string::npos) {
+      expressionsStr.replace(pos, kvp.first.size(), kvp.second);
+      pos += kvp.second.size();
+    }
+  }
+}
+
+//===----------------------------------------------------------------------===//
 // Lexer
 //===----------------------------------------------------------------------===//
 
@@ -999,7 +1023,6 @@ struct TensorUse : public Expression {
   TensorUse() : TensorUse("", AffineMap()) {}
   TensorUse(StringRef name, AffineMap map)
       : Expression(Kind::TensorUse), tensorId(name), indexingMap(map) {}
-  TensorUse(const TensorUse &use) = default;
 
   static bool classof(const Expression *e) {
     return e->kind == Kind::TensorUse;
@@ -1900,7 +1923,7 @@ void TCParser::printODS(llvm::raw_ostream &os, StringRef cppOpName,
             $_builder,
             $_state,
             TypeRange(inputs),
-            TypeRange(outputs)/*, TODO: support captures*/);
+            TypeRange(outputs));
         }]>,
         OpBuilder<
         (ins "TypeRange":$resultTensorTypes, "ValueRange":$inputs,
@@ -1918,7 +1941,7 @@ void TCParser::printODS(llvm::raw_ostream &os, StringRef cppOpName,
             $_builder,
             $_state,
             TypeRange(inputs),
-            TypeRange(outputs)/*, TODO: support captures*/);
+            TypeRange(outputs));
         }]>,
         OpBuilder<
         (ins "TypeRange":$resultTensorTypes, "ValueRange":$operands,
@@ -1933,17 +1956,17 @@ void TCParser::printODS(llvm::raw_ostream &os, StringRef cppOpName,
       ];
       let printer = [{{ return ::printNamedStructuredOp(p, *this); }];
       let parser = [{{
-        return ::parseNamedStructuredOp<{0}>(parser, result/*TODO:, captures*/);
+        return ::parseNamedStructuredOp<{0}>(parser, result);
       }];
       let hasFolder = 1;
-      let hasCanonicalizer = 1;
 
       let extraClassDeclaration = structuredOpsBaseDecls # [{{
         // Auto-generated.
         ArrayAttr iterator_types();
         ArrayAttr indexing_maps();
-        static void regionBuilder(Block &block, ValueRange captures);
-        static std::function<void(Block &, ValueRange)> getRegionBuilder() {{
+        static void regionBuilder(ImplicitLocOpBuilder &b, Block &block);
+        static std::function<void(ImplicitLocOpBuilder &b, Block &)>
+        getRegionBuilder() {{
           return regionBuilder;
         }
 
@@ -2011,7 +2034,7 @@ void TCParser::printODS(llvm::raw_ostream &os, StringRef cppOpName,
           $_builder,
           $_state,
           TypeRange(inputs),
-          TypeRange(outputs)/*, TODO: support captures*/);
+          TypeRange(outputs));
         {2}
       }]>
     )FMT";
@@ -2069,23 +2092,19 @@ void TCParser::printReferenceIterators(llvm::raw_ostream &os,
 
 void TCParser::printCanonicalizersAndFolders(llvm::raw_ostream &os,
                                              StringRef cppOpName) {
-  const char *canonicalizersAndFoldersFmt = R"FMT(
-    void {0}::getCanonicalizationPatterns(
-        RewritePatternSet &results,
-        MLIRContext *context) {{
-      results.add<EraseDeadLinalgOp>(context);
-      results.add<FoldTensorCastOp>(context);
-    }
+  const char *foldersFmt = R"FMT(
     LogicalResult {0}::fold(ArrayRef<Attribute>,
                             SmallVectorImpl<OpFoldResult> &) {{
       return foldMemRefCast(*this);
     }
     void {0}::getEffects(SmallVectorImpl<
         SideEffects::EffectInstance<MemoryEffects::Effect> >&effects) {{
+      SmallVector<Value> inputBuffers = getInputBufferOperands();
+      SmallVector<Value> outputBuffers = getOutputBufferOperands();
       getGenericEffectsImpl(effects,
-        getOperation()->getResults(), getInputBuffers(), getOutputBuffers());
+        getOperation()->getResults(), inputBuffers, outputBuffers);
     })FMT";
-  os << llvm::formatv(canonicalizersAndFoldersFmt, cppOpName);
+  os << llvm::formatv(foldersFmt, cppOpName);
 }
 
 // Prints methods for querying whether the current named op has attributes that
@@ -2326,7 +2345,7 @@ void TCParser::printRegionBuilder(llvm::raw_ostream &os, StringRef cppOpName,
                               printExpr(subExprsStringStream, *e);
                             });
       subExprsStringStream.flush();
-      const char *tensorExprFmt = "\n    Value _{0} = {1}({2});";
+      const char *tensorExprFmt = "\n    Value _{0} = b.create<{1}>({2});";
       os << llvm::formatv(tensorExprFmt, ++count, pTensorExpr->operationName,
                           subExprs);
       subExprsMap[pTensorExpr] = count;
@@ -2334,13 +2353,11 @@ void TCParser::printRegionBuilder(llvm::raw_ostream &os, StringRef cppOpName,
   };
 
   const char *regionBuilderFmt = R"FMT(
-  void {0}::regionBuilder(Block &block, ValueRange captures) {
-    using namespace edsc;
-    using namespace intrinsics;
+  void {0}::regionBuilder(ImplicitLocOpBuilder &b, Block &block) {
     auto args = block.getArguments();
     Value {1};
     {2}
-    (linalg_yield(ValueRange{ {3} }));
+    b.create<linalg::YieldOp>(ValueRange{ {3} });
   })FMT";
 
   std::string valueHandleStr;
@@ -2359,6 +2376,8 @@ void TCParser::printRegionBuilder(llvm::raw_ostream &os, StringRef cppOpName,
       if (e.kind == Expression::Kind::TensorExpr)
         printExpr(expressionStringStream, e);
     });
+  expressionStringStream.flush();
+  substituteOpAliases(expressionsStr);
 
   std::string yieldStr;
   llvm::raw_string_ostream yieldStringStream(yieldStr);
@@ -2368,7 +2387,6 @@ void TCParser::printRegionBuilder(llvm::raw_ostream &os, StringRef cppOpName,
                         });
 
   valueHandleStringStream.flush();
-  expressionStringStream.flush();
   yieldStringStream.flush();
 
   os << llvm::formatv(regionBuilderFmt, cppOpName, valueHandleStr,

@@ -47,7 +47,8 @@ bool isTopLevelValue(Value value);
 /// id), transferring chunks of number_of_elements_per_stride every stride until
 /// %num_elements are transferred. Either both or no stride arguments should be
 /// specified. The value of 'num_elements' must be a multiple of
-/// 'number_of_elements_per_stride'.
+/// 'number_of_elements_per_stride'. If the source and destination locations
+/// overlap the behavior of this operation is not defined.
 //
 // For example, an AffineDmaStartOp operation that transfers 256 elements of a
 // memref '%src' in memory space 0 at indices [%i + 3, %j] to memref '%dst' in
@@ -76,6 +77,7 @@ class AffineDmaStartOp
                 AffineMapAccessInterface::Trait> {
 public:
   using Op::Op;
+  static ArrayRef<StringRef> getAttributeNames() { return {}; }
 
   static void build(OpBuilder &builder, OperationState &result, Value srcMemRef,
                     AffineMap srcMap, ValueRange srcIndices, Value destMemRef,
@@ -267,6 +269,7 @@ class AffineDmaWaitOp
                 AffineMapAccessInterface::Trait> {
 public:
   using Op::Op;
+  static ArrayRef<StringRef> getAttributeNames() { return {}; }
 
   static void build(OpBuilder &builder, OperationState &result, Value tagMemRef,
                     AffineMap tagMap, ValueRange tagIndices, Value numElements);
@@ -355,7 +358,10 @@ void canonicalizeSetAndOperands(IntegerSet *set,
 /// other AffineApplyOps supplying those operands. The operands of the resulting
 /// AffineApplyOp do not change the length of  AffineApplyOp chains.
 AffineApplyOp makeComposedAffineApply(OpBuilder &b, Location loc, AffineMap map,
-                                      ArrayRef<Value> operands);
+                                      ValueRange operands);
+/// Variant of `makeComposedAffineApply` which infers the AffineMap from `e`.
+AffineApplyOp makeComposedAffineApply(OpBuilder &b, Location loc, AffineExpr e,
+                                      ValueRange values);
 
 /// Given an affine map `map` and its input `operands`, this method composes
 /// into `map`, maps of AffineApplyOps whose results are the values in
@@ -366,12 +372,13 @@ AffineApplyOp makeComposedAffineApply(OpBuilder &b, Location loc, AffineMap map,
 /// argument.
 void fullyComposeAffineMapAndOperands(AffineMap *map,
                                       SmallVectorImpl<Value> *operands);
-
+} // namespace mlir
 #include "mlir/Dialect/Affine/IR/AffineOpsDialect.h.inc"
 
 #define GET_OP_CLASSES
 #include "mlir/Dialect/Affine/IR/AffineOps.h.inc"
 
+namespace mlir {
 /// Returns true if the provided value is the induction variable of a
 /// AffineForOp.
 bool isForInductionVar(Value val);
@@ -399,6 +406,20 @@ void buildAffineLoopNest(OpBuilder &builder, Location loc, ValueRange lbs,
                          ValueRange ubs, ArrayRef<int64_t> steps,
                          function_ref<void(OpBuilder &, Location, ValueRange)>
                              bodyBuilderFn = nullptr);
+
+/// Replace `loop` with a new loop where `newIterOperands` are appended with
+/// new initialization values and `newYieldedValues` are added as new yielded
+/// values. The returned ForOp has `newYieldedValues.size()` new result values.
+/// Additionally, if `replaceLoopResults` is true, all uses of
+/// `loop.getResults()` are replaced with the first `loop.getNumResults()`
+/// return values  of the original loop respectively. The original loop is
+/// deleted and the new loop returned.
+/// Prerequisite: `newIterOperands.size() == newYieldedValues.size()`.
+AffineForOp replaceForOpWithNewYields(OpBuilder &b, AffineForOp loop,
+                                      ValueRange newIterOperands,
+                                      ValueRange newYieldedValues,
+                                      ValueRange newIterArgs,
+                                      bool replaceLoopResults = true);
 
 /// AffineBound represents a lower or upper bound in the for operation.
 /// This class does not own the underlying operands. Instead, it refers

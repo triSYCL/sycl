@@ -375,7 +375,7 @@ InstructionCost NVPTXTTIImpl::getArithmeticInstrCost(
     TTI::OperandValueProperties Opd2PropInfo, ArrayRef<const Value *> Args,
     const Instruction *CxtI) {
   // Legalize the type.
-  std::pair<int, MVT> LT = TLI->getTypeLegalizationCost(DL, Ty);
+  std::pair<InstructionCost, MVT> LT = TLI->getTypeLegalizationCost(DL, Ty);
 
   int ISD = TLI->InstructionOpcodeToISD(Opcode);
 
@@ -402,8 +402,9 @@ InstructionCost NVPTXTTIImpl::getArithmeticInstrCost(
 }
 
 void NVPTXTTIImpl::getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
-                                           TTI::UnrollingPreferences &UP) {
-  BaseT::getUnrollingPreferences(L, SE, UP);
+                                           TTI::UnrollingPreferences &UP,
+                                           OptimizationRemarkEmitter *ORE) {
+  BaseT::getUnrollingPreferences(L, SE, UP, ORE);
 
   // Enable partial unrolling and runtime unrolling, but reduce the
   // threshold.  This partially unrolls small loops which are often

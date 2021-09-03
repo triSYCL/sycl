@@ -7,9 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 // Defines the API for the reduction transformational intrinsic functions.
-// (Except the complex-valued total reduction forms of SUM and PRODUCT;
-// the API for those is in complex-reduction.h so that C's _Complex can
-// be used for their return types.)
 
 #ifndef FORTRAN_RUNTIME_REDUCTION_H_
 #define FORTRAN_RUNTIME_REDUCTION_H_
@@ -36,10 +33,10 @@ extern "C" {
 // results in a caller-supplied descriptor, which is assumed to
 // be large enough.
 //
-// Complex-valued SUM and PRODUCT reductions have their API
-// entry points defined in complex-reduction.h; these are C wrappers
-// around C++ implementations so as to keep usage of C's _Complex
-// types out of C++ code.
+// Complex-valued SUM and PRODUCT reductions and complex-valued
+// DOT_PRODUCT have their API entry points defined in complex-reduction.h;
+// these here are C wrappers around C++ implementations so as to keep
+// usage of C's _Complex types out of C++ code.
 
 // SUM()
 
@@ -144,7 +141,37 @@ void RTNAME(CppProductComplex16)(std::complex<long double> &,
 void RTNAME(ProductDim)(Descriptor &result, const Descriptor &array, int dim,
     const char *source, int line, const Descriptor *mask = nullptr);
 
-// IPARITY()
+// IALL, IANY, IPARITY
+std::int8_t RTNAME(IAll1)(const Descriptor &, const char *source, int line,
+    int dim = 0, const Descriptor *mask = nullptr);
+std::int16_t RTNAME(IAll2)(const Descriptor &, const char *source, int line,
+    int dim = 0, const Descriptor *mask = nullptr);
+std::int32_t RTNAME(IAll4)(const Descriptor &, const char *source, int line,
+    int dim = 0, const Descriptor *mask = nullptr);
+std::int64_t RTNAME(IAll8)(const Descriptor &, const char *source, int line,
+    int dim = 0, const Descriptor *mask = nullptr);
+#ifdef __SIZEOF_INT128__
+common::int128_t RTNAME(IAll16)(const Descriptor &, const char *source,
+    int line, int dim = 0, const Descriptor *mask = nullptr);
+#endif
+void RTNAME(IAllDim)(Descriptor &result, const Descriptor &array, int dim,
+    const char *source, int line, const Descriptor *mask = nullptr);
+
+std::int8_t RTNAME(IAny1)(const Descriptor &, const char *source, int line,
+    int dim = 0, const Descriptor *mask = nullptr);
+std::int16_t RTNAME(IAny2)(const Descriptor &, const char *source, int line,
+    int dim = 0, const Descriptor *mask = nullptr);
+std::int32_t RTNAME(IAny4)(const Descriptor &, const char *source, int line,
+    int dim = 0, const Descriptor *mask = nullptr);
+std::int64_t RTNAME(IAny8)(const Descriptor &, const char *source, int line,
+    int dim = 0, const Descriptor *mask = nullptr);
+#ifdef __SIZEOF_INT128__
+common::int128_t RTNAME(IAny16)(const Descriptor &, const char *source,
+    int line, int dim = 0, const Descriptor *mask = nullptr);
+#endif
+void RTNAME(IAnyDim)(Descriptor &result, const Descriptor &array, int dim,
+    const char *source, int line, const Descriptor *mask = nullptr);
+
 std::int8_t RTNAME(IParity1)(const Descriptor &, const char *source, int line,
     int dim = 0, const Descriptor *mask = nullptr);
 std::int16_t RTNAME(IParity2)(const Descriptor &, const char *source, int line,
@@ -217,10 +244,10 @@ std::int16_t RTNAME(MinvalInteger2)(const Descriptor &, const char *source,
     int line, int dim = 0, const Descriptor *mask = nullptr);
 std::int32_t RTNAME(MinvalInteger4)(const Descriptor &, const char *source,
     int line, int dim = 0, const Descriptor *mask = nullptr);
-std::int64_t RTNAME(MivalInteger8)(const Descriptor &, const char *source,
+std::int64_t RTNAME(MinvalInteger8)(const Descriptor &, const char *source,
     int line, int dim = 0, const Descriptor *mask = nullptr);
 #ifdef __SIZEOF_INT128__
-common::int128_t RTNAME(MivalInteger16)(const Descriptor &, const char *source,
+common::int128_t RTNAME(MinvalInteger16)(const Descriptor &, const char *source,
     int line, int dim = 0, const Descriptor *mask = nullptr);
 #endif
 float RTNAME(MinvalReal2)(const Descriptor &, const char *source, int line,
@@ -243,6 +270,22 @@ void RTNAME(MaxvalDim)(Descriptor &, const Descriptor &, int dim,
 void RTNAME(MinvalDim)(Descriptor &, const Descriptor &, int dim,
     const char *source, int line, const Descriptor *mask = nullptr);
 
+// NORM2
+float RTNAME(Norm2_2)(const Descriptor &, const char *source, int line,
+    int dim = 0, const Descriptor *mask = nullptr);
+float RTNAME(Norm2_3)(const Descriptor &, const char *source, int line,
+    int dim = 0, const Descriptor *mask = nullptr);
+float RTNAME(Norm2_4)(const Descriptor &, const char *source, int line,
+    int dim = 0, const Descriptor *mask = nullptr);
+double RTNAME(Norm2_8)(const Descriptor &, const char *source, int line,
+    int dim = 0, const Descriptor *mask = nullptr);
+long double RTNAME(Norm2_10)(const Descriptor &, const char *source, int line,
+    int dim = 0, const Descriptor *mask = nullptr);
+long double RTNAME(Norm2_16)(const Descriptor &, const char *source, int line,
+    int dim = 0, const Descriptor *mask = nullptr);
+void RTNAME(Norm2Dim)(Descriptor &, const Descriptor &, int dim,
+    const char *source, int line, const Descriptor *mask = nullptr);
+
 // ALL, ANY, COUNT, & PARITY logical reductions
 bool RTNAME(All)(const Descriptor &, const char *source, int line, int dim = 0);
 void RTNAME(AllDim)(Descriptor &result, const Descriptor &, int dim,
@@ -258,6 +301,48 @@ bool RTNAME(Parity)(
     const Descriptor &, const char *source, int line, int dim = 0);
 void RTNAME(ParityDim)(Descriptor &result, const Descriptor &, int dim,
     const char *source, int line);
+
+// DOT_PRODUCT
+std::int8_t RTNAME(DotProductInteger1)(const Descriptor &, const Descriptor &,
+    const char *source = nullptr, int line = 0);
+std::int16_t RTNAME(DotProductInteger2)(const Descriptor &, const Descriptor &,
+    const char *source = nullptr, int line = 0);
+std::int32_t RTNAME(DotProductInteger4)(const Descriptor &, const Descriptor &,
+    const char *source = nullptr, int line = 0);
+std::int64_t RTNAME(DotProductInteger8)(const Descriptor &, const Descriptor &,
+    const char *source = nullptr, int line = 0);
+#ifdef __SIZEOF_INT128__
+common::int128_t RTNAME(DotProductInteger16)(const Descriptor &,
+    const Descriptor &, const char *source = nullptr, int line = 0);
+#endif
+float RTNAME(DotProductReal2)(const Descriptor &, const Descriptor &,
+    const char *source = nullptr, int line = 0);
+float RTNAME(DotProductReal3)(const Descriptor &, const Descriptor &,
+    const char *source = nullptr, int line = 0);
+float RTNAME(DotProductReal4)(const Descriptor &, const Descriptor &,
+    const char *source = nullptr, int line = 0);
+double RTNAME(DotProductReal8)(const Descriptor &, const Descriptor &,
+    const char *source = nullptr, int line = 0);
+long double RTNAME(DotProductReal10)(const Descriptor &, const Descriptor &,
+    const char *source = nullptr, int line = 0);
+long double RTNAME(DotProductReal16)(const Descriptor &, const Descriptor &,
+    const char *source = nullptr, int line = 0);
+void RTNAME(CppDotProductComplex2)(std::complex<float> &, const Descriptor &,
+    const Descriptor &, const char *source = nullptr, int line = 0);
+void RTNAME(CppDotProductComplex3)(std::complex<float> &, const Descriptor &,
+    const Descriptor &, const char *source = nullptr, int line = 0);
+void RTNAME(CppDotProductComplex4)(std::complex<float> &, const Descriptor &,
+    const Descriptor &, const char *source = nullptr, int line = 0);
+void RTNAME(CppDotProductComplex8)(std::complex<double> &, const Descriptor &,
+    const Descriptor &, const char *source = nullptr, int line = 0);
+void RTNAME(CppDotProductComplex10)(std::complex<long double> &,
+    const Descriptor &, const Descriptor &, const char *source = nullptr,
+    int line = 0);
+void RTNAME(CppDotProductComplex16)(std::complex<long double> &,
+    const Descriptor &, const Descriptor &, const char *source = nullptr,
+    int line = 0);
+bool RTNAME(DotProductLogical)(const Descriptor &, const Descriptor &,
+    const char *source = nullptr, int line = 0);
 
 } // extern "C"
 } // namespace Fortran::runtime

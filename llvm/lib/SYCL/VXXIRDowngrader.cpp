@@ -139,6 +139,25 @@ struct VXXIRDowngrader : public ModulePass {
     }
   }
 
+  /// At this point in the pipeline Annotations intrinsic have all been
+  /// converted into what they need to be. But they can still be present and
+  /// have pointer on pointer as arguments which v++ can't deal with.
+  void removeAnnotations(Module &M) {
+    SmallVector<Instruction *, 16> ToRemove;
+    for (Function &F : M.functions())
+      if (F.getIntrinsicID() == Intrinsic::annotation ||
+          F.getIntrinsicID() == Intrinsic::ptr_annotation ||
+          F.getIntrinsicID() == Intrinsic::var_annotation)
+        for (User *U : F.users())
+          if (auto *I = dyn_cast<Instruction>(U))
+            ToRemove.push_back(I);
+    for (Instruction *I : ToRemove)
+      I->eraseFromParent();
+    GlobalVariable *Annot = M.getGlobalVariable("llvm.global.annotations");
+    if (Annot)
+      Annot->eraseFromParent();
+  }
+
   /// Removes nofree bitcode function attribute that is applied to
   /// functions to indicate that they do not deallocate memory.
   /// It was added in LLVM-9 (D49165), so as v++ catches up it can be removed
@@ -339,6 +358,7 @@ struct VXXIRDowngrader : public ModulePass {
     removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
                          Attribute::ImmArg, Attribute::NoSync,
                          Attribute::MustProgress, Attribute::NoUndef});
+    removeAnnotations(M);
     renameBasicBlocks(M);
     removeFreezeInst(M);
     removeFNegInst(M);

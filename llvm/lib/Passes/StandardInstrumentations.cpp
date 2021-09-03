@@ -20,6 +20,7 @@
 #include "llvm/Analysis/LazyCallGraph.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/IR/Function.h"
+#include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/PassInstrumentation.h"
 #include "llvm/IR/PassManager.h"
@@ -43,13 +44,6 @@ cl::opt<bool> PreservedCFGCheckerInstrumentation::VerifyPreservedCFG(
 #else
     cl::init(true));
 #endif
-
-// FIXME: Change `-debug-pass-manager` from boolean to enum type. Similar to
-// `-debug-pass` in legacy PM.
-static cl::opt<bool>
-    DebugPMVerbose("debug-pass-manager-verbose", cl::Hidden, cl::init(false),
-                   cl::desc("Print all pass management debugging information. "
-                            "`-debug-pass-manager` must also be specified"));
 
 // An option that prints out the IR after passes, similar to
 // -print-after-all except that it only prints the IR after passes that
@@ -138,8 +132,8 @@ std::string doSystemDiff(StringRef Before, StringRef After,
   // Store the 2 bodies into temporary files and call diff on them
   // to get the body of the node.
   const unsigned NumFiles = 3;
-  std::string FileName[NumFiles];
-  int FD[NumFiles]{-1, -1, -1};
+  static std::string FileName[NumFiles];
+  static int FD[NumFiles]{-1, -1, -1};
   for (unsigned I = 0; I < NumFiles; ++I) {
     if (FD[I] == -1) {
       SmallVector<char, 200> SV;
@@ -653,13 +647,12 @@ void ChangedIRComparer::compare(Any IR, StringRef Prefix, StringRef PassID,
 
   ChangedIRData::report(
       Before, After, [&](const ChangedFuncData *B, const ChangedFuncData *A) {
+        assert((B || A) && "Both functions cannot be missing.");
         ChangedFuncData Missing;
         if (!B)
           B = &Missing;
         else if (!A)
           A = &Missing;
-        assert(B != &Missing && A != &Missing &&
-               "Both functions cannot be missing.");
         handleFunctionCompare(Name, Prefix, PassID, true, *B, *A);
       });
 }
@@ -715,7 +708,6 @@ PrintIRInstrumentation::~PrintIRInstrumentation() {
 }
 
 void PrintIRInstrumentation::pushModuleDesc(StringRef PassID, Any IR) {
-  assert(StoreModuleDesc);
   const Module *M = unwrapModule(IR);
   ModuleDescStack.emplace_back(M, getIRName(IR), PassID);
 }
@@ -736,7 +728,7 @@ void PrintIRInstrumentation::printBeforePass(StringRef PassID, Any IR) {
   // Note: here we rely on a fact that we do not change modules while
   // traversing the pipeline, so the latest captured module is good
   // for all print operations that has not happen yet.
-  if (StoreModuleDesc && shouldPrintAfterPass(PassID))
+  if (shouldPrintAfterPass(PassID))
     pushModuleDesc(PassID, IR);
 
   if (!shouldPrintBeforePass(PassID))
@@ -757,25 +749,22 @@ void PrintIRInstrumentation::printAfterPass(StringRef PassID, Any IR) {
   if (!shouldPrintAfterPass(PassID))
     return;
 
-  if (StoreModuleDesc) {
-    const Module *M;
-    std::string IRName;
-    StringRef StoredPassID;
-    std::tie(M, IRName, StoredPassID) = popModuleDesc(PassID);
-    assert(StoredPassID == PassID && "mismatched PassID");
-  }
+  const Module *M;
+  std::string IRName;
+  StringRef StoredPassID;
+  std::tie(M, IRName, StoredPassID) = popModuleDesc(PassID);
+  assert(StoredPassID == PassID && "mismatched PassID");
 
   if (!shouldPrintIR(IR))
     return;
 
-  dbgs() << "*** IR Dump After " << PassID << " on " << getIRName(IR)
-         << " ***\n";
+  dbgs() << "*** IR Dump After " << PassID << " on " << IRName << " ***\n";
   unwrapAndPrint(dbgs(), IR);
 }
 
 void PrintIRInstrumentation::printAfterPassInvalidated(StringRef PassID) {
   StringRef PassName = PIC->getPassNameForClassName(PassID);
-  if (!StoreModuleDesc || !shouldPrintAfterPass(PassName))
+  if (!shouldPrintAfterPass(PassName))
     return;
 
   if (isIgnored(PassID))
@@ -819,8 +808,7 @@ void PrintIRInstrumentation::registerCallbacks(
 
   // BeforePass callback is not just for printing, it also saves a Module
   // for later use in AfterPassInvalidated.
-  StoreModuleDesc = forcePrintModuleIR() && shouldPrintAfterSomePass();
-  if (shouldPrintBeforeSomePass() || StoreModuleDesc)
+  if (shouldPrintBeforeSomePass() || shouldPrintAfterSomePass())
     PIC.registerBeforeNonSkippedPassCallback(
         [this](StringRef P, Any IR) { this->printBeforePass(P, IR); });
 
@@ -866,35 +854,73 @@ void OptBisectInstrumentation::registerCallbacks(
   });
 }
 
+raw_ostream &PrintPassInstrumentation::print() {
+  if (Opts.Indent) {
+    assert(Indent >= 0);
+    dbgs().indent(Indent);
+  }
+  return dbgs();
+}
+
 void PrintPassInstrumentation::registerCallbacks(
     PassInstrumentationCallbacks &PIC) {
-  if (!DebugLogging)
+  if (!Enabled)
     return;
 
-  std::vector<StringRef> SpecialPasses = {"PassManager"};
-  if (!DebugPMVerbose)
+  std::vector<StringRef> SpecialPasses;
+  if (!Opts.Verbose) {
+    SpecialPasses.emplace_back("PassManager");
     SpecialPasses.emplace_back("PassAdaptor");
+  }
 
   PIC.registerBeforeSkippedPassCallback(
-      [SpecialPasses](StringRef PassID, Any IR) {
+      [this, SpecialPasses](StringRef PassID, Any IR) {
         assert(!isSpecialPass(PassID, SpecialPasses) &&
                "Unexpectedly skipping special pass");
 
-        dbgs() << "Skipping pass: " << PassID << " on " << getIRName(IR)
-               << "\n";
+        print() << "Skipping pass: " << PassID << " on " << getIRName(IR)
+                << "\n";
       });
+  PIC.registerBeforeNonSkippedPassCallback([this, SpecialPasses](
+                                               StringRef PassID, Any IR) {
+    if (isSpecialPass(PassID, SpecialPasses))
+      return;
 
-  PIC.registerBeforeNonSkippedPassCallback(
-      [SpecialPasses](StringRef PassID, Any IR) {
+    print() << "Running pass: " << PassID << " on " << getIRName(IR) << "\n";
+    Indent += 2;
+  });
+  PIC.registerAfterPassCallback(
+      [this, SpecialPasses](StringRef PassID, Any IR,
+                            const PreservedAnalyses &) {
         if (isSpecialPass(PassID, SpecialPasses))
           return;
 
-        dbgs() << "Running pass: " << PassID << " on " << getIRName(IR) << "\n";
+        Indent -= 2;
+      });
+  PIC.registerAfterPassInvalidatedCallback(
+      [this, SpecialPasses](StringRef PassID, Any IR) {
+        if (isSpecialPass(PassID, SpecialPasses))
+          return;
+
+        Indent -= 2;
       });
 
-  PIC.registerBeforeAnalysisCallback([](StringRef PassID, Any IR) {
-    dbgs() << "Running analysis: " << PassID << " on " << getIRName(IR) << "\n";
-  });
+  if (!Opts.SkipAnalyses) {
+    PIC.registerBeforeAnalysisCallback([this](StringRef PassID, Any IR) {
+      print() << "Running analysis: " << PassID << " on " << getIRName(IR)
+              << "\n";
+      Indent += 2;
+    });
+    PIC.registerAfterAnalysisCallback(
+        [this](StringRef PassID, Any IR) { Indent -= 2; });
+    PIC.registerAnalysisInvalidatedCallback([this](StringRef PassID, Any IR) {
+      print() << "Invalidating analysis: " << PassID << " on " << getIRName(IR)
+              << "\n";
+    });
+    PIC.registerAnalysesClearedCallback([this](StringRef IRName) {
+      print() << "Clearing all analysis results for: " << IRName << "\n";
+    });
+  }
 }
 
 PreservedCFGCheckerInstrumentation::CFG::CFG(const Function *F,
@@ -923,7 +949,7 @@ static void printBBName(raw_ostream &out, const BasicBlock *BB) {
     return;
   }
 
-  if (BB == &BB->getParent()->getEntryBlock()) {
+  if (BB->isEntryBlock()) {
     out << "entry"
         << "<" << BB << ">";
     return;
@@ -1054,7 +1080,9 @@ void PreservedCFGCheckerInstrumentation::registerCallbacks(
 
   PIC.registerBeforeNonSkippedPassCallback(
       [this, &FAM](StringRef P, Any IR) {
+#ifdef LLVM_ENABLE_ABI_BREAKING_CHECKS
         assert(&PassStack.emplace_back(P));
+#endif
         (void)this;
         if (!any_isa<const Function *>(IR))
           return;
@@ -1066,16 +1094,20 @@ void PreservedCFGCheckerInstrumentation::registerCallbacks(
 
   PIC.registerAfterPassInvalidatedCallback(
       [this](StringRef P, const PreservedAnalyses &PassPA) {
+#ifdef LLVM_ENABLE_ABI_BREAKING_CHECKS
         assert(PassStack.pop_back_val() == P &&
                "Before and After callbacks must correspond");
+#endif
         (void)this;
       });
 
   PIC.registerAfterPassCallback([this, &FAM,
                                  checkCFG](StringRef P, Any IR,
                                            const PreservedAnalyses &PassPA) {
+#ifdef LLVM_ENABLE_ABI_BREAKING_CHECKS
     assert(PassStack.pop_back_val() == P &&
            "Before and After callbacks must correspond");
+#endif
     (void)this;
 
     if (!any_isa<const Function *>(IR))
@@ -1180,9 +1212,9 @@ void InLineChangePrinter::registerCallbacks(PassInstrumentationCallbacks &PIC) {
     TextChangeReporter<ChangedIRData>::registerRequiredCallbacks(PIC);
 }
 
-StandardInstrumentations::StandardInstrumentations(bool DebugLogging,
-                                                   bool VerifyEach)
-    : PrintPass(DebugLogging), OptNone(DebugLogging),
+StandardInstrumentations::StandardInstrumentations(
+    bool DebugLogging, bool VerifyEach, PrintPassOptions PrintPassOpts)
+    : PrintPass(DebugLogging, PrintPassOpts), OptNone(DebugLogging),
       PrintChangedIR(PrintChanged == ChangePrinter::PrintChangedVerbose),
       PrintChangedDiff(
           PrintChanged == ChangePrinter::PrintChangedDiffVerbose ||

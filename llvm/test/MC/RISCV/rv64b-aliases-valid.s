@@ -3,7 +3,7 @@
 # RUN: llvm-mc %s  -triple=riscv64 -mattr=+experimental-b \
 # RUN:     | FileCheck -check-prefixes=CHECK-S-OBJ %s
 # RUN: llvm-mc -filetype=obj -triple riscv64 -mattr=+experimental-b < %s \
-# RUN:     | llvm-objdump -d -r --riscv-no-aliases --mattr=+experimental-b - \
+# RUN:     | llvm-objdump -d -r -M no-aliases --mattr=+experimental-b - \
 # RUN:     | FileCheck -check-prefixes=CHECK-S-OBJ-NOALIAS %s
 # RUN: llvm-mc -filetype=obj -triple riscv64 -mattr=+experimental-b < %s \
 # RUN:     | llvm-objdump -d -r --mattr=+experimental-b - \
@@ -362,3 +362,17 @@ grevw x5, x6, 13
 # CHECK-S-OBJ-NOALIAS: gorciw t0, t1, 13
 # CHECK-S-OBJ: gorciw t0, t1, 13
 gorcw x5, x6, 13
+
+# CHECK-S-OBJ-NOALIAS: addi t1, zero, -2
+# CHECK-S-OBJ-NOALIAS-NEXT: add.uw t1, t1, zero
+# CHECK-S-OBJ: addi t1, zero, -2
+# CHECK-S-OBJ-NEXT: zext.w t1, t1
+li x6, 0xfffffffe
+
+# CHECK-S-OBJ-NOALIAS: lui t2, 699051
+# CHECK-S-OBJ-NOALIAS-NEXT: addiw t2, t2, -1366
+# CHECK-S-OBJ-NOALIAS-NEXT: add.uw t2, t2, zero
+# CHECK-S-OBJ: lui t2, 699051
+# CHECK-S-OBJ-NEXT: addiw t2, t2, -1366
+# CHECK-S-OBJ-NEXT: zext.w t2, t2
+li x7, 0xaaaaaaaa

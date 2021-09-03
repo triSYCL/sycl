@@ -25,8 +25,8 @@
 #include "llvm/IR/Value.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/TypeSize.h"
+#include "llvm/Support/raw_ostream.h"
 #include <cassert>
 #include <utility>
 
@@ -58,6 +58,12 @@ Type *Type::getPrimitiveType(LLVMContext &C, TypeID IDNumber) {
 
 bool Type::isIntegerTy(unsigned Bitwidth) const {
   return isIntegerTy() && cast<IntegerType>(this)->getBitWidth() == Bitwidth;
+}
+
+bool Type::isOpaquePointerTy() const {
+  if (auto *PTy = dyn_cast<PointerType>(this))
+    return PTy->isOpaque();
+  return false;
 }
 
 bool Type::canLosslesslyBitCastTo(Type *Ty) const {
@@ -690,12 +696,30 @@ PointerType *PointerType::get(Type *EltTy, unsigned AddressSpace) {
 
   LLVMContextImpl *CImpl = EltTy->getContext().pImpl;
 
+  // Create opaque pointer for pointer to opaque pointer.
+  if (CImpl->ForceOpaquePointers || EltTy->isOpaquePointerTy())
+    return get(EltTy->getContext(), AddressSpace);
+
   // Since AddressSpace #0 is the common case, we special case it.
   PointerType *&Entry = AddressSpace == 0 ? CImpl->PointerTypes[EltTy]
      : CImpl->ASPointerTypes[std::make_pair(EltTy, AddressSpace)];
 
   if (!Entry)
     Entry = new (CImpl->Alloc) PointerType(EltTy, AddressSpace);
+  return Entry;
+}
+
+PointerType *PointerType::get(LLVMContext &C, unsigned AddressSpace) {
+  LLVMContextImpl *CImpl = C.pImpl;
+
+  // Since AddressSpace #0 is the common case, we special case it.
+  PointerType *&Entry =
+      AddressSpace == 0
+          ? CImpl->PointerTypes[nullptr]
+          : CImpl->ASPointerTypes[std::make_pair(nullptr, AddressSpace)];
+
+  if (!Entry)
+    Entry = new (CImpl->Alloc) PointerType(C, AddressSpace);
   return Entry;
 }
 
@@ -706,8 +730,13 @@ PointerType::PointerType(Type *E, unsigned AddrSpace)
   setSubclassData(AddrSpace);
 }
 
-PointerType *Type::getPointerTo(unsigned addrs) const {
-  return PointerType::get(const_cast<Type*>(this), addrs);
+PointerType::PointerType(LLVMContext &C, unsigned AddrSpace)
+    : Type(C, PointerTyID), PointeeTy(nullptr) {
+  setSubclassData(AddrSpace);
+}
+
+PointerType *Type::getPointerTo(unsigned AddrSpace) const {
+  return PointerType::get(const_cast<Type*>(this), AddrSpace);
 }
 
 bool PointerType::isValidElementType(Type *ElemTy) {

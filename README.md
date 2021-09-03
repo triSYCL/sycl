@@ -1,6 +1,6 @@
 # SYCL for Vitis 2021.1: experimental melting pot with Intel oneAPI DPC++ SYCL and triSYCL for Xilinx FPGA
 
-## Introduction
+Intel staging area for llvm.org contribution. Home for Intel LLVM-based projects:
 
 This project is about assessing the viability of unifying 2 of the
 current open-source implementations of the SYCL standard
