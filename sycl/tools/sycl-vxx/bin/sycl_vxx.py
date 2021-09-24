@@ -225,7 +225,7 @@ class CompilationDriver:
     def _get_compile_kernel_cmd_out(self, kernel):
         """Create command to compile kernel"""
         vxx = self.vitis_bin_dir / "v++"
-        comp_config = os.envorin['XILINX_VXX_COMP_CONFIG']
+        comp_config = environ.get('SYCL_VXX_COMP_CONFIG')
         kernel_output = self.tmpdir / f"{kernel['name']}.xo"
         command = [
             vxx, "--target", self.vitis_mode,
@@ -238,7 +238,7 @@ class CompilationDriver:
             self.vpp_llvm_input
         ]
         if comp_config is not None and path.isfile(comp_config):
-        	command.extend("--config", comp_config)
+            command.extend(("--config", comp_config))
         if 'extra_args' in kernel and kernel['extra_args'].strip():
             # User provided kernel arguments can contain many spaces,
             # leading split to give empty string that are incorrectly
@@ -258,7 +258,7 @@ class CompilationDriver:
     def _link_kernels(self):
         """Call v++ to link all kernel in one .xclbin"""
         vpp = self.vitis_bin_dir / "v++"
-        link_config = os.environ['XILINX_VXX_LINK_CONFIG']
+        link_config = environ.get('SYCL_VXX_LINK_CONFIG')
         command = [
             vpp, "--target", self.vitis_mode,
             "--advanced.param", "compiler.hlsDataflowStrictMode=off",
@@ -269,7 +269,7 @@ class CompilationDriver:
             "--save-temps", "-l", "-o", self.outpath
         ]
         if link_config is not None and path.isfile(link_config):
-        	command.extend("--config", link_config)
+            command.extend(("--config", link_config))
         for kernelprop in self.kernel_properties['kernels']:
             targets = dict()
             for mem_assign in kernelprop["bundle_hw_mapping"]:
