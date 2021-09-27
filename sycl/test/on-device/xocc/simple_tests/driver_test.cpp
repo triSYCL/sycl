@@ -6,6 +6,7 @@
 // CHECK-PIPELINE_SW_EMU-NEXT:{{.*}}sycl_vxx.py" {{.*}} "sw_emu"
 // CHECK-PIPELINE_SW_EMU-NEXT:{{.*}}clang-offload-wrapper"
 // CHECK-PIPELINE_SW_EMU-NEXT:{{.*}}llc"
+// CHECK-PIPELINE_SW_EMU-NEXT:{{.*}}append-file
 // CHECK-PIPELINE_SW_EMU-NEXT:{{.*}}clang-{{.*}}" "-cc1" "-triple"{{.*}} "-fsycl-is-host"
 // CHECK-PIPELINE_SW_EMU-NEXT:{{.*}}ld"
 
@@ -15,6 +16,7 @@
 // CHECK-PIPELINE_HW_EMU-NEXT:{{.*}}sycl_vxx.py" {{.*}} "hw_emu"
 // CHECK-PIPELINE_HW_EMU-NEXT:{{.*}}clang-offload-wrapper"
 // CHECK-PIPELINE_HW_EMU-NEXT:{{.*}}llc"
+// CHECK-PIPELINE_HW_EMU-NEXT:{{.*}}append-file
 // CHECK-PIPELINE_HW_EMU-NEXT:{{.*}}clang-{{.*}}" "-cc1" "-triple"{{.*}} "-fsycl-is-host"
 // CHECK-PIPELINE_HW_EMU-NEXT:{{.*}}ld"
 
@@ -25,5 +27,6 @@
 // CHECK-PIPELINE_HW-NEXT:{{.*}}sycl_vxx.py" {{.*}} "hw"
 // CHECK-PIPELINE_HW-NEXT:{{.*}}clang-offload-wrapper"
 // CHECK-PIPELINE_HW-NEXT:{{.*}}llc"
+// CHECK-PIPELINE_HW-NEXT:{{.*}}append-file
 // CHECK-PIPELINE_HW-NEXT:{{.*}}clang-{{.*}}" "-cc1" "-triple"{{.*}} "-fsycl-is-host"
 // CHECK-PIPELINE_HW-NEXT:{{.*}}ld"

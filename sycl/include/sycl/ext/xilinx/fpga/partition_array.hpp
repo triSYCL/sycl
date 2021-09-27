@@ -21,14 +21,13 @@
 #define SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP
 
 #include "CL/sycl/detail/defines.hpp"
-#include "CL/sycl/xilinx/fpga/opt_decorate_func.hpp"
 
 #include <array>
 #include <cstddef>
 #include <type_traits>
 
 __SYCL_INLINE_NAMESPACE(cl) {
-namespace sycl::xilinx {
+namespace sycl::ext::xilinx {
 
 /** Kind of array partition
 
@@ -233,7 +232,7 @@ struct partition_array {
             // Only use this constructor for a real element-oriented
             // initializer_list we can assign, not for the case
             // partition_array<> a = { some_other_array }
-            typename = detail::enable_if_t<std::is_convertible<SourceBasicType,
+            typename = sycl::detail::enable_if_t<std::is_convertible<SourceBasicType,
                                                             ValueType>::value>>
   constexpr partition_array(std::initializer_list<SourceBasicType> l)
     : partition_array { } {
@@ -262,7 +261,7 @@ struct partition_array {
   }
 };
 
-} // namespace cl::sycl::xilinx
+} // namespace cl::sycl::ext::xilinx
 
 }
 

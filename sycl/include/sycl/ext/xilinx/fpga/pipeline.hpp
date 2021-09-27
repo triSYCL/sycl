@@ -21,11 +21,12 @@
 
 #include "CL/sycl/detail/defines.hpp"
 #include "CL/sycl/detail/property_helper.hpp"
+#include "sycl/ext/xilinx/fpga/kernel_properties.hpp"
 
 __SYCL_INLINE_NAMESPACE(cl) {
 
 namespace sycl {
-namespace xilinx {
+namespace ext::xilinx {
 
 enum struct PipelineStyle : std::uint8_t {
   stall = 0,     ///< Runs only when input data is available otherwise it stalls
@@ -61,12 +62,9 @@ __SYCL_DEVICE_ANNOTATE("xilinx_pipeline", 0, false, PipelineStyle::stall)
 __SYCL_ALWAYS_INLINE void noPipeline(T &&functor) {
   std::forward<T>(functor)();
 }
-} // namespace xilinx
 
-namespace xilinx {
 template <int II = -1, PipelineStyle pipelineType = PipelineStyle::stall>
 auto pipeline_kernel(auto kernel) {
-  using namespace detail::literals;
   using kernelType = std::remove_cvref_t<decltype(kernel)>;
   return detail::KernelDecorator<kernelType, decltype(&kernelType::operator()),
                                  decltype("kernel_pipeline"_cstr), pipelineType,
@@ -74,13 +72,12 @@ auto pipeline_kernel(auto kernel) {
 }
 
 auto unpipeline_kernel(auto kernel) {
-  using namespace detail::literals;
   using kernelType = std::remove_cvref_t<decltype(kernel)>;
   return detail::KernelDecorator<kernelType, decltype(&kernelType::operator()),
                                  decltype("kernel_pipeline"_cstr), 0, 0>{
       kernel};
 }
-} // namespace xilinx
+} // namespace ext::xilinx
 } // namespace sycl
 
 } // __SYCL_INLINE_NAMESPACE(cl)

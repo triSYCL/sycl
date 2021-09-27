@@ -330,13 +330,15 @@ else:
     if getDeviceCount("gpu", "cuda")[1]:
         lit_config.note("found secondary cuda target")
         config.available_features.add("has_secondary_cuda")
-    lit_config.note("XOCC target: {}".format(vxx_target))
+    lit_config.note(f"XOCC target: {vxx_target}")
     required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]
     has_error=False
     config.available_features.add("xocc")
     for feature in split_target(vxx_target):
         config.available_features.add(feature) 
     config.available_features.add(vxx_target)
+    feat_list = ",".join(config.available_features)
+    lit_config.note(f"Features: {feat_list}")
     pkg_opencv4 = subprocess.run(["pkg-config", "--libs", "--cflags", "opencv4"], stdout=subprocess.PIPE)
     has_opencv4 = not pkg_opencv4.returncode
     lit_config.note("has opencv4: {}".format(has_opencv4))

@@ -10,12 +10,12 @@
 #define SYCL_XILINX_FPGA_MEMORY_PROPERTIES_HPP
 
 #include "CL/sycl/detail/defines.hpp"
-#include "CL/sycl/detail/property_helper.hpp"
 #include "CL/sycl/properties/accessor_properties.hpp"
 
 __SYCL_INLINE_NAMESPACE(cl) {
 
 namespace sycl {
+namespace ext {
 namespace xilinx {
 namespace property {
 
@@ -32,20 +32,21 @@ struct ddr_bank {
 } // namespace property
 
 template <typename... Ts>
-using accessor_property_list = sycl::ONEAPI::accessor_property_list<Ts...>;
+using accessor_property_list = sycl::ext::oneapi::accessor_property_list<Ts...>;
 
 template <int A> inline constexpr property::ddr_bank::instance<A> ddr_bank;
 
 } // namespace xilinx
 
-namespace ONEAPI {
+namespace oneapi {
 template <>
 struct is_compile_time_property<xilinx::property::ddr_bank> : std::true_type {};
-} // namespace ONEAPI
+} // namespace oneapi
+} // namespace ext
 
 namespace detail {
 template <int I>
-struct IsCompileTimePropertyInstance<xilinx::property::ddr_bank::instance<I>>
+struct IsCompileTimePropertyInstance<ext::xilinx::property::ddr_bank::instance<I>>
     : std::true_type {};
 } // namespace detail
 

@@ -123,6 +123,8 @@ public:
   /// This is used to emit bytes in \p Data as sequence of .byte directives.
   virtual void emitRawBytes(StringRef Data);
 
+  virtual void emitConstantPools();
+
   virtual void finish();
 };
 
@@ -165,7 +167,7 @@ public:
 
   virtual void emitThumbSet(MCSymbol *Symbol, const MCExpr *Value);
 
-  void finish() override;
+  void emitConstantPools() override;
 
   /// Reset any state between object emissions, i.e. the equivalent of
   /// MCStreamer's reset method.
@@ -618,6 +620,9 @@ public:
   /// \param Args - Arguments of the LOH.
   virtual void emitLOHDirective(MCLOHType Kind, const MCLOHArgs &Args) {}
 
+  /// Emit a .gnu_attribute directive.
+  virtual void emitGNUAttribute(unsigned Tag, unsigned Value) {}
+
   /// Emit a common symbol.
   ///
   /// \param Symbol - The common symbol to emit.
@@ -851,6 +856,10 @@ public:
   /// "foo.c"' assembler directive.
   virtual void emitFileDirective(StringRef Filename);
 
+  /// Emit ".file assembler diretive with additioal info.
+  virtual void emitFileDirective(StringRef Filename, StringRef CompilerVerion,
+                                 StringRef TimeStamp, StringRef Description);
+
   /// Emit the "identifiers" directive.  This implements the
   /// '.ident "version foo"' assembler directive.
   virtual void emitIdent(StringRef IdentString) {}
@@ -979,6 +988,8 @@ public:
   virtual void emitCFIDefCfa(int64_t Register, int64_t Offset);
   virtual void emitCFIDefCfaOffset(int64_t Offset);
   virtual void emitCFIDefCfaRegister(int64_t Register);
+  virtual void emitCFILLVMDefAspaceCfa(int64_t Register, int64_t Offset,
+                                       int64_t AddressSpace);
   virtual void emitCFIOffset(int64_t Register, int64_t Offset);
   virtual void emitCFIPersonality(const MCSymbol *Sym, unsigned Encoding);
   virtual void emitCFILsda(const MCSymbol *Sym, unsigned Encoding);

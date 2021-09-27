@@ -589,6 +589,9 @@ public:
   ///
   PHINode *getCanonicalInductionVariable() const;
 
+  /// Get the latch condition instruction.
+  ICmpInst *getLatchCmpInst() const;
+
   /// Obtain the unique incoming and back edge. Return false if they are
   /// non-unique or the loop is dead; otherwise, return true.
   bool getIncomingAndBackEdge(BasicBlock *&Incoming,
@@ -1291,6 +1294,33 @@ MDNode *findOptionMDForLoopID(MDNode *LoopID, StringRef Name);
 /// following operands are the metadata's values. If no metadata with @p Name is
 /// found, return nullptr.
 MDNode *findOptionMDForLoop(const Loop *TheLoop, StringRef Name);
+
+Optional<bool> getOptionalBoolLoopAttribute(const Loop *TheLoop,
+                                            StringRef Name);
+  
+/// Returns true if Name is applied to TheLoop and enabled.
+bool getBooleanLoopAttribute(const Loop *TheLoop, StringRef Name);
+
+/// Find named metadata for a loop with an integer value.
+llvm::Optional<int>
+getOptionalIntLoopAttribute(const Loop *TheLoop, StringRef Name);
+
+/// Find string metadata for loop
+///
+/// If it has a value (e.g. {"llvm.distribute", 1} return the value as an
+/// operand or null otherwise.  If the string metadata is not found return
+/// Optional's not-a-value.
+Optional<const MDOperand *> findStringMetadataForLoop(const Loop *TheLoop,
+                                                      StringRef Name);
+
+/// Look for the loop attribute that requires progress within the loop.
+/// Note: Most consumers probably want "isMustProgress" which checks
+/// the containing function attribute too.
+bool hasMustProgress(const Loop *L);
+
+/// Return true if this loop can be assumed to make progress.  (i.e. can't
+/// be infinite without side effects without also being undefined)
+bool isMustProgress(const Loop *L);
 
 /// Return whether an MDNode might represent an access group.
 ///

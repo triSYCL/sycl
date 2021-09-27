@@ -21,14 +21,13 @@
 
 #include "CL/sycl/detail/defines.hpp"
 #include "CL/sycl/detail/property_helper.hpp"
+#include "sycl/ext/xilinx/fpga/kernel_properties.hpp"
 
 __SYCL_INLINE_NAMESPACE(cl) {
 
-namespace sycl {
-namespace xilinx {
+namespace sycl::ext::xilinx {
 
 template <typename... Params> auto kernel_param(auto kernel, Params...) {
-  using namespace detail::literals;
   using kernelType = std::remove_cvref_t<decltype(kernel)>;
   using concat_type = detail::concat_t<detail::cstr<char, ' '>, Params...>;
   using concatenated_strpack = detail::StrPacker<concat_type>;
@@ -39,7 +38,6 @@ template <typename... Params> auto kernel_param(auto kernel, Params...) {
 
 template <typename CharT, CharT... charpack> struct KernelArgumentDecorator {
   auto operator()(auto kernel) const {
-    using namespace detail::literals;
     using kernelType = std::remove_cvref_t<decltype(kernel)>;
     using argument = detail::StrPacker<detail::cstr<CharT, charpack...>>;
     return detail::KernelDecorator<
@@ -62,8 +60,7 @@ operator"" _vitis_option() noexcept {
 
 #pragma clang diagnostic pop
 } // namespace literals
-} // namespace xilinx
-} // namespace sycl
+} // namespace sycl::ext::xilinx
 
 } // __SYCL_INLINE_NAMESPACE(cl)
 

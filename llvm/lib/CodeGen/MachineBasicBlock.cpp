@@ -21,6 +21,7 @@
 #include "llvm/CodeGen/MachineRegisterInfo.h"
 #include "llvm/CodeGen/SlotIndexes.h"
 #include "llvm/CodeGen/TargetInstrInfo.h"
+#include "llvm/CodeGen/TargetLowering.h"
 #include "llvm/CodeGen/TargetRegisterInfo.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/Config/llvm-config.h"
@@ -900,32 +901,6 @@ MachineBasicBlock::transferSuccessorsAndUpdatePHIs(MachineBasicBlock *FromMBB) {
   normalizeSuccProbs();
 }
 
-/// A block emptied (i.e., with all instructions moved out of it) won't be
-/// sampled at run time. In such cases, AutoFDO will be informed of zero samples
-/// collected for the block. This is not accurate and could lead to misleading
-/// weights assigned for the block. A way to mitigate that is to treat such
-/// block as having unknown counts in the AutoFDO profile loader and allow the
-/// counts inference tool a chance to calculate a relatively reasonable weight
-/// for it. This can be done by moving all pseudo probes in the emptied block
-/// i.e, /c this, to before /c ToMBB and tag them dangling. Note that this is
-/// not needed for dead blocks which really have a zero weight. It's per
-/// transforms to decide whether to call this function or not.
-void MachineBasicBlock::moveAndDanglePseudoProbes(MachineBasicBlock *ToMBB) {
-  SmallVector<MachineInstr *, 4> ToBeMoved;
-  for (MachineInstr &MI : instrs()) {
-    if (MI.isPseudoProbe()) {
-      MI.addPseudoProbeAttribute(PseudoProbeAttributes::Dangling);
-      ToBeMoved.push_back(&MI);
-    }
-  }
-
-  MachineBasicBlock::iterator I = ToMBB->getFirstTerminator();
-  for (MachineInstr *MI : ToBeMoved) {
-    MI->removeFromParent();
-    ToMBB->insert(I, MI);
-  }
-}
-
 bool MachineBasicBlock::isPredecessor(const MachineBasicBlock *MBB) const {
   return is_contained(predecessors(), MBB);
 }
@@ -1627,6 +1602,23 @@ MachineBasicBlock::livein_iterator MachineBasicBlock::livein_begin() const {
       MachineFunctionProperties::Property::TracksLiveness) &&
       "Liveness information is accurate");
   return LiveIns.begin();
+}
+
+MachineBasicBlock::liveout_iterator MachineBasicBlock::liveout_begin() const {
+  const MachineFunction &MF = *getParent();
+  assert(MF.getProperties().hasProperty(
+      MachineFunctionProperties::Property::TracksLiveness) &&
+      "Liveness information is accurate");
+
+  const TargetLowering &TLI = *MF.getSubtarget().getTargetLowering();
+  MCPhysReg ExceptionPointer = 0, ExceptionSelector = 0;
+  if (MF.getFunction().hasPersonalityFn()) {
+    auto PersonalityFn = MF.getFunction().getPersonalityFn();
+    ExceptionPointer = TLI.getExceptionPointerRegister(PersonalityFn);
+    ExceptionSelector = TLI.getExceptionSelectorRegister(PersonalityFn);
+  }
+
+  return liveout_iterator(*this, ExceptionPointer, ExceptionSelector, false);
 }
 
 const MBBSectionID MBBSectionID::ColdSectionID(MBBSectionID::SectionType::Cold);

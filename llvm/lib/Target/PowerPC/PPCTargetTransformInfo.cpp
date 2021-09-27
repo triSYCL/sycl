@@ -167,8 +167,8 @@ PPCTTIImpl::instCombineIntrinsic(InstCombiner &IC, IntrinsicInst &II) const {
   return None;
 }
 
-int PPCTTIImpl::getIntImmCost(const APInt &Imm, Type *Ty,
-                              TTI::TargetCostKind CostKind) {
+InstructionCost PPCTTIImpl::getIntImmCost(const APInt &Imm, Type *Ty,
+                                          TTI::TargetCostKind CostKind) {
   if (DisablePPCConstHoist)
     return BaseT::getIntImmCost(Imm, Ty, CostKind);
 
@@ -197,9 +197,9 @@ int PPCTTIImpl::getIntImmCost(const APInt &Imm, Type *Ty,
   return 4 * TTI::TCC_Basic;
 }
 
-int PPCTTIImpl::getIntImmCostIntrin(Intrinsic::ID IID, unsigned Idx,
-                                    const APInt &Imm, Type *Ty,
-                                    TTI::TargetCostKind CostKind) {
+InstructionCost PPCTTIImpl::getIntImmCostIntrin(Intrinsic::ID IID, unsigned Idx,
+                                                const APInt &Imm, Type *Ty,
+                                                TTI::TargetCostKind CostKind) {
   if (DisablePPCConstHoist)
     return BaseT::getIntImmCostIntrin(IID, Idx, Imm, Ty, CostKind);
 
@@ -232,10 +232,10 @@ int PPCTTIImpl::getIntImmCostIntrin(Intrinsic::ID IID, unsigned Idx,
   return PPCTTIImpl::getIntImmCost(Imm, Ty, CostKind);
 }
 
-int PPCTTIImpl::getIntImmCostInst(unsigned Opcode, unsigned Idx,
-                                  const APInt &Imm, Type *Ty,
-                                  TTI::TargetCostKind CostKind,
-                                  Instruction *Inst) {
+InstructionCost PPCTTIImpl::getIntImmCostInst(unsigned Opcode, unsigned Idx,
+                                              const APInt &Imm, Type *Ty,
+                                              TTI::TargetCostKind CostKind,
+                                              Instruction *Inst) {
   if (DisablePPCConstHoist)
     return BaseT::getIntImmCostInst(Opcode, Idx, Imm, Ty, CostKind, Inst);
 
@@ -328,7 +328,8 @@ InstructionCost PPCTTIImpl::getUserCost(const User *U,
 
   if (U->getType()->isVectorTy()) {
     // Instructions that need to be split should cost more.
-    std::pair<int, MVT> LT = TLI->getTypeLegalizationCost(DL, U->getType());
+    std::pair<InstructionCost, MVT> LT =
+        TLI->getTypeLegalizationCost(DL, U->getType());
     return LT.first * BaseT::getUserCost(U, Operands, CostKind);
   }
 
@@ -370,7 +371,7 @@ bool PPCTTIImpl::mightUseCTR(BasicBlock *BB, TargetLibraryInfo *LibInfo,
       InlineAsm::ConstraintInfo &C = CIV[i];
       if (C.Type != InlineAsm::isInput)
         for (unsigned j = 0, je = C.Codes.size(); j < je; ++j)
-          if (StringRef(C.Codes[j]).equals_lower("{ctr}"))
+          if (StringRef(C.Codes[j]).equals_insensitive("{ctr}"))
             return true;
     }
     return false;
@@ -484,6 +485,9 @@ bool PPCTTIImpl::mightUseCTR(BasicBlock *BB, TargetLibraryInfo *LibInfo,
           case Intrinsic::experimental_constrained_sin:
           case Intrinsic::experimental_constrained_cos:
             return true;
+          // There is no corresponding FMA instruction for PPC double double.
+          // Thus, we need to disable CTR loop generation for this type.
+          case Intrinsic::fmuladd:
           case Intrinsic::copysign:
             if (CI->getArgOperand(0)->getType()->getScalarType()->
                 isPPC_FP128Ty())
@@ -786,7 +790,8 @@ bool PPCTTIImpl::isHardwareLoopProfitable(Loop *L, ScalarEvolution &SE,
 }
 
 void PPCTTIImpl::getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
-                                         TTI::UnrollingPreferences &UP) {
+                                         TTI::UnrollingPreferences &UP,
+                                         OptimizationRemarkEmitter *ORE) {
   if (ST->getCPUDirective() == PPC::DIR_A2) {
     // The A2 is in-order with a deep pipeline, and concatenation unrolling
     // helps expose latency-hiding opportunities to the instruction scheduler.
@@ -797,7 +802,7 @@ void PPCTTIImpl::getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
     UP.AllowExpensiveTripCount = true;
   }
 
-  BaseT::getUnrollingPreferences(L, SE, UP);
+  BaseT::getUnrollingPreferences(L, SE, UP, ORE);
 }
 
 void PPCTTIImpl::getPeelingPreferences(Loop *L, ScalarEvolution &SE,
@@ -946,7 +951,7 @@ InstructionCost PPCTTIImpl::vectorCostAdjustment(InstructionCost Cost,
   if (!ST->vectorsUseTwoUnits() || !Ty1->isVectorTy())
     return Cost;
 
-  std::pair<int, MVT> LT1 = TLI->getTypeLegalizationCost(DL, Ty1);
+  std::pair<InstructionCost, MVT> LT1 = TLI->getTypeLegalizationCost(DL, Ty1);
   // If type legalization involves splitting the vector, we don't want to
   // double the cost at every step - only the last step.
   if (LT1.first != 1 || !LT1.second.isVector())
@@ -957,7 +962,7 @@ InstructionCost PPCTTIImpl::vectorCostAdjustment(InstructionCost Cost,
     return Cost;
 
   if (Ty2) {
-    std::pair<int, MVT> LT2 = TLI->getTypeLegalizationCost(DL, Ty2);
+    std::pair<InstructionCost, MVT> LT2 = TLI->getTypeLegalizationCost(DL, Ty2);
     if (LT2.first != 1 || !LT2.second.isVector())
       return Cost;
   }
@@ -988,7 +993,7 @@ InstructionCost PPCTTIImpl::getShuffleCost(TTI::ShuffleKind Kind, Type *Tp,
                                            ArrayRef<int> Mask, int Index,
                                            Type *SubTp) {
   // Legalize the type.
-  std::pair<int, MVT> LT = TLI->getTypeLegalizationCost(DL, Tp);
+  std::pair<InstructionCost, MVT> LT = TLI->getTypeLegalizationCost(DL, Tp);
 
   // PPC, for both Altivec/VSX, support cheap arbitrary permutations
   // (at least in the sense that there need only be one non-loop-invariant
@@ -1113,7 +1118,7 @@ InstructionCost PPCTTIImpl::getMemoryOpCost(unsigned Opcode, Type *Src,
     return BaseT::getMemoryOpCost(Opcode, Src, Alignment, AddressSpace,
                                   CostKind);
   // Legalize the type.
-  std::pair<int, MVT> LT = TLI->getTypeLegalizationCost(DL, Src);
+  std::pair<InstructionCost, MVT> LT = TLI->getTypeLegalizationCost(DL, Src);
   assert((Opcode == Instruction::Load || Opcode == Instruction::Store) &&
          "Invalid Opcode");
 
@@ -1198,7 +1203,7 @@ InstructionCost PPCTTIImpl::getInterleavedMemoryOpCost(
          "Expect a vector type for interleaved memory op");
 
   // Legalize the type.
-  std::pair<int, MVT> LT = TLI->getTypeLegalizationCost(DL, VecTy);
+  std::pair<InstructionCost, MVT> LT = TLI->getTypeLegalizationCost(DL, VecTy);
 
   // Firstly, the cost of load/store operation.
   InstructionCost Cost = getMemoryOpCost(Opcode, VecTy, MaybeAlign(Alignment),
@@ -1218,6 +1223,27 @@ InstructionCost
 PPCTTIImpl::getIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
                                   TTI::TargetCostKind CostKind) {
   return BaseT::getIntrinsicInstrCost(ICA, CostKind);
+}
+
+bool PPCTTIImpl::areFunctionArgsABICompatible(
+    const Function *Caller, const Function *Callee,
+    SmallPtrSetImpl<Argument *> &Args) const {
+
+  // We need to ensure that argument promotion does not
+  // attempt to promote pointers to MMA types (__vector_pair
+  // and __vector_quad) since these types explicitly cannot be
+  // passed as arguments. Both of these types are larger than
+  // the 128-bit Altivec vectors and have a scalar size of 1 bit.
+  if (!BaseT::areFunctionArgsABICompatible(Caller, Callee, Args))
+    return false;
+
+  return llvm::none_of(Args, [](Argument *A) {
+    auto *EltTy = cast<PointerType>(A->getType())->getElementType();
+    if (EltTy->isSized())
+      return (EltTy->isIntOrIntVectorTy(1) &&
+              EltTy->getPrimitiveSizeInBits() > 128);
+    return false;
+  });
 }
 
 bool PPCTTIImpl::canSaveCmp(Loop *L, BranchInst **BI, ScalarEvolution *SE,

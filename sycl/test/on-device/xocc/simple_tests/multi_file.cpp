@@ -14,7 +14,7 @@ int main() {
   test();
   cl::sycl::buffer<cl::sycl::cl_int, 1> Buffer(4);
   cl::sycl::queue Queue{sycl::accelerator_selector{}};
-  cl::sycl::range<1> NumOfWorkItems{Buffer.get_count()};
+  cl::sycl::range<1> NumOfWorkItems{Buffer.size()};
   Queue.submit([&](cl::sycl::handler &cgh) {
     sycl::accessor Accessor(Buffer, cgh, sycl::write_only);
     cgh.single_task<class Test1>([=] { Accessor[0] = 0; });
@@ -27,7 +27,7 @@ int main() {
 void test() {
   cl::sycl::buffer<cl::sycl::cl_int, 1> Buffer(4);
   cl::sycl::queue Queue{sycl::accelerator_selector{}};
-  cl::sycl::range<1> NumOfWorkItems{Buffer.get_count()};
+  cl::sycl::range<1> NumOfWorkItems{Buffer.size()};
   Queue.submit([&](cl::sycl::handler &cgh) {
     sycl::accessor Accessor(Buffer, cgh, sycl::write_only);
     cgh.single_task<class Test2>(
