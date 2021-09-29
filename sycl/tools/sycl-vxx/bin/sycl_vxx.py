@@ -24,7 +24,7 @@ kernel.
 from argparse import ArgumentParser
 import json
 from multiprocessing import Pool
-from os import environ, path
+from os import environ
 from pathlib import Path
 import shutil
 import subprocess
@@ -237,7 +237,7 @@ class CompilationDriver:
             "--save-temps", "-c", "-k", kernel['name'], '-o', kernel_output,
             self.vpp_llvm_input
         ]
-        if comp_config is not None and path.isfile(comp_config):
+        if comp_config is not None and Path(comp_config).is_file():
             command.extend(("--config", comp_config))
         if 'extra_args' in kernel and kernel['extra_args'].strip():
             # User provided kernel arguments can contain many spaces,
@@ -268,7 +268,7 @@ class CompilationDriver:
             "--report_dir", self.tmpdir / 'vxx_link_report',
             "--save-temps", "-l", "-o", self.outpath
         ]
-        if link_config is not None and path.isfile(link_config):
+        if link_config is not None and Path(link_config).is_file():
             command.extend(("--config", link_config))
         for kernelprop in self.kernel_properties['kernels']:
             targets = dict()
