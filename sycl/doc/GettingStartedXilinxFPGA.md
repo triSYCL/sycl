@@ -327,6 +327,11 @@ export EMCONFIG_PATH=~/.Xilinx
 emconfigutil --platform $XILINX_PLATFORM --od $EMCONFIG_PATH --save-temps
 ```
 
+Optionally,
+[configuration files](https://www.xilinx.com/developer/articles/using-configuration-files-to-control-vitis-compilation.html)
+for Vitis compiler and linker can be specified in, respectively,
+`SYCL_VXX_COMP_CONFIG` and `SYCL_VXX_LINK_CONFIG` environment variables.
+
 You can compile an application either for real FPGA execution,
 software emulation (the SYCL device code is executed by the XRT
 runtime on CPU) or hardware emulation (the SYCL device code is
