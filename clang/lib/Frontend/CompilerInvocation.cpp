@@ -453,7 +453,7 @@ static bool FixupInvocation(CompilerInvocation &Invocation,
   CodeGenOpts.XRayAlwaysEmitTypedEvents = LangOpts.XRayAlwaysEmitTypedEvents;
   CodeGenOpts.DisableFree = FrontendOpts.DisableFree;
   FrontendOpts.GenerateGlobalModuleIndex = FrontendOpts.UseGlobalModuleIndex;
-
+  LangOpts.SanitizeCoverage = CodeGenOpts.hasSanitizeCoverage();
   LangOpts.ForceEmitVTables = CodeGenOpts.ForceEmitVTables;
   LangOpts.SpeculativeLoadHardening = CodeGenOpts.SpeculativeLoadHardening;
   LangOpts.CurrentModule = LangOpts.ModuleName;
@@ -463,7 +463,8 @@ static bool FixupInvocation(CompilerInvocation &Invocation,
 
   CodeGenOpts.CodeModel = TargetOpts.CodeModel;
 
-  if (LangOpts.getExceptionHandling() != llvm::ExceptionHandling::None &&
+  if (LangOpts.getExceptionHandling() !=
+          LangOptions::ExceptionHandlingKind::None &&
       T.isWindowsMSVCEnvironment())
     Diags.Report(diag::err_fe_invalid_exception_model)
         << static_cast<unsigned>(LangOpts.getExceptionHandling()) << T.str();
@@ -502,9 +503,10 @@ static bool FixupInvocation(CompilerInvocation &Invocation,
   // -cl-strict-aliasing needs to emit diagnostic in the case where CL > 1.0.
   // This option should be deprecated for CL > 1.0 because
   // this option was added for compatibility with OpenCL 1.0.
-  if (Args.getLastArg(OPT_cl_strict_aliasing) && LangOpts.OpenCLVersion > 100)
+  if (Args.getLastArg(OPT_cl_strict_aliasing) &&
+      (LangOpts.OpenCLCPlusPlus || LangOpts.OpenCLVersion > 100))
     Diags.Report(diag::warn_option_invalid_ocl_version)
-        << LangOpts.getOpenCLVersionTuple().getAsString()
+        << LangOpts.getOpenCLVersionString()
         << Args.getLastArg(OPT_cl_strict_aliasing)->getAsString(Args);
 
   if (Arg *A = Args.getLastArg(OPT_fdefault_calling_conv_EQ)) {
@@ -1369,9 +1371,6 @@ void CompilerInvocation::GenerateCodeGenArgs(
   if (DebugInfoVal)
     GenerateArg(Args, OPT_debug_info_kind_EQ, *DebugInfoVal, SA);
 
-  if (Opts.DebugInfo == codegenoptions::DebugInfoConstructor)
-    GenerateArg(Args, OPT_fuse_ctor_homing, SA);
-
   for (const auto &Prefix : Opts.DebugPrefixMap)
     GenerateArg(Args, OPT_fdebug_prefix_map_EQ,
                 Prefix.first + "=" + Prefix.second, SA);
@@ -1627,10 +1626,16 @@ bool CompilerInvocation::ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args,
   }
 
   // If -fuse-ctor-homing is set and limited debug info is already on, then use
-  // constructor homing.
-  if (Args.getLastArg(OPT_fuse_ctor_homing))
-    if (Opts.getDebugInfo() == codegenoptions::LimitedDebugInfo)
+  // constructor homing, and vice versa for -fno-use-ctor-homing.
+  if (const Arg *A =
+          Args.getLastArg(OPT_fuse_ctor_homing, OPT_fno_use_ctor_homing)) {
+    if (A->getOption().matches(OPT_fuse_ctor_homing) &&
+        Opts.getDebugInfo() == codegenoptions::LimitedDebugInfo)
       Opts.setDebugInfo(codegenoptions::DebugInfoConstructor);
+    if (A->getOption().matches(OPT_fno_use_ctor_homing) &&
+        Opts.getDebugInfo() == codegenoptions::DebugInfoConstructor)
+      Opts.setDebugInfo(codegenoptions::LimitedDebugInfo);
+  }
 
   for (const auto &Arg : Args.getAllArgValues(OPT_fdebug_prefix_map_EQ)) {
     auto Split = StringRef(Arg).split('=');
@@ -1813,6 +1818,14 @@ bool CompilerInvocation::ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args,
     Opts.ExplicitEmulatedTLS = true;
   }
 
+  if (Arg *A = Args.getLastArg(OPT_ftlsmodel_EQ)) {
+    if (T.isOSAIX()) {
+      StringRef Name = A->getValue();
+      if (Name != "global-dynamic")
+        Diags.Report(diag::err_aix_unsupported_tls_model) << Name;
+    }
+  }
+
   if (Arg *A = Args.getLastArg(OPT_fdenormal_fp_math_EQ)) {
     StringRef Val = A->getValue();
     Opts.FPDenormalMode = llvm::parseDenormalFPAttribute(Val);
@@ -1856,13 +1869,7 @@ bool CompilerInvocation::ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args,
           << A->getSpelling() << T.str();
 
     const Option &O = A->getOption();
-    if (O.matches(OPT_mabi_EQ_vec_default))
-      Diags.Report(diag::err_aix_default_altivec_abi)
-          << A->getSpelling() << T.str();
-    else {
-      assert(O.matches(OPT_mabi_EQ_vec_extabi));
-      Opts.EnableAIXExtendedAltivecABI = 1;
-    }
+    Opts.EnableAIXExtendedAltivecABI = O.matches(OPT_mabi_EQ_vec_extabi);
   }
 
   bool NeedLocTracking = false;
@@ -1928,6 +1935,9 @@ bool CompilerInvocation::ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args,
   if (UsingSampleProfile)
     NeedLocTracking = true;
 
+  if (!Opts.StackUsageOutput.empty())
+    NeedLocTracking = true;
+
   // If the user requested a flag that requires source locations available in
   // the backend, make sure that the backend tracks source location information.
   if (NeedLocTracking && Opts.getDebugInfo() == codegenoptions::NoDebugInfo)
@@ -1948,6 +1958,11 @@ bool CompilerInvocation::ParseCodeGenArgs(CodeGenOptions &Opts, ArgList &Args,
     Opts.FiniteLoops = CodeGenOptions::FiniteLoopsKind::Always;
   else if (Args.hasArg(options::OPT_fno_finite_loops))
     Opts.FiniteLoops = CodeGenOptions::FiniteLoopsKind::Never;
+
+  Opts.EmitIEEENaNCompliantInsts =
+      Args.hasFlag(options::OPT_mamdgpu_ieee, options::OPT_mno_amdgpu_ieee);
+  if (!Opts.EmitIEEENaNCompliantInsts && !LangOptsRef.NoHonorNaNs)
+    Diags.Report(diag::err_drv_amdgpu_ieee_without_no_honor_nans);
 
   return Diags.getNumErrors() == NumErrorsBefore;
 }
@@ -1973,8 +1988,8 @@ GenerateDependencyOutputArgs(const DependencyOutputOptions &Opts,
 
   for (const auto &Dep : Opts.ExtraDeps) {
     switch (Dep.second) {
-    case EDK_SanitizeBlacklist:
-      // Sanitizer blacklist arguments are generated from LanguageOptions.
+    case EDK_SanitizeIgnorelist:
+      // Sanitizer ignorelist arguments are generated from LanguageOptions.
       continue;
     case EDK_ModuleFile:
       // Module file arguments are generated from FrontendOptions and
@@ -2021,20 +2036,20 @@ static bool ParseDependencyOutputArgs(DependencyOutputOptions &Opts,
     Opts.ShowIncludesDest = ShowIncludesDestination::None;
   }
 
-  // Add sanitizer blacklists as extra dependencies.
+  // Add sanitizer ignorelists as extra dependencies.
   // They won't be discovered by the regular preprocessor, so
   // we let make / ninja to know about this implicit dependency.
-  if (!Args.hasArg(OPT_fno_sanitize_blacklist)) {
-    for (const auto *A : Args.filtered(OPT_fsanitize_blacklist)) {
+  if (!Args.hasArg(OPT_fno_sanitize_ignorelist)) {
+    for (const auto *A : Args.filtered(OPT_fsanitize_ignorelist_EQ)) {
       StringRef Val = A->getValue();
       if (Val.find('=') == StringRef::npos)
-        Opts.ExtraDeps.emplace_back(std::string(Val), EDK_SanitizeBlacklist);
+        Opts.ExtraDeps.emplace_back(std::string(Val), EDK_SanitizeIgnorelist);
     }
     if (Opts.IncludeSystemHeaders) {
-      for (const auto *A : Args.filtered(OPT_fsanitize_system_blacklist)) {
+      for (const auto *A : Args.filtered(OPT_fsanitize_system_ignorelist_EQ)) {
         StringRef Val = A->getValue();
         if (Val.find('=') == StringRef::npos)
-          Opts.ExtraDeps.emplace_back(std::string(Val), EDK_SanitizeBlacklist);
+          Opts.ExtraDeps.emplace_back(std::string(Val), EDK_SanitizeIgnorelist);
       }
     }
   }
@@ -2613,24 +2628,24 @@ static bool ParseFrontendArgs(FrontendOptions &Opts, ArgList &Args,
       StringRef ArgStr =
           Args.hasArg(OPT_interface_stub_version_EQ)
               ? Args.getLastArgValue(OPT_interface_stub_version_EQ)
-              : "experimental-ifs-v2";
+              : "ifs-v1";
       if (ArgStr == "experimental-yaml-elf-v1" ||
-          ArgStr == "experimental-ifs-v1" ||
+          ArgStr == "experimental-ifs-v1" || ArgStr == "experimental-ifs-v2" ||
           ArgStr == "experimental-tapi-elf-v1") {
         std::string ErrorMessage =
             "Invalid interface stub format: " + ArgStr.str() +
             " is deprecated.";
         Diags.Report(diag::err_drv_invalid_value)
             << "Must specify a valid interface stub format type, ie: "
-               "-interface-stub-version=experimental-ifs-v2"
+               "-interface-stub-version=ifs-v1"
             << ErrorMessage;
         ProgramAction = frontend::ParseSyntaxOnly;
-      } else if (!ArgStr.startswith("experimental-ifs-")) {
+      } else if (!ArgStr.startswith("ifs-")) {
         std::string ErrorMessage =
             "Invalid interface stub format: " + ArgStr.str() + ".";
         Diags.Report(diag::err_drv_invalid_value)
             << "Must specify a valid interface stub format type, ie: "
-               "-interface-stub-version=experimental-ifs-v2"
+               "-interface-stub-version=ifs-v1"
             << ErrorMessage;
         ProgramAction = frontend::ParseSyntaxOnly;
       }
@@ -3080,10 +3095,10 @@ void CompilerInvocation::setLangDefaults(LangOptions &Opts, InputKind IK,
     case Language::LLVM_IR:
       llvm_unreachable("Invalid input kind!");
     case Language::OpenCL:
-      LangStd = LangStandard::lang_opencl10;
+      LangStd = LangStandard::lang_opencl12;
       break;
     case Language::OpenCLCXX:
-      LangStd = LangStandard::lang_openclcpp;
+      LangStd = LangStandard::lang_openclcpp10;
       break;
     case Language::CUDA:
       LangStd = LangStandard::lang_cuda;
@@ -3142,8 +3157,6 @@ void CompilerInvocation::setLangDefaults(LangOptions &Opts, InputKind IK,
   Opts.HexFloats = Std.hasHexFloats();
   Opts.ImplicitInt = Std.hasImplicitInt();
 
-  Opts.CPlusPlusModules = Opts.CPlusPlus20;
-
   // Set OpenCL Version.
   Opts.OpenCL = Std.isOpenCL();
   if (LangStd == LangStandard::lang_opencl10)
@@ -3156,7 +3169,7 @@ void CompilerInvocation::setLangDefaults(LangOptions &Opts, InputKind IK,
     Opts.OpenCLVersion = 200;
   else if (LangStd == LangStandard::lang_opencl30)
     Opts.OpenCLVersion = 300;
-  else if (LangStd == LangStandard::lang_openclcpp)
+  else if (LangStd == LangStandard::lang_openclcpp10)
     Opts.OpenCLCPlusPlusVersion = 100;
 
   // OpenCL has some additional defaults.
@@ -3165,7 +3178,7 @@ void CompilerInvocation::setLangDefaults(LangOptions &Opts, InputKind IK,
     Opts.ZVector = 0;
     Opts.setDefaultFPContractMode(LangOptions::FPM_On);
     Opts.OpenCLCPlusPlus = Opts.CPlusPlus;
-    Opts.OpenCLPipe = Opts.OpenCLCPlusPlus || Opts.OpenCLVersion == 200;
+    Opts.OpenCLPipes = Opts.OpenCLCPlusPlus || Opts.OpenCLVersion == 200;
     Opts.OpenCLGenericAddressSpace =
         Opts.OpenCLCPlusPlus || Opts.OpenCLVersion == 200;
 
@@ -3306,7 +3319,7 @@ void CompilerInvocation::GenerateLangArgs(const LangOptions &Opts,
   case LangStandard::lang_opencl12:
   case LangStandard::lang_opencl20:
   case LangStandard::lang_opencl30:
-  case LangStandard::lang_openclcpp:
+  case LangStandard::lang_openclcpp10:
     StdOpt = OPT_cl_std_EQ;
     break;
   default:
@@ -3464,9 +3477,6 @@ void CompilerInvocation::GenerateLangArgs(const LangOptions &Opts,
   if (Opts.OpenMPCUDAMode)
     GenerateArg(Args, OPT_fopenmp_cuda_mode, SA);
 
-  if (Opts.OpenMPCUDATargetParallel)
-    GenerateArg(Args, OPT_fopenmp_cuda_parallel_target_regions, SA);
-
   if (Opts.OpenMPCUDAForceFullRuntime)
     GenerateArg(Args, OPT_fopenmp_cuda_force_full_runtime, SA);
 
@@ -3485,9 +3495,9 @@ void CompilerInvocation::GenerateLangArgs(const LangOptions &Opts,
   for (StringRef Sanitizer : serializeSanitizerKinds(Opts.Sanitize))
     GenerateArg(Args, OPT_fsanitize_EQ, Sanitizer, SA);
 
-  // Conflating '-fsanitize-system-blacklist' and '-fsanitize-blacklist'.
+  // Conflating '-fsanitize-system-ignorelist' and '-fsanitize-ignorelist'.
   for (const std::string &F : Opts.NoSanitizeFiles)
-    GenerateArg(Args, OPT_fsanitize_blacklist, F, SA);
+    GenerateArg(Args, OPT_fsanitize_ignorelist_EQ, F, SA);
 
   if (Opts.getClangABICompat() == LangOptions::ClangABI::Ver3_8)
     GenerateArg(Args, OPT_fclang_abi_compat_EQ, "3.8", SA);
@@ -3501,6 +3511,8 @@ void CompilerInvocation::GenerateLangArgs(const LangOptions &Opts,
     GenerateArg(Args, OPT_fclang_abi_compat_EQ, "9.0", SA);
   else if (Opts.getClangABICompat() == LangOptions::ClangABI::Ver11)
     GenerateArg(Args, OPT_fclang_abi_compat_EQ, "11.0", SA);
+  else if (Opts.getClangABICompat() == LangOptions::ClangABI::Ver12)
+    GenerateArg(Args, OPT_fclang_abi_compat_EQ, "12.0", SA);
 
   if (Opts.getSignReturnAddressScope() ==
       LangOptions::SignReturnAddressScopeKind::All)
@@ -3512,6 +3524,15 @@ void CompilerInvocation::GenerateLangArgs(const LangOptions &Opts,
   if (Opts.getSignReturnAddressKey() ==
       LangOptions::SignReturnAddressKeyKind::BKey)
     GenerateArg(Args, OPT_msign_return_address_key_EQ, "b_key", SA);
+
+  if (Opts.CXXABI)
+    GenerateArg(Args, OPT_fcxx_abi_EQ, TargetCXXABI::getSpelling(*Opts.CXXABI),
+                SA);
+
+  if (Opts.RelativeCXXABIVTables)
+    GenerateArg(Args, OPT_fexperimental_relative_cxx_abi_vtables, SA);
+  else
+    GenerateArg(Args, OPT_fno_experimental_relative_cxx_abi_vtables, SA);
 
   switch (Opts.getDefaultSubGroupSizeType()) {
   case LangOptions::SubGroupSizeType::Auto:
@@ -3527,6 +3548,23 @@ void CompilerInvocation::GenerateLangArgs(const LangOptions &Opts,
   case LangOptions::SubGroupSizeType::None:
     break;
   }
+
+  if (Opts.isSYCL()) {
+    switch (Opts.SYCLVersion) {
+    case LangOptions::SYCL_2017:
+      GenerateArg(Args, OPT_sycl_std_EQ, "2017", SA);
+      break;
+    case LangOptions::SYCL_2020:
+      GenerateArg(Args, OPT_sycl_std_EQ, "2020", SA);
+      break;
+    case LangOptions::SYCL_None:
+      // Do nothing, case where we were given an invalid value.
+      break;
+    }
+  }
+
+  for (const auto &MP : Opts.MacroPrefixMap)
+    GenerateArg(Args, OPT_fmacro_prefix_map_EQ, MP.first + "=" + MP.second, SA);
 }
 
 bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
@@ -3607,7 +3645,8 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
         .Cases("cl1.2", "CL1.2", LangStandard::lang_opencl12)
         .Cases("cl2.0", "CL2.0", LangStandard::lang_opencl20)
         .Cases("cl3.0", "CL3.0", LangStandard::lang_opencl30)
-        .Cases("clc++", "CLC++", LangStandard::lang_openclcpp)
+        .Cases("clc++", "CLC++", LangStandard::lang_openclcpp10)
+        .Cases("clc++1.0", "CLC++1.0", LangStandard::lang_openclcpp10)
         .Default(LangStandard::lang_unspecified);
 
     if (OpenCLLangStd == LangStandard::lang_unspecified) {
@@ -3618,22 +3657,25 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
       LangStd = OpenCLLangStd;
   }
 
+  // We have to parse this manually before the marshalling, otherwise we can't
+  // use the marshalling to set other flags based on the SYCL version.
   if (Args.hasArg(OPT_fsycl_is_device) || Args.hasArg(OPT_fsycl_is_host)) {
-    // -sycl-std applies to any SYCL source, not only those containing kernels,
-    // but also those using the SYCL API
     if (const Arg *A = Args.getLastArg(OPT_sycl_std_EQ)) {
       Opts.setSYCLVersion(
           llvm::StringSwitch<LangOptions::SYCLMajorVersion>(A->getValue())
-              .Cases("2017", "1.2.1", "121", "sycl-1.2.1",
-                     LangOptions::SYCL_2017)
               .Case("2020", LangOptions::SYCL_2020)
+              .Cases("2017", "121", "1.2.1", "sycl-1.2.1",
+                     LangOptions::SYCL_2017)
               .Default(LangOptions::SYCL_None));
 
-      if (Opts.getSYCLVersion() == LangOptions::SYCL_None) {
-        // User has passed an invalid value to the flag, this is an error
+      if (Opts.SYCLVersion == LangOptions::SYCL_None)
         Diags.Report(diag::err_drv_invalid_value)
             << A->getAsString(Args) << A->getValue();
-      }
+    } else {
+      // If the user supplied -fsycl-is-device or -fsycl-is-host, but failed to
+      // provide -sycl-std=, we want to default it to whatever the default SYCL
+      // version is.
+      Opts.setSYCLVersion(LangOptions::SYCL_Default);
     }
   }
 
@@ -3949,12 +3991,6 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
   Opts.OpenMPCUDAMode = Opts.OpenMPIsDevice && (T.isNVPTX() || T.isAMDGCN()) &&
                         Args.hasArg(options::OPT_fopenmp_cuda_mode);
 
-  // Set CUDA support for parallel execution of target regions for OpenMP target
-  // NVPTX/AMDGCN if specified in options.
-  Opts.OpenMPCUDATargetParallel =
-      Opts.OpenMPIsDevice && (T.isNVPTX() || T.isAMDGCN()) &&
-      Args.hasArg(options::OPT_fopenmp_cuda_parallel_target_regions);
-
   // Set CUDA mode for OpenMP target NVPTX/AMDGCN if specified in options
   Opts.OpenMPCUDAForceFullRuntime =
       Opts.OpenMPIsDevice && (T.isNVPTX() || T.isAMDGCN()) &&
@@ -3993,11 +4029,12 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
   // Parse -fsanitize= arguments.
   parseSanitizerKinds("-fsanitize=", Args.getAllArgValues(OPT_fsanitize_EQ),
                       Diags, Opts.Sanitize);
-  Opts.NoSanitizeFiles = Args.getAllArgValues(OPT_fsanitize_blacklist);
-  std::vector<std::string> systemBlacklists =
-      Args.getAllArgValues(OPT_fsanitize_system_blacklist);
+  Opts.NoSanitizeFiles = Args.getAllArgValues(OPT_fsanitize_ignorelist_EQ);
+  std::vector<std::string> systemIgnorelists =
+      Args.getAllArgValues(OPT_fsanitize_system_ignorelist_EQ);
   Opts.NoSanitizeFiles.insert(Opts.NoSanitizeFiles.end(),
-                              systemBlacklists.begin(), systemBlacklists.end());
+                              systemIgnorelists.begin(),
+                              systemIgnorelists.end());
 
   if (Arg *A = Args.getLastArg(OPT_fclang_abi_compat_EQ)) {
     Opts.setClangABICompat(LangOptions::ClangABI::Latest);
@@ -4028,6 +4065,8 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
         Opts.setClangABICompat(LangOptions::ClangABI::Ver9);
       else if (Major <= 11)
         Opts.setClangABICompat(LangOptions::ClangABI::Ver11);
+      else if (Major <= 12)
+        Opts.setClangABICompat(LangOptions::ClangABI::Ver12);
     } else if (Ver != "latest") {
       Diags.Report(diag::err_drv_invalid_value)
           << A->getAsString(Args) << A->getValue();
@@ -4037,13 +4076,13 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
   if (Arg *A = Args.getLastArg(OPT_msign_return_address_EQ)) {
     StringRef SignScope = A->getValue();
 
-    if (SignScope.equals_lower("none"))
+    if (SignScope.equals_insensitive("none"))
       Opts.setSignReturnAddressScope(
           LangOptions::SignReturnAddressScopeKind::None);
-    else if (SignScope.equals_lower("all"))
+    else if (SignScope.equals_insensitive("all"))
       Opts.setSignReturnAddressScope(
           LangOptions::SignReturnAddressScopeKind::All);
-    else if (SignScope.equals_lower("non-leaf"))
+    else if (SignScope.equals_insensitive("non-leaf"))
       Opts.setSignReturnAddressScope(
           LangOptions::SignReturnAddressScopeKind::NonLeaf);
     else
@@ -4053,10 +4092,10 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
     if (Arg *A = Args.getLastArg(OPT_msign_return_address_key_EQ)) {
       StringRef SignKey = A->getValue();
       if (!SignScope.empty() && !SignKey.empty()) {
-        if (SignKey.equals_lower("a_key"))
+        if (SignKey.equals_insensitive("a_key"))
           Opts.setSignReturnAddressKey(
               LangOptions::SignReturnAddressKeyKind::AKey);
-        else if (SignKey.equals_lower("b_key"))
+        else if (SignKey.equals_insensitive("b_key"))
           Opts.setSignReturnAddressKey(
               LangOptions::SignReturnAddressKeyKind::BKey);
         else
@@ -4064,6 +4103,31 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
               << A->getAsString(Args) << SignKey;
       }
     }
+  }
+
+  // The value can be empty, which indicates the system default should be used.
+  StringRef CXXABI = Args.getLastArgValue(OPT_fcxx_abi_EQ);
+  if (!CXXABI.empty()) {
+    if (!TargetCXXABI::isABI(CXXABI)) {
+      Diags.Report(diag::err_invalid_cxx_abi) << CXXABI;
+    } else {
+      auto Kind = TargetCXXABI::getKind(CXXABI);
+      if (!TargetCXXABI::isSupportedCXXABI(T, Kind))
+        Diags.Report(diag::err_unsupported_cxx_abi) << CXXABI << T.str();
+      else
+        Opts.CXXABI = Kind;
+    }
+  }
+
+  Opts.RelativeCXXABIVTables =
+      Args.hasFlag(options::OPT_fexperimental_relative_cxx_abi_vtables,
+                   options::OPT_fno_experimental_relative_cxx_abi_vtables,
+                   TargetCXXABI::usesRelativeVTables(T));
+
+  for (const auto &A : Args.getAllArgValues(OPT_fmacro_prefix_map_EQ)) {
+    auto Split = StringRef(A).split('=');
+    Opts.MacroPrefixMap.insert(
+        {std::string(Split.first), std::string(Split.second)});
   }
 
   return Diags.getNumErrors() == NumErrorsBefore;
@@ -4138,9 +4202,6 @@ static void GeneratePreprocessorArgs(PreprocessorOptions &Opts,
   for (const auto &D : Opts.DeserializedPCHDeclsToErrorOn)
     GenerateArg(Args, OPT_error_on_deserialized_pch_decl, D, SA);
 
-  for (const auto &MP : Opts.MacroPrefixMap)
-    GenerateArg(Args, OPT_fmacro_prefix_map_EQ, MP.first + "=" + MP.second, SA);
-
   if (Opts.PrecompiledPreambleBytes != std::make_pair(0u, false))
     GenerateArg(Args, OPT_preamble_bytes_EQ,
                 Twine(Opts.PrecompiledPreambleBytes.first) + "," +
@@ -4209,12 +4270,6 @@ static bool ParsePreprocessorArgs(PreprocessorOptions &Opts, ArgList &Args,
   for (const auto *A : Args.filtered(OPT_error_on_deserialized_pch_decl))
     Opts.DeserializedPCHDeclsToErrorOn.insert(A->getValue());
 
-  for (const auto &A : Args.getAllArgValues(OPT_fmacro_prefix_map_EQ)) {
-    auto Split = StringRef(A).split('=');
-    Opts.MacroPrefixMap.insert(
-        {std::string(Split.first), std::string(Split.second)});
-  }
-
   if (const Arg *A = Args.getLastArg(OPT_preamble_bytes_EQ)) {
     StringRef Value(A->getValue());
     size_t Comma = Value.find(',');
@@ -4271,8 +4326,13 @@ static bool ParsePreprocessorArgs(PreprocessorOptions &Opts, ArgList &Args,
   // Always avoid lexing editor placeholders when we're just running the
   // preprocessor as we never want to emit the
   // "editor placeholder in source file" error in PP only mode.
-  if (isStrictlyPreprocessorAction(Action))
+  // Certain predefined macros which depend upon semantic processing,
+  // for example __FLT_EVAL_METHOD__, are not expanded in PP mode, they
+  // appear in the preprocessed output as an unexpanded macro name.
+  if (isStrictlyPreprocessorAction(Action)) {
     Opts.LexEditorPlaceholders = false;
+    Opts.LexExpandSpecialBuiltins = false;
+  }
 
   return Diags.getNumErrors() == NumErrorsBefore;
 }
@@ -4622,7 +4682,7 @@ std::string CompilerInvocation::getModuleHash() const {
   if (!SanHash.empty())
     code = hash_combine(code, SanHash.Mask);
 
-  return llvm::APInt(64, code).toString(36, /*Signed=*/false);
+  return toString(llvm::APInt(64, code), 36, /*Signed=*/false);
 }
 
 void CompilerInvocation::generateCC1CommandLine(

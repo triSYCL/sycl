@@ -8,7 +8,6 @@
 
 // UNSUPPORTED: c++03, c++11, c++14
 // UNSUPPORTED: clang-8
-// UNSUPPORTED: gcc-9
 
 // <numeric>
 
@@ -97,7 +96,7 @@ test()
     basic_tests();
 
 //  All the iterator categories
-    test<input_iterator        <const int*> >();
+    test<cpp17_input_iterator        <const int*> >();
     test<forward_iterator      <const int*> >();
     test<bidirectional_iterator<const int*> >();
     test<random_access_iterator<const int*> >();

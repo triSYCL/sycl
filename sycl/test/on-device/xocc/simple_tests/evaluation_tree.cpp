@@ -225,7 +225,7 @@ int main() {
     auto AOut = Out.get_access<sycl::access::mode::write>(cgh);
     int root_node = data.size() - 1;
     cgh.single_task<class Kernel>([=] {
-      for (int i = 0; i < AIn.get_count(); i++)
+      for (int i = 0; i < AIn.size(); i++)
         AIn[i].compute();
       AOut[0] = AIn[root_node].get_value();
     });
