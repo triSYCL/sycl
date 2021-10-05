@@ -101,10 +101,20 @@ struct PrepareSyclChessOpt : public ModulePass {
         // we must replicate the calling convention across it's Uses. Another
         // method would be to go through each basic block and check each
         // instruction, but this seems more optimal
-        for (auto U : F.users()) {
-          if (auto CB = dyn_cast<CallBase>(U))\
+        SmallVector<User *, 8> Stack;
+        SmallSet<User *, 16> Set;
+        Stack.push_back(&F);
+        Set.insert(&F);
+        while (!Stack.empty()) {
+          auto *V = Stack.pop_back_val();
+          if (auto *CB = dyn_cast<CallBase>(V)) {
             CB->setCallingConv(CallingConv::C);
-         }
+            continue;
+          }
+          for (auto U : V->users())
+            if (Set.insert(U).second)
+              Stack.push_back(U);
+        }
       }
     }
   }

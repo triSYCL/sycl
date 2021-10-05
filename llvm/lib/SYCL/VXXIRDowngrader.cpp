@@ -330,11 +330,22 @@ struct VXXIRDowngrader : public ModulePass {
   /// the backend.
   void warnForIssues(Module &M) {
     /// ACAP cores do not have the same restriction as FPGA.
-    if (Triple(M.getTargetTriple()).isXilinxAIE())
+    if (!Triple(M.getTargetTriple()).isXilinxFPGA())
       return;
     WarnVisitor Visitor;
     Visitor.visit(M);
     Visitor.emit();
+  }
+
+  void replaceFunction(Module &M, StringRef OldN, StringRef NewN) {
+    Function* Old = M.getFunction(OldN);
+    Function* New = M.getFunction(NewN);
+    if (!Old)
+      return;
+    assert(New);
+    assert(Old->getFunctionType() == New->getFunctionType() && "replacement is not possible");
+    Old->replaceAllUsesWith(New);
+    Old->eraseFromParent();
   }
 
   bool runOnModule(Module &M) override {
@@ -351,13 +362,18 @@ struct VXXIRDowngrader : public ModulePass {
     removeMetaDataValues(M);
     /// __assert_fail doesn't exist on device and takes its arguments in
     /// addressspace 0 causing addresspace cast.
-    removeFunction(M, "__assert_fail");
+    if (Triple(M.getTargetTriple()).isXilinxFPGA())
+      removeFunction(M, "__assert_fail");
+    if (Triple(M.getTargetTriple()).isXilinxAIE())
+      replaceFunction(M, "abort", "_Z13finish_kernelv");
 
     convertPoinsonToZero(M);
-    if (Triple(M.getTargetTriple()).getArch() == llvm::Triple::fpga64)
-      M.setTargetTriple("fpga64-xilinx-none");
-    else
-      M.setTargetTriple("fpga32-xilinx-none");
+    if (Triple(M.getTargetTriple()).isXilinxFPGA()) {
+      if (Triple(M.getTargetTriple()).getArch() == llvm::Triple::fpga64)
+        M.setTargetTriple("fpga64-xilinx-none");
+      else
+        M.setTargetTriple("fpga32-xilinx-none");
+    }
     // The module probably changed
 
     warnForIssues(M);

@@ -589,12 +589,17 @@ class SingleDeviceFunctionTracker {
   void VisitCallNode(CallGraphNode *Node,
                      llvm::SmallVectorImpl<FunctionDecl *> &CallStack) {
     FunctionDecl *CurrentDecl = GetFDFromNode(Node);
-    LLVM_DEBUG(for (int i = 0; i < CallStack.size(); i++) llvm::dbgs() << "  ";
-               llvm::dbgs() << CurrentDecl->getQualifiedNameAsString() << "\n");
-
     // If this isn't a function, I don't think there is anything we can do here.
     if (!CurrentDecl)
       return;
+
+    /// This will print a uniqued call graph of function being complied for the device.
+    /// This is usefull for debugging how a function ended up in device code.
+    LLVM_DEBUG(if (!DeviceFunctions.contains(CurrentDecl)) {
+      for (int i = 0; i < CallStack.size(); i++)
+        llvm::dbgs() << "  ";
+      llvm::dbgs() << CurrentDecl->getQualifiedNameAsString() << "\n";
+    });
 
     // Determine if this is a recursive function. If so, we're done.
     if (llvm::is_contained(CallStack, CurrentDecl)) {
@@ -1022,7 +1027,7 @@ static void populateMainEntryPoint(Sema& S, const StringRef Name,
   Out << "// SYCL Tile Address Register \n";
   Out << "int main(void) {\n";
   Out << "  "<< Name << "();\n";
-  Out << "  return 0;\n";
+  Out << "  done();\n";
   Out << "}\n";
 }
 

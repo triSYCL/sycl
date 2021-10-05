@@ -132,7 +132,7 @@ UNMERGED_PROP=$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}
 
 cp $INPUT_FILE_NAME $INPUT_FILE_NAME.saved.bc
 
-$OPT -S -preparechess -Os -mergefunc -ChessMassage -globaldce -kernelPropGen -vxxIRDowngrader \
+$OPT -S -preparechess -Oz -mergefunc -ChessMassage -globaldce -kernelPropGen -vxxIRDowngrader \
   "$INPUT_FILE_NAME" --sycl-kernel-propgen-output $KERNELPROP \
   --sycl-kernel-unmerged-prop-out $UNMERGED_PROP -o \
   "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
@@ -153,7 +153,7 @@ source "$KERNELPROP"
 source "$UNMERGED_PROP"
 
 # AI Engine .o file containing all kernels for the module
-$XCHESSCC +P $(nproc) -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c \
+$XCHESSCC +P $(nproc) -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c -Oz \
   -o "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
   "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
 
@@ -183,7 +183,7 @@ chess_kernel_compile () {
     # in some unusual behaviour longterm
     mv "$CLANG_TEMPORARY_DIR/$0.cpp" "$SOURCE_TEMPORARY_DIR/$0.cpp"
 
-    $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c \
+    $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c -Oz \
       -o "$SOURCE_TEMPORARY_DIR/$0.main.o" "$SOURCE_TEMPORARY_DIR/$0.cpp"
 
     # TODO: the runtime often only uses on of these images
@@ -192,14 +192,14 @@ chess_kernel_compile () {
 
     # link the same kernel for west tiles and east tiles
     $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f \
-      +l$DRIVER_PATH_DIR/chesswrappers/linker_script_east.bcf \
+      +l$DRIVER_PATH_DIR/chesswrappers/linker_script_east.bcf -Oz \
       -o "$SOURCE_TEMPORARY_DIR/$0.elf.o_east" \
       "$SOURCE_TEMPORARY_DIR/$0.main.o" \
       "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
       "$SYCL_LIB_PATH/acap-intrinsic.o" &
 
     $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f \
-      +l$DRIVER_PATH_DIR/chesswrappers/linker_script_west.bcf \
+      +l$DRIVER_PATH_DIR/chesswrappers/linker_script_west.bcf -Oz \
       -o "$SOURCE_TEMPORARY_DIR/$0.elf.o_west" \
       "$SOURCE_TEMPORARY_DIR/$0.main.o" \
       "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \

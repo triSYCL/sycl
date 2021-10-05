@@ -16,4 +16,9 @@ void release(unsigned id) { return ::release(id); }
 
 void core_done() { ::done(); }
 
+void nop5() { ::nop(5); }
+
+uint32_t stream_read32(int stream_idx) { return ::get_ss(stream_idx); }
+void stream_write32(int stream_idx, uint32_t val, int tlast) { return ::put_ms(stream_idx, val, tlast); }
+
 }

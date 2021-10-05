@@ -29,6 +29,8 @@
 #define DECL_PREFIX inline
 #endif
 
+#include <stdint.h>
+
 namespace acap_intr {
 
 DECL_PREFIX int get_coreid(void) DECL_POSTFIX
@@ -42,5 +44,10 @@ DECL_PREFIX void acquire(unsigned id) DECL_POSTFIX
 DECL_PREFIX void release(unsigned id) DECL_POSTFIX
 
 DECL_PREFIX void core_done() DECL_POSTFIX
+
+DECL_PREFIX void nop5() DECL_POSTFIX
+
+DECL_PREFIX uint32_t stream_read32(int stream_idx) DECL_POSTFIX
+DECL_PREFIX void stream_write32(int stream_idx, uint32_t val, int tlast = false) DECL_POSTFIX
 
 }

@@ -1,5 +1,0 @@
-
- - look for duping program memory kinda: x/4xw h.get_device_data(0x2400, 16).data()
- - look for program counter and source code locations. yes h.raw_read(0x00030280)
- - update comments
- - unifying device <-> host communication into RPC style generic system.
