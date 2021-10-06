@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include "CL/sycl/device.hpp"
 #include <CL/sycl/access/access.hpp>
 #include <CL/sycl/accessor.hpp>
 #include <CL/sycl/context.hpp>
@@ -34,6 +35,7 @@
 #include <memory>
 #include <tuple>
 #include <type_traits>
+#include <utility>
 
 // SYCL_LANGUAGE_VERSION is 4 digit year followed by 2 digit revision
 #if !SYCL_LANGUAGE_VERSION || SYCL_LANGUAGE_VERSION < 202001
@@ -196,6 +198,53 @@ checkValueRange(const T &V) {
 #else
   (void)V;
 #endif
+}
+
+/// @brief Construct parallel_for equivalent loop recursively
+///
+/// @tparam CurDimIdx Which dimension of the iteration space (starting from 0)
+/// @tparam IterDims Dimension of the iteration space (loop nest total depth)
+///
+/// @param ElementWiseOp The kernel that should be applied to each element
+/// @param IterDomain The range describing the iteration space
+/// @param OuterLoopIterIdx Tuple storing a ref to each outer loop iteration idx
+///
+/// Build one loop of depth CurDimIDX for the loop nest corresponding to
+/// IterDomain
+template <int CurDimIdx, int IterDims>
+inline void build_loop_nest_rec(auto &ElementWiseOp,
+                                range<IterDims> &IterDomain,
+                                auto OuterLoopIterIdx) {
+  int CurDimIter = 0;
+  auto NextIdx = std::tuple_cat(OuterLoopIterIdx, std::tie(CurDimIter));
+  for (CurDimIter = 0; CurDimIter < IterDomain[CurDimIdx]; CurDimIter++) {
+    if constexpr (CurDimIdx + 1 >= IterDims) {
+      static_assert(CurDimIdx == IterDims - 1);
+      // innermost loop : perform the call
+      ElementWiseOp(detail::Builder::createItem<IterDims, false>(
+          IterDomain, std::make_from_tuple<id<IterDims>>(NextIdx)));
+    } else {
+      // Extend the iteration index tuple and generate the next loop level
+      build_loop_nest_rec<CurDimIdx + 1>(ElementWiseOp, IterDomain, NextIdx);
+    }
+  }
+}
+
+/// @brief Invoke a function on each element of a range in a sequential manner
+///
+/// @tparam IterDims Number of dimensions of the iteration space.
+///
+/// @param ElementWiseOp The function to apply on each element
+/// @param IterDomain a range describing the iteration domain
+///
+/// This function produces the serial equivalent to
+/// \code parallel_for(ElementWiseOp, IterDomain); \endcode
+/// It is used to replace parallel_for on device where having a
+/// single loop nest makes more sense.
+template <int IterDims>
+inline void serialize_parallel_for(auto &ElementWiseOp,
+                                   range<IterDims> IterDomain) {
+  build_loop_nest_rec<0, IterDims>(ElementWiseOp, IterDomain, std::tuple<>{});
 }
 
 } // namespace detail
@@ -757,6 +806,14 @@ private:
   void parallel_for_lambda_impl(range<Dims> NumWorkItems,
                                 KernelType KernelFunc) {
     throwIfActionIsCreated();
+    using NameT =
+        typename detail::get_kernel_name_t<KernelName, KernelType>::name;
+#ifndef __SYCL_DEVICE_ONLY__
+device D = detail::getDeviceFromHandler(*this);
+#endif
+
+// Normal parallel_for handling
+#ifndef __SYCL_SPIR_DEVICE__
     using LambdaArgType = sycl::detail::lambda_arg_type<KernelType, item<Dims>>;
 
     // If 1D kernel argument is an integral type, convert it to sycl::item<1>
@@ -764,8 +821,6 @@ private:
         typename std::conditional<std::is_integral<LambdaArgType>::value &&
                                       Dims == 1,
                                   item<Dims>, LambdaArgType>::type;
-    using NameT =
-        typename detail::get_kernel_name_t<KernelName, KernelType>::name;
 
     // Range rounding can be disabled by the user.
     // Range rounding is not done on the host device.
@@ -835,11 +890,14 @@ private:
       AdjustedRange.set_range_dim0(NewValX);
       kernel_parallel_for_wrapper<KName, TransformedArgType>(Wrapper);
 #ifndef __SYCL_DEVICE_ONLY__
-      detail::checkValueRange<Dims>(AdjustedRange);
-      MNDRDesc.set(std::move(AdjustedRange));
-      StoreLambda<KName, decltype(Wrapper), Dims, TransformedArgType>(
-          std::move(Wrapper));
-      setType(detail::CG::Kernel);
+      if(!D.has(aspect::ext_xilinx_single_task_only)) {
+        detail::checkValueRange<Dims>(AdjustedRange);
+        MNDRDesc.set(std::move(AdjustedRange));
+        StoreLambda<KName, decltype(Wrapper), Dims, TransformedArgType>(
+            std::move(Wrapper));
+        setType(detail::CG::Kernel);
+        return;
+      }
 #endif
     } else
 #endif // !__SYCL_DISABLE_PARALLEL_FOR_RANGE_ROUNDING__ &&                     \
@@ -849,13 +907,36 @@ private:
       (void)NumWorkItems;
       kernel_parallel_for_wrapper<NameT, TransformedArgType>(KernelFunc);
 #ifndef __SYCL_DEVICE_ONLY__
-      detail::checkValueRange<Dims>(NumWorkItems);
-      MNDRDesc.set(std::move(NumWorkItems));
-      StoreLambda<NameT, KernelType, Dims, TransformedArgType>(
-          std::move(KernelFunc));
-      setType(detail::CG::Kernel);
-#endif
+      if (!D.has(aspect::ext_xilinx_single_task_only)) {
+        detail::checkValueRange<Dims>(NumWorkItems);
+        MNDRDesc.set(std::move(NumWorkItems));
+        StoreLambda<NameT, KernelType, Dims, TransformedArgType>(
+            std::move(KernelFunc));
+        setType(detail::CG::Kernel);
+        return;
+      }
+#endif // SYCL_DEVICE_ONLY
     }
+#endif // !__SYCL_SPIR_DEVICE__
+
+// Wrap kernel in for loop for devices that do not support parallel_for
+// (currently Xilinx)
+#if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
+    auto SingleTaskKernel = [=]{
+        detail::serialize_parallel_for(KernelFunc, NumWorkItems);
+    };
+    using ToSingleTaskName = detail::par_for_to_st<NameT>;
+    kernel_single_task<ToSingleTaskName>(SingleTaskKernel);
+#ifndef __SYCL_DEVICE_ONLY__
+    // No need to check if range is out of INT_MAX limits as it's compile-time
+    // known constant
+    if (D.has(aspect::ext_xilinx_single_task_only)) {
+      MNDRDesc.set(range<1>{1});
+      StoreLambda<ToSingleTaskName, decltype(SingleTaskKernel), /*Dims*/ 0, void>(SingleTaskKernel);
+      setType(detail::CG::Kernel);
+    }
+#endif // !__SYCL_DEVICE_ONLY__
+#endif // __SYCL_SPIR_DEVICE__ || !__SYCL_DEVICE_ONLY__
   }
 
   /// Defines and invokes a SYCL kernel function for the specified range.

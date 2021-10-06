@@ -317,6 +317,8 @@ bool device_impl::has(aspect Aspect) const {
     return false;
   case aspect::ext_oneapi_srgb:
     return get_info<info::device::ext_oneapi_srgb>();
+  case aspect::ext_xilinx_single_task_only:
+    return get_info<info::device::vendor>().rfind("Xilinx", 0) == 0;
 
   default:
     throw runtime_error("This device aspect has not been implemented yet.",
