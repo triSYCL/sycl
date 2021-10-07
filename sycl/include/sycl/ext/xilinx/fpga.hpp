@@ -14,11 +14,13 @@
 #ifndef SYCL_XILINX_FPGA_HPP
 #define SYCL_XILINX_FPGA_HPP
 
-
 #include "sycl/ext/xilinx/fpga/kernel_param.hpp"
+#include "sycl/ext/xilinx/fpga/dataflow.hpp"
 #include "sycl/ext/xilinx/fpga/kernel_properties.hpp"
 #include "sycl/ext/xilinx/fpga/memory_properties.hpp"
 #include "sycl/ext/xilinx/fpga/partition_array.hpp"
 #include "sycl/ext/xilinx/fpga/pipeline.hpp"
+#include "sycl/ext/xilinx/fpga/parallel_invoke.hpp"
+#include "sycl/ext/xilinx/fpga/unroll.hpp"
 
 #endif // SYCL_XILINX_FPGA_HPP

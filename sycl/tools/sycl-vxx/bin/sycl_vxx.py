@@ -144,7 +144,8 @@ class CompilationDriver:
                 "-flat-address-space=0", "-globaldce"
             ])
         opt_options.extend([
-            "-O3", "-globaldce", "-globaldce", "-inSPIRation",
+            "--vectorize-loops=false", "--disable-loop-unrolling", "-O3",
+            "-globaldce", "-globaldce", "-inSPIRation",
             "-o", f"{self.optimised_bc}"
         ])
 
@@ -189,6 +190,7 @@ class CompilationDriver:
             f"{self.outstem}-kernels_properties.json"
         )
         opt_options = [
+            "--lower-delayed-sycl-metadata", "-lower-sycl-metadata",
             "--sycl-vxx", "--sycl-prepare-clearspir", "-S", "-preparesycl",
             "-kernelPropGen",
             "--sycl-kernel-propgen-output", f"{kernel_prop}",
@@ -200,7 +202,7 @@ class CompilationDriver:
         subprocess.run(args, check=True)
         with kernel_prop.open('r') as kp_fp:
             self.kernel_properties = json.load(kp_fp)
-        opt_options = ["--sycl-vxx", "-S", "-O3", "-vxxIRDowngrader"]
+        opt_options = ["--sycl-vxx", "-S", "-vxxIRDowngrader"]
         self.downgraded_ir = (
             self.tmpdir / f"{self.outstem}_kernels-linked.opt.ll")
         args = [
