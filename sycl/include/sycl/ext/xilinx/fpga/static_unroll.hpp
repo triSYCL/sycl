@@ -1,4 +1,4 @@
-//==- parallel_invoke.hpp --- SYCL Xilinx loop unrolling       -------==//
+//==- parallel_invoke.hpp --- SYCL templated loop unrolling       -------==//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -17,6 +17,8 @@ namespace sycl {
 
 namespace ext::xilinx {
 namespace detail {
+
+    
 template <int firstStep, int firstOutStep, int inc>
 void inline normalized_parallel_invoke(auto &loop_step, auto &&loop_condition,
                                        int first, int bound) {
