@@ -1,4 +1,4 @@
-//==- parallel_invoke.hpp --- SYCL templated loop unrolling       -------==//
+//==- static_unroll.hpp --- SYCL templated loop unrolling       -------==//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -18,73 +18,137 @@ namespace sycl {
 namespace ext::xilinx {
 namespace detail {
 
-    
-template <int firstStep, int firstOutStep, int inc>
-void inline normalized_parallel_invoke(auto &loop_step, auto &&loop_condition,
-                                       int first, int bound) {
-  if constexpr (firstOutStep - firstStep <= 1) {
+///
+///@brief partial_static_unroll implementation
+///
+///@tparam NormalizedInitStep Normalized unrolled iteration index
+///@tparam NormalizedExitStep First value greater than maximal normalized
+///        unrolled iteration index
+///@tparam Increment How much to add to the iteration variable between each iteration
+///@param LoopStep Computation performed at each iteration
+///@param LoopCondition Loop condition 
+///@param First Initial iteration value
+///@param Bound Loop iteration bound
+template <int NormalizedInitStep, int NormalizedExitStep, int Increment>
+void inline normalized_partial_static_unroll(auto &LoopStep, auto &&LoopCondition,
+                                       int First, int Bound) {
+  if constexpr (NormalizedExitStep - NormalizedInitStep <= 1) {
     // Actual call step
-    constexpr int localInc = firstStep * inc;
-    int callIdx = first + localInc;
-    if (loop_condition(callIdx, bound)) {
-      loop_step(callIdx);
+    constexpr int LocalInc = NormalizedInitStep * Increment;
+    int CallIdx = First + LocalInc;
+    if (LoopCondition(CallIdx, Bound)) {
+      LoopStep(CallIdx);
     }
   } else {
     // Subdivide call sequence
-    constexpr int midpoint = (firstStep + firstOutStep) / 2;
-    normalized_parallel_invoke<firstStep, midpoint, inc>(
-        loop_step,
-        loop_condition, first, bound);
+    constexpr int MidPoint = (NormalizedInitStep + NormalizedExitStep) / 2;
+    normalized_partial_static_unroll<NormalizedInitStep, MidPoint, Increment>(
+        LoopStep,
+        LoopCondition, First, Bound);
 
-    normalized_parallel_invoke<midpoint, firstOutStep, inc>(
-        loop_step,
-        loop_condition, first, bound);
+    normalized_partial_static_unroll<MidPoint, NormalizedExitStep, Increment>(
+        LoopStep,
+        LoopCondition, First, Bound);
   }
 }
 
-template <int firstNormalizedStep, int firstNormalizedOutStep, int offset,
-          int inc>
-void inline normalized_full_parallel_invoke(auto &loop_step) {
-  if constexpr (firstNormalizedOutStep - firstNormalizedStep <= 1) {
+///
+///@brief Implementation for static_full_unrolling
+///
+/// Recursively build the loop by splitting the iteration range into subranges,
+/// until the subrange length is one, at which step the corresponding iteration is
+/// performed.
+///
+/// The range is normalized such that the full iteration domain corresponds to
+/// range [0, total number of iterations)
+///
+///@tparam Minimum of the normalized subrange
+///@tparam Smallest out-of-normalized-range iteration number
+///@tparam Offset initial iteration value
+///@tparam Increment How much to add to the iteration variable between each iteration 
+///@param LoopStep Iteration computation
+template <int NormalizedInitStep, int NormalizedExitStep, int Offset,
+          int Increment>
+void inline normalized_static_full_unrolling(auto &LoopStep) {
+  if constexpr (NormalizedExitStep - NormalizedInitStep <= 1) {
     // Actual call step
-    constexpr int localInc = firstNormalizedStep * inc;
-    int callIdx = offset + localInc;
-    loop_step(callIdx);
+    constexpr int LocalInc = NormalizedInitStep * Increment;
+    int CallIdx = Offset + LocalInc;
+    LoopStep(CallIdx);
   } else {
     // Subdivide call sequence
-    constexpr int midpoint = (firstNormalizedStep + firstNormalizedOutStep) / 2;
-    normalized_full_parallel_invoke<firstNormalizedStep, midpoint, offset, inc>(
-        loop_step);
+    constexpr int Midpoint = (NormalizedInitStep + NormalizedExitStep) / 2;
+    normalized_static_full_unrolling<NormalizedInitStep, Midpoint, Offset,
+                                         Increment>(LoopStep);
 
-    normalized_full_parallel_invoke<midpoint, firstNormalizedOutStep, offset,
-                                    inc>(loop_step);
+    normalized_static_full_unrolling<Midpoint, NormalizedExitStep,
+                                         Offset, Increment>(LoopStep);
   }
 }
 } // namespace detail
 
-template <int unrollFactor = 1, int increment = 1>
-inline void parallel_invoke(auto &loop_step, auto &loop_condition, int start,
-                            int bound) {
+///
+///@brief Build a partially unrolled loop
+///
+///@tparam UnrollFactor How many iterations are explicited in loop body
+///@tparam Increment by how many is incremented the loop variable between
+///        each iteration
+///
+///@param LoopStep Elementary computation performed at each step
+///@param LoopCondition Boundary check computation
+///@param StartIdx Initial iteration loop variable value
+///@param Bound Bound for the loop
+///
+/// The function is equivalent to the following for loop :
+/// \code {.cpp}
+/// for (int I = StartIdX ; LoopCondition(I, Bound) ; I += Increment) {
+///   LoopStep(I);
+/// }
+/// \endcode
+///
+/// Except that there is UnrollFactor less iteration and the loop body contains
+/// UnrollFactor successive call to LoopStep (with I incremented
+/// correspondingly).
+template <int UnrollFactor = 1, int Increment = 1>
+inline void partial_static_unroll(auto &LoopStep, auto &LoopCondition,
+                                  int StartIdx, int Bound) {
 
-  static_assert(unrollFactor >= 1, "Parallel invoke requires a strictly "
+  static_assert(UnrollFactor >= 1, "Static unrolling requires a strictly "
                                    "positive unfold factor. For full "
-                                   "parallel unrolling use "
-                                   "full_parallel_invoke");
-  static_assert(increment != 0, "parallel_invoke increment cannot be zero");
-  constexpr int newIncrement = unrollFactor * increment;
-  for (int i = start;
-       loop_condition(i, bound);
-       i += newIncrement)
-    detail::normalized_parallel_invoke<0, unrollFactor, increment>(
-        loop_step,
-        loop_condition, i, bound);
+                                   "static unrolling use "
+                                   "full_static_unroll");
+  static_assert(Increment != 0, "static_unroll increment cannot be zero");
+  constexpr int newIncrement = UnrollFactor * Increment;
+  for (int i = StartIdx; LoopCondition(i, Bound); i += newIncrement) {
+    detail::normalized_partial_static_unroll<0, UnrollFactor, Increment>(
+        LoopStep, LoopCondition, i, Bound);
+  }
 }
 
-template <int startIdx, int nbSteps, int increment = 1>
-inline void full_parallel_invoke(auto &loop_step) {
-  static_assert(nbSteps > 0, "Trying to unroll a loop of 0 steps");
-  detail::normalized_full_parallel_invoke<0, nbSteps, startIdx, increment>(
-      loop_step);
+/// @brief Build the unrolled equivalent of a for loop
+///
+/// @tparam StartIdx Initial value of the iteration index
+/// @tparam NbSteps The number of iteration to perform
+/// @tparam Increment The value by which the iteration index is incremented
+///         between iterations.
+///
+/// @param Functor Lambda containing the elementary computation step.
+///
+/// The generated code is equivalent to 
+/// \code {.cpp}
+/// int IterationVal = StartIdx;
+/// for (int Iteration = 0 ; Iteration < NbSteps ; Iteration++) {
+///   LoopStep(IterationVal);
+///   IterationVal += Increment;
+/// }
+/// \endcode
+///
+/// But all there is no loop structure, all the call are explicits.
+template <int StartIdx, int NbSteps, int Increment = 1>
+inline void static_full_unrolling(auto &Functor) {
+  static_assert(NbSteps > 0, "Trying to unroll an iteration of less than 1 step");
+  detail::normalized_static_full_unrolling<0, NbSteps, StartIdx, Increment>(
+      Functor);
 }
 } // namespace ext::xilinx
 } // namespace sycl
