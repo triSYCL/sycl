@@ -215,14 +215,15 @@ template <int CurDimIdx, int IterDims>
 inline void build_loop_nest_rec(auto &ElementWiseOp,
                                 range<IterDims> &IterDomain,
                                 auto OuterLoopIterIdx) {
-  int CurDimIter = 0;
+  size_t CurDimIter = 0;
   auto NextIdx = std::tuple_cat(OuterLoopIterIdx, std::tie(CurDimIter));
   for (CurDimIter = 0; CurDimIter < IterDomain[CurDimIdx]; CurDimIter++) {
     if constexpr (CurDimIdx + 1 >= IterDims) {
       static_assert(CurDimIdx == IterDims - 1);
       // innermost loop : perform the call
-      ElementWiseOp(detail::Builder::createItem<IterDims, false>(
-          IterDomain, std::make_from_tuple<id<IterDims>>(NextIdx)));
+      item<IterDims> CurItem = detail::Builder::createItem<IterDims, false>(
+          IterDomain, std::make_from_tuple<id<IterDims>>(NextIdx)); 
+      ElementWiseOp({CurItem});
     } else {
       // Extend the iteration index tuple and generate the next loop level
       build_loop_nest_rec<CurDimIdx + 1>(ElementWiseOp, IterDomain, NextIdx);
