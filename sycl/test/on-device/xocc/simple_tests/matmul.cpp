@@ -1,6 +1,6 @@
-// REQUIRES: spir
+// REQUIRES: xocc
 
-// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
 
 // RUN: env SYCL_DISABLE_PARALLEL_FOR_RANGE_ROUNDING=1 %ACC_RUN_PLACEHOLDER %t.out
 
