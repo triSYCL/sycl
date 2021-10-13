@@ -11384,7 +11384,7 @@ def warn_sycl_kernel_return_type : Warning<
   InGroup<IgnoredAttributes>;
 
 def err_ext_int_bad_size : Error<"%select{signed|unsigned}0 _ExtInt must "
-                                 "have a bit size of at least %select{2|1}0">;
+                                 "have a bit size of at least 1">;
 def err_ext_int_max_size : Error<"%select{signed|unsigned}0 _ExtInt of bit "
                                  "sizes greater than %1 not supported">;
 def err_esimd_glob_cant_init : Error<

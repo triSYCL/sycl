@@ -133,7 +133,9 @@ struct ConstantPipeStorage {
 };
 
 // Arbitrary precision integer type
+namespace __spv {
 template <int Bits> using ap_int = _ExtInt(Bits);
+} // namespace _spv
 #endif // __SYCL_DEVICE_ONLY__
 
 // This class does not have definition, it is only predeclared here.

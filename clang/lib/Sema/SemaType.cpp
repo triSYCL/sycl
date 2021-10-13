@@ -2262,13 +2262,9 @@ QualType Sema::BuildExtIntType(bool IsUnsigned, Expr *BitWidth,
     return QualType();
 
   int64_t NumBits = Bits.getSExtValue();
-  if (!IsUnsigned && NumBits < 2) {
-    Diag(Loc, diag::err_ext_int_bad_size) << 0;
-    return QualType();
-  }
 
-  if (IsUnsigned && NumBits < 1) {
-    Diag(Loc, diag::err_ext_int_bad_size) << 1;
+  if (NumBits < 1) {
+    Diag(Loc, diag::err_ext_int_bad_size) << ((IsUnsigned) ? 1 : 0);
     return QualType();
   }
 

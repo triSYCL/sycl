@@ -17,13 +17,12 @@ _ExtInt(33) Declarations(_ExtInt(48) &Param) { // Useable in params and returns.
   unsigned _ExtInt(5) e = 5;
   _ExtInt(5) unsigned f;
 
-  _ExtInt(-3) g; // expected-error{{signed _ExtInt must have a bit size of at least 2}}
-  _ExtInt(0) h; // expected-error{{signed _ExtInt must have a bit size of at least 2}}
-  _ExtInt(1) i; // expected-error{{signed _ExtInt must have a bit size of at least 2}}
-  _ExtInt(2) j;;
+  _ExtInt(-3) g; // expected-error{{signed _ExtInt must have a bit size of at least 1}}
+  _ExtInt(0) h; // expected-error{{signed _ExtInt must have a bit size of at least 1}}
+  _ExtInt(1) j;;
   unsigned _ExtInt(0) k;// expected-error{{unsigned _ExtInt must have a bit size of at least 1}}
   unsigned _ExtInt(1) l;
-  signed _ExtInt(1) m; // expected-error{{signed _ExtInt must have a bit size of at least 2}}
+  signed _ExtInt(0) m; // expected-error{{signed _ExtInt must have a bit size of at least 1}}
 
   constexpr _ExtInt(6) n = 33; // expected-warning{{implicit conversion from 'int' to 'const _ExtInt(6)' changes value from 33 to -31}}
   constexpr _ExtInt(7) o = 33;
@@ -33,18 +32,15 @@ _ExtInt(33) Declarations(_ExtInt(48) &Param) { // Useable in params and returns.
   unsigned _ExtInt(0xFFFFFFFFFF) q; // expected-error {{unsigned _ExtInt of bit sizes greater than 16777215 not supported}}
 
 // Ensure template params are instantiated correctly.
-  // expected-error@5{{signed _ExtInt must have a bit size of at least 2}}
+  // expected-error@5{{signed _ExtInt must have a bit size of at least 1}}
   // expected-error@6{{unsigned _ExtInt must have a bit size of at least 1}}
   // expected-note@+1{{in instantiation of template class }}
   HasExtInt<-1> r;
-  // expected-error@5{{signed _ExtInt must have a bit size of at least 2}}
+  // expected-error@5{{signed _ExtInt must have a bit size of at least 1}}
   // expected-error@6{{unsigned _ExtInt must have a bit size of at least 1}}
   // expected-note@+1{{in instantiation of template class }}
   HasExtInt<0> s;
-  // expected-error@5{{signed _ExtInt must have a bit size of at least 2}}
-  // expected-note@+1{{in instantiation of template class }}
   HasExtInt<1> t;
-  HasExtInt<2> u;
 
   _ExtInt(-3.0) v; // expected-error {{integral constant expression must have integral or unscoped enumeration type, not 'double'}}
   _ExtInt(3.0) x; // expected-error {{integral constant expression must have integral or unscoped enumeration type, not 'double'}}
