@@ -336,9 +336,12 @@ public:
 
   void dispatchLocalAnnotation(llvm::CallBase &CB,
                                llvm::ConstantDataArray *KindInit,
-                               llvm::ConstantStruct *Payload) {
+                               llvm::Constant *PayloadCst) {
     auto Kind = KindInit->getRawDataValues();
     bool processed = false;
+    if (Kind == kindOf("xilinx_ddr_bank"))
+        return;
+    auto* Payload = cast<ConstantStruct>(PayloadCst);
     if (AfterO3) { // Annotation that should wait after optimisation to be
                    // lowered
       if (Kind == kindOf("xilinx_unroll")) {
@@ -368,11 +371,9 @@ public:
               ->getInitializer();
       if (!isa<ConstantDataArray>(KindInit))
         return;
-
-      auto *Payload = cast<ConstantStruct>(
+      auto *Payload = cast<Constant>(
           cast<GlobalVariable>(getUnderlyingObject(CB.getOperand(4)))
               ->getInitializer());
-
       Parent.dispatchLocalAnnotation(CB, cast<ConstantDataArray>(KindInit),
                                      Payload);
     }
