@@ -74,7 +74,7 @@ __SYCL_ALWAYS_INLINE void noPipeline(T &&functor) {
   std::forward<T>(functor)();
 }
 
-template <typename IIType, PipelineStyle pipelineType = PipelineStyle::stall>
+template <typename IIType = AutoII, PipelineStyle pipelineType = PipelineStyle::stall>
 auto pipeline_kernel(auto kernel) {
   using kernelType = std::remove_cvref_t<decltype(kernel)>;
   return detail::KernelDecorator<kernelType, decltype(&kernelType::operator()),
