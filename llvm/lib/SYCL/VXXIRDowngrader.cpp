@@ -22,6 +22,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/SYCL/VXXIRDowngrader.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/SetVector.h"
@@ -309,6 +310,14 @@ struct VXXIRDowngrader : public ModulePass {
     F->eraseFromParent();
   }
 
+  struct CleanerVisitor : InstVisitor<CleanerVisitor> {
+      void visitCallBase (CallBase& CB) {
+          if (CB.hasMetadata(llvm::LLVMContext::MD_range)) {
+              CB.setMetadata(llvm::LLVMContext::MD_range, nullptr);
+          }
+      }
+  };
+
   /// Visit the IR and emit warnings about construct not handled by the backend
   /// The IR has no debug info so we cannot say where in the source code the
   /// error happend.
@@ -377,6 +386,8 @@ struct VXXIRDowngrader : public ModulePass {
       M.setTargetTriple("fpga32-xilinx-none");
     // The module probably changed
 
+    CleanerVisitor CV{};
+    CV.visit(M);
     warnForIssues(M);
 
     return true;
