@@ -420,7 +420,7 @@ Note that the SPIR compilation flow has been discontinued.
   ```
   This takes usually 15-30 minutes with a good CPU.
 
-- Run the test suite with real hardware execution on FPGA (HLS flow):
+- Run the `xocc` test suite with real hardware execution on FPGA (HLS flow):
   ```bash
   cd $SYCL_HOME/llvm/build
   export VXX_TARGET=hls_hw
@@ -454,7 +454,7 @@ $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
 ```
 and then look at the `input.bmp` and `output.bmp` images.
 
-There is another application using a webcam instead, if you have one
+There is another application along using a webcam instead, if you have one
 on your machine.
 
 
@@ -534,11 +534,13 @@ to compile SYCL kernels to a format edible by `v++`, then take the output of
 `v++` and wrap it into the fat binary as normal.
 
 The current Intel SYCL implementation revolves around SPIR-V while
-Xilinx's `v++` compiler can only ingest SPIR-df as an intermediate
-representation. SPIR-df is LLVM IR with some SPIR decorations. It is
-similar to the SPIR-2.0 provisional specification but does not
-requires the LLVM IR version to be 3.4. It uses just the encoding of
-the LLVM used, which explains the `-df` as "de-facto".
+Xilinx's `v++` compiler can only ingest plain LLVM IR 6.x or LLVM IR
+6.x with a SPIR-df flavor as an intermediate representation. SPIR-df
+is some LLVM IR with some SPIR decorations. It is similar to the
+SPIR-2.0 provisional specification but does not requires the LLVM IR
+version to be exactly 3.4. It uses just the encoding of the LLVM used,
+which explains the `-df` as "de-facto". This is the term used in the
+team to present this non-conforming and non-standard SPIR.
 
 So a lot of our modifications revolve
 around being the middle man between `v++` and the SYCL device
@@ -547,11 +549,12 @@ the insane! Hopefully...
 
 
 ### Extra Notes:
+
 * The Driver ToolChain, currently makes some assumptions about the
   `Vitis` installation. For example, it assumes that `v++` is inside
-  Vitis's bin folder and that the lib folder containing `SPIR`
-  builtins that kernels are linked against are in a `/lnx64/lib`
-  directory relative to the bin folders parent.
+  Vitis's `bin` folder and that the `lib` folder containing `SPIR`
+  builtins that kernels are linked against are in a `lnx64/lib`
+  directory relative to the `bin` folder parent.
 
 ## Debugging the SYCL implementation
 
