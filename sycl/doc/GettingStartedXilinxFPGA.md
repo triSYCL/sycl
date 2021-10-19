@@ -18,6 +18,9 @@ some adaptations.
   flow for Xilinx FPGA. The HLS target relies on direct LLVM IR
   feeding and allows finer control by using HLS extensions.
 
+- 2021/10/01: the OpenCL/SPIR device compiler flow has been deprecated
+  because it has less features than the HLS device compiler flow and
+  we lack resources to maintain both.
 
 ## Installing the Alveo U200 board
 
@@ -333,10 +336,17 @@ runtime on CPU) or hardware emulation (the SYCL device code is
 synthesized into RTL Verilog and run by an RTL simulator such as
 `xsim`).
 
-In addition, two compilation flows for compiling SYCL kernels are provided.
-The SPIR flow is the first to have been supported by the tool.
-An alternative HLS flow is now developed, that aims at compiling kernels to 
-LLVM bitcode similar to what is produced by the open source Xilinx HLS frontend. 
+In addition, two compilation flows for compiling SYCL kernels are
+provided:
+
+- a new HLS device compiler flow is now developed, that aims at
+  compiling kernels to LLVM bitcode similar to what is produced by the
+  open source Xilinx HLS front-end. This way, anything supported by
+  Xilinx HLS C++ should be supported at some point in the future;
+
+- the SPIR flow device compiler, the first to have been supported by
+  the tool, aiming at using OpenCL C-like features. But it is
+  deprecated now since it provides less features than the HLS one.
 
 Note that the software and hardware emulation might not work for some
 system incompatibility reasons because Vitis comes with a lot of
@@ -349,26 +359,23 @@ using what is available on the system.
 Architecture provided to the `sycl-targets` Clang flag selects the
 compilation mode. Supported architectures are:
 
-|                       | Software simulation | Hardware emulation  | Hardware        |
-|-----------------------|---------------------|---------------------|-----------------|
-| SPIR compilation flow | `fpga64_sw_emu`     | `fpga64_hw_emu`     | `fpga64_hw`     |
-| HLS compilation flow  | Unsupported yet | `fpga64_hls_hw_emu` | `fpga64_hls_hw` |
+|                                    | Software simulation | Hardware emulation  | Hardware        |
+|------------------------------------|---------------------|---------------------|-----------------|
+| SPIR compilation flow (deprecated) | `fpga64_sw_emu`     | `fpga64_hw_emu`     | `fpga64_hw`     |
+| HLS compilation flow               | Unsupported yet     | `fpga64_hls_hw_emu` | `fpga64_hls_hw` |
 
-Only one `fpga64_*` architecture is allowed in the `sycl-targets` flag.
+Only one `fpga64_*` architecture is allowed in the `sycl-targets`
+flag.
+
+The SYCL HLS compilation flow does not support software emulation because
+of internal Xilinx issue https://jira.xilinx.com/browse/CR-1099885
+But as SYCL allows also execution on a CPU device, it can replace the
+back-end software emulation.
+
 
 ### Small examples
 
 To run an example from the provided examples:
-- with software emulation:
-  ```bash
-  cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/simple_tests
-  # Instruct the compiler and runtime to use FPGA software emulation with SPIR flow
-  # Compile the SYCL program down to a host fat binary including device code for CPU
-  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_sw_emu \
-    single_task_vector_add.cpp -o single_task_vector_add
-  # Run the software emulation
-  ./single_task_vector_add
-  ```
 
 - with hardware emulation:
   ```bash
@@ -384,7 +391,7 @@ To run an example from the provided examples:
   ```bash
   # Instruct the compiler to use real FPGA hardware execution with SPIR flow
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
-  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hw \
+  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw \
     single_task_vector_add.cpp -o single_task_vector_add
   # Run on the real FPGA board
   ./single_task_vector_add
@@ -403,17 +410,9 @@ the `fpga64_` prefix trimmed. Namely:
 | SPIR compilation flow | `sw_emu`     | `hw_emu`     | `hw`     |
 | HLS compilation flow  | Unsupported yet | `hls_hw_emu` | `hls_hw` |
 
+Note that the SPIR compilation flow has been discontinued.
 
-
-- Run the test suite with software emulation (SPIR flow):
-  ```bash
-  cd $SYCL_HOME/llvm/build
-  export VXX_TARGET=sw_emu
-  cmake --build . --parallel `nproc` --target check-sycl-xocc-jmax
-  ```
-  This takes usually 4-6 minutes with a good CPU.
-
-- Run the test suite with hardware emulation (HLS flow):
+- Run the `xocc` test suite with hardware emulation (HLS flow):
   ```bash
   cd $SYCL_HOME/llvm/build
   export VXX_TARGET=hls_hw_emu
@@ -448,7 +447,7 @@ https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
 cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/edge_detection
 # Instruct the compiler and runtime to use real FPGA hardware execution
 $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
-    -fsycl-targets=fpga64_hw edge_detection.cpp \
+    -fsycl-targets=fpga64_hls_hw edge_detection.cpp \
     -o edge_detection `pkg-config --libs --cflags opencv4`
 # Execute on one of the images
 ./edge_detection data/input/eiffel.bmp
