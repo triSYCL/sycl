@@ -433,7 +433,11 @@ the `fpga64_` prefix trimmed. Namely:
 available on the system. But for `hw` and `hw_emu` execution mode,
 this usually means the system will run out of RAM even with 64G so
 `check-sycl-xocc-j4` should be used to run only 4 tests in
-parallel.
+parallel. There is also a `j2` version to use only 2 cores.
+
+To launch the compilation on all the SYCL tests, not only the `xocc`
+ones, there are the targets `check-sycl-all-jmax`,
+`check-sycl-all-j2` and `check-sycl-all-j4`
 
 
 ### Running a bigger example on real FPGA
