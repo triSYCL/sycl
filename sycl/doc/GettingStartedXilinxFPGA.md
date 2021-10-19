@@ -1,4 +1,4 @@
-Getting started with SYCL with a Xilinx FPGA U200 Alveo board and Ubuntu 20.10
+Getting started with SYCL with a Xilinx FPGA U200 Alveo board and Ubuntu 21.04
 ==============================================================================
 
 Disclaimer: nothing here is supported and this is all about a research
@@ -7,7 +7,7 @@ project.
 We assume you have a Xilinx FPGA U200 Alveo board but it might work
 with another board too.
 
-We assume that you have some modern Ubuntu like 20.10 version
+We assume that you have some modern Ubuntu like 21.04 version
 installed on an `x86_64` machine. But it might work with other recent
 versions of Ubuntu or Debian or even other Linux distributions, with
 some adaptations.
@@ -68,7 +68,7 @@ sudo ../src/runtime_src/tools/scripts/xrtdeps.sh
 ./build.sh
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
-sudo apt install --reinstall ./Release/xrt_202110.2.11.0_20.10-amd64-xrt.deb
+sudo apt install --reinstall ./Release/xrt_202210.2.13.0_21.04-amd64-xrt.deb
 ```
 
 It will install the user-mode XRT runtime and at least compile and
@@ -87,7 +87,7 @@ cd Debug
 make package
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
-sudo apt install --reinstall ./xrt_202110.2.11.0_20.10-amd64-xrt.deb
+sudo apt install --reinstall ./xrt_202210.2.13.0_21.04-amd64-xrt.deb
 ```
 
 Check that the FPGA board is detected:
@@ -132,7 +132,7 @@ tar zxvf .../Xilinx_Unified_2021.1_0610_2318.tar.gz
 ```
 
 Since the graphics Java installer does not work on modern Linux
-distributions like Ubuntu 20.10, use the batch-mode version:
+distributions like Ubuntu 21.04, use the batch-mode version:
 ```bash
 Xilinx_Unified_2021.1_0610_2318/xsetup --batch Install --location /opt/xilinx --agree 3rdPartyEULA,WebTalkTerms,XilinxEULA --edition "Vitis Unified Software Platform"
 ```
