@@ -12,6 +12,13 @@ installed on an `x86_64` machine. But it might work with other recent
 versions of Ubuntu or Debian or even other Linux distributions, with
 some adaptations.
 
+Warning: if you are using Linux kernel 5.12+ like shipped with Ubuntu
+21.10 or Debian/unstable, you will be hit by the bug
+https://github.com/Xilinx/XRT/issues/5943 up to its resolution.  In
+the meantime you can always help fixing the bug :-) or install/keep
+explicitly an older Linux kernel package and boot on it.
+
+
 ## What's new?
 
 - 2021/06/24: there is a new HLS target along the OpenCL/SPIR compiler
