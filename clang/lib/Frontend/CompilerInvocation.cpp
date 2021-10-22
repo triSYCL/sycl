@@ -3976,7 +3976,6 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
                          options::OPT_fno_sycl_allow_variadic_func)
           : Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
                          options::OPT_fno_sycl_allow_variadic_func, false);
-  Opts.SYCLUnnamedLambda = Args.hasArg(options::OPT_fsycl_unnamed_lambda);
 
   // Get OpenMP host file path if any and report if a non existent file is
   // found
