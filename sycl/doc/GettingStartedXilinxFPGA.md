@@ -12,11 +12,15 @@ installed on an `x86_64` machine. But it might work with other recent
 versions of Ubuntu or Debian or even other Linux distributions, with
 some adaptations.
 
-Warning: if you are using Linux kernel 5.12+ like shipped with Ubuntu
+:warning: if you are using Linux kernel 5.12+ like shipped with Ubuntu
 21.10 or Debian/unstable, you will be hit by the bug
 https://github.com/Xilinx/XRT/issues/5943 up to its resolution.  In
 the meantime you can always help fixing the bug :-) or install/keep
 explicitly an older Linux kernel package and boot on it.
+
+:warning: for some reason Ubuntu 21.10 ships an old version of XRT
+which is not to be used here. See [section about
+XRT](#installing-the-xilinx-xrt-runtime).
 
 
 ## What's new?
@@ -63,7 +67,7 @@ into the BIOS setup at boot time to ask for the explicit
 update. Often, there is no need to build a bootable USB stick.
 
 
-## Installing the Xilinx runtime
+## Installing the Xilinx XRT runtime
 
 ```bash
 # Get the latest Xilinx runtime. You might try the master branch instead...
@@ -98,6 +102,16 @@ make package
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
 sudo apt install --reinstall ./xrt_202210.2.13.0_21.04-amd64-xrt.deb
+```
+
+:warning: for some reason Ubuntu 21.10 ships an old version of XRT
+which is not to be used here. Even if you have installed it like
+above, it might be automatically "updated" by some automatic package
+updater running on a regular basis. So, if you are running Ubuntu
+21.10, to avoid this situation, you can put the
+package on hold after the installation with:
+```bash
+sudo apt-mark hold xrt
 ```
 
 Check that the FPGA board is detected:
