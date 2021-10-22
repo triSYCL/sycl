@@ -302,6 +302,16 @@ python $SYCL_HOME/llvm/buildbot/configure.py
 python $SYCL_HOME/llvm/buildbot/compile.py
 ```
 
+These scripts have many options which can be displayed when using the
+`--help` option. For example to configure with CUDA support, without
+treating compiler warnings as errors and producing a compiler database
+to be used by tools like LSP server like `clangd`:
+```
+python $SYCL_HOME/llvm/buildbot/configure.py --cuda -no-werror --cmake-opt="-DCMAKE_EXPORT_COMPILE_COMMANDS=1"
+```
+For more control, see [section Build](#build).
+
+
 ## Compiling and running a SYCL application
 
 The typical environment is setup with something like
