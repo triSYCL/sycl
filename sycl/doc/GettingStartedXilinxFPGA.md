@@ -396,6 +396,7 @@ To run an example from the provided examples:
 
 - with hardware emulation:
   ```bash
+  cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/simple_tests
   # Instruct the compiler and runtime to use FPGA hardware emulation with HLS flow
   # Compile the SYCL program down to a host fat binary including the RTL for simulation
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw_emu \
@@ -406,7 +407,8 @@ To run an example from the provided examples:
 
 - with real hardware execution on FPGA:
   ```bash
-  # Instruct the compiler to use real FPGA hardware execution with SPIR flow
+  cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/simple_tests
+  # Instruct the compiler to use real FPGA hardware execution with HLS flow
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw \
     single_task_vector_add.cpp -o single_task_vector_add
