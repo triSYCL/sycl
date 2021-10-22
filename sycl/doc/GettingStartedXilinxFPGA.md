@@ -116,7 +116,7 @@ sudo apt-mark hold xrt
 
 Check that the FPGA board is detected:
 ```bash
-sudo /opt/xilinx/xrt/bin/xbutil flash scan -v
+sudo /opt/xilinx/xrt/bin/xbutil --legacy flash scan -v
 ```
 
 which should display something similar to
@@ -206,7 +206,7 @@ about how to correctly generate the exact flashing command.
 
 Typically you run:
 ```bash
-sudo /opt/xilinx/xrt/bin/xbutil flash scan
+sudo /opt/xilinx/xrt/bin/xbutil --legacy flash scan
 XBFLASH -- Xilinx Card Flash Utility
 Card [0]
 	Card BDF:		0000:04:00.0
@@ -256,9 +256,9 @@ configurable with an FPGA!).
 
 Then after rebooting, you can check with a pre-compiled FPGA program
 provided by the target platform that the board is working correctly
-with:
+with (the device id below is to adapt to your card):
 ```bash
-sudo /opt/xilinx/xrt/bin/xbutil validate
+sudo /opt/xilinx/xrt/bin/xbutil validate --device 0000:04:00.1
 INFO: Found 1 cards
 
 INFO: Validating card[0]: xilinx_u200_xdma_201830_2
@@ -319,11 +319,10 @@ python $SYCL_HOME/llvm/buildbot/compile.py
 These scripts have many options which can be displayed when using the
 `--help` option. For example to configure with CUDA support, without
 treating compiler warnings as errors and producing a compiler database
-to be used by tools like LSP server like `clangd`:
-```
-python $SYCL_HOME/llvm/buildbot/configure.py --cuda -no-werror --cmake-opt="-DCMAKE_EXPORT_COMPILE_COMMANDS=1"
-```
-For more control, see [section Build](#build).
+to be used by tools like LSP server like `clangd`: ``` python
+$SYCL_HOME/llvm/buildbot/configure.py --cuda -no-werror
+--cmake-opt="-DCMAKE_EXPORT_COMPILE_COMMANDS=1" ``` For more control,
+see [section Build](#build).
 
 
 ## Compiling and running a SYCL application
