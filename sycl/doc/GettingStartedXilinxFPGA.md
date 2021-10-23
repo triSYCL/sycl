@@ -430,6 +430,35 @@ To run an example from the provided examples:
   ```
 Note that only the flag `-fsycl-targets` is changed across the previous examples.
 
+
+### Looking at the FPGA layout with Vivado
+
+SYCL for Vitis can generate a lot of files, report files, log
+files... including Xilinx `.xpr` projects which can be used by Vivado
+for inspection, for example to look at the physical layout of the FPGA.
+
+For this, you need to compile with an environment variable stating
+that the temporary files have to be kept, for example with:
+```bash
+export SYCL_VXX_KEEP_CLUTTER=True
+```
+
+Then, after compiling, you will have in your temporary directory
+(typically `/tmp`) a directory with a name related to the
+binary you have built, like `answer_42-bdb894rl239zxg`.
+
+In this directory you can find report files in various textual or HTML
+format per kernel in the `vxx_comp_report` directory giving
+information about expected frequency operation and FPGA resource usage.
+
+In the `vxx_link_report/link` there is information after linking all
+the kernel together.
+
+More interesting there is in
+`vxx_link_tmp/link/vivado/vpl/prj/prj.xpr` the project file which can
+be opened with Vivado to look at the FPGA schematics and layout.
+
+
 ### Running the test suite
 
 Selecting the target for which the tests are run is done using
