@@ -20,7 +20,6 @@
 #include <sycl/sycl.hpp>
 
 using namespace boost::hana::literals;
-;
 
 // Use sycl::host_selector for debug
 static selector_defines::CompiledForDeviceSelector selector;
@@ -28,10 +27,9 @@ static selector_defines::CompiledForDeviceSelector selector;
 /* A generic function taking any number of arguments of any type and
    folding them with a given generic operator */
 auto generic_executor = [](auto op, auto... inputs) {
-  // Use a tupple of heterogeneous buffers to wrap the inputs
+  // Use a tuple of heterogeneous buffers to wrap the inputs
   auto a = boost::hana::make_tuple(
-      sycl::buffer<typename decltype(inputs)::value_type>{std::begin(inputs),
-                                                          std::end(inputs)}...);
+      sycl::buffer{std::begin(inputs), std::end(inputs)}...);
 
   /* The element-wise computation
 
