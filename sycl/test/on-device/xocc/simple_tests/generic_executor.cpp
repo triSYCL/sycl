@@ -1,0 +1,105 @@
+/* RUN: %{execute}%s | %{filecheck} %s
+   CHECK: 6 8 10
+   CHECK: 352 -128 -44.25 -55.875
+
+
+   Simple example showing how SYCL provide single-source genericity
+   enabling writing generic templated libraries
+*/
+#include <functional>
+#include <iostream>
+#include <list>
+#include <set>
+#include <span>
+#include <vector>
+
+#include <boost/hana.hpp>
+
+#include "../utilities/device_selectors.hpp"
+#include <sycl/ext/xilinx/fpga.hpp>
+#include <sycl/sycl.hpp>
+
+using namespace boost::hana::literals;
+;
+
+// Use sycl::host_selector for debug
+static selector_defines::CompiledForDeviceSelector selector;
+
+/* A generic function taking any number of arguments of any type and
+   folding them with a given generic operator */
+auto generic_executor = [](auto op, auto... inputs) {
+  // Use a tupple of heterogeneous buffers to wrap the inputs
+  auto a = boost::hana::make_tuple(
+      sycl::buffer<typename decltype(inputs)::value_type>{std::begin(inputs),
+                                                          std::end(inputs)}...);
+
+  /* The element-wise computation
+
+     Note that we could use HANA to add some hierarchy in the
+     computation (Wallace's tree...) or to sort by type to minimize
+     the hardware usage... */
+  auto compute = [=](auto args) { return boost::hana::fold_left(args, op); };
+
+  // Use the range of the first argument as the range
+  // of the result and computation */
+  auto size = a[0_c].size();
+
+  // Infer the type of the output from 1 computation on inputs
+  using return_value_type =
+      decltype(compute(boost::hana::make_tuple(*std::begin(inputs)...)));
+
+  // Create a buffer to return the result
+  sycl::buffer<return_value_type> output{size};
+
+  // Submit a command-group to the device
+  sycl::queue{sycl::host_selector{}}.submit([&](sycl::handler &cgh) {
+    // Define the data used as a tuple of read accessors
+    auto ka = boost::hana::transform(a, [&](auto b) {
+      return b.template get_access<sycl::access::mode::read>(cgh);
+    });
+    // Data are produced to a write accessor to the output buffer
+    auto ko =
+        output.template get_access<sycl::access::mode::discard_write>(cgh);
+
+    // Define the kernel
+    // Does not compile: candidate template ignored: couldn't infer template
+    // argument 'IIType' cgh.single_task(sycl::ext::xilinx::pipeline_kernel([=]
+    // {
+    cgh.single_task([=] {
+      sycl::ext::xilinx::pipeline([&] {
+        for (int i = 0; i < size; ++i) {
+          // Pack operands an elemental computation in a tuple
+          auto operands =
+              boost::hana::transform(ka, [&](auto acc) { return acc[i]; });
+          // Assign computation on the operands to the elemental result
+          ko[i] = compute(operands);
+        }
+      });
+    });
+  });
+  // Return the output buffer
+  return output;
+};
+
+int main() {
+  std::vector<int> u{1, 2, 3};
+  std::vector<float> v{5, 6, 7};
+
+  // Do not use std::plus because it forces the same type for both operands
+  auto res = generic_executor([](auto x, auto y) { return x + y; }, u, v);
+  for (auto a = res.get_access<sycl::access::mode::read_write>();
+       auto e : std::span{&a[0], a.size()})
+    std::cout << e << ' ';
+  std::cout << std::endl;
+
+  // Just for kidding
+  std::vector<double> a{1, 2.5, 3.25, 10.125};
+  std::set<char> b{5, 6, 7, 2};
+  std::list<float> c{-55, 6.5, -7.5, 0};
+  auto res2 =
+      generic_executor([](auto x, auto y) { return 3 * x - 7 * y; }, a, b, c);
+  for (auto a = res2.get_access<sycl::access::mode::read_write>();
+       auto e : std::span{&a[0], a.size()})
+    std::cout << e << ' ';
+  std::cout << std::endl;
+}
