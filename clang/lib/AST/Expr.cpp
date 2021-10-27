@@ -559,6 +559,8 @@ static llvm::Optional<unsigned> SYCLMangleCallback(ASTContext &Ctx,
   return llvm::None;
 }
 
+std::string computeUniqueSYCLVXXName(StringRef Demangle);
+
 std::string SYCLUniqueStableNameExpr::ComputeName(ASTContext &Context,
                                                   QualType Ty) {
   std::unique_ptr<MangleContext> Ctx{ItaniumMangleContext::create(
@@ -569,7 +571,7 @@ std::string SYCLUniqueStableNameExpr::ComputeName(ASTContext &Context,
   llvm::raw_string_ostream Out(Buffer);
   Ctx->mangleTypeName(Ty, Out);
 
-  return Out.str();
+  return computeUniqueSYCLVXXName(Out.str());
 }
 
 SYCLUniqueStableIdExpr::SYCLUniqueStableIdExpr(EmptyShell Empty,
@@ -684,7 +686,7 @@ StringRef PredefinedExpr::getIdentKindName(PredefinedExpr::IdentKind IK) {
 }
 
 /// Compute a unique name that is consumable by sycl_vxx
-std::string computeUniqueSYCLVXXName(StringRef Name, StringRef Demangle) {
+std::string computeUniqueSYCLVXXName(StringRef Demangle) {
   /// VXX has a maximum of 64 character for the name of the kernel function
   /// plus the name of one parameter.
   /// Those characters need to be used wisely to prevent name collisions.
@@ -747,8 +749,8 @@ std::string computeUniqueSYCLVXXName(StringRef Name, StringRef Demangle) {
   /// repeated. This doesn't hurt entropy too much because it is just 2 out
   /// of 64.
   Result += llvm::SHA1::hashToString(
-      llvm::ArrayRef<uint8_t>{reinterpret_cast<const uint8_t *>(Name.data()),
-                              Name.size()},
+      llvm::ArrayRef<uint8_t>{reinterpret_cast<const uint8_t *>(Demangle.data()),
+                              Demangle.size()},
       "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
       "abcdefghijklmnopqrstuvwxyz"
       "0123456789AB");
