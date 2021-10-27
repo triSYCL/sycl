@@ -61,19 +61,15 @@ auto generic_executor(auto op, auto... inputs) {
         output.template get_access<sycl::access::mode::discard_write>(cgh);
 
     // Define the kernel
-    // Does not compile: candidate template ignored: couldn't infer template
-    // argument 'IIType' cgh.single_task(sycl::ext::xilinx::pipeline_kernel([=]
-    // {
     cgh.single_task([=] {
-      sycl::ext::xilinx::pipeline([&] {
-        for (int i = 0; i < size; ++i) {
+      for (int i = 0; i < size; ++i)
+        sycl::ext::xilinx::pipeline([&] {
           // Pack operands an elemental computation in a tuple
           auto operands =
               boost::hana::transform(ka, [&](auto acc) { return acc[i]; });
           // Assign computation on the operands to the elemental result
           ko[i] = compute(operands);
-        }
-      });
+        });
     });
   });
   // Return the output buffer
