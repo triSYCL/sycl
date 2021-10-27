@@ -6,6 +6,7 @@
    Simple example showing how SYCL provide single-source genericity
    enabling writing generic templated libraries
 */
+#include <cstdint>
 #include <functional>
 #include <iostream>
 #include <list>
@@ -80,8 +81,8 @@ auto generic_executor(auto op, auto... inputs) {
 };
 
 int main() {
-  std::vector<int> u{1, 2, 3};
-  std::vector<float> v{5, 6, 7};
+  std::vector<std::int8_t> u{1, 2, 3};
+  std::vector<std::int16_t> v{5, 6, 7};
 
   // Do not use std::plus because it forces the same type for both operands
   auto res = generic_executor([](auto x, auto y) { return x + y; }, u, v);
