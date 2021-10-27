@@ -26,7 +26,7 @@ static selector_defines::CompiledForDeviceSelector selector;
 
 /* A generic function taking any number of arguments of any type and
    folding them with a given generic operator */
-auto generic_executor = [](auto op, auto... inputs) {
+auto generic_executor(auto op, auto... inputs) {
   // Use a tuple of heterogeneous buffers to wrap the inputs
   auto a = boost::hana::make_tuple(
       sycl::buffer{std::begin(inputs), std::end(inputs)}...);
@@ -50,7 +50,7 @@ auto generic_executor = [](auto op, auto... inputs) {
   sycl::buffer<return_value_type> output{size};
 
   // Submit a command-group to the device
-  sycl::queue{sycl::host_selector{}}.submit([&](sycl::handler &cgh) {
+  sycl::queue{selector}.submit([&](sycl::handler &cgh) {
     // Define the data used as a tuple of read accessors
     auto ka = boost::hana::transform(a, [&](auto b) {
       return b.template get_access<sycl::access::mode::read>(cgh);
