@@ -34,7 +34,6 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
-#include "llvm/Support/SHA1.h"
 #include <algorithm>
 #include <cstring>
 using namespace clang;
@@ -559,8 +558,6 @@ static llvm::Optional<unsigned> SYCLMangleCallback(ASTContext &Ctx,
   return llvm::None;
 }
 
-std::string computeUniqueSYCLVXXName(StringRef Demangle);
-
 std::string SYCLUniqueStableNameExpr::ComputeName(ASTContext &Context,
                                                   QualType Ty) {
   std::unique_ptr<MangleContext> Ctx{ItaniumMangleContext::create(
@@ -571,7 +568,7 @@ std::string SYCLUniqueStableNameExpr::ComputeName(ASTContext &Context,
   llvm::raw_string_ostream Out(Buffer);
   Ctx->mangleTypeName(Ty, Out);
 
-  return computeUniqueSYCLVXXName(Out.str());
+  return Out.str();
 }
 
 SYCLUniqueStableIdExpr::SYCLUniqueStableIdExpr(EmptyShell Empty,
@@ -683,82 +680,6 @@ StringRef PredefinedExpr::getIdentKindName(PredefinedExpr::IdentKind IK) {
     break;
   }
   llvm_unreachable("Unknown ident kind for PredefinedExpr");
-}
-
-/// Compute a unique name that is consumable by sycl_vxx
-std::string computeUniqueSYCLVXXName(StringRef Demangle) {
-  /// VXX has a maximum of 64 character for the name of the kernel function
-  /// plus the name of one parameter.
-  /// Those characters need to be used wisely to prevent name collisions.
-  /// It is also useful to use a name that is understandable by the user,
-  /// so we add only 8 character of hash and only if needed.
-  /// The first character cannot be an underscore or a digit.
-  /// An underscore can only be found between two non underscore character
-  /// (No __ or undersocre at end or start of name)
-  constexpr unsigned MaxVXXSize = 30;
-  /// Some transformations might make 2 kernel identifiers the same.
-  /// Allow adding a hash when such transformations are made to avoid possible
-  /// name conflict.
-  bool ForceHash = false;
-
-  std::string Result;
-  Result.reserve(Demangle.size());
-
-  for (char c : Demangle) {
-    if (!isAlphanumeric(c)) {
-      // Do not repeat _ in the cleaned-up name
-      if (!Result.empty() && Result.back() == '_')
-        continue;
-      c = '_';
-    }
-    Result.push_back(c);
-  }
-
-  // Replace first kernel character name by a 'k' to be compatible with SPIR
-  if ((Result.front() == '_' || isDigit(Result.front()))) {
-    Result.front() = 'k';
-    ForceHash = true;
-  }
-
-  // Vivado IP naming requirements forbids having '_' as a last character
-  if (Result.back() == '_') {
-    ForceHash = true;
-  }
-
-  /// The name alone is guaranteed to be unique, so if fits in the size, it is
-  /// enough.
-  if (Result.size() < MaxVXXSize && !ForceHash) {
-    return Result;
-  }
-
-  if (Result.size() > (MaxVXXSize - 9)) {
-    /// 9 for 8 characters of hash and an '_'.
-    Result.erase(0, Result.size() - (MaxVXXSize - 9));
-  }
-
-  if (Result.front() == '_')
-    Result.front() = 'u';
-  if(isDigit(Result.front()))
-    Result.front() = 'a' + Result.front() - '0';
-
-  if (Result.back() != '_')
-    Result.push_back('_');
-
-  /// Sadly there is only 63 valid characters in C identifiers and v++ doesn't
-  /// deal well with double underscores in identifiers. So A and B are
-  /// repeated. This doesn't hurt entropy too much because it is just 2 out
-  /// of 64.
-  Result += llvm::SHA1::hashToString(
-      llvm::ArrayRef<uint8_t>{reinterpret_cast<const uint8_t *>(Demangle.data()),
-                              Demangle.size()},
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-      "abcdefghijklmnopqrstuvwxyz"
-      "0123456789AB");
-
-  if (Result.size() > MaxVXXSize)
-    Result.resize(MaxVXXSize);
-
-  return Result;
 }
 
 // FIXME: Maybe this should use DeclPrinter with a special "print predefined
