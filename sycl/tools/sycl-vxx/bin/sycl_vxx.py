@@ -144,8 +144,7 @@ class CompilationDriver:
                 "-flat-address-space=0", "-globaldce"
             ])
         opt_options.extend([
-            "--vectorize-loops=false", "--disable-loop-unrolling", "-O3",
-            "-globaldce", "-globaldce", "-inSPIRation",
+            "-inSPIRation",
             "-o", f"{self.optimised_bc}"
         ])
 
