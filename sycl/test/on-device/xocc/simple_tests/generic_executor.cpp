@@ -39,8 +39,8 @@ auto generic_executor(auto op, auto... inputs) {
      the hardware usage... */
   auto compute = [=](auto args) { return boost::hana::fold_left(args, op); };
 
-  // Use the range of the first argument as the range
-  // of the result and computation */
+  /* Use the range of the first argument as the range
+     of the result and computation */
   auto size = a[0_c].size();
 
   // Infer the type of the output from 1 computation on inputs
@@ -54,11 +54,10 @@ auto generic_executor(auto op, auto... inputs) {
   sycl::queue{selector}.submit([&](sycl::handler &cgh) {
     // Define the data used as a tuple of read accessors
     auto ka = boost::hana::transform(a, [&](auto b) {
-      return b.template get_access<sycl::access::mode::read>(cgh);
+      return sycl::accessor{b, cgh, sycl::read_only};
     });
     // Data are produced to a write accessor to the output buffer
-    auto ko =
-        output.template get_access<sycl::access::mode::discard_write>(cgh);
+    sycl::accessor ko{output, cgh, sycl::write_only, sycl::no_init};
 
     // Define the kernel
     cgh.single_task([=] {
@@ -82,7 +81,7 @@ int main() {
 
   // Do not use std::plus because it forces the same type for both operands
   auto res = generic_executor([](auto x, auto y) { return x + y; }, u, v);
-  for (auto a = res.get_access<sycl::access::mode::read_write>();
+  for (sycl::host_accessor a{res, sycl::read_only};
        auto e : std::span{&a[0], a.size()})
     std::cout << e << ' ';
   std::cout << std::endl;
@@ -93,7 +92,7 @@ int main() {
   std::list<float> c{-55, 6.5, -7.5, 0};
   auto res2 =
       generic_executor([](auto x, auto y) { return 3 * x - 7 * y; }, a, b, c);
-  for (auto a = res2.get_access<sycl::access::mode::read_write>();
+  for (sycl::host_accessor a{res, sycl::read_only};
        auto e : std::span{&a[0], a.size()})
     std::cout << e << ' ';
   std::cout << std::endl;
