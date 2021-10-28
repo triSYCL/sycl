@@ -29,7 +29,7 @@ static selector_defines::CompiledForDeviceSelector selector;
    folding them with a given generic operator */
 auto generic_executor(auto op, auto... inputs) {
   // Use a tuple of heterogeneous buffers to wrap the inputs
-  auto a = boost::hana::make_tuple(
+  auto bufs = boost::hana::make_tuple(
       sycl::buffer{std::begin(inputs), std::end(inputs)}...);
 
   /* The element-wise computation
@@ -41,7 +41,7 @@ auto generic_executor(auto op, auto... inputs) {
 
   /* Use the range of the first argument as the range
      of the result and computation */
-  auto size = a[0_c].size();
+  auto size = bufs[0_c].size();
 
   // Infer the type of the output from 1 computation on inputs
   using return_value_type =
@@ -53,7 +53,7 @@ auto generic_executor(auto op, auto... inputs) {
   // Submit a command-group to the device
   sycl::queue{selector}.submit([&](sycl::handler &cgh) {
     // Define the data used as a tuple of read accessors
-    auto ka = boost::hana::transform(a, [&](auto b) {
+    auto ka = boost::hana::transform(bufs, [&](auto b) {
       return sycl::accessor{b, cgh, sycl::read_only};
     });
     // Data are produced to a write accessor to the output buffer
