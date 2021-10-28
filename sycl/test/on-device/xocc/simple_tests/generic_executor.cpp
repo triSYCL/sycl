@@ -92,7 +92,7 @@ int main() {
   std::list<float> c{-55, 6.5, -7.5, 0};
   auto res2 =
       generic_executor([](auto x, auto y) { return 3 * x - 7 * y; }, a, b, c);
-  for (sycl::host_accessor a{res, sycl::read_only};
+  for (sycl::host_accessor a{res2, sycl::read_only};
        auto e : std::span{&a[0], a.size()})
     std::cout << e << ' ';
   std::cout << std::endl;
