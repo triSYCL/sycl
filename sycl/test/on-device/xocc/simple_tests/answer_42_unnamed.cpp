@@ -1,4 +1,4 @@
-// The universal answer on an heterogeneous world
+// The universal answer from an heterogeneous world
 
 #include <sycl/sycl.hpp>
 #include <iostream>
@@ -6,7 +6,7 @@
 #include "../utilities/device_selectors.hpp"
 
 int main() {
-  // Allocate some abstract memory
+  // Allocate 1 int of 1D abstract memory
   sycl::buffer<int> answer { 1 };
   // Create a queue on Xilinx FPGA
   sycl::queue q { selector_defines::CompiledForDeviceSelector {} };
@@ -20,13 +20,13 @@ int main() {
   // Submit a kernel on the FPGA
   q.submit([&] (sycl::handler &cgh) {
       // Get a write-only access to the buffer
-      auto a = answer.get_access<sycl::access::mode::write>(cgh);
+      sycl::accessor a { answer, cgh, sycl::write_only };
       // The computation on the accelerator
       cgh.single_task([=] { a[0] = 42; });
     });
 
   // Verify the result
-  auto ans = answer.get_access<sycl::access::mode::read>();
+  sycl::host_accessor ans { answer, sycl::read_only };
   std::cout << "The universal answer to the question is " << ans[0]
             << std::endl;
 }
