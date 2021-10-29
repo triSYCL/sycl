@@ -1056,6 +1056,7 @@ void ProgramManager::addImages(pi_device_binaries DeviceBinary) {
     const _pi_offload_entry EntriesB = RawImg->EntriesBegin;
     const _pi_offload_entry EntriesE = RawImg->EntriesEnd;
     auto Img = make_unique_ptr<RTDeviceBinaryImage>(RawImg, M);
+    setupEnvironmentForKernels(Img.get());
 
     // Fill the kernel argument mask map
     const pi::DeviceBinaryImage::PropertyRange &KPOIRange =
@@ -1111,7 +1112,6 @@ void ProgramManager::addImages(pi_device_binaries DeviceBinary) {
     if (KSId == 0)
       KSId = getNextKernelSetId();
 
-    setupEnvironmentForKernels(Img.get());
     auto &Imgs = m_DeviceImages[KSId];
     if (!Imgs)
       Imgs.reset(new std::vector<RTDeviceBinaryImageUPtr>());

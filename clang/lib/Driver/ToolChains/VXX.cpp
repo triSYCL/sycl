@@ -8,6 +8,7 @@
 
 #include "VXX.h"
 #include "CommonArgs.h"
+#include "clang/Driver/Action.h"
 #include "clang/Driver/Compilation.h"
 #include "clang/Driver/Driver.h"
 #include "clang/Driver/DriverDiagnostic.h"
@@ -227,6 +228,51 @@ void SYCL::LinkerVXX::constructSYCLVXXCommand(
 }
 
 ///////////////////////////////////////////////////////////////////////////////
+////                            V++ SYCL Post Link
+///////////////////////////////////////////////////////////////////////////////
+
+void SYCL::SYCLPostLinkVXX::ConstructJob(Compilation &C, const JobAction &JA,
+                                   const InputInfo &Output,
+                                   const InputInfoList &Inputs,
+                                   const ArgList &Args,
+                                   const char *LinkingOutput) const {
+  constructSYCLVXXPLCommand(C, JA, Output, Inputs, Args);
+}
+
+// \todo: Extend to support the possibility of more than one file being passed
+// to the linker stage
+// \todo: Add additional modifications that were added to the SYCL ToolChain
+// recently if feasible
+void SYCL::SYCLPostLinkVXX::constructSYCLVXXPLCommand(
+    Compilation &C, const JobAction &JA, const InputInfo &Output,
+    const InputInfoList &Inputs, const llvm::opt::ArgList &Args) const {
+  const auto &TC =
+    static_cast<const toolchains::VXXToolChain &>(getToolChain());
+  InputInfoList SyclVxxArg = Inputs;
+
+  ArgStringList CmdArgs;
+
+  assert(Output.getFilename()[0]);
+  CmdArgs.push_back("-o");
+  CmdArgs.push_back(Output.getFilename());
+
+  for (auto& In : Inputs)
+    CmdArgs.push_back(Args.MakeArgString(In.getFilename()));
+
+  // Path to sycl_vxx.py script
+  SmallString<128> ExecPath(C.getDriver().Dir);
+  path::append(ExecPath, "sycl_vxx_post_link.py");
+  const char *Exec = C.getArgs().MakeArgString(ExecPath);
+
+  // Generate our command to sycl_vxx.py using the arguments we've made
+  // Note: Inputs that the shell script doesn't use should be ignored
+  C.addCommand(std::make_unique<Command>(JA, *this, ResponseFileSupport::None(),
+                                         Exec, CmdArgs, Inputs, Output));
+}
+
+
+
+///////////////////////////////////////////////////////////////////////////////
 ////                            V++ Toolchain
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -301,4 +347,13 @@ void VXXToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
 void VXXToolChain::AddClangCXXStdlibIncludeArgs(const ArgList &Args,
                                                  ArgStringList &CC1Args) const {
   HostTC.AddClangCXXStdlibIncludeArgs(Args, CC1Args);
+}
+
+Tool *VXXToolChain::getTool(Action::ActionClass AC) const {
+  if (AC == Action::SYCLPostLinkJobClass) {
+    if (!VXXSYCLPostLink)
+      VXXSYCLPostLink.reset(new SYCL::SYCLPostLinkVXX(*this));
+    return VXXSYCLPostLink.get();
+  }
+  return ToolChain::getTool(AC);
 }

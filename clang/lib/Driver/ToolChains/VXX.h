@@ -83,6 +83,25 @@ public:
                                  const llvm::opt::ArgList &Args) const;
 };
 
+class LLVM_LIBRARY_VISIBILITY SYCLPostLinkVXX : public Tool {
+public:
+  SYCLPostLinkVXX(const ToolChain &TC)
+      : Tool("VXX::SYCLPostLinkVXX", "sycl-post-link-vxx", TC) {}
+
+  bool hasIntegratedCPP() const override { return false; }
+
+  void ConstructJob(Compilation &C, const JobAction &JA,
+                    const InputInfo &Output, const InputInfoList &Inputs,
+                    const llvm::opt::ArgList &TCArgs,
+                    const char *LinkingOutput) const override;
+
+private:
+  void constructSYCLVXXPLCommand(Compilation &C, const JobAction &JA,
+                               const InputInfo &Output,
+                               const InputInfoList &Inputs,
+                               const llvm::opt::ArgList &Args) const;
+};
+
 } // end namespace SYCL
 } // end namespace tools
 
@@ -125,6 +144,10 @@ public:
 
 protected:
   Tool *buildLinker() const override;
+  virtual Tool *getTool(Action::ActionClass AC) const override;
+
+private:
+  mutable std::unique_ptr<Tool> VXXSYCLPostLink;
 };
 
 } // end namespace toolchains

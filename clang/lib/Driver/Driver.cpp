@@ -4428,6 +4428,7 @@ class OffloadingActionBuilder final {
         auto isNVPTX = (*TC)->getTriple().isNVPTX();
         auto isAMDGCN = (*TC)->getTriple().isAMDGCN();
         auto isSPIR = (*TC)->getTriple().isSPIR();
+        auto isXilinxFPGA = (*TC)->getTriple().isXilinxFPGA();
         bool isSpirvAOT = TT.getSubArch() == llvm::Triple::SPIRSubArch_fpga ||
                           TT.getSubArch() == llvm::Triple::SPIRSubArch_gen ||
                           TT.getSubArch() == llvm::Triple::SPIRSubArch_x86_64;
@@ -4544,16 +4545,18 @@ class OffloadingActionBuilder final {
 
         // reflects whether current target is ahead-of-time and can't support
         // runtime setting of specialization constants
-        bool isAOT = isNVPTX || isAMDGCN || isSpirvAOT;
+        bool isAOT = isNVPTX || isAMDGCN || isSpirvAOT || isXilinxFPGA;
         // TODO support device code split for NVPTX target
 
         ActionList WrapperInputs;
         // post link is not optional - even if not splitting, always need to
         // process specialization constants
 
+        bool shouldOutputTables = isSPIR || isXilinxFPGA;
+
         types::ID PostLinkOutType =
-            isSPIR ? types::TY_Tempfiletable : FullDeviceLinkAction->getType();
-        if ((*TC)->getTriple().isXilinxFPGA()) {
+            (shouldOutputTables) ? types::TY_Tempfiletable : FullDeviceLinkAction->getType();
+        if (false && (*TC)->getTriple().isXilinxFPGA()) {
           WrapperInputs.push_back(DeviceLinkAction);
         } else {
           // For SPIR-V targets, force TY_Tempfiletable.
@@ -4563,7 +4566,7 @@ class OffloadingActionBuilder final {
 
           auto *ExtractIRFilesAction = C.MakeAction<FileTableTformJobAction>(
               PostLinkAction,
-              isSPIR ? types::TY_Tempfilelist : PostLinkAction->getType(),
+              (shouldOutputTables) ? types::TY_Tempfilelist : PostLinkAction->getType(),
               types::TY_Tempfilelist);
           // single column w/o title fits TY_Tempfilelist format
           ExtractIRFilesAction->addExtractColumnTform(
@@ -4586,6 +4589,8 @@ class OffloadingActionBuilder final {
                 FileTableTformJobAction::COL_CODE);
 
             WrapperInputs.push_back(ReplaceFilesAction);
+          } else if(isXilinxFPGA) {
+            WrapperInputs.push_back(PostLinkAction);
           } else {
             // For SPIRV-based targets - translate to SPIRV then optionally
             // compile ahead-of-time to native architecture
