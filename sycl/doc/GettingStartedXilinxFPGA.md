@@ -1,4 +1,4 @@
-Getting started with SYCL with a Xilinx FPGA U200 Alveo board and Ubuntu 20.10
+Getting started with SYCL with a Xilinx FPGA U200 Alveo board and Ubuntu 21.04
 ==============================================================================
 
 Disclaimer: nothing here is supported and this is all about a research
@@ -7,15 +7,21 @@ project.
 We assume you have a Xilinx FPGA U200 Alveo board but it might work
 with another board too.
 
-We assume that you have some modern Ubuntu like 20.10 version
+We assume that you have some modern Ubuntu like 21.04 version
 installed on an `x86_64` machine. But it might work with other recent
-versions of Ubuntu or Debian with some adaptations.
+versions of Ubuntu or Debian or even other Linux distributions, with
+some adaptations.
 
-Warning: if you are using Linux kernel 5.11+ like shipped with Ubuntu
-21.04, you will be hit by the bug
-https://github.com/Xilinx/XRT/issues/5168 up to its resolution.  In
-the meantime you can always help fixing the bug or install explicitly
-an older Linux kernel package and boot on it.
+:warning: if you are using Linux kernel 5.12+ like shipped with Ubuntu
+21.10 or Debian/unstable, you will be hit by the bug
+https://github.com/Xilinx/XRT/issues/5943 up to its resolution.  In
+the meantime you can always help fixing the bug :-) or install/keep
+explicitly an older Linux kernel package and boot on it.
+
+:warning: for some reason Ubuntu 21.10 ships an old version of XRT
+which is not to be used here. See [section about
+XRT](#installing-the-xilinx-xrt-runtime).
+
 
 ## What's new?
 
@@ -23,6 +29,9 @@ an older Linux kernel package and boot on it.
   flow for Xilinx FPGA. The HLS target relies on direct LLVM IR
   feeding and allows finer control by using HLS extensions.
 
+- 2021/10/01: the OpenCL/SPIR device compiler flow has been deprecated
+  because it has less features than the HLS device compiler flow and
+  we lack resources to maintain both.
 
 ## Installing the Alveo U200 board
 
@@ -58,7 +67,7 @@ into the BIOS setup at boot time to ask for the explicit
 update. Often, there is no need to build a bootable USB stick.
 
 
-## Installing the Xilinx runtime
+## Installing the Xilinx XRT runtime
 
 ```bash
 # Get the latest Xilinx runtime. You might try the master branch instead...
@@ -73,7 +82,7 @@ sudo ../src/runtime_src/tools/scripts/xrtdeps.sh
 ./build.sh
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
-sudo apt install --reinstall ./Release/xrt_202110.2.11.0_20.10-amd64-xrt.deb
+sudo apt install --reinstall ./Release/xrt_202210.2.13.0_21.04-amd64-xrt.deb
 ```
 
 It will install the user-mode XRT runtime and at least compile and
@@ -92,12 +101,22 @@ cd Debug
 make package
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
-sudo apt install --reinstall ./xrt_202110.2.11.0_20.10-amd64-xrt.deb
+sudo apt install --reinstall ./xrt_202210.2.13.0_21.04-amd64-xrt.deb
+```
+
+:warning: for some reason Ubuntu 21.10 ships an old version of XRT
+which is not to be used here. Even if you have installed it like
+above, it might be automatically "updated" by some automatic package
+updater running on a regular basis. So, if you are running Ubuntu
+21.10, to avoid this situation, you can put the
+package on hold after the installation with:
+```bash
+sudo apt-mark hold xrt
 ```
 
 Check that the FPGA board is detected:
 ```bash
-sudo /opt/xilinx/xrt/bin/xbutil flash scan -v
+sudo /opt/xilinx/xrt/bin/xbutil --legacy flash scan -v
 ```
 
 which should display something similar to
@@ -137,7 +156,7 @@ tar zxvf .../Xilinx_Unified_2021.1_0610_2318.tar.gz
 ```
 
 Since the graphics Java installer does not work on modern Linux
-distributions like Ubuntu 20.10, use the batch-mode version:
+distributions like Ubuntu 21.04, use the batch-mode version:
 ```bash
 Xilinx_Unified_2021.1_0610_2318/xsetup --batch Install --location /opt/xilinx --agree 3rdPartyEULA,WebTalkTerms,XilinxEULA --edition "Vitis Unified Software Platform"
 ```
@@ -187,7 +206,7 @@ about how to correctly generate the exact flashing command.
 
 Typically you run:
 ```bash
-sudo /opt/xilinx/xrt/bin/xbutil flash scan
+sudo /opt/xilinx/xrt/bin/xbutil --legacy flash scan
 XBFLASH -- Xilinx Card Flash Utility
 Card [0]
 	Card BDF:		0000:04:00.0
@@ -237,9 +256,9 @@ configurable with an FPGA!).
 
 Then after rebooting, you can check with a pre-compiled FPGA program
 provided by the target platform that the board is working correctly
-with:
+with (the device id below is to adapt to your card):
 ```bash
-sudo /opt/xilinx/xrt/bin/xbutil validate
+sudo /opt/xilinx/xrt/bin/xbutil validate --device 0000:04:00.1
 INFO: Found 1 cards
 
 INFO: Validating card[0]: xilinx_u200_xdma_201830_2
@@ -297,6 +316,15 @@ python $SYCL_HOME/llvm/buildbot/configure.py
 python $SYCL_HOME/llvm/buildbot/compile.py
 ```
 
+These scripts have many options which can be displayed when using the
+`--help` option. For example to configure with CUDA support, without
+treating compiler warnings as errors and producing a compiler database
+to be used by tools like LSP server like `clangd`: ``` python
+$SYCL_HOME/llvm/buildbot/configure.py --cuda -no-werror
+--cmake-opt="-DCMAKE_EXPORT_COMPILE_COMMANDS=1" ``` For more control,
+see [section Build](#build).
+
+
 ## Compiling and running a SYCL application
 
 The typical environment is setup with something like
@@ -338,10 +366,17 @@ runtime on CPU) or hardware emulation (the SYCL device code is
 synthesized into RTL Verilog and run by an RTL simulator such as
 `xsim`).
 
-In addition, two compilation flows for compiling SYCL kernels are provided.
-The SPIR flow is the first to have been supported by the tool.
-An alternative HLS flow is now developed, that aims at compiling kernels to 
-LLVM bitcode similar to what is produced by the open source Xilinx HLS frontend. 
+In addition, two compilation flows for compiling SYCL kernels are
+provided:
+
+- a new HLS device compiler flow is now developed, that aims at
+  compiling kernels to LLVM bitcode similar to what is produced by the
+  open source Xilinx HLS front-end. This way, anything supported by
+  Xilinx HLS C++ should be supported at some point in the future;
+
+- the SPIR flow device compiler, the first to have been supported by
+  the tool, aiming at using OpenCL C-like features. But it is
+  deprecated now since it provides less features than the HLS one.
 
 Note that the software and hardware emulation might not work for some
 system incompatibility reasons because Vitis comes with a lot of
@@ -354,29 +389,27 @@ using what is available on the system.
 Architecture provided to the `sycl-targets` Clang flag selects the
 compilation mode. Supported architectures are:
 
-|                       | Software simulation | Hardware emulation  | Hardware        |
-|-----------------------|---------------------|---------------------|-----------------|
-| SPIR compilation flow | `fpga64_sw_emu`     | `fpga64_hw_emu`     | `fpga64_hw`     |
-| HLS compilation flow  | Unsupported yet | `fpga64_hls_hw_emu` | `fpga64_hls_hw` |
+|                                    | Software simulation | Hardware emulation  | Hardware        |
+|------------------------------------|---------------------|---------------------|-----------------|
+| SPIR compilation flow (deprecated) | `fpga64_sw_emu`     | `fpga64_hw_emu`     | `fpga64_hw`     |
+| HLS compilation flow               | Unsupported yet     | `fpga64_hls_hw_emu` | `fpga64_hls_hw` |
 
-Only one `fpga64_*` architecture is allowed in the `sycl-targets` flag.
+Only one `fpga64_*` architecture is allowed in the `sycl-targets`
+flag.
+
+The SYCL HLS compilation flow does not support software emulation because
+of internal Xilinx issue https://jira.xilinx.com/browse/CR-1099885
+But as SYCL allows also execution on a CPU device, it can replace the
+back-end software emulation.
+
 
 ### Small examples
 
 To run an example from the provided examples:
-- with software emulation:
-  ```bash
-  cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/simple_tests
-  # Instruct the compiler and runtime to use FPGA software emulation with SPIR flow
-  # Compile the SYCL program down to a host fat binary including device code for CPU
-  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_sw_emu \
-    single_task_vector_add.cpp -o single_task_vector_add
-  # Run the software emulation
-  ./single_task_vector_add
-  ```
 
 - with hardware emulation:
   ```bash
+  cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/simple_tests
   # Instruct the compiler and runtime to use FPGA hardware emulation with HLS flow
   # Compile the SYCL program down to a host fat binary including the RTL for simulation
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw_emu \
@@ -387,14 +420,44 @@ To run an example from the provided examples:
 
 - with real hardware execution on FPGA:
   ```bash
-  # Instruct the compiler to use real FPGA hardware execution with SPIR flow
+  cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/simple_tests
+  # Instruct the compiler to use real FPGA hardware execution with HLS flow
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
-  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hw \
+  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw \
     single_task_vector_add.cpp -o single_task_vector_add
   # Run on the real FPGA board
   ./single_task_vector_add
   ```
 Note that only the flag `-fsycl-targets` is changed across the previous examples.
+
+
+### Looking at the FPGA layout with Vivado
+
+SYCL for Vitis can generate a lot of files, report files, log
+files... including Xilinx `.xpr` projects which can be used by Vivado
+for inspection, for example to look at the physical layout of the FPGA.
+
+For this, you need to compile with an environment variable stating
+that the temporary files have to be kept, for example with:
+```bash
+export SYCL_VXX_KEEP_CLUTTER=True
+```
+
+Then, after compiling, you will have in your temporary directory
+(typically `/tmp`) a directory with a name related to the
+binary you have built, like `answer_42-bdb894rl239zxg`.
+
+In this directory you can find report files in various textual or HTML
+format per kernel in the `vxx_comp_report` directory giving
+information about expected frequency operation and FPGA resource usage.
+
+In the `vxx_link_report/link` there is information after linking all
+the kernel together.
+
+More interesting there is in
+`vxx_link_tmp/link/vivado/vpl/prj/prj.xpr` the project file which can
+be opened with Vivado to look at the FPGA schematics and layout.
+
 
 ### Running the test suite
 
@@ -408,17 +471,9 @@ the `fpga64_` prefix trimmed. Namely:
 | SPIR compilation flow | `sw_emu`     | `hw_emu`     | `hw`     |
 | HLS compilation flow  | Unsupported yet | `hls_hw_emu` | `hls_hw` |
 
+Note that the SPIR compilation flow has been discontinued.
 
-
-- Run the test suite with software emulation (SPIR flow):
-  ```bash
-  cd $SYCL_HOME/llvm/build
-  export VXX_TARGET=sw_emu
-  cmake --build . --parallel `nproc` --target check-sycl-xocc-jmax
-  ```
-  This takes usually 4-6 minutes with a good CPU.
-
-- Run the test suite with hardware emulation (HLS flow):
+- Run the `xocc` test suite with hardware emulation (HLS flow):
   ```bash
   cd $SYCL_HOME/llvm/build
   export VXX_TARGET=hls_hw_emu
@@ -426,7 +481,7 @@ the `fpga64_` prefix trimmed. Namely:
   ```
   This takes usually 15-30 minutes with a good CPU.
 
-- Run the test suite with real hardware execution on FPGA (HLS flow):
+- Run the `xocc` test suite with real hardware execution on FPGA (HLS flow):
   ```bash
   cd $SYCL_HOME/llvm/build
   export VXX_TARGET=hls_hw
@@ -438,7 +493,11 @@ the `fpga64_` prefix trimmed. Namely:
 available on the system. But for `hw` and `hw_emu` execution mode,
 this usually means the system will run out of RAM even with 64G so
 `check-sycl-xocc-j4` should be used to run only 4 tests in
-parallel.
+parallel. There is also a `j2` version to use only 2 cores.
+
+To launch the compilation on all the SYCL tests, not only the `xocc`
+ones, there are the targets `check-sycl-all-jmax`,
+`check-sycl-all-j2` and `check-sycl-all-j4`
 
 
 ### Running a bigger example on real FPGA
@@ -449,14 +508,14 @@ https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
 cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/edge_detection
 # Instruct the compiler and runtime to use real FPGA hardware execution
 $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
-    -fsycl-targets=fpga64_hw edge_detection.cpp \
+    -fsycl-targets=fpga64_hls_hw edge_detection.cpp \
     -o edge_detection `pkg-config --libs --cflags opencv4`
 # Execute on one of the images
 ./edge_detection data/input/eiffel.bmp
 ```
 and then look at the `input.bmp` and `output.bmp` images.
 
-There is another application using a webcam instead, if you have one
+There is another application along using a webcam instead, if you have one
 on your machine.
 
 
@@ -536,11 +595,13 @@ to compile SYCL kernels to a format edible by `v++`, then take the output of
 `v++` and wrap it into the fat binary as normal.
 
 The current Intel SYCL implementation revolves around SPIR-V while
-Xilinx's `v++` compiler can only ingest SPIR-df as an intermediate
-representation. SPIR-df is LLVM IR with some SPIR decorations. It is
-similar to the SPIR-2.0 provisional specification but does not
-requires the LLVM IR version to be 3.4. It uses just the encoding of
-the LLVM used, which explains the `-df` as "de-facto".
+Xilinx's `v++` compiler can only ingest plain LLVM IR 6.x or LLVM IR
+6.x with a SPIR-df flavor as an intermediate representation. SPIR-df
+is some LLVM IR with some SPIR decorations. It is similar to the
+SPIR-2.0 provisional specification but does not requires the LLVM IR
+version to be exactly 3.4. It uses just the encoding of the LLVM used,
+which explains the `-df` as "de-facto". This is the term used in the
+team to present this non-conforming and non-standard SPIR.
 
 So a lot of our modifications revolve
 around being the middle man between `v++` and the SYCL device
@@ -549,11 +610,12 @@ the insane! Hopefully...
 
 
 ### Extra Notes:
+
 * The Driver ToolChain, currently makes some assumptions about the
   `Vitis` installation. For example, it assumes that `v++` is inside
-  Vitis's bin folder and that the lib folder containing `SPIR`
-  builtins that kernels are linked against are in a `/lnx64/lib`
-  directory relative to the bin folders parent.
+  Vitis's `bin` folder and that the `lib` folder containing `SPIR`
+  builtins that kernels are linked against are in a `lnx64/lib`
+  directory relative to the `bin` folder parent.
 
 ## Debugging the SYCL implementation
 
