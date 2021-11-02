@@ -352,7 +352,8 @@ struct VXXIRDowngrader : public ModulePass {
     resetByVal(M);
     removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
                          Attribute::ImmArg, Attribute::NoSync,
-                         Attribute::MustProgress, Attribute::NoUndef});
+                         Attribute::MustProgress, Attribute::NoUndef,
+                         Attribute::StructRet});
     renameBasicBlocks(M);
     removeFreezeInst(M);
     removeFNegInst(M);

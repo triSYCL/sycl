@@ -157,6 +157,19 @@ $XCHESSCC +P $(nproc) -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c -Oz \
   -o "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
   "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
 
+# The following code will edit the linker script based on the kernel to optimize memory usage.
+SIZE_OF_VARIABLE_SECTION_STR=$(objdump -h $SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o | grep -E "data|bss" | sed -E 's/00+/0x/' | gawk --non-decimal-data -F' ' '{ printf "%d\n",$3 }' | awk '{sum+=$1;} END{print sum;}')
+echo $SIZE_OF_VARIABLE_SECTION_STR
+declare -i SIZE_OF_VARIABLE_SECTION=$(($SIZE_OF_VARIABLE_SECTION_STR))
+# 7000 in hexa is 0x8000(size of the tile's memory) - 0x1000(fixed size dedicated to the stack)
+# 6fdc is 0x7000 - 0x24 because the linker alway insert a 0x24 byte section of data even without anything in the .o files
+declare -i TOTAL_SIZE=$((16#6edc))
+declare -i TOTAL_SIZE_MINUS_GLOBAL_VARIABLES=TOTAL_SIZE-SIZE_OF_VARIABLE_SECTION
+SCRIPT_REPLACEMENT=$(printf "%x\n" $((TOTAL_SIZE_MINUS_GLOBAL_VARIABLES)))
+cat $DRIVER_PATH_DIR/chesswrappers/linker_script_east.bcf | sed "s/CALCULATED_SIZE_MINUS_GLOBALS/$SCRIPT_REPLACEMENT/g" > $SOURCE_TEMPORARY_DIR/linker_script_east.bcf
+cat $DRIVER_PATH_DIR/chesswrappers/linker_script_west.bcf | sed "s/CALCULATED_SIZE_MINUS_GLOBALS/$SCRIPT_REPLACEMENT/g" > $SOURCE_TEMPORARY_DIR/linker_script_west.bcf
+echo "$TOTAL_SIZE_MINUS_GLOBAL_VARIABLES" > $SOURCE_TEMPORARY_DIR/REMAINING_SIZES
+
 # A function we can fork into child processes to achieve some form of
 # parallelism at a higher level than chess itself provides with it's own
 # paralleism via +P.
@@ -192,14 +205,14 @@ chess_kernel_compile () {
 
     # link the same kernel for west tiles and east tiles
     $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f \
-      +l$DRIVER_PATH_DIR/chesswrappers/linker_script_east.bcf -Oz \
+      +l$SOURCE_TEMPORARY_DIR/linker_script_east.bcf -Oz \
       -o "$SOURCE_TEMPORARY_DIR/$0.elf.o_east" \
       "$SOURCE_TEMPORARY_DIR/$0.main.o" \
       "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
       "$SYCL_LIB_PATH/acap-intrinsic.o" &
 
     $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f \
-      +l$DRIVER_PATH_DIR/chesswrappers/linker_script_west.bcf -Oz \
+      +l$SOURCE_TEMPORARY_DIR/linker_script_west.bcf -Oz \
       -o "$SOURCE_TEMPORARY_DIR/$0.elf.o_west" \
       "$SOURCE_TEMPORARY_DIR/$0.main.o" \
       "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
@@ -219,6 +232,8 @@ if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
   echo "${KERNEL_NAME_ARRAY[@]}" | xargs -n1 -P$(nproc) \
     bash -c 'chess_kernel_compile "$@"'
 fi
+
+echo $REMAINING_SIZES
 
 # Wait on all our spawned compilations to complete
 wait
@@ -266,7 +281,10 @@ if [[ ! ${#KERNEL_NAME_ARRAY_UNMERGED[@]} -eq 0 ]]; then
         # The name is also used by the Offload Wrapper to identify the image to
         # wrap into the host binary after its loaded into memory.
         echo "${index}$POSTFIX" >> "$OUTPUT_FILE_NAME"
-        
+
+        # The size in decimal of the memory section that was reserved for the runtime.
+        cat $SOURCE_TEMPORARY_DIR/REMAINING_SIZES >> "$OUTPUT_FILE_NAME"
+
         # Size of file in bytes
         echo "`ls -lrt "${ELF}$POSTFIX" | nawk '{print $5}'`" >> "$OUTPUT_FILE_NAME"
         cat ${ELF}$POSTFIX >> "$OUTPUT_FILE_NAME"

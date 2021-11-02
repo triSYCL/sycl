@@ -119,9 +119,33 @@ struct PrepareSyclChessOpt : public ModulePass {
     }
   }
 
+  void handleGlobals(Module &M) {
+    /// Chess cannot handle llvm.global_ctors so we remove it.
+    if (GlobalVariable *GV = M.getGlobalVariable("llvm.global_ctors")) {
+      GV->eraseFromParent();
+    }
+    if (Function *OurF = M.getFunction("__cxx_global_var_ctor")) {
+      for (Function &F : M.getFunctionList()) {
+        if (F.getName().startswith("__cxx_global_var_init"))
+          CallInst::Create(F.getFunctionType(), &F, "",
+                           OurF->getEntryBlock().getTerminator());
+      }
+    }
+    if (Function *OurF = M.getFunction("__cxx_global_var_dtor"))
+      if (Function *AtExit = M.getFunction("__cxa_atexit")) {
+        for (User *U : AtExit->users()) {
+          Function *F = cast<Function>(getUnderlyingObject(U->getOperand(0)));
+          GlobalVariable *GV = cast<GlobalVariable>(getUnderlyingObject(U->getOperand(1)));
+          CallInst::Create(F->getFunctionType(), F, {GV}, "",
+                           OurF->getEntryBlock().getTerminator());
+        }
+      }
+  }
+
   bool runOnModule(Module &M) override {
     turnNonKernelsIntoPrivate(M);
     prepareForMerging(M);
+    handleGlobals(M);
     // This has to be done before changing the calling convention
     modifySPIRCallingConv(M);
     // makeVolatile(M);

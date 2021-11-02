@@ -214,46 +214,50 @@ bool Sema::DiagnoseUseOfDecl(NamedDecl *D, ArrayRef<SourceLocation> Locs,
                              bool AvoidPartialAvailabilityChecks,
                              ObjCInterfaceDecl *ClassReceiver) {
   if (getLangOpts().SYCLIsDevice) {
-    if (auto VD = dyn_cast<VarDecl>(D)) {
-      bool IsConst = VD->getType().isConstant(Context);
-      bool IsRuntimeEvaluated =
-          ExprEvalContexts.empty() ||
-          (!isUnevaluatedContext() && !isConstantEvaluated());
-      bool IsEsimdPrivateGlobal = isSYCLEsimdPrivateGlobal(VD);
-      if (IsRuntimeEvaluated && !IsConst && VD->getStorageClass() == SC_Static)
-        SYCLDiagIfDeviceCode(*Locs.begin(), diag::err_sycl_restrict)
-            << Sema::KernelNonConstStaticDataVariable;
-      // Non-const globals are allowed for SYCL explicit SIMD.
-      else if (IsRuntimeEvaluated && !IsEsimdPrivateGlobal && !IsConst &&
-               VD->hasGlobalStorage())
-        SYCLDiagIfDeviceCode(*Locs.begin(), diag::err_sycl_restrict)
-            << Sema::KernelGlobalVariable;
-      // ESIMD globals cannot be used in a SYCL context.
-      else if (IsRuntimeEvaluated && IsEsimdPrivateGlobal &&
-               VD->hasGlobalStorage())
-        SYCLDiagIfDeviceCode(*Locs.begin(),
-                             diag::err_esimd_global_in_sycl_context,
-                             Sema::DeviceDiagnosticReason::Sycl);
-      // Disallow const statics and globals that are not zero-initialized
-      // or constant-initialized.
-      else if (IsRuntimeEvaluated && IsConst && VD->hasGlobalStorage() &&
-               !VD->isConstexpr() &&
-               !checkAllowedSYCLInitializer(VD, /*CheckValueDependent =*/true))
-        SYCLDiagIfDeviceCode(*Locs.begin(), diag::err_sycl_restrict)
-            << Sema::KernelConstStaticVariable;
-    } else if (auto *FDecl = dyn_cast<FunctionDecl>(D)) {
-      // SYCL device function cannot be called from an ESIMD context. However,
-      // funcitons that start with '__spirv_' or '__sycl_' are exceptions to
-      // this rule.
-      const IdentifierInfo *Id = FDecl->getIdentifier();
-      if ((getEmissionReason(FDecl) == Sema::DeviceDiagnosticReason::Sycl) &&
-          Id && !Id->getName().startswith("__spirv_") &&
-          !Id->getName().startswith("__sycl_")) {
-        SYCLDiagIfDeviceCode(
-            *Locs.begin(), diag::err_sycl_device_function_is_called_from_esimd,
-            Sema::DeviceDiagnosticReason::Esimd);
+    if (!getLangOpts().SYCLAllowMutableGlobal)
+      if (auto VD = dyn_cast<VarDecl>(D)) {
+        bool IsConst = VD->getType().isConstant(Context);
+        bool IsRuntimeEvaluated =
+            ExprEvalContexts.empty() ||
+            (!isUnevaluatedContext() && !isConstantEvaluated());
+        bool IsEsimdPrivateGlobal = isSYCLEsimdPrivateGlobal(VD);
+        if (IsRuntimeEvaluated && !IsConst &&
+            VD->getStorageClass() == SC_Static)
+          SYCLDiagIfDeviceCode(*Locs.begin(), diag::err_sycl_restrict)
+              << Sema::KernelNonConstStaticDataVariable;
+        // Non-const globals are allowed for SYCL explicit SIMD.
+        else if (IsRuntimeEvaluated && !IsEsimdPrivateGlobal && !IsConst &&
+                 VD->hasGlobalStorage())
+          SYCLDiagIfDeviceCode(*Locs.begin(), diag::err_sycl_restrict)
+              << Sema::KernelGlobalVariable;
+        // ESIMD globals cannot be used in a SYCL context.
+        else if (IsRuntimeEvaluated && IsEsimdPrivateGlobal &&
+                 VD->hasGlobalStorage())
+          SYCLDiagIfDeviceCode(*Locs.begin(),
+                               diag::err_esimd_global_in_sycl_context,
+                               Sema::DeviceDiagnosticReason::Sycl);
+        // Disallow const statics and globals that are not zero-initialized
+        // or constant-initialized.
+        else if (IsRuntimeEvaluated && IsConst && VD->hasGlobalStorage() &&
+                 !VD->isConstexpr() &&
+                 !checkAllowedSYCLInitializer(VD,
+                                              /*CheckValueDependent =*/true))
+          SYCLDiagIfDeviceCode(*Locs.begin(), diag::err_sycl_restrict)
+              << Sema::KernelConstStaticVariable;
+      } else if (auto *FDecl = dyn_cast<FunctionDecl>(D)) {
+        // SYCL device function cannot be called from an ESIMD context. However,
+        // funcitons that start with '__spirv_' or '__sycl_' are exceptions to
+        // this rule.
+        const IdentifierInfo *Id = FDecl->getIdentifier();
+        if ((getEmissionReason(FDecl) == Sema::DeviceDiagnosticReason::Sycl) &&
+            Id && !Id->getName().startswith("__spirv_") &&
+            !Id->getName().startswith("__sycl_")) {
+          SYCLDiagIfDeviceCode(
+              *Locs.begin(),
+              diag::err_sycl_device_function_is_called_from_esimd,
+              Sema::DeviceDiagnosticReason::Esimd);
+        }
       }
-    }
   }
 
   SourceLocation Loc = Locs.front();

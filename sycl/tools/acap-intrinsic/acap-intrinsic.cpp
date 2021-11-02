@@ -28,20 +28,20 @@ void stream_read4(char* out_buffer, int stream_idx) {
   *reinterpret_cast<uint32_t*>(out_buffer) = ::get_ss(stream_idx);
 }
 void stream_write4(const char* in_buffer, int stream_idx, int tlast) {
-  ::put_ms(stream_idx, *reinterpret_cast<uint32_t*>(in_buffer), tlast);
+  ::put_ms(stream_idx, *reinterpret_cast<const uint32_t*>(in_buffer), tlast);
 }
 void stream_read16(char* out_buffer, int stream_idx) {
   *reinterpret_cast<v4int32*>(out_buffer) = ::getl_wss(stream_idx);
 }
 void stream_write16(const char* in_buffer, int stream_idx, int tlast) {
-  ::put_wms(stream_idx, *reinterpret_cast<v4int32*>(in_buffer), tlast);
+  ::put_wms(stream_idx, *reinterpret_cast<const v4int32*>(in_buffer), tlast);
 }
 
 void cstream_read48(char* out_buffer) {
   *reinterpret_cast<v8acc48*>(out_buffer) = ::get_scd();
 }
 void cstream_write48(const char* in_buffer) {
-  ::put_mcd(*reinterpret_cast<v8acc48*>(in_buffer));
+  ::put_mcd(*reinterpret_cast<const v8acc48*>(in_buffer));
 }
 
 }

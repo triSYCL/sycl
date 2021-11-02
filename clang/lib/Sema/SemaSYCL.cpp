@@ -1010,19 +1010,8 @@ static void populateMainEntryPoint(Sema& S, const StringRef Name,
   }
   llvm::raw_fd_ostream Out(MainNameFD, true /*close in destructor*/);
 
-  Out << "// This is an auto-generated SYCL AIE Processor Tile Main.\n";
-  Out << "#include <stdint.h>\n";
-
   Out << "// SYCL generated kernel wrapper function \n";
   Out << "extern \"C\" void " << Name << "();\n";
-
-  // TODO: Declare Kernel objects and external arrays
-  Out << "// Declare Kernel objects and external arrays \n";
-  Out << "\n";
-
-  // TODO: Declare shared memory buffers
-  Out << "// Declare shared memory buffers \n";
-  Out << "\n";
 
   Out << "// SYCL Tile Address Register \n";
   Out << "int main(void) {\n";

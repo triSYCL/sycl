@@ -51,7 +51,8 @@ _reserved   DMb                        0x30000   0x08000
 //East-------------------------------------------------
 _stack DM_stack                        0x38000   0x01000
 // This is the space used by the runtime for various purposes
-_reserved   DMb                        0x39000   0x06800
+// CALCULATED_SIZE_MINUS_GLOBALS will be replaced by the correct value before use
+_reserved   DMb                        0x39000   0x0CALCULATED_SIZE_MINUS_GLOBALS
 // This is leaves 0x800 for global variables and constants
 // constant are be used by the scalar floating point emulation code.
 

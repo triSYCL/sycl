@@ -7223,7 +7223,7 @@ NamedDecl *Sema::ActOnVariableDeclarator(
 
   // Static variables declared inside SYCL device code must be const or
   // constexpr
-  if (getLangOpts().SYCLIsDevice)
+  if (getLangOpts().SYCLIsDevice && !getLangOpts().SYCLAllowMutableGlobal)
     if (SCSpec == DeclSpec::SCS_static && !R.isConstant(Context))
       SYCLDiagIfDeviceCode(D.getIdentifierLoc(), diag::err_sycl_restrict)
           << Sema::KernelNonConstStaticDataVariable;

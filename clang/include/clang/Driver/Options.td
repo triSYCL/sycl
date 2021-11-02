@@ -2527,6 +2527,9 @@ def fsycl_header_only_library : Flag<["-"], "fsycl-header-only-library">,
   HelpText<"Tells the SYCL host compilation not to implicitly add -lsycl and "
            "look for a SYCL library as we will use a header only runtime "
            "library.">;
+def fsycl_mutable_global : Flag<["-"], "fsycl-mutable-global">,
+  Flags<[CC1Option, CoreOption]>, HelpText<"Allow mutable global variables in SYCL device code">,
+  MarshallingInfoFlag<LangOpts<"SYCLAllowMutableGlobal">>;
 def fsycl_unnamed_lambda : Flag<["-"], "fsycl-unnamed-lambda">,
   Flags<[CC1Option, CoreOption]>, HelpText<"Allow unnamed SYCL lambda kernels">,
   MarshallingInfoFlag<LangOpts<"SYCLUnnamedLambda">>;
