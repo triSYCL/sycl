@@ -4554,8 +4554,9 @@ class OffloadingActionBuilder final {
 
         bool shouldOutputTables = isSPIR || isXilinxFPGA;
 
-        types::ID PostLinkOutType =
-            (shouldOutputTables) ? types::TY_Tempfiletable : FullDeviceLinkAction->getType();
+        types::ID PostLinkOutType = shouldOutputTables
+                                        ? types::TY_Tempfiletable
+                                        : FullDeviceLinkAction->getType();
         if (false && (*TC)->getTriple().isXilinxFPGA()) {
           WrapperInputs.push_back(DeviceLinkAction);
         } else {
@@ -4566,7 +4567,8 @@ class OffloadingActionBuilder final {
 
           auto *ExtractIRFilesAction = C.MakeAction<FileTableTformJobAction>(
               PostLinkAction,
-              (shouldOutputTables) ? types::TY_Tempfilelist : PostLinkAction->getType(),
+              shouldOutputTables ? types::TY_Tempfilelist
+                                 : PostLinkAction->getType(),
               types::TY_Tempfilelist);
           // single column w/o title fits TY_Tempfilelist format
           ExtractIRFilesAction->addExtractColumnTform(
@@ -4589,7 +4591,7 @@ class OffloadingActionBuilder final {
                 FileTableTformJobAction::COL_CODE);
 
             WrapperInputs.push_back(ReplaceFilesAction);
-          } else if(isXilinxFPGA) {
+          } else if (isXilinxFPGA) {
             WrapperInputs.push_back(PostLinkAction);
           } else {
             // For SPIRV-based targets - translate to SPIRV then optionally

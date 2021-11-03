@@ -134,8 +134,6 @@ void AddForwardedOptions(const llvm::opt::ArgList &Args,
   CmdArgs.push_back(Args.MakeArgString(TmpPath));
 }
 
-// \todo: Extend to support the possibility of more than one file being passed
-// to the linker stage
 // \todo: Add additional modifications that were added to the SYCL ToolChain
 // recently if feasible
 void SYCL::LinkerVXX::constructSYCLVXXCommand(

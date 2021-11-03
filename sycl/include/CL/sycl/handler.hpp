@@ -891,7 +891,7 @@ device D = detail::getDeviceFromHandler(*this);
       AdjustedRange.set_range_dim0(NewValX);
       kernel_parallel_for_wrapper<KName, TransformedArgType>(Wrapper);
 #ifndef __SYCL_DEVICE_ONLY__
-      if(!D.has(aspect::ext_xilinx_single_task_only)) {
+      if (!D.has(aspect::ext_xilinx_single_task_only)) {
         detail::checkValueRange<Dims>(AdjustedRange);
         MNDRDesc.set(std::move(AdjustedRange));
         StoreLambda<KName, decltype(Wrapper), Dims, TransformedArgType>(
@@ -921,7 +921,7 @@ device D = detail::getDeviceFromHandler(*this);
 #endif // !__SYCL_SPIR_DEVICE__
 
 // Wrap kernel in for loop for devices that do not support parallel_for
-// (currently Xilinx)
+// (currently Xilinx HLS)
 #if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
     auto SingleTaskKernel = [=]{
         detail::serialize_parallel_for(KernelFunc, NumWorkItems);

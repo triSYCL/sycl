@@ -129,12 +129,12 @@ class CompilationDriver:
         subprocess.run(args, check=True)
 
     @subprocess_error_handler("Error in sycl->HLS conversion")
-    def _run_optimisation(self):
+    def _run_preparation(self):
         """Run the various sycl->HLS conversion passes"""
         outstem = self.outstem
-        self.optimised_bc = (
+        self.prepared_bc = (
             self.tmpdir /
-            f"{outstem}-kernels-optimized.bc"
+            f"{outstem}-kernels-prepared.bc"
         )
         opt_options = ["--sycl-vxx",
                        "-preparesycl", "-globaldce"]
@@ -145,12 +145,12 @@ class CompilationDriver:
             ])
         opt_options.extend([
             "-inSPIRation",
-            "-o", f"{self.optimised_bc}"
+            "-o", f"{self.prepared_bc}"
         ])
 
         opt = self.clang_path / "opt"
         args = [opt, *opt_options, self.before_opt_src]
-        self._dump_cmd("01-run_optimisations.cmd", args)
+        self._dump_cmd("01-run_preparation.cmd", args)
         proc = subprocess.run(args, check=True, capture_output=True)
         if bytes("SYCL_VXX_UNSUPPORTED_SPIR_BUILTINS", "ascii") in proc.stderr:
             print("Unsupported SPIR builtins found : stopping compilation")
@@ -171,7 +171,7 @@ class CompilationDriver:
         self.linked_kernels = self.tmpdir / f"{self.outstem}_kernels-linked.bc"
         args = [
             llvm_link,
-            self.optimised_bc,
+            self.prepared_bc,
             "--only-needed",
             vitis_lib_spir,
             "-o",
@@ -181,7 +181,7 @@ class CompilationDriver:
         subprocess.run(args, check=True)
 
     @subprocess_error_handler("Error in preparing and downgrading IR")
-    def _prepare_and_downgrade(self):
+    def _downgrade(self):
         opt = self.clang_path / "opt"
         prepared_kernels = self.tmpdir / f"{self.outstem}_linked.simple.bc"
         kernel_prop = (
@@ -330,9 +330,9 @@ class CompilationDriver:
                 self._link_multi_inputs()
             else:
                 shutil.copy2(self.inputs[0], self.before_opt_src)
-            self._run_optimisation()
+            self._run_preparation()
             self._link_spir()
-            self._prepare_and_downgrade()
+            self._downgrade()
             if environ.get("SYCL_VXX_MANUAL_EDIT") is not None:
                 print("Please edit", self.downgraded_ir)
                 input("Press enter to resume the compilation")

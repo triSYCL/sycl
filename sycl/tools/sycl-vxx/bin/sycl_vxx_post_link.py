@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """sycl_vxx_post_link
-This is a sycl-post-link replacement which is able to parse xclbins
+This is the sycl-post-link implementation for the VXX toolchain which is able
+to get kernel names from xclbins (Xilinx FPGA native binaries).
 """
 
 from argparse import ArgumentParser

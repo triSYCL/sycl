@@ -21,17 +21,33 @@ namespace detail {
 ///
 ///@brief partial_static_unroll implementation
 ///
-///@tparam NormalizedInitStep Normalized unrolled iteration index
+/// Flatten a given number of loop step invocation.
+///
+/// normalized_partial_static_unroll<0, 4, Inc>(LoopStep, Condition, i, bound)
+/// is equivalent to:
+///
+/// \code{.cpp}
+/// if (Condition(i, bound)) LoopStep(i);
+/// if (Condition(i + Inc, bound)) LoopStep(i + Inc);
+/// if (Condition(i + 2*Inc, bound)) LoopStep(i + 2*Inc);
+/// if (Condition(i + 3*Inc, bound)) LoopStep(i + 3*Inc);
+/// \endcode
+///
+///@tparam NormalizedInitStep Normalized unrolled iteration index (used for
+///        recursion, for top call will be 0)
 ///@tparam NormalizedExitStep First value greater than maximal normalized
-///        unrolled iteration index
-///@tparam Increment How much to add to the iteration variable between each iteration
+///        unrolled iteration index (Used for recursion: for top call should be
+///        the number of step to explicite)
+///@tparam Increment How much to add to the iteration variable between each
+///        iteration
 ///@param LoopStep Computation performed at each iteration
-///@param LoopCondition Loop condition 
+///@param LoopCondition Loop condition
 ///@param First Initial iteration value
 ///@param Bound Loop iteration bound
 template <int NormalizedInitStep, int NormalizedExitStep, int Increment>
-void inline normalized_partial_static_unroll(auto &LoopStep, auto &&LoopCondition,
-                                       int First, int Bound) {
+void inline normalized_partial_static_unroll(auto &LoopStep,
+                                             auto &&LoopCondition, int First,
+                                             int Bound) {
   if constexpr (NormalizedExitStep - NormalizedInitStep <= 1) {
     // Actual call step
     constexpr int LocalInc = NormalizedInitStep * Increment;
@@ -43,12 +59,10 @@ void inline normalized_partial_static_unroll(auto &LoopStep, auto &&LoopConditio
     // Subdivide call sequence
     constexpr int MidPoint = (NormalizedInitStep + NormalizedExitStep) / 2;
     normalized_partial_static_unroll<NormalizedInitStep, MidPoint, Increment>(
-        LoopStep,
-        LoopCondition, First, Bound);
+        LoopStep, LoopCondition, First, Bound);
 
     normalized_partial_static_unroll<MidPoint, NormalizedExitStep, Increment>(
-        LoopStep,
-        LoopCondition, First, Bound);
+        LoopStep, LoopCondition, First, Bound);
   }
 }
 
@@ -106,9 +120,9 @@ void inline normalized_static_full_unrolling(auto &LoopStep) {
 /// }
 /// \endcode
 ///
-/// Except that there is UnrollFactor less iteration and the loop body contains
-/// UnrollFactor successive call to LoopStep (with I incremented
-/// correspondingly).
+/// Except that there are UnrollFactor less iterations and the loop body
+/// contains UnrollFactor successive call to LoopStep (with I incremented
+/// accordingly).
 template <int UnrollFactor = 1, int Increment = 1>
 inline void partial_static_unroll(auto &LoopStep, auto &LoopCondition,
                                   int StartIdx, int Bound) {
@@ -128,13 +142,13 @@ inline void partial_static_unroll(auto &LoopStep, auto &LoopCondition,
 /// @brief Build the unrolled equivalent of a for loop
 ///
 /// @tparam StartIdx Initial value of the iteration index
-/// @tparam NbSteps The number of iteration to perform
+/// @tparam NbSteps The number of iterations to perform
 /// @tparam Increment The value by which the iteration index is incremented
 ///         between iterations.
 ///
 /// @param Functor Lambda containing the elementary computation step.
 ///
-/// The generated code is equivalent to 
+/// The generated code is equivalent to
 /// \code {.cpp}
 /// int IterationVal = StartIdx;
 /// for (int Iteration = 0 ; Iteration < NbSteps ; Iteration++) {
@@ -143,7 +157,8 @@ inline void partial_static_unroll(auto &LoopStep, auto &LoopCondition,
 /// }
 /// \endcode
 ///
-/// But all there is no loop structure, all the call are explicits.
+/// But no loop construct is used, all the calls to LoopStep are explicitely
+/// performed.
 template <int StartIdx, int NbSteps, int Increment = 1>
 inline void static_full_unrolling(auto &Functor) {
   static_assert(NbSteps > 0, "Trying to unroll an iteration of less than 1 step");
