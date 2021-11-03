@@ -1,0 +1,32 @@
+name: Run tests
+
+on:
+  pull_request:
+    branches:
+      - ci_test
+
+jobs:
+  build:
+    runs-on: xsjsycl40
+
+    steps:
+    - name: Check out repository code
+      uses: actions/checkout@v2
+    - run: cd ${{ github.workspace }}
+    - name: Cache Gradle packages
+    - name: Restoring build cache 
+      uses: actions/cache@v2
+      id: build-cache
+      with:
+        path: ${{ github.workspace }}/build
+    - name: Configure build
+      if: steps.build-cache.outputs.cache-hit != 'true'
+      run: python ${{ github.workspace }}/llvm/buildbot/configure.py
+    - name: Build compiler
+      run: python ${{ github.workspace }}/llvm/buildbot/compile.py
+    - name: Creating artifact for builded compiler
+      uses: actions/upload-artifact@v2
+      with:
+        name: sycl-compiler
+        path: ${{ github.workspace }}/build
+
