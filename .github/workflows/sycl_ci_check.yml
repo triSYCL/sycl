@@ -7,7 +7,7 @@ on:
 
 jobs:
   build:
-    runs-on: xsjsycl40
+    runs-on: vitis
 
     steps:
     - name: Check out repository code
