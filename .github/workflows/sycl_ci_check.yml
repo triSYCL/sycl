@@ -17,6 +17,7 @@ jobs:
       id: build-cache
       with:
         path: ${{ github.workspace }}/build
+        key: build-cache
     - name: Configure build
       if: steps.build-cache.outputs.cache-hit != 'true'
       run: python ${{ github.workspace }}/llvm/buildbot/configure.py
