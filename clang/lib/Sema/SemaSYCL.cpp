@@ -124,6 +124,17 @@ public:
   /// \param Tmpl  whether the class is template instantiation or simple record
   static bool isSyclType(QualType Ty, StringRef Name, bool Tmpl = false);
 
+  /// Checks whether given clang type is a standard SYCL API class with given
+  /// name.
+  /// \param Ty    the clang type being checked
+  /// \param Name  the class name checked against
+  /// \param Tmpl  whether the class is template instantiation or simple record
+  static bool isAcapSyclType(QualType Ty, StringRef Name, bool Tmpl = false);
+
+  /// Checks whether given clang type is a full specialization of the ACAP SYCL
+  /// accessor class.
+  static bool isAcapAccessorType(QualType Ty);
+
   /// Checks whether given function is a standard SYCL API function with given
   /// name.
   /// \param FD    the function being checked.
@@ -1172,6 +1183,8 @@ class KernelObjVisitor {
       // Required to initialize accessors inside streams.
       if (Util::isSyclAccessorType(FieldTy))
         KF_FOR_EACH(handleSyclAccessorType, Field, FieldTy);
+      if (Util::isAcapAccessorType(FieldTy))
+        KF_FOR_EACH(handleAcapAccessorType, Field, FieldTy);
     }
     (void)std::initializer_list<int>{
         (Handlers.leaveStream(Owner, Parent, RecordTy), 0)...};
@@ -1245,6 +1258,8 @@ class KernelObjVisitor {
                   QualType FieldTy, HandlerTys &... Handlers) {
     if (Util::isSyclAccessorType(FieldTy))
       KF_FOR_EACH(handleSyclAccessorType, Field, FieldTy);
+    else if (Util::isAcapAccessorType(FieldTy))
+      KF_FOR_EACH(handleAcapAccessorType, Field, FieldTy);
     else if (Util::isSyclSamplerType(FieldTy))
       KF_FOR_EACH(handleSyclSamplerType, Field, FieldTy);
     else if (Util::isSyclHalfType(FieldTy))
@@ -1316,6 +1331,11 @@ public:
     return true;
   }
   virtual bool handleSyclAccessorType(FieldDecl *, QualType) { return true; }
+  virtual bool handleAcapAccessorType(const CXXRecordDecl *,
+                                      const CXXBaseSpecifier &, QualType) {
+    return true;
+  }
+  virtual bool handleAcapAccessorType(FieldDecl *, QualType) { return true; }
   virtual bool handleSyclSamplerType(const CXXRecordDecl *,
                                      const CXXBaseSpecifier &, QualType) {
     return true;
@@ -3241,6 +3261,21 @@ public:
     return true;
   }
 
+  bool handleAcapAccessorType(const CXXRecordDecl *RD,
+                              const CXXBaseSpecifier &BC,
+                              QualType FieldTy) final {
+    Header.addParamDesc(SYCLIntegrationHeader::kind_accessor, 0,
+                        CurOffset +
+                            offsetOf(RD, BC.getType()->getAsCXXRecordDecl()));
+    return true;
+  }
+
+  bool handleAcapAccessorType(FieldDecl *FD, QualType FieldTy) final {
+    Header.addParamDesc(SYCLIntegrationHeader::kind_accessor, 0,
+                        CurOffset + offsetOf(FD, FieldTy));
+    return true;
+  }
+
   bool handleSyclSamplerType(FieldDecl *FD, QualType FieldTy) final {
     const auto *SamplerTy = FieldTy->getAsCXXRecordDecl();
     assert(SamplerTy && "Sampler type must be a C++ record type");
@@ -3789,6 +3824,17 @@ void Sema::ConstructOpenCLKernel(FunctionDecl *KernelCallerFunc,
     kernel_decl.handleSyclKernelHandlerType();
     kernel_body.handleSyclKernelHandlerType(KernelHandlerArg);
     int_header.handleSyclKernelHandlerType(KernelHandlerArg->getType());
+  }
+  /// The Acap runtime has different code pattern form intel's
+  /// This is the way we generate inclusion headers for the Acap runtime.
+  if (getASTContext().getTargetInfo().getTriple().isXilinxAIE()) {
+    auto *MD = cast<CXXMethodDecl>(KernelObj->getDeclContext());
+    CXXRecordDecl *AcapKernelObj = MD->getTemplateSpecializationArgs()
+                                       ->get(0)
+                                       .getAsType()
+                                       ->getAsCXXRecordDecl();
+    Visitor.VisitRecordBases(AcapKernelObj, int_header);
+    Visitor.VisitRecordFields(AcapKernelObj, int_header);
   }
 }
 
@@ -5022,6 +5068,23 @@ bool Util::isSyclType(QualType Ty, StringRef Name, bool Tmpl) {
       Util::MakeDeclContextDesc(Decl::Kind::Namespace, "sycl"),
       Util::MakeDeclContextDesc(ClassDeclKind, Name)};
   return matchQualifiedTypeName(Ty, Scopes);
+}
+
+bool Util::isAcapSyclType(QualType Ty, StringRef Name, bool Tmpl) {
+  Decl::Kind ClassDeclKind =
+      Tmpl ? Decl::Kind::ClassTemplateSpecialization : Decl::Kind::CXXRecord;
+  std::array<DeclContextDesc, 6> Scopes = {
+      Util::MakeDeclContextDesc(Decl::Kind::Namespace, "trisycl"),
+      Util::MakeDeclContextDesc(Decl::Kind::Namespace, "vendor"),
+      Util::MakeDeclContextDesc(Decl::Kind::Namespace, "xilinx"),
+      Util::MakeDeclContextDesc(Decl::Kind::Namespace, "acap"),
+      Util::MakeDeclContextDesc(Decl::Kind::Namespace, "aie"),
+      Util::MakeDeclContextDesc(ClassDeclKind, Name)};
+  return matchQualifiedTypeName(Ty, Scopes);
+}
+
+bool Util::isAcapAccessorType(QualType Ty) {
+  return isAcapSyclType(Ty, "accessor", true /*Tmpl*/);
 }
 
 bool Util::isSyclFunction(const FunctionDecl *FD, StringRef Name) {
