@@ -20,9 +20,9 @@ jobs:
         key: build-cache
     - name: Configure build
       if: steps.build-cache.outputs.cache-hit != 'true'
-      run: python ${{ github.workspace }}/llvm/buildbot/configure.py
+      run: python3 ${{ github.workspace }}/llvm/buildbot/configure.py
     - name: Build compiler
-      run: python ${{ github.workspace }}/llvm/buildbot/compile.py
+      run: python3 ${{ github.workspace }}/llvm/buildbot/compile.py
     - name: Creating artifact for builded compiler
       uses: actions/upload-artifact@v2
       with:
