@@ -264,7 +264,7 @@ config.substitutions.append( ('%GPU_RUN_ON_LINUX_PLACEHOLDER',  gpu_run_on_linux
 config.substitutions.append( ('%GPU_CHECK_PLACEHOLDER',  gpu_check_substitute) )
 config.substitutions.append( ('%GPU_CHECK_ON_LINUX_PLACEHOLDER',  gpu_check_on_linux_substitute) )
 
-acc_run_substitute = "true"
+acc_run_substitute = "true " # white space intended
 acc_check_substitute = ""
 if getDeviceCount("accelerator")[0]:
     found_at_least_one_device = True

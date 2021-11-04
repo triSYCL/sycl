@@ -17,7 +17,7 @@ int main() {
   sycl::queue Queue;
   Queue.submit([&](sycl::handler &cgh) {
     auto Accessor = Buffer.get_access<sycl::access_mode::write>(cgh);
-    cgh.single_task<class FirstKernel>(sycl::ext::xilinx::pipeline_kernel([=] {
+    cgh.single_task<class FirstKernel>(sycl::ext::xilinx::pipeline_kernel<>([=] {
       // CHECK-DAG: xilinx_kernel_property
       // CHECK-DAG: kernel_pipeline
       for (size_t i = 0; i < len; ++i)

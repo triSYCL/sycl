@@ -47,6 +47,8 @@ template <typename Name, typename Type> struct get_kernel_name_t {
       "No kernel name provided without -fsycl-unnamed-lambda enabled!");
 };
 
+template <typename Name> struct par_for_to_st {};
+
 #ifdef __SYCL_UNNAMED_LAMBDA__
 /// Specialization for the case when \c Name is undefined.
 /// This is only legal with our compiler with the unnamed lambda

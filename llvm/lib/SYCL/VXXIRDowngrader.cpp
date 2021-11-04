@@ -22,6 +22,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/SYCL/VXXIRDowngrader.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/SetVector.h"
@@ -198,9 +199,9 @@ struct VXXIRDowngrader : public ModulePass {
   }
 
   /// Remove Freeze instruction because v++ can't deal with them.
-  /// This is not a safe transformation but since llvm survived with bugs cause
-  /// by absence of freeze for many years, so i guess its its good enough for a
-  /// prototype
+  /// FIXME: This is not a safe transformation but since LLVM survived with bugs
+  /// caused by absence of freeze for many years, so I guess it is good enough
+  /// for a prototype.
   void removeFreezeInst(Module &M) {
     SmallVector<Instruction*, 16> ToRemove;
     for (auto& F : M.functions())
@@ -309,6 +310,14 @@ struct VXXIRDowngrader : public ModulePass {
     F->eraseFromParent();
   }
 
+  struct CleanerVisitor : InstVisitor<CleanerVisitor> {
+      void visitCallBase (CallBase& CB) {
+          if (CB.hasMetadata(llvm::LLVMContext::MD_range)) {
+              CB.setMetadata(llvm::LLVMContext::MD_range, nullptr);
+          }
+      }
+  };
+
   /// Visit the IR and emit warnings about construct not handled by the backend
   /// The IR has no debug info so we cannot say where in the source code the
   /// error happend.
@@ -357,7 +366,8 @@ struct VXXIRDowngrader : public ModulePass {
     resetByVal(M);
     removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
                          Attribute::ImmArg, Attribute::NoSync,
-                         Attribute::MustProgress, Attribute::NoUndef});
+                         Attribute::MustProgress, Attribute::NoUndef,
+                         Attribute::StructRet});
     removeAnnotations(M);
     renameBasicBlocks(M);
     removeFreezeInst(M);
@@ -377,6 +387,8 @@ struct VXXIRDowngrader : public ModulePass {
       M.setTargetTriple("fpga32-xilinx-none");
     // The module probably changed
 
+    CleanerVisitor CV{};
+    CV.visit(M);
     warnForIssues(M);
 
     return true;
