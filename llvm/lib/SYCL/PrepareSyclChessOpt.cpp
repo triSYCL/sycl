@@ -142,10 +142,21 @@ struct PrepareSyclChessOpt : public ModulePass {
       }
   }
 
+  void makeVisible(Module &M, StringRef Symbol) {
+    auto* GV = M.getNamedGlobal(Symbol);
+    if (!GV)
+      return;
+    GV->setComdat(nullptr);
+    GV->setVisibility(llvm::GlobalValue::DefaultVisibility);
+    GV->setDSOLocal(false);
+    GV->setLinkage(llvm::GlobalValue::ExternalLinkage);
+  }
+
   bool runOnModule(Module &M) override {
     turnNonKernelsIntoPrivate(M);
     prepareForMerging(M);
     handleGlobals(M);
+    makeVisible(M, "kernel_lambda_capture");
     // This has to be done before changing the calling convention
     modifySPIRCallingConv(M);
     // makeVolatile(M);
