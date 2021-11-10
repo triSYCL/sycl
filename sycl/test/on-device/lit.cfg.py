@@ -44,6 +44,7 @@ config.test_source_root = os.path.dirname(__file__)
 config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
 
 config.environment['SYCL_VXX_KEEP_CLUTTER'] = 'True'
+config.environment['SYCL_VXX_PRINT_CMD'] = 'True'
 llvm_config.use_clang()
 
 # Propagate some variables from the host environment.
@@ -101,6 +102,7 @@ config.substitutions.append( ('%cuda_toolkit_include',  config.cuda_toolkit_incl
 config.substitutions.append( ('%sycl_tools_src_dir',  config.sycl_tools_src_dir ) )
 config.substitutions.append( ('%llvm_build_lib_dir',  config.llvm_build_lib_dir ) )
 config.substitutions.append( ('%llvm_build_bin_dir',  config.llvm_build_bin_dir ) )
+config.substitutions.append( ('%clang_offload_bundler', f'{config.llvm_build_bin_dir}clang-offload-bundler') )
 
 if config.level_zero_include_dir:
     config.available_features.add("level_zero_headers")
@@ -262,7 +264,7 @@ config.substitutions.append( ('%GPU_RUN_ON_LINUX_PLACEHOLDER',  gpu_run_on_linux
 config.substitutions.append( ('%GPU_CHECK_PLACEHOLDER',  gpu_check_substitute) )
 config.substitutions.append( ('%GPU_CHECK_ON_LINUX_PLACEHOLDER',  gpu_check_on_linux_substitute) )
 
-acc_run_substitute = "true"
+acc_run_substitute = "true " # white space intended
 acc_check_substitute = ""
 if getDeviceCount("accelerator")[0]:
     found_at_least_one_device = True
@@ -328,13 +330,15 @@ else:
     if getDeviceCount("gpu", "cuda")[1]:
         lit_config.note("found secondary cuda target")
         config.available_features.add("has_secondary_cuda")
-    lit_config.note("XOCC target: {}".format(vxx_target))
+    lit_config.note(f"XOCC target: {vxx_target}")
     required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]
     has_error=False
     config.available_features.add("xocc")
     for feature in split_target(vxx_target):
         config.available_features.add(feature) 
     config.available_features.add(vxx_target)
+    feat_list = ",".join(config.available_features)
+    lit_config.note(f"Features: {feat_list}")
     pkg_opencv4 = subprocess.run(["pkg-config", "--libs", "--cflags", "opencv4"], stdout=subprocess.PIPE)
     has_opencv4 = not pkg_opencv4.returncode
     lit_config.note("has opencv4: {}".format(has_opencv4))

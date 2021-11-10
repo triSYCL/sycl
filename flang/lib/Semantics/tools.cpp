@@ -80,8 +80,12 @@ const Scope *FindPureProcedureContaining(const Scope &start) {
   // N.B. We only need to examine the innermost containing program unit
   // because an internal subprogram of a pure subprogram must also
   // be pure (C1592).
-  const Scope &scope{GetProgramUnitContaining(start)};
-  return IsPureProcedure(scope) ? &scope : nullptr;
+  if (start.IsGlobal()) {
+    return nullptr;
+  } else {
+    const Scope &scope{GetProgramUnitContaining(start)};
+    return IsPureProcedure(scope) ? &scope : nullptr;
+  }
 }
 
 static bool MightHaveCompatibleDerivedtypes(
@@ -355,6 +359,16 @@ const Symbol *FindExternallyVisibleObject(
   return nullptr;
 }
 
+const Symbol &BypassGeneric(const Symbol &symbol) {
+  const Symbol &ultimate{symbol.GetUltimate()};
+  if (const auto *generic{ultimate.detailsIf<GenericDetails>()}) {
+    if (const Symbol * specific{generic->specific()}) {
+      return *specific;
+    }
+  }
+  return symbol;
+}
+
 bool ExprHasTypeCategory(
     const SomeExpr &expr, const common::TypeCategory &type) {
   auto dynamicType{expr.GetType()};
@@ -588,6 +602,23 @@ bool IsInitialized(const Symbol &symbol, bool ignoreDATAstatements,
   return false;
 }
 
+bool IsDestructible(const Symbol &symbol, const Symbol *derivedTypeSymbol) {
+  if (IsAllocatable(symbol) || IsAutomatic(symbol)) {
+    return true;
+  } else if (IsNamedConstant(symbol) || IsFunctionResult(symbol) ||
+      IsPointer(symbol)) {
+    return false;
+  } else if (const auto *object{symbol.detailsIf<ObjectEntityDetails>()}) {
+    if (!object->isDummy() && object->type()) {
+      if (const auto *derived{object->type()->AsDerived()}) {
+        return &derived->typeSymbol() != derivedTypeSymbol &&
+            derived->HasDestruction();
+      }
+    }
+  }
+  return false;
+}
+
 bool HasIntrinsicTypeName(const Symbol &symbol) {
   std::string name{symbol.name().ToString()};
   if (name == "doubleprecision") {
@@ -656,7 +687,8 @@ bool IsAutomatic(const Symbol &symbol) {
   return false;
 }
 
-bool IsFinalizable(const Symbol &symbol) {
+bool IsFinalizable(
+    const Symbol &symbol, std::set<const DerivedTypeSpec *> *inProgress) {
   if (IsPointer(symbol)) {
     return false;
   }
@@ -665,19 +697,33 @@ bool IsFinalizable(const Symbol &symbol) {
       return false;
     }
     const DeclTypeSpec *type{object->type()};
-    const DerivedTypeSpec *derived{type ? type->AsDerived() : nullptr};
-    return derived && IsFinalizable(*derived);
+    const DerivedTypeSpec *typeSpec{type ? type->AsDerived() : nullptr};
+    return typeSpec && IsFinalizable(*typeSpec, inProgress);
   }
   return false;
 }
 
-bool IsFinalizable(const DerivedTypeSpec &derived) {
+bool IsFinalizable(const DerivedTypeSpec &derived,
+    std::set<const DerivedTypeSpec *> *inProgress) {
   if (!derived.typeSymbol().get<DerivedTypeDetails>().finals().empty()) {
     return true;
   }
-  DirectComponentIterator components{derived};
-  return bool{std::find_if(components.begin(), components.end(),
-      [](const Symbol &component) { return IsFinalizable(component); })};
+  std::set<const DerivedTypeSpec *> basis;
+  if (inProgress) {
+    if (inProgress->find(&derived) != inProgress->end()) {
+      return false; // don't loop on recursive type
+    }
+  } else {
+    inProgress = &basis;
+  }
+  auto iterator{inProgress->insert(&derived).first};
+  PotentialComponentIterator components{derived};
+  bool result{bool{std::find_if(
+      components.begin(), components.end(), [=](const Symbol &component) {
+        return IsFinalizable(component, inProgress);
+      })}};
+  inProgress->erase(iterator);
+  return result;
 }
 
 bool HasImpureFinal(const DerivedTypeSpec &derived) {

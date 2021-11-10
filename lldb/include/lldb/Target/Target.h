@@ -37,8 +37,6 @@
 
 namespace lldb_private {
 
-class ClangModulesDeclVendor;
-
 OptionEnumValues GetDynamicValueTypes();
 
 enum InlineStrategy {
@@ -1128,12 +1126,19 @@ public:
   ///
   /// \return
   ///   The trace object. It might be undefined.
-  lldb::TraceSP &GetTrace();
+  lldb::TraceSP GetTrace();
 
-  /// Similar to \a GetTrace, but this also tries to create a \a Trace object
-  /// if not available using the default supported tracing technology for
-  /// this process.
-  llvm::Expected<lldb::TraceSP &> GetTraceOrCreate();
+  /// Create a \a Trace object for the current target using the using the
+  /// default supported tracing technology for this process.
+  ///
+  /// \return
+  ///     The new \a Trace or an \a llvm::Error if a \a Trace already exists or
+  ///     the trace couldn't be created.
+  llvm::Expected<lldb::TraceSP> CreateTrace();
+
+  /// If a \a Trace object is present, this returns it, otherwise a new Trace is
+  /// created with \a Trace::CreateTrace.
+  llvm::Expected<lldb::TraceSP> GetTraceOrCreate();
 
   // Since expressions results can persist beyond the lifetime of a process,
   // and the const expression results are available after a process is gone, we
@@ -1336,8 +1341,6 @@ public:
 
   SourceManager &GetSourceManager();
 
-  ClangModulesDeclVendor *GetClangModulesDeclVendor();
-
   // Methods.
   lldb::SearchFilterSP
   GetSearchFilterForModule(const FileSpec *containingModule);
@@ -1421,15 +1424,15 @@ protected:
   typedef std::map<lldb::LanguageType, lldb::REPLSP> REPLMap;
   REPLMap m_repl_map;
 
-  std::unique_ptr<ClangModulesDeclVendor> m_clang_modules_decl_vendor_up;
-
   lldb::SourceManagerUP m_source_manager_up;
 
   typedef std::map<lldb::user_id_t, StopHookSP> StopHookCollection;
   StopHookCollection m_stop_hooks;
   lldb::user_id_t m_stop_hook_next_id;
+  uint32_t m_latest_stop_hook_id; /// This records the last natural stop at
+                                  /// which we ran a stop-hook.
   bool m_valid;
-  bool m_suppress_stop_hooks;
+  bool m_suppress_stop_hooks; /// Used to not run stop hooks for expressions
   bool m_is_dummy_target;
   unsigned m_next_persistent_variable_index = 0;
   /// An optional \a lldb_private::Trace object containing processor trace

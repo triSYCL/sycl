@@ -21,6 +21,30 @@ using namespace mlir::lsp;
 // Reply
 //===----------------------------------------------------------------------===//
 
+namespace {
+/// Function object to reply to an LSP call.
+/// Each instance must be called exactly once, otherwise:
+///  - if there was no reply, an error reply is sent
+///  - if there were multiple replies, only the first is sent
+class Reply {
+public:
+  Reply(const llvm::json::Value &id, StringRef method,
+        JSONTransport &transport);
+  Reply(Reply &&other);
+  Reply &operator=(Reply &&) = delete;
+  Reply(const Reply &) = delete;
+  Reply &operator=(const Reply &) = delete;
+
+  void operator()(llvm::Expected<llvm::json::Value> reply);
+
+private:
+  StringRef method;
+  std::atomic<bool> replied = {false};
+  llvm::json::Value id;
+  JSONTransport *transport;
+};
+} // namespace
+
 Reply::Reply(const llvm::json::Value &id, llvm::StringRef method,
              JSONTransport &transport)
     : id(id), transport(&transport) {}
@@ -180,6 +204,8 @@ llvm::Error JSONTransport::run(MessageHandler &handler) {
       if (llvm::Expected<llvm::json::Value> doc = llvm::json::parse(json)) {
         if (!handleMessage(std::move(*doc), handler))
           return llvm::Error::success();
+      } else {
+        Logger::error("JSON parse error: {0}", llvm::toString(doc.takeError()));
       }
     }
   }
@@ -193,6 +219,7 @@ void JSONTransport::sendMessage(llvm::json::Value msg) {
   out << "Content-Length: " << outputBuffer.size() << "\r\n\r\n"
       << outputBuffer;
   out.flush();
+  Logger::debug(">>> {0}\n", outputBuffer);
 }
 
 bool JSONTransport::handleMessage(llvm::json::Value msg,
@@ -271,7 +298,7 @@ LogicalResult JSONTransport::readStandardMessage(std::string &json) {
       return failure();
 
     // Content-Length is a mandatory header, and the only one we handle.
-    StringRef lineRef(line);
+    StringRef lineRef = line;
     if (lineRef.consume_front("Content-Length: ")) {
       llvm::getAsUnsignedInteger(lineRef.trim(), 0, contentLength);
     } else if (!lineRef.trim().empty()) {
@@ -311,7 +338,7 @@ LogicalResult JSONTransport::readDelimitedMessage(std::string &json) {
   json.clear();
   llvm::SmallString<128> line;
   while (succeeded(readLine(in, line))) {
-    StringRef lineRef = StringRef(line).trim();
+    StringRef lineRef = line.str().trim();
     if (lineRef.startswith("//")) {
       // Found a delimiter for the message.
       if (lineRef == "// -----")

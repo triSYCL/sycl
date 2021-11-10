@@ -1,4 +1,4 @@
-// RUN: %clang_cc1 -fsyntax-only -verify %s -Wimplicit-int-conversion -triple x86_64-gnu-linux
+// RUN: %clang_cc1 -fsyntax-only -verify %s -Wimplicit-int-conversion -Wno-unused -Wunevaluated-expression -triple x86_64-gnu-linux
 
 template<int Bounds>
 struct HasExtInt {
@@ -17,13 +17,12 @@ _ExtInt(33) Declarations(_ExtInt(48) &Param) { // Useable in params and returns.
   unsigned _ExtInt(5) e = 5;
   _ExtInt(5) unsigned f;
 
-  _ExtInt(-3) g; // expected-error{{signed _ExtInt must have a bit size of at least 2}}
-  _ExtInt(0) h; // expected-error{{signed _ExtInt must have a bit size of at least 2}}
-  _ExtInt(1) i; // expected-error{{signed _ExtInt must have a bit size of at least 2}}
-  _ExtInt(2) j;;
+  _ExtInt(-3) g; // expected-error{{signed _ExtInt must have a bit size of at least 1}}
+  _ExtInt(0) h; // expected-error{{signed _ExtInt must have a bit size of at least 1}}
+  _ExtInt(1) j;;
   unsigned _ExtInt(0) k;// expected-error{{unsigned _ExtInt must have a bit size of at least 1}}
   unsigned _ExtInt(1) l;
-  signed _ExtInt(1) m; // expected-error{{signed _ExtInt must have a bit size of at least 2}}
+  signed _ExtInt(0) m; // expected-error{{signed _ExtInt must have a bit size of at least 1}}
 
   constexpr _ExtInt(6) n = 33; // expected-warning{{implicit conversion from 'int' to 'const _ExtInt(6)' changes value from 33 to -31}}
   constexpr _ExtInt(7) o = 33;
@@ -33,18 +32,15 @@ _ExtInt(33) Declarations(_ExtInt(48) &Param) { // Useable in params and returns.
   unsigned _ExtInt(0xFFFFFFFFFF) q; // expected-error {{unsigned _ExtInt of bit sizes greater than 16777215 not supported}}
 
 // Ensure template params are instantiated correctly.
-  // expected-error@5{{signed _ExtInt must have a bit size of at least 2}}
+  // expected-error@5{{signed _ExtInt must have a bit size of at least 1}}
   // expected-error@6{{unsigned _ExtInt must have a bit size of at least 1}}
   // expected-note@+1{{in instantiation of template class }}
   HasExtInt<-1> r;
-  // expected-error@5{{signed _ExtInt must have a bit size of at least 2}}
+  // expected-error@5{{signed _ExtInt must have a bit size of at least 1}}
   // expected-error@6{{unsigned _ExtInt must have a bit size of at least 1}}
   // expected-note@+1{{in instantiation of template class }}
   HasExtInt<0> s;
-  // expected-error@5{{signed _ExtInt must have a bit size of at least 2}}
-  // expected-note@+1{{in instantiation of template class }}
   HasExtInt<1> t;
-  HasExtInt<2> u;
 
   _ExtInt(-3.0) v; // expected-error {{integral constant expression must have integral or unscoped enumeration type, not 'double'}}
   _ExtInt(3.0) x; // expected-error {{integral constant expression must have integral or unscoped enumeration type, not 'double'}}
@@ -110,72 +106,54 @@ void Ops() {
   unsigned x_uint = 1, y_uint = 1;
   bool b;
 
-  // Disabling mixed conversions:
   // Signed/unsigned mixed.
-  // expected-error@+1{{invalid operands to binary expression}}
   x43_u + y43_s;
-  // expected-error@+1{{invalid operands to binary expression}}
   x4_s - y4_u;
-  // expected-error@+1{{invalid operands to binary expression}}
   x43_s * y43_u;
-  // expected-error@+1{{invalid operands to binary expression}}
   x4_u / y4_s;
 
   // Different Sizes.
-  // expected-error@+1{{invalid operands to binary expression}}
   x43_s + y4_s;
-  // expected-error@+1{{invalid operands to binary expression}}
   x43_s - y4_u;
-  // expected-error@+1{{invalid operands to binary expression}}
   x43_u * y4_u;
-  // expected-error@+1{{invalid operands to binary expression}}
   x4_u / y43_u;
 
   // Mixed with standard types.
-  // expected-error@+1{{invalid operands to binary expression}}
   x43_s + x_int;
-  // expected-error@+1{{invalid operands to binary expression}}
   x43_u - x_int;
-  // expected-error@+1{{invalid operands to binary expression}}
   x32_s * x_int;
-  // expected-error@+1{{invalid operands to binary expression}}
   x32_u / x_int;
-  // expected-error@+1{{invalid operands to binary expression}}
   x32_s * x_uint;
-  // expected-error@+1{{invalid operands to binary expression}}
   x32_u / x_uint;
-  // expected-error@+1{{invalid operands to binary expression}}
   x4_s + x_int;
-  // expected-error@+1{{invalid operands to binary expression}}
   x4_u - x_int;
-  // expected-error@+1{{invalid operands to binary expression}}
   x4_s + b;
-  // expected-error@+1{{invalid operands to binary expression}}
   x4_u - b;
-  // expected-error@+1{{invalid operands to binary expression}}
   x43_s + b;
-  // expected-error@+1{{invalid operands to binary expression}}
   x43_u - b;
+  static_assert(is_same<decltype(x43_s + x_int), _ExtInt(43)>::value, "");
+  static_assert(is_same<decltype(x43_u + x_int), unsigned _ExtInt(43)>::value, "");
+  static_assert(is_same<decltype(x32_s + x_int), int>::value, "");
+  static_assert(is_same<decltype(x32_u + x_int), unsigned int>::value, "");
+  static_assert(is_same<decltype(x32_s + x_uint), unsigned int>::value, "");
+  static_assert(is_same<decltype(x32_u + x_uint), unsigned int>::value, "");
+  static_assert(is_same<decltype(x4_s + x_int), int>::value, "");
+  static_assert(is_same<decltype(x4_u + x_int), int>::value, "");
+  static_assert(is_same<decltype(x4_s + x_uint), unsigned int>::value, "");
+  static_assert(is_same<decltype(x4_u + x_uint), unsigned int>::value, "");
 
   // Bitwise checks.
-  // expected-error@+1{{invalid operands to binary expression}}
   x43_s % y4_u;
-  // expected-error@+1{{invalid operands to binary expression}}
   x43_u % y4_s;
-  // expected-error@+1{{invalid operands to binary expression}}
   x4_s | y43_u;
-  // expected-error@+1{{invalid operands to binary expression}}
   x4_u | y43_s;
 
   // compassign.
-  // expected-error@+1{{invalid operands to binary expression}}
   x43_s += 33;
 
   // Comparisons.
-  // expected-error@+1{{invalid operands to binary expression}}
   x43_s > 33;
-  // expected-error@+1{{invalid operands to binary expression}}
-  x4_s > 33;
+  x4_s > 33; // expected-warning {{result of comparison of constant 33 with expression of type '_ExtInt(4)' is always false}}
 
   // Same size/sign ops don't change type.
   static_assert(is_same<decltype(x43_s + y43_s), _ExtInt(43)>::value,"");
@@ -262,6 +240,10 @@ struct UsedAsBitField {
   _ExtInt(3) H : 3;
 };
 
+struct CursedBitField {
+  _ExtInt(4) A : 8; // expected-warning {{width of bit-field 'A' (8 bits) exceeds the width of its type; value will be truncated to 4 bits}}
+};
+
 // expected-error@+1{{mode attribute only supported for integer and floating-point types}}
 typedef _ExtInt(33) IllegalMode __attribute__((mode(DI)));
 
@@ -279,9 +261,29 @@ void ImplicitCasts(_ExtInt(31) s31, _ExtInt(33) s33, int i) {
 
 void Ternary(_ExtInt(30) s30, _ExtInt(31) s31a, _ExtInt(31) s31b,
              _ExtInt(32) s32, bool b) {
-  b ? s30 : s31a; // expected-error{{incompatible operand types}}
-  b ? s31a : s30; // expected-error{{incompatible operand types}}
-  b ? s32 : (int)0; // expected-error{{incompatible operand types}}
+  b ? s30 : s31a;
+  b ? s31a : s30;
+  b ? s32 : (int)0;
   (void)(b ? s31a : s31b);
   (void)(s30 ? s31a : s31b);
+
+  static_assert(is_same<decltype(b ? s30 : s31a), _ExtInt(31)>::value, "");
+  static_assert(is_same<decltype(b ? s32 : s30), _ExtInt(32)>::value, "");
+  static_assert(is_same<decltype(b ? s30 : 0), int>::value, "");
+}
+
+void FromPaper1() {
+  // Test the examples of conversion and promotion rules from C2x 6.3.1.8.
+  _ExtInt(2) a2 = 1;
+  _ExtInt(3) a3 = 2;
+  _ExtInt(33) a33 = 1;
+  char c = 3;
+
+  static_assert(is_same<decltype(a2 * a3), _ExtInt(3)>::value, "");
+  static_assert(is_same<decltype(a2 * c), int>::value, "");
+  static_assert(is_same<decltype(a33 * c), _ExtInt(33)>::value, "");
+}
+
+void FromPaper2(_ExtInt(8) a1, _ExtInt(24) a2) {
+  static_assert(is_same<decltype(a1 * (_ExtInt(32))a2), _ExtInt(32)>::value, "");
 }

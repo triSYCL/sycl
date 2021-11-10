@@ -42,7 +42,7 @@ int main() {
 
   {
     auto wb = test_buffer.get_access<access::mode::write>();
-    for (int i = 0; i < wb.get_count(); ++i)
+    for (int i = 0; i < wb.size(); ++i)
       wb[i] = 0;
   }
 
@@ -96,7 +96,7 @@ int main() {
   // missing functions.
 
   int sum = 0;
-  for (int i = 0; i < rb.get_count(); ++i) {
+  for (int i = 0; i < rb.size(); ++i) {
     sum += rb[i];
   }
 
