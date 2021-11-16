@@ -14,7 +14,7 @@ jobs:
       run: docker volume rm sycl_ci_sources
     - name: Check out repository code
       run: docker run --rm --volume sycl_ci_sources:/sycl_ci_sources alpine/git clone --depth=1 --branch ${{ github.ref }} ${{ github.repository }} /sycl_ci_sources
-      if: succeeded() || failed()
+      if: ${{ success() || failure() }}
     - name: Configure build
       run: docker run --rm --volume sycl_ci_sources:/sycl_ci_sources sycl-vxx-build python3 /sycl_ci_sources/buildbot/configure.py --no-werror
     - name: Build compiler
