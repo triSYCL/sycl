@@ -1,6 +1,7 @@
 # -*- Python -*-
 
 import os
+from pathlib import Path
 import platform
 import re
 import subprocess
@@ -178,6 +179,7 @@ if cl_options:
 config.substitutions.append( ('%level_zero_options', level_zero_options) )
 
 sp = subprocess.getstatusoutput(config.clang + ' -fsycl  ' + check_l0_file + level_zero_options)
+Path(check_l0_file).unlink(missing_ok=True)
 if sp[0] == 0:
     config.available_features.add('level_zero_dev_kit')
     config.substitutions.append( ('%level_zero_options', level_zero_options) )

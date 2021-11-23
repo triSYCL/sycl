@@ -144,8 +144,10 @@ class CompilationDriver:
                 "-flat-address-space=0", "-globaldce"
             ])
         opt_options.extend([
-            "-inSPIRation",
-            "-o", f"{self.prepared_bc}"
+            "-instcombine", "-domtree", "-argpromotion", "-deadargelim",
+            "-globalopt", "-domtree", "-inline", "-instcombine", "-domtree",
+            "-argpromotion", "-deadargelim",
+            "-inSPIRation", "-o", f"{self.prepared_bc}"
         ])
 
         opt = self.clang_path / "opt"
@@ -190,7 +192,7 @@ class CompilationDriver:
         )
         opt_options = [
             "--lower-delayed-sycl-metadata", "-lower-sycl-metadata",
-            "--sycl-vxx", "--sycl-prepare-clearspir", "-S", "-preparesycl",
+            "--sycl-vxx", "--sycl-prepare-clearspir", "-preparesycl",
             "-kernelPropGen",
             "--sycl-kernel-propgen-output", f"{kernel_prop}",
             "-globaldce", self.linked_kernels,
@@ -231,6 +233,7 @@ class CompilationDriver:
         command = [
             vxx, "--target", self.vitis_mode,
             "--advanced.param", "compiler.hlsDataflowStrictMode=off",
+            "-O3",
             "--platform", self.xilinx_platform,
             "--temp_dir", self.tmpdir / 'vxx_comp_tmp',
             "--log_dir", self.tmpdir / 'vxx_comp_log',
