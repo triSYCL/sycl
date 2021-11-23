@@ -19,6 +19,7 @@
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/Demangle/Demangle.h"
+#include "llvm/IR/Attributes.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
@@ -40,16 +41,28 @@ struct PrepareSYCLOpt : public ModulePass {
 
   PrepareSYCLOpt() : ModulePass(ID) {}
 
+  inline bool isKernel(Function &F) {
+    return (F.getCallingConv() == CallingConv::SPIR_KERNEL ||
+            F.hasFnAttribute("fpga.top.func"));
+  }
+
   void turnNonKernelsIntoPrivate(Module &M) {
     for (GlobalObject &G : M.global_objects()) {
       if (auto *F = dyn_cast<Function>(&G))
-        if (F->getCallingConv() == CallingConv::SPIR_KERNEL ||
-            F->hasFnAttribute("fpga.top.func"))
+        if (isKernel(*F))
           continue;
       if (G.isDeclaration())
         continue;
       G.setComdat(nullptr);
       G.setLinkage(llvm::GlobalValue::PrivateLinkage);
+    }
+  }
+
+  void markKernelandNoInlineForFlattening(Module &M) {
+    for (auto &F : M.functions()) {
+      if (isKernel(F) || F.hasFnAttribute(Attribute::NoInline)) {
+        F.addFnAttr("flatten");
+      }
     }
   }
 
@@ -239,6 +252,8 @@ struct PrepareSYCLOpt : public ModulePass {
     lowerArrayPartition(M);
     if (!SyclHLSFlow)
       forceInlining(M);
+    else
+      markKernelandNoInlineForFlattening(M);
     return true;
   }
 };

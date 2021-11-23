@@ -130,9 +130,9 @@ int main() {
     auto B_r = B.get_access<cl::sycl::access::mode::read>(cgh);
     // Executing kernel
     cgh.parallel_for<class S2>(A_r.get_range(), [=](cl::sycl::id<2> idx) {
-      C_w[{idx[0], idx[1]}] = 0;
+      C_w[idx] = 0;
       for (size_t i = 0; i < A_r.get_range()[0]; i++) {
-        C_w[{idx[0], idx[1]}] += A_r[{idx[0], i}] * B_r[{i, idx[1]}];
+        C_w[idx] += A_r[{idx[0], i}] * B_r[{i, idx[1]}];
       }
     });
   });
