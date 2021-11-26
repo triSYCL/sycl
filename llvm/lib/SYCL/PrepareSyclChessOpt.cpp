@@ -11,10 +11,6 @@
 //
 // ===---------------------------------------------------------------------===//
 
-#include <cstddef>
-#include <regex>
-#include <string>
-
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/CallingConv.h"
 #include "llvm/IR/InstIterator.h"
@@ -35,52 +31,37 @@ struct PrepareSyclChessOpt : public ModulePass {
 
   PrepareSyclChessOpt() : ModulePass(ID) {}
 
+  /// make non-kernel functions and global variables private.
+  /// Because only kernels are externally visible.
   void turnNonKernelsIntoPrivate(Module &M) {
     for (GlobalObject &G : M.global_objects()) {
       if (auto *F = dyn_cast<Function>(&G)) {
-        if (F->getCallingConv() == CallingConv::SPIR_KERNEL)
-          continue;
-        if (G.isDeclaration())
+        if (F->getCallingConv() == CallingConv::SPIR_KERNEL || G.isDeclaration())
           continue;
         G.setLinkage(llvm::GlobalValue::PrivateLinkage);
       }
     }
   }
 
+  /// we give a attribute with a unique id to every kenrels such
+  /// that mergefunc dont merge them.
+  /// the first level of call in the kernel (which is introduced by the
+  /// runtime) Will be inlined into the kernel function.
   void prepareForMerging(Module &M) {
-    /// we give a attribute with a unique id to every kenrels such
-    /// that mergefunc dont merge them.
-    /// the first level of call in the kernel (which is introduced by the
-    /// runtime) Will be inlined into the kernel function.
     int id = 0;
     for (GlobalObject &G : M.global_objects()) {
       if (auto *F = dyn_cast<Function>(&G)) {
         if (F->getCallingConv() == CallingConv::SPIR_KERNEL) {
           F->addFnAttr("unmergable-kernel-id",
                        StringRef(llvm::to_string(id++)));
-          for (auto &I : instructions(F))
-            if (auto *CB = dyn_cast<CallBase>(&I))
-              CB->getCalledFunction()->addFnAttr(Attribute::AlwaysInline);
         }
       }
     }
   }
 
-  struct MakeVolatileVisitor : InstVisitor<MakeVolatileVisitor> {
-    void visitLoadInst(LoadInst &I) { I.setVolatile(true); }
-    void visitStoreInst(StoreInst &I) { I.setVolatile(true); }
-  };
-
-  /// Make every store or load of unknow volatile.
-  /// TODO we could only change lod and store of unknow provenance.
-  void makeVolatile(Module &M) {
-    MakeVolatileVisitor Visitor;
-    Visitor.visit(M);
-  }
-
-
   /// Removes SPIR_FUNC/SPIR_KERNEL calling conventions from functions and
   /// replace them with the default C calling convention for now
+  /// TODO: factorize common part with the FPGA flow.
   void modifySPIRCallingConv(Module &M) {
     for (auto &F : M.functions()) {
       if (F.getCallingConv() == CallingConv::SPIR_KERNEL ||
@@ -94,13 +75,15 @@ struct PrepareSyclChessOpt : public ModulePass {
         // tolerate certain amounts of prototype mismatch.
         // Calling Convention List For Reference:
         // https://llvm.org/doxygen/CallingConv_8h_source.html#l00029
-        // Changing top level function defintiion/declaration, not call sites
+        // Changing top level function definition/declaration, not call sites
         F.setCallingConv(CallingConv::C);
 
         // setCallingConv on the function won't change all the call sites,
         // we must replicate the calling convention across it's Uses. Another
         // method would be to go through each basic block and check each
         // instruction, but this seems more optimal
+
+        /// Go throught every users to find callsite and updated them.
         SmallVector<User *, 8> Stack;
         SmallSet<User *, 16> Set;
         Stack.push_back(&F);
@@ -119,21 +102,28 @@ struct PrepareSyclChessOpt : public ModulePass {
     }
   }
 
+  /// This will collect every constructors and destructors calls. and put them
+  /// into specific runtime function that will be invoked at the right time by
+  /// the runtime.
   void handleGlobals(Module &M) {
     /// Chess cannot handle llvm.global_ctors so we remove it.
-    if (GlobalVariable *GV = M.getGlobalVariable("llvm.global_ctors")) {
+    if (GlobalVariable *GV = M.getGlobalVariable("llvm.global_ctors"))
       GV->eraseFromParent();
-    }
+    /// Find the runtime function that will be called to run constructors.
     if (Function *OurF = M.getFunction("__cxx_global_var_ctor")) {
       for (Function &F : M.getFunctionList()) {
+        /// Find every constructors. and add them to __cxx_global_var_ctor
         if (F.getName().startswith("__cxx_global_var_init"))
           CallInst::Create(F.getFunctionType(), &F, "",
                            OurF->getEntryBlock().getTerminator());
       }
     }
+    /// Find the runtime function that will be called to run destructors.
     if (Function *OurF = M.getFunction("__cxx_global_var_dtor"))
       if (Function *AtExit = M.getFunction("__cxa_atexit")) {
+        /// Go through every calls to at exit.
         for (User *U : AtExit->users()) {
+          /// Add function they asked to call to __cxx_global_var_dtor
           Function *F = cast<Function>(getUnderlyingObject(U->getOperand(0)));
           GlobalVariable *GV = cast<GlobalVariable>(getUnderlyingObject(U->getOperand(1)));
           CallInst::Create(F->getFunctionType(), F, {GV}, "",
@@ -142,6 +132,7 @@ struct PrepareSyclChessOpt : public ModulePass {
       }
   }
 
+  /// Make sur that a symbol is visible in the resulting binary.
   void makeVisible(Module &M, StringRef Symbol) {
     auto* GV = M.getNamedGlobal(Symbol);
     if (!GV)
@@ -153,13 +144,16 @@ struct PrepareSyclChessOpt : public ModulePass {
   }
 
   bool runOnModule(Module &M) override {
+    /// mark invisible globals as private.
     turnNonKernelsIntoPrivate(M);
+    /// prevent the function merger from merging kernels.
     prepareForMerging(M);
+    /// accumulate constructors and destructors into specific runtime fontions.
     handleGlobals(M);
+    /// keep kernel_lambda_capture visible because the runtime needs it.
     makeVisible(M, "kernel_lambda_capture");
-    // This has to be done before changing the calling convention
+    /// We are not SPIR so make all calling convention C.
     modifySPIRCallingConv(M);
-    // makeVolatile(M);
     return true;
   }
 };

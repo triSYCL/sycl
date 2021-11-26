@@ -41,9 +41,12 @@ example an Intel FPGA and a Xilinx FPGA.
 
 ## SYCL Related Documentation
 
-- Basic get started guide for the SYCL compiler - [GetStartedWithSYCLCompiler.md](sycl/doc/GetStartedWithSYCLCompiler.md)
-- Xilinx FPGA get started guide for the SYCL compiler - [XilinxFPGACompilation.md](sycl/doc/GettingStartedXilinxFPGA.md)
-- Xilinx ACAP get started guide for the SYCL compiler - [GettingStartedACAP.md](sycl/doc/GettingStartedACAP.md)
+- Basic get started guide for the SYCL compiler
+  [GetStartedWithSYCLCompiler.md](sycl/doc/GetStartedWithSYCLCompiler.md)
+- Xilinx FPGA get started guide for the SYCL compiler
+  [XilinxFPGACompilation.md](sycl/doc/GettingStartedXilinxFPGA.md)
+- Xilinx ACAP get started guide for the SYCL compiler
+  [GettingStartedACAP.md](sycl/doc/GettingStartedACAP.md)
 - Xilinx FPGA Tests Documentation - [Tests.md](sycl/doc/Tests.md)
   covers a few details about the the
   additional [xocc_tests](sycl/test/xocc_tests) directory we added to

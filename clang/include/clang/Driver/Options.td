@@ -140,7 +140,7 @@ def opencl_Group : OptionGroup<"<opencl group>">, Group<f_Group>,
                    DocName<"OpenCL flags">;
 
 def sycl_Group : OptionGroup<"<SYCL group>">, Group<f_Group>,
-                  DocName<"SYCL flags">;
+                 DocName<"SYCL flags">;
 
 def m_Group : OptionGroup<"<m group>">, Group<CompileOnly_Group>,
               DocName<"Target-dependent compilation options">;

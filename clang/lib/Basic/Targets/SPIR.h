@@ -164,6 +164,8 @@ public:
   }
 
   void setAddressSpaceMap(bool DefaultIsGeneric) {
+    if (AddrSpaceMap == &AIEAddrSpaceMap)
+      return;
     AddrSpaceMap = DefaultIsGeneric ? &SPIRDefIsGenMap : &SPIRDefIsPrivMap;
   }
 

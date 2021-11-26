@@ -3,8 +3,10 @@
 # TODO: A lovely 💞 description when this is working to a reasonable level of
 # stability
 #
+# This script is used in clang/lib/Driver/ToolChains/Chess.cpp look there for example of use.
+# 
 # Arguments:
-# $1 == Cardanos bin directory where the xilinx wrapper scripts to chess tools
+# $1 == Cardano's bin directory where the Xilinx wrapper scripts to Chess tools
 #       (xchess*) reside amongst other things
 # $2 == path to the clang driver that's executing the shell script (e.g.
 #        your compiled Clang's build/bin)
@@ -118,11 +120,12 @@ UNMERGED_PROP=$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}
 # The kernel merging process:
 #  -preparechess  will setup metadata to prevent kernels from being merged by mergefunc and
 #                 set the linkage of non-kernel to private such that they can be discard when unused.
-#  -mergefunc     will merge identical function except kernels, this makes spotting identical kernels much easier
-#  -ChessMassage  will generate reorder kernel to be cluster by mergability,
+#  -mergefunc     will merge identical function except kernels because of preparechess changes
+#                 this makes spotting identical kernels much easier
+#  -ChessMassage  will reorder kernel to be cluster by mergability,
 #                 generate an ordered list of kernels before the merge and
-#                 make mergable kernels as private
-#  -globaldce     will eliminate redondant kernels
+#                 mark mergable/redondant kernels as private
+#  -globaldce     will eliminate kernels marked private by ChessMassage because they are unreachable.
 #  -kernelPropGen will generate and ordered list of kernels after the merge
 #  and finally this script will compile each unique kernel via chess and duplicate the output for equivalent kernels.
 #  since the addresses of data is not the same for east tiles and west tiles east and west tiles a generally not merged.
@@ -152,13 +155,15 @@ source "$KERNELPROP"
 #   func1 - func4 - ...
 source "$UNMERGED_PROP"
 
-# AI Engine .o file containing all kernels for the module
+# Compiler all our kernels into a .o file.
 $XCHESSCC +P $(nproc) -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c -Oz \
   -o "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
   "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
 
 # The following code will edit the linker script based on the kernel to optimize memory usage.
-SIZE_OF_VARIABLE_SECTION_STR=$(objdump -h $SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o | grep -E "data|bss" | sed -E 's/00+/0x/' | gawk --non-decimal-data -F' ' '{ printf "%d\n",$3 }' | awk '{sum+=$1;} END{print sum;}')
+# Calulcate the sum of the sizes of the data sections inside the .o file containing all kernels.
+SIZE_OF_VARIABLE_SECTION_STR=$(objdump --headers $SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o \
+ | grep --extended-regexp "data|bss" | sed --regexp-extended 's/00+/0x/' | awk --non-decimal-data --field-separator=' ' '{ printf "%d\n",$3 }' | awk '{sum+=$1;} END{print sum;}')
 echo $SIZE_OF_VARIABLE_SECTION_STR
 declare -i SIZE_OF_VARIABLE_SECTION=$(($SIZE_OF_VARIABLE_SECTION_STR))
 # 7000 in hexa is 0x8000(size of the tile's memory) - 0x1000(fixed size dedicated to the stack)
@@ -181,8 +186,8 @@ echo "$TOTAL_SIZE_MINUS_GLOBAL_VARIABLES" > $SOURCE_TEMPORARY_DIR/REMAINING_SIZE
 # TODO: The next simplest speedup is to swap to Peano which is several times
 # quicker after that if it's still slow or if we do not wish to/cannot swap to
 # Peano eventually working out duplicate kernels and removing them is the next
-# step. Even if templated most sane kernel code is unlikely to have 400
-# variations, if it does then may the implementer fall apon the sword of their
+# step. Even if usual templated kernel code is unlikely to have 400
+# variations, if it does, then may the implementer fall upon the sword of their
 # own making!
 chess_kernel_compile () {
     set -e
@@ -251,9 +256,9 @@ if [[ ! ${#KERNEL_NAME_ARRAY_UNMERGED[@]} -eq 0 ]]; then
   # kernel2 are merged into kernel0.
   #   unmerged: kernel0 - kernel1 - kernel2 - kernel3
   #   merged:   kernel0 - kernel3
-  # While iterating the unmerged kernel list below, if the corresponding elf
+  # While iterating on the unmerged kernel list below, if the corresponding ELF
   # doesn't exist, it means the kernel has been merged, hence the other kernel
-  # pointed by merged_index is used instead. When the elf exists, merged_index
+  # pointed by merged_index is used instead. When the ELF exists, merged_index
   # increments to update and point to correct merged kernel.
   merged_index=-1;
   for index in "${KERNEL_NAME_ARRAY_UNMERGED[@]}"; do

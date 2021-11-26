@@ -796,7 +796,7 @@ class SingleDeviceFunctionTracker {
     /// This will print a uniqued call graph of function being complied for the device.
     /// This is usefull for debugging how a function ended up in device code.
     LLVM_DEBUG(if (!DeviceFunctions.contains(CurrentDecl)) {
-      for (int i = 0; i < CallStack.size(); i++)
+      for (std::size_t i = 0; i < CallStack.size(); i++)
         llvm::dbgs() << "  ";
       llvm::dbgs() << CurrentDecl->getQualifiedNameAsString() << "\n";
     });
@@ -2313,7 +2313,6 @@ public:
       KernelBodyTransform KBT(P, SemaRef);
       Stmt *NewBody = KBT.TransformStmt(OldDecl->getBody()).get();
       KernelDecl->setBody(NewBody);
-      populateMainEntryPoint(SemaRef, KernelDecl->getName(), KernelDecl);
       if (OldDecl->hasAttr<AnnotateAttr>()) {
         auto* AA = OldDecl->getAttr<AnnotateAttr>();
         KernelDecl->addAttr(AA->clone(Ctx));
@@ -4205,6 +4204,9 @@ void Sema::SetSYCLKernelNames() {
         IsSYCLUnnamedKernel(*this, Pair.first) ? StableName : CalculatedName);
     std::string LastingName = computeUniqueSYCLVXXName(KernelName);
     KernelName = LastingName;
+
+    if (getASTContext().getTargetInfo().getTriple().isXilinxAIE())
+      populateMainEntryPoint(*this, llvm::StringRef(LastingName), Pair.first);
 
     getSyclIntegrationHeader().updateKernelNames(Pair.first, KernelName,
                                                  StableName);

@@ -266,10 +266,15 @@ struct VXXIRDowngrader : public ModulePass {
       I->eraseFromParent();
   }
 
-  void convertPoinsonToZero(Module &M) {
-    for (auto &PV : M.getContext().pImpl->PVConstants)
+  void convertPoisonToZero(Module &M) {
+    for (auto &PV : M.getContext().pImpl->PVConstants) {
+      Type* Ty = PV.second->getType();
+      if (PV.second->use_empty() || Ty->isVoidTy() || Ty->isFunctionTy() ||
+          Ty->isLabelTy() || Ty->isMetadataTy())
+        continue;
       PV.second.get()->replaceAllUsesWith(
           Constant::getNullValue(PV.second.get()->getType()));
+    }
   }
 
   void removeMetaDataValues(Module &M) {
@@ -365,6 +370,8 @@ struct VXXIRDowngrader : public ModulePass {
     Visitor.emit();
   }
 
+  /// Replace the function named OldN by the function named NewN then delete the
+  /// function named OldN.
   void replaceFunction(Module &M, StringRef OldN, StringRef NewN) {
     Function* Old = M.getFunction(OldN);
     Function* New = M.getFunction(NewN);
@@ -397,7 +404,7 @@ struct VXXIRDowngrader : public ModulePass {
     if (Triple(M.getTargetTriple()).isXilinxAIE())
       replaceFunction(M, "abort", "_Z13finish_kernelv");
 
-    convertPoinsonToZero(M);
+    convertPoisonToZero(M);
     if (Triple(M.getTargetTriple()).isXilinxFPGA()) {
       if (Triple(M.getTargetTriple()).getArch() == llvm::Triple::fpga64)
         M.setTargetTriple("fpga64-xilinx-none");

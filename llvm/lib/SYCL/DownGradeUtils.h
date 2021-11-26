@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Tools to downgrad IR
+// Tools to down-grade IR
 //
 // ===---------------------------------------------------------------------===//
 
@@ -41,4 +41,9 @@ inline void removeAttributes(Module &M, ArrayRef<Attribute::AttrKind> Kinds) {
     }
 }
 
+inline void removeMetadata(Module &M, StringRef MetadataName) {
+  llvm::NamedMDNode *Old = M.getOrInsertNamedMetadata(MetadataName);
+  if (Old)
+    M.eraseNamedMetadata(Old);
+}
 }

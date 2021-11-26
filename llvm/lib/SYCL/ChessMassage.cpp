@@ -7,9 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Erases and modifies IR incompatabilities with chess-clang backend
-// And triage which kernel are actually needed to be compiled by the backend and
-// which are redundant.
+// resolve IR incompatibilities with the chess backend.
+// for the kernel merging process this pass also reorder function in the module,
+// generate an ordered list of kernels and mark redundant kernel private.
+// for more detail about kernel merging look at sycl-chess comment.
 //
 // ===---------------------------------------------------------------------===//
 
@@ -17,9 +18,8 @@
 #include <regex>
 #include <string>
 
-#include "llvm/Analysis/ValueTracking.h"
-#include "llvm/SYCL/ChessMassage.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
@@ -29,6 +29,7 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/SYCL/ChessMassage.h"
 #include "llvm/Transforms/Utils/FunctionComparator.h"
 
 #include "DownGradeUtils.h"
@@ -53,28 +54,39 @@ struct ChessMassage : public ModulePass {
 
   GlobalNumberState GNS;
 
+  /// For the kernel merging process is kernel needs to be treated specially.
+  /// The function merger pass doesn't merge function with different arguments
+  /// that it doesn't know about. so preparechess adds a unique attribute to
+  /// every kernels to prevent kernel function from being merged by the function
+  /// merger. This function cleans up this annotations. the function merger
+  /// should not be run after this pass.
   void removeMetadataForUnmergability(Module &M) {
     for (auto &F : M.functions())
       if (F.hasFnAttribute("unmergable-kernel-id"))
         F.removeFnAttr("unmergable-kernel-id");
   }
 
-  // Re-order functions with hash values. This means, the original list is
-  // sorted as:
+  // Re-order functions according to their relative order in FunctionComparator
+  // values. This means, the original
+  // list is sorted as:
   //   func1 - func2 - func3 - func4 - func5 - ...
   // The merged one looks like:
   //   func1 - func4 - ...
   // And this indicates that func2 and func3 are merged into func1
   void TriageKernelForMerging(Module &M, llvm::raw_fd_ostream &O) {
     std::vector<Function *> Funcs;
-    DenseMap<Function*, FunctionComparator::FunctionHash> FuncHashCache;
     DenseMap<std::pair<Function*, Function*>, int> FuncCompareCache;
-    auto ComapreFunc = [&](Function *LHS, Function *RHS) {
+
+    /// Return the result of the comparaison of 2 function. with some caching.
+    auto CompareFunc = [&](Function *LHS, Function *RHS) {
       auto Lookup = FuncCompareCache.find({LHS, RHS});
       int Compare = 0;
       if (Lookup != FuncCompareCache.end())
+        /// We have a result in cache return it.
         Compare = Lookup->second;
       else {
+        /// We do not have the result in cache. calculate it and write it to
+        /// cache.
         Compare = FunctionComparator(LHS, RHS, &GNS).compare();
         LLVM_DEBUG(llvm::dbgs()
                    << "chess-massage: " << LHS->getName() << " <=> "
@@ -92,28 +104,29 @@ struct ChessMassage : public ModulePass {
         Funcs.emplace_back(&F);
     }
 
-    // Sort collected kernel functions with hash values
+    // Sort collected kernel functions by comparaison.
     llvm::sort(Funcs, [&](Function *LHS, Function *RHS) {
-      return ComapreFunc(LHS, RHS) < 0;
+      return CompareFunc(LHS, RHS) < 0;
     });
 
     // Put sorted kernel functions back to the Modules's function list
-    // Set linkages such that only one of each function comparing equal will survive globaldce
+    // Set linkages such that only the first of each function comparing equal
+    // will survive globaldce
     for (auto I = Funcs.begin(), IE = Funcs.end(); I != IE; ++I) {
       Function *F = *I;
       F->removeFromParent();
       M.getFunctionList().push_back(F);
-      if (I != Funcs.begin() && ComapreFunc(*std::prev(I), F) == 0)
-        /// This kenrel will be removed because it is redondant.
+      if (I != Funcs.begin() && CompareFunc(*std::prev(I), F) == 0)
+        /// This kenrel will be removed because it is redundant.
         F->setLinkage(llvm::GlobalValue::PrivateLinkage);
       else
-        /// This kenrel will be kept.
+        /// This kernel will be kept
         F->setLinkage(llvm::GlobalValue::ExternalLinkage);
       kernelNames += (" \"" + F->getName() + "\" \n").str();
       F->replaceAllUsesWith(UndefValue::get(F->getType()));
     }
 
-    // output our list of kernel names as a bash array we can iterate over
+    // Output our list of kernel names as a bash array we can iterate over
     if (!kernelNames.empty()) {
       O << "# ordered array of unmerged kernel names found in the current "
            "module\n";
@@ -142,14 +155,6 @@ struct ChessMassage : public ModulePass {
     }
   }
 
-  /// Remove a piece of metadata we don't want
-  void removeMetadata(Module &M, StringRef MetadataName) {
-    llvm::NamedMDNode *Old =
-      M.getOrInsertNamedMetadata(MetadataName);
-    if (Old)
-      M.eraseNamedMetadata(Old);
-  }
-
   int GetWriteStreamID(StringRef Path) {
     int FileFD = 0;
     std::error_code EC =
@@ -176,11 +181,12 @@ struct ChessMassage : public ModulePass {
     removeMetadataForUnmergability(M);
     TriageKernelForMerging(M, O);
     removeImmarg(M);
+
     // This causes some problems with Tale when we generate a .sfg from a kernel
     // that contains this piece of IR, perhaps it's fine not to delete it
     // provided it's not empty. But at least for the moment it's empty and Tale
     // doesn't know how to handle it.
-    removeMetadata(M, "llvm.linker.options");
+    llvm::removeMetadata(M, "llvm.linker.options");
 
     llvm::removeAttributes(
         M, {Attribute::MustProgress, Attribute::ByVal, Attribute::StructRet});
@@ -196,6 +202,7 @@ namespace llvm {
 void initializeChessMassagePass(PassRegistry &Registry);
 }
 
+/// TODO: split this pass into the kernel mergin part and the downgrading part.
 INITIALIZE_PASS(ChessMassage, "ChessMassage",
   "pass that downgrades modern LLVM IR to something compatible with current "
   "chess-clang backend LLVM IR", false, false)
