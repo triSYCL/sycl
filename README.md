@@ -45,10 +45,12 @@ example an Intel FPGA and a Xilinx FPGA.
   [GettingStartedXilinxFPGA.md](sycl/doc/GettingStartedXilinxFPGA.md)
 - The unchanged get started guide for the SYCL compiler
   [GetStartedGuide.md](sycl/doc/GetStartedGuide.md)
-- Xilinx FPGA Tests Documentation - [Tests.md](sycl/doc/Tests.md)
-  covers a few details about the the
-  additional [xocc_tests](sycl/test/xocc_tests) directory we added to
-  the [sycl/test](sycl/test) directory among some other small details.
+
+- Xilinx FPGA Tests Documentation
+  - [Tests.md](sycl/doc/Tests.md) covers a few details about the the
+    additional [xocc_tests](sycl/test/xocc_tests) directory we added
+    to the [sycl/test](sycl/test) directory among some other small
+    details.
 
 The [Build DPC++ toolchain](sycl/doc/GetStartedGuide.md#build-dpc-toolchain) from the
 Intel oneAPI DPC++ SYCL project is a good starting point to get to
