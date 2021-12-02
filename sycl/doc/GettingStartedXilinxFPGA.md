@@ -194,21 +194,19 @@ https://www.xilinx.com/cgi-bin/docs/bkdoc?k=accelerator-cards;v=latest;d=ug1301-
 which is typically:
 ```bash
 tar zxvf xilinx-u200_2021.2_2021_1021_1001-all.deb.tar.gz
-sudo apt install ./xilinx-sc-fw-u200-u250_4.6.18-1.ff327cc_all.deb
-sudo apt install ./xilinx-cmc-u200-u250_1.2.20-3358356_all.deb
-sudo apt install ./xilinx-u200-gen3x16-xdma-validate_1-3209073_all.deb
-sudo apt install ./xilinx-u200-gen3x16-xdma-base_1-3209015_all.deb
-
-  ./xilinx-sc-fw-u200-u250_4.6.18-1.ff327cc_all.deb \
-  ./xilinx-u200-gen3x16-xdma-base_1-3209015_all.deb \
-  ./xilinx-u200-gen3x16-xdma-validate_1-3209073_all.deb
+# Install all of them at once to hide some dependency error (at least
+# in 2021)
+sudo apt install ./xilinx-sc-fw-u200-u250_4.6.18-1.ff327cc_all.deb \
+ ./xilinx-cmc-u200-u250_1.2.20-3358356_all.deb \
+ ./xilinx-u200-gen3x16-xdma-validate_1-3209073_all.deb \
+ ./xilinx-u200-gen3x16-xdma-base_1-3209015_all.deb
 
 sudo apt install ./xilinx-u200-gen3x16-xdma-1-202110-1-dev_1-3221508_all.deb
 ```
 from where they have been downloaded or adapt the paths to them.
 
 
-### Flash the board
+### Flash and test the board
 
 If you do not want to use a real board or if you have access to a
 machine with a board which is already configured, like an XACC cluster
@@ -407,7 +405,7 @@ INFO: All cards validated successfully.
 ## Compile the SYCL compiler
 
 Building SYCL can be done with Python scripts:
-```
+```bash
 # Pick some place where SYCL has to be compiled, such as:
 SYCL_HOME=~/sycl_workspace
 mkdir $SYCL_HOME
@@ -420,10 +418,13 @@ python $SYCL_HOME/llvm/buildbot/compile.py
 These scripts have many options which can be displayed when using the
 `--help` option. For example to configure with CUDA support, without
 treating compiler warnings as errors and producing a compiler database
-to be used by tools like LSP server like `clangd`: ``` python
-$SYCL_HOME/llvm/buildbot/configure.py --cuda -no-werror
---cmake-opt="-DCMAKE_EXPORT_COMPILE_COMMANDS=1" ``` For more control,
-see [section Build](#build).
+to be used by tools like LSP server like `clangd`:
+```bash
+python $SYCL_HOME/llvm/buildbot/configure.py --cuda -no-werror \
+  --cmake-opt="-DCMAKE_EXPORT_COMPILE_COMMANDS=1"
+```
+
+For more control, see [section Build](#build).
 
 
 ## Compiling and running a SYCL application
