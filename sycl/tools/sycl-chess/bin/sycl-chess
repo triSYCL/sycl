@@ -199,7 +199,8 @@ chess_kernel_compile () {
     # once pre-linker phase and once after. This is probably normal behaviour
     # but we do not want to be unable to clean up those files and it may result
     # in some unusual behaviour longterm
-    mv "$CLANG_TEMPORARY_DIR/$0.cpp" "$SOURCE_TEMPORARY_DIR/$0.cpp"
+
+    echo "extern \"C\" void $0(); int main(void) { $0(); done(); }" > $SOURCE_TEMPORARY_DIR/$0.cpp
 
     $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c -Oz \
       -o "$SOURCE_TEMPORARY_DIR/$0.main.o" "$SOURCE_TEMPORARY_DIR/$0.cpp"

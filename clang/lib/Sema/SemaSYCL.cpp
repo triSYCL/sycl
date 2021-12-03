@@ -1160,58 +1160,26 @@ constructKernelName(Sema &S, const FunctionDecl *KernelCallerFunc,
                                       S.getASTContext(), KernelNameType)};
 }
 
-// Creates the contents of a SYCL main file which wraps a kernel function and
-// its parameters and invokes it. The idea for now is that creating a high
-// level main file gives easier access to kernel information and a higher level
-// way to alter the entry point. Writing it as an LLVM pass is probably possible
-// but harder to make modifications to.
+// Just rips the __global address space from a string as these are appended to
+// Pointers inside of buildArgTys and we don't want them in our AI Engine main
 //
-// Used for the AI Engine Tile entry point as it doesn't follow standard OpenCL
-// kernel entry points.
+// They currently degrade to no address space inside our LLVM IR because all
+// Language AS Spaces are set to the default 0 for our targets. But they still
+// pose a problem when we're trying to spit out our types as strings.
 //
-// Currently restricted to a very OpenCL-esque idea of what a tile is e.g. 1
-// Kernel Per Tile, so 1 single function inside of a main with no concept of
-// connectivity to anything else. Unsure if this is the way to go long term but
-// works for a first pass.
+// An alternative fix to this is to just put the address space modificaiton
+// section of the code in buildArgTys inside of an if (AIEngine) block or to
+// create a temporary copy we can rip the address space qualifier off of.
 //
-// TODO FIXME Hyun Kwon believes it might be possible to skip this and do some
-// runtime magic to increment the program counter and fill the parameters as we
-// need, this maybe a good thing to look into to get rid of a compiler
-// dependency and it may allow complex scheduling from the runtime. This works
-// as a simple first step for now.
-// TODO If it's decide this direction is fine refactor this to perhaps behave
-// more like the Integrated Header as we can keep some form of Module state and
-// emit the files at the end of the module
-// TODO Also clean it up in general, break it into reusable lambdas etc. a lot
-// of repetition/readability issues
-// TODO Fix double generation of main file, SYCL passes through here twice and
-// generates two sets of main files, they overwrite each other which is fine.
-// However, the second set happens after the script so it makes it impossible
-// to automate the deletion from the script. Also a waste of processing time
-// when you need to generate 400 main files a second time around.
-static void populateMainEntryPoint(Sema& S, const StringRef Name,
-                                   const FunctionDecl *KernelFunction) {
-  SmallString<256> TmpDir;
-  llvm::sys::path::system_temp_directory(true, TmpDir);
-  auto MainFileName = std::string(TmpDir.str()) + "/" + Name.str() + ".cpp";
+// For now this keeps the change local to the generation of our main file,
+// prevents conflicts and is easy to understand.
+static std::string RemoveGlobalFromType(std::string S) {
+  const char S1[] = "__global ";
 
-  int MainNameFD = 0;
-  std::error_code EC =
-      llvm::sys::fs::openFileForWrite(MainFileName, MainNameFD);
-  if (EC) {
-    llvm::errs() << "Error: " << EC.message() << "\n";
-    llvm_unreachable("failed to generate main entry file");
-  }
-  llvm::raw_fd_ostream Out(MainNameFD, true /*close in destructor*/);
+  for (auto Pos = S.find(S1); Pos != StringRef::npos; Pos = S.find(S1, Pos))
+    S.erase(Pos, sizeof(S1) - 1);
 
-  Out << "// SYCL generated kernel wrapper function \n";
-  Out << "extern \"C\" void " << Name << "();\n";
-
-  Out << "// SYCL Tile Address Register \n";
-  Out << "int main(void) {\n";
-  Out << "  "<< Name << "();\n";
-  Out << "  done();\n";
-  Out << "}\n";
+  return S;
 }
 
 static bool isDefaultSPIRArch(ASTContext &Context) {
@@ -4182,9 +4150,6 @@ void Sema::SetSYCLKernelNames() {
         IsSYCLUnnamedKernel(*this, Pair.first) ? StableName : CalculatedName);
     std::string LastingName = computeUniqueSYCLVXXName(KernelName);
     KernelName = LastingName;
-
-    if (getASTContext().getTargetInfo().getTriple().isXilinxAIE())
-      populateMainEntryPoint(*this, llvm::StringRef(LastingName), Pair.first);
 
     getSyclIntegrationHeader().updateKernelNames(Pair.first, KernelName,
                                                  StableName);

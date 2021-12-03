@@ -113,6 +113,15 @@ add_lit_testsuite(check-sycl-xocc-all-j4 "Running the SYCL regression tests for 
   )
 set_target_properties(check-sycl-xocc-all-j4 PROPERTIES FOLDER "SYCL tests")
 
+add_lit_testsuite(check-acap "Running the ACAP regression tests"
+  ${CMAKE_CURRENT_BINARY_DIR}/on-device
+  ARGS ${RT_TEST_ARGS}
+  PARAMS "ACAP=only"
+  DEPENDS ${SYCL_TEST_DEPS}
+  EXCLUDE_FROM_CHECK_ALL
+  )
+set_target_properties(check-acap PROPERTIES FOLDER "SYCL tests")
+
 add_custom_target(check-sycl)
 add_dependencies(check-sycl check-sycl-spirv)
 set_target_properties(check-sycl PROPERTIES FOLDER "SYCL tests")
