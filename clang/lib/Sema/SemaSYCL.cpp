@@ -128,7 +128,7 @@ public:
   /// \param Tmpl  whether the class is template instantiation or simple record
   static bool isSyclType(QualType Ty, StringRef Name, bool Tmpl = false);
 
-  /// Checks whether given clang type is a standard SYCL API class with given
+  /// Checks whether given clang type is a standard ACAP API class with given
   /// name.
   /// \param Ty    the clang type being checked
   /// \param Name  the class name checked against
@@ -136,7 +136,7 @@ public:
   static bool isAcapSyclType(QualType Ty, StringRef Name, bool Tmpl = false);
 
   /// Checks whether given clang type is a full specialization of the ACAP SYCL
-  /// accessor class.
+  /// accessor class
   static bool isAcapAccessorType(QualType Ty);
 
   /// Checks whether given function is a standard SYCL API function with given
@@ -794,7 +794,7 @@ class SingleDeviceFunctionTracker {
       return;
 
     /// This will print a uniqued call graph of function being complied for the device.
-    /// This is usefull for debugging how a function ended up in device code.
+    /// This is useful for debugging how a function ended up in device code.
     LLVM_DEBUG(if (!DeviceFunctions.contains(CurrentDecl)) {
       for (std::size_t i = 0; i < CallStack.size(); i++)
         llvm::dbgs() << "  ";
@@ -1100,7 +1100,7 @@ static QualType calculateKernelNameType(ASTContext &Ctx,
   return TAL->get(0).getAsType().getCanonicalType();
 }
 
-// First pass at a name gen function currently just inefficently rips all
+// First pass at a name gen function currently just inefficiently rips all
 // illegal function name characters from the type to make the name.
 // e.g:
 // ::prog< ::trisycl::vendor::xilinx::acap::aie::array<
@@ -1158,28 +1158,6 @@ constructKernelName(Sema &S, const FunctionDecl *KernelCallerFunc,
 
   return {std::string(Out.str()), SYCLUniqueStableNameExpr::ComputeName(
                                       S.getASTContext(), KernelNameType)};
-}
-
-// Just rips the __global address space from a string as these are appended to
-// Pointers inside of buildArgTys and we don't want them in our AI Engine main
-//
-// They currently degrade to no address space inside our LLVM IR because all
-// Language AS Spaces are set to the default 0 for our targets. But they still
-// pose a problem when we're trying to spit out our types as strings.
-//
-// An alternative fix to this is to just put the address space modificaiton
-// section of the code in buildArgTys inside of an if (AIEngine) block or to
-// create a temporary copy we can rip the address space qualifier off of.
-//
-// For now this keeps the change local to the generation of our main file,
-// prevents conflicts and is easy to understand.
-static std::string RemoveGlobalFromType(std::string S) {
-  const char S1[] = "__global ";
-
-  for (auto Pos = S.find(S1); Pos != StringRef::npos; Pos = S.find(S1, Pos))
-    S.erase(Pos, sizeof(S1) - 1);
-
-  return S;
 }
 
 // Creates the contents of a SYCL main file which wraps a kernel function and
@@ -4292,7 +4270,7 @@ void Sema::ConstructOpenCLKernel(FunctionDecl *KernelCallerFunc,
     int_header.handleSyclKernelHandlerType(KernelHandlerArg->getType());
     opt_report.handleSyclKernelHandlerType();
   }
-  /// The Acap runtime has different code pattern form intel's
+  /// The Acap runtime has different code pattern form intel's runtime,
   /// This is the way we generate inclusion headers for the Acap runtime.
   if (getASTContext().getTargetInfo().getTriple().isXilinxAIE()) {
     auto *MD = cast<CXXMethodDecl>(KernelObj->getDeclContext());

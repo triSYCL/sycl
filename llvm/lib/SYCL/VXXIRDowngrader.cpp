@@ -370,19 +370,6 @@ struct VXXIRDowngrader : public ModulePass {
     Visitor.emit();
   }
 
-  /// Replace the function named OldN by the function named NewN then delete the
-  /// function named OldN.
-  void replaceFunction(Module &M, StringRef OldN, StringRef NewN) {
-    Function* Old = M.getFunction(OldN);
-    Function* New = M.getFunction(NewN);
-    if (!Old)
-      return;
-    assert(New);
-    assert(Old->getFunctionType() == New->getFunctionType() && "replacement is not possible");
-    Old->replaceAllUsesWith(New);
-    Old->eraseFromParent();
-  }
-
   bool runOnModule(Module &M) override {
     resetByVal(M);
     removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
@@ -401,8 +388,6 @@ struct VXXIRDowngrader : public ModulePass {
     /// addressspace 0 causing addresspace cast.
     if (Triple(M.getTargetTriple()).isXilinxFPGA())
       removeFunction(M, "__assert_fail");
-    if (Triple(M.getTargetTriple()).isXilinxAIE())
-      replaceFunction(M, "abort", "_Z13finish_kernelv");
 
     convertPoisonToZero(M);
     if (Triple(M.getTargetTriple()).isXilinxFPGA()) {

@@ -38,7 +38,7 @@ ChessInstallationDetector::ChessInstallationDetector(
     if (llvm::ErrorOr<std::string> xchesscc = findProgramByName("xchesscc")) {
       SmallString<256> xchessccAbsolutePath;
       fs::real_path(*xchesscc, xchessccAbsolutePath);
-      /// xchessccAbsolutePath wil be equal to something like .../Vitis/2021.2/aietools/bin/xchesscc
+      /// xchessccAbsolutePath will be equal to something like .../Vitis/2021.2/aietools/bin/xchesscc
 
       BinaryPath = xchessccAbsolutePath.str().str();
 
@@ -70,7 +70,7 @@ void SYCL::LinkerChess::constructSYCLChessCommand(
     static_cast<const toolchains::ChessToolChain &>(getToolChain());
   ArgStringList CmdArgs;
 
-  // The command we are invoking the script at sycl/tools/sycl-chess/bin/sycl-chess
+  // This command is invoking the script at sycl/tools/sycl-chess/bin/sycl-chess
 
   // Script Arg $1, directory of cardano bin (where xchesscc resides)
   CmdArgs.push_back(Args.MakeArgString(TC.ChessInstallation.getBinPath()));

@@ -1,12 +1,11 @@
 ## Disclaimer
 
-This is document is not complete. the compiler and library implementation are experimental, so it will likely
+This is document is not complete. The compiler and library implementation are experimental, so it will likely
 change rapidly or get outdated.
 
-
 ## Requirements
-  * recent linux distribution
-  * Vitis 2021.2 with chess for AIE
+  * Recent Linux distribution
+  * Vitis 2021.2 which includes CHESS for AIE
 
 # Xilinx ACAP Compilation
 

@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Prepare sycl chess device code for optimizations
+// Prepare SYCL ACAP device code for optimizations
 //
 // ===---------------------------------------------------------------------===//
 

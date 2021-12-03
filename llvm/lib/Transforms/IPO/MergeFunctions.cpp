@@ -171,10 +171,6 @@ static cl::opt<bool>
                           cl::init(false),
                           cl::desc("Allow mergefunc to create aliases"));
 
-static cl::opt<bool>
-    MergeFunctionsThunks("mergefunc-use-thunk", cl::Hidden, cl::init(true),
-                         cl::desc("Allow mergefunc to create thunk"));
-
 namespace {
 
 class FunctionNode {
@@ -654,7 +650,7 @@ void MergeFunctions::filterInstsUnrelatedToPDI(
 
 /// Whether this function may be replaced by a forwarding thunk.
 static bool canCreateThunkFor(Function *F) {
-  if (F->isVarArg() || !MergeFunctionsThunks)
+  if (F->isVarArg())
     return false;
 
   // Don't merge tiny functions using a thunk, since it can just end up

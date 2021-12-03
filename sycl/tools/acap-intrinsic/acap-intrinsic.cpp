@@ -11,9 +11,9 @@
 
 namespace acap_intr {
 
-// all the function called here are intrinsic. they do not have symbols but are
-// just a function-like representation of AIE instructions. so they shouldn't be
-// able to collide with ayn other symbol.
+// All the functions called here are intrinsic. They do not have symbols but are
+// just a function-like representation of AIE instruction, so they should not be
+// able to collide with another symbol
 
 int get_coreid() { return ::get_coreid(); }
 
@@ -27,15 +27,21 @@ void release(unsigned id) { return ::release(id); }
 
 void core_done() { ::done(); }
 
+extern "C" void _Z13finish_kernelv();
+
+void soft_done() {
+  _Z13finish_kernelv();
+}
+
 void nop5() { ::nop(5); }
 
 uint32_t sread(int stream_idx) { return ::get_ss(stream_idx); }
 void swrite(int stream_idx, uint32_t val, int tlast) { return ::put_ms(stream_idx, val, tlast); }
 
-/// chess stream intrinsics use types like v4int32 or v8acc48 that do not exist
-/// in our SYCL compiler. so all data to be read or written to a stream is
-/// passed by a pointer to its start. we do not copy any of this data just load
-/// it and write it to a stream or read for a stream and write it to memory.
+/// CHESS stream intrinsics use types like v4int32 or v8acc48 that do not exist
+/// in our SYCL compiler, so all data to be read or written to a stream is
+/// passed by a pointer to its start. We do not copy any of this data just load
+/// it and write it to a stream or read for a stream and write it to memory
 void stream_read4(char* out_buffer, int stream_idx) {
   *reinterpret_cast<uint32_t*>(out_buffer) = ::get_ss(stream_idx);
 }

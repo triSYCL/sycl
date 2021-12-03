@@ -46,4 +46,19 @@ inline void removeMetadata(Module &M, StringRef MetadataName) {
   if (Old)
     M.eraseNamedMetadata(Old);
 }
+
+/// Replace the function named OldN by the function named NewN then delete the
+/// function named OldN.
+inline void replaceFunction(Module &M, StringRef OldN, StringRef NewN) {
+  Function *Old = M.getFunction(OldN);
+  Function *New = M.getFunction(NewN);
+  if (!Old)
+    return;
+  assert(New);
+  assert(Old->getFunctionType() == New->getFunctionType() &&
+         "replacement is not possible");
+  Old->replaceAllUsesWith(New);
+  Old->eraseFromParent();
 }
+
+} // namespace llvm

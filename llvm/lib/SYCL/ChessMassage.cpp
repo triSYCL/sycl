@@ -7,10 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// resolve IR incompatibilities with the chess backend.
-// for the kernel merging process this pass also reorder function in the module,
-// generate an ordered list of kernels and mark redundant kernel private.
-// for more detail about kernel merging look at sycl-chess comment.
+// Resolve IR incompatibilities with the CHESS backend.
+// For the kernel merging process, this pass also reorders functions in the module,
+// generates an ordered list of kernels and marks redundant kernels as private.
+// For more detail about kernel merging, look at sycl-chess comments.
 //
 // ===---------------------------------------------------------------------===//
 
@@ -54,11 +54,11 @@ struct ChessMassage : public ModulePass {
 
   GlobalNumberState GNS;
 
-  /// For the kernel merging process is kernel needs to be treated specially.
-  /// The function merger pass doesn't merge function with different arguments
-  /// that it doesn't know about. so preparechess adds a unique attribute to
-  /// every kernels to prevent kernel function from being merged by the function
-  /// merger. This function cleans up this annotations. the function merger
+  /// For the kernel merging process, kernels need to be treated specially.
+  /// The function merger pass doesn't merge functions with different attributes
+  /// that it doesn't know about. So preparechess adds a unique attribute to
+  /// each kernel to prevent kernel function from being merged by the function
+  /// merger. This function cleans up this annotations. The function merger
   /// should not be run after this pass.
   void removeMetadataForUnmergability(Module &M) {
     for (auto &F : M.functions())
@@ -72,12 +72,14 @@ struct ChessMassage : public ModulePass {
   //   func1 - func2 - func3 - func4 - func5 - ...
   // The merged one looks like:
   //   func1 - func4 - ...
-  // And this indicates that func2 and func3 are merged into func1
+  // And this indicates that func2 and func3 are merged into func1 and that
+  // func5 was merged into func4
   void TriageKernelForMerging(Module &M, llvm::raw_fd_ostream &O) {
     std::vector<Function *> Funcs;
     DenseMap<std::pair<Function*, Function*>, int> FuncCompareCache;
 
-    /// Return the result of the comparaison of 2 function. with some caching.
+    /// Return the result of the comparison of 2 functions
+    /// with some caching because comparison is costly
     auto CompareFunc = [&](Function *LHS, Function *RHS) {
       auto Lookup = FuncCompareCache.find({LHS, RHS});
       int Compare = 0;
@@ -85,8 +87,8 @@ struct ChessMassage : public ModulePass {
         /// We have a result in cache return it.
         Compare = Lookup->second;
       else {
-        /// We do not have the result in cache. calculate it and write it to
-        /// cache.
+        /// We do not have the result in cache, thus calculate it and write it to
+        /// cache
         Compare = FunctionComparator(LHS, RHS, &GNS).compare();
         LLVM_DEBUG(llvm::dbgs()
                    << "chess-massage: " << LHS->getName() << " <=> "
@@ -104,20 +106,20 @@ struct ChessMassage : public ModulePass {
         Funcs.emplace_back(&F);
     }
 
-    // Sort collected kernel functions by comparaison.
+    // Sort collected kernel functions by comparison
     llvm::sort(Funcs, [&](Function *LHS, Function *RHS) {
       return CompareFunc(LHS, RHS) < 0;
     });
 
-    // Put sorted kernel functions back to the Modules's function list
+    // Put sorted kernel functions back into the Modules's function list.
     // Set linkages such that only the first of each function comparing equal
-    // will survive globaldce
+    // will survive globaldce.
     for (auto I = Funcs.begin(), IE = Funcs.end(); I != IE; ++I) {
       Function *F = *I;
       F->removeFromParent();
       M.getFunctionList().push_back(F);
       if (I != Funcs.begin() && CompareFunc(*std::prev(I), F) == 0)
-        /// This kenrel will be removed because it is redundant.
+        /// This kernel will be removed because it is redundant.
         F->setLinkage(llvm::GlobalValue::PrivateLinkage);
       else
         /// This kernel will be kept
@@ -132,26 +134,6 @@ struct ChessMassage : public ModulePass {
            "module\n";
       O << "declare -a KERNEL_NAME_ARRAY_UNMERGED=(" << kernelNames.str()
         << ")\n\n";
-    }
-  }
-
-  /// Removes immarg (immutable arg) bitcode attribute that is applied to
-  /// function parameters. It was added in LLVM-9 (D57825), so as Vitis catches
-  /// up it can be removed
-  /// Note: If you llvm-dis the output Opt .bc file with an LLVM that has the
-  /// ImmArg attribute, it will reapply all of the ImmArg attributes to the
-  /// LLVM IR
-  void removeImmarg(Module &M) {
-    for (auto &F : M.functions()) {
-      int i = 0;
-      for (auto &P : F.args()) {
-          if (P.hasAttribute(llvm::Attribute::ImmArg)
-              || F.hasParamAttribute(i, llvm::Attribute::ImmArg)) {
-              P.removeAttr(llvm::Attribute::ImmArg);
-              F.removeParamAttr(i, llvm::Attribute::ImmArg);
-          }
-          ++i;
-      }
     }
   }
 
@@ -180,7 +162,6 @@ struct ChessMassage : public ModulePass {
 
     removeMetadataForUnmergability(M);
     TriageKernelForMerging(M, O);
-    removeImmarg(M);
 
     // This causes some problems with Tale when we generate a .sfg from a kernel
     // that contains this piece of IR, perhaps it's fine not to delete it
@@ -202,7 +183,7 @@ namespace llvm {
 void initializeChessMassagePass(PassRegistry &Registry);
 }
 
-/// TODO: split this pass into the kernel mergin part and the downgrading part.
+/// TODO: split this pass into the kernel merging part and the downgrading part
 INITIALIZE_PASS(ChessMassage, "ChessMassage",
   "pass that downgrades modern LLVM IR to something compatible with current "
   "chess-clang backend LLVM IR", false, false)

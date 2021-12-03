@@ -120,11 +120,11 @@ UNMERGED_PROP=$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}
 # The kernel merging process:
 #  -preparechess  will setup metadata to prevent kernels from being merged by mergefunc and
 #                 set the linkage of non-kernel to private such that they can be discard when unused.
-#  -mergefunc     will merge identical function except kernels because of preparechess changes
-#                 this makes spotting identical kernels much easier
-#  -ChessMassage  will reorder kernel to be cluster by mergability,
+#  -mergefunc     will merge identical functions except kernels because of preparechess changes.
+#                 This makes spotting identical kernels much easier.
+#  -ChessMassage  will reorder kernels to be clustered by mergeability,
 #                 generate an ordered list of kernels before the merge and
-#                 mark mergable/redondant kernels as private
+#                 mark mergeable/redundant kernels as private.
 #  -globaldce     will eliminate kernels marked private by ChessMassage because they are unreachable.
 #  -kernelPropGen will generate and ordered list of kernels after the merge
 #  and finally this script will compile each unique kernel via chess and duplicate the output for equivalent kernels.
@@ -135,7 +135,7 @@ UNMERGED_PROP=$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}
 
 cp $INPUT_FILE_NAME $INPUT_FILE_NAME.saved.bc
 
-$OPT -S -preparechess -Oz -mergefunc -ChessMassage -globaldce -kernelPropGen -vxxIRDowngrader \
+$OPT -S -preparechess -Oz -mergefunc -ChessMassage -globaldce -kernelPropGen \
   "$INPUT_FILE_NAME" --sycl-kernel-propgen-output $KERNELPROP \
   --sycl-kernel-unmerged-prop-out $UNMERGED_PROP -o \
   "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
@@ -155,13 +155,13 @@ source "$KERNELPROP"
 #   func1 - func4 - ...
 source "$UNMERGED_PROP"
 
-# Compiler all our kernels into a .o file.
+# Compile all our kernels into a .o file.
 $XCHESSCC +P $(nproc) -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c -Oz \
   -o "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
   "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
 
 # The following code will edit the linker script based on the kernel to optimize memory usage.
-# Calulcate the sum of the sizes of the data sections inside the .o file containing all kernels.
+# Calculate the sum of the sizes of the data sections inside the .o file containing all kernels.
 SIZE_OF_VARIABLE_SECTION_STR=$(objdump --headers $SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o \
  | grep --extended-regexp "data|bss" | sed --regexp-extended 's/00+/0x/' | awk --non-decimal-data --field-separator=' ' '{ printf "%d\n",$3 }' | awk '{sum+=$1;} END{print sum;}')
 echo $SIZE_OF_VARIABLE_SECTION_STR

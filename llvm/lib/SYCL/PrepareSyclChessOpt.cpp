@@ -21,6 +21,8 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/ScopedPrinter.h"
 
+#include "DownGradeUtils.h"
+
 using namespace llvm;
 
 namespace {
@@ -31,22 +33,20 @@ struct PrepareSyclChessOpt : public ModulePass {
 
   PrepareSyclChessOpt() : ModulePass(ID) {}
 
-  /// make non-kernel functions and global variables private.
+  /// Make non-kernel functions and global variables private.
   /// Because only kernels are externally visible.
   void turnNonKernelsIntoPrivate(Module &M) {
-    for (GlobalObject &G : M.global_objects()) {
-      if (auto *F = dyn_cast<Function>(&G)) {
-        if (F->getCallingConv() == CallingConv::SPIR_KERNEL || G.isDeclaration())
-          continue;
-        G.setLinkage(llvm::GlobalValue::PrivateLinkage);
-      }
-    }
+    for (GlobalObject &G : M.global_objects())
+      if (auto *F = dyn_cast<Function>(&G))
+        if (F->getCallingConv() != CallingConv::SPIR_KERNEL &&
+            !G.isDeclaration())
+          G.setLinkage(llvm::GlobalValue::PrivateLinkage);
   }
 
-  /// we give a attribute with a unique id to every kenrels such
-  /// that mergefunc dont merge them.
-  /// the first level of call in the kernel (which is introduced by the
-  /// runtime) Will be inlined into the kernel function.
+  /// We give an attribute with a unique id to each kernels such
+  /// that the function merger pass does not merge them.
+  /// The first level of call in the kernel (which is introduced by the
+  /// runtime) will be inlined into the kernel function.
   void prepareForMerging(Module &M) {
     int id = 0;
     for (GlobalObject &G : M.global_objects()) {
@@ -83,7 +83,7 @@ struct PrepareSyclChessOpt : public ModulePass {
         // method would be to go through each basic block and check each
         // instruction, but this seems more optimal
 
-        /// Go throught every users to find callsite and updated them.
+        /// Go through every users to find call sites and update them
         SmallVector<User *, 8> Stack;
         SmallSet<User *, 16> Set;
         Stack.push_back(&F);
@@ -102,26 +102,26 @@ struct PrepareSyclChessOpt : public ModulePass {
     }
   }
 
-  /// This will collect every constructors and destructors calls. and put them
-  /// into specific runtime function that will be invoked at the right time by
+  /// This will collect every constructor and destructor calls and put them
+  /// into specific runtime functions that will be invoked at the right time by
   /// the runtime.
   void handleGlobals(Module &M) {
-    /// Chess cannot handle llvm.global_ctors so we remove it.
+    /// Chess cannot handle llvm.global_ctors so we remove it
     if (GlobalVariable *GV = M.getGlobalVariable("llvm.global_ctors"))
       GV->eraseFromParent();
-    /// Find the runtime function that will be called to run constructors.
+    /// Find the runtime function that will be called to run constructors
     if (Function *OurF = M.getFunction("__cxx_global_var_ctor")) {
       for (Function &F : M.getFunctionList()) {
-        /// Find every constructors. and add them to __cxx_global_var_ctor
+        /// Find every constructors and add them to __cxx_global_var_ctor
         if (F.getName().startswith("__cxx_global_var_init"))
           CallInst::Create(F.getFunctionType(), &F, "",
                            OurF->getEntryBlock().getTerminator());
       }
     }
-    /// Find the runtime function that will be called to run destructors.
+    /// Find the runtime function that will be called to run destructors
     if (Function *OurF = M.getFunction("__cxx_global_var_dtor"))
       if (Function *AtExit = M.getFunction("__cxa_atexit")) {
-        /// Go through every calls to at exit.
+        /// Go through every calls to at exit
         for (User *U : AtExit->users()) {
           /// Add function they asked to call to __cxx_global_var_dtor
           Function *F = cast<Function>(getUnderlyingObject(U->getOperand(0)));
@@ -132,7 +132,7 @@ struct PrepareSyclChessOpt : public ModulePass {
       }
   }
 
-  /// Make sur that a symbol is visible in the resulting binary.
+  /// Make sure that a symbol is visible in the resulting binary
   void makeVisible(Module &M, StringRef Symbol) {
     auto* GV = M.getNamedGlobal(Symbol);
     if (!GV)
@@ -144,16 +144,18 @@ struct PrepareSyclChessOpt : public ModulePass {
   }
 
   bool runOnModule(Module &M) override {
-    /// mark invisible globals as private.
+    /// Mark invisible globals as private
     turnNonKernelsIntoPrivate(M);
-    /// prevent the function merger from merging kernels.
+    /// Prevent the function merger from merging kernels
     prepareForMerging(M);
-    /// accumulate constructors and destructors into specific runtime fontions.
+    /// Accumulate constructors and destructors into specific runtime functions
     handleGlobals(M);
-    /// keep kernel_lambda_capture visible because the runtime needs it.
+    /// Keep kernel_lambda_capture visible because the runtime needs it
     makeVisible(M, "kernel_lambda_capture");
-    /// We are not SPIR so make all calling convention C.
+    /// We are not SPIR so make all calling convention C
     modifySPIRCallingConv(M);
+
+    llvm::replaceFunction(M, "abort", "_Z13finish_kernelv");
     return true;
   }
 };

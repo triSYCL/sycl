@@ -45,6 +45,7 @@ DECL_PREFIX void acquire(unsigned id) DECL_POSTFIX
 DECL_PREFIX void release(unsigned id) DECL_POSTFIX
 
 DECL_PREFIX void core_done() DECL_POSTFIX
+DECL_PREFIX void soft_done() DECL_POSTFIX
 
 DECL_PREFIX void nop5() DECL_POSTFIX
 
