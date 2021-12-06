@@ -39,6 +39,8 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "SYCLUtils.h"
+
 using namespace llvm;
 
 // Put the code in an anonymous namespace to avoid polluting the global
@@ -241,12 +243,6 @@ struct InSPIRation : public ModulePass {
   /// Set the output Triple to SPIR
   void setSPIRTriple(Module &M) { M.setTargetTriple("spir64"); }
 
-  /// Test if a function is a SPIR kernel
-  bool isKernel(const Function &F) {
-    return F.getCallingConv() == CallingConv::SPIR_KERNEL ||
-           F.hasFnAttribute("fpga.top.func");
-  }
-
   /// Test if a function is a non-intrinsic SPIR function, indicating that it is
   /// a user created function that the SYCL compiler has transitively generated
   /// or one that comes from an existing library of SPIR functions (HLS SPIR
@@ -296,7 +292,7 @@ struct InSPIRation : public ModulePass {
 
     std::vector<Function *> Declarations;
     for (auto &F : M.functions()) {
-      if (isKernel(F)) {
+      if (isKernelFunc(&F)) {
         kernelSPIRify(F);
         applyKernelProperties(F);
         giveNameToArguments(F);

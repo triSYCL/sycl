@@ -36,6 +36,8 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "SYCLUtils.h"
+
 /// This should theoretically not be accessed from outside of the IR directory.
 /// But using it is the most reliable way to do some of the IR transformation we
 /// are doing in this file.
@@ -159,45 +161,6 @@ struct VXXIRDowngrader : public ModulePass {
       Annot->eraseFromParent();
   }
 
-  /// Removes nofree bitcode function attribute that is applied to
-  /// functions to indicate that they do not deallocate memory.
-  /// It was added in LLVM-9 (D49165), so as v++ catches up it can be removed
-  /// Removes immarg (immutable arg) bitcode attribute that is applied to
-  /// function parameters. It was added in LLVM-9 (D57825), so as v++ catches
-  /// up it can be removed
-  /// Removes WillReturn LLVM bitcode attribute from llvm/Doc/LangRef:
-  ///
-  /// "This function attribute indicates that a call of this function will
-  ///  either exhibit undefined behavior or comes back and continues execution
-  ///  at a point in the existing call stack that includes the current
-  ///  invocation.
-  ///  Annotated functions may still raise an exception, i.a., ``nounwind``
-  ///  is not implied.
-  ///  If an invocation of an annotated function does not return control back
-  ///  to a point in the call stack, the behavior is undefined."
-  ///
-  /// Added in LLVM-10: rL364555 + D62801, this removal can be reverted as the
-  /// v++ backend catches up. It seems unlikely removal will cause any problems
-  /// as it appears to be an attribute that helps carry information to
-  /// backends/other passes for further transformations.
-  void removeAttributes(Module &M, ArrayRef<Attribute::AttrKind> Kinds) {
-    for (auto &F : M.functions())
-      for (auto Kind : Kinds) {
-        F.removeFnAttr(Kind);
-        F.removeRetAttr(Kind);
-        for (auto &P : F.args())
-          P.removeAttr(Kind);
-        for (User *U : F.users())
-          if (CallBase *CB = dyn_cast<CallBase>(U)) {
-            CB->removeFnAttr(Kind);
-            CB->removeRetAttr(Kind);
-            for (unsigned int i = 0; i < CB->arg_size(); ++i) {
-              CB->removeParamAttr(i, Kind);
-            }
-          }
-      }
-  }
-
   /// Remove Freeze instruction because v++ can't deal with them.
   /// FIXME: This is not a safe transformation but since LLVM survived with bugs
   /// caused by absence of freeze for many years, so I guess it is good enough
@@ -255,8 +218,8 @@ struct VXXIRDowngrader : public ModulePass {
                 CI->getArgOperand(0),
                 ConstantInt::getNullValue(CI->getArgOperand(0)->getType()));
             Value *Sub = B.CreateSub(
-                CI->getArgOperand(0),
-                ConstantInt::getNullValue(CI->getArgOperand(0)->getType()));
+                ConstantInt::getNullValue(CI->getArgOperand(0)->getType()),
+                CI->getArgOperand(0));
             Value *ABS = B.CreateSelect(Cmp, Sub, CI->getArgOperand(0));
             CI->replaceAllUsesWith(ABS);
             ToRemove.push_back(CI);
@@ -266,12 +229,27 @@ struct VXXIRDowngrader : public ModulePass {
       I->eraseFromParent();
   }
 
-  void convertPoinsonToZero(Module &M) {
-    for (auto &PV : M.getContext().pImpl->PVConstants)
+  /// Poison is a special value that was added to LLVM but is not present in the
+  /// HLS backend. This function removes all poison values by converting them
+  /// into zeros.
+  void convertPoisonToZero(Module &M) {
+    /// We are iterating over every poison value that is stored by this module.
+    for (auto &PV : M.getContext().pImpl->PVConstants) {
+      Type* Ty = PV.second->getType();
+      /// Here we can get poison values that are unreachable by "normal" IR
+      /// traversal because we are traversing through the module's
+      /// implementation. So we do some basic sanity checks to make sure that we
+      /// can turn this value into a null.
+      if (PV.second->use_empty() || Ty->isVoidTy() || Ty->isFunctionTy() ||
+          Ty->isLabelTy() || Ty->isMetadataTy())
+        continue;
       PV.second.get()->replaceAllUsesWith(
           Constant::getNullValue(PV.second.get()->getType()));
+    }
   }
 
+  /// This function removes values of type metadata because they are not
+  /// supported by the HLS backend.
   void removeMetaDataValues(Module &M) {
     SmallVector<Instruction *, 16> ToDelete;
     for (auto &F : M.functions()) {
@@ -364,7 +342,7 @@ struct VXXIRDowngrader : public ModulePass {
 
   bool runOnModule(Module &M) override {
     resetByVal(M);
-    removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
+    llvm::removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
                          Attribute::ImmArg, Attribute::NoSync,
                          Attribute::MustProgress, Attribute::NoUndef,
                          Attribute::StructRet});
@@ -380,7 +358,7 @@ struct VXXIRDowngrader : public ModulePass {
     /// addressspace 0 causing addresspace cast.
     removeFunction(M, "__assert_fail");
 
-    convertPoinsonToZero(M);
+    convertPoisonToZero(M);
     if (Triple(M.getTargetTriple()).getArch() == llvm::Triple::fpga64)
       M.setTargetTriple("fpga64-xilinx-none");
     else

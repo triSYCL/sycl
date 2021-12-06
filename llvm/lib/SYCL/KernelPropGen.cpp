@@ -37,8 +37,9 @@
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/SHA1.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include "SYCLUtils.h"
 
 using namespace llvm;
 
@@ -71,14 +72,6 @@ struct KernelPropGen : public ModulePass {
   static char ID; // Pass identification, replacement for typeid
 
   KernelPropGen() : ModulePass(ID) {}
-
-  /// Test if a function is a SPIR kernel
-  bool isKernel(const Function &F) {
-    if (F.getCallingConv() == CallingConv::SPIR_KERNEL ||
-        F.hasFnAttribute("fpga.top.func"))
-      return true;
-    return false;
-  }
 
   int getWriteStreamId(StringRef Path) {
     int FileFD = 0;
@@ -148,7 +141,7 @@ struct KernelPropGen : public ModulePass {
     J.attributeBegin("kernels");
     J.arrayBegin();
     for (auto &F : M.functions()) {
-      if (isKernel(F)) {
+      if (isKernelFunc(&F)) {
         KernelProperties KProp(F, SyclHlsFlow);
         J.objectBegin();
         J.attribute("name", F.getName());
