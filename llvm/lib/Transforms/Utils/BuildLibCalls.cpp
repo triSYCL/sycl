@@ -44,7 +44,6 @@ STATISTIC(NumSExtArg, "Number of arguments inferred as signext");
 STATISTIC(NumReadOnlyArg, "Number of arguments inferred as readonly");
 STATISTIC(NumNoAlias, "Number of function returns inferred as noalias");
 STATISTIC(NumNoUndef, "Number of function returns inferred as noundef returns");
-STATISTIC(NumNonNull, "Number of function returns inferred as nonnull returns");
 STATISTIC(NumReturnedArg, "Number of arguments inferred as returned");
 STATISTIC(NumWillReturn, "Number of functions inferred as willreturn");
 
@@ -568,7 +567,6 @@ bool llvm::inferLibFuncAttributes(Function &F, const TargetLibraryInfo &TLI) {
     return Changed;
   case LibFunc_calloc:
   case LibFunc_vec_calloc:
-    Changed |= setOnlyAccessesInaccessibleMemory(F);
     Changed |= setRetAndArgsNoUndef(F);
     Changed |= setDoesNotThrow(F);
     Changed |= setRetDoesNotAlias(F);
@@ -1657,8 +1655,8 @@ Value *llvm::emitMalloc(Value *Num, IRBuilderBase &B, const DataLayout &DL,
   return CI;
 }
 
-Value *llvm::emitCalloc(Value *Num, Value *Size, const AttributeList &Attrs,
-                        IRBuilderBase &B, const TargetLibraryInfo &TLI) {
+Value *llvm::emitCalloc(Value *Num, Value *Size, IRBuilderBase &B,
+                        const TargetLibraryInfo &TLI) {
   if (!TLI.has(LibFunc_calloc))
     return nullptr;
 
@@ -1666,8 +1664,8 @@ Value *llvm::emitCalloc(Value *Num, Value *Size, const AttributeList &Attrs,
   StringRef CallocName = TLI.getName(LibFunc_calloc);
   const DataLayout &DL = M->getDataLayout();
   IntegerType *PtrType = DL.getIntPtrType((B.GetInsertBlock()->getContext()));
-  FunctionCallee Calloc = M->getOrInsertFunction(
-      CallocName, Attrs, B.getInt8PtrTy(), PtrType, PtrType);
+  FunctionCallee Calloc =
+      M->getOrInsertFunction(CallocName, B.getInt8PtrTy(), PtrType, PtrType);
   inferLibFuncAttributes(M, CallocName, TLI);
   CallInst *CI = B.CreateCall(Calloc, {Num, Size}, CallocName);
 

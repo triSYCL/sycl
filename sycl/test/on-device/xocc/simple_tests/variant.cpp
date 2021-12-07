@@ -1,5 +1,5 @@
 
-// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out -Xsycl-target-frontend -fno-exceptions
+// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.out -Xsycl-target-frontend -fno-exceptions
 
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
 
@@ -90,7 +90,7 @@ int main() {
     auto AIn = In.get_access<sycl::access::mode::read>(cgh);
     auto AOut = Out.get_access<sycl::access::mode::write>(cgh);
     cgh.single_task<class Kernel>([=] {
-      for (unsigned i = 0; i < AIn.get_count(); i++)
+      for (unsigned i = 0; i < AIn.size(); i++)
         dev_visit([&](auto V) { AOut[{i}] = V; }, AIn[{i}]);
     });
   });

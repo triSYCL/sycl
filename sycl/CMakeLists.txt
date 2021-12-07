@@ -13,7 +13,7 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 include(AddSYCLExecutable)
 
 set(SYCL_MAJOR_VERSION 5)
-set(SYCL_MINOR_VERSION 2)
+set(SYCL_MINOR_VERSION 3)
 set(SYCL_PATCH_VERSION 0)
 set(SYCL_DEV_ABI_VERSION 0)
 if (SYCL_ADD_DEV_VERSION_POSTFIX)
@@ -69,7 +69,6 @@ set(CLANG_VERSION "${CLANG_VERSION_MAJOR}.${CLANG_VERSION_MINOR}.${CLANG_VERSION
 
 set(SYCL_INCLUDE_DIR "include")
 set(SYCL_INCLUDE_BUILD_DIR ${LLVM_BINARY_DIR}/${SYCL_INCLUDE_DIR})
-set(SYCL_INCLUDE_DEPLOY_DIR ${CMAKE_INSTALL_PREFIX}/${SYCL_INCLUDE_DIR})
 
 add_llvm_external_project(opencl)
 list(FIND LLVM_ENABLE_PROJECTS opencl OPENCL_FOUND)
@@ -85,7 +84,7 @@ file(COPY ${OpenCL_INCLUDE_DIR}/CL
 
 # Include OpenCL Headers into final bundle.
 install(DIRECTORY ${OpenCL_INCLUDE_DIR}/CL
-        DESTINATION ${SYCL_INCLUDE_DEPLOY_DIR}/sycl
+        DESTINATION ${SYCL_INCLUDE_DIR}/sycl
         COMPONENT OpenCL-Headers)
 
 # Try to find and include XRT OpenCL in the build components to allow access to
@@ -134,6 +133,9 @@ endif()
 option(SYCL_BUILD_PI_CUDA
   "Enables the CUDA backend for the Plugin Interface" OFF)
 
+option(SYCL_BUILD_PI_ROCM
+  "Enables the ROCM backend for the Plugin Interface" OFF)
+
 # Configure SYCL version macro
 set(sycl_inc_dir ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(sycl_src_dir ${CMAKE_CURRENT_SOURCE_DIR}/source)
@@ -149,8 +151,8 @@ COMMAND ${CMAKE_COMMAND} -E copy_directory ${sycl_inc_dir}/CL ${SYCL_INCLUDE_BUI
 COMMENT "Copying SYCL headers ...")
 
 # Copy SYCL headers from sources to install directory
-install(DIRECTORY "${sycl_inc_dir}/sycl" DESTINATION ${SYCL_INCLUDE_DEPLOY_DIR} COMPONENT sycl-headers)
-install(DIRECTORY "${sycl_inc_dir}/CL" DESTINATION ${SYCL_INCLUDE_DEPLOY_DIR}/sycl COMPONENT sycl-headers)
+install(DIRECTORY "${sycl_inc_dir}/sycl" DESTINATION ${SYCL_INCLUDE_DIR} COMPONENT sycl-headers)
+install(DIRECTORY "${sycl_inc_dir}/CL" DESTINATION ${SYCL_INCLUDE_DIR}/sycl COMPONENT sycl-headers)
 
 set(SYCL_RT_LIBS sycl)
 if (MSVC)
@@ -188,7 +190,7 @@ function( add_common_options LIB_NAME)
   endif()
 endfunction(add_common_options)
 
-if (LLVM_ENABLE_ASSERTIONS AND NOT SYCL_DISABLE_STL_ASSERTIONS)
+if (LLVM_ENABLE_ASSERTIONS AND NOT SYCL_DISABLE_STL_ASSERTIONS AND NOT WIN32)
   if(SYCL_USE_LIBCXX)
     add_definitions(-D_LIBCPP_DEBUG=1)
     set(SYCL_CLANG_EXTRA_FLAGS "${SYCL_CLANG_EXTRA_FLAGS} -D_LIBCPP_DEBUG=1")
@@ -217,12 +219,13 @@ if (SYCL_ENABLE_XPTI_TRACING)
 endif()
 
 # SYCL toolchain builds all components: compiler, libraries, headers, etc.
-add_custom_target( sycl-toolchain
-  DEPENDS ${SYCL_RT_LIBS}
+add_custom_target(sycl-compiler
+  DEPENDS append-file
           clang
           clang-offload-wrapper
           clang-offload-bundler
           clang-offload-deps
+          clang-offload-extract
           file-table-tform
           llc
           llvm-ar
@@ -234,17 +237,15 @@ add_custom_target( sycl-toolchain
           opt
           llvm-objcopy
           sycl-post-link
+          opencl-aot
+)
+add_custom_target( sycl-toolchain
+  DEPENDS ${SYCL_RT_LIBS}
+          sycl-compiler
           sycl-ls
           ${XPTIFW_LIBS}
   COMMENT "Building SYCL compiler toolchain..."
 )
-
-# Check if opencl-aot tool is enabled.
-list(FIND LLVM_ENABLE_PROJECTS opencl-aot OPENCL_AOT_FOUND)
-if(NOT OPENCL_AOT_FOUND EQUAL -1)
-  add_dependencies(sycl-toolchain opencl-aot)
-  list(APPEND SYCL_TOOLCHAIN_DEPLOY_COMPONENTS opencl-aot)
-endif()
 
 if (SYCL_ENABLE_XPTI_TRACING)
   add_dependencies( sycl-toolchain xpti)
@@ -263,6 +264,10 @@ add_subdirectory( plugins )
 add_subdirectory(tools)
 
 if(SYCL_INCLUDE_TESTS)
+  if(NOT LLVM_INCLUDE_TESTS)
+      message(FATAL_ERROR
+        "Can't build SYCL tests without LLVM_INCLUDE_TESTS enabled.")
+  endif()
   if(EXISTS ${LLVM_MAIN_SRC_DIR}/utils/unittest/googletest/include/gtest/gtest.h)
     add_subdirectory(unittests)
     list(APPEND SYCL_TEST_DEPS SYCLUnitTests)
@@ -273,10 +278,12 @@ endif()
 # Package deploy support
 # Listed here are component names contributing the package
 set( SYCL_TOOLCHAIN_DEPLOY_COMPONENTS
+     append-file
      clang
      clang-offload-wrapper
      clang-offload-bundler
      clang-offload-deps
+     clang-offload-extract
      file-table-tform
      level-zero-loader
      level-zero-headers
@@ -291,11 +298,13 @@ set( SYCL_TOOLCHAIN_DEPLOY_COMPONENTS
      sycl-ls
      clang-resource-headers
      OpenCL-Headers
+     opencl-aot
      sycl-headers
      sycl-headers-extras
      sycl
      pi_opencl
      pi_level_zero
+     pi_esimd_cpu
      libsycldevice
      ${XPTIFW_LIBS}
 )
@@ -314,6 +323,18 @@ if(SYCL_BUILD_PI_CUDA)
 
   add_dependencies(sycl-toolchain libspirv-builtins pi_cuda)
   list(APPEND SYCL_TOOLCHAIN_DEPLOY_COMPONENTS libspirv-builtins pi_cuda)
+endif()
+
+if(SYCL_BUILD_PI_ROCM)
+  # Ensure that libclc is enabled.
+  list(FIND LLVM_ENABLE_PROJECTS libclc LIBCLC_FOUND)
+  if( LIBCLC_FOUND EQUAL -1 )
+    message(FATAL_ERROR
+      "ROCM support requires adding \"libclc\" to the CMake argument \"LLVM_ENABLE_PROJECTS\"")
+  endif()
+
+  add_dependencies(sycl-toolchain libspirv-builtins pi_rocm)
+  list(APPEND SYCL_TOOLCHAIN_DEPLOY_COMPONENTS libspirv-builtins pi_rocm)
 endif()
 
 # Use it as fake dependency in order to force another command(s) to execute.

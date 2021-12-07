@@ -3,6 +3,7 @@
 # selected based on the compile target similar to scan-build.
 set(BinFiles
       sycl_vxx.py
+      sycl_vxx_post_link.py
     )
 
 foreach(BinFile ${BinFiles})
