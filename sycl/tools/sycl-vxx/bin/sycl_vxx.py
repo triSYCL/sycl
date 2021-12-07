@@ -131,6 +131,9 @@ class CompilationDriver:
     @subprocess_error_handler("Error in sycl->HLS conversion")
     def _run_preparation(self):
         """Run the various sycl->HLS conversion passes"""
+        # We try to avoid as many optimization as possible
+        # to give vitis the opportunity to use its custom 
+        # optimizations 
         outstem = self.outstem
         self.prepared_bc = (
             self.tmpdir /
@@ -233,6 +236,7 @@ class CompilationDriver:
         command = [
             vxx, "--target", self.vitis_mode,
             "--advanced.param", "compiler.hlsDataflowStrictMode=off",
+            # Do the optimizations that were not performed by sycl compiler
             "-O3",
             "--platform", self.xilinx_platform,
             "--temp_dir", self.tmpdir / 'vxx_comp_tmp',

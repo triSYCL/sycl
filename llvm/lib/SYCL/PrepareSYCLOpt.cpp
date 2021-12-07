@@ -42,6 +42,11 @@ struct PrepareSYCLOpt : public ModulePass {
   PrepareSYCLOpt() : ModulePass(ID) {}
 
   inline bool isKernel(Function &F) {
+    // Kernel are first detected with the SPIR_KERNEL CC.
+    // After a first run of this pass in case of HLS flow,
+    // this CC is replaced and kernels are marked with an
+    // fpga.top.func attribute.
+    // (See setHLSCallingConvention)
     return (F.getCallingConv() == CallingConv::SPIR_KERNEL ||
             F.hasFnAttribute("fpga.top.func"));
   }
@@ -58,6 +63,9 @@ struct PrepareSYCLOpt : public ModulePass {
     }
   }
 
+  /// Add the flatten attribute to all kernel and noinline
+  /// functions, in oder for all non-kernel and non-noinline
+  /// functions to be inlined
   void markKernelandNoInlineForFlattening(Module &M) {
     for (auto &F : M.functions()) {
       if (isKernel(F) || F.hasFnAttribute(Attribute::NoInline)) {
