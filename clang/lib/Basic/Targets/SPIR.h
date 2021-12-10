@@ -30,40 +30,29 @@ namespace targets {
 ///   used for that. However, it's advisable to move towards AIE having its own
 ///  target info.
 static const unsigned AIEAddrSpaceMap[] = {
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-    0,
-};
-
-static const unsigned SPIRAddrSpaceMap[] = {
     0, // Default
-    1, // opencl_global
-    3, // opencl_local
-    2, // opencl_constant
+    0, // opencl_global
+    0, // opencl_local
+    0, // opencl_constant
     0, // opencl_private
-    4, // opencl_generic
-    5, // opencl_global_device
-    6, // opencl_global_host
+    0, // opencl_generic
+    0, // opencl_global_device
+    0, // opencl_global_host
     0, // cuda_device
     0, // cuda_constant
     0, // cuda_shared
+    // SYCL address space values for this map are dummy
+    0, // sycl_global
+    0, // sycl_global_device
+    0, // sycl_global_host
+    0, // sycl_local
+    0, // sycl_private
     0, // ptr32_sptr
     0, // ptr32_uptr
     0  // ptr64
 };
 
-static const unsigned SYCLAddrSpaceMap[] = {
+static const unsigned SPIRDefIsPrivMap[] = {
     0, // Default
     1, // opencl_global
     3, // opencl_local
@@ -75,6 +64,38 @@ static const unsigned SYCLAddrSpaceMap[] = {
     0, // cuda_device
     0, // cuda_constant
     0, // cuda_shared
+    // SYCL address space values for this map are dummy
+    0, // sycl_global
+    0, // sycl_global_device
+    0, // sycl_global_host
+    0, // sycl_local
+    0, // sycl_private
+    0, // ptr32_sptr
+    0, // ptr32_uptr
+    0  // ptr64
+};
+
+static const unsigned SPIRDefIsGenMap[] = {
+    4, // Default
+    // OpenCL address space values for this map are dummy and they can't be used
+    // FIXME: reset opencl_global entry to 0. Currently CodeGen libary uses
+    // opencl_global in SYCL language mode, but we should switch to using
+    // sycl_global instead.
+    1, // opencl_global
+    0, // opencl_local
+    2, // opencl_constant
+    0, // opencl_private
+    0, // opencl_generic
+    0, // opencl_global_device
+    0, // opencl_global_host
+    0, // cuda_device
+    0, // cuda_constant
+    0, // cuda_shared
+    1, // sycl_global
+    5, // sycl_global_device
+    6, // sycl_global_host
+    3, // sycl_local
+    0, // sycl_private
     0, // ptr32_sptr
     0, // ptr32_uptr
     0  // ptr64
@@ -87,14 +108,9 @@ public:
     TLSSupported = false;
     VLASupported = false;
     LongWidth = LongAlign = 64;
-    if (Triple.isXilinxAIE()) {
+    AddrSpaceMap = &SPIRDefIsPrivMap;
+    if (Triple.isXilinxAIE())
       AddrSpaceMap = &AIEAddrSpaceMap;
-    } else if (Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
-      AddrSpaceMap = &SYCLAddrSpaceMap;
-    } else {
-      AddrSpaceMap = &SPIRAddrSpaceMap;
-    }
-
     UseAddrSpaceMapMangling = true;
     HasLegalHalfType = true;
     HasFloat16 = true;
@@ -133,6 +149,11 @@ public:
     return TargetInfo::VoidPtrBuiltinVaList;
   }
 
+  Optional<unsigned>
+  getDWARFAddressSpace(unsigned AddressSpace) const override {
+    return AddressSpace;
+  }
+
   CallingConvCheckResult checkCallingConvention(CallingConv CC) const override {
     return (CC == CC_SpirFunction || CC == CC_OpenCLKernel) ? CCCR_OK
                                                             : CCCR_Warning;
@@ -142,14 +163,22 @@ public:
     return CC_SpirFunction;
   }
 
-  llvm::Optional<LangAS> getConstantAddressSpace() const override {
-    // If we assign "opencl_constant" address space the following code becomes
-    // illegal, because it can't be cast to any other address space:
-    //
-    //   const char *getLiteral() {
-    //     return "AB";
-    //   }
-    return LangAS::opencl_global;
+  void setAddressSpaceMap(bool DefaultIsGeneric) {
+    if (AddrSpaceMap == &AIEAddrSpaceMap)
+      return;
+    AddrSpaceMap = DefaultIsGeneric ? &SPIRDefIsGenMap : &SPIRDefIsPrivMap;
+  }
+
+  void adjust(DiagnosticsEngine &Diags, LangOptions &Opts) override {
+    TargetInfo::adjust(Diags, Opts);
+    // NOTE: SYCL specification considers unannotated pointers and references
+    // to be pointing to the generic address space. See section 5.9.3 of
+    // SYCL 2020 specification.
+    // Currently, there is no way of representing SYCL's default address space
+    // language semantics along with the semantics of embedded C's default
+    // address space in the same address space map. Hence the map needs to be
+    // reset to allow mapping to the desired value of 'Default' entry for SYCL.
+    setAddressSpaceMap(/*DefaultIsGeneric=*/Opts.SYCLIsDevice);
   }
 
   void setSupportedOpenCLOpts() override {
@@ -162,6 +191,7 @@ public:
 
   bool hasInt128Type() const override { return false; }
 };
+
 class LLVM_LIBRARY_VISIBILITY SPIR32TargetInfo : public SPIRTargetInfo {
 public:
   SPIR32TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
@@ -169,7 +199,13 @@ public:
     PointerWidth = PointerAlign = 32;
     SizeType = TargetInfo::UnsignedInt;
     PtrDiffType = IntPtrType = TargetInfo::SignedInt;
-    if (Triple.isXilinxFPGA())
+    if (Triple.isXilinxAIE())
+      /// This is only a part of the datalayout used by chess because chess's
+      /// datalayout contains bitwidth that are not multiple of bytes
+      resetDataLayout(
+          "e-i8:8:8-i16:16:16-i32:32:32-i64:32:32-f32:32:32-f64:32:32-p:32:32:"
+          "32:32:8");
+    else if (Triple.isXilinxFPGA())
       resetDataLayout(
           "e-m:e-p:32:32-i64:64-i128:128-i256:256-i512:512-i1024:1024-i2048:"
           "2048-i4096:4096-n8:16:32:64-S128-v16:16-v24:32-v32:32-v48:64-v96:"
@@ -192,6 +228,7 @@ public:
     SizeType = TargetInfo::UnsignedLong;
     PtrDiffType = IntPtrType = TargetInfo::SignedLong;
 
+    assert(!Triple.isXilinxAIE() && "there is no 64bit aie targets");
     if (Triple.isXilinxFPGA())
       resetDataLayout(
           "e-m:e-i64:64-i128:128-i256:256-i512:512-i1024:1024-i2048:2048-i4096:"
@@ -265,7 +302,6 @@ public:
   MicrosoftX86_32SPIRTargetInfo(const llvm::Triple &Triple,
                             const TargetOptions &Opts)
       : WindowsX86_32SPIRTargetInfo(Triple, Opts) {
-    assert(DataLayout->getPointerSizeInBits() == 32);
   }
 
   void getTargetDefines(const LangOptions &Opts,
@@ -315,7 +351,6 @@ public:
   MicrosoftX86_64_SPIR64TargetInfo(const llvm::Triple &Triple,
                             const TargetOptions &Opts)
       : WindowsX86_64_SPIR64TargetInfo(Triple, Opts) {
-    assert(DataLayout->getPointerSizeInBits() == 64);
   }
 
   void getTargetDefines(const LangOptions &Opts,

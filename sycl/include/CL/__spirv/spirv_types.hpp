@@ -8,6 +8,7 @@
 
 #pragma once
 
+#include <cstddef>
 #include <cstdint>
 
 // TODO: include the header file with SPIR-V declarations from SPIRV-Headers
@@ -105,6 +106,12 @@ enum class GroupOperation : uint32_t {
   ExclusiveScan = 2
 };
 
+enum class MatrixLayout { RowMajor, ColumnMajor, PackedA, PackedB };
+
+template <typename T, std::size_t R, std::size_t C, MatrixLayout U,
+          Scope::Flag S = Scope::Flag::Subgroup>
+struct __spirv_JointMatrixINTEL;
+
 } // namespace __spv
 
 #ifdef __SYCL_DEVICE_ONLY__
@@ -126,7 +133,9 @@ struct ConstantPipeStorage {
 };
 
 // Arbitrary precision integer type
+namespace __spv {
 template <int Bits> using ap_int = _ExtInt(Bits);
+} // namespace _spv
 #endif // __SYCL_DEVICE_ONLY__
 
 // This class does not have definition, it is only predeclared here.

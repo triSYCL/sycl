@@ -50,6 +50,8 @@ do
   fi
 done
 
+set -x
+
 # Has to be invoked with exec, which means it never returns to this script
 # so this has to be the final invocation.
 exec $CHESSROOT/target/bin/LNa64bin/chess-clang "${ArgsArr[@]}"

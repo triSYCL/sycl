@@ -248,7 +248,7 @@ llvm::UnrollAndJamLoop(Loop *L, unsigned Count, unsigned TripCount,
   bool CompletelyUnroll = (Count == TripCount);
 
   // We use the runtime remainder in cases where we don't know trip multiple
-  if (TripMultiple == 1 || TripMultiple % Count != 0) {
+  if (TripMultiple % Count != 0) {
     if (!UnrollRuntimeLoopRemainder(L, Count, /*AllowExpensiveTripCount*/ false,
                                     /*UseEpilogRemainder*/ true,
                                     UnrollRemainder, /*ForgetAllSCEV*/ false,
@@ -349,7 +349,9 @@ llvm::UnrollAndJamLoop(Loop *L, unsigned Count, unsigned TripCount,
   LoopBlocksDFS::RPOIterator BlockBegin = DFS.beginRPO();
   LoopBlocksDFS::RPOIterator BlockEnd = DFS.endRPO();
 
-  if (Header->getParent()->isDebugInfoForProfiling())
+  // When a FSDiscriminator is enabled, we don't need to add the multiply
+  // factors to the discriminators.
+  if (Header->getParent()->isDebugInfoForProfiling() && !EnableFSDiscriminator)
     for (BasicBlock *BB : L->getBlocks())
       for (Instruction &I : *BB)
         if (!isa<DbgInfoIntrinsic>(&I))

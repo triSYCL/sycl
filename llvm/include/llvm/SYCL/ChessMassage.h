@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Pass for modifying certain LLVM IR incompatabilities with the chess-clang
+// Pass for modifying certain LLVM IR incompatibilities with the chess-clang
 // backend we use for SYCL
 //
 // ===---------------------------------------------------------------------===//

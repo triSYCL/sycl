@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Tools to downgrad IR
+// Tools to down-grade IR
 //
 // ===---------------------------------------------------------------------===//
 
@@ -35,10 +35,30 @@ inline void removeAttributes(Module &M, ArrayRef<Attribute::AttrKind> Kinds) {
           CB->removeAttribute(AttributeList::FunctionIndex, Kind);
           CB->removeAttribute(AttributeList::ReturnIndex, Kind);
           for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
-            CB->removeParamAttr(i, llvm::Attribute::ByVal);
+            CB->removeParamAttr(i, Kind);
           }
         }
     }
 }
 
+inline void removeMetadata(Module &M, StringRef MetadataName) {
+  llvm::NamedMDNode *Old = M.getOrInsertNamedMetadata(MetadataName);
+  if (Old)
+    M.eraseNamedMetadata(Old);
 }
+
+/// Replace the function named OldN by the function named NewN then delete the
+/// function named OldN.
+inline void replaceFunction(Module &M, StringRef OldN, StringRef NewN) {
+  Function *Old = M.getFunction(OldN);
+  Function *New = M.getFunction(NewN);
+  if (!Old)
+    return;
+  assert(New);
+  assert(Old->getFunctionType() == New->getFunctionType() &&
+         "replacement is not possible");
+  Old->replaceAllUsesWith(New);
+  Old->eraseFromParent();
+}
+
+} // namespace llvm

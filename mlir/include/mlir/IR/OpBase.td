@@ -211,9 +211,17 @@ def IsTensorTypePred : CPred<"$_self.isa<::mlir::TensorType>()">;
 // Whether a type is a MemRefType.
 def IsMemRefTypePred : CPred<"$_self.isa<::mlir::MemRefType>()">;
 
-// Whether a type is an  IsUnrankedMemRefType
+// Whether a type is an UnrankedMemRefType
 def IsUnrankedMemRefTypePred
         : CPred<"$_self.isa<::mlir::UnrankedMemRefType>()">;
+
+// Whether a type is an UnrankedTensorType
+def IsUnrankedTensorTypePred
+        : CPred<"$_self.isa<::mlir::UnrankedTensorType>()">;
+
+// Whether a type is a BaseMemRefType
+def IsBaseMemRefTypePred
+        : CPred<"$_self.isa<::mlir::BaseMemRefType>()">;
 
 // Whether a type is a ShapedType.
 def IsShapedTypePred : CPred<"$_self.isa<::mlir::ShapedType>()">;
@@ -263,6 +271,10 @@ class Dialect {
   // If this dialect overrides the hook for materializing constants.
   bit hasConstantMaterializer = 0;
 
+  /// If the dialect definition provides a non-default destructor.
+  /// If false, a default destructor implementation will be generated.
+  bit hasNonDefaultDestructor = 0;
+
   // If this dialect overrides the hook for verifying operation attributes.
   bit hasOperationAttrVerify = 0;
 
@@ -275,6 +287,9 @@ class Dialect {
 
   // If this dialect overrides the hook for op interface fallback.
   bit hasOperationInterfaceFallback = 0;
+
+  // If this dialect overrides the hook for canonicalization patterns.
+  bit hasCanonicalizer = 0;
 }
 
 //===----------------------------------------------------------------------===//
@@ -613,6 +628,12 @@ class RankedTensorOf<list<Type> allowedTypes> :
 
 def AnyTensor : TensorOf<[AnyType]>;
 
+// Unranked Memref type
+class UnrankedTensorOf<list<Type> allowedTypes> :
+    ShapedContainerType<allowedTypes,
+                        IsUnrankedTensorTypePred,
+                        "unranked.tensor", "::mlir::UnrankedTensorType">;
+
 def AnyRankedTensor : RankedTensorOf<[AnyType]>;
 
 // TODO: Have an easy way to add another constraint to a type.
@@ -648,10 +669,13 @@ class 3DTensorOf<list<Type> allowedTypes> : TensorRankOf<allowedTypes, [3]>;
 class 4DTensorOf<list<Type> allowedTypes> : TensorRankOf<allowedTypes, [4]>;
 
 // Unranked Memref type
-def AnyUnrankedMemRef :
-    ShapedContainerType<[AnyType],
+class UnrankedMemRefOf<list<Type> allowedTypes> :
+    ShapedContainerType<allowedTypes,
                         IsUnrankedMemRefTypePred, "unranked.memref",
                         "::mlir::UnrankedMemRefType">;
+
+def AnyUnrankedMemRef : UnrankedMemRefOf<[AnyType]>;
+
 // Memref type.
 
 // Memrefs are blocks of data with fixed type and rank.
@@ -660,6 +684,9 @@ class MemRefOf<list<Type> allowedTypes> :
                         "::mlir::MemRefType">;
 
 def AnyMemRef : MemRefOf<[AnyType]>;
+
+class RankedOrUnrankedMemRefOf<list<Type> allowedTypes>:
+    AnyTypeOf<[UnrankedMemRefOf<allowedTypes>, MemRefOf<allowedTypes>]>;
 
 def AnyRankedOrUnrankedMemRef: AnyTypeOf<[AnyUnrankedMemRef, AnyMemRef]>;
 
@@ -1779,6 +1806,14 @@ class PredTrait<string descr, Pred pred> : Trait {
 // TODO: Remove this class in favor of using Trait.
 class OpTrait;
 
+// Define a OpTrait corresponding to a list of OpTraits, this allows for
+// specifying a list of traits as trait. Avoids needing to do
+// `[Traits, ...] # ListOfTraits # [Others, ...]` while still allowing providing
+// convenient groupings.
+class OpTraitList<list<OpTrait> props> : OpTrait {
+  list<OpTrait> traits = props;
+}
+
 // These classes are used to define operation specific traits.
 class NativeOpTrait<string name> : NativeTrait<name, "Op">, OpTrait;
 class ParamNativeOpTrait<string prop, string params>
@@ -2123,6 +2158,9 @@ class Op<Dialect dialect, string mnemonic, list<OpTrait> props = []> {
   // The mnemonic of the op.
   string opName = mnemonic;
 
+  // The C++ namespace to use for this op.
+  string cppNamespace = dialect.cppNamespace;
+
   // One-line human-readable description of what the op does.
   string summary = "";
 
@@ -2328,10 +2366,7 @@ class TypesMatchWith<string summary, string lhsArg, string rhsArg,
 // ranged arguments.
 class RangedTypesMatchWith<string summary, string lhsArg, string rhsArg,
                            string transform>
-  : TypesMatchWith<summary, lhsArg, rhsArg, transform,
-    "[](auto &&lhs, auto &&rhs) { "
-    "return std::equal(lhs.begin(), lhs.end(), rhs.begin(), rhs.end());"
-    " }">;
+  : TypesMatchWith<summary, lhsArg, rhsArg, transform, "llvm::equal">;
 
 // Type Constraint operand `idx`'s Element type is `type`.
 class TCopVTEtIs<int idx, Type type> : And<[
@@ -2530,19 +2565,28 @@ class Pat<dag pattern, dag result, list<dag> preds = [],
 // the wrapped expression can take special placeholders listed below:
 //
 // * `$_builder` will be replaced by the current `mlir::PatternRewriter`.
-// * `$_self` will be replaced with the entity this transformer is attached to.
-//   E.g., with the definition `def transform : NativeCodeCall<"$_self...">`,
-//   `$_self` in `transform:$attr` will be replaced by the value for `$attr`.
+// * `$_self` will be replaced by the defining operation in a source pattern.
+//   E.g., `NativeCodeCall<"Foo($_self, &$0)> I32Attr:$attr)>`, `$_self` will be
+//   replaced with the defining operation of the first operand of OneArgOp.
 //
 // If used as a DAG node, i.e., `(NativeCodeCall<"..."> <arg0>, ..., <argN>)`,
 // then positional placeholders are also supported; placeholder `$N` in the
 // wrapped C++ expression will be replaced by `<argN>`.
+//
+// ## Bind multiple results
+//
+// To bind multi-results and access the N-th result with `$<name>__N`, specify
+// the number of return values in the template. Note that only `Value` type is
+// supported for multiple results binding.
 
-class NativeCodeCall<string expr> {
+class NativeCodeCall<string expr, int returns = 1> {
   string expression = expr;
+  int numReturns = returns;
 }
 
-def ConstantLikeMatcher : NativeCodeCall<"success(matchPattern($0->getResult(0), m_Constant(&$1)))">;
+class NativeCodeCallVoid<string expr> : NativeCodeCall<expr, 0>;
+
+def ConstantLikeMatcher : NativeCodeCall<"success(matchPattern($_self->getResult(0), m_Constant(&$0)))">;
 
 //===----------------------------------------------------------------------===//
 // Rewrite directives

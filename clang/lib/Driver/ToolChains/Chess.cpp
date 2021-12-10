@@ -8,7 +8,7 @@
 
 #include "Chess.h"
 #include "CommonArgs.h"
-#include "InputInfo.h"
+#include "clang/Driver/InputInfo.h"
 #include "clang/Driver/Compilation.h"
 #include "clang/Driver/Driver.h"
 #include "clang/Driver/DriverDiagnostic.h"
@@ -34,10 +34,11 @@ ChessInstallationDetector::ChessInstallationDetector(
     : D(D) {
     // This is the Xilinx wrapper for the real chesscc, this resides inside of
     // Cardano's bin directory. The real chesscc resides in Cardano's
-    // /tps/lnx64/target/bin/LNa64bin/ directory
+    // Vitis/VERSION/aietools/bin/ directory
     if (llvm::ErrorOr<std::string> xchesscc = findProgramByName("xchesscc")) {
       SmallString<256> xchessccAbsolutePath;
       fs::real_path(*xchesscc, xchessccAbsolutePath);
+      /// xchessccAbsolutePath will be equal to something like .../Vitis/2021.2/aietools/bin/xchesscc
 
       BinaryPath = xchessccAbsolutePath.str().str();
 
@@ -46,7 +47,6 @@ ChessInstallationDetector::ChessInstallationDetector(
       if (path::filename(xchessccDir) == "bin")
         BinPath = xchessccDir.str();
 
-      // TODO: slightly stricter IsValid test, check all strings aren't empty
       IsValid = true;
     }
 }
@@ -69,6 +69,8 @@ void SYCL::LinkerChess::constructSYCLChessCommand(
   const auto &TC =
     static_cast<const toolchains::ChessToolChain &>(getToolChain());
   ArgStringList CmdArgs;
+
+  // This command is invoking the script at sycl/tools/sycl-chess/bin/sycl-chess
 
   // Script Arg $1, directory of cardano bin (where xchesscc resides)
   CmdArgs.push_back(Args.MakeArgString(TC.ChessInstallation.getBinPath()));
@@ -95,7 +97,7 @@ void SYCL::LinkerChess::constructSYCLChessCommand(
   llvm::sys::path::system_temp_directory(true, TmpDir);
   CmdArgs.push_back(Args.MakeArgString(TmpDir));
 
-  // Script Arg $6, the name of the final output elf binary file after
+  // Script Arg $6, the name of the final output ELF binary file after
   // compilation and linking is complete
   CmdArgs.push_back(Output.getFilename());
 
@@ -136,29 +138,6 @@ void ChessToolChain::addClangTargetOptions(
          "Only SYCL offloading kinds are supported");
 
   CC1Args.push_back("-fsycl-is-device");
-}
-
-llvm::opt::DerivedArgList *
-ChessToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                              StringRef BoundArch,
-                              Action::OffloadKind DeviceOffloadKind) const {
-  DerivedArgList *DAL =
-      HostTC.TranslateArgs(Args, BoundArch, DeviceOffloadKind);
-  if (!DAL)
-    DAL = new DerivedArgList(Args.getBaseArgs());
-
-  const OptTable &Opts = getDriver().getOpts();
-
-  for (Arg *A : Args) {
-    DAL->append(A);
-  }
-
-  if (!BoundArch.empty()) {
-    DAL->eraseArg(options::OPT_march_EQ);
-    DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ),
-                      BoundArch);
-  }
-  return DAL;
 }
 
 Tool *ChessToolChain::buildLinker() const {

@@ -50,7 +50,6 @@
 #include <fstream>
 #include <iterator>
 #include <memory>
-#include <sstream>
 #include <string>
 #include <tuple>
 
@@ -318,57 +317,11 @@ public:
     std::unique_ptr<SameKindPack> &Pack = Packs[Kind];
     if (!Pack)
       Pack.reset(new SameKindPack());
-
-    // Each AIE Kernel has the potential to spawn multiple binaries, the chess
-    // script wraps these into one file and passes it along here with some
-    // relevant information. We now unpackage this into multiple seperate
-    // images to be wrapped.
-    if (llvm::Triple(Tgt).isXilinxAIE())
-      UnpackAIEImages(Pack, Kind, File, Manif, Tgt, Fmt, CompileOpts, LinkOpts);
     Pack->emplace_back(std::make_unique<Image>(
         File, Manif, Tgt, Fmt, CompileOpts, LinkOpts, EntriesFile, PropsFile));
   }
 
 private:
-  void UnpackAIEImages(std::unique_ptr<SameKindPack> &Pack,
-                       const OffloadKind Kind, const llvm::StringRef &File,
-                       const llvm::StringRef &Manif, const llvm::StringRef &Tgt,
-                       const BinaryImageFormat Fmt, llvm::StringRef CompileOpts,
-                      llvm::StringRef LinkOpts) {
-    auto PackagedImgsOrError = loadFile(File);
-    if (!PackagedImgsOrError)
-      return;
-    llvm::MemoryBuffer* PackagedImgs = *PackagedImgsOrError;
-    std::istringstream ImgStream;
-    ImgStream.str(std::string(PackagedImgs->getBufferStart(),
-                              PackagedImgs->getBufferEnd()));
-
-    // Naive unpacking algorithm that expects a very simple line by line format
-    // Line 1: Name of kernel
-    // Line 2: Size of Image
-    // Line 3 to (Size of Image): Elf binary data
-    int I = 0;
-    std::string ImgName;
-    for (std::string Line; std::getline(ImgStream, Line);) {
-      if (I == 0) {
-        ImgName = Line;
-        I++;
-      } else {
-        std::vector<char> Img(std::stoi(Line));
-        ImgStream.read(Img.data(), Img.size());
-        AutoGcBufs.emplace_back(MemoryBuffer::getMemBufferCopy(
-            llvm::StringRef(Img.data(), Img.size()), ImgName));
-
-        // Piggybacking off of Opts to link binary <-> tile invocation
-        // cannot use Tgt as we use it to represent the Tgt triple inside the
-        // ClangOffloadWrapper
-        Pack->emplace_back(std::make_unique<Image>(ImgName, Manif, Tgt, Fmt,
-                                                   CompileOpts, LinkOpts, "", ""));
-        I = 0;
-      }
-    }
-  }
-
   IntegerType *getSizeTTy() {
     switch (M.getDataLayout().getPointerTypeSize(Type::getInt8PtrTy(C))) {
     case 4u:
@@ -614,24 +567,6 @@ private:
 
   PointerType *getSyclBinDescPtrTy() {
     return PointerType::getUnqual(getSyclBinDescTy());
-  }
-
-  // AIE compilation should already have preloaded the images, search for them
-  // in the vector AutoGcBufs that stores all MemoryBuffers for the duration
-  // of the Wrappers lifetime
-  MemoryBuffer *getMemBuffFromGcBufs(llvm::StringRef Name) {
-    MemoryBuffer* MemBuff;
-    for (auto &GcBuf : AutoGcBufs) {
-      if (GcBuf->getBufferIdentifier() == Name) {
-        MemBuff = GcBuf.get();
-        return MemBuff;
-       }
-    }
-
-    // At the moment this is only called for AIE, we expect the buffer to exist,
-    // if it doesn't then there is a problem so error out early.
-    errs() << "error: missing memory buffer from map " << Name << "\n";
-    exit(1);
   }
 
   Expected<MemoryBuffer *> loadFile(llvm::StringRef Name) {
@@ -999,13 +934,10 @@ private:
       if (Img.File.empty())
         return createStringError(errc::invalid_argument,
                                  "image file name missing");
-      auto BinOrErr = llvm::Triple(Img.Tgt).isXilinxAIE() ?
-                        getMemBuffFromGcBufs(Img.File) :
-                        loadFile(Img.File);
+      Expected<MemoryBuffer *> BinOrErr = loadFile(Img.File);
       if (!BinOrErr)
         return BinOrErr.takeError();
       MemoryBuffer *Bin = *BinOrErr;
-
       std::pair<Constant *, Constant *> Fbin = addDeviceImageToModule(
           makeArrayRef(Bin->getBufferStart(), Bin->getBufferSize()),
           Twine(OffloadKindTag) + Twine(ImgId) + Twine(".data"), Kind, Img.Tgt);
@@ -1026,6 +958,28 @@ private:
       } else
         ImagesInits.push_back(ConstantStruct::get(
             getDeviceImageTy(), Fbin.first, Fbin.second, EntriesB, EntriesE));
+
+      // Create an object that holds <address, size> pair for the device image
+      // and put it into a .tgtimg section. This section can be used for finding
+      // and extracting all device images from the fat binary after linking.
+      Type *IntPtrTy = M.getDataLayout().getIntPtrType(C);
+      auto *ImgInfoArr = ConstantArray::get(
+          ArrayType::get(IntPtrTy, 2),
+          {ConstantExpr::getPointerCast(Fbin.first, IntPtrTy),
+           ConstantInt::get(IntPtrTy, Bin->getBufferSize())});
+      auto *ImgInfoVar = new GlobalVariable(
+          M, ImgInfoArr->getType(), /*isConstant*/ true,
+          GlobalVariable::InternalLinkage, ImgInfoArr,
+          Twine(OffloadKindTag) + Twine(ImgId) + Twine(".info"));
+      ImgInfoVar->setAlignment(
+          MaybeAlign(M.getDataLayout().getTypeStoreSize(IntPtrTy) * 2u));
+      ImgInfoVar->setUnnamedAddr(GlobalValue::UnnamedAddr::Local);
+      ImgInfoVar->setSection(".tgtimg");
+
+      // Add image info to the used list to force it to be emitted to the
+      // object.
+      appendToUsed(M, ImgInfoVar);
+
       ImgId++;
     }
 

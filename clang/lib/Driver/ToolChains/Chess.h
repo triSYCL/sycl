@@ -15,7 +15,7 @@
 namespace clang {
 namespace driver {
 
-/// Based loosely on CudaInstallationDetector/XOCCInstallationDetector
+/// Based loosely on CudaInstallationDetector/VXXInstallationDetector
 class ChessInstallationDetector {
 private:
   const Driver &D;
@@ -74,10 +74,6 @@ public:
   const llvm::Triple *getAuxTriple() const override {
     return &HostTC.getTriple();
   }
-
-  llvm::opt::DerivedArgList *
-  TranslateArgs(const llvm::opt::DerivedArgList &Args, StringRef BoundArch,
-                Action::OffloadKind DeviceOffloadKind) const override;
 
   void addClangTargetOptions(
       const llvm::opt::ArgList &DriverArgs,

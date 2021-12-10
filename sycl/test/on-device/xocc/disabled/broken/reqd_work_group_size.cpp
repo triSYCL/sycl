@@ -286,7 +286,7 @@ int main() {
 
     auto rb = ob2.get_access<access::mode::read>();
     unsigned int sum = 0;
-    for (size_t i = 0; i != ob2.get_count(); ++i) {
+    for (size_t i = 0; i != ob2.size(); ++i) {
       sum += rb[i];
     }
     assert(sum == 129024);

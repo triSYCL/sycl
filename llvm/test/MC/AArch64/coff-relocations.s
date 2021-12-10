@@ -67,6 +67,10 @@ tbz x0, #0, target
 .word .Linfo_bar - .Ltable
 .word .Linfo_foo - .Ltable
 
+// As an extension, we allow 64-bit label differences. They lower to
+// IMAGE_REL_ARM64_REL32 because IMAGE_REL_ARM64_REL64 does not exist.
+.xword .Linfo_foo - .Ltable
+
 // CHECK: Format: COFF-ARM64
 // CHECK: Arch: aarch64
 // CHECK: AddressSize: 64bit
@@ -96,6 +100,7 @@ tbz x0, #0, target
 // CHECK:   Section (4) .rdata {
 // CHECK: 0x0 IMAGE_REL_ARM64_REL32 .text
 // CHECK: 0x4 IMAGE_REL_ARM64_REL32 .text
+// CHECK: 0x8 IMAGE_REL_ARM64_REL32 .text
 // CHECK:   }
 // CHECK: ]
 
@@ -109,4 +114,4 @@ tbz x0, #0, target
 // DISASM: 4c:       20 1a 09 30     adr     x0, #74565
 
 // DATA: Contents of section .rdata:
-// DATA-NEXT:  0000 2c000000 04000000
+// DATA-NEXT:  0000 30000000 08000000

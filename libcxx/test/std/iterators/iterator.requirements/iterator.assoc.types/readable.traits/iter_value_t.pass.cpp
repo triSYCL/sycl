@@ -8,7 +8,6 @@
 
 // UNSUPPORTED: c++03, c++11, c++14, c++17
 // UNSUPPORTED: libcpp-no-concepts
-// UNSUPPORTED: gcc-10
 
 // template<class T>
 // using iter_value_t;
@@ -20,7 +19,7 @@
 #include <vector>
 
 template <class T, class Expected>
-[[nodiscard]] constexpr bool check_iter_value_t() {
+constexpr bool check_iter_value_t() {
   constexpr bool result = std::same_as<std::iter_value_t<T>, Expected>;
   static_assert(std::same_as<std::iter_value_t<T const>, Expected> == result);
   static_assert(std::same_as<std::iter_value_t<T volatile>, Expected> == result);
@@ -38,8 +37,8 @@ template <class T, class Expected>
 static_assert(check_iter_value_t<int*, int>());
 static_assert(check_iter_value_t<int[], int>());
 static_assert(check_iter_value_t<int[10], int>());
-static_assert(check_iter_value_t<std::vector<int>::iterator, std::vector<int>::iterator::value_type>());
-static_assert(check_iter_value_t<std::shared_ptr<int>, std::shared_ptr<int>::element_type>());
+static_assert(check_iter_value_t<std::vector<int>::iterator, int>());
+static_assert(check_iter_value_t<std::shared_ptr<int>, int>());
 
 struct both_members {
   using value_type = double;
@@ -50,13 +49,13 @@ static_assert(check_iter_value_t<both_members, double>());
 // clang-format off
 template <class T>
 requires requires { typename std::iter_value_t<T>; }
-[[nodiscard]] constexpr bool check_no_iter_value_t() {
+constexpr bool check_no_iter_value_t() {
   return false;
 }
 // clang-format on
 
 template <class T>
-[[nodiscard]] constexpr bool check_no_iter_value_t() {
+constexpr bool check_no_iter_value_t() {
   return true;
 }
 

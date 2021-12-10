@@ -23,7 +23,8 @@
 
 */
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
+#include <sycl/ext/xilinx/fpga.hpp>
 #include <iostream>
 #include <iterator>
 #include <string>
@@ -40,6 +41,7 @@
 #include "../utilities/device_selectors.hpp"
 
 using namespace cl::sycl;
+using namespace sycl::ext;
 
 class krnl_sobel;
 
@@ -93,9 +95,9 @@ int main(int argc, char* argv[]) {
     auto pixel_wb = ob.get_access<access::mode::write>(cgh);
 
     printf("pixel_rb size in submit: %zu \n", pixel_rb.get_size());
-    printf("pixel_rb count in submit: %zu \n", pixel_rb.get_count());
+    printf("pixel_rb count in submit: %zu \n", pixel_rb.size());
 
-    cgh.single_task<xilinx::reqd_work_group_size<1, 1, 1, krnl_sobel>>(
+    cgh.single_task<krnl_sobel>(
     // The reqd_work_group_size is already actually applied internally for single
     // tasks but this showcases it's usage none the less, as it can be applied
     // to parallel_fors with local sizes

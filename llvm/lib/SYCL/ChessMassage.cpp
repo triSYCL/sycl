@@ -1,4 +1,4 @@
-//===- ChessMassage.cpp                                      ---------------===//
+//===- ChessMassage.cpp ---------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -7,7 +7,10 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Erases and modifies IR incompatabilities with chess-clang backend
+// Resolve IR incompatibilities with the CHESS backend.
+// For the kernel merging process, this pass also reorders functions in the module,
+// generates an ordered list of kernels and marks redundant kernels as private.
+// For more detail about kernel merging, look at sycl-chess comments.
 //
 // ===---------------------------------------------------------------------===//
 
@@ -15,8 +18,8 @@
 #include <regex>
 #include <string>
 
-#include "llvm/SYCL/ChessMassage.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
@@ -25,9 +28,13 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/Debug.h"
+#include "llvm/SYCL/ChessMassage.h"
 #include "llvm/Transforms/Utils/FunctionComparator.h"
 
 #include "DownGradeUtils.h"
+
+#define DEBUG_TYPE "chess-massage"
 
 using namespace llvm;
 
@@ -45,134 +52,89 @@ struct ChessMassage : public ModulePass {
 
   ChessMassage() : ModulePass(ID) {}
 
-  // Re-order functions with hash values. This is taken from MergeFunctions
-  // and required to correctly identifie to which one the functions are
-  // merged into. This means, the original list is sorted as:
+  GlobalNumberState GNS;
+
+  /// For the kernel merging process, kernels need to be treated specially.
+  /// The function merger pass doesn't merge functions with different attributes
+  /// that it doesn't know about. So preparechess adds a unique attribute to
+  /// each kernel to prevent kernel function from being merged by the function
+  /// merger. This function cleans up this annotations. The function merger
+  /// should not be run after this pass.
+  void removeMetadataForUnmergability(Module &M) {
+    for (auto &F : M.functions())
+      if (F.hasFnAttribute("unmergable-kernel-id"))
+        F.removeFnAttr("unmergable-kernel-id");
+  }
+
+  // Re-order functions according to their relative order in FunctionComparator
+  // values. This means, the original
+  // list is sorted as:
   //   func1 - func2 - func3 - func4 - func5 - ...
   // The merged one looks like:
   //   func1 - func4 - ...
-  // And this indicates that func2 and func3 are merged into func1
-  // Note, since it's from MergeFunctions, if MergeFunctions changes in some
-  // way, it may break, ex identifying merged function incorrectly.
-  void reorderFunctions(Module &M, llvm::raw_fd_ostream &O) {
+  // And this indicates that func2 and func3 are merged into func1 and that
+  // func5 was merged into func4
+  void TriageKernelForMerging(Module &M, llvm::raw_fd_ostream &O) {
     std::vector<Function *> Funcs;
-    DenseMap<Function*, FunctionComparator::FunctionHash> FuncHashCache;
     DenseMap<std::pair<Function*, Function*>, int> FuncCompareCache;
+
+    /// Return the result of the comparison of 2 functions
+    /// with some caching because comparison is costly
+    auto CompareFunc = [&](Function *LHS, Function *RHS) {
+      auto Lookup = FuncCompareCache.find({LHS, RHS});
+      int Compare = 0;
+      if (Lookup != FuncCompareCache.end())
+        /// We have a result in cache return it.
+        Compare = Lookup->second;
+      else {
+        /// We do not have the result in cache, thus calculate it and write it to
+        /// cache
+        Compare = FunctionComparator(LHS, RHS, &GNS).compare();
+        LLVM_DEBUG(llvm::dbgs()
+                   << "chess-massage: " << LHS->getName() << " <=> "
+                   << RHS->getName() << " == " << Compare << "\n");
+        FuncCompareCache[{LHS, RHS}] = Compare;
+        FuncCompareCache[{RHS, LHS}] = -Compare;
+      }
+      return Compare;
+    };
     llvm::SmallString<512> kernelNames;
 
     for (auto &F : M.functions()) {
       // Collect the kernel functions
-      if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
+      if (F.hasFnAttribute("chess_sycl_kernel"))
         Funcs.emplace_back(&F);
-      }
     }
 
-    // Sort collected kernel functions with hash values
-    llvm::stable_sort(Funcs, [&](Function *LHS, Function *RHS) {
-      FunctionComparator::FunctionHash& LHSHash = FuncHashCache[LHS];
-      if (!LHSHash)
-        LHSHash = FunctionComparator::functionHash(*LHS);
-      FunctionComparator::FunctionHash& RHSHash = FuncHashCache[RHS];
-      if (!RHSHash)
-        LHSHash = FunctionComparator::functionHash(*LHS);
-      if (LHSHash != RHSHash)
-        return LHSHash < RHSHash;
-      auto Lookup = FuncCompareCache.find({LHS, RHS});
-      int Compare = 0;
-      if (Lookup != FuncCompareCache.end())
-        Compare = Lookup->second;
-      else {
-        GlobalNumberState GNS;
-        Compare = FunctionComparator(LHS, RHS, &GNS).compare();
-        FuncCompareCache[{LHS, RHS}] = Compare;
-        FuncCompareCache[{RHS, LHS}] = -Compare;
-      }
-      return Compare < 0;
+    // Sort collected kernel functions by comparison
+    llvm::sort(Funcs, [&](Function *LHS, Function *RHS) {
+      return CompareFunc(LHS, RHS) < 0;
     });
 
-    // Put sorted kernel functions back to the Modules's function list
+    // Put sorted kernel functions back into the Modules's function list.
+    // Set linkages such that only the first of each function comparing equal
+    // will survive globaldce.
     for (auto I = Funcs.begin(), IE = Funcs.end(); I != IE; ++I) {
-      (*I)->removeFromParent();
-      M.getFunctionList().push_back((*I));
-      kernelNames += (" \"" + (*I)->getName() + "\" ").str();
+      Function *F = *I;
+      F->removeFromParent();
+      M.getFunctionList().push_back(F);
+      if (I != Funcs.begin() && CompareFunc(*std::prev(I), F) == 0)
+        /// This kernel will be removed because it is redundant.
+        F->setLinkage(llvm::GlobalValue::PrivateLinkage);
+      else
+        /// This kernel will be kept
+        F->setLinkage(llvm::GlobalValue::ExternalLinkage);
+      kernelNames += (" \"" + F->getName() + "\" \n").str();
+      F->replaceAllUsesWith(UndefValue::get(F->getType()));
     }
 
-    // output our list of kernel names as a bash array we can iterate over
+    // Output our list of kernel names as a bash array we can iterate over
     if (!kernelNames.empty()) {
-       O << "# array of unmerged kernel names found in the current module\n";
-       O << "declare -a KERNEL_NAME_ARRAY_UNMERGED=(" << kernelNames.str()
-         << ")\n\n";
+      O << "# ordered array of unmerged kernel names found in the current "
+           "module\n";
+      O << "declare -a KERNEL_NAME_ARRAY_UNMERGED=(" << kernelNames.str()
+        << ")\n\n";
     }
-  }
-
-  /// Removes immarg (immutable arg) bitcode attribute that is applied to
-  /// function parameters. It was added in LLVM-9 (D57825), so as xocc catches
-  /// up it can be removed
-  /// Note: If you llvm-dis the output Opt .bc file with an LLVM that has the
-  /// ImmArg attribute, it will reapply all of the ImmArg attributes to the
-  /// LLVM IR
-  void removeImmarg(Module &M) {
-    for (auto &F : M.functions()) {
-      int i = 0;
-      for (auto &P : F.args()) {
-          if (P.hasAttribute(llvm::Attribute::ImmArg)
-              || F.hasParamAttribute(i, llvm::Attribute::ImmArg)) {
-              P.removeAttr(llvm::Attribute::ImmArg);
-              F.removeParamAttr(i, llvm::Attribute::ImmArg);
-          }
-          ++i;
-      }
-    }
-  }
-
-  // This is to make function-merge work. The kernel functions are set
-  // with GlobalValue::WeakODRLinkage, which doesn't allow to merge functions.
-  // So detect the kernel functions and change the linkage to mergerable one.
-  // The linkage has to be recovered back to original one before compiling.
-  // It can be done when generating the kernel properties in KernelPropGen
-  void modifyKernelLinkageToLinkOnceODR(Module &M) {
-    for (auto &F : M.functions()) {
-      if (F.getCallingConv() == CallingConv::SPIR_KERNEL) {
-	F.setLinkage(GlobalValue::LinkOnceODRLinkage);
-      }
-    }
-  }
-
-  /// Removes SPIR_FUNC/SPIR_KERNEL calling conventions from functions and
-  /// replace them with the default C calling convention for now
-  void modifySPIRCallingConv(Module &M) {
-    for (auto &F : M.functions()) {
-      if (F.getCallingConv() == CallingConv::SPIR_KERNEL ||
-          F.getCallingConv() == CallingConv::SPIR_FUNC) {
-        // C - The default llvm calling convention, compatible with C.  This
-        // convention is the only calling convention that supports varargs calls.
-        // As with typical C calling conventions, the callee/caller have to
-        // tolerate certain amounts of prototype mismatch.
-        // Calling Convention List For Reference:
-        // https://llvm.org/doxygen/CallingConv_8h_source.html#l00029
-        // Changing top level function defintiion/declaration, not call sites
-        F.setCallingConv(CallingConv::C);
-
-        F.addFnAttr("chess_sycl_kernel");
-
-        // setCallingConv on the function won't change all the call sites,
-        // we must replicate the calling convention across it's Uses. Another
-        // method would be to go through each basic block and check each
-        // instruction, but this seems more optimal
-        for (auto U : F.users()) {
-          if (auto CB = dyn_cast<CallBase>(U))\
-            CB->setCallingConv(CallingConv::C);
-         }
-      }
-    }
-  }
-
-  /// Remove a piece of metadata we don't want
-  void removeMetadata(Module &M, StringRef MetadataName) {
-    llvm::NamedMDNode *Old =
-      M.getOrInsertNamedMetadata(MetadataName);
-    if (Old)
-      M.eraseNamedMetadata(Old);
   }
 
   int GetWriteStreamID(StringRef Path) {
@@ -188,28 +150,27 @@ struct ChessMassage : public ModulePass {
 
   bool runOnModule(Module &M) override {
     llvm::raw_fd_ostream O(GetWriteStreamID(KernelUnmergedProperties),
-                            true /*close in destructor*/);
+                           true /*close in destructor*/);
 
-   // Script header/comment
+    // Script header/comment
     O << "# This is a generated bash script to inject environment information\n"
          "# containing kernel properties that we need so we can compile.\n"
-         "# This script is called from the sycl-xocc and sycl-chess scripts.\n";
+         "# This script is called from sycl-chess scripts.\n";
 
     if (O.has_error())
       return false;
 
-    reorderFunctions(M, O);
-    removeImmarg(M);
-    // This has to be done before changing the calling convention
-    modifyKernelLinkageToLinkOnceODR(M);
-    modifySPIRCallingConv(M);
+    removeMetadataForUnmergability(M);
+    TriageKernelForMerging(M, O);
+
     // This causes some problems with Tale when we generate a .sfg from a kernel
     // that contains this piece of IR, perhaps it's fine not to delete it
     // provided it's not empty. But at least for the moment it's empty and Tale
     // doesn't know how to handle it.
-    removeMetadata(M, "llvm.linker.options");
+    llvm::removeMetadata(M, "llvm.linker.options");
 
-    llvm::removeAttributes(M, {Attribute::MustProgress});
+    llvm::removeAttributes(
+        M, {Attribute::MustProgress, Attribute::ByVal, Attribute::StructRet});
 
     // The module probably changed
     return true;
@@ -222,6 +183,7 @@ namespace llvm {
 void initializeChessMassagePass(PassRegistry &Registry);
 }
 
+/// TODO: split this pass into the kernel merging part and the downgrading part
 INITIALIZE_PASS(ChessMassage, "ChessMassage",
   "pass that downgrades modern LLVM IR to something compatible with current "
   "chess-clang backend LLVM IR", false, false)

@@ -1,6 +1,6 @@
-# SYCL for Vitis 2020.2: experimental melting pot with Intel oneAPI DPC++ SYCL and triSYCL for Xilinx FPGA
+# SYCL for Vitis 2021.1: experimental melting pot with Intel oneAPI DPC++ SYCL and triSYCL for Xilinx FPGA
 
-## Introduction
+Intel staging area for llvm.org contribution. Home for Intel LLVM-based projects:
 
 This project is about assessing the viability of unifying 2 of the
 current open-source implementations of the SYCL standard
@@ -41,9 +41,12 @@ example an Intel FPGA and a Xilinx FPGA.
 
 ## SYCL Related Documentation
 
-- Basic get started guide for the SYCL compiler - [GetStartedWithSYCLCompiler.md](sycl/doc/GetStartedWithSYCLCompiler.md)
-- Xilinx FPGA get started guide for the SYCL compiler - [XilinxFPGACompilation.md](sycl/doc/XilinxFPGACompilation.md)
-- Xilinx ACAP get started guide for the SYCL compiler - [GettingStartedACAP.md](sycl/doc/GettingStartedACAP.md)
+- Basic get started guide for the SYCL compiler
+  [GetStartedWithSYCLCompiler.md](sycl/doc/GetStartedWithSYCLCompiler.md)
+- Xilinx FPGA get started guide for the SYCL compiler
+  [XilinxFPGACompilation.md](sycl/doc/GettingStartedXilinxFPGA.md)
+- Xilinx ACAP get started guide for the SYCL compiler
+  [GettingStartedACAP.md](sycl/doc/GettingStartedACAP.md)
 - Xilinx FPGA Tests Documentation - [Tests.md](sycl/doc/Tests.md)
   covers a few details about the the
   additional [xocc_tests](sycl/test/xocc_tests) directory we added to

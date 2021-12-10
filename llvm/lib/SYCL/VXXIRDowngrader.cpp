@@ -22,6 +22,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/SYCL/VXXIRDowngrader.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/SetVector.h"
@@ -139,6 +140,25 @@ struct VXXIRDowngrader : public ModulePass {
     }
   }
 
+  /// At this point in the pipeline Annotations intrinsic have all been
+  /// converted into what they need to be. But they can still be present and
+  /// have pointer on pointer as arguments which v++ can't deal with.
+  void removeAnnotations(Module &M) {
+    SmallVector<Instruction *, 16> ToRemove;
+    for (Function &F : M.functions())
+      if (F.getIntrinsicID() == Intrinsic::annotation ||
+          F.getIntrinsicID() == Intrinsic::ptr_annotation ||
+          F.getIntrinsicID() == Intrinsic::var_annotation)
+        for (User *U : F.users())
+          if (auto *I = dyn_cast<Instruction>(U))
+            ToRemove.push_back(I);
+    for (Instruction *I : ToRemove)
+      I->eraseFromParent();
+    GlobalVariable *Annot = M.getGlobalVariable("llvm.global.annotations");
+    if (Annot)
+      Annot->eraseFromParent();
+  }
+
   /// Removes nofree bitcode function attribute that is applied to
   /// functions to indicate that they do not deallocate memory.
   /// It was added in LLVM-9 (D49165), so as v++ catches up it can be removed
@@ -179,9 +199,9 @@ struct VXXIRDowngrader : public ModulePass {
   }
 
   /// Remove Freeze instruction because v++ can't deal with them.
-  /// This is not a safe transformation but since llvm survived with bugs cause
-  /// by absence of freeze for many years, so i guess its its good enough for a
-  /// prototype
+  /// FIXME: This is not a safe transformation but since LLVM survived with bugs
+  /// caused by absence of freeze for many years, so I guess it is good enough
+  /// for a prototype.
   void removeFreezeInst(Module &M) {
     SmallVector<Instruction*, 16> ToRemove;
     for (auto& F : M.functions())
@@ -246,10 +266,15 @@ struct VXXIRDowngrader : public ModulePass {
       I->eraseFromParent();
   }
 
-  void convertPoinsonToZero(Module &M) {
-    for (auto &PV : M.getContext().pImpl->PVConstants)
+  void convertPoisonToZero(Module &M) {
+    for (auto &PV : M.getContext().pImpl->PVConstants) {
+      Type* Ty = PV.second->getType();
+      if (PV.second->use_empty() || Ty->isVoidTy() || Ty->isFunctionTy() ||
+          Ty->isLabelTy() || Ty->isMetadataTy())
+        continue;
       PV.second.get()->replaceAllUsesWith(
           Constant::getNullValue(PV.second.get()->getType()));
+    }
   }
 
   void removeMetaDataValues(Module &M) {
@@ -290,6 +315,14 @@ struct VXXIRDowngrader : public ModulePass {
     F->eraseFromParent();
   }
 
+  struct CleanerVisitor : InstVisitor<CleanerVisitor> {
+      void visitCallBase (CallBase& CB) {
+          if (CB.hasMetadata(llvm::LLVMContext::MD_range)) {
+              CB.setMetadata(llvm::LLVMContext::MD_range, nullptr);
+          }
+      }
+  };
+
   /// Visit the IR and emit warnings about construct not handled by the backend
   /// The IR has no debug info so we cannot say where in the source code the
   /// error happend.
@@ -329,6 +362,9 @@ struct VXXIRDowngrader : public ModulePass {
   /// Traverse the IR in the module and warn about IR constructs unsupported by
   /// the backend.
   void warnForIssues(Module &M) {
+    /// ACAP cores do not have the same restriction as FPGA.
+    if (!Triple(M.getTargetTriple()).isXilinxFPGA())
+      return;
     WarnVisitor Visitor;
     Visitor.visit(M);
     Visitor.emit();
@@ -338,7 +374,9 @@ struct VXXIRDowngrader : public ModulePass {
     resetByVal(M);
     removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
                          Attribute::ImmArg, Attribute::NoSync,
-                         Attribute::MustProgress, Attribute::NoUndef});
+                         Attribute::MustProgress, Attribute::NoUndef,
+                         Attribute::StructRet});
+    removeAnnotations(M);
     renameBasicBlocks(M);
     removeFreezeInst(M);
     removeFNegInst(M);
@@ -348,15 +386,20 @@ struct VXXIRDowngrader : public ModulePass {
     removeMetaDataValues(M);
     /// __assert_fail doesn't exist on device and takes its arguments in
     /// addressspace 0 causing addresspace cast.
-    removeFunction(M, "__assert_fail");
+    if (Triple(M.getTargetTriple()).isXilinxFPGA())
+      removeFunction(M, "__assert_fail");
 
-    convertPoinsonToZero(M);
-    if (Triple(M.getTargetTriple()).getArch() == llvm::Triple::fpga64)
-      M.setTargetTriple("fpga64-xilinx-none");
-    else
-      M.setTargetTriple("fpga32-xilinx-none");
+    convertPoisonToZero(M);
+    if (Triple(M.getTargetTriple()).isXilinxFPGA()) {
+      if (Triple(M.getTargetTriple()).getArch() == llvm::Triple::fpga64)
+        M.setTargetTriple("fpga64-xilinx-none");
+      else
+        M.setTargetTriple("fpga32-xilinx-none");
+    }
     // The module probably changed
 
+    CleanerVisitor CV{};
+    CV.visit(M);
     warnForIssues(M);
 
     return true;

@@ -10,7 +10,7 @@ foreach(BinFile ${BinFiles})
                        ${CMAKE_BINARY_DIR}/bin
                      COMMAND ${CMAKE_COMMAND} -E copy
                        ${CMAKE_CURRENT_SOURCE_DIR}/bin/${BinFile}
-                       ${CMAKE_BINARY_DIR}/bin/
+                       ${CMAKE_BINARY_DIR}/bin
                      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bin/${BinFile})
   list(APPEND Depends ${CMAKE_BINARY_DIR}/bin/${BinFile})
   install(PROGRAMS bin/${BinFile} DESTINATION bin)
@@ -19,7 +19,8 @@ endforeach()
 # \TODO: Might be able to refactor this into a single foreach
 set(ChessWrapperFiles
       chesswrappers/chess-clang
-      chesswrappers/linker_script.bcf
+      chesswrappers/linker_script_east.bcf
+      chesswrappers/linker_script_west.bcf
   )
 
 foreach(ChessWrapper ${ChessWrapperFiles})
@@ -28,7 +29,7 @@ foreach(ChessWrapper ${ChessWrapperFiles})
                        ${CMAKE_BINARY_DIR}/bin/chesswrappers
                      COMMAND ${CMAKE_COMMAND} -E copy
                        ${CMAKE_CURRENT_SOURCE_DIR}/bin/${ChessWrapper}
-                       ${CMAKE_BINARY_DIR}/bin/chesswrappers/
+                       ${CMAKE_BINARY_DIR}/bin/chesswrappers
                      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/bin/${ChessWrapper})
   list(APPEND Depends ${CMAKE_BINARY_DIR}/bin/${ChessWrapper})
   install(PROGRAMS bin/${ChessWrapper} DESTINATION bin/chesswrappers)

@@ -104,7 +104,6 @@ bool KernelProperties::isArgBuffer(Argument *Arg, bool SyclHLSFlow) {
 }
 
 KernelProperties::KernelProperties(Function &F, bool SyclHlsFlow) {
-
   SmallDenseMap<llvm::AllocaInst *, unsigned, 16> UserSpecifiedDDRBanks{};
   // Collect user specified DDR banks for F in DDRBanks
   collectUserSpecifiedDDRBanks(F, UserSpecifiedDDRBanks);

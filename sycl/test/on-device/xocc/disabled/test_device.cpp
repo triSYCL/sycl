@@ -15,7 +15,7 @@ void test_device(Selector s) {
   sycl::queue Queue{s};
 
   // Size of index space for kernel
-  sycl::range<1> NumOfWorkItems{Buffer.get_count()};
+  sycl::range<1> NumOfWorkItems{Buffer.size()};
 
   // Submitting command group(work) to queue
   Queue.submit([&](sycl::handler &cgh) {
@@ -35,7 +35,7 @@ void test_device(Selector s) {
 
   // Check the results
   bool MismatchFound = false;
-  for (size_t I = 0; I < Buffer.get_count(); ++I) {
+  for (size_t I = 0; I < Buffer.size(); ++I) {
     if (HostAccessor[I] != I) {
       std::cerr << "The result is incorrect for element: " << I
                 << ", expected: " << I << ", got: " << HostAccessor[I]
