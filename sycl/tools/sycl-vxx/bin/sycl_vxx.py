@@ -35,6 +35,91 @@ import sys
 from tabnanny import check
 import tempfile
 
+# This pipeline should be able to do any promotion O3 is capable of
+# and some more control flow optimizations then strictly necessary.
+# Some more minimization is possible
+VXX_PassPipeline = [
+"-preparesycl",
+"-lower-expect",
+"-simplifycfg",
+"-sroa",
+"-early-cse",
+"-annotation2metadata",
+"-callsite-splitting",
+"-ipsccp",
+"-called-value-propagation",
+"-globalopt",
+"-mem2reg",
+"-deadargelim",
+"-simplifycfg",
+"-inline",
+"-function-attrs",
+"-argpromotion",
+"-sroa",
+"-early-cse-memssa",
+"-speculative-execution",
+"-jump-threading",
+"-correlated-propagation",
+"-simplifycfg",
+"-libcalls-shrinkwrap",
+"-tailcallelim",
+"-simplifycfg",
+"-reassociate",
+"-loop-simplify",
+"-lcssa",
+"-licm",
+"-loop-rotate",
+"-licm",
+"-loop-unswitch",
+"-simplifycfg",
+"-loop-simplify",
+"-lcssa",
+"-loop-idiom",
+"-indvars",
+"-loop-deletion",
+"-loop-unroll",
+"-sroa",
+"-mldst-motion",
+"-gvn",
+"-sccp",
+"-bdce",
+"-jump-threading",
+"-correlated-propagation",
+"-adce",
+"-memcpyopt",
+"-dse",
+"-loop-simplify",
+"-lcssa",
+"-simplifycfg",
+"-elim-avail-extern",
+"-rpo-function-attrs",
+"-globalopt",
+"-globaldce",
+"-float2int",
+"-lower-constant-intrinsics",
+"-loop-simplify",
+"-lcssa",
+"-loop-rotate",
+"-loop-simplify",
+"-loop-load-elim",
+"-simplifycfg",
+"-loop-simplify",
+"-lcssa",
+"-loop-unroll",
+"-loop-simplify",
+"-lcssa",
+"-licm",
+"-alignment-from-assumptions",
+"-strip-dead-prototypes",
+"-globaldce",
+"-constmerge",
+"-loop-simplify",
+"-lcssa",
+"-loop-sink",
+"-instsimplify",
+"-div-rem-pairs",
+"-simplifycfg",
+]
 
 class TmpDirManager:
     """ Context handler for a temporary repository that can be programmed
@@ -211,11 +296,9 @@ class VitisCompilationDriver:
         )
         opt_options = [
             "--sycl-vxx",
-            "-preparesycl", "-globaldce",
-            "--vectorize-loops=false", "--disable-loop-unrolling",
-            "--sroa-avoid-aggregates", "-O3", "-globaldce", "-globaldce",
-            "-inSPIRation", "-o", f"{prepared_bc}"
-        ]
+            "-preparesycl", "-globaldce",]
+        opt_options.extend(VXX_PassPipeline)
+        opt_options.extend(["-inSPIRation", "-o", f"{prepared_bc}"])
 
         opt = self.clang_path / "opt"
         args = [opt, *opt_options, inputs]
