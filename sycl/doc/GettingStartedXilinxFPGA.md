@@ -290,6 +290,19 @@ sudo apt install ./xilinx-u200-gen3x16-xdma-1-202110-1-dev_1-3221508_all.deb
 
 from where they have been downloaded or adapt the paths to them.
 
+> :warning: Some packages have been shipped by Xilinx with a broken
+> manifest, which might lead to some warning every time you use APT
+> related package management commands, like:
+>
+> ```
+> dpkg: warning: parsing file '/var/lib/dpkg/status' near line 138044 package 'xilinx-cmc-u200-u250':
+>  missing 'Maintainer' field
+> ```
+>
+> In that case edit `/var/lib/dpkg/status` around the indicated line
+> and fix the line `Maintainer: Xilinx Inc.` by removing the leading
+> spaces which were inserted by error.
+
 
 ### Flash and test the board
 
