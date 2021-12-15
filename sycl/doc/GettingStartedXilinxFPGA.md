@@ -214,8 +214,7 @@ sudo apt install --reinstall ./xrt_202210.2.13.0_21.10-amd64-xrt.deb
 > you might want to avoid 1 reboot by loading them explicitly with:
 >
 > ```bash
-> sudo modprobe xocl
-> sudo modprobe xclmgmt
+> sudo modprobe --all xocl xclmgmt
 > ```
 
 > :warning: for some reason Ubuntu 21.04 ships an old version of XRT
