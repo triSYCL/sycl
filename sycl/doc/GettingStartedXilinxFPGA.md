@@ -202,11 +202,21 @@ make package
 sudo apt install --reinstall ./xrt_202210.2.13.0_21.10-amd64-xrt.deb
 ```
 
-> :note: The Linux kernel driver is actually compiled during the
+> :memo: The Linux kernel driver is actually compiled during the
 > installation of the `.deb` package for the currently running
 > kernel. If the compilation fails because of some incompatibilities,
 > look at [section Boot on a specific kernel](#boot-specific-kernel)
 > and reinstall the `.deb` after booting with another kernel.
+
+> :memo: If the compilation fails for some of the Linux kernels of the
+> system but works for the kernel you are interested in, it might
+> prevent the kernel drivers to be loaded immediately. In that case
+> you might want to avoid 1 reboot by loading them explicitly with:
+>
+> ```bash
+> sudo modprobe xocl
+> sudo modprobe xclmgmt
+> ```
 
 > :warning: for some reason Ubuntu 21.04 ships an old version of XRT
 > which is not to be used here. Even if you have installed it like
