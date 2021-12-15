@@ -12,15 +12,18 @@ installed on an `x86_64` machine. But it might work with other recent
 versions of Ubuntu or Debian or even other Linux distributions, with
 some adaptations.
 
-:warning: if you are using Linux kernel 5.12+ like shipped with Ubuntu
-21.10 or Debian/unstable, you will be hit by the bug
-https://github.com/Xilinx/XRT/issues/5943 up to its resolution.  In
-the meantime you can always help fixing the bug :-) or install/keep
-explicitly an older Linux kernel package and boot on it.
+> :warning: if you are using Linux kernel 5.12+ like shipped with
+> Ubuntu 21.10 or Debian/unstable, you will be hit by the bug
+> https://github.com/Xilinx/XRT/issues/5943 up to its resolution.  In
+> the meantime you can always help fixing the bug :-) or install/keep
+> explicitly an older Linux kernel package and boot on it, like
+> explained in [section Boot on a specific
+> kernel](#boot-specific-kernel).
 
-:warning: for some reason Ubuntu 21.04 ships an old version of XRT
-which is not to be used here. See [section about
-XRT](#installing-the-xilinx-xrt-runtime).
+
+> :warning: for some reason Ubuntu 21.04 ships an old version of XRT
+> which is not to be used here. See [section about
+> XRT](#installing-the-xilinx-xrt-runtime).
 
 
 ## What's new?
@@ -51,6 +54,7 @@ have an up-to-date BIOS.
 
 If you are running Linux on top of an EFI BIOS, you can probably use
 the firmware capsule concept and try:
+
 ```bash
 # Install the firmware manager and daemon
 sudo apt install fwupdate fwupd
@@ -83,20 +87,79 @@ Create a `/opt/xilinx` with the right access mode so you can work in
 it.
 
 Materialize the installer files with
+
 ```bash
 tar zxvf .../Xilinx_Unified_2021.2_1021_0703.tar.gz
 ```
 
 Since the graphics Java installer might not work on modern Linux
 distributions like Ubuntu 21.10, use the batch-mode version:
+
 ```bash
 Xilinx_Unified_2021.2_1021_0703/xsetup --xdebug --batch Install --location /opt/xilinx --agree XilinxEULA,3rdPartyEULA --product "Vitis" --edition "Vitis Unified Software Platform"
 ```
 
 Note that if you want to uninstall this later, you can typically use:
+
 ```bash
 /opt/xilinx/.xinstall/Vitis_2021.2/xsetup --batch Uninstall
 ```
+
+
+## Boot on a specific kernel
+
+If for some reason you need to boot a specific Linux kernel because
+this is the only way to have XRT compiling and running with it, here
+is a recipe.
+
+Assuming for example you have an old kernel known to work, hold it to
+make sure that it is not uninstalled during an upgrade with for
+example:
+
+```bash
+sudo apt-mark hold linux-headers-5.11.0-41 linux-headers-5.11.0-41-generic \
+    linux-image-5.11.0-41-generic linux-modules-5.11.0-41-generic \
+    linux-modules-extra-5.11.0-41-generic linux-tools-5.11.0-41 \
+    linux-tools-5.11.0-41-generic
+```
+
+> :memo: More generally it is useful to hold any old kernel just in case
+> you discover later that it does not work anymore with a new kernel
+> which was installed automatically...
+
+Then you might want to boot by default with this kernel, for example
+if you are not in front of the machine to select the right kernel with
+the menu.
+
+A semi-manual way can be to use instead of `GRUB_DEFAULT=0` in
+`/etc/default/grub` to boot the first menu entry to have the
+configuration:
+
+```bash
+#GRUB_DEFAULT=0
+GRUB_SAVEDEFAULT=true
+GRUB_DEFAULT=saved
+```
+
+so the default boot will be the previous one explicitly selected by
+the menu.
+
+A more explicit way to select a kernel is to figure out the menu entry
+you are interested in by looking at `/boot/grub/grub.cfg` and update
+`/etc/default/grub` with its reference, like:
+
+```bash
+#GRUB_DEFAULT=0
+GRUB_DEFAULT='gnulinux-advanced-bedd64b9-a611-4ccf-ad12-8f703a5df1da>gnulinux-5.11.0-41-generic-advanced-bedd64b9-a611-4ccf-ad12-8f703a5df1da'
+```
+
+In any case, before rebooting, you need to update the boot
+configuration from the modified `/etc/default/grub` by running:
+
+```bash
+sudo update-grub
+```
+
 
 ## Installing the Xilinx XRT runtime
 
@@ -120,14 +183,15 @@ sudo apt install --reinstall ./Release/xrt_202210.2.13.0_21.10-amd64-xrt.deb
 ```
 
 It will install the user-mode XRT runtime and at least compile and
-install the Xilinx device driver modules for the current running kernel,
-even if it fails for the other kernels installed on the machine. If
-you do not plan to run on a real FPGA board but only use software or
-hardware emulation instead, it does not matter if the kernel device
-driver is not compiled since it will not be used.
+install the Xilinx device driver modules for the current running
+kernel, even if it fails for the other kernels installed on the
+machine. If you do not plan to run on a real FPGA board but only use
+software or hardware emulation instead, it does not matter if the
+kernel device driver is not compiled since it will not be used.
 
 Note that if for some reasons you want to use a debug version of XRT,
 use this recipe instead:
+
 ```bash
 cd Debug
 # You need to make explicitly the Debug package because it is not made
@@ -138,23 +202,32 @@ make package
 sudo apt install --reinstall ./xrt_202210.2.13.0_21.10-amd64-xrt.deb
 ```
 
-:warning: for some reason Ubuntu 21.04 ships an old version of XRT
-which is not to be used here. Even if you have installed it like
-above, it might be automatically "updated" by some automatic package
-updater running on a regular basis because the package use an
-alternate versioning. So, if you are running Ubuntu
-21.04, to avoid this situation, you can put the
-package on hold after the installation with:
-```bash
-sudo apt-mark hold xrt
-```
+> :note: The Linux kernel driver is actually compiled during the
+> installation of the `.deb` package for the currently running
+> kernel. If the compilation fails because of some incompatibilities,
+> look at [section Boot on a specific kernel](#boot-specific-kernel)
+> and reinstall the `.deb` after booting with another kernel.
+
+> :warning: for some reason Ubuntu 21.04 ships an old version of XRT
+> which is not to be used here. Even if you have installed it like
+> above, it might be automatically "updated" by some automatic package
+> updater running on a regular basis because the package use an
+> alternate versioning. So, if you are running Ubuntu 21.04, to avoid
+> this situation, you can put the package on hold after the
+> installation with:
+>
+> ```bash
+> sudo apt-mark hold xrt
+> ```
 
 Check that the FPGA board is detected:
+
 ```bash
 sudo /opt/xilinx/xrt/bin/xbutil --legacy flash scan -v
 ```
 
 which should display something similar to
+
 ```
 ---------------------------------------------------------------------
 Legacy xbutil is being deprecated, consider moving to next-gen xbutil
@@ -169,6 +242,7 @@ Card [0000:04:00.0]
     Flashable partitions installed in system:	
         xilinx_u200_xdma_201830_2,[ID=0x5d1211e8],[SC=4.2.0]
 ```
+
 
 ## Install the target platform for the FPGA board
 
@@ -192,6 +266,7 @@ Debian.
 Install the target platforms according to documentation
 https://www.xilinx.com/cgi-bin/docs/bkdoc?k=accelerator-cards;v=latest;d=ug1301-getting-started-guide-alveo-accelerator-cards.pdf
 which is typically:
+
 ```bash
 tar zxvf xilinx-u200_2021.2_2021_1021_1001-all.deb.tar.gz
 # Install all of them at once to hide some dependency error (at least
@@ -203,6 +278,7 @@ sudo apt install ./xilinx-sc-fw-u200-u250_4.6.18-1.ff327cc_all.deb \
 
 sudo apt install ./xilinx-u200-gen3x16-xdma-1-202110-1-dev_1-3221508_all.deb
 ```
+
 from where they have been downloaded or adapt the paths to them.
 
 
@@ -217,6 +293,7 @@ https://www.xilinx.com/support/documentation/boards_and_kits/accelerator-cards/1
 about how to correctly generate the exact flashing command.
 
 Typically you run:
+
 ```bash
 sudo /opt/xilinx/xrt/bin/xbmgmt examine --report all
 System Configuration
@@ -316,10 +393,12 @@ CMC
       Override : false
       Override limit : 0C C
 ```
+
 to get the information about the installed target platform and you
 translate this into a flashing command according to the parameters
 above or just follow the information you got when installing
 previously the deployment target platform:
+
 ```bash
 rkeryell@xsjsycl41:~$ sudo /opt/xilinx/xrt/bin/xbutil flash -a xilinx_u200_xdma_201830_2 -t 1561465320
 ---------------------------------------------------------------------
@@ -356,6 +435,7 @@ configurable with an FPGA!).
 Then after rebooting, you can check with a pre-compiled FPGA program
 provided by the target platform that the board is working correctly
 with (the device id below is to adapt to your card):
+
 ```bash
 sudo /opt/xilinx/xrt/bin/xbutil validate --verbose --device 0000:04:00.1
 INFO: Found 1 cards
@@ -405,6 +485,7 @@ INFO: All cards validated successfully.
 ## Compile the SYCL compiler
 
 Building SYCL can be done with Python scripts:
+
 ```bash
 # Pick some place where SYCL has to be compiled, such as:
 SYCL_HOME=~/sycl_workspace
@@ -419,6 +500,7 @@ These scripts have many options which can be displayed when using the
 `--help` option. For example to configure with CUDA support, without
 treating compiler warnings as errors and producing a compiler database
 to be used by tools like LSP server like `clangd`:
+
 ```bash
 python $SYCL_HOME/llvm/buildbot/configure.py --cuda -no-werror \
   --cmake-opt="-DCMAKE_EXPORT_COMPILE_COMMANDS=1"
@@ -430,6 +512,7 @@ For more control, see [section Build](#build).
 ## Compiling and running a SYCL application
 
 The typical environment is setup with something like
+
 ```bash
 # The place where SYCL has been compiled:
 SYCL_HOME=~/sycl_workspace
@@ -510,7 +593,8 @@ back-end software emulation.
 To run an example from the provided examples:
 
 - with hardware emulation:
-  ```bash
+
+```bash
   cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/simple_tests
   # Instruct the compiler and runtime to use FPGA hardware emulation with HLS flow
   # Compile the SYCL program down to a host fat binary including the RTL for simulation
@@ -521,7 +605,8 @@ To run an example from the provided examples:
   ```
 
 - with real hardware execution on FPGA:
-  ```bash
+
+```bash
   cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/simple_tests
   # Instruct the compiler to use real FPGA hardware execution with HLS flow
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
@@ -530,6 +615,7 @@ To run an example from the provided examples:
   # Run on the real FPGA board
   ./single_task_vector_add
   ```
+
 Note that only the flag `-fsycl-targets` is changed across the previous examples.
 
 
@@ -541,6 +627,7 @@ for inspection, for example to look at the physical layout of the FPGA.
 
 For this, you need to compile with an environment variable stating
 that the temporary files have to be kept, for example with:
+
 ```bash
 export SYCL_VXX_KEEP_CLUTTER=True
 ```
@@ -576,20 +663,24 @@ the `fpga64_` prefix trimmed. Namely:
 Note that the SPIR compilation flow has been discontinued.
 
 - Run the `xocc` test suite with hardware emulation (HLS flow):
-  ```bash
+
+```bash
   cd $SYCL_HOME/llvm/build
   export VXX_TARGET=hls_hw_emu
   cmake --build . --parallel `nproc` --target check-sycl-xocc-j4
   ```
-  This takes usually 15-30 minutes with a good CPU.
+
+This takes usually 15-30 minutes with a good CPU.
 
 - Run the `xocc` test suite with real hardware execution on FPGA (HLS flow):
-  ```bash
+
+```bash
   cd $SYCL_HOME/llvm/build
   export VXX_TARGET=hls_hw
   cmake --build . --parallel `nproc` --target check-sycl-xocc-j4
   ```
-  This takes usually 8+ hours.
+
+This takes usually 8+ hours.
 
 `check-sycl-xocc-jmax` will run the tests on as many cores as is
 available on the system. But for `hw` and `hw_emu` execution mode,
@@ -606,6 +697,7 @@ ones, there are the targets `check-sycl-all-jmax`,
 
 To run a SYCL translation of
 https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
+
 ```bash
 cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/edge_detection
 # Instruct the compiler and runtime to use real FPGA hardware execution
@@ -615,6 +707,7 @@ $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
 # Execute on one of the images
 ./edge_detection data/input/eiffel.bmp
 ```
+
 and then look at the `input.bmp` and `output.bmp` images.
 
 There is another application along using a webcam instead, if you have one
@@ -638,12 +731,15 @@ But if a SYCL program crashes before freeing the OpenCL buffer
 and the user tries to allocate some other buffers at the same place on
 the FPGA board with another program, then the runtime refuses to load
 the program, with some error like:
+
 ```
 [XRT] ERROR: Failed to load xclbin.
 OpenCL API failed. /var/tmp/rkeryell/SYCL/sycl/sycl/source/detail/program_manager/program_manager.cpp:78: OpenCL API returns: -44 (CL_INVALID_PROGRAM)
 ```
+
 and with some kernel message that can be displayed by executing `dmesg`
 like:
+
 ```
 [256564.482271] [drm] Finding MEM_TOPOLOGY section header
 [256564.482273] [drm] Section MEM_TOPOLOGY details:
@@ -659,10 +755,12 @@ allocated buffer in the future...
 
 This can be done by removing the kernel driver and reloading it by
 executing:
+
 ```bash
 sudo rmmod xocl
 sudo modprobe xocl
 ```
+
 
 ## Xilinx Macros
 
@@ -675,6 +773,7 @@ sudo modprobe xocl
 when compiling host code none of the ``__SYCL_XILINX_*_MODE__`` macros will be defined.
 
 ``__SYCL_HAS_XILINX_DEVICE__`` will be defined on the host if one of the specified targets is a Xilinx device or on a Xilinx device
+
 
 ## Xilinx FPGA SYCL compiler architecture
 
@@ -733,6 +832,7 @@ and a Debug one used for debugging.
 Note: the configuration of environment variables must be done before the `cmake` invocation.
 
 A possible Release configuration and build script targeting Xilinx FPGA, CUDA & OpenCL:
+
 ```bash
 cd $SYCL_HOME
 mkdir -p "build-Release" && cd "build-Release" && cmake \
@@ -762,13 +862,16 @@ mkdir -p "build-Release" && cd "build-Release" && cmake \
  -DSYCL_ENABLE_XPTI_TRACING=ON \
  $SYCL_HOME/llvm
 ```
+
 then build with
+
 ```bash
 cd $SYCL_HOME
 ninja -C build-Release sycl-toolchain
 ```
 
 A possible Debug configuration and build script targeting Xilinx FPGA, CUDA & OpenCL:
+
 ```bash
 cd $SYCL_HOME
 mkdir -p "build-Debug" && cd "build-Debug" && cmake \
@@ -800,7 +903,9 @@ mkdir -p "build-Debug" && cd "build-Debug" && cmake \
  -DSYCL_ENABLE_XPTI_TRACING=ON \
  $SYCL_HOME/llvm
 ```
+
 then build with
+
 ```bash
 cd $SYCL_HOME
 ninja -C build-Debug sycl-toolchain
@@ -820,6 +925,7 @@ For details about the `CMake` configuration see https://llvm.org/docs/CMake.html
 
 While building the `sycl-toolchain` target, the device runtime for `spirv` and `nvptx` targets gets compiled using the device compiler from the specific build.
 Building anything with a debug compiler is very slow, but it can be speedup using:
+
 ```bash
 export LD_LIBRARY_PATH=$SYCL_HOME/build-Release/lib:$LD_LIBRARY_PATH
 ```
@@ -859,6 +965,7 @@ export SYCL_PI_TRACE=1
 export SYCL_PI_TRACE=-1
 ```
 
+
 #### Clang flags
 
 Some useful Clang flags:
@@ -869,35 +976,44 @@ Some useful Clang flags:
 #### Running a single test
 
 To run a test from the test suite in isolation, use:
+
 ```bash
 /path/to/build/dir/bin/llvm-lit -v --param XOCC=all path/to/test.cpp
 ```
+
 where all tests utilities must have been build for this to work.
+
 
 #### v++ Logs
 
 The kinds of following errors are typical of a back-end issue:
+
 ```
 ERROR: [v++ 60-300] Failed to build kernel(ip) kernel_name, see log for details: [...]/vitis_hls.log
 ERROR: [v++ 60-599] Kernel compilation failed to complete
 ERROR: [v++ 60-592] Failed to finish compilation
 ```
+
 the path `[...]` contains a hash and kernel names.
 
-Please follow the log chain to identify the cause of this issue. 
+Please follow the log chain to identify the cause of this issue.
 Keep in mind that if the `SYCL_VXX_KEEP_CLUTTER` environment variable is not set, 
 log files will be deleted as soon as the compilation process exit, meaning that they are 
 probably already gone when you get this error message.
+
 
 #### llvm-reduce
 
 It is possible to use `llvm-reduce` to track down `v++` issues.
 First build `llvm-reduce` with:
+
 ```bash
 ninja -C build-Release llvm-reduce
 ```
+
 then build a script called later `is_interesting_llvm.sh` to exhibits the `v++` bug.
 This will look like the following:
+
 ```bash
 #!/bin/bash
 
@@ -925,7 +1041,9 @@ else
   exit 1
 fi
 ```
+
 then we can run `llvm-reduce` by doing the following:
+
 ```bash
 # Disassemble the file that crashed Vitis's Clang
 ./build-Release/bin/opt -S file_that_crashed_vitis_clang.bc -o tmp.ll
