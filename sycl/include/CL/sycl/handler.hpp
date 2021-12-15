@@ -231,6 +231,91 @@ inline void build_loop_nest_rec(auto &ElementWiseOp,
   }
 }
 
+/// @brief Construct parallel_for equivalent loop recursively
+///
+/// @tparam CurDimIdx Which dimension of the iteration space (starting from 0)
+/// @tparam IterDims Dimension of the iteration space (loop nest total depth)
+///
+/// @param ElementWiseOp The kernel that should be applied to each element
+/// @param IterDomains The nd_range describing the iteration space
+/// @param OuterLoopIterIdx Tuple storing a ref to each outer loop iteration idx
+///
+/// Build one loop of depth CurDimIDX for the loop nest corresponding to
+/// IterDomain
+template <int CurDimIdx, int IterDims>
+inline void build_inner_loop_nd_nest_rec(auto &ElementWiseOp,
+                                         nd_range<IterDims> &IterDomains,
+                                         auto WGIdx,
+                                         auto OuterLoopLocalWG,
+                                         auto OuterLoopGlobalIdx) {
+  size_t CurDimGroupRange = IterDomains.get_group_range()[CurDimIdx];
+  size_t CurDimLocalIter = 0;
+  size_t CurDimGlobalIter = get<CurDimIdx>(WGIdx) * CurDimGroupRange;
+  auto NextLocalIdx =
+      std::tuple_cat(OuterLoopLocalWG, std::tie(CurDimLocalIter));
+  auto NextGlobalIdx =
+      std::tuple_cat(OuterLoopGlobalIdx, std::tie(CurDimGlobalIter));
+  for (CurDimLocalIter = 0;
+       CurDimLocalIter < IterDomains.get_local_range()[CurDimIdx];
+       CurDimLocalIter++) {
+    if constexpr (CurDimIdx + 1 >= IterDims) {
+      static_assert(CurDimIdx == IterDims - 1);
+      // innermost loop : perform the call
+      auto GlobalItem = detail::Builder::createItem<IterDims, true>(
+          IterDomains.get_global_range(),
+          std::make_from_tuple<id<IterDims>>(NextGlobalIdx),
+          id<IterDims>{});
+      auto LocalItem = detail::Builder::createItem<IterDims, false>(
+          IterDomains.get_local_range(),
+          std::make_from_tuple<id<IterDims>>(NextLocalIdx));
+      id<IterDims> GroupID = std::make_from_tuple<id<IterDims>>(WGIdx);
+      auto Group =
+          detail::Builder::createGroup(IterDomains.get_global_range(),
+                                       IterDomains.get_local_range(), GroupID);
+
+      auto NDItem = detail::Builder::createNDItem<IterDims>(GlobalItem, LocalItem, Group);
+      ElementWiseOp({NDItem});
+    } else {
+      // Extend the iteration index tuple and generate the next loop level
+      build_inner_loop_nd_nest_rec<CurDimIdx + 1>(ElementWiseOp, IterDomains, WGIdx, NextLocalIdx, NextGlobalIdx);
+    }
+    ++CurDimGlobalIter;
+  }
+}
+
+/// @brief Construct parallel_for with ND range outer loop
+///
+/// @tparam CurDimIdx Which dimension of the iteration space (starting from 0)
+/// @tparam IterDims Dimension of the iteration space (loop nest total depth)
+///
+/// @param ElementWiseOp The kernel that should be applied to each element
+/// @param IterDomains The nd_range describing the iteration space
+/// @param OuterLoopWGIdx Tuple storing a ref to each outer loop iteration idx
+///
+/// Build one loop of depth CurDimIDX for the workgroup level corresponding to
+/// IterDomain
+template <int CurDimIdx, int IterDims>
+inline void
+build_loop_nd_nest_rec(auto &ElementWiseOp, nd_range<IterDims> &IterDomains,
+                       auto OuterLoopWGIdx) {
+  size_t CurDimGroupRange = IterDomains.get_group_range()[CurDimIdx];
+  size_t CurDimGroupIter = 0;
+  auto NextWGIdx =
+      std::tuple_cat(OuterLoopWGIdx, std::tie(CurDimGroupIter));
+  for (CurDimGroupIter = 0;
+       CurDimGroupIter < CurDimGroupRange;
+       CurDimGroupRange++) {
+    if constexpr (CurDimIdx + 1 >= IterDims) {
+      static_assert(CurDimIdx == IterDims - 1);
+      build_inner_loop_nd_nest_rec<0>(ElementWiseOp, IterDomains, NextWGIdx,
+                                   std::tuple<>{}, std::tuple<>{});
+    } else {
+      // Extend the iteration index tuple and generate the next loop level
+      build_loop_nd_nest_rec<CurDimIdx + 1>(ElementWiseOp, IterDomains, NextWGIdx);
+    }
+  }
+}
+
 /// @brief Invoke a function on each element of a range in a sequential manner
 ///
 /// @tparam IterDims Number of dimensions of the iteration space.
@@ -246,6 +331,25 @@ template <int IterDims>
 inline void serialize_parallel_for(auto &ElementWiseOp,
                                    range<IterDims> IterDomain) {
   build_loop_nest_rec<0, IterDims>(ElementWiseOp, IterDomain, std::tuple<>{});
+}
+
+/// @brief Invoke a function on each element of a nd_range in a sequential
+/// manner
+///
+/// @tparam IterDims Number of dimensions of the iteration space.
+///
+/// @param ElementWiseOp The function to apply on each element
+/// @param IterDomains a nd_range describing the iteration domain
+///
+/// This function produces the serial equivalent to
+/// \code parallel_for(ElementWiseOp, IterDomain); \endcode
+/// It is used to replace parallel_for on device where having a
+/// single loop nest makes more sense.
+template <int IterDims>
+inline void serialize_parallel_for(auto &ElementWiseOp,
+                                   nd_range<IterDims> IterDomains) {
+  build_loop_nd_nest_rec<0, IterDims>(ElementWiseOp, IterDomains,
+                                      std::tuple<>{});
 }
 
 } // namespace detail
@@ -916,7 +1020,7 @@ device D = detail::getDeviceFromHandler(*this);
         setType(detail::CG::Kernel);
         return;
       }
-#endif // SYCL_DEVICE_ONLY
+#endif // !SYCL_DEVICE_ONLY
     }
 #endif // !__SYCL_SPIR_DEVICE__
 
@@ -1430,16 +1534,43 @@ public:
     throwIfActionIsCreated();
     using NameT =
         typename detail::get_kernel_name_t<KernelName, KernelType>::name;
+#ifndef __SYCL_DEVICE_ONLY__
+    device D = detail::getDeviceFromHandler(*this);
+#endif
+// Normal handling
+#ifndef __SYCL_SPIR_DEVICE__
     using LambdaArgType =
         sycl::detail::lambda_arg_type<KernelType, nd_item<Dims>>;
     (void)ExecutionRange;
     kernel_parallel_for_wrapper<NameT, LambdaArgType>(KernelFunc);
 #ifndef __SYCL_DEVICE_ONLY__
-    detail::checkValueRange<Dims>(ExecutionRange);
-    MNDRDesc.set(std::move(ExecutionRange));
-    StoreLambda<NameT, KernelType, Dims, LambdaArgType>(std::move(KernelFunc));
-    setType(detail::CG::Kernel);
+    if (!D.has(aspect::ext_xilinx_single_task_only)) {
+      detail::checkValueRange<Dims>(ExecutionRange);
+      MNDRDesc.set(std::move(ExecutionRange));
+      StoreLambda<NameT, KernelType, Dims, LambdaArgType>(
+          std::move(KernelFunc));
+      setType(detail::CG::Kernel);
+    }
 #endif
+#endif
+// Parallel for serializing for
+#if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
+    auto SingleTaskKernel = [=] {
+      detail::serialize_parallel_for(KernelFunc, ExecutionRange);
+    };
+    using ToSingleTaskName = detail::par_for_to_st<NameT>;
+    kernel_single_task<ToSingleTaskName>(SingleTaskKernel);
+#ifndef __SYCL_DEVICE_ONLY__
+    // No need to check if range is out of INT_MAX limits as it's compile-time
+    // known constant
+    if (D.has(aspect::ext_xilinx_single_task_only)) {
+      MNDRDesc.set(range<1>{1});
+      StoreLambda<ToSingleTaskName, decltype(SingleTaskKernel), /*Dims*/ 0,
+                  void>(SingleTaskKernel);
+      setType(detail::CG::Kernel);
+    }
+#endif // !__SYCL_DEVICE_ONLY__
+#endif // __SYCL_SPIR_DEVICE__ || !__SYCL_DEVICE_ONLY__
   }
 
   /// Defines and invokes a SYCL kernel function for the specified nd_range.
@@ -1447,7 +1578,7 @@ public:
   /// The SYCL kernel function is defined as a lambda function or a named
   /// function object type and given an id for indexing in the indexing
   /// space defined by range \p Range.
-  /// The parameter \p Redu contains the object creted by the reduction()
+  /// The parameter \p Redu contains the object created by the reduction()
   /// function and defines the type and operation used in the corresponding
   /// argument of 'reducer' type passed to lambda/functor function.
   template <typename KernelName = detail::auto_name, typename KernelType,
