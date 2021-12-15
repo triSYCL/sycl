@@ -116,8 +116,11 @@ STATISTIC(NumVectorized, "Number of vectorized aggregates");
 static cl::opt<bool> SROAStrictInbounds("sroa-strict-inbounds", cl::init(false),
                                         cl::Hidden);
 
-static cl::opt<bool> SROAAvoidAggregates("sroa-avoid-aggregates", cl::init(false),
-                                         cl::Hidden);
+/// Prevent SROA from desegregating structs containing variable width integers
+/// with non-common bits sizes.
+static cl::opt<bool> SROAVXXConservative("sroa-vxx-conservative", cl::init(false),
+                                        cl::Hidden);
+
 namespace {
 
 /// A custom IRBuilder inserter which prefixes all names, but only in
@@ -3579,6 +3582,23 @@ private:
   }
 };
 
+bool isValidSROAVXXType(Type *Ty) {
+  if (auto *ST = dyn_cast<StructType>(Ty))
+    return llvm::all_of(ST->elements(), isValidSROAVXXType);
+  if (auto *AT = dyn_cast<ArrayType>(Ty))
+    return isValidSROAVXXType(AT->getArrayElementType());
+  if (auto *IT = dyn_cast<IntegerType>(Ty))
+    return ((IT->getBitWidth() % 8) == 0) &&
+           llvm::isPowerOf2_32(IT->getBitWidth());
+  return true;
+}
+
+bool isAllocaValidForVXXSROA(AllocaInst *AI) {
+  bool Result = isValidSROAVXXType(AI->getAllocatedType());
+  LLVM_DEBUG(dbgs() << "SROA is VXX promotable:" << *AI << " = " << Result << "\n");
+  return Result;
+}
+
 } // end anonymous namespace
 
 /// Strip aggregate type wrapping.
@@ -4720,7 +4740,7 @@ PreservedAnalyses SROAPass::runImpl(Function &F, DominatorTree &RunDT,
         if (isAllocaPromotable(AI))
           PromotableAllocas.push_back(AI);
       } else {
-        if (AI->getType()->isSingleValueType() || !SROAAvoidAggregates)
+        if (!SROAVXXConservative || isAllocaValidForVXXSROA(AI))
           Worklist.insert(AI);
       }
     }
