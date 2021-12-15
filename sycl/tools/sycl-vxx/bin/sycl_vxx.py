@@ -131,9 +131,6 @@ class CompilationDriver:
     @subprocess_error_handler("Error in sycl->HLS conversion")
     def _run_preparation(self):
         """Run the various sycl->HLS conversion passes"""
-        # We try to avoid as many optimization as possible
-        # to give vitis the opportunity to use its custom 
-        # optimizations 
         outstem = self.outstem
         self.prepared_bc = (
             self.tmpdir /
@@ -147,9 +144,8 @@ class CompilationDriver:
                 "-flat-address-space=0", "-globaldce"
             ])
         opt_options.extend([
-            "-instcombine", "-domtree", "-argpromotion", "-deadargelim",
-            "-globalopt", "-domtree", "-inline", "-instcombine", "-domtree",
-            "-argpromotion", "-deadargelim",
+            "--vectorize-loops=false", "--disable-loop-unrolling",
+            "--sroa-avoid-aggregates", "-O3", "-globaldce", "-globaldce",
             "-inSPIRation", "-o", f"{self.prepared_bc}"
         ])
 
@@ -195,7 +191,7 @@ class CompilationDriver:
         )
         opt_options = [
             "--lower-delayed-sycl-metadata", "-lower-sycl-metadata",
-            "--sycl-vxx", "--sycl-prepare-clearspir", "-preparesycl",
+            "--sycl-vxx", "--sycl-prepare-clearspir", "-S", "-preparesycl",
             "-kernelPropGen",
             "--sycl-kernel-propgen-output", f"{kernel_prop}",
             "-globaldce", self.linked_kernels,
@@ -236,8 +232,6 @@ class CompilationDriver:
         command = [
             vxx, "--target", self.vitis_mode,
             "--advanced.param", "compiler.hlsDataflowStrictMode=off",
-            # Do the optimizations that were not performed by sycl compiler
-            "-O3",
             "--platform", self.xilinx_platform,
             "--temp_dir", self.tmpdir / 'vxx_comp_tmp',
             "--log_dir", self.tmpdir / 'vxx_comp_log',
@@ -312,14 +306,21 @@ class CompilationDriver:
         # Compilation commands are generated in main process to ensure
         # they are printed on main process stdout if command dump is set
         compile_commands = map(
-            self._get_compile_kernel_cmd_out, self.kernel_properties["kernels"])
-        p = Pool()
-        try:
-            future = p.starmap_async(self._compile_kernel, compile_commands)
-            self.compiled_kernels = list(future.get())
-        except KeyboardInterrupt:
-            p.terminate()
-            raise KeyboardInterrupt
+            self._get_compile_kernel_cmd_out,
+            self.kernel_properties["kernels"])
+        if environ.get("SYCL_VXX_SERIALIZE_VITIS_COMP") is None:
+            p = Pool()
+            try:
+                future = p.starmap_async(
+                    self._compile_kernel,
+                    compile_commands)
+                self.compiled_kernels = list(future.get())
+            except KeyboardInterrupt:
+                p.terminate()
+                raise KeyboardInterrupt
+        else:
+            for command in compile_commands:
+                subprocess.run(command, check_output=True)
 
     def drive_compilation(self):
         if self.hls_flow and (self.vitis_mode == "sw_emu"):

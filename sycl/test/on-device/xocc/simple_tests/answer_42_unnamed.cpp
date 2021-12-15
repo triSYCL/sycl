@@ -1,4 +1,7 @@
-// The universal answer from an heterogeneous world
+// REQUIRES: xocc
+
+// RUN: %clangxx -fsycl -fsycl-unnamed-lambda -std=c++20 -fsycl-targets=%sycl_triple %s -o %t.out
+// RUN: %ACC_RUN_PLACEHOLDER %t.out
 
 #include <sycl/sycl.hpp>
 #include <iostream>
