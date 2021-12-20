@@ -232,24 +232,33 @@ sudo apt install --reinstall ./xrt_202210.2.13.0_21.10-amd64-xrt.deb
 Check that the FPGA board is detected:
 
 ```bash
-sudo /opt/xilinx/xrt/bin/xbutil --legacy flash scan -v
+sudo /opt/xilinx/xrt/bin/xbmgmt examine
 ```
 
-which should display something similar to
+which should display something similar to:
 
 ```
----------------------------------------------------------------------
-Legacy xbutil is being deprecated, consider moving to next-gen xbutil
----------------------------------------------------------------------
-WARNING: The xbutil sub-command flash has been deprecated. Please use the xbmgmt utility with flash sub-command for equivalent functionality.
+System Configuration
+  OS Name              : Linux
+  Release              : 5.11.0-41-generic
+  Version              : #45-Ubuntu SMP Fri Nov 5 11:37:01 UTC 2021
+  Machine              : x86_64
+  CPU Cores            : 20
+  Memory               : 64235 MB
+  Distribution         : Ubuntu 21.10
+  GLIBC                : 2.34
+  Model                : Precision Tower 5810
 
-Card [0000:04:00.0]
-    Card type:		u200
-    Flash type:		SPI
-    Flashable partition running on FPGA:
-        xilinx_u200_GOLDEN_5,[SC=INACTIVE]
-    Flashable partitions installed in system:	
-        xilinx_u200_xdma_201830_2,[ID=0x5d1211e8],[SC=4.2.0]
+XRT
+  Version              : 2.13.0
+  Branch               : master
+  Hash                 : 79d9180de2d15026ef7c50dda76a7df210d56c9e
+  Hash Date            : 2021-12-14 17:10:50
+  XOCL                 : unknown, unknown
+  XCLMGMT              : 2.13.0, 79d9180de2d15026ef7c50dda76a7df210d56c9e
+
+Devices present
+  [0000:04:00.0] : xilinx_u200_GOLDEN_5  NOTE: Device not ready for use
 ```
 
 
@@ -320,100 +329,67 @@ Typically you run:
 sudo /opt/xilinx/xrt/bin/xbmgmt examine --report all
 System Configuration
   OS Name              : Linux
-  Release              : 5.11.0-38-generic
-  Version              : #42-Ubuntu SMP Fri Sep 24 14:03:54 UTC 2021
+  Release              : 5.11.0-41-generic
+  Version              : #45-Ubuntu SMP Fri Nov 5 11:37:01 UTC 2021
   Machine              : x86_64
   CPU Cores            : 20
   Memory               : 64235 MB
-  Distribution         : Ubuntu 21.04
-  GLIBC                : 2.33
+  Distribution         : Ubuntu 21.10
+  GLIBC                : 2.34
   Model                : Precision Tower 5810
 
 XRT
   Version              : 2.13.0
   Branch               : master
-  Hash                 : d735e06ba32acb0872747c38faac6a6480740ae3
-  Hash Date            : 2021-10-21 22:05:36
-  XOCL                 : 2.13.0, d735e06ba32acb0872747c38faac6a6480740ae3
-  XCLMGMT              : 2.13.0, d735e06ba32acb0872747c38faac6a6480740ae3
+  Hash                 : 79d9180de2d15026ef7c50dda76a7df210d56c9e
+  Hash Date            : 2021-12-14 17:10:50
+  XOCL                 : unknown, unknown
+  XCLMGMT              : 2.13.0, 79d9180de2d15026ef7c50dda76a7df210d56c9e
 
 Devices present
-  [0000:04:00.0] : xilinx_u200_xdma_201830_2 mgmt(inst=1024) 
+  [0000:04:00.0] : xilinx_u200_GOLDEN_5  NOTE: Device not ready for use
 
 
------------------------------------------------
-1/1 [0000:04:00.0] : xilinx_u200_xdma_201830_2
------------------------------------------------
+----------------------------------------
+1/1 [0000:04:00.0] : xilinx_u200_GOLDEN
+----------------------------------------
 Flash properties
   Type                 : spi
-  Serial Number        : 21290605K03Y
+  Serial Number        : N/A
 
 Device properties
-  Type                 : N/A
-  Name                 : ALVEO U200 PQ
-  Config Mode          : 7
-  Max Power            : 225W
+  Type                 : u200
+  Name                 : N/A
+  Config Mode          : 3353235696
+  Max Power            : N/A
 
 Flashable partitions running on FPGA
-  Platform             : xilinx_u200_xdma_201830_2
-  SC Version           : 4.2.0
-  Platform ID          : 0x5d1211e8
+  Platform             : xilinx_u200_GOLDEN_5
+  SC Version           : INACTIVE
+  Platform ID          : N/A
 
 Flashable partitions installed in system
+  Platform             : xilinx_u200_gen3x16_xdma_base_1
+  SC Version           : 4.6.18
+  Platform UUID        : A2D4F3CF-5B7A-0B7B-70F9-DA589CB5B3CD
+
   Platform             : xilinx_u200_xdma_201830_2
   SC Version           : 4.2.0
   Platform ID          : 0x5d1211e8
 
-
-  Mac Address          : 00:0A:35:06:9F:8A
-                       : 00:0A:35:06:9F:8B
-
+WARNING  : Multiple shells are installed on the system.
 
 Mechanical
-  Fans
-    FPGA Fan 1
-      Critical Trigger Temp : 49 C
-      Speed                 : 1172 RPM
+  ERROR: Could not open device with index '0'
 
 Firewall
-  Level 0 : 0x0 (GOOD)
+  Level -- --: -- --
 
 Mailbox
-  Total bytes received   : 6912 Bytes
-  Unknown                : 0 
-  Test msg ready         : 0 
-  Test msg fetch         : 0 
-  Lock bitstream         : 0 
-  Unlock bitstream       : 0 
-  Hot reset              : 0 
-  Firewall trip          : 0 
-  Download xclbin kaddr  : 7 
-  Download xclbin        : 0 
-  Reclock                : 0 
-  Peer data read         : 50
-  User probe             : 1 
-  Mgmt state             : 0 
-  Change shell           : 0 
-  Reprogram shell        : 0 
-  P2P bar addr           : 0 
+  ERROR: Failed to find subdirectory for mailbox under /sys/bus/pci/devices/0000:04:00.0
+
 
 CMC
-  Status : 0x0 (GOOD)
-  Runtime clock scaling feature :
-    Supported : true
-    Enabled : true
-    Critical threshold (clock shutdown) limits:
-      Power : N/A W
-      Temperature : N/A C
-    Throttling threshold limits:
-      Power : 0W W
-      Temperature : 0C C
-    Power threshold override:
-      Override : false
-      Override limit : 0W W
-    Temperature threshold override:
-      Override : false
-      Override limit : 0C C
 ```
 
 to get the information about the installed target platform and you
@@ -422,30 +398,51 @@ above or just follow the information you got when installing
 previously the deployment target platform:
 
 ```bash
-rkeryell@xsjsycl41:~$ sudo /opt/xilinx/xrt/bin/xbutil flash -a xilinx_u200_xdma_201830_2 -t 1561465320
----------------------------------------------------------------------
-Legacy xbutil is being deprecated, consider moving to next-gen xbutil
----------------------------------------------------------------------
-WARNING: The xbutil sub-command flash has been deprecated. Please use the xbmgmt utility with flash sub-command for equivalent functionality.
+sudo /opt/xilinx/xrt/bin/xbmgmt program --device 0000:04:00.0 --base --image xilinx_u200_gen3x16_xdma_base_1
+----------------------------------------------------
+Device : [0000:04:00.0]
 
-	 Status: shell needs updating
-	 Current shell: xilinx_u200_GOLDEN_5
-	 Shell to be flashed: xilinx_u200_xdma_201830_2
-Are you sure you wish to proceed? [y/n]: y
+Current Configuration
+  Platform             : xilinx_u200_GOLDEN_5
+  SC Version           : INACTIVE
+  Platform ID          : N/A
 
-Updating shell on card[0000:04:00.0]
+
+Incoming Configuration
+  Deployment File      : partition.xsabin
+  Deployment Directory : /lib/firmware/xilinx/a2d4f3cf5b7a0b7b70f9da589cb5b3cd
+  Size                 : 95,405,680 bytes
+  Timestamp            : Wed Dec 15 13:49:16 2021
+
+  Platform             : xilinx_u200_gen3x16_xdma_base_1
+  SC Version           : 4.6.18
+  Platform UUID        : A2D4F3CF-5B7A-0B7B-70F9-DA589CB5B3CD
+----------------------------------------------------
+Actions to perform:
+  [0000:04:00.0] : Program base (FLASH) image
+  [0000:04:00.0] : Program Satellite Controller (SC) image
+----------------------------------------------------
+Are you sure you wish to proceed? [Y/n]: 
+
+INFO: Satellite Controller (SC) images are the same.
+[0000:04:00.0] : Updating base (e.g., shell) flash image...
 Bitstream guard installed on flash @0x1002000
-Persisted 451594 bytes of meta data to flash 0 @0x7f91bca
 Extracting bitstream from MCS data:
-............................................
-Extracted 45859024 bytes from bitstream @0x1002000
+.................................
+Extracted 34437940 bytes from bitstream @0x1002000
 Writing bitstream to flash 0:
-............................................
+.................................
 Bitstream guard removed from flash
-Successfully flashed Card[0000:04:00.0]
+INFO     : Base flash image has been programmed successfully. 
+----------------------------------------------------
+Report
+  [0000:04:00.0] : Satellite Controller (SC) is either up-to-date, fixed, or not installed. No actions taken.
+  [0000:04:00.0] : Successfully flashed the base (e.g., shell) image
 
-1 Card(s) flashed successfully.
-Cold reboot machine to load the new image on card(s).
+Device flashed successfully.
+****************************************************
+Cold reboot machine to load the new image on device.
+****************************************************
 ```
 
 Unfortunately you need to "cold reboot" the machine to have the new
