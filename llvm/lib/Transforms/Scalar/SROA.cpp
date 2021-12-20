@@ -34,6 +34,7 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/ADT/iterator.h"
 #include "llvm/ADT/iterator_range.h"
@@ -115,6 +116,8 @@ STATISTIC(NumVectorized, "Number of vectorized aggregates");
 static cl::opt<bool> SROAStrictInbounds("sroa-strict-inbounds", cl::init(false),
                                         cl::Hidden);
 
+static cl::opt<bool> SROAAvoidAggregates("sroa-avoid-aggregates", cl::init(false),
+                                         cl::Hidden);
 namespace {
 
 /// A custom IRBuilder inserter which prefixes all names, but only in
@@ -4787,7 +4790,8 @@ PreservedAnalyses SROA::runImpl(Function &F, DominatorTree &RunDT,
         if (isAllocaPromotable(AI))
           PromotableAllocas.push_back(AI);
       } else {
-        Worklist.insert(AI);
+        if (AI->getType()->isSingleValueType() || !SROAAvoidAggregates)
+          Worklist.insert(AI);
       }
     }
   }

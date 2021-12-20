@@ -23,10 +23,10 @@ int main() {
     auto Accessor = Buffer.get_access<sycl::access_mode::write>(cgh);
     cgh.single_task<class FirstKernel>(kernel_param(
         [=] {
-          // CHECK-DAG:  {{.*}}v++ {{.*}}FirstKernel{{.*}} --optimize 2
+          // CHECK-DAG:  {{.*}}v++ {{.*}}FirstKernel{{.*}} --kernel_frequency 200
           Accessor[0] = 0;
         },
-        "--optimize 2"_cstr));
+        "--kernel_frequency 200"_cstr));
   });
 
   Queue.submit([&](sycl::handler &cgh) {
@@ -42,8 +42,8 @@ int main() {
 
   Queue.submit([&](sycl::handler &cgh) {
     auto Accessor = Buffer.get_access<sycl::access_mode::write>(cgh);
-    cgh.single_task<class ThirdKernel>("--optimize 2"_vitis_option([=] {
-      // CHECK-DAG:  {{.*}}v++ {{.*}}ThirdKernel{{.*}} --optimize 2
+    cgh.single_task<class ThirdKernel>("--kernel_frequency 300"_vitis_option([=] {
+      // CHECK-DAG:  {{.*}}v++ {{.*}}ThirdKernel{{.*}} --kernel_frequency 300
       Accessor[0] = 0;
     }));
   });
