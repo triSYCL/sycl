@@ -323,6 +323,12 @@ If you want to install a real board, follow the recipe from
 https://www.xilinx.com/support/documentation/boards_and_kits/accelerator-cards/1_9/ug1301-getting-started-guide-alveo-accelerator-cards.pdf
 about how to correctly generate the exact flashing command.
 
+> :warning: It looks like there are some issues to program an FPGA
+> board when several versions of platforms are installed on the
+> machine. If you need several platforms, uninstall the unused one
+> when updating the FPGA board firmware and you can reinstall them
+> afterwards.
+
 Typically you run:
 
 ```bash
@@ -340,11 +346,11 @@ System Configuration
 
 XRT
   Version              : 2.13.0
-  Branch               : master
-  Hash                 : 79d9180de2d15026ef7c50dda76a7df210d56c9e
-  Hash Date            : 2021-12-14 17:10:50
-  XOCL                 : unknown, unknown
-  XCLMGMT              : 2.13.0, 79d9180de2d15026ef7c50dda76a7df210d56c9e
+  Branch               : HEAD
+  Hash                 : 37f368eae34cb70b8c3dc1c840d02e59b2b6b8cb
+  Hash Date            : 2021-12-21 14:17:06
+  XOCL                 : 2.13.0, 37f368eae34cb70b8c3dc1c840d02e59b2b6b8cb
+  XCLMGMT              : 2.13.0, 37f368eae34cb70b8c3dc1c840d02e59b2b6b8cb
 
 Devices present
   [0000:04:00.0] : xilinx_u200_GOLDEN_5  NOTE: Device not ready for use
@@ -360,7 +366,7 @@ Flash properties
 Device properties
   Type                 : u200
   Name                 : N/A
-  Config Mode          : 3353235696
+  Config Mode          : 3715565296
   Max Power            : N/A
 
 Flashable partitions running on FPGA
@@ -373,11 +379,7 @@ Flashable partitions installed in system
   SC Version           : 4.6.18
   Platform UUID        : A2D4F3CF-5B7A-0B7B-70F9-DA589CB5B3CD
 
-  Platform             : xilinx_u200_xdma_201830_2
-  SC Version           : 4.2.0
-  Platform ID          : 0x5d1211e8
-
-WARNING  : Multiple shells are installed on the system.
+WARNING  : Device is not up-to-date.
 
 Mechanical
   ERROR: Could not open device with index '0'
@@ -412,7 +414,7 @@ Incoming Configuration
   Deployment File      : partition.xsabin
   Deployment Directory : /lib/firmware/xilinx/a2d4f3cf5b7a0b7b70f9da589cb5b3cd
   Size                 : 95,405,680 bytes
-  Timestamp            : Wed Dec 15 13:49:16 2021
+  Timestamp            : Tue Dec 21 14:39:07 2021
 
   Platform             : xilinx_u200_gen3x16_xdma_base_1
   SC Version           : 4.6.18
@@ -451,53 +453,345 @@ power-off the machine so the new instantiated PCIe interface of the
 card can actually be rediscovered by the host machine (everything is
 configurable with an FPGA!).
 
+After rebooting you can look at the FPGA configuration:
+
+```bash
+sudo /opt/xilinx/xrt/bin/xbmgmt examine --report all
+System Configuration
+  OS Name              : Linux
+  Release              : 5.11.0-41-generic
+  Version              : #45-Ubuntu SMP Fri Nov 5 11:37:01 UTC 2021
+  Machine              : x86_64
+  CPU Cores            : 20
+  Memory               : 64235 MB
+  Distribution         : Ubuntu 21.10
+  GLIBC                : 2.34
+  Model                : Precision Tower 5810
+
+XRT
+  Version              : 2.13.0
+  Branch               : HEAD
+  Hash                 : 37f368eae34cb70b8c3dc1c840d02e59b2b6b8cb
+  Hash Date            : 2021-12-21 14:17:06
+  XOCL                 : 2.13.0, 37f368eae34cb70b8c3dc1c840d02e59b2b6b8cb
+  XCLMGMT              : 2.13.0, 37f368eae34cb70b8c3dc1c840d02e59b2b6b8cb
+
+Devices present
+  [0000:04:00.0] : xilinx_u200_gen3x16_xdma_base_1 mgmt(inst=1024) 
+
+
+-----------------------------------------------------
+1/1 [0000:04:00.0] : xilinx_u200_gen3x16_xdma_base_1
+-----------------------------------------------------
+Flash properties
+  Type                 : spi
+  Serial Number        : 21290605K03Y
+
+Device properties
+  Type                 : u200
+  Name                 : ALVEO U200 PQ
+  Config Mode          : 7
+  Max Power            : 225W
+
+Flashable partitions running on FPGA
+  Platform             : xilinx_u200_gen3x16_xdma_base_1
+  SC Version           : 4.2
+  Platform UUID        : A2D4F3CF-5B7A-0B7B-70F9-DA589CB5B3CD
+  Interface UUID       : 15FB8DA1-F552-A9F9-23DE-6DC54AA8968F
+
+Flashable partitions installed in system
+  Platform             : xilinx_u200_gen3x16_xdma_base_1
+  SC Version           : 4.6.18
+  Platform UUID        : A2D4F3CF-5B7A-0B7B-70F9-DA589CB5B3CD
+
+
+  Mac Address          : 00:0A:35:06:9F:8A
+                       : 00:0A:35:06:9F:8B
+
+WARNING  : SC image on the device is not up-to-date.
+
+Mechanical
+  Fans
+    FPGA Fan 1
+      Critical Trigger Temp : 38 C
+      Speed                 : 1107 RPM
+
+Firewall
+  Level 0 : 0x0 (GOOD)
+
+Mailbox
+  Total bytes received   : 704 Bytes
+  Unknown                : 0 
+  Test msg ready         : 0 
+  Test msg fetch         : 0 
+  Lock bitstream         : 0 
+  Unlock bitstream       : 0 
+  Hot reset              : 0 
+  Firewall trip          : 0 
+  Download xclbin kaddr  : 0 
+  Download xclbin        : 0 
+  Reclock                : 0 
+  Peer data read         : 5 
+  User probe             : 1 
+  Mgmt state             : 0 
+  Change shell           : 0 
+  Reprogram shell        : 0 
+  P2P bar addr           : 0 
+
+CMC
+  Status : 0x1390001 (SINGLE_SENSOR_UPDATE_ERR)
+  err time : 1640129064 sec
+
+  Runtime clock scaling feature :
+    Supported : false
+    Enabled : false
+    Critical threshold (clock shutdown) limits:
+      Power : 0 W
+      Temperature : 0 C
+    Throttling threshold limits:
+      Power : 0 W
+      Temperature : 0 C
+    Power threshold override:
+      Override : false
+      Override limit : 0 W
+    Temperature threshold override:
+      Override : false
+      Override limit : 0 C
+```
+
+In that case the `WARNING  : SC image on the device is not
+up-to-date.` shows that there is still need to program it by
+repeating the same program command:
+
+```bash
+sudo /opt/xilinx/xrt/bin/xbmgmt program --device 0000:04:00.0 --base --image xilinx_u200_gen3x16_xdma_base_1
+----------------------------------------------------
+Device : [0000:04:00.0]
+
+Current Configuration
+  Platform             : xilinx_u200_gen3x16_xdma_base_1
+  SC Version           : 4.2
+  Platform ID          : 0xa2d4f3cf5b7a0b7b
+
+
+Incoming Configuration
+  Deployment File      : partition.xsabin
+  Deployment Directory : /lib/firmware/xilinx/a2d4f3cf5b7a0b7b70f9da589cb5b3cd
+  Size                 : 95,405,680 bytes
+  Timestamp            : Tue Dec 21 14:39:07 2021
+
+  Platform             : xilinx_u200_gen3x16_xdma_base_1
+  SC Version           : 4.6.18
+  Platform UUID        : A2D4F3CF-5B7A-0B7B-70F9-DA589CB5B3CD
+----------------------------------------------------
+Actions to perform:
+  [0000:04:00.0] : Program Satellite Controller (SC) image
+----------------------------------------------------
+Are you sure you wish to proceed? [Y/n]: 
+
+[0000:04:00.0] : Updating Satellite Controller (SC) firmware flash image...
+Stopping user function...
+INFO     : found 5 sections
+[PASSED] : SC successfully updated < 37s >
+INFO     : Loading new firmware on SC
+.......
+
+INFO: Base (e.g., shell) flash images are the same.
+----------------------------------------------------
+Report
+  [0000:04:00.0] : Successfully flashed the Satellite Controller (SC) image
+  [0000:04:00.0] : Base (e.g., shell) image is up-to-date.  No actions taken.
+
+Device flashed successfully.
+******************************************************************
+Warm reboot is required to recognize new SC image on the device.
+******************************************************************
+```
+
+Good news here, only a normal reboot is required now.
+
+You can check with:
+
+```bash
+sudo /opt/xilinx/xrt/bin/xbmgmt examine --report all
+System Configuration
+  OS Name              : Linux
+  Release              : 5.11.0-41-generic
+  Version              : #45-Ubuntu SMP Fri Nov 5 11:37:01 UTC 2021
+  Machine              : x86_64
+  CPU Cores            : 20
+  Memory               : 64235 MB
+  Distribution         : Ubuntu 21.10
+  GLIBC                : 2.34
+  Model                : Precision Tower 5810
+
+XRT
+  Version              : 2.13.0
+  Branch               : HEAD
+  Hash                 : 37f368eae34cb70b8c3dc1c840d02e59b2b6b8cb
+  Hash Date            : 2021-12-21 14:17:06
+  XOCL                 : 2.13.0, 37f368eae34cb70b8c3dc1c840d02e59b2b6b8cb
+  XCLMGMT              : 2.13.0, 37f368eae34cb70b8c3dc1c840d02e59b2b6b8cb
+
+Devices present
+  [0000:04:00.0] : xilinx_u200_gen3x16_xdma_base_1 mgmt(inst=1024) 
+
+
+-----------------------------------------------------
+1/1 [0000:04:00.0] : xilinx_u200_gen3x16_xdma_base_1
+-----------------------------------------------------
+Flash properties
+  Type                 : spi
+  Serial Number        : 21290605K03Y
+
+Device properties
+  Type                 : u200
+  Name                 : ALVEO U200 PQ
+  Config Mode          : 7
+  Max Power            : 225W
+
+Flashable partitions running on FPGA
+  Platform             : xilinx_u200_gen3x16_xdma_base_1
+  SC Version           : 4.6.18
+  Platform UUID        : A2D4F3CF-5B7A-0B7B-70F9-DA589CB5B3CD
+  Interface UUID       : 15FB8DA1-F552-A9F9-23DE-6DC54AA8968F
+
+Flashable partitions installed in system
+  Platform             : xilinx_u200_gen3x16_xdma_base_1
+  SC Version           : 4.6.18
+  Platform UUID        : A2D4F3CF-5B7A-0B7B-70F9-DA589CB5B3CD
+
+
+  Mac Address          : 00:0A:35:06:9F:8A
+                       : 00:0A:35:06:9F:8B
+                       : 00:0A:35:06:9F:8C
+                       : 00:0A:35:06:9F:8D
+
+
+Mechanical
+  Fans
+    FPGA Fan 1
+      Critical Trigger Temp : 41 C
+      Speed                 : 1108 RPM
+
+Firewall
+  Level 0 : 0x0 (GOOD)
+
+Mailbox
+  Total bytes received   : 576 Bytes
+  Unknown                : 0 
+  Test msg ready         : 0 
+  Test msg fetch         : 0 
+  Lock bitstream         : 0 
+  Unlock bitstream       : 0 
+  Hot reset              : 0 
+  Firewall trip          : 0 
+  Download xclbin kaddr  : 0 
+  Download xclbin        : 0 
+  Reclock                : 0 
+  Peer data read         : 4 
+  User probe             : 1 
+  Mgmt state             : 0 
+  Change shell           : 0 
+  Reprogram shell        : 0 
+  P2P bar addr           : 0 
+
+CMC
+  Status : 0x0 (GOOD)
+  Runtime clock scaling feature :
+    Supported : false
+    Enabled : false
+    Critical threshold (clock shutdown) limits:
+      Power : 0 W
+      Temperature : 0 C
+    Throttling threshold limits:
+      Power : 0 W
+      Temperature : 0 C
+    Power threshold override:
+      Override : false
+      Override limit : 0 W
+    Temperature threshold override:
+      Override : false
+      Override limit : 0 C
+```
+
 Then after rebooting, you can check with a pre-compiled FPGA program
 provided by the target platform that the board is working correctly
 with (the device id below is to adapt to your card):
 
 ```bash
 sudo /opt/xilinx/xrt/bin/xbutil validate --verbose --device 0000:04:00.1
-INFO: Found 1 cards
+Verbose: Enabling Verbosity
+Starting validation for 1 devices
 
-INFO: Validating card[0]: xilinx_u200_xdma_201830_2
-INFO: == Starting AUX power connector check: 
-INFO: == AUX power connector check PASSED
-INFO: == Starting Power warning check: 
-INFO: == Power warning check PASSED
-INFO: == Starting PCIE link check: 
-INFO: == PCIE link check PASSED
-INFO: == Starting SC firmware version check: 
-INFO: == SC firmware version check PASSED
-INFO: == Starting verify kernel test: 
-INFO: == verify kernel test PASSED
-INFO: == Starting IOPS test: 
-Maximum IOPS: 109996 (hello)
-INFO: == IOPS test PASSED
-INFO: == Starting DMA test: 
-Host -> PCIe -> FPGA write bandwidth = 8992.138465 MB/s
-Host <- PCIe <- FPGA read bandwidth = 11756.230429 MB/s
-INFO: == DMA test PASSED
-INFO: == Starting device memory bandwidth test: 
-...........
-Maximum throughput: 48073 MB/s
-INFO: == device memory bandwidth test PASSED
-INFO: == Starting PCIE peer-to-peer test: 
-P2P BAR is not enabled. Skipping validation
-INFO: == PCIE peer-to-peer test SKIPPED
-INFO: == Starting memory-to-memory DMA test: 
-bank0 -> bank1 M2M bandwidth: 11685.8 MB/s	
-bank0 -> bank2 M2M bandwidth: 11736.7 MB/s	
-bank0 -> bank3 M2M bandwidth: 11748 MB/s	
-bank1 -> bank2 M2M bandwidth: 11630.5 MB/s	
-bank1 -> bank3 M2M bandwidth: 11710.9 MB/s	
-bank2 -> bank3 M2M bandwidth: 11700.2 MB/s	
-INFO: == memory-to-memory DMA test PASSED
-INFO: == Starting host memory bandwidth test: 
-Host_mem is not available. Skipping validation
-INFO: == host memory bandwidth test SKIPPED
-INFO: Card[0] validated successfully.
+Validate Device           : [0000:04:00.1]
+    Platform              : xilinx_u200_gen3x16_xdma_base_1
+    SC Version            : 4.6.18
+    Platform ID           : A2D4F3CF-5B7A-0B7B-70F9-DA589CB5B3CD
+-------------------------------------------------------------------------------
+Test 1 [0000:04:00.1]     : Aux connection 
+    Description           : Check if auxiliary power is connected
+    Test Status           : [PASSED]
+-------------------------------------------------------------------------------
+Test 2 [0000:04:00.1]     : PCIE link 
+    Description           : Check if PCIE link is active
+    Test Status           : [PASSED]
+-------------------------------------------------------------------------------
+Test 3 [0000:04:00.1]     : SC version 
+    Description           : Check if SC firmware is up-to-date
+    Test Status           : [PASSED]
+-------------------------------------------------------------------------------
+Test 4 [0000:04:00.1]     : Verify kernel 
+    Description           : Run 'Hello World' kernel test
+    Xclbin                : /opt/xilinx/firmware/u200/gen3x16-xdma/base/test/verify.xclbin
+    Testcase              : /opt/xilinx/xrt/test/validate.exe
+    Test Status           : [PASSED]
+-------------------------------------------------------------------------------
+Test 5 [0000:04:00.1]     : DMA 
+    Description           : Run dma test
+    Details               : Host -> PCIe -> FPGA write bandwidth = 8950.9 MB/s
+                            Host <- PCIe <- FPGA read bandwidth = 11743.5 MB/s
+    Test Status           : [PASSED]
+-------------------------------------------------------------------------------
+Test 6 [0000:04:00.1]     : iops 
+    Description           : Run scheduler performance measure test
+    Xclbin                : /opt/xilinx/firmware/u200/gen3x16-xdma/base/test/verify.xclbin
+    Testcase              : /opt/xilinx/xrt/test/xcl_iops_test.exe
+    Details               : IOPS: 469984 (verify)
+    Test Status           : [PASSED]
+-------------------------------------------------------------------------------
+Test 7 [0000:04:00.1]     : Bandwidth kernel 
+    Description           : Run 'bandwidth kernel' and check the throughput
+    Xclbin                : /opt/xilinx/firmware/u200/gen3x16-xdma/base/test/bandwidth.xclbin
+    Testcase              : /opt/xilinx/xrt/test/kernel_bw.exe
+    Details               : Throughput (Type: DDR) (Bank count: 4) : 67197.8MB/s
+    Test Status           : [PASSED]
+-------------------------------------------------------------------------------
+Test 8 [0000:04:00.1]     : Peer to peer bar 
 
-INFO: All cards validated successfully.
+    Description           : Run P2P test
+    Details               : P2P bar is not enabled
+    Test Status           : [SKIPPED]
+-------------------------------------------------------------------------------
+Test 9 [0000:04:00.1]     : Memory to memory DMA 
+
+    Description           : Run M2M test
+    Details               : M2M is not available
+    Test Status           : [SKIPPED]
+-------------------------------------------------------------------------------
+Test 10 [0000:04:00.1]    : Host memory bandwidth test 
+
+    Description           : Run 'bandwidth kernel' when host memory is enabled
+    Details               : Host memory is not enabled
+    Test Status           : [SKIPPED]
+-------------------------------------------------------------------------------
+Test 11 [0000:04:00.1]    : vcu 
+    Description           : Run decoder test
+    Details               : Verify xclbin not available or shell partition is not
+                            programmed. Skipping validation.
+    Test Status           : [SKIPPED]
+-------------------------------------------------------------------------------
+Validation completed
 ```
 
 
