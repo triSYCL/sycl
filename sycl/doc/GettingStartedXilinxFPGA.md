@@ -277,7 +277,7 @@ the kernels or the simulation details.
 Pick the latest deployment and development target platforms from
 https://www.xilinx.com/products/boards-and-kits/alveo/u200.html#gettingStarted
 for your board and for you OS. It might be an older version. For
-example it is possible to use a `2018.3` target platform with Vitis `2021.1`,
+example it is possible to use a `2018.3` target platform with Vitis `2021.2`,
 and a version for Ubuntu `18.04` on a more recent version of Ubuntu or
 Debian.
 
@@ -804,6 +804,7 @@ Building SYCL can be done with Python scripts:
 SYCL_HOME=~/sycl_workspace
 mkdir $SYCL_HOME
 cd $SYCL_HOME
+# You can also try --branch sycl/unified/next for a bleeding edge experience
 git clone --branch sycl/unified/master git@github.com:triSYCL/sycl.git llvm
 python $SYCL_HOME/llvm/buildbot/configure.py
 python $SYCL_HOME/llvm/buildbot/compile.py
@@ -830,9 +831,9 @@ The typical environment is setup with something like
 # The place where SYCL has been compiled:
 SYCL_HOME=~/sycl_workspace
 # The version of Vitis you want to use
-XILINX_VERSION=2021.1
+XILINX_VERSION=2021.2
 # The target platform for the FPGA board model
-export XILINX_PLATFORM=xilinx_u200_xdma_201830_2
+export XILINX_PLATFORM=xilinx_u200_gen3x16_xdma_1_202110_1
 # Where all the Xilinx tools are
 XILINX_ROOT=/opt/xilinx
 # Where the SYCL compiler binaries are:
