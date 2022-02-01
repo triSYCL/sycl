@@ -105,6 +105,24 @@ Note that if you want to uninstall this later, you can typically use:
 /opt/xilinx/.xinstall/Vitis_2021.2/xsetup --batch Uninstall
 ```
 
+If you have a Vitis framework with a version from before 2022, you
+might be hit by the 2022+ year `int` overflow bug with an error
+message like:
+
+```
+caught Tcl error: ERROR: '2202011410' is an invalid argument. Please specify an integer value.
+```
+
+To avoid this, follow the recipe from
+https://support.xilinx.com/s/article/76960 after downloading the path:
+
+```bash
+# The patching script assume working in the top Xilinx tool directory
+cd /opt/xilinx
+unzip ..../y2k22_patch-1.2.zip
+python y2k22_patch/patch.py
+```
+
 
 ## Boot on a specific kernel
 
