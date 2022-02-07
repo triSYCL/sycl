@@ -65,6 +65,16 @@ def subprocess_error_handler(msg: str):
         return decorated
     return decorator
 
+def _run_in_isolated_proctree(cmd, check):
+    """ Run a command in isolated process namespace
+    This is necessary to get a clean termination of all v++
+    subprocesses in case of program interruption, as v++ subprocess
+    handling is strange.
+    """
+    newcmd = ("unshare",
+    "--map-current-user", "--pid", "--mount-proc", "--kill-child", *cmd)
+    subprocess.run(cmd, check=check)
+
 
 class CompilationDriver:
     def __init__(self, arguments):
@@ -253,7 +263,7 @@ class CompilationDriver:
 
     def _compile_kernel(self, outname, command):
         """Execute a kernel compilation command"""
-        subprocess.run(command, check=True)
+        _run_in_isolated_proctree(command, check=True)
         return outname
 
     @subprocess_error_handler("Vitis linkage stage failed")
@@ -261,7 +271,6 @@ class CompilationDriver:
         """Call v++ to link all kernel in one .xclbin"""
         vpp = self.vitis_bin_dir / "v++"
         link_config = environ.get('SYCL_VXX_LINK_CONFIG')
-        self.xclbin = self.tmpdir / f"{self.outstem}.xclbin"
         command = [
             vpp, "--target", self.vitis_mode,
             "--advanced.param", "compiler.hlsDataflowStrictMode=off",
@@ -300,7 +309,7 @@ class CompilationDriver:
         command.extend(self.extra_link_args)
         command.extend(self.compiled_kernels)
         self._dump_cmd("07-vxxlink.cmd", command)
-        subprocess.run(command, check=True)
+        _run_in_isolated_proctree(command, check=True)
 
     @subprocess_error_handler("Vitis compilation stage failed")
     def _launch_parallel_compilation(self):
@@ -332,6 +341,7 @@ class CompilationDriver:
         tmp_manager = TmpDirManager(tmp_root, outstem, autodelete)
         with tmp_manager as self.tmpdir:
             tmpdir = self.tmpdir
+            self.xclbin = tmpdir / f"{outstem}.xclbin"
             if not autodelete:
                 print(f"Temporary clutter in {tmpdir} will not be deleted")
             self.before_opt_src = self.tmpdir / f"{outstem}-before-opt.bc"
@@ -350,7 +360,10 @@ class CompilationDriver:
             self._asm_ir()
             self._launch_parallel_compilation()
             self._link_kernels()
-            shutil.copy2(self.xclbin, self.outpath)
+            try:
+                shutil.copy2(self.xclbin, self.outpath)
+            except FileNotFoundError:
+                print(f"Output {self.xclbin} was not properly produced by previous commands")
             return self.ok
 
 
