@@ -261,6 +261,7 @@ class CompilationDriver:
         """Call v++ to link all kernel in one .xclbin"""
         vpp = self.vitis_bin_dir / "v++"
         link_config = environ.get('SYCL_VXX_LINK_CONFIG')
+        self.xclbin = self.tmpdir / f"{self.outstem}.xclbin"
         command = [
             vpp, "--target", self.vitis_mode,
             "--advanced.param", "compiler.hlsDataflowStrictMode=off",
@@ -268,7 +269,7 @@ class CompilationDriver:
             "--temp_dir", self.tmpdir / 'vxx_link_tmp',
             "--log_dir", self.tmpdir / 'vxx_link_log',
             "--report_dir", self.tmpdir / 'vxx_link_report',
-            "--save-temps", "-l", "-o", self.outpath
+            "--save-temps", "-l", "-o", self.xclbin
         ]
         if link_config is not None and Path(link_config).is_file():
             command.extend(("--config", Path(link_config).resolve()))
@@ -349,6 +350,7 @@ class CompilationDriver:
             self._asm_ir()
             self._launch_parallel_compilation()
             self._link_kernels()
+            shutil.copy2(self.xclbin, self.outpath)
             return self.ok
 
 
