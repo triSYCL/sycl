@@ -204,7 +204,9 @@ class CompilationDriver:
             "--sycl-vxx", "--sycl-prepare-clearspir", "-S", "-preparesycl",
             "-kernelPropGen",
             "--sycl-kernel-propgen-output", f"{kernel_prop}",
-            "-globaldce", self.linked_kernels,
+            "-globaldce",
+            "-strip-debug",
+            self.linked_kernels,
             "-o", prepared_kernels
         ]
         args = [opt, *opt_options]
