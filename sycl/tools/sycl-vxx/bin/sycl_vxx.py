@@ -26,6 +26,7 @@ import json
 from multiprocessing import Pool
 from os import environ
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -65,15 +66,45 @@ def subprocess_error_handler(msg: str):
         return decorated
     return decorator
 
-def _run_in_isolated_proctree(cmd, check):
+
+def _run_in_isolated_proctree(cmd, *args, **kwargs):
     """ Run a command in isolated process namespace
     This is necessary to get a clean termination of all v++
     subprocesses in case of program interruption, as v++ subprocess
     handling is strange.
     """
     newcmd = ("unshare",
-    "--map-current-user", "--pid", "--mount-proc", "--kill-child", *cmd)
-    subprocess.run(cmd, check=check)
+              "--map-current-user",
+              "--pid",
+              "--mount-proc",
+              "--kill-child",
+              *cmd)
+    return subprocess.run(cmd, *args, **kwargs)
+
+
+class VXXVersion:
+    def __init__(self, vxx_path):
+        cmd = (vxx_path, '-v')
+        proc_res = _run_in_isolated_proctree(cmd, capture_output=True)
+        version_regex = r".*v(?P<major>\d{4})\.(?P<minor>\d).*"
+        match = re.match(version_regex,
+                         proc_res.stdout.decode('utf-8'),
+                         flags=re.DOTALL)
+        self.major = int(match['major'])
+        self.minor = int(match['minor'])
+        print(f"Found vitis version {self}")
+
+    def __str__(self) -> str:
+        return f"{self.major}.{self.minor}"
+
+    def _interface_is_attribute(self):
+        return self.major >= 2022
+
+    def get_kernel_prop_opt(self):
+        ret = []
+        if self._interface_is_attribute:
+            ret.append("-sycl-vxx-maxi-attr-encoding")
+        return ret
 
 
 class CompilationDriver:
@@ -84,7 +115,7 @@ class CompilationDriver:
         self.inputs = arguments.inputs
         self.hls_flow = arguments.hls
         self.vitis_bin_dir = arguments.vitis_bin_dir.resolve()
-        self.vitis_version = self.vitis_bin_dir.parent.name
+        self.vitis_version = VXXVersion(self.vitis_bin_dir / "v++")
         self.outstem = self.outpath.stem
         self.vitis_mode = arguments.target
         self.ok = True
@@ -199,11 +230,16 @@ class CompilationDriver:
             self.tmpdir /
             f"{self.outstem}-kernels_properties.json"
         )
+
+        kernel_prop_opt = ["-kernelPropGen",
+                           "--sycl-kernel-propgen-output", f"{kernel_prop}"]
+
+        kernel_prop_opt.extend(self.vitis_version.get_kernel_prop_opt())
+
         opt_options = [
             "--lower-delayed-sycl-metadata", "-lower-sycl-metadata",
             "--sycl-vxx", "--sycl-prepare-clearspir", "-S", "-preparesycl",
-            "-kernelPropGen",
-            "--sycl-kernel-propgen-output", f"{kernel_prop}",
+            *kernel_prop_opt,
             "-globaldce",
             "-strip-debug",
             self.linked_kernels,
@@ -332,7 +368,7 @@ class CompilationDriver:
                 raise KeyboardInterrupt
         else:
             for command in compile_commands:
-                subprocess.run(command, check_output=True)
+                self._compile_kernel(command)
 
     def drive_compilation(self):
         if self.hls_flow and (self.vitis_mode == "sw_emu"):
@@ -365,7 +401,8 @@ class CompilationDriver:
             try:
                 shutil.copy2(self.xclbin, self.outpath)
             except FileNotFoundError:
-                print(f"Output {self.xclbin} was not properly produced by previous commands")
+                print(
+                    f"Output {self.xclbin} was not properly produced by previous commands")
             return self.ok
 
 
