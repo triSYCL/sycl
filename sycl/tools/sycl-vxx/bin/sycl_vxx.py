@@ -132,7 +132,7 @@ class VXXBinary:
         self.path = self.path.resolve()
         self.version = VXXVersion(self.path)
         if environ.get("XILINX_CLANG_39_BUILD_PATH") is not None:
-            self.clang_bin_ = Path(environ["XILINX_CLANG_39_BUILD_PATH"])
+            self.clang_bin_ = Path(environ["XILINX_CLANG_39_BUILD_PATH"]) / "bin"
         else:
             self.clang_bin_ = (
                 vitis_exec.parents[2] /
