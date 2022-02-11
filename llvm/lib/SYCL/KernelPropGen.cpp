@@ -44,6 +44,11 @@ using namespace llvm;
 
 static cl::opt<std::string> KernelPropGenOutput("sycl-kernel-propgen-output",
                                                 cl::ReallyHidden);
+// Switch the representation of m_axi bundle encooding in IR.
+// Up to 2021.2, a llvm.sideffect call was used.
+// Since 2022.1, a special string parameter of the argument is used.
+// When this option is present, the new encoding is used, while the old one
+// is used if it is not set.
 static cl::opt<bool> MAXIAsArgumentParameter("sycl-vxx-maxi-attr-encoding", cl::ReallyHidden);
 
 // Put the code in an anonymous namespace to avoid polluting the global
@@ -102,7 +107,7 @@ struct KernelPropGen : public ModulePass {
       Arg.addAttr(
           llvm::Attribute::get(C, "fpga.address.interface", ParamValue));
     } else {
-      // Up to 2021.2 m_axi bundles where encoded with a call to sideeffect
+      // Up to 2021.2 m_axi bundles were encoded with a call to sideeffect
       auto *BundleIDConstant =
           ConstantDataArray::getString(C, Bundle->BundleName, false);
       auto *MinusOne = ConstantInt::getSigned(IntegerType::get(C, 64), -1);

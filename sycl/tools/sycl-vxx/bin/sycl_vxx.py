@@ -68,7 +68,7 @@ def subprocess_error_handler(msg: str):
 
 
 def _run_in_isolated_proctree(cmd, *args, **kwargs):
-    """ Run a command in isolated process namespace
+    """ Run a command in isolated process namespace.
     This is necessary to get a clean termination of all v++
     subprocesses in case of program interruption, as v++ subprocess
     handling is strange.
@@ -92,7 +92,7 @@ class VXXVersion:
                          flags=re.DOTALL)
         self.major = int(match['major'])
         self.minor = int(match['minor'])
-        print(f"Found vitis version {self}")
+        print(f"Found Vitis version {self}")
 
     def __str__(self) -> str:
         return f"{self.major}.{self.minor}"
