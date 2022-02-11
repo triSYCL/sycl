@@ -646,6 +646,18 @@ add_entrypoint_object(
 )
 
 add_entrypoint_object(
+  logf
+  SRCS
+    logf.cpp
+  HDRS
+    ../logf.h
+  DEPENDS
+    libc.src.__support.FPUtil.fputil
+  COMPILE_OPTIONS
+    -O3
+)
+
+add_entrypoint_object(
   logb
   SRCS
     logb.cpp
@@ -991,4 +1003,16 @@ add_entrypoint_object(
     libc.src.__support.FPUtil.fputil
   COMPILE_OPTIONS
     -O2
+)
+
+add_object_library(
+  dp_trig
+  SRCS
+    dp_trig.cpp
+  HDRS
+    dp_trig.h
+  DEPENDS
+    libc.src.__support.FPUtil.fputil
+  COMPILE_OPTIONS
+   -O3
 )

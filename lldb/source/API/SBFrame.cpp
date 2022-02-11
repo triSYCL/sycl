@@ -119,15 +119,13 @@ SBSymbolContext SBFrame::GetSymbolContext(uint32_t resolve_scope) const {
   std::unique_lock<std::recursive_mutex> lock;
   ExecutionContext exe_ctx(m_opaque_sp.get(), lock);
   SymbolContextItem scope = static_cast<SymbolContextItem>(resolve_scope);
-  StackFrame *frame = nullptr;
   Target *target = exe_ctx.GetTargetPtr();
   Process *process = exe_ctx.GetProcessPtr();
   if (target && process) {
     Process::StopLocker stop_locker;
     if (stop_locker.TryLock(&process->GetRunLock())) {
-      frame = exe_ctx.GetFramePtr();
-      if (frame)
-        sb_sym_ctx.SetSymbolContext(&frame->GetSymbolContext(scope));
+      if (StackFrame *frame = exe_ctx.GetFramePtr())
+        sb_sym_ctx = frame->GetSymbolContext(scope);
     }
   }
 
@@ -633,18 +631,10 @@ SBValue SBFrame::FindValue(const char *name, ValueType value_type,
         {
           RegisterContextSP reg_ctx(frame->GetRegisterContext());
           if (reg_ctx) {
-            const uint32_t num_regs = reg_ctx->GetRegisterCount();
-            for (uint32_t reg_idx = 0; reg_idx < num_regs; ++reg_idx) {
-              const RegisterInfo *reg_info =
-                  reg_ctx->GetRegisterInfoAtIndex(reg_idx);
-              if (reg_info &&
-                  ((reg_info->name && strcasecmp(reg_info->name, name) == 0) ||
-                   (reg_info->alt_name &&
-                    strcasecmp(reg_info->alt_name, name) == 0))) {
-                value_sp = ValueObjectRegister::Create(frame, reg_ctx, reg_idx);
-                sb_value.SetSP(value_sp);
-                break;
-              }
+            if (const RegisterInfo *reg_info =
+                    reg_ctx->GetRegisterInfoByName(name)) {
+              value_sp = ValueObjectRegister::Create(frame, reg_ctx, reg_info);
+              sb_value.SetSP(value_sp);
             }
           }
         } break;
@@ -953,18 +943,10 @@ SBValue SBFrame::FindRegister(const char *name) {
       if (frame) {
         RegisterContextSP reg_ctx(frame->GetRegisterContext());
         if (reg_ctx) {
-          const uint32_t num_regs = reg_ctx->GetRegisterCount();
-          for (uint32_t reg_idx = 0; reg_idx < num_regs; ++reg_idx) {
-            const RegisterInfo *reg_info =
-                reg_ctx->GetRegisterInfoAtIndex(reg_idx);
-            if (reg_info &&
-                ((reg_info->name && strcasecmp(reg_info->name, name) == 0) ||
-                 (reg_info->alt_name &&
-                  strcasecmp(reg_info->alt_name, name) == 0))) {
-              value_sp = ValueObjectRegister::Create(frame, reg_ctx, reg_idx);
-              result.SetSP(value_sp);
-              break;
-            }
+          if (const RegisterInfo *reg_info =
+                  reg_ctx->GetRegisterInfoByName(name)) {
+            value_sp = ValueObjectRegister::Create(frame, reg_ctx, reg_info);
+            result.SetSP(value_sp);
           }
         }
       }

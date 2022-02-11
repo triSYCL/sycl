@@ -23,6 +23,7 @@ class MCCodeEmitter;
 class MCStreamer;
 class X86Subtarget;
 class TargetMachine;
+struct ASanAccessInfo;
 
 class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
   const X86Subtarget *Subtarget = nullptr;
@@ -30,7 +31,7 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
   FaultMaps FM;
   std::unique_ptr<MCCodeEmitter> CodeEmitter;
   bool EmitFPOData = false;
-  bool NeedsRetpoline = false;
+  bool ShouldEmitWeakSwiftAsyncExtendedFramePointerFlags = false;
 
   // This utility class tracks the length of a stackmap instruction's 'shadow'.
   // It is used by the X86AsmPrinter to ensure that the stackmap shadow
@@ -98,6 +99,9 @@ class LLVM_LIBRARY_VISIBILITY X86AsmPrinter : public AsmPrinter {
 
   void LowerFENTRY_CALL(const MachineInstr &MI, X86MCInstLower &MCIL);
 
+  // Address sanitizer specific lowering for X86.
+  void LowerASAN_CHECK_MEMACCESS(const MachineInstr &MI);
+
   // Choose between emitting .seh_ directives and .cv_fpo_ directives.
   void EmitSEHInstruction(const MachineInstr *MI);
 
@@ -148,6 +152,10 @@ public:
   bool runOnMachineFunction(MachineFunction &MF) override;
   void emitFunctionBodyStart() override;
   void emitFunctionBodyEnd() override;
+
+  bool shouldEmitWeakSwiftAsyncExtendedFramePointerFlags() const override {
+    return ShouldEmitWeakSwiftAsyncExtendedFramePointerFlags;
+  }
 };
 
 } // end namespace llvm

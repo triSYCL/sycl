@@ -743,9 +743,7 @@ getRequiredQualification(ASTContext &Context, const DeclContext *CurContext,
 static bool shouldIgnoreDueToReservedName(const NamedDecl *ND, Sema &SemaRef) {
   ReservedIdentifierStatus Status = ND->isReserved(SemaRef.getLangOpts());
   // Ignore reserved names for compiler provided decls.
-  if ((Status != ReservedIdentifierStatus::NotReserved) &&
-      (Status != ReservedIdentifierStatus::StartsWithUnderscoreAtGlobalScope) &&
-      ND->getLocation().isInvalid())
+  if (isReservedInAllContexts(Status) && ND->getLocation().isInvalid())
     return true;
 
   // For system headers ignore only double-underscore names.
@@ -2823,7 +2821,7 @@ FormatFunctionParameter(const PrintingPolicy &Policy, const ParmVarDecl *Param,
                         bool SuppressName = false, bool SuppressBlock = false,
                         Optional<ArrayRef<QualType>> ObjCSubsts = None) {
   // Params are unavailable in FunctionTypeLoc if the FunctionType is invalid.
-  // It would be better to pass in the param Type, which is usually avaliable.
+  // It would be better to pass in the param Type, which is usually available.
   // But this case is rare, so just pretend we fell back to int as elsewhere.
   if (!Param)
     return "int";
@@ -4389,7 +4387,8 @@ void Sema::CodeCompleteAttribute(AttributeCommonInfo::Syntax Syntax,
   auto AddCompletions = [&](const ParsedAttrInfo &A) {
     if (A.IsTargetSpecific && !A.existsInTarget(Context.getTargetInfo()))
       return;
-    // FIXME: filter by langopts (diagLangOpts method requires a ParsedAttr)
+    if (!A.acceptsLangOpts(getLangOpts()))
+      return;
     for (const auto &S : A.Spellings) {
       if (S.Syntax != Syntax)
         continue;
@@ -4422,33 +4421,59 @@ void Sema::CodeCompleteAttribute(AttributeCommonInfo::Syntax Syntax,
         Scope = "";
       }
 
+      auto Add = [&](llvm::StringRef Scope, llvm::StringRef Name,
+                     bool Underscores) {
+        CodeCompletionBuilder Builder(Results.getAllocator(),
+                                      Results.getCodeCompletionTUInfo());
+        llvm::SmallString<32> Text;
+        if (!Scope.empty()) {
+          Text.append(Scope);
+          Text.append("::");
+        }
+        if (Underscores)
+          Text.append("__");
+        Text.append(Name);
+        if (Underscores)
+          Text.append("__");
+        Builder.AddTypedTextChunk(Results.getAllocator().CopyString(Text));
+
+        if (!A.ArgNames.empty()) {
+          Builder.AddChunk(CodeCompletionString::CK_LeftParen, "(");
+          bool First = true;
+          for (const char *Arg : A.ArgNames) {
+            if (!First)
+              Builder.AddChunk(CodeCompletionString::CK_Comma, ", ");
+            First = false;
+            Builder.AddPlaceholderChunk(Arg);
+          }
+          Builder.AddChunk(CodeCompletionString::CK_RightParen, ")");
+        }
+
+        Results.AddResult(Builder.TakeString());
+      };
+
       // Generate the non-underscore-guarded result.
       // Note this is (a suffix of) the NormalizedFullName, no need to copy.
       // If an underscore-guarded scope was specified, only the
       // underscore-guarded attribute name is relevant.
       if (!InScopeUnderscore)
-        Results.AddResult(Scope.empty() ? Name.data() : S.NormalizedFullName);
+        Add(Scope, Name, /*Underscores=*/false);
 
       // Generate the underscore-guarded version, for syntaxes that support it.
       // We skip this if the scope was already spelled and not guarded, or
       // we must spell it and can't guard it.
       if (!(InScope && !InScopeUnderscore) && SyntaxSupportsGuards) {
         llvm::SmallString<32> Guarded;
-        if (!Scope.empty()) {
+        if (Scope.empty()) {
+          Add(Scope, Name, /*Underscores=*/true);
+        } else {
           const char *GuardedScope = underscoreAttrScope(Scope);
           if (!GuardedScope)
             continue;
-          Guarded.append(GuardedScope);
-          Guarded.append("::");
+          Add(GuardedScope, Name, /*Underscores=*/true);
         }
-        Guarded.append("__");
-        Guarded.append(Name);
-        Guarded.append("__");
-        Results.AddResult(
-            CodeCompletionResult(Results.getAllocator().CopyString(Guarded)));
       }
 
-      // FIXME: include the list of arg names (not currently exposed).
       // It may be nice to include the Kind so we can look up the docs later.
     }
   };
@@ -5793,7 +5818,8 @@ static void mergeCandidatesWithResults(
     if (Candidate.Function) {
       if (Candidate.Function->isDeleted())
         continue;
-      if (!Candidate.Function->isVariadic() &&
+      if (shouldEnforceArgLimit(/*PartialOverloading=*/true,
+                                Candidate.Function) &&
           Candidate.Function->getNumParams() <= ArgSize &&
           // Having zero args is annoying, normally we don't surface a function
           // with 2 params, if you already have 2 params, because you are
@@ -9588,6 +9614,10 @@ void Sema::CodeCompleteIncludedFile(llvm::StringRef Dir, bool Angled) {
       }
     }
 
+    const StringRef &Dirname = llvm::sys::path::filename(Dir);
+    const bool isQt = Dirname.startswith("Qt") || Dirname == "ActiveQt";
+    const bool ExtensionlessHeaders =
+        IsSystem || isQt || Dir.endswith(".framework/Headers");
     std::error_code EC;
     unsigned Count = 0;
     for (auto It = FS.dir_begin(Dir, EC);
@@ -9614,18 +9644,19 @@ void Sema::CodeCompleteIncludedFile(llvm::StringRef Dir, bool Angled) {
 
         AddCompletion(Filename, /*IsDirectory=*/true);
         break;
-      case llvm::sys::fs::file_type::regular_file:
-        // Only files that really look like headers. (Except in system dirs).
-        if (!IsSystem) {
-          // Header extensions from Types.def, which we can't depend on here.
-          if (!(Filename.endswith_insensitive(".h") ||
-                Filename.endswith_insensitive(".hh") ||
-                Filename.endswith_insensitive(".hpp") ||
-                Filename.endswith_insensitive(".inc")))
-            break;
-        }
+      case llvm::sys::fs::file_type::regular_file: {
+        // Only files that really look like headers. (Except in special dirs).
+        // Header extensions from Types.def, which we can't depend on here.
+        const bool IsHeader = Filename.endswith_insensitive(".h") ||
+                              Filename.endswith_insensitive(".hh") ||
+                              Filename.endswith_insensitive(".hpp") ||
+                              Filename.endswith_insensitive(".inc") ||
+                              (ExtensionlessHeaders && !Filename.contains('.'));
+        if (!IsHeader)
+          break;
         AddCompletion(Filename, /*IsDirectory=*/false);
         break;
+      }
       default:
         break;
       }

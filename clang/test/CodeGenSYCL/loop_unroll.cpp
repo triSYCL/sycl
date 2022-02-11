@@ -1,7 +1,4 @@
-// RUN: %clang_cc1 -triple spir64-unknown-unknown-sycldevice -disable-llvm-passes -fsycl-is-device -emit-llvm %s -o - > %t
-// RUN: cat %t | FileCheck %s --check-prefix ENABLE
-// RUN: cat %t | FileCheck %s --check-prefix COUNT
-// RUN: cat %t | FileCheck %s --check-prefix DISABLE
+// RUN: %clang_cc1 -triple spir64-unknown-unknown -disable-llvm-passes -fsycl-is-device -emit-llvm %s -o - | FileCheck %s
 
 void enable() {
   // CHECK-LABEL: define dso_local spir_func void @_Z6enablev()

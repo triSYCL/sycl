@@ -22,7 +22,6 @@
 #include "mlir/Transforms/Passes.h"
 #include "llvm/ADT/SCCIterator.h"
 #include "llvm/Support/Debug.h"
-#include "llvm/Support/Parallel.h"
 
 #define DEBUG_TYPE "inlining"
 
@@ -124,7 +123,7 @@ private:
   /// A symbol table to use when resolving call lookups.
   SymbolTableCollection &symbolTable;
 };
-} // end anonymous namespace
+} // namespace
 
 CGUseList::CGUseList(Operation *op, CallGraph &cg,
                      SymbolTableCollection &symbolTable)
@@ -280,7 +279,7 @@ private:
   std::vector<CallGraphNode *> nodes;
   llvm::scc_iterator<const CallGraph *> &parentIterator;
 };
-} // end anonymous namespace
+} // namespace
 
 /// Run a given transformation over the SCCs of the callgraph in a bottom up
 /// traversal.
@@ -312,7 +311,7 @@ struct ResolvedCall {
   CallOpInterface call;
   CallGraphNode *sourceNode, *targetNode;
 };
-} // end anonymous namespace
+} // namespace
 
 /// Collect all of the callable operations within the given range of blocks. If
 /// `traverseNestedCGNodes` is true, this will also collect call operations
@@ -560,7 +559,7 @@ private:
   /// during optimization.
   SmallVector<llvm::StringMap<OpPassManager>, 8> opPipelines;
 };
-} // end anonymous namespace
+} // namespace
 
 InlinerPass::InlinerPass() : InlinerPass(defaultInlinerOptPipeline) {}
 InlinerPass::InlinerPass(std::function<void(OpPassManager &)> defaultPipeline)
@@ -664,7 +663,7 @@ LogicalResult InlinerPass::optimizeSCC(CallGraph &cg, CGUseList &useList,
 
   // Optimize each of the nodes within the SCC in parallel.
   if (failed(optimizeSCCAsync(nodesToVisit, context)))
-      return failure();
+    return failure();
 
   // Recompute the uses held by each of the nodes.
   for (CallGraphNode *node : nodesToVisit)
@@ -675,11 +674,12 @@ LogicalResult InlinerPass::optimizeSCC(CallGraph &cg, CGUseList &useList,
 LogicalResult
 InlinerPass::optimizeSCCAsync(MutableArrayRef<CallGraphNode *> nodesToVisit,
                               MLIRContext *ctx) {
-  // Ensure that there are enough pipeline maps for the optimizer to run in
-  // parallel. Note: The number of pass managers here needs to remain constant
+  // We must maintain a fixed pool of pass managers which is at least as large
+  // as the maximum parallelism of the failableParallelForEach below.
+  // Note: The number of pass managers here needs to remain constant
   // to prevent issues with pass instrumentations that rely on having the same
   // pass manager for the main thread.
-  size_t numThreads = llvm::hardware_concurrency().compute_thread_count();
+  size_t numThreads = ctx->getNumThreads();
   if (opPipelines.size() < numThreads) {
     // Reserve before resizing so that we can use a reference to the first
     // element.
@@ -701,6 +701,8 @@ InlinerPass::optimizeSCCAsync(MutableArrayRef<CallGraphNode *> nodesToVisit,
       bool expectedInactive = false;
       return isActive.compare_exchange_strong(expectedInactive, true);
     });
+    assert(it != activePMs.end() &&
+           "could not find inactive pass manager for thread");
     unsigned pmIndex = it - activePMs.begin();
 
     // Optimize this callable node.
@@ -774,9 +776,9 @@ mlir::createInlinerPass(llvm::StringMap<OpPassManager> opPipelines) {
   return std::make_unique<InlinerPass>(defaultInlinerOptPipeline,
                                        std::move(opPipelines));
 }
-std::unique_ptr<Pass>
-createInlinerPass(llvm::StringMap<OpPassManager> opPipelines,
-                  std::function<void(OpPassManager &)> defaultPipelineBuilder) {
+std::unique_ptr<Pass> mlir::createInlinerPass(
+    llvm::StringMap<OpPassManager> opPipelines,
+    std::function<void(OpPassManager &)> defaultPipelineBuilder) {
   return std::make_unique<InlinerPass>(std::move(defaultPipelineBuilder),
                                        std::move(opPipelines));
 }

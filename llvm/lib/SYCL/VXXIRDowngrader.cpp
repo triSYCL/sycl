@@ -115,7 +115,7 @@ struct VXXIRDowngrader : public ModulePass {
       // These appear on Call/Invoke Instructions as well
       for (auto &I : instructions(F))
         if (CallBase *CB = dyn_cast<CallBase>(&I)) {
-          for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
+          for (unsigned int i = 0; i < CB->arg_size(); ++i) {
             if (CB->paramHasAttr(i, llvm::Attribute::ByVal)) {
               CB->removeParamAttr(i, llvm::Attribute::ByVal);
               CB->addParamAttr(i,
@@ -183,15 +183,15 @@ struct VXXIRDowngrader : public ModulePass {
   void removeAttributes(Module &M, ArrayRef<Attribute::AttrKind> Kinds) {
     for (auto &F : M.functions())
       for (auto Kind : Kinds) {
-        F.removeAttribute(AttributeList::FunctionIndex, Kind);
-        F.removeAttribute(AttributeList::ReturnIndex, Kind);
+        F.removeFnAttr(Kind);
+        F.removeRetAttr(Kind);
         for (auto &P : F.args())
           P.removeAttr(Kind);
         for (User *U : F.users())
           if (CallBase *CB = dyn_cast<CallBase>(U)) {
-            CB->removeAttribute(AttributeList::FunctionIndex, Kind);
-            CB->removeAttribute(AttributeList::ReturnIndex, Kind);
-            for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
+            CB->removeFnAttr(Kind);
+            CB->removeRetAttr(Kind);
+            for (unsigned int i = 0; i < CB->arg_size(); ++i) {
               CB->removeParamAttr(i, Kind);
             }
           }
@@ -239,7 +239,7 @@ struct VXXIRDowngrader : public ModulePass {
       for (auto &I : instructions(F))
         if (auto *MI = dyn_cast<AnyMemIntrinsic>(&I))
           for (Use &U : MI->args())
-            MI->removeAttribute(U.getOperandNo(),
+            MI->removeParamAttr(U.getOperandNo(),
                                 Attribute::AttrKind::Alignment);
   }
 

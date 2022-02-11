@@ -278,18 +278,21 @@ else:
     lit_config.warning("Accelerator device not found")
 
 if xocc != "off":
-    if vxx_target == "hw":
-        # xrt doesn't deal well with multiple executables using it concurrently (at the time of writing).
-        # The details are at https://xilinx.github.io/XRT/master/html/multiprocess.html
-        # so we wrap every use of XRT inside an file lock.
-        # We also wrap invocation of executable in an setsid to prevent
-        # a single program failure from ending all the tests.
-        xrt_lock = f"{tempfile.gettempdir()}/xrt-{getpass.getuser()}.lock"
-        acc_run_substitute+= "setsid flock --exclusive " + xrt_lock + " "
-        if os.path.exists(xrt_lock):
-            os.remove(xrt_lock)
+    # xrt doesn't deal well with multiple executables using it concurrently (at the time of writing).
+    # The details are at https://xilinx.github.io/XRT/master/html/multiprocess.html
+    # so we wrap every use of XRT inside an file lock.
+    # We also wrap invocation of executable in an setsid to prevent
+    # a single program failure from ending all the tests.
+    xrt_lock = f"{tempfile.gettempdir()}/xrt-{getpass.getuser()}.lock"
+    acc_run_substitute+= "setsid flock --exclusive " + xrt_lock + " "
+    if os.path.exists(xrt_lock):
+        os.remove(xrt_lock)
     acc_run_substitute="env --unset=XCL_EMULATION_MODE " + acc_run_substitute
-    acc_run_substitute+= "timeout -s KILL 3000  unshare -r --mount-proc -p --kill-child"
+    # hw_emu is very slow so it has a higher timeout.
+    if not vxx_target.endswith("hw_emu"):
+        acc_run_substitute+= "timeout 3000 env "
+    else:
+        acc_run_substitute+= "timeout 3000 env "
 
 config.substitutions.append( ('%ACC_RUN_PLACEHOLDER',  acc_run_substitute) )
 config.substitutions.append( ('%ACC_CHECK_PLACEHOLDER',  acc_check_substitute) )
@@ -299,11 +302,11 @@ if not cuda and not level_zero and found_at_least_one_device:
     config.available_features.add('opencl')
 
 if cuda:
-    config.substitutions.append( ('%sycl_triple',  "nvptx64-nvidia-cuda-sycldevice" ) )
+    config.substitutions.append( ('%sycl_triple',  "nvptx64-nvidia-cuda" ) )
 elif xocc != "off":
-    config.substitutions.append( ('%sycl_triple',  f"fpga64_{vxx_target}-xilinx-unknown-sycldevice" ) )
+    config.substitutions.append( ('%sycl_triple',  f"fpga64_{vxx_target}-xilinx" ) )
 else:
-    config.substitutions.append( ('%sycl_triple',  "spir64-unknown-unknown-sycldevice" ) )
+    config.substitutions.append( ('%sycl_triple',  "spir64" ) )
 
 if "opencl-aot" in config.llvm_enable_projects:
     lit_config.note("Using opencl-aot version which is built as part of the project")

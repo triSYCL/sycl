@@ -23,9 +23,6 @@
 #pragma GCC system_header
 #endif
 
-_LIBCPP_PUSH_MACROS
-#include <__undef_macros>
-
 _LIBCPP_BEGIN_NAMESPACE_STD
 
 template <class _InputIter>
@@ -41,6 +38,7 @@ inline _LIBCPP_INLINE_VISIBILITY _LIBCPP_CONSTEXPR_AFTER_CXX14
 #if !defined(_LIBCPP_HAS_NO_RANGES)
 
 namespace ranges {
+// TODO(varconst): rename `__prev_fn` to `__fn`.
 struct __prev_fn final : private __function_like {
   _LIBCPP_HIDE_FROM_ABI
   constexpr explicit __prev_fn(__tag __x) noexcept : __function_like(__x) {}
@@ -73,7 +71,5 @@ inline constexpr auto prev = __prev_fn(__function_like::__tag());
 #endif // !defined(_LIBCPP_HAS_NO_RANGES)
 
 _LIBCPP_END_NAMESPACE_STD
-
-_LIBCPP_POP_MACROS
 
 #endif // _LIBCPP___ITERATOR_PREV_H

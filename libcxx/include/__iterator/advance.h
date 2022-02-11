@@ -26,9 +26,6 @@
 #pragma GCC system_header
 #endif
 
-_LIBCPP_PUSH_MACROS
-#include <__undef_macros>
-
 _LIBCPP_BEGIN_NAMESPACE_STD
 
 template <class _InputIter>
@@ -58,7 +55,7 @@ void __advance(_RandIter& __i, typename iterator_traits<_RandIter>::difference_t
 template <
     class _InputIter, class _Distance,
     class _IntegralDistance = decltype(_VSTD::__convert_to_integral(declval<_Distance>())),
-    class = _EnableIf<is_integral<_IntegralDistance>::value> >
+    class = __enable_if_t<is_integral<_IntegralDistance>::value> >
 _LIBCPP_HIDE_FROM_ABI _LIBCPP_CONSTEXPR_AFTER_CXX14
 void advance(_InputIter& __i, _Distance __orig_n) {
   typedef typename iterator_traits<_InputIter>::difference_type _Difference;
@@ -72,6 +69,7 @@ void advance(_InputIter& __i, _Distance __orig_n) {
 
 namespace ranges {
 // [range.iter.op.advance]
+// TODO(varconst): rename `__advance_fn` to `__fn`.
 struct __advance_fn final : private __function_like {
 private:
   template <class _Tp>
@@ -194,7 +192,5 @@ inline constexpr auto advance = __advance_fn(__function_like::__tag());
 #endif // !defined(_LIBCPP_HAS_NO_RANGES)
 
 _LIBCPP_END_NAMESPACE_STD
-
-_LIBCPP_POP_MACROS
 
 #endif // _LIBCPP___ITERATOR_ADVANCE_H

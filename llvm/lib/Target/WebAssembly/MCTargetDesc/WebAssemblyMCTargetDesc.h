@@ -78,8 +78,6 @@ enum OperandType {
   OPERAND_BRLIST,
   /// 32-bit unsigned table number.
   OPERAND_TABLE,
-  /// heap type immediate for ref.null.
-  OPERAND_HEAPTYPE,
 };
 } // end namespace WebAssembly
 
@@ -94,6 +92,9 @@ enum TOF {
   // runtime.  This adds a level of indirection similar to the GOT on native
   // platforms.
   MO_GOT,
+
+  // Same as MO_GOT but the address stored in the global is a TLS address.
+  MO_GOT_TLS,
 
   // On a symbol operand this indicates that the immediate is the symbol
   // address relative the __memory_base wasm global.

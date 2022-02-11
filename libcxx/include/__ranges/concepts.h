@@ -1,5 +1,5 @@
 // -*- C++ -*-
-//===--------------------- __ranges/concepts.h ----------------------------===//
+//===----------------------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -16,8 +16,8 @@
 #include <__iterator/iterator_traits.h>
 #include <__iterator/readable_traits.h>
 #include <__ranges/access.h>
-#include <__ranges/enable_borrowed_range.h>
 #include <__ranges/data.h>
+#include <__ranges/enable_borrowed_range.h>
 #include <__ranges/enable_view.h>
 #include <__ranges/size.h>
 #include <concepts>
@@ -27,12 +27,7 @@
 #pragma GCC system_header
 #endif
 
-_LIBCPP_PUSH_MACROS
-#include <__undef_macros>
-
 _LIBCPP_BEGIN_NAMESPACE_STD
-
-// clang-format off
 
 #if !defined(_LIBCPP_HAS_NO_RANGES)
 
@@ -129,10 +124,6 @@ namespace ranges {
 
 #endif // !defined(_LIBCPP_HAS_NO_RANGES)
 
-// clang-format on
-
 _LIBCPP_END_NAMESPACE_STD
-
-_LIBCPP_POP_MACROS
 
 #endif // _LIBCPP___RANGES_CONCEPTS_H

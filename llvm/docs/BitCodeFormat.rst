@@ -840,7 +840,7 @@ function. The operand fields are:
   plus 1.
 
 * *preemptionspecifier*: If present, an encoding of the :ref:`runtime preemption specifier<bcpreemptionspecifier>`  of this function.
- 
+
 MODULE_CODE_ALIAS Record
 ^^^^^^^^^^^^^^^^^^^^^^^^
 
@@ -1075,6 +1075,8 @@ The integer codes are mapped to well-known attributes as follows.
 * code 74: ``vscale_range(<Min>[, <Max>])``
 * code 75: ``swiftasync``
 * code 76: ``nosanitize_coverage``
+* code 77: ``elementtype``
+* code 78: ``disable_sanitizer_instrumentation``
 
 .. note::
   The ``allocsize`` attribute has a special encoding for its arguments. Its two

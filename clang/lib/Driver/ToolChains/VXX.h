@@ -19,7 +19,6 @@ namespace driver {
 /// Based loosely on CudaInstallationDetector
 class VXXInstallationDetector {
 private:
-  const Driver &D;
   bool IsValid = false;
   std::string BinPath;
   std::string BinaryPath;
@@ -127,7 +126,7 @@ public:
   bool useIntegratedAs() const override { return true; }
 
   bool isPICDefault() const override { return false; }
-  bool isPIEDefault() const override { return false; }
+  bool isPIEDefault(const llvm::opt::ArgList &Args) const override { return false; }
   bool isPICDefaultForced() const override { return false; }
 
   void addClangWarningOptions(llvm::opt::ArgStringList &CC1Args) const override;

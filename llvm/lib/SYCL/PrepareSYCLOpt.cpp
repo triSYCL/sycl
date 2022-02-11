@@ -195,7 +195,7 @@ struct PrepareSYCLOpt : public ModulePass {
       visit(*F);
 
       // Now copy fpga attributes to parent
-      auto FnAttr = F->getAttributes().getFnAttributes();
+      auto FnAttr = F->getAttributes().getFnAttrs();
       for (auto &Attr : FnAttr) {
         if (Attr.isStringAttribute()) {
           StringRef AttrKind = Attr.getKindAsString();

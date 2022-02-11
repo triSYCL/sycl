@@ -11,7 +11,7 @@
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 
 using namespace mlir;
-using namespace mlir::test;
+using namespace test;
 
 //===----------------------------------------------------------------------===//
 // Trait Folder.
@@ -39,7 +39,7 @@ struct TestTraitFolder : public PassWrapper<TestTraitFolder, FunctionPass> {
                                        RewritePatternSet(&getContext()));
   }
 };
-} // end anonymous namespace
+} // namespace
 
 namespace mlir {
 void registerTestTraitsPass() { PassRegistration<TestTraitFolder>(); }

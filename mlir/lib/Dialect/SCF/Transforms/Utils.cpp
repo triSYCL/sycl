@@ -35,8 +35,8 @@ scf::ForOp mlir::cloneWithNewYields(OpBuilder &b, scf::ForOp loop,
   auto operands = llvm::to_vector<4>(loop.getIterOperands());
   operands.append(newIterOperands.begin(), newIterOperands.end());
   scf::ForOp newLoop =
-      b.create<scf::ForOp>(loop.getLoc(), loop.lowerBound(), loop.upperBound(),
-                           loop.step(), operands);
+      b.create<scf::ForOp>(loop.getLoc(), loop.getLowerBound(),
+                           loop.getUpperBound(), loop.getStep(), operands);
 
   auto &loopBody = *loop.getBody();
   auto &newLoopBody = *newLoop.getBody();
@@ -118,10 +118,10 @@ void mlir::outlineIfOp(OpBuilder &b, scf::IfOp ifOp, FuncOp *thenFn,
     return outlinedFunc;
   };
 
-  if (thenFn && !ifOp.thenRegion().empty())
-    *thenFn = outline(ifOp.thenRegion(), thenFnName);
-  if (elseFn && !ifOp.elseRegion().empty())
-    *elseFn = outline(ifOp.elseRegion(), elseFnName);
+  if (thenFn && !ifOp.getThenRegion().empty())
+    *thenFn = outline(ifOp.getThenRegion(), thenFnName);
+  if (elseFn && !ifOp.getElseRegion().empty())
+    *elseFn = outline(ifOp.getElseRegion(), elseFnName);
 }
 
 bool mlir::getInnermostParallelLoops(Operation *rootOp,
@@ -144,44 +144,4 @@ bool mlir::getInnermostParallelLoops(Operation *rootOp,
     }
   }
   return rootEnclosesPloops;
-}
-
-/// Given the `lbVal`, `ubVal` and `stepVal` of a loop, append `lbVal` and
-/// `ubVal` to `dims` and `stepVal` to `symbols`.
-/// Create new AffineDimExpr (`%lb` and `%ub`) and AffineSymbolExpr (`%step`)
-/// with positions matching the newly appended values. Then create a min
-/// expression (i.e. `%lb`) and a max expression
-/// (i.e. `%lb + %step * floordiv(%ub -1 - %lb, %step)`.
-static std::pair<AffineExpr, AffineExpr>
-getMinMaxLoopIndVar(Value lbVal, Value ubVal, Value stepVal,
-                    SmallVectorImpl<Value> &dims,
-                    SmallVectorImpl<Value> &symbols) {
-  MLIRContext *ctx = lbVal.getContext();
-  AffineExpr lb = getAffineDimExpr(dims.size(), ctx);
-  dims.push_back(lbVal);
-  AffineExpr ub = getAffineDimExpr(dims.size(), ctx);
-  dims.push_back(ubVal);
-  AffineExpr step = getAffineSymbolExpr(symbols.size(), ctx);
-  symbols.push_back(stepVal);
-  return std::make_pair(lb, lb + step * ((ub - 1) - lb).floorDiv(step));
-}
-
-/// Return the min/max expressions for `value` if it is an induction variable
-/// from scf.for or scf.parallel loop.
-/// if `loopFilter` is passed, the filter determines which loop to consider.
-/// Other induction variables are ignored.
-Optional<std::pair<AffineExpr, AffineExpr>> mlir::getSCFMinMaxExpr(
-    Value value, SmallVectorImpl<Value> &dims, SmallVectorImpl<Value> &symbols,
-    llvm::function_ref<bool(Operation *)> substituteOperation) {
-  if (auto forOp = scf::getForInductionVarOwner(value))
-    return getMinMaxLoopIndVar(forOp.lowerBound(), forOp.upperBound(),
-                               forOp.step(), dims, symbols);
-
-  if (auto parallelForOp = scf::getParallelForInductionVarOwner(value))
-    for (unsigned idx = 0, e = parallelForOp.getNumLoops(); idx < e; ++idx)
-      if (parallelForOp.getInductionVars()[idx] == value)
-        return getMinMaxLoopIndVar(parallelForOp.lowerBound()[idx],
-                                   parallelForOp.upperBound()[idx],
-                                   parallelForOp.step()[idx], dims, symbols);
-  return {};
 }

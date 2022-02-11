@@ -26,9 +26,6 @@
 #pragma GCC system_header
 #endif
 
-_LIBCPP_PUSH_MACROS
-#include <__undef_macros>
-
 _LIBCPP_BEGIN_NAMESPACE_STD
 
 #if !defined(_LIBCPP_HAS_NO_RANGES)
@@ -46,11 +43,13 @@ template<class _Derived>
 class view_interface : public view_base {
   _LIBCPP_HIDE_FROM_ABI
   constexpr _Derived& __derived() noexcept {
+    static_assert(sizeof(_Derived) && derived_from<_Derived, view_interface> && view<_Derived>);
     return static_cast<_Derived&>(*this);
   }
 
   _LIBCPP_HIDE_FROM_ABI
   constexpr _Derived const& __derived() const noexcept {
+    static_assert(sizeof(_Derived) && derived_from<_Derived, view_interface> && view<_Derived>);
     return static_cast<_Derived const&>(*this);
   }
 
@@ -193,7 +192,5 @@ public:
 #endif // !defined(_LIBCPP_HAS_NO_RANGES)
 
 _LIBCPP_END_NAMESPACE_STD
-
-_LIBCPP_POP_MACROS
 
 #endif // _LIBCPP___RANGES_VIEW_INTERFACE_H
