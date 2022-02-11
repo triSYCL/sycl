@@ -181,6 +181,10 @@ sudo update-grub
 
 ## Installing the Xilinx XRT runtime
 
+First be careful that `LD_LIBRARY_PATH` does not have the XRT
+libraries in it because it might mess up with the unit tests linking
+in the build process.
+
 ```bash
 # Get the latest Xilinx runtime. You might try the master branch instead...
 # Use either ssh
