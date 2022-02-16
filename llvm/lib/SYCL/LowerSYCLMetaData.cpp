@@ -164,13 +164,17 @@ public:
   }
 
   void lowerPipelineKernelDecoration(llvm::Function *F, llvm::Value *Payload) {
-    auto *Parameters = cast<ConstantStruct>(Payload);
-    auto *IIInitializer = cast<ConstantInt>(
-        getUnderlyingObject(Parameters->getAggregateElement(0u)));
-    auto *PipelineType = cast<ConstantInt>(
-        getUnderlyingObject(Parameters->getAggregateElement(1u)));
-    std::string S = formatv("{0}.{1}", IIInitializer->getSExtValue(),
-                            PipelineType->getSExtValue());
+    std::string S;
+    if (auto *Parameters = dyn_cast<ConstantStruct>(Payload)) {
+      auto *IIInitializer = cast<ConstantInt>(
+          getUnderlyingObject(Parameters->getAggregateElement(0u)));
+      auto *PipelineType = cast<ConstantInt>(
+          getUnderlyingObject(Parameters->getAggregateElement(1u)));
+      S = formatv("{0}.{1}", IIInitializer->getSExtValue(),
+                              PipelineType->getSExtValue());
+    } else {
+      S = "0.0";
+    }
     F->addFnAttr("fpga.static.pipeline", S);
   }
 

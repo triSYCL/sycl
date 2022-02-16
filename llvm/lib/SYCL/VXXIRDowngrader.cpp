@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Erases and modifies IR incompatabilities with v++ backend
+// Erases and modifies IR incompatibilities with v++ backend
 //
 // ===---------------------------------------------------------------------===//
 
@@ -17,24 +17,26 @@
 #include <string>
 
 #include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/ADT/SetVector.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/Function.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IRBuilder.h"
-#include "llvm/IR/LLVMContext.h"
-#include "llvm/SYCL/VXXIRDowngrader.h"
-#include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/SetVector.h"
-#include "llvm/IR/Attributes.h"
-#include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Transforms/Utils/LowerMemIntrinsics.h"
+#include "llvm/SYCL/VXXIRDowngrader.h"
 
 #include "SYCLUtils.h"
 
@@ -44,6 +46,9 @@
 #include "llvm/../../lib/IR/LLVMContextImpl.h"
 
 using namespace llvm;
+
+#undef DEBUG_TYPE
+#define DEBUG_TYPE "VXXDownGrade"
 
 // Put the code in an anonymous namespace to avoid polluting the global
 // namespace
@@ -206,27 +211,190 @@ struct VXXIRDowngrader : public ModulePass {
                                 Attribute::AttrKind::Alignment);
   }
 
+  Value* traverseBitCasts(Value* V, llvm::function_ref<bool(Value*)> Func) {
+    while (1) {
+      if (auto* BC = dyn_cast<BitCastInst>(V))
+        V = BC->getOperand(0);
+      else if (auto* BC = dyn_cast<BitCastOperator>(V))
+        V = BC->getOperand(0);
+      else
+        break;
+      if (Func(V))
+        return V;
+    }
+    Func(V);
+    return V;
+  }
+
+  /// return true if the memcpy was replaced by a load store pair
+  bool tryReplaceMemcpyByLoadStore(MemTransferInst *Mcpy) {
+    LLVM_DEBUG(llvm::dbgs() << "VXXDownGrader: try to replace: " << *Mcpy << "\n");
+    ConstantInt *CI = dyn_cast<ConstantInt>(Mcpy->getLength());
+    const DataLayout& DL = Mcpy->getModule()->getDataLayout();
+    llvm::SmallDenseMap<Type*, Value* , 4> Srcs;
+    Value *Src = nullptr;
+    Value *Dest = nullptr;
+
+    /// Find a common type for the source and destination
+    traverseBitCasts(Mcpy->getOperand(1), [&](Value* V){
+      if (!Srcs.count(V->getType()))
+        Srcs[V->getType()] = V;
+      return false;
+    });
+    traverseBitCasts(Mcpy->getOperand(0), [&](Value* V){
+      if (Srcs.count(V->getType())) {
+        Src = Srcs[V->getType()];
+        Dest = V;
+        return true;
+      }
+      return false;
+    });
+
+    /// Failed to find a common type.
+    if (Src == nullptr || Dest == nullptr)
+      return false;
+    Type* DTy = Src->getType()->getPointerElementType();
+    uint64_t CopySize = CI->getZExtValue();
+
+    /// Unknown size
+    if (!CI)
+      return false;
+    /// Size is not a multiple of the store size of the elements.
+    if (CopySize % DL.getTypeStoreSize(DTy) != 0)
+      return false;
+    uint64_t Iterations = CopySize / DL.getTypeStoreSize(DTy);
+    LLVM_DEBUG(llvm::dbgs() << "VXXDownGrader: type: " << *DTy
+                            << " size: " << DL.getTypeStoreSize(DTy) << " x "
+                            << Iterations << " + 0"
+                            << "\n");
+
+    // TODO: handle all cases properly and remove this restriction
+    assert(Iterations == 1);
+
+    auto *Load = new LoadInst(DTy, Src, "", Mcpy);
+    new StoreInst(Load, Dest, Mcpy);
+
+    return true;
+  }
+
+  Constant *emitBytePatternForType(Type *Ty, ConstantInt *Pattern, Module &M) {
+    const DataLayout &DL = M.getDataLayout();
+    uint64_t IntValue;
+    std::memset(&IntValue, Pattern->getZExtValue(), sizeof(IntValue));
+    if (Ty->isIntOrIntVectorTy()) {
+      unsigned BitWidth =
+          cast<llvm::IntegerType>(Ty->getScalarType())->getBitWidth();
+      if (BitWidth <= 64)
+        return llvm::ConstantInt::get(Ty, IntValue);
+      return llvm::ConstantInt::get(
+          Ty, llvm::APInt::getSplat(BitWidth, llvm::APInt(64, IntValue)));
+    }
+    if (Ty->isPtrOrPtrVectorTy()) {
+      auto *PtrTy = cast<llvm::PointerType>(Ty->getScalarType());
+      unsigned PtrWidth = DL.getPointerSizeInBits();
+      llvm::Type *IntTy = llvm::IntegerType::get(M.getContext(), PtrWidth);
+      auto *Int = llvm::ConstantInt::get(IntTy, IntValue);
+      return llvm::ConstantExpr::getIntToPtr(Int, PtrTy);
+    }
+    if (Ty->isStructTy()) {
+      auto *StructTy = cast<llvm::StructType>(Ty);
+      llvm::SmallVector<llvm::Constant *, 8> Struct(StructTy->getNumElements());
+      for (unsigned El = 0; El != Struct.size(); ++El)
+        Struct[El] =
+            emitBytePatternForType(StructTy->getElementType(El), Pattern, M);
+      return llvm::ConstantStruct::get(StructTy, Struct);
+    }
+    if (Ty->isFPOrFPVectorTy()) {
+      unsigned BitWidth = llvm::APFloat::semanticsSizeInBits(
+          Ty->getScalarType()->getFltSemantics());
+      llvm::APInt Payload(64, IntValue);
+      if (BitWidth >= 64)
+        Payload = llvm::APInt::getSplat(BitWidth, Payload);
+      return ConstantFP::get(Ty, APFloat(Ty->getScalarType()->getFltSemantics(), Payload));
+    }
+    if (Ty->isArrayTy()) {
+      auto *ArrTy = cast<llvm::ArrayType>(Ty);
+      llvm::SmallVector<llvm::Constant *, 8> Element(
+          ArrTy->getNumElements(),
+          emitBytePatternForType(ArrTy->getElementType(), Pattern, M));
+      return llvm::ConstantArray::get(ArrTy, Element);
+    }
+    llvm_unreachable("Unhandled type");
+  }
+
+  bool tryReplaceMemsetByStore(MemSetInst *Mset) {
+    ConstantInt *CI = dyn_cast<ConstantInt>(Mset->getLength());
+    const DataLayout &DL = Mset->getModule()->getDataLayout();
+
+    if (!CI)
+      return false;
+    uint64_t CopySize = CI->getZExtValue();
+    Type *DTy = Mset->getDest()->getType()->getPointerElementType();
+
+    assert(CopySize == DL.getTypeStoreSize(DTy));
+
+    new StoreInst(emitBytePatternForType(DTy,
+                                         cast<ConstantInt>(Mset->getOperand(1)),
+                                         *Mset->getModule()),
+                  Mset->getDest(), Mset);
+    return true;
+  }
+
   void lowerIntrinsic(Module &M) {
+    TargetTransformInfo TTI(M.getDataLayout());
     IRBuilder<> B(M.getContext());
-    SmallVector<Instruction *, 16> ToRemove;
+    SmallVector<Instruction *, 16> ToProcess;
     for (auto &F : M.functions())
       for (auto &I : instructions(F))
-        if (auto *CI = dyn_cast<CallBase>(&I)) {
-          if (CI->getIntrinsicID() == Intrinsic::abs) {
-            B.SetInsertPoint(CI->getNextNode());
-            Value *Cmp = B.CreateICmpSLT(
-                CI->getArgOperand(0),
-                ConstantInt::getNullValue(CI->getArgOperand(0)->getType()));
-            Value *Sub = B.CreateSub(
-                ConstantInt::getNullValue(CI->getArgOperand(0)->getType()),
-                CI->getArgOperand(0));
-            Value *ABS = B.CreateSelect(Cmp, Sub, CI->getArgOperand(0));
-            CI->replaceAllUsesWith(ABS);
-            ToRemove.push_back(CI);
+        if (auto *CI = dyn_cast<CallBase>(&I))
+          ToProcess.push_back(&I);
+    for (auto *I : ToProcess) {
+      if (auto *CI = dyn_cast<CallBase>(I)) {
+        /// TODO: the proper way to deal with this is that we always generate a
+        /// loop when lowering memory intrinsic but we pass the loop-unroll
+        /// after that that that short loops will be unrolled.
+        if (MemCpyInst *Memcpy = dyn_cast<MemCpyInst>(CI)) {
+          if (!tryReplaceMemcpyByLoadStore(Memcpy)) {
+            /// we can remove this and fallback to expandMemCpyAsLoop but it is
+            /// going to worse the performance a lot. so we just fail for now.
+            llvm_unreachable("unable to remove intrinsic");
+            continue;
           }
+        //     expandMemCpyAsLoop(Memcpy, TTI);
+        } else if (MemMoveInst *Memmove = dyn_cast<MemMoveInst>(CI)) {
+          if (!tryReplaceMemcpyByLoadStore(Memmove)) {
+            /// we can remove this and fallback to expandMemCpyAsLoop but it is
+            /// going to worse the performance a lot. so we just fail for now.
+            llvm_unreachable("unable to remove intrinsic");
+            continue;
+          }
+          // expandMemMoveAsLoop(Memmove);
         }
-    for (auto *I : ToRemove)
-      I->eraseFromParent();
+        else if (MemSetInst *Memset = dyn_cast<MemSetInst>(CI)) {
+          if (!tryReplaceMemsetByStore(Memset)) {
+            /// we can remove this and fallback to expandMemCpyAsLoop but it is
+            /// going to worse the performance a lot. so we just fail for now.
+            llvm_unreachable("unable to remove intrinsic");
+            continue;
+          }
+          // expandMemSetAsLoop(Memset);
+        } else
+        if (CI->getIntrinsicID() == Intrinsic::abs) {
+          B.SetInsertPoint(CI->getNextNode());
+          Value *Cmp = B.CreateICmpSLT(
+              CI->getArgOperand(0),
+              ConstantInt::getNullValue(CI->getArgOperand(0)->getType()));
+          Value *Sub = B.CreateSub(
+              ConstantInt::getNullValue(CI->getArgOperand(0)->getType()),
+              CI->getArgOperand(0));
+          Value *ABS = B.CreateSelect(Cmp, Sub, CI->getArgOperand(0));
+          CI->replaceAllUsesWith(ABS);
+        }
+        else
+          continue;
+        CI->eraseFromParent();
+      }
+    }
   }
 
   /// Poison is a special value that was added to LLVM but is not present in the
