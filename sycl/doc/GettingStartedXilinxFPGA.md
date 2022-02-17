@@ -185,6 +185,12 @@ First be careful that `LD_LIBRARY_PATH` does not have the XRT
 libraries in it because it might mess up with the unit tests linking
 in the build process.
 
+> :warning: there is currently a bug
+> https://github.com/Xilinx/XRT/issues/6180 in hardware-emulation
+> runtime where the simulator might not shutdown correctly.
+> So you can try the branch from
+> https://github.com/Xilinx/XRT/pull/6269
+
 ```bash
 # Get the latest AMD/Xilinx runtime
 # Use either ssh
