@@ -20,33 +20,33 @@ in the same program.
 modern C++11/.../C++20-based DSEL (Domain Specific Embedded Language) aimed at
 facilitating the programming of heterogeneous accelerators.
 
-## triSYCL for Xilinx FPGA with Xilinx Vitis v++
+## triSYCL for AMD/Xilinx FPGA with Xilinx Vitis v++
 
 Some LLVM passes and some C++ SYCL runtime from
 https://github.com/triSYCL/triSYCL are merged-in with a new Clang
-driver and scripts to use Xilinx Vitis
+driver and scripts to use AMD/Xilinx Vitis
 [v++](https://www.xilinx.com/html_docs/xilinx2020_2/vitis_doc/vitiscommandcompiler.html)
-as a back-end for Xilinx FPGA using the open-source runtime and
+as a back-end for AMD/Xilinx FPGA using the open-source runtime and
 device-driver https://github.com/Xilinx/XRT
 
 ## Intel oneAPI DPC++ SYCL compiler and runtime libraries using Clang/LLVM technology
 
 This is a fork of the Intel SYCL upstreaming effort
 ([https://github.com/intel/llvm/tree/sycl](https://github.com/intel/llvm/tree/sycl))
-with some alterations made to allow SYCL compilation for Xilinx FPGA. However,
-the alterations made shouldn't affect previous targets supported by
-the Intel tool, so in theory it should be possible to use different
-accelerators from different vendors at the same time, including for
-example an Intel FPGA and a Xilinx FPGA.
+with some alterations made to allow SYCL compilation for AMD/Xilinx
+FPGA. However, the alterations made shouldn't affect previous targets
+supported by the Intel tool, so in theory it should be possible to use
+different accelerators from different vendors at the same time,
+including for example an Intel FPGA and a AMD/Xilinx FPGA.
 
 ## SYCL Related Documentation
 
-- Xilinx FPGA get started guide for the SYCL compiler
+- AMD/Xilinx FPGA get started guide for the SYCL compiler
   [GettingStartedXilinxFPGA.md](sycl/doc/GettingStartedXilinxFPGA.md)
 - The unchanged get started guide for the SYCL compiler
   [GetStartedGuide.md](sycl/doc/GetStartedGuide.md)
 
-- Xilinx FPGA Tests Documentation
+- AMD/Xilinx FPGA Tests Documentation
   - [Tests.md](sycl/doc/Tests.md) covers a few details about the the
     additional [xocc_tests](sycl/test/xocc_tests) directory we added
     to the [sycl/test](sycl/test) directory among some other small
@@ -60,10 +60,10 @@ like.
 It also showcases the requirements to get the project and examples
 running with the Intel OpenCL runtime or other back-ends.
 
-This fork of the project can be compiled the same way
-and used in conjunction with the normal compiler commands as demonstrated.
-However, the software requirements for Xilinx FPGA compilation and the compiler
-invocation are not the same and are documented elsewhere.
+This fork of the project can be compiled the same way and used in
+conjunction with the normal compiler commands as demonstrated.
+However, the software requirements for AMD/Xilinx FPGA compilation and
+the compiler invocation are not the same and are documented elsewhere.
 
 
 ## License

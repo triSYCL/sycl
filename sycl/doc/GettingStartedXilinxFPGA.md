@@ -1,10 +1,10 @@
-Getting started with SYCL with a Xilinx FPGA U200 Alveo board and Ubuntu 21.10
-==============================================================================
+Getting started with SYCL with a AMD/Xilinx FPGA U200 Alveo board and Ubuntu 21.10
+==================================================================================
 
 Disclaimer: nothing here is supported and this is all about a research
 project.
 
-We assume you have a Xilinx FPGA U200 Alveo board but it might work
+We assume you have a AMD/Xilinx FPGA U200 Alveo board but it might work
 with another board too.
 
 We assume that you have some modern Ubuntu like 21.10 version
@@ -29,7 +29,7 @@ some adaptations.
 ## What's new?
 
 - 2021/06/24: there is a new HLS target along the OpenCL/SPIR compiler
-  flow for Xilinx FPGA. The HLS target relies on direct LLVM IR
+  flow for AMD/Xilinx FPGA. The HLS target relies on direct LLVM IR
   feeding and allows finer control by using HLS extensions.
 
 - 2021/10/01: the OpenCL/SPIR device compiler flow has been deprecated
@@ -80,7 +80,7 @@ generating some FPGA configuration bitstream.
 
 For this, download from
 https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/vitis.html
-the "Xilinx Unified Installer 2021.2 SFD"
+the "AMD/Xilinx Unified Installer 2021.2 SFD"
 somewhere you have enough storage.
 
 Create a `/opt/xilinx` with the right access mode so you can work in
@@ -117,7 +117,7 @@ To avoid this, follow the recipe from
 https://support.xilinx.com/s/article/76960 after downloading the path:
 
 ```bash
-# The patching script assume working in the top Xilinx tool directory
+# The patching script assume working in the top AMD/Xilinx tool directory
 cd /opt/xilinx
 unzip ..../y2k22_patch-1.2.zip
 python y2k22_patch/patch.py
@@ -179,14 +179,14 @@ sudo update-grub
 ```
 
 
-## Installing the Xilinx XRT runtime
+## Installing the AMD/Xilinx XRT runtime
 
 First be careful that `LD_LIBRARY_PATH` does not have the XRT
 libraries in it because it might mess up with the unit tests linking
 in the build process.
 
 ```bash
-# Get the latest Xilinx runtime. You might try the master branch instead...
+# Get the latest AMD/Xilinx runtime
 # Use either ssh
 git clone git@github.com:Xilinx/XRT.git
 # or https according to your usual method
@@ -197,7 +197,7 @@ sudo ../src/runtime_src/tools/scripts/xrtdeps.sh
 # Setup the Vitis location so the Microblaze GCC can be used to
 # compile the ERT XRT runtime
 export XILINX_VITIS=/opt/xilinx/Vitis/2021.2
-# Compile the Xilinx runtime
+# Compile the AMD/Xilinx runtime
 ./build.sh
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
@@ -205,7 +205,7 @@ sudo apt install --reinstall ./Release/xrt_202210.2.13.0_21.10-amd64-xrt.deb
 ```
 
 It will install the user-mode XRT runtime and at least compile and
-install the Xilinx device driver modules for the current running
+install the AMD/Xilinx device driver modules for the current running
 kernel, even if it fails for the other kernels installed on the
 machine. If you do not plan to run on a real FPGA board but only use
 software or hardware emulation instead, it does not matter if the
@@ -321,7 +321,7 @@ sudo apt install ./xilinx-u200-gen3x16-xdma-1-202110-1-dev_1-3221508_all.deb
 
 from where they have been downloaded or adapt the paths to them.
 
-> :warning: Some packages have been shipped by Xilinx with a broken
+> :warning: Some packages have been shipped by AMD/Xilinx with a broken
 > manifest, which might lead to some warning every time you use APT
 > related package management commands, like:
 >
@@ -856,7 +856,7 @@ SYCL_HOME=~/sycl_workspace
 XILINX_VERSION=2021.2
 # The target platform for the FPGA board model
 export XILINX_PLATFORM=xilinx_u200_gen3x16_xdma_1_202110_1
-# Where all the Xilinx tools are
+# Where all the AMD/Xilinx tools are
 XILINX_ROOT=/opt/xilinx
 # Where the SYCL compiler binaries are:
 SYCL_BIN_DIR=$SYCL_HOME/llvm/build/bin
@@ -892,8 +892,8 @@ provided:
 
 - a new HLS device compiler flow is now developed, that aims at
   compiling kernels to LLVM bitcode similar to what is produced by the
-  open source Xilinx HLS front-end. This way, anything supported by
-  Xilinx HLS C++ should be supported at some point in the future;
+  open source AMD/Xilinx HLS front-end. This way, anything supported by
+  AMD/Xilinx HLS C++ should be supported at some point in the future;
 
 - the SPIR flow device compiler, the first to have been supported by
   the tool, aiming at using OpenCL C-like features. But it is
@@ -919,7 +919,7 @@ Only one `fpga64_*` architecture is allowed in the `sycl-targets`
 flag.
 
 The SYCL HLS compilation flow does not support software emulation because
-of internal Xilinx issue https://jira.xilinx.com/browse/CR-1099885
+of internal AMD/Xilinx issue https://jira.xilinx.com/browse/CR-1099885
 But as SYCL allows also execution on a CPU device, it can replace the
 back-end software emulation.
 
@@ -1098,7 +1098,7 @@ sudo modprobe xocl
 ```
 
 
-## Xilinx Macros
+## AMD/Xilinx Macros
 
 ``__SYCL_XILINX_SW_EMU_MODE__`` will be defined when compiling device code in sw_emu mode
 
@@ -1108,31 +1108,33 @@ sudo modprobe xocl
 
 when compiling host code none of the ``__SYCL_XILINX_*_MODE__`` macros will be defined.
 
-``__SYCL_HAS_XILINX_DEVICE__`` will be defined on the host if one of the specified targets is a Xilinx device or on a Xilinx device
+``__SYCL_HAS_XILINX_DEVICE__`` will be defined on the host if one of
+the specified targets is a AMD/Xilinx device or on a Xilinx device
 
 
-## Xilinx FPGA SYCL compiler architecture
+## AMD/Xilinx FPGA SYCL compiler architecture
 
-[Architecture of the Xilinx SYCL
+[Architecture of the AMD/Xilinx SYCL
 compiler](Xilinx_sycl_compiler_architecture.rst) describes the
 compiler architecture.
 
-This document aims to cover the key differences of compiling SYCL for Xilinx
+This document aims to cover the key differences of compiling SYCL for AMD/Xilinx
 FPGAs. Things like building the compiler and library remain the same but other
-things like the compiler invocation for Xilinx FPGA compilation is a little
+things like the compiler invocation for AMD/Xilinx FPGA compilation is a little
 different. As a general rule of thumb we're trying to keep things as close as we
 can to the Intel implementation, but in some areas were still working on that.
 
-One of the significant differences of compilation for Xilinx FPGAs over the
-ordinary compiler directive is that Xilinx devices require offline compilation
-of SYCL kernels to binary before being wrapped into the end fat binary. The
-offline compilation of these kernels is done by Xilinx's `v++` compiler rather
-than the SYCL device compiler itself in this case. The device compiler's job is
-to compile SYCL kernels to a format edible by `v++`, then take the output of
-`v++` and wrap it into the fat binary as normal.
+One of the significant differences of compilation for AMD/Xilinx FPGAs
+over the ordinary compiler directive is that AMD/Xilinx devices
+require offline compilation of SYCL kernels to binary before being
+wrapped into the end fat binary. The offline compilation of these
+kernels is done by AMD/Xilinx's `v++` compiler rather than the SYCL
+device compiler itself in this case. The device compiler's job is to
+compile SYCL kernels to a format edible by `v++`, then take the output
+of `v++` and wrap it into the fat binary as normal.
 
 The current Intel SYCL implementation revolves around SPIR-V while
-Xilinx's `v++` compiler can only ingest plain LLVM IR 6.x or LLVM IR
+AMD/Xilinx's `v++` compiler can only ingest plain LLVM IR 6.x or LLVM IR
 6.x with a SPIR-df flavor as an intermediate representation. SPIR-df
 is some LLVM IR with some SPIR decorations. It is similar to the
 SPIR-2.0 provisional specification but does not requires the LLVM IR
@@ -1165,9 +1167,11 @@ This gives much more control over the build configuration.
 It is quite useful to work with two builds, a Release one used by default
 and a Debug one used for debugging.
 
-Note: the configuration of environment variables must be done before the `cmake` invocation.
+Note: the configuration of environment variables must be done before
+the `cmake` invocation.
 
-A possible Release configuration and build script targeting Xilinx FPGA, CUDA & OpenCL:
+A possible Release configuration and build script targeting AMD/Xilinx
+FPGA, CUDA & OpenCL:
 
 ```bash
 cd $SYCL_HOME
@@ -1206,7 +1210,8 @@ cd $SYCL_HOME
 ninja -C build-Release sycl-toolchain
 ```
 
-A possible Debug configuration and build script targeting Xilinx FPGA, CUDA & OpenCL:
+A possible Debug configuration and build script targeting AMD/Xilinx
+FPGA, CUDA & OpenCL:
 
 ```bash
 cd $SYCL_HOME
