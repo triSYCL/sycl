@@ -28,44 +28,6 @@ using namespace llvm::opt;
 using namespace llvm::sys;
 
 ///////////////////////////////////////////////////////////////////////////////
-////                            V++ Installation Detector
-///////////////////////////////////////////////////////////////////////////////
-
-VXXInstallationDetector::VXXInstallationDetector(
-    const Driver &D, const llvm::Triple &HostTriple,
-    const llvm::opt::ArgList &Args) {
-  // This might only work on Linux systems.
-  // Rather than just checking the environment variables you could also add an
-  // optional path variable for users to use.
-  auto search_and_set_up_program = [&] (const char * programName) {
-    llvm::ErrorOr<std::string> program = findProgramByName(programName);
-    if (program) {
-      SmallString<256> programsAbsolutePath;
-      fs::real_path(*program, programsAbsolutePath);
-
-      BinaryPath = programsAbsolutePath.str().str();
-
-      StringRef programDir = path::parent_path(programsAbsolutePath);
-
-      if (path::filename(programDir) == "bin")
-        BinPath = programDir.str();
-
-      // TODO: Check if this assumption is correct in all installations and give
-      // environment variable specifier option or an argument to the Driver
-      VitisPath = path::parent_path(programDir).str();
-      LibPath = VitisPath + "/lnx64/lib";
-
-      // TODO: slightly stricter IsValid test... check all strings aren't empty
-      IsValid = true;
-    }
-    return program;
-  };
-
-  if (!search_and_set_up_program("v++"))
-    search_and_set_up_program("xocc");
-}
-
-///////////////////////////////////////////////////////////////////////////////
 ////                            V++ Linker
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -138,16 +100,17 @@ void AddForwardedOptions(const llvm::opt::ArgList &Args,
 void SYCL::LinkerVXX::constructSYCLVXXCommand(
     Compilation &C, const JobAction &JA, const InputInfo &Output,
     const InputInfoList &Inputs, const llvm::opt::ArgList &Args) const {
+
   const auto &TC =
     static_cast<const toolchains::VXXToolChain &>(getToolChain());
   InputInfoList SyclVxxArg = Inputs;
 
   ArgStringList CmdArgs;
 
-  // Script Arg $1, directory of v++ binary (Vitis's bin)
-  assert(!TC.VXXInstallation.getBinPath().empty());
-  CmdArgs.push_back("--vitis_bin_dir");
-  CmdArgs.push_back(Args.MakeArgString(TC.VXXInstallation.getBinPath()));
+  if (TC.isVitisIP())
+    CmdArgs.push_back("ipexport");
+  else
+    CmdArgs.push_back("vxxcompile");
 
   // Script Arg $2, directory of the Clang driver, where the sycl-vxx script
   // opt binary and llvm-linker binary should be contained among other things
@@ -169,45 +132,55 @@ void SYCL::LinkerVXX::constructSYCLVXXCommand(
   CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
 
-  CmdArgs.push_back("--vitis_comp_argfile");
-  AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_backend,
-      options::OPT_Xsycl_backend_EQ, TC.getTriple(), C.getDriver());
+  if (TC.isVitisIP()) {
+    if (!Args.hasArg(options::OPT_vitis_ip_part_EQ))
+      C.getDriver().Diag(diag::err_drv_option_required_for_target)
+          << "--vitis-ip-part" << TC.getTriple().getArchName();
+    else {
+      CmdArgs.push_back("--target");
+      CmdArgs.push_back(
+          Args.getLastArg(options::OPT_vitis_ip_part_EQ)->getValue());
+    }
+  } else {
+    CmdArgs.push_back("--vitis_comp_argfile");
+    AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_backend,
+                        options::OPT_Xsycl_backend_EQ, TC.getTriple(),
+                        C.getDriver());
 
-  
-  CmdArgs.push_back("--vitis_link_argfile");
-  AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_linker,
-      options::OPT_Xsycl_linker_EQ, TC.getTriple(), C.getDriver());
-
-  CmdArgs.push_back("--target");
-  switch (TC.getTriple().getSubArch()) {
-  case llvm::Triple::FPGASubArch_hw:
-  case llvm::Triple::FPGASubArch_hls_hw:
-    CmdArgs.push_back("hw");
-    break;
-  case llvm::Triple::FPGASubArch_hw_emu:
-  case llvm::Triple::FPGASubArch_hls_hw_emu:
-    CmdArgs.push_back("hw_emu");
-    break;
-  case llvm::Triple::FPGASubArch_sw_emu:
-  case llvm::Triple::FPGASubArch_hls_sw_emu:
-    CmdArgs.push_back("sw_emu");
-    break;
-  default:
-    llvm_unreachable("invalid subarch");
-  }
-
-  switch (TC.getTriple().getSubArch()) {
-  case llvm::Triple::FPGASubArch_hw:
-  case llvm::Triple::FPGASubArch_hw_emu:
-  case llvm::Triple::FPGASubArch_sw_emu:
-    break;
-  case llvm::Triple::FPGASubArch_hls_hw:
-  case llvm::Triple::FPGASubArch_hls_hw_emu:
-  case llvm::Triple::FPGASubArch_hls_sw_emu:
-    CmdArgs.push_back("--hls");
-    break;
-  default:
-    llvm_unreachable("invalid subarch");
+    CmdArgs.push_back("--vitis_link_argfile");
+    AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_linker,
+                        options::OPT_Xsycl_linker_EQ, TC.getTriple(),
+                        C.getDriver());
+    CmdArgs.push_back("--target");
+    switch (TC.getTriple().getSubArch()) {
+    case llvm::Triple::FPGASubArch_hw:
+    case llvm::Triple::FPGASubArch_hls_hw:
+      CmdArgs.push_back("hw");
+      break;
+    case llvm::Triple::FPGASubArch_hw_emu:
+    case llvm::Triple::FPGASubArch_hls_hw_emu:
+      CmdArgs.push_back("hw_emu");
+      break;
+    case llvm::Triple::FPGASubArch_sw_emu:
+    case llvm::Triple::FPGASubArch_hls_sw_emu:
+      CmdArgs.push_back("sw_emu");
+      break;
+    default:
+      llvm_unreachable("invalid subarch");
+    }
+    switch (TC.getTriple().getSubArch()) {
+    case llvm::Triple::FPGASubArch_hw:
+    case llvm::Triple::FPGASubArch_hw_emu:
+    case llvm::Triple::FPGASubArch_sw_emu:
+      break;
+    case llvm::Triple::FPGASubArch_hls_hw:
+    case llvm::Triple::FPGASubArch_hls_hw_emu:
+    case llvm::Triple::FPGASubArch_hls_sw_emu:
+      CmdArgs.push_back("--hls");
+      break;
+    default:
+      llvm_unreachable("invalid subarch");
+    }
   }
 
   for (auto& In : Inputs)
@@ -271,25 +244,26 @@ void SYCL::SYCLPostLinkVXX::constructSYCLVXXPLCommand(
 ////                            V++ Toolchain
 ///////////////////////////////////////////////////////////////////////////////
 
-VXXToolChain::VXXToolChain(const Driver &D, const llvm::Triple &Triple,
-                             const ToolChain &HostTC, const ArgList &Args)
-    : ToolChain(D, Triple, Args), HostTC(HostTC),
-      VXXInstallation(D, HostTC.getTriple(), Args)
+VXXToolChain::VXXToolChain(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
+    : ToolChain(D, Triple, Args)
 {
+}
 
-  if (VXXInstallation.isValid())
-    getProgramPaths().push_back(VXXInstallation.getBinPath().str());
-
-  // Lookup binaries into the driver directory, this is used to
-  // discover the clang-offload-bundler executable.
-  getProgramPaths().push_back(getDriver().Dir);
+VXXToolChain::VXXToolChain(const Driver &D, const llvm::Triple &Triple,
+                           const ToolChain &HostTC, const ArgList &Args)
+    : VXXToolChain(D, Triple, Args) {
+  this->HostTC = &HostTC;
 }
 
 void VXXToolChain::addClangTargetOptions(
     const llvm::opt::ArgList &DriverArgs,
     llvm::opt::ArgStringList &CC1Args,
     Action::OffloadKind DeviceOffloadingKind) const {
-  HostTC.addClangTargetOptions(DriverArgs, CC1Args, DeviceOffloadingKind);
+  if (!HostTC) {
+    CC1Args.push_back("-emit-llvm");
+    return;
+  }
+  HostTC->addClangTargetOptions(DriverArgs, CC1Args, DeviceOffloadingKind);
 
   assert(DeviceOffloadingKind == Action::OFK_SYCL &&
          "Only SYCL offloading kinds are supported");
@@ -299,25 +273,28 @@ void VXXToolChain::addClangTargetOptions(
 
 llvm::opt::DerivedArgList *
 VXXToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                             StringRef BoundArch,
-                             Action::OffloadKind DeviceOffloadKind) const {
-  DerivedArgList *DAL =
-      HostTC.TranslateArgs(Args, BoundArch, DeviceOffloadKind);
-  if (!DAL)
-    DAL = new DerivedArgList(Args.getBaseArgs());
+                            StringRef BoundArch,
+                            Action::OffloadKind DeviceOffloadKind) const {
+  if (HostTC) {
+    DerivedArgList *DAL =
+        HostTC->TranslateArgs(Args, BoundArch, DeviceOffloadKind);
+    if (!DAL)
+      DAL = new DerivedArgList(Args.getBaseArgs());
 
-  const OptTable &Opts = getDriver().getOpts();
+    const OptTable &Opts = getDriver().getOpts();
 
-  for (Arg *A : Args) {
-    DAL->append(A);
+    for (Arg *A : Args) {
+      DAL->append(A);
+    }
+
+    if (!BoundArch.empty()) {
+      DAL->eraseArg(options::OPT_march_EQ);
+      DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ),
+                        BoundArch);
+    }
+    return DAL;
   }
-
-  if (!BoundArch.empty()) {
-    DAL->eraseArg(options::OPT_march_EQ);
-    DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ),
-                      BoundArch);
-  }
-  return DAL;
+  return nullptr;
 }
 
 Tool *VXXToolChain::buildLinker() const {
@@ -326,22 +303,27 @@ Tool *VXXToolChain::buildLinker() const {
 }
 
 void VXXToolChain::addClangWarningOptions(ArgStringList &CC1Args) const {
-  HostTC.addClangWarningOptions(CC1Args);
+  if (HostTC)
+    HostTC->addClangWarningOptions(CC1Args);
 }
 
 ToolChain::CXXStdlibType
 VXXToolChain::GetCXXStdlibType(const ArgList &Args) const {
-  return HostTC.GetCXXStdlibType(Args);
+  if (HostTC)
+    return HostTC->GetCXXStdlibType(Args);
+  return ToolChain::CXXStdlibType::CST_Libstdcxx;
 }
 
 void VXXToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
                                               ArgStringList &CC1Args) const {
-  HostTC.AddClangSystemIncludeArgs(DriverArgs, CC1Args);
+  if (HostTC)
+    HostTC->AddClangSystemIncludeArgs(DriverArgs, CC1Args);
 }
 
 void VXXToolChain::AddClangCXXStdlibIncludeArgs(const ArgList &Args,
                                                  ArgStringList &CC1Args) const {
-  HostTC.AddClangCXXStdlibIncludeArgs(Args, CC1Args);
+  if (HostTC)
+    HostTC->AddClangCXXStdlibIncludeArgs(Args, CC1Args);
 }
 
 Tool *VXXToolChain::getTool(Action::ActionClass AC) const {

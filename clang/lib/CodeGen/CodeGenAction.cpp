@@ -331,7 +331,8 @@ namespace clang {
       // builtins function. Definitions of those builtins can be provided in
       // LinkModule. We force the pass to legalize the code before the link
       // happens.
-      if (LangOpts.SYCLIsDevice) {
+      if (LangOpts.SYCLIsDevice ||
+          C.getTargetInfo().getTriple().getArch() == llvm::Triple::vitis_ip) {
         PrettyStackTraceString CrashInfo("Pre-linking SYCL passes");
         legacy::PassManager PreLinkingSyclPasses;
         PreLinkingSyclPasses.add(llvm::createLowerSYCLMetaDataPass());

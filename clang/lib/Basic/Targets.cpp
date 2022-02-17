@@ -648,6 +648,10 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
     return nullptr;
   }
 
+  case llvm::Triple::vitis_ip:
+    // Triple example: vitis_ip-xilinx-unknown
+    return new XilinxHLS64TargetInfo(Triple, Opts);
+
   case llvm::Triple::spir: {
     llvm::Triple HT(Opts.HostTriple);
     switch (HT.getOS()) {

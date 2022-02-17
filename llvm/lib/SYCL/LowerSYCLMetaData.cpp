@@ -327,6 +327,8 @@ public:
             ->getRawDataValues();
     if (AnnotKind == kindOf("xilinx_kernel_property")) {
       dispatchKernelPropertyToHandler(CS);
+    } else if (AnnotKind == kindOf("vitis_kernel")) {
+      
     } else if (!AfterO3) { // Annotations that should be lowered before -O3
       if (AnnotKind == kindOf("xilinx_pipeline")) {
         lowerPipelineDecoration(CS);

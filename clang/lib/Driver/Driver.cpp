@@ -7884,6 +7884,9 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
       case llvm::Triple::spirv64:
         TC = std::make_unique<toolchains::SPIRVToolChain>(*this, Target, Args);
         break;
+      case llvm::Triple::vitis_ip:
+        TC = std::make_unique<toolchains::VXXToolChain>(*this, Target, Args);
+        break;
       default:
         if (Target.getVendor() == llvm::Triple::Myriad)
           TC = std::make_unique<toolchains::MyriadToolChain>(*this, Target,
@@ -7951,7 +7954,7 @@ const ToolChain &Driver::getOffloadingDeviceToolChain(const ArgList &Args,
           case llvm::Triple::fpga32:
           case llvm::Triple::fpga64:
             TC = std::make_unique<toolchains::VXXToolChain>(
-              *this, Target, HostTC, Args);
+              *this, Target, Args);
             break;
           case llvm::Triple::nvptx:
           case llvm::Triple::nvptx64:

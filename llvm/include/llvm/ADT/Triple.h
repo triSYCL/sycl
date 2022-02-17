@@ -104,6 +104,7 @@ public:
     fpga,           // Intel FPGA
     fpga32,         // 32-bit Xilinx FPGA
     fpga64,         // 64-bit Xilinx FPGA
+    vitis_ip,       // Vitis ip block design for Xilinx FPGA
     ve,             // NEC SX-Aurora Vector Engine
     LastArchType = ve
   };
@@ -491,15 +492,17 @@ public:
 
   bool isXilinxFPGA() const {
     return (getArch() == Triple::fpga64
-        || getArch() == Triple::fpga32)
+        || getArch() == Triple::fpga32
+        || getArch() == Triple::vitis_ip)
         && getVendor() == Triple::Xilinx;
   }
 
   bool isXilinxHLS() const {
-    assert(isXilinxFPGA() && "Not a Xilinx FPGA architecture");
-    return getSubArch() == SubArchType::FPGASubArch_hls_hw
-        || getSubArch() == SubArchType::FPGASubArch_hls_hw_emu
-        || getSubArch() == SubArchType::FPGASubArch_hls_sw_emu;
+    return isXilinxFPGA() &&
+           (getSubArch() == SubArchType::FPGASubArch_hls_hw ||
+            getSubArch() == SubArchType::FPGASubArch_hls_hw_emu ||
+            getSubArch() == SubArchType::FPGASubArch_hls_sw_emu ||
+            getSubArch() == SubArchType::NoSubArch);
   }
 
   bool isMacCatalystEnvironment() const {

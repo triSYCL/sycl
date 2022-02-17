@@ -16,37 +16,6 @@
 namespace clang {
 namespace driver {
 
-/// Based loosely on CudaInstallationDetector
-class VXXInstallationDetector {
-private:
-  bool IsValid = false;
-  std::string BinPath;
-  std::string BinaryPath;
-  std::string VitisPath;
-  std::string LibPath;
-
-public:
-  VXXInstallationDetector(const Driver &D, const llvm::Triple &HostTriple,
-                           const llvm::opt::ArgList &Args);
-
-  /// Check whether we detected a valid v++ installation
-  bool isValid() const { return IsValid; }
-
-  /// Get the path to the v++ binary
-  StringRef getBinaryPath() const { return BinaryPath; }
-
-  /// Get the detected path to v++'s bin directory.
-  StringRef getBinPath() const { return BinPath; }
-
-  /// Get the path to Vitis's root, the v++ drivers parent project
-  StringRef getVitisPath() const { return VitisPath; }
-
-  /// Get the detected path to v++'s lib directory.
-  /// FIXME: This currently assumes lnx64
-  StringRef getLibPath() const { return LibPath; }
-
-};
-
 // \todo come up with a better name like,  SYCLAssemblerVXX/Linker for the
 // tools? Or should the tool just be SYCLVXXToolchain?
 namespace tools {
@@ -109,11 +78,15 @@ namespace toolchains {
 class LLVM_LIBRARY_VISIBILITY VXXToolChain : public ToolChain {
 public:
   VXXToolChain(const Driver &D, const llvm::Triple &Triple,
+               const llvm::opt::ArgList &Args);
+  VXXToolChain(const Driver &D, const llvm::Triple &Triple,
                const ToolChain &HostTC, const llvm::opt::ArgList &Args);
 
   const llvm::Triple *getAuxTriple() const override {
-    return &HostTC.getTriple();
+    return &HostTC->getTriple();
   }
+
+  bool isVitisIP() const { return !HostTC; }
 
   llvm::opt::DerivedArgList *
   TranslateArgs(const llvm::opt::DerivedArgList &Args, StringRef BoundArch,
@@ -138,8 +111,7 @@ public:
       llvm::opt::ArgStringList &CC1Args) const override;
   // Tool *SelectTool(const JobAction &JA) const override;
 
-  const ToolChain &HostTC;
-  VXXInstallationDetector VXXInstallation;
+  const ToolChain* HostTC;
 
 protected:
   Tool *buildLinker() const override;
