@@ -46,6 +46,8 @@ config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
 
 config.environment['SYCL_VXX_KEEP_CLUTTER'] = 'True'
 config.environment['SYCL_VXX_PRINT_CMD'] = 'True'
+config.environment['SYCL_VXX_SERIALIZE_VITIS_COMP'] = 'True'
+config.environment['XRT_PCIE_HW_EMU_FORCE_SHUTDOWN'] = 'True'
 llvm_config.use_clang()
 
 # Propagate some variables from the host environment.
@@ -266,7 +268,7 @@ config.substitutions.append( ('%GPU_RUN_ON_LINUX_PLACEHOLDER',  gpu_run_on_linux
 config.substitutions.append( ('%GPU_CHECK_PLACEHOLDER',  gpu_check_substitute) )
 config.substitutions.append( ('%GPU_CHECK_ON_LINUX_PLACEHOLDER',  gpu_check_on_linux_substitute) )
 
-acc_run_substitute = "true " # white space intended
+acc_run_substitute = ""
 acc_check_substitute = ""
 if getDeviceCount("accelerator")[0]:
     found_at_least_one_device = True
@@ -281,10 +283,8 @@ if xocc != "off":
     # xrt doesn't deal well with multiple executables using it concurrently (at the time of writing).
     # The details are at https://xilinx.github.io/XRT/master/html/multiprocess.html
     # so we wrap every use of XRT inside an file lock.
-    # We also wrap invocation of executable in an setsid to prevent
-    # a single program failure from ending all the tests.
     xrt_lock = f"{tempfile.gettempdir()}/xrt-{getpass.getuser()}.lock"
-    acc_run_substitute+= "setsid flock --exclusive " + xrt_lock + " "
+    acc_run_substitute+= "flock --exclusive " + xrt_lock + " "
     if os.path.exists(xrt_lock):
         os.remove(xrt_lock)
     acc_run_substitute="env --unset=XCL_EMULATION_MODE " + acc_run_substitute
@@ -293,6 +293,7 @@ if xocc != "off":
         acc_run_substitute+= "timeout 3000 env "
     else:
         acc_run_substitute+= "timeout 3000 env "
+    acc_run_substitute += "unshare -pc --kill-child "
 
 config.substitutions.append( ('%ACC_RUN_PLACEHOLDER',  acc_run_substitute) )
 config.substitutions.append( ('%ACC_CHECK_PLACEHOLDER',  acc_check_substitute) )

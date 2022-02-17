@@ -22,6 +22,7 @@ kernel.
 """
 
 from argparse import ArgumentParser
+from itertools import starmap
 import json
 from multiprocessing import Pool
 from os import environ
@@ -367,8 +368,7 @@ class CompilationDriver:
                 p.terminate()
                 raise KeyboardInterrupt
         else:
-            for command in compile_commands:
-                self._compile_kernel(command)
+            self.compiled_kernels = list(starmap(self._compile_kernel, compile_commands))
 
     def drive_compilation(self):
         if self.hls_flow and (self.vitis_mode == "sw_emu"):

@@ -1,8 +1,9 @@
 /* REQUIRES: xocc
    REQUIRES: xocc
 
-   RUN: %clangxx -fsycl -fsycl-unnamed-lambda -std=c++20 -fsycl-targets=%sycl_triple %s -o %t.out  
-   RUN: %ACC_RUN_PLACEHOLDER %t.out 2>&1 | FileCheck %s
+   RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
+   RUN: %clangxx -fsycl -fsycl-unnamed-lambda -std=c++20 -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out  
+   RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out 2>&1 | FileCheck %s
    CHECK: 6 8 10
    CHECK: 352 -128 -44.25 -55.875
 */
