@@ -28,6 +28,7 @@ import json
 from multiprocessing import Pool
 from os import environ
 from pathlib import Path
+from random import choices
 import re
 import shutil
 import subprocess
@@ -159,14 +160,12 @@ def subprocess_error_handler(msg: str):
         return decorated
     return decorator
 
-def run_if_ok():
+def run_if_ok(func):
     """ Function only runs if the internal ok state is true"""
-    def decorator(func):
-        def decorated(self, *args, **kwargs):
-            if self.ok:
-                return func(self, *args, **kwargs)
-        return decorated
-    return decorator
+    def decorated(self, *args, **kwargs):
+        if self.ok:
+            return func(self, *args, **kwargs)
+    return decorated
 
 
 def _run_in_isolated_proctree(cmd, *args, **kwargs):
@@ -186,7 +185,8 @@ def _run_in_isolated_proctree(cmd, *args, **kwargs):
 
 class VXXVersion:
     def __init__(self, exec_path) -> None:
-        cmd = (exec_path, '-v')
+        version_opt = {"v++" : "-v", "vitis_hls" : "-version"}
+        cmd = (exec_path, version_opt[exec_path.name])
         proc_res = _run_in_isolated_proctree(cmd, capture_output=True)
         version_regex = r".*v(?P<major>\d{4})\.(?P<minor>\d).*"
         match = re.match(version_regex,
@@ -194,7 +194,7 @@ class VXXVersion:
                          flags=re.DOTALL)
         self.major = int(match['major'])
         self.minor = int(match['minor'])
-        print(f"Found Vitis version {self}")
+        print(f"Found {exec_path.name} version {self}")
 
     def __str__(self) -> str:
         return f"{self.major}.{self.minor}"
@@ -211,7 +211,7 @@ class VXXVersion:
 
 class VXXBinary:
     def __init__(self, execname):
-        self.path = shutil.which(execname)
+        self.path = Path(shutil.which(execname))
         if self.path is None:
             raise FileNotFoundError
         self.path = self.path.resolve()
@@ -220,12 +220,12 @@ class VXXBinary:
             self.clang_bin_ = Path(environ["XILINX_CLANG_39_BUILD_PATH"]) / "bin"
         else:
             self.clang_bin_ = (
-                vitis_exec.parents[2] /
+                self.path.parents[2] /
                 "/lnx64/tools/clang-3.9-csynth/bin"
             ).resolve()
             if not (self.clang_bin_ / "llvm-as").is_file():
                 self.clang_bin_ = (
-                    vitis_exec.parents[3] /
+                    self.path.parents[3] /
                     f"Vitis_HLS/{self.version}" /
                     "lnx64/tools/clang-3.9-csynth/bin"
                 ).resolve()
@@ -546,7 +546,7 @@ class VXXCompilationDriver(VitisCompilationDriver):
 class IPExportCompilationDriver(VitisCompilationDriver):
     def __init__(self, arguments):
         super().__init__(arguments, "vitis_hls")
-        self.target == arguments.target
+        self.target = arguments.target
         self.clock_period = arguments.clock_period
     
     @run_if_ok
@@ -563,23 +563,25 @@ class IPExportCompilationDriver(VitisCompilationDriver):
         script = self.tmpdir / "run_hls.tcl"
         out = self.tmpdir / f"{compname}.zip"
         with script.open("w") as sf:
-            sf.writelines([
+            sf.writelines(map(lambda x : f"{x}\n", [
                 "open_project -reset proj",
                 f"add_files {inputs}",
                 f"set_top {compname}",
                 "open_solution -reset sol",
                 f"set_part {self.target}",
-                f"create_clock -period {self.clock_period} -name default"
-                "csynth_design"
-                f"export_design -format ip_catalog -output {out}"
-                ])
+                f"create_clock -period {self.clock_period} -name default",
+                "config_dataflow -strict_mode off",
+                "csynth_design",
+                f"export_design -format ip_catalog -output {out}",
+                "exit",
+                ]))
         return script, out
     
     @subprocess_error_handler("Vitis HLS invocation failed")
     def _run_vitis_hls(self, script):
-        cmd = (self.vitisexec.path, script)
+        cmd = (self.vitisexec.path, "-f", script)
         self._dump_cmd("vitis-hls-invocation", cmd)
-        _run_in_isolated_proctree(cmd, check=True)
+        _run_in_isolated_proctree(cmd, check=True, cwd=self.tmpdir)
 
     def _next_passes(self, inputs):
         topcompname = self._get_top_comp_name()
@@ -589,9 +591,16 @@ class IPExportCompilationDriver(VitisCompilationDriver):
 
 
 def parse_args(args=sys.argv[1:]):
-    parser = ArgumentParser(
-        description="Utility to drive various compilation flow vor vivado related tools")
-    command = args[1]
+    description="Utility to drive various compilation flow vor vivado related tools"
+    toplevel_parser = ArgumentParser(description=description, add_help=False, prefix_chars="@")
+    toplevel_parser.add_argument("command", choices=("vxxcompile", "ipexport", "help"), help="Command to launch")
+    toplevel_parser.add_argument("args", nargs="*", help="Command arguments")
+    toplevel = toplevel_parser.parse_args(args=args)
+    command = toplevel.command
+    if command == "help":
+        toplevel_parser.print_help()
+        toplevel_parser.exit()
+    parser = ArgumentParser(description=description)
     if command == "vxxcompile":
         parser.add_argument(
             "--hls",
@@ -610,7 +619,8 @@ def parse_args(args=sys.argv[1:]):
             "--vitis_link_argfile",
             help="file containing v++ -l argument",
             type=Path)
-    elif command == "ipexport":
+    # There should not be other cases
+    elif command == "ipexport": 
         parser.add_argument(
             "--target",
             help="Part code for which the synthesis should be done",
@@ -621,8 +631,6 @@ def parse_args(args=sys.argv[1:]):
             help="clock period description",
             default="3ns"
         )
-    else:
-        raise ArgumentError(message=f"Unknown command: {command}")
 
     parser.add_argument(
         "--clang_path",
@@ -635,9 +643,9 @@ def parse_args(args=sys.argv[1:]):
         required=True,
         type=Path)
 
-    parser.add_argument("-o", help="output file name", required=True)
+    parser.add_argument("-o", help="output file name", required=True, type=Path)
     parser.add_argument("inputs", nargs="+")
-    return command, parser.parse_args(args=args)
+    return command, parser.parse_args(args=toplevel.args)
 
 
 def main():

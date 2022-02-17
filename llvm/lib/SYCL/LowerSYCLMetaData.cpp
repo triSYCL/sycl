@@ -314,6 +314,15 @@ public:
     }
   }
 
+  void markKernel(llvm::ConstantStruct *CS) {
+    auto *F =
+        dyn_cast<Function>(getUnderlyingObject(CS->getAggregateElement(0u)));
+    F->addFnAttr("fpga.top.func", F->getName());
+    F->addFnAttr("fpga.demangled.name", F->getName());
+    F->setCallingConv(CallingConv::C);
+    F->setLinkage(llvm::GlobalValue::ExternalLinkage);
+  }
+
   /// @brief Check if a global annotation (from llvm.global.annotations)
   /// corresponds to a marker that has to be converted to an HLS-compatible
   /// annotation
@@ -328,7 +337,7 @@ public:
     if (AnnotKind == kindOf("xilinx_kernel_property")) {
       dispatchKernelPropertyToHandler(CS);
     } else if (AnnotKind == kindOf("vitis_kernel")) {
-      
+      markKernel(CS);
     } else if (!AfterO3) { // Annotations that should be lowered before -O3
       if (AnnotKind == kindOf("xilinx_pipeline")) {
         lowerPipelineDecoration(CS);
