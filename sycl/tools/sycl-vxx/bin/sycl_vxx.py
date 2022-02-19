@@ -103,7 +103,7 @@ class VXXVersion:
 
     def get_kernel_prop_opt(self):
         ret = []
-        if self._interface_is_attribute:
+        if self._interface_is_attribute():
             ret.append("-sycl-vxx-maxi-attr-encoding")
         return ret
 

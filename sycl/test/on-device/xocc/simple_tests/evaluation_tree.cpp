@@ -9,6 +9,8 @@
 #include <optional>
 #include <type_traits>
 #include <variant>
+
+#include "../utilities/device_selectors.hpp"
 namespace detail {
 
 template <typename> struct variant_trait {};
@@ -219,7 +221,8 @@ int main() {
   sycl::buffer<node> In{data.data(), {data.size()}};
   sycl::buffer<int> Out{1};
 
-  sycl::queue Queue;
+  // Create a queue on Xilinx FPGA
+  sycl::queue Queue { selector_defines::CompiledForDeviceSelector {} };
 
   Queue.submit([&](sycl::handler &cgh) {
     auto AIn = In.get_access<sycl::access::mode::read_write>(cgh);
@@ -231,9 +234,10 @@ int main() {
       AOut[0] = AIn[root_node].get_value();
     });
   });
-  {
-    auto AOut = Out.get_access<sycl::access::mode::read>();
-    std::cout << AOut[0] << std::endl;
-    assert(AOut[0] == 9);
+    {
+      auto AOut = Out.get_access<sycl::access::mode::read>();
+      std::cout << AOut[0] << std::endl;
+      assert(AOut[0] == 9);
     }
+    return 0;
   }

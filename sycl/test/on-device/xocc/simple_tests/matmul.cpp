@@ -10,6 +10,8 @@
 #include <cstdio>
 #include <random>
 
+#include "../utilities/device_selectors.hpp"
+
 using cl::sycl::detail::aligned_allocator;
 using std::default_random_engine;
 using std::generate;
@@ -71,7 +73,7 @@ int main() {
   size_t rows = columns;
 
   // Creating SYCL queue
-  cl::sycl::queue Queue;
+  cl::sycl::queue Queue{ selector_defines::CompiledForDeviceSelector {} };
 
   cl::sycl::buffer<int, 2> A(cl::sycl::range<2>{columns, rows});
   cl::sycl::buffer<int, 2> B(cl::sycl::range<2>{columns, rows});

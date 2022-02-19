@@ -5,6 +5,8 @@
 #include <CL/sycl.hpp>
 #include <variant>
 
+#include "../utilities/device_selectors.hpp"
+
 namespace detail {
 
 template<typename> struct variant_trait {};
@@ -83,7 +85,7 @@ int main() {
   sycl::buffer<std::variant<B, A>> Out{d.size()};
   sycl::buffer<int> OutI{1};
 
-  sycl::queue Queue{};
+  sycl::queue Queue{ selector_defines::CompiledForDeviceSelector {} };
 
   Queue.submit([&](sycl::handler &cgh) {
     auto AIn = In.get_access<sycl::access::mode::read>(cgh);

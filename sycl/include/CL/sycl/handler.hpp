@@ -250,14 +250,15 @@ inline void build_inner_loop_nd_nest_rec(auto &ElementWiseOp,
                                          auto OuterLoopLocalWG,
                                          auto OuterLoopGlobalIdx) {
   size_t CurDimGroupRange = IterDomains.get_group_range()[CurDimIdx];
+  size_t CurDimLocalRange = IterDomains.get_local_range()[CurDimIdx];
   size_t CurDimLocalIter = 0;
-  size_t CurDimGlobalIter = get<CurDimIdx>(WGIdx) * CurDimGroupRange;
+  size_t CurDimGlobalIter = get<CurDimIdx>(WGIdx) * CurDimLocalRange;
   auto NextLocalIdx =
       std::tuple_cat(OuterLoopLocalWG, std::tie(CurDimLocalIter));
   auto NextGlobalIdx =
       std::tuple_cat(OuterLoopGlobalIdx, std::tie(CurDimGlobalIter));
   for (CurDimLocalIter = 0;
-       CurDimLocalIter < IterDomains.get_local_range()[CurDimIdx];
+       CurDimLocalIter < CurDimLocalRange;
        CurDimLocalIter++) {
     if constexpr (CurDimIdx + 1 >= IterDims) {
       static_assert(CurDimIdx == IterDims - 1);
@@ -305,7 +306,7 @@ build_loop_nd_nest_rec(auto &ElementWiseOp, nd_range<IterDims> &IterDomains,
       std::tuple_cat(OuterLoopWGIdx, std::tie(CurDimGroupIter));
   for (CurDimGroupIter = 0;
        CurDimGroupIter < CurDimGroupRange;
-       CurDimGroupRange++) {
+       CurDimGroupIter++) {
     if constexpr (CurDimIdx + 1 >= IterDims) {
       static_assert(CurDimIdx == IterDims - 1);
       build_inner_loop_nd_nest_rec<0>(ElementWiseOp, IterDomains, NextWGIdx,
