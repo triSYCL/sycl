@@ -431,7 +431,7 @@ class VXXCompilationDriver(VitisCompilationDriver):
                 content = f.read().strip()
                 if content:
                     self.extra_link_args.extend(content.split(' '))
-        if self.hls_flow and (self.vitis_mode == "sw_emu"):
+        if (self.vitis_mode == "sw_emu"):
             raise Exception("sw_emu is not compatible with the HLS flow")
 
     @run_if_ok
