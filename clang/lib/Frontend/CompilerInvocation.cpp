@@ -4059,9 +4059,6 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
           : Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
                          options::OPT_fno_sycl_allow_variadic_func, false);
 
-  if (T.getArch() == llvm::Triple::vitis_ip)
-    Opts.VitisIP = true;
-
   // Get OpenMP host file path if any and report if a non existent file is
   // found
   if (Arg *A = Args.getLastArg(options::OPT_fopenmp_host_ir_file_path)) {

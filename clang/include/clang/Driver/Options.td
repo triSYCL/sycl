@@ -2665,8 +2665,7 @@ def fstrict_overflow : Flag<["-"], "fstrict-overflow">, Group<f_Group>;
 def fintelfpga : Flag<["-"], "fintelfpga">, Group<f_Group>,
   Flags<[CC1Option, CoreOption]>, HelpText<"Perform ahead of time compilation for FPGA">;
 def vitis_ip_part_EQ : Joined<["--"], "vitis-ip-part=">,
-  HelpText<"Specify which device to targeted">, Flags<[NoXarchOption, CoreOption]>,
-  MarshallingInfoInt<LangOpts<"VitisIP">>;
+  HelpText<"Specify which device to targeted">, Flags<[NoXarchOption, CoreOption]>;
 def fsycl_device_only : Flag<["-"], "fsycl-device-only">, Flags<[CoreOption]>,
   HelpText<"Compile SYCL kernels for device">;
 def fsycl_targets_EQ : CommaJoined<["-"], "fsycl-targets=">, Flags<[NoXarchOption, CC1Option, CoreOption]>,
