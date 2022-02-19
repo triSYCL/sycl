@@ -1249,7 +1249,9 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
     Builder.defineMacro("__SYCL_HAS_XILINX_DEVICE__");
 
   if (TI.getTriple().getArch() == llvm::Triple::vitis_ip)
-    Builder.defineMacro("__VITIS_KERNEL", "__attribute__((annotate(\"vitis_kernel\")))");
+    Builder.defineMacro(
+        "__VITIS_KERNEL",
+        "extern \"C\" __attribute__((annotate(\"vitis_kernel\")))");
 
   // OpenCL definitions.
   if (LangOpts.OpenCL) {

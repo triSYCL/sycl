@@ -107,7 +107,9 @@ void SYCL::LinkerVXX::constructSYCLVXXCommand(
 
   ArgStringList CmdArgs;
 
-  if (TC.isVitisIP())
+  bool isVitisIP = TC.isVitisIP() || Args.hasArg(options::OPT_vitis_ip_part_EQ);
+
+  if (isVitisIP)
     CmdArgs.push_back("ipexport");
   else
     CmdArgs.push_back("vxxcompile");
@@ -132,7 +134,7 @@ void SYCL::LinkerVXX::constructSYCLVXXCommand(
   CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
 
-  if (TC.isVitisIP()) {
+  if (isVitisIP) {
     if (!Args.hasArg(options::OPT_vitis_ip_part_EQ))
       C.getDriver().Diag(diag::err_drv_option_required_for_target)
           << "--vitis-ip-part" << TC.getTriple().getArchName();

@@ -7954,7 +7954,7 @@ const ToolChain &Driver::getOffloadingDeviceToolChain(const ArgList &Args,
           case llvm::Triple::fpga32:
           case llvm::Triple::fpga64:
             TC = std::make_unique<toolchains::VXXToolChain>(
-              *this, Target, Args);
+              *this, Target, HostTC, Args);
             break;
           case llvm::Triple::nvptx:
           case llvm::Triple::nvptx64:
