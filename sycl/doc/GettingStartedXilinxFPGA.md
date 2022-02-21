@@ -1,10 +1,10 @@
-Getting started with SYCL with a AMD/Xilinx FPGA U200 Alveo board and Ubuntu 21.10
-==================================================================================
+Getting started with SYCL with an AMD/Xilinx FPGA U200 Alveo board and Ubuntu 21.10
+===================================================================================
 
 Disclaimer: nothing here is supported and this is all about a research
 project.
 
-We assume you have a AMD/Xilinx FPGA U200 Alveo board but it might work
+We assume you have an AMD/Xilinx FPGA U200 Alveo board but it might work
 with another board too.
 
 We assume that you have some modern Ubuntu like 21.10 version
@@ -35,6 +35,24 @@ some adaptations.
 - 2021/10/01: the OpenCL/SPIR device compiler flow has been deprecated
   because it has less features than the HLS device compiler flow and
   we lack resources to maintain both.
+
+- 2022/02/21:
+  - provide `parallel_for` emulation with loop-nest in `single_task` for
+    AMD/Xilinx FPGA LLVM IR HLS workflow;
+  - updated for latest Alveo DFX platforms like the
+    `xilinx_u200_gen3x16_xdma_1_202110_1`;
+  - remove some FPGA-specific optimizations breaking HLS compilation
+    flow;
+  - clean up static unroll;
+  - updated for latest Ubuntu 21.10 Linux version;
+  - updated for Vitis 2021.2 and prepare for next Vitis release;
+  - simplify some examples like the generic executor;
+  - work-around various Vitis HLS, XRT & platform bugs;
+  - execute Vitis in a process namespace to avoid process left-over;
+  - merge from upstream Intel oneAPI DPC++ SYCL implementation;
+  - mention 2022 year bug work-around;
+  - Xilinx is now AMD after acquisition by AMD, so rename Xilinx mentions.
+
 
 ## Installing the Alveo U200 board
 
@@ -1115,7 +1133,7 @@ sudo modprobe xocl
 when compiling host code none of the ``__SYCL_XILINX_*_MODE__`` macros will be defined.
 
 ``__SYCL_HAS_XILINX_DEVICE__`` will be defined on the host if one of
-the specified targets is a AMD/Xilinx device or on a Xilinx device
+the specified targets is an AMD/Xilinx device or on a Xilinx device
 
 
 ## AMD/Xilinx FPGA SYCL compiler architecture
