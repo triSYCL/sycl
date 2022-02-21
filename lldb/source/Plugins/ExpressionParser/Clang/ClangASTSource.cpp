@@ -479,7 +479,10 @@ void ClangASTSource::FindExternalLexicalDecls(
                    decl->getDeclKindName(), ast_dump);
       }
 
-      CopyDecl(decl);
+      Decl *copied_decl = CopyDecl(decl);
+
+      if (!copied_decl)
+        continue;
 
       // FIXME: We should add the copied decl to the 'decls' list. This would
       // add the copied Decl into the DeclContext and make sure that we
@@ -489,6 +492,12 @@ void ClangASTSource::FindExternalLexicalDecls(
       // lookup issues later on.
       // We can't just add them for now as the ASTImporter already added the
       // decl into the DeclContext and this would add it twice.
+
+      if (FieldDecl *copied_field = dyn_cast<FieldDecl>(copied_decl)) {
+        QualType copied_field_type = copied_field->getType();
+
+        m_ast_importer_sp->RequireCompleteType(copied_field_type);
+      }
     } else {
       SkippedDecls = true;
     }
@@ -1495,7 +1504,7 @@ bool ClangASTSource::layoutRecordType(const RecordDecl *record, uint64_t &size,
 
   LLDB_LOG(log,
            "LayoutRecordType on (ASTContext*){0} '{1}' for (RecordDecl*)"
-           "{3} [name = '{4}']",
+           "{2} [name = '{3}']",
            m_ast_context, m_clang_ast_context->getDisplayName(), record,
            record->getName());
 
@@ -1571,8 +1580,10 @@ bool ClangASTSource::layoutRecordType(const RecordDecl *record, uint64_t &size,
                                     fe = record->field_end();
          fi != fe; ++fi) {
       LLDB_LOG(log,
-               "LRT     (FieldDecl*){0}, Name = '{1}', Offset = {2} bits",
-               *fi, fi->getName(), field_offsets[*fi]);
+               "LRT     (FieldDecl*){0}, Name = '{1}', Type = '{2}', Offset = "
+               "{3} bits",
+               *fi, fi->getName(), fi->getType().getAsString(),
+               field_offsets[*fi]);
     }
     DeclFromParser<const CXXRecordDecl> parser_cxx_record =
         DynCast<const CXXRecordDecl>(parser_record);

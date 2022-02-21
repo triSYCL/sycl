@@ -1321,12 +1321,20 @@ bool cl::ParseCommandLineOptions(int argc, const char *const *argv,
                                                Errs, LongOptionsUseDoubleDash);
 }
 
+/// Reset all options at least once, so that we can parse different options.
 void CommandLineParser::ResetAllOptionOccurrences() {
-  // So that we can parse different command lines multiple times in succession
-  // we reset all option values to look like they have never been seen before.
+  // Reset all option values to look like they have never been seen before.
+  // Options might be reset twice (they can be reference in both OptionsMap
+  // and one of the other members), but that does not harm.
   for (auto *SC : RegisteredSubCommands) {
     for (auto &O : SC->OptionsMap)
       O.second->reset();
+    for (Option *O : SC->PositionalOpts)
+      O->reset();
+    for (Option *O : SC->SinkOpts)
+      O->reset();
+    if (SC->ConsumeAfterOpt)
+      SC->ConsumeAfterOpt->reset();
   }
 }
 
@@ -1530,10 +1538,8 @@ bool CommandLineParser::ParseCommandLineOptions(int argc,
 
         ErrorParsing = true;
       } else {
-        for (SmallVectorImpl<Option *>::iterator I = SinkOpts.begin(),
-                                                 E = SinkOpts.end();
-             I != E; ++I)
-          (*I)->addOccurrence(i, "", StringRef(argv[i]));
+        for (Option *SinkOpt : SinkOpts)
+          SinkOpt->addOccurrence(i, "", StringRef(argv[i]));
       }
       continue;
     }
@@ -2295,11 +2301,8 @@ protected:
 
     // Collect registered option categories into vector in preparation for
     // sorting.
-    for (auto I = GlobalParser->RegisteredOptionCategories.begin(),
-              E = GlobalParser->RegisteredOptionCategories.end();
-         I != E; ++I) {
-      SortedCategories.push_back(*I);
-    }
+    for (OptionCategory *Category : GlobalParser->RegisteredOptionCategories)
+      SortedCategories.push_back(Category);
 
     // Sort the different option categories alphabetically.
     assert(SortedCategories.size() > 0 && "No option categories registered!");
@@ -2307,11 +2310,8 @@ protected:
                    OptionCategoryCompare);
 
     // Create map to empty vectors.
-    for (std::vector<OptionCategory *>::const_iterator
-             I = SortedCategories.begin(),
-             E = SortedCategories.end();
-         I != E; ++I)
-      CategorizedOptions[*I] = std::vector<Option *>();
+    for (OptionCategory *Category : SortedCategories)
+      CategorizedOptions[Category] = std::vector<Option *>();
 
     // Walk through pre-sorted options and assign into categories.
     // Because the options are already alphabetically sorted the
@@ -2326,23 +2326,20 @@ protected:
     }
 
     // Now do printing.
-    for (std::vector<OptionCategory *>::const_iterator
-             Category = SortedCategories.begin(),
-             E = SortedCategories.end();
-         Category != E; ++Category) {
+    for (OptionCategory *Category : SortedCategories) {
       // Hide empty categories for --help, but show for --help-hidden.
-      const auto &CategoryOptions = CategorizedOptions[*Category];
+      const auto &CategoryOptions = CategorizedOptions[Category];
       bool IsEmptyCategory = CategoryOptions.empty();
       if (!ShowHidden && IsEmptyCategory)
         continue;
 
       // Print category information.
       outs() << "\n";
-      outs() << (*Category)->getName() << ":\n";
+      outs() << Category->getName() << ":\n";
 
       // Check if description is set.
-      if (!(*Category)->getDescription().empty())
-        outs() << (*Category)->getDescription() << "\n\n";
+      if (!Category->getDescription().empty())
+        outs() << Category->getDescription() << "\n\n";
       else
         outs() << "\n";
 
@@ -2648,10 +2645,13 @@ cl::getRegisteredSubcommands() {
 void cl::HideUnrelatedOptions(cl::OptionCategory &Category, SubCommand &Sub) {
   initCommonOptions();
   for (auto &I : Sub.OptionsMap) {
+    bool Unrelated = true;
     for (auto &Cat : I.second->Categories) {
-      if (Cat != &Category && Cat != &CommonOptions->GenericCategory)
-        I.second->setHiddenFlag(cl::ReallyHidden);
+      if (Cat == &Category || Cat == &CommonOptions->GenericCategory)
+        Unrelated = false;
     }
+    if (Unrelated)
+      I.second->setHiddenFlag(cl::ReallyHidden);
   }
 }
 
@@ -2659,11 +2659,14 @@ void cl::HideUnrelatedOptions(ArrayRef<const cl::OptionCategory *> Categories,
                               SubCommand &Sub) {
   initCommonOptions();
   for (auto &I : Sub.OptionsMap) {
+    bool Unrelated = true;
     for (auto &Cat : I.second->Categories) {
-      if (!is_contained(Categories, Cat) &&
-          Cat != &CommonOptions->GenericCategory)
-        I.second->setHiddenFlag(cl::ReallyHidden);
+      if (is_contained(Categories, Cat) ||
+          Cat == &CommonOptions->GenericCategory)
+        Unrelated = false;
     }
+    if (Unrelated)
+      I.second->setHiddenFlag(cl::ReallyHidden);
   }
 }
 

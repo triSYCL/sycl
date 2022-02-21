@@ -483,7 +483,7 @@ Enable migration to use NS\_NONATOMIC\_IOSONLY macro for setting property's 'ato
 
 Enable migration to annotate property with NS\_RETURNS\_INNER\_POINTER
 
-.. option:: -objcmt-whitelist-dir-path=<arg>, -objcmt-white-list-dir-path=<arg>
+.. option:: -objcmpt-allowlist-dir-path=<arg>, -objcmt-whitelist-dir-path=<arg>, -objcmt-white-list-dir-path=<arg>
 
 Only modify files with a filename contained in the provided directory path
 
@@ -875,7 +875,7 @@ Inline functions which are (explicitly or implicitly) marked inline
 
 .. option:: -flegacy-pass-manager, -fno-experimental-new-pass-manager, -fno-legacy-pass-manager
 
-Use the legacy pass manager in LLVM
+Use the legacy pass manager in LLVM (deprecated, to be removed in a future release)
 
 .. option:: -fno-crash-diagnostics
 
@@ -1705,7 +1705,7 @@ Enable support for int128\_t type
 
 .. option:: -ffp-contract=<arg>
 
-Form fused FP ops (e.g. FMAs): fast (fuses across statements disregarding pragmas) \| on (only fuses in the same statement unless dictated by pragmas) \| off (never fuses) \| fast-honor-pragmas (fuses across statements unless diectated by pragmas). Default is 'fast' for CUDA, 'fast-honor-pragmas' for HIP, and 'on' otherwise.
+Form fused FP ops (e.g. FMAs): fast (fuses across statements disregarding pragmas) \| on (only fuses in the same statement unless dictated by pragmas) \| off (never fuses) \| fast-honor-pragmas (fuses across statements unless dictated by pragmas). Default is 'fast' for CUDA, 'fast-honor-pragmas' for HIP, and 'on' otherwise.
 
 .. option:: -ffp-exception-behavior=<arg>
 
@@ -1941,9 +1941,9 @@ Microsoft compiler version number to report in \_MSC\_VER (0 = don't define it (
 
 Specifies the largest alignment guaranteed by '::operator new(size\_t)'
 
-.. option:: -fnew-infallible
+.. option:: -fnew-infallible, -fno-new-infallible
 
-Treats throwing global C++ operator new as always returning valid memory (annotates with \_\_attribute\_\_((returns\_nonnull)) and throw()). This is detectable in source.
+Enable treating throwing global C++ operator new as always returning valid memory (annotates with \_\_attribute\_\_((returns\_nonnull)) and throw()). This is detectable in source.
 
 .. option:: -fnext-runtime
 
@@ -2038,6 +2038,11 @@ Parse OpenMP pragmas and generate parallel code.
 Emit OpenMP code only for SIMD-based constructs.
 
 .. option:: -fopenmp-version=<arg>
+
+.. option:: -fopenmp-extensions, -fno-openmp-extensions
+
+Enable or disable all Clang extensions for OpenMP directives and clauses.  By
+default, they are enabled.
 
 .. program:: clang1
 .. option:: -fopenmp=<arg>
@@ -2543,7 +2548,7 @@ Give global types 'default' visibility and global functions and variables 'hidde
 
 .. option:: -fvisibility-nodllstorageclass=<arg>
 
-The visibility for defintiions without an explicit DLL export class \[-fvisibility-from-dllstorageclass\]
+The visibility for definitions without an explicit DLL export class \[-fvisibility-from-dllstorageclass\]
 
 .. option:: -fvisibility=<arg>
 
@@ -3223,6 +3228,10 @@ Reserve the r9 register (ARM only)
 
 Allow use of CMSE (Armv8-M Security Extensions)
 
+.. option:: -mfix-cmse-cve-2021-35465, -mno-fix-cmse-cve-2021-35465
+
+Enable the cve-2021-35465 security vulnerability mitigation (ARM only).
+
 .. option:: -mexecute-only, -mno-execute-only, -mpure-code
 
 Disallow generation of data access to code sections (ARM only)
@@ -3250,6 +3259,11 @@ Thread pointer access method (AArch32/AArch64 only)
 .. option:: -munaligned-access, -mno-unaligned-access
 
 Allow memory accesses to be unaligned (AArch32/AArch64 only)
+
+.. option:: -mno-bti-at-return-twice
+
+Do not add a BTI instruction after a setjmp or other return-twice construct (Arm
+only)
 
 Hexagon
 -------
@@ -3584,6 +3598,8 @@ X86
 .. option:: -mclwb, -mno-clwb
 
 .. option:: -mclzero, -mno-clzero
+
+.. option:: -mcrc32, -mno-crc32
 
 .. option:: -mcx16, -mno-cx16
 

@@ -231,6 +231,7 @@ protected:
 public:
   void initMCObjectFileInfo(MCContext &MCCtx, bool PIC,
                             bool LargeCodeModel = false);
+  virtual ~MCObjectFileInfo();
   MCContext &getContext() const { return *Ctx; }
 
   bool getSupportsWeakOmittedEHFrame() const {
@@ -253,6 +254,7 @@ public:
     return CompactUnwindDwarfEHFrameOnly;
   }
 
+  virtual unsigned getTextSectionAlignment() const { return 4; }
   MCSection *getTextSection() const { return TextSection; }
   MCSection *getDataSection() const { return DataSection; }
   MCSection *getBSSSection() const { return BSSSection; }
@@ -425,6 +427,8 @@ private:
   bool PositionIndependent = false;
   MCContext *Ctx = nullptr;
   VersionTuple SDKVersion;
+  Optional<Triple> DarwinTargetVariantTriple;
+  VersionTuple DarwinTargetVariantSDKVersion;
 
   void initMachOMCObjectFileInfo(const Triple &T);
   void initELFMCObjectFileInfo(const Triple &T, bool Large);
@@ -440,6 +444,23 @@ public:
   }
 
   const VersionTuple &getSDKVersion() const { return SDKVersion; }
+
+  void setDarwinTargetVariantTriple(const Triple &T) {
+    DarwinTargetVariantTriple = T;
+  }
+
+  const Triple *getDarwinTargetVariantTriple() const {
+    return DarwinTargetVariantTriple ? DarwinTargetVariantTriple.getPointer()
+                                     : nullptr;
+  }
+
+  void setDarwinTargetVariantSDKVersion(const VersionTuple &TheSDKVersion) {
+    DarwinTargetVariantSDKVersion = TheSDKVersion;
+  }
+
+  const VersionTuple &getDarwinTargetVariantSDKVersion() const {
+    return DarwinTargetVariantSDKVersion;
+  }
 };
 
 } // end namespace llvm

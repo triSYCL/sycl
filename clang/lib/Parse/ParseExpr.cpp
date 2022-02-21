@@ -893,7 +893,6 @@ class CastExpressionIdValidator final : public CorrectionCandidateCallback {
 /// [Clang] unary-type-trait:
 ///                   '__is_aggregate'
 ///                   '__trivially_copyable'
-///                   '__builtin_sycl_mark_kernel_name'
 ///
 ///       binary-type-trait:
 /// [GNU]             '__is_base_of'
@@ -1517,6 +1516,7 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
   case tok::kw___int64:
   case tok::kw___int128:
   case tok::kw__ExtInt:
+  case tok::kw__BitInt:
   case tok::kw_signed:
   case tok::kw_unsigned:
   case tok::kw_half:
@@ -1525,6 +1525,7 @@ ExprResult Parser::ParseCastExpression(CastParseKind ParseKind,
   case tok::kw___bf16:
   case tok::kw__Float16:
   case tok::kw___float128:
+  case tok::kw___ibm128:
   case tok::kw_void:
   case tok::kw_typename:
   case tok::kw_typeof:
@@ -2401,7 +2402,7 @@ Parser::ParseExprAfterUnaryExprOrTypeTrait(const Token &OpTok,
 /// a parameter.
 ExprResult Parser::ParseSYCLUniqueStableNameExpression() {
   assert(Tok.is(tok::kw___builtin_sycl_unique_stable_name) &&
-         "Not __bulitin_sycl_unique_stable_name");
+         "Not __builtin_sycl_unique_stable_name");
 
   SourceLocation OpLoc = ConsumeToken();
   BalancedDelimiterTracker T(*this, tok::l_paren);

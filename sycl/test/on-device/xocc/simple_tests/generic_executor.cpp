@@ -1,10 +1,11 @@
-/* RUN: %{execute}%s | %{filecheck} %s
+/* REQUIRES: xocc
+   REQUIRES: xocc
+
+   RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
+   RUN: %clangxx -fsycl -fsycl-unnamed-lambda -std=c++20 -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out  
+   RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out 2>&1 | FileCheck %s
    CHECK: 6 8 10
    CHECK: 352 -128 -44.25 -55.875
-
-
-   Simple example showing how SYCL provide single-source genericity
-   enabling writing generic templated libraries
 */
 #include <cstdint>
 #include <functional>

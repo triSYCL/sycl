@@ -8,7 +8,7 @@
 # upstream are:
 #   id_mangle
 #   math_mangle
-#   parallel_for_ND_range
+#   parallel_for
 #   reqd_work_group_size
 #   single_task_vector_add
 #   edge_detection
@@ -139,8 +139,8 @@ test_list () {
  run_test "integration_header_check" "simple_tests" "$1"
  run_test "internal_defines" "simple_tests" "$1"
  run_test "math_mangle" "simple_tests" "$1" # failed infinitloop
- run_test "multi_parallel_for_ND_range" "simple_tests" "$1"
- run_test "parallel_for_ND_range" "simple_tests" "$1"
+ run_test "multi_parallel_for" "simple_tests" "$1"
+ run_test "parallel_for" "simple_tests" "$1"
  run_test "reqd_work_group_size" "simple_tests" "$1" # failed infinitloop
 #  Note: There appears to be a race condition in hw_emu for
 #  single_task_vector_add, sometimes passes sometimes fails.

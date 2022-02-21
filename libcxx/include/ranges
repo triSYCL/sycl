@@ -1,5 +1,5 @@
 // -*- C++ -*-
-//===--------------------------- ranges -----------------------------------===//
+//===----------------------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -36,7 +36,7 @@ namespace std::ranges {
     inline constexpr bool enable_borrowed_range = false;
 
   template<class T>
-    using iterator_t = decltype(ranges::begin(declval<R&>()));
+    using iterator_t = decltype(ranges::begin(declval<T&>()));
   template<range R>
     using sentinel_t = decltype(ranges::end(declval<R&>()));
   template<range R>
@@ -177,6 +177,18 @@ namespace std::ranges {
   template<copy_constructible T>
     requires is_object_v<T>
   class single_view;
+
+  template<weakly_incrementable W, semiregular Bound = unreachable_sentinel_t>
+    requires weakly-equality-comparable-with<W, Bound> && copyable<W>
+  class iota_view;
+
+  template<class W, class Bound>
+    inline constexpr bool enable_borrowed_range<iota_view<W, Bound>> = true;
+
+  // [range.join], join view
+  template<input_range V>
+    requires view<V> && input_range<range_reference_t<V>>
+  class join_view;
 }
 
 */
@@ -190,18 +202,19 @@ namespace std::ranges {
 #include <__ranges/access.h>
 #include <__ranges/all.h>
 #include <__ranges/common_view.h>
-#include <__ranges/counted.h>
 #include <__ranges/concepts.h>
+#include <__ranges/counted.h>
 #include <__ranges/dangling.h>
 #include <__ranges/data.h>
 #include <__ranges/drop_view.h>
-#include <__ranges/empty.h>
 #include <__ranges/empty_view.h>
+#include <__ranges/empty.h>
 #include <__ranges/enable_borrowed_range.h>
 #include <__ranges/enable_view.h>
+#include <__ranges/iota_view.h>
+#include <__ranges/join_view.h>
 #include <__ranges/ref_view.h>
 #include <__ranges/reverse_view.h>
-#include <__ranges/take_view.h>
 #include <__ranges/single_view.h>
 #include <__ranges/size.h>
 #include <__ranges/subrange.h>
@@ -217,18 +230,15 @@ namespace std::ranges {
 #pragma GCC system_header
 #endif
 
-_LIBCPP_PUSH_MACROS
-#include <__undef_macros>
-
 _LIBCPP_BEGIN_NAMESPACE_STD
 
 #if _LIBCPP_STD_VER > 17 && !defined(_LIBCPP_HAS_NO_RANGES)
 
+namespace views = ranges::views;
+
 #endif // _LIBCPP_STD_VER > 17 && !defined(_LIBCPP_HAS_NO_RANGES)
 
 _LIBCPP_END_NAMESPACE_STD
-
-_LIBCPP_POP_MACROS
 
 #endif // !defined(_LIBCPP_HAS_NO_INCOMPLETE_RANGES)
 

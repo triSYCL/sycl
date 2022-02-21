@@ -1,7 +1,8 @@
 // REQUIRES: xocc
 
-// RUN: %clangxx -fsycl -std=c++20 -fsycl-targets=%sycl_triple %s -o %t.out 2>&1 | FileCheck %s
-// RUN: %ACC_RUN_PLACEHOLDER %t.out
+// RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
+// RUN: %clangxx -fsycl -std=c++20 -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out 2>&1 | FileCheck %s
+// RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
 #include <sycl/sycl.hpp>
 #include <sycl/ext/xilinx/fpga.hpp>
