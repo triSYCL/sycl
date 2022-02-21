@@ -33,8 +33,7 @@ using namespace llvm::sys;
 
 VXXInstallationDetector::VXXInstallationDetector(
     const Driver &D, const llvm::Triple &HostTriple,
-    const llvm::opt::ArgList &Args)
-    : D(D) {
+    const llvm::opt::ArgList &Args) {
   // This might only work on Linux systems.
   // Rather than just checking the environment variables you could also add an
   // optional path variable for users to use.
@@ -244,8 +243,6 @@ void SYCL::SYCLPostLinkVXX::ConstructJob(Compilation &C, const JobAction &JA,
 void SYCL::SYCLPostLinkVXX::constructSYCLVXXPLCommand(
     Compilation &C, const JobAction &JA, const InputInfo &Output,
     const InputInfoList &Inputs, const llvm::opt::ArgList &Args) const {
-  const auto &TC =
-    static_cast<const toolchains::VXXToolChain &>(getToolChain());
   InputInfoList SyclVxxArg = Inputs;
 
   ArgStringList CmdArgs;

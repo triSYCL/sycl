@@ -96,13 +96,33 @@ llvm::Constant *CodeGenModule::getBuiltinLibFunction(const FunctionDecl *FD,
   StringRef Name;
   GlobalDecl D(FD);
 
+  // TODO: This list should be expanded or refactored after all GCC-compatible
+  // std libcall builtins are implemented.
+  static SmallDenseMap<unsigned, StringRef, 8> F128Builtins{
+      {Builtin::BI__builtin_printf, "__printfieee128"},
+      {Builtin::BI__builtin_vsnprintf, "__vsnprintfieee128"},
+      {Builtin::BI__builtin_vsprintf, "__vsprintfieee128"},
+      {Builtin::BI__builtin_sprintf, "__sprintfieee128"},
+      {Builtin::BI__builtin_snprintf, "__snprintfieee128"},
+      {Builtin::BI__builtin_fprintf, "__fprintfieee128"},
+      {Builtin::BI__builtin_nexttowardf128, "__nexttowardieee128"},
+  };
+
   // If the builtin has been declared explicitly with an assembler label,
   // use the mangled name. This differs from the plain label on platforms
   // that prefix labels.
   if (FD->hasAttr<AsmLabelAttr>())
     Name = getMangledName(D);
-  else
-    Name = Context.BuiltinInfo.getName(BuiltinID) + 10;
+  else {
+    // TODO: This mutation should also be applied to other targets other than
+    // PPC, after backend supports IEEE 128-bit style libcalls.
+    if (getTriple().isPPC64() &&
+        &getTarget().getLongDoubleFormat() == &llvm::APFloat::IEEEquad() &&
+        F128Builtins.find(BuiltinID) != F128Builtins.end())
+      Name = F128Builtins[BuiltinID];
+    else
+      Name = Context.BuiltinInfo.getName(BuiltinID) + 10;
+  }
 
   llvm::FunctionType *Ty =
     cast<llvm::FunctionType>(getTypes().ConvertType(FD->getType()));
@@ -170,8 +190,9 @@ static Value *EmitNontemporalStore(CodeGenFunction &CGF, const CallExpr *E) {
 
   // Convert the type of the pointer to a pointer to the stored type.
   Val = CGF.EmitToMemory(Val, E->getArg(0)->getType());
+  unsigned SrcAddrSpace = Address->getType()->getPointerAddressSpace();
   Value *BC = CGF.Builder.CreateBitCast(
-      Address, llvm::PointerType::getUnqual(Val->getType()), "cast");
+      Address, llvm::PointerType::get(Val->getType(), SrcAddrSpace), "cast");
   LValue LV = CGF.MakeNaturalAlignAddrLValue(BC, E->getArg(0)->getType());
   LV.setNontemporal(true);
   CGF.EmitStoreOfScalar(Val, LV, false);
@@ -666,7 +687,7 @@ getIntegerWidthAndSignedness(const clang::ASTContext &context,
                              const clang::QualType Type) {
   assert(Type->isIntegerType() && "Given type is not an integer.");
   unsigned Width = Type->isBooleanType()  ? 1
-                   : Type->isExtIntType() ? context.getIntWidth(Type)
+                   : Type->isBitIntType() ? context.getIntWidth(Type)
                                           : context.getTypeInfo(Type).Width;
   bool Signed = Type->isSignedIntegerType();
   return {Width, Signed};
@@ -1481,8 +1502,7 @@ Value *CodeGenFunction::EmitMSVCBuiltinExpr(MSVCIntrin BuiltinID,
     Value *ArgValue = EmitScalarExpr(E->getArg(1));
 
     llvm::Type *ArgType = ArgValue->getType();
-    llvm::Type *IndexType =
-        IndexAddress.getPointer()->getType()->getPointerElementType();
+    llvm::Type *IndexType = IndexAddress.getElementType();
     llvm::Type *ResultType = ConvertType(E->getType());
 
     Value *ArgZero = llvm::Constant::getNullValue(ArgType);
@@ -3068,17 +3088,134 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     // ZExt bool to int type.
     return RValue::get(Builder.CreateZExt(LHS, ConvertType(E->getType())));
   }
-
   case Builtin::BI__builtin_isnan: {
     CodeGenFunction::CGFPOptionsRAII FPOptsRAII(*this, E);
     Value *V = EmitScalarExpr(E->getArg(0));
+    llvm::Type *Ty = V->getType();
+    const llvm::fltSemantics &Semantics = Ty->getFltSemantics();
+    if (!Builder.getIsFPConstrained() ||
+        Builder.getDefaultConstrainedExcept() == fp::ebIgnore ||
+        !Ty->isIEEE()) {
+      V = Builder.CreateFCmpUNO(V, V, "cmp");
+      return RValue::get(Builder.CreateZExt(V, ConvertType(E->getType())));
+    }
 
     if (Value *Result = getTargetHooks().testFPKind(V, BuiltinID, Builder, CGM))
       return RValue::get(Result);
 
-    Function *F = CGM.getIntrinsic(Intrinsic::isnan, V->getType());
-    Value *Call = Builder.CreateCall(F, V);
-    return RValue::get(Builder.CreateZExt(Call, ConvertType(E->getType())));
+    // NaN has all exp bits set and a non zero significand. Therefore:
+    // isnan(V) == ((exp mask - (abs(V) & exp mask)) < 0)
+    unsigned bitsize = Ty->getScalarSizeInBits();
+    llvm::IntegerType *IntTy = Builder.getIntNTy(bitsize);
+    Value *IntV = Builder.CreateBitCast(V, IntTy);
+    APInt AndMask = APInt::getSignedMaxValue(bitsize);
+    Value *AbsV =
+        Builder.CreateAnd(IntV, llvm::ConstantInt::get(IntTy, AndMask));
+    APInt ExpMask = APFloat::getInf(Semantics).bitcastToAPInt();
+    Value *Sub =
+        Builder.CreateSub(llvm::ConstantInt::get(IntTy, ExpMask), AbsV);
+    // V = sign bit (Sub) <=> V = (Sub < 0)
+    V = Builder.CreateLShr(Sub, llvm::ConstantInt::get(IntTy, bitsize - 1));
+    if (bitsize > 32)
+      V = Builder.CreateTrunc(V, ConvertType(E->getType()));
+    return RValue::get(V);
+  }
+
+  case Builtin::BI__builtin_elementwise_abs: {
+    Value *Op0 = EmitScalarExpr(E->getArg(0));
+    Value *Result;
+    if (Op0->getType()->isIntOrIntVectorTy())
+      Result = Builder.CreateBinaryIntrinsic(
+          llvm::Intrinsic::abs, Op0, Builder.getFalse(), nullptr, "elt.abs");
+    else
+      Result = Builder.CreateUnaryIntrinsic(llvm::Intrinsic::fabs, Op0, nullptr,
+                                            "elt.abs");
+    return RValue::get(Result);
+  }
+
+  case Builtin::BI__builtin_elementwise_ceil: {
+    Value *Op0 = EmitScalarExpr(E->getArg(0));
+    Value *Result = Builder.CreateUnaryIntrinsic(llvm::Intrinsic::ceil, Op0,
+                                                 nullptr, "elt.ceil");
+    return RValue::get(Result);
+  }
+
+  case Builtin::BI__builtin_elementwise_max: {
+    Value *Op0 = EmitScalarExpr(E->getArg(0));
+    Value *Op1 = EmitScalarExpr(E->getArg(1));
+    Value *Result;
+    if (Op0->getType()->isIntOrIntVectorTy()) {
+      QualType Ty = E->getArg(0)->getType();
+      if (auto *VecTy = Ty->getAs<VectorType>())
+        Ty = VecTy->getElementType();
+      Result = Builder.CreateBinaryIntrinsic(Ty->isSignedIntegerType()
+                                                 ? llvm::Intrinsic::smax
+                                                 : llvm::Intrinsic::umax,
+                                             Op0, Op1, nullptr, "elt.max");
+    } else
+      Result = Builder.CreateMaxNum(Op0, Op1, "elt.max");
+    return RValue::get(Result);
+  }
+  case Builtin::BI__builtin_elementwise_min: {
+    Value *Op0 = EmitScalarExpr(E->getArg(0));
+    Value *Op1 = EmitScalarExpr(E->getArg(1));
+    Value *Result;
+    if (Op0->getType()->isIntOrIntVectorTy()) {
+      QualType Ty = E->getArg(0)->getType();
+      if (auto *VecTy = Ty->getAs<VectorType>())
+        Ty = VecTy->getElementType();
+      Result = Builder.CreateBinaryIntrinsic(Ty->isSignedIntegerType()
+                                                 ? llvm::Intrinsic::smin
+                                                 : llvm::Intrinsic::umin,
+                                             Op0, Op1, nullptr, "elt.min");
+    } else
+      Result = Builder.CreateMinNum(Op0, Op1, "elt.min");
+    return RValue::get(Result);
+  }
+
+  case Builtin::BI__builtin_reduce_max: {
+    auto GetIntrinsicID = [](QualType QT, llvm::Type *IrTy) {
+      if (IrTy->isIntOrIntVectorTy()) {
+        if (auto *VecTy = QT->getAs<VectorType>())
+          QT = VecTy->getElementType();
+        if (QT->isSignedIntegerType())
+          return llvm::Intrinsic::vector_reduce_smax;
+        else
+          return llvm::Intrinsic::vector_reduce_umax;
+      }
+      return llvm::Intrinsic::vector_reduce_fmax;
+    };
+    Value *Op0 = EmitScalarExpr(E->getArg(0));
+    Value *Result = Builder.CreateUnaryIntrinsic(
+        GetIntrinsicID(E->getArg(0)->getType(), Op0->getType()), Op0, nullptr,
+        "rdx.min");
+    return RValue::get(Result);
+  }
+
+  case Builtin::BI__builtin_reduce_min: {
+    auto GetIntrinsicID = [](QualType QT, llvm::Type *IrTy) {
+      if (IrTy->isIntOrIntVectorTy()) {
+        if (auto *VecTy = QT->getAs<VectorType>())
+          QT = VecTy->getElementType();
+        if (QT->isSignedIntegerType())
+          return llvm::Intrinsic::vector_reduce_smin;
+        else
+          return llvm::Intrinsic::vector_reduce_umin;
+      }
+      return llvm::Intrinsic::vector_reduce_fmin;
+    };
+    Value *Op0 = EmitScalarExpr(E->getArg(0));
+    Value *Result = Builder.CreateUnaryIntrinsic(
+        GetIntrinsicID(E->getArg(0)->getType(), Op0->getType()), Op0, nullptr,
+        "rdx.min");
+    return RValue::get(Result);
+  }
+
+  case Builtin::BI__builtin_reduce_xor: {
+    Value *Op0 = EmitScalarExpr(E->getArg(0));
+    Value *Result = Builder.CreateUnaryIntrinsic(
+        llvm::Intrinsic::vector_reduce_xor, Op0, nullptr, "rdx.xor");
+    return RValue::get(Result);
   }
 
   case Builtin::BI__builtin_matrix_transpose: {
@@ -4375,6 +4512,9 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
   }
   case Builtin::BI__builtin_addressof:
     return RValue::get(EmitLValue(E->getArg(0)).getPointer(*this));
+  case Builtin::BI__builtin_function_start:
+    return RValue::get(CGM.GetFunctionStart(
+        E->getArg(0)->getAsBuiltinConstantDeclRef(CGM.getContext())));
   case Builtin::BI__builtin_operator_new:
     return EmitBuiltinNewDeleteCall(
         E->getCallee()->getType()->castAs<FunctionProtoType>(), E, false);
@@ -4571,8 +4711,6 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     return EmitCoroutineIntrinsic(E, Intrinsic::coro_end);
   case Builtin::BI__builtin_coro_suspend:
     return EmitCoroutineIntrinsic(E, Intrinsic::coro_suspend);
-  case Builtin::BI__builtin_coro_param:
-    return EmitCoroutineIntrinsic(E, Intrinsic::coro_param);
 
   // OpenCL v2.0 s6.13.16.2, Built-in pipe read and write functions
   case Builtin::BIread_pipe:
@@ -5004,11 +5142,16 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     return RValue::get(Builder.CreateFPExt(HalfVal, Builder.getFloatTy()));
   }
   case Builtin::BIprintf:
-    if (getTarget().getTriple().isNVPTX())
-      return EmitNVPTXDevicePrintfCallExpr(E, ReturnValue);
-    if (getTarget().getTriple().getArch() == Triple::amdgcn &&
-        getLangOpts().HIP)
-      return EmitAMDGPUDevicePrintfCallExpr(E, ReturnValue);
+    if (getTarget().getTriple().isNVPTX() ||
+        getTarget().getTriple().isAMDGCN()) {
+      if (getLangOpts().OpenMPIsDevice)
+        return EmitOpenMPDevicePrintfCallExpr(E);
+      if (getTarget().getTriple().isNVPTX())
+        return EmitNVPTXDevicePrintfCallExpr(E);
+      if (getTarget().getTriple().isAMDGCN() && getLangOpts().HIP)
+        return EmitAMDGPUDevicePrintfCallExpr(E);
+    }
+
     break;
   case Builtin::BI__builtin_canonicalize:
   case Builtin::BI__builtin_canonicalizef:
@@ -5113,9 +5256,9 @@ RValue CodeGenFunction::EmitBuiltinExpr(const GlobalDecl GD, unsigned BuiltinID,
     llvm::Type *BPP = Int8PtrPtrTy;
 
     DestAddr = Address(Builder.CreateBitCast(DestAddr.getPointer(), BPP, "cp"),
-                       DestAddr.getAlignment());
+                       Int8PtrTy, DestAddr.getAlignment());
     SrcAddr = Address(Builder.CreateBitCast(SrcAddr.getPointer(), BPP, "ap"),
-                      SrcAddr.getAlignment());
+                      Int8PtrTy, SrcAddr.getAlignment());
 
     Value *ArgPtr = Builder.CreateLoad(SrcAddr, "ap.val");
     return RValue::get(Builder.CreateStore(ArgPtr, DestAddr));
@@ -6283,6 +6426,7 @@ static const ARMVectorIntrinsicInfo AArch64SISDIntrinsicMap[] = {
 static const ARMVectorIntrinsicInfo AArch64SVEIntrinsicMap[] = {
 #define GET_SVE_LLVM_INTRINSIC_MAP
 #include "clang/Basic/arm_sve_builtin_cg.inc"
+#include "clang/Basic/BuiltinsAArch64NeonSVEBridge_cg.def"
 #undef GET_SVE_LLVM_INTRINSIC_MAP
 };
 
@@ -8385,7 +8529,7 @@ Value *CodeGenFunction::vectorWrapScalar16(Value *Op) {
 /// SVEBuiltinMemEltTy - Returns the memory element type for this memory
 /// access builtin.  Only required if it can't be inferred from the base pointer
 /// operand.
-llvm::Type *CodeGenFunction::SVEBuiltinMemEltTy(SVETypeFlags TypeFlags) {
+llvm::Type *CodeGenFunction::SVEBuiltinMemEltTy(const SVETypeFlags &TypeFlags) {
   switch (TypeFlags.getMemEltType()) {
   case SVETypeFlags::MemEltTyDefault:
     return getEltType(TypeFlags);
@@ -8401,7 +8545,7 @@ llvm::Type *CodeGenFunction::SVEBuiltinMemEltTy(SVETypeFlags TypeFlags) {
   llvm_unreachable("Unknown MemEltType");
 }
 
-llvm::Type *CodeGenFunction::getEltType(SVETypeFlags TypeFlags) {
+llvm::Type *CodeGenFunction::getEltType(const SVETypeFlags &TypeFlags) {
   switch (TypeFlags.getEltType()) {
   default:
     llvm_unreachable("Invalid SVETypeFlag!");
@@ -8436,7 +8580,7 @@ llvm::Type *CodeGenFunction::getEltType(SVETypeFlags TypeFlags) {
 // Return the llvm predicate vector type corresponding to the specified element
 // TypeFlags.
 llvm::ScalableVectorType *
-CodeGenFunction::getSVEPredType(SVETypeFlags TypeFlags) {
+CodeGenFunction::getSVEPredType(const SVETypeFlags &TypeFlags) {
   switch (TypeFlags.getEltType()) {
   default: llvm_unreachable("Unhandled SVETypeFlag!");
 
@@ -8505,7 +8649,8 @@ CodeGenFunction::getSVEType(const SVETypeFlags &TypeFlags) {
   }
 }
 
-llvm::Value *CodeGenFunction::EmitSVEAllTruePred(SVETypeFlags TypeFlags) {
+llvm::Value *
+CodeGenFunction::EmitSVEAllTruePred(const SVETypeFlags &TypeFlags) {
   Function *Ptrue =
       CGM.getIntrinsic(Intrinsic::aarch64_sve_ptrue, getSVEPredType(TypeFlags));
   return Builder.CreateCall(Ptrue, {Builder.getInt32(/*SV_ALL*/ 31)});
@@ -8549,7 +8694,7 @@ Value *CodeGenFunction::EmitSVEPredicateCast(Value *Pred,
   return C;
 }
 
-Value *CodeGenFunction::EmitSVEGatherLoad(SVETypeFlags TypeFlags,
+Value *CodeGenFunction::EmitSVEGatherLoad(const SVETypeFlags &TypeFlags,
                                           SmallVectorImpl<Value *> &Ops,
                                           unsigned IntID) {
   auto *ResultTy = getSVEType(TypeFlags);
@@ -8601,7 +8746,7 @@ Value *CodeGenFunction::EmitSVEGatherLoad(SVETypeFlags TypeFlags,
                                   : Builder.CreateSExt(Call, ResultTy);
 }
 
-Value *CodeGenFunction::EmitSVEScatterStore(SVETypeFlags TypeFlags,
+Value *CodeGenFunction::EmitSVEScatterStore(const SVETypeFlags &TypeFlags,
                                             SmallVectorImpl<Value *> &Ops,
                                             unsigned IntID) {
   auto *SrcDataTy = getSVEType(TypeFlags);
@@ -8656,7 +8801,7 @@ Value *CodeGenFunction::EmitSVEScatterStore(SVETypeFlags TypeFlags,
   return Builder.CreateCall(F, Ops);
 }
 
-Value *CodeGenFunction::EmitSVEGatherPrefetch(SVETypeFlags TypeFlags,
+Value *CodeGenFunction::EmitSVEGatherPrefetch(const SVETypeFlags &TypeFlags,
                                               SmallVectorImpl<Value *> &Ops,
                                               unsigned IntID) {
   // The gather prefetches are overloaded on the vector input - this can either
@@ -8689,7 +8834,7 @@ Value *CodeGenFunction::EmitSVEGatherPrefetch(SVETypeFlags TypeFlags,
   return Builder.CreateCall(F, Ops);
 }
 
-Value *CodeGenFunction::EmitSVEStructLoad(SVETypeFlags TypeFlags,
+Value *CodeGenFunction::EmitSVEStructLoad(const SVETypeFlags &TypeFlags,
                                           SmallVectorImpl<Value*> &Ops,
                                           unsigned IntID) {
   llvm::ScalableVectorType *VTy = getSVEType(TypeFlags);
@@ -8723,7 +8868,7 @@ Value *CodeGenFunction::EmitSVEStructLoad(SVETypeFlags TypeFlags,
   return Builder.CreateCall(F, { Predicate, BasePtr });
 }
 
-Value *CodeGenFunction::EmitSVEStructStore(SVETypeFlags TypeFlags,
+Value *CodeGenFunction::EmitSVEStructStore(const SVETypeFlags &TypeFlags,
                                            SmallVectorImpl<Value*> &Ops,
                                            unsigned IntID) {
   llvm::ScalableVectorType *VTy = getSVEType(TypeFlags);
@@ -8770,7 +8915,7 @@ Value *CodeGenFunction::EmitSVEStructStore(SVETypeFlags TypeFlags,
 // SVE2's svpmullb and svpmullt builtins are similar to the svpmullb_pair and
 // svpmullt_pair intrinsics, with the exception that their results are bitcast
 // to a wider type.
-Value *CodeGenFunction::EmitSVEPMull(SVETypeFlags TypeFlags,
+Value *CodeGenFunction::EmitSVEPMull(const SVETypeFlags &TypeFlags,
                                      SmallVectorImpl<Value *> &Ops,
                                      unsigned BuiltinID) {
   // Splat scalar operand to vector (intrinsics with _n infix)
@@ -8788,14 +8933,14 @@ Value *CodeGenFunction::EmitSVEPMull(SVETypeFlags TypeFlags,
   return EmitSVEReinterpret(Call, Ty);
 }
 
-Value *CodeGenFunction::EmitSVEMovl(SVETypeFlags TypeFlags,
+Value *CodeGenFunction::EmitSVEMovl(const SVETypeFlags &TypeFlags,
                                     ArrayRef<Value *> Ops, unsigned BuiltinID) {
   llvm::Type *OverloadedTy = getSVEType(TypeFlags);
   Function *F = CGM.getIntrinsic(BuiltinID, OverloadedTy);
   return Builder.CreateCall(F, {Ops[0], Builder.getInt32(0)});
 }
 
-Value *CodeGenFunction::EmitSVEPrefetchLoad(SVETypeFlags TypeFlags,
+Value *CodeGenFunction::EmitSVEPrefetchLoad(const SVETypeFlags &TypeFlags,
                                             SmallVectorImpl<Value *> &Ops,
                                             unsigned BuiltinID) {
   auto *MemEltTy = SVEBuiltinMemEltTy(TypeFlags);
@@ -8904,8 +9049,10 @@ static void InsertExplicitUndefOperand(CGBuilderTy &Builder, llvm::Type *Ty,
   Ops.insert(Ops.begin(), SplatUndef);
 }
 
-SmallVector<llvm::Type *, 2> CodeGenFunction::getSVEOverloadTypes(
-    SVETypeFlags TypeFlags, llvm::Type *ResultType, ArrayRef<Value *> Ops) {
+SmallVector<llvm::Type *, 2>
+CodeGenFunction::getSVEOverloadTypes(const SVETypeFlags &TypeFlags,
+                                     llvm::Type *ResultType,
+                                     ArrayRef<Value *> Ops) {
   if (TypeFlags.isOverloadNone())
     return {};
 
@@ -9202,6 +9349,54 @@ Value *CodeGenFunction::EmitAArch64SVEBuiltinExpr(unsigned BuiltinID,
     Value *V1 = Builder.CreateCall(FExtr, {Ops[0], Builder.getInt32(1)});
     Function *F = CGM.getIntrinsic(Intrinsic::aarch64_sve_tbl2, VTy);
     return Builder.CreateCall(F, {V0, V1, Ops[1]});
+  }
+
+  case SVE::BI__builtin_sve_svset_neonq_s8:
+  case SVE::BI__builtin_sve_svset_neonq_s16:
+  case SVE::BI__builtin_sve_svset_neonq_s32:
+  case SVE::BI__builtin_sve_svset_neonq_s64:
+  case SVE::BI__builtin_sve_svset_neonq_u8:
+  case SVE::BI__builtin_sve_svset_neonq_u16:
+  case SVE::BI__builtin_sve_svset_neonq_u32:
+  case SVE::BI__builtin_sve_svset_neonq_u64:
+  case SVE::BI__builtin_sve_svset_neonq_f16:
+  case SVE::BI__builtin_sve_svset_neonq_f32:
+  case SVE::BI__builtin_sve_svset_neonq_f64:
+  case SVE::BI__builtin_sve_svset_neonq_bf16: {
+    return Builder.CreateInsertVector(Ty, Ops[0], Ops[1], Builder.getInt64(0));
+  }
+
+  case SVE::BI__builtin_sve_svget_neonq_s8:
+  case SVE::BI__builtin_sve_svget_neonq_s16:
+  case SVE::BI__builtin_sve_svget_neonq_s32:
+  case SVE::BI__builtin_sve_svget_neonq_s64:
+  case SVE::BI__builtin_sve_svget_neonq_u8:
+  case SVE::BI__builtin_sve_svget_neonq_u16:
+  case SVE::BI__builtin_sve_svget_neonq_u32:
+  case SVE::BI__builtin_sve_svget_neonq_u64:
+  case SVE::BI__builtin_sve_svget_neonq_f16:
+  case SVE::BI__builtin_sve_svget_neonq_f32:
+  case SVE::BI__builtin_sve_svget_neonq_f64:
+  case SVE::BI__builtin_sve_svget_neonq_bf16: {
+    return Builder.CreateExtractVector(Ty, Ops[0], Builder.getInt64(0));
+  }
+
+  case SVE::BI__builtin_sve_svdup_neonq_s8:
+  case SVE::BI__builtin_sve_svdup_neonq_s16:
+  case SVE::BI__builtin_sve_svdup_neonq_s32:
+  case SVE::BI__builtin_sve_svdup_neonq_s64:
+  case SVE::BI__builtin_sve_svdup_neonq_u8:
+  case SVE::BI__builtin_sve_svdup_neonq_u16:
+  case SVE::BI__builtin_sve_svdup_neonq_u32:
+  case SVE::BI__builtin_sve_svdup_neonq_u64:
+  case SVE::BI__builtin_sve_svdup_neonq_f16:
+  case SVE::BI__builtin_sve_svdup_neonq_f32:
+  case SVE::BI__builtin_sve_svdup_neonq_f64:
+  case SVE::BI__builtin_sve_svdup_neonq_bf16: {
+    Value *Insert = Builder.CreateInsertVector(Ty, UndefValue::get(Ty), Ops[0],
+                                               Builder.getInt64(0));
+    return Builder.CreateIntrinsic(Intrinsic::aarch64_sve_dupq_lane, {Ty},
+                                   {Insert, Builder.getInt64(0)});
   }
   }
 
@@ -9716,6 +9911,29 @@ Value *CodeGenFunction::EmitAArch64BuiltinExpr(unsigned BuiltinID,
   if (BuiltinID == AArch64::BI__builtin_sponentry) {
     llvm::Function *F = CGM.getIntrinsic(Intrinsic::sponentry, AllocaInt8PtrTy);
     return Builder.CreateCall(F);
+  }
+
+  if (BuiltinID == AArch64::BI__mulh || BuiltinID == AArch64::BI__umulh) {
+    llvm::Type *ResType = ConvertType(E->getType());
+    llvm::Type *Int128Ty = llvm::IntegerType::get(getLLVMContext(), 128);
+
+    bool IsSigned = BuiltinID == AArch64::BI__mulh;
+    Value *LHS =
+        Builder.CreateIntCast(EmitScalarExpr(E->getArg(0)), Int128Ty, IsSigned);
+    Value *RHS =
+        Builder.CreateIntCast(EmitScalarExpr(E->getArg(1)), Int128Ty, IsSigned);
+
+    Value *MulResult, *HigherBits;
+    if (IsSigned) {
+      MulResult = Builder.CreateNSWMul(LHS, RHS);
+      HigherBits = Builder.CreateAShr(MulResult, 64);
+    } else {
+      MulResult = Builder.CreateNUWMul(LHS, RHS);
+      HigherBits = Builder.CreateLShr(MulResult, 64);
+    }
+    HigherBits = Builder.CreateIntCast(HigherBits, ResType, IsSigned);
+
+    return HigherBits;
   }
 
   // Handle MSVC intrinsics before argument evaluation to prevent double
@@ -12030,6 +12248,22 @@ static Value *EmitX86FMAExpr(CodeGenFunction &CGF, const CallExpr *E,
   Intrinsic::ID IID = Intrinsic::not_intrinsic;
   switch (BuiltinID) {
   default: break;
+  case clang::X86::BI__builtin_ia32_vfmsubph512_mask3:
+    Subtract = true;
+    LLVM_FALLTHROUGH;
+  case clang::X86::BI__builtin_ia32_vfmaddph512_mask:
+  case clang::X86::BI__builtin_ia32_vfmaddph512_maskz:
+  case clang::X86::BI__builtin_ia32_vfmaddph512_mask3:
+    IID = llvm::Intrinsic::x86_avx512fp16_vfmadd_ph_512;
+    break;
+  case clang::X86::BI__builtin_ia32_vfmsubaddph512_mask3:
+    Subtract = true;
+    LLVM_FALLTHROUGH;
+  case clang::X86::BI__builtin_ia32_vfmaddsubph512_mask:
+  case clang::X86::BI__builtin_ia32_vfmaddsubph512_maskz:
+  case clang::X86::BI__builtin_ia32_vfmaddsubph512_mask3:
+    IID = llvm::Intrinsic::x86_avx512fp16_vfmaddsub_ph_512;
+    break;
   case clang::X86::BI__builtin_ia32_vfmsubps512_mask3:
     Subtract = true;
     LLVM_FALLTHROUGH;
@@ -12093,22 +12327,30 @@ static Value *EmitX86FMAExpr(CodeGenFunction &CGF, const CallExpr *E,
   // Handle any required masking.
   Value *MaskFalseVal = nullptr;
   switch (BuiltinID) {
+  case clang::X86::BI__builtin_ia32_vfmaddph512_mask:
   case clang::X86::BI__builtin_ia32_vfmaddps512_mask:
   case clang::X86::BI__builtin_ia32_vfmaddpd512_mask:
+  case clang::X86::BI__builtin_ia32_vfmaddsubph512_mask:
   case clang::X86::BI__builtin_ia32_vfmaddsubps512_mask:
   case clang::X86::BI__builtin_ia32_vfmaddsubpd512_mask:
     MaskFalseVal = Ops[0];
     break;
+  case clang::X86::BI__builtin_ia32_vfmaddph512_maskz:
   case clang::X86::BI__builtin_ia32_vfmaddps512_maskz:
   case clang::X86::BI__builtin_ia32_vfmaddpd512_maskz:
+  case clang::X86::BI__builtin_ia32_vfmaddsubph512_maskz:
   case clang::X86::BI__builtin_ia32_vfmaddsubps512_maskz:
   case clang::X86::BI__builtin_ia32_vfmaddsubpd512_maskz:
     MaskFalseVal = Constant::getNullValue(Ops[0]->getType());
     break;
+  case clang::X86::BI__builtin_ia32_vfmsubph512_mask3:
+  case clang::X86::BI__builtin_ia32_vfmaddph512_mask3:
   case clang::X86::BI__builtin_ia32_vfmsubps512_mask3:
   case clang::X86::BI__builtin_ia32_vfmaddps512_mask3:
   case clang::X86::BI__builtin_ia32_vfmsubpd512_mask3:
   case clang::X86::BI__builtin_ia32_vfmaddpd512_mask3:
+  case clang::X86::BI__builtin_ia32_vfmsubaddph512_mask3:
+  case clang::X86::BI__builtin_ia32_vfmaddsubph512_mask3:
   case clang::X86::BI__builtin_ia32_vfmsubaddps512_mask3:
   case clang::X86::BI__builtin_ia32_vfmaddsubps512_mask3:
   case clang::X86::BI__builtin_ia32_vfmsubaddpd512_mask3:
@@ -12139,9 +12381,21 @@ static Value *EmitScalarFMAExpr(CodeGenFunction &CGF, const CallExpr *E,
   Ops[2] = CGF.Builder.CreateExtractElement(Ops[2], (uint64_t)0);
   Value *Res;
   if (Rnd != 4) {
-    Intrinsic::ID IID = Ops[0]->getType()->getPrimitiveSizeInBits() == 32 ?
-                        Intrinsic::x86_avx512_vfmadd_f32 :
-                        Intrinsic::x86_avx512_vfmadd_f64;
+    Intrinsic::ID IID;
+
+    switch (Ops[0]->getType()->getPrimitiveSizeInBits()) {
+    case 16:
+      IID = Intrinsic::x86_avx512fp16_vfmadd_f16;
+      break;
+    case 32:
+      IID = Intrinsic::x86_avx512_vfmadd_f32;
+      break;
+    case 64:
+      IID = Intrinsic::x86_avx512_vfmadd_f64;
+      break;
+    default:
+      llvm_unreachable("Unexpected size");
+    }
     Res = CGF.Builder.CreateCall(CGF.CGM.getIntrinsic(IID),
                                  {Ops[0], Ops[1], Ops[2], Ops[4]});
   } else if (CGF.Builder.getIsFPConstrained()) {
@@ -12348,23 +12602,8 @@ Value *CodeGenFunction::EmitX86CpuSupports(const CallExpr *E) {
   return EmitX86CpuSupports(FeatureStr);
 }
 
-uint64_t
-CodeGenFunction::GetX86CpuSupportsMask(ArrayRef<StringRef> FeatureStrs) {
-  // Processor features and mapping to processor feature value.
-  uint64_t FeaturesMask = 0;
-  for (const StringRef &FeatureStr : FeatureStrs) {
-    unsigned Feature =
-        StringSwitch<unsigned>(FeatureStr)
-#define X86_FEATURE_COMPAT(ENUM, STR) .Case(STR, llvm::X86::FEATURE_##ENUM)
-#include "llvm/Support/X86TargetParser.def"
-        ;
-    FeaturesMask |= (1ULL << Feature);
-  }
-  return FeaturesMask;
-}
-
 Value *CodeGenFunction::EmitX86CpuSupports(ArrayRef<StringRef> FeatureStrs) {
-  return EmitX86CpuSupports(GetX86CpuSupportsMask(FeatureStrs));
+  return EmitX86CpuSupports(llvm::X86::getCpuSupportsMask(FeatureStrs));
 }
 
 llvm::Value *CodeGenFunction::EmitX86CpuSupports(uint64_t FeaturesMask) {
@@ -12447,6 +12686,7 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
 
   SmallVector<Value*, 4> Ops;
   bool IsMaskFCmp = false;
+  bool IsConjFMA = false;
 
   // Find out if any arguments are required to be integer constant expressions.
   unsigned ICEArguments = 0;
@@ -12729,14 +12969,21 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
   case X86::BI__builtin_ia32_cvtdq2ps512_mask:
   case X86::BI__builtin_ia32_cvtqq2ps512_mask:
   case X86::BI__builtin_ia32_cvtqq2pd512_mask:
+  case X86::BI__builtin_ia32_vcvtw2ph512_mask:
+  case X86::BI__builtin_ia32_vcvtdq2ph512_mask:
+  case X86::BI__builtin_ia32_vcvtqq2ph512_mask:
     return EmitX86ConvertIntToFp(*this, E, Ops, /*IsSigned*/ true);
   case X86::BI__builtin_ia32_cvtudq2ps512_mask:
   case X86::BI__builtin_ia32_cvtuqq2ps512_mask:
   case X86::BI__builtin_ia32_cvtuqq2pd512_mask:
+  case X86::BI__builtin_ia32_vcvtuw2ph512_mask:
+  case X86::BI__builtin_ia32_vcvtudq2ph512_mask:
+  case X86::BI__builtin_ia32_vcvtuqq2ph512_mask:
     return EmitX86ConvertIntToFp(*this, E, Ops, /*IsSigned*/ false);
 
   case X86::BI__builtin_ia32_vfmaddss3:
   case X86::BI__builtin_ia32_vfmaddsd3:
+  case X86::BI__builtin_ia32_vfmaddsh3_mask:
   case X86::BI__builtin_ia32_vfmaddss3_mask:
   case X86::BI__builtin_ia32_vfmaddsd3_mask:
     return EmitScalarFMAExpr(*this, E, Ops, Ops[0]);
@@ -12744,20 +12991,28 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
   case X86::BI__builtin_ia32_vfmaddsd:
     return EmitScalarFMAExpr(*this, E, Ops,
                              Constant::getNullValue(Ops[0]->getType()));
+  case X86::BI__builtin_ia32_vfmaddsh3_maskz:
   case X86::BI__builtin_ia32_vfmaddss3_maskz:
   case X86::BI__builtin_ia32_vfmaddsd3_maskz:
     return EmitScalarFMAExpr(*this, E, Ops, Ops[0], /*ZeroMask*/ true);
+  case X86::BI__builtin_ia32_vfmaddsh3_mask3:
   case X86::BI__builtin_ia32_vfmaddss3_mask3:
   case X86::BI__builtin_ia32_vfmaddsd3_mask3:
     return EmitScalarFMAExpr(*this, E, Ops, Ops[2], /*ZeroMask*/ false, 2);
+  case X86::BI__builtin_ia32_vfmsubsh3_mask3:
   case X86::BI__builtin_ia32_vfmsubss3_mask3:
   case X86::BI__builtin_ia32_vfmsubsd3_mask3:
     return EmitScalarFMAExpr(*this, E, Ops, Ops[2], /*ZeroMask*/ false, 2,
                              /*NegAcc*/ true);
+  case X86::BI__builtin_ia32_vfmaddph:
   case X86::BI__builtin_ia32_vfmaddps:
   case X86::BI__builtin_ia32_vfmaddpd:
+  case X86::BI__builtin_ia32_vfmaddph256:
   case X86::BI__builtin_ia32_vfmaddps256:
   case X86::BI__builtin_ia32_vfmaddpd256:
+  case X86::BI__builtin_ia32_vfmaddph512_mask:
+  case X86::BI__builtin_ia32_vfmaddph512_maskz:
+  case X86::BI__builtin_ia32_vfmaddph512_mask3:
   case X86::BI__builtin_ia32_vfmaddps512_mask:
   case X86::BI__builtin_ia32_vfmaddps512_maskz:
   case X86::BI__builtin_ia32_vfmaddps512_mask3:
@@ -12766,7 +13021,12 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
   case X86::BI__builtin_ia32_vfmaddpd512_maskz:
   case X86::BI__builtin_ia32_vfmaddpd512_mask3:
   case X86::BI__builtin_ia32_vfmsubpd512_mask3:
+  case X86::BI__builtin_ia32_vfmsubph512_mask3:
     return EmitX86FMAExpr(*this, E, Ops, BuiltinID, /*IsAddSub*/ false);
+  case X86::BI__builtin_ia32_vfmaddsubph512_mask:
+  case X86::BI__builtin_ia32_vfmaddsubph512_maskz:
+  case X86::BI__builtin_ia32_vfmaddsubph512_mask3:
+  case X86::BI__builtin_ia32_vfmsubaddph512_mask3:
   case X86::BI__builtin_ia32_vfmaddsubps512_mask:
   case X86::BI__builtin_ia32_vfmaddsubps512_maskz:
   case X86::BI__builtin_ia32_vfmaddsubps512_mask3:
@@ -13936,15 +14196,28 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
     }
     return Builder.CreateInsertElement(Ops[0], A, (uint64_t)0);
   }
+  case X86::BI__builtin_ia32_sqrtsh_round_mask:
   case X86::BI__builtin_ia32_sqrtsd_round_mask:
   case X86::BI__builtin_ia32_sqrtss_round_mask: {
     unsigned CC = cast<llvm::ConstantInt>(Ops[4])->getZExtValue();
     // Support only if the rounding mode is 4 (AKA CUR_DIRECTION),
     // otherwise keep the intrinsic.
     if (CC != 4) {
-      Intrinsic::ID IID = BuiltinID == X86::BI__builtin_ia32_sqrtsd_round_mask ?
-                          Intrinsic::x86_avx512_mask_sqrt_sd :
-                          Intrinsic::x86_avx512_mask_sqrt_ss;
+      Intrinsic::ID IID;
+
+      switch (BuiltinID) {
+      default:
+        llvm_unreachable("Unsupported intrinsic!");
+      case X86::BI__builtin_ia32_sqrtsh_round_mask:
+        IID = Intrinsic::x86_avx512fp16_mask_sqrt_sh;
+        break;
+      case X86::BI__builtin_ia32_sqrtsd_round_mask:
+        IID = Intrinsic::x86_avx512_mask_sqrt_sd;
+        break;
+      case X86::BI__builtin_ia32_sqrtss_round_mask:
+        IID = Intrinsic::x86_avx512_mask_sqrt_ss;
+        break;
+      }
       return Builder.CreateCall(CGM.getIntrinsic(IID), Ops);
     }
     Value *A = Builder.CreateExtractElement(Ops[1], (uint64_t)0);
@@ -13966,6 +14239,9 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
   case X86::BI__builtin_ia32_sqrtpd:
   case X86::BI__builtin_ia32_sqrtps256:
   case X86::BI__builtin_ia32_sqrtps:
+  case X86::BI__builtin_ia32_sqrtph256:
+  case X86::BI__builtin_ia32_sqrtph:
+  case X86::BI__builtin_ia32_sqrtph512:
   case X86::BI__builtin_ia32_sqrtps512:
   case X86::BI__builtin_ia32_sqrtpd512: {
     if (Ops.size() == 2) {
@@ -13973,9 +14249,21 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
       // Support only if the rounding mode is 4 (AKA CUR_DIRECTION),
       // otherwise keep the intrinsic.
       if (CC != 4) {
-        Intrinsic::ID IID = BuiltinID == X86::BI__builtin_ia32_sqrtps512 ?
-                            Intrinsic::x86_avx512_sqrt_ps_512 :
-                            Intrinsic::x86_avx512_sqrt_pd_512;
+        Intrinsic::ID IID;
+
+        switch (BuiltinID) {
+        default:
+          llvm_unreachable("Unsupported intrinsic!");
+        case X86::BI__builtin_ia32_sqrtph512:
+          IID = Intrinsic::x86_avx512fp16_sqrt_ph_512;
+          break;
+        case X86::BI__builtin_ia32_sqrtps512:
+          IID = Intrinsic::x86_avx512_sqrt_ps_512;
+          break;
+        case X86::BI__builtin_ia32_sqrtpd512:
+          IID = Intrinsic::x86_avx512_sqrt_pd_512;
+          break;
+        }
         return Builder.CreateCall(CGM.getIntrinsic(IID), Ops);
       }
     }
@@ -14143,28 +14431,40 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
     return Builder.CreateCall(F, {Ops[0]});
   }
   case X86::BI__builtin_ia32_reduce_fadd_pd512:
-  case X86::BI__builtin_ia32_reduce_fadd_ps512: {
+  case X86::BI__builtin_ia32_reduce_fadd_ps512:
+  case X86::BI__builtin_ia32_reduce_fadd_ph512:
+  case X86::BI__builtin_ia32_reduce_fadd_ph256:
+  case X86::BI__builtin_ia32_reduce_fadd_ph128: {
     Function *F =
         CGM.getIntrinsic(Intrinsic::vector_reduce_fadd, Ops[1]->getType());
     Builder.getFastMathFlags().setAllowReassoc();
     return Builder.CreateCall(F, {Ops[0], Ops[1]});
   }
   case X86::BI__builtin_ia32_reduce_fmul_pd512:
-  case X86::BI__builtin_ia32_reduce_fmul_ps512: {
+  case X86::BI__builtin_ia32_reduce_fmul_ps512:
+  case X86::BI__builtin_ia32_reduce_fmul_ph512:
+  case X86::BI__builtin_ia32_reduce_fmul_ph256:
+  case X86::BI__builtin_ia32_reduce_fmul_ph128: {
     Function *F =
         CGM.getIntrinsic(Intrinsic::vector_reduce_fmul, Ops[1]->getType());
     Builder.getFastMathFlags().setAllowReassoc();
     return Builder.CreateCall(F, {Ops[0], Ops[1]});
   }
   case X86::BI__builtin_ia32_reduce_fmax_pd512:
-  case X86::BI__builtin_ia32_reduce_fmax_ps512: {
+  case X86::BI__builtin_ia32_reduce_fmax_ps512:
+  case X86::BI__builtin_ia32_reduce_fmax_ph512:
+  case X86::BI__builtin_ia32_reduce_fmax_ph256:
+  case X86::BI__builtin_ia32_reduce_fmax_ph128: {
     Function *F =
         CGM.getIntrinsic(Intrinsic::vector_reduce_fmax, Ops[0]->getType());
     Builder.getFastMathFlags().setNoNaNs();
     return Builder.CreateCall(F, {Ops[0]});
   }
   case X86::BI__builtin_ia32_reduce_fmin_pd512:
-  case X86::BI__builtin_ia32_reduce_fmin_ps512: {
+  case X86::BI__builtin_ia32_reduce_fmin_ps512:
+  case X86::BI__builtin_ia32_reduce_fmin_ph512:
+  case X86::BI__builtin_ia32_reduce_fmin_ph256:
+  case X86::BI__builtin_ia32_reduce_fmin_ph128: {
     Function *F =
         CGM.getIntrinsic(Intrinsic::vector_reduce_fmin, Ops[0]->getType());
     Builder.getFastMathFlags().setNoNaNs();
@@ -14280,6 +14580,9 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
   case X86::BI__builtin_ia32_fpclassps128_mask:
   case X86::BI__builtin_ia32_fpclassps256_mask:
   case X86::BI__builtin_ia32_fpclassps512_mask:
+  case X86::BI__builtin_ia32_fpclassph128_mask:
+  case X86::BI__builtin_ia32_fpclassph256_mask:
+  case X86::BI__builtin_ia32_fpclassph512_mask:
   case X86::BI__builtin_ia32_fpclasspd128_mask:
   case X86::BI__builtin_ia32_fpclasspd256_mask:
   case X86::BI__builtin_ia32_fpclasspd512_mask: {
@@ -14291,6 +14594,15 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
     Intrinsic::ID ID;
     switch (BuiltinID) {
     default: llvm_unreachable("Unsupported intrinsic!");
+    case X86::BI__builtin_ia32_fpclassph128_mask:
+      ID = Intrinsic::x86_avx512fp16_fpclass_ph_128;
+      break;
+    case X86::BI__builtin_ia32_fpclassph256_mask:
+      ID = Intrinsic::x86_avx512fp16_fpclass_ph_256;
+      break;
+    case X86::BI__builtin_ia32_fpclassph512_mask:
+      ID = Intrinsic::x86_avx512fp16_fpclass_ph_512;
+      break;
     case X86::BI__builtin_ia32_fpclassps128_mask:
       ID = Intrinsic::x86_avx512_fpclass_ps_128;
       break;
@@ -14428,6 +14740,9 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
   case X86::BI__builtin_ia32_cmpordps:
   case X86::BI__builtin_ia32_cmpordpd:
     return getVectorFCmpIR(CmpInst::FCMP_ORD, /*IsSignaling*/false);
+  case X86::BI__builtin_ia32_cmpph128_mask:
+  case X86::BI__builtin_ia32_cmpph256_mask:
+  case X86::BI__builtin_ia32_cmpph512_mask:
   case X86::BI__builtin_ia32_cmpps128_mask:
   case X86::BI__builtin_ia32_cmpps256_mask:
   case X86::BI__builtin_ia32_cmpps512_mask:
@@ -14769,7 +15084,7 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
 
     Value *Call = Builder.CreateCall(CGM.getIntrinsic(IID), {Ops[0], Ops[1]});
 
-    for (int i = 0; i < 6; ++i) {
+    for (int i = 0; i < 3; ++i) {
       Value *Extract = Builder.CreateExtractValue(Call, i + 1);
       Value *Ptr = Builder.CreateConstGEP1_32(Int8Ty, Ops[2], i * 16);
       Ptr = Builder.CreateBitCast(
@@ -14785,7 +15100,7 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
     Value *Call =
         Builder.CreateCall(CGM.getIntrinsic(IID), {Ops[0], Ops[1], Ops[2]});
 
-    for (int i = 0; i < 7; ++i) {
+    for (int i = 0; i < 4; ++i) {
       Value *Extract = Builder.CreateExtractValue(Call, i + 1);
       Value *Ptr = Builder.CreateConstGEP1_32(Int8Ty, Ops[3], i * 16);
       Ptr = Builder.CreateBitCast(
@@ -14910,6 +15225,36 @@ Value *CodeGenFunction::EmitX86BuiltinExpr(unsigned BuiltinID,
     Builder.SetInsertPoint(End);
     return Builder.CreateExtractValue(Call, 0);
   }
+  case X86::BI__builtin_ia32_vfcmaddcph512_mask:
+    IsConjFMA = true;
+    LLVM_FALLTHROUGH;
+  case X86::BI__builtin_ia32_vfmaddcph512_mask: {
+    Intrinsic::ID IID = IsConjFMA
+                            ? Intrinsic::x86_avx512fp16_mask_vfcmadd_cph_512
+                            : Intrinsic::x86_avx512fp16_mask_vfmadd_cph_512;
+    Value *Call = Builder.CreateCall(CGM.getIntrinsic(IID), Ops);
+    return EmitX86Select(*this, Ops[3], Call, Ops[0]);
+  }
+  case X86::BI__builtin_ia32_vfcmaddcsh_round_mask:
+    IsConjFMA = true;
+    LLVM_FALLTHROUGH;
+  case X86::BI__builtin_ia32_vfmaddcsh_round_mask: {
+    Intrinsic::ID IID = IsConjFMA ? Intrinsic::x86_avx512fp16_mask_vfcmadd_csh
+                                  : Intrinsic::x86_avx512fp16_mask_vfmadd_csh;
+    Value *Call = Builder.CreateCall(CGM.getIntrinsic(IID), Ops);
+    Value *And = Builder.CreateAnd(Ops[3], llvm::ConstantInt::get(Int8Ty, 1));
+    return EmitX86Select(*this, And, Call, Ops[0]);
+  }
+  case X86::BI__builtin_ia32_vfcmaddcsh_round_mask3:
+    IsConjFMA = true;
+    LLVM_FALLTHROUGH;
+  case X86::BI__builtin_ia32_vfmaddcsh_round_mask3: {
+    Intrinsic::ID IID = IsConjFMA ? Intrinsic::x86_avx512fp16_mask_vfcmadd_csh
+                                  : Intrinsic::x86_avx512fp16_mask_vfmadd_csh;
+    Value *Call = Builder.CreateCall(CGM.getIntrinsic(IID), Ops);
+    static constexpr int Mask[] = {0, 5, 6, 7};
+    return Builder.CreateShuffleVector(Call, Ops[2], Mask);
+  }
   }
 }
 
@@ -14917,8 +15262,12 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
                                            const CallExpr *E) {
   SmallVector<Value*, 4> Ops;
 
-  for (unsigned i = 0, e = E->getNumArgs(); i != e; i++)
-    Ops.push_back(EmitScalarExpr(E->getArg(i)));
+  for (unsigned i = 0, e = E->getNumArgs(); i != e; i++) {
+    if (E->getArg(i)->getType()->isArrayType())
+      Ops.push_back(EmitArrayToPointerDecay(E->getArg(i)).getPointer());
+    else
+      Ops.push_back(EmitScalarExpr(E->getArg(i)));
+  }
 
   Intrinsic::ID ID = Intrinsic::not_intrinsic;
 
@@ -15072,7 +15421,8 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
     // If the user wants the entire vector, just load the entire vector.
     if (NumBytes == 16) {
       Value *BC = Builder.CreateBitCast(Ops[0], ResTy->getPointerTo());
-      Value *LD = Builder.CreateLoad(Address(BC, CharUnits::fromQuantity(1)));
+      Value *LD =
+          Builder.CreateLoad(Address(BC, ResTy, CharUnits::fromQuantity(1)));
       if (!IsLE)
         return LD;
 
@@ -15133,8 +15483,8 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
             RevMask.push_back(15 - Idx);
           StVec = Builder.CreateShuffleVector(Ops[2], Ops[2], RevMask);
         }
-        return Builder.CreateStore(StVec,
-                                   Address(BC, CharUnits::fromQuantity(1)));
+        return Builder.CreateStore(
+            StVec, Address(BC, Ops[2]->getType(), CharUnits::fromQuantity(1)));
       }
       auto *ConvTy = Int64Ty;
       unsigned NumElts = 0;
@@ -15168,8 +15518,8 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
         Function *F = CGM.getIntrinsic(Intrinsic::bswap, ConvTy);
         Elt = Builder.CreateCall(F, Elt);
       }
-      return Builder.CreateStore(Elt,
-                                 Address(PtrBC, CharUnits::fromQuantity(1)));
+      return Builder.CreateStore(
+          Elt, Address(PtrBC, ConvTy, CharUnits::fromQuantity(1)));
     };
     unsigned Stored = 0;
     unsigned RemainingBytes = NumBytes;
@@ -15488,6 +15838,12 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
     Value *Rotate = Builder.CreateCall(F, {Ops[0], Ops[0], ShiftAmt});
     return Builder.CreateAnd(Rotate, Ops[2]);
   }
+  case PPC::BI__builtin_ppc_load2r: {
+    Function *F = CGM.getIntrinsic(Intrinsic::ppc_load2r);
+    Ops[0] = Builder.CreateBitCast(Ops[0], Int8PtrTy);
+    Value *LoadIntrinsic = Builder.CreateCall(F, Ops);
+    return Builder.CreateTrunc(LoadIntrinsic, Int16Ty);
+  }
   // FMA variations
   case PPC::BI__builtin_vsx_xvmaddadp:
   case PPC::BI__builtin_vsx_xvmaddasp:
@@ -15743,6 +16099,17 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
       }
       return Call;
     }
+    if (BuiltinID == PPC::BI__builtin_vsx_build_pair ||
+        BuiltinID == PPC::BI__builtin_mma_build_acc) {
+      // Reverse the order of the operands for LE, so the
+      // same builtin call can be used on both LE and BE
+      // without the need for the programmer to swap operands.
+      // The operands are reversed starting from the second argument,
+      // the first operand is the pointer to the pair/accumulator
+      // that is being built.
+      if (getTarget().isLittleEndian())
+        std::reverse(Ops.begin() + 1, Ops.end());
+    }
     bool Accumulate;
     switch (BuiltinID) {
   #define CUSTOM_BUILTIN(Name, Intr, Types, Acc) \
@@ -15899,6 +16266,21 @@ Value *CodeGenFunction::EmitPPCBuiltinExpr(unsigned BuiltinID,
                            *this, E, Intrinsic::sqrt,
                            Intrinsic::experimental_constrained_sqrt))
         .getScalarVal();
+  case PPC::BI__builtin_ppc_test_data_class: {
+    llvm::Type *ArgType = EmitScalarExpr(E->getArg(0))->getType();
+    unsigned IntrinsicID;
+    if (ArgType->isDoubleTy())
+      IntrinsicID = Intrinsic::ppc_test_data_class_d;
+    else if (ArgType->isFloatTy())
+      IntrinsicID = Intrinsic::ppc_test_data_class_f;
+    else
+      llvm_unreachable("Invalid Argument Type");
+    return Builder.CreateCall(CGM.getIntrinsic(IntrinsicID), Ops,
+                              "test_data_class");
+  }
+  case PPC::BI__builtin_ppc_swdiv:
+  case PPC::BI__builtin_ppc_swdivs:
+    return Builder.CreateFDiv(Ops[0], Ops[1], "swdiv");
   }
 }
 
@@ -15909,11 +16291,9 @@ Value *EmitAMDGPUDispatchPtr(CodeGenFunction &CGF,
                              const CallExpr *E = nullptr) {
   auto *F = CGF.CGM.getIntrinsic(Intrinsic::amdgcn_dispatch_ptr);
   auto *Call = CGF.Builder.CreateCall(F);
-  Call->addAttribute(
-      AttributeList::ReturnIndex,
+  Call->addRetAttr(
       Attribute::getWithDereferenceableBytes(Call->getContext(), 64));
-  Call->addAttribute(AttributeList::ReturnIndex,
-                     Attribute::getWithAlignment(Call->getContext(), Align(4)));
+  Call->addRetAttr(Attribute::getWithAlignment(Call->getContext(), Align(4)));
   if (!E)
     return Call;
   QualType BuiltinRetType = E->getType();
@@ -15933,7 +16313,8 @@ Value *EmitAMDGPUWorkGroupSize(CodeGenFunction &CGF, unsigned Index) {
   auto *DstTy =
       CGF.Int16Ty->getPointerTo(GEP->getType()->getPointerAddressSpace());
   auto *Cast = CGF.Builder.CreateBitCast(GEP, DstTy);
-  auto *LD = CGF.Builder.CreateLoad(Address(Cast, CharUnits::fromQuantity(2)));
+  auto *LD = CGF.Builder.CreateLoad(
+      Address(Cast, CGF.Int16Ty, CharUnits::fromQuantity(2)));
   llvm::MDBuilder MDHelper(CGF.getLLVMContext());
   llvm::MDNode *RNode = MDHelper.createRange(APInt(16, 1),
       APInt(16, CGF.getTarget().getMaxOpenCLWorkGroupSize() + 1));
@@ -15953,7 +16334,8 @@ Value *EmitAMDGPUGridSize(CodeGenFunction &CGF, unsigned Index) {
   auto *DstTy =
       CGF.Int32Ty->getPointerTo(GEP->getType()->getPointerAddressSpace());
   auto *Cast = CGF.Builder.CreateBitCast(GEP, DstTy);
-  auto *LD = CGF.Builder.CreateLoad(Address(Cast, CharUnits::fromQuantity(4)));
+  auto *LD = CGF.Builder.CreateLoad(
+      Address(Cast, CGF.Int32Ty, CharUnits::fromQuantity(4)));
   LD->setMetadata(llvm::LLVMContext::MD_invariant_load,
                   llvm::MDNode::get(CGF.getLLVMContext(), None));
   return LD;
@@ -16025,8 +16407,7 @@ Value *CodeGenFunction::EmitAMDGPUBuiltinExpr(unsigned BuiltinID,
     llvm::Value *Result = Builder.CreateExtractValue(Tmp, 0);
     llvm::Value *Flag = Builder.CreateExtractValue(Tmp, 1);
 
-    llvm::Type *RealFlagType
-      = FlagOutPtr.getPointer()->getType()->getPointerElementType();
+    llvm::Type *RealFlagType = FlagOutPtr.getElementType();
 
     llvm::Value *FlagExt = Builder.CreateZExt(Flag, RealFlagType);
     Builder.CreateStore(FlagExt, FlagOutPtr);
@@ -16282,6 +16663,15 @@ Value *CodeGenFunction::EmitAMDGPUBuiltinExpr(unsigned BuiltinID,
     llvm::Value *RayDir = EmitScalarExpr(E->getArg(3));
     llvm::Value *RayInverseDir = EmitScalarExpr(E->getArg(4));
     llvm::Value *TextureDescr = EmitScalarExpr(E->getArg(5));
+
+    // The builtins take these arguments as vec4 where the last element is
+    // ignored. The intrinsic takes them as vec3.
+    RayOrigin = Builder.CreateShuffleVector(RayOrigin, RayOrigin,
+                                            ArrayRef<int>{0, 1, 2});
+    RayDir =
+        Builder.CreateShuffleVector(RayDir, RayDir, ArrayRef<int>{0, 1, 2});
+    RayInverseDir = Builder.CreateShuffleVector(RayInverseDir, RayInverseDir,
+                                                ArrayRef<int>{0, 1, 2});
 
     Function *F = CGM.getIntrinsic(Intrinsic::amdgcn_image_bvh_intersect_ray,
                                    {NodePtr->getType(), RayDir->getType()});
@@ -17106,6 +17496,13 @@ CodeGenFunction::EmitNVPTXBuiltinExpr(unsigned BuiltinID, const CallExpr *E) {
                                        Ptr->getType()}),
         {Ptr, EmitScalarExpr(E->getArg(1))});
   };
+  auto MakeScopedCasAtomic = [&](unsigned IntrinsicID) {
+    Value *Ptr = EmitScalarExpr(E->getArg(0));
+    return Builder.CreateCall(
+        CGM.getIntrinsic(IntrinsicID, {Ptr->getType()->getPointerElementType(),
+                                       Ptr->getType()}),
+        {Ptr, EmitScalarExpr(E->getArg(1)), EmitScalarExpr(E->getArg(2))});
+  };
   switch (BuiltinID) {
   case NVPTX::BI__nvvm_atom_add_gen_i:
   case NVPTX::BI__nvvm_atom_add_gen_l:
@@ -17246,40 +17643,52 @@ CodeGenFunction::EmitNVPTXBuiltinExpr(unsigned BuiltinID, const CallExpr *E) {
   case NVPTX::BI__nvvm_atom_sys_xchg_gen_ll:
     return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_gen_i_sys);
   case NVPTX::BI__nvvm_atom_cta_max_gen_i:
-  case NVPTX::BI__nvvm_atom_cta_max_gen_ui:
   case NVPTX::BI__nvvm_atom_cta_max_gen_l:
-  case NVPTX::BI__nvvm_atom_cta_max_gen_ul:
   case NVPTX::BI__nvvm_atom_cta_max_gen_ll:
-  case NVPTX::BI__nvvm_atom_cta_max_gen_ull:
     return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_i_cta);
+  case NVPTX::BI__nvvm_atom_cta_max_gen_ui:
+  case NVPTX::BI__nvvm_atom_cta_max_gen_ul:
+  case NVPTX::BI__nvvm_atom_cta_max_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_ui_cta);
   case NVPTX::BI__nvvm_atom_sys_max_gen_i:
-  case NVPTX::BI__nvvm_atom_sys_max_gen_ui:
   case NVPTX::BI__nvvm_atom_sys_max_gen_l:
-  case NVPTX::BI__nvvm_atom_sys_max_gen_ul:
   case NVPTX::BI__nvvm_atom_sys_max_gen_ll:
-  case NVPTX::BI__nvvm_atom_sys_max_gen_ull:
     return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_i_sys);
+  case NVPTX::BI__nvvm_atom_sys_max_gen_ui:
+  case NVPTX::BI__nvvm_atom_sys_max_gen_ul:
+  case NVPTX::BI__nvvm_atom_sys_max_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_ui_sys);
   case NVPTX::BI__nvvm_atom_cta_min_gen_i:
-  case NVPTX::BI__nvvm_atom_cta_min_gen_ui:
   case NVPTX::BI__nvvm_atom_cta_min_gen_l:
-  case NVPTX::BI__nvvm_atom_cta_min_gen_ul:
   case NVPTX::BI__nvvm_atom_cta_min_gen_ll:
-  case NVPTX::BI__nvvm_atom_cta_min_gen_ull:
     return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_i_cta);
+  case NVPTX::BI__nvvm_atom_cta_min_gen_ui:
+  case NVPTX::BI__nvvm_atom_cta_min_gen_ul:
+  case NVPTX::BI__nvvm_atom_cta_min_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_ui_cta);
   case NVPTX::BI__nvvm_atom_sys_min_gen_i:
-  case NVPTX::BI__nvvm_atom_sys_min_gen_ui:
   case NVPTX::BI__nvvm_atom_sys_min_gen_l:
-  case NVPTX::BI__nvvm_atom_sys_min_gen_ul:
   case NVPTX::BI__nvvm_atom_sys_min_gen_ll:
-  case NVPTX::BI__nvvm_atom_sys_min_gen_ull:
     return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_i_sys);
+  case NVPTX::BI__nvvm_atom_sys_min_gen_ui:
+  case NVPTX::BI__nvvm_atom_sys_min_gen_ul:
+  case NVPTX::BI__nvvm_atom_sys_min_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_ui_sys);
   case NVPTX::BI__nvvm_atom_cta_inc_gen_ui:
+  case NVPTX::BI__nvvm_atom_cta_inc_gen_ul:
+  case NVPTX::BI__nvvm_atom_cta_inc_gen_ull:
     return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_gen_i_cta);
   case NVPTX::BI__nvvm_atom_cta_dec_gen_ui:
+  case NVPTX::BI__nvvm_atom_cta_dec_gen_ul:
+  case NVPTX::BI__nvvm_atom_cta_dec_gen_ull:
     return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_gen_i_cta);
   case NVPTX::BI__nvvm_atom_sys_inc_gen_ui:
+  case NVPTX::BI__nvvm_atom_sys_inc_gen_ul:
+  case NVPTX::BI__nvvm_atom_sys_inc_gen_ull:
     return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_gen_i_sys);
   case NVPTX::BI__nvvm_atom_sys_dec_gen_ui:
+  case NVPTX::BI__nvvm_atom_sys_dec_gen_ul:
+  case NVPTX::BI__nvvm_atom_sys_dec_gen_ull:
     return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_gen_i_sys);
   case NVPTX::BI__nvvm_atom_cta_and_gen_i:
   case NVPTX::BI__nvvm_atom_cta_and_gen_l:
@@ -17307,24 +17716,1696 @@ CodeGenFunction::EmitNVPTXBuiltinExpr(unsigned BuiltinID, const CallExpr *E) {
     return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_gen_i_sys);
   case NVPTX::BI__nvvm_atom_cta_cas_gen_i:
   case NVPTX::BI__nvvm_atom_cta_cas_gen_l:
-  case NVPTX::BI__nvvm_atom_cta_cas_gen_ll: {
-    Value *Ptr = EmitScalarExpr(E->getArg(0));
-    return Builder.CreateCall(
-        CGM.getIntrinsic(
-            Intrinsic::nvvm_atomic_cas_gen_i_cta,
-            {Ptr->getType()->getPointerElementType(), Ptr->getType()}),
-        {Ptr, EmitScalarExpr(E->getArg(1)), EmitScalarExpr(E->getArg(2))});
-  }
+  case NVPTX::BI__nvvm_atom_cta_cas_gen_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_gen_i_cta);
   case NVPTX::BI__nvvm_atom_sys_cas_gen_i:
   case NVPTX::BI__nvvm_atom_sys_cas_gen_l:
-  case NVPTX::BI__nvvm_atom_sys_cas_gen_ll: {
-    Value *Ptr = EmitScalarExpr(E->getArg(0));
-    return Builder.CreateCall(
-        CGM.getIntrinsic(
-            Intrinsic::nvvm_atomic_cas_gen_i_sys,
-            {Ptr->getType()->getPointerElementType(), Ptr->getType()}),
-        {Ptr, EmitScalarExpr(E->getArg(1)), EmitScalarExpr(E->getArg(2))});
-  }
+  case NVPTX::BI__nvvm_atom_sys_cas_gen_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_gen_i_sys);
+  case NVPTX::BI__nvvm_atom_acquire_add_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_add_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_add_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_add_gen_f:
+  case NVPTX::BI__nvvm_atom_acquire_add_gen_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_f_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_xchg_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_xchg_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_xchg_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_gen_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_max_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_max_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_max_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_max_gen_ui:
+  case NVPTX::BI__nvvm_atom_acquire_max_gen_ul:
+  case NVPTX::BI__nvvm_atom_acquire_max_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_ui_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_min_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_min_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_min_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_min_gen_ui:
+  case NVPTX::BI__nvvm_atom_acquire_min_gen_ul:
+  case NVPTX::BI__nvvm_atom_acquire_min_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_ui_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_inc_gen_ui:
+  case NVPTX::BI__nvvm_atom_acquire_inc_gen_ul:
+  case NVPTX::BI__nvvm_atom_acquire_inc_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_gen_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_dec_gen_ui:
+  case NVPTX::BI__nvvm_atom_acquire_dec_gen_ul:
+  case NVPTX::BI__nvvm_atom_acquire_dec_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_gen_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_and_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_and_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_and_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_gen_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_or_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_or_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_or_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_gen_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_xor_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_xor_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_xor_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_gen_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_cas_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_cas_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_cas_gen_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_gen_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_cta_add_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_add_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_add_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_add_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_add_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_add_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_add_gen_f:
+  case NVPTX::BI__nvvm_atom_acquire_cta_add_gen_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_f_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_add_gen_f:
+  case NVPTX::BI__nvvm_atom_acquire_sys_add_gen_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_f_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_xchg_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_xchg_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_xchg_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_gen_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_xchg_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_xchg_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_xchg_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_gen_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_gen_ui:
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_gen_ul:
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_ui_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_gen_ui:
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_gen_ul:
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_ui_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_gen_ui:
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_gen_ul:
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_ui_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_gen_ui:
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_gen_ul:
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_ui_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_inc_gen_ui:
+  case NVPTX::BI__nvvm_atom_acquire_cta_inc_gen_ul:
+  case NVPTX::BI__nvvm_atom_acquire_cta_inc_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_gen_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_cta_dec_gen_ui:
+  case NVPTX::BI__nvvm_atom_acquire_cta_dec_gen_ul:
+  case NVPTX::BI__nvvm_atom_acquire_cta_dec_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_gen_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_inc_gen_ui:
+  case NVPTX::BI__nvvm_atom_acquire_sys_inc_gen_ul:
+  case NVPTX::BI__nvvm_atom_acquire_sys_inc_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_gen_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_sys_dec_gen_ui:
+  case NVPTX::BI__nvvm_atom_acquire_sys_dec_gen_ul:
+  case NVPTX::BI__nvvm_atom_acquire_sys_dec_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_gen_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_and_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_and_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_and_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_gen_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_and_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_and_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_and_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_gen_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_or_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_or_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_or_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_gen_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_or_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_or_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_or_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_gen_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_xor_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_xor_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_xor_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_gen_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_xor_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_xor_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_xor_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_gen_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_cas_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_cas_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_cas_gen_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_gen_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_cas_gen_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_cas_gen_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_cas_gen_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_gen_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_release_add_gen_i:
+  case NVPTX::BI__nvvm_atom_release_add_gen_l:
+  case NVPTX::BI__nvvm_atom_release_add_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_i_release);
+  case NVPTX::BI__nvvm_atom_release_add_gen_f:
+  case NVPTX::BI__nvvm_atom_release_add_gen_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_f_release);
+  case NVPTX::BI__nvvm_atom_release_xchg_gen_i:
+  case NVPTX::BI__nvvm_atom_release_xchg_gen_l:
+  case NVPTX::BI__nvvm_atom_release_xchg_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_gen_i_release);
+  case NVPTX::BI__nvvm_atom_release_max_gen_i:
+  case NVPTX::BI__nvvm_atom_release_max_gen_l:
+  case NVPTX::BI__nvvm_atom_release_max_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_i_release);
+  case NVPTX::BI__nvvm_atom_release_max_gen_ui:
+  case NVPTX::BI__nvvm_atom_release_max_gen_ul:
+  case NVPTX::BI__nvvm_atom_release_max_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_ui_release);
+  case NVPTX::BI__nvvm_atom_release_min_gen_i:
+  case NVPTX::BI__nvvm_atom_release_min_gen_l:
+  case NVPTX::BI__nvvm_atom_release_min_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_i_release);
+  case NVPTX::BI__nvvm_atom_release_min_gen_ui:
+  case NVPTX::BI__nvvm_atom_release_min_gen_ul:
+  case NVPTX::BI__nvvm_atom_release_min_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_ui_release);
+  case NVPTX::BI__nvvm_atom_release_inc_gen_ui:
+  case NVPTX::BI__nvvm_atom_release_inc_gen_ul:
+  case NVPTX::BI__nvvm_atom_release_inc_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_gen_i_release);
+  case NVPTX::BI__nvvm_atom_release_dec_gen_ui:
+  case NVPTX::BI__nvvm_atom_release_dec_gen_ul:
+  case NVPTX::BI__nvvm_atom_release_dec_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_gen_i_release);
+  case NVPTX::BI__nvvm_atom_release_and_gen_i:
+  case NVPTX::BI__nvvm_atom_release_and_gen_l:
+  case NVPTX::BI__nvvm_atom_release_and_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_gen_i_release);
+  case NVPTX::BI__nvvm_atom_release_or_gen_i:
+  case NVPTX::BI__nvvm_atom_release_or_gen_l:
+  case NVPTX::BI__nvvm_atom_release_or_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_gen_i_release);
+  case NVPTX::BI__nvvm_atom_release_xor_gen_i:
+  case NVPTX::BI__nvvm_atom_release_xor_gen_l:
+  case NVPTX::BI__nvvm_atom_release_xor_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_gen_i_release);
+  case NVPTX::BI__nvvm_atom_release_cas_gen_i:
+  case NVPTX::BI__nvvm_atom_release_cas_gen_l:
+  case NVPTX::BI__nvvm_atom_release_cas_gen_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_gen_i_release);
+  case NVPTX::BI__nvvm_atom_release_cta_add_gen_i:
+  case NVPTX::BI__nvvm_atom_release_cta_add_gen_l:
+  case NVPTX::BI__nvvm_atom_release_cta_add_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_add_gen_i:
+  case NVPTX::BI__nvvm_atom_release_sys_add_gen_l:
+  case NVPTX::BI__nvvm_atom_release_sys_add_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_add_gen_f:
+  case NVPTX::BI__nvvm_atom_release_cta_add_gen_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_f_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_add_gen_f:
+  case NVPTX::BI__nvvm_atom_release_sys_add_gen_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_f_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_xchg_gen_i:
+  case NVPTX::BI__nvvm_atom_release_cta_xchg_gen_l:
+  case NVPTX::BI__nvvm_atom_release_cta_xchg_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_gen_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_xchg_gen_i:
+  case NVPTX::BI__nvvm_atom_release_sys_xchg_gen_l:
+  case NVPTX::BI__nvvm_atom_release_sys_xchg_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_gen_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_max_gen_i:
+  case NVPTX::BI__nvvm_atom_release_cta_max_gen_l:
+  case NVPTX::BI__nvvm_atom_release_cta_max_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_cta_max_gen_ui:
+  case NVPTX::BI__nvvm_atom_release_cta_max_gen_ul:
+  case NVPTX::BI__nvvm_atom_release_cta_max_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_ui_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_max_gen_i:
+  case NVPTX::BI__nvvm_atom_release_sys_max_gen_l:
+  case NVPTX::BI__nvvm_atom_release_sys_max_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_sys_max_gen_ui:
+  case NVPTX::BI__nvvm_atom_release_sys_max_gen_ul:
+  case NVPTX::BI__nvvm_atom_release_sys_max_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_ui_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_min_gen_i:
+  case NVPTX::BI__nvvm_atom_release_cta_min_gen_l:
+  case NVPTX::BI__nvvm_atom_release_cta_min_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_cta_min_gen_ui:
+  case NVPTX::BI__nvvm_atom_release_cta_min_gen_ul:
+  case NVPTX::BI__nvvm_atom_release_cta_min_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_ui_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_min_gen_i:
+  case NVPTX::BI__nvvm_atom_release_sys_min_gen_l:
+  case NVPTX::BI__nvvm_atom_release_sys_min_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_sys_min_gen_ui:
+  case NVPTX::BI__nvvm_atom_release_sys_min_gen_ul:
+  case NVPTX::BI__nvvm_atom_release_sys_min_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_ui_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_inc_gen_ui:
+  case NVPTX::BI__nvvm_atom_release_cta_inc_gen_ul:
+  case NVPTX::BI__nvvm_atom_release_cta_inc_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_gen_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_cta_dec_gen_ui:
+  case NVPTX::BI__nvvm_atom_release_cta_dec_gen_ul:
+  case NVPTX::BI__nvvm_atom_release_cta_dec_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_gen_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_inc_gen_ui:
+  case NVPTX::BI__nvvm_atom_release_sys_inc_gen_ul:
+  case NVPTX::BI__nvvm_atom_release_sys_inc_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_gen_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_sys_dec_gen_ui:
+  case NVPTX::BI__nvvm_atom_release_sys_dec_gen_ul:
+  case NVPTX::BI__nvvm_atom_release_sys_dec_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_gen_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_and_gen_i:
+  case NVPTX::BI__nvvm_atom_release_cta_and_gen_l:
+  case NVPTX::BI__nvvm_atom_release_cta_and_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_gen_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_and_gen_i:
+  case NVPTX::BI__nvvm_atom_release_sys_and_gen_l:
+  case NVPTX::BI__nvvm_atom_release_sys_and_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_gen_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_or_gen_i:
+  case NVPTX::BI__nvvm_atom_release_cta_or_gen_l:
+  case NVPTX::BI__nvvm_atom_release_cta_or_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_gen_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_or_gen_i:
+  case NVPTX::BI__nvvm_atom_release_sys_or_gen_l:
+  case NVPTX::BI__nvvm_atom_release_sys_or_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_gen_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_xor_gen_i:
+  case NVPTX::BI__nvvm_atom_release_cta_xor_gen_l:
+  case NVPTX::BI__nvvm_atom_release_cta_xor_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_gen_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_xor_gen_i:
+  case NVPTX::BI__nvvm_atom_release_sys_xor_gen_l:
+  case NVPTX::BI__nvvm_atom_release_sys_xor_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_gen_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_cas_gen_i:
+  case NVPTX::BI__nvvm_atom_release_cta_cas_gen_l:
+  case NVPTX::BI__nvvm_atom_release_cta_cas_gen_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_gen_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_cas_gen_i:
+  case NVPTX::BI__nvvm_atom_release_sys_cas_gen_l:
+  case NVPTX::BI__nvvm_atom_release_sys_cas_gen_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_gen_i_release_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_add_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_add_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_add_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_add_gen_f:
+  case NVPTX::BI__nvvm_atom_acq_rel_add_gen_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_f_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_xchg_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_xchg_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_xchg_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_gen_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_max_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_max_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_max_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_max_gen_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_max_gen_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_max_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_ui_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_min_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_min_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_min_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_min_gen_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_min_gen_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_min_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_ui_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_inc_gen_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_inc_gen_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_inc_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_gen_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_dec_gen_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_dec_gen_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_dec_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_gen_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_and_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_and_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_and_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_gen_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_or_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_or_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_or_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_gen_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_xor_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_xor_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_xor_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_gen_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_cas_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cas_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cas_gen_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_gen_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_add_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_add_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_add_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_add_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_add_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_add_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_add_gen_f:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_add_gen_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_f_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_add_gen_f:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_add_gen_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_gen_f_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xchg_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xchg_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xchg_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_gen_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xchg_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xchg_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xchg_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_gen_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_gen_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_gen_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_ui_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_gen_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_gen_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_gen_ui_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_gen_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_gen_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_ui_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_gen_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_gen_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_gen_ui_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_inc_gen_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_inc_gen_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_inc_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_gen_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_dec_gen_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_dec_gen_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_dec_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_gen_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_inc_gen_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_inc_gen_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_inc_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_gen_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_dec_gen_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_dec_gen_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_dec_gen_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_gen_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_and_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_and_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_and_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_gen_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_and_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_and_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_and_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_gen_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_or_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_or_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_or_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_gen_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_or_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_or_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_or_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_gen_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xor_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xor_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xor_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_gen_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xor_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xor_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xor_gen_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_gen_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_cas_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_cas_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_cas_gen_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_gen_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_cas_gen_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_cas_gen_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_cas_gen_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_gen_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_add_global_i:
+  case NVPTX::BI__nvvm_atom_add_global_l:
+  case NVPTX::BI__nvvm_atom_add_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_i);
+  case NVPTX::BI__nvvm_atom_add_global_f:
+  case NVPTX::BI__nvvm_atom_add_global_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_f);
+  case NVPTX::BI__nvvm_atom_xchg_global_i:
+  case NVPTX::BI__nvvm_atom_xchg_global_l:
+  case NVPTX::BI__nvvm_atom_xchg_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_global_i);
+  case NVPTX::BI__nvvm_atom_max_global_i:
+  case NVPTX::BI__nvvm_atom_max_global_l:
+  case NVPTX::BI__nvvm_atom_max_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_i);
+  case NVPTX::BI__nvvm_atom_max_global_ui:
+  case NVPTX::BI__nvvm_atom_max_global_ul:
+  case NVPTX::BI__nvvm_atom_max_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_ui);
+  case NVPTX::BI__nvvm_atom_min_global_i:
+  case NVPTX::BI__nvvm_atom_min_global_l:
+  case NVPTX::BI__nvvm_atom_min_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_i);
+  case NVPTX::BI__nvvm_atom_min_global_ui:
+  case NVPTX::BI__nvvm_atom_min_global_ul:
+  case NVPTX::BI__nvvm_atom_min_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_ui);
+  case NVPTX::BI__nvvm_atom_inc_global_ui:
+  case NVPTX::BI__nvvm_atom_inc_global_ul:
+  case NVPTX::BI__nvvm_atom_inc_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_global_i);
+  case NVPTX::BI__nvvm_atom_dec_global_ui:
+  case NVPTX::BI__nvvm_atom_dec_global_ul:
+  case NVPTX::BI__nvvm_atom_dec_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_global_i);
+  case NVPTX::BI__nvvm_atom_and_global_i:
+  case NVPTX::BI__nvvm_atom_and_global_l:
+  case NVPTX::BI__nvvm_atom_and_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_global_i);
+  case NVPTX::BI__nvvm_atom_or_global_i:
+  case NVPTX::BI__nvvm_atom_or_global_l:
+  case NVPTX::BI__nvvm_atom_or_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_global_i);
+  case NVPTX::BI__nvvm_atom_xor_global_i:
+  case NVPTX::BI__nvvm_atom_xor_global_l:
+  case NVPTX::BI__nvvm_atom_xor_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_global_i);
+  case NVPTX::BI__nvvm_atom_cas_global_i:
+  case NVPTX::BI__nvvm_atom_cas_global_l:
+  case NVPTX::BI__nvvm_atom_cas_global_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_global_i);
+  case NVPTX::BI__nvvm_atom_cta_add_global_i:
+  case NVPTX::BI__nvvm_atom_cta_add_global_l:
+  case NVPTX::BI__nvvm_atom_cta_add_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_add_global_i:
+  case NVPTX::BI__nvvm_atom_sys_add_global_l:
+  case NVPTX::BI__nvvm_atom_sys_add_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_add_global_f:
+  case NVPTX::BI__nvvm_atom_cta_add_global_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_f_cta);
+  case NVPTX::BI__nvvm_atom_sys_add_global_f:
+  case NVPTX::BI__nvvm_atom_sys_add_global_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_f_sys);
+  case NVPTX::BI__nvvm_atom_cta_xchg_global_i:
+  case NVPTX::BI__nvvm_atom_cta_xchg_global_l:
+  case NVPTX::BI__nvvm_atom_cta_xchg_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_global_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_xchg_global_i:
+  case NVPTX::BI__nvvm_atom_sys_xchg_global_l:
+  case NVPTX::BI__nvvm_atom_sys_xchg_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_global_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_max_global_i:
+  case NVPTX::BI__nvvm_atom_cta_max_global_l:
+  case NVPTX::BI__nvvm_atom_cta_max_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_i_cta);
+  case NVPTX::BI__nvvm_atom_cta_max_global_ui:
+  case NVPTX::BI__nvvm_atom_cta_max_global_ul:
+  case NVPTX::BI__nvvm_atom_cta_max_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_ui_cta);
+  case NVPTX::BI__nvvm_atom_sys_max_global_i:
+  case NVPTX::BI__nvvm_atom_sys_max_global_l:
+  case NVPTX::BI__nvvm_atom_sys_max_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_i_sys);
+  case NVPTX::BI__nvvm_atom_sys_max_global_ui:
+  case NVPTX::BI__nvvm_atom_sys_max_global_ul:
+  case NVPTX::BI__nvvm_atom_sys_max_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_ui_sys);
+  case NVPTX::BI__nvvm_atom_cta_min_global_i:
+  case NVPTX::BI__nvvm_atom_cta_min_global_l:
+  case NVPTX::BI__nvvm_atom_cta_min_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_i_cta);
+  case NVPTX::BI__nvvm_atom_cta_min_global_ui:
+  case NVPTX::BI__nvvm_atom_cta_min_global_ul:
+  case NVPTX::BI__nvvm_atom_cta_min_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_ui_cta);
+  case NVPTX::BI__nvvm_atom_sys_min_global_i:
+  case NVPTX::BI__nvvm_atom_sys_min_global_l:
+  case NVPTX::BI__nvvm_atom_sys_min_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_i_sys);
+  case NVPTX::BI__nvvm_atom_sys_min_global_ui:
+  case NVPTX::BI__nvvm_atom_sys_min_global_ul:
+  case NVPTX::BI__nvvm_atom_sys_min_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_ui_sys);
+  case NVPTX::BI__nvvm_atom_cta_inc_global_ui:
+  case NVPTX::BI__nvvm_atom_cta_inc_global_ul:
+  case NVPTX::BI__nvvm_atom_cta_inc_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_global_i_cta);
+  case NVPTX::BI__nvvm_atom_cta_dec_global_ui:
+  case NVPTX::BI__nvvm_atom_cta_dec_global_ul:
+  case NVPTX::BI__nvvm_atom_cta_dec_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_global_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_inc_global_ui:
+  case NVPTX::BI__nvvm_atom_sys_inc_global_ul:
+  case NVPTX::BI__nvvm_atom_sys_inc_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_global_i_sys);
+  case NVPTX::BI__nvvm_atom_sys_dec_global_ui:
+  case NVPTX::BI__nvvm_atom_sys_dec_global_ul:
+  case NVPTX::BI__nvvm_atom_sys_dec_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_global_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_and_global_i:
+  case NVPTX::BI__nvvm_atom_cta_and_global_l:
+  case NVPTX::BI__nvvm_atom_cta_and_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_global_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_and_global_i:
+  case NVPTX::BI__nvvm_atom_sys_and_global_l:
+  case NVPTX::BI__nvvm_atom_sys_and_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_global_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_or_global_i:
+  case NVPTX::BI__nvvm_atom_cta_or_global_l:
+  case NVPTX::BI__nvvm_atom_cta_or_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_global_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_or_global_i:
+  case NVPTX::BI__nvvm_atom_sys_or_global_l:
+  case NVPTX::BI__nvvm_atom_sys_or_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_global_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_xor_global_i:
+  case NVPTX::BI__nvvm_atom_cta_xor_global_l:
+  case NVPTX::BI__nvvm_atom_cta_xor_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_global_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_xor_global_i:
+  case NVPTX::BI__nvvm_atom_sys_xor_global_l:
+  case NVPTX::BI__nvvm_atom_sys_xor_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_global_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_cas_global_i:
+  case NVPTX::BI__nvvm_atom_cta_cas_global_l:
+  case NVPTX::BI__nvvm_atom_cta_cas_global_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_global_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_cas_global_i:
+  case NVPTX::BI__nvvm_atom_sys_cas_global_l:
+  case NVPTX::BI__nvvm_atom_sys_cas_global_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_global_i_sys);
+  case NVPTX::BI__nvvm_atom_acquire_add_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_add_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_add_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_add_global_f:
+  case NVPTX::BI__nvvm_atom_acquire_add_global_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_f_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_xchg_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_xchg_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_xchg_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_global_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_max_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_max_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_max_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_max_global_ui:
+  case NVPTX::BI__nvvm_atom_acquire_max_global_ul:
+  case NVPTX::BI__nvvm_atom_acquire_max_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_ui_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_min_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_min_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_min_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_min_global_ui:
+  case NVPTX::BI__nvvm_atom_acquire_min_global_ul:
+  case NVPTX::BI__nvvm_atom_acquire_min_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_ui_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_inc_global_ui:
+  case NVPTX::BI__nvvm_atom_acquire_inc_global_ul:
+  case NVPTX::BI__nvvm_atom_acquire_inc_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_global_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_dec_global_ui:
+  case NVPTX::BI__nvvm_atom_acquire_dec_global_ul:
+  case NVPTX::BI__nvvm_atom_acquire_dec_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_global_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_and_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_and_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_and_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_global_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_or_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_or_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_or_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_global_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_xor_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_xor_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_xor_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_global_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_cas_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_cas_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_cas_global_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_global_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_cta_add_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_add_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_add_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_add_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_add_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_add_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_add_global_f:
+  case NVPTX::BI__nvvm_atom_acquire_cta_add_global_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_f_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_add_global_f:
+  case NVPTX::BI__nvvm_atom_acquire_sys_add_global_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_f_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_xchg_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_xchg_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_xchg_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_global_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_xchg_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_xchg_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_xchg_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_global_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_global_ui:
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_global_ul:
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_ui_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_global_ui:
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_global_ul:
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_ui_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_global_ui:
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_global_ul:
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_ui_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_global_ui:
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_global_ul:
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_ui_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_inc_global_ui:
+  case NVPTX::BI__nvvm_atom_acquire_cta_inc_global_ul:
+  case NVPTX::BI__nvvm_atom_acquire_cta_inc_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_global_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_cta_dec_global_ui:
+  case NVPTX::BI__nvvm_atom_acquire_cta_dec_global_ul:
+  case NVPTX::BI__nvvm_atom_acquire_cta_dec_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_global_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_inc_global_ui:
+  case NVPTX::BI__nvvm_atom_acquire_sys_inc_global_ul:
+  case NVPTX::BI__nvvm_atom_acquire_sys_inc_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_global_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_sys_dec_global_ui:
+  case NVPTX::BI__nvvm_atom_acquire_sys_dec_global_ul:
+  case NVPTX::BI__nvvm_atom_acquire_sys_dec_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_global_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_and_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_and_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_and_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_global_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_and_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_and_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_and_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_global_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_or_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_or_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_or_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_global_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_or_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_or_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_or_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_global_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_xor_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_xor_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_xor_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_global_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_xor_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_xor_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_xor_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_global_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_cas_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_cas_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_cas_global_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_global_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_cas_global_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_cas_global_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_cas_global_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_global_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_release_add_global_i:
+  case NVPTX::BI__nvvm_atom_release_add_global_l:
+  case NVPTX::BI__nvvm_atom_release_add_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_i_release);
+  case NVPTX::BI__nvvm_atom_release_add_global_f:
+  case NVPTX::BI__nvvm_atom_release_add_global_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_f_release);
+  case NVPTX::BI__nvvm_atom_release_xchg_global_i:
+  case NVPTX::BI__nvvm_atom_release_xchg_global_l:
+  case NVPTX::BI__nvvm_atom_release_xchg_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_global_i_release);
+  case NVPTX::BI__nvvm_atom_release_max_global_i:
+  case NVPTX::BI__nvvm_atom_release_max_global_l:
+  case NVPTX::BI__nvvm_atom_release_max_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_i_release);
+  case NVPTX::BI__nvvm_atom_release_max_global_ui:
+  case NVPTX::BI__nvvm_atom_release_max_global_ul:
+  case NVPTX::BI__nvvm_atom_release_max_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_ui_release);
+  case NVPTX::BI__nvvm_atom_release_min_global_i:
+  case NVPTX::BI__nvvm_atom_release_min_global_l:
+  case NVPTX::BI__nvvm_atom_release_min_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_i_release);
+  case NVPTX::BI__nvvm_atom_release_min_global_ui:
+  case NVPTX::BI__nvvm_atom_release_min_global_ul:
+  case NVPTX::BI__nvvm_atom_release_min_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_ui_release);
+  case NVPTX::BI__nvvm_atom_release_inc_global_ui:
+  case NVPTX::BI__nvvm_atom_release_inc_global_ul:
+  case NVPTX::BI__nvvm_atom_release_inc_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_global_i_release);
+  case NVPTX::BI__nvvm_atom_release_dec_global_ui:
+  case NVPTX::BI__nvvm_atom_release_dec_global_ul:
+  case NVPTX::BI__nvvm_atom_release_dec_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_global_i_release);
+  case NVPTX::BI__nvvm_atom_release_and_global_i:
+  case NVPTX::BI__nvvm_atom_release_and_global_l:
+  case NVPTX::BI__nvvm_atom_release_and_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_global_i_release);
+  case NVPTX::BI__nvvm_atom_release_or_global_i:
+  case NVPTX::BI__nvvm_atom_release_or_global_l:
+  case NVPTX::BI__nvvm_atom_release_or_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_global_i_release);
+  case NVPTX::BI__nvvm_atom_release_xor_global_i:
+  case NVPTX::BI__nvvm_atom_release_xor_global_l:
+  case NVPTX::BI__nvvm_atom_release_xor_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_global_i_release);
+  case NVPTX::BI__nvvm_atom_release_cas_global_i:
+  case NVPTX::BI__nvvm_atom_release_cas_global_l:
+  case NVPTX::BI__nvvm_atom_release_cas_global_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_global_i_release);
+  case NVPTX::BI__nvvm_atom_release_cta_add_global_i:
+  case NVPTX::BI__nvvm_atom_release_cta_add_global_l:
+  case NVPTX::BI__nvvm_atom_release_cta_add_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_add_global_i:
+  case NVPTX::BI__nvvm_atom_release_sys_add_global_l:
+  case NVPTX::BI__nvvm_atom_release_sys_add_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_add_global_f:
+  case NVPTX::BI__nvvm_atom_release_cta_add_global_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_f_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_add_global_f:
+  case NVPTX::BI__nvvm_atom_release_sys_add_global_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_f_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_xchg_global_i:
+  case NVPTX::BI__nvvm_atom_release_cta_xchg_global_l:
+  case NVPTX::BI__nvvm_atom_release_cta_xchg_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_global_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_xchg_global_i:
+  case NVPTX::BI__nvvm_atom_release_sys_xchg_global_l:
+  case NVPTX::BI__nvvm_atom_release_sys_xchg_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_global_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_max_global_i:
+  case NVPTX::BI__nvvm_atom_release_cta_max_global_l:
+  case NVPTX::BI__nvvm_atom_release_cta_max_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_cta_max_global_ui:
+  case NVPTX::BI__nvvm_atom_release_cta_max_global_ul:
+  case NVPTX::BI__nvvm_atom_release_cta_max_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_ui_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_max_global_i:
+  case NVPTX::BI__nvvm_atom_release_sys_max_global_l:
+  case NVPTX::BI__nvvm_atom_release_sys_max_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_sys_max_global_ui:
+  case NVPTX::BI__nvvm_atom_release_sys_max_global_ul:
+  case NVPTX::BI__nvvm_atom_release_sys_max_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_ui_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_min_global_i:
+  case NVPTX::BI__nvvm_atom_release_cta_min_global_l:
+  case NVPTX::BI__nvvm_atom_release_cta_min_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_cta_min_global_ui:
+  case NVPTX::BI__nvvm_atom_release_cta_min_global_ul:
+  case NVPTX::BI__nvvm_atom_release_cta_min_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_ui_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_min_global_i:
+  case NVPTX::BI__nvvm_atom_release_sys_min_global_l:
+  case NVPTX::BI__nvvm_atom_release_sys_min_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_sys_min_global_ui:
+  case NVPTX::BI__nvvm_atom_release_sys_min_global_ul:
+  case NVPTX::BI__nvvm_atom_release_sys_min_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_ui_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_inc_global_ui:
+  case NVPTX::BI__nvvm_atom_release_cta_inc_global_ul:
+  case NVPTX::BI__nvvm_atom_release_cta_inc_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_global_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_cta_dec_global_ui:
+  case NVPTX::BI__nvvm_atom_release_cta_dec_global_ul:
+  case NVPTX::BI__nvvm_atom_release_cta_dec_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_global_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_inc_global_ui:
+  case NVPTX::BI__nvvm_atom_release_sys_inc_global_ul:
+  case NVPTX::BI__nvvm_atom_release_sys_inc_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_global_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_sys_dec_global_ui:
+  case NVPTX::BI__nvvm_atom_release_sys_dec_global_ul:
+  case NVPTX::BI__nvvm_atom_release_sys_dec_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_global_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_and_global_i:
+  case NVPTX::BI__nvvm_atom_release_cta_and_global_l:
+  case NVPTX::BI__nvvm_atom_release_cta_and_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_global_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_and_global_i:
+  case NVPTX::BI__nvvm_atom_release_sys_and_global_l:
+  case NVPTX::BI__nvvm_atom_release_sys_and_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_global_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_or_global_i:
+  case NVPTX::BI__nvvm_atom_release_cta_or_global_l:
+  case NVPTX::BI__nvvm_atom_release_cta_or_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_global_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_or_global_i:
+  case NVPTX::BI__nvvm_atom_release_sys_or_global_l:
+  case NVPTX::BI__nvvm_atom_release_sys_or_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_global_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_xor_global_i:
+  case NVPTX::BI__nvvm_atom_release_cta_xor_global_l:
+  case NVPTX::BI__nvvm_atom_release_cta_xor_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_global_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_xor_global_i:
+  case NVPTX::BI__nvvm_atom_release_sys_xor_global_l:
+  case NVPTX::BI__nvvm_atom_release_sys_xor_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_global_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_cas_global_i:
+  case NVPTX::BI__nvvm_atom_release_cta_cas_global_l:
+  case NVPTX::BI__nvvm_atom_release_cta_cas_global_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_global_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_cas_global_i:
+  case NVPTX::BI__nvvm_atom_release_sys_cas_global_l:
+  case NVPTX::BI__nvvm_atom_release_sys_cas_global_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_global_i_release_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_add_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_add_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_add_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_add_global_f:
+  case NVPTX::BI__nvvm_atom_acq_rel_add_global_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_f_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_xchg_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_xchg_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_xchg_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_global_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_max_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_max_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_max_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_max_global_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_max_global_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_max_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_ui_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_min_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_min_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_min_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_min_global_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_min_global_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_min_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_ui_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_inc_global_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_inc_global_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_inc_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_global_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_dec_global_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_dec_global_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_dec_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_global_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_and_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_and_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_and_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_global_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_or_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_or_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_or_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_global_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_xor_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_xor_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_xor_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_global_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_cas_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cas_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cas_global_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_global_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_add_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_add_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_add_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_add_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_add_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_add_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_add_global_f:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_add_global_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_f_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_add_global_f:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_add_global_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_global_f_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xchg_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xchg_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xchg_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_global_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xchg_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xchg_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xchg_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_global_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_global_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_global_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_ui_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_global_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_global_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_global_ui_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_global_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_global_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_ui_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_global_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_global_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_global_ui_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_inc_global_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_inc_global_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_inc_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_global_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_dec_global_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_dec_global_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_dec_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_global_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_inc_global_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_inc_global_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_inc_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_global_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_dec_global_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_dec_global_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_dec_global_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_global_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_and_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_and_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_and_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_global_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_and_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_and_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_and_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_global_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_or_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_or_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_or_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_global_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_or_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_or_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_or_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_global_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xor_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xor_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xor_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_global_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xor_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xor_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xor_global_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_global_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_cas_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_cas_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_cas_global_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_global_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_cas_global_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_cas_global_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_cas_global_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_global_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_add_shared_i:
+  case NVPTX::BI__nvvm_atom_add_shared_l:
+  case NVPTX::BI__nvvm_atom_add_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_i);
+  case NVPTX::BI__nvvm_atom_add_shared_f:
+  case NVPTX::BI__nvvm_atom_add_shared_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_f);
+  case NVPTX::BI__nvvm_atom_xchg_shared_i:
+  case NVPTX::BI__nvvm_atom_xchg_shared_l:
+  case NVPTX::BI__nvvm_atom_xchg_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_shared_i);
+  case NVPTX::BI__nvvm_atom_max_shared_i:
+  case NVPTX::BI__nvvm_atom_max_shared_l:
+  case NVPTX::BI__nvvm_atom_max_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_i);
+  case NVPTX::BI__nvvm_atom_max_shared_ui:
+  case NVPTX::BI__nvvm_atom_max_shared_ul:
+  case NVPTX::BI__nvvm_atom_max_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_ui);
+  case NVPTX::BI__nvvm_atom_min_shared_i:
+  case NVPTX::BI__nvvm_atom_min_shared_l:
+  case NVPTX::BI__nvvm_atom_min_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_i);
+  case NVPTX::BI__nvvm_atom_min_shared_ui:
+  case NVPTX::BI__nvvm_atom_min_shared_ul:
+  case NVPTX::BI__nvvm_atom_min_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_ui);
+  case NVPTX::BI__nvvm_atom_inc_shared_ui:
+  case NVPTX::BI__nvvm_atom_inc_shared_ul:
+  case NVPTX::BI__nvvm_atom_inc_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_shared_i);
+  case NVPTX::BI__nvvm_atom_dec_shared_ui:
+  case NVPTX::BI__nvvm_atom_dec_shared_ul:
+  case NVPTX::BI__nvvm_atom_dec_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_shared_i);
+  case NVPTX::BI__nvvm_atom_and_shared_i:
+  case NVPTX::BI__nvvm_atom_and_shared_l:
+  case NVPTX::BI__nvvm_atom_and_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_shared_i);
+  case NVPTX::BI__nvvm_atom_or_shared_i:
+  case NVPTX::BI__nvvm_atom_or_shared_l:
+  case NVPTX::BI__nvvm_atom_or_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_shared_i);
+  case NVPTX::BI__nvvm_atom_xor_shared_i:
+  case NVPTX::BI__nvvm_atom_xor_shared_l:
+  case NVPTX::BI__nvvm_atom_xor_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_shared_i);
+  case NVPTX::BI__nvvm_atom_cas_shared_i:
+  case NVPTX::BI__nvvm_atom_cas_shared_l:
+  case NVPTX::BI__nvvm_atom_cas_shared_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_shared_i);
+  case NVPTX::BI__nvvm_atom_cta_add_shared_i:
+  case NVPTX::BI__nvvm_atom_cta_add_shared_l:
+  case NVPTX::BI__nvvm_atom_cta_add_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_add_shared_i:
+  case NVPTX::BI__nvvm_atom_sys_add_shared_l:
+  case NVPTX::BI__nvvm_atom_sys_add_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_add_shared_f:
+  case NVPTX::BI__nvvm_atom_cta_add_shared_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_f_cta);
+  case NVPTX::BI__nvvm_atom_sys_add_shared_f:
+  case NVPTX::BI__nvvm_atom_sys_add_shared_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_f_sys);
+  case NVPTX::BI__nvvm_atom_cta_xchg_shared_i:
+  case NVPTX::BI__nvvm_atom_cta_xchg_shared_l:
+  case NVPTX::BI__nvvm_atom_cta_xchg_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_shared_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_xchg_shared_i:
+  case NVPTX::BI__nvvm_atom_sys_xchg_shared_l:
+  case NVPTX::BI__nvvm_atom_sys_xchg_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_shared_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_max_shared_i:
+  case NVPTX::BI__nvvm_atom_cta_max_shared_l:
+  case NVPTX::BI__nvvm_atom_cta_max_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_i_cta);
+  case NVPTX::BI__nvvm_atom_cta_max_shared_ui:
+  case NVPTX::BI__nvvm_atom_cta_max_shared_ul:
+  case NVPTX::BI__nvvm_atom_cta_max_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_ui_cta);
+  case NVPTX::BI__nvvm_atom_sys_max_shared_i:
+  case NVPTX::BI__nvvm_atom_sys_max_shared_l:
+  case NVPTX::BI__nvvm_atom_sys_max_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_i_sys);
+  case NVPTX::BI__nvvm_atom_sys_max_shared_ui:
+  case NVPTX::BI__nvvm_atom_sys_max_shared_ul:
+  case NVPTX::BI__nvvm_atom_sys_max_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_ui_sys);
+  case NVPTX::BI__nvvm_atom_cta_min_shared_i:
+  case NVPTX::BI__nvvm_atom_cta_min_shared_l:
+  case NVPTX::BI__nvvm_atom_cta_min_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_i_cta);
+  case NVPTX::BI__nvvm_atom_cta_min_shared_ui:
+  case NVPTX::BI__nvvm_atom_cta_min_shared_ul:
+  case NVPTX::BI__nvvm_atom_cta_min_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_ui_cta);
+  case NVPTX::BI__nvvm_atom_sys_min_shared_i:
+  case NVPTX::BI__nvvm_atom_sys_min_shared_l:
+  case NVPTX::BI__nvvm_atom_sys_min_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_i_sys);
+  case NVPTX::BI__nvvm_atom_sys_min_shared_ui:
+  case NVPTX::BI__nvvm_atom_sys_min_shared_ul:
+  case NVPTX::BI__nvvm_atom_sys_min_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_ui_sys);
+  case NVPTX::BI__nvvm_atom_cta_inc_shared_ui:
+  case NVPTX::BI__nvvm_atom_cta_inc_shared_ul:
+  case NVPTX::BI__nvvm_atom_cta_inc_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_shared_i_cta);
+  case NVPTX::BI__nvvm_atom_cta_dec_shared_ui:
+  case NVPTX::BI__nvvm_atom_cta_dec_shared_ul:
+  case NVPTX::BI__nvvm_atom_cta_dec_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_shared_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_inc_shared_ui:
+  case NVPTX::BI__nvvm_atom_sys_inc_shared_ul:
+  case NVPTX::BI__nvvm_atom_sys_inc_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_shared_i_sys);
+  case NVPTX::BI__nvvm_atom_sys_dec_shared_ui:
+  case NVPTX::BI__nvvm_atom_sys_dec_shared_ul:
+  case NVPTX::BI__nvvm_atom_sys_dec_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_shared_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_and_shared_i:
+  case NVPTX::BI__nvvm_atom_cta_and_shared_l:
+  case NVPTX::BI__nvvm_atom_cta_and_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_shared_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_and_shared_i:
+  case NVPTX::BI__nvvm_atom_sys_and_shared_l:
+  case NVPTX::BI__nvvm_atom_sys_and_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_shared_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_or_shared_i:
+  case NVPTX::BI__nvvm_atom_cta_or_shared_l:
+  case NVPTX::BI__nvvm_atom_cta_or_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_shared_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_or_shared_i:
+  case NVPTX::BI__nvvm_atom_sys_or_shared_l:
+  case NVPTX::BI__nvvm_atom_sys_or_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_shared_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_xor_shared_i:
+  case NVPTX::BI__nvvm_atom_cta_xor_shared_l:
+  case NVPTX::BI__nvvm_atom_cta_xor_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_shared_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_xor_shared_i:
+  case NVPTX::BI__nvvm_atom_sys_xor_shared_l:
+  case NVPTX::BI__nvvm_atom_sys_xor_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_shared_i_sys);
+  case NVPTX::BI__nvvm_atom_cta_cas_shared_i:
+  case NVPTX::BI__nvvm_atom_cta_cas_shared_l:
+  case NVPTX::BI__nvvm_atom_cta_cas_shared_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_shared_i_cta);
+  case NVPTX::BI__nvvm_atom_sys_cas_shared_i:
+  case NVPTX::BI__nvvm_atom_sys_cas_shared_l:
+  case NVPTX::BI__nvvm_atom_sys_cas_shared_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_shared_i_sys);
+  case NVPTX::BI__nvvm_atom_acquire_add_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_add_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_add_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_add_shared_f:
+  case NVPTX::BI__nvvm_atom_acquire_add_shared_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_f_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_xchg_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_xchg_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_xchg_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_shared_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_max_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_max_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_max_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_max_shared_ui:
+  case NVPTX::BI__nvvm_atom_acquire_max_shared_ul:
+  case NVPTX::BI__nvvm_atom_acquire_max_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_ui_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_min_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_min_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_min_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_min_shared_ui:
+  case NVPTX::BI__nvvm_atom_acquire_min_shared_ul:
+  case NVPTX::BI__nvvm_atom_acquire_min_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_ui_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_inc_shared_ui:
+  case NVPTX::BI__nvvm_atom_acquire_inc_shared_ul:
+  case NVPTX::BI__nvvm_atom_acquire_inc_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_shared_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_dec_shared_ui:
+  case NVPTX::BI__nvvm_atom_acquire_dec_shared_ul:
+  case NVPTX::BI__nvvm_atom_acquire_dec_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_shared_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_and_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_and_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_and_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_shared_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_or_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_or_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_or_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_shared_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_xor_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_xor_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_xor_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_shared_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_cas_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_cas_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_cas_shared_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_shared_i_acquire);
+  case NVPTX::BI__nvvm_atom_acquire_cta_add_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_add_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_add_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_add_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_add_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_add_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_add_shared_f:
+  case NVPTX::BI__nvvm_atom_acquire_cta_add_shared_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_f_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_add_shared_f:
+  case NVPTX::BI__nvvm_atom_acquire_sys_add_shared_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_f_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_xchg_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_xchg_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_xchg_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_shared_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_xchg_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_xchg_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_xchg_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_shared_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_shared_ui:
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_shared_ul:
+  case NVPTX::BI__nvvm_atom_acquire_cta_max_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_ui_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_shared_ui:
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_shared_ul:
+  case NVPTX::BI__nvvm_atom_acquire_sys_max_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_ui_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_shared_ui:
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_shared_ul:
+  case NVPTX::BI__nvvm_atom_acquire_cta_min_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_ui_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_shared_ui:
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_shared_ul:
+  case NVPTX::BI__nvvm_atom_acquire_sys_min_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_ui_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_inc_shared_ui:
+  case NVPTX::BI__nvvm_atom_acquire_cta_inc_shared_ul:
+  case NVPTX::BI__nvvm_atom_acquire_cta_inc_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_shared_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_cta_dec_shared_ui:
+  case NVPTX::BI__nvvm_atom_acquire_cta_dec_shared_ul:
+  case NVPTX::BI__nvvm_atom_acquire_cta_dec_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_shared_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_inc_shared_ui:
+  case NVPTX::BI__nvvm_atom_acquire_sys_inc_shared_ul:
+  case NVPTX::BI__nvvm_atom_acquire_sys_inc_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_shared_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_sys_dec_shared_ui:
+  case NVPTX::BI__nvvm_atom_acquire_sys_dec_shared_ul:
+  case NVPTX::BI__nvvm_atom_acquire_sys_dec_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_shared_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_and_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_and_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_and_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_shared_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_and_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_and_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_and_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_shared_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_or_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_or_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_or_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_shared_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_or_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_or_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_or_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_shared_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_xor_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_xor_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_xor_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_shared_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_xor_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_xor_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_xor_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_shared_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_acquire_cta_cas_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_cta_cas_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_cta_cas_shared_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_shared_i_acquire_cta);
+  case NVPTX::BI__nvvm_atom_acquire_sys_cas_shared_i:
+  case NVPTX::BI__nvvm_atom_acquire_sys_cas_shared_l:
+  case NVPTX::BI__nvvm_atom_acquire_sys_cas_shared_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_shared_i_acquire_sys);
+  case NVPTX::BI__nvvm_atom_release_add_shared_i:
+  case NVPTX::BI__nvvm_atom_release_add_shared_l:
+  case NVPTX::BI__nvvm_atom_release_add_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_i_release);
+  case NVPTX::BI__nvvm_atom_release_add_shared_f:
+  case NVPTX::BI__nvvm_atom_release_add_shared_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_f_release);
+  case NVPTX::BI__nvvm_atom_release_xchg_shared_i:
+  case NVPTX::BI__nvvm_atom_release_xchg_shared_l:
+  case NVPTX::BI__nvvm_atom_release_xchg_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_shared_i_release);
+  case NVPTX::BI__nvvm_atom_release_max_shared_i:
+  case NVPTX::BI__nvvm_atom_release_max_shared_l:
+  case NVPTX::BI__nvvm_atom_release_max_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_i_release);
+  case NVPTX::BI__nvvm_atom_release_max_shared_ui:
+  case NVPTX::BI__nvvm_atom_release_max_shared_ul:
+  case NVPTX::BI__nvvm_atom_release_max_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_ui_release);
+  case NVPTX::BI__nvvm_atom_release_min_shared_i:
+  case NVPTX::BI__nvvm_atom_release_min_shared_l:
+  case NVPTX::BI__nvvm_atom_release_min_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_i_release);
+  case NVPTX::BI__nvvm_atom_release_min_shared_ui:
+  case NVPTX::BI__nvvm_atom_release_min_shared_ul:
+  case NVPTX::BI__nvvm_atom_release_min_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_ui_release);
+  case NVPTX::BI__nvvm_atom_release_inc_shared_ui:
+  case NVPTX::BI__nvvm_atom_release_inc_shared_ul:
+  case NVPTX::BI__nvvm_atom_release_inc_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_shared_i_release);
+  case NVPTX::BI__nvvm_atom_release_dec_shared_ui:
+  case NVPTX::BI__nvvm_atom_release_dec_shared_ul:
+  case NVPTX::BI__nvvm_atom_release_dec_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_shared_i_release);
+  case NVPTX::BI__nvvm_atom_release_and_shared_i:
+  case NVPTX::BI__nvvm_atom_release_and_shared_l:
+  case NVPTX::BI__nvvm_atom_release_and_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_shared_i_release);
+  case NVPTX::BI__nvvm_atom_release_or_shared_i:
+  case NVPTX::BI__nvvm_atom_release_or_shared_l:
+  case NVPTX::BI__nvvm_atom_release_or_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_shared_i_release);
+  case NVPTX::BI__nvvm_atom_release_xor_shared_i:
+  case NVPTX::BI__nvvm_atom_release_xor_shared_l:
+  case NVPTX::BI__nvvm_atom_release_xor_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_shared_i_release);
+  case NVPTX::BI__nvvm_atom_release_cas_shared_i:
+  case NVPTX::BI__nvvm_atom_release_cas_shared_l:
+  case NVPTX::BI__nvvm_atom_release_cas_shared_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_shared_i_release);
+  case NVPTX::BI__nvvm_atom_release_cta_add_shared_i:
+  case NVPTX::BI__nvvm_atom_release_cta_add_shared_l:
+  case NVPTX::BI__nvvm_atom_release_cta_add_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_add_shared_i:
+  case NVPTX::BI__nvvm_atom_release_sys_add_shared_l:
+  case NVPTX::BI__nvvm_atom_release_sys_add_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_add_shared_f:
+  case NVPTX::BI__nvvm_atom_release_cta_add_shared_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_f_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_add_shared_f:
+  case NVPTX::BI__nvvm_atom_release_sys_add_shared_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_f_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_xchg_shared_i:
+  case NVPTX::BI__nvvm_atom_release_cta_xchg_shared_l:
+  case NVPTX::BI__nvvm_atom_release_cta_xchg_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_shared_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_xchg_shared_i:
+  case NVPTX::BI__nvvm_atom_release_sys_xchg_shared_l:
+  case NVPTX::BI__nvvm_atom_release_sys_xchg_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_shared_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_max_shared_i:
+  case NVPTX::BI__nvvm_atom_release_cta_max_shared_l:
+  case NVPTX::BI__nvvm_atom_release_cta_max_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_cta_max_shared_ui:
+  case NVPTX::BI__nvvm_atom_release_cta_max_shared_ul:
+  case NVPTX::BI__nvvm_atom_release_cta_max_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_ui_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_max_shared_i:
+  case NVPTX::BI__nvvm_atom_release_sys_max_shared_l:
+  case NVPTX::BI__nvvm_atom_release_sys_max_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_sys_max_shared_ui:
+  case NVPTX::BI__nvvm_atom_release_sys_max_shared_ul:
+  case NVPTX::BI__nvvm_atom_release_sys_max_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_ui_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_min_shared_i:
+  case NVPTX::BI__nvvm_atom_release_cta_min_shared_l:
+  case NVPTX::BI__nvvm_atom_release_cta_min_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_cta_min_shared_ui:
+  case NVPTX::BI__nvvm_atom_release_cta_min_shared_ul:
+  case NVPTX::BI__nvvm_atom_release_cta_min_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_ui_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_min_shared_i:
+  case NVPTX::BI__nvvm_atom_release_sys_min_shared_l:
+  case NVPTX::BI__nvvm_atom_release_sys_min_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_sys_min_shared_ui:
+  case NVPTX::BI__nvvm_atom_release_sys_min_shared_ul:
+  case NVPTX::BI__nvvm_atom_release_sys_min_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_ui_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_inc_shared_ui:
+  case NVPTX::BI__nvvm_atom_release_cta_inc_shared_ul:
+  case NVPTX::BI__nvvm_atom_release_cta_inc_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_shared_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_cta_dec_shared_ui:
+  case NVPTX::BI__nvvm_atom_release_cta_dec_shared_ul:
+  case NVPTX::BI__nvvm_atom_release_cta_dec_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_shared_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_inc_shared_ui:
+  case NVPTX::BI__nvvm_atom_release_sys_inc_shared_ul:
+  case NVPTX::BI__nvvm_atom_release_sys_inc_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_shared_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_sys_dec_shared_ui:
+  case NVPTX::BI__nvvm_atom_release_sys_dec_shared_ul:
+  case NVPTX::BI__nvvm_atom_release_sys_dec_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_shared_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_and_shared_i:
+  case NVPTX::BI__nvvm_atom_release_cta_and_shared_l:
+  case NVPTX::BI__nvvm_atom_release_cta_and_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_shared_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_and_shared_i:
+  case NVPTX::BI__nvvm_atom_release_sys_and_shared_l:
+  case NVPTX::BI__nvvm_atom_release_sys_and_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_shared_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_or_shared_i:
+  case NVPTX::BI__nvvm_atom_release_cta_or_shared_l:
+  case NVPTX::BI__nvvm_atom_release_cta_or_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_shared_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_or_shared_i:
+  case NVPTX::BI__nvvm_atom_release_sys_or_shared_l:
+  case NVPTX::BI__nvvm_atom_release_sys_or_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_shared_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_xor_shared_i:
+  case NVPTX::BI__nvvm_atom_release_cta_xor_shared_l:
+  case NVPTX::BI__nvvm_atom_release_cta_xor_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_shared_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_xor_shared_i:
+  case NVPTX::BI__nvvm_atom_release_sys_xor_shared_l:
+  case NVPTX::BI__nvvm_atom_release_sys_xor_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_shared_i_release_sys);
+  case NVPTX::BI__nvvm_atom_release_cta_cas_shared_i:
+  case NVPTX::BI__nvvm_atom_release_cta_cas_shared_l:
+  case NVPTX::BI__nvvm_atom_release_cta_cas_shared_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_shared_i_release_cta);
+  case NVPTX::BI__nvvm_atom_release_sys_cas_shared_i:
+  case NVPTX::BI__nvvm_atom_release_sys_cas_shared_l:
+  case NVPTX::BI__nvvm_atom_release_sys_cas_shared_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_shared_i_release_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_add_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_add_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_add_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_add_shared_f:
+  case NVPTX::BI__nvvm_atom_acq_rel_add_shared_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_f_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_xchg_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_xchg_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_xchg_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_shared_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_max_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_max_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_max_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_max_shared_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_max_shared_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_max_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_ui_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_min_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_min_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_min_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_min_shared_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_min_shared_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_min_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_ui_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_inc_shared_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_inc_shared_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_inc_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_shared_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_dec_shared_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_dec_shared_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_dec_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_shared_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_and_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_and_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_and_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_shared_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_or_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_or_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_or_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_shared_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_xor_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_xor_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_xor_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_shared_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_cas_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cas_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cas_shared_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_shared_i_acq_rel);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_add_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_add_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_add_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_add_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_add_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_add_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_add_shared_f:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_add_shared_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_f_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_add_shared_f:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_add_shared_d:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_add_shared_f_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xchg_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xchg_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xchg_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_shared_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xchg_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xchg_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xchg_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_exch_shared_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_shared_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_shared_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_max_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_ui_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_shared_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_shared_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_max_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_max_shared_ui_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_shared_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_shared_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_min_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_ui_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_shared_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_shared_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_min_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_min_shared_ui_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_inc_shared_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_inc_shared_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_inc_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_shared_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_dec_shared_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_dec_shared_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_dec_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_shared_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_inc_shared_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_inc_shared_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_inc_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_inc_shared_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_dec_shared_ui:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_dec_shared_ul:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_dec_shared_ull:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_dec_shared_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_and_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_and_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_and_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_shared_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_and_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_and_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_and_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_and_shared_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_or_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_or_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_or_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_shared_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_or_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_or_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_or_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_or_shared_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xor_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xor_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_xor_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_shared_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xor_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xor_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_xor_shared_ll:
+    return MakeScopedAtomic(Intrinsic::nvvm_atomic_xor_shared_i_acq_rel_sys);
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_cas_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_cas_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_cta_cas_shared_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_shared_i_acq_rel_cta);
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_cas_shared_i:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_cas_shared_l:
+  case NVPTX::BI__nvvm_atom_acq_rel_sys_cas_shared_ll:
+    return MakeScopedCasAtomic(Intrinsic::nvvm_atomic_cas_shared_i_acq_rel_sys);
+
   case NVPTX::BI__nvvm_match_all_sync_i32p:
   case NVPTX::BI__nvvm_match_all_sync_i64p: {
     Value *Mask = EmitScalarExpr(E->getArg(0));
@@ -17649,7 +19730,7 @@ RValue CodeGenFunction::EmitBuiltinAlignTo(const CallExpr *E, bool AlignUp) {
     if (getLangOpts().isSignedOverflowDefined())
       Result = Builder.CreateGEP(Int8Ty, Base, Difference, "aligned_result");
     else
-      Result = EmitCheckedInBoundsGEP(Base, Difference,
+      Result = EmitCheckedInBoundsGEP(Int8Ty, Base, Difference,
                                       /*SignedIndices=*/true,
                                       /*isSubtraction=*/!AlignUp,
                                       E->getExprLoc(), "aligned_result");
@@ -17784,6 +19865,22 @@ Value *CodeGenFunction::EmitWebAssemblyBuiltinExpr(unsigned BuiltinID,
     Value *RHS = EmitScalarExpr(E->getArg(1));
     Function *Callee =
         CGM.getIntrinsic(Intrinsic::maximum, ConvertType(E->getType()));
+    return Builder.CreateCall(Callee, {LHS, RHS});
+  }
+  case WebAssembly::BI__builtin_wasm_pmin_f32x4:
+  case WebAssembly::BI__builtin_wasm_pmin_f64x2: {
+    Value *LHS = EmitScalarExpr(E->getArg(0));
+    Value *RHS = EmitScalarExpr(E->getArg(1));
+    Function *Callee =
+        CGM.getIntrinsic(Intrinsic::wasm_pmin, ConvertType(E->getType()));
+    return Builder.CreateCall(Callee, {LHS, RHS});
+  }
+  case WebAssembly::BI__builtin_wasm_pmax_f32x4:
+  case WebAssembly::BI__builtin_wasm_pmax_f64x2: {
+    Value *LHS = EmitScalarExpr(E->getArg(0));
+    Value *RHS = EmitScalarExpr(E->getArg(1));
+    Function *Callee =
+        CGM.getIntrinsic(Intrinsic::wasm_pmax, ConvertType(E->getType()));
     return Builder.CreateCall(Callee, {LHS, RHS});
   }
   case WebAssembly::BI__builtin_wasm_ceil_f32x4:
@@ -18072,6 +20169,93 @@ Value *CodeGenFunction::EmitWebAssemblyBuiltinExpr(unsigned BuiltinID,
     Function *Callee = CGM.getIntrinsic(Intrinsic::wasm_shuffle);
     return Builder.CreateCall(Callee, Ops);
   }
+  case WebAssembly::BI__builtin_wasm_fma_f32x4:
+  case WebAssembly::BI__builtin_wasm_fms_f32x4:
+  case WebAssembly::BI__builtin_wasm_fma_f64x2:
+  case WebAssembly::BI__builtin_wasm_fms_f64x2: {
+    Value *A = EmitScalarExpr(E->getArg(0));
+    Value *B = EmitScalarExpr(E->getArg(1));
+    Value *C = EmitScalarExpr(E->getArg(2));
+    unsigned IntNo;
+    switch (BuiltinID) {
+    case WebAssembly::BI__builtin_wasm_fma_f32x4:
+    case WebAssembly::BI__builtin_wasm_fma_f64x2:
+      IntNo = Intrinsic::wasm_fma;
+      break;
+    case WebAssembly::BI__builtin_wasm_fms_f32x4:
+    case WebAssembly::BI__builtin_wasm_fms_f64x2:
+      IntNo = Intrinsic::wasm_fms;
+      break;
+    default:
+      llvm_unreachable("unexpected builtin ID");
+    }
+    Function *Callee = CGM.getIntrinsic(IntNo, A->getType());
+    return Builder.CreateCall(Callee, {A, B, C});
+  }
+  case WebAssembly::BI__builtin_wasm_laneselect_i8x16:
+  case WebAssembly::BI__builtin_wasm_laneselect_i16x8:
+  case WebAssembly::BI__builtin_wasm_laneselect_i32x4:
+  case WebAssembly::BI__builtin_wasm_laneselect_i64x2: {
+    Value *A = EmitScalarExpr(E->getArg(0));
+    Value *B = EmitScalarExpr(E->getArg(1));
+    Value *C = EmitScalarExpr(E->getArg(2));
+    Function *Callee =
+        CGM.getIntrinsic(Intrinsic::wasm_laneselect, A->getType());
+    return Builder.CreateCall(Callee, {A, B, C});
+  }
+  case WebAssembly::BI__builtin_wasm_relaxed_swizzle_i8x16: {
+    Value *Src = EmitScalarExpr(E->getArg(0));
+    Value *Indices = EmitScalarExpr(E->getArg(1));
+    Function *Callee = CGM.getIntrinsic(Intrinsic::wasm_relaxed_swizzle);
+    return Builder.CreateCall(Callee, {Src, Indices});
+  }
+  case WebAssembly::BI__builtin_wasm_relaxed_min_f32x4:
+  case WebAssembly::BI__builtin_wasm_relaxed_max_f32x4:
+  case WebAssembly::BI__builtin_wasm_relaxed_min_f64x2:
+  case WebAssembly::BI__builtin_wasm_relaxed_max_f64x2: {
+    Value *LHS = EmitScalarExpr(E->getArg(0));
+    Value *RHS = EmitScalarExpr(E->getArg(1));
+    unsigned IntNo;
+    switch (BuiltinID) {
+    case WebAssembly::BI__builtin_wasm_relaxed_min_f32x4:
+    case WebAssembly::BI__builtin_wasm_relaxed_min_f64x2:
+      IntNo = Intrinsic::wasm_relaxed_min;
+      break;
+    case WebAssembly::BI__builtin_wasm_relaxed_max_f32x4:
+    case WebAssembly::BI__builtin_wasm_relaxed_max_f64x2:
+      IntNo = Intrinsic::wasm_relaxed_max;
+      break;
+    default:
+      llvm_unreachable("unexpected builtin ID");
+    }
+    Function *Callee = CGM.getIntrinsic(IntNo, LHS->getType());
+    return Builder.CreateCall(Callee, {LHS, RHS});
+  }
+  case WebAssembly::BI__builtin_wasm_relaxed_trunc_s_i32x4_f32x4:
+  case WebAssembly::BI__builtin_wasm_relaxed_trunc_u_i32x4_f32x4:
+  case WebAssembly::BI__builtin_wasm_relaxed_trunc_zero_s_i32x4_f64x2:
+  case WebAssembly::BI__builtin_wasm_relaxed_trunc_zero_u_i32x4_f64x2: {
+    Value *Vec = EmitScalarExpr(E->getArg(0));
+    unsigned IntNo;
+    switch (BuiltinID) {
+    case WebAssembly::BI__builtin_wasm_relaxed_trunc_s_i32x4_f32x4:
+      IntNo = Intrinsic::wasm_relaxed_trunc_signed;
+      break;
+    case WebAssembly::BI__builtin_wasm_relaxed_trunc_u_i32x4_f32x4:
+      IntNo = Intrinsic::wasm_relaxed_trunc_unsigned;
+      break;
+    case WebAssembly::BI__builtin_wasm_relaxed_trunc_zero_s_i32x4_f64x2:
+      IntNo = Intrinsic::wasm_relaxed_trunc_zero_signed;
+      break;
+    case WebAssembly::BI__builtin_wasm_relaxed_trunc_zero_u_i32x4_f64x2:
+      IntNo = Intrinsic::wasm_relaxed_trunc_zero_unsigned;
+      break;
+    default:
+      llvm_unreachable("unexpected builtin ID");
+    }
+    Function *Callee = CGM.getIntrinsic(IntNo);
+    return Builder.CreateCall(Callee, {Vec});
+  }
   default:
     return nullptr;
   }
@@ -18109,6 +20293,7 @@ getIntrinsicForHexagonNonGCCBuiltin(unsigned BuiltinID) {
     CUSTOM_BUILTIN_MAPPING(S2_storerf_pcr, 0)
     CUSTOM_BUILTIN_MAPPING(S2_storeri_pcr, 0)
     CUSTOM_BUILTIN_MAPPING(S2_storerd_pcr, 0)
+    // Legacy builtins that take a vector in place of a vector predicate.
     CUSTOM_BUILTIN_MAPPING(V6_vmaskedstoreq, 64)
     CUSTOM_BUILTIN_MAPPING(V6_vmaskedstorenq, 64)
     CUSTOM_BUILTIN_MAPPING(V6_vmaskedstorentq, 64)
@@ -18142,8 +20327,8 @@ Value *CodeGenFunction::EmitHexagonBuiltinExpr(unsigned BuiltinID,
   auto MakeCircOp = [this, E](unsigned IntID, bool IsLoad) {
     // The base pointer is passed by address, so it needs to be loaded.
     Address A = EmitPointerWithAlignment(E->getArg(0));
-    Address BP = Address(
-        Builder.CreateBitCast(A.getPointer(), Int8PtrPtrTy), A.getAlignment());
+    Address BP = Address(Builder.CreateBitCast(
+        A.getPointer(), Int8PtrPtrTy), Int8PtrTy, A.getAlignment());
     llvm::Value *Base = Builder.CreateLoad(BP);
     // The treatment of both loads and stores is the same: the arguments for
     // the builtin are the same as the arguments for the intrinsic.
@@ -18187,7 +20372,7 @@ Value *CodeGenFunction::EmitHexagonBuiltinExpr(unsigned BuiltinID,
     // per call.
     Address DestAddr = EmitPointerWithAlignment(E->getArg(1));
     DestAddr = Address(Builder.CreateBitCast(DestAddr.getPointer(), Int8PtrTy),
-                       DestAddr.getAlignment());
+                       Int8Ty, DestAddr.getAlignment());
     llvm::Value *DestAddress = DestAddr.getPointer();
 
     // Operands are Base, Dest, Modifier.
@@ -18234,8 +20419,8 @@ Value *CodeGenFunction::EmitHexagonBuiltinExpr(unsigned BuiltinID,
   case Hexagon::BI__builtin_HEXAGON_V6_vsubcarry_128B: {
     // Get the type from the 0-th argument.
     llvm::Type *VecType = ConvertType(E->getArg(0)->getType());
-    Address PredAddr = Builder.CreateBitCast(
-        EmitPointerWithAlignment(E->getArg(2)), VecType->getPointerTo(0));
+    Address PredAddr = Builder.CreateElementBitCast(
+        EmitPointerWithAlignment(E->getArg(2)), VecType);
     llvm::Value *PredIn = V2Q(Builder.CreateLoad(PredAddr));
     llvm::Value *Result = Builder.CreateCall(CGM.getIntrinsic(ID),
         {EmitScalarExpr(E->getArg(0)), EmitScalarExpr(E->getArg(1)), PredIn});
@@ -18244,6 +20429,27 @@ Value *CodeGenFunction::EmitHexagonBuiltinExpr(unsigned BuiltinID,
     Builder.CreateAlignedStore(Q2V(PredOut), PredAddr.getPointer(),
         PredAddr.getAlignment());
     return Builder.CreateExtractValue(Result, 0);
+  }
+
+  case Hexagon::BI__builtin_HEXAGON_V6_vmaskedstoreq:
+  case Hexagon::BI__builtin_HEXAGON_V6_vmaskedstorenq:
+  case Hexagon::BI__builtin_HEXAGON_V6_vmaskedstorentq:
+  case Hexagon::BI__builtin_HEXAGON_V6_vmaskedstorentnq:
+  case Hexagon::BI__builtin_HEXAGON_V6_vmaskedstoreq_128B:
+  case Hexagon::BI__builtin_HEXAGON_V6_vmaskedstorenq_128B:
+  case Hexagon::BI__builtin_HEXAGON_V6_vmaskedstorentq_128B:
+  case Hexagon::BI__builtin_HEXAGON_V6_vmaskedstorentnq_128B: {
+    SmallVector<llvm::Value*,4> Ops;
+    const Expr *PredOp = E->getArg(0);
+    // There will be an implicit cast to a boolean vector. Strip it.
+    if (auto *Cast = dyn_cast<ImplicitCastExpr>(PredOp)) {
+      if (Cast->getCastKind() == CK_BitCast)
+        PredOp = Cast->getSubExpr();
+      Ops.push_back(V2Q(EmitScalarExpr(PredOp)));
+    }
+    for (int i = 1, e = E->getNumArgs(); i != e; ++i)
+      Ops.push_back(EmitScalarExpr(E->getArg(i)));
+    return Builder.CreateCall(CGM.getIntrinsic(ID), Ops);
   }
 
   case Hexagon::BI__builtin_HEXAGON_L2_loadrub_pci:
@@ -18282,40 +20488,6 @@ Value *CodeGenFunction::EmitHexagonBuiltinExpr(unsigned BuiltinID,
     return MakeBrevLd(Intrinsic::hexagon_L2_loadri_pbr, Int32Ty);
   case Hexagon::BI__builtin_brev_ldd:
     return MakeBrevLd(Intrinsic::hexagon_L2_loadrd_pbr, Int64Ty);
-
-  default: {
-    if (ID == Intrinsic::not_intrinsic)
-      return nullptr;
-
-    auto IsVectorPredTy = [](llvm::Type *T) {
-      return T->isVectorTy() &&
-             cast<llvm::VectorType>(T)->getElementType()->isIntegerTy(1);
-    };
-
-    llvm::Function *IntrFn = CGM.getIntrinsic(ID);
-    llvm::FunctionType *IntrTy = IntrFn->getFunctionType();
-    SmallVector<llvm::Value*,4> Ops;
-    for (unsigned i = 0, e = IntrTy->getNumParams(); i != e; ++i) {
-      llvm::Type *T = IntrTy->getParamType(i);
-      const Expr *A = E->getArg(i);
-      if (IsVectorPredTy(T)) {
-        // There will be an implicit cast to a boolean vector. Strip it.
-        if (auto *Cast = dyn_cast<ImplicitCastExpr>(A)) {
-          if (Cast->getCastKind() == CK_BitCast)
-            A = Cast->getSubExpr();
-        }
-        Ops.push_back(V2Q(EmitScalarExpr(A)));
-      } else {
-        Ops.push_back(EmitScalarExpr(A));
-      }
-    }
-
-    llvm::Value *Call = Builder.CreateCall(IntrFn, Ops);
-    if (IsVectorPredTy(IntrTy->getReturnType()))
-      Call = Q2V(Call);
-
-    return Call;
-  } // default
   } // switch
 
   return nullptr;
@@ -18380,8 +20552,7 @@ RValue CodeGenFunction::EmitIntelFPGAMemBuiltin(const CallExpr *E) {
 
   llvm::Value *Ann = EmitAnnotationCall(F, PtrVal, AnnotStr, SourceLocation());
 
-  cast<CallBase>(Ann)->addAttribute(llvm::AttributeList::FunctionIndex,
-                                    llvm::Attribute::ReadNone);
+  cast<CallBase>(Ann)->addFnAttr(llvm::Attribute::ReadNone);
 
   return RValue::get(Ann);
 }
@@ -18397,6 +20568,7 @@ Value *CodeGenFunction::EmitRISCVBuiltinExpr(unsigned BuiltinID,
 
   Intrinsic::ID ID = Intrinsic::not_intrinsic;
   unsigned NF = 1;
+  constexpr unsigned TAIL_UNDISTURBED = 0;
 
   // Required for overloaded intrinsics.
   llvm::SmallVector<llvm::Type *, 2> IntrinsicTypes;

@@ -78,7 +78,8 @@ bool ConstantFoldTerminator(BasicBlock *BB, bool DeleteDeadConditions = false,
 //
 
 /// Return true if the result produced by the instruction is not used, and the
-/// instruction has no side effects.
+/// instruction will return. Certain side-effecting instructions are also
+/// considered dead if there are no uses of the instruction.
 bool isInstructionTriviallyDead(Instruction *I,
                                 const TargetLibraryInfo *TLI = nullptr);
 
@@ -87,6 +88,14 @@ bool isInstructionTriviallyDead(Instruction *I,
 /// isInstructionTriviallyDead would be true if the use count was 0.
 bool wouldInstructionBeTriviallyDead(Instruction *I,
                                      const TargetLibraryInfo *TLI = nullptr);
+
+/// Return true if the result produced by the instruction has no side effects on
+/// any paths other than where it is used. This is less conservative than 
+/// wouldInstructionBeTriviallyDead which is based on the assumption
+/// that the use count will be 0. An example usage of this API is for
+/// identifying instructions that can be sunk down to use(s).
+bool wouldInstructionBeTriviallyDeadOnUnusedPaths(
+    Instruction *I, const TargetLibraryInfo *TLI = nullptr);
 
 /// If the specified value is a trivially dead instruction, delete it.
 /// If that makes any of its operands trivially dead, delete them too,

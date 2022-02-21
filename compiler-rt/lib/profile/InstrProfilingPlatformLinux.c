@@ -94,11 +94,14 @@ static size_t RoundUp(size_t size, size_t align) {
  * Write binary id length and then its data, because binary id does not
  * have a fixed length.
  */
-int WriteOneBinaryId(ProfDataWriter *Writer, uint64_t BinaryIdLen,
-                     const uint8_t *BinaryIdData) {
+static int WriteOneBinaryId(ProfDataWriter *Writer, uint64_t BinaryIdLen,
+                            const uint8_t *BinaryIdData,
+                            uint64_t BinaryIdPadding) {
   ProfDataIOVec BinaryIdIOVec[] = {
       {&BinaryIdLen, sizeof(uint64_t), 1, 0},
-      {BinaryIdData, sizeof(uint8_t), BinaryIdLen, 0}};
+      {BinaryIdData, sizeof(uint8_t), BinaryIdLen, 0},
+      {NULL, sizeof(uint8_t), BinaryIdPadding, 1},
+  };
   if (Writer->Write(Writer, BinaryIdIOVec,
                     sizeof(BinaryIdIOVec) / sizeof(*BinaryIdIOVec)))
     return -1;
@@ -119,7 +122,8 @@ int WriteOneBinaryId(ProfDataWriter *Writer, uint64_t BinaryIdLen,
  * Note sections like .note.ABI-tag and .note.gnu.build-id are aligned
  * to 4 bytes, so round n_namesz and n_descsz to the nearest 4 bytes.
  */
-int WriteBinaryIdForNote(ProfDataWriter *Writer, const ElfW(Nhdr) * Note) {
+static int WriteBinaryIdForNote(ProfDataWriter *Writer,
+                                const ElfW(Nhdr) * Note) {
   int BinaryIdSize = 0;
 
   const char *NoteName = (const char *)Note + sizeof(ElfW(Nhdr));
@@ -129,11 +133,12 @@ int WriteBinaryIdForNote(ProfDataWriter *Writer, const ElfW(Nhdr) * Note) {
     uint64_t BinaryIdLen = Note->n_descsz;
     const uint8_t *BinaryIdData =
         (const uint8_t *)(NoteName + RoundUp(Note->n_namesz, 4));
-    if (Writer != NULL &&
-        WriteOneBinaryId(Writer, BinaryIdLen, BinaryIdData) == -1)
+    uint8_t BinaryIdPadding = __llvm_profile_get_num_padding_bytes(BinaryIdLen);
+    if (Writer != NULL && WriteOneBinaryId(Writer, BinaryIdLen, BinaryIdData,
+                                           BinaryIdPadding) == -1)
       return -1;
 
-    BinaryIdSize = sizeof(BinaryIdLen) + BinaryIdLen;
+    BinaryIdSize = sizeof(BinaryIdLen) + BinaryIdLen + BinaryIdPadding;
   }
 
   return BinaryIdSize;
@@ -144,8 +149,8 @@ int WriteBinaryIdForNote(ProfDataWriter *Writer, const ElfW(Nhdr) * Note) {
  * If writer is given, write binary ids into profiles.
  * If an error happens while writing, return -1.
  */
-int WriteBinaryIds(ProfDataWriter *Writer, const ElfW(Nhdr) * Note,
-                   const ElfW(Nhdr) * NotesEnd) {
+static int WriteBinaryIds(ProfDataWriter *Writer, const ElfW(Nhdr) * Note,
+                          const ElfW(Nhdr) * NotesEnd) {
   int TotalBinaryIdsSize = 0;
   while (Note < NotesEnd) {
     int Result = WriteBinaryIdForNote(Writer, Note);

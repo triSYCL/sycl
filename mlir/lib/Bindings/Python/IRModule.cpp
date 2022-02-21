@@ -12,6 +12,8 @@
 
 #include <vector>
 
+#include "mlir-c/Bindings/Python/Interop.h"
+
 namespace py = pybind11;
 using namespace mlir;
 using namespace mlir::python;
@@ -25,6 +27,9 @@ PyGlobals *PyGlobals::instance = nullptr;
 PyGlobals::PyGlobals() {
   assert(!instance && "PyGlobals already constructed");
   instance = this;
+  // The default search path include {mlir.}dialects, where {mlir.} is the
+  // package prefix configured at compile time.
+  dialectSearchPrefixes.emplace_back(MAKE_MLIR_PYTHON_QUALNAME("dialects"));
 }
 
 PyGlobals::~PyGlobals() { instance = nullptr; }
@@ -46,9 +51,8 @@ void PyGlobals::loadDialectModule(llvm::StringRef dialectNamespace) {
     } catch (py::error_already_set &e) {
       if (e.matches(PyExc_ModuleNotFoundError)) {
         continue;
-      } else {
-        throw;
       }
+      throw;
     }
     break;
   }
@@ -131,11 +135,10 @@ PyGlobals::lookupRawOpViewClass(llvm::StringRef operationName) {
       // Positive cache.
       rawOpViewClassMapCache[operationName] = foundIt->second;
       return foundIt->second;
-    } else {
-      // Negative cache.
-      rawOpViewClassMap[operationName] = py::none();
-      return llvm::None;
     }
+    // Negative cache.
+    rawOpViewClassMap[operationName] = py::none();
+    return llvm::None;
   }
 }
 

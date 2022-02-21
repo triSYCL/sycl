@@ -56,7 +56,8 @@ static bool isDependentLoadOrStoreOp(Operation *op,
   if (auto loadOp = dyn_cast<AffineReadOpInterface>(op)) {
     return values.count(loadOp.getMemRef()) > 0 &&
            values[loadOp.getMemRef()] == true;
-  } else if (auto storeOp = dyn_cast<AffineWriteOpInterface>(op)) {
+  }
+  if (auto storeOp = dyn_cast<AffineWriteOpInterface>(op)) {
     return values.count(storeOp.getMemRef()) > 0;
   }
   return false;
@@ -235,7 +236,7 @@ static unsigned getMaxLoopDepth(ArrayRef<Operation *> srcOps,
       unsigned numCommonLoops =
           getNumCommonSurroundingLoops(*srcOpInst, *dstOpInst);
       for (unsigned d = 1; d <= numCommonLoops + 1; ++d) {
-        FlatAffineConstraints dependenceConstraints;
+        FlatAffineValueConstraints dependenceConstraints;
         // TODO: Cache dependence analysis results, check cache here.
         DependenceResult result = checkMemrefAccessDependence(
             srcAccess, dstAccess, d, &dependenceConstraints,

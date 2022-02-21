@@ -1,14 +1,16 @@
 // REQUIRES: xocc
 
-// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
-
-// RUN: env SYCL_DISABLE_PARALLEL_FOR_RANGE_ROUNDING=1 %ACC_RUN_PLACEHOLDER %t.out
+// RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
+// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
+// RUN: env SYCL_DISABLE_PARALLEL_FOR_RANGE_ROUNDING=1 %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
 #include <CL/sycl.hpp>
 
 #include <algorithm>
 #include <cstdio>
 #include <random>
+
+#include "../utilities/device_selectors.hpp"
 
 using cl::sycl::detail::aligned_allocator;
 using std::default_random_engine;
@@ -71,7 +73,7 @@ int main() {
   size_t rows = columns;
 
   // Creating SYCL queue
-  cl::sycl::queue Queue;
+  cl::sycl::queue Queue{ selector_defines::CompiledForDeviceSelector {} };
 
   cl::sycl::buffer<int, 2> A(cl::sycl::range<2>{columns, rows});
   cl::sycl::buffer<int, 2> B(cl::sycl::range<2>{columns, rows});

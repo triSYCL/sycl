@@ -58,6 +58,10 @@ public:
   bool selectSExti32(SDValue N, SDValue &Val);
   bool selectZExti32(SDValue N, SDValue &Val);
 
+  bool hasAllNBitUsers(SDNode *Node, unsigned Bits) const;
+  bool hasAllHUsers(SDNode *Node) const { return hasAllNBitUsers(Node, 16); }
+  bool hasAllWUsers(SDNode *Node) const { return hasAllNBitUsers(Node, 32); }
+
   bool selectVLOp(SDValue N, SDValue &VL);
 
   bool selectVSplat(SDValue N, SDValue &SplatVal);
@@ -75,7 +79,7 @@ public:
                                   const SDLoc &DL, unsigned CurOp,
                                   bool IsMasked, bool IsStridedOrIndexed,
                                   SmallVectorImpl<SDValue> &Operands,
-                                  MVT *IndexVT = nullptr);
+                                  bool IsLoad = false, MVT *IndexVT = nullptr);
 
   void selectVLSEG(SDNode *Node, bool IsMasked, bool IsStrided);
   void selectVLSEGFF(SDNode *Node, bool IsMasked);
@@ -109,7 +113,8 @@ public:
 #include "RISCVGenDAGISel.inc"
 
 private:
-  void doPeepholeLoadStoreADDI();
+  bool doPeepholeLoadStoreADDI(SDNode *Node);
+  bool doPeepholeSExtW(SDNode *Node);
 };
 
 namespace RISCV {
