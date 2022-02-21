@@ -18,7 +18,6 @@
 
 #include "sycl/ext/xilinx/literals/cstr.hpp"
 #include "CL/sycl/detail/pi.h"
-#include <boost/core/demangle.hpp>
 #include <cstddef>
 #include <iostream>
 #include <regex>

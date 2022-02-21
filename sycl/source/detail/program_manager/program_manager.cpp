@@ -26,10 +26,6 @@
 #include <detail/spec_constant_impl.hpp>
 #include <sycl/ext/oneapi/experimental/spec_constant.hpp>
 
-#include <boost/container_hash/hash.hpp> // uuid_hasher
-#include <boost/uuid/uuid_generators.hpp> // sha name_gen/generator
-#include <boost/uuid/uuid_io.hpp> // uuid to_string
-
 #include <algorithm>
 #include <cassert>
 #include <cstdint>

@@ -20,7 +20,7 @@
 #include "sycl/ext/xilinx/fpga/memory_properties.hpp"
 #include "sycl/ext/xilinx/fpga/partition_array.hpp"
 #include "sycl/ext/xilinx/fpga/pipeline.hpp"
-#include "sycl/ext/xilinx/fpga/parallel_invoke.hpp"
+#include "sycl/ext/xilinx/fpga/static_unroll.hpp"
 #include "sycl/ext/xilinx/fpga/unroll.hpp"
 
 #endif // SYCL_XILINX_FPGA_HPP
