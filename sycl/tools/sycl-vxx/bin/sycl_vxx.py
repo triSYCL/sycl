@@ -22,6 +22,8 @@ kernel.
 """
 
 from argparse import ArgumentError, ArgumentParser
+import functools
+from genericpath import exists
 from itertools import starmap
 import functools
 import json
@@ -420,13 +422,13 @@ class VXXCompilationDriver(VitisCompilationDriver):
         # TODO: XILINX_PLATFORM should be passed by clang driver instead
         self.xilinx_platform = environ['XILINX_PLATFORM']
         self.extra_comp_args = []
-        if arguments.vitis_comp_argfile is not None:
+        if arguments.vitis_comp_argfile is not None and exists(arguments.vitis_comp_argfile):
             with arguments.vitis_comp_argfile.open("r") as f:
                 content = f.read().strip()
                 if content:
                     self.extra_comp_args.extend(content.split(' '))
         self.extra_link_args = []
-        if arguments.vitis_link_argfile is not None:
+        if arguments.vitis_link_argfile is not None and exists(arguments.vitis_link_argfile):
             with arguments.vitis_link_argfile.open("r") as f:
                 content = f.read().strip()
                 if content:
@@ -434,44 +436,44 @@ class VXXCompilationDriver(VitisCompilationDriver):
         if (self.vitis_mode == "sw_emu"):
             raise Exception("sw_emu is not compatible with the HLS flow")
 
-    @run_if_ok
     def _get_compile_kernel_cmd_out(self, kernel, inputs):
         """Create command to compile kernel"""
-        vxx = self.vitis_bin_dir / "v++"
-        comp_config = environ.get('SYCL_VXX_COMP_CONFIG')
-        kernel_output = self.tmpdir / f"{kernel['name']}.xo"
-        command = [
-            vxx, "--target", self.vitis_mode,
-            "--advanced.param", "compiler.hlsDataflowStrictMode=off",
-            # Do the optimizations that were not performed by sycl compiler
-            "-O3",
-            "--platform", self.xilinx_platform,
-            "--temp_dir", self.tmpdir / 'vxx_comp_tmp',
-            "--log_dir", self.tmpdir / 'vxx_comp_log',
-            "--report_dir", self.tmpdir / 'vxx_comp_report',
-            "--save-temps", "-c", "-k", kernel['name'], '-o', kernel_output,
-            inputs
-        ]
-        if comp_config is not None and Path(comp_config).is_file():
-            command.extend(("--config", Path(comp_config).resolve()))
-        if 'extra_args' in kernel and kernel['extra_args'].strip():
-            # User provided kernel arguments can contain many spaces,
-            # leading split to give empty string that are incorrectly
-            # interpreted as file name by v++ : filter remove them
-            command.extend(
-                filter(lambda x: x != '', kernel['extra_args'].split(' ')))
-        command.extend(self.extra_comp_args)
-        self._dump_cmd(f"vxxcomp-{kernel['name']}", command)
-        return (kernel_output, command)
+        if self.ok:
+            vxx = self.vitis_bin_dir / "v++"
+            comp_config = environ.get('SYCL_VXX_COMP_CONFIG')
+            kernel_output = self.tmpdir / f"{kernel['name']}.xo"
+            command = [
+                vxx, "--target", self.vitis_mode,
+                "--advanced.param", "compiler.hlsDataflowStrictMode=off",
+                # Do the optimizations that were not performed by sycl compiler
+                "-O3",
+                "--platform", self.xilinx_platform,
+                "--temp_dir", self.tmpdir / 'vxx_comp_tmp',
+                "--log_dir", self.tmpdir / 'vxx_comp_log',
+                "--report_dir", self.tmpdir / 'vxx_comp_report',
+                "--save-temps", "-c", "-k", kernel['name'], '-o', kernel_output,
+                inputs
+            ]
+            if comp_config is not None and Path(comp_config).is_file():
+                command.extend(("--config", Path(comp_config).resolve()))
+            if 'extra_args' in kernel and kernel['extra_args'].strip():
+                # User provided kernel arguments can contain many spaces,
+                # leading split to give empty string that are incorrectly
+                # interpreted as file name by v++ : filter remove them
+                command.extend(
+                    filter(lambda x: x != '', kernel['extra_args'].split(' ')))
+            command.extend(self.extra_comp_args)
+            self._dump_cmd(f"vxxcomp-{kernel['name']}", command)
+            return (kernel_output, command)
 
-    @run_if_ok
     def _compile_kernel(self, outname, command):
         """Execute a kernel compilation command"""
-        _run_in_isolated_proctree(command, check=True)
+        if self.ok:
+            _run_in_isolated_proctree(command, check=True)
         return outname
 
     @subprocess_error_handler("Vitis linkage stage failed")
-    def _link_kernels(self):
+    def _link_kernels(self, kernels):
         """Call v++ to link all kernel in one .xclbin"""
         xclbin = self.tmpdir / f"{self.outstem}.xclbin"
         vpp = self.vitis_bin_dir / "v++"
@@ -512,7 +514,7 @@ class VXXCompilationDriver(VitisCompilationDriver):
                     )
                 ))
         command.extend(self.extra_link_args)
-        command.extend(self.compiled_kernels)
+        command.extend(kernels)
         self._dump_cmd("vxxlink", command)
         _run_in_isolated_proctree(command, check=True)
         return xclbin
@@ -530,12 +532,12 @@ class VXXCompilationDriver(VitisCompilationDriver):
                 future = p.starmap_async(
                     self._compile_kernel,
                     compile_commands)
-                compiled_kernels = list(future.get())
+                return list(future.get())
             except KeyboardInterrupt:
                 p.terminate()
                 raise KeyboardInterrupt
         else:
-            self.compiled_kernels = list(starmap(self._compile_kernel, compile_commands))
+            return list(starmap(self._compile_kernel, compile_commands))
 
     def _next_passes(self, inputs):
         # Driver specific area
