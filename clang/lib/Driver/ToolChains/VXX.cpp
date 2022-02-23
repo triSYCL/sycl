@@ -249,6 +249,9 @@ void SYCL::SYCLPostLinkVXX::constructSYCLVXXPLCommand(
 VXXToolChain::VXXToolChain(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
     : ToolChain(D, Triple, Args)
 {
+  // Lookup binaries into the driver directory, this is used to
+  // discover the clang-offload-bundler executable.
+  getProgramPaths().push_back(getDriver().Dir);
 }
 
 VXXToolChain::VXXToolChain(const Driver &D, const llvm::Triple &Triple,
