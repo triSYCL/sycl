@@ -18,9 +18,11 @@
 
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Demangle/Demangle.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/CallingConv.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
@@ -28,6 +30,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/Transforms/Utils/LowerMemIntrinsics.h"
 
 #include "SYCLUtils.h"
 
@@ -246,11 +249,34 @@ struct PrepareSYCLOpt : public ModulePass {
     }
   }
 
+  void lowerMemIntrinsic(Module &M) {
+    TargetTransformInfo TTI(M.getDataLayout());
+    SmallVector<Instruction *, 16> ToProcess;
+    for (auto &F : M.functions())
+      for (auto &I : instructions(F))
+        if (auto *CI = dyn_cast<CallBase>(&I))
+          ToProcess.push_back(&I);
+    for (auto *I : ToProcess) {
+      if (auto *CI = dyn_cast<CallBase>(I)) {
+        if (MemCpyInst *Memcpy = dyn_cast<MemCpyInst>(CI))
+          expandMemCpyAsLoop(Memcpy, TTI);
+        else if (MemMoveInst *Memmove = dyn_cast<MemMoveInst>(CI))
+          expandMemMoveAsLoop(Memmove);
+        else if (MemSetInst *Memset = dyn_cast<MemSetInst>(CI))
+          expandMemSetAsLoop(Memset);
+        else
+          continue;
+        CI->eraseFromParent();
+      }
+    }
+  }
+
   bool runOnModule(Module &M) override {
     // When using the HLS flow instead of SPIR default
     bool SyclHLSFlow = Triple(M.getTargetTriple()).isXilinxHLS();
     unwrapFPGAProperties(M);
     turnNonKernelsIntoPrivate(M);
+    lowerMemIntrinsic(M);
     if (SyclHLSFlow) {
       setHLSCallingConvention(M);
       signalUnsupportedSPIRBuiltins(M);

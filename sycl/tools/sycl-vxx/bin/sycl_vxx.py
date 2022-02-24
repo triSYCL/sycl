@@ -296,7 +296,7 @@ class VitisCompilationDriver:
             self.tmpdir /
             f"{outstem}-kernels-prepared.bc"
         )
-        opt_options = ["--sycl-vxx", "--sroa-vxx-conservative", "-preparesycl"]
+        opt_options = ["--sycl-vxx", "--sroa-vxx-conservative", "--lower-mem-intr-to-llvm-type", "-preparesycl"]
         opt_options.extend(VXX_PassPipeline)
         opt_options.extend(["-inSPIRation", "-o", f"{prepared_bc}"])
 
