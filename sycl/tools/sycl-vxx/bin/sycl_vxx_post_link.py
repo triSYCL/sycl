@@ -61,3 +61,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("Received keyboard interrupt, will stop")
         sys.exit(-2)
+    except EOFError:
+        print("No kernel found")

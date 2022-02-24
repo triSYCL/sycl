@@ -5,6 +5,7 @@
 
 // CHECK: clang-{{.*}}"-cc1" "-triple" "vitis_ip-xilinx" "-O3" "-disable-llvm-passes" {{.*}} "-emit-llvm"
 // CHECK-NEXT: sycl_vxx.py" "ipexport" "--clang_path" {{.*}} "--target" "xc7vx330t-ffg1157-1"
+// CHECK-NOT: clang
 
 #ifndef __VITIS_KERNEL
 #error "not using device compiler"
