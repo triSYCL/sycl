@@ -1087,12 +1087,11 @@ std::string Triple::normalize(StringRef Str) {
   }
 
   if (Arch == fpga64) {
-    Components.resize(4);
+    Components.resize(std::max<size_t>(Components.size(), 3));
     if (Vendor == UnknownVendor)
       Components[1] = "xilinx";
-    if (Environment == UnknownEnvironment)
-      Components[3] = "sycldevice";
-    Components[2] = "unknown";
+    if (OS == UnknownOS)
+      Components[2] = "linux";
   }
 
   // Stick the corrected components back together to form the normalized string.
