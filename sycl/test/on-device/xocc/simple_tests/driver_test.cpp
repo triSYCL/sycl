@@ -2,7 +2,7 @@
 
 // RUN: %clang -fsycl -fsycl-targets=fpga64_sw_emu -### %s 2>&1 | FileCheck -check-prefix=CHECK-PIPELINE_SW_EMU %s
 // RUN: env XCL_EMULATION_MODE=sw_emu %clang -fsycl -fsycl-targets=fpga64 -### %s 2>&1 | FileCheck -check-prefix=CHECK-PIPELINE_SW_EMU %s
-// CHECK-PIPELINE_SW_EMU:{{.*}}clang-{{.*}}" "-cc1" "-triple" "fpga64_sw_emu-xilinx-linux"{{.*}} "-fsycl-is-device"{{.*}} "-disable-llvm-passes"{{.*}} "-fsycl-int-header
+// CHECK-PIPELINE_SW_EMU:{{.*}}clang-{{.*}}" "-cc1" "-triple" "fpga64_sw_emu-xilinx-linux"{{.*}}"-fsycl-is-device"{{.*}}"-fsycl-int-header
 // CHECK-PIPELINE_SW_EMU-NEXT:{{.*}}sycl_vxx.py" {{.*}} "sw_emu"
 // CHECK-PIPELINE_SW_EMU-NEXT:{{.*}}sycl_vxx_post_link.py"
 // CHECK-PIPELINE_SW_EMU-NEXT:{{.*}}clang-offload-wrapper"
