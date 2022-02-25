@@ -309,8 +309,8 @@ class VitisCompilationDriver:
             self.ok = False
         return prepared_bc
 
-    @subprocess_error_handler("Error when linking with HLS SPIR library")
-    def _link_spir(self, inputs):
+    @subprocess_error_handler("Error when preparing HLS SPIR library")
+    def _run_prepare_lib(self):
         vitis_lib_spir = (
             self.vitis_bin_dir.parent /
             "lnx64/lib/libspir64-39-hls.bc"
@@ -320,13 +320,17 @@ class VitisCompilationDriver:
                 self.vitis_bin_dir.parents[2] /
                 f"Vitis_HLS/{self.vitis_version}/lnx64/lib/libspir64-39-hls.bc"
             ).resolve()
-        llvm_link = self.clang_path / 'llvm-link'
-        linked_kernels = self.tmpdir / f"{self.outstem}_kernels-linked.bc"
+        return vitis_lib_spir
+
+    @subprocess_error_handler("Error when linking with HLS SPIR library")
+    def _link_spir(self, kernel, lib):
+        llvm_link = self.vitis_clang_bin / 'llvm-link'
+        linked_kernels = self.tmpdir / f"{self.outstem}_kernels-linked.xpirbc"
         args = [
             llvm_link,
-            inputs,
+            kernel,
             "--only-needed",
-            vitis_lib_spir,
+            lib,
             "-o",
             linked_kernels
         ]
@@ -398,15 +402,16 @@ class VitisCompilationDriver:
                 print(f"Temporary clutter in {tmpdir} will not be deleted")
             joined_kernels = self._link_multi_inputs(self.inputs)
             prepared_bc = self._run_preparation(joined_kernels)
-            spir_linked = self._link_spir(prepared_bc)
-            downgraded = self._downgrade(spir_linked)
+            prepared_lib = self._run_prepare_lib()
+            downgraded = self._downgrade(prepared_bc)
             if environ.get("SYCL_VXX_MANUAL_EDIT") is not None:
                 print("Please edit", self.downgraded_ir)
                 input("Press enter to resume the compilation")
             self.vpp_llvm_input = (
             )
             assembled = self._asm_ir(downgraded)
-            final = self._next_passes(assembled)
+            spir_linked = self._link_spir(assembled, prepared_lib)
+            final = self._next_passes(spir_linked)
             try:
                 shutil.copy2(final, self.outpath)
             except FileNotFoundError:
