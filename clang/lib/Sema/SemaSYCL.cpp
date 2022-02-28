@@ -1928,13 +1928,12 @@ class SyclKernelDeclCreator : public SyclKernelFieldHandler {
     Params.push_back(NewParam);
   }
 
-  // Obtain an integer value stored in a template parameter of buffer_location
-  // property to pass it to buffer_location kernel attribute
+  // Transform sycl properties in the xilinx namespace into an annotation
+  // attribute.
   void handleXilinxProperty(ParmVarDecl *Param, QualType PropTy,
                             SourceLocation Loc) {
     if (!isSyclXilinxType(PropTy))
       return;
-    /// TODO: when D88645 lands update this code to use that instead.
     ASTContext &Ctx = SemaRef.getASTContext();
     const CXXRecordDecl *RD = PropTy->getAsCXXRecordDecl();
     const CXXRecordDecl *PRD = cast<CXXRecordDecl>(RD->getParent());
