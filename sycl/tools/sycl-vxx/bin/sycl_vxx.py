@@ -185,6 +185,8 @@ def _run_in_isolated_proctree(cmd, *args, **kwargs):
     return subprocess.run(cmd, *args, **kwargs)
 
 
+# This is currently unused because a change in from 2021.2 to 2022.1 was reverted
+#  but it is likely to become usefull in the future so i leave it as is
 class VXXVersion:
     def __init__(self, exec_path) -> None:
         version_opt = {"v++" : "-v", "vitis_hls" : "-version"}
@@ -200,16 +202,6 @@ class VXXVersion:
 
     def __str__(self) -> str:
         return f"{self.major}.{self.minor}"
-
-    def _interface_is_attribute(self):
-        return self.major >= 2022
-
-    def get_kernel_prop_opt(self):
-        ret = []
-        if self._interface_is_attribute():
-            ret.append("-sycl-vxx-maxi-attr-encoding")
-        return ret
-
 
 class VXXBinary:
     def __init__(self, execname):
@@ -349,8 +341,6 @@ class VitisCompilationDriver:
 
         kernel_prop_opt = ["-kernelPropGen",
                            "--sycl-kernel-propgen-output", f"{kernel_prop}"]
-
-        kernel_prop_opt.extend(self.vitis_version.get_kernel_prop_opt())
 
         opt_options = [
             "--lower-delayed-sycl-metadata", "-lower-sycl-metadata",
