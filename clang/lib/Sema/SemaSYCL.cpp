@@ -34,6 +34,8 @@
 #include <functional>
 #include <initializer_list>
 
+#define DEBUG_TYPE "sema-sycl"
+
 using namespace clang;
 using namespace std::placeholders;
 
@@ -765,6 +767,14 @@ class SingleDeviceFunctionTracker {
     // If this isn't a function, I don't think there is anything we can do here.
     if (!CurrentDecl)
       return;
+
+    /// This will print a uniqued call graph of functions being complied for the
+    /// device. This is useful for debugging how a function ended up in device
+    /// code.
+    LLVM_DEBUG(if (!DeviceFunctions.contains(CurrentDecl)) {
+      llvm::dbgs() << std::string(CallStack.size(), ' ');
+      llvm::dbgs() << CurrentDecl->getQualifiedNameAsString() << "\n";
+    });
 
     // Determine if this is a recursive function. If so, we're done.
     if (llvm::is_contained(CallStack, CurrentDecl)) {
