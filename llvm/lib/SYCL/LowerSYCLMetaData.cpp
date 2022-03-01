@@ -163,6 +163,8 @@ public:
     });
   }
 
+  /// Lower xilinx_pipeline annotation attributes into HLS's representation for
+  /// pipeline
   void lowerPipelineKernelDecoration(llvm::Function *F, llvm::Value *Payload) {
     std::string S;
     if (auto *Parameters = dyn_cast<ConstantStruct>(Payload)) {
@@ -314,9 +316,9 @@ public:
     }
   }
 
+  /// Add a function with the vitis_kernel annotation attribute as an HLS kernel
   void markKernel(llvm::ConstantStruct *CS) {
-    auto *F =
-        dyn_cast<Function>(getUnderlyingObject(CS->getAggregateElement(0u)));
+    auto *F = cast<Function>(getUnderlyingObject(CS->getAggregateElement(0u)));
     F->addFnAttr("fpga.top.func", F->getName());
     F->addFnAttr("fpga.demangled.name", F->getName());
     F->setCallingConv(CallingConv::C);

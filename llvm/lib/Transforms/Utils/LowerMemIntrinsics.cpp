@@ -19,8 +19,8 @@ namespace {
 
 cl::opt<bool>
     LowerToNonI8Type("lower-mem-intr-to-llvm-type", cl::Hidden,
-                       cl::desc("try to lower memory intrinsics to their "
-                                "underlying LLVM IR types and not i8"));
+                     cl::desc("try to lower memory intrinsics to their "
+                              "underlying LLVM IR types and not i8"));
 
 Value *Skip1BitCast(Value *V) {
   assert(V->getType()->isPointerTy());

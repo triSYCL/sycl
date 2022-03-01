@@ -198,6 +198,7 @@ struct VXXIRDowngrader : public ModulePass {
       I->eraseFromParent();
   }
 
+  /// Lower all llvm.abs into select(a < 0, -a, a)
   void lowerAbsIntrinsic(Module &M) {
     IRBuilder<> B(M.getContext());
     SmallVector<Instruction *, 16> ToProcess;
@@ -207,19 +208,17 @@ struct VXXIRDowngrader : public ModulePass {
           ToProcess.push_back(&I);
     for (auto *I : ToProcess) {
       if (auto *CI = dyn_cast<CallBase>(I)) {
-        if (CI->getIntrinsicID() == Intrinsic::abs) {
-          B.SetInsertPoint(CI->getNextNode());
-          Value *Cmp = B.CreateICmpSLT(
-              CI->getArgOperand(0),
-              ConstantInt::getNullValue(CI->getArgOperand(0)->getType()));
-          Value *Sub = B.CreateSub(
-              ConstantInt::getNullValue(CI->getArgOperand(0)->getType()),
-              CI->getArgOperand(0));
-          Value *ABS = B.CreateSelect(Cmp, Sub, CI->getArgOperand(0));
-          CI->replaceAllUsesWith(ABS);
-        }
-        else
+        if (CI->getIntrinsicID() != Intrinsic::abs)
           continue;
+        B.SetInsertPoint(CI->getNextNode());
+        Value *Cmp = B.CreateICmpSLT(
+            CI->getArgOperand(0),
+            ConstantInt::getNullValue(CI->getArgOperand(0)->getType()));
+        Value *Sub = B.CreateSub(
+            ConstantInt::getNullValue(CI->getArgOperand(0)->getType()),
+            CI->getArgOperand(0));
+        Value *ABS = B.CreateSelect(Cmp, Sub, CI->getArgOperand(0));
+        CI->replaceAllUsesWith(ABS);
         CI->eraseFromParent();
       }
     }

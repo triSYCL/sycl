@@ -100,13 +100,13 @@ void AddForwardedOptions(const llvm::opt::ArgList &Args,
 void SYCL::LinkerVXX::constructSYCLVXXCommand(
     Compilation &C, const JobAction &JA, const InputInfo &Output,
     const InputInfoList &Inputs, const llvm::opt::ArgList &Args) const {
-
   const auto &TC =
     static_cast<const toolchains::VXXToolChain &>(getToolChain());
   InputInfoList SyclVxxArg = Inputs;
 
   ArgStringList CmdArgs;
 
+  /// Determine if we are going to target an IP block or an xclbin
   bool isVitisIP = TC.isVitisIP() || Args.hasArg(options::OPT_vitis_ip_part_EQ);
 
   if (isVitisIP)
@@ -114,13 +114,13 @@ void SYCL::LinkerVXX::constructSYCLVXXCommand(
   else
     CmdArgs.push_back("vxxcompile");
 
-  // Script Arg $2, directory of the Clang driver, where the sycl-vxx script
+  // directory of the Clang driver, where the sycl-vxx script
   // opt binary and llvm-linker binary should be contained among other things
   assert(!C.getDriver().Dir.empty());
   CmdArgs.push_back("--clang_path");
   CmdArgs.push_back(Args.MakeArgString(C.getDriver().Dir));
 
-  // Script Arg $5, temporary directory path, used to dump a lot of intermediate
+  // temporary directory path, used to dump a lot of intermediate
   // files that no one needs to know about unless they're debugging
   SmallString<256> TmpDir;
   llvm::sys::path::system_temp_directory(true, TmpDir);
@@ -128,21 +128,21 @@ void SYCL::LinkerVXX::constructSYCLVXXCommand(
   CmdArgs.push_back("--tmp_root");
   CmdArgs.push_back(Args.MakeArgString(TmpDir));
 
-  // Script Arg $6, the name of the final output .xcl binary file after
+  // the name of the final output .xcl binary file after
   // compilation and linking is complete
   assert(Output.getFilename()[0]);
   CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
 
   if (isVitisIP) {
-    if (!Args.hasArg(options::OPT_vitis_ip_part_EQ))
+    if (!Args.hasArg(options::OPT_vitis_ip_part_EQ)) {
       C.getDriver().Diag(diag::err_drv_option_required_for_target)
           << "--vitis-ip-part" << TC.getTriple().getArchName();
-    else {
-      CmdArgs.push_back("--target");
-      CmdArgs.push_back(
-          Args.getLastArg(options::OPT_vitis_ip_part_EQ)->getValue());
+      return;
     }
+    CmdArgs.push_back("--target");
+    CmdArgs.push_back(
+        Args.getLastArg(options::OPT_vitis_ip_part_EQ)->getValue());
   } else {
     CmdArgs.push_back("--vitis_comp_argfile");
     AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_backend,

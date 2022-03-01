@@ -4772,8 +4772,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   if (RawTriple.isXilinxFPGA()) {
     /// -O3 to generate all the necessary information for proper optimization.
     CmdArgs.push_back("-O3");
-    /// -disable-llvm-passes because we want sycl_vxx and v++ to have full
-    /// control over the IR. so we disable any optimization that could run
+    /// Use -disable-llvm-passes because we want sycl_vxx and v++ to have full
+    /// control over the IR, so we disable any optimization that could run
     /// before them.
     CmdArgs.push_back("-disable-llvm-passes");
   }

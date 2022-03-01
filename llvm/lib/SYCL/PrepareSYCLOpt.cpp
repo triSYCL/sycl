@@ -249,6 +249,9 @@ struct PrepareSYCLOpt : public ModulePass {
     }
   }
 
+  /// Lower memory intrinsics into a simple loop of load and/or store
+  /// Note: the default intrinsic lowering is what we need for HLS because the
+  /// LowerToNonI8Type flag is used by sycl_vxx
   void lowerMemIntrinsic(Module &M) {
     TargetTransformInfo TTI(M.getDataLayout());
     SmallVector<Instruction *, 16> ToProcess;

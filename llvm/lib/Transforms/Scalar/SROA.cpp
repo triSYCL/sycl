@@ -116,8 +116,8 @@ STATISTIC(NumVectorized, "Number of vectorized aggregates");
 static cl::opt<bool> SROAStrictInbounds("sroa-strict-inbounds", cl::init(false),
                                         cl::Hidden);
 
-/// Prevent SROA from desegregating structs containing variable width integers
-/// with non-common bits sizes.
+/// Prevent SROA from desegregating structs containing arbitrary-width integers
+/// with non-common bit sizes.
 static cl::opt<bool> SROAVXXConservative("sroa-vxx-conservative", cl::init(false),
                                         cl::Hidden);
 
