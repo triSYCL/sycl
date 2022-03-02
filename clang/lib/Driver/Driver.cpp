@@ -734,7 +734,7 @@ static llvm::Triple completeSYCLTriple(llvm::Triple T) {
     if (T.getSubArch() == llvm::Triple::NoSubArch) {
       /// SubArch is inferred from XCL_EMULATION_MODE defaulting to hw.
       /// This has the same behavior as XRT.
-      const char *Mode = "hw";
+      const char *Mode = "hls_hw";
       if (const char *M = std::getenv("XCL_EMULATION_MODE"))
         Mode = M;
       T.setArchName(std::string(T.getArchName()) + "_" + Mode);

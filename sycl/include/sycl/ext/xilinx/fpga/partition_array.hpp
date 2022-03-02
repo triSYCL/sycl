@@ -201,14 +201,12 @@ struct partition_array {
     // partitioning to use
     if constexpr (partition_type == partition::type::cyclic)
       partition::xilinx_partition_array(
-          (ValueType __SYCL_DEVICE_ADDRSPACE(0 /*stack*/)(*)[Size])(&elems) &
-              elems,
+          (ValueType __SYCL_DEVICE_ADDRSPACE(0 /*stack*/)(*)[Size])(&elems),
           partition_type, PartitionType::physical_mem_num,
           PartitionType::partition_dim);
     if constexpr (partition_type == partition::type::block)
       partition::xilinx_partition_array(
-          (ValueType __SYCL_DEVICE_ADDRSPACE(0 /*stack*/)(*)[Size])(&elems) &
-              elems,
+          (ValueType __SYCL_DEVICE_ADDRSPACE(0 /*stack*/)(*)[Size])(&elems),
           partition_type, PartitionType::ele_in_each_physical_mem,
           PartitionType::partition_dim);
     if constexpr (partition_type == partition::type::complete)

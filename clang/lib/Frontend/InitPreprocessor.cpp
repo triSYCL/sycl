@@ -1212,12 +1212,15 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
       Builder.defineMacro("__SYCL_SPIR_DEVICE__");
       switch (TI.getTriple().getSubArch()) {
       case llvm::Triple::FPGASubArch_sw_emu:
+      case llvm::Triple::FPGASubArch_hls_sw_emu:
         Builder.defineMacro("__SYCL_XILINX_SW_EMU_MODE__");
         break;
       case llvm::Triple::FPGASubArch_hw_emu:
+      case llvm::Triple::FPGASubArch_hls_hw_emu:
         Builder.defineMacro("__SYCL_XILINX_HW_EMU_MODE__");
         break;
       case llvm::Triple::FPGASubArch_hw:
+      case llvm::Triple::FPGASubArch_hls_hw:
         Builder.defineMacro("__SYCL_XILINX_HW_MODE__");
         break;
       default:
