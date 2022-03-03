@@ -5,7 +5,7 @@ Disclaimer: nothing here is supported and this is all about a research
 project.
 
 We assume that you are on a recent Linux `x86_64` machine.
-We assume that you have installed a recent version for Vitis/Vivado already installed
+We assume that you have a recent version for Vitis/Vivado already installed
 
 ## Compile the compiler
 
