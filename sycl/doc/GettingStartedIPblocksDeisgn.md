@@ -13,7 +13,7 @@ Building the compiler can be done with Python scripts:
 
 ```bash
 # Pick some place where the compiler has to be compiled, such as:
-git clone --branch VitisIpTarget git@github.com:Ralender/sycl.git
+git clone --branch VitisIpTarget https://github.com/Ralender/sycl.git
 cd sycl
 python ./buildbot/configure.py
 python ./buildbot/compile.py -t vitis-ip-compiler
