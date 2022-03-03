@@ -1121,6 +1121,184 @@ sudo rmmod xocl
 sudo modprobe xocl
 ```
 
+## Xilinx FPGA extension
+
+In order to give user more control over how is implemented the kernel on hardware,
+a few SYCL extensions are provided as a replacement of Vitis HLS `HLS` pragmas.
+
+These extensions requires the inclusion of the `sycl/ext/xilinx/fpga.hpp`
+header, and requires compiling with C++20 support.
+
+### Pipelining
+
+Pipelining support comes from the `sycl/ext/xilinx/fpga/pipeline.hpp` header.
+
+A few pipeline types are defined, that are used to parametrize pipelining decorators.
+
+The `PipelineStyle` enum describes the different pipeline style supported by HLS:
+
++ `stall` pipelines only run when input data is present and stops otherwise (default),
++ `flushable` pipelines run when input data is present or if there is still data in the pipeline,
++ `free_running` pipelines run without stalling (simpler logic but more energy consumption).
+
+Two types are also defined to describe more specifically loop pipeline behavior:
+
++ `NoRewindPipeline` loop pipelines are flushed between two execution of the full loop, while
++ `RewindPipeline` are not.
+
+Finally, a few types are present to constrain the pipeline initialization interval :
+
++ `AutoII` let Vitis determine the pipeline II,
++ `ConstrainedII<Value>` asks Vitis to create a pipeline with an II of exactly Value cycles,
++ `DisablePipeline` force the absence of pipelining.
+
+Two decorations exists to pipeline part of the code.
+
++ `sycl::ext::xilinx::pipeline_kernel<IIType, PipelineType>` is used to pipeline kernel,
++ `sycl::ext::xilinx::pipeline<IIType, RewindType, PipelineType>` is used to pipeline a loop.
+
+#### Pipelining examples:
+
+Kernel pipelining:
+
+```cpp
+cgh.single_task(pipeline_kernel<ConstrainedII<4>>(
+  [=]{
+    for (size_t i = 0 ; i < 42 ; ++i>) {
+      OutAcc[i] = InAcc[i] * i;
+    }
+  }
+));
+```
+
+Loop pipelining:
+
+```cpp
+chh.single_task([=]{
+  // Pipeline the following loop
+  for (size_t i = 0 ; i < 42 ; ++i>) {
+    pipeline<>([&]{
+      OutAcc[i] = InAcc[i] * i;
+    });
+  }
+});
+```
+
+The lambda given to `pipeline` is executed for each step of
+the loop, and the enclosing loop is pipelined.
+
+Helpers to deactivate the pipeline for loop and kernel,
+respectively `no_pipeline` and `unpipeline_kernel` are used in
+ a similar way.
+
+### Dataflow decorators
+
+These decorators are the equivalent of the
+[HLS dataflow pragma](https://www.xilinx.com/html_docs/xilinx2021_1/vitis_doc/hls_pragmas.html#sxx1504034358866).
+
+A kernel decorator `sycl::ext::xilinx::dataflow_kernel()` and a loop
+decorator `sycl::ext::xilinx::dataflow()` exists, which are used in
+a similar fashion to the equivalent pipeline annotation.
+
+### Loop unrolling
+
+The `sycl::ext::xilinx::unroll<UnrollType>()` decorator should be applied
+to a lambda inside a for loop. The lambda is called at each loop
+iteration and the enclosing loop is unrolled following UnrollType
+semantics.
+
+`UnrollType` can be one of the following:
+
++ `NoUnrolling`: forbids unrolling of the enclosing loop,
++ `Full unrolling`: The loop will be replaced by expliciting all the iteration,
++ `CheckedFixedUnrolling<UnrollFactor>`: The iteration will be grouped
+   by UnrollFactor. If the total number of iteration is unknown or not
+   n integral multiple of UnrollFactor, extra hardware is generated
+   to ensure the loop does not perform too much iterations.
++ `UncheckedFixedUnrolling<UnrollFactor>`: Like `CheckedFixedUnrolling`,
+  but does not generate the extra hardware to ensure the loop exits at
+  the correct iteration if the total number of iteration is not an
+  integral multiple of UnrollFactor.
+  When the total number of iteration is only known at runtime, the user
+  takes the responsibility that it will always be an integral
+  multiple of UnrollFactor.
+  If it is known at compile time and does not verify the property,
+  the backend compilation will fail.
+
+### Pinning allocators to specific memory banks
+
+The memory bank on which a buffer is copied on the device is
+controllable via an accessor property.
+
+Example:
+
+```cpp
+sycl::queue queue;
+sycl::buffer<int, 42> a_buff, b_buff, c_buff;
+
+/*
+Fill a_buff and b_buff
+*/
+
+queue.submit([&](sycl::handler &cgh) {
+  sycl::ext::oneapi::accessor_property_list property_bank_1{sycl::ext::xilinx::ddr_bank<1>};
+  sycl::ext::oneapi::accessor_property_list property_bank_2{sycl::ext::xilinx::ddr_bank<2>};
+  sycl::ext::oneapi::accessor_property_list property_bank_3{sycl::ext::xilinx::ddr_bank<3>};
+
+  const sycl::accessor a_acc{a_buff, cgh, sycl::read_only, property_bank_1};
+  const sycl::accessor b_acc{b_buff, cgh, sycl::read_only, property_bank_2};
+  sycl::accessor c_acc{c_buff, cgh, sycl::write_only, property_bank_3};
+
+  cgh.single_task<class VectorAddDDR>([=] {
+    for (std::size_t i = 0 ; i < N ; ++i) {
+      c_acc[i] = a_acc[i] + b_acc[i];
+    }
+  });
+});
+}
+
+```
+
+In this example, `a_buff` copy on device will be stored on DDR 
+bank 1, `b_buff` copy on DDR bank 2 and `c_buff` copy on 
+DDR bank 3.
+
+**As of now, having accessor on the same buffer with different memory location is not supported.**
+
+### Array partitioning
+
+Partitioning an array allows having faster accesses to that array while using more hardware.
+all code will be shown with
+```cpp
+using namespace sycl::ext::xilinx
+```
+
+`partition_ndarray<int, sycl::dim<2, 3>, partition::complete<>>` is equivalent to the C-style array `int array[2][3]` but we specified a complete partitioning like the [HLS array_partition pragma](https://www.xilinx.com/htmldocs/xilinx2021_1/vitis_doc/hls_pragmas.html#gle1504034361378).
+
++ `partition::complete<>` each element will be in an individual register
++ `partition::block<4>` the array will be partitioned into `4` continuous blocks.
++ `partition::cyclic<6>` the array will be partitioned into `6` interleaving sections.
+
+`partition_array` is an alias for 1d arrays.
+
+Example:
+```cpp
+sycl::queue queue;
+sycl::buffer<int, 42> a_buff, b_buff;
+
+queue.submit([&](sycl::handler &cgh) {
+  const sycl::accessor a_acc{a_buff, cgh, sycl::read_only};
+  sycl::accessor b_acc{b_buff, cgh, sycl::write_only};
+  cgh.single_task<class Calculation>([=] {
+    partition_ndarray<int, sycl::dim<2, 3>, partition::complete<>> array = {{1, 2, -1}, {3, 4, -2}};
+    for (std::size_t i = 0 ; i < N ; ++i) {
+      c_acc[i] = b_acc[i] * array[i % 2][i % 3];
+    }
+  });
+});
+```
+
+for more example see [this test case](../test/on-device/xocc/simple_tests/partion_ndarray.cpp) or [this one](../test/on-device/xocc/edge_detection/edge_detection.cpp)
 
 ## AMD/Xilinx Macros
 
