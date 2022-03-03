@@ -205,9 +205,12 @@ class VXXVersion:
 
 class VXXBinary:
     def __init__(self, execname):
-        self.path = Path(shutil.which(execname))
-        if self.path is None:
+        p = shutil.which(execname)
+        if p is None:
+            print(f"error: unable to find {execname}")
+            print(f"note: make sure you can run {execname} on the command line\n")
             raise FileNotFoundError
+        self.path = Path(p)
         self.path = self.path.resolve()
         self.version = VXXVersion(self.path)
         if environ.get("XILINX_CLANG_39_BUILD_PATH") is not None:

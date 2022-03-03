@@ -286,6 +286,13 @@ add_custom_target( sycl-toolchain
   COMMENT "Building SYCL compiler toolchain..."
 )
 
+add_custom_target( vitis-ip-compiler
+  DEPENDS clang
+          opt
+          sycl-vxx
+  COMMENT "Building vitis ip compiler..."
+)
+
 if (SYCL_ENABLE_XPTI_TRACING)
   add_dependencies( sycl-toolchain xpti)
   if (MSVC)
