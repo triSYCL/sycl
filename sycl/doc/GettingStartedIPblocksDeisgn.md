@@ -12,7 +12,7 @@ We assume that you have installed a recent version for Vitis/Vivado already inst
 Building the compiler can be done with Python scripts:
 
 ```bash
-# Pick some place where The compiler has to be compiled, such as:
+# Pick some place where the compiler has to be compiled, such as:
 git clone --branch VitisIpTarget git@github.com:Ralender/sycl.git
 cd sycl
 python ./buildbot/configure.py
@@ -21,10 +21,10 @@ python ./buildbot/compile.py -t vitis-ip-compiler
 
 ## Environnement Setup
 
-The only requirement for environnement setup is that there is a vitis_hls in the PATH.
+The only requirement for environment setup is that there is a vitis_hls in the PATH.
 if you already have a setup for this you can use it.
 
-otherwise you need somthing like like
+otherwise you need something like:
 ```bash
 # Fill the version and path of Vitis/Vivado
 export XILINX_VERSION=2021.2
@@ -44,15 +44,15 @@ __VITIS_KERNEL int test(int a, int b) {
 }
 ```
 
-then to compile this file use 
+then, to compile this file, use 
 ```bash
-./build/bin/clang++ --target=vitis_ip-xilinx vitis_ip.cpp --vitis-ip-part=xc7vx330t-ffg1157-1 -o a.zip
+./build/bin/clang++ --target=vitis_ip-xilinx vitis_ip.cpp --vitis-ip-part=xc7vx330t-ffg1157-1 -o adder.zip
 ```
 
  ``--target=vitis_ip-xilinx`` specifies that we are targeting vitis ip blocks
- ``--vitis-ip-part=xc7vx330t-ffg1157-1`` specifies which Xilinx device we are targeting ``xc7vx330t-ffg1157-1`` needs to be replace by the part id you are working with
+ ``--vitis-ip-part=xc7vx330t-ffg1157-1`` specifies which Xilinx device we are targeting ``xc7vx330t-ffg1157-1`` needs to be replaced by the part id you are working with.
 
- The output is a zip file that can be loaded into Vivado when making a block design
+ The output is a Vivado IP zip archive that can be loaded into Vivado when making a block design
 
 ### Further Reading
 
