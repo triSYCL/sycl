@@ -305,7 +305,7 @@ if not cuda and not level_zero and found_at_least_one_device:
 if cuda:
     config.substitutions.append( ('%sycl_triple',  "nvptx64-nvidia-cuda" ) )
 elif xocc != "off":
-    config.substitutions.append( ('%sycl_triple',  f"fpga64_{vxx_target}-xilinx" ) )
+    config.substitutions.append( ('%sycl_triple',  f"fpga64_{vxx_target}-xilinx-linux" ) )
 else:
     config.substitutions.append( ('%sycl_triple',  "spir64" ) )
 
