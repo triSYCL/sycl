@@ -4,8 +4,7 @@ Getting started with Vitis ip block design with an AMD/Xilinx FPGA
 Disclaimer: nothing here is supported and this is all about a research
 project.
 
-We assume that you are on a recent Linux `x86_64` machine.
-We assume that you have a recent version for Vitis/Vivado already installed
+We assume that you are on a recent Linux `x86_64` machine. with a recent C++ compiler, python3 and Vitis/Vivado already installed.
 
 ## Compile the compiler
 
@@ -21,16 +20,19 @@ python ./buildbot/compile.py -t vitis-ip-compiler
 
 ## Environnement Setup
 
-The only requirement for environment setup is that there is a vitis_hls in the PATH.
+The requirements for environment setup is that there is a vitis_hls in the PATH and the librairies shipped with Vitis are in the LD_LIBRARY_PATH.
 if you already have a setup for this you can use it.
 
-otherwise you need something like:
+Otherwise you will need to make a setup.sh script like this:
 ```bash
-# Fill the version and path of Vitis/Vivado
-export XILINX_VERSION=2021.2
-export XILINX_PATH=/path/to/xilinx/root/
+# Fill the version
+XILINX_VERSION=2021.2
+# Fill the path to the root of the installation, the directory containing Vitis, Vivado and Vitis_HLS
+XILINX_PATH=/path/to/vitis/root
 
+# This it to have vitis_hls in the PATH
 export PATH=$PATH:$XILINX_PATH/Vitis_HLS/$XILINX_VERSION/bin
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$XILINX_PATH/Vitis_HLS/$XILINX_VERSION/lib/lnx64.o
 ```
 
 ### Small examples
