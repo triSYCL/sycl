@@ -212,10 +212,10 @@ checkValueRange(const T &V) {
 ///
 /// Build one loop of depth CurDimIDX for the loop nest corresponding to
 /// IterDomain
-template <int CurDimIdx, int IterDims>
-inline void build_loop_nest_rec(auto &ElementWiseOp,
+template <int CurDimIdx, int IterDims, typename ElementWiseOpTy, typename OuterLoopIterIdxTy>
+inline void build_loop_nest_rec(ElementWiseOpTy &ElementWiseOp,
                                 range<IterDims> &IterDomain,
-                                auto OuterLoopIterIdx) {
+                                OuterLoopIterIdxTy OuterLoopIterIdx) {
   size_t CurDimIter = 0;
   auto NextIdx = std::tuple_cat(OuterLoopIterIdx, std::tie(CurDimIter));
   for (CurDimIter = 0; CurDimIter < IterDomain[CurDimIdx]; CurDimIter++) {
@@ -243,16 +243,17 @@ inline void build_loop_nest_rec(auto &ElementWiseOp,
 ///
 /// Build one loop of depth CurDimIDX for the loop nest corresponding to
 /// IterDomain
-template <int CurDimIdx, int IterDims>
-inline void build_inner_loop_nd_nest_rec(auto &ElementWiseOp,
-                                         nd_range<IterDims> &IterDomains,
-                                         auto WGIdx,
-                                         auto OuterLoopLocalWG,
-                                         auto OuterLoopGlobalIdx) {
-  size_t CurDimGroupRange = IterDomains.get_group_range()[CurDimIdx];
+template <int CurDimIdx, int IterDims, typename ElementWiseOpTy,
+          typename WGIdxTy, typename OuterLoopLocalWGTy,
+          typename OuterLoopGlobalIdxTy>
+inline void
+build_inner_loop_nd_nest_rec(ElementWiseOpTy &ElementWiseOp,
+                             nd_range<IterDims> &IterDomains, WGIdxTy WGIdx,
+                             OuterLoopLocalWGTy OuterLoopLocalWG,
+                             OuterLoopGlobalIdxTy OuterLoopGlobalIdx) {
   size_t CurDimLocalRange = IterDomains.get_local_range()[CurDimIdx];
   size_t CurDimLocalIter = 0;
-  size_t CurDimGlobalIter = get<CurDimIdx>(WGIdx) * CurDimLocalRange;
+  size_t CurDimGlobalIter = std::get<CurDimIdx>(WGIdx) * CurDimLocalRange;
   auto NextLocalIdx =
       std::tuple_cat(OuterLoopLocalWG, std::tie(CurDimLocalIter));
   auto NextGlobalIdx =
@@ -296,10 +297,10 @@ inline void build_inner_loop_nd_nest_rec(auto &ElementWiseOp,
 ///
 /// Build one loop of depth CurDimIDX for the workgroup level corresponding to
 /// IterDomain
-template <int CurDimIdx, int IterDims>
+template <int CurDimIdx, int IterDims, typename ElementWiseOpTy, typename OuterLoopWGIdxTy>
 inline void
-build_loop_nd_nest_rec(auto &ElementWiseOp, nd_range<IterDims> &IterDomains,
-                       auto OuterLoopWGIdx) {
+build_loop_nd_nest_rec(ElementWiseOpTy &ElementWiseOp, nd_range<IterDims> &IterDomains,
+                       OuterLoopWGIdxTy OuterLoopWGIdx) {
   size_t CurDimGroupRange = IterDomains.get_group_range()[CurDimIdx];
   size_t CurDimGroupIter = 0;
   auto NextWGIdx =
@@ -329,8 +330,8 @@ build_loop_nd_nest_rec(auto &ElementWiseOp, nd_range<IterDims> &IterDomains,
 /// \code parallel_for(ElementWiseOp, IterDomain); \endcode
 /// It is used to replace parallel_for on device where having a
 /// single loop nest makes more sense.
-template <int IterDims>
-inline void serialize_parallel_for(auto &ElementWiseOp,
+template <int IterDims, typename ElementWiseOpTy>
+inline void serialize_parallel_for(ElementWiseOpTy &ElementWiseOp,
                                    range<IterDims> IterDomain) {
   build_loop_nest_rec<0, IterDims>(ElementWiseOp, IterDomain, std::tuple<>{});
 }
@@ -347,8 +348,8 @@ inline void serialize_parallel_for(auto &ElementWiseOp,
 /// \code parallel_for(ElementWiseOp, IterDomain); \endcode
 /// It is used to replace parallel_for on device where having a
 /// single loop nest makes more sense.
-template <int IterDims>
-inline void serialize_parallel_for(auto &ElementWiseOp,
+template <int IterDims, typename ElementWiseOpTy>
+inline void serialize_parallel_for(ElementWiseOpTy &ElementWiseOp,
                                    nd_range<IterDims> IterDomains) {
   build_loop_nd_nest_rec<0, IterDims>(ElementWiseOp, IterDomains,
                                       std::tuple<>{});
