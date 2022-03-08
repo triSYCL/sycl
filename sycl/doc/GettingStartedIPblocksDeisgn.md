@@ -1,4 +1,4 @@
-Getting started with Vitis ip block design with an AMD/Xilinx FPGA
+Getting started with Vitis IP block design with an AMD/Xilinx FPGA
 ===================================================================================
 
 Disclaimer: nothing here is supported and this is all about a research
@@ -20,7 +20,7 @@ python ./buildbot/compile.py -t vitis-ip-compiler
 
 ## Environnement Setup
 
-The requirements for environment setup is that there is a vitis_hls in the PATH and the librairies shipped with Vitis are in the LD_LIBRARY_PATH.
+The requirements for environment setup is that there is a vitis_hls in the PATH and the libraries shipped with Vitis are in the LD_LIBRARY_PATH.
 if you already have a setup for this you can use it.
 
 Otherwise you will need to make a setup.sh script like this:
@@ -37,7 +37,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$XILINX_PATH/Vitis_HLS/$XILINX_VERSION/l
 
 ### Small examples
 
-create a file named vitis_ip.cpp containing
+create a file named `vitis_ip.cpp` containing
 
 ```cpp
 // __VITIS_KERNEL marks the top-level kernel function
@@ -51,8 +51,8 @@ then, to compile this file, use
 ./build/bin/clang++ --target=vitis_ip-xilinx vitis_ip.cpp --vitis-ip-part=xc7vx330t-ffg1157-1 -o adder.zip
 ```
 
- ``--target=vitis_ip-xilinx`` specifies that we are targeting vitis ip blocks
- ``--vitis-ip-part=xc7vx330t-ffg1157-1`` specifies which Xilinx device we are targeting ``xc7vx330t-ffg1157-1`` needs to be replaced by the part id you are working with.
+ `--target=vitis_ip-xilinx` specifies that we are targeting vitis ip blocks
+ `--vitis-ip-part=xc7vx330t-ffg1157-1` specifies which Xilinx device we are targeting `xc7vx330t-ffg1157-1` needs to be replaced by the part id you are working with.
 
  The output is a Vivado IP zip archive that can be loaded into Vivado when making a block design
 

@@ -21,7 +21,7 @@ but could expand in the future to include optimization information for each
 kernel.
 """
 
-from argparse import ArgumentError, ArgumentParser
+from argparse import ArgumentParser
 import functools
 from genericpath import exists
 from itertools import starmap
@@ -30,17 +30,15 @@ import json
 from multiprocessing import Pool
 from os import environ
 from pathlib import Path
-from random import choices
 import re
 import shutil
 import subprocess
 import sys
-from tabnanny import check
 import tempfile
 
-# This pipeline should be able to do any promotion O3 is capable of
-# and some more control flow optimizations then strictly necessary.
-# Some more minimization is possible
+# This pipeline should be able to do any promotion -O3 is capable of
+# and some more control-flow optimizations than strictly necessary.
+# Some more minimization is probably possible
 VXX_PassPipeline = [
 "-preparesycl",
 "-lower-expect",
@@ -133,6 +131,8 @@ class TmpDirManager:
         self.prefix = prefix
         self.tmpdir = tmpdir
         self.autodelete = autodelete
+        if not autodelete:
+            print(f"Temporary clutter in {tmpdir} will not be deleted")
 
     def __enter__(self) -> Path:
         self.dir = Path(tempfile.mkdtemp(
@@ -185,8 +185,8 @@ def _run_in_isolated_proctree(cmd, *args, **kwargs):
     return subprocess.run(cmd, *args, **kwargs)
 
 
-# This is currently unused because a change in from 2021.2 to 2022.1 was reverted
-#  but it is likely to become usefull in the future so i leave it as is
+# This is currently unused because a change between version 2021.2 and 2022.1 was later reverted.
+# But it is likely to become useful again in the future, so keep it as is
 class VXXVersion:
     def __init__(self, exec_path) -> None:
         version_opt = {"v++" : "-v", "vitis_hls" : "-version"}
@@ -390,9 +390,6 @@ class VitisCompilationDriver:
         tmp_root = self.tmp_root
         tmp_manager = TmpDirManager(tmp_root, outstem, autodelete)
         with tmp_manager as self.tmpdir:
-            tmpdir = self.tmpdir
-            if not autodelete:
-                print(f"Temporary clutter in {tmpdir} will not be deleted")
             joined_kernels = self._link_multi_inputs(self.inputs)
             prepared_bc = self._run_preparation(joined_kernels)
             prepared_lib = self._run_prepare_lib()
@@ -400,8 +397,6 @@ class VitisCompilationDriver:
             if environ.get("SYCL_VXX_MANUAL_EDIT") is not None:
                 print("Please edit", self.downgraded_ir)
                 input("Press enter to resume the compilation")
-            self.vpp_llvm_input = (
-            )
             assembled = self._asm_ir(downgraded)
             spir_linked = self._link_spir(assembled, prepared_lib)
             final = self._next_passes(spir_linked)
@@ -415,6 +410,7 @@ class VitisCompilationDriver:
 
 class VXXCompilationDriver(VitisCompilationDriver):
     def __init__(self, arguments):
+        """Initializer the compilation driver for VXX mode"""
         super().__init__(arguments, "v++")
         self.vitis_mode = arguments.target
         # TODO: XILINX_PLATFORM should be passed by clang driver instead
@@ -443,7 +439,7 @@ class VXXCompilationDriver(VitisCompilationDriver):
             command = [
                 vxx, "--target", self.vitis_mode,
                 "--advanced.param", "compiler.hlsDataflowStrictMode=off",
-                # Do the optimizations that were not performed by sycl compiler
+                # Do the optimizations that were not performed by the SYCL compiler
                 "-O3",
                 "--platform", self.xilinx_platform,
                 "--temp_dir", self.tmpdir / 'vxx_comp_tmp',
@@ -545,6 +541,7 @@ class VXXCompilationDriver(VitisCompilationDriver):
 
 class IPExportCompilationDriver(VitisCompilationDriver):
     def __init__(self, arguments):
+        """Initializer the compilation driver for vitis_hls mode"""
         super().__init__(arguments, "vitis_hls")
         self.target = arguments.target
         self.clock_period = arguments.clock_period
@@ -591,7 +588,7 @@ class IPExportCompilationDriver(VitisCompilationDriver):
 
 
 def parse_args(args=sys.argv[1:]):
-    description="Utility to drive various compilation flow vor vivado related tools"
+    description="Utility to drive various compilation flow for vivado related tools"
     toplevel_parser = ArgumentParser(description=description, add_help=False, prefix_chars="@")
     toplevel_parser.add_argument("command", choices=("vxxcompile", "ipexport", "help"), help="Command to launch")
     toplevel_parser.add_argument("args", nargs="*", help="Command arguments")
@@ -604,7 +601,7 @@ def parse_args(args=sys.argv[1:]):
     if command == "vxxcompile":
         parser.add_argument(
             "--hls",
-            help="Activate the hls flow instead of the default spir one",
+            help="Activate the HLS flow instead of the default SPIR one",
             action="store_true")
         parser.add_argument(
             "--target",

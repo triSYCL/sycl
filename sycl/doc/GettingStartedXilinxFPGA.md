@@ -1127,7 +1127,7 @@ In order to give user more control over how is implemented the kernel on hardwar
 a few SYCL extensions are provided as a replacement of Vitis HLS `HLS` pragmas.
 
 These extensions requires the inclusion of the `sycl/ext/xilinx/fpga.hpp`
-header, and requires compiling with C++20 support.
+header, and requires compiling with support of C++20 or more.
 
 ### Pipelining
 
@@ -1135,7 +1135,7 @@ Pipelining support comes from the `sycl/ext/xilinx/fpga/pipeline.hpp` header.
 
 A few pipeline types are defined, that are used to parametrize pipelining decorators.
 
-The `PipelineStyle` enum describes the different pipeline style supported by HLS:
+The `pipeline_style` enum describes the different pipeline style supported by HLS:
 
 + `stall` pipelines only run when input data is present and stops otherwise (default),
 + `flushable` pipelines run when input data is present or if there is still data in the pipeline,
@@ -1143,14 +1143,14 @@ The `PipelineStyle` enum describes the different pipeline style supported by HLS
 
 Two types are also defined to describe more specifically loop pipeline behavior:
 
-+ `NoRewindPipeline` loop pipelines are flushed between two execution of the full loop, while
-+ `RewindPipeline` are not.
++ `no_rewind_pipeline` loop pipelines are flushed between two execution of the full loop, while
++ `rewind_pipeline` are not.
 
 Finally, a few types are present to constrain the pipeline initialization interval :
 
-+ `AutoII` let Vitis determine the pipeline II,
-+ `ConstrainedII<Value>` asks Vitis to create a pipeline with an II of exactly Value cycles,
-+ `DisablePipeline` force the absence of pipelining.
++ `auto_ii` let Vitis determine the pipeline II,
++ `constrained_ii<Value>` asks Vitis to create a pipeline with an II of exactly Value cycles,
++ `disable_pipeline` force the absence of pipelining.
 
 Two decorations exists to pipeline part of the code.
 
@@ -1162,7 +1162,7 @@ Two decorations exists to pipeline part of the code.
 Kernel pipelining:
 
 ```cpp
-cgh.single_task(pipeline_kernel<ConstrainedII<4>>(
+cgh.single_task(pipeline_kernel<constrained_ii<4>>(
   [=]{
     for (size_t i = 0 ; i < 42 ; ++i>) {
       OutAcc[i] = InAcc[i] * i;
@@ -1177,7 +1177,7 @@ Loop pipelining:
 chh.single_task([=]{
   // Pipeline the following loop
   for (size_t i = 0 ; i < 42 ; ++i>) {
-    pipeline<>([&]{
+    pipeline([&]{
       OutAcc[i] = InAcc[i] * i;
     });
   }
@@ -1194,7 +1194,7 @@ respectively `no_pipeline` and `unpipeline_kernel` are used in
 ### Dataflow decorators
 
 These decorators are the equivalent of the
-[HLS dataflow pragma](https://www.xilinx.com/html_docs/xilinx2021_1/vitis_doc/hls_pragmas.html#sxx1504034358866).
+[HLS dataflow pragma](https://docs.xilinx.com/r/en-US/ug1399-vitis-hls/pragma-HLS-dataflow).
 
 A kernel decorator `sycl::ext::xilinx::dataflow_kernel()` and a loop
 decorator `sycl::ext::xilinx::dataflow()` exists, which are used in
@@ -1209,19 +1209,19 @@ semantics.
 
 `UnrollType` can be one of the following:
 
-+ `NoUnrolling`: forbids unrolling of the enclosing loop,
-+ `Full unrolling`: The loop will be replaced by expliciting all the iteration,
-+ `CheckedFixedUnrolling<UnrollFactor>`: The iteration will be grouped
-   by UnrollFactor. If the total number of iteration is unknown or not
-   n integral multiple of UnrollFactor, extra hardware is generated
++ `no_unrolling`: forbids unrolling of the enclosing loop,
++ `full_unrolling`: The loop will be replaced by expliciting all the iteration,
++ `checked_fixed_unrolling<unroll_factor>`: The iteration will be grouped
+   by unroll_factor. If the total number of iteration is unknown or not
+   n integral multiple of unroll_factor, extra hardware is generated
    to ensure the loop does not perform too much iterations.
-+ `UncheckedFixedUnrolling<UnrollFactor>`: Like `CheckedFixedUnrolling`,
++ `unchecked_fixed_unrolling<unroll_factor>`: Like `checked_fixed_unrolling`,
   but does not generate the extra hardware to ensure the loop exits at
   the correct iteration if the total number of iteration is not an
-  integral multiple of UnrollFactor.
+  integral multiple of unroll_factor.
   When the total number of iteration is only known at runtime, the user
   takes the responsibility that it will always be an integral
-  multiple of UnrollFactor.
+  multiple of unroll_factor.
   If it is known at compile time and does not verify the property,
   the backend compilation will fail.
 
@@ -1234,7 +1234,7 @@ Example:
 
 ```cpp
 sycl::queue queue;
-sycl::buffer<int, 42> a_buff, b_buff, c_buff;
+sycl::buffer<int> a_buff, b_buff, c_buff;
 
 /*
 Fill a_buff and b_buff
@@ -1259,8 +1259,8 @@ queue.submit([&](sycl::handler &cgh) {
 
 ```
 
-In this example, `a_buff` copy on device will be stored on DDR 
-bank 1, `b_buff` copy on DDR bank 2 and `c_buff` copy on 
+In this example, `a_buff` materialization on device will be stored on DDR
+	bank 1, `b_buff` materialization on DDR bank 2 and `c_buff` materialization on 
 DDR bank 3.
 
 **As of now, having accessor on the same buffer with different memory location is not supported.**
@@ -1284,7 +1284,9 @@ using namespace sycl::ext::xilinx
 Example:
 ```cpp
 sycl::queue queue;
-sycl::buffer<int, 42> a_buff, b_buff;
+sycl::buffer<int> a_buff, b_buff;
+
+/// Fill the buffers
 
 queue.submit([&](sycl::handler &cgh) {
   const sycl::accessor a_acc{a_buff, cgh, sycl::read_only};
@@ -1298,7 +1300,7 @@ queue.submit([&](sycl::handler &cgh) {
 });
 ```
 
-for more example see [this test case](../test/on-device/xocc/simple_tests/partion_ndarray.cpp) or [this one](../test/on-device/xocc/edge_detection/edge_detection.cpp)
+for more examples see [this test case](../test/on-device/xocc/simple_tests/partion_ndarray.cpp) or [this one](../test/on-device/xocc/edge_detection/edge_detection.cpp)
 
 ## AMD/Xilinx Macros
 

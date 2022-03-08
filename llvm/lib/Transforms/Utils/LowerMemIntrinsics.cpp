@@ -44,6 +44,8 @@ Type *determineUnderlyingType(Type* Default, Value *Ptr1, Value *Ptr2 = nullptr)
   return Default;
 }
 
+/// return a constant of Type Ty as if it was obtained from a memset over the
+/// representation of the type.
 Constant *emitBytePatternForType(Type *Ty, ConstantInt *Pattern, Module &M) {
   const DataLayout &DL = M.getDataLayout();
   uint64_t IntValue;

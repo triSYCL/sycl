@@ -87,13 +87,11 @@ int main() {
   // Launch a kernel to do the summation
   q.submit([&](sycl::handler &cgh) {
     // Get access to the data
-    auto a_a = a.get_access<sycl::access::mode::write>(cgh);
-    auto a_b = b.get_access<sycl::access::mode::read>(cgh);
-    auto a_c = c.get_access<sycl::access::mode::read>(cgh);
+    sycl::accessor a_a{a, cgh, sycl::write_only};
+    sycl::accessor a_b{b, cgh, sycl::read_only};
+    sycl::accessor a_c{c, cgh, sycl::read_only};
 
-    // A typical FPGA-style pipelined kernel
-    cgh.single_task<class add>([=]() {
-      // Use an intermediate automatic array
+    cgh.single_task<class add>([=] {
       sycl::ext::xilinx::partition_ndarray<
           int, sycl::dim<2, 3, 2>, sycl::ext::xilinx::partition::complete<>>
           array;

@@ -83,7 +83,6 @@ namespace partition {
       \param PDim is the dimension that user wants to apply cyclic partition on.
       If PDim is 0, all dimensions will be partitioned with cyclic order.
 
-      TODO: Deal with multi-dimension array. Now, since we can only deal with
       1-dim, PDim is set to 1 by default.
   */
   template <std::size_t SplitInto = 1, std::size_t PDim = 0>
@@ -112,7 +111,6 @@ namespace partition {
       \param PDim is the dimension that user wants to apply block partition on.
       If PDim is 0, all dimensions will be partitioned with block order.
 
-      TODO: Deal with multi-dimension array. Now, since we can only deal with
       1-dim, PDim is set to 1 by default.
   */
   template <std::size_t SplitInto = 1, std::size_t PDim = 0>
@@ -133,7 +131,6 @@ namespace partition {
       \param PDim is the dimension that user wants to apply complete partition
       on. If PDim is 0, all dimensions will be completely partitioned.
 
-      TODO: Deal with multi-dimension array. Now, since we can only deal with
       1-dim, PDim is set to 1 by default.
   */
   template <std::size_t PDim = 0>
@@ -166,11 +163,11 @@ struct rec_array_of<T, Idx, Idxs...> {
   using init = std::initializer_list<typename sub_type::init>;
 
   template<typename InitTy, typename Lambda>
-  static inline constexpr bool on_each(type& self, InitTy&& other, Lambda&& L) {
+  static inline constexpr bool recursively_on_each(type& self, InitTy&& other, Lambda&& L) {
     auto eIt = std::begin(self);
     auto iIt = std::begin(other);
     for (; eIt < std::end(self) && iIt < std::end(other);eIt++, iIt++)
-      if (sub_type::on_each(*eIt, *iIt, L))
+      if (sub_type::recursively_on_each(*eIt, *iIt, L))
         return true;
     return false;
   }
@@ -189,7 +186,7 @@ struct rec_array_of<T> {
                                    std::declval<const init &>())),
                                bool>,
                 int> = 0>
-  static inline constexpr bool on_each(type &self, const init &other, Lambda &&L) {
+  static inline constexpr bool recursively_on_each(type &self, const init &other, Lambda &&L) {
     return L(self, other);
   }
   template <typename Lambda,
@@ -199,7 +196,7 @@ struct rec_array_of<T> {
                                     std::declval<const init &>())),
                                 bool>,
                 int> = 0>
-  static inline constexpr bool on_each(type &self, const init &other, Lambda &&L) {
+  static inline constexpr bool recursively_on_each(type &self, const init &other, Lambda &&L) {
     L(self, other);
     return false;
   }
@@ -284,7 +281,7 @@ class partition_ndarray<ValueType, dim<Size, Sizes...>, PartitionType> {
           partition_type, 0, PartitionType::partition_dim);
   }
 
-  /// Determine if on other type has the same underlying type and dimension and
+  /// Determine if another type has the same underlying type and dimension and
   /// size as the current type.
   template <typename OtherTy>
   static constexpr bool is_layout_compatible =
@@ -295,7 +292,7 @@ class partition_ndarray<ValueType, dim<Size, Sizes...>, PartitionType> {
 
   /// Construct from an N-dimension std::initializer_list
   partition_ndarray(typename recursive_type::init i) : partition_ndarray() {
-    recursive_type::on_each(elems, i,
+    recursive_type::recursively_on_each(elems, i,
                             [](auto &self, auto other) { self = other; });
   }
 
@@ -304,14 +301,14 @@ class partition_ndarray<ValueType, dim<Size, Sizes...>, PartitionType> {
   template <typename OtherTy,
             typename std::enable_if_t<is_layout_compatible<OtherTy>, int> = 0>
   partition_ndarray(OtherTy &&other) : partition_ndarray() {
-    recursive_type::on_each(elems, std::forward<OtherTy>(other),
+    recursive_type::recursively_on_each(elems, std::forward<OtherTy>(other),
                             [](auto &self, auto other) { self = other; });
   }
 
   template <typename OtherTy,
             typename std::enable_if_t<is_layout_compatible<OtherTy>, int> = 0>
   partition_ndarray &operator=(const OtherTy &other) {
-    recursive_type::on_each(elems, other,
+    recursive_type::recursively_on_each(elems, other,
                             [](auto &self, auto other) { self = other; });
     return *this;
   }
@@ -319,7 +316,7 @@ class partition_ndarray<ValueType, dim<Size, Sizes...>, PartitionType> {
   template <typename OtherTy,
             typename std::enable_if_t<is_layout_compatible<OtherTy>, int> = 0>
   bool operator!=(const OtherTy &other) {
-    return recursive_type::on_each(
+    return recursive_type::recursively_on_each(
         elems, other, [](auto &self, auto other) { return self != other; });
   }
 
