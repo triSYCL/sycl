@@ -9,6 +9,7 @@
 #ifndef LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_VXX_H
 #define LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_VXX_H
 
+#include "ToolChains/Gnu.h"
 #include "clang/Driver/ToolChain.h"
 #include "clang/Driver/Tool.h"
 #include "llvm/ADT/Triple.h"
@@ -75,7 +76,9 @@ private:
 
 namespace toolchains {
 
-class LLVM_LIBRARY_VISIBILITY VXXToolChain : public ToolChain {
+/// The VXXToolChain inherits from Generic_GCC because the logic for detecting
+/// and using libstdc++ are inside Generic_GCC
+class LLVM_LIBRARY_VISIBILITY VXXToolChain : public Generic_GCC {
 public:
   VXXToolChain(const Driver &D, const llvm::Triple &Triple,
                const llvm::opt::ArgList &Args);
@@ -101,15 +104,6 @@ public:
   bool isPICDefault() const override { return false; }
   bool isPIEDefault(const llvm::opt::ArgList &Args) const override { return false; }
   bool isPICDefaultForced() const override { return false; }
-
-  void addClangWarningOptions(llvm::opt::ArgStringList &CC1Args) const override;
-  CXXStdlibType GetCXXStdlibType(const llvm::opt::ArgList &Args) const override;
-  void AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
-                            llvm::opt::ArgStringList &CC1Args) const override;
-  void AddClangCXXStdlibIncludeArgs(
-      const llvm::opt::ArgList &Args,
-      llvm::opt::ArgStringList &CC1Args) const override;
-  // Tool *SelectTool(const JobAction &JA) const override;
 
   const ToolChain* HostTC;
 

@@ -8,6 +8,7 @@
 
 #include "VXX.h"
 #include "CommonArgs.h"
+#include "ToolChains/Gnu.h"
 #include "clang/Driver/Action.h"
 #include "clang/Driver/Compilation.h"
 #include "clang/Driver/Driver.h"
@@ -18,6 +19,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Host.h"
 #include "llvm/Option/ArgList.h"
 
 using namespace clang::driver;
@@ -246,9 +248,18 @@ void SYCL::SYCLPostLinkVXX::constructSYCLVXXPLCommand(
 ////                            V++ Toolchain
 ///////////////////////////////////////////////////////////////////////////////
 
-VXXToolChain::VXXToolChain(const Driver &D, const llvm::Triple &Triple, const ArgList &Args)
-    : ToolChain(D, Triple, Args)
-{
+VXXToolChain::VXXToolChain(const Driver &D, const llvm::Triple &Triple,
+                           const ArgList &Args)
+    : Generic_GCC(D, Triple, Args) {
+  if (Triple.getArch() == llvm::Triple::vitis_ip) {
+    /// If we are targeting vitis_ip we cannot rely on sycl setting up the
+    /// standard library. So we do it ourselves by configuring gcc to find
+    /// native system libraries.
+    GCCInstallation.init(llvm::Triple(llvm::sys::getProcessTriple()), Args);
+  } else {
+    /// Otherwise we initialize gcc with our triple and gcc will find nothing.
+    GCCInstallation.init(Triple, Args);
+  }
   // Lookup binaries into the driver directory, this is used to
   // discover the clang-offload-bundler executable.
   getProgramPaths().push_back(getDriver().Dir);
@@ -305,30 +316,6 @@ VXXToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
 Tool *VXXToolChain::buildLinker() const {
   assert(getTriple().isXilinxFPGA());
   return new tools::SYCL::LinkerVXX(*this);
-}
-
-void VXXToolChain::addClangWarningOptions(ArgStringList &CC1Args) const {
-  if (HostTC)
-    HostTC->addClangWarningOptions(CC1Args);
-}
-
-ToolChain::CXXStdlibType
-VXXToolChain::GetCXXStdlibType(const ArgList &Args) const {
-  if (HostTC)
-    return HostTC->GetCXXStdlibType(Args);
-  return ToolChain::CXXStdlibType::CST_Libstdcxx;
-}
-
-void VXXToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
-                                              ArgStringList &CC1Args) const {
-  if (HostTC)
-    HostTC->AddClangSystemIncludeArgs(DriverArgs, CC1Args);
-}
-
-void VXXToolChain::AddClangCXXStdlibIncludeArgs(const ArgList &Args,
-                                                 ArgStringList &CC1Args) const {
-  if (HostTC)
-    HostTC->AddClangCXXStdlibIncludeArgs(Args, CC1Args);
 }
 
 Tool *VXXToolChain::getTool(Action::ActionClass AC) const {
