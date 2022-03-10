@@ -1,0 +1,481 @@
+//===-- pi_xrt.hpp - Xilinx Runtime (XRT) Plugin -----------------------------------------===//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+/// \defgroup sycl_pi_xrt Xilinx Runtime (XRT) Plugin
+/// \ingroup sycl_pi
+
+/// \file pi_xrt.hpp
+/// Declarations for CUDA Plugin. It is the interface between the
+/// device-agnostic SYCL runtime layer and underlying CUDA runtime.
+///
+/// \ingroup sycl_pi_xrt
+#ifndef PI_XRT_HPP
+#define PI_XRT_HPP
+
+#include "CL/sycl/detail/pi.h"
+#include <array>
+#include <atomic>
+#include <cassert>
+#include <cstring>
+#include <cuda.h>
+#include <experimental/xrt_xclbin.h>
+#include <limits>
+#include <numeric>
+#include <stdint.h>
+#include <string>
+#include <vector>
+#include <functional>
+#include <mutex>
+
+#include <xrt/xrt_bo.h>
+#include <xrt/xrt_device.h>
+#include <xrt/xrt_kernel.h>
+
+extern "C" {
+
+/// \cond IGNORE_BLOCK_IN_DOXYGEN
+pi_result xrt_piContextRetain(pi_context);
+pi_result xrt_piContextRelease(pi_context);
+pi_result xrt_piDeviceRelease(pi_device);
+pi_result xrt_piDeviceRetain(pi_device);
+pi_result xrt_piProgramRetain(pi_program);
+pi_result xrt_piProgramRelease(pi_program);
+pi_result xrt_piQueueRelease(pi_queue);
+pi_result xrt_piQueueRetain(pi_queue);
+pi_result xrt_piMemRetain(pi_mem);
+pi_result xrt_piMemRelease(pi_mem);
+pi_result xrt_piKernelRetain(pi_kernel);
+pi_result xrt_piKernelRelease(pi_kernel);
+pi_result xrt_piKernelGetGroupInfo(pi_kernel kernel, pi_device device,
+                                    pi_kernel_group_info param_name,
+                                    size_t param_value_size, void *param_value,
+                                    size_t *param_value_size_ret);
+/// \endcond
+}
+
+/// A PI platform stores all known PI devices,
+///  in the XRT plugin this is just a vector of
+///  available devices since initialization is done
+///  when devices are used.
+///
+struct _pi_platform {
+private:
+  std::vector<std::unique_ptr<_pi_device>> devices_;
+  std::atomic_uint32_t refCount_;
+
+public:
+  _pi_platform(unsigned int numDevices);
+  unsigned int getNumDevices() const noexcept { return devices_.size(); }
+  _pi_device& getDevice(unsigned int i) { return *devices_[i]; }
+};
+
+struct _pi_device {
+private:
+  using native_type = xrt::device;
+
+  native_type xrtDevice_;
+  _pi_platform& platform_;
+
+public:
+  _pi_device(unsigned int devNum, _pi_platform& platform)
+      : xrtDevice_(devNum), platform_(platform) {}
+
+  native_type& get() noexcept { return xrtDevice_; };
+  pi_platform get_platform() const noexcept { return &platform_; };
+
+};
+
+struct _pi_context {
+  struct deleter_data {
+    pi_context_extended_deleter function;
+    void *user_data;
+
+    void operator()() { function(user_data); }
+  };
+
+  std::vector<pi_device> devices_;
+
+  _pi_context(pi_uint32 num_devices, const pi_device *devices);
+
+  ~_pi_context() = default;
+
+  void invoke_extended_deleters() {
+    std::lock_guard<std::mutex> guard(mutex_);
+    for (auto &deleter : extended_deleters_) {
+      deleter();
+    }
+  }
+
+  void set_extended_deleter(pi_context_extended_deleter function,
+                            void *user_data) {
+    std::lock_guard<std::mutex> guard(mutex_);
+    extended_deleters_.emplace_back(deleter_data{function, user_data});
+  }
+
+  pi_uint32 get_reference_count() const noexcept { return refCount_; }
+
+  pi_uint32 increment_reference_count() noexcept { return ++refCount_; }
+  pi_uint32 decrement_reference_count() noexcept { return --refCount_; }
+
+private:
+  std::mutex mutex_;
+  std::vector<deleter_data> extended_deleters_;
+  std::atomic_int32_t refCount_;
+};
+
+/// PI Mem mapping to XRT memory allocations, both data and texture/surface.
+/// \brief Represents non-SVM allocations on the CUDA backend.
+/// Keeps tracks of all mapped regions used for Map/Unmap calls.
+/// Only one region can be active at the same time per allocation.
+struct _pi_mem {
+
+  // TODO: Move as much shared data up as possible
+  using pi_context = _pi_context *;
+
+  // Context where the memory object is accessible
+  pi_context context_;
+
+  /// A PI Memory object represents either plain memory allocations ("Buffers"
+  /// in OpenCL) or typed allocations ("Images" in OpenCL).
+  /// In CUDA their API handlers are different. Whereas "Buffers" are allocated
+  /// as pointer-like structs, "Images" are stored in Textures or Surfaces
+  /// This union allows implementation to use either from the same handler.
+
+    // Handler for plain, pointer-based CUDA allocations
+  struct mem_ {
+    using native_type = xrt::bo;
+
+    // If this allocation is a sub-buffer (i.e., a view on an existing
+    // allocation), this is the pointer to the parent handler structure
+    pi_mem parent_;
+    // Underlying XRT handler for the buffer
+    native_type buffer_;
+
+    /// Pointer associated with this device on the host
+    void *hostPtr_;
+    /// Size of the allocation in bytes
+    size_t size_;
+    /// Offset of the active mapped region.
+    size_t mapOffset_;
+    /// Pointer to the active mapped region, if any
+    void *mapPtr_;
+    /// Original flags for the mapped region
+    pi_map_flags mapFlags_;
+
+    /** alloc_mode
+     * classic: Just a normal buffer allocated on the device via cuda malloc
+     * use_host_ptr: Use an address on the host for the device
+     * copy_in: The data for the device comes from the host but the host
+     pointer is not available later for re-use
+     * alloc_host_ptr: Uses pinned-memory allocation
+    */
+    enum class alloc_mode {
+      classic,
+      use_host_ptr,
+      copy_in,
+      alloc_host_ptr
+    } allocMode_;
+
+    native_type get() const noexcept { return buffer_; }
+
+    size_t get_size() const noexcept { return size_; }
+
+    void *get_map_ptr() const noexcept { return mapPtr_; }
+
+    size_t get_map_offset(void *) const noexcept { return mapOffset_; }
+
+    /// Returns a pointer to data visible on the host that contains
+    /// the data on the device associated with this allocation.
+    /// The offset is used to index into the CUDA allocation.
+    ///
+    void *map_to_ptr(size_t offset, pi_map_flags flags) noexcept {
+      assert(mapPtr_ == nullptr);
+      mapOffset_ = offset;
+      mapFlags_ = flags;
+      if (hostPtr_) {
+        mapPtr_ = static_cast<char *>(hostPtr_) + offset;
+      } else {
+        // TODO: Allocate only what is needed based on the offset
+        mapPtr_ = static_cast<void *>(malloc(this->get_size()));
+      }
+      return mapPtr_;
+    }
+
+    /// Detach the allocation from the host memory.
+    void unmap(void *) noexcept {
+      assert(mapPtr_ != nullptr);
+
+      if (mapPtr_ != hostPtr_) {
+        free(mapPtr_);
+      }
+      mapPtr_ = nullptr;
+      mapOffset_ = 0;
+    }
+
+    pi_map_flags get_map_flags() const noexcept {
+      assert(mapPtr_ != nullptr);
+      return mapFlags_;
+    }
+  } buffer_mem_;
+
+  /// Constructs the PI MEM handler for a non-typed allocation ("buffer")
+  _pi_mem(pi_context ctxt, pi_mem parent, mem_::alloc_mode mode, xrt::bo buffer,
+          void *host_ptr, size_t size)
+      : context_{ctxt} {
+    buffer_mem_.buffer_ = buffer;
+    buffer_mem_.parent_ = parent;
+    buffer_mem_.hostPtr_ = host_ptr;
+    buffer_mem_.size_ = size;
+    buffer_mem_.mapOffset_ = 0;
+    buffer_mem_.mapPtr_ = nullptr;
+    buffer_mem_.mapFlags_ = PI_MAP_WRITE;
+    buffer_mem_.allocMode_ = mode;
+    if (is_sub_buffer()) {
+      xrt_piMemRetain(buffer_mem_.parent_);
+    } else {
+      xrt_piContextRetain(context_);
+    }
+  };
+
+  ~_pi_mem() {
+
+    if (is_sub_buffer()) {
+      xrt_piMemRelease(buffer_mem_.parent_);
+      return;
+    }
+    xrt_piContextRelease(context_);
+  }
+
+  bool is_sub_buffer() const noexcept {
+    return buffer_mem_.parent_ != nullptr;
+  }
+
+  pi_context get_context() const noexcept { return context_; }
+};
+
+struct _pi_queue {
+  _pi_context *context_;
+  _pi_device *device_;
+  pi_queue_properties properties_;
+
+  _pi_queue(_pi_context *context, _pi_device *device,
+            pi_queue_properties properties)
+      : context_{context}, device_{device},
+        properties_{properties} {
+    xrt_piContextRetain(context_);
+    xrt_piDeviceRetain(device_);
+  }
+
+  ~_pi_queue() {
+    xrt_piContextRelease(context_);
+    xrt_piDeviceRelease(device_);
+  }
+
+};
+
+typedef void (*pfn_notify)(pi_event event, pi_int32 eventCommandStatus,
+                           void *userData);
+/// PI Event mapping to CUevent
+///
+struct _pi_event {
+public:
+
+  pi_result record();
+
+  pi_result wait();
+
+  pi_result start();
+
+  pi_queue get_queue() const noexcept { return queue_; }
+
+  pi_command_type get_command_type() const noexcept { return commandType_; }
+
+  pi_uint32 get_reference_count() const noexcept { return refCount_; }
+
+  bool is_recorded() const noexcept { return isRecorded_; }
+
+  bool is_started() const noexcept { return isStarted_; }
+
+  bool is_completed() const noexcept;
+
+  pi_int32 get_execution_status() const noexcept {
+
+    if (!is_recorded()) {
+      return PI_EVENT_SUBMITTED;
+    }
+
+    if (!is_completed()) {
+      return PI_EVENT_RUNNING;
+    }
+    return PI_EVENT_COMPLETE;
+  }
+
+  pi_context get_context() const noexcept { return context_; };
+
+  pi_uint32 increment_reference_count() { return ++refCount_; }
+
+  pi_uint32 decrement_reference_count() { return --refCount_; }
+
+  pi_uint32 get_event_id() const noexcept { return eventId_; }
+
+  // Returns the counter time when the associated command(s) were enqueued
+  //
+  pi_uint64 get_queued_time() const;
+
+  // Returns the counter time when the associated command(s) started execution
+  //
+  pi_uint64 get_start_time() const;
+
+  // Returns the counter time when the associated command(s) completed
+  //
+  pi_uint64 get_end_time() const;
+
+  // construct a native CUDA. This maps closely to the underlying CUDA event.
+  static pi_event make_native(pi_command_type type, pi_queue queue);
+
+  pi_result release();
+
+  ~_pi_event();
+
+private:
+  // This constructor is private to force programmers to use the make_native /
+  // make_user static members in order to create a pi_event for CUDA.
+  _pi_event(pi_command_type type, pi_context context, pi_queue queue);
+
+  pi_command_type commandType_; // The type of command associated with event.
+
+  std::atomic_uint32_t refCount_; // Event reference count.
+
+  bool hasBeenWaitedOn_; // Signifies whether the event has been waited
+                         // on through a call to wait(), which implies
+                         // that it has completed.
+
+  bool isRecorded_; // Signifies wether a native CUDA event has been recorded
+                    // yet.
+  bool isStarted_;  // Signifies wether the operation associated with the
+                    // PI event has started or not
+                    //
+
+  pi_uint32 eventId_; // Queue identifier of the event.
+
+  pi_queue queue_; // pi_queue associated with the event. If this is a user
+                   // event, this will be nullptr.
+
+  pi_context context_; // pi_context associated with the event. If this is a
+                       // native event, this will be the same context associated
+                       // with the queue_ member.
+};
+
+/// Implementation of PI Program on CUDA Module object
+///
+struct _pi_program {
+  using native_type = xrt::xclbin;
+  native_type module_;
+  const char *binary_;
+  size_t binarySizeInBytes_;
+  _pi_context *context_;
+
+  _pi_program(pi_context ctxt);
+  ~_pi_program();
+
+  pi_result set_metadata(const pi_device_binary_property *metadata,
+                         size_t length);
+
+  pi_result set_binary(const char *binary, size_t binarySizeInBytes);
+
+  pi_result build_program(const char* build_options);
+
+  pi_context get_context() const { return context_; };
+
+  native_type get() const noexcept { return module_; };
+};
+
+/// Implementation of a PI Kernel for XRT
+///
+struct _pi_kernel {
+  using native_type = xrt::kernel;
+
+  native_type function_;
+  native_type functionWithOffsetParam_;
+  std::string name_;
+  pi_context context_;
+  pi_program program_;
+
+  _pi_kernel(native_type func, native_type funcWithOffsetParam, const char *name,
+             pi_program program, pi_context ctxt)
+      : function_{func}, functionWithOffsetParam_{funcWithOffsetParam},
+        name_{name}, context_{ctxt}, program_{program} {
+    xrt_piProgramRetain(program_);
+    xrt_piContextRetain(context_);
+  }
+
+  ~_pi_kernel()
+  {
+    xrt_piProgramRelease(program_);
+    xrt_piContextRelease(context_);
+  }
+
+  pi_program get_program() const noexcept { return program_; }
+
+  native_type get() const noexcept { return function_; };
+
+  pi_context get_context() const noexcept { return context_; };
+
+  const char *get_name() const noexcept { return name_.c_str(); }
+
+  /// Returns the number of arguments, excluding the implicit global offset.
+  /// Note this only returns the current known number of arguments, not the
+  /// real one required by the kernel, since this cannot be queried from
+  /// the CUDA Driver API
+  pi_uint32 get_num_args() const noexcept {
+    // return function_.
+  }
+
+  void set_kernel_arg(int index, size_t size, const void *arg) {
+    // args_.add_arg(index, size, arg);
+  }
+
+  void set_kernel_local_arg(int index, size_t size) {
+    // args_.add_local_arg(index, size);
+  }
+
+  void set_implicit_offset_arg(size_t size, std::uint32_t *implicitOffset) {
+    // args_.set_implicit_offset(size, implicitOffset);
+  }
+
+  // const arguments::args_index_t &get_arg_indices() const {
+  //   return args_.get_indices();
+  // }
+
+  pi_uint32 get_local_size() const noexcept {
+    // return args_.get_local_size();
+  }
+
+  void clear_local_size() {
+    // args_.clear_local_size();
+  }
+};
+
+/// Implementation of samplers for CUDA
+///
+/// Sampler property layout:
+/// | 31 30 ... 6 5 |      4 3 2      |     1      |         0        |
+/// |      N/A      | addressing mode | fiter mode | normalize coords |
+struct _pi_sampler {
+  pi_uint32 props_;
+  pi_context context_;
+
+  _pi_sampler(pi_context context)
+      : props_(0), context_(context) {}
+};
+
+// -------------------------------------------------------------
+// Helper types and functions
+//
+
+#endif // PI_XRT_HPP
