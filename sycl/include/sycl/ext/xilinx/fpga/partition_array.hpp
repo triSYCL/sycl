@@ -29,11 +29,11 @@
 __SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 
+namespace ext::xilinx {
+
 /// Type used to represent dimensions of an partition_ndarray
 template<std::size_t...>
 struct dim {};
-
-namespace ext::xilinx {
 
 /** Kind of array partition
 
@@ -82,8 +82,6 @@ namespace partition {
 
       \param PDim is the dimension that user wants to apply cyclic partition on.
       If PDim is 0, all dimensions will be partitioned with cyclic order.
-
-      1-dim, PDim is set to 1 by default.
   */
   template <std::size_t SplitInto = 1, std::size_t PDim = 0>
   struct cyclic {
@@ -110,8 +108,6 @@ namespace partition {
 
       \param PDim is the dimension that user wants to apply block partition on.
       If PDim is 0, all dimensions will be partitioned with block order.
-
-      1-dim, PDim is set to 1 by default.
   */
   template <std::size_t SplitInto = 1, std::size_t PDim = 0>
   struct block {
@@ -130,8 +126,6 @@ namespace partition {
 
       \param PDim is the dimension that user wants to apply complete partition
       on. If PDim is 0, all dimensions will be completely partitioned.
-
-      1-dim, PDim is set to 1 by default.
   */
   template <std::size_t PDim = 0>
   struct complete {
@@ -217,8 +211,6 @@ struct rec_array_of<T> {
 
     \param PartitionType is the array partition type: cyclic, block, and
     complete. The default type is none.
-
-    TODO: Deal with multi-dimension array.
 */
 template <typename ValueType,
           typename Size,
@@ -298,30 +290,26 @@ class partition_ndarray<ValueType, dim<Size, Sizes...>, PartitionType> {
 
   /// Construct from an other partition_ndarray with the same type and
   /// dimensions
-  template <typename OtherTy,
-            typename std::enable_if_t<is_layout_compatible<OtherTy>, int> = 0>
+  template <typename OtherTy> requires is_layout_compatible<OtherTy>
   partition_ndarray(OtherTy &&other) : partition_ndarray() {
     recursive_type::recursively_on_each(elems, std::forward<OtherTy>(other),
                             [](auto &self, auto other) { self = other; });
   }
 
-  template <typename OtherTy,
-            typename std::enable_if_t<is_layout_compatible<OtherTy>, int> = 0>
+  template <typename OtherTy> requires is_layout_compatible<OtherTy>
   partition_ndarray &operator=(const OtherTy &other) {
     recursive_type::recursively_on_each(elems, other,
                             [](auto &self, auto other) { self = other; });
     return *this;
   }
 
-  template <typename OtherTy,
-            typename std::enable_if_t<is_layout_compatible<OtherTy>, int> = 0>
+  template <typename OtherTy> requires is_layout_compatible<OtherTy>
   bool operator!=(const OtherTy &other) {
     return recursive_type::recursively_on_each(
         elems, other, [](auto &self, auto other) { return self != other; });
   }
 
-  template <typename OtherTy,
-            typename std::enable_if_t<is_layout_compatible<OtherTy>, int> = 0>
+  template <typename OtherTy> requires is_layout_compatible<OtherTy>
   bool operator==(const OtherTy &other) {
     return !(*this != other);
   }

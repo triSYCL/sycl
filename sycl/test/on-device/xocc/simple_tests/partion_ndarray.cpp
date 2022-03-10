@@ -13,9 +13,9 @@
 using namespace sycl;
 
 void aip_test() {
-  sycl::ext::xilinx::partition_ndarray<int, sycl::dim<2, 3>, sycl::ext::xilinx::partition::complete<>> array = {{1, 2, -1}, {3, 4, -2}};
-  const sycl::ext::xilinx::partition_ndarray<int, sycl::dim<2, 3>> carray = array;
-  sycl::ext::xilinx::partition_ndarray<int, sycl::dim<2, 3>, sycl::ext::xilinx::partition::block<2>> array2;
+  sycl::ext::xilinx::partition_ndarray<int, sycl::ext::xilinx::dim<2, 3>, sycl::ext::xilinx::partition::complete<>> array = {{1, 2, -1}, {3, 4, -2}};
+  const sycl::ext::xilinx::partition_ndarray<int, sycl::ext::xilinx::dim<2, 3>> carray = array;
+  sycl::ext::xilinx::partition_ndarray<int, sycl::ext::xilinx::dim<2, 3>, sycl::ext::xilinx::partition::block<2>> array2;
 
   static_assert(std::is_same_v<decltype(array.begin()), int(*)[3]>, "");
   static_assert(std::is_same_v<decltype(array.end()), int(*)[3]>, "");
@@ -93,7 +93,7 @@ int main() {
 
     cgh.single_task<class add>([=] {
       sycl::ext::xilinx::partition_ndarray<
-          int, sycl::dim<2, 3, 2>, sycl::ext::xilinx::partition::complete<>>
+          int, sycl::ext::xilinx::dim<2, 3, 2>, sycl::ext::xilinx::partition::complete<>>
           array;
       int i = 0;
       for (auto& d1 : array)

@@ -1273,7 +1273,7 @@ all code will be shown with
 using namespace sycl::ext::xilinx
 ```
 
-`partition_ndarray<int, sycl::dim<2, 3>, partition::complete<>>` is equivalent to the C-style array `int array[2][3]` but we specified a complete partitioning like the [HLS array_partition pragma](https://www.xilinx.com/htmldocs/xilinx2021_1/vitis_doc/hls_pragmas.html#gle1504034361378).
+`partition_ndarray<int, sycl::ext::xilinx::dim<2, 3>, partition::complete<>>` is equivalent to the C-style array `int array[2][3]` but we specified a complete partitioning like the [HLS array_partition pragma](https://www.xilinx.com/htmldocs/xilinx2021_1/vitis_doc/hls_pragmas.html#gle1504034361378).
 
 + `partition::complete<>` each element will be in an individual register
 + `partition::block<4>` the array will be partitioned into `4` continuous blocks.
@@ -1292,7 +1292,7 @@ queue.submit([&](sycl::handler &cgh) {
   const sycl::accessor a_acc{a_buff, cgh, sycl::read_only};
   sycl::accessor b_acc{b_buff, cgh, sycl::write_only};
   cgh.single_task<class Calculation>([=] {
-    partition_ndarray<int, sycl::dim<2, 3>, partition::complete<>> array = {{1, 2, -1}, {3, 4, -2}};
+    partition_ndarray<int, sycl::ext::xilinx::dim<2, 3>, partition::complete<>> array = {{1, 2, -1}, {3, 4, -2}};
     for (std::size_t i = 0 ; i < N ; ++i) {
       c_acc[i] = b_acc[i] * array[i % 2][i % 3];
     }
