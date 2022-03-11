@@ -1447,7 +1447,7 @@ pi_result xrt_piProgramCreateWithBinary(
   pi_device dev = device_list[0];
   xrt::uuid uuid = dev->get().load_xclbin(reinterpret_cast<const axlf *>(binaries[0]));
 
-  *program = ref_counted_base<_pi_program>::make(context, dev, bin, uuid);
+  *program = ref_counted_base<_pi_program>::make(context, dev, uuid);
   return PI_SUCCESS;
 }
 

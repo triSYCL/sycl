@@ -285,6 +285,7 @@ std::vector<std::pair<std::string, backend>> findPlugins() {
                              backend::ext_oneapi_level_zero);
     PluginNames.emplace_back(__SYCL_CUDA_PLUGIN_NAME, backend::ext_oneapi_cuda);
     PluginNames.emplace_back(__SYCL_HIP_PLUGIN_NAME, backend::ext_oneapi_hip);
+    PluginNames.emplace_back(__SYCL_XRT_PLUGIN_NAME, backend::xrt);
     PluginNames.emplace_back(__SYCL_ESIMD_EMULATOR_PLUGIN_NAME,
                              backend::ext_intel_esimd_emulator);
   } else {
@@ -294,6 +295,7 @@ std::vector<std::pair<std::string, backend>> findPlugins() {
     bool CudaFound = false;
     bool EsimdCpuFound = false;
     bool HIPFound = false;
+    bool XRTFound = false;
     for (const device_filter &Filter : Filters) {
       backend Backend = Filter.Backend;
       if (!OpenCLFound &&
@@ -324,6 +326,12 @@ std::vector<std::pair<std::string, backend>> findPlugins() {
         PluginNames.emplace_back(__SYCL_HIP_PLUGIN_NAME,
                                  backend::ext_oneapi_hip);
         HIPFound = true;
+      }
+      if (!XRTFound &&
+          (Backend == backend::xrt || Backend == backend::all)) {
+        PluginNames.emplace_back(__SYCL_XRT_PLUGIN_NAME,
+                                 backend::xrt);
+        XRTFound = true;
       }
     }
   }
@@ -434,6 +442,11 @@ static void initializePlugins(std::vector<plugin> &Plugins) {
       // Use the HIP plugin as the GlobalPlugin
       GlobalPlugin = std::make_shared<plugin>(PluginInformation,
                                               backend::ext_oneapi_hip, Library);
+    } else if (InteropBE == backend::xrt &&
+               PluginNames[I].first.find("xrt") != std::string::npos) {
+      // Use the XRT plugin as the GlobalPlugin
+      GlobalPlugin = std::make_shared<plugin>(PluginInformation,
+                                              backend::xrt, Library);
     } else if (InteropBE == backend::ext_oneapi_level_zero &&
                PluginNames[I].first.find("level_zero") != std::string::npos) {
       // Use the LEVEL_ZERO plugin as the GlobalPlugin

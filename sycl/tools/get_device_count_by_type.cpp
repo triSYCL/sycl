@@ -313,6 +313,8 @@ int main(int argc, char *argv[]) {
     querySuccess = queryCUDA(deviceType, deviceCount, msg);
   } else if (backend == "hip" || backend == "pi_hip") {
     querySuccess = queryHIP(deviceType, deviceCount, msg);
+  } else if (backend == "xrt" || backend == "pi_xrt") {
+    assert(false && "TODO");
   } else {
     msg = "ERROR: Unknown backend " + backend + "\n" + help + "\n";
   }
