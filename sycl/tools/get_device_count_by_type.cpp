@@ -24,6 +24,10 @@
 #include <hip/hip_runtime.h>
 #endif // USE_PI_HIP
 
+#ifdef USE_PI_XRT
+#include "xrt.h"
+#endif
+
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
@@ -271,6 +275,23 @@ static bool queryHIP(cl_device_type deviceType, cl_uint &deviceCount,
 #endif
 }
 
+static bool queryXRT(cl_device_type deviceType, cl_uint &deviceCount,
+                     std::string &msg) {
+#ifdef USE_PI_XRT
+  if (deviceType == CL_DEVICE_TYPE_ACCELERATOR ||
+      deviceType == CL_DEVICE_TYPE_ALL ||
+      deviceType == CL_DEVICE_TYPE_DEFAULT) {
+    msg = std::string("xrt ") + deviceTypeToString(deviceType);
+    deviceCount = 1;
+    return true;
+  } else
+    return true;
+#endif
+  msg = "ERROR: XRT not  supported";
+  deviceCount = 0;
+  return false;
+}
+
 int main(int argc, char *argv[]) {
   if (argc < 3) {
     std::cout << "0:ERROR: Please set a device type and backend to find"
@@ -314,7 +335,7 @@ int main(int argc, char *argv[]) {
   } else if (backend == "hip" || backend == "pi_hip") {
     querySuccess = queryHIP(deviceType, deviceCount, msg);
   } else if (backend == "xrt" || backend == "pi_xrt") {
-    assert(false && "TODO");
+    querySuccess = queryXRT(deviceType, deviceCount, msg);
   } else {
     msg = "ERROR: Unknown backend " + backend + "\n" + help + "\n";
   }

@@ -151,11 +151,11 @@ if xocc != "off":
         os.remove(xrt_lock)
     acc_run_substitute="env --unset=XCL_EMULATION_MODE " + acc_run_substitute
     # hw_emu is very slow so it has a higher timeout.
+    acc_run_substitute += "unshare -pc --kill-child "
     if "hw_emu" not in triple:
-        acc_run_substitute+= "timeout 600 env "
+        acc_run_substitute+= "timeout 300 env "
     else:
-        acc_run_substitute+= "timeout 3000 env "
-    acc_run_substitute += "unshare -pc --kill-child"
+        acc_run_substitute+= "timeout 600 env "
 config.substitutions.append( ('%ACC_RUN_PLACEHOLDER', acc_run_substitute) )
 
 timeout = 600

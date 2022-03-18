@@ -60,9 +60,9 @@ add_lit_testsuite(check-sycl-spirv "Running device-agnostic SYCL regression test
   )
 
 add_lit_testsuite(check-sycl-vitis-hw-emu "Running the SYCL regression tests for sycl-vitis hw_emu"
-  ${CMAKE_CURRENT_BINARY_DIR}/vitis "-j 4"
+  ${CMAKE_CURRENT_BINARY_DIR}/vitis "-j 8"
   ARGS ${RT_TEST_ARGS}
-  PARAMS "XOCC=only;SYCL_TRIPLE=fpga64_hls_hw_emu-xilinx-linux"
+  PARAMS "XOCC=only;SYCL_TRIPLE=fpga64_hls_hw_emu-xilinx-linux;SYCL_PLUGIN=opencl"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )

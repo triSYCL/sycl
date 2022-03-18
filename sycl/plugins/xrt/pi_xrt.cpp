@@ -25,6 +25,8 @@
 #include <CL/sycl/detail/pi.h>
 #include <CL/sycl/detail/pi.hpp>
 
+#include <cstddef>
+#include <cstdlib>
 #include <array>
 #include <atomic>
 #include <cassert>
@@ -39,6 +41,15 @@
 #include <string>
 #include <vector>
 
+/// the any header break under #define private public
+/// So we include it from here. and let the protection against double inclusion
+/// do its job
+#include <any>
+
+/// XRT doesnt expose some APIs that are very useful so until it is fixed here
+/// is the hack. #define class struct could be good for completeness but sadly
+/// class can be used as an alternative to typename
+#define private public
 #include <experimental/xrt_system.h>
 #include <experimental/xrt_xclbin.h>
 #include <version.h>
@@ -46,6 +57,11 @@
 #include <xrt/xrt_device.h>
 #include <xrt/xrt_kernel.h>
 #include <xrt/xrt_uuid.h>
+#include <xrt.h>
+#include <xrt_mem.h>
+#include <xclbin.h>
+#undef private
+
 #pragma clang diagnostic pop
 
 // Most of the API is not implemented and exist so most parameters are not used
@@ -134,11 +150,14 @@ template <typename T> struct ref_counted_ref {
 ///  when devices are used.
 ///
 struct _pi_platform : ref_counted_base<_pi_platform> {
-private:
   std::vector<std::unique_ptr<_pi_device>> devices_;
 
-public:
-  _pi_platform(unsigned int numDevices);
+  _pi_platform(unsigned int numDevices) {
+    devices_.reserve(numDevices);
+    for (unsigned int i = 0; i < numDevices; ++i) {
+      devices_.emplace_back(std::make_unique<_pi_device>(i, *this));
+    }
+  }
   unsigned int getNumDevices() const noexcept { return devices_.size(); }
   _pi_device &getDevice(unsigned int i) { return *devices_[i]; }
 };
@@ -199,13 +218,17 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
     pi_mem_flags flags;
     size_t size;
     void *host_ptr;
+    void *mapped_ptr;
   } mem;
 
   _pi_mem(_pi_context *ctx, _mem m) : context_(ctx), mem(m) {
-    buffers.resize(context_->devices_.size());
   }
 
-  std::vector<native_type> buffers;
+  void set_buffer(native_type&& buf) {
+    buffer_ = buf;
+    mem.mapped_ptr = buf.map();
+  }
+  native_type buffer_;
 };
 
 struct _pi_queue : ref_counted_base<_pi_queue> {
@@ -307,10 +330,11 @@ private:
 struct _pi_program {
   ref_counted_ref<_pi_context> context_;
   ref_counted_ref<_pi_device> device_;
+  xrt::xclbin bin_;
   xrt::uuid uuid_;
 
-  _pi_program(pi_context ctx, pi_device dev, xrt::uuid uuid)
-      : context_(ctx), device_(dev), uuid_(std::move(uuid)) {}
+  _pi_program(pi_context ctx, pi_device dev, xrt::xclbin bin, xrt::uuid uuid)
+      : context_(ctx), device_(dev), bin_(std::move(bin)), uuid_(std::move(uuid)) {}
 };
 
 /// Implementation of a PI Kernel for XRT
@@ -320,8 +344,14 @@ struct _pi_kernel {
 
   ref_counted_ref<_pi_program> program_;
   native_type kernel_;
-  _pi_kernel(pi_program prog, native_type kern)
-      : program_(prog), kernel_(std::move(kern)) {}
+  xrt::run run_;
+  xrt::xclbin::kernel info_;
+
+  std::vector<std::function<void()>> sync_to_device;
+  std::vector<std::function<void()>> sync_to_host;
+
+  _pi_kernel(pi_program prog, native_type kern, xrt::xclbin::kernel info)
+      : program_(prog), kernel_(std::move(kern)), run_(kernel_), info_(std::move(info)) {}
 };
 
 /// Implementation of samplers for CUDA
@@ -395,6 +425,17 @@ pi_result getInfo<const char *>(size_t param_value_size, void *param_value,
                       param_value_size_ret, value);
 }
 
+enum class arg_kind {
+  buffer,
+  scalar,
+};
+
+arg_kind type_str_to_arg_kind(const std::string& str) {
+  if (str == "void*")
+    return arg_kind::buffer;
+  return arg_kind::scalar;
+}
+
 } // anonymous namespace
 
 /// ------ Error handling, matching OpenCL plugin semantics.
@@ -403,16 +444,15 @@ namespace sycl {
 namespace detail {
 namespace pi {
 
+std::ostream& log() {
+  return std::cerr;
+}
+
 // Report error and no return (keeps compiler from printing warnings).
 //
 [[noreturn]] void die(const char *Message) {
-  std::cerr << "pi_die: " << Message << std::endl;
+  log() << "pi_die: " << Message << std::endl;
   std::terminate();
-}
-
-// Reports error messages
-void xrtPrint(const char *Message) {
-  std::cerr << "pi_print: " << Message << std::endl;
 }
 
 void assertion(bool Condition, const char *Message) {
@@ -424,9 +464,9 @@ void assertion(bool Condition, const char *Message) {
 /// cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 [[noreturn]] void unimplemented(const char *str) {
 
-  std::cout
-      << "pi_unimplemented: call too unimplemented function in XRT backend: "
-      << str << std::endl;
+  log() << "pi_xrt: unimplemented: call too unimplemented function in XRT "
+           "backend: "
+        << str << std::endl;
 
   std::terminate();
 }
@@ -436,25 +476,135 @@ void assertion(bool Condition, const char *Message) {
 } // namespace sycl
 } // __SYCL_INLINE_NAMESPACE(cl)
 
-_pi_platform::_pi_platform(unsigned int numDevices) {
-  devices_.reserve(numDevices);
-  for (unsigned int i = 0; i < numDevices; ++i) {
-    devices_.emplace_back(std::make_unique<_pi_device>(i, *this));
+static void run_original_test() {
+  int device_index = 0;
+  std::string binaryFile = "/storage/gauthier/Vitis_Accel_Examples/host_xrt/hello_world_xrt/build_dir.hw_emu.xilinx_u200_gen3x16_xdma_1_202110_1/vadd.link.xclbin";
+  int data_size = 16;
+
+  std::cout << "Open the device" << device_index << std::endl;
+  auto device = xrt::device(device_index);
+  std::cout << "Load the xclbin " << binaryFile << std::endl;
+  auto uuid = device.load_xclbin(binaryFile);
+
+  size_t vector_size_bytes = sizeof(int) * data_size;
+
+  auto krnl = xrt::kernel(device, uuid, "vadd");
+
+  std::cout << "Allocate Buffer in Global Memory\n";
+  auto bo0 = xrt::bo(device, vector_size_bytes, krnl.group_id(0));
+  auto bo1 = xrt::bo(device, vector_size_bytes, krnl.group_id(1));
+  auto bo_out = xrt::bo(device, vector_size_bytes, krnl.group_id(2));
+
+  // Map the contents of the buffer object into host memory
+  auto bo0_map = bo0.map<int *>();
+  auto bo1_map = bo1.map<int *>();
+  auto bo_out_map = bo_out.map<int *>();
+  std::fill(bo0_map, bo0_map + data_size, 0);
+  std::fill(bo1_map, bo1_map + data_size, 0);
+  std::fill(bo_out_map, bo_out_map + data_size, 0);
+
+  // Create the test data
+  int bufReference[data_size];
+  for (int i = 0; i < data_size; ++i) {
+    bo0_map[i] = i;
+    bo1_map[i] = i;
+    bufReference[i] = bo0_map[i] + bo1_map[i];
   }
+
+  // Synchronize buffer content with device side
+  std::cout << "synchronize input buffer data to device global memory\n";
+
+  bo0.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  bo1.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+  std::cout << "Execution of the kernel\n";
+  auto run = krnl(bo0, bo1, bo_out, data_size);
+  run.wait();
+
+  // Get the output;
+  std::cout << "Get the output data from the device" << std::endl;
+  bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+
+  // Validate our results
+  if (std::memcmp(bo_out_map, bufReference, data_size))
+    throw std::runtime_error("Value read back does not match reference");
+
+  std::cout << "TEST PASSED\n";
+  exit(0);
+}
+
+static void run_test(
+  xrt::device& device
+  // , xrt::kernel& krnl
+  ) {
+  // int device_index = 0;
+  std::string binaryFile = "/storage/gauthier/Vitis_Accel_Examples/host_xrt/hello_world_xrt/build_dir.hw_emu.xilinx_u200_gen3x16_xdma_1_202110_1/vadd.link.xclbin";
+  int data_size = 16;
+
+  // std::cout << "Open the device" << device_index << std::endl;
+  // auto device = xrt::device(device_index);
+  std::cout << "Load the xclbin " << binaryFile << std::endl;
+  auto uuid = device.load_xclbin(binaryFile);
+
+  size_t vector_size_bytes = sizeof(int) * data_size;
+
+  auto krnl = xrt::kernel(device, uuid, "vadd");
+
+  std::cout << "Allocate Buffer in Global Memory\n";
+  auto bo0 = xrt::bo(device, vector_size_bytes, krnl.group_id(0));
+  auto bo1 = xrt::bo(device, vector_size_bytes, krnl.group_id(1));
+  auto bo_out = xrt::bo(device, vector_size_bytes, krnl.group_id(2));
+
+  // Map the contents of the buffer object into host memory
+  auto bo0_map = bo0.map<int *>();
+  auto bo1_map = bo1.map<int *>();
+  auto bo_out_map = bo_out.map<int *>();
+  std::fill(bo0_map, bo0_map + data_size, 0);
+  std::fill(bo1_map, bo1_map + data_size, 0);
+  std::fill(bo_out_map, bo_out_map + data_size, 0);
+
+  // Create the test data
+  int bufReference[data_size];
+  for (int i = 0; i < data_size; ++i) {
+    bo0_map[i] = i;
+    bo1_map[i] = i;
+    bufReference[i] = bo0_map[i] + bo1_map[i];
+  }
+
+  // Synchronize buffer content with device side
+  std::cout << "synchronize input buffer data to device global memory\n";
+
+  bo0.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  bo1.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+
+  std::cout << "Execution of the kernel\n";
+  auto run = krnl(bo0, bo1, bo_out, data_size);
+  run.wait();
+
+  // Get the output;
+  std::cout << "Get the output data from the device" << std::endl;
+  bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+
+  // Validate our results
+  if (std::memcmp(bo_out_map, bufReference, data_size))
+    throw std::runtime_error("Value read back does not match reference");
+
+  std::cout << "TEST PASSED\n";
+  exit(0);
 }
 
 /// Obtains the XRT platform.
 pi_result xrt_piPlatformsGet(pi_uint32 num_entries, pi_platform *platforms,
                              pi_uint32 *num_platforms) {
   pi_result result = PI_SUCCESS;
-  static pi_uint32 numPlatforms = [&]() -> unsigned {
-    try {
-      return xrt::system::enumerate_devices();
-    } catch (const std::bad_alloc &) {
-      result = PI_OUT_OF_HOST_MEMORY;
-      return 0;
-    }
-  }();
+
+  // run_original_test();
+
+  // Simulators are not considered as devices by XRT...
+  // And wether XRT is configured to use simulator or real device cannot be
+  // changed once it is selected. So we just assume there is 1 device available.
+  // And hope we are right
+  static pi_uint32 numPlatforms = 1;
   static _pi_platform platform(numPlatforms);
 
   if (num_entries == 0 && platforms != nullptr)
@@ -1319,27 +1469,78 @@ pi_result xrt_piEnqueueMemBufferRead(pi_queue command_queue, pi_mem buffer,
                                      pi_uint32 num_events_in_wait_list,
                                      const pi_event *event_wait_list,
                                      pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  assert(command_queue);
+  assert(buffer);
+  assert(!num_events_in_wait_list && !event_wait_list && !*event && "events not yet supported");
+  assert(ptr && size);
+
+  std::memcpy(ptr, ((char*)buffer->mem.mapped_ptr) + offset, size);
+  return PI_SUCCESS;
 }
 
 pi_result xrt_piEventsWait(pi_uint32 num_events, const pi_event *event_list) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  assert(num_events == 0 && "events not yet supported");
+  /// Technically every operation we have are greedily executed so we could
+  /// remove this assert
+
+  return PI_SUCCESS;
 }
 
 pi_result xrt_piKernelCreate(pi_program program, const char *kernel_name,
                              pi_kernel *kernel) {
 
+  /// TODO: XRT error handling
   xrt::kernel ker(program->device_->get(), program->uuid_, kernel_name);
-  *kernel = ref_counted_base<_pi_kernel>::make(program, std::move(ker));
+  *kernel = ref_counted_base<_pi_kernel>::make(program, std::move(ker), program->bin_.get_kernel(kernel_name));
   return PI_SUCCESS;
 }
 
+static xrt::bo build_xrt_bo(_pi_mem* buf, _pi_kernel* kernel) {
+  assert(buf);
+  assert(kernel);
+  if (buf->mem.host_ptr)
+    return xrt::bo(kernel->program_->device_->get(),
+                                          buf->mem.host_ptr, buf->mem.size,
+                                          kernel->kernel_.group_id(0));
+  return xrt::bo(kernel->program_->device_->get(), buf->mem.size,
+                 XRT_BO_FLAGS_NONE, kernel->kernel_.group_id(0));
+}
+
 pi_result xrt_piKernelSetArg(pi_kernel kernel, pi_uint32 arg_index,
-                             size_t arg_size, const void *arg_value) {}
+                             size_t arg_size, const void *arg_value) {
+  assert(kernel);
+  assert(kernel->info_.get_num_args() > arg_index);
+  auto arg_info = kernel->info_.get_arg(arg_index);
+  arg_kind kind = type_str_to_arg_kind(arg_info.get_host_type());
+
+  //TODO XRT: analyse if xrt_piKernelSetArg can be called for buffer.
+  // if (kind == arg_kind::buffer) {
+  //   _pi_mem* mem = (_pi_mem*)(arg_value);
+
+  //   kernel->run_.set_arg(arg_index, build_xrt_bo(mem, kernel));
+  // } else {
+    /// This API is private in XRT but we include XRT under #define private public
+    kernel->run_.set_arg_at_index(arg_index, arg_value, arg_size);
+  // }
+  return PI_SUCCESS;
+}
 
 pi_result xrt_piextKernelSetArgMemObj(pi_kernel kernel, pi_uint32 arg_index,
                                       const pi_mem *arg_value) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  assert(kernel != nullptr);
+  assert(arg_value != nullptr);
+  _pi_mem* buf = *arg_value;
+
+  buf->set_buffer(build_xrt_bo(buf, kernel));
+  kernel->run_.set_arg(arg_index, buf->buffer_);
+  kernel->sync_to_device.push_back([buf](){
+    buf->buffer_.sync(XCL_BO_SYNC_BO_TO_DEVICE);
+  });
+  kernel->sync_to_host.push_back([buf](){
+    buf->buffer_.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
+  });
+
+  return PI_SUCCESS;
 }
 
 pi_result xrt_piextKernelSetArgSampler(pi_kernel kernel, pi_uint32 arg_index,
@@ -1359,7 +1560,22 @@ pi_result xrt_piEnqueueKernelLaunch(
     const size_t *global_work_offset, const size_t *global_work_size,
     const size_t *local_work_size, pi_uint32 num_events_in_wait_list,
     const pi_event *event_wait_list, pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  assert(command_queue);
+  assert(kernel);
+  assert(!num_events_in_wait_list && !event_wait_list && !*event && "events not yet supported");
+  assert(work_dim == 1 && *global_work_offset == 0 && *global_work_size == 1 &&
+         *local_work_size == 1 && "only support 1 single_task");
+
+  for (auto& call : kernel->sync_to_device)
+    call();
+
+  kernel->run_.start();
+  kernel->run_.wait();
+
+  for (auto& call : kernel->sync_to_host)
+    call();
+
+  return PI_SUCCESS;
 }
 
 /// \TODO Not implemented
@@ -1444,11 +1660,19 @@ pi_result xrt_piProgramCreateWithBinary(
          "Mismatch between devices context and passed context when creating "
          "program from binary");
 
-  pi_device dev = device_list[0];
-  xrt::uuid uuid = dev->get().load_xclbin(reinterpret_cast<const axlf *>(binaries[0]));
+  try {
+    /// We assume there is al least 1 valid device
+    pi_device dev = device_list[0];
+    xrt::xclbin xclbin(reinterpret_cast<const axlf *>(binaries[0]));
+    xrt::uuid uuid = dev->get().load_xclbin(xclbin);
 
-  *program = ref_counted_base<_pi_program>::make(context, dev, uuid);
-  return PI_SUCCESS;
+    *program = ref_counted_base<_pi_program>::make(
+        context, dev, std::move(xclbin), std::move(uuid));
+    return PI_SUCCESS;
+  } catch (std::system_error err) {
+    cl::sycl::detail::pi::log() << "XRT error:" << err.code() << ":" << err.what() << std::endl;
+    return PI_ERROR_UNKNOWN;
+  }
 }
 
 pi_result xrt_piProgramGetInfo(pi_program program, pi_program_info param_name,
@@ -1491,14 +1715,16 @@ pi_result xrt_piProgramGetBuildInfo(pi_program program, pi_device device,
 }
 
 pi_result xrt_piProgramRetain(pi_program program) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  incr_ref_count(program);
+  return PI_SUCCESS;
 }
 
 /// Decreases the reference count of a pi_program object.
 /// When the reference count reaches 0, it unloads the module from
 /// the context.
 pi_result xrt_piProgramRelease(pi_program program) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  decr_ref_count(program);
+  return PI_SUCCESS;
 }
 
 /// Gets the native CUDA handle of a PI program object
@@ -1540,11 +1766,13 @@ pi_result xrt_piKernelGetSubGroupInfo(
 }
 
 pi_result xrt_piKernelRetain(pi_kernel kernel) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  incr_ref_count(kernel);
+  return PI_SUCCESS;
 }
 
 pi_result xrt_piKernelRelease(pi_kernel kernel) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  decr_ref_count(kernel);
+  return PI_SUCCESS;
 }
 
 // A NOP for the XRT backend

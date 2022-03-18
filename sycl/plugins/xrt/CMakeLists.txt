@@ -39,16 +39,7 @@ if (DEFINED XILINX_RT_INCLUDE)
   target_link_libraries(pi_xrt
   PRIVATE
       OpenCL-Headers
-      ${XILINX_RT_INCLUDE}/../lib/libxilinxopencl.so
-      # ${XILINX_RT_INCLUDE}/../lib/libxma2plugin.so
       ${XILINX_RT_INCLUDE}/../lib/libxrt_coreutil.so
-      # ${XILINX_RT_INCLUDE}/../lib/libxrt_noop.so
-      # ${XILINX_RT_INCLUDE}/../lib/libxrt_swemu.so
-      # ${XILINX_RT_INCLUDE}/../lib/libxdp_core.so
-      # ${XILINX_RT_INCLUDE}/../lib/libxma2api.so
-      ${XILINX_RT_INCLUDE}/../lib/libxrt_core.so
-      # ${XILINX_RT_INCLUDE}/../lib/libxrt_hwemu.so
-      ${XILINX_RT_INCLUDE}/../lib/libxrt++.so
       -luuid
   )
 
