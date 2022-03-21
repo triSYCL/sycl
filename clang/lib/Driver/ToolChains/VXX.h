@@ -9,43 +9,13 @@
 #ifndef LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_VXX_H
 #define LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_VXX_H
 
+#include "ToolChains/Gnu.h"
 #include "clang/Driver/ToolChain.h"
 #include "clang/Driver/Tool.h"
 #include "llvm/ADT/Triple.h"
 
 namespace clang {
 namespace driver {
-
-/// Based loosely on CudaInstallationDetector
-class VXXInstallationDetector {
-private:
-  bool IsValid = false;
-  std::string BinPath;
-  std::string BinaryPath;
-  std::string VitisPath;
-  std::string LibPath;
-
-public:
-  VXXInstallationDetector(const Driver &D, const llvm::Triple &HostTriple,
-                           const llvm::opt::ArgList &Args);
-
-  /// Check whether we detected a valid v++ installation
-  bool isValid() const { return IsValid; }
-
-  /// Get the path to the v++ binary
-  StringRef getBinaryPath() const { return BinaryPath; }
-
-  /// Get the detected path to v++'s bin directory.
-  StringRef getBinPath() const { return BinPath; }
-
-  /// Get the path to Vitis's root, the v++ drivers parent project
-  StringRef getVitisPath() const { return VitisPath; }
-
-  /// Get the detected path to v++'s lib directory.
-  /// FIXME: This currently assumes lnx64
-  StringRef getLibPath() const { return LibPath; }
-
-};
 
 // \todo come up with a better name like,  SYCLAssemblerVXX/Linker for the
 // tools? Or should the tool just be SYCLVXXToolchain?
@@ -106,14 +76,20 @@ private:
 
 namespace toolchains {
 
-class LLVM_LIBRARY_VISIBILITY VXXToolChain : public ToolChain {
+/// The VXXToolChain inherits from Generic_GCC because the logic for detecting
+/// and using libstdc++ are inside Generic_GCC
+class LLVM_LIBRARY_VISIBILITY VXXToolChain : public Generic_GCC {
 public:
+  VXXToolChain(const Driver &D, const llvm::Triple &Triple,
+               const llvm::opt::ArgList &Args);
   VXXToolChain(const Driver &D, const llvm::Triple &Triple,
                const ToolChain &HostTC, const llvm::opt::ArgList &Args);
 
   const llvm::Triple *getAuxTriple() const override {
-    return &HostTC.getTriple();
+    return &HostTC->getTriple();
   }
+
+  bool isVitisIP() const { return !HostTC; }
 
   llvm::opt::DerivedArgList *
   TranslateArgs(const llvm::opt::DerivedArgList &Args, StringRef BoundArch,
@@ -129,17 +105,7 @@ public:
   bool isPIEDefault(const llvm::opt::ArgList &Args) const override { return false; }
   bool isPICDefaultForced() const override { return false; }
 
-  void addClangWarningOptions(llvm::opt::ArgStringList &CC1Args) const override;
-  CXXStdlibType GetCXXStdlibType(const llvm::opt::ArgList &Args) const override;
-  void AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
-                            llvm::opt::ArgStringList &CC1Args) const override;
-  void AddClangCXXStdlibIncludeArgs(
-      const llvm::opt::ArgList &Args,
-      llvm::opt::ArgStringList &CC1Args) const override;
-  // Tool *SelectTool(const JobAction &JA) const override;
-
-  const ToolChain &HostTC;
-  VXXInstallationDetector VXXInstallation;
+  const ToolChain* HostTC;
 
 protected:
   Tool *buildLinker() const override;

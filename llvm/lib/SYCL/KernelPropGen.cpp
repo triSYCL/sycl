@@ -45,12 +45,6 @@ using namespace llvm;
 
 static cl::opt<std::string> KernelPropGenOutput("sycl-kernel-propgen-output",
                                                 cl::ReallyHidden);
-// Switch the representation of m_axi bundle encooding in IR.
-// Up to 2021.2, a llvm.sideffect call was used.
-// Since 2022.1, a special string parameter of the argument is used.
-// When this option is present, the new encoding is used, while the old one
-// is used if it is not set.
-static cl::opt<bool> MAXIAsArgumentParameter("sycl-vxx-maxi-attr-encoding", cl::ReallyHidden);
 
 // Put the code in an anonymous namespace to avoid polluting the global
 // namespace
@@ -93,34 +87,28 @@ struct KernelPropGen : public ModulePass {
                         KernelProperties::MAXIBundle const *Bundle, Function &F,
                         Module &M) {
     LLVMContext &C = F.getContext();
-    if (MAXIAsArgumentParameter) {
-      // Starting from 2022.1, maxi bundles are encoded as argument parameters
-      std::string ParamValue =
-          llvm::formatv("m_axi.{0}.slave", Bundle->BundleName);
-      Arg.addAttr(
-          llvm::Attribute::get(C, "fpga.address.interface", ParamValue));
-    } else {
-      // Up to 2021.2 m_axi bundles were encoded with a call to sideeffect
-      auto *BundleIDConstant =
-          ConstantDataArray::getString(C, Bundle->BundleName, false);
-      auto *MinusOne = ConstantInt::getSigned(IntegerType::get(C, 64), -1);
-      auto *CAZ =
-          ConstantAggregateZero::get(ArrayType::get(IntegerType::get(C, 8), 0));
-      Function *SideEffect =
-          Intrinsic::getDeclaration(&M, Intrinsic::sideeffect);
-      SideEffect->addFnAttr(Attribute::NoUnwind);
-      SideEffect->addFnAttr(Attribute::InaccessibleMemOnly);
-      // TODO find a clever default value, allow user customization via
-      // properties
-      SideEffect->addFnAttr("xlx.port.bitwidth", "4096");
+    // Up to 2021.2 m_axi bundles were encoded with a call to sideeffect
+    auto *BundleIDConstant =
+        ConstantDataArray::getString(C, Bundle->BundleName, false);
+    auto *MinusOne64 = ConstantInt::getSigned(IntegerType::get(C, 64), -1);
+    auto *Zero32 = ConstantInt::getSigned(IntegerType::get(C, 32), 0);
+    auto *CAZ =
+        ConstantAggregateZero::get(ArrayType::get(IntegerType::get(C, 8), 0));
+    auto *Slave = ConstantDataArray::getString(C, "slave", false);
+    Function *SideEffect = Intrinsic::getDeclaration(&M, Intrinsic::sideeffect);
+    SideEffect->addFnAttr(Attribute::NoUnwind);
+    SideEffect->addFnAttr(Attribute::InaccessibleMemOnly);
+    // TODO find a clever default value, allow user customization via
+    // properties
+    SideEffect->addFnAttr("xlx.port.bitwidth", "4096");
 
-      OperandBundleDef OpBundle(
-          "xlx_m_axi", ArrayRef<Value *>{&Arg, BundleIDConstant, MinusOne, CAZ,
-                                         CAZ, MinusOne, MinusOne, MinusOne,
-                                         MinusOne, MinusOne, MinusOne});
-      Instruction *Instr = CallInst::Create(SideEffect, {}, {OpBundle});
-      Instr->insertBefore(F.getEntryBlock().getTerminator());
-    }
+    OperandBundleDef OpBundle(
+        "xlx_m_axi",
+        ArrayRef<Value *>{&Arg, BundleIDConstant, MinusOne64, Slave, CAZ,
+                          MinusOne64, MinusOne64, MinusOne64, MinusOne64,
+                          MinusOne64, MinusOne64, Zero32});
+    Instruction *Instr = CallInst::Create(SideEffect, {}, {OpBundle});
+    Instr->insertBefore(F.getEntryBlock().getTerminator());
   }
 
   Optional<std::string> getExtraArgs(Function &F) {

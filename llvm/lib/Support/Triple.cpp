@@ -39,6 +39,7 @@ StringRef Triple::getArchTypeName(ArchType Kind) {
   case fpga:           return "fpga";
   case fpga32:         return "fpga32";
   case fpga64:         return "fpga64";
+  case vitis_ip:       return "vitis_ip";
   case csky:           return "csky";
   case hexagon:        return "hexagon";
   case hsail64:        return "hsail64";
@@ -168,6 +169,7 @@ StringRef Triple::getArchTypePrefix(ArchType Kind) {
   case fpga:        return "fpga";
   case fpga32:      return "fpga32";
   case fpga64:      return "fpga64";
+  case vitis_ip:    return "vitis_ip";
 
   case ve:          return "ve";
   case csky:        return "csky";
@@ -349,6 +351,7 @@ Triple::ArchType Triple::getArchTypeForLLVMName(StringRef Name) {
     .Case("renderscript64", renderscript64)
     .Case("fpga32", fpga32)
     .Case("fpga64", fpga64)
+    .Case("vitis_ip", vitis_ip)
     .Case("fpga", fpga)
     .Case("ve", ve)
     .Case("csky", csky)
@@ -484,6 +487,7 @@ static Triple::ArchType parseArch(StringRef ArchName) {
     .Case("renderscript64", Triple::renderscript64)
     .StartsWith("fpga32", Triple::fpga32)
     .StartsWith("fpga64", Triple::fpga64)
+    .Case("vitis_ip", Triple::vitis_ip)
     .StartsWith("fpga", Triple::fpga)
     .Case("shave", Triple::shave)
     .Case("ve", Triple::ve)
@@ -822,6 +826,7 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
 
   case Triple::spirv32:
   case Triple::spirv64:
+  case Triple::vitis_ip:
     // TODO: In future this will be Triple::SPIRV.
     return Triple::UnknownObjectFormat;
   }
@@ -1391,6 +1396,7 @@ static unsigned getArchPointerBitWidth(llvm::Triple::ArchType Arch) {
   case llvm::Triple::ve:
   case llvm::Triple::wasm64:
   case llvm::Triple::fpga64:
+  case llvm::Triple::vitis_ip:
   case llvm::Triple::x86_64:
     return 64;
   }
@@ -1420,6 +1426,7 @@ Triple Triple::get32BitArchVariant() const {
   case Triple::msp430:
   case Triple::systemz:
   case Triple::ve:
+  case Triple::vitis_ip:
     T.setArch(UnknownArch);
     break;
 
@@ -1530,6 +1537,7 @@ Triple Triple::get64BitArchVariant() const {
   case Triple::ve:
   case Triple::wasm64:
   case Triple::fpga64:
+  case Triple::vitis_ip:
   case Triple::x86_64:
     // Already 64-bit.
     break;
@@ -1600,6 +1608,7 @@ Triple Triple::getBigEndianArchVariant() const {
   case Triple::xcore:
   case Triple::fpga32:
   case Triple::fpga64:
+  case Triple::vitis_ip:
   case Triple::ve:
   case Triple::csky:
 

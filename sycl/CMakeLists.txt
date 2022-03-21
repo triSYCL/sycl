@@ -2,7 +2,7 @@ cmake_minimum_required(VERSION 3.14)
 
 project(sycl-solution)
 # Requirements
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 option(SYCL_ENABLE_WERROR "Treat all warnings as errors in SYCL project" OFF)
@@ -284,6 +284,13 @@ add_custom_target( sycl-toolchain
           sycl-ls
           ${XPTIFW_LIBS}
   COMMENT "Building SYCL compiler toolchain..."
+)
+
+add_custom_target( vitis-ip-compiler
+  DEPENDS clang
+          opt
+          sycl-vxx
+  COMMENT "Building vitis ip compiler..."
 )
 
 if (SYCL_ENABLE_XPTI_TRACING)

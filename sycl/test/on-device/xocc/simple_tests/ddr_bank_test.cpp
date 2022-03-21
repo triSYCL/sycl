@@ -22,9 +22,8 @@ int main() {
         });
   });
   Queue.submit([&](cl::sycl::handler &cgh) {
-    sycl::ext::oneapi::accessor_property_list PL{sycl::ext::xilinx::ddr_bank<3>};
     // CHECK:{{.*}}:DDR[3]
-    sycl::accessor Accessor(BufferB, cgh, sycl::write_only, PL);
+    sycl::accessor Accessor(BufferB, cgh, sycl::write_only, sycl::ext::oneapi::accessor_property_list{sycl::ext::xilinx::ddr_bank<3>});
     cgh.single_task<class SmallerTestb>([=]{
           for (cl::sycl::cl_int i = 0 ; i < buf_size ; ++i)
             Accessor[i] = i;

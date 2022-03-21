@@ -4769,6 +4769,15 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   Arg *SYCLStdArg = Args.getLastArg(options::OPT_sycl_std_EQ);
 
+  if (RawTriple.isXilinxFPGA()) {
+    /// -O3 to generate all the necessary information for proper optimization.
+    CmdArgs.push_back("-O3");
+    /// Use -disable-llvm-passes because we want sycl_vxx and v++ to have full
+    /// control over the IR, so we disable any optimization that could run
+    /// before them.
+    CmdArgs.push_back("-disable-llvm-passes");
+  }
+
   if (IsSYCLOffloadDevice) {
     // Pass the triple of host when doing SYCL
     llvm::Triple AuxT = C.getDefaultToolChain().getTriple();
@@ -4783,15 +4792,6 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     /// we clang emits spir and not spirv. but the InSPIRation pass will
     /// translate spirv builtins into function of the hls runtime.
     CmdArgs.push_back("-fdeclare-spirv-builtins");
-
-    if (RawTriple.isXilinxFPGA()) {
-      /// -O3 to generate all the necessary information for proper optimization.
-      CmdArgs.push_back("-O3");
-      /// -disable-llvm-passes because we want sycl_vxx and v++ to have full
-      /// control over the IR. so we disable any optimization that could run
-      /// before them.
-      CmdArgs.push_back("-disable-llvm-passes");
-    }
 
     // Default value for FPGA is false, for all other targets is true.
     if (!Args.hasFlag(options::OPT_fsycl_early_optimizations,

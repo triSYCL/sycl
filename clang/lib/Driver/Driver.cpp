@@ -734,7 +734,7 @@ static llvm::Triple completeSYCLTriple(llvm::Triple T) {
     if (T.getSubArch() == llvm::Triple::NoSubArch) {
       /// SubArch is inferred from XCL_EMULATION_MODE defaulting to hw.
       /// This has the same behavior as XRT.
-      const char *Mode = "hw";
+      const char *Mode = "hls_hw";
       if (const char *M = std::getenv("XCL_EMULATION_MODE"))
         Mode = M;
       T.setArchName(std::string(T.getArchName()) + "_" + Mode);
@@ -7883,6 +7883,9 @@ const ToolChain &Driver::getToolChain(const ArgList &Args,
       case llvm::Triple::spirv32:
       case llvm::Triple::spirv64:
         TC = std::make_unique<toolchains::SPIRVToolChain>(*this, Target, Args);
+        break;
+      case llvm::Triple::vitis_ip:
+        TC = std::make_unique<toolchains::VXXToolChain>(*this, Target, Args);
         break;
       default:
         if (Target.getVendor() == llvm::Triple::Myriad)

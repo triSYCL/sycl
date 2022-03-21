@@ -44,7 +44,7 @@ config.test_source_root = os.path.dirname(__file__)
 # test_exec_root: The root path where tests should be run.
 config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
 
-config.environment['SYCL_VXX_KEEP_CLUTTER'] = 'True'
+#config.environment['SYCL_VXX_KEEP_CLUTTER'] = 'True'
 config.environment['SYCL_VXX_PRINT_CMD'] = 'True'
 config.environment['SYCL_VXX_SERIALIZE_VITIS_COMP'] = 'True'
 config.environment['XRT_PCIE_HW_EMU_FORCE_SHUTDOWN'] = 'True'
@@ -293,7 +293,7 @@ if xocc != "off":
         acc_run_substitute+= "timeout 3000 env "
     else:
         acc_run_substitute+= "timeout 3000 env "
-    acc_run_substitute += "unshare -pc --kill-child "
+    acc_run_substitute += "unshare -pc --kill-child"
 
 config.substitutions.append( ('%ACC_RUN_PLACEHOLDER',  acc_run_substitute) )
 config.substitutions.append( ('%ACC_CHECK_PLACEHOLDER',  acc_check_substitute) )
@@ -305,7 +305,7 @@ if not cuda and not level_zero and found_at_least_one_device:
 if cuda:
     config.substitutions.append( ('%sycl_triple',  "nvptx64-nvidia-cuda" ) )
 elif xocc != "off":
-    config.substitutions.append( ('%sycl_triple',  f"fpga64_{vxx_target}-xilinx" ) )
+    config.substitutions.append( ('%sycl_triple',  f"fpga64_{vxx_target}-xilinx-linux" ) )
 else:
     config.substitutions.append( ('%sycl_triple',  "spir64" ) )
 

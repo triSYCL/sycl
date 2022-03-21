@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Erases and modifies IR incompatabilities with v++ backend
+// Erases and modifies IR incompatibilities with v++ backend
 //
 // ===---------------------------------------------------------------------===//
 
@@ -17,21 +17,21 @@
 #include <string>
 
 #include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/InstVisitor.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/SYCL/VXXIRDowngrader.h"
-#include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/SetVector.h"
-#include "llvm/IR/Attributes.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/InstIterator.h"
-#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
+#include "llvm/SYCL/VXXIRDowngrader.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
@@ -44,6 +44,9 @@
 #include "llvm/../../lib/IR/LLVMContextImpl.h"
 
 using namespace llvm;
+
+#undef DEBUG_TYPE
+#define DEBUG_TYPE "VXXDownGrade"
 
 // Put the code in an anonymous namespace to avoid polluting the global
 // namespace
@@ -195,38 +198,30 @@ struct VXXIRDowngrader : public ModulePass {
       I->eraseFromParent();
   }
 
-  /// V++ has issues with intrinsic having different alignment attributes on
-  /// inputs and outputs. So we remove alignment attributes.
-  void removeMemIntrAlign(Module &M) {
-    for (auto &F : M.functions())
-      for (auto &I : instructions(F))
-        if (auto *MI = dyn_cast<AnyMemIntrinsic>(&I))
-          for (Use &U : MI->args())
-            MI->removeParamAttr(U.getOperandNo(),
-                                Attribute::AttrKind::Alignment);
-  }
-
-  void lowerIntrinsic(Module &M) {
+  /// Lower all llvm.abs into select(a < 0, -a, a)
+  void lowerAbsIntrinsic(Module &M) {
     IRBuilder<> B(M.getContext());
-    SmallVector<Instruction *, 16> ToRemove;
+    SmallVector<Instruction *, 16> ToProcess;
     for (auto &F : M.functions())
       for (auto &I : instructions(F))
-        if (auto *CI = dyn_cast<CallBase>(&I)) {
-          if (CI->getIntrinsicID() == Intrinsic::abs) {
-            B.SetInsertPoint(CI->getNextNode());
-            Value *Cmp = B.CreateICmpSLT(
-                CI->getArgOperand(0),
-                ConstantInt::getNullValue(CI->getArgOperand(0)->getType()));
-            Value *Sub = B.CreateSub(
-                ConstantInt::getNullValue(CI->getArgOperand(0)->getType()),
-                CI->getArgOperand(0));
-            Value *ABS = B.CreateSelect(Cmp, Sub, CI->getArgOperand(0));
-            CI->replaceAllUsesWith(ABS);
-            ToRemove.push_back(CI);
-          }
-        }
-    for (auto *I : ToRemove)
-      I->eraseFromParent();
+        if (auto *CI = dyn_cast<CallBase>(&I))
+          ToProcess.push_back(&I);
+    for (auto *I : ToProcess) {
+      if (auto *CI = dyn_cast<CallBase>(I)) {
+        if (CI->getIntrinsicID() != Intrinsic::abs)
+          continue;
+        B.SetInsertPoint(CI->getNextNode());
+        Value *Cmp = B.CreateICmpSLT(
+            CI->getArgOperand(0),
+            ConstantInt::getNullValue(CI->getArgOperand(0)->getType()));
+        Value *Sub = B.CreateSub(
+            ConstantInt::getNullValue(CI->getArgOperand(0)->getType()),
+            CI->getArgOperand(0));
+        Value *ABS = B.CreateSelect(Cmp, Sub, CI->getArgOperand(0));
+        CI->replaceAllUsesWith(ABS);
+        CI->eraseFromParent();
+      }
+    }
   }
 
   /// Poison is a special value that was added to LLVM but is not present in the
@@ -350,9 +345,8 @@ struct VXXIRDowngrader : public ModulePass {
     renameBasicBlocks(M);
     removeFreezeInst(M);
     removeFNegInst(M);
-    removeMemIntrAlign(M);
 
-    lowerIntrinsic(M);
+    lowerAbsIntrinsic(M);
     removeMetaDataValues(M);
     /// __assert_fail doesn't exist on device and takes its arguments in
     /// addressspace 0 causing addresspace cast.

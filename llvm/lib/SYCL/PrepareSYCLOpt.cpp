@@ -18,9 +18,11 @@
 
 #include "llvm/ADT/Triple.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/Demangle/Demangle.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/CallingConv.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
@@ -28,6 +30,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/Utils/Cloning.h"
+#include "llvm/Transforms/Utils/LowerMemIntrinsics.h"
 
 #include "SYCLUtils.h"
 
@@ -115,43 +118,6 @@ struct PrepareSYCLOpt : public ModulePass {
         if (auto *Call = dyn_cast<CallBase>(V))
           Call->setCallingConv(CallingConv::SPIR_FUNC);
       }
-    }
-  }
-
-  
-
-  /// This will change array partition such that after the O3 pipeline it
-  /// matched very closely what v++ generates.
-  /// This will change the type of the alloca referenced by the array partition
-  /// into an array. and change the argument received by xlx_array_partition
-  /// into a pointer on an array.
-  void lowerArrayPartition(Module &M) {
-    Function *Func = Intrinsic::getDeclaration(&M, Intrinsic::sideeffect);
-    for (Use &U : Func->uses()) {
-      auto *Usr = dyn_cast<CallBase>(U.getUser());
-      if (!Usr)
-        continue;
-      if (!Usr->getOperandBundle("xlx_array_partition"))
-        continue;
-      Use &Ptr = U.getUser()->getOperandUse(0);
-      Value *Obj = getUnderlyingObject(Ptr);
-      if (!isa<AllocaInst>(Obj))
-        return;
-      auto *Alloca = cast<AllocaInst>(Obj);
-      auto *Replacement =
-          new AllocaInst(Ptr->getType()->getPointerElementType(), 0,
-                         ConstantInt::get(Type::getInt32Ty(M.getContext()), 1),
-                         Align(128), "");
-      Replacement->insertAfter(Alloca);
-      Instruction *Cast = BitCastInst::Create(Instruction::BitCast, Replacement,
-                                              Alloca->getType());
-      Cast->insertAfter(Replacement);
-      Alloca->replaceAllUsesWith(Cast);
-      Value *Zero = ConstantInt::get(Type::getInt32Ty(M.getContext()), 0);
-      Instruction *GEP =
-          GetElementPtrInst::Create(nullptr, Replacement, {Zero});
-      GEP->insertAfter(Cast);
-      Ptr.set(GEP);
     }
   }
 
@@ -246,11 +212,37 @@ struct PrepareSYCLOpt : public ModulePass {
     }
   }
 
+  /// Lower memory intrinsics into a simple loop of load and/or store
+  /// Note: the default intrinsic lowering is what we need for HLS because the
+  /// LowerToNonI8Type flag is used by sycl_vxx
+  void lowerMemIntrinsic(Module &M) {
+    TargetTransformInfo TTI(M.getDataLayout());
+    SmallVector<Instruction *, 16> ToProcess;
+    for (auto &F : M.functions())
+      for (auto &I : instructions(F))
+        if (auto *CI = dyn_cast<CallBase>(&I))
+          ToProcess.push_back(&I);
+    for (auto *I : ToProcess) {
+      if (auto *CI = dyn_cast<CallBase>(I)) {
+        if (MemCpyInst *Memcpy = dyn_cast<MemCpyInst>(CI))
+          expandMemCpyAsLoop(Memcpy, TTI);
+        else if (MemMoveInst *Memmove = dyn_cast<MemMoveInst>(CI))
+          expandMemMoveAsLoop(Memmove);
+        else if (MemSetInst *Memset = dyn_cast<MemSetInst>(CI))
+          expandMemSetAsLoop(Memset);
+        else
+          continue;
+        CI->eraseFromParent();
+      }
+    }
+  }
+
   bool runOnModule(Module &M) override {
     // When using the HLS flow instead of SPIR default
     bool SyclHLSFlow = Triple(M.getTargetTriple()).isXilinxHLS();
     unwrapFPGAProperties(M);
     turnNonKernelsIntoPrivate(M);
+    lowerMemIntrinsic(M);
     if (SyclHLSFlow) {
       setHLSCallingConvention(M);
       signalUnsupportedSPIRBuiltins(M);
@@ -259,7 +251,6 @@ struct PrepareSYCLOpt : public ModulePass {
     } else {
       setCallingConventions(M);
     }
-    lowerArrayPartition(M);
     if (!SyclHLSFlow)
       forceInlining(M);
     else

@@ -163,14 +163,20 @@ public:
     });
   }
 
+  /// Lower xilinx_pipeline annotation attributes into HLS's representation for
+  /// pipeline
   void lowerPipelineKernelDecoration(llvm::Function *F, llvm::Value *Payload) {
-    auto *Parameters = cast<ConstantStruct>(Payload);
-    auto *IIInitializer = cast<ConstantInt>(
-        getUnderlyingObject(Parameters->getAggregateElement(0u)));
-    auto *PipelineType = cast<ConstantInt>(
-        getUnderlyingObject(Parameters->getAggregateElement(1u)));
-    std::string S = formatv("{0}.{1}", IIInitializer->getSExtValue(),
-                            PipelineType->getSExtValue());
+    std::string S;
+    if (auto *Parameters = dyn_cast<ConstantStruct>(Payload)) {
+      auto *IIInitializer = cast<ConstantInt>(
+          getUnderlyingObject(Parameters->getAggregateElement(0u)));
+      auto *PipelineType = cast<ConstantInt>(
+          getUnderlyingObject(Parameters->getAggregateElement(1u)));
+      S = formatv("{0}.{1}", IIInitializer->getSExtValue(),
+                              PipelineType->getSExtValue());
+    } else {
+      S = "0.0";
+    }
     F->addFnAttr("fpga.static.pipeline", S);
   }
 
@@ -310,6 +316,15 @@ public:
     }
   }
 
+  /// Add a function with the vitis_kernel annotation attribute as an HLS kernel
+  void markKernel(llvm::ConstantStruct *CS) {
+    auto *F = cast<Function>(getUnderlyingObject(CS->getAggregateElement(0u)));
+    F->addFnAttr("fpga.top.func", F->getName());
+    F->addFnAttr("fpga.demangled.name", F->getName());
+    F->setCallingConv(CallingConv::C);
+    F->setLinkage(llvm::GlobalValue::ExternalLinkage);
+  }
+
   /// @brief Check if a global annotation (from llvm.global.annotations)
   /// corresponds to a marker that has to be converted to an HLS-compatible
   /// annotation
@@ -323,6 +338,8 @@ public:
             ->getRawDataValues();
     if (AnnotKind == kindOf("xilinx_kernel_property")) {
       dispatchKernelPropertyToHandler(CS);
+    } else if (AnnotKind == kindOf("vitis_kernel")) {
+      markKernel(CS);
     } else if (!AfterO3) { // Annotations that should be lowered before -O3
       if (AnnotKind == kindOf("xilinx_pipeline")) {
         lowerPipelineDecoration(CS);
