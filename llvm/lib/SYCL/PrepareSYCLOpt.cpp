@@ -38,7 +38,7 @@ using namespace llvm;
 
 namespace {
 
-cl::opt<bool> ClearSpir("sycl-prepare-clearspir", cl::Hidden, cl::init(false));
+cl::opt<bool> AfterO3("sycl-prepare-after-O3", cl::Hidden, cl::init(false));
 
 struct PrepareSYCLOpt : public ModulePass {
 
@@ -61,7 +61,7 @@ struct PrepareSYCLOpt : public ModulePass {
       if (auto *F = dyn_cast<Function>(&G))
         if (isKernel(*F))
           continue;
-      if (G.isDeclaration())
+      if (G.getName() == "llvm.global_ctors" || G.isDeclaration())
         continue;
       G.setComdat(nullptr);
       G.setLinkage(llvm::GlobalValue::PrivateLinkage);
@@ -95,7 +95,7 @@ struct PrepareSYCLOpt : public ModulePass {
       } else {
         // We need to call intrinsic with SPIR_FUNC calling conv
         // for correct linkage with Vitis SPIR builtins lib
-        auto cc = (ClearSpir) ? CallingConv::C : CallingConv::SPIR_FUNC;
+        auto cc = (AfterO3) ? CallingConv::C : CallingConv::SPIR_FUNC;
         F.setCallingConv(cc);
         for (Value *V : F.users()) {
           if (auto *Call = dyn_cast<CallBase>(V))
@@ -246,7 +246,7 @@ struct PrepareSYCLOpt : public ModulePass {
     if (SyclHLSFlow) {
       setHLSCallingConvention(M);
       signalUnsupportedSPIRBuiltins(M);
-      if (ClearSpir)
+      if (AfterO3)
         cleanSpirBuiltins(M);
     } else {
       setCallingConventions(M);

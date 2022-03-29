@@ -124,6 +124,7 @@ struct KernelPropGen : public ModulePass {
     json::OStream J(O, 2);
     llvm::json::Array Kernels{};
     bool SyclHlsFlow = Triple(M.getTargetTriple()).isXilinxHLS();
+    bool VitisHlsFlow = Triple(M.getTargetTriple()).getArch() == llvm::Triple::vitis_ip;
 
     J.objectBegin();
     J.attributeBegin("kernels");
@@ -149,7 +150,8 @@ struct KernelPropGen : public ModulePass {
         J.attributeBegin("arg_bundle_mapping");
         J.arrayBegin();
         for (auto &Arg : F.args()) {
-          if (KernelProperties::isArgBuffer(&Arg, SyclHlsFlow)) {
+          if (!VitisHlsFlow &&
+              KernelProperties::isArgBuffer(&Arg, SyclHlsFlow)) {
             // This currently forces a default assignment of DDR banks to 0
             // as some platforms have different Default DDR banks and buffers
             // default to DDR Bank 0. Perhaps it is possible to query the

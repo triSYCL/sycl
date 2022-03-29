@@ -41,6 +41,7 @@ import tempfile
 # Some more minimization is probably possible
 VXX_PassPipeline = [
 "-preparesycl",
+"-loop-unroll",
 "-lower-expect",
 "-simplifycfg",
 "-sroa",
@@ -86,7 +87,6 @@ VXX_PassPipeline = [
 "-jump-threading",
 "-correlated-propagation",
 "-adce",
-"-memcpyopt",
 "-dse",
 "-loop-simplify",
 "-lcssa",
@@ -290,7 +290,7 @@ class VitisCompilationDriver:
             self.tmpdir /
             f"{outstem}-kernels-prepared.bc"
         )
-        opt_options = ["--sycl-vxx", "--sroa-vxx-conservative", "--lower-mem-intr-to-llvm-type", "-preparesycl"]
+        opt_options = ["--sycl-vxx", "--sroa-vxx-conservative", "--lower-mem-intr-to-llvm-type"]
         opt_options.extend(VXX_PassPipeline)
         opt_options.extend(["-inSPIRation", "-o", f"{prepared_bc}"])
 
@@ -346,7 +346,7 @@ class VitisCompilationDriver:
 
         opt_options = [
             "--lower-delayed-sycl-metadata", "-lower-sycl-metadata",
-            "--sycl-vxx", "--sycl-prepare-clearspir", "-S", "-preparesycl",
+            "--sycl-vxx", "--sycl-prepare-after-O3", "-S", "-preparesycl", "-loop-unroll",
             *kernel_prop_opt,
             "-globaldce",
             "-strip-debug",
@@ -568,7 +568,7 @@ class IPExportCompilationDriver(VitisCompilationDriver):
                 f"create_clock -period {self.clock_period} -name default",
                 "config_dataflow -strict_mode off",
                 "csynth_design",
-                f"export_design -format ip_catalog -output {out}",
+                f"export_design -flow impl -format ip_catalog -output {out}",
                 "exit",
                 ]))
         return script, out
