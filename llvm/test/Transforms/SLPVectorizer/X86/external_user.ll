@@ -34,9 +34,9 @@ define double @ext_user(double* noalias nocapture %B, double* noalias nocapture 
 ; CHECK-NEXT:    [[TMP2:%.*]] = phi <2 x double> [ [[TMP1]], [[ENTRY]] ], [ [[TMP5:%.*]], [[FOR_BODY]] ]
 ; CHECK-NEXT:    [[TMP3:%.*]] = fadd <2 x double> [[TMP2]], <double 1.000000e+01, double 1.000000e+01>
 ; CHECK-NEXT:    [[TMP4:%.*]] = fmul <2 x double> [[TMP3]], <double 4.000000e+00, double 4.000000e+00>
-; CHECK-NEXT:    [[TMP5]] = fadd <2 x double> [[TMP4]], <double 4.000000e+00, double 4.000000e+00>
 ; CHECK-NEXT:    [[INC]] = add nsw i32 [[I_020]], 1
 ; CHECK-NEXT:    [[EXITCOND:%.*]] = icmp eq i32 [[INC]], 100
+; CHECK-NEXT:    [[TMP5]] = fadd <2 x double> [[TMP4]], <double 4.000000e+00, double 4.000000e+00>
 ; CHECK-NEXT:    br i1 [[EXITCOND]], label [[FOR_END:%.*]], label [[FOR_BODY]]
 ; CHECK:       for.end:
 ; CHECK-NEXT:    [[TMP6:%.*]] = bitcast double* [[B:%.*]] to <2 x double>*
@@ -82,7 +82,7 @@ define i32 @needtogather(double *noalias %a, i32 *noalias %b,  float * noalias %
 ; CHECK-NEXT:  entry:
 ; CHECK-NEXT:    [[TMP0:%.*]] = load i32, i32* [[D:%.*]], align 4
 ; CHECK-NEXT:    [[CONV:%.*]] = sitofp i32 [[TMP0]] to float
-; CHECK-NEXT:    [[TMP1:%.*]] = load float, float* [[C:%.*]]
+; CHECK-NEXT:    [[TMP1:%.*]] = load float, float* [[C:%.*]], align 4
 ; CHECK-NEXT:    [[SUB:%.*]] = fsub float 0.000000e+00, [[TMP1]]
 ; CHECK-NEXT:    [[MUL:%.*]] = fmul float [[SUB]], 0.000000e+00
 ; CHECK-NEXT:    [[ADD:%.*]] = fadd float [[CONV]], [[MUL]]

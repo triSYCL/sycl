@@ -217,6 +217,11 @@ LogicalResult OperationVerifier::verifyOperation(
     }
   }
 
+  // After the region ops are verified, run the verifiers that have additional
+  // region invariants need to veirfy.
+  if (registeredInfo && failed(registeredInfo->verifyRegionInvariants(&op)))
+    return failure();
+
   // If this is a registered operation, there is nothing left to do.
   if (registeredInfo)
     return success();
@@ -316,7 +321,7 @@ OperationVerifier::verifyDominanceOfContainedRegions(Operation &op,
       for (Operation &op : block) {
         if (isReachable) {
           // Check that operands properly dominate this use.
-          for (auto operand : llvm::enumerate(op.getOperands())) {
+          for (const auto &operand : llvm::enumerate(op.getOperands())) {
             if (domInfo.properlyDominates(operand.value(), &op))
               continue;
 

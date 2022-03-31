@@ -21,14 +21,28 @@ struct TestModulePass
     return "Test a module pass in the pass manager";
   }
 };
-struct TestFunctionPass : public PassWrapper<TestFunctionPass, FunctionPass> {
-  void runOnFunction() final {}
+struct TestFunctionPass
+    : public PassWrapper<TestFunctionPass, OperationPass<FuncOp>> {
+  void runOnOperation() final {}
   StringRef getArgument() const final { return "test-function-pass"; }
   StringRef getDescription() const final {
     return "Test a function pass in the pass manager";
   }
 };
-class TestOptionsPass : public PassWrapper<TestOptionsPass, FunctionPass> {
+class TestInterfacePass
+    : public PassWrapper<TestInterfacePass,
+                         InterfacePass<FunctionOpInterface>> {
+  void runOnOperation() final {
+    getOperation()->emitRemark() << "Executing interface pass on operation";
+  }
+  StringRef getArgument() const final { return "test-interface-pass"; }
+  StringRef getDescription() const final {
+    return "Test an interface pass (running on FunctionOpInterface) in the "
+           "pass manager";
+  }
+};
+class TestOptionsPass
+    : public PassWrapper<TestOptionsPass, OperationPass<FuncOp>> {
 public:
   struct Options : public PassPipelineOptions<Options> {
     ListOption<int> listOption{*this, "list",
@@ -48,7 +62,7 @@ public:
     stringListOption = options.stringListOption;
   }
 
-  void runOnFunction() final {}
+  void runOnOperation() final {}
   StringRef getArgument() const final { return "test-options-pass"; }
   StringRef getDescription() const final {
     return "Test options parsing capabilities";
@@ -125,6 +139,8 @@ void registerPassManagerTestPass() {
   PassRegistration<TestModulePass>();
 
   PassRegistration<TestFunctionPass>();
+
+  PassRegistration<TestInterfacePass>();
 
   PassRegistration<TestCrashRecoveryPass>();
   PassRegistration<TestFailurePass>();

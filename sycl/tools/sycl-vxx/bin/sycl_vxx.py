@@ -75,7 +75,6 @@ VXX_PassPipeline = [
 "-simplifycfg",
 "-loop-simplify",
 "-lcssa",
-"-loop-idiom",
 "-indvars",
 "-loop-deletion",
 "-loop-unroll",

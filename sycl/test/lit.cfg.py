@@ -5,6 +5,7 @@ import platform
 import re
 import subprocess
 import tempfile
+import getpass
 from distutils.spawn import find_executable
 
 import lit.formats
@@ -27,7 +28,7 @@ config.test_format = lit.formats.ShTest()
 config.suffixes = ['.c', '.cpp', '.dump'] #add .spv. Currently not clear what to do with those
 
 # feature tests are considered not so lightweight, so, they are excluded by default
-config.excludes = ['Inputs', 'feature-tests']
+config.excludes = ['Inputs', 'feature-tests', 'disabled', '_x', '.Xil', '.run', 'span']
 
 # test_source_root: The root path where tests are located.
 config.test_source_root = os.path.dirname(__file__)
@@ -35,10 +36,10 @@ config.test_source_root = os.path.dirname(__file__)
 # test_exec_root: The root path where tests should be run.
 config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
 
-llvm_config.use_clang(additional_flags=config.sycl_clang_extra_flags.split(' '))
-
 # Propagate some variables from the host environment.
 llvm_config.with_system_environment(['PATH', 'OCL_ICD_FILENAMES', 'SYCL_DEVICE_ALLOWLIST', 'SYCL_CONFIG_FILE_NAME'])
+
+xocc=lit_config.params.get('XOCC', "off")
 
 # Propagate extra environment variables
 if config.extra_environment:
@@ -51,6 +52,10 @@ if config.extra_environment:
         else:
            lit_config.note("\tUnset "+var)
            llvm_config.with_environment(var,"")
+
+config.environment['SYCL_VXX_PRINT_CMD'] = 'True'
+config.environment['SYCL_VXX_SERIALIZE_VITIS_COMP'] = 'True'
+config.environment['XRT_PCIE_HW_EMU_FORCE_SHUTDOWN'] = 'True'
 
 # Configure LD_LIBRARY_PATH or corresponding os-specific alternatives
 # Add 'libcxx' feature to filter out all SYCL abi tests when SYCL runtime
@@ -87,6 +92,7 @@ config.substitutions.append( ('%cuda_toolkit_include',  config.cuda_toolkit_incl
 config.substitutions.append( ('%sycl_tools_src_dir',  config.sycl_tools_src_dir ) )
 config.substitutions.append( ('%llvm_build_lib_dir',  config.llvm_build_lib_dir ) )
 config.substitutions.append( ('%llvm_build_bin_dir',  config.llvm_build_bin_dir ) )
+config.substitutions.append( ('%clang_offload_bundler', f'{config.llvm_build_bin_dir}clang-offload-bundler') )
 
 config.substitutions.append( ('%fsycl-host-only', '-std=c++17 -Xclang -fsycl-is-host -isystem %s -isystem %s -isystem %s' % (config.sycl_include, config.opencl_include_dir, config.sycl_include + '/sycl/') ) )
 
@@ -104,6 +110,8 @@ triple=lit_config.params.get('SYCL_TRIPLE', 'spir64-unknown-unknown')
 lit_config.note("Triple: {}".format(triple))
 config.substitutions.append( ('%sycl_triple',  triple ) )
 
+additional_flags = config.sycl_clang_extra_flags.split(' ')
+
 if config.cuda_be == "ON":
     config.available_features.add('cuda_be')
 
@@ -119,16 +127,86 @@ if triple == 'nvptx64-nvidia-cuda':
 if triple == 'amdgcn-amd-amdhsa':
     config.available_features.add('hip_amd')
     # For AMD the specific GPU has to be specified with --offload-arch
-    if not re.match('.*--offload-arch.*', config.sycl_clang_extra_flags):
-        raise Exception("Error: missing --offload-arch flag when trying to "  \
-                        "run lit tests for AMD GPU, please add "              \
-                        "--hip-amd-arch=<target> to buildbot/configure.py or add"  \
-                        "`-Xsycl-target-backend=amdgcn-amd-amdhsa --offload-arch=<target>` to " \
-                        "the CMake variable SYCL_CLANG_EXTRA_FLAGS")
+    if not any([f.startswith('--offload-arch') for f in additional_flags]):
+        # If the offload arch wasn't specified in SYCL_CLANG_EXTRA_FLAGS,
+        # hardcode it to gfx906, this is fine because only compiler tests
+        additional_flags += ['-Xsycl-target-backend=amdgcn-amd-amdhsa',
+                            '--offload-arch=gfx906']
+
+llvm_config.use_clang(additional_flags=additional_flags)
+
+filter=lit_config.params.get('SYCL_PLUGIN', "opencl")
+filter+=":acc"
+
+lit_config.note("Filter: {}".format(filter))
+
+acc_run_substitute=f"env SYCL_DEVICE_FILTER={filter} "
+if xocc != "off":
+    # xrt doesn't deal well with multiple executables using it concurrently (at the time of writing).
+    # The details are at https://xilinx.github.io/XRT/master/html/multiprocess.html
+    # so we wrap every use of XRT inside an file lock.
+    xrt_lock = f"{tempfile.gettempdir()}/xrt-{getpass.getuser()}.lock"
+    acc_run_substitute+= "flock --exclusive " + xrt_lock + " "
+    if os.path.exists(xrt_lock):
+        os.remove(xrt_lock)
+    acc_run_substitute="env --unset=XCL_EMULATION_MODE " + acc_run_substitute
+    # hw_emu is very slow so it has a higher timeout.
+    if "hw_emu" not in triple:
+        acc_run_substitute+= "timeout 600 env "
+    else:
+        acc_run_substitute+= "timeout 3000 env "
+    acc_run_substitute += "unshare -pc --kill-child"
+config.substitutions.append( ('%ACC_RUN_PLACEHOLDER', acc_run_substitute) )
+
+timeout = 600
+if xocc == "off":
+    config.excludes += ['vitis']
+else:
+    # TODO how to deal with cuda ?
+    # if getDeviceCount("gpu", "cuda")[1]:
+    #     lit_config.note("found secondary cuda target")
+    #     config.available_features.add("has_secondary_cuda")
+    required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]
+    has_error=False
+    config.available_features.add("xocc")
+    feat_list = ",".join(config.available_features)
+    lit_config.note(f"Features: {feat_list}")
+    pkg_opencv4 = subprocess.run(["pkg-config", "--libs", "--cflags", "opencv4"], stdout=subprocess.PIPE)
+    has_opencv4 = not pkg_opencv4.returncode
+    lit_config.note("has opencv4: {}".format(has_opencv4))
+    if has_opencv4:
+        config.available_features.add("opencv4")
+        config.substitutions.append( ('%opencv4_flags', pkg_opencv4.stdout.decode('utf-8')[:-1]) )
+    for env in required_env:
+        if env not in os.environ:
+            lit_config.note("missing environnement variable: {}".format(env))
+            has_error=True
+    if has_error:
+        lit_config.error("Can't configure tests for XOCC")
+    llvm_config.with_system_environment(required_env)
+    if xocc == "only":
+        config.excludes += ['basic_tests', 'extentions', 'online_compiler', 'plugins']
+    # run_if_* defaults to a simple echo to print the comand instead of running it.
+    # it will be replaced by and empty string to actually run the command.
+    run_if_hw="echo"
+    run_if_hw_emu="echo"
+    run_if_sw_emu="echo"
+    if "_hw-" in triple:
+        timeout = 10800 # 3h
+        run_if_hw=""
+    if "_hw_emu" in triple:
+        timeout = 3600 # 1h
+        run_if_hw_emu=""
+    if "_sw_emu" in triple:
+        timeout = 1200 # 20min
+        run_if_sw_emu=""
+    config.substitutions.append( ('%run_if_hw', run_if_hw) )
+    config.substitutions.append( ('%run_if_hw_emu', run_if_hw_emu) )
+    config.substitutions.append( ('%run_if_sw_emu', run_if_sw_emu) )
 
 # Set timeout for test = 10 mins
 try:
     import psutil
-    lit_config.maxIndividualTestTime = 600
+    lit_config.maxIndividualTestTime = timeout
 except ImportError:
     pass

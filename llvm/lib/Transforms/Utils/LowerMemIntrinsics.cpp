@@ -382,13 +382,20 @@ static void createMemMoveLoop(Instruction *InsertBefore, Value *SrcAddr,
   Function *F = OrigBB->getParent();
   const DataLayout &DL = F->getParent()->getDataLayout();
 
-  Type *EltTy = cast<PointerType>(SrcAddr->getType())->getElementType();
+  // TODO: Use different element type if possible?
+  IRBuilder<> CastBuilder(InsertBefore);
+  Type *EltTy = CastBuilder.getInt8Ty();
+  Type *PtrTy =
+      CastBuilder.getInt8PtrTy(SrcAddr->getType()->getPointerAddressSpace());
+  SrcAddr = CastBuilder.CreateBitCast(SrcAddr, PtrTy);
+  DstAddr = CastBuilder.CreateBitCast(DstAddr, PtrTy);
   if (LowerToNonI8Type) {
     Type* NewTy = determineUnderlyingType(EltTy, SrcAddr, DstAddr);
     if (EltTy != NewTy) {
       SrcAddr = Skip1BitCast(SrcAddr);
       DstAddr = Skip1BitCast(DstAddr);
     }
+    EltTy = NewTy;
   }
 
   // Create the a comparison of src and dst, based on which we jump to either

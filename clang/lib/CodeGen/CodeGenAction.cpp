@@ -334,10 +334,20 @@ namespace clang {
       if (LangOpts.SYCLIsDevice ||
           C.getTargetInfo().getTriple().getArch() == llvm::Triple::vitis_ip) {
         PrettyStackTraceString CrashInfo("Pre-linking SYCL passes");
-        legacy::PassManager PreLinkingSyclPasses;
-        PreLinkingSyclPasses.add(llvm::createLowerSYCLMetaDataPass());
-        PreLinkingSyclPasses.add(llvm::createSYCLLowerWGScopePass());
-        PreLinkingSyclPasses.run(*getModule());
+
+        FunctionAnalysisManager FAM;
+        ModuleAnalysisManager MAM;
+        MAM.registerPass([&] { return PassInstrumentationAnalysis(); });
+        MAM.registerPass(
+            [&] { return FunctionAnalysisManagerModuleProxy(FAM); });
+        FAM.registerPass(
+            [&] { return ModuleAnalysisManagerFunctionProxy(MAM); });
+
+        ModulePassManager PreLinkingSyclPasses;
+        PreLinkingSyclPasses.addPass(
+            createModuleToFunctionPassAdaptor(SYCLLowerWGScopePass()));
+        PreLinkingSyclPasses.addPass(LowerSYCLMetaDataPass());
+        PreLinkingSyclPasses.run(*getModule(), MAM);
       }
 
       // Link each LinkModule into our module.
@@ -568,7 +578,6 @@ void BackendConsumer::SrcMgrDiagHandler(const llvm::DiagnosticInfoSrcMgr &DI) {
   // If Loc is invalid, we still need to report the issue, it just gets no
   // location info.
   Diags.Report(Loc, DiagID).AddString(Message);
-  return;
 }
 
 bool
@@ -1153,7 +1162,7 @@ void CodeGenAction::ExecuteAction() {
   auto &CodeGenOpts = CI.getCodeGenOpts();
   auto &Diagnostics = CI.getDiagnostics();
   std::unique_ptr<raw_pwrite_stream> OS =
-      GetOutputStream(CI, getCurrentFile(), BA);
+      GetOutputStream(CI, getCurrentFileOrBufferName(), BA);
   if (BA != Backend_EmitNothing && !OS)
     return;
 
@@ -1174,6 +1183,7 @@ void CodeGenAction::ExecuteAction() {
     TheModule->setTargetTriple(TargetOpts.Triple);
   }
 
+  EmbedObject(TheModule.get(), CodeGenOpts, Diagnostics);
   EmbedBitcode(TheModule.get(), CodeGenOpts, *MainFile);
 
   LLVMContext &Ctx = TheModule->getContext();

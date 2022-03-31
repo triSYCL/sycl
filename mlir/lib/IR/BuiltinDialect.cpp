@@ -101,52 +101,30 @@ void FuncOp::build(OpBuilder &builder, OperationState &state, StringRef name,
                    ArrayRef<DictionaryAttr> argAttrs) {
   state.addAttribute(SymbolTable::getSymbolAttrName(),
                      builder.getStringAttr(name));
-  state.addAttribute(getTypeAttrName(), TypeAttr::get(type));
+  state.addAttribute(function_interface_impl::getTypeAttrName(),
+                     TypeAttr::get(type));
   state.attributes.append(attrs.begin(), attrs.end());
   state.addRegion();
 
   if (argAttrs.empty())
     return;
   assert(type.getNumInputs() == argAttrs.size());
-  function_like_impl::addArgAndResultAttrs(builder, state, argAttrs,
-                                           /*resultAttrs=*/llvm::None);
+  function_interface_impl::addArgAndResultAttrs(builder, state, argAttrs,
+                                                /*resultAttrs=*/llvm::None);
 }
 
-static ParseResult parseFuncOp(OpAsmParser &parser, OperationState &result) {
-  auto buildFuncType = [](Builder &builder, ArrayRef<Type> argTypes,
-                          ArrayRef<Type> results,
-                          function_like_impl::VariadicFlag, std::string &) {
-    return builder.getFunctionType(argTypes, results);
-  };
+ParseResult FuncOp::parse(OpAsmParser &parser, OperationState &result) {
+  auto buildFuncType =
+      [](Builder &builder, ArrayRef<Type> argTypes, ArrayRef<Type> results,
+         function_interface_impl::VariadicFlag,
+         std::string &) { return builder.getFunctionType(argTypes, results); };
 
-  return function_like_impl::parseFunctionLikeOp(
+  return function_interface_impl::parseFunctionOp(
       parser, result, /*allowVariadic=*/false, buildFuncType);
 }
 
-static void print(FuncOp op, OpAsmPrinter &p) {
-  FunctionType fnType = op.getType();
-  function_like_impl::printFunctionLikeOp(
-      p, op, fnType.getInputs(), /*isVariadic=*/false, fnType.getResults());
-}
-
-static LogicalResult verify(FuncOp op) {
-  // If this function is external there is nothing to do.
-  if (op.isExternal())
-    return success();
-
-  // Verify that the argument list of the function and the arg list of the entry
-  // block line up.  The trait already verified that the number of arguments is
-  // the same between the signature and the block.
-  auto fnInputTypes = op.getType().getInputs();
-  Block &entryBlock = op.front();
-  for (unsigned i = 0, e = entryBlock.getNumArguments(); i != e; ++i)
-    if (fnInputTypes[i] != entryBlock.getArgument(i).getType())
-      return op.emitOpError("type of entry block argument #")
-             << i << '(' << entryBlock.getArgument(i).getType()
-             << ") must match the type of the corresponding argument in "
-             << "function signature(" << fnInputTypes[i] << ')';
-
-  return success();
+void FuncOp::print(OpAsmPrinter &p) {
+  function_interface_impl::printFunctionOp(p, *this, /*isVariadic=*/false);
 }
 
 /// Clone the internal blocks from this function into dest and all attributes
@@ -246,28 +224,28 @@ DataLayoutSpecInterface ModuleOp::getDataLayoutSpec() {
   return {};
 }
 
-static LogicalResult verify(ModuleOp op) {
+LogicalResult ModuleOp::verify() {
   // Check that none of the attributes are non-dialect attributes, except for
   // the symbol related attributes.
-  for (auto attr : op->getAttrs()) {
+  for (auto attr : (*this)->getAttrs()) {
     if (!attr.getName().strref().contains('.') &&
         !llvm::is_contained(
             ArrayRef<StringRef>{mlir::SymbolTable::getSymbolAttrName(),
                                 mlir::SymbolTable::getVisibilityAttrName()},
             attr.getName().strref()))
-      return op.emitOpError() << "can only contain attributes with "
-                                 "dialect-prefixed names, found: '"
-                              << attr.getName().getValue() << "'";
+      return emitOpError() << "can only contain attributes with "
+                              "dialect-prefixed names, found: '"
+                           << attr.getName().getValue() << "'";
   }
 
   // Check that there is at most one data layout spec attribute.
   StringRef layoutSpecAttrName;
   DataLayoutSpecInterface layoutSpec;
-  for (const NamedAttribute &na : op->getAttrs()) {
+  for (const NamedAttribute &na : (*this)->getAttrs()) {
     if (auto spec = na.getValue().dyn_cast<DataLayoutSpecInterface>()) {
       if (layoutSpec) {
         InFlightDiagnostic diag =
-            op.emitOpError() << "expects at most one data layout attribute";
+            emitOpError() << "expects at most one data layout attribute";
         diag.attachNote() << "'" << layoutSpecAttrName
                           << "' is a data layout attribute";
         diag.attachNote() << "'" << na.getName().getValue()
@@ -288,8 +266,8 @@ static LogicalResult verify(ModuleOp op) {
 LogicalResult
 UnrealizedConversionCastOp::fold(ArrayRef<Attribute> attrOperands,
                                  SmallVectorImpl<OpFoldResult> &foldResults) {
-  OperandRange operands = inputs();
-  ResultRange results = outputs();
+  OperandRange operands = getInputs();
+  ResultRange results = getOutputs();
 
   if (operands.getType() == results.getType()) {
     foldResults.append(operands.begin(), operands.end());
