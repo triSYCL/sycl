@@ -225,10 +225,13 @@ protected:
 
   // XCOFF specific sections
   MCSection *TOCBaseSection = nullptr;
+  MCSection *ReadOnly8Section = nullptr;
+  MCSection *ReadOnly16Section = nullptr;
 
 public:
-  void InitMCObjectFileInfo(const Triple &TT, bool PIC, MCContext &ctx,
+  void initMCObjectFileInfo(MCContext &MCCtx, bool PIC,
                             bool LargeCodeModel = false);
+  virtual ~MCObjectFileInfo();
   MCContext &getContext() const { return *Ctx; }
 
   bool getSupportsWeakOmittedEHFrame() const {
@@ -251,10 +254,12 @@ public:
     return CompactUnwindDwarfEHFrameOnly;
   }
 
+  virtual unsigned getTextSectionAlignment() const { return 4; }
   MCSection *getTextSection() const { return TextSection; }
   MCSection *getDataSection() const { return DataSection; }
   MCSection *getBSSSection() const { return BSSSection; }
   MCSection *getReadOnlySection() const { return ReadOnlySection; }
+  MCSection *getLSDASection() const { return LSDASection; }
   MCSection *getCompactUnwindSection() const { return CompactUnwindSection; }
   MCSection *getDwarfAbbrevSection() const { return DwarfAbbrevSection; }
   MCSection *getDwarfInfoSection() const { return DwarfInfoSection; }
@@ -416,33 +421,46 @@ public:
 
   MCSection *getEHFrameSection() const { return EHFrameSection; }
 
-  enum Environment { IsMachO, IsELF, IsCOFF, IsWasm, IsXCOFF };
-  Environment getObjectFileType() const { return Env; }
-
   bool isPositionIndependent() const { return PositionIndependent; }
 
 private:
-  Environment Env;
   bool PositionIndependent = false;
   MCContext *Ctx = nullptr;
-  Triple TT;
   VersionTuple SDKVersion;
+  Optional<Triple> DarwinTargetVariantTriple;
+  VersionTuple DarwinTargetVariantSDKVersion;
 
   void initMachOMCObjectFileInfo(const Triple &T);
   void initELFMCObjectFileInfo(const Triple &T, bool Large);
+  void initGOFFMCObjectFileInfo(const Triple &T);
   void initCOFFMCObjectFileInfo(const Triple &T);
   void initWasmMCObjectFileInfo(const Triple &T);
   void initXCOFFMCObjectFileInfo(const Triple &T);
   MCSection *getDwarfComdatSection(const char *Name, uint64_t Hash) const;
 
 public:
-  const Triple &getTargetTriple() const { return TT; }
-
   void setSDKVersion(const VersionTuple &TheSDKVersion) {
     SDKVersion = TheSDKVersion;
   }
 
   const VersionTuple &getSDKVersion() const { return SDKVersion; }
+
+  void setDarwinTargetVariantTriple(const Triple &T) {
+    DarwinTargetVariantTriple = T;
+  }
+
+  const Triple *getDarwinTargetVariantTriple() const {
+    return DarwinTargetVariantTriple ? DarwinTargetVariantTriple.getPointer()
+                                     : nullptr;
+  }
+
+  void setDarwinTargetVariantSDKVersion(const VersionTuple &TheSDKVersion) {
+    DarwinTargetVariantSDKVersion = TheSDKVersion;
+  }
+
+  const VersionTuple &getDarwinTargetVariantSDKVersion() const {
+    return DarwinTargetVariantSDKVersion;
+  }
 };
 
 } // end namespace llvm

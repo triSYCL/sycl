@@ -100,16 +100,16 @@ define i64 @f5() {
 define i64 @f6() {
 ; CHECK-LABEL: f6:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    adrp x8, x2
-; CHECK-NEXT:    add x8, x8, :lo12:x2
-; CHECK-NEXT:    mov w9, #2097152
-; CHECK-NEXT:    ldr x0, [x8, x9]
+; CHECK-NEXT:    mov w8, #2097152
+; CHECK-NEXT:    adrp x9, x2
+; CHECK-NEXT:    add x9, x9, :lo12:x2
+; CHECK-NEXT:    ldr x0, [x9, x8]
 ; CHECK-NEXT:    ret
 ;
 ; GISEL-LABEL: f6:
 ; GISEL:       // %bb.0:
-; GISEL-NEXT:    adrp x9, x2
 ; GISEL-NEXT:    mov w8, #2097152
+; GISEL-NEXT:    adrp x9, x2
 ; GISEL-NEXT:    add x9, x9, :lo12:x2
 ; GISEL-NEXT:    ldr x0, [x9, x8]
 ; GISEL-NEXT:    ret
@@ -131,18 +131,8 @@ define i32 @f7() {
 ; GISEL-NEXT:    adrp x8, x3+88
 ; GISEL-NEXT:    add x8, x8, :lo12:x3+88
 ; GISEL-NEXT:    mov v0.d[1], x8
-; GISEL-NEXT:    mov w9, #64
-; GISEL-NEXT:    mov d1, v0.d[1]
-; GISEL-NEXT:    sub x8, x9, #64 // =64
-; GISEL-NEXT:    fmov x11, d1
-; GISEL-NEXT:    fmov x10, d0
-; GISEL-NEXT:    lsl x12, x11, x8
-; GISEL-NEXT:    cmp x9, #64 // =64
-; GISEL-NEXT:    lsr x8, x11, x8
-; GISEL-NEXT:    orr x11, x12, x10, lsr #0
-; GISEL-NEXT:    csel x8, x11, x8, lo
-; GISEL-NEXT:    cmp x9, #0 // =0
-; GISEL-NEXT:    csel x8, x10, x8, eq
+; GISEL-NEXT:    mov d0, v0.d[1]
+; GISEL-NEXT:    fmov x8, d0
 ; GISEL-NEXT:    ldr w0, [x8, #20]
 ; GISEL-NEXT:    ret
 

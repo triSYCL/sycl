@@ -1,5 +1,5 @@
 // -*- C++ -*-
-//===--------------------------- string -----------------------------------===//
+//===----------------------------------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -110,6 +110,7 @@ public:
         explicit basic_string(const T& t, const Allocator& a = Allocator()); // C++17
     basic_string(const value_type* s, const allocator_type& a = allocator_type());
     basic_string(const value_type* s, size_type n, const allocator_type& a = allocator_type());
+    basic_string(nullptr_t) = delete; // C++2b
     basic_string(size_type n, value_type c, const allocator_type& a = allocator_type());
     template<class InputIterator>
         basic_string(InputIterator begin, InputIterator end,
@@ -130,6 +131,7 @@ public:
              allocator_type::propagate_on_container_move_assignment::value ||
              allocator_type::is_always_equal::value ); // C++17
     basic_string& operator=(const value_type* s);
+    basic_string& operator=(nullptr_t) = delete; // C++2b
     basic_string& operator=(value_type c);
     basic_string& operator=(initializer_list<value_type>);
 
@@ -514,26 +516,31 @@ basic_string<char32_t> operator "" s( const char32_t *str, size_t len ); // C++1
 */
 
 #include <__config>
-#include <compare>
-#include <string_view>
-#include <iosfwd>
-#include <cstring>
-#include <cstdio>  // For EOF.
-#include <cwchar>
+#include <__debug>
+#include <__functional_base>
+#include <__iterator/wrap_iter.h>
 #include <algorithm>
+#include <compare>
+#include <cstdio>  // EOF
+#include <cstdlib>
+#include <cstring>
+#include <initializer_list>
+#include <iosfwd>
 #include <iterator>
-#include <utility>
 #include <memory>
 #include <stdexcept>
+#include <string_view>
 #include <type_traits>
-#include <initializer_list>
-#include <__functional_base>
+#include <utility>
 #include <version>
-#ifndef _LIBCPP_HAS_NO_UNICODE_CHARS
-#include <cstdint>
+
+#ifndef _LIBCPP_HAS_NO_WIDE_CHARACTERS
+#   include <cwchar>
 #endif
 
-#include <__debug>
+#ifndef _LIBCPP_HAS_NO_UNICODE_CHARS
+# include <cstdint>
+#endif
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)
 #pragma GCC system_header
@@ -609,52 +616,25 @@ operator+(const basic_string<_CharT, _Traits, _Allocator>& __x, _CharT __y);
 _LIBCPP_EXTERN_TEMPLATE(_LIBCPP_FUNC_VIS string operator+<char, char_traits<char>, allocator<char> >(char const*, string const&))
 
 template <bool>
-class _LIBCPP_TEMPLATE_VIS __basic_string_common
-{
-protected:
-    _LIBCPP_NORETURN void __throw_length_error() const;
-    _LIBCPP_NORETURN void __throw_out_of_range() const;
+struct __basic_string_common;
+
+template <>
+struct __basic_string_common<true> {
+    // Both are defined in string.cpp
+    _LIBCPP_NORETURN _LIBCPP_EXPORTED_FROM_ABI void __throw_length_error() const;
+    _LIBCPP_NORETURN _LIBCPP_EXPORTED_FROM_ABI void __throw_out_of_range() const;
 };
 
-template <bool __b>
-void
-__basic_string_common<__b>::__throw_length_error() const
-{
-    _VSTD::__throw_length_error("basic_string");
-}
-
-template <bool __b>
-void
-__basic_string_common<__b>::__throw_out_of_range() const
-{
-    _VSTD::__throw_out_of_range("basic_string");
-}
-
-_LIBCPP_EXTERN_TEMPLATE(class _LIBCPP_EXTERN_TEMPLATE_TYPE_VIS __basic_string_common<true>)
-
-#ifdef _LIBCPP_NO_EXCEPTIONS
 template <class _Iter>
-struct __libcpp_string_gets_noexcept_iterator_impl : public true_type {};
-#elif defined(_LIBCPP_HAS_NO_NOEXCEPT)
-template <class _Iter>
-struct __libcpp_string_gets_noexcept_iterator_impl : public false_type {};
-#else
-template <class _Iter, bool = __is_cpp17_forward_iterator<_Iter>::value>
-struct __libcpp_string_gets_noexcept_iterator_impl : public _LIBCPP_BOOL_CONSTANT((
-    noexcept(++(declval<_Iter&>())) &&
-    is_nothrow_assignable<_Iter&, _Iter>::value &&
-    noexcept(declval<_Iter>() == declval<_Iter>()) &&
-    noexcept(*declval<_Iter>())
-)) {};
+struct __string_is_trivial_iterator : public false_type {};
+
+template <class _Tp>
+struct __string_is_trivial_iterator<_Tp*>
+    : public is_arithmetic<_Tp> {};
 
 template <class _Iter>
-struct __libcpp_string_gets_noexcept_iterator_impl<_Iter, false> : public false_type {};
-#endif
-
-
-template <class _Iter>
-struct __libcpp_string_gets_noexcept_iterator
-    : public _LIBCPP_BOOL_CONSTANT(__libcpp_is_trivial_iterator<_Iter>::value || __libcpp_string_gets_noexcept_iterator_impl<_Iter>::value) {};
+struct __string_is_trivial_iterator<__wrap_iter<_Iter> >
+    : public __string_is_trivial_iterator<_Iter> {};
 
 template <class _CharT, class _Traits, class _Tp>
 struct __can_be_converted_to_string_view : public _BoolConstant<
@@ -684,7 +664,7 @@ typedef basic_string<char8_t> u8string;
 #ifndef _LIBCPP_HAS_NO_UNICODE_CHARS
 typedef basic_string<char16_t> u16string;
 typedef basic_string<char32_t> u32string;
-#endif // _LIBCPP_HAS_NO_UNICODE_CHARS
+#endif
 
 template<class _CharT, class _Traits, class _Allocator>
 class
@@ -697,7 +677,7 @@ class
     _LIBCPP_PREFERRED_NAME(u32string)
 #endif
     basic_string
-    : private __basic_string_common<true>
+    : private __basic_string_common<true> // This base class is historical, but it needs to remain for ABI compatibility
 {
 public:
     typedef basic_string                                 __self;
@@ -841,19 +821,24 @@ public:
     basic_string(basic_string&& __str, const allocator_type& __a);
 #endif // _LIBCPP_CXX03_LANG
 
-    template <class = _EnableIf<__is_allocator<_Allocator>::value, nullptr_t> >
+    template <class = __enable_if_t<__is_allocator<_Allocator>::value, nullptr_t> >
     _LIBCPP_INLINE_VISIBILITY
     basic_string(const _CharT* __s) : __r_(__default_init_tag(), __default_init_tag()) {
       _LIBCPP_ASSERT(__s != nullptr, "basic_string(const char*) detected nullptr");
       __init(__s, traits_type::length(__s));
-#   if _LIBCPP_DEBUG_LEVEL == 2
-      __get_db()->__insert_c(this);
-#   endif
+#if _LIBCPP_DEBUG_LEVEL == 2
+        if (!__libcpp_is_constant_evaluated())
+            __get_db()->__insert_c(this);
+#endif
     }
 
-    template <class = _EnableIf<__is_allocator<_Allocator>::value, nullptr_t> >
+    template <class = __enable_if_t<__is_allocator<_Allocator>::value, nullptr_t> >
         _LIBCPP_INLINE_VISIBILITY
         basic_string(const _CharT* __s, const _Allocator& __a);
+
+#if _LIBCPP_STD_VER > 20
+    basic_string(nullptr_t) = delete;
+#endif
 
     _LIBCPP_INLINE_VISIBILITY
     basic_string(const _CharT* __s, size_type __n);
@@ -862,7 +847,7 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     basic_string(size_type __n, _CharT __c);
 
-    template <class = _EnableIf<__is_allocator<_Allocator>::value, nullptr_t> >
+    template <class = __enable_if_t<__is_allocator<_Allocator>::value, nullptr_t> >
         _LIBCPP_INLINE_VISIBILITY
         basic_string(size_type __n, _CharT __c, const _Allocator& __a);
 
@@ -872,24 +857,24 @@ public:
     basic_string(const basic_string& __str, size_type __pos,
                  const _Allocator& __a = _Allocator());
 
-    template<class _Tp, class = _EnableIf<__can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value && !__is_same_uncvref<_Tp, basic_string>::value> >
+    template<class _Tp, class = __enable_if_t<__can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value && !__is_same_uncvref<_Tp, basic_string>::value> >
         _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
         basic_string(const _Tp& __t, size_type __pos, size_type __n,
                      const allocator_type& __a = allocator_type());
 
-    template<class _Tp, class = _EnableIf<__can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value &&
+    template<class _Tp, class = __enable_if_t<__can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value &&
                                           !__is_same_uncvref<_Tp, basic_string>::value> >
         _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
         explicit basic_string(const _Tp& __t);
 
-    template<class _Tp, class = _EnableIf<__can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value && !__is_same_uncvref<_Tp, basic_string>::value> >
+    template<class _Tp, class = __enable_if_t<__can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value && !__is_same_uncvref<_Tp, basic_string>::value> >
         _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
         explicit basic_string(const _Tp& __t, const allocator_type& __a);
 
-    template<class _InputIterator, class = _EnableIf<__is_cpp17_input_iterator<_InputIterator>::value> >
+    template<class _InputIterator, class = __enable_if_t<__is_cpp17_input_iterator<_InputIterator>::value> >
         _LIBCPP_INLINE_VISIBILITY
         basic_string(_InputIterator __first, _InputIterator __last);
-    template<class _InputIterator, class = _EnableIf<__is_cpp17_input_iterator<_InputIterator>::value> >
+    template<class _InputIterator, class = __enable_if_t<__is_cpp17_input_iterator<_InputIterator>::value> >
         _LIBCPP_INLINE_VISIBILITY
         basic_string(_InputIterator __first, _InputIterator __last, const allocator_type& __a);
 #ifndef _LIBCPP_CXX03_LANG
@@ -906,7 +891,7 @@ public:
 
     basic_string& operator=(const basic_string& __str);
 
-    template <class _Tp, class = _EnableIf<__can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value && !__is_same_uncvref<_Tp, basic_string>::value> >
+    template <class _Tp, class = __enable_if_t<__can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value && !__is_same_uncvref<_Tp, basic_string>::value> >
     basic_string& operator=(const _Tp& __t)
         {__self_view __sv = __t; return assign(__sv);}
 
@@ -918,6 +903,9 @@ public:
     basic_string& operator=(initializer_list<value_type> __il) {return assign(__il.begin(), __il.size());}
 #endif
     _LIBCPP_INLINE_VISIBILITY basic_string& operator=(const value_type* __s) {return assign(__s);}
+#if _LIBCPP_STD_VER > 20
+    basic_string& operator=(nullptr_t) = delete;
+#endif
     basic_string& operator=(value_type __c);
 
 #if _LIBCPP_DEBUG_LEVEL == 2
@@ -1006,7 +994,7 @@ public:
 
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value
             && !__is_same_uncvref<_Tp, basic_string >::value,
@@ -1024,7 +1012,7 @@ public:
 
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf<
+    __enable_if_t<
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value
             && !__is_same_uncvref<_Tp, basic_string>::value,
             basic_string&
@@ -1034,7 +1022,7 @@ public:
 
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value
             && !__is_same_uncvref<_Tp, basic_string>::value,
@@ -1048,35 +1036,28 @@ public:
     _LIBCPP_INLINE_VISIBILITY
     void __append_default_init(size_type __n);
 
-    template <class _ForwardIterator>
-    _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    basic_string& __append_forward_unsafe(_ForwardIterator, _ForwardIterator);
     template<class _InputIterator>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
-            __is_exactly_cpp17_input_iterator<_InputIterator>::value
-                || !__libcpp_string_gets_noexcept_iterator<_InputIterator>::value,
+            __is_exactly_cpp17_input_iterator<_InputIterator>::value,
             basic_string&
         >
     _LIBCPP_INLINE_VISIBILITY
     append(_InputIterator __first, _InputIterator __last) {
-      const basic_string __temp (__first, __last, __alloc());
+      const basic_string __temp(__first, __last, __alloc());
       append(__temp.data(), __temp.size());
       return *this;
     }
     template<class _ForwardIterator>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
-            __is_cpp17_forward_iterator<_ForwardIterator>::value
-                && __libcpp_string_gets_noexcept_iterator<_ForwardIterator>::value,
+            __is_cpp17_forward_iterator<_ForwardIterator>::value,
             basic_string&
         >
     _LIBCPP_INLINE_VISIBILITY
-    append(_ForwardIterator __first, _ForwardIterator __last) {
-      return __append_forward_unsafe(__first, __last);
-    }
+    append(_ForwardIterator __first, _ForwardIterator __last);
 
 #ifndef _LIBCPP_CXX03_LANG
     _LIBCPP_INLINE_VISIBILITY
@@ -1093,7 +1074,7 @@ public:
 
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
             basic_string&
@@ -1110,7 +1091,7 @@ public:
     basic_string& assign(const basic_string& __str, size_type __pos, size_type __n=npos);
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value
             && !__is_same_uncvref<_Tp, basic_string>::value,
@@ -1122,19 +1103,17 @@ public:
     basic_string& assign(size_type __n, value_type __c);
     template<class _InputIterator>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
-           __is_exactly_cpp17_input_iterator<_InputIterator>::value
-                || !__libcpp_string_gets_noexcept_iterator<_InputIterator>::value,
+            __is_exactly_cpp17_input_iterator<_InputIterator>::value,
             basic_string&
         >
         assign(_InputIterator __first, _InputIterator __last);
     template<class _ForwardIterator>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
-            __is_cpp17_forward_iterator<_ForwardIterator>::value
-                 && __libcpp_string_gets_noexcept_iterator<_ForwardIterator>::value,
+            __is_cpp17_forward_iterator<_ForwardIterator>::value,
             basic_string&
         >
         assign(_ForwardIterator __first, _ForwardIterator __last);
@@ -1148,7 +1127,7 @@ public:
 
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
             basic_string&
@@ -1158,7 +1137,7 @@ public:
 
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value && !__is_same_uncvref<_Tp, basic_string>::value,
             basic_string&
@@ -1173,19 +1152,17 @@ public:
     iterator      insert(const_iterator __pos, size_type __n, value_type __c);
     template<class _InputIterator>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
-           __is_exactly_cpp17_input_iterator<_InputIterator>::value
-                || !__libcpp_string_gets_noexcept_iterator<_InputIterator>::value,
+            __is_exactly_cpp17_input_iterator<_InputIterator>::value,
             iterator
         >
         insert(const_iterator __pos, _InputIterator __first, _InputIterator __last);
     template<class _ForwardIterator>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
-            __is_cpp17_forward_iterator<_ForwardIterator>::value
-                 && __libcpp_string_gets_noexcept_iterator<_ForwardIterator>::value,
+            __is_cpp17_forward_iterator<_ForwardIterator>::value,
             iterator
         >
         insert(const_iterator __pos, _ForwardIterator __first, _ForwardIterator __last);
@@ -1206,7 +1183,7 @@ public:
 
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
             basic_string&
@@ -1215,7 +1192,7 @@ public:
     basic_string& replace(size_type __pos1, size_type __n1, const basic_string& __str, size_type __pos2, size_type __n2=npos);
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value  && !__is_same_uncvref<_Tp, basic_string>::value,
             basic_string&
@@ -1229,7 +1206,7 @@ public:
 
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
             basic_string&
@@ -1244,7 +1221,7 @@ public:
     basic_string& replace(const_iterator __i1, const_iterator __i2, size_type __n, value_type __c);
     template<class _InputIterator>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __is_cpp17_input_iterator<_InputIterator>::value,
             basic_string&
@@ -1286,7 +1263,7 @@ public:
 
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
             size_type
@@ -1302,7 +1279,7 @@ public:
 
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
             size_type
@@ -1318,7 +1295,7 @@ public:
 
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
             size_type
@@ -1335,7 +1312,7 @@ public:
 
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
             size_type
@@ -1352,7 +1329,7 @@ public:
 
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
             size_type
@@ -1369,7 +1346,7 @@ public:
 
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
             size_type
@@ -1386,7 +1363,7 @@ public:
 
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
             int
@@ -1395,7 +1372,7 @@ public:
 
     template <class _Tp>
     _LIBCPP_METHOD_TEMPLATE_IMPLICIT_INSTANTIATION_VIS
-    _EnableIf
+    __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
             int
@@ -1408,7 +1385,7 @@ public:
 
     template <class _Tp>
     inline _LIBCPP_INLINE_VISIBILITY
-        _EnableIf
+        __enable_if_t
         <
             __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value  && !__is_same_uncvref<_Tp, basic_string>::value,
             int
@@ -1419,28 +1396,28 @@ public:
     int compare(size_type __pos1, size_type __n1, const value_type* __s, size_type __n2) const;
 
 #if _LIBCPP_STD_VER > 17
-    _LIBCPP_CONSTEXPR_AFTER_CXX11 _LIBCPP_INLINE_VISIBILITY
-    bool starts_with(__self_view __sv) const _NOEXCEPT
+    constexpr _LIBCPP_INLINE_VISIBILITY
+    bool starts_with(__self_view __sv) const noexcept
     { return __self_view(data(), size()).starts_with(__sv); }
 
-    _LIBCPP_CONSTEXPR_AFTER_CXX11 _LIBCPP_INLINE_VISIBILITY
-    bool starts_with(value_type __c) const _NOEXCEPT
+    constexpr _LIBCPP_INLINE_VISIBILITY
+    bool starts_with(value_type __c) const noexcept
     { return !empty() && _Traits::eq(front(), __c); }
 
-    _LIBCPP_CONSTEXPR_AFTER_CXX11 _LIBCPP_INLINE_VISIBILITY
-    bool starts_with(const value_type* __s) const _NOEXCEPT
+    constexpr _LIBCPP_INLINE_VISIBILITY
+    bool starts_with(const value_type* __s) const noexcept
     { return starts_with(__self_view(__s)); }
 
-    _LIBCPP_CONSTEXPR_AFTER_CXX11 _LIBCPP_INLINE_VISIBILITY
-    bool ends_with(__self_view __sv) const _NOEXCEPT
+    constexpr _LIBCPP_INLINE_VISIBILITY
+    bool ends_with(__self_view __sv) const noexcept
     { return __self_view(data(), size()).ends_with( __sv); }
 
-    _LIBCPP_CONSTEXPR_AFTER_CXX11 _LIBCPP_INLINE_VISIBILITY
-    bool ends_with(value_type __c) const _NOEXCEPT
+    constexpr _LIBCPP_INLINE_VISIBILITY
+    bool ends_with(value_type __c) const noexcept
     { return !empty() && _Traits::eq(back(), __c); }
 
-    _LIBCPP_CONSTEXPR_AFTER_CXX11 _LIBCPP_INLINE_VISIBILITY
-    bool ends_with(const value_type* __s) const _NOEXCEPT
+    constexpr _LIBCPP_INLINE_VISIBILITY
+    bool ends_with(const value_type* __s) const noexcept
     { return ends_with(__self_view(__s)); }
 #endif
 
@@ -1604,7 +1581,7 @@ private:
 
     template <class _InputIterator>
     inline
-    _EnableIf
+    __enable_if_t
     <
         __is_exactly_cpp17_input_iterator<_InputIterator>::value
     >
@@ -1612,7 +1589,7 @@ private:
 
     template <class _ForwardIterator>
     inline
-    _EnableIf
+    __enable_if_t
     <
         __is_cpp17_forward_iterator<_ForwardIterator>::value
     >
@@ -1718,8 +1695,40 @@ private:
       return *this;
     }
 
+    _LIBCPP_HIDE_FROM_ABI basic_string& __null_terminate_at(value_type* __p, size_type __newsz) {
+      __set_size(__newsz);
+      __invalidate_iterators_past(__newsz);
+      traits_type::assign(__p[__newsz], value_type());
+      return *this;
+    }
+
     _LIBCPP_INLINE_VISIBILITY void __invalidate_all_iterators();
     _LIBCPP_INLINE_VISIBILITY void __invalidate_iterators_past(size_type);
+
+    template<class _Tp>
+    _LIBCPP_INLINE_VISIBILITY
+    bool __addr_in_range(_Tp&& __t) const {
+        const volatile void *__p = _VSTD::addressof(__t);
+        return data() <= __p && __p <= data() + size();
+    }
+
+    _LIBCPP_NORETURN _LIBCPP_HIDE_FROM_ABI
+    void __throw_length_error() const {
+#ifndef _LIBCPP_NO_EXCEPTIONS
+        __basic_string_common<true>::__throw_length_error();
+#else
+        _VSTD::abort();
+#endif
+    }
+
+    _LIBCPP_NORETURN _LIBCPP_HIDE_FROM_ABI
+    void __throw_out_of_range() const {
+#ifndef _LIBCPP_NO_EXCEPTIONS
+        __basic_string_common<true>::__throw_out_of_range();
+#else
+        _VSTD::abort();
+#endif
+    }
 
     friend basic_string operator+<>(const basic_string&, const basic_string&);
     friend basic_string operator+<>(const value_type*, const basic_string&);
@@ -1731,20 +1740,24 @@ private:
 // These declarations must appear before any functions are implicitly used
 // so that they have the correct visibility specifier.
 #ifdef _LIBCPP_ABI_STRING_OPTIMIZED_EXTERNAL_INSTANTIATION
-_LIBCPP_STRING_UNSTABLE_EXTERN_TEMPLATE_LIST(_LIBCPP_EXTERN_TEMPLATE, char)
-_LIBCPP_STRING_UNSTABLE_EXTERN_TEMPLATE_LIST(_LIBCPP_EXTERN_TEMPLATE, wchar_t)
+    _LIBCPP_STRING_UNSTABLE_EXTERN_TEMPLATE_LIST(_LIBCPP_EXTERN_TEMPLATE, char)
+#   ifndef _LIBCPP_HAS_NO_WIDE_CHARACTERS
+        _LIBCPP_STRING_UNSTABLE_EXTERN_TEMPLATE_LIST(_LIBCPP_EXTERN_TEMPLATE, wchar_t)
+#   endif
 #else
-_LIBCPP_STRING_V1_EXTERN_TEMPLATE_LIST(_LIBCPP_EXTERN_TEMPLATE, char)
-_LIBCPP_STRING_V1_EXTERN_TEMPLATE_LIST(_LIBCPP_EXTERN_TEMPLATE, wchar_t)
+    _LIBCPP_STRING_V1_EXTERN_TEMPLATE_LIST(_LIBCPP_EXTERN_TEMPLATE, char)
+#   ifndef _LIBCPP_HAS_NO_WIDE_CHARACTERS
+        _LIBCPP_STRING_V1_EXTERN_TEMPLATE_LIST(_LIBCPP_EXTERN_TEMPLATE, wchar_t)
+#   endif
 #endif
 
 
-#ifndef _LIBCPP_HAS_NO_DEDUCTION_GUIDES
+#if _LIBCPP_STD_VER >= 17
 template<class _InputIterator,
          class _CharT = __iter_value_type<_InputIterator>,
          class _Allocator = allocator<_CharT>,
-         class = _EnableIf<__is_cpp17_input_iterator<_InputIterator>::value>,
-         class = _EnableIf<__is_allocator<_Allocator>::value>
+         class = enable_if_t<__is_cpp17_input_iterator<_InputIterator>::value>,
+         class = enable_if_t<__is_allocator<_Allocator>::value>
          >
 basic_string(_InputIterator, _InputIterator, _Allocator = _Allocator())
   -> basic_string<_CharT, char_traits<_CharT>, _Allocator>;
@@ -1752,7 +1765,7 @@ basic_string(_InputIterator, _InputIterator, _Allocator = _Allocator())
 template<class _CharT,
          class _Traits,
          class _Allocator = allocator<_CharT>,
-         class = _EnableIf<__is_allocator<_Allocator>::value>
+         class = enable_if_t<__is_allocator<_Allocator>::value>
          >
 explicit basic_string(basic_string_view<_CharT, _Traits>, const _Allocator& = _Allocator())
   -> basic_string<_CharT, _Traits, _Allocator>;
@@ -1760,7 +1773,7 @@ explicit basic_string(basic_string_view<_CharT, _Traits>, const _Allocator& = _A
 template<class _CharT,
          class _Traits,
          class _Allocator = allocator<_CharT>,
-         class = _EnableIf<__is_allocator<_Allocator>::value>,
+         class = enable_if_t<__is_allocator<_Allocator>::value>,
          class _Sz = typename allocator_traits<_Allocator>::size_type
          >
 basic_string(basic_string_view<_CharT, _Traits>, _Sz, _Sz, const _Allocator& = _Allocator())
@@ -1773,37 +1786,38 @@ void
 basic_string<_CharT, _Traits, _Allocator>::__invalidate_all_iterators()
 {
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__invalidate_all(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__invalidate_all(this);
 #endif
 }
 
 template <class _CharT, class _Traits, class _Allocator>
 inline
 void
-basic_string<_CharT, _Traits, _Allocator>::__invalidate_iterators_past(size_type
-#if _LIBCPP_DEBUG_LEVEL == 2
-                                                                        __pos
-#endif
-                                                                      )
+basic_string<_CharT, _Traits, _Allocator>::__invalidate_iterators_past(size_type __pos)
 {
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __c_node* __c = __get_db()->__find_c_and_lock(this);
-    if (__c)
-    {
-        const_pointer __new_last = __get_pointer() + __pos;
-        for (__i_node** __p = __c->end_; __p != __c->beg_; )
+    if (!__libcpp_is_constant_evaluated()) {
+        __c_node* __c = __get_db()->__find_c_and_lock(this);
+        if (__c)
         {
-            --__p;
-            const_iterator* __i = static_cast<const_iterator*>((*__p)->__i_);
-            if (__i->base() > __new_last)
+            const_pointer __new_last = __get_pointer() + __pos;
+            for (__i_node** __p = __c->end_; __p != __c->beg_; )
             {
-                (*__p)->__c_ = nullptr;
-                if (--__c->end_ != __p)
-                    _VSTD::memmove(__p, __p+1, (__c->end_ - __p)*sizeof(__i_node*));
+                --__p;
+                const_iterator* __i = static_cast<const_iterator*>((*__p)->__i_);
+                if (__i->base() > __new_last)
+                {
+                    (*__p)->__c_ = nullptr;
+                    if (--__c->end_ != __p)
+                        _VSTD::memmove(__p, __p+1, (__c->end_ - __p)*sizeof(__i_node*));
+                }
             }
+            __get_db()->unlock();
         }
-        __get_db()->unlock();
     }
+#else
+    (void)__pos;
 #endif // _LIBCPP_DEBUG_LEVEL == 2
 }
 
@@ -1814,7 +1828,8 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string()
      : __r_(__default_init_tag(), __default_init_tag())
 {
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
     __zero();
 }
@@ -1830,7 +1845,8 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(const allocator_type& __
 : __r_(__default_init_tag(), __a)
 {
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
     __zero();
 }
@@ -1892,7 +1908,8 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(const _CharT* __s, const
     _LIBCPP_ASSERT(__s != nullptr, "basic_string(const char*, allocator) detected nullptr");
     __init(__s, traits_type::length(__s));
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
 }
 
@@ -1901,10 +1918,11 @@ inline
 basic_string<_CharT, _Traits, _Allocator>::basic_string(const _CharT* __s, size_type __n)
      : __r_(__default_init_tag(), __default_init_tag())
 {
-    _LIBCPP_ASSERT(__n == 0 || __s != nullptr, "basic_string(const char*, n) detected nullptr");
-    __init(__s, __n);
+      _LIBCPP_ASSERT(__n == 0 || __s != nullptr, "basic_string(const char*, n) detected nullptr");
+      __init(__s, __n);
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
 }
 
@@ -1916,7 +1934,8 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(const _CharT* __s, size_
     _LIBCPP_ASSERT(__n == 0 || __s != nullptr, "basic_string(const char*, n, allocator) detected nullptr");
     __init(__s, __n);
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
 }
 
@@ -1931,7 +1950,8 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(const basic_string& __st
                                   __str.__get_long_size());
 
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
 }
 
@@ -1946,7 +1966,8 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(
         __init_copy_ctor_external(_VSTD::__to_address(__str.__get_long_pointer()),
                                   __str.__get_long_size());
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
 }
 
@@ -1983,9 +2004,11 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(basic_string&& __str)
 {
     __str.__zero();
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
-    if (__is_long())
-        __get_db()->swap(this, &__str);
+    if (!__libcpp_is_constant_evaluated()) {
+        __get_db()->__insert_c(this);
+        if (__is_long())
+            __get_db()->swap(this, &__str);
+    }
 #endif
 }
 
@@ -2002,9 +2025,11 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(basic_string&& __str, co
         __str.__zero();
     }
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
-    if (__is_long())
-        __get_db()->swap(this, &__str);
+    if (!__libcpp_is_constant_evaluated()) {
+        __get_db()->__insert_c(this);
+        if (__is_long())
+            __get_db()->swap(this, &__str);
+    }
 #endif
 }
 
@@ -2041,7 +2066,8 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(size_type __n, _CharT __
 {
     __init(__n, __c);
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
 }
 
@@ -2052,7 +2078,8 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(size_type __n, _CharT __
 {
     __init(__n, __c);
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
 }
 
@@ -2067,7 +2094,8 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(const basic_string& __st
         this->__throw_out_of_range();
     __init(__str.data() + __pos, _VSTD::min(__n, __str_sz - __pos));
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
 }
 
@@ -2082,7 +2110,8 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(const basic_string& __st
         this->__throw_out_of_range();
     __init(__str.data() + __pos, __str_sz - __pos);
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
 }
 
@@ -2096,7 +2125,8 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(
     __self_view __sv = __sv0.substr(__pos, __n);
     __init(__sv.data(), __sv.size());
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
 }
 
@@ -2108,7 +2138,8 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(const _Tp & __t)
     __self_view __sv = __t;
     __init(__sv.data(), __sv.size());
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
 }
 
@@ -2120,13 +2151,14 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(const _Tp & __t, const _
     __self_view __sv = __t;
     __init(__sv.data(), __sv.size());
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
 }
 
 template <class _CharT, class _Traits, class _Allocator>
 template <class _InputIterator>
-_EnableIf
+__enable_if_t
 <
     __is_exactly_cpp17_input_iterator<_InputIterator>::value
 >
@@ -2152,7 +2184,7 @@ basic_string<_CharT, _Traits, _Allocator>::__init(_InputIterator __first, _Input
 
 template <class _CharT, class _Traits, class _Allocator>
 template <class _ForwardIterator>
-_EnableIf
+__enable_if_t
 <
     __is_cpp17_forward_iterator<_ForwardIterator>::value
 >
@@ -2175,9 +2207,23 @@ basic_string<_CharT, _Traits, _Allocator>::__init(_ForwardIterator __first, _For
         __set_long_cap(__cap+1);
         __set_long_size(__sz);
     }
+
+#ifndef _LIBCPP_NO_EXCEPTIONS
+    try
+    {
+#endif  // _LIBCPP_NO_EXCEPTIONS
     for (; __first != __last; ++__first, (void) ++__p)
         traits_type::assign(*__p, *__first);
     traits_type::assign(*__p, value_type());
+#ifndef _LIBCPP_NO_EXCEPTIONS
+    }
+    catch (...)
+    {
+        if (__is_long())
+            __alloc_traits::deallocate(__alloc(), __get_long_pointer(), __get_long_cap());
+        throw;
+    }
+#endif  // _LIBCPP_NO_EXCEPTIONS
 }
 
 template <class _CharT, class _Traits, class _Allocator>
@@ -2188,7 +2234,8 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(_InputIterator __first, 
 {
     __init(__first, __last);
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
 }
 
@@ -2201,7 +2248,8 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(_InputIterator __first, 
 {
     __init(__first, __last);
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
 }
 
@@ -2215,7 +2263,8 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(
 {
     __init(__il.begin(), __il.end());
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
 }
 
@@ -2228,7 +2277,8 @@ basic_string<_CharT, _Traits, _Allocator>::basic_string(
 {
     __init(__il.begin(), __il.end());
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__insert_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__insert_c(this);
 #endif
 }
 
@@ -2238,7 +2288,8 @@ template <class _CharT, class _Traits, class _Allocator>
 basic_string<_CharT, _Traits, _Allocator>::~basic_string()
 {
 #if _LIBCPP_DEBUG_LEVEL == 2
-    __get_db()->__erase_c(this);
+    if (!__libcpp_is_constant_evaluated())
+        __get_db()->__erase_c(this);
 #endif
     if (__is_long())
         __alloc_traits::deallocate(__alloc(), __get_long_pointer(), __get_long_cap());
@@ -2334,14 +2385,12 @@ basic_string<_CharT, _Traits, _Allocator>::__assign_external(
   if (__cap >= __n) {
     value_type* __p = _VSTD::__to_address(__get_pointer());
     traits_type::move(__p, __s, __n);
-    traits_type::assign(__p[__n], value_type());
-    __set_size(__n);
-    __invalidate_iterators_past(__n);
+    return __null_terminate_at(__p, __n);
   } else {
     size_type __sz = size();
     __grow_by_and_replace(__cap, __n - __cap, __sz, 0, __sz, __n, __s);
+    return *this;
   }
-  return *this;
 }
 
 template <class _CharT, class _Traits, class _Allocator>
@@ -2349,7 +2398,7 @@ basic_string<_CharT, _Traits, _Allocator>&
 basic_string<_CharT, _Traits, _Allocator>::assign(const value_type* __s, size_type __n)
 {
     _LIBCPP_ASSERT(__n == 0 || __s != nullptr, "string::assign received nullptr");
-    return (_LIBCPP_BUILTIN_CONSTANT_P(__n) && __n < __min_cap)
+    return (__builtin_constant_p(__n) && __n < __min_cap)
                ? __assign_short(__s, __n)
                : __assign_external(__s, __n);
 }
@@ -2364,13 +2413,9 @@ basic_string<_CharT, _Traits, _Allocator>::assign(size_type __n, value_type __c)
         size_type __sz = size();
         __grow_by(__cap, __n - __cap, __sz, 0, __sz);
     }
-    else
-        __invalidate_iterators_past(__n);
     value_type* __p = _VSTD::__to_address(__get_pointer());
     traits_type::assign(__p, __n, __c);
-    traits_type::assign(__p[__n], value_type());
-    __set_size(__n);
-    return *this;
+    return __null_terminate_at(__p, __n);
 }
 
 template <class _CharT, class _Traits, class _Allocator>
@@ -2468,10 +2513,9 @@ basic_string<_CharT, _Traits, _Allocator>::operator=(basic_string&& __str)
 
 template <class _CharT, class _Traits, class _Allocator>
 template<class _InputIterator>
-_EnableIf
+__enable_if_t
 <
-     __is_exactly_cpp17_input_iterator <_InputIterator>::value
-          || !__libcpp_string_gets_noexcept_iterator<_InputIterator>::value,
+     __is_exactly_cpp17_input_iterator<_InputIterator>::value,
     basic_string<_CharT, _Traits, _Allocator>&
 >
 basic_string<_CharT, _Traits, _Allocator>::assign(_InputIterator __first, _InputIterator __last)
@@ -2483,28 +2527,37 @@ basic_string<_CharT, _Traits, _Allocator>::assign(_InputIterator __first, _Input
 
 template <class _CharT, class _Traits, class _Allocator>
 template<class _ForwardIterator>
-_EnableIf
+__enable_if_t
 <
-    __is_cpp17_forward_iterator<_ForwardIterator>::value
-         && __libcpp_string_gets_noexcept_iterator<_ForwardIterator>::value,
+    __is_cpp17_forward_iterator<_ForwardIterator>::value,
     basic_string<_CharT, _Traits, _Allocator>&
 >
 basic_string<_CharT, _Traits, _Allocator>::assign(_ForwardIterator __first, _ForwardIterator __last)
 {
-    size_type __n = static_cast<size_type>(_VSTD::distance(__first, __last));
     size_type __cap = capacity();
-    if (__cap < __n)
+    size_type __n = __string_is_trivial_iterator<_ForwardIterator>::value ?
+        static_cast<size_type>(_VSTD::distance(__first, __last)) : 0;
+
+    if (__string_is_trivial_iterator<_ForwardIterator>::value &&
+        (__cap >= __n || !__addr_in_range(*__first)))
     {
-        size_type __sz = size();
-        __grow_by(__cap, __n - __cap, __sz, 0, __sz);
+        if (__cap < __n)
+        {
+            size_type __sz = size();
+            __grow_by(__cap, __n - __cap, __sz, 0, __sz);
+        }
+        pointer __p = __get_pointer();
+        for (; __first != __last; ++__p, (void) ++__first)
+            traits_type::assign(*__p, *__first);
+        traits_type::assign(*__p, value_type());
+        __set_size(__n);
+        __invalidate_iterators_past(__n);
     }
     else
-        __invalidate_iterators_past(__n);
-    pointer __p = __get_pointer();
-    for (; __first != __last; ++__first, ++__p)
-        traits_type::assign(*__p, *__first);
-    traits_type::assign(*__p, value_type());
-    __set_size(__n);
+    {
+        const basic_string __temp(__first, __last, __alloc());
+        assign(__temp.data(), __temp.size());
+    }
     return *this;
 }
 
@@ -2520,7 +2573,7 @@ basic_string<_CharT, _Traits, _Allocator>::assign(const basic_string& __str, siz
 
 template <class _CharT, class _Traits, class _Allocator>
 template <class _Tp>
-_EnableIf
+__enable_if_t
 <
     __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value
     && !__is_same_uncvref<_Tp, basic_string<_CharT, _Traits, _Allocator> >::value,
@@ -2547,7 +2600,7 @@ basic_string<_CharT, _Traits, _Allocator>&
 basic_string<_CharT, _Traits, _Allocator>::assign(const value_type* __s)
 {
     _LIBCPP_ASSERT(__s != nullptr, "string::assign received nullptr");
-    return _LIBCPP_BUILTIN_CONSTANT_P(*__s)
+    return __builtin_constant_p(*__s)
                ? (traits_type::length(__s) < __min_cap
                       ? __assign_short(__s, traits_type::length(__s))
                       : __assign_external(__s, traits_type::length(__s)))
@@ -2634,7 +2687,7 @@ basic_string<_CharT, _Traits, _Allocator>::push_back(value_type __c)
     if (__sz == __cap)
     {
         __grow_by(__cap, 1, __sz, __sz, 0);
-        __is_short = !__is_long();
+        __is_short = false; // the string is always long after __grow_by
     }
     pointer __p;
     if (__is_short)
@@ -2651,47 +2704,36 @@ basic_string<_CharT, _Traits, _Allocator>::push_back(value_type __c)
     traits_type::assign(*++__p, value_type());
 }
 
-template <class _Tp>
-bool __ptr_in_range (const _Tp* __p, const _Tp* __first, const _Tp* __last)
-{
-    return __first <= __p && __p < __last;
-}
-
-template <class _Tp1, class _Tp2>
-bool __ptr_in_range (const _Tp1*, const _Tp2*, const _Tp2*)
-{
-    return false;
-}
-
 template <class _CharT, class _Traits, class _Allocator>
 template<class _ForwardIterator>
-basic_string<_CharT, _Traits, _Allocator>&
-basic_string<_CharT, _Traits, _Allocator>::__append_forward_unsafe(
+__enable_if_t
+<
+    __is_cpp17_forward_iterator<_ForwardIterator>::value,
+    basic_string<_CharT, _Traits, _Allocator>&
+>
+basic_string<_CharT, _Traits, _Allocator>::append(
     _ForwardIterator __first, _ForwardIterator __last)
 {
-    static_assert(__is_cpp17_forward_iterator<_ForwardIterator>::value,
-                  "function requires a ForwardIterator");
     size_type __sz = size();
     size_type __cap = capacity();
     size_type __n = static_cast<size_type>(_VSTD::distance(__first, __last));
     if (__n)
     {
-        typedef typename iterator_traits<_ForwardIterator>::reference _CharRef;
-        _CharRef __tmp_ref = *__first;
-        if (__ptr_in_range(_VSTD::addressof(__tmp_ref), data(), data() + size()))
-        {
-            const basic_string __temp (__first, __last, __alloc());
-            append(__temp.data(), __temp.size());
-        }
-        else
+        if (__string_is_trivial_iterator<_ForwardIterator>::value &&
+            !__addr_in_range(*__first))
         {
             if (__cap - __sz < __n)
                 __grow_by(__cap, __sz + __n - __cap, __sz, __sz, 0);
             pointer __p = __get_pointer() + __sz;
-            for (; __first != __last; ++__p, ++__first)
+            for (; __first != __last; ++__p, (void) ++__first)
                 traits_type::assign(*__p, *__first);
             traits_type::assign(*__p, value_type());
             __set_size(__sz + __n);
+        }
+        else
+        {
+            const basic_string __temp(__first, __last, __alloc());
+            append(__temp.data(), __temp.size());
         }
     }
     return *this;
@@ -2717,7 +2759,7 @@ basic_string<_CharT, _Traits, _Allocator>::append(const basic_string& __str, siz
 
 template <class _CharT, class _Traits, class _Allocator>
 template <class _Tp>
-    _EnableIf
+    __enable_if_t
     <
         __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value  && !__is_same_uncvref<_Tp, basic_string<_CharT, _Traits, _Allocator> >::value,
         basic_string<_CharT, _Traits, _Allocator>&
@@ -2806,70 +2848,66 @@ basic_string<_CharT, _Traits, _Allocator>::insert(size_type __pos, size_type __n
 
 template <class _CharT, class _Traits, class _Allocator>
 template<class _InputIterator>
-_EnableIf
+__enable_if_t
 <
-   __is_exactly_cpp17_input_iterator<_InputIterator>::value
-        || !__libcpp_string_gets_noexcept_iterator<_InputIterator>::value,
+   __is_exactly_cpp17_input_iterator<_InputIterator>::value,
    typename basic_string<_CharT, _Traits, _Allocator>::iterator
 >
 basic_string<_CharT, _Traits, _Allocator>::insert(const_iterator __pos, _InputIterator __first, _InputIterator __last)
 {
-#if _LIBCPP_DEBUG_LEVEL == 2
-    _LIBCPP_ASSERT(__get_const_db()->__find_c_from_i(&__pos) == this,
-        "string::insert(iterator, range) called with an iterator not"
-        " referring to this string");
-#endif
-    const basic_string __temp(__first, __last, __alloc());
-    return insert(__pos, __temp.data(), __temp.data() + __temp.size());
+  _LIBCPP_DEBUG_ASSERT(__get_const_db()->__find_c_from_i(&__pos) == this,
+                       "string::insert(iterator, range) called with an iterator not"
+                       " referring to this string");
+  const basic_string __temp(__first, __last, __alloc());
+  return insert(__pos, __temp.data(), __temp.data() + __temp.size());
 }
 
 template <class _CharT, class _Traits, class _Allocator>
 template<class _ForwardIterator>
-_EnableIf
+__enable_if_t
 <
-    __is_cpp17_forward_iterator<_ForwardIterator>::value
-        && __libcpp_string_gets_noexcept_iterator<_ForwardIterator>::value,
+    __is_cpp17_forward_iterator<_ForwardIterator>::value,
     typename basic_string<_CharT, _Traits, _Allocator>::iterator
 >
 basic_string<_CharT, _Traits, _Allocator>::insert(const_iterator __pos, _ForwardIterator __first, _ForwardIterator __last)
 {
-#if _LIBCPP_DEBUG_LEVEL == 2
-    _LIBCPP_ASSERT(__get_const_db()->__find_c_from_i(&__pos) == this,
-        "string::insert(iterator, range) called with an iterator not"
-        " referring to this string");
-#endif
+  _LIBCPP_DEBUG_ASSERT(__get_const_db()->__find_c_from_i(&__pos) == this,
+                       "string::insert(iterator, range) called with an iterator not"
+                       " referring to this string");
+
     size_type __ip = static_cast<size_type>(__pos - begin());
     size_type __n = static_cast<size_type>(_VSTD::distance(__first, __last));
     if (__n)
     {
-        typedef typename iterator_traits<_ForwardIterator>::reference _CharRef;
-        _CharRef __tmp_char = *__first;
-        if (__ptr_in_range(_VSTD::addressof(__tmp_char), data(), data() + size()))
+        if (__string_is_trivial_iterator<_ForwardIterator>::value &&
+            !__addr_in_range(*__first))
+        {
+            size_type __sz = size();
+            size_type __cap = capacity();
+            value_type* __p;
+            if (__cap - __sz >= __n)
+            {
+                __p = _VSTD::__to_address(__get_pointer());
+                size_type __n_move = __sz - __ip;
+                if (__n_move != 0)
+                    traits_type::move(__p + __ip + __n, __p + __ip, __n_move);
+            }
+            else
+            {
+                __grow_by(__cap, __sz + __n - __cap, __sz, __ip, 0, __n);
+                __p = _VSTD::__to_address(__get_long_pointer());
+            }
+            __sz += __n;
+            __set_size(__sz);
+            traits_type::assign(__p[__sz], value_type());
+            for (__p += __ip; __first != __last; ++__p, (void) ++__first)
+                traits_type::assign(*__p, *__first);
+        }
+        else
         {
             const basic_string __temp(__first, __last, __alloc());
             return insert(__pos, __temp.data(), __temp.data() + __temp.size());
         }
-
-        size_type __sz = size();
-        size_type __cap = capacity();
-        value_type* __p;
-        if (__cap - __sz >= __n)
-        {
-            __p = _VSTD::__to_address(__get_pointer());
-            size_type __n_move = __sz - __ip;
-            if (__n_move != 0)
-                traits_type::move(__p + __ip + __n, __p + __ip, __n_move);
-        }
-        else
-        {
-            __grow_by(__cap, __sz + __n - __cap, __sz, __ip, 0, __n);
-            __p = _VSTD::__to_address(__get_long_pointer());
-        }
-        __sz += __n;
-        __set_size(__sz);
-        traits_type::assign(__p[__sz], value_type());
-        for (__p += __ip; __first != __last; ++__p, ++__first)
-            traits_type::assign(*__p, *__first);
     }
     return begin() + __ip;
 }
@@ -2895,7 +2933,7 @@ basic_string<_CharT, _Traits, _Allocator>::insert(size_type __pos1, const basic_
 
 template <class _CharT, class _Traits, class _Allocator>
 template <class _Tp>
-_EnableIf
+__enable_if_t
 <
     __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value  && !__is_same_uncvref<_Tp, basic_string<_CharT, _Traits, _Allocator> >::value,
     basic_string<_CharT, _Traits, _Allocator>&
@@ -2949,14 +2987,12 @@ inline
 typename basic_string<_CharT, _Traits, _Allocator>::iterator
 basic_string<_CharT, _Traits, _Allocator>::insert(const_iterator __pos, size_type __n, value_type __c)
 {
-#if _LIBCPP_DEBUG_LEVEL == 2
-    _LIBCPP_ASSERT(__get_const_db()->__find_c_from_i(&__pos) == this,
-        "string::insert(iterator, n, value) called with an iterator not"
-        " referring to this string");
-#endif
-    difference_type __p = __pos - begin();
-    insert(static_cast<size_type>(__p), __n, __c);
-    return begin() + __p;
+  _LIBCPP_DEBUG_ASSERT(__get_const_db()->__find_c_from_i(&__pos) == this,
+                       "string::insert(iterator, n, value) called with an iterator not"
+                       " referring to this string");
+  difference_type __p = __pos - begin();
+  insert(static_cast<size_type>(__p), __n, __c);
+  return begin() + __p;
 }
 
 // replace
@@ -2984,7 +3020,7 @@ basic_string<_CharT, _Traits, _Allocator>::replace(size_type __pos, size_type __
                 {
                     traits_type::move(__p + __pos, __s, __n2);
                     traits_type::move(__p + __pos + __n2, __p + __pos + __n1, __n_move);
-                    goto __finish;
+                    return __null_terminate_at(__p, __sz + (__n2 - __n1));
                 }
                 if (__p + __pos < __s && __s < __p + __sz)
                 {
@@ -3003,13 +3039,7 @@ basic_string<_CharT, _Traits, _Allocator>::replace(size_type __pos, size_type __
             }
         }
         traits_type::move(__p + __pos, __s, __n2);
-__finish:
-// __sz += __n2 - __n1; in this and the below function below can cause unsigned
-// integer overflow, but this is a safe operation, so we disable the check.
-        __sz += __n2 - __n1;
-        __set_size(__sz);
-        __invalidate_iterators_past(__sz);
-        traits_type::assign(__p[__sz], value_type());
+        return __null_terminate_at(__p, __sz + (__n2 - __n1));
     }
     else
         __grow_by_and_replace(__cap, __sz - __n1 + __n2 - __cap, __sz, __pos, __n1, __n2, __s);
@@ -3019,7 +3049,6 @@ __finish:
 template <class _CharT, class _Traits, class _Allocator>
 basic_string<_CharT, _Traits, _Allocator>&
 basic_string<_CharT, _Traits, _Allocator>::replace(size_type __pos, size_type __n1, size_type __n2, value_type __c)
-    _LIBCPP_DISABLE_UBSAN_UNSIGNED_INTEGER_CHECK
 {
     size_type __sz = size();
     if (__pos > __sz)
@@ -3043,16 +3072,12 @@ basic_string<_CharT, _Traits, _Allocator>::replace(size_type __pos, size_type __
         __p = _VSTD::__to_address(__get_long_pointer());
     }
     traits_type::assign(__p + __pos, __n2, __c);
-    __sz += __n2 - __n1;
-    __set_size(__sz);
-    __invalidate_iterators_past(__sz);
-    traits_type::assign(__p[__sz], value_type());
-    return *this;
+    return __null_terminate_at(__p, __sz - (__n1 - __n2));
 }
 
 template <class _CharT, class _Traits, class _Allocator>
 template<class _InputIterator>
-_EnableIf
+__enable_if_t
 <
     __is_cpp17_input_iterator<_InputIterator>::value,
     basic_string<_CharT, _Traits, _Allocator>&
@@ -3085,7 +3110,7 @@ basic_string<_CharT, _Traits, _Allocator>::replace(size_type __pos1, size_type _
 
 template <class _CharT, class _Traits, class _Allocator>
 template <class _Tp>
-_EnableIf
+__enable_if_t
 <
     __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value && !__is_same_uncvref<_Tp, basic_string<_CharT, _Traits, _Allocator> >::value,
     basic_string<_CharT, _Traits, _Allocator>&
@@ -3158,10 +3183,7 @@ basic_string<_CharT, _Traits, _Allocator>::__erase_external_with_move(
         size_type __n_move = __sz - __pos - __n;
         if (__n_move != 0)
             traits_type::move(__p + __pos, __p + __pos + __n, __n_move);
-        __sz -= __n;
-        __set_size(__sz);
-        __invalidate_iterators_past(__sz);
-        traits_type::assign(__p[__sz], value_type());
+        __null_terminate_at(__p, __sz - __n);
     }
 }
 
@@ -3183,17 +3205,15 @@ inline
 typename basic_string<_CharT, _Traits, _Allocator>::iterator
 basic_string<_CharT, _Traits, _Allocator>::erase(const_iterator __pos)
 {
-#if _LIBCPP_DEBUG_LEVEL == 2
-    _LIBCPP_ASSERT(__get_const_db()->__find_c_from_i(&__pos) == this,
-        "string::erase(iterator) called with an iterator not"
-        " referring to this string");
-#endif
-    _LIBCPP_ASSERT(__pos != end(),
-        "string::erase(iterator) called with a non-dereferenceable iterator");
-    iterator __b = begin();
-    size_type __r = static_cast<size_type>(__pos - __b);
-    erase(__r, 1);
-    return __b + static_cast<difference_type>(__r);
+  _LIBCPP_DEBUG_ASSERT(__get_const_db()->__find_c_from_i(&__pos) == this,
+                       "string::erase(iterator) called with an iterator not"
+                       " referring to this string");
+
+  _LIBCPP_ASSERT(__pos != end(), "string::erase(iterator) called with a non-dereferenceable iterator");
+  iterator __b = begin();
+  size_type __r = static_cast<size_type>(__pos - __b);
+  erase(__r, 1);
+  return __b + static_cast<difference_type>(__r);
 }
 
 template <class _CharT, class _Traits, class _Allocator>
@@ -3201,16 +3221,15 @@ inline
 typename basic_string<_CharT, _Traits, _Allocator>::iterator
 basic_string<_CharT, _Traits, _Allocator>::erase(const_iterator __first, const_iterator __last)
 {
-#if _LIBCPP_DEBUG_LEVEL == 2
-    _LIBCPP_ASSERT(__get_const_db()->__find_c_from_i(&__first) == this,
-        "string::erase(iterator,  iterator) called with an iterator not"
-        " referring to this string");
-#endif
-    _LIBCPP_ASSERT(__first <= __last, "string::erase(first, last) called with invalid range");
-    iterator __b = begin();
-    size_type __r = static_cast<size_type>(__first - __b);
-    erase(__r, static_cast<size_type>(__last - __first));
-    return __b + static_cast<difference_type>(__r);
+  _LIBCPP_DEBUG_ASSERT(__get_const_db()->__find_c_from_i(&__first) == this,
+                       "string::erase(iterator,  iterator) called with an iterator not"
+                       " referring to this string");
+
+  _LIBCPP_ASSERT(__first <= __last, "string::erase(first, last) called with invalid range");
+  iterator __b = begin();
+  size_type __r = static_cast<size_type>(__first - __b);
+  erase(__r, static_cast<size_type>(__last - __first));
+  return __b + static_cast<difference_type>(__r);
 }
 
 template <class _CharT, class _Traits, class _Allocator>
@@ -3219,20 +3238,7 @@ void
 basic_string<_CharT, _Traits, _Allocator>::pop_back()
 {
     _LIBCPP_ASSERT(!empty(), "string::pop_back(): string is already empty");
-    size_type __sz;
-    if (__is_long())
-    {
-        __sz = __get_long_size() - 1;
-        __set_long_size(__sz);
-        traits_type::assign(*(__get_long_pointer() + __sz), value_type());
-    }
-    else
-    {
-        __sz = __get_short_size() - 1;
-        __set_short_size(__sz);
-        traits_type::assign(*(__get_short_pointer() + __sz), value_type());
-    }
-    __invalidate_iterators_past(__sz);
+    __erase_to_end(size() - 1);
 }
 
 template <class _CharT, class _Traits, class _Allocator>
@@ -3258,17 +3264,7 @@ inline
 void
 basic_string<_CharT, _Traits, _Allocator>::__erase_to_end(size_type __pos)
 {
-    if (__is_long())
-    {
-        traits_type::assign(*(__get_long_pointer() + __pos), value_type());
-        __set_long_size(__pos);
-    }
-    else
-    {
-        traits_type::assign(*(__get_short_pointer() + __pos), value_type());
-        __set_short_size(__pos);
-    }
-    __invalidate_iterators_past(__pos);
+  __null_terminate_at(_VSTD::__to_address(__get_pointer()), __pos);
 }
 
 template <class _CharT, class _Traits, class _Allocator>
@@ -3326,6 +3322,7 @@ basic_string<_CharT, _Traits, _Allocator>::reserve(size_type __requested_capacit
 }
 
 template <class _CharT, class _Traits, class _Allocator>
+inline
 void
 basic_string<_CharT, _Traits, _Allocator>::shrink_to_fit() _NOEXCEPT
 {
@@ -3336,6 +3333,7 @@ basic_string<_CharT, _Traits, _Allocator>::shrink_to_fit() _NOEXCEPT
 }
 
 template <class _CharT, class _Traits, class _Allocator>
+inline
 void
 basic_string<_CharT, _Traits, _Allocator>::__shrink_or_extend(size_type __target_capacity)
 {
@@ -3496,11 +3494,13 @@ basic_string<_CharT, _Traits, _Allocator>::swap(basic_string& __str)
 #endif
 {
 #if _LIBCPP_DEBUG_LEVEL == 2
-    if (!__is_long())
-        __get_db()->__invalidate_all(this);
-    if (!__str.__is_long())
-        __get_db()->__invalidate_all(&__str);
-    __get_db()->swap(this, &__str);
+    if (!__libcpp_is_constant_evaluated()) {
+        if (!__is_long())
+            __get_db()->__invalidate_all(this);
+        if (!__str.__is_long())
+            __get_db()->__invalidate_all(&__str);
+        __get_db()->swap(this, &__str);
+    }
 #endif
     _LIBCPP_ASSERT(
         __alloc_traits::propagate_on_container_swap::value ||
@@ -3544,7 +3544,7 @@ basic_string<_CharT, _Traits, _Allocator>::find(const basic_string& __str,
 
 template<class _CharT, class _Traits, class _Allocator>
 template <class _Tp>
-_EnableIf
+__enable_if_t
 <
     __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
     typename basic_string<_CharT, _Traits, _Allocator>::size_type
@@ -3602,7 +3602,7 @@ basic_string<_CharT, _Traits, _Allocator>::rfind(const basic_string& __str,
 
 template<class _CharT, class _Traits, class _Allocator>
 template <class _Tp>
-_EnableIf
+__enable_if_t
 <
     __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
     typename basic_string<_CharT, _Traits, _Allocator>::size_type
@@ -3660,7 +3660,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_first_of(const basic_string& __s
 
 template<class _CharT, class _Traits, class _Allocator>
 template <class _Tp>
-_EnableIf
+__enable_if_t
 <
     __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
     typename basic_string<_CharT, _Traits, _Allocator>::size_type
@@ -3718,7 +3718,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_last_of(const basic_string& __st
 
 template<class _CharT, class _Traits, class _Allocator>
 template <class _Tp>
-_EnableIf
+__enable_if_t
 <
     __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
     typename basic_string<_CharT, _Traits, _Allocator>::size_type
@@ -3776,7 +3776,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_first_not_of(const basic_string&
 
 template<class _CharT, class _Traits, class _Allocator>
 template <class _Tp>
-_EnableIf
+__enable_if_t
 <
     __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
     typename basic_string<_CharT, _Traits, _Allocator>::size_type
@@ -3835,7 +3835,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_last_not_of(const basic_string& 
 
 template<class _CharT, class _Traits, class _Allocator>
 template <class _Tp>
-_EnableIf
+__enable_if_t
 <
     __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
     typename basic_string<_CharT, _Traits, _Allocator>::size_type
@@ -3873,7 +3873,7 @@ basic_string<_CharT, _Traits, _Allocator>::find_last_not_of(value_type __c,
 
 template <class _CharT, class _Traits, class _Allocator>
 template <class _Tp>
-_EnableIf
+__enable_if_t
 <
     __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
     int
@@ -3927,7 +3927,7 @@ basic_string<_CharT, _Traits, _Allocator>::compare(size_type __pos1,
 
 template <class _CharT, class _Traits, class _Allocator>
 template <class _Tp>
-_EnableIf
+__enable_if_t
 <
     __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value,
     int
@@ -3952,7 +3952,7 @@ basic_string<_CharT, _Traits, _Allocator>::compare(size_type __pos1,
 
 template <class _CharT, class _Traits, class _Allocator>
 template <class _Tp>
-_EnableIf
+__enable_if_t
 <
     __can_be_converted_to_string_view<_CharT, _Traits, _Tp>::value
     && !__is_same_uncvref<_Tp, basic_string<_CharT, _Traits, _Allocator> >::value,
@@ -4390,6 +4390,7 @@ _LIBCPP_FUNC_VIS string to_string(float __val);
 _LIBCPP_FUNC_VIS string to_string(double __val);
 _LIBCPP_FUNC_VIS string to_string(long double __val);
 
+#ifndef _LIBCPP_HAS_NO_WIDE_CHARACTERS
 _LIBCPP_FUNC_VIS int                stoi  (const wstring& __str, size_t* __idx = nullptr, int __base = 10);
 _LIBCPP_FUNC_VIS long               stol  (const wstring& __str, size_t* __idx = nullptr, int __base = 10);
 _LIBCPP_FUNC_VIS unsigned long      stoul (const wstring& __str, size_t* __idx = nullptr, int __base = 10);
@@ -4409,6 +4410,7 @@ _LIBCPP_FUNC_VIS wstring to_wstring(unsigned long long __val);
 _LIBCPP_FUNC_VIS wstring to_wstring(float __val);
 _LIBCPP_FUNC_VIS wstring to_wstring(double __val);
 _LIBCPP_FUNC_VIS wstring to_wstring(long double __val);
+#endif // _LIBCPP_HAS_NO_WIDE_CHARACTERS
 
 template<class _CharT, class _Traits, class _Allocator>
 _LIBCPP_TEMPLATE_DATA_VIS
@@ -4448,8 +4450,6 @@ basic_istream<_CharT, _Traits>&
 getline(basic_istream<_CharT, _Traits>& __is,
         basic_string<_CharT, _Traits, _Allocator>& __str);
 
-#ifndef _LIBCPP_CXX03_LANG
-
 template<class _CharT, class _Traits, class _Allocator>
 inline _LIBCPP_INLINE_VISIBILITY
 basic_istream<_CharT, _Traits>&
@@ -4461,8 +4461,6 @@ inline _LIBCPP_INLINE_VISIBILITY
 basic_istream<_CharT, _Traits>&
 getline(basic_istream<_CharT, _Traits>&& __is,
         basic_string<_CharT, _Traits, _Allocator>& __str);
-
-#endif // _LIBCPP_CXX03_LANG
 
 #if _LIBCPP_STD_VER > 17
 template <class _CharT, class _Traits, class _Allocator, class _Up>
@@ -4534,11 +4532,13 @@ inline namespace literals
         return basic_string<char> (__str, __len);
     }
 
+#ifndef _LIBCPP_HAS_NO_WIDE_CHARACTERS
     inline _LIBCPP_INLINE_VISIBILITY
     basic_string<wchar_t> operator "" s( const wchar_t *__str, size_t __len )
     {
         return basic_string<wchar_t> (__str, __len);
     }
+#endif
 
 #ifndef _LIBCPP_HAS_NO_CHAR8_T
     inline _LIBCPP_INLINE_VISIBILITY
@@ -4559,8 +4559,8 @@ inline namespace literals
     {
         return basic_string<char32_t> (__str, __len);
     }
-  }
-}
+  } // namespace string_literals
+} // namespace literals
 #endif
 
 _LIBCPP_END_NAMESPACE_STD

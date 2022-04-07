@@ -173,6 +173,7 @@ size_t SBThread::GetStopReasonDataCount() {
         case eStopReasonThreadExiting:
         case eStopReasonInstrumentation:
         case eStopReasonProcessorTrace:
+        case eStopReasonVForkDone:
           // There is no data for these stop reasons.
           return 0;
 
@@ -194,6 +195,12 @@ size_t SBThread::GetStopReasonDataCount() {
           return 1;
 
         case eStopReasonException:
+          return 1;
+
+        case eStopReasonFork:
+          return 1;
+
+        case eStopReasonVFork:
           return 1;
         }
       }
@@ -225,6 +232,7 @@ uint64_t SBThread::GetStopReasonDataAtIndex(uint32_t idx) {
         case eStopReasonThreadExiting:
         case eStopReasonInstrumentation:
         case eStopReasonProcessorTrace:
+        case eStopReasonVForkDone:
           // There is no data for these stop reasons.
           return 0;
 
@@ -257,6 +265,12 @@ uint64_t SBThread::GetStopReasonDataAtIndex(uint32_t idx) {
           return stop_info_sp->GetValue();
 
         case eStopReasonException:
+          return stop_info_sp->GetValue();
+
+        case eStopReasonFork:
+          return stop_info_sp->GetValue();
+
+        case eStopReasonVFork:
           return stop_info_sp->GetValue();
         }
       }
@@ -499,10 +513,10 @@ SBError SBThread::ResumeNewPlan(ExecutionContext &exe_ctx,
     return sb_error;
   }
 
-  // User level plans should be Master Plans so they can be interrupted, other
-  // plans executed, and then a "continue" will resume the plan.
+  // User level plans should be Controlling Plans so they can be interrupted,
+  // other plans executed, and then a "continue" will resume the plan.
   if (new_plan != nullptr) {
-    new_plan->SetIsMasterPlan(true);
+    new_plan->SetIsControllingPlan(true);
     new_plan->SetOkayToDiscard(false);
   }
 
@@ -843,12 +857,13 @@ SBError SBThread::StepOverUntil(lldb::SBFrame &sb_frame,
     std::vector<addr_t> step_over_until_addrs;
     const bool abort_other_plans = false;
     const bool stop_other_threads = false;
-    const bool check_inlines = true;
-    const bool exact = false;
+    // TODO: Handle SourceLocationSpec column information
+    SourceLocationSpec location_spec(
+        step_file_spec, line, /*column=*/llvm::None, /*check_inlines=*/true,
+        /*exact_match=*/false);
 
     SymbolContextList sc_list;
-    frame_sc.comp_unit->ResolveSymbolContext(step_file_spec, line,
-                                             check_inlines, exact,
+    frame_sc.comp_unit->ResolveSymbolContext(location_spec,
                                              eSymbolContextLineEntry, sc_list);
     const uint32_t num_matches = sc_list.GetSize();
     if (num_matches > 0) {

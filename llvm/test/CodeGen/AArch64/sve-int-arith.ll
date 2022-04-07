@@ -45,6 +45,16 @@ define <vscale x 16 x i8> @add_i8_zero(<vscale x 16 x i8> %a) {
   ret <vscale x 16 x i8> %res
 }
 
+define <vscale x 1 x i32> @add_nxv1i32(<vscale x 1 x i32> %a, <vscale x 1 x i32> %b) {
+; CHECK-LABEL: add_nxv1i32:
+; CHECK:       // %bb.0: // %entry
+; CHECK-NEXT:    add z0.s, z0.s, z1.s
+; CHECK-NEXT:    ret
+entry:
+  %c = add <vscale x 1 x i32> %a, %b
+  ret <vscale x 1 x i32> %c
+}
+
 define <vscale x 2 x i64> @sub_i64(<vscale x 2 x i64> %a, <vscale x 2 x i64> %b) {
 ; CHECK-LABEL: sub_i64:
 ; CHECK:       // %bb.0:
@@ -155,9 +165,9 @@ define <vscale x 8 x i64> @abs_nxv8i64(<vscale x 8 x i64> %a) {
 ; CHECK-LABEL: abs_nxv8i64:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    ptrue p0.d
+; CHECK-NEXT:    abs z2.d, p0/m, z2.d
 ; CHECK-NEXT:    abs z0.d, p0/m, z0.d
 ; CHECK-NEXT:    abs z1.d, p0/m, z1.d
-; CHECK-NEXT:    abs z2.d, p0/m, z2.d
 ; CHECK-NEXT:    abs z3.d, p0/m, z3.d
 ; CHECK-NEXT:    ret
   %res = call <vscale x 8 x i64> @llvm.abs.nxv8i64(<vscale x 8 x i64> %a, i1 false)

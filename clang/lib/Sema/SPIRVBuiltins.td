@@ -35,10 +35,10 @@ class AddressSpace<string _AS> {
 // the one it will be lowered to.
 // This file assumes it will get lowered to generic or private.
 def DefaultAS    : AddressSpace<"clang::LangAS::Default">;
-def PrivateAS    : AddressSpace<"clang::LangAS::opencl_private">;
-def GlobalAS     : AddressSpace<"clang::LangAS::opencl_global">;
+def PrivateAS    : AddressSpace<"clang::LangAS::sycl_private">;
+def GlobalAS     : AddressSpace<"clang::LangAS::sycl_global">;
 def ConstantAS   : AddressSpace<"clang::LangAS::opencl_constant">;
-def LocalAS      : AddressSpace<"clang::LangAS::opencl_local">;
+def LocalAS      : AddressSpace<"clang::LangAS::sycl_local">;
 def GenericAS    : AddressSpace<"clang::LangAS::opencl_generic">;
 
 // TODO: Manage capabilities. Unused for now.
@@ -721,12 +721,6 @@ foreach VSize1 = [Vec2, Vec4, Vec8, Vec16] in {
 }
 
 // 2.8. Misc instructions
-
-let IsVariadic = 1 in {
-  foreach name = ["printf"] in {
-    def : OCLSPVBuiltin<name, [Int, PointerType<ConstType<TrueChar>, ConstantAS>]>;
-  }
-}
 
 foreach name = ["prefetch"] in {
   def : OCLSPVBuiltin<name, [Void, PointerType<ConstType<AGenTypeN>, GlobalAS>, Size]>;

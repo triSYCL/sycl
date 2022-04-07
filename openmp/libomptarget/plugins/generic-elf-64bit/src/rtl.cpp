@@ -41,7 +41,7 @@
 
 /// Array of Dynamic libraries loaded for this target.
 struct DynLibTy {
-  char *FileName;
+  std::string FileName;
   void *Handle;
 };
 
@@ -100,7 +100,7 @@ public:
     for (auto &lib : DynLibs) {
       if (lib.Handle) {
         dlclose(lib.Handle);
-        remove(lib.FileName);
+        remove(lib.FileName.c_str());
       }
     }
   }
@@ -335,6 +335,3 @@ int32_t __tgt_rtl_run_target_region(int32_t device_id, void *tgt_entry_ptr,
 #ifdef __cplusplus
 }
 #endif
-
-// Elf-64 plugin's internal InfoLevel.
-std::atomic<uint32_t> InfoLevel;

@@ -269,8 +269,10 @@ void Sema::ActOnPragmaOptionsAlign(PragmaOptionsAlignKind Kind,
   AlignPackStack.Act(PragmaLoc, Action, StringRef(), Info);
 }
 
-void Sema::ActOnPragmaClangSection(SourceLocation PragmaLoc, PragmaClangSectionAction Action,
-                                   PragmaClangSectionKind SecKind, StringRef SecName) {
+void Sema::ActOnPragmaClangSection(SourceLocation PragmaLoc,
+                                   PragmaClangSectionAction Action,
+                                   PragmaClangSectionKind SecKind,
+                                   StringRef SecName) {
   PragmaClangSection *CSec;
   int SectionFlags = ASTContext::PSF_Read;
   switch (SecKind) {
@@ -301,8 +303,7 @@ void Sema::ActOnPragmaClangSection(SourceLocation PragmaLoc, PragmaClangSectionA
     return;
   }
 
-  if (llvm::Error E =
-          Context.getTargetInfo().isValidSectionSpecifier(SecName)) {
+  if (llvm::Error E = isValidSectionSpecifier(SecName)) {
     Diag(PragmaLoc, diag::err_pragma_section_invalid_for_target)
         << toString(std::move(E));
     CSec->Valid = false;
@@ -339,7 +340,7 @@ void Sema::ActOnPragmaPack(SourceLocation PragmaLoc, PragmaMsStackAction Action,
 
     // pack(0) is like pack(), which just works out since that is what
     // we use 0 for in PackAttr.
-    if (Alignment->isTypeDependent() || Alignment->isValueDependent() || !Val ||
+    if (Alignment->isTypeDependent() || !Val ||
         !(*Val == 0 || Val->isPowerOf2()) || Val->getZExtValue() > 16) {
       Diag(PragmaLoc, diag::warn_pragma_pack_invalid_alignment);
       return; // Ignore
@@ -474,8 +475,9 @@ void Sema::ActOnPragmaFloatControl(SourceLocation Loc,
                                    PragmaFloatControlKind Value) {
   FPOptionsOverride NewFPFeatures = CurFPFeatureOverrides();
   if ((Action == PSK_Push_Set || Action == PSK_Push || Action == PSK_Pop) &&
-      !(CurContext->isTranslationUnit()) && !CurContext->isNamespace()) {
-    // Push and pop can only occur at file or namespace scope.
+      !CurContext->getRedeclContext()->isFileContext()) {
+    // Push and pop can only occur at file or namespace scope, or within a
+    // language linkage declaration.
     Diag(Loc, diag::err_pragma_fc_pp_scope);
     return;
   }
@@ -790,7 +792,7 @@ attrMatcherRuleListToString(ArrayRef<attr::SubjectMatchRule> Rules) {
       OS << (I.index() == Rules.size() - 1 ? ", and " : ", ");
     OS << "'" << attr::getSubjectMatchRuleSpelling(I.value()) << "'";
   }
-  return OS.str();
+  return Result;
 }
 
 } // end anonymous namespace

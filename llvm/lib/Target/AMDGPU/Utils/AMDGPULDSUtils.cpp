@@ -11,8 +11,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPULDSUtils.h"
+#include "AMDGPU.h"
 #include "Utils/AMDGPUBaseInfo.h"
+#include "llvm/ADT/DepthFirstIterator.h"
+#include "llvm/ADT/SetVector.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/IR/ReplaceConstant.h"
 
 using namespace llvm;
 
@@ -20,7 +24,7 @@ namespace llvm {
 
 namespace AMDGPU {
 
-bool isKernelCC(Function *Func) {
+bool isKernelCC(const Function *Func) {
   return AMDGPU::isModuleEntryFunctionCC(Func->getCallingConv());
 }
 
@@ -29,52 +33,81 @@ Align getAlign(DataLayout const &DL, const GlobalVariable *GV) {
                                        GV->getValueType());
 }
 
-bool userRequiresLowering(const SmallPtrSetImpl<GlobalValue *> &UsedList,
-                          User *InitialUser) {
-  // Any LDS variable can be lowered by moving into the created struct
-  // Each variable so lowered is allocated in every kernel, so variables
-  // whose users are all known to be safe to lower without the transform
-  // are left unchanged.
-  SmallPtrSet<User *, 8> Visited;
-  SmallVector<User *, 16> Stack;
-  Stack.push_back(InitialUser);
+static void collectFunctionUses(User *U, const Function *F,
+                                SetVector<Instruction *> &InstUsers) {
+  SmallVector<User *> Stack{U};
 
   while (!Stack.empty()) {
-    User *V = Stack.pop_back_val();
+    U = Stack.pop_back_val();
+
+    if (auto *I = dyn_cast<Instruction>(U)) {
+      if (I->getFunction() == F)
+        InstUsers.insert(I);
+      continue;
+    }
+
+    if (!isa<ConstantExpr>(U))
+      continue;
+
+    append_range(Stack, U->users());
+  }
+}
+
+void replaceConstantUsesInFunction(ConstantExpr *C, const Function *F) {
+  SetVector<Instruction *> InstUsers;
+
+  collectFunctionUses(C, F, InstUsers);
+  for (Instruction *I : InstUsers) {
+    convertConstantExprsToInstructions(I, C);
+  }
+}
+
+static bool shouldLowerLDSToStruct(const GlobalVariable &GV,
+                                   const Function *F) {
+  // We are not interested in kernel LDS lowering for module LDS itself.
+  if (F && GV.getName() == "llvm.amdgcn.module.lds")
+    return false;
+
+  bool Ret = false;
+  SmallPtrSet<const User *, 8> Visited;
+  SmallVector<const User *, 16> Stack(GV.users());
+
+  assert(!F || isKernelCC(F));
+
+  while (!Stack.empty()) {
+    const User *V = Stack.pop_back_val();
     Visited.insert(V);
 
-    if (auto *G = dyn_cast<GlobalValue>(V->stripPointerCasts())) {
-      if (UsedList.contains(G)) {
-        continue;
-      }
+    if (isa<GlobalValue>(V)) {
+      // This use of the LDS variable is the initializer of a global variable.
+      // This is ill formed. The address of an LDS variable is kernel dependent
+      // and unknown until runtime. It can't be written to a global variable.
+      continue;
     }
 
     if (auto *I = dyn_cast<Instruction>(V)) {
-      if (isKernelCC(I->getFunction())) {
-        continue;
-      }
-    }
-
-    if (auto *E = dyn_cast<ConstantExpr>(V)) {
-      for (Value::user_iterator EU = E->user_begin(); EU != E->user_end();
-           ++EU) {
-        if (Visited.insert(*EU).second) {
-          Stack.push_back(*EU);
-        }
+      const Function *UF = I->getFunction();
+      if (UF == F) {
+        // Used from this kernel, we want to put it into the structure.
+        Ret = true;
+      } else if (!F) {
+        // For module LDS lowering, lowering is required if the user instruction
+        // is from non-kernel function.
+        Ret |= !isKernelCC(UF);
       }
       continue;
     }
 
-    // Unknown user, conservatively lower the variable
-    return true;
+    // User V should be a constant, recursively visit users of V.
+    assert(isa<Constant>(V) && "Expected a constant.");
+    append_range(Stack, V->users());
   }
 
-  return false;
+  return Ret;
 }
 
-std::vector<GlobalVariable *>
-findVariablesToLower(Module &M,
-                     const SmallPtrSetImpl<GlobalValue *> &UsedList) {
+std::vector<GlobalVariable *> findVariablesToLower(Module &M,
+                                                   const Function *F) {
   std::vector<llvm::GlobalVariable *> LocalVars;
   for (auto &GV : M.globals()) {
     if (GV.getType()->getPointerAddressSpace() != AMDGPUAS::LOCAL_ADDRESS) {
@@ -88,7 +121,7 @@ findVariablesToLower(Module &M,
       continue;
     }
     if (!isa<UndefValue>(GV.getInitializer())) {
-      // Initializers are unimplemented for local address space.
+      // Initializers are unimplemented for LDS address space.
       // Leave such variables in place for consistent error reporting.
       continue;
     }
@@ -98,28 +131,12 @@ findVariablesToLower(Module &M,
       // dropped by the back end if not. This pass skips over it.
       continue;
     }
-    if (std::none_of(GV.user_begin(), GV.user_end(), [&](User *U) {
-          return userRequiresLowering(UsedList, U);
-        })) {
+    if (!shouldLowerLDSToStruct(GV, F)) {
       continue;
     }
     LocalVars.push_back(&GV);
   }
   return LocalVars;
-}
-
-SmallPtrSet<GlobalValue *, 32> getUsedList(Module &M) {
-  SmallPtrSet<GlobalValue *, 32> UsedList;
-
-  SmallVector<GlobalValue *, 32> TmpVec;
-  collectUsedGlobalVariables(M, TmpVec, true);
-  UsedList.insert(TmpVec.begin(), TmpVec.end());
-
-  TmpVec.clear();
-  collectUsedGlobalVariables(M, TmpVec, false);
-  UsedList.insert(TmpVec.begin(), TmpVec.end());
-
-  return UsedList;
 }
 
 } // end namespace AMDGPU

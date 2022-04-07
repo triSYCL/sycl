@@ -19,7 +19,6 @@ namespace driver {
 /// Based loosely on CudaInstallationDetector
 class VXXInstallationDetector {
 private:
-  const Driver &D;
   bool IsValid = false;
   std::string BinPath;
   std::string BinaryPath;
@@ -83,6 +82,25 @@ public:
                                  const llvm::opt::ArgList &Args) const;
 };
 
+class LLVM_LIBRARY_VISIBILITY SYCLPostLinkVXX : public Tool {
+public:
+  SYCLPostLinkVXX(const ToolChain &TC)
+      : Tool("VXX::SYCLPostLinkVXX", "sycl-post-link-vxx", TC) {}
+
+  bool hasIntegratedCPP() const override { return false; }
+
+  void ConstructJob(Compilation &C, const JobAction &JA,
+                    const InputInfo &Output, const InputInfoList &Inputs,
+                    const llvm::opt::ArgList &TCArgs,
+                    const char *LinkingOutput) const override;
+
+private:
+  void constructSYCLVXXPLCommand(Compilation &C, const JobAction &JA,
+                               const InputInfo &Output,
+                               const InputInfoList &Inputs,
+                               const llvm::opt::ArgList &Args) const;
+};
+
 } // end namespace SYCL
 } // end namespace tools
 
@@ -108,7 +126,7 @@ public:
   bool useIntegratedAs() const override { return true; }
 
   bool isPICDefault() const override { return false; }
-  bool isPIEDefault() const override { return false; }
+  bool isPIEDefault(const llvm::opt::ArgList &Args) const override { return false; }
   bool isPICDefaultForced() const override { return false; }
 
   void addClangWarningOptions(llvm::opt::ArgStringList &CC1Args) const override;
@@ -125,6 +143,10 @@ public:
 
 protected:
   Tool *buildLinker() const override;
+  virtual Tool *getTool(Action::ActionClass AC) const override;
+
+private:
+  mutable std::unique_ptr<Tool> VXXSYCLPostLink;
 };
 
 } // end namespace toolchains

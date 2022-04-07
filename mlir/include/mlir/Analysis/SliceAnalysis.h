@@ -33,7 +33,7 @@ using TransitiveFilter = llvm::function_ref<bool(Operation *)>;
 /// This additionally takes a TransitiveFilter which acts as a frontier:
 /// when looking at uses transitively, an operation that does not pass the
 /// filter is never propagated through. This allows in particular to carve out
-/// the scope within a ForInst or the scope within an IfInst.
+/// the scope within a ForOp or the scope within an IfOp.
 ///
 /// The implementation traverses the use chains in postorder traversal for
 /// efficiency reasons: if an operation is already in `forwardSlice`, no
@@ -82,7 +82,7 @@ void getForwardSlice(Value root, SetVector<Operation *> *forwardSlice,
 /// This additionally takes a TransitiveFilter which acts as a frontier:
 /// when looking at defs transitively, an operation that does not pass the
 /// filter is never propagated through. This allows in particular to carve out
-/// the scope within a ForInst or the scope within an IfInst.
+/// the scope within a ForOp or the scope within an IfOp.
 ///
 /// The implementation traverses the def chains in postorder traversal for
 /// efficiency reasons: if an operation is already in `backwardSlice`, no
@@ -205,6 +205,6 @@ getSlice(Operation *op,
 /// Returns a topologically sorted SetVector.
 SetVector<Operation *> topologicalSort(const SetVector<Operation *> &toSort);
 
-} // end namespace mlir
+} // namespace mlir
 
 #endif // MLIR_ANALYSIS_SLICEANALYSIS_H_

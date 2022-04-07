@@ -15,6 +15,18 @@
 namespace clang {
 namespace driver {
 
+class SYCLInstallationDetector {
+public:
+  SYCLInstallationDetector(const Driver &D);
+  void getSYCLDeviceLibPath(
+      llvm::SmallVector<llvm::SmallString<128>, 4> &DeviceLibPaths) const;
+  void print(llvm::raw_ostream &OS) const;
+
+private:
+  const Driver &D;
+  llvm::SmallVector<llvm::SmallString<128>, 4> InstallationCandidates;
+};
+
 class Command;
 
 namespace tools {
@@ -24,7 +36,8 @@ void constructLLVMForeachCommand(Compilation &C, const JobAction &JA,
                                  std::unique_ptr<Command> InputCommand,
                                  const InputInfoList &InputFiles,
                                  const InputInfo &Output, const Tool *T,
-                                 StringRef Ext);
+                                 StringRef Increment, StringRef Ext = "out",
+                                 StringRef ParallelJobs = "");
 
 // Runs llvm-spirv to convert spirv to bc, llvm-link, which links multiple LLVM
 // bitcode. Converts generated bc back to spirv using llvm-spirv, wraps with
@@ -139,14 +152,18 @@ public:
   void AddImpliedTargetArgs(const llvm::Triple &Triple,
                             const llvm::opt::ArgList &Args,
                             llvm::opt::ArgStringList &CmdArgs) const;
-  void TranslateBackendTargetArgs(const llvm::opt::ArgList &Args,
-      llvm::opt::ArgStringList &CmdArgs) const;
-  void TranslateLinkerTargetArgs(const llvm::opt::ArgList &Args,
-      llvm::opt::ArgStringList &CmdArgs) const;
+  void TranslateBackendTargetArgs(const llvm::Triple &Triple,
+                                  const llvm::opt::ArgList &Args,
+                                  llvm::opt::ArgStringList &CmdArgs) const;
+  void TranslateLinkerTargetArgs(const llvm::Triple &Triple,
+                                 const llvm::opt::ArgList &Args,
+                                 llvm::opt::ArgStringList &CmdArgs) const;
 
   bool useIntegratedAs() const override { return true; }
   bool isPICDefault() const override { return false; }
-  bool isPIEDefault() const override { return false; }
+  bool isPIEDefault(const llvm::opt::ArgList &Args) const override {\
+    return false;
+  }
   bool isPICDefaultForced() const override { return false; }
 
   void addClangWarningOptions(llvm::opt::ArgStringList &CC1Args) const override;
@@ -162,6 +179,7 @@ public:
 
 
   const ToolChain &HostTC;
+  const SYCLInstallationDetector SYCLInstallation;
 
 protected:
   Tool *buildBackendCompiler() const override;

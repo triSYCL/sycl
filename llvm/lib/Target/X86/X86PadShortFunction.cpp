@@ -174,12 +174,9 @@ void PadShortFunc::findReturns(MachineBasicBlock *MBB, unsigned int Cycles) {
   }
 
   // Follow branches in BB and look for returns
-  for (MachineBasicBlock::succ_iterator I = MBB->succ_begin();
-       I != MBB->succ_end(); ++I) {
-    if (*I == MBB)
-      continue;
-    findReturns(*I, Cycles);
-  }
+  for (MachineBasicBlock *Succ : MBB->successors())
+    if (Succ != MBB)
+      findReturns(Succ, Cycles);
 }
 
 /// cyclesUntilReturn - return true if the MBB has a return instruction,
@@ -222,7 +219,7 @@ bool PadShortFunc::cyclesUntilReturn(MachineBasicBlock *MBB,
 void PadShortFunc::addPadding(MachineBasicBlock *MBB,
                               MachineBasicBlock::iterator &MBBI,
                               unsigned int NOOPsToAdd) {
-  DebugLoc DL = MBBI->getDebugLoc();
+  const DebugLoc &DL = MBBI->getDebugLoc();
   unsigned IssueWidth = TSM.getIssueWidth();
 
   for (unsigned i = 0, e = IssueWidth * NOOPsToAdd; i != e; ++i)

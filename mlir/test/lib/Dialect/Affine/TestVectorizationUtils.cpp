@@ -75,6 +75,10 @@ struct VectorizerTestPass
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<vector::VectorDialect>();
   }
+  StringRef getArgument() const final { return "affine-super-vectorizer-test"; }
+  StringRef getDescription() const final {
+    return "Tests vectorizer standalone functionality.";
+  }
 
   void runOnFunction() override;
   void testVectorShapeRatio(llvm::raw_ostream &outs);
@@ -87,7 +91,7 @@ struct VectorizerTestPass
   void testVecAffineLoopNest();
 };
 
-} // end anonymous namespace
+} // namespace
 
 void VectorizerTestPass::testVectorShapeRatio(llvm::raw_ostream &outs) {
   auto f = getFunction();
@@ -269,9 +273,5 @@ void VectorizerTestPass::runOnFunction() {
 }
 
 namespace mlir {
-void registerVectorizerTestPass() {
-  PassRegistration<VectorizerTestPass> pass(
-      "affine-super-vectorizer-test",
-      "Tests vectorizer standalone functionality.");
-}
+void registerVectorizerTestPass() { PassRegistration<VectorizerTestPass>(); }
 } // namespace mlir

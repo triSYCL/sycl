@@ -13,6 +13,7 @@
 #include "NVPTXTargetMachine.h"
 #include "NVPTX.h"
 #include "NVPTXAllocaHoisting.h"
+#include "NVPTXAtomicLower.h"
 #include "NVPTXLowerAggrCopies.h"
 #include "NVPTXTargetObjectFile.h"
 #include "NVPTXTargetTransformInfo.h"
@@ -24,11 +25,12 @@
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/IR/IntrinsicsNVPTX.h"
 #include "llvm/IR/LegacyPassManager.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Pass.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/TargetRegistry.h"
 #include "llvm/Target/TargetMachine.h"
 #include "llvm/Target/TargetOptions.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
@@ -67,6 +69,7 @@ void initializeNVVMIntrRangePass(PassRegistry&);
 void initializeNVVMReflectPass(PassRegistry&);
 void initializeGenericToNVVMPass(PassRegistry&);
 void initializeNVPTXAllocaHoistingPass(PassRegistry &);
+void initializeNVPTXAtomicLowerPass(PassRegistry &);
 void initializeNVPTXAssignValidGlobalNamesPass(PassRegistry&);
 void initializeNVPTXLowerAggrCopiesPass(PassRegistry &);
 void initializeNVPTXLowerArgsPass(PassRegistry &);
@@ -91,6 +94,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeNVPTXTarget() {
   initializeGenericToNVVMPass(PR);
   initializeNVPTXAllocaHoistingPass(PR);
   initializeNVPTXAssignValidGlobalNamesPass(PR);
+  initializeNVPTXAtomicLowerPass(PR);
   initializeNVPTXLowerArgsPass(PR);
   initializeNVPTXLowerAllocaPass(PR);
   initializeNVPTXLowerAggrCopiesPass(PR);
@@ -215,8 +219,7 @@ void NVPTXTargetMachine::adjustPassManager(PassManagerBuilder &Builder) {
     });
 }
 
-void NVPTXTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB,
-                                                      bool DebugPassManager) {
+void NVPTXTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB) {
   PB.registerPipelineParsingCallback(
       [](StringRef PassName, FunctionPassManager &PM,
          ArrayRef<PassBuilder::PipelineElement>) {
@@ -232,9 +235,8 @@ void NVPTXTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB,
       });
 
   PB.registerPipelineStartEPCallback(
-      [this, DebugPassManager](ModulePassManager &PM,
-                               PassBuilder::OptimizationLevel Level) {
-        FunctionPassManager FPM(DebugPassManager);
+      [this](ModulePassManager &PM, OptimizationLevel Level) {
+        FunctionPassManager FPM;
         FPM.addPass(NVVMReflectPass(Subtarget.getSmVersion()));
         // FIXME: NVVMIntrRangePass is causing numerical discrepancies,
         // investigate and re-enable.
@@ -246,6 +248,25 @@ void NVPTXTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB,
 TargetTransformInfo
 NVPTXTargetMachine::getTargetTransformInfo(const Function &F) {
   return TargetTransformInfo(NVPTXTTIImpl(this, F));
+}
+
+std::pair<const Value *, unsigned>
+NVPTXTargetMachine::getPredicatedAddrSpace(const Value *V) const {
+  if (auto *II = dyn_cast<IntrinsicInst>(V)) {
+    switch (II->getIntrinsicID()) {
+    case Intrinsic::nvvm_isspacep_const:
+      return std::make_pair(II->getArgOperand(0), llvm::ADDRESS_SPACE_CONST);
+    case Intrinsic::nvvm_isspacep_global:
+      return std::make_pair(II->getArgOperand(0), llvm::ADDRESS_SPACE_GLOBAL);
+    case Intrinsic::nvvm_isspacep_local:
+      return std::make_pair(II->getArgOperand(0), llvm::ADDRESS_SPACE_LOCAL);
+    case Intrinsic::nvvm_isspacep_shared:
+      return std::make_pair(II->getArgOperand(0), llvm::ADDRESS_SPACE_SHARED);
+    default:
+      break;
+    }
+  }
+  return std::make_pair(nullptr, -1);
 }
 
 void NVPTXPassConfig::addEarlyCSEOrGVNPass() {
@@ -261,6 +282,7 @@ void NVPTXPassConfig::addAddressSpaceInferencePasses() {
   addPass(createSROAPass());
   addPass(createNVPTXLowerAllocaPass());
   addPass(createInferAddressSpacesPass());
+  addPass(createNVPTXAtomicLowerPass());
 }
 
 void NVPTXPassConfig::addStraightLineScalarOptimizationPasses() {
@@ -342,6 +364,7 @@ void NVPTXPassConfig::addIRPasses() {
     addEarlyCSEOrGVNPass();
     if (!DisableLoadStoreVectorizer)
       addPass(createLoadStoreVectorizerPass());
+    addPass(createSROAPass());
   }
 }
 
@@ -364,7 +387,7 @@ void NVPTXPassConfig::addPreRegAlloc() {
 }
 
 void NVPTXPassConfig::addPostRegAlloc() {
-  addPass(createNVPTXPrologEpilogPass(), false);
+  addPass(createNVPTXPrologEpilogPass());
   if (getOptLevel() != CodeGenOpt::None) {
     // NVPTXPrologEpilogPass calculates frame object offset and replace frame
     // index with VRFrame register. NVPTXPeephole need to be run after that and

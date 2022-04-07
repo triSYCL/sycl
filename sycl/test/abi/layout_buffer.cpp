@@ -23,7 +23,7 @@ void foo(sycl::buffer<int, 2>) {}
 // CHECK-NEXT:  24 |             struct std::_Tuple_impl<0, class sycl::detail::SYCLMemObjAllocator *, struct std::default_delete<class sycl::detail::SYCLMemObjAllocator> > (base)
 // CHECK-NEXT:  24 |               struct std::_Tuple_impl<1, struct std::default_delete<class sycl::detail::SYCLMemObjAllocator> > (base) (empty)
 // CHECK-NEXT:  24 |                 struct std::_Head_base<1, struct std::default_delete<class sycl::detail::SYCLMemObjAllocator>, true> (base) (empty)
-// CHECK-NEXT:  24 |                   struct std::default_delete<class sycl::detail::SYCLMemObjAllocator> (base) (empty)
+// CHECK-NEXT:  24 |                   struct std::default_delete<class sycl::detail::SYCLMemObjAllocator>
 // CHECK-NEXT:  24 |               struct std::_Head_base<0, class sycl::detail::SYCLMemObjAllocator *, false> (base)
 // CHECK-NEXT:  24 |                 class sycl::detail::SYCLMemObjAllocator * _M_head_impl
 // CHECK-NEXT:  32 |     class sycl::property_list MProps
@@ -67,7 +67,7 @@ void foo(sycl::buffer<int, 2>) {}
 // CHECK-NEXT:  136 |             const void * _M_const_object
 // CHECK-NEXT:  136 |             void (*)(void) _M_function_pointer
 // CHECK-NEXT:  136 |             void (class std::_Undefined_class::*)(void) _M_member_pointer
-// CHECK-NEXT:  136 |           char [16] _M_pod_data
+// CHECK-NEXT:  136 |           char[16] _M_pod_data
 // CHECK-NEXT:  152 |         std::_Function_base::_Manager_type _M_manager
 // CHECK-NEXT:  160 |       std::function<void (void)>::_Invoker_type _M_invoker
 // CHECK-NEXT:  168 |     class std::shared_ptr<const void> MSharedPtrStorage
@@ -88,7 +88,7 @@ void foo(sycl::buffer<int, 2>) {}
 // CHECK-NEXT: 8 |         _Sp_counted_base<(enum __gnu_cxx::_Lock_policy)2U> * _M_pi
 // CHECK-NEXT: 16 |   class sycl::range<2> Range
 // CHECK-NEXT: 16 |     class sycl::detail::array<2> (base)
-// CHECK-NEXT: 16 |       size_t [2] common_array
+// CHECK-NEXT: 16 |       size_t[2] common_array
 // CHECK-NEXT: 32 |   size_t OffsetInBytes
 // CHECK-NEXT: 40 |   _Bool IsSubBuffer
 // CHECK-NEXT:    | [sizeof=48, dsize=41, align=8,

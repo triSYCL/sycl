@@ -8,7 +8,8 @@
 #ifndef MLIR_CONVERSION_GPUTONVVM_GPUTONVVMPASS_H_
 #define MLIR_CONVERSION_GPUTONVVM_GPUTONVVMPASS_H_
 
-#include "mlir/Conversion/StandardToLLVM/ConvertStandardToLLVMPass.h"
+#include "mlir/Conversion/LLVMCommon/LoweringOptions.h"
+#include "mlir/Dialect/LLVMIR/LLVMTypes.h"
 #include <memory>
 
 namespace mlir {
@@ -22,7 +23,10 @@ class OperationPass;
 
 namespace gpu {
 class GPUModuleOp;
+class MMAMatrixType;
 }
+
+LLVM::LLVMStructType convertMMAToLLVMType(gpu::MMAMatrixType type);
 
 /// Configure target to convert from the GPU dialect to NVVM.
 void configureGpuToNVVMConversionLegality(ConversionTarget &target);
@@ -30,6 +34,10 @@ void configureGpuToNVVMConversionLegality(ConversionTarget &target);
 /// Collect a set of patterns to convert from the GPU dialect to NVVM.
 void populateGpuToNVVMConversionPatterns(LLVMTypeConverter &converter,
                                          RewritePatternSet &patterns);
+
+/// Collect a set of patterns to convert WMMA ops from GPU dialect to NVVM.
+void populateGpuWMMAToNVVMConversionPatterns(LLVMTypeConverter &converter,
+                                             RewritePatternSet &patterns);
 
 /// Creates a pass that lowers GPU dialect operations to NVVM counterparts. The
 /// index bitwidth used for the lowering of the device side index computations

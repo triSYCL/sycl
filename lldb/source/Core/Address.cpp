@@ -7,12 +7,12 @@
 //===----------------------------------------------------------------------===//
 
 #include "lldb/Core/Address.h"
+#include "lldb/Core/Declaration.h"
 #include "lldb/Core/DumpDataExtractor.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/ModuleList.h"
 #include "lldb/Core/Section.h"
 #include "lldb/Symbol/Block.h"
-#include "lldb/Symbol/Declaration.h"
 #include "lldb/Symbol/LineEntry.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/Symbol.h"
@@ -43,9 +43,9 @@
 #include <memory>
 #include <vector>
 
-#include <assert.h>
-#include <inttypes.h>
-#include <string.h>
+#include <cassert>
+#include <cinttypes>
+#include <cstring>
 
 namespace lldb_private {
 class CompileUnit;
@@ -384,6 +384,19 @@ bool Address::SetOpcodeLoadAddress(lldb::addr_t load_addr, Target *target,
         addr_class = GetAddressClass();
       m_offset = target->GetOpcodeLoadAddress(m_offset, addr_class);
     }
+    return true;
+  }
+  return false;
+}
+
+bool Address::GetDescription(Stream &s, Target &target,
+                             DescriptionLevel level) const {
+  assert(level == eDescriptionLevelBrief &&
+         "Non-brief descriptions not implemented");
+  LineEntry line_entry;
+  if (CalculateSymbolContextLineEntry(line_entry)) {
+    s.Printf(" (%s:%u:%u)", line_entry.file.GetFilename().GetCString(),
+             line_entry.line, line_entry.column);
     return true;
   }
   return false;

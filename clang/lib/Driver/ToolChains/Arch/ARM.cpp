@@ -147,14 +147,30 @@ bool arm::useAAPCSForMachO(const llvm::Triple &T) {
          T.getOS() == llvm::Triple::UnknownOS || isARMMProfile(T);
 }
 
+// We follow GCC and support when the backend has support for the MRC/MCR
+// instructions that are used to set the hard thread pointer ("CP15 C13
+// Thread id").
+bool arm::isHardTPSupported(const llvm::Triple &Triple) {
+  int Ver = getARMSubArchVersionNumber(Triple);
+  llvm::ARM::ArchKind AK = llvm::ARM::parseArch(Triple.getArchName());
+  return Triple.isARM() || AK == llvm::ARM::ArchKind::ARMV6T2 ||
+         (Ver >= 7 && AK != llvm::ARM::ArchKind::ARMV8MBaseline);
+}
+
 // Select mode for reading thread pointer (-mtp=soft/cp15).
-arm::ReadTPMode arm::getReadTPMode(const Driver &D, const ArgList &Args) {
+arm::ReadTPMode arm::getReadTPMode(const Driver &D, const ArgList &Args,
+                                   const llvm::Triple &Triple, bool ForAS) {
   if (Arg *A = Args.getLastArg(options::OPT_mtp_mode_EQ)) {
     arm::ReadTPMode ThreadPointer =
         llvm::StringSwitch<arm::ReadTPMode>(A->getValue())
             .Case("cp15", ReadTPMode::Cp15)
             .Case("soft", ReadTPMode::Soft)
             .Default(ReadTPMode::Invalid);
+    if (ThreadPointer == ReadTPMode::Cp15 && !isHardTPSupported(Triple) &&
+        !ForAS) {
+      D.Diag(diag::err_target_unsupported_tp_hard) << Triple.getArchName();
+      return ReadTPMode::Invalid;
+    }
     if (ThreadPointer != ReadTPMode::Invalid)
       return ThreadPointer;
     if (StringRef(A->getValue()).empty())
@@ -314,6 +330,10 @@ arm::FloatABI arm::getDefaultFloatABI(const llvm::Triple &Triple) {
 
   // FIXME: this is invalid for WindowsCE
   case llvm::Triple::Win32:
+    // It is incorrect to select hard float ABI on MachO platforms if the ABI is
+    // "apcs-gnu".
+    if (Triple.isOSBinFormatMachO() && !useAAPCSForMachO(Triple))
+      return FloatABI::Soft;
     return FloatABI::Hard;
 
   case llvm::Triple::NetBSD:
@@ -418,7 +438,6 @@ void arm::getARMTargetFeatures(const Driver &D, const llvm::Triple &Triple,
   bool KernelOrKext =
       Args.hasArg(options::OPT_mkernel, options::OPT_fapple_kext);
   arm::FloatABI ABI = arm::getARMFloatABI(D, Triple, Args);
-  arm::ReadTPMode ThreadPointer = arm::getReadTPMode(D, Args);
   llvm::Optional<std::pair<const Arg *, StringRef>> WaCPU, WaFPU, WaHDiv,
       WaArch;
 
@@ -470,7 +489,7 @@ void arm::getARMTargetFeatures(const Driver &D, const llvm::Triple &Triple,
     }
   }
 
-  if (ThreadPointer == arm::ReadTPMode::Cp15)
+  if (getReadTPMode(D, Args, Triple, ForAS) == ReadTPMode::Cp15)
     Features.push_back("+read-tp-hard");
 
   const Arg *ArchArg = Args.getLastArg(options::OPT_march_EQ);
@@ -541,6 +560,14 @@ void arm::getARMTargetFeatures(const Driver &D, const llvm::Triple &Triple,
     if (!llvm::ARM::getFPUFeatures(FPUID, Features))
       D.Diag(clang::diag::err_drv_clang_unsupported)
           << std::string("-mfpu=") + AndroidFPU;
+  } else {
+    if (!ForAS) {
+      std::string CPU = arm::getARMTargetCPU(CPUName, ArchName, Triple);
+      llvm::ARM::ArchKind ArchKind =
+          arm::getLLVMArchKindForARM(CPU, ArchName, Triple);
+      FPUID = llvm::ARM::getDefaultFPU(CPU, ArchKind);
+      (void)llvm::ARM::getFPUFeatures(FPUID, Features);
+    }
   }
 
   // Now we've finished accumulating features from arch, cpu and fpu,
@@ -618,34 +645,73 @@ fp16_fml_fallthrough:
       Features.push_back("-crc");
   }
 
-  // For Arch >= ARMv8.0 && A profile:  crypto = sha2 + aes
+  // For Arch >= ARMv8.0 && A or R profile:  crypto = sha2 + aes
+  // Rather than replace within the feature vector, determine whether each
+  // algorithm is enabled and append this to the end of the vector.
+  // The algorithms can be controlled by their specific feature or the crypto
+  // feature, so their status can be determined by the last occurance of
+  // either in the vector. This allows one to supercede the other.
+  // e.g. +crypto+noaes in -march/-mcpu should enable sha2, but not aes
   // FIXME: this needs reimplementation after the TargetParser rewrite
-  auto CryptoIt = llvm::find_if(llvm::reverse(Features), [](const StringRef F) {
-    return F.contains("crypto");
-  });
-  if (CryptoIt != Features.rend()) {
-    if (CryptoIt->take_front() == "+") {
-      StringRef ArchSuffix = arm::getLLVMArchSuffixForARM(
-          arm::getARMTargetCPU(CPUName, ArchName, Triple), ArchName, Triple);
-      if (llvm::ARM::parseArchVersion(ArchSuffix) >= 8 &&
-          llvm::ARM::parseArchProfile(ArchSuffix) ==
-              llvm::ARM::ProfileKind::A) {
-        if (ArchName.find_lower("+nosha2") == StringRef::npos &&
-            CPUName.find_lower("+nosha2") == StringRef::npos)
-          Features.push_back("+sha2");
-        if (ArchName.find_lower("+noaes") == StringRef::npos &&
-            CPUName.find_lower("+noaes") == StringRef::npos)
-          Features.push_back("+aes");
-      } else {
+  bool HasSHA2 = false;
+  bool HasAES = false;
+  const auto ItCrypto =
+      llvm::find_if(llvm::reverse(Features), [](const StringRef F) {
+        return F.contains("crypto");
+      });
+  const auto ItSHA2 =
+      llvm::find_if(llvm::reverse(Features), [](const StringRef F) {
+        return F.contains("crypto") || F.contains("sha2");
+      });
+  const auto ItAES =
+      llvm::find_if(llvm::reverse(Features), [](const StringRef F) {
+        return F.contains("crypto") || F.contains("aes");
+      });
+  const bool FoundSHA2 = ItSHA2 != Features.rend();
+  const bool FoundAES = ItAES != Features.rend();
+  if (FoundSHA2)
+    HasSHA2 = ItSHA2->take_front() == "+";
+  if (FoundAES)
+    HasAES = ItAES->take_front() == "+";
+  if (ItCrypto != Features.rend()) {
+    if (HasSHA2 && HasAES)
+      Features.push_back("+crypto");
+    else
+      Features.push_back("-crypto");
+    if (HasSHA2)
+      Features.push_back("+sha2");
+    else
+      Features.push_back("-sha2");
+    if (HasAES)
+      Features.push_back("+aes");
+    else
+      Features.push_back("-aes");
+  }
+
+  if (HasSHA2 || HasAES) {
+    StringRef ArchSuffix = arm::getLLVMArchSuffixForARM(
+        arm::getARMTargetCPU(CPUName, ArchName, Triple), ArchName, Triple);
+    llvm::ARM::ProfileKind ArchProfile =
+        llvm::ARM::parseArchProfile(ArchSuffix);
+    if (!((llvm::ARM::parseArchVersion(ArchSuffix) >= 8) &&
+          (ArchProfile == llvm::ARM::ProfileKind::A ||
+           ArchProfile == llvm::ARM::ProfileKind::R))) {
+      if (HasSHA2)
         D.Diag(clang::diag::warn_target_unsupported_extension)
-            << "crypto"
+            << "sha2"
             << llvm::ARM::getArchName(llvm::ARM::parseArch(ArchSuffix));
-        // With -fno-integrated-as -mfpu=crypto-neon-fp-armv8 some assemblers such as the GNU assembler
-        // will permit the use of crypto instructions as the fpu will override the architecture.
-        // We keep the crypto feature in this case to preserve compatibility.
-        // In all other cases we remove the crypto feature.
-        if (!Args.hasArg(options::OPT_fno_integrated_as))
-          Features.push_back("-crypto");
+      if (HasAES)
+        D.Diag(clang::diag::warn_target_unsupported_extension)
+            << "aes"
+            << llvm::ARM::getArchName(llvm::ARM::parseArch(ArchSuffix));
+      // With -fno-integrated-as -mfpu=crypto-neon-fp-armv8 some assemblers such
+      // as the GNU assembler will permit the use of crypto instructions as the
+      // fpu will override the architecture. We keep the crypto feature in this
+      // case to preserve compatibility. In all other cases we remove the crypto
+      // feature.
+      if (!Args.hasArg(options::OPT_fno_integrated_as)) {
+        Features.push_back("-sha2");
+        Features.push_back("-aes");
       }
     }
   }
@@ -653,6 +719,18 @@ fp16_fml_fallthrough:
   // CMSE: Check for target 8M (for -mcmse to be applicable) is performed later.
   if (Args.getLastArg(options::OPT_mcmse))
     Features.push_back("+8msecext");
+
+  if (Arg *A = Args.getLastArg(options::OPT_mfix_cmse_cve_2021_35465,
+                               options::OPT_mno_fix_cmse_cve_2021_35465)) {
+    if (!Args.getLastArg(options::OPT_mcmse))
+      D.Diag(diag::err_opt_not_valid_without_opt)
+          << A->getOption().getName() << "-mcmse";
+
+    if (A->getOption().matches(options::OPT_mfix_cmse_cve_2021_35465))
+      Features.push_back("+fix-cmse-cve-2021-35465");
+    else
+      Features.push_back("-fix-cmse-cve-2021-35465");
+  }
 
   // Look for the last occurrence of -mlong-calls or -mno-long-calls. If
   // neither options are specified, see if we are compiling for kernel/kext and
@@ -716,7 +794,8 @@ fp16_fml_fallthrough:
     // which raises an alignment fault on unaligned accesses. Linux
     // defaults this bit to 0 and handles it as a system-wide (not
     // per-process) setting. It is therefore safe to assume that ARMv7+
-    // Linux targets support unaligned accesses. The same goes for NaCl.
+    // Linux targets support unaligned accesses. The same goes for NaCl
+    // and Windows.
     //
     // The above behavior is consistent with GCC.
     int VersionNum = getARMSubArchVersionNumber(Triple);
@@ -724,7 +803,8 @@ fp16_fml_fallthrough:
       if (VersionNum < 6 ||
           Triple.getSubArch() == llvm::Triple::SubArchType::ARMSubArch_v6m)
         Features.push_back("+strict-align");
-    } else if (Triple.isOSLinux() || Triple.isOSNaCl()) {
+    } else if (Triple.isOSLinux() || Triple.isOSNaCl() ||
+               Triple.isOSWindows()) {
       if (VersionNum < 7)
         Features.push_back("+strict-align");
     } else
@@ -749,11 +829,17 @@ fp16_fml_fallthrough:
     StringRef Scope = A->getValue();
     bool EnableRetBr = false;
     bool EnableBlr = false;
-    if (Scope != "none" && Scope != "all") {
+    bool DisableComdat = false;
+    if (Scope != "none") {
       SmallVector<StringRef, 4> Opts;
       Scope.split(Opts, ",");
       for (auto Opt : Opts) {
         Opt = Opt.trim();
+        if (Opt == "all") {
+          EnableBlr = true;
+          EnableRetBr = true;
+          continue;
+        }
         if (Opt == "retbr") {
           EnableRetBr = true;
           continue;
@@ -762,13 +848,18 @@ fp16_fml_fallthrough:
           EnableBlr = true;
           continue;
         }
+        if (Opt == "comdat") {
+          DisableComdat = false;
+          continue;
+        }
+        if (Opt == "nocomdat") {
+          DisableComdat = true;
+          continue;
+        }
         D.Diag(diag::err_invalid_sls_hardening)
             << Scope << A->getAsString(Args);
         break;
       }
-    } else if (Scope == "all") {
-      EnableRetBr = true;
-      EnableBlr = true;
     }
 
     if (EnableRetBr || EnableBlr)
@@ -780,11 +871,16 @@ fp16_fml_fallthrough:
       Features.push_back("+harden-sls-retbr");
     if (EnableBlr)
       Features.push_back("+harden-sls-blr");
+    if (DisableComdat) {
+      Features.push_back("+harden-sls-nocomdat");
+    }
   }
 
+  if (Args.getLastArg(options::OPT_mno_bti_at_return_twice))
+    Features.push_back("+no-bti-at-return-twice");
 }
 
-const std::string arm::getARMArch(StringRef Arch, const llvm::Triple &Triple) {
+std::string arm::getARMArch(StringRef Arch, const llvm::Triple &Triple) {
   std::string MArch;
   if (!Arch.empty())
     MArch = std::string(Arch);

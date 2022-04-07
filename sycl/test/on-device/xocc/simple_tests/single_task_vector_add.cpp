@@ -1,8 +1,8 @@
 // REQUIRES: xocc
 
-// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
-
-// RUN: %ACC_RUN_PLACEHOLDER %t.out
+// RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
+// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
+// RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
 
 /*
@@ -27,13 +27,13 @@ int main(int argc, char *argv[]) {
   {
     auto a_b = b.get_access<access::mode::discard_write>();
     // Initialize buffer with increasing numbers starting at 0
-    std::iota(&a_b[0], &a_b[a_b.get_count()], 0);
+    std::iota(&a_b[0], &a_b[a_b.size()], 0);
   }
 
   {
     auto a_c = c.get_access<access::mode::discard_write>();
     // Initialize buffer with increasing numbers starting at 5
-    std::iota(&a_c[0], &a_c[a_c.get_count()], 5);
+    std::iota(&a_c[0], &a_c[a_c.size()], 5);
   }
 
   selector_defines::CompiledForDeviceSelector selector;
@@ -62,7 +62,7 @@ int main(int argc, char *argv[]) {
 
   // Verify the result
   auto a_a = a.get_access<access::mode::read>();
-  for (unsigned int i = 0 ; i < a.get_count(); ++i) {
+  for (unsigned int i = 0 ; i < a.size(); ++i) {
     assert(a_a[i] == 5 + 2*i && "invalid result from kernel");
   }
 

@@ -16,10 +16,13 @@ TEST_F(SchedulerTest, FailedDependency) {
   MockCommand MDep(detail::getSyclObjImpl(MQueue));
   MockCommand MUser(detail::getSyclObjImpl(MQueue));
   MDep.addUser(&MUser);
-  MUser.addDep(detail::DepDesc{&MDep, &MockReq, nullptr});
+  std::vector<detail::Command *> ToCleanUp;
+  (void)MUser.addDep(detail::DepDesc{&MDep, &MockReq, nullptr}, ToCleanUp);
   MUser.MEnqueueStatus = detail::EnqueueResultT::SyclEnqueueReady;
   MDep.MEnqueueStatus = detail::EnqueueResultT::SyclEnqueueFailed;
 
+  MockScheduler MS;
+  auto Lock = MS.acquireGraphReadLock();
   detail::EnqueueResultT Res;
   bool Enqueued =
       MockScheduler::enqueueCommand(&MUser, Res, detail::NON_BLOCKING);

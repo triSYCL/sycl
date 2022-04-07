@@ -59,6 +59,7 @@ ASM_FUNCTION_M68K_RE = re.compile(
 
 ASM_FUNCTION_MIPS_RE = re.compile(
     r'^_?(?P<func>[^:]+):[ \t]*#+[ \t]*@"?(?P=func)"?\n[^:]*?' # f: (name of func)
+    r'(?:\s*\.?Ltmp[^:\n]*:\n)?[^:]*?'        # optional .Ltmp<N> for EH
     r'(?:^[ \t]+\.(frame|f?mask|set).*?\n)+'  # Mips+LLVM standard asm prologue
     r'(?P<body>.*?)\n'                        # (body of the function)
     # Mips+LLVM standard asm epilogue
@@ -141,11 +142,21 @@ ASM_FUNCTION_ARM_MACHO_RE = re.compile(
      r'[ \t]*\.cfi_endproc\n',
      flags=(re.M | re.S))
 
+ASM_FUNCTION_THUMBS_DARWIN_RE = re.compile(
+     r'^_(?P<func>[^:]+):\n'
+     r'(?P<body>.*?)\n'
+     r'[ \t]*\.data_region\n',
+     flags=(re.M | re.S))
+
+ASM_FUNCTION_THUMB_DARWIN_RE = re.compile(
+     r'^_(?P<func>[^:]+):\n'
+     r'(?P<body>.*?)\n'
+     r'^[ \t]*@[ \t]--[ \t]End[ \t]function',
+     flags=(re.M | re.S))
+
 ASM_FUNCTION_ARM_IOS_RE = re.compile(
-     r'^_(?P<func>[^:]+):[ \t]*\n'
-     r'^Lfunc_begin(?P<id>[0-9][1-9]*):\n'
+     r'^_(?P<func>[^:]+):\n'
      r'(?P<body>.*?)'
-     r'^Lfunc_end(?P=id):\n'
      r'^[ \t]*@[ \t]--[ \t]End[ \t]function',
      flags=(re.M | re.S))
 
@@ -153,6 +164,12 @@ ASM_FUNCTION_WASM32_RE = re.compile(
     r'^_?(?P<func>[^:]+):[ \t]*#+[ \t]*@"?(?P=func)"?\n'
     r'(?P<body>.*?)\n'
     r'^\s*(\.Lfunc_end[0-9]+:\n|end_function)',
+    flags=(re.M | re.S))
+
+ASM_FUNCTION_VE_RE = re.compile(
+    r'^_?(?P<func>[^:]+):[ \t]*#+[ \t]*@(?P=func)\n'
+    r'(?P<body>^##?[ \t]+[^:]+:.*?)\s*'
+    r'.Lfunc_end[0-9]+:\n',
     flags=(re.M | re.S))
 
 SCRUB_X86_SHUFFLES_RE = (
@@ -171,7 +188,7 @@ SCRUB_X86_SPILL_RELOAD_RE = (
         flags=re.M))
 SCRUB_X86_SP_RE = re.compile(r'\d+\(%(esp|rsp)\)')
 SCRUB_X86_RIP_RE = re.compile(r'[.\w]+\(%rip\)')
-SCRUB_X86_LCP_RE = re.compile(r'\.LCPI[0-9]+_[0-9]+')
+SCRUB_X86_LCP_RE = re.compile(r'\.?LCPI[0-9]+_[0-9]+')
 SCRUB_X86_RET_RE = re.compile(r'ret[l|q]')
 
 def scrub_asm_x86(asm, args):
@@ -197,7 +214,7 @@ def scrub_asm_x86(asm, args):
     # Generically match a RIP-relative memory operand.
     asm = SCRUB_X86_RIP_RE.sub(r'{{.*}}(%rip)', asm)
   # Generically match a LCP symbol.
-  asm = SCRUB_X86_LCP_RE.sub(r'{{\.LCPI[0-9]+_[0-9]+}}', asm)
+  asm = SCRUB_X86_LCP_RE.sub(r'{{\.?LCPI[0-9]+_[0-9]+}}', asm)
   if getattr(args, 'extra_scrub', False):
     # Avoid generating different checks for 32- and 64-bit because of 'retl' vs 'retq'.
     asm = SCRUB_X86_RET_RE.sub(r'ret{{[l|q]}}', asm)
@@ -343,6 +360,16 @@ def scrub_asm_wasm32(asm, args):
   asm = common.SCRUB_TRAILING_WHITESPACE_RE.sub(r'', asm)
   return asm
 
+def scrub_asm_ve(asm, args):
+  # Scrub runs of whitespace out of the assembly, but leave the leading
+  # whitespace in place.
+  asm = common.SCRUB_WHITESPACE_RE.sub(r' ', asm)
+  # Expand the tabs used for indentation.
+  asm = string.expandtabs(asm, 2)
+  # Strip trailing whitespace.
+  asm = common.SCRUB_TRAILING_WHITESPACE_RE.sub(r'', asm)
+  return asm
+
 def get_triple_from_march(march):
   triples = {
       'amdgcn': 'amdgcn',
@@ -350,6 +377,7 @@ def get_triple_from_march(march):
       'mips': 'mips',
       'sparc': 'sparc',
       'hexagon': 'hexagon',
+      've': 've',
   }
   for prefix, triple in triples.items():
     if march.startswith(prefix):
@@ -362,8 +390,10 @@ def get_run_handler(triple):
       'i686': (scrub_asm_x86, ASM_FUNCTION_X86_RE),
       'x86': (scrub_asm_x86, ASM_FUNCTION_X86_RE),
       'i386': (scrub_asm_x86, ASM_FUNCTION_X86_RE),
+      'arm64_32-apple-ios': (scrub_asm_arm_eabi, ASM_FUNCTION_AARCH64_DARWIN_RE),
       'aarch64': (scrub_asm_arm_eabi, ASM_FUNCTION_AARCH64_RE),
       'aarch64-apple-darwin': (scrub_asm_arm_eabi, ASM_FUNCTION_AARCH64_DARWIN_RE),
+      'aarch64-apple-ios': (scrub_asm_arm_eabi, ASM_FUNCTION_AARCH64_DARWIN_RE),
       'hexagon': (scrub_asm_hexagon, ASM_FUNCTION_HEXAGON_RE),
       'r600': (scrub_asm_amdgpu, ASM_FUNCTION_AMDGPU_RE),
       'amdgcn': (scrub_asm_amdgpu, ASM_FUNCTION_AMDGPU_RE),
@@ -376,6 +406,8 @@ def get_run_handler(triple):
       'thumb': (scrub_asm_arm_eabi, ASM_FUNCTION_ARM_RE),
       'thumb-macho': (scrub_asm_arm_eabi, ASM_FUNCTION_ARM_MACHO_RE),
       'thumbv5-macho': (scrub_asm_arm_eabi, ASM_FUNCTION_ARM_MACHO_RE),
+      'thumbv7s-apple-darwin' : (scrub_asm_arm_eabi, ASM_FUNCTION_THUMBS_DARWIN_RE),
+      'thumbv7-apple-darwin' : (scrub_asm_arm_eabi, ASM_FUNCTION_THUMB_DARWIN_RE),
       'thumbv7-apple-ios' : (scrub_asm_arm_eabi, ASM_FUNCTION_ARM_IOS_RE),
       'm68k': (scrub_asm_m68k, ASM_FUNCTION_M68K_RE),
       'mips': (scrub_asm_mips, ASM_FUNCTION_MIPS_RE),
@@ -389,6 +421,7 @@ def get_run_handler(triple):
       'sparc': (scrub_asm_sparc, ASM_FUNCTION_SPARC_RE),
       's390x': (scrub_asm_systemz, ASM_FUNCTION_SYSTEMZ_RE),
       'wasm32': (scrub_asm_wasm32, ASM_FUNCTION_WASM32_RE),
+      've': (scrub_asm_ve, ASM_FUNCTION_VE_RE),
   }
   handler = None
   best_prefix = ''

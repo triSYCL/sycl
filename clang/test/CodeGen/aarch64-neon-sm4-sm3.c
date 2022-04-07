@@ -1,12 +1,11 @@
 // RUN: %clang_cc1 -triple aarch64-linux-gnu -target-feature +neon \
-// RUN:  -target-feature +crypto -S -emit-llvm -o - %s \
+// RUN:  -target-feature +sm4 -S -emit-llvm -o - %s \
 // RUN:  | FileCheck %s
 
 // RUN: not %clang_cc1 -triple aarch64-linux-gnu -target-feature +neon \
 // RUN: -S -emit-llvm -o - %s 2>&1 | FileCheck --check-prefix=CHECK-NO-CRYPTO %s
 
-//The front-end requires the addition of both +crypto and +sm4 in the 
-// command line, however the back-end requires only +sm4 (includes sm4&sm3)
+// REQUIRES: aarch64-registered-target || arm-registered-target
 
 #include <arm_neon.h>
 

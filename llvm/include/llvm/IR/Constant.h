@@ -198,6 +198,12 @@ public:
   /// hanging off of the globals.
   void removeDeadConstantUsers() const;
 
+  /// Return true if the constant has exactly one live use.
+  ///
+  /// This returns the same result as calling Value::hasOneUse after
+  /// Constant::removeDeadConstantUsers, but doesn't remove dead constants.
+  bool hasOneLiveUse() const;
+
   const Constant *stripPointerCasts() const {
     return cast<Constant>(Value::stripPointerCasts());
   }
@@ -216,6 +222,10 @@ public:
   /// both must either be scalars or vectors with the same element count. If no
   /// changes are made, the constant C is returned.
   static Constant *mergeUndefsWith(Constant *C, Constant *Other);
+
+  /// Return true if a constant is ConstantData or a ConstantAggregate or
+  /// ConstantExpr that contain only ConstantData.
+  bool isManifestConstant() const;
 
 private:
   enum PossibleRelocationsTy {

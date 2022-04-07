@@ -9,7 +9,7 @@
 #ifndef MLIR_DIALECT_LINALG_ANALYSIS_DEPENDENCEANALYSIS_H_
 #define MLIR_DIALECT_LINALG_ANALYSIS_DEPENDENCEANALYSIS_H_
 
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/OpDefinition.h"
 
@@ -80,9 +80,9 @@ public:
       if (!owner)
         return llvm::None;
       if (OpOperand *operand = opView.dyn_cast<OpOperand *>())
-        return owner.getIndexingMap(operand->getOperandNumber());
-      return owner.getOutputIndexingMap(
-          opView.get<Value>().cast<OpResult>().getResultNumber());
+        return owner.getTiedIndexingMap(operand);
+      return owner.getTiedIndexingMap(owner.getOutputOperand(
+          opView.get<Value>().cast<OpResult>().getResultNumber()));
     }
     // Return the operand number if the `opView` is an OpOperand *. Otherwise
     // return llvm::None.

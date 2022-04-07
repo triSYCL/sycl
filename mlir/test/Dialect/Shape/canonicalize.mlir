@@ -1,10 +1,10 @@
 // RUN: mlir-opt -split-input-file -allow-unregistered-dialect -canonicalize %s | FileCheck %s
 
 // CHECK-LABEL: func @f
-func @f(%arg0: tensor<2x3x4xf32>) -> tensor<?xindex> {
-  // CHECK: shape.const_shape [2, 3, 4] : tensor<?xindex>
-  %0 = shape.shape_of %arg0 : tensor<2x3x4xf32> -> tensor<?xindex>
-  return %0 : tensor<?xindex>
+func @f(%arg0: tensor<2x3x4xf32>) -> tensor<3xindex> {
+  // CHECK: shape.const_shape [2, 3, 4] : tensor<3xindex>
+  %0 = shape.shape_of %arg0 : tensor<2x3x4xf32> -> tensor<3xindex>
+  return %0 : tensor<3xindex>
 }
 
 // -----
@@ -12,9 +12,9 @@ func @f(%arg0: tensor<2x3x4xf32>) -> tensor<?xindex> {
 // Basic case.
 // CHECK-LABEL: func @f
 func @f() -> (!shape.shape, !shape.shape) {
-  // CHECK: shape.const_shape [2, 3] : !shape.shape
-  // CHECK: shape.const_shape [4, 5] : !shape.shape
-  %c2 = constant 2 : index
+  // CHECK-DAG: shape.const_shape [2, 3] : !shape.shape
+  // CHECK-DAG: shape.const_shape [4, 5] : !shape.shape
+  %c2 = arith.constant 2 : index
   %0 = shape.const_shape [2, 3, 4, 5] : !shape.shape
   %head, %tail = "shape.split_at"(%0, %c2) : (!shape.shape, index) -> (!shape.shape, !shape.shape)
   return %head, %tail : !shape.shape, !shape.shape
@@ -26,9 +26,9 @@ func @f() -> (!shape.shape, !shape.shape) {
 // Negative split point.
 // CHECK-LABEL: func @f
 func @f() -> (!shape.shape, !shape.shape) {
-  // CHECK: shape.const_shape [2, 3, 4] : !shape.shape
-  // CHECK: shape.const_shape [5] : !shape.shape
-  %c-1 = constant -1 : index
+  // CHECK-DAG: shape.const_shape [2, 3, 4] : !shape.shape
+  // CHECK-DAG: shape.const_shape [5] : !shape.shape
+  %c-1 = arith.constant -1 : index
   %0 = shape.const_shape [2, 3, 4, 5] : !shape.shape
   %head, %tail = "shape.split_at"(%0, %c-1) : (!shape.shape, index) -> (!shape.shape, !shape.shape)
   return %head, %tail : !shape.shape, !shape.shape
@@ -40,7 +40,7 @@ func @f() -> (!shape.shape, !shape.shape) {
 // CHECK-LABEL: func @f
 func @f() -> (!shape.shape, !shape.shape) {
   // CHECK: shape.split_at
-  %c5 = constant 5 : index
+  %c5 = arith.constant 5 : index
   %0 = shape.const_shape [2, 3, 4, 5] : !shape.shape
   %head, %tail = "shape.split_at"(%0, %c5) : (!shape.shape, index) -> (!shape.shape, !shape.shape)
   return %head, %tail : !shape.shape, !shape.shape
@@ -62,13 +62,13 @@ func @f() -> !shape.shape {
 
 // Basic case including extent tensors.
 // CHECK-LABEL: @broadcast
-func @broadcast() -> tensor<?xindex> {
-  // CHECK: shape.const_shape [7, 2] : tensor<?xindex>
-  %0 = shape.const_shape [1, 2] : tensor<?xindex>
-  %1 = shape.const_shape [7, 1] : tensor<?xindex>
+func @broadcast() -> tensor<2xindex> {
+  // CHECK: shape.const_shape [7, 2] : tensor<2xindex>
+  %0 = shape.const_shape [1, 2] : tensor<2xindex>
+  %1 = shape.const_shape [7, 1] : tensor<2xindex>
   %2 = shape.broadcast %0, %1
-      : tensor<?xindex>, tensor<?xindex> -> tensor<?xindex>
-  return %2 : tensor<?xindex>
+      : tensor<2xindex>, tensor<2xindex> -> tensor<2xindex>
+  return %2 : tensor<2xindex>
 }
 
 // -----
@@ -77,9 +77,9 @@ func @broadcast() -> tensor<?xindex> {
 // CHECK-LABEL: @broadcast
 func @broadcast() -> !shape.shape {
   // CHECK: shape.const_shape [7, 2] : !shape.shape
-  %0 = shape.const_shape [1, 2] : tensor<?xindex>
-  %1 = shape.const_shape [7, 1] : tensor<?xindex>
-  %2 = shape.broadcast %0, %1 : tensor<?xindex>, tensor<?xindex> -> !shape.shape
+  %0 = shape.const_shape [1, 2] : tensor<2xindex>
+  %1 = shape.const_shape [7, 1] : tensor<2xindex>
+  %2 = shape.broadcast %0, %1 : tensor<2xindex>, tensor<2xindex> -> !shape.shape
   return %2 : !shape.shape
 }
 
@@ -138,7 +138,7 @@ func @all_but_one_empty(%arg0 : !shape.shape) -> !shape.shape {
 // CHECK-LABEL: @partial_folding
 // CHECK-SAME:  (%[[ARG:.*]]: !shape.shape)
 func @partial_folding(%arg0 : !shape.shape) -> !shape.shape {
-  // CHECK: %[[CST_SHAPE:.*]] = constant dense<[1, 2, 3]> : tensor<3xindex>
+  // CHECK: %[[CST_SHAPE:.*]] = shape.const_shape [1, 2, 3] : tensor<3xindex>
   // CHECK: %[[RESULT:.*]] = shape.broadcast %[[ARG]], %[[CST_SHAPE]] : !shape.shape, tensor<3xindex> -> !shape.shape
   // CHECK: return %[[RESULT]]
   %0 = shape.const_shape [2, 1] : !shape.shape
@@ -188,7 +188,7 @@ func @f() -> !shape.shape {
 // Basic case.
 // CHECK-LABEL: func @f
 func @f() -> tensor<2xindex> {
-  // CHECK: constant dense<[0, 1]> : tensor<2xindex>
+  // CHECK: shape.const_shape [0, 1] : tensor<2xindex>
   %cs = shape.const_shape [0, 1] : !shape.shape
   %0 = shape.to_extent_tensor %cs : !shape.shape -> tensor<2xindex>
   return %0 : tensor<2xindex>
@@ -200,9 +200,9 @@ func @f() -> tensor<2xindex> {
 // CHECK-LABEL: func @f()
 func @f() -> !shape.shape {
   // CHECK: shape.const_shape [3, 5, 11] : !shape.shape
-  %e0 = constant 3 : index
-  %e1 = constant 5 : index
-  %e2 = constant 11 : index
+  %e0 = arith.constant 3 : index
+  %e1 = arith.constant 5 : index
+  %e2 = arith.constant 11 : index
   %ret = shape.from_extents %e0, %e1, %e2 : index, index, index
   return %ret : !shape.shape
 }
@@ -224,7 +224,7 @@ func @fold_const_size() -> !shape.shape {
 // CHECK-LABEL: func @no_fold
 func @no_fold(%arg0: index) -> !shape.shape {
   // CHECK-NOT: shape.const_shape
-  %e0 = constant 3 : index
+  %e0 = arith.constant 3 : index
   %ret = shape.from_extents %e0, %arg0 : index, index
   return %ret : !shape.shape
 }
@@ -236,7 +236,7 @@ func @no_fold(%arg0: index) -> !shape.shape {
 func @const_size_to_index() -> index {
   // CHECK-NOT: shape.index_cast
   %cs = shape.const_size 123
-  // CHECK: constant 123 : index
+  // CHECK: arith.constant 123 : index
   %ci = shape.size_to_index %cs : !shape.size
   return %ci : index
 }
@@ -246,8 +246,8 @@ func @const_size_to_index() -> index {
 // Cast constant index to size and fold it away.
 // CHECK-LABEL: func @const_index_to_size
 func @const_index_to_size() -> !shape.size {
-  // CHECK-NOT: index_cast
-  %ci = constant 123 : index
+  // CHECK-NOT: arith.index_cast
+  %ci = arith.constant 123 : index
   // CHECK: shape.const_size 123
   %cs = shape.index_to_size %ci
   return %cs : !shape.size
@@ -259,9 +259,9 @@ func @const_index_to_size() -> !shape.size {
 // CHECK-LABEL: func @const_index_to_size_to_index
 func @const_index_to_size_to_index() -> index {
   // CHECK-NOT: shape.index_cast
-  %ci0 = constant 123 : index
+  %ci0 = arith.constant 123 : index
   %cs0 = shape.index_to_size %ci0
-  // CHECK: %[[CI:.*]] = constant 123 : index
+  // CHECK: %[[CI:.*]] = arith.constant 123 : index
   // CHECK-NEXT: return %[[CI]] : index
   %ci1 = shape.size_to_index %cs0 : !shape.size
   return %ci1 : index
@@ -317,9 +317,9 @@ func @nonfoldable_num_elements(%shape : !shape.shape) -> !shape.size {
 // CHECK-LABEL: func @basic
 func @basic() -> index {
   // CHECK: constant 2 : index
-  %0 = shape.const_shape [0, 1, 2] : tensor<?xindex>
-  %c2 = constant 2 : index
-  %1 = shape.get_extent %0, %c2 : tensor<?xindex>, index -> index
+  %0 = shape.const_shape [0, 1, 2] : tensor<3xindex>
+  %c2 = arith.constant 2 : index
+  %1 = shape.get_extent %0, %c2 : tensor<3xindex>, index -> index
   return %1 : index
 }
 
@@ -330,9 +330,9 @@ func @basic() -> index {
 func @out_of_bounds() -> index {
   // CHECK: shape.const_shape
   // CHECK: shape.get_extent
-  %0 = shape.const_shape [0, 1, 2] : tensor<?xindex>
-  %c3 = constant 3 : index
-  %1 = shape.get_extent %0, %c3 : tensor<?xindex>, index -> index
+  %0 = shape.const_shape [0, 1, 2] : tensor<3xindex>
+  %c3 = arith.constant 3 : index
+  %1 = shape.get_extent %0, %c3 : tensor<3xindex>, index -> index
   return %1 : index
 }
 
@@ -342,7 +342,7 @@ func @out_of_bounds() -> index {
 // CHECK-LABEL: func @not_const
 func @not_const(%arg0: tensor<?xindex>) -> index {
   // CHECK: shape.get_extent
-  %c3 = constant 3 : index
+  %c3 = arith.constant 3 : index
   %0 = shape.get_extent %arg0, %c3 : tensor<?xindex>, index -> index
   return %0 : index
 }
@@ -445,7 +445,7 @@ func @cstr_require_fold() {
   // CHECK-NEXT: shape.const_witness true
   // CHECK-NEXT: consume.witness
   // CHECK-NEXT: return
-  %true = constant true
+  %true = arith.constant true
   %0 = shape.cstr_require %true, "msg"
   "consume.witness"(%0) : (!shape.witness) -> ()
   return
@@ -475,6 +475,19 @@ func @assuming_all_to_cstr_eq(%a : !shape.shape, %b : tensor<?xindex>,
   %1 = shape.cstr_eq %b, %c : tensor<?xindex>, tensor<3xindex>
   %2 = shape.assuming_all %0, %1
   return %2 : !shape.witness
+}
+
+// -----
+// `assuming_all` with duplicate operands.
+// CHECK-LABEL: func @assuming_all_duplicate_operands
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<?xindex>, %[[ARG1:.*]]: tensor<?xindex>)
+func @assuming_all_duplicate_operands(%arg0 : tensor<?xindex>,
+    %arg1 : tensor<?xindex>) -> !shape.witness {
+  // CHECK: %[[RES:.*]] = shape.cstr_broadcastable %[[ARG0]], %[[ARG1]]
+  // CHECK: return %[[RES]]
+  %0 = shape.cstr_broadcastable %arg0, %arg1 : tensor<?xindex>, tensor<?xindex>
+  %1 = shape.assuming_all %0, %0, %0
+  return %1 : !shape.witness
 }
 
 // -----
@@ -546,12 +559,12 @@ func @f(%arg : !shape.shape) -> !shape.shape {
 
 // any can be replaced with a constant input if it has one.
 // CHECK-LABEL: func @f
-func @f(%arg : tensor<?xindex>) -> tensor<?xindex> {
-  // CHECK-NEXT: %[[CS:.*]] = shape.const_shape [2, 3, 4] : tensor<?xindex>
-  // CHECK-NEXT: return %[[CS]] : tensor<?xindex>
-  %0 = shape.const_shape [2, 3, 4] : tensor<?xindex>
-  %1 = shape.any %0, %arg : tensor<?xindex>, tensor<?xindex> -> tensor<?xindex>
-  return %1 : tensor<?xindex>
+func @f(%arg : tensor<?xindex>) -> tensor<3xindex> {
+  // CHECK-NEXT: %[[CS:.*]] = shape.const_shape [2, 3, 4] : tensor<3xindex>
+  // CHECK-NEXT: return %[[CS]] : tensor<3xindex>
+  %0 = shape.const_shape [2, 3, 4] : tensor<3xindex>
+  %1 = shape.any %0, %arg : tensor<3xindex>, tensor<?xindex> -> tensor<3xindex>
+  return %1 : tensor<3xindex>
 }
 
 // -----
@@ -635,6 +648,20 @@ func @f() {
   %cs1 = shape.const_shape [1, 5] : !shape.shape
   %0 = shape.cstr_broadcastable %cs0, %cs1 : !shape.shape, !shape.shape
   "consume.witness"(%0) : (!shape.witness) -> ()
+  return
+}
+
+// -----
+// Empty shape arguments can be removed from broadcastable ops.
+// CHECK-LABEL: func @f
+// CHECK-SAME:  (%[[ARG0:.*]]: tensor<?xindex>, %[[ARG1:.*]]: tensor<?xindex>, %{{.*}}: tensor<0xindex>)
+func @f(%arg0 : tensor<?xindex>, %arg1 : tensor<?xindex>, %arg2 : tensor<0xindex>) {
+  // CHECK-NOT: const_shape
+  // CHECK: cstr_broadcastable %[[ARG0]], %[[ARG1]] : tensor<?xindex>, tensor<?xindex>
+  %0 = shape.const_shape [] : !shape.shape
+  %1 = shape.cstr_broadcastable %arg0, %arg1, %0, %arg2
+      : tensor<?xindex>, tensor<?xindex>, !shape.shape, tensor<0xindex>
+  "consume.witness"(%1) : (!shape.witness) -> ()
   return
 }
 
@@ -808,10 +835,10 @@ func @dont_fold_rank(%shape : !shape.shape) -> !shape.size {
 // Fold `rank` based on constant extent tensor.
 // CHECK-LABEL: @fold_rank
 func @fold_rank() -> index {
-  // CHECK: %[[RESULT:.*]] = constant 5 : index
+  // CHECK: %[[RESULT:.*]] = arith.constant 5 : index
   // CHECK: return %[[RESULT]] : index
-  %shape = shape.const_shape [3, 4, 5, 6, 7] : tensor<?xindex>
-  %rank = shape.rank %shape : tensor<?xindex> -> index
+  %shape = shape.const_shape [3, 4, 5, 6, 7] : tensor<5xindex>
+  %rank = shape.rank %shape : tensor<5xindex> -> index
   return %rank : index
 }
 
@@ -832,7 +859,7 @@ func @dont_fold_rank(%shape : tensor<?xindex>) -> index {
 // Canonicalize `rank` when shape is derived from ranked tensor.
 // CHECK-LABEL: @canonicalize_rank
 func @canonicalize_rank(%arg : tensor<1x2x?xf32>) -> index {
-  // CHECK: %[[RESULT:.*]] = constant 3 : index
+  // CHECK: %[[RESULT:.*]] = arith.constant 3 : index
   // CHECK: return %[[RESULT]] : index
   %shape = shape.shape_of %arg : tensor<1x2x?xf32> -> tensor<?xindex>
   %rank = shape.rank %shape : tensor<?xindex> -> index
@@ -941,12 +968,12 @@ func @cstr_broadcastable_scalar_unranked(%arg0 : tensor<*xf32>, %arg1 : tensor<i
 // Fold `shape_eq` for equal and constant shapes.
 // CHECK-LABEL: @shape_eq_fold_1
 func @shape_eq_fold_1() -> i1 {
-  // CHECK: %[[RESULT:.*]] = constant true
+  // CHECK: %[[RESULT:.*]] = arith.constant true
   // CHECK: return %[[RESULT]] : i1
   %a = shape.const_shape [1, 2, 3] : !shape.shape
-  %b = shape.const_shape [1, 2, 3] : tensor<?xindex>
-  %c = shape.const_shape [1, 2, 3] : tensor<?xindex>
-  %result = shape.shape_eq %a, %b, %c : !shape.shape, tensor<?xindex>, tensor<?xindex>
+  %b = shape.const_shape [1, 2, 3] : tensor<3xindex>
+  %c = shape.const_shape [1, 2, 3] : tensor<3xindex>
+  %result = shape.shape_eq %a, %b, %c : !shape.shape, tensor<3xindex>, tensor<3xindex>
   return %result : i1
 }
 
@@ -955,12 +982,12 @@ func @shape_eq_fold_1() -> i1 {
 // Fold `shape_eq` for different but constant shapes of same length.
 // CHECK-LABEL: @shape_eq_fold_0
 func @shape_eq_fold_0() -> i1 {
-  // CHECK: %[[RESULT:.*]] = constant false
+  // CHECK: %[[RESULT:.*]] = arith.constant false
   // CHECK: return %[[RESULT]] : i1
-  %a = shape.const_shape [1, 2, 3] : tensor<?xindex>
-  %b = shape.const_shape [4, 5, 6] : tensor<?xindex>
-  %c = shape.const_shape [4, 5, 6] : tensor<?xindex>
-  %result = shape.shape_eq %a, %b, %c : tensor<?xindex>, tensor<?xindex>, tensor<?xindex>
+  %a = shape.const_shape [1, 2, 3] : tensor<3xindex>
+  %b = shape.const_shape [4, 5, 6] : tensor<3xindex>
+  %c = shape.const_shape [4, 5, 6] : tensor<3xindex>
+  %result = shape.shape_eq %a, %b, %c : tensor<3xindex>, tensor<3xindex>, tensor<3xindex>
   return %result : i1
 }
 
@@ -969,7 +996,7 @@ func @shape_eq_fold_0() -> i1 {
 // Fold `shape_eq` for different but constant shapes of different length.
 // CHECK-LABEL: @shape_eq_fold_0
 func @shape_eq_fold_0() -> i1 {
-  // CHECK: %[[RESULT:.*]] = constant false
+  // CHECK: %[[RESULT:.*]] = arith.constant false
   // CHECK: return %[[RESULT]] : i1
   %a = shape.const_shape [1, 2, 3, 4, 5, 6] : !shape.shape
   %b = shape.const_shape [1, 2, 3] : !shape.shape
@@ -993,6 +1020,19 @@ func @shape_eq_do_not_fold(%a : !shape.shape) -> i1 {
 
 // -----
 
+// Fold `add` for constant sizes.
+// CHECK-LABEL: @fold_add_size
+func @fold_add_size() -> !shape.size {
+  // CHECK: %[[RESULT:.*]] = shape.const_size 5
+  // CHECK: return %[[RESULT]] : !shape.size
+  %c2 = shape.const_size 2
+  %c3 = shape.const_size 3
+  %result = shape.add %c2, %c3 : !shape.size, !shape.size -> !shape.size
+  return %result : !shape.size
+}
+
+// -----
+
 // Fold `mul` for constant sizes.
 // CHECK-LABEL: @fold_mul_size
 func @fold_mul_size() -> !shape.size {
@@ -1009,10 +1049,10 @@ func @fold_mul_size() -> !shape.size {
 // Fold `mul` for constant indices.
 // CHECK-LABEL: @fold_mul_index
 func @fold_mul_index() -> index {
-  // CHECK: %[[RESULT:.*]] = constant 6 : index
+  // CHECK: %[[RESULT:.*]] = arith.constant 6 : index
   // CHECK: return %[[RESULT]] : index
-  %c2 = constant 2 : index
-  %c3 = constant 3 : index
+  %c2 = arith.constant 2 : index
+  %c3 = arith.constant 3 : index
   %result = shape.mul %c2, %c3 : index, index -> index
   return %result : index
 }
@@ -1025,7 +1065,7 @@ func @fold_mul_mixed() -> !shape.size {
   // CHECK: %[[RESULT:.*]] = shape.const_size 6
   // CHECK: return %[[RESULT]] : !shape.size
   %c2 = shape.const_size 2
-  %c3 = constant 3 : index
+  %c3 = arith.constant 3 : index
   %result = shape.mul %c2, %c3 : !shape.size, index -> !shape.size
   return %result : !shape.size
 }
@@ -1048,10 +1088,10 @@ func @fold_div_size() -> !shape.size {
 // Fold `div` for constant indices.
 // CHECK-LABEL: @fold_div_index
 func @fold_div_index() -> index {
-  // CHECK: %[[RESULT:.*]] = constant 2 : index
+  // CHECK: %[[RESULT:.*]] = arith.constant 2 : index
   // CHECK: return %[[RESULT]] : index
-  %c2 = constant 10 : index
-  %c3 = constant 4 : index
+  %c2 = arith.constant 10 : index
+  %c3 = arith.constant 4 : index
   %result = shape.div %c2, %c3 : index, index -> index
   return %result : index
 }
@@ -1061,10 +1101,10 @@ func @fold_div_index() -> index {
 // Fold `div` for constant indices and lhs is negative.
 // CHECK-LABEL: @fold_div_index_neg_lhs
 func @fold_div_index_neg_lhs() -> index {
-  // CHECK: %[[RESULT:.*]] = constant -3 : index
+  // CHECK: %[[RESULT:.*]] = arith.constant -3 : index
   // CHECK: return %[[RESULT]] : index
-  %c2 = constant -10 : index
-  %c3 = constant 4 : index
+  %c2 = arith.constant -10 : index
+  %c3 = arith.constant 4 : index
   %result = shape.div %c2, %c3 : index, index -> index
   return %result : index
 }
@@ -1074,10 +1114,10 @@ func @fold_div_index_neg_lhs() -> index {
 // Fold `div` for constant indices and rhs is negative.
 // CHECK-LABEL: @fold_div_index_neg_rhs
 func @fold_div_index_neg_rhs() -> index {
-  // CHECK: %[[RESULT:.*]] = constant -3 : index
+  // CHECK: %[[RESULT:.*]] = arith.constant -3 : index
   // CHECK: return %[[RESULT]] : index
-  %c2 = constant 10 : index
-  %c3 = constant -4 : index
+  %c2 = arith.constant 10 : index
+  %c3 = arith.constant -4 : index
   %result = shape.div %c2, %c3 : index, index -> index
   return %result : index
 }
@@ -1090,7 +1130,7 @@ func @fold_div_mixed() -> !shape.size {
   // CHECK: %[[RESULT:.*]] = shape.const_size 4
   // CHECK: return %[[RESULT]] : !shape.size
   %c2 = shape.const_size 12
-  %c3 = constant 3 : index
+  %c3 = arith.constant 3 : index
   %result = shape.div %c2, %c3 : !shape.size, index -> !shape.size
   return %result : !shape.size
 }
@@ -1101,8 +1141,8 @@ func @fold_div_mixed() -> !shape.size {
 // CHECK-LABEL: @fold_index_cast_on_index
 func @fold_index_cast_on_index(%arg: index) -> index {
   // CHECK-NOT: size_to_index
-  %casted = shape.size_to_index %arg : index
-  return %casted : index
+  %0 = shape.size_to_index %arg : index
+  return %0 : index
 }
 
 // -----
@@ -1111,8 +1151,8 @@ func @fold_index_cast_on_index(%arg: index) -> index {
 // CHECK-LABEL: @fold_to_extent_tensor_on_tensor
 func @fold_to_extent_tensor_on_tensor(%arg: tensor<?xindex>) -> tensor<?xindex> {
   // CHECK-NOT: to_extent_tensor
-  %casted = shape.to_extent_tensor %arg : tensor<?xindex> -> tensor<?xindex>
-  return %casted : tensor<?xindex>
+  %0 = shape.to_extent_tensor %arg : tensor<?xindex> -> tensor<?xindex>
+  return %0 : tensor<?xindex>
 }
 
 // -----
@@ -1132,20 +1172,19 @@ func @fold_assuming_all_single_element(%arg: tensor<?xindex>) {
 // Verify that tensor.cast folding uses the correct type
 // CHECK-LABEL: @fold_tensor.cast_of_const_shape_returned
 func @fold_tensor.cast_of_const_shape_returned(%arg: i1) -> tensor<1xindex> {
-  // CHECK: constant dense<2> : tensor<1xindex>
+  // CHECK: shape.const_shape [2] : tensor<1xindex>
   // CHECK-NOT: tensor.cast
-  %0 = shape.const_shape [2] : tensor<?xindex>
-  %1 = tensor.cast %0 : tensor<?xindex> to tensor<1xindex>
+  %0 = shape.const_shape [2] : tensor<1xindex>
+  %1 = tensor.cast %0 : tensor<1xindex> to tensor<1xindex>
   return %1 : tensor<1xindex>
 }
 
 // -----
 
-// Verify that tensor.cast folding uses the correct type
-// CHECK-LABEL: @fold_tensor.cast_of_const_shape_returned_dynamic
-func @fold_tensor.cast_of_const_shape_returned_dynamic(%arg: i1) -> tensor<?xindex> {
-  // CHECK: shape.const_shape [2] : tensor<?xindex>
-  // CHECK-NOT: tensor.cast
+// CHECK-LABEL: @dont_fold_tensor.cast_of_const_shape_returned_dynamic
+func @dont_fold_tensor.cast_of_const_shape_returned_dynamic(%arg: i1) -> tensor<?xindex> {
+  // CHECK: %[[CONST_SHAPE:.*]] = shape.const_shape [2] : tensor<1xindex>
+  // CHECK: tensor.cast %[[CONST_SHAPE]] : tensor<1xindex> to tensor<?xindex>
   %0 = shape.const_shape [2] : tensor<1xindex>
   %1 = tensor.cast %0 : tensor<1xindex> to tensor<?xindex>
   return %1 : tensor<?xindex>
@@ -1156,7 +1195,7 @@ func @fold_tensor.cast_of_const_shape_returned_dynamic(%arg: i1) -> tensor<?xind
 // CHECK-LABEL: @is_broadcastable_on_same_shape
 func @is_broadcastable_on_same_shape(%shape : !shape.shape) -> i1 {
   // CHECK-NOT: is_broadcastable
-  // CHECK: %[[RES:.*]] = constant true
+  // CHECK: %[[RES:.*]] = arith.constant true
   // CHECK: return %[[RES]]
   %0 = shape.is_broadcastable %shape, %shape, %shape
       : !shape.shape, !shape.shape, !shape.shape
@@ -1217,20 +1256,42 @@ func @broadcast_on_duplicate_shapes(%a : !shape.shape, %b : !shape.shape)
 // -----
 
 // CHECK-LABEL: @broadcast_on_single_operand
-// CHECK-SAME: (%[[A:.*]]: tensor<3xindex>)
-func @broadcast_on_single_operand(%a : tensor<3xindex>) {
+// CHECK-SAME: (%[[A:.*]]: tensor<?xindex>)
+func @broadcast_on_single_operand(%a : tensor<?xindex>) {
   // CHECK-NOT: broadcast
   // CHECK: "use"(%[[A]])
-  %0 = shape.broadcast %a : tensor<3xindex> -> tensor<?xindex>
+  %0 = shape.broadcast %a : tensor<?xindex> -> tensor<?xindex>
   "use"(%0) : (tensor<?xindex>) -> ()
   return
 }
 
 // -----
 
-// CHECK-LABEL: @casted_extent_tensor
+// CHECK-LABEL: @broadcast_as_tensor_cast
+// CHECK-SAME: (%[[A:.*]]: tensor<3xindex>)
+func @broadcast_as_tensor_cast(%a : tensor<3xindex>) -> tensor<?xindex> {
+  // CHECK: %[[RESULT:.*]] = tensor.cast %[[A]] : tensor<3xindex> to tensor<?xindex>
+  // CHECK: return %[[RESULT]] : tensor<?xindex>
+  %0 = shape.broadcast %a : tensor<3xindex> -> tensor<?xindex>
+  return %0 : tensor<?xindex>
+}
+
+// -----
+
+// CHECK-LABEL: @broadcast_as_from_extent_tensor
+// CHECK-SAME: (%[[A:.*]]: tensor<?xindex>)
+func @broadcast_as_from_extent_tensor(%a : tensor<?xindex>) -> !shape.shape {
+  // CHECK: %[[RESULT:.*]] = shape.from_extent_tensor %[[A]] : tensor<?xindex>
+  // CHECK: return %[[RESULT]] : !shape.shape
+  %0 = shape.broadcast %a : tensor<?xindex> -> !shape.shape
+  return %0 : !shape.shape
+}
+
+// -----
+
+// CHECK-LABEL: @cast_extent_tensor
 // CHECK-SAME: (%[[ARG:.*]]: tensor<?x?x?xf32>) -> tensor<?xindex>
-func @casted_extent_tensor(%arg : tensor<?x?x?xf32>) -> tensor<?xindex> {
+func @cast_extent_tensor(%arg : tensor<?x?x?xf32>) -> tensor<?xindex> {
   // CHECK: %[[RESULT:.*]] = shape.shape_of %[[ARG]] : tensor<?x?x?xf32> -> tensor<?xindex>
   // CHECK: return %[[RESULT]] : tensor<?xindex>
   %0 = shape.shape_of %arg : tensor<?x?x?xf32> -> tensor<3xindex>
@@ -1240,9 +1301,9 @@ func @casted_extent_tensor(%arg : tensor<?x?x?xf32>) -> tensor<?xindex> {
 
 // -----
 
-// CHECK-LABEL: @casted_extent_tensor
+// CHECK-LABEL: @cast_extent_tensor
 // CHECK-SAME: (%[[ARG:.*]]: tensor<?x?x?xf32>) -> tensor<3xindex>
-func @casted_extent_tensor(%arg : tensor<?x?x?xf32>) -> tensor<3xindex> {
+func @cast_extent_tensor(%arg : tensor<?x?x?xf32>) -> tensor<3xindex> {
   // CHECK: %[[RESULT:.*]] = shape.shape_of %[[ARG]] : tensor<?x?x?xf32> -> tensor<3xindex>
   // CHECK: return %[[RESULT]] : tensor<3xindex>
   %0 = shape.shape_of %arg : tensor<?x?x?xf32> -> tensor<?xindex>
@@ -1252,8 +1313,8 @@ func @casted_extent_tensor(%arg : tensor<?x?x?xf32>) -> tensor<3xindex> {
 
 // -----
 
-// CHECK-LABEL: @casted_extent_tensor
-func @casted_extent_tensor(%arg : tensor<?x?x?x?xf32>) -> tensor<3xindex> {
+// CHECK-LABEL: @cast_extent_tensor
+func @cast_extent_tensor(%arg : tensor<?x?x?x?xf32>) -> tensor<3xindex> {
   // CHECK: tensor.cast %{{.*}} : tensor<?xindex> to tensor<3xindex>
   %0 = shape.shape_of %arg : tensor<?x?x?x?xf32> -> tensor<?xindex>
   %1 = tensor.cast %0 : tensor<?xindex> to tensor<3xindex>
@@ -1262,15 +1323,15 @@ func @casted_extent_tensor(%arg : tensor<?x?x?x?xf32>) -> tensor<3xindex> {
 
 // -----
 
-// CHECK-LABEL: @casted_extent_tensor
-func @casted_extent_tensor(%arg : tensor<*xf32>) -> tensor<3xindex> {
+// CHECK-LABEL: @cast_extent_tensor
+func @cast_extent_tensor(%arg : tensor<*xf32>) -> tensor<3xindex> {
   // CHECK: tensor.cast %{{.*}} : tensor<?xindex> to tensor<3xindex>
   %0 = shape.shape_of %arg : tensor<*xf32> -> tensor<?xindex>
   %1 = tensor.cast %0 : tensor<?xindex> to tensor<3xindex>
   return %1 : tensor<3xindex>
 }
 
-// ----
+// -----
 
 // CHECK-LABEL: max_same_arg
 // CHECK-SAME: (%[[SHAPE:.*]]: !shape.shape)
@@ -1280,7 +1341,7 @@ func @max_same_arg(%a: !shape.shape) -> !shape.shape {
   return %1 : !shape.shape
 }
 
-// ----
+// -----
 
 // CHECK-LABEL: min_same_arg
 // CHECK-SAME: (%[[SHAPE:.*]]: !shape.shape)
@@ -1289,14 +1350,60 @@ func @min_same_arg(%a: !shape.shape) -> !shape.shape {
   // CHECK: return %[[SHAPE]]
   return %1 : !shape.shape
 }
-
-// ----
+// -----
 
 // CHECK-LABEL: @cstr_broadcastable_folding
 func @cstr_broadcastable_folding(%arg : tensor<?x4xf32>) {
   // CHECK: const_witness true
   %0 = shape.shape_of %arg : tensor<?x4xf32> -> tensor<2xindex>
-  %1 = constant dense<[4]> : tensor<1xindex>
+  %1 = shape.const_shape [4] : tensor<1xindex>
   %2 = shape.cstr_broadcastable %0, %1: tensor<2xindex>, tensor<1xindex>
   "use"(%2) : (!shape.witness) -> ()
+}
+
+// -----
+
+// CHECK-LABEL: @cast_extent_tensor_operands
+// CHECK-SAME: (%[[ARG0:.*]]: tensor<?xindex>, %[[ARG1:.*]]: tensor<3xindex>)
+func @cast_extent_tensor_operands(%arg0 : tensor<?xindex>,
+    %arg1 : tensor<3xindex>) -> (!shape.witness, tensor<?xindex>) {
+  // CHECK: %[[CAST_ARG0:.*]] = tensor.cast %[[ARG0]] : tensor<?xindex> to tensor<3xindex>
+  // CHECK: %[[WIT:.*]] = shape.cstr_broadcastable %[[CAST_ARG0]], %[[ARG1]] : tensor<3xindex>, tensor<3xindex>
+  // CHECK: %[[UNCAST_RES:.*]] = shape.broadcast %[[CAST_ARG0]], %[[ARG1]] : tensor<3xindex>, tensor<3xindex> -> tensor<3xindex>
+  // CHECK: %[[RES:.*]] = tensor.cast %[[UNCAST_RES]] : tensor<3xindex> to tensor<?xindex>
+  // CHECK: return %[[WIT]], %[[RES]]
+  %0 = tensor.cast %arg0 : tensor<?xindex> to tensor<3xindex>
+  %1 = tensor.cast %arg1 : tensor<3xindex> to tensor<?xindex>
+  %2 = shape.cstr_broadcastable %0, %1 : tensor<3xindex>, tensor<?xindex>
+  %3 = shape.broadcast %0, %1 :tensor<3xindex>, tensor<?xindex>
+      -> tensor<?xindex>
+  return %2, %3 : !shape.witness, tensor<?xindex>
+}
+
+// -----
+
+// CHECK-LABEL: @concretize_broadcast_result_type
+// CHECK-SAME:  (%[[ARG0:.*]]: tensor<2xindex>, %[[ARG1:.*]]: tensor<3xindex>)
+func @concretize_broadcast_result_type(%arg0 : tensor<2xindex>,
+    %arg1 : tensor<3xindex>) -> tensor<?xindex> {
+  // CHECK: %[[CONCR:.*]] = shape.broadcast %[[ARG0]], %[[ARG1]] : tensor<2xindex>, tensor<3xindex> -> tensor<3xindex>
+  // CHECK: %[[RES:.*]] = tensor.cast %[[CONCR]] : tensor<3xindex> to tensor<?xindex>
+  // CHECK: return %[[RES]]
+  %0 = shape.broadcast %arg0, %arg1 : tensor<2xindex>, tensor<3xindex>
+      -> tensor<?xindex>
+  return %0 : tensor<?xindex>
+}
+
+// -----
+
+// CHECK-LABEL: func @extract_shapeof
+// CHECK-SAME:    %[[ARG0:.*]]: tensor<?x?xf64>
+func @extract_shapeof(%arg0 : tensor<?x?xf64>) -> index {
+ %c1 = arith.constant 1 : index
+// CHECK:        %[[C1:.*]] = arith.constant 1
+ %shape = shape.shape_of %arg0 : tensor<?x?xf64> -> tensor<2xindex>
+// CHECK:        %[[DIM:.*]] = tensor.dim %[[ARG0]], %[[C1]]
+ %result = tensor.extract %shape[%c1] : tensor<2xindex>
+// CHECK:        return %[[DIM]]
+ return %result : index
 }

@@ -1,4 +1,4 @@
-//===-- runtime/unit-map.cpp ------------------------------------*- C++ -*-===//
+//===-- runtime/unit-map.cpp ----------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -52,14 +52,23 @@ void UnitMap::DestroyClosed(ExternalFileUnit &unit) {
 }
 
 void UnitMap::CloseAll(IoErrorHandler &handler) {
-  CriticalSection critical{lock_};
-  for (int j{0}; j < buckets_; ++j) {
-    while (Chain * p{bucket_[j].get()}) {
-      bucket_[j].swap(p->next); // pops p from head of list
-      p->unit.CloseUnit(CloseStatus::Keep, handler);
-      p->unit.~ExternalFileUnit();
-      FreeMemory(p);
+  // Extract units from the map so they can be closed
+  // without holding lock_.
+  OwningPtr<Chain> closeList;
+  {
+    CriticalSection critical{lock_};
+    for (int j{0}; j < buckets_; ++j) {
+      while (Chain * p{bucket_[j].get()}) {
+        bucket_[j].swap(p->next); // pops p from head of bucket list
+        closeList.swap(p->next); // pushes p to closeList
+      }
     }
+  }
+  while (Chain * p{closeList.get()}) {
+    closeList.swap(p->next); // pops p from head of closeList
+    p->unit.CloseUnit(CloseStatus::Keep, handler);
+    p->unit.~ExternalFileUnit();
+    FreeMemory(p);
   }
 }
 
@@ -67,7 +76,7 @@ void UnitMap::FlushAll(IoErrorHandler &handler) {
   CriticalSection critical{lock_};
   for (int j{0}; j < buckets_; ++j) {
     for (Chain *p{bucket_[j].get()}; p; p = p->next.get()) {
-      p->unit.Flush(handler);
+      p->unit.FlushOutput(handler);
     }
   }
 }
@@ -92,4 +101,5 @@ ExternalFileUnit &UnitMap::Create(int n, const Terminator &terminator) {
   bucket_[Hash(n)].swap(chain.next); // pushes new node as list head
   return chain.unit;
 }
+
 } // namespace Fortran::runtime::io

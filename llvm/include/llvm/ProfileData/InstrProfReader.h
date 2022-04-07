@@ -18,6 +18,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/ProfileSummary.h"
 #include "llvm/ProfileData/InstrProf.h"
+#include "llvm/ProfileData/InstrProfCorrelator.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/LineIterator.h"
@@ -71,6 +72,7 @@ public:
 /// format. Provides an iterator over NamedInstrProfRecords.
 class InstrProfReader {
   instrprof_error LastError = instrprof_error::success;
+  std::string LastErrorMsg;
 
 public:
   InstrProfReader() = default;
@@ -82,6 +84,9 @@ public:
   /// Read a single record.
   virtual Error readNextRecord(NamedInstrProfRecord &Record) = 0;
 
+  /// Print binary ids on stream OS.
+  virtual Error printBinaryIds(raw_ostream &OS) { return success(); };
+
   /// Iterator over profile data.
   InstrProfIterator begin() { return InstrProfIterator(this); }
   InstrProfIterator end() { return InstrProfIterator(); }
@@ -91,6 +96,9 @@ public:
   virtual bool hasCSIRLevelProfile() const = 0;
 
   virtual bool instrEntryBBEnabled() const = 0;
+
+  /// Return true if we must provide debug info to create PGO profiles.
+  virtual bool useDebugInfoCorrelate() const { return false; }
 
   /// Return the PGO symtab. There are three different readers:
   /// Raw, Text, and Indexed profile readers. The first two types
@@ -111,14 +119,21 @@ protected:
   std::unique_ptr<InstrProfSymtab> Symtab;
 
   /// Set the current error and return same.
-  Error error(instrprof_error Err) {
+  Error error(instrprof_error Err, const std::string &ErrMsg = "") {
     LastError = Err;
+    LastErrorMsg = ErrMsg;
     if (Err == instrprof_error::success)
       return Error::success();
-    return make_error<InstrProfError>(Err);
+    return make_error<InstrProfError>(Err, ErrMsg);
   }
 
-  Error error(Error &&E) { return error(InstrProfError::take(std::move(E))); }
+  Error error(Error &&E) {
+    handleAllErrors(std::move(E), [&](const InstrProfError &IPE) {
+      LastError = IPE.get();
+      LastErrorMsg = IPE.getMessage();
+    });
+    return make_error<InstrProfError>(LastError, LastErrorMsg);
+  }
 
   /// Clear the current error and return a successful one.
   Error success() { return error(instrprof_error::success); }
@@ -133,16 +148,18 @@ public:
   /// Get the current error.
   Error getError() {
     if (hasError())
-      return make_error<InstrProfError>(LastError);
+      return make_error<InstrProfError>(LastError, LastErrorMsg);
     return Error::success();
   }
 
   /// Factory method to create an appropriately typed reader for the given
   /// instrprof file.
-  static Expected<std::unique_ptr<InstrProfReader>> create(const Twine &Path);
+  static Expected<std::unique_ptr<InstrProfReader>>
+  create(const Twine &Path, const InstrProfCorrelator *Correlator = nullptr);
 
   static Expected<std::unique_ptr<InstrProfReader>>
-  create(std::unique_ptr<MemoryBuffer> Buffer);
+  create(std::unique_ptr<MemoryBuffer> Buffer,
+         const InstrProfCorrelator *Correlator = nullptr);
 };
 
 /// Reader for the simple text based instrprof format.
@@ -194,7 +211,7 @@ public:
 
 /// Reader for the raw instrprof binary format from runtime.
 ///
-/// This format is a raw memory dump of the instrumentation-baed profiling data
+/// This format is a raw memory dump of the instrumentation-based profiling data
 /// from the runtime.  It has no index.
 ///
 /// Templated on the unsigned type whose size matches pointers on the platform
@@ -204,6 +221,9 @@ class RawInstrProfReader : public InstrProfReader {
 private:
   /// The profile data file contents.
   std::unique_ptr<MemoryBuffer> DataBuffer;
+  /// If available, this hold the ProfileData array used to correlate raw
+  /// instrumentation data to their functions.
+  const InstrProfCorrelatorImpl<IntPtrT> *Correlator;
   bool ShouldSwapBytes;
   // The value of the version field of the raw profile data header. The lower 56
   // bits specifies the format version and the most significant 8 bits specify
@@ -215,22 +235,29 @@ private:
   const RawInstrProf::ProfileData<IntPtrT> *DataEnd;
   const uint64_t *CountersStart;
   const char *NamesStart;
-  uint64_t NamesSize;
+  const char *NamesEnd;
   // After value profile is all read, this pointer points to
   // the header of next profile data (if exists)
   const uint8_t *ValueDataStart;
   uint32_t ValueKindLast;
   uint32_t CurValueDataSize;
 
+  uint64_t BinaryIdsSize;
+  const uint8_t *BinaryIdsStart;
+
 public:
-  RawInstrProfReader(std::unique_ptr<MemoryBuffer> DataBuffer)
-      : DataBuffer(std::move(DataBuffer)) {}
+  RawInstrProfReader(std::unique_ptr<MemoryBuffer> DataBuffer,
+                     const InstrProfCorrelator *Correlator)
+      : DataBuffer(std::move(DataBuffer)),
+        Correlator(dyn_cast_or_null<const InstrProfCorrelatorImpl<IntPtrT>>(
+            Correlator)) {}
   RawInstrProfReader(const RawInstrProfReader &) = delete;
   RawInstrProfReader &operator=(const RawInstrProfReader &) = delete;
 
   static bool hasFormat(const MemoryBuffer &DataBuffer);
   Error readHeader() override;
   Error readNextRecord(NamedInstrProfRecord &Record) override;
+  Error printBinaryIds(raw_ostream &OS) override;
 
   bool isIRLevelProfile() const override {
     return (Version & VARIANT_MASK_IR_PROF) != 0;
@@ -242,6 +269,10 @@ public:
 
   bool instrEntryBBEnabled() const override {
     return (Version & VARIANT_MASK_INSTR_ENTRY) != 0;
+  }
+
+  bool useDebugInfoCorrelate() const override {
+    return (Version & VARIANT_MASK_DBG_CORRELATE) != 0;
   }
 
   InstrProfSymtab &getSymtab() override {

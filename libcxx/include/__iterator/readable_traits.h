@@ -18,9 +18,6 @@
 #pragma GCC system_header
 #endif
 
-_LIBCPP_PUSH_MACROS
-#include <__undef_macros>
-
 _LIBCPP_BEGIN_NAMESPACE_STD
 
 #if !defined(_LIBCPP_HAS_NO_RANGES)
@@ -74,9 +71,9 @@ struct indirectly_readable_traits<_Tp>
 template <class>
 struct iterator_traits;
 
-// Let `RI` be `remove_­cvref_­t<I>`. The type `iter_­value_­t<I>` denotes
-// `indirectly_­readable_­traits<RI>::value_­type` if `iterator_­traits<RI>` names a specialization
-// generated from the primary template, and `iterator_­traits<RI>::value_­type` otherwise.
+// Let `RI` be `remove_cvref_t<I>`. The type `iter_value_t<I>` denotes
+// `indirectly_readable_traits<RI>::value_type` if `iterator_traits<RI>` names a specialization
+// generated from the primary template, and `iterator_traits<RI>::value_type` otherwise.
 template <class _Ip>
 using iter_value_t = typename conditional_t<__is_primary_template<iterator_traits<remove_cvref_t<_Ip> > >::value,
                                             indirectly_readable_traits<remove_cvref_t<_Ip> >,
@@ -85,7 +82,5 @@ using iter_value_t = typename conditional_t<__is_primary_template<iterator_trait
 #endif // !defined(_LIBCPP_HAS_NO_RANGES)
 
 _LIBCPP_END_NAMESPACE_STD
-
-_LIBCPP_POP_MACROS
 
 #endif // _LIBCPP___ITERATOR_READABLE_TRAITS_H

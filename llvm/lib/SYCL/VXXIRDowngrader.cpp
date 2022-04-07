@@ -22,6 +22,7 @@
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/LLVMContext.h"
 #include "llvm/SYCL/VXXIRDowngrader.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/SetVector.h"
@@ -114,7 +115,7 @@ struct VXXIRDowngrader : public ModulePass {
       // These appear on Call/Invoke Instructions as well
       for (auto &I : instructions(F))
         if (CallBase *CB = dyn_cast<CallBase>(&I)) {
-          for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
+          for (unsigned int i = 0; i < CB->arg_size(); ++i) {
             if (CB->paramHasAttr(i, llvm::Attribute::ByVal)) {
               CB->removeParamAttr(i, llvm::Attribute::ByVal);
               CB->addParamAttr(i,
@@ -137,6 +138,25 @@ struct VXXIRDowngrader : public ModulePass {
         for (auto &B : F)
           B.setName("label_" + Twine{count++});
     }
+  }
+
+  /// At this point in the pipeline Annotations intrinsic have all been
+  /// converted into what they need to be. But they can still be present and
+  /// have pointer on pointer as arguments which v++ can't deal with.
+  void removeAnnotations(Module &M) {
+    SmallVector<Instruction *, 16> ToRemove;
+    for (Function &F : M.functions())
+      if (F.getIntrinsicID() == Intrinsic::annotation ||
+          F.getIntrinsicID() == Intrinsic::ptr_annotation ||
+          F.getIntrinsicID() == Intrinsic::var_annotation)
+        for (User *U : F.users())
+          if (auto *I = dyn_cast<Instruction>(U))
+            ToRemove.push_back(I);
+    for (Instruction *I : ToRemove)
+      I->eraseFromParent();
+    GlobalVariable *Annot = M.getGlobalVariable("llvm.global.annotations");
+    if (Annot)
+      Annot->eraseFromParent();
   }
 
   /// Removes nofree bitcode function attribute that is applied to
@@ -163,15 +183,15 @@ struct VXXIRDowngrader : public ModulePass {
   void removeAttributes(Module &M, ArrayRef<Attribute::AttrKind> Kinds) {
     for (auto &F : M.functions())
       for (auto Kind : Kinds) {
-        F.removeAttribute(AttributeList::FunctionIndex, Kind);
-        F.removeAttribute(AttributeList::ReturnIndex, Kind);
+        F.removeFnAttr(Kind);
+        F.removeRetAttr(Kind);
         for (auto &P : F.args())
           P.removeAttr(Kind);
         for (User *U : F.users())
           if (CallBase *CB = dyn_cast<CallBase>(U)) {
-            CB->removeAttribute(AttributeList::FunctionIndex, Kind);
-            CB->removeAttribute(AttributeList::ReturnIndex, Kind);
-            for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
+            CB->removeFnAttr(Kind);
+            CB->removeRetAttr(Kind);
+            for (unsigned int i = 0; i < CB->arg_size(); ++i) {
               CB->removeParamAttr(i, Kind);
             }
           }
@@ -179,9 +199,9 @@ struct VXXIRDowngrader : public ModulePass {
   }
 
   /// Remove Freeze instruction because v++ can't deal with them.
-  /// This is not a safe transformation but since llvm survived with bugs cause
-  /// by absence of freeze for many years, so i guess its its good enough for a
-  /// prototype
+  /// FIXME: This is not a safe transformation but since LLVM survived with bugs
+  /// caused by absence of freeze for many years, so I guess it is good enough
+  /// for a prototype.
   void removeFreezeInst(Module &M) {
     SmallVector<Instruction*, 16> ToRemove;
     for (auto& F : M.functions())
@@ -219,7 +239,7 @@ struct VXXIRDowngrader : public ModulePass {
       for (auto &I : instructions(F))
         if (auto *MI = dyn_cast<AnyMemIntrinsic>(&I))
           for (Use &U : MI->args())
-            MI->removeAttribute(U.getOperandNo(),
+            MI->removeParamAttr(U.getOperandNo(),
                                 Attribute::AttrKind::Alignment);
   }
 
@@ -290,6 +310,14 @@ struct VXXIRDowngrader : public ModulePass {
     F->eraseFromParent();
   }
 
+  struct CleanerVisitor : InstVisitor<CleanerVisitor> {
+      void visitCallBase (CallBase& CB) {
+          if (CB.hasMetadata(llvm::LLVMContext::MD_range)) {
+              CB.setMetadata(llvm::LLVMContext::MD_range, nullptr);
+          }
+      }
+  };
+
   /// Visit the IR and emit warnings about construct not handled by the backend
   /// The IR has no debug info so we cannot say where in the source code the
   /// error happend.
@@ -338,7 +366,9 @@ struct VXXIRDowngrader : public ModulePass {
     resetByVal(M);
     removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
                          Attribute::ImmArg, Attribute::NoSync,
-                         Attribute::MustProgress, Attribute::NoUndef});
+                         Attribute::MustProgress, Attribute::NoUndef,
+                         Attribute::StructRet});
+    removeAnnotations(M);
     renameBasicBlocks(M);
     removeFreezeInst(M);
     removeFNegInst(M);
@@ -357,6 +387,8 @@ struct VXXIRDowngrader : public ModulePass {
       M.setTargetTriple("fpga32-xilinx-none");
     // The module probably changed
 
+    CleanerVisitor CV{};
+    CV.visit(M);
     warnForIssues(M);
 
     return true;

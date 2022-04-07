@@ -26,7 +26,13 @@ namespace {
 class TestLoopMappingPass
     : public PassWrapper<TestLoopMappingPass, FunctionPass> {
 public:
-  explicit TestLoopMappingPass() {}
+  StringRef getArgument() const final {
+    return "test-mapping-to-processing-elements";
+  }
+  StringRef getDescription() const final {
+    return "test mapping a single loop on a virtual processor grid";
+  }
+  explicit TestLoopMappingPass() = default;
 
   void getDependentDialects(DialectRegistry &registry) const override {
     registry.insert<AffineDialect, scf::SCFDialect>();
@@ -58,10 +64,6 @@ public:
 
 namespace mlir {
 namespace test {
-void registerTestLoopMappingPass() {
-  PassRegistration<TestLoopMappingPass>(
-      "test-mapping-to-processing-elements",
-      "test mapping a single loop on a virtual processor grid");
-}
+void registerTestLoopMappingPass() { PassRegistration<TestLoopMappingPass>(); }
 } // namespace test
 } // namespace mlir

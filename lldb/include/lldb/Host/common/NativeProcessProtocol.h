@@ -30,6 +30,8 @@
 #include <vector>
 
 namespace lldb_private {
+LLVM_ENABLE_BITMASK_ENUMS_IN_NAMESPACE();
+
 class MemoryRegionInfo;
 class ResumeActionList;
 
@@ -44,7 +46,7 @@ struct SVR4LibraryInfo {
 // NativeProcessProtocol
 class NativeProcessProtocol {
 public:
-  virtual ~NativeProcessProtocol() {}
+  virtual ~NativeProcessProtocol() = default;
 
   virtual Status Resume(const ResumeActionList &resume_actions) = 0;
 
@@ -84,6 +86,12 @@ public:
 
   Status ReadMemoryWithoutTrap(lldb::addr_t addr, void *buf, size_t size,
                                size_t &bytes_read);
+
+  virtual Status ReadMemoryTags(int32_t type, lldb::addr_t addr, size_t len,
+                                std::vector<uint8_t> &tags);
+
+  virtual Status WriteMemoryTags(int32_t type, lldb::addr_t addr, size_t len,
+                                 const std::vector<uint8_t> &tags);
 
   /// Reads a null terminated string from memory.
   ///
@@ -212,7 +220,7 @@ public:
   // Callbacks for low-level process state changes
   class NativeDelegate {
   public:
-    virtual ~NativeDelegate() {}
+    virtual ~NativeDelegate() = default;
 
     virtual void InitializeDelegate(NativeProcessProtocol *process) = 0;
 
@@ -220,6 +228,10 @@ public:
                                      lldb::StateType state) = 0;
 
     virtual void DidExec(NativeProcessProtocol *process) = 0;
+
+    virtual void
+    NewSubprocess(NativeProcessProtocol *parent_process,
+                  std::unique_ptr<NativeProcessProtocol> child_process) = 0;
   };
 
   virtual Status GetLoadedModuleFileSpec(const char *module_path,
@@ -227,6 +239,21 @@ public:
 
   virtual Status GetFileLoadAddress(const llvm::StringRef &file_name,
                                     lldb::addr_t &load_addr) = 0;
+
+  /// Extension flag constants, returned by Factory::GetSupportedExtensions()
+  /// and passed to SetEnabledExtension()
+  enum class Extension {
+    multiprocess = (1u << 0),
+    fork = (1u << 1),
+    vfork = (1u << 2),
+    pass_signals = (1u << 3),
+    auxv = (1u << 4),
+    libraries_svr4 = (1u << 5),
+    memory_tagging = (1u << 6),
+    savecore = (1u << 7),
+
+    LLVM_MARK_AS_BITMASK_ENUM(savecore)
+  };
 
   class Factory {
   public:
@@ -274,6 +301,12 @@ public:
     virtual llvm::Expected<std::unique_ptr<NativeProcessProtocol>>
     Attach(lldb::pid_t pid, NativeDelegate &native_delegate,
            MainLoop &mainloop) const = 0;
+
+    /// Get the bitmask of extensions supported by this process plugin.
+    ///
+    /// \return
+    ///     A NativeProcessProtocol::Extension bitmask.
+    virtual Extension GetSupportedExtensions() const { return {}; }
   };
 
   /// Start tracing a process or its threads.
@@ -328,6 +361,28 @@ public:
     return llvm::make_error<UnimplementedError>();
   }
 
+  /// Method called in order to propagate the bitmap of protocol
+  /// extensions supported by the client.
+  ///
+  /// \param[in] flags
+  ///     The bitmap of enabled extensions.
+  virtual void SetEnabledExtensions(Extension flags) {
+    m_enabled_extensions = flags;
+  }
+
+  /// Write a core dump (without crashing the program).
+  ///
+  /// \param[in] path_hint
+  ///     Suggested core dump path (optional, can be empty).
+  ///
+  /// \return
+  ///     Path to the core dump if successfully written, an error
+  ///     otherwise.
+  virtual llvm::Expected<std::string> SaveCore(llvm::StringRef path_hint) {
+    return llvm::createStringError(llvm::inconvertibleErrorCode(),
+                                   "Not implemented");
+  }
+
 protected:
   struct SoftwareBreakpoint {
     uint32_t ref_count;
@@ -356,6 +411,9 @@ protected:
   // Set of signal numbers that LLDB directly injects back to inferior without
   // stopping it.
   llvm::DenseSet<int> m_signals_to_ignore;
+
+  // Extensions enabled per the last SetEnabledExtensions() call.
+  Extension m_enabled_extensions;
 
   // lldb_private::Host calls should be used to launch a process for debugging,
   // and then the process should be attached to. When attaching to a process

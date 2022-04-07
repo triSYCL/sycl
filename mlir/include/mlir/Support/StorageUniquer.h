@@ -12,7 +12,9 @@
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Support/TypeID.h"
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseSet.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Allocator.h"
 
 namespace mlir {
@@ -81,7 +83,7 @@ class StorageUniquer {
 public:
   /// This class acts as the base storage that all storage classes must derived
   /// from.
-  class BaseStorage {
+  class alignas(8) BaseStorage {
   protected:
     BaseStorage() = default;
   };
@@ -103,8 +105,13 @@ public:
     /// Copy the provided string into memory managed by our bump pointer
     /// allocator.
     StringRef copyInto(StringRef str) {
-      auto result = copyInto(ArrayRef<char>(str.data(), str.size()));
-      return StringRef(result.data(), str.size());
+      if (str.empty())
+        return StringRef();
+
+      char *result = allocator.Allocate<char>(str.size() + 1);
+      std::uninitialized_copy(str.begin(), str.end(), result);
+      result[str.size()] = 0;
+      return StringRef(result, str.size());
     }
 
     /// Allocate an instance of the provided type.
@@ -319,6 +326,6 @@ private:
     return DenseMapInfo<DerivedKey>::getHashValue(derivedKey);
   }
 };
-} // end namespace mlir
+} // namespace mlir
 
 #endif

@@ -90,16 +90,16 @@ void foo() {
 // CHECK-NEXT: 208 |   class sycl::detail::NDRDescT MNDRDesc
 // CHECK-NEXT: 208 |     class sycl::range<3> GlobalSize
 // CHECK-NEXT: 208 |       class sycl::detail::array<3> (base)
-// CHECK-NEXT: 208 |         size_t [3] common_array
+// CHECK-NEXT: 208 |         size_t[3] common_array
 // CHECK-NEXT: 232 |     class sycl::range<3> LocalSize
 // CHECK-NEXT: 232 |       class sycl::detail::array<3> (base)
-// CHECK-NEXT: 232 |         size_t [3] common_array
+// CHECK-NEXT: 232 |         size_t[3] common_array
 // CHECK-NEXT: 256 |     class sycl::id<3> GlobalOffset
 // CHECK-NEXT: 256 |       class sycl::detail::array<3> (base)
-// CHECK-NEXT: 256 |         size_t [3] common_array
+// CHECK-NEXT: 256 |         size_t[3] common_array
 // CHECK-NEXT: 280 |     class sycl::range<3> NumWorkGroups
 // CHECK-NEXT: 280 |       class sycl::detail::array<3> (base)
-// CHECK-NEXT: 280 |         size_t [3] common_array
+// CHECK-NEXT: 280 |         size_t[3] common_array
 // CHECK-NEXT: 304 |     size_t Dims
 // CHECK-NEXT: 312 |   class std::basic_string<char> MKernelName
 // CHECK-NEXT: 312 |     struct std::basic_string<char>::_Alloc_hider _M_dataplus
@@ -107,8 +107,8 @@ void foo() {
 // CHECK-NEXT: 312 |         class __gnu_cxx::new_allocator<char> (base) (empty)
 // CHECK-NEXT: 312 |       std::basic_string<char>::pointer _M_p
 // CHECK-NEXT: 320 |     std::basic_string<char>::size_type _M_string_length
-// CHECK-NEXT: 328 |     union std::basic_string<char>::(anonymous at {{.*}}) 
-// CHECK-NEXT: 328 |       char [16] _M_local_buf
+// CHECK-NEXT: 328 |     union std::basic_string<char>::(anonymous at {{.*}})
+// CHECK-NEXT: 328 |       char[16] _M_local_buf
 // CHECK-NEXT: 328 |       std::basic_string<char>::size_type _M_allocated_capacity
 // CHECK-NEXT: 344 |   class std::shared_ptr<class sycl::detail::kernel_impl> MKernel
 // CHECK-NEXT: 344 |     class std::__shared_ptr<class sycl::detail::kernel_impl, __gnu_cxx::_S_atomic> (base)
@@ -134,7 +134,7 @@ void foo() {
 // CHECK-NEXT: 416 |         struct std::_Tuple_impl<0, class sycl::detail::HostKernelBase *, struct std::default_delete<class sycl::detail::HostKernelBase> > (base)
 // CHECK-NEXT: 416 |           struct std::_Tuple_impl<1, struct std::default_delete<class sycl::detail::HostKernelBase> > (base) (empty)
 // CHECK-NEXT: 416 |             struct std::_Head_base<1, struct std::default_delete<class sycl::detail::HostKernelBase>, true> (base) (empty)
-// CHECK-NEXT: 416 |               struct std::default_delete<class sycl::detail::HostKernelBase> (base) (empty)
+// CHECK-NEXT: 416 |               struct std::default_delete<class sycl::detail::HostKernelBase>
 // CHECK-NEXT: 416 |           struct std::_Head_base<0, class sycl::detail::HostKernelBase *, false> (base)
 // CHECK-NEXT: 416 |             class sycl::detail::HostKernelBase * _M_head_impl
 // CHECK-NEXT: 424 |   class std::unique_ptr<class sycl::detail::HostTask> MHostTask
@@ -143,7 +143,7 @@ void foo() {
 // CHECK-NEXT: 424 |         struct std::_Tuple_impl<0, class sycl::detail::HostTask *, struct std::default_delete<class sycl::detail::HostTask> > (base)
 // CHECK-NEXT: 424 |           struct std::_Tuple_impl<1, struct std::default_delete<class sycl::detail::HostTask> > (base) (empty)
 // CHECK-NEXT: 424 |             struct std::_Head_base<1, struct std::default_delete<class sycl::detail::HostTask>, true> (base) (empty)
-// CHECK-NEXT: 424 |               struct std::default_delete<class sycl::detail::HostTask> (base) (empty)
+// CHECK-NEXT: 424 |               struct std::default_delete<class sycl::detail::HostTask>
 // CHECK-NEXT: 424 |           struct std::_Head_base<0, class sycl::detail::HostTask *, false> (base)
 // CHECK-NEXT: 424 |             class sycl::detail::HostTask * _M_head_impl
 // CHECK-NEXT: 432 |   detail::OSModuleHandle MOSModuleHandle
@@ -153,7 +153,7 @@ void foo() {
 // CHECK-NEXT: 440 |         struct std::_Tuple_impl<0, class sycl::detail::InteropTask *, struct std::default_delete<class sycl::detail::InteropTask> > (base)
 // CHECK-NEXT: 440 |           struct std::_Tuple_impl<1, struct std::default_delete<class sycl::detail::InteropTask> > (base) (empty)
 // CHECK-NEXT: 440 |             struct std::_Head_base<1, struct std::default_delete<class sycl::detail::InteropTask>, true> (base) (empty)
-// CHECK-NEXT: 440 |               struct std::default_delete<class sycl::detail::InteropTask> (base) (empty)
+// CHECK-NEXT: 440 |               struct std::default_delete<class sycl::detail::InteropTask>
 // CHECK-NEXT: 440 |           struct std::_Head_base<0, class sycl::detail::InteropTask *, false> (base)
 // CHECK-NEXT: 440 |             class sycl::detail::InteropTask * _M_head_impl
 // CHECK-NEXT: 448 |   class std::vector<class std::shared_ptr<class sycl::detail::event_impl> > MEvents

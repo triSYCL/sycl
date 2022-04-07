@@ -14,6 +14,7 @@
 #define MLIR_TABLEGEN_PREDICATE_H_
 
 #include "mlir/Support/LLVM.h"
+#include "llvm/ADT/Hashing.h"
 
 #include <string>
 #include <vector>
@@ -23,7 +24,7 @@ class Init;
 class ListInit;
 class Record;
 class SMLoc;
-} // end namespace llvm
+} // namespace llvm
 
 namespace mlir {
 namespace tblgen {
@@ -52,11 +53,19 @@ public:
   // record of type CombinedPred.
   bool isCombined() const;
 
+  // Get the location of the predicate.
+  ArrayRef<llvm::SMLoc> getLoc() const;
+
   // Records are pointer-comparable.
   bool operator==(const Pred &other) const { return def == other.def; }
 
-  // Get the location of the predicate.
-  ArrayRef<llvm::SMLoc> getLoc() const;
+  // Return true if the predicate is not null.
+  operator bool() const { return def; }
+
+  // Hash a predicate by its pointer value.
+  friend llvm::hash_code hash_value(Pred pred) {
+    return llvm::hash_value(pred.def);
+  }
 
 protected:
   // The TableGen definition of this predicate.
@@ -113,7 +122,7 @@ public:
   StringRef getSuffix() const;
 };
 
-} // end namespace tblgen
-} // end namespace mlir
+} // namespace tblgen
+} // namespace mlir
 
 #endif // MLIR_TABLEGEN_PREDICATE_H_

@@ -576,11 +576,11 @@ Compiler Invocation
 -------------------
 
 One of the classes provided by the Frontend library is ``CompilerInvocation``,
-which holds information that describe current invocation of the Clang frontend.
-The information typically comes from the command line constructed by the Clang
-driver or from clients performing custom initialization. The data structure is
-split into logical units used by different parts of the compiler, for example
-``PreprocessorOptions``, ``LanguageOptions`` or ``CodeGenOptions``.
+which holds information that describe current invocation of the Clang ``-cc1``
+frontend. The information typically comes from the command line constructed by
+the Clang driver or from clients performing custom initialization. The data
+structure is split into logical units used by different parts of the compiler,
+for example ``PreprocessorOptions``, ``LanguageOptions`` or ``CodeGenOptions``.
 
 Command Line Interface
 ----------------------
@@ -685,7 +685,7 @@ use them to construct the ``-cc1`` job:
 
     void Clang::ConstructJob(const ArgList &Args /*...*/) const {
       ArgStringList CmdArgs;
-      // ... 
+      // ...
 
   +   for (const Arg *A : Args.filtered(OPT_fpass_plugin_EQ)) {
   +     CmdArgs.push_back(Args.MakeArgString(Twine("-fpass-plugin=") + A->getValue()));
@@ -758,12 +758,16 @@ desired.
 Option Marshalling Infrastructure
 ---------------------------------
 
-The option marshalling infrastructure automates the parsing of command line
-arguments into ``CompilerInvocation`` and their generation from
-``CompilerInvocation``. The system replaces lots of repetitive C++ code with
-simple, declarative tablegen annotations and it's being used for the majority of
-the ``-cc1`` command line interface. This section provides an overview of the
-system.
+The option marshalling infrastructure automates the parsing of the Clang
+``-cc1`` frontend command line arguments into ``CompilerInvocation`` and their
+generation from ``CompilerInvocation``. The system replaces lots of repetitive
+C++ code with simple, declarative tablegen annotations and it's being used for
+the majority of the ``-cc1`` command line interface. This section provides an
+overview of the system.
+
+**Note:** The marshalling infrastructure is not intended for driver-only
+options. Only options of the ``-cc1`` frontend need to be marshalled to/from
+``CompilerInvocation`` instance.
 
 To read and modify contents of ``CompilerInvocation``, the marshalling system
 uses key paths, which are declared in two steps. First, a tablegen definition
@@ -855,6 +859,10 @@ How does the tablegen backend know what to put in place of ``[...]`` in the
 generated ``Options.inc``? This is specified by the ``Marshalling`` utilities
 described below. All of them take a key path argument and possibly other
 information required for parsing or generating the command line argument.
+
+**Note:** The marshalling infrastructure is not intended for driver-only
+options. Only options of the ``-cc1`` frontend need to be marshalled to/from
+``CompilerInvocation`` instance.
 
 **Positive Flag**
 
@@ -2822,7 +2830,7 @@ semantic) type, or one of its derivatives. Most attributes will derive from the
 later redeclarations of the ``Decl`` it is associated with.
 ``InheritableParamAttr`` is similar to ``InheritableAttr``, except that the
 attribute is written on a parameter instead of a declaration. If the attribute
-applies to statements, it should inherit from ``StmtAttr`. If the attribute is
+applies to statements, it should inherit from ``StmtAttr``. If the attribute is
 intended to apply to a type instead of a declaration, such an attribute should
 derive from ``TypeAttr``, and will generally not be given an AST representation.
 (Note that this document does not cover the creation of type attributes.) An
@@ -2875,7 +2883,7 @@ are created implicitly. The following spellings are accepted:
 
 Subjects
 ~~~~~~~~
-Attributes appertain to one or more subjects. If the attribute attempts to 
+Attributes appertain to one or more subjects. If the attribute attempts to
 attach to a subject that is not in the subject list, a diagnostic is issued
 automatically. Whether the diagnostic is a warning or an error depends on how
 the attribute's ``SubjectList`` is defined, but the default behavior is to warn.
@@ -2906,7 +2914,7 @@ Documentation
 All attributes must have some form of documentation associated with them.
 Documentation is table generated on the public web server by a server-side
 process that runs daily. Generally, the documentation for an attribute is a
-stand-alone definition in `include/clang/Basic/AttrDocs.td 
+stand-alone definition in `include/clang/Basic/AttrDocs.td
 <https://github.com/llvm/llvm-project/blob/main/clang/include/clang/Basic/AttrDocs.td>`_
 that is named after the attribute being documented.
 
@@ -2924,7 +2932,7 @@ There are four predefined documentation categories: ``DocCatFunction`` for
 attributes that appertain to function-like subjects, ``DocCatVariable`` for
 attributes that appertain to variable-like subjects, ``DocCatType`` for type
 attributes, and ``DocCatStmt`` for statement attributes. A custom documentation
-category should be used for groups of attributes with similar functionality. 
+category should be used for groups of attributes with similar functionality.
 Custom categories are good for providing overview information for the attributes
 grouped under it. For instance, the consumed annotation attributes define a
 custom category, ``DocCatConsumed``, that explains what consumed annotations are
@@ -3257,4 +3265,3 @@ are similar.
      proper visitation for your expression, enabling various IDE features such
      as syntax highlighting, cross-referencing, and so on.  The
      ``c-index-test`` helper program can be used to test these features.
-

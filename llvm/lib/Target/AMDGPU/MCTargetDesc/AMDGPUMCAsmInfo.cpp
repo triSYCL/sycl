@@ -28,7 +28,6 @@ AMDGPUMCAsmInfo::AMDGPUMCAsmInfo(const Triple &TT,
   MaxInstLength = (TT.getArch() == Triple::amdgcn) ? 20 : 16;
   SeparatorString = "\n";
   CommentString = ";";
-  PrivateLabelPrefix = "";
   InlineAsmStart = ";#ASMSTART";
   InlineAsmEnd = ";#ASMEND";
 
@@ -42,6 +41,7 @@ AMDGPUMCAsmInfo::AMDGPUMCAsmInfo(const Triple &TT,
   HasNoDeadStrip = true;
   //===--- Dwarf Emission Directives -----------------------------------===//
   SupportsDebugInformation = true;
+  UsesCFIForDebug = true;
   DwarfRegNumForCFI = true;
 
   UseIntegratedAssembler = false;

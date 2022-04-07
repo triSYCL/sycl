@@ -96,6 +96,10 @@ public:
 
   std::vector<std::pair<Optional<DataRefImpl>, uint64_t>>
   getPltAddresses() const;
+
+  /// Returns a vector containing a symbol version for each dynamic symbol.
+  /// Returns an empty vector if version sections do not exist.
+  Expected<std::vector<VersionEntry>> readDynsymVersions() const;
 };
 
 class ELFSectionRef : public SectionRef {
@@ -289,7 +293,7 @@ protected:
   bool isSectionVirtual(DataRefImpl Sec) const override;
   bool isBerkeleyText(DataRefImpl Sec) const override;
   bool isBerkeleyData(DataRefImpl Sec) const override;
-  bool isDebugSection(StringRef SectionName) const override;
+  bool isDebugSection(DataRefImpl Sec) const override;
   relocation_iterator section_rel_begin(DataRefImpl Sec) const override;
   relocation_iterator section_rel_end(DataRefImpl Sec) const override;
   std::vector<SectionRef> dynamic_relocation_sections() const override;
@@ -407,7 +411,8 @@ public:
   const Elf_Shdr *getRelSection(DataRefImpl Rel) const {
     auto RelSecOrErr = EF.getSection(Rel.d.a);
     if (!RelSecOrErr)
-      report_fatal_error(errorToErrorCode(RelSecOrErr.takeError()).message());
+      report_fatal_error(
+          Twine(errorToErrorCode(RelSecOrErr.takeError()).message()));
     return *RelSecOrErr;
   }
 
@@ -728,7 +733,8 @@ Expected<uint32_t> ELFObjectFile<ELFT>::getSymbolFlags(DataRefImpl Sym) const {
   } else if (EF.getHeader().e_machine == ELF::EM_ARM) {
     if (Expected<StringRef> NameOrErr = getSymbolName(Sym)) {
       StringRef Name = *NameOrErr;
-      if (Name.startswith("$d") || Name.startswith("$t") ||
+      // TODO Investigate why empty name symbols need to be marked.
+      if (Name.empty() || Name.startswith("$d") || Name.startswith("$t") ||
           Name.startswith("$a"))
         Result |= SymbolRef::SF_FormatSpecific;
     } else {
@@ -928,7 +934,14 @@ bool ELFObjectFile<ELFT>::isBerkeleyData(DataRefImpl Sec) const {
 }
 
 template <class ELFT>
-bool ELFObjectFile<ELFT>::isDebugSection(StringRef SectionName) const {
+bool ELFObjectFile<ELFT>::isDebugSection(DataRefImpl Sec) const {
+  Expected<StringRef> SectionNameOrErr = getSectionName(Sec);
+  if (!SectionNameOrErr) {
+    // TODO: Report the error message properly.
+    consumeError(SectionNameOrErr.takeError());
+    return false;
+  }
+  StringRef SectionName = SectionNameOrErr.get();
   return SectionName.startswith(".debug") ||
          SectionName.startswith(".zdebug") || SectionName == ".gdb_index";
 }
@@ -959,7 +972,8 @@ ELFObjectFile<ELFT>::section_rel_end(DataRefImpl Sec) const {
   // Error check sh_link here so that getRelocationSymbol can just use it.
   auto SymSecOrErr = EF.getSection(RelSec->sh_link);
   if (!SymSecOrErr)
-    report_fatal_error(errorToErrorCode(SymSecOrErr.takeError()).message());
+    report_fatal_error(
+        Twine(errorToErrorCode(SymSecOrErr.takeError()).message()));
 
   RelData.d.b += S->sh_size / S->sh_entsize;
   return relocation_iterator(RelocationRef(RelData, this));
@@ -968,9 +982,6 @@ ELFObjectFile<ELFT>::section_rel_end(DataRefImpl Sec) const {
 template <class ELFT>
 Expected<section_iterator>
 ELFObjectFile<ELFT>::getRelocatedSection(DataRefImpl Sec) const {
-  if (EF.getHeader().e_type != ELF::ET_REL)
-    return section_end();
-
   const Elf_Shdr *EShdr = getSection(Sec);
   uintX_t Type = EShdr->sh_type;
   if (Type != ELF::SHT_REL && Type != ELF::SHT_RELA)
@@ -1051,7 +1062,7 @@ ELFObjectFile<ELFT>::getRel(DataRefImpl Rel) const {
   assert(getRelSection(Rel)->sh_type == ELF::SHT_REL);
   auto Ret = EF.template getEntry<Elf_Rel>(Rel.d.a, Rel.d.b);
   if (!Ret)
-    report_fatal_error(errorToErrorCode(Ret.takeError()).message());
+    report_fatal_error(Twine(errorToErrorCode(Ret.takeError()).message()));
   return *Ret;
 }
 
@@ -1061,7 +1072,7 @@ ELFObjectFile<ELFT>::getRela(DataRefImpl Rela) const {
   assert(getRelSection(Rela)->sh_type == ELF::SHT_RELA);
   auto Ret = EF.template getEntry<Elf_Rela>(Rela.d.a, Rela.d.b);
   if (!Ret)
-    report_fatal_error(errorToErrorCode(Ret.takeError()).message());
+    report_fatal_error(Twine(errorToErrorCode(Ret.takeError()).message()));
   return *Ret;
 }
 

@@ -306,12 +306,33 @@ MLIR_CAPI_EXPORTED bool mlirAttributeIsADenseFPElements(MlirAttribute attr);
 MLIR_CAPI_EXPORTED MlirAttribute mlirDenseElementsAttrGet(
     MlirType shapedType, intptr_t numElements, MlirAttribute const *elements);
 
+/// Creates a dense elements attribute with the given Shaped type and elements
+/// populated from a packed, row-major opaque buffer of contents.
+///
+/// The format of the raw buffer is a densely packed array of values that
+/// can be bitcast to the storage format of the element type specified.
+/// Types that are not byte aligned will be:
+///   - For bitwidth > 1: Rounded up to the next byte.
+///   - For bitwidth = 1: Packed into 8bit bytes with bits corresponding to
+///     the linear order of the shape type from MSB to LSB, padded to on the
+///     right.
+///
+/// A raw buffer of a single element (or for 1-bit, a byte of value 0 or 255)
+/// will be interpreted as a splat. User code should be prepared for additional,
+/// conformant patterns to be identified as splats in the future.
+MLIR_CAPI_EXPORTED MlirAttribute mlirDenseElementsAttrRawBufferGet(
+    MlirType shapedType, size_t rawBufferSize, const void *rawBuffer);
+
 /// Creates a dense elements attribute with the given Shaped type containing a
 /// single replicated element (splat).
 MLIR_CAPI_EXPORTED MlirAttribute
 mlirDenseElementsAttrSplatGet(MlirType shapedType, MlirAttribute element);
 MLIR_CAPI_EXPORTED MlirAttribute
 mlirDenseElementsAttrBoolSplatGet(MlirType shapedType, bool element);
+MLIR_CAPI_EXPORTED MlirAttribute
+mlirDenseElementsAttrUInt8SplatGet(MlirType shapedType, uint8_t element);
+MLIR_CAPI_EXPORTED MlirAttribute
+mlirDenseElementsAttrInt8SplatGet(MlirType shapedType, int8_t element);
 MLIR_CAPI_EXPORTED MlirAttribute
 mlirDenseElementsAttrUInt32SplatGet(MlirType shapedType, uint32_t element);
 MLIR_CAPI_EXPORTED MlirAttribute
@@ -330,6 +351,10 @@ mlirDenseElementsAttrDoubleSplatGet(MlirType shapedType, double element);
 /// data element type.
 MLIR_CAPI_EXPORTED MlirAttribute mlirDenseElementsAttrBoolGet(
     MlirType shapedType, intptr_t numElements, const int *elements);
+MLIR_CAPI_EXPORTED MlirAttribute mlirDenseElementsAttrUInt8Get(
+    MlirType shapedType, intptr_t numElements, const uint8_t *elements);
+MLIR_CAPI_EXPORTED MlirAttribute mlirDenseElementsAttrInt8Get(
+    MlirType shapedType, intptr_t numElements, const int8_t *elements);
 MLIR_CAPI_EXPORTED MlirAttribute mlirDenseElementsAttrUInt32Get(
     MlirType shapedType, intptr_t numElements, const uint32_t *elements);
 MLIR_CAPI_EXPORTED MlirAttribute mlirDenseElementsAttrInt32Get(
@@ -364,6 +389,10 @@ MLIR_CAPI_EXPORTED MlirAttribute
 mlirDenseElementsAttrGetSplatValue(MlirAttribute attr);
 MLIR_CAPI_EXPORTED int
 mlirDenseElementsAttrGetBoolSplatValue(MlirAttribute attr);
+MLIR_CAPI_EXPORTED int8_t
+mlirDenseElementsAttrGetInt8SplatValue(MlirAttribute attr);
+MLIR_CAPI_EXPORTED uint8_t
+mlirDenseElementsAttrGetUInt8SplatValue(MlirAttribute attr);
 MLIR_CAPI_EXPORTED int32_t
 mlirDenseElementsAttrGetInt32SplatValue(MlirAttribute attr);
 MLIR_CAPI_EXPORTED uint32_t
@@ -383,6 +412,10 @@ mlirDenseElementsAttrGetStringSplatValue(MlirAttribute attr);
 /// contained by the given dense elements attribute.
 MLIR_CAPI_EXPORTED bool mlirDenseElementsAttrGetBoolValue(MlirAttribute attr,
                                                           intptr_t pos);
+MLIR_CAPI_EXPORTED int8_t mlirDenseElementsAttrGetInt8Value(MlirAttribute attr,
+                                                            intptr_t pos);
+MLIR_CAPI_EXPORTED uint8_t
+mlirDenseElementsAttrGetUInt8Value(MlirAttribute attr, intptr_t pos);
 MLIR_CAPI_EXPORTED int32_t
 mlirDenseElementsAttrGetInt32Value(MlirAttribute attr, intptr_t pos);
 MLIR_CAPI_EXPORTED uint32_t

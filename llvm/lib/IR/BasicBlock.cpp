@@ -12,6 +12,7 @@
 
 #include "llvm/IR/BasicBlock.h"
 #include "SymbolTableListTraitsImpl.h"
+#include "llvm/ADT/Statistic.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/IR/CFG.h"
 #include "llvm/IR/Constants.h"
@@ -22,6 +23,9 @@
 #include <algorithm>
 
 using namespace llvm;
+
+#define DEBUG_TYPE "ir"
+STATISTIC(NumInstrRenumberings, "Number of renumberings across all blocks");
 
 ValueSymbolTable *BasicBlock::getValueSymbolTable() {
   if (Function *F = getParent())
@@ -372,6 +376,12 @@ bool BasicBlock::isLegalToHoistInto() const {
   return !Term->isExceptionalTerminator();
 }
 
+bool BasicBlock::isEntryBlock() const {
+  const Function *F = getParent();
+  assert(F && "Block must have a parent function to use this API");
+  return this == &F->getEntryBlock();
+}
+
 BasicBlock *BasicBlock::splitBasicBlock(iterator I, const Twine &BBName,
                                         bool Before) {
   if (Before)
@@ -440,8 +450,8 @@ BasicBlock *BasicBlock::splitBasicBlockBefore(iterator I, const Twine &BBName) {
 void BasicBlock::replacePhiUsesWith(BasicBlock *Old, BasicBlock *New) {
   // N.B. This might not be a complete BasicBlock, so don't assume
   // that it ends with a non-phi instruction.
-  for (iterator II = begin(), IE = end(); II != IE; ++II) {
-    PHINode *PN = dyn_cast<PHINode>(II);
+  for (Instruction &I : *this) {
+    PHINode *PN = dyn_cast<PHINode>(&I);
     if (!PN)
       break;
     PN->replaceIncomingBlockWith(Old, New);
@@ -499,6 +509,8 @@ void BasicBlock::renumberInstructions() {
   BasicBlockBits Bits = getBasicBlockBits();
   Bits.InstrOrderValid = true;
   setBasicBlockBits(Bits);
+
+  NumInstrRenumberings++;
 }
 
 #ifndef NDEBUG

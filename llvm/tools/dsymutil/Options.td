@@ -24,6 +24,10 @@ def verbose: F<"verbose">,
   HelpText<"Enable verbose mode.">,
   Group<grp_general>;
 
+def keep_func_for_static: F<"keep-function-for-static">,
+  HelpText<"Make a static variable keep the enclosing function even if it would have been omitted otherwise.">,
+  Group<grp_general>;
+
 def statistics: F<"statistics">,
   HelpText<"Print statistics about the contribution of each object file to "
            "the linked debug info. This prints a table after linking with the "
@@ -50,7 +54,7 @@ def no_odr: F<"no-odr">,
   Group<grp_general>;
 
 def dump_debug_map: F<"dump-debug-map">,
-  HelpText<"Parse and dump the debug map to standard output. Not DWARF link will take place.">,
+  HelpText<"Parse and dump the debug map to standard output. No DWARF link will take place.">,
   Group<grp_general>;
 
 def yaml_input: Flag<["-", "--"], "y">,

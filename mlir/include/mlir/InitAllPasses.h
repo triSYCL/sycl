@@ -16,7 +16,9 @@
 
 #include "mlir/Conversion/Passes.h"
 #include "mlir/Dialect/Affine/Passes.h"
+#include "mlir/Dialect/Arithmetic/Transforms/Passes.h"
 #include "mlir/Dialect/Async/Passes.h"
+#include "mlir/Dialect/Bufferization/Transforms/Passes.h"
 #include "mlir/Dialect/GPU/Passes.h"
 #include "mlir/Dialect/LLVMIR/Transforms/Passes.h"
 #include "mlir/Dialect/Linalg/Passes.h"
@@ -25,6 +27,7 @@
 #include "mlir/Dialect/SCF/Passes.h"
 #include "mlir/Dialect/SPIRV/Transforms/Passes.h"
 #include "mlir/Dialect/Shape/Transforms/Passes.h"
+#include "mlir/Dialect/SparseTensor/Transforms/Passes.h"
 #include "mlir/Dialect/StandardOps/Transforms/Passes.h"
 #include "mlir/Dialect/Tensor/Transforms/Passes.h"
 #include "mlir/Dialect/Tosa/Transforms/Passes.h"
@@ -51,10 +54,13 @@ inline void registerAllPasses() {
   // Dialect passes
   registerAffinePasses();
   registerAsyncPasses();
+  arith::registerArithmeticPasses();
+  bufferization::registerBufferizationPasses();
   registerGPUPasses();
   registerGpuSerializeToCubinPass();
   registerGpuSerializeToHsacoPass();
   registerLinalgPasses();
+  registerSparseTensorPasses();
   LLVM::registerLLVMPasses();
   memref::registerMemRefPasses();
   quant::registerQuantPasses();

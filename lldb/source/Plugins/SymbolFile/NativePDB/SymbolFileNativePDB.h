@@ -60,9 +60,9 @@ public:
 
   static void DebuggerInitialize(Debugger &debugger);
 
-  static ConstString GetPluginNameStatic();
+  static llvm::StringRef GetPluginNameStatic() { return "native-pdb"; }
 
-  static const char *GetPluginDescriptionStatic();
+  static llvm::StringRef GetPluginDescriptionStatic();
 
   static SymbolFile *CreateInstance(lldb::ObjectFileSP objfile_sp);
 
@@ -74,6 +74,8 @@ public:
   uint32_t CalculateAbilities() override;
 
   void InitializeObject() override;
+
+  uint64_t GetDebugInfoSize() override;
 
   // Compile Unit function calls
 
@@ -120,8 +122,7 @@ public:
   uint32_t ResolveSymbolContext(const Address &so_addr,
                                 lldb::SymbolContextItem resolve_scope,
                                 SymbolContext &sc) override;
-  uint32_t ResolveSymbolContext(const FileSpec &file_spec, uint32_t line,
-                                bool check_inlines,
+  uint32_t ResolveSymbolContext(const SourceLocationSpec &src_location_spec,
                                 lldb::SymbolContextItem resolve_scope,
                                 SymbolContextList &sc_list) override;
 
@@ -152,9 +153,7 @@ public:
   FindNamespace(ConstString name,
                 const CompilerDeclContext &parent_decl_ctx) override;
 
-  ConstString GetPluginName() override;
-
-  uint32_t GetPluginVersion() override;
+  llvm::StringRef GetPluginName() override { return GetPluginNameStatic(); }
 
   llvm::pdb::PDBFile &GetPDBFile() { return m_index->pdb(); }
   const llvm::pdb::PDBFile &GetPDBFile() const { return m_index->pdb(); }

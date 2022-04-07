@@ -3,7 +3,7 @@ import("//llvm/utils/gn/build/write_vcsrevision.gni")
 config("write_vcsrevision_config") {
   # To pick up the generated inc file.
   include_dirs = [ target_gen_dir ]
-  visibility = [ ":write_vcsrevision" ]
+  visibility = [ ":write_vcsversion" ]
 }
 
 write_vcsrevision("write_vcsversion") {
@@ -49,17 +49,17 @@ static_library("Basic") {
     "//clang/include/clang/Sema:AttrParsedAttrKinds",
     "//clang/include/clang/Sema:AttrSpellingListIndex",
     "//llvm/include/llvm/Config:llvm-config",
-    "//llvm/lib/IR",
-    "//llvm/lib/MC",
     "//llvm/lib/Support",
   ]
   include_dirs = [ "." ]
   sources = [
     "Attributes.cpp",
     "Builtins.cpp",
+    "CLWarnings.cpp",
     "CharInfo.cpp",
     "CodeGenOptions.cpp",
     "Cuda.cpp",
+    "DarwinSDKInfo.cpp",
     "Diagnostic.cpp",
     "DiagnosticIDs.cpp",
     "DiagnosticOptions.cpp",

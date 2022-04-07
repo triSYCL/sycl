@@ -6,9 +6,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-// XFAIL: gcc-10
-//     GCC's __builtin_strlen isn't constexpr yet
-
 // <string_view>
 
 // size_type copy(charT* s, size_type n, size_type pos = 0) const;

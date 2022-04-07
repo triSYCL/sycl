@@ -14,6 +14,10 @@
 // This is for convinience of doing same thing for all interfaces, e.g.
 // declare, define, initialize.
 //
+// This list is used to define PiApiKind enum, which is part of external
+// interface. To avoid ABI breakage, please, add new entries to the end of the
+// list.
+//
 // Platform
 _PI_API(piPlatformsGet)
 _PI_API(piPlatformGetInfo)
@@ -41,6 +45,7 @@ _PI_API(piextContextCreateWithNativeHandle)
 _PI_API(piQueueCreate)
 _PI_API(piQueueGetInfo)
 _PI_API(piQueueFinish)
+_PI_API(piQueueFlush)
 _PI_API(piQueueRetain)
 _PI_API(piQueueRelease)
 _PI_API(piextQueueGetNativeHandle)
@@ -128,6 +133,9 @@ _PI_API(piextUSMGetMemAllocInfo)
 
 _PI_API(piextKernelSetArgMemObj)
 _PI_API(piextKernelSetArgSampler)
+
+_PI_API(piextPluginGetOpaqueData)
+
 _PI_API(piTearDown)
 
 #undef _PI_API

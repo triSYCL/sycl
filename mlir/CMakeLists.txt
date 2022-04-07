@@ -37,10 +37,23 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 
 include(AddMLIR)
 
+# -BSymbolic is incompatible with TypeID
+if("${CMAKE_SHARED_LINKER_FLAGS}" MATCHES "-Bsymbolic[^-]")
+  message(FATAL_ERROR " MLIR does not support `-Bsymbolic` (see http://llvm.org/pr51420 ),"
+          " try `-Bsymbolic-functions` instead.")
+endif()
+
 # Forbid implicit function declaration: this may lead to subtle bugs and we
 # don't have a reason to support this.
 check_c_compiler_flag("-Werror=implicit-function-declaration" C_SUPPORTS_WERROR_IMPLICIT_FUNCTION_DECLARATION)
 append_if(C_SUPPORTS_WERROR_IMPLICIT_FUNCTION_DECLARATION "-Werror=implicit-function-declaration" CMAKE_C_FLAGS)
+
+# Forbid mismatch between declaration and definition for class vs struct. This is
+# harmless on Unix systems, but it'll be a ticking bomb for MSVC/Windows systems
+# where it creeps into the ABI.
+check_c_compiler_flag("-Werror=mismatched-tags" C_SUPPORTS_WERROR_MISMATCHED_TAGS)
+append_if(C_SUPPORTS_WERROR_MISMATCHED_TAGS "-Werror=mismatched-tags" CMAKE_C_FLAGS)
+append_if(C_SUPPORTS_WERROR_MISMATCHED_TAGS "-Werror=mismatched-tags" CMAKE_CXX_FLAGS)
 
 # Installing the headers and docs needs to depend on generating any public
 # tablegen'd targets.
@@ -56,26 +69,26 @@ add_custom_target(mlir-doc)
 # Build the CUDA conversions and run according tests if the NVPTX backend
 # is available
 if ("NVPTX" IN_LIST LLVM_TARGETS_TO_BUILD)
-  set(MLIR_CUDA_CONVERSIONS_ENABLED 1)
+  set(MLIR_ENABLE_CUDA_CONVERSIONS 1)
 else()
-  set(MLIR_CUDA_CONVERSIONS_ENABLED 0)
+  set(MLIR_ENABLE_CUDA_CONVERSIONS 0)
 endif()
 # TODO: we should use a config.h file like LLVM does
-add_definitions(-DMLIR_CUDA_CONVERSIONS_ENABLED=${MLIR_CUDA_CONVERSIONS_ENABLED})
+add_definitions(-DMLIR_CUDA_CONVERSIONS_ENABLED=${MLIR_ENABLE_CUDA_CONVERSIONS})
 
 # Build the ROCm conversions and run according tests if the AMDGPU backend
 # is available
 if ("AMDGPU" IN_LIST LLVM_TARGETS_TO_BUILD)
-  set(MLIR_ROCM_CONVERSIONS_ENABLED 1)
+  set(MLIR_ENABLE_ROCM_CONVERSIONS 1)
 else()
-  set(MLIR_ROCM_CONVERSIONS_ENABLED 0)
+  set(MLIR_ENABLE_ROCM_CONVERSIONS 0)
 endif()
-add_definitions(-DMLIR_ROCM_CONVERSIONS_ENABLED=${MLIR_ROCM_CONVERSIONS_ENABLED})
+add_definitions(-DMLIR_ROCM_CONVERSIONS_ENABLED=${MLIR_ENABLE_ROCM_CONVERSIONS})
 
-set(MLIR_CUDA_RUNNER_ENABLED 0 CACHE BOOL "Enable building the mlir CUDA runner")
-set(MLIR_ROCM_RUNNER_ENABLED 0 CACHE BOOL "Enable building the mlir ROCm runner")
-set(MLIR_SPIRV_CPU_RUNNER_ENABLED 0 CACHE BOOL "Enable building the mlir SPIR-V cpu runner")
-set(MLIR_VULKAN_RUNNER_ENABLED 0 CACHE BOOL "Enable building the mlir Vulkan runner")
+set(MLIR_ENABLE_CUDA_RUNNER 0 CACHE BOOL "Enable building the mlir CUDA runner")
+set(MLIR_ENABLE_ROCM_RUNNER 0 CACHE BOOL "Enable building the mlir ROCm runner")
+set(MLIR_ENABLE_SPIRV_CPU_RUNNER 0 CACHE BOOL "Enable building the mlir SPIR-V cpu runner")
+set(MLIR_ENABLE_VULKAN_RUNNER 0 CACHE BOOL "Enable building the mlir Vulkan runner")
 
 option(MLIR_INCLUDE_TESTS
        "Generate build targets for the MLIR unit tests."
@@ -84,39 +97,26 @@ option(MLIR_INCLUDE_TESTS
 option(MLIR_INCLUDE_INTEGRATION_TESTS
        "Generate build targets for the MLIR integration tests.")
 
+set(MLIR_INSTALL_AGGREGATE_OBJECTS 1 CACHE BOOL
+    "Installs object files needed for add_mlir_aggregate to work out of \
+    tree. Package maintainers can disable this to exclude these assets if \
+    not desired. Enabling this will result in object files being written \
+    under lib/objects-{CMAKE_BUILD_TYPE}.")
+
+set(MLIR_BUILD_MLIR_C_DYLIB 0 CACHE BOOL "Builds libMLIR-C shared library.")
+
 #-------------------------------------------------------------------------------
 # Python Bindings Configuration
 # Requires:
 #   The pybind11 library can be found (set with -DPYBIND_DIR=...)
 #   The python executable is correct (set with -DPython3_EXECUTABLE=...)
-#
-# Version locking
-# ---------------
-# By default, python extensions are version locked to specific Python libraries.
-# This linking mode is somewhat more consistent across platforms and surfaces
-# undefined symbols at link time (vs runtime). It is suitable for development
-# workflows but can be disabled for more flexible deployment by
-# setting -DMLIR_PYTHON_BINDINGS_VERSION_LOCKED=OFF
 #-------------------------------------------------------------------------------
 
-set(MLIR_BINDINGS_PYTHON_ENABLED 0 CACHE BOOL
+set(MLIR_ENABLE_BINDINGS_PYTHON 0 CACHE BOOL
        "Enables building of Python bindings.")
-set(MLIR_PYTHON_BINDINGS_VERSION_LOCKED 1 CACHE BOOL
-       "Links to specific python libraries, resolving all symbols.")
-
-if(MLIR_BINDINGS_PYTHON_ENABLED)
+if(MLIR_ENABLE_BINDINGS_PYTHON)
   include(MLIRDetectPythonEnv)
-  find_package(Python3 ${LLVM_MINIMUM_PYTHON_VERSION}
-    COMPONENTS Interpreter Development NumPy REQUIRED)
-  message(STATUS "Found python include dirs: ${Python3_INCLUDE_DIRS}")
-  message(STATUS "Found python libraries: ${Python3_LIBRARIES}")
-  message(STATUS "Found numpy v${Python3_NumPy_VERSION}: ${Python3_NumPy_INCLUDE_DIRS}")
-  mlir_detect_pybind11_install()
-  find_package(pybind11 2.6 CONFIG REQUIRED)
-  message(STATUS "Found pybind11 v${pybind11_VERSION}: ${pybind11_INCLUDE_DIR}")
-  message(STATUS "Python prefix = '${PYTHON_MODULE_PREFIX}', "
-                 "suffix = '${PYTHON_MODULE_SUFFIX}', "
-                 "extension = '${PYTHON_MODULE_EXTENSION}")
+  mlir_configure_python_dev_packages()
 endif()
 
 include_directories( "include")
@@ -132,6 +132,7 @@ add_subdirectory(include/mlir)
 add_subdirectory(lib)
 # C API needs all dialects for registration, but should be built before tests.
 add_subdirectory(lib/CAPI)
+
 if (MLIR_INCLUDE_TESTS)
   add_definitions(-DMLIR_INCLUDE_TESTS)
   add_custom_target(MLIRUnitTests)
@@ -145,6 +146,11 @@ endif()
 # Tools needs to come late to ensure that MLIR_ALL_LIBS is populated.
 # Generally things after this point may depend on MLIR_ALL_LIBS or libMLIR.so.
 add_subdirectory(tools)
+
+if(MLIR_ENABLE_BINDINGS_PYTHON)
+  # Python sources: built extensions come in via lib/Bindings/Python
+  add_subdirectory(python)
+endif()
 
 if( LLVM_INCLUDE_EXAMPLES )
   add_subdirectory(examples)

@@ -87,6 +87,25 @@ TEST(SanitizerCommon, MmapAlignedOrDieOnFatalError) {
   }
 }
 
+TEST(SanitizerCommon, Mprotect) {
+  uptr PageSize = GetPageSizeCached();
+  u8 *mem = reinterpret_cast<u8 *>(MmapOrDie(PageSize, "MprotectTest"));
+  for (u8 *p = mem; p < mem + PageSize; ++p) ++(*p);
+
+  MprotectReadOnly(reinterpret_cast<uptr>(mem), PageSize);
+  for (u8 *p = mem; p < mem + PageSize; ++p) EXPECT_EQ(1u, *p);
+  EXPECT_DEATH(++mem[0], "");
+  EXPECT_DEATH(++mem[PageSize / 2], "");
+  EXPECT_DEATH(++mem[PageSize - 1], "");
+
+  MprotectNoAccess(reinterpret_cast<uptr>(mem), PageSize);
+  volatile u8 t;
+  (void)t;
+  EXPECT_DEATH(t = mem[0], "");
+  EXPECT_DEATH(t = mem[PageSize / 2], "");
+  EXPECT_DEATH(t = mem[PageSize - 1], "");
+}
+
 TEST(SanitizerCommon, InternalMmapVectorRoundUpCapacity) {
   InternalMmapVector<uptr> v;
   v.reserve(1);
@@ -295,8 +314,8 @@ const std::vector<int> kSortAndDedupTests[] = {
     {1, 2, 1, 1, 2, 1, 1, 1, 2, 2},
     {1, 3, 3, 2, 3, 1, 3, 1, 4, 4, 2, 1, 4, 1, 1, 2, 2},
 };
-INSTANTIATE_TEST_CASE_P(SortAndDedupTest, SortAndDedupTest,
-                        ::testing::ValuesIn(kSortAndDedupTests));
+INSTANTIATE_TEST_SUITE_P(SortAndDedupTest, SortAndDedupTest,
+                         ::testing::ValuesIn(kSortAndDedupTests));
 
 #if SANITIZER_LINUX && !SANITIZER_ANDROID
 TEST(SanitizerCommon, FindPathToBinary) {
@@ -378,7 +397,7 @@ TEST(SanitizerCommon, InternalScopedStringLarge) {
   for (int i = 0; i < 1000; ++i) {
     std::string append(i, 'a' + i % 26);
     expected += append;
-    str.append(append.c_str());
+    str.append("%s", append.c_str());
     EXPECT_EQ(expected, str.data());
   }
 }

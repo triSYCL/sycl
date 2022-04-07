@@ -1,7 +1,8 @@
 // REQUIRES: xocc
 
-// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
-// RUN: %ACC_RUN_PLACEHOLDER %t.out
+// RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
+// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
+// RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
 
 /*

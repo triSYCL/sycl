@@ -13,24 +13,24 @@
 #ifndef LLVM_LIB_TARGET_AMDGPU_UTILS_AMDGPULDSUTILS_H
 #define LLVM_LIB_TARGET_AMDGPU_UTILS_AMDGPULDSUTILS_H
 
-#include "AMDGPU.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/IR/Constants.h"
 
 namespace llvm {
 
+class ConstantExpr;
+
 namespace AMDGPU {
 
-bool isKernelCC(Function *Func);
+bool isKernelCC(const Function *Func);
 
 Align getAlign(DataLayout const &DL, const GlobalVariable *GV);
 
-bool userRequiresLowering(const SmallPtrSetImpl<GlobalValue *> &UsedList,
-                          User *InitialUser);
+std::vector<GlobalVariable *> findVariablesToLower(Module &M,
+                                                   const Function *F = nullptr);
 
-std::vector<GlobalVariable *>
-findVariablesToLower(Module &M, const SmallPtrSetImpl<GlobalValue *> &UsedList);
-
-SmallPtrSet<GlobalValue *, 32> getUsedList(Module &M);
-
+/// Replace all uses of constant \p C with instructions in \p F.
+void replaceConstantUsesInFunction(ConstantExpr *C, const Function *F);
 } // end namespace AMDGPU
 
 } // end namespace llvm

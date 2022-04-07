@@ -1,10 +1,11 @@
-
-// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out -Xsycl-target-frontend -fno-exceptions
-
-// RUN: %ACC_RUN_PLACEHOLDER %t.out
+// RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
+// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out -Xsycl-target-frontend -fno-exceptions
+// RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
 #include <CL/sycl.hpp>
 #include <variant>
+
+#include "../utilities/device_selectors.hpp"
 
 namespace detail {
 
@@ -84,13 +85,13 @@ int main() {
   sycl::buffer<std::variant<B, A>> Out{d.size()};
   sycl::buffer<int> OutI{1};
 
-  sycl::queue Queue{};
+  sycl::queue Queue{ selector_defines::CompiledForDeviceSelector {} };
 
   Queue.submit([&](sycl::handler &cgh) {
     auto AIn = In.get_access<sycl::access::mode::read>(cgh);
     auto AOut = Out.get_access<sycl::access::mode::write>(cgh);
     cgh.single_task<class Kernel>([=] {
-      for (unsigned i = 0; i < AIn.get_count(); i++)
+      for (unsigned i = 0; i < AIn.size(); i++)
         dev_visit([&](auto V) { AOut[{i}] = V; }, AIn[{i}]);
     });
   });

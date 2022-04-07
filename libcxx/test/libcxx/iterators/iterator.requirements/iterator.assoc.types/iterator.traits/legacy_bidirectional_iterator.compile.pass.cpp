@@ -8,7 +8,9 @@
 
 // UNSUPPORTED: c++03, c++11, c++14, c++17
 // UNSUPPORTED: libcpp-no-concepts
-// UNSUPPORTED: gcc-10
+
+// This test uses iterator types from std::filesystem, which were introduced in macOS 10.15.
+// XFAIL: use_system_cxx_lib && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14}}
 
 // template<class I>
 // concept __iterator_traits_detail::__cpp17_bidirectional_iterator;
@@ -35,13 +37,10 @@
 static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<iterator_traits_cpp17_iterator>);
 static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<iterator_traits_cpp17_proxy_iterator>);
 static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<iterator_traits_cpp17_input_iterator>);
-static_assert(
-    !std::__iterator_traits_detail::__cpp17_bidirectional_iterator<iterator_traits_cpp17_proxy_input_iterator>);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<iterator_traits_cpp17_proxy_input_iterator>);
 static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<iterator_traits_cpp17_forward_iterator>);
-static_assert(
-    std::__iterator_traits_detail::__cpp17_bidirectional_iterator<iterator_traits_cpp17_bidirectional_iterator>);
-static_assert(
-    std::__iterator_traits_detail::__cpp17_bidirectional_iterator<iterator_traits_cpp17_random_access_iterator>);
+static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<iterator_traits_cpp17_bidirectional_iterator>);
+static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<iterator_traits_cpp17_random_access_iterator>);
 
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<int*>);
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<int const*>);
@@ -52,8 +51,7 @@ static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<int 
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::array<int, 10>::iterator>);
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::array<int, 10>::const_iterator>);
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::array<int, 10>::reverse_iterator>);
-static_assert(
-    std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::array<int, 10>::const_reverse_iterator>);
+static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::array<int, 10>::const_reverse_iterator>);
 
 // <deque>
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::deque<int>::iterator>);
@@ -64,8 +62,7 @@ static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std:
 // <filesystem>
 #ifndef _LIBCPP_HAS_NO_FILESYSTEM_LIBRARY
 static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::filesystem::directory_iterator>);
-static_assert(
-    !std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::filesystem::recursive_directory_iterator>);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::filesystem::recursive_directory_iterator>);
 #endif
 
 // <forward_list>
@@ -73,13 +70,10 @@ static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std
 static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::forward_list<int>::const_iterator>);
 
 // <iterator>
-static_assert(
-    !std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::back_insert_iterator<std::vector<int> > >);
-static_assert(
-    !std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::front_insert_iterator<std::vector<int> > >);
-static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::insert_iterator<std::vector<int> > >);
-static_assert(
-    !std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::move_iterator<std::vector<int>::iterator> >);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::back_insert_iterator<std::vector<int>>>);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::front_insert_iterator<std::vector<int>>>);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::insert_iterator<std::vector<int>>>);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::move_iterator<int*>>);
 
 // <list>
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::list<int>::iterator>);
@@ -91,14 +85,12 @@ static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std:
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::map<int, int>::iterator>);
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::map<int, int>::const_iterator>);
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::map<int, int>::reverse_iterator>);
-static_assert(
-    std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::map<int, int>::const_reverse_iterator>);
+static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::map<int, int>::const_reverse_iterator>);
 
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::multimap<int, int>::iterator>);
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::multimap<int, int>::const_iterator>);
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::multimap<int, int>::reverse_iterator>);
-static_assert(
-    std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::multimap<int, int>::const_reverse_iterator>);
+static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::multimap<int, int>::const_reverse_iterator>);
 
 // <set>
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::set<int>::iterator>);
@@ -109,8 +101,7 @@ static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std:
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::multiset<int>::iterator>);
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::multiset<int>::const_iterator>);
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::multiset<int>::reverse_iterator>);
-static_assert(
-    std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::multiset<int>::const_reverse_iterator>);
+static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::multiset<int>::const_reverse_iterator>);
 
 // <string>
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::string::iterator>);
@@ -126,36 +117,25 @@ static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std:
 
 // <unordered_map>
 static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_map<int, int>::iterator>);
-static_assert(
-    !std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_map<int, int>::const_iterator>);
-static_assert(
-    !std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_map<int, int>::local_iterator>);
-static_assert(
-    !std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_map<int, int>::const_local_iterator>);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_map<int, int>::const_iterator>);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_map<int, int>::local_iterator>);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_map<int, int>::const_local_iterator>);
 
-static_assert(
-    !std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_multimap<int, int>::iterator>);
-static_assert(
-    !std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_multimap<int, int>::const_iterator>);
-static_assert(
-    !std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_multimap<int, int>::local_iterator>);
-static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<
-              std::unordered_multimap<int, int>::const_local_iterator>);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_multimap<int, int>::iterator>);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_multimap<int, int>::const_iterator>);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_multimap<int, int>::local_iterator>);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_multimap<int, int>::const_local_iterator>);
 
 // <unordered_set>
 static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_set<int>::iterator>);
 static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_set<int>::const_iterator>);
 static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_set<int>::local_iterator>);
-static_assert(
-    !std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_set<int>::const_local_iterator>);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_set<int>::const_local_iterator>);
 
 static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_multiset<int>::iterator>);
-static_assert(
-    !std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_multiset<int>::const_iterator>);
-static_assert(
-    !std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_multiset<int>::local_iterator>);
-static_assert(
-    !std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_multiset<int>::const_local_iterator>);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_multiset<int>::const_iterator>);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_multiset<int>::local_iterator>);
+static_assert(!std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::unordered_multiset<int>::const_local_iterator>);
 
 // <vector>
 static_assert(std::__iterator_traits_detail::__cpp17_bidirectional_iterator<std::vector<int>::iterator>);

@@ -12,7 +12,6 @@
 
 #include "Lexer.h"
 #include "mlir/IR/Diagnostics.h"
-#include "mlir/IR/Identifier.h"
 #include "mlir/IR/Location.h"
 #include "mlir/IR/MLIRContext.h"
 #include "llvm/ADT/StringExtras.h"
@@ -41,11 +40,17 @@ Lexer::Lexer(const llvm::SourceMgr &sourceMgr, MLIRContext *context)
 Location Lexer::getEncodedSourceLocation(llvm::SMLoc loc) {
   auto &sourceMgr = getSourceMgr();
   unsigned mainFileID = sourceMgr.getMainFileID();
-  auto lineAndColumn = sourceMgr.getLineAndColumn(loc, mainFileID);
+
+  // TODO: Fix performance issues in SourceMgr::getLineAndColumn so that we can
+  //       use it here.
+  auto &bufferInfo = sourceMgr.getBufferInfo(mainFileID);
+  unsigned lineNo = bufferInfo.getLineNumber(loc.getPointer());
+  unsigned column =
+      (loc.getPointer() - bufferInfo.getPointerForLineNumber(lineNo)) + 1;
   auto *buffer = sourceMgr.getMemoryBuffer(mainFileID);
 
-  return FileLineColLoc::get(context, buffer->getBufferIdentifier(),
-                             lineAndColumn.first, lineAndColumn.second);
+  return FileLineColLoc::get(context, buffer->getBufferIdentifier(), lineNo,
+                             column);
 }
 
 /// emitError - Emit an error message and return an Token::error token.

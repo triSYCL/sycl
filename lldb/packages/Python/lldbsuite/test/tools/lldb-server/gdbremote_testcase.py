@@ -162,9 +162,6 @@ class GdbRemoteTestCaseBase(Base):
         self._verbose_log_handler = None
         TestBase.tearDown(self)
 
-    def build(self, *args, **kwargs):
-        self.buildDefault(*args, **kwargs)
-
     def getLocalServerLogFile(self):
         return self.getLogBasenameForCurrentTest() + "-server.log"
 
@@ -723,7 +720,9 @@ class GdbRemoteTestCaseBase(Base):
                  "permissions",
                  "flags",
                  "name",
-                 "error"])
+                 "error",
+                 "dirty-pages",
+                 "type"])
             self.assertIsNotNone(val)
 
         mem_region_dict["name"] = seven.unhexlify(mem_region_dict.get("name", ""))
@@ -792,7 +791,7 @@ class GdbRemoteTestCaseBase(Base):
 
             if time.time() > timeout_time:
                 raise Exception(
-                    'timed out after {} seconds while waiting for theads: waiting for at least {} threads, found {}'.format(
+                    'timed out after {} seconds while waiting for threads: waiting for at least {} threads, found {}'.format(
                         self.DEFAULT_TIMEOUT, thread_count, actual_thread_count))
 
         return threads
@@ -835,9 +834,10 @@ class GdbRemoteTestCaseBase(Base):
                 "send packet: $OK#00",
             ], True)
 
-    def add_qSupported_packets(self):
+    def add_qSupported_packets(self, client_features=[]):
+        features = ''.join(';' + x for x in client_features)
         self.test_sequence.add_log_lines(
-            ["read packet: $qSupported#00",
+            ["read packet: $qSupported{}#00".format(features),
              {"direction": "send", "regex": r"^\$(.*)#[0-9a-fA-F]{2}", "capture": {1: "qSupported_response"}},
              ], True)
 
@@ -854,6 +854,11 @@ class GdbRemoteTestCaseBase(Base):
         "qEcho",
         "QPassSignals",
         "multiprocess",
+        "fork-events",
+        "vfork-events",
+        "memory-tagging",
+        "qSaveCore",
+        "native-signals",
     ]
 
     def parse_qSupported_response(self, context):

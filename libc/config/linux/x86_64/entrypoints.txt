@@ -21,19 +21,26 @@ set(TARGET_LIBC_ENTRYPOINTS
     libc.src.errno.__errno_location
 
     # string.h entrypoints
+    libc.src.string.bcmp
     libc.src.string.bzero
+    libc.src.string.memccpy
     libc.src.string.memchr
     libc.src.string.memcmp
     libc.src.string.memcpy
     libc.src.string.memmove
+    libc.src.string.mempcpy
     libc.src.string.memrchr
     libc.src.string.memset
+    libc.src.string.stpcpy
+    libc.src.string.stpncpy
     libc.src.string.strcat
     libc.src.string.strchr
     libc.src.string.strcmp
     libc.src.string.strcpy
     libc.src.string.strcspn
     libc.src.string.strlen
+    libc.src.string.strncat
+    libc.src.string.strncmp
     libc.src.string.strncpy
     libc.src.string.strnlen
     libc.src.string.strpbrk
@@ -42,12 +49,41 @@ set(TARGET_LIBC_ENTRYPOINTS
     libc.src.string.strstr
     libc.src.string.strtok
     libc.src.string.strtok_r
+
+    # inttypes.h entrypoints
+    libc.src.inttypes.imaxdiv
+    libc.src.inttypes.strtoimax
+    libc.src.inttypes.strtoumax
+
+    # stdlib.h entrypoints
+    libc.src.stdlib.abs
+    libc.src.stdlib.atoi
+    libc.src.stdlib.atof
+    libc.src.stdlib.atol
+    libc.src.stdlib.atoll
+    libc.src.stdlib.bsearch
+    libc.src.stdlib.div
+    libc.src.stdlib.labs
+    libc.src.stdlib.ldiv
+    libc.src.stdlib.llabs
+    libc.src.stdlib.lldiv
+    libc.src.stdlib.qsort
+    libc.src.stdlib.strtod
+    libc.src.stdlib.strtof
+    libc.src.stdlib.strtol
+    libc.src.stdlib.strtold
+    libc.src.stdlib.strtoll
+    libc.src.stdlib.strtoul
+    libc.src.stdlib.strtoull
 )
 
 set(TARGET_LIBM_ENTRYPOINTS
     # fenv.h entrypoints
     libc.src.fenv.feclearexcept
+    libc.src.fenv.fedisableexcept
+    libc.src.fenv.feenableexcept
     libc.src.fenv.fegetenv
+    libc.src.fenv.fegetexcept
     libc.src.fenv.fegetexceptflag
     libc.src.fenv.fegetround
     libc.src.fenv.feholdexcept
@@ -65,9 +101,11 @@ set(TARGET_LIBM_ENTRYPOINTS
     libc.src.math.ceil
     libc.src.math.ceilf
     libc.src.math.ceill
+    libc.src.math.cos
     libc.src.math.cosf
     libc.src.math.expf
     libc.src.math.exp2f
+    libc.src.math.expm1f
     libc.src.math.fabs
     libc.src.math.fabsf
     libc.src.math.fabsl
@@ -77,12 +115,8 @@ set(TARGET_LIBM_ENTRYPOINTS
     libc.src.math.floor
     libc.src.math.floorf
     libc.src.math.floorl
-    # Temporarily disable fma as the clang version
-    # on the bots cannot compile them. Note however
-    # that the version of gcc on the bots is able to
-    # compile them.
-    # libc.src.math.fma
-    # libc.src.math.fmaf
+    libc.src.math.fma
+    libc.src.math.fmaf
     libc.src.math.fmin
     libc.src.math.fminf
     libc.src.math.fminl
@@ -106,6 +140,7 @@ set(TARGET_LIBM_ENTRYPOINTS
     libc.src.math.llround
     libc.src.math.llroundf
     libc.src.math.llroundl
+    libc.src.math.logf
     libc.src.math.logb
     libc.src.math.logbf
     libc.src.math.logbl
@@ -136,11 +171,13 @@ set(TARGET_LIBM_ENTRYPOINTS
     libc.src.math.round
     libc.src.math.roundf
     libc.src.math.roundl
+    libc.src.math.sin
     libc.src.math.sincosf
     libc.src.math.sinf
     libc.src.math.sqrt
     libc.src.math.sqrtf
     libc.src.math.sqrtl
+    libc.src.math.tan
     libc.src.math.trunc
     libc.src.math.truncf
     libc.src.math.truncl
@@ -149,24 +186,22 @@ set(TARGET_LIBM_ENTRYPOINTS
 if(LLVM_LIBC_FULL_BUILD)
   list(APPEND TARGET_LIBC_ENTRYPOINTS
     # assert.h entrypoints
-    libc.src.assert.__assert_fail
+    # libc.src.assert.__assert_fail
 
     # stdlib.h entrypoints
     libc.src.stdlib._Exit
-    libc.src.stdlib.abort
-    libc.src.stdlib.abs
-    libc.src.stdlib.labs
-    libc.src.stdlib.llabs
+    # libc.src.stdlib.abort
 
     # signal.h entrypoints
-    libc.src.signal.raise
-    libc.src.signal.sigaction
-    libc.src.signal.sigdelset
-    libc.src.signal.sigaddset
-    libc.src.signal.sigemptyset
-    libc.src.signal.sigprocmask
-    libc.src.signal.sigfillset
-    libc.src.signal.signal
+    # TODO: Enable signal.h entrypoints after fixing signal.h
+    # libc.src.signal.raise
+    # libc.src.signal.sigaction
+    # libc.src.signal.sigdelset
+    # libc.src.signal.sigaddset
+    # libc.src.signal.sigemptyset
+    # libc.src.signal.sigprocmask
+    # libc.src.signal.sigfillset
+    # libc.src.signal.signal
 
     # sys/mman.h entrypoints
     libc.src.sys.mman.mmap
@@ -174,6 +209,12 @@ if(LLVM_LIBC_FULL_BUILD)
 
     # threads.h entrypoints
     libc.src.threads.call_once
+    libc.src.threads.cnd_broadcast
+    libc.src.threads.cnd_destroy
+    libc.src.threads.cnd_init
+    libc.src.threads.cnd_signal
+    libc.src.threads.cnd_wait
+    libc.src.threads.mtx_destroy
     libc.src.threads.mtx_init
     libc.src.threads.mtx_lock
     libc.src.threads.mtx_unlock
@@ -181,12 +222,29 @@ if(LLVM_LIBC_FULL_BUILD)
     libc.src.threads.thrd_join
 
     # time.h entrypoints
+    libc.src.time.asctime
+    libc.src.time.asctime_r
     libc.src.time.gmtime
     libc.src.time.gmtime_r
     libc.src.time.mktime
 
     # unistd.h entrypoints
     libc.src.unistd.write
+  )
+endif()
+
+if(LLVM_LIBC_INCLUDE_SCUDO)
+  list(APPEND TARGET_LIBC_ENTRYPOINTS
+
+    # stdlib.h external entrypoints
+    libc.src.stdlib.malloc
+    libc.src.stdlib.calloc
+    libc.src.stdlib.realloc
+    libc.src.stdlib.free
+
+    # string.h entrypoints that depend on malloc
+    libc.src.string.strdup
+    libc.src.string.strndup
   )
 endif()
 

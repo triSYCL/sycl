@@ -893,13 +893,22 @@ UnwindPlanSP RegisterContextUnwind::GetFullUnwindPlanForFrame() {
     return arch_default_unwind_plan_sp;
   }
 
-  // If we're in _sigtramp(), unwinding past this frame requires special
-  // knowledge.  On Mac OS X this knowledge is properly encoded in the eh_frame
-  // section, so prefer that if available. On other platforms we may need to
-  // provide a platform-specific UnwindPlan which encodes the details of how to
-  // unwind out of sigtramp.
   if (m_frame_type == eTrapHandlerFrame && process) {
     m_fast_unwind_plan_sp.reset();
+
+    // On some platforms the unwind information for signal handlers is not
+    // present or correct. Give the platform plugins a chance to provide
+    // substitute plan. Otherwise, use eh_frame.
+    if (m_sym_ctx_valid) {
+      lldb::PlatformSP platform = process->GetTarget().GetPlatform();
+      unwind_plan_sp = platform->GetTrapHandlerUnwindPlan(
+          process->GetTarget().GetArchitecture().GetTriple(),
+          GetSymbolOrFunctionName(m_sym_ctx));
+
+      if (unwind_plan_sp)
+        return unwind_plan_sp;
+    }
+
     unwind_plan_sp =
         func_unwinders_sp->GetEHFrameUnwindPlan(process->GetTarget());
     if (!unwind_plan_sp)
@@ -1946,6 +1955,8 @@ bool RegisterContextUnwind::ReadFrameAddress(
             reg_info, cfa_reg_contents, reg_info->byte_size, reg_value);
         if (error.Success()) {
           address = reg_value.GetAsUInt64();
+          if (ABISP abi_sp = m_thread.GetProcess()->GetABI())
+            address = abi_sp->FixCodeAddress(address);
           UnwindLogMsg(
               "CFA value via dereferencing reg %s (%d): reg has val 0x%" PRIx64
               ", CFA value is 0x%" PRIx64,
@@ -2000,6 +2011,8 @@ bool RegisterContextUnwind::ReadFrameAddress(
     if (dwarfexpr.Evaluate(&exe_ctx, this, 0, nullptr, nullptr, result,
                            &error)) {
       address = result.GetScalar().ULongLong();
+      if (ABISP abi_sp = m_thread.GetProcess()->GetABI())
+        address = abi_sp->FixCodeAddress(address);
 
       UnwindLogMsg("CFA value set by DWARF expression is 0x%" PRIx64,
                    address);

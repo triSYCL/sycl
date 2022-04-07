@@ -1,6 +1,7 @@
 # -*- Python -*-
 
 import os
+from pathlib import Path
 import platform
 import re
 import subprocess
@@ -44,6 +45,9 @@ config.test_source_root = os.path.dirname(__file__)
 config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
 
 config.environment['SYCL_VXX_KEEP_CLUTTER'] = 'True'
+config.environment['SYCL_VXX_PRINT_CMD'] = 'True'
+config.environment['SYCL_VXX_SERIALIZE_VITIS_COMP'] = 'True'
+config.environment['XRT_PCIE_HW_EMU_FORCE_SHUTDOWN'] = 'True'
 llvm_config.use_clang()
 
 # Propagate some variables from the host environment.
@@ -101,6 +105,7 @@ config.substitutions.append( ('%cuda_toolkit_include',  config.cuda_toolkit_incl
 config.substitutions.append( ('%sycl_tools_src_dir',  config.sycl_tools_src_dir ) )
 config.substitutions.append( ('%llvm_build_lib_dir',  config.llvm_build_lib_dir ) )
 config.substitutions.append( ('%llvm_build_bin_dir',  config.llvm_build_bin_dir ) )
+config.substitutions.append( ('%clang_offload_bundler', f'{config.llvm_build_bin_dir}clang-offload-bundler') )
 
 if config.level_zero_include_dir:
     config.available_features.add("level_zero_headers")
@@ -176,6 +181,7 @@ if cl_options:
 config.substitutions.append( ('%level_zero_options', level_zero_options) )
 
 sp = subprocess.getstatusoutput(config.clang + ' -fsycl  ' + check_l0_file + level_zero_options)
+Path(check_l0_file).unlink(missing_ok=True)
 if sp[0] == 0:
     config.available_features.add('level_zero_dev_kit')
     config.substitutions.append( ('%level_zero_options', level_zero_options) )
@@ -262,7 +268,7 @@ config.substitutions.append( ('%GPU_RUN_ON_LINUX_PLACEHOLDER',  gpu_run_on_linux
 config.substitutions.append( ('%GPU_CHECK_PLACEHOLDER',  gpu_check_substitute) )
 config.substitutions.append( ('%GPU_CHECK_ON_LINUX_PLACEHOLDER',  gpu_check_on_linux_substitute) )
 
-acc_run_substitute = "true"
+acc_run_substitute = ""
 acc_check_substitute = ""
 if getDeviceCount("accelerator")[0]:
     found_at_least_one_device = True
@@ -277,10 +283,8 @@ if xocc != "off":
     # xrt doesn't deal well with multiple executables using it concurrently (at the time of writing).
     # The details are at https://xilinx.github.io/XRT/master/html/multiprocess.html
     # so we wrap every use of XRT inside an file lock.
-    # We also wrap invocation of executable in an setsid to prevent
-    # a single program failure from ending all the tests.
     xrt_lock = f"{tempfile.gettempdir()}/xrt-{getpass.getuser()}.lock"
-    acc_run_substitute+= "setsid flock --exclusive " + xrt_lock + " "
+    acc_run_substitute+= "flock --exclusive " + xrt_lock + " "
     if os.path.exists(xrt_lock):
         os.remove(xrt_lock)
     acc_run_substitute="env --unset=XCL_EMULATION_MODE " + acc_run_substitute
@@ -289,6 +293,7 @@ if xocc != "off":
         acc_run_substitute+= "timeout 3000 env "
     else:
         acc_run_substitute+= "timeout 3000 env "
+    acc_run_substitute += "unshare -pc --kill-child "
 
 config.substitutions.append( ('%ACC_RUN_PLACEHOLDER',  acc_run_substitute) )
 config.substitutions.append( ('%ACC_CHECK_PLACEHOLDER',  acc_check_substitute) )
@@ -298,11 +303,11 @@ if not cuda and not level_zero and found_at_least_one_device:
     config.available_features.add('opencl')
 
 if cuda:
-    config.substitutions.append( ('%sycl_triple',  "nvptx64-nvidia-cuda-sycldevice" ) )
+    config.substitutions.append( ('%sycl_triple',  "nvptx64-nvidia-cuda" ) )
 elif xocc != "off":
-    config.substitutions.append( ('%sycl_triple',  f"fpga64_{vxx_target}-xilinx-unknown-sycldevice" ) )
+    config.substitutions.append( ('%sycl_triple',  f"fpga64_{vxx_target}-xilinx" ) )
 else:
-    config.substitutions.append( ('%sycl_triple',  "spir64-unknown-unknown-sycldevice" ) )
+    config.substitutions.append( ('%sycl_triple',  "spir64" ) )
 
 if "opencl-aot" in config.llvm_enable_projects:
     lit_config.note("Using opencl-aot version which is built as part of the project")
@@ -328,13 +333,15 @@ else:
     if getDeviceCount("gpu", "cuda")[1]:
         lit_config.note("found secondary cuda target")
         config.available_features.add("has_secondary_cuda")
-    lit_config.note("XOCC target: {}".format(vxx_target))
+    lit_config.note(f"XOCC target: {vxx_target}")
     required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]
     has_error=False
     config.available_features.add("xocc")
     for feature in split_target(vxx_target):
         config.available_features.add(feature) 
     config.available_features.add(vxx_target)
+    feat_list = ",".join(config.available_features)
+    lit_config.note(f"Features: {feat_list}")
     pkg_opencv4 = subprocess.run(["pkg-config", "--libs", "--cflags", "opencv4"], stdout=subprocess.PIPE)
     has_opencv4 = not pkg_opencv4.returncode
     lit_config.note("has opencv4: {}".format(has_opencv4))

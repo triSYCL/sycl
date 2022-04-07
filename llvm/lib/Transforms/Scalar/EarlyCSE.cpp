@@ -108,8 +108,29 @@ struct SimpleValue {
 
   static bool canHandle(Instruction *Inst) {
     // This can only handle non-void readnone functions.
-    if (CallInst *CI = dyn_cast<CallInst>(Inst))
+    // Also handled are constrained intrinsic that look like the types
+    // of instruction handled below (UnaryOperator, etc.).
+    if (CallInst *CI = dyn_cast<CallInst>(Inst)) {
+      if (Function *F = CI->getCalledFunction()) {
+        switch ((Intrinsic::ID)F->getIntrinsicID()) {
+        case Intrinsic::experimental_constrained_fadd:
+        case Intrinsic::experimental_constrained_fsub:
+        case Intrinsic::experimental_constrained_fmul:
+        case Intrinsic::experimental_constrained_fdiv:
+        case Intrinsic::experimental_constrained_frem:
+        case Intrinsic::experimental_constrained_fptosi:
+        case Intrinsic::experimental_constrained_sitofp:
+        case Intrinsic::experimental_constrained_fptoui:
+        case Intrinsic::experimental_constrained_uitofp:
+        case Intrinsic::experimental_constrained_fcmp:
+        case Intrinsic::experimental_constrained_fcmps: {
+          auto *CFP = cast<ConstrainedFPIntrinsic>(CI);
+          return CFP->isDefaultFPEnvironment();
+        }
+        }
+      }
       return CI->doesNotAccessMemory() && !CI->getType()->isVoidTy();
+    }
     return isa<CastInst>(Inst) || isa<UnaryOperator>(Inst) ||
            isa<BinaryOperator>(Inst) || isa<GetElementPtrInst>(Inst) ||
            isa<CmpInst>(Inst) || isa<SelectInst>(Inst) ||
@@ -272,7 +293,7 @@ static unsigned getHashValueImpl(SimpleValue Val) {
   // TODO: Extend this to handle intrinsics with >2 operands where the 1st
   //       2 operands are commutative.
   auto *II = dyn_cast<IntrinsicInst>(Inst);
-  if (II && II->isCommutative() && II->getNumArgOperands() == 2) {
+  if (II && II->isCommutative() && II->arg_size() == 2) {
     Value *LHS = II->getArgOperand(0), *RHS = II->getArgOperand(1);
     if (LHS > RHS)
       std::swap(LHS, RHS);
@@ -342,7 +363,7 @@ static bool isEqualImpl(SimpleValue LHS, SimpleValue RHS) {
   auto *LII = dyn_cast<IntrinsicInst>(LHSI);
   auto *RII = dyn_cast<IntrinsicInst>(RHSI);
   if (LII && RII && LII->getIntrinsicID() == RII->getIntrinsicID() &&
-      LII->isCommutative() && LII->getNumArgOperands() == 2) {
+      LII->isCommutative() && LII->arg_size() == 2) {
     return LII->getArgOperand(0) == RII->getArgOperand(1) &&
            LII->getArgOperand(1) == RII->getArgOperand(0);
   }
@@ -1244,6 +1265,12 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
       continue;
     }
 
+    // Skip pseudoprobe intrinsics, for the same reason as assume intrinsics.
+    if (match(&Inst, m_Intrinsic<Intrinsic::pseudoprobe>())) {
+      LLVM_DEBUG(dbgs() << "EarlyCSE skipping pseudoprobe: " << Inst << '\n');
+      continue;
+    }
+
     // We can skip all invariant.start intrinsics since they only read memory,
     // and we can forward values across it. For invariant starts without
     // invariant ends, we can use the fact that the invariantness never ends to
@@ -1339,8 +1366,16 @@ bool EarlyCSE::processNode(DomTreeNode *Node) {
           LLVM_DEBUG(dbgs() << "Skipping due to debug counter\n");
           continue;
         }
-        if (auto *I = dyn_cast<Instruction>(V))
-          I->andIRFlags(&Inst);
+        if (auto *I = dyn_cast<Instruction>(V)) {
+          // If I being poison triggers UB, there is no need to drop those
+          // flags. Otherwise, only retain flags present on both I and Inst.
+          // TODO: Currently some fast-math flags are not treated as
+          // poison-generating even though they should. Until this is fixed,
+          // always retain flags present on both I and Inst for floating point
+          // instructions.
+          if (isa<FPMathOperator>(I) || (I->hasPoisonGeneratingFlags() && !programUndefinedIfPoison(I)))
+            I->andIRFlags(&Inst);
+        }
         Inst.replaceAllUsesWith(V);
         salvageKnowledge(&Inst, &AC);
         removeMSSA(Inst);
@@ -1616,10 +1651,19 @@ PreservedAnalyses EarlyCSEPass::run(Function &F,
 
   PreservedAnalyses PA;
   PA.preserveSet<CFGAnalyses>();
-  PA.preserve<GlobalsAA>();
   if (UseMemorySSA)
     PA.preserve<MemorySSAAnalysis>();
   return PA;
+}
+
+void EarlyCSEPass::printPipeline(
+    raw_ostream &OS, function_ref<StringRef(StringRef)> MapClassName2PassName) {
+  static_cast<PassInfoMixin<EarlyCSEPass> *>(this)->printPipeline(
+      OS, MapClassName2PassName);
+  OS << "<";
+  if (UseMemorySSA)
+    OS << "memssa";
+  OS << ">";
 }
 
 namespace {

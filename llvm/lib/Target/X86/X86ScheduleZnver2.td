@@ -178,6 +178,10 @@ def : WriteRes<WriteStoreNT, [Zn2AGU]>;
 def : WriteRes<WriteMove,    [Zn2ALU]>;
 def : WriteRes<WriteLoad,    [Zn2AGU]> { let Latency = 8; }
 
+// Model the effect of clobbering the read-write mask operand of the GATHER operation.
+// Does not cost anything by itself, only has latency, matching that of the WriteLoad,
+def : WriteRes<WriteVecMaskedGatherWriteback, []> { let Latency = 8; let NumMicroOps = 0; }
+
 def : WriteRes<WriteZero,  []>;
 def : WriteRes<WriteLEA, [Zn2ALU]>;
 defm : Zn2WriteResPair<WriteALU,   [Zn2ALU], 1>;
@@ -239,9 +243,16 @@ defm : Zn2WriteResPair<WriteIDiv32, [Zn2ALU2, Zn2Divider], 25, [1,25], 2>;
 defm : Zn2WriteResPair<WriteIDiv64, [Zn2ALU2, Zn2Divider], 41, [1,41], 2>;
 
 // IMULH
-def  : WriteRes<WriteIMulH, [Zn2ALU1, Zn2Multiplier]>{
-  let Latency = 4;
+def Zn2WriteIMulH : WriteRes<WriteIMulH, [Zn2Multiplier]>{
+  let Latency = 3;
+  let NumMicroOps = 0;
 }
+
+def  : WriteRes<WriteIMulHLd, [Zn2Multiplier]>{
+  let Latency = !add(Zn2WriteIMulH.Latency, Znver2Model.LoadLatency);
+  let NumMicroOps = Zn2WriteIMulH.NumMicroOps;
+}
+
 
 // Floating point operations
 defm : X86WriteRes<WriteFLoad,         [Zn2AGU], 8, [1], 1>;
@@ -654,31 +665,9 @@ def : SchedAlias<WriteIMul64ImmLd, Zn2WriteMul64Ld>;
 def : SchedAlias<WriteIMul64RegLd, Zn2WriteMul64Ld>;
 
 // MULX.
-// r32,r32,r32.
-def Zn2WriteMulX32 : SchedWriteRes<[Zn2ALU1, Zn2Multiplier]> {
-  let Latency = 3;
-  let ResourceCycles = [1, 2];
-}
-def : InstRW<[Zn2WriteMulX32], (instrs MULX32rr)>;
-
-// r32,r32,m32.
-def Zn2WriteMulX32Ld : SchedWriteRes<[Zn2AGU, Zn2ALU1, Zn2Multiplier]> {
-  let Latency = 7;
-  let ResourceCycles = [1, 2, 2];
-}
-def : InstRW<[Zn2WriteMulX32Ld, ReadAfterLd], (instrs MULX32rm)>;
-
-// r64,r64,r64.
-def Zn2WriteMulX64 : SchedWriteRes<[Zn2ALU1]> {
-  let Latency = 3;
-}
-def : InstRW<[Zn2WriteMulX64], (instrs MULX64rr)>;
-
-// r64,r64,m64.
-def Zn2WriteMulX64Ld : SchedWriteRes<[Zn2AGU, Zn2ALU1, Zn2Multiplier]> {
-  let Latency = 7;
-}
-def : InstRW<[Zn2WriteMulX64Ld, ReadAfterLd], (instrs MULX64rm)>;
+// Numbers are based on the AMD SOG for Family 17h - Instruction Latencies.
+defm : Zn2WriteResPair<WriteMULX32, [Zn2ALU1, Zn2Multiplier], 3, [1, 1], 1, 4, 0>;
+defm : Zn2WriteResPair<WriteMULX64, [Zn2ALU1, Zn2Multiplier], 3, [1, 1], 1, 4, 0>;
 
 //-- Control transfer instructions --//
 
@@ -708,7 +697,7 @@ def : InstRW<[WriteMicrocoded], (instregex "CALL(16|32)m")>;
 def Zn2WriteRET : SchedWriteRes<[Zn2ALU03]> {
   let NumMicroOps = 2;
 }
-def : InstRW<[Zn2WriteRET], (instregex "RET(L|Q|W)", "LRET(L|Q|W)",
+def : InstRW<[Zn2WriteRET], (instregex "RET(16|32|64)", "LRET(16|32|64)",
                             "IRET(16|32|64)")>;
 
 //-- Logic instructions --//
@@ -979,7 +968,7 @@ def : InstRW<[Zn2WriteFPU03], (instregex "FICOM(P?)(16|32)m")>;
 def : InstRW<[Zn2WriteFPU0Lat1], (instregex "TST_F")>;
 
 // FXAM.
-def : InstRW<[Zn2WriteFPU3Lat1], (instrs FXAM)>;
+def : InstRW<[Zn2WriteFPU3Lat1], (instrs XAM_F)>;
 
 // FPREM.
 def : InstRW<[WriteMicrocoded], (instrs FPREM)>;
@@ -1023,12 +1012,12 @@ def Zn2WriteFPU12Ym : SchedWriteRes<[Zn2AGU, Zn2FPU12]> {
   let NumMicroOps = 2;
 }
 
-def : InstRW<[Zn2WriteFPU12], (instrs MMX_PACKSSDWirr,
-                                     MMX_PACKSSWBirr,
-                                     MMX_PACKUSWBirr)>;
-def : InstRW<[Zn2WriteFPU12m], (instrs MMX_PACKSSDWirm,
-                                      MMX_PACKSSWBirm,
-                                      MMX_PACKUSWBirm)>;
+def : InstRW<[Zn2WriteFPU12], (instrs MMX_PACKSSDWrr,
+                                     MMX_PACKSSWBrr,
+                                     MMX_PACKUSWBrr)>;
+def : InstRW<[Zn2WriteFPU12m], (instrs MMX_PACKSSDWrm,
+                                      MMX_PACKSSWBrm,
+                                      MMX_PACKUSWBrm)>;
 
 def Zn2WriteFPU013 : SchedWriteRes<[Zn2FPU013]> ;
 def Zn2WriteFPU013Y : SchedWriteRes<[Zn2FPU013]> ;
@@ -1315,15 +1304,15 @@ def Zn2WriteCVTPS2PIr: SchedWriteRes<[Zn2FPU3]> {
 }
 // CVT(T)PS2PI.
 // mm,x.
-def : InstRW<[Zn2WriteCVTPS2PIr], (instregex "MMX_CVT(T?)PS2PIirr")>;
+def : InstRW<[Zn2WriteCVTPS2PIr], (instregex "MMX_CVT(T?)PS2PIrr")>;
 
 // CVTPI2PD.
 // x,mm.
-def : InstRW<[Zn2WriteCVTPS2PDr], (instrs MMX_CVTPI2PDirr)>;
+def : InstRW<[Zn2WriteCVTPS2PDr], (instrs MMX_CVTPI2PDrr)>;
 
 // CVT(T)PD2PI.
 // mm,x.
-def : InstRW<[Zn2WriteCVTPS2PIr], (instregex "MMX_CVT(T?)PD2PIirr")>;
+def : InstRW<[Zn2WriteCVTPS2PIr], (instregex "MMX_CVT(T?)PD2PIrr")>;
 
 def Zn2WriteCVSTSI2SSr: SchedWriteRes<[Zn2FPU3]> {
   let Latency = 3;

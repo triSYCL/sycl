@@ -2899,6 +2899,7 @@ bool AArch64FastISel::fastLowerArguments() {
         Arg.hasAttribute(Attribute::InReg) ||
         Arg.hasAttribute(Attribute::StructRet) ||
         Arg.hasAttribute(Attribute::SwiftSelf) ||
+        Arg.hasAttribute(Attribute::SwiftAsync) ||
         Arg.hasAttribute(Attribute::SwiftError) ||
         Arg.hasAttribute(Attribute::Nest))
       return false;
@@ -3157,7 +3158,7 @@ bool AArch64FastISel::fastLowerCall(CallLoweringInfo &CLI) {
 
   for (auto Flag : CLI.OutFlags)
     if (Flag.isInReg() || Flag.isSRet() || Flag.isNest() || Flag.isByVal() ||
-        Flag.isSwiftSelf() || Flag.isSwiftError())
+        Flag.isSwiftSelf() || Flag.isSwiftAsync() || Flag.isSwiftError())
       return false;
 
   // Set up the argument vectors.
@@ -3482,7 +3483,7 @@ bool AArch64FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
       return false;
 
     const char *IntrMemName = isa<MemCpyInst>(II) ? "memcpy" : "memmove";
-    return lowerCallTo(II, IntrMemName, II->getNumArgOperands() - 1);
+    return lowerCallTo(II, IntrMemName, II->arg_size() - 1);
   }
   case Intrinsic::memset: {
     const MemSetInst *MSI = cast<MemSetInst>(II);
@@ -3498,7 +3499,7 @@ bool AArch64FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
       // address spaces.
       return false;
 
-    return lowerCallTo(II, "memset", II->getNumArgOperands() - 1);
+    return lowerCallTo(II, "memset", II->arg_size() - 1);
   }
   case Intrinsic::sin:
   case Intrinsic::cos:
@@ -3532,10 +3533,10 @@ bool AArch64FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
     }
 
     ArgListTy Args;
-    Args.reserve(II->getNumArgOperands());
+    Args.reserve(II->arg_size());
 
     // Populate the argument list.
-    for (auto &Arg : II->arg_operands()) {
+    for (auto &Arg : II->args()) {
       ArgListEntry Entry;
       Entry.Val = Arg;
       Entry.Ty = Arg->getType();
@@ -3680,11 +3681,13 @@ bool AArch64FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
 
       if (VT == MVT::i32) {
         MulReg = emitSMULL_rr(MVT::i64, LHSReg, RHSReg);
-        unsigned ShiftReg = emitLSR_ri(MVT::i64, MVT::i64, MulReg, 32);
-        MulReg = fastEmitInst_extractsubreg(VT, MulReg, AArch64::sub_32);
-        ShiftReg = fastEmitInst_extractsubreg(VT, ShiftReg, AArch64::sub_32);
-        emitSubs_rs(VT, ShiftReg, MulReg, AArch64_AM::ASR, 31,
-                    /*WantResult=*/false);
+        unsigned MulSubReg =
+            fastEmitInst_extractsubreg(VT, MulReg, AArch64::sub_32);
+        // cmp xreg, wreg, sxtw
+        emitAddSub_rx(/*UseAdd=*/false, MVT::i64, MulReg, MulSubReg,
+                      AArch64_AM::SXTW, /*ShiftImm=*/0, /*SetFlags=*/true,
+                      /*WantResult=*/false);
+        MulReg = MulSubReg;
       } else {
         assert(VT == MVT::i64 && "Unexpected value type.");
         // LHSReg and RHSReg cannot be killed by this Mul, since they are
@@ -3708,8 +3711,11 @@ bool AArch64FastISel::fastLowerIntrinsicCall(const IntrinsicInst *II) {
 
       if (VT == MVT::i32) {
         MulReg = emitUMULL_rr(MVT::i64, LHSReg, RHSReg);
-        emitSubs_rs(MVT::i64, AArch64::XZR, MulReg, AArch64_AM::LSR, 32,
-                    /*WantResult=*/false);
+        // tst xreg, #0xffffffff00000000
+        BuildMI(*FuncInfo.MBB, FuncInfo.InsertPt, DbgLoc,
+                TII.get(AArch64::ANDSXri), AArch64::XZR)
+            .addReg(MulReg)
+            .addImm(AArch64_AM::encodeLogicalImmediate(0xFFFFFFFF00000000, 64));
         MulReg = fastEmitInst_extractsubreg(VT, MulReg, AArch64::sub_32);
       } else {
         assert(VT == MVT::i64 && "Unexpected value type.");
@@ -4800,7 +4806,7 @@ bool AArch64FastISel::selectSDiv(const Instruction *I) {
 
   const APInt &C = cast<ConstantInt>(I->getOperand(1))->getValue();
   if ((VT != MVT::i32 && VT != MVT::i64) || !C ||
-      !(C.isPowerOf2() || (-C).isPowerOf2()))
+      !(C.isPowerOf2() || C.isNegatedPowerOf2()))
     return selectBinaryOp(I, ISD::SDIV);
 
   unsigned Lg2 = C.countTrailingZeros();
@@ -5094,11 +5100,7 @@ bool AArch64FastISel::fastSelectInstruction(const Instruction *I) {
   return selectOperator(I, I->getOpcode());
 }
 
-namespace llvm {
-
 FastISel *AArch64::createFastISel(FunctionLoweringInfo &FuncInfo,
                                         const TargetLibraryInfo *LibInfo) {
   return new AArch64FastISel(FuncInfo, LibInfo);
 }
-
-} // end namespace llvm
