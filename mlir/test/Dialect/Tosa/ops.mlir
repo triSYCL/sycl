@@ -10,10 +10,31 @@ func @test_argmax(%arg0: tensor<14x19xf32>) -> tensor<14xi32> {
 }
 
 // -----
-// CHECK-LABEL: avg_pool2d
-func @test_avg_pool2d(%arg0: tensor<1x7x7x9xf32>) -> tensor<1x7x7x9xf32> {
+// CHECK-LABEL: avg_pool2d_f32
+func @test_avg_pool2d_f32(%arg0: tensor<1x7x7x9xf32>) -> tensor<1x7x7x9xf32> {
     %0 = "tosa.avg_pool2d"(%arg0) {kernel = [2, 2], pad = [0, 1, 0, 1], stride = [1, 1]} : (tensor<1x7x7x9xf32>) -> tensor<1x7x7x9xf32>
     return %0 : tensor<1x7x7x9xf32>
+}
+
+// -----
+// CHECK-LABEL: avg_pool2d_i8
+func @test_avg_pool2d_i8(%arg0: tensor<1x7x7x9xi8>) -> tensor<1x7x7x9xi8> {
+    %0 = "tosa.avg_pool2d"(%arg0) {kernel = [2, 2], pad = [0, 1, 0, 1], stride = [1, 1]} : (tensor<1x7x7x9xi8>) -> tensor<1x7x7x9xi8>
+    return %0 : tensor<1x7x7x9xi8>
+}
+
+// -----
+// CHECK-LABEL: avg_pool2d_i16
+func @test_avg_pool2d_i16(%arg0: tensor<1x7x7x9xi16>) -> tensor<1x7x7x9xi16> {
+    %0 = "tosa.avg_pool2d"(%arg0) {kernel = [2, 2], pad = [0, 1, 0, 1], stride = [1, 1]} : (tensor<1x7x7x9xi16>) -> tensor<1x7x7x9xi16>
+    return %0 : tensor<1x7x7x9xi16>
+}
+
+// -----
+// CHECK-LABEL: avg_pool2d_q8
+func @test_avg_pool2d_q8(%arg0: tensor<1x7x7x9x!quant.uniform<i8:f32, 0.01>>) -> tensor<1x7x7x9x!quant.uniform<i8:f32, 0.01>> {
+    %0 = "tosa.avg_pool2d"(%arg0) {kernel = [2, 2], pad = [0, 1, 0, 1], stride = [1, 1]} : (tensor<1x7x7x9x!quant.uniform<i8:f32, 0.01>>) -> tensor<1x7x7x9x!quant.uniform<i8:f32, 0.01>>
+    return %0 : tensor<1x7x7x9x!quant.uniform<i8:f32, 0.01>>
 }
 
 // -----
@@ -39,9 +60,9 @@ func @test_fully_connected(%arg0: tensor<14x19xf32>, %arg1: tensor<19x28xf32>, %
 
 // -----
 // CHECK-LABEL: test_matmul
-func @test_matmul(%arg0: tensor<14x19xf32>, %arg1: tensor<19x28xf32>) -> tensor<14x28xf32> {
-  %0 = "tosa.matmul"(%arg0, %arg1) : (tensor<14x19xf32>, tensor<19x28xf32>) -> tensor<14x28xf32>
-  return %0 : tensor<14x28xf32>
+func @test_matmul(%arg0: tensor<1x14x19xf32>, %arg1: tensor<1x19x28xf32>) -> tensor<1x14x28xf32> {
+  %0 = "tosa.matmul"(%arg0, %arg1) : (tensor<1x14x19xf32>, tensor<1x19x28xf32>) -> tensor<1x14x28xf32>
+  return %0 : tensor<1x14x28xf32>
 }
 
 // -----
@@ -101,7 +122,6 @@ func @test_arithmetic_right_shift(%arg0: tensor<13x21x1xf32>, %arg1: tensor<13x2
   return %0 : tensor<13x21x3xf32>
 }
 
-
 // -----
 // CHECK-LABEL: bitwise_and
 func @test_bitwise_and(%arg0: tensor<13x21x3xi32>, %arg1: tensor<13x21x1xi32>) -> tensor<13x21x3xi32> {
@@ -120,6 +140,13 @@ func @test_bitwise_or(%arg0: tensor<13x21x3xi32>, %arg1: tensor<13x1x3xi32>) -> 
 // CHECK-LABEL: bitwise_xor
 func @test_bitwise_xor(%arg0: tensor<13x21x1xi32>, %arg1: tensor<13x21x3xi32>) -> tensor<13x21x3xi32> {
   %0 = "tosa.bitwise_xor"(%arg0, %arg1) : (tensor<13x21x1xi32>, tensor<13x21x3xi32>) -> tensor<13x21x3xi32>
+  return %0 : tensor<13x21x3xi32>
+}
+
+// -----
+// CHECK-LABEL: div
+func @test_div(%arg0: tensor<13x21x1xi32>, %arg1: tensor<13x21x3xi32>) -> tensor<13x21x3xi32> {
+  %0 = "tosa.div"(%arg0, %arg1) : (tensor<13x21x1xi32>, tensor<13x21x3xi32>) -> tensor<13x21x3xi32>
   return %0 : tensor<13x21x3xi32>
 }
 
@@ -369,6 +396,14 @@ func @test_pad(%arg0: tensor<13x21x3xf32>, %arg1: tensor<3x2xi32>) -> tensor<13x
 }
 
 // -----
+// CHECK-LABEL: pad_explicit_value
+func @test_pad_explicit_value(%arg0: tensor<13x21x3xf32>, %arg1: tensor<3x2xi32>) -> tensor<13x21x3xf32> {
+  %0 = "tosa.const"() {value = dense<3.14> : tensor<f32>} : () -> tensor<f32>
+  %1 = "tosa.pad"(%arg0, %arg1, %0) : (tensor<13x21x3xf32>, tensor<3x2xi32>, tensor<f32>) -> tensor<13x21x3xf32>
+  return %1 : tensor<13x21x3xf32>
+}
+
+// -----
 // CHECK-LABEL: reshape
 func @test_reshape(%arg0: tensor<13x21x3xf32>) -> tensor<1x819xf32> {
   %0 = "tosa.reshape"(%arg0) {new_shape = [1, 819]} : (tensor<13x21x3xf32>) -> tensor<1x819xf32>
@@ -465,20 +500,6 @@ func @test_const(%arg0 : index) -> tensor<4xi32> {
 func @test_identity(%arg0: tensor<13x21x3xi32>) -> tensor<13x21x3xi32> {
   %0 = "tosa.identity"(%arg0) : (tensor<13x21x3xi32>) -> tensor<13x21x3xi32>
   return %0 : tensor<13x21x3xi32>
-}
-
-// -----
-// CHECK-LABEL: identityn
-func @test_identityn(%arg0: tensor<1xi32>, %arg1: tensor<1xi32>) -> tensor<1xi32> {
-  %0:2 = "tosa.identityn"(%arg0, %arg1) : (tensor<1xi32>, tensor<1xi32>) -> (tensor<1xi32>, tensor<1xi32>)
-  return %0#0 : tensor<1xi32>
-}
-
-// -----
-// CHECK-LABEL: placeholder
-func @test_placeholder() -> tensor<1xi32> {
-  %0 = "tosa.placeholder"() : () -> tensor<1xi32>
-  return %0 : tensor<1xi32>
 }
 
 // -----

@@ -25,8 +25,8 @@ $comdat.exactmatch = comdat exactmatch
 ; CHECK: $comdat.exactmatch = comdat exactmatch
 $comdat.largest = comdat largest
 ; CHECK: $comdat.largest = comdat largest
-$comdat.noduplicates = comdat noduplicates
-; CHECK: $comdat.noduplicates = comdat noduplicates
+$comdat.noduplicates = comdat nodeduplicate
+; CHECK: $comdat.noduplicates = comdat nodeduplicate
 $comdat.samesize = comdat samesize
 ; CHECK: $comdat.samesize = comdat samesize
 
@@ -264,28 +264,28 @@ declare void @g.f1()
 ;                  <ResolverTy>* @<Resolver>
 
 ; IFunc -- Linkage
-@ifunc.external = external ifunc void (), i8* ()* @ifunc_resolver
-; CHECK: @ifunc.external = ifunc void (), i8* ()* @ifunc_resolver
-@ifunc.private = private ifunc void (), i8* ()* @ifunc_resolver
-; CHECK: @ifunc.private = private ifunc void (), i8* ()* @ifunc_resolver
-@ifunc.internal = internal ifunc void (), i8* ()* @ifunc_resolver
-; CHECK: @ifunc.internal = internal ifunc void (), i8* ()* @ifunc_resolver
+@ifunc.external = external ifunc void (), void ()* ()* @ifunc_resolver
+; CHECK: @ifunc.external = ifunc void (), void ()* ()* @ifunc_resolver
+@ifunc.private = private ifunc void (), void ()* ()* @ifunc_resolver
+; CHECK: @ifunc.private = private ifunc void (), void ()* ()* @ifunc_resolver
+@ifunc.internal = internal ifunc void (), void ()* ()* @ifunc_resolver
+; CHECK: @ifunc.internal = internal ifunc void (), void ()* ()* @ifunc_resolver
 
 ; IFunc -- Visibility
-@ifunc.default = default ifunc void (), i8* ()* @ifunc_resolver
-; CHECK: @ifunc.default = ifunc void (), i8* ()* @ifunc_resolver
-@ifunc.hidden = hidden ifunc void (), i8* ()* @ifunc_resolver
-; CHECK: @ifunc.hidden = hidden ifunc void (), i8* ()* @ifunc_resolver
-@ifunc.protected = protected ifunc void (), i8* ()* @ifunc_resolver
-; CHECK: @ifunc.protected = protected ifunc void (), i8* ()* @ifunc_resolver
+@ifunc.default = default ifunc void (), void ()* ()* @ifunc_resolver
+; CHECK: @ifunc.default = ifunc void (), void ()* ()* @ifunc_resolver
+@ifunc.hidden = hidden ifunc void (), void ()* ()* @ifunc_resolver
+; CHECK: @ifunc.hidden = hidden ifunc void (), void ()* ()* @ifunc_resolver
+@ifunc.protected = protected ifunc void (), void ()* ()* @ifunc_resolver
+; CHECK: @ifunc.protected = protected ifunc void (), void ()* ()* @ifunc_resolver
 
 ; IFunc -- partition
-; CHECK: @ifunc.partition = ifunc void (), i8* ()* @ifunc_resolver, partition "part"
-@ifunc.partition = ifunc void (), i8* ()* @ifunc_resolver, partition "part"
+; CHECK: @ifunc.partition = ifunc void (), void ()* ()* @ifunc_resolver, partition "part"
+@ifunc.partition = ifunc void (), void ()* ()* @ifunc_resolver, partition "part"
 
-define i8* @ifunc_resolver() {
+define void ()* @ifunc_resolver() {
 entry:
-  ret i8* null
+  ret void ()* null
 }
 
 ;; Functions
@@ -382,6 +382,8 @@ declare preserve_mostcc void @f.preserve_mostcc()
 ; CHECK: declare preserve_mostcc void @f.preserve_mostcc()
 declare preserve_allcc void @f.preserve_allcc()
 ; CHECK: declare preserve_allcc void @f.preserve_allcc()
+declare swifttailcc void @f.swifttailcc()
+; CHECK: declare swifttailcc void @f.swifttailcc()
 declare cc64 void @f.cc64()
 ; CHECK: declare x86_stdcallcc void @f.cc64()
 declare x86_stdcallcc void @f.x86_stdcallcc()
@@ -552,6 +554,12 @@ declare void @f.param.dereferenceable_or_null(i8* dereferenceable_or_null(4))
 ; CHECK: declare void @f.param.dereferenceable_or_null(i8* dereferenceable_or_null(4))
 declare void @f.param.stack_align([2 x double] alignstack(16))
 ; CHECK: declare void @f.param.stack_align([2 x double] alignstack(16))
+declare void @f.param.swiftself(i8* swiftself)
+; CHECK: declare void @f.param.swiftself(i8* swiftself)
+declare void @f.param.swiftasync(i8* swiftasync)
+; CHECK: declare void @f.param.swiftasync(i8* swiftasync)
+declare void @f.param.swifterror(i8** swifterror)
+; CHECK: declare void @f.param.swifterror(i8** swifterror)
 
 ; Functions -- unnamed_addr and local_unnamed_addr
 declare void @f.unnamed_addr() unnamed_addr
@@ -1502,7 +1510,7 @@ exit:
   ; CHECK: select <2 x i1> <i1 true, i1 false>, <2 x i8> <i8 2, i8 3>, <2 x i8> <i8 3, i8 2>
 
   call void @f.nobuiltin() builtin
-  ; CHECK: call void @f.nobuiltin() #44
+  ; CHECK: call void @f.nobuiltin() #46
 
   call fastcc noalias i32* @f.noalias() noinline
   ; CHECK: call fastcc noalias i32* @f.noalias() #12
@@ -1896,6 +1904,12 @@ define void @instructions.strictfp() strictfp {
   ret void
 }
 
+declare void @f.nosanitize_coverage() nosanitize_coverage
+; CHECK: declare void @f.nosanitize_coverage() #44
+
+declare void @f.disable_sanitizer_instrumentation() disable_sanitizer_instrumentation
+; CHECK: declare void @f.disable_sanitizer_instrumentation() #45
+
 ; immarg attribute
 declare void @llvm.test.immarg.intrinsic(i32 immarg)
 ; CHECK: declare void @llvm.test.immarg.intrinsic(i32 immarg)
@@ -1953,7 +1967,9 @@ declare void @byval_named_type(%named_type* byval(%named_type))
 ; CHECK: attributes #41 = { writeonly }
 ; CHECK: attributes #42 = { speculatable }
 ; CHECK: attributes #43 = { strictfp }
-; CHECK: attributes #44 = { builtin }
+; CHECK: attributes #44 = { nosanitize_coverage }
+; CHECK: attributes #45 = { disable_sanitizer_instrumentation }
+; CHECK: attributes #46 = { builtin }
 
 ;; Metadata
 

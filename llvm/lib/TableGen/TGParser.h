@@ -37,20 +37,20 @@ namespace llvm {
   };
 
   /// RecordsEntry - Holds exactly one of a Record, ForeachLoop, or
-  /// assertion tuple.
+  /// AssertionInfo.
   struct RecordsEntry {
     std::unique_ptr<Record> Rec;
     std::unique_ptr<ForeachLoop> Loop;
-    std::unique_ptr<Record::AssertionTuple> Assertion;
+    std::unique_ptr<Record::AssertionInfo> Assertion;
 
     void dump() const;
 
     RecordsEntry() {}
     RecordsEntry(std::unique_ptr<Record> Rec) : Rec(std::move(Rec)) {}
     RecordsEntry(std::unique_ptr<ForeachLoop> Loop)
-      : Loop(std::move(Loop)) {}
-    RecordsEntry(std::unique_ptr<Record::AssertionTuple> Assertion)
-      : Assertion(std::move(Assertion)) {}
+        : Loop(std::move(Loop)) {}
+    RecordsEntry(std::unique_ptr<Record::AssertionInfo> Assertion)
+        : Assertion(std::move(Assertion)) {}
   };
 
   /// ForeachLoop - Record the iteration state associated with a for loop.
@@ -160,10 +160,13 @@ class TGParser {
                       // exist.
   };
 
+  bool NoWarnOnUnusedTemplateArgs = false;
+
 public:
-  TGParser(SourceMgr &SM, ArrayRef<std::string> Macros,
-           RecordKeeper &records)
-    : Lex(SM, Macros), CurMultiClass(nullptr), Records(records) {}
+  TGParser(SourceMgr &SM, ArrayRef<std::string> Macros, RecordKeeper &records,
+           const bool NoWarnOnUnusedTemplateArgs = false)
+      : Lex(SM, Macros), CurMultiClass(nullptr), Records(records),
+        NoWarnOnUnusedTemplateArgs(NoWarnOnUnusedTemplateArgs) {}
 
   /// ParseFile - Main entrypoint for parsing a tblgen file.  These parser
   /// routines return true on error, or false on success.
@@ -262,6 +265,7 @@ private:  // Parser methods.
   RecTy *ParseType();
   Init *ParseOperation(Record *CurRec, RecTy *ItemType);
   Init *ParseOperationSubstr(Record *CurRec, RecTy *ItemType);
+  Init *ParseOperationFind(Record *CurRec, RecTy *ItemType);
   Init *ParseOperationForEachFilter(Record *CurRec, RecTy *ItemType);
   Init *ParseOperationCond(Record *CurRec, RecTy *ItemType);
   RecTy *ParseOperatorType();

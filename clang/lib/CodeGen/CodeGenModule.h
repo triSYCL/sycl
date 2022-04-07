@@ -586,6 +586,8 @@ private:
   MetadataTypeMap VirtualMetadataIdMap;
   MetadataTypeMap GeneralizedMetadataIdMap;
 
+  llvm::DenseMap<StringRef, const RecordDecl *> TypesWithAspects;
+
 public:
   CodeGenModule(ASTContext &C, const HeaderSearchOptions &headersearchopts,
                 const PreprocessorOptions &ppopts,
@@ -869,6 +871,13 @@ public:
   /// space, target-specific global or constant address space may be returned.
   LangAS GetGlobalVarAddressSpace(const VarDecl *D);
 
+  /// Return the AST address space of constant literal, which is used to emit
+  /// the constant literal as global variable in LLVM IR.
+  /// Note: This is not necessarily the address space of the constant literal
+  /// in AST. For address space agnostic language, e.g. C++, constant literal
+  /// in AST is always in default address space.
+  LangAS GetGlobalConstantAddressSpace() const;
+
   /// Return the llvm::Constant for the address of the given global variable.
   /// If Ty is non-null and if the global doesn't exist, then it will be created
   /// with the specified type instead of whatever the normal requested type
@@ -880,13 +889,6 @@ public:
                                      ForDefinition_t IsForDefinition
                                        = NotForDefinition);
 
-  /// Return the AST address space of string literal, which is used to emit
-  /// the string literal as global variable in LLVM IR.
-  /// Note: This is not necessarily the address space of the string literal
-  /// in AST. For address space agnostic language, e.g. C++, string literal
-  /// in AST is always in default address space.
-  LangAS getStringLiteralAddressSpace() const;
-
   /// Return the address of the given function. If Ty is non-null, then this
   /// function will use the specified type if it has to create it.
   llvm::Constant *GetAddrOfFunction(GlobalDecl GD, llvm::Type *Ty = nullptr,
@@ -894,6 +896,9 @@ public:
                                     bool DontDefer = false,
                                     ForDefinition_t IsForDefinition
                                       = NotForDefinition);
+
+  // Return the function body address of the given function.
+  llvm::Constant *GetFunctionStart(const ValueDecl *Decl);
 
   /// Get the address of the RTTI descriptor for the given type.
   llvm::Constant *GetAddrOfRTTIDescriptor(QualType Ty, bool ForEH = false);
@@ -1048,6 +1053,10 @@ public:
       llvm::FunctionType *FnType = nullptr, bool DontDefer = false,
       ForDefinition_t IsForDefinition = NotForDefinition);
 
+  void addTypeWithAspects(StringRef TypeName, const RecordDecl *RD) {
+    TypesWithAspects[TypeName] = RD;
+  }
+
   void generateIntelFPGAAnnotation(const Decl *D,
                                      llvm::SmallString<256> &AnnotStr);
   void addGlobalIntelFPGAAnnotation(const VarDecl *VD, llvm::GlobalValue *GV);
@@ -1182,7 +1191,7 @@ public:
 
   /// Set the LLVM function attributes (sext, zext, etc).
   void SetLLVMFunctionAttributes(GlobalDecl GD, const CGFunctionInfo &Info,
-                                 llvm::Function *F);
+                                 llvm::Function *F, bool IsThunk);
 
   /// Set the LLVM function attributes which only apply to a function
   /// definition.
@@ -1218,7 +1227,7 @@ public:
   void ConstructAttributeList(StringRef Name, const CGFunctionInfo &Info,
                               CGCalleeInfo CalleeInfo,
                               llvm::AttributeList &Attrs, unsigned &CallingConv,
-                              bool AttrOnCallSite);
+                              bool AttrOnCallSite, bool IsThunk);
 
   /// Adds attributes to F according to our CodeGenOptions and LangOptions, as
   /// though we had emitted it ourselves.  We remove any attributes on F that
@@ -1374,6 +1383,10 @@ public:
   /// \param D Requires declaration
   void EmitOMPRequiresDecl(const OMPRequiresDecl *D);
 
+  /// Emit a code for the allocate directive.
+  /// \param D The allocate declaration
+  void EmitOMPAllocateDecl(const OMPAllocateDecl *D);
+
   /// Returns whether the given record has hidden LTO visibility and therefore
   /// may participate in (single-module) CFI and whole-program vtable
   /// optimization.
@@ -1491,11 +1504,10 @@ private:
                                                   const FunctionDecl *FD);
   void UpdateMultiVersionNames(GlobalDecl GD, const FunctionDecl *FD);
 
-  llvm::Constant *GetOrCreateLLVMGlobal(StringRef MangledName,
-                                        llvm::PointerType *PTy,
-                                        const VarDecl *D,
-                                        ForDefinition_t IsForDefinition
-                                          = NotForDefinition);
+  llvm::Constant *
+  GetOrCreateLLVMGlobal(StringRef MangledName, llvm::Type *Ty, LangAS AddrSpace,
+                        const VarDecl *D,
+                        ForDefinition_t IsForDefinition = NotForDefinition);
 
   bool GetCPUAndFeaturesAttributes(GlobalDecl GD,
                                    llvm::AttrBuilder &AttrBuilder);
@@ -1515,6 +1527,7 @@ private:
   void EmitAliasDefinition(GlobalDecl GD);
   void emitIFuncDefinition(GlobalDecl GD);
   void emitCPUDispatchDefinition(GlobalDecl GD);
+  void EmitTargetClonesResolver(GlobalDecl GD);
   void EmitObjCPropertyImplementations(const ObjCImplementationDecl *D);
   void EmitObjCIvarInitializations(ObjCImplementationDecl *D);
 

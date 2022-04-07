@@ -15,14 +15,17 @@
 #define BUILTIN_TYPES
 
 include "mlir/IR/BuiltinDialect.td"
+include "mlir/IR/BuiltinTypeInterfaces.td"
+include "mlir/IR/SubElementInterfaces.td"
 
 // TODO: Currently the types defined in this file are prefixed with `Builtin_`.
 // This is to differentiate the types here with the ones in OpBase.td. We should
 // remove the definitions in OpBase.td, and repoint users to this file instead.
 
 // Base class for Builtin dialect types.
-class Builtin_Type<string name, string baseCppClass = "::mlir::Type">
-    : TypeDef<Builtin_Dialect, name, [], baseCppClass> {
+class Builtin_Type<string name, list<Trait> traits = [],
+                   string baseCppClass = "::mlir::Type">
+    : TypeDef<Builtin_Dialect, name, traits, baseCppClass> {
   let mnemonic = ?;
 }
 
@@ -65,7 +68,8 @@ def Builtin_Complex : Builtin_Type<"Complex"> {
 //===----------------------------------------------------------------------===//
 
 // Base class for Builtin dialect float types.
-class Builtin_FloatType<string name> : Builtin_Type<name, "::mlir::FloatType"> {
+class Builtin_FloatType<string name>
+    : Builtin_Type<name, /*traits=*/[], "::mlir::FloatType"> {
   let extraClassDeclaration = [{
     static }] # name # [{Type get(MLIRContext *context);
   }];
@@ -117,7 +121,9 @@ def Builtin_Float128 : Builtin_FloatType<"Float128"> {
 // FunctionType
 //===----------------------------------------------------------------------===//
 
-def Builtin_Function : Builtin_Type<"Function"> {
+def Builtin_Function : Builtin_Type<"Function", [
+    DeclareTypeInterfaceMethods<SubElementTypeInterface>
+  ]> {
   let summary = "Map from a list of inputs to a list of results";
   let description = [{
     Syntax:
@@ -148,6 +154,13 @@ def Builtin_Function : Builtin_Type<"Function"> {
     unsigned getNumResults() const;
     Type getResult(unsigned i) const { return getResults()[i]; }
 
+    /// Returns a new function type with the specified arguments and results
+    /// inserted.
+    FunctionType getWithArgsAndResults(ArrayRef<unsigned> argIndices,
+                                       TypeRange argTypes,
+                                       ArrayRef<unsigned> resultIndices,
+                                       TypeRange resultTypes);
+
     /// Returns a new function type without the specified arguments and results.
     FunctionType getWithoutArgsAndResults(ArrayRef<unsigned> argIndices,
                                           ArrayRef<unsigned> resultIndices);
@@ -170,8 +183,7 @@ def Builtin_Index : Builtin_Type<"Index"> {
 
     The index type is a signless integer whose size is equal to the natural
     machine word of the target ( [rationale](https://mlir.llvm.org/docs/Rationale/Rationale/#integer-signedness-semantics) )
-    and is used by the affine constructs in MLIR. Unlike fixed-size integers,
-    it cannot be used as an element of vector ( [rationale](https://mlir.llvm.org/docs/Rationale/Rationale/#index-type-disallowed-in-vector-types) ).
+    and is used by the affine constructs in MLIR.
 
     **Rationale:** integers of platform-specific bit widths are practical to
     express sizes, dimensionalities and subscripts.
@@ -253,7 +265,9 @@ def Builtin_Integer : Builtin_Type<"Integer"> {
 // MemRefType
 //===----------------------------------------------------------------------===//
 
-def Builtin_MemRef : Builtin_Type<"MemRef", "BaseMemRefType"> {
+def Builtin_MemRef : Builtin_Type<"MemRef", [
+    DeclareTypeInterfaceMethods<SubElementTypeInterface>
+  ], "BaseMemRefType"> {
   let summary = "Shaped reference to a region of memory";
   let description = [{
     Syntax:
@@ -264,8 +278,7 @@ def Builtin_MemRef : Builtin_Type<"MemRef", "BaseMemRefType"> {
 
     stride-list ::= `[` (dimension (`,` dimension)*)? `]`
     strided-layout ::= `offset:` dimension `,` `strides: ` stride-list
-    semi-affine-map-composition ::= (semi-affine-map `,` )* semi-affine-map
-    layout-specification ::= semi-affine-map-composition | strided-layout
+    layout-specification ::= semi-affine-map | strided-layout | attribute-value
     memory-space ::= attribute-value
     ```
 
@@ -282,6 +295,15 @@ def Builtin_MemRef : Builtin_Type<"MemRef", "BaseMemRefType"> {
     receive memref arguments of any rank without versioning the functions based
     on the rank. Other uses of this type are disallowed or will have undefined
     behavior.
+
+    Are accepted as elements:
+
+    - built-in integer types;
+    - built-in index type;
+    - built-in floating point types;
+    - built-in vector types with elements of the above types;
+    - another memref type;
+    - any other type implementing `MemRefElementTypeInterface`.
 
     ##### Codegen of Unranked Memref
 
@@ -328,7 +350,7 @@ def Builtin_MemRef : Builtin_Type<"MemRef", "BaseMemRefType"> {
     ```
 
     The core syntax and representation of a layout specification is a
-    [semi-affine map](Dialects/Affine.md#semi-affine-maps). Additionally,
+    [semi-affine map](Affine.md/#semi-affine-maps). Additionally,
     syntactic sugar is supported to make certain layout specifications more
     intuitive to read. For the moment, a `memref` supports parsing a strided
     form which is converted to a semi-affine map automatically.
@@ -423,7 +445,7 @@ def Builtin_MemRef : Builtin_Type<"MemRef", "BaseMemRefType"> {
     ##### Index Map
 
     An index map is a one-to-one
-    [semi-affine map](Dialects/Affine.md#semi-affine-maps) that transforms a
+    [semi-affine map](Affine.md/#semi-affine-maps) that transforms a
     multidimensional index from one index space to another. For example, the
     following figure shows an index map which maps a 2-dimensional index from a
     2x2 index space to a 3x3 index space, using symbols `S0` and `S1` as
@@ -441,7 +463,7 @@ def Builtin_MemRef : Builtin_Type<"MemRef", "BaseMemRefType"> {
 
     ##### Layout Map
 
-    A layout map is a [semi-affine map](Dialects/Affine.md#semi-affine-maps)
+    A layout map is a [semi-affine map](Affine.md/#semi-affine-maps)
     which encodes logical to physical index space mapping, by mapping input
     dimensions to their ordering from most-major (slowest varying) to most-minor
     (fastest varying). Therefore, an identity layout map corresponds to a
@@ -463,37 +485,18 @@ def Builtin_MemRef : Builtin_Type<"MemRef", "BaseMemRefType"> {
     #layout_tiled = (i, j) -> (i floordiv 64, j floordiv 64, i mod 64, j mod 64)
     ```
 
-    ##### Affine Map Composition
-
-    A memref specifies a semi-affine map composition as part of its type. A
-    semi-affine map composition is a composition of semi-affine maps beginning
-    with zero or more index maps, and ending with a layout map. The composition
-    must be conformant: the number of dimensions of the range of one map, must
-    match the number of dimensions of the domain of the next map in the
-    composition.
-
-    The semi-affine map composition specified in the memref type, maps from
-    accesses used to index the memref in load/store operations to other index
-    spaces (i.e. logical to physical index mapping). Each of the
-    [semi-affine maps](Affine.md) and thus its composition is required
-    to be one-to-one.
-
-    The semi-affine map composition can be used in dependence analysis, memory
-    access pattern analysis, and for performance optimizations like
-    vectorization, copy elision and in-place updates. If an affine map
-    composition is not specified for the memref, the identity affine map is
-    assumed.
-
     ##### Strided MemRef
 
-    A memref may specify strides as part of its type. A stride specification is
-    a list of integer values that are either static or `?` (dynamic case).
+    A memref may specify a strided layout as part of its type. A stride
+    specification is a list of integer values that are either static or `?`
+    (dynamic case).
     Strides encode the distance, in number of elements, in (linear) memory
     between successive entries along a particular dimension. A stride
     specification is syntactic sugar for an equivalent strided memref
-    representation using semi-affine maps. For example,
-    `memref<42x16xf32, offset: 33, strides: [1, 64]>` specifies a non-contiguous
-    memory region of `42` by `16` `f32` elements such that:
+    representation with a *single* semi-affine map.
+
+    For example, `memref<42x16xf32, offset: 33, strides: [1, 64]>` specifies a
+    non-contiguous memory region of `42` by `16` `f32` elements such that:
 
     1.  the minimal size of the enclosing memory region must be
         `33 + 42 * 1 + 16 * 64 = 1066` elements;
@@ -519,40 +522,27 @@ def Builtin_MemRef : Builtin_Type<"MemRef", "BaseMemRefType"> {
   let parameters = (ins
     ArrayRefParameter<"int64_t">:$shape,
     "Type":$elementType,
-    ArrayRefParameter<"AffineMap">:$affineMaps,
+    "MemRefLayoutAttrInterface":$layout,
     "Attribute":$memorySpace
   );
   let builders = [
     TypeBuilderWithInferredContext<(ins
       "ArrayRef<int64_t>":$shape, "Type":$elementType,
-      CArg<"ArrayRef<AffineMap>", "{}">:$affineMaps,
-      CArg<"Attribute", "{}">:$memorySpace
-    ), [{
-      // Drop identity maps from the composition. This may lead to the
-      // composition becoming empty, which is interpreted as an implicit
-      // identity.
-      auto nonIdentityMaps = llvm::make_filter_range(affineMaps,
-        [](AffineMap map) { return !map.isIdentity(); });
-      // Drop default memory space value and replace it with empty attribute.
-      Attribute nonDefaultMemorySpace = skipDefaultMemorySpace(memorySpace);
-      return $_get(elementType.getContext(), shape, elementType,
-                   llvm::to_vector<4>(nonIdentityMaps), nonDefaultMemorySpace);
-    }]>,
+      CArg<"MemRefLayoutAttrInterface", "{}">:$layout,
+      CArg<"Attribute", "{}">:$memorySpace)>,
+    TypeBuilderWithInferredContext<(ins
+      "ArrayRef<int64_t>":$shape, "Type":$elementType,
+      CArg<"AffineMap">:$map,
+      CArg<"Attribute", "{}">:$memorySpace)>,
     /// [deprecated] `Attribute`-based form should be used instead.
     TypeBuilderWithInferredContext<(ins
       "ArrayRef<int64_t>":$shape, "Type":$elementType,
-      "ArrayRef<AffineMap>":$affineMaps,
-      "unsigned":$memorySpace
-    ), [{
-      // Convert deprecated integer-like memory space to Attribute.
-      Attribute memorySpaceAttr =
-          wrapIntegerMemorySpace(memorySpace, elementType.getContext());
-      return MemRefType::get(shape, elementType, affineMaps, memorySpaceAttr);
-    }]>
+      "AffineMap":$map,
+      "unsigned":$memorySpaceInd)>
   ];
   let extraClassDeclaration = [{
     /// This is a builder type that keeps local references to arguments.
-    /// Arguments that are passed into the builder must out-live the builder.
+    /// Arguments that are passed into the builder must outlive the builder.
     class Builder;
 
     /// [deprecated] Returns the memory space in old raw integer representation.
@@ -610,13 +600,13 @@ def Builtin_Opaque : Builtin_Type<"Opaque"> {
     ```
   }];
   let parameters = (ins
-    "Identifier":$dialectNamespace,
+    "StringAttr":$dialectNamespace,
     StringRefParameter<"">:$typeData
   );
 
   let builders = [
     TypeBuilderWithInferredContext<(ins
-      "Identifier":$dialectNamespace, CArg<"StringRef", "{}">:$typeData
+      "StringAttr":$dialectNamespace, CArg<"StringRef", "{}">:$typeData
     ), [{
       return $_get(dialectNamespace.getContext(), dialectNamespace, typeData);
     }]>
@@ -629,7 +619,9 @@ def Builtin_Opaque : Builtin_Type<"Opaque"> {
 // RankedTensorType
 //===----------------------------------------------------------------------===//
 
-def Builtin_RankedTensor : Builtin_Type<"RankedTensor", "TensorType"> {
+def Builtin_RankedTensor : Builtin_Type<"RankedTensor", [
+    DeclareTypeInterfaceMethods<SubElementTypeInterface>
+  ], "TensorType"> {
   let summary = "Multi-dimensional array with a fixed number of dimensions";
   let description = [{
     Syntax:
@@ -651,7 +643,7 @@ def Builtin_RankedTensor : Builtin_Type<"RankedTensor", "TensorType"> {
     low level buffer access, MLIR has a [`memref` type](#memref-type). This
     abstracted runtime representation holds both the tensor data values as well
     as information about the (potentially dynamic) shape of the tensor. The
-    [`dim` operation](Dialects/Standard.md#dim-operation) returns the size of a
+    [`dim` operation](MemRef.md/#memrefdim-mlirmemrefdimop) returns the size of a
     dimension from a value of tensor type.
 
     The `encoding` attribute provides additional information on the tensor.
@@ -709,6 +701,11 @@ def Builtin_RankedTensor : Builtin_Type<"RankedTensor", "TensorType"> {
       return $_get(elementType.getContext(), shape, elementType, encoding);
     }]>
   ];
+  let extraClassDeclaration = [{
+    /// This is a builder type that keeps local references to arguments.
+    /// Arguments that are passed into the builder must outlive the builder.
+    class Builder;
+  }];
   let skipDefaultBuilders = 1;
   let genVerifyDecl = 1;
 }
@@ -717,7 +714,9 @@ def Builtin_RankedTensor : Builtin_Type<"RankedTensor", "TensorType"> {
 // TupleType
 //===----------------------------------------------------------------------===//
 
-def Builtin_Tuple : Builtin_Type<"Tuple"> {
+def Builtin_Tuple : Builtin_Type<"Tuple", [
+    DeclareTypeInterfaceMethods<SubElementTypeInterface>
+  ]> {
   let summary = "Fixed-sized collection of other types";
   let description = [{
     Syntax:
@@ -731,7 +730,7 @@ def Builtin_Tuple : Builtin_Type<"Tuple"> {
 
     **Rationale:** Though this type is first class in the type system, MLIR
     provides no standard operations for operating on `tuple` types
-    ([rationale](Rationale/Rationale.md#tuple-types)).
+    ([rationale](Rationale/Rationale/#tuple-types)).
 
     Examples:
 
@@ -784,7 +783,9 @@ def Builtin_Tuple : Builtin_Type<"Tuple"> {
 // UnrankedMemRefType
 //===----------------------------------------------------------------------===//
 
-def Builtin_UnrankedMemRef : Builtin_Type<"UnrankedMemRef", "BaseMemRefType"> {
+def Builtin_UnrankedMemRef : Builtin_Type<"UnrankedMemRef", [
+    DeclareTypeInterfaceMethods<SubElementTypeInterface>
+  ], "BaseMemRefType"> {
   let summary = "Shaped reference, with unknown rank, to a region of memory";
   let description = [{
     Syntax:
@@ -844,7 +845,9 @@ def Builtin_UnrankedMemRef : Builtin_Type<"UnrankedMemRef", "BaseMemRefType"> {
 // UnrankedTensorType
 //===----------------------------------------------------------------------===//
 
-def Builtin_UnrankedTensor : Builtin_Type<"UnrankedTensor", "TensorType"> {
+def Builtin_UnrankedTensor : Builtin_Type<"UnrankedTensor", [
+    DeclareTypeInterfaceMethods<SubElementTypeInterface>
+  ], "TensorType"> {
   let summary = "Multi-dimensional array with unknown dimensions";
   let description = [{
     Syntax:
@@ -881,54 +884,82 @@ def Builtin_UnrankedTensor : Builtin_Type<"UnrankedTensor", "TensorType"> {
 // VectorType
 //===----------------------------------------------------------------------===//
 
-def Builtin_Vector : Builtin_Type<"Vector", "ShapedType"> {
+def Builtin_Vector : Builtin_Type<"Vector", [
+    DeclareTypeInterfaceMethods<SubElementTypeInterface>
+  ], "ShapedType"> {
   let summary = "Multi-dimensional SIMD vector type";
   let description = [{
     Syntax:
 
     ```
-    vector-type ::= `vector` `<` static-dimension-list vector-element-type `>`
+    vector-type ::= `vector` `<` vector-dim-list vector-element-type `>`
     vector-element-type ::= float-type | integer-type | index-type
-
-    static-dimension-list ::= (decimal-literal `x`)+
+    vector-dim-list := (static-dim-list `x`)? (`[` static-dim-list `]` `x`)?
+    static-dim-list ::= decimal-literal (`x` decimal-literal)*
     ```
 
-    The vector type represents a SIMD style vector, used by target-specific
-    operation sets like AVX. While the most common use is for 1D vectors (e.g.
-    vector<16 x f32>) we also support multidimensional registers on targets that
-    support them (like TPUs).
+    The vector type represents a SIMD style vector used by target-specific
+    operation sets like AVX or SVE. While the most common use is for 1D
+    vectors (e.g. vector<16 x f32>) we also support multidimensional registers
+    on targets that support them (like TPUs). The dimensions of a vector type
+    can be fixed-length, scalable, or a combination of the two. The scalable
+    dimensions in a vector are indicated between square brackets ([ ]), and
+    all fixed-length dimensions, if present, must precede the set of scalable
+    dimensions. That is, a `vector<2x[4]xf32>` is valid, but `vector<[4]x2xf32>`
+    is not.
 
-    Vector shapes must be positive decimal integers.
+    Vector shapes must be positive decimal integers. 0D vectors are allowed by
+    omitting the dimension: `vector<f32>`.
 
     Note: hexadecimal integer literals are not allowed in vector type
     declarations, `vector<0x42xi32>` is invalid because it is interpreted as a
     2D vector with shape `(0, 42)` and zero shapes are not allowed.
 
-
     Examples:
 
     ```mlir
+    // A 2D fixed-length vector of 3x42 i32 elements.
     vector<3x42xi32>
+
+    // A 1D scalable-length vector that contains a multiple of 4 f32 elements.
+    vector<[4]xf32>
+
+    // A 2D scalable-length vector that contains a multiple of 2x8 i8 elements.
+    vector<[2x8]xf32>
+
+    // A 2D mixed fixed/scalable vector that contains 4 scalable vectors of 4 f32 elements.
+    vector<4x[4]xf32>
     ```
   }];
   let parameters = (ins
     ArrayRefParameter<"int64_t">:$shape,
-    "Type":$elementType
+    "Type":$elementType,
+    "unsigned":$numScalableDims
   );
-
   let builders = [
     TypeBuilderWithInferredContext<(ins
-      "ArrayRef<int64_t>":$shape, "Type":$elementType
+      "ArrayRef<int64_t>":$shape, "Type":$elementType,
+      CArg<"unsigned", "0">:$numScalableDims
     ), [{
-      return $_get(elementType.getContext(), shape, elementType);
+      return $_get(elementType.getContext(), shape, elementType,
+                   numScalableDims);
     }]>
   ];
   let extraClassDeclaration = [{
-    /// Returns true of the given type can be used as an element of a vector
+    /// This is a builder type that keeps local references to arguments.
+    /// Arguments that are passed into the builder must outlive the builder.
+    class Builder;
+
+    /// Returns true if the given type can be used as an element of a vector
     /// type. In particular, vectors can consist of integer, index, or float
     /// primitives.
     static bool isValidElementType(Type t) {
       return t.isa<IntegerType, IndexType, FloatType>();
+    }
+
+    /// Returns true if the vector contains scalable dimensions.
+    bool isScalable() const {
+      return getNumScalableDims() > 0;
     }
 
     /// Get or create a new VectorType with the same shape as `this` and an

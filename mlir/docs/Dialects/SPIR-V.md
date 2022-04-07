@@ -92,8 +92,8 @@ The SPIR-V dialect adopts the following conventions for IR:
     (de)serialization.
 *   Ops with `mlir.snake_case` names are those that have no corresponding
     instructions (or concepts) in the binary format. They are introduced to
-    satisfy MLIR structural requirements. For example, `spv.mlir.endmodule` and
-    `spv.mlir.merge`. They map to no instructions during (de)serialization.
+    satisfy MLIR structural requirements. For example, `spv.mlir.merge`. They
+    map to no instructions during (de)serialization.
 
 (TODO: consider merging the last two cases and adopting `spv.mlir.` prefix for
 them.)
@@ -1119,7 +1119,7 @@ Those `*Ops.td` files are organized according to the instruction categories used
 in the SPIR-V specification, for example, an op belonging to the "Atomics
 Instructions" section is put in the `SPIRVAtomicOps.td` file.
 
-`SPIRVOps.td` serves as the master op definition file that includes all files
+`SPIRVOps.td` serves as the main op definition file that includes all files
 for specific categories.
 
 `SPIRVBase.td` defines common classes and utilities used by various op
@@ -1388,20 +1388,19 @@ dialect.
 [MlirDialectConversion]: ../DialectConversion.md
 [StructType]: https://www.khronos.org/registry/spir-v/specs/unified1/SPIRV.html#Structure
 [SpirvTools]: https://github.com/KhronosGroup/SPIRV-Tools
-[Rationale]: ../Rationale/#block-arguments-vs-phi-nodes
+[Rationale]: ../Rationale/Rationale.md/#block-arguments-vs-phi-nodes
 [ODS]: ../OpDefinitions.md
 [GreedyPatternRewriter]: https://github.com/llvm/llvm-project/blob/main/mlir/lib/Transforms/Utils/GreedyPatternRewriteDriver.cpp
-[MlirDialectConversionTypeConversion]: ../DialectConversion.md#type-converter
-[MlirDialectConversionRewritePattern]: ../DialectConversion.md#conversion-patterns
-[MlirDialectConversionSignatureConversion]: ../DialectConversion.md#region-signature-conversion
+[MlirDialectConversionTypeConversion]: ../DialectConversion.md/#type-converter
+[MlirDialectConversionRewritePattern]: ../DialectConversion.md/#conversion-patterns
+[MlirDialectConversionSignatureConversion]: ../DialectConversion.md/#region-signature-conversion
 [MlirOpInterface]: ../Interfaces/#operation-interfaces
-[MlirIntegerType]: ../LangRef.md#integer-type
-[MlirFloatType]: ../LangRef.md#floating-point-types
-[MlirVectorType]: ../LangRef.md#vector-type
-[MlirMemrefType]: ../LangRef.md#memref-type
-[MlirIndexType]: ../LangRef.md#index-type
-[MlirGpuDialect]: ../Dialects/GPU.md
-[MlirStandardDialect]: ../Dialects/Standard.md
+[MlirIntegerType]: Builtin.md/#integertype
+[MlirVectorType]: Builtin.md/#vectortype
+[MlirMemrefType]: Builtin.md/#memreftype
+[MlirIndexType]: Builtin.md/#indextype
+[MlirGpuDialect]: GPU.md
+[MlirStandardDialect]: Standard.md
 [MlirSpirvHeaders]: https://github.com/llvm/llvm-project/tree/main/mlir/include/mlir/Dialect/SPIRV
 [MlirSpirvLibs]: https://github.com/llvm/llvm-project/tree/main/mlir/lib/Dialect/SPIRV
 [MlirSpirvTests]: https://github.com/llvm/llvm-project/tree/main/mlir/test/Dialect/SPIRV
@@ -1423,8 +1422,8 @@ dialect.
 [GitHubLoweringTracking]: https://github.com/tensorflow/mlir/issues/303
 [GenSpirvUtilsPy]: https://github.com/llvm/llvm-project/blob/main/mlir/utils/spirv/gen_spirv_dialect.py
 [CustomTypeAttrTutorial]: ../Tutorials/DefiningAttributesAndTypes.md
-[VulkanExtensionPhysicalStorageBuffer]: https://github.com/KhronosGroup/SPIRV-Registry/blob/master/extensions/KHR/SPV_KHR_physical_storage_buffer.html
-[VulkanExtensionVariablePointers]: https://github.com/KhronosGroup/SPIRV-Registry/blob/master/extensions/KHR/SPV_KHR_variable_pointers.html
+[VulkanExtensionPhysicalStorageBuffer]: https://github.com/KhronosGroup/SPIRV-Registry/blob/main/extensions/KHR/SPV_KHR_physical_storage_buffer.html
+[VulkanExtensionVariablePointers]: https://github.com/KhronosGroup/SPIRV-Registry/blob/main/extensions/KHR/SPV_KHR_variable_pointers.html
 [VulkanSpirv]: https://renderdoc.org/vkspec_chunked/chap40.html#spirvenv
 [VulkanShaderInterface]: https://renderdoc.org/vkspec_chunked/chap14.html#interfaces-resources
 [VulkanShaderInterfaceStorageClass]: https://renderdoc.org/vkspec_chunked/chap15.html#interfaces

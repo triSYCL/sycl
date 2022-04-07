@@ -1,5 +1,5 @@
 // RUN: %clangxx -fsycl %s -o %t.out
-// RUN: env SYCL_DEVICE_TYPE=HOST %t.out
+// RUN: env SYCL_DEVICE_FILTER=host %t.out
 
 #include <CL/sycl.hpp>
 
@@ -21,8 +21,8 @@ int main() {
         double inputData_1D(0.3);
         resultPtr[1] = cl::sycl::isordered(inputData_0D, inputData_1D);
 
-        half inputData_0H(0.3);
-        half inputData_1H(0.9);
+        sycl::half inputData_0H(0.3);
+        sycl::half inputData_1H(0.9);
         resultPtr[2] = cl::sycl::isordered(inputData_0H, inputData_1H);
       });
     });

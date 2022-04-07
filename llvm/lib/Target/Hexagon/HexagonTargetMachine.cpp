@@ -21,11 +21,12 @@
 #include "TargetInfo/HexagonTargetInfo.h"
 #include "llvm/CodeGen/Passes.h"
 #include "llvm/CodeGen/TargetPassConfig.h"
+#include "llvm/CodeGen/VLIWMachineScheduler.h"
 #include "llvm/IR/LegacyPassManager.h"
 #include "llvm/IR/Module.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Support/CommandLine.h"
-#include "llvm/Support/TargetRegistry.h"
 #include "llvm/Transforms/IPO/PassManagerBuilder.h"
 #include "llvm/Transforms/Scalar.h"
 
@@ -120,8 +121,8 @@ extern "C" int HexagonTargetMachineModule;
 int HexagonTargetMachineModule = 0;
 
 static ScheduleDAGInstrs *createVLIWMachineSched(MachineSchedContext *C) {
-  ScheduleDAGMILive *DAG =
-    new VLIWMachineScheduler(C, std::make_unique<ConvergingVLIWScheduler>());
+  ScheduleDAGMILive *DAG = new VLIWMachineScheduler(
+      C, std::make_unique<HexagonConvergingVLIWScheduler>());
   DAG->addMutation(std::make_unique<HexagonSubtarget::UsrOverflowMutation>());
   DAG->addMutation(std::make_unique<HexagonSubtarget::HVXMemLatencyMutation>());
   DAG->addMutation(std::make_unique<HexagonSubtarget::CallMutation>());
@@ -238,9 +239,9 @@ const HexagonSubtarget *
 HexagonTargetMachine::getSubtargetImpl(const Function &F) const {
   AttributeList FnAttrs = F.getAttributes();
   Attribute CPUAttr =
-      FnAttrs.getAttribute(AttributeList::FunctionIndex, "target-cpu");
+      FnAttrs.getFnAttr("target-cpu");
   Attribute FSAttr =
-      FnAttrs.getAttribute(AttributeList::FunctionIndex, "target-features");
+      FnAttrs.getFnAttr("target-features");
 
   std::string CPU =
       CPUAttr.isValid() ? CPUAttr.getValueAsString().str() : TargetCPU;
@@ -278,14 +279,13 @@ void HexagonTargetMachine::adjustPassManager(PassManagerBuilder &PMB) {
       });
 }
 
-void HexagonTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB,
-                                                        bool DebugPassManager) {
+void HexagonTargetMachine::registerPassBuilderCallbacks(PassBuilder &PB) {
   PB.registerLateLoopOptimizationsEPCallback(
-      [=](LoopPassManager &LPM, PassBuilder::OptimizationLevel Level) {
+      [=](LoopPassManager &LPM, OptimizationLevel Level) {
         LPM.addPass(HexagonLoopIdiomRecognitionPass());
       });
   PB.registerLoopOptimizerEndEPCallback(
-      [=](LoopPassManager &LPM, PassBuilder::OptimizationLevel Level) {
+      [=](LoopPassManager &LPM, OptimizationLevel Level) {
         LPM.addPass(HexagonVectorLoopCarriedReusePass());
       });
 }
@@ -448,11 +448,11 @@ void HexagonPassConfig::addPreEmitPass() {
   }
 
   // Packetization is mandatory: it handles gather/scatter at all opt levels.
-  addPass(createHexagonPacketizer(NoOpt), false);
+  addPass(createHexagonPacketizer(NoOpt));
 
   if (EnableVectorPrint)
-    addPass(createHexagonVectorPrint(), false);
+    addPass(createHexagonVectorPrint());
 
   // Add CFI instructions if necessary.
-  addPass(createHexagonCallFrameInformation(), false);
+  addPass(createHexagonCallFrameInformation());
 }

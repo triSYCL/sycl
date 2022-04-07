@@ -14,6 +14,7 @@
 ; CHECK-NEXT: Scoped NoAlias Alias Analysis
 ; CHECK-NEXT: Create Garbage Collector Module Metadata
 ; CHECK-NEXT: Machine Branch Probability Analysis
+; CHECK-NEXT: Default Regalloc Eviction Advisor
 ; CHECK-NEXT:   ModulePass Manager
 ; CHECK-NEXT:     Pre-ISel Intrinsic Lowering
 ; CHECK-NEXT:     FunctionPass Manager
@@ -25,6 +26,7 @@
 ; CHECK-NEXT:       Simplify the CFG
 ; CHECK-NEXT:       Dominator Tree Construction
 ; CHECK-NEXT:       Natural Loop Information
+; CHECK-NEXT:       Canonicalize natural loops
 ; CHECK-NEXT:       Lazy Branch Probability Analysis
 ; CHECK-NEXT:       Lazy Block Frequency Analysis
 ; CHECK-NEXT:       Optimization Remark Emitter
@@ -39,7 +41,7 @@
 ; CHECK-NEXT:         Induction Variable Users
 ; CHECK-NEXT:         Loop Strength Reduction
 ; CHECK-NEXT:       Basic Alias Analysis (stateless AA impl)
-; CHECK-NEXT:         Function Alias Analysis Results
+; CHECK-NEXT:       Function Alias Analysis Results
 ; CHECK-NEXT:       Merge contiguous icmps into a memcmp
 ; CHECK-NEXT:       Natural Loop Information
 ; CHECK-NEXT:       Lazy Branch Probability Analysis
@@ -56,6 +58,7 @@
 ; CHECK-NEXT:       Constant Hoisting
 ; CHECK-NEXT:       Replace intrinsics with calls to vector library
 ; CHECK-NEXT:       Partially inline calls to library functions
+; CHECK-NEXT:       Expand vector predication intrinsics
 ; CHECK-NEXT:       Scalarize Masked Memory Intrinsics
 ; CHECK-NEXT:       Expand reduction intrinsics
 ; CHECK-NEXT:     Stack Safety Analysis
@@ -74,10 +77,9 @@
 ; CHECK-NEXT:       Interleaved Load Combine Pass
 ; CHECK-NEXT:       Dominator Tree Construction
 ; CHECK-NEXT:       Interleaved Access Pass
+; CHECK-NEXT:       Type Promotion
 ; CHECK-NEXT:       Natural Loop Information
 ; CHECK-NEXT:       CodeGen Prepare
-; CHECK-NEXT:     Rewrite Symbols
-; CHECK-NEXT:     FunctionPass Manager
 ; CHECK-NEXT:       Dominator Tree Construction
 ; CHECK-NEXT:       Exception handling preparation
 ; CHECK-NEXT:     AArch64 Promote Constant
@@ -131,6 +133,7 @@
 ; CHECK-NEXT:       Machine code sinking
 ; CHECK-NEXT:       Peephole Optimizations
 ; CHECK-NEXT:       Remove dead machine instructions
+; CHECK-NEXT:       AArch64 MI Peephole Optimization pass
 ; CHECK-NEXT:       AArch64 Dead register definitions
 ; CHECK-NEXT:       Detect Dead Lanes
 ; CHECK-NEXT:       Process Implicit Definitions
@@ -160,6 +163,7 @@
 ; CHECK-NEXT:       Machine Loop Invariant Code Motion
 ; CHECK-NEXT:       AArch64 Redundant Copy Elimination
 ; CHECK-NEXT:       A57 FP Anti-dependency breaker
+; CHECK-NEXT:       Remove Redundant DEBUG_VALUE analysis
 ; CHECK-NEXT:       Fixup Statepoint Caller Saved
 ; CHECK-NEXT:       PostRA Machine Sink
 ; CHECK-NEXT:       MachineDominator Tree Construction
@@ -192,6 +196,7 @@
 ; CHECK-NEXT:       Insert XRay ops
 ; CHECK-NEXT:       Implement the 'patchable-function' attribute
 ; CHECK-NEXT:       AArch64 load / store optimization pass
+; CHECK-NEXT:       Workaround A53 erratum 835769 pass
 ; CHECK-NEXT:       AArch64 Branch Targets
 ; CHECK-NEXT:       Branch relaxation pass
 ; CHECK-NEXT:       AArch64 Compress Jump Tables

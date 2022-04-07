@@ -53,6 +53,7 @@ bool FormatToken::isSimpleTypeSpecifier() const {
   case tok::kw___bf16:
   case tok::kw__Float16:
   case tok::kw___float128:
+  case tok::kw___ibm128:
   case tok::kw_wchar_t:
   case tok::kw_bool:
   case tok::kw___underlying_type:
@@ -67,6 +68,10 @@ bool FormatToken::isSimpleTypeSpecifier() const {
   default:
     return false;
   }
+}
+
+bool FormatToken::isTypeOrIdentifier() const {
+  return isSimpleTypeSpecifier() || Tok.isOneOf(tok::kw_auto, tok::identifier);
 }
 
 TokenRole::~TokenRole() {}

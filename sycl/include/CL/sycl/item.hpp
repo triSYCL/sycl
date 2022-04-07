@@ -21,6 +21,10 @@ __SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 namespace detail {
 class Builder;
+template <typename TransformedArgType, int Dims, typename KernelType>
+class RoundedRangeKernel;
+template <typename TransformedArgType, int Dims, typename KernelType>
+class RoundedRangeKernelWithKH;
 }
 template <int dimensions> class id;
 template <int dimensions> class range;
@@ -68,13 +72,15 @@ public:
   operator EnableIfT<dimensions == 1, std::size_t>() const { return get_id(0); }
 #endif // __SYCL_DISABLE_ITEM_TO_INT_CONV__
   template <bool has_offset = with_offset>
+  __SYCL2020_DEPRECATED("offsets are deprecated in SYCL2020")
   detail::enable_if_t<has_offset, id<dimensions>> get_offset() const {
     return MImpl.MOffset;
   }
 
   template <bool has_offset = with_offset>
-  detail::enable_if_t<has_offset, size_t>
-      __SYCL_ALWAYS_INLINE get_offset(int dimension) const {
+  __SYCL2020_DEPRECATED("offsets are deprecated in SYCL2020")
+  detail::enable_if_t<has_offset, size_t> __SYCL_ALWAYS_INLINE
+      get_offset(int dimension) const {
     size_t Id = MImpl.MOffset[dimension];
     __SYCL_ASSUME_INT(Id);
     return Id;
@@ -118,25 +124,41 @@ protected:
   friend class detail::Builder;
 
 private:
-  friend class handler;
+  // Friend to get access to private method set_allowed_range().
+  template <typename, int, typename> friend class detail::RoundedRangeKernel;
+  template <typename, int, typename>
+  friend class detail::RoundedRangeKernelWithKH;
   void set_allowed_range(const range<dimensions> rnwi) { MImpl.MExtent = rnwi; }
 
   detail::ItemBase<dimensions, with_offset> MImpl;
 };
 
-namespace detail {
-template <int Dims> item<Dims> store_item(const item<Dims> *i) {
-  return get_or_store(i);
-}
-} // namespace detail
-
-template <int Dims> item<Dims> this_item() {
+template <int Dims>
+__SYCL_DEPRECATED("use sycl::ext::oneapi::experimental::this_item() instead")
+item<Dims> this_item() {
 #ifdef __SYCL_DEVICE_ONLY__
   return detail::Builder::getElement(detail::declptr<item<Dims>>());
 #else
-  return detail::store_item<Dims>(nullptr);
+  throw sycl::exception(
+      sycl::make_error_code(sycl::errc::feature_not_supported),
+      "Free function calls are not supported on host device");
 #endif
 }
 
+namespace ext {
+namespace oneapi {
+namespace experimental {
+template <int Dims> item<Dims> this_item() {
+#ifdef __SYCL_DEVICE_ONLY__
+  return sycl::detail::Builder::getElement(detail::declptr<item<Dims>>());
+#else
+  throw sycl::exception(
+      sycl::make_error_code(sycl::errc::feature_not_supported),
+      "Free function calls are not supported on host device");
+#endif
+}
+} // namespace experimental
+} // namespace oneapi
+} // namespace ext
 } // namespace sycl
 } // __SYCL_INLINE_NAMESPACE(cl)

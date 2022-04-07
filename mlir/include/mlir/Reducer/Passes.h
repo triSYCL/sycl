@@ -9,8 +9,6 @@
 #define MLIR_REDUCER_PASSES_H
 
 #include "mlir/Pass/Pass.h"
-#include "mlir/Reducer/OptReductionPass.h"
-#include "mlir/Reducer/ReductionTreePass.h"
 
 namespace mlir {
 
@@ -22,6 +20,6 @@ std::unique_ptr<Pass> createOptReductionPass();
 #define GEN_PASS_REGISTRATION
 #include "mlir/Reducer/Passes.h.inc"
 
-} // end namespace mlir
+} // namespace mlir
 
 #endif // MLIR_REDUCER_PASSES_H

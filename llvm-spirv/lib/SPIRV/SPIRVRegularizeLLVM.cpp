@@ -41,6 +41,9 @@
 #include "SPIRVInternal.h"
 #include "libSPIRV/SPIRVDebug.h"
 
+#include "llvm/ADT/StringExtras.h" // llvm::isDigit
+#include "llvm/CodeGen/IntrinsicLowering.h"
+#include "llvm/Demangle/Demangle.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Operator.h"
@@ -74,32 +77,34 @@ public:
   void lowerFuncPtr(Function *F, Op OC);
   void lowerFuncPtr(Module *M);
 
-  /// There is no SPIR-V counterpart for @llvm.memset.* intrinsic. Cases with
-  /// constant value and length arguments are emulated via "storing" a constant
-  /// array to the destination. For other cases we wrap the intrinsic in
-  /// @spirv.llvm_memset_* function and expand the intrinsic to a loop via
-  /// expandMemSetAsLoop() from llvm/Transforms/Utils/LowerMemIntrinsics.h
-  /// During reverse translation from SPIR-V to LLVM IR we can detect
-  /// @spirv.llvm_memset_* and replace it with @llvm.memset.
-  void lowerMemset(MemSetInst *MSI);
+  /// Some LLVM intrinsics that have no SPIR-V counterpart may be wrapped in
+  /// @spirv.llvm_intrinsic_* function. During reverse translation from SPIR-V
+  /// to LLVM IR we can detect this @spirv.llvm_intrinsic_* function and
+  /// replace it with @llvm.intrinsic.* back.
+  void lowerIntrinsicToFunction(IntrinsicInst *Intrinsic);
 
-  /// No SPIR-V counterpart for @llvm.fshl.i* intrinsic. It will be lowered
-  /// to a newly generated @spirv.llvm_fshl_i* function.
-  /// Conceptually, FSHL:
+  /// No SPIR-V counterpart for @llvm.fshl.*(@llvm.fshr.*) intrinsic. It will be
+  /// lowered to a newly generated @spirv.llvm_fshl_*(@spirv.llvm_fshr_*)
+  /// function.
+  ///
+  /// Conceptually, FSHL (FSHR):
   /// 1. concatenates the ints, the first one being the more significant;
-  /// 2. performs a left shift-rotate on the resulting doubled-sized int;
-  /// 3. returns the most significant bits of the shift-rotate result,
+  /// 2. performs a left (right) shift-rotate on the resulting doubled-sized
+  /// int;
+  /// 3. returns the most (least) significant bits of the shift-rotate result,
   ///    the number of bits being equal to the size of the original integers.
-  /// The actual implementation algorithm will be slightly different to speed
-  /// things up.
-  void lowerFunnelShiftLeft(IntrinsicInst *FSHLIntrinsic);
-  void buildFunnelShiftLeftFunc(Function *FSHLFunc);
+  /// If FSHL (FSHR) operates on a vector type instead, the same operations are
+  /// performed for each set of corresponding vector elements.
+  ///
+  /// The actual implementation algorithm will be slightly different for
+  /// simplification purposes.
+  void lowerFunnelShift(IntrinsicInst *FSHIntrinsic);
 
   void lowerUMulWithOverflow(IntrinsicInst *UMulIntrinsic);
   void buildUMulWithOverflowFunc(Function *UMulFunc);
 
   static std::string lowerLLVMIntrinsicName(IntrinsicInst *II);
-
+  void adaptStructTypes(StructType *ST);
   static char ID;
 
 private:
@@ -145,113 +150,134 @@ std::string SPIRVRegularizeLLVMBase::lowerLLVMIntrinsicName(IntrinsicInst *II) {
   return FuncName;
 }
 
-void SPIRVRegularizeLLVMBase::lowerMemset(MemSetInst *MSI) {
-  if (isa<Constant>(MSI->getValue()) && isa<ConstantInt>(MSI->getLength()))
-    return; // To be handled in LLVMToSPIRV::transIntrinsicInst
+void SPIRVRegularizeLLVMBase::lowerIntrinsicToFunction(
+    IntrinsicInst *Intrinsic) {
+  // For @llvm.memset.* intrinsic cases with constant value and length arguments
+  // are emulated via "storing" a constant array to the destination. For other
+  // cases we wrap the intrinsic in @spirv.llvm_memset_* function and expand the
+  // intrinsic to a loop via expandMemSetAsLoop() from
+  // llvm/Transforms/Utils/LowerMemIntrinsics.h
+  if (auto *MSI = dyn_cast<MemSetInst>(Intrinsic))
+    if (isa<Constant>(MSI->getValue()) && isa<ConstantInt>(MSI->getLength()))
+      return; // To be handled in LLVMToSPIRV::transIntrinsicInst
 
-  std::string FuncName = lowerLLVMIntrinsicName(MSI);
-  if (MSI->isVolatile())
+  std::string FuncName = lowerLLVMIntrinsicName(Intrinsic);
+  if (Intrinsic->isVolatile())
     FuncName += ".volatile";
-  // Redirect @llvm.memset.* call to @spirv.llvm_memset_*
+  // Redirect @llvm.intrinsic.* call to @spirv.llvm_intrinsic_*
   Function *F = M->getFunction(FuncName);
   if (F) {
     // This function is already linked in.
-    MSI->setCalledFunction(F);
+    Intrinsic->setCalledFunction(F);
     return;
   }
   // TODO copy arguments attributes: nocapture writeonly.
-  FunctionCallee FC = M->getOrInsertFunction(FuncName, MSI->getFunctionType());
-  MSI->setCalledFunction(FC);
+  FunctionCallee FC =
+      M->getOrInsertFunction(FuncName, Intrinsic->getFunctionType());
+  auto IntrinsicID = Intrinsic->getIntrinsicID();
+  Intrinsic->setCalledFunction(FC);
 
   F = dyn_cast<Function>(FC.getCallee());
   assert(F && "must be a function!");
-  Argument *Dest = F->getArg(0);
-  Argument *Val = F->getArg(1);
-  Argument *Len = F->getArg(2);
-  Argument *IsVolatile = F->getArg(3);
-  Dest->setName("dest");
-  Val->setName("val");
-  Len->setName("len");
-  IsVolatile->setName("isvolatile");
-  IsVolatile->addAttr(Attribute::ImmArg);
-  BasicBlock *EntryBB = BasicBlock::Create(M->getContext(), "entry", F);
-  IRBuilder<> IRB(EntryBB);
-  auto *MemSet =
-      IRB.CreateMemSet(Dest, Val, Len, MSI->getDestAlign(), MSI->isVolatile());
-  IRB.CreateRetVoid();
-  expandMemSetAsLoop(cast<MemSetInst>(MemSet));
-  MemSet->eraseFromParent();
+
+  switch (IntrinsicID) {
+  case Intrinsic::memset: {
+    auto *MSI = static_cast<MemSetInst *>(Intrinsic);
+    Argument *Dest = F->getArg(0);
+    Argument *Val = F->getArg(1);
+    Argument *Len = F->getArg(2);
+    Argument *IsVolatile = F->getArg(3);
+    Dest->setName("dest");
+    Val->setName("val");
+    Len->setName("len");
+    IsVolatile->setName("isvolatile");
+    IsVolatile->addAttr(Attribute::ImmArg);
+    BasicBlock *EntryBB = BasicBlock::Create(M->getContext(), "entry", F);
+    IRBuilder<> IRB(EntryBB);
+    auto *MemSet = IRB.CreateMemSet(Dest, Val, Len, MSI->getDestAlign(),
+                                    MSI->isVolatile());
+    IRB.CreateRetVoid();
+    expandMemSetAsLoop(cast<MemSetInst>(MemSet));
+    MemSet->eraseFromParent();
+    break;
+  }
+  case Intrinsic::bswap: {
+    BasicBlock *EntryBB = BasicBlock::Create(M->getContext(), "entry", F);
+    IRBuilder<> IRB(EntryBB);
+    auto *BSwap = IRB.CreateIntrinsic(Intrinsic::bswap, Intrinsic->getType(),
+                                      F->getArg(0));
+    IRB.CreateRet(BSwap);
+    IntrinsicLowering IL(M->getDataLayout());
+    IL.LowerIntrinsicCall(BSwap);
+    break;
+  }
+  default:
+    break; // do nothing
+  }
+
   return;
 }
 
-void SPIRVRegularizeLLVMBase::buildFunnelShiftLeftFunc(Function *FSHLFunc) {
-  if (!FSHLFunc->empty())
-    return;
-
-  auto *IntTy = dyn_cast<IntegerType>(FSHLFunc->getReturnType());
-  assert(IntTy && "llvm.fshl: expected an integer return type");
-  assert(FSHLFunc->arg_size() == 3 && "llvm.fshl: expected 3 arguments");
-  for (Argument &Arg : FSHLFunc->args())
-    assert(Arg.getType()->getTypeID() == IntTy->getTypeID() &&
-           "llvm.fshl: mismatched return type and argument types");
-
-  // Our function will require 3 basic blocks; the purpose of each will be
-  // clarified below.
-  auto *CondBB = BasicBlock::Create(M->getContext(), "cond", FSHLFunc);
-  auto *RotateBB =
-      BasicBlock::Create(M->getContext(), "rotate", FSHLFunc); // Main logic
-  auto *PhiBB = BasicBlock::Create(M->getContext(), "phi", FSHLFunc);
-
-  IRBuilder<> Builder(CondBB);
-  // If the number of bits to rotate for is divisible by the bitsize,
-  // the shift becomes useless, and we should bypass the main logic in that
-  // case.
-  unsigned BitWidth = IntTy->getIntegerBitWidth();
-  ConstantInt *BitWidthConstant = Builder.getInt({BitWidth, BitWidth});
-  auto *RotateModVal =
-      Builder.CreateURem(/*Rotate*/ FSHLFunc->getArg(2), BitWidthConstant);
-  ConstantInt *ZeroConstant = Builder.getInt({BitWidth, 0});
-  auto *CheckRotateModIfZero = Builder.CreateICmpEQ(RotateModVal, ZeroConstant);
-  Builder.CreateCondBr(CheckRotateModIfZero, /*True*/ PhiBB,
-                       /*False*/ RotateBB);
-
-  // Build the actual funnel shift rotate logic.
-  Builder.SetInsertPoint(RotateBB);
-  // Shift the more significant number left, the "rotate" number of bits
-  // will be 0-filled on the right as a result of this regular shift.
-  auto *ShiftLeft = Builder.CreateShl(FSHLFunc->getArg(0), RotateModVal);
-  // We want the "rotate" number of the second int's MSBs to occupy the
-  // rightmost "0 space" left by the previous operation. Therefore,
-  // subtract the "rotate" number from the integer bitsize...
-  auto *SubRotateVal = Builder.CreateSub(BitWidthConstant, RotateModVal);
-  // ...and right-shift the second int by this number, zero-filling the MSBs.
-  auto *ShiftRight = Builder.CreateLShr(FSHLFunc->getArg(1), SubRotateVal);
-  // A simple binary addition of the shifted ints yields the final result.
-  auto *FunnelShiftRes = Builder.CreateOr(ShiftLeft, ShiftRight);
-  Builder.CreateBr(PhiBB);
-
-  // PHI basic block. If no actual rotate was required, return the first, more
-  // significant int. E.g. for 32-bit integers, it's equivalent to concatenating
-  // the 2 ints and taking 32 MSBs.
-  Builder.SetInsertPoint(PhiBB);
-  PHINode *Phi = Builder.CreatePHI(IntTy, 0);
-  Phi->addIncoming(FunnelShiftRes, RotateBB);
-  Phi->addIncoming(FSHLFunc->getArg(0), CondBB);
-  Builder.CreateRet(Phi);
-}
-
-void SPIRVRegularizeLLVMBase::lowerFunnelShiftLeft(
-    IntrinsicInst *FSHLIntrinsic) {
+void SPIRVRegularizeLLVMBase::lowerFunnelShift(IntrinsicInst *FSHIntrinsic) {
   // Get a separate function - otherwise, we'd have to rework the CFG of the
   // current one. Then simply replace the intrinsic uses with a call to the new
   // function.
-  FunctionType *FSHLFuncTy = FSHLIntrinsic->getFunctionType();
-  Type *FSHLRetTy = FSHLFuncTy->getReturnType();
-  const std::string FuncName = lowerLLVMIntrinsicName(FSHLIntrinsic);
-  Function *FSHLFunc =
-      getOrCreateFunction(M, FSHLRetTy, FSHLFuncTy->params(), FuncName);
-  buildFunnelShiftLeftFunc(FSHLFunc);
-  FSHLIntrinsic->setCalledFunction(FSHLFunc);
+  // Expected LLVM IR for the function: i* @spirv.llvm_fsh?_i* (i* %a, i* %b, i*
+  // %c)
+  FunctionType *FSHFuncTy = FSHIntrinsic->getFunctionType();
+  Type *FSHRetTy = FSHFuncTy->getReturnType();
+  const std::string FuncName = lowerLLVMIntrinsicName(FSHIntrinsic);
+  Function *FSHFunc =
+      getOrCreateFunction(M, FSHRetTy, FSHFuncTy->params(), FuncName);
+
+  if (!FSHFunc->empty()) {
+    FSHIntrinsic->setCalledFunction(FSHFunc);
+    return;
+  }
+  auto *RotateBB = BasicBlock::Create(M->getContext(), "rotate", FSHFunc);
+  IRBuilder<> Builder(RotateBB);
+  Type *Ty = FSHFunc->getReturnType();
+  // Build the actual funnel shift rotate logic.
+  // In the comments, "int" is used interchangeably with "vector of int
+  // elements".
+  FixedVectorType *VectorTy = dyn_cast<FixedVectorType>(Ty);
+  Type *IntTy = VectorTy ? VectorTy->getElementType() : Ty;
+  unsigned BitWidth = IntTy->getIntegerBitWidth();
+  ConstantInt *BitWidthConstant = Builder.getInt({BitWidth, BitWidth});
+  Value *BitWidthForInsts =
+      VectorTy ? Builder.CreateVectorSplat(VectorTy->getNumElements(),
+                                           BitWidthConstant)
+               : BitWidthConstant;
+  auto *RotateModVal =
+      Builder.CreateURem(/*Rotate*/ FSHFunc->getArg(2), BitWidthForInsts);
+  Value *FirstShift = nullptr, *SecShift = nullptr;
+  if (FSHIntrinsic->getIntrinsicID() == Intrinsic::fshr)
+    // Shift the less significant number right, the "rotate" number of bits
+    // will be 0-filled on the left as a result of this regular shift.
+    FirstShift = Builder.CreateLShr(FSHFunc->getArg(1), RotateModVal);
+  else
+    // Shift the more significant number left, the "rotate" number of bits
+    // will be 0-filled on the right as a result of this regular shift.
+    FirstShift = Builder.CreateShl(FSHFunc->getArg(0), RotateModVal);
+
+  // We want the "rotate" number of the more significant int's LSBs (MSBs) to
+  // occupy the leftmost (rightmost) "0 space" left by the previous operation.
+  // Therefore, subtract the "rotate" number from the integer bitsize...
+  auto *SubRotateVal = Builder.CreateSub(BitWidthForInsts, RotateModVal);
+  if (FSHIntrinsic->getIntrinsicID() == Intrinsic::fshr)
+    // ...and left-shift the more significant int by this number, zero-filling
+    // the LSBs.
+    SecShift = Builder.CreateShl(FSHFunc->getArg(0), SubRotateVal);
+  else
+    // ...and right-shift the less significant int by this number, zero-filling
+    // the MSBs.
+    SecShift = Builder.CreateLShr(FSHFunc->getArg(1), SubRotateVal);
+
+  // A simple binary addition of the shifted ints yields the final result.
+  auto *FunnelShiftRes = Builder.CreateOr(FirstShift, SecShift);
+  Builder.CreateRet(FunnelShiftRes);
+
+  FSHIntrinsic->setCalledFunction(FSHFunc);
 }
 
 void SPIRVRegularizeLLVMBase::buildUMulWithOverflowFunc(Function *UMulFunc) {
@@ -294,6 +320,68 @@ void SPIRVRegularizeLLVMBase::lowerUMulWithOverflow(
   UMulIntrinsic->setCalledFunction(UMulFunc);
 }
 
+void SPIRVRegularizeLLVMBase::adaptStructTypes(StructType *ST) {
+  if (!ST->hasName())
+    return;
+  StringRef STName = ST->getName();
+  STName.consume_front("struct.");
+  StringRef MangledName = STName.substr(0, STName.find('.'));
+
+  // Demangle the name of a template struct and parse the template
+  // parameters which look like:
+  // <signed char, 2ul, 2ul, (spv::MatrixLayout)0, (spv::Scope)3>
+  // The result should look like SPIR-V friendly LLVM IR:
+  // %spirv.JointMatrixINTEL._char_2_2_0_3
+  if (MangledName.startswith("_ZTSN5__spv24__spirv_JointMatrixINTEL")) {
+    std::string DemangledName = llvm::demangle(MangledName.str());
+    StringRef Name(DemangledName);
+    Name = Name.slice(Name.find('<') + 1, Name.rfind('>'));
+    std::stringstream SPVName;
+    // Name = signed char, 2ul, 2ul, (spv::MatrixLayout)0, (spv::Scope)3
+    auto P = Name.split(", ");
+    // P.first = "signed char
+    // P.second = "2ul, 2ul, (spv::MatrixLayout)0, (spv::Scope)3"
+    StringRef ElemType = P.first;
+    // remove possile qualifiers, like "const" or "signed"
+    ElemType.consume_back(" const");
+    size_t Space = ElemType.rfind(' ');
+    if (Space != StringRef::npos)
+      ElemType = ElemType.substr(Space + 1);
+    // Half type is special: because of https://github.com/intel/llvm/pull/1089
+    // in DPC++ we use `class half` instead of `half` type natively supported by
+    // Clang. After demangling we get the type name qualified with parent
+    // namespaces, which we should remove.
+    // In anticipation of https://github.com/intel/llvm/pull/4460 we provide
+    // for 2 possible prefixes(top level namespaces).
+    if ((ElemType.startswith("cl::sycl::") ||
+         ElemType.startswith("__sycl_internal::")) &&
+        ElemType.endswith("::half"))
+      ElemType = ElemType.take_back(/*strlen("half")*/ 4);
+    P = P.second.split(", ");
+    // P.first = "2ul"
+    // P.second = "2ul, (spv::MatrixLayout)0, (spv::Scope)3"
+    StringRef Rows = P.first.take_while(llvm::isDigit);
+    P = P.second.split(", ");
+    // P.first = "2ul"
+    // P.second = "(spv::MatrixLayout)0, (spv::Scope)3"
+    StringRef Cols = P.first.take_while(llvm::isDigit);
+    P = P.second.split(", ");
+    // P.first = "(spv::MatrixLayout)0"
+    // P.second = "(spv::Scope)3"
+    StringRef Layout = P.first.substr(P.first.rfind(')') + 1);
+    StringRef Scope = P.second.substr(P.second.rfind(')') + 1);
+
+    SPVName << kSPIRVTypeName::PrefixAndDelim
+            << kSPIRVTypeName::JointMatrixINTEL << kSPIRVTypeName::Delimiter
+            << kSPIRVTypeName::PostfixDelim << ElemType.str()
+            << kSPIRVTypeName::PostfixDelim << Rows.str()
+            << kSPIRVTypeName::PostfixDelim << Cols.str()
+            << kSPIRVTypeName::PostfixDelim << Layout.str()
+            << kSPIRVTypeName::PostfixDelim << Scope.str();
+    ST->setName(SPVName.str());
+  }
+}
+
 bool SPIRVRegularizeLLVMBase::runRegularizeLLVM(Module &Module) {
   M = &Module;
   Ctx = &M->getContext();
@@ -328,10 +416,12 @@ bool SPIRVRegularizeLLVMBase::regularize() {
           if (CF && CF->isIntrinsic()) {
             removeFnAttr(Call, Attribute::NoUnwind);
             auto *II = cast<IntrinsicInst>(Call);
-            if (auto *MSI = dyn_cast<MemSetInst>(II))
-              lowerMemset(MSI);
-            else if (II->getIntrinsicID() == Intrinsic::fshl)
-              lowerFunnelShiftLeft(II);
+            if (II->getIntrinsicID() == Intrinsic::memset ||
+                II->getIntrinsicID() == Intrinsic::bswap)
+              lowerIntrinsicToFunction(II);
+            else if (II->getIntrinsicID() == Intrinsic::fshl ||
+                     II->getIntrinsicID() == Intrinsic::fshr)
+              lowerFunnelShift(II);
             else if (II->getIntrinsicID() == Intrinsic::umul_with_overflow)
               lowerUMulWithOverflow(II);
           }
@@ -359,6 +449,25 @@ bool SPIRVRegularizeLLVMBase::regularize() {
         for (auto &MDName : MDs) {
           if (II.getMetadata(MDName)) {
             II.setMetadata(MDName, nullptr);
+          }
+        }
+        // Add an additional bitcast in case address space cast also changes
+        // pointer element type.
+        if (auto *ASCast = dyn_cast<AddrSpaceCastInst>(&II)) {
+          Type *DestTy = ASCast->getDestTy();
+          Type *SrcTy = ASCast->getSrcTy();
+          if (DestTy->getPointerElementType() !=
+              SrcTy->getPointerElementType()) {
+            PointerType *InterTy =
+                PointerType::get(DestTy->getPointerElementType(),
+                                 SrcTy->getPointerAddressSpace());
+            BitCastInst *NewBCast = new BitCastInst(
+                ASCast->getPointerOperand(), InterTy, /*NameStr=*/"", ASCast);
+            AddrSpaceCastInst *NewASCast =
+                new AddrSpaceCastInst(NewBCast, DestTy, /*NameStr=*/"", ASCast);
+            ToErase.push_back(ASCast);
+            ASCast->dropAllReferences();
+            ASCast->replaceAllUsesWith(NewASCast);
           }
         }
         if (auto Cmpxchg = dyn_cast<AtomicCmpXchgInst>(&II)) {
@@ -420,6 +529,9 @@ bool SPIRVRegularizeLLVMBase::regularize() {
       V->eraseFromParent();
     }
   }
+
+  for (StructType *ST : M->getIdentifiedStructTypes())
+    adaptStructTypes(ST);
 
   if (SPIRVDbgSaveRegularizedModule)
     saveLLVMModule(M, RegularizedModuleTmpFile);

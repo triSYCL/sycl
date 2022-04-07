@@ -45,6 +45,7 @@ enum RelExpr {
   R_PC,
   R_PLT,
   R_PLT_PC,
+  R_PLT_GOTPLT,
   R_RELAX_GOT_PC,
   R_RELAX_GOT_PC_NOPIC,
   R_RELAX_TLS_GD_TO_IE,
@@ -62,6 +63,7 @@ enum RelExpr {
   R_TLSDESC,
   R_TLSDESC_CALL,
   R_TLSDESC_PC,
+  R_TLSDESC_GOTPLT,
   R_TLSGD_GOT,
   R_TLSGD_GOTPLT,
   R_TLSGD_PC,
@@ -124,6 +126,7 @@ struct JumpInstrMod {
 // Call reportUndefinedSymbols() after calling scanRelocations() to emit
 // the diagnostics.
 template <class ELFT> void scanRelocations(InputSectionBase &);
+void postScanRelocations();
 
 template <class ELFT> void reportUndefinedSymbols();
 
@@ -195,6 +198,19 @@ static inline int64_t getAddend(const typename ELFT::Rel &rel) {
 template <class ELFT>
 static inline int64_t getAddend(const typename ELFT::Rela &rel) {
   return rel.r_addend;
+}
+
+template <typename RelTy>
+ArrayRef<RelTy> sortRels(ArrayRef<RelTy> rels, SmallVector<RelTy, 0> &storage) {
+  auto cmp = [](const RelTy &a, const RelTy &b) {
+    return a.r_offset < b.r_offset;
+  };
+  if (!llvm::is_sorted(rels, cmp)) {
+    storage.assign(rels.begin(), rels.end());
+    llvm::stable_sort(storage, cmp);
+    rels = storage;
+  }
+  return rels;
 }
 } // namespace elf
 } // namespace lld

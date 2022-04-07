@@ -175,6 +175,13 @@ void FillResponse(const llvm::json::Object &request,
 //       "type": "string",
 //       "description": "Name of the scope such as 'Arguments', 'Locals'."
 //     },
+//     "presentationHint": {
+//       "type": "string",
+//       "description": "An optional hint for how to present this scope in the
+//                       UI. If this attribute is missing, the scope is shown
+//                       with a generic UI.",
+//       "_enum": [ "arguments", "locals", "registers" ],
+//     },
 //     "variablesReference": {
 //       "type": "integer",
 //       "description": "The variables of this scope can be retrieved by
@@ -229,6 +236,15 @@ llvm::json::Value CreateScope(const llvm::StringRef name,
                               int64_t namedVariables, bool expensive) {
   llvm::json::Object object;
   EmplaceSafeString(object, "name", name.str());
+
+  // TODO: Support "arguments" scope. At the moment lldb-vscode includes the
+  // arguments into the "locals" scope.
+  if (variablesReference == VARREF_LOCALS) {
+    object.try_emplace("presentationHint", "locals");
+  } else if (variablesReference == VARREF_REGS) {
+    object.try_emplace("presentationHint", "registers");
+  }
+
   object.try_emplace("variablesReference", variablesReference);
   object.try_emplace("expensive", expensive);
   object.try_emplace("namedVariables", namedVariables);
@@ -878,6 +894,15 @@ llvm::json::Value CreateThreadStopped(lldb::SBThread &thread,
   case lldb::eStopReasonExec:
     body.try_emplace("reason", "entry");
     break;
+  case lldb::eStopReasonFork:
+    body.try_emplace("reason", "fork");
+    break;
+  case lldb::eStopReasonVFork:
+    body.try_emplace("reason", "vfork");
+    break;
+  case lldb::eStopReasonVForkDone:
+    body.try_emplace("reason", "vforkdone");
+    break;
   case lldb::eStopReasonThreadExiting:
   case lldb::eStopReasonInvalid:
   case lldb::eStopReasonNone:
@@ -905,21 +930,24 @@ llvm::json::Value CreateThreadStopped(lldb::SBThread &thread,
   return llvm::json::Value(std::move(event));
 }
 
+const char *GetNonNullVariableName(lldb::SBValue v) {
+  const char *name = v.GetName();
+  return name ? name : "<null>";
+}
+
 std::string CreateUniqueVariableNameForDisplay(lldb::SBValue v,
                                                bool is_name_duplicated) {
   lldb::SBStream name_builder;
-  const char *name = v.GetName();
-  name_builder.Print(name ? name : "<null>");
+  name_builder.Print(GetNonNullVariableName(v));
   if (is_name_duplicated) {
-    name_builder.Print(" @ ");
     lldb::SBDeclaration declaration = v.GetDeclaration();
-    std::string file_name(declaration.GetFileSpec().GetFilename());
+    const char *file_name = declaration.GetFileSpec().GetFilename();
     const uint32_t line = declaration.GetLine();
 
-    if (!file_name.empty() && line > 0)
-      name_builder.Printf("%s:%u", file_name.c_str(), line);
-    else
-      name_builder.Print(v.GetLocation());
+    if (file_name != nullptr && line > 0)
+      name_builder.Printf(" @ %s:%u", file_name, line);
+    else if (const char *location = v.GetLocation())
+      name_builder.Printf(" @ %s", location);
   }
   return name_builder.GetData();
 }

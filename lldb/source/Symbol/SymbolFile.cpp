@@ -97,10 +97,10 @@ SymbolFile::GetTypeSystemForLanguage(lldb::LanguageType language) {
   return type_system_or_err;
 }
 
-uint32_t SymbolFile::ResolveSymbolContext(const FileSpec &file_spec,
-                                          uint32_t line, bool check_inlines,
-                                          lldb::SymbolContextItem resolve_scope,
-                                          SymbolContextList &sc_list) {
+uint32_t
+SymbolFile::ResolveSymbolContext(const SourceLocationSpec &src_location_spec,
+                                 lldb::SymbolContextItem resolve_scope,
+                                 SymbolContextList &sc_list) {
   return 0;
 }
 
@@ -147,9 +147,11 @@ void SymbolFile::AssertModuleLock() {
   // We assert that we have to module lock by trying to acquire the lock from a
   // different thread. Note that we must abort if the result is true to
   // guarantee correctness.
-  assert(std::async(std::launch::async,
-                    [this] { return this->GetModuleMutex().try_lock(); })
-                 .get() == false &&
+  assert(std::async(
+             std::launch::async,
+             [this] {
+               return this->GetModuleMutex().try_lock();
+             }).get() == false &&
          "Module is not locked");
 #endif
 }
@@ -236,3 +238,15 @@ void SymbolFile::Dump(Stream &s) {
 }
 
 SymbolFile::RegisterInfoResolver::~RegisterInfoResolver() = default;
+
+uint64_t SymbolFile::GetDebugInfoSize() {
+  if (!m_objfile_sp)
+    return 0;
+  ModuleSP module_sp(m_objfile_sp->GetModule());
+  if (!module_sp)
+    return 0;
+  const SectionList *section_list = module_sp->GetSectionList();
+  if (section_list)
+    return section_list->GetDebugInfoSize();
+  return 0;
+}

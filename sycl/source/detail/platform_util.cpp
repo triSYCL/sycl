@@ -13,11 +13,7 @@
 #if defined(__SYCL_RT_OS_LINUX)
 #include <errno.h>
 #include <unistd.h>
-#if defined(__arm__) || defined(__aarch64__)
-// TODO: Create ARM Query Header (or an alternative) for linux that will look
-// at /sys/devices/system/cpu/ and query it for information on the CPU. Doesn't
-// appear to be any equivalent intrinsic or helper function on ARM
-#elif defined(__i386__) || defined(__x86_64__)
+#if defined(__x86_64__) || defined(__i386__)
 #include <cpuid.h>
 #endif
 #elif defined(__SYCL_RT_OS_WINDOWS)
@@ -31,7 +27,7 @@ namespace detail {
 #if defined(__x86_64__) || defined(__i386__)
 // Used by methods that duplicate OpenCL behaviour in order to get CPU info
 static void cpuid(uint32_t *CPUInfo, uint32_t Type, uint32_t SubType = 0) {
-#if defined(__SYCL_RT_OS_LINUX) && (defined(__x86_64__) || defined(__i386__))
+#if defined(__SYCL_RT_OS_LINUX)
   __cpuid_count(Type, SubType, CPUInfo[0], CPUInfo[1], CPUInfo[2], CPUInfo[3]);
 #elif defined(__SYCL_RT_OS_WINDOWS)
   __cpuidex(reinterpret_cast<int *>(CPUInfo), Type, SubType);
@@ -45,7 +41,7 @@ uint32_t PlatformUtil::getMaxClockFrequency() {
       PI_INVALID_DEVICE);
 #if defined(__x86_64__) || defined(__i386__)
   uint32_t CPUInfo[4];
-  string_class Buff(sizeof(CPUInfo) * 3 + 1, 0);
+  std::string Buff(sizeof(CPUInfo) * 3 + 1, 0);
   size_t Offset = 0;
 
   for (uint32_t i = 0x80000002; i <= 0x80000004; i++) {
@@ -78,11 +74,6 @@ uint32_t PlatformUtil::getMaxClockFrequency() {
 }
 
 uint32_t PlatformUtil::getMemCacheLineSize() {
-#if defined(__arm__) || defined(__aarch64__)
-  throw runtime_error(
-      "global_mem_cache_line_size is not supported for ARM architectures");
-#endif
-
 #if defined(__x86_64__) || defined(__i386__)
   uint32_t CPUInfo[4];
   cpuid(CPUInfo, 0x80000006);
@@ -97,11 +88,6 @@ uint32_t PlatformUtil::getMemCacheLineSize() {
 }
 
 uint64_t PlatformUtil::getMemCacheSize() {
-#if defined(__arm__) || defined(__aarch64__)
-  throw runtime_error(
-      "global_mem_cache_size is not supported for ARM architectures");
-#endif
-
 #if defined(__x86_64__) || defined(__i386__)
   uint32_t CPUInfo[4];
   cpuid(CPUInfo, 0x80000006);
@@ -116,11 +102,6 @@ uint64_t PlatformUtil::getMemCacheSize() {
 }
 
 uint32_t PlatformUtil::getNativeVectorWidth(PlatformUtil::TypeIndex TIndex) {
-#if defined(__arm__) || defined(__aarch64__)
-  throw runtime_error(
-      "native_vector_width_* is not supported for ARM architectures");
-#endif
-
 
 #if defined(__x86_64__) || defined(__i386__)
   uint32_t Index = static_cast<uint32_t>(TIndex);
@@ -133,8 +114,7 @@ uint32_t PlatformUtil::getNativeVectorWidth(PlatformUtil::TypeIndex TIndex) {
   static constexpr uint32_t VECTOR_WIDTH_AVX2[] = {32, 16, 8, 4, 8, 4, 0};
   // AVX512 has 64 byte (ZMM) registers
   static constexpr uint32_t VECTOR_WIDTH_AVX512[] = {64, 32, 16, 8, 16, 8, 0};
-#endif
-#if defined(__SYCL_RT_OS_LINUX) && (defined(__x86_64__) || defined(__i386__))
+
 #if defined(__SYCL_RT_OS_LINUX)
   if (__builtin_cpu_supports("avx512f"))
     return VECTOR_WIDTH_AVX512[Index];

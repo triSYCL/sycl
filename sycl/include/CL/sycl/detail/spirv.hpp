@@ -10,18 +10,22 @@
 #include <CL/__spirv/spirv_ops.hpp>
 #include <CL/__spirv/spirv_types.hpp>
 #include <CL/__spirv/spirv_vars.hpp>
-#include <CL/sycl/ONEAPI/atomic_enums.hpp>
 #include <CL/sycl/detail/generic_type_traits.hpp>
 #include <CL/sycl/detail/helpers.hpp>
 #include <CL/sycl/detail/type_traits.hpp>
 #include <CL/sycl/id.hpp>
+#include <CL/sycl/memory_enums.hpp>
+#include <cstring>
 
 #ifdef __SYCL_DEVICE_ONLY__
 __SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
-namespace ONEAPI {
+namespace ext {
+namespace oneapi {
 struct sub_group;
-} // namespace ONEAPI
+} // namespace oneapi
+} // namespace ext
+
 namespace detail {
 namespace spirv {
 
@@ -31,7 +35,7 @@ template <int Dimensions> struct group_scope<group<Dimensions>> {
   static constexpr __spv::Scope::Flag value = __spv::Scope::Flag::Workgroup;
 };
 
-template <> struct group_scope<::cl::sycl::ONEAPI::sub_group> {
+template <> struct group_scope<::cl::sycl::ext::oneapi::sub_group> {
   static constexpr __spv::Scope::Flag value = __spv::Scope::Flag::Subgroup;
 };
 
@@ -48,7 +52,7 @@ template <typename T, typename Functor>
 void GenericCall(const Functor &ApplyToBytes) {
   if (sizeof(T) >= sizeof(ShuffleChunkT)) {
 #pragma unroll
-    for (size_t Offset = 0; Offset < sizeof(T);
+    for (size_t Offset = 0; Offset + sizeof(ShuffleChunkT) <= sizeof(T);
          Offset += sizeof(ShuffleChunkT)) {
       ApplyToBytes(Offset, sizeof(ShuffleChunkT));
     }
@@ -82,8 +86,10 @@ template <typename Group> bool GroupAny(bool pred) {
 }
 
 // Native broadcasts map directly to a SPIR-V GroupBroadcast intrinsic
+// FIXME: Do not special-case for half once all backends support all data types.
 template <typename T>
-using is_native_broadcast = bool_constant<detail::is_arithmetic<T>::value>;
+using is_native_broadcast = bool_constant<detail::is_arithmetic<T>::value &&
+                                          !std::is_same<T, half>::value>;
 
 template <typename T, typename IdT = size_t>
 using EnableIfNativeBroadcast = detail::enable_if_t<
@@ -117,11 +123,18 @@ template <typename T, typename IdT = size_t>
 using EnableIfGenericBroadcast = detail::enable_if_t<
     is_generic_broadcast<T>::value && std::is_integral<IdT>::value, T>;
 
+// FIXME: Disable widening once all backends support all data types.
+template <typename T>
+using WidenOpenCLTypeTo32_t = conditional_t<
+    std::is_same<T, cl_char>() || std::is_same<T, cl_short>(), cl_int,
+    conditional_t<std::is_same<T, cl_uchar>() || std::is_same<T, cl_ushort>(),
+                  cl_uint, T>>;
+
 // Broadcast with scalar local index
 // Work-group supports any integral type
 // Sub-group currently supports only uint32_t
 template <typename Group> struct GroupId { using type = size_t; };
-template <> struct GroupId<::cl::sycl::ONEAPI::sub_group> {
+template <> struct GroupId<::cl::sycl::ext::oneapi::sub_group> {
   using type = uint32_t;
 };
 template <typename Group, typename T, typename IdT>
@@ -129,21 +142,17 @@ EnableIfNativeBroadcast<T, IdT> GroupBroadcast(T x, IdT local_id) {
   using GroupIdT = typename GroupId<Group>::type;
   GroupIdT GroupLocalId = static_cast<GroupIdT>(local_id);
   using OCLT = detail::ConvertToOpenCLType_t<T>;
+  using WidenedT = WidenOpenCLTypeTo32_t<OCLT>;
   using OCLIdT = detail::ConvertToOpenCLType_t<GroupIdT>;
-  OCLT OCLX = detail::convertDataToType<T, OCLT>(x);
+  WidenedT OCLX = detail::convertDataToType<T, OCLT>(x);
   OCLIdT OCLId = detail::convertDataToType<GroupIdT, OCLIdT>(GroupLocalId);
   return __spirv_GroupBroadcast(group_scope<Group>::value, OCLX, OCLId);
 }
 template <typename Group, typename T, typename IdT>
 EnableIfBitcastBroadcast<T, IdT> GroupBroadcast(T x, IdT local_id) {
-  using GroupIdT = typename GroupId<Group>::type;
-  GroupIdT GroupLocalId = static_cast<GroupIdT>(local_id);
   using BroadcastT = ConvertToNativeBroadcastType_t<T>;
-  using OCLIdT = detail::ConvertToOpenCLType_t<GroupIdT>;
   auto BroadcastX = bit_cast<BroadcastT>(x);
-  OCLIdT OCLId = detail::convertDataToType<GroupIdT, OCLIdT>(GroupLocalId);
-  BroadcastT Result =
-      __spirv_GroupBroadcast(group_scope<Group>::value, BroadcastX, OCLId);
+  BroadcastT Result = GroupBroadcast<Group>(BroadcastX, local_id);
   return bit_cast<T>(Result);
 }
 template <typename Group, typename T, typename IdT>
@@ -153,9 +162,9 @@ EnableIfGenericBroadcast<T, IdT> GroupBroadcast(T x, IdT local_id) {
   char *ResultBytes = reinterpret_cast<char *>(&Result);
   auto BroadcastBytes = [=](size_t Offset, size_t Size) {
     uint64_t BroadcastX, BroadcastResult;
-    detail::memcpy(&BroadcastX, XBytes + Offset, Size);
+    std::memcpy(&BroadcastX, XBytes + Offset, Size);
     BroadcastResult = GroupBroadcast<Group>(BroadcastX, local_id);
-    detail::memcpy(ResultBytes + Offset, &BroadcastResult, Size);
+    std::memcpy(ResultBytes + Offset, &BroadcastResult, Size);
   };
   GenericCall<T>(BroadcastBytes);
   return Result;
@@ -169,31 +178,21 @@ EnableIfNativeBroadcast<T> GroupBroadcast(T x, id<Dimensions> local_id) {
   }
   using IdT = vec<size_t, Dimensions>;
   using OCLT = detail::ConvertToOpenCLType_t<T>;
+  using WidenedT = WidenOpenCLTypeTo32_t<OCLT>;
   using OCLIdT = detail::ConvertToOpenCLType_t<IdT>;
   IdT VecId;
   for (int i = 0; i < Dimensions; ++i) {
     VecId[i] = local_id[Dimensions - i - 1];
   }
-  OCLT OCLX = detail::convertDataToType<T, OCLT>(x);
+  WidenedT OCLX = detail::convertDataToType<T, OCLT>(x);
   OCLIdT OCLId = detail::convertDataToType<IdT, OCLIdT>(VecId);
   return __spirv_GroupBroadcast(group_scope<Group>::value, OCLX, OCLId);
 }
 template <typename Group, typename T, int Dimensions>
 EnableIfBitcastBroadcast<T> GroupBroadcast(T x, id<Dimensions> local_id) {
-  if (Dimensions == 1) {
-    return GroupBroadcast<Group>(x, local_id[0]);
-  }
-  using IdT = vec<size_t, Dimensions>;
   using BroadcastT = ConvertToNativeBroadcastType_t<T>;
-  using OCLIdT = detail::ConvertToOpenCLType_t<IdT>;
-  IdT VecId;
-  for (int i = 0; i < Dimensions; ++i) {
-    VecId[i] = local_id[Dimensions - i - 1];
-  }
   auto BroadcastX = bit_cast<BroadcastT>(x);
-  OCLIdT OCLId = detail::convertDataToType<IdT, OCLIdT>(VecId);
-  BroadcastT Result =
-      __spirv_GroupBroadcast(group_scope<Group>::value, BroadcastX, OCLId);
+  BroadcastT Result = GroupBroadcast<Group>(BroadcastX, local_id);
   return bit_cast<T>(Result);
 }
 template <typename Group, typename T, int Dimensions>
@@ -206,9 +205,9 @@ EnableIfGenericBroadcast<T> GroupBroadcast(T x, id<Dimensions> local_id) {
   char *ResultBytes = reinterpret_cast<char *>(&Result);
   auto BroadcastBytes = [=](size_t Offset, size_t Size) {
     uint64_t BroadcastX, BroadcastResult;
-    detail::memcpy(&BroadcastX, XBytes + Offset, Size);
+    std::memcpy(&BroadcastX, XBytes + Offset, Size);
     BroadcastResult = GroupBroadcast<Group>(BroadcastX, local_id);
-    detail::memcpy(ResultBytes + Offset, &BroadcastResult, Size);
+    std::memcpy(ResultBytes + Offset, &BroadcastResult, Size);
   };
   GenericCall<T>(BroadcastBytes);
   return Result;
@@ -216,24 +215,27 @@ EnableIfGenericBroadcast<T> GroupBroadcast(T x, id<Dimensions> local_id) {
 
 // Single happens-before means semantics should always apply to all spaces
 // Although consume is unsupported, forwarding to acquire is valid
-static inline constexpr __spv::MemorySemanticsMask::Flag
-getMemorySemanticsMask(ONEAPI::memory_order Order) {
+template <typename T>
+static inline constexpr
+    typename std::enable_if<std::is_same<T, sycl::memory_order>::value,
+                            __spv::MemorySemanticsMask::Flag>::type
+    getMemorySemanticsMask(T Order) {
   __spv::MemorySemanticsMask::Flag SpvOrder = __spv::MemorySemanticsMask::None;
   switch (Order) {
-  case ONEAPI::memory_order::relaxed:
+  case T::relaxed:
     SpvOrder = __spv::MemorySemanticsMask::None;
     break;
-  case ONEAPI::memory_order::__consume_unsupported:
-  case ONEAPI::memory_order::acquire:
+  case T::__consume_unsupported:
+  case T::acquire:
     SpvOrder = __spv::MemorySemanticsMask::Acquire;
     break;
-  case ONEAPI::memory_order::release:
+  case T::release:
     SpvOrder = __spv::MemorySemanticsMask::Release;
     break;
-  case ONEAPI::memory_order::acq_rel:
+  case T::acq_rel:
     SpvOrder = __spv::MemorySemanticsMask::AcquireRelease;
     break;
-  case ONEAPI::memory_order::seq_cst:
+  case T::seq_cst:
     SpvOrder = __spv::MemorySemanticsMask::SequentiallyConsistent;
     break;
   }
@@ -243,27 +245,26 @@ getMemorySemanticsMask(ONEAPI::memory_order Order) {
       __spv::MemorySemanticsMask::CrossWorkgroupMemory);
 }
 
-static inline constexpr __spv::Scope::Flag
-getScope(ONEAPI::memory_scope Scope) {
+static inline constexpr __spv::Scope::Flag getScope(memory_scope Scope) {
   switch (Scope) {
-  case ONEAPI::memory_scope::work_item:
+  case memory_scope::work_item:
     return __spv::Scope::Invocation;
-  case ONEAPI::memory_scope::sub_group:
+  case memory_scope::sub_group:
     return __spv::Scope::Subgroup;
-  case ONEAPI::memory_scope::work_group:
+  case memory_scope::work_group:
     return __spv::Scope::Workgroup;
-  case ONEAPI::memory_scope::device:
+  case memory_scope::device:
     return __spv::Scope::Device;
-  case ONEAPI::memory_scope::system:
+  case memory_scope::system:
     return __spv::Scope::CrossDevice;
   }
 }
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_integral<T>::value, T>
-AtomicCompareExchange(multi_ptr<T, AddressSpace> MPtr,
-                      ONEAPI::memory_scope Scope, ONEAPI::memory_order Success,
-                      ONEAPI::memory_order Failure, T Desired, T Expected) {
+AtomicCompareExchange(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+                      memory_order Success, memory_order Failure, T Desired,
+                      T Expected) {
   auto SPIRVSuccess = getMemorySemanticsMask(Success);
   auto SPIRVFailure = getMemorySemanticsMask(Failure);
   auto SPIRVScope = getScope(Scope);
@@ -274,9 +275,9 @@ AtomicCompareExchange(multi_ptr<T, AddressSpace> MPtr,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_floating_point<T>::value, T>
-AtomicCompareExchange(multi_ptr<T, AddressSpace> MPtr,
-                      ONEAPI::memory_scope Scope, ONEAPI::memory_order Success,
-                      ONEAPI::memory_order Failure, T Desired, T Expected) {
+AtomicCompareExchange(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+                      memory_order Success, memory_order Failure, T Desired,
+                      T Expected) {
   using I = detail::make_unsinged_integer_t<T>;
   auto SPIRVSuccess = getMemorySemanticsMask(Success);
   auto SPIRVFailure = getMemorySemanticsMask(Failure);
@@ -293,8 +294,8 @@ AtomicCompareExchange(multi_ptr<T, AddressSpace> MPtr,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_integral<T>::value, T>
-AtomicLoad(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
-           ONEAPI::memory_order Order) {
+AtomicLoad(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+           memory_order Order) {
   auto *Ptr = MPtr.get();
   auto SPIRVOrder = getMemorySemanticsMask(Order);
   auto SPIRVScope = getScope(Scope);
@@ -303,8 +304,8 @@ AtomicLoad(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_floating_point<T>::value, T>
-AtomicLoad(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
-           ONEAPI::memory_order Order) {
+AtomicLoad(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+           memory_order Order) {
   using I = detail::make_unsinged_integer_t<T>;
   auto *PtrInt =
       reinterpret_cast<typename multi_ptr<I, AddressSpace>::pointer_t>(
@@ -317,8 +318,8 @@ AtomicLoad(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_integral<T>::value>
-AtomicStore(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
-            ONEAPI::memory_order Order, T Value) {
+AtomicStore(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+            memory_order Order, T Value) {
   auto *Ptr = MPtr.get();
   auto SPIRVOrder = getMemorySemanticsMask(Order);
   auto SPIRVScope = getScope(Scope);
@@ -327,8 +328,8 @@ AtomicStore(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_floating_point<T>::value>
-AtomicStore(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
-            ONEAPI::memory_order Order, T Value) {
+AtomicStore(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+            memory_order Order, T Value) {
   using I = detail::make_unsinged_integer_t<T>;
   auto *PtrInt =
       reinterpret_cast<typename multi_ptr<I, AddressSpace>::pointer_t>(
@@ -341,8 +342,8 @@ AtomicStore(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_integral<T>::value, T>
-AtomicExchange(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
-               ONEAPI::memory_order Order, T Value) {
+AtomicExchange(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+               memory_order Order, T Value) {
   auto *Ptr = MPtr.get();
   auto SPIRVOrder = getMemorySemanticsMask(Order);
   auto SPIRVScope = getScope(Scope);
@@ -351,8 +352,8 @@ AtomicExchange(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_floating_point<T>::value, T>
-AtomicExchange(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
-               ONEAPI::memory_order Order, T Value) {
+AtomicExchange(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+               memory_order Order, T Value) {
   using I = detail::make_unsinged_integer_t<T>;
   auto *PtrInt =
       reinterpret_cast<typename multi_ptr<I, AddressSpace>::pointer_t>(
@@ -367,8 +368,8 @@ AtomicExchange(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_integral<T>::value, T>
-AtomicIAdd(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
-           ONEAPI::memory_order Order, T Value) {
+AtomicIAdd(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+           memory_order Order, T Value) {
   auto *Ptr = MPtr.get();
   auto SPIRVOrder = getMemorySemanticsMask(Order);
   auto SPIRVScope = getScope(Scope);
@@ -377,8 +378,8 @@ AtomicIAdd(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_integral<T>::value, T>
-AtomicISub(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
-           ONEAPI::memory_order Order, T Value) {
+AtomicISub(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+           memory_order Order, T Value) {
   auto *Ptr = MPtr.get();
   auto SPIRVOrder = getMemorySemanticsMask(Order);
   auto SPIRVScope = getScope(Scope);
@@ -387,8 +388,8 @@ AtomicISub(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_floating_point<T>::value, T>
-AtomicFAdd(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
-           ONEAPI::memory_order Order, T Value) {
+AtomicFAdd(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+           memory_order Order, T Value) {
   auto *Ptr = MPtr.get();
   auto SPIRVOrder = getMemorySemanticsMask(Order);
   auto SPIRVScope = getScope(Scope);
@@ -397,8 +398,8 @@ AtomicFAdd(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_integral<T>::value, T>
-AtomicAnd(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
-          ONEAPI::memory_order Order, T Value) {
+AtomicAnd(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+          memory_order Order, T Value) {
   auto *Ptr = MPtr.get();
   auto SPIRVOrder = getMemorySemanticsMask(Order);
   auto SPIRVScope = getScope(Scope);
@@ -407,8 +408,8 @@ AtomicAnd(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_integral<T>::value, T>
-AtomicOr(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
-         ONEAPI::memory_order Order, T Value) {
+AtomicOr(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+         memory_order Order, T Value) {
   auto *Ptr = MPtr.get();
   auto SPIRVOrder = getMemorySemanticsMask(Order);
   auto SPIRVScope = getScope(Scope);
@@ -417,8 +418,8 @@ AtomicOr(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_integral<T>::value, T>
-AtomicXor(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
-          ONEAPI::memory_order Order, T Value) {
+AtomicXor(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+          memory_order Order, T Value) {
   auto *Ptr = MPtr.get();
   auto SPIRVOrder = getMemorySemanticsMask(Order);
   auto SPIRVScope = getScope(Scope);
@@ -427,8 +428,8 @@ AtomicXor(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_integral<T>::value, T>
-AtomicMin(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
-          ONEAPI::memory_order Order, T Value) {
+AtomicMin(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+          memory_order Order, T Value) {
   auto *Ptr = MPtr.get();
   auto SPIRVOrder = getMemorySemanticsMask(Order);
   auto SPIRVScope = getScope(Scope);
@@ -437,8 +438,8 @@ AtomicMin(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_floating_point<T>::value, T>
-AtomicMin(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
-          ONEAPI::memory_order Order, T Value) {
+AtomicMin(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+          memory_order Order, T Value) {
   auto *Ptr = MPtr.get();
   auto SPIRVOrder = getMemorySemanticsMask(Order);
   auto SPIRVScope = getScope(Scope);
@@ -447,8 +448,8 @@ AtomicMin(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_integral<T>::value, T>
-AtomicMax(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
-          ONEAPI::memory_order Order, T Value) {
+AtomicMax(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+          memory_order Order, T Value) {
   auto *Ptr = MPtr.get();
   auto SPIRVOrder = getMemorySemanticsMask(Order);
   auto SPIRVScope = getScope(Scope);
@@ -457,8 +458,8 @@ AtomicMax(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
 
 template <typename T, access::address_space AddressSpace>
 inline typename detail::enable_if_t<std::is_floating_point<T>::value, T>
-AtomicMax(multi_ptr<T, AddressSpace> MPtr, ONEAPI::memory_scope Scope,
-          ONEAPI::memory_order Order, T Value) {
+AtomicMax(multi_ptr<T, AddressSpace> MPtr, memory_scope Scope,
+          memory_order Order, T Value) {
   auto *Ptr = MPtr.get();
   auto SPIRVOrder = getMemorySemanticsMask(Order);
   auto SPIRVScope = getScope(Scope);
@@ -485,10 +486,9 @@ using EnableIfVectorShuffle =
 
 #ifdef __NVPTX__
 inline uint32_t membermask() {
-  uint32_t FULL_MASK = 0xFFFFFFFF;
-  uint32_t max_size = __spirv_SubgroupMaxSize();
-  uint32_t sg_size = __spirv_SubgroupSize();
-  return FULL_MASK >> (max_size - sg_size);
+  // use a full mask as sync operations are required to be convergent and exited
+  // threads can safely be in the mask
+  return 0xFFFFFFFF;
 }
 #endif
 
@@ -682,9 +682,9 @@ EnableIfGenericShuffle<T> SubgroupShuffle(T x, id<1> local_id) {
   char *ResultBytes = reinterpret_cast<char *>(&Result);
   auto ShuffleBytes = [=](size_t Offset, size_t Size) {
     ShuffleChunkT ShuffleX, ShuffleResult;
-    detail::memcpy(&ShuffleX, XBytes + Offset, Size);
+    std::memcpy(&ShuffleX, XBytes + Offset, Size);
     ShuffleResult = SubgroupShuffle(ShuffleX, local_id);
-    detail::memcpy(ResultBytes + Offset, &ShuffleResult, Size);
+    std::memcpy(ResultBytes + Offset, &ShuffleResult, Size);
   };
   GenericCall<T>(ShuffleBytes);
   return Result;
@@ -697,9 +697,9 @@ EnableIfGenericShuffle<T> SubgroupShuffleXor(T x, id<1> local_id) {
   char *ResultBytes = reinterpret_cast<char *>(&Result);
   auto ShuffleBytes = [=](size_t Offset, size_t Size) {
     ShuffleChunkT ShuffleX, ShuffleResult;
-    detail::memcpy(&ShuffleX, XBytes + Offset, Size);
+    std::memcpy(&ShuffleX, XBytes + Offset, Size);
     ShuffleResult = SubgroupShuffleXor(ShuffleX, local_id);
-    detail::memcpy(ResultBytes + Offset, &ShuffleResult, Size);
+    std::memcpy(ResultBytes + Offset, &ShuffleResult, Size);
   };
   GenericCall<T>(ShuffleBytes);
   return Result;
@@ -712,9 +712,9 @@ EnableIfGenericShuffle<T> SubgroupShuffleDown(T x, id<1> local_id) {
   char *ResultBytes = reinterpret_cast<char *>(&Result);
   auto ShuffleBytes = [=](size_t Offset, size_t Size) {
     ShuffleChunkT ShuffleX, ShuffleResult;
-    detail::memcpy(&ShuffleX, XBytes + Offset, Size);
+    std::memcpy(&ShuffleX, XBytes + Offset, Size);
     ShuffleResult = SubgroupShuffleDown(ShuffleX, local_id);
-    detail::memcpy(ResultBytes + Offset, &ShuffleResult, Size);
+    std::memcpy(ResultBytes + Offset, &ShuffleResult, Size);
   };
   GenericCall<T>(ShuffleBytes);
   return Result;
@@ -727,9 +727,9 @@ EnableIfGenericShuffle<T> SubgroupShuffleUp(T x, id<1> local_id) {
   char *ResultBytes = reinterpret_cast<char *>(&Result);
   auto ShuffleBytes = [=](size_t Offset, size_t Size) {
     ShuffleChunkT ShuffleX, ShuffleResult;
-    detail::memcpy(&ShuffleX, XBytes + Offset, Size);
+    std::memcpy(&ShuffleX, XBytes + Offset, Size);
     ShuffleResult = SubgroupShuffleUp(ShuffleX, local_id);
-    detail::memcpy(ResultBytes + Offset, &ShuffleResult, Size);
+    std::memcpy(ResultBytes + Offset, &ShuffleResult, Size);
   };
   GenericCall<T>(ShuffleBytes);
   return Result;

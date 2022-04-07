@@ -31,6 +31,10 @@ struct FullDependencies {
   /// directly depends on, not including transitive dependencies.
   std::vector<std::string> FileDeps;
 
+  /// A collection of prebuilt modules this translation unit directly depends
+  /// on, not including transitive dependencies.
+  std::vector<PrebuiltModuleDep> PrebuiltModuleDeps;
+
   /// A list of modules this translation unit directly depends on, not including
   /// transitive dependencies.
   ///
@@ -41,16 +45,22 @@ struct FullDependencies {
   /// Get additional arguments suitable for appending to the original Clang
   /// command line.
   ///
-  /// \param LookupPCMPath This function is called to fill in `-fmodule-file=`
-  ///                      flags and for the `-o` flag. It needs to return a
-  ///                      path for where the PCM for the given module is to
+  /// \param LookupPCMPath This function is called to fill in "-fmodule-file="
+  ///                      arguments and the "-o" argument. It needs to return
+  ///                      a path for where the PCM for the given module is to
   ///                      be located.
   /// \param LookupModuleDeps This function is called to collect the full
   ///                         transitive set of dependencies for this
-  ///                         compilation.
-  std::vector<std::string> getAdditionalCommandLine(
+  ///                         compilation and fill in "-fmodule-map-file="
+  ///                         arguments.
+  std::vector<std::string> getAdditionalArgs(
       std::function<StringRef(ModuleID)> LookupPCMPath,
       std::function<const ModuleDeps &(ModuleID)> LookupModuleDeps) const;
+
+  /// Get additional arguments suitable for appending to the original Clang
+  /// command line, excluding arguments containing modules-related paths:
+  /// "-fmodule-file=", "-fmodule-map-file=".
+  std::vector<std::string> getAdditionalArgsWithoutModulePaths() const;
 };
 
 struct FullDependenciesResult {
@@ -67,16 +77,18 @@ public:
 
   /// Print out the dependency information into a string using the dependency
   /// file format that is specified in the options (-MD is the default) and
-  /// return it.
+  /// return it. If \p ModuleName isn't empty, this function returns the
+  /// dependency information of module \p ModuleName.
   ///
   /// \returns A \c StringError with the diagnostic output if clang errors
   /// occurred, dependency file contents otherwise.
   llvm::Expected<std::string>
-  getDependencyFile(const tooling::CompilationDatabase &Compilations,
-                    StringRef CWD);
+  getDependencyFile(const std::vector<std::string> &CommandLine, StringRef CWD,
+                    llvm::Optional<StringRef> ModuleName = None);
 
   /// Collect the full module dependency graph for the input, ignoring any
-  /// modules which have already been seen.
+  /// modules which have already been seen. If \p ModuleName isn't empty, this
+  /// function returns the full dependency information of module \p ModuleName.
   ///
   /// \param AlreadySeen This stores modules which have previously been
   ///                    reported. Use the same instance for all calls to this
@@ -87,8 +99,9 @@ public:
   /// \returns a \c StringError with the diagnostic output if clang errors
   /// occurred, \c FullDependencies otherwise.
   llvm::Expected<FullDependenciesResult>
-  getFullDependencies(const tooling::CompilationDatabase &Compilations,
-                      StringRef CWD, const llvm::StringSet<> &AlreadySeen);
+  getFullDependencies(const std::vector<std::string> &CommandLine,
+                      StringRef CWD, const llvm::StringSet<> &AlreadySeen,
+                      llvm::Optional<StringRef> ModuleName = None);
 
 private:
   DependencyScanningWorker Worker;

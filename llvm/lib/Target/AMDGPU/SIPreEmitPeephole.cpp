@@ -174,7 +174,7 @@ bool SIPreEmitPeephole::optimizeVccBranch(MachineInstr &MI) const {
     MI.setDesc(TII->get(AMDGPU::S_BRANCH));
   } else if (IsVCCZ && MaskValue == 0) {
     // Will always branch
-    // Remove all succesors shadowed by new unconditional branch
+    // Remove all successors shadowed by new unconditional branch
     MachineBasicBlock *Parent = MI.getParent();
     SmallVector<MachineInstr *, 4> ToRemove;
     bool Found = false;
@@ -257,10 +257,8 @@ bool SIPreEmitPeephole::optimizeSetGPR(MachineInstr &First,
                        })) {
         // The only exception allowed here is another indirect vector move
         // with the same mode.
-        if (!IdxOn ||
-            !((I->getOpcode() == AMDGPU::V_MOV_B32_e32 &&
-               I->hasRegisterImplicitUseOperand(AMDGPU::M0)) ||
-              I->getOpcode() == AMDGPU::V_MOV_B32_indirect))
+        if (!IdxOn || !(I->getOpcode() == AMDGPU::V_MOV_B32_indirect_write ||
+                        I->getOpcode() == AMDGPU::V_MOV_B32_indirect_read))
           return false;
       }
     }
@@ -293,20 +291,19 @@ bool SIPreEmitPeephole::mustRetainExeczBranch(
        MBBI != End && MBBI != ToI; ++MBBI) {
     const MachineBasicBlock &MBB = *MBBI;
 
-    for (MachineBasicBlock::const_iterator I = MBB.begin(), E = MBB.end();
-         I != E; ++I) {
+    for (const MachineInstr &MI : MBB) {
       // When a uniform loop is inside non-uniform control flow, the branch
       // leaving the loop might never be taken when EXEC = 0.
       // Hence we should retain cbranch out of the loop lest it become infinite.
-      if (I->isConditionalBranch())
+      if (MI.isConditionalBranch())
         return true;
 
-      if (TII->hasUnwantedEffectsWhenEXECEmpty(*I))
+      if (TII->hasUnwantedEffectsWhenEXECEmpty(MI))
         return true;
 
       // These instructions are potentially expensive even if EXEC = 0.
-      if (TII->isSMRD(*I) || TII->isVMEM(*I) || TII->isFLAT(*I) ||
-          TII->isDS(*I) || I->getOpcode() == AMDGPU::S_WAITCNT)
+      if (TII->isSMRD(MI) || TII->isVMEM(MI) || TII->isFLAT(MI) ||
+          TII->isDS(MI) || MI.getOpcode() == AMDGPU::S_WAITCNT)
         return true;
 
       ++NumInstr;
@@ -349,8 +346,7 @@ bool SIPreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
   MF.RenumberBlocks();
 
   for (MachineBasicBlock &MBB : MF) {
-    MachineBasicBlock::iterator MBBE = MBB.getFirstTerminator();
-    MachineBasicBlock::iterator TermI = MBBE;
+    MachineBasicBlock::iterator TermI = MBB.getFirstTerminator();
     // Check first terminator for branches to optimize
     if (TermI != MBB.end()) {
       MachineInstr &MI = *TermI;
@@ -358,11 +354,9 @@ bool SIPreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
       case AMDGPU::S_CBRANCH_VCCZ:
       case AMDGPU::S_CBRANCH_VCCNZ:
         Changed |= optimizeVccBranch(MI);
-        continue;
+        break;
       case AMDGPU::S_CBRANCH_EXECZ:
         Changed |= removeExeczBranch(MI, MBB);
-        continue;
-      default:
         break;
       }
     }
@@ -378,11 +372,8 @@ bool SIPreEmitPeephole::runOnMachineFunction(MachineFunction &MF) {
     // and limit the distance to 20 instructions for compile time purposes.
     // Note: this needs to work on bundles as S_SET_GPR_IDX* instructions
     // may be bundled with the instructions they modify.
-    for (MachineBasicBlock::instr_iterator MBBI = MBB.instr_begin();
-         MBBI != MBBE;) {
-      MachineInstr &MI = *MBBI;
-      ++MBBI;
-
+    for (auto &MI :
+         make_early_inc_range(make_range(MBB.instr_begin(), MBB.instr_end()))) {
       if (Count == Threshold)
         SetGPRMI = nullptr;
       else

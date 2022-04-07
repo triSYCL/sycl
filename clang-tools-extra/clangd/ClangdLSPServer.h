@@ -11,7 +11,6 @@
 
 #include "ClangdServer.h"
 #include "DraftStore.h"
-#include "Features.inc"
 #include "FindSymbols.h"
 #include "GlobalCompilationDatabase.h"
 #include "LSPBinder.h"
@@ -57,11 +56,18 @@ public:
     /// Per-feature options. Generally ClangdServer lets these vary
     /// per-request, but LSP allows limited/no customizations.
     clangd::CodeCompleteOptions CodeComplete;
+    MarkupKind SignatureHelpDocumentationFormat = MarkupKind::PlainText;
     clangd::RenameOptions Rename;
     /// Returns true if the tweak should be enabled.
     std::function<bool(const Tweak &)> TweakFilter = [](const Tweak &T) {
       return !T.hidden(); // only enable non-hidden tweaks.
     };
+
+    /// Enable preview of InlayHints feature.
+    bool InlayHints = false;
+
+    /// Limit the number of references returned (0 means no limit).
+    size_t ReferencesLimit = 0;
   };
 
   ClangdLSPServer(Transport &Transp, const ThreadsafeFS &TFS,

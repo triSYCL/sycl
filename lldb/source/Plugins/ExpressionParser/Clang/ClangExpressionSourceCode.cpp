@@ -311,17 +311,17 @@ bool ClangExpressionSourceCode::GetText(
     }
     if (target->GetArchitecture().GetMachine() == llvm::Triple::x86_64) {
       if (lldb::PlatformSP platform_sp = target->GetPlatform()) {
-        static ConstString g_platform_ios_simulator("ios-simulator");
-        if (platform_sp->GetPluginName() == g_platform_ios_simulator) {
+        if (platform_sp->GetPluginName() == "ios-simulator") {
           target_specific_defines = "typedef bool BOOL;\n";
         }
       }
     }
 
-    ClangModulesDeclVendor *decl_vendor = target->GetClangModulesDeclVendor();
     auto *persistent_vars = llvm::cast<ClangPersistentVariables>(
         target->GetPersistentExpressionStateForLanguage(lldb::eLanguageTypeC));
-    if (decl_vendor && persistent_vars) {
+    std::shared_ptr<ClangModulesDeclVendor> decl_vendor =
+        persistent_vars->GetClangModulesDeclVendor();
+    if (decl_vendor) {
       const ClangModulesDeclVendor::ModuleVector &hand_imported_modules =
           persistent_vars->GetHandLoadedClangModules();
       ClangModulesDeclVendor::ModuleVector modules_for_macros;
@@ -419,7 +419,6 @@ bool ClangExpressionSourceCode::GetText(
                          module_imports.c_str(), m_name.c_str(),
                          lldb_local_var_decls.GetData(), tagged_body.c_str());
       break;
-    case WrapKind::CppStaticMemberFunction:
     case WrapKind::CppMemberFunction:
       wrap_stream.Printf("%s"
                          "void                                   \n"

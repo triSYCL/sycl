@@ -223,22 +223,21 @@ static void analyzeImportedModule(
     SysRoot = CU.getSysRoot();
   if (!SysRoot.empty() && Path.startswith(SysRoot))
     return;
-  if (Optional<DWARFFormValue> Val = DIE.find(dwarf::DW_AT_name))
-    if (Optional<const char *> Name = Val->getAsCString()) {
-      auto &Entry = (*ParseableSwiftInterfaces)[*Name];
-      // The prepend path is applied later when copying.
-      DWARFDie CUDie = CU.getOrigUnit().getUnitDIE();
-      SmallString<128> ResolvedPath;
-      if (sys::path::is_relative(Path))
-        resolveRelativeObjectPath(ResolvedPath, CUDie);
-      sys::path::append(ResolvedPath, Path);
-      if (!Entry.empty() && Entry != ResolvedPath)
-        ReportWarning(
-            Twine("Conflicting parseable interfaces for Swift Module ") +
-                *Name + ": " + Entry + " and " + Path,
-            DIE);
-      Entry = std::string(ResolvedPath.str());
-    }
+  Optional<const char*> Name = dwarf::toString(DIE.find(dwarf::DW_AT_name));
+  if (!Name)
+    return;
+  auto &Entry = (*ParseableSwiftInterfaces)[*Name];
+  // The prepend path is applied later when copying.
+  DWARFDie CUDie = CU.getOrigUnit().getUnitDIE();
+  SmallString<128> ResolvedPath;
+  if (sys::path::is_relative(Path))
+    resolveRelativeObjectPath(ResolvedPath, CUDie);
+  sys::path::append(ResolvedPath, Path);
+  if (!Entry.empty() && Entry != ResolvedPath)
+    ReportWarning(Twine("Conflicting parseable interfaces for Swift Module ") +
+                      *Name + ": " + Entry + " and " + Path,
+                  DIE);
+  Entry = std::string(ResolvedPath.str());
 }
 
 /// The distinct types of work performed by the work loop in
@@ -409,10 +408,10 @@ static bool dieNeedsChildrenToBeMeaningful(uint32_t Tag) {
 void DWARFLinker::cleanupAuxiliarryData(LinkContext &Context) {
   Context.clear();
 
-  for (auto I = DIEBlocks.begin(), E = DIEBlocks.end(); I != E; ++I)
-    (*I)->~DIEBlock();
-  for (auto I = DIELocs.begin(), E = DIELocs.end(); I != E; ++I)
-    (*I)->~DIELoc();
+  for (DIEBlock *I : DIEBlocks)
+    I->~DIEBlock();
+  for (DIELoc *I : DIELocs)
+    I->~DIELoc();
 
   DIEBlocks.clear();
   DIELocs.clear();
@@ -434,13 +433,15 @@ unsigned DWARFLinker::shouldKeepVariableDIE(AddressesMap &RelocMgr,
     return Flags | TF_Keep;
   }
 
-  // See if there is a relocation to a valid debug map entry inside
-  // this variable's location. The order is important here. We want to
-  // always check if the variable has a valid relocation, so that the
-  // DIEInfo is filled. However, we don't want a static variable in a
-  // function to force us to keep the enclosing function.
-  if (!RelocMgr.hasLiveMemoryLocation(DIE, MyInfo) ||
-      (Flags & TF_InFunctionScope))
+  // See if there is a relocation to a valid debug map entry inside this
+  // variable's location. The order is important here. We want to always check
+  // if the variable has a valid relocation, so that the DIEInfo is filled.
+  // However, we don't want a static variable in a function to force us to keep
+  // the enclosing function, unless requested explicitly.
+  const bool HasLiveMemoryLocation =
+      RelocMgr.hasLiveMemoryLocation(DIE, MyInfo);
+  if (!HasLiveMemoryLocation || ((Flags & TF_InFunctionScope) &&
+                                 !LLVM_UNLIKELY(Options.KeepFunctionForStatic)))
     return Flags;
 
   if (Options.Verbose) {
@@ -547,6 +548,7 @@ static void updateChildIncompleteness(const DWARFDie &Die, CompileUnit &CU,
   switch (Die.getTag()) {
   case dwarf::DW_TAG_structure_type:
   case dwarf::DW_TAG_class_type:
+  case dwarf::DW_TAG_union_type:
     break;
   default:
     return;
@@ -843,7 +845,7 @@ void DWARFLinker::assignAbbrev(DIEAbbrev &Abbrev) {
 unsigned DWARFLinker::DIECloner::cloneStringAttribute(
     DIE &Die, AttributeSpec AttrSpec, const DWARFFormValue &Val,
     const DWARFUnit &U, OffsetsStringPool &StringPool, AttributesInfo &Info) {
-  Optional<const char *> String = Val.getAsCString();
+  Optional<const char *> String = dwarf::toString(Val);
   if (!String)
     return 0;
 
@@ -1027,7 +1029,7 @@ unsigned DWARFLinker::DIECloner::cloneBlockAttribute(
   // buffer using cloneExpression(), otherwise copy the data directly.
   SmallVector<uint8_t, 32> Buffer;
   ArrayRef<uint8_t> Bytes = *Val.getAsBlock();
-  if (DWARFAttribute::mayHaveLocationDescription(AttrSpec.Attr) &&
+  if (DWARFAttribute::mayHaveLocationExpr(AttrSpec.Attr) &&
       (Val.isFormClass(DWARFFormValue::FC_Block) ||
        Val.isFormClass(DWARFFormValue::FC_Exprloc))) {
     DWARFUnit &OrigUnit = Unit.getOrigUnit();
@@ -1420,6 +1422,11 @@ DIE *DWARFLinker::DIECloner::cloneDIE(const DWARFDie &InputDIE,
     Flags |= TF_InFunctionScope;
     if (!Info.InDebugMap && LLVM_LIKELY(!Update))
       Flags |= TF_SkipPC;
+  } else if (Abbrev->getTag() == dwarf::DW_TAG_variable) {
+    // Function-local globals could be in the debug map even when the function
+    // is not, e.g., inlined functions.
+    if ((Flags & TF_InFunctionScope) && Info.InDebugMap)
+      Flags &= ~TF_SkipPC;
   }
 
   for (const auto &AttrSpec : Abbrev->attributes()) {

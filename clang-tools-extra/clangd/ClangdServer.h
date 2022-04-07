@@ -225,7 +225,8 @@ public:
 
   /// Provide signature help for \p File at \p Pos.  This method should only be
   /// called for tracked files.
-  void signatureHelp(PathRef File, Position Pos, Callback<SignatureHelp> CB);
+  void signatureHelp(PathRef File, Position Pos, MarkupKind DocumentationFormat,
+                     Callback<SignatureHelp> CB);
 
   /// Find declaration/definition locations of symbol at a specified position.
   void locateSymbolAt(PathRef File, Position Pos,
@@ -344,7 +345,8 @@ public:
                           Callback<std::vector<HighlightingToken>>);
 
   /// Describe the AST subtree for a piece of code.
-  void getAST(PathRef File, Range R, Callback<llvm::Optional<ASTNode>> CB);
+  void getAST(PathRef File, llvm::Optional<Range> R,
+              Callback<llvm::Optional<ASTNode>> CB);
 
   /// Runs an arbitrary action that has access to the AST of the specified file.
   /// The action will execute on one of ClangdServer's internal threads.

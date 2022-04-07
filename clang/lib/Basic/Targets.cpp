@@ -597,9 +597,8 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
 
 
   case llvm::Triple::fpga32: {
-    // Triple example: fpga32-xilinx-unknown-sycldevice
-    if (Triple.getVendor() == llvm::Triple::Xilinx &&
-        Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
+    // Triple example: fpga32-xilinx-unknown
+    if (Triple.getVendor() == llvm::Triple::Xilinx) {
       switch (Triple.getSubArch()) {
       case llvm::Triple::FPGASubArch_hls_hw:
       case llvm::Triple::FPGASubArch_hls_hw_emu:
@@ -614,9 +613,9 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
       default:
         switch (os) {
         case llvm::Triple::Linux:
-          return new LinuxTargetInfo<SPIR32SYCLDeviceTargetInfo>(Triple, Opts);
+          return new LinuxTargetInfo<SPIR32TargetInfo>(Triple, Opts);
         default:
-          return new SPIR32SYCLDeviceTargetInfo(Triple, Opts);
+          return new SPIR32TargetInfo(Triple, Opts);
         }
       }
     }
@@ -624,9 +623,8 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
   }
 
   case llvm::Triple::fpga64: {
-    // Triple example: fpga64-xilinx-unknown-sycldevice
-    if (Triple.getVendor() == llvm::Triple::Xilinx &&
-        Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
+    // Triple example: fpga64-xilinx-unknown
+    if (Triple.getVendor() == llvm::Triple::Xilinx) {
       switch (Triple.getSubArch()) {
       case llvm::Triple::FPGASubArch_hls_hw:
       case llvm::Triple::FPGASubArch_hls_hw_emu:
@@ -641,9 +639,9 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
       default:
         switch (os) {
         case llvm::Triple::Linux:
-          return new LinuxTargetInfo<SPIR64SYCLDeviceTargetInfo>(Triple, Opts);
+          return new LinuxTargetInfo<SPIR64TargetInfo>(Triple, Opts);
         default:
-          return new SPIR64SYCLDeviceTargetInfo(Triple, Opts);
+          return new SPIR64TargetInfo(Triple, Opts);
         }
       }
     }
@@ -651,45 +649,52 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
   }
 
   case llvm::Triple::spir: {
-    if (Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
-      llvm::Triple HT(Opts.HostTriple);
-      switch (HT.getOS()) {
-      case llvm::Triple::Win32:
-        switch (HT.getEnvironment()) {
-        default: // Assume MSVC for unknown environments
-        case llvm::Triple::MSVC:
-          assert(HT.getArch() == llvm::Triple::x86 &&
-                 "Unsupported host architecture");
-          return new MicrosoftX86_32SPIRTargetInfo(Triple, Opts);
-        }
-      case llvm::Triple::Linux:
-        return new LinuxTargetInfo<SPIR32SYCLDeviceTargetInfo>(Triple, Opts);
-      default:
-        return new SPIR32SYCLDeviceTargetInfo(Triple, Opts);
+    llvm::Triple HT(Opts.HostTriple);
+    switch (HT.getOS()) {
+    case llvm::Triple::Win32:
+      switch (HT.getEnvironment()) {
+      default: // Assume MSVC for unknown environments
+      case llvm::Triple::MSVC:
+        assert(HT.getArch() == llvm::Triple::x86 &&
+               "Unsupported host architecture");
+        return new MicrosoftX86_32SPIRTargetInfo(Triple, Opts);
       }
+    case llvm::Triple::Linux:
+      return new LinuxTargetInfo<SPIR32TargetInfo>(Triple, Opts);
+    default:
+      return new SPIR32TargetInfo(Triple, Opts);
     }
-    return new SPIR32TargetInfo(Triple, Opts);
   }
 
   case llvm::Triple::spir64: {
-    if (Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
-      llvm::Triple HT(Opts.HostTriple);
-      switch (HT.getOS()) {
-      case llvm::Triple::Win32:
-        switch (HT.getEnvironment()) {
-        default: // Assume MSVC for unknown environments
-        case llvm::Triple::MSVC:
-          assert(HT.getArch() == llvm::Triple::x86_64 &&
-                 "Unsupported host architecture");
-          return new MicrosoftX86_64_SPIR64TargetInfo(Triple, Opts);
-        }
-      case llvm::Triple::Linux:
-        return new LinuxTargetInfo<SPIR64SYCLDeviceTargetInfo>(Triple, Opts);
-      default:
-        return new SPIR64SYCLDeviceTargetInfo(Triple, Opts);
+    llvm::Triple HT(Opts.HostTriple);
+    switch (HT.getOS()) {
+    case llvm::Triple::Win32:
+      switch (HT.getEnvironment()) {
+      default: // Assume MSVC for unknown environments
+      case llvm::Triple::MSVC:
+        assert(HT.getArch() == llvm::Triple::x86_64 &&
+               "Unsupported host architecture");
+        return new MicrosoftX86_64_SPIR64TargetInfo(Triple, Opts);
       }
+    case llvm::Triple::Linux:
+      return new LinuxTargetInfo<SPIR64TargetInfo>(Triple, Opts);
+    default:
+      return new SPIR64TargetInfo(Triple, Opts);
     }
-    return new SPIR64TargetInfo(Triple, Opts);
+  }
+
+  case llvm::Triple::spirv32: {
+    if (os != llvm::Triple::UnknownOS ||
+        Triple.getEnvironment() != llvm::Triple::UnknownEnvironment)
+      return nullptr;
+    return new SPIRV32TargetInfo(Triple, Opts);
+  }
+  case llvm::Triple::spirv64: {
+    if (os != llvm::Triple::UnknownOS ||
+        Triple.getEnvironment() != llvm::Triple::UnknownEnvironment)
+      return nullptr;
+    return new SPIRV64TargetInfo(Triple, Opts);
   }
 
   case llvm::Triple::wasm32:
@@ -812,30 +817,28 @@ TargetInfo::CreateTargetInfo(DiagnosticsEngine &Diags,
 
   return Target.release();
 }
+/// validateOpenCLTarget  - Check that OpenCL target has valid
+/// options setting based on OpenCL version.
+bool TargetInfo::validateOpenCLTarget(const LangOptions &Opts,
+                                      DiagnosticsEngine &Diags) const {
+  const llvm::StringMap<bool> &OpenCLFeaturesMap = getSupportedOpenCLOpts();
 
-/// getOpenCLFeatureDefines - Define OpenCL macros based on target settings
-/// and language version
-void TargetInfo::getOpenCLFeatureDefines(const LangOptions &Opts,
-                                         MacroBuilder &Builder) const {
-  // FIXME: OpenCL options which affect language semantics/syntax
-  // should be moved into LangOptions, thus macro definitions of
-  // such options is better to be done in clang::InitializePreprocessor.
-  auto defineOpenCLExtMacro = [&](llvm::StringRef Name, unsigned AvailVer,
-                                  unsigned CoreVersions,
-                                  unsigned OptionalVersions) {
-    // Check if extension is supported by target and is available in this
-    // OpenCL version
-    auto It = getTargetOpts().OpenCLFeaturesMap.find(Name);
-    if ((It != getTargetOpts().OpenCLFeaturesMap.end()) && It->getValue() &&
-        OpenCLOptions::OpenCLOptionInfo(false, AvailVer, CoreVersions,
-                                        OptionalVersions)
-            .isAvailableIn(Opts))
-      Builder.defineMacro(Name);
+  auto diagnoseNotSupportedCore = [&](llvm::StringRef Name, auto... OptArgs) {
+    if (OpenCLOptions::isOpenCLOptionCoreIn(Opts, OptArgs...) &&
+        !hasFeatureEnabled(OpenCLFeaturesMap, Name))
+      Diags.Report(diag::warn_opencl_unsupported_core_feature)
+          << Name << Opts.OpenCLCPlusPlus
+          << Opts.getOpenCLVersionTuple().getAsString();
   };
-#define OPENCL_GENERIC_EXTENSION(Ext, WithPragma, Avail, Core, Opt)            \
-  defineOpenCLExtMacro(#Ext, Avail, Core, Opt);
+#define OPENCL_GENERIC_EXTENSION(Ext, ...)                                     \
+  diagnoseNotSupportedCore(#Ext, __VA_ARGS__);
 #include "clang/Basic/OpenCLExtensions.def"
 
-  // Assume compiling for FULL profile
-  Builder.defineMacro("__opencl_c_int64");
+  // Validate that feature macros are set properly for OpenCL C 3.0.
+  // In other cases assume that target is always valid.
+  if (Opts.getOpenCLCompatibleVersion() < 300)
+    return true;
+
+  return OpenCLOptions::diagnoseUnsupportedFeatureDependencies(*this, Diags) &&
+         OpenCLOptions::diagnoseFeatureExtensionDifferences(*this, Diags);
 }

@@ -404,7 +404,7 @@ define void @f68() mustprogress
   ret void
 }
 
-; CHECK; define void @f69() #42
+; CHECK: define void @f69() #42
 define void @f69() nocallback
 {
   ret void
@@ -440,11 +440,35 @@ define void @f74() vscale_range(1,0)
   ret void
 }
 
-; CHECK: define void @f75()
-; CHECK-NOT: define void @f75() #
-define void @f75() vscale_range(0,0)
+; CHECK: define void @f76(i8* swiftasync %0)
+define void @f76(i8* swiftasync %0)
 {
+  ret void;
+}
+
+; CHECK: define void @f77() #48
+define void @f77() nosanitize_coverage
+{
+        ret void;
+}
+
+; CHECK: define void @f78() #49
+define void @f78() noprofile
+{
+        ret void;
+}
+
+declare void @llvm.some.intrinsic(i32*)
+define void @f79() {
+; CHECK: call void @llvm.some.intrinsic(i32* elementtype(i32) null)
+  call void @llvm.some.intrinsic(i32* elementtype(i32) null)
   ret void
+}
+
+; CHECK: define void @f80() #50
+define void @f80() disable_sanitizer_instrumentation
+{
+        ret void;
 }
 
 ; CHECK: attributes #0 = { noreturn }
@@ -495,4 +519,7 @@ define void @f75() vscale_range(0,0)
 ; CHECK: attributes #45 = { vscale_range(8,8) }
 ; CHECK: attributes #46 = { vscale_range(1,8) }
 ; CHECK: attributes #47 = { vscale_range(1,0) }
+; CHECK: attributes #48 = { nosanitize_coverage }
+; CHECK: attributes #49 = { noprofile }
+; CHECK: attributes #50 = { disable_sanitizer_instrumentation }
 ; CHECK: attributes #[[NOBUILTIN]] = { nobuiltin }

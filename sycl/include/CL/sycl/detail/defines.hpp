@@ -32,3 +32,9 @@
 #else
 #define __SYCL_DEVICE_ADDRSPACE(AS)
 #endif
+
+#if __has_attribute(sycl_special_class)
+#define __SYCL_SPECIAL_CLASS __attribute__((sycl_special_class))
+#else
+#define __SYCL_SPECIAL_CLASS
+#endif

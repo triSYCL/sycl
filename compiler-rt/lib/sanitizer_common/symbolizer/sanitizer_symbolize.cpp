@@ -17,10 +17,17 @@
 #include "llvm/DebugInfo/Symbolize/DIPrinter.h"
 #include "llvm/DebugInfo/Symbolize/Symbolize.h"
 
+static llvm::symbolize::LLVMSymbolizer *Symbolizer = nullptr;
+static bool Demangle = true;
+static bool InlineFrames = true;
+
 static llvm::symbolize::LLVMSymbolizer *getDefaultSymbolizer() {
-  static llvm::symbolize::LLVMSymbolizer *DefaultSymbolizer =
-      new llvm::symbolize::LLVMSymbolizer();
-  return DefaultSymbolizer;
+  if (Symbolizer)
+    return Symbolizer;
+  llvm::symbolize::LLVMSymbolizer::Options Opts;
+  Opts.Demangle = Demangle;
+  Symbolizer = new llvm::symbolize::LLVMSymbolizer(Opts);
+  return Symbolizer;
 }
 
 static llvm::symbolize::PrinterConfig getDefaultPrinterConfig() {
@@ -43,8 +50,7 @@ extern "C" {
 typedef uint64_t u64;
 
 bool __sanitizer_symbolize_code(const char *ModuleName, uint64_t ModuleOffset,
-                                char *Buffer, int MaxLength,
-                                bool SymbolizeInlineFrames) {
+                                char *Buffer, int MaxLength) {
   std::string Result;
   {
     llvm::raw_string_ostream OS(Result);
@@ -55,7 +61,7 @@ bool __sanitizer_symbolize_code(const char *ModuleName, uint64_t ModuleOffset,
 
     // TODO: it is neccessary to set proper SectionIndex here.
     // object::SectionedAddress::UndefSection works for only absolute addresses.
-    if (SymbolizeInlineFrames) {
+    if (InlineFrames) {
       auto ResOrErr = getDefaultSymbolizer()->symbolizeInlinedCode(
           ModuleName,
           {ModuleOffset, llvm::object::SectionedAddress::UndefSection});
@@ -93,7 +99,10 @@ bool __sanitizer_symbolize_data(const char *ModuleName, uint64_t ModuleOffset,
                                         Result.c_str()) < MaxLength;
 }
 
-void __sanitizer_symbolize_flush() { getDefaultSymbolizer()->flush(); }
+void __sanitizer_symbolize_flush() {
+  if (Symbolizer)
+    Symbolizer->flush();
+}
 
 int __sanitizer_symbolize_demangle(const char *Name, char *Buffer,
                                    int MaxLength) {
@@ -104,5 +113,46 @@ int __sanitizer_symbolize_demangle(const char *Name, char *Buffer,
              ? static_cast<int>(Result.size() + 1)
              : 0;
 }
+
+bool __sanitizer_symbolize_set_demangle(bool Value) {
+  // Must be called before LLVMSymbolizer created.
+  if (Symbolizer)
+    return false;
+  Demangle = Value;
+  return true;
+}
+
+bool __sanitizer_symbolize_set_inline_frames(bool Value) {
+  InlineFrames = Value;
+  return true;
+}
+
+// Override __cxa_atexit and ignore callbacks.
+// This prevents crashes in a configuration when the symbolizer
+// is built into sanitizer runtime and consequently into the test process.
+// LLVM libraries have some global objects destroyed during exit,
+// so if the test process triggers any bugs after that, the symbolizer crashes.
+// An example stack trace of such crash:
+//
+// #1  __cxa_throw
+// #2  std::__u::__throw_system_error
+// #3  std::__u::recursive_mutex::lock
+// #4  __sanitizer_llvm::ManagedStaticBase::RegisterManagedStatic
+// #5  __sanitizer_llvm::errorToErrorCode
+// #6  __sanitizer_llvm::getFileAux
+// #7  __sanitizer_llvm::MemoryBuffer::getFileOrSTDIN
+// #10 __sanitizer_llvm::symbolize::LLVMSymbolizer::getOrCreateModuleInfo
+// #13 __sanitizer::Symbolizer::SymbolizeData
+// #14 __tsan::SymbolizeData
+// #16 __tsan::ReportRace
+// #18 __tsan_write4
+// #19 race() () at test/tsan/atexit4.cpp
+// #20 cxa_at_exit_wrapper
+// #21 __cxa_finalize
+// #22 __do_fini
+//
+// For the standalone llvm-symbolizer this does not hurt,
+// we just don't destroy few global objects on exit.
+int __cxa_atexit(void (*f)(void *a), void *arg, void *dso) { return 0; }
 
 }  // extern "C"

@@ -28,49 +28,6 @@ static int mlirTypeIsAIntegerOrFloat(MlirType type) {
          mlirTypeIsAF16(type) || mlirTypeIsAF32(type) || mlirTypeIsAF64(type);
 }
 
-/// CRTP base classes for Python types that subclass Type and should be
-/// castable from it (i.e. via something like IntegerType(t)).
-/// By default, type class hierarchies are one level deep (i.e. a
-/// concrete type class extends PyType); however, intermediate python-visible
-/// base classes can be modeled by specifying a BaseTy.
-template <typename DerivedTy, typename BaseTy = PyType>
-class PyConcreteType : public BaseTy {
-public:
-  // Derived classes must define statics for:
-  //   IsAFunctionTy isaFunction
-  //   const char *pyClassName
-  using ClassTy = py::class_<DerivedTy, BaseTy>;
-  using IsAFunctionTy = bool (*)(MlirType);
-
-  PyConcreteType() = default;
-  PyConcreteType(PyMlirContextRef contextRef, MlirType t)
-      : BaseTy(std::move(contextRef), t) {}
-  PyConcreteType(PyType &orig)
-      : PyConcreteType(orig.getContext(), castFrom(orig)) {}
-
-  static MlirType castFrom(PyType &orig) {
-    if (!DerivedTy::isaFunction(orig)) {
-      auto origRepr = py::repr(py::cast(orig)).cast<std::string>();
-      throw SetPyError(PyExc_ValueError, Twine("Cannot cast type to ") +
-                                             DerivedTy::pyClassName +
-                                             " (from " + origRepr + ")");
-    }
-    return orig;
-  }
-
-  static void bind(py::module &m) {
-    auto cls = ClassTy(m, DerivedTy::pyClassName);
-    cls.def(py::init<PyType &>(), py::keep_alive<0, 1>());
-    cls.def_static("isinstance", [](PyType &otherType) -> bool {
-      return DerivedTy::isaFunction(otherType);
-    });
-    DerivedTy::bindDerived(cls);
-  }
-
-  /// Implemented by derived classes to add methods to the Python subclass.
-  static void bindDerived(ClassTy &m) {}
-};
-
 class PyIntegerType : public PyConcreteType<PyIntegerType> {
 public:
   static constexpr IsAFunctionTy isaFunction = mlirTypeIsAInteger;
@@ -305,6 +262,7 @@ public:
           self.requireHasRank();
           return mlirShapedTypeIsDynamicDim(self, dim);
         },
+        py::arg("dim"),
         "Returns whether the dim-th dimension of the given shaped type is "
         "dynamic.");
     c.def(
@@ -313,10 +271,12 @@ public:
           self.requireHasRank();
           return mlirShapedTypeGetDimSize(self, dim);
         },
+        py::arg("dim"),
         "Returns the dim-th dimension of the given ranked shaped type.");
     c.def_static(
         "is_dynamic_size",
         [](int64_t size) -> bool { return mlirShapedTypeIsDynamicSize(size); },
+        py::arg("dim_size"),
         "Returns whether the given dimension size indicates a dynamic "
         "dimension.");
     c.def(
@@ -325,8 +285,22 @@ public:
           self.requireHasRank();
           return mlirShapedTypeIsDynamicStrideOrOffset(val);
         },
+        py::arg("dim_size"),
         "Returns whether the given value is used as a placeholder for dynamic "
         "strides and offsets in shaped types.");
+    c.def_property_readonly(
+        "shape",
+        [](PyShapedType &self) {
+          self.requireHasRank();
+
+          std::vector<int64_t> shape;
+          int64_t rank = mlirShapedTypeGetRank(self);
+          shape.reserve(rank);
+          for (int64_t i = 0; i < rank; ++i)
+            shape.push_back(mlirShapedTypeGetDimSize(self, i));
+          return shape;
+        },
+        "Returns the shape of the ranked shaped type as a list of integers.");
   }
 
 private:
@@ -381,10 +355,11 @@ public:
     c.def_static(
         "get",
         [](std::vector<int64_t> shape, PyType &elementType,
+           llvm::Optional<PyAttribute> &encodingAttr,
            DefaultingPyLocation loc) {
-          MlirAttribute encodingAttr = mlirAttributeGetNull();
           MlirType t = mlirRankedTensorTypeGetChecked(
-              loc, shape.size(), shape.data(), elementType, encodingAttr);
+              loc, shape.size(), shape.data(), elementType,
+              encodingAttr ? encodingAttr->get() : mlirAttributeGetNull());
           // TODO: Rework error reporting once diagnostic engine is exposed
           // in C API.
           if (mlirTypeIsNull(t)) {
@@ -398,8 +373,17 @@ public:
           }
           return PyRankedTensorType(elementType.getContext(), t);
         },
-        py::arg("shape"), py::arg("element_type"), py::arg("loc") = py::none(),
+        py::arg("shape"), py::arg("element_type"),
+        py::arg("encoding") = py::none(), py::arg("loc") = py::none(),
         "Create a ranked tensor type");
+    c.def_property_readonly(
+        "encoding",
+        [](PyRankedTensorType &self) -> llvm::Optional<PyAttribute> {
+          MlirAttribute encoding = mlirRankedTensorTypeGetEncoding(self.get());
+          if (mlirAttributeIsNull(encoding))
+            return llvm::None;
+          return PyAttribute(self.getContext(), encoding);
+        });
   }
 };
 
@@ -434,35 +418,25 @@ public:
   }
 };
 
-class PyMemRefLayoutMapList;
-
 /// Ranked MemRef Type subclass - MemRefType.
 class PyMemRefType : public PyConcreteType<PyMemRefType, PyShapedType> {
 public:
-  static constexpr IsAFunctionTy isaFunction = mlirTypeIsARankedTensor;
+  static constexpr IsAFunctionTy isaFunction = mlirTypeIsAMemRef;
   static constexpr const char *pyClassName = "MemRefType";
   using PyConcreteType::PyConcreteType;
-
-  PyMemRefLayoutMapList getLayout();
 
   static void bindDerived(ClassTy &c) {
     c.def_static(
          "get",
          [](std::vector<int64_t> shape, PyType &elementType,
-            std::vector<PyAffineMap> layout, PyAttribute *memorySpace,
+            PyAttribute *layout, PyAttribute *memorySpace,
             DefaultingPyLocation loc) {
-           SmallVector<MlirAffineMap> maps;
-           maps.reserve(layout.size());
-           for (PyAffineMap &map : layout)
-             maps.push_back(map);
-
-           MlirAttribute memSpaceAttr = {};
-           if (memorySpace)
-             memSpaceAttr = *memorySpace;
-
-           MlirType t = mlirMemRefTypeGetChecked(loc, elementType, shape.size(),
-                                                 shape.data(), maps.size(),
-                                                 maps.data(), memSpaceAttr);
+           MlirAttribute layoutAttr = layout ? *layout : mlirAttributeGetNull();
+           MlirAttribute memSpaceAttr =
+               memorySpace ? *memorySpace : mlirAttributeGetNull();
+           MlirType t =
+               mlirMemRefTypeGetChecked(loc, elementType, shape.size(),
+                                        shape.data(), layoutAttr, memSpaceAttr);
            // TODO: Rework error reporting once diagnostic engine is exposed
            // in C API.
            if (mlirTypeIsNull(t)) {
@@ -477,10 +451,22 @@ public:
            return PyMemRefType(elementType.getContext(), t);
          },
          py::arg("shape"), py::arg("element_type"),
-         py::arg("layout") = py::list(), py::arg("memory_space") = py::none(),
+         py::arg("layout") = py::none(), py::arg("memory_space") = py::none(),
          py::arg("loc") = py::none(), "Create a memref type")
-        .def_property_readonly("layout", &PyMemRefType::getLayout,
-                               "The list of layout maps of the MemRef type.")
+        .def_property_readonly(
+            "layout",
+            [](PyMemRefType &self) -> PyAttribute {
+              MlirAttribute layout = mlirMemRefTypeGetLayout(self);
+              return PyAttribute(self.getContext(), layout);
+            },
+            "The layout of the MemRef type.")
+        .def_property_readonly(
+            "affine_map",
+            [](PyMemRefType &self) -> PyAffineMap {
+              MlirAffineMap map = mlirMemRefTypeGetAffineMap(self);
+              return PyAffineMap(self.getContext(), map);
+            },
+            "The layout of the MemRef type as an affine map.")
         .def_property_readonly(
             "memory_space",
             [](PyMemRefType &self) -> PyAttribute {
@@ -490,41 +476,6 @@ public:
             "Returns the memory space of the given MemRef type.");
   }
 };
-
-/// A list of affine layout maps in a memref type. Internally, these are stored
-/// as consecutive elements, random access is cheap. Both the type and the maps
-/// are owned by the context, no need to worry about lifetime extension.
-class PyMemRefLayoutMapList
-    : public Sliceable<PyMemRefLayoutMapList, PyAffineMap> {
-public:
-  static constexpr const char *pyClassName = "MemRefLayoutMapList";
-
-  PyMemRefLayoutMapList(PyMemRefType type, intptr_t startIndex = 0,
-                        intptr_t length = -1, intptr_t step = 1)
-      : Sliceable(startIndex,
-                  length == -1 ? mlirMemRefTypeGetNumAffineMaps(type) : length,
-                  step),
-        memref(type) {}
-
-  intptr_t getNumElements() { return mlirMemRefTypeGetNumAffineMaps(memref); }
-
-  PyAffineMap getElement(intptr_t index) {
-    return PyAffineMap(memref.getContext(),
-                       mlirMemRefTypeGetAffineMap(memref, index));
-  }
-
-  PyMemRefLayoutMapList slice(intptr_t startIndex, intptr_t length,
-                              intptr_t step) {
-    return PyMemRefLayoutMapList(memref, startIndex, length, step);
-  }
-
-private:
-  PyMemRefType memref;
-};
-
-PyMemRefLayoutMapList PyMemRefType::getLayout() {
-  return PyMemRefLayoutMapList(*this);
-}
 
 /// Unranked MemRef Type subclass - UnrankedMemRefType.
 class PyUnrankedMemRefType
@@ -597,7 +548,7 @@ public:
           MlirType t = mlirTupleTypeGetType(self, pos);
           return PyType(self.getContext(), t);
         },
-        "Returns the pos-th type in the tuple type.");
+        py::arg("pos"), "Returns the pos-th type in the tuple type.");
     c.def_property_readonly(
         "num_types",
         [](PyTupleType &self) -> intptr_t {
@@ -673,7 +624,6 @@ void mlir::python::populateIRTypes(py::module &m) {
   PyRankedTensorType::bind(m);
   PyUnrankedTensorType::bind(m);
   PyMemRefType::bind(m);
-  PyMemRefLayoutMapList::bind(m);
   PyUnrankedMemRefType::bind(m);
   PyTupleType::bind(m);
   PyFunctionType::bind(m);

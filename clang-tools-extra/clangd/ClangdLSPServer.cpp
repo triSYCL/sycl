@@ -12,6 +12,7 @@
 #include "Diagnostics.h"
 #include "DraftStore.h"
 #include "DumpAST.h"
+#include "Feature.h"
 #include "GlobalCompilationDatabase.h"
 #include "LSPBinder.h"
 #include "Protocol.h"
@@ -24,7 +25,6 @@
 #include "support/MemoryTree.h"
 #include "support/Trace.h"
 #include "clang/AST/ASTContext.h"
-#include "clang/Basic/Version.h"
 #include "clang/Tooling/Core/Replacement.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/Optional.h"
@@ -493,7 +493,6 @@ void ClangdLSPServer::onInitialize(const InitializeParams &Params,
     Server.emplace(*CDB, TFS, Opts,
                    static_cast<ClangdServer::Callbacks *>(this));
   }
-  applyConfiguration(Params.initializationOptions.ConfigSettings);
 
   Opts.CodeComplete.EnableSnippets = Params.capabilities.CompletionSnippets;
   Opts.CodeComplete.IncludeFixIts = Params.capabilities.CompletionFixes;
@@ -501,6 +500,8 @@ void ClangdLSPServer::onInitialize(const InitializeParams &Params,
     Opts.CodeComplete.BundleOverloads = Params.capabilities.HasSignatureHelp;
   Opts.CodeComplete.DocumentationFormat =
       Params.capabilities.CompletionDocumentationFormat;
+  Opts.SignatureHelpDocumentationFormat =
+      Params.capabilities.SignatureHelpDocumentationFormat;
   DiagOpts.EmbedFixesInDiagnostics = Params.capabilities.DiagnosticFixes;
   DiagOpts.SendDiagnosticCategory = Params.capabilities.DiagnosticCategory;
   DiagOpts.EmitRelatedLocations =
@@ -542,7 +543,7 @@ void ClangdLSPServer::onInitialize(const InitializeParams &Params,
              "^", "&",  "#", "?", ".", "=", "\"", "'", "|"}},
            {"resolveProvider", false},
            // We do extra checks, e.g. that > is part of ->.
-           {"triggerCharacters", {".", "<", ">", ":", "\"", "/"}},
+           {"triggerCharacters", {".", "<", ">", ":", "\"", "/", "*"}},
        }},
       {"semanticTokensProvider",
        llvm::json::Object{
@@ -554,7 +555,7 @@ void ClangdLSPServer::onInitialize(const InitializeParams &Params,
        }},
       {"signatureHelpProvider",
        llvm::json::Object{
-           {"triggerCharacters", {"(", ","}},
+           {"triggerCharacters", {"(", ",", ")"}},
        }},
       {"declarationProvider", true},
       {"definitionProvider", true},
@@ -571,7 +572,6 @@ void ClangdLSPServer::onInitialize(const InitializeParams &Params,
       {"referencesProvider", true},
       {"astProvider", true}, // clangd extension
       {"typeHierarchyProvider", true},
-      {"clangdInlayHintsProvider", true},
       {"memoryUsageProvider", true}, // clangd extension
       {"compilationDatabase",        // clangd extension
        llvm::json::Object{{"automaticReload", true}}},
@@ -608,6 +608,9 @@ void ClangdLSPServer::onInitialize(const InitializeParams &Params,
   if (Opts.FoldingRanges)
     ServerCaps["foldingRangeProvider"] = true;
 
+  if (Opts.InlayHints)
+    ServerCaps["clangdInlayHintsProvider"] = true;
+
   std::vector<llvm::StringRef> Commands;
   for (llvm::StringRef Command : Handlers.CommandHandlers.keys())
     Commands.push_back(Command);
@@ -617,12 +620,18 @@ void ClangdLSPServer::onInitialize(const InitializeParams &Params,
 
   llvm::json::Object Result{
       {{"serverInfo",
-        llvm::json::Object{{"name", "clangd"},
-                           {"version", getClangToolFullVersion("clangd")}}},
+        llvm::json::Object{
+            {"name", "clangd"},
+            {"version", llvm::formatv("{0} {1} {2}", versionString(),
+                                      featureString(), platformString())}}},
        {"capabilities", std::move(ServerCaps)}}};
   if (Opts.Encoding)
     Result["offsetEncoding"] = *Opts.Encoding;
   Reply(std::move(Result));
+
+  // Apply settings after we're fully initialized.
+  // This can start background indexing and in turn trigger LSP notifications.
+  applyConfiguration(Params.initializationOptions.ConfigSettings);
 }
 
 void ClangdLSPServer::onInitialized(const InitializedParams &Params) {}
@@ -725,8 +734,8 @@ void ClangdLSPServer::onCommandApplyEdit(const WorkspaceEdit &WE,
 
 void ClangdLSPServer::onCommandApplyTweak(const TweakArgs &Args,
                                           Callback<llvm::json::Value> Reply) {
-  auto Action = [this, Reply = std::move(Reply),
-                 File = Args.file](llvm::Expected<Tweak::Effect> R) mutable {
+  auto Action = [this, Reply = std::move(Reply)](
+                    llvm::Expected<Tweak::Effect> R) mutable {
     if (!R)
       return Reply(R.takeError());
 
@@ -746,9 +755,8 @@ void ClangdLSPServer::onCommandApplyTweak(const TweakArgs &Args,
       return Reply(std::move(Err));
 
     WorkspaceEdit WE;
-    WE.changes.emplace();
     for (const auto &It : R->ApplyEdits) {
-      (*WE.changes)[URI::createFile(It.first()).toString()] =
+      WE.changes[URI::createFile(It.first()).toString()] =
           It.second.asTextEdits();
     }
     // ApplyEdit will take care of calling Reply().
@@ -811,22 +819,20 @@ void ClangdLSPServer::onRename(const RenameParams &Params,
   if (!Server->getDraft(File))
     return Reply(llvm::make_error<LSPError>(
         "onRename called for non-added file", ErrorCode::InvalidParams));
-  Server->rename(
-      File, Params.position, Params.newName, Opts.Rename,
-      [File, Params, Reply = std::move(Reply),
-       this](llvm::Expected<RenameResult> R) mutable {
-        if (!R)
-          return Reply(R.takeError());
-        if (auto Err = validateEdits(*Server, R->GlobalChanges))
-          return Reply(std::move(Err));
-        WorkspaceEdit Result;
-        Result.changes.emplace();
-        for (const auto &Rep : R->GlobalChanges) {
-          (*Result.changes)[URI::createFile(Rep.first()).toString()] =
-              Rep.second.asTextEdits();
-        }
-        Reply(Result);
-      });
+  Server->rename(File, Params.position, Params.newName, Opts.Rename,
+                 [File, Params, Reply = std::move(Reply),
+                  this](llvm::Expected<RenameResult> R) mutable {
+                   if (!R)
+                     return Reply(R.takeError());
+                   if (auto Err = validateEdits(*Server, R->GlobalChanges))
+                     return Reply(std::move(Err));
+                   WorkspaceEdit Result;
+                   for (const auto &Rep : R->GlobalChanges) {
+                     Result.changes[URI::createFile(Rep.first()).toString()] =
+                         Rep.second.asTextEdits();
+                   }
+                   Reply(Result);
+                 });
 }
 
 void ClangdLSPServer::onDocumentDidClose(
@@ -928,8 +934,7 @@ void ClangdLSPServer::onDocumentSymbol(const DocumentSymbolParams &Params,
         adjustSymbolKinds(*Items, SupportedSymbolKinds);
         if (SupportsHierarchicalDocumentSymbol)
           return Reply(std::move(*Items));
-        else
-          return Reply(flattenSymbolHierarchy(*Items, FileURI));
+        return Reply(flattenSymbolHierarchy(*Items, FileURI));
       });
 }
 
@@ -1055,6 +1060,7 @@ void ClangdLSPServer::onCompletion(const CompletionParams &Params,
 void ClangdLSPServer::onSignatureHelp(const TextDocumentPositionParams &Params,
                                       Callback<SignatureHelp> Reply) {
   Server->signatureHelp(Params.textDocument.uri.file(), Params.position,
+                        Opts.SignatureHelpDocumentationFormat,
                         [Reply = std::move(Reply), this](
                             llvm::Expected<SignatureHelp> Signature) mutable {
                           if (!Signature)
@@ -1202,13 +1208,6 @@ void ClangdLSPServer::onCallHierarchyIncomingCalls(
   Server->incomingCalls(Params.item, std::move(Reply));
 }
 
-void ClangdLSPServer::onCallHierarchyOutgoingCalls(
-    const CallHierarchyOutgoingCallsParams &Params,
-    Callback<std::vector<CallHierarchyOutgoingCall>> Reply) {
-  // FIXME: To be implemented.
-  Reply(std::vector<CallHierarchyOutgoingCall>{});
-}
-
 void ClangdLSPServer::onInlayHints(const InlayHintsParams &Params,
                                    Callback<std::vector<InlayHint>> Reply) {
   Server->inlayHints(Params.textDocument.uri.file(), std::move(Reply));
@@ -1262,7 +1261,7 @@ void ClangdLSPServer::onChangeConfiguration(
 void ClangdLSPServer::onReference(const ReferenceParams &Params,
                                   Callback<std::vector<Location>> Reply) {
   Server->findReferences(
-      Params.textDocument.uri.file(), Params.position, Opts.CodeComplete.Limit,
+      Params.textDocument.uri.file(), Params.position, Opts.ReferencesLimit,
       [Reply = std::move(Reply),
        IncludeDecl(Params.context.includeDeclaration)](
           llvm::Expected<ReferencesResult> Refs) mutable {
@@ -1472,7 +1471,6 @@ void ClangdLSPServer::bindMethods(LSPBinder &Bind,
   Bind.method("typeHierarchy/resolve", this, &ClangdLSPServer::onResolveTypeHierarchy);
   Bind.method("textDocument/prepareCallHierarchy", this, &ClangdLSPServer::onPrepareCallHierarchy);
   Bind.method("callHierarchy/incomingCalls", this, &ClangdLSPServer::onCallHierarchyIncomingCalls);
-  Bind.method("callHierarchy/outgoingCalls", this, &ClangdLSPServer::onCallHierarchyOutgoingCalls);
   Bind.method("textDocument/selectionRange", this, &ClangdLSPServer::onSelectionRange);
   Bind.method("textDocument/documentLink", this, &ClangdLSPServer::onDocumentLink);
   Bind.method("textDocument/semanticTokens/full", this, &ClangdLSPServer::onSemanticTokens);
@@ -1604,7 +1602,7 @@ void ClangdLSPServer::onBackgroundIndexProgress(
     if (Stats.Completed < Stats.Enqueued) {
       assert(Stats.Enqueued > Stats.LastIdle);
       WorkDoneProgressReport Report;
-      Report.percentage = 100.0 * (Stats.Completed - Stats.LastIdle) /
+      Report.percentage = 100 * (Stats.Completed - Stats.LastIdle) /
                           (Stats.Enqueued - Stats.LastIdle);
       Report.message =
           llvm::formatv("{0}/{1}", Stats.Completed - Stats.LastIdle,

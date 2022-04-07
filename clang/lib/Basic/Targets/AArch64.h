@@ -30,6 +30,10 @@ class LLVM_LIBRARY_VISIBILITY AArch64TargetInfo : public TargetInfo {
   unsigned FPU;
   bool HasCRC;
   bool HasCrypto;
+  bool HasAES;
+  bool HasSHA2;
+  bool HasSHA3;
+  bool HasSM4;
   bool HasUnaligned;
   bool HasFullFP16;
   bool HasDotProd;
@@ -55,6 +59,7 @@ class LLVM_LIBRARY_VISIBILITY AArch64TargetInfo : public TargetInfo {
   static const Builtin::Info BuiltinInfo[];
 
   std::string ABI;
+  StringRef getArchProfile() const;
 
 public:
   AArch64TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts);
@@ -87,10 +92,19 @@ public:
                                MacroBuilder &Builder) const;
   void getTargetDefinesARMV87A(const LangOptions &Opts,
                                MacroBuilder &Builder) const;
+  void getTargetDefinesARMV9A(const LangOptions &Opts,
+                              MacroBuilder &Builder) const;
+  void getTargetDefinesARMV91A(const LangOptions &Opts,
+                               MacroBuilder &Builder) const;
+  void getTargetDefinesARMV92A(const LangOptions &Opts,
+                               MacroBuilder &Builder) const;
   void getTargetDefines(const LangOptions &Opts,
                         MacroBuilder &Builder) const override;
 
   ArrayRef<Builtin::Info> getTargetBuiltins() const override;
+
+  Optional<std::pair<unsigned, unsigned>>
+  getVScaleRange(const LangOptions &LangOpts) const override;
 
   bool hasFeature(StringRef Feature) const override;
   bool handleTargetFeatures(std::vector<std::string> &Features,
@@ -136,7 +150,7 @@ public:
   const char *getBFloat16Mangling() const override { return "u6__bf16"; };
   bool hasInt128Type() const override;
 
-  bool hasExtIntType() const override { return true; }
+  bool hasBitIntType() const override { return true; }
 };
 
 class LLVM_LIBRARY_VISIBILITY AArch64leTargetInfo : public AArch64TargetInfo {

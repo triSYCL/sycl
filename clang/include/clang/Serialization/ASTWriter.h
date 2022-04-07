@@ -347,7 +347,7 @@ private:
     union {
       const Decl *Dcl;
       void *Type;
-      unsigned Loc;
+      SourceLocation::UIntTy Loc;
       unsigned Val;
       Module *Mod;
       const Attr *Attribute;
@@ -402,8 +402,8 @@ private:
   /// headers. The declarations themselves are stored as declaration
   /// IDs, since they will be written out to an EAGERLY_DESERIALIZED_DECLS
   /// record.
-  SmallVector<uint64_t, 16> EagerlyDeserializedDecls;
-  SmallVector<uint64_t, 16> ModularCodegenDecls;
+  SmallVector<serialization::DeclID, 16> EagerlyDeserializedDecls;
+  SmallVector<serialization::DeclID, 16> ModularCodegenDecls;
 
   /// DeclContexts that have received extensions since their serialized
   /// form.
@@ -450,11 +450,14 @@ private:
 
   /// A mapping from each known submodule to its ID number, which will
   /// be a positive integer.
-  llvm::DenseMap<Module *, unsigned> SubmoduleIDs;
+  llvm::DenseMap<const Module *, unsigned> SubmoduleIDs;
 
   /// A list of the module file extension writers.
   std::vector<std::unique_ptr<ModuleFileExtensionWriter>>
       ModuleFileExtensionWriters;
+
+  /// User ModuleMaps skipped when writing control block.
+  std::set<const FileEntry *> SkippedModuleMaps;
 
   /// Retrieve or create a submodule ID for this module.
   unsigned getSubmoduleID(Module *Mod);
@@ -475,7 +478,7 @@ private:
   createSignature(StringRef AllBytes, StringRef ASTBlockBytes);
 
   void WriteInputFiles(SourceManager &SourceMgr, HeaderSearchOptions &HSOpts,
-                       bool Modules);
+                       std::set<const FileEntry *> &AffectingModuleMaps);
   void WriteSourceManagerBlock(SourceManager &SourceMgr,
                                const Preprocessor &PP);
   void WritePreprocessor(const Preprocessor &PP, bool IsModule);
@@ -510,8 +513,6 @@ private:
   void WriteDeclContextVisibleUpdate(const DeclContext *DC);
   void WriteFPPragmaOptions(const FPOptionsOverride &Opts);
   void WriteOpenCLExtensions(Sema &SemaRef);
-  void WriteOpenCLExtensionTypes(Sema &SemaRef);
-  void WriteOpenCLExtensionDecls(Sema &SemaRef);
   void WriteCUDAPragmas(Sema &SemaRef);
   void WriteObjCCategories();
   void WriteLateParsedTemplates(Sema &SemaRef);
@@ -673,7 +674,7 @@ public:
   /// Retrieve or create a submodule ID for this module, or return 0 if
   /// the submodule is neither local (a submodle of the currently-written module)
   /// nor from an imported module.
-  unsigned getLocalOrImportedSubmoduleID(Module *Mod);
+  unsigned getLocalOrImportedSubmoduleID(const Module *Mod);
 
   /// Note that the identifier II occurs at the given offset
   /// within the identifier table.

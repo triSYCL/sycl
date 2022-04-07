@@ -292,7 +292,11 @@ struct MIMGBaseOpcodeInfo {
   bool LodOrClampOrMip;
   bool HasD16;
   bool MSAA;
+  bool BVH;
 };
+
+LLVM_READONLY
+const MIMGBaseOpcodeInfo *getMIMGBaseOpcode(unsigned Opc);
 
 LLVM_READONLY
 const MIMGBaseOpcodeInfo *getMIMGBaseOpcodeInfo(unsigned BaseOpcode);
@@ -347,6 +351,11 @@ int getMIMGOpcode(unsigned BaseOpcode, unsigned MIMGEncoding,
 LLVM_READONLY
 int getMaskedMIMGOp(unsigned Opc, unsigned NewChannels);
 
+LLVM_READONLY
+unsigned getAddrSizeMIMGOp(const MIMGBaseOpcodeInfo *BaseOpcode,
+                           const MIMGDimInfo *Dim, bool IsA16,
+                           bool IsG16Supported);
+
 struct MIMGInfo {
   uint16_t Opcode;
   uint16_t BaseOpcode;
@@ -393,6 +402,9 @@ bool getMUBUFHasSrsrc(unsigned Opc);
 
 LLVM_READONLY
 bool getMUBUFHasSoffset(unsigned Opc);
+
+LLVM_READONLY
+bool getMUBUFIsBufferInv(unsigned Opc);
 
 LLVM_READONLY
 bool getSMEMIsBuffer(unsigned Opc);
@@ -475,6 +487,14 @@ struct Waitcnt {
 
   bool hasWait() const {
     return VmCnt != ~0u || ExpCnt != ~0u || LgkmCnt != ~0u || VsCnt != ~0u;
+  }
+
+  bool hasWaitExceptVsCnt() const {
+    return VmCnt != ~0u || ExpCnt != ~0u || LgkmCnt != ~0u;
+  }
+
+  bool hasWaitVsCnt() const {
+    return VsCnt != ~0u;
   }
 
   bool dominates(const Waitcnt &Other) const {
@@ -673,6 +693,10 @@ uint64_t encodeMsg(uint64_t MsgId,
 
 unsigned getInitialPSInputAddr(const Function &F);
 
+bool getHasColorExport(const Function &F);
+
+bool getHasDepthExport(const Function &F);
+
 LLVM_READNONE
 bool isShader(CallingConv::ID CC);
 
@@ -721,9 +745,11 @@ bool isGFX9Plus(const MCSubtargetInfo &STI);
 bool isGFX10(const MCSubtargetInfo &STI);
 bool isGFX10Plus(const MCSubtargetInfo &STI);
 bool isGCN3Encoding(const MCSubtargetInfo &STI);
+bool isGFX10_AEncoding(const MCSubtargetInfo &STI);
 bool isGFX10_BEncoding(const MCSubtargetInfo &STI);
 bool hasGFX10_3Insts(const MCSubtargetInfo &STI);
 bool isGFX90A(const MCSubtargetInfo &STI);
+bool hasArchitectedFlatScratch(const MCSubtargetInfo &STI);
 
 /// Is Reg - scalar register
 bool isSGPR(unsigned Reg, const MCRegisterInfo* TRI);
@@ -745,7 +771,7 @@ bool isSISrcOperand(const MCInstrDesc &Desc, unsigned OpNo);
 /// Is this floating-point operand?
 bool isSISrcFPOperand(const MCInstrDesc &Desc, unsigned OpNo);
 
-/// Does this opearnd support only inlinable literals?
+/// Does this operand support only inlinable literals?
 bool isSISrcInlinableOperand(const MCInstrDesc &Desc, unsigned OpNo);
 
 /// Get the size in bits of a register from the register class \p RC.
@@ -763,6 +789,7 @@ inline unsigned getOperandSize(const MCOperandInfo &OpInfo) {
   switch (OpInfo.OperandType) {
   case AMDGPU::OPERAND_REG_IMM_INT32:
   case AMDGPU::OPERAND_REG_IMM_FP32:
+  case AMDGPU::OPERAND_REG_IMM_FP32_DEFERRED:
   case AMDGPU::OPERAND_REG_INLINE_C_INT32:
   case AMDGPU::OPERAND_REG_INLINE_C_FP32:
   case AMDGPU::OPERAND_REG_INLINE_AC_INT32:
@@ -771,6 +798,8 @@ inline unsigned getOperandSize(const MCOperandInfo &OpInfo) {
   case AMDGPU::OPERAND_REG_IMM_V2FP32:
   case AMDGPU::OPERAND_REG_INLINE_C_V2INT32:
   case AMDGPU::OPERAND_REG_INLINE_C_V2FP32:
+  case AMDGPU::OPERAND_KIMM32:
+  case AMDGPU::OPERAND_KIMM16: // mandatory literal is always size 4
     return 4;
 
   case AMDGPU::OPERAND_REG_IMM_INT64:
@@ -782,6 +811,7 @@ inline unsigned getOperandSize(const MCOperandInfo &OpInfo) {
 
   case AMDGPU::OPERAND_REG_IMM_INT16:
   case AMDGPU::OPERAND_REG_IMM_FP16:
+  case AMDGPU::OPERAND_REG_IMM_FP16_DEFERRED:
   case AMDGPU::OPERAND_REG_INLINE_C_INT16:
   case AMDGPU::OPERAND_REG_INLINE_C_FP16:
   case AMDGPU::OPERAND_REG_INLINE_C_V2INT16:

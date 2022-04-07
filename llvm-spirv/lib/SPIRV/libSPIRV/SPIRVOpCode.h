@@ -41,7 +41,7 @@
 #define SPIRV_LIBSPIRV_SPIRVOPCODE_H
 
 #include "SPIRVUtil.h"
-#include "spirv.hpp"
+#include "spirv/unified1/spirv.hpp"
 #include "spirv_internal.hpp"
 #include <string>
 
@@ -58,11 +58,16 @@ template <> inline void SPIRVMap<Op, std::string>::init() {
 }
 SPIRV_DEF_NAMEMAP(Op, OpCodeNameMap)
 
+inline bool isFPAtomicOpCode(Op OpCode) {
+  return OpCode == OpAtomicFAddEXT || OpCode == OpAtomicFMinEXT ||
+         OpCode == OpAtomicFMaxEXT;
+}
 inline bool isAtomicOpCode(Op OpCode) {
   static_assert(OpAtomicLoad < OpAtomicXor, "");
   return ((unsigned)OpCode >= OpAtomicLoad &&
           (unsigned)OpCode <= OpAtomicXor) ||
-         OpCode == OpAtomicFlagTestAndSet || OpCode == OpAtomicFlagClear;
+         OpCode == OpAtomicFlagTestAndSet || OpCode == OpAtomicFlagClear ||
+         isFPAtomicOpCode(OpCode);
 }
 inline bool isBinaryOpCode(Op OpCode) {
   return ((unsigned)OpCode >= OpIAdd && (unsigned)OpCode <= OpFMod) ||
@@ -210,7 +215,8 @@ inline bool isTypeOpCode(Op OpCode) {
   unsigned OC = OpCode;
   return (OpTypeVoid <= OC && OC <= OpTypePipe) || OC == OpTypePipeStorage ||
          isSubgroupAvcINTELTypeOpCode(OpCode) || OC == OpTypeVmeImageINTEL ||
-         isVCOpCode(OpCode);
+         isVCOpCode(OpCode) || OC == internal::OpTypeTokenINTEL ||
+         OC == internal::OpTypeJointMatrixINTEL;
 }
 
 inline bool isSpecConstantOpCode(Op OpCode) {
@@ -221,7 +227,7 @@ inline bool isSpecConstantOpCode(Op OpCode) {
 inline bool isConstantOpCode(Op OpCode) {
   unsigned OC = OpCode;
   return (OpConstantTrue <= OC && OC <= OpSpecConstantOp) || OC == OpUndef ||
-         OC == OpConstantPipeStorage || OC == OpConstFunctionPointerINTEL;
+         OC == OpConstantPipeStorage || OC == OpConstantFunctionPointerINTEL;
 }
 
 inline bool isModuleScopeAllowedOpCode(Op OpCode) {
@@ -232,6 +238,10 @@ inline bool isModuleScopeAllowedOpCode(Op OpCode) {
 inline bool isIntelSubgroupOpCode(Op OpCode) {
   unsigned OC = OpCode;
   return OpSubgroupShuffleINTEL <= OC && OC <= OpSubgroupImageBlockWriteINTEL;
+}
+
+inline bool isEventOpCode(Op OpCode) {
+  return OpRetainEvent <= OpCode && OpCode <= OpCaptureEventProfilingInfo;
 }
 
 } // namespace SPIRV

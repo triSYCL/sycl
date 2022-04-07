@@ -93,15 +93,17 @@ private:
     llvm::Type *PaddingType; // canHavePaddingType()
     llvm::Type *UnpaddedCoerceAndExpandType; // isCoerceAndExpand()
   };
+  struct DirectAttrInfo {
+    unsigned Offset;
+    unsigned Align;
+  };
+  struct IndirectAttrInfo {
+    unsigned Align;
+    unsigned AddrSpace;
+  };
   union {
-    struct {
-      unsigned Offset;
-      unsigned Align;
-    } DirectAttr;              // isDirect() || isExtend()
-    struct {
-      unsigned Align;
-      unsigned AddrSpace;
-    } IndirectAttr;            // isIndirect()
+    DirectAttrInfo DirectAttr;     // isDirect() || isExtend()
+    IndirectAttrInfo IndirectAttr; // isIndirect()
     unsigned AllocaFieldIndex; // isInAlloca()
   };
   Kind TheKind;
@@ -248,7 +250,7 @@ public:
   static ABIArgInfo getCoerceAndExpand(llvm::StructType *coerceToType,
                                        llvm::Type *unpaddedCoerceToType) {
 #ifndef NDEBUG
-    // Sanity checks on unpaddedCoerceToType.
+    // Check that unpaddedCoerceToType has roughly the right shape.
 
     // Assert that we only have a struct type if there are multiple elements.
     auto unpaddedStruct = dyn_cast<llvm::StructType>(unpaddedCoerceToType);

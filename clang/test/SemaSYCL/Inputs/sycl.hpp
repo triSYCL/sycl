@@ -37,20 +37,35 @@ enum class address_space : int {
 };
 } // namespace access
 
+// Dummy aspect enum with limited enumerators
+enum class aspect {
+  host = 0,
+  cpu = 1,
+  gpu = 2,
+  accelerator = 3,
+  custom = 4,
+  fp16 = 5,
+  fp64 = 6,
+};
+
 class property_list {};
 
-namespace INTEL {
+namespace ext {
+namespace intel {
 namespace property {
 struct buffer_location {
   template <int> class instance {};
 };
 } // namespace property
-} // namespace INTEL
+} // namespace intel
+} // namespace ext
 
-namespace ONEAPI {
+namespace ext {
+namespace oneapi {
 template <typename... properties>
 class accessor_property_list {};
-} // namespace ONEAPI
+} // namespace oneapi
+} // namespace ext
 
 namespace detail {
 namespace half_impl {
@@ -102,9 +117,8 @@ struct DeviceValueType<dataT, access::target::local> {
 template <typename dataT, int dimensions, access::mode accessmode,
           access::target accessTarget = access::target::global_buffer,
           access::placeholder isPlaceholder = access::placeholder::false_t,
-          typename propertyListT = ONEAPI::accessor_property_list<>>
-class accessor {
-
+          typename propertyListT = ext::oneapi::accessor_property_list<>>
+class __attribute__((sycl_special_class)) accessor {
 public:
   void use(void) const {}
   void use(void *) const {}
@@ -114,6 +128,7 @@ private:
   using PtrType = typename DeviceValueType<dataT, accessTarget>::type *;
   void __init(PtrType Ptr, range<dimensions> AccessRange,
               range<dimensions> MemRange, id<dimensions> Offset) {}
+  friend class stream;
 };
 
 template <int dimensions, access::mode accessmode, access::target accesstarget>
@@ -125,6 +140,8 @@ struct opencl_image_type;
                            access::target::Target> {                \
     using type = __ocl_image##dim##d_##ifarray_##amsuffix##_t;      \
   };
+
+#ifdef __SYCL_DEVICE_ONLY__
 
 #define IMAGETY_READ_3_DIM_IMAGE       \
   IMAGETY_DEFINE(1, read, ro, image, ) \
@@ -150,6 +167,8 @@ IMAGETY_WRITE_3_DIM_IMAGE
 IMAGETY_READ_2_DIM_IARRAY
 IMAGETY_WRITE_2_DIM_IARRAY
 
+#endif // __SYCL_DEVICE_ONLY__
+
 template <int dim, access::mode accessmode, access::target accesstarget>
 struct _ImageImplT {
 #ifdef __SYCL_DEVICE_ONLY__
@@ -162,7 +181,7 @@ struct _ImageImplT {
 };
 
 template <typename dataT, int dimensions, access::mode accessmode>
-class accessor<dataT, dimensions, accessmode, access::target::image, access::placeholder::false_t> {
+class __attribute__((sycl_special_class)) accessor<dataT, dimensions, accessmode, access::target::image, access::placeholder::false_t> {
 public:
   void use(void) const {}
   template <typename... T>
@@ -181,7 +200,7 @@ struct sampler_impl {
 #endif
 };
 
-class sampler {
+class __attribute__((sycl_special_class)) sampler {
   struct sampler_impl impl;
 #ifdef __SYCL_DEVICE_ONLY__
   void __init(__ocl_sampler_t Sampler) { impl.m_Sampler = Sampler; }
@@ -226,21 +245,37 @@ template <typename Type> struct get_kernel_wrapper_name_t {
 };
 
 #define ATTR_SYCL_KERNEL __attribute__((sycl_kernel))
-template <typename KernelName = auto_name, typename KernelType>
-ATTR_SYCL_KERNEL void kernel_single_task(const KernelType &kernelFunc) {
+template <typename KernelName, typename KernelType>
+ATTR_SYCL_KERNEL void kernel_single_task(const KernelType &kernelFunc) { // #KernelSingleTaskFunc
+#ifdef __SYCL_DEVICE_ONLY__
   kernelFunc(); // #KernelSingleTaskKernelFuncCall
+#else
+  (void)kernelFunc;
+#endif
 }
-template <typename KernelName = auto_name, typename KernelType>
+template <typename KernelName, typename KernelType>
 ATTR_SYCL_KERNEL void kernel_single_task(const KernelType &kernelFunc, kernel_handler kh) {
+#ifdef __SYCL_DEVICE_ONLY__
   kernelFunc(kh);
+#else
+  (void)kernelFunc;
+#endif
 }
-template <typename KernelName = auto_name, typename KernelType>
+template <typename KernelName, typename KernelType>
 ATTR_SYCL_KERNEL void kernel_parallel_for(const KernelType &kernelFunc) {
+#ifdef __SYCL_DEVICE_ONLY__
   kernelFunc();
+#else
+  (void)kernelFunc;
+#endif
 }
 template <typename KernelName, typename KernelType>
 ATTR_SYCL_KERNEL void kernel_parallel_for_work_group(const KernelType &KernelFunc, kernel_handler kh) {
+#ifdef __SYCL_DEVICE_ONLY__
   KernelFunc(group<1>(), kh);
+#else
+  (void)KernelFunc;
+#endif
 }
 
 class handler {
@@ -248,62 +283,67 @@ public:
   template <typename KernelName = auto_name, typename KernelType>
   void single_task(const KernelType &kernelFunc) {
     using NameT = typename get_kernel_name_t<KernelName, KernelType>::name;
-#ifdef __SYCL_DEVICE_ONLY__
     kernel_single_task<NameT>(kernelFunc); // #KernelSingleTask
-#else
-    kernelFunc();
-#endif
   }
   template <typename KernelName = auto_name, typename KernelType>
   void single_task(const KernelType &kernelFunc, kernel_handler kh) {
     using NameT = typename get_kernel_name_t<KernelName, KernelType>::name;
-#ifdef __SYCL_DEVICE_ONLY__
     kernel_single_task<NameT>(kernelFunc, kh);
-#else
-    kernelFunc(kh);
-#endif
   }
   template <typename KernelName = auto_name, typename KernelType>
   void parallel_for(const KernelType &kernelObj) {
     using NameT = typename get_kernel_name_t<KernelName, KernelType>::name;
     using NameWT = typename get_kernel_wrapper_name_t<NameT>::name;
-#ifdef __SYCL_DEVICE_ONLY__
     kernel_parallel_for<NameT>(kernelObj);
-#else
-    kernelObj();
-#endif
   }
   template <typename KernelName = auto_name, typename KernelType>
   void parallel_for_work_group(const KernelType &kernelFunc, kernel_handler kh) {
     using NameT = typename get_kernel_name_t<KernelName, KernelType>::name;
-#ifdef __SYCL_DEVICE_ONLY__
     kernel_parallel_for_work_group<NameT>(kernelFunc, kh);
-#else
-    group<1> G;
-    kernelFunc(G, kh);
-#endif
   }
 };
 
-class stream {
+class __attribute__((sycl_special_class)) stream {
   accessor<int, 1, access::mode::read> acc;
 
 public:
   stream(unsigned long BufferSize, unsigned long MaxStatementSize,
          handler &CGH) {}
+#ifdef __SYCL_DEVICE_ONLY__
+  // Default constructor for objects later initialized with __init member.
+  stream() = default;
+#endif
 
-  void __init() {}
+  void __init(__attribute((opencl_global)) char *Ptr, range<1> AccessRange,
+              range<1> MemRange, id<1> Offset, int _FlushBufferSize) {
+    Acc.__init(Ptr, AccessRange, MemRange, Offset);
+    FlushBufferSize = _FlushBufferSize;
+  }
+
   void use() const {}
 
   void __finalize() {}
+
+private:
+  cl::sycl::accessor<char, 1, cl::sycl::access::mode::read_write> Acc;
+  int FlushBufferSize;
 };
 
-namespace ONEAPI {
+namespace ext {
+namespace oneapi {
 namespace experimental {
 template <typename T, typename ID = T>
-class spec_constant {};
+class spec_constant {
+public:
+  spec_constant() {}
+  explicit constexpr spec_constant(T defaultVal) : DefaultValue(defaultVal) {}
+
+private:
+  T DefaultValue;
+};
 } // namespace experimental
-} // namespace ONEAPI
+} // namespace oneapi
+} // namespace ext
 } // namespace sycl
 } // namespace cl
 

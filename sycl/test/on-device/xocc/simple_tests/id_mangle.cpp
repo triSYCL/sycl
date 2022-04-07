@@ -1,8 +1,8 @@
-// REQUIRES: xocc, spir
+// REQUIRES: xocc
 
-// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
-
-// RUN: %ACC_RUN_PLACEHOLDER %t.out
+// RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
+// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
+// RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
 /*
   Test to see if the world will explode when using SPIR built-ins that are
@@ -42,7 +42,7 @@ int main() {
 
   {
     auto wb = test_buffer.get_access<access::mode::write>();
-    for (int i = 0; i < wb.get_count(); ++i)
+    for (int i = 0; i < wb.size(); ++i)
       wb[i] = 0;
   }
 
@@ -80,10 +80,6 @@ int main() {
         wb[index.get_global_linear_id()] += index.get_local_range(0);
         wb[index.get_global_linear_id()] += index.get_local_range(1);
         wb[index.get_global_linear_id()] += index.get_local_range(2);
-
-        wb[index.get_global_linear_id()] += index.get_offset()[0];
-        wb[index.get_global_linear_id()] += index.get_offset()[1];
-        wb[index.get_global_linear_id()] += index.get_offset()[2];
     });
   });
 
@@ -96,7 +92,7 @@ int main() {
   // missing functions.
 
   int sum = 0;
-  for (int i = 0; i < rb.get_count(); ++i) {
+  for (int i = 0; i < rb.size(); ++i) {
     sum += rb[i];
   }
 
@@ -104,11 +100,11 @@ int main() {
   // one host invocation should sum up to 9000, this is only relevant for Xilinx
   // at the moment
 #ifdef __SYCL_HAS_XILINX_DEVICE__
-  std::cout << "sum of all id's, sizes and offsets and user get_global_id call "
+  std::cout << "sum of all id's and sizes and user get_global_id call "
             <<  sum + get_global_id(0) << std::endl;
   assert((sum + get_global_id(0)) == 9172);
 #else
-  std::cout << "sum of all id's, sizes and offsets: " <<  sum << std::endl;
+  std::cout << "sum of all id's, sizes: " <<  sum << std::endl;
   assert(sum == 172);
 #endif
 

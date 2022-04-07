@@ -17,6 +17,7 @@
 #include "lldb/API/SBTypeSynthetic.h"
 
 #include "lldb/Breakpoint/Watchpoint.h"
+#include "lldb/Core/Declaration.h"
 #include "lldb/Core/Module.h"
 #include "lldb/Core/Section.h"
 #include "lldb/Core/StreamFile.h"
@@ -25,7 +26,6 @@
 #include "lldb/Core/ValueObjectConstResult.h"
 #include "lldb/DataFormatters/DataVisualization.h"
 #include "lldb/Symbol/Block.h"
-#include "lldb/Symbol/Declaration.h"
 #include "lldb/Symbol/ObjectFile.h"
 #include "lldb/Symbol/Type.h"
 #include "lldb/Symbol/Variable.h"
@@ -1431,6 +1431,18 @@ bool SBValue::SetData(lldb::SBData &data, SBError &error) {
   return ret;
 }
 
+lldb::SBValue SBValue::Clone(const char *new_name) {
+  LLDB_RECORD_METHOD(lldb::SBValue, SBValue, Clone, (const char *), new_name);
+
+  ValueLocker locker;
+  lldb::ValueObjectSP value_sp(GetSP(locker));
+
+  if (value_sp)
+    return lldb::SBValue(value_sp->Clone(ConstString(new_name)));
+  else
+    return lldb::SBValue();
+}
+
 lldb::SBDeclaration SBValue::GetDeclaration() {
   LLDB_RECORD_METHOD_NO_ARGS(lldb::SBDeclaration, SBValue, GetDeclaration);
 
@@ -1656,6 +1668,7 @@ void RegisterMethods<SBValue>(Registry &R) {
   LLDB_REGISTER_METHOD(lldb::SBData, SBValue, GetData, ());
   LLDB_REGISTER_METHOD(bool, SBValue, SetData,
                        (lldb::SBData &, lldb::SBError &));
+  LLDB_REGISTER_METHOD(lldb::SBValue, SBValue, Clone, (const char *));
   LLDB_REGISTER_METHOD(lldb::SBDeclaration, SBValue, GetDeclaration, ());
   LLDB_REGISTER_METHOD(lldb::SBWatchpoint, SBValue, Watch,
                        (bool, bool, bool, lldb::SBError &));

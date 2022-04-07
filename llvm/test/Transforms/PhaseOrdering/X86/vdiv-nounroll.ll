@@ -17,7 +17,7 @@ target triple = "x86_64-apple-macosx11.0.0"
 define void @vdiv(float* %a, float %b) #0 {
 ; CHECK-LABEL: @vdiv(
 ; CHECK-NEXT:  entry:
-; CHECK-NEXT:    [[BROADCAST_SPLATINSERT:%.*]] = insertelement <4 x float> poison, float [[B:%.*]], i32 0
+; CHECK-NEXT:    [[BROADCAST_SPLATINSERT:%.*]] = insertelement <4 x float> poison, float [[B:%.*]], i64 0
 ; CHECK-NEXT:    [[BROADCAST_SPLAT:%.*]] = shufflevector <4 x float> [[BROADCAST_SPLATINSERT]], <4 x float> poison, <4 x i32> zeroinitializer
 ; CHECK-NEXT:    [[TMP0:%.*]] = fdiv fast <4 x float> <float 1.000000e+00, float 1.000000e+00, float 1.000000e+00, float 1.000000e+00>, [[BROADCAST_SPLAT]]
 ; CHECK-NEXT:    br label [[VECTOR_BODY:%.*]]
@@ -29,7 +29,7 @@ define void @vdiv(float* %a, float %b) #0 {
 ; CHECK-NEXT:    [[TMP3:%.*]] = fmul fast <4 x float> [[WIDE_LOAD]], [[TMP0]]
 ; CHECK-NEXT:    [[TMP4:%.*]] = bitcast float* [[TMP1]] to <4 x float>*
 ; CHECK-NEXT:    store <4 x float> [[TMP3]], <4 x float>* [[TMP4]], align 4, !tbaa [[TBAA3]]
-; CHECK-NEXT:    [[INDEX_NEXT]] = add i64 [[INDEX]], 4
+; CHECK-NEXT:    [[INDEX_NEXT]] = add nuw i64 [[INDEX]], 4
 ; CHECK-NEXT:    [[TMP5:%.*]] = icmp eq i64 [[INDEX_NEXT]], 1024
 ; CHECK-NEXT:    br i1 [[TMP5]], label [[FOR_COND_CLEANUP:%.*]], label [[VECTOR_BODY]], !llvm.loop [[LOOP7:![0-9]+]]
 ; CHECK:       for.cond.cleanup:

@@ -1,5 +1,13 @@
 set(OBJECT_LIBRARY_TARGET_TYPE "OBJECT_LIBRARY")
 
+function(_get_common_compile_options output_var)
+  set(compile_options ${LLVM_CXX_STD_default} ${LIBC_COMPILE_OPTIONS_DEFAULT} ${ARGN})
+  if(NOT ${LIBC_TARGET_OS} STREQUAL "windows")
+    set(compile_options ${compile_options} -fpie -ffreestanding)
+  endif()
+  set(${output_var} ${compile_options} PARENT_SCOPE)
+endfunction()
+
 # Rule which is essentially a wrapper over add_library to compile a set of
 # sources to object files.
 # Usage:
@@ -37,12 +45,8 @@ function(add_object_library target_name)
       ${LIBC_SOURCE_DIR}
       ${LIBC_BUILD_DIR}
   )
-  if(ADD_OBJECT_COMPILE_OPTIONS)
-    target_compile_options(
-      ${fq_target_name}
-      PRIVATE ${ADD_OBJECT_COMPILE_OPTIONS}
-    )
-  endif()
+  _get_common_compile_options(compile_options ${ADD_OBJECT_COMPILE_OPTIONS})
+  target_compile_options(${fq_target_name} PRIVATE ${compile_options})
 
   get_fq_deps_list(fq_deps_list ${ADD_OBJECT_DEPENDS})
   if(fq_deps_list)
@@ -148,7 +152,7 @@ function(add_entrypoint_object target_name)
     message(FATAL_ERROR "`add_entrypoint_object` rule requires HDRS to be specified.")
   endif()
 
-  set(common_compile_options -fpie ${LLVM_CXX_STD_default} -ffreestanding ${ADD_ENTRYPOINT_OBJ_COMPILE_OPTIONS})
+  _get_common_compile_options(common_compile_options ${ADD_ENTRYPOINT_OBJ_COMPILE_OPTIONS})
   set(internal_target_name ${fq_target_name}.__internal__)
   set(include_dirs ${LIBC_BUILD_DIR}/include ${LIBC_SOURCE_DIR} ${LIBC_BUILD_DIR})
   get_fq_deps_list(fq_deps_list ${ADD_ENTRYPOINT_OBJ_DEPENDS})
@@ -176,9 +180,7 @@ function(add_entrypoint_object target_name)
     ${ADD_ENTRYPOINT_OBJ_SRCS}
     ${ADD_ENTRYPOINT_OBJ_HDRS}
   )
-  target_compile_options(
-      ${fq_target_name} BEFORE PRIVATE ${common_compile_options} -DLLVM_LIBC_PUBLIC_PACKAGING
-  )
+  target_compile_options(${fq_target_name} BEFORE PRIVATE ${common_compile_options} -DLLVM_LIBC_PUBLIC_PACKAGING)
   target_include_directories(${fq_target_name} PRIVATE ${include_dirs})
   add_dependencies(${fq_target_name} ${full_deps_list})
 
@@ -256,6 +258,36 @@ function(add_entrypoint_object target_name)
 
 endfunction(add_entrypoint_object)
 
+set(ENTRYPOINT_EXT_TARGET_TYPE "ENTRYPOINT_EXT")
+
+# A rule for external entrypoint targets.
+# Usage:
+#     add_entrypoint_external(
+#       <target_name>
+#       DEPENDS <list of dependencies>
+#     )
+function(add_entrypoint_external target_name)
+  cmake_parse_arguments(
+    "ADD_ENTRYPOINT_EXT"
+    "" # No optional arguments
+    "" # No single value arguments
+    "DEPENDS"  # Multi value arguments
+    ${ARGN}
+  )
+  get_fq_target_name(${target_name} fq_target_name)
+  set(entrypoint_name ${target_name})
+
+  add_custom_target(${fq_target_name})
+  set_target_properties(
+    ${fq_target_name}
+    PROPERTIES
+      "ENTRYPOINT_NAME" ${entrypoint_name}
+      "TARGET_TYPE" ${ENTRYPOINT_EXT_TARGET_TYPE}
+      "DEPS" "${ADD_ENTRYPOINT_EXT_DEPENDS}"
+  )
+
+endfunction(add_entrypoint_external)
+
 # Rule build a redirector object file.
 function(add_redirector_object target_name)
   cmake_parse_arguments(
@@ -277,6 +309,6 @@ function(add_redirector_object target_name)
   )
   target_compile_options(
     ${target_name}
-    BEFORE PRIVATE -fPIC
+    BEFORE PRIVATE -fPIC ${LIBC_COMPILE_OPTIONS_DEFAULT}
   )
 endfunction(add_redirector_object)

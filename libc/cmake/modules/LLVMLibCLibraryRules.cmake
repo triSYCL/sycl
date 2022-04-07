@@ -36,6 +36,14 @@ function(collect_object_file_deps target result)
     set(${result} ${all_deps} PARENT_SCOPE)
     return()
   endif()
+
+  if(${target_type} STREQUAL ${ENTRYPOINT_EXT_TARGET_TYPE})
+    # It is not possible to recursively extract deps of external dependencies.
+    # So, we just accumulate the direct dep and return.
+    get_target_property(deps ${target} "DEPS")
+    set(${result} ${deps} PARENT_SCOPE)
+    return()
+  endif()
 endfunction(collect_object_file_deps)
 
 # A rule to build a library from a collection of entrypoint objects.
@@ -44,7 +52,7 @@ endfunction(collect_object_file_deps)
 #       DEPENDS <list of add_entrypoint_object targets>
 #     )
 #
-# NOTE: If one wants an entrypoint to be availabe in a library, then they will
+# NOTE: If one wants an entrypoint to be available in a library, then they will
 # have to list the entrypoint target explicitly in the DEPENDS list. Implicit
 # entrypoint dependencies will not be added to the library.
 function(add_entrypoint_library target_name)
@@ -64,9 +72,9 @@ function(add_entrypoint_library target_name)
   set(all_deps "")
   foreach(dep IN LISTS fq_deps_list)
     get_target_property(dep_type ${dep} "TARGET_TYPE")
-    if(NOT (${dep_type} STREQUAL ${ENTRYPOINT_OBJ_TARGET_TYPE}))
+    if(NOT ((${dep_type} STREQUAL ${ENTRYPOINT_OBJ_TARGET_TYPE}) OR (${dep_type} STREQUAL ${ENTRYPOINT_EXT_TARGET_TYPE})))
       message(FATAL_ERROR "Dependency '${dep}' of 'add_entrypoint_collection' is "
-                          "not an 'add_entrypoint_object' target.")
+                          "not an 'add_entrypoint_object' or 'add_entrypoint_external' target.")
     endif()
     collect_object_file_deps(${dep} recursive_deps)
     list(APPEND all_deps ${recursive_deps})
@@ -76,16 +84,13 @@ function(add_entrypoint_library target_name)
   foreach(dep IN LISTS all_deps)
     list(APPEND objects $<TARGET_OBJECTS:${dep}>)
   endforeach(dep)
+
   add_library(
     ${target_name}
     STATIC
     ${objects}
   )
-  set_target_properties(
-    ${target_name}
-    PROPERTIES
-      ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-  )
+  set_target_properties(${target_name}  PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
 endfunction(add_entrypoint_library)
 
 # Rule to build a shared library of redirector objects.
@@ -112,18 +117,9 @@ function(add_redirector_library target_name)
     SHARED
     ${obj_files}
   )
-  set_target_properties(${target_name} PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
-
-  target_link_libraries(
-    ${target_name}
-    -nostdlib -lc -lm
-  )
-
-  set_target_properties(
-    ${target_name}
-    PROPERTIES
-      LINKER_LANGUAGE "C"
-  )
+  set_target_properties(${target_name}  PROPERTIES LIBRARY_OUTPUT_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
+  target_link_libraries(${target_name}  -nostdlib -lc -lm)
+  set_target_properties(${target_name}  PROPERTIES LINKER_LANGUAGE "C")
 endfunction(add_redirector_library)
 
 set(HDR_LIBRARY_TARGET_TYPE "HDR_LIBRARY")

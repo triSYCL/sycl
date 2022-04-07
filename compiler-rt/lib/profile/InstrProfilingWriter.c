@@ -32,7 +32,7 @@ static uint32_t VPDataArraySize = sizeof(VPDataArray) / sizeof(*VPDataArray);
 COMPILER_RT_VISIBILITY uint8_t *DynamicBufferIOBuffer = 0;
 COMPILER_RT_VISIBILITY uint32_t VPBufferSize = 0;
 
-/* The buffer writer is reponsponsible in keeping writer state
+/* The buffer writer is responsible in keeping writer state
  * across the call.
  */
 COMPILER_RT_VISIBILITY uint32_t lprofBufferWriter(ProfDataWriter *This,
@@ -259,16 +259,19 @@ lprofWriteDataImpl(ProfDataWriter *Writer, const __llvm_profile_data *DataBegin,
                    const uint64_t *CountersBegin, const uint64_t *CountersEnd,
                    VPDataReaderType *VPDataReader, const char *NamesBegin,
                    const char *NamesEnd, int SkipNameDataWrite) {
+  int DebugInfoCorrelate =
+      (__llvm_profile_get_version() & VARIANT_MASK_DBG_CORRELATE) != 0ULL;
 
   /* Calculate size of sections. */
-  const uint64_t DataSize = __llvm_profile_get_data_size(DataBegin, DataEnd);
+  const uint64_t DataSize =
+      DebugInfoCorrelate ? 0 : __llvm_profile_get_data_size(DataBegin, DataEnd);
   const uint64_t CountersSize = CountersEnd - CountersBegin;
-  const uint64_t NamesSize = NamesEnd - NamesBegin;
+  const uint64_t NamesSize = DebugInfoCorrelate ? 0 : NamesEnd - NamesBegin;
 
   /* Create the header. */
   __llvm_profile_header Header;
 
-  if (!DataSize)
+  if (!DataSize && (!DebugInfoCorrelate || !CountersSize))
     return 0;
 
   /* Determine how much padding is needed before/after the counters and after
@@ -283,16 +286,38 @@ lprofWriteDataImpl(ProfDataWriter *Writer, const __llvm_profile_data *DataBegin,
 #define INSTR_PROF_RAW_HEADER(Type, Name, Init) Header.Name = Init;
 #include "profile/InstrProfData.inc"
 
-  /* Write the data. */
-  ProfDataIOVec IOVec[] = {
-      {&Header, sizeof(__llvm_profile_header), 1, 0},
-      {DataBegin, sizeof(__llvm_profile_data), DataSize, 0},
+  /* On WIN64, label differences are truncated 32-bit values. Truncate
+   * CountersDelta to match. */
+#ifdef _WIN64
+  Header.CountersDelta = (uint32_t)Header.CountersDelta;
+#endif
+
+  /* The data and names sections are omitted in lightweight mode. */
+  if (DebugInfoCorrelate) {
+    Header.CountersDelta = 0;
+    Header.NamesDelta = 0;
+  }
+
+  /* Write the profile header. */
+  ProfDataIOVec IOVec[] = {{&Header, sizeof(__llvm_profile_header), 1, 0}};
+  if (Writer->Write(Writer, IOVec, sizeof(IOVec) / sizeof(*IOVec)))
+    return -1;
+
+  /* Write the binary id lengths and data. */
+  if (__llvm_write_binary_ids(Writer) == -1)
+    return -1;
+
+  /* Write the profile data. */
+  ProfDataIOVec IOVecData[] = {
+      {DebugInfoCorrelate ? NULL : DataBegin, sizeof(__llvm_profile_data),
+       DataSize, 0},
       {NULL, sizeof(uint8_t), PaddingBytesBeforeCounters, 1},
       {CountersBegin, sizeof(uint64_t), CountersSize, 0},
       {NULL, sizeof(uint8_t), PaddingBytesAfterCounters, 1},
-      {SkipNameDataWrite ? NULL : NamesBegin, sizeof(uint8_t), NamesSize, 0},
+      {(SkipNameDataWrite || DebugInfoCorrelate) ? NULL : NamesBegin,
+       sizeof(uint8_t), NamesSize, 0},
       {NULL, sizeof(uint8_t), PaddingBytesAfterNames, 1}};
-  if (Writer->Write(Writer, IOVec, sizeof(IOVec) / sizeof(*IOVec)))
+  if (Writer->Write(Writer, IOVecData, sizeof(IOVecData) / sizeof(*IOVecData)))
     return -1;
 
   /* Value profiling is not yet supported in continuous mode. */

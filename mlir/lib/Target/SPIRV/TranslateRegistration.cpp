@@ -12,7 +12,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/SPIRV/IR/SPIRVDialect.h"
-#include "mlir/Dialect/SPIRV/IR/SPIRVModule.h"
 #include "mlir/Dialect/SPIRV/IR/SPIRVOps.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinOps.h"
@@ -41,7 +40,7 @@ static OwningModuleRef deserializeModule(const llvm::MemoryBuffer *input,
   context->loadDialect<spirv::SPIRVDialect>();
 
   // Make sure the input stream can be treated as a stream of SPIR-V words
-  auto start = input->getBufferStart();
+  auto *start = input->getBufferStart();
   auto size = input->getBufferSize();
   if (size % sizeof(uint32_t) != 0) {
     emitError(UnknownLoc::get(context))
@@ -52,7 +51,8 @@ static OwningModuleRef deserializeModule(const llvm::MemoryBuffer *input,
   auto binary = llvm::makeArrayRef(reinterpret_cast<const uint32_t *>(start),
                                    size / sizeof(uint32_t));
 
-  spirv::OwningSPIRVModuleRef spirvModule = spirv::deserialize(binary, context);
+  OwningOpRef<spirv::ModuleOp> spirvModule =
+      spirv::deserialize(binary, context);
   if (!spirvModule)
     return {};
 
@@ -94,8 +94,7 @@ static LogicalResult serializeModule(ModuleOp module, raw_ostream &output) {
   if (spirvModules.size() != 1)
     return module.emitError("found more than one 'spv.module' op");
 
-  if (failed(
-          spirv::serialize(spirvModules[0], binary, /*emitDebuginfo=*/false)))
+  if (failed(spirv::serialize(spirvModules[0], binary)))
     return failure();
 
   output.write(reinterpret_cast<char *>(binary.data()),
@@ -133,14 +132,16 @@ static LogicalResult roundTripModule(ModuleOp srcModule, bool emitDebugInfo,
   if (std::next(spirvModules.begin()) != spirvModules.end())
     return srcModule.emitError("found more than one 'spv.module' op");
 
-  if (failed(spirv::serialize(*spirvModules.begin(), binary, emitDebugInfo)))
+  spirv::SerializationOptions options;
+  options.emitDebugInfo = emitDebugInfo;
+  if (failed(spirv::serialize(*spirvModules.begin(), binary, options)))
     return failure();
 
   MLIRContext deserializationContext(context->getDialectRegistry());
   // TODO: we should only load the required dialects instead of all dialects.
   deserializationContext.loadAllAvailableDialects();
   // Then deserialize to get back a SPIR-V module.
-  spirv::OwningSPIRVModuleRef spirvModule =
+  OwningOpRef<spirv::ModuleOp> spirvModule =
       spirv::deserialize(binary, &deserializationContext);
   if (!spirvModule)
     return failure();

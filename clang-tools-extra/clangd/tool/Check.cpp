@@ -37,6 +37,7 @@
 #include "index/FileIndex.h"
 #include "refactor/Tweak.h"
 #include "support/ThreadsafeFS.h"
+#include "support/Trace.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/Basic/DiagnosticIDs.h"
 #include "clang/Format/Format.h"
@@ -158,16 +159,15 @@ public:
   // Build preamble and AST, and index them.
   bool buildAST() {
     log("Building preamble...");
-    Preamble =
-        buildPreamble(File, *Invocation, Inputs, /*StoreInMemory=*/true,
-                      [&](ASTContext &Ctx, std::shared_ptr<Preprocessor> PP,
-                          const CanonicalIncludes &Includes) {
-                        if (!Opts.BuildDynamicSymbolIndex)
-                          return;
-                        log("Indexing headers...");
-                        Index.updatePreamble(File, /*Version=*/"null", Ctx,
-                                             std::move(PP), Includes);
-                      });
+    Preamble = buildPreamble(File, *Invocation, Inputs, /*StoreInMemory=*/true,
+                             [&](ASTContext &Ctx, Preprocessor &PP,
+                                 const CanonicalIncludes &Includes) {
+                               if (!Opts.BuildDynamicSymbolIndex)
+                                 return;
+                               log("Indexing headers...");
+                               Index.updatePreamble(File, /*Version=*/"null",
+                                                    Ctx, PP, Includes);
+                             });
     if (!Preamble) {
       elog("Failed to build preamble");
       return false;
@@ -193,10 +193,16 @@ public:
 
   // Run AST-based features at each token in the file.
   void testLocationFeatures(
-      llvm::function_ref<bool(const Position &)> ShouldCheckLine) {
+      llvm::function_ref<bool(const Position &)> ShouldCheckLine,
+      const bool EnableCodeCompletion) {
+    trace::Span Trace("testLocationFeatures");
     log("Testing features at each token (may be slow in large files)");
     auto &SM = AST->getSourceManager();
     auto SpelledTokens = AST->getTokens().spelledTokens(SM.getMainFileID());
+
+    CodeCompleteOptions CCOpts = Opts.CodeComplete;
+    CCOpts.Index = &Index;
+
     for (const auto &Tok : SpelledTokens) {
       unsigned Start = AST->getSourceManager().getFileOffset(Tok.location());
       unsigned End = Start + Tok.length();
@@ -205,6 +211,10 @@ public:
       if (!ShouldCheckLine(Pos))
         continue;
 
+      trace::Span Trace("Token");
+      SPAN_ATTACH(Trace, "pos", Pos);
+      SPAN_ATTACH(Trace, "text", Tok.text(AST->getSourceManager()));
+
       // FIXME: dumping the tokens may leak sensitive code into bug reports.
       // Add an option to turn this off, once we decide how options work.
       vlog("  {0} {1}", Pos, Tok.text(AST->getSourceManager()));
@@ -212,8 +222,13 @@ public:
                                              AST->getTokens(), Start, End);
       Tweak::Selection Selection(&Index, *AST, Start, End, std::move(Tree),
                                  nullptr);
-      for (const auto &T :
-           prepareTweaks(Selection, Opts.TweakFilter, Opts.FeatureModules)) {
+      // FS is only populated when applying a tweak, not during prepare as
+      // prepare should not do any I/O to be fast.
+      auto Tweaks =
+          prepareTweaks(Selection, Opts.TweakFilter, Opts.FeatureModules);
+      Selection.FS =
+          &AST->getSourceManager().getFileManager().getVirtualFileSystem();
+      for (const auto &T : Tweaks) {
         auto Result = T->apply(Selection);
         if (!Result) {
           elog("    tweak: {0} ==> FAIL: {1}", T->id(), Result.takeError());
@@ -228,8 +243,12 @@ public:
       auto Hover = getHover(*AST, Pos, Style, &Index);
       vlog("    hover: {0}", Hover.hasValue());
 
-      // FIXME: it'd be nice to include code completion, but it's too slow.
-      // Maybe in combination with a line restriction?
+      if (EnableCodeCompletion) {
+        Position EndPos = offsetToPosition(Inputs.Contents, End);
+        auto CC = codeComplete(File, EndPos, Preamble.get(), Inputs, CCOpts);
+        vlog("    code completion: {0}",
+             CC.Completions.empty() ? "<empty>" : CC.Completions[0].Name);
+      }
     }
   }
 };
@@ -238,7 +257,8 @@ public:
 
 bool check(llvm::StringRef File,
            llvm::function_ref<bool(const Position &)> ShouldCheckLine,
-           const ThreadsafeFS &TFS, const ClangdLSPServer::Options &Opts) {
+           const ThreadsafeFS &TFS, const ClangdLSPServer::Options &Opts,
+           bool EnableCodeCompletion) {
   llvm::SmallString<0> FakeFile;
   llvm::Optional<std::string> Contents;
   if (File.empty()) {
@@ -257,12 +277,15 @@ bool check(llvm::StringRef File,
 
   auto ContextProvider = ClangdServer::createConfiguredContextProvider(
       Opts.ConfigProvider, nullptr);
-  WithContext Ctx(ContextProvider(""));
+  WithContext Ctx(ContextProvider(
+      FakeFile.empty()
+          ? File
+          : /*Don't turn on local configs for an arbitrary temp path.*/ ""));
   Checker C(File, Opts);
   if (!C.buildCommand(TFS) || !C.buildInvocation(TFS, Contents) ||
       !C.buildAST())
     return false;
-  C.testLocationFeatures(ShouldCheckLine);
+  C.testLocationFeatures(ShouldCheckLine, EnableCodeCompletion);
 
   log("All checks completed, {0} errors", C.ErrCount);
   return C.ErrCount == 0;

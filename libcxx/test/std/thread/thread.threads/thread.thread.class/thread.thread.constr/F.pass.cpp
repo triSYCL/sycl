@@ -7,8 +7,7 @@
 //===----------------------------------------------------------------------===//
 //
 // UNSUPPORTED: libcpp-has-no-threads
-
-// XFAIL: LIBCXX-WINDOWS-FIXME
+// XFAIL: LIBCXX-AIX-FIXME
 
 // <thread>
 
@@ -17,6 +16,12 @@
 // template <class F, class ...Args> thread(F&& f, Args&&... args);
 
 // UNSUPPORTED: sanitizer-new-delete
+
+// This fails on MinGW when statically linked, if built with Clang 13 or older.
+// (It's fixed in the upcoming Clang 14, by https://reviews.llvm.org/D109651.)
+// Prior to the fix, when statically linked, the unwind info for the two
+// (default and overridden) operator new implementations clash.
+// UNSUPPORTED: target={{.+}}-windows-gnu && !windows-dll && clang-13
 
 #include <thread>
 #include <new>
@@ -148,7 +153,7 @@ void test_throwing_new_during_thread_creation() {
             assert(i < numAllocs);
             assert(!f_run); // (2.2)
         }
-        assert(old_outstanding == outstanding_new); // (2.3)
+        ASSERT_WITH_LIBRARY_INTERNAL_ALLOCATIONS(old_outstanding == outstanding_new); // (2.3)
     }
     f_run = false;
     throw_one = 0xFFF;

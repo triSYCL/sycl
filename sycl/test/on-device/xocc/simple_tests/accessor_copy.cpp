@@ -1,6 +1,7 @@
 // REQUIRES: xocc
 // REQUIRES: spir
 
+// RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
 

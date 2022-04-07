@@ -74,11 +74,9 @@ target(asan_target_type, "asan") {
     "asan_lock.h",
     "asan_mac.cpp",
     "asan_malloc_linux.cpp",
-    "asan_malloc_local.h",
     "asan_malloc_mac.cpp",
     "asan_malloc_win.cpp",
     "asan_mapping.h",
-    "asan_mapping_myriad.h",
     "asan_memory_profile.cpp",
     "asan_poisoning.cpp",
     "asan_poisoning.h",
@@ -87,7 +85,6 @@ target(asan_target_type, "asan") {
     "asan_premap_shadow.h",
     "asan_report.cpp",
     "asan_report.h",
-    "asan_rtems.cpp",
     "asan_rtl.cpp",
     "asan_scariness_score.h",
     "asan_shadow_setup.cpp",
@@ -120,7 +117,7 @@ target(asan_target_type, "asan") {
   # FIXME: add_sanitizer_rt_version_list (cf hwasan)
   # FIXME: need libclang_rt.asan*.a.syms?
   # FIXME: windows flags (-Zl -nodefaultlibs)
-  # FIXME: asan_blacklist.txt
+  # FIXME: asan_ignorelist.txt
 
   if (target_os == "android") {
     ldflags = [ "-Wl,-z,global" ]
@@ -163,6 +160,8 @@ target(asan_target_type, "asan") {
       "-Wl,-U,___sanitizer_symbolize_data",
       "-Wl,-U,___sanitizer_symbolize_demangle",
       "-Wl,-U,___sanitizer_symbolize_flush",
+      "-Wl,-U,___sanitizer_symbolize_set_demangle",
+      "-Wl,-U,___sanitizer_symbolize_set_inline_frames",
 
       # xray
       "-Wl,-U,___start_xray_fn_idx",
@@ -198,5 +197,9 @@ source_set("unused") {
     "asan_preinit.cpp",
     "asan_win_dll_thunk.cpp",
     "asan_win_dynamic_runtime_thunk.cpp",
+
+    # FIXME: These are in clang_rt.asan_static in the CMake build.
+
+    "asan_rtl_x86_64.S",
   ]
 }

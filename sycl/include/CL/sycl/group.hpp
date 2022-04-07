@@ -25,9 +25,11 @@ namespace __device_builtin = __spirv;
 #include <CL/sycl/detail/common.hpp>
 #include <CL/sycl/detail/generic_type_traits.hpp>
 #include <CL/sycl/detail/helpers.hpp>
+#include <CL/sycl/detail/spirv.hpp>
 #include <CL/sycl/device_event.hpp>
 #include <CL/sycl/h_item.hpp>
 #include <CL/sycl/id.hpp>
+#include <CL/sycl/memory_enums.hpp>
 #include <CL/sycl/pointers.hpp>
 #include <CL/sycl/range.hpp>
 #include <stdexcept>
@@ -107,6 +109,9 @@ public:
   using linear_id_type = size_t;
   static constexpr int dimensions = Dimensions;
 #endif // __DISABLE_SYCL_INTEL_GROUP_ALGORITHMS__
+
+  static constexpr sycl::memory_scope fence_scope =
+      sycl::memory_scope::work_group;
 
   group() = delete;
 
@@ -300,7 +305,7 @@ public:
     __ocl_event_t E = __SYCL_OpGroupAsyncCopyGlobalToLocal(
         __spv::Scope::Workgroup, DestT(dest.get()), SrcT(src.get()),
         numElements, srcStride, 0);
-    return device_event(&E);
+    return device_event(E);
   }
 
   /// Asynchronously copies a number of elements specified by \p numElements
@@ -318,7 +323,7 @@ public:
     __ocl_event_t E = __SYCL_OpGroupAsyncCopyLocalToGlobal(
         __spv::Scope::Workgroup, DestT(dest.get()), SrcT(src.get()),
         numElements, destStride, 0);
-    return device_event(&E);
+    return device_event(E);
   }
 
   /// Specialization for scalar bool type.
@@ -428,19 +433,32 @@ protected:
   }
 };
 
-namespace detail {
-template <int Dims> group<Dims> store_group(const group<Dims> *g) {
-  return get_or_store(g);
-}
-} // namespace detail
-
-template <int Dims> group<Dims> this_group() {
+template <int Dims>
+__SYCL_DEPRECATED("use sycl::ext::oneapi::experimental::this_group() instead")
+group<Dims> this_group() {
 #ifdef __SYCL_DEVICE_ONLY__
   return detail::Builder::getElement(detail::declptr<group<Dims>>());
 #else
-  return detail::store_group<Dims>(nullptr);
+  throw sycl::exception(
+      sycl::make_error_code(sycl::errc::feature_not_supported),
+      "Free function calls are not supported on host device");
 #endif
 }
 
+namespace ext {
+namespace oneapi {
+namespace experimental {
+template <int Dims> group<Dims> this_group() {
+#ifdef __SYCL_DEVICE_ONLY__
+  return sycl::detail::Builder::getElement(detail::declptr<group<Dims>>());
+#else
+  throw sycl::exception(
+      sycl::make_error_code(sycl::errc::feature_not_supported),
+      "Free function calls are not supported on host device");
+#endif
+}
+} // namespace experimental
+} // namespace oneapi
+} // namespace ext
 } // namespace sycl
 } // __SYCL_INLINE_NAMESPACE(cl)

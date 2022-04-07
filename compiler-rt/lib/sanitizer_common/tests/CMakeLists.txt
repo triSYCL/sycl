@@ -9,6 +9,7 @@ if(APPLE)
 endif()
 
 set(SANITIZER_UNITTESTS
+  sanitizer_addrhashmap_test.cpp
   sanitizer_allocator_test.cpp
   sanitizer_atomic_test.cpp
   sanitizer_bitvector_test.cpp
@@ -16,12 +17,17 @@ set(SANITIZER_UNITTESTS
   sanitizer_chained_origin_depot_test.cpp
   sanitizer_common_test.cpp
   sanitizer_deadlock_detector_test.cpp
+  sanitizer_dense_map_test.cpp
   sanitizer_flags_test.cpp
+  sanitizer_flat_map_test.cpp
   sanitizer_format_interceptor_test.cpp
+  sanitizer_hash_test.cpp
   sanitizer_ioctl_test.cpp
+  sanitizer_leb128_test.cpp
   sanitizer_libc_test.cpp
   sanitizer_linux_test.cpp
   sanitizer_list_test.cpp
+  sanitizer_lzw_test.cpp
   sanitizer_mac_test.cpp
   sanitizer_mutex_test.cpp
   sanitizer_nolibc_test.cpp
@@ -30,6 +36,7 @@ set(SANITIZER_UNITTESTS
   sanitizer_procmaps_test.cpp
   sanitizer_ring_buffer_test.cpp
   sanitizer_quarantine_test.cpp
+  sanitizer_stack_store_test.cpp
   sanitizer_stackdepot_test.cpp
   sanitizer_stacktrace_printer_test.cpp
   sanitizer_stacktrace_test.cpp
@@ -54,6 +61,7 @@ endforeach()
 set(SANITIZER_TEST_CFLAGS_COMMON
   ${COMPILER_RT_UNITTEST_CFLAGS}
   ${COMPILER_RT_GTEST_CFLAGS}
+  ${COMPILER_RT_GMOCK_CFLAGS}
   -I${COMPILER_RT_SOURCE_DIR}/include
   -I${COMPILER_RT_SOURCE_DIR}/lib
   -I${COMPILER_RT_SOURCE_DIR}/lib/sanitizer_common
@@ -151,7 +159,7 @@ macro(add_sanitizer_tests_for_arch arch)
   generate_compiler_rt_tests(SANITIZER_TEST_OBJECTS SanitizerUnitTests
     "Sanitizer-${arch}-Test" ${arch}
     RUNTIME "${SANITIZER_COMMON_LIB}"
-    SOURCES ${SANITIZER_UNITTESTS} ${COMPILER_RT_GTEST_SOURCE}
+    SOURCES ${SANITIZER_UNITTESTS} ${COMPILER_RT_GTEST_SOURCE} ${COMPILER_RT_GMOCK_SOURCE}
     COMPILE_DEPS ${SANITIZER_TEST_HEADERS}
     DEPS gtest
     CFLAGS  ${SANITIZER_TEST_CFLAGS_COMMON} ${extra_flags}
@@ -208,6 +216,7 @@ if(ANDROID)
     add_executable(SanitizerTest
       ${SANITIZER_UNITTESTS}
       ${COMPILER_RT_GTEST_SOURCE}
+      ${COMPILER_RT_GMOCK_SOURCE}
       $<TARGET_OBJECTS:RTSanitizerCommon.${arch}>
       $<TARGET_OBJECTS:RTSanitizerCommonLibc.${arch}>
       $<TARGET_OBJECTS:RTSanitizerCommonSymbolizer.${arch}>)

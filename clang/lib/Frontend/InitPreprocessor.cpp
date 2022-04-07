@@ -168,7 +168,7 @@ static void DefineTypeSize(const Twine &MacroName, unsigned TypeWidth,
                            MacroBuilder &Builder) {
   llvm::APInt MaxVal = isSigned ? llvm::APInt::getSignedMaxValue(TypeWidth)
                                 : llvm::APInt::getMaxValue(TypeWidth);
-  Builder.defineMacro(MacroName, MaxVal.toString(10, isSigned) + ValSuffix);
+  Builder.defineMacro(MacroName, toString(MaxVal, 10, isSigned) + ValSuffix);
 }
 
 /// DefineTypeSize - An overloaded helper that uses TargetInfo to determine
@@ -215,6 +215,11 @@ static void DefineExactWidthIntType(TargetInfo::IntType Ty,
   // ends up being defined in terms of the correct type.
   if (TypeWidth == 64)
     Ty = IsSigned ? TI.getInt64Type() : TI.getUInt64Type();
+
+  // Use the target specified int16 type when appropriate. Some MCU targets
+  // (such as AVR) have definition of [u]int16_t to [un]signed int.
+  if (TypeWidth == 16)
+    Ty = IsSigned ? TI.getInt16Type() : TI.getUInt16Type();
 
   const char *Prefix = IsSigned ? "__INT" : "__UINT";
 
@@ -366,7 +371,10 @@ static void InitializeStandardPredefinedMacros(const TargetInfo &TI,
   //      value is, are implementation-defined.
   // (Removed in C++20.)
   if (!LangOpts.CPlusPlus) {
-    if (LangOpts.C17)
+    // FIXME: Use correct value for C23.
+    if (LangOpts.C2x)
+      Builder.defineMacro("__STDC_VERSION__", "202000L");
+    else if (LangOpts.C17)
       Builder.defineMacro("__STDC_VERSION__", "201710L");
     else if (LangOpts.C11)
       Builder.defineMacro("__STDC_VERSION__", "201112L");
@@ -428,11 +436,18 @@ static void InitializeStandardPredefinedMacros(const TargetInfo &TI,
   // OpenCL v1.0/1.1 s6.9, v1.2/2.0 s6.10: Preprocessor Directives and Macros.
   if (LangOpts.OpenCL) {
     if (LangOpts.CPlusPlus) {
-      if (LangOpts.OpenCLCPlusPlusVersion == 100)
+      switch (LangOpts.OpenCLCPlusPlusVersion) {
+      case 100:
         Builder.defineMacro("__OPENCL_CPP_VERSION__", "100");
-      else
+        break;
+      case 202100:
+        Builder.defineMacro("__OPENCL_CPP_VERSION__", "202100");
+        break;
+      default:
         llvm_unreachable("Unsupported C++ version for OpenCL");
+      }
       Builder.defineMacro("__CL_CPP_VERSION_1_0__", "100");
+      Builder.defineMacro("__CL_CPP_VERSION_2021__", "202100");
     } else {
       // OpenCL v1.0 and v1.1 do not have a predefined macro to indicate the
       // language standard with which the program is compiled. __OPENCL_VERSION__
@@ -479,12 +494,17 @@ static void InitializeStandardPredefinedMacros(const TargetInfo &TI,
     if (LangOpts.getSYCLVersion() == LangOptions::SYCL_2017) {
       Builder.defineMacro("CL_SYCL_LANGUAGE_VERSION", "121");
       Builder.defineMacro("SYCL_LANGUAGE_VERSION", "201707");
-    } else if (LangOpts.getSYCLVersion() == LangOptions::SYCL_2020) {
+    } else if (LangOpts.getSYCLVersion() == LangOptions::SYCL_2020)
       Builder.defineMacro("SYCL_LANGUAGE_VERSION", "202001");
-    }
 
     if (LangOpts.SYCLValueFitInMaxInt)
-      Builder.defineMacro("__SYCL_ID_QUERIES_FIT_IN_INT__", "1");
+      Builder.defineMacro("__SYCL_ID_QUERIES_FIT_IN_INT__");
+
+    // Set __SYCL_DISABLE_PARALLEL_FOR_RANGE_ROUNDING__ macro for
+    // both host and device compilations if -fsycl-disable-range-rounding
+    // flag is used.
+    if (LangOpts.SYCLDisableRangeRounding)
+      Builder.defineMacro("__SYCL_DISABLE_PARALLEL_FOR_RANGE_ROUNDING__");
   }
 
   if (LangOpts.DeclareSPIRVBuiltins) {
@@ -494,11 +514,20 @@ static void InitializeStandardPredefinedMacros(const TargetInfo &TI,
   // Not "standard" per se, but available even with the -undef flag.
   if (LangOpts.AsmPreprocessor)
     Builder.defineMacro("__ASSEMBLER__");
-  if (LangOpts.CUDA && !LangOpts.HIP)
-    Builder.defineMacro("__CUDA__");
+  if (LangOpts.CUDA) {
+    if (LangOpts.GPURelocatableDeviceCode)
+      Builder.defineMacro("__CLANG_RDC__");
+    if (!LangOpts.HIP)
+      Builder.defineMacro("__CUDA__");
+  }
   if (LangOpts.HIP) {
     Builder.defineMacro("__HIP__");
     Builder.defineMacro("__HIPCC__");
+    Builder.defineMacro("__HIP_MEMORY_SCOPE_SINGLETHREAD", "1");
+    Builder.defineMacro("__HIP_MEMORY_SCOPE_WAVEFRONT", "2");
+    Builder.defineMacro("__HIP_MEMORY_SCOPE_WORKGROUP", "3");
+    Builder.defineMacro("__HIP_MEMORY_SCOPE_AGENT", "4");
+    Builder.defineMacro("__HIP_MEMORY_SCOPE_SYSTEM", "5");
     if (LangOpts.CUDAIsDevice)
       Builder.defineMacro("__HIP_DEVICE_COMPILE__");
   }
@@ -594,15 +623,18 @@ static void InitializeCPlusPlusFeatureTestMacros(const LangOptions &LangOpts,
     //Builder.defineMacro("__cpp_consteval", "201811L");
     Builder.defineMacro("__cpp_constexpr_dynamic_alloc", "201907L");
     Builder.defineMacro("__cpp_constinit", "201907L");
-    //Builder.defineMacro("__cpp_coroutines", "201902L");
+    Builder.defineMacro("__cpp_impl_coroutine", "201902L");
     Builder.defineMacro("__cpp_designated_initializers", "201707L");
     Builder.defineMacro("__cpp_impl_three_way_comparison", "201907L");
     //Builder.defineMacro("__cpp_modules", "201907L");
-    //Builder.defineMacro("__cpp_using_enum", "201907L");
+    Builder.defineMacro("__cpp_using_enum", "201907L");
   }
   // C++2b features.
-  if (LangOpts.CPlusPlus2b)
+  if (LangOpts.CPlusPlus2b) {
+    Builder.defineMacro("__cpp_implicit_move", "202011L");
     Builder.defineMacro("__cpp_size_t_suffix", "202011L");
+    Builder.defineMacro("__cpp_if_consteval", "202106L");
+  }
   if (LangOpts.Char8)
     Builder.defineMacro("__cpp_char8_t", "201811L");
   Builder.defineMacro("__cpp_impl_destroying_delete", "201806L");
@@ -610,6 +642,29 @@ static void InitializeCPlusPlusFeatureTestMacros(const LangOptions &LangOpts,
   // TS features.
   if (LangOpts.Coroutines)
     Builder.defineMacro("__cpp_coroutines", "201703L");
+}
+
+/// InitializeOpenCLFeatureTestMacros - Define OpenCL macros based on target
+/// settings and language version
+void InitializeOpenCLFeatureTestMacros(const TargetInfo &TI,
+                                       const LangOptions &Opts,
+                                       MacroBuilder &Builder) {
+  const llvm::StringMap<bool> &OpenCLFeaturesMap = TI.getSupportedOpenCLOpts();
+  // FIXME: OpenCL options which affect language semantics/syntax
+  // should be moved into LangOptions.
+  auto defineOpenCLExtMacro = [&](llvm::StringRef Name, auto... OptArgs) {
+    // Check if extension is supported by target and is available in this
+    // OpenCL version
+    if (TI.hasFeatureEnabled(OpenCLFeaturesMap, Name) &&
+        OpenCLOptions::isOpenCLOptionAvailableIn(Opts, OptArgs...))
+      Builder.defineMacro(Name);
+  };
+#define OPENCL_GENERIC_EXTENSION(Ext, ...)                                     \
+  defineOpenCLExtMacro(#Ext, __VA_ARGS__);
+#include "clang/Basic/OpenCLExtensions.def"
+
+  // Assume compiling for FULL profile
+  Builder.defineMacro("__opencl_c_int64");
 }
 
 static void InitializePredefinedMacros(const TargetInfo &TI,
@@ -996,8 +1051,7 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
   DefineFastIntType(64, true, TI, Builder);
   DefineFastIntType(64, false, TI, Builder);
 
-  char UserLabelPrefix[2] = {TI.getDataLayout().getGlobalPrefix(), 0};
-  Builder.defineMacro("__USER_LABEL_PREFIX__", UserLabelPrefix);
+  Builder.defineMacro("__USER_LABEL_PREFIX__", TI.getUserLabelPrefix());
 
   if (LangOpts.FastMath || LangOpts.FiniteMathOnly)
     Builder.defineMacro("__FINITE_MATH_ONLY__", "1");
@@ -1121,6 +1175,12 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
     case 45:
       Builder.defineMacro("_OPENMP", "201511");
       break;
+    case 51:
+      Builder.defineMacro("_OPENMP", "202011");
+      break;
+    case 52:
+      Builder.defineMacro("_OPENMP", "202111");
+      break;
     default:
       // Default version is OpenMP 5.0
       Builder.defineMacro("_OPENMP", "201811");
@@ -1144,7 +1204,7 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
   // Define a macro indicating that the source file is being compiled with a
   // SYCL device compiler which doesn't produce host binary.
   if (LangOpts.SYCLIsDevice) {
-    Builder.defineMacro("__SYCL_DEVICE_ONLY__", "1");
+    Builder.defineMacro("__SYCL_DEVICE_ONLY__");
     Builder.defineMacro("SYCL_EXTERNAL", "__attribute__((sycl_device))");
     // Defines a macro that switches on SPIR intrinsics in SYCL runtime, used
     // by Xilinx FPGA devices for the moment
@@ -1165,18 +1225,19 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
       }
     }
 
-    // Enable __SYCL_DISABLE_PARALLEL_FOR_RANGE_ROUNDING__ macro for
-    // all FPGA compilations.
-    if (TI.getTriple().getSubArch() == llvm::Triple::SPIRSubArch_fpga) {
-      Builder.defineMacro("__SYCL_DISABLE_PARALLEL_FOR_RANGE_ROUNDING__", "1");
-    }
-
-    if (TI.getTriple().isNVPTX()) {
-        Builder.defineMacro("__SYCL_NVPTX__", "1");
+    const llvm::Triple &DeviceTriple = TI.getTriple();
+    const llvm::Triple::SubArchType DeviceSubArch = DeviceTriple.getSubArch();
+    if (DeviceTriple.isSPIR() &&
+        DeviceSubArch != llvm::Triple::SPIRSubArch_fpga)
+      Builder.defineMacro("SYCL_USE_NATIVE_FP_ATOMICS");
+    // Enable generation of USM address spaces for FPGA.
+    if (DeviceSubArch == llvm::Triple::SPIRSubArch_fpga || DeviceTriple.isXilinxFPGA()) {
+      Builder.defineMacro("__ENABLE_USM_ADDR_SPACE__");
+      Builder.defineMacro("SYCL_DISABLE_FALLBACK_ASSERT");
     }
   }
   if (LangOpts.SYCLUnnamedLambda)
-    Builder.defineMacro("__SYCL_UNNAMED_LAMBDA__", "1");
+    Builder.defineMacro("__SYCL_UNNAMED_LAMBDA__");
 
   // These are defined for both the host and device compilation phases when it's
   // a Xilinx SYCL FPGA device.
@@ -1190,9 +1251,9 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
 
   // OpenCL definitions.
   if (LangOpts.OpenCL) {
-    TI.getOpenCLFeatureDefines(LangOpts, Builder);
+    InitializeOpenCLFeatureTestMacros(TI, LangOpts, Builder);
 
-    if (TI.getTriple().isSPIR())
+    if (TI.getTriple().isSPIR() || TI.getTriple().isSPIRV())
       Builder.defineMacro("__IMAGE_SUPPORT__");
   }
 

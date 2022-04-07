@@ -169,7 +169,6 @@ static std::string GetPatFromTreePatternNode(const TreePatternNode *N) {
   std::string str;
   raw_string_ostream Stream(str);
   Stream << *N;
-  Stream.str();
   return str;
 }
 
@@ -235,7 +234,6 @@ static std::string getIncludePath(const Record *R) {
 
   Stream << SrcMgr.getBufferInfo(CurBuf).Buffer->getBufferIdentifier() << ":"
          << SrcMgr.FindLineNumber(L, CurBuf);
-  Stream.str();
   return str;
 }
 
@@ -668,16 +666,16 @@ EmitMatcher(const Matcher *N, const unsigned Indent, unsigned CurrentIdx,
     int64_t Val = cast<EmitIntegerMatcher>(N)->getValue();
     OS << "OPC_EmitInteger, "
        << getEnumName(cast<EmitIntegerMatcher>(N)->getVT()) << ", ";
-    unsigned Bytes = 2+EmitVBRValue(Val, OS);
+    unsigned Bytes = 2 + EmitSignedVBRValue(Val, OS);
     OS << '\n';
     return Bytes;
   }
   case Matcher::EmitStringInteger: {
     const std::string &Val = cast<EmitStringIntegerMatcher>(N)->getValue();
     // These should always fit into 7 bits.
-    OS << "OPC_EmitInteger, "
-      << getEnumName(cast<EmitStringIntegerMatcher>(N)->getVT()) << ", "
-      << Val << ",\n";
+    OS << "OPC_EmitStringInteger, "
+       << getEnumName(cast<EmitStringIntegerMatcher>(N)->getVT()) << ", " << Val
+       << ",\n";
     return 3;
   }
 

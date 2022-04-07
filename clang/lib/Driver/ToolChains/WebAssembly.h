@@ -45,7 +45,7 @@ private:
   bool IsObjCNonFragileABIDefault() const override;
   bool UseObjCMixedDispatch() const override;
   bool isPICDefault() const override;
-  bool isPIEDefault() const override;
+  bool isPIEDefault(const llvm::opt::ArgList &Args) const override;
   bool isPICDefaultForced() const override;
   bool IsIntegratedAssemblerDefault() const override;
   bool hasBlocksRuntime() const override;
@@ -70,6 +70,10 @@ private:
   const char *getDefaultLinker() const override { return "wasm-ld"; }
 
   Tool *buildLinker() const override;
+
+  std::string getMultiarchTriple(const Driver &D,
+                                 const llvm::Triple &TargetTriple,
+                                 StringRef SysRoot) const override;
 };
 
 } // end namespace toolchains

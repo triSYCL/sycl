@@ -112,6 +112,7 @@ def VecElement : Operand<i32> {
 
 def hasAtomAddF64 : Predicate<"Subtarget->hasAtomAddF64()">;
 def hasAtomScope : Predicate<"Subtarget->hasAtomScope()">;
+def hasAtomSemantics : Predicate<"Subtarget->hasAtomSemantics()">;
 def hasAtomBitwise64 : Predicate<"Subtarget->hasAtomBitwise64()">;
 def hasAtomMinMax64 : Predicate<"Subtarget->hasAtomMinMax64()">;
 def hasVote : Predicate<"Subtarget->hasVote()">;
@@ -144,11 +145,15 @@ def hasPTX60 : Predicate<"Subtarget->getPTXVersion() >= 60">;
 def hasPTX61 : Predicate<"Subtarget->getPTXVersion() >= 61">;
 def hasPTX63 : Predicate<"Subtarget->getPTXVersion() >= 63">;
 def hasPTX64 : Predicate<"Subtarget->getPTXVersion() >= 64">;
+def hasPTX65 : Predicate<"Subtarget->getPTXVersion() >= 65">;
+def hasPTX70 : Predicate<"Subtarget->getPTXVersion() >= 70">;
+def hasPTX71 : Predicate<"Subtarget->getPTXVersion() >= 71">;
 
 def hasSM30 : Predicate<"Subtarget->getSmVersion() >= 30">;
 def hasSM70 : Predicate<"Subtarget->getSmVersion() >= 70">;
 def hasSM72 : Predicate<"Subtarget->getSmVersion() >= 72">;
 def hasSM75 : Predicate<"Subtarget->getSmVersion() >= 75">;
+def hasSM80 : Predicate<"Subtarget->getSmVersion() >= 80">;
 
 // non-sync shfl instructions are not available on sm_70+ in PTX6.4+
 def hasSHFL : Predicate<"!(Subtarget->getSmVersion() >= 70" 
@@ -1039,39 +1044,39 @@ def COSF:  NVPTXInst<(outs Float32Regs:$dst), (ins Float32Regs:$src),
                       [(set Float32Regs:$dst, (fcos Float32Regs:$src))]>,
                       Requires<[allowUnsafeFPMath]>;
 
-// Lower (frem x, y) into (sub x, (mul (floor (div x, y)) y)),
+// Lower (frem x, y) into (sub x, (mul (ftrunc (div x, y)) y)),
 // i.e. "poor man's fmod()"
 
 // frem - f32 FTZ
 def : Pat<(frem Float32Regs:$x, Float32Regs:$y),
           (FSUBf32rr_ftz Float32Regs:$x, (FMULf32rr_ftz (CVT_f32_f32
-            (FDIV32rr_prec_ftz Float32Regs:$x, Float32Regs:$y), CvtRMI_FTZ),
+            (FDIV32rr_prec_ftz Float32Regs:$x, Float32Regs:$y), CvtRZI_FTZ),
              Float32Regs:$y))>,
           Requires<[doF32FTZ]>;
 def : Pat<(frem Float32Regs:$x, fpimm:$y),
           (FSUBf32rr_ftz Float32Regs:$x, (FMULf32ri_ftz (CVT_f32_f32
-            (FDIV32ri_prec_ftz Float32Regs:$x, fpimm:$y), CvtRMI_FTZ),
+            (FDIV32ri_prec_ftz Float32Regs:$x, fpimm:$y), CvtRZI_FTZ),
              fpimm:$y))>,
           Requires<[doF32FTZ]>;
 
 // frem - f32
 def : Pat<(frem Float32Regs:$x, Float32Regs:$y),
           (FSUBf32rr Float32Regs:$x, (FMULf32rr (CVT_f32_f32
-            (FDIV32rr_prec Float32Regs:$x, Float32Regs:$y), CvtRMI),
+            (FDIV32rr_prec Float32Regs:$x, Float32Regs:$y), CvtRZI),
              Float32Regs:$y))>;
 def : Pat<(frem Float32Regs:$x, fpimm:$y),
           (FSUBf32rr Float32Regs:$x, (FMULf32ri (CVT_f32_f32
-            (FDIV32ri_prec Float32Regs:$x, fpimm:$y), CvtRMI),
+            (FDIV32ri_prec Float32Regs:$x, fpimm:$y), CvtRZI),
              fpimm:$y))>;
 
 // frem - f64
 def : Pat<(frem Float64Regs:$x, Float64Regs:$y),
           (FSUBf64rr Float64Regs:$x, (FMULf64rr (CVT_f64_f64
-            (FDIV64rr Float64Regs:$x, Float64Regs:$y), CvtRMI),
+            (FDIV64rr Float64Regs:$x, Float64Regs:$y), CvtRZI),
              Float64Regs:$y))>;
 def : Pat<(frem Float64Regs:$x, fpimm:$y),
           (FSUBf64rr Float64Regs:$x, (FMULf64ri (CVT_f64_f64
-            (FDIV64ri Float64Regs:$x, fpimm:$y), CvtRMI),
+            (FDIV64ri Float64Regs:$x, fpimm:$y), CvtRZI),
              fpimm:$y))>;
 
 //-----------------------------------
@@ -2243,8 +2248,18 @@ class MoveParamInst<NVPTXRegClass regclass, string asmstr> :
             !strconcat("mov", asmstr, " \t$dst, $src;"),
             [(set regclass:$dst, (MoveParam regclass:$src))]>;
 
+class MoveParamSymbolInst<NVPTXRegClass regclass, Operand srcty,
+                          string asmstr> :
+  NVPTXInst<(outs regclass:$dst), (ins srcty:$src),
+            !strconcat("mov", asmstr, " \t$dst, $src;"),
+            [(set regclass:$dst, (MoveParam texternalsym:$src))]>;
+
 def MoveParamI64 : MoveParamInst<Int64Regs, ".b64">;
 def MoveParamI32 : MoveParamInst<Int32Regs, ".b32">;
+
+def MoveParamSymbolI64 : MoveParamSymbolInst<Int64Regs, i64imm, ".b64">;
+def MoveParamSymbolI32 : MoveParamSymbolInst<Int32Regs, i32imm, ".b32">;
+
 def MoveParamI16 :
   NVPTXInst<(outs Int16Regs:$dst), (ins Int16Regs:$src),
             "cvt.u16.u32 \t$dst, $src;",

@@ -55,6 +55,8 @@ static bool checkAllDevicesHaveAspect(const std::vector<device> &Devices,
 // objects.
 class kernel_bundle_impl {
 
+  using SpecConstMapT = std::map<std::string, std::vector<unsigned char>>;
+
   void common_ctor_checks(bundle_state State) {
     const bool AllDevicesInTheContext =
         checkAllDevicesAreInContext(MDevices, MContext);
@@ -85,15 +87,21 @@ public:
         MContext, MDevices, State);
   }
 
-  // Interop constructor
-  kernel_bundle_impl(context Ctx, std::vector<device> Devs,
-                     device_image_plain &DevImage)
+  // Interop constructor used by make_kernel
+  kernel_bundle_impl(context Ctx, std::vector<device> Devs)
       : MContext(Ctx), MDevices(Devs) {
     if (!checkAllDevicesAreInContext(Devs, Ctx))
       throw sycl::exception(
           make_error_code(errc::invalid),
           "Not all devices are associated with the context or "
           "vector of devices is empty");
+    MIsInterop = true;
+  }
+
+  // Interop constructor
+  kernel_bundle_impl(context Ctx, std::vector<device> Devs,
+                     device_image_plain &DevImage)
+      : kernel_bundle_impl(Ctx, Devs) {
     MDeviceImages.push_back(DevImage);
   }
 
@@ -104,6 +112,8 @@ public:
                      std::vector<device> Devs, const property_list &PropList,
                      bundle_state TargetState)
       : MContext(InputBundle.get_context()), MDevices(std::move(Devs)) {
+
+    MSpecConstValues = getSyclObjImpl(InputBundle)->get_spec_const_map_ref();
 
     const std::vector<device> &InputBundleDevices =
         getSyclObjImpl(InputBundle)->get_devices();
@@ -153,6 +163,10 @@ public:
       std::vector<device> Devs, const property_list &PropList)
       : MDevices(std::move(Devs)) {
 
+    if (MDevices.empty())
+      throw sycl::exception(make_error_code(errc::invalid),
+                            "Vector of devices is empty");
+
     if (ObjectBundles.empty())
       return;
 
@@ -179,16 +193,21 @@ public:
                                                         Dev);
               });
         });
-    if (MDevices.empty() || !AllDevsAssociatedWithInputBundles)
-      throw sycl::exception(
-          make_error_code(errc::invalid),
-          "Not all devices are in the set of associated "
-          "devices for input bundles or vector of devices is empty");
+    if (!AllDevsAssociatedWithInputBundles)
+      throw sycl::exception(make_error_code(errc::invalid),
+                            "Not all devices are in the set of associated "
+                            "devices for input bundles");
 
     // TODO: Unify with c'tor for sycl::comile and sycl::build by calling
     // sycl::join on vector of kernel_bundles
 
-    std::vector<device_image_plain> DeviceImages;
+    // The loop below just links each device image separately, not linking any
+    // two device images together. This is correct so long as each device image
+    // has no unresolved symbols. That's the case when device images are created
+    // from generic SYCL APIs. There's no way in generic SYCL to create a kernel
+    // which references an undefined symbol. If we decide in the future to allow
+    // a backend interop API to create a "sycl::kernel_bundle" that references
+    // undefined symbols, then the logic in this loop will need to be changed.
     for (const kernel_bundle<bundle_state::object> &ObjectBundle :
          ObjectBundles) {
       for (const device_image_plain &DeviceImage : ObjectBundle) {
@@ -201,12 +220,22 @@ public:
                          }))
           continue;
 
-        DeviceImages.insert(DeviceImages.end(), DeviceImage);
+        const std::vector<device_image_plain> VectorOfOneImage{DeviceImage};
+        std::vector<device_image_plain> LinkedResults =
+            detail::ProgramManager::getInstance().link(VectorOfOneImage,
+                                                       MDevices, PropList);
+        MDeviceImages.insert(MDeviceImages.end(), LinkedResults.begin(),
+                             LinkedResults.end());
       }
     }
 
-    MDeviceImages = detail::ProgramManager::getInstance().link(
-        std::move(DeviceImages), MDevices, PropList);
+    for (const kernel_bundle<bundle_state::object> &Bundle : ObjectBundles) {
+      const KernelBundleImplPtr BundlePtr = getSyclObjImpl(Bundle);
+      for (const std::pair<const std::string, std::vector<unsigned char>>
+               &SpecConst : BundlePtr->MSpecConstValues) {
+        MSpecConstValues[SpecConst.first] = SpecConst.second;
+      }
+    }
   }
 
   kernel_bundle_impl(context Ctx, std::vector<device> Devs,
@@ -258,8 +287,6 @@ public:
 
     std::sort(MDeviceImages.begin(), MDeviceImages.end(),
               LessByHash<device_image_plain>{});
-    const auto DevImgIt =
-        std::unique(MDeviceImages.begin(), MDeviceImages.end());
 
     if (get_bundle_state() == bundle_state::input) {
       // Copy spec constants values from the device images to be removed.
@@ -284,6 +311,9 @@ public:
       std::for_each(MDeviceImages.begin(), MDeviceImages.end(),
                     MergeSpecConstants);
     }
+
+    const auto DevImgIt =
+        std::unique(MDeviceImages.begin(), MDeviceImages.end());
 
     // Remove duplicate device images.
     MDeviceImages.erase(DevImgIt, MDeviceImages.end());
@@ -442,22 +472,29 @@ public:
     return SetInDevImg || MSpecConstValues.count(std::string{SpecName}) != 0;
   }
 
-  const device_image_plain *begin() const {
-    assert(!MDeviceImages.empty() && "MDeviceImages can't be empty");
-    // UB in case MDeviceImages is empty
-    return &MDeviceImages.front();
-  }
+  const device_image_plain *begin() const { return MDeviceImages.data(); }
 
-  const device_image_plain *end() const { return &MDeviceImages.back() + 1; }
+  const device_image_plain *end() const {
+    return MDeviceImages.data() + MDeviceImages.size();
+  }
 
   size_t size() const noexcept { return MDeviceImages.size(); }
 
   bundle_state get_bundle_state() const {
+    // Interop kernel-bundles are always in executable state
+    if (MIsInterop)
+      return bundle_state::executable;
     // All device images are expected to have the same state
     return MDeviceImages.empty()
                ? bundle_state::input
                : detail::getSyclObjImpl(MDeviceImages[0])->get_state();
   }
+
+  const SpecConstMapT &get_spec_const_map_ref() const noexcept {
+    return MSpecConstValues;
+  }
+
+  bool isInterop() const { return MIsInterop; }
 
 private:
   context MContext;
@@ -465,7 +502,8 @@ private:
   std::vector<device_image_plain> MDeviceImages;
   // This map stores values for specialization constants, that are missing
   // from any device image.
-  std::map<std::string, std::vector<unsigned char>> MSpecConstValues;
+  SpecConstMapT MSpecConstValues;
+  bool MIsInterop = false;
 };
 
 } // namespace detail

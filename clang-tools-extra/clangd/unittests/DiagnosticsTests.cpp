@@ -9,10 +9,10 @@
 #include "Annotations.h"
 #include "Config.h"
 #include "Diagnostics.h"
+#include "Feature.h"
 #include "FeatureModule.h"
 #include "ParsedAST.h"
 #include "Protocol.h"
-#include "SourceCode.h"
 #include "TestFS.h"
 #include "TestIndex.h"
 #include "TestTU.h"
@@ -64,6 +64,13 @@ WithNote(::testing::Matcher<Note> NoteMatcher1,
   return Field(&Diag::Notes, UnorderedElementsAre(NoteMatcher1, NoteMatcher2));
 }
 
+::testing::Matcher<const Diag &>
+WithTag(::testing::Matcher<DiagnosticTag> TagMatcher) {
+  return Field(&Diag::Tags, Contains(TagMatcher));
+}
+
+MATCHER_P(HasRange, Range, "") { return arg.Range == Range; }
+
 MATCHER_P2(Diag, Range, Message,
            "Diag at " + llvm::to_string(Range) + " = [" + Message + "]") {
   return arg.Range == Range && arg.Message == Message;
@@ -114,6 +121,18 @@ Position pos(int line, int character) {
   return Res;
 }
 
+// Normally returns the provided diagnostics matcher.
+// If clang-tidy checks are not linked in, returns a matcher for no diagnostics!
+// This is intended for tests where the diagnostics come from clang-tidy checks.
+// We don't #ifdef each individual test as it's intrusive and we want to ensure
+// that as much of the test is still compiled an run as possible.
+::testing::Matcher<std::vector<clangd::Diag>>
+ifTidyChecks(::testing::Matcher<std::vector<clangd::Diag>> M) {
+  if (!CLANGD_TIDY_CHECKS)
+    return IsEmpty();
+  return M;
+}
+
 TEST(DiagnosticsTest, DiagnosticRanges) {
   // Check we report correct ranges, including various edge-cases.
   Annotations Test(R"cpp(
@@ -121,8 +140,11 @@ TEST(DiagnosticsTest, DiagnosticRanges) {
     #define ID(X) X
     namespace test{};
     void $decl[[foo]]();
-    class T{$explicit[[]]$constructor[[T]](int a);};
     int main() {
+      struct Container { int* begin(); int* end(); } *container;
+      for (auto i : $insertstar[[]]$range[[container]]) {
+      }
+
       $typo[[go\
 o]]();
       foo()$semicolon[[]]//with comments
@@ -135,10 +157,14 @@ o]]();
     }
   )cpp");
   auto TU = TestTU::withCode(Test.code());
-  TU.ClangTidyProvider = addTidyChecks("google-explicit-constructor");
   EXPECT_THAT(
       *TU.build().getDiagnostics(),
       ElementsAre(
+          // Make sure the whole token is highlighted.
+          AllOf(Diag(Test.range("range"),
+                     "invalid range expression of type 'struct Container *'; "
+                     "did you mean to dereference it with '*'?"),
+                WithFix(Fix(Test.range("insertstar"), "*", "insert '*'"))),
           // This range spans lines.
           AllOf(Diag(Test.range("typo"),
                      "use of undeclared identifier 'goo'; did you mean 'foo'?"),
@@ -156,20 +182,34 @@ o]]();
           Diag(Test.range("unk"), "use of undeclared identifier 'unknown'"),
           Diag(Test.range("type"),
                "cannot initialize a variable of type 'double' with an lvalue "
-               "of type 'const char [4]'"),
+               "of type 'const char[4]'"),
           Diag(Test.range("nomember"), "no member named 'y' in 'Foo'"),
           Diag(Test.range("nomembernamespace"),
                "no member named 'test' in namespace 'test'"),
           AllOf(Diag(Test.range("macro"),
                      "use of undeclared identifier 'fod'; did you mean 'foo'?"),
                 WithFix(Fix(Test.range("macroarg"), "foo",
-                            "change 'fod' to 'foo'"))),
-          // We make sure here that the entire token is highlighted
-          AllOf(Diag(Test.range("constructor"),
-                     "single-argument constructors must be marked explicit to "
-                     "avoid unintentional implicit conversions"),
-                WithFix(Fix(Test.range("explicit"), "explicit ",
-                            "insert 'explicit '")))));
+                            "change 'fod' to 'foo'")))));
+}
+
+// Verify that the -Wswitch case-not-covered diagnostic range covers the
+// whole expression. This is important because the "populate-switch" tweak
+// fires for the full expression range (see tweaks/PopulateSwitchTests.cpp).
+// The quickfix flow only works end-to-end if the tweak can be triggered on
+// the diagnostic's range.
+TEST(DiagnosticsTest, WSwitch) {
+  Annotations Test(R"cpp(
+    enum A { X };
+    struct B { A a; };
+    void foo(B b) {
+      switch ([[b.a]]) {}
+    }
+  )cpp");
+  auto TU = TestTU::withCode(Test.code());
+  TU.ExtraArgs = {"-Wswitch"};
+  EXPECT_THAT(*TU.build().getDiagnostics(),
+              ElementsAre(Diag(Test.range(),
+                               "enumeration value 'X' not handled in switch")));
 }
 
 TEST(DiagnosticsTest, FlagsMatter) {
@@ -212,10 +252,10 @@ TEST(DiagnosticsTest, DeduplicatedClangTidyDiagnostics) {
   // Verify that we filter out the duplicated diagnostic message.
   EXPECT_THAT(
       *TU.build().getDiagnostics(),
-      UnorderedElementsAre(::testing::AllOf(
+      ifTidyChecks(UnorderedElementsAre(::testing::AllOf(
           Diag(Test.range(),
                "floating point literal has suffix 'f', which is not uppercase"),
-          DiagSource(Diag::ClangTidy))));
+          DiagSource(Diag::ClangTidy)))));
 
   Test = Annotations(R"cpp(
     template<typename T>
@@ -232,10 +272,10 @@ TEST(DiagnosticsTest, DeduplicatedClangTidyDiagnostics) {
   // duplicated messages, verify that we deduplicate them.
   EXPECT_THAT(
       *TU.build().getDiagnostics(),
-      UnorderedElementsAre(::testing::AllOf(
+      ifTidyChecks(UnorderedElementsAre(::testing::AllOf(
           Diag(Test.range(),
                "floating point literal has suffix 'f', which is not uppercase"),
-          DiagSource(Diag::ClangTidy))));
+          DiagSource(Diag::ClangTidy)))));
 }
 
 TEST(DiagnosticsTest, ClangTidy) {
@@ -248,16 +288,27 @@ TEST(DiagnosticsTest, ClangTidy) {
       return SQUARE($macroarg[[++]]y);
       return $doubled[[sizeof]](sizeof(int));
     }
+
+    // misc-no-recursion uses a custom traversal from the TUDecl
+    void foo();
+    void $bar[[bar]]() {
+      foo();
+    }
+    void $foo[[foo]]() {
+      bar();
+    }
   )cpp");
   auto TU = TestTU::withCode(Test.code());
   TU.HeaderFilename = "assert.h"; // Suppress "not found" error.
   TU.ClangTidyProvider = addTidyChecks("bugprone-sizeof-expression,"
                                        "bugprone-macro-repeated-side-effects,"
                                        "modernize-deprecated-headers,"
-                                       "modernize-use-trailing-return-type");
+                                       "modernize-use-trailing-return-type,"
+                                       "misc-no-recursion");
+  TU.ExtraArgs.push_back("-Wno-unsequenced");
   EXPECT_THAT(
       *TU.build().getDiagnostics(),
-      UnorderedElementsAre(
+      ifTidyChecks(UnorderedElementsAre(
           AllOf(Diag(Test.range("deprecated"),
                      "inclusion of deprecated C++ header 'assert.h'; consider "
                      "using 'cassert' instead"),
@@ -267,24 +318,25 @@ TEST(DiagnosticsTest, ClangTidy) {
                             "change '\"assert.h\"' to '<cassert>'"))),
           Diag(Test.range("doubled"),
                "suspicious usage of 'sizeof(sizeof(...))'"),
-          AllOf(
-              Diag(Test.range("macroarg"),
-                   "side effects in the 1st macro argument 'X' are repeated in "
-                   "macro expansion"),
-              DiagSource(Diag::ClangTidy),
-              DiagName("bugprone-macro-repeated-side-effects"),
-              WithNote(
-                  Diag(Test.range("macrodef"), "macro 'SQUARE' defined here"))),
-          Diag(Test.range("macroarg"),
-               "multiple unsequenced modifications to 'y'"),
-          AllOf(
-              Diag(Test.range("main"),
-                   "use a trailing return type for this function"),
-              DiagSource(Diag::ClangTidy),
-              DiagName("modernize-use-trailing-return-type"),
-              // Verify that we don't have "[check-name]" suffix in the message.
-              WithFix(FixMessage(
-                  "use a trailing return type for this function")))));
+          AllOf(Diag(Test.range("macroarg"),
+                     "side effects in the 1st macro argument 'X' are "
+                     "repeated in "
+                     "macro expansion"),
+                DiagSource(Diag::ClangTidy),
+                DiagName("bugprone-macro-repeated-side-effects"),
+                WithNote(Diag(Test.range("macrodef"),
+                              "macro 'SQUARE' defined here"))),
+          AllOf(Diag(Test.range("main"),
+                     "use a trailing return type for this function"),
+                DiagSource(Diag::ClangTidy),
+                DiagName("modernize-use-trailing-return-type"),
+                // Verify there's no "[check-name]" suffix in the message.
+                WithFix(FixMessage(
+                    "use a trailing return type for this function"))),
+          Diag(Test.range("foo"),
+               "function 'foo' is within a recursive call chain"),
+          Diag(Test.range("bar"),
+               "function 'bar' is within a recursive call chain"))));
 }
 
 TEST(DiagnosticsTest, ClangTidyEOF) {
@@ -299,9 +351,9 @@ TEST(DiagnosticsTest, ClangTidyEOF) {
   TU.ClangTidyProvider = addTidyChecks("llvm-include-order");
   EXPECT_THAT(
       *TU.build().getDiagnostics(),
-      Contains(AllOf(Diag(Test.range(), "#includes are not sorted properly"),
-                     DiagSource(Diag::ClangTidy),
-                     DiagName("llvm-include-order"))));
+      ifTidyChecks(Contains(
+          AllOf(Diag(Test.range(), "#includes are not sorted properly"),
+                DiagSource(Diag::ClangTidy), DiagName("llvm-include-order")))));
 }
 
 TEST(DiagnosticTest, TemplatesInHeaders) {
@@ -371,9 +423,9 @@ TEST(DiagnosticTest, NoMultipleDiagnosticInFlight) {
   TU.ClangTidyProvider = addTidyChecks("modernize-loop-convert");
   EXPECT_THAT(
       *TU.build().getDiagnostics(),
-      UnorderedElementsAre(::testing::AllOf(
+      ifTidyChecks(UnorderedElementsAre(::testing::AllOf(
           Diag(Main.range(), "use range-based for loop instead"),
-          DiagSource(Diag::ClangTidy), DiagName("modernize-loop-convert"))));
+          DiagSource(Diag::ClangTidy), DiagName("modernize-loop-convert")))));
 }
 
 TEST(DiagnosticTest, RespectsDiagnosticConfig) {
@@ -398,6 +450,21 @@ TEST(DiagnosticTest, RespectsDiagnosticConfig) {
                                "use of undeclared identifier 'unknown'")));
 }
 
+TEST(DiagnosticTest, RespectsDiagnosticConfigInHeader) {
+  Annotations Header(R"cpp(
+    int x = "42";  // error-ok
+  )cpp");
+  Annotations Main(R"cpp(
+    #include "header.hpp"
+  )cpp");
+  auto TU = TestTU::withCode(Main.code());
+  TU.AdditionalFiles["header.hpp"] = std::string(Header.code());
+  Config Cfg;
+  Cfg.Diagnostics.Suppress.insert("init_conversion_failed");
+  WithContextValue WithCfg(Config::Key, std::move(Cfg));
+  EXPECT_THAT(*TU.build().getDiagnostics(), IsEmpty());
+}
+
 TEST(DiagnosticTest, ClangTidySuppressionComment) {
   Annotations Main(R"cpp(
     int main() {
@@ -410,16 +477,25 @@ TEST(DiagnosticTest, ClangTidySuppressionComment) {
       double g = [[8]] / i;
       #define BAD2 BAD
       double h = BAD2;  // NOLINT
+      // NOLINTBEGIN
+      // FIXME: re-enable when NOLINTBEGIN suppresss block is enabled in clangd.
+      // double x = BAD2;
+      // double y = BAD2;
+      // NOLINTEND
+
+      // verify no crashes on unmatched nolints.
+      // NOLINTBEGIN
     }
   )cpp");
   TestTU TU = TestTU::withCode(Main.code());
   TU.ClangTidyProvider = addTidyChecks("bugprone-integer-division");
   EXPECT_THAT(
       *TU.build().getDiagnostics(),
-      UnorderedElementsAre(::testing::AllOf(
+      ifTidyChecks(UnorderedElementsAre(::testing::AllOf(
           Diag(Main.range(), "result of integer division used in a floating "
                              "point context; possible loss of precision"),
-          DiagSource(Diag::ClangTidy), DiagName("bugprone-integer-division"))));
+          DiagSource(Diag::ClangTidy),
+          DiagName("bugprone-integer-division")))));
 }
 
 TEST(DiagnosticTest, ClangTidyWarningAsError) {
@@ -434,11 +510,11 @@ TEST(DiagnosticTest, ClangTidyWarningAsError) {
       addTidyChecks("bugprone-integer-division", "bugprone-integer-division");
   EXPECT_THAT(
       *TU.build().getDiagnostics(),
-      UnorderedElementsAre(::testing::AllOf(
+      ifTidyChecks(UnorderedElementsAre(::testing::AllOf(
           Diag(Main.range(), "result of integer division used in a floating "
                              "point context; possible loss of precision"),
           DiagSource(Diag::ClangTidy), DiagName("bugprone-integer-division"),
-          DiagSeverity(DiagnosticsEngine::Error))));
+          DiagSeverity(DiagnosticsEngine::Error)))));
 }
 
 TEST(DiagnosticTest, LongFixMessages) {
@@ -514,9 +590,9 @@ TEST(DiagnosticTest, ElseAfterReturnRange) {
   )cpp");
   TestTU TU = TestTU::withCode(Main.code());
   TU.ClangTidyProvider = addTidyChecks("llvm-else-after-return");
-  EXPECT_THAT(
-      *TU.build().getDiagnostics(),
-      ElementsAre(Diag(Main.range(), "do not use 'else' after 'return'")));
+  EXPECT_THAT(*TU.build().getDiagnostics(),
+              ifTidyChecks(ElementsAre(
+                  Diag(Main.range(), "do not use 'else' after 'return'"))));
 }
 
 TEST(DiagnosticsTest, Preprocessor) {
@@ -638,6 +714,7 @@ TEST(DiagnosticsTest, ToLSP) {
 
   clangd::Diag D;
   D.ID = clang::diag::err_undeclared_var_use;
+  D.Tags = {DiagnosticTag::Unnecessary};
   D.Name = "undeclared_var_use";
   D.Source = clangd::Diag::Clang;
   D.Message = "something terrible happened";
@@ -683,6 +760,7 @@ main.cpp:6:7: remark: declared somewhere in the main file
 
 ../foo/baz/header.h:10:11:
 note: declared somewhere in the header file)";
+  MainLSP.tags = {DiagnosticTag::Unnecessary};
 
   clangd::Diagnostic NoteInMainLSP;
   NoteInMainLSP.range = NoteInMain.Range;
@@ -755,95 +833,82 @@ buildIndexWithSymbol(llvm::ArrayRef<SymbolWithHeader> Syms) {
 }
 
 TEST(IncludeFixerTest, IncompleteType) {
-  Annotations Test(R"cpp(// error-ok
-$insert[[]]namespace ns {
-  class X;
-  $nested[[X::]]Nested n;
-}
-class Y : $base[[public ns::X]] {};
-void test(ns::X *x, ns::X& ref_x) {
-  x$access[[->]]f();
-  auto& $type[[[]]a] = *x;
-
-  ns::X $incomplete[[var]];
-  $tag[[ref_x]]->f();
-  $use[[ns::X()]];
-  $sizeof[[sizeof]](ns::X);
-  for (auto it : $for[[ref_x]]);
-}
-
-ns::X $return[[func]]() {}
-
-class T {
-  ns::X $field[[x]];
-};
-  )cpp");
-  auto TU = TestTU::withCode(Test.code());
-  TU.ExtraArgs.push_back("-std=c++17");
+  auto TU = TestTU::withHeaderCode("namespace ns { class X; } ns::X *x;");
+  TU.ExtraArgs.push_back("-std=c++20");
   auto Index = buildIndexWithSymbol(
       {SymbolWithHeader{"ns::X", "unittest:///x.h", "\"x.h\""}});
   TU.ExternalIndex = Index.get();
 
-  EXPECT_THAT(
-      *TU.build().getDiagnostics(),
-      UnorderedElementsAreArray(
-          {AllOf(Diag(Test.range("nested"),
-                      "incomplete type 'ns::X' named in nested name specifier"),
-                 DiagName("incomplete_nested_name_spec"),
-                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                             "Add include \"x.h\" for symbol ns::X"))),
-           AllOf(Diag(Test.range("base"), "base class has incomplete type"),
-                 DiagName("incomplete_base_class"),
-                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                             "Add include \"x.h\" for symbol ns::X"))),
-           AllOf(Diag(Test.range("access"),
-                      "member access into incomplete type 'ns::X'"),
-                 DiagName("incomplete_member_access"),
-                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                             "Add include \"x.h\" for symbol ns::X"))),
-           AllOf(
-               Diag(
-                   Test.range("type"),
-                   "incomplete type 'ns::X' where a complete type is required"),
-               DiagName("incomplete_type"),
-               WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                           "Add include \"x.h\" for symbol ns::X"))),
-           AllOf(Diag(Test.range("incomplete"),
-                      "variable has incomplete type 'ns::X'"),
-                 DiagName("typecheck_decl_incomplete_type"),
-                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                             "Add include \"x.h\" for symbol ns::X"))),
-           AllOf(
-               Diag(Test.range("tag"), "incomplete definition of type 'ns::X'"),
-               DiagName("typecheck_incomplete_tag"),
-               WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                           "Add include \"x.h\" for symbol ns::X"))),
-           AllOf(Diag(Test.range("use"),
-                      "invalid use of incomplete type 'ns::X'"),
-                 DiagName("invalid_incomplete_type_use"),
-                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                             "Add include \"x.h\" for symbol ns::X"))),
-           AllOf(Diag(Test.range("sizeof"),
-                      "invalid application of 'sizeof' to "
-                      "an incomplete type 'ns::X'"),
-                 DiagName("sizeof_alignof_incomplete_or_sizeless_type"),
-                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                             "Add include \"x.h\" for symbol ns::X"))),
-           AllOf(Diag(Test.range("for"),
-                      "cannot use incomplete type 'ns::X' as a range"),
-                 DiagName("for_range_incomplete_type"),
-                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                             "Add include \"x.h\" for symbol ns::X"))),
-           AllOf(Diag(Test.range("return"),
-                      "incomplete result type 'ns::X' in function definition"),
-                 DiagName("func_def_incomplete_result"),
-                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                             "Add include \"x.h\" for symbol ns::X"))),
-           AllOf(Diag(Test.range("field"), "field has incomplete type 'ns::X'"),
-                 DiagName("field_incomplete_or_sizeless"),
-                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                             "Add include \"x.h\" for symbol ns::X")))}))
-      << Test.code();
+  std::vector<std::pair<llvm::StringRef, llvm::StringRef>> Tests{
+      {"incomplete_nested_name_spec", "[[ns::X::]]Nested n;"},
+      {"incomplete_base_class", "class Y : [[ns::X]] {};"},
+      {"incomplete_member_access", "auto i = x[[->]]f();"},
+      {"incomplete_type", "auto& [[[]]m] = *x;"},
+      {"init_incomplete_type",
+       "struct C { static int f(ns::X&); }; int i = C::f([[{]]});"},
+      {"bad_cast_incomplete", "auto a = [[static_cast]]<ns::X>(0);"},
+      {"template_nontype_parm_incomplete", "template <ns::X [[foo]]> int a;"},
+      {"typecheck_decl_incomplete_type", "ns::X [[var]];"},
+      {"typecheck_incomplete_tag", "auto i = [[(*x)]]->f();"},
+      {"typecheck_nonviable_condition_incomplete",
+       "struct A { operator ns::X(); } a; const ns::X &[[b]] = a;"},
+      {"invalid_incomplete_type_use", "auto var = [[ns::X()]];"},
+      {"sizeof_alignof_incomplete_or_sizeless_type",
+       "auto s = [[sizeof]](ns::X);"},
+      {"for_range_incomplete_type", "void foo() { for (auto i : [[*]]x ) {} }"},
+      {"func_def_incomplete_result", "ns::X [[func]] () {}"},
+      {"field_incomplete_or_sizeless", "class M { ns::X [[member]]; };"},
+      {"array_incomplete_or_sizeless_type", "auto s = [[(ns::X[]){}]];"},
+      {"call_incomplete_return", "ns::X f(); auto fp = &f; auto z = [[fp()]];"},
+      {"call_function_incomplete_return", "ns::X foo(); auto a = [[foo()]];"},
+      {"call_incomplete_argument", "int m(ns::X); int i = m([[*x]]);"},
+      {"switch_incomplete_class_type", "void a() { [[switch]](*x) {} }"},
+      {"delete_incomplete_class_type", "void f() { [[delete]] *x; }"},
+      {"-Wdelete-incomplete", "void f() { [[delete]] x; }"},
+      {"dereference_incomplete_type",
+       R"cpp(void f() { asm("" : "=r"([[*]]x)::); })cpp"},
+  };
+  for (auto Case : Tests) {
+    Annotations Main(Case.second);
+    TU.Code = Main.code().str() + "\n // error-ok";
+    EXPECT_THAT(
+        *TU.build().getDiagnostics(),
+        ElementsAre(AllOf(DiagName(Case.first), HasRange(Main.range()),
+                          WithFix(Fix(Range{}, "#include \"x.h\"\n",
+                                      "Include \"x.h\" for symbol ns::X")))))
+        << Case.second;
+  }
+}
+
+TEST(IncludeFixerTest, IncompleteEnum) {
+  Symbol Sym = enm("X");
+  Sym.Flags |= Symbol::IndexedForCodeCompletion;
+  Sym.CanonicalDeclaration.FileURI = Sym.Definition.FileURI = "unittest:///x.h";
+  Sym.IncludeHeaders.emplace_back("\"x.h\"", 1);
+  SymbolSlab::Builder Slab;
+  Slab.insert(Sym);
+  auto Index =
+      MemIndex::build(std::move(Slab).build(), RefSlab(), RelationSlab());
+
+  TestTU TU;
+  TU.ExternalIndex = Index.get();
+  TU.ExtraArgs.push_back("-std=c++20");
+  TU.ExtraArgs.push_back("-fno-ms-compatibility"); // else incomplete enum is OK
+
+  std::vector<std::pair<llvm::StringRef, llvm::StringRef>> Tests{
+      {"incomplete_enum", "enum class X : int; using enum [[X]];"},
+      {"underlying_type_of_incomplete_enum",
+       "[[__underlying_type]](enum X) i;"},
+  };
+  for (auto Case : Tests) {
+    Annotations Main(Case.second);
+    TU.Code = Main.code().str() + "\n // error-ok";
+    EXPECT_THAT(*TU.build().getDiagnostics(),
+                Contains(AllOf(DiagName(Case.first), HasRange(Main.range()),
+                               WithFix(Fix(Range{}, "#include \"x.h\"\n",
+                                           "Include \"x.h\" for symbol X")))))
+        << Case.second;
+  }
 }
 
 TEST(IncludeFixerTest, NoSuggestIncludeWhenNoDefinitionInHeader) {
@@ -908,28 +973,28 @@ using Type = ns::$template[[Foo]]<int>;
           AllOf(Diag(Test.range("unqualified1"), "unknown type name 'X'"),
                 DiagName("unknown_typename"),
                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                            "Add include \"x.h\" for symbol ns::X"))),
+                            "Include \"x.h\" for symbol ns::X"))),
           Diag(Test.range("unqualified2"), "use of undeclared identifier 'X'"),
           AllOf(Diag(Test.range("qualified1"),
                      "no type named 'X' in namespace 'ns'"),
                 DiagName("typename_nested_not_found"),
                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                            "Add include \"x.h\" for symbol ns::X"))),
+                            "Include \"x.h\" for symbol ns::X"))),
           AllOf(Diag(Test.range("qualified2"),
                      "no member named 'X' in namespace 'ns'"),
                 DiagName("no_member"),
                 WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                            "Add include \"x.h\" for symbol ns::X"))),
+                            "Include \"x.h\" for symbol ns::X"))),
           AllOf(Diag(Test.range("global"),
                      "no type named 'Global' in the global namespace"),
                 DiagName("typename_nested_not_found"),
                 WithFix(Fix(Test.range("insert"), "#include \"global.h\"\n",
-                            "Add include \"global.h\" for symbol Global"))),
+                            "Include \"global.h\" for symbol Global"))),
           AllOf(Diag(Test.range("template"),
                      "no template named 'Foo' in namespace 'ns'"),
                 DiagName("no_member_template"),
                 WithFix(Fix(Test.range("insert"), "#include \"foo.h\"\n",
-                            "Add include \"foo.h\" for symbol ns::Foo")))));
+                            "Include \"foo.h\" for symbol ns::Foo")))));
 }
 
 TEST(IncludeFixerTest, MultipleMatchedSymbols) {
@@ -953,12 +1018,12 @@ void foo() {
                   Diag(Test.range("unqualified"), "unknown type name 'X'"),
                   DiagName("unknown_typename"),
                   WithFix(Fix(Test.range("insert"), "#include \"a.h\"\n",
-                              "Add include \"a.h\" for symbol na::X"),
+                              "Include \"a.h\" for symbol na::X"),
                           Fix(Test.range("insert"), "#include \"b.h\"\n",
-                              "Add include \"b.h\" for symbol na::nb::X")))));
+                              "Include \"b.h\" for symbol na::nb::X")))));
 }
 
-TEST(IncludeFixerTest, NoCrashMemebrAccess) {
+TEST(IncludeFixerTest, NoCrashMemberAccess) {
   Annotations Test(R"cpp(// error-ok
     struct X { int  xyz; };
     void g() { X x; x.$[[xy]]; }
@@ -1009,8 +1074,7 @@ void bar(X *x) {
       ADD_FAILURE() << "D.Fixes.size() != 1";
       continue;
     }
-    EXPECT_EQ(D.Fixes[0].Message,
-              std::string("Add include \"a.h\" for symbol X"));
+    EXPECT_EQ(D.Fixes[0].Message, std::string("Include \"a.h\" for symbol X"));
   }
 }
 
@@ -1030,11 +1094,11 @@ void g() {  ns::$[[scope]]::X_Y();  }
 
   EXPECT_THAT(
       *TU.build().getDiagnostics(),
-      UnorderedElementsAre(AllOf(
-          Diag(Test.range(), "no member named 'scope' in namespace 'ns'"),
-          DiagName("no_member"),
-          WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                      "Add include \"x.h\" for symbol ns::scope::X_Y")))));
+      UnorderedElementsAre(
+          AllOf(Diag(Test.range(), "no member named 'scope' in namespace 'ns'"),
+                DiagName("no_member"),
+                WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
+                            "Include \"x.h\" for symbol ns::scope::X_Y")))));
 }
 
 TEST(IncludeFixerTest, UnresolvedSpecifierWithSemaCorrection) {
@@ -1059,32 +1123,29 @@ void f() {
   EXPECT_THAT(
       *TU.build().getDiagnostics(),
       UnorderedElementsAre(
-          AllOf(
-              Diag(Test.range("q1"), "use of undeclared identifier 'clangd'; "
-                                     "did you mean 'clang'?"),
-              DiagName("undeclared_var_use_suggest"),
-              WithFix(_, // change clangd to clang
-                      Fix(Test.range("insert"), "#include \"x.h\"\n",
-                          "Add include \"x.h\" for symbol clang::clangd::X"))),
-          AllOf(
-              Diag(Test.range("x"), "no type named 'X' in namespace 'clang'"),
-              DiagName("typename_nested_not_found"),
-              WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                          "Add include \"x.h\" for symbol clang::clangd::X"))),
+          AllOf(Diag(Test.range("q1"), "use of undeclared identifier 'clangd'; "
+                                       "did you mean 'clang'?"),
+                DiagName("undeclared_var_use_suggest"),
+                WithFix(_, // change clangd to clang
+                        Fix(Test.range("insert"), "#include \"x.h\"\n",
+                            "Include \"x.h\" for symbol clang::clangd::X"))),
+          AllOf(Diag(Test.range("x"), "no type named 'X' in namespace 'clang'"),
+                DiagName("typename_nested_not_found"),
+                WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
+                            "Include \"x.h\" for symbol clang::clangd::X"))),
           AllOf(
               Diag(Test.range("q2"), "use of undeclared identifier 'clangd'; "
                                      "did you mean 'clang'?"),
               DiagName("undeclared_var_use_suggest"),
-              WithFix(
-                  _, // change clangd to clang
-                  Fix(Test.range("insert"), "#include \"y.h\"\n",
-                      "Add include \"y.h\" for symbol clang::clangd::ns::Y"))),
+              WithFix(_, // change clangd to clang
+                      Fix(Test.range("insert"), "#include \"y.h\"\n",
+                          "Include \"y.h\" for symbol clang::clangd::ns::Y"))),
           AllOf(Diag(Test.range("ns"),
                      "no member named 'ns' in namespace 'clang'"),
                 DiagName("no_member"),
-                WithFix(Fix(
-                    Test.range("insert"), "#include \"y.h\"\n",
-                    "Add include \"y.h\" for symbol clang::clangd::ns::Y")))));
+                WithFix(
+                    Fix(Test.range("insert"), "#include \"y.h\"\n",
+                        "Include \"y.h\" for symbol clang::clangd::ns::Y")))));
 }
 
 TEST(IncludeFixerTest, SpecifiedScopeIsNamespaceAlias) {
@@ -1105,7 +1166,7 @@ namespace c {
                   Diag(Test.range(), "no type named 'X' in namespace 'a'"),
                   DiagName("typename_nested_not_found"),
                   WithFix(Fix(Test.range("insert"), "#include \"x.h\"\n",
-                              "Add include \"x.h\" for symbol a::X")))));
+                              "Include \"x.h\" for symbol a::X")))));
 }
 
 TEST(IncludeFixerTest, NoCrashOnTemplateInstantiations) {
@@ -1128,6 +1189,26 @@ TEST(IncludeFixerTest, NoCrashOnTemplateInstantiations) {
   EXPECT_THAT(
       *TU.build().getDiagnostics(),
       ElementsAre(Diag(Test.range(), "use of undeclared identifier 'a'")));
+}
+
+TEST(IncludeFixerTest, HeaderNamedInDiag) {
+  Annotations Test(R"cpp(
+    $insert[[]]int main() {
+      [[printf]]("");
+    }
+  )cpp");
+  auto TU = TestTU::withCode(Test.code());
+  TU.ExtraArgs = {"-xc"};
+  auto Index = buildIndexWithSymbol({});
+  TU.ExternalIndex = Index.get();
+
+  EXPECT_THAT(
+      *TU.build().getDiagnostics(),
+      ElementsAre(AllOf(
+          Diag(Test.range(), "implicitly declaring library function 'printf' "
+                             "with type 'int (const char *, ...)'"),
+          WithFix(Fix(Test.range("insert"), "#include <stdio.h>\n",
+                      "Include <stdio.h> for symbol printf")))));
 }
 
 TEST(DiagsInHeaders, DiagInsideHeader) {
@@ -1392,6 +1473,69 @@ TEST(Preamble, EndsOnNonEmptyLine) {
         testing::Contains(Diag(Code.range(), "no newline at end of file")));
   }
 }
+
+TEST(Diagnostics, Tags) {
+  TestTU TU;
+  TU.ExtraArgs = {"-Wunused", "-Wdeprecated"};
+  Annotations Test(R"cpp(
+  void bar() __attribute__((deprecated));
+  void foo() {
+    int $unused[[x]];
+    $deprecated[[bar]]();
+  })cpp");
+  TU.Code = Test.code().str();
+  EXPECT_THAT(*TU.build().getDiagnostics(),
+              UnorderedElementsAre(
+                  AllOf(Diag(Test.range("unused"), "unused variable 'x'"),
+                        WithTag(DiagnosticTag::Unnecessary)),
+                  AllOf(Diag(Test.range("deprecated"), "'bar' is deprecated"),
+                        WithTag(DiagnosticTag::Deprecated))));
+}
+
+TEST(DiagnosticsTest, IncludeCleaner) {
+  Annotations Test(R"cpp(
+$fix[[  $diag[[#include "unused.h"]]
+]]
+  #include "used.h"
+
+  #include <system_header.h>
+
+  void foo() {
+    used();
+  }
+  )cpp");
+  TestTU TU;
+  TU.Code = Test.code().str();
+  TU.AdditionalFiles["unused.h"] = R"cpp(
+    #pragma once
+    void unused() {}
+  )cpp";
+  TU.AdditionalFiles["used.h"] = R"cpp(
+    #pragma once
+    void used() {}
+  )cpp";
+  TU.AdditionalFiles["system/system_header.h"] = "";
+  TU.ExtraArgs = {"-isystem" + testPath("system")};
+  // Off by default.
+  EXPECT_THAT(*TU.build().getDiagnostics(), IsEmpty());
+  Config Cfg;
+  Cfg.Diagnostics.UnusedIncludes = Config::UnusedIncludesPolicy::Strict;
+  WithContextValue WithCfg(Config::Key, std::move(Cfg));
+  EXPECT_THAT(
+      *TU.build().getDiagnostics(),
+      UnorderedElementsAre(AllOf(
+          Diag(Test.range("diag"), "included header unused.h is not used"),
+          WithTag(DiagnosticTag::Unnecessary), DiagSource(Diag::Clangd),
+          WithFix(Fix(Test.range("fix"), "", "remove #include directive")))));
+  Cfg.Diagnostics.SuppressAll = true;
+  WithContextValue SuppressAllWithCfg(Config::Key, std::move(Cfg));
+  EXPECT_THAT(*TU.build().getDiagnostics(), IsEmpty());
+  Cfg.Diagnostics.SuppressAll = false;
+  Cfg.Diagnostics.Suppress = {"unused-includes"};
+  WithContextValue SuppressFilterWithCfg(Config::Key, std::move(Cfg));
+  EXPECT_THAT(*TU.build().getDiagnostics(), IsEmpty());
+}
+
 } // namespace
 } // namespace clangd
 } // namespace clang

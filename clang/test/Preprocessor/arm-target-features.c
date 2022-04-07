@@ -859,11 +859,72 @@
 // CHECK-V87A: #define __ARM_ARCH_8_7A__ 1
 // CHECK-V87A: #define __ARM_ARCH_PROFILE 'A'
 
+// RUN: %clang -target armv9a-none-none-eabi -x c -E -dM %s -o - | FileCheck -match-full-lines --check-prefix=CHECK-V9A %s
+// CHECK-V9A: #define __ARM_ARCH 9
+// CHECK-V9A: #define __ARM_ARCH_9A__ 1
+// CHECK-V9A: #define __ARM_ARCH_PROFILE 'A'
+
+// RUN: %clang -target armv9.1a-none-none-eabi -x c -E -dM %s -o - | FileCheck -match-full-lines --check-prefix=CHECK-V91A %s
+// CHECK-V91A: #define __ARM_ARCH 9
+// CHECK-V91A: #define __ARM_ARCH_9_1A__ 1
+// CHECK-V91A: #define __ARM_ARCH_PROFILE 'A'
+
+// RUN: %clang -target armv9.2a-none-none-eabi -x c -E -dM %s -o - | FileCheck -match-full-lines --check-prefix=CHECK-V92A %s
+// CHECK-V92A: #define __ARM_ARCH 9
+// CHECK-V92A: #define __ARM_ARCH_9_2A__ 1
+// CHECK-V92A: #define __ARM_ARCH_PROFILE 'A'
+
 // RUN: %clang -target arm-none-none-eabi -march=armv7-m -mfpu=softvfp -x c -E -dM %s -o - | FileCheck --check-prefix=CHECK-SOFTVFP %s
 // CHECK-SOFTVFP-NOT: #define __ARM_FP 0x
+
+// Test Armv8.1-M PACBTI
+// RUN: %clang -target arm-arm-none-eabi -march=armv8.1-m.main -x c -E -dM %s -o - | FileCheck --check-prefixes=CHECK-NOBTI,CHECK-NOPAC %s
+// RUN: %clang -target arm-arm-none-eabi -march=armv8.1-m.main -mbranch-protection=bti -x c -E -dM %s -o - | FileCheck --check-prefixes=CHECK-BTI,CHECK-NOPAC %s
+// RUN: %clang -target arm-arm-none-eabi -march=armv8.1-m.main -mbranch-protection=pac-ret -x c -E -dM %s -o - | FileCheck --check-prefixes=CHECK-PAC,CHECK-NOBTI %s
+// RUN: %clang -target arm-arm-none-eabi -march=armv8.1-m.main -mbranch-protection=pac-ret+b-key -x c -E -dM %s -o - | FileCheck --check-prefixes=CHECK-PAC,CHECK-NOBTI %s
+// RUN: %clang -target arm-arm-none-eabi -march=armv8.1-m.main -mbranch-protection=pac-ret+leaf -x c -E -dM %s -o - | FileCheck --check-prefixes=CHECK-PAC-LEAF,CHECK-NOBTI %s
+// RUN: %clang -target arm-arm-none-eabi -march=armv8.1-m.main -mbranch-protection=pac-ret+b-key+leaf -x c -E -dM %s -o - | FileCheck --check-prefixes=CHECK-PAC-LEAF,CHECK-NOBTI %s
+// RUN: %clang -target arm-arm-none-eabi -march=armv8.1-m.main -mbranch-protection=bti+pac-ret -x c -E -dM %s -o - | FileCheck --check-prefixes=CHECK-PAC,CHECK-BTI %s
+// RUN: %clang -target arm-arm-none-eabi -march=armv8.1-m.main -mbranch-protection=bti+pac-ret+b-key -x c -E -dM %s -o - | FileCheck --check-prefixes=CHECK-PAC,CHECK-BTI %s
+// RUN: %clang -target arm-arm-none-eabi -march=armv8.1-m.main -mbranch-protection=bti+pac-ret+leaf -x c -E -dM %s -o - | FileCheck --check-prefixes=CHECK-PAC-LEAF,CHECK-BTI %s
+// RUN: %clang -target arm-arm-none-eabi -march=armv8.1-m.main -mbranch-protection=bti+pac-ret+b-key+leaf -x c -E -dM %s -o - | FileCheck --check-prefixes=CHECK-PAC-LEAF,CHECK-BTI %s
+// CHECK-NOBTI-NOT: #define __ARM_FEATURE_BTI_DEFAULT
+// CHECK-NOPAC-NOT: #define __ARM_FEATURE_PAC_DEFAULT
+// CHECK-BTI: #define __ARM_FEATURE_BTI_DEFAULT 1
+// CHECK-PAC: #define __ARM_FEATURE_PAC_DEFAULT 1
+// CHECK-PAC-LEAF: #define __ARM_FEATURE_PAC_DEFAULT 5
+
+// RUN: %clang -target arm-arm-none-eabi -march=armv8.1-m.main -x c -E -dM %s -o - | FileCheck --check-prefixes=CHECK-NOBTI-EXT,CHECK-NOPAC-EXT %s
+// RUN: %clang -target arm-arm-none-eabi -march=armv7-m+pacbti -x c -E -dM %s -o - | FileCheck --check-prefixes=CHECK-PACBTI-EXT %s
+// CHECK-NOBTI-EXT-NOT: #define __ARM_FEATURE_BTI 1
+// CHECK-NOPAC-EXT-NOT: #define __ARM_FEATURE_PAUTH 1
+// CHECK-PACBTI-EXT: #define __ARM_FEATURE_BTI 1
+// CHECK-PACBTI-EXT: #define __ARM_FEATURE_PAUTH 1
 
 // ================== Check BFloat16 Extensions.
 // RUN: %clang -target arm-arm-none-eabi -march=armv8.6-a+bf16 -x c -E -dM %s -o - 2>&1 | FileCheck -check-prefix=CHECK-BFLOAT %s
 // CHECK-BFLOAT: #define __ARM_BF16_FORMAT_ALTERNATIVE 1
 // CHECK-BFLOAT: #define __ARM_FEATURE_BF16 1
 // CHECK-BFLOAT: #define __ARM_FEATURE_BF16_VECTOR_ARITHMETIC 1
+
+// Check crypto feature test macros
+// RUN: %clang -target arm-arm-none-eabi -march=armv8-a+crypto -x c -E -dM %s -o - | FileCheck -match-full-lines --check-prefix=CHECK-CRYPTO %s
+// CHECK-CRYPTO: #define __ARM_ARCH_PROFILE 'A'
+// CHECK-CRYPTO: #define __ARM_FEATURE_AES 1
+// CHECK-CRYPTO: #define __ARM_FEATURE_CRYPTO 1
+// CHECK-CRYPTO: #define __ARM_FEATURE_SHA2 1
+// RUN: %clang -target arm-arm-none-eabi -march=armv8-a+nocrypto -x c -E -dM %s -o - | FileCheck -match-full-lines --check-prefix=CHECK-NOCRYPTO %s
+// CHECK-NOCRYPTO: #define __ARM_ARCH_PROFILE 'A'
+// CHECK-NOCRYPTO-NOT: #define __ARM_FEATURE_AES 1
+// CHECK-NOCRYPTO-NOT: #define __ARM_FEATURE_CRYPTO 1
+// CHECK-NOCRYPTO-NOT: #define __ARM_FEATURE_SHA2 1
+// RUN: %clang -target arm-arm-none-eabi -march=armv8-a+aes+nosha2 -x c -E -dM %s -o - | FileCheck -match-full-lines --check-prefix=CHECK-AES %s
+// CHECK-AES: #define __ARM_ARCH_PROFILE 'A'
+// CHECK-AES: #define __ARM_FEATURE_AES 1
+// CHECK-AES-NOT: #define __ARM_FEATURE_CRYPTO 1
+// CHECK-AES-NOT: #define __ARM_FEATURE_SHA2 1
+// RUN: %clang -target arm-arm-none-eabi -march=armv8-a+noaes+sha2 -x c -E -dM %s -o - | FileCheck -match-full-lines --check-prefix=CHECK-SHA2 %s
+// CHECK-SHA2: #define __ARM_ARCH_PROFILE 'A'
+// CHECK-SHA2-NOT: #define __ARM_FEATURE_AES 1
+// CHECK-SHA2-NOT: #define __ARM_FEATURE_CRYPTO 1
+// CHECK-SHA2: #define __ARM_FEATURE_SHA2 1

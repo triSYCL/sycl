@@ -362,6 +362,8 @@ DwarfDebug::DwarfDebug(AsmPrinter *A)
     DebuggerTuning = DebuggerKind::LLDB;
   else if (TT.isPS4CPU())
     DebuggerTuning = DebuggerKind::SCE;
+  else if (TT.isOSAIX())
+    DebuggerTuning = DebuggerKind::DBX;
   else
     DebuggerTuning = DebuggerKind::GDB;
 
@@ -478,7 +480,7 @@ static bool hasObjCCategory(StringRef Name) {
   if (!isObjCClass(Name))
     return false;
 
-  return Name.find(") ") != StringRef::npos;
+  return Name.contains(") ");
 }
 
 static void getObjCClassCategory(StringRef In, StringRef &Class,
@@ -583,14 +585,6 @@ void DwarfDebug::constructAbstractSubprogramScopeDIE(DwarfCompileUnit &SrcCU,
     } else
       CU.constructAbstractSubprogramScopeDIE(Scope);
   }
-}
-
-DIE &DwarfDebug::constructSubprogramDefinitionDIE(const DISubprogram *SP) {
-  DICompileUnit *Unit = SP->getUnit();
-  assert(SP->isDefinition() && "Subprogram not a definition");
-  assert(Unit && "Subprogram definition without parent unit");
-  auto &CU = getOrCreateDwarfCompileUnit(Unit);
-  return *CU.getOrCreateSubprogramDIE(SP);
 }
 
 /// Represents a parameter whose call site value can be described by applying a
@@ -936,12 +930,14 @@ void DwarfDebug::constructCallSiteEntryDIEs(const DISubprogram &SP,
       // If this is a direct call, find the callee's subprogram.
       // In the case of an indirect call find the register that holds
       // the callee.
-      const MachineOperand &CalleeOp = MI.getOperand(0);
-      if (!CalleeOp.isGlobal() && !CalleeOp.isReg())
+      const MachineOperand &CalleeOp = TII->getCalleeOperand(MI);
+      if (!CalleeOp.isGlobal() &&
+          (!CalleeOp.isReg() ||
+           !Register::isPhysicalRegister(CalleeOp.getReg())))
         continue;
 
       unsigned CallReg = 0;
-      DIE *CalleeDIE = nullptr;
+      const DISubprogram *CalleeSP = nullptr;
       const Function *CalleeDecl = nullptr;
       if (CalleeOp.isReg()) {
         CallReg = CalleeOp.getReg();
@@ -951,19 +947,7 @@ void DwarfDebug::constructCallSiteEntryDIEs(const DISubprogram &SP,
         CalleeDecl = dyn_cast<Function>(CalleeOp.getGlobal());
         if (!CalleeDecl || !CalleeDecl->getSubprogram())
           continue;
-        const DISubprogram *CalleeSP = CalleeDecl->getSubprogram();
-
-        if (CalleeSP->isDefinition()) {
-          // Ensure that a subprogram DIE for the callee is available in the
-          // appropriate CU.
-          CalleeDIE = &constructSubprogramDefinitionDIE(CalleeSP);
-        } else {
-          // Create the declaration DIE if it is missing. This is required to
-          // support compilation of old bitcode with an incomplete list of
-          // retained metadata.
-          CalleeDIE = CU.getOrCreateSubprogramDIE(CalleeSP);
-        }
-        assert(CalleeDIE && "Must have a DIE for the callee");
+        CalleeSP = CalleeDecl->getSubprogram();
       }
 
       // TODO: Omit call site entries for runtime calls (objc_msgSend, etc).
@@ -1000,7 +984,7 @@ void DwarfDebug::constructCallSiteEntryDIEs(const DISubprogram &SP,
                         << (IsTail ? " [IsTail]" : "") << "\n");
 
       DIE &CallSiteDIE = CU.constructCallSiteEntryDIE(
-          ScopeDIE, CalleeDIE, IsTail, PCAddr, CallAddr, CallReg);
+          ScopeDIE, CalleeSP, IsTail, PCAddr, CallAddr, CallReg);
 
       // Optionally emit call-site-param debug info.
       if (emitDebugEntryValues()) {
@@ -1232,6 +1216,7 @@ void DwarfDebug::beginModule(Module *M) {
       if (!GVMapEntry.size() || (Expr && Expr->isConstant()))
         GVMapEntry.push_back({nullptr, Expr});
     }
+
     DenseSet<DIGlobalVariable *> Processed;
     for (auto *GVE : CUNode->getGlobalVariables()) {
       DIGlobalVariable *GV = GVE->getVariable();
@@ -1239,17 +1224,15 @@ void DwarfDebug::beginModule(Module *M) {
         CU.getOrCreateGlobalVariableDIE(GV, sortGlobalExprs(GVMap[GV]));
     }
 
-    for (auto *Ty : CUNode->getEnumTypes()) {
-      // The enum types array by design contains pointers to
-      // MDNodes rather than DIRefs. Unique them here.
+    for (auto *Ty : CUNode->getEnumTypes())
       CU.getOrCreateTypeDIE(cast<DIType>(Ty));
-    }
+
     for (auto *Ty : CUNode->getRetainedTypes()) {
       // The retained types array by design contains pointers to
       // MDNodes rather than DIRefs. Unique them here.
       if (DIType *RT = dyn_cast<DIType>(Ty))
-          // There is no point in force-emitting a forward declaration.
-          CU.getOrCreateTypeDIE(RT);
+        // There is no point in force-emitting a forward declaration.
+        CU.getOrCreateTypeDIE(RT);
     }
     // Emit imported_modules last so that the relevant context is already
     // available.
@@ -1422,6 +1405,10 @@ void DwarfDebug::finalizeModuleInfo() {
 
 // Emit all Dwarf sections that should come after the content.
 void DwarfDebug::endModule() {
+  // Terminate the pending line table.
+  if (PrevCU)
+    terminateLineTable(PrevCU);
+  PrevCU = nullptr;
   assert(CurFn == nullptr);
   assert(CurMI == nullptr);
 
@@ -1549,6 +1536,7 @@ void DwarfDebug::collectVariableInfoFromMFTable(
     RegVar->initializeMMI(VI.Expr, VI.Slot);
     LLVM_DEBUG(dbgs() << "Created DbgVariable for " << VI.Var->getName()
                       << "\n");
+
     if (DbgVariable *DbgVar = MFVars.lookup(Var))
       DbgVar->addMMIEntry(*RegVar);
     else if (InfoHolder.addScopeVariable(Scope, RegVar.get())) {
@@ -1737,7 +1725,30 @@ bool DwarfDebug::buildLocationList(SmallVectorImpl<DebugLocEntry> &DebugLoc,
     SmallVector<DbgValueLoc, 4> Values;
     for (auto &R : OpenRanges)
       Values.push_back(R.second);
-    DebugLoc.emplace_back(StartLabel, EndLabel, Values);
+
+    // With Basic block sections, it is posssible that the StartLabel and the
+    // Instr are not in the same section.  This happens when the StartLabel is
+    // the function begin label and the dbg value appears in a basic block
+    // that is not the entry.  In this case, the range needs to be split to
+    // span each individual section in the range from StartLabel to EndLabel.
+    if (Asm->MF->hasBBSections() && StartLabel == Asm->getFunctionBegin() &&
+        !Instr->getParent()->sameSection(&Asm->MF->front())) {
+      const MCSymbol *BeginSectionLabel = StartLabel;
+
+      for (const MachineBasicBlock &MBB : *Asm->MF) {
+        if (MBB.isBeginSection() && &MBB != &Asm->MF->front())
+          BeginSectionLabel = MBB.getSymbol();
+
+        if (MBB.sameSection(Instr->getParent())) {
+          DebugLoc.emplace_back(BeginSectionLabel, EndLabel, Values);
+          break;
+        }
+        if (MBB.isEndSection())
+          DebugLoc.emplace_back(BeginSectionLabel, MBB.getEndSymbol(), Values);
+      }
+    } else {
+      DebugLoc.emplace_back(StartLabel, EndLabel, Values);
+    }
 
     // Attempt to coalesce the ranges of two otherwise identical
     // DebugLocEntries.
@@ -1754,8 +1765,46 @@ bool DwarfDebug::buildLocationList(SmallVectorImpl<DebugLocEntry> &DebugLoc,
       DebugLoc.pop_back();
   }
 
-  return DebugLoc.size() == 1 && isSafeForSingleLocation &&
-         validThroughout(LScopes, StartDebugMI, EndMI, getInstOrdering());
+  if (!isSafeForSingleLocation ||
+      !validThroughout(LScopes, StartDebugMI, EndMI, getInstOrdering()))
+    return false;
+
+  if (DebugLoc.size() == 1)
+    return true;
+
+  if (!Asm->MF->hasBBSections())
+    return false;
+
+  // Check here to see if loclist can be merged into a single range. If not,
+  // we must keep the split loclists per section.  This does exactly what
+  // MergeRanges does without sections.  We don't actually merge the ranges
+  // as the split ranges must be kept intact if this cannot be collapsed
+  // into a single range.
+  const MachineBasicBlock *RangeMBB = nullptr;
+  if (DebugLoc[0].getBeginSym() == Asm->getFunctionBegin())
+    RangeMBB = &Asm->MF->front();
+  else
+    RangeMBB = Entries.begin()->getInstr()->getParent();
+  auto *CurEntry = DebugLoc.begin();
+  auto *NextEntry = std::next(CurEntry);
+  while (NextEntry != DebugLoc.end()) {
+    // Get the last machine basic block of this section.
+    while (!RangeMBB->isEndSection())
+      RangeMBB = RangeMBB->getNextNode();
+    if (!RangeMBB->getNextNode())
+      return false;
+    // CurEntry should end the current section and NextEntry should start
+    // the next section and the Values must match for these two ranges to be
+    // merged.
+    if (CurEntry->getEndSym() != RangeMBB->getEndSymbol() ||
+        NextEntry->getBeginSym() != RangeMBB->getNextNode()->getSymbol() ||
+        CurEntry->getValues() != NextEntry->getValues())
+      return false;
+    RangeMBB = RangeMBB->getNextNode();
+    CurEntry = NextEntry;
+    NextEntry = std::next(CurEntry);
+  }
+  return true;
 }
 
 DbgEntity *DwarfDebug::createConcreteEntity(DwarfCompileUnit &TheCU,
@@ -2035,12 +2084,22 @@ void DwarfDebug::beginInstruction(const MachineInstr *MI) {
 static DebugLoc findPrologueEndLoc(const MachineFunction *MF) {
   // First known non-DBG_VALUE and non-frame setup location marks
   // the beginning of the function body.
-  for (const auto &MBB : *MF)
-    for (const auto &MI : MBB)
+  DebugLoc LineZeroLoc;
+  for (const auto &MBB : *MF) {
+    for (const auto &MI : MBB) {
       if (!MI.isMetaInstruction() && !MI.getFlag(MachineInstr::FrameSetup) &&
-          MI.getDebugLoc())
-        return MI.getDebugLoc();
-  return DebugLoc();
+          MI.getDebugLoc()) {
+        // Scan forward to try to find a non-zero line number. The prologue_end
+        // marks the first breakpoint in the function after the frame setup, and
+        // a compiler-generated line 0 location is not a meaningful breakpoint.
+        // If none is found, return the first location after the frame setup.
+        if (MI.getDebugLoc().getLine())
+          return MI.getDebugLoc();
+        LineZeroLoc = MI.getDebugLoc();
+      }
+    }
+  }
+  return LineZeroLoc;
 }
 
 /// Register a source line with debug info. Returns the  unique label that was
@@ -2095,24 +2154,42 @@ void DwarfDebug::beginFunctionImpl(const MachineFunction *MF) {
 
   DwarfCompileUnit &CU = getOrCreateDwarfCompileUnit(SP->getUnit());
 
-  // Set DwarfDwarfCompileUnitID in MCContext to the Compile Unit this function
-  // belongs to so that we add to the correct per-cu line table in the
-  // non-asm case.
-  if (Asm->OutStreamer->hasRawTextSupport())
-    // Use a single line table if we are generating assembly.
-    Asm->OutStreamer->getContext().setDwarfCompileUnitID(0);
-  else
-    Asm->OutStreamer->getContext().setDwarfCompileUnitID(CU.getUniqueID());
+  Asm->OutStreamer->getContext().setDwarfCompileUnitID(
+      getDwarfCompileUnitIDForLineTable(CU));
 
   // Record beginning of function.
   PrologEndLoc = emitInitialLocDirective(
       *MF, Asm->OutStreamer->getContext().getDwarfCompileUnitID());
 }
 
+unsigned
+DwarfDebug::getDwarfCompileUnitIDForLineTable(const DwarfCompileUnit &CU) {
+  // Set DwarfDwarfCompileUnitID in MCContext to the Compile Unit this function
+  // belongs to so that we add to the correct per-cu line table in the
+  // non-asm case.
+  if (Asm->OutStreamer->hasRawTextSupport())
+    // Use a single line table if we are generating assembly.
+    return 0;
+  else
+    return CU.getUniqueID();
+}
+
+void DwarfDebug::terminateLineTable(const DwarfCompileUnit *CU) {
+  const auto &CURanges = CU->getRanges();
+  auto &LineTable = Asm->OutStreamer->getContext().getMCDwarfLineTable(
+      getDwarfCompileUnitIDForLineTable(*CU));
+  // Add the last range label for the given CU.
+  LineTable.getMCLineSections().addEndEntry(
+      const_cast<MCSymbol *>(CURanges.back().End));
+}
+
 void DwarfDebug::skippedNonDebugFunction() {
   // If we don't have a subprogram for this function then there will be a hole
   // in the range information. Keep note of this by setting the previously used
   // section to nullptr.
+  // Terminate the pending line table.
+  if (PrevCU)
+    terminateLineTable(PrevCU);
   PrevCU = nullptr;
   CurFn = nullptr;
 }

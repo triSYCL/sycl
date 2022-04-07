@@ -147,7 +147,7 @@ static bool isDereferenceableAndAlignedPointer(
                                               Alignment, Size, DL, CtxI, DT,
                                               TLI, Visited, MaxDepth);
 
-  if (const AddrSpaceCastInst *ASC = dyn_cast<AddrSpaceCastInst>(V))
+  if (const AddrSpaceCastOperator *ASC = dyn_cast<AddrSpaceCastOperator>(V))
     return isDereferenceableAndAlignedPointer(ASC->getOperand(0), Alignment,
                                               Size, DL, CtxI, DT, TLI,
                                               Visited, MaxDepth);
@@ -451,8 +451,8 @@ static bool areNonOverlapSameBaseLoadAndStore(const Value *LoadPtr,
                                               const Value *StorePtr,
                                               Type *StoreTy,
                                               const DataLayout &DL) {
-  APInt LoadOffset(DL.getTypeSizeInBits(LoadPtr->getType()), 0);
-  APInt StoreOffset(DL.getTypeSizeInBits(StorePtr->getType()), 0);
+  APInt LoadOffset(DL.getIndexTypeSizeInBits(LoadPtr->getType()), 0);
+  APInt StoreOffset(DL.getIndexTypeSizeInBits(StorePtr->getType()), 0);
   const Value *LoadBase = LoadPtr->stripAndAccumulateConstantOffsets(
       DL, LoadOffset, /* AllowNonInbounds */ false);
   const Value *StoreBase = StorePtr->stripAndAccumulateConstantOffsets(
@@ -511,8 +511,11 @@ static Value *getAvailableLoadStore(Instruction *Inst, const Value *Ptr,
     if (CastInst::isBitOrNoopPointerCastable(Val->getType(), AccessTy, DL))
       return Val;
 
-    if (auto *C = dyn_cast<Constant>(Val))
-      return ConstantFoldLoadThroughBitcast(C, AccessTy, DL);
+    TypeSize StoreSize = DL.getTypeStoreSize(Val->getType());
+    TypeSize LoadSize = DL.getTypeStoreSize(AccessTy);
+    if (TypeSize::isKnownLE(LoadSize, StoreSize))
+      if (auto *C = dyn_cast<Constant>(Val))
+        return ConstantFoldLoadFromConst(C, AccessTy, DL);
   }
 
   return nullptr;
@@ -532,7 +535,7 @@ Value *llvm::findAvailablePtrLoadStore(
     // We must ignore debug info directives when counting (otherwise they
     // would affect codegen).
     Instruction *Inst = &*--ScanFrom;
-    if (isa<DbgInfoIntrinsic>(Inst))
+    if (Inst->isDebugOrPseudoInst())
       continue;
 
     // Restore ScanFrom to expected value in case next test succeeds
@@ -620,7 +623,7 @@ Value *llvm::FindAvailableLoadedValue(LoadInst *Load, AAResults &AA,
   SmallVector<Instruction *> MustNotAliasInsts;
   for (Instruction &Inst : make_range(++Load->getReverseIterator(),
                                       ScanBB->rend())) {
-    if (isa<DbgInfoIntrinsic>(&Inst))
+    if (Inst.isDebugOrPseudoInst())
       continue;
 
     if (MaxInstsToScan-- == 0)

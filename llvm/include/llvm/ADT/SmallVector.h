@@ -16,7 +16,6 @@
 #include "llvm/ADT/iterator_range.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/MemAlloc.h"
 #include "llvm/Support/type_traits.h"
 #include <algorithm>
@@ -24,6 +23,7 @@
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
+#include <functional>
 #include <initializer_list>
 #include <iterator>
 #include <limits>
@@ -589,17 +589,21 @@ public:
 
 private:
   template <bool ForOverwrite> void resizeImpl(size_type N) {
+    if (N == this->size())
+      return;
+
     if (N < this->size()) {
-      this->pop_back_n(this->size() - N);
-    } else if (N > this->size()) {
-      this->reserve(N);
-      for (auto I = this->end(), E = this->begin() + N; I != E; ++I)
-        if (ForOverwrite)
-          new (&*I) T;
-        else
-          new (&*I) T();
-      this->set_size(N);
+      this->truncate(N);
+      return;
     }
+
+    this->reserve(N);
+    for (auto I = this->end(), E = this->begin() + N; I != E; ++I)
+      if (ForOverwrite)
+        new (&*I) T;
+      else
+        new (&*I) T();
+    this->set_size(N);
   }
 
 public:
@@ -608,12 +612,19 @@ public:
   /// Like resize, but \ref T is POD, the new values won't be initialized.
   void resize_for_overwrite(size_type N) { resizeImpl<true>(N); }
 
+  /// Like resize, but requires that \p N is less than \a size().
+  void truncate(size_type N) {
+    assert(this->size() >= N && "Cannot increase size with truncate");
+    this->destroy_range(this->begin() + N, this->end());
+    this->set_size(N);
+  }
+
   void resize(size_type N, ValueParamT NV) {
     if (N == this->size())
       return;
 
     if (N < this->size()) {
-      this->pop_back_n(this->size() - N);
+      this->truncate(N);
       return;
     }
 
@@ -628,8 +639,7 @@ public:
 
   void pop_back_n(size_type NumItems) {
     assert(this->size() >= NumItems);
-    this->destroy_range(this->end() - NumItems, this->end());
-    this->set_size(this->size() - NumItems);
+    truncate(this->size() - NumItems);
   }
 
   LLVM_NODISCARD T pop_back_val() {
@@ -1239,13 +1249,22 @@ inline size_t capacity_in_bytes(const SmallVector<T, N> &X) {
   return X.capacity_in_bytes();
 }
 
+template <typename RangeType>
+using ValueTypeFromRangeType =
+    typename std::remove_const<typename std::remove_reference<
+        decltype(*std::begin(std::declval<RangeType &>()))>::type>::type;
+
 /// Given a range of type R, iterate the entire range and return a
 /// SmallVector with elements of the vector.  This is useful, for example,
 /// when you want to iterate a range and then sort the results.
 template <unsigned Size, typename R>
-SmallVector<typename std::remove_const<typename std::remove_reference<
-                decltype(*std::begin(std::declval<R &>()))>::type>::type,
-            Size>
+SmallVector<ValueTypeFromRangeType<R>, Size> to_vector(R &&Range) {
+  return {std::begin(Range), std::end(Range)};
+}
+template <typename R>
+SmallVector<ValueTypeFromRangeType<R>,
+            CalculateSmallVectorDefaultInlinedElements<
+                ValueTypeFromRangeType<R>>::value>
 to_vector(R &&Range) {
   return {std::begin(Range), std::end(Range)};
 }

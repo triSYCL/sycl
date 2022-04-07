@@ -22,10 +22,12 @@ kernel.
 """
 
 from argparse import ArgumentParser
+from itertools import starmap
 import json
 from multiprocessing import Pool
 from os import environ
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import tempfile
@@ -49,6 +51,63 @@ class TmpDirManager:
             shutil.rmtree(self.dir)
 
 
+def subprocess_error_handler(msg: str):
+    """ Build decorator that prints an error message and prevents
+        CompilationDriver from continuing when a called subprocess
+        exits with non-zero status
+    """
+    def decorator(func):
+        def decorated(self, *args, **kwargs):
+            if self.ok:
+                try:
+                    return func(self, *args, **kwargs)
+                except subprocess.CalledProcessError:
+                    print(msg, file=sys.stderr)
+                    self.ok = False
+        return decorated
+    return decorator
+
+
+def _run_in_isolated_proctree(cmd, *args, **kwargs):
+    """ Run a command in isolated process namespace.
+    This is necessary to get a clean termination of all v++
+    subprocesses in case of program interruption, as v++ subprocess
+    handling is strange.
+    """
+    newcmd = ("unshare",
+              "--map-current-user",
+              "--pid",
+              "--mount-proc",
+              "--kill-child",
+              *cmd)
+    return subprocess.run(cmd, *args, **kwargs)
+
+
+class VXXVersion:
+    def __init__(self, vxx_path):
+        cmd = (vxx_path, '-v')
+        proc_res = _run_in_isolated_proctree(cmd, capture_output=True)
+        version_regex = r".*v(?P<major>\d{4})\.(?P<minor>\d).*"
+        match = re.match(version_regex,
+                         proc_res.stdout.decode('utf-8'),
+                         flags=re.DOTALL)
+        self.major = int(match['major'])
+        self.minor = int(match['minor'])
+        print(f"Found Vitis version {self}")
+
+    def __str__(self) -> str:
+        return f"{self.major}.{self.minor}"
+
+    def _interface_is_attribute(self):
+        return self.major >= 2022
+
+    def get_kernel_prop_opt(self):
+        ret = []
+        if self._interface_is_attribute():
+            ret.append("-sycl-vxx-maxi-attr-encoding")
+        return ret
+
+
 class CompilationDriver:
     def __init__(self, arguments):
         self.outpath = Path(arguments.o)
@@ -57,9 +116,10 @@ class CompilationDriver:
         self.inputs = arguments.inputs
         self.hls_flow = arguments.hls
         self.vitis_bin_dir = arguments.vitis_bin_dir.resolve()
-        self.vitis_version = self.vitis_bin_dir.parent.name
+        self.vitis_version = VXXVersion(self.vitis_bin_dir / "v++")
         self.outstem = self.outpath.stem
         self.vitis_mode = arguments.target
+        self.ok = True
         # TODO: XILINX_PLATFORM should be passed by clang driver instead
         self.xilinx_platform = environ['XILINX_PLATFORM']
         if environ.get("XILINX_CLANG_39_BUILD_PATH") is not None:
@@ -90,9 +150,15 @@ class CompilationDriver:
                     self.extra_link_args.extend(content.split(' '))
 
     def _dump_cmd(self, filename, args):
+        cmdline = " ".join(map(str, args))
         with (self.tmpdir / filename).open("w") as f:
-            f.write(" ".join(map(str, args)) + "\n")
+            f.write(cmdline + "\n")
+            if environ.get("SYCL_VXX_DBG_CMD_DUMP") is not None:
+                f.write(f"\nOriginal command list: {args}")
+            if environ.get("SYCL_VXX_PRINT_CMD") is not None:
+                print("SYCL_VXX_CMD:", cmdline)
 
+    @subprocess_error_handler("Linkage of multiple inputs failed")
     def _link_multi_inputs(self):
         """Link all input files into a single .bc"""
         llvm_link = self.clang_path / "llvm-link"
@@ -102,22 +168,20 @@ class CompilationDriver:
                 str(self.before_opt_src)
                 ]
         self._dump_cmd("00-link_multi_inputs.cmd", args)
-        subprocess.run(args)
+        subprocess.run(args, check=True)
 
-    def _run_optimisation(self):
+    @subprocess_error_handler("Error in sycl->HLS conversion")
+    def _run_preparation(self):
         """Run the various sycl->HLS conversion passes"""
+        # We try to avoid as many optimization as possible
+        # to give vitis the opportunity to use its custom
+        # optimizations
         outstem = self.outstem
-        kernel_prop = (
+        self.prepared_bc = (
             self.tmpdir /
-            f"{outstem}-kernels_properties.json"
-        )
-        self.optimised_bc = (
-            self.tmpdir /
-            f"{outstem}-kernels-optimized.bc"
+            f"{outstem}-kernels-prepared.bc"
         )
         opt_options = ["--sycl-vxx",
-                       "-kernelPropGen",
-                       "--sycl-kernel-propgen-output", f"{kernel_prop}",
                        "-preparesycl", "-globaldce"]
         if not self.hls_flow:
             opt_options.extend([
@@ -125,17 +189,20 @@ class CompilationDriver:
                 "-flat-address-space=0", "-globaldce"
             ])
         opt_options.extend([
-            "-O3", "-globaldce", "-globaldce", "-inSPIRation",
-            "-o", f"{self.optimised_bc}"
+            "--vectorize-loops=false", "--disable-loop-unrolling",
+            "--sroa-avoid-aggregates", "-O3", "-globaldce", "-globaldce",
+            "-inSPIRation", "-o", f"{self.prepared_bc}"
         ])
 
         opt = self.clang_path / "opt"
         args = [opt, *opt_options, self.before_opt_src]
-        self._dump_cmd("01-run_optimisations.cmd", args)
-        subprocess.run(args)
-        with kernel_prop.open('r') as kp_fp:
-            self.kernel_properties = json.load(kp_fp)
+        self._dump_cmd("01-run_preparation.cmd", args)
+        proc = subprocess.run(args, check=True, capture_output=True)
+        if bytes("SYCL_VXX_UNSUPPORTED_SPIR_BUILTINS", "ascii") in proc.stderr:
+            print("Unsupported SPIR builtins found : stopping compilation")
+            self.ok = False
 
+    @subprocess_error_handler("Error when linking with HLS SPIR library")
     def _link_spir(self):
         vitis_lib_spir = (
             self.vitis_bin_dir.parent /
@@ -150,27 +217,44 @@ class CompilationDriver:
         self.linked_kernels = self.tmpdir / f"{self.outstem}_kernels-linked.bc"
         args = [
             llvm_link,
-            self.optimised_bc,
+            self.prepared_bc,
             "--only-needed",
             vitis_lib_spir,
             "-o",
             self.linked_kernels
         ]
         self._dump_cmd("02-link_spir.cmd", args)
-        subprocess.run(args)
+        subprocess.run(args, check=True)
 
-    def _prepare_and_downgrade(self):
+    @subprocess_error_handler("Error in preparing and downgrading IR")
+    def _downgrade(self):
         opt = self.clang_path / "opt"
         prepared_kernels = self.tmpdir / f"{self.outstem}_linked.simple.bc"
+        kernel_prop = (
+            self.tmpdir /
+            f"{self.outstem}-kernels_properties.json"
+        )
+
+        kernel_prop_opt = ["-kernelPropGen",
+                           "--sycl-kernel-propgen-output", f"{kernel_prop}"]
+
+        kernel_prop_opt.extend(self.vitis_version.get_kernel_prop_opt())
+
         opt_options = [
+            "--lower-delayed-sycl-metadata", "-lower-sycl-metadata",
             "--sycl-vxx", "--sycl-prepare-clearspir", "-S", "-preparesycl",
-            "-globaldce", self.linked_kernels,
+            *kernel_prop_opt,
+            "-globaldce",
+            "-strip-debug",
+            self.linked_kernels,
             "-o", prepared_kernels
         ]
         args = [opt, *opt_options]
         self._dump_cmd("03-prepare.cmd", args)
-        subprocess.run(args)
-        opt_options = ["--sycl-vxx", "-S", "-O3", "-vxxIRDowngrader"]
+        subprocess.run(args, check=True)
+        with kernel_prop.open('r') as kp_fp:
+            self.kernel_properties = json.load(kp_fp)
+        opt_options = ["--sycl-vxx", "-S", "-vxxIRDowngrader"]
         self.downgraded_ir = (
             self.tmpdir / f"{self.outstem}_kernels-linked.opt.ll")
         args = [
@@ -178,8 +262,9 @@ class CompilationDriver:
             "-o", self.downgraded_ir
         ]
         self._dump_cmd("04-downgrade.cmd", args)
-        subprocess.run(args)
+        subprocess.run(args, check=True)
 
+    @subprocess_error_handler("Downgrading of llvm IR -> Vitis old llvm bitcode failed")
     def _asm_ir(self):
         """Assemble downgraded IR to bitcode using Vitis llvm-as"""
         args = [
@@ -189,35 +274,18 @@ class CompilationDriver:
             self.vpp_llvm_input
         ]
         self._dump_cmd("05-asm_ir.cmd", args)
-        subprocess.run(args)
-        if self.hls_flow and self.vitis_mode == "sw_emu":
-            # assemble the xpirbc due to bug in v++ when provided with llvm IR
-            proc = subprocess.run([
-                self.vitis_clang_bin / 'llvm-config',
-                '--host-target'
-            ], capture_output=True)
-            host_triple = proc.stdout.decode('utf-8')
-            self.assembled_xpirbc = self.tmpdir / f"{self.outstem}.S"
-            self.host_native_code = self.tmpdir / f"{self.outstem}.o"
-            subprocess.run([
-                self.vitis_clang_bin / "llc", f"-mtriple={host_triple}",
-                "-o", self.assembled_xpirbc,
-                self.vpp_llvm_input
-            ])
-            subprocess.run([
-                self.vitis_clang_bin / "llc", f"-mtriple={host_triple}",
-                "-o", self.host_native_code,
-                "--filetype=obj",
-                self.vpp_llvm_input
-            ])
+        subprocess.run(args, check=True)
 
-    def _compile_kernel(self, kernel):
-        """Generate .xo from kernel"""
+    def _get_compile_kernel_cmd_out(self, kernel):
+        """Create command to compile kernel"""
         vxx = self.vitis_bin_dir / "v++"
+        comp_config = environ.get('SYCL_VXX_COMP_CONFIG')
         kernel_output = self.tmpdir / f"{kernel['name']}.xo"
         command = [
             vxx, "--target", self.vitis_mode,
             "--advanced.param", "compiler.hlsDataflowStrictMode=off",
+            # Do the optimizations that were not performed by sycl compiler
+            "-O3",
             "--platform", self.xilinx_platform,
             "--temp_dir", self.tmpdir / 'vxx_comp_tmp',
             "--log_dir", self.tmpdir / 'vxx_comp_log',
@@ -225,16 +293,28 @@ class CompilationDriver:
             "--save-temps", "-c", "-k", kernel['name'], '-o', kernel_output,
             self.vpp_llvm_input
         ]
-        if kernel['extra_args'].strip():
-            command.extend(kernel['extra_args'].split(' '))
+        if comp_config is not None and Path(comp_config).is_file():
+            command.extend(("--config", Path(comp_config).resolve()))
+        if 'extra_args' in kernel and kernel['extra_args'].strip():
+            # User provided kernel arguments can contain many spaces,
+            # leading split to give empty string that are incorrectly
+            # interpreted as file name by v++ : filter remove them
+            command.extend(
+                filter(lambda x: x != '', kernel['extra_args'].split(' ')))
         command.extend(self.extra_comp_args)
         self._dump_cmd(f"06-vxxcomp-{kernel['name']}.cmd", command)
-        subprocess.run(command)
-        return kernel_output
+        return (kernel_output, command)
 
+    def _compile_kernel(self, outname, command):
+        """Execute a kernel compilation command"""
+        _run_in_isolated_proctree(command, check=True)
+        return outname
+
+    @subprocess_error_handler("Vitis linkage stage failed")
     def _link_kernels(self):
         """Call v++ to link all kernel in one .xclbin"""
         vpp = self.vitis_bin_dir / "v++"
+        link_config = environ.get('SYCL_VXX_LINK_CONFIG')
         command = [
             vpp, "--target", self.vitis_mode,
             "--advanced.param", "compiler.hlsDataflowStrictMode=off",
@@ -242,8 +322,10 @@ class CompilationDriver:
             "--temp_dir", self.tmpdir / 'vxx_link_tmp',
             "--log_dir", self.tmpdir / 'vxx_link_log',
             "--report_dir", self.tmpdir / 'vxx_link_report',
-            "--save-temps", "-l", "-o", self.outpath
+            "--save-temps", "-l", "-o", self.xclbin
         ]
+        if link_config is not None and Path(link_config).is_file():
+            command.extend(("--config", Path(link_config).resolve()))
         for kernelprop in self.kernel_properties['kernels']:
             targets = dict()
             for mem_assign in kernelprop["bundle_hw_mapping"]:
@@ -271,7 +353,27 @@ class CompilationDriver:
         command.extend(self.extra_link_args)
         command.extend(self.compiled_kernels)
         self._dump_cmd("07-vxxlink.cmd", command)
-        subprocess.run(command)
+        _run_in_isolated_proctree(command, check=True)
+
+    @subprocess_error_handler("Vitis compilation stage failed")
+    def _launch_parallel_compilation(self):
+        # Compilation commands are generated in main process to ensure
+        # they are printed on main process stdout if command dump is set
+        compile_commands = map(
+            self._get_compile_kernel_cmd_out,
+            self.kernel_properties["kernels"])
+        if environ.get("SYCL_VXX_SERIALIZE_VITIS_COMP") is None:
+            p = Pool()
+            try:
+                future = p.starmap_async(
+                    self._compile_kernel,
+                    compile_commands)
+                self.compiled_kernels = list(future.get())
+            except KeyboardInterrupt:
+                p.terminate()
+                raise KeyboardInterrupt
+        else:
+            self.compiled_kernels = list(starmap(self._compile_kernel, compile_commands))
 
     def drive_compilation(self):
         if self.hls_flow and (self.vitis_mode == "sw_emu"):
@@ -282,6 +384,7 @@ class CompilationDriver:
         tmp_manager = TmpDirManager(tmp_root, outstem, autodelete)
         with tmp_manager as self.tmpdir:
             tmpdir = self.tmpdir
+            self.xclbin = tmpdir / f"{outstem}.xclbin"
             if not autodelete:
                 print(f"Temporary clutter in {tmpdir} will not be deleted")
             self.before_opt_src = self.tmpdir / f"{outstem}-before-opt.bc"
@@ -289,20 +392,23 @@ class CompilationDriver:
                 self._link_multi_inputs()
             else:
                 shutil.copy2(self.inputs[0], self.before_opt_src)
-            self._run_optimisation()
+            self._run_preparation()
             self._link_spir()
-            self._prepare_and_downgrade()
+            self._downgrade()
             if environ.get("SYCL_VXX_MANUAL_EDIT") is not None:
                 print("Please edit", self.downgraded_ir)
                 input("Press enter to resume the compilation")
             self.vpp_llvm_input = (
                 tmpdir / f"{outstem}_kernels.opt.xpirbc")
             self._asm_ir()
-            with Pool() as p:
-                self.compiled_kernels = list(p.map(self._compile_kernel, list(
-                    k for k in self.kernel_properties["kernels"])))
-            if self.compiled_kernels:
-                self._link_kernels()
+            self._launch_parallel_compilation()
+            self._link_kernels()
+            try:
+                shutil.copy2(self.xclbin, self.outpath)
+            except FileNotFoundError:
+                print(
+                    f"Output {self.xclbin} was not properly produced by previous commands")
+            return self.ok
 
 
 def main():
@@ -344,10 +450,14 @@ def main():
     parser.add_argument("inputs", nargs="+")
     args = parser.parse_args()
     cd = CompilationDriver(args)
-    cd.drive_compilation()
+    return cd.drive_compilation()
 
 
 if __name__ == "__main__":
     import sys
-    print(sys.argv)
-    main()
+    try:
+        if (not main()):
+            sys.exit(-1)
+    except KeyboardInterrupt:
+        print("Received keyboard interrupt, will stop")
+        sys.exit(-2)

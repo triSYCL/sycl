@@ -14,9 +14,10 @@
 #endif
 
 #include <cassert>
+#include <chrono>
 #include <cstdio> // for printf
 #include <string>
-#include <chrono>
+#include <system_error>
 #include <vector>
 
 #include "make_string.h"
@@ -139,11 +140,17 @@ struct scoped_test_env
         int ret = std::system(cmd.c_str());
         assert(ret == 0);
 #else
+#if defined(__MVS__)
+        // The behaviour of chmod -R on z/OS prevents recursive
+        // permission change for directories that do not have read permission.
+        std::string cmd = "find  " + test_root.string() + " -exec chmod 777 {} \\;";
+#else
         std::string cmd = "chmod -R 777 " + test_root.string();
+#endif // defined(__MVS__)
         int ret = std::system(cmd.c_str());
         assert(ret == 0);
 
-        cmd = "rm -r " + test_root.string();
+        cmd = "rm -rf " + test_root.string();
         ret = std::system(cmd.c_str());
         assert(ret == 0);
 #endif
@@ -193,10 +200,10 @@ struct scoped_test_env
             abort();
         }
 
-#ifndef _WIN32
-#define FOPEN_CLOEXEC_FLAG "e"
+#if defined(_WIN32) || defined(__MVS__)
+#  define FOPEN_CLOEXEC_FLAG ""
 #else
-#define FOPEN_CLOEXEC_FLAG ""
+#  define FOPEN_CLOEXEC_FLAG "e"
 #endif
         FILE* file = large_file_fopen(filename.c_str(), "w" FOPEN_CLOEXEC_FLAG);
         if (file == nullptr) {
@@ -578,7 +585,7 @@ inline bool ErrorIs(const std::error_code& ec, std::errc First, ErrcT... Rest) {
 
 // Provide our own Sleep routine since std::this_thread::sleep_for is not
 // available in single-threaded mode.
-void SleepFor(std::chrono::seconds dur) {
+template <class Dur> void SleepFor(Dur dur) {
     using namespace std::chrono;
 #if defined(_LIBCPP_HAS_NO_MONOTONIC_CLOCK)
     using Clock = system_clock;
@@ -598,6 +605,23 @@ inline bool PathEqIgnoreSep(fs::path LHS, fs::path RHS) {
   LHS.make_preferred();
   RHS.make_preferred();
   return LHS.native() == RHS.native();
+}
+
+inline fs::perms NormalizeExpectedPerms(fs::perms P) {
+#ifdef _WIN32
+  // On Windows, fs::perms only maps down to one bit stored in the filesystem,
+  // a boolean readonly flag.
+  // Normalize permissions to the format it gets returned; all fs entries are
+  // read+exec for all users; writable ones also have the write bit set for
+  // all users.
+  P |= fs::perms::owner_read | fs::perms::group_read | fs::perms::others_read;
+  P |= fs::perms::owner_exec | fs::perms::group_exec | fs::perms::others_exec;
+  fs::perms Write =
+      fs::perms::owner_write | fs::perms::group_write | fs::perms::others_write;
+  if ((P & Write) != fs::perms::none)
+    P |= Write;
+#endif
+  return P;
 }
 
 struct ExceptionChecker {

@@ -63,21 +63,42 @@ config.substitutions.append(('%PATH%', config.environment['PATH']))
 tool_dirs = [config.clang_tools_dir, config.llvm_tools_dir]
 
 tools = [
-    'apinotes-test', 'c-index-test', 'clang-diff', 'clang-format',
-    'clang-tblgen', 'opt', 'llvm-ifs', 'yaml2obj',
+    'apinotes-test', 'c-index-test', 'clang-diff', 'clang-format', 'clang-repl',
+    'clang-tblgen', 'clang-scan-deps', 'opt', 'llvm-ifs', 'yaml2obj',
     ToolSubst('%clang_extdef_map', command=FindTool(
         'clang-extdef-mapping'), unresolved='ignore'),
 ]
 
 if config.clang_examples:
     config.available_features.add('examples')
-    tools.append('clang-interpreter')
+
+def have_host_jit_support():
+    clang_repl_exe = lit.util.which('clang-repl', config.clang_tools_dir)
+
+    if not clang_repl_exe:
+        print('clang-repl not found')
+        return False
+
+    try:
+        clang_repl_cmd = subprocess.Popen(
+            [clang_repl_exe, '--host-supports-jit'], stdout=subprocess.PIPE)
+    except OSError:
+        print('could not exec clang-repl')
+        return False
+
+    clang_repl_out = clang_repl_cmd.stdout.read().decode('ascii')
+    clang_repl_cmd.wait()
+
+    return 'true' in clang_repl_out
+
+if have_host_jit_support():
+    config.available_features.add('host-supports-jit')
 
 if config.clang_staticanalyzer:
     config.available_features.add('staticanalyzer')
     tools.append('clang-check')
 
-    if config.clang_staticanalyzer_z3 == '1':
+    if config.clang_staticanalyzer_z3:
         config.available_features.add('z3')
 
     check_analyzer_fixit_path = os.path.join(
@@ -99,6 +120,9 @@ config.substitutions.append(('%host_cxx', config.host_cxx))
 # Plugins (loadable modules)
 if config.has_plugins and config.llvm_plugin_ext:
     config.available_features.add('plugins')
+
+if config.clang_default_pie_on_linux:
+    config.available_features.add('default-pie-on-linux')
 
 # Set available features we allow tests to conditionalize on.
 #

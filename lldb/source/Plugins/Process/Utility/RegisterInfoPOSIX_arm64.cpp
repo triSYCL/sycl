@@ -7,7 +7,7 @@
 //===---------------------------------------------------------------------===//
 
 #include <cassert>
-#include <stddef.h>
+#include <cstddef>
 #include <vector>
 
 #include "lldb/lldb-defines.h"
@@ -60,7 +60,7 @@
                               {LLDB_INVALID_REGNUM, LLDB_INVALID_REGNUM,       \
                                LLDB_INVALID_REGNUM, LLDB_INVALID_REGNUM,       \
                                dbg_##reg##i },                                 \
-                               NULL, NULL, NULL, 0
+                               NULL, NULL,         
 #define REG_CONTEXT_SIZE                                                       \
   (sizeof(RegisterInfoPOSIX_arm64::GPR) +                                      \
    sizeof(RegisterInfoPOSIX_arm64::FPU) +                                      \

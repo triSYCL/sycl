@@ -26,6 +26,10 @@ namespace tools {
 
 /// Clang compiler tool.
 class LLVM_LIBRARY_VISIBILITY Clang : public Tool {
+  // Indicates whether this instance has integrated backend using
+  // internal LLVM infrastructure.
+  bool HasBackend;
+
 public:
   static const char *getBaseInputName(const llvm::opt::ArgList &Args,
                                       const InputInfo &Input);
@@ -104,11 +108,12 @@ private:
       const InputInfo &Input, const llvm::opt::ArgList &Args) const;
 
 public:
-  Clang(const ToolChain &TC);
+  Clang(const ToolChain &TC, bool HasIntegratedBackend = true);
   ~Clang() override;
 
   bool hasGoodDiagnostics() const override { return true; }
   bool hasIntegratedAssembler() const override { return true; }
+  bool hasIntegratedBackend() const override { return HasBackend; }
   bool hasIntegratedCPP() const override { return true; }
   bool canEmitIR() const override { return true; }
 
@@ -238,6 +243,20 @@ class LLVM_LIBRARY_VISIBILITY FileTableTform final : public Tool {
 public:
   FileTableTform(const ToolChain &TC)
       : Tool("File table transformation", "file-table-tform", TC) {}
+
+  bool hasIntegratedCPP() const override { return false; }
+  bool hasGoodDiagnostics() const override { return true; }
+  void ConstructJob(Compilation &C, const JobAction &JA,
+                    const InputInfo &Output, const InputInfoList &Inputs,
+                    const llvm::opt::ArgList &TCArgs,
+                    const char *LinkingOutput) const override;
+};
+
+/// Append Footer tool
+class LLVM_LIBRARY_VISIBILITY AppendFooter final : public Tool {
+public:
+  AppendFooter(const ToolChain &TC)
+      : Tool("Append Footer to source", "append-file", TC) {}
 
   bool hasIntegratedCPP() const override { return false; }
   bool hasGoodDiagnostics() const override { return true; }

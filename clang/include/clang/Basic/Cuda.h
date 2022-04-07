@@ -31,8 +31,13 @@ enum class CudaVersion {
   CUDA_110,
   CUDA_111,
   CUDA_112,
-  LATEST = CUDA_112,
-  LATEST_SUPPORTED = CUDA_101,
+  CUDA_113,
+  CUDA_114,
+  CUDA_115,
+  FULLY_SUPPORTED = CUDA_115,
+  PARTIALLY_SUPPORTED =
+      CUDA_115, // Partially supported. Proceed with a warning.
+  NEW = 10000,  // Too new. Issue a warning, but allow using it.
 };
 const char *CudaVersionToString(CudaVersion V);
 // Input is "Major.Minor"
@@ -83,10 +88,15 @@ enum class CudaArch {
   GFX1010,
   GFX1011,
   GFX1012,
+  GFX1013,
   GFX1030,
   GFX1031,
   GFX1032,
   GFX1033,
+  GFX1034,
+  GFX1035,
+  Generic, // A processor model named 'generic' if the target backend defines a
+           // public one.
   LAST,
 };
 
@@ -95,7 +105,8 @@ static inline bool IsNVIDIAGpuArch(CudaArch A) {
 }
 
 static inline bool IsAMDGpuArch(CudaArch A) {
-  return A >= CudaArch::GFX600 && A < CudaArch::LAST;
+  // Generic processor model is for testing only.
+  return A >= CudaArch::GFX600 && A < CudaArch::Generic;
 }
 
 const char *CudaArchToString(CudaArch A);

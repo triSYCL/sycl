@@ -1,10 +1,10 @@
 // RUN: mlir-opt %s | mlir-opt | FileCheck %s
 
 // CHECK-LABEL: func @ops
-// CHECK-SAME: (%[[I32:.*]]: i32, %[[FLOAT:.*]]: f32, %[[I8PTR1:.*]]: !llvm.ptr<i8>, %[[I8PTR2:.*]]: !llvm.ptr<i8>, %[[BOOL:.*]]: i1)
+// CHECK-SAME: (%[[I32:.*]]: i32, %[[FLOAT:.*]]: f32, %[[I8PTR1:.*]]: !llvm.ptr<i8>, %[[I8PTR2:.*]]: !llvm.ptr<i8>, %[[BOOL:.*]]: i1, %[[VI8PTR1:.*]]: !llvm.vec<2 x ptr<i8>>)
 func @ops(%arg0: i32, %arg1: f32,
           %arg2: !llvm.ptr<i8>, %arg3: !llvm.ptr<i8>,
-          %arg4: i1) {
+          %arg4: i1, %arg5 : !llvm.vec<2x!llvm.ptr<i8>>) {
 // Integer arithmetic binary operations.
 //
 // CHECK: {{.*}} = llvm.add %[[I32]], %[[I32]] : i32
@@ -15,6 +15,8 @@ func @ops(%arg0: i32, %arg1: f32,
 // CHECK: {{.*}} = llvm.urem %[[I32]], %[[I32]] : i32
 // CHECK: {{.*}} = llvm.srem %[[I32]], %[[I32]] : i32
 // CHECK: {{.*}} = llvm.icmp "ne" %[[I32]], %[[I32]] : i32
+// CHECK: {{.*}} = llvm.icmp "ne" %[[I8PTR1]], %[[I8PTR1]] : !llvm.ptr<i8>
+// CHECK: {{.*}} = llvm.icmp "ne" %[[VI8PTR1]], %[[VI8PTR1]] : !llvm.vec<2 x ptr<i8>>
   %0 = llvm.add %arg0, %arg0 : i32
   %1 = llvm.sub %arg0, %arg0 : i32
   %2 = llvm.mul %arg0, %arg0 : i32
@@ -23,6 +25,8 @@ func @ops(%arg0: i32, %arg1: f32,
   %5 = llvm.urem %arg0, %arg0 : i32
   %6 = llvm.srem %arg0, %arg0 : i32
   %7 = llvm.icmp "ne" %arg0, %arg0 : i32
+  %ptrcmp = llvm.icmp "ne" %arg2, %arg2 : !llvm.ptr<i8>
+  %vptrcmp = llvm.icmp "ne" %arg5, %arg5 : !llvm.vec<2 x ptr<i8>>
 
 // Floating point binary operations.
 //
@@ -80,12 +84,12 @@ func @ops(%arg0: i32, %arg1: f32,
 // CHECK: %{{.*}} = llvm.mlir.constant(42 : i64) : i47
   %22 = llvm.mlir.undef : !llvm.struct<(i32, f64, i32)>
   %23 = llvm.mlir.constant(42) : i47
-  // CHECK:      llvm.switch %0, ^[[BB3]] [
+  // CHECK:      llvm.switch %0 : i32, ^[[BB3]] [
   // CHECK-NEXT:   1: ^[[BB4:.*]],
   // CHECK-NEXT:   2: ^[[BB5:.*]],
   // CHECK-NEXT:   3: ^[[BB6:.*]]
   // CHECK-NEXT: ]
-  llvm.switch %0, ^bb3 [
+  llvm.switch %0 : i32, ^bb3 [
     1: ^bb4,
     2: ^bb5,
     3: ^bb6
@@ -93,24 +97,24 @@ func @ops(%arg0: i32, %arg1: f32,
 
 // CHECK: ^[[BB3]]
 ^bb3:
-// CHECK:      llvm.switch %0, ^[[BB7:.*]] [
+// CHECK:      llvm.switch %0 : i32, ^[[BB7:.*]] [
 // CHECK-NEXT: ]
-  llvm.switch %0, ^bb7 [
+  llvm.switch %0 : i32, ^bb7 [
   ]
 
 // CHECK: ^[[BB4]]
 ^bb4:
-  llvm.switch %0, ^bb7 [
+  llvm.switch %0 : i32, ^bb7 [
   ]
 
 // CHECK: ^[[BB5]]
 ^bb5:
-  llvm.switch %0, ^bb7 [
+  llvm.switch %0 : i32, ^bb7 [
   ]
 
 // CHECK: ^[[BB6]]
 ^bb6:
-  llvm.switch %0, ^bb7 [
+  llvm.switch %0 : i32, ^bb7 [
   ]
 
 // CHECK: ^[[BB7]]

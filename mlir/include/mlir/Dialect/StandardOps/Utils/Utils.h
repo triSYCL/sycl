@@ -16,6 +16,7 @@
 #ifndef MLIR_DIALECT_STANDARDOPS_UTILS_UTILS_H
 #define MLIR_DIALECT_STANDARDOPS_UTILS_UTILS_H
 
+#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/StandardOps/IR/Ops.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
@@ -24,7 +25,7 @@
 namespace mlir {
 
 /// Matches a ConstantIndexOp.
-detail::op_matcher<ConstantIndexOp> matchConstantIndex();
+detail::op_matcher<arith::ConstantIndexOp> matchConstantIndex();
 
 /// Detects the `values` produced by a ConstantIndexOp and places the new
 /// constant in place of the corresponding sentinel value.
@@ -35,7 +36,7 @@ void getPositionsOfShapeOne(unsigned rank, ArrayRef<int64_t> shape,
                             llvm::SmallDenseSet<unsigned> &dimsToProject);
 
 /// Pattern to rewrite a subview op with constant arguments.
-template <typename OpType, typename CastOpFunc>
+template <typename OpType, typename ResultTypeFunc, typename CastOpFunc>
 class OpWithOffsetSizesAndStridesConstantArgumentFolder final
     : public OpRewritePattern<OpType> {
 public:
@@ -59,8 +60,14 @@ public:
     canonicalizeSubViewPart(mixedStrides, ShapedType::isDynamicStrideOrOffset);
 
     // Create the new op in canonical form.
-    auto newOp = rewriter.create<OpType>(op.getLoc(), op.source(), mixedOffsets,
-                                         mixedSizes, mixedStrides);
+    ResultTypeFunc resultTypeFunc;
+    auto resultType =
+        resultTypeFunc(op, mixedOffsets, mixedSizes, mixedStrides);
+    if (!resultType)
+      return failure();
+    auto newOp =
+        rewriter.create<OpType>(op.getLoc(), resultType, op.source(),
+                                mixedOffsets, mixedSizes, mixedStrides);
     CastOpFunc func;
     func(rewriter, op, newOp);
 
@@ -68,6 +75,34 @@ public:
   }
 };
 
-} // end namespace mlir
+/// Converts an OpFoldResult to a Value. Returns the fold result if it casts to
+/// a Value or creates a ConstantIndexOp if it casts to an IntegerAttribute.
+/// Other attribute types are not supported.
+Value getValueOrCreateConstantIndexOp(OpBuilder &b, Location loc,
+                                      OpFoldResult ofr);
+
+/// Similar to the other overload, but converts multiple OpFoldResults into
+/// Values.
+SmallVector<Value>
+getValueOrCreateConstantIndexOp(OpBuilder &b, Location loc,
+                                ArrayRef<OpFoldResult> valueOrAttrVec);
+
+/// Helper struct to build simple arithmetic quantities with minimal type
+/// inference support.
+struct ArithBuilder {
+  ArithBuilder(OpBuilder &b, Location loc) : b(b), loc(loc) {}
+
+  Value _and(Value lhs, Value rhs);
+  Value add(Value lhs, Value rhs);
+  Value mul(Value lhs, Value rhs);
+  Value select(Value cmp, Value lhs, Value rhs);
+  Value sgt(Value lhs, Value rhs);
+  Value slt(Value lhs, Value rhs);
+
+private:
+  OpBuilder &b;
+  Location loc;
+};
+} // namespace mlir
 
 #endif // MLIR_DIALECT_STANDARDOPS_UTILS_UTILS_H

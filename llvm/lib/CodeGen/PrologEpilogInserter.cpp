@@ -138,11 +138,6 @@ char PEI::ID = 0;
 
 char &llvm::PrologEpilogCodeInserterID = PEI::ID;
 
-static cl::opt<unsigned>
-WarnStackSize("warn-stack-size", cl::Hidden, cl::init((unsigned)-1),
-              cl::desc("Warn for stack size bigger than the given"
-                       " number"));
-
 INITIALIZE_PASS_BEGIN(PEI, DEBUG_TYPE, "Prologue/Epilogue Insertion", false,
                       false)
 INITIALIZE_PASS_DEPENDENCY(MachineLoopInfo)
@@ -278,8 +273,19 @@ bool PEI::runOnMachineFunction(MachineFunction &MF) {
   // Warn on stack size when we exceeds the given limit.
   MachineFrameInfo &MFI = MF.getFrameInfo();
   uint64_t StackSize = MFI.getStackSize();
-  if (WarnStackSize.getNumOccurrences() > 0 && WarnStackSize < StackSize) {
-    DiagnosticInfoStackSize DiagStackSize(F, StackSize);
+
+  unsigned Threshold = UINT_MAX;
+  if (MF.getFunction().hasFnAttribute("warn-stack-size")) {
+    bool Failed = MF.getFunction()
+                      .getFnAttribute("warn-stack-size")
+                      .getValueAsString()
+                      .getAsInteger(10, Threshold);
+    // Verifier should have caught this.
+    assert(!Failed && "Invalid warn-stack-size fn attr value");
+    (void)Failed;
+  }
+  if (StackSize > Threshold) {
+    DiagnosticInfoStackSize DiagStackSize(F, StackSize, Threshold, DS_Warning);
     F.getContext().diagnose(DiagStackSize);
   }
   ORE->emit([&]() {
@@ -389,17 +395,34 @@ static void assignCalleeSavedSpillSlots(MachineFunction &F,
 
   const TargetRegisterInfo *RegInfo = F.getSubtarget().getRegisterInfo();
   const MCPhysReg *CSRegs = F.getRegInfo().getCalleeSavedRegs();
+  BitVector CSMask(SavedRegs.size());
+
+  for (unsigned i = 0; CSRegs[i]; ++i)
+    CSMask.set(CSRegs[i]);
 
   std::vector<CalleeSavedInfo> CSI;
   for (unsigned i = 0; CSRegs[i]; ++i) {
     unsigned Reg = CSRegs[i];
-    if (SavedRegs.test(Reg))
-      CSI.push_back(CalleeSavedInfo(Reg));
+    if (SavedRegs.test(Reg)) {
+      bool SavedSuper = false;
+      for (const MCPhysReg &SuperReg : RegInfo->superregs(Reg)) {
+        // Some backends set all aliases for some registers as saved, such as
+        // Mips's $fp, so they appear in SavedRegs but not CSRegs.
+        if (SavedRegs.test(SuperReg) && CSMask.test(SuperReg)) {
+          SavedSuper = true;
+          break;
+        }
+      }
+
+      if (!SavedSuper)
+        CSI.push_back(CalleeSavedInfo(Reg));
+    }
   }
 
   const TargetFrameLowering *TFI = F.getSubtarget().getFrameLowering();
   MachineFrameInfo &MFI = F.getFrameInfo();
-  if (!TFI->assignCalleeSavedSpillSlots(F, RegInfo, CSI)) {
+  if (!TFI->assignCalleeSavedSpillSlots(F, RegInfo, CSI, MinCSFrameIndex,
+                                        MaxCSFrameIndex)) {
     // If target doesn't implement this, use generic code.
 
     if (CSI.empty())
@@ -436,7 +459,7 @@ static void assignCalleeSavedSpillSlots(MachineFunction &F,
       unsigned Size = RegInfo->getSpillSize(*RC);
       if (FixedSlot == FixedSpillSlots + NumFixedSpillSlots) {
         // Nope, just spill it anywhere convenient.
-        Align Alignment(RegInfo->getSpillAlignment(*RC));
+        Align Alignment = RegInfo->getSpillAlign(*RC);
         // We may not be able to satisfy the desired alignment specification of
         // the TargetRegisterClass if the stack alignment is smaller. Use the
         // min.
@@ -504,9 +527,9 @@ static void updateLiveness(MachineFunction &MF) {
   const std::vector<CalleeSavedInfo> &CSI = MFI.getCalleeSavedInfo();
 
   MachineRegisterInfo &MRI = MF.getRegInfo();
-  for (unsigned i = 0, e = CSI.size(); i != e; ++i) {
+  for (const CalleeSavedInfo &I : CSI) {
     for (MachineBasicBlock *MBB : Visited) {
-      MCPhysReg Reg = CSI[i].getReg();
+      MCPhysReg Reg = I.getReg();
       // Add the callee-saved register as live-in.
       // It's killed at the spill.
       if (!MRI.isReserved(Reg) && !MBB->isLiveIn(Reg))
@@ -517,17 +540,16 @@ static void updateLiveness(MachineFunction &MF) {
     // each MBB between the prologue and epilogue so that it is not clobbered
     // before it is reloaded in the epilogue. The Visited set contains all
     // blocks outside of the region delimited by prologue/epilogue.
-    if (CSI[i].isSpilledToReg()) {
+    if (I.isSpilledToReg()) {
       for (MachineBasicBlock &MBB : MF) {
         if (Visited.count(&MBB))
           continue;
-        MCPhysReg DstReg = CSI[i].getDstReg();
+        MCPhysReg DstReg = I.getDstReg();
         if (!MBB.isLiveIn(DstReg))
           MBB.addLiveIn(DstReg);
       }
     }
   }
-
 }
 
 /// Insert restore code for the callee-saved registers used in the function.
@@ -677,10 +699,12 @@ computeFreeStackSlots(MachineFrameInfo &MFI, bool StackGrowsDown,
     // StackSlot scavenging is only implemented for the default stack.
     if (MFI.getStackID(i) == TargetStackID::Default)
       AllocatedFrameSlots.push_back(i);
-  // Add callee-save objects.
-  for (int i = MinCSFrameIndex; i <= (int)MaxCSFrameIndex; ++i)
-    if (MFI.getStackID(i) == TargetStackID::Default)
-      AllocatedFrameSlots.push_back(i);
+  // Add callee-save objects if there are any.
+  if (MinCSFrameIndex <= MaxCSFrameIndex) {
+    for (int i = MinCSFrameIndex; i <= (int)MaxCSFrameIndex; ++i)
+      if (MFI.getStackID(i) == TargetStackID::Default)
+        AllocatedFrameSlots.push_back(i);
+  }
 
   for (int i : AllocatedFrameSlots) {
     // These are converted from int64_t, but they should always fit in int
@@ -833,7 +857,7 @@ void PEI::calculateFrameObjectOffsets(MachineFunction &MF) {
 
   // First assign frame offsets to stack objects that are used to spill
   // callee saved registers.
-  if (StackGrowsDown) {
+  if (StackGrowsDown && MaxCSFrameIndex >= MinCSFrameIndex) {
     for (unsigned i = MinCSFrameIndex; i <= MaxCSFrameIndex; ++i) {
       if (MFI.getStackID(i) !=
           TargetStackID::Default) // Only allocate objects on the default stack.
@@ -877,9 +901,7 @@ void PEI::calculateFrameObjectOffsets(MachineFunction &MF) {
   // incoming stack pointer if a frame pointer is required and is closer
   // to the incoming rather than the final stack pointer.
   const TargetRegisterInfo *RegInfo = MF.getSubtarget().getRegisterInfo();
-  bool EarlyScavengingSlots = (TFI.hasFP(MF) && TFI.isFPCloseToIncomingSP() &&
-                               RegInfo->useFPForScavengingIndex(MF) &&
-                               !RegInfo->hasStackRealignment(MF));
+  bool EarlyScavengingSlots = TFI.allocateScavengingFrameIndexesNearIncomingSP(MF);
   if (RS && EarlyScavengingSlots) {
     SmallVector<int, 2> SFIs;
     RS->getScavengingFrameIndices(SFIs);
@@ -931,12 +953,22 @@ void PEI::calculateFrameObjectOffsets(MachineFunction &MF) {
     // LocalStackSlotPass didn't already allocate a slot for it.
     // If we are told to use the LocalStackAllocationBlock, the stack protector
     // is expected to be already pre-allocated.
-    if (!MFI.getUseLocalStackAllocationBlock())
+    if (MFI.getStackID(StackProtectorFI) != TargetStackID::Default) {
+      // If the stack protector isn't on the default stack then it's up to the
+      // target to set the stack offset.
+      assert(MFI.getObjectOffset(StackProtectorFI) != 0 &&
+             "Offset of stack protector on non-default stack expected to be "
+             "already set.");
+      assert(!MFI.isObjectPreAllocated(MFI.getStackProtectorIndex()) &&
+             "Stack protector on non-default stack expected to not be "
+             "pre-allocated by LocalStackSlotPass.");
+    } else if (!MFI.getUseLocalStackAllocationBlock()) {
       AdjustStackOffset(MFI, StackProtectorFI, StackGrowsDown, Offset, MaxAlign,
                         Skew);
-    else if (!MFI.isObjectPreAllocated(MFI.getStackProtectorIndex()))
+    } else if (!MFI.isObjectPreAllocated(MFI.getStackProtectorIndex())) {
       llvm_unreachable(
           "Stack protector not pre-allocated by LocalStackSlotPass.");
+    }
 
     // Assign large stack objects first.
     for (unsigned i = 0, e = MFI.getObjectIndexEnd(); i != e; ++i) {
@@ -1228,7 +1260,6 @@ void PEI::replaceFrameIndices(MachineBasicBlock *BB, MachineFunction &MF,
         StackOffset Offset =
             TFI->getFrameIndexReference(MF, FrameIdx, Reg);
         Op.ChangeToRegister(Reg, false /*isDef*/);
-        Op.setIsDebug();
 
         const DIExpression *DIExpr = MI.getDebugExpression();
 
@@ -1265,6 +1296,9 @@ void PEI::replaceFrameIndices(MachineBasicBlock *BB, MachineFunction &MF,
           DIExpr = DIExpression::appendOpsToArg(DIExpr, Ops, DebugOpIndex);
         }
         MI.getDebugExpressionOp().setMetadata(DIExpr);
+        continue;
+      } else if (MI.isDebugPHI()) {
+        // Allow stack ref to continue onwards.
         continue;
       }
 
