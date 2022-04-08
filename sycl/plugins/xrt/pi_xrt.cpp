@@ -25,6 +25,12 @@
 #include <CL/sycl/detail/pi.h>
 #include <CL/sycl/detail/pi.hpp>
 
+#include <deque>
+#include <thread>
+#include <ostream>
+#include <type_traits>
+#include <utility>
+#include <array>
 #include <cstddef>
 #include <cstdlib>
 #include <array>
@@ -41,15 +47,6 @@
 #include <string>
 #include <vector>
 
-/// the any header break under #define private public
-/// So we include it from here. and let the protection against double inclusion
-/// do its job
-#include <any>
-
-/// XRT doesnt expose some APIs that are very useful so until it is fixed here
-/// is the hack. #define class struct could be good for completeness but sadly
-/// class can be used as an alternative to typename
-#define private public
 #include <experimental/xrt_system.h>
 #include <experimental/xrt_xclbin.h>
 #include <version.h>
@@ -60,7 +57,8 @@
 #include <xrt.h>
 #include <xrt_mem.h>
 #include <xclbin.h>
-#undef private
+
+#include "reproducer.h"
 
 #pragma clang diagnostic pop
 
@@ -68,6 +66,7 @@
 // and it is expected
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-parameter"
+#pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
 
 /// Base class for _pi_* object that need ref-counting
 template <typename base> struct ref_counted_base {
@@ -144,6 +143,19 @@ template <typename T> struct ref_counted_ref {
   ~ref_counted_ref() { decr_ref_count(value); }
 };
 
+struct workqueue {
+  std::deque<std::function<void()>> cmds;
+
+  void clear_queue() {
+    cmds.clear();
+  }
+  void exec_queue() {
+    for (auto& func : cmds)
+      func();
+    clear_queue();
+  }
+};
+
 /// A PI platform stores all known PI devices,
 ///  in the XRT plugin this is just a vector of
 ///  available devices since initialization is done
@@ -155,7 +167,7 @@ struct _pi_platform : ref_counted_base<_pi_platform> {
   _pi_platform(unsigned int numDevices) {
     devices_.reserve(numDevices);
     for (unsigned int i = 0; i < numDevices; ++i) {
-      devices_.emplace_back(std::make_unique<_pi_device>(i, *this));
+      devices_.emplace_back(std::make_unique<_pi_device>(REPRODUCE_CALL(xrt::device, i), *this));
     }
   }
   unsigned int getNumDevices() const noexcept { return devices_.size(); }
@@ -170,8 +182,8 @@ private:
   ref_counted_ref<_pi_platform> platform_;
 
 public:
-  _pi_device(unsigned int devNum, _pi_platform &platform)
-      : xrtDevice_(devNum), platform_(&platform) {}
+  _pi_device(native_type dev, _pi_platform &platform)
+      : xrtDevice_(std::move(dev)), platform_(&platform) {}
 
   native_type &get() noexcept { return xrtDevice_; };
   pi_platform get_platform() const noexcept { return platform_.value; };
@@ -219,21 +231,63 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
     size_t size;
     void *host_ptr;
     void *mapped_ptr;
+    void *dev_ptr;
   } mem;
+
+  /// Writes cannot be performed on a buffer until the xclbin has been loaded.
+  /// But sycl can request som writes before loading the xclbin so we just
+  /// enqueue them.
+  workqueue pending_cmds;
 
   _pi_mem(_pi_context *ctx, _mem m) : context_(ctx), mem(m) {
   }
 
-  void set_buffer(native_type&& buf) {
-    buffer_ = buf;
-    mem.mapped_ptr = buf.map();
+  template<typename T>
+  void run_if_possible(const xrt::device &device, T&& call) {
+    if (is_mapped(device)) // TODO fix this
+      std::forward<T>(call)();
+    else
+      pending_cmds.cmds.push_back(std::forward<T>(call));
   }
-  native_type buffer_;
+
+  bool is_mapped(const xrt::device &device) {
+    if (mem.mapped_ptr) {
+      assert(device.get_handle().get() == mem.dev_ptr && "can only be mapped on one device for now");
+      return true;
+    }
+    return false;
+  }
+  void map_if_needed(const xrt::device &device) {
+    if (mem.mapped_ptr) {
+      assert(device.get_handle().get() == mem.dev_ptr && "can only be mapped on one device for now");
+      return;
+    }
+    mem.dev_ptr = device.get_handle().get();
+    if (mem.host_ptr)
+      get_native() = REPRODUCE_CALL(xrt::bo, device, mem.host_ptr, mem.size, 0);
+    else
+      get_native() = REPRODUCE_CALL(xrt::bo, device, mem.size, XRT_BO_FLAGS_NONE, 0);
+    mem.mapped_ptr = REPRODUCE_MEMCALL(get_native(), map);
+    pending_cmds.exec_queue();
+  }
+
+  /// TODO: xrt::bo sometimes stay stuck while being deleted. so we dont delete it.
+  union no_destroy {
+    no_destroy() = default;
+    native_type buffer_ = {};
+    ~no_destroy() {}
+  } nd;
+  native_type& get_native() {
+    return nd.buffer_;
+  }
+  ~_pi_mem() { assert(pending_cmds.cmds.empty()); }
 };
 
 struct _pi_queue : ref_counted_base<_pi_queue> {
   ref_counted_ref<_pi_context> context_;
   ref_counted_ref<_pi_device> device_;
+
+  workqueue cmds;
 
   _pi_queue(_pi_context *context, _pi_device *device)
       : context_{context}, device_{device} {}
@@ -241,8 +295,8 @@ struct _pi_queue : ref_counted_base<_pi_queue> {
 
 typedef void (*pfn_notify)(pi_event event, pi_int32 eventCommandStatus,
                            void *userData);
-/// PI Event mapping to CUevent
-///
+
+/// Copied from CUDA plugin , unused
 struct _pi_event : ref_counted_base<_pi_event> {
 public:
   pi_result record();
@@ -325,8 +379,7 @@ private:
                        // with the queue_ member.
 };
 
-/// Implementation of PI Program on CUDA Module object
-///
+/// Implementation of PI Program
 struct _pi_program {
   ref_counted_ref<_pi_context> context_;
   ref_counted_ref<_pi_device> device_;
@@ -347,23 +400,8 @@ struct _pi_kernel {
   xrt::run run_;
   xrt::xclbin::kernel info_;
 
-  std::vector<std::function<void()>> sync_to_device;
-  std::vector<std::function<void()>> sync_to_host;
-
-  _pi_kernel(pi_program prog, native_type kern, xrt::xclbin::kernel info)
-      : program_(prog), kernel_(std::move(kern)), run_(kernel_), info_(std::move(info)) {}
-};
-
-/// Implementation of samplers for CUDA
-///
-/// Sampler property layout:
-/// | 31 30 ... 6 5 |      4 3 2      |     1      |         0        |
-/// |      N/A      | addressing mode | fiter mode | normalize coords |
-struct _pi_sampler {
-  pi_uint32 props_;
-  pi_context context_;
-
-  _pi_sampler(pi_context context) : props_(0), context_(context) {}
+  _pi_kernel(pi_program prog, native_type kern, xrt::run run, xrt::xclbin::kernel info)
+      : program_(prog), kernel_(std::move(kern)), run_(run), info_(std::move(info)) {}
 };
 
 // -------------------------------------------------------------
@@ -430,12 +468,6 @@ enum class arg_kind {
   scalar,
 };
 
-arg_kind type_str_to_arg_kind(const std::string& str) {
-  if (str == "void*")
-    return arg_kind::buffer;
-  return arg_kind::scalar;
-}
-
 } // anonymous namespace
 
 /// ------ Error handling, matching OpenCL plugin semantics.
@@ -461,7 +493,7 @@ void assertion(bool Condition, const char *Message) {
   }
 }
 
-/// cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+/// sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 [[noreturn]] void unimplemented(const char *str) {
 
   log() << "pi_xrt: unimplemented: call too unimplemented function in XRT "
@@ -476,126 +508,15 @@ void assertion(bool Condition, const char *Message) {
 } // namespace sycl
 } // __SYCL_INLINE_NAMESPACE(cl)
 
-static void run_original_test() {
-  int device_index = 0;
-  std::string binaryFile = "/storage/gauthier/Vitis_Accel_Examples/host_xrt/hello_world_xrt/build_dir.hw_emu.xilinx_u200_gen3x16_xdma_1_202110_1/vadd.link.xclbin";
-  int data_size = 16;
-
-  std::cout << "Open the device" << device_index << std::endl;
-  auto device = xrt::device(device_index);
-  std::cout << "Load the xclbin " << binaryFile << std::endl;
-  auto uuid = device.load_xclbin(binaryFile);
-
-  size_t vector_size_bytes = sizeof(int) * data_size;
-
-  auto krnl = xrt::kernel(device, uuid, "vadd");
-
-  std::cout << "Allocate Buffer in Global Memory\n";
-  auto bo0 = xrt::bo(device, vector_size_bytes, krnl.group_id(0));
-  auto bo1 = xrt::bo(device, vector_size_bytes, krnl.group_id(1));
-  auto bo_out = xrt::bo(device, vector_size_bytes, krnl.group_id(2));
-
-  // Map the contents of the buffer object into host memory
-  auto bo0_map = bo0.map<int *>();
-  auto bo1_map = bo1.map<int *>();
-  auto bo_out_map = bo_out.map<int *>();
-  std::fill(bo0_map, bo0_map + data_size, 0);
-  std::fill(bo1_map, bo1_map + data_size, 0);
-  std::fill(bo_out_map, bo_out_map + data_size, 0);
-
-  // Create the test data
-  int bufReference[data_size];
-  for (int i = 0; i < data_size; ++i) {
-    bo0_map[i] = i;
-    bo1_map[i] = i;
-    bufReference[i] = bo0_map[i] + bo1_map[i];
-  }
-
-  // Synchronize buffer content with device side
-  std::cout << "synchronize input buffer data to device global memory\n";
-
-  bo0.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-  bo1.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-
-  std::cout << "Execution of the kernel\n";
-  auto run = krnl(bo0, bo1, bo_out, data_size);
-  run.wait();
-
-  // Get the output;
-  std::cout << "Get the output data from the device" << std::endl;
-  bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
-
-  // Validate our results
-  if (std::memcmp(bo_out_map, bufReference, data_size))
-    throw std::runtime_error("Value read back does not match reference");
-
-  std::cout << "TEST PASSED\n";
-  exit(0);
-}
-
-static void run_test(
-  xrt::device& device
-  // , xrt::kernel& krnl
-  ) {
-  // int device_index = 0;
-  std::string binaryFile = "/storage/gauthier/Vitis_Accel_Examples/host_xrt/hello_world_xrt/build_dir.hw_emu.xilinx_u200_gen3x16_xdma_1_202110_1/vadd.link.xclbin";
-  int data_size = 16;
-
-  // std::cout << "Open the device" << device_index << std::endl;
-  // auto device = xrt::device(device_index);
-  std::cout << "Load the xclbin " << binaryFile << std::endl;
-  auto uuid = device.load_xclbin(binaryFile);
-
-  size_t vector_size_bytes = sizeof(int) * data_size;
-
-  auto krnl = xrt::kernel(device, uuid, "vadd");
-
-  std::cout << "Allocate Buffer in Global Memory\n";
-  auto bo0 = xrt::bo(device, vector_size_bytes, krnl.group_id(0));
-  auto bo1 = xrt::bo(device, vector_size_bytes, krnl.group_id(1));
-  auto bo_out = xrt::bo(device, vector_size_bytes, krnl.group_id(2));
-
-  // Map the contents of the buffer object into host memory
-  auto bo0_map = bo0.map<int *>();
-  auto bo1_map = bo1.map<int *>();
-  auto bo_out_map = bo_out.map<int *>();
-  std::fill(bo0_map, bo0_map + data_size, 0);
-  std::fill(bo1_map, bo1_map + data_size, 0);
-  std::fill(bo_out_map, bo_out_map + data_size, 0);
-
-  // Create the test data
-  int bufReference[data_size];
-  for (int i = 0; i < data_size; ++i) {
-    bo0_map[i] = i;
-    bo1_map[i] = i;
-    bufReference[i] = bo0_map[i] + bo1_map[i];
-  }
-
-  // Synchronize buffer content with device side
-  std::cout << "synchronize input buffer data to device global memory\n";
-
-  bo0.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-  bo1.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-
-  std::cout << "Execution of the kernel\n";
-  auto run = krnl(bo0, bo1, bo_out, data_size);
-  run.wait();
-
-  // Get the output;
-  std::cout << "Get the output data from the device" << std::endl;
-  bo_out.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
-
-  // Validate our results
-  if (std::memcmp(bo_out_map, bufReference, data_size))
-    throw std::runtime_error("Value read back does not match reference");
-
-  std::cout << "TEST PASSED\n";
-  exit(0);
+void assert_single_thread() {
+  static std::thread::id saved_id = std::this_thread::get_id();
+  assert(saved_id == std::this_thread::get_id() && "there is no multithread support for now");
 }
 
 /// Obtains the XRT platform.
 pi_result xrt_piPlatformsGet(pi_uint32 num_entries, pi_platform *platforms,
                              pi_uint32 *num_platforms) {
+  assert_single_thread();
   pi_result result = PI_SUCCESS;
 
   // run_original_test();
@@ -622,6 +543,7 @@ pi_result xrt_piPlatformGetInfo(pi_platform platform,
                                 pi_platform_info param_name,
                                 size_t param_value_size, void *param_value,
                                 size_t *param_value_size_ret) {
+  assert_single_thread();
   assert(platform != nullptr);
 
   switch (param_name) {
@@ -644,7 +566,7 @@ pi_result xrt_piPlatformGetInfo(pi_platform platform,
   default:
     __SYCL_PI_HANDLE_UNKNOWN_PARAM_NAME(param_name);
   }
-  cl::sycl::detail::pi::die("Platform info request not implemented");
+  sycl::detail::pi::die("Platform info request not implemented");
   return {};
 }
 
@@ -656,6 +578,7 @@ pi_result xrt_piPlatformGetInfo(pi_platform platform,
 pi_result xrt_piDevicesGet(pi_platform platform, pi_device_type device_type,
                            pi_uint32 num_entries, pi_device *devices,
                            pi_uint32 *num_devices) {
+  assert_single_thread();
 
   pi_result err = PI_SUCCESS;
   const bool askingForDefault = device_type == PI_DEVICE_TYPE_DEFAULT;
@@ -687,12 +610,14 @@ pi_result xrt_piDevicesGet(pi_platform platform, pi_device_type device_type,
 /// \return PI_SUCCESS if the function is executed successfully
 /// XRT devices are always root devices so retain always returns success.
 pi_result xrt_piDeviceRetain(pi_device dev) {
+  assert_single_thread();
   incr_ref_count(dev);
   return PI_SUCCESS;
 }
 
 /// \return PI_SUCCESS always since XRT devices are always root devices.
 pi_result xrt_piDeviceRelease(pi_device dev) {
+  assert_single_thread();
   decr_ref_count(dev);
   return PI_SUCCESS;
 }
@@ -700,6 +625,7 @@ pi_result xrt_piDeviceRelease(pi_device dev) {
 pi_result xrt_piDeviceGetInfo(pi_device device, pi_device_info param_name,
                               size_t param_value_size, void *param_value,
                               size_t *param_value_size_ret) {
+  assert_single_thread();
   assert(device != nullptr);
   auto native_dev = device->get();
 
@@ -934,7 +860,6 @@ pi_result xrt_piDeviceGetInfo(pi_device device, pi_device_info param_name,
                    device->get_platform());
   }
   case PI_DEVICE_INFO_NAME: {
-    static constexpr size_t MAX_DEVICE_NAME_LENGTH = 256u;
     auto name = native_dev.get_info<xrt::info::device::name>();
     return getInfoArray(strlen(name.c_str()) + 1, param_value_size, param_value,
                         param_value_size_ret, name.c_str());
@@ -1064,13 +989,14 @@ pi_result xrt_piDeviceGetInfo(pi_device device, pi_device_info param_name,
   default:
     __SYCL_PI_HANDLE_UNKNOWN_PARAM_NAME(param_name);
   }
-  cl::sycl::detail::pi::die("Device info request not implemented");
+  sycl::detail::pi::die("Device info request not implemented");
   return {};
 }
 
 pi_result xrt_piContextGetInfo(pi_context context, pi_context_info param_name,
                                size_t param_value_size, void *param_value,
                                size_t *param_value_size_ret) {
+  assert_single_thread();
   switch (param_name) {
   case PI_CONTEXT_INFO_NUM_DEVICES:
     return getInfo(param_value_size, param_value, param_value_size_ret, 1);
@@ -1088,20 +1014,21 @@ pi_result xrt_piContextGetInfo(pi_context context, pi_context_info param_name,
 }
 
 pi_result xrt_piContextRetain(pi_context context) {
+  assert_single_thread();
   incr_ref_count(context);
   return PI_SUCCESS;
 }
 
 pi_result xrt_piextContextSetExtendedDeleter(
     pi_context context, pi_context_extended_deleter function, void *user_data) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Not applicable to XRT, devices cannot be partitioned.
 ///
 pi_result xrt_piDevicePartition(pi_device, const cl_device_partition_property *,
                                 pi_uint32, pi_device *, pi_uint32 *) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Gets the native XRT handle of a PI device object
@@ -1112,7 +1039,7 @@ pi_result xrt_piDevicePartition(pi_device, const cl_device_partition_property *,
 /// \return PI_SUCCESS
 pi_result xrt_piextDeviceGetNativeHandle(pi_device device,
                                          pi_native_handle *nativeHandle) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Created a PI device object from a CUDA device handle.
@@ -1126,7 +1053,7 @@ pi_result xrt_piextDeviceGetNativeHandle(pi_device device,
 /// \return TBD
 pi_result xrt_piextDeviceCreateWithNativeHandle(pi_native_handle, pi_platform,
                                                 pi_device *) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /* Context APIs */
@@ -1151,6 +1078,7 @@ pi_result xrt_piContextCreate(const pi_context_properties *properties,
                                                  const void *private_info,
                                                  size_t cb, void *user_data),
                               void *user_data, pi_context *ret) {
+  assert_single_thread();
   assert(devices != nullptr);
   assert(pfn_notify == nullptr);
   assert(user_data == nullptr);
@@ -1175,7 +1103,7 @@ pi_result xrt_piContextRelease(pi_context ctx) {
 /// \return PI_SUCCESS
 pi_result xrt_piextContextGetNativeHandle(pi_context context,
                                           pi_native_handle *nativeHandle) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// TODO @lforg37 HERE
@@ -1191,7 +1119,7 @@ pi_result xrt_piextContextGetNativeHandle(pi_context context,
 pi_result xrt_piextContextCreateWithNativeHandle(pi_native_handle, pi_uint32,
                                                  const pi_device *, bool,
                                                  pi_context *) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// \return If available, the first binary that is PTX
@@ -1200,6 +1128,7 @@ pi_result xrt_piextDeviceSelectBinary(pi_device device,
                                       pi_device_binary *binaries,
                                       pi_uint32 num_binaries,
                                       pi_uint32 *selected_binary) {
+  assert_single_thread();
   assert(num_binaries > 0);
   assert(selected_binary);
   (void)device;
@@ -1221,7 +1150,7 @@ pi_result xrt_piextGetDeviceFunctionPointer(pi_device device,
                                             pi_program program,
                                             const char *func_name,
                                             pi_uint64 *func_pointer_ret) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 namespace {
@@ -1251,7 +1180,7 @@ namespace {
 class ScopedContext {
 public:
   ScopedContext(pi_context ctxt) {
-    cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+    sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
   }
 
   ~ScopedContext() {}
@@ -1262,53 +1191,53 @@ public:
 } // anonymous namespace
 
 _pi_event::_pi_event(pi_command_type type, pi_context context, pi_queue queue) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 _pi_event::~_pi_event() {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result _pi_event::start() {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 bool _pi_event::is_completed() const noexcept {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_uint64 _pi_event::get_queued_time() const {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_uint64 _pi_event::get_start_time() const {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_uint64 _pi_event::get_end_time() const {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result _pi_event::record() {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result _pi_event::wait() {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result _pi_event::release() {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 // makes all future work submitted to queue wait for all work captured in event.
 pi_result enqueueEventWait(pi_queue queue, pi_event event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 bool get_kernel_metadata(std::string metadataName, const char *tag,
                          std::string &kernelName) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Finds kernel names by searching for entry points in the PTX source, as the
@@ -1319,7 +1248,7 @@ bool get_kernel_metadata(std::string metadataName, const char *tag,
 /// Note: Another alternative is to add kernel names as metadata, like with
 ///       reqd_work_group_size.
 std::string getKernelNames(pi_program program) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Creates a PI Memory object using a CUDA memory allocation.
@@ -1329,11 +1258,12 @@ std::string getKernelNames(pi_program program) {
 pi_result xrt_piMemBufferCreate(pi_context context, pi_mem_flags flags,
                                 size_t size, void *host_ptr, pi_mem *ret_mem,
                                 const pi_mem_properties *properties) {
+  assert_single_thread();
   assert(ret_mem != nullptr);
   assert(properties == nullptr);
 
   *ret_mem = ref_counted_base<_pi_mem>::make(
-      context, _pi_mem::_mem{flags, size, host_ptr});
+      context, _pi_mem::_mem{flags, size, host_ptr, nullptr, nullptr});
   return PI_SUCCESS;
 }
 
@@ -1342,6 +1272,7 @@ pi_result xrt_piMemBufferCreate(pi_context context, pi_mem_flags flags,
 /// \return PI_SUCCESS unless deallocation error
 ///
 pi_result xrt_piMemRelease(pi_mem mem) {
+  assert_single_thread();
   decr_ref_count(mem);
   return PI_SUCCESS;
 }
@@ -1353,11 +1284,11 @@ pi_result xrt_piMemRelease(pi_mem mem) {
 pi_result xrt_piMemBufferPartition(pi_mem parent_buffer, pi_mem_flags flags,
                                    pi_buffer_create_type buffer_create_type,
                                    void *buffer_create_info, pi_mem *memObj) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piMemGetInfo(pi_mem, cl_mem_info, size_t, void *, size_t *) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Gets the native CUDA handle of a PI mem object
@@ -1368,7 +1299,7 @@ pi_result xrt_piMemGetInfo(pi_mem, cl_mem_info, size_t, void *, size_t *) {
 /// \return PI_SUCCESS
 pi_result xrt_piextMemGetNativeHandle(pi_mem mem,
                                       pi_native_handle *nativeHandle) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Created a PI mem object from a CUDA mem handle.
@@ -1380,17 +1311,13 @@ pi_result xrt_piextMemGetNativeHandle(pi_mem mem,
 ///
 /// \return TBD
 pi_result xrt_piextMemCreateWithNativeHandle(pi_native_handle, pi_mem *) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
-/// Creates a `pi_queue` object on the CUDA backend.
-/// Valid properties
-/// * __SYCL_PI_CUDA_USE_DEFAULT_STREAM -> CU_STREAM_DEFAULT
-/// * __SYCL_PI_CUDA_SYNC_WITH_DEFAULT -> CU_STREAM_NON_BLOCKING
-/// \return Pi queue object mapping to a CUStream
-///
+/// Creates a `pi_queue` object on the XRT backend.
 pi_result xrt_piQueueCreate(pi_context context, pi_device device,
                             pi_queue_properties properties, pi_queue *queue) {
+  assert_single_thread();
   assert(context != nullptr);
   assert(device != nullptr);
   // TODO(XRT): : properties not handled
@@ -1402,28 +1329,33 @@ pi_result xrt_piQueueCreate(pi_context context, pi_device device,
 pi_result xrt_piQueueGetInfo(pi_queue command_queue, pi_queue_info param_name,
                              size_t param_value_size, void *param_value,
                              size_t *param_value_size_ret) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piQueueRetain(pi_queue command_queue) {
+  assert_single_thread();
   incr_ref_count(command_queue);
   return PI_SUCCESS;
 }
 
 pi_result xrt_piQueueRelease(pi_queue command_queue) {
+  assert_single_thread();
   decr_ref_count(command_queue);
   return PI_SUCCESS;
 }
 
+/// All commands are executed greedily so this is a noop.
 pi_result xrt_piQueueFinish(pi_queue command_queue) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  assert_single_thread();
+  assert(command_queue);
+  return PI_SUCCESS;
 }
 
-// There is no CUDA counterpart for queue flushing and we don't run into the
-// same problem of having to flush cross-queue dependencies as some of the
-// other plugins, so it can be left as no-op.
+/// All commands are executed greedily so this is a noop.
 pi_result xrt_piQueueFlush(pi_queue command_queue) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  assert_single_thread();
+  assert(command_queue);
+  return PI_SUCCESS;
 }
 
 /// Gets the native CUDA handle of a PI queue object
@@ -1434,7 +1366,7 @@ pi_result xrt_piQueueFlush(pi_queue command_queue) {
 /// \return PI_SUCCESS
 pi_result xrt_piextQueueGetNativeHandle(pi_queue queue,
                                         pi_native_handle *nativeHandle) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Created a PI queue object from a CUDA queue handle.
@@ -1451,7 +1383,7 @@ pi_result xrt_piextQueueGetNativeHandle(pi_queue queue,
 pi_result xrt_piextQueueCreateWithNativeHandle(pi_native_handle, pi_context,
                                                pi_queue *,
                                                bool ownNativeHandle) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piEnqueueMemBufferWrite(pi_queue command_queue, pi_mem buffer,
@@ -1460,7 +1392,21 @@ pi_result xrt_piEnqueueMemBufferWrite(pi_queue command_queue, pi_mem buffer,
                                       pi_uint32 num_events_in_wait_list,
                                       const pi_event *event_wait_list,
                                       pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  assert_single_thread();
+  assert(command_queue);
+  assert(buffer);
+  assert(!num_events_in_wait_list && !event_wait_list && !*event && "events not yet supported");
+  assert(ptr && size);
+
+  buffer->run_if_possible(command_queue->device_->get(), [=] {
+    buffer->map_if_needed(command_queue->device_->get());
+    void *adjusted_ptr = ((char *)buffer->mem.mapped_ptr) + offset;
+    REPRODUCE_ADD_BUFFER(ptr, size);
+    REPRODUCE_CALL((void)std::memcpy, adjusted_ptr, ptr, size);
+    REPRODUCE_MEMCALL(buffer->get_native(), sync, XCL_BO_SYNC_BO_TO_DEVICE);
+  });
+
+  return PI_SUCCESS;
 }
 
 pi_result xrt_piEnqueueMemBufferRead(pi_queue command_queue, pi_mem buffer,
@@ -1469,16 +1415,22 @@ pi_result xrt_piEnqueueMemBufferRead(pi_queue command_queue, pi_mem buffer,
                                      pi_uint32 num_events_in_wait_list,
                                      const pi_event *event_wait_list,
                                      pi_event *event) {
+  assert_single_thread();
   assert(command_queue);
   assert(buffer);
   assert(!num_events_in_wait_list && !event_wait_list && !*event && "events not yet supported");
   assert(ptr && size);
 
-  std::memcpy(ptr, ((char*)buffer->mem.mapped_ptr) + offset, size);
+  buffer->map_if_needed(command_queue->device_->get());
+  REPRODUCE_MEMCALL(buffer->get_native(), sync, XCL_BO_SYNC_BO_FROM_DEVICE);
+  void* adjusted_ptr = ((char*)buffer->mem.mapped_ptr) + offset;
+  REPRODUCE_ADD_BUFFER(ptr, size);
+  REPRODUCE_CALL((void)std::memcpy, ptr, adjusted_ptr, size);
   return PI_SUCCESS;
 }
 
 pi_result xrt_piEventsWait(pi_uint32 num_events, const pi_event *event_list) {
+  assert_single_thread();
   assert(num_events == 0 && "events not yet supported");
   /// Technically every operation we have are greedily executed so we could
   /// remove this assert
@@ -1490,69 +1442,51 @@ pi_result xrt_piKernelCreate(pi_program program, const char *kernel_name,
                              pi_kernel *kernel) {
 
   /// TODO: XRT error handling
-  xrt::kernel ker(program->device_->get(), program->uuid_, kernel_name);
-  *kernel = ref_counted_base<_pi_kernel>::make(program, std::move(ker), program->bin_.get_kernel(kernel_name));
+  auto ker = REPRODUCE_CALL(xrt::kernel, program->device_->get(), program->uuid_,
+                      kernel_name);
+  auto info = REPRODUCE_MEMCALL(program->bin_, get_kernel, kernel_name);
+  auto run = REPRODUCE_CALL(xrt::run, ker);
+  *kernel = ref_counted_base<_pi_kernel>::make(program, std::move(ker),
+                                               std::move(run), std::move(info));
   return PI_SUCCESS;
-}
-
-static xrt::bo build_xrt_bo(_pi_mem* buf, _pi_kernel* kernel) {
-  assert(buf);
-  assert(kernel);
-  if (buf->mem.host_ptr)
-    return xrt::bo(kernel->program_->device_->get(),
-                                          buf->mem.host_ptr, buf->mem.size,
-                                          kernel->kernel_.group_id(0));
-  return xrt::bo(kernel->program_->device_->get(), buf->mem.size,
-                 XRT_BO_FLAGS_NONE, kernel->kernel_.group_id(0));
 }
 
 pi_result xrt_piKernelSetArg(pi_kernel kernel, pi_uint32 arg_index,
                              size_t arg_size, const void *arg_value) {
+  assert_single_thread();
   assert(kernel);
   assert(kernel->info_.get_num_args() > arg_index);
   auto arg_info = kernel->info_.get_arg(arg_index);
-  arg_kind kind = type_str_to_arg_kind(arg_info.get_host_type());
 
   //TODO XRT: analyse if xrt_piKernelSetArg can be called for buffer.
-  // if (kind == arg_kind::buffer) {
-  //   _pi_mem* mem = (_pi_mem*)(arg_value);
-
-  //   kernel->run_.set_arg(arg_index, build_xrt_bo(mem, kernel));
-  // } else {
-    /// This API is private in XRT but we include XRT under #define private public
-    kernel->run_.set_arg_at_index(arg_index, arg_value, arg_size);
-  // }
+  REPRODUCE_ADD_BUFFER(arg_value, arg_size);
+  REPRODUCE_MEMCALL(kernel->run_, set_arg, arg_index, arg_value, arg_size);
   return PI_SUCCESS;
 }
 
 pi_result xrt_piextKernelSetArgMemObj(pi_kernel kernel, pi_uint32 arg_index,
                                       const pi_mem *arg_value) {
+  assert_single_thread();
   assert(kernel != nullptr);
   assert(arg_value != nullptr);
   _pi_mem* buf = *arg_value;
 
-  buf->set_buffer(build_xrt_bo(buf, kernel));
-  kernel->run_.set_arg(arg_index, buf->buffer_);
-  kernel->sync_to_device.push_back([buf](){
-    buf->buffer_.sync(XCL_BO_SYNC_BO_TO_DEVICE);
-  });
-  kernel->sync_to_host.push_back([buf](){
-    buf->buffer_.sync(XCL_BO_SYNC_BO_FROM_DEVICE);
-  });
+  buf->map_if_needed(kernel->program_->device_->get());
+  REPRODUCE_MEMCALL(kernel->run_, set_arg, arg_index, buf->get_native());
 
   return PI_SUCCESS;
 }
 
 pi_result xrt_piextKernelSetArgSampler(pi_kernel kernel, pi_uint32 arg_index,
                                        const pi_sampler *arg_value) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piKernelGetGroupInfo(pi_kernel kernel, pi_device device,
                                    pi_kernel_group_info param_name,
                                    size_t param_value_size, void *param_value,
                                    size_t *param_value_size_ret) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piEnqueueKernelLaunch(
@@ -1560,20 +1494,15 @@ pi_result xrt_piEnqueueKernelLaunch(
     const size_t *global_work_offset, const size_t *global_work_size,
     const size_t *local_work_size, pi_uint32 num_events_in_wait_list,
     const pi_event *event_wait_list, pi_event *event) {
+  assert_single_thread();
   assert(command_queue);
   assert(kernel);
   assert(!num_events_in_wait_list && !event_wait_list && !*event && "events not yet supported");
   assert(work_dim == 1 && *global_work_offset == 0 && *global_work_size == 1 &&
          *local_work_size == 1 && "only support 1 single_task");
 
-  for (auto& call : kernel->sync_to_device)
-    call();
-
-  kernel->run_.start();
-  kernel->run_.wait();
-
-  for (auto& call : kernel->sync_to_host)
-    call();
+  REPRODUCE_MEMCALL(kernel->run_, start);
+  REPRODUCE_MEMCALL(kernel->run_, wait);
 
   return PI_SUCCESS;
 }
@@ -1582,12 +1511,12 @@ pi_result xrt_piEnqueueKernelLaunch(
 pi_result xrt_piEnqueueNativeKernel(pi_queue, void (*)(void *), void *, size_t,
                                     pi_uint32, const pi_mem *, const void **,
                                     pi_uint32, const pi_event *, pi_event *) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piextKernelCreateWithNativeHandle(pi_native_handle, pi_context,
                                                 pi_program, bool, pi_kernel *) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// \TODO Not implemented
@@ -1595,16 +1524,17 @@ pi_result xrt_piMemImageCreate(pi_context context, pi_mem_flags flags,
                                const pi_image_format *image_format,
                                const pi_image_desc *image_desc, void *host_ptr,
                                pi_mem *ret_mem) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// \TODO Not implemented
 pi_result xrt_piMemImageGetInfo(pi_mem, pi_image_info, size_t, void *,
                                 size_t *) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piMemRetain(pi_mem mem) {
+  assert_single_thread();
   incr_ref_count(mem);
   return PI_SUCCESS;
 }
@@ -1614,7 +1544,7 @@ pi_result xrt_piMemRetain(pi_mem mem) {
 ///
 pi_result xrt_piclProgramCreateWithSource(pi_context, pi_uint32, const char **,
                                           const size_t *, pi_program *) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Loads the images from a PI program into a CUmodule that can be
@@ -1626,6 +1556,7 @@ pi_result xrt_piProgramBuild(pi_program program, pi_uint32 num_devices,
                              void (*pfn_notify)(pi_program program,
                                                 void *user_data),
                              void *user_data) {
+  assert_single_thread();
   assert(program != nullptr);
   assert(num_devices == 1);
   assert(device_list != nullptr);
@@ -1637,7 +1568,7 @@ pi_result xrt_piProgramBuild(pi_program program, pi_uint32 num_devices,
 
 /// \TODO Not implemented
 pi_result xrt_piProgramCreate(pi_context, const void *, size_t, pi_program *) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Loads images from a list of PTX or CUBIN binaries.
@@ -1651,11 +1582,12 @@ pi_result xrt_piProgramCreateWithBinary(
     const size_t *lengths, const unsigned char **binaries,
     size_t num_metadata_entries, const pi_device_binary_property *metadata,
     pi_int32 *binary_status, pi_program *program) {
+  assert_single_thread();
   assert(context != nullptr);
   assert(binaries != nullptr);
   assert(program != nullptr);
   assert(device_list != nullptr);
-  assert(num_devices == 1 && "CUDA contexts are for a single device");
+  assert(num_devices == 1 && "XRT contexts are for a single device");
   assert((context->devices_[0].value == device_list[0]) &&
          "Mismatch between devices context and passed context when creating "
          "program from binary");
@@ -1663,14 +1595,15 @@ pi_result xrt_piProgramCreateWithBinary(
   try {
     /// We assume there is al least 1 valid device
     pi_device dev = device_list[0];
-    xrt::xclbin xclbin(reinterpret_cast<const axlf *>(binaries[0]));
-    xrt::uuid uuid = dev->get().load_xclbin(xclbin);
-
+    reproducer() << "// xclbin buffer size=" << lengths[0] << "\n";
+    auto xclbin = REPRODUCE_CALL(xrt::xclbin, reinterpret_cast<const axlf *>(binaries[0]));
+    xrt::uuid uuid = REPRODUCE_MEMCALL(dev->get(), load_xclbin, xclbin);
+    
     *program = ref_counted_base<_pi_program>::make(
         context, dev, std::move(xclbin), std::move(uuid));
     return PI_SUCCESS;
   } catch (std::system_error err) {
-    cl::sycl::detail::pi::log() << "XRT error:" << err.code() << ":" << err.what() << std::endl;
+    sycl::detail::pi::log() << "XRT error:" << err.code() << ":" << err.what() << std::endl;
     return PI_ERROR_UNKNOWN;
   }
 }
@@ -1678,7 +1611,7 @@ pi_result xrt_piProgramCreateWithBinary(
 pi_result xrt_piProgramGetInfo(pi_program program, pi_program_info param_name,
                                size_t param_value_size, void *param_value,
                                size_t *param_value_size_ret) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Creates a new PI program object that is the outcome of linking all input
@@ -1692,7 +1625,7 @@ pi_result xrt_piProgramLink(pi_context context, pi_uint32 num_devices,
                             void (*pfn_notify)(pi_program program,
                                                void *user_data),
                             void *user_data, pi_program *ret_program) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Creates a new program that is the outcome of the compilation of the headers
@@ -1704,17 +1637,18 @@ pi_result xrt_piProgramCompile(
     const char *options, pi_uint32 num_input_headers,
     const pi_program *input_headers, const char **header_include_names,
     void (*pfn_notify)(pi_program program, void *user_data), void *user_data) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piProgramGetBuildInfo(pi_program program, pi_device device,
                                     cl_program_build_info param_name,
                                     size_t param_value_size, void *param_value,
                                     size_t *param_value_size_ret) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piProgramRetain(pi_program program) {
+  assert_single_thread();
   incr_ref_count(program);
   return PI_SUCCESS;
 }
@@ -1723,6 +1657,7 @@ pi_result xrt_piProgramRetain(pi_program program) {
 /// When the reference count reaches 0, it unloads the module from
 /// the context.
 pi_result xrt_piProgramRelease(pi_program program) {
+  assert_single_thread();
   decr_ref_count(program);
   return PI_SUCCESS;
 }
@@ -1735,7 +1670,7 @@ pi_result xrt_piProgramRelease(pi_program program) {
 /// \return TBD
 pi_result xrt_piextProgramGetNativeHandle(pi_program program,
                                           pi_native_handle *nativeHandle) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Created a PI program object from a CUDA program handle.
@@ -1749,28 +1684,30 @@ pi_result xrt_piextProgramGetNativeHandle(pi_program program,
 /// \return TBD
 pi_result xrt_piextProgramCreateWithNativeHandle(pi_native_handle, pi_context,
                                                  bool, pi_program *) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piKernelGetInfo(pi_kernel kernel, pi_kernel_info param_name,
                               size_t param_value_size, void *param_value,
                               size_t *param_value_size_ret) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piKernelGetSubGroupInfo(
     pi_kernel kernel, pi_device device, pi_kernel_sub_group_info param_name,
     size_t input_value_size, const void *input_value, size_t param_value_size,
     void *param_value, size_t *param_value_size_ret) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piKernelRetain(pi_kernel kernel) {
+  assert_single_thread();
   incr_ref_count(kernel);
   return PI_SUCCESS;
 }
 
 pi_result xrt_piKernelRelease(pi_kernel kernel) {
+  assert_single_thread();
   decr_ref_count(kernel);
   return PI_SUCCESS;
 }
@@ -1778,25 +1715,26 @@ pi_result xrt_piKernelRelease(pi_kernel kernel) {
 // A NOP for the XRT backend
 pi_result xrt_piKernelSetExecInfo(pi_kernel, pi_kernel_exec_info, size_t,
                                   const void *) {
+  assert_single_thread();
   return PI_SUCCESS;
 }
 
 pi_result xrt_piextKernelSetArgPointer(pi_kernel kernel, pi_uint32 arg_index,
                                        size_t arg_size, const void *arg_value) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 //
 // Events
 //
 pi_result xrt_piEventCreate(pi_context, pi_event *) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piEventGetInfo(pi_event event, pi_event_info param_name,
                              size_t param_value_size, void *param_value,
                              size_t *param_value_size_ret) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Obtain profiling information from PI CUDA events
@@ -1806,23 +1744,23 @@ pi_result xrt_piEventGetProfilingInfo(pi_event event,
                                       size_t param_value_size,
                                       void *param_value,
                                       size_t *param_value_size_ret) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piEventSetCallback(pi_event, pi_int32, pfn_notify, void *) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piEventSetStatus(pi_event, pi_int32) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piEventRetain(pi_event event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piEventRelease(pi_event event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Enqueues a wait on the given CUstream for all events.
@@ -1834,7 +1772,7 @@ pi_result xrt_piEnqueueEventsWait(pi_queue command_queue,
                                   pi_uint32 num_events_in_wait_list,
                                   const pi_event *event_wait_list,
                                   pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Enqueues a wait on the given CUstream for all specified events (See
@@ -1853,7 +1791,7 @@ pi_result xrt_piEnqueueEventsWaitWithBarrier(pi_queue command_queue,
                                              pi_uint32 num_events_in_wait_list,
                                              const pi_event *event_wait_list,
                                              pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Gets the native CUDA handle of a PI event object
@@ -1864,7 +1802,7 @@ pi_result xrt_piEnqueueEventsWaitWithBarrier(pi_queue command_queue,
 /// \return PI_SUCCESS on success. PI_INVALID_EVENT if given a user event.
 pi_result xrt_piextEventGetNativeHandle(pi_event event,
                                         pi_native_handle *nativeHandle) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Created a PI event object from a CUDA event handle.
@@ -1877,7 +1815,7 @@ pi_result xrt_piextEventGetNativeHandle(pi_event event,
 /// \return TBD
 pi_result xrt_piextEventCreateWithNativeHandle(pi_native_handle, pi_context,
                                                bool, pi_event *) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Creates a PI sampler object
@@ -1891,7 +1829,7 @@ pi_result xrt_piextEventCreateWithNativeHandle(pi_native_handle, pi_context,
 pi_result xrt_piSamplerCreate(pi_context context,
                               const pi_sampler_properties *sampler_properties,
                               pi_sampler *result_sampler) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Gets information from a PI sampler object
@@ -1906,7 +1844,7 @@ pi_result xrt_piSamplerCreate(pi_context context,
 pi_result xrt_piSamplerGetInfo(pi_sampler sampler, cl_sampler_info param_name,
                                size_t param_value_size, void *param_value,
                                size_t *param_value_size_ret) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Retains a PI sampler object, incrementing its reference count.
@@ -1915,7 +1853,7 @@ pi_result xrt_piSamplerGetInfo(pi_sampler sampler, cl_sampler_info param_name,
 ///
 /// \return PI_SUCCESS.
 pi_result xrt_piSamplerRetain(pi_sampler sampler) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Releases a PI sampler object, decrementing its reference count. If the
@@ -1925,7 +1863,7 @@ pi_result xrt_piSamplerRetain(pi_sampler sampler) {
 ///
 /// \return PI_SUCCESS.
 pi_result xrt_piSamplerRelease(pi_sampler sampler) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piEnqueueMemBufferReadRect(
@@ -1935,7 +1873,7 @@ pi_result xrt_piEnqueueMemBufferReadRect(
     size_t buffer_slice_pitch, size_t host_row_pitch, size_t host_slice_pitch,
     void *ptr, pi_uint32 num_events_in_wait_list,
     const pi_event *event_wait_list, pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piEnqueueMemBufferWriteRect(
@@ -1945,7 +1883,7 @@ pi_result xrt_piEnqueueMemBufferWriteRect(
     size_t buffer_slice_pitch, size_t host_row_pitch, size_t host_slice_pitch,
     const void *ptr, pi_uint32 num_events_in_wait_list,
     const pi_event *event_wait_list, pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piEnqueueMemBufferCopy(pi_queue command_queue, pi_mem src_buffer,
@@ -1954,7 +1892,7 @@ pi_result xrt_piEnqueueMemBufferCopy(pi_queue command_queue, pi_mem src_buffer,
                                      pi_uint32 num_events_in_wait_list,
                                      const pi_event *event_wait_list,
                                      pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piEnqueueMemBufferCopyRect(
@@ -1964,7 +1902,7 @@ pi_result xrt_piEnqueueMemBufferCopyRect(
     size_t dst_row_pitch, size_t dst_slice_pitch,
     pi_uint32 num_events_in_wait_list, const pi_event *event_wait_list,
     pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piEnqueueMemBufferFill(pi_queue command_queue, pi_mem buffer,
@@ -1973,7 +1911,7 @@ pi_result xrt_piEnqueueMemBufferFill(pi_queue command_queue, pi_mem buffer,
                                      pi_uint32 num_events_in_wait_list,
                                      const pi_event *event_wait_list,
                                      pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piEnqueueMemImageRead(pi_queue command_queue, pi_mem image,
@@ -1983,7 +1921,7 @@ pi_result xrt_piEnqueueMemImageRead(pi_queue command_queue, pi_mem image,
                                     pi_uint32 num_events_in_wait_list,
                                     const pi_event *event_wait_list,
                                     pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piEnqueueMemImageWrite(pi_queue command_queue, pi_mem image,
@@ -1994,7 +1932,7 @@ pi_result xrt_piEnqueueMemImageWrite(pi_queue command_queue, pi_mem image,
                                      pi_uint32 num_events_in_wait_list,
                                      const pi_event *event_wait_list,
                                      pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piEnqueueMemImageCopy(pi_queue command_queue, pi_mem src_image,
@@ -2004,14 +1942,14 @@ pi_result xrt_piEnqueueMemImageCopy(pi_queue command_queue, pi_mem src_image,
                                     pi_uint32 num_events_in_wait_list,
                                     const pi_event *event_wait_list,
                                     pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// \TODO Not implemented in CUDA, requires untie from OpenCL
 pi_result xrt_piEnqueueMemImageFill(pi_queue, pi_mem, const void *,
                                     const size_t *, const size_t *, pi_uint32,
                                     const pi_event *, pi_event *) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Implements mapping on the host using a BufferRead operation.
@@ -2027,7 +1965,7 @@ pi_result xrt_piEnqueueMemBufferMap(pi_queue command_queue, pi_mem buffer,
                                     pi_uint32 num_events_in_wait_list,
                                     const pi_event *event_wait_list,
                                     pi_event *event, void **ret_map) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Implements the unmap from the host, using a BufferWrite operation.
@@ -2039,7 +1977,7 @@ pi_result xrt_piEnqueueMemUnmap(pi_queue command_queue, pi_mem memobj,
                                 pi_uint32 num_events_in_wait_list,
                                 const pi_event *event_wait_list,
                                 pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// USM: Implements USM Host allocations using CUDA Pinned Memory
@@ -2047,7 +1985,7 @@ pi_result xrt_piEnqueueMemUnmap(pi_queue command_queue, pi_mem memobj,
 pi_result xrt_piextUSMHostAlloc(void **result_ptr, pi_context context,
                                 pi_usm_mem_properties *properties, size_t size,
                                 pi_uint32 alignment) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// USM: Implements USM device allocations using a normal CUDA device pointer
@@ -2056,7 +1994,7 @@ pi_result xrt_piextUSMDeviceAlloc(void **result_ptr, pi_context context,
                                   pi_device device,
                                   pi_usm_mem_properties *properties,
                                   size_t size, pi_uint32 alignment) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// USM: Implements USM Shared allocations using CUDA Managed Memory
@@ -2065,13 +2003,13 @@ pi_result xrt_piextUSMSharedAlloc(void **result_ptr, pi_context context,
                                   pi_device device,
                                   pi_usm_mem_properties *properties,
                                   size_t size, pi_uint32 alignment) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// USM: Frees the given USM pointer associated with the context.
 ///
 pi_result xrt_piextUSMFree(pi_context context, void *ptr) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piextUSMEnqueueMemset(pi_queue queue, void *ptr, pi_int32 value,
@@ -2079,7 +2017,7 @@ pi_result xrt_piextUSMEnqueueMemset(pi_queue queue, void *ptr, pi_int32 value,
                                     pi_uint32 num_events_in_waitlist,
                                     const pi_event *events_waitlist,
                                     pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piextUSMEnqueueMemcpy(pi_queue queue, pi_bool blocking,
@@ -2088,7 +2026,7 @@ pi_result xrt_piextUSMEnqueueMemcpy(pi_queue queue, pi_bool blocking,
                                     pi_uint32 num_events_in_waitlist,
                                     const pi_event *events_waitlist,
                                     pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 pi_result xrt_piextUSMEnqueuePrefetch(pi_queue queue, const void *ptr,
@@ -2096,14 +2034,14 @@ pi_result xrt_piextUSMEnqueuePrefetch(pi_queue queue, const void *ptr,
                                       pi_uint32 num_events_in_waitlist,
                                       const pi_event *events_waitlist,
                                       pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// USM: memadvise API to govern behavior of automatic migration mechanisms
 pi_result xrt_piextUSMEnqueueMemAdvise(pi_queue queue, const void *ptr,
                                        size_t length, pi_mem_advice advice,
                                        pi_event *event) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// API to query information about USM allocated pointers
@@ -2127,17 +2065,21 @@ pi_result xrt_piextUSMGetMemAllocInfo(pi_context context, const void *ptr,
                                       size_t param_value_size,
                                       void *param_value,
                                       size_t *param_value_size_ret) {
-  cl::sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 // This API is called by Sycl RT to notify the end of the plugin lifetime.
 // TODO: add a global variable lifetime management code here (see
 // pi_level_zero.cpp for reference) Currently this is just a NOOP.
-pi_result xrt_piTearDown(void *) { return PI_SUCCESS; }
+pi_result xrt_piTearDown(void *) {
+  assert_single_thread();
+  return PI_SUCCESS;
+}
 
 const char SupportedVersion[] = _PI_H_VERSION_STRING;
 
 pi_result piPluginInit(pi_plugin *PluginInit) {
+  assert_single_thread();
   int CompareVersions = strcmp(PluginInit->PiVersion, SupportedVersion);
   if (CompareVersions < 0) {
     // PI interface supports lower version of PI.
