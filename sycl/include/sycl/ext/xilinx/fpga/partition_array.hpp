@@ -259,17 +259,17 @@ class partition_ndarray<ValueType, dim<Size, Sizes...>, PartitionType> {
     // partitioning to use
     if constexpr (partition_type == partition::type::cyclic)
       partition::xilinx_partition_array(
-          (ValueType __SYCL_DEVICE_ADDRSPACE(0 /*stack*/)(*)[Size])(&elems),
+          (ValueType(*)[Size])(&elems),
           partition_type, PartitionType::split_into,
           PartitionType::partition_dim);
     if constexpr (partition_type == partition::type::block)
       partition::xilinx_partition_array(
-          (ValueType __SYCL_DEVICE_ADDRSPACE(0 /*stack*/)(*)[Size])(&elems),
+          (ValueType(*)[Size])(&elems),
           partition_type, PartitionType::split_into,
           PartitionType::partition_dim);
     if constexpr (partition_type == partition::type::complete)
       partition::xilinx_partition_array(
-          (ValueType __SYCL_DEVICE_ADDRSPACE(0 /*stack*/)(*)[Size])(&elems),
+          (ValueType(*)[Size])(&elems),
           partition_type, 0, PartitionType::partition_dim);
   }
 

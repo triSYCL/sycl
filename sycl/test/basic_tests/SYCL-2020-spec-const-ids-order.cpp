@@ -21,7 +21,6 @@ const static sycl::specialization_id<int> SecondValue{42};
 const static sycl::specialization_id<int> ConstantId{42};
 const static sycl::specialization_id<int> Val23{42};
 
-
 int main() {
   sycl::queue queue;
   {

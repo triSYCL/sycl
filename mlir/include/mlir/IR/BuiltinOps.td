@@ -15,6 +15,7 @@
 #define BUILTIN_OPS
 
 include "mlir/IR/BuiltinDialect.td"
+include "mlir/IR/FunctionInterfaces.td"
 include "mlir/IR/OpAsmInterface.td"
 include "mlir/IR/RegionKindInterface.td"
 include "mlir/IR/SymbolInterfaces.td"
@@ -24,7 +25,7 @@ include "mlir/Interfaces/DataLayoutInterfaces.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
 // Base class for Builtin dialect ops.
-class Builtin_Op<string mnemonic, list<OpTrait> traits = []> :
+class Builtin_Op<string mnemonic, list<Trait> traits = []> :
     Op<Builtin_Dialect, mnemonic, traits>;
 
 //===----------------------------------------------------------------------===//
@@ -32,8 +33,8 @@ class Builtin_Op<string mnemonic, list<OpTrait> traits = []> :
 //===----------------------------------------------------------------------===//
 
 def FuncOp : Builtin_Op<"func", [
-  AffineScope, AutomaticAllocationScope, CallableOpInterface, FunctionLike,
-  IsolatedFromAbove, Symbol
+  AffineScope, AutomaticAllocationScope, CallableOpInterface,
+  FunctionOpInterface, IsolatedFromAbove, Symbol
 ]> {
   let summary = "An operation with a name containing a single `SSACFG` region";
   let description = [{
@@ -75,7 +76,7 @@ def FuncOp : Builtin_Op<"func", [
   }];
 
   let arguments = (ins SymbolNameAttr:$sym_name,
-                       TypeAttr:$type,
+                       TypeAttrOf<FunctionType>:$type,
                        OptionalAttr<StrAttr>:$sym_visibility);
   let regions = (region AnyRegion:$body);
 
@@ -123,37 +124,22 @@ def FuncOp : Builtin_Op<"func", [
     ArrayRef<Type> getCallableResults() { return getType().getResults(); }
 
     //===------------------------------------------------------------------===//
+    // FunctionOpInterface Methods
+    //===------------------------------------------------------------------===//
+
+    /// Returns the argument types of this function.
+    ArrayRef<Type> getArgumentTypes() { return getType().getInputs(); }
+
+    /// Returns the result types of this function.
+    ArrayRef<Type> getResultTypes() { return getType().getResults(); }
+
+    //===------------------------------------------------------------------===//
     // SymbolOpInterface Methods
     //===------------------------------------------------------------------===//
 
     bool isDeclaration() { return isExternal(); }
-
-  private:
-    // This trait needs access to the hooks defined below.
-    friend class OpTrait::FunctionLike<FuncOp>;
-
-    /// Returns the number of arguments. This is a hook for
-    /// OpTrait::FunctionLike.
-    unsigned getNumFuncArguments() { return getType().getInputs().size(); }
-
-    /// Returns the number of results. This is a hook for OpTrait::FunctionLike.
-    unsigned getNumFuncResults() { return getType().getResults().size(); }
-
-    /// Hook for OpTrait::FunctionLike, called after verifying that the 'type'
-    /// attribute is present and checks if it holds a function type. Ensures
-    /// getType, getNumFuncArguments, and getNumFuncResults can be called
-    /// safely.
-    LogicalResult verifyType() {
-      auto type = getTypeAttr().getValue();
-      if (!type.isa<FunctionType>())
-        return emitOpError("requires '" + getTypeAttrName() +
-                           "' attribute of function type");
-      return success();
-    }
   }];
-  let parser = [{ return ::parseFuncOp(parser, result); }];
-  let printer = [{ return ::print(*this, p); }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasCustomAssemblyFormat = 1;
 }
 
 //===----------------------------------------------------------------------===//
@@ -185,16 +171,16 @@ def ModuleOp : Builtin_Op<"module", [
 
   let arguments = (ins OptionalAttr<SymbolNameAttr>:$sym_name,
                        OptionalAttr<StrAttr>:$sym_visibility);
-  let regions = (region SizedRegion<1>:$body);
+  let regions = (region SizedRegion<1>:$bodyRegion);
 
-  let assemblyFormat = "($sym_name^)? attr-dict-with-keyword $body";
+  let assemblyFormat = "($sym_name^)? attr-dict-with-keyword $bodyRegion";
   let builders = [OpBuilder<(ins CArg<"Optional<StringRef>", "{}">:$name)>];
   let extraClassDeclaration = [{
     /// Construct a module from the given location with an optional name.
     static ModuleOp create(Location loc, Optional<StringRef> name = llvm::None);
 
     /// Return the name of this module if present.
-    Optional<StringRef> getName() { return sym_name(); }
+    Optional<StringRef> getName() { return getSymName(); }
 
     //===------------------------------------------------------------------===//
     // SymbolOpInterface Methods
@@ -217,7 +203,7 @@ def ModuleOp : Builtin_Op<"module", [
       return "builtin";
     }
   }];
-  let verifier = [{ return ::verify(*this); }];
+  let hasVerifier = 1;
 
   // We need to ensure the block inside the region is properly terminated;
   // the auto-generated builders do not guarantee that.

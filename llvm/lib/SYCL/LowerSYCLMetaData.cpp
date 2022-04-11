@@ -425,6 +425,11 @@ struct LowerSYCLMetaData : public ModulePass {
 };
 } // namespace
 
+PreservedAnalyses LowerSYCLMetaDataPass::run(Module &M, ModuleAnalysisManager &AM) {
+  LSMDState(M).run();
+  return PreservedAnalyses::none();
+}
+
 namespace llvm {
 void initializeLowerSYCLMetaDataPass(PassRegistry &Registry);
 } // namespace llvm
