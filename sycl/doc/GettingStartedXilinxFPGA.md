@@ -955,7 +955,7 @@ To run an example from the provided examples:
 - with hardware emulation:
 
 ```bash
-  cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/simple_tests
+  cd $SYCL_HOME/llvm/sycl/test/vitis/simple_tests
   # Instruct the compiler and runtime to use FPGA hardware emulation with HLS flow
   # Compile the SYCL program down to a host fat binary including the RTL for simulation
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw_emu \
@@ -967,7 +967,7 @@ To run an example from the provided examples:
 - with real hardware execution on FPGA:
 
 ```bash
-  cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/simple_tests
+  cd $SYCL_HOME/llvm/sycl/test/vitis/simple_tests
   # Instruct the compiler to use real FPGA hardware execution with HLS flow
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw \
@@ -1022,33 +1022,33 @@ the `fpga64_` prefix trimmed. Namely:
 
 Note that the SPIR compilation flow has been discontinued.
 
-- Run the `xocc` test suite with hardware emulation (HLS flow):
+- Run the `vitis` test suite with hardware emulation (HLS flow):
 
 ```bash
   cd $SYCL_HOME/llvm/build
   export VXX_TARGET=hls_hw_emu
-  cmake --build . --parallel `nproc` --target check-sycl-xocc-j4
+  cmake --build . --parallel `nproc` --target check-sycl-vitis-j4
   ```
 
 This takes usually 15-30 minutes with a good CPU.
 
-- Run the `xocc` test suite with real hardware execution on FPGA (HLS flow):
+- Run the `vitis` test suite with real hardware execution on FPGA (HLS flow):
 
 ```bash
   cd $SYCL_HOME/llvm/build
   export VXX_TARGET=hls_hw
-  cmake --build . --parallel `nproc` --target check-sycl-xocc-j4
+  cmake --build . --parallel `nproc` --target check-sycl-vitis-j4
   ```
 
 This takes usually 8+ hours.
 
-`check-sycl-xocc-jmax` will run the tests on as many cores as is
+`check-sycl-vitis-jmax` will run the tests on as many cores as is
 available on the system. But for `hw` and `hw_emu` execution mode,
 this usually means the system will run out of RAM even with 64G so
-`check-sycl-xocc-j4` should be used to run only 4 tests in
+`check-sycl-vitis-j4` should be used to run only 4 tests in
 parallel. There is also a `j2` version to use only 2 cores.
 
-To launch the compilation on all the SYCL tests, not only the `xocc`
+To launch the compilation on all the SYCL tests, not only the `vitis`
 ones, there are the targets `check-sycl-all-jmax`,
 `check-sycl-all-j2` and `check-sycl-all-j4`
 
@@ -1059,7 +1059,7 @@ To run a SYCL translation of
 https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
 
 ```bash
-cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/edge_detection
+cd $SYCL_HOME/llvm/sycl/test/on-device/vitis/edge_detection
 # Instruct the compiler and runtime to use real FPGA hardware execution
 $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
     -fsycl-targets=fpga64_hls_hw edge_detection.cpp \
@@ -1300,7 +1300,7 @@ queue.submit([&](sycl::handler &cgh) {
 });
 ```
 
-for more examples see [this test case](../test/on-device/xocc/simple_tests/partion_ndarray.cpp) or [this one](../test/on-device/xocc/edge_detection/edge_detection.cpp)
+for more examples see [this test case](../test/vitis/simple_tests/partion_ndarray.cpp) or [this one](../test/vitis/edge_detection/edge_detection.cpp)
 
 ## AMD/Xilinx Macros
 
