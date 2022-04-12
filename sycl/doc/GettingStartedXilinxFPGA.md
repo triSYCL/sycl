@@ -1563,7 +1563,7 @@ This will look like the following:
 #!/bin/bash
 
 # Downgrade the IR generate by llvm-reduce
-./build-Release/bin/opt -verify -S -xoccIRDowngrader $1 -o $1.tmp.ll || exit 1
+./build-Release/bin/opt -verify -S -vxxIRDowngrader $1 -o $1.tmp.ll || exit 1
 
 # Assemble the IR using Vitis's assembler
 .../clang-3.9-csynth/bin/llvm-as $1.tmp.ll -o $1.tmp.xpirbc
