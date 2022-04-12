@@ -852,7 +852,7 @@ mkdir $SYCL_HOME
 cd $SYCL_HOME
 # You can also try --branch sycl/unified/next for a bleeding edge experience
 git clone --branch sycl/unified/master git@github.com:triSYCL/sycl.git llvm
-python $SYCL_HOME/llvm/buildbot/configure.py
+python $SYCL_HOME/llvm/buildbot/configure.py --no-werror
 python $SYCL_HOME/llvm/buildbot/compile.py
 ```
 
