@@ -37,7 +37,7 @@ config.test_source_root = os.path.dirname(__file__)
 config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
 
 # Propagate some variables from the host environment.
-llvm_config.with_system_environment(['PATH', 'OCL_ICD_FILENAMES', 'SYCL_DEVICE_ALLOWLIST', 'SYCL_CONFIG_FILE_NAME'])
+llvm_config.with_system_environment(['PATH', 'OCL_ICD_FILENAMES', 'SYCL_DEVICE_ALLOWLIST', 'SYCL_CONFIG_FILE_NAME', 'SYCL_PI_TRACE'])
 
 xocc=lit_config.params.get('XOCC', "off")
 
@@ -56,6 +56,7 @@ if config.extra_environment:
 config.environment['SYCL_VXX_PRINT_CMD'] = 'True'
 config.environment['SYCL_VXX_SERIALIZE_VITIS_COMP'] = 'True'
 config.environment['XRT_PCIE_HW_EMU_FORCE_SHUTDOWN'] = 'True'
+config.environment['SYCL_VXX_TEST_MODE'] = 'True'
 
 # Configure LD_LIBRARY_PATH or corresponding os-specific alternatives
 # Add 'libcxx' feature to filter out all SYCL abi tests when SYCL runtime
@@ -142,6 +143,9 @@ lit_config.note("Filter: {}".format(filter))
 
 acc_run_substitute=f"env SYCL_DEVICE_FILTER={filter} "
 if xocc != "off":
+    # cleanup the named semaphore in case the previous test didnt cleanup properly
+    # If someone tries to run multiple tests on the same machin this could cause issues.
+    os.system("rm -rf /dev/shm/sem.sycl_vxx.py")
     # xrt doesn't deal well with multiple executables using it concurrently (at the time of writing).
     # The details are at https://xilinx.github.io/XRT/master/html/multiprocess.html
     # so we wrap every use of XRT inside an file lock.
@@ -168,6 +172,7 @@ else:
     #     config.available_features.add("has_secondary_cuda")
     required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]
     has_error=False
+    lit_config.note(f"XILINX_HLS={os.environ['XILINX_HLS']}")
     config.available_features.add("xocc")
     feat_list = ",".join(config.available_features)
     lit_config.note(f"Features: {feat_list}")

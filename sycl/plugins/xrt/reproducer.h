@@ -12,10 +12,12 @@
 #include <array>
 #include <cassert>
 #include <cstddef>
+#include <cstdio>
 #include <fstream>
 #include <initializer_list>
 #include <ostream>
 #include <set>
+#include <string>
 #include <tuple>
 #include <type_traits>
 #include <unordered_map>
@@ -90,17 +92,18 @@ std::unordered_map<const void *, std::string> &name_map() {
 }
 
 std::string nameof(const void *ptr, bool is_use = true,
-                   const std::string &use_prefix = "",
-                   const std::string &use_postfix = "") {
+                   const std::string &format = "%s") {
   static int id_next = 0;
   if (!std::getenv(reproducer_env_name))
     return "";
   auto &name = name_map()[ptr];
   if (!is_use) {
-    name = "name" + std::to_string(id_next++);
-    auto ret = name;
-    name = use_prefix + name + use_postfix;
-    return ret;
+    std::string id = "name" + std::to_string(id_next++);
+    int e = std::snprintf(nullptr, 0, format.c_str(), id.c_str());
+    name.resize(e + 1);
+    std::snprintf(&name[0], name.size(), format.c_str(), id.c_str());
+    name.resize(e);
+    return id;
   }
   assert(!name.empty());
   return name;
@@ -304,8 +307,8 @@ template <typename T>
 void reproducer_add_buffer_wrapper(const std::string &from, T *ptr, int size) {
   reproducer() << "// from: " << from << "\n";
   reproducer() << "std::array<char, " << size << "> "
-               << nameof(ptr, false, std::string("((") + TypeName<T>() + "*)",
-                         ".data())")
+               << nameof(ptr, false,
+                         std::string("((") + TypeName<T>() + "*)%s.data())")
                << "= {";
   std::array<char, 10> char_buff;
   const unsigned char *cptr = (const unsigned char *)ptr;
@@ -319,24 +322,46 @@ void reproducer_add_buffer_wrapper(const std::string &from, T *ptr, int size) {
   std::flush(reproducer());
 }
 
+template <typename T, typename T2>
+void reproducer_add_related_ptr_wrapper(T *base, T2* ptr) {
+  int offset = ((char*)ptr) - ((char*)base);
+  if (offset == 0)
+    return;
+  assert(offset >= 0);
+  nameof(ptr, false, "(void*)(((char*)" + nameof(base) + ") + " + std::to_string(offset) + ")");
+}
 }
 
+/// allow treating constructors and function call the same way
 #define CALLABLE(X)                                                            \
   [&](auto &&...args) { return X(std::forward<decltype(args)>(args)...); }
+
+/// generate: X(...) or auto nameY = X(...)
 #define REPRODUCE_CALL(X, ...)                                                 \
   ::detail::reproducer_call_unpacker(                                          \
       std::string(__PRETTY_FUNCTION__) + " " + __FILE__ + ":" +                \
           std::to_string(__LINE__),                                            \
       #X, #X, std::initializer_list<std::string>{#__VA_ARGS__}, CALLABLE(X),   \
       std::forward_as_tuple(__VA_ARGS__))
+
+/// generate: O.X(...) or auto nameY = O.X(...)
 #define REPRODUCE_MEMCALL(O, X, ...)                                           \
   ::detail::reproducer_memcall_unpacker(                                       \
       std::string(__PRETTY_FUNCTION__) + " " + __FILE__ + ":" +                \
           std::to_string(__LINE__),                                            \
       #O, #X, std::initializer_list<std::string>{#__VA_ARGS__}, (O),           \
       CALLABLE((O).X), std::forward_as_tuple(__VA_ARGS__))
+
+/// replace P by a buffer of S elements
+/// generate: std::array<X, S> = {...};
 #define REPRODUCE_ADD_BUFFER(P, S)                                             \
   ::detail::reproducer_add_buffer_wrapper(std::string(__PRETTY_FUNCTION__) +   \
                                               " " + __FILE__ + ":" +           \
                                               std::to_string(__LINE__),        \
                                           (P), (S))
+
+/// Inform the naming system that P should be expressed (B + X)
+/// generate nothing on its own.
+/// this is a macro only be cause the rest of the API is macros.
+#define REPRODUCE_ADD_RELATED_PTR(B, P)                                        \
+  ::detail::reproducer_add_related_ptr_wrapper(B, P)
