@@ -1410,8 +1410,6 @@ pi_result piPluginInit(pi_plugin *PluginInit) {
     return PI_INVALID_OPERATION;
   }
 
-  std::atexit(terminate_xsimk);
-
   // PI interface supports higher version or the same version.
   strncpy(PluginInit->PluginVersion, SupportedVersion, 4);
 

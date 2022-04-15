@@ -44,7 +44,7 @@ if (DEFINED XILINX_RT_INCLUDE)
   )
 
   if (MSVC)
-    # by defining __SYCL_BUILD_SYCL_DLL, we can use __declspec(dllexport)
+    # By defining __SYCL_BUILD_SYCL_DLL, we can use __declspec(dllexport)
     # which are individually tagged for all pi* symbols in pi.h
     target_compile_definitions(pi_xrt PRIVATE __SYCL_BUILD_SYCL_DLL)
     # Install stripped PDB

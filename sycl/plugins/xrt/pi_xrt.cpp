@@ -30,50 +30,49 @@
 #include <CL/sycl/detail/pi.hpp>
 #include <CL/sycl/detail/terminate_xsimk.hpp>
 
-#include <deque>
-#include <thread>
-#include <ostream>
-#include <type_traits>
-#include <utility>
-#include <array>
-#include <cstddef>
-#include <cstdlib>
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <cstddef>
+#include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <functional>
 #include <iterator>
 #include <limits>
 #include <mutex>
 #include <numeric>
 #include <optional>
+#include <ostream>
 #include <stdint.h>
 #include <string>
+#include <thread>
+#include <type_traits>
+#include <utility>
 #include <vector>
 
 #include <experimental/xrt_system.h>
 #include <experimental/xrt_xclbin.h>
 #include <version.h>
+#include <xclbin.h>
+#include <xrt.h>
 #include <xrt/xrt_bo.h>
 #include <xrt/xrt_device.h>
 #include <xrt/xrt_kernel.h>
 #include <xrt/xrt_uuid.h>
-#include <xrt.h>
 #include <xrt_mem.h>
-#include <xclbin.h>
 
 #include "reproducer.h"
 
 #pragma clang diagnostic pop
 
-// Most of the API is not implemented and exist so most parameters are not used
-// and it is expected
+// Most of functions in the API exists but do not have an implementation so most
+// parameters are not used and it is expected
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
 
-/// Base class for _pi_* object that need ref-counting
+/// Base class for _pi_* objects that need ref-counting
 template <typename base> struct ref_counted_base {
   ref_counted_base() : refCount_(1) {}
   std::atomic_uint32_t refCount_;
@@ -124,19 +123,18 @@ void decr_ref_count(T *value) {}
 
 template <typename T, typename std::enable_if_t<
                           std::is_base_of_v<ref_counted_base<T>, T>, int> = 0>
-void assert_valid_obj(T* obj) {
+void assert_valid_obj(T *obj) {
   assert(obj);
   assert(obj->get_reference_count() > 0);
 }
 
 template <typename T, typename std::enable_if_t<
                           !std::is_base_of_v<ref_counted_base<T>, T>, int> = 0>
-void assert_valid_obj(T* obj) {
+void assert_valid_obj(T *obj) {
   assert(obj);
 }
 
-template <typename T>
-void assert_valid_objs(T ptr, int count) {
+template <typename T> void assert_valid_objs(T ptr, int count) {
   for (int i = 0; i < count; i++)
     assert_valid_obj(ptr[i]);
 }
@@ -170,11 +168,9 @@ template <typename T> struct ref_counted_ref {
 struct workqueue {
   std::deque<std::function<void()>> cmds;
 
-  void clear_queue() {
-    cmds.clear();
-  }
+  void clear_queue() { cmds.clear(); }
   void exec_queue() {
-    for (auto& func : cmds)
+    for (auto &func : cmds)
       func();
     clear_queue();
   }
@@ -191,7 +187,8 @@ struct _pi_platform : ref_counted_base<_pi_platform> {
   _pi_platform(unsigned int numDevices) {
     devices_.reserve(numDevices);
     for (unsigned int i = 0; i < numDevices; ++i) {
-      devices_.emplace_back(std::make_unique<_pi_device>(REPRODUCE_CALL(xrt::device, i), *this));
+      devices_.emplace_back(
+          std::make_unique<_pi_device>(REPRODUCE_CALL(xrt::device, i), *this));
     }
   }
   unsigned int getNumDevices() const noexcept { return devices_.size(); }
@@ -226,23 +223,6 @@ struct _pi_context : ref_counted_base<_pi_context> {
   _pi_context(pi_uint32 num_devices, const pi_device *devices);
 
   ~_pi_context() = default;
-
-  void invoke_extended_deleters() {
-    std::lock_guard<std::mutex> guard(mutex_);
-    for (auto &deleter : extended_deleters_) {
-      deleter();
-    }
-  }
-
-  void set_extended_deleter(pi_context_extended_deleter function,
-                            void *user_data) {
-    std::lock_guard<std::mutex> guard(mutex_);
-    extended_deleters_.emplace_back(deleter_data{function, user_data});
-  }
-
-private:
-  std::mutex mutex_;
-  std::vector<deleter_data> extended_deleters_;
 };
 
 struct _pi_mem : ref_counted_base<_pi_mem> {
@@ -263,11 +243,10 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
   /// enqueue them.
   workqueue pending_cmds;
 
-  _pi_mem(_pi_context *ctx, _mem m) : context_(ctx), mem(m) {
-  }
+  _pi_mem(_pi_context *ctx, _mem m) : context_(ctx), mem(m) {}
 
-  template<typename T>
-  void run_if_possible(const xrt::device &device, T&& call) {
+  template <typename T>
+  void run_when_mapped(const xrt::device &device, T &&call) {
     // TODO: kept as an if def because we have some an open bug in XRT that we
     // may be asked to reproduce (https://github.com/Xilinx/XRT/issues/6589)
 #if 1
@@ -276,41 +255,42 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
     else
       pending_cmds.cmds.push_back(std::forward<T>(call));
 #else
-      std::forward<T>(call)();
+    std::forward<T>(call)();
 #endif
   }
 
   bool is_mapped(const xrt::device &device) {
     if (mem.mapped_ptr) {
-      assert(device.get_handle().get() == mem.dev_ptr && "can only be mapped on one device for now");
+      assert(device.get_handle().get() == mem.dev_ptr &&
+             "can only be mapped on one device for now");
       return true;
     }
     return false;
   }
   void map_if_needed(const xrt::device &device) {
     if (mem.mapped_ptr) {
-      assert(device.get_handle().get() == mem.dev_ptr && "can only be mapped on one device for now");
+      assert(device.get_handle().get() == mem.dev_ptr &&
+             "can only be mapped on one device for now");
       return;
     }
     mem.dev_ptr = device.get_handle().get();
     if (mem.host_ptr)
       get_native() = REPRODUCE_CALL(xrt::bo, device, mem.host_ptr, mem.size, 0);
     else
-      get_native() = REPRODUCE_CALL(xrt::bo, device, mem.size, XRT_BO_FLAGS_NONE, 0);
+      get_native() =
+          REPRODUCE_CALL(xrt::bo, device, mem.size, XRT_BO_FLAGS_NONE, 0);
     mem.mapped_ptr = REPRODUCE_MEMCALL(get_native(), map);
     pending_cmds.exec_queue(); // TODO fix this
   }
 
-  // TODO: xrt::bo sometimes stay stuck while being deleted. so we dont delete it.
-  // (https://github.com/Xilinx/XRT/issues/6588)
+  // TODO: xrt::bo sometimes stay stuck while being deleted. so we dont delete
+  // it. (https://github.com/Xilinx/XRT/issues/6588)
   union no_destroy {
     no_destroy() = default;
     native_type buffer_ = {};
     ~no_destroy() {}
   } nd;
-  native_type& get_native() {
-    return nd.buffer_;
-  }
+  native_type &get_native() { return nd.buffer_; }
   ~_pi_mem() { assert(pending_cmds.cmds.empty()); }
 };
 
@@ -328,8 +308,7 @@ typedef void (*pfn_notify)(pi_event event, pi_int32 eventCommandStatus,
                            void *userData);
 
 /// there are currently no async operation so event are noop
-struct _pi_event : ref_counted_base<_pi_event> {
-};
+struct _pi_event : ref_counted_base<_pi_event> {};
 
 /// Implementation of PI Program
 struct _pi_program {
@@ -339,7 +318,8 @@ struct _pi_program {
   xrt::uuid uuid_;
 
   _pi_program(pi_context ctx, pi_device dev, xrt::xclbin bin, xrt::uuid uuid)
-      : context_(ctx), device_(dev), bin_(std::move(bin)), uuid_(std::move(uuid)) {}
+      : context_(ctx), device_(dev), bin_(std::move(bin)),
+        uuid_(std::move(uuid)) {}
 };
 
 /// Implementation of a PI Kernel for XRT
@@ -352,8 +332,10 @@ struct _pi_kernel {
   xrt::run run_;
   xrt::xclbin::kernel info_;
 
-  _pi_kernel(pi_program prog, native_type kern, xrt::run run, xrt::xclbin::kernel info)
-      : program_(prog), kernel_(std::move(kern)), run_(run), info_(std::move(info)) {}
+  _pi_kernel(pi_program prog, native_type kern, xrt::run run,
+             xrt::xclbin::kernel info)
+      : program_(prog), kernel_(std::move(kern)), run_(run),
+        info_(std::move(info)) {}
 };
 
 // -------------------------------------------------------------
@@ -415,11 +397,6 @@ pi_result getInfo<const char *>(size_t param_value_size, void *param_value,
                       param_value_size_ret, value);
 }
 
-enum class arg_kind {
-  buffer,
-  scalar,
-};
-
 } // anonymous namespace
 
 /// ------ Error handling, matching OpenCL plugin semantics.
@@ -428,9 +405,7 @@ namespace sycl {
 namespace detail {
 namespace pi {
 
-std::ostream& log() {
-  return std::cerr;
-}
+std::ostream &log() { return std::cerr; }
 
 // Report error and no return (keeps compiler from printing warnings).
 //
@@ -462,7 +437,8 @@ void assertion(bool Condition, const char *Message) {
 
 void assert_single_thread() {
   static std::thread::id saved_id = std::this_thread::get_id();
-  assert(saved_id == std::this_thread::get_id() && "there is no multithread support for now");
+  assert(saved_id == std::this_thread::get_id() &&
+         "there is no multithread support for now");
 }
 
 /// Obtains the XRT platform.
@@ -1113,46 +1089,7 @@ pi_result xrt_piextGetDeviceFunctionPointer(pi_device device,
   sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
-namespace {
-
-/// ScopedContext is used across all PI CUDA plugin implementation to ensure
-/// that the proper CUDA context is active for the given PI context.
-//
-/// This class will only replace the context if necessary, and will leave the
-/// new context active on the current thread. If there was an active context
-/// already it will simply be replaced.
-//
-/// Previously active contexts are not restored for two reasons:
-/// * Performance: context switches are expensive so leaving the context active
-///   means subsequent SYCL calls with the same context will be cheaper.
-/// * Multi-threading cleanup: contexts are set active per thread and deleting a
-///   context will only deactivate it for the current thread. This means other
-///   threads may end up with deleted active contexts. In particular this can
-///   happen with host_tasks as they run in a thread pool. When the context
-///   associated with these tasks is deleted it will remain active in the
-///   threads of the thread pool. So it would be invalid for any other task
-///   running on these threads to try to restore the deleted context. With the
-///   current implementation this is not an issue because the active deleted
-///   context will just be replaced.
-//
-/// This approach does mean that CUDA interop tasks should NOT expect their
-/// contexts to be restored by SYCL.
-class ScopedContext {
-public:
-  ScopedContext(pi_context ctxt) {
-    sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
-  }
-
-  ~ScopedContext() {}
-};
-
-/// \endcond
-
-} // anonymous namespace
-
-/// Creates a PI Memory object using a CUDA memory allocation.
-/// Can trigger a manual copy depending on the mode.
-/// \TODO Implement USE_HOST_PTR using cuHostRegister
+/// Creates a PI Memory object
 ///
 pi_result xrt_piMemBufferCreate(pi_context context, pi_mem_flags flags,
                                 size_t size, void *host_ptr, pi_mem *ret_mem,
@@ -1167,10 +1104,6 @@ pi_result xrt_piMemBufferCreate(pi_context context, pi_mem_flags flags,
   return PI_SUCCESS;
 }
 
-/// Decreases the reference count of the Mem object.
-/// If this is zero, calls the relevant CUDA Free function
-/// \return PI_SUCCESS unless deallocation error
-///
 pi_result xrt_piMemRelease(pi_mem mem) {
   assert_single_thread();
   decr_ref_count(mem);
@@ -1302,8 +1235,7 @@ pi_result xrt_piEnqueueMemBufferWrite(pi_queue command_queue, pi_mem buffer,
   assert(event);
   *event = ref_counted_base<_pi_event>::make();
 
-  buffer->run_if_possible(command_queue->device_->get(), [=] {
-    buffer->map_if_needed(command_queue->device_->get());
+  buffer->run_when_mapped(command_queue->device_->get(), [=] {
     void *adjusted_ptr = ((char *)buffer->mem.mapped_ptr) + offset;
     REPRODUCE_ADD_BUFFER(ptr, size);
     REPRODUCE_CALL((void)std::memcpy, adjusted_ptr, ptr, size);
@@ -1329,7 +1261,7 @@ pi_result xrt_piEnqueueMemBufferRead(pi_queue command_queue, pi_mem buffer,
 
   assert(buffer->is_mapped(command_queue->device_->get()));
   REPRODUCE_MEMCALL(buffer->get_native(), sync, XCL_BO_SYNC_BO_FROM_DEVICE);
-  void* adjusted_ptr = ((char*)buffer->mem.mapped_ptr) + offset;
+  void *adjusted_ptr = ((char *)buffer->mem.mapped_ptr) + offset;
   REPRODUCE_ADD_BUFFER(ptr, size);
   REPRODUCE_CALL((void)std::memcpy, ptr, adjusted_ptr, size);
   return PI_SUCCESS;
@@ -1338,7 +1270,7 @@ pi_result xrt_piEnqueueMemBufferRead(pi_queue command_queue, pi_mem buffer,
 pi_result xrt_piEventsWait(pi_uint32 num_events, const pi_event *event_list) {
   assert_single_thread();
   assert_valid_objs(event_list, num_events);
-  /// For now every operation is executed synchronously so even are not
+  /// For now every operation is executed synchronously this ia a noop
 
   return PI_SUCCESS;
 }
@@ -1349,8 +1281,8 @@ pi_result xrt_piKernelCreate(pi_program program, const char *kernel_name,
   assert_valid_obj(program);
 
   /// TODO: XRT error handling
-  auto ker = REPRODUCE_CALL(xrt::kernel, program->device_->get(), program->uuid_,
-                      kernel_name);
+  auto ker = REPRODUCE_CALL(xrt::kernel, program->device_->get(),
+                            program->uuid_, kernel_name);
   auto info = REPRODUCE_MEMCALL(program->bin_, get_kernel, kernel_name);
   auto run = REPRODUCE_CALL(xrt::run, ker);
   *kernel = ref_counted_base<_pi_kernel>::make(program, std::move(ker),
@@ -1365,7 +1297,7 @@ pi_result xrt_piKernelSetArg(pi_kernel kernel, pi_uint32 arg_index,
   assert(kernel->info_.get_num_args() > arg_index);
   auto arg_info = kernel->info_.get_arg(arg_index);
 
-  //TODO XRT: analyse if xrt_piKernelSetArg can be called for buffer.
+  // TODO XRT: analyse if xrt_piKernelSetArg can be called for buffer.
   REPRODUCE_ADD_BUFFER(arg_value, arg_size);
   REPRODUCE_MEMCALL(kernel->run_, set_arg, arg_index, arg_value, arg_size);
   return PI_SUCCESS;
@@ -1376,7 +1308,7 @@ pi_result xrt_piextKernelSetArgMemObj(pi_kernel kernel, pi_uint32 arg_index,
   assert_single_thread();
   assert_valid_obj(kernel);
   assert(arg_value);
-  _pi_mem* buf = *arg_value;
+  _pi_mem *buf = *arg_value;
 
   buf->map_if_needed(kernel->program_->device_->get());
   REPRODUCE_MEMCALL(kernel->run_, set_arg, arg_index, buf->get_native());
@@ -1480,10 +1412,7 @@ pi_result xrt_piProgramCreate(pi_context, const void *, size_t, pi_program *) {
   sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
-/// Loads images from a list of PTX or CUBIN binaries.
-/// Note: No calls to CUDA driver API in this function, only store binaries
-/// for later.
-///
+/// Loads the first xclbin from the list
 /// Note: Only supports one device
 ///
 pi_result xrt_piProgramCreateWithBinary(
@@ -1506,14 +1435,16 @@ pi_result xrt_piProgramCreateWithBinary(
     /// We assume there is al least 1 valid device
     pi_device dev = device_list[0];
     reproducer() << "// xclbin buffer size=" << lengths[0] << "\n";
-    auto xclbin = REPRODUCE_CALL(xrt::xclbin, reinterpret_cast<const axlf *>(binaries[0]));
+    auto xclbin = REPRODUCE_CALL(xrt::xclbin,
+                                 reinterpret_cast<const axlf *>(binaries[0]));
     xrt::uuid uuid = REPRODUCE_MEMCALL(dev->get(), load_xclbin, xclbin);
-    
+
     *program = ref_counted_base<_pi_program>::make(
         context, dev, std::move(xclbin), std::move(uuid));
     return PI_SUCCESS;
   } catch (std::system_error err) {
-    sycl::detail::pi::log() << "XRT error:" << err.code() << ":" << err.what() << std::endl;
+    sycl::detail::pi::log()
+        << "XRT error:" << err.code() << ":" << err.what() << std::endl;
     return PI_ERROR_UNKNOWN;
   }
 }
@@ -1647,7 +1578,7 @@ pi_result xrt_piEventGetInfo(pi_event event, pi_event_info param_name,
   assert_single_thread();
   assert_valid_obj(event);
 
-    switch (param_name) {
+  switch (param_name) {
   case PI_EVENT_INFO_REFERENCE_COUNT:
     return getInfo(param_value_size, param_value, param_value_size_ret,
                    event->get_reference_count());
@@ -1811,7 +1742,7 @@ pi_result enuqeue_rect_copy(bool is_read, pi_queue command_queue, pi_mem buffer,
   /// TODO add test where the offsets and sizes are not simple
   if (is_read)
     assert(buffer->is_mapped(command_queue->device_->get()));
-  buffer->run_if_possible(
+  buffer->run_when_mapped(
       command_queue->device_->get(),
       [=, dev_off = *buffer_offset, host_off = *host_offset, size = *region] {
         if (is_read)
