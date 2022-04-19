@@ -23,6 +23,11 @@
 #if SYCL_EXT_ONEAPI_BACKEND_LEVEL_ZERO
 #include <CL/sycl/detail/backend_traits_level_zero.hpp>
 #endif
+#if SYCL_BACKEND_XRT
+#include <CL/sycl/detail/backend_traits_xrt.hpp>
+#else
+#error "meh
+#endif
 #include <CL/sycl/detail/common.hpp>
 #include <CL/sycl/detail/export.hpp>
 #include <CL/sycl/detail/pi.h>

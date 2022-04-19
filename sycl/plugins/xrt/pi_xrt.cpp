@@ -103,8 +103,8 @@ template <typename base> struct ref_counted_base {
 template <typename T, typename std::enable_if_t<
                           std::is_base_of_v<ref_counted_base<T>, T>, int> = 0>
 void incr_ref_count(T *value) {
-  if (value)
-    value->increment_reference_count();
+  assert(value);
+  value->increment_reference_count();
 }
 template <typename T, typename std::enable_if_t<
                           !std::is_base_of_v<ref_counted_base<T>, T>, int> = 0>
@@ -114,8 +114,8 @@ void incr_ref_count(T *value) {}
 template <typename T, typename std::enable_if_t<
                           std::is_base_of_v<ref_counted_base<T>, T>, int> = 0>
 void decr_ref_count(T *value) {
-  if (value)
-    value->decrement_reference_count();
+  assert(value);
+  value->decrement_reference_count();
 }
 template <typename T, typename std::enable_if_t<
                           !std::is_base_of_v<ref_counted_base<T>, T>, int> = 0>
@@ -147,22 +147,40 @@ template <typename T> struct ref_counted_ref {
   ref_counted_ref(std::nullptr_t) : ref_counted_ref() {}
 
   /// Copy from an existing ref so we increase the ref count
-  ref_counted_ref(T *v) : value(v) { incr_ref_count(value); }
-  ref_counted_ref(ref_counted_ref &other) : ref_counted_ref(other.value) {}
-  /// Copy from an existing move the ref into the object so the ref count say
-  /// the same
-  ref_counted_ref(ref_counted_ref &&other) : value(other.value) {}
+  ref_counted_ref(T *v) : value(v) { retain(); }
+  ref_counted_ref(const ref_counted_ref &other)
+      : ref_counted_ref(other.value) {}
+  ref_counted_ref(ref_counted_ref &&other) : value(other.value) {
+    other.value = nullptr;
+  }
 
   T *operator->() { return value; }
   T &operator*() { return *value; }
   operator bool() { return value; }
+  void release() {
+    if (value)
+      decr_ref_count(value);
+  }
+  void retain() {
+    if (value)
+      incr_ref_count(value);
+  }
+  void reset() {
+    release();
+    value = nullptr;
+  }
 
-  template <typename OtherTy> ref_counted_ref &operator=(OtherTy &&other) {
-    decr_ref_count(value);
-    value = ref_counted_ref(std::forward<OtherTy>(other));
+  void swap(ref_counted_ref &other) {
+    T *tmp = value;
+    value = other.value;
+    other.value = tmp;
+  }
+
+  ref_counted_ref &operator=(ref_counted_ref other) {
+    swap(other);
     return *this;
   }
-  ~ref_counted_ref() { decr_ref_count(value); }
+  ~ref_counted_ref() { release(); }
 };
 
 struct workqueue {
@@ -176,41 +194,60 @@ struct workqueue {
   }
 };
 
-/// A PI platform stores all known PI devices,
-///  in the XRT plugin this is just a vector of
-///  available devices since initialization is done
-///  when devices are used.
-///
-struct _pi_platform : ref_counted_base<_pi_platform> {
-  std::vector<std::unique_ptr<_pi_device>> devices_;
-
-  _pi_platform(unsigned int numDevices) {
-    devices_.reserve(numDevices);
-    for (unsigned int i = 0; i < numDevices; ++i) {
-      devices_.emplace_back(
-          std::make_unique<_pi_device>(REPRODUCE_CALL(xrt::device, i), *this));
-    }
-  }
-  unsigned int getNumDevices() const noexcept { return devices_.size(); }
-  _pi_device &getDevice(unsigned int i) { return *devices_[i]; }
-};
-
 struct _pi_device {
-private:
   using native_type = xrt::device;
 
   native_type xrtDevice_;
   ref_counted_ref<_pi_platform> platform_;
 
-public:
-  _pi_device(native_type dev, _pi_platform &platform)
-      : xrtDevice_(std::move(dev)), platform_(&platform) {}
+  _pi_device(native_type dev, _pi_platform *platform)
+      : xrtDevice_(std::move(dev)), platform_(platform) {}
 
   native_type &get() noexcept { return xrtDevice_; };
-  pi_platform get_platform() const noexcept { return platform_.value; };
+  _pi_platform* get_platform() const noexcept { return platform_.value; };
+};
+
+/// A PI platform stores all known PI devices,
+///  in the XRT plugin this is just a vector of
+///  available devices since initialization is done
+///  when devices are used.
+///
+struct _pi_platform {
+  std::vector<_pi_device> devices_;
+
+  static int get_count() {
+    // Simulators are not considered as devices by XRT...
+    // And wether XRT is configured to use simulator or real device cannot be
+    // changed once it is selected. So we just assume there is 1 device
+    // available. And hope we are right
+    static pi_uint32 numPlatforms = 1;
+    return numPlatforms;
+  }
+  static _pi_platform *get() {
+    static _pi_platform self(get_count());
+    return &self;
+  }
+
+  _pi_platform(unsigned int numDevices) {
+    devices_.reserve(numDevices);
+    for (unsigned int i = 0; i < numDevices; ++i)
+      devices_.emplace_back(REPRODUCE_CALL(xrt::device, i), this);
+  }
+  unsigned int getNumDevices() const noexcept { return devices_.size(); }
+  _pi_device &getDevice(unsigned int i) { return devices_[i]; }
+  _pi_device &get_or_create_device(xclDeviceHandle dev_handle) {
+    for (auto &dev : devices_)
+      if (static_cast<xclDeviceHandle>(dev.xrtDevice_) == dev_handle)
+        return dev;
+    devices_.emplace_back(REPRODUCE_CALL(xrt::device, dev_handle), this);
+    return devices_.back();
+  }
 };
 
 struct _pi_context : ref_counted_base<_pi_context> {
+  using base = ref_counted_base<_pi_context>;
+  using base::make;
+
   struct deleter_data {
     pi_context_extended_deleter function;
     void *user_data;
@@ -226,6 +263,9 @@ struct _pi_context : ref_counted_base<_pi_context> {
 };
 
 struct _pi_mem : ref_counted_base<_pi_mem> {
+  using base = ref_counted_base<_pi_mem>;
+  using base::make;
+
   using native_type = xrt::bo;
 
   // Context where the memory object is accessible
@@ -267,7 +307,7 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
     }
     return false;
   }
-  void map_if_needed(const xrt::device &device) {
+  void map_if_needed(const xrt::device &device, xrt::memory_group grp) {
     if (mem.mapped_ptr) {
       assert(device.get_handle().get() == mem.dev_ptr &&
              "can only be mapped on one device for now");
@@ -275,10 +315,10 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
     }
     mem.dev_ptr = device.get_handle().get();
     if (mem.host_ptr)
-      get_native() = REPRODUCE_CALL(xrt::bo, device, mem.host_ptr, mem.size, 0);
+      get_native() = REPRODUCE_CALL(xrt::bo, device, mem.host_ptr, mem.size, grp);
     else
       get_native() =
-          REPRODUCE_CALL(xrt::bo, device, mem.size, XRT_BO_FLAGS_NONE, 0);
+          REPRODUCE_CALL(xrt::bo, device, mem.size, XRT_BO_FLAGS_NONE, grp);
     mem.mapped_ptr = REPRODUCE_MEMCALL(get_native(), map);
     pending_cmds.exec_queue(); // TODO fix this
   }
@@ -295,6 +335,9 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
 };
 
 struct _pi_queue : ref_counted_base<_pi_queue> {
+  using base = ref_counted_base<_pi_queue>;
+  using base::make;
+
   ref_counted_ref<_pi_context> context_;
   ref_counted_ref<_pi_device> device_;
 
@@ -308,10 +351,16 @@ typedef void (*pfn_notify)(pi_event event, pi_int32 eventCommandStatus,
                            void *userData);
 
 /// there are currently no async operation so event are noop
-struct _pi_event : ref_counted_base<_pi_event> {};
+struct _pi_event : ref_counted_base<_pi_event> {
+  using base = ref_counted_base<_pi_event>;
+  using base::make;
+};
 
 /// Implementation of PI Program
-struct _pi_program {
+struct _pi_program : ref_counted_base<_pi_program> {
+  using base = ref_counted_base<_pi_program>;
+  using base::make;
+
   ref_counted_ref<_pi_context> context_;
   ref_counted_ref<_pi_device> device_;
   xrt::xclbin bin_;
@@ -324,7 +373,10 @@ struct _pi_program {
 
 /// Implementation of a PI Kernel for XRT
 ///
-struct _pi_kernel {
+struct _pi_kernel : ref_counted_base<_pi_kernel> {
+  using base = ref_counted_base<_pi_kernel>;
+  using base::make;
+
   using native_type = xrt::kernel;
 
   ref_counted_ref<_pi_program> program_;
@@ -447,23 +499,14 @@ pi_result xrt_piPlatformsGet(pi_uint32 num_entries, pi_platform *platforms,
   assert_single_thread();
   pi_result result = PI_SUCCESS;
 
-  // run_original_test();
-
-  // Simulators are not considered as devices by XRT...
-  // And wether XRT is configured to use simulator or real device cannot be
-  // changed once it is selected. So we just assume there is 1 device available.
-  // And hope we are right
-  static pi_uint32 numPlatforms = 1;
-  static _pi_platform platform(numPlatforms);
-
   if (num_entries == 0 && platforms)
     return PI_INVALID_VALUE;
   if (platforms == nullptr && num_platforms == nullptr)
     return PI_INVALID_VALUE;
   if (num_platforms)
-    *num_platforms = numPlatforms;
+    *num_platforms = _pi_platform::get_count();
   if (platforms)
-    *platforms = &platform;
+    *platforms = _pi_platform::get();
   return result;
 }
 
@@ -515,7 +558,6 @@ pi_result xrt_piDevicesGet(pi_platform platform, pi_device_type device_type,
   const bool returnDevices = askingForDefault || askingForACC;
 
   size_t numDevices = returnDevices ? platform->getNumDevices() : 0;
-  assert(numDevices == 1 && "XRT should only have 1 device");
 
   try {
     if (num_devices) {
@@ -976,18 +1018,22 @@ pi_result xrt_piextDeviceGetNativeHandle(pi_device device,
   sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
-/// Created a PI device object from a CUDA device handle.
-/// TODO: Implement this.
-/// NOTE: The created PI object takes ownership of the native handle.
-///
+/// Created a PI device object from a XRT device handle.
 /// \param[in] nativeHandle The native handle to create PI device object from.
 /// \param[in] platform is the PI platform of the device.
 /// \param[out] device Set to the PI device object created from native handle.
 ///
 /// \return TBD
-pi_result xrt_piextDeviceCreateWithNativeHandle(pi_native_handle, pi_platform,
-                                                pi_device *) {
-  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+pi_result xrt_piextDeviceCreateWithNativeHandle(pi_native_handle handle,
+                                                pi_platform platform,
+                                                pi_device *res) {
+  assert_single_thread();
+  /// the sycl runtime almost always provide a null platform
+  assert(res);
+  xclDeviceHandle dev_handle = (xclDeviceHandle)handle;
+
+  *res = &_pi_platform::get()->get_or_create_device(dev_handle);
+  return PI_SUCCESS;
 }
 
 /* Context APIs */
@@ -1017,10 +1063,9 @@ pi_result xrt_piContextCreate(const pi_context_properties *properties,
   assert(devices);
   assert(pfn_notify == nullptr);
   assert(user_data == nullptr);
-  assert(num_devices == 1);
   assert(ret);
 
-  *ret = ref_counted_base<_pi_context>::make(num_devices, devices);
+  *ret = _pi_context::make(num_devices, devices);
   return PI_SUCCESS;
 }
 
@@ -1099,7 +1144,7 @@ pi_result xrt_piMemBufferCreate(pi_context context, pi_mem_flags flags,
   assert(ret_mem);
   assert(properties == nullptr);
 
-  *ret_mem = ref_counted_base<_pi_mem>::make(
+  *ret_mem = _pi_mem::make(
       context, _pi_mem::_mem{flags, size, host_ptr, nullptr, nullptr});
   return PI_SUCCESS;
 }
@@ -1157,7 +1202,7 @@ pi_result xrt_piQueueCreate(pi_context context, pi_device device,
   assert(device);
   // TODO(XRT): : properties not handled
 
-  *queue = ref_counted_base<_pi_queue>::make(context, device);
+  *queue = _pi_queue::make(context, device);
   return PI_SUCCESS;
 }
 
@@ -1233,7 +1278,7 @@ pi_result xrt_piEnqueueMemBufferWrite(pi_queue command_queue, pi_mem buffer,
   assert_valid_objs(event_wait_list, num_events_in_wait_list);
   assert(ptr && size);
   assert(event);
-  *event = ref_counted_base<_pi_event>::make();
+  *event = _pi_event::make();
 
   buffer->run_when_mapped(command_queue->device_->get(), [=] {
     void *adjusted_ptr = ((char *)buffer->mem.mapped_ptr) + offset;
@@ -1257,7 +1302,7 @@ pi_result xrt_piEnqueueMemBufferRead(pi_queue command_queue, pi_mem buffer,
   assert_valid_objs(event_wait_list, num_events_in_wait_list);
   assert(ptr && size);
   assert(event);
-  *event = ref_counted_base<_pi_event>::make();
+  *event = _pi_event::make();
 
   assert(buffer->is_mapped(command_queue->device_->get()));
   REPRODUCE_MEMCALL(buffer->get_native(), sync, XCL_BO_SYNC_BO_FROM_DEVICE);
@@ -1285,8 +1330,8 @@ pi_result xrt_piKernelCreate(pi_program program, const char *kernel_name,
                             program->uuid_, kernel_name);
   auto info = REPRODUCE_MEMCALL(program->bin_, get_kernel, kernel_name);
   auto run = REPRODUCE_CALL(xrt::run, ker);
-  *kernel = ref_counted_base<_pi_kernel>::make(program, std::move(ker),
-                                               std::move(run), std::move(info));
+  *kernel = _pi_kernel::make(program, std::move(ker), std::move(run),
+                             std::move(info));
   return PI_SUCCESS;
 }
 
@@ -1310,7 +1355,7 @@ pi_result xrt_piextKernelSetArgMemObj(pi_kernel kernel, pi_uint32 arg_index,
   assert(arg_value);
   _pi_mem *buf = *arg_value;
 
-  buf->map_if_needed(kernel->program_->device_->get());
+  buf->map_if_needed(kernel->program_->device_->get(), kernel->kernel_.group_id(arg_index));
   REPRODUCE_MEMCALL(kernel->run_, set_arg, arg_index, buf->get_native());
 
   return PI_SUCCESS;
@@ -1339,7 +1384,7 @@ pi_result xrt_piEnqueueKernelLaunch(
   assert(work_dim == 1 && *global_work_offset == 0 && *global_work_size == 1 &&
          *local_work_size == 1 && "only support 1 single_task");
   assert(event);
-  *event = ref_counted_base<_pi_event>::make();
+  *event = _pi_event::make();
 
   REPRODUCE_MEMCALL(kernel->run_, start);
   REPRODUCE_MEMCALL(kernel->run_, wait);
@@ -1439,7 +1484,7 @@ pi_result xrt_piProgramCreateWithBinary(
                                  reinterpret_cast<const axlf *>(binaries[0]));
     xrt::uuid uuid = REPRODUCE_MEMCALL(dev->get(), load_xclbin, xclbin);
 
-    *program = ref_counted_base<_pi_program>::make(
+    *program = _pi_program::make(
         context, dev, std::move(xclbin), std::move(uuid));
     return PI_SUCCESS;
   } catch (std::system_error err) {
@@ -2013,8 +2058,6 @@ pi_result piPluginInit(pi_plugin *PluginInit) {
     // TODO: Take appropriate actions.
     return PI_INVALID_OPERATION;
   }
-
-  std::atexit(terminate_xsimk);
 
   // PI interface supports higher version or the same version.
   strncpy(PluginInit->PluginVersion, SupportedVersion, 4);

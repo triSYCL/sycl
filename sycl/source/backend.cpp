@@ -35,6 +35,8 @@ static const plugin &getPlugin(backend Backend) {
     return pi::getPlugin<backend::opencl>();
   case backend::ext_oneapi_level_zero:
     return pi::getPlugin<backend::ext_oneapi_level_zero>();
+  case backend::xrt:
+    return pi::getPlugin<backend::xrt>();
   default:
     throw sycl::runtime_error{"Unsupported backend", PI_INVALID_OPERATION};
   }

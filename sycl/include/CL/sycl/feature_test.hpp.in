@@ -82,6 +82,10 @@ namespace sycl {
 #if SYCL_BUILD_PI_HIP
 #define SYCL_EXT_ONEAPI_BACKEND_HIP 1
 #endif
+#cmakedefine01 SYCL_BUILD_PI_XRT
+#if SYCL_BUILD_PI_XRT
+#define SYCL_BACKEND_XRT 1
+#endif
 
 } // namespace sycl
 } // __SYCL_INLINE_NAMESPACE(cl)

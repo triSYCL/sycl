@@ -542,6 +542,7 @@ template __SYCL_EXPORT const plugin &
 getPlugin<backend::ext_oneapi_level_zero>();
 template __SYCL_EXPORT const plugin &
 getPlugin<backend::ext_intel_esimd_emulator>();
+template __SYCL_EXPORT const plugin &getPlugin<backend::xrt>();
 
 // Report error and no return (keeps compiler from printing warnings).
 // TODO: Probably change that to throw a catchable exception,
