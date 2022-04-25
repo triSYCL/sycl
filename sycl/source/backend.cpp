@@ -61,9 +61,13 @@ __SYCL_EXPORT device make_device(pi_native_handle NativeHandle,
   pi::PiDevice PiDevice = nullptr;
   Plugin.call<PiApiKind::piextDeviceCreateWithNativeHandle>(NativeHandle,
                                                             nullptr, &PiDevice);
+
+  std::shared_ptr<platform_impl> PlatformImpl =
+      detail::platform_impl::getPlatformFromPiDevice(PiDevice, Plugin);
+
   // Construct the SYCL device from PI device.
   return detail::createSyclObjFromImpl<device>(
-      std::make_shared<device_impl>(PiDevice, Plugin));
+      PlatformImpl->getOrMakeDeviceImpl(PiDevice, PlatformImpl));
 }
 
 __SYCL_EXPORT context make_context(pi_native_handle NativeHandle,
