@@ -948,7 +948,80 @@ But as SYCL allows also execution on a CPU device, it can replace the
 back-end software emulation.
 
 
+### Picking the right device
+
+The SYCL framework displays the available SYCL devices by running the
+`sycl-ls` command, with an optional `--verbose` parameter for more
+information.
+
+The XRT runtime exposes the real FPGA available on the machine or some
+emulated FPGA according to the `XCL_EMULATION_MODE` environment
+variable: which can take 3 values according to the required emulation:
+- `hw_emu`, for hardware emulation where an RTL simulator is used to
+  run (slowly) the kernels instead of using a real FPGA and is the
+  only option that matters here;
+- `hw`, for real hardware execution, equivalent to not defining
+  `XCL_EMULATION_MODE`;
+- `sw_emu`, for software emulation, which is not very useful in SYCL
+  since the code is already executable on CPU as plain single-source
+  C++, but makes sense for HLS C/C++ or OpenCL.
+
+When running a SYCL program on AMD/Xilinx FPGA, the runtime takes care
+of this variable according to the compilation option, so it is not
+necessary to set it.
+
+But to list the available SYCL devices on the machine, setting the
+variable to have a list of available devices according whether you
+want to see simulated devices or not.
+
+For example, on a machine without a physical FPGA, running the
+`sycl-ls` command can show:
+```bash
+>- sycl-ls
+XRT build version: 2.14.0
+Build hash: 3d71c4e867bf91e789f89499a97b95708331d7e7
+Build date: 2022-04-12 13:48:07
+Git branch: master
+PID: 421146
+UID: 1000
+[Tue Apr 26 01:04:14 2022 GMT]
+HOST: rk-xsj
+EXE: /home/rkeryell/Xilinx/Projects/LLVM/worktrees/xilinx/llvm/build/bin/sycl-ls
+[XRT] ERROR: No devices found
+[opencl:cpu:0] Intel(R) CPU Runtime for OpenCL(TM) Applications, Intel(R) Xeon(R) E-2176M  CPU @ 2.70GHz 2.1 [18.1.0.0920]
+[opencl:cpu:1] Portable Computing Language, pthread-Intel(R) Xeon(R) E-2176M  CPU @ 2.70GHz 1.2 [1.8]
+[host:host:0] SYCL host platform, SYCL host device 1.2 [1.2]
+```
+with an error message ending with `[XRT] ERROR: No devices found`.
+
+But by asking some hardware emulated devices, the installed platforms
+show up:
+```bash
+>- XCL_EMULATION_MODE=hw_emu sycl-ls
+[opencl:acc:0] Xilinx, xilinx_u200_gen3x16_xdma_1_202110_1 1.0 [1.0]
+[opencl:cpu:1] Intel(R) CPU Runtime for OpenCL(TM) Applications, Intel(R) Xeon(R) E-2176M  CPU @ 2.70GHz 2.1 [18.1.0.0920]
+[opencl:cpu:2] Portable Computing Language, pthread-Intel(R) Xeon(R) E-2176M  CPU @ 2.70GHz 1.2 [1.8]
+[host:host:0] SYCL host platform, SYCL host device 1.2 [1.2]
+```
+as `opencl:acc:0` which can be used to select the right device.
+
+The examples provided here often rely on the SYCL default selector
+whose behavior can be influenced by the
+[`SYCL_DEVICE_FILTER`](EnvironmentVariables.md#sycl_device_filter)
+environment variable, among others. Thus, to run an example on the
+AMD/Xilinx FPGA shown by the previous `sycl-ls`, the environment
+variable can be set with:
+```bash
+>- export SYCL_DEVICE_FILTER=opencl:acc:0
+```
+Beware that setting this variable also change the view from `sycl-ls` itself.
+
+
 ### Small examples
+
+See section [Picking the right device](#picking-the-right-device) to
+set correctly the `SYCL_DEVICE_FILTER` environment variable to select
+the right AMD/Xilinx FPGA device first.
 
 To run an example from the provided examples:
 
