@@ -225,7 +225,7 @@ export XILINX_VITIS=/opt/xilinx/Vitis/2021.2
 ./build.sh
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
-sudo apt install --reinstall ./Release/xrt_202210.2.13.0_21.10-amd64-xrt.deb
+sudo apt install --reinstall ./Release/xrt_202220.2.14.0_21.10-amd64-xrt.deb
 ```
 
 It will install the user-mode XRT runtime and at least compile and
