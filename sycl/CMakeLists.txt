@@ -175,6 +175,9 @@ option(SYCL_BUILD_PI_CUDA
 option(SYCL_BUILD_PI_HIP
   "Enables the HIP backend for the Plugin Interface" OFF)
 
+option(SYCL_BUILD_PI_XRT
+  "Enables the XRT backend for the Plugin Interface" OFF)
+
 # Configure SYCL version macro
 set(sycl_inc_dir ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(sycl_src_dir ${CMAKE_CURRENT_SOURCE_DIR}/source)

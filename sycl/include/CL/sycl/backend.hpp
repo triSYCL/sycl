@@ -25,8 +25,6 @@
 #endif
 #if SYCL_BACKEND_XRT
 #include <CL/sycl/detail/backend_traits_xrt.hpp>
-#else
-#error "meh
 #endif
 #include <CL/sycl/detail/common.hpp>
 #include <CL/sycl/detail/export.hpp>

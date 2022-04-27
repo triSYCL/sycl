@@ -329,17 +329,23 @@ private:
   template <backend Backend, class SyclT>
   friend auto get_native(const SyclT &Obj) -> backend_return_t<Backend, SyclT>;
 
-  template <backend Backend>
-  backend_return_t<Backend, kernel_bundle<State>> getNative() const {
+  template <
+      backend Backend,
+      typename ConvertT = typename backend_return_t<
+          Backend, kernel_bundle<State>>::value_type (*)(pi_native_handle)>
+  backend_return_t<Backend, kernel_bundle<State>>
+  getNative(ConvertT convert = [](pi_native_handle a) {
+    return detail::pi::cast<
+        typename backend_return_t<Backend, kernel_bundle<State>>::value_type>(
+        a);
+  }) const {
     // NOTE: implementation assumes that the return type is a
     // derivative of std::vector.
     backend_return_t<Backend, kernel_bundle<State>> ReturnValue;
     ReturnValue.reserve(std::distance(begin(), end()));
 
     for (const device_image<State> &DevImg : *this) {
-      ReturnValue.push_back(
-          detail::pi::cast<typename decltype(ReturnValue)::value_type>(
-              DevImg.getNative()));
+      ReturnValue.push_back(convert(DevImg.getNative()));
     }
 
     return ReturnValue;

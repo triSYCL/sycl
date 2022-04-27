@@ -25,7 +25,7 @@
 #endif // USE_PI_HIP
 
 #ifdef USE_PI_XRT
-#include "xrt.h"
+#include <xrt.h>
 #endif
 
 #include <algorithm>

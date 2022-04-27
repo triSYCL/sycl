@@ -221,6 +221,9 @@ private:
   template <class T>
   friend T detail::createSyclObjFromImpl(decltype(T::impl) ImplObj);
 
+  template <backend Backend, class SyclT>
+  friend auto get_native(const SyclT &Obj) -> backend_return_t<Backend, SyclT>;
+
   friend auto detail::getDeviceComparisonLambda();
 };
 

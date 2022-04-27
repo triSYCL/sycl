@@ -74,13 +74,15 @@
 
 /// Base class for _pi_* objects that need ref-counting
 template <typename base> struct ref_counted_base {
-  ref_counted_base() : refCount_(1) {}
+  // ref_counted_base should always be built via make_ref_counted
+  // the pointer will be wrapped into a ref_counted_ref that will increment the
+  // ref_count
+  ref_counted_base() : refCount_(0) {}
   std::atomic_uint32_t refCount_;
 
   pi_uint32 get_reference_count() const noexcept { return refCount_; }
 
   pi_uint32 increment_reference_count() noexcept {
-    assert(refCount_ > 0);
     return ++refCount_;
   }
 
@@ -93,9 +95,8 @@ template <typename base> struct ref_counted_base {
     }
     return ref_count;
   }
-
-  template <typename... Args> static base *make(Args &&...args) {
-    return new base(std::forward<Args>(args)...);
+  ~ref_counted_base() {
+    assert(refCount_ == 0);
   }
 };
 
@@ -157,6 +158,14 @@ template <typename T> struct ref_counted_ref {
   T *operator->() { return value; }
   T &operator*() { return *value; }
   operator bool() { return value; }
+  T *get() { return value; }
+
+  /// to be used when providing a raw pointer to the user of the PI
+  T *give_externally() {
+    retain();
+    return value;
+  }
+
   void release() {
     if (value)
       decr_ref_count(value);
@@ -183,6 +192,63 @@ template <typename T> struct ref_counted_ref {
   ~ref_counted_ref() { release(); }
 };
 
+template <typename base, typename... Args>
+ref_counted_ref<base> make_ref_counted(Args &&...args) {
+  return new base(std::forward<Args>(args)...);
+}
+
+template<typename T>
+struct singleton {
+private:
+  /// Storage for the instance
+  static T *&get_self() {
+    static T *self = nullptr;
+    return self;
+  }
+public:
+  /// Return a new instance or the currently live instance
+  template <typename... Ts> static ref_counted_ref<T> get(Ts &&...ts) {
+    if (!get_self()) {
+      auto res = make_ref_counted<T>(std::forward<Ts>(ts)...);
+      get_self() = res.get();
+      return res;
+    }
+    return get_self();
+  }
+  ~singleton() {
+    /// Make null such that the next request will rebuild
+    get_self() = nullptr;
+  }
+};
+
+/// Cannot be used for XRT objects because xrt also has global destructors
+struct cleanup_system {
+  using clenup_item = std::pair<void (*)(void *), void *>;
+  std::vector<clenup_item> cleanup_list;
+  std::unordered_map<void *, unsigned> cleanup_map;
+
+  template <typename T> void remove(T *ptr) {
+    unsigned &idx = cleanup_map[ptr];
+    /// remove if in the cleanup list
+    /// should we assert ?
+    if (cleanup_list[idx].second == ptr)
+      cleanup_list[idx] = clenup_item{nullptr, nullptr};
+  }
+
+  template <typename T> void add(T *ptr) {
+    unsigned &idx = cleanup_map[ptr];
+    assert(idx == 0);
+    idx = cleanup_list.size();
+    cleanup_list.push_back(clenup_item{[](void *p) { ((T *)p)->~T(); }, ptr});
+  }
+  ~cleanup_system() {
+    /// idx must be signed
+    for (int idx = cleanup_list.size() - 1; idx >= 0; idx--)
+      if (cleanup_list[idx].second)
+        cleanup_list[idx].first(cleanup_list[idx].second);
+  }
+} cleanup;
+
 struct workqueue {
   std::deque<std::function<void()>> cmds;
 
@@ -194,14 +260,34 @@ struct workqueue {
   }
 };
 
-struct _pi_device {
+template <typename To>
+typename std::enable_if<std::is_reference_v<To>, To>::type
+from_native_handle(pi_native_handle handle) {
+  return REPRODUCE_ADD_EXTERNAL(std::forward<To>(
+      *reinterpret_cast<std::remove_reference_t<To> *>(handle)));
+}
+
+template <typename From>
+typename std::enable_if<std::is_reference_v<From>, pi_native_handle>::type
+to_native_handle(From &&from) {
+  return (pi_native_handle)std::addressof(from);
+}
+
+struct _pi_device
+/// TODO: _pi_device should be ref-counted , but the SYCL runtime
+/// seems to be expected piDevicesGet to return objects with a ref-count
+/// of 0 so we do not destroy _pi_device for now.
+/// (https://github.com/intel/llvm/issues/6034)
+/// : ref_counted_base<_pi_device>
+{
   using native_type = xrt::device;
 
   native_type xrtDevice_;
   ref_counted_ref<_pi_platform> platform_;
 
-  _pi_device(native_type dev, _pi_platform *platform)
-      : xrtDevice_(std::move(dev)), platform_(platform) {}
+  _pi_device(native_type dev, _pi_platform *platform) 
+      : xrtDevice_(std::move(dev)), platform_(platform) {
+  }
 
   native_type &get() noexcept { return xrtDevice_; };
   _pi_platform* get_platform() const noexcept { return platform_.value; };
@@ -212,42 +298,34 @@ struct _pi_device {
 ///  available devices since initialization is done
 ///  when devices are used.
 ///
-struct _pi_platform {
-  std::vector<_pi_device> devices_;
+struct _pi_platform : ref_counted_base<_pi_platform>, singleton<_pi_platform> {
+private:
+  /// _pi_platform is destroyed during program exit and can happen after XRT's
+  /// global state has been cleanup so we do not hold a counting reference on
+  /// _pi_device. to make it manageable 
+  std::vector<_pi_device*> devices_;
 
-  static int get_count() {
-    // Simulators are not considered as devices by XRT...
-    // And wether XRT is configured to use simulator or real device cannot be
-    // changed once it is selected. So we just assume there is 1 device
-    // available. And hope we are right
-    static pi_uint32 numPlatforms = 1;
-    return numPlatforms;
+public:
+  unsigned get_num_device() {
+    return devices_.size();
   }
-  static _pi_platform *get() {
-    static _pi_platform self(get_count());
-    return &self;
+  ref_counted_ref<_pi_device> get_device(unsigned idx) {
+    return devices_[idx];
   }
-
-  _pi_platform(unsigned int numDevices) {
-    devices_.reserve(numDevices);
-    for (unsigned int i = 0; i < numDevices; ++i)
-      devices_.emplace_back(REPRODUCE_CALL(xrt::device, i), this);
-  }
-  unsigned int getNumDevices() const noexcept { return devices_.size(); }
-  _pi_device &getDevice(unsigned int i) { return devices_[i]; }
-  _pi_device &get_or_create_device(xclDeviceHandle dev_handle) {
-    for (auto &dev : devices_)
-      if (static_cast<xclDeviceHandle>(dev.xrtDevice_) == dev_handle)
+  /// Add a device if it inst't already in the list
+  template <typename... Ts> ref_counted_ref<_pi_device> add_device(Ts &&...ts) {
+    auto new_dev = REPRODUCE_CALL(xrt::device, std::forward<Ts>(ts)...);
+    auto bdf = new_dev.template get_info<xrt::info::device::bdf>();
+    for (auto *dev : devices_)
+      if (bdf == dev->get().get_info<xrt::info::device::bdf>())
         return dev;
-    devices_.emplace_back(REPRODUCE_CALL(xrt::device, dev_handle), this);
-    return devices_.back();
+    auto dev_ref = make_ref_counted<_pi_device>(std::move(new_dev), this);
+    devices_.emplace_back(dev_ref.get());
+    return dev_ref;
   }
 };
 
-struct _pi_context : ref_counted_base<_pi_context> {
-  using base = ref_counted_base<_pi_context>;
-  using base::make;
-
+struct _pi_context : ref_counted_base<_pi_context>, singleton<_pi_context> {
   struct deleter_data {
     pi_context_extended_deleter function;
     void *user_data;
@@ -257,15 +335,11 @@ struct _pi_context : ref_counted_base<_pi_context> {
 
   std::vector<ref_counted_ref<_pi_device>> devices_;
 
-  _pi_context(pi_uint32 num_devices, const pi_device *devices);
-
-  ~_pi_context() = default;
+  _pi_context(pi_uint32 num_devices, const pi_device *devices)
+    : devices_(devices, devices + num_devices) {}
 };
 
 struct _pi_mem : ref_counted_base<_pi_mem> {
-  using base = ref_counted_base<_pi_mem>;
-  using base::make;
-
   using native_type = xrt::bo;
 
   // Context where the memory object is accessible
@@ -275,6 +349,7 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
     size_t size;
     void *host_ptr;
     void *mapped_ptr;
+    /// only used for asserts
     void *dev_ptr;
   } mem;
 
@@ -335,9 +410,6 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
 };
 
 struct _pi_queue : ref_counted_base<_pi_queue> {
-  using base = ref_counted_base<_pi_queue>;
-  using base::make;
-
   ref_counted_ref<_pi_context> context_;
   ref_counted_ref<_pi_device> device_;
 
@@ -352,42 +424,34 @@ typedef void (*pfn_notify)(pi_event event, pi_int32 eventCommandStatus,
 
 /// there are currently no async operation so event are noop
 struct _pi_event : ref_counted_base<_pi_event> {
-  using base = ref_counted_base<_pi_event>;
-  using base::make;
 };
 
 /// Implementation of PI Program
 struct _pi_program : ref_counted_base<_pi_program> {
-  using base = ref_counted_base<_pi_program>;
-  using base::make;
-
   ref_counted_ref<_pi_context> context_;
-  ref_counted_ref<_pi_device> device_;
   xrt::xclbin bin_;
-  xrt::uuid uuid_;
 
-  _pi_program(pi_context ctx, pi_device dev, xrt::xclbin bin, xrt::uuid uuid)
-      : context_(ctx), device_(dev), bin_(std::move(bin)),
-        uuid_(std::move(uuid)) {}
+  _pi_program(pi_context ctx, xrt::xclbin bin)
+      : context_(ctx), bin_(std::move(bin)) {}
+  ref_counted_ref<_pi_device> get_device() {
+    assert(context_->devices_.size() == 1);
+    return context_->devices_[0];
+  }
+  xrt::uuid get_uuid() { return REPRODUCE_MEMCALL(bin_, get_uuid); }
 };
 
 /// Implementation of a PI Kernel for XRT
 ///
 struct _pi_kernel : ref_counted_base<_pi_kernel> {
-  using base = ref_counted_base<_pi_kernel>;
-  using base::make;
-
   using native_type = xrt::kernel;
 
-  ref_counted_ref<_pi_program> program_;
+  ref_counted_ref<_pi_device> device_;
   native_type kernel_;
   xrt::run run_;
-  xrt::xclbin::kernel info_;
 
-  _pi_kernel(pi_program prog, native_type kern, xrt::run run,
-             xrt::xclbin::kernel info)
-      : program_(prog), kernel_(std::move(kern)), run_(run),
-        info_(std::move(info)) {}
+  _pi_kernel(ref_counted_ref<_pi_device> dev, native_type kern)
+      : device_(dev), kernel_(std::move(kern)),
+        run_(REPRODUCE_CALL(xrt::run, kernel_)) {}
 };
 
 // -------------------------------------------------------------
@@ -487,6 +551,7 @@ void assertion(bool Condition, const char *Message) {
 } // namespace sycl
 } // __SYCL_INLINE_NAMESPACE(cl)
 
+/// Check that we always use the same thread to call this function
 void assert_single_thread() {
   static std::thread::id saved_id = std::this_thread::get_id();
   assert(saved_id == std::this_thread::get_id() &&
@@ -496,7 +561,6 @@ void assert_single_thread() {
 /// Obtains the XRT platform.
 pi_result xrt_piPlatformsGet(pi_uint32 num_entries, pi_platform *platforms,
                              pi_uint32 *num_platforms) {
-  assert_single_thread();
   pi_result result = PI_SUCCESS;
 
   if (num_entries == 0 && platforms)
@@ -504,9 +568,9 @@ pi_result xrt_piPlatformsGet(pi_uint32 num_entries, pi_platform *platforms,
   if (platforms == nullptr && num_platforms == nullptr)
     return PI_INVALID_VALUE;
   if (num_platforms)
-    *num_platforms = _pi_platform::get_count();
+    *num_platforms = 1; // only 1 platform
   if (platforms)
-    *platforms = _pi_platform::get();
+    *platforms = _pi_platform::get().give_externally();
   return result;
 }
 
@@ -514,7 +578,6 @@ pi_result xrt_piPlatformGetInfo(pi_platform platform,
                                 pi_platform_info param_name,
                                 size_t param_value_size, void *param_value,
                                 size_t *param_value_size_ret) {
-  assert_single_thread();
   assert_valid_obj(platform);
 
   switch (param_name) {
@@ -541,6 +604,16 @@ pi_result xrt_piPlatformGetInfo(pi_platform platform,
   return {};
 }
 
+pi_result xrt_piextPlatformGetNativeHandle(pi_platform platform,
+                                       pi_native_handle *nativeHandle) {
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+}
+
+pi_result xrt_piextPlatformCreateWithNativeHandle(pi_native_handle nativeHandle,
+                                              pi_platform *platform) {
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+}
+
 /// \param devices List of devices available on the system
 /// \param num_devices Number of elements in the list of devices
 /// Requesting a non-accelerator device triggers an error, all PI XRT devices
@@ -549,24 +622,24 @@ pi_result xrt_piPlatformGetInfo(pi_platform platform,
 pi_result xrt_piDevicesGet(pi_platform platform, pi_device_type device_type,
                            pi_uint32 num_entries, pi_device *devices,
                            pi_uint32 *num_devices) {
-  assert_single_thread();
   assert_valid_obj(platform);
 
   pi_result err = PI_SUCCESS;
-  const bool askingForDefault = device_type == PI_DEVICE_TYPE_DEFAULT;
-  const bool askingForACC = device_type & PI_DEVICE_TYPE_ACC;
-  const bool returnDevices = askingForDefault || askingForACC;
 
-  size_t numDevices = returnDevices ? platform->getNumDevices() : 0;
+  unsigned device_count = std::max<unsigned>(1, platform->get_num_device());
 
   try {
     if (num_devices) {
-      *num_devices = numDevices;
+      *num_devices = device_count;
     }
 
-    if (returnDevices && devices) {
-      for (size_t i = 0; i < std::min(size_t(num_entries), numDevices); ++i) {
-        devices[i] = &platform->getDevice(i);
+    if (devices) {
+      {
+        ref_counted_ref<_pi_device> new_device;
+        if (platform->get_num_device() == 0)
+          new_device = platform->add_device(0);
+        for (size_t i = 0; i < platform->get_num_device(); ++i)
+          devices[i] = platform->get_device(i).give_externally();
       }
     }
 
@@ -581,14 +654,12 @@ pi_result xrt_piDevicesGet(pi_platform platform, pi_device_type device_type,
 /// \return PI_SUCCESS if the function is executed successfully
 /// XRT devices are always root devices so retain always returns success.
 pi_result xrt_piDeviceRetain(pi_device dev) {
-  assert_single_thread();
   incr_ref_count(dev);
   return PI_SUCCESS;
 }
 
 /// \return PI_SUCCESS always since XRT devices are always root devices.
 pi_result xrt_piDeviceRelease(pi_device dev) {
-  assert_single_thread();
   decr_ref_count(dev);
   return PI_SUCCESS;
 }
@@ -596,7 +667,7 @@ pi_result xrt_piDeviceRelease(pi_device dev) {
 pi_result xrt_piDeviceGetInfo(pi_device device, pi_device_info param_name,
                               size_t param_value_size, void *param_value,
                               size_t *param_value_size_ret) {
-  assert_single_thread();
+  /// TODO: should be assert_valid_obj
   assert(device);
   auto native_dev = device->get();
 
@@ -970,7 +1041,6 @@ pi_result xrt_piDeviceGetInfo(pi_device device, pi_device_info param_name,
 pi_result xrt_piContextGetInfo(pi_context context, pi_context_info param_name,
                                size_t param_value_size, void *param_value,
                                size_t *param_value_size_ret) {
-  assert_single_thread();
   assert_valid_obj(context);
 
   switch (param_name) {
@@ -990,7 +1060,6 @@ pi_result xrt_piContextGetInfo(pi_context context, pi_context_info param_name,
 }
 
 pi_result xrt_piContextRetain(pi_context context) {
-  assert_single_thread();
   incr_ref_count(context);
   return PI_SUCCESS;
 }
@@ -1015,7 +1084,10 @@ pi_result xrt_piDevicePartition(pi_device, const cl_device_partition_property *,
 /// \return PI_SUCCESS
 pi_result xrt_piextDeviceGetNativeHandle(pi_device device,
                                          pi_native_handle *nativeHandle) {
-  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  assert_valid_obj(device);
+
+  *nativeHandle = to_native_handle<xrt::device&>(device->xrtDevice_);
+  return PI_SUCCESS;
 }
 
 /// Created a PI device object from a XRT device handle.
@@ -1027,19 +1099,13 @@ pi_result xrt_piextDeviceGetNativeHandle(pi_device device,
 pi_result xrt_piextDeviceCreateWithNativeHandle(pi_native_handle handle,
                                                 pi_platform platform,
                                                 pi_device *res) {
-  assert_single_thread();
   /// the sycl runtime almost always provide a null platform
   assert(res);
-  xclDeviceHandle dev_handle = (xclDeviceHandle)handle;
-
-  *res = &_pi_platform::get()->get_or_create_device(dev_handle);
+  *res = _pi_platform::get()
+             ->add_device(from_native_handle<xrt::device &>(handle))
+             .give_externally();
   return PI_SUCCESS;
 }
-
-/* Context APIs */
-
-_pi_context::_pi_context(pi_uint32 num_devices, const pi_device *devices)
-    : devices_(devices, devices + num_devices) {}
 
 /// Create a PI XRT context.
 ///
@@ -1058,19 +1124,18 @@ pi_result xrt_piContextCreate(const pi_context_properties *properties,
                                                  const void *private_info,
                                                  size_t cb, void *user_data),
                               void *user_data, pi_context *ret) {
-  assert_single_thread();
   assert_valid_objs(devices, num_devices);
   assert(devices);
   assert(pfn_notify == nullptr);
   assert(user_data == nullptr);
   assert(ret);
+  assert(num_devices == 1);
 
-  *ret = _pi_context::make(num_devices, devices);
+  *ret = _pi_context::get(num_devices, devices).give_externally();
   return PI_SUCCESS;
 }
 
 pi_result xrt_piContextRelease(pi_context ctx) {
-  assert_single_thread();
   decr_ref_count(ctx);
   return PI_SUCCESS;
 }
@@ -1108,7 +1173,6 @@ pi_result xrt_piextDeviceSelectBinary(pi_device device,
                                       pi_device_binary *binaries,
                                       pi_uint32 num_binaries,
                                       pi_uint32 *selected_binary) {
-  assert_single_thread();
   assert_valid_obj(device);
   assert(num_binaries > 0);
   assert(selected_binary);
@@ -1139,18 +1203,18 @@ pi_result xrt_piextGetDeviceFunctionPointer(pi_device device,
 pi_result xrt_piMemBufferCreate(pi_context context, pi_mem_flags flags,
                                 size_t size, void *host_ptr, pi_mem *ret_mem,
                                 const pi_mem_properties *properties) {
-  assert_single_thread();
   assert_valid_obj(context);
   assert(ret_mem);
   assert(properties == nullptr);
 
-  *ret_mem = _pi_mem::make(
-      context, _pi_mem::_mem{flags, size, host_ptr, nullptr, nullptr});
+  *ret_mem =
+      make_ref_counted<_pi_mem>(
+          context, _pi_mem::_mem{flags, size, host_ptr, nullptr, nullptr})
+          .give_externally();
   return PI_SUCCESS;
 }
 
 pi_result xrt_piMemRelease(pi_mem mem) {
-  assert_single_thread();
   decr_ref_count(mem);
   return PI_SUCCESS;
 }
@@ -1195,14 +1259,11 @@ pi_result xrt_piextMemCreateWithNativeHandle(pi_native_handle, pi_mem *) {
 /// Creates a `pi_queue` object on the XRT backend.
 pi_result xrt_piQueueCreate(pi_context context, pi_device device,
                             pi_queue_properties properties, pi_queue *queue) {
-  assert_single_thread();
   assert_valid_obj(context);
   assert_valid_obj(device);
-  assert(context);
-  assert(device);
   // TODO(XRT): : properties not handled
 
-  *queue = _pi_queue::make(context, device);
+  *queue = make_ref_counted<_pi_queue>(context, device).give_externally();
   return PI_SUCCESS;
 }
 
@@ -1213,27 +1274,23 @@ pi_result xrt_piQueueGetInfo(pi_queue command_queue, pi_queue_info param_name,
 }
 
 pi_result xrt_piQueueRetain(pi_queue command_queue) {
-  assert_single_thread();
   incr_ref_count(command_queue);
   return PI_SUCCESS;
 }
 
 pi_result xrt_piQueueRelease(pi_queue command_queue) {
-  assert_single_thread();
   decr_ref_count(command_queue);
   return PI_SUCCESS;
 }
 
 /// All commands are executed greedily so this is a noop.
 pi_result xrt_piQueueFinish(pi_queue command_queue) {
-  assert_single_thread();
   assert_valid_obj(command_queue);
   return PI_SUCCESS;
 }
 
 /// All commands are executed greedily so this is a noop.
 pi_result xrt_piQueueFlush(pi_queue command_queue) {
-  assert_single_thread();
   assert_valid_obj(command_queue);
   return PI_SUCCESS;
 }
@@ -1272,13 +1329,12 @@ pi_result xrt_piEnqueueMemBufferWrite(pi_queue command_queue, pi_mem buffer,
                                       pi_uint32 num_events_in_wait_list,
                                       const pi_event *event_wait_list,
                                       pi_event *event) {
-  assert_single_thread();
   assert_valid_obj(command_queue);
   assert_valid_obj(buffer);
   assert_valid_objs(event_wait_list, num_events_in_wait_list);
   assert(ptr && size);
   assert(event);
-  *event = _pi_event::make();
+  *event = make_ref_counted<_pi_event>().give_externally();
 
   buffer->run_when_mapped(command_queue->device_->get(), [=] {
     void *adjusted_ptr = ((char *)buffer->mem.mapped_ptr) + offset;
@@ -1296,13 +1352,12 @@ pi_result xrt_piEnqueueMemBufferRead(pi_queue command_queue, pi_mem buffer,
                                      pi_uint32 num_events_in_wait_list,
                                      const pi_event *event_wait_list,
                                      pi_event *event) {
-  assert_single_thread();
   assert_valid_obj(command_queue);
   assert_valid_obj(buffer);
   assert_valid_objs(event_wait_list, num_events_in_wait_list);
   assert(ptr && size);
   assert(event);
-  *event = _pi_event::make();
+  *event = make_ref_counted<_pi_event>().give_externally();
 
   assert(buffer->is_mapped(command_queue->device_->get()));
   REPRODUCE_MEMCALL(buffer->get_native(), sync, XCL_BO_SYNC_BO_FROM_DEVICE);
@@ -1313,7 +1368,6 @@ pi_result xrt_piEnqueueMemBufferRead(pi_queue command_queue, pi_mem buffer,
 }
 
 pi_result xrt_piEventsWait(pi_uint32 num_events, const pi_event *event_list) {
-  assert_single_thread();
   assert_valid_objs(event_list, num_events);
   /// For now every operation is executed synchronously this ia a noop
 
@@ -1322,25 +1376,19 @@ pi_result xrt_piEventsWait(pi_uint32 num_events, const pi_event *event_list) {
 
 pi_result xrt_piKernelCreate(pi_program program, const char *kernel_name,
                              pi_kernel *kernel) {
-  assert_single_thread();
   assert_valid_obj(program);
 
   /// TODO: XRT error handling
-  auto ker = REPRODUCE_CALL(xrt::kernel, program->device_->get(),
-                            program->uuid_, kernel_name);
-  auto info = REPRODUCE_MEMCALL(program->bin_, get_kernel, kernel_name);
-  auto run = REPRODUCE_CALL(xrt::run, ker);
-  *kernel = _pi_kernel::make(program, std::move(ker), std::move(run),
-                             std::move(info));
+  auto ker = REPRODUCE_CALL(xrt::kernel, program->get_device()->get(),
+                            program->get_uuid(), kernel_name);
+  *kernel = make_ref_counted<_pi_kernel>(program->get_device(), std::move(ker))
+                .give_externally();
   return PI_SUCCESS;
 }
 
 pi_result xrt_piKernelSetArg(pi_kernel kernel, pi_uint32 arg_index,
                              size_t arg_size, const void *arg_value) {
-  assert_single_thread();
   assert_valid_obj(kernel);
-  assert(kernel->info_.get_num_args() > arg_index);
-  auto arg_info = kernel->info_.get_arg(arg_index);
 
   // TODO XRT: analyse if xrt_piKernelSetArg can be called for buffer.
   REPRODUCE_ADD_BUFFER(arg_value, arg_size);
@@ -1350,12 +1398,11 @@ pi_result xrt_piKernelSetArg(pi_kernel kernel, pi_uint32 arg_index,
 
 pi_result xrt_piextKernelSetArgMemObj(pi_kernel kernel, pi_uint32 arg_index,
                                       const pi_mem *arg_value) {
-  assert_single_thread();
   assert_valid_obj(kernel);
   assert(arg_value);
   _pi_mem *buf = *arg_value;
 
-  buf->map_if_needed(kernel->program_->device_->get(), kernel->kernel_.group_id(arg_index));
+  buf->map_if_needed(kernel->device_->get(), kernel->kernel_.group_id(arg_index));
   REPRODUCE_MEMCALL(kernel->run_, set_arg, arg_index, buf->get_native());
 
   return PI_SUCCESS;
@@ -1378,13 +1425,12 @@ pi_result xrt_piEnqueueKernelLaunch(
     const size_t *global_work_offset, const size_t *global_work_size,
     const size_t *local_work_size, pi_uint32 num_events_in_wait_list,
     const pi_event *event_wait_list, pi_event *event) {
-  assert_single_thread();
   assert_valid_obj(command_queue);
   assert_valid_obj(kernel);
   assert(work_dim == 1 && *global_work_offset == 0 && *global_work_size == 1 &&
          *local_work_size == 1 && "only support 1 single_task");
   assert(event);
-  *event = _pi_event::make();
+  *event = make_ref_counted<_pi_event>().give_externally();
 
   REPRODUCE_MEMCALL(kernel->run_, start);
   REPRODUCE_MEMCALL(kernel->run_, wait);
@@ -1399,9 +1445,25 @@ pi_result xrt_piEnqueueNativeKernel(pi_queue, void (*)(void *), void *, size_t,
   sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
-pi_result xrt_piextKernelCreateWithNativeHandle(pi_native_handle, pi_context,
-                                                pi_program, bool, pi_kernel *) {
+pi_result xrt_piextKernelGetNativeHandle(pi_kernel kernel,
+                                         pi_native_handle *nativeHandle) {
   sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+}
+
+pi_result xrt_piextKernelCreateWithNativeHandle(pi_native_handle handle,
+                                                pi_context ctx, pi_program,
+                                                bool KeepOwnership,
+                                                pi_kernel *res) {
+  assert_valid_obj(ctx);
+  assert(ctx->devices_.size() == 1);
+  xrt::kernel kern;
+  if (KeepOwnership)
+    kern = std::move(from_native_handle<xrt::kernel &>(handle));
+  else
+    kern = from_native_handle<xrt::kernel &>(handle);
+  *res = make_ref_counted<_pi_kernel>(ctx->devices_[0], std::move(kern))
+             .give_externally();
+  return PI_SUCCESS;
 }
 
 /// \TODO Not implemented
@@ -1419,7 +1481,6 @@ pi_result xrt_piMemImageGetInfo(pi_mem, pi_image_info, size_t, void *,
 }
 
 pi_result xrt_piMemRetain(pi_mem mem) {
-  assert_single_thread();
   incr_ref_count(mem);
   return PI_SUCCESS;
 }
@@ -1441,7 +1502,6 @@ pi_result xrt_piProgramBuild(pi_program program, pi_uint32 num_devices,
                              void (*pfn_notify)(pi_program program,
                                                 void *user_data),
                              void *user_data) {
-  assert_single_thread();
   assert_valid_obj(program);
   assert(num_devices == 1);
   assert(device_list);
@@ -1465,7 +1525,6 @@ pi_result xrt_piProgramCreateWithBinary(
     const size_t *lengths, const unsigned char **binaries,
     size_t num_metadata_entries, const pi_device_binary_property *metadata,
     pi_int32 *binary_status, pi_program *program) {
-  assert_single_thread();
   assert_valid_obj(context);
   assert(binaries);
   assert_valid_obj(program);
@@ -1482,10 +1541,10 @@ pi_result xrt_piProgramCreateWithBinary(
     reproducer() << "// xclbin buffer size=" << lengths[0] << "\n";
     auto xclbin = REPRODUCE_CALL(xrt::xclbin,
                                  reinterpret_cast<const axlf *>(binaries[0]));
-    xrt::uuid uuid = REPRODUCE_MEMCALL(dev->get(), load_xclbin, xclbin);
+    REPRODUCE_MEMCALL(dev->get(), load_xclbin, xclbin);
 
-    *program = _pi_program::make(
-        context, dev, std::move(xclbin), std::move(uuid));
+    *program = make_ref_counted<_pi_program>(context, std::move(xclbin))
+                   .give_externally();
     return PI_SUCCESS;
   } catch (std::system_error err) {
     sycl::detail::pi::log()
@@ -1497,7 +1556,27 @@ pi_result xrt_piProgramCreateWithBinary(
 pi_result xrt_piProgramGetInfo(pi_program program, pi_program_info param_name,
                                size_t param_value_size, void *param_value,
                                size_t *param_value_size_ret) {
-  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  assert_valid_obj(program);
+
+  switch (param_name) {
+  case PI_PROGRAM_INFO_NUM_DEVICES:
+    return getInfo(param_value_size, param_value, param_value_size_ret,
+                   program->context_->devices_.size());
+  case PI_PROGRAM_INFO_DEVICES:
+    return getInfoArray(program->context_->devices_.size(), param_value_size,
+                        param_value, param_value_size_ret,
+                        program->context_->devices_.data());
+  case PI_PROGRAM_INFO_REFERENCE_COUNT:
+    return getInfo(param_value_size, param_value, param_value_size_ret,
+                   program->get_reference_count());
+  case PI_PROGRAM_INFO_CONTEXT:
+    return getInfo(param_value_size, param_value, param_value_size_ret,
+                   program->context_.get());
+  default:
+    __SYCL_PI_HANDLE_UNKNOWN_PARAM_NAME(param_name);
+  }
+  sycl::detail::pi::die("Device info request not implemented");
+  return {};
 }
 
 /// Creates a new PI program object that is the outcome of linking all input
@@ -1530,11 +1609,22 @@ pi_result xrt_piProgramGetBuildInfo(pi_program program, pi_device device,
                                     cl_program_build_info param_name,
                                     size_t param_value_size, void *param_value,
                                     size_t *param_value_size_ret) {
-  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  assert_valid_obj(program);
+  assert_valid_obj(device);
+
+  switch (param_name) {
+  case PI_PROGRAM_BUILD_INFO_BINARY_TYPE: {
+    return getInfo(param_value_size, param_value, param_value_size_ret,
+                   PI_PROGRAM_BINARY_TYPE_EXECUTABLE);
+  }
+  default:
+    __SYCL_PI_HANDLE_UNKNOWN_PARAM_NAME(param_name);
+  }
+  cl::sycl::detail::pi::die("Program Build info request not implemented");
+  return {};
 }
 
 pi_result xrt_piProgramRetain(pi_program program) {
-  assert_single_thread();
   incr_ref_count(program);
   return PI_SUCCESS;
 }
@@ -1543,9 +1633,15 @@ pi_result xrt_piProgramRetain(pi_program program) {
 /// When the reference count reaches 0, it unloads the module from
 /// the context.
 pi_result xrt_piProgramRelease(pi_program program) {
-  assert_single_thread();
   decr_ref_count(program);
   return PI_SUCCESS;
+}
+
+pi_result xrt_piextProgramSetSpecializationConstant(pi_program prog,
+                                                    pi_uint32 spec_id,
+                                                    size_t spec_size,
+                                                    const void *spec_value) {
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
 /// Gets the native CUDA handle of a PI program object
@@ -1555,8 +1651,10 @@ pi_result xrt_piProgramRelease(pi_program program) {
 ///
 /// \return TBD
 pi_result xrt_piextProgramGetNativeHandle(pi_program program,
-                                          pi_native_handle *nativeHandle) {
-  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+                                          pi_native_handle *res) {
+  assert_valid_obj(program);
+  *res = to_native_handle<xrt::xclbin &>(program->bin_);
+  return PI_SUCCESS;
 }
 
 /// Created a PI program object from a CUDA program handle.
@@ -1568,9 +1666,18 @@ pi_result xrt_piextProgramGetNativeHandle(pi_program program,
 /// \param[out] program Set to the PI program object created from native handle.
 ///
 /// \return TBD
-pi_result xrt_piextProgramCreateWithNativeHandle(pi_native_handle, pi_context,
-                                                 bool, pi_program *) {
-  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+pi_result xrt_piextProgramCreateWithNativeHandle(pi_native_handle handle,
+                                                 pi_context ctx,
+                                                 bool keep_ownership,
+                                                 pi_program *res) {
+  assert_valid_obj(ctx);
+  xrt::xclbin bin;
+  if (keep_ownership)
+    bin = std::move(from_native_handle<xrt::xclbin &>(handle));
+  else
+    bin = from_native_handle<xrt::xclbin &>(handle);
+  *res = make_ref_counted<_pi_program>(ctx, std::move(bin)).give_externally();
+  return PI_SUCCESS;
 }
 
 pi_result xrt_piKernelGetInfo(pi_kernel kernel, pi_kernel_info param_name,
@@ -1587,13 +1694,11 @@ pi_result xrt_piKernelGetSubGroupInfo(
 }
 
 pi_result xrt_piKernelRetain(pi_kernel kernel) {
-  assert_single_thread();
   incr_ref_count(kernel);
   return PI_SUCCESS;
 }
 
 pi_result xrt_piKernelRelease(pi_kernel kernel) {
-  assert_single_thread();
   decr_ref_count(kernel);
   return PI_SUCCESS;
 }
@@ -1601,7 +1706,6 @@ pi_result xrt_piKernelRelease(pi_kernel kernel) {
 // A NOP for the XRT backend
 pi_result xrt_piKernelSetExecInfo(pi_kernel, pi_kernel_exec_info, size_t,
                                   const void *) {
-  assert_single_thread();
   return PI_SUCCESS;
 }
 
@@ -1620,7 +1724,6 @@ pi_result xrt_piEventCreate(pi_context, pi_event *) {
 pi_result xrt_piEventGetInfo(pi_event event, pi_event_info param_name,
                              size_t param_value_size, void *param_value,
                              size_t *param_value_size_ret) {
-  assert_single_thread();
   assert_valid_obj(event);
 
   switch (param_name) {
@@ -1657,13 +1760,11 @@ pi_result xrt_piEventSetStatus(pi_event, pi_int32) {
 }
 
 pi_result xrt_piEventRetain(pi_event event) {
-  assert_single_thread();
   incr_ref_count(event);
   return PI_SUCCESS;
 }
 
 pi_result xrt_piEventRelease(pi_event event) {
-  assert_single_thread();
   decr_ref_count(event);
   return PI_SUCCESS;
 }
@@ -1779,7 +1880,6 @@ pi_result enuqeue_rect_copy(bool is_read, pi_queue command_queue, pi_mem buffer,
                             size_t host_slice_pitch, void *ptr,
                             pi_uint32 num_events_in_wait_list,
                             const pi_event *event_wait_list, pi_event *event) {
-  assert_single_thread();
   assert_valid_obj(command_queue);
   assert_valid_obj(buffer);
   assert_valid_objs(event_wait_list, num_events_in_wait_list);
@@ -2043,15 +2143,31 @@ pi_result xrt_piextUSMGetMemAllocInfo(pi_context context, const void *ptr,
 }
 
 pi_result xrt_piTearDown(void *) {
-  assert_single_thread();
   terminate_xsimk();
+
   return PI_SUCCESS;
 }
+
+template<typename func_ty, func_ty func>
+struct xrt_pi_call_wrapper;
+
+template<typename ret_ty, typename ... args_ty, auto func>
+struct xrt_pi_call_wrapper<ret_ty(*)(args_ty...), func> {
+  static ret_ty call(args_ty... args) {
+    /// Wrapper around every call to the XRT pi.
+    assert_single_thread();
+    try {
+      return func(args...);
+    } catch (...) {
+      sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+      return PI_ERROR_UNKNOWN;
+    }
+  }
+};
 
 const char SupportedVersion[] = _PI_H_VERSION_STRING;
 
 pi_result piPluginInit(pi_plugin *PluginInit) {
-  assert_single_thread();
   int CompareVersions = strcmp(PluginInit->PiVersion, SupportedVersion);
   if (CompareVersions < 0) {
     // PI interface supports lower version of PI.
@@ -2069,11 +2185,14 @@ pi_result piPluginInit(pi_plugin *PluginInit) {
 
 // Forward calls to Xilinx RT (XRT).
 #define _PI_CL(pi_api, xrt_api)                                                \
-  (PluginInit->PiFunctionTable).pi_api = (decltype(&::pi_api))(&xrt_api);
+  (PluginInit->PiFunctionTable).pi_api = (decltype(                            \
+      &::pi_api))xrt_pi_call_wrapper<decltype(&xrt_api), &xrt_api>::call;
 
   // Platform
   _PI_CL(piPlatformsGet, xrt_piPlatformsGet)
   _PI_CL(piPlatformGetInfo, xrt_piPlatformGetInfo)
+  _PI_CL(piextPlatformGetNativeHandle, xrt_piextPlatformGetNativeHandle)
+  _PI_CL(piextPlatformCreateWithNativeHandle, xrt_piextPlatformCreateWithNativeHandle)
   // Device
   _PI_CL(piDevicesGet, xrt_piDevicesGet)
   _PI_CL(piDeviceGetInfo, xrt_piDeviceGetInfo)
@@ -2083,17 +2202,14 @@ pi_result piPluginInit(pi_plugin *PluginInit) {
   _PI_CL(piextDeviceSelectBinary, xrt_piextDeviceSelectBinary)
   _PI_CL(piextGetDeviceFunctionPointer, xrt_piextGetDeviceFunctionPointer)
   _PI_CL(piextDeviceGetNativeHandle, xrt_piextDeviceGetNativeHandle)
-  _PI_CL(piextDeviceCreateWithNativeHandle,
-         xrt_piextDeviceCreateWithNativeHandle)
+  _PI_CL(piextDeviceCreateWithNativeHandle, xrt_piextDeviceCreateWithNativeHandle)
   // Context
-  _PI_CL(piextContextSetExtendedDeleter, xrt_piextContextSetExtendedDeleter)
   _PI_CL(piContextCreate, xrt_piContextCreate)
   _PI_CL(piContextGetInfo, xrt_piContextGetInfo)
   _PI_CL(piContextRetain, xrt_piContextRetain)
   _PI_CL(piContextRelease, xrt_piContextRelease)
   _PI_CL(piextContextGetNativeHandle, xrt_piextContextGetNativeHandle)
-  _PI_CL(piextContextCreateWithNativeHandle,
-         xrt_piextContextCreateWithNativeHandle)
+  _PI_CL(piextContextCreateWithNativeHandle, xrt_piextContextCreateWithNativeHandle)
   // Queue
   _PI_CL(piQueueCreate, xrt_piQueueCreate)
   _PI_CL(piQueueGetInfo, xrt_piQueueGetInfo)
@@ -2124,9 +2240,9 @@ pi_result piPluginInit(pi_plugin *PluginInit) {
   _PI_CL(piProgramGetBuildInfo, xrt_piProgramGetBuildInfo)
   _PI_CL(piProgramRetain, xrt_piProgramRetain)
   _PI_CL(piProgramRelease, xrt_piProgramRelease)
+  _PI_CL(piextProgramSetSpecializationConstant, xrt_piextProgramSetSpecializationConstant)
   _PI_CL(piextProgramGetNativeHandle, xrt_piextProgramGetNativeHandle)
-  _PI_CL(piextProgramCreateWithNativeHandle,
-         xrt_piextProgramCreateWithNativeHandle)
+  _PI_CL(piextProgramCreateWithNativeHandle, xrt_piextProgramCreateWithNativeHandle)
   // Kernel
   _PI_CL(piKernelCreate, xrt_piKernelCreate)
   _PI_CL(piKernelSetArg, xrt_piKernelSetArg)
@@ -2137,8 +2253,8 @@ pi_result piPluginInit(pi_plugin *PluginInit) {
   _PI_CL(piKernelRelease, xrt_piKernelRelease)
   _PI_CL(piKernelSetExecInfo, xrt_piKernelSetExecInfo)
   _PI_CL(piextKernelSetArgPointer, xrt_piextKernelSetArgPointer)
-  _PI_CL(piextKernelCreateWithNativeHandle,
-         xrt_piextKernelCreateWithNativeHandle)
+  _PI_CL(piextKernelCreateWithNativeHandle, xrt_piextKernelCreateWithNativeHandle)
+  _PI_CL(piextKernelGetNativeHandle, xrt_piextKernelGetNativeHandle)
   // Event
   _PI_CL(piEventCreate, xrt_piEventCreate)
   _PI_CL(piEventGetInfo, xrt_piEventGetInfo)

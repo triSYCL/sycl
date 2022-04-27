@@ -9,19 +9,29 @@
 // This file defines the specializations of the sycl::detail::interop,
 // sycl::detail::BackendInput and sycl::detail::BackendReturn specialization for
 // the XRT backend.
+//
+// the the supported conversions are:
+//  sycl::device <-> xrt::device:
+//    the interop type is xclDeviceHandle aka void* but
+//    xrt::device is convertible implicitly to an xclDeviceHandle and the
+//    conversation from void* to xrt::device is explicit
+//  sycl::kernel <-> xrt::kernel:
+//
+// sycl::queue, sycl::context, sycl::platform and sycl::event have no XRT
+// equivalents so they are not supported
 //===----------------------------------------------------------------------===//
 
 #pragma once
 
 #include <CL/sycl/accessor.hpp>
-#include <CL/sycl/context.hpp>
 #include <CL/sycl/detail/backend_traits.hpp>
 #include <CL/sycl/device.hpp>
-#include <CL/sycl/event.hpp>
-#include <CL/sycl/queue.hpp>
+#include <CL/sycl/kernel.hpp>
+#include <CL/sycl/kernel_bundle.hpp>
 
 namespace xrt {
 struct device;
+struct kernel;
 struct xclbin;
 struct bo;
 }
@@ -36,84 +46,38 @@ template <> struct InteropFeatureSupportMap<backend::xrt> {
   static constexpr bool MakeContext = false;
   static constexpr bool MakeQueue = false;
   static constexpr bool MakeEvent = false;
-  static constexpr bool MakeKernelBundle = false;
+  static constexpr bool MakeKernelBundle = true;
   static constexpr bool MakeKernel = true;
-  static constexpr bool MakeBuffer = false;
-};
-
-template <> struct interop<backend::xrt, context> {
-};
-
-template <> struct interop<backend::xrt, device> {
-  using type = xrt::device*;
-};
-
-template <> struct interop<backend::xrt, event> {
-};
-
-template <> struct interop<backend::xrt, queue> {
-};
-
-// TODO the interops for accessor is used in the already deprecated class
-// interop_handler and can be removed after API cleanup.
-template <typename DataT, int Dimensions, access::mode AccessMode>
-struct interop<backend::xrt,
-               accessor<DataT, Dimensions, AccessMode, access::target::device,
-                        access::placeholder::false_t>> {
-  using type = xrt::bo*;
-};
-
-template <typename DataT, int Dimensions, access::mode AccessMode>
-struct interop<
-    backend::xrt,
-    accessor<DataT, Dimensions, AccessMode, access::target::constant_buffer,
-             access::placeholder::false_t>> {
-  using type = xrt::bo*;
-};
-
-template <typename DataT, int Dimensions, typename AllocatorT>
-struct BackendInput<backend::xrt,
-                    buffer<DataT, Dimensions, AllocatorT>> {
-};
-
-template <typename DataT, int Dimensions, typename AllocatorT>
-struct BackendReturn<backend::xrt,
-                     buffer<DataT, Dimensions, AllocatorT>> {
-};
-
-template <> struct BackendInput<backend::xrt, context> {
-};
-
-template <> struct BackendReturn<backend::xrt, context> {
+  static constexpr bool MakeBuffer = true;
 };
 
 template <> struct BackendInput<backend::xrt, device> {
-  using type = void*;
+  using type = const xrt::device&;
 };
 
 template <> struct BackendReturn<backend::xrt, device> {
-  using type = xrt::device&;
+  using type = const xrt::device&;
 };
 
-template <> struct BackendInput<backend::xrt, event> {
+template <> struct BackendInput<backend::xrt, sycl::kernel> {
+  using type = const xrt::kernel&;
 };
 
-template <> struct BackendReturn<backend::xrt, event> {
+template <> struct BackendReturn<backend::xrt, sycl::kernel> {
+  using type = const xrt::kernel&;
 };
 
-template <> struct BackendInput<backend::xrt, queue> {
+template <>
+struct BackendInput<backend::xrt,
+                    sycl::kernel_bundle<sycl::bundle_state::executable>> {
+  using type = const xrt::xclbin&;
 };
 
-template <> struct BackendReturn<backend::xrt, queue> {
+template <>
+struct BackendReturn<backend::xrt,
+                     sycl::kernel_bundle<sycl::bundle_state::executable>> {
+  using type = std::vector<xrt::xclbin>;
 };
-
-#ifdef __SYCL_INTERNAL_API
-template <> struct BackendInput<backend::xrt, program> {
-};
-
-template <> struct BackendReturn<backend::xrt, program> {
-};
-#endif
 
 } // namespace detail
 } // namespace sycl

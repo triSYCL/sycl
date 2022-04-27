@@ -5,6 +5,22 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This is an infrastructure to generate an XRT reproducer of an issue found in
+// SYCL. every call to XRT is annotated with REPRODUCE_CALL for A(B, C, ...)
+// (constructor and function calls) or REPRODUCE_MEMCALL for A.B(C, D, ...)
+// (member function call)
+//
+// for example:
+//   auto d = REPRODUCE_CALL(xrt::device, 0);
+// is equivalent to:
+//   auto d = xrt::device(0);
+// and will generate in the reproducer file (something similar to):
+//   // from: my_function(int) my_file.cpp:#
+//   // call str:xrt::device(0)
+//   auto name# = xrt::device(((int)0));
+//
+//===----------------------------------------------------------------------===//
 
 // This header is not quite self contained because it needs to know about xrt objects
 // This could be refactored into something generic
@@ -270,7 +286,7 @@ auto reproducer_memcall_unpacker(const std::string &from,
       [&](auto &&...args) {
         return reproducer_call_wrapper(
             from, obj_str + "." + call_str,
-            nameof(obj.get_handle().get()) + "." + call_str, args_str,
+            nameof(get_id(obj)) + "." + call_str, args_str,
             std::forward<CallTy>(call), std::forward<decltype(args)>(args)...);
       },
       ts);
@@ -330,6 +346,15 @@ void reproducer_add_related_ptr_wrapper(T *base, T2* ptr) {
   assert(offset >= 0);
   nameof(ptr, false, "(void*)(((char*)" + nameof(base) + ") + " + std::to_string(offset) + ")");
 }
+
+template <typename T>
+T &&reproducer_add_external(const std::string &from, T &&obj) {
+  reproducer() << "// from: " << from << "\n";
+  reproducer() << TypeName<remove_cvref_t<T>>() << " "
+               << nameof(get_id(obj), false) << "(/*TODO*/);\n\n";
+  std::flush(reproducer());
+  return obj;
+}
 }
 
 /// allow treating constructors and function call the same way
@@ -365,3 +390,11 @@ void reproducer_add_related_ptr_wrapper(T *base, T2* ptr) {
 /// this is a macro only be cause the rest of the API is macros.
 #define REPRODUCE_ADD_RELATED_PTR(B, P)                                        \
   ::detail::reproducer_add_related_ptr_wrapper(B, P)
+
+/// Inform the naming system that O is an object created outside of the
+/// reproducer system.
+#define REPRODUCE_ADD_EXTERNAL(O)                                              \
+  ::detail::reproducer_add_external(std::string(__PRETTY_FUNCTION__) + " " +   \
+                                        __FILE__ + ":" +                       \
+                                        std::to_string(__LINE__),              \
+                                    O)
