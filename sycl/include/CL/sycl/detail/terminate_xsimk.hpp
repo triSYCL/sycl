@@ -8,8 +8,8 @@
 
 #pragma once
 
-/// The implementation of terminate_xsimk depends on many linux or posix
-/// specific features so it is only provided on linux
+/// The implementation of terminate_xsimk depends on many Linux or POSIX
+/// specific features so it is only provided on Linux
 #ifndef __linux__
 
 inline void terminate_xsimk() {}
@@ -27,7 +27,7 @@ inline void terminate_xsimk() {}
 #include <vector>
 
 inline void terminate_xsimk() {
-  int my_pid = ::getpid();
+  pid_t my_pid = ::getpid();
 
   /// Tree of processes according to their parenthood
   std::unordered_map<pid_t, std::vector<pid_t>> ppid2pids;

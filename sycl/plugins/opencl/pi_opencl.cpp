@@ -1398,6 +1398,8 @@ pi_result piextKernelGetNativeHandle(pi_kernel kernel,
 // pi_level_zero.cpp for reference) Currently this is just a NOOP.
 pi_result piTearDown(void *PluginParameter) {
   (void)PluginParameter;
+
+  /// cleanup the potential left-overs from the HLD simulator
   terminate_xsimk();
   return PI_SUCCESS;
 }

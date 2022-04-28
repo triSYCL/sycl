@@ -319,8 +319,10 @@ const char *print_char(unsigned char c, std::array<char, 10> &out) {
   out[i++] = '\'';
   out[i++] = '\\';
   out[i++] = 'x';
-  out[i++] = table[c / 16];
-  out[i++] = table[c % 16];
+  /// Valgrind errors here are false positives, because some buffer that are
+  /// uninitialized when being generated. and then written into.
+  out[i++] = table[(c >> 4) & 0xff];
+  out[i++] = table[c & 0xff];
   out[i++] = '\'';
   out[i++] = '\0';
   return out.data();

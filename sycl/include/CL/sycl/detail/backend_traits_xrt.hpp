@@ -29,6 +29,9 @@
 #include <CL/sycl/kernel.hpp>
 #include <CL/sycl/kernel_bundle.hpp>
 
+/// there is no cyclic dependencies. but the XRT includes path is not configured
+/// by the CMake of the sycl runtime (only the pi_xrt) while compiling this
+/// file.
 namespace xrt {
 struct device;
 struct kernel;
@@ -79,5 +82,4 @@ struct BackendReturn<backend::xrt,
 };
 
 } // namespace detail
-} // namespace sycl
 } // __SYCL_INLINE_NAMESPACE(cl)

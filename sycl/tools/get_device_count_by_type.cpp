@@ -285,7 +285,7 @@ static bool queryXRT(cl_device_type deviceType, cl_uint &deviceCount,
     deviceCount = 1;
     return true;
   } else
-    return true;
+    return false;
 #endif
   msg = "ERROR: XRT not  supported";
   deviceCount = 0;

@@ -9,12 +9,11 @@
 #pragma once
 
 #include <CL/sycl/backend.hpp>
-#include <CL/sycl/program.hpp>
 #include <CL/sycl/detail/pi.h>
-#include <CL/sycl/backend.hpp>
+#include <CL/sycl/program.hpp>
 
-#include <xrt/xrt_kernel.h>
 #include <xrt.h>
+#include <xrt/xrt_kernel.h>
 
 __SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl::detail {
@@ -31,7 +30,9 @@ template <typename To>
 typename std::enable_if_t<std::is_reference_v<To>, To>
 from_native_handle(pi_native_handle handle) {
   /// A safe and convenient default is const& with the backend making a copy of
-  /// what it receives
+  /// what it receives. If the backend says it should be an T&& meaning the
+  /// backend transfers ownership to the user, we need to let it happen so we
+  /// std::forward
   return std::forward<To>(
       *reinterpret_cast<std::remove_reference_t<To> *>(handle));
 }
@@ -39,6 +40,7 @@ from_native_handle(pi_native_handle handle) {
 template <typename From>
 typename std::enable_if<!std::is_reference_v<From>, pi_native_handle>::type
 to_native_handle(From &&from) {
+  static_assert(sizeof(From) <= sizeof(pi_native_handle), "doesn't fit in pi_native_handle");
   return (pi_native_handle)from;
 }
 
@@ -46,8 +48,9 @@ template <typename From>
 typename std::enable_if<std::is_reference_v<From>, pi_native_handle>::type
 to_native_handle(From &&from) {
   /// A safe and convenient default is const& with the backend returning without
-  /// copies. a copy will occur on the user's side if needed
-  return (pi_native_handle)std::addressof(from);
+  /// copies. a copy will occur on the user's side if needed. but we "handle"
+  /// r-value references assuming the backend know it needs to move from it.
+  return reinterpret_cast<pi_native_handle>(std::addressof(from));
 }
 
 }

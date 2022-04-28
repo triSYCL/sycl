@@ -194,8 +194,8 @@ def get_exec_count():
                 # KiB to GiB
                 ram_gb = int(line.split()[1]) / (1024 * 1024)
                 break
-    # each instance of vxx uses 4.5 GiB at most and we keep 10% margin
-    max_vxx_instance_count = int(math.trunc(ram_gb * 0.9) / 4.5)
+    # each instance of vxx uses 5 GiB at most and we keep 10% margin
+    max_vxx_instance_count = int(math.trunc(ram_gb * 0.9) / 5)
     if max_vxx_instance_count == 0:
         print("warning: v++ is likely to run out of RAM")
         max_vxx_instance_count = 1
