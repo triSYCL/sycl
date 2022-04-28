@@ -931,7 +931,7 @@ might be wrong on your current system... But the hardware execution
 just requires the open-source XRT that should have been compiled just
 using what is available on the system.
 
-Architecture provided to the `sycl-targets` Clang flag selects the
+Architecture provided to the `--sycl-targets` Clang option selects the
 compilation mode. Supported architectures are:
 
 |                                    | Software simulation | Hardware emulation  | Hardware        |
@@ -939,8 +939,8 @@ compilation mode. Supported architectures are:
 | SPIR compilation flow (deprecated) | `fpga64_sw_emu`     | `fpga64_hw_emu`     | `fpga64_hw`     |
 | HLS compilation flow               | Unsupported yet     | `fpga64_hls_hw_emu` | `fpga64_hls_hw` |
 
-Only one `fpga64_*` architecture is allowed in the `sycl-targets`
-flag.
+Only one `fpga64_*` architecture is allowed in the `--sycl-targets`
+option.
 
 The SYCL HLS compilation flow does not support software emulation because
 of internal AMD/Xilinx issue https://jira.xilinx.com/browse/CR-1099885
@@ -1260,9 +1260,9 @@ chh.single_task([=]{
 The lambda given to `pipeline` is executed for each step of
 the loop, and the enclosing loop is pipelined.
 
-Helpers to deactivate the pipeline for loop and kernel,
+Helpers to deactivate the pipeline `for` loop and kernel,
 respectively `no_pipeline` and `unpipeline_kernel` are used in
- a similar way.
+a similar way.
 
 ### Dataflow decorators
 
@@ -1276,7 +1276,7 @@ a similar fashion to the equivalent pipeline annotation.
 ### Loop unrolling
 
 The `sycl::ext::xilinx::unroll<UnrollType>()` decorator should be applied
-to a lambda inside a for loop. The lambda is called at each loop
+to a lambda inside a `for` loop. The lambda is called at each loop
 iteration and the enclosing loop is unrolled following UnrollType
 semantics.
 
@@ -1333,7 +1333,7 @@ queue.submit([&](sycl::handler &cgh) {
 ```
 
 In this example, `a_buff` materialization on device will be stored on DDR
-	bank 1, `b_buff` materialization on DDR bank 2 and `c_buff` materialization on 
+bank 1, `b_buff` materialization on DDR bank 2 and `c_buff` materialization on
 DDR bank 3.
 
 **As of now, having accessor on the same buffer with different memory location is not supported.**
