@@ -250,6 +250,7 @@ auto reproducer_call_wrapper(const std::string &from,
     is_first = false;
   }
   reproducer() << ")\n";
+  std::flush(reproducer());
   using ret_type =
       decltype(std::forward<CallTy>(call)(std::forward<Ts>(ts)...));
   auto simple_run = [&] {
@@ -265,13 +266,19 @@ auto reproducer_call_wrapper(const std::string &from,
   else if constexpr (!is_namable<ret_type>)
     return simple_run();
   else {
-    auto ret = std::forward<CallTy>(call)(std::forward<Ts>(ts)...);
-    reproducer() << "auto " << nameof(get_id(ret), false) << " = " << call_cpp
-                 << "(";
-    print_args(0, ts...);
-    reproducer() << ");\n\n";
-    std::flush(reproducer());
-    return std::forward<ret_type>(ret);
+    try {
+      auto ret = std::forward<CallTy>(call)(std::forward<Ts>(ts)...);
+      reproducer() << "auto " << nameof(get_id(ret), false) << " = " << call_cpp
+                   << "(";
+      print_args(0, ts...);
+      reproducer() << ");\n\n";
+      std::flush(reproducer());
+      return std::forward<ret_type>(ret);
+    } catch (...) {
+      reproducer() << "// caught exception will running:";
+      simple_run();
+      throw;
+    }
   }
 }
 
