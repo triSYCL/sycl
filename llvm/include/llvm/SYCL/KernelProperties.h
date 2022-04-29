@@ -39,11 +39,14 @@ public:
     // This structure should evolve once we provide support for other 
     // m_axi memory such as HBM.
     std::string BundleName; // Vitis bundle name
-    unsigned TargetId; // Associated DDR bank ID
+    Optional<unsigned> TargetId; // Associated DDR bank ID
+    bool isDefaultBundle() const {
+      return BundleName == "default";
+    }
   };
 private:
   
-  SmallDenseMap<unsigned, StringMap<unsigned>, 4> BundlesByIDName;
+  SmallDenseMap<unsigned, unsigned, 4> BundlesByIDName;
   SmallDenseMap<Argument *, unsigned, 16> BundleForArgument;
   StringMap<unsigned> BundlesByName;
   SmallVector<MAXIBundle, 8> Bundles;

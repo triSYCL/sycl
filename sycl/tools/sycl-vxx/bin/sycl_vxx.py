@@ -482,30 +482,41 @@ class VXXCompilationDriver(VitisCompilationDriver):
         ]
         if link_config is not None and Path(link_config).is_file():
             command.extend(("--config", Path(link_config).resolve()))
+        has_assignment = False
+        has_default = False
         for kernelprop in self.kernel_properties['kernels']:
             targets = dict()
             for mem_assign in kernelprop["bundle_hw_mapping"]:
-                command.extend((
-                    "--connectivity.sp",
-                    "{}_1.m_axi_{}:{}".format(
-                        kernelprop["name"],
-                        mem_assign["maxi_bundle_name"],
-                        mem_assign["target_bank"]
-                    )
-                ))
-                targets[mem_assign["maxi_bundle_name"]
-                        ] = mem_assign["target_bank"]
+                if mem_assign["maxi_bundle_name"] != "default":
+                    command.extend((
+                        "--connectivity.sp",
+                        "{}_1.m_axi_{}:{}".format(
+                            kernelprop["name"],
+                            mem_assign["maxi_bundle_name"],
+                            mem_assign["target_bank"]
+                        )
+                    ))
+                    targets[mem_assign["maxi_bundle_name"]
+                            ] = mem_assign["target_bank"]
             for arg_assign in kernelprop["arg_bundle_mapping"]:
                 arg_name = arg_assign["arg_name"]
-                target = targets[arg_assign["maxi_bundle_name"]]
-                command.extend((
-                    "--connectivity.sp",
-                    "{}_1.{}:{}".format(
-                        kernelprop["name"],
-                        arg_name,
-                        target
-                    )
-                ))
+                bundle_name = arg_assign["maxi_bundle_name"]
+                if bundle_name == "default":
+                    has_default = True
+                else:
+                    target = targets[bundle_name]
+                    command.extend((
+                        "--connectivity.sp",
+                        "{}_1.{}:{}".format(
+                            kernelprop["name"],
+                            arg_name,
+                            target
+                        )
+                    ))
+                    has_assignment = True
+                if has_assignment and has_default:
+                    raise NotImplementedError(
+                        "Mix between assigned an non assigned bank is not supported yet")
         command.extend(self.extra_link_args)
         command.extend(kernels)
         self._dump_cmd("vxxlink", command)
