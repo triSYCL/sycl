@@ -37,8 +37,7 @@ struct bo;
 }
 
 __SYCL_INLINE_NAMESPACE(cl) {
-namespace sycl {
-namespace detail {
+namespace sycl::detail {
 
 template <> struct InteropFeatureSupportMap<backend::xrt> {
   static constexpr bool MakePlatform = false;

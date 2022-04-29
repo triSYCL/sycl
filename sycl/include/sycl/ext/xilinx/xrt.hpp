@@ -17,19 +17,18 @@
 #include <xrt.h>
 
 __SYCL_INLINE_NAMESPACE(cl) {
-namespace sycl {
-namespace detail {
+namespace sycl::detail {
 
 /// The backend is responsible for selecting the correct type and reference
 /// kind based on the semantic of the underlying pi call.
 template <typename To>
-typename std::enable_if<!std::is_reference_v<To>, To>::type
+typename std::enable_if_t<!std::is_reference_v<To>, To>
 from_native_handle(pi_native_handle handle) {
-  return (To)(handle);
+  return { handle };
 }
 
 template <typename To>
-typename std::enable_if<std::is_reference_v<To>, To>::type
+typename std::enable_if_t<std::is_reference_v<To>, To>
 from_native_handle(pi_native_handle handle) {
   /// A safe and convenient default is const& with the backend making a copy of
   /// what it receives

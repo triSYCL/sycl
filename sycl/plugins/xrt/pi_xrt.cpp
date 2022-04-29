@@ -251,8 +251,8 @@ public:
 
 /// Cannot be used for XRT objects because xrt also has global destructors
 struct cleanup_system {
-  using clenup_item = std::pair<void (*)(void *), void *>;
-  std::vector<clenup_item> cleanup_list;
+  using cleanup_item = std::pair<void (*)(void *), void *>;
+  std::vector<cleanup_item> cleanup_list;
   std::unordered_map<void *, unsigned> cleanup_map;
 
   template <typename T> void remove(T *ptr) {
@@ -335,8 +335,8 @@ public:
 struct _pi_platform : ref_counted_base<_pi_platform>, unique<_pi_platform> {
 private:
   /// _pi_platform is destroyed during program exit and can happen after XRT's
-  /// global state has been cleanup so we do not hold a counting reference on
-  /// _pi_device. to make it manageable 
+  /// global state has been cleaned up so we do not hold a counting reference on
+  /// _pi_device to make it manageable 
   std::vector<_pi_device*> devices_;
 
 public:
@@ -360,6 +360,7 @@ public:
 };
 
 struct _pi_context : ref_counted_base<_pi_context>, unique<_pi_context> {
+  // Devices in this context
   std::vector<ref_counted_ref<_pi_device>> devices_;
 
   _pi_context(pi_uint32 num_devices, const pi_device *devices)
@@ -425,7 +426,7 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
     pending_cmds.exec_queue(); // TODO fix this
   }
 
-  // TODO: xrt::bo sometimes stay stuck while being deleted. so we dont delete
+  // TODO: xrt::bo sometimes stay stuck while being deleted. So we do not delete
   // it. (https://github.com/Xilinx/XRT/issues/6588)
   // TODO: no_destroy should be a template wrapper.
   union no_destroy {
@@ -1129,7 +1130,7 @@ pi_result xrt_piextDeviceGetNativeHandle(pi_device device,
 pi_result xrt_piextDeviceCreateWithNativeHandle(pi_native_handle handle,
                                                 pi_platform platform,
                                                 pi_device *res) {
-  /// the sycl runtime almost always provide a null platform
+  /// the SYCL runtime almost always provide a null platform
   assert(res);
   *res = _pi_platform::get()
              ->add_device(from_native_handle<xrt::device &>(handle))
@@ -1346,7 +1347,7 @@ pi_result xrt_piEnqueueMemBufferRead(pi_queue command_queue, pi_mem buffer,
 
 pi_result xrt_piEventsWait(pi_uint32 num_events, const pi_event *event_list) {
   assert_valid_objs(event_list, num_events);
-  /// For now every operation is executed synchronously this ia a noop
+  /// For now every operation is executed synchronously this is a no op
 
   return PI_SUCCESS;
 }
@@ -1816,7 +1817,7 @@ pi_result xrt_piSamplerRelease(pi_sampler sampler) {
 }
 
 /// Make a rectangular copy from or to the device
-pi_result enuqeue_rect_copy(bool is_read, pi_queue command_queue, pi_mem buffer,
+pi_result enqueue_rect_copy(bool is_read, pi_queue command_queue, pi_mem buffer,
                             pi_bool blocking, pi_buff_rect_offset buffer_offset,
                             pi_buff_rect_offset host_offset,
                             pi_buff_rect_region region, size_t buffer_row_pitch,

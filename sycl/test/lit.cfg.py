@@ -143,8 +143,8 @@ lit_config.note("Filter: {}".format(filter))
 
 acc_run_substitute=f"env SYCL_DEVICE_FILTER={filter} "
 if xocc != "off":
-    # cleanup the named semaphore in case the previous test didnt cleanup properly
-    # If someone tries to run multiple tests on the same machin this could cause issues.
+    # Clean up the named semaphore in case the previous test did not clean up properly.
+    # If someone tries to run multiple tests on the same machine this could cause issues.
     os.system("rm -rf /dev/shm/sem.sycl_vxx.py")
     # xrt doesn't deal well with multiple executables using it concurrently (at the time of writing).
     # The details are at https://xilinx.github.io/XRT/master/html/multiprocess.html
