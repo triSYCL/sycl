@@ -1107,14 +1107,19 @@ private:
   void parallel_for_lambda_impl(range<Dims> NumWorkItems,
                                 KernelType KernelFunc) {
     throwIfActionIsCreated();
-    using NameT =
-        typename detail::get_kernel_name_t<KernelName, KernelType>::name;
-#ifndef __SYCL_DEVICE_ONLY__
-device D = detail::getDeviceFromHandler(*this);
+#if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
+#if !defined(__SYCL_DEVICE_ONLY__)
+    if (detail::getDeviceFromHandler(*this).has(
+            aspect::ext_xilinx_single_task_only)) {
 #endif
-
-// Normal parallel_for handling
-#ifndef __SYCL_SPIR_DEVICE__
+      single_task<KernelName>(
+          [=] { detail::serialize_parallel_for(KernelFunc, NumWorkItems); });
+#if !defined(__SYCL_DEVICE_ONLY__)
+    return;
+  }
+#endif
+#endif
+#if !defined(__SYCL_SPIR_DEVICE__)
     using LambdaArgType = sycl::detail::lambda_arg_type<KernelType, item<Dims>>;
 
     // If 1D kernel argument is an integral type, convert it to sycl::item<1>
@@ -1123,6 +1128,9 @@ device D = detail::getDeviceFromHandler(*this);
     using TransformedArgType = typename std::conditional<
         std::is_integral<LambdaArgType>::value && Dims == 1, item<Dims>,
         typename TransformUserItemType<Dims, LambdaArgType>::type>::type;
+
+    using NameT =
+        typename detail::get_kernel_name_t<KernelName, KernelType>::name;
 
     verifyUsedKernelBundle(detail::KernelInfo<NameT>::getName());
 
@@ -1192,14 +1200,11 @@ device D = detail::getDeviceFromHandler(*this);
       AdjustedRange.set_range_dim0(NewValX);
       kernel_parallel_for_wrapper<KName, TransformedArgType>(Wrapper);
 #ifndef __SYCL_DEVICE_ONLY__
-      if (!D.has(aspect::ext_xilinx_single_task_only)) {
         detail::checkValueRange<Dims>(AdjustedRange);
         MNDRDesc.set(std::move(AdjustedRange));
         StoreLambda<KName, decltype(Wrapper), Dims, TransformedArgType>(
             std::move(Wrapper));
         setType(detail::CG::Kernel);
-        return;
-      }
 #endif
     } else
 #endif // !__SYCL_DISABLE_PARALLEL_FOR_RANGE_ROUNDING__ &&
@@ -1209,36 +1214,14 @@ device D = detail::getDeviceFromHandler(*this);
       (void)NumWorkItems;
       kernel_parallel_for_wrapper<NameT, TransformedArgType>(KernelFunc);
 #ifndef __SYCL_DEVICE_ONLY__
-      if (!D.has(aspect::ext_xilinx_single_task_only)) {
         detail::checkValueRange<Dims>(NumWorkItems);
         MNDRDesc.set(std::move(NumWorkItems));
         StoreLambda<NameT, KernelType, Dims, TransformedArgType>(
             std::move(KernelFunc));
         setType(detail::CG::Kernel);
-        return;
-      }
-#endif // !SYCL_DEVICE_ONLY
+#endif
     }
-#endif // !__SYCL_SPIR_DEVICE__
-
-// Wrap kernel in for loop for devices that do not support parallel_for
-// (currently Xilinx HLS)
-#if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
-    auto SingleTaskKernel = [=]{
-        detail::serialize_parallel_for(KernelFunc, NumWorkItems);
-    };
-    using ToSingleTaskName = detail::par_for_to_st<NameT>;
-    kernel_single_task<ToSingleTaskName>(SingleTaskKernel);
-#ifndef __SYCL_DEVICE_ONLY__
-    // No need to check if range is out of INT_MAX limits as it's compile-time
-    // known constant
-    if (D.has(aspect::ext_xilinx_single_task_only)) {
-      MNDRDesc.set(range<1>{1});
-      StoreLambda<ToSingleTaskName, decltype(SingleTaskKernel), /*Dims*/ 1, void>(SingleTaskKernel);
-      setType(detail::CG::Kernel);
-    }
-#endif // !__SYCL_DEVICE_ONLY__
-#endif // __SYCL_SPIR_DEVICE__ || !__SYCL_DEVICE_ONLY__
+    #endif
   }
 
   /// Defines and invokes a SYCL kernel function for the specified range.
@@ -1755,13 +1738,21 @@ public:
   void parallel_for(nd_range<Dims> ExecutionRange,
                     _KERNELFUNCPARAM(KernelFunc)) {
     throwIfActionIsCreated();
+#if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
+#if !defined(__SYCL_DEVICE_ONLY__)
+    if (detail::getDeviceFromHandler(*this).has(
+            aspect::ext_xilinx_single_task_only)) {
+#endif
+      single_task<KernelName>(
+          [=] { detail::serialize_parallel_for(KernelFunc, ExecutionRange); });
+#if !defined(__SYCL_DEVICE_ONLY__)
+    return;
+  }
+#endif
+#endif
+#if !defined(__SYCL_SPIR_DEVICE__)
     using NameT =
         typename detail::get_kernel_name_t<KernelName, KernelType>::name;
-#ifndef __SYCL_DEVICE_ONLY__
-    device D = detail::getDeviceFromHandler(*this);
-#endif
-// Normal handling
-#ifndef __SYCL_SPIR_DEVICE__
     verifyUsedKernelBundle(detail::KernelInfo<NameT>::getName());
     using LambdaArgType =
         sycl::detail::lambda_arg_type<KernelType, nd_item<Dims>>;
@@ -1772,33 +1763,13 @@ public:
     (void)ExecutionRange;
     kernel_parallel_for_wrapper<NameT, TransformedArgType>(KernelFunc);
 #ifndef __SYCL_DEVICE_ONLY__
-    if (!D.has(aspect::ext_xilinx_single_task_only)) {
       detail::checkValueRange<Dims>(ExecutionRange);
       MNDRDesc.set(std::move(ExecutionRange));
       StoreLambda<NameT, KernelType, Dims, TransformedArgType>(
           std::move(KernelFunc));
       setType(detail::CG::Kernel);
-    }
 #endif
 #endif
-// Parallel for serializing for
-#if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
-    auto SingleTaskKernel = [=] {
-      detail::serialize_parallel_for(KernelFunc, ExecutionRange);
-    };
-    using ToSingleTaskName = detail::par_for_to_st<NameT>;
-    kernel_single_task<ToSingleTaskName>(SingleTaskKernel);
-#ifndef __SYCL_DEVICE_ONLY__
-    // No need to check if range is out of INT_MAX limits as it's compile-time
-    // known constant
-    if (D.has(aspect::ext_xilinx_single_task_only)) {
-      MNDRDesc.set(range<1>{1});
-      StoreLambda<ToSingleTaskName, decltype(SingleTaskKernel), /*Dims*/ 1,
-                  void>(SingleTaskKernel);
-      setType(detail::CG::Kernel);
-    }
-#endif // !__SYCL_DEVICE_ONLY__
-#endif // __SYCL_SPIR_DEVICE__ || !__SYCL_DEVICE_ONLY__
   }
 
   /// Defines and invokes a SYCL kernel function for the specified nd_range.
@@ -1806,7 +1777,7 @@ public:
   /// The SYCL kernel function is defined as a lambda function or a named
   /// function object type and given an id for indexing in the indexing
   /// space defined by range \p Range.
-  /// The parameter \p Redu contains the object created by the reduction()
+  /// The parameter \p Redu contains the object creted by the reduction()
   /// function and defines the type and operation used in the corresponding
   /// argument of 'reducer' type passed to lambda/functor function.
   template <typename KernelName = detail::auto_name, typename KernelType,
