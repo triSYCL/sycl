@@ -16,8 +16,8 @@
 #endif
 
 /// XRT has a bunch of very noisy warnings we need to suppress.
-/// XRT can be found as opencl implementation so we suppress warning on both xrt
-/// native header and opencl headers
+/// XRT can be found as OpenCL implementation so we suppress warning on both XRT
+/// native header and OpenCL headers
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wnested-anon-types"
 #pragma clang diagnostic ignored "-Wgnu-anonymous-struct"
