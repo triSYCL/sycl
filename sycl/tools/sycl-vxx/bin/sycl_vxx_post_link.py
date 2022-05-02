@@ -18,6 +18,9 @@ class PostLinkEntriesExtractor:
         def get_kernels(xclbin):
             process = subprocess.run(["xclbinutil", "-i", xclbin,
                                       "--info"], capture_output=True)
+
+            # the output of xclbinutil contain one line per kernel with:
+            #    Kernel: NAME_OF_KERNEL
             klist = []
             for line in process.stdout.decode("utf8").split("\n"):
                 if line.strip().startswith("Kernel:"):
