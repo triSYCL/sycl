@@ -18,12 +18,17 @@ class PostLinkEntriesExtractor:
         def get_kernels(xclbin):
             process = subprocess.run(["xclbinutil", "-i", xclbin,
                                       "--info"], capture_output=True)
+
+            # the output of xclbinutil contain one line per kernel with:
+            #    Kernel: NAME_OF_KERNEL
+            klist = []
             for line in process.stdout.decode("utf8").split("\n"):
-                if line.strip().startswith("Kernels:"):
-                    line = line.replace("Kernels:", "", 1).strip()
-                    kernels = {s.strip() for s in line.split(',')}
-                    return kernels
-            raise EOFError("No kernel found")
+                if line.strip().startswith("Kernel:"):
+                    line = line.replace("Kernel:", "", 1).strip()
+                    klist += [line]
+            if len(klist) == 0:
+                raise EOFError("warning: No kernel found: insure you have the latest version of xrt installed")
+            return klist
 
         def handle_input(input_n: int, filename: Path, outfile):
             outdir = self.output.resolve().parent
@@ -61,5 +66,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         print("Received keyboard interrupt, will stop")
         sys.exit(-2)
-    except EOFError:
-        print("No kernel found")
+    except EOFError as e:
+        print(str(e))
