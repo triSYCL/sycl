@@ -29,6 +29,7 @@
 #include <CL/sycl/property_list.hpp>
 #include <CL/sycl/sampler.hpp>
 #include <CL/sycl/stl.hpp>
+#include <CL/sycl/types.hpp>
 
 #include <functional>
 #include <limits>
@@ -354,6 +355,7 @@ inline void serialize_parallel_for(ElementWiseOpTy &ElementWiseOp,
   build_loop_nd_nest_rec<0, IterDims>(ElementWiseOp, IterDomains,
                                       std::tuple<>{});
 }
+
 template <typename TransformedArgType, int Dims, typename KernelType>
 class RoundedRangeKernel {
 public:
@@ -390,7 +392,17 @@ private:
   KernelType KernelFunc;
 };
 
+template<typename T>
+struct assume_device_copyable_wrapper : T {
+};
+
 } // namespace detail
+
+template <typename T>
+struct is_device_copyable<
+    detail::assume_device_copyable_wrapper<T>,
+    std::enable_if_t<!std::is_trivially_copyable<T>::value>> : std::true_type {
+};
 
 namespace ext {
 namespace oneapi {
@@ -1112,11 +1124,14 @@ private:
     if (detail::getDeviceFromHandler(*this).has(
             aspect::ext_xilinx_single_task_only)) {
 #endif
-      single_task<KernelName>(
-          [=] { detail::serialize_parallel_for(KernelFunc, NumWorkItems); });
+      single_task<KernelName>([=, Func = detail::assume_device_copyable_wrapper<
+                                      std::remove_reference_t<KernelType>>{
+                                      std::forward<KernelType>(KernelFunc)}] {
+        detail::serialize_parallel_for(Func, NumWorkItems);
+      });
 #if !defined(__SYCL_DEVICE_ONLY__)
-    return;
-  }
+      return;
+    }
 #endif
 #endif
 #if !defined(__SYCL_SPIR_DEVICE__)
@@ -1743,11 +1758,14 @@ public:
     if (detail::getDeviceFromHandler(*this).has(
             aspect::ext_xilinx_single_task_only)) {
 #endif
-      single_task<KernelName>(
-          [=] { detail::serialize_parallel_for(KernelFunc, ExecutionRange); });
+      single_task<KernelName>([=, Func = detail::assume_device_copyable_wrapper<
+                                      std::remove_reference_t<KernelType>>{
+                                      std::forward<KernelType>(KernelFunc)}] {
+        detail::serialize_parallel_for(Func, ExecutionRange);
+      });
 #if !defined(__SYCL_DEVICE_ONLY__)
-    return;
-  }
+      return;
+    }
 #endif
 #endif
 #if !defined(__SYCL_SPIR_DEVICE__)

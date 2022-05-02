@@ -198,8 +198,8 @@ struct PrepareSYCLOpt : public ModulePass {
       : public llvm::InstVisitor<CheckUnsupportedBuiltinsVisitor> {
     void visitCallInst(CallInst &I) {
       auto *F = I.getCalledFunction();
-      if (llvm::demangle(std::string(F->getName()))
-              .rfind("__spir_ocl_get", 0) == 0) {
+      if (F && llvm::demangle(std::string(F->getName()))
+                       .rfind("__spir_ocl_get", 0) == 0) {
         std::cerr << "SYCL_VXX_UNSUPPORTED_SPIR_BUILTINS" << std::endl;
       }
     }
