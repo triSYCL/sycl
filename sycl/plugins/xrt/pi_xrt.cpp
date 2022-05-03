@@ -2039,7 +2039,7 @@ pi_result xrt_piTearDown(void *) {
   return PI_SUCCESS;
 }
 
-template <typename func_ty, func_ty func> struct xrt_pi_call_wrapper;
+template <typename, auto func> struct xrt_pi_call_wrapper;
 
 template <typename ret_ty, typename... args_ty, auto func>
 struct xrt_pi_call_wrapper<ret_ty (*)(args_ty...), func> {
