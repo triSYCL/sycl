@@ -248,6 +248,9 @@ make package
 sudo apt install --reinstall ./xrt_202210.2.13.0_21.10-amd64-xrt.deb
 ```
 
+If you also want a debug and verbose version which traces all the
+XRT calls, try compiling with `./dbg.sh -noccache`.
+
 > :memo: The Linux kernel driver is actually compiled during the
 > installation of the `.deb` package for the currently running
 > kernel. If the compilation fails because of some incompatibilities,
