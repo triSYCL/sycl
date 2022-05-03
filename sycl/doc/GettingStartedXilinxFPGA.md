@@ -855,7 +855,7 @@ mkdir $SYCL_HOME
 cd $SYCL_HOME
 # You can also try --branch sycl/unified/next for a bleeding edge experience
 git clone --branch sycl/unified/master git@github.com:triSYCL/sycl.git llvm
-python $SYCL_HOME/llvm/buildbot/configure.py --no-werror
+python $SYCL_HOME/llvm/buildbot/configure.py
 python $SYCL_HOME/llvm/buildbot/compile.py
 ```
 
@@ -865,7 +865,7 @@ treating compiler warnings as errors and producing a compiler database
 to be used by tools like LSP server like `clangd`:
 
 ```bash
-python $SYCL_HOME/llvm/buildbot/configure.py --cuda --no-werror \
+python $SYCL_HOME/llvm/buildbot/configure.py --cuda \
   --cmake-opt="-DCMAKE_EXPORT_COMPILE_COMMANDS=1"
 ```
 
