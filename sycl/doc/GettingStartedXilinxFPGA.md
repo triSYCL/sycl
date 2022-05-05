@@ -225,7 +225,7 @@ export XILINX_VITIS=/opt/xilinx/Vitis/2021.2
 ./build.sh
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
-sudo apt install --reinstall ./Release/xrt_202210.2.13.0_21.10-amd64-xrt.deb
+sudo apt install --reinstall ./Release/xrt_202220.2.14.0_21.10-amd64-xrt.deb
 ```
 
 It will install the user-mode XRT runtime and at least compile and
@@ -247,6 +247,9 @@ make package
 # the Linux kernel drivers (adapt to the real name if different)
 sudo apt install --reinstall ./xrt_202210.2.13.0_21.10-amd64-xrt.deb
 ```
+
+If you also want a debug and verbose version which traces all the
+XRT calls, try compiling with `./dbg.sh -noccache`.
 
 > :memo: The Linux kernel driver is actually compiled during the
 > installation of the `.deb` package for the currently running
@@ -862,7 +865,7 @@ treating compiler warnings as errors and producing a compiler database
 to be used by tools like LSP server like `clangd`:
 
 ```bash
-python $SYCL_HOME/llvm/buildbot/configure.py --cuda -no-werror \
+python $SYCL_HOME/llvm/buildbot/configure.py --cuda \
   --cmake-opt="-DCMAKE_EXPORT_COMPILE_COMMANDS=1"
 ```
 
@@ -931,7 +934,7 @@ might be wrong on your current system... But the hardware execution
 just requires the open-source XRT that should have been compiled just
 using what is available on the system.
 
-Architecture provided to the `sycl-targets` Clang flag selects the
+Architecture provided to the `--sycl-targets` Clang option selects the
 compilation mode. Supported architectures are:
 
 |                                    | Software simulation | Hardware emulation  | Hardware        |
@@ -939,8 +942,8 @@ compilation mode. Supported architectures are:
 | SPIR compilation flow (deprecated) | `fpga64_sw_emu`     | `fpga64_hw_emu`     | `fpga64_hw`     |
 | HLS compilation flow               | Unsupported yet     | `fpga64_hls_hw_emu` | `fpga64_hls_hw` |
 
-Only one `fpga64_*` architecture is allowed in the `sycl-targets`
-flag.
+Only one `fpga64_*` architecture is allowed in the `--sycl-targets`
+option.
 
 The SYCL HLS compilation flow does not support software emulation because
 of internal AMD/Xilinx issue https://jira.xilinx.com/browse/CR-1099885
@@ -948,14 +951,87 @@ But as SYCL allows also execution on a CPU device, it can replace the
 back-end software emulation.
 
 
+### Picking the right device
+
+The SYCL framework displays the available SYCL devices by running the
+`sycl-ls` command, with an optional `--verbose` parameter for more
+information.
+
+The XRT runtime exposes the real FPGA available on the machine or some
+emulated FPGA according to the `XCL_EMULATION_MODE` environment
+variable: which can take 3 values according to the required emulation:
+- `hw_emu`, for hardware emulation where an RTL simulator is used to
+  run (slowly) the kernels instead of using a real FPGA and is the
+  only option that matters here;
+- `hw`, for real hardware execution, equivalent to not defining
+  `XCL_EMULATION_MODE`;
+- `sw_emu`, for software emulation, which is not very useful in SYCL
+  since the code is already executable on CPU as plain single-source
+  C++, but makes sense for HLS C/C++ or OpenCL.
+
+When running a SYCL program on AMD/Xilinx FPGA, the runtime takes care
+of this variable according to the compilation option, so it is not
+necessary to set it.
+
+But to list the available SYCL devices on the machine, setting the
+variable to have a list of available devices according whether you
+want to see simulated devices or not.
+
+For example, on a machine without a physical FPGA, running the
+`sycl-ls` command can show:
+```bash
+>- sycl-ls
+XRT build version: 2.14.0
+Build hash: 3d71c4e867bf91e789f89499a97b95708331d7e7
+Build date: 2022-04-12 13:48:07
+Git branch: master
+PID: 421146
+UID: 1000
+[Tue Apr 26 01:04:14 2022 GMT]
+HOST: rk-xsj
+EXE: /home/rkeryell/Xilinx/Projects/LLVM/worktrees/xilinx/llvm/build/bin/sycl-ls
+[XRT] ERROR: No devices found
+[opencl:cpu:0] Intel(R) CPU Runtime for OpenCL(TM) Applications, Intel(R) Xeon(R) E-2176M  CPU @ 2.70GHz 2.1 [18.1.0.0920]
+[opencl:cpu:1] Portable Computing Language, pthread-Intel(R) Xeon(R) E-2176M  CPU @ 2.70GHz 1.2 [1.8]
+[host:host:0] SYCL host platform, SYCL host device 1.2 [1.2]
+```
+with an error message ending with `[XRT] ERROR: No devices found`.
+
+But by asking some hardware emulated devices, the installed platforms
+show up:
+```bash
+>- XCL_EMULATION_MODE=hw_emu sycl-ls
+[opencl:acc:0] Xilinx, xilinx_u200_gen3x16_xdma_1_202110_1 1.0 [1.0]
+[opencl:cpu:1] Intel(R) CPU Runtime for OpenCL(TM) Applications, Intel(R) Xeon(R) E-2176M  CPU @ 2.70GHz 2.1 [18.1.0.0920]
+[opencl:cpu:2] Portable Computing Language, pthread-Intel(R) Xeon(R) E-2176M  CPU @ 2.70GHz 1.2 [1.8]
+[host:host:0] SYCL host platform, SYCL host device 1.2 [1.2]
+```
+as `opencl:acc:0` which can be used to select the right device.
+
+The examples provided here often rely on the SYCL default selector
+whose behavior can be influenced by the
+[`SYCL_DEVICE_FILTER`](EnvironmentVariables.md#sycl_device_filter)
+environment variable, among others. Thus, to run an example on the
+AMD/Xilinx FPGA shown by the previous `sycl-ls`, the environment
+variable can be set with:
+```bash
+>- export SYCL_DEVICE_FILTER=opencl:acc:0
+```
+Beware that setting this variable also change the view from `sycl-ls` itself.
+
+
 ### Small examples
+
+See section [Picking the right device](#picking-the-right-device) to
+set correctly the `SYCL_DEVICE_FILTER` environment variable to select
+the right AMD/Xilinx FPGA device first.
 
 To run an example from the provided examples:
 
 - with hardware emulation:
 
 ```bash
-  cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/simple_tests
+  cd $SYCL_HOME/llvm/sycl/test/vitis/simple_tests
   # Instruct the compiler and runtime to use FPGA hardware emulation with HLS flow
   # Compile the SYCL program down to a host fat binary including the RTL for simulation
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw_emu \
@@ -967,7 +1043,7 @@ To run an example from the provided examples:
 - with real hardware execution on FPGA:
 
 ```bash
-  cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/simple_tests
+  cd $SYCL_HOME/llvm/sycl/test/vitis/simple_tests
   # Instruct the compiler to use real FPGA hardware execution with HLS flow
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw \
@@ -1022,33 +1098,33 @@ the `fpga64_` prefix trimmed. Namely:
 
 Note that the SPIR compilation flow has been discontinued.
 
-- Run the `xocc` test suite with hardware emulation (HLS flow):
+- Run the `vitis` test suite with hardware emulation (HLS flow):
 
 ```bash
   cd $SYCL_HOME/llvm/build
   export VXX_TARGET=hls_hw_emu
-  cmake --build . --parallel `nproc` --target check-sycl-xocc-j4
+  cmake --build . --parallel `nproc` --target check-sycl-vitis-j4
   ```
 
 This takes usually 15-30 minutes with a good CPU.
 
-- Run the `xocc` test suite with real hardware execution on FPGA (HLS flow):
+- Run the `vitis` test suite with real hardware execution on FPGA (HLS flow):
 
 ```bash
   cd $SYCL_HOME/llvm/build
   export VXX_TARGET=hls_hw
-  cmake --build . --parallel `nproc` --target check-sycl-xocc-j4
+  cmake --build . --parallel `nproc` --target check-sycl-vitis-j4
   ```
 
 This takes usually 8+ hours.
 
-`check-sycl-xocc-jmax` will run the tests on as many cores as is
+`check-sycl-vitis-jmax` will run the tests on as many cores as is
 available on the system. But for `hw` and `hw_emu` execution mode,
 this usually means the system will run out of RAM even with 64G so
-`check-sycl-xocc-j4` should be used to run only 4 tests in
+`check-sycl-vitis-j4` should be used to run only 4 tests in
 parallel. There is also a `j2` version to use only 2 cores.
 
-To launch the compilation on all the SYCL tests, not only the `xocc`
+To launch the compilation on all the SYCL tests, not only the `vitis`
 ones, there are the targets `check-sycl-all-jmax`,
 `check-sycl-all-j2` and `check-sycl-all-j4`
 
@@ -1059,7 +1135,7 @@ To run a SYCL translation of
 https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
 
 ```bash
-cd $SYCL_HOME/llvm/sycl/test/on-device/xocc/edge_detection
+cd $SYCL_HOME/llvm/sycl/test/on-device/vitis/edge_detection
 # Instruct the compiler and runtime to use real FPGA hardware execution
 $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
     -fsycl-targets=fpga64_hls_hw edge_detection.cpp \
@@ -1187,9 +1263,9 @@ chh.single_task([=]{
 The lambda given to `pipeline` is executed for each step of
 the loop, and the enclosing loop is pipelined.
 
-Helpers to deactivate the pipeline for loop and kernel,
+Helpers to deactivate the pipeline `for` loop and kernel,
 respectively `no_pipeline` and `unpipeline_kernel` are used in
- a similar way.
+a similar way.
 
 ### Dataflow decorators
 
@@ -1203,7 +1279,7 @@ a similar fashion to the equivalent pipeline annotation.
 ### Loop unrolling
 
 The `sycl::ext::xilinx::unroll<UnrollType>()` decorator should be applied
-to a lambda inside a for loop. The lambda is called at each loop
+to a lambda inside a `for` loop. The lambda is called at each loop
 iteration and the enclosing loop is unrolled following UnrollType
 semantics.
 
@@ -1260,7 +1336,7 @@ queue.submit([&](sycl::handler &cgh) {
 ```
 
 In this example, `a_buff` materialization on device will be stored on DDR
-	bank 1, `b_buff` materialization on DDR bank 2 and `c_buff` materialization on 
+bank 1, `b_buff` materialization on DDR bank 2 and `c_buff` materialization on
 DDR bank 3.
 
 **As of now, having accessor on the same buffer with different memory location is not supported.**
@@ -1300,7 +1376,7 @@ queue.submit([&](sycl::handler &cgh) {
 });
 ```
 
-for more examples see [this test case](../test/on-device/xocc/simple_tests/partion_ndarray.cpp) or [this one](../test/on-device/xocc/edge_detection/edge_detection.cpp)
+for more examples see [this test case](../test/vitis/simple_tests/partion_ndarray.cpp) or [this one](../test/vitis/edge_detection/edge_detection.cpp)
 
 ## AMD/Xilinx Macros
 
@@ -1563,7 +1639,7 @@ This will look like the following:
 #!/bin/bash
 
 # Downgrade the IR generate by llvm-reduce
-./build-Release/bin/opt -verify -S -xoccIRDowngrader $1 -o $1.tmp.ll || exit 1
+./build-Release/bin/opt -verify -S -vxxIRDowngrader $1 -o $1.tmp.ll || exit 1
 
 # Assemble the IR using Vitis's assembler
 .../clang-3.9-csynth/bin/llvm-as $1.tmp.ll -o $1.tmp.xpirbc
