@@ -16,7 +16,8 @@
 #include <xrt/xrt_kernel.h>
 
 __SYCL_INLINE_NAMESPACE(cl) {
-namespace sycl::detail {
+namespace sycl {
+namespace detail {
 
 /// The backend is responsible for selecting the correct type and reference
 /// kind based on the semantic of the underlying pi call.
@@ -53,7 +54,7 @@ to_native_handle(From &&from) {
   return reinterpret_cast<pi_native_handle>(std::addressof(from));
 }
 
-}
+}  // namespace detail
 
 template <>
 inline device make_device<backend::xrt>(
@@ -66,13 +67,13 @@ inline device make_device<backend::xrt>(
 
 template <>
 inline auto get_native<backend::xrt>(const device &Obj)
-    -> backend_return_t<sycl::backend::xrt, device> {
+    -> backend_return_t<backend::xrt, device> {
   if (Obj.get_backend() != backend::xrt)
     throw runtime_error(errc::backend_mismatch, "Backends mismatch",
                         PI_INVALID_OPERATION);
 
   return detail::from_native_handle<
-      backend_return_t<sycl::backend::xrt, device>>(
+      backend_return_t<backend::xrt, device>>(
       Obj.getNative());
 }
 
@@ -88,13 +89,13 @@ inline kernel make_kernel<backend::xrt>(
 
 template <>
 inline auto get_native<backend::xrt>(const kernel &Obj)
-    -> backend_return_t<sycl::backend::xrt, kernel> {
+    -> backend_return_t<backend::xrt, kernel> {
   if (Obj.get_backend() != backend::xrt)
     throw runtime_error(errc::backend_mismatch, "Backends mismatch",
                         PI_INVALID_OPERATION);
 
   return detail::from_native_handle<
-      backend_return_t<sycl::backend::xrt, kernel>>(
+      backend_return_t<backend::xrt, kernel>>(
       Obj.getNative());
 }
 
@@ -114,14 +115,14 @@ make_kernel_bundle<backend::xrt, bundle_state::executable>(
 
 template <>
 inline auto get_native<backend::xrt>(const kernel_bundle<bundle_state::executable> &Obj)
-    -> backend_return_t<sycl::backend::xrt, kernel_bundle<bundle_state::executable>> {
+    -> backend_return_t<backend::xrt, kernel_bundle<bundle_state::executable>> {
   if (Obj.get_backend() != backend::xrt)
     throw runtime_error(errc::backend_mismatch, "Backends mismatch",
                         PI_INVALID_OPERATION);
 
   return Obj.getNative<backend::xrt>([](pi_native_handle handle) {
     return detail::from_native_handle<typename backend_return_t<
-        sycl::backend::xrt, kernel_bundle<bundle_state::executable>>::reference>(handle);
+        backend::xrt, kernel_bundle<bundle_state::executable>>::reference>(handle);
   });
 }
 
