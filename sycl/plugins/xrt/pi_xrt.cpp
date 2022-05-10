@@ -99,27 +99,25 @@ public:
   ~ref_counted_base() { assert(refCount_ == 0); }
 };
 
+template <typename...> using void_t = void;
+
 /// Will increment ref count if needed by the object
-template <typename T, typename std::enable_if_t<
-                          std::is_base_of_v<ref_counted_base<T>, T>, int> = 0>
-void incr_ref_count(T *value) {
+template <typename T>
+void_t<decltype(std::declval<T>().increment_reference_count())>
+incr_ref_count(T *value) {
   assert(value);
   value->increment_reference_count();
 }
-template <typename T, typename std::enable_if_t<
-                          !std::is_base_of_v<ref_counted_base<T>, T>, int> = 0>
-void incr_ref_count(T *value) {}
+void incr_ref_count(void *) {}
 
 /// Will decrement ref count if needed by the object
-template <typename T, typename std::enable_if_t<
-                          std::is_base_of_v<ref_counted_base<T>, T>, int> = 0>
-void decr_ref_count(T *value) {
+template <typename T>
+void_t<decltype(std::declval<T>().decrement_reference_count())>
+decr_ref_count(T *value) {
   assert(value);
   value->decrement_reference_count();
 }
-template <typename T, typename std::enable_if_t<
-                          !std::is_base_of_v<ref_counted_base<T>, T>, int> = 0>
-void decr_ref_count(T *value) {}
+void decr_ref_count(void *) {}
 
 /// Validate a _pi_* object.
 template <typename T, typename std::enable_if_t<
@@ -239,6 +237,41 @@ public:
     /// Make null such that the next request will rebuild
     get_self() = nullptr;
   }
+};
+
+/// Intrusive list base class
+template <typename T> struct intr_list_node {
+  intr_list_node<T> *prev = nullptr;
+  T *next = nullptr;
+  void verify_invariance() {
+    assert(!prev || prev->next == this);
+    assert(!next || next->prev == this);
+  }
+  void insert_next(T *other) {
+    verify_invariance();
+    assert(other->next == nullptr);
+    assert(other->prev == nullptr);
+    other->next = next;
+    other->prev = this;
+    if (next)
+      next->prev = other;
+    next = other;
+    next->verify_invariance();
+    verify_invariance();
+  }
+  void unlink_self() {
+    verify_invariance();
+    if (!prev) {
+      assert(!next);
+      return;
+    }
+    prev->next = next;
+    if (next)
+      next->prev = prev;
+    prev = nullptr;
+    next = nullptr;
+  }
+  ~intr_list_node() { unlink_self(); }
 };
 
 /// Cannot be used for XRT objects because xrt also has global destructors
@@ -432,16 +465,39 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
 struct _pi_queue : ref_counted_base<_pi_queue> {
   ref_counted_ref<_pi_context> context_;
   ref_counted_ref<_pi_device> device_;
+  intr_list_node<_pi_event> event_list;
 
   _pi_queue(_pi_context *context, _pi_device *device)
       : context_{context}, device_{device} {}
+  /// iterator over all events in the list, it is safe to modify the provided
+  /// list node in func.
+  template<typename T>
+  void for_each_events(T func);
 };
 
 using pfn_notify = void (*)(pi_event event, pi_int32 eventCommandStatus,
                             void *userData);
 
-/// there are currently no async operation so event are noop
-struct _pi_event : ref_counted_base<_pi_event> {};
+struct _pi_event : ref_counted_base<_pi_event>, intr_list_node<_pi_event> {
+protected:
+  _pi_event(_pi_queue *q) { q->event_list.insert_next(this); }
+
+public:
+  _pi_event() {}
+  virtual void wait() {}
+  virtual bool is_done() { return true; }
+  virtual ~_pi_event() {}
+};
+
+template <typename T> void _pi_queue::for_each_events(T func) {
+  _pi_event *curr = event_list.next;
+  while (curr) {
+    /// Make sure we are not affected by changes to the node made by the function
+    _pi_event *next = curr->next;
+    func(curr);
+    curr = next;
+  }
+}
 
 /// Implementation of PI Program
 struct _pi_program : ref_counted_base<_pi_program> {
@@ -477,6 +533,11 @@ struct _pi_kernel : ref_counted_base<_pi_kernel> {
     return get_context()->devices_[0];
   }
 };
+
+void wait_on_events(const _pi_event* const* e, int count) {
+  for (int i = 0; i < count; i++)
+    const_cast<_pi_event*>(e[i])->wait();
+}
 
 // -------------------------------------------------------------
 // Helper types and functions
@@ -1264,13 +1325,13 @@ pi_result xrt_piQueueRelease(pi_queue command_queue) {
 
 pi_result xrt_piQueueFinish(pi_queue command_queue) {
   assert_valid_obj(command_queue);
-  /// All commands are executed greedily so this is a noop.
+  command_queue->for_each_events([](_pi_event *e) { e->wait(); });
   return PI_SUCCESS;
 }
 
 pi_result xrt_piQueueFlush(pi_queue command_queue) {
   assert_valid_obj(command_queue);
-  /// All commands are executed greedily so this is a noop.
+  command_queue->for_each_events([](_pi_event *e) { e->unlink_self(); });
   return PI_SUCCESS;
 }
 
@@ -1296,6 +1357,7 @@ pi_result xrt_piEnqueueMemBufferWrite(pi_queue command_queue, pi_mem buffer,
   assert_valid_objs(event_wait_list, num_events_in_wait_list);
   assert(ptr && size);
   assert(event);
+  wait_on_events(event_wait_list, num_events_in_wait_list);
   *event = make_ref_counted<_pi_event>().give_externally();
 
   buffer->run_when_mapped(command_queue->device_->get_native(), [=] {
@@ -1319,6 +1381,7 @@ pi_result xrt_piEnqueueMemBufferRead(pi_queue command_queue, pi_mem buffer,
   assert_valid_objs(event_wait_list, num_events_in_wait_list);
   assert(ptr && size);
   assert(event);
+  wait_on_events(event_wait_list, num_events_in_wait_list);
   *event = make_ref_counted<_pi_event>().give_externally();
 
   assert(buffer->is_mapped(command_queue->device_->get_native()));
@@ -1332,6 +1395,8 @@ pi_result xrt_piEnqueueMemBufferRead(pi_queue command_queue, pi_mem buffer,
 pi_result xrt_piEventsWait(uint32_t num_events, const pi_event *event_list) {
   assert_valid_objs(event_list, num_events);
   /// For now every operation is executed synchronously this is a no op
+
+  wait_on_events(event_list, num_events);
 
   return PI_SUCCESS;
 }
@@ -1396,10 +1461,23 @@ pi_result xrt_piEnqueueKernelLaunch(
   assert(work_dim == 1 && *global_work_offset == 0 && *global_work_size == 1 &&
          *local_work_size == 1 && "only support 1 single_task");
   assert(event);
-  *event = make_ref_counted<_pi_event>().give_externally();
+  struct _pi_event_kernel_launch : _pi_event {
+    ref_counted_ref<_pi_kernel> kernel;
+    bool done_flag = false;
+    _pi_event_kernel_launch(_pi_queue* q, ref_counted_ref<_pi_kernel> k) : _pi_event(q), kernel(k) {}
+    virtual void wait() override {
+      if (done_flag)
+        return;
+      REPRODUCE_MEMCALL(kernel->run_, wait);
+      done_flag = true;
+    }
+    virtual bool is_done() override {
+      return done_flag;
+    }
+  };
+  *event = make_ref_counted<_pi_event_kernel_launch>(command_queue, kernel).give_externally();
 
   REPRODUCE_MEMCALL(kernel->run_, start);
-  REPRODUCE_MEMCALL(kernel->run_, wait);
 
   return PI_SUCCESS;
 }
@@ -1811,6 +1889,8 @@ pi_result enqueue_rect_copy(bool is_read, pi_queue command_queue, pi_mem buffer,
   assert_valid_obj(command_queue);
   assert_valid_obj(buffer);
   assert_valid_objs(event_wait_list, num_events_in_wait_list);
+
+  wait_on_events(event_wait_list, num_events_in_wait_list);
 
   /// TODO add test where the offsets and sizes are not simple
   if (is_read)
