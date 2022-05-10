@@ -337,10 +337,10 @@ struct VXXIRDowngrader : public ModulePass {
 
   bool runOnModule(Module &M) override {
     resetByVal(M);
-    llvm::removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
-                         Attribute::ImmArg, Attribute::NoSync,
-                         Attribute::MustProgress, Attribute::NoUndef,
-                         Attribute::StructRet});
+    llvm::sycl::removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
+                                     Attribute::ImmArg, Attribute::NoSync,
+                                     Attribute::MustProgress,
+                                     Attribute::NoUndef, Attribute::StructRet});
     removeAnnotations(M);
     renameBasicBlocks(M);
     removeFreezeInst(M);

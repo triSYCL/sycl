@@ -28,6 +28,8 @@
 #include <string>
 #include <utility>
 
+#include "SYCLUtils.h"
+
 using namespace llvm;
 namespace {
 enum SPIRAddressSpace {
@@ -103,6 +105,8 @@ Optional<KernelProperties::MemBankSpec> getUserSpecifiedBank(
 
 namespace llvm {
 bool KernelProperties::isArgBuffer(Argument *Arg, bool SyclHLSFlow) {
+  if (sycl::isPipe(Arg))
+    return false;
   if (Arg->getType()->isPointerTy() &&
       (SyclHLSFlow ||
        Arg->getType()->getPointerAddressSpace() == SPIRAS_Global ||

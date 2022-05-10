@@ -19,6 +19,7 @@
 #include "SYCLUtils.h"
 
 namespace llvm {
+namespace sycl {
 
 /// Remove a list of attributes from an IR module.
 void removeAttributes(Module &M, ArrayRef<Attribute::AttrKind> Kinds) {
@@ -66,4 +67,60 @@ bool isKernelFunc(const Function *F) {
          F->hasFnAttribute("fpga.top.func");
 }
 
+constexpr const char *xilinx_pipe = "sycl_xilinx_pipe";
+
+bool isWritePipe(Argument *Arg) {
+  return Arg->getParent()
+      ->getAttributeAtIndex(Arg->getArgNo() + 1, sycl::xilinx_pipe)
+      .getValueAsString()
+      .startswith("write:");
+}
+
+bool isReadPipe(Argument *Arg) {
+  return Arg->getParent()
+      ->getAttributeAtIndex(Arg->getArgNo() + 1, sycl::xilinx_pipe)
+      .getValueAsString()
+      .startswith("read:");
+}
+
+StringRef getPipeID(Argument *Arg) {
+  assert(isPipe(Arg));
+  return Arg->getParent()
+      ->getAttributeAtIndex(Arg->getArgNo() + 1, sycl::xilinx_pipe)
+      .getValueAsString()
+      .split(':')
+      .second;
+}
+
+void makeReadPipe(Argument *Arg, StringRef Id) {
+  Arg->addAttr(
+      Attribute::get(Arg->getContext(), sycl::xilinx_pipe, "read:" + Id.str()));
+}
+
+void makeWritePipe(Argument *Arg, StringRef Id) {
+  Arg->addAttr(Attribute::get(Arg->getContext(), sycl::xilinx_pipe,
+                              "write:" + Id.str()));
+}
+
+void removePipeAnnotation(Argument *Arg) {
+  Arg->getParent()->removeParamAttr(Arg->getArgNo(), sycl::xilinx_pipe);
+}
+
+/// This function gives llvm::function arguments with no name
+/// a default name e.g. arg_0, arg_1..
+///
+/// This is because if your arguments have no name v++ will commit seppuku
+/// when generating XML. Perhaps it's possible to move this to the Clang
+/// Frontend by generating the name from the accessor/capture the arguments
+/// come from, but I believe it requires a special compiler invocation option
+/// to keep arg names from the frontend in the LLVM bitcode.
+void giveNameToArguments(Function &F) {
+  int Counter = 0;
+  for (auto &Arg : F.args()) {
+    if (!Arg.hasName())
+      Arg.setName("arg_" + Twine{Counter++});
+  }
+}
+
+} // namespace sycl
 } // namespace llvm
