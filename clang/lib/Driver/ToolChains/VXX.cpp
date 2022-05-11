@@ -275,10 +275,8 @@ void VXXToolChain::addClangTargetOptions(
     const llvm::opt::ArgList &DriverArgs,
     llvm::opt::ArgStringList &CC1Args,
     Action::OffloadKind DeviceOffloadingKind) const {
-  if (!HostTC) {
-    CC1Args.push_back("-emit-llvm");
+  if (!HostTC)
     return;
-  }
   HostTC->addClangTargetOptions(DriverArgs, CC1Args, DeviceOffloadingKind);
 
   assert(DeviceOffloadingKind == Action::OFK_SYCL &&

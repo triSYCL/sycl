@@ -16,6 +16,7 @@
 #include <iterator>
 #include <regex>
 #include <string>
+#include <vector>
 
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
@@ -261,16 +262,15 @@ public:
     annotateLoop(EnclosingLoop, Annot);
   }
 
-  void lowerArrayPartition(llvm::Value *V) {
+  void lowerAsSideEffect(llvm::Value *V, StringRef XclId) {
     auto *F = dyn_cast<Function>(V);
     if (!F)
       return;
 
     HasChanged = true;
     Function *SideEffect = Intrinsic::getDeclaration(&M, Intrinsic::sideeffect);
-    OperandBundleDef OpBundle("xlx_array_partition",
-                              ArrayRef<Value *>{F->getArg(0), F->getArg(1),
-                                                F->getArg(2), F->getArg(3)});
+    OperandBundleDef OpBundle(
+        XclId.str(), std::vector<Value *>{F->arg_begin(), F->arg_end()});
 
     Instruction *I = CallInst::Create(SideEffect, {}, {OpBundle});
     I->insertBefore(F->getEntryBlock().getTerminator());
@@ -344,7 +344,11 @@ public:
       if (AnnotKind == kindOf("xilinx_pipeline")) {
         lowerPipelineDecoration(CS);
       } else if (AnnotKind == kindOf("xilinx_partition_array")) {
-        lowerArrayPartition(getUnderlyingObject(CS->getAggregateElement(0u)));
+        lowerAsSideEffect(getUnderlyingObject(CS->getAggregateElement(0u)),
+                          "xlx_array_partition");
+      } else if (AnnotKind == kindOf("xilinx_bind_storage")) {
+        lowerAsSideEffect(getUnderlyingObject(CS->getAggregateElement(0u)),
+                          "xlx_bind_storage");
       } else if (AnnotKind == kindOf("xilinx_dataflow")) {
         lowerDataflowDecoration(CS);
       }

@@ -650,7 +650,7 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
 
   case llvm::Triple::vitis_ip:
     // Triple example: vitis_ip-xilinx-unknown
-    return new XilinxHLS64TargetInfo(Triple, Opts);
+    return new LinuxTargetInfo<XilinxHLS64TargetInfo>(Triple, Opts);
 
   case llvm::Triple::spir: {
     llvm::Triple HT(Opts.HostTriple);
