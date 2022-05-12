@@ -33,6 +33,7 @@
 #include "llvm/SYCL/KernelPropGen.h"
 #include "llvm/SYCL/KernelProperties.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/JSON.h"
@@ -135,16 +136,28 @@ struct KernelPropGen : public ModulePass {
         KernelProperties KProp(F, SyclHlsFlow);
         J.objectBegin();
         J.attribute("name", F.getName());
-        auto extraArgs = getExtraArgs(F);
-        if (extraArgs)
-          J.attribute("extra_args", extraArgs.getValue());
+        auto ExtraArgs = getExtraArgs(F);
+        if (ExtraArgs)
+          J.attribute("extra_args", ExtraArgs.getValue());
         J.attributeBegin("bundle_hw_mapping");
         J.arrayBegin();
         for (auto &Bundle : KProp.getMAXIBundles()) {
           J.objectBegin();
           J.attribute("maxi_bundle_name", Bundle.BundleName);
-          if (Bundle.TargetId.hasValue())
-            J.attribute("target_bank", formatv("DDR[{0}]", Bundle.TargetId.getValue()));
+          if (Bundle.TargetId.hasValue()) {
+            StringRef Prefix;
+            switch (Bundle.MemType) {
+              case KernelProperties::MemoryType::DDR:
+              Prefix = "DDR";
+              break;
+              case KernelProperties::MemoryType::HBM:
+              Prefix = "HBM";
+              break;
+              default:
+              llvm_unreachable("Default bundle should not appear here");
+            }
+            J.attribute("target_bank", formatv("{0}[{1}]", Prefix, Bundle.TargetId.getValue()));
+          }
           J.objectEnd();
         }
         J.arrayEnd();

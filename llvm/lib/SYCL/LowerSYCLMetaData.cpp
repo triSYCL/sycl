@@ -356,7 +356,7 @@ public:
                                llvm::Constant *PayloadCst) {
     auto Kind = KindInit->getRawDataValues();
     bool processed = false;
-    if (Kind == kindOf("xilinx_ddr_bank"))
+    if (Kind == kindOf("xilinx_ddr_bank") || Kind == kindOf("xilinx_hbm_bank"))
         return;
     auto* Payload = cast<ConstantStruct>(PayloadCst);
     if (AfterO3) { // Annotation that should wait after optimisation to be

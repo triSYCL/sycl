@@ -14,6 +14,7 @@
 #include "llvm/SYCL/KernelProperties.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Function.h"
@@ -22,7 +23,10 @@
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/Support/Casting.h"
+#include "llvm/Support/ErrorHandling.h"
+#include <optional>
 #include <string>
+#include <utility>
 
 using namespace llvm;
 namespace {
@@ -40,9 +44,9 @@ static StringRef kindOf(const char *Str) {
 
 /// Search for the annotation specifying user specified DDR bank for all
 /// arguments of F and populates UserSpecifiedDDRBanks accordingly
-void collectUserSpecifiedDDRBanks(
+void collectUserSpecifiedBanks(
     Function &F,
-    SmallDenseMap<llvm::AllocaInst *, unsigned, 16> &UserSpecifiedDDRBanks) {
+    SmallDenseMap<llvm::AllocaInst *, KernelProperties::MemBankSpec, 16> &UserSpecifiedBanks) {
   for (Instruction &I : instructions(F)) {
     auto *CB = dyn_cast<CallBase>(&I);
     if (!CB || CB->getIntrinsicID() != Intrinsic::var_annotation)
@@ -58,32 +62,37 @@ void collectUserSpecifiedDDRBanks(
     auto *Str = cast<ConstantDataArray>(
         cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(1)))
             ->getOperand(0));
-    if (Str->getRawDataValues() != kindOf("xilinx_ddr_bank"))
+    KernelProperties::MemoryType MemT;
+    if (Str->getRawDataValues() == kindOf("xilinx_ddr_bank"))
+      MemT = KernelProperties::MemoryType::DDR;
+    else if (Str->getRawDataValues() == kindOf("xilinx_hbm_bank"))
+      MemT = KernelProperties::MemoryType::HBM;
+    else
       continue;
     Constant *Args =
         (cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(4)))
              ->getInitializer());
     unsigned Bank;
-    if (auto *ZeroData = dyn_cast<ConstantAggregateZero>(Args))
+    if (isa<ConstantAggregateZero>(Args))
       Bank = 0;
     else
       Bank = cast<ConstantInt>(Args->getOperand(0))->getZExtValue();
 
-    UserSpecifiedDDRBanks[Alloca] = Bank;
+    UserSpecifiedBanks[Alloca] = {MemT, Bank};
   }
 }
 
 /// Check if the argument has a user specified DDR bank corresponding to it in
 /// UserSpecifiedDDRBank
-Optional<unsigned> getUserSpecifiedDDRBank(
+Optional<KernelProperties::MemBankSpec> getUserSpecifiedBank(
     Argument *Arg,
-    SmallDenseMap<llvm::AllocaInst *, unsigned, 16> &UserSpecifiedDDRBanks) {
+    SmallDenseMap<llvm::AllocaInst *, KernelProperties::MemBankSpec, 16> &UserSpecifiedBanks) {
   for (User *U : Arg->users()) {
     if (auto *Store = dyn_cast<StoreInst>(U))
       if (Store->getValueOperand() == Arg) {
-        auto Lookup = UserSpecifiedDDRBanks.find(dyn_cast_or_null<AllocaInst>(
+        auto Lookup = UserSpecifiedBanks.find(dyn_cast_or_null<AllocaInst>(
             getUnderlyingObject(Store->getPointerOperand())));
-        if (Lookup == UserSpecifiedDDRBanks.end())
+        if (Lookup == UserSpecifiedBanks.end())
           continue;
         return {Lookup->second};
       }
@@ -104,31 +113,40 @@ bool KernelProperties::isArgBuffer(Argument *Arg, bool SyclHLSFlow) {
 }
 
 KernelProperties::KernelProperties(Function &F, bool SyclHlsFlow) {
-  MAXIBundle DefaultBundle{};
-  DefaultBundle.BundleName = "default";
-  Bundles.push_back(std::move(DefaultBundle));
-  SmallDenseMap<llvm::AllocaInst *, unsigned, 16> UserSpecifiedDDRBanks{};
+  Bundles.push_back(MAXIBundle{{}, "default", MemoryType::DEFAULT});
+  SmallDenseMap<llvm::AllocaInst *, MemBankSpec, 16> UserSpecifiedBanks{};
   // Collect user specified DDR banks for F in DDRBanks
-  collectUserSpecifiedDDRBanks(F, UserSpecifiedDDRBanks);
+  collectUserSpecifiedBanks(F, UserSpecifiedBanks);
 
 
   // For each argument A of F which is a buffer, if it has no user specified DDR
   // Bank, default to 0
   for (auto &Arg : F.args()) {
     if (isArgBuffer(&Arg, SyclHlsFlow)) {
-      auto Assignment = getUserSpecifiedDDRBank(&Arg, UserSpecifiedDDRBanks);
+      auto Assignment = getUserSpecifiedBank(&Arg, UserSpecifiedBanks);
       if (Assignment.hasValue()) {
         auto ArgBank = Assignment.getValue();
-        auto LookUp = BundlesByIDName.find(ArgBank);
-        if (LookUp == BundlesByIDName.end()) {
+        auto& SubSpecIndex = BundlesBySpec[static_cast<size_t>(ArgBank.first)];
+        auto LookUp = SubSpecIndex.find(ArgBank.second);
+        if (LookUp == SubSpecIndex.end()) {
           // We need to create a bundle for this bank
-          std::string BundleName =
-              (ArgBank) ? std::string{formatv("ddrmem{0}", ArgBank)} : "gmem";
-          Bundles.push_back({BundleName, ArgBank});
+          StringRef Prefix;
+          switch (ArgBank.first) {
+            case MemoryType::DDR:
+            Prefix = "ddr";
+            break;
+            case MemoryType::HBM:
+            Prefix = "hb";
+            break;
+            default:
+            llvm_unreachable("Default type should not appear here");
+          }
+          std::string BundleName{formatv("{0}mem{1}", Prefix, ArgBank.second)};
+          Bundles.push_back({ArgBank.second, BundleName, ArgBank.first});
           unsigned BundleIdx = Bundles.size() - 1;
           BundlesByName[BundleName] = BundleIdx;
           BundleForArgument[&Arg] = BundleIdx;
-          BundlesByIDName[ArgBank] = BundleIdx;
+          SubSpecIndex[ArgBank.second] = BundleIdx;
         } else {
           BundleForArgument[&Arg] = LookUp->getSecond();
         }

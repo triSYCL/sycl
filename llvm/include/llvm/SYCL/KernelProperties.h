@@ -34,19 +34,28 @@ public:
   //
   // As of now, all arguments sharing the same memory bank share the 
   // same bundle.
+
+  enum struct MemoryType {
+      DEFAULT,
+      DDR,
+      HBM
+  };
+
+  using MemBankSpec = std::pair<MemoryType, unsigned>;
   struct MAXIBundle {
     // Represents one m_axi bundle and its associated memory bank.
     // This structure should evolve once we provide support for other 
     // m_axi memory such as HBM.
-    std::string BundleName; // Vitis bundle name
     Optional<unsigned> TargetId; // Associated DDR bank ID
+    std::string BundleName; // Vitis bundle name
+    MemoryType MemType;
     bool isDefaultBundle() const {
-      return BundleName == "default";
+      return MemType == MemoryType::DEFAULT;
     }
   };
 private:
   
-  SmallDenseMap<unsigned, unsigned, 4> BundlesByIDName;
+  std::array<SmallDenseMap<unsigned, unsigned, 4>, 3> BundlesBySpec;
   SmallDenseMap<Argument *, unsigned, 16> BundleForArgument;
   StringMap<unsigned> BundlesByName;
   SmallVector<MAXIBundle, 8> Bundles;
