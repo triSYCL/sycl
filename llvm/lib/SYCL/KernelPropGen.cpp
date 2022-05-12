@@ -147,10 +147,10 @@ struct KernelPropGen : public ModulePass {
           if (Bundle.TargetId.hasValue()) {
             StringRef Prefix;
             switch (Bundle.MemType) {
-              case KernelProperties::MemoryType::DDR:
+              case KernelProperties::MemoryType::ddr:
               Prefix = "DDR";
               break;
-              case KernelProperties::MemoryType::HBM:
+              case KernelProperties::MemoryType::hbm:
               Prefix = "HBM";
               break;
               default:

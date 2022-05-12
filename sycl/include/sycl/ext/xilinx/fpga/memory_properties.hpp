@@ -14,8 +14,9 @@
 
 __SYCL_INLINE_NAMESPACE(cl) {
 
-// TODO(lforg37): [Technical Debt]: Merge properties for hbm_bank and ddr_bank with a template type for the 
-//                                  type of memory bank. 
+// TODO(lforg37): [Technical Debt]: Merge properties for hbm_bank and ddr_bank
+//                                  with a template type for the type of memory
+//                                  bank.
 //
 
 namespace sycl {

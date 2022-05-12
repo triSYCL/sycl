@@ -29,32 +29,37 @@ class KernelProperties {
   // currently, retrieve annotation for DDR bank assignment to kernel arguments
 public:
   // In HLS, array-like arguments are grouped together in bundles.
-  // One bundle corresponds to one memory controller, and this is 
+  // One bundle corresponds to one memory controller, and this is
   // the bundle that can be associated to a specific DDR Bank/HBM.
   //
   // As of now, all arguments sharing the same memory bank share the 
   // same bundle.
 
   enum struct MemoryType {
-      DEFAULT,
-      DDR,
-      HBM
+      unspecified,
+      ddr,
+      hbm
   };
 
-  using MemBankSpec = std::pair<MemoryType, unsigned>;
+  struct MemBankSpec {
+    MemoryType MemType;
+    unsigned BankID;
+  };
+
   struct MAXIBundle {
-    // Represents one m_axi bundle and its associated memory bank.
-    // This structure should evolve once we provide support for other 
-    // m_axi memory such as HBM.
-    Optional<unsigned> TargetId; // Associated DDR bank ID
+    // Represents one m_axi bundle and its associated memory bank ID and Type.
+    Optional<unsigned> TargetId; // Associated bank ID
     std::string BundleName; // Vitis bundle name
     MemoryType MemType;
     bool isDefaultBundle() const {
-      return MemType == MemoryType::DEFAULT;
+      return MemType == MemoryType::unspecified;
     }
   };
+
 private:
   
+  // BundlesBySpec[MemType][MemID] contains the index of the 
+  // Bundle of the bank MemType:MemID in Bundles
   std::array<SmallDenseMap<unsigned, unsigned, 4>, 3> BundlesBySpec;
   SmallDenseMap<Argument *, unsigned, 16> BundleForArgument;
   StringMap<unsigned> BundlesByName;

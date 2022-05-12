@@ -64,9 +64,9 @@ void collectUserSpecifiedBanks(
             ->getOperand(0));
     KernelProperties::MemoryType MemT;
     if (Str->getRawDataValues() == kindOf("xilinx_ddr_bank"))
-      MemT = KernelProperties::MemoryType::DDR;
+      MemT = KernelProperties::MemoryType::ddr;
     else if (Str->getRawDataValues() == kindOf("xilinx_hbm_bank"))
-      MemT = KernelProperties::MemoryType::HBM;
+      MemT = KernelProperties::MemoryType::hbm;
     else
       continue;
     Constant *Args =
@@ -113,40 +113,40 @@ bool KernelProperties::isArgBuffer(Argument *Arg, bool SyclHLSFlow) {
 }
 
 KernelProperties::KernelProperties(Function &F, bool SyclHlsFlow) {
-  Bundles.push_back(MAXIBundle{{}, "default", MemoryType::DEFAULT});
+  Bundles.push_back(MAXIBundle{{}, "default", MemoryType::unspecified});
   SmallDenseMap<llvm::AllocaInst *, MemBankSpec, 16> UserSpecifiedBanks{};
   // Collect user specified DDR banks for F in DDRBanks
   collectUserSpecifiedBanks(F, UserSpecifiedBanks);
 
 
-  // For each argument A of F which is a buffer, if it has no user specified DDR
-  // Bank, default to 0
+  // For each argument A of F which is a buffer, if it has no user specified
+  // assigned Bank, default to "default" bundle
   for (auto &Arg : F.args()) {
     if (isArgBuffer(&Arg, SyclHlsFlow)) {
       auto Assignment = getUserSpecifiedBank(&Arg, UserSpecifiedBanks);
       if (Assignment.hasValue()) {
         auto ArgBank = Assignment.getValue();
-        auto& SubSpecIndex = BundlesBySpec[static_cast<size_t>(ArgBank.first)];
-        auto LookUp = SubSpecIndex.find(ArgBank.second);
+        auto& SubSpecIndex = BundlesBySpec[static_cast<size_t>(ArgBank.MemType)];
+        auto LookUp = SubSpecIndex.find(ArgBank.BankID);
         if (LookUp == SubSpecIndex.end()) {
           // We need to create a bundle for this bank
           StringRef Prefix;
-          switch (ArgBank.first) {
-            case MemoryType::DDR:
+          switch (ArgBank.MemType) {
+            case MemoryType::ddr:
             Prefix = "ddr";
             break;
-            case MemoryType::HBM:
+            case MemoryType::hbm:
             Prefix = "hb";
             break;
             default:
             llvm_unreachable("Default type should not appear here");
           }
-          std::string BundleName{formatv("{0}mem{1}", Prefix, ArgBank.second)};
-          Bundles.push_back({ArgBank.second, BundleName, ArgBank.first});
+          std::string BundleName{formatv("{0}mem{1}", Prefix, ArgBank.BankID)};
+          Bundles.push_back({ArgBank.BankID, BundleName, ArgBank.MemType});
           unsigned BundleIdx = Bundles.size() - 1;
           BundlesByName[BundleName] = BundleIdx;
           BundleForArgument[&Arg] = BundleIdx;
-          SubSpecIndex[ArgBank.second] = BundleIdx;
+          SubSpecIndex[ArgBank.BankID] = BundleIdx;
         } else {
           BundleForArgument[&Arg] = LookUp->getSecond();
         }
