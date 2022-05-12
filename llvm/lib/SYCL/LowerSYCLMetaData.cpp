@@ -53,6 +53,8 @@
 
 #include "SYCLUtils.h"
 
+#define DEBUG_TYPE "lower-sycl-md"
+
 using namespace llvm;
 
 namespace {
@@ -406,6 +408,9 @@ public:
     using pipe_creation_rec_t = std::pair<llvm::Function *, llvm::CallBase *>;
     llvm::SmallVector<pipe_creation_rec_t> PipeCreations;
 
+    using CallPaths = SmallVector<SmallVector<Function*>>;
+    SmallDenseMap<Function*, CallPaths, 8> CallPathsCache;
+
     LocalAnnotationVisitor(LSMDState &P) : Parent(P), Ctx(Parent.Ctx), Builder(Ctx) {}
 
     void visitCallBase(CallBase &CB) {
@@ -491,44 +496,37 @@ public:
       auto *Usage = *(CB->user_begin());
       CallBase *UsageCb = dyn_cast<CallBase>(Usage);
       assert(UsageCb != nullptr);
-      auto *PipeOp = UsageCb->getArgOperand(1);
-      llvm::Type *PipeType = nullptr;
-      if (auto *Alloca = dyn_cast<AllocaInst>(PipeOp)) {
-        PipeType = Alloca->getAllocatedType();
-      }
-      assert(PipeType != nullptr);
+      llvm::Type *PipeType =
+          UsageCb->getArgOperand(1)->getType()->getPointerElementType();
       return PipeType;
     }
 
-    llvm::Function *createNewKernelEmpty(llvm::Function *Kernel,
-                                         llvm::ArrayRef<CallBase *> Creations) {
-      llvm::SmallVector<llvm::Type *> ExtraTypes;
-
-      for (auto *CB : Creations)
-        ExtraTypes.push_back(detectPipeType(CB));
-
-      llvm::FunctionType *KernelType = Kernel->getFunctionType();
-      llvm::SmallVector<llvm::Type *> KernelArgs;
-      for (auto *Type : KernelType->params())
-        KernelArgs.push_back(Type);
+    llvm::Function *
+    duplicateFunctionWithExtraArgs(llvm::Function *Func,
+                                   ArrayRef<Type *> ExtraTypes,
+                                   llvm::ValueToValueMapTy& ValMap) {
+      llvm::FunctionType *FuncType = Func->getFunctionType();
+      llvm::SmallVector<llvm::Type *> FuncArgs;
+      for (auto *Type : FuncType->params())
+        FuncArgs.push_back(Type);
       for (auto *Type : ExtraTypes)
-        KernelArgs.push_back(PointerType::get(Type, 0));
-      auto *NewKernelType =
-          FunctionType::get(KernelType->getReturnType(), KernelArgs, false);
-#ifndef NDEBUG
-      // As of now we do not handle non top-level kernels
-      for (auto *UserPtr : Kernel->users()) {
-        auto *Val = dyn_cast<CallBase>(UserPtr);
-        assert(!Val);
-      }
-#endif
+        FuncArgs.push_back(PointerType::get(Type, 0));
+      auto *NewFuncType =
+          FunctionType::get(FuncType->getReturnType(), FuncArgs, false);
 
-      std::string Kname = Kernel->getName().str();
-      Kernel->setName(Kname + ".old");
-      auto *NewKernel = Function::Create(NewKernelType, Kernel->getLinkage(),
-                                         Kname, Kernel->getParent());
-      sycl::giveNameToArguments(*NewKernel);
-      return NewKernel;
+      std::string Fname = Func->getName().str();
+      Func->setName(Fname + ".old");
+      auto *NewFunc = Function::Create(NewFuncType, Func->getLinkage(),
+                                         Fname, Func->getParent());
+      sycl::giveNameToArguments(*NewFunc);
+
+      for (size_t i = 0; i < Func->arg_size(); ++i)
+        ValMap.insert({Func->getArg(i), NewFunc->getArg(i)});
+
+      llvm::SmallVector<llvm::ReturnInst *> RetInst;
+      llvm::CloneFunctionInto(NewFunc, Func, ValMap,
+                              CloneFunctionChangeType::GlobalChanges, RetInst);
+      return NewFunc;
     }
 
     void insertStreamInterfaceSideEffect(Argument *Pipe) {
@@ -542,25 +540,62 @@ public:
       I->insertBefore(&*Pipe->getParent()->getEntryBlock().begin());
     }
 
-    void handlePipeCreations(llvm::Function *Kernel,
-                             llvm::ArrayRef<CallBase *> Creations) {
-      /// TODO Handle more complicated cases:
-      /// For now we only handle cases:
-      /// - where everything is self contained in one function (kernel argument, creation, use)
-      /// - the pipes are easy to track, not phi inst on pipes.
+    /// This is not used yet, it exist for the interprocedural rewriting
+    const CallPaths& getCallPaths(llvm::Function *Func) {
+      CallPaths& Res = CallPathsCache[Func];
 
-      auto *NewKernel = createNewKernelEmpty(Kernel, Creations);
+      /// valid CallPaths should at lease contain one path
+      if (!Res.empty())
+        return Res;
+      SmallVector<Function*> CurrStack;
+      llvm::DenseSet<Function*> UniqueEdge;
+      std::deque<Function*> ToBeProcessed;
+      ToBeProcessed.push_front(Func);
+      while (!ToBeProcessed.empty()) {
+        Function* Curr = ToBeProcessed.front();
+        ToBeProcessed.pop_front();
+        if (!Curr) {
+          CurrStack.pop_back();
+          continue;
+        }
+        CurrStack.push_back(Curr);
+        if (sycl::isKernelFunc(Curr)) {
+          LLVM_DEBUG(llvm::dbgs() << DEBUG_TYPE << ": call path: ";
+                     llvm::dbgs() << CurrStack.front()->getName();
+                     for (auto *Func
+                          : ArrayRef<Function *>(CurrStack).drop_front())
+                         llvm::dbgs()
+                     << " <- " << Func->getName());
+          Res.push_back(CurrStack);
+          continue;
+        }
+        UniqueEdge.clear();
+        for (User* user : Curr->users())
+          if (auto* Inst = dyn_cast<Instruction>(user))
+            if (UniqueEdge.insert(Inst->getFunction()).second)
+              ToBeProcessed.push_front(Inst->getFunction());
+        ToBeProcessed.push_back(nullptr);
+      }
+      assert(CurrStack.size() == 1);
+      assert(CurrStack[0] == Func);
+      return Res;
+    }
+
+    void handlePipeCreations(llvm::Function *Func,
+                             llvm::ArrayRef<CallBase *> Creations) {
+      assert(sycl::isKernelFunc(Func) && "interprocedural rewrites are not yet supported");
+
+      llvm::SmallVector<llvm::Type *> ExtraTypes;
+
+      for (auto *CB : Creations)
+        ExtraTypes.push_back(detectPipeType(CB));
 
       llvm::ValueToValueMapTy ValMap;
-      for (size_t i = 0; i < Kernel->arg_size(); ++i)
-        ValMap.insert({Kernel->getArg(i), NewKernel->getArg(i)});
 
-      llvm::SmallVector<llvm::ReturnInst *> RetInst;
-      llvm::CloneFunctionInto(NewKernel, Kernel, ValMap,
-                              CloneFunctionChangeType::GlobalChanges, RetInst);
+      auto *NewFunc = duplicateFunctionWithExtraArgs(Func, ExtraTypes, ValMap);
 
       for (size_t i = 0; i < Creations.size(); ++i) {
-        Argument *Pipe = NewKernel->getArg(Kernel->arg_size() + i);
+        Argument *Pipe = NewFunc->getArg(Func->arg_size() + i);
         insertStreamInterfaceSideEffect(Pipe);
         auto OldCreate = Creations[i];
         auto *newCB = cast<CallBase>(ValMap[OldCreate]);
@@ -587,7 +622,7 @@ public:
         newCB->eraseFromParent();
       }
 
-      Kernel->eraseFromParent();
+      Func->eraseFromParent();
     }
 
     void handlePipeCreations() {
