@@ -10,12 +10,9 @@
 // sycl::detail::BackendInput and sycl::detail::BackendReturn specialization for
 // the XRT backend.
 //
-// the the supported conversions are:
-//  sycl::device <-> xrt::device:
-//    the interop type is xclDeviceHandle aka void* but
-//    xrt::device is convertible implicitly to an xclDeviceHandle and the
-//    conversation from void* to xrt::device is explicit
-//  sycl::kernel <-> xrt::kernel:
+// the supported conversions are:
+//  sycl::device <-> xrt::device
+//  sycl::kernel <-> xrt::kernel
 //
 // sycl::queue, sycl::context, sycl::platform and sycl::event have no XRT
 // equivalents so they are not supported
@@ -29,8 +26,8 @@
 #include <CL/sycl/kernel.hpp>
 #include <CL/sycl/kernel_bundle.hpp>
 
-/// there is no cyclic dependencies. but the XRT includes path is not configured
-/// by the CMake of the sycl runtime (only the pi_xrt) while compiling this
+/// There is no cyclic dependencies, but the XRT include path is not configured
+/// by the CMake of the SYCL runtime (only the pi_xrt is) while compiling this
 /// file.
 namespace xrt {
 struct device;

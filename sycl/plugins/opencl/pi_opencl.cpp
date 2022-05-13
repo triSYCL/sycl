@@ -1399,7 +1399,7 @@ pi_result piextKernelGetNativeHandle(pi_kernel kernel,
 pi_result piTearDown(void *PluginParameter) {
   (void)PluginParameter;
 
-  /// cleanup the potential left-overs from the HLD simulator
+  /// cleanup the potential left-overs from the hw_emu simulator
   terminate_xsimk();
   return PI_SUCCESS;
 }

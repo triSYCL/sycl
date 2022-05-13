@@ -42,6 +42,8 @@ template <typename From>
 typename std::enable_if<!std::is_reference_v<From>, pi_native_handle>::type
 to_native_handle(From &&from) {
   static_assert(sizeof(From) <= sizeof(pi_native_handle), "doesn't fit in pi_native_handle");
+  // It can be either a static_cast or a reinterpret_cast depending on From and
+  // it is intended this way
   return (pi_native_handle)from;
 }
 

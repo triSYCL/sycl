@@ -16,8 +16,8 @@
 #endif
 
 /// XRT has a bunch of very noisy warnings we need to suppress.
-/// XRT can be found as OpenCL implementation so we suppress warning on both XRT
-/// native header and OpenCL headers
+/// XRT can be included also as an OpenCL header implementation, so we suppress
+/// warning on both XRT native header and OpenCL headers
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wnested-anon-types"
 #pragma clang diagnostic ignored "-Wgnu-anonymous-struct"
@@ -65,7 +65,7 @@
 
 #pragma clang diagnostic pop
 
-// Most of functions in the API exists but do not have an implementation so most
+// Most of the functions in the API exist but do not have an implementation, so most
 // parameters are not used and it is expected
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -99,11 +99,9 @@ public:
   ~ref_counted_base() { assert(refCount_ == 0); }
 };
 
-template <typename...> using void_t = void;
-
 /// Will increment ref count if needed by the object
 template <typename T>
-void_t<decltype(std::declval<T>().increment_reference_count())>
+std::void_t<decltype(std::declval<T>().increment_reference_count())>
 incr_ref_count(T *value) {
   assert(value);
   value->increment_reference_count();
@@ -112,7 +110,7 @@ void incr_ref_count(void *) {}
 
 /// Will decrement ref count if needed by the object
 template <typename T>
-void_t<decltype(std::declval<T>().decrement_reference_count())>
+std::void_t<decltype(std::declval<T>().decrement_reference_count())>
 decr_ref_count(T *value) {
   assert(value);
   value->decrement_reference_count();
@@ -214,10 +212,7 @@ ref_counted_ref<base> make_ref_counted(Args &&...args) {
 template <typename T> struct unique {
 private:
   /// Storage for the instance
-  static T *&get_self() {
-    static T *self = nullptr;
-    return self;
-  }
+  inline static T *self = nullptr;
 
 public:
   unique() = default;
@@ -226,27 +221,29 @@ public:
 
   /// Return a new instance or the currently live instance
   template <typename... Ts> static ref_counted_ref<T> get(Ts &&...ts) {
-    if (!get_self()) {
+    if (!self) {
       auto res = make_ref_counted<T>(std::forward<Ts>(ts)...);
-      get_self() = res.get();
+      self = res.get();
       return res;
     }
-    return get_self();
+    return self;
   }
   ~unique() {
     /// Make null such that the next request will rebuild
-    get_self() = nullptr;
+    self = nullptr;
   }
 };
 
-/// Intrusive list base class
+/// Intrusive list mix-in
 template <typename T> struct intr_list_node {
   intr_list_node<T> *prev = nullptr;
   T *next = nullptr;
+
   void verify_invariance() {
     assert(!prev || prev->next == this);
     assert(!next || next->prev == this);
   }
+
   void insert_next(T *other) {
     verify_invariance();
     assert(other->next == nullptr);
@@ -259,6 +256,7 @@ template <typename T> struct intr_list_node {
     next->verify_invariance();
     verify_invariance();
   }
+
   void unlink_self() {
     verify_invariance();
     if (!prev) {
@@ -271,6 +269,7 @@ template <typename T> struct intr_list_node {
     prev = nullptr;
     next = nullptr;
   }
+
   ~intr_list_node() { unlink_self(); }
 };
 
@@ -367,7 +366,7 @@ public:
   unsigned get_num_device() { return devices_.size(); }
   ref_counted_ref<_pi_device> get_device(unsigned idx) { return devices_[idx]; }
   /// Add a device if it inst't already in the list
-  template <typename... Ts> ref_counted_ref<_pi_device> add_device(Ts &&...ts) {
+  template <typename... Ts> ref_counted_ref<_pi_device> make_device(Ts &&...ts) {
     auto new_dev = REPRODUCE_CALL(xrt::device, std::forward<Ts>(ts)...);
     auto bdf = new_dev.template get_info<xrt::info::device::bdf>();
     for (auto *dev : devices_)
@@ -401,8 +400,8 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
   } mem;
 
   /// Writes cannot be performed on a buffer until the xclbin has been loaded.
-  /// But SYCL can request som writes before loading the xclbin so we just
-  /// enqueue them.
+  /// But SYCL can request some writes before loading the xclbin so we just
+  /// enqueue them to process them later.
   workqueue pending_cmds;
 
   _pi_mem(_pi_context *ctx, _mem m) : context_(ctx), mem(m) {}
@@ -718,7 +717,7 @@ pi_result xrt_piDevicesGet(pi_platform platform, pi_device_type device_type,
 
     // If the platform is empty add a device
     if (platform->get_num_device() == 0)
-      new_device = platform->add_device(0);
+      new_device = platform->make_device(0);
 
     for (size_t i = 0; i < platform->get_num_device(); ++i)
       devices[i] = platform->get_device(i).give_externally();
@@ -1178,7 +1177,7 @@ pi_result xrt_piextDeviceCreateWithNativeHandle(pi_native_handle handle,
   /// the SYCL runtime almost always provide a null platform
   assert(res);
   *res = _pi_platform::get()
-             ->add_device(from_native_handle<xrt::device &>(handle))
+             ->make_device(from_native_handle<xrt::device &>(handle))
              .give_externally();
   return PI_SUCCESS;
 }
@@ -2113,7 +2112,7 @@ pi_result xrt_piextUSMGetMemAllocInfo(pi_context context, const void *ptr,
 
 pi_result xrt_piTearDown(void *) {
 
-  /// cleanup the potential left-overs from the HLD simulator
+  /// cleanup the potential left-overs from the hw_emu simulator
   terminate_xsimk();
 
   return PI_SUCCESS;
