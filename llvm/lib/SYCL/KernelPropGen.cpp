@@ -127,6 +127,7 @@ struct KernelPropGen : public ModulePass {
     StringRef Arg;
   };
   struct PipeProp {
+    int Depth = -1;
     PipeEndpoint write;
     PipeEndpoint read;
   };
@@ -145,6 +146,10 @@ struct KernelPropGen : public ModulePass {
             assert(mapEndPoint.Arg.empty() && mapEndPoint.Kernel.empty() &&
                    "multiple reader or writers");
             mapEndPoint = endPoint;
+            if (Prop.Depth == -1)
+              Prop.Depth = sycl::getPipeDepth(&Arg);
+            assert(sycl::getPipeDepth(&Arg) == Prop.Depth &&
+                   "read & write depth not matching");
           }
   }
 
@@ -166,6 +171,7 @@ struct KernelPropGen : public ModulePass {
       J.attribute("writer_arg", Elem.second.write.Arg);
       J.attribute("reader_kernel", Elem.second.read.Kernel);
       J.attribute("reader_arg", Elem.second.read.Arg);
+      J.attribute("depth", Elem.second.Depth);
       J.objectEnd();
     }
     J.arrayEnd();

@@ -353,7 +353,8 @@ public:
     if (AnnotKind == kindOf("xilinx_kernel_property")) {
       dispatchKernelPropertyToHandler(CS);
     } else if (AnnotKind == kindOf("vitis_kernel")) {
-      markKernel(CS);
+      sycl::annotateKernelFunc(
+          cast<Function>(getUnderlyingObject(CS->getAggregateElement(0u))));
     } else if (!AfterO3) { // Annotations that should be lowered before -O3
       if (AnnotKind == kindOf("xilinx_pipeline")) {
         lowerPipelineDecoration(CS);
@@ -408,8 +409,13 @@ public:
     using pipe_creation_rec_t = std::pair<llvm::Function *, llvm::CallBase *>;
     llvm::SmallVector<pipe_creation_rec_t> PipeCreations;
 
-    using CallPaths = SmallVector<SmallVector<Function*>>;
-    SmallDenseMap<Function*, CallPaths, 8> CallPathsCache;
+    /// Map the original version of a function to its most recent version.
+    /// it should be used via getMostRecent
+    SmallDenseMap<Function*, Function*> MostRecentFunc;
+
+    /// Map a GlobalValue* representing a 
+    SmallDenseMap<std::pair<GlobalValue*, Function*>, Argument*> PipeInFuncMap;
+    SmallVector<Function*> ToDelete;
 
     LocalAnnotationVisitor(LSMDState &P) : Parent(P), Ctx(Parent.Ctx), Builder(Ctx) {}
 
@@ -435,6 +441,14 @@ public:
               ->getInitializer());
       Parent.dispatchLocalAnnotation(CB, cast<ConstantDataArray>(KindInit),
                                      Payload);
+    }
+
+    Function*& getMostRecent(Function* Func) {
+      assert(Func);
+      Function*& res = MostRecentFunc[Func];
+      if (!res)
+        res = Func;
+      return res;
     }
 
     std::string getTypeStr(Type* T) {
@@ -502,9 +516,10 @@ public:
     }
 
     llvm::Function *
-    duplicateFunctionWithExtraArgs(llvm::Function *Func,
+    duplicateFunctionWithExtraArgs(llvm::Function *Orig, llvm::Function *Func,
                                    ArrayRef<Type *> ExtraTypes,
-                                   llvm::ValueToValueMapTy& ValMap) {
+                                   llvm::ValueToValueMapTy &ValMap) {
+      assert(getMostRecent(Orig) == Func);
       llvm::FunctionType *FuncType = Func->getFunctionType();
       llvm::SmallVector<llvm::Type *> FuncArgs;
       for (auto *Type : FuncType->params())
@@ -516,8 +531,8 @@ public:
 
       std::string Fname = Func->getName().str();
       Func->setName(Fname + ".old");
-      auto *NewFunc = Function::Create(NewFuncType, Func->getLinkage(),
-                                         Fname, Func->getParent());
+      auto *NewFunc = Function::Create(NewFuncType, Func->getLinkage(), Fname,
+                                       Func->getParent());
       sycl::giveNameToArguments(*NewFunc);
 
       for (size_t i = 0; i < Func->arg_size(); ++i)
@@ -526,12 +541,11 @@ public:
       llvm::SmallVector<llvm::ReturnInst *> RetInst;
       llvm::CloneFunctionInto(NewFunc, Func, ValMap,
                               CloneFunctionChangeType::GlobalChanges, RetInst);
+      MostRecentFunc[Orig] = NewFunc;
       return NewFunc;
     }
 
     void insertStreamInterfaceSideEffect(Argument *Pipe) {
-      // call void @llvm.sideeffect() #1 [
-      // "stream_interface"(%"class.hls::stream<int, 0>"* %generator_channel) ]
       Function *SideEffect = Intrinsic::getDeclaration(
           Pipe->getParent()->getParent(), Intrinsic::sideeffect);
       OperandBundleDef OpBundle("stream_interface", ArrayRef<Value *>{Pipe});
@@ -540,66 +554,78 @@ public:
       I->insertBefore(&*Pipe->getParent()->getEntryBlock().begin());
     }
 
-    /// This is not used yet, it exist for the interprocedural rewriting
-    const CallPaths& getCallPaths(llvm::Function *Func) {
-      CallPaths& Res = CallPathsCache[Func];
-
-      /// valid CallPaths should at lease contain one path
-      if (!Res.empty())
-        return Res;
-      SmallVector<Function*> CurrStack;
-      llvm::DenseSet<Function*> UniqueEdge;
-      std::deque<Function*> ToBeProcessed;
-      ToBeProcessed.push_front(Func);
+    void traverseCallGraph(llvm::Function *Func,
+                                  function_ref<void(CallBase *)> OnCall = nullptr,
+                                  function_ref<void(Function *)> OnFunc = nullptr) {
+      llvm::DenseSet<Function *> UniqueEdge;
+      SmallVector<Function *> ToBeProcessed;
+      ToBeProcessed.push_back(Func);
       while (!ToBeProcessed.empty()) {
-        Function* Curr = ToBeProcessed.front();
-        ToBeProcessed.pop_front();
-        if (!Curr) {
-          CurrStack.pop_back();
-          continue;
-        }
-        CurrStack.push_back(Curr);
+        Function *Curr = ToBeProcessed.pop_back_val();
+        if (OnFunc && Curr != Func)
+          OnFunc(Curr);
         if (sycl::isKernelFunc(Curr)) {
-          LLVM_DEBUG(llvm::dbgs() << DEBUG_TYPE << ": call path: ";
-                     llvm::dbgs() << CurrStack.front()->getName();
-                     for (auto *Func
-                          : ArrayRef<Function *>(CurrStack).drop_front())
-                         llvm::dbgs()
-                     << " <- " << Func->getName());
-          Res.push_back(CurrStack);
           continue;
         }
         UniqueEdge.clear();
-        for (User* user : Curr->users())
-          if (auto* Inst = dyn_cast<Instruction>(user))
-            if (UniqueEdge.insert(Inst->getFunction()).second)
-              ToBeProcessed.push_front(Inst->getFunction());
-        ToBeProcessed.push_back(nullptr);
+        for (User *user : llvm::make_early_inc_range(Curr->users()))
+          if (auto *CB = dyn_cast<CallBase>(user)) {
+            if (UniqueEdge.insert(CB->getFunction()).second)
+              ToBeProcessed.push_back(CB->getFunction());
+            if (OnCall)
+              OnCall(CB);
+          }
       }
-      assert(CurrStack.size() == 1);
-      assert(CurrStack[0] == Func);
-      return Res;
     }
 
-    void handlePipeCreations(llvm::Function *Func,
+    void handlePipeCreations(llvm::Function *Orig,
                              llvm::ArrayRef<CallBase *> Creations) {
-      assert(sycl::isKernelFunc(Func) && "interprocedural rewrites are not yet supported");
+      /// Most of the implementation for interprocedural rewrites is done but
+      /// since it is rarely useful and not properly tested it is disable
+      assert(sycl::isKernelFunc(Orig) && "interprocedural rewrites are not yet supported");
+      Function* Func = getMostRecent(Orig);
+
+      struct PipeInfo {
+        bool isRead;
+        int Depth;
+        std::string ID;
+      };
 
       llvm::SmallVector<llvm::Type *> ExtraTypes;
+      llvm::SmallVector<PipeInfo> PipeInfos;
+
+      auto maybeAnnotatePipe = [&](int idx, Argument *Pipe) {
+        if (sycl::isKernelFunc(Pipe->getParent())) {
+          insertStreamInterfaceSideEffect(Pipe);
+          PipeInfos[idx];
+          if (PipeInfos[idx].isRead)
+            sycl::annotateReadPipe(Pipe, PipeInfos[idx].ID,
+                                   PipeInfos[idx].Depth);
+          else
+            sycl::annotateWritePipe(Pipe, PipeInfos[idx].ID,
+                                    PipeInfos[idx].Depth);
+        }
+      };
 
       for (auto *CB : Creations)
         ExtraTypes.push_back(detectPipeType(CB));
 
       llvm::ValueToValueMapTy ValMap;
-
-      auto *NewFunc = duplicateFunctionWithExtraArgs(Func, ExtraTypes, ValMap);
+      auto *NewFunc = duplicateFunctionWithExtraArgs(Orig, Func, ExtraTypes, ValMap);
 
       for (size_t i = 0; i < Creations.size(); ++i) {
         Argument *Pipe = NewFunc->getArg(Func->arg_size() + i);
-        insertStreamInterfaceSideEffect(Pipe);
+        if (sycl::isKernelFunc(Func))
+          insertStreamInterfaceSideEffect(Pipe);
         auto OldCreate = Creations[i];
         auto *newCB = cast<CallBase>(ValMap[OldCreate]);
-        std::string PipeID = OldCreate->getArgOperand(0)->getName().str();
+        PipeInfo PInfo;
+        GlobalVariable* PipeStorage = cast<GlobalVariable>(OldCreate->getArgOperand(0));
+        PInfo.ID = PipeStorage->getName().str();
+        PInfo.Depth = cast<ConstantInt>(
+                        cast<ConstantStruct>(PipeStorage->getInitializer())
+                            ->getOperand(2))
+                        ->getSExtValue();
         Builder.SetInsertPoint(newCB);
         bool hasRead = false;
         bool hasWrite = false;
@@ -614,15 +640,58 @@ public:
             replaceWritePipe(CB, Pipe);
           }
           assert(hasRead ^ hasWrite && "cannot read an write in the same pipe in the same kernel");
-          if (hasRead)
-            sycl::makeReadPipe(Pipe, PipeID);
-          else
-            sycl::makeWritePipe(Pipe, PipeID);
+          PInfo.isRead = hasRead;
+          PipeInfos.push_back(PInfo);
+          maybeAnnotatePipe(i, Pipe);
         }
         newCB->eraseFromParent();
       }
 
-      Func->eraseFromParent();
+      /// Rewrite the all function and call that can transitively call Func
+      /// Collection of Nodes to modify
+      SmallVector<Function*> FunctionToDuplicate;
+      /// Collection of Edges to modify
+      SmallVector<CallBase*> CallsToRewrite;
+
+      /// Fill the collections
+      traverseCallGraph(
+          Func, [&](CallBase *CB) { CallsToRewrite.push_back(CB); },
+          [&](Function *Caller) { FunctionToDuplicate.push_back(Caller); });
+
+      /// Duplicate the Functions
+      for (Function *Caller : FunctionToDuplicate) {
+        Function *newCaller = getMostRecent(Caller);
+
+        newCaller = duplicateFunctionWithExtraArgs(Caller, newCaller,
+                                                   ExtraTypes, ValMap);
+        for (unsigned i = 0; i < ExtraTypes.size(); i++) {
+          Argument *Arg =
+              newCaller->getArg(i + newCaller->arg_size() - ExtraTypes.size());
+          maybeAnnotatePipe(i, Arg);
+        }
+        ToDelete.push_back(Caller);
+      }
+
+      /// Edits the Calls
+      for (CallBase *CB : CallsToRewrite) {
+        Value *Val = ValMap[CB];
+        auto *CBInNewFunc = cast<CallBase>(Val);
+        Function *newCaller = getMostRecent(CB->getFunction());
+        Function *newCallee = getMostRecent(CB->getCalledFunction());
+        SmallVector<Value *> newParam(CB->arg_begin(), CB->arg_end());
+        for (unsigned i = 0; i < ExtraTypes.size(); i++) {
+          Argument *Arg =
+              newCaller->getArg(i + newCaller->arg_size() - ExtraTypes.size());
+          newParam.push_back(Arg);
+        }
+
+        Builder.SetInsertPoint(CBInNewFunc);
+        auto *newCB = Builder.CreateCall(newCallee, newParam);
+        CBInNewFunc->replaceAllUsesWith(newCB);
+        CBInNewFunc->eraseFromParent();
+      }
+
+      ToDelete.push_back(Func);
     }
 
     void handlePipeCreations() {
@@ -643,6 +712,11 @@ public:
         }
       }
       handlePipeCreations(cur_kernel, collection);
+
+      /// This will not delete the old call graph but make it such that i
+      /// can be deleted by global dce
+      for (auto *F : ToDelete)
+        sycl::removeKernelFuncAnnotation(F);
     }
   };
 

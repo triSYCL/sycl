@@ -11,10 +11,12 @@
 //
 // ===---------------------------------------------------------------------===//
 
+#include "llvm/ADT/StringExtras.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Support/FormatVariadic.h"
 
 #include "SYCLUtils.h"
 
@@ -67,43 +69,75 @@ bool isKernelFunc(const Function *F) {
          F->hasFnAttribute("fpga.top.func");
 }
 
-constexpr const char *xilinx_pipe = "sycl_xilinx_pipe";
+void annotateKernelFunc(Function *F) {
+  F->addFnAttr("fpga.top.func", F->getName());
+  F->addFnAttr("fpga.demangled.name", F->getName());
+  F->setCallingConv(CallingConv::C);
+  F->setLinkage(llvm::GlobalValue::ExternalLinkage);
+}
+
+void removeKernelFuncAnnotation(Function *F) {
+  F->removeFnAttr("fpga.top.func");
+  F->removeFnAttr("fpga.demangled.name");
+  F->setCallingConv(CallingConv::C);
+  F->setLinkage(llvm::GlobalValue::PrivateLinkage);
+}
+
+constexpr const char *xilinx_pipe_type = "sycl_xilinx_pipe_type";
+constexpr const char *xilinx_pipe_id = "sycl_xilinx_pipe_id";
+constexpr const char *xilinx_pipe_depth = "sycl_xilinx_pipe_depth";
 
 bool isWritePipe(Argument *Arg) {
   return Arg->getParent()
-      ->getAttributeAtIndex(Arg->getArgNo() + 1, sycl::xilinx_pipe)
-      .getValueAsString()
-      .startswith("write:");
+             ->getAttributeAtIndex(Arg->getArgNo() + 1, sycl::xilinx_pipe_type)
+             .getValueAsString() == "write";
 }
 
 bool isReadPipe(Argument *Arg) {
   return Arg->getParent()
-      ->getAttributeAtIndex(Arg->getArgNo() + 1, sycl::xilinx_pipe)
-      .getValueAsString()
-      .startswith("read:");
+             ->getAttributeAtIndex(Arg->getArgNo() + 1, sycl::xilinx_pipe_type)
+             .getValueAsString() == "read";
 }
 
 StringRef getPipeID(Argument *Arg) {
   assert(isPipe(Arg));
   return Arg->getParent()
-      ->getAttributeAtIndex(Arg->getArgNo() + 1, sycl::xilinx_pipe)
-      .getValueAsString()
-      .split(':')
-      .second;
+      ->getAttributeAtIndex(Arg->getArgNo() + 1, sycl::xilinx_pipe_id)
+      .getValueAsString();
 }
 
-void makeReadPipe(Argument *Arg, StringRef Id) {
+int getPipeDepth(Argument *Arg) {
+  assert(isPipe(Arg));
+  int val;
+  llvm::to_integer(
+      Arg->getParent()
+          ->getAttributeAtIndex(Arg->getArgNo() + 1, sycl::xilinx_pipe_depth)
+          .getValueAsString(),
+      val);
+  return val;
+}
+
+void annotatePipe(Argument *Arg, StringRef Op, StringRef Id, int Depth) {
   Arg->addAttr(
-      Attribute::get(Arg->getContext(), sycl::xilinx_pipe, "read:" + Id.str()));
+      Attribute::get(Arg->getContext(), sycl::xilinx_pipe_type, Op));
+  Arg->addAttr(
+      Attribute::get(Arg->getContext(), sycl::xilinx_pipe_id, Id));
+  Arg->addAttr(
+      Attribute::get(Arg->getContext(), sycl::xilinx_pipe_depth, llvm::formatv("{0}", Depth).str()));
 }
 
-void makeWritePipe(Argument *Arg, StringRef Id) {
-  Arg->addAttr(Attribute::get(Arg->getContext(), sycl::xilinx_pipe,
-                              "write:" + Id.str()));
+void annotateReadPipe(Argument *Arg, StringRef Id, int Depth) {
+  annotatePipe(Arg, "read", Id, Depth);
+}
+
+void annotateWritePipe(Argument *Arg, StringRef Id, int Depth) {
+  annotatePipe(Arg, "write", Id, Depth);
 }
 
 void removePipeAnnotation(Argument *Arg) {
-  Arg->getParent()->removeParamAttr(Arg->getArgNo(), sycl::xilinx_pipe);
+  Arg->getParent()->removeParamAttr(Arg->getArgNo(), sycl::xilinx_pipe_id);
+  Arg->getParent()->removeParamAttr(Arg->getArgNo(), sycl::xilinx_pipe_type);
+  Arg->getParent()->removeParamAttr(Arg->getArgNo(), sycl::xilinx_pipe_depth);
 }
 
 /// This function gives llvm::function arguments with no name

@@ -32,6 +32,10 @@ void replaceFunction(Module &M, StringRef OldN, StringRef NewN);
 /// Test if a function is a kernel
 bool isKernelFunc(const Function* F);
 
+void annotateKernelFunc(Function* F);
+
+void removeKernelFuncAnnotation(Function* F);
+
 bool isWritePipe(Argument* Arg);
 
 bool isReadPipe(Argument *Arg);
@@ -40,9 +44,11 @@ inline bool isPipe(Argument *Arg) { return isWritePipe(Arg) || isReadPipe(Arg); 
 
 StringRef getPipeID(Argument *Arg);
 
-void makeReadPipe(Argument *Arg, StringRef Id);
+int getPipeDepth(Argument *Arg);
 
-void makeWritePipe(Argument *Arg, StringRef Id);
+void annotateReadPipe(Argument *Arg, StringRef Id, int Depth);
+
+void annotateWritePipe(Argument *Arg, StringRef Id, int Depth);
 
 void removePipeAnnotation(Argument *Arg);
 

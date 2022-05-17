@@ -88,10 +88,7 @@ struct PrepareSYCLOpt : public ModulePass {
       // Annotate kernels for HLS backend being able to identify them
       if (sycl::isKernelFunc(&F)) {
         assert(F.use_empty());
-        F.addFnAttr("fpga.top.func", F.getName());
-        F.addFnAttr("fpga.demangled.name", F.getName());
-        F.setCallingConv(CallingConv::C);
-        F.setLinkage(llvm::GlobalValue::ExternalLinkage);
+        sycl::annotateKernelFunc(&F);
       } else {
         // We need to call intrinsic with SPIR_FUNC calling conv
         // for correct linkage with Vitis SPIR builtins lib
