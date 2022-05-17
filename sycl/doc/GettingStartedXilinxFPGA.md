@@ -1306,6 +1306,14 @@ semantics.
 The memory bank on which a buffer is copied on the device is
 controllable via an accessor property.
 
+As of now, buffer pinning is an all-or-nothing feature for kernel: either all 
+buffer accessors should have a specific memory bank assignment, or none of them.
+
+Two kinds of memory banks are supported: DDR and HBM.
+
+The related accessor property is `sycl::ext::xilinx::ddr_bank<BANK_ID>` for the
+former and `sycl::ext::xilinx::hbm_bank<BANK_ID>` for the later.
+
 Example:
 
 ```cpp

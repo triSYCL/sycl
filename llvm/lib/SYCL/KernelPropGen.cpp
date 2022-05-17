@@ -33,6 +33,7 @@
 #include "llvm/SYCL/KernelPropGen.h"
 #include "llvm/SYCL/KernelProperties.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/JSON.h"
@@ -86,6 +87,8 @@ struct KernelPropGen : public ModulePass {
   void generateBundleSE(Argument &Arg,
                         KernelProperties::MAXIBundle const *Bundle, Function &F,
                         Module &M) {
+    if (Bundle->isDefaultBundle())
+      return;
     LLVMContext &C = F.getContext();
     // Up to 2021.2 m_axi bundles were encoded with a call to sideeffect
     auto *BundleIDConstant =
@@ -134,15 +137,28 @@ struct KernelPropGen : public ModulePass {
         KernelProperties KProp(F, SyclHlsFlow);
         J.objectBegin();
         J.attribute("name", F.getName());
-        auto extraArgs = getExtraArgs(F);
-        if (extraArgs)
-          J.attribute("extra_args", extraArgs.getValue());
+        auto ExtraArgs = getExtraArgs(F);
+        if (ExtraArgs)
+          J.attribute("extra_args", ExtraArgs.getValue());
         J.attributeBegin("bundle_hw_mapping");
         J.arrayBegin();
         for (auto &Bundle : KProp.getMAXIBundles()) {
           J.objectBegin();
           J.attribute("maxi_bundle_name", Bundle.BundleName);
-          J.attribute("target_bank", formatv("DDR[{0}]", Bundle.TargetId));
+          if (Bundle.TargetId.hasValue()) {
+            StringRef Prefix;
+            switch (Bundle.MemType) {
+              case KernelProperties::MemoryType::ddr:
+              Prefix = "DDR";
+              break;
+              case KernelProperties::MemoryType::hbm:
+              Prefix = "HBM";
+              break;
+              default:
+              llvm_unreachable("Default bundle should not appear here");
+            }
+            J.attribute("target_bank", formatv("{0}[{1}]", Prefix, Bundle.TargetId.getValue()));
+          }
           J.objectEnd();
         }
         J.arrayEnd();
@@ -161,7 +177,7 @@ struct KernelPropGen : public ModulePass {
             // infrastructure to assign DDR banks at compile time for a CU
             // if the information is passed down.
             const auto *Bundle = KProp.getArgumentMAXIBundle(&Arg);
-            assert(Bundle && "Empty bundle should default to DDR bank 0");
+            assert(Bundle && "Empty bundle should be marked as default bundle");
             generateBundleSE(Arg, Bundle, F, M);
             J.objectBegin();
             J.attribute("arg_name", Arg.getName());
