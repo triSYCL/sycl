@@ -1466,7 +1466,7 @@ Also the XRT backend support generating reproducer for debugging purposes (or bu
 
 Run the program with SYCL_PI_XRT_REPRODUCER_PATH=path/to/reprod.out.cpp
 
-create a file named reprod.cpp with:
+Create a file named `reprod.cpp` with:
 ```cpp
 #include <xrt/xrt_kernel.h>
 #include <xrt.h>
@@ -1476,24 +1476,24 @@ create a file named reprod.cpp with:
 
 int main() {
 
-/// insert the code here
+  /// insert the code here
 
-/// Edit the code below to validate the data
-/// int* a_c = name#.data();
-for (int i = 0; i < /*size*/; i++) {
-int res = i + i + 1;
-int val = a_c[i];
-assert(val == res);
-}
-printf("PASS\n");
+  /// Edit the code below to validate the data
+  /// int* a_c = name#.data();
+  for (int i = 0; i < /*size*/; i++) {
+    int res = i + i + 1;
+    int val = a_c[i];
+    assert(val == res);
+  }
+  printf("PASS\n");
 }
 ```
-copy the contents of path/to/reprod.out.cpp into reprod.cpp where the comment says so.
+copy the content of `path/to/reprod.out.cpp` into `reprod.cpp` where the comment says so.
 
-the find all the TODOs in the file.
-if your sycl code is simple there should be only 1 TODO which should be replaced by the path to the xclbin see the previous section to get the path to the xclbin
+The reproducer is going to leave comments with a TODO everywhere it couldn't automatically generate the code.
+So find all the TODOs in the file. If your SYCL code is simple, there should be only 1 TODO which should be replaced by the path to the `xclbin` see the previous section to get the path to the `xclbin`.
 
-also edit the end of the main to adapt or remove the validation of data
+Also edit the end of the `main` to adapt or remove the validation of data
 
 then you can compile your reproducer via:
 ```bash

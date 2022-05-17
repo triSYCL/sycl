@@ -31,12 +31,12 @@ import math
 from multiprocessing import Pool
 from os import environ
 from pathlib import Path
+import posix_ipc
 import re
 import shutil
 import subprocess
 import sys
 import tempfile
-import posix_ipc
 
 # This pipeline should be able to do any promotion -O3 is capable of
 # and some more control-flow optimizations than strictly necessary.
