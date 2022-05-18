@@ -12,6 +12,10 @@ if(SYCL_BUILD_PI_HIP)
   add_subdirectory(hip)
 endif()
 
+if(SYCL_BUILD_PI_XRT)
+  add_subdirectory(xrt)
+endif()
+
 add_subdirectory(opencl)
 add_subdirectory(level_zero)
 

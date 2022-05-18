@@ -27,17 +27,6 @@ __SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 namespace detail {
 
-bool is_compact_transfer(const sycl::range<3> &SrcSize,
-                         const sycl::range<3> &DstSize,
-                         const sycl::range<3> &SrcAccessRange,
-                         const sycl::range<3> &DstAccessRange,
-                         const sycl::id<3> &SrcOffset,
-                         const sycl::id<3> &DstOffset) {
-  return (SrcOffset == sycl::id<3>{0, 0, 0}) && (SrcSize == DstAccessRange) &&
-         (SrcSize == DstSize) && (SrcSize == SrcAccessRange) &&
-         (SrcOffset == DstOffset);
-}
-
 #ifdef XPTI_ENABLE_INSTRUMENTATION
 uint8_t GMemAllocStreamID;
 xpti::trace_event_data_t *GMemAllocEvent;
@@ -525,17 +514,6 @@ void copyH2D(SYCLMemObjI *SYCLMemObj, char *SrcMem, QueueImplPtr,
           /*blocking_write=*/CL_FALSE, DstXOffBytes, DstAccessRangeWidthBytes,
           SrcMem + SrcXOffBytes, DepEvents.size(), DepEvents.data(), &OutEvent);
     } else {
-      if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
-                              SrcOffset, DstOffset)) {
-        Plugin.call<PiApiKind::piEnqueueMemBufferWrite>(
-            Queue, DstMem, /*blocking_write=*/CL_FALSE, DstOffset[DstPos.YTerm],
-            DstAccessRangeWidthBytes * DstAccessRange[DstPos.YTerm] *
-                DstAccessRange[DstPos.ZTerm],
-            SrcMem + DstOffset[DstPos.YTerm], DepEvents.size(),
-            DepEvents.size() ? &DepEvents[0] : nullptr, &OutEvent);
-        return;
-      }
-
       size_t BufferRowPitch = (1 == DimDst) ? 0 : DstSzWidthBytes;
       size_t BufferSlicePitch =
           (3 == DimDst) ? DstSzWidthBytes * DstSize[DstPos.YTerm] : 0;
@@ -614,17 +592,6 @@ void copyD2H(SYCLMemObjI *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
           /*blocking_read=*/CL_FALSE, SrcXOffBytes, SrcAccessRangeWidthBytes,
           DstMem + DstXOffBytes, DepEvents.size(), DepEvents.data(), &OutEvent);
     } else {
-      if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
-                              SrcOffset, DstOffset)) {
-        Plugin.call<PiApiKind::piEnqueueMemBufferRead>(
-            Queue, SrcMem, /*blocking_read=*/CL_FALSE, DstOffset[0],
-            DstAccessRange[DstPos.YTerm] * DstAccessRange[DstPos.XTerm] *
-                DstAccessRange[DstPos.ZTerm],
-            DstMem + DstOffset[DstPos.YTerm], DepEvents.size(),
-            DepEvents.size() ? &DepEvents[0] : nullptr, &OutEvent);
-        return;
-      }
-
       size_t BufferRowPitch = (1 == DimSrc) ? 0 : SrcSzWidthBytes;
       size_t BufferSlicePitch =
           (3 == DimSrc) ? SrcSzWidthBytes * SrcSize[SrcPos.YTerm] : 0;
@@ -668,10 +635,9 @@ void copyD2D(SYCLMemObjI *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
              unsigned int DimSrc, sycl::range<3> SrcSize,
              sycl::range<3> SrcAccessRange, sycl::id<3> SrcOffset,
              unsigned int SrcElemSize, RT::PiMem DstMem, QueueImplPtr,
-             unsigned int DimDst, sycl::range<3> DstSize,
-             sycl::range<3> DstAccessRange, sycl::id<3> DstOffset,
-             unsigned int DstElemSize, std::vector<RT::PiEvent> DepEvents,
-             RT::PiEvent &OutEvent) {
+             unsigned int DimDst, sycl::range<3> DstSize, sycl::range<3>,
+             sycl::id<3> DstOffset, unsigned int DstElemSize,
+             std::vector<RT::PiEvent> DepEvents, RT::PiEvent &OutEvent) {
   assert(SYCLMemObj && "The SYCLMemObj is nullptr");
 
   const RT::PiQueue Queue = SrcQueue->getHandleRef();
@@ -695,18 +661,6 @@ void copyD2D(SYCLMemObjI *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
           SrcAccessRangeWidthBytes, DepEvents.size(), DepEvents.data(),
           &OutEvent);
     } else {
-      if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
-                              SrcOffset, DstOffset)) {
-        Plugin.call<PiApiKind::piEnqueueMemBufferCopy>(
-            Queue, SrcMem, DstMem, SrcOffset[SrcPos.YTerm],
-            DstOffset[SrcPos.YTerm],
-            SrcAccessRangeWidthBytes * SrcAccessRange[SrcPos.YTerm] *
-                SrcAccessRange[SrcPos.ZTerm],
-            DepEvents.size(), DepEvents.size() ? &DepEvents[0] : nullptr,
-            &OutEvent);
-        return;
-      }
-
       // passing 0 for pitches not allowed. Because clEnqueueCopyBufferRect will
       // calculate both src and dest pitch using region[0], which is not correct
       // if src and dest are not the same size.

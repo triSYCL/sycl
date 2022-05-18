@@ -35,6 +35,7 @@ def do_configure(args):
     sycl_build_pi_esimd_emulator = 'OFF'
     sycl_build_pi_hip = 'OFF'
     sycl_build_pi_hip_platform = 'AMD'
+    sycl_build_pi_xrt = 'OFF'
     sycl_clang_extra_flags = ''
     sycl_werror = 'ON'
     llvm_enable_assertions = 'ON'
@@ -76,6 +77,9 @@ def do_configure(args):
 
         sycl_build_pi_hip_platform = args.hip_platform
         sycl_build_pi_hip = 'ON'
+
+    if args.xrt:
+        sycl_build_pi_xrt = 'ON'
 
     if args.no_werror:
         sycl_werror = 'OFF'
@@ -136,6 +140,7 @@ def do_configure(args):
         "-DSYCL_BUILD_PI_CUDA={}".format(sycl_build_pi_cuda),
         "-DSYCL_BUILD_PI_HIP={}".format(sycl_build_pi_hip),
         "-DSYCL_BUILD_PI_HIP_PLATFORM={}".format(sycl_build_pi_hip_platform),
+        "-DSYCL_BUILD_PI_XRT={}".format(sycl_build_pi_xrt),
         "-DLLVM_BUILD_TOOLS=ON",
         "-DSYCL_ENABLE_WERROR={}".format(sycl_werror),
         "-DCMAKE_INSTALL_PREFIX={}".format(install_dir),
@@ -207,6 +212,7 @@ def main():
     parser.add_argument("-t", "--build-type",
                         metavar="BUILD_TYPE", default="Release", help="build type: Debug, Release")
     parser.add_argument("--cuda", action='store_true', help="switch from OpenCL to CUDA")
+    parser.add_argument("--xrt", action='store_true', help="switch from OpenCL to XRT")
     parser.add_argument("--hip", action='store_true', help="switch from OpenCL to HIP")
     parser.add_argument("--hip-platform", type=str, choices=['AMD', 'NVIDIA'], default='AMD', help="choose hardware platform for HIP backend")
     parser.add_argument("--arm", action='store_true', help="build ARM support rather than x86")

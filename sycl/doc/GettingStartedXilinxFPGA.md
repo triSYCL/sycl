@@ -855,7 +855,9 @@ mkdir $SYCL_HOME
 cd $SYCL_HOME
 # You can also try --branch sycl/unified/next for a bleeding edge experience
 git clone --branch sycl/unified/master git@github.com:triSYCL/sycl.git llvm
-python $SYCL_HOME/llvm/buildbot/configure.py
+# Use --xrt is to enable the optional XRT plugin. This is a replacement for the OpenCL plugin
+# because XRT offers more control and expressiveness on the hardware
+python $SYCL_HOME/llvm/buildbot/configure.py --xrt
 python $SYCL_HOME/llvm/buildbot/compile.py
 ```
 
@@ -1102,32 +1104,25 @@ Note that the SPIR compilation flow has been discontinued.
 
 ```bash
   cd $SYCL_HOME/llvm/build
-  export VXX_TARGET=hls_hw_emu
-  cmake --build . --parallel `nproc` --target check-sycl-vitis-j4
-  ```
+  # Running tests with the OpenCL backend
+  cmake --build . --parallel `nproc` --target check-sycl-vitis
+  # Running tests with the XRT backend
+  cmake --build . --parallel `nproc` --target check-sycl-xrt
+```
 
-This takes usually 15-30 minutes with a good CPU.
+This takes usually 45-60 minutes with a good CPU.
 
 - Run the `vitis` test suite with real hardware execution on FPGA (HLS flow):
 
 ```bash
   cd $SYCL_HOME/llvm/build
-  export VXX_TARGET=hls_hw
-  cmake --build . --parallel `nproc` --target check-sycl-vitis-j4
-  ```
+  # Running tests with the OpenCL backend
+  cmake --build . --parallel `nproc` --target check-sycl-vitis-hw
+  # Running tests with the XRT backend
+  cmake --build . --parallel `nproc` --target check-sycl-xrt-hw
+```
 
-This takes usually 8+ hours.
-
-`check-sycl-vitis-jmax` will run the tests on as many cores as is
-available on the system. But for `hw` and `hw_emu` execution mode,
-this usually means the system will run out of RAM even with 64G so
-`check-sycl-vitis-j4` should be used to run only 4 tests in
-parallel. There is also a `j2` version to use only 2 cores.
-
-To launch the compilation on all the SYCL tests, not only the `vitis`
-ones, there are the targets `check-sycl-all-jmax`,
-`check-sycl-all-j2` and `check-sycl-all-j4`
-
+This takes usually 10+ hours.
 
 ### Running a bigger example on real FPGA
 
@@ -1446,126 +1441,9 @@ the insane! Hopefully...
 
 ## Debugging the SYCL implementation
 
-### Build
+### Debugging the driver and intermediate steps
 
-For serious work on the SYCL toolchain it is better to
-not use the scripts in `$SYCL_HOME/buildbot` but to invoke `cmake` directly.
-This gives much more control over the build configuration.
-
-It is quite useful to work with two builds, a Release one used by default
-and a Debug one used for debugging.
-
-Note: the configuration of environment variables must be done before
-the `cmake` invocation.
-
-A possible Release configuration and build script targeting AMD/Xilinx
-FPGA, CUDA & OpenCL:
-
-```bash
-cd $SYCL_HOME
-mkdir -p "build-Release" && cd "build-Release" && cmake \
- -DCMAKE_INSTALL_PREFIX="../Install-Release" \
- -DCMAKE_CXX_FLAGS_RELEASE="-O3 -march=native -fno-omit-frame-pointer" \
- -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
- -G Ninja \
- -DCMAKE_C_COMPILER="/usr/bin/clang-13" \
- -DCMAKE_CXX_COMPILER="/usr/bin/clang++-13" \
- -DLLVM_USE_LINKER="lld-13" \
- -DCMAKE_BUILD_TYPE=Release \
- -DLLVM_ENABLE_ASSERTIONS=ON \
- -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
- -DLLVM_EXTERNAL_PROJECTS="sycl;llvm-spirv;opencl-aot;xpti;libdevice" \
- -DLLVM_EXTERNAL_SYCL_SOURCE_DIR=$SYCL_HOME/sycl \
- -DLLVM_EXTERNAL_LLVM_SPIRV_SOURCE_DIR=$SYCL_HOME/llvm-spirv \
- -DLLVM_EXTERNAL_XPTI_SOURCE_DIR=$SYCL_HOME/xpti \
- -DLLVM_EXTERNAL_LIBDEVICE_SOURCE_DIR=$SYCL_HOME/libdevice \
- -DLLVM_ENABLE_PROJECTS="clang;llvm-spirv;sycl;opencl-aot;xpti;libdevice;libclc" \
- -DLIBCLC_TARGETS_TO_BUILD="nvptx64--;nvptx64--nvidiacl" \
- -DSYCL_BUILD_PI_CUDA=ON \
- -DLLVM_BUILD_TOOLS=ON \
- -DSYCL_INCLUDE_TESTS=ON \
- -DLLVM_ENABLE_DOXYGEN=OFF \
- -DLLVM_ENABLE_SPHINX=OFF \
- -DBUILD_SHARED_LIBS=ON \
- -DSYCL_ENABLE_XPTI_TRACING=ON \
- $SYCL_HOME/llvm
-```
-
-then build with
-
-```bash
-cd $SYCL_HOME
-ninja -C build-Release sycl-toolchain
-```
-
-A possible Debug configuration and build script targeting AMD/Xilinx
-FPGA, CUDA & OpenCL:
-
-```bash
-cd $SYCL_HOME
-mkdir -p "build-Debug" && cd "build-Debug" && cmake \
- -DCMAKE_BUILD_TYPE="Debug" \
- -DCMAKE_CXX_FLAGS_DEBUG="-g -fstandalone-debug" \
- -DLLVM_TABLEGEN="$(pwd)/../build-Release/bin/llvm-tblgen" \
- -DCLANG_TABLEGEN="$(pwd)/../build-Release/bin/clang-tblgen" \
- -DCMAKE_INSTALL_PREFIX="../Install-Debug" \
- -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
- -G Ninja \
- -DLLVM_ENABLE_ASSERTIONS=ON \
- -DCMAKE_C_COMPILER="/usr/bin/clang-13" \
- -DCMAKE_CXX_COMPILER="/usr/bin/clang++-13" \
- -DLLVM_USE_LINKER="lld-13" \
- -DLLVM_TARGETS_TO_BUILD="X86;NVPTX" \
- -DLLVM_EXTERNAL_PROJECTS="sycl;llvm-spirv;opencl-aot;xpti;libdevice" \
- -DLLVM_EXTERNAL_SYCL_SOURCE_DIR=$SYCL_HOME/sycl \
- -DLLVM_EXTERNAL_LLVM_SPIRV_SOURCE_DIR=$SYCL_HOME/llvm-spirv \
- -DLLVM_EXTERNAL_XPTI_SOURCE_DIR=$SYCL_HOME/xpti \
- -DLLVM_EXTERNAL_LIBDEVICE_SOURCE_DIR=$SYCL_HOME/libdevice \
- -DLLVM_ENABLE_PROJECTS="clang;llvm-spirv;sycl;opencl-aot;xpti;libdevice;libclc" \
- -DLIBCLC_TARGETS_TO_BUILD="nvptx64--;nvptx64--nvidiacl" \
- -DSYCL_BUILD_PI_CUDA=ON \
- -DLLVM_BUILD_TOOLS=ON \
- -DSYCL_INCLUDE_TESTS=ON \
- -DLLVM_ENABLE_DOXYGEN=OFF \
- -DLLVM_ENABLE_SPHINX=OFF \
- -DBUILD_SHARED_LIBS=ON \
- -DSYCL_ENABLE_XPTI_TRACING=ON \
- $SYCL_HOME/llvm
-```
-
-then build with
-
-```bash
-cd $SYCL_HOME
-ninja -C build-Debug sycl-toolchain
-```
-
-* `-CMAKE_CXX_FLAGS_RELEASE="-O3 -march=native -fno-omit-frame-pointer"` to have an optimized build with relatively accurate stack traces;
-* `-G Ninja` use `ninja` instead of `make` to speedup builds;
-* `-DLLVM_USE_LINKER="lld-13"` select `lld` or `gold` instead of `ld` to speedup builds;
-* `-DLLVM_TARGETS_TO_BUILD="X86;NVPTX"` to build only the targets needed, like NVPTX for CUDA support;
-* `-DLIBCLC_TARGETS_TO_BUILD="nvptx64--;nvptx64--nvidiacl"` needed for CUDA support;
-* `-DSYCL_ENABLE_XPTI_TRACING=ON` adds useful debugging capabilities;
-* `-DBUILD_SHARED_LIBS=ON` to speed up the build process by using shared libraries;
-* `-DLLVM_TABLEGEN="$SYCL_HOME/build-Release/bin/llvm-tblgen" -DCLANG_TABLEGEN="$SYCL_HOME/build-Release/bin/clang-tblgen"` to reuse the tablegen built with the Release version and speedup builds. The Release build must be done before configuring the Debug one;
-* `-DCMAKE_CXX_FLAGS_DEBUG="-g -fstandalone-debug"` to have full debug information.
-
-For details about the `CMake` configuration see https://llvm.org/docs/CMake.html
-
-While building the `sycl-toolchain` target, the device runtime for `spirv` and `nvptx` targets gets compiled using the device compiler from the specific build.
-Building anything with a debug compiler is very slow, but it can be speedup using:
-
-```bash
-export LD_LIBRARY_PATH=$SYCL_HOME/build-Release/lib:$LD_LIBRARY_PATH
-```
-
-This will make the debug compiler select the dynamic libraries of the release compiler and speedup the build. This only works because the Release and Debug build have ABI compatible configuration, changing `LLVM_ENABLE_ASSERTIONS` or other configuration may change that.
-
-### Debugging
-
-#### Debugging the driver and intermediate steps
-
-During the compilation, an temporary directory is created in which all Vitis inputs, commands, outputs and logs are stored.
+During the compilation, a temporary directory is created in which all Vitis inputs, commands, outputs and logs are stored.
 By default, this directory is deleted as soon as the compilation ends (even when it fails).
 
 In order to keep it, set the `SYCL_VXX_KEEP_CLUTTER` environment variable to True.
@@ -1578,7 +1456,59 @@ Temporary clutter in /tmp/EXECNAME-e5ece1pxk5rz43 will not be deleted
 
 Informing you of where those files are kept (`/tmp/EXECNAME-e5ece1pxk5rz43` in this case).
 
-#### Environnement variables
+### Debugging the SYCL runtime
+
+There is 2 supported backends targeting Xilinx/AMD FPGA the XRT backend and the OpenCL backend.
+if you are using the default device selector the xrt backend selected by:
+```bash
+export SYCL_DEVICE_FILTER=xrt
+```
+and the OpenCL backend can be selected by:
+```bash
+export SYCL_DEVICE_FILTER=opencl
+```
+
+Testing if it is possible to reproduce a bug on the other backend can give you more information about the bug.
+
+Also the XRT backend support generating reproducer for debugging purposes (or bug reports). To generate a reproducer:
+
+Run the program with SYCL_PI_XRT_REPRODUCER_PATH=path/to/reprod.out.cpp
+
+Create a file named `reprod.cpp` with:
+```cpp
+#include <xrt/xrt_kernel.h>
+#include <xrt.h>
+#include <array>
+#include <cassert>
+#include <cstring>
+
+int main() {
+
+  /// insert the code here
+
+  /// Edit the code below to validate the data
+  /// int* a_c = name#.data();
+  for (int i = 0; i < /*size*/; i++) {
+    int res = i + i + 1;
+    int val = a_c[i];
+    assert(val == res);
+  }
+  printf("PASS\n");
+}
+```
+copy the content of `path/to/reprod.out.cpp` into `reprod.cpp` where the comment says so.
+
+The reproducer is going to leave comments with a TODO everywhere it couldn't automatically generate the code.
+So find all the TODOs in the file. If your SYCL code is simple, there should be only 1 TODO which should be replaced by the path to the `xclbin` see the previous section to get the path to the `xclbin`.
+
+Also edit the end of the `main` to adapt or remove the validation of data
+
+then you can compile your reproducer via:
+```bash
+g++ -o reprod reprod.cpp -g -I/opt/xilinx/xrt/include -L/opt/xilinx/xrt/lib -lOpenCL -luuid -lxrt_coreutil
+```
+
+### Environnement variables
 
 Some environment variables are very useful for debugging:
 
@@ -1595,25 +1525,26 @@ export SYCL_PI_TRACE=-1
 ```
 
 
-#### Clang flags
+### Clang flags
 
 Some useful Clang flags:
 * `-ccc-print-phases` outputs the graph of compilation phases;
 * `-ccc-print-bindings` outputs the mapping from compilation phases to commands;
 * `-###` outputs the commands to run to compile. The driver will create files to reserve them for those commands.
 
-#### Running a single test
+### Running a single test
 
 To run a test from the test suite in isolation, use:
 
 ```bash
-/path/to/build/dir/bin/llvm-lit -v --param XOCC=all path/to/test.cpp
+# The SYCL_TRIPLE variable can be changed to select hw or hw_emu, and the SYCL_PLUGIN can be changed to select opencl or xrt
+/path/to/build/dir/bin/llvm-lit -v --param XOCC=only --param SYCL_TRIPLE=fpga64_hls_hw_emu-xilinx-linux --param SYCL_PLUGIN=xrt path/to/test.cpp
 ```
 
 where all tests utilities must have been build for this to work.
 
 
-#### v++ Logs
+### v++ Logs
 
 The kinds of following errors are typical of a back-end issue:
 
@@ -1631,7 +1562,7 @@ log files will be deleted as soon as the compilation process exit, meaning that 
 probably already gone when you get this error message.
 
 
-#### llvm-reduce
+### llvm-reduce
 
 It is possible to use `llvm-reduce` to track down `v++` issues.
 First build `llvm-reduce` with:

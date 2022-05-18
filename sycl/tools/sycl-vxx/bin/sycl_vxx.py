@@ -27,9 +27,11 @@ from genericpath import exists
 from itertools import starmap
 import functools
 import json
+import math
 from multiprocessing import Pool
 from os import environ
 from pathlib import Path
+import posix_ipc
 import re
 import shutil
 import subprocess
@@ -181,7 +183,43 @@ def _run_in_isolated_proctree(cmd, *args, **kwargs):
               "--mount-proc",
               "--kill-child",
               *cmd)
-    return subprocess.run(cmd, *args, **kwargs)
+    return subprocess.run(newcmd, *args, **kwargs)
+
+# choose how many parallel instances of v++ we should have at most
+def get_exec_count():
+    ram_gb = 0
+    with open('/proc/meminfo') as file:
+        for line in file:
+            if 'MemAvailable' in line:
+                # KiB to GiB
+                ram_gb = int(line.split()[1]) / (1024 * 1024)
+                break
+    # each instance of vxx uses 5 GiB at most and we keep 10% margin
+    max_vxx_instance_count = int(math.trunc(ram_gb * 0.9) / 5)
+    if max_vxx_instance_count == 0:
+        print("warning: v++ is likely to run out of RAM")
+        max_vxx_instance_count = 1
+    return max_vxx_instance_count
+
+# In test mode the ressource usage is controlled by a global named semaphore
+is_test_mode = False
+if environ.get("SYCL_VXX_TEST_MODE") is not None:
+    is_test_mode = True
+
+class CSema:
+    def __init__(self):
+        if is_test_mode:
+        # this semaphore is global to every instances of sycl_vxx.py
+            self.sema = posix_ipc.Semaphore("sycl_vxx.py", flags= posix_ipc.O_CREAT, initial_value = get_exec_count())
+    
+    def __enter__(self):
+        if is_test_mode:
+            self.sema.acquire()
+  
+    def __exit__(self, a, b, c):
+        if is_test_mode:
+            self.sema.release()
+            self.sema.close()
 
 
 # This is currently unused because a change between version 2021.2 and 2022.1 was later reverted.
@@ -462,7 +500,8 @@ class VXXCompilationDriver(VitisCompilationDriver):
     def _compile_kernel(self, outname, command):
         """Execute a kernel compilation command"""
         if self.ok:
-            _run_in_isolated_proctree(command, check=True)
+            with CSema():
+                _run_in_isolated_proctree(command, check=True)
         return outname
 
     @subprocess_error_handler("Vitis linkage stage failed")
@@ -520,7 +559,8 @@ class VXXCompilationDriver(VitisCompilationDriver):
         command.extend(self.extra_link_args)
         command.extend(kernels)
         self._dump_cmd("vxxlink", command)
-        _run_in_isolated_proctree(command, check=True)
+        with CSema():
+            _run_in_isolated_proctree(command, check=True)
         return xclbin
 
     @subprocess_error_handler("Vitis compilation stage failed")

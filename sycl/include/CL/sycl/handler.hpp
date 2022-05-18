@@ -1124,11 +1124,11 @@ private:
     if (detail::getDeviceFromHandler(*this).has(
             aspect::ext_xilinx_single_task_only)) {
 #endif
-      single_task<KernelName>([=, Func = detail::assume_device_copyable_wrapper<
-                                      std::remove_reference_t<KernelType>>{
-                                      std::forward<KernelType>(KernelFunc)}] {
-        detail::serialize_parallel_for(Func, NumWorkItems);
-      });
+      single_task<KernelName>(
+          [=, Func = detail::assume_device_copyable_wrapper<
+                  std::remove_reference_t<KernelType>>{KernelFunc}] {
+            detail::serialize_parallel_for(Func, NumWorkItems);
+          });
 #if !defined(__SYCL_DEVICE_ONLY__)
       return;
     }

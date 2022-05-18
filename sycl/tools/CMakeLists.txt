@@ -48,6 +48,7 @@ target_compile_definitions(get_device_count_by_type
   PRIVATE
     $<$<BOOL:${SYCL_BUILD_PI_CUDA}>:USE_PI_CUDA>
     $<$<BOOL:${SYCL_BUILD_PI_HIP}>:USE_PI_HIP>
+    $<$<BOOL:${SYCL_BUILD_PI_XRT}>:USE_PI_XRT>
     # For HIP set defines depending on the platform
     $<$<AND:$<BOOL:${SYCL_BUILD_PI_HIP}>,$<STREQUAL:${SYCL_BUILD_PI_HIP_PLATFORM},AMD>>:__HIP_PLATFORM_AMD__>
     $<$<AND:$<BOOL:${SYCL_BUILD_PI_HIP}>,$<STREQUAL:${SYCL_BUILD_PI_HIP_PLATFORM},NVIDIA>>:__HIP_PLATFORM_NVIDIA__>
@@ -57,4 +58,10 @@ if(SYCL_BUILD_PI_HIP)
   target_include_directories(get_device_count_by_type
     PRIVATE
     ${SYCL_BUILD_PI_HIP_INCLUDE_DIR})
+endif()
+
+if(SYCL_BUILD_PI_HIP)
+  target_include_directories(get_device_count_by_type
+    PRIVATE
+    ${XILINX_RT_INCLUDE})
 endif()
