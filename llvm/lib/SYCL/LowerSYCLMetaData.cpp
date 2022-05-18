@@ -18,12 +18,16 @@
 #include <string>
 #include <vector>
 
+#include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/SmallVector.h"
+#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
+#include "llvm/Demangle/Demangle.h"
 #include "llvm/IR/Argument.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/BasicBlock.h"
@@ -35,6 +39,7 @@
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/InstrTypes.h"
+#include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
@@ -43,6 +48,7 @@
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "llvm/Transforms/Utils/Cloning.h"
 
 using namespace llvm;
 
@@ -103,7 +109,7 @@ public:
   }
 
   void applyOnEnclosingLoop(Function *Start,
-                              function_ref<void(Loop *)> Functor) {
+                            function_ref<void(Loop *)> Functor) {
     llvm::SmallSetVector<Function *, 8> Stack;
     Stack.insert(Start);
     while (!Stack.empty()) {
@@ -174,7 +180,7 @@ public:
       auto *PipelineType = cast<ConstantInt>(
           getUnderlyingObject(Parameters->getAggregateElement(1u)));
       S = formatv("{0}.{1}", IIInitializer->getSExtValue(),
-                              PipelineType->getSExtValue());
+                  PipelineType->getSExtValue());
     } else {
       S = "0.0";
     }
@@ -215,13 +221,14 @@ public:
   /// @brief Add HLS-compatible pipeline annotation to surrounding loop
   ///
   /// @param CS Payload of the original annotation
-  void lowerUnrollDecoration(llvm::CallBase &CB, llvm::ConstantStruct *Payload) {
+  void lowerUnrollDecoration(llvm::CallBase &CB,
+                             llvm::ConstantStruct *Payload) {
     auto *F = CB.getCaller();
 
-    // Metadata payload is unroll factor (first argument) and boolean indicating 
-    // whether the unrolling should be checked (in case of iteration not a multiple
-    // of the unroll factor). 
-    // Using u suffix to avoid ambiguity with overloads of getAggregateElement.
+    // Metadata payload is unroll factor (first argument) and boolean indicating
+    // whether the unrolling should be checked (in case of iteration not a
+    // multiple of the unroll factor). Using u suffix to avoid ambiguity with
+    // overloads of getAggregateElement.
     auto UnrollFactor =
         cast<ConstantInt>(getUnderlyingObject(Payload->getAggregateElement(0u)))
             ->getZExtValue();
@@ -289,8 +296,8 @@ public:
     auto *CSArgs = cast<Constant>(
         cast<GlobalVariable>(getUnderlyingObject(CS->getAggregateElement(4)))
             ->getOperand(0));
-    // Property is always constituted by a string for the property type (first argument),
-    // and a payload (second argument)
+    // Property is always constituted by a string for the property type (first
+    // argument), and a payload (second argument)
     StringRef PropertyType =
         cast<ConstantDataArray>(
             cast<GlobalVariable>(
@@ -381,12 +388,25 @@ public:
   struct LocalAnnotationVisitor
       : public llvm::InstVisitor<LocalAnnotationVisitor> {
     LSMDState &Parent;
+    using pipe_creation_rec_t = std::pair<llvm::Function *, llvm::CallBase *>;
+    llvm::SmallVector<pipe_creation_rec_t> PipeCreations;
 
     LocalAnnotationVisitor(LSMDState &P) : Parent(P) {}
 
     void visitCallBase(CallBase &CB) {
       // Search for var_annotation having payload
-      if (CB.getIntrinsicID() != Intrinsic::var_annotation || CB.arg_size() < 5)
+      if (CB.getIntrinsicID() != Intrinsic::var_annotation) {
+        auto unmangled_name =
+            llvm::demangle(CB.getCalledFunction()->getName().str());
+        if (unmangled_name.find(" CreatePipeFromPipeStorage_") !=
+            std::string::npos) {
+          // Parent.handlePipeCreation(CB);
+          PipeCreations.emplace_back(CB.getFunction(), &CB);
+        }
+        return;
+      }
+      // Annotation without payload are not interesting
+      if (CB.arg_size() < 5)
         return;
 
       auto *KindInit =
@@ -400,11 +420,154 @@ public:
       Parent.dispatchLocalAnnotation(CB, cast<ConstantDataArray>(KindInit),
                                      Payload);
     }
+
+    void forwardPipeCreation(llvm::Function *Kernel,
+                             const size_t OriginalArgSize,
+                             llvm::StringMap<std::size_t> &NameToArgOrder,
+                             llvm::ArrayRef<llvm::StructType *> WrapperStruct) {
+      llvm::SmallVector<std::pair<llvm::Instruction *, llvm::Instruction *>>
+          ReplacementList;
+      auto *Zero = llvm::ConstantInt::get(
+          llvm::IntegerType::get(Kernel->getContext(), 32), 0);
+      for (auto &BB : *Kernel) {
+        for (auto &I : BB) {
+          auto Rec = NameToArgOrder.find(I.getName());
+          if (Rec != NameToArgOrder.end()) {
+            auto Offset = Rec->second;
+            auto *ULType = WrapperStruct[Offset]->getElementType(0);
+            auto *AssociatedArg = Kernel->getArg(Offset);
+            llvm::SmallVector<Value *, 2> Zeros{Zero, Zero};
+            auto *ReplacementInst =
+                llvm::GetElementPtrInst::Create(ULType, AssociatedArg, Zeros);
+            for (auto *IUser : I.users()) {
+              auto *CB = dyn_cast<CallBase>(IUser);
+              if (CB) {
+                auto CalledName =
+                    llvm::demangle(CB->getCalledFunction()->getName().str());
+                llvm::Instruction *NewInst = nullptr;
+                if (CalledName.find("WritePipeBlockingINTEL") !=
+                    std::string::npos) {
+                  llvm::SmallVector<llvm::Type *, 2> WriteArgTypes{
+                      ULType, ReplacementInst->getType()};
+                  auto *WriteType =
+                      llvm::FunctionType::get(nullptr, WriteArgTypes, false);
+                  auto FifoWrite = llvm::Function::Create(
+                      WriteType, GlobalValue::LinkageTypes::CommonLinkage,
+                      llvm::formatv("llvm.fpga.fifo.push.{0}.{1}",
+                                    Kernel->getName(), Offset));
+                  auto *WrittenValPtr = CB->getArgOperand(1);
+
+                  auto*WrittenVal = new llvm::LoadInst(ULType, WrittenValPtr, llvm::formatv("deref_pipe_val.{0}", Offset), CB);
+                  llvm::SmallVector<Value*, 2> Args{WrittenVal, ReplacementInst};
+                  NewInst = llvm::CallInst::Create(WriteType, FifoWrite, Args);
+                } else if (CalledName.find("ReadPipeBlockingINTEL") !=
+                           std::string::npos) {
+                    llvm::SmallVector<llvm::Type *, 1> ReadArgTypes{ReplacementInst->getType()};
+                    auto *ReadType =
+                      llvm::FunctionType::get(ULType, ReadArgTypes, false);
+                    auto FifoRead = llvm::Function::Create(
+                      ReadType, GlobalValue::LinkageTypes::CommonLinkage,
+                      llvm::formatv("llvm.fpga.fifo.pop.{0}.{1}",
+                                    Kernel->getName(), Offset));
+                    auto *StoredValPtr = CB->getArgOperand(1);
+                    /*llvm::SmallVector<Value*, 2> Args{WrittenVal, ReplacementInst};
+                    NewInst = llvm::CallInst::Create(ReadType, FifoRead, Args);*/
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
+    void handlePipeCreations(llvm::Function *Kernel,
+                             llvm::ArrayRef<CallBase *> Creations) {
+      const auto KernelArgSize = Kernel->arg_size();
+      llvm::SmallVector<llvm::Type *> ExtraTypes;
+      llvm::SmallVector<llvm::StructType *> WrapperStruct;
+      llvm::StringMap<std::size_t> NameToOrder;
+      size_t CurOffset = 0;
+      for (auto *CB : Creations) {
+        // Find usage to know the type of the object stored in the pipe
+        assert(!CB->user_empty());
+        auto *Usage = *(CB->user_begin());
+        CallBase *UsageCb = dyn_cast<CallBase>(Usage);
+        assert(UsageCb != nullptr);
+        auto *PipeOp = UsageCb->getArgOperand(1);
+        // assert(pipe_type->isPointerTy());
+        PipeOp->dump();
+        llvm::Type *PipeType = nullptr;
+        if (auto *Alloca = dyn_cast<AllocaInst>(PipeOp)) {
+          PipeType = Alloca->getAllocatedType();
+        }
+        assert(PipeType != nullptr);
+        PipeType->dump();
+        ExtraTypes.push_back(PipeType);
+        NameToOrder.insert({CB->getName(), CurOffset++});
+      }
+
+      llvm::FunctionType *KernelType = Kernel->getFunctionType();
+      std::vector<llvm::Type *> KernelArgs{};
+      for (auto *Type : KernelType->params()) {
+        KernelArgs.push_back(Type);
+      }
+      for (auto *Type : ExtraTypes) {
+        auto *PipeStruct = llvm::StructType::create({&Type, 1});
+        auto *PtrType = llvm::PointerType::get(PipeStruct, 0);
+        KernelArgs.push_back(PtrType);
+      }
+      auto *NewKernelType =
+          FunctionType::get(KernelType->getReturnType(), KernelArgs, false);
+      auto KernelName = Kernel->getName().str();
+      std::cerr << KernelName << std::endl;
+#ifndef NDEBUG
+      // As of now we do not handle non top-level kernels
+      for (auto *UserPtr : Kernel->users()) {
+        auto *Val = dyn_cast<CallBase>(UserPtr);
+        assert(!Val);
+      }
+#endif
+      Kernel->setName("to_be_replaced_kernel");
+      auto *NewKernel = Function::Create(NewKernelType, Kernel->getLinkage(),
+                                         KernelName, Kernel->getParent());
+      llvm::ValueToValueMapTy Maptype;
+      for (size_t i = 0 ; i < Kernel->arg_size() ; ++i) {
+        Maptype.insert({Kernel->getArg(i), NewKernel->getArg(i)});  
+      }
+      llvm::SmallVector<llvm::ReturnInst *> RetInst{};
+      llvm::CloneFunctionInto(NewKernel, Kernel, Maptype,
+                              CloneFunctionChangeType::GlobalChanges, RetInst);
+      // kernel->replaceAllUsesWith(new_kernel);
+      Kernel->eraseFromParent();
+      forwardPipeCreation(NewKernel, KernelArgSize, NameToOrder, WrapperStruct);
+      // Perform annotation
+    }
+
+    void handlePipeCreations() {
+      if (PipeCreations.size() < 1)
+        return;
+
+      std::sort(PipeCreations.begin(), PipeCreations.end());
+      using pipe_creat_coll = llvm::SmallVector<CallBase *>;
+      pipe_creat_coll collection{};
+      llvm::Function *cur_kernel = PipeCreations[0].first;
+      for (auto &elem : PipeCreations) {
+        if (elem.first == cur_kernel) {
+          collection.push_back(elem.second);
+        } else {
+          handlePipeCreations(cur_kernel, collection);
+          cur_kernel = elem.first;
+          collection = pipe_creat_coll{elem.second};
+        }
+      }
+      handlePipeCreations(cur_kernel, collection);
+    }
   };
 
   void processLocalAnnotations() {
     LocalAnnotationVisitor LAV{*this};
     LAV.visit(M);
+    LAV.handlePipeCreations();
   }
 
   bool run() {
@@ -431,7 +594,8 @@ struct LowerSYCLMetaData : public ModulePass {
 };
 } // namespace
 
-PreservedAnalyses LowerSYCLMetaDataPass::run(Module &M, ModuleAnalysisManager &AM) {
+PreservedAnalyses LowerSYCLMetaDataPass::run(Module &M,
+                                             ModuleAnalysisManager &AM) {
   LSMDState(M).run();
   return PreservedAnalyses::none();
 }
