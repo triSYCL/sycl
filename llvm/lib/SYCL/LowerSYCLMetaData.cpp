@@ -269,8 +269,10 @@ public:
 
     HasChanged = true;
     Function *SideEffect = Intrinsic::getDeclaration(&M, Intrinsic::sideeffect);
-    OperandBundleDef OpBundle(
-        XclId.str(), std::vector<Value *>{F->arg_begin(), F->arg_end()});
+    std::vector<Value *> Args;
+    for (auto &A : F->args())
+      Args.push_back(&A);
+    OperandBundleDef OpBundle(XclId.str(), Args);
 
     Instruction *I = CallInst::Create(SideEffect, {}, {OpBundle});
     I->insertBefore(F->getEntryBlock().getTerminator());
