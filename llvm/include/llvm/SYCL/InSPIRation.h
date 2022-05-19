@@ -15,14 +15,16 @@
 #ifndef LLVM_SYCL_INSPIRATION_H
 #define LLVM_SYCL_INSPIRATION_H
 
-#include "llvm/IR/Module.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
-#include "llvm/Support/SHA1.h"
 
 namespace llvm {
 
+struct InSPIRationPass : PassInfoMixin<InSPIRationPass> {
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
+};
 
-ModulePass *createInSPIRationPass();
+ModulePass *createInSPIRationLegacyPass();
 
 }
 

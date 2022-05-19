@@ -462,10 +462,10 @@ void initializeWinEHPreparePass(PassRegistry&);
 void initializeWriteBitcodePassPass(PassRegistry&);
 void initializeWriteThinLTOBitcodePass(PassRegistry&);
 void initializeXRayInstrumentationPass(PassRegistry&);
-void initializeInSPIRationPass(PassRegistry&);
-void initializeKernelPropGenPass(PassRegistry&);
-void initializeVXXIRDowngraderPass(PassRegistry&);
-void initializePrepareSYCLOptPass(PassRegistry&);
+void initializeInSPIRationLegacyPass(PassRegistry&);
+void initializeKernelPropGenLegacyPass(PassRegistry&);
+void initializeVXXIRDowngraderLegacyPass(PassRegistry&);
+void initializePrepareSYCLOptLegacyPass(PassRegistry&);
 void initializeLowerSYCLMetaDataPass(PassRegistry&);
 
 } // end namespace llvm

@@ -569,10 +569,10 @@ int main(int argc, char **argv) {
   // SYCL related passes, there may come a time where it's better to register
   // these as a module rather than separate passes
   // (e.g. initializeTransformUtils(Registry) etc. above)
-  initializeInSPIRationPass(Registry);
-  initializeKernelPropGenPass(Registry);
-  initializeVXXIRDowngraderPass(Registry);
-  initializePrepareSYCLOptPass(Registry);
+  initializeInSPIRationLegacyPass(Registry);
+  initializeKernelPropGenLegacyPass(Registry);
+  initializeVXXIRDowngraderLegacyPass(Registry);
+  initializePrepareSYCLOptLegacyPass(Registry);
   initializeLowerSYCLMetaDataPass(Registry);
   initializeHardwareLoopsPass(Registry);
   initializeTypePromotionPass(Registry);
