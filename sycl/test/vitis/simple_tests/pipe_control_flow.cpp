@@ -1,38 +1,28 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <sycl/ext/intel/fpga_extensions.hpp>
-#include <type_traits>
-
-using Type = int;
-
-using namespace sycl;
 
 int main(int argc, char *argv[]) {
   int size = 4;
   sycl::queue q;
   sycl::buffer<int, 1> a(size);
-  sycl::buffer<int, 1> b(size);
-  sycl::buffer<int, 1> c(size);
 
   {
     sycl::host_accessor a_a(a);
-    sycl::host_accessor a_b(b);
-    // sycl::host_accessor a_c(c);
     for (int i = 0; i < size; i++) {
       a_a[i] = i;
-      a_b[i] = i + 1;
-      // a_c[i] = 0;
     }
   }
 
-  using PipeA = cl::sycl::ext::intel::pipe<class PipeNameA, int>;
-  using PipeB = cl::sycl::ext::intel::pipe<class PipeNameB, int>;
-  using PipeC = cl::sycl::ext::intel::pipe<class PipeNameC, int>;
+  using PipeA = sycl::ext::intel::pipe<class PipeNameA, int>;
+  using PipeB = sycl::ext::intel::pipe<class PipeNameB, int>;
+  using PipeC = sycl::ext::intel::pipe<class PipeNameC, int>;
+
   q.submit([&](handler &cgh) {
     sycl::accessor a_a{a, cgh, sycl::read_only};
     cgh.single_task([=]() {
@@ -60,12 +50,8 @@ int main(int argc, char *argv[]) {
   });
 
   {
-    // sycl::host_accessor a_a(a);
-    // sycl::host_accessor a_b(b);
     sycl::host_accessor a_c(c);
       for (int i = 0; i < size; i++) {
-        // int res = a_a[i] + a_b[i];
-        // int res = i + i + 1;
         int res = i;
         int val = a_c[i];
         assert(val == res);

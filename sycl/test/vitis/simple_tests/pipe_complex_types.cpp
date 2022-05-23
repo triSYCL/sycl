@@ -1,12 +1,11 @@
-/// clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw_emu test_pipe.cpp -o pipe.out -g
+// REQUIRES: vitis
 
-#include <CL/sycl.hpp>
+// RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
+// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
+// RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
+
+#include <sycl/sycl.hpp>
 #include <sycl/ext/intel/fpga_extensions.hpp>
-#include <type_traits>
-
-using Type = int;
-
-using namespace sycl;
 
 struct data {
   int i;
@@ -31,7 +30,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  using PipeA = cl::sycl::ext::intel::pipe<class PipeNameA, data>;
+  using PipeA = sycl::ext::intel::pipe<class PipeNameA, data>;
 
   q.submit([&](handler &cgh) {
     sycl::accessor a_a{a, cgh, sycl::read_only};

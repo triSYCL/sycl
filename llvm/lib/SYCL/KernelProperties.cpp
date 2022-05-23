@@ -105,6 +105,8 @@ Optional<KernelProperties::MemBankSpec> getUserSpecifiedBank(
 
 namespace llvm {
 bool KernelProperties::isArgBuffer(Argument *Arg, bool SyclHLSFlow) {
+  /// We consider that pointer arguments that are not byval or pipes are
+  /// buffers.
   if (sycl::isPipe(Arg))
     return false;
   if (Arg->getType()->isPointerTy() &&

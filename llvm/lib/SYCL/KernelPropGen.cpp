@@ -123,33 +123,45 @@ struct KernelPropGen : public ModulePass {
   }
 
   struct PipeEndpoint {
+    /// Name of the kernel function in IR.
     StringRef Kernel;
+    /// Name of the pipe function argument in IR.
     StringRef Arg;
   };
   struct PipeProp {
+    /// Depth it defaults to -1 to indicate it is unset
     int Depth = -1;
     PipeEndpoint write;
     PipeEndpoint read;
   };
 
+  /// Pipes are matched in read and write pairs by there ID. There ID is a
+  /// string matching the name of the global variable intel uses to identify its
+  /// pipes
   StringMap<PipeProp> PipeConnections;
 
-  void handlePipeConnections(Module &M) {
+  void collectPipeConnections(Module &M) {
     for (auto &F : M.functions())
       if (sycl::isKernelFunc(&F))
         for (auto &Arg : F.args())
           if (sycl::isPipe(&Arg)) {
+            /// Build the endpoint for this pipe
             PipeEndpoint endPoint{F.getName(), Arg.getName()};
             PipeProp &Prop = PipeConnections[sycl::getPipeID(&Arg)];
+
+            /// Figure out the correct endpoint to write to
             PipeEndpoint &mapEndPoint =
                 sycl::isReadPipe(&Arg) ? Prop.read : Prop.write;
             assert(mapEndPoint.Arg.empty() && mapEndPoint.Kernel.empty() &&
                    "multiple reader or writers");
             mapEndPoint = endPoint;
+
+            /// If the Depth is unset, set it
             if (Prop.Depth == -1)
               Prop.Depth = sycl::getPipeDepth(&Arg);
+
             assert(sycl::getPipeDepth(&Arg) == Prop.Depth &&
-                   "read & write depth not matching");
+                   "read and write depth not matching");
           }
   }
 
@@ -160,7 +172,7 @@ struct KernelPropGen : public ModulePass {
     bool SyclHlsFlow = Triple(M.getTargetTriple()).isXilinxHLS();
     bool VitisHlsFlow = Triple(M.getTargetTriple()).getArch() == llvm::Triple::vitis_ip;
 
-    handlePipeConnections(M);
+    collectPipeConnections(M);
 
     J.objectBegin();
     J.attributeBegin("pipe_connections");
@@ -214,6 +226,9 @@ struct KernelPropGen : public ModulePass {
         for (auto &Arg : F.args()) {
           if (VitisHlsFlow)
             continue;
+          /// Vitis's clang doesn't support string attributes on arguments which
+          /// we use to annotate a a pipe so we remove it here. we could
+          /// remove them in the downgrader instead
           if (sycl::isPipe(&Arg))
             sycl::removePipeAnnotation(&Arg);
           else if (KernelProperties::isArgBuffer(&Arg, SyclHlsFlow)) {

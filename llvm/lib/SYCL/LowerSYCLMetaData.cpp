@@ -23,7 +23,6 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallVector.h"
-#include "llvm/ADT/StringMap.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Analysis/LoopInfo.h"
 #include "llvm/Analysis/ValueTracking.h"
@@ -99,7 +98,6 @@ public:
 
   llvm::SmallDenseMap<Function *, std::unique_ptr<DominatorTree>, 16> DTCache;
   llvm::SmallDenseMap<Function *, std::unique_ptr<LoopInfo>, 16> LICache;
-  // llvm::SmallDenseSet<Function*, 8>
 
   Loop *findLoopAround(Instruction *I) {
     Function *F = I->getFunction();
@@ -330,15 +328,6 @@ public:
     }
   }
 
-  /// Add a function with the vitis_kernel annotation attribute as an HLS kernel
-  void markKernel(llvm::ConstantStruct *CS) {
-    auto *F = cast<Function>(getUnderlyingObject(CS->getAggregateElement(0u)));
-    F->addFnAttr("fpga.top.func", F->getName());
-    F->addFnAttr("fpga.demangled.name", F->getName());
-    F->setCallingConv(CallingConv::C);
-    F->setLinkage(llvm::GlobalValue::ExternalLinkage);
-  }
-
   /// @brief Check if a global annotation (from llvm.global.annotations)
   /// corresponds to a marker that has to be converted to an HLS-compatible
   /// annotation
@@ -376,8 +365,8 @@ public:
     auto Kind = KindInit->getRawDataValues();
     bool processed = false;
     if (Kind == kindOf("xilinx_ddr_bank") || Kind == kindOf("xilinx_hbm_bank"))
-        return;
-    auto* Payload = cast<ConstantStruct>(PayloadCst);
+      return;
+    auto *Payload = cast<ConstantStruct>(PayloadCst);
     if (AfterO3) { // Annotation that should wait after optimisation to be
                    // lowered
       if (Kind == kindOf("xilinx_unroll")) {
@@ -403,25 +392,30 @@ public:
   struct LocalAnnotationVisitor
       : public llvm::InstVisitor<LocalAnnotationVisitor> {
     LSMDState &Parent;
-    LLVMContext& Ctx;
+    LLVMContext &Ctx;
     IRBuilder<> Builder;
-    
-    using pipe_creation_rec_t = std::pair<llvm::Function *, llvm::CallBase *>;
-    llvm::SmallVector<pipe_creation_rec_t> PipeCreations;
+
+    struct PipeCreationT {
+      llvm::Function *Func;
+      llvm::CallBase *CB;
+    };
+    llvm::SmallVector<PipeCreationT> PipeCreations;
 
     /// Map the original version of a function to its most recent version.
     /// it should be used via getMostRecent
-    SmallDenseMap<Function*, Function*> MostRecentFunc;
+    SmallDenseMap<Function *, Function *> MostRecentFunc;
 
-    /// Map a GlobalValue* representing a 
-    SmallDenseMap<std::pair<GlobalValue*, Function*>, Argument*> PipeInFuncMap;
-    SmallVector<Function*> ToDelete;
+    /// Collection of functions to "delete" we dont do the deleting but allow
+    /// global DCE to do it
+    SmallVector<Function *> ToDelete;
 
-    LocalAnnotationVisitor(LSMDState &P) : Parent(P), Ctx(Parent.Ctx), Builder(Ctx) {}
+    LocalAnnotationVisitor(LSMDState &P)
+        : Parent(P), Ctx(Parent.Ctx), Builder(Ctx) {}
 
     void visitCallBase(CallBase &CB) {
       // Search for var_annotation having payload
-      if (CB.getIntrinsicID() != Intrinsic::var_annotation && CB.getCalledFunction()) {
+      if (CB.getIntrinsicID() != Intrinsic::var_annotation &&
+          CB.getCalledFunction()) {
         if (isFunc(CB.getCalledFunction(), "CreatePipeFromPipeStorage_")) {
           PipeCreations.emplace_back(CB.getFunction(), &CB);
         }
@@ -443,25 +437,29 @@ public:
                                      Payload);
     }
 
-    Function*& getMostRecent(Function* Func) {
+    Function *&getMostRecent(Function *Func) {
       assert(Func);
-      Function*& res = MostRecentFunc[Func];
+      Function *&res = MostRecentFunc[Func];
       if (!res)
         res = Func;
       return res;
     }
 
-    std::string getTypeStr(Type* T) {
+    /// Return a string unique to the provided Type
+    /// It is used to make Vitis HLS's function unique per type
+    std::string getUniqueTypeStr(Type *T) {
       std::string str;
       raw_string_ostream os(str);
       T->print(os);
-      return "p0" + str;
+      if (T->isSingleValueType())
+        return "b." + str;
+      return "u." + str;
     }
 
     Function *getPipeReadFunc(Type *ValTy) {
       Type *PipeTy = PointerType::get(ValTy, 0);
       std::string FuncName =
-          llvm::formatv("llvm.fpga.fifo.pop.{0}", getTypeStr(ValTy));
+          llvm::formatv("llvm.fpga.fifo.pop.{0}", getUniqueTypeStr(ValTy));
       FunctionType *FTy = FunctionType::get(ValTy, {PipeTy}, false);
       Function *Func = cast<Function>(
           Parent.M.getOrInsertFunction(FuncName, FTy).getCallee());
@@ -471,19 +469,19 @@ public:
     Function *getPipeWriteFunc(Type *ValTy) {
       Type *PipeTy = PointerType::get(ValTy, 0);
       std::string FuncName =
-          llvm::formatv("llvm.fpga.fifo.push.{0}", getTypeStr(ValTy));
-      FunctionType *FTy = FunctionType::get(Type::getVoidTy(Ctx), {ValTy, PipeTy},
-                              false);
+          llvm::formatv("llvm.fpga.fifo.push.{0}", getUniqueTypeStr(ValTy));
+      FunctionType *FTy =
+          FunctionType::get(Type::getVoidTy(Ctx), {ValTy, PipeTy}, false);
       Function *Func = cast<Function>(
           Parent.M.getOrInsertFunction(FuncName, FTy).getCallee());
       return Func;
     }
 
-    bool isReadPipe(CallBase* CB) {
+    bool isReadPipe(CallBase *CB) {
       return isFunc(CB->getCalledFunction(), "ReadPipeBlockingINTEL");
     }
 
-    bool isWritePipe(CallBase* CB) {
+    bool isWritePipe(CallBase *CB) {
       return isFunc(CB->getCalledFunction(), "WritePipeBlockingINTEL");
     }
 
@@ -497,7 +495,7 @@ public:
     }
 
     CallBase *replaceWritePipe(CallBase *Old, Value *Pipe) {
-      assert(isFunc(Old->getCalledFunction(), "WritePipeBlockingINTEL"));
+      assert(isWritePipe(Old));
       Type *ValTy = Pipe->getType()->getPointerElementType();
       auto *Load = Builder.CreateLoad(ValTy, Old->getArgOperand(1));
       auto *NewCall = Builder.CreateCall(getPipeWriteFunc(ValTy), {Load, Pipe});
@@ -555,8 +553,8 @@ public:
     }
 
     void traverseCallGraph(llvm::Function *Func,
-                                  function_ref<void(CallBase *)> OnCall = nullptr,
-                                  function_ref<void(Function *)> OnFunc = nullptr) {
+                           function_ref<void(CallBase *)> OnCall = nullptr,
+                           function_ref<void(Function *)> OnFunc = nullptr) {
       llvm::DenseSet<Function *> UniqueEdge;
       SmallVector<Function *> ToBeProcessed;
       ToBeProcessed.push_back(Func);
@@ -581,9 +579,10 @@ public:
     void handlePipeCreations(llvm::Function *Orig,
                              llvm::ArrayRef<CallBase *> Creations) {
       /// Most of the implementation for interprocedural rewrites is done but
-      /// since it is rarely useful and not properly tested it is disable
-      assert(sycl::isKernelFunc(Orig) && "interprocedural rewrites are not yet supported");
-      Function* Func = getMostRecent(Orig);
+      /// since it is rarely useful and not properly tested it is disabled
+      assert(sycl::isKernelFunc(Orig) &&
+             "interprocedural rewrites are not yet supported");
+      Function *Func = getMostRecent(Orig);
 
       struct PipeInfo {
         bool isRead;
@@ -591,9 +590,14 @@ public:
         std::string ID;
       };
 
+      /// Types of arguments representing pipes to we are adding to the function
       llvm::SmallVector<llvm::Type *> ExtraTypes;
+      /// Information about the pipes we are adding used during interprocedural
+      /// rewrites
       llvm::SmallVector<PipeInfo> PipeInfos;
 
+      /// Add the correct pipe annotation iff Pipe is an argument of the
+      /// top-level kernel function
       auto maybeAnnotatePipe = [&](int idx, Argument *Pipe) {
         if (sycl::isKernelFunc(Pipe->getParent())) {
           insertStreamInterfaceSideEffect(Pipe);
@@ -607,51 +611,76 @@ public:
         }
       };
 
+      /// Collect the types of the pipes in the function
       for (auto *CB : Creations)
         ExtraTypes.push_back(detectPipeType(CB));
 
+      /// Generate the new function with the extra augments
+      /// But this function will still have the old IR
       llvm::ValueToValueMapTy ValMap;
-      auto *NewFunc = duplicateFunctionWithExtraArgs(Orig, Func, ExtraTypes, ValMap);
+      auto *NewFunc =
+          duplicateFunctionWithExtraArgs(Orig, Func, ExtraTypes, ValMap);
 
+      /// Update the body of the new function
       for (size_t i = 0; i < Creations.size(); ++i) {
+        /// extra arguments are added to the end so we only look at arguments
+        /// after Func->arg_size()
         Argument *Pipe = NewFunc->getArg(Func->arg_size() + i);
-        if (sycl::isKernelFunc(Func))
-          insertStreamInterfaceSideEffect(Pipe);
+
         auto OldCreate = Creations[i];
+        /// the ValMap maps Values from the old function into the new one.
+        /// We lookup into it to find the new Creation
         auto *newCB = cast<CallBase>(ValMap[OldCreate]);
+
         PipeInfo PInfo;
-        GlobalVariable* PipeStorage = cast<GlobalVariable>(OldCreate->getArgOperand(0));
+        /// The storage in Intel pipes is represented by a global variable
+        /// provided to the call of CreatePipeFromPipeStorage_*
+        GlobalVariable *PipeStorage =
+            cast<GlobalVariable>(OldCreate->getArgOperand(0));
+
+        /// The storage is unique to 1 pipe and the name of all global variable
+        /// must be distinct so the name of the storage is unique to the pipe.
+        /// and is used as identifier to by the pipe connection later.
         PInfo.ID = PipeStorage->getName().str();
         PInfo.Depth = cast<ConstantInt>(
-                        cast<ConstantStruct>(PipeStorage->getInitializer())
-                            ->getOperand(2))
-                        ->getSExtValue();
+                          cast<ConstantStruct>(PipeStorage->getInitializer())
+                              ->getOperand(2))
+                          ->getSExtValue();
+
         Builder.SetInsertPoint(newCB);
         bool hasRead = false;
         bool hasWrite = false;
+
+        /// We remove the instructions while we iterate over them so we use
+        /// llvm::make_early_inc_range
         for (auto *User : llvm::make_early_inc_range(newCB->users())) {
+          /// Here we replace SPIRV intrinsics to read and write to pipes by
+          /// ours (the one of Vitis HLS)
           auto *CB = cast<CallBase>(User);
           if (isReadPipe(CB)) {
             hasRead = true;
             replaceReadPipe(CB, Pipe);
-          }
-          else {
+          } else {
             hasWrite = true;
             replaceWritePipe(CB, Pipe);
           }
-          assert(hasRead ^ hasWrite && "cannot read an write in the same pipe in the same kernel");
+
+          assert(hasRead ^ hasWrite &&
+                 "cannot read and write in the same pipe in the same kernel");
           PInfo.isRead = hasRead;
           PipeInfos.push_back(PInfo);
+
+          /// Add annotation iff we are not doing and interprocedural rewrite
           maybeAnnotatePipe(i, Pipe);
         }
         newCB->eraseFromParent();
       }
 
-      /// Rewrite the all function and call that can transitively call Func
+      /// Rewrite all the functions and calls that can transitively call Func
       /// Collection of Nodes to modify
-      SmallVector<Function*> FunctionToDuplicate;
+      SmallVector<Function *> FunctionToDuplicate;
       /// Collection of Edges to modify
-      SmallVector<CallBase*> CallsToRewrite;
+      SmallVector<CallBase *> CallsToRewrite;
 
       /// Fill the collections
       traverseCallGraph(
@@ -667,18 +696,26 @@ public:
         for (unsigned i = 0; i < ExtraTypes.size(); i++) {
           Argument *Arg =
               newCaller->getArg(i + newCaller->arg_size() - ExtraTypes.size());
+          /// Add annotation iff we are the top-level kernel
           maybeAnnotatePipe(i, Arg);
         }
         ToDelete.push_back(Caller);
       }
 
-      /// Edits the Calls
+      /// Replace calls to the old function by calls to the new function
       for (CallBase *CB : CallsToRewrite) {
-        Value *Val = ValMap[CB];
-        auto *CBInNewFunc = cast<CallBase>(Val);
+        /// Lookup the ValMap to get the call in the new function to an old
+        /// function
+        auto *CBInNewFunc = cast<CallBase>(ValMap[CB]);
+
         Function *newCaller = getMostRecent(CB->getFunction());
+        /// Get the new function we need to call
         Function *newCallee = getMostRecent(CB->getCalledFunction());
+
+        /// Build a param list from the old parameters
         SmallVector<Value *> newParam(CB->arg_begin(), CB->arg_end());
+
+        /// Add the pipes we are propagating
         for (unsigned i = 0; i < ExtraTypes.size(); i++) {
           Argument *Arg =
               newCaller->getArg(i + newCaller->arg_size() - ExtraTypes.size());
@@ -686,8 +723,11 @@ public:
         }
 
         Builder.SetInsertPoint(CBInNewFunc);
+        /// Build the new call
         auto *newCB = Builder.CreateCall(newCallee, newParam);
+        /// replace the old
         CBInNewFunc->replaceAllUsesWith(newCB);
+        /// delete the old
         CBInNewFunc->eraseFromParent();
       }
 
@@ -699,22 +739,20 @@ public:
         return;
 
       std::sort(PipeCreations.begin(), PipeCreations.end());
-      using pipe_creat_coll = llvm::SmallVector<CallBase *>;
-      pipe_creat_coll collection{};
-      llvm::Function *cur_kernel = PipeCreations[0].first;
+      llvm::SmallVector<CallBase *> collection;
+      llvm::Function *cur_kernel = PipeCreations[0].Func;
       for (auto &elem : PipeCreations) {
-        if (elem.first == cur_kernel) {
-          collection.push_back(elem.second);
-        } else {
+        if (elem.Func != cur_kernel) {
           handlePipeCreations(cur_kernel, collection);
-          cur_kernel = elem.first;
-          collection = pipe_creat_coll{elem.second};
+          cur_kernel = elem.Func;
+          collection.clear();
         }
+        collection.push_back(elem.CB);
       }
       handlePipeCreations(cur_kernel, collection);
 
-      /// This will not delete the old call graph but make it such that i
-      /// can be deleted by global dce
+      /// This will not delete the old call graph but make it such that it
+      /// can be deleted by global DCE
       for (auto *F : ToDelete)
         sycl::removeKernelFuncAnnotation(F);
     }
