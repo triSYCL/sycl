@@ -12,20 +12,6 @@ installed on an `x86_64` machine. But it might work with other recent
 versions of Ubuntu or Debian or even other Linux distributions, with
 some adaptations.
 
-> :warning: if you are using Linux kernel 5.12+ like shipped with
-> Ubuntu 21.10 or Debian/unstable, you will be hit by the bug
-> https://github.com/Xilinx/XRT/issues/5943 up to its resolution.  In
-> the meantime you can always help fixing the bug :-) or install/keep
-> explicitly an older Linux kernel package and boot on it, like
-> explained in [section Boot on a specific
-> kernel](#boot-specific-kernel).
-
-
-> :warning: for some reason Ubuntu 21.04 ships an old version of XRT
-> which is not to be used here. See [section about
-> XRT](#installing-the-xilinx-xrt-runtime).
-
-
 ## What's new?
 
 - 2021/06/24: there is a new HLS target along the OpenCL/SPIR compiler
@@ -264,18 +250,6 @@ XRT calls, try compiling with `./dbg.sh -noccache`.
 >
 > ```bash
 > sudo modprobe --all xocl xclmgmt
-> ```
-
-> :warning: for some reason Ubuntu 21.04 ships an old version of XRT
-> which is not to be used here. Even if you have installed it like
-> above, it might be automatically "updated" by some automatic package
-> updater running on a regular basis because the package use an
-> alternate versioning. So, if you are running Ubuntu 21.04, to avoid
-> this situation, you can put the package on hold after the
-> installation with:
->
-> ```bash
-> sudo apt-mark hold xrt
 > ```
 
 Check that the FPGA board is detected:
