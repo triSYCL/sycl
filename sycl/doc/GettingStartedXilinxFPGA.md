@@ -846,6 +846,13 @@ Validation completed
 
 ## Compile the SYCL compiler
 
+Some packages are required to use the compiler. It can be done for
+example on Debian/Ubuntu with:
+```bash
+sudo apt update
+sudo apt install python3-posix-ipc
+```
+
 Building SYCL can be done with Python scripts:
 
 ```bash
