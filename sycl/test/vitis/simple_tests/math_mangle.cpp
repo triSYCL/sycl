@@ -35,7 +35,7 @@ int main(int argc, char* argv[]) {
   q.submit([&](handler &cgh) {
     auto wb = test_buffer.get_access<access::mode::write>(cgh);
 
-    cgh.single_task<math_mangle>([=]() {
+    cgh.single_task<math_mangle>([=] {
       wb[0] = cl::sycl::sqrt(10.0f);
       wb[1] = cl::sycl::fabs(-10.0f);
       wb[2] = cl::sycl::sin(10.0f);

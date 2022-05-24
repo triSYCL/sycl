@@ -101,7 +101,7 @@ int main() {
     q.submit([&](handler &cgh) {
       accessor<int, 2, access::mode::write, access::target::global_buffer>
           accessorFrom(idc, cgh, range<2>(Size, Size));
-      cgh.single_task<noop>([=](){
+      cgh.single_task<noop>([=]{
         accessorFrom[0][0] = 1;
       });
     });

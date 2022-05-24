@@ -40,7 +40,7 @@ auto main() -> int {
 
   q.submit([&](cl::sycl::handler &cgh) {
     auto s = s_buf.get_access<cl::sycl::access::mode::read_write>(cgh);
-    cgh.single_task<kernel>([=]() {
+    cgh.single_task<kernel>([=] {
       // a little bit unusual but trying to keep inline with the original
       // contrived example!
       for (unsigned int i = 0; i < s.get_range()[0]; ++i)

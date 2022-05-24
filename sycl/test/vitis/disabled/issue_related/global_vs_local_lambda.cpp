@@ -13,12 +13,12 @@ using namespace cl::sycl;
 
 auto do_global = [](){};
 int main() {
-  auto do_local = [=](){};
+  auto do_local = [=]{};
 
   queue q;
 
   q.submit([&](handler &cgh) {
-    cgh.single_task<class event_wait>([=]() {
+    cgh.single_task<class event_wait>([=] {
       do_local();
       do_global();
     });

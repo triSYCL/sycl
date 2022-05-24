@@ -35,7 +35,7 @@ int main() {
   q.submit([&](handler &cgh) {
       auto wb = ob.get_access<access::mode::write>(cgh);
 
-      cgh.single_task<class constexpr_carryover>([=]() {
+      cgh.single_task<class constexpr_carryover>([=] {
         wb[0] = host_to_device;
         wb[1] = try_capture;
         wb[2] = add(host_to_device, try_capture);

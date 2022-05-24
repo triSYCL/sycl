@@ -62,7 +62,7 @@ int main(int argc, char* argv[]) {
     auto pixel_rb = ib.get_access<access::mode::read>(cgh);
     auto pixel_wb = ob.get_access<access::mode::write>(cgh);
 
-    cgh.single_task<class median_filter>([=]() {
+    cgh.single_task<class median_filter>([=] {
       printf("single_task 1 launched");
       printf("%d \n", wh_rb[0]);
       printf("%d \n", wh_rb[1]);

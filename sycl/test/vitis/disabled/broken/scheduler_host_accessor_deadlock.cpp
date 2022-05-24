@@ -40,7 +40,7 @@ int main() {
 //{
   q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::read_write>(cgh);
-    cgh.single_task<k1>([=]() {
+    cgh.single_task<k1>([=] {
       wb[0] += 1;
     });
   });
@@ -52,7 +52,7 @@ int main() {
 //{
   q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::read_write>(cgh);
-    cgh.single_task<k2>([=]() {
+    cgh.single_task<k2>([=] {
       wb[0] += 1;
     });
   });

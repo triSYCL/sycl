@@ -36,7 +36,7 @@ int main(int argc, char *argv[]) {
 
   q.submit([&](handler &cgh) {
     sycl::accessor a_a{a, cgh, sycl::read_only};
-    cgh.single_task([=]() {
+    cgh.single_task([=] {
       for (unsigned int i = 0; i < size; ++i) {
         writeA(a_a[i]);
       }
@@ -44,7 +44,7 @@ int main(int argc, char *argv[]) {
   });
   q.submit([&](handler &cgh) {
     sycl::accessor a_c{c, cgh, sycl::write_only};
-    cgh.single_task([=]() {
+    cgh.single_task([=] {
       for (unsigned int i = 0; i < size; ++i) {
         a_c[i] = readA();
       }

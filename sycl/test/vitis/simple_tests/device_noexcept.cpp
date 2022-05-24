@@ -42,7 +42,7 @@ int main() {
 
   q.submit([&](handler &cgh) {
       auto wb = ob.get_access<access::mode::write>(cgh);
-      cgh.single_task<exceptions_on_device>([=]() {
+      cgh.single_task<exceptions_on_device>([=] {
         invoke([&]() noexcept {
             wb[0] += return_v();
           }

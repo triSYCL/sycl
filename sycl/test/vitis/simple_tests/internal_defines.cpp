@@ -48,7 +48,7 @@ int main() {
   
   q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::write>(cgh);
-    cgh.single_task<class add>([=]() {
+    cgh.single_task<class add>([=] {
 #ifdef __SYCL_SPIR_DEVICE__
       wb[0] = 1;
 #else

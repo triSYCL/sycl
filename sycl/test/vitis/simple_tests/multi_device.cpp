@@ -24,7 +24,7 @@ template<typename Selector> void test_device(Selector s) {
     // Getting write only access to the buffer on a device
     auto Accessor = Buffer.get_access<sycl::access::mode::write>(cgh);
     // Executing kernel
-    cgh.single_task<FillBuffer<Selector>>([=]() {
+    cgh.single_task<FillBuffer<Selector>>([=] {
                                              for (std::size_t i = 0 ; i < size ; ++i) {
                                                  Accessor[i] = i;
                                              }

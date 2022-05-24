@@ -46,7 +46,7 @@ auto main() -> int {
   q.submit([&](cl::sycl::handler &cgh) {
     auto s = s_buf.get_access<cl::sycl::access::mode::read_write>(cgh);
 
-    cgh.single_task<burst_test>([=]() { loop(s); });
+    cgh.single_task<burst_test>([=] { loop(s); });
   });
   q.wait();
 

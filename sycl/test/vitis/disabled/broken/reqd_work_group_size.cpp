@@ -129,7 +129,7 @@ int main() {
       auto wb = ob.get_access<access::mode::write>(cgh);
       cgh.single_task<
           xilinx::reqd_work_group_size<1, 1, 1, reqd_work_group_size_test2>>(
-          [=]() { wb[0] = 2; });
+          [=] { wb[0] = 2; });
     });
 
     auto rb = ob.get_access<access::mode::read>();
@@ -319,7 +319,7 @@ int main() {
     q.submit([&](handler &cgh) {
       auto wb = ob.get_access<access::mode::write>(cgh);
       cgh.single_task<reqd_work_group_size_test10>(
-          [=]() { wb[0] = 10; });
+          [=] { wb[0] = 10; });
     });
 
     auto rb = ob.get_access<access::mode::read>();
