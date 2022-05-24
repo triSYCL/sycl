@@ -71,7 +71,7 @@ set_target_properties(check-sycl-vitis-cpu PROPERTIES FOLDER "SYCL tests")
 add_lit_testsuite(check-sycl-vitis "Running the SYCL regression tests for sycl-vitis hw_emu"
   ${CMAKE_CURRENT_BINARY_DIR}/vitis
   ARGS ${RT_TEST_ARGS}
-  PARAMS "XOCC=only;SYCL_TRIPLE=fpga64_hls_hw_emu-xilinx-linux;SYCL_PLUGIN=opencl"
+  PARAMS "VITIS=only;SYCL_TRIPLE=fpga64_hls_hw_emu-xilinx-linux;SYCL_PLUGIN=opencl"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )
@@ -80,7 +80,7 @@ set_target_properties(check-sycl-vitis PROPERTIES FOLDER "SYCL tests")
 add_lit_testsuite(check-sycl-xrt "Running the SYCL regression tests for sycl-vitis hw_emu"
   ${CMAKE_CURRENT_BINARY_DIR}/vitis
   ARGS ${RT_TEST_ARGS}
-  PARAMS "XOCC=only;SYCL_TRIPLE=fpga64_hls_hw_emu-xilinx-linux;SYCL_PLUGIN=xrt"
+  PARAMS "VITIS=only;SYCL_TRIPLE=fpga64_hls_hw_emu-xilinx-linux;SYCL_PLUGIN=xrt"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )
@@ -89,7 +89,7 @@ set_target_properties(check-sycl-xrt PROPERTIES FOLDER "SYCL tests")
 add_lit_testsuite(check-sycl-vitis-hw "Running the SYCL regression tests for sycl-vitis hw"
   ${CMAKE_CURRENT_BINARY_DIR}/vitis
   ARGS ${RT_TEST_ARGS}
-  PARAMS "XOCC=only;SYCL_TRIPLE=fpga64_hls_hw-xilinx-linux;SYCL_PLUGIN=opencl"
+  PARAMS "VITIS=only;SYCL_TRIPLE=fpga64_hls_hw-xilinx-linux;SYCL_PLUGIN=opencl"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )
@@ -98,7 +98,7 @@ set_target_properties(check-sycl-vitis PROPERTIES FOLDER "SYCL tests")
 add_lit_testsuite(check-sycl-xrt-hw "Running the SYCL regression tests for sycl-vitis hw"
   ${CMAKE_CURRENT_BINARY_DIR}/vitis
   ARGS ${RT_TEST_ARGS}
-  PARAMS "XOCC=only;SYCL_TRIPLE=fpga64_hls_hw-xilinx-linux;SYCL_PLUGIN=xrt"
+  PARAMS "VITIS=only;SYCL_TRIPLE=fpga64_hls_hw-xilinx-linux;SYCL_PLUGIN=xrt"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )

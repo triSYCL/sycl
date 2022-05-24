@@ -1538,7 +1538,7 @@ To run a test from the test suite in isolation, use:
 
 ```bash
 # The SYCL_TRIPLE variable can be changed to select hw or hw_emu, and the SYCL_PLUGIN can be changed to select opencl or xrt
-/path/to/build/dir/bin/llvm-lit -v --param XOCC=only --param SYCL_TRIPLE=fpga64_hls_hw_emu-xilinx-linux --param SYCL_PLUGIN=xrt path/to/test.cpp
+/path/to/build/dir/bin/llvm-lit -v --param VITIS=only --param SYCL_TRIPLE=fpga64_hls_hw_emu-xilinx-linux --param SYCL_PLUGIN=xrt path/to/test.cpp
 ```
 
 where all tests utilities must have been build for this to work.

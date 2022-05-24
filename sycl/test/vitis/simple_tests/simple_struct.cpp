@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
@@ -6,10 +6,10 @@
 
 #include <CL/sycl.hpp>
 
-// A regression test case that used to trigger an ICE in XOCC's aggressive dead
-// code elimination pass. It was originally related an address space cast based
-// on the Accessor[Index] trying to access some "external" struct data/not in
-// the same address space. The problem was fixed by some tweaks inside of the
+// A regression test case that used to trigger an ICE in Vitis HLS's aggressive
+// dead code elimination pass. It was originally related an address space cast
+// based on the Accessor[Index] trying to access some "external" struct data/not
+// in the same address space. The problem was fixed by some tweaks inside of the
 // accessor class and a transition towards the InferAddressSpaces pass.
 //
 // This example now simply assigns the index value to each element of the

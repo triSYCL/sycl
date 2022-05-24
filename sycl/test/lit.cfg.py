@@ -39,7 +39,7 @@ config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
 # Propagate some variables from the host environment.
 llvm_config.with_system_environment(['PATH', 'OCL_ICD_FILENAMES', 'SYCL_DEVICE_ALLOWLIST', 'SYCL_CONFIG_FILE_NAME', 'SYCL_PI_TRACE'])
 
-xocc=lit_config.params.get('XOCC', "off")
+vitis=lit_config.params.get('VITIS', "off")
 
 # Propagate extra environment variables
 if config.extra_environment:
@@ -141,7 +141,7 @@ filter=lit_config.params.get('SYCL_PLUGIN', "opencl")
 lit_config.note("Filter: {}".format(filter))
 
 acc_run_substitute=f"env SYCL_DEVICE_FILTER={filter} "
-if xocc != "off" and xocc != "cpu":
+if vitis != "off" and vitis != "cpu":
     # Clean up the named semaphore in case the previous test did not clean up properly.
     # If someone tries to run multiple tests on the same machine this could cause issues.
     os.system("rm -rf /dev/shm/sem.sycl_vxx.py")
@@ -162,7 +162,7 @@ if xocc != "off" and xocc != "cpu":
 config.substitutions.append( ('%ACC_RUN_PLACEHOLDER', acc_run_substitute) )
 
 timeout = 600
-if xocc == "off":
+if vitis == "off":
     config.excludes += ['vitis']
 else:
     if xocc == "cpu":
@@ -174,7 +174,7 @@ else:
     required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]
     has_error=False
     lit_config.note(f"XILINX_HLS={os.environ['XILINX_HLS']}")
-    config.available_features.add("xocc")
+    config.available_features.add("vitis")
     feat_list = ",".join(config.available_features)
     lit_config.note(f"Features: {feat_list}")
     pkg_opencv4 = subprocess.run(["pkg-config", "--libs", "--cflags", "opencv4"], stdout=subprocess.PIPE)
@@ -188,9 +188,9 @@ else:
             lit_config.note("missing environnement variable: {}".format(env))
             has_error=True
     if has_error:
-        lit_config.error("Can't configure tests for XOCC")
+        lit_config.error("Can't configure tests for Vitis")
     llvm_config.with_system_environment(required_env)
-    if xocc == "only":
+    if vitis == "only":
         config.excludes += ['basic_tests', 'extentions', 'online_compiler', 'plugins']
     # run_if_* defaults to a simple echo to print the comand instead of running it.
     # it will be replaced by and empty string to actually run the command.

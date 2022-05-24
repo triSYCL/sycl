@@ -1,4 +1,4 @@
-// REQUIRES: xocc, spir
+// REQUIRES: vitis, spir
 // XFAIL: hw
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir

@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 // REQUIRES: spir
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
@@ -95,8 +95,8 @@ int main() {
     const size_t Size = 20;
     int Data[Size] = {0};
     // This showcases another issue we have just now, all Kernels HAVE to have
-    // a minimum of 1 accessor or the xocc compiler will complain as there is no
-    // buffer associated with m_axi_gmem
+    // a minimum of 1 accessor or the Vitis HLS compiler will complain as there
+    // is no buffer associated with m_axi_gmem
     buffer<int, 2> idc((int *)Data, range<2>(Size, Size));
     q.submit([&](handler &cgh) {
       accessor<int, 2, access::mode::write, access::target::global_buffer>

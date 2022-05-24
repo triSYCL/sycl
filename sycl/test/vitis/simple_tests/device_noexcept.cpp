@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
@@ -14,7 +14,7 @@
   exceptions were not appropriately switched off or handled in the compiler.
 
   The device should be compiled with no exception related code, exception
-  related IR can lead to choking of the LLVM-SPIRV translator or the xocc
+  related IR can lead to choking of the LLVM-SPIRV translator or the Vitis HLS
   backend in some cases.
 
   If this test case is broken, the test will most likely ICE and you'll know

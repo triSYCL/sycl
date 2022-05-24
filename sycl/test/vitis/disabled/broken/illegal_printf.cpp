@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: true
 // TODO Move to Sema

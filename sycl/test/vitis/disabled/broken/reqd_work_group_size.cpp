@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
 // XFAIL
@@ -21,7 +21,7 @@
   kernels execute).
 
   The kernels that should fail on execution for Xilinx devices are numbers 6,7,8
-  and 9. Compiling without XOCC/Xilinx related flags results in the property
+  and 9. Compiling without Vitis/Xilinx related flags results in the property
   being ignored for now.
 
   You can also run this with Intel devices (provided std C++17), but the test is

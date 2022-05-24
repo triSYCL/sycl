@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
@@ -6,7 +6,7 @@
 
 /*
   Test to see if the world will explode when using SPIR built-ins that are
-  derived from those in cl__spirv on Xilinx FPGAs when compiling using xocc.
+  derived from those in cl__spirv on Xilinx FPGAs when compiling using Vitis HLS.
 */
 #include <CL/sycl.hpp>
 #include <iostream>

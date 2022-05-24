@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -std=c++20 %s -S -emit-llvm -o %t.bundled.ll
 // RUN: %clang_offload_bundler --unbundle --type=ll --targets=sycl-%sycl_triple --inputs %t.bundled.ll --outputs %t.ll

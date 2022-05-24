@@ -1,4 +1,4 @@
-// REQUIRES: xocc && opencv4
+// REQUIRES: vitis && opencv4
 
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple -o %t.out %s %opencv4_flags
 // RUN: %run_if_hw %ACC_RUN_PLACEHOLDER %t.out %S/data/input/eiffel.bmp
@@ -15,7 +15,7 @@
   $ISYCL_BIN_DIR/clang++ -std=c++2a -fsycl edge_detection.cpp -o \
     edge_detection -lOpenCL `pkg-config --libs opencv`
 
-  XOCC compile command:
+  compile command:
   $ISYCL_BIN_DIR/clang++ -std=c++2a -fsycl \
     -fsycl-targets=fpga64-xilinx-unknown-sycldevice edge_detection.cpp \
     -o edge_detection -lOpenCL `pkg-config --libs opencv` \

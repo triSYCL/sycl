@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
@@ -6,7 +6,7 @@
 
 /*
   This test is similar to id_mangle.cpp in that it's mostly for testing the
-  correct generation of SPIR built-ins when compiling for xocc. Incorrect
+  correct generation of SPIR built-ins when compiling for Vitis HLS. Incorrect
   generation can result in linker errors, run-time ABI errors or incorrect
   output.
 
