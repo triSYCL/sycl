@@ -20,10 +20,10 @@
   If this test case is broken, the test will most likely ICE and you'll know
   about it the hard-way unfortunately!
 */
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 class exceptions_on_device;
 

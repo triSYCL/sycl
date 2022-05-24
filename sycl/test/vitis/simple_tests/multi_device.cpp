@@ -6,7 +6,7 @@
 
 // RUN: %ACC_RUN_PLACEHOLDER env --unset=SYCL_DEVICE_FILTER %t.dir/exec.out
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 constexpr unsigned int size = 12;
 

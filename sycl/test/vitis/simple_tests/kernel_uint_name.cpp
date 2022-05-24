@@ -14,14 +14,14 @@
 // instance.
 
 #include <cstdint>
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 
 
 template <std::uint32_t Var>
 struct foo
 {
-    cl::sycl::accessor<int, 1, cl::sycl::access::mode::read_write> acc;
+    sycl::accessor<int, 1, sycl::access::mode::read_write> acc;
 
     auto operator()() const
     {
@@ -32,19 +32,19 @@ struct foo
 
 auto main() -> int
 {
-    auto queue = cl::sycl::queue{};
+    auto queue = sycl::queue{};
 
-    auto buf = cl::sycl::buffer<int>{cl::sycl::range<1>{1024}};
+    auto buf = sycl::buffer<int>{sycl::range<1>{1024}};
 
-    queue.submit([&](cl::sycl::handler& cgh)
+    queue.submit([&](sycl::handler& cgh)
     {
-        auto acc = buf.get_access<cl::sycl::access::mode::read_write>(cgh);
+        auto acc = buf.get_access<sycl::access::mode::read_write>(cgh);
 
         auto kernel = foo<42>{acc};
         cgh.single_task<foo<42>>(kernel);
     });
 
-    auto rb = buf.get_access<cl::sycl::access::mode::read>();
+    auto rb = buf.get_access<sycl::access::mode::read>();
 
     for (int i = 0; i < buf.size(); ++i) {
       assert(rb[i] == 42 && " execution of kernel is invalid");

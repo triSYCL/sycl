@@ -1,5 +1,5 @@
 // RUN: true
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 #include <boost/hana.hpp>
 #include <iostream>
@@ -7,7 +7,7 @@
 // This test cases showcases a boost hana / SYCL kernel IR issue it should be
 // compiled with: -Xclang -fsycl-allow-func-ptr, otherwise Clang diagnostics
 // will diagnose errors
-using namespace cl::sycl;
+using namespace sycl;
 
 constexpr size_t N = 5;
 

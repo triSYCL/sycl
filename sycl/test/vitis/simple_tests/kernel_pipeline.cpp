@@ -4,7 +4,7 @@
 // RUN: %clang_offload_bundler --unbundle --type=ll --targets=sycl-%sycl_triple --inputs %t.bundled.ll --outputs %t.ll
 // RUN: cat %t.ll | FileCheck %s
 
-#include <sycl/sycl.hpp>
+#include <sysycl/sycl.hpp>
 #include <sycl/ext/xilinx/fpga.hpp>
 #include <array>
 #include <iostream>

@@ -11,10 +11,10 @@
   to be broken).
 */
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 int add(int v1, int v2) {
   return v1 + v2;

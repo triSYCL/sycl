@@ -2,7 +2,7 @@
 
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -std=c++20 %s -o %t.out 2>&1 | tee %t.dump | FileCheck %s
 
-#include <sycl/sycl.hpp>
+#include <sysycl/sycl.hpp>
 #include <sycl/ext/xilinx/fpga.hpp>
 #include <array>
 #include <iostream>

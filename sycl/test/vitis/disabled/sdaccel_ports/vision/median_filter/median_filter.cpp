@@ -15,14 +15,14 @@
      -I/opt/xilinx/xrt/include/
 */
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <iostream>
 
 #include <opencv2/opencv.hpp>
 
 #include "../../../utilities/device_selectors.hpp"
 
-using namespace cl::sycl;
+using namespace sycl;
 
 // very wip implementation of the median_filter SDAccel example
 int main(int argc, char* argv[]) {

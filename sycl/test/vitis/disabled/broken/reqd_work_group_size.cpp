@@ -53,11 +53,11 @@
   CL_INVALID_WORK_GROUP_SIZE error.
 */
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <iostream>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 // Forward declaring some class names that are similar to the property name to
 // make sure that it's not inaccurately chosen

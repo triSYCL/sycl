@@ -25,7 +25,7 @@
   OpenCL API failed. /storage/ogozillo/intel-sycl/sycl/sycl/source/detail/
     memory_manager.cpp:243: OpenCL API returns: -6 (CL_OUT_OF_HOST_MEMORY)
   [XRT] ERROR: Internal error. cl_mem doesn't map to buffer object
-  terminate called after throwing an instance of 'cl::sycl::runtime_error'
+  terminate called after throwing an instance of 'sycl::runtime_error'
   free(): corrupted unsorted chunks
 
   \TODO fix the 2D/3D Copy for XRT
@@ -34,10 +34,10 @@
 #include <numeric>
 #include <vector>
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 int main()
 {
@@ -48,7 +48,7 @@ int main()
   std::vector<int> v(nElems);
   std::iota(std::begin(v), std::end(v), 0);
 
-  buffer<int, 1> b{cl::sycl::range<1>(nElems)};
+  buffer<int, 1> b{sycl::range<1>(nElems)};
 
   q.submit([&](handler& cgh) {
     accessor<int, 1, access::mode::write, access::target::global_buffer>

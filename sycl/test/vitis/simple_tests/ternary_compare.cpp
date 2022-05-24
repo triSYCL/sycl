@@ -15,9 +15,9 @@
    value to the buffer.
 */
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
-using namespace cl::sycl;
+using namespace sycl;
 
 class issue_69;
 
@@ -29,7 +29,7 @@ auto cmp(std::size_t &large, std::size_t small) {
 auto main() -> int {
   queue q;
 
-  auto s_buf = cl::sycl::buffer<std::size_t, 3>{cl::sycl::range<3>{5, 5, 5}};
+  auto s_buf = sycl::buffer<std::size_t, 3>{sycl::range<3>{5, 5, 5}};
   {
     auto s_w = s_buf.get_access<access::mode::write>();
     for (unsigned int i = 0; i < s_w.get_range()[0]; ++i)
@@ -38,15 +38,15 @@ auto main() -> int {
           s_w[i][j][k] = 42;
   }
 
-  q.submit([&](cl::sycl::handler &cgh) {
-    auto s = s_buf.get_access<cl::sycl::access::mode::read_write>(cgh);
+  q.submit([&](sycl::handler &cgh) {
+    auto s = s_buf.get_access<sycl::access::mode::read_write>(cgh);
     cgh.single_task<kernel>([=] {
       // a little bit unusual but trying to keep inline with the original
       // contrived example!
       for (unsigned int i = 0; i < s.get_range()[0]; ++i)
         for (unsigned int j = 0; j < s.get_range()[1]; ++j)
           for (unsigned int k = 0; k < s.get_range()[2]; ++k) {
-            const auto id = cl::sycl::id<3>{i, j, k};
+            const auto id = sycl::id<3>{i, j, k};
             s[id] = cmp(s[id], 40);
           }
     });

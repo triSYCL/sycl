@@ -5,11 +5,11 @@
 */
 // TODO Move to Sema
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <iostream>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 auto do_global = [](){};
 int main() {

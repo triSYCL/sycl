@@ -4,7 +4,7 @@
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 // A regression test case that used to trigger an ICE in Vitis HLS's aggressive
 // dead code elimination pass. It was originally related an address space cast
@@ -15,7 +15,7 @@
 // This example now simply assigns the index value to each element of the
 // strucutre via copy constructor and then checks if the values were properly
 // assigned via the overloaded equality operator on the host.
-using namespace cl::sycl;
+using namespace sycl;
 
 template <typename T>
 struct point {

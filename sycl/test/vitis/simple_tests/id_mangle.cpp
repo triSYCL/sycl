@@ -8,13 +8,13 @@
   Test to see if the world will explode when using SPIR built-ins that are
   derived from those in cl__spirv on Xilinx FPGAs when compiling using Vitis HLS.
 */
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <iostream>
 #include <numeric>
 #include <vector>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 class id_mangle;
 

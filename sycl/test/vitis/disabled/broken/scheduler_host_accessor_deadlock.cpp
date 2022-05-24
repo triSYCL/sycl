@@ -18,11 +18,11 @@
   correct interactions with the scheduler for various runtimes
 */
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <iostream>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 class k1;
 class k2;
 
@@ -36,7 +36,7 @@ int main() {
   std::cout << "Device is CPU: " << q.get_device().is_cpu() << std::endl;
 
   int arr[1]{0};
-  cl::sycl::buffer<int, 1> ob(arr, 1);
+  sycl::buffer<int, 1> ob(arr, 1);
 //{
   q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::read_write>(cgh);

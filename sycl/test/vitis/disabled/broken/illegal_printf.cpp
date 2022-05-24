@@ -3,7 +3,7 @@
 // RUN: true
 // TODO Move to Sema
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 
 /*
@@ -16,7 +16,7 @@
   emulation for Xilinx FPGA, but not on Intel CPU/GPU devices)
 */
 
-using namespace cl::sycl;
+using namespace sycl;
 
 class are_you_broken;
 

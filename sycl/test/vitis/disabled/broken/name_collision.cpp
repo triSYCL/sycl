@@ -5,10 +5,10 @@
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
 // TODO should be a Sema test
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 class add_2;
 

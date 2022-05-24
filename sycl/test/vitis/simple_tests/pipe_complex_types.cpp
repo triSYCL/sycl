@@ -4,7 +4,7 @@
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
-#include <sycl/sycl.hpp>
+#include <sysycl/sycl.hpp>
 #include <sycl/ext/intel/fpga_extensions.hpp>
 
 struct data {

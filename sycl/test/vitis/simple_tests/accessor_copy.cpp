@@ -11,10 +11,10 @@
 // rather than the full comprehensive list contained inside handler_mem_op.cpp.
 // \TODO maybe throw in some 1D D2D tests
 #include <iostream>
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 class noop;
 
