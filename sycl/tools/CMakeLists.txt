@@ -63,5 +63,5 @@ endif()
 if(SYCL_BUILD_PI_XRT)
   target_include_directories(get_device_count_by_type
     PRIVATE
-    ${XILINX_RT_INCLUDE})
+    ${SYCL_BUILD_PI_XRT_INCLUDE_DIR})
 endif()

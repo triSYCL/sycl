@@ -417,7 +417,7 @@ public:
       if (CB.getIntrinsicID() != Intrinsic::var_annotation &&
           CB.getCalledFunction()) {
         if (isFunc(CB.getCalledFunction(), "CreatePipeFromPipeStorage_")) {
-          PipeCreations.emplace_back(CB.getFunction(), &CB);
+          PipeCreations.emplace_back(PipeCreationT{CB.getFunction(), &CB});
         }
         return;
       }
@@ -738,7 +738,8 @@ public:
       if (PipeCreations.size() < 1)
         return;
 
-      std::sort(PipeCreations.begin(), PipeCreations.end());
+      std::sort(PipeCreations.begin(), PipeCreations.end(),
+                [](auto lhs, auto rhs) { return lhs.Func < rhs.Func; });
       llvm::SmallVector<CallBase *> collection;
       llvm::Function *cur_kernel = PipeCreations[0].Func;
       for (auto &elem : PipeCreations) {
