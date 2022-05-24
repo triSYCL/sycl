@@ -1,7 +1,8 @@
 // REQUIRES: xocc
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
-// RUN: %clangxx -fsycl -std=c++20 -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out 2>&1 | FileCheck %s
+// RUN: %clangxx -fsycl -std=c++20 -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out > %t.check 2>&1
+// RUN: %run_if_not_cpu cat %t.check | FileCheck %s
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
 #include <sycl/sycl.hpp>

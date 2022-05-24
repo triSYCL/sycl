@@ -137,12 +137,11 @@ if triple == 'amdgcn-amd-amdhsa':
 llvm_config.use_clang(additional_flags=additional_flags)
 
 filter=lit_config.params.get('SYCL_PLUGIN', "opencl")
-filter+=":acc"
 
 lit_config.note("Filter: {}".format(filter))
 
 acc_run_substitute=f"env SYCL_DEVICE_FILTER={filter} "
-if xocc != "off":
+if xocc != "off" and xocc != "cpu":
     # Clean up the named semaphore in case the previous test did not clean up properly.
     # If someone tries to run multiple tests on the same machine this could cause issues.
     os.system("rm -rf /dev/shm/sem.sycl_vxx.py")
@@ -166,6 +165,8 @@ timeout = 600
 if xocc == "off":
     config.excludes += ['vitis']
 else:
+    if xocc == "cpu":
+        config.available_features.add("vitis_cpu")
     # TODO how to deal with cuda ?
     # if getDeviceCount("gpu", "cuda")[1]:
     #     lit_config.note("found secondary cuda target")
@@ -205,9 +206,13 @@ else:
     if "_sw_emu" in triple:
         timeout = 1200 # 20min
         run_if_sw_emu=""
+    run_if_not_cpu="echo"
+    if xocc != "cpu":
+        run_if_not_cpu = ""
     config.substitutions.append( ('%run_if_hw', run_if_hw) )
     config.substitutions.append( ('%run_if_hw_emu', run_if_hw_emu) )
     config.substitutions.append( ('%run_if_sw_emu', run_if_sw_emu) )
+    config.substitutions.append( ('%run_if_not_cpu', run_if_not_cpu) )
 
 # Set timeout for test = 10 mins
 try:

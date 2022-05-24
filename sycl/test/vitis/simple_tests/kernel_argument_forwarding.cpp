@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: xocc && !vitis_cpu
 
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -std=c++20 %s -o %t.out 2>&1 | tee %t.dump | FileCheck %s
 

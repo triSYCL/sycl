@@ -13,7 +13,7 @@ void test();
 int main() {
   test();
   cl::sycl::buffer<cl::sycl::cl_int, 1> Buffer(4);
-  cl::sycl::queue Queue{sycl::accelerator_selector{}};
+  cl::sycl::queue Queue;
   cl::sycl::range<1> NumOfWorkItems{Buffer.size()};
   Queue.submit([&](cl::sycl::handler &cgh) {
     sycl::accessor Accessor(Buffer, cgh, sycl::write_only);
@@ -26,7 +26,7 @@ int main() {
 
 void test() {
   cl::sycl::buffer<cl::sycl::cl_int, 1> Buffer(4);
-  cl::sycl::queue Queue{sycl::accelerator_selector{}};
+  cl::sycl::queue Queue;
   cl::sycl::range<1> NumOfWorkItems{Buffer.size()};
   Queue.submit([&](cl::sycl::handler &cgh) {
     sycl::accessor Accessor(Buffer, cgh, sycl::write_only);
