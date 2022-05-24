@@ -165,7 +165,8 @@ timeout = 600
 if vitis == "off":
     config.excludes += ['vitis']
 else:
-    if xocc == "cpu":
+    lit_config.note(f"vitis mode: {vitis}")
+    if vitis == "cpu":
         config.available_features.add("vitis_cpu")
     # TODO how to deal with cuda ?
     # if getDeviceCount("gpu", "cuda")[1]:
@@ -207,7 +208,7 @@ else:
         timeout = 1200 # 20min
         run_if_sw_emu=""
     run_if_not_cpu="echo"
-    if xocc != "cpu":
+    if vitis != "cpu":
         run_if_not_cpu = ""
     config.substitutions.append( ('%run_if_hw', run_if_hw) )
     config.substitutions.append( ('%run_if_hw_emu', run_if_hw_emu) )

@@ -5,7 +5,7 @@
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
 #include <iostream>
-#include <sysycl/sycl.hpp>
+#include <sycl.hpp>
 
 int main() {
   sycl::buffer<int> answer{1};

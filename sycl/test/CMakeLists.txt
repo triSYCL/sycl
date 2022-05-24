@@ -62,7 +62,7 @@ add_lit_testsuite(check-sycl-spirv "Running device-agnostic SYCL regression test
 add_lit_testsuite(check-sycl-vitis-cpu "Running the SYCL vitis regression test on the host device"
   ${CMAKE_CURRENT_BINARY_DIR}/vitis
   ARGS ${RT_TEST_ARGS}
-  PARAMS "XOCC=cpu;SYCL_PLUGIN=host"
+  PARAMS "VITIS=cpu;SYCL_PLUGIN=host"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )

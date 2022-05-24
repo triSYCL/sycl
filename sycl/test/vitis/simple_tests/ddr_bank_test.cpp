@@ -2,10 +2,10 @@
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -fsycl -std=c++20 -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out > %t.check 2>&1
-// RUN: %run_if_not_cpu cat %t.check | FileCheck %s
+// RUN: %run_if_not_cpu FileCheck --input-file=%t.check %s
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
-#include <sysycl/sycl.hpp>
+#include <sycl.hpp>
 #include <sycl/ext/xilinx/fpga.hpp>
 
 int main() {

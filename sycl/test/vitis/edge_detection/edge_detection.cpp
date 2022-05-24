@@ -23,7 +23,7 @@
 
 */
 
-#include <sysycl/sycl.hpp>
+#include <sycl.hpp>
 #include <sycl/ext/xilinx/fpga.hpp>
 #include <iostream>
 #include <iterator>

@@ -1,10 +1,11 @@
-// REQUIRES: vitis
+// REQUIRES: vitis && !vitis_cpu
+// Pipes are not implemented for the host device
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
-#include <sysycl/sycl.hpp>
+#include <sycl.hpp>
 #include <sycl/ext/intel/fpga_extensions.hpp>
 
 struct data {

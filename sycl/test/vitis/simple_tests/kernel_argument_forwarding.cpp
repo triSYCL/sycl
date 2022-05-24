@@ -1,8 +1,9 @@
-// REQUIRES: vitis && !vitis_cpu
+// REQUIRES: vitis
 
-// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -std=c++20 %s -o %t.out 2>&1 | tee %t.dump | FileCheck %s
+// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -std=c++20 %s -o %t.out > %t.check 2>&1
+// RUN: %run_if_not_cpu FileCheck --input-file=%t.check %s
 
-#include <sysycl/sycl.hpp>
+#include <sycl.hpp>
 #include <sycl/ext/xilinx/fpga.hpp>
 #include <array>
 #include <iostream>

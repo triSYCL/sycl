@@ -17,7 +17,7 @@
 #include <boost/hana.hpp>
 
 #include <sycl/ext/xilinx/fpga.hpp>
-#include <sysycl/sycl.hpp>
+#include <sycl.hpp>
 
 using namespace boost::hana::literals;
 
