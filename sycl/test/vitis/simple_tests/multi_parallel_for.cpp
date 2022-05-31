@@ -54,7 +54,7 @@ void gen_nd_range(range<Dimensions> k_range, queue q) {
 */
 // This test does not deal with duplicate kernel names, it was to test the
 // ability to extract all the kernels from a file that contained multiple
-// kernels in the one translation unit when using Vitis HLS (xpirbc consumption
+// kernels in the translation unit when using Vitis HLS (xpirbc consumption
 // path doesn't allow you to pass -k all, each kernel needs to be compiled and
 // linked separately before being linked together).
 int main(int argc, char *argv[]) {

@@ -83,7 +83,7 @@ void removeKernelFuncAnnotation(Function *F) {
   F->setLinkage(llvm::GlobalValue::PrivateLinkage);
 }
 
-/// Pipe are represented with 3 sting attributes here are the names:
+/// Pipe are represented with 3 string attributes with the following names:
 constexpr const char *xilinx_pipe_type =
     "sycl_xilinx_pipe_type"; // value is "read" or "write"
 constexpr const char *xilinx_pipe_id =
@@ -91,7 +91,7 @@ constexpr const char *xilinx_pipe_id =
 constexpr const char *xilinx_pipe_depth =
     "sycl_xilinx_pipe_depth"; // value is the depth of the pipe
 
-/// getAttributeAtIndex(0, ...) is the attribute on the return the first argment
+/// getAttributeAtIndex(0, ...) is the attribute on the return. The first argument
 /// starts at 1
 
 bool isWritePipe(Argument *Arg) {

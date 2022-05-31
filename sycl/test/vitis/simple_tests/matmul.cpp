@@ -49,10 +49,10 @@ template<typename A> void print(A A_r) {
 }
 
 void verify(sycl::accessor<int, 2, sycl::access::mode::read,
-                               sycl::access::target::host_buffer>
+                           sycl::access::target::host_buffer>
                 gold_r,
             sycl::accessor<int, 2, sycl::access::mode::read,
-                               sycl::access::target::host_buffer>
+                           sycl::access::target::host_buffer>
                 output_r) {
   for (size_t i = 0; i < output_r.get_range()[0]; i++) {
     for (size_t j = 0; j < output_r.get_range()[1]; j++) {

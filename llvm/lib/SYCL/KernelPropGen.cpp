@@ -135,8 +135,8 @@ struct KernelPropGen : public ModulePass {
     PipeEndpoint read;
   };
 
-  /// Pipes are matched in read and write pairs by there ID. There ID is a
-  /// string matching the name of the global variable intel uses to identify its
+  /// Pipes are matched in read and write pairs by their ID. Their ID is a
+  /// string matching the name of the global variable Intel uses to identify its
   /// pipes
   StringMap<PipeProp> PipeConnections;
 
@@ -227,8 +227,8 @@ struct KernelPropGen : public ModulePass {
           if (VitisHlsFlow)
             continue;
           /// Vitis's clang doesn't support string attributes on arguments which
-          /// we use to annotate a a pipe so we remove it here. we could
-          /// remove them in the downgrader instead
+          /// we use to annotate a pipe, so we remove it here. But we could
+          /// remove them in the downgrader instead too.
           if (sycl::isPipe(&Arg))
             sycl::removePipeAnnotation(&Arg);
           else if (KernelProperties::isArgBuffer(&Arg, SyclHlsFlow)) {

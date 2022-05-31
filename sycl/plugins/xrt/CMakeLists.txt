@@ -25,9 +25,6 @@ endif()
 
 set(SYCL_BUILD_PI_XRT_INCLUDE_DIR "${SYCL_BUILD_PI_XRT_INCLUDE_DIR}" CACHE STRING "XRT include dir")
 
-if (SYCL_BUILD_PI_XRT_INCLUDE_DIR STREQUAL "")
-  file(GLOB_RECURSE XRT_SRC ${SYCL_BUILD_PI_XRT_INCLUDE_DIR}/../lib/*.so)
-
 add_library(pi_xrt SHARED
 "${sycl_inc_dir}/CL/sycl/detail/pi.h"
 "${sycl_inc_dir}/CL/sycl/detail/pi.hpp"
@@ -36,15 +33,15 @@ add_library(pi_xrt SHARED
 
 add_dependencies(sycl-toolchain pi_xrt)
 
-  set_target_properties(pi_xrt PROPERTIES LINKER_LANGUAGE CXX)
-  target_include_directories(pi_xrt PRIVATE ${sycl_inc_dir})
-  target_include_directories(pi_xrt PRIVATE ${SYCL_BUILD_PI_XRT_INCLUDE_DIR})
-  target_link_libraries(pi_xrt
-  PRIVATE
-      OpenCL-Headers
-      ${SYCL_BUILD_PI_XRT_INCLUDE_DIR}/../lib/libxrt_coreutil.so
-      -luuid
-  )
+set_target_properties(pi_xrt PROPERTIES LINKER_LANGUAGE CXX)
+target_include_directories(pi_xrt PRIVATE ${sycl_inc_dir})
+target_include_directories(pi_xrt PRIVATE ${SYCL_BUILD_PI_XRT_INCLUDE_DIR})
+target_link_libraries(pi_xrt
+PRIVATE
+    OpenCL-Headers
+    ${SYCL_BUILD_PI_XRT_INCLUDE_DIR}/../lib/libxrt_coreutil.so
+    -luuid
+)
 
 if (MSVC)
   # By defining __SYCL_BUILD_SYCL_DLL, we can use __declspec(dllexport)
