@@ -73,13 +73,14 @@ def strtobool(val):
 
 def find_compilation_database(path):
   """Adjusts the directory until a compilation database is found."""
-  result = './'
+  result = os.path.realpath('./')
   while not os.path.isfile(os.path.join(result, path)):
-    if os.path.realpath(result) == '/':
+    parent = os.path.dirname(result)
+    if result == parent:
       print('Error: could not find compilation database.')
       sys.exit(1)
-    result += '../'
-  return os.path.realpath(result)
+    result = parent
+  return result
 
 
 def make_absolute(f, directory):
@@ -90,8 +91,8 @@ def make_absolute(f, directory):
 
 def get_tidy_invocation(f, clang_tidy_binary, checks, tmpdir, build_path,
                         header_filter, allow_enabling_alpha_checkers,
-                        extra_arg, extra_arg_before, quiet, config,
-                        line_filter, use_color):
+                        extra_arg, extra_arg_before, quiet, config_file_path,
+                        config, line_filter, use_color, plugins):
   """Gets a command line for clang-tidy."""
   start = [clang_tidy_binary]
   if allow_enabling_alpha_checkers:
@@ -121,8 +122,12 @@ def get_tidy_invocation(f, clang_tidy_binary, checks, tmpdir, build_path,
   start.append('-p=' + build_path)
   if quiet:
       start.append('-quiet')
-  if config:
+  if config_file_path:
+      start.append('--config-file=' + config_file_path)
+  elif config:
       start.append('-config=' + config)
+  for plugin in plugins:
+      start.append('-load=' + plugin)
   start.append(f)
   return start
 
@@ -192,8 +197,9 @@ def run_tidy(args, clang_tidy_binary, tmpdir, build_path, queue, lock,
                                      tmpdir, build_path, args.header_filter,
                                      args.allow_enabling_alpha_checkers,
                                      args.extra_arg, args.extra_arg_before,
-                                     args.quiet, args.config, args.line_filter,
-                                     args.use_color)
+                                     args.quiet, args.config_file, args.config,
+                                     args.line_filter, args.use_color,
+                                     args.plugins)
 
     proc = subprocess.Popen(invocation, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     output, err = proc.communicate()
@@ -225,7 +231,8 @@ def main():
   parser.add_argument('-checks', default=None,
                       help='checks filter, when not specified, use clang-tidy '
                       'default')
-  parser.add_argument('-config', default=None,
+  config_group = parser.add_mutually_exclusive_group()
+  config_group.add_argument('-config', default=None,
                       help='Specifies a configuration in YAML/JSON format: '
                       '  -config="{Checks: \'*\', '
                       '                       CheckOptions: [{key: x, '
@@ -233,6 +240,12 @@ def main():
                       'When the value is empty, clang-tidy will '
                       'attempt to find a file named .clang-tidy for '
                       'each source file in its parent directories.')
+  config_group.add_argument('-config-file', default=None,
+                      help='Specify the path of .clang-tidy or custom config '
+                      'file: e.g. -config-file=/some/path/myTidyConfigFile. '
+                      'This option internally works exactly the same way as '
+                      '-config option after reading specified config file. '
+                      'Use either -config-file or -config, not both.')
   parser.add_argument('-header-filter', default=None,
                       help='regular expression matching the names of the '
                       'headers to output diagnostics from. Diagnostics from '
@@ -270,6 +283,9 @@ def main():
                       'command line.')
   parser.add_argument('-quiet', action='store_true',
                       help='Run clang-tidy in quiet mode')
+  parser.add_argument('-load', dest='plugins',
+                      action='append', default=[],
+                      help='Load the specified plugin in clang-tidy.')
   args = parser.parse_args()
 
   db_path = 'compile_commands.json'
@@ -295,8 +311,9 @@ def main():
                                      None, build_path, args.header_filter,
                                      args.allow_enabling_alpha_checkers,
                                      args.extra_arg, args.extra_arg_before,
-                                     args.quiet, args.config, args.line_filter,
-                                     args.use_color)
+                                     args.quiet, args.config_file, args.config,
+                                     args.line_filter, args.use_color,
+                                     args.plugins)
     invocation.append('-list-checks')
     invocation.append('-')
     if args.quiet:

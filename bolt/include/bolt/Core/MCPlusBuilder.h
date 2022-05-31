@@ -282,6 +282,8 @@ public:
     // Initialize the default annotation allocator with id 0
     AnnotationAllocators.emplace(0, AnnotationAllocator());
     MaxAllocatorId++;
+    // Build alias map
+    initAliases();
   }
 
   /// Initialize a new annotation allocator and return its id
@@ -353,7 +355,7 @@ public:
   }
 
   virtual bool isUnconditionalBranch(const MCInst &Inst) const {
-    return Analysis->isUnconditionalBranch(Inst);
+    return Analysis->isUnconditionalBranch(Inst) && !isTailCall(Inst);
   }
 
   virtual bool isIndirectBranch(const MCInst &Inst) const {
@@ -509,11 +511,6 @@ public:
   virtual int getPushSize(const MCInst &Inst) const {
     llvm_unreachable("not implemented");
     return 0;
-  }
-
-  virtual bool isADD64rr(const MCInst &Inst) const {
-    llvm_unreachable("not implemented");
-    return false;
   }
 
   virtual bool isSUB(const MCInst &Inst) const {
@@ -1140,6 +1137,9 @@ public:
   virtual const BitVector &getAliases(MCPhysReg Reg,
                                       bool OnlySmaller = false) const;
 
+  /// Initialize aliases tables.
+  virtual void initAliases();
+
   /// Change \p Regs setting all registers used to pass parameters according
   /// to the host abi. Do nothing if not implemented.
   virtual BitVector getRegsUsedAsParams() const {
@@ -1282,7 +1282,8 @@ public:
 
   /// Replace instruction with a shorter version that could be relaxed later
   /// if needed.
-  virtual bool shortenInstruction(MCInst &Inst) const {
+  virtual bool shortenInstruction(MCInst &Inst,
+                                  const MCSubtargetInfo &STI) const {
     llvm_unreachable("not implemented");
     return false;
   }
@@ -1908,6 +1909,11 @@ public:
     llvm_unreachable("not implemented");
     return BlocksVectorTy();
   }
+
+  // AliasMap caches a mapping of registers to the set of registers that
+  // alias (are sub or superregs of itself, including itself).
+  std::vector<BitVector> AliasMap;
+  std::vector<BitVector> SmallerAliasMap;
 };
 
 MCPlusBuilder *createX86MCPlusBuilder(const MCInstrAnalysis *,

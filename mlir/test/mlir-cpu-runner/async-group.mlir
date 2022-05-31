@@ -1,4 +1,4 @@
-// RUN:   mlir-opt %s -pass-pipeline="async-to-async-runtime,builtin.func(async-runtime-ref-counting,async-runtime-ref-counting-opt),convert-async-to-llvm,builtin.func(convert-arith-to-llvm),convert-func-to-llvm,reconcile-unrealized-casts" \
+// RUN:   mlir-opt %s -pass-pipeline="async-to-async-runtime,func.func(async-runtime-ref-counting,async-runtime-ref-counting-opt),convert-async-to-llvm,func.func(convert-arith-to-llvm),convert-func-to-llvm,reconcile-unrealized-casts" \
 // RUN: | mlir-cpu-runner                                                      \
 // RUN:     -e main -entry-point-result=void -O0                               \
 // RUN:     -shared-libs=%linalg_test_lib_dir/libmlir_c_runner_utils%shlibext  \
@@ -13,7 +13,7 @@
 // to keep the bot green for now.
 // UNSUPPORTED: asan
 
-func @main() {
+func.func @main() {
   %c1 = arith.constant 1 : index
   %c5 = arith.constant 5 : index
 
@@ -46,4 +46,4 @@ func @main() {
   return
 }
 
-func private @mlirAsyncRuntimePrintCurrentThreadId() -> ()
+func.func private @mlirAsyncRuntimePrintCurrentThreadId() -> ()
