@@ -4040,7 +4040,7 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
   Opts.SYCLAllowVariadicFunc =
       T.isXilinxFPGA()
           ? Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
-                         options::OPT_fno_sycl_allow_variadic_func)
+                         options::OPT_fno_sycl_allow_variadic_func, false)
           : Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
                          options::OPT_fno_sycl_allow_variadic_func, false);
 

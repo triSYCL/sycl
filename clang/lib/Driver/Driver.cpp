@@ -5035,15 +5035,16 @@ class OffloadingActionBuilder final {
             shouldOutputTables ? types::TY_Tempfilelist
                                : PostLinkAction->getType(),
             types::TY_Tempfilelist);
-
         // single column w/o title fits TY_Tempfilelist format
         ExtractIRFilesAction->addExtractColumnTform(
             FileTableTformJobAction::COL_CODE, false /*drop titles*/);
 
         if (isNVPTX || isAMDGCN) {
           JobAction *FinAction =
-              isNVPTX ? finalizeNVPTXDependences(ExtractIRFilesAction, TT)
-                      : finalizeAMDGCNDependences(ExtractIRFilesAction, TT);
+              isNVPTX ? finalizeNVPTXDependences(ExtractIRFilesAction,
+                                                 TC->getTriple())
+                      : finalizeAMDGCNDependences(ExtractIRFilesAction,
+                                                  TC->getTriple());
           auto *ForEachWrapping = C.MakeAction<ForEachWrappingAction>(
               ExtractIRFilesAction, FinAction);
 
