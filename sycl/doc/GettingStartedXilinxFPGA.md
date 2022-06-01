@@ -1,4 +1,4 @@
-Getting started with SYCL with an AMD/Xilinx FPGA U200 Alveo board and Ubuntu 21.10
+Getting started with SYCL with an AMD/Xilinx FPGA U200 Alveo board and Ubuntu 22.04
 ===================================================================================
 
 Disclaimer: nothing here is supported and this is all about a research
@@ -7,7 +7,7 @@ project.
 We assume you have an AMD/Xilinx FPGA U200 Alveo board but it might work
 with another board too.
 
-We assume that you have some modern Ubuntu like 21.10 version
+We assume that you have some modern Ubuntu like 22.04 version
 installed on an `x86_64` machine. But it might work with other recent
 versions of Ubuntu or Debian or even other Linux distributions, with
 some adaptations.
@@ -97,7 +97,7 @@ tar zxvf .../Xilinx_Unified_2021.2_1021_0703.tar.gz
 ```
 
 Since the graphics Java installer might not work on modern Linux
-distributions like Ubuntu 21.10, use the batch-mode version:
+distributions like Ubuntu 22.04, use the batch-mode version:
 
 ```bash
 Xilinx_Unified_2021.2_1021_0703/xsetup --xdebug --batch Install --location /opt/xilinx --agree XilinxEULA,3rdPartyEULA --product "Vitis" --edition "Vitis Unified Software Platform"
@@ -211,7 +211,7 @@ export XILINX_VITIS=/opt/xilinx/Vitis/2021.2
 ./build.sh
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
-sudo apt install --reinstall ./Release/xrt_202220.2.14.0_21.10-amd64-xrt.deb
+sudo apt install --reinstall ./Release/xrt_202220.2.14.0_22.04-amd64-xrt.deb
 ```
 
 It will install the user-mode XRT runtime and at least compile and
@@ -231,7 +231,7 @@ cd Debug
 make package
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
-sudo apt install --reinstall ./xrt_202210.2.13.0_21.10-amd64-xrt.deb
+sudo apt install --reinstall ./xrt_202210.2.13.0_22.04-amd64-xrt.deb
 ```
 
 If you also want a debug and verbose version which traces all the
