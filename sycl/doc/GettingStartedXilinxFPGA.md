@@ -4,6 +4,10 @@ Getting started with SYCL with an AMD/Xilinx FPGA U200 Alveo board and Ubuntu 22
 Disclaimer: nothing here is supported and this is all about a research
 project.
 
+This document is about the normal SYCL single-source compilation flow.
+There is also another document about the [C++20 non-single source Vitis
+IP mode compilation flow](GettingStartedXilinxFPGAIPBlockDesign.md).
+
 We assume you have an AMD/Xilinx FPGA U200 Alveo board but it might work
 with another board too.
 
