@@ -18,13 +18,25 @@ some adaptations.
 
 ## What's new?
 
-- 2021/06/24: there is a new HLS target along the OpenCL/SPIR compiler
-  flow for AMD/Xilinx FPGA. The HLS target relies on direct LLVM IR
-  feeding and allows finer control by using HLS extensions.
-
-- 2021/10/01: the OpenCL/SPIR device compiler flow has been deprecated
-  because it has less features than the HLS device compiler flow and
-  we lack resources to maintain both.
+- 2022/05/23:
+  - new XRT backend plugin to use AMD FPGA without the OpenCL layer;
+  - SYCL interoperability with XRT backend;
+  - add a new HLS-like non-single-source compiler flow relying on the
+    C++20 features of the SYCL device-compiler to generate Vitis IP;
+  - enable more C++ standard library in Vitis IP mode;
+  - new `--vitis-ip-part` option to specify the FPGA target in Vitis
+    IP mode;
+  - new accessor property to handle HBM bank allocation;
+  - remove default allocation on DDR bank 0;
+  - allow N-dimensional partitioned arrays;
+  - fix bugs in `parallel_for` emulation for FPGA with HLS flow;
+  - updated for latest Ubuntu 22.04 Linux version;
+  - updated for Vitis 2022.1 and latest XRT;
+  - improved documentation;
+  - simplify test targets;
+  - fix many other bugs;
+  - lot of cleanup and refactoring;
+  - merge from upstream.
 
 - 2022/02/21:
   - provide `parallel_for` emulation with loop-nest in `single_task` for
@@ -43,6 +55,13 @@ some adaptations.
   - mention 2022 year bug work-around;
   - Xilinx is now AMD after acquisition by AMD, so rename Xilinx mentions.
 
+- 2021/10/01: the OpenCL/SPIR device compiler flow has been deprecated
+  because it has less features than the HLS device compiler flow and
+  we lack resources to maintain both.
+
+- 2021/06/24: there is a new HLS target along the OpenCL/SPIR compiler
+  flow for AMD/Xilinx FPGA. The HLS target relies on direct LLVM IR
+  feeding and allows finer control by using HLS extensions.
 
 ## Installing the Alveo U200 board
 
@@ -1017,7 +1036,7 @@ To run an example from the provided examples:
 
 - with hardware emulation:
 
-```bash
+  ```bash
   cd $SYCL_HOME/llvm/sycl/test/vitis/simple_tests
   # Instruct the compiler and runtime to use FPGA hardware emulation with HLS flow
   # Compile the SYCL program down to a host fat binary including the RTL for simulation
@@ -1029,7 +1048,7 @@ To run an example from the provided examples:
 
 - with real hardware execution on FPGA:
 
-```bash
+  ```bash
   cd $SYCL_HOME/llvm/sycl/test/vitis/simple_tests
   # Instruct the compiler to use real FPGA hardware execution with HLS flow
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
@@ -1087,25 +1106,25 @@ Note that the SPIR compilation flow has been discontinued.
 
 - Run the `vitis` test suite with hardware emulation (HLS flow):
 
-```bash
+  ```bash
   cd $SYCL_HOME/llvm/build
   # Running tests with the OpenCL backend
   cmake --build . --parallel `nproc` --target check-sycl-vitis
   # Running tests with the XRT backend
   cmake --build . --parallel `nproc` --target check-sycl-xrt
-```
+  ```
 
 This takes usually 45-60 minutes with a good CPU.
 
 - Run the `vitis` test suite with real hardware execution on FPGA (HLS flow):
 
-```bash
+  ```bash
   cd $SYCL_HOME/llvm/build
   # Running tests with the OpenCL backend
   cmake --build . --parallel `nproc` --target check-sycl-vitis-hw
   # Running tests with the XRT backend
   cmake --build . --parallel `nproc` --target check-sycl-xrt-hw
-```
+  ```
 
 This takes usually 10+ hours.
 
