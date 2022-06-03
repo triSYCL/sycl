@@ -248,18 +248,17 @@ void SYCL::SYCLPostLinkVXX::constructSYCLVXXPLCommand(
 ////                            V++ Toolchain
 ///////////////////////////////////////////////////////////////////////////////
 
+static llvm::Triple getLinuxTriple(const llvm::Triple &Triple) {
+  if (Triple.getArch() == llvm::Triple::vitis_ip)
+    return llvm::Triple(llvm::sys::getProcessTriple());
+  return Triple;
+}
+
 VXXToolChain::VXXToolChain(const Driver &D, const llvm::Triple &Triple,
                            const ArgList &Args)
-    : Generic_GCC(D, Triple, Args) {
-  if (Triple.getArch() == llvm::Triple::vitis_ip) {
-    /// If we are targeting vitis_ip we cannot rely on sycl setting up the
-    /// standard library. So we do it ourselves by configuring gcc to find
-    /// native system libraries.
-    GCCInstallation.init(llvm::Triple(llvm::sys::getProcessTriple()), Args);
-  } else {
-    /// Otherwise we initialize gcc with our triple and gcc will find nothing.
-    GCCInstallation.init(Triple, Args);
-  }
+    : ToolChain(D, Triple, Args) {
+  InnerTC =
+      std::make_unique<toolchains::Linux>(D, getLinuxTriple(Triple), Args);
   // Lookup binaries into the driver directory, this is used to
   // discover the clang-offload-bundler executable.
   getProgramPaths().push_back(getDriver().Dir);
