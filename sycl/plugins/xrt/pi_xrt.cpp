@@ -330,7 +330,7 @@ to_native_handle(From &&from) {
 
 struct _pi_device
 /// TODO: _pi_device should be ref-counted , but the SYCL runtime
-/// seems to be expected piDevicesGet to return objects with a ref-count
+/// seems to expect piDevicesGet to return objects with a ref-count
 /// of 0 so we do not destroy _pi_device for now.
 /// (https://github.com/intel/llvm/issues/6034)
 /// : ref_counted_base<_pi_device>
@@ -339,7 +339,9 @@ struct _pi_device
 
 private:
   native_type xrtDevice_;
-  ref_counted_ref<_pi_platform> platform_;
+  /// _pi_platform holds a counting reference onto all its _pi_device so we do
+  /// not keep counting reference on devices to prevent circular dependency.
+  _pi_platform *platform_;
 
 public:
   _pi_device(native_type dev, _pi_platform *platform)
@@ -358,18 +360,23 @@ public:
 ///
 struct _pi_platform : ref_counted_base<_pi_platform>, unique<_pi_platform> {
 private:
-  /// _pi_device hold a counting reference onto _pi_platform so we do not keep
-  /// counting reference on devices to prevent circular dependency.
-  std::vector<_pi_device*> devices_;
+  std::vector<ref_counted_ref<_pi_device>> devices_;
 
 public:
+  _pi_platform() {
+    int device_count = xrt::system::enumerate_devices();
+    devices_.reserve(device_count);
+    for (int idx = 0; idx < device_count; idx++)
+      devices_.emplace_back(
+          make_ref_counted<_pi_device>(REPRODUCE_CALL(xrt::device, idx), this));
+  }
   unsigned get_num_device() { return devices_.size(); }
   ref_counted_ref<_pi_device> get_device(unsigned idx) { return devices_[idx]; }
   /// Add a device if it inst't already in the list
   template <typename... Ts> ref_counted_ref<_pi_device> make_device(Ts &&...ts) {
     auto new_dev = REPRODUCE_CALL(xrt::device, std::forward<Ts>(ts)...);
     auto bdf = new_dev.template get_info<xrt::info::device::bdf>();
-    for (auto *dev : devices_)
+    for (ref_counted_ref<_pi_device> dev : devices_)
       if (bdf == dev->get_native().get_info<xrt::info::device::bdf>())
         return dev;
     auto dev_ref = make_ref_counted<_pi_device>(std::move(new_dev), this);
@@ -704,21 +711,11 @@ pi_result xrt_piDevicesGet(pi_platform platform, pi_device_type device_type,
                            uint32_t *num_devices) {
   assert_valid_obj(platform);
 
-  unsigned device_count = std::max<unsigned>(1, platform->get_num_device());
-
   if (num_devices) {
-    *num_devices = device_count;
+    *num_devices = platform->get_num_device();
   }
 
   if (devices) {
-    /// We keep the reference to the device to insure it doesn't get destroyed
-    /// before re call give_externally
-    ref_counted_ref<_pi_device> new_device;
-
-    // If the platform is empty add a device
-    if (platform->get_num_device() == 0)
-      new_device = platform->make_device(0);
-
     for (size_t i = 0; i < platform->get_num_device(); ++i)
       devices[i] = platform->get_device(i).give_externally();
   }

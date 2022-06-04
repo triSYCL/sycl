@@ -60,7 +60,7 @@ if(SYCL_BUILD_PI_HIP)
     ${SYCL_BUILD_PI_HIP_INCLUDE_DIR})
 endif()
 
-if(SYCL_BUILD_PI_HIP)
+if(SYCL_BUILD_PI_XRT)
   target_include_directories(get_device_count_by_type
     PRIVATE
     ${XILINX_RT_INCLUDE})

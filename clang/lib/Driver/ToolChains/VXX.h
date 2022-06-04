@@ -9,7 +9,7 @@
 #ifndef LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_VXX_H
 #define LLVM_CLANG_LIB_DRIVER_TOOLCHAINS_VXX_H
 
-#include "ToolChains/Gnu.h"
+#include "ToolChains/Linux.h"
 #include "clang/Driver/ToolChain.h"
 #include "clang/Driver/Tool.h"
 #include "llvm/ADT/Triple.h"
@@ -76,9 +76,10 @@ private:
 
 namespace toolchains {
 
-/// The VXXToolChain inherits from Generic_GCC because the logic for detecting
-/// and using libstdc++ are inside Generic_GCC
-class LLVM_LIBRARY_VISIBILITY VXXToolChain : public Generic_GCC {
+/// The VXXToolChain inherits from Linux because the logic for detecting
+/// and using libstdc++ are inside Linux
+class LLVM_LIBRARY_VISIBILITY VXXToolChain : public ToolChain {
+  std::unique_ptr<ToolChain> InnerTC;
 public:
   VXXToolChain(const Driver &D, const llvm::Triple &Triple,
                const llvm::opt::ArgList &Args);
@@ -106,6 +107,17 @@ public:
   bool isPICDefaultForced() const override { return false; }
 
   const ToolChain* HostTC;
+
+  virtual void
+  AddClangSystemIncludeArgs(const llvm::opt::ArgList &DriverArgs,
+                            llvm::opt::ArgStringList &CC1Args) const override {
+    InnerTC->AddClangSystemIncludeArgs(DriverArgs, CC1Args);
+  }
+  virtual void AddClangCXXStdlibIncludeArgs(
+      const llvm::opt::ArgList &DriverArgs,
+      llvm::opt::ArgStringList &CC1Args) const override {
+    InnerTC->AddClangCXXStdlibIncludeArgs(DriverArgs, CC1Args);
+  }
 
 protected:
   Tool *buildLinker() const override;
