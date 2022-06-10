@@ -56,7 +56,7 @@ SYCL_BIN_DIR=$SYCL_HOME/llvm/build/bin
 XILINX_VITIS_HLS=$XILINX_ROOT/Vitis_HLS/$XILINX_VERSION
 XILINX_VIVADO=$XILINX_ROOT/Vivado/$XILINX_VERSION
 # Add the various tools in the PATH
-PATH=$PATH:$SYCL_BIN_DIR:$XILINX_VITIS_HLS/bin:$XILINX_VIVADO/bin
+PATH=$PATH:$SYCL_BIN_DIR:$XILINX_VITIS_HLS/bin
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$XILINX_VITIS_HLS/lib/lnx64.o:$SYCL_HOME/llvm/build/lib
 ```
 
@@ -73,15 +73,19 @@ __VITIS_KERNEL int test(int a, int b) {
 ```
 
 then, to compile this file, use
+
 ```bash
 # Be sure to use the right clang++
 $SYCL_BIN_DIR/clang++ --target=vitis_ip-xilinx vitis_ip.cpp --vitis-ip-part=xc7vx330t-ffg1157-1 -o adder.zip
 ```
 
- `--target=vitis_ip-xilinx` specifies that we are targeting vitis ip blocks
- `--vitis-ip-part=xc7vx330t-ffg1157-1` specifies which Xilinx device we are targeting `xc7vx330t-ffg1157-1` needs to be replaced by the part id you are working with.
+where `--target=vitis_ip-xilinx` specifies that we are targeting Vitis
+IP blocks and `--vitis-ip-part=xc7vx330t-ffg1157-1` specifies which
+Xilinx device we are targeting `xc7vx330t-ffg1157-1`, which can
+obviously replaced by what you are really working with.
 
- The output is a Vivado IP zip archive that can be loaded into Vivado when making a block design
+The output is a Vivado IP `zip` archive that can be loaded into Vivado
+when making a block design.
 
 
 ### Further Reading
