@@ -378,7 +378,7 @@ about how to correctly generate the exact flashing command.
 Typically you run:
 
 ```bash
-sudo /opt/xilinx/xrt/bin/xbmgmt examine --report all
+sudo /opt/xilinx/xrt/bin/xbmgmt examine --report all --device 0000:04:00.0
 System Configuration
   OS Name              : Linux
   Release              : 5.11.0-41-generic
@@ -502,7 +502,7 @@ configurable with an FPGA!).
 After rebooting you can look at the FPGA configuration:
 
 ```bash
-sudo /opt/xilinx/xrt/bin/xbmgmt examine --report all
+sudo /opt/xilinx/xrt/bin/xbmgmt examine --report all --device 0000:04:00.0
 System Configuration
   OS Name              : Linux
   Release              : 5.11.0-41-generic
