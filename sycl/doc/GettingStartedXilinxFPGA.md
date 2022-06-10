@@ -861,8 +861,8 @@ cd $SYCL_HOME
 git clone --branch sycl/unified/master git@github.com:triSYCL/sycl.git llvm
 # Use --xrt is to enable the optional XRT plugin. This is a replacement for the OpenCL plugin
 # because XRT offers more control and expressiveness on the hardware
-python $SYCL_HOME/llvm/buildbot/configure.py --xrt
-python $SYCL_HOME/llvm/buildbot/compile.py
+python3 $SYCL_HOME/llvm/buildbot/configure.py --xrt
+python3 $SYCL_HOME/llvm/buildbot/compile.py
 ```
 
 These scripts have many options which can be displayed when using the
@@ -871,7 +871,7 @@ treating compiler warnings as errors and producing a compiler database
 to be used by tools like LSP server like `clangd`:
 
 ```bash
-python $SYCL_HOME/llvm/buildbot/configure.py --cuda \
+python3 $SYCL_HOME/llvm/buildbot/configure.py --cuda \
   --cmake-opt="-DCMAKE_EXPORT_COMPILE_COMMANDS=1"
 ```
 
