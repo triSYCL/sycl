@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: %clang -fsycl -fsycl-targets=fpga64_sw_emu -### %s 2>&1 | FileCheck -check-prefix=CHECK-PIPELINE %s
 // RUN: env XCL_EMULATION_MODE=sw_emu %clang -fsycl -fsycl-targets=fpga64 -### %s 2>&1 | FileCheck -check-prefix=CHECK-PIPELINE %s

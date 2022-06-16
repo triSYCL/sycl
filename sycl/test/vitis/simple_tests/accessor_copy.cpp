@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 // REQUIRES: spir
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
@@ -11,10 +11,10 @@
 // rather than the full comprehensive list contained inside handler_mem_op.cpp.
 // \TODO maybe throw in some 1D D2D tests
 #include <iostream>
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 class noop;
 
@@ -95,13 +95,13 @@ int main() {
     const size_t Size = 20;
     int Data[Size] = {0};
     // This showcases another issue we have just now, all Kernels HAVE to have
-    // a minimum of 1 accessor or the xocc compiler will complain as there is no
-    // buffer associated with m_axi_gmem
+    // a minimum of 1 accessor or the Vitis HLS compiler will complain as there
+    // is no buffer associated with m_axi_gmem
     buffer<int, 2> idc((int *)Data, range<2>(Size, Size));
     q.submit([&](handler &cgh) {
       accessor<int, 2, access::mode::write, access::target::global_buffer>
           accessorFrom(idc, cgh, range<2>(Size, Size));
-      cgh.single_task<noop>([=](){
+      cgh.single_task<noop>([=]{
         accessorFrom[0][0] = 1;
       });
     });

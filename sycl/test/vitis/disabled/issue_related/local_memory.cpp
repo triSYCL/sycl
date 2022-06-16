@@ -19,13 +19,13 @@
 
 */
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <iostream>
 #include <numeric>
 #include <vector>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 constexpr size_t sz = 4;
 

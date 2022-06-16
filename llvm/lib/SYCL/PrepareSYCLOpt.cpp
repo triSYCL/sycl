@@ -86,12 +86,9 @@ struct PrepareSYCLOpt : public ModulePass {
         continue;
       }
       // Annotate kernels for HLS backend being able to identify them
-      if (isKernelFunc(&F)) {
+      if (sycl::isKernelFunc(&F)) {
         assert(F.use_empty());
-        F.addFnAttr("fpga.top.func", F.getName());
-        F.addFnAttr("fpga.demangled.name", F.getName());
-        F.setCallingConv(CallingConv::C);
-        F.setLinkage(llvm::GlobalValue::ExternalLinkage);
+        sycl::annotateKernelFunc(&F);
       } else {
         // We need to call intrinsic with SPIR_FUNC calling conv
         // for correct linkage with Vitis SPIR builtins lib
@@ -107,7 +104,7 @@ struct PrepareSYCLOpt : public ModulePass {
 
   void setCallingConventions(Module &M) {
     for (Function &F : M.functions()) {
-      if (isKernelFunc(&F)) {
+      if (sycl::isKernelFunc(&F)) {
         assert(F.use_empty());
         continue;
       }
@@ -123,7 +120,7 @@ struct PrepareSYCLOpt : public ModulePass {
 
   void forceInlining(Module &M) {
     for (auto &F : M.functions()) {
-      if (F.isDeclaration() || isKernelFunc(&F))
+      if (F.isDeclaration() || sycl::isKernelFunc(&F))
         continue;
       F.addFnAttr(Attribute::AlwaysInline);
     }
@@ -188,7 +185,7 @@ struct PrepareSYCLOpt : public ModulePass {
   void unwrapFPGAProperties(Module &M) {
     UnwrapperVisitor UWV{};
     for (auto &F : M.functions()) {
-      if (isKernelFunc(&F)) {
+      if (sycl::isKernelFunc(&F)) {
         UWV.visit(F);
       }
     }

@@ -56,7 +56,7 @@ including for example an Intel FPGA and an AMD/Xilinx FPGA.
 
 - AMD/Xilinx FPGA Tests Documentation
   - [Tests.md](sycl/doc/Tests.md) covers a few details about the the
-    additional [xocc_tests](sycl/test/xocc_tests) directory we added
+    additional [vitis](sycl/test/vitis) directory we added
     to the [sycl/test](sycl/test) directory among some other small
     details.
 

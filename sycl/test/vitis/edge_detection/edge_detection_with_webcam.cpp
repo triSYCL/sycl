@@ -8,7 +8,7 @@
 #include <string>
 
 #include "../../../utilities/device_selectors.hpp"
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 // OpenCV Includes
 #include <opencv2/core/core.hpp>
@@ -16,7 +16,7 @@
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/opencv.hpp>
 
-using namespace cl::sycl;
+using namespace sycl;
 
 class krnl_sobel;
 
@@ -85,8 +85,8 @@ int main(int argc, char *argv[]) {
               }
             });
 
-            pixel_wb[x + y * width] = cl::sycl::min(
-                static_cast<int>(cl::sycl::abs(magX) + cl::sycl::abs(magY)),
+            pixel_wb[x + y * width] = sycl::min(
+                static_cast<int>(sycl::abs(magX) + sycl::abs(magY)),
                 0xFF);
           }
         }

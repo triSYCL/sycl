@@ -17,6 +17,7 @@
 #include "llvm/IR/Module.h"
 
 namespace llvm {
+namespace sycl {
 
 /// Remove a list of attributes from an IR module.
 void removeAttributes(Module &M, ArrayRef<Attribute::AttrKind> Kinds);
@@ -29,6 +30,43 @@ void removeMetadata(Module &M, StringRef MetadataName);
 void replaceFunction(Module &M, StringRef OldN, StringRef NewN);
 
 /// Test if a function is a kernel
-bool isKernelFunc(const Function* F);
+bool isKernelFunc(const Function *F);
 
+/// Add annotation such that F is considered a Kernel by our passes and
+/// Vitis's HLS
+void annotateKernelFunc(Function *F);
+
+/// Remove annotation that make F a kernel
+void removeKernelFuncAnnotation(Function *F);
+
+/// Return true iff Arg is a pipe for writing
+bool isWritePipe(Argument *Arg);
+
+/// Return true iff Arg is a pipe for reading
+bool isReadPipe(Argument *Arg);
+
+/// Return true iff Arg is a pipe
+inline bool isPipe(Argument *Arg) {
+  return isWritePipe(Arg) || isReadPipe(Arg);
+}
+
+/// Return the Identifier of a pipe
+StringRef getPipeID(Argument *Arg);
+
+/// Return the Depth of a pipe
+int getPipeDepth(Argument *Arg);
+
+/// Add annotation such that Arg is considered a read pipe
+void annotateReadPipe(Argument *Arg, StringRef Id, int Depth);
+
+/// Add annotation such that Arg is considered a write pipe
+void annotateWritePipe(Argument *Arg, StringRef Id, int Depth);
+
+/// Remove annotations that make Arg a pipe
+void removePipeAnnotation(Argument *Arg);
+
+/// Rename arguments to comply with Vitis's HLS
+void giveNameToArguments(Function &F);
+
+} // namespace sycl
 } // namespace llvm

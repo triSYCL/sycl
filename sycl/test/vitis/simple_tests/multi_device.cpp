@@ -1,4 +1,4 @@
-// REQUIRES: xocc && has_secondary_cuda
+// REQUIRES: vitis && has_secondary_cuda
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-libspirv-path=%llvm_build_lib_dir./clc/libspirv-nvptx64--nvidiacl.bc -fsycl-targets=nvptx64-nvidia-cuda-sycldevice,%sycl_triple %s -o %t.dir/exec.out  -###
@@ -6,7 +6,7 @@
 
 // RUN: %ACC_RUN_PLACEHOLDER env --unset=SYCL_DEVICE_FILTER %t.dir/exec.out
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 constexpr unsigned int size = 12;
 
@@ -24,7 +24,7 @@ template<typename Selector> void test_device(Selector s) {
     // Getting write only access to the buffer on a device
     auto Accessor = Buffer.get_access<sycl::access::mode::write>(cgh);
     // Executing kernel
-    cgh.single_task<FillBuffer<Selector>>([=]() {
+    cgh.single_task<FillBuffer<Selector>>([=] {
                                              for (std::size_t i = 0 ; i < size ; ++i) {
                                                  Accessor[i] = i;
                                              }

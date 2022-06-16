@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
@@ -11,10 +11,10 @@
   to be broken).
 */
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 int add(int v1, int v2) {
   return v1 + v2;
@@ -35,7 +35,7 @@ int main() {
   q.submit([&](handler &cgh) {
       auto wb = ob.get_access<access::mode::write>(cgh);
 
-      cgh.single_task<class constexpr_carryover>([=]() {
+      cgh.single_task<class constexpr_carryover>([=] {
         wb[0] = host_to_device;
         wb[1] = try_capture;
         wb[2] = add(host_to_device, try_capture);

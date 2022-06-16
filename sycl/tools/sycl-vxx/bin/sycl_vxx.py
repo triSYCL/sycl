@@ -383,7 +383,7 @@ class VitisCompilationDriver:
                            "--sycl-kernel-propgen-output", f"{kernel_prop}"]
 
         opt_options = [
-            "--lower-delayed-sycl-metadata", "-lower-sycl-metadata",
+            "--lower-delayed-sycl-metadata", "-lower-sycl-metadata", "-globaldce",
             "--sycl-vxx", "--sycl-prepare-after-O3", "-S", "-preparesycl", "-loop-unroll",
             *kernel_prop_opt,
             "-globaldce",
@@ -556,6 +556,12 @@ class VXXCompilationDriver(VitisCompilationDriver):
                 if has_assignment and has_default:
                     raise NotImplementedError(
                         "Mix between assigned an non assigned bank is not supported yet")
+
+        # The pipe plumbing is actually done by Vitis with the right options
+        for pipe in self.kernel_properties['pipe_connections']:
+            command.extend(("--connectivity.sc", "{}_1.{}:{}_1.{}:{}".format(
+                pipe["writer_kernel"], pipe["writer_arg"], pipe["reader_kernel"], pipe["reader_arg"], pipe["depth"])))
+
         command.extend(self.extra_link_args)
         command.extend(kernels)
         self._dump_cmd("vxxlink", command)

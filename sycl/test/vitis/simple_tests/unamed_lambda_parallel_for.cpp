@@ -1,11 +1,11 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
 #include <iostream>
-#include <sycl/sycl.hpp>
+#include <sycl.hpp>
 
 int main() {
   sycl::buffer<int> answer{1};

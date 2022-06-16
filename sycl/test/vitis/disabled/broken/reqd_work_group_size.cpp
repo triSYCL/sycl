@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
 // XFAIL
@@ -21,7 +21,7 @@
   kernels execute).
 
   The kernels that should fail on execution for Xilinx devices are numbers 6,7,8
-  and 9. Compiling without XOCC/Xilinx related flags results in the property
+  and 9. Compiling without Vitis/Xilinx related flags results in the property
   being ignored for now.
 
   You can also run this with Intel devices (provided std C++17), but the test is
@@ -53,11 +53,11 @@
   CL_INVALID_WORK_GROUP_SIZE error.
 */
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <iostream>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 // Forward declaring some class names that are similar to the property name to
 // make sure that it's not inaccurately chosen
@@ -129,7 +129,7 @@ int main() {
       auto wb = ob.get_access<access::mode::write>(cgh);
       cgh.single_task<
           xilinx::reqd_work_group_size<1, 1, 1, reqd_work_group_size_test2>>(
-          [=]() { wb[0] = 2; });
+          [=] { wb[0] = 2; });
     });
 
     auto rb = ob.get_access<access::mode::read>();
@@ -319,7 +319,7 @@ int main() {
     q.submit([&](handler &cgh) {
       auto wb = ob.get_access<access::mode::write>(cgh);
       cgh.single_task<reqd_work_group_size_test10>(
-          [=]() { wb[0] = 10; });
+          [=] { wb[0] = 10; });
     });
 
     auto rb = ob.get_access<access::mode::read>();

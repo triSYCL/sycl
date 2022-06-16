@@ -39,9 +39,11 @@ struct KernelDecorator<KernelType, Ret (Functor::*)(Args...) const,
                        cstr<CharT, CharPack...>, propPayload...> {
   const KernelType kernel;
   KernelDecorator(KernelType &kernel) : kernel{kernel} {}
+#ifdef __SYCL_SPIR_DEVICE__
   __SYCL_DEVICE_ANNOTATE("xilinx_kernel_property",
                          StrPacker<cstr<CharT, CharPack...>>{}.Str,
                          std::make_tuple(propPayload...))
+#endif
   Ret operator()(Args... args) const { return kernel(args...); }
 };
 

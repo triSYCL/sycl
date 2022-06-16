@@ -1,26 +1,29 @@
 
 message(STATUS "Including the PI API Xilinx Runtime (XRT) backend.")
 
+set(SYCL_BUILD_PI_XRT_INCLUDE_DIR "")
 
-if (NOT DEFINED XILINX_RT_INCLUDE)
+if (SYCL_BUILD_PI_XRT_INCLUDE_DIR STREQUAL "")
   # First check user environment
   if (DEFINED ENV{XILINX_XRT} AND 
       EXISTS "$ENV{XILINX_XRT}/include")
       message(STATUS "Got XRT installation path from $XILINX_XRT")
-      set(XILINX_RT_INCLUDE "$ENV{XILINX_XRT}/include")
+      set(SYCL_BUILD_PI_XRT_INCLUDE_DIR "$ENV{XILINX_XRT}/include")
       
   # Check on standard XRT installation path
   elseif(EXISTS "/opt/xilinx/xrt/include")
     message(STATUS "Standard XRT installation path found")
-    set(XILINX_RT_INCLUDE "/opt/xilinx/xrt/include")
+    set(SYCL_BUILD_PI_XRT_INCLUDE_DIR "/opt/xilinx/xrt/include")
   
   #TODO: Automatic download of XRT once their CMake is clean
   else()
-    message(ERROR "No Xilinx runtime (XRT) installation found. Please set XILINX_XRT to point to a valid install")  
+    message(ERROR "No Xilinx runtime (XRT) installation found.
+    Please set the environement variable XILINX_XRT to point to a valid install
+    or set the cmake variable SYCL_BUILD_PI_XRT_INCLUDE_DIR to point to an include dir in a valid install")
   endif()
 endif()
 
-message(STATUS "Found xrt sources: ${XRT_SRC}")
+set(SYCL_BUILD_PI_XRT_INCLUDE_DIR "${SYCL_BUILD_PI_XRT_INCLUDE_DIR}" CACHE STRING "XRT include dir")
 
 add_library(pi_xrt SHARED
 "${sycl_inc_dir}/CL/sycl/detail/pi.h"
@@ -32,11 +35,11 @@ add_dependencies(sycl-toolchain pi_xrt)
 
 set_target_properties(pi_xrt PROPERTIES LINKER_LANGUAGE CXX)
 target_include_directories(pi_xrt PRIVATE ${sycl_inc_dir})
-target_include_directories(pi_xrt PRIVATE ${XILINX_RT_INCLUDE})
+target_include_directories(pi_xrt PRIVATE ${SYCL_BUILD_PI_XRT_INCLUDE_DIR})
 target_link_libraries(pi_xrt
 PRIVATE
     OpenCL-Headers
-    ${XILINX_RT_INCLUDE}/../lib/libxrt_coreutil.so
+    ${SYCL_BUILD_PI_XRT_INCLUDE_DIR}/../lib/libxrt_coreutil.so
     -luuid
 )
 

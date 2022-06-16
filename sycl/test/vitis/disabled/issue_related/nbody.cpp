@@ -30,7 +30,7 @@
 #include <utility>
 #include <vector>
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 constexpr auto eps = 0.001f;
 constexpr auto eps2 = eps * eps;
@@ -58,8 +58,8 @@ struct float4 {
 auto force_calculation(
     float4 body_pos,
 
-    cl::sycl::accessor<float4, 1, cl::sycl::access::mode::read,
-                       cl::sycl::access::target::global_buffer>
+    sycl::accessor<float4, 1, sycl::access::mode::read,
+                       sycl::access::target::global_buffer>
         positions,
 
     std::size_t n) -> float3 {
@@ -74,37 +74,37 @@ auto force_calculation(
     r.z = j.z - body_pos.z;
 
     // dist_sqr = dot(r_ij, r_ij) + EPS^2 [6 FLOPS]
-    const auto dist_sqr = cl::sycl::fma(
-        r.x, r.x, cl::sycl::fma(r.y, r.y, cl::sycl::fma(r.z, r.z, eps2)));
+    const auto dist_sqr = sycl::fma(
+        r.x, r.x, sycl::fma(r.y, r.y, sycl::fma(r.z, r.z, eps2)));
 
     // inv_dist_cube = 1/dist_sqr^(3/2) [4 FLOPS]
     auto dist_sixth = dist_sqr * dist_sqr * dist_sqr;
-    auto inv_dist_cube = cl::sycl::rsqrt(dist_sixth);
+    auto inv_dist_cube = sycl::rsqrt(dist_sixth);
 
     // s = m_j * inv_dist_cube [1 FLOP]
     const auto s = float{j.w} * inv_dist_cube;
     const auto s3 = float3{s, s, s};
 
     // a_i = a_i + s * r_ij [6 FLOPS]
-    acc.x = cl::sycl::fma(r.x, s3.x, acc.x);
-    acc.y = cl::sycl::fma(r.y, s3.y, acc.y);
-    acc.z = cl::sycl::fma(r.z, s3.z, acc.z);
+    acc.x = sycl::fma(r.x, s3.x, acc.x);
+    acc.y = sycl::fma(r.y, s3.y, acc.y);
+    acc.z = sycl::fma(r.z, s3.z, acc.z);
   }
 
   return acc;
 }
 
 struct body_integrator {
-  cl::sycl::accessor<float4, 1, cl::sycl::access::mode::read,
-                     cl::sycl::access::target::global_buffer>
+  sycl::accessor<float4, 1, sycl::access::mode::read,
+                     sycl::access::target::global_buffer>
       old_pos;
 
-  cl::sycl::accessor<float4, 1, cl::sycl::access::mode::discard_write,
-                     cl::sycl::access::target::global_buffer>
+  sycl::accessor<float4, 1, sycl::access::mode::discard_write,
+                     sycl::access::target::global_buffer>
       new_pos;
 
-  cl::sycl::accessor<float4, 1, cl::sycl::access::mode::read_write,
-                     cl::sycl::access::target::global_buffer>
+  sycl::accessor<float4, 1, sycl::access::mode::read_write,
+                     sycl::access::target::global_buffer>
       vel;
 
   std::size_t n; // bodies
@@ -147,19 +147,19 @@ auto main() -> int {
     // --------------------------------------------------------------------
 
     // create queue on device
-    auto exception_handler = [](cl::sycl::exception_list exceptions) {
+    auto exception_handler = [](sycl::exception_list exceptions) {
       for (std::exception_ptr e : exceptions) {
         try {
           std::rethrow_exception(e);
-        } catch (const cl::sycl::exception &err) {
+        } catch (const sycl::exception &err) {
           std::cerr << "Caught asynchronous SYCL exception: " << err.what()
                     << std::endl;
         }
       }
     };
 
-    auto queue = cl::sycl::queue{exception_handler,
-                                 cl::sycl::property::queue::enable_profiling{}};
+    auto queue = sycl::queue{exception_handler,
+                                 sycl::property::queue::enable_profiling{}};
 
     // --------------------------------------------------------------------
     // Init host memory
@@ -186,39 +186,39 @@ auto main() -> int {
     // Init device memory
     // --------------------------------------------------------------------
     auto d_old_positions =
-        cl::sycl::buffer<float4, 1>{cl::sycl::range<1>{old_positions.size()}};
+        sycl::buffer<float4, 1>{sycl::range<1>{old_positions.size()}};
     d_old_positions.set_write_back(false);
 
     auto d_new_positions =
-        cl::sycl::buffer<float4, 1>{cl::sycl::range<1>{new_positions.size()}};
+        sycl::buffer<float4, 1>{sycl::range<1>{new_positions.size()}};
     d_new_positions.set_write_back(false);
 
     auto d_velocities =
-        cl::sycl::buffer<float4, 1>{cl::sycl::range<1>{velocities.size()}};
+        sycl::buffer<float4, 1>{sycl::range<1>{velocities.size()}};
     d_velocities.set_write_back(false);
 
-    queue.submit([&](cl::sycl::handler &cgh) {
+    queue.submit([&](sycl::handler &cgh) {
       auto acc =
-          d_old_positions.get_access<cl::sycl::access::mode::discard_write,
-                                     cl::sycl::access::target::global_buffer>(
+          d_old_positions.get_access<sycl::access::mode::discard_write,
+                                     sycl::access::target::global_buffer>(
               cgh);
 
       cgh.copy(old_positions.data(), acc);
     });
 
-    queue.submit([&](cl::sycl::handler &cgh) {
+    queue.submit([&](sycl::handler &cgh) {
       auto acc =
-          d_new_positions.get_access<cl::sycl::access::mode::discard_write,
-                                     cl::sycl::access::target::global_buffer>(
+          d_new_positions.get_access<sycl::access::mode::discard_write,
+                                     sycl::access::target::global_buffer>(
               cgh);
 
       cgh.copy(new_positions.data(), acc);
     });
 
-    queue.submit([&](cl::sycl::handler &cgh) {
+    queue.submit([&](sycl::handler &cgh) {
       auto acc =
-          d_velocities.get_access<cl::sycl::access::mode::discard_write,
-                                  cl::sycl::access::target::global_buffer>(cgh);
+          d_velocities.get_access<sycl::access::mode::discard_write,
+                                  sycl::access::target::global_buffer>(cgh);
 
       cgh.copy(velocities.data(), acc);
     });
@@ -226,24 +226,24 @@ auto main() -> int {
     // --------------------------------------------------------------------
     // execute kernel
     // --------------------------------------------------------------------
-    auto first_event = cl::sycl::event{};
-    auto last_event = cl::sycl::event{};
+    auto first_event = sycl::event{};
+    auto last_event = sycl::event{};
 
     for (auto i = 0; i < iterations; ++i) {
-      last_event = queue.submit([&, n](cl::sycl::handler &cgh) {
+      last_event = queue.submit([&, n](sycl::handler &cgh) {
         auto old_acc =
-            d_old_positions.get_access<cl::sycl::access::mode::read,
-                                       cl::sycl::access::target::global_buffer>(
+            d_old_positions.get_access<sycl::access::mode::read,
+                                       sycl::access::target::global_buffer>(
                 cgh);
 
         auto new_acc =
-            d_new_positions.get_access<cl::sycl::access::mode::discard_write,
-                                       cl::sycl::access::target::global_buffer>(
+            d_new_positions.get_access<sycl::access::mode::discard_write,
+                                       sycl::access::target::global_buffer>(
                 cgh);
 
         auto vel_acc =
-            d_velocities.get_access<cl::sycl::access::mode::read_write,
-                                    cl::sycl::access::target::global_buffer>(
+            d_velocities.get_access<sycl::access::mode::read_write,
+                                    sycl::access::target::global_buffer>(
                 cgh);
 
         auto integrator = body_integrator{old_acc, new_acc, vel_acc, n};
@@ -261,10 +261,10 @@ auto main() -> int {
     // results
     // --------------------------------------------------------------------
     auto start = first_event.get_profiling_info<
-        cl::sycl::info::event_profiling::command_start>();
+        sycl::info::event_profiling::command_start>();
     auto stop =
         last_event
-            .get_profiling_info<cl::sycl::info::event_profiling::command_end>();
+            .get_profiling_info<sycl::info::event_profiling::command_end>();
 
     auto time_ns = stop - start;
     auto time_s = time_ns / 1e9;
@@ -277,7 +277,7 @@ auto main() -> int {
     auto gflops = flops / 1e9;
 
     std::cout << n << ";" << time_ms << ";" << gflops << std::endl;
-  } catch (const cl::sycl::exception &e) {
+  } catch (const sycl::exception &e) {
     std::cerr << e.what() << std::endl;
     return EXIT_FAILURE;
   }

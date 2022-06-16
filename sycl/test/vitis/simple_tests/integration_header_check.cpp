@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
@@ -16,10 +16,10 @@
 
 */
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 class kernel_1;
 
@@ -60,7 +60,7 @@ int main() {
   q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::write>(cgh);
 
-    cgh.single_task<kernel_1>([=]() {
+    cgh.single_task<kernel_1>([=] {
       wb[0] = 1;
     });
   });
@@ -74,7 +74,7 @@ int main() {
   q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::write>(cgh);
 
-    cgh.single_task<class kernel_2>([=]() {
+    cgh.single_task<class kernel_2>([=] {
       wb[0] += 2;
     });
   });
@@ -88,7 +88,7 @@ int main() {
   q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::write>(cgh);
 
-    cgh.single_task<second_namespace::second_kernel<char>>([=]() {
+    cgh.single_task<second_namespace::second_kernel<char>>([=] {
       wb[0] += 3;
     });
   });
@@ -106,7 +106,7 @@ int main() {
     // the keyword struct from the struct X declaration, it works as it by
     // default re-declares it at the beginning of the header, is this ideal
     // behavior though?
-    cgh.single_task<third_kernel<1, int,point<struct X>>>([=]() {
+    cgh.single_task<third_kernel<1, int,point<struct X>>>([=] {
       wb[0] += 4;
     });
   });
@@ -119,7 +119,7 @@ int main() {
 
   q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::write>(cgh);
-    cgh.single_task<fourth_kernel<template_arg_ns::namespaced_arg<1>>>([=]() {
+    cgh.single_task<fourth_kernel<template_arg_ns::namespaced_arg<1>>>([=] {
       wb[0] += 5;
     });
   });
@@ -132,7 +132,7 @@ int main() {
 
   q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::write>(cgh);
-    cgh.single_task<nm1::sixth_kernel<nm1::nm2::fifth_kernel<10>>>([=]() {
+    cgh.single_task<nm1::sixth_kernel<nm1::nm2::fifth_kernel<10>>>([=] {
       wb[0] += 6;
     });
   });

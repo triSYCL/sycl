@@ -1945,7 +1945,8 @@ class SyclKernelDeclCreator : public SyclKernelFieldHandler {
   // attribute.
   void handleXilinxProperty(ParmVarDecl *Param, QualType PropTy,
                             SourceLocation Loc) {
-    if (!isSyclXilinxType(PropTy))
+    if (!SemaRef.getASTContext().getTargetInfo().getTriple().isXilinxFPGA() ||
+        !isSyclXilinxType(PropTy))
       return;
     ASTContext &Ctx = SemaRef.getASTContext();
     const CXXRecordDecl *RD = PropTy->getAsCXXRecordDecl();
