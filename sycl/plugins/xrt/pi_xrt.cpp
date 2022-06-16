@@ -15,14 +15,21 @@
 #error "unsupported OS"
 #endif
 
+#if !defined(__clang__) && (defined(__GNUC__) || defined(__GNUG__))
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpedantic"
+#endif
+
 /// XRT has a bunch of very noisy warnings we need to suppress.
 /// XRT can be included also as an OpenCL header implementation, so we suppress
 /// warning on both XRT native header and OpenCL headers
+#if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wnested-anon-types"
 #pragma clang diagnostic ignored "-Wgnu-anonymous-struct"
 #pragma clang diagnostic ignored "-Wc++98-compat-extra-semi"
 #pragma clang diagnostic ignored "-Wgnu-include-next"
+#endif
 
 #include <CL/sycl/detail/pi.h>
 #include <CL/sycl/detail/pi.hpp>
@@ -63,15 +70,21 @@
 
 #include "reproducer.h"
 
+#if defined(__clang__)
 #pragma clang diagnostic pop
+#endif
 
 // Most of the functions in the API exist but do not have an implementation, so most
 // parameters are not used and it is expected
+#if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-parameter"
 #pragma clang diagnostic ignored "-Wgnu-zero-variadic-macro-arguments"
+#elif defined(__GNUC__)
 
-/// Base class for _pi_* objects that need ref-counting
+#endif
+
+/// Base class for _pi_* objects that need ref-counting 
 template <typename base> class ref_counted_base {
   std::atomic<uint32_t> refCount_;
 
@@ -1592,7 +1605,7 @@ pi_result xrt_piProgramCreateWithBinary(
     *program = make_ref_counted<_pi_program>(context, std::move(xclbin))
                    .give_externally();
     return PI_SUCCESS;
-  } catch (std::system_error err) {
+  } catch (const std::system_error& err) {
     sycl::detail::pi::log()
         << "XRT error:" << err.code() << ":" << err.what() << std::endl;
     return PI_ERROR_UNKNOWN;
@@ -2281,4 +2294,10 @@ pi_result piPluginInit(pi_plugin *PluginInit) {
   return PI_SUCCESS;
 }
 
+#if defined(__clang__)
 #pragma clang diagnostic pop
+#endif
+
+#if !defined(__clang__) && (defined(__GNUC__) || defined(__GNUG__))
+#pragma GCC diagnostic pop
+#endif
