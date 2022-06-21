@@ -1105,6 +1105,15 @@ the `fpga64_` prefix trimmed. Namely:
 
 Note that the SPIR compilation flow has been discontinued.
 
+- Run the `vitis` test suite on CPU just to check the basic API
+  (around 1 minute):
+
+  ```bash
+  cd $SYCL_HOME/llvm/build
+  # Running tests with the CPU backend
+  cmake --build . --parallel `nproc` --target check-sycl-vitis-cpu
+  ```
+
 - Run the `vitis` test suite with hardware emulation (HLS flow):
 
   ```bash
