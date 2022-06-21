@@ -76,13 +76,15 @@ then, to compile this file, use
 
 ```bash
 # Be sure to use the right clang++
-$SYCL_BIN_DIR/clang++ --target=vitis_ip-xilinx vitis_ip.cpp --vitis-ip-part=xc7vx330t-ffg1157-1 -o adder.zip
+SYCL_VXX_KEEP_CLUTTER=1 $SYCL_BIN_DIR/clang++ --target=vitis_ip-xilinx vitis_ip.cpp --vitis-ip-part=xczu9eg-ffvb1156-2-e -o adder.zip
 ```
 
 where `--target=vitis_ip-xilinx` specifies that we are targeting Vitis
-IP blocks and `--vitis-ip-part=xc7vx330t-ffg1157-1` specifies which
-Xilinx device we are targeting `xc7vx330t-ffg1157-1`, which can
-obviously replaced by what you are really working with.
+IP blocks and `--vitis-ip-part=xc7z020clg484-1` specifies for example
+the part `xc7z020clg484-1` which is used in the ZYNQ-7 ZC702
+Evaluation Board, which can obviously replaced by what you are really
+working with. But be careful to use only a part you have a license
+for, otherwise it will fail.
 
 The output is a Vivado IP `zip` archive that can be loaded into Vivado
 when making a block design.
