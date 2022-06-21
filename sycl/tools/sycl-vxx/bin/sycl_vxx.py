@@ -211,11 +211,11 @@ class CSema:
         if is_test_mode:
         # this semaphore is global to every instances of sycl_vxx.py
             self.sema = posix_ipc.Semaphore("sycl_vxx.py", flags= posix_ipc.O_CREAT, initial_value = get_exec_count())
-    
+
     def __enter__(self):
         if is_test_mode:
             self.sema.acquire()
-  
+
     def __exit__(self, a, b, c):
         if is_test_mode:
             self.sema.release()
@@ -595,7 +595,7 @@ class IPExportCompilationDriver(VitisCompilationDriver):
         super().__init__(arguments, "vitis_hls")
         self.target = arguments.target
         self.clock_period = arguments.clock_period
-    
+
     @run_if_ok
     def _get_top_comp_name(self):
         numKernels = len(self.kernel_properties["kernels"])
@@ -623,7 +623,7 @@ class IPExportCompilationDriver(VitisCompilationDriver):
                 "exit",
                 ]))
         return script, out
-    
+
     @subprocess_error_handler("Vitis HLS invocation failed")
     def _run_vitis_hls(self, script):
         cmd = (self.vitisexec.path, "-f", script)
@@ -667,12 +667,12 @@ def parse_args(args=sys.argv[1:]):
             help="file containing v++ -l argument",
             type=Path)
     # There should not be other cases
-    elif command == "ipexport": 
+    elif command == "ipexport":
         parser.add_argument(
             "--target",
             help="Part code for which the synthesis should be done",
             required=True)
-        # TODO delay the default to clang driver, make it required here 
+        # TODO delay the default to clang driver, make it required here
         parser.add_argument(
             "--clock-period",
             help="clock period description",
