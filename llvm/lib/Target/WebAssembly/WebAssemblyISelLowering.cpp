@@ -19,6 +19,8 @@
 #include "WebAssemblySubtarget.h"
 #include "WebAssemblyTargetMachine.h"
 #include "llvm/CodeGen/CallingConvLower.h"
+#include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineFunctionPass.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineJumpTableInfo.h"
 #include "llvm/CodeGen/MachineModuleInfo.h"
@@ -577,7 +579,7 @@ LowerCallResults(MachineInstr &CallResults, DebugLoc DL, MachineBasicBlock *BB,
   // Move the function pointer to the end of the arguments for indirect calls
   if (IsIndirect) {
     auto FnPtr = CallParams.getOperand(0);
-    CallParams.RemoveOperand(0);
+    CallParams.removeOperand(0);
 
     // For funcrefs, call_indirect is done through __funcref_call_table and the
     // funcref is always installed in slot 0 of the table, therefore instead of having
@@ -1491,8 +1493,7 @@ bool WebAssemblyTargetLowering::MatchTableForLowering(SelectionDAG &DAG,
     if (GA) {
       // We are in Case 2 above.
       Idx = Base->getOperand(1);
-      if (!Idx || GA->getNumValues() != 1 || Idx->getNumValues() != 1)
-        return false;
+      assert(GA->getNumValues() == 1);
     } else {
       // This might be Case 1 above (or an error)
       SDValue V = Base->getOperand(0);
@@ -1629,7 +1630,7 @@ SDValue WebAssemblyTargetLowering::LowerCopyToReg(SDValue Op,
     // local.copy between Op and its FI operand.
     SDValue Chain = Op.getOperand(0);
     SDLoc DL(Op);
-    unsigned Reg = cast<RegisterSDNode>(Op.getOperand(1))->getReg();
+    Register Reg = cast<RegisterSDNode>(Op.getOperand(1))->getReg();
     EVT VT = Src.getValueType();
     SDValue Copy(DAG.getMachineNode(VT == MVT::i32 ? WebAssembly::COPY_I32
                                                    : WebAssembly::COPY_I64,

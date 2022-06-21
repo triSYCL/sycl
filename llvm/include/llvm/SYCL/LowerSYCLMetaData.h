@@ -15,9 +15,15 @@
 #define LLVM_PREPARE_SYCL_OPT_H
 
 #include "llvm/IR/Module.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
 
 namespace llvm {
+
+class LowerSYCLMetaDataPass : public PassInfoMixin<LowerSYCLMetaDataPass> {
+public:
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
+};
 
 ModulePass *createLowerSYCLMetaDataPass();
 

@@ -27,17 +27,6 @@ __SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
 namespace detail {
 
-bool is_compact_transfer(const sycl::range<3> &SrcSize,
-                         const sycl::range<3> &DstSize,
-                         const sycl::range<3> &SrcAccessRange,
-                         const sycl::range<3> &DstAccessRange,
-                         const sycl::id<3> &SrcOffset,
-                         const sycl::id<3> &DstOffset) {
-  return (SrcOffset == sycl::id<3>{0, 0, 0}) && (SrcSize == DstAccessRange) &&
-         (SrcSize == DstSize) && (SrcSize == SrcAccessRange) &&
-         (SrcOffset == DstOffset);
-}
-
 #ifdef XPTI_ENABLE_INSTRUMENTATION
 uint8_t GMemAllocStreamID;
 xpti::trace_event_data_t *GMemAllocEvent;
@@ -87,8 +76,8 @@ void emitMemAllocEndTrace(uintptr_t ObjHandle, uintptr_t AllocPtr,
 uint64_t emitMemReleaseBeginTrace(uintptr_t ObjHandle, uintptr_t AllocPtr) {
   (void)ObjHandle;
   (void)AllocPtr;
-#ifdef XPTI_ENABLE_INSTRUMENTATION
   uint64_t CorrelationID = 0;
+#ifdef XPTI_ENABLE_INSTRUMENTATION
   if (xptiTraceEnabled()) {
     xpti::mem_alloc_data_t MemAlloc{ObjHandle, AllocPtr, 0 /* alloc size */,
                                     0 /* guard zone */};
@@ -138,9 +127,12 @@ static void waitForEvents(const std::vector<EventImplPtr> &Events) {
 void memBufferCreateHelper(const plugin &Plugin, pi_context Ctx,
                            pi_mem_flags Flags, size_t Size, void *HostPtr,
                            pi_mem *RetMem, const pi_mem_properties *Props) {
+#ifdef XPTI_ENABLE_INSTRUMENTATION
   uint64_t CorrID = 0;
+#endif
   // We only want to instrument piMemBufferCreate
   {
+#ifdef XPTI_ENABLE_INSTRUMENTATION
     CorrID =
         emitMemAllocBeginTrace(0 /* mem object */, Size, 0 /* guard zone */);
     xpti::utils::finally _{[&] {
@@ -154,6 +146,7 @@ void memBufferCreateHelper(const plugin &Plugin, pi_context Ctx,
       emitMemAllocEndTrace(MemObjID, (uintptr_t)(Ptr), Size, 0 /* guard zone */,
                            CorrID);
     }};
+#endif
     Plugin.call<PiApiKind::piMemBufferCreate>(Ctx, Flags, Size, HostPtr, RetMem,
                                               Props);
   }
@@ -163,6 +156,7 @@ void memReleaseHelper(const plugin &Plugin, pi_mem Mem) {
   // FIXME piMemRelease does not guarante memory release. It is only true if
   // reference counter is 1. However, SYCL runtime currently only calls
   // piMemRetain only for OpenCL interop
+#ifdef XPTI_ENABLE_INSTRUMENTATION
   uint64_t CorrID = 0;
   // C-style cast is required for MSVC
   uintptr_t MemObjID = (uintptr_t)(Mem);
@@ -173,11 +167,14 @@ void memReleaseHelper(const plugin &Plugin, pi_mem Mem) {
     Plugin.call<PiApiKind::piextMemGetNativeHandle>(Mem, &PtrHandle);
     Ptr = (uintptr_t)(PtrHandle);
   }
+#endif
   // We only want to instrument piMemRelease
   {
+#ifdef XPTI_ENABLE_INSTRUMENTATION
     CorrID = emitMemReleaseBeginTrace(MemObjID, Ptr);
     xpti::utils::finally _{
         [&] { emitMemReleaseEndTrace(MemObjID, Ptr, CorrID); }};
+#endif
     Plugin.call<PiApiKind::piMemRelease>(Mem);
   }
 }
@@ -187,15 +184,19 @@ void memBufferMapHelper(const plugin &Plugin, pi_queue Queue, pi_mem Buffer,
                         size_t Size, pi_uint32 NumEvents,
                         const pi_event *WaitList, pi_event *Event,
                         void **RetMap) {
+#ifdef XPTI_ENABLE_INSTRUMENTATION
   uint64_t CorrID = 0;
   uintptr_t MemObjID = (uintptr_t)(Buffer);
+#endif
   // We only want to instrument piEnqueueMemBufferMap
   {
+#ifdef XPTI_ENABLE_INSTRUMENTATION
     CorrID = emitMemAllocBeginTrace(MemObjID, Size, 0 /* guard zone */);
     xpti::utils::finally _{[&] {
       emitMemAllocEndTrace(MemObjID, (uintptr_t)(*RetMap), Size,
                            0 /* guard zone */, CorrID);
     }};
+#endif
     Plugin.call<PiApiKind::piEnqueueMemBufferMap>(
         Queue, Buffer, Blocking, Flags, Offset, Size, NumEvents, WaitList,
         Event, RetMap);
@@ -205,11 +206,14 @@ void memBufferMapHelper(const plugin &Plugin, pi_queue Queue, pi_mem Buffer,
 void memUnmapHelper(const plugin &Plugin, pi_queue Queue, pi_mem Mem,
                     void *MappedPtr, pi_uint32 NumEvents,
                     const pi_event *WaitList, pi_event *Event) {
+#ifdef XPTI_ENABLE_INSTRUMENTATION
   uint64_t CorrID = 0;
   uintptr_t MemObjID = (uintptr_t)(Mem);
   uintptr_t Ptr = (uintptr_t)(MappedPtr);
+#endif
   // We only want to instrument piEnqueueMemUnmap
   {
+#ifdef XPTI_ENABLE_INSTRUMENTATION
     CorrID = emitMemReleaseBeginTrace(MemObjID, Ptr);
     xpti::utils::finally _{[&] {
       // There's no way for SYCL to know, when the pointer is freed, so we have
@@ -221,6 +225,7 @@ void memUnmapHelper(const plugin &Plugin, pi_queue Queue, pi_mem Mem,
       Plugin.call_nocheck<PiApiKind::piEventsWait>(1, Event);
       emitMemReleaseEndTrace(MemObjID, Ptr, CorrID);
     }};
+#endif
     Plugin.call<PiApiKind::piEnqueueMemUnmap>(Queue, Mem, MappedPtr, NumEvents,
                                               WaitList, Event);
   }
@@ -293,7 +298,6 @@ void *MemoryManager::allocateHostMemory(SYCLMemObjI *MemObj, void *UserPtr,
     return UserPtr;
 
   void *NewMem = MemObj->allocateHostMem();
-
   // Need to initialize new memory if user provides pointer to read only
   // memory.
   if (UserPtr && HostPtrReadOnly == true)
@@ -358,6 +362,18 @@ MemoryManager::allocateBufferObject(ContextImplPtr TargetContext, void *UserPtr,
 
   RT::PiMem NewMem = nullptr;
   const detail::plugin &Plugin = TargetContext->getPlugin();
+
+  if (PropsList.has_property<property::buffer::detail::buffer_location>())
+    if (TargetContext->isBufferLocationSupported()) {
+      auto location =
+          PropsList.get_property<property::buffer::detail::buffer_location>()
+              .get_buffer_location();
+      pi_mem_properties props[3] = {PI_MEM_PROPERTIES_ALLOC_BUFFER_LOCATION,
+                                    location, 0};
+      memBufferCreateHelper(Plugin, TargetContext->getHandleRef(),
+                            CreationFlags, Size, UserPtr, &NewMem, props);
+      return NewMem;
+    }
   memBufferCreateHelper(Plugin, TargetContext->getHandleRef(), CreationFlags,
                         Size, UserPtr, &NewMem, nullptr);
   return NewMem;
@@ -498,17 +514,6 @@ void copyH2D(SYCLMemObjI *SYCLMemObj, char *SrcMem, QueueImplPtr,
           /*blocking_write=*/CL_FALSE, DstXOffBytes, DstAccessRangeWidthBytes,
           SrcMem + SrcXOffBytes, DepEvents.size(), DepEvents.data(), &OutEvent);
     } else {
-      if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
-                              SrcOffset, DstOffset)) {
-        Plugin.call<PiApiKind::piEnqueueMemBufferWrite>(
-            Queue, DstMem, /*blocking_write=*/CL_FALSE, DstOffset[DstPos.YTerm],
-            DstAccessRangeWidthBytes * DstAccessRange[DstPos.YTerm] *
-                DstAccessRange[DstPos.ZTerm],
-            SrcMem + DstOffset[DstPos.YTerm], DepEvents.size(),
-            DepEvents.size() ? &DepEvents[0] : nullptr, &OutEvent);
-        return;
-      }
-
       size_t BufferRowPitch = (1 == DimDst) ? 0 : DstSzWidthBytes;
       size_t BufferSlicePitch =
           (3 == DimDst) ? DstSzWidthBytes * DstSize[DstPos.YTerm] : 0;
@@ -587,17 +592,6 @@ void copyD2H(SYCLMemObjI *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
           /*blocking_read=*/CL_FALSE, SrcXOffBytes, SrcAccessRangeWidthBytes,
           DstMem + DstXOffBytes, DepEvents.size(), DepEvents.data(), &OutEvent);
     } else {
-      if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
-                              SrcOffset, DstOffset)) {
-        Plugin.call<PiApiKind::piEnqueueMemBufferRead>(
-            Queue, SrcMem, /*blocking_read=*/CL_FALSE, DstOffset[0],
-            DstAccessRange[DstPos.YTerm] * DstAccessRange[DstPos.XTerm] *
-                DstAccessRange[DstPos.ZTerm],
-            DstMem + DstOffset[DstPos.YTerm], DepEvents.size(),
-            DepEvents.size() ? &DepEvents[0] : nullptr, &OutEvent);
-        return;
-      }
-
       size_t BufferRowPitch = (1 == DimSrc) ? 0 : SrcSzWidthBytes;
       size_t BufferSlicePitch =
           (3 == DimSrc) ? SrcSzWidthBytes * SrcSize[SrcPos.YTerm] : 0;
@@ -641,10 +635,9 @@ void copyD2D(SYCLMemObjI *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
              unsigned int DimSrc, sycl::range<3> SrcSize,
              sycl::range<3> SrcAccessRange, sycl::id<3> SrcOffset,
              unsigned int SrcElemSize, RT::PiMem DstMem, QueueImplPtr,
-             unsigned int DimDst, sycl::range<3> DstSize,
-             sycl::range<3> DstAccessRange, sycl::id<3> DstOffset,
-             unsigned int DstElemSize, std::vector<RT::PiEvent> DepEvents,
-             RT::PiEvent &OutEvent) {
+             unsigned int DimDst, sycl::range<3> DstSize, sycl::range<3>,
+             sycl::id<3> DstOffset, unsigned int DstElemSize,
+             std::vector<RT::PiEvent> DepEvents, RT::PiEvent &OutEvent) {
   assert(SYCLMemObj && "The SYCLMemObj is nullptr");
 
   const RT::PiQueue Queue = SrcQueue->getHandleRef();
@@ -668,18 +661,6 @@ void copyD2D(SYCLMemObjI *SYCLMemObj, RT::PiMem SrcMem, QueueImplPtr SrcQueue,
           SrcAccessRangeWidthBytes, DepEvents.size(), DepEvents.data(),
           &OutEvent);
     } else {
-      if (is_compact_transfer(SrcSize, DstSize, SrcAccessRange, DstAccessRange,
-                              SrcOffset, DstOffset)) {
-        Plugin.call<PiApiKind::piEnqueueMemBufferCopy>(
-            Queue, SrcMem, DstMem, SrcOffset[SrcPos.YTerm],
-            DstOffset[SrcPos.YTerm],
-            SrcAccessRangeWidthBytes * SrcAccessRange[SrcPos.YTerm] *
-                SrcAccessRange[SrcPos.ZTerm],
-            DepEvents.size(), DepEvents.size() ? &DepEvents[0] : nullptr,
-            &OutEvent);
-        return;
-      }
-
       // passing 0 for pitches not allowed. Because clEnqueueCopyBufferRect will
       // calculate both src and dest pitch using region[0], which is not correct
       // if src and dest are not the same size.

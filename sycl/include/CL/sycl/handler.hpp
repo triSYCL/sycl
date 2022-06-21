@@ -29,6 +29,7 @@
 #include <CL/sycl/property_list.hpp>
 #include <CL/sycl/sampler.hpp>
 #include <CL/sycl/stl.hpp>
+#include <CL/sycl/types.hpp>
 
 #include <functional>
 #include <limits>
@@ -212,10 +213,10 @@ checkValueRange(const T &V) {
 ///
 /// Build one loop of depth CurDimIDX for the loop nest corresponding to
 /// IterDomain
-template <int CurDimIdx, int IterDims>
-inline void build_loop_nest_rec(auto &ElementWiseOp,
+template <int CurDimIdx, int IterDims, typename ElementWiseOpTy, typename OuterLoopIterIdxTy>
+inline void build_loop_nest_rec(ElementWiseOpTy &ElementWiseOp,
                                 range<IterDims> &IterDomain,
-                                auto OuterLoopIterIdx) {
+                                OuterLoopIterIdxTy OuterLoopIterIdx) {
   size_t CurDimIter = 0;
   auto NextIdx = std::tuple_cat(OuterLoopIterIdx, std::tie(CurDimIter));
   for (CurDimIter = 0; CurDimIter < IterDomain[CurDimIdx]; CurDimIter++) {
@@ -243,16 +244,17 @@ inline void build_loop_nest_rec(auto &ElementWiseOp,
 ///
 /// Build one loop of depth CurDimIDX for the loop nest corresponding to
 /// IterDomain
-template <int CurDimIdx, int IterDims>
-inline void build_inner_loop_nd_nest_rec(auto &ElementWiseOp,
-                                         nd_range<IterDims> &IterDomains,
-                                         auto WGIdx,
-                                         auto OuterLoopLocalWG,
-                                         auto OuterLoopGlobalIdx) {
-  size_t CurDimGroupRange = IterDomains.get_group_range()[CurDimIdx];
+template <int CurDimIdx, int IterDims, typename ElementWiseOpTy,
+          typename WGIdxTy, typename OuterLoopLocalWGTy,
+          typename OuterLoopGlobalIdxTy>
+inline void
+build_inner_loop_nd_nest_rec(ElementWiseOpTy &ElementWiseOp,
+                             nd_range<IterDims> &IterDomains, WGIdxTy WGIdx,
+                             OuterLoopLocalWGTy OuterLoopLocalWG,
+                             OuterLoopGlobalIdxTy OuterLoopGlobalIdx) {
   size_t CurDimLocalRange = IterDomains.get_local_range()[CurDimIdx];
   size_t CurDimLocalIter = 0;
-  size_t CurDimGlobalIter = get<CurDimIdx>(WGIdx) * CurDimLocalRange;
+  size_t CurDimGlobalIter = std::get<CurDimIdx>(WGIdx) * CurDimLocalRange;
   auto NextLocalIdx =
       std::tuple_cat(OuterLoopLocalWG, std::tie(CurDimLocalIter));
   auto NextGlobalIdx =
@@ -296,10 +298,10 @@ inline void build_inner_loop_nd_nest_rec(auto &ElementWiseOp,
 ///
 /// Build one loop of depth CurDimIDX for the workgroup level corresponding to
 /// IterDomain
-template <int CurDimIdx, int IterDims>
+template <int CurDimIdx, int IterDims, typename ElementWiseOpTy, typename OuterLoopWGIdxTy>
 inline void
-build_loop_nd_nest_rec(auto &ElementWiseOp, nd_range<IterDims> &IterDomains,
-                       auto OuterLoopWGIdx) {
+build_loop_nd_nest_rec(ElementWiseOpTy &ElementWiseOp, nd_range<IterDims> &IterDomains,
+                       OuterLoopWGIdxTy OuterLoopWGIdx) {
   size_t CurDimGroupRange = IterDomains.get_group_range()[CurDimIdx];
   size_t CurDimGroupIter = 0;
   auto NextWGIdx =
@@ -329,8 +331,8 @@ build_loop_nd_nest_rec(auto &ElementWiseOp, nd_range<IterDims> &IterDomains,
 /// \code parallel_for(ElementWiseOp, IterDomain); \endcode
 /// It is used to replace parallel_for on device where having a
 /// single loop nest makes more sense.
-template <int IterDims>
-inline void serialize_parallel_for(auto &ElementWiseOp,
+template <int IterDims, typename ElementWiseOpTy>
+inline void serialize_parallel_for(ElementWiseOpTy &ElementWiseOp,
                                    range<IterDims> IterDomain) {
   build_loop_nest_rec<0, IterDims>(ElementWiseOp, IterDomain, std::tuple<>{});
 }
@@ -347,12 +349,13 @@ inline void serialize_parallel_for(auto &ElementWiseOp,
 /// \code parallel_for(ElementWiseOp, IterDomain); \endcode
 /// It is used to replace parallel_for on device where having a
 /// single loop nest makes more sense.
-template <int IterDims>
-inline void serialize_parallel_for(auto &ElementWiseOp,
+template <int IterDims, typename ElementWiseOpTy>
+inline void serialize_parallel_for(ElementWiseOpTy &ElementWiseOp,
                                    nd_range<IterDims> IterDomains) {
   build_loop_nd_nest_rec<0, IterDims>(ElementWiseOp, IterDomains,
                                       std::tuple<>{});
 }
+
 template <typename TransformedArgType, int Dims, typename KernelType>
 class RoundedRangeKernel {
 public:
@@ -389,7 +392,17 @@ private:
   KernelType KernelFunc;
 };
 
+template<typename T>
+struct assume_device_copyable_wrapper : T {
+};
+
 } // namespace detail
+
+template <typename T>
+struct is_device_copyable<
+    detail::assume_device_copyable_wrapper<T>,
+    std::enable_if_t<!std::is_trivially_copyable<T>::value>> : std::true_type {
+};
 
 namespace ext {
 namespace oneapi {
@@ -626,12 +639,9 @@ private:
   /// Saves buffers created by handling reduction feature in handler.
   /// They are then forwarded to command group and destroyed only after
   /// the command group finishes the work on device/host.
-  /// The 'MSharedPtrStorage' suits that need.
   ///
   /// @param ReduObj is a pointer to object that must be stored.
-  void addReduction(const std::shared_ptr<const void> &ReduObj) {
-    MSharedPtrStorage.push_back(ReduObj);
-  }
+  void addReduction(const std::shared_ptr<const void> &ReduObj);
 
   ~handler() = default;
 
@@ -814,16 +824,29 @@ private:
         KernelFunc);
   }
 
-  /* 'wrapper'-based approach using 'NormalizedKernelType' struct is
-   * not applied for 'void(void)' type kernel and
-   * 'void(sycl::group<Dims>)'. This is because 'void(void)' type does
-   * not have argument to normalize and 'void(sycl::group<Dims>)' is
-   * not supported in ESIMD.
-   */
-  // For 'void' and 'sycl::group<Dims>' kernel argument
+  // For 'void' kernel argument (single_task)
   template <class KernelType, typename ArgT, int Dims>
-  typename std::enable_if<std::is_same<ArgT, void>::value ||
-                              std::is_same<ArgT, sycl::group<Dims>>::value,
+  typename std::enable_if_t<std::is_same<ArgT, void>::value, KernelType *>
+  ResetHostKernel(const KernelType &KernelFunc) {
+    struct NormalizedKernelType {
+      KernelType MKernelFunc;
+      NormalizedKernelType(const KernelType &KernelFunc)
+          : MKernelFunc(KernelFunc) {}
+      void operator()(const nd_item<Dims> &Arg) {
+        (void)Arg;
+        detail::runKernelWithoutArg(MKernelFunc);
+      }
+    };
+    return ResetHostKernelHelper<KernelType, struct NormalizedKernelType, Dims>(
+        KernelFunc);
+  }
+
+  // For 'sycl::group<Dims>' kernel argument
+  // 'wrapper'-based approach using 'NormalizedKernelType' struct is not used
+  // for 'void(sycl::group<Dims>)' since 'void(sycl::group<Dims>)' is not
+  // supported in ESIMD.
+  template <class KernelType, typename ArgT, int Dims>
+  typename std::enable_if<std::is_same<ArgT, sycl::group<Dims>>::value,
                           KernelType *>::type
   ResetHostKernel(const KernelType &KernelFunc) {
     MHostKernel.reset(
@@ -1071,11 +1094,14 @@ private:
   }
 
   template <int Dims, typename LambdaArgType> struct TransformUserItemType {
-    using type = typename std::conditional<
-        std::is_convertible<nd_item<Dims>, LambdaArgType>::value, nd_item<Dims>,
-        typename std::conditional<
-            std::is_convertible<item<Dims>, LambdaArgType>::value, item<Dims>,
-            LambdaArgType>::type>::type;
+    using type = typename std::conditional_t<
+        detail::is_same_v<id<Dims>, LambdaArgType>, LambdaArgType,
+        typename std::conditional_t<
+            detail::is_convertible_v<nd_item<Dims>, LambdaArgType>,
+            nd_item<Dims>,
+            typename std::conditional_t<
+                detail::is_convertible_v<item<Dims>, LambdaArgType>, item<Dims>,
+                LambdaArgType>>>;
   };
 
   /// Defines and invokes a SYCL kernel function for the specified range.
@@ -1093,14 +1119,22 @@ private:
   void parallel_for_lambda_impl(range<Dims> NumWorkItems,
                                 KernelType KernelFunc) {
     throwIfActionIsCreated();
-    using NameT =
-        typename detail::get_kernel_name_t<KernelName, KernelType>::name;
-#ifndef __SYCL_DEVICE_ONLY__
-device D = detail::getDeviceFromHandler(*this);
+#if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
+#if !defined(__SYCL_DEVICE_ONLY__)
+    if (detail::getDeviceFromHandler(*this).has(
+            aspect::ext_xilinx_single_task_only)) {
 #endif
-
-// Normal parallel_for handling
-#ifndef __SYCL_SPIR_DEVICE__
+      single_task<KernelName>(
+          [=, Func = detail::assume_device_copyable_wrapper<
+                  std::remove_reference_t<KernelType>>{KernelFunc}] {
+            detail::serialize_parallel_for(Func, NumWorkItems);
+          });
+#if !defined(__SYCL_DEVICE_ONLY__)
+      return;
+    }
+#endif
+#endif
+#if !defined(__SYCL_SPIR_DEVICE__)
     using LambdaArgType = sycl::detail::lambda_arg_type<KernelType, item<Dims>>;
 
     // If 1D kernel argument is an integral type, convert it to sycl::item<1>
@@ -1109,6 +1143,9 @@ device D = detail::getDeviceFromHandler(*this);
     using TransformedArgType = typename std::conditional<
         std::is_integral<LambdaArgType>::value && Dims == 1, item<Dims>,
         typename TransformUserItemType<Dims, LambdaArgType>::type>::type;
+
+    using NameT =
+        typename detail::get_kernel_name_t<KernelName, KernelType>::name;
 
     verifyUsedKernelBundle(detail::KernelInfo<NameT>::getName());
 
@@ -1178,14 +1215,11 @@ device D = detail::getDeviceFromHandler(*this);
       AdjustedRange.set_range_dim0(NewValX);
       kernel_parallel_for_wrapper<KName, TransformedArgType>(Wrapper);
 #ifndef __SYCL_DEVICE_ONLY__
-      if (!D.has(aspect::ext_xilinx_single_task_only)) {
         detail::checkValueRange<Dims>(AdjustedRange);
         MNDRDesc.set(std::move(AdjustedRange));
         StoreLambda<KName, decltype(Wrapper), Dims, TransformedArgType>(
             std::move(Wrapper));
         setType(detail::CG::Kernel);
-        return;
-      }
 #endif
     } else
 #endif // !__SYCL_DISABLE_PARALLEL_FOR_RANGE_ROUNDING__ &&
@@ -1195,36 +1229,14 @@ device D = detail::getDeviceFromHandler(*this);
       (void)NumWorkItems;
       kernel_parallel_for_wrapper<NameT, TransformedArgType>(KernelFunc);
 #ifndef __SYCL_DEVICE_ONLY__
-      if (!D.has(aspect::ext_xilinx_single_task_only)) {
         detail::checkValueRange<Dims>(NumWorkItems);
         MNDRDesc.set(std::move(NumWorkItems));
         StoreLambda<NameT, KernelType, Dims, TransformedArgType>(
             std::move(KernelFunc));
         setType(detail::CG::Kernel);
-        return;
-      }
-#endif // !SYCL_DEVICE_ONLY
+#endif
     }
-#endif // !__SYCL_SPIR_DEVICE__
-
-// Wrap kernel in for loop for devices that do not support parallel_for
-// (currently Xilinx HLS)
-#if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
-    auto SingleTaskKernel = [=]{
-        detail::serialize_parallel_for(KernelFunc, NumWorkItems);
-    };
-    using ToSingleTaskName = detail::par_for_to_st<NameT>;
-    kernel_single_task<ToSingleTaskName>(SingleTaskKernel);
-#ifndef __SYCL_DEVICE_ONLY__
-    // No need to check if range is out of INT_MAX limits as it's compile-time
-    // known constant
-    if (D.has(aspect::ext_xilinx_single_task_only)) {
-      MNDRDesc.set(range<1>{1});
-      StoreLambda<ToSingleTaskName, decltype(SingleTaskKernel), /*Dims*/ 0, void>(SingleTaskKernel);
-      setType(detail::CG::Kernel);
-    }
-#endif // !__SYCL_DEVICE_ONLY__
-#endif // __SYCL_SPIR_DEVICE__ || !__SYCL_DEVICE_ONLY__
+    #endif
   }
 
   /// Defines and invokes a SYCL kernel function for the specified range.
@@ -1247,7 +1259,7 @@ device D = detail::getDeviceFromHandler(*this);
   }
 
 #ifdef SYCL_LANGUAGE_VERSION
-#define __SYCL_KERNEL_ATTR__ __attribute__((sycl_kernel))
+#define __SYCL_KERNEL_ATTR__ [[clang::sycl_kernel]]
 #else
 #define __SYCL_KERNEL_ATTR__
 #endif
@@ -1449,6 +1461,7 @@ device D = detail::getDeviceFromHandler(*this);
   }
 
   std::shared_ptr<detail::handler_impl> getHandlerImpl() const;
+  std::shared_ptr<detail::handler_impl> evictHandlerImpl() const;
 
   void setStateExplicitKernelBundle();
   void setStateSpecConstSet();
@@ -1483,7 +1496,7 @@ public:
   handler &operator=(const handler &) = delete;
   handler &operator=(handler &&) = delete;
 
-#if __cplusplus > 201402L
+#if __cplusplus >= 201703L
   template <auto &SpecName>
   void set_specialization_constant(
       typename std::remove_reference_t<decltype(SpecName)>::value_type Value) {
@@ -1620,7 +1633,7 @@ public:
     // known constant.
     MNDRDesc.set(range<1>{1});
 
-    StoreLambda<NameT, KernelType, /*Dims*/ 0, void>(KernelFunc);
+    StoreLambda<NameT, KernelType, /*Dims*/ 1, void>(KernelFunc);
     setType(detail::CG::Kernel);
 #endif
   }
@@ -1740,13 +1753,25 @@ public:
   void parallel_for(nd_range<Dims> ExecutionRange,
                     _KERNELFUNCPARAM(KernelFunc)) {
     throwIfActionIsCreated();
+#if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
+#if !defined(__SYCL_DEVICE_ONLY__)
+    if (detail::getDeviceFromHandler(*this).has(
+            aspect::ext_xilinx_single_task_only)) {
+#endif
+      single_task<KernelName>(
+          [=, Func = detail::assume_device_copyable_wrapper<
+                  std::remove_reference_t<KernelType>>{
+                  std::forward<_KERNELFUNCPARAM()>(KernelFunc)}] {
+            detail::serialize_parallel_for(Func, ExecutionRange);
+          });
+#if !defined(__SYCL_DEVICE_ONLY__)
+      return;
+    }
+#endif
+#endif
+#if !defined(__SYCL_SPIR_DEVICE__)
     using NameT =
         typename detail::get_kernel_name_t<KernelName, KernelType>::name;
-#ifndef __SYCL_DEVICE_ONLY__
-    device D = detail::getDeviceFromHandler(*this);
-#endif
-// Normal handling
-#ifndef __SYCL_SPIR_DEVICE__
     verifyUsedKernelBundle(detail::KernelInfo<NameT>::getName());
     using LambdaArgType =
         sycl::detail::lambda_arg_type<KernelType, nd_item<Dims>>;
@@ -1757,33 +1782,13 @@ public:
     (void)ExecutionRange;
     kernel_parallel_for_wrapper<NameT, TransformedArgType>(KernelFunc);
 #ifndef __SYCL_DEVICE_ONLY__
-    if (!D.has(aspect::ext_xilinx_single_task_only)) {
       detail::checkValueRange<Dims>(ExecutionRange);
       MNDRDesc.set(std::move(ExecutionRange));
       StoreLambda<NameT, KernelType, Dims, TransformedArgType>(
           std::move(KernelFunc));
       setType(detail::CG::Kernel);
-    }
 #endif
 #endif
-// Parallel for serializing for
-#if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
-    auto SingleTaskKernel = [=] {
-      detail::serialize_parallel_for(KernelFunc, ExecutionRange);
-    };
-    using ToSingleTaskName = detail::par_for_to_st<NameT>;
-    kernel_single_task<ToSingleTaskName>(SingleTaskKernel);
-#ifndef __SYCL_DEVICE_ONLY__
-    // No need to check if range is out of INT_MAX limits as it's compile-time
-    // known constant
-    if (D.has(aspect::ext_xilinx_single_task_only)) {
-      MNDRDesc.set(range<1>{1});
-      StoreLambda<ToSingleTaskName, decltype(SingleTaskKernel), /*Dims*/ 0,
-                  void>(SingleTaskKernel);
-      setType(detail::CG::Kernel);
-    }
-#endif // !__SYCL_DEVICE_ONLY__
-#endif // __SYCL_SPIR_DEVICE__ || !__SYCL_DEVICE_ONLY__
   }
 
   /// Defines and invokes a SYCL kernel function for the specified nd_range.
@@ -1791,7 +1796,7 @@ public:
   /// The SYCL kernel function is defined as a lambda function or a named
   /// function object type and given an id for indexing in the indexing
   /// space defined by range \p Range.
-  /// The parameter \p Redu contains the object created by the reduction()
+  /// The parameter \p Redu contains the object creted by the reduction()
   /// function and defines the type and operation used in the corresponding
   /// argument of 'reducer' type passed to lambda/functor function.
   template <typename KernelName = detail::auto_name, typename KernelType,
@@ -2254,7 +2259,7 @@ public:
       extractArgsAndReqs();
       MKernelName = getKernelName();
     } else
-      StoreLambda<NameT, KernelType, /*Dims*/ 0, void>(std::move(KernelFunc));
+      StoreLambda<NameT, KernelType, /*Dims*/ 1, void>(std::move(KernelFunc));
 #else
     detail::CheckDeviceCopyable<KernelType>();
 #endif
@@ -2622,8 +2627,11 @@ public:
                   "Invalid source accessor mode for the copy method.");
     static_assert(isValidModeForDestinationAccessor(AccessMode_Dst),
                   "Invalid destination accessor mode for the copy method.");
-    assert(Dst.get_size() >= Src.get_size() &&
-           "The destination accessor does not fit the copied memory.");
+    if (Dst.get_size() < Src.get_size())
+      throw sycl::invalid_object_error(
+          "The destination accessor size is too small to copy the memory into.",
+          CL_INVALID_OPERATION);
+
     if (copyAccToAccHelper(Src, Dst))
       return;
     setType(detail::CG::CopyAccToAcc);

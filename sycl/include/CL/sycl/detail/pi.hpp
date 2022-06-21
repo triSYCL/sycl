@@ -67,12 +67,14 @@ bool trace(TraceLevel level);
 #define __SYCL_CUDA_PLUGIN_NAME "pi_cuda.dll"
 #define __SYCL_ESIMD_EMULATOR_PLUGIN_NAME "pi_esimd_emulator.dll"
 #define __SYCL_HIP_PLUGIN_NAME "libpi_hip.dll"
+#define __SYCL_XRT_PLUGIN_NAME "libpi_xrt.dll"
 #else
 #define __SYCL_OPENCL_PLUGIN_NAME "libpi_opencl.so"
 #define __SYCL_LEVEL_ZERO_PLUGIN_NAME "libpi_level_zero.so"
 #define __SYCL_CUDA_PLUGIN_NAME "libpi_cuda.so"
 #define __SYCL_ESIMD_EMULATOR_PLUGIN_NAME "libpi_esimd_emulator.so"
 #define __SYCL_HIP_PLUGIN_NAME "libpi_hip.so"
+#define __SYCL_XRT_PLUGIN_NAME "libpi_xrt.so"
 #endif
 
 // Report error and no return (keeps compiler happy about no return statements).
@@ -381,6 +383,13 @@ public:
     ExportedSymbols.init(Bin, __SYCL_PI_PROPERTY_SET_SYCL_EXPORTED_SYMBOLS);
     return ExportedSymbols;
   }
+  const PropertyRange getDeviceGlobals() const {
+    // We can't have this variable as a class member, since it would break
+    // the ABI backwards compatibility.
+    DeviceBinaryImage::PropertyRange DeviceGlobals;
+    DeviceGlobals.init(Bin, __SYCL_PI_PROPERTY_SET_SYCL_DEVICE_GLOBALS);
+    return DeviceGlobals;
+  }
   virtual ~DeviceBinaryImage() {}
 
 protected:
@@ -416,6 +425,15 @@ template <class To, class From> inline To cast(From value) {
   // TODO: see if more sanity checks are possible.
   RT::assertion((sizeof(From) == sizeof(To)), "assert: cast failed size check");
   return (To)(value);
+}
+
+// Cast for std::vector<cl_event>, according to the spec, make_event
+// should create one(?) event from a vector of cl_event
+template <class To> inline To cast(std::vector<cl_event> value) {
+  RT::assertion(value.size() == 1,
+                "Temporary workaround requires that the "
+                "size of the input vector for make_event be equal to one.");
+  return (To)(value[0]);
 }
 
 // These conversions should use PI interop API.

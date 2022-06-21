@@ -10,7 +10,6 @@ int main() {
                                 sycl::memory_scope_device,
                                 sycl::access::address_space::local_space>(d);
 
-
   int i = 10;
   auto ref_i = sycl::atomic_ref<int, sycl::memory_order_acq_rel,
                                 sycl::memory_scope_device,

@@ -57,6 +57,8 @@ public:
     bpfeb,          // eBPF or extended BPF or 64-bit BPF (big endian)
     csky,           // CSKY: csky
     hexagon,        // Hexagon: hexagon
+    loongarch32,    // LoongArch (32-bit): loongarch32
+    loongarch64,    // LoongArch (64-bit): loongarch64
     m68k,           // M68k: Motorola 680x0 family
     mips,           // MIPS: mips, mipsallegrex, mipsr6
     mipsel,         // MIPSEL: mipsel, mipsallegrexe, mipsr6el
@@ -104,15 +106,18 @@ public:
     fpga,           // Intel FPGA
     fpga32,         // 32-bit Xilinx FPGA
     fpga64,         // 64-bit Xilinx FPGA
+    vitis_ip,       // Vitis ip block design for Xilinx FPGA
     ve,             // NEC SX-Aurora Vector Engine
     LastArchType = ve
   };
   enum SubArchType {
     NoSubArch,
 
+    ARMSubArch_v9_3a,
     ARMSubArch_v9_2a,
     ARMSubArch_v9_1a,
     ARMSubArch_v9,
+    ARMSubArch_v8_8a,
     ARMSubArch_v8_7a,
     ARMSubArch_v8_6a,
     ARMSubArch_v8_5a,
@@ -212,6 +217,7 @@ public:
     ELFIAMCU,
     TvOS,       // Apple tvOS
     WatchOS,    // Apple watchOS
+    DriverKit,  // Apple DriverKit
     Mesa3D,
     Contiki,
     AMDPAL,     // AMD PAL Runtime
@@ -286,9 +292,7 @@ public:
 
   /// Default constructor is the same as an empty string and leaves all
   /// triple fields unknown.
-  Triple()
-      : Data(), Arch(), SubArch(), Vendor(), OS(), Environment(),
-        ObjectFormat() {}
+  Triple() : Arch(), SubArch(), Vendor(), OS(), Environment(), ObjectFormat() {}
 
   explicit Triple(const Twine &Str);
   Triple(const Twine &ArchStr, const Twine &VendorStr, const Twine &OSStr);
@@ -375,6 +379,9 @@ public:
   /// Parse the version number as with getOSVersion.  This should only be called
   /// with WatchOS or generic triples.
   VersionTuple getWatchOSVersion() const;
+
+  /// Parse the version number as with getOSVersion.
+  VersionTuple getDriverKitVersion() const;
 
   /// @}
   /// @name Direct Component Access
@@ -478,11 +485,14 @@ public:
     return getSubArch() == Triple::ARMSubArch_v7k;
   }
 
+  /// Is this an Apple DriverKit triple.
+  bool isDriverKit() const { return getOS() == Triple::DriverKit; }
+
   bool isOSzOS() const { return getOS() == Triple::ZOS; }
 
-  /// Is this a "Darwin" OS (macOS, iOS, tvOS or watchOS).
+  /// Is this a "Darwin" OS (macOS, iOS, tvOS, watchOS, or DriverKit).
   bool isOSDarwin() const {
-    return isMacOSX() || isiOS() || isWatchOS();
+    return isMacOSX() || isiOS() || isWatchOS() || isDriverKit();
   }
 
   bool isSimulatorEnvironment() const {
@@ -491,15 +501,17 @@ public:
 
   bool isXilinxFPGA() const {
     return (getArch() == Triple::fpga64
-        || getArch() == Triple::fpga32)
+        || getArch() == Triple::fpga32
+        || getArch() == Triple::vitis_ip)
         && getVendor() == Triple::Xilinx;
   }
 
   bool isXilinxHLS() const {
-    assert(isXilinxFPGA() && "Not a Xilinx FPGA architecture");
-    return getSubArch() == SubArchType::FPGASubArch_hls_hw
-        || getSubArch() == SubArchType::FPGASubArch_hls_hw_emu
-        || getSubArch() == SubArchType::FPGASubArch_hls_sw_emu;
+    return isXilinxFPGA() &&
+           (getSubArch() == SubArchType::FPGASubArch_hls_hw ||
+            getSubArch() == SubArchType::FPGASubArch_hls_hw_emu ||
+            getSubArch() == SubArchType::FPGASubArch_hls_sw_emu ||
+            getSubArch() == SubArchType::NoSubArch);
   }
 
   bool isMacCatalystEnvironment() const {
@@ -669,16 +681,10 @@ public:
     return getObjectFormat() == Triple::XCOFF;
   }
 
-  /// Tests whether the target is the PS4 CPU
-  bool isPS4CPU() const {
+  /// Tests whether the target is the PS4 platform.
+  bool isPS4() const {
     return getArch() == Triple::x86_64 &&
            getVendor() == Triple::SCEI &&
-           getOS() == Triple::PS4;
-  }
-
-  /// Tests whether the target is the PS4 platform
-  bool isPS4() const {
-    return getVendor() == Triple::SCEI &&
            getOS() == Triple::PS4;
   }
 
@@ -750,6 +756,41 @@ public:
            isOSBinFormatELF();
   }
 
+  /// Tests whether the target is T32.
+  bool isArmT32() const {
+    switch (getSubArch()) {
+    case Triple::ARMSubArch_v8m_baseline:
+    case Triple::ARMSubArch_v7s:
+    case Triple::ARMSubArch_v7k:
+    case Triple::ARMSubArch_v7ve:
+    case Triple::ARMSubArch_v6:
+    case Triple::ARMSubArch_v6m:
+    case Triple::ARMSubArch_v6k:
+    case Triple::ARMSubArch_v6t2:
+    case Triple::ARMSubArch_v5:
+    case Triple::ARMSubArch_v5te:
+    case Triple::ARMSubArch_v4t:
+      return false;
+    default:
+      return true;
+    }
+  }
+
+  /// Tests whether the target is an M-class.
+  bool isArmMClass() const {
+    switch (getSubArch()) {
+    case Triple::ARMSubArch_v6m:
+    case Triple::ARMSubArch_v7m:
+    case Triple::ARMSubArch_v7em:
+    case Triple::ARMSubArch_v8m_mainline:
+    case Triple::ARMSubArch_v8m_baseline:
+    case Triple::ARMSubArch_v8_1m_mainline:
+      return true;
+    default:
+      return false;
+    }
+  }
+
   /// Tests whether the target is AArch64 (little and big endian).
   bool isAArch64() const {
     return getArch() == Triple::aarch64 || getArch() == Triple::aarch64_be ||
@@ -766,6 +807,11 @@ public:
                    getEnvironment() == Triple::GNUILP32
                ? PointerWidth == 32
                : PointerWidth == 64;
+  }
+
+  /// Tests whether the target is LoongArch (32- and 64-bit).
+  bool isLoongArch() const {
+    return getArch() == Triple::loongarch32 || getArch() == Triple::loongarch64;
   }
 
   /// Tests whether the target is MIPS 32-bit (little and big endian).
@@ -803,6 +849,17 @@ public:
   bool isRISCV() const {
     return getArch() == Triple::riscv32 || getArch() == Triple::riscv64;
   }
+
+  /// Tests whether the target is 32-bit SPARC (little and big endian).
+  bool isSPARC32() const {
+    return getArch() == Triple::sparc || getArch() == Triple::sparcel;
+  }
+
+  /// Tests whether the target is 64-bit SPARC (big endian).
+  bool isSPARC64() const { return getArch() == Triple::sparcv9; }
+
+  /// Tests whether the target is SPARC.
+  bool isSPARC() const { return isSPARC32() || isSPARC64(); }
 
   /// Tests whether the target is SystemZ.
   bool isSystemZ() const {
@@ -857,7 +914,7 @@ public:
   }
 
   /// Tests if the environment supports dllimport/export annotations.
-  bool hasDLLImportExport() const { return isOSWindows() || isPS4CPU(); }
+  bool hasDLLImportExport() const { return isOSWindows() || isPS4(); }
 
   /// @}
   /// @name Mutators

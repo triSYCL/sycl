@@ -33,23 +33,19 @@
 #include "llvm/SYCL/KernelPropGen.h"
 #include "llvm/SYCL/KernelProperties.h"
 #include "llvm/Support/CommandLine.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Support/JSON.h"
 #include "llvm/Support/Path.h"
-#include "llvm/Support/SHA1.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include "SYCLUtils.h"
 
 using namespace llvm;
 
 static cl::opt<std::string> KernelPropGenOutput("sycl-kernel-propgen-output",
                                                 cl::ReallyHidden);
-// Switch the representation of m_axi bundle encooding in IR.
-// Up to 2021.2, a llvm.sideffect call was used.
-// Since 2022.1, a special string parameter of the argument is used.
-// When this option is present, the new encoding is used, while the old one
-// is used if it is not set.
-static cl::opt<bool> MAXIAsArgumentParameter("sycl-vxx-maxi-attr-encoding", cl::ReallyHidden);
 
 // Put the code in an anonymous namespace to avoid polluting the global
 // namespace
@@ -72,14 +68,6 @@ struct KernelPropGen : public ModulePass {
 
   KernelPropGen() : ModulePass(ID) {}
 
-  /// Test if a function is a SPIR kernel
-  bool isKernel(const Function &F) {
-    if (F.getCallingConv() == CallingConv::SPIR_KERNEL ||
-        F.hasFnAttribute("fpga.top.func"))
-      return true;
-    return false;
-  }
-
   int getWriteStreamId(StringRef Path) {
     int FileFD = 0;
     std::error_code EC = llvm::sys::fs::openFileForWrite(Path, FileFD);
@@ -99,35 +87,31 @@ struct KernelPropGen : public ModulePass {
   void generateBundleSE(Argument &Arg,
                         KernelProperties::MAXIBundle const *Bundle, Function &F,
                         Module &M) {
+    if (Bundle->isDefaultBundle())
+      return;
     LLVMContext &C = F.getContext();
-    if (MAXIAsArgumentParameter) {
-      // Starting from 2022.1, maxi bundles are encoded as argument parameters
-      std::string ParamValue =
-          llvm::formatv("m_axi.{0}.slave", Bundle->BundleName);
-      Arg.addAttr(
-          llvm::Attribute::get(C, "fpga.address.interface", ParamValue));
-    } else {
-      // Up to 2021.2 m_axi bundles were encoded with a call to sideeffect
-      auto *BundleIDConstant =
-          ConstantDataArray::getString(C, Bundle->BundleName, false);
-      auto *MinusOne = ConstantInt::getSigned(IntegerType::get(C, 64), -1);
-      auto *CAZ =
-          ConstantAggregateZero::get(ArrayType::get(IntegerType::get(C, 8), 0));
-      Function *SideEffect =
-          Intrinsic::getDeclaration(&M, Intrinsic::sideeffect);
-      SideEffect->addFnAttr(Attribute::NoUnwind);
-      SideEffect->addFnAttr(Attribute::InaccessibleMemOnly);
-      // TODO find a clever default value, allow user customization via
-      // properties
-      SideEffect->addFnAttr("xlx.port.bitwidth", "4096");
+    // Up to 2021.2 m_axi bundles were encoded with a call to sideeffect
+    auto *BundleIDConstant =
+        ConstantDataArray::getString(C, Bundle->BundleName, false);
+    auto *MinusOne64 = ConstantInt::getSigned(IntegerType::get(C, 64), -1);
+    auto *Zero32 = ConstantInt::getSigned(IntegerType::get(C, 32), 0);
+    auto *CAZ =
+        ConstantAggregateZero::get(ArrayType::get(IntegerType::get(C, 8), 0));
+    auto *Slave = ConstantDataArray::getString(C, "slave", false);
+    Function *SideEffect = Intrinsic::getDeclaration(&M, Intrinsic::sideeffect);
+    SideEffect->addFnAttr(Attribute::NoUnwind);
+    SideEffect->addFnAttr(Attribute::InaccessibleMemOnly);
+    // TODO find a clever default value, allow user customization via
+    // properties
+    SideEffect->addFnAttr("xlx.port.bitwidth", "4096");
 
-      OperandBundleDef OpBundle(
-          "xlx_m_axi", ArrayRef<Value *>{&Arg, BundleIDConstant, MinusOne, CAZ,
-                                         CAZ, MinusOne, MinusOne, MinusOne,
-                                         MinusOne, MinusOne, MinusOne});
-      Instruction *Instr = CallInst::Create(SideEffect, {}, {OpBundle});
-      Instr->insertBefore(F.getEntryBlock().getTerminator());
-    }
+    OperandBundleDef OpBundle(
+        "xlx_m_axi",
+        ArrayRef<Value *>{&Arg, BundleIDConstant, MinusOne64, Slave, CAZ,
+                          MinusOne64, MinusOne64, MinusOne64, MinusOne64,
+                          MinusOne64, MinusOne64, Zero32});
+    Instruction *Instr = CallInst::Create(SideEffect, {}, {OpBundle});
+    Instr->insertBefore(F.getEntryBlock().getTerminator());
   }
 
   Optional<std::string> getExtraArgs(Function &F) {
@@ -138,29 +122,101 @@ struct KernelPropGen : public ModulePass {
     return {};
   }
 
+  struct PipeEndpoint {
+    /// Name of the kernel function in IR.
+    StringRef Kernel;
+    /// Name of the pipe function argument in IR.
+    StringRef Arg;
+  };
+  struct PipeProp {
+    /// Depth it defaults to -1 to indicate it is unset
+    int Depth = -1;
+    PipeEndpoint write;
+    PipeEndpoint read;
+  };
+
+  /// Pipes are matched in read and write pairs by their ID. Their ID is a
+  /// string matching the name of the global variable Intel uses to identify its
+  /// pipes
+  StringMap<PipeProp> PipeConnections;
+
+  void collectPipeConnections(Module &M) {
+    for (auto &F : M.functions())
+      if (sycl::isKernelFunc(&F))
+        for (auto &Arg : F.args())
+          if (sycl::isPipe(&Arg)) {
+            /// Build the endpoint for this pipe
+            PipeEndpoint endPoint{F.getName(), Arg.getName()};
+            PipeProp &Prop = PipeConnections[sycl::getPipeID(&Arg)];
+
+            /// Figure out the correct endpoint to write to
+            PipeEndpoint &mapEndPoint =
+                sycl::isReadPipe(&Arg) ? Prop.read : Prop.write;
+            assert(mapEndPoint.Arg.empty() && mapEndPoint.Kernel.empty() &&
+                   "multiple reader or writers");
+            mapEndPoint = endPoint;
+
+            /// If the Depth is unset, set it
+            if (Prop.Depth == -1)
+              Prop.Depth = sycl::getPipeDepth(&Arg);
+
+            assert(sycl::getPipeDepth(&Arg) == Prop.Depth &&
+                   "read and write depth not matching");
+          }
+  }
+
   /// Print in O the property file for all kernels of M
   void generateProperties(Module &M, llvm::raw_fd_ostream &O) {
     json::OStream J(O, 2);
     llvm::json::Array Kernels{};
     bool SyclHlsFlow = Triple(M.getTargetTriple()).isXilinxHLS();
+    bool VitisHlsFlow = Triple(M.getTargetTriple()).getArch() == llvm::Triple::vitis_ip;
+
+    collectPipeConnections(M);
 
     J.objectBegin();
+    J.attributeBegin("pipe_connections");
+    J.arrayBegin();
+    for (auto& Elem : PipeConnections) {
+      J.objectBegin();
+      J.attribute("writer_kernel", Elem.second.write.Kernel);
+      J.attribute("writer_arg", Elem.second.write.Arg);
+      J.attribute("reader_kernel", Elem.second.read.Kernel);
+      J.attribute("reader_arg", Elem.second.read.Arg);
+      J.attribute("depth", Elem.second.Depth);
+      J.objectEnd();
+    }
+    J.arrayEnd();
+    J.attributeEnd();
     J.attributeBegin("kernels");
     J.arrayBegin();
     for (auto &F : M.functions()) {
-      if (isKernel(F)) {
+      if (sycl::isKernelFunc(&F)) {
         KernelProperties KProp(F, SyclHlsFlow);
         J.objectBegin();
         J.attribute("name", F.getName());
-        auto extraArgs = getExtraArgs(F);
-        if (extraArgs)
-          J.attribute("extra_args", extraArgs.getValue());
+        auto ExtraArgs = getExtraArgs(F);
+        if (ExtraArgs)
+          J.attribute("extra_args", ExtraArgs.getValue());
         J.attributeBegin("bundle_hw_mapping");
         J.arrayBegin();
         for (auto &Bundle : KProp.getMAXIBundles()) {
           J.objectBegin();
           J.attribute("maxi_bundle_name", Bundle.BundleName);
-          J.attribute("target_bank", formatv("DDR[{0}]", Bundle.TargetId));
+          if (Bundle.TargetId.hasValue()) {
+            StringRef Prefix;
+            switch (Bundle.MemType) {
+              case KernelProperties::MemoryType::ddr:
+              Prefix = "DDR";
+              break;
+              case KernelProperties::MemoryType::hbm:
+              Prefix = "HBM";
+              break;
+              default:
+              llvm_unreachable("Default bundle should not appear here");
+            }
+            J.attribute("target_bank", formatv("{0}[{1}]", Prefix, Bundle.TargetId.getValue()));
+          }
           J.objectEnd();
         }
         J.arrayEnd();
@@ -168,7 +224,14 @@ struct KernelPropGen : public ModulePass {
         J.attributeBegin("arg_bundle_mapping");
         J.arrayBegin();
         for (auto &Arg : F.args()) {
-          if (KernelProperties::isArgBuffer(&Arg, SyclHlsFlow)) {
+          if (VitisHlsFlow)
+            continue;
+          /// Vitis's clang doesn't support string attributes on arguments which
+          /// we use to annotate a pipe, so we remove it here. But we could
+          /// remove them in the downgrader instead too.
+          if (sycl::isPipe(&Arg))
+            sycl::removePipeAnnotation(&Arg);
+          else if (KernelProperties::isArgBuffer(&Arg, SyclHlsFlow)) {
             // This currently forces a default assignment of DDR banks to 0
             // as some platforms have different Default DDR banks and buffers
             // default to DDR Bank 0. Perhaps it is possible to query the
@@ -178,7 +241,7 @@ struct KernelPropGen : public ModulePass {
             // infrastructure to assign DDR banks at compile time for a CU
             // if the information is passed down.
             const auto *Bundle = KProp.getArgumentMAXIBundle(&Arg);
-            assert(Bundle && "Empty bundle should default to DDR bank 0");
+            assert(Bundle && "Empty bundle should be marked as default bundle");
             generateBundleSE(Arg, Bundle, F, M);
             J.objectBegin();
             J.attribute("arg_name", Arg.getName());

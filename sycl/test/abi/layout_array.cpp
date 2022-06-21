@@ -8,7 +8,6 @@
 // TODO fix individual headers and include them instead of sycl.hpp
 #include <CL/sycl.hpp>
 
-
 SYCL_EXTERNAL void id(sycl::id<2>) {}
 
 // CHECK: 0 | class sycl::id<2>

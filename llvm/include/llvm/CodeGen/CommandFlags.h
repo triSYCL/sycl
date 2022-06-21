@@ -16,11 +16,6 @@
 #define LLVM_CODEGEN_COMMANDFLAGS_H
 
 #include "llvm/ADT/FloatingPointMode.h"
-#include "llvm/ADT/StringExtras.h"
-#include "llvm/ADT/Triple.h"
-#include "llvm/IR/Instructions.h"
-#include "llvm/IR/Intrinsics.h"
-#include "llvm/MC/MCTargetOptionsCommandFlags.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Target/TargetOptions.h"
 #include <string>
@@ -29,6 +24,9 @@
 namespace llvm {
 
 class Module;
+class AttrBuilder;
+class Function;
+class Triple;
 
 namespace codegen {
 
@@ -61,6 +59,8 @@ bool getEnableNoInfsFPMath();
 bool getEnableNoNaNsFPMath();
 
 bool getEnableNoSignedZerosFPMath();
+
+bool getEnableApproxFuncFPMath();
 
 bool getEnableNoTrappingFPMath();
 
@@ -139,6 +139,8 @@ bool getXRayOmitFunctionIndex();
 bool getDebugStrictDwarf();
 
 unsigned getAlignLoops();
+
+bool getJMCInstrument();
 
 /// Create this object with static storage to register codegen-related command
 /// line options.

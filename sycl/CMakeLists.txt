@@ -2,12 +2,17 @@ cmake_minimum_required(VERSION 3.14)
 
 project(sycl-solution)
 # Requirements
-set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 option(SYCL_ENABLE_WERROR "Treat all warnings as errors in SYCL project" OFF)
 option(SYCL_DISABLE_STL_ASSERTIONS "Disable assertions in STL containers" OFF)
 option(SYCL_ADD_DEV_VERSION_POSTFIX "Adds -V postfix to version string" ON)
+option(SYCL_ENABLE_COVERAGE "Enables code coverage for runtime and unit tests" OFF)
+
+if (NOT SYCL_COVERAGE_PATH)
+  set(SYCL_COVERAGE_PATH "${CMAKE_CURRENT_BINARY_DIR}/profiles")
+endif()
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/modules")
 include(AddSYCLExecutable)
@@ -57,7 +62,23 @@ if(MSVC)
   include(LLVMCheckLinkerFlag)
   llvm_check_linker_flag(CXX "/DEBUG" LINKER_SUPPORTS_DEBUG)
   if(LINKER_SUPPORTS_DEBUG)
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi")
+    # sccache is not compatible with /Zi flag
+    if (CMAKE_CXX_COMPILER_LAUNCHER STREQUAL "sccache")
+      # CMake may put /Zi by default
+      if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+        string(REPLACE "/Zi" "/Z7" CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG}")
+        string(REPLACE "/Zi" "/Z7" CMAKE_C_FLAGS_DEBUG "${CMAKE_C_FLAGS_DEBUG}")
+      elseif(CMAKE_BUILD_TYPE STREQUAL "Release")
+        string(REPLACE "/Zi" "/Z7" CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE}")
+        string(REPLACE "/Zi" "/Z7" CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE}")
+      elseif(CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+        string(REPLACE "/Zi" "/Z7" CMAKE_CXX_FLAGS_RELWITHDEBINFO "${CMAKE_CXX_FLAGS_RELWITHDEBINFO}")
+        string(REPLACE "/Zi" "/Z7" CMAKE_C_FLAGS_RELWITHDEBINFO "${CMAKE_C_FLAGS_RELWITHDEBINFO}")
+      endif()
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Z7")
+    else()
+      set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /Zi")
+    endif()
     add_link_options("/DEBUG")
 
     # Enable unreferenced removal and ICF in Release mode.
@@ -154,6 +175,9 @@ option(SYCL_BUILD_PI_CUDA
 option(SYCL_BUILD_PI_HIP
   "Enables the HIP backend for the Plugin Interface" OFF)
 
+option(SYCL_BUILD_PI_XRT
+  "Enables the XRT backend for the Plugin Interface" OFF)
+
 # Configure SYCL version macro
 set(sycl_inc_dir ${CMAKE_CURRENT_SOURCE_DIR}/include)
 set(sycl_src_dir ${CMAKE_CURRENT_SOURCE_DIR}/source)
@@ -169,28 +193,36 @@ configure_file("${feature_header}.in" "${feature_header}")
 # TODO: detect and process remove header/directory case
 file(GLOB_RECURSE HEADERS_IN_SYCL_DIR CONFIGURE_DEPENDS "${sycl_inc_dir}/sycl/*")
 file(GLOB_RECURSE HEADERS_IN_CL_DIR CONFIGURE_DEPENDS "${sycl_inc_dir}/CL/*")
+file(GLOB_RECURSE HEADERS_IN_STD_DIR CONFIGURE_DEPENDS "${sycl_inc_dir}/std/*")
 string(REPLACE "${sycl_inc_dir}" "${SYCL_INCLUDE_BUILD_DIR}"
   OUT_HEADERS_IN_SYCL_DIR "${HEADERS_IN_SYCL_DIR}")
 string(REPLACE "${sycl_inc_dir}/CL" "${SYCL_INCLUDE_BUILD_DIR}/sycl/CL"
   OUT_HEADERS_IN_CL_DIR "${HEADERS_IN_CL_DIR}")
+string(REPLACE "${sycl_inc_dir}" "${SYCL_INCLUDE_BUILD_DIR}"
+  OUT_HEADERS_IN_STD_DIR "${HEADERS_IN_STD_DIR}")
 
 # Copy SYCL headers from sources to build directory
 add_custom_target(sycl-headers
   DEPENDS ${OUT_HEADERS_IN_SYCL_DIR}
-          ${OUT_HEADERS_IN_CL_DIR})
+          ${OUT_HEADERS_IN_CL_DIR}
+          ${OUT_HEADERS_IN_STD_DIR})
 
 add_custom_command(
   OUTPUT  ${OUT_HEADERS_IN_SYCL_DIR}
           ${OUT_HEADERS_IN_CL_DIR}
+          ${OUT_HEADERS_IN_STD_DIR}
   DEPENDS ${HEADERS_IN_SYCL_DIR}
           ${HEADERS_IN_CL_DIR}
+          ${HEADERS_IN_STD_DIR}
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${sycl_inc_dir}/sycl ${SYCL_INCLUDE_BUILD_DIR}/sycl
   COMMAND ${CMAKE_COMMAND} -E copy_directory ${sycl_inc_dir}/CL ${SYCL_INCLUDE_BUILD_DIR}/sycl/CL
+  COMMAND ${CMAKE_COMMAND} -E copy_directory ${sycl_inc_dir}/std ${SYCL_INCLUDE_BUILD_DIR}/std
   COMMENT "Copying SYCL headers ...")
 
 # Copy SYCL headers from source to install directory
 install(DIRECTORY "${sycl_inc_dir}/sycl" DESTINATION ${SYCL_INCLUDE_DIR} COMPONENT sycl-headers)
 install(DIRECTORY "${sycl_inc_dir}/CL" DESTINATION ${SYCL_INCLUDE_DIR}/sycl COMPONENT sycl-headers)
+install(DIRECTORY "${sycl_inc_dir}/std" DESTINATION ${SYCL_INCLUDE_DIR} COMPONENT sycl-headers)
 
 set(SYCL_RT_LIBS sycl)
 if (MSVC)
@@ -278,6 +310,7 @@ add_custom_target(sycl-compiler
           sycl-post-link
           opencl-aot
 )
+
 add_custom_target( sycl-toolchain
   DEPENDS ${SYCL_RT_LIBS}
           sycl-compiler
@@ -285,6 +318,20 @@ add_custom_target( sycl-toolchain
           ${XPTIFW_LIBS}
   COMMENT "Building SYCL compiler toolchain..."
 )
+
+add_custom_target( vitis-ip-compiler
+  DEPENDS clang
+          opt
+          sycl-vxx
+  COMMENT "Building vitis ip compiler..."
+)
+
+# Enable new IN_LIST operator.
+cmake_policy(SET CMP0057 NEW)
+
+if (libdevice IN_LIST LLVM_ENABLE_PROJECTS)
+  add_dependencies(sycl-toolchain libsycldevice)
+endif()
 
 if (SYCL_ENABLE_XPTI_TRACING)
   add_dependencies( sycl-toolchain xpti)
@@ -353,6 +400,16 @@ set( SYCL_TOOLCHAIN_DEPLOY_COMPONENTS
      ${XPTIFW_LIBS}
 )
 
+if (TARGET sycl-prof)
+  list(APPEND SYCL_TOOLCHAIN_DEPLOY_COMPONENTS sycl-prof)
+endif()
+if (TARGET sycl-sanitize)
+  list(APPEND SYCL_TOOLCHAIN_DEPLOY_COMPONENTS sycl-sanitize)
+endif()
+if (TARGET sycl-trace)
+  list(APPEND SYCL_TOOLCHAIN_DEPLOY_COMPONENTS sycl-trace)
+endif()
+
 if(OpenCL_INSTALL_KHRONOS_ICD_LOADER AND TARGET OpenCL-ICD)
   list(APPEND SYCL_TOOLCHAIN_DEPLOY_COMPONENTS OpenCL-ICD)
 endif()
@@ -381,17 +438,13 @@ if(SYCL_BUILD_PI_HIP)
   list(APPEND SYCL_TOOLCHAIN_DEPLOY_COMPONENTS libspirv-builtins pi_hip)
 endif()
 
-if (SYCL_BUILD_PI_ESIMD_EMULATOR)
+if(SYCL_BUILD_PI_ESIMD_EMULATOR)
   list(APPEND SYCL_TOOLCHAIN_DEPLOY_COMPONENTS pi_esimd_emulator libcmrt-headers)
   if (MSVC)
     list(APPEND SYCL_TOOLCHAIN_DEPLOY_COMPONENTS libcmrt-libs libcmrt-dlls)
   else()
     list(APPEND SYCL_TOOLCHAIN_DEPLOY_COMPONENTS libcmrt-sos)
   endif()
-else()
-  # TODO/FIXME : Removing empty header file (cm_rt.h) generation when
-  # the ESIMD_EMULATOR support is enabled by default
-  file (TOUCH ${SYCL_INCLUDE_BUILD_DIR}/sycl/CL/cm_rt.h)
 endif()
 
 # Use it as fake dependency in order to force another command(s) to execute.
@@ -424,5 +477,3 @@ add_custom_target(deploy-sycl-toolchain
 
 # SYCL Runtime documentation
 add_subdirectory(doc)
-
-add_subdirectory(examples)

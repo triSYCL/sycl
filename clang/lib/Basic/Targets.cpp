@@ -648,6 +648,10 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
     return nullptr;
   }
 
+  case llvm::Triple::vitis_ip:
+    // Triple example: vitis_ip-xilinx-unknown
+    return new LinuxTargetInfo<XilinxHLS64TargetInfo>(Triple, Opts);
+
   case llvm::Triple::spir: {
     llvm::Triple HT(Opts.HostTriple);
     switch (HT.getOS()) {
@@ -809,6 +813,10 @@ TargetInfo::CreateTargetInfo(DiagnosticsEngine &Diags,
   Target->setSupportedOpenCLOpts();
   Target->setCommandLineOpenCLOpts();
   Target->setMaxAtomicWidth();
+
+  if (!Opts->DarwinTargetVariantTriple.empty())
+    Target->DarwinTargetVariantTriple =
+        llvm::Triple(Opts->DarwinTargetVariantTriple);
 
   if (!Target->validateTarget(Diags))
     return nullptr;

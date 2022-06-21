@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Erases and modifies IR incompatabilities with v++ backend
+// Erases and modifies IR incompatibilities with v++ backend
 //
 // ===---------------------------------------------------------------------===//
 
@@ -17,24 +17,26 @@
 #include <string>
 
 #include "llvm/ADT/MapVector.h"
+#include "llvm/ADT/SetVector.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/IR/Attributes.h"
+#include "llvm/IR/Function.h"
+#include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/InstVisitor.h"
+#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/IntrinsicInst.h"
 #include "llvm/IR/Intrinsics.h"
-#include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/SYCL/VXXIRDowngrader.h"
-#include "llvm/ADT/StringRef.h"
-#include "llvm/ADT/SetVector.h"
-#include "llvm/IR/Attributes.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/InstIterator.h"
-#include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Module.h"
 #include "llvm/Pass.h"
+#include "llvm/SYCL/VXXIRDowngrader.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+
+#include "SYCLUtils.h"
 
 /// This should theoretically not be accessed from outside of the IR directory.
 /// But using it is the most reliable way to do some of the IR transformation we
@@ -42,6 +44,9 @@
 #include "llvm/../../lib/IR/LLVMContextImpl.h"
 
 using namespace llvm;
+
+#undef DEBUG_TYPE
+#define DEBUG_TYPE "VXXDownGrade"
 
 // Put the code in an anonymous namespace to avoid polluting the global
 // namespace
@@ -159,45 +164,6 @@ struct VXXIRDowngrader : public ModulePass {
       Annot->eraseFromParent();
   }
 
-  /// Removes nofree bitcode function attribute that is applied to
-  /// functions to indicate that they do not deallocate memory.
-  /// It was added in LLVM-9 (D49165), so as v++ catches up it can be removed
-  /// Removes immarg (immutable arg) bitcode attribute that is applied to
-  /// function parameters. It was added in LLVM-9 (D57825), so as v++ catches
-  /// up it can be removed
-  /// Removes WillReturn LLVM bitcode attribute from llvm/Doc/LangRef:
-  ///
-  /// "This function attribute indicates that a call of this function will
-  ///  either exhibit undefined behavior or comes back and continues execution
-  ///  at a point in the existing call stack that includes the current
-  ///  invocation.
-  ///  Annotated functions may still raise an exception, i.a., ``nounwind``
-  ///  is not implied.
-  ///  If an invocation of an annotated function does not return control back
-  ///  to a point in the call stack, the behavior is undefined."
-  ///
-  /// Added in LLVM-10: rL364555 + D62801, this removal can be reverted as the
-  /// v++ backend catches up. It seems unlikely removal will cause any problems
-  /// as it appears to be an attribute that helps carry information to
-  /// backends/other passes for further transformations.
-  void removeAttributes(Module &M, ArrayRef<Attribute::AttrKind> Kinds) {
-    for (auto &F : M.functions())
-      for (auto Kind : Kinds) {
-        F.removeFnAttr(Kind);
-        F.removeRetAttr(Kind);
-        for (auto &P : F.args())
-          P.removeAttr(Kind);
-        for (User *U : F.users())
-          if (CallBase *CB = dyn_cast<CallBase>(U)) {
-            CB->removeFnAttr(Kind);
-            CB->removeRetAttr(Kind);
-            for (unsigned int i = 0; i < CB->arg_size(); ++i) {
-              CB->removeParamAttr(i, Kind);
-            }
-          }
-      }
-  }
-
   /// Remove Freeze instruction because v++ can't deal with them.
   /// FIXME: This is not a safe transformation but since LLVM survived with bugs
   /// caused by absence of freeze for many years, so I guess it is good enough
@@ -232,46 +198,53 @@ struct VXXIRDowngrader : public ModulePass {
       I->eraseFromParent();
   }
 
-  /// V++ has issues with intrinsic having different alignment attributes on
-  /// inputs and outputs. So we remove alignment attributes.
-  void removeMemIntrAlign(Module &M) {
-    for (auto &F : M.functions())
-      for (auto &I : instructions(F))
-        if (auto *MI = dyn_cast<AnyMemIntrinsic>(&I))
-          for (Use &U : MI->args())
-            MI->removeParamAttr(U.getOperandNo(),
-                                Attribute::AttrKind::Alignment);
-  }
-
-  void lowerIntrinsic(Module &M) {
+  /// Lower all llvm.abs into select(a < 0, -a, a)
+  void lowerAbsIntrinsic(Module &M) {
     IRBuilder<> B(M.getContext());
-    SmallVector<Instruction *, 16> ToRemove;
+    SmallVector<Instruction *, 16> ToProcess;
     for (auto &F : M.functions())
       for (auto &I : instructions(F))
-        if (auto *CI = dyn_cast<CallBase>(&I)) {
-          if (CI->getIntrinsicID() == Intrinsic::abs) {
-            B.SetInsertPoint(CI->getNextNode());
-            Value *Cmp = B.CreateICmpSLT(
-                CI->getArgOperand(0),
-                ConstantInt::getNullValue(CI->getArgOperand(0)->getType()));
-            Value *Sub = B.CreateSub(
-                CI->getArgOperand(0),
-                ConstantInt::getNullValue(CI->getArgOperand(0)->getType()));
-            Value *ABS = B.CreateSelect(Cmp, Sub, CI->getArgOperand(0));
-            CI->replaceAllUsesWith(ABS);
-            ToRemove.push_back(CI);
-          }
-        }
-    for (auto *I : ToRemove)
-      I->eraseFromParent();
+        if (auto *CI = dyn_cast<CallBase>(&I))
+          ToProcess.push_back(&I);
+    for (auto *I : ToProcess) {
+      if (auto *CI = dyn_cast<CallBase>(I)) {
+        if (CI->getIntrinsicID() != Intrinsic::abs)
+          continue;
+        B.SetInsertPoint(CI->getNextNode());
+        Value *Cmp = B.CreateICmpSLT(
+            CI->getArgOperand(0),
+            ConstantInt::getNullValue(CI->getArgOperand(0)->getType()));
+        Value *Sub = B.CreateSub(
+            ConstantInt::getNullValue(CI->getArgOperand(0)->getType()),
+            CI->getArgOperand(0));
+        Value *ABS = B.CreateSelect(Cmp, Sub, CI->getArgOperand(0));
+        CI->replaceAllUsesWith(ABS);
+        CI->eraseFromParent();
+      }
+    }
   }
 
-  void convertPoinsonToZero(Module &M) {
-    for (auto &PV : M.getContext().pImpl->PVConstants)
+  /// Poison is a special value that was added to LLVM but is not present in the
+  /// HLS backend. This function removes all poison values by converting them
+  /// into zeros.
+  void convertPoisonToZero(Module &M) {
+    /// We are iterating over every poison value that is stored by this module.
+    for (auto &PV : M.getContext().pImpl->PVConstants) {
+      Type* Ty = PV.second->getType();
+      /// Here we can get poison values that are unreachable by "normal" IR
+      /// traversal because we are traversing through the module's
+      /// implementation. So we do some basic sanity checks to make sure that we
+      /// can turn this value into a null.
+      if (PV.second->use_empty() || Ty->isVoidTy() || Ty->isFunctionTy() ||
+          Ty->isLabelTy() || Ty->isMetadataTy())
+        continue;
       PV.second.get()->replaceAllUsesWith(
           Constant::getNullValue(PV.second.get()->getType()));
+    }
   }
 
+  /// This function removes values of type metadata because they are not
+  /// supported by the HLS backend.
   void removeMetaDataValues(Module &M) {
     SmallVector<Instruction *, 16> ToDelete;
     for (auto &F : M.functions()) {
@@ -364,23 +337,22 @@ struct VXXIRDowngrader : public ModulePass {
 
   bool runOnModule(Module &M) override {
     resetByVal(M);
-    removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
-                         Attribute::ImmArg, Attribute::NoSync,
-                         Attribute::MustProgress, Attribute::NoUndef,
-                         Attribute::StructRet});
+    llvm::sycl::removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
+                                     Attribute::ImmArg, Attribute::NoSync,
+                                     Attribute::MustProgress,
+                                     Attribute::NoUndef, Attribute::StructRet});
     removeAnnotations(M);
     renameBasicBlocks(M);
     removeFreezeInst(M);
     removeFNegInst(M);
-    removeMemIntrAlign(M);
 
-    lowerIntrinsic(M);
+    lowerAbsIntrinsic(M);
     removeMetaDataValues(M);
     /// __assert_fail doesn't exist on device and takes its arguments in
     /// addressspace 0 causing addresspace cast.
     removeFunction(M, "__assert_fail");
 
-    convertPoinsonToZero(M);
+    convertPoisonToZero(M);
     if (Triple(M.getTargetTriple()).getArch() == llvm::Triple::fpga64)
       M.setTargetTriple("fpga64-xilinx-none");
     else

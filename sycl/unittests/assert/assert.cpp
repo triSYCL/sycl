@@ -18,6 +18,7 @@
  * pipe.
  */
 
+#define SYCL_FALLBACK_ASSERT 1
 // Enable use of interop kernel c-tor
 #define __SYCL_INTERNAL_API
 #include <CL/sycl.hpp>
@@ -521,6 +522,11 @@ TEST(Assert, TestPositive) {
 
     if (Plt.get_backend() == sycl::backend::ext_oneapi_hip) {
       printf("Test is not supported on HIP platform, skipping\n");
+      return;
+    }
+
+    if (Plt.get_backend() == sycl::backend::xrt) {
+      printf("Test is not supported on XRT platform, skipping\n");
       return;
     }
   }

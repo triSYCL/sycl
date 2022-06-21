@@ -77,6 +77,7 @@
 #include "BPF.h"
 #include "BPFCORE.h"
 #include "BPFTargetMachine.h"
+#include "llvm/BinaryFormat/Dwarf.h"
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/Instruction.h"
@@ -270,7 +271,7 @@ static uint32_t calcArraySize(const DICompositeType *CTy, uint32_t StartDim) {
 
 static Type *getBaseElementType(const CallInst *Call) {
   // Element type is stored in an elementtype() attribute on the first param.
-  return Call->getAttributes().getParamElementType(0);
+  return Call->getParamElementType(0);
 }
 
 /// Check whether a call is a preserve_*_access_index intrinsic call or not.
@@ -1002,7 +1003,7 @@ bool BPFAbstractMemberAccess::transformGEPChain(CallInst *Call,
       VarType = Type::getInt64Ty(BB->getContext()); // 64bit ptr or enum value
 
     GV = new GlobalVariable(*M, VarType, false, GlobalVariable::ExternalLinkage,
-                            NULL, AccessKey);
+                            nullptr, AccessKey);
     GV->addAttribute(BPFCoreSharedInfo::AmaAttr);
     GV->setMetadata(LLVMContext::MD_preserve_access_index, TypeMeta);
     GEPGlobals[AccessKey] = GV;

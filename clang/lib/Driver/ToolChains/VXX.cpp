@@ -8,6 +8,7 @@
 
 #include "VXX.h"
 #include "CommonArgs.h"
+#include "ToolChains/Gnu.h"
 #include "clang/Driver/Action.h"
 #include "clang/Driver/Compilation.h"
 #include "clang/Driver/Driver.h"
@@ -18,6 +19,7 @@
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Host.h"
 #include "llvm/Option/ArgList.h"
 
 using namespace clang::driver;
@@ -26,44 +28,6 @@ using namespace clang::driver::tools;
 using namespace clang;
 using namespace llvm::opt;
 using namespace llvm::sys;
-
-///////////////////////////////////////////////////////////////////////////////
-////                            V++ Installation Detector
-///////////////////////////////////////////////////////////////////////////////
-
-VXXInstallationDetector::VXXInstallationDetector(
-    const Driver &D, const llvm::Triple &HostTriple,
-    const llvm::opt::ArgList &Args) {
-  // This might only work on Linux systems.
-  // Rather than just checking the environment variables you could also add an
-  // optional path variable for users to use.
-  auto search_and_set_up_program = [&] (const char * programName) {
-    llvm::ErrorOr<std::string> program = findProgramByName(programName);
-    if (program) {
-      SmallString<256> programsAbsolutePath;
-      fs::real_path(*program, programsAbsolutePath);
-
-      BinaryPath = programsAbsolutePath.str().str();
-
-      StringRef programDir = path::parent_path(programsAbsolutePath);
-
-      if (path::filename(programDir) == "bin")
-        BinPath = programDir.str();
-
-      // TODO: Check if this assumption is correct in all installations and give
-      // environment variable specifier option or an argument to the Driver
-      VitisPath = path::parent_path(programDir).str();
-      LibPath = VitisPath + "/lnx64/lib";
-
-      // TODO: slightly stricter IsValid test... check all strings aren't empty
-      IsValid = true;
-    }
-    return program;
-  };
-
-  if (!search_and_set_up_program("v++"))
-    search_and_set_up_program("xocc");
-}
 
 ///////////////////////////////////////////////////////////////////////////////
 ////                            V++ Linker
@@ -144,18 +108,21 @@ void SYCL::LinkerVXX::constructSYCLVXXCommand(
 
   ArgStringList CmdArgs;
 
-  // Script Arg $1, directory of v++ binary (Vitis's bin)
-  assert(!TC.VXXInstallation.getBinPath().empty());
-  CmdArgs.push_back("--vitis_bin_dir");
-  CmdArgs.push_back(Args.MakeArgString(TC.VXXInstallation.getBinPath()));
+  /// Determine if we are going to target an IP block or an xclbin
+  bool isVitisIP = TC.isVitisIP() || Args.hasArg(options::OPT_vitis_ip_part_EQ);
 
-  // Script Arg $2, directory of the Clang driver, where the sycl-vxx script
+  if (isVitisIP)
+    CmdArgs.push_back("ipexport");
+  else
+    CmdArgs.push_back("vxxcompile");
+
+  // directory of the Clang driver, where the sycl-vxx script
   // opt binary and llvm-linker binary should be contained among other things
   assert(!C.getDriver().Dir.empty());
   CmdArgs.push_back("--clang_path");
   CmdArgs.push_back(Args.MakeArgString(C.getDriver().Dir));
 
-  // Script Arg $5, temporary directory path, used to dump a lot of intermediate
+  // temporary directory path, used to dump a lot of intermediate
   // files that no one needs to know about unless they're debugging
   SmallString<256> TmpDir;
   llvm::sys::path::system_temp_directory(true, TmpDir);
@@ -163,51 +130,61 @@ void SYCL::LinkerVXX::constructSYCLVXXCommand(
   CmdArgs.push_back("--tmp_root");
   CmdArgs.push_back(Args.MakeArgString(TmpDir));
 
-  // Script Arg $6, the name of the final output .xcl binary file after
+  // the name of the final output .xcl binary file after
   // compilation and linking is complete
   assert(Output.getFilename()[0]);
   CmdArgs.push_back("-o");
   CmdArgs.push_back(Output.getFilename());
 
-  CmdArgs.push_back("--vitis_comp_argfile");
-  AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_backend,
-      options::OPT_Xsycl_backend_EQ, TC.getTriple(), C.getDriver());
+  if (isVitisIP) {
+    if (!Args.hasArg(options::OPT_vitis_ip_part_EQ)) {
+      C.getDriver().Diag(diag::err_drv_option_required_for_target)
+          << "--vitis-ip-part" << TC.getTriple().getArchName();
+      return;
+    }
+    CmdArgs.push_back("--target");
+    CmdArgs.push_back(
+        Args.getLastArg(options::OPT_vitis_ip_part_EQ)->getValue());
+  } else {
+    CmdArgs.push_back("--vitis_comp_argfile");
+    AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_backend,
+                        options::OPT_Xsycl_backend_EQ, TC.getTriple(),
+                        C.getDriver());
 
-  
-  CmdArgs.push_back("--vitis_link_argfile");
-  AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_linker,
-      options::OPT_Xsycl_linker_EQ, TC.getTriple(), C.getDriver());
-
-  CmdArgs.push_back("--target");
-  switch (TC.getTriple().getSubArch()) {
-  case llvm::Triple::FPGASubArch_hw:
-  case llvm::Triple::FPGASubArch_hls_hw:
-    CmdArgs.push_back("hw");
-    break;
-  case llvm::Triple::FPGASubArch_hw_emu:
-  case llvm::Triple::FPGASubArch_hls_hw_emu:
-    CmdArgs.push_back("hw_emu");
-    break;
-  case llvm::Triple::FPGASubArch_sw_emu:
-  case llvm::Triple::FPGASubArch_hls_sw_emu:
-    CmdArgs.push_back("sw_emu");
-    break;
-  default:
-    llvm_unreachable("invalid subarch");
-  }
-
-  switch (TC.getTriple().getSubArch()) {
-  case llvm::Triple::FPGASubArch_hw:
-  case llvm::Triple::FPGASubArch_hw_emu:
-  case llvm::Triple::FPGASubArch_sw_emu:
-    break;
-  case llvm::Triple::FPGASubArch_hls_hw:
-  case llvm::Triple::FPGASubArch_hls_hw_emu:
-  case llvm::Triple::FPGASubArch_hls_sw_emu:
-    CmdArgs.push_back("--hls");
-    break;
-  default:
-    llvm_unreachable("invalid subarch");
+    CmdArgs.push_back("--vitis_link_argfile");
+    AddForwardedOptions(Args, CmdArgs, options::OPT_Xsycl_linker,
+                        options::OPT_Xsycl_linker_EQ, TC.getTriple(),
+                        C.getDriver());
+    CmdArgs.push_back("--target");
+    switch (TC.getTriple().getSubArch()) {
+    case llvm::Triple::FPGASubArch_hw:
+    case llvm::Triple::FPGASubArch_hls_hw:
+      CmdArgs.push_back("hw");
+      break;
+    case llvm::Triple::FPGASubArch_hw_emu:
+    case llvm::Triple::FPGASubArch_hls_hw_emu:
+      CmdArgs.push_back("hw_emu");
+      break;
+    case llvm::Triple::FPGASubArch_sw_emu:
+    case llvm::Triple::FPGASubArch_hls_sw_emu:
+      CmdArgs.push_back("sw_emu");
+      break;
+    default:
+      llvm_unreachable("invalid subarch");
+    }
+    switch (TC.getTriple().getSubArch()) {
+    case llvm::Triple::FPGASubArch_hw:
+    case llvm::Triple::FPGASubArch_hw_emu:
+    case llvm::Triple::FPGASubArch_sw_emu:
+      break;
+    case llvm::Triple::FPGASubArch_hls_hw:
+    case llvm::Triple::FPGASubArch_hls_hw_emu:
+    case llvm::Triple::FPGASubArch_hls_sw_emu:
+      CmdArgs.push_back("--hls");
+      break;
+    default:
+      llvm_unreachable("invalid subarch");
+    }
   }
 
   for (auto& In : Inputs)
@@ -271,25 +248,35 @@ void SYCL::SYCLPostLinkVXX::constructSYCLVXXPLCommand(
 ////                            V++ Toolchain
 ///////////////////////////////////////////////////////////////////////////////
 
+static llvm::Triple getLinuxTriple(const llvm::Triple &Triple) {
+  if (Triple.getArch() == llvm::Triple::vitis_ip)
+    return llvm::Triple(llvm::sys::getProcessTriple());
+  return Triple;
+}
+
 VXXToolChain::VXXToolChain(const Driver &D, const llvm::Triple &Triple,
-                             const ToolChain &HostTC, const ArgList &Args)
-    : ToolChain(D, Triple, Args), HostTC(HostTC),
-      VXXInstallation(D, HostTC.getTriple(), Args)
-{
-
-  if (VXXInstallation.isValid())
-    getProgramPaths().push_back(VXXInstallation.getBinPath().str());
-
+                           const ArgList &Args)
+    : ToolChain(D, Triple, Args) {
+  InnerTC =
+      std::make_unique<toolchains::Linux>(D, getLinuxTriple(Triple), Args);
   // Lookup binaries into the driver directory, this is used to
   // discover the clang-offload-bundler executable.
   getProgramPaths().push_back(getDriver().Dir);
+}
+
+VXXToolChain::VXXToolChain(const Driver &D, const llvm::Triple &Triple,
+                           const ToolChain &HostTC, const ArgList &Args)
+    : VXXToolChain(D, Triple, Args) {
+  this->HostTC = &HostTC;
 }
 
 void VXXToolChain::addClangTargetOptions(
     const llvm::opt::ArgList &DriverArgs,
     llvm::opt::ArgStringList &CC1Args,
     Action::OffloadKind DeviceOffloadingKind) const {
-  HostTC.addClangTargetOptions(DriverArgs, CC1Args, DeviceOffloadingKind);
+  if (!HostTC)
+    return;
+  HostTC->addClangTargetOptions(DriverArgs, CC1Args, DeviceOffloadingKind);
 
   assert(DeviceOffloadingKind == Action::OFK_SYCL &&
          "Only SYCL offloading kinds are supported");
@@ -299,49 +286,33 @@ void VXXToolChain::addClangTargetOptions(
 
 llvm::opt::DerivedArgList *
 VXXToolChain::TranslateArgs(const llvm::opt::DerivedArgList &Args,
-                             StringRef BoundArch,
-                             Action::OffloadKind DeviceOffloadKind) const {
-  DerivedArgList *DAL =
-      HostTC.TranslateArgs(Args, BoundArch, DeviceOffloadKind);
-  if (!DAL)
-    DAL = new DerivedArgList(Args.getBaseArgs());
+                            StringRef BoundArch,
+                            Action::OffloadKind DeviceOffloadKind) const {
+  if (HostTC) {
+    DerivedArgList *DAL =
+        HostTC->TranslateArgs(Args, BoundArch, DeviceOffloadKind);
+    if (!DAL)
+      DAL = new DerivedArgList(Args.getBaseArgs());
 
-  const OptTable &Opts = getDriver().getOpts();
+    const OptTable &Opts = getDriver().getOpts();
 
-  for (Arg *A : Args) {
-    DAL->append(A);
+    for (Arg *A : Args) {
+      DAL->append(A);
+    }
+
+    if (!BoundArch.empty()) {
+      DAL->eraseArg(options::OPT_march_EQ);
+      DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ),
+                        BoundArch);
+    }
+    return DAL;
   }
-
-  if (!BoundArch.empty()) {
-    DAL->eraseArg(options::OPT_march_EQ);
-    DAL->AddJoinedArg(nullptr, Opts.getOption(options::OPT_march_EQ),
-                      BoundArch);
-  }
-  return DAL;
+  return nullptr;
 }
 
 Tool *VXXToolChain::buildLinker() const {
   assert(getTriple().isXilinxFPGA());
   return new tools::SYCL::LinkerVXX(*this);
-}
-
-void VXXToolChain::addClangWarningOptions(ArgStringList &CC1Args) const {
-  HostTC.addClangWarningOptions(CC1Args);
-}
-
-ToolChain::CXXStdlibType
-VXXToolChain::GetCXXStdlibType(const ArgList &Args) const {
-  return HostTC.GetCXXStdlibType(Args);
-}
-
-void VXXToolChain::AddClangSystemIncludeArgs(const ArgList &DriverArgs,
-                                              ArgStringList &CC1Args) const {
-  HostTC.AddClangSystemIncludeArgs(DriverArgs, CC1Args);
-}
-
-void VXXToolChain::AddClangCXXStdlibIncludeArgs(const ArgList &Args,
-                                                 ArgStringList &CC1Args) const {
-  HostTC.AddClangCXXStdlibIncludeArgs(Args, CC1Args);
 }
 
 Tool *VXXToolChain::getTool(Action::ActionClass AC) const {

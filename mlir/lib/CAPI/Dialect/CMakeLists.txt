@@ -80,13 +80,13 @@ add_mlir_upstream_c_api_library(MLIRCAPISparseTensor
   MLIRSparseTensorTransforms
 )
 
-add_mlir_upstream_c_api_library(MLIRCAPIStandard
-  Standard.cpp
+add_mlir_upstream_c_api_library(MLIRCAPIFunc
+  Func.cpp
 
   PARTIAL_SOURCES_INTENDED
   LINK_LIBS PUBLIC
   MLIRCAPIIR
-  MLIRStandard
+  MLIRFunc
 )
 
 add_mlir_upstream_c_api_library(MLIRCAPITensor
@@ -96,4 +96,22 @@ add_mlir_upstream_c_api_library(MLIRCAPITensor
   LINK_LIBS PUBLIC
   MLIRCAPIIR
   MLIRTensor
+)
+
+add_mlir_upstream_c_api_library(MLIRCAPIQuant
+  Quant.cpp
+
+  PARTIAL_SOURCES_INTENDED
+  LINK_LIBS PUBLIC
+  MLIRCAPIIR
+  MLIRQuant
+)
+
+add_mlir_upstream_c_api_library(MLIRCAPIPDL
+  PDL.cpp
+
+  PARTIAL_SOURCES_INTENDED
+  LINK_LIBS PUBLIC
+  MLIRCAPIIR
+  MLIRPDL
 )

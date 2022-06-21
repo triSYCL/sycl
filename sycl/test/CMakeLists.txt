@@ -59,59 +59,50 @@ add_lit_testsuite(check-sycl-spirv "Running device-agnostic SYCL regression test
   EXCLUDE_FROM_CHECK_ALL
   )
 
-add_lit_testsuite(check-sycl-xocc-jmax "Running the SYCL regression tests for sycl-xocc"
-  ${CMAKE_CURRENT_BINARY_DIR}/on-device
+add_lit_testsuite(check-sycl-vitis-cpu "Running the SYCL vitis regression test on the host device"
+  ${CMAKE_CURRENT_BINARY_DIR}/vitis
   ARGS ${RT_TEST_ARGS}
-  PARAMS "XOCC=only"
+  PARAMS "VITIS=cpu;SYCL_PLUGIN=host"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )
-set_target_properties(check-sycl-xocc-jmax PROPERTIES FOLDER "SYCL tests")
+set_target_properties(check-sycl-vitis-cpu PROPERTIES FOLDER "SYCL tests")
 
-add_lit_testsuite(check-sycl-xocc-j2 "Running the SYCL regression tests for sycl-xocc in j2"
-  ${CMAKE_CURRENT_BINARY_DIR}/on-device "-j 2"
+add_lit_testsuite(check-sycl-vitis "Running the SYCL regression tests for sycl-vitis hw_emu"
+  ${CMAKE_CURRENT_BINARY_DIR}/vitis
   ARGS ${RT_TEST_ARGS}
-  PARAMS "XOCC=only"
+  PARAMS "VITIS=only;SYCL_TRIPLE=fpga64_hls_hw_emu-xilinx-linux;SYCL_PLUGIN=opencl"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )
-set_target_properties(check-sycl-xocc-j2 PROPERTIES FOLDER "SYCL tests")
+set_target_properties(check-sycl-vitis PROPERTIES FOLDER "SYCL tests")
 
-add_lit_testsuite(check-sycl-xocc-j4 "Running the SYCL regression tests for sycl-xocc in j4"
-  ${CMAKE_CURRENT_BINARY_DIR}/on-device "-j 4"
+add_lit_testsuite(check-sycl-xrt "Running the SYCL regression tests for sycl-vitis hw_emu"
+  ${CMAKE_CURRENT_BINARY_DIR}/vitis
   ARGS ${RT_TEST_ARGS}
-  PARAMS "XOCC=only"
+  PARAMS "VITIS=only;SYCL_TRIPLE=fpga64_hls_hw_emu-xilinx-linux;SYCL_PLUGIN=xrt"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )
-set_target_properties(check-sycl-xocc-j4 PROPERTIES FOLDER "SYCL tests")
+set_target_properties(check-sycl-xrt PROPERTIES FOLDER "SYCL tests")
 
-add_lit_testsuite(check-sycl-xocc-all-jmax "Running the SYCL regression tests for SYCL on v++"
-  ${CMAKE_CURRENT_BINARY_DIR}/on-device
+add_lit_testsuite(check-sycl-vitis-hw "Running the SYCL regression tests for sycl-vitis hw"
+  ${CMAKE_CURRENT_BINARY_DIR}/vitis
   ARGS ${RT_TEST_ARGS}
-  PARAMS "XOCC=all"
+  PARAMS "VITIS=only;SYCL_TRIPLE=fpga64_hls_hw-xilinx-linux;SYCL_PLUGIN=opencl"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )
-set_target_properties(check-sycl-xocc-all-jmax PROPERTIES FOLDER "SYCL tests")
+set_target_properties(check-sycl-vitis PROPERTIES FOLDER "SYCL tests")
 
-add_lit_testsuite(check-sycl-xocc-all-j2 "Running the SYCL regression tests for SYCL on v++ in -j2"
-  ${CMAKE_CURRENT_BINARY_DIR}/on-device "-j 2"
+add_lit_testsuite(check-sycl-xrt-hw "Running the SYCL regression tests for sycl-vitis hw"
+  ${CMAKE_CURRENT_BINARY_DIR}/vitis
   ARGS ${RT_TEST_ARGS}
-  PARAMS "XOCC=all"
+  PARAMS "VITIS=only;SYCL_TRIPLE=fpga64_hls_hw-xilinx-linux;SYCL_PLUGIN=xrt"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )
-set_target_properties(check-sycl-xocc-all-j2 PROPERTIES FOLDER "SYCL tests")
-
-add_lit_testsuite(check-sycl-xocc-all-j4 "Running the SYCL regression tests for SYCL on v++ in -j4"
-  ${CMAKE_CURRENT_BINARY_DIR}/on-device "-j 4"
-  ARGS ${RT_TEST_ARGS}
-  PARAMS "XOCC=all"
-  DEPENDS ${SYCL_TEST_DEPS}
-  EXCLUDE_FROM_CHECK_ALL
-  )
-set_target_properties(check-sycl-xocc-all-j4 PROPERTIES FOLDER "SYCL tests")
+set_target_properties(check-sycl-xrt PROPERTIES FOLDER "SYCL tests")
 
 add_custom_target(check-sycl)
 add_dependencies(check-sycl check-sycl-spirv)
@@ -159,4 +150,3 @@ if(SYCL_BUILD_PI_HIP)
 
   add_dependencies(check-sycl check-sycl-hip)
 endif()
-add_subdirectory(on-device)

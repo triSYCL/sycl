@@ -13,6 +13,7 @@ inline const char *GetBackendString(cl::sycl::backend backend) {
   case cl::sycl::backend::backend_name:                                        \
     return #backend_name
     PI_BACKEND_STR(hip);
+    PI_BACKEND_STR(xrt);
     PI_BACKEND_STR(cuda);
     PI_BACKEND_STR(host);
     PI_BACKEND_STR(opencl);

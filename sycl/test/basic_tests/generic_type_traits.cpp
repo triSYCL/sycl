@@ -150,7 +150,6 @@ int main() {
   is_sgeninteger
   is_vgeninteger
 
-
   is_sigeninteger
   is_sugeninteger
   is_vigeninteger

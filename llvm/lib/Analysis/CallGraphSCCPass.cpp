@@ -28,7 +28,9 @@
 #include "llvm/IR/OptBisect.h"
 #include "llvm/IR/PassTimingInfo.h"
 #include "llvm/IR/PrintPasses.h"
+#ifdef EXPENSIVE_CHECKS
 #include "llvm/IR/StructuralHash.h"
+#endif
 #include "llvm/Pass.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/Debug.h"
@@ -61,7 +63,7 @@ class CGPassManager : public ModulePass, public PMDataManager {
 public:
   static char ID;
 
-  explicit CGPassManager() : ModulePass(ID), PMDataManager() {}
+  explicit CGPassManager() : ModulePass(ID) {}
 
   /// Execute all of the passes scheduled for execution.  Keep track of
   /// whether any of the passes modifies the module, and if so, return true.

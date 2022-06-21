@@ -1,13 +1,20 @@
-set(CMAKE_CXX_STANDARD 20)
-set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF)
-
 add_subdirectory( sycl-vxx )
+
+function(link_llvm_libs target)
+  foreach(LIB ${ARGN})
+    target_include_directories(${target} SYSTEM PRIVATE ${LLVM_MAIN_INCLUDE_DIR})
+    target_link_libraries(${target} PRIVATE ${LIB})
+  endforeach()
+endfunction()
 
 add_subdirectory(sycl-ls)
 
 if (SYCL_ENABLE_XPTI_TRACING)
-  add_subdirectory(pi-trace)
+  if (UNIX)
+    add_subdirectory(sycl-prof)
+    add_subdirectory(sycl-trace)
+    add_subdirectory(sycl-sanitize)
+  endif()
 endif()
 
 # TODO: move each tool in its own sub-directory
@@ -41,6 +48,7 @@ target_compile_definitions(get_device_count_by_type
   PRIVATE
     $<$<BOOL:${SYCL_BUILD_PI_CUDA}>:USE_PI_CUDA>
     $<$<BOOL:${SYCL_BUILD_PI_HIP}>:USE_PI_HIP>
+    $<$<BOOL:${SYCL_BUILD_PI_XRT}>:USE_PI_XRT>
     # For HIP set defines depending on the platform
     $<$<AND:$<BOOL:${SYCL_BUILD_PI_HIP}>,$<STREQUAL:${SYCL_BUILD_PI_HIP_PLATFORM},AMD>>:__HIP_PLATFORM_AMD__>
     $<$<AND:$<BOOL:${SYCL_BUILD_PI_HIP}>,$<STREQUAL:${SYCL_BUILD_PI_HIP_PLATFORM},NVIDIA>>:__HIP_PLATFORM_NVIDIA__>
@@ -50,4 +58,10 @@ if(SYCL_BUILD_PI_HIP)
   target_include_directories(get_device_count_by_type
     PRIVATE
     ${SYCL_BUILD_PI_HIP_INCLUDE_DIR})
+endif()
+
+if(SYCL_BUILD_PI_XRT)
+  target_include_directories(get_device_count_by_type
+    PRIVATE
+    ${SYCL_BUILD_PI_XRT_INCLUDE_DIR})
 endif()

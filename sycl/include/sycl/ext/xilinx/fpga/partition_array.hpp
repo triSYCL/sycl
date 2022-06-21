@@ -9,12 +9,6 @@
 /// \file
 /// This file contains a class expressing arrays that can be partitioned.
 ///
-/// \todo While Xilinx xocc supports multidimensional C arrays, the
-/// current implementation only support 1-dim array partition.
-///    .
-/// \todo Extend this with multidimensional C++ arrays, such as with future
-/// mdspan C++20 syntax.
-///
 //===----------------------------------------------------------------------===//
 
 #ifndef SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP
@@ -27,7 +21,13 @@
 #include <type_traits>
 
 __SYCL_INLINE_NAMESPACE(cl) {
-namespace sycl::ext::xilinx {
+namespace sycl {
+
+namespace ext::xilinx {
+
+/// Type used to represent dimensions of an partition_ndarray
+template<std::size_t...>
+struct dim {};
 
 /** Kind of array partition
 
@@ -57,6 +57,16 @@ namespace partition {
   __SYCL_ALWAYS_INLINE
   inline void xilinx_partition_array(Ptr, int, int, int) {}
 
+  /// This fuction is currently empty but the LowerSYCLMetaData Pass will fill
+  /// it with the required IR.
+  template<typename Ptr>
+#if defined(__SYCL_XILINX_HW_EMU_MODE__) || defined(__SYCL_XILINX_HW_MODE__)
+  __SYCL_DEVICE_ANNOTATE("xilinx_bind_storage")
+#endif
+  __SYCL_ALWAYS_INLINE
+  inline void xilinx_bind_storage(Ptr, int, int, int) {}
+  // xilinx_bind_storage(ptr, 666, 18, -1) is a RAM_1P BRAM.
+
   /** Represent a cyclic partition.
 
       The single array would be partitioned into several small physical
@@ -71,18 +81,15 @@ namespace partition {
       contents of this array will be distributed to 2 physical
       memories: one contains 1, 3 and the other contains 2,4.
 
-      \param PhyMemNum is the number of physical memories that user wants to
+      \param SplitInto is the number of physical memories that user wants to
       have.
 
       \param PDim is the dimension that user wants to apply cyclic partition on.
       If PDim is 0, all dimensions will be partitioned with cyclic order.
-
-      TODO: Deal with multi-dimension array. Now, since we can only deal with
-      1-dim, PDim is set to 1 by default.
   */
-  template <std::size_t PhyMemNum = 1, std::size_t PDim = 1>
+  template <std::size_t SplitInto = 1, std::size_t PDim = 0>
   struct cyclic {
-    static constexpr auto physical_mem_num = PhyMemNum;
+    static constexpr auto split_into = SplitInto;
     static constexpr auto partition_dim = PDim;
     static constexpr auto partition_type = type::cyclic;
   };
@@ -101,18 +108,14 @@ namespace partition {
       contents of this array will be distributed to 2 physical
       memories: one contains 1, 2 and the other contains 3,4.
 
-      \param ElmInEachPhyMem is the number of elements in each physical memory
-      that user wants to have.
+      \param SplitInto is the number blocks the array will be split into.
 
       \param PDim is the dimension that user wants to apply block partition on.
       If PDim is 0, all dimensions will be partitioned with block order.
-
-      TODO: Deal with multi-dimension array. Now, since we can only deal with
-      1-dim, PDim is set to 1 by default.
   */
-  template <std::size_t ElmInEachPhyMem = 1, std::size_t PDim = 1>
+  template <std::size_t SplitInto = 1, std::size_t PDim = 0>
   struct block {
-    static constexpr auto ele_in_each_physical_mem = ElmInEachPhyMem;
+    static constexpr auto split_into = SplitInto;
     static constexpr auto partition_dim = PDim;
     static constexpr auto partition_type = type::block;
   };
@@ -127,11 +130,8 @@ namespace partition {
 
       \param PDim is the dimension that user wants to apply complete partition
       on. If PDim is 0, all dimensions will be completely partitioned.
-
-      TODO: Deal with multi-dimension array. Now, since we can only deal with
-      1-dim, PDim is set to 1 by default.
   */
-  template <std::size_t PDim = 1>
+  template <std::size_t PDim = 0>
   struct complete {
     static constexpr auto partition_dim = PDim;
     static constexpr auto partition_type = type::complete;
@@ -145,8 +145,62 @@ namespace partition {
   struct none {
     static constexpr auto partition_type = type::none;
   };
-}
+}  // namespace partition
 
+namespace detail {
+
+template<typename T, auto... Idxs>
+struct rec_array_of;
+
+/// Type containing the iterative case of various recursive type and value calculations
+template<typename T, auto Idx, auto... Idxs>
+struct rec_array_of<T, Idx, Idxs...> {
+  using sub_type = rec_array_of<T, Idxs...>;
+
+  using type = typename sub_type::type[Idx];
+  using init = std::initializer_list<typename sub_type::init>;
+
+  template<typename InitTy, typename Lambda>
+  static inline constexpr bool recursively_on_each(type& self, InitTy&& other, Lambda&& L) {
+    auto eIt = std::begin(self);
+    auto iIt = std::begin(other);
+    for (; eIt < std::end(self) && iIt < std::end(other);eIt++, iIt++)
+      if (sub_type::recursively_on_each(*eIt, *iIt, L))
+        return true;
+    return false;
+  }
+};
+
+/// Type containing the base case of various recursive type and value calculations
+template<typename T>
+struct rec_array_of<T> {
+  using type = T;
+  using init = T;
+
+  template <typename Lambda,
+            typename std::enable_if_t<
+                std::is_same_v<decltype(std::declval<Lambda>()(
+                                   std::declval<type &>(),
+                                   std::declval<const init &>())),
+                               bool>,
+                int> = 0>
+  static inline constexpr bool recursively_on_each(type &self, const init &other, Lambda &&L) {
+    return L(self, other);
+  }
+  template <typename Lambda,
+            typename std::enable_if_t<
+                !std::is_same_v<decltype(std::declval<Lambda>()(
+                                    std::declval<type &>(),
+                                    std::declval<const init &>())),
+                                bool>,
+                int> = 0>
+  static inline constexpr bool recursively_on_each(type &self, const init &other, Lambda &&L) {
+    L(self, other);
+    return false;
+  }
+};
+
+}  // namespace detail
 
 /** Define an array class with partition feature.
 
@@ -161,34 +215,42 @@ namespace partition {
 
     \param PartitionType is the array partition type: cyclic, block, and
     complete. The default type is none.
-
-    TODO: Deal with multi-dimension array.
 */
 template <typename ValueType,
-          std::size_t Size,
+          typename Size,
           typename PartitionType = partition::none>
-struct partition_array {
-  /** Store the array elements.
+struct partition_ndarray {};
 
-      Note that it means default initialization for partition_array
-      elements, which is lazily convenient for heterogeneous
-      computing */
-  ValueType elems[Size];
-  /// The number of elements of the 1-D array
-  static constexpr auto array_size = Size;
+/// alias declaration to make a partition_array = partition_ndarray of 1 dimension
+template<typename VTy, std::size_t Size, typename PartitionType = partition::none>
+using partition_array = partition_ndarray<VTy, dim<Size>, PartitionType>;
+
+/// The implementation of the N-dimension array
+template <typename ValueType, std::size_t Size, std::size_t... Sizes,
+          typename PartitionType>
+class partition_ndarray<ValueType, dim<Size, Sizes...>, PartitionType> {
+  using recursive_type = detail::rec_array_of<ValueType, Size, Sizes...>;
+
+  /// The N-dimension array. 
+  typename recursive_type::type elems;
+
+  public:
   /// The kind of partitioning
   static constexpr auto partition_type = PartitionType::partition_type;
-  /// Type of array elements
-  using element_type = ValueType;
-  using iterator = ValueType*;
-  using const_iterator = const ValueType*;
+
+  /// Type of the last dimension's element
+  using elem_type = ValueType;
+  /// Type of the next dimension's element
+  using value_type = std::remove_cvref_t<decltype(elems[0])>;
+  using iterator = value_type*;
+  using const_iterator = const value_type*;
+  using dim_type = dim<Size, Sizes...>;
 
   /// Provide iterator
-  iterator begin() { return elems; }
-  const_iterator begin() const { return elems; }
-  iterator end() { return elems+Size; }
-  const_iterator end() const { return elems+Size; }
-
+  iterator begin() { return std::begin(elems); }
+  const_iterator begin() const { return std::begin(elems); }
+  iterator end() { return std::end(elems); }
+  const_iterator end() const { return std::end(elems); }
 
   /// Evaluate size
   constexpr std::size_t size() const noexcept {
@@ -196,64 +258,74 @@ struct partition_array {
   }
 
   /// Construct an array
-  partition_array() {
+  partition_ndarray() {
     // Add the intrinsic according expressing to the target compiler the
     // partitioning to use
     if constexpr (partition_type == partition::type::cyclic)
       partition::xilinx_partition_array(
-          (ValueType __SYCL_DEVICE_ADDRSPACE(0 /*stack*/)(*)[Size])(&elems) &
-              elems,
-          partition_type, PartitionType::physical_mem_num,
+          (ValueType(*)[Size])(&elems),
+          partition_type, PartitionType::split_into,
           PartitionType::partition_dim);
     if constexpr (partition_type == partition::type::block)
       partition::xilinx_partition_array(
-          (ValueType __SYCL_DEVICE_ADDRSPACE(0 /*stack*/)(*)[Size])(&elems) &
-              elems,
-          partition_type, PartitionType::ele_in_each_physical_mem,
+          (ValueType(*)[Size])(&elems),
+          partition_type, PartitionType::split_into,
           PartitionType::partition_dim);
     if constexpr (partition_type == partition::type::complete)
       partition::xilinx_partition_array(
-          (ValueType __SYCL_DEVICE_ADDRSPACE(0 /*stack*/)(*)[Size])(&elems),
+          (ValueType(*)[Size])(&elems),
           partition_type, 0, PartitionType::partition_dim);
   }
 
-  /// A constructor from some container
-  template <typename SomeContainer>
-  partition_array(const SomeContainer &src)
-    : partition_array { } {
-    /// TODO: Find a way to specialize this with a safer
-    /// implementation when the size of src is at least constexpr
-    std::copy_n(std::begin(src), Size, begin());
+  /// Determine if another type has the same underlying type and dimension and
+  /// size as the current type.
+  template <typename OtherTy>
+  static constexpr bool is_layout_compatible =
+      std::is_same_v<elem_type,
+                     typename std::remove_reference_t<OtherTy>::elem_type>
+          &&std::is_same_v<dim_type,
+                           typename std::remove_reference_t<OtherTy>::dim_type>;
+
+  /// Construct from an N-dimension std::initializer_list
+  partition_ndarray(typename recursive_type::init i) : partition_ndarray() {
+    recursive_type::recursively_on_each(elems, i,
+                            [](auto &self, auto other) { self = other; });
   }
 
-
-  /// Construct an array from initializer_list
-  template <typename SourceBasicType,
-            // Only use this constructor for a real element-oriented
-            // initializer_list we can assign, not for the case
-            // partition_array<> a = { some_other_array }
-            typename = sycl::detail::enable_if_t<std::is_convertible<SourceBasicType,
-                                                            ValueType>::value>>
-  constexpr partition_array(std::initializer_list<SourceBasicType> l)
-    : partition_array { } {
-    /// TODO: Find a way to specialize this with a safer
-    /// implementation when the size of src is at least constexpr
-    /// This does not work...
-    /// static_assert(l.size() == Size);
-    std::copy_n(std::begin(l), Size, begin());
+  /// Construct from an other partition_ndarray with the same type and
+  /// dimensions
+  template <typename OtherTy> requires is_layout_compatible<OtherTy>
+  partition_ndarray(OtherTy &&other) : partition_ndarray() {
+    recursive_type::recursively_on_each(elems, std::forward<OtherTy>(other),
+                            [](auto &self, auto other) { self = other; });
   }
 
+  template <typename OtherTy> requires is_layout_compatible<OtherTy>
+  partition_ndarray &operator=(const OtherTy &other) {
+    recursive_type::recursively_on_each(elems, other,
+                            [](auto &self, auto other) { self = other; });
+    return *this;
+  }
+
+  template <typename OtherTy> requires is_layout_compatible<OtherTy>
+  bool operator!=(const OtherTy &other) {
+    return recursive_type::recursively_on_each(
+        elems, other, [](auto &self, auto other) { return self != other; });
+  }
+
+  template <typename OtherTy> requires is_layout_compatible<OtherTy>
+  bool operator==(const OtherTy &other) {
+    return !(*this != other);
+  }
 
   /// Provide a subscript operator
-  ValueType& operator[](std::size_t i) {
+  decltype(auto) operator[](std::size_t i) {
     return elems[i];
   }
 
-
-  constexpr const ValueType& operator[](std::size_t i) const {
+  constexpr decltype(auto) operator[](std::size_t i) const {
     return elems[i];
   }
-
 
   /// Return the partition type of the array
   constexpr auto get_partition_type() const -> decltype(partition_type) {
@@ -261,7 +333,8 @@ struct partition_array {
   }
 };
 
-} // namespace cl::sycl::ext::xilinx
+}  // namespace ext::xilinx
+}  // namespace sycl
 
 }
 

@@ -1,5 +1,5 @@
-// RUN: %clangxx -fsycl -fsycl-device-only -O3 -S -emit-llvm -x c++ %s -o - | FileCheck %s --check-prefix CHECK-O3
-// RUN: %clangxx -fsycl -fsycl-device-only -O0 -S -emit-llvm -x c++ %s -o - | FileCheck %s --check-prefix CHECK-O0
+// RUN: %clangxx -fsycl -fsycl-device-only -O3 -S -emit-llvm -x c++ -Xclang -no-enable-noundef-analysis %s -o - | FileCheck %s --check-prefix CHECK-O3
+// RUN: %clangxx -fsycl -fsycl-device-only -O0 -S -emit-llvm -x c++ -Xclang -no-enable-noundef-analysis %s -o - | FileCheck %s --check-prefix CHECK-O0
 // Test compilation with -O3 when all methods are inlined in kernel function
 // and -O0 when helper methods are preserved.
 #include <CL/sycl.hpp>
@@ -67,7 +67,6 @@ int main(int argc, char *argv[]) {
   // CHECK-O3: call spir_func i8 addrspace(1)* {{.*}}spirv_GenericCastToPtrExplicit_ToGlobal{{.*}}(i8 addrspace(4)*
   // CHECK-O3: call spir_func i32 {{.*}}spirv_SubgroupBlockRead{{.*}}(i32 addrspace(1)*
   // CHECK-O3: call spir_func void {{.*}}assert
-
 
   // load() for local address space
   // CHECK-O3: call spir_func i8 addrspace(3)* {{.*}}spirv_GenericCastToPtrExplicit_ToLocal{{.*}}(i8 addrspace(4)*

@@ -259,7 +259,7 @@ public:
   // This guard is needed because the libsycl.so can compiled with C++ <=14
   // while the code requires C++17. This code is not supposed to be used by the
   // libsycl.so so it should not be a problem.
-#if __cplusplus > 201402L
+#if __cplusplus >= 201703L
   /// \returns true if any device image in the kernel_bundle uses specialization
   /// constant whose address is SpecName
   template <auto &SpecName> bool has_specialization_constant() const noexcept {
@@ -329,17 +329,23 @@ private:
   template <backend Backend, class SyclT>
   friend auto get_native(const SyclT &Obj) -> backend_return_t<Backend, SyclT>;
 
-  template <backend Backend>
-  backend_return_t<Backend, kernel_bundle<State>> getNative() const {
+  template <
+      backend Backend,
+      typename ConvertT = typename backend_return_t<
+          Backend, kernel_bundle<State>>::value_type (*)(pi_native_handle)>
+  backend_return_t<Backend, kernel_bundle<State>>
+  getNative(ConvertT convert = [](pi_native_handle a) {
+    return detail::pi::cast<
+        typename backend_return_t<Backend, kernel_bundle<State>>::value_type>(
+        a);
+  }) const {
     // NOTE: implementation assumes that the return type is a
     // derivative of std::vector.
     backend_return_t<Backend, kernel_bundle<State>> ReturnValue;
     ReturnValue.reserve(std::distance(begin(), end()));
 
     for (const device_image<State> &DevImg : *this) {
-      ReturnValue.push_back(
-          detail::pi::cast<typename decltype(ReturnValue)::value_type>(
-              DevImg.getNative()));
+      ReturnValue.push_back(convert(DevImg.getNative()));
     }
 
     return ReturnValue;
@@ -588,8 +594,13 @@ template <typename KernelName> bool is_compatible(const device &Dev) {
 
 namespace detail {
 
+// TODO: This is no longer in use. Remove when ABI break is allowed.
 __SYCL_EXPORT std::shared_ptr<detail::kernel_bundle_impl>
 join_impl(const std::vector<detail::KernelBundleImplPtr> &Bundles);
+
+__SYCL_EXPORT std::shared_ptr<detail::kernel_bundle_impl>
+join_impl(const std::vector<detail::KernelBundleImplPtr> &Bundles,
+          bundle_state State);
 }
 
 /// \returns a new kernel bundle that represents the union of all the device
@@ -604,7 +615,7 @@ join(const std::vector<sycl::kernel_bundle<State>> &Bundles) {
     KernelBundleImpls.push_back(detail::getSyclObjImpl(Bundle));
 
   std::shared_ptr<detail::kernel_bundle_impl> Impl =
-      detail::join_impl(KernelBundleImpls);
+      detail::join_impl(KernelBundleImpls, State);
   return detail::createSyclObjFromImpl<kernel_bundle<State>>(Impl);
 }
 

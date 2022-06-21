@@ -39,6 +39,8 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "SYCLUtils.h"
+
 using namespace llvm;
 
 // Put the code in an anonymous namespace to avoid polluting the global
@@ -241,12 +243,6 @@ struct InSPIRation : public ModulePass {
   /// Set the output Triple to SPIR
   void setSPIRTriple(Module &M) { M.setTargetTriple("spir64"); }
 
-  /// Test if a function is a SPIR kernel
-  bool isKernel(const Function &F) {
-    return F.getCallingConv() == CallingConv::SPIR_KERNEL ||
-           F.hasFnAttribute("fpga.top.func");
-  }
-
   /// Test if a function is a non-intrinsic SPIR function, indicating that it is
   /// a user created function that the SYCL compiler has transitively generated
   /// or one that comes from an existing library of SPIR functions (HLS SPIR
@@ -255,22 +251,6 @@ struct InSPIRation : public ModulePass {
     if (!F.isIntrinsic())
       return true;
     return false;
-  }
-
-  /// This function gives llvm::function arguments with no name
-  /// a default name e.g. arg_0, arg_1..
-  ///
-  /// This is because if your arguments have no name v++ will commit seppuku
-  /// when generating XML. Perhaps it's possible to move this to the Clang
-  /// Frontend by generating the name from the accessor/capture the arguments
-  /// come from, but I believe it requires a special compiler invocation option
-  /// to keep arg names from the frontend in the LLVM bitcode.
-  void giveNameToArguments(Function &F) {
-    int Counter = 0;
-    for (auto &Arg : F.args()) {
-      if (!Arg.hasName())
-        Arg.setName("arg_" + Twine{Counter++});
-    }
   }
 
   // Hopeful list/probably impractical asks for v++:
@@ -296,10 +276,10 @@ struct InSPIRation : public ModulePass {
 
     std::vector<Function *> Declarations;
     for (auto &F : M.functions()) {
-      if (isKernel(F)) {
+      if (sycl::isKernelFunc(&F)) {
         kernelSPIRify(F);
         applyKernelProperties(F);
-        giveNameToArguments(F);
+        sycl::giveNameToArguments(F);
 
         /// \todo Possible: We don't modify declarations right now as this
         /// will destroy the names of SPIR/CL intrinsics as they aren't
@@ -335,7 +315,7 @@ struct InSPIRation : public ModulePass {
         //
         // It doesn't require application to the SPIR intrinsics as we're
         // linking against the HLS SPIR library, which is already conformant.
-        giveNameToArguments(F);
+        sycl::giveNameToArguments(F);
       } else if (isTransitiveNonIntrinsicFunc(F) && F.isDeclaration()) {
         // push back intrinsics to make sure we handle naming after changing the
         // name of all functions to sycl_func.

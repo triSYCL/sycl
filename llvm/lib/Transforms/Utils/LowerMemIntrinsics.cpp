@@ -10,9 +10,89 @@
 #include "llvm/Analysis/TargetTransformInfo.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/IntrinsicInst.h"
+#include "llvm/Support/CommandLine.h"
 #include "llvm/Transforms/Utils/BasicBlockUtils.h"
 
 using namespace llvm;
+
+namespace {
+
+cl::opt<bool>
+    LowerToNonI8Type("lower-mem-intr-to-llvm-type", cl::Hidden,
+                     cl::desc("try to lower memory intrinsics to their "
+                              "underlying LLVM IR types and not i8"));
+
+Value *Skip1BitCast(Value *V) {
+  assert(V->getType()->isPointerTy());
+
+  if (auto *BC = dyn_cast<BitCastInst>(V))
+    return BC->getOperand(0);
+  if (auto *BC = dyn_cast<BitCastOperator>(V))
+    return BC->getOperand(0);
+  return V;
+}
+
+/// Choose the LLVM type that should be used for a memory operation on Ptr1 and maybe Ptr2
+Type *determineUnderlyingType(Type* Default, Value *Ptr1, Value *Ptr2 = nullptr) {
+  assert((Ptr1->getType()->isPointerTy() &&
+          Ptr1->getType()->getPointerElementType()->isIntegerTy(8)) &&
+         (!Ptr2 || (Ptr2->getType()->isPointerTy() &&
+                    Ptr2->getType()->getPointerElementType()->isIntegerTy(8))));
+
+  if (!Ptr2 || Skip1BitCast(Ptr1)->getType() == Skip1BitCast(Ptr2)->getType())
+    return Skip1BitCast(Ptr1)->getType()->getPointerElementType();
+  return Default;
+}
+
+/// return a constant of Type Ty as if it was obtained from a memset over the
+/// representation of the type.
+Constant *emitBytePatternForType(Type *Ty, ConstantInt *Pattern, Module &M) {
+  const DataLayout &DL = M.getDataLayout();
+  uint64_t IntValue;
+  std::memset(&IntValue, Pattern->getZExtValue(), sizeof(IntValue));
+  if (Ty->isIntOrIntVectorTy()) {
+    unsigned BitWidth =
+        cast<llvm::IntegerType>(Ty->getScalarType())->getBitWidth();
+    if (BitWidth <= 64)
+      return llvm::ConstantInt::get(Ty, IntValue);
+    return llvm::ConstantInt::get(
+        Ty, llvm::APInt::getSplat(BitWidth, llvm::APInt(64, IntValue)));
+  }
+  if (Ty->isPtrOrPtrVectorTy()) {
+    auto *PtrTy = cast<llvm::PointerType>(Ty->getScalarType());
+    unsigned PtrWidth = DL.getPointerSizeInBits();
+    llvm::Type *IntTy = llvm::IntegerType::get(M.getContext(), PtrWidth);
+    auto *Int = llvm::ConstantInt::get(IntTy, IntValue);
+    return llvm::ConstantExpr::getIntToPtr(Int, PtrTy);
+  }
+  if (Ty->isStructTy()) {
+    auto *StructTy = cast<llvm::StructType>(Ty);
+    llvm::SmallVector<llvm::Constant *, 8> Struct(StructTy->getNumElements());
+    for (unsigned El = 0; El != Struct.size(); ++El)
+      Struct[El] =
+          emitBytePatternForType(StructTy->getElementType(El), Pattern, M);
+    return llvm::ConstantStruct::get(StructTy, Struct);
+  }
+  if (Ty->isFPOrFPVectorTy()) {
+    unsigned BitWidth = llvm::APFloat::semanticsSizeInBits(
+        Ty->getScalarType()->getFltSemantics());
+    llvm::APInt Payload(64, IntValue);
+    if (BitWidth >= 64)
+      Payload = llvm::APInt::getSplat(BitWidth, Payload);
+    return ConstantFP::get(
+        Ty, APFloat(Ty->getScalarType()->getFltSemantics(), Payload));
+  }
+  if (Ty->isArrayTy()) {
+    auto *ArrTy = cast<llvm::ArrayType>(Ty);
+    llvm::SmallVector<llvm::Constant *, 8> Element(
+        ArrTy->getNumElements(),
+        emitBytePatternForType(ArrTy->getElementType(), Pattern, M));
+    return llvm::ConstantArray::get(ArrTy, Element);
+  }
+  llvm_unreachable("Unhandled type");
+}
+
+}
 
 void llvm::createMemCpyLoopKnownSize(Instruction *InsertBefore, Value *SrcAddr,
                                      Value *DstAddr, ConstantInt *CopyLen,
@@ -35,6 +115,8 @@ void llvm::createMemCpyLoopKnownSize(Instruction *InsertBefore, Value *SrcAddr,
   Type *TypeOfCopyLen = CopyLen->getType();
   Type *LoopOpType = TTI.getMemcpyLoopLoweringType(
       Ctx, CopyLen, SrcAS, DstAS, SrcAlign.value(), DstAlign.value());
+  if (LowerToNonI8Type)
+    LoopOpType = determineUnderlyingType(LoopOpType, SrcAddr, DstAddr);
 
   unsigned LoopOpSize = DL.getTypeStoreSize(LoopOpType);
   uint64_t LoopEndCount = CopyLen->getZExtValue() / LoopOpSize;
@@ -148,6 +230,9 @@ void llvm::createMemCpyLoopUnknownSize(Instruction *InsertBefore,
 
   Type *LoopOpType = TTI.getMemcpyLoopLoweringType(
       Ctx, CopyLen, SrcAS, DstAS, SrcAlign.value(), DstAlign.value());
+  if (LowerToNonI8Type)
+    LoopOpType = determineUnderlyingType(LoopOpType, SrcAddr, DstAddr);
+
   unsigned LoopOpSize = DL.getTypeStoreSize(LoopOpType);
 
   IRBuilder<> PLBuilder(PreLoopBB->getTerminator());
@@ -297,7 +382,21 @@ static void createMemMoveLoop(Instruction *InsertBefore, Value *SrcAddr,
   Function *F = OrigBB->getParent();
   const DataLayout &DL = F->getParent()->getDataLayout();
 
-  Type *EltTy = cast<PointerType>(SrcAddr->getType())->getElementType();
+  // TODO: Use different element type if possible?
+  IRBuilder<> CastBuilder(InsertBefore);
+  Type *EltTy = CastBuilder.getInt8Ty();
+  Type *PtrTy =
+      CastBuilder.getInt8PtrTy(SrcAddr->getType()->getPointerAddressSpace());
+  SrcAddr = CastBuilder.CreateBitCast(SrcAddr, PtrTy);
+  DstAddr = CastBuilder.CreateBitCast(DstAddr, PtrTy);
+  if (LowerToNonI8Type) {
+    Type* NewTy = determineUnderlyingType(EltTy, SrcAddr, DstAddr);
+    if (EltTy != NewTy) {
+      SrcAddr = Skip1BitCast(SrcAddr);
+      DstAddr = Skip1BitCast(DstAddr);
+    }
+    EltTy = NewTy;
+  }
 
   // Create the a comparison of src and dst, based on which we jump to either
   // the forward-copy part of the function (if src >= dst) or the backwards-copy
@@ -378,6 +477,14 @@ static void createMemMoveLoop(Instruction *InsertBefore, Value *SrcAddr,
 static void createMemSetLoop(Instruction *InsertBefore, Value *DstAddr,
                              Value *CopyLen, Value *SetValue, Align DstAlign,
                              bool IsVolatile) {
+  if (LowerToNonI8Type) {
+    Type *OpTy = determineUnderlyingType(SetValue->getType(), DstAddr);
+    if (OpTy != SetValue->getType())
+      if (auto *CI = dyn_cast<ConstantInt>(SetValue)) {
+        SetValue = emitBytePatternForType(OpTy, CI, *InsertBefore->getModule());
+      }
+  }
+
   Type *TypeOfCopyLen = CopyLen->getType();
   BasicBlock *OrigBB = InsertBefore->getParent();
   Function *F = OrigBB->getParent();

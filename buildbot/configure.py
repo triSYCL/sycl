@@ -35,6 +35,7 @@ def do_configure(args):
     sycl_build_pi_esimd_emulator = 'OFF'
     sycl_build_pi_hip = 'OFF'
     sycl_build_pi_hip_platform = 'AMD'
+    sycl_build_pi_xrt = 'OFF'
     sycl_clang_extra_flags = ''
     sycl_werror = 'ON'
     llvm_enable_assertions = 'ON'
@@ -50,7 +51,7 @@ def do_configure(args):
     if args.arm:
         llvm_targets_to_build = 'ARM;AArch64'
 
-    if args.enable_esimd_cpu_emulation:
+    if args.enable_esimd_emulator:
         sycl_build_pi_esimd_emulator = 'ON'
 
     if args.cuda or args.hip:
@@ -66,8 +67,6 @@ def do_configure(args):
         if args.hip_platform == 'AMD':
             llvm_targets_to_build += ';AMDGPU'
             libclc_targets_to_build += libclc_amd_target_names
-            if args.hip_amd_arch:
-                sycl_clang_extra_flags += "-Xsycl-target-backend=amdgcn-amd-amdhsa --offload-arch="+args.hip_amd_arch
 
             # The HIP plugin for AMD uses lld for linking
             llvm_enable_projects += ';lld'
@@ -78,6 +77,9 @@ def do_configure(args):
 
         sycl_build_pi_hip_platform = args.hip_platform
         sycl_build_pi_hip = 'ON'
+
+    if args.xrt:
+        sycl_build_pi_xrt = 'ON'
 
     if args.no_werror:
         sycl_werror = 'OFF'
@@ -103,8 +105,8 @@ def do_configure(args):
         print("# Default CI configuration will be applied. #")
         print("#############################################")
 
-        # For clang-format and clang-tidy
-        llvm_enable_projects += ";clang-tools-extra"
+        # For clang-format, clang-tidy and code coverage
+        llvm_enable_projects += ";clang-tools-extra;compiler-rt"
         # libclc is required for CI validation
         if 'libclc' not in llvm_enable_projects:
             llvm_enable_projects += ';libclc'
@@ -138,6 +140,7 @@ def do_configure(args):
         "-DSYCL_BUILD_PI_CUDA={}".format(sycl_build_pi_cuda),
         "-DSYCL_BUILD_PI_HIP={}".format(sycl_build_pi_hip),
         "-DSYCL_BUILD_PI_HIP_PLATFORM={}".format(sycl_build_pi_hip_platform),
+        "-DSYCL_BUILD_PI_XRT={}".format(sycl_build_pi_xrt),
         "-DLLVM_BUILD_TOOLS=ON",
         "-DSYCL_ENABLE_WERROR={}".format(sycl_werror),
         "-DCMAKE_INSTALL_PREFIX={}".format(install_dir),
@@ -209,11 +212,11 @@ def main():
     parser.add_argument("-t", "--build-type",
                         metavar="BUILD_TYPE", default="Release", help="build type: Debug, Release")
     parser.add_argument("--cuda", action='store_true', help="switch from OpenCL to CUDA")
+    parser.add_argument("--xrt", action='store_true', help="switch from OpenCL to XRT")
     parser.add_argument("--hip", action='store_true', help="switch from OpenCL to HIP")
     parser.add_argument("--hip-platform", type=str, choices=['AMD', 'NVIDIA'], default='AMD', help="choose hardware platform for HIP backend")
-    parser.add_argument("--hip-amd-arch", type=str, help="Sets AMD gpu architecture for llvm lit tests, this is only needed for the HIP backend and AMD platform")
     parser.add_argument("--arm", action='store_true', help="build ARM support rather than x86")
-    parser.add_argument("--enable-esimd-cpu-emulation", action='store_true', help="build with ESIMD_CPU emulation support")
+    parser.add_argument("--enable-esimd-emulator", action='store_true', help="build with ESIMD emulation support")
     parser.add_argument("--no-assertions", action='store_true', help="build without assertions")
     parser.add_argument("--docs", action='store_true', help="build Doxygen documentation")
     parser.add_argument("--no-werror", action='store_true', help="Don't treat warnings as errors")
