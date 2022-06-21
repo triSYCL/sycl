@@ -170,7 +170,7 @@ else:
     # if getDeviceCount("gpu", "cuda")[1]:
     #     lit_config.note("found secondary cuda target")
     #     config.available_features.add("has_secondary_cuda")
-    required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_SDX', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]
+    required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', "XILINX_VITIS"]
     has_error=False
     lit_config.note(f"XILINX_HLS={os.environ['XILINX_HLS']}")
     config.available_features.add("xocc")
