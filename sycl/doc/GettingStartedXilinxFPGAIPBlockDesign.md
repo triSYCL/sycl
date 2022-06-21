@@ -48,7 +48,7 @@ Otherwise you will need to make a setup.sh script like this:
 # The place where SYCL has been compiled:
 SYCL_HOME=~/sycl_workspace
 # Fill the version
-XILINX_VERSION=2021.2
+XILINX_VERSION=2022.1
 # Where all the AMD/Xilinx tools are
 XILINX_ROOT=/opt/xilinx
 # Where the SYCL compiler binaries are:
