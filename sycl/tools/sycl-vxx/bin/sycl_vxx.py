@@ -42,6 +42,7 @@ import tempfile
 # and some more control-flow optimizations than strictly necessary.
 # Some more minimization is probably possible
 VXX_PassPipeline = [
+"-lower-sycl-metadata",
 "-preparesycl",
 "-loop-unroll",
 "-lower-expect",
@@ -240,6 +241,16 @@ class VXXVersion:
     def __str__(self) -> str:
         return f"{self.major}.{self.minor}"
 
+    def get_correct_opt_args(self):
+        options = [
+            ("--sycl-vxx-array-partition-mode-arg", 2022, 2),
+            ("--sycl-kernel-propgen-maxi-extra-arg", 2022, 2)
+        ]
+        def keep_opt_4_cur_ver(opt_record):
+            _, maj, min = opt_record
+            return maj > self.major or (maj == self.major and min >= self.minor)
+        return (opt for opt, _, _ in filter(keep_opt_4_cur_ver, options))
+
 class VXXBinary:
     def __init__(self, execname):
         p = shutil.which(execname)
@@ -328,8 +339,9 @@ class VitisCompilationDriver:
             self.tmpdir /
             f"{outstem}-kernels-prepared.bc"
         )
-        opt_options = ["--sycl-vxx", "--sroa-vxx-conservative", "--lower-mem-intr-to-llvm-type"]
+        opt_options = ["--sycl-vxx", "--sroa-vxx-conservative", "--lower-mem-intr-to-llvm-type", "--lower-mem-intr-unroll-count=1", "--unroll-only-when-forced"]
         opt_options.extend(VXX_PassPipeline)
+        opt_options.extend(self.vitis_version.get_correct_opt_args())
         opt_options.extend(["-inSPIRation", "-o", f"{prepared_bc}"])
 
         opt = self.clang_path / "opt"
@@ -381,10 +393,10 @@ class VitisCompilationDriver:
 
         kernel_prop_opt = ["-kernelPropGen",
                            "--sycl-kernel-propgen-output", f"{kernel_prop}"]
-
+        kernel_prop_opt.extend(self.vitis_version.get_correct_opt_args())
         opt_options = [
             "--lower-delayed-sycl-metadata", "-lower-sycl-metadata", "-globaldce",
-            "--sycl-vxx", "--sycl-prepare-after-O3", "-S", "-preparesycl", "-loop-unroll",
+            "--sycl-vxx", "--sycl-prepare-after-O3", "-S", "-preparesycl", "-loop-unroll", "--unroll-only-when-forced",
             *kernel_prop_opt,
             "-globaldce",
             "-strip-debug",

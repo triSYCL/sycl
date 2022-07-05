@@ -1,0 +1,20 @@
+//==--------- xrt_alloc.hpp - SYCL XRT Allocator ---------------------------==//
+//
+// Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
+// See https://llvm.org/LICENSE.txt for license information.
+// SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+//
+//===----------------------------------------------------------------------===//
+
+#pragma once
+
+__SYCL_INLINE_NAMESPACE(cl) {
+namespace sycl::ext::xilinx {
+
+struct xrt_alloc : public aligned_allocator<char> {
+  xrt_alloc() : aligned_allocator<char>(4096) {
+  }
+};
+
+}
+}
