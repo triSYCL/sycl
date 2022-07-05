@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
@@ -10,13 +10,13 @@
   information.
 */
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <iostream>
 #include <numeric>
 #include <vector>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 template <int Dimensions, class kernel_name>
 void gen_nd_range(range<Dimensions> k_range) {

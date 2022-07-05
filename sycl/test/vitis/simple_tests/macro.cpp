@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: %clang -fsycl -fsycl-targets=fpga64_hls_sw_emu -dM -E %s 2>&1 | FileCheck -check-prefix=CHECK-MACRO-COMMON -check-prefix=CHECK-MACRO-SW_EMU %s
 // env XCL_EMULATION_MODE=hls_sw_emu %clang -fsycl -fsycl-targets=fpga64 -dM -E %s 2>&1 | FileCheck -check-prefix=CHECK-MACRO-COMMON -check-prefix=CHECK-MACRO-SW_EMU %s

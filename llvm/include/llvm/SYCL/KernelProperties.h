@@ -66,7 +66,9 @@ private:
   SmallVector<MAXIBundle, 8> Bundles;
 
 public:
-  static bool isArgBuffer(Argument* Arg, bool SyclHLSFlow);
+  /// Return true iff Arg represents a buffer in the OpenCL sense equivalent to
+  /// a SYCL accessor's pointer on the data
+  static bool isArgBuffer(Argument *Arg, bool SyclHLSFlow);
   KernelProperties(Function &F, bool SyclHlsFlow);
   KernelProperties(KernelProperties &) = delete;
 

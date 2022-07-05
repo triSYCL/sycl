@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis && !vitis_cpu
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
@@ -21,11 +21,11 @@
   be undefined.
 */
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <iostream>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 int main() {
   queue q;
@@ -48,7 +48,7 @@ int main() {
   
   q.submit([&](handler &cgh) {
     auto wb = ob.get_access<access::mode::write>(cgh);
-    cgh.single_task<class add>([=]() {
+    cgh.single_task<class add>([=] {
 #ifdef __SYCL_SPIR_DEVICE__
       wb[0] = 1;
 #else

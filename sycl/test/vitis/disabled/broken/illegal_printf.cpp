@@ -1,9 +1,9 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: true
 // TODO Move to Sema
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 
 /*
@@ -16,7 +16,7 @@
   emulation for Xilinx FPGA, but not on Intel CPU/GPU devices)
 */
 
-using namespace cl::sycl;
+using namespace sycl;
 
 class are_you_broken;
 
@@ -25,7 +25,7 @@ int main() {
 
   auto e = q.submit([&](handler &cgh) {
     int w = 512;
-    cgh.single_task<are_you_broken>([=]() {
+    cgh.single_task<are_you_broken>([=] {
       printf("%d \n", w);
     });
   });

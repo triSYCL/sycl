@@ -1,10 +1,10 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 #include <boost/hana.hpp>
 #include <iostream>
@@ -12,7 +12,7 @@
 // This test cases showcases a boost hana / SYCL kernel IR issue it should be
 // compiled with: -Xclang -fsycl-allow-func-ptr, otherwise Clang diagnostics
 // will diagnose errors
-using namespace cl::sycl;
+using namespace sycl;
 
 constexpr size_t N = 5;
 

@@ -6,29 +6,29 @@
 
 #ifdef FILE1
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 void test();
 
 int main() {
   test();
-  cl::sycl::buffer<cl::sycl::cl_int, 1> Buffer(4);
-  cl::sycl::queue Queue{sycl::accelerator_selector{}};
-  cl::sycl::range<1> NumOfWorkItems{Buffer.size()};
-  Queue.submit([&](cl::sycl::handler &cgh) {
+  sycl::buffer<sycl::cl_int, 1> Buffer(4);
+  sycl::queue Queue;
+  sycl::range<1> NumOfWorkItems{Buffer.size()};
+  Queue.submit([&](sycl::handler &cgh) {
     sycl::accessor Accessor(Buffer, cgh, sycl::write_only);
     cgh.single_task<class Test1>([=] { Accessor[0] = 0; });
   });
 }
 #else
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 void test() {
-  cl::sycl::buffer<cl::sycl::cl_int, 1> Buffer(4);
-  cl::sycl::queue Queue{sycl::accelerator_selector{}};
-  cl::sycl::range<1> NumOfWorkItems{Buffer.size()};
-  Queue.submit([&](cl::sycl::handler &cgh) {
+  sycl::buffer<sycl::cl_int, 1> Buffer(4);
+  sycl::queue Queue;
+  sycl::range<1> NumOfWorkItems{Buffer.size()};
+  Queue.submit([&](sycl::handler &cgh) {
     sycl::accessor Accessor(Buffer, cgh, sycl::write_only);
     cgh.single_task<class Test2>(
         [=] { Accessor[0] = 0; });

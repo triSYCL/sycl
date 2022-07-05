@@ -118,6 +118,49 @@ struct KernelPropGenState {
     return {};
   }
 
+  struct PipeEndpoint {
+    /// Name of the kernel function in IR.
+    StringRef Kernel;
+    /// Name of the pipe function argument in IR.
+    StringRef Arg;
+  };
+  struct PipeProp {
+    /// Depth it defaults to -1 to indicate it is unset
+    int Depth = -1;
+    PipeEndpoint write;
+    PipeEndpoint read;
+  };
+
+  /// Pipes are matched in read and write pairs by their ID. Their ID is a
+  /// string matching the name of the global variable Intel uses to identify its
+  /// pipes
+  StringMap<PipeProp> PipeConnections;
+
+  void collectPipeConnections(Module &M) {
+    for (auto &F : M.functions())
+      if (sycl::isKernelFunc(&F))
+        for (auto &Arg : F.args())
+          if (sycl::isPipe(&Arg)) {
+            /// Build the endpoint for this pipe
+            PipeEndpoint endPoint{F.getName(), Arg.getName()};
+            PipeProp &Prop = PipeConnections[sycl::getPipeID(&Arg)];
+
+            /// Figure out the correct endpoint to write to
+            PipeEndpoint &mapEndPoint =
+                sycl::isReadPipe(&Arg) ? Prop.read : Prop.write;
+            assert(mapEndPoint.Arg.empty() && mapEndPoint.Kernel.empty() &&
+                   "multiple reader or writers");
+            mapEndPoint = endPoint;
+
+            /// If the Depth is unset, set it
+            if (Prop.Depth == -1)
+              Prop.Depth = sycl::getPipeDepth(&Arg);
+
+            assert(sycl::getPipeDepth(&Arg) == Prop.Depth &&
+                   "read and write depth not matching");
+          }
+  }
+
   /// Print in O the property file for all kernels of M
   void generateProperties(Module &M, llvm::raw_fd_ostream &O) {
     json::OStream J(O, 2);
@@ -125,11 +168,26 @@ struct KernelPropGenState {
     bool SyclHlsFlow = Triple(M.getTargetTriple()).isXilinxHLS();
     bool VitisHlsFlow = Triple(M.getTargetTriple()).getArch() == llvm::Triple::vitis_ip;
 
+    collectPipeConnections(M);
+
     J.objectBegin();
+    J.attributeBegin("pipe_connections");
+    J.arrayBegin();
+    for (auto& Elem : PipeConnections) {
+      J.objectBegin();
+      J.attribute("writer_kernel", Elem.second.write.Kernel);
+      J.attribute("writer_arg", Elem.second.write.Arg);
+      J.attribute("reader_kernel", Elem.second.read.Kernel);
+      J.attribute("reader_arg", Elem.second.read.Arg);
+      J.attribute("depth", Elem.second.Depth);
+      J.objectEnd();
+    }
+    J.arrayEnd();
+    J.attributeEnd();
     J.attributeBegin("kernels");
     J.arrayBegin();
     for (auto &F : M.functions()) {
-      if (isKernelFunc(&F)) {
+      if (sycl::isKernelFunc(&F)) {
         KernelProperties KProp(F, SyclHlsFlow);
         J.objectBegin();
         J.attribute("name", F.getName());
@@ -162,8 +220,14 @@ struct KernelPropGenState {
         J.attributeBegin("arg_bundle_mapping");
         J.arrayBegin();
         for (auto &Arg : F.args()) {
-          if (!VitisHlsFlow &&
-              KernelProperties::isArgBuffer(&Arg, SyclHlsFlow)) {
+          if (VitisHlsFlow)
+            continue;
+          /// Vitis's clang doesn't support string attributes on arguments which
+          /// we use to annotate a pipe, so we remove it here. But we could
+          /// remove them in the downgrader instead too.
+          if (sycl::isPipe(&Arg))
+            sycl::removePipeAnnotation(&Arg);
+          else if (KernelProperties::isArgBuffer(&Arg, SyclHlsFlow)) {
             // This currently forces a default assignment of DDR banks to 0
             // as some platforms have different Default DDR banks and buffers
             // default to DDR Bank 0. Perhaps it is possible to query the

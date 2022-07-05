@@ -1,5 +1,4 @@
-/* REQUIRES: xocc
-   REQUIRES: xocc
+/* REQUIRES: vitis
 
    RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
    RUN: %clangxx -fsycl -fsycl-unnamed-lambda -std=c++20 -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out  
@@ -18,7 +17,7 @@
 #include <boost/hana.hpp>
 
 #include <sycl/ext/xilinx/fpga.hpp>
-#include <sycl/sycl.hpp>
+#include <sycl.hpp>
 
 using namespace boost::hana::literals;
 

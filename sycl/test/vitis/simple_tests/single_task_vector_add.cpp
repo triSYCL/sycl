@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
@@ -9,12 +9,12 @@
 /*
    A simple typical FPGA-like kernel adding 2 vectors
 */
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <iostream>
 #include <numeric>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 constexpr size_t N = 300;
 using Type = int;

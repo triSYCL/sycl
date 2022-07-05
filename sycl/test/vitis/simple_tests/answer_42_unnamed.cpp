@@ -1,10 +1,10 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -fsycl -fsycl-unnamed-lambda -std=c++20 -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
 // RUN: %ACC_RUN_PLACEHOLDER  %t.dir/exec.out
 
-#include <sycl/sycl.hpp>
+#include <sycl.hpp>
 #include <iostream>
 
 

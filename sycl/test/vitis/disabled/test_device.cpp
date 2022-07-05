@@ -1,7 +1,7 @@
 // Test that a single SYCL application can target the host CPU,
 // a Xilinx FPGA device and a CUDA GPU.
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 template<typename S>
 struct FillBuffer {};

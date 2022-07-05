@@ -2,7 +2,7 @@
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out -Xsycl-target-frontend -fno-exceptions
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <variant>
 
 

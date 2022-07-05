@@ -9,12 +9,6 @@
 /// \file
 /// This file contains a class expressing arrays that can be partitioned.
 ///
-/// \todo While Xilinx xocc supports multidimensional C arrays, the
-/// current implementation only support 1-dim array partition.
-///    .
-/// \todo Extend this with multidimensional C++ arrays, such as with future
-/// mdspan C++20 syntax.
-///
 //===----------------------------------------------------------------------===//
 
 #ifndef SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP

@@ -333,10 +333,10 @@ struct VXXIRDowngrader {
 
   bool runOnModule(Module &M) {
     resetByVal(M);
-    llvm::removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
-                               Attribute::ImmArg, Attribute::NoSync,
-                               Attribute::MustProgress, Attribute::NoUndef,
-                               Attribute::StructRet, Attribute::NoCallback});
+    llvm::sycl::removeAttributes(
+        M, {Attribute::WillReturn, Attribute::NoFree, Attribute::ImmArg,
+            Attribute::NoSync, Attribute::MustProgress, Attribute::NoUndef,
+            Attribute::StructRet, Attribute::NoCallback});
     removeAnnotations(M);
     renameBasicBlocks(M);
     removeFreezeInst(M);

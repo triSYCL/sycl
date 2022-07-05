@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
@@ -6,7 +6,7 @@
 
 /*
   This test is similar to id_mangle.cpp in that it's mostly for testing the
-  correct generation of SPIR built-ins when compiling for xocc. Incorrect
+  correct generation of SPIR built-ins when compiling for Vitis HLS. Incorrect
   generation can result in linker errors, run-time ABI errors or incorrect
   output.
 
@@ -15,11 +15,11 @@
   problems that Intel plan to fix.
 */
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <iostream>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 class math_mangle;
 
@@ -35,22 +35,22 @@ int main(int argc, char* argv[]) {
   q.submit([&](handler &cgh) {
     auto wb = test_buffer.get_access<access::mode::write>(cgh);
 
-    cgh.single_task<math_mangle>([=]() {
-      wb[0] = cl::sycl::sqrt(10.0f);
-      wb[1] = cl::sycl::fabs(-10.0f);
-      wb[2] = cl::sycl::sin(10.0f);
-      wb[3] = cl::sycl::max(10, 12);
-      wb[4] = cl::sycl::min(10, 12);
-      wb[5] = cl::sycl::floor(10.2f);
-      wb[6] = cl::sycl::ceil(10.2f);
-      wb[7] = cl::sycl::exp(10.2f);
-      wb[8] = cl::sycl::log(10.2f);
-      wb[9] = cl::sycl::fmin(10.2f, 10.0f);
-      wb[10] = cl::sycl::fmax(10.2f, 10.0f);
-      wb[11] = cl::sycl::cos(10.2f);
+    cgh.single_task<math_mangle>([=] {
+      wb[0] = sycl::sqrt(10.0f);
+      wb[1] = sycl::fabs(-10.0f);
+      wb[2] = sycl::sin(10.0f);
+      wb[3] = sycl::max(10, 12);
+      wb[4] = sycl::min(10, 12);
+      wb[5] = sycl::floor(10.2f);
+      wb[6] = sycl::ceil(10.2f);
+      wb[7] = sycl::exp(10.2f);
+      wb[8] = sycl::log(10.2f);
+      wb[9] = sycl::fmin(10.2f, 10.0f);
+      wb[10] = sycl::fmax(10.2f, 10.0f);
+      wb[11] = sycl::cos(10.2f);
 
       // not working, unsure why at the moment, has correct mangling in llvm ir
-      // wb[12] = cl::sycl::mad(10.2f, 11.0f, 12.0f)
+      // wb[12] = sycl::mad(10.2f, 11.0f, 12.0f)
 
   });
 });

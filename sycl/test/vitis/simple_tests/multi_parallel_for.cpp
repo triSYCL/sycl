@@ -1,4 +1,4 @@
-// REQUIRES: xocc
+// REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
@@ -9,13 +9,13 @@
   appropriately.
 */
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <iostream>
 #include <numeric>
 #include <vector>
 
 
-using namespace cl::sycl;
+using namespace sycl;
 
 template <int Dimensions, class kernel_name>
 void gen_nd_range(range<Dimensions> k_range, queue q) {
@@ -54,9 +54,9 @@ void gen_nd_range(range<Dimensions> k_range, queue q) {
 */
 // This test does not deal with duplicate kernel names, it was to test the
 // ability to extract all the kernels from a file that contained multiple
-// kernels in the one translation unit when using xocc (xpirbc consumption path
-// doesn't allow you to pass -k all, each kernel needs to be compiled and linked
-// separately before being linked together).
+// kernels in the translation unit when using Vitis HLS (xpirbc consumption
+// path doesn't allow you to pass -k all, each kernel needs to be compiled and
+// linked separately before being linked together).
 int main(int argc, char *argv[]) {
   queue q;
 
