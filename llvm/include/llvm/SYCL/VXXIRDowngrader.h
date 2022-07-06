@@ -16,11 +16,17 @@
 #define LLVM_SYCL_VXX_IR_DOWNGRADER_H
 
 #include "llvm/IR/Module.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
 
 namespace llvm {
 
-ModulePass *createVXXIRDowngraderPass();
+class VXXIRDowngraderPass : public PassInfoMixin<VXXIRDowngraderPass> {
+public:
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
+};
+
+ModulePass *createVXXIRDowngraderLegacyPass();
 
 }
 

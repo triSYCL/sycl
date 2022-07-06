@@ -34,6 +34,7 @@ list(APPEND SYCL_TEST_DEPS
   get_device_count_by_type
   llvm-config
   llvm-cxxdump
+  llvm-dis
   llvm-readobj
   )
 
@@ -68,45 +69,49 @@ add_lit_testsuite(check-sycl-vitis-cpu "Running the SYCL vitis regression test o
   )
 set_target_properties(check-sycl-vitis-cpu PROPERTIES FOLDER "SYCL tests")
 
-add_lit_testsuite(check-sycl-vitis "Running the SYCL regression tests for sycl-vitis hw_emu"
+add_lit_testsuite(check-sycl-vitis-opencl "Running the SYCL regression tests for sycl-vitis hw_emu"
   ${CMAKE_CURRENT_BINARY_DIR}/vitis
   ARGS ${RT_TEST_ARGS}
   PARAMS "VITIS=only;SYCL_TRIPLE=fpga64_hls_hw_emu-xilinx-linux;SYCL_PLUGIN=opencl"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )
-set_target_properties(check-sycl-vitis PROPERTIES FOLDER "SYCL tests")
+set_target_properties(check-sycl-vitis-opencl PROPERTIES FOLDER "SYCL tests")
 
-add_lit_testsuite(check-sycl-xrt "Running the SYCL regression tests for sycl-vitis hw_emu"
+add_lit_testsuite(check-sycl-vitis-xrt "Running the SYCL regression tests for sycl-vitis hw_emu"
   ${CMAKE_CURRENT_BINARY_DIR}/vitis
   ARGS ${RT_TEST_ARGS}
   PARAMS "VITIS=only;SYCL_TRIPLE=fpga64_hls_hw_emu-xilinx-linux;SYCL_PLUGIN=xrt"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )
-set_target_properties(check-sycl-xrt PROPERTIES FOLDER "SYCL tests")
+set_target_properties(check-sycl-vitis-xrt PROPERTIES FOLDER "SYCL tests")
 
-add_lit_testsuite(check-sycl-vitis-hw "Running the SYCL regression tests for sycl-vitis hw"
+add_lit_testsuite(check-sycl-vitis-opencl-hw "Running the SYCL regression tests for sycl-vitis hw"
   ${CMAKE_CURRENT_BINARY_DIR}/vitis
   ARGS ${RT_TEST_ARGS}
   PARAMS "VITIS=only;SYCL_TRIPLE=fpga64_hls_hw-xilinx-linux;SYCL_PLUGIN=opencl"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )
-set_target_properties(check-sycl-vitis PROPERTIES FOLDER "SYCL tests")
+set_target_properties(check-sycl-vitis-opencl-hw PROPERTIES FOLDER "SYCL tests")
 
-add_lit_testsuite(check-sycl-xrt-hw "Running the SYCL regression tests for sycl-vitis hw"
+add_lit_testsuite(check-sycl-vitis-xrt-hw "Running the SYCL regression tests for sycl-vitis hw"
   ${CMAKE_CURRENT_BINARY_DIR}/vitis
   ARGS ${RT_TEST_ARGS}
   PARAMS "VITIS=only;SYCL_TRIPLE=fpga64_hls_hw-xilinx-linux;SYCL_PLUGIN=xrt"
   DEPENDS ${SYCL_TEST_DEPS}
   EXCLUDE_FROM_CHECK_ALL
   )
-set_target_properties(check-sycl-xrt PROPERTIES FOLDER "SYCL tests")
+set_target_properties(check-sycl-vitis-xrt-hw PROPERTIES FOLDER "SYCL tests")
 
 add_custom_target(check-sycl)
 add_dependencies(check-sycl check-sycl-spirv)
 set_target_properties(check-sycl PROPERTIES FOLDER "SYCL tests")
+
+if (TARGET check-all)
+  add_dependencies(check-all check-sycl)
+endif()
 
 if(SYCL_BUILD_PI_CUDA)
   add_lit_testsuite(check-sycl-ptx "Running device-agnostic SYCL regression tests for NVidia PTX"

@@ -74,7 +74,7 @@ VXX_PassPipeline = [
 "-licm",
 "-loop-rotate",
 "-licm",
-"-loop-unswitch",
+"-simple-loop-unswitch",
 "-simplifycfg",
 "-loop-simplify",
 "-lcssa",

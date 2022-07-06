@@ -1119,9 +1119,9 @@ Note that the SPIR compilation flow has been discontinued.
   ```bash
   cd $SYCL_HOME/llvm/build
   # Running tests with the OpenCL backend
-  cmake --build . --parallel `nproc` --target check-sycl-vitis
+  cmake --build . --parallel `nproc` --target check-sycl-vitis-opencl
   # Running tests with the XRT backend
-  cmake --build . --parallel `nproc` --target check-sycl-xrt
+  cmake --build . --parallel `nproc` --target check-sycl-vitis-xrt
   ```
 
 This takes usually 45-60 minutes with a good CPU.
@@ -1131,9 +1131,9 @@ This takes usually 45-60 minutes with a good CPU.
   ```bash
   cd $SYCL_HOME/llvm/build
   # Running tests with the OpenCL backend
-  cmake --build . --parallel `nproc` --target check-sycl-vitis-hw
+  cmake --build . --parallel `nproc` --target check-sycl-vitis-opencl-hw
   # Running tests with the XRT backend
-  cmake --build . --parallel `nproc` --target check-sycl-xrt-hw
+  cmake --build . --parallel `nproc` --target check-sycl-vitis-xrt-hw
   ```
 
 This takes usually 10+ hours.

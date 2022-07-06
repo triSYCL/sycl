@@ -7,6 +7,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "clang-pseudo/Token.h"
+#include "clang/Basic/IdentifierTable.h"
 #include "clang/Basic/SourceLocation.h"
 #include "clang/Basic/TokenKinds.h"
 #include "clang/Lex/Lexer.h"
@@ -40,18 +41,18 @@ TokenStream lex(const std::string &Code, const clang::LangOptions &LangOpts) {
 
     // Update current line number and indentation from raw source code.
     unsigned NewLineStart = 0;
-    for (unsigned i = LastOffset; i < Offset; ++i) {
-      if (Code[i] == '\n') {
-        NewLineStart = i + 1;
+    for (unsigned I = LastOffset; I < Offset; ++I) {
+      if (Code[I] == '\n') {
+        NewLineStart = I + 1;
         ++Line;
       }
     }
     if (NewLineStart || !LastOffset) {
       Indent = 0;
-      for (char c : StringRef(Code).slice(NewLineStart, Offset)) {
-        if (c == ' ')
+      for (char C : StringRef(Code).slice(NewLineStart, Offset)) {
+        if (C == ' ')
           ++Indent;
-        else if (c == '\t')
+        else if (C == '\t')
           Indent += 8;
         else
           break;
@@ -98,9 +99,21 @@ TokenStream cook(const TokenStream &Code, const LangOptions &LangOpts) {
       Tok.Length = Text.size();
       Tok.Flags &= ~static_cast<decltype(Tok.Flags)>(LexFlags::NeedsCleaning);
     }
-    // Cook raw_identifiers into identifier, keyword, etc.
-    if (Tok.Kind == tok::raw_identifier)
+
+    if (Tok.Kind == tok::raw_identifier) {
+      // Cook raw_identifiers into identifier, keyword, etc.
       Tok.Kind = Identifiers.get(Tok.text()).getTokenID();
+    } else if (Tok.Kind == tok::greatergreater) {
+      // Split the greatergreater token.
+      // FIXME: split lessless token to support Cuda triple angle brackets <<<.
+      assert(Tok.text() == ">>");
+      Tok.Kind = tok::greater;
+      Tok.Length = 1;
+      Result.push(Tok);
+      // Line is wrong if the first greater is followed by an escaped newline!
+      Tok.Data = Tok.text().data() + 1;
+    }
+
     Result.push(std::move(Tok));
   }
 

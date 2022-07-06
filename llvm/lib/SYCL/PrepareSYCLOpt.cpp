@@ -40,11 +40,7 @@ namespace {
 
 cl::opt<bool> AfterO3("sycl-prepare-after-O3", cl::Hidden, cl::init(false));
 
-struct PrepareSYCLOpt : public ModulePass {
-
-  static char ID; // Pass identification, replacement for typeid
-
-  PrepareSYCLOpt() : ModulePass(ID) {}
+struct PrepareSYCLOptState {
 
   inline bool isKernel(Function &F) {
     // Kernel are first detected with the SPIR_KERNEL CC.
@@ -234,7 +230,7 @@ struct PrepareSYCLOpt : public ModulePass {
     }
   }
 
-  bool runOnModule(Module &M) override {
+  bool runOnModule(Module &M) {
     // When using the HLS flow instead of SPIR default
     bool SyclHLSFlow = Triple(M.getTargetTriple()).isXilinxHLS();
     unwrapFPGAProperties(M);
@@ -255,14 +251,35 @@ struct PrepareSYCLOpt : public ModulePass {
     return true;
   }
 };
-} // namespace
 
-namespace llvm {
-void initializePrepareSYCLOptPass(PassRegistry &Registry);
+void runPrepareSYCLOpt(Module &M) {
+  PrepareSYCLOptState State;
+  State.runOnModule(M);
 }
 
-INITIALIZE_PASS(PrepareSYCLOpt, "preparesycl",
-                "prepare SYCL device code to optimizations", false, false)
-ModulePass *llvm::createPrepareSYCLOptPass() { return new PrepareSYCLOpt(); }
+} // namespace
 
-char PrepareSYCLOpt::ID = 0;
+PreservedAnalyses PrepareSYCLOptPass::run(Module &M,
+                                          ModuleAnalysisManager &AM) {
+  runPrepareSYCLOpt(M);
+  return PreservedAnalyses::none();
+}
+
+struct PrepareSYCLOptLegacy : public ModulePass {
+  static char ID; // Pass identification, replacement for typeid
+  PrepareSYCLOptLegacy() : ModulePass(ID) {}
+  bool runOnModule(Module &M) override {
+    runPrepareSYCLOpt(M);
+    return true;
+  }
+};
+
+namespace llvm {
+void initializePrepareSYCLOptLegacyPass(PassRegistry &Registry);
+}
+
+INITIALIZE_PASS(PrepareSYCLOptLegacy, "preparesycl",
+                "prepare SYCL device code to optimizations", false, false)
+ModulePass *llvm::createPrepareSYCLOptLegacyPass() { return new PrepareSYCLOptLegacy(); }
+
+char PrepareSYCLOptLegacy::ID = 0;

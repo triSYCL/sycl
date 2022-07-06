@@ -23,6 +23,7 @@ add_llvm_component_library(LLVMPasses
   ObjCARC
   Scalar
   Support
+  SYCL
   SYCLLowerIR
   Target
   TransformUtils

@@ -55,12 +55,8 @@ namespace {
 /// As a rule of thumb, if a pass to downgrade a part of the IR is added it
 /// should have the LLVM version and date of patch/patch (if possible) that it
 /// was added in so it can eventually be removed as v++ catches up
-struct VXXIRDowngrader : public ModulePass {
-
-  static char ID; // Pass identification, replacement for typeid
-
-  VXXIRDowngrader() : ModulePass(ID) {}
-
+struct VXXIRDowngrader {
+  
   /// Removes byval bitcode function parameter attribute that is applied to
   /// pointer arguments of functions to state that they should technically be
   /// passed by value.
@@ -335,12 +331,12 @@ struct VXXIRDowngrader : public ModulePass {
     Visitor.emit();
   }
 
-  bool runOnModule(Module &M) override {
+  bool runOnModule(Module &M) {
     resetByVal(M);
-    llvm::sycl::removeAttributes(M, {Attribute::WillReturn, Attribute::NoFree,
-                                     Attribute::ImmArg, Attribute::NoSync,
-                                     Attribute::MustProgress,
-                                     Attribute::NoUndef, Attribute::StructRet});
+    llvm::sycl::removeAttributes(
+        M, {Attribute::WillReturn, Attribute::NoFree, Attribute::ImmArg,
+            Attribute::NoSync, Attribute::MustProgress, Attribute::NoUndef,
+            Attribute::StructRet, Attribute::NoCallback});
     removeAnnotations(M);
     renameBasicBlocks(M);
     removeFreezeInst(M);
@@ -367,15 +363,36 @@ struct VXXIRDowngrader : public ModulePass {
   }
 };
 
+void runVXXIRDowngrader(Module& M) {
+  VXXIRDowngrader VID;
+  VID.runOnModule(M);
 }
+
+}
+
+PreservedAnalyses VXXIRDowngraderPass::run(Module &M, ModuleAnalysisManager &AM) {
+  runVXXIRDowngrader(M);
+  return PreservedAnalyses::none();
+}
+
+struct VXXIRDowngraderLegacy : public ModulePass {
+
+  static char ID; // Pass identification, replacement for typeid
+
+  VXXIRDowngraderLegacy() : ModulePass(ID) {}
+  bool runOnModule(Module &M) override {
+    runVXXIRDowngrader(M);
+    return true;
+  }
+};
 
 namespace llvm {
-void initializeVXXIRDowngraderPass(PassRegistry &Registry);
+void initializeVXXIRDowngraderLegacyPass(PassRegistry &Registry);
 }
 
-INITIALIZE_PASS(VXXIRDowngrader, "vxxIRDowngrader",
+INITIALIZE_PASS(VXXIRDowngraderLegacy, "vxxIRDowngrader",
   "pass that downgrades modern LLVM IR to something compatible with current v++"
   "backend LLVM IR", false, false)
-ModulePass *llvm::createVXXIRDowngraderPass() {return new VXXIRDowngrader();}
+ModulePass *llvm::createVXXIRDowngraderLegacyPass() {return new VXXIRDowngraderLegacy();}
 
-char VXXIRDowngrader::ID = 0;
+char VXXIRDowngraderLegacy::ID = 0;

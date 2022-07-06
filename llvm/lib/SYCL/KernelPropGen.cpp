@@ -62,11 +62,7 @@ enum SPIRAddressSpace {
 
 /// Retrieve the names and properties for all kernels in the module and place
 /// them into a file. Generates the vitis HLS IR for kernel interface control.
-struct KernelPropGen : public ModulePass {
-
-  static char ID; // Pass identification, replacement for typeid
-
-  KernelPropGen() : ModulePass(ID) {}
+struct KernelPropGenState {
 
   int getWriteStreamId(StringRef Path) {
     int FileFD = 0;
@@ -260,7 +256,7 @@ struct KernelPropGen : public ModulePass {
   }
 
   /// Visit all the functions of the module
-  bool runOnModule(Module &M) override {
+  bool runOnModule(Module &M) {
     llvm::raw_fd_ostream O(getWriteStreamId(KernelPropGenOutput),
                            true /*close in destructor*/);
 
@@ -273,15 +269,36 @@ struct KernelPropGen : public ModulePass {
   }
 };
 
+void runKernelPropGen(Module &M) {
+  KernelPropGenState S;
+  S.runOnModule(M);
+}
+
 } // namespace
 
+PreservedAnalyses KernelPropGenPass::run(Module &M, ModuleAnalysisManager &AM) {
+  runKernelPropGen(M);
+  return PreservedAnalyses::none();
+}
+
 namespace llvm {
-void initializeKernelPropGenPass(PassRegistry &Registry);
+void initializeKernelPropGenLegacyPass(PassRegistry &Registry);
 } // namespace llvm
 
-INITIALIZE_PASS(KernelPropGen, "kernelPropGen",
+struct KernelPropGenLegacy : public ModulePass {
+
+  static char ID; // Pass identification, replacement for typeid
+
+  KernelPropGenLegacy() : ModulePass(ID) {}
+  bool runOnModule(Module &M) override {
+    runKernelPropGen(M);
+    return true;
+  }
+};
+
+INITIALIZE_PASS(KernelPropGenLegacy, "kernelPropGen",
                 "pass that finds kernel names and places them into a text file",
                 false, false)
-ModulePass *llvm::createKernelPropGenPass() { return new KernelPropGen(); }
+ModulePass *llvm::createKernelPropGenLegacyPass() { return new KernelPropGenLegacy(); }
 
-char KernelPropGen::ID = 0;
+char KernelPropGenLegacy::ID = 0;

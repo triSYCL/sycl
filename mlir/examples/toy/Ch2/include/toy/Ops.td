@@ -135,7 +135,7 @@ def FuncOp : Toy_Op<"func", [
 
   let arguments = (ins
     SymbolNameAttr:$sym_name,
-    TypeAttrOf<FunctionType>:$type
+    TypeAttrOf<FunctionType>:$function_type
   );
   let regions = (region AnyRegion:$body);
 
@@ -149,10 +149,10 @@ def FuncOp : Toy_Op<"func", [
     //===------------------------------------------------------------------===//
 
     /// Returns the argument types of this function.
-    ArrayRef<Type> getArgumentTypes() { return getType().getInputs(); }
+    ArrayRef<Type> getArgumentTypes() { return getFunctionType().getInputs(); }
 
     /// Returns the result types of this function.
-    ArrayRef<Type> getResultTypes() { return getType().getResults(); }
+    ArrayRef<Type> getResultTypes() { return getFunctionType().getResults(); }
   }];
   let hasCustomAssemblyFormat = 1;
   let skipDefaultBuilders = 1;
@@ -276,7 +276,7 @@ def ReturnOp : Toy_Op<"return", [NoSideEffect, HasParent<"FuncOp">,
     the operation. For example:
 
     ```mlir
-      func @foo() -> tensor<2xf64> {
+      toy.func @foo() -> tensor<2xf64> {
         ...
         toy.return %0 : tensor<2xf64>
       }

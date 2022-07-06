@@ -369,6 +369,8 @@ AlignTokenSequence(const FormatStyle &Style, unsigned Start, unsigned End,
           if (Changes[i].Tok->MatchingParen &&
               Changes[i].Tok->MatchingParen->is(TT_LambdaLBrace))
             return false;
+          if (Changes[ScopeStart].NewlinesBefore > 0)
+            return false;
           return Style.BinPackArguments;
         }
 
@@ -396,6 +398,8 @@ AlignTokenSequence(const FormatStyle &Style, unsigned Start, unsigned End,
                 Changes[OuterScopeStart - 1].Tok->is(TT_LambdaLBrace))
               return false;
           }
+          if (Changes[ScopeStart].NewlinesBefore > 0)
+            return false;
           return true;
         }
 
@@ -1163,9 +1167,8 @@ void WhitespaceManager::alignArrayInitializersLeftJustified(
     auto Offset = std::distance(Cells.begin(), CellIter);
     for (const auto *Next = CellIter->NextColumnElement; Next != nullptr;
          Next = Next->NextColumnElement) {
-      if (RowCount > CellDescs.CellCounts.size()) {
+      if (RowCount > CellDescs.CellCounts.size())
         break;
-      }
       auto *Start = (Cells.begin() + RowCount * CellDescs.CellCounts[0]);
       auto *End = Start + Offset;
       auto ThisNetWidth = getNetWidth(Start, End, CellDescs.InitialSpaces);

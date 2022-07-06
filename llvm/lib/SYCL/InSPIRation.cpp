@@ -67,12 +67,7 @@ static const std::regex matchReqdWorkGroupSize{
 static const std::regex matchSomeNaturalInteger{R"(\d+)"};
 
 /// Transform the SYCL kernel functions into v++ SPIR-compatible kernels
-struct InSPIRation : public ModulePass {
-
-  static char ID; // Pass identification, replacement for typeid
-
-  InSPIRation() : ModulePass(ID) {}
-
+struct InSPIRationState {
   /// This function currently works by checking for certain prefixes, and
   /// removing them from the mangled name, this currently is used for
   /// get_global_id etc. (as we forcefully prefix it with __spir_ocl_), and
@@ -122,19 +117,6 @@ struct InSPIRation : public ModulePass {
       if (F->getName().startswith(Elem.first))
         return F->setName(Elem.second +
                           F->getName().drop_front(Elem.first.size()));
-  }
-
-  bool doInitialization(Module &M) override {
-    // LLVM_DEBUG(dbgs() << "Enter: " << M.getModuleIdentifier() << "\n\n");
-
-    // Do not change the code
-    return false;
-  }
-
-  bool doFinalization(Module &M) override {
-    // LLVM_DEBUG(dbgs() << "Exit: " << M.getModuleIdentifier() << "\n\n");
-    // Do not change the code
-    return false;
   }
 
   /// Do transforms on a SPIR function called by a SPIR kernel
@@ -270,7 +252,7 @@ struct InSPIRation : public ModulePass {
   /// However, it should be run prior to KernelPropGen as that
   /// pass relies on the kernel names generated here for now to fuel the driver
   /// script.
-  bool runOnModule(Module &M) override {
+  bool runOnModule(Module &M) {
     // funcCount is for naming new name for each function called in kernel
     int FuncCount = 0;
 
@@ -375,15 +357,36 @@ struct InSPIRation : public ModulePass {
   }
 };
 
-} // namespace
-
-namespace llvm {
-void initializeInSPIRationPass(PassRegistry &Registry);
+void runInSPIRation(Module &M) {
+  InSPIRationState S;
+  S.runOnModule(M);
 }
 
-INITIALIZE_PASS(InSPIRation, "inSPIRation",
+} // namespace
+
+PreservedAnalyses InSPIRationPass::run(Module &M, ModuleAnalysisManager &AM) {
+  runInSPIRation(M);
+  return PreservedAnalyses::none();
+}
+
+struct InSPIRationLegacy : public ModulePass {
+
+  static char ID; // Pass identification, replacement for typeid
+
+  InSPIRationLegacy() : ModulePass(ID) {}
+  bool runOnModule(Module &M) override {
+    runInSPIRation(M);
+    return true;
+  }
+};
+
+namespace llvm {
+  void initializeInSPIRationLegacyPass(PassRegistry & Registry);
+}
+
+INITIALIZE_PASS(InSPIRationLegacy, "inSPIRation",
                 "pass to make functions and kernels SPIR-compatible", false,
                 false)
-ModulePass *llvm::createInSPIRationPass() { return new InSPIRation(); }
+ModulePass *llvm::createInSPIRationLegacyPass() { return new InSPIRationLegacy(); }
 
-char InSPIRation::ID = 0;
+char InSPIRationLegacy::ID = 0;
