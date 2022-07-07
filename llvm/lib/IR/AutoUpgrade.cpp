@@ -1005,6 +1005,9 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
       return true;
   }
 
+  if (F->getIntrinsicID() == Intrinsic::not_intrinsic)
+      return false;
+
   auto *ST = dyn_cast<StructType>(F->getReturnType());
   if (ST && (!ST->isLiteral() || ST->isPacked())) {
     // Replace return type with literal non-packed struct. Only do this for

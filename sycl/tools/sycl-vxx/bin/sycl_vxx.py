@@ -246,10 +246,10 @@ class VXXVersion:
             ("--sycl-vxx-array-partition-mode-arg", 2022, 2),
             ("--sycl-kernel-propgen-maxi-extra-arg", 2022, 2)
         ]
-        def keep_opt_4_cur_ver(opt_record):
+        def should_add_option(opt_record):
             _, maj, min = opt_record
             return maj > self.major or (maj == self.major and min >= self.minor)
-        return (opt for opt, _, _ in filter(keep_opt_4_cur_ver, options))
+        return (opt for opt, _, _ in filter(should_add_option, options))
 
 class VXXBinary:
     def __init__(self, execname):
@@ -337,9 +337,9 @@ class VitisCompilationDriver:
         outstem = self.outstem
         prepared_bc = (
             self.tmpdir /
-            f"{outstem}-kernels-prepared.bc"
+            f"{outstem}-kernels-prepared.ll"
         )
-        opt_options = ["--sycl-vxx", "--sroa-vxx-conservative", "--lower-mem-intr-to-llvm-type", "--lower-mem-intr-unroll-count=1", "--unroll-only-when-forced"]
+        opt_options = ["-S", "--sycl-vxx", "--sroa-vxx-conservative", "--lower-mem-intr-to-llvm-type", "--lower-mem-intr-unroll-count=1", "--unroll-only-when-forced"]
         opt_options.extend(VXX_PassPipeline)
         opt_options.extend(self.vitis_version.get_correct_opt_args())
         opt_options.extend(["-inSPIRation", "-o", f"{prepared_bc}"])
@@ -385,7 +385,7 @@ class VitisCompilationDriver:
     @subprocess_error_handler("Error in preparing and downgrading IR")
     def _downgrade(self, inputs):
         opt = self.clang_path / "opt"
-        prepared_kernels = self.tmpdir / f"{self.outstem}_linked.simple.bc"
+        prepared_kernels = self.tmpdir / f"{self.outstem}_linked.simple.ll"
         kernel_prop = (
             self.tmpdir /
             f"{self.outstem}-kernels_properties.json"
