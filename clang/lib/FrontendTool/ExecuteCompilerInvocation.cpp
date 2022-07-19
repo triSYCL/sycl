@@ -184,6 +184,17 @@ CreateFrontendAction(CompilerInstance &CI) {
     Act = std::make_unique<ASTMergeAction>(std::move(Act),
                                             FEOpts.ASTMergeFiles);
 
+  for (const FrontendPluginRegistry::entry &Plugin :
+       FrontendPluginRegistry::entries()) {
+    std::unique_ptr<PluginASTAction> P = Plugin.instantiate();
+    PluginASTAction::ActionType ActionType = P->getActionType();
+    if (ActionType == PluginASTAction::ActionType::ReplaceAndReuseAction) {
+      P->takeMainActionToReplace(std::move(Act));
+      Act = std::move(P);
+      break;
+    }
+  }
+
   return Act;
 }
 

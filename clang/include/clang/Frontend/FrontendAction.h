@@ -44,7 +44,7 @@ private:
   std::unique_ptr<ASTConsumer> CreateWrappedASTConsumer(CompilerInstance &CI,
                                                         StringRef InFile);
 
-protected:
+public:
   /// @name Implementation Action Interface
   /// @{
 
@@ -241,7 +241,7 @@ public:
 
 /// Abstract base class to use for AST consumer-based frontend actions.
 class ASTFrontendAction : public FrontendAction {
-protected:
+public:
   /// Implement the ExecuteAction interface by running Sema on
   /// the already-initialized AST consumer.
   ///
@@ -276,12 +276,18 @@ public:
                              ///< the command line
     ReplaceAction,           ///< Replace the main action
     AddBeforeMainAction,     ///< Execute the action before the main action
-    AddAfterMainAction       ///< Execute the action after the main action
+    AddAfterMainAction,      ///< Execute the action after the main action
+    ReplaceAndReuseAction,   ///< Replace the main action by an action that reuses
+                             ///< the original main action
   };
   /// Get the action type for this plugin
   ///
   /// \return The action type. By default we use CmdlineAfterMainAction.
   virtual ActionType getActionType() { return CmdlineAfterMainAction; }
+
+  /// Iff the Action is of ReplaceAndReuseAction the main action to replace will
+  /// be given via this function
+  virtual void takeMainActionToReplace(std::unique_ptr<FrontendAction> Old) = 0;
 };
 
 /// Abstract base class to use for preprocessor-based frontend actions.
