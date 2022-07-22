@@ -1119,7 +1119,7 @@ static void setupEnvironmentForKernels(RTDeviceBinaryImage *Img) {
               std::string("all kernels are not compiled for the same "
                           "environemnt: hw and ") +
                   mode,
-              PI_INVALID_BINARY);
+              PI_ERROR_INVALID_BINARY);
       ::unsetenv(env_var);
     }
     else {
@@ -1130,13 +1130,13 @@ static void setupEnvironmentForKernels(RTDeviceBinaryImage *Img) {
               std::string(
                   "all kernels are not compiled for the same environemnt: ") +
                   target + " and hw",
-              PI_INVALID_BINARY);
+              PI_ERROR_INVALID_BINARY);
         if (strcmp(mode, target) != 0)
           throw sycl::platform_error(
               std::string(
                   "all kernels are not compiled for the same environemnt: ") +
                   target + " and " + mode,
-              PI_INVALID_BINARY);
+              PI_ERROR_INVALID_BINARY);
       }
       ::setenv(env_var, target, true);
     }

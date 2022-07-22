@@ -573,7 +573,7 @@ pi_result getInfoImpl(size_t param_value_size, void *param_value,
   if (param_value) {
 
     if (param_value_size < value_size) {
-      return PI_INVALID_VALUE;
+      return PI_ERROR_INVALID_VALUE;
     }
 
     assign_func(param_value, value, value_size);
@@ -664,9 +664,9 @@ pi_result xrt_piPlatformsGet(uint32_t num_entries, pi_platform *platforms,
   pi_result result = PI_SUCCESS;
 
   if (num_entries == 0 && platforms)
-    return PI_INVALID_VALUE;
+    return PI_ERROR_INVALID_VALUE;
   if (platforms == nullptr && num_platforms == nullptr)
-    return PI_INVALID_VALUE;
+    return PI_ERROR_INVALID_VALUE;
   if (num_platforms)
     *num_platforms = 1; // only 1 platform
   if (platforms)
@@ -1114,7 +1114,7 @@ pi_result xrt_piDeviceGetInfo(pi_device device, pi_device_info param_name,
   case PI_DEVICE_INFO_GPU_HW_THREADS_PER_EU:
   case PI_DEVICE_INFO_MAX_MEM_BANDWIDTH:
   case PI_DEVICE_INFO_UUID:
-    return PI_INVALID_VALUE;
+    return PI_ERROR_INVALID_VALUE;
 
   default:
     sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
@@ -1141,7 +1141,7 @@ pi_result xrt_piContextGetInfo(pi_context context, pi_context_info param_name,
     sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
   }
 
-  return PI_OUT_OF_RESOURCES;
+  return PI_ERROR_OUT_OF_RESOURCES;
 }
 
 pi_result xrt_piContextRetain(pi_context context) {
@@ -1255,7 +1255,7 @@ pi_result xrt_piextDeviceSelectBinary(pi_device device,
   }
 
   // No image can be loaded for the given device
-  return PI_INVALID_BINARY;
+  return PI_ERROR_INVALID_BINARY;
 }
 
 pi_result xrt_piextGetDeviceFunctionPointer(pi_device device,
@@ -1758,7 +1758,7 @@ pi_result xrt_piKernelGetInfo(pi_kernel kernel, pi_kernel_info param_name,
     sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
   }
 
-  return PI_INVALID_VALUE;
+  return PI_ERROR_INVALID_VALUE;
 }
 
 pi_result xrt_piKernelGetSubGroupInfo(
@@ -1813,7 +1813,7 @@ pi_result xrt_piEventGetInfo(pi_event event, pi_event_info param_name,
     sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
   }
 
-  return PI_INVALID_EVENT;
+  return PI_ERROR_INVALID_EVENT;
 }
 
 pi_result xrt_piEventGetProfilingInfo(pi_event event,
@@ -2151,7 +2151,7 @@ pi_result piPluginInit(pi_plugin *PluginInit) {
   if (CompareVersions < 0) {
     // PI interface supports lower version of PI.
     // TODO: Take appropriate actions.
-    return PI_INVALID_OPERATION;
+    return PI_ERROR_INVALID_OPERATION;
   }
 
   // PI interface supports higher version or the same version.
