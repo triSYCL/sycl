@@ -182,6 +182,8 @@ Function types are converted to LLVM dialect function types as follows:
     individual pointers;
 -   the conversion of `memref`-typed arguments is subject to
     [calling conventions](TargetLLVMIR.md#calling-conventions).
+-   if a function type has boolean attribute `func.varargs` being set, the
+    converted LLVM function will be variadic.
 
 Examples:
 
@@ -252,6 +254,11 @@ Examples:
 // potentially with other non-memref typed results.
 !llvm.func<struct<(struct<(ptr<f32>, ptr<f32>, i64)>,
                    struct<(ptr<double>, ptr<double>, i64)>)> ()>
+
+// If "func.varargs" attribute is set:
+(i32) -> () attributes { "func.varargs" = true }
+// the corresponding LLVM function will be variadic:
+!llvm.func<void (i32, ...)>
 ```
 
 Conversion patterns are available to convert built-in function operations and
@@ -367,8 +374,7 @@ func.func @foo(%arg0: memref<?xf32>) -> () {
 
 // Gets converted to the following
 // (using type alias for brevity):
-!llvm.memref_1d = type !llvm.struct<(ptr<f32>, ptr<f32>, i64,
-                                     array<1xi64>, array<1xi64>)>
+!llvm.memref_1d = !llvm.struct<(ptr<f32>, ptr<f32>, i64, array<1xi64>, array<1xi64>)>
 
 llvm.func @foo(%arg0: !llvm.ptr<f32>,  // Allocated pointer.
                %arg1: !llvm.ptr<f32>,  // Aligned pointer.
@@ -398,8 +404,7 @@ func.func @bar() {
 
 // Gets converted to the following
 // (using type alias for brevity):
-!llvm.memref_1d = type !llvm.struct<(ptr<f32>, ptr<f32>, i64,
-                                     array<1xi64>, array<1xi64>)>
+!llvm.memref_1d = !llvm.struct<(ptr<f32>, ptr<f32>, i64, array<1xi64>, array<1xi64>)>
 
 llvm.func @bar() {
   %0 = "get"() : () -> !llvm.memref_1d
@@ -619,8 +624,7 @@ func.func @qux(%arg0: memref<?x?xf32>)
 
 // Gets converted into the following
 // (using type alias for brevity):
-!llvm.memref_2d = type !llvm.struct<(ptr<f32>, ptr<f32>, i64,
-                                     array<2xi64>, array<2xi64>)>
+!llvm.memref_2d = !llvm.struct<(ptr<f32>, ptr<f32>, i64, array<2xi64>, array<2xi64>)>
 
 // Function with unpacked arguments.
 llvm.func @qux(%arg0: !llvm.ptr<f32>, %arg1: !llvm.ptr<f32>,
@@ -665,10 +669,8 @@ func.func @foo(%arg0: memref<?x?xf32>) {
 
 // Gets converted into the following
 // (using type alias for brevity):
-!llvm.memref_2d = type !llvm.struct<(ptr<f32>, ptr<f32>, i64,
-                                     array<2xi64>, array<2xi64>)>
-!llvm.memref_2d_ptr = type !llvm.ptr<struct<(ptr<f32>, ptr<f32>, i64,
-                                             array<2xi64>, array<2xi64>)>>
+!llvm.memref_2d = !llvm.struct<(ptr<f32>, ptr<f32>, i64, array<2xi64>, array<2xi64>)>
+!llvm.memref_2d_ptr = !llvm.ptr<struct<(ptr<f32>, ptr<f32>, i64, array<2xi64>, array<2xi64>)>>
 
 // Function with unpacked arguments.
 llvm.func @foo(%arg0: !llvm.ptr<f32>, %arg1: !llvm.ptr<f32>,
@@ -704,10 +706,8 @@ func.func @foo(%arg0: memref<?x?xf32>) -> memref<?x?xf32> {
 
 // Gets converted into the following
 // (using type alias for brevity):
-!llvm.memref_2d = type !llvm.struct<(ptr<f32>, ptr<f32>, i64,
-                                     array<2xi64>, array<2xi64>)>
-!llvm.memref_2d_ptr = type !llvm.ptr<struct<(ptr<f32>, ptr<f32>, i64,
-                                             array<2xi64>, array<2xi64>)>>
+!llvm.memref_2d = !llvm.struct<(ptr<f32>, ptr<f32>, i64, array<2xi64>, array<2xi64>)>
+!llvm.memref_2d_ptr = !llvm.ptr<struct<(ptr<f32>, ptr<f32>, i64, array<2xi64>, array<2xi64>)>>
 
 // Function with unpacked arguments.
 llvm.func @foo(%arg0: !llvm.ptr<f32>, %arg1: !llvm.ptr<f32>, %arg2: i64,
@@ -753,6 +753,18 @@ descriptors passed by pointer would have to be transferred to the device memory,
 which introduces significant overhead. In such situations, auxiliary interface
 functions are executed on host and only pass the values through device function
 invocation mechanism.
+
+Limitation: Right now we cannot generate C interface for variadic functions,
+regardless of being non-external or external. Because C functions are unable to
+"forward" variadic arguments like this:
+```c
+void bar(int, ...);
+
+void foo(int x, ...) {
+  // ERROR: no way to forward variadic arguments.
+  void bar(x, ...);
+}
+```
 
 ### Address Computation
 

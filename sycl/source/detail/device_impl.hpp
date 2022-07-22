@@ -8,12 +8,13 @@
 
 #pragma once
 
-#include <CL/sycl/aspects.hpp>
-#include <CL/sycl/detail/pi.hpp>
-#include <CL/sycl/kernel_bundle.hpp>
-#include <CL/sycl/stl.hpp>
 #include <detail/device_info.hpp>
 #include <detail/platform_impl.hpp>
+#include <sycl/aspects.hpp>
+#include <sycl/detail/cl.h>
+#include <sycl/detail/pi.hpp>
+#include <sycl/kernel_bundle.hpp>
+#include <sycl/stl.hpp>
 
 #include <memory>
 #include <mutex>
@@ -63,7 +64,7 @@ public:
   RT::PiDevice &getHandleRef() {
     if (MIsHostDevice)
       throw invalid_object_error("This instance of device is a host instance",
-                                 PI_INVALID_DEVICE);
+                                 PI_ERROR_INVALID_DEVICE);
 
     return MDevice;
   }
@@ -76,7 +77,7 @@ public:
   const RT::PiDevice &getHandleRef() const {
     if (MIsHostDevice)
       throw invalid_object_error("This instance of device is a host instance",
-                                 PI_INVALID_DEVICE);
+                                 PI_ERROR_INVALID_DEVICE);
 
     return MDevice;
   }

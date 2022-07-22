@@ -31,14 +31,14 @@ namespace {
 /// at position \p Key.
 void serializeObject(Object &Paren, StringRef Key, Optional<Object> Obj) {
   if (Obj)
-    Paren[Key] = std::move(Obj.getValue());
+    Paren[Key] = std::move(Obj.value());
 }
 
 /// Helper function to inject a JSON array \p Array into object \p Paren at
 /// position \p Key.
 void serializeArray(Object &Paren, StringRef Key, Optional<Array> Array) {
   if (Array)
-    Paren[Key] = std::move(Array.getValue());
+    Paren[Key] = std::move(Array.value());
 }
 
 /// Serialize a \c VersionTuple \p V with the Symbol Graph semantic version
@@ -63,8 +63,8 @@ Optional<Object> serializeSemanticVersion(const VersionTuple &V) {
 
   Object Version;
   Version["major"] = V.getMajor();
-  Version["minor"] = V.getMinor().getValueOr(0);
-  Version["patch"] = V.getSubminor().getValueOr(0);
+  Version["minor"] = V.getMinor().value_or(0);
+  Version["patch"] = V.getSubminor().value_or(0);
   return Version;
 }
 
@@ -465,6 +465,11 @@ Object SymbolGraphSerializer::serializeModule() const {
 bool SymbolGraphSerializer::shouldSkip(const APIRecord &Record) const {
   // Skip unconditionally unavailable symbols
   if (Record.Availability.isUnconditionallyUnavailable())
+    return true;
+
+  // Filter out symbols prefixed with an underscored as they are understood to
+  // be symbols clients should not use.
+  if (Record.Name.startswith("_"))
     return true;
 
   return false;

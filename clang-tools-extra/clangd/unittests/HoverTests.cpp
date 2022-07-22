@@ -198,7 +198,7 @@ TEST(Hover, Structured) {
                     typename = char,
                     int = 0,
                     bool Q = false,
-                    class... Ts> class Foo {};
+                    class... Ts> class Foo final {};
           template <template<typename, bool...> class T>
           [[F^oo]]<T> foo;
           )cpp",
@@ -209,7 +209,7 @@ TEST(Hover, Structured) {
          HI.Definition =
              R"cpp(template <template <typename, bool...> class C, typename = char, int = 0,
           bool Q = false, class... Ts>
-class Foo {})cpp";
+class Foo final {})cpp";
          HI.TemplateParameters = {
              {{"template <typename, bool...> class"},
               std::string("C"),
@@ -3205,6 +3205,30 @@ TEST(Hover, HideBigInitializers) {
 
   ASSERT_TRUE(H);
   EXPECT_EQ(H->Definition, "int arr[]");
+}
+
+TEST(Hover, Typedefs) {
+  Annotations T(R"cpp(
+  template <bool X, typename T, typename F>
+  struct cond { using type = T; };
+  template <typename T, typename F>
+  struct cond<false, T, F> { using type = F; };
+
+  template <bool X, typename T, typename F>
+  using type = typename cond<X, T, F>::type;
+
+  void foo() {
+    using f^oo = type<true, int, double>;
+  }
+  )cpp");
+
+  TestTU TU = TestTU::withCode(T.code());
+  auto AST = TU.build();
+  auto H = getHover(AST, T.point(), format::getLLVMStyle(), nullptr);
+
+  ASSERT_TRUE(H && H->Type);
+  EXPECT_EQ(H->Type->Type, "int");
+  EXPECT_EQ(H->Definition, "using foo = type<true, int, double>");
 }
 } // namespace
 } // namespace clangd

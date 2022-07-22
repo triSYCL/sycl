@@ -19,6 +19,7 @@ set(LIBOMPTARGET_SRC_FILES
   ${CMAKE_CURRENT_SOURCE_DIR}/interop.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/omptarget.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/rtl.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/LegacyAPI.cpp
 )
 
 set(LIBOMPTARGET_SRC_FILES ${LIBOMPTARGET_SRC_FILES} PARENT_SCOPE)
@@ -34,6 +35,8 @@ if (OPENMP_ENABLE_LIBOMPTARGET_PROFILING)
   target_compile_definitions(omptarget PUBLIC OMPTARGET_PROFILE_ENABLED)
   target_link_libraries(omptarget PRIVATE LLVMSupport)
 endif()
+target_include_directories(omptarget PRIVATE
+  ${LIBOMPTARGET_INCLUDE_DIR})
 target_link_libraries(omptarget PRIVATE
   ${CMAKE_DL_LIBS}
   "-Wl,--version-script=${CMAKE_CURRENT_SOURCE_DIR}/exports")

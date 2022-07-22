@@ -45,46 +45,32 @@ namespace opts {
 extern cl::OptionCategory BoltOptCategory;
 extern cl::opt<bool> NoThreads;
 
-cl::opt<unsigned>
-ChainSplitThreshold("chain-split-threshold",
-  cl::desc("The maximum size of a chain to apply splitting"),
-  cl::init(128),
-  cl::ReallyHidden,
-  cl::ZeroOrMore,
-  cl::cat(BoltOptCategory));
+cl::opt<unsigned> ChainSplitThreshold(
+    "chain-split-threshold",
+    cl::desc("The maximum size of a chain to apply splitting"), cl::init(128),
+    cl::ReallyHidden, cl::cat(BoltOptCategory));
 
 cl::opt<double>
-ForwardWeight("forward-weight",
-  cl::desc("The weight of forward jumps for ExtTSP value"),
-  cl::init(0.1),
-  cl::ReallyHidden,
-  cl::ZeroOrMore,
-  cl::cat(BoltOptCategory));
+    ForwardWeight("forward-weight",
+                  cl::desc("The weight of forward jumps for ExtTSP value"),
+                  cl::init(0.1), cl::ReallyHidden, cl::cat(BoltOptCategory));
 
 cl::opt<double>
-BackwardWeight("backward-weight",
-  cl::desc("The weight of backward jumps for ExtTSP value"),
-  cl::init(0.1),
-  cl::ReallyHidden,
-  cl::ZeroOrMore,
-  cl::cat(BoltOptCategory));
+    BackwardWeight("backward-weight",
+                   cl::desc("The weight of backward jumps for ExtTSP value"),
+                   cl::init(0.1), cl::ReallyHidden, cl::cat(BoltOptCategory));
 
-cl::opt<unsigned>
-ForwardDistance("forward-distance",
-  cl::desc("The maximum distance (in bytes) of forward jumps for ExtTSP value"),
-  cl::init(1024),
-  cl::ReallyHidden,
-  cl::ZeroOrMore,
-  cl::cat(BoltOptCategory));
+cl::opt<unsigned> ForwardDistance(
+    "forward-distance",
+    cl::desc(
+        "The maximum distance (in bytes) of forward jumps for ExtTSP value"),
+    cl::init(1024), cl::ReallyHidden, cl::cat(BoltOptCategory));
 
-cl::opt<unsigned>
-BackwardDistance("backward-distance",
-  cl::desc("The maximum distance (in bytes) of backward jumps for ExtTSP value"),
-  cl::init(640),
-  cl::ReallyHidden,
-  cl::ZeroOrMore,
-  cl::cat(BoltOptCategory));
-
+cl::opt<unsigned> BackwardDistance(
+    "backward-distance",
+    cl::desc(
+        "The maximum distance (in bytes) of backward jumps for ExtTSP value"),
+    cl::init(640), cl::ReallyHidden, cl::cat(BoltOptCategory));
 }
 
 namespace llvm {
@@ -656,20 +642,25 @@ private:
     }
   }
 
-  /// Merge cold blocks to reduce code size
+  /// Merge remaining blocks into chains w/o taking jump counts into
+  /// consideration. This allows to maintain the original block order in the
+  /// absense of profile data
   void mergeColdChains() {
     for (BinaryBasicBlock *SrcBB : BF.layout()) {
       // Iterating in reverse order to make sure original fallthrough jumps are
-      // merged first
+      // merged first; this might be beneficial for code size.
       for (auto Itr = SrcBB->succ_rbegin(); Itr != SrcBB->succ_rend(); ++Itr) {
         BinaryBasicBlock *DstBB = *Itr;
         size_t SrcIndex = SrcBB->getLayoutIndex();
         size_t DstIndex = DstBB->getLayoutIndex();
         Chain *SrcChain = AllBlocks[SrcIndex].CurChain;
         Chain *DstChain = AllBlocks[DstIndex].CurChain;
+        bool IsColdSrc = SrcChain->executionCount() == 0;
+        bool IsColdDst = DstChain->executionCount() == 0;
         if (SrcChain != DstChain && !DstChain->isEntryPoint() &&
             SrcChain->blocks().back()->Index == SrcIndex &&
-            DstChain->blocks().front()->Index == DstIndex)
+            DstChain->blocks().front()->Index == DstIndex &&
+            IsColdSrc == IsColdDst)
           mergeChains(SrcChain, DstChain, 0, MergeTypeTy::X_Y);
       }
     }
@@ -815,8 +806,7 @@ private:
     }
 
     // Remove chain From from the list of active chains
-    auto Iter = std::remove(HotChains.begin(), HotChains.end(), From);
-    HotChains.erase(Iter, HotChains.end());
+    llvm::erase_value(HotChains, From);
 
     // Invalidate caches
     for (std::pair<Chain *, Edge *> EdgeIter : Into->edges())
@@ -832,26 +822,23 @@ private:
         SortedChains.push_back(&Chain);
 
     // Sorting chains by density in decreasing order
-    std::stable_sort(
-      SortedChains.begin(), SortedChains.end(),
-      [](const Chain *C1, const Chain *C2) {
-        // Original entry point to the front
-        if (C1->isEntryPoint() != C2->isEntryPoint()) {
-          if (C1->isEntryPoint())
-            return true;
-          if (C2->isEntryPoint())
-            return false;
-        }
-
-        const double D1 = C1->density();
-        const double D2 = C2->density();
-        if (D1 != D2)
-          return D1 > D2;
-
-        // Making the order deterministic
-        return C1->id() < C2->id();
+    llvm::stable_sort(SortedChains, [](const Chain *C1, const Chain *C2) {
+      // Original entry point to the front
+      if (C1->isEntryPoint() != C2->isEntryPoint()) {
+        if (C1->isEntryPoint())
+          return true;
+        if (C2->isEntryPoint())
+          return false;
       }
-    );
+
+      const double D1 = C1->density();
+      const double D2 = C2->density();
+      if (D1 != D2)
+        return D1 > D2;
+
+      // Making the order deterministic
+      return C1->id() < C2->id();
+    });
 
     // Collect the basic blocks in the order specified by their chains
     Order.reserve(BF.layout_size());

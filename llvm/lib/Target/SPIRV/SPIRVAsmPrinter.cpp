@@ -105,7 +105,7 @@ void SPIRVAsmPrinter::emitFunctionHeader() {
   const Function &F = MF->getFunction();
 
   if (isVerbose()) {
-    OutStreamer->GetCommentOS()
+    OutStreamer->getCommentOS()
         << "-- Begin function "
         << GlobalValue::dropLLVMManglingEscape(F.getName()) << '\n';
   }
@@ -215,6 +215,9 @@ void SPIRVAsmPrinter::outputInstruction(const MachineInstr *MI) {
 }
 
 void SPIRVAsmPrinter::emitInstruction(const MachineInstr *MI) {
+  SPIRV_MC::verifyInstructionPredicates(MI->getOpcode(),
+                                        getSubtargetInfo().getFeatureBits());
+
   if (!MAI->getSkipEmission(MI))
     outputInstruction(MI);
 

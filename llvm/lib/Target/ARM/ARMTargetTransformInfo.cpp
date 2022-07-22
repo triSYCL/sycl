@@ -1291,7 +1291,8 @@ InstructionCost ARMTTIImpl::getShuffleCost(TTI::ShuffleKind Kind,
 
     if (!Mask.empty()) {
       std::pair<InstructionCost, MVT> LT = TLI->getTypeLegalizationCost(DL, Tp);
-      if (Mask.size() <= LT.second.getVectorNumElements() &&
+      if (LT.second.isVector() &&
+          Mask.size() <= LT.second.getVectorNumElements() &&
           (isVREVMask(Mask, LT.second, 16) || isVREVMask(Mask, LT.second, 32) ||
            isVREVMask(Mask, LT.second, 64)))
         return ST->getMVEVectorCostFactor(TTI::TCK_RecipThroughput) * LT.first;
@@ -1765,6 +1766,48 @@ ARMTTIImpl::getIntrinsicInstrCost(const IntrinsicCostAttributes &ICA,
       return LT.first * ST->getMVEVectorCostFactor(CostKind);
     break;
   }
+  case Intrinsic::fptosi_sat:
+  case Intrinsic::fptoui_sat: {
+    if (ICA.getArgTypes().empty())
+      break;
+    bool IsSigned = ICA.getID() == Intrinsic::fptosi_sat;
+    auto LT = TLI->getTypeLegalizationCost(DL, ICA.getArgTypes()[0]);
+    EVT MTy = TLI->getValueType(DL, ICA.getReturnType());
+    // Check for the legal types, with the corect subtarget features.
+    if ((ST->hasVFP2Base() && LT.second == MVT::f32 && MTy == MVT::i32) ||
+        (ST->hasFP64() && LT.second == MVT::f64 && MTy == MVT::i32) ||
+        (ST->hasFullFP16() && LT.second == MVT::f16 && MTy == MVT::i32))
+      return LT.first;
+
+    // Equally for MVE vector types
+    if (ST->hasMVEFloatOps() &&
+        (LT.second == MVT::v4f32 || LT.second == MVT::v8f16) &&
+        LT.second.getScalarSizeInBits() == MTy.getScalarSizeInBits())
+      return LT.first * ST->getMVEVectorCostFactor(CostKind);
+
+    // Otherwise we use a legal convert followed by a min+max
+    if (((ST->hasVFP2Base() && LT.second == MVT::f32) ||
+         (ST->hasFP64() && LT.second == MVT::f64) ||
+         (ST->hasFullFP16() && LT.second == MVT::f16) ||
+         (ST->hasMVEFloatOps() &&
+          (LT.second == MVT::v4f32 || LT.second == MVT::v8f16))) &&
+        LT.second.getScalarSizeInBits() >= MTy.getScalarSizeInBits()) {
+      Type *LegalTy = Type::getIntNTy(ICA.getReturnType()->getContext(),
+                                      LT.second.getScalarSizeInBits());
+      InstructionCost Cost =
+          LT.second.isVector() ? ST->getMVEVectorCostFactor(CostKind) : 1;
+      IntrinsicCostAttributes Attrs1(IsSigned ? Intrinsic::smin
+                                              : Intrinsic::umin,
+                                     LegalTy, {LegalTy, LegalTy});
+      Cost += getIntrinsicInstrCost(Attrs1, CostKind);
+      IntrinsicCostAttributes Attrs2(IsSigned ? Intrinsic::smax
+                                              : Intrinsic::umax,
+                                     LegalTy, {LegalTy, LegalTy});
+      Cost += getIntrinsicInstrCost(Attrs2, CostKind);
+      return LT.first * Cost;
+    }
+    break;
+  }
   }
 
   return BaseT::getIntrinsicInstrCost(ICA, CostKind);
@@ -2204,15 +2247,15 @@ bool ARMTTIImpl::preferPredicateOverEpilogue(Loop *L, LoopInfo *LI,
   return canTailPredicateLoop(L, LI, SE, DL, LAI);
 }
 
-bool ARMTTIImpl::emitGetActiveLaneMask() const {
+PredicationStyle ARMTTIImpl::emitGetActiveLaneMask() const {
   if (!ST->hasMVEIntegerOps() || !EnableTailPredication)
-    return false;
+    return PredicationStyle::None;
 
   // Intrinsic @llvm.get.active.lane.mask is supported.
   // It is used in the MVETailPredication pass, which requires the number of
   // elements processed by this vector loop to setup the tail-predicated
   // loop.
-  return true;
+  return PredicationStyle::Data;
 }
 void ARMTTIImpl::getUnrollingPreferences(Loop *L, ScalarEvolution &SE,
                                          TTI::UnrollingPreferences &UP,
