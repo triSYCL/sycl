@@ -17,7 +17,7 @@
 #define SYCL_XILINX_FPGA_KERNEL_PROPERTIES_HPP
 
 #include "sycl/ext/xilinx/literals/cstr.hpp"
-#include "CL/sycl/detail/pi.h"
+#include "sycl/detail/pi.h"
 #include <cstddef>
 #include <iostream>
 #include <regex>

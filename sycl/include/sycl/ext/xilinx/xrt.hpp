@@ -8,9 +8,9 @@
 
 #pragma once
 
-#include <CL/sycl/backend.hpp>
-#include <CL/sycl/detail/pi.h>
-#include <CL/sycl/program.hpp>
+#include <sycl/backend.hpp>
+#include <sycl/detail/pi.h>
+#include <sycl/program.hpp>
 
 #include <xrt.h>
 #include <xrt/xrt_kernel.h>

@@ -31,9 +31,9 @@
 #pragma clang diagnostic ignored "-Wgnu-include-next"
 #endif
 
-#include <CL/sycl/detail/pi.h>
-#include <CL/sycl/detail/pi.hpp>
-#include <CL/sycl/detail/terminate_xsimk.hpp>
+#include <sycl/detail/pi.h>
+#include <sycl/detail/pi.hpp>
+#include <sycl/detail/terminate_xsimk.hpp>
 #include <CL/cl.h>
 
 #include <array>

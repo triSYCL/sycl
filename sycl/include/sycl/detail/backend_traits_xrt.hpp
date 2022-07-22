@@ -20,11 +20,11 @@
 
 #pragma once
 
-#include <CL/sycl/accessor.hpp>
-#include <CL/sycl/detail/backend_traits.hpp>
-#include <CL/sycl/device.hpp>
-#include <CL/sycl/kernel.hpp>
-#include <CL/sycl/kernel_bundle.hpp>
+#include <sycl/accessor.hpp>
+#include <sycl/detail/backend_traits.hpp>
+#include <sycl/device.hpp>
+#include <sycl/kernel.hpp>
+#include <sycl/kernel_bundle.hpp>
 
 /// There is no cyclic dependencies, but the XRT include path is not configured
 /// by the CMake of the SYCL runtime (only the pi_xrt is) while compiling this

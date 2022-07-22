@@ -9,8 +9,8 @@
 #ifndef SYCL_XILINX_FPGA_MEMORY_PROPERTIES_HPP
 #define SYCL_XILINX_FPGA_MEMORY_PROPERTIES_HPP
 
-#include "CL/sycl/detail/defines.hpp"
-#include "CL/sycl/properties/accessor_properties.hpp"
+#include "sycl/detail/defines.hpp"
+#include "sycl/properties/accessor_properties.hpp"
 
 __SYCL_INLINE_NAMESPACE(cl) {
 
