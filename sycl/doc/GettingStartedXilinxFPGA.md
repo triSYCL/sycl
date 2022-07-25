@@ -1,5 +1,46 @@
-Getting started with SYCL with an AMD/Xilinx FPGA U200 Alveo board and Ubuntu 22.04
-===================================================================================
+
+# Table of content
+
+1. [Table of content](#Table-of-content)
+1. [Introduction](#Introduction)
+    1. [What's new?](#Whats-new)
+1. [Installation](Installation)
+    1. [Installing the Alveo U200 board](#Installing-the-Alveo-U200-board)
+        1. [Use a modern BIOS](#Use-a-modern-BIOS)
+    1. [Install Vitis 2022.1](#Install-Vitis-20221)
+    1. [Boot on a specific kernel](#Boot-on-a-specific-kernel)
+    1. [Installing the AMD/Xilinx XRT runtime](#Installing-the-AMDXilinx-XRT-runtime)
+    1. [Install the target platform for the FPGA board](#Install-the-target-platform-for-the-FPGA-board)
+        1. [Flash and test the board](#Flash-and-test-the-board)
+    1. [Compile the SYCL compiler](#Compile-the-SYCL-compiler)
+1. [Usage](#Usage)
+    1. [Compiling and running a SYCL application](#Compiling-and-running-a-SYCL-application)
+        1. [Picking the right device](#Picking-the-right-device)
+        1. [Small examples](#Small-examples)
+        1. [Looking at the FPGA layout with Vivado](#Looking-at-the-FPGA-layout-with-Vivado)
+        1. [Running the test suite](#Running-the-test-suite)
+        1. [Running a bigger example on real FPGA](#Running-a-bigger-example-on-real-FPGA)
+    1. [Cleaning up some buffer allocation](#Cleaning-up-some-buffer-allocation)
+    1. [Xilinx FPGA extension](#Xilinx-FPGA-extension)
+        1. [Pipelining](#Pipelining)
+        1. [Dataflow decorators](#Dataflow-decorators)
+        1. [Loop unrolling](#Loop-unrolling)
+        1. [Pinning allocators to specific memory banks](#Pinning-allocators-to-specific-memory-banks)
+        1. [Array partitioning](#Array-partitioning)
+    1. [AMD/Xilinx Macros](#AMDXilinx-Macros)
+1. [Implementation](#Implementation)
+    1. [AMD/Xilinx FPGA SYCL compiler architecture](#AMDXilinx-FPGA-SYCL-compiler-architecture)
+    1. [Extra Notes](#Extra-Notes)
+    1. [Debugging the SYCL implementation](#Debugging-the-SYCL-implementation)
+        1. [Debugging the driver and intermediate steps](#Debugging-the-driver-and-intermediate-steps)
+        1. [Debugging the SYCL runtime](#Debugging-the-SYCL-runtime)
+        1. [Environnement variables](#Environnement-variables)
+        1. [Clang flags](#Clang-flags)
+        1. [Running a single test](#Running-a-single-test)
+        1. [v++ Logs](#v-Logs)
+        1. [llvm-reduce](#llvm-reduce)
+
+# Introduction
 
 Disclaimer: nothing here is supported and this is all about a research
 project.
@@ -62,6 +103,8 @@ some adaptations.
 - 2021/06/24: there is a new HLS target along the OpenCL/SPIR compiler
   flow for AMD/Xilinx FPGA. The HLS target relies on direct LLVM IR
   feeding and allows finer control by using HLS extensions.
+
+# Installation
 
 ## Installing the Alveo U200 board
 
@@ -877,7 +920,7 @@ python3 $SYCL_HOME/llvm/buildbot/configure.py --cuda \
 
 For more control, see [section Build](#build).
 
-
+# Usage
 ## Compiling and running a SYCL application
 
 The typical environment is setup with something like
@@ -1033,7 +1076,7 @@ See section [Picking the right device](#picking-the-right-device) to
 set correctly the `SYCL_DEVICE_FILTER` environment variable to select
 the right AMD/Xilinx FPGA device first.
 
-To run an example from the provided examples:
+To run an example from the provided examples
 
 - with hardware emulation:
 
@@ -1242,8 +1285,6 @@ Two decorations exists to pipeline part of the code.
 + `sycl::ext::xilinx::pipeline_kernel<IIType, PipelineType>` is used to pipeline kernel,
 + `sycl::ext::xilinx::pipeline<IIType, RewindType, PipelineType>` is used to pipeline a loop.
 
-#### Pipelining examples:
-
 Kernel pipelining:
 
 ```cpp
@@ -1408,6 +1449,7 @@ when compiling host code none of the ``__SYCL_XILINX_*_MODE__`` macros will be d
 ``__SYCL_HAS_XILINX_DEVICE__`` will be defined on the host if one of
 the specified targets is an AMD/Xilinx device or on a Xilinx device
 
+# Implementation
 
 ## AMD/Xilinx FPGA SYCL compiler architecture
 
@@ -1445,7 +1487,7 @@ compiler and runtime for the moment, they are not the simple whims of
 the insane! Hopefully...
 
 
-### Extra Notes:
+### Extra Notes
 
 * The Driver ToolChain, currently makes some assumptions about the
   `Vitis` installation. For example, it assumes that `v++` is inside
