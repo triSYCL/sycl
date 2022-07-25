@@ -248,7 +248,7 @@ class VXXVersion:
         ]
         def should_add_option(opt_record):
             _, maj, min = opt_record
-            return maj > self.major or (maj == self.major and min >= self.minor)
+            return maj < self.major or (maj == self.major and min <= self.minor)
         return (opt for opt, _, _ in filter(should_add_option, options))
 
 class VXXBinary:
