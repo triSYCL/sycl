@@ -44,8 +44,6 @@
 using namespace llvm;
 
 namespace llvm {
-static cl::opt<bool> SyclVXX("sycl-vxx", cl::Hidden, cl::init(false));
-
 cl::opt<bool> RunPartialInlining("enable-partial-inlining", cl::Hidden,
                                  cl::desc("Run Partial inlinining pass"));
 
@@ -438,7 +436,7 @@ if (!SYCLOptimizationMode) { // broken formatting to simplify pulldown
   if (OptLevel > 1) {
     MPM.add(createMergedLoadStoreMotionPass()); // Merge ld/st in diamonds
     MPM.add(NewGVN ? createNewGVNPass()
-                   : createGVNPass(!SyclVXX && DisableGVNLoadPRE)); // Remove redundancies
+                   : createGVNPass(DisableGVNLoadPRE)); // Remove redundancies
   }
   MPM.add(createSCCPPass());                  // Constant prop with SCCP
 

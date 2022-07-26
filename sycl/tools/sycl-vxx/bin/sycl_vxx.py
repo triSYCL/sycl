@@ -58,7 +58,6 @@ VXX_PassPipeline = [
 "-simplifycfg",
 "-inline",
 "-function-attrs",
-"-argpromotion",
 "-sroa",
 "-early-cse-memssa",
 "-speculative-execution",
