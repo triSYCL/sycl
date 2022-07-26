@@ -33,7 +33,6 @@
 
 #include <CL/sycl/detail/pi.h>
 #include <CL/sycl/detail/pi.hpp>
-#include <CL/sycl/detail/terminate_xsimk.hpp>
 #include <CL/cl.h>
 
 #include <array>
@@ -2121,10 +2120,6 @@ pi_result xrt_piextUSMGetMemAllocInfo(pi_context context, const void *ptr,
 }
 
 pi_result xrt_piTearDown(void *) {
-
-  /// cleanup the potential left-overs from the hw_emu simulator
-  terminate_xsimk();
-
   return PI_SUCCESS;
 }
 

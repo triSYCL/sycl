@@ -28,6 +28,7 @@
         1. [Pinning allocators to specific memory banks](#Pinning-allocators-to-specific-memory-banks)
         1. [Array partitioning](#Array-partitioning)
     1. [AMD/Xilinx Macros](#AMDXilinx-Macros)
+    1. [xsim issues](#xsim-issues)
 1. [Implementation](#Implementation)
     1. [AMD/Xilinx FPGA SYCL compiler architecture](#AMDXilinx-FPGA-SYCL-compiler-architecture)
     1. [Extra Notes](#Extra-Notes)
@@ -1448,6 +1449,12 @@ when compiling host code none of the ``__SYCL_XILINX_*_MODE__`` macros will be d
 
 ``__SYCL_HAS_XILINX_DEVICE__`` will be defined on the host if one of
 the specified targets is an AMD/Xilinx device or on a Xilinx device
+
+## Xsim issues
+
+When a SYCL application running in hw_emu is not properly terminated like killed from a debugger.
+It is possible that the xsim process used for simulation will still be running. This process has some memory leaks so it is an issue.
+[cleanup_xsimk.cpp](../tools/cleanup_xsimk.cpp) contains the sources for a process that will cleanup the xsims that are not in use every 5 minutes
 
 # Implementation
 
