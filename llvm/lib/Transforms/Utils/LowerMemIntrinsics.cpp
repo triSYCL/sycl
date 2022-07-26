@@ -38,7 +38,7 @@ Value *Skip1BitCast(Value *V) {
   return V;
 }
 
-void annotateBackEdge(BranchInst *Br) {
+void maybeAddUnrollAnnotation(BranchInst *Br) {
   if (RequestedUnrollCount > 0)
     Br->setMetadata(
         LLVMContext::MD_loop,
@@ -209,7 +209,7 @@ void llvm::createMemCpyLoopKnownSize(Instruction *InsertBefore, Value *SrcAddr,
     Constant *LoopEndCI = ConstantInt::get(TypeOfCopyLen, LoopEndCount);
     BranchInst *Br = LoopBuilder.CreateCondBr(
         LoopBuilder.CreateICmpULT(NewIndex, LoopEndCI), LoopBB, PostLoopBB);
-    annotateBackEdge(Br);
+    maybeAddUnrollAnnotation(Br);
   }
 
   uint64_t BytesCopied = LoopEndCount * LoopOpSize;
@@ -556,7 +556,8 @@ static void createMemMoveLoop(Instruction *InsertBefore, Value *SrcAddr,
       ExitBB, LoopBB);
   LoopPhi->addIncoming(IndexPtr, LoopBB);
   LoopPhi->addIncoming(CopyLen, CopyBackwardsBB);
-  BranchInst::Create(ExitBB, LoopBB, CompareN, ThenTerm);
+  BranchInst *Br = BranchInst::Create(ExitBB, LoopBB, CompareN, ThenTerm);
+  maybeAddUnrollAnnotation(Br);
   ThenTerm->eraseFromParent();
 
   // Copying forward.
@@ -576,8 +577,8 @@ static void createMemMoveLoop(Instruction *InsertBefore, Value *SrcAddr,
   FwdCopyPhi->addIncoming(FwdIndexPtr, FwdLoopBB);
   FwdCopyPhi->addIncoming(ConstantInt::get(TypeOfCopyLen, 0), CopyForwardBB);
 
-  BranchInst *Br = BranchInst::Create(ExitBB, FwdLoopBB, CompareN, ElseTerm);
-  annotateBackEdge(Br);
+  Br = BranchInst::Create(ExitBB, FwdLoopBB, CompareN, ElseTerm);
+  maybeAddUnrollAnnotation(Br);
   ElseTerm->eraseFromParent();
 }
 
@@ -631,7 +632,7 @@ static void createMemSetLoop(Instruction *InsertBefore, Value *DstAddr,
 
   BranchInst *Br = LoopBuilder.CreateCondBr(
       LoopBuilder.CreateICmpULT(NewIndex, CopyLen), LoopBB, NewBB);
-  annotateBackEdge(Br);
+  maybeAddUnrollAnnotation(Br);
 }
 
 template <typename T>

@@ -176,7 +176,7 @@ static cl::opt<unsigned>
 
 static cl::opt<bool> UnrollOnlyWhenForced(
   "unroll-only-when-forced", cl::Hidden,
-  cl::desc("Allow the loop remainder to be unrolled."));
+  cl::desc("Loops will only be unrolled if there it is requested by the user"));
 
 /// A magic value for use with the Threshold parameter to indicate
 /// that the loop unroll should be performed regardless of how much

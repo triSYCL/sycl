@@ -287,7 +287,7 @@ public:
     std::vector<Value *> Args;
     for (auto &A : F->args())
       Args.push_back(&A);
-    std::ignore = std::initializer_list<int>{(Args.push_back(ts), 0)...};
+    (void)std::initializer_list<int>{(Args.push_back(ts), 0)...};
     OperandBundleDef OpBundle(XclId.str(), Args);
 
     Instruction *I = CallInst::Create(SideEffect, {}, {OpBundle});
