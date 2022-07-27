@@ -31,6 +31,9 @@
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendPluginRegistry.h"
 
+#include "archgen/Aprox/Aprox.h"
+#include "archgen/FixedPt/FixedPt.h"
+
 #define DEBUG_TYPE "archgen-mlir"
 
 namespace {

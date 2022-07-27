@@ -1,0 +1,10 @@
+set(LLVM_TARGET_DEFINITIONS FixedPt.td)
+mlir_tablegen(FixedPtOps.h.inc -gen-op-decls)
+mlir_tablegen(FixedPtOps.cpp.inc -gen-op-defs)
+mlir_tablegen(FixedPtType.h.inc -gen-typedef-decls)
+mlir_tablegen(FixedPtType.cpp.inc -gen-typedef-defs)
+mlir_tablegen(FixedPtDialect.h.inc -gen-dialect-decls)
+mlir_tablegen(FixedPtDialect.cpp.inc -gen-dialect-defs)
+add_public_tablegen_target(ArchGenFixedPtIncGen)
+
+add_mlir_doc(FixedPt FixedPt Dialects/ -gen-op-doc)

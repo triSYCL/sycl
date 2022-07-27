@@ -1,0 +1,10 @@
+set(LLVM_TARGET_DEFINITIONS Aprox.td)
+mlir_tablegen(AproxOps.h.inc -gen-op-decls)
+mlir_tablegen(AproxOps.cpp.inc -gen-op-defs)
+mlir_tablegen(AproxType.h.inc -gen-typedef-decls)
+mlir_tablegen(AproxType.cpp.inc -gen-typedef-defs)
+mlir_tablegen(AproxDialect.h.inc -gen-dialect-decls)
+mlir_tablegen(AproxDialect.cpp.inc -gen-dialect-defs)
+add_public_tablegen_target(ArchGenAproxIncGen)
+
+add_mlir_doc(Aprox Aprox Dialects/ -gen-op-doc)

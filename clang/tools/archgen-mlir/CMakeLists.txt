@@ -1,9 +1,12 @@
 
 # Find MLIR directories
-set(MLIR_MAIN_SRC_DIR ${LLVM_MAIN_SRC_DIR}/../mlir/include )
-set(MLIR_INCLUDE_DIR ${LLVM_MAIN_SRC_DIR}/../mlir/include )
+set(MLIR_MAIN_SRC_DIR ${LLVM_MAIN_SRC_DIR}/../mlir )
+set(MLIR_MAIN_INCLUDE_DIR ${MLIR_MAIN_SRC_DIR}/include )
 set(MLIR_TABLEGEN_OUTPUT_DIR ${CMAKE_BINARY_DIR}/tools/mlir/include)
 set(MLIR_TABLEGEN_EXE $<TARGET_FILE:mlir-tblgen>)
+
+include_directories(SYSTEM ${MLIR_MAIN_INCLUDE_DIR})
+include_directories(SYSTEM ${MLIR_TABLEGEN_OUTPUT_DIR})
 
 # If we don't need RTTI or EH, there's no reason to export anything
 # from the plugin.
@@ -16,16 +19,30 @@ if( NOT MSVC ) # MSVC mangles symbols differently, and
   endif()
 endif()
 
-set(LINK_LIBRARIES
+add_subdirectory(include)
+
+include_directories(${CMAKE_CURRENT_BINARY_DIR}/include)
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
+
+add_subdirectory(lib)
+
+set(ARCHGENMLIR_LINK_LIBRARIES
   clangAST
   clangBasic
   clangFrontend
   clangCodeGen
-  MLIRIR
+  MLIRLLVMDialect
+  MLIRArithmeticDialect
+  MLIRFuncDialect
+  MLIRPass
+  MLIRTransforms
+  MLIRSupport
+  ArchGenAprox
+  ArchGenFixedPt
 )
 
 llvm_add_library(
-  ArchGenMLIR
+  ArchGenMLIRPlugin
 
   ArchGenMLIR.cpp
 
@@ -36,11 +53,16 @@ llvm_add_library(
   clang
   
   LINK_LIBS
-  ${LINK_LIBRARIES}
+  ${ARCHGENMLIR_LINK_LIBRARIES}
 
   DEPENDS
-  ${LINK_LIBRARIES}
+  ${ARCHGENMLIR_LINK_LIBRARIES}
   )
 
-target_include_directories(ArchGenMLIR PRIVATE ${MLIR_INCLUDE_DIR})
-target_include_directories(ArchGenMLIR PRIVATE ${MLIR_TABLEGEN_OUTPUT_DIR})
+target_include_directories(ArchGenMLIRPlugin PRIVATE ${MLIR_MAIN_INCLUDE_DIR})
+target_include_directories(ArchGenMLIRPlugin PRIVATE ${MLIR_TABLEGEN_OUTPUT_DIR})
+
+add_custom_target(ArchGenMLIR DEPENDS
+  ArchGenMLIRPlugin
+  clang
+  )
