@@ -1005,8 +1005,12 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
       return true;
   }
 
+  /// Vitis's HLS intrinsics are considered as LLVM intrinsics because they
+  /// start by "llvm.". The code below assume it knows about every possible
+  /// intrinsics which is not true in our case because of our HLS intrinsics. so
+  /// we bail now.
   if (F->getIntrinsicID() == Intrinsic::not_intrinsic)
-      return false;
+    return false;
 
   auto *ST = dyn_cast<StructType>(F->getReturnType());
   if (ST && (!ST->isLiteral() || ST->isPacked())) {

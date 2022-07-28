@@ -5,6 +5,12 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// When using Xilinx/AMD FPGA through the OpenCL backend. Iff buffer allocation
+// are not aligned on 4096 bytes, XRT will perform an extra memcpy. This is file
+// provides a sycl allocator with the proper alignment.
+//
+//===----------------------------------------------------------------------===//
 
 #pragma once
 
