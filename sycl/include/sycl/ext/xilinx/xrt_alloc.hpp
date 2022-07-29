@@ -6,9 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// When using Xilinx/AMD FPGA through the OpenCL backend. Iff buffer allocation
-// are not aligned on 4096 bytes, XRT will perform an extra memcpy. This is file
-// provides a sycl allocator with the proper alignment.
+// When using Xilinx/AMD FPGA through the OpenCL backend, if buffer allocation
+// are not aligned on 4096 bytes, XRT will perform an extra memcpy. This file
+// provides a SYCL allocator with the proper alignment.
 //
 //===----------------------------------------------------------------------===//
 
