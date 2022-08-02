@@ -12,6 +12,7 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dialect.h"
+#include "archgen/FixedPt/FixedPt.h"
 
 #include "archgen/Aprox/AproxDialect.h.inc"
 

@@ -12,11 +12,15 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dialect.h"
+#include "llvm/ADT/APFixedPoint.h"
 
 #include "archgen/FixedPt/FixedPtDialect.h.inc"
 
 #define GET_TYPEDEF_CLASSES
 #include "archgen/FixedPt/FixedPtType.h.inc"
+
+#define GET_ATTRDEF_CLASSES
+#include "archgen/FixedPt/FixedPtAttr.h.inc"
 
 #define GET_OP_CLASSES
 #include "archgen/FixedPt/FixedPtOps.h.inc"

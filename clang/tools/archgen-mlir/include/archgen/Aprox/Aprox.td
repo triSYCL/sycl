@@ -11,13 +11,14 @@
 
 include "mlir/IR/OpBase.td"
 include "mlir/IR/AttrTypeBase.td"
+include "archgen/FixedPt/FixedPtBase.td"
 
 def Aprox_Dialect : Dialect {
   let summary = "Dialect to represent aproximated expression";
-
   let name = "aprox";
-
+  let dependentDialects = ["::archgen::fixedpt::FixedPtDialect"];
   let cppNamespace = "::archgen::aprox";
+  let useDefaultTypePrinterParser = 1;
 }
 
 // Base class for Func dialect ops.
@@ -32,6 +33,25 @@ class Aprox_Type<string name, string typeMnemonic, list<Trait> traits = []>
 /// A TypeAttr for ToBeFolded types.
 def ToBeFoldedType
     : Aprox_Type<"toBeFolded", "toBeFolded"> {
+}
+
+def Aprox_genericOp : Aprox_Op<"generic"> {
+  let arguments = (ins
+    Variadic<AnyType>: $inputs,
+    StrAttr: $action
+  );
+  let results = (outs Variadic<AnyType>: $outputs);
+}
+
+def Aprox_constantOp : Aprox_Op<"constant", [ConstantLike]> {
+  let arguments = (ins
+    FixedPtAttr: $value
+  );
+  let results = (outs ToBeFoldedType);
+  let extraClassDeclaration = [{
+    static void build(::mlir::OpBuilder &odsBuilder, ::mlir::OperationState &odsState, ::archgen::fixedpt::fixedPointAttr value);
+  }];
+  
 }
 
 #endif

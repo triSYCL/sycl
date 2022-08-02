@@ -4,8 +4,10 @@ Aprox.cpp
 ADDITIONAL_HEADER_DIRS
 
 DEPENDS
+ArchGenFixedPt
 ArchGenAproxIncGen
 
 LINK_LIBS PUBLIC
+ArchGenFixedPt
 MLIRIR
 )

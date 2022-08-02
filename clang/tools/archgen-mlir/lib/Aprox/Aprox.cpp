@@ -39,6 +39,13 @@ void AproxDialect::initialize() {
 #define GET_OP_CLASSES
 #include "archgen/Aprox/AproxOps.cpp.inc"
 
+void constantOp::build(mlir::OpBuilder &odsBuilder,
+                       mlir::OperationState &odsState,
+                       archgen::fixedpt::fixedPointAttr value) {
+  build(odsBuilder, odsState, toBeFoldedType::get(odsBuilder.getContext()),
+        value);
+}
+
 //===----------------------------------------------------------------------===//
 // TableGen'd type method definitions
 //===----------------------------------------------------------------------===//

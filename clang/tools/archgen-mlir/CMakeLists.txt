@@ -5,14 +5,12 @@ set(MLIR_MAIN_INCLUDE_DIR ${MLIR_MAIN_SRC_DIR}/include )
 set(MLIR_TABLEGEN_OUTPUT_DIR ${CMAKE_BINARY_DIR}/tools/mlir/include)
 set(MLIR_TABLEGEN_EXE $<TARGET_FILE:mlir-tblgen>)
 
-include_directories(SYSTEM ${MLIR_MAIN_INCLUDE_DIR})
-include_directories(SYSTEM ${MLIR_TABLEGEN_OUTPUT_DIR})
-
-add_subdirectory(include)
-
+include_directories(${MLIR_MAIN_INCLUDE_DIR})
+include_directories(${MLIR_TABLEGEN_OUTPUT_DIR})
 include_directories(${CMAKE_CURRENT_BINARY_DIR}/include)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/include)
 
+add_subdirectory(include)
 add_subdirectory(lib)
 add_subdirectory(tools)
 
