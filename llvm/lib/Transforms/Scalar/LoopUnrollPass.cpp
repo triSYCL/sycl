@@ -174,6 +174,10 @@ static cl::opt<unsigned>
                            cl::desc("Default threshold (max size of unrolled "
                                     "loop), used in all but O3 optimizations"));
 
+static cl::opt<bool> UnrollOnlyWhenForced(
+  "unroll-only-when-forced", cl::Hidden,
+  cl::desc("Loops will only be unrolled if there it is requested by the user"));
+
 /// A magic value for use with the Threshold parameter to indicate
 /// that the loop unroll should be performed regardless of how much
 /// code expansion would result.
@@ -1127,6 +1131,8 @@ static LoopUnrollResult tryToUnrollLoop(
     Optional<bool> ProvidedAllowPeeling,
     Optional<bool> ProvidedAllowProfileBasedPeeling,
     Optional<unsigned> ProvidedFullUnrollMaxCount) {
+  if (UnrollOnlyWhenForced)
+    OnlyWhenForced = true;
   LLVM_DEBUG(dbgs() << "Loop Unroll: F["
                     << L->getHeader()->getParent()->getName() << "] Loop %"
                     << L->getHeader()->getName() << "\n");

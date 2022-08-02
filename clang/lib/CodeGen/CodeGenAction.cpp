@@ -346,7 +346,6 @@ namespace clang {
         ModulePassManager PreLinkingSyclPasses;
         PreLinkingSyclPasses.addPass(
             createModuleToFunctionPassAdaptor(SYCLLowerWGScopePass()));
-        PreLinkingSyclPasses.addPass(LowerSYCLMetaDataPass());
         PreLinkingSyclPasses.run(*getModule(), MAM);
       }
 
