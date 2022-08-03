@@ -6,16 +6,40 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "archgen/Aprox/Aprox.h"
-#include "mlir/IR/Builders.h"
-#include "mlir/IR/DialectImplementation.h"
-#include "mlir/IR/OpDefinition.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
+
+#include "mlir/IR/Builders.h"
+#include "mlir/IR/DialectImplementation.h"
+#include "mlir/Transforms/InliningUtils.h"
+#include "mlir/IR/OpDefinition.h"
+
+#include "archgen/Aprox/Aprox.h"
 
 using namespace archgen::aprox;
 
 #include "archgen/Aprox/AproxDialect.cpp.inc"
+
+//===----------------------------------------------------------------------===//
+// AproxDialect Interfacce
+//===----------------------------------------------------------------------===//
+struct AproxInlinerInterface : public mlir::DialectInlinerInterface {
+  using mlir::DialectInlinerInterface::DialectInlinerInterface;
+
+  /// All call operations should get inlined
+  bool isLegalToInline(mlir::Operation *call, mlir::Operation *callable,
+                       bool wouldBeCloned) const final {
+    return true;
+  }
+  bool isLegalToInline(mlir::Operation *, mlir::Region *, bool,
+                       mlir::BlockAndValueMapping &) const final {
+    return true;
+  }
+  bool isLegalToInline(mlir::Region *, mlir::Region *, bool,
+                       mlir::BlockAndValueMapping &) const final {
+    return true;
+  }
+};
 
 //===----------------------------------------------------------------------===//
 // AproxDialect
@@ -30,6 +54,7 @@ void AproxDialect::initialize() {
 #define GET_TYPEDEF_LIST
 #include "archgen/Aprox/AproxType.cpp.inc"
       >();
+  addInterfaces<AproxInlinerInterface>();
 }
 
 //===----------------------------------------------------------------------===//

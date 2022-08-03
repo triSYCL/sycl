@@ -22,6 +22,7 @@
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Transforms/Passes.h"
 
 #include "clang/../../lib/CodeGen/CodeGenModule.h"
 #include "clang/AST/AST.h"
@@ -135,7 +136,9 @@ namespace Annot {
 constexpr llvm::StringLiteral Prefix = "archgen_mlir";
 constexpr llvm::StringLiteral GenericOp = "archgen_mlir_generic_op";
 constexpr llvm::StringLiteral GenAsMLIR = "archgen_mlir_emit_as_mlir";
+constexpr llvm::StringLiteral TopLevel = "archgen_mlir_top_level";
 constexpr llvm::StringLiteral KindConstant = "constant";
+constexpr llvm::StringLiteral KindParam = "parameter";
 
 bool hasAnnotation(clang::Decl *D, llvm::StringRef Annot) {
   return llvm::any_of(
@@ -264,9 +267,15 @@ public:
     if (MLIRFunc)
       return MLIRFunc;
 
+    /// The top-level function need to stay, all the reset should be deleted by
+    /// inlining
+    bool isPrivate = !Annot::hasAnnotation(FD, Annot::TopLevel);
+    mlir::StringAttr visibility =
+        builder.getStringAttr(isPrivate ? "private" : "public");
+
     MLIRFunc = builder.create<mlir::func::FuncOp>(
         loc, CGM.getMangledName(FD).str(),
-        getMLIRType(FD->getType()).cast<mlir::FunctionType>());
+        getMLIRType(FD->getType()).cast<mlir::FunctionType>(), visibility);
     return MLIRFunc;
   }
   mlir::func::FuncOp GetFunc(clang::FunctionDecl *FD) {
@@ -330,11 +339,11 @@ struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
       clang::APValue *Cvalue =
           llvm::cast<clang::VarDecl>(DRExpr->getDecl())->getEvaluatedValue();
       llvm::APFixedPoint FPvalue(Cvalue->getInt(), sema);
+      auto attr =
+          archgen::fixedpt::fixedPointAttr::get(&state.ctx, std::move(FPvalue));
       return state.builder
           .create<archgen::aprox::constantOp>(
-              state.getMLIRLocation(CE->getBeginLoc()),
-              archgen::fixedpt::fixedPointAttr::get(&state.ctx,
-                                                    std::move(FPvalue)))
+              state.getMLIRLocation(CE->getBeginLoc()), attr)
           ->getResults()[0];
     }
 
@@ -361,6 +370,7 @@ struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
 
     mlir::func::FuncOp Callee =
         state.GetFunc(llvm::cast<clang::FunctionDecl>(CE->getCalleeDecl()));
+
     return state.builder
         .create<mlir::func::CallOp>(state.getMLIRLocation(CE->getBeginLoc()),
                                     Callee, Args)
@@ -442,10 +452,6 @@ public:
 
   std::deque<clang::FunctionDecl *> FuncToEmit;
 
-  bool isOurAnnotationAttr(clang::AnnotateAttr *Attr) {
-    return Attr->getAnnotation().startswith("archgen_mlir");
-  }
-
   void addToEmit(clang::FunctionDecl *FD) {
     LLVM_DEBUG(FD->dump(llvm::dbgs()));
     if (ListNotEmit)
@@ -464,23 +470,57 @@ public:
     }
   }
 
-  void RunMLIRPipeline() {
-    mlir::PassManager pm(&state.ctx);
-    
+  /// This is transformation fixes function parameters. it is not generic, it
+  /// exist only because we do not generate parameter properly.
+  /// This is why it is not a pass.
+  void rewriteParameters() {
+    llvm::SmallVector<mlir::Operation *> maybeDelete;
+
+    state.module->walk([&](archgen::aprox::genericOp op) {
+      if (op.action() != Annot::KindParam)
+        return;
+      mlir::func::FuncOp func = llvm::cast<mlir::func::FuncOp>(op->getParentOp());
+      auto constantInt =
+          llvm::cast<mlir::arith::ConstantIntOp>(op->getOperand(0).getDefiningOp());
+      int param_idx =
+          constantInt.getValue().cast<mlir::IntegerAttr>().getInt();
+      op->replaceAllUsesWith(
+          mlir::ValueRange{func.getBody().getArgument(param_idx)});
+
+      /// Order matters.
+      maybeDelete.push_back(op);
+      maybeDelete.push_back(constantInt);
+    });
+    for (auto *op : maybeDelete)
+      if (op->use_empty())
+        op->erase();
   }
 
-  void Finalize() {
+  mlir::LogicalResult runMLIROptimization() {
+    mlir::PassManager pm(&state.ctx);
+    pm.addPass(mlir::createInlinerPass());
+    if (mlir::failed(pm.run(state.module.get())))
+      return mlir::failure();
+    
+    rewriteParameters();
+
+    return mlir::success();
+  }
+
+  mlir::LogicalResult Finalize() {
     for (auto *FD : FuncToEmit) {
       if (FD->getBody())
         FillFunctionBody(FD);
     }
 
-    RunMLIRPipeline();
+    if (mlir::failed(runMLIROptimization()))
+      return mlir::failure();
 
     if (ListNotEmit)
       Lister.dump();
     else
       state.module->dump();
+    return mlir::success();
   }
 
   // Below is the exposed API of clang::ASTConsumer most place just need to
@@ -493,15 +533,19 @@ public:
     return LLVMIRASTConsumer->HandleCXXStaticMemberVarInstantiation(VD);
   }
   bool HandleTopLevelDecl(clang::DeclGroupRef D) override {
-    for (auto Elem : D) {
-      if (auto *FD = llvm::dyn_cast<clang::FunctionDecl>(Elem))
-        if (auto *AA = FD->getAttr<clang::AnnotateAttr>())
-          if (isOurAnnotationAttr(AA)) {
-            addToEmit(FD);
-            continue;
-          }
-    }
-    return LLVMIRASTConsumer->HandleTopLevelDecl(D);
+    if (llvm::any_of(D, [&](auto *E) {
+          return Annot::hasAnnotationStartingWith(E, "archgen_mlir");
+        })) {
+      /// We are assuming here that there the DeclGroupRef conain only code we
+      /// should generate or code that the LLVM backend should generate
+      assert(llvm::all_of(D, [&](auto *E) {
+        return Annot::hasAnnotationStartingWith(E, "archgen_mlir");
+      }));
+      for (auto *E : D)
+        addToEmit(llvm::cast<clang::FunctionDecl>(E));
+      return true;
+    } else
+      return LLVMIRASTConsumer->HandleTopLevelDecl(D);
   }
   void HandleInlineFunctionDefinition(clang::FunctionDecl *D) override {
     return LLVMIRASTConsumer->HandleInlineFunctionDefinition(D);
@@ -510,7 +554,8 @@ public:
     return LLVMIRASTConsumer->HandleInterestingDecl(D);
   }
   void HandleTranslationUnit(clang::ASTContext &Ctx) override {
-    Finalize();
+    if (mlir::failed(Finalize()))
+      return;
     return LLVMIRASTConsumer->HandleTranslationUnit(Ctx);
   }
   void HandleTagDeclDefinition(clang::TagDecl *D) override {

@@ -47,13 +47,13 @@ def FixedPtType
   let extraClassDeclaration = [{
     bool isSigned() const { return getIsSigned(); }
     bool isUnsigned() const { return !isSigned(); }
-    int getWidth() const { return getMsb() - getLsb() + /*width includes both ends*/1; }
+    int getWidth() const { return getMsb() - getLsb() + 1; }
     llvm::FixedPointSemantics getFixedPointSemantics() const;
   }];
   let builders = [
     TypeBuilder<(ins "llvm::FixedPointSemantics":$sema), [{
-    return Base::get($_ctxt, sema.getWidth() - sema.getScale() /*msb-lsb is an inclusive range*/-1,
-                     sema.getScale(), sema.isSigned());
+    return Base::get($_ctxt, sema.getWidth() - sema.getScale() - 1,
+                     -sema.getScale(), sema.isSigned());
   }]>];
 }
 
