@@ -13,15 +13,22 @@
 
 #include "llvm/ADT/BitmaskEnum.h"
 #include "llvm/IR/Module.h"
+#include "llvm/Linker/Linker.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
+#include "llvm/Support/ToolOutputFile.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/CommandLine.h"
 
+#include "mlir/Conversion/Passes.h"
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Pass/PassManager.h"
+#include "mlir/Support/FileUtilities.h"
+#include "mlir/Target/LLVMIR/Dialect/LLVMIR/LLVMToLLVMIRTranslation.h"
+#include "mlir/Target/LLVMIR/Export.h"
 #include "mlir/Transforms/Passes.h"
 
 #include "clang/../../lib/CodeGen/CodeGenModule.h"
@@ -34,12 +41,21 @@
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendPluginRegistry.h"
 
-#include "archgen/Aprox/Aprox.h"
+#include "archgen/Approx/Approx.h"
 #include "archgen/FixedPt/FixedPt.h"
 
-#define DEBUG_TYPE "archgen-mlir"
+using namespace clang;
+using namespace archgen;
+namespace cl = llvm::cl;
+namespace func = mlir::func;
+namespace arith = mlir::arith;
 
+#define DEBUG_TYPE "archgen-mlir"
 namespace {
+
+cl::opt<std::string>
+    MLIROutput("archgen-mlir-mlir-output", cl::init("-"), cl::Optional,
+               cl::desc("MLIR output of the ArchGenMLIR plugin"));
 
 constexpr bool ListNotEmit = false;
 
@@ -83,10 +99,10 @@ public:
       case clang::Decl::Kind::ClassTemplateSpecialization:
         // ClassTemplateSpecializationDecl inherits from CXXRecordDecl
       case clang::Decl::Kind::CXXRecord:
-        Name = llvm::cast<clang::CXXRecordDecl>(Ctx)->getName();
+        Name = cast<clang::CXXRecordDecl>(Ctx)->getName();
         break;
       case clang::Decl::Kind::Namespace:
-        Name = llvm::cast<clang::NamespaceDecl>(Ctx)->getName();
+        Name = cast<clang::NamespaceDecl>(Ctx)->getName();
         break;
       default:
         llvm_unreachable("matchContext: decl kind not supported");
@@ -107,7 +123,7 @@ public:
 
     if (!RecTy)
       return false; // only classes/structs supported
-    const auto *Ctx = llvm::cast<clang::DeclContext>(RecTy);
+    const auto *Ctx = cast<clang::DeclContext>(RecTy);
     return Util::matchContext(Ctx, Scopes);
   }
 
@@ -158,9 +174,10 @@ bool hasAnnotationStartingWith(clang::Decl *D, llvm::StringRef Annot) {
 class MLIRGenState {
   void InitMLIR() {
     ctx.disableMultithreading();
-    ctx.loadDialect<mlir::LLVM::LLVMDialect, mlir::arith::ArithmeticDialect,
-                    mlir::func::FuncDialect, archgen::aprox::AproxDialect,
-                    archgen::fixedpt::FixedPtDialect>();
+    ctx.loadDialect<mlir::LLVM::LLVMDialect, arith::ArithmeticDialect,
+                    func::FuncDialect, approx::ApproxDialect,
+                    fixedpt::FixedPtDialect>();
+    mlir::registerLLVMDialectTranslation(ctx);
 
     builder.setInsertionPointToStart(module->getBody());
   }
@@ -173,7 +190,7 @@ public:
   clang::ASTContext &ASTctx;
   clang::SourceManager &SM;
   clang::CodeGen::CodeGenModule CGM;
-  llvm::DenseMap<clang::FunctionDecl *, mlir::func::FuncOp> FunctionMap;
+  llvm::DenseMap<clang::FunctionDecl *, func::FuncOp> FunctionMap;
 
   MLIRGenState(clang::CompilerInstance &CI, llvm::Module *LLVMModule)
       : builder(&ctx), loc(builder.getUnknownLoc()),
@@ -198,7 +215,7 @@ public:
   }
 
   const clang::TemplateArgumentList &getTemplateArgList(clang::QualType Ty) {
-    return llvm::cast<clang::ClassTemplateSpecializationDecl>(
+    return cast<clang::ClassTemplateSpecializationDecl>(
                Ty->getAsRecordDecl())
         ->getTemplateArgs();
   }
@@ -215,7 +232,7 @@ public:
     int lsb = TAL2.get(1).getAsIntegral().getExtValue();
     bool is_signed = TAL2.get(2).getAsType()->isSignedIntegerType();
 
-    return archgen::fixedpt::fixedPtType::get(&ctx, msb, lsb, is_signed);
+    return fixedpt::fixedPtType::get(&ctx, msb, lsb, is_signed);
   }
 
   mlir::Type getMLIRType(clang::QualType Cqtype) {
@@ -224,13 +241,13 @@ public:
 
     if (Util::isArchGenType(Cqdesugar, "ToBeFolded",
                             TypeLookupOpt::isInDetailNamespace))
-      return archgen::aprox::toBeFoldedType::get(&ctx);
+      return approx::toBeFoldedType::get(&ctx);
     if (Util::isArchGenType(Cqdesugar, "FixedNumber",
                             TypeLookupOpt::isTemplate))
       return getFixedPointType(Cqdesugar);
 
     auto *Ctype = Cqdesugar->getUnqualifiedDesugaredType();
-    if (auto *BT = llvm::dyn_cast<clang::BuiltinType>(Ctype)) {
+    if (auto *BT = dyn_cast<clang::BuiltinType>(Ctype)) {
       if (Ctype->isBooleanType())
         return builder.getIntegerType(8);
       llvm::Type *T = CGM.getTypes().ConvertType(Cqtype);
@@ -244,11 +261,11 @@ public:
         return builder.getF80Type();
       if (T->isFP128Ty())
         return builder.getF128Type();
-      if (auto IT = llvm::dyn_cast<llvm::IntegerType>(T))
+      if (auto IT = dyn_cast<llvm::IntegerType>(T))
         return builder.getIntegerType(IT->getBitWidth());
     }
 
-    if (auto *FT = llvm::dyn_cast<clang::FunctionProtoType>(Ctype)) {
+    if (auto *FT = dyn_cast<clang::FunctionProtoType>(Ctype)) {
       llvm::SmallVector<mlir::Type> Args;
       llvm::transform(FT->param_types(), std::back_inserter(Args),
                       [&](clang::QualType Elem) { return getMLIRType(Elem); });
@@ -262,7 +279,7 @@ public:
     llvm_unreachable("unhandeled type");
   }
 
-  mlir::func::FuncOp GetOrCreateFunc(clang::FunctionDecl *FD) {
+  func::FuncOp GetOrCreateFunc(clang::FunctionDecl *FD) {
     auto &MLIRFunc = FunctionMap[FD];
     if (MLIRFunc)
       return MLIRFunc;
@@ -273,12 +290,12 @@ public:
     mlir::StringAttr visibility =
         builder.getStringAttr(isPrivate ? "private" : "public");
 
-    MLIRFunc = builder.create<mlir::func::FuncOp>(
+    MLIRFunc = builder.create<func::FuncOp>(
         loc, CGM.getMangledName(FD).str(),
         getMLIRType(FD->getType()).cast<mlir::FunctionType>(), visibility);
     return MLIRFunc;
   }
-  mlir::func::FuncOp GetFunc(clang::FunctionDecl *FD) {
+  func::FuncOp GetFunc(clang::FunctionDecl *FD) {
     auto &MLIRFunc = FunctionMap[FD];
     assert(MLIRFunc);
     return MLIRFunc;
@@ -289,7 +306,7 @@ struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
   using Base = clang::StmtVisitor<MLIREmiter, mlir::Value>;
   MLIRGenState &state;
   MLIREmiter(MLIRGenState &s) : state(s) {}
-  void Emit(clang::FunctionDecl *FD, mlir::func::FuncOp MLIRFunc) {
+  void Emit(clang::FunctionDecl *FD, func::FuncOp MLIRFunc) {
     mlir::Block *block = MLIRFunc.addEntryBlock();
     state.builder.setInsertionPointToStart(block);
     Visit(FD->getBody());
@@ -304,7 +321,7 @@ struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
   mlir::Value VisitIntegerLiteral(clang::IntegerLiteral *IL) {
     mlir::Type MLIRType = state.getMLIRType(IL->getType());
     return state.builder
-        .create<mlir::arith::ConstantIntOp>(
+        .create<arith::ConstantIntOp>(
             state.getMLIRLocation(IL->getLocation()),
             IL->getValue().getZExtValue(), MLIRType)
         ->getResult(0);
@@ -318,11 +335,11 @@ struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
   mlir::Value VisitGenericOpCall(clang::CallExpr *CE) {
     assert(Annot::hasAnnotation(CE->getCalleeDecl(), Annot::GenericOp));
     llvm::StringRef Kind =
-        llvm::cast<clang::StringLiteral>(CE->getArg(0)->IgnoreImplicit())
+        cast<clang::StringLiteral>(CE->getArg(0)->IgnoreImplicit())
             ->getString();
 
     auto buildGenericOp = [&](auto &&args) {
-      return state.builder.create<archgen::aprox::genericOp>(
+      return state.builder.create<approx::genericOp>(
           state.getMLIRLocation(CE->getBeginLoc()),
           mlir::TypeRange{state.getMLIRType(CE->getType())}, args, Kind);
     };
@@ -330,19 +347,19 @@ struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
     if (Kind == Annot::KindConstant) {
       llvm::FixedPointSemantics sema =
           state.getMLIRType(CE->getArg(1)->getType())
-              .cast<archgen::fixedpt::fixedPtType>()
+              .cast<fixedpt::fixedPtType>()
               .getFixedPointSemantics();
-      auto *DRExpr = llvm::cast<clang::DeclRefExpr>(
-          *llvm::cast<clang::CXXTemporaryObjectExpr>(CE->getArg(1))
+      auto *DRExpr = cast<clang::DeclRefExpr>(
+          *cast<clang::CXXTemporaryObjectExpr>(CE->getArg(1))
                ->children()
                .begin());
       clang::APValue *Cvalue =
-          llvm::cast<clang::VarDecl>(DRExpr->getDecl())->getEvaluatedValue();
+          cast<clang::VarDecl>(DRExpr->getDecl())->getEvaluatedValue();
       llvm::APFixedPoint FPvalue(Cvalue->getInt(), sema);
       auto attr =
-          archgen::fixedpt::fixedPointAttr::get(&state.ctx, std::move(FPvalue));
+          fixedpt::fixedPointAttr::get(&state.ctx, std::move(FPvalue));
       return state.builder
-          .create<archgen::aprox::constantOp>(
+          .create<approx::constantOp>(
               state.getMLIRLocation(CE->getBeginLoc()), attr)
           ->getResults()[0];
     }
@@ -355,30 +372,24 @@ struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
   }
 
   mlir::Value VisitCallExpr(clang::CallExpr *CE) {
-    if (Annot::hasAnnotationStartingWith(CE->getCalleeDecl(), Annot::Prefix) &&
-        !Annot::hasAnnotation(CE->getCalleeDecl(), Annot::GenAsMLIR)) {
-      if (Annot::hasAnnotation(CE->getCalleeDecl(), Annot::GenericOp))
-        return VisitGenericOpCall(CE);
-
-      CE->dump();
-      llvm_unreachable("unhandeled archgen_mlir call");
-    }
+    if (Annot::hasAnnotation(CE->getCalleeDecl(), Annot::GenericOp))
+      return VisitGenericOpCall(CE);
 
     llvm::SmallVector<mlir::Value> Args;
     for (auto *E : CE->arguments())
       Args.push_back(Visit(E));
 
-    mlir::func::FuncOp Callee =
-        state.GetFunc(llvm::cast<clang::FunctionDecl>(CE->getCalleeDecl()));
+    func::FuncOp Callee =
+        state.GetFunc(cast<clang::FunctionDecl>(CE->getCalleeDecl()));
 
     return state.builder
-        .create<mlir::func::CallOp>(state.getMLIRLocation(CE->getBeginLoc()),
+        .create<func::CallOp>(state.getMLIRLocation(CE->getBeginLoc()),
                                     Callee, Args)
         ->getResults()[0];
   }
   mlir::Value VisitReturnStmt(clang::ReturnStmt *RS) {
     mlir::Value val = Visit(RS->getRetValue());
-    state.builder.create<mlir::func::ReturnOp>(
+    state.builder.create<func::ReturnOp>(
         state.getMLIRLocation(RS->getReturnLoc()), val);
     return {};
   }
@@ -415,7 +426,7 @@ struct ASTLister : clang::StmtVisitor<ASTLister, void> {
   }
 
   void VisitStmt(clang::Stmt *S) {
-    if (auto *E = llvm::dyn_cast<clang::Expr>(S))
+    if (auto *E = dyn_cast<clang::Expr>(S))
       addType(E->getType(), E->getExprLoc());
     if (Stmts.insert(S->getStmtClass()).second) {
       S->dump(StmtOS, state.ASTctx);
@@ -443,17 +454,21 @@ class ArchGenMLIRConsumer : public clang::ASTConsumer {
   ASTLister Lister;
 
 public:
-  ArchGenMLIRConsumer(clang::CompilerInstance &CI,
+  ArchGenMLIRConsumer(clang::CompilerInstance &CompilerInstance,
                       std::unique_ptr<clang::ASTConsumer> Consumer,
                       llvm::Module *LLVMModule)
-      : CI(CI), LLVMIRASTConsumer(std::move(Consumer)), LLVMModule(LLVMModule),
-        LLVMCtx(&LLVMModule->getContext()), state(CI, LLVMModule),
-        Visitor(state), Lister(state) {}
+      : CI(CompilerInstance), LLVMIRASTConsumer(std::move(Consumer)),
+        LLVMModule(LLVMModule), LLVMCtx(&LLVMModule->getContext()),
+        state(CI, LLVMModule), Visitor(state), Lister(state) {}
 
   std::deque<clang::FunctionDecl *> FuncToEmit;
 
   void addToEmit(clang::FunctionDecl *FD) {
-    LLVM_DEBUG(FD->dump(llvm::dbgs()));
+    LLVM_DEBUG({
+      if (Annot::hasAnnotation(FD, Annot::TopLevel))
+        llvm::dbgs() << "top-level: \n";
+      FD->dump(llvm::dbgs());
+    });
     if (ListNotEmit)
       Lister.addType(FD->getType(), FD->getLocation());
     else
@@ -465,7 +480,7 @@ public:
     if (ListNotEmit)
       Lister.VisitStmt(FD->getBody());
     else {
-      mlir::func::FuncOp MLIRFunc = state.GetOrCreateFunc(FD);
+      func::FuncOp MLIRFunc = state.GetOrCreateFunc(FD);
       Visitor.Emit(FD, MLIRFunc);
     }
   }
@@ -476,12 +491,12 @@ public:
   void rewriteParameters() {
     llvm::SmallVector<mlir::Operation *> maybeDelete;
 
-    state.module->walk([&](archgen::aprox::genericOp op) {
+    state.module->walk([&](approx::genericOp op) {
       if (op.action() != Annot::KindParam)
         return;
-      mlir::func::FuncOp func = llvm::cast<mlir::func::FuncOp>(op->getParentOp());
+      func::FuncOp func = cast<func::FuncOp>(op->getParentOp());
       auto constantInt =
-          llvm::cast<mlir::arith::ConstantIntOp>(op->getOperand(0).getDefiningOp());
+          cast<arith::ConstantIntOp>(op->getOperand(0).getDefiningOp());
       int param_idx =
           constantInt.getValue().cast<mlir::IntegerAttr>().getInt();
       op->replaceAllUsesWith(
@@ -496,14 +511,87 @@ public:
         op->erase();
   }
 
-  mlir::LogicalResult runMLIROptimization() {
-    mlir::PassManager pm(&state.ctx);
-    pm.addPass(mlir::createInlinerPass());
-    if (mlir::failed(pm.run(state.module.get())))
-      return mlir::failure();
-    
+  /// This is temproray just to test interation of MLIR and LLVMIR code.
+  void replaceByGenerableMLIR() {
+    auto replaceTypeImpl = [&](mlir::Type ty,
+                               auto &replacerImpl) -> mlir::Type {
+      auto replacer = [&](mlir::Type inner) -> mlir::Type {
+        return replacerImpl(inner, replacerImpl);
+      };
+      if (auto funcTy = ty.dyn_cast<mlir::FunctionType>()) {
+        SmallVector<mlir::Type> subTy;
+        llvm::transform(funcTy.getInputs(), std::back_inserter(subTy),
+                        replacer);
+        return mlir::FunctionType::get(&state.ctx, subTy,
+                                       replacer(funcTy.getResult(0)));
+      }
+      if (auto fixedPt = ty.dyn_cast<fixedpt::fixedPtType>())
+        return mlir::IntegerType::get(&state.ctx, fixedPt.getWidth());
+      return ty;
+    };
+
+    auto replaceType = [&](mlir::Type ty) {
+      return replaceTypeImpl(ty, replaceTypeImpl);
+    };
+
+    state.module->walk([&](func::FuncOp op) {
+      mlir::FunctionType newTy = replaceType(op.getFunctionType()).cast<mlir::FunctionType>();
+      llvm::StringRef str = op.getSymName();
+      mlir::Location loc = op.getLoc();
+
+      op.erase();
+
+      state.builder.setInsertionPointToStart(&state.module->getRegion().front());
+      auto newFunc = state.builder.create<func::FuncOp>(loc, str, newTy);
+      mlir::Block* b = newFunc.addEntryBlock();
+      state.builder.setInsertionPointToStart(b);
+      auto Constant = state.builder.create<arith::ConstantIntOp>(
+          state.builder.getUnknownLoc(), 17,
+          newFunc.getFunctionType().getResult(0));
+      state.builder.create<func::ReturnOp>(state.builder.getUnknownLoc(),
+                                           Constant.getResult());
+    });
+  }
+
+  mlir::LogicalResult runMLIROptimizationAndLowering() {
+    {
+      mlir::PassManager pm(&state.ctx);
+      pm.addPass(mlir::createInlinerPass());
+      if (mlir::failed(pm.run(state.module.get())))
+        return mlir::failure();
+    }
     rewriteParameters();
 
+    std::unique_ptr<llvm::ToolOutputFile> outputFile =
+        mlir::openOutputFile(MLIROutput);
+    state.module->print(outputFile->os());
+
+    /// This shouldd get replaced by Approx lowering and FixedPt lowering
+    replaceByGenerableMLIR();
+
+    state.module->dump();
+    {
+      mlir::PassManager pm(&state.ctx);
+      pm.addPass(arith::createConvertArithmeticToLLVMPass());
+      pm.addPass(mlir::createConvertFuncToLLVMPass());
+      pm.addPass(mlir::createReconcileUnrealizedCastsPass());
+      if (mlir::failed(pm.run(state.module.get())))
+        return mlir::failure();
+    }
+
+    return mlir::success();
+  }
+
+  mlir::LogicalResult mergeMLIRintoLLVMIR() {
+    std::unique_ptr<llvm::Module> MLIRLLVMModule =
+        mlir::translateModuleToLLVMIR(state.module.get(), *LLVMCtx);
+    if (!MLIRLLVMModule)
+      return mlir::failure();
+
+    MLIRLLVMModule->setDataLayout(LLVMModule->getDataLayout());
+    MLIRLLVMModule->setTargetTriple(LLVMModule->getTargetTriple());
+
+    llvm::Linker::linkModules(*LLVMModule, std::move(MLIRLLVMModule));
     return mlir::success();
   }
 
@@ -513,7 +601,10 @@ public:
         FillFunctionBody(FD);
     }
 
-    if (mlir::failed(runMLIROptimization()))
+    if (mlir::failed(runMLIROptimizationAndLowering()))
+      return mlir::failure();
+
+    if (mlir::failed(mergeMLIRintoLLVMIR()))
       return mlir::failure();
 
     if (ListNotEmit)
@@ -534,15 +625,15 @@ public:
   }
   bool HandleTopLevelDecl(clang::DeclGroupRef D) override {
     if (llvm::any_of(D, [&](auto *E) {
-          return Annot::hasAnnotationStartingWith(E, "archgen_mlir");
+          return Annot::hasAnnotation(E, Annot::GenAsMLIR);
         })) {
       /// We are assuming here that there the DeclGroupRef conain only code we
       /// should generate or code that the LLVM backend should generate
       assert(llvm::all_of(D, [&](auto *E) {
-        return Annot::hasAnnotationStartingWith(E, "archgen_mlir");
+        return Annot::hasAnnotation(E, Annot::GenAsMLIR);
       }));
       for (auto *E : D)
-        addToEmit(llvm::cast<clang::FunctionDecl>(E));
+        addToEmit(cast<clang::FunctionDecl>(E));
       return true;
     } else
       return LLVMIRASTConsumer->HandleTopLevelDecl(D);
@@ -664,12 +755,3 @@ public:
 
 static clang::FrontendPluginRegistry::Add<ArchGenMLIRAction>
     X("archgen-mlir", "generate approximations in mlir");
-
-/*
-ongoing issues:
-  - annotate_type doesnt have the behavior I expected:
-    - it is lost througt template paramters.
-    - the AnnortateTypeAttr is only accessible from a TypeLoc.
-  - how will MLIR/LLVMIR boundry look like.
-
-*/

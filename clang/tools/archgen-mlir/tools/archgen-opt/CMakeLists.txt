@@ -20,8 +20,8 @@ set(ARCHGEN_OPT_LIBS
   MLIRTransformUtils
   MLIRSupport
   MLIRIR
-  ArchGenAprox
-  ArchGenFixedPt
+  ArchGenMLIRApprox
+  ArchGenMLIRFixedPt
   )
 
 add_llvm_tool(archgen-opt

@@ -20,7 +20,7 @@
 #include "mlir/Support/FileUtilities.h"
 #include "mlir/Tools/mlir-opt/MlirOptMain.h"
 
-#include "archgen/Aprox/Aprox.h"
+#include "archgen/Approx/Approx.h"
 #include "archgen/FixedPt/FixedPt.h"
 
 int main(int argc, char **argv) {
@@ -28,7 +28,7 @@ int main(int argc, char **argv) {
 
   mlir::DialectRegistry registry;
   mlir::registerAllDialects(registry);
-  registry.insert<archgen::aprox::AproxDialect>();
+  registry.insert<archgen::approx::ApproxDialect>();
   registry.insert<archgen::fixedpt::FixedPtDialect>();
 
   return mlir::asMainReturnCode(

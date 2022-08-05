@@ -1,4 +1,4 @@
-//===- Aprox.cpp - Aprox Dialect ------------------------------------------===//
+//===- Approx.cpp - Approx Dialect ------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -14,16 +14,16 @@
 #include "mlir/Transforms/InliningUtils.h"
 #include "mlir/IR/OpDefinition.h"
 
-#include "archgen/Aprox/Aprox.h"
+#include "archgen/Approx/Approx.h"
 
-using namespace archgen::aprox;
+using namespace archgen::approx;
 
-#include "archgen/Aprox/AproxDialect.cpp.inc"
+#include "archgen/Approx/ApproxDialect.cpp.inc"
 
 //===----------------------------------------------------------------------===//
-// AproxDialect Interfacce
+// ApproxDialect Interfacce
 //===----------------------------------------------------------------------===//
-struct AproxInlinerInterface : public mlir::DialectInlinerInterface {
+struct ApproxInlinerInterface : public mlir::DialectInlinerInterface {
   using mlir::DialectInlinerInterface::DialectInlinerInterface;
 
   /// All call operations should get inlined
@@ -42,19 +42,19 @@ struct AproxInlinerInterface : public mlir::DialectInlinerInterface {
 };
 
 //===----------------------------------------------------------------------===//
-// AproxDialect
+// ApproxDialect
 //===----------------------------------------------------------------------===//
 
-void AproxDialect::initialize() {
+void ApproxDialect::initialize() {
   addOperations<
 #define GET_OP_LIST
-#include "archgen/Aprox/AproxOps.cpp.inc"
+#include "archgen/Approx/ApproxOps.cpp.inc"
       >();
   addTypes<
 #define GET_TYPEDEF_LIST
-#include "archgen/Aprox/AproxType.cpp.inc"
+#include "archgen/Approx/ApproxType.cpp.inc"
       >();
-  addInterfaces<AproxInlinerInterface>();
+  addInterfaces<ApproxInlinerInterface>();
 }
 
 //===----------------------------------------------------------------------===//
@@ -62,7 +62,7 @@ void AproxDialect::initialize() {
 //===----------------------------------------------------------------------===//
 
 #define GET_OP_CLASSES
-#include "archgen/Aprox/AproxOps.cpp.inc"
+#include "archgen/Approx/ApproxOps.cpp.inc"
 
 void constantOp::build(mlir::OpBuilder &odsBuilder,
                        mlir::OperationState &odsState,
@@ -76,4 +76,4 @@ void constantOp::build(mlir::OpBuilder &odsBuilder,
 //===----------------------------------------------------------------------===//
 
 #define GET_TYPEDEF_CLASSES
-#include "archgen/Aprox/AproxType.cpp.inc"
+#include "archgen/Approx/ApproxType.cpp.inc"

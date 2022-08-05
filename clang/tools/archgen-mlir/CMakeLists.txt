@@ -36,8 +36,14 @@ set(ARCHGEN_PLUGIN_LIBS
   MLIRPass
   MLIRTransforms
   MLIRSupport
-  ArchGenAprox
-  ArchGenFixedPt
+  ArchGenMLIRApprox
+  ArchGenMLIRFixedPt
+  MLIRArithmeticToLLVM
+  MLIRFuncToLLVM
+  MLIRTargetLLVMIRExport
+  MLIRLLVMToLLVMIRTranslation
+  MLIRReconcileUnrealizedCasts
+  LLVMLinker
 )
 
 llvm_add_library(

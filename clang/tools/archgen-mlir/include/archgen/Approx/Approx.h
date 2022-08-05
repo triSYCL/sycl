@@ -12,14 +12,15 @@
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dialect.h"
+
 #include "archgen/FixedPt/FixedPt.h"
 
-#include "archgen/Aprox/AproxDialect.h.inc"
+#include "archgen/Approx/ApproxDialect.h.inc"
 
 #define GET_TYPEDEF_CLASSES
-#include "archgen/Aprox/AproxType.h.inc"
+#include "archgen/Approx/ApproxType.h.inc"
 
 #define GET_OP_CLASSES
-#include "archgen/Aprox/AproxOps.h.inc"
+#include "archgen/Approx/ApproxOps.h.inc"
 
 #endif // ARCHGEN_APROX_DILECT_H

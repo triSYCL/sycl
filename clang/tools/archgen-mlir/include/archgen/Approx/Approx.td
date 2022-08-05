@@ -13,29 +13,28 @@ include "mlir/IR/OpBase.td"
 include "mlir/IR/AttrTypeBase.td"
 include "archgen/FixedPt/FixedPtBase.td"
 
-def Aprox_Dialect : Dialect {
-  let summary = "Dialect to represent aproximated expression";
-  let name = "aprox";
-  let dependentDialects = ["::archgen::fixedpt::FixedPtDialect"];
-  let cppNamespace = "::archgen::aprox";
+def Approx_Dialect : Dialect {
+  let summary = "Dialect to represent approximated expression";
+  let name = "approx";
+  let cppNamespace = "::archgen::approx";
   let useDefaultTypePrinterParser = 1;
 }
 
 // Base class for Func dialect ops.
-class Aprox_Op<string mnemonic, list<Trait> traits = []> :
-    Op<Aprox_Dialect, mnemonic, traits>;
+class Approx_Op<string mnemonic, list<Trait> traits = []> :
+    Op<Approx_Dialect, mnemonic, traits>;
 
-class Aprox_Type<string name, string typeMnemonic, list<Trait> traits = []>
-    : TypeDef<Aprox_Dialect, name, traits> {
+class Approx_Type<string name, string typeMnemonic, list<Trait> traits = []>
+    : TypeDef<Approx_Dialect, name, traits> {
   let mnemonic = typeMnemonic;
 }
 
 /// A TypeAttr for ToBeFolded types.
 def ToBeFoldedType
-    : Aprox_Type<"toBeFolded", "toBeFolded"> {
+    : Approx_Type<"toBeFolded", "toBeFolded"> {
 }
 
-def Aprox_genericOp : Aprox_Op<"generic"> {
+def Approx_genericOp : Approx_Op<"generic"> {
   let arguments = (ins
     Variadic<AnyType>: $inputs,
     StrAttr: $action
@@ -43,15 +42,14 @@ def Aprox_genericOp : Aprox_Op<"generic"> {
   let results = (outs Variadic<AnyType>: $outputs);
 }
 
-def Aprox_constantOp : Aprox_Op<"constant"> {
+def Approx_constantOp : Approx_Op<"constant"> {
   let arguments = (ins
-    FixedPtAttr: $value
+    FixedPtAttr: $valueAttr
   );
-  let results = (outs ToBeFoldedType);
+  let results = (outs ToBeFoldedType: $result);
   let extraClassDeclaration = [{
     static void build(::mlir::OpBuilder &odsBuilder, ::mlir::OperationState &odsState, ::archgen::fixedpt::fixedPointAttr value);
   }];
-  
 }
 
 #endif

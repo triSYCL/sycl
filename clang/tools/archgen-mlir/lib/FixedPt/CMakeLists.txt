@@ -1,11 +1,13 @@
-add_mlir_dialect_library(ArchGenFixedPt
-FixedPt.cpp
+add_mlir_dialect_library(ArchGenMLIRFixedPt
+  EXCLUDE_FROM_LIBMLIR
+  FixedPt.cpp
 
-ADDITIONAL_HEADER_DIRS
+  ADDITIONAL_HEADER_DIRS
 
-DEPENDS
-ArchGenFixedPtIncGen
+  DEPENDS
+  ArchGenMLIRFixedPtIncGen
 
-LINK_LIBS PUBLIC
-MLIRIR
-)
+  LINK_LIBS PUBLIC
+  MLIRIR
+  MLIRInferTypeOpInterface
+  )

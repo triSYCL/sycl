@@ -21,8 +21,8 @@ set(ARCHGEN_LSP_LIBS
   MLIRTransformUtils
   MLIRSupport
   MLIRIR
-  ArchGenAprox
-  ArchGenFixedPt
+  ArchGenMLIRApprox
+  ArchGenMLIRFixedPt
   )
 
 add_llvm_tool(archgen-lsp-server

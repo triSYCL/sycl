@@ -6,13 +6,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef ARCHGEN_FIXEDPT_DILECT_H
-#define ARCHGEN_FIXEDPT_DILECT_H
+#ifndef ARCHGEN_FIXEDPT_H
+#define ARCHGEN_FIXEDPT_H
+
+#include "llvm/ADT/APFixedPoint.h"
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dialect.h"
-#include "llvm/ADT/APFixedPoint.h"
+#include "mlir/Interfaces/InferTypeOpInterface.h"
 
 #include "archgen/FixedPt/FixedPtDialect.h.inc"
 

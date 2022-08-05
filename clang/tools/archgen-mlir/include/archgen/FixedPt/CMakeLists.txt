@@ -7,6 +7,4 @@ mlir_tablegen(FixedPtAttr.h.inc -gen-attrdef-decls)
 mlir_tablegen(FixedPtAttr.cpp.inc -gen-attrdef-defs)
 mlir_tablegen(FixedPtDialect.h.inc -gen-dialect-decls)
 mlir_tablegen(FixedPtDialect.cpp.inc -gen-dialect-defs)
-add_public_tablegen_target(ArchGenFixedPtIncGen)
-
-add_mlir_doc(FixedPt FixedPt Dialects/ -gen-op-doc)
+add_public_tablegen_target(ArchGenMLIRFixedPtIncGen)

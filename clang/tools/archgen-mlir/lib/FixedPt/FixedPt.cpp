@@ -81,6 +81,30 @@ llvm::FixedPointSemantics fixedPtType::getFixedPointSemantics() const {
                                    /*hasUnsignedPadding*/ false);
 }
 
+mlir::Type fixedPtType::parse(mlir::AsmParser &odsParser) {
+  int msb;
+  int lsb;
+  std::string sign;
+  if (odsParser.parseLess() || odsParser.parseInteger(msb) ||
+      odsParser.parseComma() || odsParser.parseInteger(lsb) ||
+      odsParser.parseComma() || odsParser.parseString(&sign) ||
+      odsParser.parseGreater()) {
+    odsParser.emitError(odsParser.getNameLoc(), "failed to parse fixedPtType");
+    return {};
+  }
+  if (sign != "signed" && sign != "unsigned") {
+    odsParser.emitError(odsParser.getNameLoc(),
+                        "expected signed or unsigned got " + sign);
+  }
+  bool isSigned = (sign == "signed");
+  return fixedPtType::get(odsParser.getContext(), msb, lsb, isSigned);
+}
+
+void fixedPtType::print(mlir::AsmPrinter &odsPrinter) const {
+  odsPrinter << "<" << getMsb() << ", " << getLsb() << ", \""
+             << (isSigned() ? "signed" : "unsigned") << "\">";
+}
+
 //===----------------------------------------------------------------------===//
 // Fixed Point attribute definitions
 //===----------------------------------------------------------------------===//
@@ -88,9 +112,9 @@ llvm::FixedPointSemantics fixedPtType::getFixedPointSemantics() const {
 mlir::Attribute fixedPointAttr::parse(mlir::AsmParser &odsParser,
                                       mlir::Type odsType) {
   mlir::Type ty;
-  llvm::APInt IntPart;
+  llvm::APInt rawInt;
   std::string text;
-  if (odsParser.parseLess() || odsParser.parseInteger(IntPart) ||
+  if (odsParser.parseLess() || odsParser.parseInteger(rawInt) ||
       odsParser.parseComma() || odsParser.parseType(ty) ||
       odsParser.parseComma() || odsParser.parseString(&text) ||
       odsParser.parseGreater()) {
@@ -98,7 +122,9 @@ mlir::Attribute fixedPointAttr::parse(mlir::AsmParser &odsParser,
                         "failed to parse fixedPointAttr");
     return {};
   }
-  llvm::APFixedPoint value(IntPart,
+  llvm::APInt intPart = rawInt.zextOrTrunc(ty.cast<fixedPtType>().getWidth());
+  assert(rawInt == intPart.zextOrTrunc(rawInt.getBitWidth()));
+  llvm::APFixedPoint value(intPart,
                            ty.cast<fixedPtType>().getFixedPointSemantics());
   assert(text == value.toString() && "textual value should match");
   return fixedPointAttr::get(odsParser.getContext(), std::move(value));
