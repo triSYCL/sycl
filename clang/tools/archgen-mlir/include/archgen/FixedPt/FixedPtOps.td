@@ -15,18 +15,17 @@ include "mlir/Interfaces/InferTypeOpInterface.td"
 class FixedPt_Op<string mnemonic, list<Trait> traits = []> :
     Op<FixedPt_Dialect, mnemonic, traits>;
 
-class FixedPt_binOp<string mnemonic, list<Trait> traits = []> : FixedPt_Op<mnemonic, traits  # [SameOperandsAndResultType]> {
+class FixedPt_binOp<string mnemonic, list<Trait> traits = []> : FixedPt_Op<mnemonic, traits> {
   let arguments = (ins
     AnyFixedPt: $rhs,
     AnyFixedPt: $lhs
   );
   let results = (outs AnyFixedPt: $result);
-  let assemblyFormat = "$rhs `,` $lhs `:` type($result) attr-dict";
 }
 
-def FixedPt_addOp : FixedPt_binOp<"add">;
-def FixedPt_mulOp : FixedPt_binOp<"mul">;
+def FixedPt_addOp : FixedPt_binOp<"add", [Commutative]>;
 def FixedPt_subOp : FixedPt_binOp<"sub">;
+def FixedPt_mulOp : FixedPt_binOp<"mul", [Commutative]>;
 def FixedPt_divOp : FixedPt_binOp<"div">;
 def FixedPt_modOp : FixedPt_binOp<"mod">;
 

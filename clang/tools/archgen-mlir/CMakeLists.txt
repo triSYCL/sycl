@@ -1,4 +1,6 @@
 
+set(ARCHGEN_SOURCE_DIR ${CMAKE_CURRENT_SOURCE_DIR})
+
 # Find MLIR directories
 set(MLIR_MAIN_SRC_DIR ${LLVM_MAIN_SRC_DIR}/../mlir )
 set(MLIR_MAIN_INCLUDE_DIR ${MLIR_MAIN_SRC_DIR}/include )
@@ -67,9 +69,11 @@ llvm_add_library(
 target_include_directories(ArchGenMLIRPlugin PRIVATE ${MLIR_MAIN_INCLUDE_DIR})
 target_include_directories(ArchGenMLIRPlugin PRIVATE ${MLIR_TABLEGEN_OUTPUT_DIR})
 
-add_custom_target(ArchGenMLIR DEPENDS
+add_custom_target(archgen DEPENDS
   archgen-opt
   archgen-lsp-server
   ArchGenMLIRPlugin
   clang
   )
+
+add_subdirectory(test)

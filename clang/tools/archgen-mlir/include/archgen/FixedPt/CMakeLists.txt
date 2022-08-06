@@ -1,4 +1,4 @@
-set(LLVM_TARGET_DEFINITIONS FixedPt.td)
+set(LLVM_TARGET_DEFINITIONS FixedPtOps.td)
 mlir_tablegen(FixedPtOps.h.inc -gen-op-decls)
 mlir_tablegen(FixedPtOps.cpp.inc -gen-op-defs)
 mlir_tablegen(FixedPtType.h.inc -gen-typedef-decls)

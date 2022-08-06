@@ -57,6 +57,23 @@ cl::opt<std::string>
     MLIROutput("archgen-mlir-mlir-output", cl::init("-"), cl::Optional,
                cl::desc("MLIR output of the ArchGenMLIR plugin"));
 
+cl::opt<bool>
+    DontLinkMLIR("archgen-mlir-dont-link-mlir", cl::init(false), cl::Optional,
+                 cl::desc("do not link the MLIR output into the LLVM IR"));
+
+mlir::LogicalResult outputMLIR(llvm::StringRef file, mlir::ModuleOp module) {
+  std::string errorMessage;
+  std::unique_ptr<llvm::ToolOutputFile> outputFile =
+      mlir::openOutputFile(file, &errorMessage);
+  if (!outputFile) {
+    llvm::errs() << errorMessage << "\n";
+    return mlir::failure();
+  }
+  outputFile->keep();
+  module->print(outputFile->os());
+  return mlir::success();
+}
+
 constexpr bool ListNotEmit = false;
 
 LLVM_ENABLE_BITMASK_ENUMS_IN_NAMESPACE();
@@ -179,12 +196,15 @@ class MLIRGenState {
                     fixedpt::FixedPtDialect>();
     mlir::registerLLVMDialectTranslation(ctx);
 
-    builder.setInsertionPointToStart(module->getBody());
+    Declbuilder.setInsertionPointToStart(module->getBody());
+    builder.clearInsertionPoint();
   }
 
+  std::deque<clang::FunctionDecl *> FuncToEmit;
 public:
   mlir::MLIRContext ctx;
   mlir::OpBuilder builder;
+  mlir::OpBuilder Declbuilder;
   mlir::Location loc;
   mlir::OwningOpRef<mlir::ModuleOp> module;
   clang::ASTContext &ASTctx;
@@ -193,7 +213,7 @@ public:
   llvm::DenseMap<clang::FunctionDecl *, func::FuncOp> FunctionMap;
 
   MLIRGenState(clang::CompilerInstance &CI, llvm::Module *LLVMModule)
-      : builder(&ctx), loc(builder.getUnknownLoc()),
+      : builder(&ctx), Declbuilder(&ctx), loc(builder.getUnknownLoc()),
         module(mlir::ModuleOp::create(loc)), ASTctx(CI.getASTContext()),
         SM(CI.getSourceManager()),
         CGM(CI.getASTContext(),
@@ -205,6 +225,7 @@ public:
   MLIRGenState(const MLIRGenState &) = delete;
   MLIRGenState &operator=(const MLIRGenState &) = delete;
 
+  /// Convert clang::SourceLocation to mlir::SourceLocation
   mlir::Location getMLIRLocation(clang::SourceLocation loc) {
     auto spellingLoc = SM.getSpellingLoc(loc);
     auto lineNumber = SM.getSpellingLineNumber(spellingLoc);
@@ -235,6 +256,7 @@ public:
     return fixedpt::fixedPtType::get(&ctx, msb, lsb, is_signed);
   }
 
+  /// Convert clang::QualType to mlir::Type
   mlir::Type getMLIRType(clang::QualType Cqtype) {
     /// If we want to handle more complex C++ types we will need to add caching
     auto Cqdesugar = Cqtype.getDesugaredType(ASTctx);
@@ -284,33 +306,49 @@ public:
     if (MLIRFunc)
       return MLIRFunc;
 
+    LLVM_DEBUG({
+      llvm::dbgs() << "add to emit";
+      if (Annot::hasAnnotation(FD, Annot::TopLevel))
+        llvm::dbgs() << " top-level";
+      llvm::dbgs() << ":\n";
+      FD->dump(llvm::dbgs());
+    });
+
+    /// If it is not in the map is it not goinf to get emitter on its own
+    /// So we add it to the list of functions to emit
+    FuncToEmit.push_back(FD);
+
     /// The top-level function need to stay, all the reset should be deleted by
     /// inlining
     bool isPrivate = !Annot::hasAnnotation(FD, Annot::TopLevel);
     mlir::StringAttr visibility =
-        builder.getStringAttr(isPrivate ? "private" : "public");
+        Declbuilder.getStringAttr(isPrivate ? "private" : "public");
 
-    MLIRFunc = builder.create<func::FuncOp>(
+    /// Create the functions empty such that they can be referenced without
+    /// being generated yet
+    MLIRFunc = Declbuilder.create<func::FuncOp>(
         loc, CGM.getMangledName(FD).str(),
         getMLIRType(FD->getType()).cast<mlir::FunctionType>(), visibility);
     return MLIRFunc;
   }
-  func::FuncOp GetFunc(clang::FunctionDecl *FD) {
-    auto &MLIRFunc = FunctionMap[FD];
-    assert(MLIRFunc);
-    return MLIRFunc;
+  std::deque<clang::FunctionDecl *> takeFuncToEmit() {
+    return std::move(FuncToEmit);
   }
 };
 
+/// Recursivly traverse clang::Stmt while emitting them
 struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
   using Base = clang::StmtVisitor<MLIREmiter, mlir::Value>;
   MLIRGenState &state;
   MLIREmiter(MLIRGenState &s) : state(s) {}
+
+  /// Entry point of the emitter
   void Emit(clang::FunctionDecl *FD, func::FuncOp MLIRFunc) {
     mlir::Block *block = MLIRFunc.addEntryBlock();
     state.builder.setInsertionPointToStart(block);
     Visit(FD->getBody());
   }
+
   mlir::Value VisitCompoundStmt(clang::CompoundStmt *CS) {
     for (auto *Elem : CS->body()) {
       Visit(Elem);
@@ -380,19 +418,22 @@ struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
       Args.push_back(Visit(E));
 
     func::FuncOp Callee =
-        state.GetFunc(cast<clang::FunctionDecl>(CE->getCalleeDecl()));
+        state.GetOrCreateFunc(cast<clang::FunctionDecl>(CE->getCalleeDecl()));
 
     return state.builder
-        .create<func::CallOp>(state.getMLIRLocation(CE->getBeginLoc()),
-                                    Callee, Args)
+        .create<func::CallOp>(state.getMLIRLocation(CE->getBeginLoc()), Callee,
+                              Args)
         ->getResults()[0];
   }
+
   mlir::Value VisitReturnStmt(clang::ReturnStmt *RS) {
     mlir::Value val = Visit(RS->getRetValue());
     state.builder.create<func::ReturnOp>(
         state.getMLIRLocation(RS->getReturnLoc()), val);
     return {};
   }
+
+  /// All unhandeled clang::Stmt come here so we emit an error
   mlir::Value VisitStmt(clang::Stmt *S) {
     S->dump();
     llvm_unreachable("unhandled Stmt");
@@ -461,19 +502,11 @@ public:
         LLVMModule(LLVMModule), LLVMCtx(&LLVMModule->getContext()),
         state(CI, LLVMModule), Visitor(state), Lister(state) {}
 
-  std::deque<clang::FunctionDecl *> FuncToEmit;
-
   void addToEmit(clang::FunctionDecl *FD) {
-    LLVM_DEBUG({
-      if (Annot::hasAnnotation(FD, Annot::TopLevel))
-        llvm::dbgs() << "top-level: \n";
-      FD->dump(llvm::dbgs());
-    });
     if (ListNotEmit)
       Lister.addType(FD->getType(), FD->getLocation());
     else
       state.GetOrCreateFunc(FD);
-    FuncToEmit.push_back(FD);
   }
 
   void FillFunctionBody(clang::FunctionDecl *FD) {
@@ -562,14 +595,12 @@ public:
     }
     rewriteParameters();
 
-    std::unique_ptr<llvm::ToolOutputFile> outputFile =
-        mlir::openOutputFile(MLIROutput);
-    state.module->print(outputFile->os());
+    if (mlir::failed(outputMLIR(MLIROutput, state.module.get())))
+      return mlir::failure();
 
     /// This shouldd get replaced by Approx lowering and FixedPt lowering
     replaceByGenerableMLIR();
 
-    state.module->dump();
     {
       mlir::PassManager pm(&state.ctx);
       pm.addPass(arith::createConvertArithmeticToLLVMPass());
@@ -591,14 +622,20 @@ public:
     MLIRLLVMModule->setDataLayout(LLVMModule->getDataLayout());
     MLIRLLVMModule->setTargetTriple(LLVMModule->getTargetTriple());
 
-    llvm::Linker::linkModules(*LLVMModule, std::move(MLIRLLVMModule));
+    if (!DontLinkMLIR)
+      llvm::Linker::linkModules(*LLVMModule, std::move(MLIRLLVMModule));
+
     return mlir::success();
   }
 
   mlir::LogicalResult Finalize() {
-    for (auto *FD : FuncToEmit) {
-      if (FD->getBody())
-        FillFunctionBody(FD);
+    std::deque<clang::FunctionDecl *> FuncToEmit = state.takeFuncToEmit();
+    while (!FuncToEmit.empty()) {
+      for (auto *FD : FuncToEmit) {
+        if (FD->getBody())
+          FillFunctionBody(FD);
+      }
+      FuncToEmit = state.takeFuncToEmit();
     }
 
     if (mlir::failed(runMLIROptimizationAndLowering()))
@@ -609,8 +646,6 @@ public:
 
     if (ListNotEmit)
       Lister.dump();
-    else
-      state.module->dump();
     return mlir::success();
   }
 
@@ -635,8 +670,9 @@ public:
       for (auto *E : D)
         addToEmit(cast<clang::FunctionDecl>(E));
       return true;
-    } else
+    } else {
       return LLVMIRASTConsumer->HandleTopLevelDecl(D);
+    }
   }
   void HandleInlineFunctionDefinition(clang::FunctionDecl *D) override {
     return LLVMIRASTConsumer->HandleInlineFunctionDefinition(D);
@@ -688,6 +724,9 @@ public:
   }
 };
 
+struct NoopASTConsumer : public clang::ASTConsumer{
+};
+
 class ArchGenMLIRAction : public clang::PluginASTAction {
 
   /// Original Main actions being replaced. it usually should be a
@@ -708,14 +747,14 @@ public:
   std::unique_ptr<clang::ASTConsumer>
   CreateASTConsumer(clang::CompilerInstance &CI,
                     llvm::StringRef InFile) override {
-    auto InnerConsumer = Inner->CreateASTConsumer(CI, InFile);
-
     /// clang::CodeGenAction should be wrapped but not other kinds of main
     /// actions
-    if (auto *CGAct = getInnerAsCodeGenAction())
+    if (auto *CGAct = getInnerAsCodeGenAction()) {
+      auto InnerConsumer = Inner->CreateASTConsumer(CI, InFile);
       return std::make_unique<ArchGenMLIRConsumer>(
           CI, std::move(InnerConsumer), CGAct->getCodeGenerator()->GetModule());
-    return InnerConsumer;
+    }
+    return std::make_unique<NoopASTConsumer>();
   }
 
   /// Assignements will be set on our clang::FrontendAction and not on the Inner
