@@ -19,7 +19,6 @@
 #include <pi_opencl.hpp>
 #include <sycl/detail/cl.h>
 #include <sycl/detail/pi.h>
-#include <sycl/detail/terminate_xsimk.hpp>
 
 #include <algorithm>
 #include <cassert>
@@ -1393,8 +1392,6 @@ pi_result piextKernelGetNativeHandle(pi_kernel kernel,
 pi_result piTearDown(void *PluginParameter) {
   (void)PluginParameter;
 
-  /// cleanup the potential left-overs from the hw_emu simulator
-  terminate_xsimk();
   return PI_SUCCESS;
 }
 
