@@ -253,10 +253,6 @@ private:
 
   std::unique_ptr<BinaryLoopInfo> BLI;
 
-  /// Set of external addresses in the code that are not a function start
-  /// and are referenced from this function.
-  std::set<uint64_t> InterproceduralReferences;
-
   /// All labels in the function that are referenced via relocations from
   /// data objects. Typically these are jump table destinations and computed
   /// goto labels.
@@ -337,9 +333,9 @@ private:
   /// True if the original entry point was patched.
   bool IsPatched{false};
 
-  /// True if the function contains jump table with entries pointing to
-  /// locations in fragments.
-  bool HasSplitJumpTable{false};
+  /// True if the function contains explicit or implicit indirect branch to its
+  /// split fragments, e.g., split jump table, landing pad in split fragment
+  bool HasIndirectTargetToSplitFragment{false};
 
   /// True if there are no control-flow edges with successors in other functions
   /// (i.e. if tail calls have edges to function-local basic blocks).
@@ -667,9 +663,6 @@ private:
                                            uint64_t Offset,
                                            uint64_t &TargetAddress);
 
-  DenseMap<const MCInst *, SmallVector<MCInst *, 4>>
-  computeLocalUDChain(const MCInst *CurInstr);
-
   BinaryFunction &operator=(const BinaryFunction &) = delete;
   BinaryFunction(const BinaryFunction &) = delete;
 
@@ -702,6 +695,27 @@ private:
         FunctionNumber(++Count) {
     Symbols.push_back(BC.Ctx->getOrCreateSymbol(Name));
     IsInjected = true;
+  }
+
+  /// Create a basic block at a given \p Offset in the function and append it
+  /// to the end of list of blocks. Used during CFG construction only.
+  BinaryBasicBlock *addBasicBlockAt(uint64_t Offset, MCSymbol *Label) {
+    assert(CurrentState == State::Disassembled &&
+           "Cannot add block with an offset in non-disassembled state.");
+    assert(!getBasicBlockAtOffset(Offset) &&
+           "Basic block already exists at the offset.");
+
+    BasicBlocks.emplace_back(createBasicBlock(Label).release());
+    BinaryBasicBlock *BB = BasicBlocks.back();
+
+    BB->setIndex(BasicBlocks.size() - 1);
+    BB->setOffset(Offset);
+
+    BasicBlockOffsets.emplace_back(Offset, BB);
+    assert(llvm::is_sorted(BasicBlockOffsets, CompareBasicBlockOffsets()) &&
+           llvm::is_sorted(blocks()));
+
+    return BB;
   }
 
   /// Clear state of the function that could not be disassembled or if its
@@ -836,6 +850,29 @@ public:
     return make_range(JumpTables.begin(), JumpTables.end());
   }
 
+  /// Return relocation associated with a given \p Offset in the function,
+  /// or nullptr if no such relocation exists.
+  const Relocation *getRelocationAt(uint64_t Offset) const {
+    assert(CurrentState == State::Empty &&
+           "Relocations unavailable in the current function state.");
+    auto RI = Relocations.find(Offset);
+    return (RI == Relocations.end()) ? nullptr : &RI->second;
+  }
+
+  /// Return the first relocation in the function that starts at an address in
+  /// the [StartOffset, EndOffset) range. Return nullptr if no such relocation
+  /// exists.
+  const Relocation *getRelocationInRange(uint64_t StartOffset,
+                                         uint64_t EndOffset) const {
+    assert(CurrentState == State::Empty &&
+           "Relocations unavailable in the current function state.");
+    auto RI = Relocations.lower_bound(StartOffset);
+    if (RI != Relocations.end() && RI->first < EndOffset)
+      return &RI->second;
+
+    return nullptr;
+  }
+
   /// Returns the raw binary encoding of this function.
   ErrorOr<ArrayRef<uint8_t>> getData() const;
 
@@ -846,8 +883,9 @@ public:
 
   /// Update layout of basic blocks used for output.
   void updateBasicBlockLayout(BasicBlockOrderType &NewLayout) {
-    BasicBlocksPreviousLayout = BasicBlocksLayout;
+    assert(NewLayout.size() == BasicBlocks.size() && "Layout size mismatch.");
 
+    BasicBlocksPreviousLayout = BasicBlocksLayout;
     if (NewLayout != BasicBlocksLayout) {
       ModifiedLayout = true;
       BasicBlocksLayout.clear();
@@ -960,6 +998,15 @@ public:
 
   const MCInst *getInstructionAtOffset(uint64_t Offset) const {
     return const_cast<BinaryFunction *>(this)->getInstructionAtOffset(Offset);
+  }
+
+  /// Return offset for the first instruction. If there is data at the
+  /// beginning of a function then offset of the first instruction could
+  /// be different from 0
+  uint64_t getFirstInstructionOffset() const {
+    if (Instructions.empty())
+      return 0;
+    return Instructions.begin()->first;
   }
 
   /// Return jump table that covers a given \p Address in memory.
@@ -1110,8 +1157,8 @@ public:
   /// Return the number of emitted instructions for this function.
   uint32_t getNumNonPseudos() const {
     uint32_t N = 0;
-    for (BinaryBasicBlock *const &BB : layout())
-      N += BB->getNumNonPseudos();
+    for (const BinaryBasicBlock &BB : blocks())
+      N += BB.getNumNonPseudos();
     return N;
   }
 
@@ -1308,11 +1355,11 @@ public:
     case ELF::R_X86_64_PC8:
     case ELF::R_X86_64_PC32:
     case ELF::R_X86_64_PC64:
+    case ELF::R_X86_64_GOTPCRELX:
+    case ELF::R_X86_64_REX_GOTPCRELX:
       Relocations[Offset] = Relocation{Offset, Symbol, RelType, Addend, Value};
       return;
     case ELF::R_X86_64_PLT32:
-    case ELF::R_X86_64_GOTPCRELX:
-    case ELF::R_X86_64_REX_GOTPCRELX:
     case ELF::R_X86_64_GOTPCREL:
     case ELF::R_X86_64_TPOFF32:
     case ELF::R_X86_64_GOTTPOFF:
@@ -1390,9 +1437,12 @@ public:
   /// otherwise processed.
   bool isPseudo() const { return IsPseudo; }
 
-  /// Return true if the function contains a jump table with entries pointing
-  /// to split fragments.
-  bool hasSplitJumpTable() const { return HasSplitJumpTable; }
+  /// Return true if the function contains explicit or implicit indirect branch
+  /// to its split fragments, e.g., split jump table, landing pad in split
+  /// fragment.
+  bool hasIndirectTargetToSplitFragment() const {
+    return HasIndirectTargetToSplitFragment;
+  }
 
   /// Return true if all CFG edges have local successors.
   bool hasCanonicalCFG() const { return HasCanonicalCFG; }
@@ -1502,66 +1552,34 @@ public:
     return Address <= PC && PC < Address + Size;
   }
 
-  /// Create a basic block at a given \p Offset in the
-  /// function.
-  /// If \p DeriveAlignment is true, set the alignment of the block based
-  /// on the alignment of the existing offset.
-  /// The new block is not inserted into the CFG.  The client must
-  /// use insertBasicBlocks to add any new blocks to the CFG.
+  /// Create a basic block in the function. The new block is *NOT* inserted
+  /// into the CFG. The caller must use insertBasicBlocks() to add any new
+  /// blocks to the CFG.
   std::unique_ptr<BinaryBasicBlock>
-  createBasicBlock(uint64_t Offset, MCSymbol *Label = nullptr,
-                   bool DeriveAlignment = false) {
-    assert(BC.Ctx && "cannot be called with empty context");
+  createBasicBlock(MCSymbol *Label = nullptr) {
     if (!Label) {
       std::unique_lock<std::shared_timed_mutex> Lock(BC.CtxMutex);
       Label = BC.Ctx->createNamedTempSymbol("BB");
     }
-    auto BB = std::unique_ptr<BinaryBasicBlock>(
-        new BinaryBasicBlock(this, Label, Offset));
-
-    if (DeriveAlignment) {
-      uint64_t DerivedAlignment = Offset & (1 + ~Offset);
-      BB->setAlignment(std::min(DerivedAlignment, uint64_t(32)));
-    }
+    auto BB =
+        std::unique_ptr<BinaryBasicBlock>(new BinaryBasicBlock(this, Label));
 
     LabelToBB[Label] = BB.get();
 
     return BB;
   }
 
-  /// Create a basic block at a given \p Offset in the
-  /// function and append it to the end of list of blocks.
-  /// If \p DeriveAlignment is true, set the alignment of the block based
-  /// on the alignment of the existing offset.
-  ///
-  /// Returns NULL if basic block already exists at the \p Offset.
-  BinaryBasicBlock *addBasicBlock(uint64_t Offset, MCSymbol *Label = nullptr,
-                                  bool DeriveAlignment = false) {
-    assert((CurrentState == State::CFG || !getBasicBlockAtOffset(Offset)) &&
-           "basic block already exists in pre-CFG state");
+  /// Create a new basic block with an optional \p Label and add it to the list
+  /// of basic blocks of this function.
+  BinaryBasicBlock *addBasicBlock(MCSymbol *Label = nullptr) {
+    assert(CurrentState == State::CFG && "Can only add blocks in CFG state");
 
-    if (!Label) {
-      std::unique_lock<std::shared_timed_mutex> Lock(BC.CtxMutex);
-      Label = BC.Ctx->createNamedTempSymbol("BB");
-    }
-    std::unique_ptr<BinaryBasicBlock> BBPtr =
-        createBasicBlock(Offset, Label, DeriveAlignment);
-    BasicBlocks.emplace_back(BBPtr.release());
-
+    BasicBlocks.emplace_back(createBasicBlock(Label).release());
     BinaryBasicBlock *BB = BasicBlocks.back();
+
     BB->setIndex(BasicBlocks.size() - 1);
-
-    if (CurrentState == State::Disassembled) {
-      BasicBlockOffsets.emplace_back(Offset, BB);
-    } else if (CurrentState == State::CFG) {
-      BB->setLayoutIndex(layout_size());
-      BasicBlocksLayout.emplace_back(BB);
-    }
-
-    assert(CurrentState == State::CFG ||
-           (std::is_sorted(BasicBlockOffsets.begin(), BasicBlockOffsets.end(),
-                           CompareBasicBlockOffsets()) &&
-            std::is_sorted(begin(), end())));
+    BB->setLayoutIndex(layout_size());
+    BasicBlocksLayout.emplace_back(BB);
 
     return BB;
   }
@@ -1819,7 +1837,9 @@ public:
 
   void setIsPatched(bool V) { IsPatched = V; }
 
-  void setHasSplitJumpTable(bool V) { HasSplitJumpTable = V; }
+  void setHasIndirectTargetToSplitFragment(bool V) {
+    HasIndirectTargetToSplitFragment = V;
+  }
 
   void setHasCanonicalCFG(bool V) { HasCanonicalCFG = V; }
 
@@ -1950,11 +1970,6 @@ public:
 
     return ColdLSDASymbol;
   }
-
-  /// True if the symbol is a mapping symbol used in AArch64 to delimit
-  /// data inside code section.
-  bool isDataMarker(const SymbolRef &Symbol, uint64_t SymbolSize) const;
-  bool isCodeMarker(const SymbolRef &Symbol, uint64_t SymbolSize) const;
 
   void setOutputDataAddress(uint64_t Address) { OutputDataOffset = Address; }
 
@@ -2320,13 +2335,13 @@ public:
   size_t estimateHotSize(const bool UseSplitSize = true) const {
     size_t Estimate = 0;
     if (UseSplitSize && isSplit()) {
-      for (const BinaryBasicBlock *BB : BasicBlocksLayout)
-        if (!BB->isCold())
-          Estimate += BC.computeCodeSize(BB->begin(), BB->end());
+      for (const BinaryBasicBlock &BB : blocks())
+        if (!BB.isCold())
+          Estimate += BC.computeCodeSize(BB.begin(), BB.end());
     } else {
-      for (const BinaryBasicBlock *BB : BasicBlocksLayout)
-        if (BB->getKnownExecutionCount() != 0)
-          Estimate += BC.computeCodeSize(BB->begin(), BB->end());
+      for (const BinaryBasicBlock &BB : blocks())
+        if (BB.getKnownExecutionCount() != 0)
+          Estimate += BC.computeCodeSize(BB.begin(), BB.end());
     }
     return Estimate;
   }
@@ -2335,16 +2350,16 @@ public:
     if (!isSplit())
       return estimateSize();
     size_t Estimate = 0;
-    for (const BinaryBasicBlock *BB : BasicBlocksLayout)
-      if (BB->isCold())
-        Estimate += BC.computeCodeSize(BB->begin(), BB->end());
+    for (const BinaryBasicBlock &BB : blocks())
+      if (BB.isCold())
+        Estimate += BC.computeCodeSize(BB.begin(), BB.end());
     return Estimate;
   }
 
   size_t estimateSize() const {
     size_t Estimate = 0;
-    for (const BinaryBasicBlock *BB : BasicBlocksLayout)
-      Estimate += BC.computeCodeSize(BB->begin(), BB->end());
+    for (const BinaryBasicBlock &BB : blocks())
+      Estimate += BC.computeCodeSize(BB.begin(), BB.end());
     return Estimate;
   }
 

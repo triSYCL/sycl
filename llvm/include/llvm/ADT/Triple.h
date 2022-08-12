@@ -164,7 +164,15 @@ public:
     FPGASubArch_hls_hw_emu,
     FPGASubArch_hls_sw_emu,
 
-    PPCSubArch_spe
+    PPCSubArch_spe,
+
+    // SPIR-V sub-arch corresponds to its version.
+    SPIRVSubArch_v10,
+    SPIRVSubArch_v11,
+    SPIRVSubArch_v12,
+    SPIRVSubArch_v13,
+    SPIRVSubArch_v14,
+    SPIRVSubArch_v15,
   };
   enum VendorType {
     UnknownVendor,
@@ -952,7 +960,7 @@ public:
   }
 
   /// Tests if the environment supports dllimport/export annotations.
-  bool hasDLLImportExport() const { return isOSWindows() || isPS4(); }
+  bool hasDLLImportExport() const { return isOSWindows() || isPS(); }
 
   /// @}
   /// @name Mutators
@@ -1060,7 +1068,7 @@ public:
 
   /// Get the "prefix" canonical name for the \p Kind architecture. This is the
   /// prefix used by the architecture specific builtins, and is suitable for
-  /// passing to \see Intrinsic::getIntrinsicForGCCBuiltin().
+  /// passing to \see Intrinsic::getIntrinsicForClangBuiltin().
   ///
   /// \return - The architecture prefix, or 0 if none is defined.
   static StringRef getArchTypePrefix(ArchType Kind);

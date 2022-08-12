@@ -470,8 +470,8 @@ static void instantiateOMPDeclareVariantAttr(
   if (!DeclVarData)
     return;
 
-  E = DeclVarData.getValue().second;
-  FD = DeclVarData.getValue().first;
+  E = DeclVarData.value().second;
+  FD = DeclVarData.value().first;
 
   if (auto *VariantDRE = dyn_cast<DeclRefExpr>(E->IgnoreParenImpCasts())) {
     if (auto *VariantFD = dyn_cast<FunctionDecl>(VariantDRE->getDecl())) {
@@ -2921,6 +2921,7 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
         SemaRef.Context, Record, StartLoc, NameInfo, T, TInfo,
         Destructor->UsesFPIntrin(), Destructor->isInlineSpecified(), false,
         Destructor->getConstexprKind(), TrailingRequiresClause);
+    Method->setIneligibleOrNotSelected(true);
     Method->setRangeEnd(Destructor->getEndLoc());
     Method->setDeclName(SemaRef.Context.DeclarationNames.getCXXDestructorName(
         SemaRef.Context.getCanonicalType(
@@ -3038,7 +3039,7 @@ Decl *TemplateDeclInstantiator::VisitCXXMethodDecl(
 
     IsExplicitSpecialization = true;
   } else if (const ASTTemplateArgumentListInfo *Info =
-                 ClassScopeSpecializationArgs.getValueOr(
+                 ClassScopeSpecializationArgs.value_or(
                      D->getTemplateSpecializationArgsAsWritten())) {
     SemaRef.LookupQualifiedName(Previous, DC);
 
@@ -4245,13 +4246,15 @@ Decl *TemplateDeclInstantiator::VisitVarTemplateSpecializationDecl(
     return nullptr;
 
   // Substitute the current template arguments.
-  const TemplateArgumentListInfo &TemplateArgsInfo = D->getTemplateArgsInfo();
-  VarTemplateArgsInfo.setLAngleLoc(TemplateArgsInfo.getLAngleLoc());
-  VarTemplateArgsInfo.setRAngleLoc(TemplateArgsInfo.getRAngleLoc());
+  if (const ASTTemplateArgumentListInfo *TemplateArgsInfo =
+          D->getTemplateArgsInfo()) {
+    VarTemplateArgsInfo.setLAngleLoc(TemplateArgsInfo->getLAngleLoc());
+    VarTemplateArgsInfo.setRAngleLoc(TemplateArgsInfo->getRAngleLoc());
 
-  if (SemaRef.SubstTemplateArguments(TemplateArgsInfo.arguments(), TemplateArgs,
-                                     VarTemplateArgsInfo))
-    return nullptr;
+    if (SemaRef.SubstTemplateArguments(TemplateArgsInfo->arguments(),
+                                       TemplateArgs, VarTemplateArgsInfo))
+      return nullptr;
+  }
 
   // Check that the template argument list is well-formed for this template.
   SmallVector<TemplateArgument, 4> Converted;
@@ -5281,7 +5284,8 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
                                      /*Complain*/DefinitionRequired)) {
     if (DefinitionRequired)
       Function->setInvalidDecl();
-    else if (TSK == TSK_ExplicitInstantiationDefinition) {
+    else if (TSK == TSK_ExplicitInstantiationDefinition ||
+             (Function->isConstexpr() && !Recursive)) {
       // Try again at the end of the translation unit (at which point a
       // definition will be required).
       assert(!Recursive);
@@ -5296,7 +5300,7 @@ void Sema::InstantiateFunctionDefinition(SourceLocation PointOfInstantiation,
         Diag(PatternDecl->getLocation(), diag::note_forward_template_decl);
         if (getLangOpts().CPlusPlus11)
           Diag(PointOfInstantiation, diag::note_inst_declaration_hint)
-            << Function;
+              << Function;
       }
     }
 
@@ -6010,8 +6014,18 @@ void Sema::InstantiateVariableDefinition(SourceLocation PointOfInstantiation,
     // declaration of the definition.
     TemplateDeclInstantiator Instantiator(*this, Var->getDeclContext(),
                                           TemplateArgs);
+
+    TemplateArgumentListInfo TemplateArgInfo;
+    if (const ASTTemplateArgumentListInfo *ArgInfo =
+            VarSpec->getTemplateArgsInfo()) {
+      TemplateArgInfo.setLAngleLoc(ArgInfo->getLAngleLoc());
+      TemplateArgInfo.setRAngleLoc(ArgInfo->getRAngleLoc());
+      for (const TemplateArgumentLoc &Arg : ArgInfo->arguments())
+        TemplateArgInfo.addArgument(Arg);
+    }
+
     Var = cast_or_null<VarDecl>(Instantiator.VisitVarTemplateSpecializationDecl(
-        VarSpec->getSpecializedTemplate(), Def, VarSpec->getTemplateArgsInfo(),
+        VarSpec->getSpecializedTemplate(), Def, TemplateArgInfo,
         VarSpec->getTemplateArgs().asArray(), VarSpec));
     if (Var) {
       llvm::PointerUnion<VarTemplateDecl *,

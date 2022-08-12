@@ -16,7 +16,7 @@
 // RUN: FileCheck %s
 //
 
-!Filename = type !llvm.ptr<i8>
+!Filename = !llvm.ptr<i8>
 
 #SparseMatrix = #sparse_tensor.encoding<{
   dimLevelType = [ "compressed", "compressed" ],
@@ -45,9 +45,9 @@ module {
   // A kernel that computes a sampled matrix matrix multiplication.
   //
   func.func @sampled_dense_dense(%args: tensor<?x?xf32, #SparseMatrix>,
-                            %arga: tensor<?x?xf32>,
-                            %argb: tensor<?x?xf32>,
-                            %argx: tensor<?x?xf32> {linalg.inplaceable = true}) -> tensor<?x?xf32> {
+                                 %arga: tensor<?x?xf32>,
+                                 %argb: tensor<?x?xf32>,
+                                 %argx: tensor<?x?xf32>) -> tensor<?x?xf32> {
     %0 = linalg.generic #trait_sampled_dense_dense
       ins(%args, %arga, %argb: tensor<?x?xf32, #SparseMatrix>, tensor<?x?xf32>, tensor<?x?xf32>)
       outs(%argx: tensor<?x?xf32>) {

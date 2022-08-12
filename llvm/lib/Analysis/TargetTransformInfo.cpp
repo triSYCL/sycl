@@ -31,6 +31,11 @@ static cl::opt<bool> EnableReduxCost("costmodel-reduxcost", cl::init(false),
                                      cl::Hidden,
                                      cl::desc("Recognize reduction patterns."));
 
+static cl::opt<unsigned> CacheLineSize(
+    "cache-line-size", cl::init(0), cl::Hidden,
+    cl::desc("Use this to override the target cache line size when "
+             "specified by the user."));
+
 namespace {
 /// No-op implementation of the TTI interface using the utility base
 /// classes.
@@ -293,7 +298,7 @@ bool TargetTransformInfo::preferPredicateOverEpilogue(
   return TTIImpl->preferPredicateOverEpilogue(L, LI, SE, AC, TLI, DT, LAI);
 }
 
-bool TargetTransformInfo::emitGetActiveLaneMask() const {
+PredicationStyle TargetTransformInfo::emitGetActiveLaneMask() const {
   return TTIImpl->emitGetActiveLaneMask();
 }
 
@@ -348,7 +353,8 @@ bool TargetTransformInfo::isLegalAddressingMode(Type *Ty, GlobalValue *BaseGV,
                                         Scale, AddrSpace, I);
 }
 
-bool TargetTransformInfo::isLSRCostLess(LSRCost &C1, LSRCost &C2) const {
+bool TargetTransformInfo::isLSRCostLess(const LSRCost &C1,
+                                        const LSRCost &C2) const {
   return TTIImpl->isLSRCostLess(C1, C2);
 }
 
@@ -404,6 +410,12 @@ bool TargetTransformInfo::isLegalBroadcastLoad(Type *ElementTy,
 bool TargetTransformInfo::isLegalMaskedGather(Type *DataType,
                                               Align Alignment) const {
   return TTIImpl->isLegalMaskedGather(DataType, Alignment);
+}
+
+bool TargetTransformInfo::isLegalAltInstr(
+    VectorType *VecTy, unsigned Opcode0, unsigned Opcode1,
+    const SmallBitVector &OpcodeMask) const {
+  return TTIImpl->isLegalAltInstr(VecTy, Opcode0, Opcode1, OpcodeMask);
 }
 
 bool TargetTransformInfo::isLegalMaskedScatter(Type *DataType,
@@ -473,7 +485,7 @@ bool TargetTransformInfo::isTypeLegal(Type *Ty) const {
   return TTIImpl->isTypeLegal(Ty);
 }
 
-InstructionCost TargetTransformInfo::getRegUsageForType(Type *Ty) const {
+unsigned TargetTransformInfo::getRegUsageForType(Type *Ty) const {
   return TTIImpl->getRegUsageForType(Ty);
 }
 
@@ -508,6 +520,10 @@ InstructionCost TargetTransformInfo::getOperandsScalarizationOverhead(
 
 bool TargetTransformInfo::supportsEfficientVectorElementLoadStore() const {
   return TTIImpl->supportsEfficientVectorElementLoadStore();
+}
+
+bool TargetTransformInfo::supportsTailCalls() const {
+  return TTIImpl->supportsTailCalls();
 }
 
 bool TargetTransformInfo::enableAggressiveInterleaving(
@@ -626,8 +642,9 @@ Optional<unsigned> TargetTransformInfo::getVScaleForTuning() const {
   return TTIImpl->getVScaleForTuning();
 }
 
-bool TargetTransformInfo::shouldMaximizeVectorBandwidth() const {
-  return TTIImpl->shouldMaximizeVectorBandwidth();
+bool TargetTransformInfo::shouldMaximizeVectorBandwidth(
+    TargetTransformInfo::RegisterKind K) const {
+  return TTIImpl->shouldMaximizeVectorBandwidth(K);
 }
 
 ElementCount TargetTransformInfo::getMinimumVF(unsigned ElemWidth,
@@ -640,6 +657,11 @@ unsigned TargetTransformInfo::getMaximumVF(unsigned ElemWidth,
   return TTIImpl->getMaximumVF(ElemWidth, Opcode);
 }
 
+unsigned TargetTransformInfo::getStoreMinimumVF(unsigned VF, Type *ScalarMemTy,
+                                                Type *ScalarValTy) const {
+  return TTIImpl->getStoreMinimumVF(VF, ScalarMemTy, ScalarValTy);
+}
+
 bool TargetTransformInfo::shouldConsiderAddressTypePromotion(
     const Instruction &I, bool &AllowPromotionWithoutCommonHeader) const {
   return TTIImpl->shouldConsiderAddressTypePromotion(
@@ -647,7 +669,8 @@ bool TargetTransformInfo::shouldConsiderAddressTypePromotion(
 }
 
 unsigned TargetTransformInfo::getCacheLineSize() const {
-  return TTIImpl->getCacheLineSize();
+  return CacheLineSize.getNumOccurrences() > 0 ? CacheLineSize
+                                               : TTIImpl->getCacheLineSize();
 }
 
 llvm::Optional<unsigned>

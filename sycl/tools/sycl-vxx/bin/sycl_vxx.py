@@ -59,7 +59,6 @@ VXX_PassPipeline = [
 "-simplifycfg",
 "-inline",
 "-function-attrs",
-"-argpromotion",
 "-sroa",
 "-early-cse-memssa",
 "-speculative-execution",
@@ -339,7 +338,7 @@ class VitisCompilationDriver:
             self.tmpdir /
             f"{outstem}-kernels-prepared.ll"
         )
-        opt_options = ["-S", "--sycl-vxx", "--sroa-vxx-conservative", "--lower-mem-intr-to-llvm-type", "--lower-mem-intr-unroll-count=1", "--unroll-only-when-forced"]
+        opt_options = ["-S", "--sroa-vxx-conservative", "--lower-mem-intr-to-llvm-type", "--lower-mem-intr-unroll-count=1", "--unroll-only-when-forced"]
         opt_options.extend(VXX_PassPipeline)
         opt_options.extend(self.vitis_version.get_correct_opt_args())
         opt_options.extend(["-inSPIRation", "-o", f"{prepared_bc}"])
@@ -396,7 +395,7 @@ class VitisCompilationDriver:
         kernel_prop_opt.extend(self.vitis_version.get_correct_opt_args())
         opt_options = [
             "--lower-delayed-sycl-metadata", "-lower-sycl-metadata", "-globaldce",
-            "--sycl-vxx", "--sycl-prepare-after-O3", "-S", "-preparesycl", "-loop-unroll", "--unroll-only-when-forced",
+            "--sycl-prepare-after-O3", "-S", "-preparesycl", "-loop-unroll", "--unroll-only-when-forced",
             *kernel_prop_opt,
             "-globaldce",
             "-strip-debug",
@@ -408,7 +407,7 @@ class VitisCompilationDriver:
         subprocess.run(args, check=True)
         with kernel_prop.open('r') as kp_fp:
             self.kernel_properties = json.load(kp_fp)
-        opt_options = ["--sycl-vxx", "-S", "-vxxIRDowngrader"]
+        opt_options = ["-S", "-vxxIRDowngrader"]
         downgraded_ir = (
             self.tmpdir / f"{self.outstem}_kernels-linked.opt.ll")
         args = [

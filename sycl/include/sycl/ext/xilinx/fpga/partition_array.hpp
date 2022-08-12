@@ -14,7 +14,7 @@
 #ifndef SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP
 #define SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP
 
-#include "CL/sycl/detail/defines.hpp"
+#include "sycl/detail/defines.hpp"
 
 #include <array>
 #include <cstddef>

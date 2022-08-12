@@ -2,15 +2,19 @@
 
 ; RUN: opt < %s -mtriple=x86_64-apple-macosx10.10.0 -passes=instrprof -S | FileCheck %s --check-prefixes=MACHO
 ; RUN: opt < %s -mtriple=x86_64 -passes=instrprof -S | FileCheck %s --check-prefix=ELF_GENERIC
-; RUN: opt < %s -mtriple=x86_64-unknown-linux -passes=instrprof -S | FileCheck %s --check-prefixes=ELF
-; RUN: opt < %s -mtriple=x86_64-unknown-fuchsia -passes=instrprof -S | FileCheck %s --check-prefixes=ELF
+; RUN: opt < %s -mtriple=x86_64-unknown-linux -passes=instrprof -S | FileCheck %s --check-prefixes=ELF,ELFRT
+; RUN: opt < %s -mtriple=x86_64-unknown-fuchsia -passes=instrprof -S | FileCheck %s --check-prefixes=ELF,ELFRT
+; RUN: opt < %s -mtriple=x86_64-scei-ps4 -passes=instrprof -S | FileCheck %s --check-prefixes=ELF,PS
+; RUN: opt < %s -mtriple=x86_64-sie-ps5 -passes=instrprof -S | FileCheck %s --check-prefixes=ELF,PS
 ; RUN: opt < %s  -mtriple=x86_64-pc-win32-coff -passes=instrprof -S | FileCheck %s --check-prefixes=COFF
 ; RUN: opt < %s -mtriple=powerpc64-ibm-aix-xcoff -passes=instrprof -S | FileCheck %s --check-prefixes=XCOFF
+; RUN: opt < %s -mtriple=x86_64-pc-freebsd13 -passes=instrprof -S | FileCheck %s --check-prefixes=ELF
 
-; MACHO: @__llvm_profile_runtime = external global i32
-; ELF_GENERIC: @__llvm_profile_runtime = external global i32
+; MACHO: @__llvm_profile_runtime = external hidden global i32
+; ELF_GENERIC: @__llvm_profile_runtime = external hidden global i32
 ; ELF-NOT: @__llvm_profile_runtime = external global i32
-; XCOFF: @__llvm_profile_runtime = external global i32
+; XCOFF: @__llvm_profile_runtime = external hidden global i32
+; COFF: @__llvm_profile_runtime = external hidden global i32
 
 ; ELF: $__profc_foo = comdat nodeduplicate
 ; ELF: $__profc_foo_weak = comdat nodeduplicate
@@ -104,8 +108,10 @@ declare void @llvm.instrprof.increment(i8*, i64, i32, i32)
 ; MACHO:   ret i32 %[[REG]]
 ; MACHO: }
 ; COFF: define linkonce_odr hidden i32 @__llvm_profile_runtime_user() {{.*}} comdat {
-; ELF-NOT: define linkonce_odr hidden i32 @__llvm_profile_runtime_user() {{.*}} {
-; ELF-NOT:   %[[REG:.*]] = load i32, i32* @__llvm_profile_runtime
+; ELFRT-NOT: define linkonce_odr hidden i32 @__llvm_profile_runtime_user() {{.*}} {
+; ELFRT-NOT:   %[[REG:.*]] = load i32, i32* @__llvm_profile_runtime
+; PS: define linkonce_odr hidden i32 @__llvm_profile_runtime_user() {{.*}} {
+; PS:   %[[REG:.*]] = load i32, i32* @__llvm_profile_runtime
 ; XCOFF: define linkonce_odr hidden i32 @__llvm_profile_runtime_user() {{.*}} {
 ; XCOFF:   %[[REG:.*]] = load i32, i32* @__llvm_profile_runtime
 ; XCOFF:   ret i32 %[[REG]]
