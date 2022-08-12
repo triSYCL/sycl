@@ -1,4 +1,4 @@
-# SYCL for Vitis 2021.2: experimental melting pot with Intel oneAPI DPC++ SYCL and triSYCL for AMD/Xilinx FPGA
+# SYCL for Vitis 2022.1: experimental melting pot with Intel oneAPI DPC++ SYCL and triSYCL for AMD/Xilinx FPGA
 
 This project is about assessing the viability of unifying 2 of the
 current open-source implementations of the SYCL standard
