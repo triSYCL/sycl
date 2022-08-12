@@ -310,30 +310,42 @@ struct DivOpLowering : public mlir::OpConversionPattern<DivOp> {
   virtual mlir::LogicalResult
   matchAndRewrite(DivOp op, base::OpAdaptor adaptor,
                   mlir::ConversionPatternRewriter &rewriter) const override {
-    /// FIXEME: This doesnt keep enough precision
+    ConvertionBuilder converter(*typeConverter, rewriter, op->getLoc());
     FixedPtType lhsTy = op.lhs().getType().cast<FixedPtType>();
     FixedPtType rhsTy = op.rhs().getType().cast<FixedPtType>();
+    FixedPtType outTy = op.result().getType().cast<FixedPtType>();
     bool isSigned = lhsTy.isSigned() || rhsTy.isSigned();
-    FixedPtType internalTy = FixedPtType::get(
-        rewriter.getContext(), lhsTy.getMsb() + rhsTy.getMsb() + isSigned,
-        lhsTy.getLsb() - rhsTy.getLsb(), isSigned);
-    mlir::IntegerType internalIntTy =
-        typeConverter->convertType(internalTy).cast<mlir::IntegerType>();
+    mlir::Value lhs;
+    mlir::Value rhs;
 
-    ConvertionBuilder converter(*typeConverter, rewriter, op->getLoc());
-    mlir::Value lhs =
-        converter.truncOrExtend(adaptor.lhs(), internalIntTy, lhsTy.isSigned());
-    mlir::Value rhs =
-        converter.truncOrExtend(adaptor.rhs(), internalIntTy, rhsTy.isSigned());
+    int currentPrec = lhsTy.getLsb() - rhsTy.getLsb();
+    int lsbOffset = outTy.getLsb() - currentPrec;
+    if (lsbOffset <= 0) {
+      int divWidth = std::max(lhsTy.getWidth() - lsbOffset, rhsTy.getWidth());
+      int newLsb = lhsTy.getLsb() + lsbOffset;
+      lhs = converter.buildConvertion(
+          adaptor.lhs(), lhsTy,
+          FixedPtType::get(rewriter.getContext(), divWidth + newLsb - 1, newLsb,
+                           lhsTy.isSigned()));
+      rhs = converter.maybeExtend(
+          adaptor.rhs(), rewriter.getIntegerType(divWidth), rhsTy.isSigned());
+    } else {
+      /// In this case we need to artificially reduce the precision of the
+      /// division to fit in the output
+      op->dump();
+      llvm_unreachable("unimplemented");
+    }
+
     mlir::Operation *divOp;
     if (isSigned)
       divOp = rewriter.create<arith::DivSIOp>(op.getLoc(), lhs, rhs);
     else
       divOp = rewriter.create<arith::DivUIOp>(op.getLoc(), lhs, rhs);
 
-    rewriter.replaceOp(op, converter.buildConvertion(
-                               divOp->getResult(0), internalTy,
-                               op.getResult().getType().cast<FixedPtType>()));
+    rewriter.replaceOp(
+        op, converter.maybeTruncate(
+                divOp->getResult(0),
+                typeConverter->convertType(outTy).cast<mlir::IntegerType>()));
     return mlir::success();
   }
 };

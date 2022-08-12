@@ -43,6 +43,8 @@ int main() {
     // CHECK: add 0x1 mul 0x0 sub 0x1
     print_8_7(0xffff, 0);
     // CHECK: add 0xffff mul 0x0 sub 0xffff
+    print_8_7(0x7fff, 0);
+    // CHECK: add 0x7fff mul 0x0 sub 0x7fff
   }
   print_8_7(0x7fff, 1);
   // CHECK: add 0x8000 mul 0xff sub 0x7ffe
@@ -60,7 +62,22 @@ int main() {
   // CHECK: add 0x180 mul 0x100 sub 0x80 div 0x100
   print_8_7(2 << 7, 2 << 7);
   // CHECK: add 0x200 mul 0x200 sub 0x0 div 0x80
-  /// The division in the next one seems wrong to me
   print_8_7(0xffff, 1 << 7);
-  // CHECK: add 0x7f mul 0xffff sub 0xff7f
+  // CHECK: add 0x7f mul 0xffff sub 0xff7f div 0xffff
+
+  {
+    noDivRAII nodiv;
+    print_8_7_to_8_5(0, 0);
+    // CHECK: add 0x0 mul 0x0 sub 0x0
+    print_8_7_to_8_5(1, 0);
+    // CHECK: add 0x0 mul 0x0 sub 0x0
+    print_8_7_to_8_5(1 << 2, 0);
+    // CHECK: add 0x1 mul 0x0 sub 0x1
+    print_8_7_to_8_5(0xffff, 0);
+    // CHECK: add 0x3fff mul 0x0 sub 0x3fff
+    print_8_7_to_8_5(0x7fff, 0);
+    // CHECK: add 0x1fff mul 0x0 sub 0x1fff
+  }
+  print_8_7_to_8_5(0x7fff, 1);
+  // CHECK: mul 0x3f sub 0x1fff
 }
