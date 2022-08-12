@@ -57,6 +57,15 @@ void ApproxDialect::initialize() {
   addInterfaces<ApproxInlinerInterface>();
 }
 
+mlir::Operation *ApproxDialect::materializeConstant(mlir::OpBuilder &builder,
+                                                    mlir::Attribute value,
+                                                    mlir::Type type,
+                                                    mlir::Location loc) {
+  assert(type.isa<fixedpt::FixedPtType>());
+  return builder.create<approx::ConstantOp>(
+      loc, type, value.cast<fixedpt::FixedPointAttr>());
+}
+
 //===----------------------------------------------------------------------===//
 // TableGen'd op method definitions
 //===----------------------------------------------------------------------===//
@@ -64,11 +73,15 @@ void ApproxDialect::initialize() {
 #define GET_OP_CLASSES
 #include "archgen/Approx/ApproxOps.cpp.inc"
 
-void constantOp::build(mlir::OpBuilder &odsBuilder,
+void ConstantOp::build(mlir::OpBuilder &odsBuilder,
                        mlir::OperationState &odsState,
-                       archgen::fixedpt::fixedPointAttr value) {
+                       archgen::fixedpt::FixedPointAttr value) {
   build(odsBuilder, odsState, toBeFoldedType::get(odsBuilder.getContext()),
         value);
+}
+
+mlir::OpFoldResult ConstantOp::fold(llvm::ArrayRef<mlir::Attribute> operands) {
+  return valueAttr();
 }
 
 //===----------------------------------------------------------------------===//

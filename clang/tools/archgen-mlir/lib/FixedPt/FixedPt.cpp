@@ -43,6 +43,14 @@ using namespace archgen::fixedpt;
 
 #include "archgen/FixedPt/FixedPtDialect.cpp.inc"
 
+mlir::Operation *FixedPtDialect::materializeConstant(mlir::OpBuilder &builder,
+                                                     mlir::Attribute value,
+                                                     mlir::Type type,
+                                                     mlir::Location loc) {
+  return builder.create<fixedpt::ConstantOp>(
+      loc, type, value.cast<fixedpt::FixedPointAttr>());
+}
+
 void FixedPtDialect::initialize() {
   addOperations<
 #define GET_OP_LIST
@@ -63,7 +71,7 @@ void FixedPtDialect::initialize() {
 //===----------------------------------------------------------------------===//
 
 mlir::LogicalResult
-fixedPtType::verify(llvm::function_ref<mlir::InFlightDiagnostic()> emitError,
+FixedPtType::verify(llvm::function_ref<mlir::InFlightDiagnostic()> emitError,
                     int msb, int lsb, bool is_signed) {
   if (msb < lsb) {
     emitError().append("requires: msb >= lsb:", msb, " >= ", lsb);
@@ -72,7 +80,7 @@ fixedPtType::verify(llvm::function_ref<mlir::InFlightDiagnostic()> emitError,
   return mlir::success();
 }
 
-llvm::FixedPointSemantics fixedPtType::getFixedPointSemantics() const {
+llvm::FixedPointSemantics FixedPtType::getFixedPointSemantics() const {
   /// isStaturated and hasUnsignedPadding are not properties of the layout but
   /// properties of operations on the APFixedPoint so they are not represented
   /// by the MLIR type
@@ -81,7 +89,7 @@ llvm::FixedPointSemantics fixedPtType::getFixedPointSemantics() const {
                                    /*hasUnsignedPadding*/ false);
 }
 
-mlir::Type fixedPtType::parse(mlir::AsmParser &odsParser) {
+mlir::Type FixedPtType::parse(mlir::AsmParser &odsParser) {
   int msb;
   int lsb;
   std::string sign;
@@ -89,7 +97,7 @@ mlir::Type fixedPtType::parse(mlir::AsmParser &odsParser) {
       odsParser.parseComma() || odsParser.parseInteger(lsb) ||
       odsParser.parseComma() || odsParser.parseString(&sign) ||
       odsParser.parseGreater()) {
-    odsParser.emitError(odsParser.getNameLoc(), "failed to parse fixedPtType");
+    odsParser.emitError(odsParser.getNameLoc(), "failed to parse FixedPtType");
     return {};
   }
   if (sign != "signed" && sign != "unsigned") {
@@ -97,10 +105,10 @@ mlir::Type fixedPtType::parse(mlir::AsmParser &odsParser) {
                         "expected signed or unsigned got " + sign);
   }
   bool isSigned = (sign == "signed");
-  return fixedPtType::get(odsParser.getContext(), msb, lsb, isSigned);
+  return FixedPtType::get(odsParser.getContext(), msb, lsb, isSigned);
 }
 
-void fixedPtType::print(mlir::AsmPrinter &odsPrinter) const {
+void FixedPtType::print(mlir::AsmPrinter &odsPrinter) const {
   odsPrinter << "<" << getMsb() << ", " << getLsb() << ", \""
              << (isSigned() ? "signed" : "unsigned") << "\">";
 }
@@ -109,7 +117,7 @@ void fixedPtType::print(mlir::AsmPrinter &odsPrinter) const {
 // Fixed Point attribute definitions
 //===----------------------------------------------------------------------===//
 
-mlir::Attribute fixedPointAttr::parse(mlir::AsmParser &odsParser,
+mlir::Attribute FixedPointAttr::parse(mlir::AsmParser &odsParser,
                                       mlir::Type odsType) {
   mlir::Type ty;
   llvm::APInt rawInt;
@@ -119,20 +127,100 @@ mlir::Attribute fixedPointAttr::parse(mlir::AsmParser &odsParser,
       odsParser.parseComma() || odsParser.parseString(&text) ||
       odsParser.parseGreater()) {
     odsParser.emitError(odsParser.getNameLoc(),
-                        "failed to parse fixedPointAttr");
+                        "failed to parse FixedPointAttr");
     return {};
   }
-  llvm::APInt intPart = rawInt.zextOrTrunc(ty.cast<fixedPtType>().getWidth());
+  llvm::APInt intPart = rawInt.zextOrTrunc(ty.cast<FixedPtType>().getWidth());
   assert(rawInt == intPart.zextOrTrunc(rawInt.getBitWidth()));
   llvm::APFixedPoint value(intPart,
-                           ty.cast<fixedPtType>().getFixedPointSemantics());
+                           ty.cast<FixedPtType>().getFixedPointSemantics());
   assert(text == value.toString() && "textual value should match");
-  return fixedPointAttr::get(odsParser.getContext(), std::move(value));
+  return FixedPointAttr::get(odsParser.getContext(), std::move(value));
 }
 
-void fixedPointAttr::print(mlir::AsmPrinter &odsPrinter) const {
+void FixedPointAttr::print(mlir::AsmPrinter &odsPrinter) const {
   odsPrinter << "<" << getValue().getValue() << ", "
-             << fixedPtType::get(this->getContext(), getValue().getSemantics())
+             << FixedPtType::get(this->getContext(), getValue().getSemantics())
              << ", \"" << getValue().toString() << "\""
              << ">";
+}
+
+//===----------------------------------------------------------------------===//
+// Fixed Point operation definitions
+//===----------------------------------------------------------------------===//
+
+mlir::LogicalResult AddOp::verify() {
+  return mlir::success();
+}
+
+mlir::LogicalResult SubOp::verify() {
+  return mlir::success();
+}
+
+mlir::LogicalResult MulOp::verify() {
+  return mlir::success();
+}
+
+mlir::LogicalResult DivOp::verify() {
+  return mlir::success();
+}
+
+mlir::OpFoldResult ConstantOp::fold(llvm::ArrayRef<mlir::Attribute> operands) {
+  return valueAttr();
+}
+
+mlir::LogicalResult ConstantOp::verify() {
+  if (getType().getFixedPointSemantics() !=
+      valueAttr().getValue().getSemantics())
+    return emitError("fixed-point semantic of type doesnt match fixed-point "
+                     "semantic of attribute");
+  return mlir::success();
+}
+
+mlir::LogicalResult TruncOp::verify() {
+  FixedPtType inTy = input().getType().cast<FixedPtType>();
+  FixedPtType outTy = result().getType().cast<FixedPtType>();
+  if (inTy.getLsb() != outTy.getLsb())
+    return emitError("cannot change lsb");
+  if (inTy.getMsb() <= outTy.getMsb())
+    return emitError("the msb must be smaller in the output");
+  return mlir::success();
+}
+
+mlir::LogicalResult RoundOp::verify() {
+  FixedPtType inTy = input().getType().cast<FixedPtType>();
+  FixedPtType outTy = result().getType().cast<FixedPtType>();
+  if (inTy.getMsb() != outTy.getMsb())
+    return emitError("cannot change msb");
+  if (inTy.isSigned() != outTy.isSigned())
+    return emitError("cannot change sign");
+  if (inTy.getLsb() >= outTy.getLsb())
+    return emitError("the lsb must be smaller in the input");
+  return mlir::success();
+}
+
+mlir::LogicalResult ExtendOp::verify() {
+  FixedPtType inTy = input().getType().cast<FixedPtType>();
+  FixedPtType outTy = result().getType().cast<FixedPtType>();
+  if (inTy.getWidth() >= outTy.getWidth())
+    return emitError("width must increase");
+  if (inTy.getLsb() < outTy.getLsb())
+    return emitError("lsb can only decrease");
+  if (inTy.getMsb() > outTy.getMsb())
+    return emitError("msb can only increase");
+  return mlir::success();
+}
+
+mlir::LogicalResult BitcastOp::verify() {
+  FixedPtType inFPTy = input().getType().dyn_cast<FixedPtType>();
+  mlir::IntegerType inIntTy = input().getType().dyn_cast<mlir::IntegerType>();
+  FixedPtType outFPTy = result().getType().dyn_cast<FixedPtType>();
+  mlir::IntegerType outIntTy = result().getType().dyn_cast<mlir::IntegerType>();
+  if (inIntTy && outIntTy)
+    return emitError("use arith.bitcast instead");
+  if ((inFPTy && outFPTy && inFPTy.getWidth() != outFPTy.getWidth()) ||
+      (inFPTy && outIntTy && inFPTy.getWidth() != outIntTy.getWidth()) ||
+      (inIntTy && outFPTy && inIntTy.getWidth() != outFPTy.getWidth()))
+    return emitError("bitwidth must match");
+  return mlir::success();
 }

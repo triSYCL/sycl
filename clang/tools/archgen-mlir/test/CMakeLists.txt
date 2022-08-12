@@ -7,7 +7,7 @@ configure_lit_site_cfg(
 
 set(ARCHGENMLIR_TEST_DEPENDS
         FileCheck count not
-        archgen
+        archgen opt llc mlir-translate
         )
 
 add_lit_testsuite(check-archgen "Running ArchGenMLIR tests"

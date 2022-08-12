@@ -22,9 +22,11 @@
 
 #include "archgen/Approx/Approx.h"
 #include "archgen/FixedPt/FixedPt.h"
+#include "archgen/FixedPt/Passes.h"
 
 int main(int argc, char **argv) {
   mlir::registerAllPasses();
+  archgen::fixedpt::registerPasses();
 
   mlir::DialectRegistry registry;
   mlir::registerAllDialects(registry);

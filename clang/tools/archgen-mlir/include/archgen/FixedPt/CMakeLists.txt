@@ -8,3 +8,7 @@ mlir_tablegen(FixedPtAttr.cpp.inc -gen-attrdef-defs)
 mlir_tablegen(FixedPtDialect.h.inc -gen-dialect-decls)
 mlir_tablegen(FixedPtDialect.cpp.inc -gen-dialect-defs)
 add_public_tablegen_target(ArchGenMLIRFixedPtIncGen)
+
+set(LLVM_TARGET_DEFINITIONS FixedPtPasses.td)
+mlir_tablegen(FixedPtPasses.h.inc -gen-pass-decls)
+add_public_tablegen_target(ArchGenMLIRFixedPtPassesIncGen)

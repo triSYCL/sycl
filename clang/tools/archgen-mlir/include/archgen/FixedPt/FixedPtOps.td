@@ -11,56 +11,70 @@
 
 include "archgen/FixedPt/FixedPtBase.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
 
 class FixedPt_Op<string mnemonic, list<Trait> traits = []> :
-    Op<FixedPt_Dialect, mnemonic, traits>;
+    Op<FixedPt_Dialect, mnemonic, traits # [NoSideEffect]> {
+  let hasVerifier = 1;
+}
 
-class FixedPt_binOp<string mnemonic, list<Trait> traits = []> : FixedPt_Op<mnemonic, traits> {
+class FixedPt_BinOp<string mnemonic, list<Trait> traits = []> : FixedPt_Op<mnemonic, traits> {
   let arguments = (ins
-    AnyFixedPt: $rhs,
-    AnyFixedPt: $lhs
+    AnyFixedPt: $lhs,
+    AnyFixedPt: $rhs
   );
   let results = (outs AnyFixedPt: $result);
 }
 
-def FixedPt_addOp : FixedPt_binOp<"add", [Commutative]>;
-def FixedPt_subOp : FixedPt_binOp<"sub">;
-def FixedPt_mulOp : FixedPt_binOp<"mul", [Commutative]>;
-def FixedPt_divOp : FixedPt_binOp<"div">;
-def FixedPt_modOp : FixedPt_binOp<"mod">;
+def FixedPt_AddOp : FixedPt_BinOp<"add", [Commutative]>;
+def FixedPt_SubOp : FixedPt_BinOp<"sub">;
+def FixedPt_MulOp : FixedPt_BinOp<"mul", [Commutative]>;
+def FixedPt_DivOp : FixedPt_BinOp<"div">;
 
-def FixedPt_constantOp : FixedPt_Op<"constant"> {
+def FixedPt_ConstantOp : FixedPt_Op<"constant", [ConstantLike]> {
   let arguments = (ins
     FixedPtAttr: $valueAttr
   );
   let results = (outs AnyFixedPt: $result);
+  let hasFolder = 1;
 }
 
-def FixedPt_convertOp : FixedPt_Op<"convert"> {
-  let summary = "convert a fixedpoint type to an fixedpoint other (trunc, sext, zext)";
+def FixedPt_TruncOp : FixedPt_Op<"trunc"> {
+  /// TODO: Add truncating semantics: saturate or modular
+  let summary = "truncate the high bits of a fixedpoint type (may change sign)";
   let arguments = (ins
     AnyFixedPt: $input
   );
-  let results = (outs AnyFixedPt: $output);
-  let assemblyFormat = "$input `:` type($input) `to` type($output) attr-dict";
+  let results = (outs AnyFixedPt: $result);
+  let assemblyFormat = "$input `:` type($input) `to` type($result) attr-dict";
 }
 
-def FixedPt_toIntOp : FixedPt_Op<"toInt"> {
-  let summary = "extract the representation of the fixepoint as an integer (bitwidth must match)";
+def FixedPt_RoundOp : FixedPt_Op<"round"> {
+  /// TODO: Add rounding semantics: tonearest, tozero, toupper, tolower, toinf...
+  let summary = "remove low bits of a fixedpoint type";
   let arguments = (ins
     AnyFixedPt: $input
   );
-  let results = (outs AnyInteger: $output);
-  let assemblyFormat = "$input `:` type($input) `as` type($output) attr-dict";
+  let results = (outs AnyFixedPt: $result);
+  let assemblyFormat = "$input `:` type($input) `to` type($result) attr-dict";
 }
 
-def FixedPt_fromIntOp : FixedPt_Op<"fromInt"> {
-  let summary = "get a fixepoint from its representation as an integer (bitwidth must match)";
+def FixedPt_ExtendOp : FixedPt_Op<"extand"> {
+  let summary = "extand high bits and/or low bits of a fixedpoint type (sext or zext)";
   let arguments = (ins
-    AnyInteger: $input
+    AnyFixedPt: $input
   );
-  let results = (outs AnyFixedPt: $output);
-  let assemblyFormat = "$input `:` type($input) `as` type($output) attr-dict";
+  let results = (outs AnyFixedPt: $result);
+  let assemblyFormat = "$input `:` type($input) `to` type($result) attr-dict";
+}
+
+def FixedPt_BitcastOp : FixedPt_Op<"bitcast"> {
+  let summary = "reinterpret the representation as an other type (width must match)";
+  let arguments = (ins
+    AnyType: $input
+  );
+  let results = (outs AnyType: $result);
+  let assemblyFormat = "$input `:` type($input) `as` type($result) attr-dict";
 }
 
 #endif

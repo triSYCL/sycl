@@ -1,4 +1,4 @@
-//===- FixedPtBase.td - Fixed Point type and ops -----------*- tablegen -*-===//
+//===- FixedPtBase.td - Fixed Point attributes and type ----*- tablegen -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -18,6 +18,7 @@ def FixedPt_Dialect : Dialect {
   let cppNamespace = "::archgen::fixedpt";
   let useDefaultTypePrinterParser = 1;
   let useDefaultAttributePrinterParser = 1;
+  let hasConstantMaterializer = 1;
 }
 
 // Base class for Func dialect ops.
@@ -32,7 +33,7 @@ class FixedPt_Attr<string name, string attrMnemonic>
 }
 
 def FixedPtType
-    : FixedPt_Type<"fixedPt", "fixedPt"> {
+    : FixedPt_Type<"FixedPt", "fixedPt"> {
 
   let parameters = (ins
     "int":$msb,
@@ -44,7 +45,7 @@ def FixedPtType
   let extraClassDeclaration = [{
     bool isSigned() const { return getIsSigned(); }
     bool isUnsigned() const { return !isSigned(); }
-    int getWidth() const { return getMsb() - getLsb() + 1; }
+    unsigned getWidth() const { return getMsb() - getLsb() + 1; }
     llvm::FixedPointSemantics getFixedPointSemantics() const;
   }];
   let builders = [
@@ -54,10 +55,10 @@ def FixedPtType
   }]>];
 }
 
-def AnyFixedPt : Type<CPred<"$_self.isa<::archgen::fixedpt::fixedPtType>()">, "fixed point type",
-                      "::archgen::fixedpt::fixedPtType">;
+def AnyFixedPt : Type<CPred<"$_self.isa<::archgen::fixedpt::FixedPtType>()">, "fixed point type",
+                      "::archgen::fixedpt::FixedPtType">;
 
-def FixedPtAttr : FixedPt_Attr<"fixedPoint", "fixedPoint"> {
+def FixedPtAttr : FixedPt_Attr<"FixedPoint", "fixed_point"> {
   let summary = "a fixed point attribute";
 
   let parameters = (ins "::llvm::APFixedPoint": $value);

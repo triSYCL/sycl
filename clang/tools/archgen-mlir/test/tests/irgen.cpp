@@ -5,6 +5,7 @@
 // RUN: %clangxx -c -std=c++17 -fplugin=%archgen_plugin %s -mllvm --archgen-mlir-mlir-output=%t.mlir -mllvm --archgen-mlir-dont-link-mlir -S -emit-llvm -o %t.ll
 // RUN: FileCheck --check-prefix=CHECK-MLIR --input-file=%t.mlir %s
 // RUN: FileCheck --check-prefix=CHECK-LLVMIR --input-file=%t.ll %s
+// RUN: %clangxx -std=c++17 -fplugin=%archgen_plugin %s -o %t.out
 
 #include "archgen.h"
 
@@ -93,4 +94,7 @@ auto test2(archgenlib::FixedNumber<archgenlib::FixedFormat<4, -5, signed>> x) {
           archgenlib::SinOp<archgenlib::Variable<
               archgenlib::FixedNumber<archgenlib::FixedFormat<4, -5, signed>>,
               0>>>>(x);
+}
+
+int main() {
 }

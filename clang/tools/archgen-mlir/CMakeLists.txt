@@ -40,6 +40,7 @@ set(ARCHGEN_PLUGIN_LIBS
   MLIRSupport
   ArchGenMLIRApprox
   ArchGenMLIRFixedPt
+  MLIRFixedPtToArith
   MLIRArithmeticToLLVM
   MLIRFuncToLLVM
   MLIRTargetLLVMIRExport

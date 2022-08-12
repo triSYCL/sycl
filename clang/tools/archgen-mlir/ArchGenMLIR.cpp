@@ -253,7 +253,7 @@ public:
     int lsb = TAL2.get(1).getAsIntegral().getExtValue();
     bool is_signed = TAL2.get(2).getAsType()->isSignedIntegerType();
 
-    return fixedpt::fixedPtType::get(&ctx, msb, lsb, is_signed);
+    return fixedpt::FixedPtType::get(&ctx, msb, lsb, is_signed);
   }
 
   /// Convert clang::QualType to mlir::Type
@@ -385,7 +385,7 @@ struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
     if (Kind == Annot::KindConstant) {
       llvm::FixedPointSemantics sema =
           state.getMLIRType(CE->getArg(1)->getType())
-              .cast<fixedpt::fixedPtType>()
+              .cast<fixedpt::FixedPtType>()
               .getFixedPointSemantics();
       auto *DRExpr = cast<clang::DeclRefExpr>(
           *cast<clang::CXXTemporaryObjectExpr>(CE->getArg(1))
@@ -395,9 +395,9 @@ struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
           cast<clang::VarDecl>(DRExpr->getDecl())->getEvaluatedValue();
       llvm::APFixedPoint FPvalue(Cvalue->getInt(), sema);
       auto attr =
-          fixedpt::fixedPointAttr::get(&state.ctx, std::move(FPvalue));
+          fixedpt::FixedPointAttr::get(&state.ctx, std::move(FPvalue));
       return state.builder
-          .create<approx::constantOp>(
+          .create<approx::ConstantOp>(
               state.getMLIRLocation(CE->getBeginLoc()), attr)
           ->getResults()[0];
     }
@@ -558,7 +558,7 @@ public:
         return mlir::FunctionType::get(&state.ctx, subTy,
                                        replacer(funcTy.getResult(0)));
       }
-      if (auto fixedPt = ty.dyn_cast<fixedpt::fixedPtType>())
+      if (auto fixedPt = ty.dyn_cast<fixedpt::FixedPtType>())
         return mlir::IntegerType::get(&state.ctx, fixedPt.getWidth());
       return ty;
     };

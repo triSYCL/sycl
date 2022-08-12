@@ -11,6 +11,7 @@
 
 include "mlir/IR/OpBase.td"
 include "mlir/IR/AttrTypeBase.td"
+include "mlir/Interfaces/SideEffectInterfaces.td"
 include "archgen/FixedPt/FixedPtBase.td"
 
 def Approx_Dialect : Dialect {
@@ -18,11 +19,12 @@ def Approx_Dialect : Dialect {
   let name = "approx";
   let cppNamespace = "::archgen::approx";
   let useDefaultTypePrinterParser = 1;
+  let hasConstantMaterializer = 1;
 }
 
 // Base class for Func dialect ops.
 class Approx_Op<string mnemonic, list<Trait> traits = []> :
-    Op<Approx_Dialect, mnemonic, traits>;
+    Op<Approx_Dialect, mnemonic, traits # [NoSideEffect]>;
 
 class Approx_Type<string name, string typeMnemonic, list<Trait> traits = []>
     : TypeDef<Approx_Dialect, name, traits> {
@@ -42,14 +44,15 @@ def Approx_genericOp : Approx_Op<"generic"> {
   let results = (outs Variadic<AnyType>: $outputs);
 }
 
-def Approx_constantOp : Approx_Op<"constant"> {
+def Approx_ConstantOp : Approx_Op<"constant"> {
   let arguments = (ins
     FixedPtAttr: $valueAttr
   );
   let results = (outs ToBeFoldedType: $result);
   let extraClassDeclaration = [{
-    static void build(::mlir::OpBuilder &odsBuilder, ::mlir::OperationState &odsState, ::archgen::fixedpt::fixedPointAttr value);
+    static void build(::mlir::OpBuilder &odsBuilder, ::mlir::OperationState &odsState, ::archgen::fixedpt::FixedPointAttr value);
   }];
+  let hasFolder = 1;
 }
 
 #endif
