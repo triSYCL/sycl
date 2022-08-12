@@ -915,7 +915,7 @@ treating compiler warnings as errors and producing a compiler database
 to be used by tools like LSP server like `clangd`:
 
 ```bash
-python3 $SYCL_HOME/llvm/buildbot/configure.py --cuda \
+python3 $SYCL_HOME/llvm/buildbot/configure.py --xrt --cuda \
   --cmake-opt="-DCMAKE_EXPORT_COMPILE_COMMANDS=1"
 ```
 
