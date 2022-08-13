@@ -6,23 +6,23 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef ARCHGEN_FIXEDPT_PASSDETAIL_H
-#define ARCHGEN_FIXEDPT_PASSDETAIL_H
+#ifndef ARCHGEN_APPROX_PASSDETAIL_H
+#define ARCHGEN_APPROX_PASSDETAIL_H
 
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/IR/BuiltinDialect.h"
 #include "mlir/IR/BuiltinOps.h"
 
-#include "archgen/FixedPt/FixedPt.h"
+#include "archgen/Approx/Approx.h"
 
 namespace archgen {
-namespace fixedpt {
+namespace approx {
 
 #define GEN_PASS_CLASSES
-#include "archgen/FixedPt/FixedPtPasses.h.inc"
+#include "archgen/Approx/ApproxPasses.h.inc"
 
 }
 }
 
-#endif // ARCHGEN_FIXEDPT_PASSDETAIL_H
+#endif // ARCHGEN_APPROX_PASSDETAIL_H

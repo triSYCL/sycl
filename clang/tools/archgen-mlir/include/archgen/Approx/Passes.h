@@ -6,17 +6,17 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef ARCHGEN_FIXEDPT_PASSES_H
-#define ARCHGEN_FIXEDPT_PASSES_H
+#ifndef ARCHGEN_APPROX_PASSES_H
+#define ARCHGEN_APPROX_PASSES_H
 
 #include "mlir/IR/BuiltinOps.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/IR/BuiltinDialect.h"
 
 namespace archgen {
-namespace fixedpt {
+namespace approx {
 
-std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>> createConvertFixedPtToArithPass();
+std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>> createLowerApproxPass();
 
 //===----------------------------------------------------------------------===//
 // Registration
@@ -24,9 +24,9 @@ std::unique_ptr<mlir::OperationPass<mlir::ModuleOp>> createConvertFixedPtToArith
 
 /// Generate the code for registering passes.
 #define GEN_PASS_REGISTRATION
-#include "archgen/FixedPt/FixedPtPasses.h.inc"
+#include "archgen/Approx/ApproxPasses.h.inc"
 
-} // namespace fixedpt
+} // namespace approx
 } // namespace archgen
 
 #endif

@@ -42,7 +42,9 @@
 #include "clang/Frontend/FrontendPluginRegistry.h"
 
 #include "archgen/Approx/Approx.h"
+#include "archgen/Approx/Passes.h"
 #include "archgen/FixedPt/FixedPt.h"
+#include "archgen/FixedPt/Passes.h"
 
 using namespace clang;
 using namespace archgen;
@@ -61,6 +63,11 @@ cl::opt<bool>
     DontLinkMLIR("archgen-mlir-dont-link-mlir", cl::init(false), cl::Optional,
                  cl::desc("do not link the MLIR output into the LLVM IR"));
 
+cl::opt<bool> ListNotEmit(
+    "archgen-mlir-list-dont-emit", cl::init(false), cl::Optional,
+    cl::desc("instead of emitting the MLIR list what would be emmitted"));
+
+/// Output MLIR module to a file
 mlir::LogicalResult outputMLIR(llvm::StringRef file, mlir::ModuleOp module) {
   std::string errorMessage;
   std::unique_ptr<llvm::ToolOutputFile> outputFile =
@@ -74,8 +81,6 @@ mlir::LogicalResult outputMLIR(llvm::StringRef file, mlir::ModuleOp module) {
   return mlir::success();
 }
 
-constexpr bool ListNotEmit = false;
-
 LLVM_ENABLE_BITMASK_ENUMS_IN_NAMESPACE();
 
 enum class TypeLookupOpt {
@@ -85,8 +90,9 @@ enum class TypeLookupOpt {
   LLVM_MARK_AS_BITMASK_ENUM(isInDetailNamespace)
 };
 
+/// Utility to identify classes that need special hanlding like
+/// ::archgenlib::detail::ToBeFolded
 class Util {
-public:
   using DeclContextDesc = std::pair<clang::Decl::Kind, llvm::StringRef>;
 
   template <size_t N>
@@ -144,6 +150,9 @@ public:
     return Util::matchContext(Ctx, Scopes);
   }
 
+public:
+
+  /// Top-level function that should be used
   static bool isArchGenType(clang::QualType Qt, llvm::StringRef Name,
                             TypeLookupOpt Opts) {
     clang::Decl::Kind ClassDeclKind =
@@ -164,6 +173,7 @@ public:
   }
 };
 
+/// Utility to detect Annotations on Declarations
 namespace Annot {
 
 constexpr llvm::StringLiteral Prefix = "archgen_mlir";
@@ -188,6 +198,8 @@ bool hasAnnotationStartingWith(clang::Decl *D, llvm::StringRef Annot) {
 
 } // namespace Annot
 
+/// Stores all the MLIR related constructs and provide basic utilities to emit
+/// MLIR from clang AST
 class MLIRGenState {
   void InitMLIR() {
     ctx.disableMultithreading();
@@ -200,12 +212,15 @@ class MLIRGenState {
     builder.clearInsertionPoint();
   }
 
+  /// List of functions that need to get emitted
   std::deque<clang::FunctionDecl *> FuncToEmit;
 public:
+  /// This class is used to easilly pass around all the neededd state to perform
+  /// MLIR emition from clang AST so most data members are public
+
   mlir::MLIRContext ctx;
   mlir::OpBuilder builder;
   mlir::OpBuilder Declbuilder;
-  mlir::Location loc;
   mlir::OwningOpRef<mlir::ModuleOp> module;
   clang::ASTContext &ASTctx;
   clang::SourceManager &SM;
@@ -213,15 +228,17 @@ public:
   llvm::DenseMap<clang::FunctionDecl *, func::FuncOp> FunctionMap;
 
   MLIRGenState(clang::CompilerInstance &CI, llvm::Module *LLVMModule)
-      : builder(&ctx), Declbuilder(&ctx), loc(builder.getUnknownLoc()),
-        module(mlir::ModuleOp::create(loc)), ASTctx(CI.getASTContext()),
-        SM(CI.getSourceManager()),
+      : builder(&ctx), Declbuilder(&ctx),
+        module(mlir::ModuleOp::create(builder.getUnknownLoc())),
+        ASTctx(CI.getASTContext()), SM(CI.getSourceManager()),
         CGM(CI.getASTContext(),
             CI.getPreprocessor().getHeaderSearchInfo().getHeaderSearchOpts(),
             CI.getPreprocessor().getPreprocessorOpts(), CI.getCodeGenOpts(),
             *LLVMModule, CI.getPreprocessor().getDiagnostics()) {
     InitMLIR();
   }
+
+  /// This class should stay unique
   MLIRGenState(const MLIRGenState &) = delete;
   MLIRGenState &operator=(const MLIRGenState &) = delete;
 
@@ -261,6 +278,7 @@ public:
     /// If we want to handle more complex C++ types we will need to add caching
     auto Cqdesugar = Cqtype.getDesugaredType(ASTctx);
 
+    /// Types we need to handle specially
     if (Util::isArchGenType(Cqdesugar, "ToBeFolded",
                             TypeLookupOpt::isInDetailNamespace))
       return approx::toBeFoldedType::get(&ctx);
@@ -301,6 +319,8 @@ public:
     llvm_unreachable("unhandeled type");
   }
 
+  /// Return a FuncOp for the provided Decl.
+  /// FuncOp are created empty
   func::FuncOp GetOrCreateFunc(clang::FunctionDecl *FD) {
     auto &MLIRFunc = FunctionMap[FD];
     if (MLIRFunc)
@@ -327,7 +347,7 @@ public:
     /// Create the functions empty such that they can be referenced without
     /// being generated yet
     MLIRFunc = Declbuilder.create<func::FuncOp>(
-        loc, CGM.getMangledName(FD).str(),
+        getMLIRLocation(FD->getBeginLoc()), CGM.getMangledName(FD).str(),
         getMLIRType(FD->getType()).cast<mlir::FunctionType>(), visibility);
     return MLIRFunc;
   }
@@ -337,6 +357,8 @@ public:
 };
 
 /// Recursivly traverse clang::Stmt while emitting them
+/// If the generator needed to emit more complex Statements like l-values it
+/// should not return an mlir::Value but for now it is kept simple.
 struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
   using Base = clang::StmtVisitor<MLIREmiter, mlir::Value>;
   MLIRGenState &state;
@@ -350,9 +372,8 @@ struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
   }
 
   mlir::Value VisitCompoundStmt(clang::CompoundStmt *CS) {
-    for (auto *Elem : CS->body()) {
+    for (auto *Elem : CS->body())
       Visit(Elem);
-    }
     return {};
   }
 
@@ -375,12 +396,6 @@ struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
     llvm::StringRef Kind =
         cast<clang::StringLiteral>(CE->getArg(0)->IgnoreImplicit())
             ->getString();
-
-    auto buildGenericOp = [&](auto &&args) {
-      return state.builder.create<approx::genericOp>(
-          state.getMLIRLocation(CE->getBeginLoc()),
-          mlir::TypeRange{state.getMLIRType(CE->getType())}, args, Kind);
-    };
 
     if (Kind == Annot::KindConstant) {
       llvm::FixedPointSemantics sema =
@@ -406,7 +421,11 @@ struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
     for (int64_t idx = 1; idx < CE->getNumArgs(); idx++)
       Args.push_back(Visit(CE->getArg(idx)));
 
-    return buildGenericOp(Args)->getResults()[0];
+    return state.builder
+        .create<approx::genericOp>(
+            state.getMLIRLocation(CE->getBeginLoc()),
+            mlir::TypeRange{state.getMLIRType(CE->getType())}, Args, Kind)
+        ->getResults()[0];
   }
 
   mlir::Value VisitCallExpr(clang::CallExpr *CE) {
@@ -466,6 +485,16 @@ struct ASTLister : clang::StmtVisitor<ASTLister, void> {
     }
   }
 
+  void VitisStmt(clang::DeclRefExpr* DRE) {
+    /// This will add the function to the list of functions to "emit". but in
+    /// this case functions are not emitted but there statement and types are
+    /// listed
+    if (auto* FD = dyn_cast<FunctionDecl>(DRE->getDecl()))
+      state.GetOrCreateFunc(FD);
+
+    VisitStmt(DRE);
+  }
+
   void VisitStmt(clang::Stmt *S) {
     if (auto *E = dyn_cast<clang::Expr>(S))
       addType(E->getType(), E->getExprLoc());
@@ -476,12 +505,14 @@ struct ASTLister : clang::StmtVisitor<ASTLister, void> {
     for (auto *Inner : S->children())
       VisitStmt(Inner);
   }
+
   void print(llvm::raw_ostream &os) {
     os << "Types(" << Types.size() << "):\n";
     os << TypeOS.str();
     os << "\n\nStms(" << Stmts.size() << "):\n";
     os << StmtOS.str();
   }
+
   void dump() { print(llvm::errs()); }
 };
 
@@ -512,10 +543,8 @@ public:
   void FillFunctionBody(clang::FunctionDecl *FD) {
     if (ListNotEmit)
       Lister.VisitStmt(FD->getBody());
-    else {
-      func::FuncOp MLIRFunc = state.GetOrCreateFunc(FD);
-      Visitor.Emit(FD, MLIRFunc);
-    }
+    else
+      Visitor.Emit(FD, state.GetOrCreateFunc(FD));
   }
 
   /// This is transformation fixes function parameters. it is not generic, it
@@ -595,6 +624,7 @@ public:
     }
     rewriteParameters();
 
+    /// This at this point the front-end and cleanup is done
     if (mlir::failed(outputMLIR(MLIROutput, state.module.get())))
       return mlir::failure();
 
@@ -603,6 +633,17 @@ public:
 
     {
       mlir::PassManager pm(&state.ctx);
+
+      /// The Core of ArchGen, will transform the approx dialect describing the
+      /// expression to be approximated into the logic to approximate the
+      /// expression
+      pm.addPass(approx::createLowerApproxPass());
+
+      pm.addPass(fixedpt::createConvertFixedPtToArithPass());
+      pm.addPass(mlir::createReconcileUnrealizedCastsPass());
+      pm.addPass(mlir::createCSEPass());
+      pm.addPass(mlir::createCanonicalizerPass());
+      pm.addPass(mlir::createMemRefToLLVMPass());
       pm.addPass(arith::createConvertArithmeticToLLVMPass());
       pm.addPass(mlir::createConvertFuncToLLVMPass());
       pm.addPass(mlir::createReconcileUnrealizedCastsPass());
@@ -629,12 +670,15 @@ public:
   }
 
   mlir::LogicalResult Finalize() {
+    /// List of function we should generate
     std::deque<clang::FunctionDecl *> FuncToEmit = state.takeFuncToEmit();
+
+    /// Go throught all the function we need to generate until there is none
     while (!FuncToEmit.empty()) {
-      for (auto *FD : FuncToEmit) {
+      for (auto *FD : FuncToEmit)
         if (FD->getBody())
           FillFunctionBody(FD);
-      }
+      /// Emitting function bodies may add new functions to generate
       FuncToEmit = state.takeFuncToEmit();
     }
 

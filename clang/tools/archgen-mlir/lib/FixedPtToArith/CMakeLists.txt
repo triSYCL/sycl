@@ -1,12 +1,9 @@
-add_mlir_conversion_library(MLIRFixedPtToArith
+add_mlir_conversion_library(ArchGenFixedPtToArith
   EXCLUDE_FROM_LIBMLIR
   FixedPtToArith.cpp
 
   DEPENDS
   ArchGenMLIRFixedPtPassesIncGen
-
-  LINK_COMPONENTS
-  Core
 
   LINK_LIBS PUBLIC
   MLIRPass
