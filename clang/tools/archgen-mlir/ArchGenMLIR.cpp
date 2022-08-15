@@ -176,7 +176,6 @@ public:
 /// Utility to detect Annotations on Declarations
 namespace Annot {
 
-constexpr llvm::StringLiteral Prefix = "archgen_mlir";
 constexpr llvm::StringLiteral GenericOp = "archgen_mlir_generic_op";
 constexpr llvm::StringLiteral GenAsMLIR = "archgen_mlir_emit_as_mlir";
 constexpr llvm::StringLiteral TopLevel = "archgen_mlir_top_level";
@@ -187,13 +186,6 @@ bool hasAnnotation(clang::Decl *D, llvm::StringRef Annot) {
   return llvm::any_of(
       D->specific_attrs<clang::AnnotateAttr>(),
       [&](clang::AnnotateAttr *AA) { return AA->getAnnotation() == Annot; });
-}
-
-bool hasAnnotationStartingWith(clang::Decl *D, llvm::StringRef Annot) {
-  return llvm::any_of(D->specific_attrs<clang::AnnotateAttr>(),
-                      [&](clang::AnnotateAttr *AA) {
-                        return AA->getAnnotation().startswith(Annot);
-                      });
 }
 
 } // namespace Annot
@@ -768,7 +760,7 @@ public:
   }
 };
 
-struct NoopASTConsumer : public clang::ASTConsumer{
+struct NoopASTConsumer : public clang::ASTConsumer {
 };
 
 class ArchGenMLIRAction : public clang::PluginASTAction {

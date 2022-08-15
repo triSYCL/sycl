@@ -6,6 +6,9 @@ add_mlir_library(ArchGenLowerApprox
 
   ADDITIONAL_HEADER_DIRS
 
+  DEPENDS
+  ArchGenMLIRApproxPassesIncGen
+
   LINK_LIBS PUBLIC
   MLIRPass
   MLIRTransforms

@@ -3,7 +3,7 @@
 // RUN: %clangxx -g -std=c++17 %s %t.fixed.o -o %t.out
 // RUN: %t.out | FileCheck %s
 
-// It might be simpler to just extand the MLIR generator to emit some fixedpt operations
+// It might be simpler to just extend the MLIR generator to emit some fixedpt operations
 
 #include <iostream>
 #include "Inputs/fixedpt.h"

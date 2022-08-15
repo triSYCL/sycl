@@ -1,3 +1,4 @@
+# Configuration to find flopoco's libhileco.so
 set(LLVM_FLOPOCO_LIB "" CACHE FILEPATH "Path to the flopoco librairy")
 set(LLVM_FLOPOCO_INC "" CACHE PATH "Path to the flopoco include")
 
@@ -6,6 +7,7 @@ if ("${LLVM_FLOPOCO_LIB}" STREQUAL "" OR "${LLVM_FLOPOCO_INC}" STREQUAL "")
   return()
 endif()
 
+# Add libhileco.so to the rpath
 get_filename_component(FLOPOCO_RPATH ${LLVM_FLOPOCO_LIB} DIRECTORY)
 list(APPEND CMAKE_BUILD_RPATH ${FLOPOCO_RPATH})
 list(APPEND CMAKE_INSTALL_RPATH ${FLOPOCO_RPATH})

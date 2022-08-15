@@ -59,8 +59,8 @@ def FixedPt_RoundOp : FixedPt_Op<"round"> {
   let assemblyFormat = "$input `:` type($input) `to` type($result) attr-dict";
 }
 
-def FixedPt_ExtendOp : FixedPt_Op<"extand"> {
-  let summary = "extand high bits and/or low bits of a fixedpoint type (sext or zext)";
+def FixedPt_ExtendOp : FixedPt_Op<"extend"> {
+  let summary = "extend high bits and/or low bits of a fixedpoint type (sext or zext)";
   let arguments = (ins
     AnyFixedPt: $input
   );

@@ -218,6 +218,9 @@ mlir::LogicalResult BitcastOp::verify() {
   mlir::IntegerType outIntTy = result().getType().dyn_cast<mlir::IntegerType>();
   if (inIntTy && outIntTy)
     return emitError("use arith.bitcast instead");
+  if ((inIntTy && inIntTy.getSignedness() != mlir::IntegerType::Signless) ||
+      (outIntTy && outIntTy.getSignedness() != mlir::IntegerType::Signless))
+    return emitError("integer types must be signless");
   if ((inFPTy && outFPTy && inFPTy.getWidth() != outFPTy.getWidth()) ||
       (inFPTy && outIntTy && inFPTy.getWidth() != outIntTy.getWidth()) ||
       (inIntTy && outFPTy && inIntTy.getWidth() != outFPTy.getWidth()))
