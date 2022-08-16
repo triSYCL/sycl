@@ -63,6 +63,10 @@ cl::opt<bool>
     DontLinkMLIR("archgen-mlir-dont-link-mlir", cl::init(false), cl::Optional,
                  cl::desc("do not link the MLIR output into the LLVM IR"));
 
+cl::opt<bool> StopAtApprox(
+    "archgen-mlir-stop-at-approx", cl::init(false), cl::Optional,
+    cl::desc("stop after emitting and cleanup the approx dialect"));
+
 cl::opt<bool> ListNotEmit(
     "archgen-mlir-list-dont-emit", cl::init(false), cl::Optional,
     cl::desc("instead of emitting the MLIR list what would be emmitted"));
@@ -620,8 +624,8 @@ public:
     if (mlir::failed(outputMLIR(MLIROutput, state.module.get())))
       return mlir::failure();
 
-    /// This shouldd get replaced by Approx lowering and FixedPt lowering
-    replaceByGenerableMLIR();
+    if (StopAtApprox)
+      return mlir::success();
 
     {
       mlir::PassManager pm(&state.ctx);
@@ -677,7 +681,7 @@ public:
     if (mlir::failed(runMLIROptimizationAndLowering()))
       return mlir::failure();
 
-    if (mlir::failed(mergeMLIRintoLLVMIR()))
+    if (!StopAtApprox && mlir::failed(mergeMLIRintoLLVMIR()))
       return mlir::failure();
 
     if (ListNotEmit)

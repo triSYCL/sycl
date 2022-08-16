@@ -44,7 +44,7 @@ def Approx_genericOp : Approx_Op<"generic"> {
   let results = (outs Variadic<AnyType>: $outputs);
 }
 
-def Approx_ConstantOp : Approx_Op<"constant"> {
+def Approx_ConstantOp : Approx_Op<"constant", [ConstantLike]> {
   let arguments = (ins
     FixedPtAttr: $valueAttr
   );

@@ -2,10 +2,10 @@
 // ./llvm/utils/update_cc_test_checks.py and
 // ./mlir/utils/generate-test-checks.py
 
-// RUN: %clangxx -c -std=c++17 -fplugin=%archgen_plugin %s -mllvm --archgen-mlir-mlir-output=%t.mlir -mllvm --archgen-mlir-dont-link-mlir -S -emit-llvm -o %t.ll
+// RUN: %clangxx -c -std=c++17 -fplugin=%archgen_plugin %s -mllvm --archgen-mlir-stop-at-approx -mllvm --archgen-mlir-mlir-output=%t.mlir -mllvm --archgen-mlir-dont-link-mlir -S -emit-llvm -o %t.ll
 // RUN: FileCheck --check-prefix=CHECK-MLIR --input-file=%t.mlir %s
 // RUN: FileCheck --check-prefix=CHECK-LLVMIR --input-file=%t.ll %s
-// RUN: %clangxx -std=c++17 -fplugin=%archgen_plugin %s -o %t.out
+// notsupported at the time reenable when later %clangxx -std=c++17 -mllvm --archgen-mlir-stop-at-approx -fplugin=%archgen_plugin %s -o %t.out
 
 #include "archgen.h"
 

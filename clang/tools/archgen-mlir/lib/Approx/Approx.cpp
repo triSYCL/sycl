@@ -61,7 +61,7 @@ mlir::Operation *ApproxDialect::materializeConstant(mlir::OpBuilder &builder,
                                                     mlir::Attribute value,
                                                     mlir::Type type,
                                                     mlir::Location loc) {
-  assert(type.isa<fixedpt::FixedPtType>());
+  assert(type.isa<approx::toBeFoldedType>());
   return builder.create<approx::ConstantOp>(
       loc, type, value.cast<fixedpt::FixedPointAttr>());
 }
