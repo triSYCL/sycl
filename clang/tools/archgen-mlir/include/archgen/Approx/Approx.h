@@ -18,18 +18,6 @@
 
 #include "archgen/Approx/ApproxDialect.h.inc"
 
-namespace archgen {
-namespace approx {
-namespace action {
-
-constexpr llvm::StringLiteral evaluate = "evaluate";
-constexpr llvm::StringLiteral variable = "variable";
-constexpr llvm::StringLiteral constant = "constant";
-
-} // namespace action
-} // namespace approx
-} // namespace archgen
-
 #define GET_TYPEDEF_CLASSES
 #include "archgen/Approx/ApproxType.h.inc"
 

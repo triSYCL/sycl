@@ -34,11 +34,11 @@
 //
 // CHECK-MLIR-LABEL:   func.func public @_ZN10archgenlib6detail12evaluateImplINS_11FixedNumberINS_11FixedFormatILi2ELin1EjEEEENS_5AddOpINS_5SinOpINS_8VariableINS2_INS3_ILi4ELin5EiEEEELm0EEEEENS_4PiOpEEEJSA_EEET_DpT1_(
 // CHECK-MLIR-SAME:                                                                                                                                                                                                      %[[VAL_0:.*]]: !fixedpt.fixedPt<4, -5, "signed">) -> !fixedpt.fixedPt<2, -1, "unsigned"> {
-// CHECK-MLIR:           %[[VAL_1:.*]] = "approx.generic"(%[[VAL_0]]) {action = "variable"} : (!fixedpt.fixedPt<4, -5, "signed">) -> !approx.toBeFolded
+// CHECK-MLIR:           %[[VAL_1:.*]] = "approx.variable"(%[[VAL_0]]) : (!fixedpt.fixedPt<4, -5, "signed">) -> !approx.toBeFolded
 // CHECK-MLIR:           %[[VAL_2:.*]] = "approx.generic"(%[[VAL_1]]) {action = "sin"} : (!approx.toBeFolded) -> !approx.toBeFolded
 // CHECK-MLIR:           %[[VAL_3:.*]] = "approx.generic"() {action = "pi"} : () -> !approx.toBeFolded
 // CHECK-MLIR:           %[[VAL_4:.*]] = "approx.generic"(%[[VAL_2]], %[[VAL_3]]) {action = "add"} : (!approx.toBeFolded, !approx.toBeFolded) -> !approx.toBeFolded
-// CHECK-MLIR:           %[[VAL_5:.*]] = "approx.generic"(%[[VAL_4]]) {action = "evaluate"} : (!approx.toBeFolded) -> !fixedpt.fixedPt<2, -1, "unsigned">
+// CHECK-MLIR:           %[[VAL_5:.*]] = "approx.evaluate"(%[[VAL_4]]) : (!approx.toBeFolded) -> !fixedpt.fixedPt<2, -1, "unsigned">
 // CHECK-MLIR:           return %[[VAL_5]] : !fixedpt.fixedPt<2, -1, "unsigned">
 // CHECK-MLIR:         }
 auto test(archgenlib::FixedNumber<archgenlib::FixedFormat<4, -5, signed>> x) {
@@ -76,12 +76,12 @@ auto test(archgenlib::FixedNumber<archgenlib::FixedFormat<4, -5, signed>> x) {
 //
 // CHECK-MLIR-LABEL:   func.func public @_ZN10archgenlib6detail12evaluateImplINS_11FixedNumberINS_11FixedFormatILi2ELin1EjEEEENS_5AddOpINS_5SinOpINS_8VariableINS2_INS3_ILi4ELin5EiEEEELm0EEEEESC_EEJSA_EEET_DpT1_(
 // CHECK-MLIR-SAME:                                                                                                                                                                                                %[[VAL_0:.*]]: !fixedpt.fixedPt<4, -5, "signed">) -> !fixedpt.fixedPt<2, -1, "unsigned"> {
-// CHECK-MLIR:           %[[VAL_1:.*]] = "approx.generic"(%[[VAL_0]]) {action = "variable"} : (!fixedpt.fixedPt<4, -5, "signed">) -> !approx.toBeFolded
+// CHECK-MLIR:           %[[VAL_1:.*]] = "approx.variable"(%[[VAL_0]]) : (!fixedpt.fixedPt<4, -5, "signed">) -> !approx.toBeFolded
 // CHECK-MLIR:           %[[VAL_2:.*]] = "approx.generic"(%[[VAL_1]]) {action = "sin"} : (!approx.toBeFolded) -> !approx.toBeFolded
-// CHECK-MLIR:           %[[VAL_3:.*]] = "approx.generic"(%[[VAL_0]]) {action = "variable"} : (!fixedpt.fixedPt<4, -5, "signed">) -> !approx.toBeFolded
+// CHECK-MLIR:           %[[VAL_3:.*]] = "approx.variable"(%[[VAL_0]]) : (!fixedpt.fixedPt<4, -5, "signed">) -> !approx.toBeFolded
 // CHECK-MLIR:           %[[VAL_4:.*]] = "approx.generic"(%[[VAL_3]]) {action = "sin"} : (!approx.toBeFolded) -> !approx.toBeFolded
 // CHECK-MLIR:           %[[VAL_5:.*]] = "approx.generic"(%[[VAL_2]], %[[VAL_4]]) {action = "add"} : (!approx.toBeFolded, !approx.toBeFolded) -> !approx.toBeFolded
-// CHECK-MLIR:           %[[VAL_6:.*]] = "approx.generic"(%[[VAL_5]]) {action = "evaluate"} : (!approx.toBeFolded) -> !fixedpt.fixedPt<2, -1, "unsigned">
+// CHECK-MLIR:           %[[VAL_6:.*]] = "approx.evaluate"(%[[VAL_5]]) : (!approx.toBeFolded) -> !fixedpt.fixedPt<2, -1, "unsigned">
 // CHECK-MLIR:           return %[[VAL_6]] : !fixedpt.fixedPt<2, -1, "unsigned">
 // CHECK-MLIR:         }
 auto test2(archgenlib::FixedNumber<archgenlib::FixedFormat<4, -5, signed>> x) {

@@ -36,12 +36,39 @@ def ToBeFoldedType
     : Approx_Type<"toBeFolded", "toBeFolded"> {
 }
 
-def Approx_genericOp : Approx_Op<"generic"> {
+def Approx_GenericOp : Approx_Op<"generic"> {
   let arguments = (ins
     Variadic<AnyType>: $inputs,
     StrAttr: $action
   );
-  let results = (outs Variadic<AnyType>: $outputs);
+  let builders = [
+    OpBuilder<(ins "::mlir::ValueRange":$val, "::llvm::StringRef": $str)>
+  ];
+  let results = (outs ToBeFoldedType: $output);
+}
+
+def Approx_EvaluateOp : Approx_Op<"evaluate"> {
+  let arguments = (ins
+    ToBeFoldedType: $input
+  );
+  let results = (outs FixedPtType: $output);
+}
+
+def Approx_VariableOp : Approx_Op<"variable"> {
+  let arguments = (ins
+    FixedPtType: $input
+  );
+  let results = (outs ToBeFoldedType: $output);
+  let builders = [
+    OpBuilder<(ins "::mlir::Value":$val)>
+  ];
+}
+
+def Approx_ParameterOp : Approx_Op<"parameter"> {
+  let arguments = (ins
+    AnyInteger: $input
+  );
+  let results = (outs FixedPtType: $output);
 }
 
 def Approx_ConstantOp : Approx_Op<"constant", [ConstantLike]> {

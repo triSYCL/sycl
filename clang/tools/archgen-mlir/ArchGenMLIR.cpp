@@ -184,6 +184,8 @@ constexpr llvm::StringLiteral GenericOp = "archgen_mlir_generic_op";
 constexpr llvm::StringLiteral GenAsMLIR = "archgen_mlir_emit_as_mlir";
 constexpr llvm::StringLiteral TopLevel = "archgen_mlir_top_level";
 constexpr llvm::StringLiteral KindConstant = "constant";
+constexpr llvm::StringLiteral KindEvaluate = "evaluate";
+constexpr llvm::StringLiteral KindVariable = "variable";
 constexpr llvm::StringLiteral KindParam = "parameter";
 
 bool hasAnnotation(clang::Decl *D, llvm::StringRef Annot) {
@@ -379,7 +381,7 @@ struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
         .create<arith::ConstantIntOp>(
             state.getMLIRLocation(IL->getLocation()),
             IL->getValue().getZExtValue(), MLIRType)
-        ->getResult(0);
+        .getResult();
   }
 
   mlir::Value
@@ -412,16 +414,26 @@ struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
               state.getMLIRLocation(CE->getBeginLoc()), attr)
           ->getResults()[0];
     }
+    if (Kind == Annot::KindEvaluate)
+      return state.builder.create<approx::EvaluateOp>(
+          state.getMLIRLocation(CE->getBeginLoc()),
+          state.getMLIRType(CE->getType()), Visit(CE->getArg(1)));
+    if (Kind == Annot::KindVariable)
+      return state.builder.create<approx::VariableOp>(
+          state.getMLIRLocation(CE->getBeginLoc()), Visit(CE->getArg(1)));
+    if (Kind == Annot::KindParam)
+      return state.builder.create<approx::ParameterOp>(
+          state.getMLIRLocation(CE->getBeginLoc()),
+          state.getMLIRType(CE->getType()), Visit(CE->getArg(1)));
 
     llvm::SmallVector<mlir::Value> Args;
     for (int64_t idx = 1; idx < CE->getNumArgs(); idx++)
       Args.push_back(Visit(CE->getArg(idx)));
 
     return state.builder
-        .create<approx::genericOp>(
-            state.getMLIRLocation(CE->getBeginLoc()),
-            mlir::TypeRange{state.getMLIRType(CE->getType())}, Args, Kind)
-        ->getResults()[0];
+        .create<approx::GenericOp>(state.getMLIRLocation(CE->getBeginLoc()),
+                                   Args, Kind)
+        .output();
   }
 
   mlir::Value VisitCallExpr(clang::CallExpr *CE) {
@@ -549,12 +561,10 @@ public:
   void rewriteParameters() {
     llvm::SmallVector<mlir::Operation *> maybeDelete;
 
-    state.module->walk([&](approx::genericOp op) {
-      if (op.action() != Annot::KindParam)
-        return;
+    state.module->walk([&](approx::ParameterOp op) {
       func::FuncOp func = cast<func::FuncOp>(op->getParentOp());
       auto constantInt =
-          cast<arith::ConstantIntOp>(op->getOperand(0).getDefiningOp());
+          cast<arith::ConstantIntOp>(op.input().getDefiningOp());
       int param_idx =
           constantInt.getValue().cast<mlir::IntegerAttr>().getInt();
       op->replaceAllUsesWith(
@@ -721,8 +731,10 @@ public:
     return LLVMIRASTConsumer->HandleInterestingDecl(D);
   }
   void HandleTranslationUnit(clang::ASTContext &Ctx) override {
-    if (mlir::failed(Finalize()))
+    if (mlir::failed(Finalize())) {
+      llvm::errs() << "MLIR pipelined failed\n";
       return;
+    }
     return LLVMIRASTConsumer->HandleTranslationUnit(Ctx);
   }
   void HandleTagDeclDefinition(clang::TagDecl *D) override {

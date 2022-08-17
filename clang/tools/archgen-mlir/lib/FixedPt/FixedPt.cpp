@@ -89,6 +89,18 @@ llvm::FixedPointSemantics FixedPtType::getFixedPointSemantics() const {
                                    /*hasUnsignedPadding*/ false);
 }
 
+FixedPtType FixedPtType::getCommonMulType(FixedPtType other) const {
+  return FixedPtType::get(getContext(), getMsb() + other.getMsb(),
+                          std::min(getLsb(), other.getLsb()),
+                          isSigned() || other.isSigned());
+}
+
+FixedPtType FixedPtType::getCommonAddType(FixedPtType other) const {
+  return FixedPtType::get(getContext(), std::max(getMsb(), other.getMsb()) + 1,
+                          std::min(getLsb(), other.getLsb()),
+                          isSigned() || other.isSigned());
+}
+
 mlir::Type FixedPtType::parse(mlir::AsmParser &odsParser) {
   int msb;
   int lsb;

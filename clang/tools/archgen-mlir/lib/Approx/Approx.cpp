@@ -90,3 +90,18 @@ mlir::OpFoldResult ConstantOp::fold(llvm::ArrayRef<mlir::Attribute> operands) {
 
 #define GET_TYPEDEF_CLASSES
 #include "archgen/Approx/ApproxType.cpp.inc"
+
+void GenericOp::build(mlir::OpBuilder &odsBuilder,
+                      mlir::OperationState &odsState, mlir::ValueRange val,
+                      llvm::StringRef str) {
+  GenericOp::build(odsBuilder, odsState,
+                   {approx::toBeFoldedType::get(odsBuilder.getContext())}, val,
+                   str);
+}
+
+void VariableOp::build(mlir::OpBuilder &odsBuilder,
+                       mlir::OperationState &odsState, mlir::Value val) {
+  VariableOp::build(odsBuilder, odsState,
+                    {approx::toBeFoldedType::get(odsBuilder.getContext())},
+                    val);
+}

@@ -47,6 +47,8 @@ def FixedPtType
     bool isUnsigned() const { return !isSigned(); }
     unsigned getWidth() const { return getMsb() - getLsb() + 1; }
     llvm::FixedPointSemantics getFixedPointSemantics() const;
+    FixedPtType getCommonMulType(FixedPtType other) const;
+    FixedPtType getCommonAddType(FixedPtType other) const;
   }];
   let builders = [
     TypeBuilder<(ins "llvm::FixedPointSemantics":$sema), [{

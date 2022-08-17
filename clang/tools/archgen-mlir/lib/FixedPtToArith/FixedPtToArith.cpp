@@ -561,17 +561,19 @@ struct DivOpLowering : public mlir::OpConversionPattern<DivOp> {
       llvm_unreachable("unimplemented");
     }
 
-    mlir::Operation *divOp;
+    mlir::Value divResult;
     /// Emit the division
     if (isSigned)
-      divOp = rewriter.create<arith::DivSIOp>(op.getLoc(), lhs, rhs);
+      divResult =
+          rewriter.create<arith::DivSIOp>(op.getLoc(), lhs, rhs).getResult();
     else
-      divOp = rewriter.create<arith::DivUIOp>(op.getLoc(), lhs, rhs);
+      divResult =
+          rewriter.create<arith::DivUIOp>(op.getLoc(), lhs, rhs).getResult();
 
     /// Remove the now useless high bits
     rewriter.replaceOp(
         op, converter.maybeTruncate(
-                divOp->getResult(0),
+                divResult,
                 typeConverter->convertType(outTy).cast<mlir::IntegerType>()));
     return mlir::success();
   }
