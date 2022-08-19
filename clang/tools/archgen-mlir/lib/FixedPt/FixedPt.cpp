@@ -84,9 +84,10 @@ llvm::FixedPointSemantics FixedPtType::getFixedPointSemantics() const {
   /// isStaturated and hasUnsignedPadding are not properties of the layout but
   /// properties of operations on the APFixedPoint so they are not represented
   /// by the MLIR type
-  return llvm::FixedPointSemantics(getWidth(), -getLsb(), isSigned(),
-                                   /*isStaturated*/ false,
-                                   /*hasUnsignedPadding*/ false);
+  return llvm::FixedPointSemantics(
+      getWidth(), llvm::FixedPointSemantics::Lsb{getLsb()}, isSigned(),
+      /*isStaturated*/ false,
+      /*hasUnsignedPadding*/ false);
 }
 
 FixedPtType FixedPtType::getCommonMulType(FixedPtType other) const {

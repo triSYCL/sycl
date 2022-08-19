@@ -52,8 +52,8 @@ def FixedPtType
   }];
   let builders = [
     TypeBuilder<(ins "llvm::FixedPointSemantics":$sema), [{
-    return Base::get($_ctxt, sema.getWidth() - sema.getScale() - 1,
-                     -sema.getScale(), sema.isSigned());
+    return Base::get($_ctxt, sema.getWidth() + sema.getLsbWeight() - 1,
+                     sema.getLsbWeight(), sema.isSigned());
   }]>];
 }
 

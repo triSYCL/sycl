@@ -13,6 +13,7 @@
 
 #include "llvm/ADT/BitmaskEnum.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Verifier.h"
 #include "llvm/Linker/Linker.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/Debug.h"
@@ -669,6 +670,13 @@ public:
     MLIRLLVMModule->setDataLayout(LLVMModule->getDataLayout());
     MLIRLLVMModule->setTargetTriple(LLVMModule->getTargetTriple());
 
+    bool brokenDebugInto = false;
+    llvm::verifyModule(*MLIRLLVMModule, &llvm::errs(), &brokenDebugInto);
+
+    /// We do not want out flags to colide with the flags from the main llvm
+    /// module
+    MLIRLLVMModule->getOrInsertModuleFlagsMetadata()->clearOperands();
+
     if (!DontLinkMLIR)
       llvm::Linker::linkModules(*LLVMModule, std::move(MLIRLLVMModule));
 
@@ -732,7 +740,7 @@ public:
   }
   void HandleTranslationUnit(clang::ASTContext &Ctx) override {
     if (mlir::failed(Finalize())) {
-      llvm::errs() << "MLIR pipelined failed\n";
+      llvm::report_fatal_error("MLIR pipelined failed");
       return;
     }
     return LLVMIRASTConsumer->HandleTranslationUnit(Ctx);

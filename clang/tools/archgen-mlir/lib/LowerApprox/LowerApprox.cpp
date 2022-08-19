@@ -63,6 +63,7 @@ auto approxTreeVisitor(mlir::Operation *rawOp, CallableTy onOp) {
   return ApproxVisitorImpl<RetTy>::Visit(rawOp, onOp);
 }
 
+/// Pass implementation
 struct LowerApprox {
   mlir::IRRewriter rewriter;
   mlir::MLIRContext *ctx;
@@ -72,13 +73,17 @@ struct LowerApprox {
   // comes from evaluate
   mlir::Location loc;
 
+  /// To do calls by function name into sollya we load it as a dynamic library
   llvm::sys::DynamicLibrary sollyaLib;
 
   LowerApprox(mlir::MLIRContext *context)
       : rewriter(context), ctx(context), loc(rewriter.getUnknownLoc()) {}
 
+  /// Load Sollya
   mlir::LogicalResult init() {
     std::string errorMsg;
+
+    /// cmake will kindly give us the path of the sollya library it selected
     sollyaLib = llvm::sys::DynamicLibrary::getPermanentLibrary(
         ARCHGEN_SOLLYA_LIB_PATH, &errorMsg);
     if (!sollyaLib.isValid()) {
@@ -88,16 +93,19 @@ struct LowerApprox {
     return mlir::success();
   }
 
+  /// Lookup a symbol of a specific type in sollya 
   template <typename T> T *lookupSollyaSymbol(llvm::StringRef symbol) {
     return (T *)sollyaLib.getAddressOfSymbol(symbol.data());
   }
 
+  /// Build a sollya expression
   template <typename... Tys>
   sollya_obj_t buildSollya(llvm::StringRef name, Tys... tys) {
     llvm::Twine fullName("sollya_lib_build_function_", name);
     return lookupSollyaSymbol<sollya_obj_t(Tys...)>(fullName.str())(tys...);
   }
 
+  /// Build a sollya constant
   sollya_obj_t buildConstant(approx::ConstantOp op) {
     auto fixedTy = fixedpt::FixedPtType::get(
         op->getContext(), op.valueAttr().getValue().getSemantics());
@@ -114,31 +122,42 @@ struct LowerApprox {
     return ret;
   }
 
-  /// Normalization inputs to [1, 0] or [1, -1]
   void normalizeInputs(approx::EvaluateOp evaluateOp) {
     approxTreeVisitor(
         evaluateOp,
         [&](mlir::Operation *rawOp, auto... operandsPack) -> mlir::Value {
+          /// Handle recursive rewrites.
           if (llvm::isa<approx::ConstantOp>(rawOp))
             return rawOp->getResult(0);
+
           auto op = llvm::dyn_cast<approx::VariableOp>(rawOp);
           if (!op) {
+            /// If this is not a variable set the operands from the operand pack
+            /// Such that we can return a new value and this will update the
+            /// users of it
             std::array<mlir::Value, sizeof...(operandsPack)> operands = {
                 operandsPack...};
             rawOp->setOperands(operands);
             assert(rawOp->getNumResults() == 1);
-            return rawOp->getResult(0);
+            return rawOp->getResult(0); // all out ops only have one result
           }
 
-          // example:
-          // fixed<3, -4, u> -> fixed<0, -7, u> scaled by 2^3
-          // fixed<3, -4, s> -> fixed<1, -6, s> scaled by 2^2
-          rewriter.setInsertionPoint(op);
-          mlir::Value variable = op->getOperand(0);
+          /// Handle normalization
+          /// example:
+          /// fixed<3, -4, u> -> fixed<-1, -8, u> scaled by 2^4
+          /// fixed<3, -4, s> -> fixed<0, -7, s> scaled by 2^3
 
+          /// We are going to start editing so set where we want to write
+          rewriter.setInsertionPoint(op);
+          
+          /// get the fixe point input to the expression
+          mlir::Value variable = op->getOperand(0);
           fixedpt::FixedPtType oldType =
               op->getOperand(0).getType().cast<fixedpt::FixedPtType>();
-          int newMsb = oldType.isSigned();
+
+          /// figure out the new type we want such that it is either [1, 0] or
+          /// [1, -1]
+          int newMsb = (int)oldType.isSigned() - 1;
           int newLsb = -(oldType.getWidth() - newMsb - 1);
           fixedpt::FixedPtType newType = fixedpt::FixedPtType::get(
               ctx, newMsb, newLsb, oldType.isSigned());
@@ -147,33 +166,40 @@ struct LowerApprox {
           if (newType == oldType)
             return op.output();
 
+          /// figure out the scaling constant
           int log2ScalingFactor = oldType.getLsb() - newType.getLsb();
-          /// APFixedPoint in the current state doesn't support fixed point
-          /// without a zero bit
           llvm::APFixedPoint fixedScalingFactor = [&]() -> llvm::APFixedPoint {
             if (log2ScalingFactor > 0)
               return llvm::APFixedPoint(
                   1 << log2ScalingFactor,
-                  llvm::FixedPointSemantics(log2ScalingFactor + 1, 0, false, false,
-                                            false));
+                  llvm::FixedPointSemantics(log2ScalingFactor + 1, 0, false,
+                                            false, false));
             return llvm::APFixedPoint(
                 1, llvm::FixedPointSemantics(-log2ScalingFactor + 1,
                                              -log2ScalingFactor, false, false,
                                              false));
           }();
 
+          /// bitcast to convert from the input format to a normalized format
+          /// for free
           variable = rewriter
                          .create<fixedpt::BitcastOp>(op->getLoc(), newType,
                                                      op->getOperand(0))
                          .result();
+
+          /// This is the new input to the expression
           op.setOperand(variable);
+
+          /// build the scaling constant
           rewriter.setInsertionPointAfter(op);
           mlir::Value scalingFactor =
               rewriter
-                  .create<approx::ConstantOp>(op.getLoc(),
-                                      fixedpt::FixedPointAttr::get(
-                                          ctx, std::move(fixedScalingFactor)))
+                  .create<approx::ConstantOp>(
+                      op.getLoc(), fixedpt::FixedPointAttr::get(
+                                       ctx, std::move(fixedScalingFactor)))
                   .result();
+
+          /// build the multiply
           return rewriter
               .create<approx::GenericOp>(op->getLoc(),
                                  mlir::ValueRange{op.output(), scalingFactor},
@@ -186,6 +212,10 @@ struct LowerApprox {
     mlir::Value inputType;
     approxTreeVisitor(evaluateOp, [&](mlir::Operation *op) {
       if (auto var = llvm::dyn_cast<approx::VariableOp>(op)) {
+        /// check that the type is the same for all variables if they exist.
+        /// because it is assumed that there is only one variable but we
+        /// de-facto handle multiple variables as long as they all have the same
+        /// value
         assert(!inputType || (inputType == var.input()));
         inputType = var.input();
       }
@@ -195,6 +225,7 @@ struct LowerApprox {
 
   sollya_obj_t buildSollyaTree(approx::EvaluateOp evaluateOp) {
     return approxTreeVisitor(
+        // skip the approx::EvaluateOp since we dont care about it
         evaluateOp->getOperand(0).getDefiningOp(),
         [&](auto *rawOp, auto... operands) -> sollya_obj_t {
           if (auto constant = llvm::dyn_cast<approx::ConstantOp>(rawOp))
@@ -206,16 +237,48 @@ struct LowerApprox {
         });
   }
 
+  /// build a constant from a flopoco::FixConstant*
   mlir::Value getConstantFromCoef(flopoco::FixConstant* constant) {
     assert(constant);
     fixedpt::FixedPtType ty = fixedpt::FixedPtType::get(
         ctx, constant->MSB, constant->LSB, constant->isSigned);
     
-    llvm::APInt bits(ty.getWidth(), constant->getBitVector(), 2);
+    std::string quotedBitsStr = constant->getBitVector();
+    llvm::StringRef bitStr = quotedBitsStr;
+    bitStr = bitStr.drop_front().drop_back();
+    llvm::APInt bits(ty.getWidth(), bitStr, 2);
     llvm::APFixedPoint fixedVal(bits, ty.getFixedPointSemantics());
 
     return rewriter.create<fixedpt::ConstantOp>(
         loc, ty, fixedpt::FixedPointAttr::get(ctx, std::move(fixedVal)));
+  }
+
+  static void printFormat(llvm::StringRef str, fixedpt::FixedPtType ty) {
+    llvm::outs() << str << ": width=" << ty.getWidth() << " lsb=" << ty.getLsb()
+                 << (ty.isSigned() ? " signed" : " unsigned") << "\n";
+  }
+
+  mlir::Value convertTo(mlir::Value in, fixedpt::FixedPtType outTy) {
+    if (in.getType() == outTy)
+      return in;
+
+    /// it is easier to to just build "x + 0" and let lowering to arith
+    /// do the conversion. we really should have a simple convertOp. its easy to
+    /// implement
+
+    /// all bits to zero is zero for all formats
+    llvm::APFixedPoint zeroFP(
+        0, llvm::FixedPointSemantics(1, 0, false, false, false));
+    fixedpt::FixedPtType zeroTy =
+        fixedpt::FixedPtType::get(ctx, zeroFP.getSemantics());
+
+    mlir::Value zero =
+        rewriter
+            .create<fixedpt::ConstantOp>(
+                loc, zeroTy,
+                fixedpt::FixedPointAttr::get(ctx, std::move(zeroFP)))
+            .result();
+    return rewriter.create<fixedpt::AddOp>(loc, outTy, in, zero);
   }
 
   void run(approx::EvaluateOp evaluateOp) {
@@ -232,19 +295,21 @@ struct LowerApprox {
 
     /// Build sollya expresion tree
     sollya_lib_printf("sollya: %b\n", sollyaTree);
-    llvm::outs() << "input: width=" << inputType.getWidth()
-                 << " lsb=" << inputType.getLsb() << "\n";
-    llvm::outs() << "output: width=" << outputType.getWidth()
-                 << " lsb=" << outputType.getLsb() << "\n";
+    printFormat("input", inputType);
+    printFormat("output", outputType);
 
     flopoco::BasicPolyApprox flopocoApprox(sollyaTree, std::pow(1.0, outputType.getLsb()));
+
+    /// Sollya loves to change the color and not reset them
+    llvm::errs().resetColor();
+    llvm::outs().resetColor();
 
     // A0 + X * ( A1 + X * (...(An-1 + X * An)))
     rewriter.setInsertionPointAfterValue(output);
     assert(flopocoApprox.getDegree() > 0);
     mlir::Value expr = getConstantFromCoef(
         flopocoApprox.getCoeff(flopocoApprox.getDegree() - 1));
-    for (int i = (flopocoApprox.getDegree() - 1); i >= 0; i--) {
+    for (int i = (flopocoApprox.getDegree() - 2); i >= 0; i--) {
       mlir::Value coef = getConstantFromCoef(flopocoApprox.getCoeff(i));
       fixedpt::FixedPtType addType = inputType.getCommonAddType(
           coef.getType().cast<fixedpt::FixedPtType>());
@@ -252,17 +317,25 @@ struct LowerApprox {
           rewriter.create<fixedpt::AddOp>(loc, addType, input, coef).result();
       fixedpt::FixedPtType mulType =
           addType.getCommonMulType(expr.getType().cast<fixedpt::FixedPtType>());
-      if (i == 0)
-        mulType = outputType;
       expr =
           rewriter.create<fixedpt::MulOp>(loc, mulType, expr, AplusX).result();
     }
+
+    /// This should not happened unless the result is a constant
+    if (expr.getType() != outputType)
+      expr = convertTo(expr, outputType);
     output.replaceAllUsesWith(expr);
 
+    /// Remove the old approx tree
+    llvm::SmallVector<mlir::Operation*> outdatedApproxExpr;
     approxTreeVisitor(evaluateOp, [&](mlir::Operation *op) {
-      op->replaceAllUsesWith(mlir::ValueRange{mlir::Value{}});
-      op->erase();
+      /// unlink and list everything
+      op->dropAllReferences();
+      outdatedApproxExpr.push_back(op);
     });
+    /// erase it all
+    for (auto* op : outdatedApproxExpr)
+      op->erase();
 
     expr.getParentBlock()->dump();
   }

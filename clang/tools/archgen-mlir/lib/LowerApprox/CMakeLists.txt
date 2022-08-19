@@ -21,9 +21,9 @@ add_mlir_library(ArchGenLowerApprox
   ArchGenMLIRApprox
   ArchGenMLIRFixedPt
   ${LLVM_FLOPOCO_LIB}
-  sollya
+  ${SOLLYA_LIB}
   mpfr
   gmp
-  )
+)
 
 target_compile_definitions(ArchGenLowerApprox PRIVATE "ARCHGEN_SOLLYA_LIB_PATH=\"${SOLLYA_LIB}\"")
