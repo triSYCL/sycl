@@ -10,6 +10,9 @@
 #error "unable to find sollya"
 #endif
 
+#include <thread>
+#include <chrono>
+
 #include "llvm/Support/DynamicLibrary.h"
 
 #include "mlir/IR/PatternMatch.h"
@@ -22,6 +25,56 @@
 #include "archgen/Approx/Passes.h"
 
 #include "flopoco/FixFunctions/BasicPolyApprox.hpp"
+
+#ifdef __linux__
+#include <unistd.h>
+#include <signal.h>
+
+struct KillableOnInput {
+  std::thread t;
+  std::atomic<bool> shouldStop{false};
+  KillableOnInput() {
+    llvm::errs() << "Sollya is intercepting SIGINT, press enter to kill the process\n";
+    llvm::errs().flush();
+    t = std::thread([&] { background(); });
+  }
+  void stop() {
+    shouldStop = true;
+    t.join();
+    ::signal(SIGINT, SIG_DFL);
+    llvm::errs() << "SIGINT back to normal\n";
+  }
+  ~KillableOnInput() {
+    if (t.joinable() && !shouldStop)
+      stop();
+  }
+
+private:
+  void terminate() {
+    llvm::errs().resetColor();
+    llvm::outs().resetColor();
+    std::terminate();
+  }
+  void background() {
+    fd_set set;
+    timeval timeout;
+    FD_ZERO(&set);
+    FD_SET(STDIN_FILENO, &set);
+    timeout.tv_sec = 0;
+    timeout.tv_usec = 100;
+
+    while (!shouldStop) {
+      int res = select(STDIN_FILENO + 1, &set, NULL, NULL, &timeout);
+      if (res != 0) // error or data to read
+        terminate();
+    }
+  }
+};
+#else
+struct KillableOnInput {
+  void stop() {}
+};
+#endif
 
 using namespace archgen;
 
@@ -209,18 +262,14 @@ struct LowerApprox {
   }
 
   mlir::Value findInputValue(approx::EvaluateOp evaluateOp) {
-    mlir::Value inputType;
+    mlir::Value inputVal;
     approxTreeVisitor(evaluateOp, [&](mlir::Operation *op) {
       if (auto var = llvm::dyn_cast<approx::VariableOp>(op)) {
-        /// check that the type is the same for all variables if they exist.
-        /// because it is assumed that there is only one variable but we
-        /// de-facto handle multiple variables as long as they all have the same
-        /// value
-        assert(!inputType || (inputType == var.input()));
-        inputType = var.input();
+        assert(!inputVal || (inputVal == var.input()));
+        inputVal = var.input();
       }
     });
-    return inputType;
+    return inputVal;
   }
 
   sollya_obj_t buildSollyaTree(approx::EvaluateOp evaluateOp) {
@@ -237,20 +286,37 @@ struct LowerApprox {
         });
   }
 
-  /// build a constant from a flopoco::FixConstant*
-  mlir::Value getConstantFromCoef(flopoco::FixConstant* constant) {
+  std::pair<llvm::APFixedPoint, fixedpt::FixedPtType>
+  getCoefAsApFixed(flopoco::FixConstant *constant) {
     assert(constant);
     fixedpt::FixedPtType ty = fixedpt::FixedPtType::get(
         ctx, constant->MSB, constant->LSB, constant->isSigned);
-    
+
     std::string quotedBitsStr = constant->getBitVector();
     llvm::StringRef bitStr = quotedBitsStr;
     bitStr = bitStr.drop_front().drop_back();
     llvm::APInt bits(ty.getWidth(), bitStr, 2);
     llvm::APFixedPoint fixedVal(bits, ty.getFixedPointSemantics());
+    return {fixedVal, ty};
+  }
 
+  /// build a constant from a flopoco::FixConstant*
+  mlir::Value getConstantFromCoef(flopoco::FixConstant *constant) {
+    std::pair<llvm::APFixedPoint, fixedpt::FixedPtType> fixedCst =
+        getCoefAsApFixed(constant);
     return rewriter.create<fixedpt::ConstantOp>(
-        loc, ty, fixedpt::FixedPointAttr::get(ctx, std::move(fixedVal)));
+        loc, fixedCst.second,
+        fixedpt::FixedPointAttr::get(ctx, std::move(fixedCst.first)));
+  }
+
+  void printPolynom(llvm::raw_ostream &os,
+                    llvm::ArrayRef<flopoco::FixConstant *> coefs) {
+    std::string expr = getCoefAsApFixed(coefs.back()).first.toString();
+    for (auto *coef : llvm::reverse(coefs.drop_back())) {
+      std::string cst = getCoefAsApFixed(coef).first.toString();
+      expr = cst + " + x * " + "(" + expr + ")";
+    }
+    os << "polynom:\ndef f(x):\n\treturn " << expr << "\n";
   }
 
   static void printFormat(llvm::StringRef str, fixedpt::FixedPtType ty) {
@@ -292,25 +358,37 @@ struct LowerApprox {
     fixedpt::FixedPtType inputType = input.getType().cast<fixedpt::FixedPtType>();
 
     sollya_obj_t sollyaTree = buildSollyaTree(evaluateOp);
+    double accuracy = std::pow(2.0, outputType.getLsb() - 1);
 
     /// Build sollya expresion tree
     sollya_lib_printf("sollya: %b\n", sollyaTree);
     printFormat("input", inputType);
     printFormat("output", outputType);
+    llvm::outs() << "accuracy="  << accuracy << "\n";
 
-    flopoco::BasicPolyApprox flopocoApprox(sollyaTree, std::pow(1.0, outputType.getLsb()));
+    KillableOnInput koi;
+    flopoco::BasicPolyApprox flopocoApprox(sollyaTree, accuracy, 0,
+                                           inputType.isSigned());
+    koi.stop();
 
     /// Sollya loves to change the color and not reset them
     llvm::errs().resetColor();
     llvm::outs().resetColor();
 
+    assert(flopocoApprox.getDegree() > 0);
+
+    llvm::SmallVector<flopoco::FixConstant*> coefsStorage;
+    for (int i = 0; i < flopocoApprox.getDegree(); i++)
+      coefsStorage.push_back(flopocoApprox.getCoeff(i));
+    llvm::ArrayRef<flopoco::FixConstant*> coefs{coefsStorage};
+
+    printPolynom(llvm::outs(), coefs);
+
     // A0 + X * ( A1 + X * (...(An-1 + X * An)))
     rewriter.setInsertionPointAfterValue(output);
-    assert(flopocoApprox.getDegree() > 0);
-    mlir::Value expr = getConstantFromCoef(
-        flopocoApprox.getCoeff(flopocoApprox.getDegree() - 1));
-    for (int i = (flopocoApprox.getDegree() - 2); i >= 0; i--) {
-      mlir::Value coef = getConstantFromCoef(flopocoApprox.getCoeff(i));
+    mlir::Value expr = getConstantFromCoef(coefs.back());
+    for (flopoco::FixConstant* flopocoCoef : llvm::reverse(coefs.drop_back())) {
+      mlir::Value coef = getConstantFromCoef(flopocoCoef);
       fixedpt::FixedPtType addType = inputType.getCommonAddType(
           coef.getType().cast<fixedpt::FixedPtType>());
       mlir::Value AplusX =

@@ -41,6 +41,7 @@
 #include "clang/CodeGen/ModuleBuilder.h"
 #include "clang/Frontend/CompilerInstance.h"
 #include "clang/Frontend/FrontendPluginRegistry.h"
+#include "clang/Sema/Sema.h"
 
 #include "archgen/Approx/Approx.h"
 #include "archgen/Approx/Passes.h"
@@ -631,6 +632,14 @@ public:
     }
     rewriteParameters();
 
+    {
+      mlir::PassManager pm(&state.ctx);
+      pm.addPass(mlir::createCanonicalizerPass());
+      pm.addPass(mlir::createCSEPass());
+      if (mlir::failed(pm.run(state.module.get())))
+        return mlir::failure();
+    }
+
     /// This at this point the front-end and cleanup is done
     if (mlir::failed(outputMLIR(MLIROutput, state.module.get())))
       return mlir::failure();
@@ -640,16 +649,19 @@ public:
 
     {
       mlir::PassManager pm(&state.ctx);
+      pm.enableIRPrinting();
 
       /// The Core of ArchGen, will transform the approx dialect describing the
       /// expression to be approximated into the logic to approximate the
       /// expression
       pm.addPass(approx::createLowerApproxPass());
 
+      pm.addPass(mlir::createCanonicalizerPass());
+      pm.addPass(mlir::createCSEPass());
       pm.addPass(fixedpt::createConvertFixedPtToArithPass());
       pm.addPass(mlir::createReconcileUnrealizedCastsPass());
-      pm.addPass(mlir::createCSEPass());
       pm.addPass(mlir::createCanonicalizerPass());
+      pm.addPass(mlir::createCSEPass());
       pm.addPass(mlir::createMemRefToLLVMPass());
       pm.addPass(arith::createConvertArithmeticToLLVMPass());
       pm.addPass(mlir::createConvertFuncToLLVMPass());
@@ -739,7 +751,10 @@ public:
     return LLVMIRASTConsumer->HandleInterestingDecl(D);
   }
   void HandleTranslationUnit(clang::ASTContext &Ctx) override {
-    if (mlir::failed(Finalize())) {
+    /// If the frontend emutted an error do not run the backend
+    if (!CI.getSema().hasUncompilableErrorOccurred() &&
+        mlir::failed(Finalize())) {
+      /// If our backend fails stop now
       llvm::report_fatal_error("MLIR pipelined failed");
       return;
     }
