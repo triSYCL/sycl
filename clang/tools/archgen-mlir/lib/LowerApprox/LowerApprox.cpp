@@ -26,6 +26,10 @@
 
 #include "flopoco/FixFunctions/BasicPolyApprox.hpp"
 
+using namespace archgen;
+namespace arith = mlir::arith;
+namespace func = mlir::func;
+
 #ifdef __linux__
 #include <unistd.h>
 #include <signal.h>
@@ -75,8 +79,6 @@ struct KillableOnInput {
   void stop() {}
 };
 #endif
-
-using namespace archgen;
 
 namespace {
 
@@ -128,6 +130,8 @@ struct LowerApprox {
 
   /// To do calls by function name into sollya we load it as a dynamic library
   llvm::sys::DynamicLibrary sollyaLib;
+
+  int doubleImplCounter = 0;
 
   LowerApprox(mlir::MLIRContext *context)
       : rewriter(context), ctx(context), loc(rewriter.getUnknownLoc()) {}
@@ -347,6 +351,39 @@ struct LowerApprox {
     return rewriter.create<fixedpt::AddOp>(loc, outTy, in, zero);
   }
 
+  mlir::Value getCoefAsDoubleConstant(flopoco::FixConstant *constant) {
+    assert(constant);
+
+    std::string quotedBitsStr = constant->getBitVector();
+    llvm::StringRef bitStr = quotedBitsStr;
+    bitStr = bitStr.drop_front().drop_back();
+    llvm::APFloat value(mpfr_get_d(constant->fpValue, GMP_RNDN));
+    return rewriter
+        .create<mlir::arith::ConstantFloatOp>(loc, value, rewriter.getF64Type())
+        .getResult();
+  }
+
+  void addPolynomCalculationAsDouble(approx::EvaluateOp evaluateOp, llvm::ArrayRef<flopoco::FixConstant *> coefs) {
+    mlir::ModuleOp module =  evaluateOp->getParentOfType<mlir::ModuleOp>();
+    rewriter.setInsertionPointToStart(module.getBody());
+
+    std::string name = "polynom_double_" + std::to_string(doubleImplCounter++);
+
+    auto function = rewriter.create<mlir::func::FuncOp>(
+        loc, name,
+        rewriter.getFunctionType(rewriter.getF64Type(), rewriter.getF64Type()));
+    mlir::Block *b = function.addEntryBlock();
+    rewriter.setInsertionPointToStart(b);
+    mlir::Value X = b->getArgument(0);
+    mlir::Value expr = getCoefAsDoubleConstant(coefs.back());
+    for (auto *coef : llvm::reverse(coefs.drop_back())) {
+      mlir::Value cst = getCoefAsDoubleConstant(coef);
+      mlir::Value sum = rewriter.create<arith::AddFOp>(loc, cst, X);
+      expr = rewriter.create<arith::MulFOp>(loc, sum, expr);
+    }
+    rewriter.create<func::ReturnOp>(loc, expr);
+  }
+
   void run(approx::EvaluateOp evaluateOp) {
     loc = evaluateOp->getLoc();
 
@@ -383,6 +420,8 @@ struct LowerApprox {
     llvm::ArrayRef<flopoco::FixConstant*> coefs{coefsStorage};
 
     printPolynom(llvm::outs(), coefs);
+
+    addPolynomCalculationAsDouble(evaluateOp, coefs);
 
     // A0 + X * ( A1 + X * (...(An-1 + X * An)))
     rewriter.setInsertionPointAfterValue(output);
