@@ -407,6 +407,7 @@ struct LowerApprox {
     flopoco::BasicPolyApprox flopocoApprox(sollyaTree, accuracy, 0,
                                            inputType.isSigned());
     koi.stop();
+    llvm::outs() << "Polynom coefficients:" << flopocoApprox.report() << "\n";
 
     /// Sollya loves to change the color and not reset them
     llvm::errs().resetColor();
@@ -415,7 +416,7 @@ struct LowerApprox {
     assert(flopocoApprox.getDegree() > 0);
 
     llvm::SmallVector<flopoco::FixConstant*> coefsStorage;
-    for (int i = 0; i < flopocoApprox.getDegree(); i++)
+    for (int i = 0; i <= flopocoApprox.getDegree(); i++)
       coefsStorage.push_back(flopocoApprox.getCoeff(i));
     llvm::ArrayRef<flopoco::FixConstant*> coefs{coefsStorage};
 
