@@ -91,8 +91,9 @@ llvm::FixedPointSemantics FixedPtType::getFixedPointSemantics() const {
 }
 
 FixedPtType FixedPtType::getCommonMulType(FixedPtType other) const {
-  return FixedPtType::get(getContext(), getMsb() + other.getMsb(),
-                          std::min(getLsb(), other.getLsb()),
+  int lsb = getLsb() + other.getLsb();
+  int width = getWidth() + other.getWidth();
+  return FixedPtType::get(getContext(), width + lsb, lsb,
                           isSigned() || other.isSigned());
 }
 
@@ -113,17 +114,17 @@ mlir::Type FixedPtType::parse(mlir::AsmParser &odsParser) {
     odsParser.emitError(odsParser.getNameLoc(), "failed to parse FixedPtType");
     return {};
   }
-  if (sign != "signed" && sign != "unsigned") {
+  if (sign != "s" && sign != "u") {
     odsParser.emitError(odsParser.getNameLoc(),
-                        "expected signed or unsigned got " + sign);
+                        "expected s or u got " + sign);
   }
-  bool isSigned = (sign == "signed");
+  bool isSigned = (sign == "s");
   return FixedPtType::get(odsParser.getContext(), msb, lsb, isSigned);
 }
 
 void FixedPtType::print(mlir::AsmPrinter &odsPrinter) const {
   odsPrinter << "<" << getMsb() << ", " << getLsb() << ", \""
-             << (isSigned() ? "signed" : "unsigned") << "\">";
+             << (isSigned() ? "s" : "u") << "\">";
 }
 
 //===----------------------------------------------------------------------===//
@@ -157,6 +158,11 @@ void FixedPointAttr::print(mlir::AsmPrinter &odsPrinter) const {
              << ", \"" << getValue().toString() << "\""
              << ">";
 }
+//===----------------------------------------------------------------------===//
+// Fixed Point enumerations
+//===----------------------------------------------------------------------===//
+
+#include "archgen/FixedPt/FixedPtEnum.cpp.inc"
 
 //===----------------------------------------------------------------------===//
 // Fixed Point operation definitions
@@ -238,5 +244,9 @@ mlir::LogicalResult BitcastOp::verify() {
       (inFPTy && outIntTy && inFPTy.getWidth() != outIntTy.getWidth()) ||
       (inIntTy && outFPTy && inIntTy.getWidth() != outFPTy.getWidth()))
     return emitError("bitwidth must match");
+  return mlir::success();
+}
+
+mlir::LogicalResult ConvertOp::verify() {
   return mlir::success();
 }

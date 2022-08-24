@@ -11,6 +11,7 @@
 
 include "mlir/IR/OpBase.td"
 include "mlir/IR/AttrTypeBase.td"
+include "mlir/IR/EnumAttr.td"
 
 def FixedPt_Dialect : Dialect {
   let summary = "Dialect to represent fixed point type and operations";
@@ -66,5 +67,15 @@ def FixedPtAttr : FixedPt_Attr<"FixedPoint", "fixed_point"> {
   let parameters = (ins "::llvm::APFixedPoint": $value);
   let hasCustomAssemblyFormat = true;
 } 
+
+def RoundDown: I32EnumAttrCase<"zero", 1>;
+def RoundNearest: I32EnumAttrCase<"nearest", 2>;
+
+def RoundingKindAttr: I32EnumAttr<"roundingMode", "describes rounding modes",
+                           [RoundDown, RoundNearest]> {
+  let cppNamespace = "::archgen::fixedpt";
+  let stringToSymbolFnName = "ConvertToEnum";
+  let symbolToStringFnName = "ConvertToString";
+}
 
 #endif

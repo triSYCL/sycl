@@ -16,6 +16,7 @@ add_mlir_library(ArchGenLowerApprox
   MLIRIR
   MLIRArithmeticDialect
   MLIRFuncDialect
+  MLIRLLVMDialect
   ArchGenMLIRApprox
   ArchGenMLIRFixedPt
   FloPoCo::hileco

@@ -21,9 +21,11 @@ class FixedPt_Op<string mnemonic, list<Trait> traits = []> :
 class FixedPt_BinOp<string mnemonic, list<Trait> traits = []> : FixedPt_Op<mnemonic, traits> {
   let arguments = (ins
     AnyFixedPt: $lhs,
-    AnyFixedPt: $rhs
+    AnyFixedPt: $rhs,
+    RoundingKindAttr: $rounding
   );
   let results = (outs AnyFixedPt: $result);
+  let assemblyFormat = "$lhs `:` type($lhs) `,` $rhs `:` type($rhs) `to` $rounding type($result) attr-dict";
 }
 
 def FixedPt_AddOp : FixedPt_BinOp<"add", [Commutative]>;
@@ -37,6 +39,7 @@ def FixedPt_ConstantOp : FixedPt_Op<"constant", [ConstantLike]> {
   );
   let results = (outs AnyFixedPt: $result);
   let hasFolder = 1;
+  let assemblyFormat = "$valueAttr `->` type($result) attr-dict";
 }
 
 def FixedPt_TruncOp : FixedPt_Op<"trunc"> {
@@ -53,10 +56,11 @@ def FixedPt_RoundOp : FixedPt_Op<"round"> {
   /// TODO: Add rounding semantics: tonearest, tozero, toupper, tolower, toinf...
   let summary = "remove low bits of a fixedpoint type";
   let arguments = (ins
-    AnyFixedPt: $input
+    AnyFixedPt: $input,
+    RoundingKindAttr: $rounding
   );
   let results = (outs AnyFixedPt: $result);
-  let assemblyFormat = "$input `:` type($input) `to` type($result) attr-dict";
+  let assemblyFormat = "$input `:` type($input) `to` $rounding type($result) attr-dict";
 }
 
 def FixedPt_ExtendOp : FixedPt_Op<"extend"> {
@@ -75,6 +79,16 @@ def FixedPt_BitcastOp : FixedPt_Op<"bitcast"> {
   );
   let results = (outs AnyType: $result);
   let assemblyFormat = "$input `:` type($input) `as` type($result) attr-dict";
+}
+
+def FixedPt_ConvertOp : FixedPt_Op<"convert"> {
+  let summary = "convert by any means necessary";
+  let arguments = (ins
+    AnyFixedPt: $input,
+    RoundingKindAttr: $rounding
+  );
+  let results = (outs AnyFixedPt: $result);
+  let assemblyFormat = "$input `:` type($input) `to` $rounding type($result) attr-dict";
 }
 
 #endif

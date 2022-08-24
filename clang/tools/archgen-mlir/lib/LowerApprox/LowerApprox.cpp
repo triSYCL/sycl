@@ -10,14 +10,12 @@
 #error "unable to find sollya"
 #endif
 
-#include <thread>
-#include <chrono>
-
 #include "llvm/Support/DynamicLibrary.h"
 
-#include "mlir/IR/PatternMatch.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/BuiltinDialect.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
 
 #include "archgen/Approx/Approx.h"
@@ -27,58 +25,9 @@
 #include "flopoco/FixFunctions/BasicPolyApprox.hpp"
 
 using namespace archgen;
-namespace arith = mlir::arith;
 namespace func = mlir::func;
-
-#ifdef __linux__
-#include <unistd.h>
-#include <signal.h>
-
-struct KillableOnInput {
-  std::thread t;
-  std::atomic<bool> shouldStop{false};
-  KillableOnInput() {
-    llvm::errs() << "Sollya is intercepting SIGINT, press enter to kill the process\n";
-    llvm::errs().flush();
-    t = std::thread([&] { background(); });
-  }
-  void stop() {
-    shouldStop = true;
-    t.join();
-    ::signal(SIGINT, SIG_DFL);
-    llvm::errs() << "SIGINT back to normal\n";
-  }
-  ~KillableOnInput() {
-    if (t.joinable() && !shouldStop)
-      stop();
-  }
-
-private:
-  void terminate() {
-    llvm::errs().resetColor();
-    llvm::outs().resetColor();
-    std::terminate();
-  }
-  void background() {
-    fd_set set;
-    timeval timeout;
-    FD_ZERO(&set);
-    FD_SET(STDIN_FILENO, &set);
-    timeout.tv_sec = 0;
-    timeout.tv_usec = 100;
-
-    while (!shouldStop) {
-      int res = select(STDIN_FILENO + 1, &set, NULL, NULL, &timeout);
-      if (res != 0) // error or data to read
-        terminate();
-    }
-  }
-};
-#else
-struct KillableOnInput {
-  void stop() {}
-};
-#endif
+namespace LLVM = mlir::LLVM;
+namespace arith = mlir::arith;
 
 namespace {
 
@@ -130,8 +79,6 @@ struct LowerApprox {
 
   /// To do calls by function name into sollya we load it as a dynamic library
   llvm::sys::DynamicLibrary sollyaLib;
-
-  int doubleImplCounter = 0;
 
   LowerApprox(mlir::MLIRContext *context)
       : rewriter(context), ctx(context), loc(rewriter.getUnknownLoc()) {}
@@ -328,60 +275,37 @@ struct LowerApprox {
                  << (ty.isSigned() ? " signed" : " unsigned") << "\n";
   }
 
-  mlir::Value convertTo(mlir::Value in, fixedpt::FixedPtType outTy) {
-    if (in.getType() == outTy)
-      return in;
-
-    /// it is easier to to just build "x + 0" and let lowering to arith
-    /// do the conversion. we really should have a simple convertOp. its easy to
-    /// implement
-
-    /// all bits to zero is zero for all formats
-    llvm::APFixedPoint zeroFP(
-        0, llvm::FixedPointSemantics(1, 0, false, false, false));
-    fixedpt::FixedPtType zeroTy =
-        fixedpt::FixedPtType::get(ctx, zeroFP.getSemantics());
-
-    mlir::Value zero =
-        rewriter
-            .create<fixedpt::ConstantOp>(
-                loc, zeroTy,
-                fixedpt::FixedPointAttr::get(ctx, std::move(zeroFP)))
-            .result();
-    return rewriter.create<fixedpt::AddOp>(loc, outTy, in, zero);
-  }
-
-  mlir::Value getCoefAsDoubleConstant(flopoco::FixConstant *constant) {
-    assert(constant);
-
-    std::string quotedBitsStr = constant->getBitVector();
-    llvm::StringRef bitStr = quotedBitsStr;
-    bitStr = bitStr.drop_front().drop_back();
-    llvm::APFloat value(mpfr_get_d(constant->fpValue, GMP_RNDN));
-    return rewriter
-        .create<mlir::arith::ConstantFloatOp>(loc, value, rewriter.getF64Type())
-        .getResult();
-  }
-
-  void addPolynomCalculationAsDouble(approx::EvaluateOp evaluateOp, llvm::ArrayRef<flopoco::FixConstant *> coefs) {
-    mlir::ModuleOp module =  evaluateOp->getParentOfType<mlir::ModuleOp>();
-    rewriter.setInsertionPointToStart(module.getBody());
-
-    std::string name = "polynom_double_" + std::to_string(doubleImplCounter++);
-
-    auto function = rewriter.create<mlir::func::FuncOp>(
-        loc, name,
-        rewriter.getFunctionType(rewriter.getF64Type(), rewriter.getF64Type()));
-    mlir::Block *b = function.addEntryBlock();
-    rewriter.setInsertionPointToStart(b);
-    mlir::Value X = b->getArgument(0);
-    mlir::Value expr = getCoefAsDoubleConstant(coefs.back());
-    for (auto *coef : llvm::reverse(coefs.drop_back())) {
-      mlir::Value cst = getCoefAsDoubleConstant(coef);
-      mlir::Value sum = rewriter.create<arith::AddFOp>(loc, cst, X);
-      expr = rewriter.create<arith::MulFOp>(loc, sum, expr);
+  LLVM::LLVMFuncOp printer;
+  void emitPrintCall(mlir::Value v, int id) {
+    mlir::ModuleOp module =
+        v.getParentBlock()->getParentOp()->getParentOfType<mlir::ModuleOp>();
+    if (!printer) {
+      mlir::OpBuilder::InsertionGuard guard(rewriter);
+      rewriter.setInsertionPointToEnd(module.getBody());
+      printer = rewriter.create<LLVM::LLVMFuncOp>(
+          loc, "debug_printer",
+          LLVM::LLVMFunctionType::get(
+              LLVM::LLVMVoidType::get(rewriter.getContext()),
+              {rewriter.getI32Type(), rewriter.getI32Type(),
+               rewriter.getI32Type()}));
     }
-    rewriter.create<func::ReturnOp>(loc, expr);
+
+    int bitwidth = v.getType().cast<fixedpt::FixedPtType>().getWidth();
+    mlir::Value bitwidthConst =
+        rewriter
+            .create<arith::ConstantIntOp>(loc, bitwidth, rewriter.getI32Type())
+            .getResult();
+    mlir::Value idConst =
+        rewriter.create<arith::ConstantIntOp>(loc, id, rewriter.getI32Type())
+            .getResult();
+    mlir::Value intVal = rewriter
+                             .create<fixedpt::BitcastOp>(
+                                 loc, rewriter.getIntegerType(bitwidth), v)
+                             .result();
+    intVal = rewriter.create<arith::ExtUIOp>(loc, rewriter.getI32Type(), intVal)
+                 .getResult();
+    rewriter.create<LLVM::CallOp>(loc, printer,
+                                  mlir::ValueRange{intVal, bitwidthConst, idConst});
   }
 
   void run(approx::EvaluateOp evaluateOp) {
@@ -403,15 +327,14 @@ struct LowerApprox {
     printFormat("output", outputType);
     llvm::outs() << "accuracy="  << accuracy << "\n";
 
-    KillableOnInput koi;
     flopoco::BasicPolyApprox flopocoApprox(sollyaTree, accuracy, 0,
                                            inputType.isSigned());
-    koi.stop();
-    llvm::outs() << "Polynom coefficients:" << flopocoApprox.report() << "\n";
 
     /// Sollya loves to change the color and not reset them
     llvm::errs().resetColor();
     llvm::outs().resetColor();
+
+    llvm::outs() << "Polynom coefficients:" << flopocoApprox.report() << "\n";
 
     assert(flopocoApprox.getDegree() > 0);
 
@@ -422,26 +345,32 @@ struct LowerApprox {
 
     printPolynom(llvm::outs(), coefs);
 
-    addPolynomCalculationAsDouble(evaluateOp, coefs);
-
     // A0 + X * ( A1 + X * (...(An-1 + X * An)))
+    int printId = 0;
     rewriter.setInsertionPointAfterValue(output);
     mlir::Value expr = getConstantFromCoef(coefs.back());
-    for (flopoco::FixConstant* flopocoCoef : llvm::reverse(coefs.drop_back())) {
+    for (flopoco::FixConstant *flopocoCoef : llvm::reverse(coefs.drop_back())) {
       mlir::Value coef = getConstantFromCoef(flopocoCoef);
-      fixedpt::FixedPtType addType = inputType.getCommonAddType(
-          coef.getType().cast<fixedpt::FixedPtType>());
-      mlir::Value AplusX =
-          rewriter.create<fixedpt::AddOp>(loc, addType, input, coef).result();
-      fixedpt::FixedPtType mulType =
-          addType.getCommonMulType(expr.getType().cast<fixedpt::FixedPtType>());
-      expr =
-          rewriter.create<fixedpt::MulOp>(loc, mulType, expr, AplusX).result();
+      fixedpt::FixedPtType mulType = inputType.getCommonMulType(
+          expr.getType().cast<fixedpt::FixedPtType>());
+      expr = rewriter
+                 .create<fixedpt::MulOp>(loc, mulType, expr, input,
+                                         fixedpt::roundingMode::nearest)
+                 .result();
+      // emitPrintCall(expr, printId++);
+      fixedpt::FixedPtType addType =
+          mulType.getCommonAddType(coef.getType().cast<fixedpt::FixedPtType>());
+      expr = rewriter
+                 .create<fixedpt::AddOp>(loc, addType, expr, coef,
+                                         fixedpt::roundingMode::nearest)
+                 .result();
+      // emitPrintCall(expr, printId++);
     }
 
     /// This should not happened unless the result is a constant
     if (expr.getType() != outputType)
-      expr = convertTo(expr, outputType);
+      expr = rewriter.create<fixedpt::ConvertOp>(
+          loc, outputType, expr, fixedpt::roundingMode::nearest);
     output.replaceAllUsesWith(expr);
 
     /// Remove the old approx tree

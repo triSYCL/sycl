@@ -111,11 +111,12 @@ struct FixedPtToArithTarget : public mlir::ConversionTarget {
 
   /// Check if a type is legal
   static bool isLegalTypeImpl(mlir::Type ty) {
-    /// Recursive case: a FunctionType is legal if all of its composing type are legal
+    /// Recursive case: a FunctionType is legal if all of its composing type are
+    /// legal
     if (auto funcTy = ty.dyn_cast<mlir::FunctionType>())
       return isLegalType(funcTy.getInputs()) &&
              isLegalType(funcTy.getResults());
-    
+
     /// Leaf case: a leaf type is legal if it is not a FixedPtType
     return !ty.isa<FixedPtType>();
   }
@@ -137,9 +138,8 @@ struct FixedPtToArithTarget : public mlir::ConversionTarget {
     /// func::FuncOp are legal if there type is legal.
     /// We rewrite func::FuncOp only when at least one of there arguments or
     /// return is a FixedPtType
-    addDynamicallyLegalOp<func::FuncOp>([&](func::FuncOp func) {
-      return isLegalType(func.getFunctionType());
-    });
+    addDynamicallyLegalOp<func::FuncOp>(
+        [&](func::FuncOp func) { return isLegalType(func.getFunctionType()); });
 
     /// func::ReturnOp are legal if there type is legal.
     /// We rewrite func::ReturnOp only when at least one of there arguments is
@@ -165,11 +165,15 @@ class ConversionBuilder {
   /// Location of the original FixedPt op we are replacing
   mlir::Location loc;
 
+  fixedpt::roundingMode rounding;
+
 public:
-  ConversionBuilder(mlir::TypeConverter &typeConverter,
-                    mlir::ConversionPatternRewriter &rewriter,
-                    mlir::Location loc)
-      : typeConverter(typeConverter), rewriter(rewriter), loc(loc) {}
+  ConversionBuilder(
+      mlir::TypeConverter &typeConverter,
+      mlir::ConversionPatternRewriter &rewriter, mlir::Location loc,
+      fixedpt::roundingMode rounding = fixedpt::roundingMode::zero)
+      : typeConverter(typeConverter), rewriter(rewriter), loc(loc),
+        rounding(rounding) {}
 
   /// Extend the type of v to dstTy if needed
   /// Since every mlir::IntegerType is signless the sign is given by isSigned
@@ -195,8 +199,8 @@ public:
 
   /// Truncate the type of v to dstTy if needed
   /// truncation doesn't care about the sign. If the value fits in the result
-  /// then the value in the output is the same. Otherwise it will be the N bottom
-  /// bits.
+  /// then the value in the output is the same. Otherwise it will be the N
+  /// bottom bits.
   mlir::Value maybeTruncate(mlir::Value v, mlir::IntegerType dstTy) {
     if (v.getType().cast<mlir::IntegerType>().getWidth() > dstTy.getWidth())
       v = rewriter.create<arith::TruncIOp>(loc, dstTy, v).getOut();
@@ -229,6 +233,31 @@ public:
     return rewriter.create<arith::ShRUIOp>(loc, v, constShift).getResult();
   }
 
+  mlir::Value applyRounding(mlir::Value v, int bitsToBeRemoved, bool isSigned) {
+    /// Nothing to round If we are adding bits or we round to zero
+    if (bitsToBeRemoved <= 0 || rounding == fixedpt::roundingMode::zero)
+      return v;
+
+    mlir::IntegerType ty = v.getType().cast<mlir::IntegerType>();
+
+    assert(rounding == fixedpt::roundingMode::nearest);
+    assert(isSigned && "TODO add signed variant");
+
+    /// v = v + (v & (1 << (bitsToBeRemoved - 1)))
+    llvm::APInt mask(ty.getWidth(), 1);
+    mask = mask.shl(bitsToBeRemoved - 1);
+
+    mlir::Value maskConstant =
+        rewriter
+            .create<arith::ConstantOp>(loc, rewriter.getIntegerAttr(ty, mask))
+            .getResult();
+    mlir::Value maskedVal =
+        rewriter.create<arith::AndIOp>(loc, v, maskConstant);
+    mlir::Value add =
+        rewriter.create<arith::AddIOp>(loc, v, maskedVal).getResult();
+    return add;
+  }
+
   /// The top-level function to emit conversions in arith from one fixed point
   /// format to an other. This function will keep the represented fixed point
   /// value the same(if possible) between the input and output
@@ -248,9 +277,12 @@ public:
     v = maybeExtend(v, dstTy, fixedSrc.isSigned());
 
     /// If the lsb was moved we need a shift
-    if (fixedSrc.getLsb() != fixedDst.getLsb())
+    if (fixedSrc.getLsb() != fixedDst.getLsb()) {
+      v = applyRounding(v, fixedDst.getLsb() - fixedSrc.getLsb(),
+                        fixedSrc.isSigned());
       v = relativeLeftShift(v, fixedSrc.getLsb() - fixedDst.getLsb(),
                             fixedSrc.isSigned());
+    }
 
     /// Truncate if the output bitwidth is smaller then the input bitwidth
     v = maybeTruncate(v, dstTy);
@@ -291,7 +323,8 @@ struct AddOpLowering : public mlir::OpConversionPattern<AddOp> {
   virtual mlir::LogicalResult
   matchAndRewrite(AddOp op, base::OpAdaptor adaptor,
                   mlir::ConversionPatternRewriter &rewriter) const override {
-    ConversionBuilder converter(*typeConverter, rewriter, op->getLoc());
+    ConversionBuilder converter(*typeConverter, rewriter, op->getLoc(),
+                                op.rounding());
     /// For example it converts:
     /// fixedpt.add(%a, %b) : (fixed<1,-1,u>, fixed<4,-2,s>) -> fixed<4,-1,s>
     /// Note: MLIR is abbreviated to fit on one line
@@ -332,7 +365,8 @@ struct SubOpLowering : public mlir::OpConversionPattern<SubOp> {
     /// %tmp6 = arith.trunci(%tmp5) : (i13) -> i11
     /// arith.subi(%tmp3, %tmp6) : (i11, i11) -> i11
 
-    ConversionBuilder converter(*typeConverter, rewriter, op->getLoc());
+    ConversionBuilder converter(*typeConverter, rewriter, op->getLoc(),
+                                op.rounding());
     mlir::Value lhs = converter.buildConversion(
         adaptor.lhs(), op.lhs().getType().cast<FixedPtType>(),
         op.result().getType().cast<FixedPtType>());
@@ -387,7 +421,8 @@ struct RoundOpLowering : public mlir::OpConversionPattern<RoundOp> {
     ///   %tmp2 = arith.shrsi(%a, %tmp1) : (i10, i10) -> i10
     ///   arith.trunci(%tmp2) : (i10) -> i7
 
-    ConversionBuilder converter(*typeConverter, rewriter, op->getLoc());
+    ConversionBuilder converter(*typeConverter, rewriter, op->getLoc(),
+                                op.rounding());
     rewriter.replaceOp(op, converter.buildConversion(
                                adaptor.input(),
                                op.input().getType().cast<FixedPtType>(),
@@ -484,14 +519,13 @@ struct MulOpLowering : public mlir::OpConversionPattern<MulOp> {
     FixedPtType rhsTy = op.rhs().getType().cast<FixedPtType>();
 
     /// Figure out the fixed point type resulting from a product of lhs and rhs
-    FixedPtType internalTy = FixedPtType::get(
-        rewriter.getContext(), lhsTy.getMsb() + rhsTy.getMsb(),
-        lhsTy.getLsb() + rhsTy.getLsb(), lhsTy.isSigned() || rhsTy.isSigned());
+    FixedPtType internalTy = lhsTy.getCommonMulType(rhsTy);
     /// And its arith lowering
     mlir::IntegerType internalIntTy =
         typeConverter->convertType(internalTy).cast<mlir::IntegerType>();
 
-    ConversionBuilder converter(*typeConverter, rewriter, op->getLoc());
+    ConversionBuilder converter(*typeConverter, rewriter, op->getLoc(),
+                                op.rounding());
     /// reinterpret extend the withd of lhs and rhs to fit the internalIntTy
     mlir::Value lhs =
         converter.maybeExtend(adaptor.lhs(), internalIntTy, lhsTy.isSigned());
@@ -526,7 +560,8 @@ struct DivOpLowering : public mlir::OpConversionPattern<DivOp> {
     ///    %tmp4 = arith.divsi(%tmp3, %tmp4) : (i20, i20) -> i20
     ///    arith.trunci(%tmp4) : (i20) -> i17
 
-    ConversionBuilder converter(*typeConverter, rewriter, op->getLoc());
+    ConversionBuilder converter(*typeConverter, rewriter, op->getLoc(),
+                                op.rounding());
     FixedPtType lhsTy = op.lhs().getType().cast<FixedPtType>();
     FixedPtType rhsTy = op.rhs().getType().cast<FixedPtType>();
     FixedPtType outTy = op.result().getType().cast<FixedPtType>();
@@ -575,6 +610,30 @@ struct DivOpLowering : public mlir::OpConversionPattern<DivOp> {
         op, converter.maybeTruncate(
                 divResult,
                 typeConverter->convertType(outTy).cast<mlir::IntegerType>()));
+    return mlir::success();
+  }
+};
+
+/// Pattern for fixedpt::TruncOp to arith::TruncIOp
+struct ConvertOpLowering : public mlir::OpConversionPattern<ConvertOp> {
+  using base = OpConversionPattern<ConvertOp>;
+  using base::OpConversionPattern;
+  virtual mlir::LogicalResult
+  matchAndRewrite(ConvertOp op, base::OpAdaptor adaptor,
+                  mlir::ConversionPatternRewriter &rewriter) const override {
+
+    /// For example converts:
+    ///   fixedpt.convert(%a) : (!fixedPt<7, -9, u>) -> !fixedPt<3, -9, s>
+    /// Note: MLIR is abbreviated to fit on one line
+    /// To:
+    ///   arith.trunci(%a) : (i17) -> i13
+
+    ConversionBuilder converter(*typeConverter, rewriter, op->getLoc(),
+                                op.rounding());
+    rewriter.replaceOp(op, converter.buildConversion(
+                               adaptor.input(),
+                               op.input().getType().cast<FixedPtType>(),
+                               op.result().getType().cast<FixedPtType>()));
     return mlir::success();
   }
 };
@@ -639,6 +698,7 @@ void populateFixedPtToArithConversionPatterns(mlir::RewritePatternSet &patterns,
                TruncOpLowering,
                MulOpLowering,
                DivOpLowering,
+               ConvertOpLowering,
                FuncOpRewriting,
                ReturnOpRewriting
                >(converter, patterns.getContext());

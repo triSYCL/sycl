@@ -807,6 +807,7 @@ class ArchGenMLIRAction : public clang::PluginASTAction {
   /// Original Main actions being replaced. it usually should be a
   /// clang::CodeGenAction. but not always
   std::unique_ptr<clang::FrontendAction> Inner;
+  bool HasLaunchedRealConsumer = false;
 
 public:
   clang::CodeGenAction *getInnerAsCodeGenAction() {
@@ -826,8 +827,12 @@ public:
     /// actions
     if (auto *CGAct = getInnerAsCodeGenAction()) {
       auto InnerConsumer = Inner->CreateASTConsumer(CI, InFile);
-      return std::make_unique<ArchGenMLIRConsumer>(
-          CI, std::move(InnerConsumer), CGAct->getCodeGenerator()->GetModule());
+      if (InnerConsumer) {
+        HasLaunchedRealConsumer = true;
+        return std::make_unique<ArchGenMLIRConsumer>(
+            CI, std::move(InnerConsumer),
+            CGAct->getCodeGenerator()->GetModule());
+      }
     }
     return std::make_unique<NoopASTConsumer>();
   }
@@ -842,11 +847,16 @@ public:
   bool hasIRSupport() const override { return Inner->hasIRSupport(); }
 
   void ExecuteAction() override {
+    if (!HasLaunchedRealConsumer)
+      return;
     copySelfToInner();
     return Inner->ExecuteAction();
   }
 
-  void EndSourceFileAction() override { return Inner->EndSourceFileAction(); }
+  void EndSourceFileAction() override {
+    if (HasLaunchedRealConsumer)
+      return Inner->EndSourceFileAction();
+  }
 
   void takeMainActionToReplace(std::unique_ptr<FrontendAction> Old) override {
     Inner = std::move(Old);

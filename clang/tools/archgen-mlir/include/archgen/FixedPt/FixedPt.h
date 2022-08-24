@@ -19,6 +19,8 @@
 
 #include "archgen/FixedPt/FixedPtDialect.h.inc"
 
+#include "archgen/FixedPt/FixedPtEnum.h.inc"
+
 #define GET_TYPEDEF_CLASSES
 #include "archgen/FixedPt/FixedPtType.h.inc"
 
