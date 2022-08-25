@@ -165,13 +165,13 @@ class ConversionBuilder {
   /// Location of the original FixedPt op we are replacing
   mlir::Location loc;
 
-  fixedpt::roundingMode rounding;
+  fixedpt::RoundingMode rounding;
 
 public:
   ConversionBuilder(
       mlir::TypeConverter &typeConverter,
       mlir::ConversionPatternRewriter &rewriter, mlir::Location loc,
-      fixedpt::roundingMode rounding = fixedpt::roundingMode::zero)
+      fixedpt::RoundingMode rounding = fixedpt::RoundingMode::zero)
       : typeConverter(typeConverter), rewriter(rewriter), loc(loc),
         rounding(rounding) {}
 
@@ -235,12 +235,12 @@ public:
 
   mlir::Value applyRounding(mlir::Value v, int bitsToBeRemoved, bool isSigned) {
     /// Nothing to round If we are adding bits or we round to zero
-    if (bitsToBeRemoved <= 0 || rounding == fixedpt::roundingMode::zero)
+    if (bitsToBeRemoved <= 0 || rounding == fixedpt::RoundingMode::zero)
       return v;
 
     mlir::IntegerType ty = v.getType().cast<mlir::IntegerType>();
 
-    assert(rounding == fixedpt::roundingMode::nearest);
+    assert(rounding == fixedpt::RoundingMode::nearest);
     assert(isSigned && "TODO add signed variant");
 
     /// v = v + (v & (1 << (bitsToBeRemoved - 1)))

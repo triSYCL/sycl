@@ -1,4 +1,5 @@
-//===- FixedPt.cpp - FixedPt Dialect ------------------------------------------===//
+//===- FixedPt.cpp - FixedPt Dialect
+//------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -11,11 +12,14 @@
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/DialectImplementation.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpDefinition.h"
 
 #include "archgen/FixedPt/FixedPt.h"
 
 using namespace archgen::fixedpt;
+using namespace archgen;
+
 //===----------------------------------------------------------------------===//
 // TableGen'd op method definitions
 //===----------------------------------------------------------------------===//
@@ -36,6 +40,12 @@ using namespace archgen::fixedpt;
 
 #define GET_ATTRDEF_CLASSES
 #include "archgen/FixedPt/FixedPtAttr.cpp.inc"
+
+//===----------------------------------------------------------------------===//
+// TableGen'd interface definitions
+//===----------------------------------------------------------------------===//
+
+#include "archgen/FixedPt/FixedPtInterfaces.cpp.inc"
 
 //===----------------------------------------------------------------------===//
 // FixedPtDialect
@@ -115,8 +125,7 @@ mlir::Type FixedPtType::parse(mlir::AsmParser &odsParser) {
     return {};
   }
   if (sign != "s" && sign != "u") {
-    odsParser.emitError(odsParser.getNameLoc(),
-                        "expected s or u got " + sign);
+    odsParser.emitError(odsParser.getNameLoc(), "expected s or u got " + sign);
   }
   bool isSigned = (sign == "s");
   return FixedPtType::get(odsParser.getContext(), msb, lsb, isSigned);
@@ -164,25 +173,40 @@ void FixedPointAttr::print(mlir::AsmPrinter &odsPrinter) const {
 
 #include "archgen/FixedPt/FixedPtEnum.cpp.inc"
 
+fixedpt::RoundingMode fixedpt::getCommonRoundingMod(fixedpt::RoundingMode m1,
+                                                    fixedpt::RoundingMode m2) {
+  assert((unsigned)m1 <= fixedpt::getMaxEnumValForRoundingMode());
+  assert((unsigned)m2 <= fixedpt::getMaxEnumValForRoundingMode());
+  // clang-format off
+  fixedpt::RoundingMode table[] = {
+    RoundingMode::zero, RoundingMode::nearest,
+    RoundingMode::nearest, RoundingMode::nearest,
+  };
+  // clang-format on
+  auto access = [&](auto x, auto y) {
+    return table[(unsigned)m1 * (fixedpt::getMaxEnumValForRoundingMode() + 1) +
+                 (unsigned)m2];
+  };
+
+#ifndef NDEBUG
+  for (unsigned i = 0; i <= fixedpt::getMaxEnumValForRoundingMode(); i++)
+    for (unsigned k = 0; k <= fixedpt::getMaxEnumValForRoundingMode(); k++)
+      assert(access(i, k) == access(k, i));
+#endif
+  return access(m1, m2);
+}
+
 //===----------------------------------------------------------------------===//
 // Fixed Point operation definitions
 //===----------------------------------------------------------------------===//
 
-mlir::LogicalResult AddOp::verify() {
-  return mlir::success();
-}
+mlir::LogicalResult AddOp::verify() { return mlir::success(); }
 
-mlir::LogicalResult SubOp::verify() {
-  return mlir::success();
-}
+mlir::LogicalResult SubOp::verify() { return mlir::success(); }
 
-mlir::LogicalResult MulOp::verify() {
-  return mlir::success();
-}
+mlir::LogicalResult MulOp::verify() { return mlir::success(); }
 
-mlir::LogicalResult DivOp::verify() {
-  return mlir::success();
-}
+mlir::LogicalResult DivOp::verify() { return mlir::success(); }
 
 mlir::OpFoldResult ConstantOp::fold(llvm::ArrayRef<mlir::Attribute> operands) {
   return valueAttr();
@@ -247,6 +271,129 @@ mlir::LogicalResult BitcastOp::verify() {
   return mlir::success();
 }
 
-mlir::LogicalResult ConvertOp::verify() {
-  return mlir::success();
+mlir::LogicalResult ConvertOp::verify() { return mlir::success(); }
+
+//===----------------------------------------------------------------------===//
+// Fixed Point operation canonicalization
+//===----------------------------------------------------------------------===//
+
+namespace {
+
+bool canUpdateTypeFor(mlir::Value v) {
+  /// We can only update the type of v if v comes from an operation.
+  return v.getDefiningOp();
+}
+
+mlir::LogicalResult tryUpdateType(mlir::Value v, mlir::Type ty,
+                                  RoundingMode rounding = RoundingMode::zero) {
+  if (canUpdateTypeFor(v)) {
+    if (auto inputOp = llvm::dyn_cast<RoundingOpInterface>(v.getDefiningOp()))
+      inputOp.setRoundingMode(
+          fixedpt::getCommonRoundingMod(rounding, inputOp.getRoundingMode()));
+    v.setType(ty);
+    return mlir::success();
+  }
+  return mlir::failure();
+}
+
+} // namespace
+
+mlir::LogicalResult AddOp::canonicalize(AddOp op,
+                                        mlir::PatternRewriter &rewriter) {
+  mlir::Value var;
+  fixedpt::FixedPointAttr constant;
+  /// var + 0 -> var
+  /// I am not sure using the pattern matcher is really easier
+  if (((mlir::matchPattern(op.lhs(), mlir::m_Constant(&constant)) &&
+        (var = op.rhs())) ||
+       (mlir::matchPattern(op.rhs(), mlir::m_Constant(&constant)) &&
+        (var = op.lhs()))) &&
+      constant.getValue().getValue().isZero()) {
+    if (var.getType() == op.result().getType())
+      rewriter.replaceOp(op, var);
+    else
+      rewriter.replaceOpWithNewOp<ConvertOp>(op, op.result().getType(), var,
+                                             op.rounding());
+    return mlir::success();
+  }
+
+  /// resize inputs based on outputs
+  fixedpt::FixedPtType lhsType = op.lhs().getType().cast<FixedPtType>();
+  fixedpt::FixedPtType rhsType = op.rhs().getType().cast<FixedPtType>();
+  fixedpt::FixedPtType resType = op.result().getType().cast<FixedPtType>();
+  fixedpt::FixedPtType newLhsType = rewriter.getType<FixedPtType>(
+      std::min(lhsType.getMsb(), resType.getMsb()),
+      std::max(lhsType.getLsb(), resType.getLsb() - 1), lhsType.isSigned());
+  fixedpt::FixedPtType newRhsType = rewriter.getType<FixedPtType>(
+      std::min(rhsType.getMsb(), resType.getMsb()),
+      std::max(rhsType.getLsb(), resType.getLsb() - 1), rhsType.isSigned());
+
+  if (mlir::succeeded(tryUpdateType(op.lhs(), newLhsType, op.rounding())) ||
+      mlir::succeeded(tryUpdateType(op.rhs(), newRhsType, op.rounding())))
+    return mlir::success();
+  return mlir::failure();
+}
+
+mlir::LogicalResult MulOp::canonicalize(MulOp op,
+                                        mlir::PatternRewriter &rewriter) {
+  llvm_unreachable("TODO copy past of add for now");
+  fixedpt::FixedPtType lhsType = op.lhs().getType().cast<FixedPtType>();
+  fixedpt::FixedPtType rhsType = op.rhs().getType().cast<FixedPtType>();
+  fixedpt::FixedPtType resType = op.result().getType().cast<FixedPtType>();
+  fixedpt::FixedPtType newLhsType = rewriter.getType<FixedPtType>(
+      std::min(lhsType.getMsb(), resType.getMsb()),
+      std::max(lhsType.getLsb(), resType.getLsb() - 1), lhsType.isSigned());
+  fixedpt::FixedPtType newRhsType = rewriter.getType<FixedPtType>(
+      std::min(rhsType.getMsb(), resType.getMsb()),
+      std::max(rhsType.getLsb(), resType.getLsb() - 1), rhsType.isSigned());
+
+  if (mlir::succeeded(tryUpdateType(op.lhs(), newLhsType, op.rounding())) ||
+      mlir::succeeded(tryUpdateType(op.rhs(), newRhsType, op.rounding())))
+    return mlir::success();
+  return mlir::failure();
+}
+
+mlir::LogicalResult SubOp::canonicalize(SubOp op,
+                                        mlir::PatternRewriter &rewriter) {
+  return mlir::failure();
+}
+
+mlir::LogicalResult DivOp::canonicalize(DivOp op,
+                                        mlir::PatternRewriter &rewriter) {
+  return mlir::failure();
+}
+
+mlir::LogicalResult ConstantOp::canonicalize(ConstantOp op,
+                                             mlir::PatternRewriter &rewriter) {
+  return mlir::failure();
+}
+
+mlir::LogicalResult TruncOp::canonicalize(TruncOp op,
+                                          mlir::PatternRewriter &rewriter) {
+  return mlir::failure();
+}
+
+mlir::LogicalResult RoundOp::canonicalize(RoundOp op,
+                                          mlir::PatternRewriter &rewriter) {
+  return mlir::failure();
+}
+
+mlir::LogicalResult ExtendOp::canonicalize(ExtendOp op,
+                                           mlir::PatternRewriter &rewriter) {
+  return mlir::failure();
+}
+
+mlir::LogicalResult BitcastOp::canonicalize(BitcastOp op,
+                                            mlir::PatternRewriter &rewriter) {
+  return mlir::failure();
+}
+
+mlir::LogicalResult ConvertOp::canonicalize(ConvertOp op,
+                                            mlir::PatternRewriter &rewriter) {
+  if (mlir::succeeded(
+          tryUpdateType(op.input(), op.result().getType(), op.rounding()))) {
+    rewriter.replaceOp(op, op.input());
+    return mlir::success();
+  }
+  return mlir::failure();
 }

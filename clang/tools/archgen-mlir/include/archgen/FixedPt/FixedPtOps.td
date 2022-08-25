@@ -10,15 +10,18 @@
 #define ARCHGEN_FIXEDPT_TD
 
 include "archgen/FixedPt/FixedPtBase.td"
+include "archgen/FixedPt/FixedPtInterface.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
 class FixedPt_Op<string mnemonic, list<Trait> traits = []> :
     Op<FixedPt_Dialect, mnemonic, traits # [NoSideEffect]> {
   let hasVerifier = 1;
+  let hasCanonicalizeMethod = 1;
 }
 
-class FixedPt_BinOp<string mnemonic, list<Trait> traits = []> : FixedPt_Op<mnemonic, traits> {
+class FixedPt_BinOp<string mnemonic, list<Trait> traits = []> : 
+FixedPt_Op<mnemonic, traits # [DeclareOpInterfaceMethods<RoundingOpInterface>]> {
   let arguments = (ins
     AnyFixedPt: $lhs,
     AnyFixedPt: $rhs,
@@ -52,7 +55,7 @@ def FixedPt_TruncOp : FixedPt_Op<"trunc"> {
   let assemblyFormat = "$input `:` type($input) `to` type($result) attr-dict";
 }
 
-def FixedPt_RoundOp : FixedPt_Op<"round"> {
+def FixedPt_RoundOp : FixedPt_Op<"round", [DeclareOpInterfaceMethods<RoundingOpInterface>]> {
   /// TODO: Add rounding semantics: tonearest, tozero, toupper, tolower, toinf...
   let summary = "remove low bits of a fixedpoint type";
   let arguments = (ins
@@ -81,7 +84,7 @@ def FixedPt_BitcastOp : FixedPt_Op<"bitcast"> {
   let assemblyFormat = "$input `:` type($input) `as` type($result) attr-dict";
 }
 
-def FixedPt_ConvertOp : FixedPt_Op<"convert"> {
+def FixedPt_ConvertOp : FixedPt_Op<"convert", [DeclareOpInterfaceMethods<RoundingOpInterface>]> {
   let summary = "convert by any means necessary";
   let arguments = (ins
     AnyFixedPt: $input,

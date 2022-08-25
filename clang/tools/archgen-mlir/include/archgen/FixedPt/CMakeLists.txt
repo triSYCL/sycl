@@ -11,6 +11,13 @@ mlir_tablegen(FixedPtEnum.h.inc -gen-enum-decls)
 mlir_tablegen(FixedPtEnum.cpp.inc -gen-enum-defs)
 add_public_tablegen_target(ArchGenMLIRFixedPtIncGen)
 
+set(LLVM_TARGET_DEFINITIONS FixedPtInterface.td)
+mlir_tablegen(FixedPtInterfaces.h.inc -gen-op-interface-decls)
+mlir_tablegen(FixedPtInterfaces.cpp.inc -gen-op-interface-defs)
+add_public_tablegen_target(ArchGenMLIRFixedPtInterfaceIncGen)
+
+# add_dependencies(ArchGenMLIRFixedPtIncGen ArchGenMLIRFixedPtInterfaceIncGen)
+
 set(LLVM_TARGET_DEFINITIONS FixedPtPasses.td)
 mlir_tablegen(FixedPtPasses.h.inc -gen-pass-decls)
 add_public_tablegen_target(ArchGenMLIRFixedPtPassesIncGen)

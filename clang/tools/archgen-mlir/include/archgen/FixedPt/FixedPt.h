@@ -11,15 +11,28 @@
 
 #include "llvm/ADT/APFixedPoint.h"
 
+#include "mlir/Dialect/Traits.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dialect.h"
+#include "mlir/IR/PatternMatch.h"
 #include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
 #include "archgen/FixedPt/FixedPtDialect.h.inc"
 
 #include "archgen/FixedPt/FixedPtEnum.h.inc"
+
+namespace archgen {
+namespace fixedpt {
+
+#include "archgen/FixedPt/FixedPtInterfaces.h.inc"
+
+fixedpt::RoundingMode getCommonRoundingMod(fixedpt::RoundingMode m1,
+                                           fixedpt::RoundingMode m2);
+
+}
+}
 
 #define GET_TYPEDEF_CLASSES
 #include "archgen/FixedPt/FixedPtType.h.inc"

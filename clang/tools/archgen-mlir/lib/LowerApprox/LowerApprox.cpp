@@ -355,14 +355,14 @@ struct LowerApprox {
           expr.getType().cast<fixedpt::FixedPtType>());
       expr = rewriter
                  .create<fixedpt::MulOp>(loc, mulType, expr, input,
-                                         fixedpt::roundingMode::nearest)
+                                         fixedpt::RoundingMode::nearest)
                  .result();
       // emitPrintCall(expr, printId++);
       fixedpt::FixedPtType addType =
           mulType.getCommonAddType(coef.getType().cast<fixedpt::FixedPtType>());
       expr = rewriter
                  .create<fixedpt::AddOp>(loc, addType, expr, coef,
-                                         fixedpt::roundingMode::nearest)
+                                         fixedpt::RoundingMode::zero)
                  .result();
       // emitPrintCall(expr, printId++);
     }
@@ -370,7 +370,7 @@ struct LowerApprox {
     /// This should not happened unless the result is a constant
     if (expr.getType() != outputType)
       expr = rewriter.create<fixedpt::ConvertOp>(
-          loc, outputType, expr, fixedpt::roundingMode::nearest);
+          loc, outputType, expr, fixedpt::RoundingMode::nearest);
     output.replaceAllUsesWith(expr);
 
     /// Remove the old approx tree
