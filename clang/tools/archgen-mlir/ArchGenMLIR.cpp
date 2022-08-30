@@ -6,12 +6,13 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Hydbrid(LLVMIR, MLIR) IR-gen used for the compiler implementation based of
+// Hybrid(LLVMIR, MLIR) IR-gen used for the compiler implementation based of
 // archgenlib
 //
 //===----------------------------------------------------------------------===//
 
 #include "llvm/ADT/BitmaskEnum.h"
+#include "llvm/IR/DebugInfo.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/Linker/Linker.h"
@@ -25,6 +26,7 @@
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/FileUtilities.h"
@@ -53,6 +55,8 @@ using namespace archgen;
 namespace cl = llvm::cl;
 namespace func = mlir::func;
 namespace arith = mlir::arith;
+namespace memref = mlir::memref;
+namespace LLVM = mlir::LLVM;
 
 #define DEBUG_TYPE "archgen-mlir"
 namespace {
@@ -96,7 +100,7 @@ enum class TypeLookupOpt {
   LLVM_MARK_AS_BITMASK_ENUM(isInDetailNamespace)
 };
 
-/// Utility to identify classes that need special hanlding like
+/// Utility to identify classes that need special handling like
 /// ::archgenlib::detail::ToBeFolded
 class Util {
   using DeclContextDesc = std::pair<clang::Decl::Kind, llvm::StringRef>;
@@ -204,31 +208,32 @@ class MLIRGenState {
   void InitMLIR() {
     ctx.disableMultithreading();
     ctx.loadDialect<mlir::LLVM::LLVMDialect, arith::ArithmeticDialect,
-                    func::FuncDialect, approx::ApproxDialect,
-                    fixedpt::FixedPtDialect>();
+                    func::FuncDialect, memref::MemRefDialect,
+                    approx::ApproxDialect, fixedpt::FixedPtDialect>();
     mlir::registerLLVMDialectTranslation(ctx);
 
-    Declbuilder.setInsertionPointToStart(module->getBody());
+    declBuilder.setInsertionPointToStart(module->getBody());
     builder.clearInsertionPoint();
   }
 
   /// List of functions that need to get emitted
   std::deque<clang::FunctionDecl *> FuncToEmit;
 public:
-  /// This class is used to easilly pass around all the neededd state to perform
-  /// MLIR emition from clang AST so most data members are public
+  /// This class is used to easily pass around all the needed state to perform
+  /// MLIR emission from clang AST so most data members are public
 
   mlir::MLIRContext ctx;
   mlir::OpBuilder builder;
-  mlir::OpBuilder Declbuilder;
+  mlir::OpBuilder declBuilder;
   mlir::OwningOpRef<mlir::ModuleOp> module;
   clang::ASTContext &ASTctx;
   clang::SourceManager &SM;
   clang::CodeGen::CodeGenModule CGM;
   llvm::DenseMap<clang::FunctionDecl *, func::FuncOp> FunctionMap;
+  llvm::DenseMap<clang::Decl *, mlir::Value> localDeclMap;
 
   MLIRGenState(clang::CompilerInstance &CI, llvm::Module *LLVMModule)
-      : builder(&ctx), Declbuilder(&ctx),
+      : builder(&ctx), declBuilder(&ctx),
         module(mlir::ModuleOp::create(builder.getUnknownLoc())),
         ASTctx(CI.getASTContext()), SM(CI.getSourceManager()),
         CGM(CI.getASTContext(),
@@ -313,10 +318,13 @@ public:
                                      {getMLIRType(FT->getReturnType())});
     }
 
+    if (auto *PT = Ctype->getPointeeType().getTypePtr())
+      return LLVM::LLVMPointerType::get(getMLIRType(clang::QualType(PT, 0)));
+
     Cqtype->dump();
-    llvm::errs() << "cannonicalized to:\n";
+    llvm::errs() << "canonicalized to:\n";
     Ctype->dump();
-    llvm_unreachable("unhandeled type");
+    llvm_unreachable("unhandled type");
   }
 
   /// Return a FuncOp for the provided Decl.
@@ -334,7 +342,7 @@ public:
       FD->dump(llvm::dbgs());
     });
 
-    /// If it is not in the map is it not goinf to get emitter on its own
+    /// If it is not in the map is it not going to get emitter on its own
     /// So we add it to the list of functions to emit
     FuncToEmit.push_back(FD);
 
@@ -342,11 +350,11 @@ public:
     /// inlining
     bool isPrivate = !Annot::hasAnnotation(FD, Annot::TopLevel);
     mlir::StringAttr visibility =
-        Declbuilder.getStringAttr(isPrivate ? "private" : "public");
+        declBuilder.getStringAttr(isPrivate ? "private" : "public");
 
     /// Create the functions empty such that they can be referenced without
     /// being generated yet
-    MLIRFunc = Declbuilder.create<func::FuncOp>(
+    MLIRFunc = declBuilder.create<func::FuncOp>(
         getMLIRLocation(FD->getBeginLoc()), CGM.getMangledName(FD).str(),
         getMLIRType(FD->getType()).cast<mlir::FunctionType>(), visibility);
     return MLIRFunc;
@@ -356,19 +364,42 @@ public:
   }
 };
 
-/// Recursivly traverse clang::Stmt while emitting them
+/// Recursively traverse clang::Stmt while emitting them
 /// If the generator needed to emit more complex Statements like l-values it
 /// should not return an mlir::Value but for now it is kept simple.
-struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
-  using Base = clang::StmtVisitor<MLIREmiter, mlir::Value>;
+struct MLIREmitter : public clang::StmtVisitor<MLIREmitter, mlir::Value> {
+  using Base = clang::StmtVisitor<MLIREmitter, mlir::Value>;
   MLIRGenState &state;
-  MLIREmiter(MLIRGenState &s) : state(s) {}
+  MLIREmitter(MLIRGenState &s) : state(s) {}
 
   /// Entry point of the emitter
   void Emit(clang::FunctionDecl *FD, func::FuncOp MLIRFunc) {
+    /// TODO: this should get split into EmitFunc and EmitBlock
     mlir::Block *block = MLIRFunc.addEntryBlock();
     state.builder.setInsertionPointToStart(block);
+
+    state.localDeclMap.clear();
+    for (unsigned idx = 0; idx < FD->getNumParams(); idx++) {
+      Decl *PD = FD->getParamDecl(idx);
+      mlir::Value BA = block->getArgument(idx);
+      state.localDeclMap[PD] = BA;
+    }
+
     Visit(FD->getBody());
+
+    if (!block->back().hasTrait<mlir::OpTrait::IsTerminator>()) {
+      if (FD->getReturnType()->isVoidType()) {
+        mlir::Value zero =
+            state.builder
+                .create<arith::ConstantIntOp>(
+                    state.getMLIRLocation(FD->getBody()->getEndLoc()), 0,
+                    MLIRFunc.getFunctionType().getResult(0))
+                .getResult();
+        state.builder.create<func::ReturnOp>(
+            state.getMLIRLocation(FD->getBody()->getEndLoc()), zero);
+      } else
+        llvm_unreachable("all non void functions must have a return for now");
+    }
   }
 
   mlir::Value VisitCompoundStmt(clang::CompoundStmt *CS) {
@@ -462,7 +493,30 @@ struct MLIREmiter : public clang::StmtVisitor<MLIREmiter, mlir::Value> {
     return {};
   }
 
-  /// All unhandeled clang::Stmt come here so we emit an error
+  mlir::Value VisitDeclRefExpr(clang::DeclRefExpr *DR) {
+    return state.localDeclMap[DR->getDecl()];
+  }
+
+  mlir::Value VisitExprWithCleanups(clang::ExprWithCleanups *EWC) {
+    assert(!EWC->cleanupsHaveSideEffects());
+    return Visit(EWC->getSubExpr());
+  }
+
+  mlir::Value VisitCXXOperatorCallExpr(clang::CXXOperatorCallExpr *OCE) {
+    assert(OCE->isAssignmentOp());
+    mlir::Value ptr = Visit(OCE->getArg(0));
+    mlir::Value val = Visit(OCE->getArg(1));
+    state.builder.create<LLVM::StoreOp>(
+        state.getMLIRLocation(OCE->getExprLoc()), val, ptr);
+    return ptr;
+  }
+
+  mlir::Value
+  VisitMaterializeTemporaryExpr(clang::MaterializeTemporaryExpr *MTE) {
+    return Visit(MTE->getSubExpr());
+  }
+
+  /// All unhandled clang::Stmt come here so we emit an error
   mlir::Value VisitStmt(clang::Stmt *S) {
     S->dump();
     llvm_unreachable("unhandled Stmt");
@@ -528,18 +582,18 @@ struct ASTLister : clang::StmtVisitor<ASTLister, void> {
 
 class ArchGenMLIRConsumer : public clang::ASTConsumer {
   clang::CompilerInstance &CI;
-  std::unique_ptr<clang::ASTConsumer> LLVMIRASTConsumer;
+  std::unique_ptr<clang::ASTConsumer> llvmirAstConsumer;
   llvm::Module *LLVMModule;
   llvm::LLVMContext *LLVMCtx;
   MLIRGenState state;
-  MLIREmiter Visitor;
+  MLIREmitter Visitor;
   ASTLister Lister;
 
 public:
   ArchGenMLIRConsumer(clang::CompilerInstance &CompilerInstance,
                       std::unique_ptr<clang::ASTConsumer> Consumer,
                       llvm::Module *LLVMModule)
-      : CI(CompilerInstance), LLVMIRASTConsumer(std::move(Consumer)),
+      : CI(CompilerInstance), llvmirAstConsumer(std::move(Consumer)),
         LLVMModule(LLVMModule), LLVMCtx(&LLVMModule->getContext()),
         state(CI, LLVMModule), Visitor(state), Lister(state) {}
 
@@ -568,9 +622,14 @@ public:
       auto constantInt =
           cast<arith::ConstantIntOp>(op.input().getDefiningOp());
       int param_idx =
-          constantInt.getValue().cast<mlir::IntegerAttr>().getInt();
-      op->replaceAllUsesWith(
-          mlir::ValueRange{func.getBody().getArgument(param_idx)});
+          constantInt.getValue().cast<mlir::IntegerAttr>().getInt() + 1;
+      state.builder.setInsertionPointToStart(op->getBlock());
+      mlir::Value argVal =
+          state.builder
+              .create<LLVM::LoadOp>(op.getLoc(),
+                                    func.getBody().getArgument(param_idx))
+              .getRes();
+      op->replaceAllUsesWith(mlir::ValueRange{argVal});
 
       /// Order matters.
       maybeDelete.push_back(op);
@@ -581,7 +640,7 @@ public:
         op->erase();
   }
 
-  /// This is temproray just to test interation of MLIR and LLVMIR code.
+  /// This is temporary just to test interation of MLIR and LLVMIR code.
   void replaceByGenerableMLIR() {
     auto replaceTypeImpl = [&](mlir::Type ty,
                                auto &replacerImpl) -> mlir::Type {
@@ -649,7 +708,7 @@ public:
 
     {
       mlir::PassManager pm(&state.ctx);
-      pm.enableIRPrinting();
+      // pm.enableIRPrinting();
 
       /// The Core of ArchGen, will transform the approx dialect describing the
       /// expression to be approximated into the logic to approximate the
@@ -685,9 +744,11 @@ public:
     bool brokenDebugInto = false;
     llvm::verifyModule(*MLIRLLVMModule, &llvm::errs(), &brokenDebugInto);
 
-    /// We do not want out flags to colide with the flags from the main llvm
+    /// We do not want out flags to collide with the flags from the main llvm
     /// module
     MLIRLLVMModule->getOrInsertModuleFlagsMetadata()->clearOperands();
+
+    llvm::StripDebugInfo(*MLIRLLVMModule);
 
     if (!DontLinkMLIR)
       llvm::Linker::linkModules(*LLVMModule, std::move(MLIRLLVMModule));
@@ -699,7 +760,7 @@ public:
     /// List of function we should generate
     std::deque<clang::FunctionDecl *> FuncToEmit = state.takeFuncToEmit();
 
-    /// Go throught all the function we need to generate until there is none
+    /// Go through all the function we need to generate until there is none
     while (!FuncToEmit.empty()) {
       for (auto *FD : FuncToEmit)
         if (FD->getBody())
@@ -723,10 +784,10 @@ public:
   // forward to LLVMIRGen clang::ASTConsumer
   //===----------------------------------------------------------------------===//
   void Initialize(clang::ASTContext &Context) override {
-    return LLVMIRASTConsumer->Initialize(Context);
+    return llvmirAstConsumer->Initialize(Context);
   }
   void HandleCXXStaticMemberVarInstantiation(clang::VarDecl *VD) override {
-    return LLVMIRASTConsumer->HandleCXXStaticMemberVarInstantiation(VD);
+    return llvmirAstConsumer->HandleCXXStaticMemberVarInstantiation(VD);
   }
   bool HandleTopLevelDecl(clang::DeclGroupRef D) override {
     if (llvm::any_of(D, [&](auto *E) {
@@ -741,61 +802,61 @@ public:
         addToEmit(cast<clang::FunctionDecl>(E));
       return true;
     } else {
-      return LLVMIRASTConsumer->HandleTopLevelDecl(D);
+      return llvmirAstConsumer->HandleTopLevelDecl(D);
     }
   }
   void HandleInlineFunctionDefinition(clang::FunctionDecl *D) override {
-    return LLVMIRASTConsumer->HandleInlineFunctionDefinition(D);
+    return llvmirAstConsumer->HandleInlineFunctionDefinition(D);
   }
   void HandleInterestingDecl(clang::DeclGroupRef D) override {
-    return LLVMIRASTConsumer->HandleInterestingDecl(D);
+    return llvmirAstConsumer->HandleInterestingDecl(D);
   }
   void HandleTranslationUnit(clang::ASTContext &Ctx) override {
-    /// If the frontend emutted an error do not run the backend
+    /// If the frontend emitted an error do not run the backend
     if (!CI.getSema().hasUncompilableErrorOccurred() &&
         mlir::failed(Finalize())) {
       /// If our backend fails stop now
       llvm::report_fatal_error("MLIR pipelined failed");
       return;
     }
-    return LLVMIRASTConsumer->HandleTranslationUnit(Ctx);
+    return llvmirAstConsumer->HandleTranslationUnit(Ctx);
   }
   void HandleTagDeclDefinition(clang::TagDecl *D) override {
-    return LLVMIRASTConsumer->HandleTagDeclDefinition(D);
+    return llvmirAstConsumer->HandleTagDeclDefinition(D);
   }
   void HandleTagDeclRequiredDefinition(const clang::TagDecl *D) override {
-    return LLVMIRASTConsumer->HandleTagDeclRequiredDefinition(D);
+    return llvmirAstConsumer->HandleTagDeclRequiredDefinition(D);
   }
   void HandleCXXImplicitFunctionInstantiation(clang::FunctionDecl *D) override {
-    return LLVMIRASTConsumer->HandleCXXImplicitFunctionInstantiation(D);
+    return llvmirAstConsumer->HandleCXXImplicitFunctionInstantiation(D);
   }
   void HandleTopLevelDeclInObjCContainer(clang::DeclGroupRef D) override {
-    return LLVMIRASTConsumer->HandleTopLevelDeclInObjCContainer(D);
+    return llvmirAstConsumer->HandleTopLevelDeclInObjCContainer(D);
   }
   void HandleImplicitImportDecl(clang::ImportDecl *D) override {
-    return LLVMIRASTConsumer->HandleImplicitImportDecl(D);
+    return llvmirAstConsumer->HandleImplicitImportDecl(D);
   }
   void CompleteTentativeDefinition(clang::VarDecl *D) override {
-    return LLVMIRASTConsumer->CompleteTentativeDefinition(D);
+    return llvmirAstConsumer->CompleteTentativeDefinition(D);
   }
   void CompleteExternalDeclaration(clang::VarDecl *D) override {
-    return LLVMIRASTConsumer->CompleteExternalDeclaration(D);
+    return llvmirAstConsumer->CompleteExternalDeclaration(D);
   }
   void AssignInheritanceModel(clang::CXXRecordDecl *RD) override {
-    return LLVMIRASTConsumer->AssignInheritanceModel(RD);
+    return llvmirAstConsumer->AssignInheritanceModel(RD);
   }
   void HandleVTable(clang::CXXRecordDecl *RD) override {
-    return LLVMIRASTConsumer->HandleVTable(RD);
+    return llvmirAstConsumer->HandleVTable(RD);
   }
   clang::ASTMutationListener *GetASTMutationListener() override {
-    return LLVMIRASTConsumer->GetASTMutationListener();
+    return llvmirAstConsumer->GetASTMutationListener();
   }
   clang::ASTDeserializationListener *GetASTDeserializationListener() override {
-    return LLVMIRASTConsumer->GetASTDeserializationListener();
+    return llvmirAstConsumer->GetASTDeserializationListener();
   }
-  void PrintStats() override { return LLVMIRASTConsumer->PrintStats(); }
+  void PrintStats() override { return llvmirAstConsumer->PrintStats(); }
   bool shouldSkipFunctionBody(clang::Decl *D) override {
-    return LLVMIRASTConsumer->shouldSkipFunctionBody(D);
+    return llvmirAstConsumer->shouldSkipFunctionBody(D);
   }
 };
 
@@ -837,7 +898,7 @@ public:
     return std::make_unique<NoopASTConsumer>();
   }
 
-  /// Assignements will be set on our clang::FrontendAction and not on the Inner
+  /// Assignments will be set on our clang::FrontendAction and not on the Inner
   /// clang::FrontendAction So before This function copies our data to the Inner
   void copySelfToInner() {
     Inner->setCurrentInput(getCurrentInput(), takeCurrentASTUnit());

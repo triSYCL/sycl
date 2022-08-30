@@ -16,11 +16,11 @@
 #include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Dialect.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Interfaces/InferTypeOpInterface.h"
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
 #include "archgen/FixedPt/FixedPtDialect.h.inc"
-
 #include "archgen/FixedPt/FixedPtEnum.h.inc"
 
 namespace archgen {

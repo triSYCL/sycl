@@ -336,20 +336,6 @@ mlir::LogicalResult AddOp::canonicalize(AddOp op,
 
 mlir::LogicalResult MulOp::canonicalize(MulOp op,
                                         mlir::PatternRewriter &rewriter) {
-  llvm_unreachable("TODO copy past of add for now");
-  fixedpt::FixedPtType lhsType = op.lhs().getType().cast<FixedPtType>();
-  fixedpt::FixedPtType rhsType = op.rhs().getType().cast<FixedPtType>();
-  fixedpt::FixedPtType resType = op.result().getType().cast<FixedPtType>();
-  fixedpt::FixedPtType newLhsType = rewriter.getType<FixedPtType>(
-      std::min(lhsType.getMsb(), resType.getMsb()),
-      std::max(lhsType.getLsb(), resType.getLsb() - 1), lhsType.isSigned());
-  fixedpt::FixedPtType newRhsType = rewriter.getType<FixedPtType>(
-      std::min(rhsType.getMsb(), resType.getMsb()),
-      std::max(rhsType.getLsb(), resType.getLsb() - 1), rhsType.isSigned());
-
-  if (mlir::succeeded(tryUpdateType(op.lhs(), newLhsType, op.rounding())) ||
-      mlir::succeeded(tryUpdateType(op.rhs(), newRhsType, op.rounding())))
-    return mlir::success();
   return mlir::failure();
 }
 

@@ -362,7 +362,7 @@ struct LowerApprox {
           mulType.getCommonAddType(coef.getType().cast<fixedpt::FixedPtType>());
       expr = rewriter
                  .create<fixedpt::AddOp>(loc, addType, expr, coef,
-                                         fixedpt::RoundingMode::zero)
+                                         fixedpt::RoundingMode::nearest)
                  .result();
       // emitPrintCall(expr, printId++);
     }

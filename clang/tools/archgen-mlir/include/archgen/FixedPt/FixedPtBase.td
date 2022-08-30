@@ -11,6 +11,7 @@
 
 include "mlir/IR/OpBase.td"
 include "mlir/IR/AttrTypeBase.td"
+include "mlir/Dialect/LLVMIR/LLVMOpsInterfaces.td"
 include "mlir/IR/EnumAttr.td"
 
 def FixedPt_Dialect : Dialect {
@@ -34,7 +35,7 @@ class FixedPt_Attr<string name, string attrMnemonic>
 }
 
 def FixedPtType
-    : FixedPt_Type<"FixedPt", "fixedPt"> {
+    : FixedPt_Type<"FixedPt", "fixedPt", [LLVM_PointerElementTypeInterface]> {
 
   let parameters = (ins
     "int":$msb,

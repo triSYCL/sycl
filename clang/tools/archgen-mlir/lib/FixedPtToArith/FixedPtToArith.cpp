@@ -13,6 +13,8 @@
 
 #include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/BuiltinDialect.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Transforms/DialectConversion.h"
@@ -24,6 +26,8 @@ using namespace archgen;
 using namespace archgen::fixedpt;
 namespace arith = mlir::arith;
 namespace func = mlir::func;
+namespace memref = mlir::memref;
+namespace LLVM = mlir::LLVM;
 
 namespace {
 
@@ -93,6 +97,14 @@ struct FixedPtToArithTypeConverter : public mlir::TypeConverter {
     /// Since we generate mlir::IntegerType we need to mlir::IntegerType to be
     /// legal. so it must return it self thought convertType
     addConversion([](mlir::IntegerType ty) { return ty; });
+
+    addConversion([&](mlir::MemRefType ty) {
+      return mlir::MemRefType::get(ty.getShape(),
+                                   convertType(ty.getElementType()));
+    });
+    addConversion([&](LLVM::LLVMPointerType ty) {
+      return LLVM::LLVMPointerType::get(convertType(ty.getElementType()));
+    });
   }
 };
 
@@ -116,6 +128,12 @@ struct FixedPtToArithTarget : public mlir::ConversionTarget {
     if (auto funcTy = ty.dyn_cast<mlir::FunctionType>())
       return isLegalType(funcTy.getInputs()) &&
              isLegalType(funcTy.getResults());
+    
+    if (auto memrefTy = ty.dyn_cast<mlir::MemRefType>())
+      return isLegalType(memrefTy.getElementType());
+
+    if (auto ptrTy = ty.dyn_cast<LLVM::LLVMPointerType>())
+      return isLegalType(ptrTy.getElementType());
 
     /// Leaf case: a leaf type is legal if it is not a FixedPtType
     return !ty.isa<FixedPtType>();
@@ -144,9 +162,12 @@ struct FixedPtToArithTarget : public mlir::ConversionTarget {
     /// func::ReturnOp are legal if there type is legal.
     /// We rewrite func::ReturnOp only when at least one of there arguments is
     /// a FixedPtType
-    addDynamicallyLegalOp<func::ReturnOp>([&](func::ReturnOp ret) {
-      return isLegalType(ret.operands().getTypes());
-    });
+    addDynamicallyLegalOp<func::ReturnOp, memref::LoadOp, memref::StoreOp,
+                          LLVM::LoadOp, LLVM::StoreOp>(
+        [&](mlir::Operation *op) {
+          return isLegalType(op->getOperands().getTypes()) &&
+                 isLegalType(op->getResultTypes());
+        });
   }
 };
 
@@ -671,16 +692,18 @@ struct FuncOpRewriting : public mlir::OpConversionPattern<func::FuncOp> {
   }
 };
 
-/// Pattern to rewrite the type of a func::ReturnOp
-struct ReturnOpRewriting : public mlir::OpConversionPattern<func::ReturnOp> {
-  using base = OpConversionPattern<func::ReturnOp>;
+template <typename SimpleOp>
+struct SimpleOpRewriting : public mlir::OpConversionPattern<SimpleOp> {
+  using base = typename mlir::OpConversionPattern<SimpleOp>;
   using base::OpConversionPattern;
   virtual mlir::LogicalResult
-  matchAndRewrite(func::ReturnOp op, base::OpAdaptor adaptor,
+  matchAndRewrite(SimpleOp op, typename base::OpAdaptor adaptor,
                   mlir::ConversionPatternRewriter &rewriter) const override {
-    /// The types in the adaptor are already correct so we just create a new
-    /// ReturnOp with them
-    rewriter.replaceOpWithNewOp<func::ReturnOp>(op, adaptor.operands());
+    llvm::SmallVector<mlir::Type> resTys;
+    if (mlir::failed(this->getTypeConverter()->convertTypes(
+            op->getResultTypes(), resTys)))
+      return mlir::failure();
+    rewriter.replaceOpWithNewOp<SimpleOp>(op, resTys, adaptor.getOperands());
     return mlir::success();
   }
 };
@@ -700,7 +723,11 @@ void populateFixedPtToArithConversionPatterns(mlir::RewritePatternSet &patterns,
                DivOpLowering,
                ConvertOpLowering,
                FuncOpRewriting,
-               ReturnOpRewriting
+               SimpleOpRewriting<func::ReturnOp>,
+               SimpleOpRewriting<memref::LoadOp>,
+               SimpleOpRewriting<memref::StoreOp>,
+               SimpleOpRewriting<LLVM::LoadOp>,
+               SimpleOpRewriting<LLVM::StoreOp>
                >(converter, patterns.getContext());
   // clang-format on
 }

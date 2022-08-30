@@ -10,4 +10,5 @@ add_mlir_dialect_library(ArchGenMLIRFixedPt
   LINK_LIBS PUBLIC
   MLIRIR
   MLIRInferTypeOpInterface
+  MLIRDataLayoutInterfaces
   )
