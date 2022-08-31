@@ -9,7 +9,7 @@
 include "mlir/Pass/PassBase.td"
 
 def ConvertFixedPtToArithPass : Pass<"convert-fixedpt-to-arith", "::mlir::ModuleOp"> {
-  let summary = "comvert FixedPt Dialect to Arithmetic Dialect";
+  let summary = "convert FixedPt Dialect to Arithmetic Dialect";
   let constructor = "::archgen::fixedpt::createConvertFixedPtToArithPass()";
   let dependentDialects = [
     "::mlir::arith::ArithmeticDialect",

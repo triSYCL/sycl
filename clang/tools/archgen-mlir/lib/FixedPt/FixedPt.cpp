@@ -101,16 +101,33 @@ llvm::FixedPointSemantics FixedPtType::getFixedPointSemantics() const {
 }
 
 FixedPtType FixedPtType::getCommonMulType(FixedPtType other) const {
+  int w1 = getWidth();
+  int w2 = other.getWidth();
+	unsigned int generalProdWidth = w1 + w2;
+	unsigned int max = (w1 > w2) ? w1 : w2;
+	bool sameSignedness = (isSigned() == other.isSigned());
+	bool oneIsOne = ((w1 == 1) || (w2 == 1));
+	bool bothAreOne = ((w1 == 1) && (w2 == 1));
+	unsigned int caseOneWidth = (sameSignedness || bothAreOne) ? max : max + 1; 
+	bool oneSigned = isSigned() or other.isSigned();
+  bool prodSigned = (oneSigned and (!bothAreOne || !sameSignedness));
+  unsigned int prodSize = ( oneIsOne ) ? caseOneWidth : generalProdWidth;
+
   int lsb = getLsb() + other.getLsb();
-  int width = getWidth() + other.getWidth();
-  return FixedPtType::get(getContext(), width + lsb, lsb,
-                          isSigned() || other.isSigned());
+  return FixedPtType::get(getContext(), prodSize + lsb - 1, lsb,
+                          prodSigned);
 }
 
 FixedPtType FixedPtType::getCommonAddType(FixedPtType other) const {
-  return FixedPtType::get(getContext(), std::max(getMsb(), other.getMsb()) + 1,
-                          std::min(getLsb(), other.getLsb()),
-                          isSigned() || other.isSigned());
+  auto lsb_out = std::min(getLsb(), other.getLsb());
+  auto max_msb = std::max(getMsb(), other.getMsb());
+  auto max_pos_msb =
+      std::max(getMaxPositiveBW(), other.getMaxPositiveBW());
+  auto one_signed = isSigned() || other.isSigned();
+  auto msb =
+      1 + (((max_msb == max_pos_msb) && one_signed) ? max_msb + 1 : max_msb);
+  return FixedPtType::get(getContext(), msb,
+                          lsb_out, one_signed);
 }
 
 mlir::Type FixedPtType::parse(mlir::AsmParser &odsParser) {

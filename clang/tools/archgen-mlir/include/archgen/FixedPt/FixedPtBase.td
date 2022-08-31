@@ -48,6 +48,7 @@ def FixedPtType
     bool isSigned() const { return getIsSigned(); }
     bool isUnsigned() const { return !isSigned(); }
     unsigned getWidth() const { return getMsb() - getLsb() + 1; }
+    int getMaxPositiveBW() const { return (isSigned()) ? getMsb() - 1 : getMsb(); }
     llvm::FixedPointSemantics getFixedPointSemantics() const;
     FixedPtType getCommonMulType(FixedPtType other) const;
     FixedPtType getCommonAddType(FixedPtType other) const;
