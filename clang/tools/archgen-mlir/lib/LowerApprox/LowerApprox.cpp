@@ -6,6 +6,9 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "archgen/FixedPt/FixedPt.h"
+#include "mlir/IR/OperationSupport.h"
+#include "mlir/Support/LLVM.h"
 #ifndef ARCHGEN_SOLLYA_LIB_PATH
 #error "unable to find sollya"
 #endif
@@ -361,8 +364,9 @@ struct LowerApprox {
       fixedpt::FixedPtType addType =
           mulType.getCommonAddType(coef.getType().cast<fixedpt::FixedPtType>());
       expr = rewriter
-                 .create<fixedpt::AddOp>(loc, addType, expr, coef,
-                                         fixedpt::RoundingMode::nearest)
+                 .create<fixedpt::AddOp>(loc, addType,
+                                         fixedpt::RoundingMode::nearest,
+                                         mlir::SmallVector<mlir::Value>{expr, coef})
                  .result();
       // emitPrintCall(expr, printId++);
     }

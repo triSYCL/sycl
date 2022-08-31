@@ -16,7 +16,9 @@
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/BuiltinDialect.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
+#include "mlir/Support/LLVM.h"
 #include "mlir/Transforms/DialectConversion.h"
 
 #include "archgen/FixedPt/PassDetail.h"
@@ -356,13 +358,24 @@ struct AddOpLowering : public mlir::OpConversionPattern<AddOp> {
     /// %tmp4 = arith.trunci(%tmp3) : (i7) -> i6
     /// arith.addi(%tmp1, %tmp4) : (i6, i6) -> i6
 
-    mlir::Value lhs = converter.buildConversion(
-        adaptor.lhs(), op.lhs().getType().cast<FixedPtType>(),
-        op.result().getType().cast<FixedPtType>());
-    mlir::Value rhs = converter.buildConversion(
-        adaptor.rhs(), op.rhs().getType().cast<FixedPtType>(),
-        op.result().getType().cast<FixedPtType>());
-    rewriter.replaceOpWithNewOp<arith::AddIOp>(op, lhs, rhs);
+
+    // TODO accumulation is performed here, can be replaced by tree reduction or bitheap
+
+    mlir::SmallVector<mlir::Value> converted;
+    auto resType = op.result().getType().cast<FixedPtType>();
+    auto adapt_args = adaptor.args();
+    auto args = op.args();
+    for (size_t i = 0 ; i < args.size() ; ++i) {
+      converted.push_back(
+        converter.buildConversion(adapt_args[i], args[i].getType().cast<FixedPtType>(), resType)
+      );
+    }
+    mlir::Value res = converted[0];
+    for (size_t i = 1 ; i < converted.size() ; ++i) {
+      res = rewriter.create<arith::AddIOp>(op->getLoc(), res, converted[i])->getResult(0);
+    }
+
+    rewriter.replaceOp(op, {res});
     return mlir::success();
   }
 };

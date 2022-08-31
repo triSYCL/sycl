@@ -31,7 +31,18 @@ FixedPt_Op<mnemonic, traits # [DeclareOpInterfaceMethods<RoundingOpInterface>]> 
   let assemblyFormat = "$lhs `:` type($lhs) `,` $rhs `:` type($rhs) `to` $rounding type($result) attr-dict";
 }
 
-def FixedPt_AddOp : FixedPt_BinOp<"add", [Commutative]>;
+class FixedPt_VarOp<string mnemonic, list<Trait> traits = []> :
+    Op<FixedPt_Dialect, mnemonic, traits # [NoSideEffect]> {
+  let hasVerifier = 1;
+  let hasCanonicalizer = 1;
+  let arguments = (ins
+    RoundingKindAttr: $rounding,
+    Variadic<AnyFixedPt>: $args
+  );
+  let results = (outs AnyFixedPt: $result);
+}
+
+def FixedPt_AddOp : FixedPt_VarOp<"add", [Commutative]>;
 def FixedPt_SubOp : FixedPt_BinOp<"sub">;
 def FixedPt_MulOp : FixedPt_BinOp<"mul", [Commutative]>;
 def FixedPt_DivOp : FixedPt_BinOp<"div">;

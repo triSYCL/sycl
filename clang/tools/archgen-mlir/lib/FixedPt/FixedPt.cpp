@@ -6,7 +6,10 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+#include <cassert>
 
+#include "llvm/ADT/APFixedPoint.h"
+#include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
 
@@ -16,6 +19,8 @@
 #include "mlir/IR/OpDefinition.h"
 
 #include "archgen/FixedPt/FixedPt.h"
+#include "mlir/Support/LLVM.h"
+#include "mlir/Support/LogicalResult.h"
 
 using namespace archgen::fixedpt;
 using namespace archgen;
@@ -217,7 +222,13 @@ fixedpt::RoundingMode fixedpt::getCommonRoundingMod(fixedpt::RoundingMode m1,
 // Fixed Point operation definitions
 //===----------------------------------------------------------------------===//
 
-mlir::LogicalResult AddOp::verify() { return mlir::success(); }
+mlir::LogicalResult AddOp::verify() {
+  if (args().size() < 2) {
+    emitError().append("requires at least two operands");
+    return mlir::failure();
+  }
+  return mlir::success();
+}
 
 mlir::LogicalResult SubOp::verify() { return mlir::success(); }
 
@@ -313,42 +324,83 @@ mlir::LogicalResult tryUpdateType(mlir::Value v, mlir::Type ty,
   return mlir::failure();
 }
 
-} // namespace
+llvm::APFixedPoint exactAdd(llvm::APFixedPoint const & lhs, llvm::APFixedPoint const & rhs) {
+  // We only need to extend one of the values to the suitable msb, as required LSB extension
+  // is done within APFixedPoint add
+  auto LsbOut = lhs.getLsbWeight();
+  auto MaxMsb = std::max(lhs.getMsbWeight(), rhs.getMsbWeight());
+  auto MaxPosMsb =
+      std::max(lhs.getMaxPosWeight(), rhs.getMaxPosWeight());
+  auto OneIsSigned = lhs.isSigned() || rhs.isSigned();
+  auto MsbOut =
+      1 + (((MaxMsb == MaxPosMsb) && OneIsSigned) ? MaxMsb + 1 : MaxMsb);
+  assert(MsbOut >= LsbOut);
+  unsigned int ResWidth{static_cast<unsigned int>(MsbOut - LsbOut + 1)};
+  llvm::FixedPointSemantics ExtendedLHSSema{ResWidth, llvm::FixedPointSemantics::Lsb{LsbOut}, OneIsSigned, false, false};
+  bool overflow;
+  auto ext_lhs = lhs.convert(ExtendedLHSSema, &overflow);
+  assert(!overflow);
+  auto res = ext_lhs.add(rhs, &overflow);
+  assert(!overflow);
+  return res;
+}
 
-mlir::LogicalResult AddOp::canonicalize(AddOp op,
-                                        mlir::PatternRewriter &rewriter) {
-  mlir::Value var;
-  fixedpt::FixedPointAttr constant;
-  /// var + 0 -> var
-  /// I am not sure using the pattern matcher is really easier
-  if (((mlir::matchPattern(op.lhs(), mlir::m_Constant(&constant)) &&
-        (var = op.rhs())) ||
-       (mlir::matchPattern(op.rhs(), mlir::m_Constant(&constant)) &&
-        (var = op.lhs()))) &&
-      constant.getValue().getValue().isZero()) {
-    if (var.getType() == op.result().getType())
-      rewriter.replaceOp(op, var);
-    else
-      rewriter.replaceOpWithNewOp<ConvertOp>(op, op.result().getType(), var,
-                                             op.rounding());
+
+struct AddOpConstFolder : public mlir::RewritePattern {
+  AddOpConstFolder(mlir::MLIRContext *context)
+      : RewritePattern(AddOp::getOperationName(), 1, context) {}
+
+  mlir::LogicalResult matchAndRewrite(mlir::Operation *op,
+                                      mlir::PatternRewriter &rewriter) const override {
+    AddOp addOp = llvm::cast<AddOp>(op);
+    fixedpt::FixedPointAttr constVal;
+    llvm::APFixedPoint CstSumVal{0, 
+                                 llvm::FixedPointSemantics(1, 0, false, false, false)};
+    mlir::SmallVector<mlir::Value> NewArgs;
+    size_t NbCst{0};
+    for (auto arg : addOp.args()) {
+      if (mlir::matchPattern(arg, mlir::m_Constant(&constVal))) {
+        auto CstValue = constVal.getValue();
+        if (!CstValue.getValue().isZero()) {
+          if (!CstSumVal.getValue().isZero()) {
+            CstSumVal = exactAdd(CstSumVal, CstValue);
+          } else {
+            // To avoid useless bit extension due to the arbitrary coice of zero semantics
+            CstSumVal = CstValue;
+          }
+          NbCst++;
+        }
+      } else {
+        NewArgs.push_back(arg);
+      }
+    }
+    if (NbCst == 0 || (NbCst == 1 && !CstSumVal.getValue().isZero())) {
+      return mlir::failure();
+    }
+
+    if (!CstSumVal.getValue().isZero()) {
+      // We need to create a constant op of the resulting constant
+      auto CstType = FixedPtType::get(getContext(), CstSumVal.getSemantics());
+      auto CstAttr = fixedpt::FixedPointAttr::get(getContext(), CstSumVal);
+      auto CstValue = rewriter.create<fixedpt::ConstantOp>(op->getLoc(), CstType, CstAttr).result();
+      NewArgs.push_back(CstValue);
+    }
+
+    rewriter.replaceOpWithNewOp<fixedpt::AddOp>(op,
+      addOp.getResult().getType().cast<fixedpt::FixedPtType>(),
+      addOp.rounding(),
+      NewArgs);
+
     return mlir::success();
   }
+};
 
-  /// resize inputs based on outputs
-  fixedpt::FixedPtType lhsType = op.lhs().getType().cast<FixedPtType>();
-  fixedpt::FixedPtType rhsType = op.rhs().getType().cast<FixedPtType>();
-  fixedpt::FixedPtType resType = op.result().getType().cast<FixedPtType>();
-  fixedpt::FixedPtType newLhsType = rewriter.getType<FixedPtType>(
-      std::min(lhsType.getMsb(), resType.getMsb()),
-      std::max(lhsType.getLsb(), resType.getLsb() - 1), lhsType.isSigned());
-  fixedpt::FixedPtType newRhsType = rewriter.getType<FixedPtType>(
-      std::min(rhsType.getMsb(), resType.getMsb()),
-      std::max(rhsType.getLsb(), resType.getLsb() - 1), rhsType.isSigned());
+} // namespace
 
-  if (mlir::succeeded(tryUpdateType(op.lhs(), newLhsType, op.rounding())) ||
-      mlir::succeeded(tryUpdateType(op.rhs(), newRhsType, op.rounding())))
-    return mlir::success();
-  return mlir::failure();
+
+void AddOp::getCanonicalizationPatterns(mlir::RewritePatternSet &patterns,
+                                       mlir::MLIRContext *context) {
+  patterns.add<AddOpConstFolder>(context);
 }
 
 mlir::LogicalResult MulOp::canonicalize(MulOp op,
@@ -368,7 +420,47 @@ mlir::LogicalResult DivOp::canonicalize(DivOp op,
 
 mlir::LogicalResult ConstantOp::canonicalize(ConstantOp op,
                                              mlir::PatternRewriter &rewriter) {
-  return mlir::failure();
+  auto ConstVal = op.valueAttr();
+  auto ConstAPFixed = ConstVal.getValue();
+  auto InitMsb = ConstAPFixed.getMsbWeight();
+  auto InitLsb = ConstAPFixed.getLsbWeight();
+  auto InitIsSigned = ConstAPFixed.isSigned();
+
+  auto ConstAPInt = ConstAPFixed.getValue();
+
+  bool NewSign = ConstAPInt.isNegative();
+  auto CLZ = ConstAPInt.countLeadingZeros();
+  auto CLO = ConstAPInt.countLeadingOnes();
+  auto CTZ = ConstAPInt.countTrailingZeros();
+
+  // Remove trailing zero bits
+  int NewLsb = ConstAPInt.isZero() ? 0 : (InitLsb + CTZ);
+  auto UselessTopBits = NewSign ? CLO - 1 : CLZ;
+  int NewMsb = ConstAPInt.isZero() ? 1 : InitMsb - UselessTopBits;
+
+  if (NewLsb == InitLsb && NewMsb == InitMsb && NewSign == InitIsSigned) {
+    // No changes
+    return mlir::failure();
+  }
+
+  assert (NewMsb >= NewLsb);
+
+  ConstAPInt.setIsSigned(NewSign);
+
+  if (!ConstAPInt.isZero())
+    ConstAPInt.ashrInPlace(CTZ);
+
+  unsigned int NewWidth{static_cast<unsigned int>(NewMsb - NewLsb) + 1};
+
+  auto NewConstRepr = ConstAPInt.trunc(NewWidth);
+
+  llvm::FixedPointSemantics NewFormat{NewWidth, llvm::FixedPointSemantics::Lsb{NewLsb}, NewSign, false, false};
+  llvm::APFixedPoint NewCstFix{NewConstRepr, NewFormat};
+  auto NewCstFixType = FixedPtType::get(op.getContext(), NewFormat);
+
+  auto ReplAttr = fixedpt::FixedPointAttr::get(op->getContext(), NewCstFix);
+  rewriter.replaceOpWithNewOp<fixedpt::ConstantOp>(op, NewCstFixType, ReplAttr);
+  return mlir::success();
 }
 
 mlir::LogicalResult TruncOp::canonicalize(TruncOp op,
