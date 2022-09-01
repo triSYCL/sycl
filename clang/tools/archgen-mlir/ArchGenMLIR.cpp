@@ -640,48 +640,6 @@ public:
         op->erase();
   }
 
-  /// This is temporary just to test interation of MLIR and LLVMIR code.
-  void replaceByGenerableMLIR() {
-    auto replaceTypeImpl = [&](mlir::Type ty,
-                               auto &replacerImpl) -> mlir::Type {
-      auto replacer = [&](mlir::Type inner) -> mlir::Type {
-        return replacerImpl(inner, replacerImpl);
-      };
-      if (auto funcTy = ty.dyn_cast<mlir::FunctionType>()) {
-        SmallVector<mlir::Type> subTy;
-        llvm::transform(funcTy.getInputs(), std::back_inserter(subTy),
-                        replacer);
-        return mlir::FunctionType::get(&state.ctx, subTy,
-                                       replacer(funcTy.getResult(0)));
-      }
-      if (auto fixedPt = ty.dyn_cast<fixedpt::FixedPtType>())
-        return mlir::IntegerType::get(&state.ctx, fixedPt.getWidth());
-      return ty;
-    };
-
-    auto replaceType = [&](mlir::Type ty) {
-      return replaceTypeImpl(ty, replaceTypeImpl);
-    };
-
-    state.module->walk([&](func::FuncOp op) {
-      mlir::FunctionType newTy = replaceType(op.getFunctionType()).cast<mlir::FunctionType>();
-      llvm::StringRef str = op.getSymName();
-      mlir::Location loc = op.getLoc();
-
-      op.erase();
-
-      state.builder.setInsertionPointToStart(&state.module->getRegion().front());
-      auto newFunc = state.builder.create<func::FuncOp>(loc, str, newTy);
-      mlir::Block* b = newFunc.addEntryBlock();
-      state.builder.setInsertionPointToStart(b);
-      auto Constant = state.builder.create<arith::ConstantIntOp>(
-          state.builder.getUnknownLoc(), 17,
-          newFunc.getFunctionType().getResult(0));
-      state.builder.create<func::ReturnOp>(state.builder.getUnknownLoc(),
-                                           Constant.getResult());
-    });
-  }
-
   mlir::LogicalResult runMLIROptimizationAndLowering() {
     {
       mlir::PassManager pm(&state.ctx);
