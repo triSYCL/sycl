@@ -70,14 +70,4 @@ def FixedPtAttr : FixedPt_Attr<"FixedPoint", "fixed_point"> {
   let hasCustomAssemblyFormat = true;
 } 
 
-def RoundDown: I32EnumAttrCase<"zero", 0>;
-def RoundNearest: I32EnumAttrCase<"nearest", 1>;
-
-def RoundingKindAttr: I32EnumAttr<"RoundingMode", "describes rounding modes",
-                           [RoundDown, RoundNearest]> {
-  let cppNamespace = "::archgen::fixedpt";
-  let stringToSymbolFnName = "ConvertToEnum";
-  let symbolToStringFnName = "ConvertToString";
-}
-
 #endif

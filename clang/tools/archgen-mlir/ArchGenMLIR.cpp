@@ -372,6 +372,13 @@ struct MLIREmitter : public clang::StmtVisitor<MLIREmitter, mlir::Value> {
   MLIRGenState &state;
   MLIREmitter(MLIRGenState &s) : state(s) {}
 
+  int64_t evaluateConstant(clang::Expr* E) {
+    clang::Expr::EvalResult result;
+    E->EvaluateAsRValue(result, state.ASTctx);
+    assert(result.Val.hasValue());
+    return result.Val.getInt().getZExtValue();
+  }
+
   /// Entry point of the emitter
   void Emit(clang::FunctionDecl *FD, func::FuncOp MLIRFunc) {
     /// TODO: this should get split into EmitFunc and EmitBlock
@@ -443,14 +450,16 @@ struct MLIREmitter : public clang::StmtVisitor<MLIREmitter, mlir::Value> {
       auto attr =
           fixedpt::FixedPointAttr::get(&state.ctx, std::move(FPvalue));
       return state.builder
-          .create<approx::ConstantOp>(
-              state.getMLIRLocation(CE->getBeginLoc()), attr)
+          .create<approx::ConstantOp>(state.getMLIRLocation(CE->getBeginLoc()),
+                                      attr)
           ->getResults()[0];
     }
     if (Kind == Annot::KindEvaluate)
       return state.builder.create<approx::EvaluateOp>(
           state.getMLIRLocation(CE->getBeginLoc()),
-          state.getMLIRType(CE->getType()), Visit(CE->getArg(1)));
+          state.getMLIRType(CE->getType()), Visit(CE->getArg(1)),
+          static_cast<archgen::approx::ApproxMode>(
+              evaluateConstant(CE->getArg(2))));
     if (Kind == Annot::KindVariable)
       return state.builder.create<approx::VariableOp>(
           state.getMLIRLocation(CE->getBeginLoc()), Visit(CE->getArg(1)));

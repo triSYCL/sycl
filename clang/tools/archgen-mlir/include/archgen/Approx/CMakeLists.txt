@@ -5,6 +5,8 @@ mlir_tablegen(ApproxType.h.inc -gen-typedef-decls -typedefs-dialect=approx)
 mlir_tablegen(ApproxType.cpp.inc -gen-typedef-defs -typedefs-dialect=approx)
 mlir_tablegen(ApproxDialect.h.inc -gen-dialect-decls -dialect=approx)
 mlir_tablegen(ApproxDialect.cpp.inc -gen-dialect-defs -dialect=approx)
+mlir_tablegen(ApproxEnum.h.inc -gen-enum-decls -dialect=approx)
+mlir_tablegen(ApproxEnum.cpp.inc -gen-enum-defs -dialect=approx)
 add_public_tablegen_target(ArchGenMLIRApproxIncGen)
 
 set(LLVM_TARGET_DEFINITIONS ApproxPasses.td)

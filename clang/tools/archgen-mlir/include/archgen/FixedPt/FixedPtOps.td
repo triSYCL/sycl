@@ -14,6 +14,17 @@ include "archgen/FixedPt/FixedPtInterface.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
+
+def RoundDown: I32EnumAttrCase<"zero", 0>;
+def RoundNearest: I32EnumAttrCase<"nearest", 1>;
+
+def RoundingKindAttr: I32EnumAttr<"RoundingMode", "describes rounding modes",
+                           [RoundDown, RoundNearest]> {
+  let cppNamespace = "::archgen::fixedpt";
+  let stringToSymbolFnName = "ConvertToEnum";
+  let symbolToStringFnName = "ConvertToString";
+}
+
 class FixedPt_Op<string mnemonic, list<Trait> traits = []> :
     Op<FixedPt_Dialect, mnemonic, traits # [NoSideEffect]> {
   let hasVerifier = 1;

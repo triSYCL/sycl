@@ -1,4 +1,4 @@
-//===- FuncOps.h - Func Dialect Operations ----------------------*- C++ -*-===//
+//===- Approx.h - Approx Dialect Operations ---------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef ARCHGEN_APROX_DILECT_H
-#define ARCHGEN_APROX_DILECT_H
+#ifndef ARCHGEN_APPROX_DILECT_H
+#define ARCHGEN_APPROX_DILECT_H
 
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/BuiltinTypes.h"
@@ -15,6 +15,8 @@
 #include "mlir/Interfaces/SideEffectInterfaces.h"
 
 #include "archgen/FixedPt/FixedPt.h"
+
+#include "archgen/Approx/ApproxEnum.h.inc"
 
 #include "archgen/Approx/ApproxDialect.h.inc"
 
@@ -24,4 +26,4 @@
 #define GET_OP_CLASSES
 #include "archgen/Approx/ApproxOps.h.inc"
 
-#endif // ARCHGEN_APROX_DILECT_H
+#endif // ARCHGEN_APPROX_DILECT_H

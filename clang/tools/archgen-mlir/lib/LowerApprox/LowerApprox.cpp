@@ -1,4 +1,4 @@
-//===- LowerApprox.cpp - Replace approx by its aproximation ---------------===//
+//===- LowerApprox.cpp - Replace approx by its approximation ---------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.

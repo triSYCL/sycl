@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
  
-#ifndef MLIR_DIALECT_APROX_TD
-#define MLIR_DIALECT_APROX_TD
+#ifndef MLIR_DIALECT_APPROX_TD
+#define MLIR_DIALECT_APPROX_TD
 
 include "mlir/IR/OpBase.td"
 include "mlir/IR/AttrTypeBase.td"
@@ -36,22 +36,36 @@ def ToBeFoldedType
     : Approx_Type<"toBeFolded", "toBeFolded"> {
 }
 
+def ApproxAuto: I32EnumAttrCase<"auto_select", 0>;
+def ApproxBasicPoly: I32EnumAttrCase<"basic_poly", 1>;
+def ApproxBiPartiteTable: I32EnumAttrCase<"bipartite_table", 2>;
+
+def ApproxKindAttr: I32EnumAttr<"ApproxMode", "describes Approx modes",
+                           [ApproxAuto, ApproxBasicPoly, ApproxBiPartiteTable]> {
+  let cppNamespace = "::archgen::approx";
+  let stringToSymbolFnName = "ConvertToEnum";
+  let symbolToStringFnName = "ConvertToString";
+}
+
 def Approx_GenericOp : Approx_Op<"generic"> {
   let arguments = (ins
-    Variadic<AnyType>: $inputs,
+    Variadic<ToBeFoldedType>: $inputs,
     StrAttr: $action
   );
   let builders = [
     OpBuilder<(ins "::mlir::ValueRange":$val, "::llvm::StringRef": $str)>
   ];
   let results = (outs ToBeFoldedType: $output);
+  let assemblyFormat = "$action `(` $inputs `)` attr-dict";
 }
 
 def Approx_EvaluateOp : Approx_Op<"evaluate"> {
   let arguments = (ins
-    ToBeFoldedType: $input
+    ToBeFoldedType: $input,
+    ApproxKindAttr: $approx_mode
   );
   let results = (outs FixedPtType: $output);
+  let assemblyFormat = "$approx_mode `of` $input `as` type($output) attr-dict";
 }
 
 def Approx_VariableOp : Approx_Op<"variable"> {
@@ -62,6 +76,7 @@ def Approx_VariableOp : Approx_Op<"variable"> {
   let builders = [
     OpBuilder<(ins "::mlir::Value":$val)>
   ];
+  let assemblyFormat = "$input `:` type($input) attr-dict";
 }
 
 def Approx_ParameterOp : Approx_Op<"parameter"> {
@@ -69,6 +84,7 @@ def Approx_ParameterOp : Approx_Op<"parameter"> {
     AnyInteger: $input
   );
   let results = (outs FixedPtType: $output);
+  let assemblyFormat = "$input `:` type($input) `as` type($output) attr-dict";
 }
 
 def Approx_ConstantOp : Approx_Op<"constant", [ConstantLike]> {
@@ -80,6 +96,7 @@ def Approx_ConstantOp : Approx_Op<"constant", [ConstantLike]> {
     static void build(::mlir::OpBuilder &odsBuilder, ::mlir::OperationState &odsState, ::archgen::fixedpt::FixedPointAttr value);
   }];
   let hasFolder = 1;
+  let assemblyFormat = "$valueAttr attr-dict";
 }
 
 #endif
