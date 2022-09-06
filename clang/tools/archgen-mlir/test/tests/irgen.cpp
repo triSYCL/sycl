@@ -11,89 +11,71 @@
 
 // CHECK-LLVMIR-LABEL: @_Z4testN10archgenlib11FixedNumberINS_11FixedFormatILi4ELin5EiEEEE(
 // CHECK-LLVMIR-NEXT:  entry:
-// CHECK-LLVMIR-NEXT:    [[RETVAL:%.*]] = alloca %"struct.archgenlib::FixedNumber", align 1
-// CHECK-LLVMIR-NEXT:    [[X:%.*]] = alloca %"struct.archgenlib::FixedNumber.0", align 2
-// CHECK-LLVMIR-NEXT:    [[AGG_TMP:%.*]] = alloca %"struct.archgenlib::FixedNumber.0", align 2
-// CHECK-LLVMIR-NEXT:    [[COERCE_DIVE:%.*]] = getelementptr inbounds %"struct.archgenlib::FixedNumber.0", %"struct.archgenlib::FixedNumber.0"* [[X]], i32 0, i32 0
+// CHECK-LLVMIR-NEXT:    [[X:%.*]] = alloca %"struct.archgenlib::FixedNumber", align 2
+// CHECK-LLVMIR-NEXT:    [[OUT:%.*]] = alloca %"struct.archgenlib::FixedNumber.0", align 1
+// CHECK-LLVMIR-NEXT:    [[COERCE_DIVE:%.*]] = getelementptr inbounds %"struct.archgenlib::FixedNumber", %"struct.archgenlib::FixedNumber"* [[X]], i32 0, i32 0
 // CHECK-LLVMIR-NEXT:    [[COERCE_VAL_II:%.*]] = trunc i16 [[X_COERCE:%.*]] to i10
 // CHECK-LLVMIR-NEXT:    store i10 [[COERCE_VAL_II]], i10* [[COERCE_DIVE]], align 2
-// CHECK-LLVMIR-NEXT:    [[TMP0:%.*]] = bitcast %"struct.archgenlib::FixedNumber.0"* [[AGG_TMP]] to i8*
-// CHECK-LLVMIR-NEXT:    [[TMP1:%.*]] = bitcast %"struct.archgenlib::FixedNumber.0"* [[X]] to i8*
-// CHECK-LLVMIR-NEXT:    call void @llvm.memcpy.p0i8.p0i8.i64(i8* align 2 [[TMP0]], i8* align 2 [[TMP1]], i64 2, i1 false)
-// CHECK-LLVMIR-NEXT:    [[COERCE_DIVE1:%.*]] = getelementptr inbounds %"struct.archgenlib::FixedNumber.0", %"struct.archgenlib::FixedNumber.0"* [[AGG_TMP]], i32 0, i32 0
-// CHECK-LLVMIR-NEXT:    [[TMP2:%.*]] = load i10, i10* [[COERCE_DIVE1]], align 2
-// CHECK-LLVMIR-NEXT:    [[COERCE_VAL_II2:%.*]] = zext i10 [[TMP2]] to i16
-// CHECK-LLVMIR-NEXT:    [[CALL:%.*]] = call i8 @_ZN10archgenlib6detail12evaluateImplINS_11FixedNumberINS_11FixedFormatILi2ELin1EjEEEENS_5AddOpINS_5SinOpINS_8VariableINS2_INS3_ILi4ELin5EiEEEELm0EEEEENS_4PiOpEEEJSA_EEET_DpT1_(i16 [[COERCE_VAL_II2]])
-// CHECK-LLVMIR-NEXT:    [[COERCE_DIVE3:%.*]] = getelementptr inbounds %"struct.archgenlib::FixedNumber", %"struct.archgenlib::FixedNumber"* [[RETVAL]], i32 0, i32 0
-// CHECK-LLVMIR-NEXT:    [[COERCE_VAL_II4:%.*]] = trunc i8 [[CALL]] to i4
-// CHECK-LLVMIR-NEXT:    store i4 [[COERCE_VAL_II4]], i4* [[COERCE_DIVE3]], align 1
-// CHECK-LLVMIR-NEXT:    [[COERCE_DIVE5:%.*]] = getelementptr inbounds %"struct.archgenlib::FixedNumber", %"struct.archgenlib::FixedNumber"* [[RETVAL]], i32 0, i32 0
-// CHECK-LLVMIR-NEXT:    [[TMP3:%.*]] = load i4, i4* [[COERCE_DIVE5]], align 1
-// CHECK-LLVMIR-NEXT:    [[COERCE_VAL_II6:%.*]] = zext i4 [[TMP3]] to i8
-// CHECK-LLVMIR-NEXT:    ret i8 [[COERCE_VAL_II6]]
+// CHECK-LLVMIR-NEXT:    call void @_ZN10archgenlib6detail12evaluateImplINS_11FixedNumberINS_11FixedFormatILi2ELin1EjEEEELi0ENS_5AddOpINS_5SinOpINS_8VariableINS2_INS3_ILi4ELin5EiEEEELm0EEEEENS_4PiOpEEEJSA_EEEvRT_DpRT2_(%"struct.archgenlib::FixedNumber.0"* noundef nonnull align 1 dereferenceable(1) [[OUT]], %"struct.archgenlib::FixedNumber"* noundef nonnull align 2 dereferenceable(2) [[X]])
+// CHECK-LLVMIR-NEXT:    ret void
 //
-// CHECK-MLIR-LABEL:   func.func public @_ZN10archgenlib6detail12evaluateImplINS_11FixedNumberINS_11FixedFormatILi2ELin1EjEEEENS_5AddOpINS_5SinOpINS_8VariableINS2_INS3_ILi4ELin5EiEEEELm0EEEEENS_4PiOpEEEJSA_EEET_DpT1_(
-// CHECK-MLIR-SAME:                                                                                                                                                                                                      %[[VAL_0:.*]]: !fixedpt.fixedPt<4, -5, "signed">) -> !fixedpt.fixedPt<2, -1, "unsigned"> {
-// CHECK-MLIR:           %[[VAL_1:.*]] = "approx.variable"(%[[VAL_0]]) : (!fixedpt.fixedPt<4, -5, "signed">) -> !approx.toBeFolded
-// CHECK-MLIR:           %[[VAL_2:.*]] = "approx.generic"(%[[VAL_1]]) {action = "sin"} : (!approx.toBeFolded) -> !approx.toBeFolded
-// CHECK-MLIR:           %[[VAL_3:.*]] = "approx.generic"() {action = "pi"} : () -> !approx.toBeFolded
-// CHECK-MLIR:           %[[VAL_4:.*]] = "approx.generic"(%[[VAL_2]], %[[VAL_3]]) {action = "add"} : (!approx.toBeFolded, !approx.toBeFolded) -> !approx.toBeFolded
-// CHECK-MLIR:           %[[VAL_5:.*]] = "approx.evaluate"(%[[VAL_4]]) : (!approx.toBeFolded) -> !fixedpt.fixedPt<2, -1, "unsigned">
-// CHECK-MLIR:           return %[[VAL_5]] : !fixedpt.fixedPt<2, -1, "unsigned">
+// CHECK-MLIR-LABEL:   func.func public @_ZN10archgenlib6detail12evaluateImplINS_11FixedNumberINS_11FixedFormatILi2ELin1EjEEEELi0ENS_5AddOpINS_5SinOpINS_8VariableINS2_INS3_ILi4ELin5EiEEEELm0EEEEENS_4PiOpEEEJSA_EEEvRT_DpRT2_(
+// CHECK-MLIR-SAME:                                                                                                                                                                                                             %[[VAL_0:.*]]: !llvm.ptr<!fixedpt.fixedPt<2, -1, "u">>,
+// CHECK-MLIR-SAME:                                                                                                                                                                                                             %[[VAL_1:.*]]: !llvm.ptr<!fixedpt.fixedPt<4, -5, "s">>) -> i8 {
+// CHECK-MLIR:           %[[VAL_2:.*]] = arith.constant 0 : i8
+// CHECK-MLIR:           %[[VAL_3:.*]] = llvm.load %[[VAL_1]] : !llvm.ptr<!fixedpt.fixedPt<4, -5, "s">>
+// CHECK-MLIR:           %[[VAL_4:.*]] = approx.variable %[[VAL_3]] : <4, -5, "s">
+// CHECK-MLIR:           %[[VAL_5:.*]] = approx.generic "sin"(%[[VAL_4]])
+// CHECK-MLIR:           %[[VAL_6:.*]] = approx.generic "pi"()
+// CHECK-MLIR:           %[[VAL_7:.*]] = approx.generic "add"(%[[VAL_5]], %[[VAL_6]])
+// CHECK-MLIR:           %[[VAL_8:.*]] = approx.evaluate auto_select of %[[VAL_7]] as <2, -1, "u">
+// CHECK-MLIR:           llvm.store %[[VAL_8]], %[[VAL_0]] : !llvm.ptr<!fixedpt.fixedPt<2, -1, "u">>
+// CHECK-MLIR:           return %[[VAL_2]] : i8
 // CHECK-MLIR:         }
 auto test(archgenlib::FixedNumber<archgenlib::FixedFormat<4, -5, signed>> x) {
+  archgenlib::FixedNumber<archgenlib::FixedFormat<2, -1, unsigned>> out;
   return archgenlib::detail::evaluateImpl<
-      archgenlib::FixedNumber<archgenlib::FixedFormat<2, -1, unsigned>>,
-      archgenlib::AddOp<
-          archgenlib::SinOp<archgenlib::Variable<
-              archgenlib::FixedNumber<archgenlib::FixedFormat<4, -5, signed>>,
-              0>>,
-          archgenlib::PiOp>>(x);
+    archgenlib::FixedNumber<archgenlib::FixedFormat<2, -1, unsigned>>, 0,
+    archgenlib::AddOp<
+      archgenlib::SinOp<archgenlib::Variable<
+        archgenlib::FixedNumber<archgenlib::FixedFormat<4, -5, signed>>,
+        0>>,
+      archgenlib::PiOp>>(out, x);
 }
 
 // CHECK-LLVMIR-LABEL: @_Z5test2N10archgenlib11FixedNumberINS_11FixedFormatILi4ELin5EiEEEE(
 // CHECK-LLVMIR-NEXT:  entry:
-// CHECK-LLVMIR-NEXT:    [[RETVAL:%.*]] = alloca %"struct.archgenlib::FixedNumber", align 1
-// CHECK-LLVMIR-NEXT:    [[X:%.*]] = alloca %"struct.archgenlib::FixedNumber.0", align 2
-// CHECK-LLVMIR-NEXT:    [[AGG_TMP:%.*]] = alloca %"struct.archgenlib::FixedNumber.0", align 2
-// CHECK-LLVMIR-NEXT:    [[COERCE_DIVE:%.*]] = getelementptr inbounds %"struct.archgenlib::FixedNumber.0", %"struct.archgenlib::FixedNumber.0"* [[X]], i32 0, i32 0
+// CHECK-LLVMIR-NEXT:    [[X:%.*]] = alloca %"struct.archgenlib::FixedNumber", align 2
+// CHECK-LLVMIR-NEXT:    [[OUT:%.*]] = alloca %"struct.archgenlib::FixedNumber.0", align 1
+// CHECK-LLVMIR-NEXT:    [[COERCE_DIVE:%.*]] = getelementptr inbounds %"struct.archgenlib::FixedNumber", %"struct.archgenlib::FixedNumber"* [[X]], i32 0, i32 0
 // CHECK-LLVMIR-NEXT:    [[COERCE_VAL_II:%.*]] = trunc i16 [[X_COERCE:%.*]] to i10
 // CHECK-LLVMIR-NEXT:    store i10 [[COERCE_VAL_II]], i10* [[COERCE_DIVE]], align 2
-// CHECK-LLVMIR-NEXT:    [[TMP0:%.*]] = bitcast %"struct.archgenlib::FixedNumber.0"* [[AGG_TMP]] to i8*
-// CHECK-LLVMIR-NEXT:    [[TMP1:%.*]] = bitcast %"struct.archgenlib::FixedNumber.0"* [[X]] to i8*
-// CHECK-LLVMIR-NEXT:    call void @llvm.memcpy.p0i8.p0i8.i64(i8* align 2 [[TMP0]], i8* align 2 [[TMP1]], i64 2, i1 false)
-// CHECK-LLVMIR-NEXT:    [[COERCE_DIVE1:%.*]] = getelementptr inbounds %"struct.archgenlib::FixedNumber.0", %"struct.archgenlib::FixedNumber.0"* [[AGG_TMP]], i32 0, i32 0
-// CHECK-LLVMIR-NEXT:    [[TMP2:%.*]] = load i10, i10* [[COERCE_DIVE1]], align 2
-// CHECK-LLVMIR-NEXT:    [[COERCE_VAL_II2:%.*]] = zext i10 [[TMP2]] to i16
-// CHECK-LLVMIR-NEXT:    [[CALL:%.*]] = call i8 @_ZN10archgenlib6detail12evaluateImplINS_11FixedNumberINS_11FixedFormatILi2ELin1EjEEEENS_5AddOpINS_5SinOpINS_8VariableINS2_INS3_ILi4ELin5EiEEEELm0EEEEESC_EEJSA_EEET_DpT1_(i16 [[COERCE_VAL_II2]])
-// CHECK-LLVMIR-NEXT:    [[COERCE_DIVE3:%.*]] = getelementptr inbounds %"struct.archgenlib::FixedNumber", %"struct.archgenlib::FixedNumber"* [[RETVAL]], i32 0, i32 0
-// CHECK-LLVMIR-NEXT:    [[COERCE_VAL_II4:%.*]] = trunc i8 [[CALL]] to i4
-// CHECK-LLVMIR-NEXT:    store i4 [[COERCE_VAL_II4]], i4* [[COERCE_DIVE3]], align 1
-// CHECK-LLVMIR-NEXT:    [[COERCE_DIVE5:%.*]] = getelementptr inbounds %"struct.archgenlib::FixedNumber", %"struct.archgenlib::FixedNumber"* [[RETVAL]], i32 0, i32 0
-// CHECK-LLVMIR-NEXT:    [[TMP3:%.*]] = load i4, i4* [[COERCE_DIVE5]], align 1
-// CHECK-LLVMIR-NEXT:    [[COERCE_VAL_II6:%.*]] = zext i4 [[TMP3]] to i8
-// CHECK-LLVMIR-NEXT:    ret i8 [[COERCE_VAL_II6]]
+// CHECK-LLVMIR-NEXT:    call void @_ZN10archgenlib6detail12evaluateImplINS_11FixedNumberINS_11FixedFormatILi2ELin1EjEEEELi0ENS_5AddOpINS_5SinOpINS_8VariableINS2_INS3_ILi4ELin5EiEEEELm0EEEEESC_EEJSA_EEEvRT_DpRT2_(%"struct.archgenlib::FixedNumber.0"* noundef nonnull align 1 dereferenceable(1) [[OUT]], %"struct.archgenlib::FixedNumber"* noundef nonnull align 2 dereferenceable(2) [[X]])
+// CHECK-LLVMIR-NEXT:    ret void
 //
-// CHECK-MLIR-LABEL:   func.func public @_ZN10archgenlib6detail12evaluateImplINS_11FixedNumberINS_11FixedFormatILi2ELin1EjEEEENS_5AddOpINS_5SinOpINS_8VariableINS2_INS3_ILi4ELin5EiEEEELm0EEEEESC_EEJSA_EEET_DpT1_(
-// CHECK-MLIR-SAME:                                                                                                                                                                                                %[[VAL_0:.*]]: !fixedpt.fixedPt<4, -5, "signed">) -> !fixedpt.fixedPt<2, -1, "unsigned"> {
-// CHECK-MLIR:           %[[VAL_1:.*]] = "approx.variable"(%[[VAL_0]]) : (!fixedpt.fixedPt<4, -5, "signed">) -> !approx.toBeFolded
-// CHECK-MLIR:           %[[VAL_2:.*]] = "approx.generic"(%[[VAL_1]]) {action = "sin"} : (!approx.toBeFolded) -> !approx.toBeFolded
-// CHECK-MLIR:           %[[VAL_3:.*]] = "approx.variable"(%[[VAL_0]]) : (!fixedpt.fixedPt<4, -5, "signed">) -> !approx.toBeFolded
-// CHECK-MLIR:           %[[VAL_4:.*]] = "approx.generic"(%[[VAL_3]]) {action = "sin"} : (!approx.toBeFolded) -> !approx.toBeFolded
-// CHECK-MLIR:           %[[VAL_5:.*]] = "approx.generic"(%[[VAL_2]], %[[VAL_4]]) {action = "add"} : (!approx.toBeFolded, !approx.toBeFolded) -> !approx.toBeFolded
-// CHECK-MLIR:           %[[VAL_6:.*]] = "approx.evaluate"(%[[VAL_5]]) : (!approx.toBeFolded) -> !fixedpt.fixedPt<2, -1, "unsigned">
-// CHECK-MLIR:           return %[[VAL_6]] : !fixedpt.fixedPt<2, -1, "unsigned">
+// CHECK-MLIR-LABEL:   func.func public @_ZN10archgenlib6detail12evaluateImplINS_11FixedNumberINS_11FixedFormatILi2ELin1EjEEEELi0ENS_5AddOpINS_5SinOpINS_8VariableINS2_INS3_ILi4ELin5EiEEEELm0EEEEESC_EEJSA_EEEvRT_DpRT2_(
+// CHECK-MLIR-SAME:                                                                                                                                                                                                       %[[VAL_0:.*]]: !llvm.ptr<!fixedpt.fixedPt<2, -1, "u">>,
+// CHECK-MLIR-SAME:                                                                                                                                                                                                       %[[VAL_1:.*]]: !llvm.ptr<!fixedpt.fixedPt<4, -5, "s">>) -> i8 {
+// CHECK-MLIR:           %[[VAL_2:.*]] = arith.constant 0 : i8
+// CHECK-MLIR:           %[[VAL_3:.*]] = llvm.load %[[VAL_1]] : !llvm.ptr<!fixedpt.fixedPt<4, -5, "s">>
+// CHECK-MLIR:           %[[VAL_4:.*]] = approx.variable %[[VAL_3]] : <4, -5, "s">
+// CHECK-MLIR:           %[[VAL_5:.*]] = approx.generic "sin"(%[[VAL_4]])
+// CHECK-MLIR:           %[[VAL_6:.*]] = approx.generic "add"(%[[VAL_5]], %[[VAL_5]])
+// CHECK-MLIR:           %[[VAL_7:.*]] = approx.evaluate auto_select of %[[VAL_6]] as <2, -1, "u">
+// CHECK-MLIR:           llvm.store %[[VAL_7]], %[[VAL_0]] : !llvm.ptr<!fixedpt.fixedPt<2, -1, "u">>
+// CHECK-MLIR:           return %[[VAL_2]] : i8
 // CHECK-MLIR:         }
 auto test2(archgenlib::FixedNumber<archgenlib::FixedFormat<4, -5, signed>> x) {
+  archgenlib::FixedNumber<archgenlib::FixedFormat<2, -1, unsigned>> out;
   return archgenlib::detail::evaluateImpl<
-      archgenlib::FixedNumber<archgenlib::FixedFormat<2, -1, unsigned>>,
-      archgenlib::AddOp<
-          archgenlib::SinOp<archgenlib::Variable<
-              archgenlib::FixedNumber<archgenlib::FixedFormat<4, -5, signed>>,
-              0>>,
-          archgenlib::SinOp<archgenlib::Variable<
-              archgenlib::FixedNumber<archgenlib::FixedFormat<4, -5, signed>>,
-              0>>>>(x);
+    archgenlib::FixedNumber<archgenlib::FixedFormat<2, -1, unsigned>>, 0,
+    archgenlib::AddOp<
+      archgenlib::SinOp<archgenlib::Variable<
+        archgenlib::FixedNumber<archgenlib::FixedFormat<4, -5, signed>>,
+        0>>,
+      archgenlib::SinOp<archgenlib::Variable<
+        archgenlib::FixedNumber<archgenlib::FixedFormat<4, -5, signed>>,
+        0>>>>(out, x);
 }
 
 int main() {

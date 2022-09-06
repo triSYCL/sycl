@@ -80,11 +80,11 @@ struct evaluatorImpl<::archgenlib::Constant<FixedConstTy>> {
   }
 };
 
-template <typename T, typename ET, typename... Ts>
+template <typename T, int AM, typename ET, typename... Ts>
 ARCHGEN_MLIR_ATTR(emit_as_mlir)
-ARCHGEN_MLIR_ATTR(top_level) T evaluateImpl(Ts... ts) {
-  return detail::generic_op<T>("evaluate",
-                               detail::evaluatorImpl<ET>::evaluate());
+ARCHGEN_MLIR_ATTR(top_level) void evaluateImpl(T &out, Ts &...ts) {
+  out = detail::generic_op<T>("evaluate", detail::evaluatorImpl<ET>::evaluate(),
+                              AM);
 }
 
 } // namespace detail

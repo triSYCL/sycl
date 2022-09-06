@@ -43,7 +43,7 @@ FixedPt_Op<mnemonic, traits # [DeclareOpInterfaceMethods<RoundingOpInterface>]> 
 }
 
 class FixedPt_VarOp<string mnemonic, list<Trait> traits = []> :
-    Op<FixedPt_Dialect, mnemonic, traits # [NoSideEffect]> {
+    FixedPt_Op<mnemonic, traits> {
   let hasVerifier = 1;
   let hasCanonicalizer = 1;
   let arguments = (ins
@@ -51,6 +51,7 @@ class FixedPt_VarOp<string mnemonic, list<Trait> traits = []> :
     Variadic<AnyFixedPt>: $args
   );
   let results = (outs AnyFixedPt: $result);
+  let assemblyFormat = "$args `:` type($args) `to` $rounding type($result) attr-dict";
 }
 
 def FixedPt_AddOp : FixedPt_VarOp<"add", [Commutative]>;
