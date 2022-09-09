@@ -549,29 +549,32 @@ struct MulOpLowering : public mlir::OpConversionPattern<MulOp> {
     ///   %tmp5 = arith.shrsi(%tmp3, %tmp4) : (i19, i19) -> i19
     ///   arith.trunci(%tmp5) : (i19) -> i13
 
-    FixedPtType lhsTy = op.lhs().getType().cast<FixedPtType>();
-    FixedPtType rhsTy = op.rhs().getType().cast<FixedPtType>();
-
-    /// Figure out the fixed point type resulting from a product of lhs and rhs
-    FixedPtType internalTy = lhsTy.getCommonMulType(rhsTy);
+    FixedPtType internalTy;
+    for (mlir::Type ty : op->getOperandTypes())
+      internalTy = internalTy.getCommonMulType(ty.cast<FixedPtType>());
     /// And its arith lowering
     mlir::IntegerType internalIntTy =
         typeConverter->convertType(internalTy).cast<mlir::IntegerType>();
 
+    /// reinterpret extend the width of operands to fit the internalIntTy
     ConversionBuilder converter(*typeConverter, rewriter, op->getLoc(),
                                 op.rounding());
-    /// reinterpret extend the withd of lhs and rhs to fit the internalIntTy
-    mlir::Value lhs =
-        converter.maybeExtend(adaptor.lhs(), internalIntTy, lhsTy.isSigned());
-    mlir::Value rhs =
-        converter.maybeExtend(adaptor.rhs(), internalIntTy, rhsTy.isSigned());
+    llvm::SmallVector<mlir::Value> convertedArgs;
+    for (auto v : llvm::zip(adaptor.getOperands(), op->getOperands()))
+      convertedArgs.push_back(converter.maybeExtend(
+          std::get<0>(v), internalIntTy,
+          std::get<1>(v).getType().cast<FixedPtType>().isSigned()));
+
     /// Multiply with it
-    auto mulOp = rewriter.create<arith::MulIOp>(op.getLoc(), lhs, rhs);
+    mlir::Value res = convertedArgs[0];
+    for (size_t i = 1; i < convertedArgs.size(); ++i)
+      res = rewriter.create<arith::MulIOp>(op->getLoc(), res, convertedArgs[i])
+                ->getResult(0);
 
     /// Convert result to the requested size
-    rewriter.replaceOp(op, converter.buildConversion(
-                               mulOp.getResult(), internalTy,
-                               op.getResult().getType().cast<FixedPtType>()));
+    rewriter.replaceOp(
+        op, converter.buildConversion(
+                res, internalTy, op.getResult().getType().cast<FixedPtType>()));
     return mlir::success();
   }
 };

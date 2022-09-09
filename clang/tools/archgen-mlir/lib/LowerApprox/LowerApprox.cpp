@@ -356,18 +356,18 @@ struct LowerApprox {
       mlir::Value coef = getConstantFromCoef(flopocoCoef);
       fixedpt::FixedPtType mulType = inputType.getCommonMulType(
           expr.getType().cast<fixedpt::FixedPtType>());
-      expr = rewriter
-                 .create<fixedpt::MulOp>(loc, mulType, expr, input,
-                                         fixedpt::RoundingMode::nearest)
-                 .result();
+      expr = rewriter.create<fixedpt::MulOp>(loc, mulType,
+                                             fixedpt::RoundingMode::zero,
+                                             mlir::ValueRange{expr, input});
       // emitPrintCall(expr, printId++);
       fixedpt::FixedPtType addType =
           mulType.getCommonAddType(coef.getType().cast<fixedpt::FixedPtType>());
-      expr = rewriter
-                 .create<fixedpt::AddOp>(loc, addType,
-                                         fixedpt::RoundingMode::nearest,
-                                         mlir::SmallVector<mlir::Value>{expr, coef})
-                 .result();
+      // fixedpt::FixedPtType addType = fixedpt::FixedPtType::get(
+      //     ctx, horner.wcSumMSB[idx], horner.wcSumLSB[idx],
+      //     !horner.wcSumSign[idx]);
+      expr = rewriter.create<fixedpt::AddOp>(loc, addType,
+                                             fixedpt::RoundingMode::zero,
+                                             mlir::ValueRange{expr, coef});
       // emitPrintCall(expr, printId++);
     }
 

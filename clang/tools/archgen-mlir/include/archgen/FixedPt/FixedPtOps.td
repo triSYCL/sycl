@@ -43,7 +43,7 @@ FixedPt_Op<mnemonic, traits # [DeclareOpInterfaceMethods<RoundingOpInterface>]> 
 }
 
 class FixedPt_VarOp<string mnemonic, list<Trait> traits = []> :
-    FixedPt_Op<mnemonic, traits> {
+    FixedPt_Op<mnemonic, traits # [DeclareOpInterfaceMethods<RoundingOpInterface>]> {
   let hasVerifier = 1;
   let hasCanonicalizer = 1;
   let arguments = (ins
@@ -51,12 +51,43 @@ class FixedPt_VarOp<string mnemonic, list<Trait> traits = []> :
     Variadic<AnyFixedPt>: $args
   );
   let results = (outs AnyFixedPt: $result);
-  let assemblyFormat = "$args `:` type($args) `to` $rounding type($result) attr-dict";
+  let extraClassDeclaration = [{
+    ::mlir::Value lhs();
+    ::mlir::Value rhs();
+    ::mlir::MutableOperandRange lhsMutable();
+    ::mlir::MutableOperandRange rhsMutable();
+  }];
+  let extraClassDefinition  = [{
+::mlir::Value $cppClass::lhs() {
+  assert(getNumOperands() == 2);
+  return *getODSOperands(0).begin();
+}
+
+::mlir::Value $cppClass::rhs() {
+  assert(getNumOperands() == 2);
+  return *getODSOperands(1).begin();
+}
+
+::mlir::MutableOperandRange $cppClass::lhsMutable() {
+  assert(getNumOperands() == 2);
+  auto range = getODSOperandIndexAndLength(0);
+  auto mutableRange = ::mlir::MutableOperandRange(getOperation(), range.first, range.second);
+  return mutableRange;
+}
+
+::mlir::MutableOperandRange $cppClass::rhsMutable() {
+  assert(getNumOperands() == 2);
+  auto range = getODSOperandIndexAndLength(1);
+  auto mutableRange = ::mlir::MutableOperandRange(getOperation(), range.first, range.second);
+  return mutableRange;
+}
+  }];
+  let hasCustomAssemblyFormat = true;
 }
 
 def FixedPt_AddOp : FixedPt_VarOp<"add", [Commutative]>;
 def FixedPt_SubOp : FixedPt_BinOp<"sub">;
-def FixedPt_MulOp : FixedPt_BinOp<"mul", [Commutative]>;
+def FixedPt_MulOp : FixedPt_VarOp<"mul", [Commutative]>;
 def FixedPt_DivOp : FixedPt_BinOp<"div">;
 
 def FixedPt_ConstantOp : FixedPt_Op<"constant", [ConstantLike]> {
@@ -65,7 +96,7 @@ def FixedPt_ConstantOp : FixedPt_Op<"constant", [ConstantLike]> {
   );
   let results = (outs AnyFixedPt: $result);
   let hasFolder = 1;
-  let assemblyFormat = "$valueAttr `->` type($result) attr-dict";
+  let hasCustomAssemblyFormat = true;
 }
 
 def FixedPt_TruncOp : FixedPt_Op<"trunc"> {

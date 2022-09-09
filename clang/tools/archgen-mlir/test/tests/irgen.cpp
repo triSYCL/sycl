@@ -20,16 +20,16 @@
 // CHECK-LLVMIR-NEXT:    ret void
 //
 // CHECK-MLIR-LABEL:   func.func public @_ZN10archgenlib6detail12evaluateImplINS_11FixedNumberINS_11FixedFormatILi2ELin1EjEEEELi0ENS_5AddOpINS_5SinOpINS_8VariableINS2_INS3_ILi4ELin5EiEEEELm0EEEEENS_4PiOpEEEJSA_EEEvRT_DpRT2_(
-// CHECK-MLIR-SAME:                                                                                                                                                                                                             %[[VAL_0:.*]]: !llvm.ptr<!fixedpt.fixedPt<2, -1, "u">>,
-// CHECK-MLIR-SAME:                                                                                                                                                                                                             %[[VAL_1:.*]]: !llvm.ptr<!fixedpt.fixedPt<4, -5, "s">>) -> i8 {
+// CHECK-MLIR-SAME:                                                                                                                                                                                                             %[[VAL_0:.*]]: !llvm.ptr<!fixedpt.fixedPt<2, -1, u>>,
+// CHECK-MLIR-SAME:                                                                                                                                                                                                             %[[VAL_1:.*]]: !llvm.ptr<!fixedpt.fixedPt<4, -5, s>>) -> i8 {
 // CHECK-MLIR:           %[[VAL_2:.*]] = arith.constant 0 : i8
-// CHECK-MLIR:           %[[VAL_3:.*]] = llvm.load %[[VAL_1]] : !llvm.ptr<!fixedpt.fixedPt<4, -5, "s">>
-// CHECK-MLIR:           %[[VAL_4:.*]] = approx.variable %[[VAL_3]] : <4, -5, "s">
+// CHECK-MLIR:           %[[VAL_3:.*]] = llvm.load %[[VAL_1]] : !llvm.ptr<!fixedpt.fixedPt<4, -5, s>>
+// CHECK-MLIR:           %[[VAL_4:.*]] = approx.variable %[[VAL_3]] : <4, -5, s>
 // CHECK-MLIR:           %[[VAL_5:.*]] = approx.generic "sin"(%[[VAL_4]])
 // CHECK-MLIR:           %[[VAL_6:.*]] = approx.generic "pi"()
 // CHECK-MLIR:           %[[VAL_7:.*]] = approx.generic "add"(%[[VAL_5]], %[[VAL_6]])
-// CHECK-MLIR:           %[[VAL_8:.*]] = approx.evaluate auto_select of %[[VAL_7]] as <2, -1, "u">
-// CHECK-MLIR:           llvm.store %[[VAL_8]], %[[VAL_0]] : !llvm.ptr<!fixedpt.fixedPt<2, -1, "u">>
+// CHECK-MLIR:           %[[VAL_8:.*]] = approx.evaluate auto_select of %[[VAL_7]] as <2, -1, u>
+// CHECK-MLIR:           llvm.store %[[VAL_8]], %[[VAL_0]] : !llvm.ptr<!fixedpt.fixedPt<2, -1, u>>
 // CHECK-MLIR:           return %[[VAL_2]] : i8
 // CHECK-MLIR:         }
 auto test(archgenlib::FixedNumber<archgenlib::FixedFormat<4, -5, signed>> x) {
@@ -54,15 +54,15 @@ auto test(archgenlib::FixedNumber<archgenlib::FixedFormat<4, -5, signed>> x) {
 // CHECK-LLVMIR-NEXT:    ret void
 //
 // CHECK-MLIR-LABEL:   func.func public @_ZN10archgenlib6detail12evaluateImplINS_11FixedNumberINS_11FixedFormatILi2ELin1EjEEEELi0ENS_5AddOpINS_5SinOpINS_8VariableINS2_INS3_ILi4ELin5EiEEEELm0EEEEESC_EEJSA_EEEvRT_DpRT2_(
-// CHECK-MLIR-SAME:                                                                                                                                                                                                       %[[VAL_0:.*]]: !llvm.ptr<!fixedpt.fixedPt<2, -1, "u">>,
-// CHECK-MLIR-SAME:                                                                                                                                                                                                       %[[VAL_1:.*]]: !llvm.ptr<!fixedpt.fixedPt<4, -5, "s">>) -> i8 {
+// CHECK-MLIR-SAME:                                                                                                                                                                                                       %[[VAL_0:.*]]: !llvm.ptr<!fixedpt.fixedPt<2, -1, u>>,
+// CHECK-MLIR-SAME:                                                                                                                                                                                                       %[[VAL_1:.*]]: !llvm.ptr<!fixedpt.fixedPt<4, -5, s>>) -> i8 {
 // CHECK-MLIR:           %[[VAL_2:.*]] = arith.constant 0 : i8
-// CHECK-MLIR:           %[[VAL_3:.*]] = llvm.load %[[VAL_1]] : !llvm.ptr<!fixedpt.fixedPt<4, -5, "s">>
-// CHECK-MLIR:           %[[VAL_4:.*]] = approx.variable %[[VAL_3]] : <4, -5, "s">
+// CHECK-MLIR:           %[[VAL_3:.*]] = llvm.load %[[VAL_1]] : !llvm.ptr<!fixedpt.fixedPt<4, -5, s>>
+// CHECK-MLIR:           %[[VAL_4:.*]] = approx.variable %[[VAL_3]] : <4, -5, s>
 // CHECK-MLIR:           %[[VAL_5:.*]] = approx.generic "sin"(%[[VAL_4]])
 // CHECK-MLIR:           %[[VAL_6:.*]] = approx.generic "add"(%[[VAL_5]], %[[VAL_5]])
-// CHECK-MLIR:           %[[VAL_7:.*]] = approx.evaluate auto_select of %[[VAL_6]] as <2, -1, "u">
-// CHECK-MLIR:           llvm.store %[[VAL_7]], %[[VAL_0]] : !llvm.ptr<!fixedpt.fixedPt<2, -1, "u">>
+// CHECK-MLIR:           %[[VAL_7:.*]] = approx.evaluate auto_select of %[[VAL_6]] as <2, -1, u>
+// CHECK-MLIR:           llvm.store %[[VAL_7]], %[[VAL_0]] : !llvm.ptr<!fixedpt.fixedPt<2, -1, u>>
 // CHECK-MLIR:           return %[[VAL_2]] : i8
 // CHECK-MLIR:         }
 auto test2(archgenlib::FixedNumber<archgenlib::FixedFormat<4, -5, signed>> x) {
