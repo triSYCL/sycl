@@ -307,6 +307,10 @@ TEST(FixedPoint, getIntPart) {
   CheckIntPart(getUSFractSema(), 0);
   CheckIntPart(getUFractSema(), 0);
   CheckIntPart(getULFractSema(), 0);
+  CheckIntPart(getS16Neg18(), 0);
+  CheckIntPart(getU8Neg10(), 0);
+  CheckIntPart(getU8Pos4(), 0);
+  CheckIntPart(getS32Pos2(), 0);
 
   CheckIntPart(getS16Neg18(), 0);
   CheckIntPart(getU8Neg10(), 0);
@@ -321,6 +325,7 @@ TEST(FixedPoint, getIntPart) {
   CheckIntPartMin(getSFractSema(), -1);
   CheckIntPartMin(getFractSema(), -1);
   CheckIntPartMin(getLFractSema(), -1);
+  CheckIntPartMin(getS32Pos2(), -8589934592);
 
   CheckIntPartMin(getS32Pos2(), -8589934592);
 
@@ -331,6 +336,8 @@ TEST(FixedPoint, getIntPart) {
   CheckIntPartMax(getUSAccumSema(), 255);
   CheckIntPartMax(getUAccumSema(), 65535);
   CheckIntPartMax(getULAccumSema(), 4294967295);
+  CheckIntPartMax(getU8Pos4(), 255 << 4);
+  CheckIntPartMax(getS32Pos2(), 2147483647ull << 2);
 
   CheckIntPartMax(getU8Pos4(), 255 << 4);
   CheckIntPartMax(getS32Pos2(), 2147483647ull << 2);
