@@ -63,10 +63,15 @@ def FixedPtType
 def AnyFixedPt : Type<CPred<"$_self.isa<::archgen::fixedpt::FixedPtType>()">, "fixed point type",
                       "::archgen::fixedpt::FixedPtType">;
 
+class APFixedPointParameter<string desc = ""> :
+    AttrOrTypeParameter<"::llvm::APFixedPoint", desc> {
+  let comparator = "$_lhs.getSemantics() == $_rhs.getSemantics() && $_lhs == $_rhs";
+}
+
 def FixedPtAttr : FixedPt_Attr<"FixedPoint", "fixed_point"> {
   let summary = "a fixed point attribute";
 
-  let parameters = (ins "::llvm::APFixedPoint": $value);
+  let parameters = (ins APFixedPointParameter<>: $value);
   let hasCustomAssemblyFormat = true;
 } 
 

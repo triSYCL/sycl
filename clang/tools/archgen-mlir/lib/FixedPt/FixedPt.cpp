@@ -518,7 +518,7 @@ struct AddOpConstFolder : public mlir::RewritePattern {
       return mlir::failure();
     }
 
-    if (!CstSumVal.getValue().isZero()) {
+    if (!CstSumVal.getValue().isZero() || NewArgs.size() == 0) {
       // We need to create a constant op of the resulting constant
       auto CstType = FixedPtType::get(getContext(), CstSumVal.getSemantics());
       auto CstAttr = fixedpt::FixedPointAttr::get(getContext(), CstSumVal);
@@ -527,11 +527,15 @@ struct AddOpConstFolder : public mlir::RewritePattern {
               .result();
       NewArgs.push_back(CstValue);
     }
-
-    rewriter.replaceOpWithNewOp<fixedpt::AddOp>(
-        op, addOp.getResult().getType().cast<fixedpt::FixedPtType>(),
-        addOp.rounding(), NewArgs);
-
+    assert(NewArgs.size() >= 1);
+    if (NewArgs.size() == 1)
+      rewriter.replaceOpWithNewOp<fixedpt::ConvertOp>(
+          op, addOp.getResult().getType().cast<fixedpt::FixedPtType>(),
+          NewArgs[0], addOp.rounding());
+    else
+      rewriter.replaceOpWithNewOp<fixedpt::AddOp>(
+          op, addOp.getResult().getType().cast<fixedpt::FixedPtType>(),
+          addOp.rounding(), NewArgs);
     return mlir::success();
   }
 };
@@ -565,6 +569,7 @@ mlir::LogicalResult DivOp::canonicalize(DivOp op,
 
 mlir::LogicalResult ConstantOp::canonicalize(ConstantOp op,
                                              mlir::PatternRewriter &rewriter) {
+  return mlir::failure();
   auto ConstVal = op.valueAttr();
   auto ConstAPFixed = ConstVal.getValue();
   auto InitMsb = ConstAPFixed.getMsbWeight();
@@ -631,6 +636,11 @@ mlir::LogicalResult BitcastOp::canonicalize(BitcastOp op,
 
 mlir::LogicalResult ConvertOp::canonicalize(ConvertOp op,
                                             mlir::PatternRewriter &rewriter) {
+  FixedPtType outTy = op.result().getType().cast<FixedPtType>();
+  if (op.input().getType() == outTy) {
+    rewriter.replaceOp(op, op.input());
+    return mlir::success();
+  }
   mlir::Operation *opAbove = op.input().getDefiningOp();
   if (!opAbove)
     return mlir::failure();
@@ -651,6 +661,14 @@ mlir::LogicalResult ConvertOp::canonicalize(ConvertOp op,
         rounding = getCommonRoundingMod(rounding, RO.getRoundingMode());
       op.setRoundingMode(rounding);
     });
+    return mlir::success();
+  }
+  if (ConstantOp cstOp = llvm::dyn_cast<fixedpt::ConstantOp>(opAbove)) {
+    llvm::APFixedPoint newVal =
+        cstOp.valueAttr().getValue().convert(outTy.getFixedPointSemantics());
+    rewriter.replaceOpWithNewOp<ConstantOp>(
+        op, outTy,
+        FixedPointAttr::get(rewriter.getContext(), std::move(newVal)));
     return mlir::success();
   }
   return mlir::failure();

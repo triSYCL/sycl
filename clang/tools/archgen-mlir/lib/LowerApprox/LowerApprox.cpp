@@ -352,6 +352,7 @@ struct LowerApprox {
     int printId = 0;
     rewriter.setInsertionPointAfterValue(output);
     mlir::Value expr = getConstantFromCoef(coefs.back());
+    int idx = flopocoApprox.getDegree();
     for (flopoco::FixConstant *flopocoCoef : llvm::reverse(coefs.drop_back())) {
       mlir::Value coef = getConstantFromCoef(flopocoCoef);
       fixedpt::FixedPtType mulType = inputType.getCommonMulType(
@@ -369,6 +370,7 @@ struct LowerApprox {
                                              fixedpt::RoundingMode::zero,
                                              mlir::ValueRange{expr, coef});
       // emitPrintCall(expr, printId++);
+      idx--;
     }
 
     /// This should not happened unless the result is a constant
