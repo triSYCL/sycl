@@ -26,6 +26,7 @@
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Intrinsics.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/SYCL/PrepareSYCLOpt.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
@@ -148,7 +149,7 @@ struct PrepareSYCLOptState {
   struct UnwrapperVisitor : public llvm::InstVisitor<UnwrapperVisitor> {
     void visitCallInst(CallInst &I) {
       auto *ParentF = I.getFunction();
-      auto *F = I.getCalledFunction();
+      auto *F = cast<Function>(getUnderlyingObject(I.getCalledOperand()));
       if (!F->hasFnAttribute("fpga.propertywrapper"))
         return;
       // We have a property wrapper.
@@ -230,12 +231,55 @@ struct PrepareSYCLOptState {
     }
   }
 
+  /// Transform calls on casted functions into calls on functions with casted
+  /// arguments, because calls on casted functions are not inlined and the Vitis
+  /// backend has issues with call on casted functions.
+  void removeCallInstCasts(llvm::Module *M) {
+    SmallVector<Instruction *> ToDelete;
+    for (auto &F : M->functions())
+      for (User *FU : F.users())
+        if (auto *BC = dyn_cast<BitCastOperator>(FU))
+          for (User *U : BC->users())
+            if (auto *CB = dyn_cast<CallBase>(U))
+              if (CB->use_empty() &&
+                  llvm::all_of(F.getFunctionType()->params(),
+                               [](Type *Ty) { return Ty->isPointerTy(); }) &&
+                  llvm::all_of(CB->operand_values(), [](Value *v) {
+                    return v->getType()->isPointerTy();
+                  })) {
+                SmallVector<Value *> args;
+
+                /// Emit casts for all arguments that need them
+                for (unsigned idx = 0;
+                     idx < F.getFunctionType()->getNumParams(); idx++) {
+                  if (F.getFunctionType()->getParamType(idx) ==
+                      CB->getOperand(idx)->getType()) {
+                    args.push_back(CB->getOperand(idx));
+                    continue;
+                  }
+                  auto *cast = llvm::BitCastInst::CreatePointerCast(
+                      CB->getOperand(idx),
+                      F.getFunctionType()->getParamType(idx));
+                  cast->insertBefore(CB);
+                  args.push_back(cast);
+                }
+
+                /// Replace the call
+                CallInst *newCB = CallInst::Create(&F, args);
+                newCB->insertBefore(CB);
+                ToDelete.push_back(CB);
+              }
+    for (auto *I : ToDelete)
+      I->eraseFromParent();
+  }
+
   bool runOnModule(Module &M) {
     // When using the HLS flow instead of SPIR default
     bool SyclHLSFlow = Triple(M.getTargetTriple()).isXilinxHLS();
     unwrapFPGAProperties(M);
     turnNonKernelsIntoPrivate(M);
     lowerMemIntrinsic(M);
+    removeCallInstCasts(&M);
     if (SyclHLSFlow) {
       setHLSCallingConvention(M);
       signalUnsupportedSPIRBuiltins(M);

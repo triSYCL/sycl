@@ -24,9 +24,9 @@ cl::opt<bool>
                      cl::desc("try to lower memory intrinsics to their "
                               "underlying LLVM IR types and not i8"));
 
-cl::opt<int> RequestedUnrollCount(
-    "lower-mem-intr-unroll-count", cl::Hidden,
-    cl::desc("number of unroll requested for the generated loops"));
+cl::opt<bool> RequestedUnrollCount(
+    "lower-mem-intr-full-unroll", cl::Hidden,
+    cl::desc("add full unroll annotations to generated loops"));
 
 Value *Skip1BitCast(Value *V) {
   assert(V->getType()->isPointerTy());
@@ -39,16 +39,15 @@ Value *Skip1BitCast(Value *V) {
 }
 
 void maybeAddUnrollAnnotation(BranchInst *Br) {
-  if (RequestedUnrollCount > 0)
-    Br->setMetadata(
-        LLVMContext::MD_loop,
-        MDNode::get(
-            Br->getContext(),
-            {
-                MDString::get(Br->getContext(), "llvm.loop.unroll.count"),
-                ConstantAsMetadata::get(ConstantInt::get(
-                    Type::getInt32Ty(Br->getContext()), RequestedUnrollCount)),
-            }));
+  if (RequestedUnrollCount > 0) {
+    MDNode *MD =
+        MDNode::get(Br->getContext(),
+                    {MDString::get(Br->getContext(), "llvm.loop.unroll.full")});
+
+    MDNode *LoopID = MDNode::getDistinct(Br->getContext(), {nullptr, MD});
+    LoopID->replaceOperandWith(0, LoopID);
+    Br->setMetadata(LLVMContext::MD_loop, LoopID);
+  }
 }
 
 /// Choose the LLVM type that should be used for a memory operation on Ptr1 and

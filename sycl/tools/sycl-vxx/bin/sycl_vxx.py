@@ -338,7 +338,7 @@ class VitisCompilationDriver:
             self.tmpdir /
             f"{outstem}-kernels-prepared.ll"
         )
-        opt_options = ["-S", "--sroa-vxx-conservative", "--lower-mem-intr-to-llvm-type", "--lower-mem-intr-unroll-count=1", "--unroll-only-when-forced"]
+        opt_options = ["-S", "--sroa-vxx-conservative", "--lower-mem-intr-to-llvm-type", "--lower-mem-intr-full-unroll", "--unroll-only-when-forced"]
         opt_options.extend(VXX_PassPipeline)
         opt_options.extend(self.vitis_version.get_correct_opt_args())
         opt_options.extend(["-inSPIRation", "-o", f"{prepared_bc}"])
@@ -394,7 +394,8 @@ class VitisCompilationDriver:
                            "--sycl-kernel-propgen-output", f"{kernel_prop}"]
         kernel_prop_opt.extend(self.vitis_version.get_correct_opt_args())
         opt_options = [
-            "--lower-delayed-sycl-metadata", "-lower-sycl-metadata", "-globaldce",
+            "--lower-mem-intr-to-llvm-type", "--lower-mem-intr-full-unroll", "--lower-delayed-sycl-metadata",
+            "-lower-sycl-metadata", "-globaldce",
             "--sycl-prepare-after-O3", "-S", "-preparesycl", "-loop-unroll", "--unroll-only-when-forced",
             *kernel_prop_opt,
             "-globaldce",
