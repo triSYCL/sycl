@@ -7,10 +7,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "CommandObjectTraceStartIntelPT.h"
-
 #include "TraceIntelPT.h"
 #include "TraceIntelPTConstants.h"
 #include "lldb/Host/OptionParser.h"
+#include "lldb/Interpreter/CommandOptionArgumentTable.h"
 #include "lldb/Target/Process.h"
 #include "lldb/Target/Trace.h"
 

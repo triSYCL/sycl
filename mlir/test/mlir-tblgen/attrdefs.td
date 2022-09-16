@@ -31,9 +31,9 @@ include "mlir/IR/OpBase.td"
 // DEF-NEXT: .Case(::test::IndexAttr::getMnemonic()
 // DEF-NEXT:   value = ::test::IndexAttr::parse(parser, type);
 // DEF-NEXT:   return ::mlir::success(!!value);
-// DEF: .Default([&](llvm::StringRef keyword, 
+// DEF: .Default([&](llvm::StringRef keyword,
 // DEF-NEXT:   *mnemonic = keyword;
-// DEF-NEXT:   return llvm::None; 
+// DEF-NEXT:   return llvm::None;
 
 def Test_Dialect: Dialect {
 // DECL-NOT: TestDialect
@@ -77,11 +77,12 @@ def B_CompoundAttrA : TestAttr<"CompoundA"> {
 // DECL: int getWidthOfSomething() const;
 // DECL: ::test::SimpleTypeA getExampleTdType() const;
 // DECL: ::llvm::APFloat getApFloat() const;
+// DECL: ::mlir::Type getInner() const;
 
 // Check that AttributeSelfTypeParameter is handled properly.
 // DEF-LABEL: struct CompoundAAttrStorage
 // DEF: CompoundAAttrStorage(
-// DEF-SAME: : ::mlir::AttributeStorage(inner),
+// DEF-SAME: inner(inner)
 
 // DEF: bool operator==(const KeyTy &tblgenKey) const {
 // DEF-NEXT: return
@@ -89,14 +90,14 @@ def B_CompoundAttrA : TestAttr<"CompoundA"> {
 // DEF-SAME: (exampleTdType == std::get<1>(tblgenKey)) &&
 // DEF-SAME: (apFloat.bitwiseIsEqual(std::get<2>(tblgenKey))) &&
 // DEF-SAME: (dims == std::get<3>(tblgenKey)) &&
-// DEF-SAME: (getType() == std::get<4>(tblgenKey));
+// DEF-SAME: (inner == std::get<4>(tblgenKey));
 
 // DEF: static CompoundAAttrStorage *construct
 // DEF: return new (allocator.allocate<CompoundAAttrStorage>())
 // DEF-SAME: CompoundAAttrStorage(widthOfSomething, exampleTdType, apFloat, dims, inner);
 
 // DEF: ::mlir::Type CompoundAAttr::getInner() const {
-// DEF-NEXT: return getImpl()->getType().cast<::mlir::Type>();
+// DEF-NEXT: return getImpl()->inner;
 }
 
 def C_IndexAttr : TestAttr<"Index"> {
@@ -127,18 +128,6 @@ def D_SingleParameterAttr : TestAttr<"SingleParameter"> {
 // DECL-SAME:  detail::SingleParameterAttrStorage
 }
 
-// An attribute testing AttributeSelfTypeParameter.
-def E_AttrWithTypeBuilder : TestAttr<"AttrWithTypeBuilder"> {
-  let mnemonic = "attr_with_type_builder";
-  let parameters = (ins "::mlir::IntegerAttr":$attr);
-  let typeBuilder = "$_attr.getType()";
-  let hasCustomAssemblyFormat = 1;
-}
-
-// DEF-LABEL: struct AttrWithTypeBuilderAttrStorage
-// DEF: AttrWithTypeBuilderAttrStorage(::mlir::IntegerAttr attr)
-// DEF-SAME: : ::mlir::AttributeStorage(attr.getType()), attr(attr)
-
 def F_ParamWithAccessorTypeAttr : TestAttr<"ParamWithAccessorType"> {
   let parameters = (ins AttrParameter<"std::string", "", "StringRef">:$param);
 }
@@ -148,3 +137,33 @@ def F_ParamWithAccessorTypeAttr : TestAttr<"ParamWithAccessorType"> {
 // DEF: ParamWithAccessorTypeAttrStorage
 // DEF: ParamWithAccessorTypeAttrStorage(std::string param)
 // DEF: StringRef ParamWithAccessorTypeAttr::getParam()
+
+def G_BuilderWithReturnTypeAttr : TestAttr<"BuilderWithReturnType"> {
+  let parameters = (ins "int":$a);
+  let genVerifyDecl = 1;
+  let builders = [AttrBuilder<(ins), [{ return {}; }], "::mlir::Attribute">];
+}
+
+// DECL-LABEL: class BuilderWithReturnTypeAttr
+// DECL: ::mlir::Attribute get(
+// DECL: ::mlir::Attribute getChecked(
+
+def H_TestExtraClassAttr : TestAttr<"TestExtraClass"> {
+  let extraClassDeclaration = [{
+    /// Test Method
+    static int getFoo(int i);
+  }];
+  let extraClassDefinition = [{
+    int $cppClass::getFoo(int i) {
+      return i+1;
+    }
+  }];
+}
+
+// DECL-LABEL: TestExtraClassAttr : public ::mlir::Attribute
+// DECL: /// Test Method
+// DECL-NEXT: static int getFoo(int i);
+
+// DEF-LABEL: int TestExtraClassAttr::getFoo(int i) {
+// DEF: return i+1;
+// DEF-NEXT: }

@@ -25,6 +25,9 @@ add_header_library(
   DEPENDS
     libc.src.__support.common
     libc.src.__support.CPP.atomic
+    libc.src.__support.CPP.optional
+    libc.src.__support.CPP.string_view
+    libc.src.__support.CPP.stringstream
 )
 
 if(TARGET libc.src.__support.threads.${LIBC_TARGET_OS}.thread)
@@ -33,6 +36,10 @@ if(TARGET libc.src.__support.threads.${LIBC_TARGET_OS}.thread)
     SRCS
       thread.cpp
     DEPENDS
+      .mutex
       .${LIBC_TARGET_OS}.thread
+      libc.src.__support.fixedvector
+      libc.src.__support.CPP.array
+      libc.src.__support.CPP.optional
   )
 endif()

@@ -619,8 +619,10 @@ pi_result getInfo<const char *>(size_t param_value_size, void *param_value,
 } // anonymous namespace
 
 /// ------ Error handling, matching OpenCL plugin semantics.
-__SYCL_INLINE_NAMESPACE(cl) {
-namespace sycl::detail::pi {
+namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
+namespace detail {
+namespace pi {
 
 std::ostream &log() { return std::cerr; }
 
@@ -647,8 +649,10 @@ void assertion(bool Condition, const char *Message) {
   std::terminate();
 }
 
-}  // namespace sycl::detail::pi
-} // __SYCL_INLINE_NAMESPACE(cl)
+}
+}
+}
+}
 
 /// Check that we always use the same thread to call this function
 void assert_single_thread() {

@@ -28,20 +28,15 @@ using namespace mlir;
 
 /// Returns the boolean value under the hood if the given `boolAttr` is a scalar
 /// or splat vector bool constant.
-static Optional<bool> getScalarOrSplatBoolAttr(Attribute boolAttr) {
-  if (!boolAttr)
+static Optional<bool> getScalarOrSplatBoolAttr(Attribute attr) {
+  if (!attr)
     return llvm::None;
 
-  auto type = boolAttr.getType();
-  if (type.isInteger(1)) {
-    auto attr = boolAttr.cast<BoolAttr>();
-    return attr.getValue();
-  }
-  if (auto vecType = type.cast<VectorType>()) {
-    if (vecType.getElementType().isInteger(1))
-      if (auto attr = boolAttr.dyn_cast<SplatElementsAttr>())
-        return attr.getSplatValue<bool>();
-  }
+  if (auto boolAttr = attr.dyn_cast<BoolAttr>())
+    return boolAttr.getValue();
+  if (auto splatAttr = attr.dyn_cast<SplatElementsAttr>())
+    if (splatAttr.getElementType().isInteger(1))
+      return splatAttr.getSplatValue<bool>();
   return llvm::None;
 }
 
@@ -131,7 +126,21 @@ void spirv::BitcastOp::getCanonicalizationPatterns(RewritePatternSet &results,
 //===----------------------------------------------------------------------===//
 
 OpFoldResult spirv::CompositeExtractOp::fold(ArrayRef<Attribute> operands) {
-  assert(operands.size() == 1 && "spv.CompositeExtract expects one operand");
+  if (auto insertOp = composite().getDefiningOp<spirv::CompositeInsertOp>()) {
+    if (indices() == insertOp.indices())
+      return insertOp.object();
+  }
+
+  if (auto constructOp =
+          composite().getDefiningOp<spirv::CompositeConstructOp>()) {
+    auto type = constructOp.getType().cast<spirv::CompositeType>();
+    if (indices().size() == 1 &&
+        constructOp.constituents().size() == type.getNumElements()) {
+      auto i = indices().begin()->cast<IntegerAttr>();
+      return constructOp.constituents()[i.getValue().getSExtValue()];
+    }
+  }
+
   auto indexVector =
       llvm::to_vector<8>(llvm::map_range(indices(), [](Attribute attr) {
         return static_cast<unsigned>(attr.cast<IntegerAttr>().getInt());

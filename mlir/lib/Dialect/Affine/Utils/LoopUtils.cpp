@@ -196,10 +196,9 @@ static AffineForOp generateShiftedLoop(
   BlockAndValueMapping operandMap;
 
   auto bodyBuilder = OpBuilder::atBlockTerminator(loopChunk.getBody());
-  for (auto it = opGroupQueue.begin() + offset, e = opGroupQueue.end(); it != e;
-       ++it) {
-    uint64_t shift = it->first;
-    auto ops = it->second;
+  for (const auto &it : llvm::drop_begin(opGroupQueue, offset)) {
+    uint64_t shift = it.first;
+    auto ops = it.second;
     // All 'same shift' operations get added with their operands being
     // remapped to results of cloned operations, and their IV used remapped.
     // Generate the remapping if the shift is not zero: remappedIV = newIV -
@@ -1091,7 +1090,8 @@ static LogicalResult generateCleanupLoopForUnroll(AffineForOp forOp,
 /// is successfully unrolled.
 LogicalResult mlir::loopUnrollByFactor(
     AffineForOp forOp, uint64_t unrollFactor,
-    function_ref<void(unsigned, Operation *, OpBuilder)> annotateFn) {
+    function_ref<void(unsigned, Operation *, OpBuilder)> annotateFn,
+    bool cleanUpUnroll) {
   assert(unrollFactor > 0 && "unroll factor should be positive");
 
   Optional<uint64_t> mayBeConstantTripCount = getConstantTripCount(forOp);
@@ -1107,9 +1107,14 @@ LogicalResult mlir::loopUnrollByFactor(
     return success();
 
   // If the trip count is lower than the unroll factor, no unrolled body.
-  // TODO: option to specify cleanup loop unrolling.
-  if (mayBeConstantTripCount && *mayBeConstantTripCount < unrollFactor)
+  if (mayBeConstantTripCount && *mayBeConstantTripCount < unrollFactor) {
+    if (cleanUpUnroll) {
+      // Unroll the cleanup loop if cleanUpUnroll is specified.
+      return loopUnrollFull(forOp);
+    }
+
     return failure();
+  }
 
   // Generate the cleanup loop if trip count isn't a multiple of unrollFactor.
   if (getLargestDivisorOfTripCount(forOp) % unrollFactor != 0) {
@@ -1120,6 +1125,9 @@ LogicalResult mlir::loopUnrollByFactor(
     if (forOp.getLowerBoundMap().getNumResults() != 1 ||
         forOp.getUpperBoundMap().getNumResults() != 1)
       return failure();
+    if (cleanUpUnroll)
+      // Force unroll including cleanup loop
+      return loopUnrollFull(forOp);
     if (failed(generateCleanupLoopForUnroll(forOp, unrollFactor)))
       assert(false && "cleanup loop lower bound map for single result lower "
                       "and upper bound maps can always be determined");

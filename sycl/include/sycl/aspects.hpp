@@ -9,10 +9,10 @@
 
 #include <sycl/detail/defines.hpp>
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 
-enum class aspect {
+enum class __SYCL_TYPE(aspect) aspect {
   host = 0,
   cpu = 1,
   gpu = 2,
@@ -51,8 +51,9 @@ enum class aspect {
   ext_intel_gpu_hw_threads_per_eu = 33,
   ext_oneapi_cuda_async_barrier = 34,
   ext_oneapi_bfloat16 = 35,
-  ext_xilinx_single_task_only = 36,
+  ext_intel_free_memory = 36,
+  ext_xilinx_single_task_only = 37,
 };
 
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)

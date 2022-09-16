@@ -4,17 +4,10 @@
 
 transform.with_pdl_patterns {
 ^bb0(%arg0: !pdl.operation):
-  sequence %arg0 {
+  sequence %arg0 failures(propagate) {
     ^bb0(%arg1: !pdl.operation):
-      %0 = pdl_match @pdl_target in %arg1
+      %0 = transform.structured.match ops{["linalg.matmul"]} in %arg1
       transform.structured.multitile_sizes %0 { target_size = 3, dimension = 0 }
-  }
-
-  pdl.pattern @pdl_target : benefit(1) {
-    %args = operands
-    %results = types
-    %0 = operation "linalg.matmul"(%args : !pdl.range<value>) -> (%results : !pdl.range<type>)
-    rewrite %0 with "transform.dialect"
   }
 }
 
@@ -38,17 +31,10 @@ func.func @multitile_sizes_static(
 
 transform.with_pdl_patterns {
 ^bb0(%arg0: !pdl.operation):
-  sequence %arg0 {
+  sequence %arg0 failures(propagate) {
     ^bb0(%arg1: !pdl.operation):
-      %0 = pdl_match @pdl_target in %arg1
+      %0 = transform.structured.match ops{["linalg.matmul"]} in %arg1
       transform.structured.multitile_sizes %0 { target_size = 3, divisor = 2, dimension = 0 }
-  }
-
-  pdl.pattern @pdl_target : benefit(1) {
-    %args = operands
-    %results = types
-    %0 = operation "linalg.matmul"(%args : !pdl.range<value>) -> (%results : !pdl.range<type>)
-    rewrite %0 with "transform.dialect"
   }
 }
 

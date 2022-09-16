@@ -1,6 +1,6 @@
 // RUN: mlir-opt %s --sparse-compiler | \
 // RUN: mlir-cpu-runner -e entry -entry-point-result=void \
-// RUN:  -shared-libs=%mlir_integration_test_dir/libmlir_c_runner_utils%shlibext | \
+// RUN:  -shared-libs=%mlir_lib_dir/libmlir_c_runner_utils%shlibext | \
 // RUN: FileCheck %s
 
 #DCSR = #sparse_tensor.encoding<{
@@ -42,7 +42,7 @@ module {
          linalg.yield %a : f64
     } -> tensor<4x3xf64, #DCSR>
 
-    sparse_tensor.release %t : tensor<3x4xf64, #DCSC>
+    bufferization.dealloc_tensor %t : tensor<3x4xf64, #DCSC>
 
     return %0 : tensor<4x3xf64, #DCSR>
   }
@@ -111,9 +111,9 @@ module {
     }
 
     // Release resources.
-    sparse_tensor.release %a : tensor<3x4xf64, #DCSR>
-    sparse_tensor.release %0 : tensor<4x3xf64, #DCSR>
-    sparse_tensor.release %1 : tensor<4x3xf64, #DCSR>
+    bufferization.dealloc_tensor %a : tensor<3x4xf64, #DCSR>
+    bufferization.dealloc_tensor %0 : tensor<4x3xf64, #DCSR>
+    bufferization.dealloc_tensor %1 : tensor<4x3xf64, #DCSR>
 
     return
   }

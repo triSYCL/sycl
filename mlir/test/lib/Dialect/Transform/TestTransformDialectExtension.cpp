@@ -52,12 +52,12 @@ public:
   static ParseResult parse(OpAsmParser &parser, OperationState &state) {
     StringAttr message;
     OptionalParseResult result = parser.parseOptionalAttribute(message);
-    if (!result.hasValue())
+    if (!result.has_value())
       return success();
 
-    if (result.getValue().succeeded())
+    if (result.value().succeeded())
       state.addAttribute("message", message);
-    return result.getValue();
+    return result.value();
   }
 
   void print(OpAsmPrinter &printer) {
@@ -198,6 +198,16 @@ DiagnosedSilenceableFailure mlir::test::TestRemoveTestExtensionOp::apply(
   state.removeExtension<TestTransformStateExtension>();
   return DiagnosedSilenceableFailure::success();
 }
+
+DiagnosedSilenceableFailure
+mlir::test::TestReversePayloadOpsOp::apply(transform::TransformResults &results,
+                                           transform::TransformState &state) {
+  ArrayRef<Operation *> payloadOps = state.getPayloadOps(getTarget());
+  auto reversedOps = llvm::to_vector(llvm::reverse(payloadOps));
+  results.set(getResult().cast<OpResult>(), reversedOps);
+  return DiagnosedSilenceableFailure::success();
+}
+
 DiagnosedSilenceableFailure mlir::test::TestTransformOpWithRegions::apply(
     transform::TransformResults &results, transform::TransformState &state) {
   return DiagnosedSilenceableFailure::success();
@@ -222,7 +232,7 @@ DiagnosedSilenceableFailure mlir::test::TestEmitRemarkAndEraseOperandOp::apply(
     op->erase();
 
   if (getFailAfterErase())
-    return emitSilenceableError() << "silencable error";
+    return emitSilenceableError() << "silenceable error";
   return DiagnosedSilenceableFailure::success();
 }
 
@@ -295,7 +305,9 @@ class TestTransformDialectExtension
     : public transform::TransformDialectExtension<
           TestTransformDialectExtension> {
 public:
-  TestTransformDialectExtension() {
+  using Base::Base;
+
+  void init() {
     declareDependentDialect<pdl::PDLDialect>();
     registerTransformOps<TestTransformOp,
                          TestTransformUnrestrictedOpNoInterface,
