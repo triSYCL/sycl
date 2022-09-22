@@ -910,12 +910,12 @@ python3 $SYCL_HOME/llvm/buildbot/compile.py
 ```
 
 These scripts have many options which can be displayed when using the
-`--help` option. For example to configure with CUDA support, without
-treating compiler warnings as errors and producing a compiler database
-to be used by tools like LSP server like `clangd`:
+`--help` option. For example to configure with CUDA support, shared
+libraries and producing a compiler database to be used by tools like
+LSP server like `clangd`:
 
 ```bash
-python3 $SYCL_HOME/llvm/buildbot/configure.py --xrt --cuda \
+python3 $SYCL_HOME/llvm/buildbot/configure.py --xrt --cuda --shared-libs \
   --cmake-opt="-DCMAKE_EXPORT_COMPILE_COMMANDS=1"
 ```
 
