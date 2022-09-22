@@ -40,7 +40,7 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "SYCLUtils.h"
+#include "llvm/SYCL/SYCLUtils.h"
 
 using namespace llvm;
 
@@ -192,7 +192,7 @@ struct KernelPropGenState {
     J.arrayBegin();
     for (auto &F : M.functions()) {
       if (sycl::isKernelFunc(&F)) {
-        KernelProperties KProp(F, SyclHlsFlow);
+        KernelProperties KProp(F);
         J.objectBegin();
         J.attribute("name", F.getName());
         auto ExtraArgs = getExtraArgs(F);
@@ -206,10 +206,10 @@ struct KernelPropGenState {
           if (Bundle.TargetId.hasValue()) {
             StringRef Prefix;
             switch (Bundle.MemType) {
-              case KernelProperties::MemoryType::ddr:
+              case sycl::MemoryType::ddr:
               Prefix = "DDR";
               break;
-              case KernelProperties::MemoryType::hbm:
+              case sycl::MemoryType::hbm:
               Prefix = "HBM";
               break;
               default:
@@ -231,7 +231,7 @@ struct KernelPropGenState {
           /// remove them in the downgrader instead too.
           if (sycl::isPipe(&Arg))
             sycl::removePipeAnnotation(&Arg);
-          else if (KernelProperties::isArgBuffer(&Arg, SyclHlsFlow)) {
+          else if (sycl::isArgBuffer(&Arg)) {
             // This currently forces a default assignment of DDR banks to 0
             // as some platforms have different Default DDR banks and buffers
             // default to DDR Bank 0. Perhaps it is possible to query the

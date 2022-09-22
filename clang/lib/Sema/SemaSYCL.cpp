@@ -1817,7 +1817,7 @@ public:
 };
 
 static bool isSyclXilinxType(const QualType &Ty) {
-  static std::array<StringRef, 4> Namespaces = {"cl", "sycl", "ext", "xilinx"};
+  static std::array<StringRef, 4> Namespaces = {"sycl", "_V1", "ext", "xilinx"};
   llvm::SmallVector<const DeclContext *, 8> CtxStack;
   CtxStack.push_back(cast<DeclContext>(Ty->getAsTagDecl()));
   while (!isa<TranslationUnitDecl>(CtxStack.back()->getParent()))

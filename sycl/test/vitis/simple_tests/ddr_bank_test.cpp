@@ -15,7 +15,7 @@ int main() {
 
   Queue.submit([&](sycl::handler &cgh) {
     sycl::ext::oneapi::accessor_property_list PL{sycl::ext::xilinx::ddr_bank<1>};
-    // CHECK:{{.*}}:DDR[1]
+    // CHECK-DAG:{{.*}}:DDR[1]
     sycl::accessor Accessor(BufferA, cgh, sycl::write_only, PL);
     cgh.single_task<class SmallerTesta>([=]{
           for (sycl::cl_int i = 0 ; i < buf_size ; ++i)
@@ -23,7 +23,7 @@ int main() {
         });
   });
   Queue.submit([&](sycl::handler &cgh) {
-    // CHECK:{{.*}}:DDR[3]
+    // CHECK-DAG:{{.*}}:DDR[3]
     sycl::accessor Accessor(BufferB, cgh, sycl::write_only, sycl::ext::oneapi::accessor_property_list{sycl::ext::xilinx::ddr_bank<3>});
     cgh.single_task<class SmallerTestb>([=]{
           for (sycl::cl_int i = 0 ; i < buf_size ; ++i)
@@ -32,7 +32,7 @@ int main() {
   });
   Queue.submit([&](sycl::handler &cgh) {
     sycl::ext::oneapi::accessor_property_list PL{sycl::ext::xilinx::ddr_bank<0>};
-    // CHECK:{{.*}}:DDR[0]
+    // CHECK-DAG:{{.*}}:DDR[0]
     sycl::accessor Accessor(BufferC, cgh, sycl::write_only, PL);
     cgh.single_task<class SmallerTestc>([=]{
           for (sycl::cl_int i = 0 ; i < buf_size ; ++i)

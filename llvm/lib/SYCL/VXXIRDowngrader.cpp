@@ -36,7 +36,7 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "SYCLUtils.h"
+#include "llvm/SYCL/SYCLUtils.h"
 
 /// This should theoretically not be accessed from outside of the IR directory.
 /// But using it is the most reliable way to do some of the IR transformation we

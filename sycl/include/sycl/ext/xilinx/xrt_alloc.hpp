@@ -13,14 +13,17 @@
 //===----------------------------------------------------------------------===//
 
 #pragma once
+#include <sycl/detail/defines_elementary.hpp>
 
-__SYCL_INLINE_NAMESPACE(cl) {
-namespace sycl::ext::xilinx {
+namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
+namespace ext::xilinx {
 
 struct xrt_alloc : public aligned_allocator<char> {
   xrt_alloc() : aligned_allocator<char>(4096) {
   }
 };
 
+} // namespace ext::xilinx
 }
-}
+}  // namespace sycl

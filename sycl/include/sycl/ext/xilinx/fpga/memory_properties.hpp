@@ -9,10 +9,11 @@
 #ifndef SYCL_XILINX_FPGA_MEMORY_PROPERTIES_HPP
 #define SYCL_XILINX_FPGA_MEMORY_PROPERTIES_HPP
 
-#include "sycl/detail/defines.hpp"
-#include "sycl/properties/accessor_properties.hpp"
+#include <sycl/detail/defines.hpp>
+#include <sycl/properties/accessor_properties.hpp>
+#include <sycl/detail/defines_elementary.hpp>
 
-__SYCL_INLINE_NAMESPACE(cl) {
+
 
 // TODO(lforg37): [Technical Debt]: Merge properties for hbm_bank and ddr_bank
 //                                  with a template type for the type of memory
@@ -20,6 +21,7 @@ __SYCL_INLINE_NAMESPACE(cl) {
 //
 
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace ext {
 namespace xilinx {
 namespace property {
@@ -48,7 +50,7 @@ struct hbm_bank {
 } // namespace property
 
 template <typename... Ts>
-using accessor_property_list = sycl::ext::oneapi::accessor_property_list<Ts...>;
+using accessor_property_list = ::sycl::ext::oneapi::accessor_property_list<Ts...>;
 
 template <int A> inline constexpr property::ddr_bank::instance<A> ddr_bank;
 
@@ -76,7 +78,8 @@ struct IsCompileTimePropertyInstance<ext::xilinx::property::hbm_bank::instance<I
     : std::true_type {};
 } // namespace detail
 
+}
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)
+
 
 #endif

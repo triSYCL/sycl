@@ -11,6 +11,9 @@
 //
 // ===---------------------------------------------------------------------===//
 
+#ifndef LLVM_SYCL_SYCLUTILS_H
+#define LLVM_SYCL_SYCLUTILS_H
+
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
@@ -31,6 +34,9 @@ void replaceFunction(Module &M, StringRef OldN, StringRef NewN);
 
 /// Test if a function is a kernel
 bool isKernelFunc(const Function *F);
+
+/// Test if the argument is a buffer in the OpenCL sense
+bool isArgBuffer(Argument *Arg);
 
 /// Add annotation such that F is considered a Kernel by our passes and
 /// Vitis's HLS
@@ -68,5 +74,20 @@ void removePipeAnnotation(Argument *Arg);
 /// Rename arguments to comply with Vitis's HLS
 void giveNameToArguments(Function &F);
 
+enum struct MemoryType { unspecified, ddr, hbm };
+
+struct MemBankSpec {
+  MemoryType MemType;
+  unsigned BankID;
+  operator bool() const { return MemType != MemoryType::unspecified; }
+};
+
+void annotateMemoryBank(Argument *Arg, MemBankSpec Val);
+void removeMemoryBankAnnotation(Argument *Arg);
+
+MemBankSpec getMemoryBank(Argument *Arg);
+
 } // namespace sycl
 } // namespace llvm
+
+#endif
