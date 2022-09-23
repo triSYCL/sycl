@@ -38,8 +38,8 @@ python $SYCL_HOME/llvm/buildbot/compile.py --build-target vitis-ip-compiler
 ## Environnement Setup
 
 The requirements for environment setup is that there is a `vitis_hls` in
-the PATH and the libraries shipped with Vitis are in the
-LD_LIBRARY_PATH.
+the `PATH` and the libraries shipped with Vitis are in the
+`LD_LIBRARY_PATH`.
 
 if you already have a setup for this you can use it.
 
@@ -63,7 +63,9 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$XILINX_VITIS_HLS/lib/lnx64.o:$SYCL_HOME
 
 ### Small examples
 
-create a file named `vitis_ip.cpp` containing
+The minimal file
+`$SYCL_HOME/llvm/sycl/test/vitis/simple_tests/vitis_ip_export.cpp`
+containing
 
 ```cpp
 // __VITIS_KERNEL marks the top-level kernel function
@@ -71,20 +73,23 @@ __VITIS_KERNEL int test(int a, int b) {
   return a + b;
 }
 ```
+can be used as an example.
 
-then, to compile this file, use
+It can be compiled with
 
 ```bash
 # Be sure to use the right clang++
-SYCL_VXX_KEEP_CLUTTER=1 $SYCL_BIN_DIR/clang++ --target=vitis_ip-xilinx vitis_ip.cpp --vitis-ip-part=xczu9eg-ffvb1156-2-e -o adder.zip
+SYCL_VXX_KEEP_CLUTTER=1 $SYCL_BIN_DIR/clang++ --target=vitis_ip-xilinx $SYCL_HOME/llvm/sycl/test/vitis/simple_tests/vitis_ip_export.cpp --vitis-ip-part=xcu200-fsgd2104-2-e -o adder.zip
 ```
 
 where `--target=vitis_ip-xilinx` specifies that we are targeting Vitis
-IP blocks and `--vitis-ip-part=xc7z020clg484-1` specifies for example
-the part `xc7z020clg484-1` which is used in the ZYNQ-7 ZC702
-Evaluation Board, which can obviously replaced by what you are really
-working with. But be careful to use only a part you have a license
-for, otherwise it will fail.
+IP blocks and `--vitis-ip-part=xcu200-fsgd2104-2-e` specifies for
+example the part `xcu200-fsgd2104-2-e` which is used in the Alveo U200
+Board, which can obviously replaced by what you are really working
+with. But be careful to use only a part you have a license for,
+otherwise it will fail. Look for example at
+`/opt/xilinx/Vivado/2022.1/data/parts/installed_devices.txt` to have
+an idea of what is available.
 
 The output is a Vivado IP `zip` archive that can be loaded into Vivado
 when making a block design.
@@ -92,4 +97,4 @@ when making a block design.
 
 ### Further Reading
 
-see documentation about the SYCL flow [here](GettingStartedXilinxFPGA.md)
+See documentation about the SYCL flow [here](GettingStartedXilinxFPGA.md).

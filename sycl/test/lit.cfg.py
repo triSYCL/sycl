@@ -198,10 +198,10 @@ else:
     run_if_hw_emu="echo"
     run_if_sw_emu="echo"
     if "_hw-" in triple:
-        timeout = 10800 # 3h
+        timeout = 32400 # 9h
         run_if_hw=""
     if "_hw_emu" in triple:
-        timeout = 3600 # 1h
+        timeout = 7200 # 2h
         run_if_hw_emu=""
     if "_sw_emu" in triple:
         timeout = 1200 # 20min
