@@ -474,8 +474,6 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
   } nd;
 
   native_type &get_native() { return nd.buffer_; }
-
-  ~_pi_mem() { assert(pending_cmds.cmds.empty()); }
 };
 
 /// The Pi calls are never queued into the _pi_queue
