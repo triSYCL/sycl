@@ -1,4 +1,4 @@
-//===- LowerApprox.cpp - Replace approx by its approximation ---------------===//
+//===- LowerApprox.cpp - Replace approx by its approximation --------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -26,6 +26,9 @@
 #include "archgen/Approx/Passes.h"
 
 #include "flopoco/FixFunctions/BasicPolyApprox.hpp"
+#include "flopoco/FixFunctions/FixHorner.hpp"
+#include "flopoco/Targets/VirtexUltrascalePlus.hpp"
+#include "flopoco/report.hpp"
 
 using namespace archgen;
 namespace func = mlir::func;
@@ -100,7 +103,7 @@ struct LowerApprox {
     return mlir::success();
   }
 
-  /// Lookup a symbol of a specific type in sollya 
+  /// Lookup a symbol of a specific type in sollya
   template <typename T> T *lookupSollyaSymbol(llvm::StringRef symbol) {
     return (T *)sollyaLib.getAddressOfSymbol(symbol.data());
   }
@@ -156,7 +159,7 @@ struct LowerApprox {
 
           /// We are going to start editing so set where we want to write
           rewriter.setInsertionPoint(op);
-          
+
           /// get the fixe point input to the expression
           mlir::Value variable = op->getOperand(0);
           fixedpt::FixedPtType oldType =
@@ -208,9 +211,9 @@ struct LowerApprox {
 
           /// build the multiply
           return rewriter
-              .create<approx::GenericOp>(op->getLoc(),
-                                 mlir::ValueRange{op.output(), scalingFactor},
-                                 "mul")
+              .create<approx::GenericOp>(
+                  op->getLoc(), mlir::ValueRange{op.output(), scalingFactor},
+                  "mul")
               .output();
         });
   }
@@ -307,8 +310,8 @@ struct LowerApprox {
                              .result();
     intVal = rewriter.create<arith::ExtUIOp>(loc, rewriter.getI32Type(), intVal)
                  .getResult();
-    rewriter.create<LLVM::CallOp>(loc, printer,
-                                  mlir::ValueRange{intVal, bitwidthConst, idConst});
+    rewriter.create<LLVM::CallOp>(
+        loc, printer, mlir::ValueRange{intVal, bitwidthConst, idConst});
   }
 
   void run(approx::EvaluateOp evaluateOp) {
@@ -318,8 +321,10 @@ struct LowerApprox {
 
     mlir::Value output = evaluateOp.getResult();
     mlir::Value input = findInputValue(evaluateOp);
-    fixedpt::FixedPtType outputType = output.getType().cast<fixedpt::FixedPtType>();
-    fixedpt::FixedPtType inputType = input.getType().cast<fixedpt::FixedPtType>();
+    fixedpt::FixedPtType outputType =
+        output.getType().cast<fixedpt::FixedPtType>();
+    fixedpt::FixedPtType inputType =
+        input.getType().cast<fixedpt::FixedPtType>();
 
     sollya_obj_t sollyaTree = buildSollyaTree(evaluateOp);
     double accuracy = std::pow(2.0, outputType.getLsb() - 1);
@@ -328,10 +333,14 @@ struct LowerApprox {
     sollya_lib_printf("sollya: %b\n", sollyaTree);
     printFormat("input", inputType);
     printFormat("output", outputType);
-    llvm::outs() << "accuracy="  << accuracy << "\n";
+    llvm::outs() << "accuracy=" << accuracy << "\n";
 
     flopoco::BasicPolyApprox flopocoApprox(sollyaTree, accuracy, 0,
                                            inputType.isSigned());
+    flopoco::VirtexUltrascalePlus flopocoTarget;
+    flopoco::FixHornerArchitecture horner(
+        &flopocoTarget, inputType.getLsb(), outputType.getMsb(),
+        outputType.getLsb(), {&flopocoApprox});
 
     /// Sollya loves to change the color and not reset them
     llvm::errs().resetColor();
@@ -341,10 +350,10 @@ struct LowerApprox {
 
     assert(flopocoApprox.getDegree() > 0);
 
-    llvm::SmallVector<flopoco::FixConstant*> coefsStorage;
+    llvm::SmallVector<flopoco::FixConstant *> coefsStorage;
     for (int i = 0; i <= flopocoApprox.getDegree(); i++)
       coefsStorage.push_back(flopocoApprox.getCoeff(i));
-    llvm::ArrayRef<flopoco::FixConstant*> coefs{coefsStorage};
+    llvm::ArrayRef<flopoco::FixConstant *> coefs{coefsStorage};
 
     printPolynom(llvm::outs(), coefs);
 
@@ -352,22 +361,27 @@ struct LowerApprox {
     int printId = 0;
     rewriter.setInsertionPointAfterValue(output);
     mlir::Value expr = getConstantFromCoef(coefs.back());
-    int idx = flopocoApprox.getDegree();
+    int idx = horner.degree - 1;
     for (flopoco::FixConstant *flopocoCoef : llvm::reverse(coefs.drop_back())) {
       mlir::Value coef = getConstantFromCoef(flopocoCoef);
+      mlir::Value truncatedIn = rewriter.create<fixedpt::ConvertOp>(
+          loc,
+          fixedpt::FixedPtType::get(ctx, inputType.getMsb(), horner.wcYLSB[idx],
+                                    inputType.isSigned()),
+          input, fixedpt::RoundingMode::zero);
       fixedpt::FixedPtType mulType = inputType.getCommonMulType(
           expr.getType().cast<fixedpt::FixedPtType>());
-      expr = rewriter.create<fixedpt::MulOp>(loc, mulType,
-                                             fixedpt::RoundingMode::zero,
-                                             mlir::ValueRange{expr, input});
+      expr = rewriter.create<fixedpt::MulOp>(
+          loc, mulType, fixedpt::RoundingMode::zero,
+          mlir::ValueRange{expr, truncatedIn});
       // emitPrintCall(expr, printId++);
-      fixedpt::FixedPtType addType =
-          mulType.getCommonAddType(coef.getType().cast<fixedpt::FixedPtType>());
-      // fixedpt::FixedPtType addType = fixedpt::FixedPtType::get(
-      //     ctx, horner.wcSumMSB[idx], horner.wcSumLSB[idx],
-      //     !horner.wcSumSign[idx]);
+      // fixedpt::FixedPtType addType =
+      //     mulType.getCommonAddType(coef.getType().cast<fixedpt::FixedPtType>());
+      fixedpt::FixedPtType addType = fixedpt::FixedPtType::get(
+          ctx, horner.wcSumMSB[idx], horner.wcSumLSB[idx],
+          !horner.wcSumSign[idx]);
       expr = rewriter.create<fixedpt::AddOp>(loc, addType,
-                                             fixedpt::RoundingMode::zero,
+                                             fixedpt::RoundingMode::nearest,
                                              mlir::ValueRange{expr, coef});
       // emitPrintCall(expr, printId++);
       idx--;
@@ -380,14 +394,14 @@ struct LowerApprox {
     output.replaceAllUsesWith(expr);
 
     /// Remove the old approx tree
-    llvm::SmallVector<mlir::Operation*> outdatedApproxExpr;
+    llvm::SmallVector<mlir::Operation *> outdatedApproxExpr;
     approxTreeVisitor(evaluateOp, [&](mlir::Operation *op) {
       /// unlink and list everything
       op->dropAllReferences();
       outdatedApproxExpr.push_back(op);
     });
     /// erase it all
-    for (auto* op : outdatedApproxExpr)
+    for (auto *op : outdatedApproxExpr)
       op->erase();
 
     expr.getParentBlock()->dump();
@@ -399,12 +413,11 @@ struct LowerApproxPass : approx::LowerApproxPassBase<LowerApproxPass> {
 };
 
 void LowerApproxPass::runOnOperation() {
+  flopoco::set_log_lvl(flopoco::LogLevel::VERBOSE);
   LowerApprox state(getOperation()->getContext());
   if (mlir::failed(state.init()))
     signalPassFailure();
-  getOperation().walk([&](approx::EvaluateOp op) {
-    state.run(op);
-  });
+  getOperation().walk([&](approx::EvaluateOp op) { state.run(op); });
 }
 
 } // namespace

@@ -264,9 +264,8 @@ public:
     mlir::IntegerType ty = v.getType().cast<mlir::IntegerType>();
 
     assert(rounding == fixedpt::RoundingMode::nearest);
-    assert(isSigned && "TODO add signed variant");
 
-    /// v = v + (v & (1 << (bitsToBeRemoved - 1)))
+    /// v = v + (1 << (bitsToBeRemoved - 1))
     llvm::APInt mask(ty.getWidth(), 1);
     mask = mask.shl(bitsToBeRemoved - 1);
 
@@ -274,10 +273,8 @@ public:
         rewriter
             .create<arith::ConstantOp>(loc, rewriter.getIntegerAttr(ty, mask))
             .getResult();
-    mlir::Value maskedVal =
-        rewriter.create<arith::AndIOp>(loc, v, maskConstant);
     mlir::Value add =
-        rewriter.create<arith::AddIOp>(loc, v, maskedVal).getResult();
+        rewriter.create<arith::AddIOp>(loc, v, maskConstant).getResult();
     return add;
   }
 
