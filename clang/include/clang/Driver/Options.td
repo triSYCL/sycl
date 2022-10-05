@@ -6336,11 +6336,14 @@ def fdefault_calling_conv_EQ : Joined<["-"], "fdefault-calling-conv=">,
 def finclude_default_header : Flag<["-"], "finclude-default-header">,
   HelpText<"Include default header file for OpenCL and HLSL">;
 def fsycl_allow_variadic_func : Flag<["-"], "fsycl-allow-variadic-func">,
-  HelpText<"Allow variadic functions in SYCL device.">;
-def fno_sycl_allow_variadic_func : Flag<["-"], "fno-sycl-allow-variadic-func">;
+  HelpText<"Allow variadic functions in SYCL device.">,
+  MarshallingInfoFlag<LangOpts<"SYCLAllowVariadicFunc">>;
 def fsycl_allow_virtual : Flag<["-"], "fsycl-allow-virtual">,
-  HelpText<"Allow virtual functions and types in SYCL device.">;
-def fno_sycl_allow_virtual : Flag<["-"], "fno-sycl-allow-virtual">;
+  HelpText<"Allow virtual functions and types in SYCL device.">,
+  MarshallingInfoFlag<LangOpts<"SYCLAllowVirtual">>;
+def fsycl_use_vxx_names : Flag<["-"], "fsycl-use-vxx-names">,
+  HelpText<"Allow virtual functions and types in SYCL device.">,
+  MarshallingInfoFlag<LangOpts<"SYCLUseVXXNames">>;
 def fdeclare_opencl_builtins : Flag<["-"], "fdeclare-opencl-builtins">,
   HelpText<"Add OpenCL builtin function declarations (experimental)">;
 def fdeclare_spirv_builtins

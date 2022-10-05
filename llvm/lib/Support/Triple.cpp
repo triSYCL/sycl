@@ -912,7 +912,7 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
 
   case Triple::spirv32:
   case Triple::spirv64:
-    // TODO: In future this will be Triple::SPIRV.
+    return Triple::SPIRV;
   case Triple::vitis_ip:
     return Triple::UnknownObjectFormat;
 
@@ -1178,14 +1178,6 @@ std::string Triple::normalize(StringRef Str) {
       Components.resize(5);
       Components[4] = getObjectFormatTypeName(ObjectFormat);
     }
-  }
-
-  if (Arch == fpga64) {
-    Components.resize(std::max<size_t>(Components.size(), 3));
-    if (Vendor == UnknownVendor)
-      Components[1] = "xilinx";
-    if (OS == UnknownOS)
-      Components[2] = "linux";
   }
 
   // Stick the corrected components back together to form the normalized string.

@@ -684,7 +684,7 @@ pi_result xrt_piPlatformGetInfo(pi_platform platform,
   switch (param_name) {
   case PI_PLATFORM_INFO_NAME:
     return getInfo(param_value_size, param_value, param_value_size_ret,
-                   "XILINX XRT BACKEND");
+                   "Xilinx XRT");
   case PI_PLATFORM_INFO_VENDOR:
     return getInfo(param_value_size, param_value, param_value_size_ret,
                    "Xilinx Corporation");

@@ -4940,8 +4940,7 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     // We want to compile sycl kernels.
     CmdArgs.push_back("-fsycl-is-device");
 
-    /// -fdeclare-spirv-builtins should be disabled when building for v++ since
-    /// we clang emits spir and not spirv. but the InSPIRation pass will
+    /// v++ doesbt use SPIRV but the InSPIRation pass will
     /// translate spirv builtins into function of the hls runtime.
     CmdArgs.push_back("-fdeclare-spirv-builtins");
 
@@ -4986,15 +4985,24 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-fsycl-allow-func-ptr");
     }
 
-    if (Args.hasFlag(options::OPT_fsycl_allow_virtual,
-                     options::OPT_fno_sycl_allow_virtual, false)) {
-      CmdArgs.push_back("-fsycl-allow-virtual");
-    }
+    // if (Args.hasFlag(options::OPT_fsycl_allow_virtual,
+    //                  options::OPT_fno_sycl_allow_virtual, false)) {
+    //   CmdArgs.push_back("-fsycl-allow-virtual");
+    // }
 
-    if (Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
-                     options::OPT_fno_sycl_allow_variadic_func, false)) {
-      CmdArgs.push_back("-fsycl-allow-variadic-func");
-    }
+    // if (Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
+    //                  options::OPT_fno_sycl_allow_variadic_func, false)) {
+    //   CmdArgs.push_back("-fsycl-allow-variadic-func");
+    // }
+
+    if (Args.hasArg(options::OPT_fsycl_targets_EQ) &&
+        llvm::any_of(
+            Args.getLastArgNoClaim(options::OPT_fsycl_targets_EQ)->getValues(),
+            [](StringRef Target) {
+              return llvm::Triple(Target).getArch() == llvm::Triple::fpga64 ||
+                     llvm::Triple(Target).getArch() == llvm::Triple::fpga32;
+            }))
+      CmdArgs.push_back("-fsycl-use-vxx-names");
 
     if (Args.hasFlag(options::OPT_fsycl_esimd_force_stateless_mem,
                      options::OPT_fno_sycl_esimd_force_stateless_mem, false))

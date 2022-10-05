@@ -4017,20 +4017,6 @@ bool CompilerInvocation::ParseLangArgs(LangOptions &Opts, ArgList &Args,
     }
   }
 
-  Opts.SYCLAllowVirtual = Args.hasFlag(options::OPT_fsycl_allow_virtual,
-                                       options::OPT_fno_sycl_allow_virtual,
-                                       false);
-  // Variadic functions are on by default for v++ compilation and off by default
-  // for anything else. For example, you have to specify that you wish variadics
-  // off for v++ if you wish to emit diagnostics for them and you have to
-  // specify if you wish no diagnostics for other devices.
-  Opts.SYCLAllowVariadicFunc =
-      T.isXilinxFPGA()
-          ? Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
-                         options::OPT_fno_sycl_allow_variadic_func, false)
-          : Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
-                         options::OPT_fno_sycl_allow_variadic_func, false);
-
   // Get OpenMP host file path if any and report if a non existent file is
   // found
   if (Arg *A = Args.getLastArg(options::OPT_fopenmp_host_ir_file_path)) {

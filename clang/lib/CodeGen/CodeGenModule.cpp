@@ -1966,7 +1966,8 @@ void CodeGenModule::GenKernelArgMetadata(llvm::Function *Fn,
           typeName = Mangle(ty);
 
         argTypeNames.push_back(llvm::MDString::get(VMContext, typeName));
-        llvm::MDString::get(VMContext, baseTypeName);
+        argBaseTypeNames.push_back(
+            llvm::MDString::get(VMContext, baseTypeName));
 
         if (isPipe)
           typeQuals = "pipe";

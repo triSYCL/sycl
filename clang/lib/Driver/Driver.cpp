@@ -791,6 +791,10 @@ static llvm::Triple completeSYCLTriple(llvm::Triple T) {
         Mode = M;
       T.setArchName(std::string(T.getArchName()) + "_" + Mode);
     }
+    if (T.getVendor() == llvm::Triple::UnknownVendor)
+      T.setVendor(llvm::Triple::Xilinx);
+    if (T.getOS() == llvm::Triple::UnknownOS)
+      T.setOS(llvm::Triple::Linux);
   }
   return T;
 }
@@ -5514,9 +5518,8 @@ class OffloadingActionBuilder final {
                   C.MakeAction<OffloadUnbundlingJobAction>(AL, T);
               BEInputs.push_back(UnbundleAction);
             };
-            // Send any known objects/archives through the unbundler to grab
-            // the dependency file associated.  This is only done for
-            // -fintelfpga.
+            // Send any known objects/archives through the unbundler to grab the
+            // dependency file associated.  This is only done for -fintelfpga.
             for (Action *A : FPGAObjectInputs)
               unbundleAdd(A, types::TY_FPGA_Dependencies);
             for (Action *A : FPGAArchiveInputs)

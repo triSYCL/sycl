@@ -3639,7 +3639,10 @@ void Sema::copySYCLKernelAttrs(const CXXRecordDecl *KernelObj) {
 }
 
 /// Compute a unique name that is consumable by sycl_vxx
-std::string computeUniqueSYCLVXXName(StringRef Demangle) {
+std::string computeUniqueSYCLVXXName(StringRef Demangle, bool shouldRename) {
+  if (!shouldRename)
+    return Demangle.str();
+
   /// VXX has a maximum of 64 character for the name of the kernel function
   /// plus the name of one parameter.
   /// Those characters need to be used wisely to prevent name collisions.
@@ -3726,7 +3729,7 @@ void Sema::SetSYCLKernelNames() {
         constructKernelName(*this, Pair.first, *MangleCtx);
     StringRef KernelName(
         IsSYCLUnnamedKernel(*this, Pair.first) ? StableName : CalculatedName);
-    std::string LastingName = computeUniqueSYCLVXXName(KernelName);
+    std::string LastingName = computeUniqueSYCLVXXName(KernelName, getLangOpts().SYCLUseVXXNames);
     KernelName = LastingName;
 
     getSyclIntegrationHeader().updateKernelNames(Pair.first, KernelName,
