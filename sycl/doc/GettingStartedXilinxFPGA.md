@@ -298,7 +298,7 @@ cd Debug
 make package
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
-sudo apt install --reinstall ./xrt_202210.2.13.0_22.04-amd64-xrt.deb
+sudo apt install --reinstall ./xrt_202220.2.14.0_22.04-amd64-xrt.deb
 ```
 
 If you also want a debug and verbose version which traces all the
