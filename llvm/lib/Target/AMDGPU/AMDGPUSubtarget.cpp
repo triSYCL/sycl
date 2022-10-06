@@ -460,21 +460,21 @@ bool AMDGPUSubtarget::makeLIDRangeMetadata(Instruction *I) const {
       case Intrinsic::amdgcn_workitem_id_x:
       case Intrinsic::r600_read_tidig_x:
         IdQuery = true;
-        LLVM_FALLTHROUGH;
+        [[fallthrough]];
       case Intrinsic::r600_read_local_size_x:
         Dim = 0;
         break;
       case Intrinsic::amdgcn_workitem_id_y:
       case Intrinsic::r600_read_tidig_y:
         IdQuery = true;
-        LLVM_FALLTHROUGH;
+        [[fallthrough]];
       case Intrinsic::r600_read_local_size_y:
         Dim = 1;
         break;
       case Intrinsic::amdgcn_workitem_id_z:
       case Intrinsic::r600_read_tidig_z:
         IdQuery = true;
-        LLVM_FALLTHROUGH;
+        [[fallthrough]];
       case Intrinsic::r600_read_local_size_z:
         Dim = 2;
         break;
@@ -736,13 +736,18 @@ static unsigned getMaxNumPreloadedSGPRs() {
                           2 + // dispatch ID
                           2 + // flat scratch init
                           2;  // Implicit buffer ptr
+
   // Max number of system SGPRs
   unsigned MaxSystemSGPRs = 1 + // WorkGroupIDX
                             1 + // WorkGroupIDY
                             1 + // WorkGroupIDZ
                             1 + // WorkGroupInfo
                             1;  // private segment wave byte offset
-  return MaxUserSGPRs + MaxSystemSGPRs;
+
+  // Max number of synthetic SGPRs
+  unsigned SyntheticSGPRs = 1; // LDSKernelId
+
+  return MaxUserSGPRs + MaxSystemSGPRs + SyntheticSGPRs;
 }
 
 unsigned GCNSubtarget::getMaxNumSGPRs(const Function &F) const {

@@ -52,6 +52,7 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeRISCVTarget() {
   initializeRISCVCodeGenPreparePass(*PR);
   initializeRISCVMergeBaseOffsetOptPass(*PR);
   initializeRISCVSExtWRemovalPass(*PR);
+  initializeRISCVPreRAExpandPseudoPass(*PR);
   initializeRISCVExpandPseudoPass(*PR);
   initializeRISCVInsertVSETVLIPass(*PR);
 }
@@ -166,7 +167,6 @@ public:
   }
 
   void addIRPasses() override;
-  void addCodeGenPrepare() override;
   bool addPreISel() override;
   bool addInstSelector() override;
   bool addIRTranslator() override;
@@ -189,15 +189,13 @@ TargetPassConfig *RISCVTargetMachine::createPassConfig(PassManagerBase &PM) {
 void RISCVPassConfig::addIRPasses() {
   addPass(createAtomicExpandPass());
 
-  addPass(createRISCVGatherScatterLoweringPass());
+  if (getOptLevel() != CodeGenOpt::None)
+    addPass(createRISCVGatherScatterLoweringPass());
 
-  TargetPassConfig::addIRPasses();
-}
-
-void RISCVPassConfig::addCodeGenPrepare() {
   if (getOptLevel() != CodeGenOpt::None)
     addPass(createRISCVCodeGenPreparePass());
-  TargetPassConfig::addCodeGenPrepare();
+
+  TargetPassConfig::addIRPasses();
 }
 
 bool RISCVPassConfig::addPreISel() {
@@ -259,6 +257,7 @@ void RISCVPassConfig::addMachineSSAOptimization() {
 }
 
 void RISCVPassConfig::addPreRegAlloc() {
+  addPass(createRISCVPreRAExpandPseudoPass());
   if (TM->getOptLevel() != CodeGenOpt::None)
     addPass(createRISCVMergeBaseOffsetOptPass());
   addPass(createRISCVInsertVSETVLIPass());

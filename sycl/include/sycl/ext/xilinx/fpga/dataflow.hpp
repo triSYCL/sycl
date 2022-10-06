@@ -20,15 +20,13 @@
 #include <utility>
 
 
-#include "sycl/detail/defines.hpp"
-#include "sycl/ext/xilinx/fpga/kernel_properties.hpp"
-
-__SYCL_INLINE_NAMESPACE(cl) {
+#include <sycl/detail/defines.hpp>
+#include <sycl/detail/defines_elementary.hpp>
+#include <sycl/ext/xilinx/fpga/kernel_properties.hpp>
 
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace ext::xilinx {
-
-
 
 /**
   Turn on dataflow optimisation for a loop
@@ -44,9 +42,8 @@ auto dataflow_kernel(auto kernel) {
   return detail::KernelDecorator<kernelType, decltype(&kernelType::operator()),
                                  decltype("kernel_dataflow"_cstr), 0>{kernel};
 }
-} // namespace xilinx
+} // namespace ext::xilinx
+}
 } // namespace sycl
-
-} // __SYCL_INLINE_NAMESPACE(cl)
 
 #endif

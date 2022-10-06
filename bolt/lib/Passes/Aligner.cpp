@@ -84,7 +84,7 @@ void alignCompact(BinaryFunction &Function, const MCCodeEmitter *Emitter) {
   size_t ColdSize = 0;
 
   for (const BinaryBasicBlock &BB : Function)
-    if (BB.isCold())
+    if (BB.isSplit())
       ColdSize += BC.computeCodeSize(BB.begin(), BB.end(), Emitter);
     else
       HotSize += BC.computeCodeSize(BB.begin(), BB.end(), Emitter);
@@ -113,7 +113,7 @@ void AlignerPass::alignBlocks(BinaryFunction &Function,
   const uint64_t FuncCount =
       std::max<uint64_t>(1, Function.getKnownExecutionCount());
   BinaryBasicBlock *PrevBB = nullptr;
-  for (BinaryBasicBlock *BB : Function.layout()) {
+  for (BinaryBasicBlock *BB : Function.getLayout().blocks()) {
     uint64_t Count = BB->getKnownExecutionCount();
 
     if (Count <= FuncCount * opts::AlignBlocksThreshold / 100) {

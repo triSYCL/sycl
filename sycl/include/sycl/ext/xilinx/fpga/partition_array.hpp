@@ -20,8 +20,9 @@
 #include <cstddef>
 #include <type_traits>
 
-__SYCL_INLINE_NAMESPACE(cl) {
+
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 
 namespace ext::xilinx {
 
@@ -146,6 +147,7 @@ namespace partition {
     static constexpr auto partition_type = type::none;
   };
 }  // namespace partition
+}  // namespace ext::xilinx
 
 namespace detail {
 
@@ -201,6 +203,8 @@ struct rec_array_of<T> {
 };
 
 }  // namespace detail
+
+namespace ext::xilinx {
 
 /** Define an array class with partition feature.
 
@@ -334,8 +338,7 @@ class partition_ndarray<ValueType, dim<Size, Sizes...>, PartitionType> {
 };
 
 }  // namespace ext::xilinx
-}  // namespace sycl
-
 }
+}  // namespace sycl
 
 #endif// SYCL_XILINX_FPGA_PARTITION_ARRAY_HPP

@@ -473,6 +473,7 @@ static Triple::ArchType parseArch(StringRef ArchName) {
     .Case("arm64", Triple::aarch64)
     .Case("arm64_32", Triple::aarch64_32)
     .Case("arm64e", Triple::aarch64)
+    .Case("arm64ec", Triple::aarch64)
     .Case("arm", Triple::arm)
     .Case("armeb", Triple::armeb)
     .Case("thumb", Triple::thumb)
@@ -707,6 +708,9 @@ static Triple::SubArchType parseSubArch(StringRef SubArchName) {
   if (SubArchName == "arm64e")
     return Triple::AArch64SubArch_arm64e;
 
+  if (SubArchName == "arm64ec")
+    return Triple::AArch64SubArch_arm64ec;
+
   if (SubArchName.startswith("spirv"))
     return StringSwitch<Triple::SubArchType>(SubArchName)
         .EndsWith("v1.0", Triple::SPIRVSubArch_v10)
@@ -908,7 +912,7 @@ static Triple::ObjectFormatType getDefaultFormat(const Triple &T) {
 
   case Triple::spirv32:
   case Triple::spirv64:
-    // TODO: In future this will be Triple::SPIRV.
+    return Triple::SPIRV;
   case Triple::vitis_ip:
     return Triple::UnknownObjectFormat;
 
@@ -1174,14 +1178,6 @@ std::string Triple::normalize(StringRef Str) {
       Components.resize(5);
       Components[4] = getObjectFormatTypeName(ObjectFormat);
     }
-  }
-
-  if (Arch == fpga64) {
-    Components.resize(std::max<size_t>(Components.size(), 3));
-    if (Vendor == UnknownVendor)
-      Components[1] = "xilinx";
-    if (OS == UnknownOS)
-      Components[2] = "linux";
   }
 
   // Stick the corrected components back together to form the normalized string.
@@ -2007,7 +2003,7 @@ VersionTuple Triple::getCanonicalVersionForOS(OSType OSKind,
     // macOS 10.16 is canonicalized to macOS 11.
     if (Version == VersionTuple(10, 16))
       return VersionTuple(11, 0);
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
   default:
     return Version;
   }

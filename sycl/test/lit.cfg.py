@@ -103,10 +103,6 @@ backend=lit_config.params.get('SYCL_BE', "PI_OPENCL")
 lit_config.note("Backend (SYCL_BE): {}".format(backend))
 config.substitutions.append( ('%sycl_be', backend) )
 
-config.substitutions.append( ('%RUN_ON_HOST', "env SYCL_DEVICE_FILTER=host ") )
-
-# Every SYCL implementation provides a host implementation.
-config.available_features.add('host')
 triple=lit_config.params.get('SYCL_TRIPLE', 'spir64-unknown-unknown')
 lit_config.note("Triple: {}".format(triple))
 config.substitutions.append( ('%sycl_triple',  triple ) )
@@ -168,11 +164,7 @@ else:
     lit_config.note(f"vitis mode: {vitis}")
     if vitis == "cpu":
         config.available_features.add("vitis_cpu")
-    # TODO how to deal with cuda ?
-    # if getDeviceCount("gpu", "cuda")[1]:
-    #     lit_config.note("found secondary cuda target")
-    #     config.available_features.add("has_secondary_cuda")
-    required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH']
+    required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', 'XILINX_VITIS']
     has_error=False
     config.available_features.add("vitis")
     feat_list = ",".join(config.available_features)

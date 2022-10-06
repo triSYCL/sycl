@@ -474,8 +474,6 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
   } nd;
 
   native_type &get_native() { return nd.buffer_; }
-
-  ~_pi_mem() { assert(pending_cmds.cmds.empty()); }
 };
 
 /// The Pi calls are never queued into the _pi_queue
@@ -619,8 +617,10 @@ pi_result getInfo<const char *>(size_t param_value_size, void *param_value,
 } // anonymous namespace
 
 /// ------ Error handling, matching OpenCL plugin semantics.
-__SYCL_INLINE_NAMESPACE(cl) {
-namespace sycl::detail::pi {
+namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
+namespace detail {
+namespace pi {
 
 std::ostream &log() { return std::cerr; }
 
@@ -647,8 +647,10 @@ void assertion(bool Condition, const char *Message) {
   std::terminate();
 }
 
-}  // namespace sycl::detail::pi
-} // __SYCL_INLINE_NAMESPACE(cl)
+}
+}
+}
+}
 
 /// Check that we always use the same thread to call this function
 void assert_single_thread() {
@@ -682,7 +684,7 @@ pi_result xrt_piPlatformGetInfo(pi_platform platform,
   switch (param_name) {
   case PI_PLATFORM_INFO_NAME:
     return getInfo(param_value_size, param_value, param_value_size_ret,
-                   "XILINX XRT BACKEND");
+                   "Xilinx XRT");
   case PI_PLATFORM_INFO_VENDOR:
     return getInfo(param_value_size, param_value, param_value_size_ret,
                    "Xilinx Corporation");

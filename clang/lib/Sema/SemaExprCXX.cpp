@@ -241,7 +241,7 @@ ParsedType Sema::getDestructorName(SourceLocation TildeLoc,
       if (IsAcceptableResult(Type)) {
         QualType T = Context.getTypeDeclType(Type);
         MarkAnyDeclReferenced(Type->getLocation(), Type, /*OdrUse=*/false);
-        return CreateParsedType(T,
+        return CreateParsedType(Context.getElaboratedType(ETK_None, nullptr, T),
                                 Context.getTrivialTypeSourceInfo(T, NameLoc));
       }
     }
@@ -4826,7 +4826,7 @@ static bool CheckUnaryTypeTraitTypeCompleteness(Sema &S, TypeTrait UTT,
   case UTT_HasTrivialDestructor:
   case UTT_HasVirtualDestructor:
     ArgTy = QualType(ArgTy->getBaseElementTypeUnsafe(), 0);
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
 
   // C++1z [meta.unary.prop]:
   //   T shall be a complete type, cv void, or an array of unknown bound.
@@ -5421,6 +5421,8 @@ void DiagnoseBuiltinDeprecation(Sema& S, TypeTrait Kind,
       Replacement = BTT_IsTriviallyAssignable;
       break;
     case UTT_HasTrivialCopy:
+      Replacement = UTT_IsTriviallyCopyable;
+      break;
     case UTT_HasTrivialDefaultConstructor:
     case UTT_HasTrivialMoveConstructor:
       Replacement = TT_IsTriviallyConstructible;
@@ -5436,9 +5438,26 @@ void DiagnoseBuiltinDeprecation(Sema& S, TypeTrait Kind,
 }
 }
 
+bool Sema::CheckTypeTraitArity(unsigned Arity, SourceLocation Loc, size_t N) {
+  if (Arity && N != Arity) {
+    Diag(Loc, diag::err_type_trait_arity)
+        << Arity << 0 << (Arity > 1) << (int)N << SourceRange(Loc);
+    return false;
+  }
+
+  if (!Arity && N == 0) {
+    Diag(Loc, diag::err_type_trait_arity)
+        << 1 << 1 << 1 << (int)N << SourceRange(Loc);
+    return false;
+  }
+  return true;
+}
+
 ExprResult Sema::BuildTypeTrait(TypeTrait Kind, SourceLocation KWLoc,
                                 ArrayRef<TypeSourceInfo *> Args,
                                 SourceLocation RParenLoc) {
+  if (!CheckTypeTraitArity(getTypeTraitArity(Kind), KWLoc, Args.size()))
+    return ExprError();
   QualType ResultType = Context.getLogicalOperationType();
 
   if (Kind <= UTT_Last && !CheckUnaryTypeTraitTypeCompleteness(
@@ -7390,7 +7409,7 @@ ExprResult Sema::ActOnDecltypeExpression(Expr *E) {
       return BinaryOperator::Create(Context, BO->getLHS(), RHS.get(), BO_Comma,
                                     BO->getType(), BO->getValueKind(),
                                     BO->getObjectKind(), BO->getOperatorLoc(),
-                                    BO->getFPFeatures(getLangOpts()));
+                                    BO->getFPFeatures());
     }
   }
 
@@ -7722,8 +7741,8 @@ ExprResult Sema::BuildPseudoDestructorExpr(Expr *Base,
   //   designated by the pseudo-destructor-name shall be the same type.
   if (DestructedTypeInfo) {
     QualType DestructedType = DestructedTypeInfo->getType();
-    SourceLocation DestructedTypeStart
-      = DestructedTypeInfo->getTypeLoc().getLocalSourceRange().getBegin();
+    SourceLocation DestructedTypeStart =
+        DestructedTypeInfo->getTypeLoc().getBeginLoc();
     if (!DestructedType->isDependentType() && !ObjectType->isDependentType()) {
       if (!Context.hasSameUnqualifiedType(DestructedType, ObjectType)) {
         // Detect dot pseudo destructor calls on pointer objects, e.g.:
@@ -7748,7 +7767,7 @@ ExprResult Sema::BuildPseudoDestructorExpr(Expr *Base,
         } else {
           Diag(DestructedTypeStart, diag::err_pseudo_dtor_type_mismatch)
               << ObjectType << DestructedType << Base->getSourceRange()
-              << DestructedTypeInfo->getTypeLoc().getLocalSourceRange();
+              << DestructedTypeInfo->getTypeLoc().getSourceRange();
 
           // Recover by setting the destructed type to the object type.
           DestructedType = ObjectType;
@@ -7764,8 +7783,8 @@ ExprResult Sema::BuildPseudoDestructorExpr(Expr *Base,
           // type.
         } else {
           Diag(DestructedTypeStart, diag::err_arc_pseudo_dtor_inconstant_quals)
-            << ObjectType << DestructedType << Base->getSourceRange()
-            << DestructedTypeInfo->getTypeLoc().getLocalSourceRange();
+              << ObjectType << DestructedType << Base->getSourceRange()
+              << DestructedTypeInfo->getTypeLoc().getSourceRange();
         }
 
         // Recover by setting the destructed type to the object type.
@@ -7789,10 +7808,10 @@ ExprResult Sema::BuildPseudoDestructorExpr(Expr *Base,
     if (!ScopeType->isDependentType() && !ObjectType->isDependentType() &&
         !Context.hasSameUnqualifiedType(ScopeType, ObjectType)) {
 
-      Diag(ScopeTypeInfo->getTypeLoc().getLocalSourceRange().getBegin(),
+      Diag(ScopeTypeInfo->getTypeLoc().getSourceRange().getBegin(),
            diag::err_pseudo_dtor_type_mismatch)
-        << ObjectType << ScopeType << Base->getSourceRange()
-        << ScopeTypeInfo->getTypeLoc().getLocalSourceRange();
+          << ObjectType << ScopeType << Base->getSourceRange()
+          << ScopeTypeInfo->getTypeLoc().getSourceRange();
 
       ScopeType = QualType();
       ScopeTypeInfo = nullptr;
@@ -8457,7 +8476,7 @@ class TransformTypos : public TreeTransform<TransformTypos> {
   ///
   /// Returns true if there are any untried correction combinations.
   bool CheckAndAdvanceTypoExprCorrectionStreams() {
-    for (auto TE : TypoExprs) {
+    for (auto *TE : TypoExprs) {
       auto &State = SemaRef.getTypoExprState(TE);
       TransformCache.erase(TE);
       if (!State.Consumer->hasMadeAnyCorrectionProgress())
@@ -8524,7 +8543,7 @@ class TransformTypos : public TreeTransform<TransformTypos> {
         // TypoExprs were created recursively and thus won't be in our
         // Sema's TypoExprs - they were created in our `RecursiveTransformLoop`.
         auto &SemaTypoExprs = SemaRef.TypoExprs;
-        for (auto TE : TypoExprs) {
+        for (auto *TE : TypoExprs) {
           TransformCache.erase(TE);
           SemaRef.clearDelayedTypo(TE);
 

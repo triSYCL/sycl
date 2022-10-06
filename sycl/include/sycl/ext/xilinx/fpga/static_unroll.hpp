@@ -6,16 +6,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "sycl/detail/defines.hpp"
+#include <sycl/detail/defines.hpp>
+#include <sycl/detail/defines_elementary.hpp>
 
 #ifndef SYCL_XILINX_FPGA_STATIC_UNROLL_HPP
 #define SYCL_XILINX_FPGA_STATIC_UNROLL_HPP
 
-__SYCL_INLINE_NAMESPACE(cl) {
 
 namespace sycl {
-
-namespace ext::xilinx {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace detail {
 
 ///
@@ -99,8 +98,9 @@ void inline normalized_static_full_unrolling(auto &LoopStep) {
                                          Offset, Increment>(LoopStep);
   }
 }
-} // namespace detail
 
+} // namespace detail
+namespace ext::xilinx {
 ///
 ///@brief Build a partially unrolled loop
 ///
@@ -166,7 +166,7 @@ inline void static_full_unrolling(auto &Functor) {
       Functor);
 }
 } // namespace ext::xilinx
+}
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)
 
 #endif

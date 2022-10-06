@@ -473,6 +473,9 @@ class ASTContext : public RefCountedBase<ASTContext> {
   };
   llvm::DenseMap<Module*, PerModuleInitializers*> ModuleInitializers;
 
+  /// For module code-gen cases, this is the top-level module we are building.
+  Module *TopLevelModule = nullptr;
+
   static constexpr unsigned ConstantArrayTypesLog2InitSize = 8;
   static constexpr unsigned GeneralTypesLog2InitSize = 9;
   static constexpr unsigned FunctionProtoTypesLog2InitSize = 12;
@@ -1075,6 +1078,12 @@ public:
 
   /// Get the initializations to perform when importing a module, if any.
   ArrayRef<Decl*> getModuleInitializers(Module *M);
+
+  /// Set the (C++20) module we are building.
+  void setModuleForCodeGen(Module *M) { TopLevelModule = M; }
+
+  /// Get module under construction, nullptr if this is not a C++20 module.
+  Module *getModuleForCodeGen() const { return TopLevelModule; }
 
   TranslationUnitDecl *getTranslationUnitDecl() const {
     return TUDecl->getMostRecentDecl();
@@ -2726,6 +2735,10 @@ public:
   /// Return number of constant array elements.
   uint64_t getConstantArrayElementCount(const ConstantArrayType *CA) const;
 
+  /// Return number of elements initialized in an ArrayInitLoopExpr.
+  uint64_t
+  getArrayInitLoopExprElementCount(const ArrayInitLoopExpr *AILE) const;
+
   /// Perform adjustment on the parameter type of a function.
   ///
   /// This routine adjusts the given parameter type @p T to the actual
@@ -2816,14 +2829,20 @@ public:
   bool typesAreBlockPointerCompatible(QualType, QualType);
 
   bool isObjCIdType(QualType T) const {
+    if (const auto *ET = dyn_cast<ElaboratedType>(T))
+      T = ET->getNamedType();
     return T == getObjCIdType();
   }
 
   bool isObjCClassType(QualType T) const {
+    if (const auto *ET = dyn_cast<ElaboratedType>(T))
+      T = ET->getNamedType();
     return T == getObjCClassType();
   }
 
   bool isObjCSelType(QualType T) const {
+    if (const auto *ET = dyn_cast<ElaboratedType>(T))
+      T = ET->getNamedType();
     return T == getObjCSelType();
   }
 
@@ -3192,11 +3211,11 @@ OPT_LIST(V)
 
 #undef OPT_LIST
 
-    LLVM_NODISCARD ObjCEncOptions keepingOnly(ObjCEncOptions Mask) const {
+    [[nodiscard]] ObjCEncOptions keepingOnly(ObjCEncOptions Mask) const {
       return Bits & Mask.Bits;
     }
 
-    LLVM_NODISCARD ObjCEncOptions forComponentType() const {
+    [[nodiscard]] ObjCEncOptions forComponentType() const {
       ObjCEncOptions Mask = ObjCEncOptions()
                                 .setIsOutermostType()
                                 .setIsStructField();

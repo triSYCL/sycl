@@ -210,6 +210,11 @@ public:
   /// Transforms OpDot instructions with a scalar type to a fmul instruction
   void visitCallDot(CallInst *CI);
 
+  /// Transforms OpDot instructions with a vector or scalar (packed vector) type
+  /// to dot or dot_acc_sat instructions
+  void visitCallDot(CallInst *CI, StringRef MangledName,
+                    StringRef DemangledName);
+
   /// Fixes for built-in functions with vector+scalar arguments that are
   /// translated to the SPIR-V instructions where all arguments must have the
   /// same type.
@@ -241,6 +246,9 @@ public:
                                           StringRef DemangledName);
   void visitSubgroupAVCBuiltinCallWithSampler(CallInst *CI,
                                               StringRef DemangledName);
+
+  /// For cl_intel_split_work_group_barrier built-ins:
+  void visitCallSplitBarrierINTEL(CallInst *CI, StringRef DemangledName);
 
   void visitCallLdexp(CallInst *CI, StringRef MangledName,
                       StringRef DemangledName);

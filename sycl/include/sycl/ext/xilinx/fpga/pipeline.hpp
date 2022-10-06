@@ -23,9 +23,10 @@
 #include "sycl/detail/property_helper.hpp"
 #include "sycl/ext/xilinx/fpga/kernel_properties.hpp"
 
-__SYCL_INLINE_NAMESPACE(cl) {
+
 
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace ext::xilinx {
 
 enum struct pipeline_style : std::uint8_t {
@@ -89,8 +90,7 @@ auto unpipeline_kernel(auto kernel) {
       kernel};
 }
 } // namespace ext::xilinx
+}
 } // namespace sycl
-
-} // __SYCL_INLINE_NAMESPACE(cl)
 
 #endif

@@ -142,23 +142,32 @@ XorOpnd::XorOpnd(Value *V) {
   isOr = true;
 }
 
+/// Return true if I is an instruction with the FastMathFlags that are needed
+/// for general reassociation set.  This is not the same as testing
+/// Instruction::isAssociative() because it includes operations like fsub.
+/// (This routine is only intended to be called for floating-point operations.)
+static bool hasFPAssociativeFlags(Instruction *I) {
+  assert(I && isa<FPMathOperator>(I) && "Should only check FP ops");
+  return I->hasAllowReassoc() && I->hasNoSignedZeros();
+}
+
 /// Return true if V is an instruction of the specified opcode and if it
 /// only has one use.
 static BinaryOperator *isReassociableOp(Value *V, unsigned Opcode) {
-  auto *I = dyn_cast<Instruction>(V);
-  if (I && I->hasOneUse() && I->getOpcode() == Opcode)
-    if (!isa<FPMathOperator>(I) || I->isFast())
-      return cast<BinaryOperator>(I);
+  auto *BO = dyn_cast<BinaryOperator>(V);
+  if (BO && BO->hasOneUse() && BO->getOpcode() == Opcode)
+    if (!isa<FPMathOperator>(BO) || hasFPAssociativeFlags(BO))
+      return BO;
   return nullptr;
 }
 
 static BinaryOperator *isReassociableOp(Value *V, unsigned Opcode1,
                                         unsigned Opcode2) {
-  auto *I = dyn_cast<Instruction>(V);
-  if (I && I->hasOneUse() &&
-      (I->getOpcode() == Opcode1 || I->getOpcode() == Opcode2))
-    if (!isa<FPMathOperator>(I) || I->isFast())
-      return cast<BinaryOperator>(I);
+  auto *BO = dyn_cast<BinaryOperator>(V);
+  if (BO && BO->hasOneUse() &&
+      (BO->getOpcode() == Opcode1 || BO->getOpcode() == Opcode2))
+    if (!isa<FPMathOperator>(BO) || hasFPAssociativeFlags(BO))
+      return BO;
   return nullptr;
 }
 
@@ -573,7 +582,7 @@ static bool LinearizeExprTree(Instruction *I,
       assert((!isa<Instruction>(Op) ||
               cast<Instruction>(Op)->getOpcode() != Opcode
               || (isa<FPMathOperator>(Op) &&
-                  !cast<Instruction>(Op)->isFast())) &&
+                  !hasFPAssociativeFlags(cast<Instruction>(Op)))) &&
              "Should have been handled above!");
       assert(Op->hasOneUse() && "Has uses outside the expression tree!");
 
@@ -769,7 +778,7 @@ void ReassociatePass::RewriteExprTree(BinaryOperator *I,
       Constant *Undef = UndefValue::get(I->getType());
       NewOp = BinaryOperator::Create(Instruction::BinaryOps(Opcode),
                                      Undef, Undef, "", I);
-      if (NewOp->getType()->isFPOrFPVectorTy())
+      if (isa<FPMathOperator>(NewOp))
         NewOp->setFastMathFlags(I->getFastMathFlags());
     } else {
       NewOp = NodesToRewrite.pop_back_val();
@@ -877,40 +886,16 @@ static Value *NegateValue(Value *V, Instruction *BI,
     if (TheNeg->getParent()->getParent() != BI->getParent()->getParent())
       continue;
 
-    bool FoundCatchSwitch = false;
-
-    BasicBlock::iterator InsertPt;
+    Instruction *InsertPt;
     if (Instruction *InstInput = dyn_cast<Instruction>(V)) {
-      if (InvokeInst *II = dyn_cast<InvokeInst>(InstInput)) {
-        InsertPt = II->getNormalDest()->begin();
-      } else {
-        InsertPt = ++InstInput->getIterator();
-      }
-
-      const BasicBlock *BB = InsertPt->getParent();
-
-      // Make sure we don't move anything before PHIs or exception
-      // handling pads.
-      while (InsertPt != BB->end() && (isa<PHINode>(InsertPt) ||
-                                       InsertPt->isEHPad())) {
-        if (isa<CatchSwitchInst>(InsertPt))
-          // A catchswitch cannot have anything in the block except
-          // itself and PHIs.  We'll bail out below.
-          FoundCatchSwitch = true;
-        ++InsertPt;
-      }
+      InsertPt = InstInput->getInsertionPointAfterDef();
+      if (!InsertPt)
+        continue;
     } else {
-      InsertPt = TheNeg->getParent()->getParent()->getEntryBlock().begin();
+      InsertPt = &*TheNeg->getFunction()->getEntryBlock().begin();
     }
 
-    // We found a catchswitch in the block where we want to move the
-    // neg.  We cannot move anything into that block.  Bail and just
-    // create the neg before BI, as if we hadn't found an existing
-    // neg.
-    if (FoundCatchSwitch)
-      break;
-
-    TheNeg->moveBefore(&*InsertPt);
+    TheNeg->moveBefore(InsertPt);
     if (TheNeg->getOpcode() == Instruction::Sub) {
       TheNeg->setHasNoUnsignedWrap(false);
       TheNeg->setHasNoSignedWrap(false);
@@ -1889,10 +1874,10 @@ ReassociatePass::buildMinimalMultiplyDAG(IRBuilderBase &Builder,
   // Iteratively collect the base of each factor with an add power into the
   // outer product, and halve each power in preparation for squaring the
   // expression.
-  for (unsigned Idx = 0, Size = Factors.size(); Idx != Size; ++Idx) {
-    if (Factors[Idx].Power & 1)
-      OuterProduct.push_back(Factors[Idx].Base);
-    Factors[Idx].Power >>= 1;
+  for (Factor &F : Factors) {
+    if (F.Power & 1)
+      OuterProduct.push_back(F.Base);
+    F.Power >>= 1;
   }
   if (Factors[0].Power) {
     Value *SquareRoot = buildMinimalMultiplyDAG(Builder, Factors);
@@ -2018,7 +2003,7 @@ void ReassociatePass::RecursivelyEraseDeadInsts(Instruction *I,
   RedoInsts.remove(I);
   llvm::salvageDebugInfo(*I);
   I->eraseFromParent();
-  for (auto Op : Ops)
+  for (auto *Op : Ops)
     if (Instruction *OpInst = dyn_cast<Instruction>(Op))
       if (OpInst->use_empty())
         Insts.insert(OpInst);
@@ -2216,8 +2201,9 @@ void ReassociatePass::OptimizeInst(Instruction *I) {
   if (Instruction *Res = canonicalizeNegFPConstants(I))
     I = Res;
 
-  // Don't optimize floating-point instructions unless they are 'fast'.
-  if (I->getType()->isFPOrFPVectorTy() && !I->isFast())
+  // Don't optimize floating-point instructions unless they have the
+  // appropriate FastMathFlags for reassociation enabled.
+  if (isa<FPMathOperator>(I) && !hasFPAssociativeFlags(I))
     return;
 
   // Do not reassociate boolean (i1) expressions.  We want to preserve the

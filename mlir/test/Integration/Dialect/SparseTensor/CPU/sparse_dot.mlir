@@ -1,6 +1,6 @@
 // RUN: mlir-opt %s --sparse-compiler | \
 // RUN: mlir-cpu-runner -e entry -entry-point-result=void \
-// RUN:  -shared-libs=%mlir_integration_test_dir/libmlir_c_runner_utils%shlibext | \
+// RUN:  -shared-libs=%mlir_lib_dir/libmlir_c_runner_utils%shlibext | \
 // RUN: FileCheck %s
 
 #SparseVector = #sparse_tensor.encoding<{ dimLevelType = [ "compressed" ] }>
@@ -47,8 +47,8 @@ module {
     vector.print %1 : f32
 
     // Release the resources.
-    sparse_tensor.release %s1 : tensor<1024xf32, #SparseVector>
-    sparse_tensor.release %s2 : tensor<1024xf32, #SparseVector>
+    bufferization.dealloc_tensor %s1 : tensor<1024xf32, #SparseVector>
+    bufferization.dealloc_tensor %s2 : tensor<1024xf32, #SparseVector>
 
     return
   }

@@ -68,6 +68,10 @@ set(COMPILER_RT_BAREMETAL_BUILD OFF CACHE BOOL
   "Build for a bare-metal target.")
 
 if (COMPILER_RT_STANDALONE_BUILD)
+  set(CMAKE_CXX_STANDARD 17 CACHE STRING "C++ standard to conform to")
+  set(CMAKE_CXX_STANDARD_REQUIRED YES)
+  set(CMAKE_CXX_EXTENSIONS NO)
+
   load_llvm_config()
   if (TARGET intrinsics_gen)
     # Loading the llvm config causes this target to be imported so place it
@@ -123,11 +127,11 @@ set(COMPILER_RT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR})
 
 pythonize_bool(LLVM_ENABLE_PER_TARGET_RUNTIME_DIR)
 
-# We support running instrumented tests when we're not cross compiling
+# We support running instrumented tests when we're not cross-compiling
 # and target a UNIX-like system or Windows.
 # We can run tests on Android even when we are cross-compiling.
-if(("${CMAKE_HOST_SYSTEM}" STREQUAL "${CMAKE_SYSTEM}" AND (UNIX OR WIN32)) OR ANDROID
-   OR COMPILER_RT_EMULATOR)
+if(("${CMAKE_HOST_SYSTEM_NAME}" STREQUAL "${CMAKE_SYSTEM_NAME}" AND (UNIX OR WIN32))
+   OR ANDROID OR COMPILER_RT_EMULATOR)
   option(COMPILER_RT_CAN_EXECUTE_TESTS "Can we execute instrumented tests" ON)
 else()
   option(COMPILER_RT_CAN_EXECUTE_TESTS "Can we execute instrumented tests" OFF)
@@ -295,8 +299,6 @@ if(COMPILER_RT_ENABLE_WERROR)
   append_string_if(COMPILER_RT_HAS_WERROR_FLAG -Werror CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
   append_string_if(COMPILER_RT_HAS_WX_FLAG /WX CMAKE_C_FLAGS CMAKE_CXX_FLAGS)
 endif()
-
-append_string_if(COMPILER_RT_HAS_STD_CXX14_FLAG -std=c++14 CMAKE_CXX_FLAGS)
 
 # Emulate C99 and C++11's __func__ for MSVC prior to 2013 CTP.
 if(NOT COMPILER_RT_HAS_FUNC_SYMBOL)
@@ -474,8 +476,16 @@ append_list_if(COMPILER_RT_HAS_WD4800_FLAG /wd4800 SANITIZER_COMMON_CFLAGS)
 append_list_if(MINGW -fms-extensions SANITIZER_COMMON_CFLAGS)
 
 # Set common link flags.
+# TODO: We should consider using the same model as libc++, that is use either
+# -nostdlib++ and --unwindlib=none if supported, or -nodefaultlibs otherwise.
 append_list_if(C_SUPPORTS_NODEFAULTLIBS_FLAG -nodefaultlibs SANITIZER_COMMON_LINK_FLAGS)
 append_list_if(COMPILER_RT_HAS_Z_TEXT -Wl,-z,text SANITIZER_COMMON_LINK_FLAGS)
+
+# Only necessary for 32-bit SPARC.  Solaris 11.2+ ld uses -z ignore/-z record
+# natively, but supports --as-needed/--no-as-needed for GNU ld compatibility.
+if("${COMPILER_RT_DEFAULT_TARGET_ARCH}" MATCHES "sparc")
+  list(APPEND SANITIZER_COMMON_LINK_LIBS -Wl,--as-needed atomic -Wl,--no-as-needed)
+endif()
 
 if (COMPILER_RT_USE_BUILTINS_LIBRARY)
   string(REPLACE "-Wl,-z,defs" "" CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS}")
@@ -533,10 +543,14 @@ string(REPLACE " " ";" COMPILER_RT_UNITTEST_CFLAGS "${COMPILER_RT_TEST_COMPILER_
 set(COMPILER_RT_UNITTEST_LINK_FLAGS ${COMPILER_RT_UNITTEST_CFLAGS})
 
 if(COMPILER_RT_USE_LLVM_UNWINDER)
+  # We're linking directly against the libunwind that we're building so don't
+  # try to link in the toolchain's default libunwind which may be missing.
+  append_list_if(CXX_SUPPORTS_UNWINDLIB_NONE_FLAG --unwindlib=none COMPILER_RT_COMMON_LINK_FLAGS)
+  append_list_if(CXX_SUPPORTS_UNWINDLIB_NONE_FLAG --unwindlib=none COMPILER_RT_UNITTEST_LINK_FLAGS)
   if (COMPILER_RT_ENABLE_STATIC_UNWINDER)
-    list(APPEND SANITIZER_CXX_ABI_LIBRARIES "$<TARGET_LINKER_FILE:unwind_static>")
+    list(APPEND COMPILER_RT_UNWINDER_LINK_LIBS "$<TARGET_LINKER_FILE:unwind_static>")
   else()
-    list(APPEND SANITIZER_CXX_ABI_LIBRARIES "$<TARGET_LINKER_FILE:$<IF:$<TARGET_EXISTS:unwind_shared>,unwind_shared,unwind_static>>")
+    list(APPEND COMPILER_RT_UNWINDER_LINK_LIBS "$<TARGET_LINKER_FILE:$<IF:$<TARGET_EXISTS:unwind_shared>,unwind_shared,unwind_static>>")
   endif()
 endif()
 
@@ -561,6 +575,11 @@ endif()
 
 macro(append_libcxx_libs var)
   if (${var}_INTREE)
+    # TODO: We don't need to add --unwindlib=none to SANITIZER_COMMON_LINK_FLAGS
+    # because we added -nodefaultlibs there earlier, and adding would result in
+    # a warning, but if we switch to -nostdlib++, we would need to add it here.
+    # append_list_if(CXX_SUPPORTS_UNWINDLIB_NONE_FLAG --unwindlib=none SANITIZER_COMMON_LINK_FLAGS)
+
     if (SANITIZER_USE_STATIC_LLVM_UNWINDER AND (TARGET unwind_static OR HAVE_LIBUNWIND))
       list(APPEND ${var}_LIBRARIES unwind_static)
     elseif (TARGET unwind_shared OR HAVE_LIBUNWIND)

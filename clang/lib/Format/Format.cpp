@@ -1347,10 +1347,19 @@ FormatStyle getLLVMStyle(FormatStyle::LanguageKind Language) {
   LLVMStyle.WhitespaceSensitiveMacros.push_back("CF_SWIFT_NAME");
 
   // Defaults that differ when not C++.
-  if (Language == FormatStyle::LK_TableGen)
+  switch (Language) {
+  case FormatStyle::LK_TableGen:
     LLVMStyle.SpacesInContainerLiterals = false;
-  if (LLVMStyle.isJson())
+    break;
+  case FormatStyle::LK_Json:
     LLVMStyle.ColumnLimit = 0;
+    break;
+  case FormatStyle::LK_Verilog:
+    LLVMStyle.IndentCaseLabels = true;
+    break;
+  default:
+    break;
+  }
 
   return LLVMStyle;
 }
@@ -1710,9 +1719,7 @@ ParseError validateQualifierOrder(FormatStyle *Style) {
   }
 
   // Ensure the list has 'type' in it.
-  auto type = std::find(Style->QualifierOrder.begin(),
-                        Style->QualifierOrder.end(), "type");
-  if (type == Style->QualifierOrder.end())
+  if (!llvm::is_contained(Style->QualifierOrder, "type"))
     return ParseError::MissingQualifierType;
 
   return ParseError::Success;
@@ -1862,7 +1869,7 @@ private:
         std::string Brace;
         if (Token->BraceCount < 0) {
           assert(Token->BraceCount == -1);
-          Brace = '{';
+          Brace = "\n{";
         } else {
           Brace = '\n' + std::string(Token->BraceCount, '}');
         }
@@ -1895,31 +1902,30 @@ private:
   void removeBraces(SmallVectorImpl<AnnotatedLine *> &Lines,
                     tooling::Replacements &Result) {
     const auto &SourceMgr = Env.getSourceManager();
-    bool EndsWithComment = false;
-    for (AnnotatedLine *Line : Lines) {
+    const auto End = Lines.end();
+    for (auto I = Lines.begin(); I != End; ++I) {
+      const auto Line = *I;
       removeBraces(Line->Children, Result);
-      if (Line->Affected) {
-        for (FormatToken *Token = Line->First; Token && !Token->Finalized;
-             Token = Token->Next) {
-          if (!Token->Optional)
-            continue;
-          assert(Token->isOneOf(tok::l_brace, tok::r_brace));
-          assert(Token->Previous || Token == Line->First);
-          const FormatToken *Next = Token->Next;
-          assert(Next || Token == Line->Last);
-          const auto Start =
-              (!Token->Previous && EndsWithComment) ||
-                      (Next && !(Next->isOneOf(tok::kw_else, tok::comment) &&
-                                 Next->NewlinesBefore > 0))
-                  ? Token->Tok.getLocation()
-                  : Token->WhitespaceRange.getBegin();
-          const auto Range =
-              CharSourceRange::getCharRange(Start, Token->Tok.getEndLoc());
-          cantFail(Result.add(tooling::Replacement(SourceMgr, Range, "")));
-        }
+      if (!Line->Affected)
+        continue;
+      const auto NextLine = I + 1 == End ? nullptr : I[1];
+      for (auto Token = Line->First; Token && !Token->Finalized;
+           Token = Token->Next) {
+        if (!Token->Optional)
+          continue;
+        assert(Token->isOneOf(tok::l_brace, tok::r_brace));
+        auto Next = Token->Next;
+        assert(Next || Token == Line->Last);
+        if (!Next && NextLine)
+          Next = NextLine->First;
+        const auto Start =
+            Next && Next->NewlinesBefore == 0 && Next->isNot(tok::eof)
+                ? Token->Tok.getLocation()
+                : Token->WhitespaceRange.getBegin();
+        const auto Range =
+            CharSourceRange::getCharRange(Start, Token->Tok.getEndLoc());
+        cantFail(Result.add(tooling::Replacement(SourceMgr, Range, "")));
       }
-      assert(Line->Last);
-      EndsWithComment = Line->Last->is(tok::comment);
     }
   }
 };
@@ -2533,7 +2539,7 @@ private:
         "UIView",
     };
 
-    for (auto Line : AnnotatedLines) {
+    for (auto *Line : AnnotatedLines) {
       if (Line->First && (Line->First->TokenText.startswith("#") ||
                           Line->First->TokenText == "__pragma" ||
                           Line->First->TokenText == "_Pragma")) {
@@ -3318,7 +3324,7 @@ reformat(const FormatStyle &Style, StringRef Code,
                                NextStartColumn, LastStartColumn);
   if (!Env)
     return {};
-  llvm::Optional<std::string> CurrentCode = None;
+  llvm::Optional<std::string> CurrentCode;
   tooling::Replacements Fixes;
   unsigned Penalty = 0;
   for (size_t I = 0, E = Passes.size(); I < E; ++I) {

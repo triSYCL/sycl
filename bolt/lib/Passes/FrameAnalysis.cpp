@@ -56,20 +56,11 @@ bool shouldFrameOptimize(const llvm::bolt::BinaryFunction &Function) {
     FrameOptFunctionNamesFile = "";
   }
 
-  bool IsValid = true;
-  if (!FrameOptFunctionNames.empty()) {
-    IsValid = false;
-    for (std::string &Name : FrameOptFunctionNames) {
-      if (Function.hasName(Name)) {
-        IsValid = true;
-        break;
-      }
-    }
-  }
-  if (!IsValid)
-    return false;
-
-  return IsValid;
+  if (FrameOptFunctionNames.empty())
+    return true;
+  return llvm::any_of(FrameOptFunctionNames, [&](std::string &Name) {
+    return Function.hasName(Name);
+  });
 }
 } // namespace opts
 
@@ -193,7 +184,7 @@ public:
       switch (CFI->getOperation()) {
       case MCCFIInstruction::OpDefCfa:
         CfaOffset = CFI->getOffset();
-        LLVM_FALLTHROUGH;
+        [[fallthrough]];
       case MCCFIInstruction::OpDefCfaRegister:
         CfaReg = CFI->getRegister();
         break;
@@ -413,7 +404,7 @@ bool FrameAnalysis::computeArgsAccessed(BinaryFunction &BF) {
   bool NoInfo = false;
   FrameAccessAnalysis FAA(BF, getSPT(BF));
 
-  for (BinaryBasicBlock *BB : BF.layout()) {
+  for (BinaryBasicBlock *BB : BF.getLayout().blocks()) {
     FAA.enterNewBB();
 
     for (MCInst &Inst : *BB) {
@@ -474,7 +465,7 @@ bool FrameAnalysis::restoreFrameIndex(BinaryFunction &BF) {
 
   LLVM_DEBUG(dbgs() << "Restoring frame indices for \"" << BF.getPrintName()
                     << "\"\n");
-  for (BinaryBasicBlock *BB : BF.layout()) {
+  for (BinaryBasicBlock *BB : BF.getLayout().blocks()) {
     LLVM_DEBUG(dbgs() << "\tNow at BB " << BB->getName() << "\n");
     FAA.enterNewBB();
 
