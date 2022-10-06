@@ -4,7 +4,7 @@
 // RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 // Test that we can get a fast reports by adding --vitis-ip-part
-// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec2.out --vitis-ip-part=xc7vx330t-ffg1157-1
+// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec2.out --vitis-ip-part=xcu200-fsgd2104-2-e
 
 /*
    A simple typical FPGA-like kernel adding 2 vectors

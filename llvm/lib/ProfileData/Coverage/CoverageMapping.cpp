@@ -25,7 +25,6 @@
 #include "llvm/Support/Errc.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorHandling.h"
-#include "llvm/Support/ManagedStatic.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
@@ -123,13 +122,15 @@ Counter CounterExpressionBuilder::simplify(Counter ExpressionTree) {
   return C;
 }
 
-Counter CounterExpressionBuilder::add(Counter LHS, Counter RHS) {
-  return simplify(get(CounterExpression(CounterExpression::Add, LHS, RHS)));
+Counter CounterExpressionBuilder::add(Counter LHS, Counter RHS, bool Simplify) {
+  auto Cnt = get(CounterExpression(CounterExpression::Add, LHS, RHS));
+  return Simplify ? simplify(Cnt) : Cnt;
 }
 
-Counter CounterExpressionBuilder::subtract(Counter LHS, Counter RHS) {
-  return simplify(
-      get(CounterExpression(CounterExpression::Subtract, LHS, RHS)));
+Counter CounterExpressionBuilder::subtract(Counter LHS, Counter RHS,
+                                           bool Simplify) {
+  auto Cnt = get(CounterExpression(CounterExpression::Subtract, LHS, RHS));
+  return Simplify ? simplify(Cnt) : Cnt;
 }
 
 void CounterMappingContext::dump(const Counter &C, raw_ostream &OS) const {
@@ -895,10 +896,9 @@ std::string CoverageMapError::message() const {
   return getCoverageMapErrString(Err);
 }
 
-static ManagedStatic<CoverageMappingErrorCategoryType> ErrorCategory;
-
 const std::error_category &llvm::coverage::coveragemap_category() {
-  return *ErrorCategory;
+  static CoverageMappingErrorCategoryType ErrorCategory;
+  return ErrorCategory;
 }
 
 char CoverageMapError::ID = 0;

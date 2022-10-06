@@ -14,7 +14,7 @@
 // RUN:  -shared-libs=%mlir_integration_test_dir/libmlir_c_runner_utils%shlibext | \
 // RUN: FileCheck %s
 
-!Filename = type !llvm.ptr<i8>
+!Filename = !llvm.ptr<i8>
 
 #SparseMatrix = #sparse_tensor.encoding<{
   dimLevelType = [ "dense", "compressed" ]
@@ -41,8 +41,8 @@ module {
   // into a dense matrix X.
   //
   func.func @kernel_spmm(%arga: tensor<?x?xf64, #SparseMatrix>,
-                    %argb: tensor<?x?xf64>,
-                    %argx: tensor<?x?xf64> {linalg.inplaceable = true}) -> tensor<?x?xf64> {
+                         %argb: tensor<?x?xf64>,
+                         %argx: tensor<?x?xf64>) -> tensor<?x?xf64> {
     %0 = linalg.generic #spmm
       ins(%arga, %argb: tensor<?x?xf64, #SparseMatrix>, tensor<?x?xf64>)
       outs(%argx: tensor<?x?xf64>) {

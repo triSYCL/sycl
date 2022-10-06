@@ -16,6 +16,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Module.h"
+#include "llvm/IR/Operator.h"
 #include "llvm/Support/FormatVariadic.h"
 
 #include "SYCLUtils.h"
@@ -31,7 +32,11 @@ void removeAttributes(Module &M, ArrayRef<Attribute::AttrKind> Kinds) {
       F.removeAttributeAtIndex(AttributeList::ReturnIndex, Kind);
       for (auto &P : F.args())
         P.removeAttr(Kind);
-      for (User *U : F.users())
+      for (User *U : F.users()) {
+        if (BitCastOperator* BC = dyn_cast<BitCastOperator>(U)) {
+          assert(BC->getNumUses() == 1);
+          U = BC->use_begin()->getUser();
+        }
         if (CallBase *CB = dyn_cast<CallBase>(U)) {
           CB->removeAttributeAtIndex(AttributeList::FunctionIndex, Kind);
           CB->removeAttributeAtIndex(AttributeList::ReturnIndex, Kind);
@@ -39,6 +44,7 @@ void removeAttributes(Module &M, ArrayRef<Attribute::AttrKind> Kinds) {
             CB->removeParamAttr(i, Kind);
           }
         }
+      }
     }
 }
 

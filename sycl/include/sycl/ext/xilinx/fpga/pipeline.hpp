@@ -19,8 +19,8 @@
 #include <type_traits>
 #include <utility>
 
-#include "CL/sycl/detail/defines.hpp"
-#include "CL/sycl/detail/property_helper.hpp"
+#include "sycl/detail/defines.hpp"
+#include "sycl/detail/property_helper.hpp"
 #include "sycl/ext/xilinx/fpga/kernel_properties.hpp"
 
 __SYCL_INLINE_NAMESPACE(cl) {

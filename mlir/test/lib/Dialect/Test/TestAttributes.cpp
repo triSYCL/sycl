@@ -28,21 +28,6 @@ using namespace mlir;
 using namespace test;
 
 //===----------------------------------------------------------------------===//
-// AttrWithSelfTypeParamAttr
-//===----------------------------------------------------------------------===//
-
-Attribute AttrWithSelfTypeParamAttr::parse(AsmParser &parser, Type type) {
-  Type selfType;
-  if (parser.parseType(selfType))
-    return Attribute();
-  return get(parser.getContext(), selfType);
-}
-
-void AttrWithSelfTypeParamAttr::print(AsmPrinter &printer) const {
-  printer << " " << getType();
-}
-
-//===----------------------------------------------------------------------===//
 // AttrWithTypeBuilderAttr
 //===----------------------------------------------------------------------===//
 
@@ -129,10 +114,10 @@ TestI64ElementsAttr::verify(function_ref<InFlightDiagnostic()> emitError,
   return success();
 }
 
-LogicalResult
-TestAttrWithFormatAttr::verify(function_ref<InFlightDiagnostic()> emitError,
-                               int64_t one, std::string two, IntegerAttr three,
-                               ArrayRef<int> four) {
+LogicalResult TestAttrWithFormatAttr::verify(
+    function_ref<InFlightDiagnostic()> emitError, int64_t one, std::string two,
+    IntegerAttr three, ArrayRef<int> four,
+    ArrayRef<AttrWithTypeBuilderAttr> arrayOfAttrWithTypeBuilderAttr) {
   if (four.size() != static_cast<unsigned>(one))
     return emitError() << "expected 'one' to equal 'four.size()'";
   return success();
@@ -207,6 +192,14 @@ SubElementAttrInterface TestSubElementsAccessAttr::replaceImmediateSubAttribute(
     }
   }
   return get(getContext(), first, second, third);
+}
+
+//===----------------------------------------------------------------------===//
+// TestExtern1DI64ElementsAttr
+//===----------------------------------------------------------------------===//
+
+ArrayRef<uint64_t> TestExtern1DI64ElementsAttr::getElements() const {
+  return getHandle().getData()->getData();
 }
 
 //===----------------------------------------------------------------------===//

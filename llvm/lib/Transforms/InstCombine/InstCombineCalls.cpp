@@ -274,7 +274,7 @@ Instruction *InstCombinerImpl::SimplifyAnyMemSet(AnyMemSetInst *MI) {
     return nullptr;
   const uint64_t Len = LenC->getLimitedValue();
   assert(Len && "0-sized memory setting should be removed already.");
-  const Align Alignment = assumeAligned(MI->getDestAlignment());
+  const Align Alignment = MI->getDestAlign().valueOrOne();
 
   // If it is an atomic and alignment is less than the size then we will
   // introduce the unaligned memory access which will be later transformed
@@ -795,7 +795,7 @@ static CallInst *canonicalizeConstantArg0ToArg1(CallInst &Call) {
 /// \p Result and a constant \p Overflow value.
 static Instruction *createOverflowTuple(IntrinsicInst *II, Value *Result,
                                         Constant *Overflow) {
-  Constant *V[] = {UndefValue::get(Result->getType()), Overflow};
+  Constant *V[] = {PoisonValue::get(Result->getType()), Overflow};
   StructType *ST = cast<StructType>(II->getType());
   Constant *Struct = ConstantStruct::get(ST, V);
   return InsertValueInst::Create(Struct, Result, 0);
@@ -1137,7 +1137,7 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
   // Don't try to simplify calls without uses. It will not do anything useful,
   // but will result in the following folds being skipped.
   if (!CI.use_empty())
-    if (Value *V = SimplifyCall(&CI, SQ.getWithInstruction(&CI)))
+    if (Value *V = simplifyCall(&CI, SQ.getWithInstruction(&CI)))
       return replaceInstUsesWith(CI, V);
 
   if (isFreeCall(&CI, &TLI))
@@ -1235,6 +1235,15 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
   if (II->isCommutative()) {
     if (CallInst *NewCall = canonicalizeConstantArg0ToArg1(CI))
       return NewCall;
+  }
+
+  // Unused constrained FP intrinsic calls may have declared side effect, which
+  // prevents it from being removed. In some cases however the side effect is
+  // actually absent. To detect this case, call SimplifyConstrainedFPCall. If it
+  // returns a replacement, the call may be removed.
+  if (CI.use_empty() && isa<ConstrainedFPIntrinsic>(CI)) {
+    if (simplifyConstrainedFPCall(&CI, SQ.getWithInstruction(&CI)))
+      return eraseInstFromFunction(CI);
   }
 
   Intrinsic::ID IID = II->getIntrinsicID();
@@ -1424,23 +1433,25 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
   }
   case Intrinsic::bswap: {
     Value *IIOperand = II->getArgOperand(0);
-    Value *X = nullptr;
 
     // Try to canonicalize bswap-of-logical-shift-by-8-bit-multiple as
     // inverse-shift-of-bswap:
-    // bswap (shl X, C) --> lshr (bswap X), C
-    // bswap (lshr X, C) --> shl (bswap X), C
-    // TODO: Use knownbits to allow variable shift and non-splat vector match.
-    BinaryOperator *BO;
-    if (match(IIOperand, m_OneUse(m_BinOp(BO)))) {
+    // bswap (shl X, Y) --> lshr (bswap X), Y
+    // bswap (lshr X, Y) --> shl (bswap X), Y
+    Value *X, *Y;
+    if (match(IIOperand, m_OneUse(m_LogicalShift(m_Value(X), m_Value(Y))))) {
+      // The transform allows undef vector elements, so try a constant match
+      // first. If knownbits can handle that case, that clause could be removed.
+      unsigned BitWidth = IIOperand->getType()->getScalarSizeInBits();
       const APInt *C;
-      if (match(BO, m_LogicalShift(m_Value(X), m_APIntAllowUndef(C))) &&
-          (*C & 7) == 0) {
+      if ((match(Y, m_APIntAllowUndef(C)) && (*C & 7) == 0) ||
+          MaskedValueIsZero(Y, APInt::getLowBitsSet(BitWidth, 3))) {
         Value *NewSwap = Builder.CreateUnaryIntrinsic(Intrinsic::bswap, X);
         BinaryOperator::BinaryOps InverseShift =
-            BO->getOpcode() == Instruction::Shl ? Instruction::LShr
-                                                : Instruction::Shl;
-        return BinaryOperator::Create(InverseShift, NewSwap, BO->getOperand(1));
+            cast<BinaryOperator>(IIOperand)->getOpcode() == Instruction::Shl
+                ? Instruction::LShr
+                : Instruction::Shl;
+        return BinaryOperator::Create(InverseShift, NewSwap, Y);
       }
     }
 
@@ -1532,7 +1543,10 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
         !ShAmtC->containsConstantExpression()) {
       // Canonicalize a shift amount constant operand to modulo the bit-width.
       Constant *WidthC = ConstantInt::get(Ty, BitWidth);
-      Constant *ModuloC = ConstantExpr::getURem(ShAmtC, WidthC);
+      Constant *ModuloC =
+          ConstantFoldBinaryOpOperands(Instruction::URem, ShAmtC, WidthC, DL);
+      if (!ModuloC)
+        return nullptr;
       if (ModuloC != ShAmtC)
         return replaceOperand(*II, 2, ModuloC);
 
@@ -1829,7 +1843,7 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
     }
 
     // Try to simplify the underlying FMul.
-    if (Value *V = SimplifyFMulInst(II->getArgOperand(0), II->getArgOperand(1),
+    if (Value *V = simplifyFMulInst(II->getArgOperand(0), II->getArgOperand(1),
                                     II->getFastMathFlags(),
                                     SQ.getWithInstruction(II))) {
       auto *FAdd = BinaryOperator::CreateFAdd(V, II->getArgOperand(2));
@@ -1860,7 +1874,7 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
 
     // Try to simplify the underlying FMul. We can only apply simplifications
     // that do not require rounding.
-    if (Value *V = SimplifyFMAFMul(II->getArgOperand(0), II->getArgOperand(1),
+    if (Value *V = simplifyFMAFMul(II->getArgOperand(0), II->getArgOperand(1),
                                    II->getFastMathFlags(),
                                    SQ.getWithInstruction(II))) {
       auto *FAdd = BinaryOperator::CreateFAdd(V, II->getArgOperand(2));
@@ -2346,7 +2360,7 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
     }
     break;
   }
-  case Intrinsic::experimental_vector_insert: {
+  case Intrinsic::vector_insert: {
     Value *Vec = II->getArgOperand(0);
     Value *SubVec = II->getArgOperand(1);
     Value *Idx = II->getArgOperand(2);
@@ -2392,7 +2406,7 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
     }
     break;
   }
-  case Intrinsic::experimental_vector_extract: {
+  case Intrinsic::vector_extract: {
     Value *Vec = II->getArgOperand(0);
     Value *Idx = II->getArgOperand(1);
 
@@ -2667,8 +2681,8 @@ Instruction *InstCombinerImpl::visitCallInst(CallInst &CI) {
   default: {
     // Handle target specific intrinsics
     Optional<Instruction *> V = targetInstCombineIntrinsic(*II);
-    if (V.hasValue())
-      return V.getValue();
+    if (V)
+      return V.value();
     break;
   }
   }
@@ -3131,7 +3145,7 @@ Instruction *InstCombinerImpl::visitCallBase(CallBase &Call) {
     Optional<OperandBundleUse> Bundle =
         GCSP.getOperandBundle(LLVMContext::OB_gc_live);
     unsigned NumOfGCLives = LiveGcValues.size();
-    if (!Bundle.hasValue() || NumOfGCLives == Bundle->Inputs.size())
+    if (!Bundle || NumOfGCLives == Bundle->Inputs.size())
       break;
     // We can reduce the size of gc live bundle.
     DenseMap<Value *, unsigned> Val2Idx;

@@ -24,6 +24,10 @@ cl::opt<bool>
                      cl::desc("try to lower memory intrinsics to their "
                               "underlying LLVM IR types and not i8"));
 
+cl::opt<bool> RequestedUnrollCount(
+    "lower-mem-intr-full-unroll", cl::Hidden,
+    cl::desc("add full unroll annotations to generated loops"));
+
 Value *Skip1BitCast(Value *V) {
   assert(V->getType()->isPointerTy());
 
@@ -34,7 +38,20 @@ Value *Skip1BitCast(Value *V) {
   return V;
 }
 
-/// Choose the LLVM type that should be used for a memory operation on Ptr1 and maybe Ptr2
+void maybeAddUnrollAnnotation(BranchInst *Br) {
+  if (RequestedUnrollCount > 0) {
+    MDNode *MD =
+        MDNode::get(Br->getContext(),
+                    {MDString::get(Br->getContext(), "llvm.loop.unroll.full")});
+
+    MDNode *LoopID = MDNode::getDistinct(Br->getContext(), {nullptr, MD});
+    LoopID->replaceOperandWith(0, LoopID);
+    Br->setMetadata(LLVMContext::MD_loop, LoopID);
+  }
+}
+
+/// Choose the LLVM type that should be used for a memory operation on Ptr1 and
+/// maybe Ptr2
 Type *determineUnderlyingType(Type* Default, Value *Ptr1, Value *Ptr2 = nullptr) {
   assert((Ptr1->getType()->isPointerTy() &&
           Ptr1->getType()->getPointerElementType()->isIntegerTy(8)) &&
@@ -189,8 +206,9 @@ void llvm::createMemCpyLoopKnownSize(Instruction *InsertBefore, Value *SrcAddr,
 
     // Create the loop branch condition.
     Constant *LoopEndCI = ConstantInt::get(TypeOfCopyLen, LoopEndCount);
-    LoopBuilder.CreateCondBr(LoopBuilder.CreateICmpULT(NewIndex, LoopEndCI),
-                             LoopBB, PostLoopBB);
+    BranchInst *Br = LoopBuilder.CreateCondBr(
+        LoopBuilder.CreateICmpULT(NewIndex, LoopEndCI), LoopBB, PostLoopBB);
+    maybeAddUnrollAnnotation(Br);
   }
 
   uint64_t BytesCopied = LoopEndCount * LoopOpSize;
@@ -537,7 +555,8 @@ static void createMemMoveLoop(Instruction *InsertBefore, Value *SrcAddr,
       ExitBB, LoopBB);
   LoopPhi->addIncoming(IndexPtr, LoopBB);
   LoopPhi->addIncoming(CopyLen, CopyBackwardsBB);
-  BranchInst::Create(ExitBB, LoopBB, CompareN, ThenTerm);
+  BranchInst *Br = BranchInst::Create(ExitBB, LoopBB, CompareN, ThenTerm);
+  maybeAddUnrollAnnotation(Br);
   ThenTerm->eraseFromParent();
 
   // Copying forward.
@@ -557,7 +576,8 @@ static void createMemMoveLoop(Instruction *InsertBefore, Value *SrcAddr,
   FwdCopyPhi->addIncoming(FwdIndexPtr, FwdLoopBB);
   FwdCopyPhi->addIncoming(ConstantInt::get(TypeOfCopyLen, 0), CopyForwardBB);
 
-  BranchInst::Create(ExitBB, FwdLoopBB, CompareN, ElseTerm);
+  Br = BranchInst::Create(ExitBB, FwdLoopBB, CompareN, ElseTerm);
+  maybeAddUnrollAnnotation(Br);
   ElseTerm->eraseFromParent();
 }
 
@@ -609,8 +629,9 @@ static void createMemSetLoop(Instruction *InsertBefore, Value *DstAddr,
       LoopBuilder.CreateAdd(LoopIndex, ConstantInt::get(TypeOfCopyLen, 1));
   LoopIndex->addIncoming(NewIndex, LoopBB);
 
-  LoopBuilder.CreateCondBr(LoopBuilder.CreateICmpULT(NewIndex, CopyLen), LoopBB,
-                           NewBB);
+  BranchInst *Br = LoopBuilder.CreateCondBr(
+      LoopBuilder.CreateICmpULT(NewIndex, CopyLen), LoopBB, NewBB);
+  maybeAddUnrollAnnotation(Br);
 }
 
 template <typename T>

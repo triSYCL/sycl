@@ -1783,14 +1783,14 @@ namespace {
          StartIndex = FieldIndex;
      } else if (StartIndex) {
        EHStack.pushCleanup<SanitizeDtorFieldRange>(
-           NormalAndEHCleanup, DD, StartIndex.getValue(), FieldIndex);
+           NormalAndEHCleanup, DD, StartIndex.value(), FieldIndex);
        StartIndex = None;
      }
    }
    void End() {
      if (StartIndex)
        EHStack.pushCleanup<SanitizeDtorFieldRange>(NormalAndEHCleanup, DD,
-                                                   StartIndex.getValue(), -1);
+                                                   StartIndex.value(), -1);
    }
  };
 } // end anonymous namespace
@@ -2695,9 +2695,9 @@ void CodeGenFunction::EmitTypeMetadataCodeForVCall(const CXXRecordDecl *RD,
   if (SanOpts.has(SanitizerKind::CFIVCall))
     EmitVTablePtrCheckForCall(RD, VTable, CodeGenFunction::CFITCK_VCall, Loc);
   else if (CGM.getCodeGenOpts().WholeProgramVTables &&
-           // Don't insert type test assumes if we are forcing public std
+           // Don't insert type test assumes if we are forcing public
            // visibility.
-           !CGM.HasLTOVisibilityPublicStd(RD)) {
+           !CGM.AlwaysHasLTOVisibilityPublic(RD)) {
     llvm::Metadata *MD =
         CGM.CreateMetadataIdentifierForType(QualType(RD->getTypeForDecl(), 0));
     llvm::Value *TypeId =

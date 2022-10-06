@@ -6,7 +6,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "CL/sycl/detail/defines.hpp"
+#include "sycl/detail/defines.hpp"
 
 #ifndef SYCL_XILINX_FPGA_STATIC_UNROLL_HPP
 #define SYCL_XILINX_FPGA_STATIC_UNROLL_HPP

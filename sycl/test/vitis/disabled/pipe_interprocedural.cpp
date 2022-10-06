@@ -1,5 +1,5 @@
 // This is not yet implemented
-// REQUIRES: vitis && !vitis_cpu
+// REQUIRES: vitis
 // Pipes are not implemented for the host device
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
@@ -8,6 +8,8 @@
 
 #include <sycl/sycl.hpp>
 #include <sycl/ext/intel/fpga_extensions.hpp>
+
+using namespace sycl;
 
 using PipeA = sycl::ext::intel::pipe<class PipeNameA, int>;
 

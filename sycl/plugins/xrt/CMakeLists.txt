@@ -26,8 +26,8 @@ endif()
 set(SYCL_BUILD_PI_XRT_INCLUDE_DIR "${SYCL_BUILD_PI_XRT_INCLUDE_DIR}" CACHE STRING "XRT include dir")
 
 add_library(pi_xrt SHARED
-"${sycl_inc_dir}/CL/sycl/detail/pi.h"
-"${sycl_inc_dir}/CL/sycl/detail/pi.hpp"
+"${sycl_inc_dir}/sycl/detail/pi.h"
+"${sycl_inc_dir}/sycl/detail/pi.hpp"
 "pi_xrt.cpp"
 )
 

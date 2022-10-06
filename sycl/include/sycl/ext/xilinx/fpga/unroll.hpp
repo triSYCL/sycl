@@ -9,7 +9,7 @@
 #ifndef SYCL_XILINX_FPGA_UNROLL_HPP
 #define SYCL_XILINX_FPGA_UNROLL_HPP
 
-#include "CL/sycl/detail/defines.hpp"
+#include "sycl/detail/defines.hpp"
 
 __SYCL_INLINE_NAMESPACE(cl) {
 

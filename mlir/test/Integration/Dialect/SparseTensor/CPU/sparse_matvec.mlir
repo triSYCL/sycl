@@ -15,7 +15,7 @@
 // RUN:  -shared-libs=%mlir_integration_test_dir/libmlir_c_runner_utils%shlibext | \
 // RUN: FileCheck %s
 
-!Filename = type !llvm.ptr<i8>
+!Filename = !llvm.ptr<i8>
 
 #SparseMatrix = #sparse_tensor.encoding<{
   dimLevelType = [ "dense", "compressed" ],
@@ -44,8 +44,8 @@ module {
   // into a dense vector x.
   //
   func.func @kernel_matvec(%arga: tensor<?x?xi32, #SparseMatrix>,
-                      %argb: tensor<?xi32>,
-                      %argx: tensor<?xi32> {linalg.inplaceable = true})
+                           %argb: tensor<?xi32>,
+                           %argx: tensor<?xi32>)
 		      -> tensor<?xi32> {
     %0 = linalg.generic #matvec
       ins(%arga, %argb: tensor<?x?xi32, #SparseMatrix>, tensor<?xi32>)

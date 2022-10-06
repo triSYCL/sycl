@@ -346,7 +346,6 @@ namespace clang {
         ModulePassManager PreLinkingSyclPasses;
         PreLinkingSyclPasses.addPass(
             createModuleToFunctionPassAdaptor(SYCLLowerWGScopePass()));
-        PreLinkingSyclPasses.addPass(LowerSYCLMetaDataPass());
         PreLinkingSyclPasses.run(*getModule(), MAM);
       }
 
@@ -1024,8 +1023,7 @@ CodeGenAction::CreateASTConsumer(CompilerInstance &CI, StringRef InFile) {
   if (BA != Backend_EmitNothing && !OS)
     return nullptr;
 
-  if (CI.getCodeGenOpts().OpaquePointers)
-    VMContext->setOpaquePointers(true);
+  VMContext->setOpaquePointers(CI.getCodeGenOpts().OpaquePointers);
 
   // Load bitcode modules to link with, if we need to.
   if (LinkModules.empty())

@@ -47,6 +47,9 @@ using namespace llvm;
 static cl::opt<std::string> KernelPropGenOutput("sycl-kernel-propgen-output",
                                                 cl::ReallyHidden);
 
+static cl::opt<bool> MAxiBundleExtraArg("sycl-kernel-propgen-maxi-extra-arg",
+                                               cl::ReallyHidden);
+
 // Put the code in an anonymous namespace to avoid polluting the global
 // namespace
 namespace {
@@ -87,13 +90,13 @@ struct KernelPropGenState {
       return;
     LLVMContext &C = F.getContext();
     // Up to 2021.2 m_axi bundles were encoded with a call to sideeffect
-    auto *BundleIDConstant =
+    Value *BundleIDConstant =
         ConstantDataArray::getString(C, Bundle->BundleName, false);
-    auto *MinusOne64 = ConstantInt::getSigned(IntegerType::get(C, 64), -1);
-    auto *Zero32 = ConstantInt::getSigned(IntegerType::get(C, 32), 0);
-    auto *CAZ =
+    Value *MinusOne64 = ConstantInt::getSigned(IntegerType::get(C, 64), -1);
+    Value *Zero32 = ConstantInt::getSigned(IntegerType::get(C, 32), 0);
+    Value *CAZ =
         ConstantAggregateZero::get(ArrayType::get(IntegerType::get(C, 8), 0));
-    auto *Slave = ConstantDataArray::getString(C, "slave", false);
+    Value *Slave = ConstantDataArray::getString(C, "slave", false);
     Function *SideEffect = Intrinsic::getDeclaration(&M, Intrinsic::sideeffect);
     SideEffect->addFnAttr(Attribute::NoUnwind);
     SideEffect->addFnAttr(Attribute::InaccessibleMemOnly);
@@ -105,7 +108,8 @@ struct KernelPropGenState {
         "xlx_m_axi",
         ArrayRef<Value *>{&Arg, BundleIDConstant, MinusOne64, Slave, CAZ,
                           MinusOne64, MinusOne64, MinusOne64, MinusOne64,
-                          MinusOne64, MinusOne64, Zero32});
+                          MinusOne64, MinusOne64,
+                          MAxiBundleExtraArg ? CAZ : Zero32});
     Instruction *Instr = CallInst::Create(SideEffect, {}, {OpBundle});
     Instr->insertBefore(F.getEntryBlock().getTerminator());
   }

@@ -60,6 +60,9 @@ namespace {
 cl::opt<bool> AfterO3("lower-delayed-sycl-metadata", cl::Hidden,
                       cl::init(false));
 
+cl::opt<bool> ArrayPartitionHasModeArg("sycl-vxx-array-partition-mode-arg",
+                                       cl::ReallyHidden);
+
 static StringRef kindOf(const char *Str) {
   return StringRef(Str, strlen(Str) + 1);
 }
@@ -272,7 +275,9 @@ public:
     annotateLoop(EnclosingLoop, Annot);
   }
 
-  void lowerAsSideEffect(llvm::Value *V, StringRef XclId) {
+  template<typename ...Ts>
+  void lowerAsSideEffect(
+      llvm::Value *V, StringRef XclId, Ts... ts) {
     auto *F = dyn_cast<Function>(V);
     if (!F)
       return;
@@ -282,6 +287,7 @@ public:
     std::vector<Value *> Args;
     for (auto &A : F->args())
       Args.push_back(&A);
+    (void)std::initializer_list<int>{(Args.push_back(ts), 0)...};
     OperandBundleDef OpBundle(XclId.str(), Args);
 
     Instruction *I = CallInst::Create(SideEffect, {}, {OpBundle});
@@ -348,8 +354,12 @@ public:
       if (AnnotKind == kindOf("xilinx_pipeline")) {
         lowerPipelineDecoration(CS);
       } else if (AnnotKind == kindOf("xilinx_partition_array")) {
-        lowerAsSideEffect(getUnderlyingObject(CS->getAggregateElement(0u)),
-                          "xlx_array_partition");
+        if (ArrayPartitionHasModeArg)
+          lowerAsSideEffect(getUnderlyingObject(CS->getAggregateElement(0u)),
+                            "xlx_array_partition", ConstantInt::getFalse(Ctx));
+        else
+          lowerAsSideEffect(getUnderlyingObject(CS->getAggregateElement(0u)),
+                            "xlx_array_partition");
       } else if (AnnotKind == kindOf("xilinx_bind_storage")) {
         lowerAsSideEffect(getUnderlyingObject(CS->getAggregateElement(0u)),
                           "xlx_bind_storage");

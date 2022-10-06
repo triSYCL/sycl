@@ -536,6 +536,17 @@ public:
 
     // What was the old variable value?
     ValueIDNum OldValue = VarLocs[MLoc.asU64()];
+    clobberMloc(MLoc, OldValue, Pos, MakeUndef);
+  }
+  /// Overload that takes an explicit value \p OldValue for when the value in
+  /// \p MLoc has changed and the TransferTracker's locations have not been
+  /// updated yet.
+  void clobberMloc(LocIdx MLoc, ValueIDNum OldValue,
+                   MachineBasicBlock::iterator Pos, bool MakeUndef = true) {
+    auto ActiveMLocIt = ActiveMLocs.find(MLoc);
+    if (ActiveMLocIt == ActiveMLocs.end())
+      return;
+
     VarLocs[MLoc.asU64()] = ValueIDNum::EmptyValue;
 
     // Examine the remaining variable locations: if we can find the same value
@@ -870,19 +881,72 @@ MachineInstrBuilder MLocTracker::emitLoc(Optional<LocIdx> MLoc,
     // the variable is.
     if (Offset == 0) {
       const SpillLoc &Spill = SpillLocs[SpillID.id()];
-      Expr = TRI.prependOffsetExpression(Expr, DIExpression::ApplyOffset,
-                                         Spill.SpillOffset);
       unsigned Base = Spill.SpillBase;
       MIB.addReg(Base);
-      MIB.addImm(0);
 
-      // Being on the stack makes this location indirect; if it was _already_
-      // indirect though, we need to add extra indirection. See this test for
-      // a scenario where this happens:
-      //     llvm/test/DebugInfo/X86/spill-nontrivial-param.ll
+      // There are several ways we can dereference things, and several inputs
+      // to consider:
+      // * NRVO variables will appear with IsIndirect set, but should have
+      //   nothing else in their DIExpressions,
+      // * Variables with DW_OP_stack_value in their expr already need an
+      //   explicit dereference of the stack location,
+      // * Values that don't match the variable size need DW_OP_deref_size,
+      // * Everything else can just become a simple location expression.
+
+      // We need to use deref_size whenever there's a mismatch between the
+      // size of value and the size of variable portion being read.
+      // Additionally, we should use it whenever dealing with stack_value
+      // fragments, to avoid the consumer having to determine the deref size
+      // from DW_OP_piece.
+      bool UseDerefSize = false;
+      unsigned ValueSizeInBits = getLocSizeInBits(*MLoc);
+      unsigned DerefSizeInBytes = ValueSizeInBits / 8;
+      if (auto Fragment = Var.getFragment()) {
+        unsigned VariableSizeInBits = Fragment->SizeInBits;
+        if (VariableSizeInBits != ValueSizeInBits || Expr->isComplex())
+          UseDerefSize = true;
+      } else if (auto Size = Var.getVariable()->getSizeInBits()) {
+        if (*Size != ValueSizeInBits) {
+          UseDerefSize = true;
+        }
+      }
+
       if (Properties.Indirect) {
-        std::vector<uint64_t> Elts = {dwarf::DW_OP_deref};
-        Expr = DIExpression::append(Expr, Elts);
+        // This is something like an NRVO variable, where the pointer has been
+        // spilt to the stack, or a dbg.addr pointing at a coroutine frame
+        // field. It should end up being a memory location, with the pointer
+        // to the variable loaded off the stack with a deref. It can't be a
+        // DW_OP_stack_value expression.
+        assert(!Expr->isImplicit());
+        Expr = TRI.prependOffsetExpression(
+            Expr, DIExpression::ApplyOffset | DIExpression::DerefAfter,
+            Spill.SpillOffset);
+        MIB.addImm(0);
+      } else if (UseDerefSize) {
+        // We're loading a value off the stack that's not the same size as the
+        // variable. Add / subtract stack offset, explicitly deref with a size,
+        // and add DW_OP_stack_value if not already present.
+        SmallVector<uint64_t, 2> Ops = {dwarf::DW_OP_deref_size,
+                                        DerefSizeInBytes};
+        Expr = DIExpression::prependOpcodes(Expr, Ops, true);
+        unsigned Flags = DIExpression::StackValue | DIExpression::ApplyOffset;
+        Expr = TRI.prependOffsetExpression(Expr, Flags, Spill.SpillOffset);
+        MIB.addReg(0);
+      } else if (Expr->isComplex()) {
+        // A variable with no size ambiguity, but with extra elements in it's
+        // expression. Manually dereference the stack location.
+        assert(Expr->isComplex());
+        Expr = TRI.prependOffsetExpression(
+            Expr, DIExpression::ApplyOffset | DIExpression::DerefAfter,
+            Spill.SpillOffset);
+        MIB.addReg(0);
+      } else {
+        // A plain value that has been spilt to the stack, with no further
+        // context. Request a location expression, marking the DBG_VALUE as
+        // IsIndirect.
+        Expr = TRI.prependOffsetExpression(Expr, DIExpression::ApplyOffset,
+                                           Spill.SpillOffset);
+        MIB.addImm(0);
       }
     } else {
       // This is a stack location with a weird subregister offset: emit an undef
@@ -1677,8 +1741,34 @@ bool InstrRefBasedLDV::transferRegisterCopy(MachineInstr &MI) {
   if (EmulateOldLDV && !SrcRegOp->isKill())
     return false;
 
+  // Before we update MTracker, remember which values were present in each of
+  // the locations about to be overwritten, so that we can recover any
+  // potentially clobbered variables.
+  DenseMap<LocIdx, ValueIDNum> ClobberedLocs;
+  if (TTracker) {
+    for (MCRegAliasIterator RAI(DestReg, TRI, true); RAI.isValid(); ++RAI) {
+      LocIdx ClobberedLoc = MTracker->getRegMLoc(*RAI);
+      auto MLocIt = TTracker->ActiveMLocs.find(ClobberedLoc);
+      // If ActiveMLocs isn't tracking this location or there are no variables
+      // using it, don't bother remembering.
+      if (MLocIt == TTracker->ActiveMLocs.end() || MLocIt->second.empty())
+        continue;
+      ValueIDNum Value = MTracker->readReg(*RAI);
+      ClobberedLocs[ClobberedLoc] = Value;
+    }
+  }
+
   // Copy MTracker info, including subregs if available.
   InstrRefBasedLDV::performCopy(SrcReg, DestReg);
+
+  // The copy might have clobbered variables based on the destination register.
+  // Tell TTracker about it, passing the old ValueIDNum to search for
+  // alternative locations (or else terminating those variables).
+  if (TTracker) {
+    for (auto LocVal : ClobberedLocs) {
+      TTracker->clobberMloc(LocVal.first, LocVal.second, MI.getIterator(), false);
+    }
+  }
 
   // Only produce a transfer of DBG_VALUE within a block where old LDV
   // would have. We might make use of the additional value tracking in some
@@ -1690,15 +1780,6 @@ bool InstrRefBasedLDV::transferRegisterCopy(MachineInstr &MI) {
   // VarLocBasedImpl would quit tracking the old location after copying.
   if (EmulateOldLDV && SrcReg != DestReg)
     MTracker->defReg(SrcReg, CurBB, CurInst);
-
-  // Finally, the copy might have clobbered variables based on the destination
-  // register. Tell TTracker about it, in case a backup location exists.
-  if (TTracker) {
-    for (MCRegAliasIterator RAI(DestReg, TRI, true); RAI.isValid(); ++RAI) {
-      LocIdx ClobberedLoc = MTracker->getRegMLoc(*RAI);
-      TTracker->clobberMloc(ClobberedLoc, MI.getIterator(), false);
-    }
-  }
 
   return true;
 }
@@ -3122,11 +3203,11 @@ bool InstrRefBasedLDV::ExtendRanges(MachineFunction &MF,
   assert(MaxNumBlocks >= 0);
   ++MaxNumBlocks;
 
+  initialSetup(MF);
+
   MLocTransfer.resize(MaxNumBlocks);
   vlocs.resize(MaxNumBlocks, VLocTracker(OverlapFragments, EmptyExpr));
   SavedLiveIns.resize(MaxNumBlocks);
-
-  initialSetup(MF);
 
   produceMLocTransferFunction(MF, MLocTransfer, MaxNumBlocks);
 
