@@ -27,6 +27,7 @@
         1. [Loop unrolling](#Loop-unrolling)
         1. [Pinning allocators to specific memory banks](#Pinning-allocators-to-specific-memory-banks)
         1. [Array partitioning](#Array-partitioning)
+        1. [Multiple annotations](#Multiple-annotations)
     1. [AMD/Xilinx Macros](#AMDXilinx-Macros)
     1. [xsim issues](#xsim-issues)
 1. [Implementation](#Implementation)
@@ -1436,6 +1437,20 @@ queue.submit([&](sycl::handler &cgh) {
 ```
 
 for more examples see [this test case](../test/vitis/simple_tests/partion_ndarray.cpp) or [this one](../test/vitis/edge_detection/edge_detection.cpp)
+
+### Multiple annotations
+
+It is also possible to apply multiple annotations on the same loop by using ``sycl::ext::xilinx::annot`` like the following:
+
+```cpp
+/// assuming
+using namespace sycl::ext::xilinx
+
+for (int i = 0; i < a.get_size(); i++)
+  annot<pipeline<>, unroll<checked_fixed_unrolling<8>>>([&] { a[i] = 0; });
+```
+
+This loop will be pipelined with default settings and unrolled by a factor of 8
 
 ## AMD/Xilinx Macros
 

@@ -60,14 +60,17 @@ struct no_unrolling {
 
  \tparam T type of the functor to execute
 */
-template <typename UnrollType = full_unrolling, typename T>
-__SYCL_ALWAYS_INLINE void unroll(T &&functor) {
+template <typename UnrollType = full_unrolling>
+struct unroll {
+  template<typename T>
+  __SYCL_ALWAYS_INLINE unroll(T functor) {
   __SYCL_DEVICE_ANNOTATE("xilinx_unroll", UnrollType::UnrollingFactor,
-                        UnrollType::checked)
+                         UnrollType::checked)
   int annotationAnchor;
   (void)annotationAnchor;
-  std::forward<T>(functor)();
-}
+  functor();
+  }
+};
 
 } // namespace ext::xilinx
 }
