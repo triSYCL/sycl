@@ -49,6 +49,11 @@ static int getDevicePreference(const device &Device) {
       backend::ext_oneapi_level_zero)
     Score += 50;
 
+  /// Prefer the XRT backend to the OpenCL backend for AMD FPGA
+  if (detail::getSyclObjImpl(Device)->getPlugin().getBackend() ==
+      backend::xrt)
+    Score += 50;
+
   return Score;
 }
 
