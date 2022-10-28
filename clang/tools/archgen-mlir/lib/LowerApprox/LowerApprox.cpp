@@ -9,6 +9,7 @@
 #include "archgen/FixedPt/FixedPt.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/Support/LLVM.h"
+#include <cmath>
 #ifndef ARCHGEN_SOLLYA_LIB_PATH
 #error "unable to find sollya"
 #endif
@@ -327,7 +328,10 @@ struct LowerApprox {
         input.getType().cast<fixedpt::FixedPtType>();
 
     sollya_obj_t sollyaTree = buildSollyaTree(evaluateOp);
-    double accuracy = std::pow(2.0, outputType.getLsb() - 1);
+
+    // We will add the rounding bit in the deg 0 coeff so we need to get extra 
+    // accurate to allow this rounding to be merged in the horner scheme
+    double accuracy = std::ldexp(double{1.0}, outputType.getLsb() - 2);
 
     /// Build sollya expresion tree
     sollya_lib_printf("sollya: %b\n", sollyaTree);
@@ -337,6 +341,8 @@ struct LowerApprox {
 
     flopoco::BasicPolyApprox flopocoApprox(sollyaTree, accuracy, 0,
                                            inputType.isSigned());
+    // Adding the rounding bit to the constant
+    flopocoApprox.getCoeff(0)->addRoundBit(outputType.getLsb()-1);
     flopoco::VirtexUltrascalePlus flopocoTarget;
     flopoco::FixHornerArchitecture horner(
         &flopocoTarget, inputType.getLsb(), outputType.getMsb(),
@@ -390,7 +396,7 @@ struct LowerApprox {
     /// This should not happened unless the result is a constant
     if (expr.getType() != outputType)
       expr = rewriter.create<fixedpt::ConvertOp>(
-          loc, outputType, expr, fixedpt::RoundingMode::nearest);
+          loc, outputType, expr, fixedpt::RoundingMode::zero);
     output.replaceAllUsesWith(expr);
 
     /// Remove the old approx tree
