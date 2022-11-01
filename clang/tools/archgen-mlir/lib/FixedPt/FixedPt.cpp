@@ -217,27 +217,49 @@ void FixedPointAttr::print(mlir::AsmPrinter &odsPrinter) const {
 
 #include "archgen/FixedPt/FixedPtEnum.cpp.inc"
 
-fixedpt::RoundingMode fixedpt::getCommonRoundingMod(fixedpt::RoundingMode m1,
-                                                    fixedpt::RoundingMode m2) {
-  assert((unsigned)m1 <= fixedpt::getMaxEnumValForRoundingMode());
-  assert((unsigned)m2 <= fixedpt::getMaxEnumValForRoundingMode());
+namespace {
+
+auto lookupCommonRoundingRaw = [](auto x, auto y) {
   // clang-format off
-  fixedpt::RoundingMode table[] = {
-    RoundingMode::zero, RoundingMode::nearest,
-    RoundingMode::nearest, RoundingMode::nearest,
+  static fixedpt::RoundingMode commonRoundingTable[] = {
+    RoundingMode::truncate, RoundingMode::nearest, RoundingMode::nearest_even_to_up, RoundingMode::nearest_even_to_down, incompatibleRounding,
+    RoundingMode::nearest, RoundingMode::nearest, RoundingMode::nearest_even_to_up, RoundingMode::nearest_even_to_down, incompatibleRounding,
+    RoundingMode::nearest_even_to_up, RoundingMode::nearest_even_to_up, incompatibleRounding, incompatibleRounding, incompatibleRounding,
+    RoundingMode::nearest_even_to_down, RoundingMode::nearest_even_to_down, incompatibleRounding, incompatibleRounding, incompatibleRounding,
+    incompatibleRounding, incompatibleRounding, incompatibleRounding, incompatibleRounding, incompatibleRounding,
   };
   // clang-format on
-  auto access = [&](auto x, auto y) {
-    return table[(unsigned)m1 * (fixedpt::getMaxEnumValForRoundingMode() + 1) +
-                 (unsigned)m2];
-  };
+  return commonRoundingTable[(unsigned)x *
+                                 (fixedpt::getMaxEnumValForRoundingMode() + 2) +
+                             (unsigned)y];
+};
+
+bool isValidOrIncompatibleRounding(fixedpt::RoundingMode m) {
+  return ((unsigned)m <= fixedpt::getMaxEnumValForRoundingMode()) ||
+         m == incompatibleRounding;
+}
+
+} // namespace
+
+bool fixedpt::hasCommonRounding(fixedpt::RoundingMode m1, fixedpt::RoundingMode m2) {
+  assert(isValidOrIncompatibleRounding(m1));
+  assert(isValidOrIncompatibleRounding(m2));
+  return lookupCommonRoundingRaw(m1, m2) != incompatibleRounding;
+}
+
+fixedpt::RoundingMode fixedpt::getCommonRoundingMod(fixedpt::RoundingMode m1,
+                                                    fixedpt::RoundingMode m2) {
+  assert(isValidOrIncompatibleRounding(m1));
+  assert(isValidOrIncompatibleRounding(m2));
 
 #ifndef NDEBUG
+  /// common<A, B> == common<B, A>, so the table should be symmetric
+  /// This code makes sure it is.
   for (unsigned i = 0; i <= fixedpt::getMaxEnumValForRoundingMode(); i++)
     for (unsigned k = 0; k <= fixedpt::getMaxEnumValForRoundingMode(); k++)
-      assert(access(i, k) == access(k, i));
+      assert(lookupCommonRoundingRaw(i, k) == lookupCommonRoundingRaw(k, i));
 #endif
-  return access(m1, m2);
+  return lookupCommonRoundingRaw(m1, m2);
 }
 
 //===----------------------------------------------------------------------===//
@@ -253,7 +275,7 @@ void printVariadicOp(mlir::Operation *op, mlir::OpAsmPrinter &printer) {
     printer << (isFirst ? (isFirst = false, "") : ", ") << v << " : ";
     printer.printStrippedAttrOrType(v.getType().cast<FixedPtType>());
   }
-  printer << " to "
+  printer << " "
           << ConvertToString(
                  op->getAttrOfType<RoundingModeAttr>("rounding").getValue())
           << " ";
@@ -275,7 +297,7 @@ mlir::ParseResult parseVariadicOp(mlir::OpAsmParser &parser,
         parser.resolveOperand(operand, ty, result.operands))
       return mlir::failure();
   } while (!parser.parseOptionalComma());
-  if (parser.parseKeyword("to") || parser.getCurrentLocation(&roundKWLoc) ||
+  if (parser.getCurrentLocation(&roundKWLoc) ||
       parser.parseKeyword(&roundingStr) ||
       parser.parseCustomTypeWithFallback(resultTy) ||
       parser.parseOptionalAttrDict(result.attributes))
@@ -644,31 +666,39 @@ mlir::LogicalResult ConvertOp::canonicalize(ConvertOp op,
   mlir::Operation *opAbove = op.input().getDefiningOp();
   if (!opAbove)
     return mlir::failure();
-  if (llvm::isa<AddOp, MulOp, DivOp, SubOp>(opAbove)) {
-    RoundingOpInterface newOp = rewriter.clone(*opAbove);
-    newOp->getResult(0).setType(op.result().getType());
-    newOp.setRoundingMode(getCommonRoundingMod(
-        op.rounding(),
-        op.input().getDefiningOp<RoundingOpInterface>().getRoundingMode()));
-    rewriter.replaceOp(op, newOp->getResults());
-    return mlir::success();
-  }
-  if (llvm::isa<TruncOp, RoundOp, ConvertOp, ExtendOp>(opAbove)) {
-    rewriter.updateRootInPlace(op, [&] {
-      op.setOperand(opAbove->getOperand(0));
-      RoundingMode rounding = op.getRoundingMode();
-      if (auto RO = llvm::dyn_cast<RoundingOpInterface>(opAbove))
-        rounding = getCommonRoundingMod(rounding, RO.getRoundingMode());
-      op.setRoundingMode(rounding);
-    });
-    return mlir::success();
-  }
+
   if (ConstantOp cstOp = llvm::dyn_cast<fixedpt::ConstantOp>(opAbove)) {
     llvm::APFixedPoint newVal =
         cstOp.valueAttr().getValue().convert(outTy.getFixedPointSemantics());
     rewriter.replaceOpWithNewOp<ConstantOp>(
         op, outTy,
         FixedPointAttr::get(rewriter.getContext(), std::move(newVal)));
+    return mlir::success();
+  }
+
+  fixedpt::RoundingMode roundingAbove = [&] {
+    if (auto RO = llvm::dyn_cast<RoundingOpInterface>(opAbove))
+      return RO.getRoundingMode();
+    return fixedpt::RoundingMode::truncate;
+  }();
+  fixedpt::RoundingMode newRounding =
+      getCommonRoundingMod(op.rounding(), roundingAbove);
+
+  if (newRounding == incompatibleRounding)
+    return mlir::failure();
+
+  if (llvm::isa<AddOp, MulOp, DivOp, SubOp>(opAbove)) {
+    RoundingOpInterface newOp = rewriter.clone(*opAbove);
+    newOp->getResult(0).setType(op.result().getType());
+    newOp.setRoundingMode(newRounding);
+    rewriter.replaceOp(op, newOp->getResults());
+    return mlir::success();
+  }
+  if (llvm::isa<TruncOp, RoundOp, ConvertOp, ExtendOp>(opAbove)) {
+    rewriter.updateRootInPlace(op, [&] {
+      op.setOperand(opAbove->getOperand(0));
+      op.setRoundingMode(newRounding);
+    });
     return mlir::success();
   }
   return mlir::failure();

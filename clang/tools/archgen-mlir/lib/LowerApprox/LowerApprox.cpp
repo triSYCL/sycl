@@ -374,11 +374,11 @@ struct LowerApprox {
           loc,
           fixedpt::FixedPtType::get(ctx, inputType.getMsb(), horner.wcYLSB[idx],
                                     inputType.isSigned()),
-          input, fixedpt::RoundingMode::zero);
+          input, fixedpt::RoundingMode::truncate);
       fixedpt::FixedPtType mulType = inputType.getCommonMulType(
           expr.getType().cast<fixedpt::FixedPtType>());
       expr = rewriter.create<fixedpt::MulOp>(
-          loc, mulType, fixedpt::RoundingMode::zero,
+          loc, mulType, fixedpt::RoundingMode::truncate,
           mlir::ValueRange{expr, truncatedIn});
       // emitPrintCall(expr, printId++);
       // fixedpt::FixedPtType addType =
@@ -396,7 +396,7 @@ struct LowerApprox {
     /// This should not happened unless the result is a constant
     if (expr.getType() != outputType)
       expr = rewriter.create<fixedpt::ConvertOp>(
-          loc, outputType, expr, fixedpt::RoundingMode::zero);
+          loc, outputType, expr, fixedpt::RoundingMode::truncate);
     output.replaceAllUsesWith(expr);
 
     /// Remove the old approx tree

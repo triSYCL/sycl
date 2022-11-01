@@ -194,7 +194,7 @@ public:
   ConversionBuilder(
       mlir::TypeConverter &typeConverter,
       mlir::ConversionPatternRewriter &rewriter, mlir::Location loc,
-      fixedpt::RoundingMode rounding = fixedpt::RoundingMode::zero)
+      fixedpt::RoundingMode rounding = fixedpt::RoundingMode::truncate)
       : typeConverter(typeConverter), rewriter(rewriter), loc(loc),
         rounding(rounding) {}
 
@@ -258,16 +258,20 @@ public:
 
   mlir::Value applyRounding(mlir::Value v, int bitsToBeRemoved, bool isSigned) {
     /// Nothing to round If we are adding bits or we round to zero
-    if (bitsToBeRemoved <= 0 || rounding == fixedpt::RoundingMode::zero)
+    if (bitsToBeRemoved <= 0 || rounding == fixedpt::RoundingMode::truncate)
       return v;
 
     mlir::IntegerType ty = v.getType().cast<mlir::IntegerType>();
 
-    assert(rounding == fixedpt::RoundingMode::nearest);
-
-    /// v = v + (1 << (bitsToBeRemoved - 1))
+    /// we generate v = v + mask
+    /// mask=(1 << (bitsToBeRemoved - 1)) to round equidistant values up
+    /// mask=(1 << (bitsToBeRemoved - 1)) - 1 to round equidistant values down
     llvm::APInt mask(ty.getWidth(), 1);
     mask = mask.shl(bitsToBeRemoved - 1);
+
+    /// nearest will be emitted the same as nearest_even_to_up
+    if (rounding == fixedpt::RoundingMode::nearest_even_to_down)
+      mask = mask - 1;
 
     mlir::Value maskConstant =
         rewriter

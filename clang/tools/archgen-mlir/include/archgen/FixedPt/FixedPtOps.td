@@ -15,11 +15,13 @@ include "mlir/Interfaces/InferTypeOpInterface.td"
 include "mlir/Interfaces/SideEffectInterfaces.td"
 
 
-def RoundDown: I32EnumAttrCase<"zero", 0>;
+def RoundDown: I32EnumAttrCase<"truncate", 0>;
 def RoundNearest: I32EnumAttrCase<"nearest", 1>;
+def RoundNearestEvenToUp: I32EnumAttrCase<"nearest_even_to_up", 2>;
+def RoundNearestEvenToDown: I32EnumAttrCase<"nearest_even_to_down", 3>;
 
 def RoundingKindAttr: I32EnumAttr<"RoundingMode", "describes rounding modes",
-                           [RoundDown, RoundNearest]> {
+                           [RoundDown, RoundNearest, RoundNearestEvenToUp, RoundNearestEvenToDown]> {
   let cppNamespace = "::archgen::fixedpt";
   let stringToSymbolFnName = "ConvertToEnum";
   let symbolToStringFnName = "ConvertToString";
@@ -39,7 +41,7 @@ FixedPt_Op<mnemonic, traits # [DeclareOpInterfaceMethods<RoundingOpInterface>]> 
     RoundingKindAttr: $rounding
   );
   let results = (outs AnyFixedPt: $result);
-  let assemblyFormat = "$lhs `:` type($lhs) `,` $rhs `:` type($rhs) `to` $rounding type($result) attr-dict";
+  let assemblyFormat = "$lhs `:` type($lhs) `,` $rhs `:` type($rhs) $rounding type($result) attr-dict";
 }
 
 class FixedPt_VarOp<string mnemonic, list<Trait> traits = []> :
@@ -117,7 +119,7 @@ def FixedPt_RoundOp : FixedPt_Op<"round", [DeclareOpInterfaceMethods<RoundingOpI
     RoundingKindAttr: $rounding
   );
   let results = (outs AnyFixedPt: $result);
-  let assemblyFormat = "$input `:` type($input) `to` $rounding type($result) attr-dict";
+  let assemblyFormat = "$input `:` type($input) $rounding type($result) attr-dict";
 }
 
 def FixedPt_ExtendOp : FixedPt_Op<"extend"> {
@@ -145,7 +147,7 @@ def FixedPt_ConvertOp : FixedPt_Op<"convert", [DeclareOpInterfaceMethods<Roundin
     RoundingKindAttr: $rounding
   );
   let results = (outs AnyFixedPt: $result);
-  let assemblyFormat = "$input `:` type($input) `to` $rounding type($result) attr-dict";
+  let assemblyFormat = "$input `:` type($input) $rounding type($result) attr-dict";
 }
 
 #endif
