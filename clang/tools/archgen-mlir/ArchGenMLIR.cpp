@@ -681,9 +681,13 @@ public:
       /// expression to be approximated into the logic to approximate the
       /// expression
       pm.addPass(approx::createLowerApproxPass());
+      /// When debugging it is a lot more useful to see the source locations form
+      /// here then from the eval call in the .cpp
+      pm.addPass(mlir::createLocationSnapshotPass());
 
-      pm.addPass(mlir::createCanonicalizerPass());
-      pm.addPass(mlir::createCSEPass());
+      /// These are not yet correct so they are disabled for now
+      // pm.addPass(mlir::createCanonicalizerPass());
+      // pm.addPass(mlir::createCSEPass());
       pm.addPass(fixedpt::createConvertFixedPtToArithPass());
       pm.addPass(mlir::createReconcileUnrealizedCastsPass());
       pm.addPass(mlir::createCanonicalizerPass());
@@ -716,6 +720,10 @@ public:
     MLIRLLVMModule->getOrInsertModuleFlagsMetadata()->clearOperands();
 
     llvm::StripDebugInfo(*MLIRLLVMModule);
+
+    for (auto& F : MLIRLLVMModule->functions())
+      if (!F.isDeclaration())
+        F.addFnAttr(llvm::Attribute::NoInline);
 
     if (!DontLinkMLIR)
       llvm::Linker::linkModules(*LLVMModule, std::move(MLIRLLVMModule));

@@ -293,12 +293,18 @@ public:
     if (fixedSrc == fixedDst)
       return v;
 
+    /// Shifts larger than the bitwidth are considered UB by llvm semantics.
+    /// So we must select a type such that not shift can be larger then its
+    /// bitwidth
+    mlir::IntegerType tmpTy =
+        typeConverter.convertType(fixedDst.getCommonAddType(fixedSrc))
+            .cast<mlir::IntegerType>();
     /// Figure out the arith type of the output
     mlir::IntegerType dstTy =
         typeConverter.convertType(fixedDst).cast<mlir::IntegerType>();
 
     /// Extend if the output bitwidth is larger then the input bitwidth
-    v = maybeExtend(v, dstTy, fixedSrc.isSigned());
+    v = maybeExtend(v, tmpTy, fixedSrc.isSigned());
 
     /// If the lsb was moved we need a shift
     if (fixedSrc.getLsb() != fixedDst.getLsb()) {

@@ -346,11 +346,12 @@ mlir::ParseResult ConstantOp::parse(mlir::OpAsmParser &parser,
     return parser.emitError(parser.getNameLoc(),
                             "failed to parse fixedpt.constant");
 
-  llvm::APInt intPart = rawInt.zextOrTrunc(ty.cast<FixedPtType>().getWidth());
-  if (rawInt != intPart.zextOrTrunc(rawInt.getBitWidth()))
+  llvm::APSInt rawSInt(rawInt, ty.isUnsigned());
+  llvm::APSInt intPart = rawSInt.extOrTrunc(ty.getWidth());
+  if (rawInt != intPart.extOrTrunc(rawInt.getBitWidth()))
     return parser.emitError(intLoc, "integer doesn't fit in format");
   llvm::APFixedPoint value(intPart,
-                           ty.cast<FixedPtType>().getFixedPointSemantics());
+                           ty.getFixedPointSemantics());
   if (text != value.toString())
     return parser.emitError(textLoc, "expected: ").append(value.toString());
   result.addAttribute(
