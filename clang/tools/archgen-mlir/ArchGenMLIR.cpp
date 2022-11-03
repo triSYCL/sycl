@@ -686,8 +686,8 @@ public:
       pm.addPass(mlir::createLocationSnapshotPass());
 
       /// These are not yet correct so they are disabled for now
-      // pm.addPass(mlir::createCanonicalizerPass());
-      // pm.addPass(mlir::createCSEPass());
+      pm.addPass(mlir::createCanonicalizerPass());
+      pm.addPass(mlir::createCSEPass());
       pm.addPass(fixedpt::createConvertFixedPtToArithPass());
       pm.addPass(mlir::createReconcileUnrealizedCastsPass());
       pm.addPass(mlir::createCanonicalizerPass());

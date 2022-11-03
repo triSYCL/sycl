@@ -12,19 +12,23 @@
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
+#include "llvm/Support/Debug.h"
 
+#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
 #include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/OpDefinition.h"
-
-#include "archgen/FixedPt/FixedPt.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 
+#include "archgen/FixedPt/FixedPt.h"
+
 using namespace archgen::fixedpt;
 using namespace archgen;
+
+namespace arith = mlir::arith;
 
 //===----------------------------------------------------------------------===//
 // TableGen'd op method definitions
@@ -107,12 +111,6 @@ llvm::FixedPointSemantics FixedPtType::getFixedPointSemantics() const {
 }
 
 FixedPtType FixedPtType::getCommonMulType(FixedPtType other) const {
-  /// The common type with null is the non-null type;
-  if (!*this || !other) {
-    FixedPtType res = (!other) ? *this : other;
-    assert(res);
-    return res;
-  }
   int w1 = getWidth();
   int w2 = other.getWidth();
   unsigned int generalProdWidth = w1 + w2;
@@ -130,12 +128,6 @@ FixedPtType FixedPtType::getCommonMulType(FixedPtType other) const {
 }
 
 FixedPtType FixedPtType::getCommonAddType(FixedPtType other) const {
-  /// The common type with null is the non-null type;
-  if (!*this || !other) {
-    FixedPtType res = (!other) ? *this : other;
-    assert(res);
-    return res;
-  }
   auto lsb_out = std::min(getLsb(), other.getLsb());
   auto max_msb = std::max(getMsb(), other.getMsb());
   auto max_pos_msb = std::max(getMaxPositiveBW(), other.getMaxPositiveBW());
@@ -368,6 +360,20 @@ void ConstantOp::print(mlir::OpAsmPrinter &p) {
   p << ", \"" << valueAttr().getValue().toString() << "\"";
 }
 
+void ConstantOp::build(mlir::OpBuilder &odsBuilder,
+                       mlir::OperationState &odsState,
+                       fixedpt::FixedPointAttr val) {
+  ConstantOp::build(odsBuilder, odsState,
+                    fixedpt::FixedPtType::get(odsBuilder.getContext(),
+                                              val.getValue().getSemantics()),
+                    val);
+}
+void ConstantOp::build(mlir::OpBuilder &odsBuilder,
+                       mlir::OperationState &odsState, llvm::APFixedPoint val) {
+  ConstantOp::build(odsBuilder, odsState,
+                    fixedpt::FixedPointAttr::get(odsState.getContext(), val));
+}
+
 mlir::LogicalResult AddOp::verify() {
   if (args().size() < 2)
     return emitError().append("requires at least two operands");
@@ -478,6 +484,77 @@ llvm::APFixedPoint exactAdd(llvm::APFixedPoint const &lhs,
   return res;
 }
 
+llvm::APFixedPoint exactMul(llvm::APFixedPoint const &lhs,
+                            llvm::APFixedPoint const &rhs) {
+  /// Find a common semantics such that lhs, rhs and the result of there product
+  /// fit without overflow or loss of precision.
+  llvm::FixedPointSemantics commonSema =
+      lhs.getSemantics().getCommonSemantics(rhs.getSemantics());
+  int lsb = std::min(std::min(lhs.getLsbWeight(), rhs.getLsbWeight()),
+                     lhs.getLsbWeight() + rhs.getLsbWeight());
+  int msb = std::max(std::max(lhs.getMsbWeight(), rhs.getMsbWeight()),
+                     lhs.getMsbWeight() + rhs.getMsbWeight());
+  unsigned width = msb - lsb + 1 + commonSema.isSigned();
+  commonSema = llvm::FixedPointSemantics{
+      width, llvm::FixedPointSemantics::Lsb{lsb}, commonSema.isSigned(),
+      commonSema.isSaturated(), commonSema.hasUnsignedPadding()};
+
+  bool overflow = false;
+  auto lhsExt = lhs.convert(commonSema, &overflow);
+  assert(!overflow && lhs == lhsExt);
+  auto rhsExt = rhs.convert(commonSema, &overflow);
+  assert(!overflow && rhs == rhsExt);
+  auto res = lhsExt.mul(rhsExt, &overflow);
+  assert(!overflow);
+  return res;
+}
+
+/// Remove leading an trailing bit from a fixedpoint constant.
+/// It is not applied as a pattern on every constant because we fold convert of
+/// constant to constant. but is it useful as part of some patterns.
+fixedpt::FixedPointAttr fitConstantBitwidth(fixedpt::FixedPointAttr ConstVal) {
+  auto ConstAPFixed = ConstVal.getValue();
+  auto InitMsb = ConstAPFixed.getMsbWeight();
+  auto InitLsb = ConstAPFixed.getLsbWeight();
+  auto InitIsSigned = ConstAPFixed.isSigned();
+
+  auto ConstAPInt = ConstAPFixed.getValue();
+
+  bool NewSign = ConstAPInt.isNegative();
+  auto CLZ = ConstAPInt.countLeadingZeros();
+  auto CLO = ConstAPInt.countLeadingOnes();
+  auto CTZ = ConstAPInt.countTrailingZeros();
+
+  // Remove trailing zero bits
+  int NewLsb = ConstAPInt.isZero() ? 0 : (InitLsb + CTZ);
+  auto UselessTopBits = NewSign ? CLO - 1 : CLZ;
+  int NewMsb = ConstAPInt.isZero() ? 1 : InitMsb - UselessTopBits;
+
+  if (NewLsb == InitLsb && NewMsb == InitMsb && NewSign == InitIsSigned)
+    return ConstVal;
+
+  assert(NewMsb >= NewLsb);
+
+  /// fixedpt.fixedPt<0, 0, *> is not legal
+  if (NewMsb == NewLsb)
+    NewMsb++;
+
+  ConstAPInt.setIsSigned(NewSign);
+
+  if (!ConstAPInt.isZero())
+    ConstAPInt.ashrInPlace(CTZ);
+
+  unsigned int NewWidth{static_cast<unsigned int>(NewMsb - NewLsb) + 1};
+
+  auto NewConstRepr = ConstAPInt.trunc(NewWidth);
+
+  llvm::FixedPointSemantics NewFormat{
+      NewWidth, llvm::FixedPointSemantics::Lsb{NewLsb}, NewSign, false, false};
+  llvm::APFixedPoint NewCstFix{NewConstRepr, NewFormat};
+  return fixedpt::FixedPointAttr::get(ConstVal.getContext(),
+                                      std::move(NewCstFix));
+}
+
 template <typename OpT>
 struct MergeVariadicCommutativeOp : public mlir::RewritePattern {
   MergeVariadicCommutativeOp(mlir::MLIRContext *context)
@@ -519,36 +596,24 @@ struct AddOpConstFolder : public mlir::RewritePattern {
     llvm::APFixedPoint CstSumVal{
         0, llvm::FixedPointSemantics(1, 0, false, false, false)};
     mlir::SmallVector<mlir::Value> NewArgs;
-    size_t NbCst{0};
+    int nbCst = 0;
     for (auto arg : addOp.args()) {
       if (mlir::matchPattern(arg, mlir::m_Constant(&constVal))) {
         auto CstValue = constVal.getValue();
-        if (!CstValue.getValue().isZero()) {
-          if (!CstSumVal.getValue().isZero()) {
-            CstSumVal = exactAdd(CstSumVal, CstValue);
-          } else {
-            // To avoid useless bit extension due to the arbitrary choice of
-            // zero semantics
-            CstSumVal = CstValue;
-          }
-          NbCst++;
-        }
-      } else {
+        nbCst++;
+        CstSumVal = exactAdd(CstSumVal, CstValue);
+      } else
         NewArgs.push_back(arg);
-      }
     }
-    if (NbCst == 0 || (NbCst == 1 && !CstSumVal.getValue().isZero())) {
+    if (nbCst == 0 || (nbCst == 1 && !CstSumVal.getValue().isZero()))
       return mlir::failure();
-    }
 
     if (!CstSumVal.getValue().isZero() || NewArgs.size() == 0) {
       // We need to create a constant op of the resulting constant
-      auto CstType = FixedPtType::get(getContext(), CstSumVal.getSemantics());
-      auto CstAttr = fixedpt::FixedPointAttr::get(getContext(), CstSumVal);
-      auto CstValue =
-          rewriter.create<fixedpt::ConstantOp>(op->getLoc(), CstType, CstAttr)
-              .result();
-      NewArgs.push_back(CstValue);
+      auto CstAttr = fitConstantBitwidth(
+          fixedpt::FixedPointAttr::get(getContext(), CstSumVal));
+      NewArgs.push_back(
+          rewriter.create<fixedpt::ConstantOp>(op->getLoc(), CstAttr));
     }
     assert(NewArgs.size() >= 1);
     if (NewArgs.size() == 1)
@@ -563,11 +628,67 @@ struct AddOpConstFolder : public mlir::RewritePattern {
   }
 };
 
+struct MulOpConstFolder : public mlir::RewritePattern {
+  MulOpConstFolder(mlir::MLIRContext *context)
+      : RewritePattern(MulOp::getOperationName(), 1, context) {}
+
+  mlir::LogicalResult
+  matchAndRewrite(mlir::Operation *op,
+                  mlir::PatternRewriter &rewriter) const override {
+    MulOp mulOp = llvm::cast<MulOp>(op);
+    fixedpt::FixedPointAttr constVal;
+    llvm::APFixedPoint fixedPtOne{
+        1, llvm::FixedPointSemantics(1, 0, false, false, false)};
+    llvm::APFixedPoint cstProdVal = fixedPtOne;
+    mlir::SmallVector<mlir::Value> NewArgs;
+    int nbCst = 0;
+    for (auto arg : op->getOperands())
+      if (mlir::matchPattern(arg, mlir::m_Constant(&constVal))) {
+        auto cstValue = constVal.getValue();
+        /// Any multiplication by 0 result in 0 so fast exit.
+        if (cstValue.getValue().isZero()) {
+          rewriter.replaceOpWithNewOp<fixedpt::ConstantOp>(
+              op, llvm::APFixedPoint{0, mulOp.result()
+                                            .getType()
+                                            .cast<FixedPtType>()
+                                            .getFixedPointSemantics()});
+          return mlir::success();
+        }
+        cstProdVal = exactMul(cstProdVal, cstValue);
+        nbCst++;
+      } else
+        NewArgs.push_back(arg);
+
+    /// If op is already canonical dont do anything.
+    if (nbCst == 0 || (nbCst == 1 && cstProdVal != fixedPtOne))
+      return mlir::failure();
+
+    if (cstProdVal != fixedPtOne || NewArgs.size() == 0) {
+      // We need to create a constant op of the resulting constant
+      auto CstAttr = fitConstantBitwidth(
+          fixedpt::FixedPointAttr::get(getContext(), cstProdVal));
+      NewArgs.push_back(
+          rewriter.create<fixedpt::ConstantOp>(op->getLoc(), CstAttr));
+    }
+
+    assert(NewArgs.size() >= 1);
+    if (NewArgs.size() == 1)
+      rewriter.replaceOpWithNewOp<fixedpt::ConvertOp>(
+          op, mulOp.getResult().getType().cast<fixedpt::FixedPtType>(),
+          NewArgs[0], mulOp.rounding());
+    else
+      rewriter.replaceOpWithNewOp<fixedpt::MulOp>(
+          op, mulOp.getResult().getType().cast<fixedpt::FixedPtType>(),
+          mulOp.rounding(), NewArgs);
+    return mlir::success();
+  }
+};
+
 } // namespace
 
 void MulOp::getCanonicalizationPatterns(mlir::RewritePatternSet &patterns,
                                         mlir::MLIRContext *context) {
-  patterns.add<MergeVariadicCommutativeOp<MulOp>>(context);
+  patterns.add<MulOpConstFolder, MergeVariadicCommutativeOp<MulOp>>(context);
 }
 
 void AddOp::getCanonicalizationPatterns(mlir::RewritePatternSet &patterns,
@@ -593,48 +714,6 @@ mlir::LogicalResult DivOp::canonicalize(DivOp op,
 mlir::LogicalResult ConstantOp::canonicalize(ConstantOp op,
                                              mlir::PatternRewriter &rewriter) {
   return mlir::failure();
-  auto ConstVal = op.valueAttr();
-  auto ConstAPFixed = ConstVal.getValue();
-  auto InitMsb = ConstAPFixed.getMsbWeight();
-  auto InitLsb = ConstAPFixed.getLsbWeight();
-  auto InitIsSigned = ConstAPFixed.isSigned();
-
-  auto ConstAPInt = ConstAPFixed.getValue();
-
-  bool NewSign = ConstAPInt.isNegative();
-  auto CLZ = ConstAPInt.countLeadingZeros();
-  auto CLO = ConstAPInt.countLeadingOnes();
-  auto CTZ = ConstAPInt.countTrailingZeros();
-
-  // Remove trailing zero bits
-  int NewLsb = ConstAPInt.isZero() ? 0 : (InitLsb + CTZ);
-  auto UselessTopBits = NewSign ? CLO - 1 : CLZ;
-  int NewMsb = ConstAPInt.isZero() ? 1 : InitMsb - UselessTopBits;
-
-  if (NewLsb == InitLsb && NewMsb == InitMsb && NewSign == InitIsSigned) {
-    // No changes
-    return mlir::failure();
-  }
-
-  assert(NewMsb >= NewLsb);
-
-  ConstAPInt.setIsSigned(NewSign);
-
-  if (!ConstAPInt.isZero())
-    ConstAPInt.ashrInPlace(CTZ);
-
-  unsigned int NewWidth{static_cast<unsigned int>(NewMsb - NewLsb) + 1};
-
-  auto NewConstRepr = ConstAPInt.trunc(NewWidth);
-
-  llvm::FixedPointSemantics NewFormat{
-      NewWidth, llvm::FixedPointSemantics::Lsb{NewLsb}, NewSign, false, false};
-  llvm::APFixedPoint NewCstFix{NewConstRepr, NewFormat};
-  auto NewCstFixType = FixedPtType::get(op.getContext(), NewFormat);
-
-  auto ReplAttr = fixedpt::FixedPointAttr::get(op->getContext(), std::move(NewCstFix));
-  rewriter.replaceOpWithNewOp<fixedpt::ConstantOp>(op, NewCstFixType, ReplAttr);
-  return mlir::success();
 }
 
 mlir::LogicalResult TruncOp::canonicalize(TruncOp op,
@@ -654,6 +733,28 @@ mlir::LogicalResult ExtendOp::canonicalize(ExtendOp op,
 
 mlir::LogicalResult BitcastOp::canonicalize(BitcastOp op,
                                             mlir::PatternRewriter &rewriter) {
+  mlir::Type outTy = op.result().getType();
+  mlir::Type inTy = op.input().getType();
+
+  /// Same type so we remove the bitcast
+  if (inTy == outTy) {
+    rewriter.replaceOp(op, op.input());
+    return mlir::success();
+  }
+  mlir::Operation *opAbove = op.input().getDefiningOp();
+  if (!opAbove)
+    return mlir::failure();
+
+  /// bitcast of bitcast we can fold it to 1 bitcast (maybe arith.bitcast)
+  if (auto bc = llvm::dyn_cast<fixedpt::BitcastOp>(opAbove)) {
+    mlir::Type inAboveTy = bc.input().getType();
+    if (inAboveTy == outTy) {
+      rewriter.replaceOp(op, bc->getOperands());
+      return mlir::success();
+    }
+    rewriter.replaceOpWithNewOp<fixedpt::BitcastOp>(op, outTy, bc.input());
+    return mlir::success();
+  }
   return mlir::failure();
 }
 
@@ -682,24 +783,18 @@ mlir::LogicalResult ConvertOp::canonicalize(ConvertOp op,
       return RO.getRoundingMode();
     return fixedpt::RoundingMode::truncate;
   }();
-  fixedpt::RoundingMode newRounding =
-      getCommonRoundingMod(op.rounding(), roundingAbove);
 
-  if (newRounding == incompatibleRounding)
-    return mlir::failure();
-
-  if (llvm::isa<AddOp, MulOp, DivOp, SubOp>(opAbove)) {
+  if (llvm::isa<AddOp, MulOp, DivOp, SubOp>(opAbove) && roundingAbove == op.rounding()) {
     RoundingOpInterface newOp = rewriter.clone(*opAbove);
     newOp->getResult(0).setType(op.result().getType());
-    newOp.setRoundingMode(newRounding);
     rewriter.replaceOp(op, newOp->getResults());
     return mlir::success();
   }
-  if (llvm::isa<TruncOp, RoundOp, ConvertOp, ExtendOp>(opAbove)) {
-    rewriter.updateRootInPlace(op, [&] {
-      op.setOperand(opAbove->getOperand(0));
-      op.setRoundingMode(newRounding);
-    });
+  if (llvm::isa<TruncOp, ExtendOp>(opAbove) ||
+      (llvm::isa<RoundOp, ConvertOp>(opAbove) &&
+       roundingAbove == op.rounding())) {
+    rewriter.updateRootInPlace(op,
+                               [&] { op.setOperand(opAbove->getOperand(0)); });
     return mlir::success();
   }
   return mlir::failure();

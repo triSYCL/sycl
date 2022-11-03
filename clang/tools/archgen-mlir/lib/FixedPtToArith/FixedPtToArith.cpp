@@ -558,7 +558,9 @@ struct MulOpLowering : public mlir::OpConversionPattern<MulOp> {
 
     FixedPtType internalTy;
     for (mlir::Type ty : op->getOperandTypes())
-      internalTy = internalTy.getCommonMulType(ty.cast<FixedPtType>());
+      internalTy = internalTy
+                       ? internalTy.getCommonMulType(ty.cast<FixedPtType>())
+                       : ty.cast<FixedPtType>();
     /// And its arith lowering
     mlir::IntegerType internalIntTy =
         typeConverter->convertType(internalTy).cast<mlir::IntegerType>();
@@ -567,10 +569,9 @@ struct MulOpLowering : public mlir::OpConversionPattern<MulOp> {
     ConversionBuilder converter(*typeConverter, rewriter, op->getLoc(),
                                 op.rounding());
     llvm::SmallVector<mlir::Value> convertedArgs;
-    for (auto v : llvm::zip(adaptor.getOperands(), op->getOperands()))
+    for (auto [a, v] : llvm::zip(adaptor.getOperands(), op->getOperands()))
       convertedArgs.push_back(converter.maybeExtend(
-          std::get<0>(v), internalIntTy,
-          std::get<1>(v).getType().cast<FixedPtType>().isSigned()));
+          a, internalIntTy, v.getType().cast<FixedPtType>().isSigned()));
 
     /// Multiply with it
     mlir::Value res = convertedArgs[0];

@@ -6,9 +6,6 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "archgen/FixedPt/FixedPt.h"
-#include "mlir/IR/OperationSupport.h"
-#include "mlir/Support/LLVM.h"
 #include <cmath>
 #ifndef ARCHGEN_SOLLYA_LIB_PATH
 #error "unable to find sollya"
@@ -19,12 +16,15 @@
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/IR/BuiltinDialect.h"
+#include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/Pass/Pass.h"
+#include "mlir/Support/LLVM.h"
 
 #include "archgen/Approx/Approx.h"
 #include "archgen/Approx/PassDetail.h"
 #include "archgen/Approx/Passes.h"
+#include "archgen/FixedPt/FixedPt.h"
 
 #include "flopoco/FixFunctions/BasicPolyApprox.hpp"
 #include "flopoco/FixFunctions/FixHorner.hpp"
@@ -409,8 +409,6 @@ struct LowerApprox {
     /// erase it all
     for (auto *op : outdatedApproxExpr)
       op->erase();
-
-    expr.getParentBlock()->dump();
   }
 };
 
@@ -424,6 +422,7 @@ void LowerApproxPass::runOnOperation() {
   if (mlir::failed(state.init()))
     signalPassFailure();
   getOperation().walk([&](approx::EvaluateOp op) { state.run(op); });
+  getOperation().dump();
 }
 
 } // namespace

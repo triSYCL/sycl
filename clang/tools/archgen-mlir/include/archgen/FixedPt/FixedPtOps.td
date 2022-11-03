@@ -99,6 +99,10 @@ def FixedPt_ConstantOp : FixedPt_Op<"constant", [ConstantLike]> {
   let results = (outs AnyFixedPt: $result);
   let hasFolder = 1;
   let hasCustomAssemblyFormat = true;
+  let builders = [
+    OpBuilder<(ins "::archgen::fixedpt::FixedPointAttr":$val)>,
+    OpBuilder<(ins "::llvm::APFixedPoint":$val)>
+  ];
 }
 
 def FixedPt_TruncOp : FixedPt_Op<"trunc"> {
