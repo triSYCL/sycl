@@ -65,15 +65,23 @@ using disable_pipeline = std::integral_constant<int, 0>;
   \tparam T type of the functor to execute
 */
 template <typename IIType = auto_ii, typename rewindtype = no_rewind_pipeline,
-          pipeline_style pipelineType = pipeline_style::stall, typename T>
-__SYCL_DEVICE_ANNOTATE("xilinx_pipeline", IIType::value, rewindtype::value, pipelineType)
-__SYCL_ALWAYS_INLINE void pipeline(T &&functor) { std::forward<T>(functor)(); }
+          pipeline_style pipelineType = pipeline_style::stall>
+struct pipeline {
+    template <typename T>
+    __SYCL_DEVICE_ANNOTATE("xilinx_pipeline", IIType::value, rewindtype::value,
+                           pipelineType)
+    __SYCL_ALWAYS_INLINE pipeline(T functor) {
+      functor();
+    }
+};
 
-template <typename T>
-__SYCL_DEVICE_ANNOTATE("xilinx_pipeline", 0, false, pipeline_style::stall)
-__SYCL_ALWAYS_INLINE void noPipeline(T &&functor) {
-  std::forward<T>(functor)();
-}
+struct noPipeline {
+    template <typename T>
+    __SYCL_DEVICE_ANNOTATE("xilinx_pipeline", 0, false, pipeline_style::stall)
+    __SYCL_ALWAYS_INLINE noPipeline(T functor) {
+      functor();
+    }
+};
 
 template <typename IIType = auto_ii, pipeline_style pipelineType = pipeline_style::stall>
 auto pipeline_kernel(auto kernel) {

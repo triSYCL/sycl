@@ -2712,7 +2712,7 @@ void CodeGenFunction::EmitVarAnnotations(const VarDecl *D, llvm::Value *V) {
   // llvm-gcc was doing.
   for (const auto *I : D->specific_attrs<AnnotateAttr>())
     EmitAnnotationCall(CGM.getIntrinsic(llvm::Intrinsic::var_annotation),
-                       Builder.CreateBitCast(V, CGM.Int8PtrTy, V->getName()),
+                       Builder.CreatePointerCast(V, CGM.Int8PtrTy, V->getName()),
                        I->getAnnotation(), D->getLocation(), I);
 }
 

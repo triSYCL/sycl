@@ -288,7 +288,7 @@ public:
   ///
   /// @param CS Payload of the original annotation
   void lowerUnrollDecoration(llvm::CallBase &CB,
-                             llvm::ConstantStruct *Payload) {
+                             llvm::Constant *Payload) {
     auto *F = CB.getCaller();
 
     // Metadata payload is unroll factor (first argument) and boolean indicating
@@ -436,11 +436,10 @@ public:
     bool processed = false;
     if (Kind == kindOf("xilinx_ddr_bank") || Kind == kindOf("xilinx_hbm_bank"))
       return;
-    auto *Payload = cast<ConstantStruct>(PayloadCst);
     if (AfterO3) { // Annotation that should wait after optimisation to be
                    // lowered
       if (Kind == kindOf("xilinx_unroll")) {
-        lowerUnrollDecoration(CB, Payload);
+        lowerUnrollDecoration(CB, PayloadCst);
         processed = true;
       }
     }
