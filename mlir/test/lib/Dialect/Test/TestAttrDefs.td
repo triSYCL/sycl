@@ -270,7 +270,7 @@ def TestExtern1DI64ElementsAttr : Test_Attr<"TestExtern1DI64Elements", [
 // An array of nested attributes.
 def TestArrayOfUglyAttrs : ArrayOfAttr<Test_Dialect, "ArrayOfUglyAttrs",
     "array_of_ugly", "TestAttrUglyAttr"> {
-  let assemblyFormat = "`[` $value ` ` `]`";
+  let assemblyFormat = "`[` (`]`) : ($value^ ` ` `]`)?";
 }
 
 // An array of integers.
@@ -290,5 +290,12 @@ def TestSimpleEnumAttr : EnumAttr<Test_Dialect, TestSimpleEnum, "simple_enum"> {
 }
 def TestArrayOfEnums : ArrayOfAttr<Test_Dialect, "ArrayOfEnums",
     "array_of_enums", "SimpleEnumAttr">;
+
+// Test custom directive as optional group anchor.
+def TestCustomAnchor : Test_Attr<"TestCustomAnchor"> {
+  let parameters = (ins "int":$a, OptionalParameter<"mlir::Optional<int>">:$b);
+  let mnemonic = "custom_anchor";
+  let assemblyFormat = "`<` $a (`>`) : (`,` ` ` custom<TrueFalse>($b)^ `>`)?";
+}
 
 #endif // TEST_ATTRDEFS

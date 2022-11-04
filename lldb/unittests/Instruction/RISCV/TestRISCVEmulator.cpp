@@ -24,11 +24,14 @@ using namespace lldb_private;
 
 struct RISCVEmulatorTester : public EmulateInstructionRISCV, testing::Test {
   RegisterInfoPOSIX_riscv64::GPR gpr;
+  uint8_t memory[1024] = {0};
 
   RISCVEmulatorTester()
       : EmulateInstructionRISCV(ArchSpec("riscv64-unknown-linux-gnu")) {
     EmulateInstruction::SetReadRegCallback(ReadRegisterCallback);
     EmulateInstruction::SetWriteRegCallback(WriteRegisterCallback);
+    EmulateInstruction::SetReadMemCallback(ReadMemoryCallback);
+    EmulateInstruction::SetWriteMemCallback(WriteMemoryCallback);
   }
 
   static bool ReadRegisterCallback(EmulateInstruction *instruction, void *baton,
@@ -53,6 +56,31 @@ struct RISCVEmulatorTester : public EmulateInstructionRISCV, testing::Test {
       tester->gpr.gpr[reg] = reg_value.GetAsUInt64();
     return true;
   }
+
+  static size_t ReadMemoryCallback(EmulateInstruction *instruction, void *baton,
+                                   const Context &context, lldb::addr_t addr,
+                                   void *dst, size_t length) {
+    RISCVEmulatorTester *tester = (RISCVEmulatorTester *)instruction;
+    assert(addr + length < sizeof(tester->memory));
+    memcpy(dst, tester->memory + addr, length);
+    return length;
+  };
+
+  static size_t WriteMemoryCallback(EmulateInstruction *instruction,
+                                    void *baton, const Context &context,
+                                    lldb::addr_t addr, const void *dst,
+                                    size_t length) {
+    RISCVEmulatorTester *tester = (RISCVEmulatorTester *)instruction;
+    assert(addr + length < sizeof(tester->memory));
+    memcpy(tester->memory + addr, dst, length);
+    return length;
+  };
+
+  bool DecodeAndExecute(uint32_t inst, bool ignore_cond) {
+    return Decode(inst)
+        .transform([&](DecodeResult res) { return Execute(res, ignore_cond); })
+        .value_or(false);
+  }
 };
 
 TEST_F(RISCVEmulatorTester, testJAL) {
@@ -62,13 +90,10 @@ TEST_F(RISCVEmulatorTester, testJAL) {
   uint32_t inst = 0b11111110100111111111000011101111;
   ASSERT_TRUE(DecodeAndExecute(inst, false));
   auto x1 = gpr.gpr[1];
-
-  bool success = false;
-  auto pc = ReadPC(&success);
-
-  ASSERT_TRUE(success);
+  auto pc = ReadPC();
+  ASSERT_TRUE(pc.has_value());
   ASSERT_EQ(x1, old_pc + 4);
-  ASSERT_EQ(pc, old_pc + (-6 * 4));
+  ASSERT_EQ(*pc, old_pc + (-6 * 4));
 }
 
 constexpr uint32_t EncodeIType(uint32_t opcode, uint32_t funct3, uint32_t rd,
@@ -76,7 +101,7 @@ constexpr uint32_t EncodeIType(uint32_t opcode, uint32_t funct3, uint32_t rd,
   return imm << 20 | rs1 << 15 | funct3 << 12 | rd << 7 | opcode;
 }
 
-constexpr uint32_t JALR(uint32_t rd, uint32_t rs1, int32_t offset) {
+constexpr uint32_t EncodeJALR(uint32_t rd, uint32_t rs1, int32_t offset) {
   return EncodeIType(0b1100111, 0, rd, rs1, uint32_t(offset));
 }
 
@@ -86,17 +111,14 @@ TEST_F(RISCVEmulatorTester, testJALR) {
   WritePC(old_pc);
   gpr.gpr[2] = old_x2;
   // jalr x1, x2(-255)
-  uint32_t inst = JALR(1, 2, -255);
+  uint32_t inst = EncodeJALR(1, 2, -255);
   ASSERT_TRUE(DecodeAndExecute(inst, false));
   auto x1 = gpr.gpr[1];
-
-  bool success = false;
-  auto pc = ReadPC(&success);
-
-  ASSERT_TRUE(success);
+  auto pc = ReadPC();
+  ASSERT_TRUE(pc.has_value());
   ASSERT_EQ(x1, old_pc + 4);
   // JALR always zeros the bottom bit of the target address.
-  ASSERT_EQ(pc, (old_x2 + (-255)) & (~1));
+  ASSERT_EQ(*pc, (old_x2 + (-255)) & (~1));
 }
 
 constexpr uint32_t EncodeBType(uint32_t opcode, uint32_t funct3, uint32_t rs1,
@@ -143,10 +165,9 @@ void testBranch(RISCVEmulatorTester *tester, EncoderB encoder, bool branched,
   // b<cmp> x1, x2, (-256)
   uint32_t inst = encoder(1, 2, -256);
   ASSERT_TRUE(tester->DecodeAndExecute(inst, false));
-  bool success = false;
-  auto pc = tester->ReadPC(&success);
-  ASSERT_TRUE(success);
-  ASSERT_EQ(pc, old_pc + (branched ? (-256) : 0));
+  auto pc = tester->ReadPC();
+  ASSERT_TRUE(pc.has_value());
+  ASSERT_EQ(*pc, old_pc + (branched ? (-256) : 0));
 }
 
 #define GEN_BRANCH_TEST(name, rs1, rs2_branched, rs2_continued)                \
@@ -161,31 +182,160 @@ void CheckRD(RISCVEmulatorTester *tester, uint64_t rd, uint64_t value) {
   ASSERT_EQ(tester->gpr.gpr[rd], value);
 }
 
+template <typename T>
+void CheckMem(RISCVEmulatorTester *tester, uint64_t addr, uint64_t value) {
+  auto mem = tester->ReadMem<T>(addr);
+  ASSERT_TRUE(mem.has_value());
+  ASSERT_EQ(*mem, value);
+}
+
 using RS1 = uint64_t;
 using RS2 = uint64_t;
 using PC = uint64_t;
 using RDComputer = std::function<uint64_t(RS1, RS2, PC)>;
 
-void TestInst(RISCVEmulatorTester *tester, uint64_t inst, bool has_rs2,
+void TestInst(RISCVEmulatorTester *tester, DecodeResult inst, bool has_rs2,
               RDComputer rd_val) {
 
   lldb::addr_t old_pc = 0x114514;
   tester->WritePC(old_pc);
-  auto rd = DecodeRD(inst);
-  auto rs1 = DecodeRS1(inst);
-  auto rs2 = 0;
+  uint32_t rd = DecodeRD(inst.inst);
+  uint32_t rs1 = DecodeRS1(inst.inst);
+  uint32_t rs2 = 0;
+
+  uint64_t rs1_val = 0x19;
+  uint64_t rs2_val = 0x81;
+
   if (rs1)
-    tester->gpr.gpr[rs1] = 0x1919;
+    tester->gpr.gpr[rs1] = rs1_val;
 
   if (has_rs2) {
-    rs2 = DecodeRS2(inst);
-    if (rs2)
-      tester->gpr.gpr[rs2] = 0x8181;
+    rs2 = DecodeRS2(inst.inst);
+    if (rs2) {
+      if (rs1 == rs2)
+        rs2_val = rs1_val;
+      tester->gpr.gpr[rs2] = rs2_val;
+    }
   }
 
+  ASSERT_TRUE(tester->Execute(inst, false));
+  CheckRD(tester, rd, rd_val(rs1_val, rs2 ? rs2_val : 0, old_pc));
+}
+
+template <typename T>
+void TestAtomic(RISCVEmulatorTester *tester, uint64_t inst, T rs1_val,
+                T rs2_val, T rd_expected, T mem_expected) {
+  // Atomic inst must have rs1 and rs2
+
+  uint32_t rd = DecodeRD(inst);
+  uint32_t rs1 = DecodeRS1(inst);
+  uint32_t rs2 = DecodeRS2(inst);
+
+  // addr was stored in rs1
+  uint64_t atomic_addr = 0x100;
+
+  tester->gpr.gpr[rs1] = atomic_addr;
+  tester->gpr.gpr[rs2] = rs2_val;
+
+  // Write and check rs1_val in atomic_addr
+  ASSERT_TRUE(tester->WriteMem<T>(atomic_addr, rs1_val));
+  CheckMem<T>(tester, atomic_addr, rs1_val);
+
   ASSERT_TRUE(tester->DecodeAndExecute(inst, false));
-  CheckRD(tester, rd,
-          rd_val(tester->gpr.gpr[rs1], rs2 ? tester->gpr.gpr[rs2] : 0, old_pc));
+  CheckRD(tester, rd, rd_expected);
+  CheckMem<T>(tester, atomic_addr, mem_expected);
+}
+
+TEST_F(RISCVEmulatorTester, TestAtomicSequence) {
+  this->WritePC(0x0);
+  *(uint32_t *)this->memory = 0x100427af;        // lr.w	a5,(s0)
+  *(uint32_t *)(this->memory + 4) = 0x00079663;  // bnez	a5,12
+  *(uint32_t *)(this->memory + 8) = 0x1ce426af;  // sc.w.aq	a3,a4,(s0)
+  *(uint32_t *)(this->memory + 12) = 0xfe069ae3; // bnez	a3,-12
+  ASSERT_TRUE(this->DecodeAndExecute(*(uint32_t *)this->memory, false));
+  ASSERT_EQ(this->gpr.gpr[0], uint64_t(16));
+}
+
+struct TestDecode {
+  uint32_t inst;
+  RISCVInst inst_type;
+};
+
+bool compareInst(const RISCVInst &lhs, const RISCVInst &rhs) {
+  if (lhs.index() != rhs.index())
+    return false;
+  return std::visit(
+      [&](auto &&L) {
+        return std::visit(
+            [&](auto &&R) {
+              // guaranteed by
+              // 1. lhs.index() == rhs.index()
+              // (they are the same instruction type)
+              // 2. all instruction representations are plain data objects
+              // consisting of primitive types.
+              return std::memcmp(&L, &R, sizeof(L)) == 0;
+            },
+            rhs);
+      },
+      lhs);
+}
+
+TEST_F(RISCVEmulatorTester, TestCDecode) {
+  std::vector<TestDecode> tests = {
+      {0x0000, INVALID{0x0000}},
+      {0x0010, RESERVED{0x0010}},
+      // ADDI4SPN here, decode as ADDI
+      {0x0024, ADDI{Rd{9}, Rs{2}, 8}},
+      {0x4488, LW{Rd{10}, Rs{9}, 8}},
+      {0x6488, LD{Rd{10}, Rs{9}, 8}},
+      {0xC488, SW{Rs{9}, Rs{10}, 8}},
+      {0xE488, SD{Rs{9}, Rs{10}, 8}},
+      {0x1001, NOP{0x1001}},
+      {0x1085, ADDI{Rd{1}, Rs{1}, uint32_t(-31)}},
+      {0x2081, ADDIW{Rd{1}, Rs{1}, 0}},
+      // ADDI16SP here, decode as ADDI
+      {0x7101, ADDI{Rd{2}, Rs{2}, uint32_t(-512)}},
+      {0x4081, ADDI{Rd{1}, Rs{0}, 0}},
+      {0x7081, LUI{Rd{1}, uint32_t(-131072)}},
+      {0x8085, SRLI{Rd{9}, Rs{9}, 1}},
+      {0x8485, SRAI{Rd{9}, Rs{9}, 1}},
+      {0x8881, ANDI{Rd{9}, Rs{9}, 0}},
+      {0x8C85, SUB{Rd{9}, Rs{9}, Rs{9}}},
+      {0x8CA5, XOR{Rd{9}, Rs{9}, Rs{9}}},
+      {0x8CC5, OR{Rd{9}, Rs{9}, Rs{9}}},
+      {0x8CE5, AND{Rd{9}, Rs{9}, Rs{9}}},
+      {0x9C85, SUBW{Rd{9}, Rs{9}, Rs{9}}},
+      {0x9CA5, ADDW{Rd{9}, Rs{9}, Rs{9}}},
+      // C.J here, decoded as JAL
+      {0xA001, JAL{Rd{0}, 0}},
+      {0xC081, B{Rs{9}, Rs{0}, 0, 0b000}},
+      {0xE081, B{Rs{9}, Rs{0}, 0, 0b001}},
+      {0x1082, SLLI{Rd{1}, Rs{1}, 32}},
+      {0x1002, HINT{0x1002}},
+      // SLLI64 here, decoded as HINT if not in RV128
+      {0x0082, HINT{0x0082}},
+      // LWSP here, decoded as LW
+      {0x4082, LW{Rd{1}, Rs{2}, 0}},
+      // LDSP here, decoded as LD
+      {0x6082, LD{Rd{1}, Rs{2}, 0}},
+      // C.JR here, decoded as JALR
+      {0x8082, JALR{Rd{0}, Rs{1}, 0}},
+      // C.MV here, decoded as ADD
+      {0x8086, ADD{Rd{1}, Rs{0}, Rs{1}}},
+      {0x9002, EBREAK{0x9002}},
+      {0x9082, JALR{Rd{1}, Rs{1}, 0}},
+      {0x9086, ADD{Rd{1}, Rs{1}, Rs{1}}},
+      // C.SWSP here, decoded as SW
+      {0xC006, SW{Rs{2}, Rs{1}, 0}},
+      // C.SDSP here, decoded as SD
+      {0xE006, SD{Rs{2}, Rs{1}, 0}},
+  };
+
+  for (auto i : tests) {
+    auto decode = this->Decode(i.inst);
+    ASSERT_TRUE(decode.has_value());
+    ASSERT_TRUE(compareInst(decode->decoded, i.inst_type));
+  }
 }
 
 // GEN_BRANCH_TEST(opcode, imm1, imm2, imm3):
@@ -206,26 +356,93 @@ struct TestData {
 };
 
 TEST_F(RISCVEmulatorTester, TestDecodeAndExcute) {
-
   std::vector<TestData> tests = {
+      // RV32I & RV64I Tests
       {0x00010113, "ADDI", false, [](RS1 rs1, RS2, PC) { return rs1 + 0; }},
       {0x00023517, "AUIPC", false, [](RS1, RS2, PC pc) { return pc + 143360; }},
       {0x0006079b, "ADDIW", false, [](RS1 rs1, RS2, PC) { return rs1 + 0; }},
       {0x00110837, "LUI", false, [](RS1, RS2, PC pc) { return 1114112; }},
       {0x00147513, "ANDI", false, [](RS1 rs1, RS2, PC) { return rs1 & 1; }},
-      {0x00153513, "SLTIU", false, [](RS1 rs1, RS2, PC) { return rs1 != 0; }},
-      {0x00256513, "ORI", false, [](RS1 rs1, RS2, PC) { return rs1 | 1; }},
+      {0x00153513, "SLTIU", false, [](RS1 rs1, RS2, PC) { return 0; }},
+      {0x00256513, "ORI", false, [](RS1 rs1, RS2, PC) { return rs1 | 2; }},
       {0x00451a13, "SLLI", false, [](RS1 rs1, RS2, PC) { return rs1 << 4; }},
       {0x00455693, "SRLI", false, [](RS1 rs1, RS2, PC) { return rs1 >> 4; }},
       {0x00a035b3, "SLTU", true, [](RS1 rs1, RS2 rs2, PC) { return rs2 != 0; }},
       {0x00b50633, "ADD", true, [](RS1 rs1, RS2 rs2, PC) { return rs1 + rs2; }},
       {0x40d507b3, "SUB", true, [](RS1 rs1, RS2 rs2, PC) { return rs1 - rs2; }},
+
+      // RV32M & RV64M Tests
+      {0x02f787b3, "MUL", true, [](RS1 rs1, RS2 rs2, PC) { return rs1 * rs2; }},
+      {0x2F797B3, "MULH", true, [](RS1 rs1, RS2 rs2, PC) { return 0; }},
+      {0x2F7A7B3, "MULHSU", true, [](RS1 rs1, RS2 rs2, PC) { return 0; }},
+      {0x2F7B7B3, "MULHU", true, [](RS1 rs1, RS2 rs2, PC) { return 0; }},
+      {0x02f747b3, "DIV", true, [](RS1 rs1, RS2 rs2, PC) { return rs1 / rs2; }},
+      {0x02f757b3, "DIVU", true,
+       [](RS1 rs1, RS2 rs2, PC) { return rs1 / rs2; }},
+      {0x02f767b3, "REM", true, [](RS1 rs1, RS2 rs2, PC) { return rs1 % rs2; }},
+      {0x02f777b3, "REMU", true,
+       [](RS1 rs1, RS2 rs2, PC) { return rs1 % rs2; }},
+      {0x02f787bb, "MULW", true,
+       [](RS1 rs1, RS2 rs2, PC) { return rs1 * rs2; }},
+      {0x02f747bb, "DIVW", true,
+       [](RS1 rs1, RS2 rs2, PC) { return rs1 / rs2; }},
+      {0x02f757bb, "DIVUW", true,
+       [](RS1 rs1, RS2 rs2, PC) { return rs1 / rs2; }},
+      {0x02f767bb, "REMW", true,
+       [](RS1 rs1, RS2 rs2, PC) { return rs1 % rs2; }},
+      {0x02f777bb, "REMUW", true,
+       [](RS1 rs1, RS2 rs2, PC) { return rs1 % rs2; }},
   };
   for (auto i : tests) {
-    const InstrPattern *pattern = this->Decode(i.inst);
-    ASSERT_TRUE(pattern != nullptr);
-    std::string name = pattern->name;
+    auto decode = this->Decode(i.inst);
+    ASSERT_TRUE(decode.has_value());
+    std::string name = decode->pattern.name;
     ASSERT_EQ(name, i.name);
-    TestInst(this, i.inst, i.has_rs2, i.rd_val);
+    TestInst(this, *decode, i.has_rs2, i.rd_val);
   }
+}
+
+TEST_F(RISCVEmulatorTester, TestAMOSWAP) {
+  TestAtomic<uint32_t>(this, 0x8F7282F, 0x1, 0x2, 0x1, 0x2);
+  TestAtomic<uint64_t>(this, 0x8F7382F, 0x1, 0x2, 0x1, 0x2);
+}
+
+TEST_F(RISCVEmulatorTester, TestAMOADD) {
+  TestAtomic<uint32_t>(this, 0xF7282F, 0x1, 0x2, 0x1, 0x3);
+  TestAtomic<uint64_t>(this, 0xF7382F, 0x1, 0x2, 0x1, 0x3);
+}
+
+TEST_F(RISCVEmulatorTester, TestAMOXOR) {
+  TestAtomic<uint32_t>(this, 0x20F7282F, 0x1, 0x2, 0x1, 0x3);
+  TestAtomic<uint32_t>(this, 0x20F7382F, 0x1, 0x2, 0x1, 0x3);
+}
+
+TEST_F(RISCVEmulatorTester, TestAMOAND) {
+  TestAtomic<uint32_t>(this, 0x60F7282F, 0x1, 0x2, 0x1, 0x0);
+  TestAtomic<uint64_t>(this, 0x60F7382F, 0x1, 0x2, 0x1, 0x0);
+}
+
+TEST_F(RISCVEmulatorTester, TestAMOOR) {
+  TestAtomic<uint32_t>(this, 0x40F7282F, 0x1, 0x2, 0x1, 0x3);
+  TestAtomic<uint32_t>(this, 0x40F7382F, 0x1, 0x2, 0x1, 0x3);
+}
+
+TEST_F(RISCVEmulatorTester, TestAMOMIN) {
+  TestAtomic<uint32_t>(this, 0x80F7282F, 0x1, 0x2, 0x1, 0x1);
+  TestAtomic<uint64_t>(this, 0x80F7382F, 0x1, 0x2, 0x1, 0x1);
+}
+
+TEST_F(RISCVEmulatorTester, TestAMOMAX) {
+  TestAtomic<uint32_t>(this, 0xA0F7282F, 0x1, 0x2, 0x1, 0x2);
+  TestAtomic<uint64_t>(this, 0xA0F7382F, 0x1, 0x2, 0x1, 0x2);
+}
+
+TEST_F(RISCVEmulatorTester, TestAMOMINU) {
+  TestAtomic<uint32_t>(this, 0xC0F7282F, 0x1, 0x2, 0x1, 0x1);
+  TestAtomic<uint64_t>(this, 0xC0F7382F, 0x1, 0x2, 0x1, 0x1);
+}
+
+TEST_F(RISCVEmulatorTester, TestAMOMAXU) {
+  TestAtomic<uint32_t>(this, 0xE0F7282F, 0x1, 0x2, 0x1, 0x2);
+  TestAtomic<uint64_t>(this, 0xE0F7382F, 0x1, 0x2, 0x1, 0x2);
 }

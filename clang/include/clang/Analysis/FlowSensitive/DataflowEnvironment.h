@@ -260,7 +260,7 @@ public:
   ///
   ///  `Loc` must not be null.
   template <typename T>
-  typename std::enable_if<std::is_base_of<StorageLocation, T>::value, T &>::type
+  std::enable_if_t<std::is_base_of<StorageLocation, T>::value, T &>
   takeOwnership(std::unique_ptr<T> Loc) {
     return DACtx->takeOwnership(std::move(Loc));
   }
@@ -272,7 +272,7 @@ public:
   ///
   ///  `Val` must not be null.
   template <typename T>
-  typename std::enable_if<std::is_base_of<Value, T>::value, T &>::type
+  std::enable_if_t<std::is_base_of<Value, T>::value, T &>
   takeOwnership(std::unique_ptr<T> Val) {
     return DACtx->takeOwnership(std::move(Val));
   }
@@ -286,6 +286,11 @@ public:
   /// Returns an atomic boolean value.
   BoolValue &makeAtomicBoolValue() const {
     return DACtx->createAtomicBoolValue();
+  }
+
+  /// Returns a unique instance of boolean Top.
+  BoolValue &makeTopBoolValue() const {
+    return DACtx->createTopBoolValue();
   }
 
   /// Returns a boolean value that represents the conjunction of `LHS` and

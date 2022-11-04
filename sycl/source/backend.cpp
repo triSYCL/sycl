@@ -146,7 +146,7 @@ make_kernel_bundle(pi_native_handle NativeHandle, const context &TargetContext,
 
   pi::PiProgram PiProgram = nullptr;
   Plugin.call<PiApiKind::piextProgramCreateWithNativeHandle>(
-      NativeHandle, ContextImpl->getHandleRef(), KeepOwnership, &PiProgram);
+      NativeHandle, ContextImpl->getHandleRef(), !KeepOwnership, &PiProgram);
 
   std::vector<pi::PiDevice> ProgramDevices;
   size_t NumDevices = 0;
@@ -257,7 +257,7 @@ kernel make_kernel(const context &TargetContext,
   // Create PI kernel first.
   pi::PiKernel PiKernel = nullptr;
   Plugin.call<PiApiKind::piextKernelCreateWithNativeHandle>(
-      NativeHandle, ContextImpl->getHandleRef(), PiProgram, KeepOwnership,
+      NativeHandle, ContextImpl->getHandleRef(), PiProgram, !KeepOwnership,
       &PiKernel);
 
   if (Backend == backend::opencl)

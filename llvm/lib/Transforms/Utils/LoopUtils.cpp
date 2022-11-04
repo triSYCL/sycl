@@ -486,8 +486,10 @@ void llvm::deleteDeadLoop(Loop *L, DominatorTree *DT, ScalarEvolution *SE,
   // Tell ScalarEvolution that the loop is deleted. Do this before
   // deleting the loop so that ScalarEvolution can look at the loop
   // to determine what it needs to clean up.
-  if (SE)
+  if (SE) {
     SE->forgetLoop(L);
+    SE->forgetBlockAndLoopDispositions();
+  }
 
   Instruction *OldTerm = Preheader->getTerminator();
   assert(!OldTerm->mayHaveSideEffects() &&
@@ -634,15 +636,14 @@ void llvm::deleteDeadLoop(Loop *L, DominatorTree *DT, ScalarEvolution *SE,
     // Since debug values in the loop have been deleted, inserting an undef
     // dbg.value truncates the range of any dbg.value before the loop where the
     // loop used to be. This is particularly important for constant values.
-    DIBuilder DIB(*ExitBlock->getModule());
     Instruction *InsertDbgValueBefore = ExitBlock->getFirstNonPHI();
     assert(InsertDbgValueBefore &&
            "There should be a non-PHI instruction in exit block, else these "
            "instructions will have no parent.");
-    for (auto *DVI : DeadDebugInst)
-      DIB.insertDbgValueIntrinsic(UndefValue::get(Builder.getInt32Ty()),
-                                  DVI->getVariable(), DVI->getExpression(),
-                                  DVI->getDebugLoc(), InsertDbgValueBefore);
+    for (auto *DVI : DeadDebugInst) {
+      DVI->setUndef();
+      DVI->moveBefore(InsertDbgValueBefore);
+    }
   }
 
   // Remove the block from the reference counting scheme, so that we can
@@ -694,6 +695,7 @@ void llvm::breakLoopBackedge(Loop *L, DominatorTree &DT, ScalarEvolution &SE,
   Loop *OutermostLoop = L->getOutermostLoop();
 
   SE.forgetLoop(L);
+  SE.forgetBlockAndLoopDispositions();
 
   std::unique_ptr<MemorySSAUpdater> MSSAU;
   if (MSSA)
@@ -1705,9 +1707,9 @@ Value *llvm::addDiffRuntimeChecks(
   return MemoryRuntimeCheck;
 }
 
-Optional<IVConditionInfo> llvm::hasPartialIVCondition(Loop &L,
+Optional<IVConditionInfo> llvm::hasPartialIVCondition(const Loop &L,
                                                       unsigned MSSAThreshold,
-                                                      MemorySSA &MSSA,
+                                                      const MemorySSA &MSSA,
                                                       AAResults &AA) {
   auto *TI = dyn_cast<BranchInst>(L.getHeader()->getTerminator());
   if (!TI || !TI->isConditional())
@@ -1843,7 +1845,7 @@ Optional<IVConditionInfo> llvm::hasPartialIVCondition(Loop &L,
           if (L.contains(Succ))
             continue;
 
-          Info.PathIsNoop &= llvm::empty(Succ->phis()) &&
+          Info.PathIsNoop &= Succ->phis().empty() &&
                              (!Info.ExitForPath || Info.ExitForPath == Succ);
           if (!Info.PathIsNoop)
             break;

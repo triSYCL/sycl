@@ -221,6 +221,8 @@ bool RISCVTargetInfo::initFeatureMap(
   if (getTriple().getArch() == llvm::Triple::riscv64) {
     Features["64bit"] = true;
     XLen = 64;
+  } else {
+    Features["32bit"] = true;
   }
 
   auto ParseResult = llvm::RISCVISAInfo::parseFeatures(XLen, FeaturesVec);
@@ -244,6 +246,21 @@ bool RISCVTargetInfo::initFeatureMap(
   return TargetInfo::initFeatureMap(Features, Diags, CPU, ImpliedFeatures);
 }
 
+Optional<std::pair<unsigned, unsigned>>
+RISCVTargetInfo::getVScaleRange(const LangOptions &LangOpts) const {
+  if (LangOpts.VScaleMin || LangOpts.VScaleMax)
+    return std::pair<unsigned, unsigned>(
+        LangOpts.VScaleMin ? LangOpts.VScaleMin : 1, LangOpts.VScaleMax);
+
+  if (unsigned MinVLen = ISAInfo->getMinVLen()) {
+    unsigned MaxVLen = ISAInfo->getMaxVLen();
+    // RISCV::RVVBitsPerBlock is 64.
+    return std::pair<unsigned, unsigned>(MinVLen/64, MaxVLen/64);
+  }
+
+  return None;
+}
+
 /// Return true if has this feature, need to sync with handleTargetFeatures.
 bool RISCVTargetInfo::hasFeature(StringRef Feature) const {
   bool Is64Bit = getTriple().getArch() == llvm::Triple::riscv64;
@@ -251,6 +268,7 @@ bool RISCVTargetInfo::hasFeature(StringRef Feature) const {
                     .Case("riscv", true)
                     .Case("riscv32", !Is64Bit)
                     .Case("riscv64", Is64Bit)
+                    .Case("32bit", !Is64Bit)
                     .Case("64bit", Is64Bit)
                     .Default(None);
   if (Result)

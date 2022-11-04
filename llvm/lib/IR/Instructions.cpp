@@ -14,6 +14,7 @@
 #include "llvm/IR/Instructions.h"
 #include "LLVMContextImpl.h"
 #include "llvm/ADT/None.h"
+#include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/IR/Attributes.h"
@@ -343,9 +344,25 @@ bool CallBase::paramHasAttr(unsigned ArgNo, Attribute::AttrKind Kind) const {
 
   if (Attrs.hasParamAttr(ArgNo, Kind))
     return true;
-  if (const Function *F = getCalledFunction())
-    return F->getAttributes().hasParamAttr(ArgNo, Kind);
-  return false;
+
+  const Function *F = getCalledFunction();
+  if (!F)
+    return false;
+
+  if (!F->getAttributes().hasParamAttr(ArgNo, Kind))
+    return false;
+
+  // Take into account mod/ref by operand bundles.
+  switch (Kind) {
+  case Attribute::ReadNone:
+    return !hasReadingOperandBundles() && !hasClobberingOperandBundles();
+  case Attribute::ReadOnly:
+    return !hasClobberingOperandBundles();
+  case Attribute::WriteOnly:
+    return !hasReadingOperandBundles();
+  default:
+    return true;
+  }
 }
 
 bool CallBase::hasFnAttrOnCalledFunction(Attribute::AttrKind Kind) const {
@@ -507,6 +524,13 @@ bool CallBase::hasReadingOperandBundles() const {
   // ptrauth) forces a callsite to be at least readonly.
   return hasOperandBundlesOtherThan(
              {LLVMContext::OB_ptrauth, LLVMContext::OB_kcfi}) &&
+         getIntrinsicID() != Intrinsic::assume;
+}
+
+bool CallBase::hasClobberingOperandBundles() const {
+  return hasOperandBundlesOtherThan(
+             {LLVMContext::OB_deopt, LLVMContext::OB_funclet,
+              LLVMContext::OB_ptrauth, LLVMContext::OB_kcfi}) &&
          getIntrinsicID() != Intrinsic::assume;
 }
 
@@ -2567,6 +2591,37 @@ bool ShuffleVectorInst::isReplicationMask(int &ReplicationFactor,
   ReplicationFactor = ShuffleMask.size() / VF;
 
   return isReplicationMaskWithParams(ShuffleMask, ReplicationFactor, VF);
+}
+
+bool ShuffleVectorInst::isOneUseSingleSourceMask(ArrayRef<int> Mask, int VF) {
+  if (VF <= 0 || Mask.size() < static_cast<unsigned>(VF) ||
+      Mask.size() % VF != 0)
+    return false;
+  for (unsigned K = 0, Sz = Mask.size(); K < Sz; K += VF) {
+    ArrayRef<int> SubMask = Mask.slice(K, VF);
+    if (all_of(SubMask, [](int Idx) { return Idx == UndefMaskElem; }))
+      continue;
+    SmallBitVector Used(VF, false);
+    for_each(SubMask, [&Used, VF](int Idx) {
+      if (Idx != UndefMaskElem && Idx < VF)
+        Used.set(Idx);
+    });
+    if (!Used.all())
+      return false;
+  }
+  return true;
+}
+
+/// Return true if this shuffle mask is a replication mask.
+bool ShuffleVectorInst::isOneUseSingleSourceMask(int VF) const {
+  // Not possible to express a shuffle mask for a scalable vector for this
+  // case.
+  if (isa<ScalableVectorType>(getType()))
+    return false;
+  if (!isSingleSourceMask(ShuffleMask))
+    return false;
+
+  return isOneUseSingleSourceMask(ShuffleMask, VF);
 }
 
 //===----------------------------------------------------------------------===//

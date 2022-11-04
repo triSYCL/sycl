@@ -23,6 +23,7 @@
 #include "clang/Driver/Options.h"
 #include "clang/Driver/Tool.h"
 #include "clang/Driver/ToolChain.h"
+#include "llvm/ADT/Twine.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/CodeGen.h"
 #include "llvm/Support/Path.h"
@@ -644,13 +645,6 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-lm");
   }
 
-  // If we are linking for the device all symbols should be bound locally. The
-  // symbols are already protected which makes this redundant. This is only
-  // necessary to work around a problem in bfd.
-  // TODO: Remove this once 'lld' becomes the only linker for offloading.
-  if (JA.isDeviceOffloading(Action::OFK_OpenMP))
-    CmdArgs.push_back("-Bsymbolic");
-
   // Silence warnings when linking C code with a C++ '-stdlib' argument.
   Args.ClaimAllArgs(options::OPT_stdlib_EQ);
 
@@ -848,7 +842,7 @@ void tools::gnutools::Assembler::ConstructJob(Compilation &C,
       CmdArgs.push_back("--compress-debug-sections");
     } else {
       StringRef Value = A->getValue();
-      if (Value == "none" || Value == "zlib") {
+      if (Value == "none" || Value == "zlib" || Value == "zstd") {
         CmdArgs.push_back(
             Args.MakeArgString("--compress-debug-sections=" + Twine(Value)));
       } else {
@@ -1093,6 +1087,17 @@ void tools::gnutools::Assembler::ConstructJob(Compilation &C,
 
   for (const auto &II : Inputs)
     CmdArgs.push_back(II.getFilename());
+
+  if (Arg *A = Args.getLastArg(options::OPT_g_Flag, options::OPT_gN_Group,
+                               options::OPT_gdwarf_2, options::OPT_gdwarf_3,
+                               options::OPT_gdwarf_4, options::OPT_gdwarf_5,
+                               options::OPT_gdwarf))
+    if (!A->getOption().matches(options::OPT_g0)) {
+      Args.AddLastArg(CmdArgs, options::OPT_g_Flag);
+
+      unsigned DwarfVersion = getDwarfVersion(getToolChain(), Args);
+      CmdArgs.push_back(Args.MakeArgString("-gdwarf-" + Twine(DwarfVersion)));
+    }
 
   const char *Exec =
       Args.MakeArgString(getToolChain().GetProgramPath(DefaultAssembler));
@@ -1997,8 +2002,15 @@ bool Generic_GCC::GCCVersion::isOlderThan(int RHSMajor, int RHSMinor,
                                           StringRef RHSPatchSuffix) const {
   if (Major != RHSMajor)
     return Major < RHSMajor;
-  if (Minor != RHSMinor)
+  if (Minor != RHSMinor) {
+    // Note that versions without a specified minor sort higher than those with
+    // a minor.
+    if (RHSMinor == -1)
+      return true;
+    if (Minor == -1)
+      return false;
     return Minor < RHSMinor;
+  }
   if (Patch != RHSPatch) {
     // Note that versions without a specified patch sort higher than those with
     // a patch.
@@ -2114,6 +2126,28 @@ void Generic_GCC::GCCInstallationDetector::init(
   CollectLibDirsAndTriples(TargetTriple, BiarchVariantTriple, CandidateLibDirs,
                            CandidateTripleAliases, CandidateBiarchLibDirs,
                            CandidateBiarchTripleAliases);
+
+  // If --gcc-install-dir= is specified, skip filesystem detection.
+  if (const Arg *A =
+          Args.getLastArg(clang::driver::options::OPT_gcc_install_dir_EQ);
+      A && A->getValue()[0]) {
+    StringRef InstallDir = A->getValue();
+    if (!ScanGCCForMultilibs(TargetTriple, Args, InstallDir, false)) {
+      D.Diag(diag::err_drv_invalid_gcc_install_dir) << InstallDir;
+    } else {
+      (void)InstallDir.consume_back("/");
+      StringRef VersionText = llvm::sys::path::filename(InstallDir);
+      StringRef TripleText =
+          llvm::sys::path::filename(llvm::sys::path::parent_path(InstallDir));
+
+      Version = GCCVersion::Parse(VersionText);
+      GCCTriple.setTriple(TripleText);
+      GCCInstallPath = std::string(InstallDir);
+      GCCParentLibPath = GCCInstallPath + "/../../..";
+      IsValid = true;
+    }
+    return;
+  }
 
   // Compute the set of prefixes for our search.
   SmallVector<std::string, 8> Prefixes;
@@ -2261,31 +2295,21 @@ void Generic_GCC::GCCInstallationDetector::AddDefaultGCCPrefixes(
   // and gcc-toolsets.
   if (SysRoot.empty() && TargetTriple.getOS() == llvm::Triple::Linux &&
       D.getVFS().exists("/opt/rh")) {
-    // Find the directory in /opt/rh/ starting with gcc-toolset-* or
-    // devtoolset-* with the highest version number and add that
-    // one to our prefixes.
-    std::string ChosenToolsetDir;
-    unsigned ChosenToolsetVersion = 0;
-    std::error_code EC;
-    for (llvm::vfs::directory_iterator LI = D.getVFS().dir_begin("/opt/rh", EC),
-                                       LE;
-         !EC && LI != LE; LI = LI.increment(EC)) {
-      StringRef ToolsetDir = llvm::sys::path::filename(LI->path());
-      unsigned ToolsetVersion;
-      if ((!ToolsetDir.startswith("gcc-toolset-") &&
-           !ToolsetDir.startswith("devtoolset-")) ||
-          ToolsetDir.substr(ToolsetDir.rfind('-') + 1)
-              .getAsInteger(10, ToolsetVersion))
-        continue;
-
-      if (ToolsetVersion > ChosenToolsetVersion) {
-        ChosenToolsetVersion = ToolsetVersion;
-        ChosenToolsetDir = "/opt/rh/" + ToolsetDir.str();
-      }
-    }
-
-    if (ChosenToolsetVersion > 0)
-      Prefixes.push_back(ChosenToolsetDir + "/root/usr");
+    // TODO: We may want to remove this, since the functionality
+    //   can be achieved using config files.
+    Prefixes.push_back("/opt/rh/gcc-toolset-12/root/usr");
+    Prefixes.push_back("/opt/rh/gcc-toolset-11/root/usr");
+    Prefixes.push_back("/opt/rh/gcc-toolset-10/root/usr");
+    Prefixes.push_back("/opt/rh/devtoolset-12/root/usr");
+    Prefixes.push_back("/opt/rh/devtoolset-11/root/usr");
+    Prefixes.push_back("/opt/rh/devtoolset-10/root/usr");
+    Prefixes.push_back("/opt/rh/devtoolset-9/root/usr");
+    Prefixes.push_back("/opt/rh/devtoolset-8/root/usr");
+    Prefixes.push_back("/opt/rh/devtoolset-7/root/usr");
+    Prefixes.push_back("/opt/rh/devtoolset-6/root/usr");
+    Prefixes.push_back("/opt/rh/devtoolset-4/root/usr");
+    Prefixes.push_back("/opt/rh/devtoolset-3/root/usr");
+    Prefixes.push_back("/opt/rh/devtoolset-2/root/usr");
   }
 
   // Fall back to /usr which is used by most non-Solaris systems.
@@ -2945,7 +2969,8 @@ void Generic_GCC::printVerboseInfo(raw_ostream &OS) const {
   RocmInstallation.print(OS);
 }
 
-bool Generic_GCC::IsUnwindTablesDefault(const ArgList &Args) const {
+ToolChain::UnwindTableLevel
+Generic_GCC::getDefaultUnwindTableLevel(const ArgList &Args) const {
   switch (getArch()) {
   case llvm::Triple::aarch64:
   case llvm::Triple::ppc:
@@ -2954,9 +2979,9 @@ bool Generic_GCC::IsUnwindTablesDefault(const ArgList &Args) const {
   case llvm::Triple::ppc64le:
   case llvm::Triple::x86:
   case llvm::Triple::x86_64:
-    return true;
+    return UnwindTableLevel::Asynchronous;
   default:
-    return false;
+    return UnwindTableLevel::None;
   }
 }
 

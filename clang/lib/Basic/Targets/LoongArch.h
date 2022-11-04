@@ -55,6 +55,9 @@ public:
 
   bool validateAsmConstraint(const char *&Name,
                              TargetInfo::ConstraintInfo &Info) const override;
+  std::string convertConstraint(const char *&Constraint) const override;
+
+  bool hasBitIntType() const override { return true; }
 };
 
 class LLVM_LIBRARY_VISIBILITY LoongArch32TargetInfo
@@ -77,6 +80,9 @@ public:
     }
     return false;
   }
+  void setMaxAtomicWidth() override {
+    MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 32;
+  }
 };
 
 class LLVM_LIBRARY_VISIBILITY LoongArch64TargetInfo
@@ -97,6 +103,9 @@ public:
       return true;
     }
     return false;
+  }
+  void setMaxAtomicWidth() override {
+    MaxAtomicPromoteWidth = MaxAtomicInlineWidth = 64;
   }
 };
 } // end namespace targets

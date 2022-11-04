@@ -794,7 +794,11 @@ DefinedOrUnknownSVal MemRegionManager::getStaticSize(const MemRegion *MR,
         if (Size.isZero())
           return true;
 
-        if (getContext().getLangOpts().StrictFlexArrays >= 2)
+        using FAMKind = LangOptions::StrictFlexArraysLevelKind;
+        const FAMKind StrictFlexArraysLevel =
+          Ctx.getLangOpts().getStrictFlexArraysLevel();
+        if (StrictFlexArraysLevel == FAMKind::ZeroOrIncomplete ||
+            StrictFlexArraysLevel == FAMKind::IncompleteOnly)
           return false;
 
         const AnalyzerOptions &Opts = SVB.getAnalyzerOptions();
@@ -1485,7 +1489,7 @@ static RegionOffset calculateOffset(const MemRegion *R) {
         // If our base region is symbolic, we don't know what type it really is.
         // Pretend the type of the symbol is the true dynamic type.
         // (This will at least be self-consistent for the life of the symbol.)
-        Ty = SR->getSymbol()->getType()->getPointeeType();
+        Ty = SR->getPointeeStaticType();
         RootIsSymbolic = true;
       }
 

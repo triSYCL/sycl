@@ -139,9 +139,9 @@ searchLibrary(StringRef name, ArrayRef<StringRef> searchPaths, bool bStatic) {
     }
     if (Optional<std::string> s = findFile(dir, "lib" + name + ".a"))
       return *s;
+    if (Optional<std::string> s = findFile(dir, name + ".lib"))
+       return *s;
     if (!bStatic) {
-      if (Optional<std::string> s = findFile(dir, name + ".lib"))
-        return *s;
       if (Optional<std::string> s = findFile(dir, "lib" + name + ".dll"))
         return *s;
       if (Optional<std::string> s = findFile(dir, name + ".dll"))
@@ -377,6 +377,17 @@ bool mingw::link(ArrayRef<const char *> argsArr, llvm::raw_ostream &stdoutOS,
       add("-machine:arm64");
     else
       error("unknown parameter: -m" + s);
+  }
+
+  if (args.hasFlag(OPT_guard_cf, OPT_no_guard_cf, false)) {
+    if (args.hasFlag(OPT_guard_longjmp, OPT_no_guard_longjmp, true))
+      add("-guard:cf,longjmp");
+    else
+      add("-guard:cf,nolongjmp");
+  } else if (args.hasFlag(OPT_guard_longjmp, OPT_no_guard_longjmp, false)) {
+    auto *a = args.getLastArg(OPT_guard_longjmp);
+    warn("parameter " + a->getSpelling() +
+         " only takes effect when used with --guard-cf");
   }
 
   for (auto *a : args.filtered(OPT_mllvm))

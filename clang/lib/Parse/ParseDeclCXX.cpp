@@ -678,6 +678,8 @@ bool Parser::ParseUsingDeclarator(DeclaratorContext Context,
 ///
 ///     using-enum-declaration: [C++20, dcl.enum]
 ///       'using' elaborated-enum-specifier ;
+///       The terminal name of the elaborated-enum-specifier undergoes
+///       ordinary lookup
 ///
 ///     elaborated-enum-specifier:
 ///       'enum' nested-name-specifier[opt] identifier
@@ -697,21 +699,47 @@ Parser::DeclGroupPtrTy Parser::ParseUsingDeclaration(
 
     DiagnoseCXX11AttributeExtension(PrefixAttrs);
 
-    DeclSpec DS(AttrFactory);
-    ParseEnumSpecifier(UELoc, DS, TemplateInfo, AS,
-                       // DSC_trailing has the semantics we desire
-                       DeclSpecContext::DSC_trailing);
-
     if (TemplateInfo.Kind) {
       SourceRange R = TemplateInfo.getSourceRange();
       Diag(UsingLoc, diag::err_templated_using_directive_declaration)
           << 1 /* declaration */ << R << FixItHint::CreateRemoval(R);
-
+      SkipUntil(tok::semi);
+      return nullptr;
+    }
+    CXXScopeSpec SS;
+    if (ParseOptionalCXXScopeSpecifier(SS, /*ParsedType=*/nullptr,
+                                       /*ObectHasErrors=*/false,
+                                       /*EnteringConttext=*/false,
+                                       /*MayBePseudoDestructor=*/nullptr,
+                                       /*IsTypename=*/false,
+                                       /*IdentifierInfo=*/nullptr,
+                                       /*OnlyNamespace=*/false,
+                                       /*InUsingDeclaration=*/true)) {
+      SkipUntil(tok::semi);
       return nullptr;
     }
 
-    Decl *UED = Actions.ActOnUsingEnumDeclaration(getCurScope(), AS, UsingLoc,
-                                                  UELoc, DS);
+    if (Tok.is(tok::code_completion)) {
+      cutOffParsing();
+      Actions.CodeCompleteUsing(getCurScope());
+      return nullptr;
+    }
+
+    if (!Tok.is(tok::identifier)) {
+      Diag(Tok.getLocation(), diag::err_using_enum_expect_identifier)
+          << Tok.is(tok::kw_enum);
+      SkipUntil(tok::semi);
+      return nullptr;
+    }
+    IdentifierInfo *IdentInfo = Tok.getIdentifierInfo();
+    SourceLocation IdentLoc = ConsumeToken();
+    Decl *UED = Actions.ActOnUsingEnumDeclaration(
+        getCurScope(), AS, UsingLoc, UELoc, IdentLoc, *IdentInfo, &SS);
+    if (!UED) {
+      SkipUntil(tok::semi);
+      return nullptr;
+    }
+
     DeclEnd = Tok.getLocation();
     if (ExpectAndConsume(tok::semi, diag::err_expected_after,
                          "using-enum declaration"))
@@ -1245,7 +1273,8 @@ TypeResult Parser::ParseBaseTypeSpecifier(SourceLocation &BaseLoc,
   if (Tok.is(tok::annot_template_id)) {
     TemplateIdAnnotation *TemplateId = takeTemplateIdAnnotation(Tok);
     if (TemplateId->mightBeType()) {
-      AnnotateTemplateIdTokenAsType(SS, /*IsClassName*/ true);
+      AnnotateTemplateIdTokenAsType(SS, ImplicitTypenameContext::No,
+                                    /*IsClassName=*/true);
 
       assert(Tok.is(tok::annot_typename) && "template-id -> type failed");
       TypeResult Type = getTypeAnnotation(Tok);
@@ -1287,7 +1316,8 @@ TypeResult Parser::ParseBaseTypeSpecifier(SourceLocation &BaseLoc,
       return true;
     if (Tok.is(tok::annot_template_id) &&
         takeTemplateIdAnnotation(Tok)->mightBeType())
-      AnnotateTemplateIdTokenAsType(SS, /*IsClassName*/ true);
+      AnnotateTemplateIdTokenAsType(SS, ImplicitTypenameContext::No,
+                                    /*IsClassName=*/true);
 
     // If we didn't end up with a typename token, there's nothing more we
     // can do.
@@ -1308,7 +1338,8 @@ TypeResult Parser::ParseBaseTypeSpecifier(SourceLocation &BaseLoc,
       *Id, IdLoc, getCurScope(), &SS, /*isClassName=*/true, false, nullptr,
       /*IsCtorOrDtorName=*/false,
       /*WantNontrivialTypeSourceInfo=*/true,
-      /*IsClassTemplateDeductionContext*/ false, &CorrectedII);
+      /*IsClassTemplateDeductionContext=*/false, ImplicitTypenameContext::No,
+      &CorrectedII);
   if (!Type) {
     Diag(IdLoc, diag::err_expected_class_name);
     return true;
@@ -1548,6 +1579,7 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
           tok::kw___is_array,
           tok::kw___is_assignable,
           tok::kw___is_base_of,
+          tok::kw___is_bounded_array,
           tok::kw___is_class,
           tok::kw___is_complete_type,
           tok::kw___is_compound,
@@ -1573,15 +1605,18 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
           tok::kw___is_nothrow_assignable,
           tok::kw___is_nothrow_constructible,
           tok::kw___is_nothrow_destructible,
+          tok::kw___is_nullptr,
           tok::kw___is_object,
           tok::kw___is_pod,
           tok::kw___is_pointer,
           tok::kw___is_polymorphic,
           tok::kw___is_reference,
+          tok::kw___is_referenceable,
           tok::kw___is_rvalue_expr,
           tok::kw___is_rvalue_reference,
           tok::kw___is_same,
           tok::kw___is_scalar,
+          tok::kw___is_scoped_enum,
           tok::kw___is_sealed,
           tok::kw___is_signed,
           tok::kw___is_standard_layout,
@@ -1589,6 +1624,7 @@ void Parser::ParseClassSpecifier(tok::TokenKind TagTokKind,
           tok::kw___is_trivially_assignable,
           tok::kw___is_trivially_constructible,
           tok::kw___is_trivially_copyable,
+          tok::kw___is_unbounded_array,
           tok::kw___is_union,
           tok::kw___is_unsigned,
           tok::kw___is_void,
@@ -3733,7 +3769,8 @@ MemInitResult Parser::ParseMemInitializer(Decl *ConstructorDecl) {
                                            ? takeTemplateIdAnnotation(Tok)
                                            : nullptr;
     if (TemplateId && TemplateId->mightBeType()) {
-      AnnotateTemplateIdTokenAsType(SS, /*IsClassName*/ true);
+      AnnotateTemplateIdTokenAsType(SS, ImplicitTypenameContext::No,
+                                    /*IsClassName=*/true);
       assert(Tok.is(tok::annot_typename) && "template-id -> type failed");
       TemplateTypeTy = getTypeAnnotation(Tok);
       ConsumeAnnotationToken();

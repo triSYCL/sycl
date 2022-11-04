@@ -1034,7 +1034,7 @@ InstructionCost ARMTTIImpl::getCmpSelInstrCost(unsigned Opcode, Type *ValTy,
     // split, we may need an expensive shuffle to get two in sync. This has the
     // effect of making larger than legal compares (v8i32 for example)
     // expensive.
-    if (LT.second.getVectorNumElements() > 2) {
+    if (LT.second.isVector() && LT.second.getVectorNumElements() > 2) {
       if (LT.first > 1)
         return LT.first * BaseCost +
                BaseT::getScalarizationOverhead(VecCondTy, true, false);
@@ -2190,7 +2190,7 @@ static bool canTailPredicateLoop(Loop *L, LoopInfo *LI, ScalarEvolution &SE,
       if (isa<StoreInst>(I) || isa<LoadInst>(I)) {
         Value *Ptr = getLoadStorePointerOperand(&I);
         Type *AccessTy = getLoadStoreType(&I);
-        int64_t NextStride = getPtrStride(PSE, AccessTy, Ptr, L);
+        int64_t NextStride = getPtrStride(PSE, AccessTy, Ptr, L).value_or(0);
         if (NextStride == 1) {
           // TODO: for now only allow consecutive strides of 1. We could support
           // other strides as long as it is uniform, but let's keep it simple

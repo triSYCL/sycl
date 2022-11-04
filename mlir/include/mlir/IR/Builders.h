@@ -59,6 +59,7 @@ public:
                        Attribute metadata = Attribute());
 
   // Types.
+  FloatType getFloat8E5M2Type();
   FloatType getBF16Type();
   FloatType getF16Type();
   FloatType getF32Type();
@@ -69,7 +70,10 @@ public:
   IndexType getIndexType();
 
   IntegerType getI1Type();
+  IntegerType getI2Type();
+  IntegerType getI4Type();
   IntegerType getI8Type();
+  IntegerType getI16Type();
   IntegerType getI32Type();
   IntegerType getI64Type();
   IntegerType getIntegerType(unsigned width);

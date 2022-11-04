@@ -1,4 +1,4 @@
-//===--- InterpState.cpp - Interpreter for the constexpr VM -----*- C++ -*-===//
+//===------- Interpcpp - Interpreter for the constexpr VM ------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -398,7 +398,13 @@ bool CheckPure(InterpState &S, CodePtr OpPC, const CXXMethodDecl *MD) {
   S.Note(MD->getLocation(), diag::note_declared_at);
   return false;
 }
+
 bool Interpret(InterpState &S, APValue &Result) {
+  // The current stack frame when we started Interpret().
+  // This is being used by the ops to determine wheter
+  // to return from this function and thus terminate
+  // interpretation.
+  const InterpFrame *StartFrame = S.Current;
   assert(!S.Current->isRoot());
   CodePtr PC = S.Current->getPC();
 

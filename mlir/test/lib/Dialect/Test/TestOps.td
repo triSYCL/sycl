@@ -23,6 +23,7 @@ include "mlir/Interfaces/CallInterfaces.td"
 include "mlir/Interfaces/ControlFlowInterfaces.td"
 include "mlir/Interfaces/CopyOpInterface.td"
 include "mlir/Interfaces/DataLayoutInterfaces.td"
+include "mlir/Interfaces/DestinationStyleOpInterface.td"
 include "mlir/Interfaces/InferIntRangeInterface.td"
 include "mlir/Interfaces/InferTypeOpInterface.td"
 include "mlir/Interfaces/LoopLikeInterface.td"
@@ -193,6 +194,14 @@ def TypeStringAttrWithTypeOp : TEST_Op<"string_attr_with_type"> {
   let assemblyFormat = "$attr attr-dict";
 }
 
+def FloatAttrOp : TEST_Op<"float_attrs"> {
+  // TODO: Clean up the OpBase float type and attribute selectors so they
+  // can express all of the types.
+  let arguments = (ins
+    AnyAttr:$float_attr
+  );
+}
+
 def I32Case5:  I32EnumAttrCase<"case5", 5>;
 def I32Case10: I32EnumAttrCase<"case10", 10>;
 
@@ -295,6 +304,17 @@ def DenseArrayAttrOp : TEST_Op<"dense_array_attr"> {
   }];
 }
 
+def ConfinedDenseArrayAttrOp : TEST_Op<"confined_dense_array_attr"> {
+  let arguments = (ins
+      ConfinedAttr<DenseI16ArrayAttr,
+                   [DenseArrayStrictlySorted<DenseI16ArrayAttr>]>:$emptyattr,
+      ConfinedAttr<DenseI32ArrayAttr,
+                   [DenseArraySorted<DenseI32ArrayAttr>]>:$i32attr,
+      ConfinedAttr<DenseI64ArrayAttr,
+                   [DenseArrayStrictlySorted<DenseI64ArrayAttr>]>:$i64attr
+  );
+}
+
 //===----------------------------------------------------------------------===//
 // Test Enum Attributes
 //===----------------------------------------------------------------------===//
@@ -376,16 +396,6 @@ def OpWithBitEnumVerticalBar : TEST_Op<"op_with_bit_enum_vbar"> {
   let arguments = (ins TestBitEnumVerticalBarAttr:$value,
                    OptionalAttr<AnyAttr>:$tag);
   let assemblyFormat = "$value (`tag` $tag^)? attr-dict";
-}
-
-//===----------------------------------------------------------------------===//
-// Test Attribute Constraints
-//===----------------------------------------------------------------------===//
-
-def SymbolRefOp : TEST_Op<"symbol_ref_attr"> {
-  let arguments = (ins
-    ConfinedAttr<FlatSymbolRefAttr, [ReferToOp<"func::FuncOp">]>:$symbol
-  );
 }
 
 //===----------------------------------------------------------------------===//
@@ -797,6 +807,18 @@ def OIListAllowedLiteral : TEST_Op<"oilist_allowed_literal"> {
   }];
 }
 
+def TestEllipsisOp : TEST_Op<"ellipsis"> {
+  let arguments = (ins Variadic<AnyType>:$operands, UnitAttr:$variadic);
+  let assemblyFormat = [{
+    `(` $operands (`...` $variadic^)? `)` attr-dict `:` type($operands) `...`
+  }];
+}
+
+def ElseAnchorOp : TEST_Op<"else_anchor"> {
+  let arguments = (ins Optional<AnyType>:$a);
+  let assemblyFormat = "`(` (`?`) : (`` $a^ `:` type($a))? `)` attr-dict";
+}
+
 // This is used to test encoding of a string attribute into an SSA name of a
 // pretty printed value name.
 def StringAttrPrettyNameOp
@@ -1162,7 +1184,7 @@ def TestOpWithRegionPattern : TEST_Op<"op_with_region_pattern"> {
   let hasCanonicalizer = 1;
 }
 
-def TestOpConstant : TEST_Op<"constant", [ConstantLike, NoSideEffect]> {
+def TestOpConstant : TEST_Op<"constant", [ConstantLike, NoMemoryEffect]> {
   let arguments = (ins AnyAttr:$value);
   let results = (outs AnyType);
 
@@ -1176,8 +1198,8 @@ def : Pat<(OpR $input1, (ConstantLikeMatcher I32Attr:$input2)),
           (OpS:$unused $input1, $input2)>;
 
 // Op for testing trivial removal via folding of op with inner ops and no uses.
-def TestOpWithRegionFoldNoSideEffect : TEST_Op<
-    "op_with_region_fold_no_side_effect", [NoSideEffect]> {
+def TestOpWithRegionFoldNoMemoryEffect : TEST_Op<
+    "op_with_region_fold_no_side_effect", [NoMemoryEffect]> {
   let regions = (region SizedRegion<1>:$region);
 }
 
@@ -1217,28 +1239,28 @@ def TestCommutative2Op : TEST_Op<"op_commutative2", [Commutative]> {
 
 def TestIdempotentTraitOp
  : TEST_Op<"op_idempotent_trait",
-           [SameOperandsAndResultType, NoSideEffect, Idempotent]> {
+           [SameOperandsAndResultType, NoMemoryEffect, Idempotent]> {
   let arguments = (ins I32:$op1);
   let results = (outs I32);
 }
 
 def TestIdempotentTraitBinaryOp
     : TEST_Op<"op_idempotent_trait_binary",
-              [SameOperandsAndResultType, NoSideEffect, Idempotent]> {
+              [SameOperandsAndResultType, NoMemoryEffect, Idempotent]> {
   let arguments = (ins I32:$op1, I32:$op2);
   let results = (outs I32);
 }
 
 def TestInvolutionTraitNoOperationFolderOp
  : TEST_Op<"op_involution_trait_no_operation_fold",
-           [SameOperandsAndResultType, NoSideEffect, Involution]> {
+           [SameOperandsAndResultType, NoMemoryEffect, Involution]> {
   let arguments = (ins I32:$op1);
   let results = (outs I32);
 }
 
 def TestInvolutionTraitFailingOperationFolderOp
  : TEST_Op<"op_involution_trait_failing_operation_fold",
-           [SameOperandsAndResultType, NoSideEffect, Involution]> {
+           [SameOperandsAndResultType, NoMemoryEffect, Involution]> {
   let arguments = (ins I32:$op1);
   let results = (outs I32);
   let hasFolder = 1;
@@ -1246,7 +1268,7 @@ def TestInvolutionTraitFailingOperationFolderOp
 
 def TestInvolutionTraitSuccesfulOperationFolderOp
  : TEST_Op<"op_involution_trait_succesful_operation_fold",
-           [SameOperandsAndResultType, NoSideEffect, Involution]> {
+           [SameOperandsAndResultType, NoMemoryEffect, Involution]> {
   let arguments = (ins I32:$op1);
   let results = (outs I32);
   let hasFolder = 1;
@@ -1899,6 +1921,12 @@ def PolyForOp : TEST_Op<"polyfor", [OpAsmOpInterface]> {
   let hasCustomAssemblyFormat = 1;
 }
 
+def TestAttrWithLoc : TEST_Op<"attr_with_loc"> {
+  let summary = "op's attribute has a location";
+  let arguments = (ins AnyAttr:$loc, AnyAttr:$value);
+  let assemblyFormat = "`(` $value `` custom<OptionalLoc>($loc) `)` attr-dict";
+}
+
 //===----------------------------------------------------------------------===//
 // Test OpAsmInterface.
 
@@ -2154,6 +2182,13 @@ def FormatOptionalUnitAttrNoElide
 def FormatOptionalEnumAttr : TEST_Op<"format_optional_enum_attr"> {
   let arguments = (ins OptionalAttr<SomeI64Enum>:$attr);
   let assemblyFormat = "($attr^)? attr-dict";
+}
+
+def FormatOptionalDefaultAttrs : TEST_Op<"format_optional_default_attrs"> {
+  let arguments = (ins DefaultValuedStrAttr<StrAttr, "default">:$str,
+                       DefaultValuedStrAttr<SymbolNameAttr, "default">:$sym,
+                       DefaultValuedAttr<SomeI64Enum, "SomeI64Enum::case5">:$e);
+  let assemblyFormat = "($str^)? ($sym^)? ($e^)? attr-dict";
 }
 
 def FormatOptionalWithElse : TEST_Op<"format_optional_else"> {
@@ -2516,7 +2551,7 @@ def CopyOp : TEST_Op<"copy", [CopyOpInterface]> {
 //===----------------------------------------------------------------------===//
 
 def RegionYieldOp : TEST_Op<"region_yield",
-      [NoSideEffect, ReturnLike, Terminator]> {
+      [Pure, ReturnLike, Terminator]> {
   let description = [{
     This operation is used in a region and yields the corresponding type for
     that operation.
@@ -2572,7 +2607,7 @@ def TensorBasedOp : TEST_Op<"tensor_based", []> {
 //===----------------------------------------------------------------------===//
 
 def RegionIfYieldOp : TEST_Op<"region_if_yield",
-      [NoSideEffect, ReturnLike, Terminator]> {
+      [NoMemoryEffect, ReturnLike, Terminator]> {
   let arguments = (ins Variadic<AnyType>:$results);
   let assemblyFormat = [{
     $results `:` type($results) attr-dict
@@ -2583,7 +2618,7 @@ def RegionIfOp : TEST_Op<"region_if",
       [DeclareOpInterfaceMethods<RegionBranchOpInterface,
                                  ["getRegionInvocationBounds"]>,
        SingleBlockImplicitTerminator<"RegionIfYieldOp">,
-       RecursiveSideEffects]> {
+       RecursiveMemoryEffects]> {
   let description =[{
     Represents an abstract if-then-else-join pattern. In this context, the then
     and else regions jump to the join region, which finally returns to its
@@ -2614,7 +2649,7 @@ def RegionIfOp : TEST_Op<"region_if",
 def AnyCondOp : TEST_Op<"any_cond",
       [DeclareOpInterfaceMethods<RegionBranchOpInterface,
                                  ["getRegionInvocationBounds"]>,
-       RecursiveSideEffects]> {
+       RecursiveMemoryEffects]> {
   let results = (outs Variadic<AnyType>:$results);
   let regions = (region AnyRegion:$region);
 }
@@ -2789,7 +2824,7 @@ def TestLinalgConvOp :
       return &regionBuilder;
     }
 
-    mlir::ArrayAttr iterator_types() {
+    mlir::ArrayAttr getIteratorTypes() {
       return getOperation()->getAttrOfType<mlir::ArrayAttr>("iterator_types");
     }
 
@@ -2801,9 +2836,10 @@ def TestLinalgConvOp :
       return "";
     }
 
-    // To conform with interface requirement on operand naming.
-    mlir::ValueRange inputs() { return getInputs(); }
-    mlir::ValueRange outputs() { return getOutputs(); }
+    std::pair<int64_t, int64_t> getDpsInitsPositionRange() {
+      int64_t getNumOperands = this->getNumOperands();
+      return {getNumOperands - 1, getNumOperands};
+    }
   }];
 }
 
@@ -2848,7 +2884,7 @@ def TestLinalgFillOp :
       return &regionBuilder;
     }
 
-    mlir::ArrayAttr iterator_types() {
+    mlir::ArrayAttr getIteratorTypes() {
       return getOperation()->getAttrOfType<mlir::ArrayAttr>("iterator_types");
     }
 
@@ -2860,9 +2896,10 @@ def TestLinalgFillOp :
       return "";
     }
 
-    // To conform with interface requirement on operand naming.
-    mlir::ValueRange inputs() { return getInputs(); }
-    mlir::ValueRange outputs() { return getOutputs(); }
+    std::pair<int64_t, int64_t> getDpsInitsPositionRange() {
+      int64_t getNumOperands = this->getNumOperands();
+      return {getNumOperands - 1, getNumOperands};
+    }
   }];
 }
 
@@ -2882,6 +2919,16 @@ def TestDefaultStrAttrHasValueOp : TEST_Op<"has_str_value"> {
 
 def : Pat<(TestDefaultStrAttrNoValueOp $value),
           (TestDefaultStrAttrHasValueOp ConstantStrAttr<StrAttr, "foo">)>;
+
+//===----------------------------------------------------------------------===//
+// Test Ops with Default-Valued Attributes and Differing Print Settings
+//===----------------------------------------------------------------------===//
+
+def TestDefaultAttrPrintOp : TEST_Op<"default_value_print"> {
+  let arguments = (ins DefaultValuedAttr<I32Attr, "0">:$value_with_default,
+                   I32:$operand);
+  let assemblyFormat = "attr-dict $operand";
+}
 
 //===----------------------------------------------------------------------===//
 // Test Ops with effects
@@ -2933,8 +2980,8 @@ def TestVerifiersOp : TEST_Op<"verifiers",
 
 // Test loop op with a graph region.
 def TestGraphLoopOp : TEST_Op<"graph_loop",
-                         [LoopLikeOpInterface, NoSideEffect,
-                          RecursiveSideEffects, SingleBlock,
+                         [LoopLikeOpInterface, NoMemoryEffect,
+                          RecursivelySpeculatable, SingleBlock,
                           RegionKindInterface, HasOnlyGraphRegion]> {
   let arguments = (ins Variadic<AnyType>:$args);
   let results = (outs Variadic<AnyType>:$rets);
@@ -2954,7 +3001,7 @@ def TestGraphLoopOp : TEST_Op<"graph_loop",
 //===----------------------------------------------------------------------===//
 def TestWithBoundsOp : TEST_Op<"with_bounds",
                           [DeclareOpInterfaceMethods<InferIntRangeInterface>,
-                           NoSideEffect]> {
+                           NoMemoryEffect]> {
   let arguments = (ins IndexAttr:$umin,
                        IndexAttr:$umax,
                        IndexAttr:$smin,
@@ -2978,7 +3025,7 @@ def TestWithBoundsRegionOp : TEST_Op<"with_bounds_region",
 
 def TestIncrementOp : TEST_Op<"increment",
                          [DeclareOpInterfaceMethods<InferIntRangeInterface>,
-                         NoSideEffect]> {
+                         NoMemoryEffect]> {
   let arguments = (ins Index:$value);
   let results = (outs Index:$result);
 
@@ -2996,4 +3043,65 @@ def TestReflectBoundsOp : TEST_Op<"reflect_bounds",
 
   let assemblyFormat = "attr-dict $value";
 }
+
+//===----------------------------------------------------------------------===//
+// Test ConditionallySpeculatable
+//===----------------------------------------------------------------------===//
+
+def ConditionallySpeculatableOp : TEST_Op<"conditionally_speculatable_op",
+    [ConditionallySpeculatable, NoMemoryEffect]> {
+  let description = [{
+    Op used to test conditional speculation.  This op can be speculatively
+    executed if the input to it is an `arith.constant`.
+  }];
+
+  let arguments = (ins I32:$input);
+  let results = (outs I32:$result);
+
+  let extraClassDeclaration = [{
+    ::mlir::Speculation::Speculatability getSpeculatability();
+  }];
+
+  let extraClassDefinition = [{
+    ::mlir::Speculation::Speculatability
+    ConditionallySpeculatableOp::getSpeculatability() {
+      Operation* definingOp = getInput().getDefiningOp();
+      return definingOp && isa<::mlir::arith::ConstantOp>(definingOp) ?
+          ::mlir::Speculation::Speculatable : ::mlir::Speculation::NotSpeculatable;
+    }
+  }];
+}
+
+def PureOp : TEST_Op<"always_speculatable_op", [Pure]> {
+  let description = [{
+    Op used to test conditional speculation.  This op can always be
+    speculatively executed.
+  }];
+  let results = (outs I32:$result);
+}
+
+def NeverSpeculatableOp : TEST_Op<"never_speculatable_op", [ConditionallySpeculatable]> {
+  let description = [{
+    Op used to test conditional speculation.  This op can never be
+    speculatively executed.
+  }];
+  let results = (outs I32:$result);
+
+  let extraClassDeclaration = [{
+    ::mlir::Speculation::Speculatability getSpeculatability() {
+      return ::mlir::Speculation::NotSpeculatable;
+    }
+  }];
+}
+
+def RecursivelySpeculatableOp : TEST_Op<"recursively_speculatable_op", [
+    RecursivelySpeculatable, RecursiveMemoryEffects]> {
+  let description = [{
+    Op used to test conditional speculation.  This op can be speculatively
+    executed only if all the ops in the attached region can be.
+  }];
+  let results = (outs I32:$result);
+  let regions = (region SizedRegion<1>:$body);
+}
+
 #endif // TEST_OPS

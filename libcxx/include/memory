@@ -883,9 +883,12 @@ template<size_t N, class T>
 #include <__memory/uninitialized_algorithms.h>
 #include <__memory/unique_ptr.h>
 #include <__memory/uses_allocator.h>
+#include <__memory/uses_allocator_construction.h>
 #include <version>
 
 // standard-mandated includes
+
+// [memory.syn]
 #include <compare>
 
 #if !defined(_LIBCPP_HAS_NO_PRAGMA_SYSTEM_HEADER)

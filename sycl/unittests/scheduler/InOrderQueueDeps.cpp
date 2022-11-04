@@ -79,24 +79,27 @@ pi_result redefinedEventRelease(pi_event event) { return PI_SUCCESS; }
 TEST_F(SchedulerTest, InOrderQueueDeps) {
   sycl::unittest::PiMock Mock;
   sycl::platform Plt = Mock.getPlatform();
-  Mock.redefine<detail::PiApiKind::piMemBufferCreate>(redefinedMemBufferCreate);
-  Mock.redefine<detail::PiApiKind::piMemRelease>(redefinedMemRelease);
-  Mock.redefine<detail::PiApiKind::piEnqueueMemBufferReadRect>(
+  Mock.redefineBefore<detail::PiApiKind::piMemBufferCreate>(
+      redefinedMemBufferCreate);
+  Mock.redefineBefore<detail::PiApiKind::piMemRelease>(redefinedMemRelease);
+  Mock.redefineBefore<detail::PiApiKind::piEnqueueMemBufferReadRect>(
       redefinedEnqueueMemBufferReadRect);
-  Mock.redefine<detail::PiApiKind::piEnqueueMemBufferWriteRect>(
+  Mock.redefineBefore<detail::PiApiKind::piEnqueueMemBufferWriteRect>(
       redefinedEnqueueMemBufferWriteRect);
-  Mock.redefine<detail::PiApiKind::piEnqueueMemBufferMap>(
+  Mock.redefineBefore<detail::PiApiKind::piEnqueueMemBufferMap>(
       redefinedEnqueueMemBufferMap);
-  Mock.redefine<detail::PiApiKind::piEnqueueMemUnmap>(redefinedEnqueueMemUnmap);
-  Mock.redefine<detail::PiApiKind::piEventsWait>(redefinedEventsWait);
-  Mock.redefine<detail::PiApiKind::piEventRelease>(redefinedEventRelease);
+  Mock.redefineBefore<detail::PiApiKind::piEnqueueMemUnmap>(
+      redefinedEnqueueMemUnmap);
+  Mock.redefineBefore<detail::PiApiKind::piEventsWait>(redefinedEventsWait);
+  Mock.redefineBefore<detail::PiApiKind::piEventRelease>(redefinedEventRelease);
 
   context Ctx{Plt.get_devices()[0]};
   queue InOrderQueue{Ctx, default_selector_v, property::queue::in_order()};
   sycl::detail::QueueImplPtr InOrderQueueImpl =
       detail::getSyclObjImpl(InOrderQueue);
 
-  device HostDevice{host_selector{}};
+  device HostDevice = detail::createSyclObjFromImpl<device>(
+      detail::device_impl::getHostDeviceImpl());
   std::shared_ptr<detail::queue_impl> DefaultHostQueue{
       new detail::queue_impl(detail::getSyclObjImpl(HostDevice), {}, {})};
 

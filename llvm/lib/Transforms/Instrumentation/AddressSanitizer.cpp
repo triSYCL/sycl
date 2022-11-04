@@ -26,6 +26,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Triple.h"
 #include "llvm/ADT/Twine.h"
+#include "llvm/Analysis/GlobalsModRef.h"
 #include "llvm/Analysis/MemoryBuiltins.h"
 #include "llvm/Analysis/StackSafetyAnalysis.h"
 #include "llvm/Analysis/TargetLibraryInfo.h"
@@ -1110,9 +1111,9 @@ struct FunctionStackPoisoner : public InstVisitor<FunctionStackPoisoner> {
 
 } // end anonymous namespace
 
-void ModuleAddressSanitizerPass::printPipeline(
+void AddressSanitizerPass::printPipeline(
     raw_ostream &OS, function_ref<StringRef(StringRef)> MapClassName2PassName) {
-  static_cast<PassInfoMixin<ModuleAddressSanitizerPass> *>(this)->printPipeline(
+  static_cast<PassInfoMixin<AddressSanitizerPass> *>(this)->printPipeline(
       OS, MapClassName2PassName);
   OS << "<";
   if (Options.CompileKernel)
@@ -1120,14 +1121,14 @@ void ModuleAddressSanitizerPass::printPipeline(
   OS << ">";
 }
 
-ModuleAddressSanitizerPass::ModuleAddressSanitizerPass(
+AddressSanitizerPass::AddressSanitizerPass(
     const AddressSanitizerOptions &Options, bool UseGlobalGC,
     bool UseOdrIndicator, AsanDtorKind DestructorKind)
     : Options(Options), UseGlobalGC(UseGlobalGC),
       UseOdrIndicator(UseOdrIndicator), DestructorKind(DestructorKind) {}
 
-PreservedAnalyses ModuleAddressSanitizerPass::run(Module &M,
-                                                  ModuleAnalysisManager &MAM) {
+PreservedAnalyses AddressSanitizerPass::run(Module &M,
+                                            ModuleAnalysisManager &MAM) {
   ModuleAddressSanitizer ModuleSanitizer(M, Options.CompileKernel,
                                          Options.Recover, UseGlobalGC,
                                          UseOdrIndicator, DestructorKind);
@@ -1143,7 +1144,15 @@ PreservedAnalyses ModuleAddressSanitizerPass::run(Module &M,
     Modified |= FunctionSanitizer.instrumentFunction(F, &TLI);
   }
   Modified |= ModuleSanitizer.instrumentModule(M);
-  return Modified ? PreservedAnalyses::none() : PreservedAnalyses::all();
+  if (!Modified)
+    return PreservedAnalyses::all();
+
+  PreservedAnalyses PA = PreservedAnalyses::none();
+  // GlobalsAA is considered stateless and does not get invalidated unless
+  // explicitly invalidated; PreservedAnalyses::none() is not enough. Sanitizers
+  // make changes that require GlobalsAA to be invalidated.
+  PA.abandon<GlobalsAA>();
+  return PA;
 }
 
 static size_t TypeSizeToSizeIndex(uint32_t TypeSize) {
@@ -2800,7 +2809,8 @@ void FunctionStackPoisoner::initializeCallbacks(Module &M) {
         kAsanUnpoisonStackMemoryName, IRB.getVoidTy(), IntptrTy, IntptrTy);
   }
 
-  for (size_t Val : {0x00, 0xf1, 0xf2, 0xf3, 0xf5, 0xf8}) {
+  for (size_t Val : {0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0xf1, 0xf2,
+                     0xf3, 0xf5, 0xf8}) {
     std::ostringstream Name;
     Name << kAsanSetShadowPrefix;
     Name << std::setw(2) << std::setfill('0') << std::hex << Val;

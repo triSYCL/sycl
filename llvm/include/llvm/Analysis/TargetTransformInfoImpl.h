@@ -108,6 +108,8 @@ public:
 
   unsigned getAssumedAddrSpace(const Value *V) const { return -1; }
 
+  bool isSingleThreaded() const { return false; }
+
   std::pair<const Value *, unsigned>
   getPredicatedAddrSpace(const Value *V) const {
     return std::make_pair(nullptr, -1);
@@ -290,10 +292,6 @@ public:
   bool enableOrderedReductions() const { return false; }
 
   bool hasDivRemOp(Type *DataType, bool IsSigned) const { return false; }
-
-  unsigned maxLegalDivRemBitWidth() const {
-    return llvm::IntegerType::MAX_INT_BITS;
-  }
 
   bool hasVolatileVariant(Instruction *I, unsigned AddrSpace) const {
     return false;
@@ -828,6 +826,10 @@ public:
   bool preferPredicatedReductionSelect(unsigned Opcode, Type *Ty,
                                        TTI::ReductionFlags Flags) const {
     return false;
+  }
+
+  bool preferEpilogueVectorization() const {
+    return true;
   }
 
   bool shouldExpandReduction(const IntrinsicInst *II) const { return true; }

@@ -31,6 +31,9 @@ class DWARFASTParser;
 class PDBASTParser;
 
 namespace lldb_private {
+namespace npdb {
+  class PdbAstBuilder;
+} // namespace npdb
 
 /// A SmallBitVector that represents a set of source languages (\p
 /// lldb::LanguageType).  Each lldb::LanguageType is represented by
@@ -88,6 +91,7 @@ public:
 
   virtual DWARFASTParser *GetDWARFParser() { return nullptr; }
   virtual PDBASTParser *GetPDBParser() { return nullptr; }
+  virtual npdb::PdbAstBuilder *GetNativePDBParser() { return nullptr; }
 
   virtual SymbolFile *GetSymbolFile() const { return m_sym_file; }
 
@@ -202,7 +206,8 @@ public:
 
   // Accessors
 
-  virtual ConstString GetTypeName(lldb::opaque_compiler_type_t type) = 0;
+  virtual ConstString GetTypeName(lldb::opaque_compiler_type_t type,
+                                  bool BaseOnly) = 0;
 
   virtual ConstString GetDisplayTypeName(lldb::opaque_compiler_type_t type) = 0;
 
@@ -366,7 +371,7 @@ public:
   LLVM_DUMP_METHOD virtual void
   dump(lldb::opaque_compiler_type_t type) const = 0;
 #endif
-  
+
   virtual void DumpValue(lldb::opaque_compiler_type_t type,
                          ExecutionContext *exe_ctx, Stream *s,
                          lldb::Format format, const DataExtractor &data,

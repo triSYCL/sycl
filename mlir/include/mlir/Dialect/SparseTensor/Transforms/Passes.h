@@ -44,37 +44,16 @@ enum class SparseParallelizationStrategy {
   // TODO: support reduction parallelization too?
 };
 
-/// Defines a vectorization strategy. Any inner loop is a candidate (full SIMD
-/// for parallel loops and horizontal SIMD for reduction loops). A loop is
-/// actually vectorized if (1) allowed by the strategy, and (2) the emitted
-/// code is an actual for-loop (and not a co-iterating while-loop).
-enum class SparseVectorizationStrategy {
-  kNone,
-  kDenseInnerLoop,
-  kAnyStorageInnerLoop
-};
-
-#define GEN_PASS_DECL_SPARSIFICATIONPASS
-#define GEN_PASS_DECL_SPARSETENSORCONVERSIONPASS
-#define GEN_PASS_DECL_SPARSETENSORCODEGEN
+#define GEN_PASS_DECL
 #include "mlir/Dialect/SparseTensor/Transforms/Passes.h.inc"
 
 /// Options for the Sparsification pass.
 struct SparsificationOptions {
-  SparsificationOptions(SparseParallelizationStrategy p,
-                        SparseVectorizationStrategy v, unsigned vl, bool e,
-                        bool vla)
-      : parallelizationStrategy(p), vectorizationStrategy(v), vectorLength(vl),
-        enableSIMDIndex32(e), enableVLAVectorization(vla) {}
+  SparsificationOptions(SparseParallelizationStrategy p)
+      : parallelizationStrategy(p) {}
   SparsificationOptions()
-      : SparsificationOptions(SparseParallelizationStrategy::kNone,
-                              SparseVectorizationStrategy::kNone, 1u, false,
-                              false) {}
+      : SparsificationOptions(SparseParallelizationStrategy::kNone) {}
   SparseParallelizationStrategy parallelizationStrategy;
-  SparseVectorizationStrategy vectorizationStrategy;
-  unsigned vectorLength;
-  bool enableSIMDIndex32;
-  bool enableVLAVectorization;
 };
 
 /// Sets up sparsification rewriting rules with the given options.
@@ -156,29 +135,26 @@ void populateSparseTensorCodegenPatterns(TypeConverter &typeConverter,
 std::unique_ptr<Pass> createSparseTensorCodegenPass();
 
 //===----------------------------------------------------------------------===//
-// The SparseTensorStorageExpansion pass.
+// The SparseTensorRewriting pass.
 //===----------------------------------------------------------------------===//
 
-/// Sparse tensor storage type converter from compound to expanded form.
-class SparseTensorStorageTupleExpander : public TypeConverter {
-public:
-  SparseTensorStorageTupleExpander();
-};
+void populateSparseTensorRewriting(RewritePatternSet &patterns, bool enableRT,
+                                   bool enableForeach, bool enableConvert);
 
-/// Sets up sparse tensor storage expansion rules.
-void populateSparseTensorStorageExpansionPatterns(TypeConverter &typeConverter,
-                                                  RewritePatternSet &patterns);
-
-std::unique_ptr<Pass> createSparseTensorStorageExpansionPass();
+std::unique_ptr<Pass> createSparseTensorRewritePass();
+std::unique_ptr<Pass> createSparseTensorRewritePass(bool enableRT,
+                                                    bool enableForeach = true,
+                                                    bool enableConvert = true);
 
 //===----------------------------------------------------------------------===//
 // Other rewriting rules and passes.
 //===----------------------------------------------------------------------===//
 
-void populateSparseTensorRewriting(RewritePatternSet &patterns);
-
 std::unique_ptr<Pass> createDenseBufferizationPass(
     const bufferization::OneShotBufferizationOptions &options);
+
+void populateSparseBufferRewriting(RewritePatternSet &patterns);
+std::unique_ptr<Pass> createSparseBufferRewritePass();
 
 //===----------------------------------------------------------------------===//
 // Registration.

@@ -115,14 +115,14 @@ bool kernel_bundle_plain::is_specialization_constant_set(
 
 const std::vector<device>
 removeDuplicateDevices(const std::vector<device> &Devs) {
-  auto compareDevices = [](device a, device b) {
-    return getSyclObjImpl(a)->getHandleRef() <
-           getSyclObjImpl(b)->getHandleRef();
-  };
-  std::set<device, decltype(compareDevices)> UniqueDeviceSet(
-      Devs.begin(), Devs.end(), compareDevices);
-  std::vector<device> UniqueDevices(UniqueDeviceSet.begin(),
-                                    UniqueDeviceSet.end());
+  std::vector<device> UniqueDevices;
+
+  // Building a new vector with unique elements and keep original order
+  std::unordered_set<device> UniqueDeviceSet;
+  for (const device &Dev : Devs)
+    if (UniqueDeviceSet.insert(Dev).second)
+      UniqueDevices.push_back(Dev);
+
   return UniqueDevices;
 }
 

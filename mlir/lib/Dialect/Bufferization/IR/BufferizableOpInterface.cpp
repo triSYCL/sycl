@@ -398,7 +398,8 @@ bool AnalysisState::isValueRead(Value value) const {
 // evaluates to true. OpOperands of such matching Values are not traversed any
 // further.
 llvm::SetVector<Value> AnalysisState::findValueInReverseUseDefChain(
-    Value value, llvm::function_ref<bool(Value)> condition) const {
+    Value value, llvm::function_ref<bool(Value)> condition,
+    bool followEquivalentOnly) const {
   llvm::SetVector<Value> result, workingSet;
   workingSet.insert(value);
 
@@ -410,8 +411,19 @@ llvm::SetVector<Value> AnalysisState::findValueInReverseUseDefChain(
     }
 
     OpResult opResult = value.cast<OpResult>();
+    BufferizableOpInterface bufferizableOp =
+        options.dynCastBufferizableOp(opResult.getDefiningOp());
     SmallVector<OpOperand *> opOperands = getAliasingOpOperand(opResult);
-    if (opOperands.empty() || !options.isOpAllowed(value.getDefiningOp())) {
+
+    // Stop iterating in either one of these cases:
+    // * The current op is not bufferizable or excluded in the filter.
+    // * There are no OpOperands to follow.
+    // * There is an OpOperand, but it is not an equivalent tensor (only if
+    //   `followEquivalentOnly` is set).
+    if (!bufferizableOp || opOperands.empty() ||
+        (followEquivalentOnly &&
+         bufferizableOp.bufferRelation(opResult, *this) !=
+             BufferRelation::Equivalent)) {
       result.insert(value);
       continue;
     }
@@ -758,8 +770,8 @@ bufferization::getMemRefTypeWithFullyDynamicLayout(TensorType tensorType,
   int64_t dynamicOffset = ShapedType::kDynamicStrideOrOffset;
   SmallVector<int64_t> dynamicStrides(rankedTensorType.getRank(),
                                       ShapedType::kDynamicStrideOrOffset);
-  AffineMap stridedLayout = makeStridedLinearLayoutMap(
-      dynamicStrides, dynamicOffset, rankedTensorType.getContext());
+  auto stridedLayout = StridedLayoutAttr::get(tensorType.getContext(),
+                                              dynamicOffset, dynamicStrides);
   return MemRefType::get(rankedTensorType.getShape(),
                          rankedTensorType.getElementType(), stridedLayout,
                          memorySpaceAttr);
