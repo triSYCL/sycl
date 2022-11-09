@@ -385,7 +385,7 @@ struct LowerApprox {
       //     mulType.getCommonAddType(coef.getType().cast<fixedpt::FixedPtType>());
       fixedpt::FixedPtType addType = fixedpt::FixedPtType::get(
           ctx, horner.wcSumMSB[idx], horner.wcSumLSB[idx],
-          !horner.wcSumSign[idx]);
+          true); // TODO handle the unsigned case
       expr = rewriter.create<fixedpt::AddOp>(loc, addType,
                                              fixedpt::RoundingMode::nearest,
                                              mlir::ValueRange{expr, coef});
