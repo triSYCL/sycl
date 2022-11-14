@@ -1128,7 +1128,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
       Diag(clang::diag::err_drv_invalid_sycl_target) << Val;
   }
   bool HasSYCLTargetsOption = SYCLTargets || SYCLLinkTargets || SYCLAddTargets;
-  llvm::StringMap<StringRef> FoundNormalizedTriples;
+  llvm::StringMap<std::string> FoundNormalizedTriples;
   llvm::SmallVector<llvm::Triple, 4> UniqueSYCLTriplesVec;
   if (HasSYCLTargetsOption) {
     // At this point, we know we have a valid combination
@@ -1155,13 +1155,13 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
             UserTargetName = "spir64_gen";
           }
 
-          if (!isValidSYCLTriple(completeSYCLTriple(MakeSYCLDeviceTriple(UserTargetName)))) {
+          if (!isValidSYCLTriple(MakeSYCLDeviceTriple(UserTargetName))) {
             Diag(clang::diag::err_drv_invalid_sycl_target) << Val;
             continue;
           }
 
           // Make sure we don't have a duplicate triple.
-          std::string NormalizedName = completeSYCLTriple(MakeSYCLDeviceTriple(Val)).normalize();
+          std::string NormalizedName = MakeSYCLDeviceTriple(Val).normalize();
           auto Duplicate = FoundNormalizedTriples.find(NormalizedName);
           if (Duplicate != FoundNormalizedTriples.end()) {
             Diag(clang::diag::warn_drv_sycl_offload_target_duplicate)
@@ -1194,7 +1194,7 @@ void Driver::CreateOffloadingDeviceToolChains(Compilation &C,
           // Store the current triple so that we can check for duplicates in
           // the following iterations.
           FoundNormalizedTriples[NormalizedName] = Val;
-          UniqueSYCLTriplesVec.push_back(TT);
+          UniqueSYCLTriplesVec.push_back(completeSYCLTriple(TT));
         }
         addSYCLDefaultTriple(C, UniqueSYCLTriplesVec);
       } else
@@ -2287,7 +2287,7 @@ llvm::Triple Driver::MakeSYCLDeviceTriple(StringRef TargetArch) const {
     TT.setOS(llvm::Triple::UnknownOS);
     return TT;
   }
-  return llvm::Triple(TargetArch);
+  return completeSYCLTriple(llvm::Triple(TargetArch));
 }
 
 // Print the help from any of the given tools which are used for AOT

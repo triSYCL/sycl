@@ -2,7 +2,7 @@
 // Pipes are not implemented for the host device
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
-// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
+// RUN: %clangxx %EXTRA_COMPILE_FLAGS-std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
 // RUN: %run_if_not_cpu %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
 #include <sycl.hpp>

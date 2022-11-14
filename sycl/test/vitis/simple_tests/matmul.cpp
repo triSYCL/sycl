@@ -1,8 +1,8 @@
 // REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
-// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
-// RUN: env SYCL_DISABLE_PARALLEL_FOR_RANGE_ROUNDING=1 %ACC_RUN_PLACEHOLDER %t.dir/exec.out
+// RUN: %clangxx %EXTRA_COMPILE_FLAGS-std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
+// RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
 #include <sycl/sycl.hpp>
 

@@ -60,7 +60,7 @@ OptimizationPipeline = [
 "-inline",
 "-function-attrs",
 "-sroa",
-"-early-cse-memssa",
+"-early-cse",
 "-speculative-execution",
 "-jump-threading",
 "-correlated-propagation",

@@ -137,6 +137,7 @@ filter=lit_config.params.get('SYCL_PLUGIN', "opencl")
 lit_config.note("Filter: {}".format(filter))
 
 acc_run_substitute=f"env SYCL_DEVICE_FILTER={filter} "
+extra_compile_flags=""
 if vitis != "off" and vitis != "cpu":
     # Clean up the named semaphore in case the previous test did not clean up properly.
     # If someone tries to run multiple tests on the same machine this could cause issues.
@@ -155,7 +156,14 @@ if vitis != "off" and vitis != "cpu":
         acc_run_substitute+= "timeout 300 env "
     else:
         acc_run_substitute+= "timeout 600 env "
+if vitis == "cpu":
+    extra_compile_flags=" -fsyntax-only "
+    # This will print the command instead of executing it
+    # Since nothing is being fully compiled nothing should ne executed
+    acc_run_substitute="echo "
+
 config.substitutions.append( ('%ACC_RUN_PLACEHOLDER', acc_run_substitute) )
+config.substitutions.append( ('%EXTRA_COMPILE_FLAGS', extra_compile_flags) )
 
 timeout = 600
 if vitis == "off":

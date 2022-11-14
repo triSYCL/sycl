@@ -1,6 +1,6 @@
 // REQUIRES: vitis
 
-// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+// RUN: %clangxx %EXTRA_COMPILE_FLAGS-fsycl -fsycl-targets=%sycl_triple %s -o %t.out
 // XFAIL
 // Disable because it contains a deadlock
 
