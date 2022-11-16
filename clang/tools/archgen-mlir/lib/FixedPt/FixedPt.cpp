@@ -592,6 +592,7 @@ struct AddOpConstFolder : public mlir::RewritePattern {
   matchAndRewrite(mlir::Operation *op,
                   mlir::PatternRewriter &rewriter) const override {
     AddOp addOp = llvm::cast<AddOp>(op);
+    fixedpt::RoundingMode rounding = addOp.rounding();
     fixedpt::FixedPointAttr constVal;
     llvm::APFixedPoint CstSumVal{
         0, llvm::FixedPointSemantics(1, 0, false, false, false)};
@@ -605,6 +606,16 @@ struct AddOpConstFolder : public mlir::RewritePattern {
       } else
         NewArgs.push_back(arg);
     }
+    // if (rounding == fixedpt::RoundingMode::nearest) {
+    //   llvm::APFixedPoint halfULP{
+    //       1, llvm::FixedPointSemantics(
+    //              1,
+    //              llvm::FixedPointSemantics::Lsb{
+    //                  addOp.result().getType().cast<FixedPtType>().getLsb() - 1},
+    //              false, false, false)};
+    //   CstSumVal = exactAdd(CstSumVal, halfULP);
+    //   rounding = fixedpt::RoundingMode::truncate;
+    // } else 
     if (nbCst == 0 || (nbCst == 1 && !CstSumVal.getValue().isZero()))
       return mlir::failure();
 
@@ -619,11 +630,11 @@ struct AddOpConstFolder : public mlir::RewritePattern {
     if (NewArgs.size() == 1)
       rewriter.replaceOpWithNewOp<fixedpt::ConvertOp>(
           op, addOp.getResult().getType().cast<fixedpt::FixedPtType>(),
-          NewArgs[0], addOp.rounding());
+          NewArgs[0], rounding);
     else
       rewriter.replaceOpWithNewOp<fixedpt::AddOp>(
           op, addOp.getResult().getType().cast<fixedpt::FixedPtType>(),
-          addOp.rounding(), NewArgs);
+          rounding, NewArgs);
     return mlir::success();
   }
 };

@@ -38,7 +38,7 @@ namespace arith = mlir::arith;
 
 namespace {
 
-/// Implementation of a generic visitor of appox expressions
+/// Implementation of a generic visitor of approx expressions
 template <typename RetTy> struct ApproxVisitorImpl {
   template <typename CallableTy>
   static RetTy Visit(mlir::Operation *op, CallableTy onOp) {
