@@ -451,12 +451,28 @@ void GVNPass::ValueTable::add(Value *V, uint32_t num) {
 }
 
 uint32_t GVNPass::ValueTable::lookupOrAddCall(CallInst *C) {
-  if (AA->doesNotAccessMemory(C)) {
+  if (AA->doesNotAccessMemory(C) &&
+      // FIXME: Currently the calls which may access the thread id may
+      // be considered as not accessing the memory. But this is
+      // problematic for coroutines, since coroutines may resume in a
+      // different thread. So we disable the optimization here for the
+      // correctness. However, it may block many other correct
+      // optimizations. Revert this one when we detect the memory
+      // accessing kind more precisely.
+      !C->getFunction()->isPresplitCoroutine()) {
     Expression exp = createExpr(C);
     uint32_t e = assignExpNewValueNum(exp).first;
     valueNumbering[C] = e;
     return e;
-  } else if (MD && AA->onlyReadsMemory(C)) {
+  } else if (MD && AA->onlyReadsMemory(C) &&
+             // FIXME: Currently the calls which may access the thread id may
+             // be considered as not accessing the memory. But this is
+             // problematic for coroutines, since coroutines may resume in a
+             // different thread. So we disable the optimization here for the
+             // correctness. However, it may block many other correct
+             // optimizations. Revert this one when we detect the memory
+             // accessing kind more precisely.
+             !C->getFunction()->isPresplitCoroutine()) {
     Expression exp = createExpr(C);
     auto ValNum = assignExpNewValueNum(exp);
     if (ValNum.second) {
@@ -1534,10 +1550,11 @@ bool GVNPass::PerformLoadPRE(LoadInst *Load, AvailValInBlkVect &ValuesPerBlock,
   // to speculatively execute the load at that points.
   if (MustEnsureSafetyOfSpeculativeExecution) {
     if (CriticalEdgePred.size())
-      if (!isSafeToSpeculativelyExecute(Load, LoadBB->getFirstNonPHI(), DT))
+      if (!isSafeToSpeculativelyExecute(Load, LoadBB->getFirstNonPHI(), AC, DT))
         return false;
     for (auto &PL : PredLoads)
-      if (!isSafeToSpeculativelyExecute(Load, PL.first->getTerminator(), DT))
+      if (!isSafeToSpeculativelyExecute(Load, PL.first->getTerminator(), AC,
+                                        DT))
         return false;
   }
 

@@ -372,6 +372,8 @@ public:
 
   unsigned getAssumedAddrSpace(const Value *V) const;
 
+  bool isSingleThreaded() const;
+
   std::pair<const Value *, unsigned>
   getPredicatedAddrSpace(const Value *V) const;
 
@@ -687,9 +689,6 @@ public:
   /// would typically be allowed using throughput or size cost models.
   bool hasDivRemOp(Type *DataType, bool IsSigned) const;
 
-  /// Returns the maximum bitwidth of legal div and rem instructions.
-  unsigned maxLegalDivRemBitWidth() const;
-
   /// Return true if the given instruction (assumed to be a memory access
   /// instruction) has a volatile variant. If that's the case then we can avoid
   /// addrspacecast to generic AS for volatile loads/stores. Default
@@ -912,7 +911,11 @@ public:
   };
 
   /// Additional properties of an operand's values.
-  enum OperandValueProperties { OP_None = 0, OP_PowerOf2 = 1 };
+  enum OperandValueProperties {
+    OP_None = 0,
+    OP_PowerOf2 = 1,
+    OP_NegatedPowerOf2 = 2,
+  };
 
   // Describe the values an operand can take.  We're in the process
   // of migrating uses of OperandValueKind and OperandValueProperties
@@ -929,6 +932,9 @@ public:
     }
     bool isPowerOf2() const {
       return Properties == OP_PowerOf2;
+    }
+    bool isNegatedPowerOf2() const {
+      return Properties == OP_NegatedPowerOf2;
     }
 
     OperandValueInfo getNoProps() const {
@@ -1155,10 +1161,10 @@ public:
                    const Instruction *I = nullptr) const;
 
   /// \return The expected cost of a sign- or zero-extended vector extract. Use
-  /// -1 to indicate that there is no information about the index value.
+  /// Index = -1 to indicate that there is no information about the index value.
   InstructionCost getExtractWithExtendCost(unsigned Opcode, Type *Dst,
                                            VectorType *VecTy,
-                                           unsigned Index = -1) const;
+                                           unsigned Index) const;
 
   /// \return The expected cost of control-flow related instructions such as
   /// Phi, Ret, Br, Switch.
@@ -1472,6 +1478,10 @@ public:
   bool preferPredicatedReductionSelect(unsigned Opcode, Type *Ty,
                                        ReductionFlags Flags) const;
 
+  /// Return true if the loop vectorizer should consider vectorizing an
+  /// otherwise scalar epilogue loop.
+  bool preferEpilogueVectorization() const;
+
   /// \returns True if the target wants to expand the given reduction intrinsic
   /// into a shuffle sequence.
   bool shouldExpandReduction(const IntrinsicInst *II) const;
@@ -1577,6 +1587,7 @@ public:
   virtual bool
   canHaveNonUndefGlobalInitializerInAddressSpace(unsigned AS) const = 0;
   virtual unsigned getAssumedAddrSpace(const Value *V) const = 0;
+  virtual bool isSingleThreaded() const = 0;
   virtual std::pair<const Value *, unsigned>
   getPredicatedAddrSpace(const Value *V) const = 0;
   virtual Value *rewriteIntrinsicWithAddressSpace(IntrinsicInst *II,
@@ -1644,7 +1655,6 @@ public:
                                const SmallBitVector &OpcodeMask) const = 0;
   virtual bool enableOrderedReductions() = 0;
   virtual bool hasDivRemOp(Type *DataType, bool IsSigned) = 0;
-  virtual unsigned maxLegalDivRemBitWidth() = 0;
   virtual bool hasVolatileVariant(Instruction *I, unsigned AddrSpace) = 0;
   virtual bool prefersVectorizedAddressing() = 0;
   virtual InstructionCost getScalingFactorCost(Type *Ty, GlobalValue *BaseGV,
@@ -1875,6 +1885,8 @@ public:
                                      ReductionFlags) const = 0;
   virtual bool preferPredicatedReductionSelect(unsigned Opcode, Type *Ty,
                                                ReductionFlags) const = 0;
+  virtual bool preferEpilogueVectorization() const = 0;
+
   virtual bool shouldExpandReduction(const IntrinsicInst *II) const = 0;
   virtual unsigned getGISelRematGlobalCost() const = 0;
   virtual unsigned getMinTripCountTailFoldingThreshold() const = 0;
@@ -1955,6 +1967,8 @@ public:
   unsigned getAssumedAddrSpace(const Value *V) const override {
     return Impl.getAssumedAddrSpace(V);
   }
+
+  bool isSingleThreaded() const override { return Impl.isSingleThreaded(); }
 
   std::pair<const Value *, unsigned>
   getPredicatedAddrSpace(const Value *V) const override {
@@ -2091,9 +2105,6 @@ public:
   }
   bool hasDivRemOp(Type *DataType, bool IsSigned) override {
     return Impl.hasDivRemOp(DataType, IsSigned);
-  }
-  unsigned maxLegalDivRemBitWidth() override {
-    return Impl.maxLegalDivRemBitWidth();
   }
   bool hasVolatileVariant(Instruction *I, unsigned AddrSpace) override {
     return Impl.hasVolatileVariant(I, AddrSpace);
@@ -2521,6 +2532,10 @@ public:
                                        ReductionFlags Flags) const override {
     return Impl.preferPredicatedReductionSelect(Opcode, Ty, Flags);
   }
+  bool preferEpilogueVectorization() const override {
+    return Impl.preferEpilogueVectorization();
+  }
+
   bool shouldExpandReduction(const IntrinsicInst *II) const override {
     return Impl.shouldExpandReduction(II);
   }

@@ -1,8 +1,9 @@
-/* REQUIRES: vitis
+/* REQUIRES: vitis && !vitis_cpu
 
    RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
    RUN: %clangxx -fsycl -fsycl-unnamed-lambda -std=c++20 -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out  
-   RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out 2>&1 | FileCheck %s
+   RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out > %t.check 2>&1
+   RUN: %run_if_not_cpu FileCheck --input-file=%t.check %s
    CHECK: 6 8 10
    CHECK: 352 -128 -44.25 -55.875
 */

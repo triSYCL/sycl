@@ -344,17 +344,22 @@ to_native_handle(From &&from) {
 /// It is used to deal with the arbitrary order of destruction across
 /// translations units.
 template <typename T> class no_destroy {
-  union {
+  union storage {
+    storage() {}
+    bool empty = false;
     T data;
-  };
+    ~storage() {}
+  } s;
 
 public:
   template<typename ... Ts>
-  no_destroy(Ts&&... ts) : data(std::forward<Ts>(ts)...) {}
+  no_destroy(Ts&&... ts) {
+    new (&s.data) T(std::forward<Ts>(ts)...);
+  }
   operator T &() { return get(); }
   operator const T &() const { return get(); }
-  T &get() { return data; }
-  const T &get() const { return data; }
+  T &get() { return s.data; }
+  const T &get() const { return s.data; }
 };
 
 struct _pi_device

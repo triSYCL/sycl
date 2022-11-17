@@ -391,6 +391,10 @@ inline void DoNotOptimize(Tp const& value) {
 #  define TEST_HAS_NO_FGETPOS_FSETPOS
 #endif
 
+#if defined(_LIBCPP_HAS_NO_C8RTOMB_MBRTOC8)
+#  define TEST_HAS_NO_C8RTOMB_MBRTOC8
+#endif
+
 #if defined(TEST_COMPILER_CLANG)
 #  define TEST_DIAGNOSTIC_PUSH _Pragma("clang diagnostic push")
 #  define TEST_DIAGNOSTIC_POP _Pragma("clang diagnostic pop")
@@ -423,6 +427,10 @@ inline void DoNotOptimize(Tp const& value) {
 #define TEST_NO_UNIQUE_ADDRESS [[no_unique_address]]
 #else
 #define TEST_NO_UNIQUE_ADDRESS
+#endif
+
+#ifdef _LIBCPP_SHORT_WCHAR
+#  define TEST_SHORT_WCHAR
 #endif
 
 #endif // SUPPORT_TEST_MACROS_HPP

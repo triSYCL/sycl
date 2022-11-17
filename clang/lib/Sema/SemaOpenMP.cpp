@@ -2095,7 +2095,7 @@ bool Sema::isOpenMPCapturedByRef(const ValueDecl *D, unsigned Level,
     //
     // =========================================================================
     // | type |  defaultmap   | pvt | first | is_device_ptr |    map   | res.  |
-    // |      |(tofrom:scalar)|     |  pvt  |               |          |       |
+    // |      |(tofrom:scalar)|     |  pvt  |               |has_dv_adr|       |
     // =========================================================================
     // | scl  |               |     |       |       -       |          | bycopy|
     // | scl  |               |  -  |   x   |       -       |     -    | bycopy|
@@ -2156,10 +2156,11 @@ bool Sema::isOpenMPCapturedByRef(const ValueDecl *D, unsigned Level,
          D](OMPClauseMappableExprCommon::MappableExprComponentListRef
                 MapExprComponents,
             OpenMPClauseKind WhereFoundClauseKind) {
-          // Only the map clause information influences how a variable is
-          // captured. E.g. is_device_ptr does not require changing the default
-          // behavior.
-          if (WhereFoundClauseKind != OMPC_map)
+          // Both map and has_device_addr clauses information influences how a
+          // variable is captured. E.g. is_device_ptr does not require changing
+          // the default behavior.
+          if (WhereFoundClauseKind != OMPC_map &&
+              WhereFoundClauseKind != OMPC_has_device_addr)
             return false;
 
           auto EI = MapExprComponents.rbegin();
@@ -11578,6 +11579,9 @@ protected:
 
   static bool CheckValue(const Expr *E, ErrorInfoTy &ErrorInfo,
                          bool ShouldBeLValue, bool ShouldBeInteger = false) {
+    if (E->isInstantiationDependent())
+      return true;
+
     if (ShouldBeLValue && !E->isLValue()) {
       ErrorInfo.Error = ErrorTy::XNotLValue;
       ErrorInfo.ErrorLoc = ErrorInfo.NoteLoc = E->getExprLoc();
@@ -11585,25 +11589,23 @@ protected:
       return false;
     }
 
-    if (!E->isInstantiationDependent()) {
-      QualType QTy = E->getType();
-      if (!QTy->isScalarType()) {
-        ErrorInfo.Error = ErrorTy::NotScalar;
-        ErrorInfo.ErrorLoc = ErrorInfo.NoteLoc = E->getExprLoc();
-        ErrorInfo.ErrorRange = ErrorInfo.NoteRange = E->getSourceRange();
-        return false;
-      }
-      if (ShouldBeInteger && !QTy->isIntegerType()) {
-        ErrorInfo.Error = ErrorTy::NotInteger;
-        ErrorInfo.ErrorLoc = ErrorInfo.NoteLoc = E->getExprLoc();
-        ErrorInfo.ErrorRange = ErrorInfo.NoteRange = E->getSourceRange();
-        return false;
-      }
+    QualType QTy = E->getType();
+    if (!QTy->isScalarType()) {
+      ErrorInfo.Error = ErrorTy::NotScalar;
+      ErrorInfo.ErrorLoc = ErrorInfo.NoteLoc = E->getExprLoc();
+      ErrorInfo.ErrorRange = ErrorInfo.NoteRange = E->getSourceRange();
+      return false;
+    }
+    if (ShouldBeInteger && !QTy->isIntegerType()) {
+      ErrorInfo.Error = ErrorTy::NotInteger;
+      ErrorInfo.ErrorLoc = ErrorInfo.NoteLoc = E->getExprLoc();
+      ErrorInfo.ErrorRange = ErrorInfo.NoteRange = E->getSourceRange();
+      return false;
     }
 
     return true;
   }
-};
+  };
 
 bool OpenMPAtomicCompareChecker::checkCondUpdateStmt(IfStmt *S,
                                                      ErrorInfoTy &ErrorInfo) {
@@ -12183,17 +12185,33 @@ bool OpenMPAtomicCompareCaptureChecker::checkStmt(Stmt *S,
 
     Stmt *UpdateStmt = nullptr;
     Stmt *CondUpdateStmt = nullptr;
+    Stmt *CondExprStmt = nullptr;
 
     if (auto *BO = dyn_cast<BinaryOperator>(S1)) {
-      // { v = x; cond-update-stmt } or form 45.
-      UpdateStmt = S1;
-      CondUpdateStmt = S2;
-      // Check if form 45.
-      if (isa<BinaryOperator>(BO->getRHS()->IgnoreImpCasts()) &&
-          isa<IfStmt>(S2))
-        return checkForm45(CS, ErrorInfo);
-      // It cannot be set before we the check for form45.
-      IsPostfixUpdate = true;
+      // It could be one of the following cases:
+      // { v = x; cond-update-stmt }
+      // { v = x; cond-expr-stmt }
+      // { cond-expr-stmt; v = x; }
+      // form 45
+      if (isa<BinaryOperator>(BO->getRHS()->IgnoreImpCasts()) ||
+          isa<ConditionalOperator>(BO->getRHS()->IgnoreImpCasts())) {
+        // check if form 45
+        if (isa<IfStmt>(S2))
+          return checkForm45(CS, ErrorInfo);
+        // { cond-expr-stmt; v = x; }
+        CondExprStmt = S1;
+        UpdateStmt = S2;
+      } else {
+        IsPostfixUpdate = true;
+        UpdateStmt = S1;
+        if (isa<IfStmt>(S2)) {
+          // { v = x; cond-update-stmt }
+          CondUpdateStmt = S2;
+        } else {
+          // { v = x; cond-expr-stmt }
+          CondExprStmt = S2;
+        }
+      }
     } else {
       // { cond-update-stmt v = x; }
       UpdateStmt = S2;
@@ -12209,10 +12227,7 @@ bool OpenMPAtomicCompareCaptureChecker::checkStmt(Stmt *S,
         return false;
       }
 
-      if (!checkCondUpdateStmt(IS, ErrorInfo))
-        return false;
-
-      return true;
+      return checkCondUpdateStmt(IS, ErrorInfo);
     };
 
     // CheckUpdateStmt has to be called *after* CheckCondUpdateStmt.
@@ -12245,7 +12260,9 @@ bool OpenMPAtomicCompareCaptureChecker::checkStmt(Stmt *S,
       return true;
     };
 
-    if (!CheckCondUpdateStmt(CondUpdateStmt))
+    if (CondUpdateStmt && !CheckCondUpdateStmt(CondUpdateStmt))
+      return false;
+    if (CondExprStmt && !checkCondExprStmt(CondExprStmt, ErrorInfo))
       return false;
     if (!CheckUpdateStmt(UpdateStmt))
       return false;
@@ -23072,13 +23089,17 @@ OMPClause *Sema::ActOnOpenMPHasDeviceAddrClause(ArrayRef<Expr *> VarList,
 
     // Store the components in the stack so that they can be used to check
     // against other clauses later on.
+    Expr *Component = SimpleRefExpr;
+    auto *VD = dyn_cast<VarDecl>(D);
+    if (VD && (isa<OMPArraySectionExpr>(RefExpr->IgnoreParenImpCasts()) ||
+               isa<ArraySubscriptExpr>(RefExpr->IgnoreParenImpCasts())))
+      Component = DefaultFunctionArrayLvalueConversion(SimpleRefExpr).get();
     OMPClauseMappableExprCommon::MappableComponent MC(
-        SimpleRefExpr, D, /*IsNonContiguous=*/false);
+        Component, D, /*IsNonContiguous=*/false);
     DSAStack->addMappableExpressionComponents(
         D, MC, /*WhereFoundClauseKind=*/OMPC_has_device_addr);
 
     // Record the expression we've just processed.
-    auto *VD = dyn_cast<VarDecl>(D);
     if (!VD && !CurContext->isDependentContext()) {
       DeclRefExpr *Ref =
           buildCapture(*this, D, SimpleRefExpr, /*WithInit=*/true);

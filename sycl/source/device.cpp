@@ -52,54 +52,48 @@ std::vector<device> device::get_devices(info::device_type deviceType) {
   std::vector<device> devices;
   detail::device_filter_list *FilterList =
       detail::SYCLConfig<detail::SYCL_DEVICE_FILTER>::get();
-  // Host device availability should depend on the forced type
-  bool includeHost = false;
-  // If SYCL_DEVICE_FILTER is set, we don't automatically include it.
-  // We will check if host devices are specified in the filter below.
-  if (FilterList) {
-    if (deviceType != info::device_type::host &&
-        deviceType != info::device_type::all)
-      includeHost = false;
-    else
-      includeHost = FilterList->containsHost();
-  } else {
-    includeHost = detail::match_types(deviceType, info::device_type::host);
-  }
-  info::device_type forced_type = detail::get_forced_type();
+  detail::ods_target_list *OdsTargetList =
+      detail::SYCLConfig<detail::ONEAPI_DEVICE_SELECTOR>::get();
+
+  info::device_type forced_type =
+      detail::get_forced_type(); // almost always ::all
   // Exclude devices which do not match requested device type
   if (detail::match_types(deviceType, forced_type)) {
     detail::force_type(deviceType, forced_type);
-    for (const auto &plt : platform::get_platforms()) {
+    auto thePlatforms = platform::get_platforms();
+    for (const auto &plt : thePlatforms) {
       // If SYCL_BE is set then skip platforms which doesn't have specified
       // backend.
       backend *ForcedBackend = detail::SYCLConfig<detail::SYCL_BE>::get();
       if (ForcedBackend)
-        if (!plt.is_host() && plt.get_backend() != *ForcedBackend)
+        if (!detail::getSyclObjImpl(plt)->is_host() &&
+            plt.get_backend() != *ForcedBackend)
           continue;
       // If SYCL_DEVICE_FILTER is set, skip platforms that is incompatible
       // with the filter specification.
-      if (FilterList && !FilterList->backendCompatible(plt.get_backend()))
+      backend platformBackend = plt.get_backend();
+      if (FilterList && !FilterList->backendCompatible(platformBackend))
+        continue;
+      if (OdsTargetList && !OdsTargetList->backendCompatible(platformBackend))
         continue;
 
-      if (includeHost && plt.is_host()) {
-        std::vector<device> host_device(
-            plt.get_devices(info::device_type::host));
-        if (!host_device.empty())
-          devices.insert(devices.end(), host_device.begin(), host_device.end());
-      } else {
-        std::vector<device> found_devices(plt.get_devices(deviceType));
-        if (!found_devices.empty())
-          devices.insert(devices.end(), found_devices.begin(),
-                         found_devices.end());
-      }
+      std::vector<device> found_devices(plt.get_devices(deviceType));
+      if (!found_devices.empty())
+        devices.insert(devices.end(), found_devices.begin(),
+                       found_devices.end());
     }
   }
+
   return devices;
 }
 
 cl_device_id device::get() const { return impl->get(); }
 
-bool device::is_host() const { return impl->is_host(); }
+bool device::is_host() const {
+  bool IsHost = impl->is_host();
+  assert(!IsHost && "device::is_host should not be called in implementation.");
+  return IsHost;
+}
 
 bool device::is_cpu() const { return impl->is_cpu(); }
 
@@ -146,6 +140,19 @@ template <typename Param>
 typename detail::is_device_info_desc<Param>::return_type
 device::get_info() const {
   return impl->template get_info<Param>();
+}
+
+template <> device device::get_info<info::device::parent_device>() const {
+  // With ONEAPI_DEVICE_SELECTOR the impl.MRootDevice is preset and may be
+  // overridden (ie it may be nullptr on a sub-device) The PI of the sub-devices
+  // have parents, but we don't want to return them. They must pretend to be
+  // parentless root devices.
+  if (impl->isRootDevice())
+    throw invalid_object_error(
+        "No parent for device because it is not a subdevice",
+        PI_ERROR_INVALID_DEVICE);
+  else
+    return impl->template get_info<info::device::parent_device>();
 }
 
 #define __SYCL_PARAM_TRAITS_SPEC(DescType, Desc, ReturnT, PiCode)              \

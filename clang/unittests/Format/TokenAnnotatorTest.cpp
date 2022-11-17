@@ -131,6 +131,20 @@ TEST_F(TokenAnnotatorTest, UnderstandsUsesOfStarAndAmp) {
   Tokens = annotate("delete[] *(ptr);");
   EXPECT_EQ(Tokens.size(), 9u) << Tokens;
   EXPECT_TOKEN(Tokens[3], tok::star, TT_UnaryOperator);
+
+  Tokens = annotate("void f() { void (*fnptr)(char* foo); }");
+  EXPECT_EQ(Tokens.size(), 18u) << Tokens;
+  EXPECT_TOKEN(Tokens[6], tok::l_paren, TT_FunctionTypeLParen);
+  // FIXME: The star of a function pointer probably makes more sense as
+  // TT_PointerOrReference.
+  EXPECT_TOKEN(Tokens[7], tok::star, TT_UnaryOperator);
+  EXPECT_TOKEN(Tokens[12], tok::star, TT_PointerOrReference);
+
+  Tokens = annotate("void f() { void (*fnptr)(t* foo); }");
+  EXPECT_EQ(Tokens.size(), 18u) << Tokens;
+  EXPECT_TOKEN(Tokens[6], tok::l_paren, TT_FunctionTypeLParen);
+  EXPECT_TOKEN(Tokens[7], tok::star, TT_UnaryOperator);
+  EXPECT_TOKEN(Tokens[12], tok::star, TT_PointerOrReference);
 }
 
 TEST_F(TokenAnnotatorTest, UnderstandsUsesOfPlusAndMinus) {
@@ -284,6 +298,17 @@ TEST_F(TokenAnnotatorTest, UnderstandsVariableTemplates) {
   EXPECT_TOKEN(Tokens[13], tok::ampamp, TT_BinaryOperator);
 }
 
+TEST_F(TokenAnnotatorTest, UnderstandsTemplatesInMacros) {
+  auto Tokens =
+      annotate("#define FOO(typeName) \\\n"
+               "  { #typeName, foo<FooType>(new foo<realClass>(#typeName)) }");
+  ASSERT_EQ(Tokens.size(), 27u) << Tokens;
+  EXPECT_TOKEN(Tokens[11], tok::less, TT_TemplateOpener);
+  EXPECT_TOKEN(Tokens[13], tok::greater, TT_TemplateCloser);
+  EXPECT_TOKEN(Tokens[17], tok::less, TT_TemplateOpener);
+  EXPECT_TOKEN(Tokens[19], tok::greater, TT_TemplateCloser);
+}
+
 TEST_F(TokenAnnotatorTest, UnderstandsWhitespaceSensitiveMacros) {
   FormatStyle Style = getLLVMStyle();
   Style.WhitespaceSensitiveMacros.push_back("FOO");
@@ -365,6 +390,55 @@ TEST_F(TokenAnnotatorTest, UnderstandsFunctionRefQualifiers) {
   EXPECT_TOKEN(Tokens[11], tok::amp, TT_PointerOrReference);
 }
 
+TEST_F(TokenAnnotatorTest, UnderstandsOverloadedOperators) {
+  auto Tokens = annotate("x.operator+()");
+  ASSERT_EQ(Tokens.size(), 7u) << Tokens;
+  EXPECT_TOKEN(Tokens[3], tok::plus, TT_OverloadedOperator);
+  EXPECT_TOKEN(Tokens[4], tok::l_paren, TT_OverloadedOperatorLParen);
+  Tokens = annotate("x.operator=()");
+  ASSERT_EQ(Tokens.size(), 7u) << Tokens;
+  EXPECT_TOKEN(Tokens[3], tok::equal, TT_OverloadedOperator);
+  EXPECT_TOKEN(Tokens[4], tok::l_paren, TT_OverloadedOperatorLParen);
+  Tokens = annotate("x.operator+=()");
+  ASSERT_EQ(Tokens.size(), 7u) << Tokens;
+  EXPECT_TOKEN(Tokens[3], tok::plusequal, TT_OverloadedOperator);
+  EXPECT_TOKEN(Tokens[4], tok::l_paren, TT_OverloadedOperatorLParen);
+  Tokens = annotate("x.operator,()");
+  ASSERT_EQ(Tokens.size(), 7u) << Tokens;
+  EXPECT_TOKEN(Tokens[3], tok::comma, TT_OverloadedOperator);
+  EXPECT_TOKEN(Tokens[4], tok::l_paren, TT_OverloadedOperatorLParen);
+  Tokens = annotate("x.operator()()");
+  ASSERT_EQ(Tokens.size(), 8u) << Tokens;
+  EXPECT_TOKEN(Tokens[3], tok::l_paren, TT_OverloadedOperator);
+  EXPECT_TOKEN(Tokens[4], tok::r_paren, TT_OverloadedOperator);
+  EXPECT_TOKEN(Tokens[5], tok::l_paren, TT_OverloadedOperatorLParen);
+  Tokens = annotate("x.operator[]()");
+  ASSERT_EQ(Tokens.size(), 8u) << Tokens;
+  // EXPECT_TOKEN(Tokens[3], tok::l_square, TT_OverloadedOperator);
+  // EXPECT_TOKEN(Tokens[4], tok::r_square, TT_OverloadedOperator);
+  EXPECT_TOKEN(Tokens[5], tok::l_paren, TT_OverloadedOperatorLParen);
+  Tokens = annotate("x.operator\"\"_a()");
+  ASSERT_EQ(Tokens.size(), 7u) << Tokens;
+  EXPECT_TOKEN(Tokens[3], tok::string_literal, TT_OverloadedOperator);
+  EXPECT_TOKEN(Tokens[4], tok::l_paren, TT_OverloadedOperatorLParen);
+  Tokens = annotate("x.operator\"\" _a()");
+  ASSERT_EQ(Tokens.size(), 8u) << Tokens;
+  EXPECT_TOKEN(Tokens[3], tok::string_literal, TT_OverloadedOperator);
+  EXPECT_TOKEN(Tokens[5], tok::l_paren, TT_OverloadedOperatorLParen);
+  Tokens = annotate("x.operator\"\"if()");
+  ASSERT_EQ(Tokens.size(), 7u) << Tokens;
+  EXPECT_TOKEN(Tokens[3], tok::string_literal, TT_OverloadedOperator);
+  EXPECT_TOKEN(Tokens[4], tok::l_paren, TT_OverloadedOperatorLParen);
+  Tokens = annotate("x.operator\"\"s()");
+  ASSERT_EQ(Tokens.size(), 7u) << Tokens;
+  EXPECT_TOKEN(Tokens[3], tok::string_literal, TT_OverloadedOperator);
+  EXPECT_TOKEN(Tokens[4], tok::l_paren, TT_OverloadedOperatorLParen);
+  Tokens = annotate("x.operator\"\" s()");
+  ASSERT_EQ(Tokens.size(), 8u) << Tokens;
+  EXPECT_TOKEN(Tokens[3], tok::string_literal, TT_OverloadedOperator);
+  EXPECT_TOKEN(Tokens[5], tok::l_paren, TT_OverloadedOperatorLParen);
+}
+
 TEST_F(TokenAnnotatorTest, UnderstandsRequiresClausesAndConcepts) {
   auto Tokens = annotate("template <typename T>\n"
                          "concept C = (Foo && Bar) && (Bar && Baz);");
@@ -428,6 +502,23 @@ TEST_F(TokenAnnotatorTest, UnderstandsRequiresClausesAndConcepts) {
                     "void foo(T) noexcept requires Bar<T>;");
   ASSERT_EQ(Tokens.size(), 18u) << Tokens;
   EXPECT_TOKEN(Tokens[11], tok::kw_requires, TT_RequiresClause);
+
+  Tokens = annotate("template <typename T>\n"
+                    "requires Bar<T> || Baz<T>\n"
+                    "auto foo(T) -> int;");
+  ASSERT_EQ(Tokens.size(), 24u) << Tokens;
+  EXPECT_TOKEN(Tokens[5], tok::kw_requires, TT_RequiresClause);
+  EXPECT_EQ(Tokens[11]->FakeLParens.size(), 0u);
+  EXPECT_TRUE(Tokens[14]->ClosesRequiresClause);
+  EXPECT_TOKEN(Tokens[20], tok::arrow, TT_TrailingReturnArrow);
+
+  Tokens = annotate("template <typename T>\n"
+                    "requires Bar<T>\n"
+                    "bool foo(T) { return false; }");
+  ASSERT_EQ(Tokens.size(), 21u) << Tokens;
+  EXPECT_TOKEN(Tokens[5], tok::kw_requires, TT_RequiresClause);
+  EXPECT_TRUE(Tokens[9]->ClosesRequiresClause);
+  EXPECT_TOKEN(Tokens[11], tok::identifier, TT_FunctionDeclarationName);
 
   Tokens = annotate("template <typename T>\n"
                     "struct S {\n"
@@ -607,6 +698,22 @@ TEST_F(TokenAnnotatorTest, UnderstandsRequiresExpressions) {
   EXPECT_TOKEN(Tokens[14], tok::l_brace, TT_RequiresExpressionLBrace);
 }
 
+TEST_F(TokenAnnotatorTest, UnderstandsPragmaRegion) {
+  // Everything after #pragma region should be ImplicitStringLiteral
+  auto Tokens = annotate("#pragma region Foo(Bar: Hello)");
+  ASSERT_EQ(Tokens.size(), 10u) << Tokens;
+  EXPECT_TOKEN(Tokens[5], tok::identifier, TT_ImplicitStringLiteral);
+  EXPECT_TOKEN(Tokens[6], tok::colon, TT_ImplicitStringLiteral);
+  EXPECT_TOKEN(Tokens[7], tok::identifier, TT_ImplicitStringLiteral);
+
+  // Make sure it's annotated correctly inside a function as well
+  Tokens = annotate("void test(){\n#pragma region Foo(Bar: Hello)\n}");
+  ASSERT_EQ(Tokens.size(), 16u) << Tokens;
+  EXPECT_TOKEN(Tokens[10], tok::identifier, TT_ImplicitStringLiteral);
+  EXPECT_TOKEN(Tokens[11], tok::colon, TT_ImplicitStringLiteral);
+  EXPECT_TOKEN(Tokens[12], tok::identifier, TT_ImplicitStringLiteral);
+}
+
 TEST_F(TokenAnnotatorTest, RequiresDoesNotChangeParsingOfTheRest) {
   const char *BaseCode = nullptr;
   const char *ConstrainedCode = nullptr;
@@ -718,6 +825,16 @@ TEST_F(TokenAnnotatorTest, RequiresDoesNotChangeParsingOfTheRest) {
   TestRequires(__LINE__);
 
   BaseCode = "template<typename T>\n"
+             "T foo();";
+  ConstrainedCode = "template<typename T>\n"
+                    "  requires(Foo<T>)\n"
+                    "T foo();";
+  BaseTokenCount = 11;
+  RequiresTokenCount = 7;
+  PrefixTokenCount = 5;
+  TestRequires(__LINE__);
+
+  BaseCode = "template<typename T>\n"
              "Bar(T) -> Bar<typename T::I>;";
   ConstrainedCode = "template<typename T>\n"
                     "  requires requires(T &&t) {\n"
@@ -803,6 +920,21 @@ TEST_F(TokenAnnotatorTest, UnderstandsObjCBlock) {
 
 TEST_F(TokenAnnotatorTest, UnderstandsLambdas) {
   auto Tokens = annotate("[]() constexpr {}");
+  ASSERT_EQ(Tokens.size(), 8u) << Tokens;
+  EXPECT_TOKEN(Tokens[0], tok::l_square, TT_LambdaLSquare);
+  EXPECT_TOKEN(Tokens[5], tok::l_brace, TT_LambdaLBrace);
+
+  Tokens = annotate("[]() consteval {}");
+  ASSERT_EQ(Tokens.size(), 8u) << Tokens;
+  EXPECT_TOKEN(Tokens[0], tok::l_square, TT_LambdaLSquare);
+  EXPECT_TOKEN(Tokens[5], tok::l_brace, TT_LambdaLBrace);
+
+  Tokens = annotate("[]() mutable {}");
+  ASSERT_EQ(Tokens.size(), 8u) << Tokens;
+  EXPECT_TOKEN(Tokens[0], tok::l_square, TT_LambdaLSquare);
+  EXPECT_TOKEN(Tokens[5], tok::l_brace, TT_LambdaLBrace);
+
+  Tokens = annotate("[]() static {}");
   ASSERT_EQ(Tokens.size(), 8u) << Tokens;
   EXPECT_TOKEN(Tokens[0], tok::l_square, TT_LambdaLSquare);
   EXPECT_TOKEN(Tokens[5], tok::l_brace, TT_LambdaLBrace);

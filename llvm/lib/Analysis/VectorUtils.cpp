@@ -429,6 +429,43 @@ bool llvm::isSplatValue(const Value *V, int Index, unsigned Depth) {
   return false;
 }
 
+bool llvm::getShuffleDemandedElts(int SrcWidth, ArrayRef<int> Mask,
+                                  const APInt &DemandedElts, APInt &DemandedLHS,
+                                  APInt &DemandedRHS, bool AllowUndefElts) {
+  DemandedLHS = DemandedRHS = APInt::getZero(SrcWidth);
+
+  // Early out if we don't demand any elements.
+  if (DemandedElts.isZero())
+    return true;
+
+  // Simple case of a shuffle with zeroinitializer.
+  if (all_of(Mask, [](int Elt) { return Elt == 0; })) {
+    DemandedLHS.setBit(0);
+    return true;
+  }
+
+  for (unsigned I = 0, E = Mask.size(); I != E; ++I) {
+    int M = Mask[I];
+    assert((-1 <= M) && (M < (SrcWidth * 2)) &&
+           "Invalid shuffle mask constant");
+
+    if (!DemandedElts[I] || (AllowUndefElts && (M < 0)))
+      continue;
+
+    // For undef elements, we don't know anything about the common state of
+    // the shuffle result.
+    if (M < 0)
+      return false;
+
+    if (M < SrcWidth)
+      DemandedLHS.setBit(M);
+    else
+      DemandedRHS.setBit(M - SrcWidth);
+  }
+
+  return true;
+}
+
 void llvm::narrowShuffleMaskElts(int Scale, ArrayRef<int> Mask,
                                  SmallVectorImpl<int> &ScaledMask) {
   assert(Scale > 0 && "Unexpected scaling factor");
@@ -1117,8 +1154,9 @@ void InterleavedAccessInfo::collectConstStrideAccesses(
       // wrap around the address space we would do a memory access at nullptr
       // even without the transformation. The wrapping checks are therefore
       // deferred until after we've formed the interleaved groups.
-      int64_t Stride = getPtrStride(PSE, ElementTy, Ptr, TheLoop, Strides,
-                                    /*Assume=*/true, /*ShouldCheckWrap=*/false);
+      int64_t Stride =
+        getPtrStride(PSE, ElementTy, Ptr, TheLoop, Strides,
+                     /*Assume=*/true, /*ShouldCheckWrap=*/false).value_or(0);
 
       const SCEV *Scev = replaceSymbolicStrideSCEV(PSE, Strides, Ptr);
       uint64_t Size = DL.getTypeAllocSize(ElementTy);
@@ -1338,7 +1376,7 @@ void InterleavedAccessInfo::analyzeInterleaving(
     Value *MemberPtr = getLoadStorePointerOperand(Member);
     Type *AccessTy = getLoadStoreType(Member);
     if (getPtrStride(PSE, AccessTy, MemberPtr, TheLoop, Strides,
-                     /*Assume=*/false, /*ShouldCheckWrap=*/true))
+                     /*Assume=*/false, /*ShouldCheckWrap=*/true).value_or(0))
       return false;
     LLVM_DEBUG(dbgs() << "LV: Invalidate candidate interleaved group due to "
                       << FirstOrLast

@@ -1378,10 +1378,10 @@ void ExprEngine::ProcessAutomaticObjDtor(const CFGAutomaticObjDtor Dtor,
                                   "Prepare for object destruction");
   PreImplicitCall PP(DtorDecl, varDecl->getLocation(), LCtx, &PT);
   Pred = Bldr.generateNode(PP, state, Pred);
-  Bldr.takeNodes(Pred);
 
   if (!Pred)
     return;
+  Bldr.takeNodes(Pred);
 
   VisitCXXDestructor(varType, Region, Dtor.getTriggerStmt(),
                      /*IsBase=*/false, Pred, Dst, CallOpts);
@@ -1452,10 +1452,10 @@ void ExprEngine::ProcessDeleteDtor(const CFGDeleteDtor Dtor,
                                   "Prepare for object destruction");
   PreImplicitCall PP(getDtorDecl(DTy), DE->getBeginLoc(), LCtx, &PT);
   Pred = Bldr.generateNode(PP, State, Pred);
-  Bldr.takeNodes(Pred);
 
   if (!Pred)
     return;
+  Bldr.takeNodes(Pred);
 
   VisitCXXDestructor(DTy, ArgR, DE, /*IsBase=*/false, Pred, Dst, CallOpts);
 }
@@ -1528,10 +1528,10 @@ void ExprEngine::ProcessMemberDtor(const CFGMemberDtor D,
                                   "Prepare for object destruction");
   PreImplicitCall PP(DtorDecl, Member->getLocation(), LCtx, &PT);
   Pred = Bldr.generateNode(PP, State, Pred);
-  Bldr.takeNodes(Pred);
 
   if (!Pred)
     return;
+  Bldr.takeNodes(Pred);
 
   VisitCXXDestructor(T, FieldVal.getAsRegion(), CurDtor->getBody(),
                      /*IsBase=*/false, Pred, Dst, CallOpts);
@@ -3163,6 +3163,12 @@ void ExprEngine::VisitCommonDeclRefExpr(const Expr *Ex, const NamedDecl *D,
     return;
   }
 
+  if (const auto *TPO = dyn_cast<TemplateParamObjectDecl>(D)) {
+    // FIXME: We should meaningfully implement this.
+    (void)TPO;
+    return;
+  }
+
   llvm_unreachable("Support for this Decl not implemented.");
 }
 
@@ -3358,6 +3364,14 @@ void ExprEngine::VisitMemberExpr(const MemberExpr *M, ExplodedNode *Pred,
                                             /*OutRegionWithAdjustments=*/&MR);
       SVal baseExprVal =
           MR ? loc::MemRegionVal(MR) : state->getSVal(BaseExpr, LCtx);
+
+      // FIXME: Copied from RegionStoreManager::bind()
+      if (const auto *SR =
+              dyn_cast_or_null<SymbolicRegion>(baseExprVal.getAsRegion())) {
+        QualType T = SR->getPointeeStaticType();
+        baseExprVal =
+            loc::MemRegionVal(getStoreManager().GetElementZeroRegion(SR, T));
+      }
 
       const auto *field = cast<FieldDecl>(Member);
       SVal L = state->getLValue(field, baseExprVal);

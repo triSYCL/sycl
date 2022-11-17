@@ -576,8 +576,7 @@ Value *FAddCombine::simplifyFAdd(AddendVect& Addends, unsigned InstrQuota) {
     }
   }
 
-  assert((NextTmpIdx <= array_lengthof(TmpResult) + 1) &&
-         "out-of-bound access");
+  assert((NextTmpIdx <= std::size(TmpResult) + 1) && "out-of-bound access");
 
   Value *Result;
   if (!SimpVect.empty())
@@ -1232,7 +1231,7 @@ Instruction *InstCombinerImpl::
 }
 
 /// This is a specialization of a more general transform from
-/// SimplifyUsingDistributiveLaws. If that code can be made to work optimally
+/// foldUsingDistributiveLaws. If that code can be made to work optimally
 /// for multi-use cases or propagating nsw/nuw, then we would not need this.
 static Instruction *factorizeMathWithShlOps(BinaryOperator &I,
                                             InstCombiner::BuilderTy &Builder) {
@@ -1268,6 +1267,45 @@ static Instruction *factorizeMathWithShlOps(BinaryOperator &I,
   return NewShl;
 }
 
+/// Reduce a sequence of masked half-width multiplies to a single multiply.
+/// ((XLow * YHigh) + (YLow * XHigh)) << HalfBits) + (XLow * YLow) --> X * Y
+static Instruction *foldBoxMultiply(BinaryOperator &I) {
+  unsigned BitWidth = I.getType()->getScalarSizeInBits();
+  // Skip the odd bitwidth types.
+  if ((BitWidth & 0x1))
+    return nullptr;
+
+  unsigned HalfBits = BitWidth >> 1;
+  APInt HalfMask = APInt::getMaxValue(HalfBits);
+
+  // ResLo = (CrossSum << HalfBits) + (YLo * XLo)
+  Value *XLo, *YLo;
+  Value *CrossSum;
+  if (!match(&I, m_c_Add(m_Shl(m_Value(CrossSum), m_SpecificInt(HalfBits)),
+                         m_Mul(m_Value(YLo), m_Value(XLo)))))
+    return nullptr;
+
+  // XLo = X & HalfMask
+  // YLo = Y & HalfMask
+  // TODO: Refactor with SimplifyDemandedBits or KnownBits known leading zeros
+  // to enhance robustness
+  Value *X, *Y;
+  if (!match(XLo, m_And(m_Value(X), m_SpecificInt(HalfMask))) ||
+      !match(YLo, m_And(m_Value(Y), m_SpecificInt(HalfMask))))
+    return nullptr;
+
+  // CrossSum = (X' * (Y >> Halfbits)) + (Y' * (X >> HalfBits))
+  // X' can be either X or XLo in the pattern (and the same for Y')
+  if (match(CrossSum,
+            m_c_Add(m_c_Mul(m_LShr(m_Specific(Y), m_SpecificInt(HalfBits)),
+                            m_CombineOr(m_Specific(X), m_Specific(XLo))),
+                    m_c_Mul(m_LShr(m_Specific(X), m_SpecificInt(HalfBits)),
+                            m_CombineOr(m_Specific(Y), m_Specific(YLo))))))
+    return BinaryOperator::CreateMul(X, Y);
+
+  return nullptr;
+}
+
 Instruction *InstCombinerImpl::visitAdd(BinaryOperator &I) {
   if (Value *V = simplifyAddInst(I.getOperand(0), I.getOperand(1),
                                  I.hasNoSignedWrap(), I.hasNoUnsignedWrap(),
@@ -1284,8 +1322,11 @@ Instruction *InstCombinerImpl::visitAdd(BinaryOperator &I) {
     return Phi;
 
   // (A*B)+(A*C) -> A*(B+C) etc
-  if (Value *V = SimplifyUsingDistributiveLaws(I))
+  if (Value *V = foldUsingDistributiveLaws(I))
     return replaceInstUsesWith(I, V);
+
+  if (Instruction *R = foldBoxMultiply(I))
+    return R;
 
   if (Instruction *R = factorizeMathWithShlOps(I, Builder))
     return R;
@@ -1397,6 +1438,18 @@ Instruction *InstCombinerImpl::visitAdd(BinaryOperator &I) {
     return &I;
   }
 
+  // (add A (or A, -A)) --> (and (add A, -1) A)
+  // (add A (or -A, A)) --> (and (add A, -1) A)
+  // (add (or A, -A) A) --> (and (add A, -1) A)
+  // (add (or -A, A) A) --> (and (add A, -1) A)
+  if (match(&I, m_c_BinOp(m_Value(A), m_OneUse(m_c_Or(m_Neg(m_Deferred(A)),
+                                                      m_Deferred(A)))))) {
+    Value *Add =
+        Builder.CreateAdd(A, Constant::getAllOnesValue(A->getType()), "",
+                          I.hasNoUnsignedWrap(), I.hasNoSignedWrap());
+    return BinaryOperator::CreateAnd(Add, A);
+  }
+
   // Canonicalize ((A & -A) - 1) --> ((A - 1) & ~A)
   // Forms all commutable operations, and simplifies ctpop -> cttz folds.
   if (match(&I,
@@ -1420,6 +1473,15 @@ Instruction *InstCombinerImpl::visitAdd(BinaryOperator &I) {
     Constant *NewMulC = ConstantInt::get(Ty, 1 - *C1);
     Value *NewMul = Builder.CreateMul(A, NewMulC);
     return BinaryOperator::CreateAdd(NewMul, ConstantInt::getAllOnesValue(Ty));
+  }
+
+  // (A * -2**C) + B --> B - (A << C)
+  const APInt *NegPow2C;
+  if (match(&I, m_c_Add(m_OneUse(m_Mul(m_Value(A), m_NegatedPower2(NegPow2C))),
+                        m_Value(B)))) {
+    Constant *ShiftAmtC = ConstantInt::get(Ty, NegPow2C->countTrailingZeros());
+    Value *Shl = Builder.CreateShl(A, ShiftAmtC);
+    return BinaryOperator::CreateSub(B, Shl);
   }
 
   // TODO(jingyue): Consider willNotOverflowSignedAdd and
@@ -1882,7 +1944,7 @@ Instruction *InstCombinerImpl::visitSub(BinaryOperator &I) {
     return TryToNarrowDeduceFlags(); // Should have been handled in Negator!
 
   // (A*B)-(A*C) -> A*(B-C) etc
-  if (Value *V = SimplifyUsingDistributiveLaws(I))
+  if (Value *V = foldUsingDistributiveLaws(I))
     return replaceInstUsesWith(I, V);
 
   if (I.getType()->isIntOrIntVectorTy(1))

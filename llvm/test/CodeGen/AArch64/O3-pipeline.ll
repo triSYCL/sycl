@@ -15,6 +15,7 @@
 ; CHECK-NEXT: Create Garbage Collector Module Metadata
 ; CHECK-NEXT: Machine Branch Probability Analysis
 ; CHECK-NEXT: Default Regalloc Eviction Advisor
+; CHECK-NEXT: Default Regalloc Priority Advisor
 ; CHECK-NEXT:   ModulePass Manager
 ; CHECK-NEXT:     Pre-ISel Intrinsic Lowering
 ; CHECK-NEXT:     FunctionPass Manager
@@ -91,6 +92,7 @@
 ; CHECK-NEXT:       Interleaved Load Combine Pass
 ; CHECK-NEXT:       Dominator Tree Construction
 ; CHECK-NEXT:       Interleaved Access Pass
+; CHECK-NEXT:       SME ABI Pass
 ; CHECK-NEXT:       Natural Loop Information
 ; CHECK-NEXT:       Type Promotion
 ; CHECK-NEXT:       CodeGen Prepare

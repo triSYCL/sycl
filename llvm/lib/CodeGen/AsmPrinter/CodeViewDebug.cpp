@@ -1498,8 +1498,16 @@ void CodeViewDebug::beginFunctionImpl(const MachineFunction *MF) {
     FPO |= FrameProcedureOptions::MarkedInline;
   if (GV.hasFnAttribute(Attribute::Naked))
     FPO |= FrameProcedureOptions::Naked;
-  if (MFI.hasStackProtectorIndex())
+  if (MFI.hasStackProtectorIndex()) {
     FPO |= FrameProcedureOptions::SecurityChecks;
+    if (GV.hasFnAttribute(Attribute::StackProtectStrong) ||
+        GV.hasFnAttribute(Attribute::StackProtectReq)) {
+      FPO |= FrameProcedureOptions::StrictSecurityChecks;
+    }
+  } else if (!GV.hasStackProtectorFnAttr()) {
+    // __declspec(safebuffers) disables stack guards.
+    FPO |= FrameProcedureOptions::SafeBuffers;
+  }
   FPO |= FrameProcedureOptions(uint32_t(CurFn->EncodedLocalFramePtrReg) << 14U);
   FPO |= FrameProcedureOptions(uint32_t(CurFn->EncodedParamFramePtrReg) << 16U);
   if (Asm->TM.getOptLevel() != CodeGenOpt::None &&
@@ -3354,7 +3362,7 @@ void CodeViewDebug::emitDebugInfoForGlobal(const CVGlobalVariable &CVGV) {
   // in its name so that we can reference the variable in the command line
   // of the VS debugger.
   std::string QualifiedName =
-      (moduleIsInFortran() || isa<DILocalScope>(Scope))
+      (moduleIsInFortran() || (Scope && isa<DILocalScope>(Scope)))
           ? std::string(DIGV->getName())
           : getFullyQualifiedName(Scope, DIGV->getName());
 

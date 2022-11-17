@@ -205,10 +205,11 @@ TEST_F(SchedulerTest, PostEnqueueCleanup) {
       detail::SYCLConfig<detail::SYCL_HOST_UNIFIED_MEMORY>::reset};
   sycl::unittest::PiMock Mock;
   sycl::platform Plt = Mock.getPlatform();
-  Mock.redefine<detail::PiApiKind::piEnqueueMemBufferMap>(
+  Mock.redefineBefore<detail::PiApiKind::piEnqueueMemBufferMap>(
       redefinedEnqueueMemBufferMap);
-  Mock.redefine<detail::PiApiKind::piEnqueueMemUnmap>(redefinedEnqueueMemUnmap);
-  Mock.redefine<detail::PiApiKind::piEnqueueMemBufferFill>(
+  Mock.redefineBefore<detail::PiApiKind::piEnqueueMemUnmap>(
+      redefinedEnqueueMemUnmap);
+  Mock.redefineBefore<detail::PiApiKind::piEnqueueMemBufferFill>(
       redefinedEnqueueMemBufferFill);
 
   context Ctx{Plt};
@@ -243,7 +244,8 @@ TEST_F(SchedulerTest, PostEnqueueCleanup) {
         MS.addEmptyCmd(Leaf, {&MockReq}, QueueImpl,
                        detail::Command::BlockReason::HostTask, ToEnqueue);
       });
-  device HostDevice{host_selector{}};
+  device HostDevice = detail::createSyclObjFromImpl<device>(
+      detail::device_impl::getHostDeviceImpl());
   detail::QueueImplPtr DefaultHostQueue{
       new detail::queue_impl(detail::getSyclObjImpl(HostDevice), {}, {})};
   checkCleanupOnLeafUpdate(

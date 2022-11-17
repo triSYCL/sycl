@@ -22,6 +22,7 @@
 #include "llvm/ADT/Statistic.h"
 #include "llvm/Analysis/AliasAnalysis.h"
 #include "llvm/CodeGen/LiveIntervals.h"
+#include "llvm/CodeGen/MachineCombinerPattern.h"
 #include "llvm/CodeGen/MachineConstantPool.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
 #include "llvm/CodeGen/MachineFunctionPass.h"
@@ -311,7 +312,7 @@ static const uint16_t FMAOpIdxInfo[][6] = {
 // Check if an opcode is a FMA instruction. If it is, return the index in array
 // FMAOpIdxInfo. Otherwise, return -1.
 int16_t PPCInstrInfo::getFMAOpIdxInfo(unsigned Opcode) const {
-  for (unsigned I = 0; I < array_lengthof(FMAOpIdxInfo); I++)
+  for (unsigned I = 0; I < std::size(FMAOpIdxInfo); I++)
     if (FMAOpIdxInfo[I][InfoArrayIdxFMAInst] == Opcode)
       return I;
   return -1;
@@ -2332,7 +2333,7 @@ bool PPCInstrInfo::ClobbersPredicate(MachineInstr &MI,
 
   bool Found = false;
   for (const MachineOperand &MO : MI.operands()) {
-    for (unsigned c = 0; c < array_lengthof(RCs) && !Found; ++c) {
+    for (unsigned c = 0; c < std::size(RCs) && !Found; ++c) {
       const TargetRegisterClass *RC = RCs[c];
       if (MO.isReg()) {
         if (MO.isDef() && RC->contains(MO.getReg())) {
@@ -2538,7 +2539,12 @@ bool PPCInstrInfo::optimizeCompareInstr(MachineInstr &CmpInstr, Register SrcReg,
     else
       return false;
 
-    PredsToUpdate.push_back(std::make_pair(&(UseMI->getOperand(0)), Pred));
+    // Convert the comparison and its user to a compare against zero with the
+    // appropriate predicate on the branch. Zero comparison might provide
+    // optimization opportunities post-RA (see optimization in
+    // PPCPreEmitPeephole.cpp).
+    UseMI->getOperand(0).setImm(Pred);
+    CmpInstr.getOperand(2).setImm(0);
   }
 
   // Search for Sub.
@@ -2759,6 +2765,85 @@ bool PPCInstrInfo::optimizeCompareInstr(MachineInstr &CmpInstr, Register SrcReg,
   for (unsigned i = 0, e = SubRegsToUpdate.size(); i < e; i++)
     SubRegsToUpdate[i].first->setSubReg(SubRegsToUpdate[i].second);
 
+  return true;
+}
+
+bool PPCInstrInfo::optimizeCmpPostRA(MachineInstr &CmpMI) const {
+  MachineRegisterInfo *MRI = &CmpMI.getParent()->getParent()->getRegInfo();
+  if (MRI->isSSA())
+    return false;
+
+  Register SrcReg, SrcReg2;
+  int64_t CmpMask, CmpValue;
+  if (!analyzeCompare(CmpMI, SrcReg, SrcReg2, CmpMask, CmpValue))
+    return false;
+
+  // Try to optimize the comparison against 0.
+  if (CmpValue || !CmpMask || SrcReg2)
+    return false;
+
+  // The record forms set the condition register based on a signed comparison
+  // with zero (see comments in optimizeCompareInstr). Since we can't do the
+  // equality checks in post-RA, we are more restricted on a unsigned
+  // comparison.
+  unsigned Opc = CmpMI.getOpcode();
+  if (Opc == PPC::CMPLWI || Opc == PPC::CMPLDI)
+    return false;
+
+  // The record forms are always based on a 64-bit comparison on PPC64
+  // (similary, a 32-bit comparison on PPC32), while the CMPWI is a 32-bit
+  // comparison. Since we can't do the equality checks in post-RA, we bail out
+  // the case.
+  if (Subtarget.isPPC64() && Opc == PPC::CMPWI)
+    return false;
+
+  // CmpMI can't be deleted if it has implicit def.
+  if (CmpMI.hasImplicitDef())
+    return false;
+
+  bool SrcRegHasOtherUse = false;
+  MachineInstr *SrcMI = getDefMIPostRA(SrcReg, CmpMI, SrcRegHasOtherUse);
+  if (!SrcMI || !SrcMI->definesRegister(SrcReg))
+    return false;
+
+  MachineOperand RegMO = CmpMI.getOperand(0);
+  Register CRReg = RegMO.getReg();
+  if (CRReg != PPC::CR0)
+    return false;
+
+  // Make sure there is no def/use of CRReg between SrcMI and CmpMI.
+  bool SeenUseOfCRReg = false;
+  bool IsCRRegKilled = false;
+  if (!isRegElgibleForForwarding(RegMO, *SrcMI, CmpMI, false, IsCRRegKilled,
+                                 SeenUseOfCRReg) ||
+      SrcMI->definesRegister(CRReg) || SeenUseOfCRReg)
+    return false;
+
+  int SrcMIOpc = SrcMI->getOpcode();
+  int NewOpC = PPC::getRecordFormOpcode(SrcMIOpc);
+  if (NewOpC == -1)
+    return false;
+
+  LLVM_DEBUG(dbgs() << "Replace Instr: ");
+  LLVM_DEBUG(SrcMI->dump());
+
+  const MCInstrDesc &NewDesc = get(NewOpC);
+  SrcMI->setDesc(NewDesc);
+  MachineInstrBuilder(*SrcMI->getParent()->getParent(), SrcMI)
+      .addReg(CRReg, RegState::ImplicitDefine);
+  SrcMI->clearRegisterDeads(CRReg);
+
+  // Fix up killed/dead flag for SrcReg after transformation.
+  if (SrcRegHasOtherUse || CmpMI.getOperand(1).isKill())
+    fixupIsDeadOrKill(SrcMI, &CmpMI, SrcReg);
+
+  assert(SrcMI->definesRegister(PPC::CR0) &&
+         "Record-form instruction does not define cr0?");
+
+  LLVM_DEBUG(dbgs() << "with: ");
+  LLVM_DEBUG(SrcMI->dump());
+  LLVM_DEBUG(dbgs() << "Delete dead instruction: ");
+  LLVM_DEBUG(CmpMI.dump());
   return true;
 }
 
@@ -4421,7 +4506,7 @@ bool PPCInstrInfo::isDefMIElgibleForForwarding(MachineInstr &DefMI,
 bool PPCInstrInfo::isRegElgibleForForwarding(
     const MachineOperand &RegMO, const MachineInstr &DefMI,
     const MachineInstr &MI, bool KillDefMI,
-    bool &IsFwdFeederRegKilled) const {
+    bool &IsFwdFeederRegKilled, bool &SeenIntermediateUse) const {
   // x = addi y, imm
   // ...
   // z = lfdx 0, x   -> z = lfd imm(y)
@@ -4443,6 +4528,8 @@ bool PPCInstrInfo::isRegElgibleForForwarding(
       return false;
     else if (It->killsRegister(Reg, &getRegisterInfo()) && (&*It) != &DefMI)
       IsFwdFeederRegKilled = true;
+    if (It->readsRegister(Reg, &getRegisterInfo()) && (&*It) != &DefMI)
+      SeenIntermediateUse = true;
     // Made it to DefMI without encountering a clobber.
     if ((&*It) == &DefMI)
       break;
@@ -4882,9 +4969,10 @@ bool PPCInstrInfo::transformToImmFormFedByAdd(
     return false;
 
   bool IsFwdFeederRegKilled = false;
+  bool SeenIntermediateUse = false;
   // Check if the RegMO can be forwarded to MI.
   if (!isRegElgibleForForwarding(*RegMO, DefMI, MI, KillDefMI,
-                                 IsFwdFeederRegKilled))
+                                 IsFwdFeederRegKilled, SeenIntermediateUse))
     return false;
 
   // Get killed info in case fixup needed after transformation.

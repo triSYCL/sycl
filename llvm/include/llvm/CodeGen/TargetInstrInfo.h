@@ -19,7 +19,6 @@
 #include "llvm/ADT/None.h"
 #include "llvm/CodeGen/MIRFormatter.h"
 #include "llvm/CodeGen/MachineBasicBlock.h"
-#include "llvm/CodeGen/MachineCombinerPattern.h"
 #include "llvm/CodeGen/MachineFunction.h"
 #include "llvm/CodeGen/MachineInstr.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
@@ -61,6 +60,7 @@ class TargetRegisterClass;
 class TargetRegisterInfo;
 class TargetSchedModel;
 class TargetSubtargetInfo;
+enum class MachineCombinerPattern;
 
 template <class T> class SmallVectorImpl;
 
@@ -108,6 +108,11 @@ public:
 
   static bool isGenericOpcode(unsigned Opc) {
     return Opc <= TargetOpcode::GENERIC_OP_END;
+  }
+
+  static bool isGenericAtomicRMWOpcode(unsigned Opc) {
+    return Opc >= TargetOpcode::GENERIC_ATOMICRMW_OP_START &&
+           Opc <= TargetOpcode::GENERIC_ATOMICRMW_OP_END;
   }
 
   /// Given a machine instruction descriptor, returns the register

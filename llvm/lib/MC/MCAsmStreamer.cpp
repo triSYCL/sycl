@@ -197,6 +197,10 @@ public:
 
   void emitXCOFFRefDirective(StringRef Name) override;
 
+  void emitXCOFFExceptDirective(const MCSymbol *Symbol, MCSymbol *Trap,
+                                unsigned Lang, unsigned Reason,
+                                unsigned FunctionSize, bool hasDebug) override;
+
   void emitELFSize(MCSymbol *Symbol, const MCExpr *Value) override;
   void emitCommonSymbol(MCSymbol *Symbol, uint64_t Size,
                         unsigned ByteAlignment) override;
@@ -374,7 +378,7 @@ public:
 
   void emitPseudoProbe(uint64_t Guid, uint64_t Index, uint64_t Type,
                        uint64_t Attr,
-                       const MCPseudoProbeInlineStack &InlineStack) override;
+                       const MCPseudoProbeInlineStack &InlineStack, MCSymbol *FnSym) override;
 
   void emitBundleAlignMode(unsigned AlignPow2) override;
   void emitBundleLock(bool AlignToEnd) override;
@@ -939,6 +943,17 @@ void MCAsmStreamer::emitXCOFFRenameDirective(const MCSymbol *Name,
 
 void MCAsmStreamer::emitXCOFFRefDirective(StringRef Name) {
   OS << "\t.ref " << Name;
+  EmitEOL();
+}
+
+void MCAsmStreamer::emitXCOFFExceptDirective(const MCSymbol *Symbol,
+                                             MCSymbol *Trap, unsigned Lang,
+                                             unsigned Reason,
+                                             unsigned FunctionSize,
+                                             bool hasDebug) {
+  OS << "\t.except\t";
+  Symbol->print(OS, MAI);
+  OS << ", " << Lang << ", " << Reason;
   EmitEOL();
 }
 
@@ -2323,13 +2338,16 @@ void MCAsmStreamer::emitInstruction(const MCInst &Inst,
 
 void MCAsmStreamer::emitPseudoProbe(
     uint64_t Guid, uint64_t Index, uint64_t Type, uint64_t Attr,
-    const MCPseudoProbeInlineStack &InlineStack) {
+    const MCPseudoProbeInlineStack &InlineStack, MCSymbol *FnSym) {
   OS << "\t.pseudoprobe\t" << Guid << " " << Index << " " << Type << " "
      << Attr;
   // Emit inline stack like
   //  @ GUIDmain:3 @ GUIDCaller:1 @ GUIDDirectCaller:11
   for (const auto &Site : InlineStack)
     OS << " @ " << std::get<0>(Site) << ":" << std::get<1>(Site);
+
+  OS << " " << FnSym->getName();
+
   EmitEOL();
 }
 

@@ -1,7 +1,7 @@
 // REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
-// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple -fsycl-unnamed-lambda -std=c++20 -Xsycl-target-frontend -fno-exceptions %s -o %t.dir/exec.out
+// RUN: %clangxx %EXTRA_COMPILE_FLAGS-fsycl -fsycl-targets=%sycl_triple -fsycl-unnamed-lambda -std=c++20 -Xsycl-target-frontend -fno-exceptions %s -o %t.dir/exec.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
 #include <sycl/sycl.hpp>

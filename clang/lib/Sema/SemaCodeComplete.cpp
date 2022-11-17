@@ -1231,8 +1231,8 @@ static OverloadCompare compareOverloads(const CXXMethodDecl &Candidate,
     if (Candidate.parameters()[I]->getType().getCanonicalType() !=
         Incumbent.parameters()[I]->getType().getCanonicalType())
       return OverloadCompare::BothViable;
-  if (!llvm::empty(Candidate.specific_attrs<EnableIfAttr>()) ||
-      !llvm::empty(Incumbent.specific_attrs<EnableIfAttr>()))
+  if (!Candidate.specific_attrs<EnableIfAttr>().empty() ||
+      !Incumbent.specific_attrs<EnableIfAttr>().empty())
     return OverloadCompare::BothViable;
   // At this point, we know calls can't pick one or the other based on
   // arguments, so one of the two must win. (Or both fail, handled elsewhere).
@@ -2642,6 +2642,13 @@ static void AddOrdinaryNameResults(Sema::ParserCompletionContext CCC, Scope *S,
       Builder.AddChunk(CodeCompletionString::CK_LeftParen);
       Builder.AddPlaceholderChunk("type");
       Builder.AddChunk(CodeCompletionString::CK_RightParen);
+      Results.AddResult(Result(Builder.TakeString()));
+    }
+
+    if (SemaRef.getLangOpts().C2x) {
+      // nullptr
+      Builder.AddResultTypeChunk("nullptr_t");
+      Builder.AddTypedTextChunk("nullptr");
       Results.AddResult(Result(Builder.TakeString()));
     }
 
@@ -4659,9 +4666,9 @@ static const FunctionProtoType *TryDeconstructFunctionLike(QualType T) {
   // Note we only handle the sugared types, they closely match what users wrote.
   // We explicitly choose to not handle ClassTemplateSpecializationDecl.
   if (auto *Specialization = T->getAs<TemplateSpecializationType>()) {
-    if (Specialization->getNumArgs() != 1)
+    if (Specialization->template_arguments().size() != 1)
       return nullptr;
-    const TemplateArgument &Argument = Specialization->getArg(0);
+    const TemplateArgument &Argument = Specialization->template_arguments()[0];
     if (Argument.getKind() != TemplateArgument::Type)
       return nullptr;
     return Argument.getAsType()->getAs<FunctionProtoType>();

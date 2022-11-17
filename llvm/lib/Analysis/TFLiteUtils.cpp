@@ -27,6 +27,7 @@
 #include "tensorflow/lite/model.h"
 #include "tensorflow/lite/model_builder.h"
 #include "tensorflow/lite/op_resolver.h"
+#include "tensorflow/lite/logger.h"
 
 #include <cassert>
 #include <numeric>
@@ -100,6 +101,8 @@ TFModelEvaluatorImpl::TFModelEvaluatorImpl(
     function_ref<TensorSpec(size_t)> GetOutputSpecs, size_t OutputSpecsSize,
     const char *Tags = "serve")
     : Input(InputSpecs.size()), Output(OutputSpecsSize) {
+  // INFO and DEBUG messages could be numerous and not particularly interesting
+  tflite::LoggerOptions::SetMinimumLogSeverity(tflite::TFLITE_LOG_WARNING);
   // FIXME: make ErrorReporter a member (may also need subclassing
   // StatefulErrorReporter) to easily get the latest error status, for
   // debugging.
@@ -118,8 +121,21 @@ TFModelEvaluatorImpl::TFModelEvaluatorImpl(
   tflite::InterpreterBuilder Builder(*Model, Resolver);
   Builder(&Interpreter);
 
-  if (!Interpreter ||
-      Interpreter->AllocateTensors() != TfLiteStatus::kTfLiteOk) {
+  if (!Interpreter) {
+    invalidate();
+    return;
+  }
+
+  // We assume the input buffers are valid for the lifetime of the interpreter.
+  // By default, tflite allocates memory in an arena and will periodically take
+  // away memory and reallocate it in a different location after evaluations in
+  // order to improve utilization of the buffers owned in the arena. So, we
+  // explicitly mark our input buffers as persistent to avoid this behavior.
+  for (size_t I = 0; I < Interpreter->inputs().size(); ++I)
+    Interpreter->tensor(I)->allocation_type =
+        TfLiteAllocationType::kTfLiteArenaRwPersistent;
+
+  if (Interpreter->AllocateTensors() != TfLiteStatus::kTfLiteOk) {
     invalidate();
     return;
   }
@@ -131,6 +147,7 @@ TFModelEvaluatorImpl::TFModelEvaluatorImpl(
   for (size_t I = 0; I < Interpreter->outputs().size(); ++I)
     OutputsMap[Interpreter->GetOutputName(I)] = I;
 
+  size_t NumberFeaturesPassed = 0;
   for (size_t I = 0; I < InputSpecs.size(); ++I) {
     auto &InputSpec = InputSpecs[I];
     auto MapI = InputsMap.find(InputSpec.name() + ":" +
@@ -144,6 +161,14 @@ TFModelEvaluatorImpl::TFModelEvaluatorImpl(
       return;
     std::memset(Input[I]->data.data, 0,
                 InputSpecs[I].getTotalTensorBufferSize());
+    ++NumberFeaturesPassed;
+  }
+
+  if (NumberFeaturesPassed < Interpreter->inputs().size()) {
+    // we haven't passed all the required features to the model, throw an error.
+    errs() << "Required feature(s) have not been passed to the ML model";
+    invalidate();
+    return;
   }
 
   for (size_t I = 0; I < OutputSpecsSize; ++I) {

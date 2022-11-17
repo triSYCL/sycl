@@ -72,7 +72,7 @@ static std::string demangleKernelName(std::string Name) { return Name; }
 #endif
 
 static std::string deviceToString(device Device) {
-  if (Device.is_host())
+  if (getSyclObjImpl(Device)->is_host())
     return "HOST";
   else if (Device.is_cpu())
     return "CPU";
@@ -121,7 +121,7 @@ static void applyFuncOnFilteredArgs(
 
 #ifdef XPTI_ENABLE_INSTRUMENTATION
 static size_t deviceToID(const device &Device) {
-  if (Device.is_host())
+  if (getSyclObjImpl(Device)->is_host())
     return 0;
   else
     return reinterpret_cast<size_t>(getSyclObjImpl(Device)->getHandleRef());
@@ -325,28 +325,7 @@ public:
     EmptyCommand *EmptyCmd = MThisCmd->MEmptyCmd;
     assert(EmptyCmd && "No empty command found");
 
-    // Completing command's event along with unblocking enqueue readiness of
-    // empty command may lead to quick deallocation of MThisCmd by some cleanup
-    // process. Thus we'll copy deps prior to completing of event and unblocking
-    // of empty command.
-    // Also, it's possible to have record deallocated prior to enqueue process.
-    // Thus we employ read-lock of graph.
-    std::vector<Command *> ToCleanUp;
-    Scheduler &Sched = Scheduler::getInstance();
-    {
-      Scheduler::ReadLockT Lock(Sched.MGraphLock);
-
-      std::vector<DepDesc> Deps = MThisCmd->MDeps;
-
-      // update self-event status
-      MThisCmd->MEvent->setComplete();
-
-      EmptyCmd->MEnqueueStatus = EnqueueResultT::SyclEnqueueReady;
-
-      for (const DepDesc &Dep : Deps)
-        Scheduler::enqueueLeavesOfReqUnlocked(Dep.MDepRequirement, ToCleanUp);
-    }
-    Sched.cleanupCommands(ToCleanUp);
+    Scheduler::getInstance().NotifyHostTaskCompletion(MThisCmd, EmptyCmd);
   }
 };
 
@@ -415,9 +394,9 @@ Command::Command(CommandType Type, QueueImplPtr Queue)
       MPreparedDepsEvents(MEvent->getPreparedDepsEvents()),
       MPreparedHostDepsEvents(MEvent->getPreparedHostDepsEvents()),
       MType(Type) {
-  MSubmittedQueue = MQueue;
   MWorkerQueue = MQueue;
   MEvent->setWorkerQueue(MWorkerQueue);
+  MEvent->setSubmittedQueue(MWorkerQueue);
   MEvent->setCommand(this);
   MEvent->setContextImpl(MQueue->getContextImplPtr());
   MEvent->setStateIncomplete();
@@ -1733,8 +1712,8 @@ ExecCGCommand::ExecCGCommand(std::unique_ptr<detail::CG> CommandGroup,
     : Command(CommandType::RUN_CG, std::move(Queue)),
       MCommandGroup(std::move(CommandGroup)) {
   if (MCommandGroup->getType() == detail::CG::CodeplayHostTask) {
-    MSubmittedQueue =
-        static_cast<detail::CGHostTask *>(MCommandGroup.get())->MQueue;
+    MEvent->setSubmittedQueue(
+        static_cast<detail::CGHostTask *>(MCommandGroup.get())->MQueue);
     MEvent->setNeedsCleanupAfterWait(true);
   } else if (MCommandGroup->getType() == CG::CGTYPE::Kernel &&
              (static_cast<CGExecKernel *>(MCommandGroup.get())->hasStreams() ||
@@ -2026,6 +2005,8 @@ static pi_result SetKernelParamsAndLaunch(
       break;
     case kernel_param_kind_t::kind_accessor: {
       Requirement *Req = (Requirement *)(Arg.MPtr);
+      if (Req->MAccessRange == range<3>({0, 0, 0}))
+        break;
       if (getMemAllocationFunc == nullptr)
         throw sycl::exception(make_error_code(errc::kernel_argument),
                               "placeholder accessor must be bound by calling "
@@ -2569,7 +2550,7 @@ pi_int32 ExecCGCommand::enqueueImp() {
     return PI_SUCCESS;
   }
   case CG::CGTYPE::Barrier: {
-    if (MQueue->get_device().is_host()) {
+    if (MQueue->getDeviceImplPtr()->is_host()) {
       // NOP for host device.
       return PI_SUCCESS;
     }
@@ -2583,7 +2564,7 @@ pi_int32 ExecCGCommand::enqueueImp() {
     CGBarrier *Barrier = static_cast<CGBarrier *>(MCommandGroup.get());
     std::vector<detail::EventImplPtr> Events = Barrier->MEventsWaitWithBarrier;
     std::vector<RT::PiEvent> PiEvents = getPiEvents(Events);
-    if (MQueue->get_device().is_host() || PiEvents.empty()) {
+    if (MQueue->getDeviceImplPtr()->is_host() || PiEvents.empty()) {
       // NOP for host device.
       // If Events is empty, then the barrier has no effect.
       return PI_SUCCESS;

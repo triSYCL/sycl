@@ -69,7 +69,6 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/Sequence.h"
-#include "llvm/ADT/SetVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -8383,8 +8382,42 @@ void ScalarEvolution::forgetValue(Value *V) {
   forgetMemoizedResults(ToForget);
 }
 
-void ScalarEvolution::forgetLoopDispositions(const Loop *L) {
-  LoopDispositions.clear();
+void ScalarEvolution::forgetLoopDispositions() { LoopDispositions.clear(); }
+
+void ScalarEvolution::forgetBlockAndLoopDispositions(Value *V) {
+  // Unless a specific value is passed to invalidation, completely clear both
+  // caches.
+  if (!V) {
+    BlockDispositions.clear();
+    LoopDispositions.clear();
+    return;
+  }
+
+  if (!isSCEVable(V->getType()))
+    return;
+
+  const SCEV *S = getExistingSCEV(V);
+  if (!S)
+    return;
+
+  // Invalidate the block and loop dispositions cached for S. Dispositions of
+  // S's users may change if S's disposition changes (i.e. a user may change to
+  // loop-invariant, if S changes to loop invariant), so also invalidate
+  // dispositions of S's users recursively.
+  SmallVector<const SCEV *, 8> Worklist = {S};
+  SmallPtrSet<const SCEV *, 8> Seen = {S};
+  while (!Worklist.empty()) {
+    const SCEV *Curr = Worklist.pop_back_val();
+    bool LoopDispoRemoved = LoopDispositions.erase(Curr);
+    bool BlockDispoRemoved = BlockDispositions.erase(Curr);
+    if (!LoopDispoRemoved && !BlockDispoRemoved)
+      continue;
+    auto Users = SCEVUsers.find(Curr);
+    if (Users != SCEVUsers.end())
+      for (const auto *User : Users->second)
+        if (Seen.insert(User).second)
+          Worklist.push_back(User);
+  }
 }
 
 /// Get the exact loop backedge taken count considering all loop exits. A
@@ -12410,11 +12443,11 @@ const SCEV *ScalarEvolution::computeMaxBECountForLT(const SCEV *Start,
   if (IsSigned && BitWidth == 1)
     return getZero(Stride->getType());
 
-  // This code has only been closely audited for negative strides in the
+  // This code below only been closely audited for negative strides in the
   // unsigned comparison case, it may be correct for signed comparison, but
   // that needs to be established.
-  assert((!IsSigned || !isKnownNonPositive(Stride)) &&
-         "Stride is expected strictly positive for signed case!");
+  if (IsSigned && isKnownNegative(Stride))
+    return getCouldNotCompute();
 
   // Calculate the maximum backedge count based on the range of values
   // permitted by Start, End, and Stride.
@@ -12598,13 +12631,6 @@ ScalarEvolution::howManyLessThans(const SCEV *LHS, const SCEV *RHS,
     //
     if (PredicatedIV || !NoWrap || !loopIsFiniteByAssumption(L) ||
         !loopHasNoAbnormalExits(L))
-      return getCouldNotCompute();
-
-    // This bailout is protecting the logic in computeMaxBECountForLT which
-    // has not yet been sufficiently auditted or tested with negative strides.
-    // We used to filter out all known-non-positive cases here, we're in the
-    // process of being less restrictive bit by bit.
-    if (IsSigned && isKnownNonPositive(Stride))
       return getCouldNotCompute();
 
     if (!isKnownNonZero(Stride)) {
@@ -13971,6 +13997,40 @@ void ScalarEvolution::verify() const {
   };
   VerifyBECountUsers(/* Predicated */ false);
   VerifyBECountUsers(/* Predicated */ true);
+
+  // Verify intergity of loop disposition cache.
+  for (const auto &It : LoopDispositions) {
+    const SCEV *S = It.first;
+    auto &Values = It.second;
+    for (auto &V : Values) {
+      auto CachedDisposition = V.getInt();
+      const auto *Loop = V.getPointer();
+      const auto RecomputedDisposition = SE2.getLoopDisposition(S, Loop);
+      if (CachedDisposition != RecomputedDisposition) {
+        dbgs() << "Cached disposition of " << *S << " for loop " << *Loop
+               << " is incorrect: cached "
+               << loopDispositionToStr(CachedDisposition) << ", actual "
+               << loopDispositionToStr(RecomputedDisposition) << "\n";
+        std::abort();
+      }
+    }
+  }
+
+  // Verify integrity of the block disposition cache.
+  for (const auto &It : BlockDispositions) {
+    const SCEV *S = It.first;
+    auto &Values = It.second;
+    for (auto &V : Values) {
+      auto CachedDisposition = V.getInt();
+      const BasicBlock *BB = V.getPointer();
+      const auto RecomputedDisposition = SE2.getBlockDisposition(S, BB);
+      if (CachedDisposition != RecomputedDisposition) {
+        dbgs() << "Cached disposition of " << *S << " for block %"
+               << BB->getName() << " is incorrect! \n";
+        std::abort();
+      }
+    }
+  }
 }
 
 bool ScalarEvolution::invalidate(

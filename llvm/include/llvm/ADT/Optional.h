@@ -50,12 +50,13 @@ namespace optional_detail {
 //
 // The move constructible / assignable conditions emulate the remaining behavior
 // of std::is_trivially_copyable.
-template <typename T, bool = (std::is_trivially_copy_constructible<T>::value &&
-                              std::is_trivially_copy_assignable<T>::value &&
-                              (std::is_trivially_move_constructible<T>::value ||
-                               !std::is_move_constructible<T>::value) &&
-                              (std::is_trivially_move_assignable<T>::value ||
-                               !std::is_move_assignable<T>::value))>
+template <typename T,
+          bool = (llvm::is_trivially_copy_constructible<T>::value &&
+                  std::is_trivially_copy_assignable<T>::value &&
+                  (llvm::is_trivially_move_constructible<T>::value ||
+                   !std::is_move_constructible<T>::value) &&
+                  (std::is_trivially_move_assignable<T>::value ||
+                   !std::is_move_assignable<T>::value))>
 class OptionalStorage {
   union {
     char empty;
@@ -386,6 +387,9 @@ public:
     return None;
   }
 };
+
+template<typename T>
+Optional(const T&) -> Optional<T>;
 
 template <class T> llvm::hash_code hash_value(const Optional<T> &O) {
   return O ? hash_combine(true, *O) : hash_value(false);

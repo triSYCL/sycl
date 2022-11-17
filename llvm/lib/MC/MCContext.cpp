@@ -59,12 +59,6 @@
 
 using namespace llvm;
 
-static cl::opt<char*>
-AsSecureLogFileName("as-secure-log-file-name",
-        cl::desc("As secure log file name (initialized from "
-                 "AS_SECURE_LOG_FILE env variable)"),
-        cl::init(getenv("AS_SECURE_LOG_FILE")), cl::Hidden);
-
 static void defaultDiagHandler(const SMDiagnostic &SMD, bool, const SourceMgr &,
                                std::vector<const MDNode *> &) {
   SMD.print(nullptr, errs());
@@ -80,7 +74,7 @@ MCContext::MCContext(const Triple &TheTriple, const MCAsmInfo *mai,
       InlineAsmUsedLabelNames(Allocator),
       CurrentDwarfLoc(0, 0, 0, DWARF2_FLAG_IS_STMT, 0, 0),
       AutoReset(DoAutoReset), TargetOptions(TargetOpts) {
-  SecureLogFile = AsSecureLogFileName;
+  SecureLogFile = TargetOptions ? TargetOptions->AsSecureLogFile : "";
 
   if (SrcMgr && SrcMgr->getNumBuffers())
     MainFileName = std::string(SrcMgr->getMemoryBuffer(SrcMgr->getMainFileID())
@@ -564,8 +558,37 @@ MCSectionELF *MCContext::getELFSection(const Twine &Section, unsigned Type,
     Kind = SectionKind::getExecuteOnly();
   else if (Flags & ELF::SHF_EXECINSTR)
     Kind = SectionKind::getText();
-  else
+  else if (~Flags & ELF::SHF_WRITE)
     Kind = SectionKind::getReadOnly();
+  else if (Flags & ELF::SHF_TLS)
+    Kind = (Type & ELF::SHT_NOBITS) ? SectionKind::getThreadBSS()
+                                    : SectionKind::getThreadData();
+  else
+    // Default to `SectionKind::getText()`. This is the default for gas as
+    // well. The condition that falls into this case is where we do not have any
+    // section flags and must infer a classification rather than where we have
+    // section flags (i.e. this is not that SHF_EXECINSTR is unset bur rather it
+    // is unknown).
+    Kind = llvm::StringSwitch<SectionKind>(CachedName)
+               .Case(".bss", SectionKind::getBSS())
+               .StartsWith(".bss.", SectionKind::getBSS())
+               .StartsWith(".gnu.linkonce.b.", SectionKind::getBSS())
+               .StartsWith(".llvm.linkonce.b.", SectionKind::getBSS())
+               .Case(".data", SectionKind::getData())
+               .Case(".data1", SectionKind::getData())
+               .Case(".data.rel.ro", SectionKind::getReadOnlyWithRel())
+               .Case(".rodata", SectionKind::getReadOnly())
+               .Case(".rodata1", SectionKind::getReadOnly())
+               .Case(".tbss", SectionKind::getThreadBSS())
+               .StartsWith(".tbss.", SectionKind::getThreadData())
+               .StartsWith(".gnu.linkonce.tb.", SectionKind::getThreadData())
+               .StartsWith(".llvm.linkonce.tb.", SectionKind::getThreadData())
+               .Case(".tdata", SectionKind::getThreadData())
+               .StartsWith(".tdata.", SectionKind::getThreadData())
+               .StartsWith(".gnu.linkonce.td.", SectionKind::getThreadData())
+               .StartsWith(".llvm.linkonce.td.", SectionKind::getThreadData())
+               .StartsWith(".debug_", SectionKind::getMetadata())
+               .Default(SectionKind::getText());
 
   MCSectionELF *Result =
       createELFSectionImpl(CachedName, Type, Flags, Kind, EntrySize, GroupSym,

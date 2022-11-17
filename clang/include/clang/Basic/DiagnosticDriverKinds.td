@@ -115,6 +115,9 @@ def warn_drv_unsupported_option_for_offload_arch_req_feature : Warning<
 def warn_drv_unsupported_option_for_target : Warning<
   "ignoring '%0' option as it is not currently supported for target '%1'">,
   InGroup<OptionIgnored>;
+def warn_drv_unsupported_option_for_flang : Warning<
+  "the argument '%0' is not supported for option '%1'. Mapping to '%1%2'">,
+  InGroup<OptionIgnored>;
 
 def err_drv_invalid_thread_model_for_target : Error<
   "invalid thread model '%0' in '%1' for this target">;
@@ -231,14 +234,14 @@ def err_drv_malformed_sanitizer_coverage_ignorelist : Error<
   "malformed sanitizer coverage ignorelist: '%0'">;
 def err_drv_duplicate_config : Error<
   "no more than one option '--config' is allowed">;
-def err_drv_config_file_not_exist : Error<
-  "configuration file '%0' does not exist">;
+def err_drv_cannot_open_config_file : Error<
+  "configuration file '%0' cannot be opened: %1">;
 def err_drv_config_file_not_found : Error<
   "configuration file '%0' cannot be found">;
 def note_drv_config_file_searched_in : Note<
   "was searched for in the directory: %0">;
 def err_drv_cannot_read_config_file : Error<
-  "cannot read configuration file '%0'">;
+  "cannot read configuration file '%0': %1">;
 def err_drv_nested_config_file: Error<
   "option '--config' is not allowed inside configuration file">;
 def err_drv_arg_requires_bitcode_input: Error<
@@ -270,6 +273,9 @@ def warn_drv_yc_multiple_inputs_clang_cl : Warning<
   "support for '/Yc' with more than one source file not implemented yet; flag ignored">,
   InGroup<ClangClPch>;
 
+def warn_drv_potentially_misspelled_joined_argument : Warning<
+  "joined argument treated as '%0'; did you mean '%1'?">, InGroup<UnknownArgument>;
+
 def err_drv_invalid_value : Error<"invalid value '%1' in '%0'">;
 def err_drv_invalid_int_value : Error<"invalid integral value '%1' in '%0'">;
 def err_drv_invalid_value_with_suggestion : Error<
@@ -277,6 +283,7 @@ def err_drv_invalid_value_with_suggestion : Error<
 def err_drv_alignment_not_power_of_two : Error<"alignment is not a power of 2 in '%0'">;
 def err_drv_invalid_remap_file : Error<
     "invalid option '%0' not of the form <from-file>;<to-file>">;
+def err_drv_invalid_gcc_install_dir : Error<"'%0' does not contain a GCC installation">;
 def err_drv_invalid_gcc_output_type : Error<
     "invalid output type '%0' for use with gcc tool">;
 def err_drv_cc_print_options_failure : Error<
@@ -443,7 +450,7 @@ def warn_missing_sysroot : Warning<"no such sysroot directory: '%0'">,
   InGroup<DiagGroup<"missing-sysroot">>;
 def warn_incompatible_sysroot : Warning<"using sysroot for '%0' but targeting '%1'">,
   InGroup<DiagGroup<"incompatible-sysroot">>;
-def warn_debug_compression_unavailable : Warning<"cannot compress debug sections (zlib not enabled)">,
+def warn_debug_compression_unavailable : Warning<"cannot compress debug sections (%0 not enabled)">,
   InGroup<DiagGroup<"debug-compression-unavailable">>;
 def warn_drv_disabling_vptr_no_rtti_default : Warning<
   "implicitly disabling vptr sanitizer because rtti wasn't enabled">,
@@ -629,11 +636,6 @@ def warn_drv_darwin_sdk_invalid_settings : Warning<
   "SDK settings were ignored as 'SDKSettings.json' could not be parsed">,
   InGroup<DiagGroup<"darwin-sdk-settings">>;
 
-def err_drv_trivial_auto_var_init_zero_disabled : Error<
-  "'-ftrivial-auto-var-init=zero' hasn't been enabled; enable it at your own "
-  "peril for benchmarking purpose only with "
-  "'-enable-trivial-auto-var-init-zero-knowing-it-will-be-removed-from-clang'">;
-
 def err_drv_trivial_auto_var_init_stop_after_missing_dependency : Error<
   "'-ftrivial-auto-var-init-stop-after=*' is used without "
   "'-ftrivial-auto-var-init=zero' or '-ftrivial-auto-var-init=pattern'">;
@@ -700,6 +702,11 @@ def warn_drv_jmc_requires_debuginfo : Warning<
 def warn_drv_fjmc_for_elf_only : Warning<
   "-fjmc works only for ELF; option ignored">,
   InGroup<OptionIgnored>;
+
+def warn_target_override_arm64ec : Warning<
+  "/arm64EC has been overridden by specified target: %0; option ignored">,
+  InGroup<OptionIgnored>;
+
 def err_drv_target_variant_invalid : Error<
   "unsupported '%0' value '%1'; use 'ios-macabi' instead">;
 def warn_drv_fsycl_with_c_type : Warning<
