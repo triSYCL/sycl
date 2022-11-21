@@ -9,7 +9,7 @@ add_mlir_conversion_library(ArchGenFixedPtToArith
   MLIRPass
   MLIRTransforms
   MLIRIR
-  MLIRArithmeticDialect
+  MLIRArithDialect
   MLIRFuncDialect
   MLIRMemRefDialect
   MLIRLLVMDialect

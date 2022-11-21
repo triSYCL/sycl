@@ -14,7 +14,7 @@
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/Debug.h"
 
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BlockAndValueMapping.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/DialectImplementation.h"
@@ -355,9 +355,9 @@ mlir::ParseResult ConstantOp::parse(mlir::OpAsmParser &parser,
 }
 
 void ConstantOp::print(mlir::OpAsmPrinter &p) {
-  p << " " << valueAttr().getValue().getValue() << " : ";
-  p.printStrippedAttrOrType(result().getType().cast<FixedPtType>());
-  p << ", \"" << valueAttr().getValue().toString() << "\"";
+  p << " " << getValueAttr().getValue().getValue() << " : ";
+  p.printStrippedAttrOrType(getResult().getType().cast<FixedPtType>());
+  p << ", \"" << getValueAttr().getValue().toString() << "\"";
 }
 
 void ConstantOp::build(mlir::OpBuilder &odsBuilder,
@@ -375,7 +375,7 @@ void ConstantOp::build(mlir::OpBuilder &odsBuilder,
 }
 
 mlir::LogicalResult AddOp::verify() {
-  if (args().size() < 2)
+  if (getArgs().size() < 2)
     return emitError().append("requires at least two operands");
   return mlir::success();
 }
@@ -383,7 +383,7 @@ mlir::LogicalResult AddOp::verify() {
 mlir::LogicalResult SubOp::verify() { return mlir::success(); }
 
 mlir::LogicalResult MulOp::verify() {
-  if (args().size() < 2)
+  if (getArgs().size() < 2)
     return emitError().append("requires at least two operands");
   return mlir::success();
 }
@@ -391,20 +391,20 @@ mlir::LogicalResult MulOp::verify() {
 mlir::LogicalResult DivOp::verify() { return mlir::success(); }
 
 mlir::OpFoldResult ConstantOp::fold(llvm::ArrayRef<mlir::Attribute> operands) {
-  return valueAttr();
+  return getValueAttr();
 }
 
 mlir::LogicalResult ConstantOp::verify() {
   if (getType().getFixedPointSemantics() !=
-      valueAttr().getValue().getSemantics())
+      getValueAttr().getValue().getSemantics())
     return emitError("fixed-point semantic of type doesn't match fixed-point "
                      "semantic of attribute");
   return mlir::success();
 }
 
 mlir::LogicalResult TruncOp::verify() {
-  FixedPtType inTy = input().getType().cast<FixedPtType>();
-  FixedPtType outTy = result().getType().cast<FixedPtType>();
+  FixedPtType inTy = getInput().getType().cast<FixedPtType>();
+  FixedPtType outTy = getResult().getType().cast<FixedPtType>();
   if (inTy.getLsb() != outTy.getLsb())
     return emitError("cannot change lsb");
   if (inTy.getMsb() <= outTy.getMsb())
@@ -413,8 +413,8 @@ mlir::LogicalResult TruncOp::verify() {
 }
 
 mlir::LogicalResult RoundOp::verify() {
-  FixedPtType inTy = input().getType().cast<FixedPtType>();
-  FixedPtType outTy = result().getType().cast<FixedPtType>();
+  FixedPtType inTy = getInput().getType().cast<FixedPtType>();
+  FixedPtType outTy = getResult().getType().cast<FixedPtType>();
   if (inTy.getMsb() != outTy.getMsb())
     return emitError("cannot change msb");
   if (inTy.isSigned() != outTy.isSigned())
@@ -425,8 +425,8 @@ mlir::LogicalResult RoundOp::verify() {
 }
 
 mlir::LogicalResult ExtendOp::verify() {
-  FixedPtType inTy = input().getType().cast<FixedPtType>();
-  FixedPtType outTy = result().getType().cast<FixedPtType>();
+  FixedPtType inTy = getInput().getType().cast<FixedPtType>();
+  FixedPtType outTy = getResult().getType().cast<FixedPtType>();
   if (inTy.getWidth() >= outTy.getWidth())
     return emitError("width must increase");
   if (inTy.getLsb() < outTy.getLsb())
@@ -437,10 +437,10 @@ mlir::LogicalResult ExtendOp::verify() {
 }
 
 mlir::LogicalResult BitcastOp::verify() {
-  FixedPtType inFPTy = input().getType().dyn_cast<FixedPtType>();
-  mlir::IntegerType inIntTy = input().getType().dyn_cast<mlir::IntegerType>();
-  FixedPtType outFPTy = result().getType().dyn_cast<FixedPtType>();
-  mlir::IntegerType outIntTy = result().getType().dyn_cast<mlir::IntegerType>();
+  FixedPtType inFPTy = getInput().getType().dyn_cast<FixedPtType>();
+  mlir::IntegerType inIntTy = getInput().getType().dyn_cast<mlir::IntegerType>();
+  FixedPtType outFPTy = getResult().getType().dyn_cast<FixedPtType>();
+  mlir::IntegerType outIntTy = getResult().getType().dyn_cast<mlir::IntegerType>();
   if (inIntTy && outIntTy)
     return emitError("use arith.bitcast instead");
   if ((inIntTy && inIntTy.getSignedness() != mlir::IntegerType::Signless) ||
@@ -592,13 +592,13 @@ struct AddOpConstFolder : public mlir::RewritePattern {
   matchAndRewrite(mlir::Operation *op,
                   mlir::PatternRewriter &rewriter) const override {
     AddOp addOp = llvm::cast<AddOp>(op);
-    fixedpt::RoundingMode rounding = addOp.rounding();
+    fixedpt::RoundingMode rounding = addOp.getRounding();
     fixedpt::FixedPointAttr constVal;
     llvm::APFixedPoint CstSumVal{
         0, llvm::FixedPointSemantics(1, 0, false, false, false)};
     mlir::SmallVector<mlir::Value> NewArgs;
     int nbCst = 0;
-    for (auto arg : addOp.args()) {
+    for (auto arg : addOp.getArgs()) {
       if (mlir::matchPattern(arg, mlir::m_Constant(&constVal))) {
         auto CstValue = constVal.getValue();
         nbCst++;
@@ -611,7 +611,7 @@ struct AddOpConstFolder : public mlir::RewritePattern {
     //       1, llvm::FixedPointSemantics(
     //              1,
     //              llvm::FixedPointSemantics::Lsb{
-    //                  addOp.result().getType().cast<FixedPtType>().getLsb() - 1},
+    //                  addOp.getResult().getType().cast<FixedPtType>().getLsb() - 1},
     //              false, false, false)};
     //   CstSumVal = exactAdd(CstSumVal, halfULP);
     //   rounding = fixedpt::RoundingMode::truncate;
@@ -659,7 +659,7 @@ struct MulOpConstFolder : public mlir::RewritePattern {
         /// Any multiplication by 0 result in 0 so fast exit.
         if (cstValue.getValue().isZero()) {
           rewriter.replaceOpWithNewOp<fixedpt::ConstantOp>(
-              op, llvm::APFixedPoint{0, mulOp.result()
+              op, llvm::APFixedPoint{0, mulOp.getResult()
                                             .getType()
                                             .cast<FixedPtType>()
                                             .getFixedPointSemantics()});
@@ -686,11 +686,11 @@ struct MulOpConstFolder : public mlir::RewritePattern {
     if (NewArgs.size() == 1)
       rewriter.replaceOpWithNewOp<fixedpt::ConvertOp>(
           op, mulOp.getResult().getType().cast<fixedpt::FixedPtType>(),
-          NewArgs[0], mulOp.rounding());
+          NewArgs[0], mulOp.getRounding());
     else
       rewriter.replaceOpWithNewOp<fixedpt::MulOp>(
           op, mulOp.getResult().getType().cast<fixedpt::FixedPtType>(),
-          mulOp.rounding(), NewArgs);
+          mulOp.getRounding(), NewArgs);
     return mlir::success();
   }
 };
@@ -744,26 +744,26 @@ mlir::LogicalResult ExtendOp::canonicalize(ExtendOp op,
 
 mlir::LogicalResult BitcastOp::canonicalize(BitcastOp op,
                                             mlir::PatternRewriter &rewriter) {
-  mlir::Type outTy = op.result().getType();
-  mlir::Type inTy = op.input().getType();
+  mlir::Type outTy = op.getResult().getType();
+  mlir::Type inTy = op.getInput().getType();
 
   /// Same type so we remove the bitcast
   if (inTy == outTy) {
-    rewriter.replaceOp(op, op.input());
+    rewriter.replaceOp(op, op.getInput());
     return mlir::success();
   }
-  mlir::Operation *opAbove = op.input().getDefiningOp();
+  mlir::Operation *opAbove = op.getInput().getDefiningOp();
   if (!opAbove)
     return mlir::failure();
 
   /// bitcast of bitcast we can fold it to 1 bitcast (maybe arith.bitcast)
   if (auto bc = llvm::dyn_cast<fixedpt::BitcastOp>(opAbove)) {
-    mlir::Type inAboveTy = bc.input().getType();
+    mlir::Type inAboveTy = bc.getInput().getType();
     if (inAboveTy == outTy) {
       rewriter.replaceOp(op, bc->getOperands());
       return mlir::success();
     }
-    rewriter.replaceOpWithNewOp<fixedpt::BitcastOp>(op, outTy, bc.input());
+    rewriter.replaceOpWithNewOp<fixedpt::BitcastOp>(op, outTy, bc.getInput());
     return mlir::success();
   }
   return mlir::failure();
@@ -771,18 +771,18 @@ mlir::LogicalResult BitcastOp::canonicalize(BitcastOp op,
 
 mlir::LogicalResult ConvertOp::canonicalize(ConvertOp op,
                                             mlir::PatternRewriter &rewriter) {
-  FixedPtType outTy = op.result().getType().cast<FixedPtType>();
-  if (op.input().getType() == outTy) {
-    rewriter.replaceOp(op, op.input());
+  FixedPtType outTy = op.getResult().getType().cast<FixedPtType>();
+  if (op.getInput().getType() == outTy) {
+    rewriter.replaceOp(op, op.getInput());
     return mlir::success();
   }
-  mlir::Operation *opAbove = op.input().getDefiningOp();
+  mlir::Operation *opAbove = op.getInput().getDefiningOp();
   if (!opAbove)
     return mlir::failure();
 
   if (ConstantOp cstOp = llvm::dyn_cast<fixedpt::ConstantOp>(opAbove)) {
     llvm::APFixedPoint newVal =
-        cstOp.valueAttr().getValue().convert(outTy.getFixedPointSemantics());
+        cstOp.getValueAttr().getValue().convert(outTy.getFixedPointSemantics());
     rewriter.replaceOpWithNewOp<ConstantOp>(
         op, outTy,
         FixedPointAttr::get(rewriter.getContext(), std::move(newVal)));
@@ -795,15 +795,15 @@ mlir::LogicalResult ConvertOp::canonicalize(ConvertOp op,
     return fixedpt::RoundingMode::truncate;
   }();
 
-  if (llvm::isa<AddOp, MulOp, DivOp, SubOp>(opAbove) && roundingAbove == op.rounding()) {
+  if (llvm::isa<AddOp, MulOp, DivOp, SubOp>(opAbove) && roundingAbove == op.getRounding()) {
     RoundingOpInterface newOp = rewriter.clone(*opAbove);
-    newOp->getResult(0).setType(op.result().getType());
+    newOp->getResult(0).setType(op.getResult().getType());
     rewriter.replaceOp(op, newOp->getResults());
     return mlir::success();
   }
   if (llvm::isa<TruncOp, ExtendOp>(opAbove) ||
       (llvm::isa<RoundOp, ConvertOp>(opAbove) &&
-       roundingAbove == op.rounding())) {
+       roundingAbove == op.getRounding())) {
     rewriter.updateRootInPlace(op,
                                [&] { op.setOperand(opAbove->getOperand(0)); });
     return mlir::success();

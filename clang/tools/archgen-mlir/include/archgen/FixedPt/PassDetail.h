@@ -9,7 +9,7 @@
 #ifndef ARCHGEN_FIXEDPT_PASSDETAIL_H
 #define ARCHGEN_FIXEDPT_PASSDETAIL_H
 
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/IR/BuiltinDialect.h"
 #include "mlir/IR/BuiltinOps.h"

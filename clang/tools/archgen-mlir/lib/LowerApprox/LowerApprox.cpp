@@ -119,9 +119,9 @@ struct LowerApprox {
   /// Build a sollya constant
   sollya_obj_t buildConstant(approx::ConstantOp op) {
     auto fixedTy = fixedpt::FixedPtType::get(
-        op->getContext(), op.valueAttr().getValue().getSemantics());
+        op->getContext(), op.getValueAttr().getValue().getSemantics());
     llvm::SmallVector<char> representation;
-    op.valueAttr().getValue().getValue().toString(representation, 10, false);
+    op.getValueAttr().getValue().getValue().toString(representation, 10, false);
     std::string strRep(representation.data(), representation.size());
     mpz_class constant_repr{strRep};
     mpfr_t value;
@@ -175,7 +175,7 @@ struct LowerApprox {
 
           /// Already the correct type. so we bail
           if (newType == oldType)
-            return op.output();
+            return op.getOutput();
 
           /// figure out the scaling constant
           int log2ScalingFactor = oldType.getLsb() - newType.getLsb();
@@ -196,7 +196,7 @@ struct LowerApprox {
           variable = rewriter
                          .create<fixedpt::BitcastOp>(op->getLoc(), newType,
                                                      op->getOperand(0))
-                         .result();
+                         .getResult();
 
           /// This is the new input to the expression
           op.setOperand(variable);
@@ -208,14 +208,14 @@ struct LowerApprox {
                   .create<approx::ConstantOp>(
                       op.getLoc(), fixedpt::FixedPointAttr::get(
                                        ctx, std::move(fixedScalingFactor)))
-                  .result();
+                  .getResult();
 
           /// build the multiply
           return rewriter
               .create<approx::GenericOp>(
-                  op->getLoc(), mlir::ValueRange{op.output(), scalingFactor},
+                  op->getLoc(), mlir::ValueRange{op.getOutput(), scalingFactor},
                   "mul")
-              .output();
+              .getOutput();
         });
   }
 
@@ -223,8 +223,8 @@ struct LowerApprox {
     mlir::Value inputVal;
     approxTreeVisitor(evaluateOp, [&](mlir::Operation *op) {
       if (auto var = llvm::dyn_cast<approx::VariableOp>(op)) {
-        assert(!inputVal || (inputVal == var.input()));
-        inputVal = var.input();
+        assert(!inputVal || (inputVal == var.getInput()));
+        inputVal = var.getInput();
       }
     });
     return inputVal;
@@ -240,7 +240,7 @@ struct LowerApprox {
           if (llvm::isa<approx::VariableOp>(rawOp))
             return buildSollya("free_variable");
           approx::GenericOp op = llvm::cast<approx::GenericOp>(rawOp);
-          return buildSollya(op.action(), operands...);
+          return buildSollya(op.getAction(), operands...);
         });
   }
 
@@ -308,7 +308,7 @@ struct LowerApprox {
     mlir::Value intVal = rewriter
                              .create<fixedpt::BitcastOp>(
                                  loc, rewriter.getIntegerType(bitwidth), v)
-                             .result();
+                             .getResult();
     intVal = rewriter.create<arith::ExtUIOp>(loc, rewriter.getI32Type(), intVal)
                  .getResult();
     rewriter.create<LLVM::CallOp>(

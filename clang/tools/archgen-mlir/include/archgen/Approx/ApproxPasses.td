@@ -12,7 +12,7 @@ def LowerApproxPass : Pass<"lower-approx", "::mlir::ModuleOp"> {
   let summary = "replace a description of the approximation by the actual approximation";
   let constructor = "::archgen::approx::createLowerApproxPass()";
   let dependentDialects = [
-    "::mlir::arith::ArithmeticDialect",
+    "::mlir::arith::ArithDialect",
     "::archgen::fixedpt::FixedPtDialect",
   ];
 }

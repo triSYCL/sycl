@@ -14,7 +14,7 @@ add_mlir_library(ArchGenLowerApprox
   MLIRPass
   MLIRTransforms
   MLIRIR
-  MLIRArithmeticDialect
+  MLIRArithDialect
   MLIRFuncDialect
   MLIRLLVMDialect
   ArchGenMLIRApprox

@@ -14,7 +14,7 @@ def RoundingOpInterface : OpInterface<"RoundingOpInterface"> {
       /*methodBody*/[{}],
       /*defaultImplementation=*/ [{
         ConcreteOp op = ::llvm::cast<ConcreteOp>(this->getOperation());
-        return op.rounding();
+        return op.getRounding();
       }]
     >,
     InterfaceMethod<
@@ -25,7 +25,7 @@ def RoundingOpInterface : OpInterface<"RoundingOpInterface"> {
       /*methodBody*/[{}],
       /*defaultImplementation=*/ [{
         ConcreteOp op = ::llvm::cast<ConcreteOp>(this->getOperation());
-        op.roundingAttr(::archgen::fixedpt::RoundingModeAttr::get(op.getContext(), val));
+        op.setRounding(val);
       }]
     >,
   ];

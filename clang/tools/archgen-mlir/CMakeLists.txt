@@ -35,7 +35,7 @@ set(ARCHGEN_PLUGIN_LIBS
   clangFrontend
   clangCodeGen
   MLIRLLVMDialect
-  MLIRArithmeticDialect
+  MLIRArithDialect
   MLIRFuncDialect
   MLIRPass
   MLIRTransforms
@@ -44,7 +44,7 @@ set(ARCHGEN_PLUGIN_LIBS
   ArchGenMLIRFixedPt
   ArchGenFixedPtToArith
   ArchGenLowerApprox
-  MLIRArithmeticToLLVM
+  MLIRArithToLLVM
   MLIRFuncToLLVM
   MLIRMemRefToLLVM
   MLIRTargetLLVMIRExport

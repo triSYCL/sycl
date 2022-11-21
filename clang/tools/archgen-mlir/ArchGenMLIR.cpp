@@ -23,7 +23,7 @@
 #include "llvm/Support/CommandLine.h"
 
 #include "mlir/Conversion/Passes.h"
-#include "mlir/Dialect/Arithmetic/IR/Arithmetic.h"
+#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
@@ -207,7 +207,7 @@ bool hasAnnotation(clang::Decl *D, llvm::StringRef Annot) {
 class MLIRGenState {
   void InitMLIR() {
     ctx.disableMultithreading();
-    ctx.loadDialect<mlir::LLVM::LLVMDialect, arith::ArithmeticDialect,
+    ctx.loadDialect<mlir::LLVM::LLVMDialect, arith::ArithDialect,
                     func::FuncDialect, memref::MemRefDialect,
                     approx::ApproxDialect, fixedpt::FixedPtDialect>();
     mlir::registerLLVMDialectTranslation(ctx);
@@ -236,7 +236,7 @@ public:
       : builder(&ctx), declBuilder(&ctx),
         module(mlir::ModuleOp::create(builder.getUnknownLoc())),
         ASTctx(CI.getASTContext()), SM(CI.getSourceManager()),
-        CGM(CI.getASTContext(),
+        CGM(CI.getASTContext(), &CI.getVirtualFileSystem(),
             CI.getPreprocessor().getHeaderSearchInfo().getHeaderSearchOpts(),
             CI.getPreprocessor().getPreprocessorOpts(), CI.getCodeGenOpts(),
             *LLVMModule, CI.getPreprocessor().getDiagnostics()) {
@@ -475,7 +475,7 @@ struct MLIREmitter : public clang::StmtVisitor<MLIREmitter, mlir::Value> {
     return state.builder
         .create<approx::GenericOp>(state.getMLIRLocation(CE->getBeginLoc()),
                                    Args, Kind)
-        .output();
+        .getOutput();
   }
 
   mlir::Value VisitCallExpr(clang::CallExpr *CE) {
@@ -629,7 +629,7 @@ public:
     state.module->walk([&](approx::ParameterOp op) {
       func::FuncOp func = cast<func::FuncOp>(op->getParentOp());
       auto constantInt =
-          cast<arith::ConstantIntOp>(op.input().getDefiningOp());
+          cast<arith::ConstantIntOp>(op.getInput().getDefiningOp());
       int param_idx =
           constantInt.getValue().cast<mlir::IntegerAttr>().getInt() + 1;
       state.builder.setInsertionPointToStart(op->getBlock());
@@ -692,8 +692,8 @@ public:
       pm.addPass(mlir::createReconcileUnrealizedCastsPass());
       pm.addPass(mlir::createCanonicalizerPass());
       pm.addPass(mlir::createCSEPass());
-      pm.addPass(mlir::createMemRefToLLVMPass());
-      pm.addPass(arith::createConvertArithmeticToLLVMPass());
+      pm.addPass(mlir::createMemRefToLLVMConversionPass());
+      pm.addPass(mlir::createArithToLLVMConversionPass());
       pm.addPass(mlir::createConvertFuncToLLVMPass());
       pm.addPass(mlir::createReconcileUnrealizedCastsPass());
       if (mlir::failed(pm.run(state.module.get())))

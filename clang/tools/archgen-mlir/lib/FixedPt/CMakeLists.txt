@@ -11,5 +11,5 @@ add_mlir_dialect_library(ArchGenMLIRFixedPt
   MLIRIR
   MLIRInferTypeOpInterface
   MLIRDataLayoutInterfaces
-  MLIRArithmeticDialect
+  MLIRArithDialect
   )

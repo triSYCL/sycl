@@ -28,7 +28,7 @@ def RoundingKindAttr: I32EnumAttr<"RoundingMode", "describes rounding modes",
 }
 
 class FixedPt_Op<string mnemonic, list<Trait> traits = []> :
-    Op<FixedPt_Dialect, mnemonic, traits # [NoSideEffect]> {
+    Op<FixedPt_Dialect, mnemonic, traits # [Pure]> {
   let hasVerifier = 1;
   let hasCanonicalizeMethod = 1;
 }
@@ -94,7 +94,7 @@ def FixedPt_DivOp : FixedPt_BinOp<"div">;
 
 def FixedPt_ConstantOp : FixedPt_Op<"constant", [ConstantLike]> {
   let arguments = (ins
-    FixedPtAttr: $valueAttr
+    FixedPtAttr: $value
   );
   let results = (outs AnyFixedPt: $result);
   let hasFolder = 1;

@@ -87,7 +87,7 @@ void ConstantOp::build(mlir::OpBuilder &odsBuilder,
 }
 
 mlir::OpFoldResult ConstantOp::fold(llvm::ArrayRef<mlir::Attribute> operands) {
-  return valueAttr();
+  return getValueAttr();
 }
 
 //===----------------------------------------------------------------------===//

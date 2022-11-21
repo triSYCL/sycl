@@ -24,7 +24,7 @@ def Approx_Dialect : Dialect {
 
 // Base class for Func dialect ops.
 class Approx_Op<string mnemonic, list<Trait> traits = []> :
-    Op<Approx_Dialect, mnemonic, traits # [NoSideEffect]>;
+    Op<Approx_Dialect, mnemonic, traits # [Pure]>;
 
 class Approx_Type<string name, string typeMnemonic, list<Trait> traits = []>
     : TypeDef<Approx_Dialect, name, traits> {

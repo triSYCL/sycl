@@ -12,6 +12,6 @@ def ConvertFixedPtToArithPass : Pass<"convert-fixedpt-to-arith", "::mlir::Module
   let summary = "convert FixedPt Dialect to Arithmetic Dialect";
   let constructor = "::archgen::fixedpt::createConvertFixedPtToArithPass()";
   let dependentDialects = [
-    "::mlir::arith::ArithmeticDialect",
+    "::mlir::arith::ArithDialect",
   ];
 }
