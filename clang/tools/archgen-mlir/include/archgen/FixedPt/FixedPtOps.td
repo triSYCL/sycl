@@ -105,36 +105,6 @@ def FixedPt_ConstantOp : FixedPt_Op<"constant", [ConstantLike]> {
   ];
 }
 
-def FixedPt_TruncOp : FixedPt_Op<"trunc"> {
-  /// TODO: Add truncating semantics: saturate or modular
-  let summary = "truncate the high bits of a fixedpoint type (may change sign)";
-  let arguments = (ins
-    AnyFixedPt: $input
-  );
-  let results = (outs AnyFixedPt: $result);
-  let assemblyFormat = "$input `:` type($input) `to` type($result) attr-dict";
-}
-
-def FixedPt_RoundOp : FixedPt_Op<"round", [DeclareOpInterfaceMethods<RoundingOpInterface>]> {
-  /// TODO: Add rounding semantics: tonearest, tozero, toupper, tolower, toinf...
-  let summary = "remove low bits of a fixedpoint type";
-  let arguments = (ins
-    AnyFixedPt: $input,
-    RoundingKindAttr: $rounding
-  );
-  let results = (outs AnyFixedPt: $result);
-  let assemblyFormat = "$input `:` type($input) $rounding type($result) attr-dict";
-}
-
-def FixedPt_ExtendOp : FixedPt_Op<"extend"> {
-  let summary = "extend high bits and/or low bits of a fixedpoint type (sext or zext)";
-  let arguments = (ins
-    AnyFixedPt: $input
-  );
-  let results = (outs AnyFixedPt: $result);
-  let assemblyFormat = "$input `:` type($input) `to` type($result) attr-dict";
-}
-
 def FixedPt_BitcastOp : FixedPt_Op<"bitcast"> {
   let summary = "reinterpret the representation as an other type (width must match)";
   let arguments = (ins

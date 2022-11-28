@@ -402,40 +402,6 @@ mlir::LogicalResult ConstantOp::verify() {
   return mlir::success();
 }
 
-mlir::LogicalResult TruncOp::verify() {
-  FixedPtType inTy = getInput().getType().cast<FixedPtType>();
-  FixedPtType outTy = getResult().getType().cast<FixedPtType>();
-  if (inTy.getLsb() != outTy.getLsb())
-    return emitError("cannot change lsb");
-  if (inTy.getMsb() <= outTy.getMsb())
-    return emitError("the msb must be smaller in the output");
-  return mlir::success();
-}
-
-mlir::LogicalResult RoundOp::verify() {
-  FixedPtType inTy = getInput().getType().cast<FixedPtType>();
-  FixedPtType outTy = getResult().getType().cast<FixedPtType>();
-  if (inTy.getMsb() != outTy.getMsb())
-    return emitError("cannot change msb");
-  if (inTy.isSigned() != outTy.isSigned())
-    return emitError("cannot change sign");
-  if (inTy.getLsb() >= outTy.getLsb())
-    return emitError("the lsb must be smaller in the input");
-  return mlir::success();
-}
-
-mlir::LogicalResult ExtendOp::verify() {
-  FixedPtType inTy = getInput().getType().cast<FixedPtType>();
-  FixedPtType outTy = getResult().getType().cast<FixedPtType>();
-  if (inTy.getWidth() >= outTy.getWidth())
-    return emitError("width must increase");
-  if (inTy.getLsb() < outTy.getLsb())
-    return emitError("lsb can only decrease");
-  if (inTy.getMsb() > outTy.getMsb())
-    return emitError("msb can only increase");
-  return mlir::success();
-}
-
 mlir::LogicalResult BitcastOp::verify() {
   FixedPtType inFPTy = getInput().getType().dyn_cast<FixedPtType>();
   mlir::IntegerType inIntTy = getInput().getType().dyn_cast<mlir::IntegerType>();
@@ -727,21 +693,6 @@ mlir::LogicalResult ConstantOp::canonicalize(ConstantOp op,
   return mlir::failure();
 }
 
-mlir::LogicalResult TruncOp::canonicalize(TruncOp op,
-                                          mlir::PatternRewriter &rewriter) {
-  return mlir::failure();
-}
-
-mlir::LogicalResult RoundOp::canonicalize(RoundOp op,
-                                          mlir::PatternRewriter &rewriter) {
-  return mlir::failure();
-}
-
-mlir::LogicalResult ExtendOp::canonicalize(ExtendOp op,
-                                           mlir::PatternRewriter &rewriter) {
-  return mlir::failure();
-}
-
 mlir::LogicalResult BitcastOp::canonicalize(BitcastOp op,
                                             mlir::PatternRewriter &rewriter) {
   mlir::Type outTy = op.getResult().getType();
@@ -801,9 +752,7 @@ mlir::LogicalResult ConvertOp::canonicalize(ConvertOp op,
     rewriter.replaceOp(op, newOp->getResults());
     return mlir::success();
   }
-  if (llvm::isa<TruncOp, ExtendOp>(opAbove) ||
-      (llvm::isa<RoundOp, ConvertOp>(opAbove) &&
-       roundingAbove == op.getRounding())) {
+  if (llvm::isa<ConvertOp>(opAbove) && roundingAbove == op.getRounding()) {
     rewriter.updateRootInPlace(op,
                                [&] { op.setOperand(opAbove->getOperand(0)); });
     return mlir::success();

@@ -23,17 +23,6 @@ func.func public @convert_fuse_convert(%arg0: !fixedpt.fixedPt<4, -5, s>) -> !fi
   return %2 : !fixedpt.fixedPt<7, -9, s>
 }
 
-// CHECK-LABEL:   func.func public @convert_fuse_round(
-// CHECK-SAME:                                         %[[VAL_0:.*]]: !fixedpt.fixedPt<4, -5, s>) -> !fixedpt.fixedPt<7, -9, s> {
-// CHECK:           %[[VAL_1:.*]] = fixedpt.convert %[[VAL_0]] : <4, -5, s> truncate <7, -9, s>
-// CHECK:           return %[[VAL_1]] : !fixedpt.fixedPt<7, -9, s>
-// CHECK:         }
-func.func public @convert_fuse_round(%arg0: !fixedpt.fixedPt<4, -5, s>) -> !fixedpt.fixedPt<7, -9, s> {
-  %1 = fixedpt.round %arg0 : <4, -5, s> truncate <4, -3, s>
-  %2 = fixedpt.convert %1 : <4, -3, s> truncate <7, -9, s>
-  return %2 : !fixedpt.fixedPt<7, -9, s>
-}
-
 // CHECK-LABEL:   func.func public @add_fuse_add(
 // CHECK-SAME:                                   %[[VAL_0:.*]]: !fixedpt.fixedPt<4, -5, s>,
 // CHECK-SAME:                                   %[[VAL_1:.*]]: !fixedpt.fixedPt<4, -5, s>) -> !fixedpt.fixedPt<7, -9, s> {

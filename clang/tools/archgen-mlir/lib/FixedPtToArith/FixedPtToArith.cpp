@@ -446,56 +446,6 @@ struct ConstantOpLowering : public mlir::OpConversionPattern<ConstantOp> {
   }
 };
 
-/// Pattern for fixedpt::RoundOp to arith Ops
-struct RoundOpLowering : public mlir::OpConversionPattern<RoundOp> {
-  using base = OpConversionPattern<RoundOp>;
-  using base::OpConversionPattern;
-  virtual mlir::LogicalResult
-
-  matchAndRewrite(RoundOp op, base::OpAdaptor adaptor,
-                  mlir::ConversionPatternRewriter &rewriter) const override {
-    /// For example converts:
-    ///   fixedpt.round(%a) : (!fixedPt<4, -5, s>) -> !fixedPt<4, -2, s>
-    /// Note: MLIR is abbreviated to fit on one line
-    /// To:
-    ///   %tmp1 = arith.constant() {value = 3 : i10} : () -> i10
-    ///   %tmp2 = arith.shrsi(%a, %tmp1) : (i10, i10) -> i10
-    ///   arith.trunci(%tmp2) : (i10) -> i7
-
-    ConversionBuilder converter(*typeConverter, rewriter, op->getLoc(),
-                                op.getRounding());
-    rewriter.replaceOp(op, converter.buildConversion(
-                               adaptor.getInput(),
-                               op.getInput().getType().cast<FixedPtType>(),
-                               op.getResult().getType().cast<FixedPtType>()));
-    return mlir::success();
-  }
-};
-
-/// Pattern for fixedpt::ExtendOp to arith Ops
-struct ExtendOpLowering : public mlir::OpConversionPattern<ExtendOp> {
-  using base = OpConversionPattern<ExtendOp>;
-  using base::OpConversionPattern;
-  virtual mlir::LogicalResult
-  matchAndRewrite(ExtendOp op, base::OpAdaptor adaptor,
-                  mlir::ConversionPatternRewriter &rewriter) const override {
-    /// For example converts:
-    ///   fixedpt.extend(%a) : (!fixedPt<4, -1, s>) -> !fixedPt<7, -9, s>
-    /// Note: MLIR is abbreviated to fit on one line
-    /// To:
-    ///   %tmp1 = arith.extsi(%a) : (i6) -> i17
-    ///   %tmp2 = arith.constant() {value = 8 : i17} : () -> i17
-    ///   arith.shli(%tmp1, %tmp2) : (i17, i17) -> i17
-
-    ConversionBuilder converter(*typeConverter, rewriter, op->getLoc());
-    rewriter.replaceOp(op, converter.buildConversion(
-                               adaptor.getInput(),
-                               op.getInput().getType().cast<FixedPtType>(),
-                               op.getResult().getType().cast<FixedPtType>()));
-    return mlir::success();
-  }
-};
-
 /// Pattern for fixedpt::BitcastOp to nothing. the operand after type rewriting
 /// should always be the same type as the expected output
 struct BitcastOpLowering : public mlir::OpConversionPattern<BitcastOp> {
@@ -512,30 +462,7 @@ struct BitcastOpLowering : public mlir::OpConversionPattern<BitcastOp> {
   }
 };
 
-/// Pattern for fixedpt::TruncOp to arith::TruncIOp
-struct TruncOpLowering : public mlir::OpConversionPattern<TruncOp> {
-  using base = OpConversionPattern<TruncOp>;
-  using base::OpConversionPattern;
-  virtual mlir::LogicalResult
-  matchAndRewrite(TruncOp op, base::OpAdaptor adaptor,
-                  mlir::ConversionPatternRewriter &rewriter) const override {
-
-    /// For example converts:
-    ///   fixedpt.trunc(%a) : (!fixedPt<7, -9, u>) -> !fixedPt<3, -9, s>
-    /// Note: MLIR is abbreviated to fit on one line
-    /// To:
-    ///   arith.trunci(%a) : (i17) -> i13
-
-    ConversionBuilder converter(*typeConverter, rewriter, op->getLoc());
-    rewriter.replaceOp(op, converter.buildConversion(
-                               adaptor.getInput(),
-                               op.getInput().getType().cast<FixedPtType>(),
-                               op.getResult().getType().cast<FixedPtType>()));
-    return mlir::success();
-  }
-};
-
-/// Pattern for fixedpt::TruncOp to arith Ops
+/// Pattern for fixedpt::MulOp to arith Ops
 struct MulOpLowering : public mlir::OpConversionPattern<MulOp> {
   using base = OpConversionPattern<MulOp>;
   using base::OpConversionPattern;
@@ -587,7 +514,7 @@ struct MulOpLowering : public mlir::OpConversionPattern<MulOp> {
   }
 };
 
-/// Pattern for fixedpt::TruncOp to arith Ops
+/// Pattern for fixedpt::DivOp to arith Ops
 struct DivOpLowering : public mlir::OpConversionPattern<DivOp> {
   using base = OpConversionPattern<DivOp>;
   using base::OpConversionPattern;
@@ -659,7 +586,7 @@ struct DivOpLowering : public mlir::OpConversionPattern<DivOp> {
   }
 };
 
-/// Pattern for fixedpt::TruncOp to arith::TruncIOp
+/// Pattern for fixedpt::ConvertOp to arith Ops
 struct ConvertOpLowering : public mlir::OpConversionPattern<ConvertOp> {
   using base = OpConversionPattern<ConvertOp>;
   using base::OpConversionPattern;
@@ -739,10 +666,7 @@ void populateFixedPtToArithConversionPatterns(mlir::RewritePatternSet &patterns,
   patterns.add<AddOpLowering,
                SubOpLowering,
                ConstantOpLowering,
-               RoundOpLowering,
-               ExtendOpLowering,
                BitcastOpLowering,
-               TruncOpLowering,
                MulOpLowering,
                DivOpLowering,
                ConvertOpLowering,
