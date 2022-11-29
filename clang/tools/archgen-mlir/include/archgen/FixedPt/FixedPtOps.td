@@ -30,7 +30,7 @@ def RoundingKindAttr: I32EnumAttr<"RoundingMode", "describes rounding modes",
 class FixedPt_Op<string mnemonic, list<Trait> traits = []> :
     Op<FixedPt_Dialect, mnemonic, traits # [Pure]> {
   let hasVerifier = 1;
-  let hasCanonicalizeMethod = 1;
+  let hasFolder = 1;
 }
 
 class FixedPt_BinOp<string mnemonic, list<Trait> traits = []> : 
@@ -97,7 +97,6 @@ def FixedPt_ConstantOp : FixedPt_Op<"constant", [ConstantLike]> {
     FixedPtAttr: $value
   );
   let results = (outs AnyFixedPt: $result);
-  let hasFolder = 1;
   let hasCustomAssemblyFormat = true;
   let builders = [
     OpBuilder<(ins "::archgen::fixedpt::FixedPointAttr":$val)>,
@@ -122,6 +121,7 @@ def FixedPt_ConvertOp : FixedPt_Op<"convert", [DeclareOpInterfaceMethods<Roundin
   );
   let results = (outs AnyFixedPt: $result);
   let assemblyFormat = "$input `:` type($input) $rounding type($result) attr-dict";
+  let hasCanonicalizeMethod = 1;
 }
 
 #endif
