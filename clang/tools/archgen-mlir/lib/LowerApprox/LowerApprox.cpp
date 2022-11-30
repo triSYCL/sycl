@@ -6,14 +6,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "mlir/IR/Value.h"
-#include "llvm/Support/ErrorHandling.h"
-#include <cmath>
-#include <tuple>
 #ifndef ARCHGEN_SOLLYA_LIB_PATH
 #error "unable to find sollya"
 #endif
 
+#include <cmath>
+
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/DynamicLibrary.h"
 
 #include "mlir/Dialect/Func/IR/FuncOps.h"
@@ -21,6 +20,7 @@
 #include "mlir/IR/BuiltinDialect.h"
 #include "mlir/IR/OperationSupport.h"
 #include "mlir/IR/PatternMatch.h"
+#include "mlir/IR/Value.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
 
@@ -35,18 +35,10 @@
 #include "flopoco/report.hpp"
 
 using namespace archgen;
-namespace func = mlir::func;
 namespace LLVM = mlir::LLVM;
 namespace arith = mlir::arith;
 
 namespace {
-
-enum class approx_kind {
-  auto_select,
-  basic_poly,
-  bipartite_table,
-  simple_table
-};
 
 /// Implementation of a generic visitor of approx expressions
 template <typename RetTy> struct ApproxVisitorImpl {
@@ -325,9 +317,9 @@ struct LowerApprox {
         loc, printer, mlir::ValueRange{intVal, bitwidthConst, idConst});
   }
 
-  approx_kind select_approx_mode(fixedpt::FixedPtType inputType) {
+  approx::ApproxMode select_approx_mode(fixedpt::FixedPtType inputType) {
     // TODO do real heuristic
-    return approx_kind::basic_poly;
+    return approx::ApproxMode::basic_poly;
   }
 
   mlir::Value basic_poly_approx(mlir::Value input, mlir::Value output, sollya_obj_t sollyaTree) {
@@ -430,24 +422,22 @@ struct LowerApprox {
     printFormat("input", inputType);
     printFormat("output", outputType);
 
-    auto approx_mode = static_cast<approx_kind>(evaluateOp->getAttrOfType<::mlir::IntegerAttr>(approx::EvaluateOp::getApproxModeAttrName(evaluateOp->getName())).getInt());
-    assert(approx_mode != approx_kind::bipartite_table);
-    if (approx_mode == approx_kind::auto_select) {
+    auto approx_mode = evaluateOp.getApproxMode();
+    assert(approx_mode != approx::ApproxMode::bipartite_table);
+    if (approx_mode == approx::ApproxMode::auto_select) {
       approx_mode = select_approx_mode(inputType);
     }
 
-    mlir::Value expr;
-
-    switch (approx_mode) {
-      case approx_kind::basic_poly:
-        expr = basic_poly_approx(input, output, sollyaTree);
-        break;
-      case approx_kind::simple_table:
-        expr = tabulate(input, output, sollyaTree);
-        brak;
+    mlir::Value expr = [&] {
+      switch (approx_mode) {
+      case approx::ApproxMode::basic_poly:
+        return basic_poly_approx(input, output, sollyaTree);
+      case approx::ApproxMode::simple_table:
+        return tabulate(input, output, sollyaTree);
       default:
         llvm_unreachable("Unsupported approximation mode");
-    }
+      }
+    }();
 
     output.replaceAllUsesWith(expr);
 

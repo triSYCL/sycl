@@ -39,9 +39,10 @@ def ToBeFoldedType
 def ApproxAuto: I32EnumAttrCase<"auto_select", 0>;
 def ApproxBasicPoly: I32EnumAttrCase<"basic_poly", 1>;
 def ApproxBiPartiteTable: I32EnumAttrCase<"bipartite_table", 2>;
+def ApproxSimpleTable: I32EnumAttrCase<"simple_table", 3>;
 
 def ApproxKindAttr: I32EnumAttr<"ApproxMode", "describes Approx modes",
-                           [ApproxAuto, ApproxBasicPoly, ApproxBiPartiteTable]> {
+                           [ApproxAuto, ApproxBasicPoly, ApproxBiPartiteTable, ApproxSimpleTable]> {
   let cppNamespace = "::archgen::approx";
   let stringToSymbolFnName = "ConvertToEnum";
   let symbolToStringFnName = "ConvertToString";
