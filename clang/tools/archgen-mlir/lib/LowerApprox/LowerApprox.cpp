@@ -6,7 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "mlir/IR/Value.h"
+#include "llvm/Support/ErrorHandling.h"
 #include <cmath>
+#include <tuple>
 #ifndef ARCHGEN_SOLLYA_LIB_PATH
 #error "unable to find sollya"
 #endif
@@ -37,6 +40,13 @@ namespace LLVM = mlir::LLVM;
 namespace arith = mlir::arith;
 
 namespace {
+
+enum class approx_kind {
+  auto_select,
+  basic_poly,
+  bipartite_table,
+  simple_table
+};
 
 /// Implementation of a generic visitor of approx expressions
 template <typename RetTy> struct ApproxVisitorImpl {
@@ -315,28 +325,22 @@ struct LowerApprox {
         loc, printer, mlir::ValueRange{intVal, bitwidthConst, idConst});
   }
 
-  void run(approx::EvaluateOp evaluateOp) {
-    loc = evaluateOp->getLoc();
+  approx_kind select_approx_mode(fixedpt::FixedPtType inputType) {
+    // TODO do real heuristic
+    return approx_kind::basic_poly;
+  }
 
-    normalizeInputs(evaluateOp);
-
-    mlir::Value output = evaluateOp.getResult();
-    mlir::Value input = findInputValue(evaluateOp);
-    fixedpt::FixedPtType outputType =
+  mlir::Value basic_poly_approx(mlir::Value input, mlir::Value output, sollya_obj_t sollyaTree) {
+    const fixedpt::FixedPtType outputType =
         output.getType().cast<fixedpt::FixedPtType>();
-    fixedpt::FixedPtType inputType =
+    const fixedpt::FixedPtType inputType =
         input.getType().cast<fixedpt::FixedPtType>();
 
-    sollya_obj_t sollyaTree = buildSollyaTree(evaluateOp);
-
-    // We will add the rounding bit in the deg 0 coeff so we need to get extra 
+    // We will add the rounding bit in the deg 0 coeff so we need tofixedpt::FixedPtType inputType get extra 
     // accurate to allow this rounding to be merged in the horner scheme
-    double accuracy = std::ldexp(double{1.0}, outputType.getLsb() - 2);
+    const double accuracy = std::ldexp(double{1.0}, outputType.getLsb() - 2);
 
     /// Build sollya expresion tree
-    sollya_lib_printf("sollya: %b\n", sollyaTree);
-    printFormat("input", inputType);
-    printFormat("output", outputType);
     llvm::outs() << "accuracy=" << accuracy << "\n";
 
     flopoco::BasicPolyApprox flopocoApprox(sollyaTree, accuracy, 0,
@@ -359,18 +363,19 @@ struct LowerApprox {
     llvm::SmallVector<flopoco::FixConstant *> coefsStorage;
     for (int i = 0; i <= flopocoApprox.getDegree(); i++)
       coefsStorage.push_back(flopocoApprox.getCoeff(i));
-    llvm::ArrayRef<flopoco::FixConstant *> coefs{coefsStorage};
+    const llvm::ArrayRef<flopoco::FixConstant *> coefs{coefsStorage};
 
     printPolynom(llvm::outs(), coefs);
 
     // A0 + X * ( A1 + X * (...(An-1 + X * An)))
-    int printId = 0;
+    const int printId = 0;
+    std::ignore = printId;
     rewriter.setInsertionPointAfterValue(output);
     mlir::Value expr = getConstantFromCoef(coefs.back());
     int idx = horner.degree - 1;
     for (flopoco::FixConstant *flopocoCoef : llvm::reverse(coefs.drop_back())) {
-      mlir::Value coef = getConstantFromCoef(flopocoCoef);
-      mlir::Value truncatedIn = rewriter.create<fixedpt::ConvertOp>(
+      const mlir::Value coef = getConstantFromCoef(flopocoCoef);
+      const mlir::Value truncatedIn = rewriter.create<fixedpt::ConvertOp>(
           loc,
           fixedpt::FixedPtType::get(ctx, inputType.getMsb(), horner.wcYLSB[idx],
                                     inputType.isSigned()),
@@ -397,6 +402,53 @@ struct LowerApprox {
     if (expr.getType() != outputType)
       expr = rewriter.create<fixedpt::ConvertOp>(
           loc, outputType, expr, fixedpt::RoundingMode::truncate);
+
+    return expr;
+  }
+
+  mlir::Value tabulate(mlir::Value input, mlir::Value output, sollya_obj_t sollyaTree) {
+    llvm_unreachable("Not implemented yet");
+    return input;
+  }
+
+
+  void run(approx::EvaluateOp evaluateOp) {
+    loc = evaluateOp->getLoc();
+
+    normalizeInputs(evaluateOp);
+
+    mlir::Value output = evaluateOp.getResult();
+    mlir::Value input = findInputValue(evaluateOp);
+    fixedpt::FixedPtType outputType =
+        output.getType().cast<fixedpt::FixedPtType>();
+    fixedpt::FixedPtType inputType =
+        input.getType().cast<fixedpt::FixedPtType>();
+
+    sollya_obj_t sollyaTree = buildSollyaTree(evaluateOp);
+
+    sollya_lib_printf("sollya: %b\n", sollyaTree);
+    printFormat("input", inputType);
+    printFormat("output", outputType);
+
+    auto approx_mode = static_cast<approx_kind>(evaluateOp->getAttrOfType<::mlir::IntegerAttr>(approx::EvaluateOp::getApproxModeAttrName(evaluateOp->getName())).getInt());
+    assert(approx_mode != approx_kind::bipartite_table);
+    if (approx_mode == approx_kind::auto_select) {
+      approx_mode = select_approx_mode(inputType);
+    }
+
+    mlir::Value expr;
+
+    switch (approx_mode) {
+      case approx_kind::basic_poly:
+        expr = basic_poly_approx(input, output, sollyaTree);
+        break;
+      case approx_kind::simple_table:
+        expr = tabulate(input, output, sollyaTree);
+        brak;
+      default:
+        llvm_unreachable("Unsupported approximation mode");
+    }
+
     output.replaceAllUsesWith(expr);
 
     /// Remove the old approx tree
