@@ -95,7 +95,7 @@ Constant *emitBytePatternForType(Type *Ty, ConstantInt *Pattern, Module &M) {
   if (Ty->isFPOrFPVectorTy()) {
     unsigned BitWidth = llvm::APFloat::semanticsSizeInBits(
         Ty->getScalarType()->getFltSemantics());
-    llvm::APInt Payload(64, IntValue);
+    llvm::APInt Payload(BitWidth, IntValue);
     if (BitWidth >= 64)
       Payload = llvm::APInt::getSplat(BitWidth, Payload);
     return ConstantFP::get(
