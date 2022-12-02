@@ -113,6 +113,15 @@ def FixedPt_BitcastOp : FixedPt_Op<"bitcast"> {
   let assemblyFormat = "$input `:` type($input) `as` type($result) attr-dict";
 }
 
+def FixedPt_SelectOp : FixedPt_Op<"select"> {
+  let summary = "select a value from all the key format space according to the key value";
+  let arguments = (ins
+    AnyFixedPt: $key,
+    Variadic<AnyFixedPt>: $values);
+    let results = (outs AnyType: $result);
+    let hasFolder = 0;
+}
+
 def FixedPt_ConvertOp : FixedPt_Op<"convert", [DeclareOpInterfaceMethods<RoundingOpInterface>]> {
   let summary = "convert by any means necessary";
   let arguments = (ins

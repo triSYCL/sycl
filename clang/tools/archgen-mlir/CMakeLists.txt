@@ -45,9 +45,14 @@ set(ARCHGEN_PLUGIN_LIBS
   ArchGenFixedPtToArith
   ArchGenLowerApprox
   MLIRArithToLLVM
+  MLIRArithTransforms
+  MLIRBufferizationTransforms
+  MLIRIndexToLLVM
   MLIRFuncToLLVM
+  MLIRFuncTransforms
   MLIRMemRefToLLVM
   MLIRTargetLLVMIRExport
+  MLIRTensorTransforms
   MLIRLLVMToLLVMIRTranslation
   MLIRReconcileUnrealizedCasts
   LLVMLinker

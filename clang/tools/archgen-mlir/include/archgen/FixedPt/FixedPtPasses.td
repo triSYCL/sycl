@@ -13,5 +13,6 @@ def ConvertFixedPtToArithPass : Pass<"convert-fixedpt-to-arith", "::mlir::Module
   let constructor = "::archgen::fixedpt::createConvertFixedPtToArithPass()";
   let dependentDialects = [
     "::mlir::arith::ArithDialect",
+    "::mlir::tensor::TensorDialect",
   ];
 }

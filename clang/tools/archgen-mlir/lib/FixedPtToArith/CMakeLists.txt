@@ -13,5 +13,6 @@ add_mlir_conversion_library(ArchGenFixedPtToArith
   MLIRFuncDialect
   MLIRMemRefDialect
   MLIRLLVMDialect
+  MLIRTensorDialect
   ArchGenMLIRFixedPt
   )

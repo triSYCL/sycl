@@ -24,9 +24,13 @@
 
 #include "mlir/Conversion/Passes.h"
 #include "mlir/Dialect/Arith/IR/Arith.h"
+#include "mlir/Dialect/Arith/Transforms/Passes.h"
+#include "mlir/Dialect/Bufferization/Transforms/Passes.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
+#include "mlir/Dialect/Func/Transforms/Passes.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/Tensor/Transforms/Passes.h"
 #include "mlir/IR/MLIRContext.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/FileUtilities.h"
@@ -692,8 +696,14 @@ public:
       pm.addPass(mlir::createReconcileUnrealizedCastsPass());
       pm.addPass(mlir::createCanonicalizerPass());
       pm.addPass(mlir::createCSEPass());
+      pm.addPass(mlir::arith::createArithBufferizePass());
+      pm.addNestedPass<mlir::func::FuncOp>(mlir::createTensorBufferizePass());
+      pm.addPass(mlir::func::createFuncBufferizePass());
+      pm.addNestedPass<mlir::func::FuncOp>(mlir::bufferization::createFinalizingBufferizePass());
       pm.addPass(mlir::createMemRefToLLVMConversionPass());
+      pm.addPass(mlir::createConvertIndexToLLVMPass());
       pm.addPass(mlir::createArithToLLVMConversionPass());
+      pm.addPass(mlir::createConvertIndexToLLVMPass());
       pm.addPass(mlir::createConvertFuncToLLVMPass());
       pm.addPass(mlir::createReconcileUnrealizedCastsPass());
       if (mlir::failed(pm.run(state.module.get())))

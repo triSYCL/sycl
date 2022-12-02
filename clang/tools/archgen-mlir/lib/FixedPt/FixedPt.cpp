@@ -402,6 +402,22 @@ mlir::LogicalResult ConstantOp::verify() {
   return mlir::success();
 }
 
+mlir::LogicalResult SelectOp::verify() {
+  auto inType = getKey().getType().dyn_cast<FixedPtType>();
+  auto width = inType.getWidth();
+  auto operands = getValues();
+  if (operands.size() != 1 << width)
+    return emitError("Number of values does not match key size");
+  auto frontType = operands.front().getType();
+  for (auto t : operands.getTypes()) {
+    if (t != frontType)
+      return emitError("Select op does not accept mixed values");
+  }
+  if (getResult().getType() != frontType)
+    return emitError("Return type does not match element types");
+  return mlir::success();
+}
+
 mlir::LogicalResult BitcastOp::verify() {
   FixedPtType inFPTy = getInput().getType().dyn_cast<FixedPtType>();
   mlir::IntegerType inIntTy = getInput().getType().dyn_cast<mlir::IntegerType>();

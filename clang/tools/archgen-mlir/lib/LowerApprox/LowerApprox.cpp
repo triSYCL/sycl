@@ -11,6 +11,10 @@
 #endif
 
 #include <cmath>
+#include <vector>
+
+#include "flopoco/FixConstant.hpp"
+#include "flopoco/FixFunctions/FixFunction.hpp"
 
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/DynamicLibrary.h"
@@ -398,9 +402,46 @@ struct LowerApprox {
     return expr;
   }
 
+  mlir::Value getTable(std::vector<mpz_class> const & tableValues, fixedpt::FixedPtType type, mlir::Value key) {
+    std::vector<mlir::Value> tableMLIRVal{};
+    for (mpz_class const & val : tableValues) {
+      flopoco::FixConstant cst{type.getMsb(), type.getLsb(), type.isSigned(), val};
+      tableMLIRVal.push_back(getConstantFromCoef(&cst));
+    }
+    return rewriter.create<fixedpt::SelectOp>(loc, type, key, tableMLIRVal);
+  }
+
   mlir::Value tabulate(mlir::Value input, mlir::Value output, sollya_obj_t sollyaTree) {
-    llvm_unreachable("Not implemented yet");
-    return input;
+    const fixedpt::FixedPtType outputType =
+        output.getType().cast<fixedpt::FixedPtType>();
+    const fixedpt::FixedPtType inputType =
+        input.getType().cast<fixedpt::FixedPtType>();
+    flopoco::FixFunction const func{sollyaTree, inputType.isSigned(), inputType.getLsb(), outputType.getLsb()};
+
+    if (func.msbOut > outputType.getMsb() ||
+        ((func.msbOut == outputType.getMsb()) &&
+         (func.signedOut != outputType.isSigned()))) {
+      llvm::outs() << "Possible overflow detected in function evaluation.\n";
+    }
+
+    if (func.msbOut < outputType.getMsb()) {
+      llvm::outs() << "Function evaluation result stored in an excessively wide result.\n";
+    }
+
+    mpz_class funcVal{};
+    std::vector<mpz_class> tableVal;
+    auto clean_overflow = [&outputType = std::as_const(outputType)](mpz_class const & to_clean){
+      const auto mask = mpz_class{(mpz_class{1} << outputType.getWidth()) - 1};
+      return mpz_class{to_clean & mask};
+    };
+    for (std::uint64_t i = 0 ; i < (uint64_t{1} << inputType.getWidth()) ; ++i) {
+      mpz_class ignored{};
+      func.eval(i, funcVal, ignored, true);
+      tableVal.push_back(clean_overflow(funcVal));
+    }
+
+    rewriter.setInsertionPointAfterValue(output);
+    return getTable(tableVal, outputType, input);
   }
 
 

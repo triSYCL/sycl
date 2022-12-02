@@ -13,16 +13,21 @@
 
 #include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
-#include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
+#include "mlir/Dialect/MemRef/IR/MemRef.h"
+#include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/IR/BuiltinDialect.h"
+#include "mlir/IR/BuiltinTypes.h"
 #include "mlir/IR/Value.h"
+#include "mlir/IR/ValueRange.h"
 #include "mlir/Pass/Pass.h"
 #include "mlir/Support/LLVM.h"
+#include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/DialectConversion.h"
 
 #include "archgen/FixedPt/PassDetail.h"
 #include "archgen/FixedPt/Passes.h"
+#include "llvm/Support/raw_ostream.h"
 
 using namespace archgen;
 using namespace archgen::fixedpt;
@@ -30,6 +35,7 @@ namespace arith = mlir::arith;
 namespace func = mlir::func;
 namespace memref = mlir::memref;
 namespace LLVM = mlir::LLVM;
+namespace tensor = mlir::tensor;
 
 namespace {
 
@@ -154,6 +160,8 @@ struct FixedPtToArithTarget : public mlir::ConversionTarget {
     /// Conversions will emit operations form ArithDialect for Operations
     /// from the FixedPtDialect
     addLegalDialect<arith::ArithDialect>();
+
+    addLegalDialect<tensor::TensorDialect>();
 
     /// func::FuncOp are legal if there type is legal.
     /// We rewrite func::FuncOp only when at least one of there arguments or
@@ -586,6 +594,21 @@ struct DivOpLowering : public mlir::OpConversionPattern<DivOp> {
   }
 };
 
+// Pattern for fixedpt::SelectOp to arith Ops
+struct SelectOpLowering : public mlir::OpConversionPattern<SelectOp> {
+  using base = OpConversionPattern<SelectOp>;
+  using base::OpConversionPattern;
+  virtual mlir::LogicalResult
+  matchAndRewrite(SelectOp op, base::OpAdaptor adaptor,
+                  mlir::ConversionPatternRewriter &rewriter) const override {
+    auto key = rewriter.create<arith::IndexCastUIOp>(op->getLoc(), rewriter.getIndexType(), adaptor.getKey());
+    auto tensor = rewriter.create<mlir::tensor::FromElementsOp>(key->getLoc(), adaptor.getValues());
+    mlir::tensor::ExtractOp extract = rewriter.create<mlir::tensor::ExtractOp>(tensor->getLoc(), tensor, key.getOut());
+    rewriter.replaceOp(op, extract.getResult());
+    return mlir::success();
+  }
+};
+
 /// Pattern for fixedpt::ConvertOp to arith Ops
 struct ConvertOpLowering : public mlir::OpConversionPattern<ConvertOp> {
   using base = OpConversionPattern<ConvertOp>;
@@ -671,6 +694,7 @@ void populateFixedPtToArithConversionPatterns(mlir::RewritePatternSet &patterns,
                DivOpLowering,
                ConvertOpLowering,
                FuncOpRewriting,
+               SelectOpLowering,
                SimpleOpRewriting<func::ReturnOp>,
                SimpleOpRewriting<memref::LoadOp>,
                SimpleOpRewriting<memref::StoreOp>,
