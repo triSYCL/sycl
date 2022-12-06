@@ -5,6 +5,7 @@
 #pragma once
 
 #include <sycl/platform.hpp>
+#include <sycl/device.hpp>
 
 #include <algorithm>
 #include <functional>
