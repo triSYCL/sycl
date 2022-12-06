@@ -358,6 +358,9 @@ std::vector<std::pair<std::string, backend>> findPlugins() {
     if (list.backendCompatible(backend::ext_oneapi_hip)) {
       PluginNames.emplace_back(__SYCL_HIP_PLUGIN_NAME, backend::ext_oneapi_hip);
     }
+    if (list.backendCompatible(backend::xrt)) {
+      PluginNames.emplace_back(__SYCL_XRT_PLUGIN_NAME, backend::xrt);
+    }
   }
   return PluginNames;
 }
