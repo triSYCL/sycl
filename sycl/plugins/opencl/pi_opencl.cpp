@@ -423,9 +423,32 @@ pi_result piextDeviceSelectBinary(pi_device device, pi_device_binary *images,
     image_target = __SYCL_PI_DEVICE_BINARY_TARGET_SPIRV64_GEN;
     break;
   case CL_DEVICE_TYPE_ACCELERATOR: // OpenCL 64-bit FPGA
-    image_target = __SYCL_PI_DEVICE_BINARY_TARGET_XILINX_FPGA;
-    // image_target = PI_DEVICE_BINARY_TARGET_SPIRV64_FPGA;
+  {
+    /// This can be either Intel FPGA or AMD/Xilinx FPGA
+    /// So we lookup the vendor_id to differentiate
+    cl_uint vendor_id;
+    cl_int ret_err =
+        clGetDeviceInfo(cast<cl_device_id>(device), CL_DEVICE_VENDOR_ID,
+                        sizeof(cl_uint), &vendor_id, nullptr);
+    if (ret_err != CL_SUCCESS) {
+      *selected_image_ind = invalid_ind;
+      return cast<pi_result>(ret_err);
+    }
+
+    /// If this is an intel FPGA
+    if (vendor_id == /*Intel simulator */ 0x1172 ||
+        vendor_id == /*Intel PCI ID*/ 0x8086)
+      image_target = __SYCL_PI_DEVICE_BINARY_TARGET_SPIRV64_FPGA;
+    /// If this is an AMD FPGA
+    else if (vendor_id == /*XRT does what XRT likes*/ 0 ||
+             vendor_id == /*Xilinx PCI ID*/ 0x10EE ||
+             vendor_id == /*AMD PCI ID*/ 0x1002)
+      image_target = __SYCL_PI_DEVICE_BINARY_TARGET_XILINX_FPGA;
+    else
+      // The device binary target cannot be guessed for this accelerator
+      return PI_ERROR_INVALID_BINARY;      
     break;
+  }
   default:
     // Otherwise, we'll attempt to find and JIT-compile
     // a device-independent SPIR-V image
