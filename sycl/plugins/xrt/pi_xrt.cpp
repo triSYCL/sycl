@@ -673,12 +673,6 @@ void assertion(bool Condition, const char *Message) {
 }
 }
 
-/// Check that we always use the same thread to call this function
-void assert_single_thread() {
-  static std::thread::id saved_id = std::this_thread::get_id();
-  assert(saved_id == std::this_thread::get_id() &&
-         "there is no multithread support for now");
-}
 
 /// Obtains the XRT platform.
 pi_result xrt_piPlatformsGet(uint32_t num_entries, pi_platform *platforms,
@@ -2148,11 +2142,12 @@ pi_result xrt_piTearDown(void *) {
 
 template <typename, auto func> struct xrt_pi_call_wrapper;
 
+static std::mutex pi_mutex;
+
 template <typename ret_ty, typename... args_ty, auto func>
 struct xrt_pi_call_wrapper<ret_ty (*)(args_ty...), func> {
   static ret_ty call(args_ty... args) {
-    /// Wrapper around every call to the XRT pi.
-    assert_single_thread();
+    std::lock_guard<std::mutex> guard(pi_mutex);
     try {
       return func(args...);
     } catch (...) {

@@ -435,7 +435,7 @@ pi_result piextDeviceSelectBinary(pi_device device, pi_device_binary *images,
       return cast<pi_result>(ret_err);
     }
 
-    /// If this is an intel FPGA
+    /// If this is an Intel FPGA
     if (vendor_id == /*Intel simulator */ 0x1172 ||
         vendor_id == /*Intel PCI ID*/ 0x8086)
       image_target = __SYCL_PI_DEVICE_BINARY_TARGET_SPIRV64_FPGA;

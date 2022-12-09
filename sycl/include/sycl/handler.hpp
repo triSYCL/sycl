@@ -462,12 +462,17 @@ void reduction_parallel_for(handler &CGH,
 template <typename T> struct IsReduction;
 template <typename FirstT, typename... RestT> struct AreAllButLastReductions;
 
-template<typename T>
-struct name_wrapper {};
+template <typename> struct name_wrapper {};
 
-template<typename T>
-struct assume_device_copyable_wrapper : T {
+template <typename KernelName> struct name_gen {
+  using type = name_wrapper<KernelName>;
 };
+
+template <> struct name_gen<detail::auto_name> {
+  using type = detail::auto_name;
+};
+
+template <typename T> struct assume_device_copyable_wrapper : T {};
 
 } // namespace detail
 
@@ -1094,12 +1099,12 @@ private:
   void parallel_for_lambda_impl(range<Dims> NumWorkItems,
                                 KernelType KernelFunc) {
     throwIfActionIsCreated();
-#if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
+// #if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
 #if !defined(__SYCL_DEVICE_ONLY__)
     if (detail::getDeviceFromHandler(*this).has(
             aspect::ext_xilinx_single_task_only)) {
 #endif
-      single_task<detail::name_wrapper<KernelName>>(
+      single_task<typename detail::name_gen<KernelName>::type>(
           [=, Func = detail::assume_device_copyable_wrapper<
                   std::remove_reference_t<KernelType>>{KernelFunc}] {
             detail::serialize_parallel_for(Func, NumWorkItems);
@@ -1108,7 +1113,7 @@ private:
       return;
     }
 #endif
-#endif
+// #endif
 #if !defined(__SYCL_SPIR_DEVICE__)
     using LambdaArgType = sycl::detail::lambda_arg_type<KernelType, item<Dims>>;
 
@@ -1829,12 +1834,12 @@ public:
   void parallel_for(range<Dims> NumWorkItems, id<Dims> WorkItemOffset,
                     _KERNELFUNCPARAM(KernelFunc)) {
     throwIfActionIsCreated();
-#if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
+// #if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
 #if !defined(__SYCL_DEVICE_ONLY__)
     if (detail::getDeviceFromHandler(*this).has(
             aspect::ext_xilinx_single_task_only)) {
 #endif
-      single_task<detail::name_wrapper<KernelName>>(
+      single_task<typename detail::name_gen<KernelName>::type>(
           [=, Func = detail::assume_device_copyable_wrapper<
                   std::remove_reference_t<KernelType>>{
                   std::forward<_KERNELFUNCPARAM()>(KernelFunc)}] {
@@ -1844,7 +1849,7 @@ public:
       return;
     }
 #endif
-#endif
+// #endif
 #if !defined(__SYCL_SPIR_DEVICE__)
     using NameT =
         typename detail::get_kernel_name_t<KernelName, KernelType>::name;
