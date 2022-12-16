@@ -911,15 +911,16 @@ python3 $SYCL_HOME/llvm/buildbot/compile.py
 ```
 
 These scripts have many options which can be displayed when using the
-`--help` option. For example to configure with CUDA support, shared
-libraries and producing a compiler database to be used by tools like
-LSP server like `clangd`:
+`--help` option. For example to configure with CUDA and HIP support,
+shared libraries and producing a compiler database to be
+used by tools like LSP server like `clangd`:
 
 ```bash
-python3 $SYCL_HOME/llvm/buildbot/configure.py --xrt --cuda --shared-libs \
-  --cmake-opt="-DCMAKE_EXPORT_COMPILE_COMMANDS=1"
+python3 $SYCL_HOME/llvm/buildbot/configure.py --xrt --cuda --hip \
+  --shared-libs --cmake-opt="-DCMAKE_EXPORT_COMPILE_COMMANDS=1"
 ```
-
+Use `--build-type=Debug` for a debug build.
+`
 For more control, see [section Build](#build).
 
 # Usage
