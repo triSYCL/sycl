@@ -1075,12 +1075,12 @@ OpenCL platform for the AMD FPGA.
 
 The examples provided here often rely on the SYCL default selector
 whose behavior can be influenced by the
-[`SYCL_DEVICE_FILTER`](EnvironmentVariables.md#sycl_device_filter)
+[`ONEAPI_DEVICE_SELECTOR`](EnvironmentVariables.md#oneapi_device_selector)
 environment variable, among others. Thus, to run an example on the
 AMD/Xilinx FPGA shown by the previous `sycl-ls`, the environment
 variable can be set with:
 ```bash
->- export SYCL_DEVICE_FILTER=opencl:acc:0
+>- export ONEAPI_DEVICE_SELECTOR=opencl:acc:0
 ```
 Beware that setting this variable also change the view from `sycl-ls` itself.
 
@@ -1088,7 +1088,7 @@ Beware that setting this variable also change the view from `sycl-ls` itself.
 ### Small examples
 
 See section [Picking the right device](#picking-the-right-device) to
-set correctly the `SYCL_DEVICE_FILTER` environment variable to select
+set correctly the `ONEAPI_DEVICE_SELECTOR` environment variable to select
 the right AMD/Xilinx FPGA device first.
 
 To run an example from the provided examples
@@ -1552,11 +1552,11 @@ Informing you of where those files are kept (`/tmp/EXECNAME-e5ece1pxk5rz43` in t
 There is 2 supported backends targeting Xilinx/AMD FPGA the XRT backend and the OpenCL backend.
 if you are using the default device selector the xrt backend selected by:
 ```bash
-export SYCL_DEVICE_FILTER=xrt
+export ONEAPI_DEVICE_SELECTOR=xrt:*
 ```
 and the OpenCL backend can be selected by:
 ```bash
-export SYCL_DEVICE_FILTER=opencl
+export ONEAPI_DEVICE_SELECTOR=opencl:*
 ```
 
 Testing if it is possible to reproduce a bug on the other backend can give you more information about the bug.
