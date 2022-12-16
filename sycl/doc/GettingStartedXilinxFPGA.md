@@ -1061,6 +1061,18 @@ show up:
 ```
 as `opencl:acc:0` which can be used to select the right device.
 
+There is bug in XRT when an AMD FPGA device is used from both the
+OpenCL and XRT platforms https://github.com/Xilinx/XRT/issues/7226
+which results in a segmentation violation. Since XRT is the preferred
+approach nowadays, if you do not use OpenCL, just temporary rename the
+AMD FPGA ICD file with
+```
+sudo mv /etc/OpenCL/vendors/xilinx.icd /etc/OpenCL/vendors/xilinx.icd.bak
+```
+to make the FPGA no longer visible from OpenCL. By keeping the file as
+a backup, you can always rename it back when you need to use the
+OpenCL platform for the AMD FPGA.
+
 The examples provided here often rely on the SYCL default selector
 whose behavior can be influenced by the
 [`SYCL_DEVICE_FILTER`](EnvironmentVariables.md#sycl_device_filter)
