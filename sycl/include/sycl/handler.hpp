@@ -1099,11 +1099,20 @@ private:
   void parallel_for_lambda_impl(range<Dims> NumWorkItems,
                                 KernelType KernelFunc) {
     throwIfActionIsCreated();
+    // There is no backend or runtime support for parallel_for for Xilinx FPGA.
+    // So it is partially emulated via a single_task instead.
+    // The following #if prevent emitting single_task kernels for non Xilinx
+    // FPGA. It is commented because it should be enabled but causes some issues
+    // in multi-device contexts
 // #if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
+// If we are compiling for host
 #if !defined(__SYCL_DEVICE_ONLY__)
+    /// And the device is a Xilinx FPGA
     if (detail::getDeviceFromHandler(*this).has(
             aspect::ext_xilinx_single_task_only)) {
 #endif
+      // Or we are compiling for device
+      // Generate a single_task kernel emulating the requested parallel_for
       single_task<typename detail::name_gen<KernelName>::type>(
           [=, Func = detail::assume_device_copyable_wrapper<
                   std::remove_reference_t<KernelType>>{KernelFunc}] {
@@ -1834,11 +1843,20 @@ public:
   void parallel_for(range<Dims> NumWorkItems, id<Dims> WorkItemOffset,
                     _KERNELFUNCPARAM(KernelFunc)) {
     throwIfActionIsCreated();
+    // There is no backend or runtime support for parallel_for for Xilinx FPGA.
+    // So it is partially emulated via a single_task instead.
+    // The following #if prevent emitting single_task kernels for non Xilinx
+    // FPGA. It is commented because it should be enabled but causes some issues
+    // in multi-device contexts
 // #if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
+// If we are compiling for host
 #if !defined(__SYCL_DEVICE_ONLY__)
+    /// And the device is a Xilinx FPGA
     if (detail::getDeviceFromHandler(*this).has(
             aspect::ext_xilinx_single_task_only)) {
 #endif
+      // Or we are compiling for device
+      // Generate a single_task kernel emulating the requested parallel_for
       single_task<typename detail::name_gen<KernelName>::type>(
           [=, Func = detail::assume_device_copyable_wrapper<
                   std::remove_reference_t<KernelType>>{
