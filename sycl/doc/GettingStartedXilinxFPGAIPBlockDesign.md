@@ -21,17 +21,17 @@ Building the compiler can be done with Python scripts:
 
 ```bash
 # Pick some place where the compiler has to be compiled, such as:
-SYCL_HOME=~/sycl_workspace
-mkdir $SYCL_HOME
-cd $SYCL_HOME
+DPCPP_HOME=~/sycl_workspace
+mkdir $DPCPP_HOME
+cd $DPCPP_HOME
 # You can also try --branch sycl/unified/next for a bleeding edge experience
 git clone --branch sycl/unified/master https://github.com/triSYCL/sycl llvm
 # Minimum configuration, but you can add more
-python $SYCL_HOME/llvm/buildbot/configure.py
+python $DPCPP_HOME/llvm/buildbot/configure.py
 # Compile only the minimum for Vitis IP support. If you compile for
 # the full SYCL support, it will work too but the compilation of the
 # tool is slower.
-python $SYCL_HOME/llvm/buildbot/compile.py --build-target vitis-ip-compiler
+python $DPCPP_HOME/llvm/buildbot/compile.py --build-target vitis-ip-compiler
 ```
 
 
@@ -46,25 +46,25 @@ if you already have a setup for this you can use it.
 Otherwise you will need to make a setup.sh script like this:
 ```bash
 # The place where SYCL has been compiled:
-SYCL_HOME=~/sycl_workspace
+DPCPP_HOME=~/sycl_workspace
 # Fill the version
 XILINX_VERSION=2022.1
 # Where all the AMD/Xilinx tools are
 XILINX_ROOT=/opt/xilinx
 # Where the SYCL compiler binaries are:
-SYCL_BIN_DIR=$SYCL_HOME/llvm/build/bin
+SYCL_BIN_DIR=$DPCPP_HOME/llvm/build/bin
 XILINX_VITIS_HLS=$XILINX_ROOT/Vitis_HLS/$XILINX_VERSION
 XILINX_VIVADO=$XILINX_ROOT/Vivado/$XILINX_VERSION
 # Add the various tools in the PATH
 PATH=$PATH:$SYCL_BIN_DIR:$XILINX_VITIS_HLS/bin
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$XILINX_VITIS_HLS/lib/lnx64.o:$SYCL_HOME/llvm/build/lib
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$XILINX_VITIS_HLS/lib/lnx64.o:$DPCPP_HOME/llvm/build/lib
 ```
 
 
 ### Small examples
 
 The minimal file
-`$SYCL_HOME/llvm/sycl/test/vitis/simple_tests/vitis_ip_export.cpp`
+`$DPCPP_HOME/llvm/sycl/test/vitis/simple_tests/vitis_ip_export.cpp`
 containing
 
 ```cpp
@@ -79,7 +79,7 @@ It can be compiled with
 
 ```bash
 # Be sure to use the right clang++
-SYCL_VXX_KEEP_CLUTTER=1 $SYCL_BIN_DIR/clang++ --target=vitis_ip-xilinx $SYCL_HOME/llvm/sycl/test/vitis/simple_tests/vitis_ip_export.cpp --vitis-ip-part=xcu200-fsgd2104-2-e -o adder.zip
+SYCL_VXX_KEEP_CLUTTER=1 $SYCL_BIN_DIR/clang++ --target=vitis_ip-xilinx $DPCPP_HOME/llvm/sycl/test/vitis/simple_tests/vitis_ip_export.cpp --vitis-ip-part=xcu200-fsgd2104-2-e -o adder.zip
 ```
 
 where `--target=vitis_ip-xilinx` specifies that we are targeting Vitis

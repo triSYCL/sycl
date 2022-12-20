@@ -899,15 +899,15 @@ Building SYCL can be done with Python scripts:
 
 ```bash
 # Pick some place where SYCL has to be compiled, such as:
-SYCL_HOME=~/sycl_workspace
-mkdir $SYCL_HOME
-cd $SYCL_HOME
+DPCPP_HOME=~/sycl_workspace
+mkdir $DPCPP_HOME
+cd $DPCPP_HOME
 # You can also try --branch sycl/unified/next for a bleeding edge experience
 git clone --branch sycl/unified/master git@github.com:triSYCL/sycl.git llvm
 # Use --xrt is to enable the optional XRT plugin. This is a replacement for the OpenCL plugin
 # because XRT offers more control and expressiveness on the hardware
-python3 $SYCL_HOME/llvm/buildbot/configure.py --xrt
-python3 $SYCL_HOME/llvm/buildbot/compile.py
+python3 $DPCPP_HOME/llvm/buildbot/configure.py --xrt
+python3 $DPCPP_HOME/llvm/buildbot/compile.py
 ```
 
 These scripts have many options which can be displayed when using the
@@ -916,7 +916,7 @@ shared libraries and producing a compiler database to be
 used by tools like LSP server like `clangd`:
 
 ```bash
-python3 $SYCL_HOME/llvm/buildbot/configure.py --xrt --cuda --hip \
+python3 $DPCPP_HOME/llvm/buildbot/configure.py --xrt --cuda --hip \
   --shared-libs --cmake-opt="-DCMAKE_EXPORT_COMPILE_COMMANDS=1"
 ```
 Use `--build-type=Debug` for a debug build.
@@ -930,7 +930,7 @@ The typical environment is setup with something like
 
 ```bash
 # The place where SYCL has been compiled:
-SYCL_HOME=~/sycl_workspace
+DPCPP_HOME=~/sycl_workspace
 # The version of Vitis you want to use
 XILINX_VERSION=2022.2
 # The target platform for the FPGA board model
@@ -938,14 +938,14 @@ export XILINX_PLATFORM=xilinx_u200_gen3x16_xdma_1_202110_1
 # Where all the AMD/Xilinx tools are
 XILINX_ROOT=/opt/xilinx
 # Where the SYCL compiler binaries are:
-SYCL_BIN_DIR=$SYCL_HOME/llvm/build/bin
+SYCL_BIN_DIR=$DPCPP_HOME/llvm/build/bin
 export XILINX_XRT=$XILINX_ROOT/xrt
 export XILINX_VITIS=$XILINX_ROOT/Vitis/$XILINX_VERSION
 export XILINX_HLS=$XILINX_ROOT/Vitis_HLS/$XILINX_VERSION
 export XILINX_VIVADO=$XILINX_ROOT/Vivado/$XILINX_VERSION
 # Add the various tools in the PATH
 PATH=$PATH:$SYCL_BIN_DIR:$XILINX_XRT/bin:$XILINX_VITIS/bin:$XILINX_HLS/bin:$XILINX_VIVADO/bin
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$XILINX_XRT/lib:$XILINX_VITIS/lib/lnx64.o:$XILINX_VITIS_HLS/lib/lnx64.o:$SYCL_HOME/llvm/build/lib
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$XILINX_XRT/lib:$XILINX_VITIS/lib/lnx64.o:$XILINX_VITIS_HLS/lib/lnx64.o:$DPCPP_HOME/llvm/build/lib
 # Setup LIBRARY_PATH used in hw and hw_emu mode
 # Ask ldconfig about the list of system library directories
 export LIBRARY_PATH=$(ldconfig --verbose 2>/dev/null | grep ':$' | tr -d '\n')
@@ -1096,7 +1096,7 @@ To run an example from the provided examples
 - with hardware emulation:
 
   ```bash
-  cd $SYCL_HOME/llvm/sycl/test/vitis/simple_tests
+  cd $DPCPP_HOME/llvm/sycl/test/vitis/simple_tests
   # Instruct the compiler and runtime to use FPGA hardware emulation with HLS flow
   # Compile the SYCL program down to a host fat binary including the RTL for simulation
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw_emu \
@@ -1108,7 +1108,7 @@ To run an example from the provided examples
 - with real hardware execution on FPGA:
 
   ```bash
-  cd $SYCL_HOME/llvm/sycl/test/vitis/simple_tests
+  cd $DPCPP_HOME/llvm/sycl/test/vitis/simple_tests
   # Instruct the compiler to use real FPGA hardware execution with HLS flow
   # Compile the SYCL program down to a host fat binary including the FPGA bitstream
   $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw \
@@ -1167,7 +1167,7 @@ Note that the SPIR compilation flow has been discontinued.
   (around 1 minute):
 
   ```bash
-  cd $SYCL_HOME/llvm/build
+  cd $DPCPP_HOME/llvm/build
   # Running tests with the CPU backend
   cmake --build . --parallel `nproc` --target check-sycl-vitis-cpu
   ```
@@ -1175,7 +1175,7 @@ Note that the SPIR compilation flow has been discontinued.
 - Run the `vitis` test suite with hardware emulation (HLS flow):
 
   ```bash
-  cd $SYCL_HOME/llvm/build
+  cd $DPCPP_HOME/llvm/build
   # Running tests with the OpenCL backend
   cmake --build . --parallel `nproc` --target check-sycl-vitis-opencl
   # Running tests with the XRT backend
@@ -1187,7 +1187,7 @@ This takes usually 45-60 minutes with a good CPU.
 - Run the `vitis` test suite with real hardware execution on FPGA (HLS flow):
 
   ```bash
-  cd $SYCL_HOME/llvm/build
+  cd $DPCPP_HOME/llvm/build
   # Running tests with the OpenCL backend
   cmake --build . --parallel `nproc` --target check-sycl-vitis-opencl-hw
   # Running tests with the XRT backend
@@ -1202,7 +1202,7 @@ To run a SYCL translation of
 https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
 
 ```bash
-cd $SYCL_HOME/llvm/sycl/test/on-device/vitis/edge_detection
+cd $DPCPP_HOME/llvm/sycl/test/on-device/vitis/edge_detection
 # Instruct the compiler and runtime to use real FPGA hardware execution
 $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
     -fsycl-targets=fpga64_hls_hw edge_detection.cpp \
@@ -1606,7 +1606,7 @@ Some environment variables are very useful for debugging:
 ```bash
 # Redirect the directory used as temporary directory
 # for the compiler and various tools
-export TMP=$SYCL_HOME/../tmp
+export TMP=$DPCPP_HOME/../tmp
 
 # SYCL_PI_TRACE should always be at least at 1, this make the SYCL runtime emit logs about which device is selected
 export SYCL_PI_TRACE=1
