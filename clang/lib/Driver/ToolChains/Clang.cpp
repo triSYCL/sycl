@@ -5700,7 +5700,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
     CmdArgs.push_back("-mrelocation-model");
     CmdArgs.push_back(RMName);
   }
-  if (PICLevel > 0) {
+  /// PIC is not needed for device SYCL code and it causes issues for Xilinx HLS backend
+  if (PICLevel > 0 && !Triple.isXilinxFPGA()) {
     CmdArgs.push_back("-pic-level");
     CmdArgs.push_back(PICLevel == 1 ? "1" : "2");
     if (IsPIE)

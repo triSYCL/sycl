@@ -29,7 +29,9 @@
         1. [Array partitioning](#Array-partitioning)
         1. [Multiple annotations](#Multiple-annotations)
     1. [AMD/Xilinx Macros](#AMDXilinx-Macros)
-    1. [xsim issues](#xsim-issues)
+    1. [Known issues](#known-issues)
+      1. [xsim](#xsim)
+      1. [Shared library](#shared-lib)
 1. [Implementation](#Implementation)
     1. [AMD/Xilinx FPGA SYCL compiler architecture](#AMDXilinx-FPGA-SYCL-compiler-architecture)
     1. [Extra Notes](#Extra-Notes)
@@ -1465,11 +1467,49 @@ when compiling host code none of the ``__SYCL_XILINX_*_MODE__`` macros will be d
 ``__SYCL_HAS_XILINX_DEVICE__`` will be defined on the host if one of
 the specified targets is an AMD/Xilinx device or on a Xilinx device
 
-## Xsim issues
+## Known issues
+
+### Xsim
 
 When a SYCL application running in hw_emu is not properly terminated like killed from a debugger.
 It is possible that the xsim process used for simulation will still be running. This process has some memory leaks so it is an issue.
 [cleanup_xsimk.cpp](../tools/cleanup_xsimk.cpp) contains the sources for a process that will cleanup the xsims that are not in use every 5 minutes
+
+### Shared Libs
+
+XRT requires the XCL_EMULATION_MODE environnement to be:
+ - unset for hw
+ - set to hw_emu for hw_emu
+ - set to sw_emu for sw_emu.
+
+This is usually done automatically by the SYCL runtime while loading kernels when global constructors are running.
+But when using dynamic libraries the global constructors of the libraries may happen after XRT is already loaded.
+Causing XRT to fail to load binaries because it is loaded in the incorrect mode.
+This issue can be bypassed by using XCL_EMULATION_MODE manually.
+
+for example:
+```cpp
+/// the main.cpp
+/// clang++ -g -fsycl -fsycl-targets=nvptx64-nvidia-cuda main.cpp
+int main() {
+  sycl::buffer<int> v{10};
+  sycl::queue(sycl::gpu_selector_v).submit([&](auto &h) {
+    auto a = sycl::accessor{v, h};
+    h.parallel_for(a.size(), [=](int i) { a[i] = i; });
+  });
+
+  ((void (*)(sycl::buffer<int> &))dlsym(dlopen("my_sycl.so", RTLD_LAZY),"run"))(v);
+}
+
+/// lib.cpp
+/// clang++ -g -fsycl -fsycl-targets=fpga64_hls_hw_emu -std=c++20 lib.cpp -fPIC -shared -o my_sycl.so
+extern "C" void run(sycl::buffer<int> &v) {
+  sycl::queue(xrt_selector_v).submit([&](auto &h) {
+    auto a = sycl::accessor{v, h};
+    h.parallel_for(a.size(), [=](int i) { a[i] *= a[i]; });
+  });
+}
+```
 
 # Implementation
 
