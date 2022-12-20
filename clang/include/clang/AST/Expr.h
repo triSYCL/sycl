@@ -2111,6 +2111,9 @@ public:
   // Convenience function to generate the name of the currently stored type.
   std::string ComputeName(ASTContext &Context) const;
 
+  /// Compute a unique name that is consumable by sycl_vxx
+  static std::string computeUniqueSYCLVXXName(StringRef Demangle);
+
   // Get the generated name of the type.  Note that this only works after all
   // kernels have been instantiated.
   static std::string ComputeName(ASTContext &Context, QualType Ty);
