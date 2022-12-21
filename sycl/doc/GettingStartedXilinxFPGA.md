@@ -61,6 +61,30 @@ some adaptations.
 
 ## What's new?
 
+- 2022/12/21:
+  - support for Vitis 2022.2 and oneAPI from up-stream;
+  - update documentation to Vitis 2022.2;
+  - various fixes to enable more backends while using AMD FPGA;
+  - add `xrt` support for new `ONEAPI_DEVICE_SELECTOR` environment variable;
+  - documentation updated to use `DPCPP_HOME` instead of `SYCL_HOME`;
+  - enable ROCm/HIP for AMD GPU in documentation;
+  - new code sample using 5 accelerators;
+  - fix some bugs in parallel_for emulation for FPGA with HLS flow that interferes with other backends;
+  - allows OpenCL accelerator to handle either Intel or AMD FPGA;
+  - new API to express several AMD FPGA annotations at once;
+  - disable AMD OpenCL for FPGA when XRT for FPGA is enabled to avoid XRT bug;
+  - do not propagate `-fPIC` option to AMD FPGA device compiler;
+  - remove `--sycl-vxx`;
+  - remove unreliable hack `terminate_xsimk` around AMD FPGA emulation
+    termination bug;
+  - move from SYCL 1.2.1 `CL/sycl.hpp` to SYCL 2020 `sycl/sycl.hpp`;
+  - clean up XRT PI;
+  - asynchronous kernel launch in XRT backend;
+  - support for pipes;
+  - fix bug in `memset` lowering;
+  - fix bug in `memcpy` unrolling;
+  - fix tests.
+
 - 2022/05/23:
   - new XRT backend plugin to use AMD FPGA without the OpenCL layer;
   - SYCL interoperability with XRT backend;
