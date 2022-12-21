@@ -1001,7 +1001,7 @@ option.
 The SYCL HLS compilation flow does not support software emulation because
 of internal AMD/Xilinx issue https://jira.xilinx.com/browse/CR-1099885
 But as SYCL allows also execution on a CPU device, it can replace the
-back-end software emulation.
+backend software emulation.
 
 
 ### Picking the right device
@@ -1060,6 +1060,12 @@ show up:
 [host:host:0] SYCL host platform, SYCL host device 1.2 [1.2]
 ```
 as `opencl:acc:0` which can be used to select the right device.
+
+Note that the emulated AMD FPGA and the real AMD FPGA might have
+different names in the OpenCL or XRT backends. For example our Alveo
+U200 appears as `xilinx_u200_gen3x16_xdma_1_202110_1` in emulation but
+`xilinx_u200_gen3x16_xdma_base_1` in hardware. This has to be taken
+into account when using explicit device selection by name.
 
 There is bug in XRT when an AMD FPGA device is used from both the
 OpenCL and XRT platforms https://github.com/Xilinx/XRT/issues/7226
@@ -1637,7 +1643,7 @@ where all tests utilities must have been build for this to work.
 
 ### v++ Logs
 
-The kinds of following errors are typical of a back-end issue:
+The kinds of following errors are typical of a backend issue:
 
 ```
 ERROR: [v++ 60-300] Failed to build kernel(ip) kernel_name, see log for details: [...]/vitis_hls.log
