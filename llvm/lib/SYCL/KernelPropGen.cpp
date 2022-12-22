@@ -99,7 +99,6 @@ struct KernelPropGenState {
     Value *Slave = ConstantDataArray::getString(C, "slave", false);
     Function *SideEffect = Intrinsic::getDeclaration(&M, Intrinsic::sideeffect);
     SideEffect->addFnAttr(Attribute::NoUnwind);
-    SideEffect->addFnAttr(Attribute::InaccessibleMemOnly);
     // TODO find a clever default value, allow user customization via
     // properties
     SideEffect->addFnAttr("xlx.port.bitwidth", "4096");
@@ -197,13 +196,13 @@ struct KernelPropGenState {
         J.attribute("name", F.getName());
         auto ExtraArgs = getExtraArgs(F);
         if (ExtraArgs)
-          J.attribute("extra_args", ExtraArgs.getValue());
+          J.attribute("extra_args", ExtraArgs.value());
         J.attributeBegin("bundle_hw_mapping");
         J.arrayBegin();
         for (auto &Bundle : KProp.getMAXIBundles()) {
           J.objectBegin();
           J.attribute("maxi_bundle_name", Bundle.BundleName);
-          if (Bundle.TargetId.hasValue()) {
+          if (Bundle.TargetId.has_value()) {
             StringRef Prefix;
             switch (Bundle.MemType) {
               case sycl::MemoryType::ddr:
@@ -215,7 +214,7 @@ struct KernelPropGenState {
               default:
               llvm_unreachable("Default bundle should not appear here");
             }
-            J.attribute("target_bank", formatv("{0}[{1}]", Prefix, Bundle.TargetId.getValue()));
+            J.attribute("target_bank", formatv("{0}[{1}]", Prefix, Bundle.TargetId.value()));
           }
           J.objectEnd();
         }
