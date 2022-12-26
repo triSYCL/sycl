@@ -94,6 +94,8 @@ void collectUserSpecifiedBanks(
       MemT = sycl::MemoryType::ddr;
     else if (Str->getRawDataValues() == kindOf("xilinx_hbm_bank"))
       MemT = sycl::MemoryType::hbm;
+    else if (Str->getRawDataValues() == kindOf("xilinx_plram_bank"))
+      MemT = sycl::MemoryType::plram;
     else
       continue;
     Constant *Args =
@@ -434,7 +436,7 @@ public:
                                llvm::Constant *PayloadCst) {
     auto Kind = KindInit->getRawDataValues();
     bool processed = false;
-    if (Kind == kindOf("xilinx_ddr_bank") || Kind == kindOf("xilinx_hbm_bank"))
+    if (Kind == kindOf("xilinx_ddr_bank") || Kind == kindOf("xilinx_hbm_bank") || Kind == kindOf("xilinx_plram_bank"))
       return;
     if (AfterO3) { // Annotation that should wait after optimisation to be
                    // lowered

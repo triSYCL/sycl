@@ -74,7 +74,7 @@ void removePipeAnnotation(Argument *Arg);
 /// Rename arguments to comply with Vitis's HLS
 void giveNameToArguments(Function &F);
 
-enum struct MemoryType { unspecified, ddr, hbm };
+enum struct MemoryType { unspecified, ddr, hbm, plram };
 
 struct MemBankSpec {
   MemoryType MemType;

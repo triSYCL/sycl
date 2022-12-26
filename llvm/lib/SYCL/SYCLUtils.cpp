@@ -117,6 +117,8 @@ constexpr const char *xilinx_ddr_bank =
     "sycl_xilinx_ddr_bank";
 constexpr const char *xilinx_hbm_bank =
     "sycl_xilinx_hbm_bank";
+constexpr const char *xilinx_plram_bank =
+    "sycl_xilinx_plram_bank";
 
 /// getAttributeAtIndex(0, ...) is the attribute on the return. The first argument
 /// starts at 1
@@ -191,16 +193,23 @@ void giveNameToArguments(Function &F) {
 }
 
 void annotateMemoryBank(Argument *Arg, MemBankSpec Bank) {
+  const auto mem_type = [&Bank](){
+    if (Bank.MemType == MemoryType::ddr)
+        return sycl::xilinx_ddr_bank;
+    if (Bank.MemType == MemoryType::hbm)
+        return sycl::xilinx_hbm_bank;
+    if (Bank.MemType == MemoryType::plram)
+        return sycl::xilinx_plram_bank;
+  }();
   Arg->addAttr(Attribute::get(Arg->getContext(),
-                              Bank.MemType == MemoryType::ddr
-                                  ? sycl::xilinx_ddr_bank
-                                  : sycl::xilinx_hbm_bank,
+                              mem_type,
                               llvm::formatv("{0}", Bank.BankID).str()));
 }
 
 void removeBankAnnotation(Argument *Arg) {
   Arg->getParent()->removeParamAttr(Arg->getArgNo(), sycl::xilinx_ddr_bank);
   Arg->getParent()->removeParamAttr(Arg->getArgNo(), sycl::xilinx_hbm_bank);
+  Arg->getParent()->removeParamAttr(Arg->getArgNo(), sycl::xilinx_plram_bank);
 }
 
 static int getBankVal(Argument *Arg, StringRef Str) {
@@ -220,6 +229,9 @@ MemBankSpec getMemoryBank(Argument *Arg) {
   Res = getBankVal(Arg, sycl::xilinx_hbm_bank);
   if (Res != -1)
     return {MemoryType::hbm, (unsigned)Res};
+  Res = getBankVal(Arg, sycl::xilinx_plram_bank);
+  if (Res != -1)
+    return {MemoryType::plram, (unsigned)Res};
   return {MemoryType::unspecified, 0};
 }
 
