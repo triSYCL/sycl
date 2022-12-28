@@ -298,6 +298,8 @@ StringRef Triple::getEnvironmentTypeName(EnvironmentType Kind) {
   case Callable: return "callable";
   case Mesh: return "mesh";
   case Amplification: return "amplification";
+  case SYCLMLIR:
+    return "syclmlir";
   }
 
   llvm_unreachable("Invalid EnvironmentType!");
@@ -656,6 +658,7 @@ static Triple::EnvironmentType parseEnvironment(StringRef EnvironmentName) {
       .StartsWith("callable", Triple::Callable)
       .StartsWith("mesh", Triple::Mesh)
       .StartsWith("amplification", Triple::Amplification)
+      .StartsWith("syclmlir", Triple::SYCLMLIR)
       .Default(Triple::UnknownEnvironment);
 }
 

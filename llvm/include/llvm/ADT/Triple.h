@@ -262,14 +262,15 @@ public:
     MuslEABI,
     MuslEABIHF,
     MuslX32,
+    SYCLMLIR,
 
     MSVC,
     Itanium,
     Cygnus,
     CoreCLR,
-    Simulator,  // Simulator variants of other systems, e.g., Apple's iOS
-    MacABI, // Mac Catalyst variant of Apple's iOS deployment target.
-    
+    Simulator, // Simulator variants of other systems, e.g., Apple's iOS
+    MacABI,    // Mac Catalyst variant of Apple's iOS deployment target.
+
     // Shader Stages
     // The order of these values matters, and must be kept in sync with the
     // language options enum in Clang. The ordering is enforced in

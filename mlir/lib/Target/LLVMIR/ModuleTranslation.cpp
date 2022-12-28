@@ -882,6 +882,7 @@ LogicalResult ModuleTranslation::convertFunctionSignatures() {
         cast<llvm::FunctionType>(convertType(function.getFunctionType())));
     llvm::Function *llvmFunc = cast<llvm::Function>(llvmFuncCst.getCallee());
     llvmFunc->setLinkage(convertLinkageToLLVM(function.getLinkage()));
+    llvmFunc->setCallingConv(convertCConvToLLVM(function.getCConv()));
     mapFunction(function.getName(), llvmFunc);
     addRuntimePreemptionSpecifier(function.getDsoLocal(), llvmFunc);
 

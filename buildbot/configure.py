@@ -13,7 +13,7 @@ def do_configure(args):
     if not os.path.isdir(abs_obj_dir):
       os.makedirs(abs_obj_dir)
 
-    llvm_external_projects = 'sycl;llvm-spirv;opencl;xpti;xptifw'
+    llvm_external_projects = 'sycl;llvm-spirv;opencl;xpti;xptifw;mlir;mlir-sycl;polygeist'
 
     # libdevice build requires a working SYCL toolchain, which is not the case
     # with macOS target right now.
@@ -32,6 +32,9 @@ def do_configure(args):
     xpti_dir = os.path.join(abs_src_dir, "xpti")
     xptifw_dir = os.path.join(abs_src_dir, "xptifw")
     libdevice_dir = os.path.join(abs_src_dir, "libdevice")
+    mlir_dir = os.path.join(abs_src_dir, "mlir")
+    mlir_sycl_dir = os.path.join(abs_src_dir, "mlir-sycl")
+    polygeist_dir = os.path.join(abs_src_dir, "polygeist")
     llvm_targets_to_build = args.host_target
     llvm_enable_projects = 'clang;' + llvm_external_projects
     libclc_targets_to_build = ''
@@ -48,6 +51,10 @@ def do_configure(args):
 
     sycl_enable_xpti_tracing = 'ON'
     xpti_enable_werror = 'OFF'
+
+    build_compiler_c = '/usr/bin/gcc'
+    build_compiler_cpp = '/usr/bin/g++'
+    verbose = 'OFF'
 
     if sys.platform != "darwin":
         sycl_enabled_plugins.append("level_zero")
@@ -132,6 +139,16 @@ def do_configure(args):
     if args.enable_plugin:
         sycl_enabled_plugins += args.enable_plugin
 
+    if args.build_compiler_c:
+        build_compiler_c = args.build_compiler_c
+
+    if args.build_compiler_cpp:
+        build_compiler_cpp = args.build_compiler_cpp
+
+    if args.verbose:
+        verbose = args.verbose
+        
+
     install_dir = os.path.join(abs_obj_dir, "install")
 
     cmake_cmd = [
@@ -147,6 +164,9 @@ def do_configure(args):
         "-DXPTI_SOURCE_DIR={}".format(xpti_dir),
         "-DLLVM_EXTERNAL_XPTIFW_SOURCE_DIR={}".format(xptifw_dir),
         "-DLLVM_EXTERNAL_LIBDEVICE_SOURCE_DIR={}".format(libdevice_dir),
+        "-DLLVM_EXTERNAL_MLIR_SOURCE_DIR={}".format(mlir_dir),
+        "-DLLVM_EXTERNAL_MLIR_SYCL_SOURCE_DIR={}".format(mlir_sycl_dir),
+        "-DLLVM_EXTERNAL_POLYGEIST_SOURCE_DIR={}".format(polygeist_dir),
         "-DLLVM_ENABLE_PROJECTS={}".format(llvm_enable_projects),
         "-DLIBCLC_TARGETS_TO_BUILD={}".format(libclc_targets_to_build),
         "-DLIBCLC_GENERATE_REMANGLED_VARIANTS={}".format(libclc_gen_remangled_variants),
@@ -162,7 +182,10 @@ def do_configure(args):
         "-DLLVM_ENABLE_LLD={}".format(llvm_enable_lld),
         "-DXPTI_ENABLE_WERROR={}".format(xpti_enable_werror),
         "-DSYCL_CLANG_EXTRA_FLAGS={}".format(sycl_clang_extra_flags),
-        "-DSYCL_ENABLE_PLUGINS={}".format(';'.join(set(sycl_enabled_plugins)))
+        "-DSYCL_ENABLE_PLUGINS={}".format(';'.join(set(sycl_enabled_plugins))),
+        "-DCMAKE_C_COMPILER={}".format(build_compiler_c),
+        "-DCMAKE_CXX_COMPILER={}".format(build_compiler_cpp),
+        "-DCMAKE_VERBOSE_MAKEFILE={}".format(verbose)
     ]
 
     if args.l0_headers and args.l0_loader:
@@ -242,6 +265,10 @@ def main():
     parser.add_argument("--llvm-external-projects", help="Add external projects to build. Add as comma seperated list.")
     parser.add_argument("--ci-defaults", action="store_true", help="Enable default CI parameters")
     parser.add_argument("--enable-plugin", action='append', help="Enable SYCL plugin")
+    parser.add_argument("--build-compiler-c", metavar="BUILD_COMPILER_C", help="C compiler to use to build the project")
+    parser.add_argument("--build-compiler-cpp", metavar="BUILD_COMPILER_CPP", help="C++ compiler to use to build the project"),
+    parser.add_argument("--verbose", default='OFF', help="Verbose build"),
+
     args = parser.parse_args()
 
     print("args:{}".format(args))
