@@ -4974,16 +4974,6 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-fsycl-allow-func-ptr");
     }
 
-    // if (Args.hasFlag(options::OPT_fsycl_allow_virtual,
-    //                  options::OPT_fno_sycl_allow_virtual, false)) {
-    //   CmdArgs.push_back("-fsycl-allow-virtual");
-    // }
-
-    // if (Args.hasFlag(options::OPT_fsycl_allow_variadic_func,
-    //                  options::OPT_fno_sycl_allow_variadic_func, false)) {
-    //   CmdArgs.push_back("-fsycl-allow-variadic-func");
-    // }
-
     if (Args.hasArg(options::OPT_fsycl_targets_EQ) &&
         llvm::any_of(
             Args.getLastArgNoClaim(options::OPT_fsycl_targets_EQ)->getValues(),
