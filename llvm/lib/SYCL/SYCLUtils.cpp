@@ -193,7 +193,7 @@ void giveNameToArguments(Function &F) {
 }
 
 void annotateMemoryBank(Argument *Arg, MemBankSpec Bank) {
-  const auto mem_type = [&Bank](){
+  const auto mem_type = [&Bank] {
     if (Bank.MemType == MemoryType::ddr)
         return sycl::xilinx_ddr_bank;
     if (Bank.MemType == MemoryType::hbm)
