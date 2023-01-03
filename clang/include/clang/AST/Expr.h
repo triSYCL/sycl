@@ -2112,7 +2112,7 @@ public:
   std::string ComputeName(ASTContext &Context) const;
 
   /// Compute a unique name that is consumable by sycl_vxx
-  static std::string computeUniqueSYCLVXXName(StringRef Demangle);
+  static std::string computeUniqueSYCLVXXName(StringRef Demangle, ASTContext& ctx);
 
   // Get the generated name of the type.  Note that this only works after all
   // kernels have been instantiated.

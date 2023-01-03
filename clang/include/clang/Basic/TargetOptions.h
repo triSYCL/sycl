@@ -81,6 +81,10 @@ public:
   /// \brief If enabled, allow AMDGPU unsafe floating point atomics.
   bool AllowAMDGPUUnsafeFPAtomics = false;
 
+  /// \brief If enabled sycl kernel with use names compatible with the VXX
+  /// backend
+  bool SYCLUseVXXNames : 1;
+
   /// \brief Enumeration value for AMDGPU code object version, which is the
   /// code object version times 100.
   enum CodeObjectVersionKind {

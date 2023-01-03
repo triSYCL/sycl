@@ -1074,7 +1074,7 @@ constructKernelName(Sema &S, const FunctionDecl *KernelCallerFunc,
 
   return {
       SYCLUniqueStableNameExpr::computeUniqueSYCLVXXName(
-          std::string(Out.str())),
+          std::string(Out.str()), S.getASTContext()),
       SYCLUniqueStableNameExpr::ComputeName(S.getASTContext(), KernelNameType)};
 }
 

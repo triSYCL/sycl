@@ -650,7 +650,10 @@ UniqueStableNameDiscriminator(ASTContext &, const NamedDecl *ND) {
 }
 
 /// Compute a unique name that is consumable by sycl_vxx
-std::string SYCLUniqueStableNameExpr::computeUniqueSYCLVXXName(StringRef Demangle) {
+std::string SYCLUniqueStableNameExpr::computeUniqueSYCLVXXName(StringRef Demangle, ASTContext& ctx) {
+  if (!ctx.getTargetInfo().getTargetOpts().SYCLUseVXXNames)
+    return Demangle.str();
+
   /// VXX has a maximum of 64 characters for the name of the kernel function
   /// plus the name of one parameter.
   /// Those characters need to be used wisely to prevent name collisions.
@@ -735,7 +738,7 @@ std::string SYCLUniqueStableNameExpr::ComputeName(ASTContext &Context,
   llvm::raw_string_ostream Out(Buffer);
   Ctx->mangleTypeName(Ty, Out);
 
-  return computeUniqueSYCLVXXName(Out.str());
+  return computeUniqueSYCLVXXName(Out.str(), Context);
 }
 
 SYCLUniqueStableIdExpr::SYCLUniqueStableIdExpr(EmptyShell Empty,

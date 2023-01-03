@@ -258,7 +258,7 @@ inline void build_loop_nest_rec(ElementWiseOpTy &ElementWiseOp,
       // innermost loop : perform the call
       item<IterDims> CurItem = detail::Builder::createItem<IterDims, false>(
           IterDomain, std::make_from_tuple<id<IterDims>>(NextIdx)); 
-      ElementWiseOp({CurItem});
+      ElementWiseOp(CurItem);
     } else {
       // Extend the iteration index tuple and generate the next loop level
       build_loop_nest_rec<CurDimIdx + 1>(ElementWiseOp, IterDomain, NextIdx);
@@ -445,7 +445,7 @@ template <typename T> struct assume_device_copyable_wrapper : T {};
 template <typename T>
 struct is_device_copyable<
     detail::assume_device_copyable_wrapper<T>,
-    std::enable_if_t<!std::is_trivially_copyable<T>::value>> : std::true_type {
+    std::enable_if_t<is_device_copyable<T>::value>> : std::true_type {
 };
 
 /// Command group handler class.
@@ -1083,7 +1083,7 @@ private:
     // The following #if prevent emitting single_task kernels for non Xilinx
     // FPGA. It is commented because it should be enabled but causes some issues
     // in multi-device contexts
-// #if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
+#if defined(__SYCL_DEV_HAS_XILINX_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
 // If we are compiling for host
 #if !defined(__SYCL_DEVICE_ONLY__)
     /// And the device is a Xilinx FPGA
@@ -1101,7 +1101,7 @@ private:
       return;
     }
 #endif
-// #endif
+#endif
 #if !defined(__SYCL_SPIR_DEVICE__)
     using LambdaArgType = sycl::detail::lambda_arg_type<KernelType, item<Dims>>;
 
@@ -1821,7 +1821,7 @@ public:
     // The following #if prevent emitting single_task kernels for non Xilinx
     // FPGA. It is commented because it should be enabled but causes some issues
     // in multi-device contexts
-// #if defined(__SYCL_SPIR_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
+#if defined(__SYCL_DEV_HAS_XILINX_DEVICE__) || !defined(__SYCL_DEVICE_ONLY__)
 // If we are compiling for host
 #if !defined(__SYCL_DEVICE_ONLY__)
     /// And the device is a Xilinx FPGA
@@ -1840,7 +1840,7 @@ public:
       return;
     }
 #endif
-// #endif
+#endif
 #if !defined(__SYCL_SPIR_DEVICE__)
     using NameT =
         typename detail::get_kernel_name_t<KernelName, KernelType>::name;

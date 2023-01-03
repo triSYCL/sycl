@@ -1294,6 +1294,8 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
   // Define a macro indicating that the source file is being compiled with a
   // SYCL device compiler which doesn't produce host binary.
   if (LangOpts.SYCLIsDevice) {
+    if (TI.getTargetOpts().SYCLUseVXXNames)
+      Builder.defineMacro("__SYCL_DEV_HAS_XILINX_DEVICE__");
     Builder.defineMacro("__SYCL_DEVICE_ONLY__");
     Builder.defineMacro("SYCL_EXTERNAL", "__attribute__((sycl_device))");
     // Defines a macro that switches on SPIR intrinsics in SYCL runtime, used

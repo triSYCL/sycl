@@ -5034,8 +5034,10 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
             llvm::make_range(C.getOffloadToolChains<Action::OFK_SYCL>()),
             [](const auto &Elem) {
               return Elem.second->getTriple().isXilinxFPGA();
-            }))
+            })) {
       CmdArgs.push_back("-D__SYCL_HAS_XILINX_DEVICE__");
+      CmdArgs.push_back("-fsycl-use-vxx-names");
+    }
     if (SYCLStdArg) {
       SYCLStdArg->render(Args, CmdArgs);
       CmdArgs.push_back("-fsycl-std-layout-kernel-params");
