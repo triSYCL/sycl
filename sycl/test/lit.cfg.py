@@ -25,7 +25,7 @@ config.name = 'SYCL'
 config.test_format = lit.formats.ShTest()
 
 # suffixes: A list of file extensions to treat as test files.
-config.suffixes = ['.c', '.cpp', '.dump'] #add .spv. Currently not clear what to do with those
+config.suffixes = ['.c', '.cpp', '.dump', '.test'] #add .spv. Currently not clear what to do with those
 
 # feature tests are considered not so lightweight, so, they are excluded by default
 config.excludes = ['Inputs', 'feature-tests', 'disabled', '_x', '.Xil', '.run', 'span']
@@ -103,10 +103,6 @@ backend=lit_config.params.get('SYCL_BE', "PI_OPENCL")
 lit_config.note("Backend (SYCL_BE): {}".format(backend))
 config.substitutions.append( ('%sycl_be', backend) )
 
-config.substitutions.append( ('%RUN_ON_HOST', "env SYCL_DEVICE_FILTER=host ") )
-
-# Every SYCL implementation provides a host implementation.
-config.available_features.add('host')
 triple=lit_config.params.get('SYCL_TRIPLE', 'spir64-unknown-unknown')
 lit_config.note("Triple: {}".format(triple))
 config.substitutions.append( ('%sycl_triple',  triple ) )
@@ -141,6 +137,7 @@ filter=lit_config.params.get('SYCL_PLUGIN', "opencl")
 lit_config.note("Filter: {}".format(filter))
 
 acc_run_substitute=f"env SYCL_DEVICE_FILTER={filter} "
+extra_compile_flags=""
 if vitis != "off" and vitis != "cpu":
     # Clean up the named semaphore in case the previous test did not clean up properly.
     # If someone tries to run multiple tests on the same machine this could cause issues.
@@ -159,7 +156,14 @@ if vitis != "off" and vitis != "cpu":
         acc_run_substitute+= "timeout 300 env "
     else:
         acc_run_substitute+= "timeout 600 env "
+if vitis == "cpu":
+    extra_compile_flags=" -fsyntax-only "
+    # This will print the command instead of executing it
+    # Since nothing is being fully compiled nothing should ne executed
+    acc_run_substitute="echo "
+
 config.substitutions.append( ('%ACC_RUN_PLACEHOLDER', acc_run_substitute) )
+config.substitutions.append( ('%EXTRA_COMPILE_FLAGS', extra_compile_flags) )
 
 timeout = 600
 if vitis == "off":
@@ -168,11 +172,7 @@ else:
     lit_config.note(f"vitis mode: {vitis}")
     if vitis == "cpu":
         config.available_features.add("vitis_cpu")
-    # TODO how to deal with cuda ?
-    # if getDeviceCount("gpu", "cuda")[1]:
-    #     lit_config.note("found secondary cuda target")
-    #     config.available_features.add("has_secondary_cuda")
-    required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH']
+    required_env = ['HOME', 'USER', 'XILINX_XRT', 'XILINX_PLATFORM', 'EMCONFIG_PATH', 'LIBRARY_PATH', 'XILINX_VITIS']
     has_error=False
     config.available_features.add("vitis")
     feat_list = ",".join(config.available_features)

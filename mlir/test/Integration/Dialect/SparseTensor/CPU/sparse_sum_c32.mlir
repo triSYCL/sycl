@@ -1,8 +1,8 @@
 // RUN: mlir-opt %s --sparse-compiler | \
-// RUN: TENSOR0="%mlir_integration_test_dir/data/test_symmetric_complex.mtx" \
+// RUN: TENSOR0="%mlir_src_dir/test/Integration/data/test_symmetric_complex.mtx" \
 // RUN: mlir-cpu-runner \
 // RUN:  -e entry -entry-point-result=void  \
-// RUN:  -shared-libs=%mlir_integration_test_dir/libmlir_c_runner_utils%shlibext | \
+// RUN:  -shared-libs=%mlir_lib_dir/libmlir_c_runner_utils%shlibext | \
 // RUN: FileCheck %s
 
 !Filename = !llvm.ptr<i8>
@@ -77,7 +77,7 @@ module {
     vector.print %imag : f64
 
     // Release the resources.
-    sparse_tensor.release %a : tensor<?x?xcomplex<f64>, #SparseMatrix>
+    bufferization.dealloc_tensor %a : tensor<?x?xcomplex<f64>, #SparseMatrix>
 
     return
   }

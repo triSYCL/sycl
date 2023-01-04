@@ -428,8 +428,7 @@ DwarfDebug::DwarfDebug(AsmPrinter *A)
   // https://sourceware.org/bugzilla/show_bug.cgi?id=11616
   UseGNUTLSOpcode = tuneForGDB() || DwarfVersion < 3;
 
-  // GDB does not fully support the DWARF 4 representation for bitfields.
-  UseDWARF2Bitfields = (DwarfVersion < 4) || tuneForGDB();
+  UseDWARF2Bitfields = DwarfVersion < 4;
 
   // The DWARF v5 string offsets table has - possibly shared - contributions
   // from each compile and type unit each preceded by a header. The string
@@ -819,7 +818,7 @@ static void collectCallSiteParameters(const MachineInstr *CallMI,
   }
 
   // Do not emit CSInfo for undef forwarding registers.
-  for (auto &MO : CallMI->uses())
+  for (const auto &MO : CallMI->uses())
     if (MO.isReg() && MO.isUndef())
       ForwardedRegWorklist.erase(MO.getReg());
 
@@ -2235,7 +2234,7 @@ void DwarfDebug::endFunctionImpl(const MachineFunction *MF) {
 #endif
   // Construct abstract scopes.
   for (LexicalScope *AScope : LScopes.getAbstractScopesList()) {
-    auto *SP = cast<DISubprogram>(AScope->getScopeNode());
+    const auto *SP = cast<DISubprogram>(AScope->getScopeNode());
     for (const DINode *DN : SP->getRetainedNodes()) {
       if (!Processed.insert(InlinedEntity(DN, nullptr)).second)
         continue;
@@ -2527,7 +2526,7 @@ void DwarfDebug::emitDebugLocEntry(ByteStreamer &Streamer,
 
   using Encoding = DWARFExpression::Operation::Encoding;
   uint64_t Offset = 0;
-  for (auto &Op : Expr) {
+  for (const auto &Op : Expr) {
     assert(Op.getCode() != dwarf::DW_OP_const_type &&
            "3 operand ops not yet supported");
     Streamer.emitInt8(Op.getCode(), Comment != End ? *(Comment++) : "");

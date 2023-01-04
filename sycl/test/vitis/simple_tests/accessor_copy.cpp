@@ -2,7 +2,7 @@
 // REQUIRES: spir
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
-// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+// RUN: %clangxx %EXTRA_COMPILE_FLAGS-fsycl -fsycl-targets=%sycl_triple %s -o %t.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.out
 
 // This test is testing 2D and 3D D2D copy using the handler it's heavily based

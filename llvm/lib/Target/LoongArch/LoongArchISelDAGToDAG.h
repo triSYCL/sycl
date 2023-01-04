@@ -38,7 +38,11 @@ public:
 
   void Select(SDNode *Node) override;
 
+  bool SelectInlineAsmMemoryOperand(const SDValue &Op, unsigned ConstraintID,
+                                    std::vector<SDValue> &OutOps) override;
+
   bool SelectBaseAddr(SDValue Addr, SDValue &Base);
+  bool selectNonFIBaseAddr(SDValue Addr, SDValue &Base);
 
   bool selectShiftMask(SDValue N, unsigned ShiftWidth, SDValue &ShAmt);
   bool selectShiftMaskGRLen(SDValue N, SDValue &ShAmt) {
@@ -55,6 +59,6 @@ public:
 #include "LoongArchGenDAGISel.inc"
 };
 
-} // namespace llvm
+} // end namespace llvm
 
 #endif // LLVM_LIB_TARGET_LOONGARCH_LOONGARCHISELDAGTODAG_H

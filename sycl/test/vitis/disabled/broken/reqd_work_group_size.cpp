@@ -1,6 +1,6 @@
 // REQUIRES: vitis
 
-// RUN: %clangxx -fsycl -fsycl-targets=%sycl_triple %s -o %t.out
+// RUN: %clangxx %EXTRA_COMPILE_FLAGS-fsycl -fsycl-targets=%sycl_triple %s -o %t.out
 // XFAIL
 // Disable because it contains a deadlock
 
@@ -72,16 +72,8 @@ class reqd_work_group_size_test8;
 class reqd_work_group_size_test9;
 class reqd_work_group_size_test10;
 
-// Just using this to make sure the llvm pass doesn't accidentally pick up the
-// incorrect thing
-__SYCL_INLINE_NAMESPACE(cl) {
-
-namespace sycl::xilinx {
-  template <int DimX, typename T>
-  struct conflict_test {};
-}
-
-}
+template <int DimX, typename T>
+struct conflict_test {};
 
 int main() {
   queue q;
@@ -168,7 +160,7 @@ int main() {
     q.submit([&](handler &cgh) {
       auto wb = ob.get_access<access::mode::write>(cgh);
       cgh.parallel_for<xilinx::reqd_work_group_size<
-          4, 4, 4, xilinx::conflict_test<30, reqd_work_group_size_test4>>>(
+          4, 4, 4, conflict_test<30, reqd_work_group_size_test4>>>(
           ndr, [=](nd_item<3> index) { wb[0] = 4; });
     });
 

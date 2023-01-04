@@ -496,6 +496,7 @@ class FunctionTestBuilder:
     self._func_dict = {}
     self._func_order = {}
     self._global_var_dict = {}
+    self._processed_prefixes = set()
     for tuple in run_list:
       for prefix in tuple[0]:
         self._func_dict.update({prefix:dict()})
@@ -584,30 +585,43 @@ class FunctionTestBuilder:
                                    scrubbed_body)
 
         if func in self._func_dict[prefix]:
-          if (self._func_dict[prefix][func] is None or
-              str(self._func_dict[prefix][func]) != scrubbed_body or
-              self._func_dict[prefix][func].args_and_sig != args_and_sig or
-                  self._func_dict[prefix][func].attrs != attrs):
-            if (self._func_dict[prefix][func] is not None and
-                self._func_dict[prefix][func].is_same_except_arg_names(
+          if (self._func_dict[prefix][func] is not None and
+              (str(self._func_dict[prefix][func]) != scrubbed_body or
+               self._func_dict[prefix][func].args_and_sig != args_and_sig or
+               self._func_dict[prefix][func].attrs != attrs)):
+            if self._func_dict[prefix][func].is_same_except_arg_names(
                 scrubbed_extra,
                 args_and_sig,
                 attrs,
-                is_backend)):
+                is_backend):
               self._func_dict[prefix][func].scrub = scrubbed_extra
               self._func_dict[prefix][func].args_and_sig = args_and_sig
-              continue
             else:
               # This means a previous RUN line produced a body for this function
               # that is different from the one produced by this current RUN line,
               # so the body can't be common accross RUN lines. We use None to
               # indicate that.
               self._func_dict[prefix][func] = None
-              continue
+        else:
+          if prefix not in self._processed_prefixes:
+            self._func_dict[prefix][func] = function_body(
+                scrubbed_body, scrubbed_extra, args_and_sig, attrs,
+                func_name_separator)
+            self._func_order[prefix].append(func)
+          else:
+            # An earlier RUN line used this check prefixes but didn't produce
+            # a body for this function. This happens in Clang tests that use
+            # preprocesser directives to exclude individual functions from some
+            # RUN lines.
+            self._func_dict[prefix][func] = None
 
-        self._func_dict[prefix][func] = function_body(
-            scrubbed_body, scrubbed_extra, args_and_sig, attrs, func_name_separator)
-        self._func_order[prefix].append(func)
+  def processed_prefixes(self, prefixes):
+    """
+    Mark a set of prefixes as having had at least one applicable RUN line fully
+    processed. This is used to filter out function bodies that don't have
+    outputs for all RUN lines.
+    """
+    self._processed_prefixes.update(prefixes)
 
   def get_failed_prefixes(self):
     # This returns the list of those prefixes that failed to match any function,
@@ -1140,8 +1154,8 @@ def get_autogennote_suffix(parser, args):
     if not hasattr(args, action.dest):
       continue  # Ignore options such as --help that aren't included in args
     # Ignore parameters such as paths to the binary or the list of tests
-    if action.dest in ('tests', 'update_only', 'opt_binary', 'llc_binary',
-                       'clang', 'opt', 'llvm_bin', 'verbose'):
+    if action.dest in ('tests', 'update_only', 'tool_binary', 'opt_binary',
+                       'llc_binary', 'clang', 'opt', 'llvm_bin', 'verbose'):
       continue
     value = getattr(args, action.dest)
     if action.const is not None:  # action stores a constant (usually True/False)

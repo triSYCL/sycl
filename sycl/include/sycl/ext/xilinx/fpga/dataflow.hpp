@@ -1,4 +1,4 @@
-//==- dataflow.hpp --- SYCL Xilinx extension ---------------==//
+//==- dataflow.hpp --- SYCL Xilinx extension -------------------------------==//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -20,33 +20,32 @@
 #include <utility>
 
 
-#include "sycl/detail/defines.hpp"
-#include "sycl/ext/xilinx/fpga/kernel_properties.hpp"
-
-__SYCL_INLINE_NAMESPACE(cl) {
+#include <sycl/detail/defines.hpp>
+#include <sycl/detail/defines_elementary.hpp>
+#include <sycl/ext/xilinx/fpga/kernel_properties.hpp>
 
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace ext::xilinx {
-
-
 
 /**
   Turn on dataflow optimisation for a loop
 */
-template <typename T>
-__SYCL_DEVICE_ANNOTATE("xilinx_dataflow")
-__SYCL_ALWAYS_INLINE void dataflow(T &&functor) {
-  std::forward<T>(functor)();
-}
+struct dataflow {
+  template <typename T>
+  __SYCL_DEVICE_ANNOTATE("xilinx_dataflow")
+  __SYCL_ALWAYS_INLINE dataflow(T functor) {
+    functor();
+  };
+};
 
 auto dataflow_kernel(auto kernel) {
   using kernelType = std::remove_cvref_t<decltype(kernel)>;
   return detail::KernelDecorator<kernelType, decltype(&kernelType::operator()),
                                  decltype("kernel_dataflow"_cstr), 0>{kernel};
 }
-} // namespace xilinx
+} // namespace ext::xilinx
+}
 } // namespace sycl
-
-} // __SYCL_INLINE_NAMESPACE(cl)
 
 #endif

@@ -1,4 +1,4 @@
-// RUN: %clang -fsycl-device-only %s -S -emit-llvm -O0 -g -o - | FileCheck %s
+// RUN: %clang -fno-sycl-force-inline-kernel-lambda -fsycl-device-only %s -S -emit-llvm -O0 -g -o - | FileCheck %s
 //
 // Verify the SYCL kernel routine is marked artificial and has the
 // expected source correlation.
@@ -17,7 +17,7 @@ __attribute__((sycl_kernel)) void kernel(const Func &kernelFunc) {
 }
 
 int main() {
-  cl::sycl::sampler Sampler;
+  sycl::sampler Sampler;
   kernel<class use_kernel_for_test>([=]() {
     Sampler.use();
   });

@@ -41,7 +41,7 @@ import tempfile
 # This pipeline should be able to do any promotion -O3 is capable of
 # and some more control-flow optimizations than strictly necessary.
 # Some more minimization is probably possible
-VXX_PassPipeline = [
+OptimizationPipeline = [
 "-lower-sycl-metadata",
 "-preparesycl",
 "-loop-unroll",
@@ -60,7 +60,7 @@ VXX_PassPipeline = [
 "-inline",
 "-function-attrs",
 "-sroa",
-"-early-cse-memssa",
+"-early-cse",
 "-speculative-execution",
 "-jump-threading",
 "-correlated-propagation",
@@ -338,8 +338,13 @@ class VitisCompilationDriver:
             self.tmpdir /
             f"{outstem}-kernels-prepared.ll"
         )
-        opt_options = ["-S", "--sroa-vxx-conservative", "--lower-mem-intr-to-llvm-type", "--lower-mem-intr-full-unroll", "--unroll-only-when-forced"]
-        opt_options.extend(VXX_PassPipeline)
+        opt_options = ["-S",
+            "--sroa-vxx-conservative",
+            "--lower-mem-intr-to-llvm-type",
+            "--lower-mem-intr-full-unroll",
+            "--unroll-only-when-forced",
+           ]
+        opt_options.extend(OptimizationPipeline)
         opt_options.extend(self.vitis_version.get_correct_opt_args())
         opt_options.extend(["-inSPIRation", "-o", f"{prepared_bc}"])
 
@@ -390,19 +395,19 @@ class VitisCompilationDriver:
             f"{self.outstem}-kernels_properties.json"
         )
 
-        kernel_prop_opt = ["-kernelPropGen",
-                           "--sycl-kernel-propgen-output", f"{kernel_prop}"]
-        kernel_prop_opt.extend(self.vitis_version.get_correct_opt_args())
         opt_options = [
             "--lower-mem-intr-to-llvm-type", "--lower-mem-intr-full-unroll", "--lower-delayed-sycl-metadata",
             "-lower-sycl-metadata", "-globaldce",
             "--sycl-prepare-after-O3", "-S", "-preparesycl", "-loop-unroll", "--unroll-only-when-forced",
-            *kernel_prop_opt,
+            "-kernelPropGen",
+            "--sycl-kernel-propgen-output",
+            f"{kernel_prop}",
             "-globaldce",
             "-strip-debug",
             inputs,
             "-o", prepared_kernels
         ]
+        opt_options.extend(self.vitis_version.get_correct_opt_args())
         args = [opt, *opt_options]
         self._dump_cmd("prepare", args)
         subprocess.run(args, check=True)

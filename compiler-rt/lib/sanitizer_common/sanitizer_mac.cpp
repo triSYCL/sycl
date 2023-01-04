@@ -73,6 +73,7 @@ extern "C" {
 #include <malloc/malloc.h>
 #include <os/log.h>
 #include <pthread.h>
+#include <pthread/introspection.h>
 #include <sched.h>
 #include <signal.h>
 #include <spawn.h>
@@ -1250,6 +1251,7 @@ uptr FindAvailableMemoryRange(uptr size, uptr alignment, uptr left_padding,
   mach_vm_address_t start_address =
     (SANITIZER_WORDSIZE == 32) ? 0x000000001000 : 0x000100000000;
 
+  const mach_vm_address_t max_vm_address = GetMaxVirtualAddress() + 1;
   mach_vm_address_t address = start_address;
   mach_vm_address_t free_begin = start_address;
   kern_return_t kr = KERN_SUCCESS;
@@ -1264,7 +1266,7 @@ uptr FindAvailableMemoryRange(uptr size, uptr alignment, uptr left_padding,
                                 (vm_region_info_t)&vminfo, &count);
     if (kr == KERN_INVALID_ADDRESS) {
       // No more regions beyond "address", consider the gap at the end of VM.
-      address = GetMaxVirtualAddress() + 1;
+      address = max_vm_address;
       vmsize = 0;
     } else {
       if (max_occupied_addr) *max_occupied_addr = address + vmsize;
@@ -1272,7 +1274,7 @@ uptr FindAvailableMemoryRange(uptr size, uptr alignment, uptr left_padding,
     if (free_begin != address) {
       // We found a free region [free_begin..address-1].
       uptr gap_start = RoundUpTo((uptr)free_begin + left_padding, alignment);
-      uptr gap_end = RoundDownTo((uptr)address, alignment);
+      uptr gap_end = RoundDownTo((uptr)Min(address, max_vm_address), alignment);
       uptr gap_size = gap_end > gap_start ? gap_end - gap_start : 0;
       if (size < gap_size) {
         return gap_start;
@@ -1394,6 +1396,61 @@ u32 GetNumberOfCPUs() {
 }
 
 void InitializePlatformCommonFlags(CommonFlags *cf) {}
+
+// Pthread introspection hook
+//
+// * GCD worker threads are created without a call to pthread_create(), but we
+//   still need to register these threads (with ThreadCreate/Start()).
+// * We use the "pthread introspection hook" below to observe the creation of
+//   such threads.
+// * GCD worker threads don't have parent threads and the CREATE event is
+//   delivered in the context of the thread itself.  CREATE events for regular
+//   threads, are delivered on the parent.  We use this to tell apart which
+//   threads are GCD workers with `thread == pthread_self()`.
+//
+static pthread_introspection_hook_t prev_pthread_introspection_hook;
+static ThreadEventCallbacks thread_event_callbacks;
+
+static void sanitizer_pthread_introspection_hook(unsigned int event,
+                                                 pthread_t thread, void *addr,
+                                                 size_t size) {
+  // create -> start -> terminate -> destroy
+  // * create/destroy are usually (not guaranteed) delivered on the parent and
+  //   track resource allocation/reclamation
+  // * start/terminate are guaranteed to be delivered in the context of the
+  //   thread and give hooks into "just after (before) thread starts (stops)
+  //   executing"
+  DCHECK(event >= PTHREAD_INTROSPECTION_THREAD_CREATE &&
+         event <= PTHREAD_INTROSPECTION_THREAD_DESTROY);
+
+  if (event == PTHREAD_INTROSPECTION_THREAD_CREATE) {
+    bool gcd_worker = (thread == pthread_self());
+    if (thread_event_callbacks.create)
+      thread_event_callbacks.create((uptr)thread, gcd_worker);
+  } else if (event == PTHREAD_INTROSPECTION_THREAD_START) {
+    CHECK_EQ(thread, pthread_self());
+    if (thread_event_callbacks.start)
+      thread_event_callbacks.start((uptr)thread);
+  }
+
+  if (prev_pthread_introspection_hook)
+    prev_pthread_introspection_hook(event, thread, addr, size);
+
+  if (event == PTHREAD_INTROSPECTION_THREAD_TERMINATE) {
+    CHECK_EQ(thread, pthread_self());
+    if (thread_event_callbacks.terminate)
+      thread_event_callbacks.terminate((uptr)thread);
+  } else if (event == PTHREAD_INTROSPECTION_THREAD_DESTROY) {
+    if (thread_event_callbacks.destroy)
+      thread_event_callbacks.destroy((uptr)thread);
+  }
+}
+
+void InstallPthreadIntrospectionHook(const ThreadEventCallbacks &callbacks) {
+  thread_event_callbacks = callbacks;
+  prev_pthread_introspection_hook =
+      pthread_introspection_hook_install(&sanitizer_pthread_introspection_hook);
+}
 
 }  // namespace __sanitizer
 

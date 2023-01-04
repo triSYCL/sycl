@@ -1,4 +1,4 @@
-//===-- IntelPTCollector.cpp ------------------------------------------------===//
+//===-- IntelPTCollector.cpp ----------------------------------------------===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -7,18 +7,14 @@
 //===----------------------------------------------------------------------===//
 
 #include "IntelPTCollector.h"
-
 #include "Perf.h"
-#include "Procfs.h"
-
 #include "Plugins/Process/POSIX/ProcessPOSIXLog.h"
+#include "Procfs.h"
 #include "lldb/Host/linux/Support.h"
 #include "lldb/Utility/StreamString.h"
-
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MathExtras.h"
-
 #include <algorithm>
 #include <cstddef>
 #include <fcntl.h>
@@ -124,7 +120,7 @@ Error IntelPTCollector::TraceStart(const TraceIntelPTStartRequest &request) {
 
       // We try to use cgroup filtering whenever possible
       Optional<int> cgroup_fd;
-      if (!request.disable_cgroup_filtering.getValueOr(false))
+      if (!request.disable_cgroup_filtering.value_or(false))
         cgroup_fd = GetCGroupFileDescriptor(m_process.GetID());
 
       if (Expected<IntelPTProcessTraceUP> trace =

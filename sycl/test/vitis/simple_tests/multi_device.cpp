@@ -1,8 +1,8 @@
-// REQUIRES: vitis && has_secondary_cuda
+// REQUIRES: vitis && cuda_be && !vitis_cpu
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
-// RUN: %clangxx -std=c++20 -fsycl -fsycl-libspirv-path=%llvm_build_lib_dir./clc/libspirv-nvptx64--nvidiacl.bc -fsycl-targets=nvptx64-nvidia-cuda-sycldevice,%sycl_triple %s -o %t.dir/exec.out  -###
-// RUN: %clangxx -std=c++20 -fsycl -fsycl-libspirv-path=%llvm_build_lib_dir./clc/libspirv-nvptx64--nvidiacl.bc -fsycl-targets=%sycl_triple,nvptx64-nvidia-cuda-sycldevice %s -o %t.dir/exec.out
+// RUN: %clangxx %EXTRA_COMPILE_FLAGS-std=c++20 -fsycl -fsycl-libspirv-path=%llvm_build_lib_dir./clc/libspirv-nvptx64--nvidiacl.bc -fsycl-targets=nvptx64-nvidia-cuda-sycldevice,%sycl_triple %s -o %t.dir/exec.out  -###
+// RUN: %clangxx %EXTRA_COMPILE_FLAGS-std=c++20 -fsycl -fsycl-libspirv-path=%llvm_build_lib_dir./clc/libspirv-nvptx64--nvidiacl.bc -fsycl-targets=%sycl_triple,nvptx64-nvidia-cuda-sycldevice %s -o %t.dir/exec.out
 
 // RUN: %ACC_RUN_PLACEHOLDER env --unset=SYCL_DEVICE_FILTER %t.dir/exec.out
 
@@ -53,7 +53,6 @@ template<typename Selector> void test_device(Selector s) {
 }
 
 int main() {
-  test_device(sycl::host_selector{});
   test_device(sycl::accelerator_selector{});
   test_device(sycl::gpu_selector{});
 }

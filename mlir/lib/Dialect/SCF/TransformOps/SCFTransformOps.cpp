@@ -46,6 +46,7 @@ transform::GetParentForOp::apply(transform::TransformResults &results,
                                            << scf::ForOp::getOperationName()
                                            << "' parent";
         diag.attachNote(target->getLoc()) << "target op";
+        results.set(getResult().cast<OpResult>(), {});
         return diag;
       }
       current = loop;
@@ -99,6 +100,7 @@ transform::LoopOutlineOp::apply(transform::TransformResults &results,
       DiagnosedSilenceableFailure diag = emitSilenceableError()
                                          << "failed to outline";
       diag.attachNote(target->getLoc()) << "target op";
+      results.set(getTransformed().cast<OpResult>(), {});
       return diag;
     }
     func::CallOp call;
@@ -233,9 +235,12 @@ class SCFTransformDialectExtension
     : public transform::TransformDialectExtension<
           SCFTransformDialectExtension> {
 public:
-  SCFTransformDialectExtension() {
-    declareDependentDialect<AffineDialect>();
-    declareDependentDialect<func::FuncDialect>();
+  using Base::Base;
+
+  void init() {
+    declareGeneratedDialect<AffineDialect>();
+    declareGeneratedDialect<func::FuncDialect>();
+
     registerTransformOps<
 #define GET_OP_LIST
 #include "mlir/Dialect/SCF/TransformOps/SCFTransformOps.cpp.inc"

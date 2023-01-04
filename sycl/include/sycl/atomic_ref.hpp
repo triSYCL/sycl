@@ -22,12 +22,12 @@
 #endif
 #include <type_traits>
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace detail {
 
-using memory_order = cl::sycl::memory_order;
-using memory_scope = cl::sycl::memory_scope;
+using memory_order = sycl::memory_order;
+using memory_scope = sycl::memory_scope;
 
 template <typename T> struct IsValidAtomicRefType {
   static constexpr bool value =
@@ -39,8 +39,7 @@ template <typename T> struct IsValidAtomicRefType {
        std::is_pointer<T>::value);
 };
 
-template <cl::sycl::access::address_space AS>
-struct IsValidAtomicRefAddressSpace {
+template <sycl::access::address_space AS> struct IsValidAtomicRefAddressSpace {
   static constexpr bool value =
       (AS == access::address_space::global_space ||
        AS == access::address_space::local_space ||
@@ -145,7 +144,8 @@ public:
   }
 
 #ifdef __SYCL_DEVICE_ONLY__
-  explicit atomic_ref_base(T &ref) : ptr(multi_ptr<T, AddressSpace>(&ref)) {}
+  explicit atomic_ref_base(T &ref)
+      : ptr(address_space_cast<AddressSpace, access::decorated::no>(&ref)) {}
 #else
   // FIXME: This reinterpret_cast is UB, but happens to work for now
   explicit atomic_ref_base(T &ref)
@@ -246,7 +246,7 @@ public:
 
 protected:
 #ifdef __SYCL_DEVICE_ONLY__
-  multi_ptr<T, AddressSpace> ptr;
+  multi_ptr<T, AddressSpace, access::decorated::no> ptr;
 #else
   std::atomic<T> *ptr;
 #endif
@@ -667,5 +667,5 @@ public:
                                 AddressSpace>::operator=;
 };
 
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)

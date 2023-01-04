@@ -9,12 +9,13 @@
 #ifndef SYCL_XILINX_FPGA_UNROLL_HPP
 #define SYCL_XILINX_FPGA_UNROLL_HPP
 
-#include "sycl/detail/defines.hpp"
+#include <utility>
+#include <sycl/detail/defines.hpp>
+#include <sycl/detail/defines_elementary.hpp>
 
-__SYCL_INLINE_NAMESPACE(cl) {
 
 namespace sycl {
-namespace ext::xilinx {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace detail {
 template <unsigned int unroll_factor> struct ConstrainedUnrolling {
   static_assert(
@@ -25,6 +26,7 @@ template <unsigned int unroll_factor> struct ConstrainedUnrolling {
 };
 } // namespace detail
 
+namespace ext::xilinx {
 template <unsigned int unroll_factor>
 struct checked_fixed_unrolling
     : public detail::ConstrainedUnrolling<unroll_factor> {
@@ -58,17 +60,20 @@ struct no_unrolling {
 
  \tparam T type of the functor to execute
 */
-template <typename UnrollType = full_unrolling, typename T>
-__SYCL_ALWAYS_INLINE void unroll(T &&functor) {
+template <typename UnrollType = full_unrolling>
+struct unroll {
+  template<typename T>
+  __SYCL_ALWAYS_INLINE unroll(T functor) {
   __SYCL_DEVICE_ANNOTATE("xilinx_unroll", UnrollType::UnrollingFactor,
-                        UnrollType::checked)
+                         UnrollType::checked)
   int annotationAnchor;
   (void)annotationAnchor;
-  std::forward<T>(functor)();
-}
+  functor();
+  }
+};
 
 } // namespace ext::xilinx
+}
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)
 
 #endif

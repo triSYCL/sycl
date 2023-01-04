@@ -37,6 +37,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/GlobalVariable.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/InstIterator.h"
 #include "llvm/IR/InstVisitor.h"
 #include "llvm/IR/InstrTypes.h"
 #include "llvm/IR/Instruction.h"
@@ -45,12 +46,13 @@
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/SYCL/LowerSYCLMetaData.h"
+#include "llvm/SYCL/KernelProperties.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
 #include "llvm/Support/FormatVariadic.h"
 #include "llvm/Transforms/Utils/Cloning.h"
 
-#include "SYCLUtils.h"
+#include "llvm/SYCL/SYCLUtils.h"
 
 #define DEBUG_TYPE "lower-sycl-md"
 
@@ -65,6 +67,64 @@ cl::opt<bool> ArrayPartitionHasModeArg("sycl-vxx-array-partition-mode-arg",
 
 static StringRef kindOf(const char *Str) {
   return StringRef(Str, strlen(Str) + 1);
+}
+
+/// Search for the annotation specifying user specified DDR bank for all
+/// arguments of F and populates UserSpecifiedDDRBanks accordingly
+void collectUserSpecifiedBanks(
+    Function &F,
+    SmallDenseMap<llvm::AllocaInst *, sycl::MemBankSpec, 16> &UserSpecifiedBanks) {
+  for (Instruction &I : instructions(F)) {
+    auto *CB = dyn_cast<CallBase>(&I);
+    if (!CB || CB->getIntrinsicID() != Intrinsic::var_annotation)
+      continue;
+    auto *Alloca =
+        dyn_cast_or_null<AllocaInst>(getUnderlyingObject(CB->getOperand(0)));
+    // SYCL buffer's property for DDR bank association is lowered
+    // as an annotation. As the signature of
+    // llvm.var.annotate takes an i8* as first argument, cast from original
+    // argument type to i8* is done, and the final bitcast is annotated.
+    if (!Alloca)
+      continue;
+    auto *Str = cast<ConstantDataArray>(
+        cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(1)))
+            ->getOperand(0));
+    sycl::MemoryType MemT;
+    if (Str->getRawDataValues() == kindOf("xilinx_ddr_bank"))
+      MemT = sycl::MemoryType::ddr;
+    else if (Str->getRawDataValues() == kindOf("xilinx_hbm_bank"))
+      MemT = sycl::MemoryType::hbm;
+    else
+      continue;
+    Constant *Args =
+        (cast<GlobalVariable>(getUnderlyingObject(CB->getOperand(4)))
+             ->getInitializer());
+    unsigned Bank;
+    if (isa<ConstantAggregateZero>(Args))
+      Bank = 0;
+    else
+      Bank = cast<ConstantInt>(Args->getOperand(0))->getZExtValue();
+
+    UserSpecifiedBanks[Alloca] = {MemT, Bank};
+  }
+}
+
+/// Check if the argument has a user specified DDR bank corresponding to it in
+/// UserSpecifiedDDRBank
+Optional<sycl::MemBankSpec> getUserSpecifiedBank(
+    Argument *Arg,
+    SmallDenseMap<llvm::AllocaInst *, sycl::MemBankSpec, 16> &UserSpecifiedBanks) {
+  for (User *U : Arg->users()) {
+    if (auto *Store = dyn_cast<StoreInst>(U))
+      if (Store->getValueOperand() == Arg) {
+        auto Lookup = UserSpecifiedBanks.find(dyn_cast_or_null<AllocaInst>(
+            getUnderlyingObject(Store->getPointerOperand())));
+        if (Lookup == UserSpecifiedBanks.end())
+          continue;
+        return {Lookup->second};
+      }
+  }
+  return {};
 }
 
 struct LSMDState {
@@ -228,7 +288,7 @@ public:
   ///
   /// @param CS Payload of the original annotation
   void lowerUnrollDecoration(llvm::CallBase &CB,
-                             llvm::ConstantStruct *Payload) {
+                             llvm::Constant *Payload) {
     auto *F = CB.getCaller();
 
     // Metadata payload is unroll factor (first argument) and boolean indicating
@@ -376,11 +436,10 @@ public:
     bool processed = false;
     if (Kind == kindOf("xilinx_ddr_bank") || Kind == kindOf("xilinx_hbm_bank"))
       return;
-    auto *Payload = cast<ConstantStruct>(PayloadCst);
     if (AfterO3) { // Annotation that should wait after optimisation to be
                    // lowered
       if (Kind == kindOf("xilinx_unroll")) {
-        lowerUnrollDecoration(CB, Payload);
+        lowerUnrollDecoration(CB, PayloadCst);
         processed = true;
       }
     }
@@ -445,6 +504,20 @@ public:
               ->getInitializer());
       Parent.dispatchLocalAnnotation(CB, cast<ConstantDataArray>(KindInit),
                                      Payload);
+    }
+
+    void visitFunction(Function& F) {
+      KernelProperties KProp(F);
+      SmallDenseMap<llvm::AllocaInst *, sycl::MemBankSpec, 16> UserSpecifiedBanks{};
+      // Collect user specified DDR banks for F in DDRBanks
+      collectUserSpecifiedBanks(F, UserSpecifiedBanks);
+
+      for (Argument &A : F.args()) {
+        if (Optional<sycl::MemBankSpec> Bank =
+                getUserSpecifiedBank(&A, UserSpecifiedBanks)) {
+          sycl::annotateMemoryBank(&A, *Bank);
+        }
+      }
     }
 
     Function *&getMostRecent(Function *Func) {

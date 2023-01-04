@@ -42,6 +42,16 @@ static cl::opt<bool> EnableRedundantCopyElimination(
     cl::desc("Enable the redundant copy elimination pass"), cl::init(true),
     cl::Hidden);
 
+// FIXME: Unify control over GlobalMerge.
+static cl::opt<cl::boolOrDefault>
+    EnableGlobalMerge("riscv-enable-global-merge", cl::Hidden,
+                      cl::desc("Enable the global merge pass"));
+
+static cl::opt<bool>
+    EnableMachineCombiner("riscv-enable-machine-combiner",
+                          cl::desc("Enable the machine combiner pass"),
+                          cl::init(true), cl::Hidden);
+
 extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeRISCVTarget() {
   RegisterTargetMachine<RISCVTargetMachine> X(getTheRISCV32Target());
   RegisterTargetMachine<RISCVTargetMachine> Y(getTheRISCV64Target());
@@ -52,13 +62,14 @@ extern "C" LLVM_EXTERNAL_VISIBILITY void LLVMInitializeRISCVTarget() {
   initializeRISCVCodeGenPreparePass(*PR);
   initializeRISCVMergeBaseOffsetOptPass(*PR);
   initializeRISCVSExtWRemovalPass(*PR);
+  initializeRISCVPreRAExpandPseudoPass(*PR);
   initializeRISCVExpandPseudoPass(*PR);
   initializeRISCVInsertVSETVLIPass(*PR);
 }
 
 static StringRef computeDataLayout(const Triple &TT) {
   if (TT.isArch64Bit())
-    return "e-m:e-p:64:64-i64:64-i128:128-n64-S128";
+    return "e-m:e-p:64:64-i64:64-i128:128-n32:64-S128";
   assert(TT.isArch32Bit() && "only RV32 and RV64 are currently supported");
   return "e-m:e-p:32:32-i64:64-n32-S128";
 }
@@ -166,7 +177,6 @@ public:
   }
 
   void addIRPasses() override;
-  void addCodeGenPrepare() override;
   bool addPreISel() override;
   bool addInstSelector() override;
   bool addIRTranslator() override;
@@ -189,15 +199,13 @@ TargetPassConfig *RISCVTargetMachine::createPassConfig(PassManagerBase &PM) {
 void RISCVPassConfig::addIRPasses() {
   addPass(createAtomicExpandPass());
 
-  addPass(createRISCVGatherScatterLoweringPass());
+  if (getOptLevel() != CodeGenOpt::None)
+    addPass(createRISCVGatherScatterLoweringPass());
 
-  TargetPassConfig::addIRPasses();
-}
-
-void RISCVPassConfig::addCodeGenPrepare() {
   if (getOptLevel() != CodeGenOpt::None)
     addPass(createRISCVCodeGenPreparePass());
-  TargetPassConfig::addCodeGenPrepare();
+
+  TargetPassConfig::addIRPasses();
 }
 
 bool RISCVPassConfig::addPreISel() {
@@ -207,6 +215,13 @@ bool RISCVPassConfig::addPreISel() {
     // more details.
     addPass(createBarrierNoopPass());
   }
+
+  if (EnableGlobalMerge == cl::BOU_TRUE) {
+    addPass(createGlobalMergePass(TM, /* MaxOffset */ 2047,
+                                  /* OnlyOptimizeForSize */ false,
+                                  /* MergeExternalByDefault */ true));
+  }
+
   return false;
 }
 
@@ -253,12 +268,15 @@ void RISCVPassConfig::addPreEmitPass2() {
 
 void RISCVPassConfig::addMachineSSAOptimization() {
   TargetPassConfig::addMachineSSAOptimization();
+  if (EnableMachineCombiner)
+    addPass(&MachineCombinerID);
 
   if (TM->getTargetTriple().getArch() == Triple::riscv64)
     addPass(createRISCVSExtWRemovalPass());
 }
 
 void RISCVPassConfig::addPreRegAlloc() {
+  addPass(createRISCVPreRAExpandPseudoPass());
   if (TM->getOptLevel() != CodeGenOpt::None)
     addPass(createRISCVMergeBaseOffsetOptPass());
   addPass(createRISCVInsertVSETVLIPass());

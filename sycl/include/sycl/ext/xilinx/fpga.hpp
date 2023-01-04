@@ -14,6 +14,7 @@
 #ifndef SYCL_XILINX_FPGA_HPP
 #define SYCL_XILINX_FPGA_HPP
 
+#include "sycl/ext/xilinx/fpga/annotate.hpp"
 #include "sycl/ext/xilinx/fpga/kernel_param.hpp"
 #include "sycl/ext/xilinx/fpga/dataflow.hpp"
 #include "sycl/ext/xilinx/fpga/kernel_properties.hpp"

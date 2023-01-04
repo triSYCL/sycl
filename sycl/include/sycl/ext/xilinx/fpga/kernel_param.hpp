@@ -19,13 +19,15 @@
 #include <type_traits>
 #include <utility>
 
-#include "sycl/detail/defines.hpp"
-#include "sycl/detail/property_helper.hpp"
-#include "sycl/ext/xilinx/fpga/kernel_properties.hpp"
+#include <sycl/detail/defines.hpp>
+#include <sycl/detail/defines_elementary.hpp>
+#include <sycl/detail/property_helper.hpp>
+#include <sycl/ext/xilinx/fpga/kernel_properties.hpp>
+#include <sycl/ext/xilinx/literals/cstr.hpp>
 
-__SYCL_INLINE_NAMESPACE(cl) {
-
-namespace sycl::ext::xilinx {
+namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
+namespace ext::xilinx {
 
 template <typename... Params> auto kernel_param(auto kernel, Params...) {
   using kernelType = std::remove_cvref_t<decltype(kernel)>;
@@ -60,8 +62,9 @@ operator"" _vitis_option() noexcept {
 
 #pragma clang diagnostic pop
 } // namespace literals
-} // namespace sycl::ext::xilinx
+} // namespace ext::xilinx
+}
+} // namespace sycl
 
-} // __SYCL_INLINE_NAMESPACE(cl)
 
 #endif

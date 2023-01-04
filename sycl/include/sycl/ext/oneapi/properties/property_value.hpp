@@ -11,40 +11,33 @@
 #include <sycl/ext/oneapi/properties/property.hpp>
 #include <sycl/ext/oneapi/properties/property_utils.hpp>
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace ext {
 namespace oneapi {
 namespace experimental {
 namespace detail {
 
-// Base class for property values with a single type value.
-struct SingleTypePropertyValueBase {};
-
-// Base class for properties with 0 or more than 1 values.
-struct EmptyPropertyValueBase {};
-
 // Base class for property values with a single non-type value
-template <typename T> struct SingleNontypePropertyValueBase {
+template <typename T, typename = void> struct SingleNontypePropertyValueBase {};
+
+template <typename T>
+struct SingleNontypePropertyValueBase<T, std::enable_if_t<HasValue<T>::value>> {
   static constexpr auto value = T::value;
 };
 
-// Helper class for property values with a single value
+// Helper base class for property_value.
+template <typename... Ts> struct PropertyValueBase {};
+
 template <typename T>
-struct SinglePropertyValue
-    : public sycl::detail::conditional_t<HasValue<T>::value,
-                                         SingleNontypePropertyValueBase<T>,
-                                         SingleTypePropertyValueBase> {
+struct PropertyValueBase<T> : public detail::SingleNontypePropertyValueBase<T> {
   using value_t = T;
 };
 
 } // namespace detail
 
-template <typename PropertyT, typename T = void, typename... Ts>
-struct property_value
-    : public sycl::detail::conditional_t<
-          sizeof...(Ts) == 0 && !std::is_same<T, void>::value,
-          detail::SinglePropertyValue<T>, detail::EmptyPropertyValueBase> {
+template <typename PropertyT, typename... Ts>
+struct property_value : public detail::PropertyValueBase<Ts...> {
   using key_t = PropertyT;
 };
 
@@ -98,5 +91,5 @@ struct IsCompileTimePropertyValue<property_value<PropertyT, PropertyValueTs...>>
 } // namespace experimental
 } // namespace oneapi
 } // namespace ext
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)

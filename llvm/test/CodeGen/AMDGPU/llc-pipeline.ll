@@ -26,6 +26,8 @@
 ; GCN-O0-NEXT:Machine Branch Probability Analysis
 ; GCN-O0-NEXT:  ModulePass Manager
 ; GCN-O0-NEXT:    Pre-ISel Intrinsic Lowering
+; GCN-O0-NEXT:    FunctionPass Manager
+; GCN-O0-NEXT:      Expand large div/rem
 ; GCN-O0-NEXT:    AMDGPU Printf lowering
 ; GCN-O0-NEXT:      FunctionPass Manager
 ; GCN-O0-NEXT:        Dominator Tree Construction
@@ -83,6 +85,9 @@
 ; GCN-O0-NEXT:        Memory SSA
 ; GCN-O0-NEXT:        AMDGPU Annotate Uniform Values
 ; GCN-O0-NEXT:        SI annotate control flow
+; GCN-O0-NEXT:        Post-Dominator Tree Construction
+; GCN-O0-NEXT:        Legacy Divergence Analysis
+; GCN-O0-NEXT:        AMDGPU Rewrite Undef for PHI
 ; GCN-O0-NEXT:        LCSSA Verifier
 ; GCN-O0-NEXT:        Loop-Closed SSA Form Pass
 ; GCN-O0-NEXT:      DummyCGSCCPass
@@ -104,8 +109,6 @@
 ; GCN-O0-NEXT:        Eliminate PHI nodes for register allocation
 ; GCN-O0-NEXT:        SI Lower control flow pseudo instructions
 ; GCN-O0-NEXT:        Two-Address instruction pass
-; GCN-O0-NEXT:        Basic Alias Analysis (stateless AA impl)
-; GCN-O0-NEXT:        Function Alias Analysis Results
 ; GCN-O0-NEXT:        MachineDominator Tree Construction
 ; GCN-O0-NEXT:        Slot index numbering
 ; GCN-O0-NEXT:        Live Interval Analysis
@@ -163,8 +166,11 @@
 ; GCN-O1-NEXT:Machine Branch Probability Analysis
 ; GCN-O1-NEXT:Register Usage Information Storage
 ; GCN-O1-NEXT:Default Regalloc Eviction Advisor
+; GCN-O1-NEXT:Default Regalloc Priority Advisor
 ; GCN-O1-NEXT:  ModulePass Manager
 ; GCN-O1-NEXT:    Pre-ISel Intrinsic Lowering
+; GCN-O1-NEXT:    FunctionPass Manager
+; GCN-O1-NEXT:      Expand large div/rem
 ; GCN-O1-NEXT:    AMDGPU Printf lowering
 ; GCN-O1-NEXT:      FunctionPass Manager
 ; GCN-O1-NEXT:        Dominator Tree Construction
@@ -265,6 +271,9 @@
 ; GCN-O1-NEXT:        Memory SSA
 ; GCN-O1-NEXT:        AMDGPU Annotate Uniform Values
 ; GCN-O1-NEXT:        SI annotate control flow
+; GCN-O1-NEXT:        Post-Dominator Tree Construction
+; GCN-O1-NEXT:        Legacy Divergence Analysis
+; GCN-O1-NEXT:        AMDGPU Rewrite Undef for PHI
 ; GCN-O1-NEXT:        LCSSA Verifier
 ; GCN-O1-NEXT:        Loop-Closed SSA Form Pass
 ; GCN-O1-NEXT:      DummyCGSCCPass
@@ -422,8 +431,11 @@
 ; GCN-O1-OPTS-NEXT:Machine Branch Probability Analysis
 ; GCN-O1-OPTS-NEXT:Register Usage Information Storage
 ; GCN-O1-OPTS-NEXT:Default Regalloc Eviction Advisor
+; GCN-O1-OPTS-NEXT:Default Regalloc Priority Advisor
 ; GCN-O1-OPTS-NEXT:  ModulePass Manager
 ; GCN-O1-OPTS-NEXT:    Pre-ISel Intrinsic Lowering
+; GCN-O1-OPTS-NEXT:    FunctionPass Manager
+; GCN-O1-OPTS-NEXT:      Expand large div/rem
 ; GCN-O1-OPTS-NEXT:    AMDGPU Printf lowering
 ; GCN-O1-OPTS-NEXT:      FunctionPass Manager
 ; GCN-O1-OPTS-NEXT:        Dominator Tree Construction
@@ -457,7 +469,6 @@
 ; GCN-O1-OPTS-NEXT:      Loop Pass Manager
 ; GCN-O1-OPTS-NEXT:        Loop Invariant Code Motion
 ; GCN-O1-OPTS-NEXT:      Split GEPs to a variadic base and a constant offset for better CSE
-; GCN-O1-OPTS-NEXT:      Speculatively execute instructions
 ; GCN-O1-OPTS-NEXT:      Scalar Evolution Analysis
 ; GCN-O1-OPTS-NEXT:      Straight line strength reduction
 ; GCN-O1-OPTS-NEXT:      Early CSE
@@ -549,6 +560,9 @@
 ; GCN-O1-OPTS-NEXT:        Memory SSA
 ; GCN-O1-OPTS-NEXT:        AMDGPU Annotate Uniform Values
 ; GCN-O1-OPTS-NEXT:        SI annotate control flow
+; GCN-O1-OPTS-NEXT:        Post-Dominator Tree Construction
+; GCN-O1-OPTS-NEXT:        Legacy Divergence Analysis
+; GCN-O1-OPTS-NEXT:        AMDGPU Rewrite Undef for PHI
 ; GCN-O1-OPTS-NEXT:        LCSSA Verifier
 ; GCN-O1-OPTS-NEXT:        Loop-Closed SSA Form Pass
 ; GCN-O1-OPTS-NEXT:      DummyCGSCCPass
@@ -714,8 +728,11 @@
 ; GCN-O2-NEXT:Machine Branch Probability Analysis
 ; GCN-O2-NEXT:Register Usage Information Storage
 ; GCN-O2-NEXT:Default Regalloc Eviction Advisor
+; GCN-O2-NEXT:Default Regalloc Priority Advisor
 ; GCN-O2-NEXT:  ModulePass Manager
 ; GCN-O2-NEXT:    Pre-ISel Intrinsic Lowering
+; GCN-O2-NEXT:    FunctionPass Manager
+; GCN-O2-NEXT:      Expand large div/rem
 ; GCN-O2-NEXT:    AMDGPU Printf lowering
 ; GCN-O2-NEXT:      FunctionPass Manager
 ; GCN-O2-NEXT:        Dominator Tree Construction
@@ -749,7 +766,6 @@
 ; GCN-O2-NEXT:      Loop Pass Manager
 ; GCN-O2-NEXT:        Loop Invariant Code Motion
 ; GCN-O2-NEXT:      Split GEPs to a variadic base and a constant offset for better CSE
-; GCN-O2-NEXT:      Speculatively execute instructions
 ; GCN-O2-NEXT:      Scalar Evolution Analysis
 ; GCN-O2-NEXT:      Straight line strength reduction
 ; GCN-O2-NEXT:      Early CSE
@@ -841,6 +857,9 @@
 ; GCN-O2-NEXT:        Memory SSA
 ; GCN-O2-NEXT:        AMDGPU Annotate Uniform Values
 ; GCN-O2-NEXT:        SI annotate control flow
+; GCN-O2-NEXT:        Post-Dominator Tree Construction
+; GCN-O2-NEXT:        Legacy Divergence Analysis
+; GCN-O2-NEXT:        AMDGPU Rewrite Undef for PHI
 ; GCN-O2-NEXT:        LCSSA Verifier
 ; GCN-O2-NEXT:        Loop-Closed SSA Form Pass
 ; GCN-O2-NEXT:      Analysis if a function is memory bound
@@ -1009,8 +1028,11 @@
 ; GCN-O3-NEXT:Machine Branch Probability Analysis
 ; GCN-O3-NEXT:Register Usage Information Storage
 ; GCN-O3-NEXT:Default Regalloc Eviction Advisor
+; GCN-O3-NEXT:Default Regalloc Priority Advisor
 ; GCN-O3-NEXT:  ModulePass Manager
 ; GCN-O3-NEXT:    Pre-ISel Intrinsic Lowering
+; GCN-O3-NEXT:    FunctionPass Manager
+; GCN-O3-NEXT:      Expand large div/rem
 ; GCN-O3-NEXT:    AMDGPU Printf lowering
 ; GCN-O3-NEXT:      FunctionPass Manager
 ; GCN-O3-NEXT:        Dominator Tree Construction
@@ -1044,7 +1066,6 @@
 ; GCN-O3-NEXT:      Loop Pass Manager
 ; GCN-O3-NEXT:        Loop Invariant Code Motion
 ; GCN-O3-NEXT:      Split GEPs to a variadic base and a constant offset for better CSE
-; GCN-O3-NEXT:      Speculatively execute instructions
 ; GCN-O3-NEXT:      Scalar Evolution Analysis
 ; GCN-O3-NEXT:      Straight line strength reduction
 ; GCN-O3-NEXT:      Phi Values Analysis
@@ -1148,6 +1169,9 @@
 ; GCN-O3-NEXT:        Memory SSA
 ; GCN-O3-NEXT:        AMDGPU Annotate Uniform Values
 ; GCN-O3-NEXT:        SI annotate control flow
+; GCN-O3-NEXT:        Post-Dominator Tree Construction
+; GCN-O3-NEXT:        Legacy Divergence Analysis
+; GCN-O3-NEXT:        AMDGPU Rewrite Undef for PHI
 ; GCN-O3-NEXT:        LCSSA Verifier
 ; GCN-O3-NEXT:        Loop-Closed SSA Form Pass
 ; GCN-O3-NEXT:      Analysis if a function is memory bound

@@ -12,15 +12,15 @@
 #include <sycl/detail/property_helper.hpp>
 #include <sycl/properties/property_traits.hpp>
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace ext {
 namespace oneapi {
 namespace cuda {
 namespace property {
 namespace context {
-class use_primary_context : public ::cl::sycl::detail::DataLessProperty<
-                                ::cl::sycl::detail::UsePrimaryContext> {};
+class use_primary_context : public ::sycl::detail::DataLessProperty<
+                                ::sycl::detail::UsePrimaryContext> {};
 } // namespace context
 } // namespace property
 } // namespace cuda
@@ -31,8 +31,9 @@ namespace property {
 namespace context {
 namespace __SYCL2020_DEPRECATED(
     "use 'sycl::ext::oneapi::cuda::property::context' instead") cuda {
-class use_primary_context : public ::cl::sycl::ext::oneapi::cuda::property::
-                                context::use_primary_context {};
+class use_primary_context
+    : public ::sycl::ext::oneapi::cuda::property::context::use_primary_context {
+};
 // clang-format off
 } // namespace cuda
 // clang-format on
@@ -44,20 +45,12 @@ class context;
 
 // Context property trait specializations
 template <>
-struct is_property<property::context::cuda::use_primary_context>
-    : std::true_type {};
-
-template <>
 struct is_property_of<property::context::cuda::use_primary_context, context>
-    : std::true_type {};
-
-template <>
-struct is_property<ext::oneapi::cuda::property::context::use_primary_context>
     : std::true_type {};
 
 template <>
 struct is_property_of<ext::oneapi::cuda::property::context::use_primary_context,
                       context> : std::true_type {};
 
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)

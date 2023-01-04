@@ -1,5 +1,5 @@
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
-// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out -Xsycl-target-frontend -fno-exceptions
+// RUN: %clangxx %EXTRA_COMPILE_FLAGS-std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out -Xsycl-target-frontend -fno-exceptions
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
 #include <sycl/sycl.hpp>

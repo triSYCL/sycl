@@ -143,6 +143,11 @@ struct __tgt_device_image {
   __tgt_offload_entry *EntriesEnd;   // End of table (non inclusive)
 };
 
+/// This struct contains information about a given image.
+struct __tgt_image_info {
+  const char *Arch;
+};
+
 /// This struct is a record of all the host code that may be offloaded to a
 /// target.
 struct __tgt_bin_desc {
@@ -241,6 +246,12 @@ int omp_target_disassociate_ptr(const void *HostPtr, int DeviceNum);
 void *llvm_omp_target_alloc_device(size_t Size, int DeviceNum);
 void *llvm_omp_target_alloc_host(size_t Size, int DeviceNum);
 void *llvm_omp_target_alloc_shared(size_t Size, int DeviceNum);
+
+/// Explicit target memory deallocators
+/// Using the llvm_ prefix until they become part of the OpenMP standard.
+void llvm_omp_target_free_device(void *DevicePtr, int DeviceNum);
+void llvm_omp_target_free_host(void *DevicePtr, int DeviceNum);
+void llvm_omp_target_free_shared(void *DevicePtr, int DeviceNum);
 
 /// Dummy target so we have a symbol for generating host fallback.
 void *llvm_omp_target_dynamic_shared_alloc();

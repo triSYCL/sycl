@@ -12,12 +12,13 @@
 
 #include <sycl/detail/defines.hpp>
 #include <sycl/detail/export.hpp>
+#include <sycl/detail/iostream_proxy.hpp>
 #include <sycl/stl.hpp>
 
 #include <cstddef>
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 
 // Forward declaration
 namespace detail {
@@ -50,7 +51,25 @@ private:
   std::vector<std::exception_ptr> MList;
 };
 
-using async_handler = std::function<void(cl::sycl::exception_list)>;
+using async_handler = std::function<void(sycl::exception_list)>;
 
+namespace detail {
+// Default implementation of async_handler used by queue and context when no
+// user-defined async_handler is specified.
+inline void defaultAsyncHandler(exception_list Exceptions) {
+  std::cerr << "Default async_handler caught exceptions:";
+  for (auto &EIt : Exceptions) {
+    try {
+      if (EIt) {
+        std::rethrow_exception(EIt);
+      }
+    } catch (const std::exception &E) {
+      std::cerr << "\n\t" << E.what();
+    }
+  }
+  std::cerr << std::endl;
+  std::terminate();
+}
+} // namespace detail
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)

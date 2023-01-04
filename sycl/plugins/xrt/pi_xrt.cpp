@@ -340,6 +340,28 @@ to_native_handle(From &&from) {
   return reinterpret_cast<pi_native_handle>(std::addressof(from));
 }
 
+/// Wrapper around a T to prevent the object constructor from running.
+/// It is used to deal with the arbitrary order of destruction across
+/// translations units.
+template <typename T> class no_destroy {
+  union storage {
+    storage() {}
+    bool empty = false;
+    T data;
+    ~storage() {}
+  } s;
+
+public:
+  template<typename ... Ts>
+  no_destroy(Ts&&... ts) {
+    new (&s.data) T(std::forward<Ts>(ts)...);
+  }
+  operator T &() { return get(); }
+  operator const T &() const { return get(); }
+  T &get() { return s.data; }
+  const T &get() const { return s.data; }
+};
+
 struct _pi_device
 /// TODO: _pi_device should be ref-counted , but the SYCL runtime
 /// seems to expect piDevicesGet to return objects with a ref-count
@@ -423,6 +445,10 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
   /// enqueue them to process them later.
   workqueue pending_cmds;
 
+  // TODO: xrt::bo sometimes stay stuck while being deleted. So we do not delete
+  // it. (https://github.com/Xilinx/XRT/issues/6588)
+  no_destroy<native_type> buffer_;
+
   _pi_mem(_pi_context *ctx, _mem m) : context_(ctx), mem(m) {}
 
   template <typename T>
@@ -465,17 +491,7 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
     pending_cmds.exec_queue(); // TODO fix this
   }
 
-  // TODO: xrt::bo sometimes stay stuck while being deleted. So we do not delete
-  // it. (https://github.com/Xilinx/XRT/issues/6588)
-  // TODO: no_destroy should be a template wrapper.
-  union no_destroy {
-    native_type buffer_ = {};
-    ~no_destroy() {}
-  } nd;
-
-  native_type &get_native() { return nd.buffer_; }
-
-  ~_pi_mem() { assert(pending_cmds.cmds.empty()); }
+  native_type &get_native() { return buffer_; }
 };
 
 /// The Pi calls are never queued into the _pi_queue
@@ -537,14 +553,17 @@ struct _pi_kernel : ref_counted_base<_pi_kernel> {
   using native_type = xrt::kernel;
 
   ref_counted_ref<_pi_program> prog_;
-  native_type kernel_;
+  // TODO: _pi_kernel are destroyed by the SYCL runtime while all the global
+  // destructors are running, so the XRT global state might already have been
+  // destroyed. (https://github.com/intel/llvm/issues/7020)
+  no_destroy<native_type> kernel_;
   xrt::run run_;
   xrt::xclbin::kernel info_;
 
   _pi_kernel(ref_counted_ref<_pi_program> ctx, native_type kern,
              xrt::xclbin::kernel info)
       : prog_(ctx), kernel_(std::move(kern)),
-        run_(REPRODUCE_CALL(xrt::run, kernel_)), info_(std::move(info)) {}
+        run_(REPRODUCE_CALL(xrt::run, kernel_.get())), info_(std::move(info)) {}
   ref_counted_ref<_pi_context> get_context() { return prog_->context_; }
   ref_counted_ref<_pi_device> get_device() {
     assert(get_context()->devices_.size() == 1);
@@ -619,8 +638,10 @@ pi_result getInfo<const char *>(size_t param_value_size, void *param_value,
 } // anonymous namespace
 
 /// ------ Error handling, matching OpenCL plugin semantics.
-__SYCL_INLINE_NAMESPACE(cl) {
-namespace sycl::detail::pi {
+namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
+namespace detail {
+namespace pi {
 
 std::ostream &log() { return std::cerr; }
 
@@ -647,15 +668,11 @@ void assertion(bool Condition, const char *Message) {
   std::terminate();
 }
 
-}  // namespace sycl::detail::pi
-} // __SYCL_INLINE_NAMESPACE(cl)
-
-/// Check that we always use the same thread to call this function
-void assert_single_thread() {
-  static std::thread::id saved_id = std::this_thread::get_id();
-  assert(saved_id == std::this_thread::get_id() &&
-         "there is no multithread support for now");
 }
+}
+}
+}
+
 
 /// Obtains the XRT platform.
 pi_result xrt_piPlatformsGet(uint32_t num_entries, pi_platform *platforms,
@@ -682,7 +699,7 @@ pi_result xrt_piPlatformGetInfo(pi_platform platform,
   switch (param_name) {
   case PI_PLATFORM_INFO_NAME:
     return getInfo(param_value_size, param_value, param_value_size_ret,
-                   "XILINX XRT BACKEND");
+                   "Xilinx XRT");
   case PI_PLATFORM_INFO_VENDOR:
     return getInfo(param_value_size, param_value, param_value_size_ret,
                    "Xilinx Corporation");
@@ -1441,7 +1458,7 @@ pi_result xrt_piextKernelSetArgMemObj(pi_kernel kernel, uint32_t arg_index,
   _pi_mem *buf = *arg_value;
 
   buf->map_if_needed(kernel->get_device()->get_native(),
-                     kernel->kernel_.group_id(arg_index));
+                     kernel->kernel_.get().group_id(arg_index));
   REPRODUCE_MEMCALL(kernel->run_, set_arg, arg_index, buf->get_native());
 
   return PI_SUCCESS;
@@ -1502,7 +1519,7 @@ pi_result xrt_piextKernelGetNativeHandle(pi_kernel kernel,
   assert_valid_obj(kernel);
   assert(handle);
 
-  *handle = to_native_handle(kernel->kernel_);
+  *handle = to_native_handle(kernel->kernel_.get());
 
   return PI_SUCCESS;
 }
@@ -2125,11 +2142,12 @@ pi_result xrt_piTearDown(void *) {
 
 template <typename, auto func> struct xrt_pi_call_wrapper;
 
+static std::mutex pi_mutex;
+
 template <typename ret_ty, typename... args_ty, auto func>
 struct xrt_pi_call_wrapper<ret_ty (*)(args_ty...), func> {
   static ret_ty call(args_ty... args) {
-    /// Wrapper around every call to the XRT pi.
-    assert_single_thread();
+    std::lock_guard<std::mutex> guard(pi_mutex);
     try {
       return func(args...);
     } catch (...) {

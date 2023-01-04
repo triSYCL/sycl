@@ -17,6 +17,7 @@
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/TinyPtrVector.h"
 #include "llvm/Object/ELF.h"
+#include "llvm/Support/Compiler.h"
 
 namespace lld {
 namespace elf {
@@ -30,7 +31,7 @@ class SyntheticSection;
 template <class ELFT> class ObjFile;
 class OutputSection;
 
-extern std::vector<Partition> partitions;
+LLVM_LIBRARY_VISIBILITY extern std::vector<Partition> partitions;
 
 // Returned by InputSectionBase::relsOrRelas. At least one member is empty.
 template <class ELFT> struct RelsOrRelas {
@@ -163,7 +164,7 @@ public:
 
   ArrayRef<uint8_t> data() const {
     if (uncompressedSize >= 0)
-      uncompress();
+      decompress();
     return rawData;
   }
 
@@ -194,7 +195,6 @@ public:
   // relocations, assuming that Buf points to this section's copy in
   // the mmap'ed output buffer.
   template <class ELFT> void relocate(uint8_t *buf, uint8_t *bufEnd);
-  void relocateAlloc(uint8_t *buf, uint8_t *bufEnd);
   static uint64_t getRelocTargetVA(const InputFile *File, RelType Type,
                                    int64_t A, uint64_t P, const Symbol &Sym,
                                    RelExpr Expr);
@@ -234,7 +234,7 @@ public:
 protected:
   template <typename ELFT>
   void parseCompressedHeader();
-  void uncompress() const;
+  void decompress() const;
 
   // This field stores the uncompressed size of the compressed data in rawData,
   // or -1 if rawData is not compressed (either because the section wasn't
@@ -296,7 +296,9 @@ public:
     return const_cast<MergeInputSection *>(this)->getSectionPiece(offset);
   }
 
-  SyntheticSection *getParent() const;
+  SyntheticSection *getParent() const {
+    return cast_or_null<SyntheticSection>(parent);
+  }
 
 private:
   void splitStrings(StringRef s, size_t size);
@@ -331,7 +333,7 @@ public:
 
   // Splittable sections are handled as a sequence of data
   // rather than a single large blob of data.
-  SmallVector<EhSectionPiece, 0> pieces;
+  SmallVector<EhSectionPiece, 0> cies, fdes;
 
   SyntheticSection *getParent() const;
   uint64_t getParentOffset(uint64_t offset) const;
@@ -394,13 +396,31 @@ private:
 
 static_assert(sizeof(InputSection) <= 160, "InputSection is too big");
 
+class SyntheticSection : public InputSection {
+public:
+  SyntheticSection(uint64_t flags, uint32_t type, uint32_t alignment,
+                   StringRef name)
+      : InputSection(nullptr, flags, type, alignment, {}, name,
+                     InputSectionBase::Synthetic) {}
+
+  virtual ~SyntheticSection() = default;
+  virtual size_t getSize() const = 0;
+  virtual bool updateAllocSize() { return false; }
+  // If the section has the SHF_ALLOC flag and the size may be changed if
+  // thunks are added, update the section size.
+  virtual bool isNeeded() const { return true; }
+  virtual void finalizeContents() {}
+  virtual void writeTo(uint8_t *buf) = 0;
+
+  static bool classof(const SectionBase *sec) {
+    return sec->kind() == InputSectionBase::Synthetic;
+  }
+};
+
 inline bool isDebugSection(const InputSectionBase &sec) {
   return (sec.flags & llvm::ELF::SHF_ALLOC) == 0 &&
          sec.name.startswith(".debug");
 }
-
-// The list of all input sections.
-extern SmallVector<InputSectionBase *, 0> inputSections;
 
 // The set of TOC entries (.toc + addend) for which we should not apply
 // toc-indirect to toc-relative relaxation. const Symbol * refers to the

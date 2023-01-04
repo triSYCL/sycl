@@ -1,7 +1,7 @@
 // RUN: mlir-opt %s --sparse-compiler | \
 // RUN: mlir-cpu-runner \
 // RUN:  -e entry -entry-point-result=void  \
-// RUN:  -shared-libs=%mlir_integration_test_dir/libmlir_c_runner_utils%shlibext | \
+// RUN:  -shared-libs=%mlir_lib_dir/libmlir_c_runner_utils%shlibext | \
 // RUN: FileCheck %s
 
 #SparseVector = #sparse_tensor.encoding<{dimLevelType = ["compressed"]}>
@@ -219,18 +219,17 @@ module {
     %m4 = sparse_tensor.values %4 : tensor<?xf64, #DenseVector> to memref<?xf64>
     %v4 = vector.load %m4[%c0]: memref<?xf64>, vector<32xf64>
     vector.print %v4 : vector<32xf64>
-    %m5 = bufferization.to_memref %5 : memref<f64>
-    %v5 = memref.load %m5[] : memref<f64>
+    %v5 = tensor.extract %5[] : tensor<f64>
     vector.print %v5 : f64
 
     // Release the resources.
-    sparse_tensor.release %sv1 : tensor<?xf64, #SparseVector>
-    sparse_tensor.release %sv1_dup : tensor<?xf64, #SparseVector>
-    sparse_tensor.release %sv2 : tensor<?xf64, #SparseVector>
-    sparse_tensor.release %0 : tensor<?xf64, #SparseVector>
-    sparse_tensor.release %2 : tensor<?xf64, #SparseVector>
-    sparse_tensor.release %3 : tensor<?xf64, #SparseVector>
-    sparse_tensor.release %4 : tensor<?xf64, #DenseVector>
+    bufferization.dealloc_tensor %sv1 : tensor<?xf64, #SparseVector>
+    bufferization.dealloc_tensor %sv1_dup : tensor<?xf64, #SparseVector>
+    bufferization.dealloc_tensor %sv2 : tensor<?xf64, #SparseVector>
+    bufferization.dealloc_tensor %0 : tensor<?xf64, #SparseVector>
+    bufferization.dealloc_tensor %2 : tensor<?xf64, #SparseVector>
+    bufferization.dealloc_tensor %3 : tensor<?xf64, #SparseVector>
+    bufferization.dealloc_tensor %4 : tensor<?xf64, #DenseVector>
     return
   }
 }

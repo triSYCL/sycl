@@ -37,7 +37,7 @@ static bool shouldIndentWrappedSelectorName(const FormatStyle &Style,
 // Returns the length of everything up to the first possible line break after
 // the ), ], } or > matching \c Tok.
 static unsigned getLengthToMatchingParen(const FormatToken &Tok,
-                                         const SmallVector<ParenState> &Stack) {
+                                         ArrayRef<ParenState> Stack) {
   // Normally whether or not a break before T is possible is calculated and
   // stored in T.CanBreakBefore. Braces, array initializers and text proto
   // messages like `key: < ... >` are an exception: a break is possible
@@ -444,7 +444,7 @@ bool ContinuationIndenter::mustBreak(const LineState &State) {
   }
 
   // If the template declaration spans multiple lines, force wrap before the
-  // function/class declaration
+  // function/class declaration.
   if (Previous.ClosesTemplateDeclaration && CurrentState.BreakBeforeParameter &&
       Current.CanBreakBefore) {
     return true;
@@ -552,7 +552,7 @@ bool ContinuationIndenter::mustBreak(const LineState &State) {
 
   // If the return type spans multiple lines, wrap before the function name.
   if (((Current.is(TT_FunctionDeclarationName) &&
-        // Don't break before a C# function when no break after return type
+        // Don't break before a C# function when no break after return type.
         (!Style.isCSharp() ||
          Style.AlwaysBreakAfterReturnType != FormatStyle::RTBS_None) &&
         // Don't always break between a JavaScript `function` and the function
@@ -656,6 +656,7 @@ void ContinuationIndenter::addTokenOnCurrentLine(LineState &State, bool DryRun,
   int PPColumnCorrection = 0;
   if (Style.IndentPPDirectives == FormatStyle::PPDIS_AfterHash &&
       Previous.is(tok::hash) && State.FirstIndent > 0 &&
+      &Previous == State.Line->First &&
       (State.Line->Type == LT_PreprocessorDirective ||
        State.Line->Type == LT_ImportStatement)) {
     Spaces += State.FirstIndent;
@@ -1089,8 +1090,12 @@ unsigned ContinuationIndenter::getNewLineColumn(const LineState &State) {
                     CurrentState.Indent + Style.ContinuationIndentWidth);
   }
 
-  if (Style.BreakBeforeBraces == FormatStyle::BS_Whitesmiths &&
-      State.Line->First->is(tok::kw_enum)) {
+  // After a goto label. Usually labels are on separate lines. However
+  // for Verilog the labels may be only recognized by the annotator and
+  // thus are on the same line as the current token.
+  if ((Style.isVerilog() && Keywords.isVerilogEndOfLabel(Previous)) ||
+      (Style.BreakBeforeBraces == FormatStyle::BS_Whitesmiths &&
+       State.Line->First->is(tok::kw_enum))) {
     return (Style.IndentWidth * State.Line->First->IndentLevel) +
            Style.IndentWidth;
   }
@@ -1190,6 +1195,10 @@ unsigned ContinuationIndenter::getNewLineColumn(const LineState &State) {
       break;
     }
   }
+  if (NextNonComment->isOneOf(TT_CtorInitializerColon, TT_InheritanceColon,
+                              TT_InheritanceComma)) {
+    return State.FirstIndent + Style.ConstructorInitializerIndentWidth;
+  }
   if ((PreviousNonComment &&
        (PreviousNonComment->ClosesTemplateDeclaration ||
         PreviousNonComment->ClosesRequiresClause ||
@@ -1239,6 +1248,9 @@ unsigned ContinuationIndenter::getNewLineColumn(const LineState &State) {
     return ContinuationIndent;
   }
 
+  if (State.Line->InPragmaDirective)
+    return CurrentState.Indent + Style.ContinuationIndentWidth;
+
   // This ensure that we correctly format ObjC methods calls without inputs,
   // i.e. where the last element isn't selector like: [callee method];
   if (NextNonComment->is(tok::identifier) && NextNonComment->FakeRParens == 0 &&
@@ -1263,10 +1275,6 @@ unsigned ContinuationIndenter::getNewLineColumn(const LineState &State) {
   if (PreviousNonComment && PreviousNonComment->is(TT_InheritanceColon) &&
       Style.BreakInheritanceList == FormatStyle::BILS_AfterColon) {
     return CurrentState.Indent;
-  }
-  if (NextNonComment->isOneOf(TT_CtorInitializerColon, TT_InheritanceColon,
-                              TT_InheritanceComma)) {
-    return State.FirstIndent + Style.ConstructorInitializerIndentWidth;
   }
   if (Previous.is(tok::r_paren) && !Current.isBinaryOperator() &&
       !Current.isOneOf(tok::colon, tok::comment)) {
@@ -1300,7 +1308,7 @@ static bool hasNestedBlockInlined(const FormatToken *Previous,
   if (Previous->ParameterCount > 1)
     return true;
 
-  // Also a nested block if contains a lambda inside function with 1 parameter
+  // Also a nested block if contains a lambda inside function with 1 parameter.
   return Style.BraceWrapping.BeforeLambdaBody && Current.is(TT_LambdaLSquare);
 }
 
@@ -1398,8 +1406,10 @@ unsigned ContinuationIndenter::moveStateToNextToken(LineState &State,
     CurrentState.NestedBlockIndent = State.Column + Current.ColumnWidth + 1;
   if (Current.isOneOf(TT_LambdaLSquare, TT_LambdaArrow))
     CurrentState.LastSpace = State.Column;
-  if (Current.is(TT_RequiresExpression))
+  if (Current.is(TT_RequiresExpression) &&
+      Style.RequiresExpressionIndentation == FormatStyle::REI_Keyword) {
     CurrentState.NestedBlockIndent = State.Column;
+  }
 
   // Insert scopes created by fake parenthesis.
   const FormatToken *Previous = Current.getPreviousNonComment();
@@ -1520,7 +1530,7 @@ void ContinuationIndenter::moveStatePastFakeLParens(LineState &State,
           Previous->is(TT_ConditionalExpr))) &&
         !Newline) {
       // If BreakBeforeBinaryOperators is set, un-indent a bit to account for
-      // the operator and keep the operands aligned
+      // the operator and keep the operands aligned.
       if (Style.AlignOperands == FormatStyle::OAS_AlignAfterOperator)
         NewParenState.UnindentOperator = true;
       // Mark indentation as alignment if the expression is aligned.
@@ -1712,7 +1722,7 @@ void ContinuationIndenter::moveStatePastScopeOpener(LineState &State,
 
   if (Style.BraceWrapping.BeforeLambdaBody && Current.Next != nullptr &&
       Current.is(tok::l_paren)) {
-    // Search for any parameter that is a lambda
+    // Search for any parameter that is a lambda.
     FormatToken const *next = Current.Next;
     while (next != nullptr) {
       if (next->is(TT_LambdaLSquare)) {
@@ -2532,7 +2542,7 @@ ContinuationIndenter::breakProtrudingToken(const FormatToken &Current,
 }
 
 unsigned ContinuationIndenter::getColumnLimit(const LineState &State) const {
-  // In preprocessor directives reserve two chars for trailing " \"
+  // In preprocessor directives reserve two chars for trailing " \".
   return Style.ColumnLimit - (State.Line->InPPDirective ? 2 : 0);
 }
 

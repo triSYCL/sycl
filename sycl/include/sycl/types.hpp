@@ -65,8 +65,8 @@
 // 4.10.1: Scalar data types
 // 4.10.2: SYCL vector types
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 
 enum class rounding_mode { automatic = 0, rte = 1, rtz = 2, rtp = 3, rtn = 4 };
 struct elem {
@@ -350,7 +350,7 @@ convertImpl(T Value) {
                             std::is_same<DestType, char>::value)),             \
                       R>                                                       \
   convertImpl(T Value) {                                                       \
-    OpenCLT OpValue = cl::sycl::detail::convertDataToType<T, OpenCLT>(Value);  \
+    OpenCLT OpValue = sycl::detail::convertDataToType<T, OpenCLT>(Value);      \
     return __spirv_SConvert##_R##DestType(OpValue);                            \
   }
 
@@ -370,7 +370,7 @@ __SYCL_GENERATE_CONVERT_IMPL(long)
                           std::is_same<OpenCLR, cl_##DestType>::value,         \
                       R>                                                       \
   convertImpl(T Value) {                                                       \
-    OpenCLT OpValue = cl::sycl::detail::convertDataToType<T, OpenCLT>(Value);  \
+    OpenCLT OpValue = sycl::detail::convertDataToType<T, OpenCLT>(Value);      \
     return __spirv_UConvert##_R##DestType(OpValue);                            \
   }
 
@@ -402,7 +402,7 @@ convertImpl(T Value) {
                             std::is_same<DestType, half>::value)),             \
                       R>                                                       \
   convertImpl(T Value) {                                                       \
-    OpenCLT OpValue = cl::sycl::detail::convertDataToType<T, OpenCLT>(Value);  \
+    OpenCLT OpValue = sycl::detail::convertDataToType<T, OpenCLT>(Value);      \
     return __spirv_Convert##SPIRVOp##_R##DestType(OpValue);                    \
   }
 
@@ -422,7 +422,7 @@ __SYCL_GENERATE_CONVERT_IMPL(SToF, double)
                             std::is_same<DestType, half>::value)),             \
                       R>                                                       \
   convertImpl(T Value) {                                                       \
-    OpenCLT OpValue = cl::sycl::detail::convertDataToType<T, OpenCLT>(Value);  \
+    OpenCLT OpValue = sycl::detail::convertDataToType<T, OpenCLT>(Value);      \
     return __spirv_Convert##SPIRVOp##_R##DestType(OpValue);                    \
   }
 
@@ -445,7 +445,7 @@ __SYCL_GENERATE_CONVERT_IMPL(UToF, double)
                           RoundingModeCondition<roundingMode>::value,          \
                       R>                                                       \
   convertImpl(T Value) {                                                       \
-    OpenCLT OpValue = cl::sycl::detail::convertDataToType<T, OpenCLT>(Value);  \
+    OpenCLT OpValue = sycl::detail::convertDataToType<T, OpenCLT>(Value);      \
     return __spirv_FConvert##_R##DestType##_##RoundingMode(OpValue);           \
   }
 
@@ -475,7 +475,7 @@ __SYCL_GENERATE_CONVERT_IMPL_FOR_ROUNDING_MODE(rtn, Rtn)
                           RoundingModeCondition<roundingMode>::value,          \
                       R>                                                       \
   convertImpl(T Value) {                                                       \
-    OpenCLT OpValue = cl::sycl::detail::convertDataToType<T, OpenCLT>(Value);  \
+    OpenCLT OpValue = sycl::detail::convertDataToType<T, OpenCLT>(Value);      \
     return __spirv_Convert##SPIRVOp##_R##DestType##_##RoundingMode(OpValue);   \
   }
 
@@ -700,15 +700,15 @@ public:
 #ifdef __SYCL_USE_EXT_VECTOR_TYPE__
   template <typename T = void>
   using EnableIfNotHostHalf = typename detail::enable_if_t<
-      !std::is_same<DataT, cl::sycl::detail::half_impl::half>::value ||
-          !std::is_same<cl::sycl::detail::half_impl::StorageT,
-                        cl::sycl::detail::host_half_impl::half_v2>::value,
+      !std::is_same<DataT, sycl::detail::half_impl::half>::value ||
+          !std::is_same<sycl::detail::half_impl::StorageT,
+                        sycl::detail::host_half_impl::half>::value,
       T>;
   template <typename T = void>
   using EnableIfHostHalf = typename detail::enable_if_t<
-      std::is_same<DataT, cl::sycl::detail::half_impl::half>::value &&
-          std::is_same<cl::sycl::detail::half_impl::StorageT,
-                       cl::sycl::detail::host_half_impl::half_v2>::value,
+      std::is_same<DataT, sycl::detail::half_impl::half>::value &&
+          std::is_same<sycl::detail::half_impl::StorageT,
+                       sycl::detail::host_half_impl::half>::value,
       T>;
 
   template <typename Ty = DataT>
@@ -935,16 +935,16 @@ public:
 #undef __SYCL_ACCESS_RETURN
   // End of hi/lo, even/odd, xyzw, and rgba swizzles.
 
-  template <access::address_space Space>
-  void load(size_t Offset, multi_ptr<const DataT, Space> Ptr) {
+  template <access::address_space Space, access::decorated DecorateAddress>
+  void load(size_t Offset, multi_ptr<const DataT, Space, DecorateAddress> Ptr) {
     for (int I = 0; I < NumElements; I++) {
-      setValue(I,
-               *multi_ptr<const DataT, Space>(Ptr + Offset * NumElements + I));
+      setValue(I, *multi_ptr<const DataT, Space, DecorateAddress>(
+                      Ptr + Offset * NumElements + I));
     }
   }
-  template <access::address_space Space>
-  void load(size_t Offset, multi_ptr<DataT, Space> Ptr) {
-    multi_ptr<const DataT, Space> ConstPtr(Ptr);
+  template <access::address_space Space, access::decorated DecorateAddress>
+  void load(size_t Offset, multi_ptr<DataT, Space, DecorateAddress> Ptr) {
+    multi_ptr<const DataT, Space, DecorateAddress> ConstPtr(Ptr);
     load(Offset, ConstPtr);
   }
   template <int Dimensions, access::mode Mode,
@@ -954,13 +954,17 @@ public:
   load(size_t Offset,
        accessor<DataT, Dimensions, Mode, Target, IsPlaceholder, PropertyListT>
            Acc) {
-    multi_ptr<const DataT, detail::TargetToAS<Target>::AS> MultiPtr(Acc);
+    multi_ptr<const DataT, detail::TargetToAS<Target>::AS,
+              access::decorated::yes>
+        MultiPtr(Acc);
     load(Offset, MultiPtr);
   }
-  template <access::address_space Space>
-  void store(size_t Offset, multi_ptr<DataT, Space> Ptr) const {
+  template <access::address_space Space, access::decorated DecorateAddress>
+  void store(size_t Offset,
+             multi_ptr<DataT, Space, DecorateAddress> Ptr) const {
     for (int I = 0; I < NumElements; I++) {
-      *multi_ptr<DataT, Space>(Ptr + Offset * NumElements + I) = getValue(I);
+      *multi_ptr<DataT, Space, DecorateAddress>(Ptr + Offset * NumElements +
+                                                I) = getValue(I);
     }
   }
   template <int Dimensions, access::mode Mode,
@@ -970,7 +974,8 @@ public:
   store(size_t Offset,
         accessor<DataT, Dimensions, Mode, Target, IsPlaceholder, PropertyListT>
             Acc) {
-    multi_ptr<DataT, detail::TargetToAS<Target>::AS> MultiPtr(Acc);
+    multi_ptr<DataT, detail::TargetToAS<Target>::AS, access::decorated::yes>
+        MultiPtr(Acc);
     store(Offset, MultiPtr);
   }
 
@@ -1870,8 +1875,8 @@ public:
 
   // Leave store() interface to automatic conversion to vec<>.
   // Load to vec_t and then assign to swizzle.
-  template <access::address_space Space>
-  void load(size_t offset, multi_ptr<DataT, Space> ptr) {
+  template <access::address_space Space, access::decorated DecorateAddress>
+  void load(size_t offset, multi_ptr<DataT, Space, DecorateAddress> ptr) {
     vec_t Tmp;
     Tmp.template load(offset, ptr);
     *this = Tmp;
@@ -1960,7 +1965,7 @@ private:
   OperationRightT m_RightOperation;
 
   // friends
-  template <typename T1, int T2> friend class cl::sycl::vec;
+  template <typename T1, int T2> friend class sycl::vec;
 
   template <typename T1, typename T2, typename T3, template <typename> class T4,
             int... T5>
@@ -2077,35 +2082,30 @@ __SYCL_RELLOGOP(&&)
 __SYCL_RELLOGOP(||)
 #undef __SYCL_RELLOGOP
 
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)
 
 #ifdef __SYCL_USE_EXT_VECTOR_TYPE__
 #define __SYCL_DECLARE_TYPE_VIA_CL_T(type)                                     \
-  using __##type##_t = cl::sycl::cl_##type;                                    \
+  using __##type##_t = sycl::cl_##type;                                        \
   using __##type##2_vec_t =                                                    \
-      cl::sycl::cl_##type __attribute__((ext_vector_type(2)));                 \
+      sycl::cl_##type __attribute__((ext_vector_type(2)));                     \
   using __##type##3_vec_t =                                                    \
-      cl::sycl::cl_##type __attribute__((ext_vector_type(3)));                 \
+      sycl::cl_##type __attribute__((ext_vector_type(3)));                     \
   using __##type##4_vec_t =                                                    \
-      cl::sycl::cl_##type __attribute__((ext_vector_type(4)));                 \
+      sycl::cl_##type __attribute__((ext_vector_type(4)));                     \
   using __##type##8_vec_t =                                                    \
-      cl::sycl::cl_##type __attribute__((ext_vector_type(8)));                 \
+      sycl::cl_##type __attribute__((ext_vector_type(8)));                     \
   using __##type##16_vec_t =                                                   \
-      cl::sycl::cl_##type __attribute__((ext_vector_type(16)));
+      sycl::cl_##type __attribute__((ext_vector_type(16)));
 
 #define __SYCL_DECLARE_TYPE_T(type)                                            \
-  using __##type##_t = cl::sycl::type;                                         \
-  using __##type##2_vec_t =                                                    \
-      cl::sycl::type __attribute__((ext_vector_type(2)));                      \
-  using __##type##3_vec_t =                                                    \
-      cl::sycl::type __attribute__((ext_vector_type(3)));                      \
-  using __##type##4_vec_t =                                                    \
-      cl::sycl::type __attribute__((ext_vector_type(4)));                      \
-  using __##type##8_vec_t =                                                    \
-      cl::sycl::type __attribute__((ext_vector_type(8)));                      \
-  using __##type##16_vec_t =                                                   \
-      cl::sycl::type __attribute__((ext_vector_type(16)));
+  using __##type##_t = sycl::type;                                             \
+  using __##type##2_vec_t = sycl::type __attribute__((ext_vector_type(2)));    \
+  using __##type##3_vec_t = sycl::type __attribute__((ext_vector_type(3)));    \
+  using __##type##4_vec_t = sycl::type __attribute__((ext_vector_type(4)));    \
+  using __##type##8_vec_t = sycl::type __attribute__((ext_vector_type(8)));    \
+  using __##type##16_vec_t = sycl::type __attribute__((ext_vector_type(16)));
 
 __SYCL_DECLARE_TYPE_VIA_CL_T(char)
 __SYCL_DECLARE_TYPE_T(schar)
@@ -2133,16 +2133,16 @@ __SYCL_DECLARE_TYPE_VIA_CL_T(double)
 #define __SYCL_GET_SCALAR_CL_TYPE(target) ::cl_##target
 #endif // __SYCL_USE_EXT_VECTOR_TYPE__
 
-using __half_t = cl::sycl::detail::half_impl::StorageT;
-using __half2_vec_t = cl::sycl::detail::half_impl::Vec2StorageT;
-using __half3_vec_t = cl::sycl::detail::half_impl::Vec3StorageT;
-using __half4_vec_t = cl::sycl::detail::half_impl::Vec4StorageT;
-using __half8_vec_t = cl::sycl::detail::half_impl::Vec8StorageT;
-using __half16_vec_t = cl::sycl::detail::half_impl::Vec16StorageT;
+using __half_t = sycl::detail::half_impl::StorageT;
+using __half2_vec_t = sycl::detail::half_impl::Vec2StorageT;
+using __half3_vec_t = sycl::detail::half_impl::Vec3StorageT;
+using __half4_vec_t = sycl::detail::half_impl::Vec4StorageT;
+using __half8_vec_t = sycl::detail::half_impl::Vec8StorageT;
+using __half16_vec_t = sycl::detail::half_impl::Vec16StorageT;
 #define __SYCL_GET_CL_HALF_TYPE(target, num) __##target##num##_vec_t
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace detail {
 // select_apply_cl_t selects from T8/T16/T32/T64 basing on
 // sizeof(IN).  expected to handle scalar types in IN.
@@ -2493,7 +2493,7 @@ struct CheckDeviceCopyable<
 #endif // __SYCL_DEVICE_ONLY__
 } // namespace detail
 
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)
 
 #undef __SYCL_ALIGNED_VAR

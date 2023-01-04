@@ -19,8 +19,8 @@
 #include <sycl/sycl.hpp>
 #include <type_traits>
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace ext {
 namespace oneapi {
 namespace experimental {
@@ -1029,7 +1029,7 @@ _SYCL_EXT_CPLX_INLINE_VISIBILITY complex<_Tp> __sqr(const complex<_Tp> &__x) {
 
 template <class _Tp, class = std::enable_if<is_gencomplex<_Tp>::value>>
 SYCL_EXTERNAL complex<_Tp> asinh(const complex<_Tp> &__x) {
-  const _Tp __pi(sycl::atan2(+0., -0.));
+  const _Tp __pi(sycl::atan2(_Tp(+0.), _Tp(-0.)));
   if (sycl::isinf(__x.real())) {
     if (sycl::isnan(__x.imag()))
       return __x;
@@ -1057,7 +1057,7 @@ SYCL_EXTERNAL complex<_Tp> asinh(const complex<_Tp> &__x) {
 
 template <class _Tp, class = std::enable_if<is_gencomplex<_Tp>::value>>
 SYCL_EXTERNAL complex<_Tp> acosh(const complex<_Tp> &__x) {
-  const _Tp __pi(sycl::atan2(+0., -0.));
+  const _Tp __pi(sycl::atan2(_Tp(+0.), _Tp(-0.)));
   if (sycl::isinf(__x.real())) {
     if (sycl::isnan(__x.imag()))
       return complex<_Tp>(sycl::fabs(__x.real()), __x.imag());
@@ -1090,7 +1090,7 @@ SYCL_EXTERNAL complex<_Tp> acosh(const complex<_Tp> &__x) {
 
 template <class _Tp, class = std::enable_if<is_gencomplex<_Tp>::value>>
 SYCL_EXTERNAL complex<_Tp> atanh(const complex<_Tp> &__x) {
-  const _Tp __pi(sycl::atan2(+0., -0.));
+  const _Tp __pi(sycl::atan2(_Tp(+0.), _Tp(-0.)));
   if (sycl::isinf(__x.imag())) {
     return complex<_Tp>(sycl::copysign(_Tp(0), __x.real()),
                         sycl::copysign(__pi / _Tp(2), __x.imag()));
@@ -1180,7 +1180,7 @@ SYCL_EXTERNAL complex<_Tp> asin(const complex<_Tp> &__x) {
 
 template <class _Tp, class = std::enable_if<is_gencomplex<_Tp>::value>>
 SYCL_EXTERNAL complex<_Tp> acos(const complex<_Tp> &__x) {
-  const _Tp __pi(sycl::atan2(+0., -0.));
+  const _Tp __pi(sycl::atan2(_Tp(+0.), _Tp(-0.)));
   if (sycl::isinf(__x.real())) {
     if (sycl::isnan(__x.imag()))
       return complex<_Tp>(__x.imag(), __x.real());
@@ -1312,8 +1312,8 @@ operator<<(const sycl::stream &__ss, const complex<_Tp> &_x) {
 } // namespace oneapi
 } // namespace ext
 
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)
 
 #undef _SYCL_EXT_CPLX_INLINE_VISIBILITY
 

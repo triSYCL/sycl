@@ -35,6 +35,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/SHA1.h"
 #include <algorithm>
 #include <cstring>
 using namespace clang;
@@ -203,6 +204,88 @@ bool Expr::isKnownToHaveBooleanValue(bool Semantic) const {
   return false;
 }
 
+bool Expr::isFlexibleArrayMemberLike(
+    ASTContext &Context,
+    LangOptions::StrictFlexArraysLevelKind StrictFlexArraysLevel,
+    bool IgnoreTemplateOrMacroSubstitution) const {
+
+  // For compatibility with existing code, we treat arrays of length 0 or
+  // 1 as flexible array members.
+  const auto *CAT = Context.getAsConstantArrayType(getType());
+  if (CAT) {
+    llvm::APInt Size = CAT->getSize();
+
+    using FAMKind = LangOptions::StrictFlexArraysLevelKind;
+
+    if (StrictFlexArraysLevel == FAMKind::IncompleteOnly)
+      return false;
+
+    // GCC extension, only allowed to represent a FAM.
+    if (Size == 0)
+      return true;
+
+    if (StrictFlexArraysLevel == FAMKind::ZeroOrIncomplete && Size.uge(1))
+      return false;
+
+    if (StrictFlexArraysLevel == FAMKind::OneZeroOrIncomplete && Size.uge(2))
+      return false;
+  } else if (!Context.getAsIncompleteArrayType(getType()))
+    return false;
+
+  const Expr *E = IgnoreParens();
+
+  const NamedDecl *ND = nullptr;
+  if (const auto *DRE = dyn_cast<DeclRefExpr>(E))
+    ND = DRE->getDecl();
+  else if (const auto *ME = dyn_cast<MemberExpr>(E))
+    ND = ME->getMemberDecl();
+  else if (const auto *IRE = dyn_cast<ObjCIvarRefExpr>(E))
+    return IRE->getDecl()->getNextIvar() == nullptr;
+
+  if (!ND)
+    return false;
+
+  // A flexible array member must be the last member in the class.
+  // FIXME: If the base type of the member expr is not FD->getParent(),
+  // this should not be treated as a flexible array member access.
+  if (const auto *FD = dyn_cast<FieldDecl>(ND)) {
+    // GCC treats an array memeber of a union as an FAM if the size is one or
+    // zero.
+    if (CAT) {
+      llvm::APInt Size = CAT->getSize();
+      if (FD->getParent()->isUnion() && (Size.isZero() || Size.isOne()))
+        return true;
+    }
+
+    // Don't consider sizes resulting from macro expansions or template argument
+    // substitution to form C89 tail-padded arrays.
+    if (IgnoreTemplateOrMacroSubstitution) {
+      TypeSourceInfo *TInfo = FD->getTypeSourceInfo();
+      while (TInfo) {
+        TypeLoc TL = TInfo->getTypeLoc();
+        // Look through typedefs.
+        if (TypedefTypeLoc TTL = TL.getAsAdjusted<TypedefTypeLoc>()) {
+          const TypedefNameDecl *TDL = TTL.getTypedefNameDecl();
+          TInfo = TDL->getTypeSourceInfo();
+          continue;
+        }
+        if (ConstantArrayTypeLoc CTL = TL.getAs<ConstantArrayTypeLoc>()) {
+          const Expr *SizeExpr = dyn_cast<IntegerLiteral>(CTL.getSizeExpr());
+          if (!SizeExpr || SizeExpr->getExprLoc().isMacroID())
+            return false;
+        }
+        break;
+      }
+    }
+
+    RecordDecl::field_iterator FI(
+        DeclContext::decl_iterator(const_cast<FieldDecl *>(FD)));
+    return ++FI == FD->getParent()->field_end();
+  }
+
+  return false;
+}
+
 const ValueDecl *
 Expr::getAsBuiltinConstantDeclRef(const ASTContext &Context) const {
   Expr::EvalResult Eval;
@@ -277,7 +360,7 @@ ConstantExpr::getStorageKind(const APValue &Value) {
   case APValue::Int:
     if (!Value.getInt().needsCleanup())
       return ConstantExpr::RSK_Int64;
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
   default:
     return ConstantExpr::RSK_APValue;
   }
@@ -566,6 +649,82 @@ UniqueStableNameDiscriminator(ASTContext &, const NamedDecl *ND) {
   return llvm::None;
 }
 
+/// Compute a unique name that is consumable by sycl_vxx
+std::string SYCLUniqueStableNameExpr::computeUniqueSYCLVXXName(StringRef Demangle) {
+  /// VXX has a maximum of 64 characters for the name of the kernel function
+  /// plus the name of one parameter.
+  /// Those characters need to be used wisely to prevent name collisions.
+  /// It is also useful to use a name that is understandable by the user,
+  /// so we add only 8 character of hash and only if needed.
+  /// The first character cannot be an underscore or a digit.
+  /// An underscore can only be found between two non underscore character
+  /// (No __ or underscore at end or start of name)
+  constexpr unsigned MaxVXXSize = 30;
+  /// Some transformations might make 2 kernel identifiers the same.
+  /// Allow adding a hash when such transformations are made to avoid possible
+  /// name conflict.
+  bool ForceHash = false;
+
+  std::string Result;
+  Result.reserve(Demangle.size());
+
+  for (char c : Demangle) {
+    if (!isAlphanumeric(c)) {
+      // Do not repeat _ in the cleaned-up name
+      if (!Result.empty() && Result.back() == '_')
+        continue;
+      c = '_';
+    }
+    Result.push_back(c);
+  }
+
+  // Replace first kernel character name by a 'k' to be compatible with SPIR
+  if ((Result.front() == '_' || isDigit(Result.front()))) {
+    Result.front() = 'k';
+    ForceHash = true;
+  }
+
+  // Vivado IP naming requirements forbids having '_' as a last character
+  if (Result.back() == '_') {
+    ForceHash = true;
+  }
+
+  /// The name alone is guaranteed to be unique, so if fits in the size, it is
+  /// enough.
+  if (Result.size() < MaxVXXSize && !ForceHash) {
+    return Result;
+  }
+
+  if (Result.size() > (MaxVXXSize - 9)) {
+    /// 9 for 8 characters of hash and an '_'.
+    Result.erase(0, Result.size() - (MaxVXXSize - 9));
+  }
+
+  if (Result.front() == '_')
+    Result.front() = 'u';
+  if(isDigit(Result.front()))
+    Result.front() = 'a' + Result.front() - '0';
+
+  if (Result.back() != '_')
+    Result.push_back('_');
+
+  /// Sadly there are only 63 valid characters in C identifiers and v++ doesn't
+  /// deal well with double underscores in identifiers. So A and B are
+  /// repeated. This doesn't hurt entropy too much because it is just 2 out
+  /// of 64.
+  Result += llvm::SHA1::hashToString(
+      llvm::ArrayRef<uint8_t>{reinterpret_cast<const uint8_t *>(Demangle.data()),
+                              Demangle.size()},
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+      "abcdefghijklmnopqrstuvwxyz"
+      "0123456789AB");
+
+  if (Result.size() > MaxVXXSize)
+    Result.resize(MaxVXXSize);
+
+  return Result;
+}
+
 std::string SYCLUniqueStableNameExpr::ComputeName(ASTContext &Context,
                                                   QualType Ty) {
   std::unique_ptr<MangleContext> Ctx{ItaniumMangleContext::create(
@@ -576,7 +735,7 @@ std::string SYCLUniqueStableNameExpr::ComputeName(ASTContext &Context,
   llvm::raw_string_ostream Out(Buffer);
   Ctx->mangleTypeName(Ty, Out);
 
-  return Out.str();
+  return computeUniqueSYCLVXXName(Out.str());
 }
 
 SYCLUniqueStableIdExpr::SYCLUniqueStableIdExpr(EmptyShell Empty,
@@ -2687,7 +2846,7 @@ bool Expr::isUnusedResultAWarning(const Expr *&WarnE, SourceLocation &Loc,
     }
 
     // Fallthrough for generic call handling.
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
   }
   case CallExprClass:
   case CXXMemberCallExprClass:
@@ -3668,7 +3827,7 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
         DCE->getCastKind() == CK_Dynamic)
       return true;
     }
-    LLVM_FALLTHROUGH;
+    [[fallthrough]];
   case ImplicitCastExprClass:
   case CStyleCastExprClass:
   case CXXStaticCastExprClass:
@@ -3916,7 +4075,7 @@ Expr::isNullPointerConstant(ASTContext &Ctx,
   if (getType().isNull())
     return NPCK_NotNull;
 
-  // C++11 nullptr_t is always a null pointer constant.
+  // C++11/C2x nullptr_t is always a null pointer constant.
   if (getType()->isNullPtrType())
     return NPCK_CXX11_nullptr;
 
@@ -4890,7 +5049,7 @@ RecoveryExpr::RecoveryExpr(ASTContext &Ctx, QualType T, SourceLocation BeginLoc,
            OK_Ordinary),
       BeginLoc(BeginLoc), EndLoc(EndLoc), NumExprs(SubExprs.size()) {
   assert(!T.isNull());
-  assert(llvm::all_of(SubExprs, [](Expr* E) { return E != nullptr; }));
+  assert(!llvm::is_contained(SubExprs, nullptr));
 
   llvm::copy(SubExprs, getTrailingObjects<Expr *>());
   setDependence(computeDependence(this));

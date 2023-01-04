@@ -27,8 +27,10 @@
 #include "SIMachineFunctionInfo.h"
 #include "TargetInfo/AMDGPUTargetInfo.h"
 #include "Utils/AMDGPUBaseInfo.h"
+#include "llvm/Analysis/OptimizationRemarkEmitter.h"
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/CodeGen/MachineFrameInfo.h"
+#include "llvm/CodeGen/MachineOptimizationRemarkEmitter.h"
 #include "llvm/IR/DiagnosticInfo.h"
 #include "llvm/MC/MCAssembler.h"
 #include "llvm/MC/MCContext.h"
@@ -86,15 +88,17 @@ extern "C" void LLVM_EXTERNAL_VISIBILITY LLVMInitializeAMDGPUAsmPrinter() {
 AMDGPUAsmPrinter::AMDGPUAsmPrinter(TargetMachine &TM,
                                    std::unique_ptr<MCStreamer> Streamer)
     : AsmPrinter(TM, std::move(Streamer)) {
+  assert(OutStreamer && "AsmPrinter constructed without streamer");
+
   if (TM.getTargetTriple().getOS() == Triple::AMDHSA) {
     if (isHsaAbiVersion2(getGlobalSTI())) {
-      HSAMetadataStream.reset(new HSAMD::MetadataStreamerV2());
+      HSAMetadataStream.reset(new HSAMD::MetadataStreamerYamlV2());
     } else if (isHsaAbiVersion3(getGlobalSTI())) {
-      HSAMetadataStream.reset(new HSAMD::MetadataStreamerV3());
+      HSAMetadataStream.reset(new HSAMD::MetadataStreamerMsgPackV3());
     } else if (isHsaAbiVersion5(getGlobalSTI())) {
-      HSAMetadataStream.reset(new HSAMD::MetadataStreamerV5());
+      HSAMetadataStream.reset(new HSAMD::MetadataStreamerMsgPackV5());
     } else {
-      HSAMetadataStream.reset(new HSAMD::MetadataStreamerV4());
+      HSAMetadataStream.reset(new HSAMD::MetadataStreamerMsgPackV4());
     }
   }
 }
@@ -156,10 +160,6 @@ void AMDGPUAsmPrinter::emitEndOfAsmFile(Module &M) {
   if (!IsTargetStreamerInitialized)
     initTargetStreamer(M);
 
-  // Following code requires TargetStreamer to be present.
-  if (!getTargetStreamer())
-    return;
-
   if (TM.getTargetTriple().getOS() != Triple::AMDHSA ||
       isHsaAbiVersion2(getGlobalSTI()))
     getTargetStreamer()->EmitISAVersion();
@@ -195,7 +195,7 @@ void AMDGPUAsmPrinter::emitFunctionBodyStart() {
 
   // TODO: Which one is called first, emitStartOfAsmFile or
   // emitFunctionBodyStart?
-  if (getTargetStreamer() && !getTargetStreamer()->getTargetID())
+  if (!getTargetStreamer()->getTargetID())
     initializeTargetID(*F.getParent());
 
   const auto &FunctionTargetID = STM.getTargetID();
@@ -336,8 +336,8 @@ void AMDGPUAsmPrinter::emitGlobalVariable(const GlobalVariable *GV) {
 
     emitVisibility(GVSym, GV->getVisibility(), !GV->isDeclaration());
     emitLinkage(GV, GVSym);
-    if (auto TS = getTargetStreamer())
-      TS->emitAMDGPULDS(GVSym, Size, Alignment);
+    auto TS = getTargetStreamer();
+    TS->emitAMDGPULDS(GVSym, Size, Alignment);
     return;
   }
 
@@ -413,6 +413,11 @@ uint16_t AMDGPUAsmPrinter::getAmdhsaKernelCodeProperties(
   if (MF.getSubtarget<GCNSubtarget>().isWave32()) {
     KernelCodeProperties |=
         amdhsa::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32;
+  }
+
+  if (CurrentProgramInfo.DynamicCallStack &&
+      AMDGPU::getAmdhsaCodeObjectVersion() >= 5) {
+    KernelCodeProperties |= amdhsa::KERNEL_CODE_PROPERTY_USES_DYNAMIC_STACK;
   }
 
   return KernelCodeProperties;
@@ -505,6 +510,9 @@ bool AMDGPUAsmPrinter::runOnMachineFunction(MachineFunction &MF) {
   DisasmLineMaxLen = 0;
 
   emitFunctionBody();
+
+  emitResourceUsageRemarks(MF, CurrentProgramInfo, MFI->isModuleEntryFunction(),
+                           STM.hasMAIInsts());
 
   if (isVerbose()) {
     MCSectionELF *CommentSection =
@@ -875,6 +883,9 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
     LDSAlignShift = 9;
   }
 
+  ProgInfo.SGPRSpill = MFI->getNumSpilledSGPRs();
+  ProgInfo.VGPRSpill = MFI->getNumSpilledVGPRs();
+
   ProgInfo.LDSSize = MFI->getLDSSize();
   ProgInfo.LDSBlocks =
       alignTo(ProgInfo.LDSSize, 1ULL << LDSAlignShift) >> LDSAlignShift;
@@ -937,7 +948,7 @@ void AMDGPUAsmPrinter::getSIProgramInfo(SIProgramInfo &ProgInfo,
 
 static unsigned getRsrcReg(CallingConv::ID CallConv) {
   switch (CallConv) {
-  default: LLVM_FALLTHROUGH;
+  default: [[fallthrough]];
   case CallingConv::AMDGPU_CS: return R_00B848_COMPUTE_PGM_RSRC1;
   case CallingConv::AMDGPU_LS: return R_00B528_SPI_SHADER_PGM_RSRC1_LS;
   case CallingConv::AMDGPU_HS: return R_00B428_SPI_SHADER_PGM_RSRC1_HS;
@@ -1179,4 +1190,59 @@ void AMDGPUAsmPrinter::getAnalysisUsage(AnalysisUsage &AU) const {
   AU.addRequired<AMDGPUResourceUsageAnalysis>();
   AU.addPreserved<AMDGPUResourceUsageAnalysis>();
   AsmPrinter::getAnalysisUsage(AU);
+}
+
+void AMDGPUAsmPrinter::emitResourceUsageRemarks(
+    const MachineFunction &MF, const SIProgramInfo &CurrentProgramInfo,
+    bool isModuleEntryFunction, bool hasMAIInsts) {
+  if (!ORE)
+    return;
+
+  const char *Name = "kernel-resource-usage";
+  const char *Indent = "    ";
+
+  // If the remark is not specifically enabled, do not output to yaml
+  LLVMContext &Ctx = MF.getFunction().getContext();
+  if (!Ctx.getDiagHandlerPtr()->isAnalysisRemarkEnabled(Name))
+    return;
+
+  auto EmitResourceUsageRemark = [&](StringRef RemarkName,
+                                     StringRef RemarkLabel, auto Argument) {
+    // Add an indent for every line besides the line with the kernel name. This
+    // makes it easier to tell which resource usage go with which kernel since
+    // the kernel name will always be displayed first.
+    std::string LabelStr = RemarkLabel.str() + ": ";
+    if (!RemarkName.equals("FunctionName"))
+      LabelStr = Indent + LabelStr;
+
+    ORE->emit([&]() {
+      return MachineOptimizationRemarkAnalysis(Name, RemarkName,
+                                               MF.getFunction().getSubprogram(),
+                                               &MF.front())
+             << LabelStr << ore::NV(RemarkName, Argument);
+    });
+  };
+
+  // FIXME: Formatting here is pretty nasty because clang does not accept
+  // newlines from diagnostics. This forces us to emit multiple diagnostic
+  // remarks to simulate newlines. If and when clang does accept newlines, this
+  // formatting should be aggregated into one remark with newlines to avoid
+  // printing multiple diagnostic location and diag opts.
+  EmitResourceUsageRemark("FunctionName", "Function Name",
+                          MF.getFunction().getName());
+  EmitResourceUsageRemark("NumSGPR", "SGPRs", CurrentProgramInfo.NumSGPR);
+  EmitResourceUsageRemark("NumVGPR", "VGPRs", CurrentProgramInfo.NumArchVGPR);
+  if (hasMAIInsts)
+    EmitResourceUsageRemark("NumAGPR", "AGPRs", CurrentProgramInfo.NumAccVGPR);
+  EmitResourceUsageRemark("ScratchSize", "ScratchSize [bytes/lane]",
+                          CurrentProgramInfo.ScratchSize);
+  EmitResourceUsageRemark("Occupancy", "Occupancy [waves/SIMD]",
+                          CurrentProgramInfo.Occupancy);
+  EmitResourceUsageRemark("SGPRSpill", "SGPRs Spill",
+                          CurrentProgramInfo.SGPRSpill);
+  EmitResourceUsageRemark("VGPRSpill", "VGPRs Spill",
+                          CurrentProgramInfo.VGPRSpill);
+  if (isModuleEntryFunction)
+    EmitResourceUsageRemark("BytesLDS", "LDS Size [bytes/block]",
+                            CurrentProgramInfo.LDSSize);
 }

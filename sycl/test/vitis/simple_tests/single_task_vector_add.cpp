@@ -1,10 +1,10 @@
 // REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
-// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
+// RUN: %clangxx %EXTRA_COMPILE_FLAGS-std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 // Test that we can get a fast reports by adding --vitis-ip-part
-// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec2.out --vitis-ip-part=xcu200-fsgd2104-2-e
+// RUN: %clangxx %EXTRA_COMPILE_FLAGS-std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec2.out --vitis-ip-part=xcu200-fsgd2104-2-e
 
 /*
    A simple typical FPGA-like kernel adding 2 vectors
@@ -51,7 +51,7 @@ int main(int argc, char *argv[]) {
       // A typical FPGA-style pipelined kernel
       cgh.single_task<class add>([=] () {
           // Use an intermediate automatic array
-          decltype(a_b)::value_type array[N];
+          int array[N];
           for (unsigned int i = 0 ; i < N; ++i)
             array[i] = a_b[i];
           for (unsigned int i = 0 ; i < N; ++i)

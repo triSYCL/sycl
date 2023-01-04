@@ -22,7 +22,7 @@ subroutine issue(c1, c2)
   ! CHECK: %[[VAL_16:.*]] = arith.addi %[[VAL_13]], %[[VAL_7]] : index
   ! CHECK: %[[VAL_17:.*]] = fir.array_coor %[[VAL_11]](%[[VAL_12]]) %[[VAL_16]] typeparams %[[VAL_10]]#1 : (!fir.ref<!fir.array<3x!fir.char<1,?>>>, !fir.shape<1>, index, index) -> !fir.ref<!fir.char<1,?>>
   ! CHECK: %[[VAL_18:.*]] = fir.array_coor %[[VAL_9]](%[[VAL_12]]) %[[VAL_16]] : (!fir.ref<!fir.array<3x!fir.char<1,4>>>, !fir.shape<1>, index) -> !fir.ref<!fir.char<1,4>>
-  ! CHECK: %[[VAL_19:.*]] = arith.cmpi slt, %[[VAL_5]], %[[VAL_10]]#1 : index
+  ! CHECK: %[[VAL_19:.*]] = arith.cmpi sgt, %[[VAL_10]]#1, %[[VAL_5]] : index
   ! CHECK: %[[VAL_20:.*]] = arith.select %[[VAL_19]], %[[VAL_5]], %[[VAL_10]]#1 : index
   ! CHECK: %[[VAL_21:.*]] = fir.convert %[[VAL_20]] : (index) -> i64
   ! CHECK: %[[VAL_22:.*]] = fir.convert %[[VAL_18]] : (!fir.ref<!fir.char<1,4>>) -> !fir.ref<i8>
@@ -58,7 +58,7 @@ program p
   ! CHECK-DAG: %[[VAL_0:.*]] = arith.constant 4 : index
   ! CHECK-DAG: %[[VAL_1:.*]] = arith.constant 3 : index
   ! CHECK-DAG: %[[VAL_2:.*]] = arith.constant -1 : i32
-  ! CHECK: %[[VAL_5:.*]] = fir.address_of(@_QFEc1) : !fir.ref<!fir.array<3x!fir.char<1,4>>>
+  ! CHECK: %[[VAL_5:.*]] = fir.alloca !fir.array<3x!fir.char<1,4>> {bindc_name = "c1", uniq_name = "_QFEc1"}
   ! CHECK: %[[VAL_6:.*]] = fir.address_of(@_QFEc2) : !fir.ref<!fir.array<3x!fir.char<1,4>>>
   ! CHECK: %[[VAL_7:.*]] = fir.address_of(@_QQcl.{{.*}}) : !fir.ref<!fir.char<1,
   ! CHECK: %[[VAL_8:.*]] = fir.convert %[[VAL_7]] : (!fir.ref<!fir.char<1,{{.*}}>>) -> !fir.ref<i8>

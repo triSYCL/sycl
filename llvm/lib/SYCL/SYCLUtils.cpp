@@ -12,6 +12,7 @@
 // ===---------------------------------------------------------------------===//
 
 #include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/Triple.h"
 #include "llvm/IR/Attributes.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
@@ -19,7 +20,7 @@
 #include "llvm/IR/Operator.h"
 #include "llvm/Support/FormatVariadic.h"
 
-#include "SYCLUtils.h"
+#include "llvm/SYCL/SYCLUtils.h"
 
 namespace llvm {
 namespace sycl {
@@ -75,6 +76,21 @@ bool isKernelFunc(const Function *F) {
          F->hasFnAttribute("fpga.top.func");
 }
 
+bool isArgBuffer(Argument *Arg) {
+  bool SyclHlsFlow =
+      Triple(Arg->getParent()->getParent()->getTargetTriple()).isXilinxHLS();
+  /// We consider that pointer arguments that are not byval or pipes are
+  /// buffers.
+  if (sycl::isPipe(Arg))
+    return false;
+  if (Arg->getType()->isPointerTy() &&
+      (SyclHlsFlow || Arg->getType()->getPointerAddressSpace() == 1 ||
+       Arg->getType()->getPointerAddressSpace() == 2)) {
+    return !Arg->hasByValAttr();
+  }
+  return false;
+}
+
 void annotateKernelFunc(Function *F) {
   F->addFnAttr("fpga.top.func", F->getName());
   F->addFnAttr("fpga.demangled.name", F->getName());
@@ -96,6 +112,11 @@ constexpr const char *xilinx_pipe_id =
     "sycl_xilinx_pipe_id"; // value is the unique ID of the pipe
 constexpr const char *xilinx_pipe_depth =
     "sycl_xilinx_pipe_depth"; // value is the depth of the pipe
+
+constexpr const char *xilinx_ddr_bank =
+    "sycl_xilinx_ddr_bank";
+constexpr const char *xilinx_hbm_bank =
+    "sycl_xilinx_hbm_bank";
 
 /// getAttributeAtIndex(0, ...) is the attribute on the return. The first argument
 /// starts at 1
@@ -130,7 +151,7 @@ int getPipeDepth(Argument *Arg) {
   return val;
 }
 
-void annotatePipe(Argument *Arg, StringRef Op, StringRef Id, int Depth) {
+static void annotatePipe(Argument *Arg, StringRef Op, StringRef Id, int Depth) {
   Arg->addAttr(
       Attribute::get(Arg->getContext(), sycl::xilinx_pipe_type, Op));
   Arg->addAttr(
@@ -167,6 +188,39 @@ void giveNameToArguments(Function &F) {
     if (!Arg.hasName())
       Arg.setName("arg_" + Twine{Counter++});
   }
+}
+
+void annotateMemoryBank(Argument *Arg, MemBankSpec Bank) {
+  Arg->addAttr(Attribute::get(Arg->getContext(),
+                              Bank.MemType == MemoryType::ddr
+                                  ? sycl::xilinx_ddr_bank
+                                  : sycl::xilinx_hbm_bank,
+                              llvm::formatv("{0}", Bank.BankID).str()));
+}
+
+void removeBankAnnotation(Argument *Arg) {
+  Arg->getParent()->removeParamAttr(Arg->getArgNo(), sycl::xilinx_ddr_bank);
+  Arg->getParent()->removeParamAttr(Arg->getArgNo(), sycl::xilinx_hbm_bank);
+}
+
+static int getBankVal(Argument *Arg, StringRef Str) {
+  Attribute Attr =
+      Arg->getParent()->getAttributeAtIndex(Arg->getArgNo() + 1, Str);
+  if (!Attr.isValid())
+    return -1;
+  int Val;
+  llvm::to_integer(Attr.getValueAsString(), Val);
+  return Val;
+}
+
+MemBankSpec getMemoryBank(Argument *Arg) {
+  int Res = getBankVal(Arg, sycl::xilinx_ddr_bank);
+  if (Res != -1)
+    return {MemoryType::ddr, (unsigned)Res};
+  Res = getBankVal(Arg, sycl::xilinx_hbm_bank);
+  if (Res != -1)
+    return {MemoryType::hbm, (unsigned)Res};
+  return {MemoryType::unspecified, 0};
 }
 
 } // namespace sycl

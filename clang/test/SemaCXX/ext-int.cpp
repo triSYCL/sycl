@@ -19,7 +19,7 @@ _BitInt(33) Declarations(_BitInt(48) &Param) { // Useable in params and returns.
 
   _BitInt(-3) g; // expected-error{{signed _BitInt of bit sizes greater than 128 not supported}}
   _BitInt(0) h; // expected-error{{signed _BitInt must have a bit size of at least 1}}
-  _BitInt(1) i; // expected-error{{signed _BitInt must have a bit size of at least 1}}
+  _BitInt(1) i;
   _BitInt(2) j;;
   unsigned _BitInt(0) k;// expected-error{{unsigned _BitInt must have a bit size of at least 1}}
   unsigned _BitInt(1) l;
@@ -41,8 +41,6 @@ _BitInt(33) Declarations(_BitInt(48) &Param) { // Useable in params and returns.
   // expected-error@6{{unsigned _BitInt must have a bit size of at least 1}}
   // expected-note@+1{{in instantiation of template class }}
   HasExtInt<0> s;
-  // expected-error@5{{signed _BitInt must have a bit size of at least 1}}
-  // expected-note@+1{{in instantiation of template class }}
   HasExtInt<1> t;
 
   _BitInt(-3.0) v; // expected-error {{integral constant expression must have integral or unscoped enumeration type, not 'double'}}
@@ -83,8 +81,22 @@ struct is_same<T,T> {
 };
 
 // Reject vector types:
-// expected-error@+1{{invalid vector element type '_BitInt(32)'}}
-typedef _BitInt(32) __attribute__((vector_size(16))) VecTy;
+// expected-error@+1{{'_BitInt' vector element width must be at least as wide as 'CHAR_BIT'}}
+typedef _BitInt(2) __attribute__((vector_size(16))) VecTy;
+// expected-error@+1{{'_BitInt' vector element width must be at least as wide as 'CHAR_BIT'}}
+typedef _BitInt(2) __attribute__((ext_vector_type(32))) OtherVecTy;
+// expected-error@+1{{'_BitInt' vector element width must be at least as wide as 'CHAR_BIT'}}
+typedef _BitInt(4) __attribute__((vector_size(16))) VecTy2;
+// expected-error@+1{{'_BitInt' vector element width must be at least as wide as 'CHAR_BIT'}}
+typedef _BitInt(4) __attribute__((ext_vector_type(32))) OtherVecTy2;
+// expected-error@+1{{'_BitInt' vector element width must be at least as wide as 'CHAR_BIT'}}
+typedef _BitInt(5) __attribute__((vector_size(16))) VecTy3;
+// expected-error@+1{{'_BitInt' vector element width must be at least as wide as 'CHAR_BIT'}}
+typedef _BitInt(5) __attribute__((ext_vector_type(32))) OtherVecTy3;
+// expected-error@+1{{'_BitInt' vector element width must be a power of 2}}
+typedef _BitInt(37) __attribute__((vector_size(16))) VecTy4;
+// expected-error@+1{{'_BitInt' vector element width must be a power of 2}}
+typedef _BitInt(37) __attribute__((ext_vector_type(32))) OtherVecTy4;
 
 // Allow _Complex:
 _Complex _BitInt(3) Cmplx;

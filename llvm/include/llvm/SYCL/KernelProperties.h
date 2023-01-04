@@ -22,6 +22,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "llvm/SYCL/SYCLUtils.h"
 
 namespace llvm {
 class KernelProperties {
@@ -35,24 +36,13 @@ public:
   // As of now, all arguments sharing the same memory bank share the 
   // same bundle.
 
-  enum struct MemoryType {
-      unspecified,
-      ddr,
-      hbm
-  };
-
-  struct MemBankSpec {
-    MemoryType MemType;
-    unsigned BankID;
-  };
-
   struct MAXIBundle {
     // Represents one m_axi bundle and its associated memory bank ID and Type.
     Optional<unsigned> TargetId; // Associated bank ID
     std::string BundleName; // Vitis bundle name
-    MemoryType MemType;
+    sycl::MemoryType MemType;
     bool isDefaultBundle() const {
-      return MemType == MemoryType::unspecified;
+      return MemType == sycl::MemoryType::unspecified;
     }
   };
 
@@ -66,10 +56,7 @@ private:
   SmallVector<MAXIBundle, 8> Bundles;
 
 public:
-  /// Return true iff Arg represents a buffer in the OpenCL sense equivalent to
-  /// a SYCL accessor's pointer on the data
-  static bool isArgBuffer(Argument *Arg, bool SyclHLSFlow);
-  KernelProperties(Function &F, bool SyclHlsFlow);
+  KernelProperties(Function &F);
   KernelProperties(KernelProperties &) = delete;
 
   MAXIBundle const * getArgumentMAXIBundle(Argument *Arg);

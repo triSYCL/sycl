@@ -5,6 +5,7 @@
 define i32 @extractelt_undef_insertelt(i32 %x, i32 %y) {
 ; CHECK-LABEL: extractelt_undef_insertelt:
 ; CHECK:       # %bb.0:
+; CHECK-NEXT:    xorl %eax, %eax
 ; CHECK-NEXT:    ret{{[l|q]}}
   %b = insertelement <4 x i32> zeroinitializer, i32 %x, i64 3
   %c = icmp uge i32 %y, %y
@@ -15,7 +16,7 @@ define i32 @extractelt_undef_insertelt(i32 %x, i32 %y) {
 define i8 @extractelt_bitcast(i32 %x) nounwind {
 ; X86-LABEL: extractelt_bitcast:
 ; X86:       # %bb.0:
-; X86-NEXT:    movb {{[0-9]+}}(%esp), %al
+; X86-NEXT:    movzbl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: extractelt_bitcast:
@@ -87,7 +88,7 @@ define i16 @trunc_i64_to_i16_le(i64 %x) {
 define i8 @trunc_i32_to_i8_le(i32 %x) {
 ; X86-LABEL: trunc_i32_to_i8_le:
 ; X86:       # %bb.0:
-; X86-NEXT:    movb {{[0-9]+}}(%esp), %al
+; X86-NEXT:    movzbl {{[0-9]+}}(%esp), %eax
 ; X86-NEXT:    retl
 ;
 ; X64-LABEL: trunc_i32_to_i8_le:

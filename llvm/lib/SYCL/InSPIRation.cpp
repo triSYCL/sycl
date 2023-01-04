@@ -39,7 +39,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
-#include "SYCLUtils.h"
+#include "llvm/SYCL/SYCLUtils.h"
 
 using namespace llvm;
 

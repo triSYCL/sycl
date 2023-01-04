@@ -957,6 +957,46 @@ TEST(LocateSymbol, All) {
         Fo^o * getFoo() {
           return 0;
         }
+      )objc",
+
+      R"objc(// Method decl and definition for ObjC class.
+        @interface Cat
+        - (void)$decl[[meow]];
+        @end
+        @implementation Cat
+        - (void)$def[[meow]] {}
+        @end
+        void makeNoise(Cat *kitty) {
+          [kitty me^ow];
+        }
+      )objc",
+
+      R"objc(// Method decl and definition for ObjC category.
+        @interface Dog
+        @end
+        @interface Dog (Play)
+        - (void)$decl[[runAround]];
+        @end
+        @implementation Dog (Play)
+        - (void)$def[[runAround]] {}
+        @end
+        void play(Dog *dog) {
+          [dog run^Around];
+        }
+      )objc",
+
+      R"objc(// Method decl and definition for ObjC class extension.
+        @interface Dog
+        @end
+        @interface Dog ()
+        - (void)$decl[[howl]];
+        @end
+        @implementation Dog
+        - (void)$def[[howl]] {}
+        @end
+        void play(Dog *dog) {
+          [dog ho^wl];
+        }
       )objc"};
   for (const char *Test : Tests) {
     Annotations T(Test);
@@ -1761,7 +1801,7 @@ TEST(FindImplementations, Inheritance) {
   }
 }
 
-TEST(FindImplementations, CaptureDefintion) {
+TEST(FindImplementations, CaptureDefinition) {
   llvm::StringRef Test = R"cpp(
     struct Base {
       virtual void F^oo();
@@ -1789,8 +1829,9 @@ TEST(FindType, All) {
     struct $Target[[Target]] { operator int() const; };
     struct Aggregate { Target a, b; };
     Target t;
+    Target make();
 
-    template <typename T> class $smart_ptr[[smart_ptr]] {
+    template <typename T> struct $smart_ptr[[smart_ptr]] {
       T& operator*();
       T* operator->();
       T* get();
@@ -1818,6 +1859,8 @@ TEST(FindType, All) {
            "void x() { ^if (t) {} }",
            "void x() { ^while (t) {} }",
            "void x() { ^do { } while (t); }",
+           "void x() { ^make(); }",
+           "void x(smart_ptr<Target> &t) { t.^get(); }",
            "^auto x = []() { return t; };",
            "Target* ^tptr = &t;",
            "Target ^tarray[3];",
@@ -2048,6 +2091,14 @@ TEST(FindReferences, WithinAST) {
           ns::S s;
           bar<ns::S>(s);
           [[f^oo]](s);
+        }
+      )cpp",
+      R"cpp(// unresolved member expression
+        struct Foo {
+          template <typename T> void $decl[[b^ar]](T t); 
+        };
+        template <typename T> void test(Foo F, T t) {
+          F.[[bar]](t);
         }
       )cpp",
 

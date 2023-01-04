@@ -17,6 +17,7 @@
 #include "lldb/Core/ValueObject.h"
 #include "lldb/Host/OptionParser.h"
 #include "lldb/Interpreter/CommandInterpreter.h"
+#include "lldb/Interpreter/CommandOptionArgumentTable.h"
 #include "lldb/Interpreter/CommandReturnObject.h"
 #include "lldb/Interpreter/OptionArgParser.h"
 #include "lldb/Interpreter/OptionGroupPythonClassWithDict.h"
@@ -61,15 +62,13 @@ public:
       const int short_option = m_getopt_table[option_idx].val;
 
       switch (short_option) {
-      case 'c': {
-        int32_t input_count = 0;
+      case 'c':
         if (option_arg.getAsInteger(0, m_count)) {
           m_count = UINT32_MAX;
           error.SetErrorStringWithFormat(
               "invalid integer value for option '%c'", short_option);
-        } else if (input_count < 0)
-          m_count = UINT32_MAX;
-      } break;
+        }
+        break;
       case 's':
         if (option_arg.getAsInteger(0, m_start))
           error.SetErrorStringWithFormat(
@@ -238,16 +237,6 @@ protected:
 };
 
 enum StepScope { eStepScopeSource, eStepScopeInstruction };
-
-static constexpr OptionEnumValueElement g_tri_running_mode[] = {
-    {eOnlyThisThread, "this-thread", "Run only this thread"},
-    {eAllThreads, "all-threads", "Run all threads"},
-    {eOnlyDuringStepping, "while-stepping",
-     "Run only this thread while stepping"}};
-
-static constexpr OptionEnumValues TriRunningModes() {
-  return OptionEnumValues(g_tri_running_mode);
-}
 
 #define LLDB_OPTIONS_thread_step_scope
 #include "CommandOptions.inc"
@@ -813,14 +802,6 @@ public:
 
 // CommandObjectThreadUntil
 
-static constexpr OptionEnumValueElement g_duo_running_mode[] = {
-    {eOnlyThisThread, "this-thread", "Run only this thread"},
-    {eAllThreads, "all-threads", "Run all threads"}};
-
-static constexpr OptionEnumValues DuoRunningModes() {
-  return OptionEnumValues(g_duo_running_mode);
-}
-
 #define LLDB_OPTIONS_thread_until
 #include "CommandOptions.inc"
 
@@ -894,8 +875,8 @@ public:
       return llvm::makeArrayRef(g_thread_until_options);
     }
 
-    uint32_t m_step_thread_idx;
-    bool m_stop_others;
+    uint32_t m_step_thread_idx = LLDB_INVALID_THREAD_ID;
+    bool m_stop_others = false;
     std::vector<lldb::addr_t> m_until_addrs;
 
     // Instance variables to hold the values for command options.
@@ -1008,7 +989,7 @@ protected:
         }
 
         LineEntry function_start;
-        uint32_t index_ptr = 0, end_ptr;
+        uint32_t index_ptr = 0, end_ptr = UINT32_MAX;
         std::vector<addr_t> address_list;
 
         // Find the beginning & end index of the function, but first make
@@ -2109,6 +2090,132 @@ public:
   }
 };
 
+static ThreadSP GetSingleThreadFromArgs(ExecutionContext &exe_ctx, Args &args,
+                                        CommandReturnObject &result) {
+  if (args.GetArgumentCount() == 0)
+    return exe_ctx.GetThreadSP();
+
+  const char *arg = args.GetArgumentAtIndex(0);
+  uint32_t thread_idx;
+
+  if (!llvm::to_integer(arg, thread_idx)) {
+    result.AppendErrorWithFormat("invalid thread specification: \"%s\"\n", arg);
+    return nullptr;
+  }
+  ThreadSP thread_sp =
+      exe_ctx.GetProcessRef().GetThreadList().FindThreadByIndexID(thread_idx);
+  if (!thread_sp)
+    result.AppendErrorWithFormat("no thread with index: \"%s\"\n", arg);
+  return thread_sp;
+}
+
+// CommandObjectTraceDumpFunctionCalls
+#define LLDB_OPTIONS_thread_trace_dump_function_calls
+#include "CommandOptions.inc"
+
+class CommandObjectTraceDumpFunctionCalls : public CommandObjectParsed {
+public:
+  class CommandOptions : public Options {
+  public:
+    CommandOptions() { OptionParsingStarting(nullptr); }
+
+    ~CommandOptions() override = default;
+
+    Status SetOptionValue(uint32_t option_idx, llvm::StringRef option_arg,
+                          ExecutionContext *execution_context) override {
+      Status error;
+      const int short_option = m_getopt_table[option_idx].val;
+
+      switch (short_option) {
+      case 'j': {
+        m_dumper_options.json = true;
+        break;
+      }
+      case 'J': {
+        m_dumper_options.json = true;
+        m_dumper_options.pretty_print_json = true;
+        break;
+      }
+      case 'F': {
+        m_output_file.emplace(option_arg);
+        break;
+      }
+      default:
+        llvm_unreachable("Unimplemented option");
+      }
+      return error;
+    }
+
+    void OptionParsingStarting(ExecutionContext *execution_context) override {
+      m_dumper_options = {};
+      m_output_file = llvm::None;
+    }
+
+    llvm::ArrayRef<OptionDefinition> GetDefinitions() override {
+      return llvm::makeArrayRef(g_thread_trace_dump_function_calls_options);
+    }
+
+    static const size_t kDefaultCount = 20;
+
+    // Instance variables to hold the values for command options.
+    TraceDumperOptions m_dumper_options;
+    llvm::Optional<FileSpec> m_output_file;
+  };
+
+  CommandObjectTraceDumpFunctionCalls(CommandInterpreter &interpreter)
+      : CommandObjectParsed(
+            interpreter, "thread trace dump function-calls",
+            "Dump the traced function-calls for one thread. If no "
+            "thread is specified, the current thread is used.",
+            nullptr,
+            eCommandRequiresProcess | eCommandRequiresThread |
+                eCommandTryTargetAPILock | eCommandProcessMustBeLaunched |
+                eCommandProcessMustBePaused | eCommandProcessMustBeTraced) {
+    CommandArgumentData thread_arg{eArgTypeThreadIndex, eArgRepeatOptional};
+    m_arguments.push_back({thread_arg});
+  }
+
+  ~CommandObjectTraceDumpFunctionCalls() override = default;
+
+  Options *GetOptions() override { return &m_options; }
+
+protected:
+  bool DoExecute(Args &args, CommandReturnObject &result) override {
+    ThreadSP thread_sp = GetSingleThreadFromArgs(m_exe_ctx, args, result);
+    if (!thread_sp) {
+      result.AppendError("invalid thread\n");
+      return false;
+    }
+
+    llvm::Expected<TraceCursorSP> cursor_or_error =
+        m_exe_ctx.GetTargetSP()->GetTrace()->CreateNewCursor(*thread_sp);
+
+    if (!cursor_or_error) {
+      result.AppendError(llvm::toString(cursor_or_error.takeError()));
+      return false;
+    }
+    TraceCursorSP &cursor_sp = *cursor_or_error;
+
+    llvm::Optional<StreamFile> out_file;
+    if (m_options.m_output_file) {
+      out_file.emplace(m_options.m_output_file->GetPath().c_str(),
+                       File::eOpenOptionWriteOnly | File::eOpenOptionCanCreate |
+                           File::eOpenOptionTruncate);
+    }
+
+    m_options.m_dumper_options.forwards = true;
+
+    TraceDumper dumper(std::move(cursor_sp),
+                       out_file ? *out_file : result.GetOutputStream(),
+                       m_options.m_dumper_options);
+
+    dumper.DumpFunctionCalls();
+    return true;
+  }
+
+  CommandOptions m_options;
+};
+
 // CommandObjectTraceDumpInstructions
 #define LLDB_OPTIONS_thread_trace_dump_instructions
 #include "CommandOptions.inc"
@@ -2179,7 +2286,7 @@ public:
         break;
       }
       case 't': {
-        m_dumper_options.show_tsc = true;
+        m_dumper_options.show_timestamps = true;
         break;
       }
       case 'e': {
@@ -2193,6 +2300,11 @@ public:
       case 'J': {
         m_dumper_options.pretty_print_json = true;
         m_dumper_options.json = true;
+        break;
+      }
+      case 'E': {
+        m_dumper_options.only_events = true;
+        m_dumper_options.show_events = true;
         break;
       }
       case 'C': {
@@ -2252,28 +2364,8 @@ public:
   }
 
 protected:
-  ThreadSP GetThread(Args &args, CommandReturnObject &result) {
-    if (args.GetArgumentCount() == 0)
-      return m_exe_ctx.GetThreadSP();
-
-    const char *arg = args.GetArgumentAtIndex(0);
-    uint32_t thread_idx;
-
-    if (!llvm::to_integer(arg, thread_idx)) {
-      result.AppendErrorWithFormat("invalid thread specification: \"%s\"\n",
-                                   arg);
-      return nullptr;
-    }
-    ThreadSP thread_sp =
-        m_exe_ctx.GetProcessRef().GetThreadList().FindThreadByIndexID(
-            thread_idx);
-    if (!thread_sp)
-      result.AppendErrorWithFormat("no thread with index: \"%s\"\n", arg);
-    return thread_sp;
-  }
-
   bool DoExecute(Args &args, CommandReturnObject &result) override {
-    ThreadSP thread_sp = GetThread(args, result);
+    ThreadSP thread_sp = GetSingleThreadFromArgs(m_exe_ctx, args, result);
     if (!thread_sp) {
       result.AppendError("invalid thread\n");
       return false;
@@ -2286,17 +2378,17 @@ protected:
       m_options.m_dumper_options.id = m_last_id;
     }
 
-    llvm::Expected<TraceCursorUP> cursor_or_error =
+    llvm::Expected<TraceCursorSP> cursor_or_error =
         m_exe_ctx.GetTargetSP()->GetTrace()->CreateNewCursor(*thread_sp);
 
     if (!cursor_or_error) {
       result.AppendError(llvm::toString(cursor_or_error.takeError()));
       return false;
     }
-    TraceCursorUP &cursor_up = *cursor_or_error;
+    TraceCursorSP &cursor_sp = *cursor_or_error;
 
     if (m_options.m_dumper_options.id &&
-        !cursor_up->HasId(*m_options.m_dumper_options.id)) {
+        !cursor_sp->HasId(*m_options.m_dumper_options.id)) {
       result.AppendError("invalid instruction id\n");
       return false;
     }
@@ -2304,18 +2396,18 @@ protected:
     llvm::Optional<StreamFile> out_file;
     if (m_options.m_output_file) {
       out_file.emplace(m_options.m_output_file->GetPath().c_str(),
-                       File::eOpenOptionWriteOnly | File::eOpenOptionCanCreate,
-                       lldb::eFilePermissionsFileDefault);
+                       File::eOpenOptionWriteOnly | File::eOpenOptionCanCreate |
+                           File::eOpenOptionTruncate);
     }
 
     if (m_options.m_continue && !m_last_id) {
       // We need to stop processing data when we already ran out of instructions
       // in a previous command. We can fake this by setting the cursor past the
       // end of the trace.
-      cursor_up->Seek(1, TraceCursor::SeekType::End);
+      cursor_sp->Seek(1, lldb::eTraceCursorSeekTypeEnd);
     }
 
-    TraceDumper dumper(std::move(cursor_up),
+    TraceDumper dumper(std::move(cursor_sp),
                        out_file ? *out_file : result.GetOutputStream(),
                        m_options.m_dumper_options);
 
@@ -2415,6 +2507,9 @@ public:
     LoadSubCommand(
         "instructions",
         CommandObjectSP(new CommandObjectTraceDumpInstructions(interpreter)));
+    LoadSubCommand(
+        "function-calls",
+        CommandObjectSP(new CommandObjectTraceDumpFunctionCalls(interpreter)));
     LoadSubCommand(
         "info", CommandObjectSP(new CommandObjectTraceDumpInfo(interpreter)));
   }

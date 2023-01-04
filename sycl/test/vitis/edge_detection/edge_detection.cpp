@@ -1,6 +1,6 @@
 // REQUIRES: vitis && opencv4
 
-// RUN: %clangxx -std=c++20 -fsycl -fsycl-targets=%sycl_triple -o %t.out %s %opencv4_flags
+// RUN: %clangxx %EXTRA_COMPILE_FLAGS-std=c++20 -fsycl -fsycl-targets=%sycl_triple -o %t.out %s %opencv4_flags
 // RUN: %run_if_hw %ACC_RUN_PLACEHOLDER %t.out %S/data/input/eiffel.bmp
 // RUN: %run_if_hw %ACC_RUN_PLACEHOLDER %t.out %S/data/input/lola.bmp
 // RUN: %run_if_hw %ACC_RUN_PLACEHOLDER %t.out %S/data/input/vase.bmp

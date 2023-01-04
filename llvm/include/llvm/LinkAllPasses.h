@@ -84,7 +84,6 @@ namespace {
       (void) llvm::createSCEVAAWrapperPass();
       (void) llvm::createTypeBasedAAWrapperPass();
       (void) llvm::createScopedNoAliasAAWrapperPass();
-      (void) llvm::createBoundsCheckingLegacyPass();
       (void) llvm::createBreakCriticalEdgesPass();
       (void) llvm::createCallGraphDOTPrinterPass();
       (void) llvm::createCallGraphViewerPass();
@@ -95,7 +94,6 @@ namespace {
       (void) llvm::createLibCallsShrinkWrapPass();
       (void) llvm::createCalledValuePropagationPass();
       (void) llvm::createConstantMergePass();
-      (void) llvm::createControlHeightReductionLegacyPass();
       (void) llvm::createCostModelAnalysisPass();
       (void) llvm::createDeadArgEliminationPass();
       (void) llvm::createDeadArgEliminationSYCLPass();
@@ -106,8 +104,6 @@ namespace {
       (void) llvm::createDomPrinterWrapperPassPass();
       (void) llvm::createDomOnlyViewerWrapperPassPass();
       (void) llvm::createDomViewerWrapperPassPass();
-      (void) llvm::createInstrProfilingLegacyPass();
-      (void) llvm::createFunctionImportPass();
       (void) llvm::createFunctionInliningPass();
       (void) llvm::createAlwaysInlinerLegacyPass();
       (void) llvm::createGlobalDCEPass();
@@ -146,15 +142,9 @@ namespace {
       (void) llvm::createLowerInvokePass();
       (void) llvm::createLowerSwitchPass();
       (void) llvm::createNaryReassociatePass();
-      (void) llvm::createObjCARCAAWrapperPass();
-      (void) llvm::createObjCARCAPElimPass();
-      (void) llvm::createObjCARCExpandPass();
       (void) llvm::createObjCARCContractPass();
-      (void) llvm::createObjCARCOptPass();
-      (void) llvm::createPAEvalPass();
       (void) llvm::createPromoteMemoryToRegisterPass();
       (void) llvm::createDemoteRegisterToMemoryPass();
-      (void) llvm::createPruneEHPass();
       (void)llvm::createPostDomOnlyPrinterWrapperPassPass();
       (void)llvm::createPostDomPrinterWrapperPassPass();
       (void)llvm::createPostDomOnlyViewerWrapperPassPass();
@@ -182,8 +172,6 @@ namespace {
       (void) llvm::createInstCountPass();
       (void) llvm::createConstantHoistingPass();
       (void) llvm::createCodeGenPreparePass();
-      (void) llvm::createEntryExitInstrumenterPass();
-      (void) llvm::createPostInlineEntryExitInstrumenterPass();
       (void) llvm::createEarlyCSEPass();
       (void) llvm::createGVNHoistPass();
       (void) llvm::createMergedLoadStoreMotionPass();
@@ -200,6 +188,7 @@ namespace {
       (void) llvm::createReversePostOrderFunctionAttrsPass();
       (void) llvm::createMergeFunctionsPass();
       (void) llvm::createMergeICmpsLegacyPass();
+      (void) llvm::createExpandLargeDivRemPass();
       (void) llvm::createExpandMemCmpPass();
       (void) llvm::createExpandVectorPredicationPass();
       (void)llvm::createESIMDVerifierPass();

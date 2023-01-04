@@ -16,8 +16,6 @@
 #ifndef LLVM_DEBUGINFO_SYMBOLIZE_MARKUP_H
 #define LLVM_DEBUGINFO_SYMBOLIZE_MARKUP_H
 
-#include <iostream>
-
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
@@ -83,6 +81,10 @@ public:
   ///
   /// \returns the next markup node or None if none remain.
   Optional<MarkupNode> nextNode();
+
+  bool isSGR(const MarkupNode &Node) const {
+    return SGRSyntax.match(Node.Text);
+  }
 
 private:
   Optional<MarkupNode> parseElement(StringRef Line);

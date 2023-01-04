@@ -25,7 +25,7 @@ There are mostly 2 public branches:
 ## What is SYCL
 
 [SYCL](https://www.khronos.org/sycl/) is a single-source
-modern C++11/.../C++20-based DSEL (Domain Specific Embedded Language) aimed at
+modern C++-based DSEL (Domain Specific Embedded Language) aimed at
 facilitating the programming of heterogeneous accelerators.
 
 ## triSYCL for AMD/Xilinx FPGA with AMD/Xilinx Vitis v++

@@ -13,23 +13,14 @@
 #include <sycl/device.hpp>
 #include <sycl/exception.hpp>
 #include <sycl/queue.hpp>
+#include <sycl/usm.hpp>
 #include <sycl/usm/usm_enums.hpp>
 
 #include <cstdlib>
 #include <memory>
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
-
-// Forward declarations.
-__SYCL_EXPORT void *aligned_alloc(size_t alignment, size_t size,
-                                  const device &dev, const context &ctxt,
-                                  usm::alloc kind,
-                                  const property_list &propList,
-                                  const detail::code_location CodeLoc);
-__SYCL_EXPORT void free(void *ptr, const context &ctxt,
-                        const detail::code_location CodeLoc);
-
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 template <typename T, usm::alloc AllocKind, size_t Alignment = 0>
 class usm_allocator {
 public:
@@ -47,14 +38,14 @@ public:
       AllocKind != usm::alloc::device,
       "usm_allocator does not support AllocKind == usm::alloc::device");
 
-  usm_allocator() noexcept = delete;
+  usm_allocator() = delete;
   usm_allocator(const context &Ctxt, const device &Dev,
-                const property_list &PropList = {}) noexcept
+                const property_list &PropList = {})
       : MContext(Ctxt), MDevice(Dev), MPropList(PropList) {}
-  usm_allocator(const queue &Q, const property_list &PropList = {}) noexcept
+  usm_allocator(const queue &Q, const property_list &PropList = {})
       : MContext(Q.get_context()), MDevice(Q.get_device()),
         MPropList(PropList) {}
-  usm_allocator(const usm_allocator &) noexcept = default;
+  usm_allocator(const usm_allocator &) = default;
   usm_allocator(usm_allocator &&) noexcept = default;
   usm_allocator &operator=(const usm_allocator &Other) {
     MContext = Other.MContext;
@@ -115,6 +106,14 @@ public:
              (One.MDevice == Two.MDevice));
   }
 
+  template <typename Property> bool has_property() const noexcept {
+    return MPropList.has_property<Property>();
+  }
+
+  template <typename Property> Property get_property() const {
+    return MPropList.get_property<Property>();
+  }
+
 private:
   constexpr size_t getAlignment() const { return max(alignof(T), Alignment); }
 
@@ -126,5 +125,5 @@ private:
   property_list MPropList;
 };
 
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)

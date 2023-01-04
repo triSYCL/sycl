@@ -34,6 +34,7 @@
 #include "ParsedAST.h"
 #include "Preamble.h"
 #include "Protocol.h"
+#include "SemanticHighlighting.h"
 #include "SourceCode.h"
 #include "XRefs.h"
 #include "index/CanonicalIncludes.h"
@@ -111,7 +112,9 @@ public:
 
     if (auto TrueCmd = CDB->getCompileCommand(File)) {
       Cmd = std::move(*TrueCmd);
-      log("Compile command from CDB is: {0}", printArgv(Cmd.CommandLine));
+      log("Compile command {0} is: {1}",
+          Cmd.Heuristic.empty() ? "from CDB" : Cmd.Heuristic,
+          printArgv(Cmd.CommandLine));
     } else {
       Cmd = CDB->getFallbackCommand(File);
       log("Generic fallback command is: {0}", printArgv(Cmd.CommandLine));
@@ -202,6 +205,14 @@ public:
     for (const auto &Hint : Hints) {
       vlog("  {0} {1} {2}", Hint.kind, Hint.position, Hint.label);
     }
+  }
+
+  void buildSemanticHighlighting(llvm::Optional<Range> LineRange) {
+    log("Building semantic highlighting");
+    auto Highlights = getSemanticHighlightings(*AST);
+    for (const auto HL : Highlights)
+      if (!LineRange || LineRange->contains(HL.R))
+        vlog(" {0} {1} {2}", HL.R, HL.Kind, HL.Modifiers);
   }
 
   // Run AST-based features at each token in the file.
@@ -300,6 +311,7 @@ bool check(llvm::StringRef File, llvm::Optional<Range> LineRange,
       !C.buildAST())
     return false;
   C.buildInlayHints(LineRange);
+  C.buildSemanticHighlighting(LineRange);
   C.testLocationFeatures(LineRange, EnableCodeCompletion);
 
   log("All checks completed, {0} errors", C.ErrCount);

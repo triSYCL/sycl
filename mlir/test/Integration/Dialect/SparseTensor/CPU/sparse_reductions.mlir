@@ -1,13 +1,6 @@
 // RUN: mlir-opt %s --sparse-compiler | \
 // RUN: mlir-cpu-runner -e entry -entry-point-result=void \
-// RUN:  -shared-libs=%mlir_integration_test_dir/libmlir_c_runner_utils%shlibext | \
-// RUN: FileCheck %s
-//
-// Do the same run, but now with SIMDization as well. This should not change the outcome.
-//
-// RUN: mlir-opt %s --sparse-compiler="vectorization-strategy=2 vl=8" | \
-// RUN: mlir-cpu-runner -e entry -entry-point-result=void \
-// RUN:  -shared-libs=%mlir_integration_test_dir/libmlir_c_runner_utils%shlibext | \
+// RUN:  -shared-libs=%mlir_lib_dir/libmlir_c_runner_utils%shlibext | \
 // RUN: FileCheck %s
 
 #SV = #sparse_tensor.encoding<{ dimLevelType = [ "compressed" ] }>
@@ -194,10 +187,10 @@ module {
     call @dump_i32(%6) : (tensor<i32>) -> ()
 
     // Release the resources.
-    sparse_tensor.release %sparse_input_i32 : tensor<32xi32, #SV>
-    sparse_tensor.release %sparse_input_f32 : tensor<32xf32, #SV>
-    sparse_tensor.release %dense_input_i32  : tensor<32xi32, #DV>
-    sparse_tensor.release %dense_input_f32  : tensor<32xf32, #DV>
+    bufferization.dealloc_tensor %sparse_input_i32 : tensor<32xi32, #SV>
+    bufferization.dealloc_tensor %sparse_input_f32 : tensor<32xf32, #SV>
+    bufferization.dealloc_tensor %dense_input_i32  : tensor<32xi32, #DV>
+    bufferization.dealloc_tensor %dense_input_f32  : tensor<32xf32, #DV>
 
     return
   }

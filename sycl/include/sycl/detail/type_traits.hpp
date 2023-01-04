@@ -17,8 +17,8 @@
 #include <tuple>
 #include <type_traits>
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 template <int Dimensions> class group;
 namespace ext {
 namespace oneapi {
@@ -49,7 +49,9 @@ class half;
 using half = detail::half_impl::half;
 
 // Forward declaration
-template <typename ElementType, access::address_space Space> class multi_ptr;
+template <typename ElementType, access::address_space Space,
+          access::decorated DecorateAddress>
+class multi_ptr;
 
 template <class T>
 __SYCL_INLINE_CONSTEXPR bool is_group_v =
@@ -211,7 +213,7 @@ using is_gen_based_on_type_sizeof =
 
 template <typename> struct is_vec : std::false_type {};
 template <typename T, std::size_t N>
-struct is_vec<cl::sycl::vec<T, N>> : std::true_type {};
+struct is_vec<sycl::vec<T, N>> : std::true_type {};
 
 // is_integral
 template <typename T>
@@ -258,8 +260,10 @@ template <typename T> struct is_pointer_impl : std::false_type {};
 
 template <typename T> struct is_pointer_impl<T *> : std::true_type {};
 
-template <typename T, access::address_space Space>
-struct is_pointer_impl<multi_ptr<T, Space>> : std::true_type {};
+template <typename T, access::address_space Space,
+          access::decorated DecorateAddress>
+struct is_pointer_impl<multi_ptr<T, Space, DecorateAddress>> : std::true_type {
+};
 
 template <typename T> struct is_pointer : is_pointer_impl<remove_cv_t<T>> {};
 
@@ -272,8 +276,9 @@ template <typename T> struct remove_pointer_impl<T *> {
   using type = T;
 };
 
-template <typename T, access::address_space Space>
-struct remove_pointer_impl<multi_ptr<T, Space>> {
+template <typename T, access::address_space Space,
+          access::decorated DecorateAddress>
+struct remove_pointer_impl<multi_ptr<T, Space, DecorateAddress>> {
   using type = T;
 };
 
@@ -289,8 +294,10 @@ struct is_address_space_compliant_impl : std::false_type {};
 template <typename T, typename SpaceList>
 struct is_address_space_compliant_impl<T *, SpaceList> : std::true_type {};
 
-template <typename T, typename SpaceList, access::address_space Space>
-struct is_address_space_compliant_impl<multi_ptr<T, Space>, SpaceList>
+template <typename T, typename SpaceList, access::address_space Space,
+          access::decorated DecorateAddress>
+struct is_address_space_compliant_impl<multi_ptr<T, Space, DecorateAddress>,
+                                       SpaceList>
     : bool_constant<is_one_of_spaces<Space, SpaceList>::value> {};
 
 template <typename T, typename SpaceList>
@@ -364,5 +371,5 @@ template <typename Ret, typename... Args> struct function_traits<Ret(Args...)> {
 };
 
 } // namespace detail
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)

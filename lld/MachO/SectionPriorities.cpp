@@ -26,6 +26,7 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/TimeProfiler.h"
 #include "llvm/Support/raw_ostream.h"
+
 #include <numeric>
 
 using namespace llvm;
@@ -370,7 +371,7 @@ macho::PriorityBuilder::buildInputSectionPriorities() {
     if (!symbolPriority)
       return;
     size_t &priority = sectionPriorities[sym->isec];
-    priority = std::max(priority, symbolPriority.getValue());
+    priority = std::max(priority, symbolPriority.value());
   };
 
   // TODO: Make sure this handles weak symbols correctly.

@@ -1752,7 +1752,13 @@ bool CursorVisitor::VisitRValueReferenceTypeLoc(RValueReferenceTypeLoc TL) {
   return Visit(TL.getPointeeLoc());
 }
 
-bool CursorVisitor::VisitUsingTypeLoc(UsingTypeLoc TL) { return false; }
+bool CursorVisitor::VisitUsingTypeLoc(UsingTypeLoc TL) {
+  auto *underlyingDecl = TL.getUnderlyingType()->getAsTagDecl();
+  if (underlyingDecl) {
+    return Visit(MakeCursorTypeRef(underlyingDecl, TL.getNameLoc(), TU));
+  }
+  return false;
+}
 
 bool CursorVisitor::VisitAttributedTypeLoc(AttributedTypeLoc TL) {
   return Visit(TL.getModifiedLoc());
@@ -1822,7 +1828,7 @@ bool CursorVisitor::VisitTypeOfExprTypeLoc(TypeOfExprTypeLoc TL) {
 }
 
 bool CursorVisitor::VisitTypeOfTypeLoc(TypeOfTypeLoc TL) {
-  if (TypeSourceInfo *TSInfo = TL.getUnderlyingTInfo())
+  if (TypeSourceInfo *TSInfo = TL.getUnmodifiedTInfo())
     return Visit(TSInfo->getTypeLoc());
 
   return false;
@@ -3487,9 +3493,11 @@ bool CursorVisitor::RunVisitorWorkList(VisitorWorkList &WL) {
            C != CEnd; ++C) {
         if (!C->capturesVariable())
           continue;
-
-        if (Visit(MakeCursorVariableRef(C->getCapturedVar(), C->getLocation(),
-                                        TU)))
+        // TODO: handle structured bindings here ?
+        if (!isa<VarDecl>(C->getCapturedVar()))
+          continue;
+        if (Visit(MakeCursorVariableRef(cast<VarDecl>(C->getCapturedVar()),
+                                        C->getLocation(), TU)))
           return true;
       }
       // Visit init captures
@@ -6661,6 +6669,7 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
   case Decl::Binding:
   case Decl::MSProperty:
   case Decl::MSGuid:
+  case Decl::HLSLBuffer:
   case Decl::UnnamedGlobalConstant:
   case Decl::TemplateParamObject:
   case Decl::IndirectField:
@@ -6696,6 +6705,7 @@ CXCursor clang_getCursorDefinition(CXCursor C) {
   case Decl::PragmaDetectMismatch:
   case Decl::UsingPack:
   case Decl::Concept:
+  case Decl::ImplicitConceptSpecialization:
   case Decl::LifetimeExtendedTemporary:
   case Decl::RequiresExprBody:
   case Decl::UnresolvedUsingIfExists:
@@ -7376,7 +7386,7 @@ AnnotateTokensWorker::PostChildrenActions
 AnnotateTokensWorker::DetermineChildActions(CXCursor Cursor) const {
   PostChildrenActions actions;
 
-  // The DeclRefExpr of CXXOperatorCallExpr refering to the custom operator is
+  // The DeclRefExpr of CXXOperatorCallExpr referring to the custom operator is
   // visited before the arguments to the operator call. For the Call and
   // Subscript operator the range of this DeclRefExpr includes the whole call
   // expression, so that all tokens in that range would be mapped to the
@@ -8263,8 +8273,35 @@ static void getCursorPlatformAvailabilityForDecl(
           deprecated_message, always_unavailable, unavailable_message,
           AvailabilityAttrs);
 
-  if (AvailabilityAttrs.empty())
+  // If no availability attributes are found, inherit the attribute from the
+  // containing decl or the class or category interface decl.
+  if (AvailabilityAttrs.empty()) {
+    const ObjCContainerDecl *CD = nullptr;
+    const DeclContext *DC = D->getDeclContext();
+
+    if (auto *IMD = dyn_cast<ObjCImplementationDecl>(D))
+      CD = IMD->getClassInterface();
+    else if (auto *CatD = dyn_cast<ObjCCategoryDecl>(D))
+      CD = CatD->getClassInterface();
+    else if (auto *IMD = dyn_cast<ObjCCategoryImplDecl>(D))
+      CD = IMD->getCategoryDecl();
+    else if (auto *ID = dyn_cast<ObjCInterfaceDecl>(DC))
+      CD = ID;
+    else if (auto *CatD = dyn_cast<ObjCCategoryDecl>(DC))
+      CD = CatD;
+    else if (auto *IMD = dyn_cast<ObjCImplementationDecl>(DC))
+      CD = IMD->getClassInterface();
+    else if (auto *IMD = dyn_cast<ObjCCategoryImplDecl>(DC))
+      CD = IMD->getCategoryDecl();
+    else if (auto *PD = dyn_cast<ObjCProtocolDecl>(DC))
+      CD = PD;
+
+    if (CD)
+      getCursorPlatformAvailabilityForDecl(
+          CD, always_deprecated, deprecated_message, always_unavailable,
+          unavailable_message, AvailabilityAttrs);
     return;
+  }
 
   llvm::sort(
       AvailabilityAttrs, [](AvailabilityAttr *LHS, AvailabilityAttr *RHS) {
@@ -8837,6 +8874,16 @@ unsigned clang_CXXMethod_isDefaulted(CXCursor C) {
   return (Method && Method->isDefaulted()) ? 1 : 0;
 }
 
+unsigned clang_CXXMethod_isDeleted(CXCursor C) {
+  if (!clang_isDeclaration(C.kind))
+    return 0;
+
+  const Decl *D = cxcursor::getCursorDecl(C);
+  const CXXMethodDecl *Method =
+      D ? dyn_cast_if_present<CXXMethodDecl>(D->getAsFunction()) : nullptr;
+  return (Method && Method->isDeleted()) ? 1 : 0;
+}
+
 unsigned clang_CXXMethod_isStatic(CXCursor C) {
   if (!clang_isDeclaration(C.kind))
     return 0;
@@ -8855,6 +8902,17 @@ unsigned clang_CXXMethod_isVirtual(CXCursor C) {
   const CXXMethodDecl *Method =
       D ? dyn_cast_or_null<CXXMethodDecl>(D->getAsFunction()) : nullptr;
   return (Method && Method->isVirtual()) ? 1 : 0;
+}
+
+unsigned clang_CXXMethod_isCopyAssignmentOperator(CXCursor C) {
+  if (!clang_isDeclaration(C.kind))
+    return 0;
+
+  const Decl *D = cxcursor::getCursorDecl(C);
+  const CXXMethodDecl *Method =
+      D ? dyn_cast_or_null<CXXMethodDecl>(D->getAsFunction()) : nullptr;
+
+  return (Method && Method->isCopyAssignmentOperator()) ? 1 : 0;
 }
 
 unsigned clang_CXXRecord_isAbstract(CXCursor C) {

@@ -93,7 +93,9 @@ struct ASTFileSignature : std::array<uint8_t, 20> {
 };
 
 /// Describes a module or submodule.
-class Module {
+///
+/// Aligned to 8 bytes to allow for llvm::PointerIntPair<Module *, 3>.
+class alignas(8) Module {
 public:
   /// The name of this module.
   std::string Name;
@@ -345,6 +347,10 @@ public:
   /// module depends.
   llvm::SmallSetVector<Module *, 2> Imports;
 
+  /// The set of top-level modules that affected the compilation of this module,
+  /// but were not imported.
+  llvm::SmallSetVector<Module *, 2> AffectingClangModules;
+
   /// Describes an exported module.
   ///
   /// The pointer is the module being re-exported, while the bit will be true
@@ -525,6 +531,11 @@ public:
     Parent->SubModules.push_back(this);
   }
 
+  /// Is this module have similar semantics as headers.
+  bool isHeaderLikeModule() const {
+    return isModuleMapModule() || isHeaderUnit();
+  }
+
   /// Is this a module partition.
   bool isModulePartition() const {
     return Kind == ModulePartitionInterface ||
@@ -599,8 +610,7 @@ public:
 
   /// Set the serialized AST file for the top-level module of this module.
   void setASTFile(Optional<FileEntryRef> File) {
-    assert((!File || !getASTFile() || getASTFile() == File) &&
-           "file path changed");
+    assert((!getASTFile() || getASTFile() == File) && "file path changed");
     getTopLevelModule()->ASTFile = File;
   }
 
@@ -664,6 +674,18 @@ public:
   /// \returns The submodule if found, or NULL otherwise.
   Module *findSubmodule(StringRef Name) const;
   Module *findOrInferSubmodule(StringRef Name);
+
+  /// Get the Global Module Fragment (sub-module) for this module, it there is
+  /// one.
+  ///
+  /// \returns The GMF sub-module if found, or NULL otherwise.
+  Module *getGlobalModuleFragment() { return findSubmodule("<global>"); }
+
+  /// Get the Private Module Fragment (sub-module) for this module, it there is
+  /// one.
+  ///
+  /// \returns The PMF sub-module if found, or NULL otherwise.
+  Module *getPrivateModuleFragment() { return findSubmodule("<private>"); }
 
   /// Determine whether the specified module would be visible to
   /// a lookup at the end of this module.

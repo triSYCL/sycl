@@ -74,6 +74,7 @@ set(SANITIZER_TEST_CFLAGS_COMMON
 
 set(SANITIZER_TEST_LINK_FLAGS_COMMON
   ${COMPILER_RT_UNITTEST_LINK_FLAGS}
+  ${COMPILER_RT_UNWINDER_LINK_LIBS}
   ${SANITIZER_TEST_CXX_LIBRARIES})
 
 # -gline-tables-only must be enough for these tests, so use it if possible.
@@ -101,6 +102,8 @@ if(APPLE)
 
   add_weak_symbols("sanitizer_common" WEAK_SYMBOL_LINK_FLAGS)
   list(APPEND SANITIZER_TEST_LINK_FLAGS_COMMON ${WEAK_SYMBOL_LINK_FLAGS})
+  # For c++17 sanitizer_allocator_test requires language features introduced in macos 10.13
+  list(APPEND SANITIZER_TEST_CFLAGS_COMMON "-mmacosx-version-min=10.13")
 endif()
 
 # MSVC linker is allocating 1M for the stack by default, which is not

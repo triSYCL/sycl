@@ -33,7 +33,7 @@
 #include "llvm/Transforms/Utils/Cloning.h"
 #include "llvm/Transforms/Utils/LowerMemIntrinsics.h"
 
-#include "SYCLUtils.h"
+#include "llvm/SYCL/SYCLUtils.h"
 
 using namespace llvm;
 
@@ -194,7 +194,7 @@ struct PrepareSYCLOptState {
       auto *F = I.getCalledFunction();
       if (F && llvm::demangle(std::string(F->getName()))
                        .rfind("__spir_ocl_get", 0) == 0) {
-        std::cerr << "SYCL_VXX_UNSUPPORTED_SPIR_BUILTINS" << std::endl;
+        std::cerr << "SYCL_VXX_UNSUPPORTED_SPIR_BUILTINS:" << F->getName().str() << std::endl;
       }
     }
   };

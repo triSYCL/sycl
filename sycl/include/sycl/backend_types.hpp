@@ -9,17 +9,17 @@
 #pragma once
 
 #include <sycl/detail/defines.hpp>
+#include <sycl/detail/iostream_proxy.hpp>
 
 #include <fstream>
-#include <iostream>
 #include <istream>
 #include <string>
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 
 enum class backend : char {
-  host = 0,
+  host __SYCL2020_DEPRECATED("'host' backend is no longer supported") = 0,
   opencl = 1,
   ext_oneapi_level_zero = 2,
   level_zero __SYCL2020_DEPRECATED("use 'ext_oneapi_level_zero' instead") =
@@ -28,7 +28,7 @@ enum class backend : char {
   cuda __SYCL2020_DEPRECATED("use 'ext_oneapi_cuda' instead") = ext_oneapi_cuda,
   all = 4,
   ext_intel_esimd_emulator = 5,
-  esimd_cpu __SYCL2020_DEPRECATED("use 'ext_oneapi_esimd_emulator' instead") =
+  esimd_cpu __SYCL2020_DEPRECATED("use 'ext_intel_esimd_emulator' instead") =
       ext_intel_esimd_emulator,
   ext_oneapi_hip = 6,
   hip __SYCL2020_DEPRECATED("use 'ext_oneapi_hip' instead") = ext_oneapi_hip,
@@ -73,5 +73,5 @@ inline std::ostream &operator<<(std::ostream &Out, backend be) {
   return Out;
 }
 
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)

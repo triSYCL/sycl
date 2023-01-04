@@ -15,8 +15,8 @@
 
 #ifdef __SYCL_DEVICE_ONLY__
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace detail {
 
 // ---- merge sort implementation
@@ -62,8 +62,9 @@ template <typename Iter> struct GetValueType {
   using type = typename std::iterator_traits<Iter>::value_type;
 };
 
-template <typename ElementType, access::address_space Space>
-struct GetValueType<sycl::multi_ptr<ElementType, Space>> {
+template <typename ElementType, access::address_space Space,
+          access::decorated IsDecorated>
+struct GetValueType<sycl::multi_ptr<ElementType, Space, IsDecorated>> {
   using type = ElementType;
 };
 
@@ -250,7 +251,7 @@ void merge_sort(Group group, Iter first, const std::size_t n, Compare comp,
 }
 
 } // namespace detail
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)
 #endif
 #endif // __cplusplus >=201703L

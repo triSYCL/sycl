@@ -10,8 +10,8 @@
 
 #include <sycl/detail/defines_elementary.hpp>
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 
 enum class memory_order : int {
   relaxed = 0,
@@ -95,9 +95,13 @@ static constexpr std::memory_order getStdMemoryOrder(sycl::memory_order order) {
   case memory_order::seq_cst:
     return std::memory_order_seq_cst;
   }
+  // Return default value here to avoid compiler warnings.
+  // default case in switch doesn't help because some compiler warn about
+  // having a default case while all values of enum are handled.
+  return std::memory_order_acq_rel;
 }
 #endif // __SYCL_DEVICE_ONLY__
 
 } // namespace detail
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)

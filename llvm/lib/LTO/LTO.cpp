@@ -131,6 +131,8 @@ void llvm::computeLTOCacheKey(
     AddUnsigned(*Conf.CodeModel);
   else
     AddUnsigned(-1);
+  for (const auto &S : Conf.MllvmArgs)
+    AddString(S);
   AddUnsigned(Conf.CGOptLevel);
   AddUnsigned(Conf.CGFileType);
   AddUnsigned(Conf.OptLevel);
@@ -563,6 +565,22 @@ void LTO::addModuleToGlobalRes(ArrayRef<InputFile::Symbol> Syms,
       // Otherwise, if we haven't seen a prevailing symbol, set the name so that
       // we can later use it to check if there is any prevailing copy in IR.
       GlobalRes.IRName = std::string(Sym.getIRName());
+    }
+
+    // In rare occasion, the symbol used to initialize GlobalRes has a different
+    // IRName from the inspected Symbol. This can happen on macOS + iOS, when a
+    // symbol is referenced through its mangled name, say @"\01_symbol" while
+    // the IRName is @symbol (the prefix underscore comes from MachO mangling).
+    // In that case, we have the same actual Symbol that can get two different
+    // GUID, leading to some invalid internalization. Workaround this by marking
+    // the GlobalRes external.
+
+    // FIXME: instead of this check, it would be desirable to compute GUIDs
+    // based on mangled name, but this requires an access to the Target Triple
+    // and would be relatively invasive on the codebase.
+    if (GlobalRes.IRName != Sym.getIRName()) {
+      GlobalRes.Partition = GlobalResolution::External;
+      GlobalRes.VisibleOutsideSummary = true;
     }
 
     // Set the partition to external if we know it is re-defined by the linker
@@ -1103,6 +1121,8 @@ Error LTO::runRegularLTO(AddStreamFn AddStream) {
   updateVCallVisibilityInModule(*RegularLTO.CombinedModule,
                                 Conf.HasWholeProgramVisibility,
                                 DynamicExportSymbols);
+  updatePublicTypeTestCalls(*RegularLTO.CombinedModule,
+                            Conf.HasWholeProgramVisibility);
 
   if (Conf.PreOptModuleHook &&
       !Conf.PreOptModuleHook(0, *RegularLTO.CombinedModule))
@@ -1482,6 +1502,8 @@ Error LTO::runThinLTO(AddStreamFn AddStream, FileCache Cache,
 
   std::set<GlobalValue::GUID> ExportedGUIDs;
 
+  if (hasWholeProgramVisibility(Conf.HasWholeProgramVisibility))
+    ThinLTO.CombinedIndex.setWithWholeProgramVisibility();
   // If allowed, upgrade public vcall visibility to linkage unit visibility in
   // the summaries before whole program devirtualization below.
   updateVCallVisibilityInIndex(ThinLTO.CombinedIndex,

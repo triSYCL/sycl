@@ -42,7 +42,8 @@ static const unsigned HLSAddrSpaceMap[] = {
     0, // sycl_private
     0, // ptr32_sptr
     0, // ptr32_uptr
-    0  // ptr64
+    0, // ptr64
+    0,
 };
 
 class LLVM_LIBRARY_VISIBILITY XilinxHLSTargetInfo : public TargetInfo {

@@ -10,13 +10,14 @@
 
 #include <sycl/backend.hpp>
 #include <sycl/detail/pi.h>
+#include <sycl/detail/defines_elementary.hpp>
 #include <sycl/program.hpp>
 
 #include <xrt.h>
 #include <xrt/xrt_kernel.h>
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace detail {
 
 /// The backend is responsible for selecting the correct type and reference
@@ -128,5 +129,5 @@ inline auto get_native<backend::xrt>(const kernel_bundle<bundle_state::executabl
   });
 }
 
+}
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)

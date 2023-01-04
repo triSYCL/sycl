@@ -29,7 +29,6 @@
 #include <cassert>
 #include <cstring>
 #include <functional>
-#include <iostream>
 #include <list>
 #include <map>
 #include <memory>
@@ -43,6 +42,7 @@
 
 #include <level_zero/ze_api.h>
 #include <level_zero/zes_api.h>
+#include <sycl/detail/iostream_proxy.hpp>
 
 #include "usm_allocator.hpp"
 
@@ -166,6 +166,14 @@ template <> zes_structure_type_t getZesStructureType<zes_pci_properties_t>() {
   return ZES_STRUCTURE_TYPE_PCI_PROPERTIES;
 }
 
+template <> zes_structure_type_t getZesStructureType<zes_mem_state_t>() {
+  return ZES_STRUCTURE_TYPE_MEM_STATE;
+}
+
+template <> zes_structure_type_t getZesStructureType<zes_mem_properties_t>() {
+  return ZES_STRUCTURE_TYPE_MEM_PROPERTIES;
+}
+
 // The helpers to properly default initialize Level-Zero descriptor and
 // properties structures.
 template <class T> struct ZeStruct : public T {
@@ -246,7 +254,7 @@ template <class T> struct ZeCache : private T {
   // it is going to initialize, since it is private here in
   // order to disallow access other than through "->".
   //
-  typedef std::function<void(T &)> InitFunctionType;
+  using InitFunctionType = std::function<void(T &)>;
   InitFunctionType Compute{nullptr};
   bool Computed{false};
   pi_mutex ZeCacheMutex;
@@ -274,7 +282,10 @@ template <class T> struct ZeCache : private T {
 // thread can reach ref count equal to zero, i.e. only a single thread can pass
 // through this check.
 struct ReferenceCounter {
-  ReferenceCounter(pi_uint32 InitVal) : RefCount{InitVal} {}
+  ReferenceCounter() : RefCount{1} {}
+
+  // Reset the counter to the initial value.
+  void reset() { RefCount = 1; }
 
   // Used when retaining an object.
   void increment() { RefCount++; }
@@ -306,7 +317,7 @@ private:
 
 // Base class to store common data
 struct _pi_object {
-  _pi_object() : RefCount{1} {}
+  _pi_object() : RefCount{} {}
 
   // Level Zero doesn't do the reference counting, so we have to do.
   // Must be atomic to prevent data race when incrementing/decrementing.
@@ -360,7 +371,7 @@ struct _pi_platform {
   // Cache versions info from zeDriverGetProperties.
   std::string ZeDriverVersion;
   std::string ZeDriverApiVersion;
-  ze_api_version_t ZeApiVersion;
+  ze_api_version_t ZeApiVersion{};
 
   // Cache driver extensions
   std::unordered_map<std::string, uint32_t> zeDriverExtensionMap;
@@ -453,11 +464,27 @@ public:
   USMHostMemoryAlloc(pi_context Ctx) : USMMemoryAllocBase(Ctx, nullptr) {}
 };
 
+enum EventsScope {
+  // All events are created host-visible.
+  AllHostVisible,
+  // All events are created with device-scope and only when
+  // host waits them or queries their status that a proxy
+  // host-visible event is created and set to signal after
+  // original event signals.
+  OnDemandHostVisibleProxy,
+  // All events are created with device-scope and only
+  // when a batch of commands is submitted for execution a
+  // last command in that batch is added to signal host-visible
+  // completion of each command in this batch (the default mode).
+  LastCommandInBatchHostVisible
+};
+
 struct _pi_device : _pi_object {
   _pi_device(ze_device_handle_t Device, pi_platform Plt,
              pi_device ParentDevice = nullptr)
       : ZeDevice{Device}, Platform{Plt}, RootDevice{ParentDevice},
-        ZeDeviceProperties{}, ZeDeviceComputeProperties{} {
+        ImmCommandListsPreferred{false}, ZeDeviceProperties{},
+        ZeDeviceComputeProperties{} {
     // NOTE: one must additionally call initialize() to complete
     // PI device creation.
   }
@@ -465,12 +492,12 @@ struct _pi_device : _pi_object {
   // The helper structure that keeps info about a command queue groups of the
   // device. It is not changed after it is initialized.
   struct queue_group_info_t {
-    typedef enum {
+    enum type {
       MainCopy,
       LinkCopy,
       Compute,
       Size // must be last
-    } type;
+    };
 
     // Keep the ordinal of the commands group as returned by
     // zeDeviceGetCommandQueueGroupProperties. A value of "-1" means that
@@ -533,6 +560,13 @@ struct _pi_device : _pi_object {
   // Therefore it can be accessed without holding a lock on this _pi_device.
   const pi_device RootDevice;
 
+  // Whether to use immediate commandlists for queues on this device.
+  // For some devices (e.g. PVC) immediate commandlists are preferred.
+  bool ImmCommandListsPreferred;
+
+  // Return whether to use immediate commandlists for this device.
+  bool useImmediateCommandLists();
+
   bool isSubDevice() { return RootDevice != nullptr; }
 
   // Cache of the immutable device properties.
@@ -580,10 +614,10 @@ struct pi_command_list_info_t {
 };
 
 // The map type that would track all command-lists in a queue.
-typedef std::unordered_map<ze_command_list_handle_t, pi_command_list_info_t>
-    pi_command_list_map_t;
+using pi_command_list_map_t =
+    std::unordered_map<ze_command_list_handle_t, pi_command_list_info_t>;
 // The iterator pointing to a specific command-list in use.
-typedef pi_command_list_map_t::iterator pi_command_list_ptr_t;
+using pi_command_list_ptr_t = pi_command_list_map_t::iterator;
 
 struct _pi_context : _pi_object {
   _pi_context(ze_context_handle_t ZeContext, pi_uint32 NumDevices,
@@ -593,41 +627,6 @@ struct _pi_context : _pi_object {
         SingleRootDevice(getRootDevice()), ZeCommandListInit{nullptr} {
     // NOTE: one must additionally call initialize() to complete
     // PI context creation.
-
-    // Create USM allocator context for each pair (device, context).
-    for (uint32_t I = 0; I < NumDevices; I++) {
-      pi_device Device = Devs[I];
-      SharedMemAllocContexts.emplace(
-          std::piecewise_construct, std::make_tuple(Device),
-          std::make_tuple(std::unique_ptr<SystemMemory>(
-              new USMSharedMemoryAlloc(this, Device))));
-      SharedReadOnlyMemAllocContexts.emplace(
-          std::piecewise_construct, std::make_tuple(Device),
-          std::make_tuple(std::unique_ptr<SystemMemory>(
-              new USMSharedReadOnlyMemoryAlloc(this, Device))));
-      DeviceMemAllocContexts.emplace(
-          std::piecewise_construct, std::make_tuple(Device),
-          std::make_tuple(std::unique_ptr<SystemMemory>(
-              new USMDeviceMemoryAlloc(this, Device))));
-    }
-    // Create USM allocator context for host. Device and Shared USM allocations
-    // are device-specific. Host allocations are not device-dependent therefore
-    // we don't need a map with device as key.
-    HostMemAllocContext = std::make_unique<USMAllocContext>(
-        std::unique_ptr<SystemMemory>(new USMHostMemoryAlloc(this)));
-
-    // We may allocate memory to this root device so create allocators.
-    if (SingleRootDevice && DeviceMemAllocContexts.find(SingleRootDevice) ==
-                                DeviceMemAllocContexts.end()) {
-      SharedMemAllocContexts.emplace(
-          std::piecewise_construct, std::make_tuple(SingleRootDevice),
-          std::make_tuple(std::unique_ptr<SystemMemory>(
-              new USMSharedMemoryAlloc(this, SingleRootDevice))));
-      DeviceMemAllocContexts.emplace(
-          std::piecewise_construct, std::make_tuple(SingleRootDevice),
-          std::make_tuple(std::unique_ptr<SystemMemory>(
-              new USMDeviceMemoryAlloc(this, SingleRootDevice))));
-    }
   }
 
   // Initialize the PI context.
@@ -653,6 +652,17 @@ struct _pi_context : _pi_object {
   // This field is only set at _pi_context creation time, and cannot change.
   // Therefore it can be accessed without holding a lock on this _pi_context.
   const std::vector<pi_device> Devices;
+
+  // Checks if Device is covered by this context.
+  // For that the Device or its root devices need to be in the context.
+  bool isValidDevice(pi_device Device) const {
+    while (Device) {
+      if (std::find(Devices.begin(), Devices.end(), Device) != Devices.end())
+        return true;
+      Device = Device->RootDevice;
+    }
+    return false;
+  }
 
   // If context contains one device or sub-devices of the same device, we want
   // to save this device.
@@ -750,6 +760,12 @@ struct _pi_context : _pi_object {
   // when kernel has finished execution.
   std::unordered_map<void *, MemAllocRecord> MemAllocs;
 
+  // Get pi_event from cache.
+  pi_event getEventFromCache(bool HostVisible, bool WithProfiling);
+
+  // Add pi_event to cache.
+  void addEventToCache(pi_event);
+
 private:
   // If context contains one device then return this device.
   // If context contains sub-devices of the same device, then return this parent
@@ -798,6 +814,20 @@ private:
   // Mutex to control operations on event pool caches and the helper maps
   // holding the current pool usage counts.
   pi_mutex ZeEventPoolCacheMutex;
+
+  // Mutex to control operations on event caches.
+  pi_mutex EventCacheMutex;
+
+  // Caches for events.
+  std::vector<std::list<pi_event>> EventCaches{4};
+
+  // Get the cache of events for a provided scope and profiling mode.
+  auto getEventCache(bool HostVisible, bool WithProfiling) {
+    if (HostVisible)
+      return WithProfiling ? &EventCaches[0] : &EventCaches[1];
+    else
+      return WithProfiling ? &EventCaches[2] : &EventCaches[3];
+  }
 };
 
 struct _pi_queue : _pi_object {
@@ -906,7 +936,7 @@ struct _pi_queue : _pi_object {
   pi_command_list_map_t CommandListMap;
 
   // Helper data structure to hold all variables related to batching
-  typedef struct CommandBatch {
+  struct command_batch {
     // These two members are used to keep track of how often the
     // batching closes and executes a command list before reaching the
     // QueueComputeBatchSize limit, versus how often we reach the limit.
@@ -924,7 +954,7 @@ struct _pi_queue : _pi_object {
     // a queue specific basis. And by putting it in the queue itself, this
     // is thread safe because of the locking of the queue that occurs.
     pi_uint32 QueueBatchSize = {0};
-  } command_batch;
+  };
 
   // ComputeCommandBatch holds data related to batching of non-copy commands.
   // CopyCommandBatch holds data related to batching of copy commands.
@@ -941,6 +971,9 @@ struct _pi_queue : _pi_object {
 
   // Returns true if the queue is a in-order queue.
   bool isInOrderQueue() const;
+
+  // Returns true if the queue has discard events property.
+  bool isDiscardEvents() const;
 
   // adjust the queue's batch size, knowing that the current command list
   // is being closed with a full batch.
@@ -1098,12 +1131,8 @@ struct _pi_buffer final : _pi_mem {
       }
     }
 
-    // Make first device in the context be the master. Mark that
-    // allocation (yet to be made) having "valid" data. And real
-    // allocation and initialization should follow the buffer
-    // construction with a "write_only" access copy.
-    LastDeviceWithValidAllocation = Context->Devices[0];
-    Allocations[LastDeviceWithValidAllocation].Valid = true;
+    // This initialization does not end up with any valid allocation yet.
+    LastDeviceWithValidAllocation = nullptr;
   }
 
   // Sub-buffer constructor
@@ -1350,6 +1379,27 @@ struct _pi_event : _pi_object {
   // L0 event (if any) is not guranteed to have been signalled, or
   // being visible to the host at all.
   bool Completed = {false};
+
+  // Besides each PI object keeping a total reference count in
+  // _pi_object::RefCount we keep special track of the event *external*
+  // references. This way we are able to tell when the event is not referenced
+  // externally anymore, i.e. it can't be passed as a dependency event to
+  // piEnqueue* functions and explicitly waited meaning that we can do some
+  // optimizations:
+  // 1. For in-order queues we can reset and reuse event even if it was not yet
+  // completed by submitting a reset command to the queue (since there are no
+  // external references, we know that nobody can wait this event somewhere in
+  // parallel thread or pass it as a dependency which may lead to hang)
+  // 2. We can avoid creating host proxy event.
+  // This counter doesn't track the lifetime of an event object. Even if it
+  // reaches zero an event object may not be destroyed and can be used
+  // internally in the plugin.
+  std::atomic<pi_uint32> RefCountExternal{0};
+
+  bool hasExternalRefs() { return RefCountExternal != 0; }
+
+  // Reset _pi_event object.
+  pi_result reset();
 };
 
 struct _pi_program : _pi_object {
@@ -1446,7 +1496,7 @@ struct _pi_program : _pi_object {
   // In IL and Object states, this contains the SPIR-V representation of the
   // module.  In Native state, it contains the native code.
   std::unique_ptr<uint8_t[]> Code; // Array containing raw IL / native code.
-  size_t CodeLength;               // Size (bytes) of the array.
+  size_t CodeLength{0};            // Size (bytes) of the array.
 
   // Used only in IL and Object states.  Contains the SPIR-V specialization
   // constants as a map from the SPIR-V "SpecID" to a buffer that contains the

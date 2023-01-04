@@ -21,6 +21,7 @@
 #pragma once
 
 #include <sycl/accessor.hpp>
+#include <sycl/detail/defines_elementary.hpp>
 #include <sycl/detail/backend_traits.hpp>
 #include <sycl/device.hpp>
 #include <sycl/kernel.hpp>
@@ -36,8 +37,9 @@ struct xclbin;
 struct bo;
 }
 
-__SYCL_INLINE_NAMESPACE(cl) {
-namespace sycl::detail {
+namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
+namespace detail {
 
 template <> struct InteropFeatureSupportMap<backend::xrt> {
   static constexpr bool MakePlatform = false;
@@ -79,4 +81,5 @@ struct BackendReturn<backend::xrt,
 };
 
 } // namespace detail
-} // __SYCL_INLINE_NAMESPACE(cl)
+}
+}  // namespace sycl

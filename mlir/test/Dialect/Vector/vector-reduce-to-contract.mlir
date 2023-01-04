@@ -213,6 +213,38 @@ func.func @contract_broadcast_dimension_would_go_unused_in_lhs_rhs(%arg0 : vecto
   return  %result : vector<1xi32>
 }
 
+// -----
+
+// Test that CombineContractBroadcast is not combining this case, as that would
+// result in a vector.contract without a reduction dimention pair, as the only
+// reduction dimension would be used by only one side among LHS, RHS.
+// This is arguably a convoluted edge case (the affine_maps here look weird!)
+// but it is something that we actually ran into from linalg.matmul tests that
+// were exercising 1x1 shapes, and using various drop-unit-dims patterns.
+
+#map0 = affine_map<(d0, d1) -> (d1)>
+#map1 = affine_map<(d0, d1) -> (d1, d0)>
+#map2 = affine_map<(d0, d1) -> (d0)>
+
+// CHECK-LABEL: contract_broadcast_would_have_no_reduction_dim_pair
+//  CHECK-SAME: (%[[ARG0:.+]]: vector<1xf32>, %[[ARG1:.+]]: vector<1xf32>, %[[ARG2:.+]]: vector<1xf32>)
+//  CHECK: %[[BROADCAST1:.+]] = vector.broadcast %[[ARG1]] : vector<1xf32> to vector<1x1xf32>
+//  CHECK: vector.contract
+//  CHECK-SAME: indexing_maps = [#[[$map0]], #[[$map1]], #[[$map2]]]
+//  CHECK-SAME: iterator_types = ["parallel", "reduction"]
+//  CHECK-SAME: %[[ARG0]], %[[BROADCAST1]], %[[ARG2]] : vector<1xf32>, vector<1x1xf32> into vector<1xf32>
+
+func.func @contract_broadcast_would_have_no_reduction_dim_pair(%arg0 : vector<1xf32>, %arg1 : vector<1xf32>, %arg2 : vector<1xf32>) -> vector<1xf32> {
+  %1 = vector.broadcast %arg1 : vector<1xf32> to vector<1x1xf32>
+  %result = vector.contract {
+    indexing_maps = [#map0, #map1, #map2],
+    iterator_types = ["parallel", "reduction"],
+    kind = #vector.kind<add>
+  } %arg0, %1, %arg2 : vector<1xf32>, vector<1x1xf32> into vector<1xf32>
+  return %result : vector<1xf32>
+}
+
+
 //===----------------------------------------------------------------------===//
 // Reorder casting ops and vector ops. The casting ops have almost identical
 // pattern, so only arith.extsi op is tested.
@@ -323,4 +355,33 @@ func.func @transpose_elementwise_diff_map(%a : vector<4x6x3x2xf32>, %b: vector<6
   %bt = vector.transpose %b, [0, 2, 1, 3]: vector<6x2x4x3xf32> to vector<6x4x2x3xf32>
   %r = arith.addf %at, %bt : vector<6x4x2x3xf32>
   return %r : vector<6x4x2x3xf32>
+}
+
+// -----
+
+// CHECK-DAG: #[[$LHS_MAP:.+]] = affine_map<(d0, d1, d2, d3) -> (d0, d3, d1)>
+// CHECK-DAG: #[[$RHS_MAP:.+]] = affine_map<(d0, d1, d2, d3) -> (d3, d2)>
+// CHECK-DAG: #[[$ACC_MAP:.+]] = affine_map<(d0, d1, d2, d3) -> (d0, d2, d1)>
+
+// CHECK-LABEL: func.func @contract_result_transpose
+//  CHECK-SAME: (%[[LHS:.+]]: vector<2x4x4xf32>, %[[RHS:.+]]: vector<4x8xf32>, %[[ACC:.+]]: vector<2x8x4xf32>)
+//       CHECK:   %[[CONTRACT:.+]] = vector.contract
+//  CHECK-SAME:     indexing_maps = [#[[$LHS_MAP]], #[[$RHS_MAP]], #[[$ACC_MAP]]]
+//  CHECK-SAME:     iterator_types = ["parallel", "parallel", "parallel", "reduction"]
+//  CHECK-SAME:     kind = #vector.kind<add>
+//  CHECK-SAME:     %[[LHS]], %[[RHS]], %[[ACC]]
+//       CHECK:   return %[[CONTRACT]]
+func.func @contract_result_transpose(%lhs : vector<2x4x4xf32>, %rhs: vector<4x8xf32>, %acc: vector<2x8x4xf32>) -> vector<2x8x4xf32> {
+  %accT = vector.transpose %acc, [0, 2, 1] : vector<2x8x4xf32> to vector<2x4x8xf32>
+  %contract = vector.contract {
+    indexing_maps = [
+      affine_map<(d0, d1, d2, d3) -> (d0, d3, d1)>,
+      affine_map<(d0, d1, d2, d3) -> (d3, d2)>,
+      affine_map<(d0, d1, d2, d3) -> (d0, d1, d2)>
+    ],
+    iterator_types = ["parallel", "parallel", "parallel", "reduction"],
+    kind = #vector.kind<add>
+  } %lhs, %rhs, %accT : vector<2x4x4xf32>, vector<4x8xf32> into vector<2x4x8xf32>
+  %resT = vector.transpose %contract, [0, 2, 1] : vector<2x4x8xf32> to vector<2x8x4xf32>
+  return %resT : vector<2x8x4xf32>
 }

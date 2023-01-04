@@ -424,6 +424,9 @@ template <> void SPIRVMap<std::string, Op, SPIRVInstruction>::init() {
   _SPIRV_OP(bitfield_extract_signed, BitFieldSExtract)
   _SPIRV_OP(bitfield_extract_unsigned, BitFieldUExtract)
   _SPIRV_OP(bit_reverse, BitReverse)
+  // cl_khr_split_work_group_barrier
+  _SPIRV_OP(intel_work_group_barrier_arrive, ControlBarrierArriveINTEL)
+  _SPIRV_OP(intel_work_group_barrier_wait, ControlBarrierWaitINTEL)
 #undef _SPIRV_OP
 }
 
@@ -976,9 +979,7 @@ static FunctionType *getBlockInvokeTy(Function *F, unsigned BlockIdx) {
 class OCLBuiltinFuncMangleInfo : public SPIRV::BuiltinFuncMangleInfo {
 public:
   OCLBuiltinFuncMangleInfo(Function *F) : F(F) {}
-  OCLBuiltinFuncMangleInfo(ArrayRef<Type *> ArgTypes)
-      : ArgTypes(ArgTypes.vec()) {}
-  Type *getArgTy(unsigned I) { return F->getFunctionType()->getParamType(I); }
+  OCLBuiltinFuncMangleInfo() = default;
   void init(StringRef UniqName) override {
     // Make a local copy as we will modify the string in init function
     std::string TempStorage = UniqName.str();
@@ -1030,7 +1031,9 @@ public:
     } else if (NameRef.contains("barrier")) {
       addUnsignedArg(0);
       if (NameRef.equals("work_group_barrier") ||
-          NameRef.equals("sub_group_barrier"))
+          NameRef.equals("sub_group_barrier") ||
+          NameRef.equals("intel_work_group_barrier_arrive") ||
+          NameRef.equals("intel_work_group_barrier_wait"))
         setEnumArg(1, SPIR::PRIMITIVE_MEMORY_SCOPE);
     } else if (NameRef.startswith("atomic_work_item_fence")) {
       addUnsignedArg(0);
@@ -1146,9 +1149,11 @@ public:
     } else if (NameRef.startswith("vstore")) {
       addUnsignedArg(1);
     } else if (NameRef.startswith("ndrange_")) {
-      addUnsignedArg(-1);
+      addUnsignedArgs(0, 2);
       if (NameRef[8] == '2' || NameRef[8] == '3') {
-        setArgAttr(-1, SPIR::ATTR_CONST);
+        setArgAttr(0, SPIR::ATTR_CONST);
+        setArgAttr(1, SPIR::ATTR_CONST);
+        setArgAttr(2, SPIR::ATTR_CONST);
       }
     } else if (NameRef.contains("umax")) {
       addUnsignedArg(-1);
@@ -1298,29 +1303,11 @@ public:
   }
   // Auxiliarry information, it is expected that it is relevant at the moment
   // the init method is called.
-  Function *F;                  // SPIRV decorated function
-  // TODO: ArgTypes argument should get removed once all SPV-IR related issues
-  // are resolved
-  std::vector<Type *> ArgTypes; // Arguments of OCL builtin
+  Function *F; // SPIRV decorated function
 };
 
-CallInst *mutateCallInstOCL(
-    Module *M, CallInst *CI,
-    std::function<std::string(CallInst *, std::vector<Value *> &)> ArgMutate,
-    AttributeList *Attrs) {
-  OCLBuiltinFuncMangleInfo BtnInfo(CI->getCalledFunction());
-  return mutateCallInst(M, CI, ArgMutate, &BtnInfo, Attrs);
-}
-
-Instruction *mutateCallInstOCL(
-    Module *M, CallInst *CI,
-    std::function<std::string(CallInst *, std::vector<Value *> &, Type *&RetTy)>
-        ArgMutate,
-    std::function<Instruction *(CallInst *)> RetMutate, AttributeList *Attrs,
-    bool TakeFuncName) {
-  OCLBuiltinFuncMangleInfo BtnInfo(CI->getCalledFunction());
-  return mutateCallInst(M, CI, ArgMutate, RetMutate, &BtnInfo, Attrs,
-                        TakeFuncName);
+std::unique_ptr<SPIRV::BuiltinFuncMangleInfo> makeMangler(Function &F) {
+  return std::make_unique<OCLBuiltinFuncMangleInfo>(&F);
 }
 
 static StringRef getStructName(Type *Ty) {
@@ -1349,7 +1336,8 @@ Value *unwrapSpecialTypeInitializer(Value *V) {
   return nullptr;
 }
 
-bool isSamplerStructTy(StructType *STy) {
+bool isSamplerStructTy(Type *Ty) {
+  auto *STy = dyn_cast_or_null<StructType>(Ty);
   return STy && STy->hasName() && STy->getName() == kSPR2TypeName::Sampler;
 }
 
@@ -1595,6 +1583,6 @@ Value *SPIRV::transSPIRVMemorySemanticsIntoOCLMemFenceFlags(
 void llvm::mangleOpenClBuiltin(const std::string &UniqName,
                                ArrayRef<Type *> ArgTypes,
                                std::string &MangledName) {
-  OCLUtil::OCLBuiltinFuncMangleInfo BtnInfo(ArgTypes);
+  OCLUtil::OCLBuiltinFuncMangleInfo BtnInfo;
   MangledName = SPIRV::mangleBuiltin(UniqName, ArgTypes, &BtnInfo);
 }

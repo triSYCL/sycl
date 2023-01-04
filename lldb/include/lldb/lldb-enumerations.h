@@ -830,6 +830,16 @@ enum TemplateArgumentKind {
   eTemplateArgumentKindNullPtr,
 };
 
+/// Type of match to be performed when looking for a formatter for a data type.
+/// Used by classes like SBTypeNameSpecifier or lldb_private::TypeMatcher.
+enum FormatterMatchType {
+  eFormatterMatchExact,
+  eFormatterMatchRegex,
+  eFormatterMatchCallback,
+
+  eLastFormatterMatchType = eFormatterMatchCallback,
+};
+
 /// Options that can be set for a formatter to alter its behavior. Not
 /// all of these are applicable to all formatter types.
 FLAGS_ENUM(TypeOptions){eTypeOptionNone = (0u),
@@ -1157,21 +1167,20 @@ enum SaveCoreStyle {
   eSaveCoreStackOnly = 3,
 };
 
-// Type of counter values associated with instructions in a trace.
-enum TraceCounter {
-  // Timestamp counter, like the one offered by Intel CPUs (TSC).
-  eTraceCounterTSC = 0,
-};
-
 /// Events that might happen during a trace session.
 enum TraceEvent {
-  /// Tracing was disabled for some time due to a software trigger
+  /// Tracing was disabled for some time due to a software trigger.
   eTraceEventDisabledSW,
-  /// Tracing was disable for some time due to a hardware trigger
+  /// Tracing was disable for some time due to a hardware trigger.
   eTraceEventDisabledHW,
   /// Event due to CPU change for a thread. This event is also fired when
   /// suddenly it's not possible to identify the cpu of a given thread.
   eTraceEventCPUChanged,
+  /// Event due to a CPU HW clock tick.
+  eTraceEventHWClockTick,
+  /// The underlying tracing technology emitted a synchronization event used by
+  /// trace processors.
+  eTraceEventSyncPoint,
 };
 
 // Enum used to identify which kind of item a \a TraceCursor is pointing at
@@ -1180,6 +1189,19 @@ enum TraceItemKind {
   eTraceItemKindEvent,
   eTraceItemKindInstruction,
 };
+
+/// Enum to indicate the reference point when invoking
+/// \a TraceCursor::Seek().
+/// The following values are inspired by \a std::istream::seekg.
+enum TraceCursorSeekType {
+  /// The beginning of the trace, i.e the oldest item.
+  eTraceCursorSeekTypeBeginning = 0,
+  /// The current position in the trace.
+  eTraceCursorSeekTypeCurrent,
+  /// The end of the trace, i.e the most recent item.
+  eTraceCursorSeekTypeEnd
+};
+
 
 } // namespace lldb
 

@@ -16,8 +16,8 @@
 #include <cstring>
 #include <mutex>
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace detail {
 
 /// Groups and provides access to all the locks used the SYCL runtime.
@@ -30,6 +30,18 @@ public:
 private:
   static Sync &getInstance();
   std::mutex GlobalLock;
+};
+
+// TempAssignGuard is the class for a guard object that will assign some OTHER
+// variable to a temporary value but restore it when the guard itself goes out
+// of scope.
+template <typename T> struct TempAssignGuard {
+  T &field;
+  T restoreValue;
+  TempAssignGuard(T &fld, T tempVal) : field(fld), restoreValue(fld) {
+    field = tempVal;
+  }
+  ~TempAssignGuard() { field = restoreValue; }
 };
 
 // const char* key hash for STL maps
@@ -56,7 +68,7 @@ struct CmpCStr {
 using SerializedObj = std::vector<unsigned char>;
 
 } // namespace detail
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)
 
 #endif //__SYCL_DEVICE_ONLY

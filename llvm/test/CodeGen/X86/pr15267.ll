@@ -27,23 +27,19 @@ define <4 x i3> @test1(ptr %in) nounwind {
 define <4 x i1> @test2(ptr %in) nounwind {
 ; CHECK-LABEL: test2:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    movb (%rdi), %al
+; CHECK-NEXT:    movzbl (%rdi), %eax
 ; CHECK-NEXT:    movl %eax, %ecx
 ; CHECK-NEXT:    shrb %cl
 ; CHECK-NEXT:    andb $1, %cl
-; CHECK-NEXT:    movzbl %cl, %ecx
 ; CHECK-NEXT:    movl %eax, %edx
 ; CHECK-NEXT:    andb $1, %dl
-; CHECK-NEXT:    movzbl %dl, %edx
 ; CHECK-NEXT:    vmovd %edx, %xmm0
 ; CHECK-NEXT:    vpinsrb $4, %ecx, %xmm0, %xmm0
 ; CHECK-NEXT:    movl %eax, %ecx
 ; CHECK-NEXT:    shrb $2, %cl
 ; CHECK-NEXT:    andb $1, %cl
-; CHECK-NEXT:    movzbl %cl, %ecx
 ; CHECK-NEXT:    vpinsrb $8, %ecx, %xmm0, %xmm0
 ; CHECK-NEXT:    shrb $3, %al
-; CHECK-NEXT:    movzbl %al, %eax
 ; CHECK-NEXT:    vpinsrb $12, %eax, %xmm0, %xmm0
 ; CHECK-NEXT:    retq
   %ret = load <4 x i1>, ptr %in, align 1
@@ -53,7 +49,7 @@ define <4 x i1> @test2(ptr %in) nounwind {
 define <4 x i64> @test3(ptr %in) nounwind {
 ; CHECK-LABEL: test3:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    movb (%rdi), %al
+; CHECK-NEXT:    movzbl (%rdi), %eax
 ; CHECK-NEXT:    movzbl %al, %ecx
 ; CHECK-NEXT:    shrb %al
 ; CHECK-NEXT:    movzbl %al, %eax
