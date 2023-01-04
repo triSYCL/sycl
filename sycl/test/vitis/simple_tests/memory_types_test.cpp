@@ -9,7 +9,7 @@
 #include <sycl/ext/xilinx/fpga.hpp>
 
 int main() {
-  sycl::buffer<int, 1> BufferA{4}, BufferB{4}, BufferC{4};
+  sycl::buffer<std::size_t, 1> BufferA{4}, BufferB{4}, BufferC{4};
   sycl::queue Queue{};
   const std::size_t buf_size{BufferA.size()};
 
