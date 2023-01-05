@@ -443,10 +443,10 @@ template <typename T> struct assume_device_copyable_wrapper : T {};
 } // namespace detail
 
 template <typename T>
-struct is_device_copyable<
-    detail::assume_device_copyable_wrapper<T>,
-    std::enable_if_t<is_device_copyable<T>::value>> : std::true_type {
-};
+struct is_device_copyable<detail::assume_device_copyable_wrapper<T>,
+                          std::enable_if_t<is_device_copyable_v<T> &&
+                                           !std::is_trivially_copyable_v<T>>>
+    : std::true_type {};
 
 /// Command group handler class.
 ///

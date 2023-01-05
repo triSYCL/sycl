@@ -6,6 +6,9 @@
 
 #include <iostream>
 #include <sycl/sycl.hpp>
+#include <sycl/ext/xilinx/fpga.hpp>
+
+using namespace sycl::ext::xilinx;
 
 int main() {
   sycl::buffer<int> answer{1};
@@ -31,5 +34,11 @@ int main() {
     sycl::accessor a{answer, cgh, sycl::write_only};
     cgh.parallel_for<class test2>(sycl::range<1>(1),
                                   [=](sycl::id<1> item) { a[item] = 42; });
+  });
+  sycl::range<1> rng{4};
+  q.submit([&](sycl::handler &cgh) {
+    cgh.parallel_for<class Kernel2>(
+        rng,
+        kernel_param([=](sycl::id<1> id) {}, "--kernel_frequency 200"_cstr));
   });
 }
