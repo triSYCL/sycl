@@ -7,37 +7,34 @@
 
 #include <sycl/sycl.hpp>
 #include <sycl/ext/xilinx/fpga.hpp>
+#include <numeric>
 
 int main() {
   sycl::buffer<std::size_t, 1> BufferA{4}, BufferB{4}, BufferC{4};
   sycl::queue Queue{};
-  const std::size_t buf_size{BufferA.size()};
 
   Queue.submit([&](sycl::handler &cgh) {
     sycl::ext::oneapi::accessor_property_list PL{sycl::ext::xilinx::ddr_bank<1>};
     // CHECK-DAG:{{.*}}:DDR[1]
     sycl::accessor Accessor(BufferA, cgh, sycl::write_only, PL);
     cgh.single_task<class SmallerTesta>([=]{
-          for (std::size_t i = 0 ; i < buf_size ; ++i)
-            Accessor[i] = i;
-        });
+      std::iota(Accessor.begin(), Accessor.end(), 0);
+    });
   });
   Queue.submit([&](sycl::handler &cgh) {
     sycl::ext::oneapi::accessor_property_list PL{sycl::ext::xilinx::hbm_bank<0>};
     // CHECK-DAG:{{.*}}:HBM[0]
     sycl::accessor Accessor(BufferB, cgh, sycl::write_only, PL);
     cgh.single_task<class SmallerTestb>([=]{
-          for (std::size_t i = 0 ; i < buf_size ; ++i)
-            Accessor[i] = i;
-        });
+      std::iota(Accessor.begin(), Accessor.end(), 0);
+    });
   });
   Queue.submit([&](sycl::handler &cgh) {
     sycl::ext::oneapi::accessor_property_list PL{sycl::ext::xilinx::plram_bank<1>};
     // CHECK-DAG:{{.*}}:PLRAM[1]
     sycl::accessor Accessor(BufferC, cgh, sycl::write_only, PL);
     cgh.single_task<class SmallerTestc>([=]{
-          for (std::size_t i = 0 ; i < buf_size ; ++i)
-            Accessor[i] = i;
-        });
+      std::iota(Accessor.begin(), Accessor.end(), 0);
+    });
   });
 }
