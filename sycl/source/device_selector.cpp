@@ -9,7 +9,6 @@
 #include <detail/config.hpp>
 #include <detail/device_impl.hpp>
 #include <detail/filter_selector_impl.hpp>
-#include <detail/force_device.hpp>
 #include <detail/global_handler.hpp>
 #include <sycl/backend_types.hpp>
 #include <sycl/detail/device_filter.hpp>
@@ -186,8 +185,6 @@ __SYCL_EXPORT int default_selector_v(const device &dev) {
   }
 
   traceDeviceSelector("info::device_type::automatic");
-  if (dev.get_info<info::device::device_type>() == detail::get_forced_type())
-    Score += 2000;
 
   if (dev.is_gpu())
     Score += 500;
@@ -301,8 +298,7 @@ int accelerator_selector::operator()(const device &dev) const {
   return accelerator_selector_v(dev);
 }
 
-namespace ext {
-namespace oneapi {
+namespace ext::oneapi {
 
 filter_selector::filter_selector(const std::string &Input)
     : impl(std::make_shared<detail::filter_selector_impl>(Input)) {}
@@ -333,8 +329,7 @@ device filter_selector::select_device() const {
   return Result;
 }
 
-} // namespace oneapi
-} // namespace ext
+} // namespace ext::oneapi
 
 namespace __SYCL2020_DEPRECATED("use 'ext::oneapi' instead") ONEAPI {
 using namespace ext::oneapi;

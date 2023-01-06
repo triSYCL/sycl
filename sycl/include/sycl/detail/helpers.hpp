@@ -93,20 +93,20 @@ public:
     return group<Dims>(Global, Local, Global / Local, Index);
   }
 
-  template <class ResType>
-  static ResType createSubGroupMask(uint32_t Bits, size_t BitsNum) {
+  template <class ResType, typename BitsType>
+  static ResType createSubGroupMask(BitsType Bits, size_t BitsNum) {
     return ResType(Bits, BitsNum);
   }
 
   template <int Dims, bool WithOffset>
-  static detail::enable_if_t<WithOffset, item<Dims, WithOffset>>
+  static std::enable_if_t<WithOffset, item<Dims, WithOffset>>
   createItem(const range<Dims> &Extent, const id<Dims> &Index,
              const id<Dims> &Offset) {
     return item<Dims, WithOffset>(Extent, Index, Offset);
   }
 
   template <int Dims, bool WithOffset>
-  static detail::enable_if_t<!WithOffset, item<Dims, WithOffset>>
+  static std::enable_if_t<!WithOffset, item<Dims, WithOffset>>
   createItem(const range<Dims> &Extent, const id<Dims> &Index) {
     return item<Dims, WithOffset>(Extent, Index);
   }
@@ -157,8 +157,7 @@ public:
   }
 
   template <int Dims, bool WithOffset>
-  static detail::enable_if_t<WithOffset, const item<Dims, WithOffset>>
-  getItem() {
+  static std::enable_if_t<WithOffset, const item<Dims, WithOffset>> getItem() {
     static_assert(is_valid_dimensions<Dims>::value, "invalid dimensions");
     id<Dims> GlobalId{__device_builtin::initGlobalInvocationId<Dims, id<Dims>>()};
     range<Dims> GlobalSize{__device_builtin::initGlobalSize<Dims, range<Dims>>()};
@@ -167,8 +166,7 @@ public:
   }
 
   template <int Dims, bool WithOffset>
-  static detail::enable_if_t<!WithOffset, const item<Dims, WithOffset>>
-  getItem() {
+  static std::enable_if_t<!WithOffset, const item<Dims, WithOffset>> getItem() {
     static_assert(is_valid_dimensions<Dims>::value, "invalid dimensions");
     id<Dims> GlobalId{__device_builtin::initGlobalInvocationId<Dims, id<Dims>>()};
     range<Dims> GlobalSize{__device_builtin::initGlobalSize<Dims, range<Dims>>()};

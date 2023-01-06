@@ -265,6 +265,7 @@ std::string memFlagsToString(pi_mem_flags Flags) {
 
 // GlobalPlugin is a global Plugin used with Interoperability constructors that
 // use OpenCL objects to construct SYCL class objects.
+// TODO: GlobalPlugin does not seem to be needed anymore. Consider removing it!
 std::shared_ptr<plugin> GlobalPlugin;
 
 // Find the plugin at the appropriate location and return the location.
@@ -451,44 +452,6 @@ static void initializePlugins(std::vector<plugin> &Plugins) {
                   << PluginNames[I].first << std::endl;
       }
       continue;
-    }
-    backend *BE = SYCLConfig<SYCL_BE>::get();
-    // Use OpenCL as the default interoperability plugin.
-    // This will go away when we make backend interoperability selection
-    // explicit in SYCL-2020.
-    backend InteropBE = BE ? *BE : backend::opencl;
-
-    if (InteropBE == backend::opencl &&
-        PluginNames[I].first.find("opencl") != std::string::npos) {
-      // Use the OpenCL plugin as the GlobalPlugin
-      GlobalPlugin =
-          std::make_shared<plugin>(PluginInformation, backend::opencl, Library);
-    } else if (InteropBE == backend::ext_oneapi_cuda &&
-               PluginNames[I].first.find("cuda") != std::string::npos) {
-      // Use the CUDA plugin as the GlobalPlugin
-      GlobalPlugin = std::make_shared<plugin>(
-          PluginInformation, backend::ext_oneapi_cuda, Library);
-    } else if (InteropBE == backend::ext_oneapi_hip &&
-               PluginNames[I].first.find("hip") != std::string::npos) {
-      // Use the HIP plugin as the GlobalPlugin
-      GlobalPlugin = std::make_shared<plugin>(PluginInformation,
-                                              backend::ext_oneapi_hip, Library);
-    } else if (InteropBE == backend::xrt &&
-               PluginNames[I].first.find("xrt") != std::string::npos) {
-      // Use the XRT plugin as the GlobalPlugin
-      GlobalPlugin = std::make_shared<plugin>(PluginInformation,
-                                              backend::xrt, Library);
-    } else if (InteropBE == backend::ext_oneapi_level_zero &&
-               PluginNames[I].first.find("level_zero") != std::string::npos) {
-      // Use the LEVEL_ZERO plugin as the GlobalPlugin
-      GlobalPlugin = std::make_shared<plugin>(
-          PluginInformation, backend::ext_oneapi_level_zero, Library);
-    } else if (InteropBE == backend::ext_intel_esimd_emulator &&
-               PluginNames[I].first.find("esimd_emulator") !=
-                   std::string::npos) {
-      // Use the ESIMD_EMULATOR plugin as the GlobalPlugin
-      GlobalPlugin = std::make_shared<plugin>(
-          PluginInformation, backend::ext_intel_esimd_emulator, Library);
     }
     plugin &NewPlugin = Plugins.emplace_back(
         plugin(PluginInformation, PluginNames[I].second, Library));
@@ -693,7 +656,7 @@ RT::PiDeviceBinaryType getBinaryImageFormat(const unsigned char *ImgData,
               {PI_DEVICE_BINARY_TYPE_NATIVE, 0x43544E49}};
 
   if (ImgSize >= sizeof(Fmts[0].Magic)) {
-    detail::remove_const_t<decltype(Fmts[0].Magic)> Hdr = 0;
+    std::remove_const_t<decltype(Fmts[0].Magic)> Hdr = 0;
     std::copy(ImgData, ImgData + sizeof(Hdr), reinterpret_cast<char *>(&Hdr));
 
     // Check headers for direct formats.

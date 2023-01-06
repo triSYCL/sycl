@@ -35,6 +35,7 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
+#include "llvm/Support/ModRef.h"
 
 #include "llvm/SYCL/SYCLUtils.h"
 
@@ -336,7 +337,7 @@ struct VXXIRDowngrader {
     llvm::sycl::removeAttributes(
         M, {Attribute::WillReturn, Attribute::NoFree, Attribute::ImmArg,
             Attribute::NoSync, Attribute::MustProgress, Attribute::NoUndef,
-            Attribute::StructRet, Attribute::NoCallback});
+            Attribute::StructRet, Attribute::NoCallback, Attribute::Memory});
     removeAnnotations(M);
     renameBasicBlocks(M);
     removeFreezeInst(M);
