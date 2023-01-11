@@ -211,6 +211,9 @@ struct KernelPropGenState {
               case sycl::MemoryType::hbm:
               Prefix = "HBM";
               break;
+              case sycl::MemoryType::plram:
+              Prefix = "PLRAM";
+              break;
               default:
               llvm_unreachable("Default bundle should not appear here");
             }
