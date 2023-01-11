@@ -5,7 +5,7 @@
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
 #include <numeric>
-#include <sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <sycl/ext/xilinx/fpga.hpp>
 
 

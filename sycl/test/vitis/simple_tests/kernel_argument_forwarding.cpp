@@ -3,7 +3,7 @@
 // RUN: %clangxx %EXTRA_COMPILE_FLAGS-fsycl -fsycl-targets=%sycl_triple -std=c++20 %s -o %t.out > %t.check 2>&1
 // RUN: %run_if_not_cpu FileCheck --input-file=%t.check %s
 
-#include <sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <sycl/ext/xilinx/fpga.hpp>
 #include <array>
 #include <iostream>
