@@ -1,9 +1,8 @@
 // REQUIRES: vitis
 
 // RUN: rm -rf %t.dir && mkdir %t.dir && cd %t.dir
-// RUN: %clangxx %EXTRA_COMPILE_FLAGS-fsycl -std=c++20 -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out > %t.check 2>&1
+// RUN: env SYCL_VXX_DONT_USE_VXX=1 %clangxx %EXTRA_COMPILE_FLAGS-fsycl -std=c++20 -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out > %t.check 2>&1
 // RUN: %run_if_not_cpu FileCheck --input-file=%t.check %s
-// RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
 #include <sycl/sycl.hpp>
 #include <sycl/ext/xilinx/fpga.hpp>

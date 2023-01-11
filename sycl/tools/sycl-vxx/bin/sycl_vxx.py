@@ -353,10 +353,7 @@ class VitisCompilationDriver:
         opt = self.clang_path / "opt"
         args = [opt, *opt_options, inputs]
         self._dump_cmd("run_preparation", args)
-        proc = subprocess.run(args, check=True, capture_output=True)
-        if bytes("SYCL_VXX_UNSUPPORTED_SPIR_BUILTINS", "ascii") in proc.stderr:
-            print("Unsupported SPIR builtins found : stopping compilation")
-            self.ok = False
+        subprocess.run(args, check=True)
         return prepared_bc
 
     @subprocess_error_handler("Error when preparing HLS SPIR library")
@@ -469,6 +466,7 @@ class VXXCompilationDriver(VitisCompilationDriver):
         # TODO: XILINX_PLATFORM should be passed by clang driver instead
         self.xilinx_platform = environ['XILINX_PLATFORM']
         self.extra_comp_args = []
+        self.dont_execute_vxx = arguments.only_print_vxx_cmds or ('SYCL_VXX_DONT_USE_VXX' in environ)
         if arguments.vitis_comp_argfile is not None and exists(arguments.vitis_comp_argfile):
             with arguments.vitis_comp_argfile.open("r") as f:
                 content = f.read().strip()
@@ -516,8 +514,9 @@ class VXXCompilationDriver(VitisCompilationDriver):
     def _compile_kernel(self, outname, command):
         """Execute a kernel compilation command"""
         if self.ok:
-            with CSema():
-                _run_in_isolated_proctree(command, check=True)
+            if not self.dont_execute_vxx:
+                with CSema():
+                    _run_in_isolated_proctree(command, check=True)
         return outname
 
     @subprocess_error_handler("Vitis linkage stage failed")
@@ -581,8 +580,9 @@ class VXXCompilationDriver(VitisCompilationDriver):
         command.extend(self.extra_link_args)
         command.extend(kernels)
         self._dump_cmd("vxxlink", command)
-        with CSema():
-            _run_in_isolated_proctree(command, check=True)
+        if not self.dont_execute_vxx:
+            with CSema():
+                _run_in_isolated_proctree(command, check=True)
         return xclbin
 
     @subprocess_error_handler("Vitis compilation stage failed")
@@ -711,6 +711,11 @@ def parse_args(args=sys.argv[1:]):
         help="The temporary directory where we'll put some intermediate files",
         required=True,
         type=Path)
+    parser.add_argument(
+        "-only_print_vxx_cmds",
+        help="Print comands instead of executing them",
+        required=False,
+        type=bool)
 
     parser.add_argument("-o", help="output file name", required=True, type=Path)
     parser.add_argument("inputs", nargs="+")
