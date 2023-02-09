@@ -13,7 +13,6 @@
 #ifndef LLVM_REMARKS_REMARKLINKER_H
 #define LLVM_REMARKS_REMARKLINKER_H
 
-#include "llvm/Object/ObjectFile.h"
 #include "llvm/Remarks/Remark.h"
 #include "llvm/Remarks/RemarkFormat.h"
 #include "llvm/Remarks/RemarkStringTable.h"
@@ -22,6 +21,11 @@
 #include <set>
 
 namespace llvm {
+
+namespace object {
+class ObjectFile;
+}
+
 namespace remarks {
 
 struct RemarkLinker {
@@ -61,12 +65,12 @@ public:
   /// \p Buffer.
   /// \p Buffer can be either a standalone remark container or just
   /// metadata. This takes care of uniquing and merging the remarks.
-  Error link(StringRef Buffer, Optional<Format> RemarkFormat = None);
+  Error link(StringRef Buffer, Optional<Format> RemarkFormat = std::nullopt);
 
   /// Link the remarks found in \p Obj by looking for the right section and
   /// calling the method above.
   Error link(const object::ObjectFile &Obj,
-             Optional<Format> RemarkFormat = None);
+             Optional<Format> RemarkFormat = std::nullopt);
 
   /// Serialize the linked remarks to the stream \p OS, using the format \p
   /// RemarkFormat.

@@ -1,5 +1,3 @@
-; RUN: opt -mtriple=amdgcn-unknown-amdhsa -mcpu=tahiti -enable-new-pm=0 -analyze -divergence -use-gpu-divergence-analysis %s | FileCheck %s
-; RUN: opt -mtriple=amdgcn-unknown-amdhsa -mcpu=gfx908 -enable-new-pm=0 -analyze -divergence -use-gpu-divergence-analysis %s | FileCheck %s
 ; RUN: opt -mtriple amdgcn-unknown-amdhsa -mcpu=tahiti -passes='print<divergence>' -disable-output %s 2>&1 | FileCheck %s
 ; RUN: opt -mtriple amdgcn-unknown-amdhsa -mcpu=gfx908 -passes='print<divergence>' -disable-output %s 2>&1 | FileCheck %s
 ; Make sure nothing crashes on targets with or without AGPRs
@@ -52,8 +50,8 @@ define void @inline_asm_2_sgpr_virtreg_output() {
   %asm = call { i32, i32 } asm "; def $0, $1", "=s,=s"()
   %sgpr0 = extractvalue { i32, i32 } %asm, 0
   %sgpr1 = extractvalue { i32, i32 } %asm, 1
-  store i32 %sgpr0, i32 addrspace(1)* undef
-  store i32 %sgpr1, i32 addrspace(1)* undef
+  store i32 %sgpr0, ptr addrspace(1) undef
+  store i32 %sgpr1, ptr addrspace(1) undef
   ret void
 }
 
@@ -66,8 +64,8 @@ define void @inline_asm_sgpr_vgpr_virtreg_output() {
   %asm = call { i32, i32 } asm "; def $0, $1", "=s,=v"()
   %sgpr = extractvalue { i32, i32 } %asm, 0
   %vgpr = extractvalue { i32, i32 } %asm, 1
-  store i32 %sgpr, i32 addrspace(1)* undef
-  store i32 %vgpr, i32 addrspace(1)* undef
+  store i32 %sgpr, ptr addrspace(1) undef
+  store i32 %vgpr, ptr addrspace(1) undef
   ret void
 }
 
@@ -79,8 +77,8 @@ define void @inline_asm_vgpr_sgpr_virtreg_output() {
   %asm = call { i32, i32 } asm "; def $0, $1", "=v,=s"()
   %vgpr = extractvalue { i32, i32 } %asm, 0
   %sgpr = extractvalue { i32, i32 } %asm, 1
-  store i32 %vgpr, i32 addrspace(1)* undef
-  store i32 %sgpr, i32 addrspace(1)* undef
+  store i32 %vgpr, ptr addrspace(1) undef
+  store i32 %sgpr, ptr addrspace(1) undef
   ret void
 }
 
@@ -91,8 +89,8 @@ define void @multi_sgpr_inline_asm_output_input_constraint() {
   %asm = call { i32, i32 } asm "; def $0, $1", "=s,=s,s"(i32 1234)
   %sgpr0 = extractvalue { i32, i32 } %asm, 0
   %sgpr1 = extractvalue { i32, i32 } %asm, 1
-  store i32 %sgpr0, i32 addrspace(1)* undef
-  store i32 %sgpr1, i32 addrspace(1)* undef
+  store i32 %sgpr0, ptr addrspace(1) undef
+  store i32 %sgpr1, ptr addrspace(1) undef
   ret void
 }
 
@@ -104,7 +102,7 @@ define void @inline_asm_vgpr_sgpr_virtreg_output_input_constraint() {
   %asm = call { i32, i32 } asm "; def $0, $1", "=v,=s,v"(i32 1234)
   %vgpr = extractvalue { i32, i32 } %asm, 0
   %sgpr = extractvalue { i32, i32 } %asm, 1
-  store i32 %vgpr, i32 addrspace(1)* undef
-  store i32 %sgpr, i32 addrspace(1)* undef
+  store i32 %vgpr, ptr addrspace(1) undef
+  store i32 %sgpr, ptr addrspace(1) undef
   ret void
 }

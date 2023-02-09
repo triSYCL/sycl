@@ -7,11 +7,11 @@
 //===----------------------------------------------------------------------===//
 
 #include "TestGetPlugin.hpp"
-#include <CL/sycl/detail/pi.hpp>
 #include <detail/plugin.hpp>
 #include <gtest/gtest.h>
+#include <sycl/detail/pi.hpp>
 
-using namespace cl::sycl;
+using namespace sycl;
 
 namespace {
 class EnqueueMemTest : public testing::TestWithParam<detail::plugin> {
@@ -41,7 +41,7 @@ protected:
                   platform, PI_DEVICE_TYPE_DEFAULT, 1, &_device, nullptr)),
               PI_SUCCESS);
 
-    pi_result result = PI_INVALID_VALUE;
+    pi_result result = PI_ERROR_INVALID_VALUE;
     result = plugin.call_nocheck<detail::PiApiKind::piContextCreate>(
         nullptr, 1u, &_device, nullptr, nullptr, &_context);
     ASSERT_EQ(result, PI_SUCCESS);
@@ -74,24 +74,18 @@ protected:
 
     detail::plugin plugin = GetParam();
 
-    if (plugin.getBackend() == sycl::backend::rocm && sizeof(T) > 4) {
-      std::cerr << "ROCm plugin doesn't support patterns larger than 4 bytes, "
-                   "skipping\n";
-      GTEST_SKIP();
-    }
-
     T inValues[_numElementsX] = {};
 
     for (size_t i = 0; i < _numElementsX; ++i) {
       ASSERT_NE(pattern, inValues[i]);
     }
 
+    pi_event event;
     ASSERT_EQ((plugin.call_nocheck<detail::PiApiKind::piEnqueueMemBufferWrite>(
                   _queue, _mem, PI_TRUE, 0, _numElementsX * sizeof(T), inValues,
-                  0, nullptr, nullptr)),
+                  0, nullptr, &event)),
               PI_SUCCESS);
 
-    pi_event event;
     ASSERT_EQ((plugin.call_nocheck<detail::PiApiKind::piEnqueueMemBufferFill>(
                   _queue, _mem, &pattern, sizeof(T), 0, sizeof(inValues), 0,
                   nullptr, &event)),
@@ -102,7 +96,7 @@ protected:
     T outValues[_numElementsX] = {};
     ASSERT_EQ((plugin.call_nocheck<detail::PiApiKind::piEnqueueMemBufferRead>(
                   _queue, _mem, PI_TRUE, 0, _numElementsX * sizeof(T),
-                  outValues, 0, nullptr, nullptr)),
+                  outValues, 0, nullptr, &event)),
               PI_SUCCESS);
 
     for (size_t i = 0; i < _numElementsX; ++i) {
@@ -111,7 +105,7 @@ protected:
   }
 };
 
-INSTANTIATE_TEST_CASE_P(
+INSTANTIATE_TEST_SUITE_P(
     EnqueueMemTestImpl, EnqueueMemTest,
     testing::ValuesIn(pi::initializeAndRemoveInvalid()),
     [](const testing::TestParamInfo<EnqueueMemTest::ParamType> &info) {

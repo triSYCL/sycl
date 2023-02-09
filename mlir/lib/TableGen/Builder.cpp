@@ -22,6 +22,13 @@ StringRef Builder::Parameter::getCppType() const {
   if (const auto *stringInit = dyn_cast<llvm::StringInit>(def))
     return stringInit->getValue();
   const llvm::Record *record = cast<llvm::DefInit>(def)->getDef();
+  // Inlining the first part of `Record::getValueAsString` to give better
+  // error messages.
+  const llvm::RecordVal *type = record->getValue("type");
+  if (!type || !type->getValue()) {
+    llvm::PrintFatalError("Builder DAG arguments must be either strings or "
+                          "defs which inherit from CArg");
+  }
   return record->getValueAsString("type");
 }
 
@@ -29,17 +36,17 @@ StringRef Builder::Parameter::getCppType() const {
 /// parameter.
 Optional<StringRef> Builder::Parameter::getDefaultValue() const {
   if (isa<llvm::StringInit>(def))
-    return llvm::None;
+    return std::nullopt;
   const llvm::Record *record = cast<llvm::DefInit>(def)->getDef();
   Optional<StringRef> value = record->getValueAsOptionalString("defaultValue");
-  return value && !value->empty() ? value : llvm::None;
+  return value && !value->empty() ? value : std::nullopt;
 }
 
 //===----------------------------------------------------------------------===//
 // Builder
 //===----------------------------------------------------------------------===//
 
-Builder::Builder(const llvm::Record *record, ArrayRef<llvm::SMLoc> loc)
+Builder::Builder(const llvm::Record *record, ArrayRef<SMLoc> loc)
     : def(record) {
   // Initialize the parameters of the builder.
   const llvm::DagInit *dag = def->getValueAsDag("dagParams");
@@ -70,5 +77,5 @@ Builder::Builder(const llvm::Record *record, ArrayRef<llvm::SMLoc> loc)
 /// Return an optional string containing the body of the builder.
 Optional<StringRef> Builder::getBody() const {
   Optional<StringRef> body = def->getValueAsOptionalString("body");
-  return body && !body->empty() ? body : llvm::None;
+  return body && !body->empty() ? body : std::nullopt;
 }

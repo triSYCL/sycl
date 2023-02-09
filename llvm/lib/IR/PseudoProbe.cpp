@@ -15,7 +15,7 @@
 #include "llvm/IR/DebugInfoMetadata.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Instruction.h"
-#include <unordered_set>
+#include "llvm/IR/IntrinsicInst.h"
 
 using namespace llvm;
 
@@ -42,7 +42,7 @@ Optional<PseudoProbe> extractProbeFromDiscriminator(const Instruction &Inst) {
       return Probe;
     }
   }
-  return None;
+  return std::nullopt;
 }
 
 Optional<PseudoProbe> extractProbe(const Instruction &Inst) {
@@ -59,7 +59,7 @@ Optional<PseudoProbe> extractProbe(const Instruction &Inst) {
   if (isa<CallBase>(&Inst) && !isa<IntrinsicInst>(&Inst))
     return extractProbeFromDiscriminator(Inst);
 
-  return None;
+  return std::nullopt;
 }
 
 void setProbeDistributionFactor(Instruction &Inst, float Factor) {
@@ -98,12 +98,4 @@ void setProbeDistributionFactor(Instruction &Inst, float Factor) {
   }
 }
 
-void addPseudoProbeAttribute(PseudoProbeInst &Inst,
-                             PseudoProbeAttributes Attr) {
-  IRBuilder<> Builder(&Inst);
-  uint32_t OldAttr = Inst.getAttributes()->getZExtValue();
-  uint32_t NewAttr = OldAttr | (uint32_t)Attr;
-  if (OldAttr != NewAttr)
-    Inst.replaceUsesOfWith(Inst.getAttributes(), Builder.getInt32(NewAttr));
-}
 } // namespace llvm

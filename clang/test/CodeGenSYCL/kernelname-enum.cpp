@@ -1,6 +1,6 @@
-// RUN: %clang_cc1 -fsycl-is-device -triple spir64-unknown-unknown-sycldevice -fno-sycl-unnamed-lambda -fsycl-int-header=%t.h %s -sycl-std=2020 -fsyntax-only
+// RUN: %clang_cc1 -fsycl-is-device -triple spir64-unknown-unknown -fno-sycl-unnamed-lambda -fsycl-int-header=%t.h %s -sycl-std=2020 -fsyntax-only
 // RUN: FileCheck -input-file=%t.h %s --check-prefixes=CHECK,NUL
-// RUN: %clang_cc1 -fsycl-is-device -triple spir64-unknown-unknown-sycldevice -fsycl-int-header=%t.h %s -sycl-std=2020 -fsyntax-only
+// RUN: %clang_cc1 -fsycl-is-device -triple spir64-unknown-unknown -fsycl-int-header=%t.h %s -sycl-std=2020 -fsyntax-only
 // RUN: FileCheck -input-file=%t.h %s --check-prefixes=CHECK,UL
 
 #include "Inputs/sycl.hpp"
@@ -122,49 +122,49 @@ int main() {
   dummy_functor_7<internal::namespace_short> f8;
   dummy_functor_8<EnumTypeOut, Baz> f9;
 
-  cl::sycl::queue q;
+  sycl::queue q;
 
-  q.submit([&](cl::sycl::handler &cgh) {
+  q.submit([&](sycl::handler &cgh) {
     cgh.single_task(f1);
   });
 
-  q.submit([&](cl::sycl::handler &cgh) {
+  q.submit([&](sycl::handler &cgh) {
     cgh.single_task(f2);
   });
 
-  q.submit([&](cl::sycl::handler &cgh) {
+  q.submit([&](sycl::handler &cgh) {
     cgh.single_task(f3);
   });
 
-  q.submit([&](cl::sycl::handler &cgh) {
+  q.submit([&](sycl::handler &cgh) {
     cgh.single_task(f4);
   });
 
-  q.submit([&](cl::sycl::handler &cgh) {
+  q.submit([&](sycl::handler &cgh) {
     cgh.single_task(f5);
   });
 
-  q.submit([&](cl::sycl::handler &cgh) {
+  q.submit([&](sycl::handler &cgh) {
     cgh.single_task(f6);
   });
 
-  q.submit([&](cl::sycl::handler &cgh) {
+  q.submit([&](sycl::handler &cgh) {
     cgh.single_task(f7);
   });
 
-  q.submit([&](cl::sycl::handler &cgh) {
+  q.submit([&](sycl::handler &cgh) {
     cgh.single_task(f8);
   });
 
-  q.submit([&](cl::sycl::handler &cgh) {
+  q.submit([&](sycl::handler &cgh) {
     cgh.single_task<T1<T2<type_argument_template_enum::E::A>>>([=]() {});
   });
 
-  q.submit([&](cl::sycl::handler &cgh) {
+  q.submit([&](sycl::handler &cgh) {
     cgh.single_task<T1<T3<type_argument_template_enum::E>>>([=]() {});
   });
 
-  q.submit([&](cl::sycl::handler &cgh) {
+  q.submit([&](sycl::handler &cgh) {
     cgh.single_task(f9);
   });
 

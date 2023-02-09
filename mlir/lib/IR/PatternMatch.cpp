@@ -126,6 +126,29 @@ void PDLValue::print(raw_ostream &os) const {
   }
 }
 
+void PDLValue::print(raw_ostream &os, Kind kind) {
+  switch (kind) {
+  case Kind::Attribute:
+    os << "Attribute";
+    break;
+  case Kind::Operation:
+    os << "Operation";
+    break;
+  case Kind::Type:
+    os << "Type";
+    break;
+  case Kind::TypeRange:
+    os << "TypeRange";
+    break;
+  case Kind::Value:
+    os << "Value";
+    break;
+  case Kind::ValueRange:
+    os << "ValueRange";
+    break;
+  }
+}
+
 //===----------------------------------------------------------------------===//
 // PDLPatternModule
 //===----------------------------------------------------------------------===//
@@ -134,24 +157,39 @@ void PDLPatternModule::mergeIn(PDLPatternModule &&other) {
   // Ignore the other module if it has no patterns.
   if (!other.pdlModule)
     return;
+
+  // Steal the functions and config of the other module.
+  for (auto &it : other.constraintFunctions)
+    registerConstraintFunction(it.first(), std::move(it.second));
+  for (auto &it : other.rewriteFunctions)
+    registerRewriteFunction(it.first(), std::move(it.second));
+  for (auto &it : other.configs)
+    configs.emplace_back(std::move(it));
+  for (auto &it : other.configMap)
+    configMap.insert(it);
+
   // Steal the other state if we have no patterns.
   if (!pdlModule) {
-    constraintFunctions = std::move(other.constraintFunctions);
-    rewriteFunctions = std::move(other.rewriteFunctions);
     pdlModule = std::move(other.pdlModule);
     return;
   }
-  // Steal the functions of the other module.
-  for (auto &it : constraintFunctions)
-    registerConstraintFunction(it.first(), std::move(it.second));
-  for (auto &it : rewriteFunctions)
-    registerRewriteFunction(it.first(), std::move(it.second));
 
   // Merge the pattern operations from the other module into this one.
   Block *block = pdlModule->getBody();
-  block->getTerminator()->erase();
   block->getOperations().splice(block->end(),
                                 other.pdlModule->getBody()->getOperations());
+}
+
+void PDLPatternModule::attachConfigToPatterns(ModuleOp module,
+                                              PDLPatternConfigSet &configSet) {
+  // Attach the configuration to the symbols within the module. We only add
+  // to symbols to avoid hardcoding any specific operation names here (given
+  // that we don't depend on any PDL dialect). We can't use
+  // cast<SymbolOpInterface> here because patterns may be optional symbols.
+  module->walk([&](Operation *op) {
+    if (op->hasTrait<SymbolOpInterface::Trait>())
+      configMap[op] = &configSet;
+  });
 }
 
 //===----------------------------------------------------------------------===//
@@ -159,18 +197,20 @@ void PDLPatternModule::mergeIn(PDLPatternModule &&other) {
 
 void PDLPatternModule::registerConstraintFunction(
     StringRef name, PDLConstraintFunction constraintFn) {
-  auto it = constraintFunctions.try_emplace(name, std::move(constraintFn));
-  (void)it;
-  assert(it.second &&
-         "constraint with the given name has already been registered");
+  // TODO: Is it possible to diagnose when `name` is already registered to
+  // a function that is not equivalent to `constraintFn`?
+  // Allow existing mappings in the case multiple patterns depend on the same
+  // constraint.
+  constraintFunctions.try_emplace(name, std::move(constraintFn));
 }
 
 void PDLPatternModule::registerRewriteFunction(StringRef name,
                                                PDLRewriteFunction rewriteFn) {
-  auto it = rewriteFunctions.try_emplace(name, std::move(rewriteFn));
-  (void)it;
-  assert(it.second && "native rewrite function with the given name has "
-                      "already been registered");
+  // TODO: Is it possible to diagnose when `name` is already registered to
+  // a function that is not equivalent to `rewriteFn`?
+  // Allow existing mappings in the case multiple patterns depend on the same
+  // rewrite.
+  rewriteFunctions.try_emplace(name, std::move(rewriteFn));
 }
 
 //===----------------------------------------------------------------------===//
@@ -192,7 +232,7 @@ void RewriterBase::replaceOpWithIf(
          "incorrect number of values to replace operation");
 
   // Notify the rewriter subclass that we're about to replace this root.
-  notifyRootReplaced(op);
+  notifyRootReplaced(op, newValues);
 
   // Replace each use of the results when the functor is true.
   bool replacedAllUses = true;
@@ -220,7 +260,7 @@ void RewriterBase::replaceOpWithinBlock(Operation *op, ValueRange newValues,
 /// the operation.
 void RewriterBase::replaceOp(Operation *op, ValueRange newValues) {
   // Notify the rewriter subclass that we're about to replace this root.
-  notifyRootReplaced(op);
+  notifyRootReplaced(op, newValues);
 
   assert(op->getNumResults() == newValues.size() &&
          "incorrect # of replacement values");
@@ -267,6 +307,14 @@ void RewriterBase::mergeBlocks(Block *source, Block *dest,
   dest->getOperations().splice(dest->end(), source->getOperations());
   source->dropAllUses();
   source->erase();
+}
+
+/// Find uses of `from` and replace it with `to`
+void RewriterBase::replaceAllUsesWith(Value from, Value to) {
+  for (OpOperand &operand : llvm::make_early_inc_range(from.getUses())) {
+    Operation *op = operand.getOwner();
+    updateRootInPlace(op, [&]() { operand.set(to); });
+  }
 }
 
 // Merge the operations of block 'source' before the operation 'op'. Source

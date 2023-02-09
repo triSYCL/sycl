@@ -1,4 +1,3 @@
-; RUN: opt  -mtriple amdgcn-unknown-amdhsa -enable-new-pm=0 -analyze -divergence -use-gpu-divergence-analysis %s | FileCheck %s
 ; RUN: opt -mtriple amdgcn-unknown-amdhsa -passes='print<divergence>' -disable-output %s 2>&1 | FileCheck %s
 
 ; CHECK-LABEL: for function 'readfirstlane':
@@ -48,8 +47,8 @@ define void @asm_mixed_sgpr_vgpr(i32 %divergent) {
   %asm = call { i32, i32 } asm "; def $0, $1, $2","=s,=v,v"(i32 %divergent)
   %sgpr = extractvalue { i32, i32 } %asm, 0
   %vgpr = extractvalue { i32, i32 } %asm, 1
-  store i32 %sgpr, i32 addrspace(1)* undef
-  store i32 %vgpr, i32 addrspace(1)* undef
+  store i32 %sgpr, ptr addrspace(1) undef
+  store i32 %vgpr, ptr addrspace(1) undef
   ret void
 }
 

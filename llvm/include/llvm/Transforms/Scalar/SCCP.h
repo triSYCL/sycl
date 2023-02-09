@@ -20,19 +20,19 @@
 #ifndef LLVM_TRANSFORMS_SCALAR_SCCP_H
 #define LLVM_TRANSFORMS_SCALAR_SCCP_H
 
-#include "llvm/ADT/STLExtras.h"
-#include "llvm/Analysis/TargetLibraryInfo.h"
-#include "llvm/Analysis/TargetTransformInfo.h"
-#include "llvm/IR/DataLayout.h"
-#include "llvm/IR/Function.h"
-#include "llvm/IR/Module.h"
+#include "llvm/ADT/STLFunctionalExtras.h"
 #include "llvm/IR/PassManager.h"
-#include "llvm/Transforms/Utils/PredicateInfo.h"
-#include "llvm/Transforms/Utils/SCCPSolver.h"
+
+#include <functional>
 
 namespace llvm {
-
-class PostDominatorTree;
+class AssumptionCache;
+class DataLayout;
+class Function;
+class Module;
+class TargetLibraryInfo;
+class TargetTransformInfo;
+struct AnalysisResultsForFn;
 
 /// This pass performs function-level constant propagation and merging.
 class SCCPPass : public PassInfoMixin<SCCPPass> {
@@ -45,7 +45,7 @@ bool runIPSCCP(Module &M, const DataLayout &DL,
                function_ref<AnalysisResultsForFn(Function &)> getAnalysis);
 
 bool runFunctionSpecialization(
-    Module &M, const DataLayout &DL,
+    Module &M, FunctionAnalysisManager *FAM, const DataLayout &DL,
     std::function<TargetLibraryInfo &(Function &)> GetTLI,
     std::function<TargetTransformInfo &(Function &)> GetTTI,
     std::function<AssumptionCache &(Function &)> GetAC,

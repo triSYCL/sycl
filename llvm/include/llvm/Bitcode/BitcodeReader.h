@@ -15,12 +15,12 @@
 
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/StringRef.h"
-#include "llvm/Bitstream/BitCodes.h"
-#include "llvm/IR/ModuleSummaryIndex.h"
+#include "llvm/Bitstream/BitCodeEnums.h"
+#include "llvm/IR/GlobalValue.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/ErrorOr.h"
-#include "llvm/Support/MemoryBuffer.h"
+#include "llvm/Support/MemoryBufferRef.h"
 #include <cstdint>
 #include <memory>
 #include <string>
@@ -30,6 +30,8 @@ namespace llvm {
 
 class LLVMContext;
 class Module;
+class MemoryBuffer;
+class ModuleSummaryIndex;
 
 typedef llvm::function_ref<Optional<std::string>(StringRef)>
     DataLayoutCallbackTy;
@@ -105,7 +107,7 @@ typedef llvm::function_ref<Optional<std::string>(StringRef)>
     /// Read the entire bitcode module and return it.
     Expected<std::unique_ptr<Module>> parseModule(
         LLVMContext &Context, DataLayoutCallbackTy DataLayoutCallback =
-                                  [](StringRef) { return None; });
+                                  [](StringRef) { return std::nullopt; });
 
     /// Returns information about the module to be used for LTO: whether to
     /// compile with ThinLTO, and whether it has a summary.
@@ -116,8 +118,10 @@ typedef llvm::function_ref<Optional<std::string>(StringRef)>
 
     /// Parse the specified bitcode buffer and merge its module summary index
     /// into CombinedIndex.
-    Error readSummary(ModuleSummaryIndex &CombinedIndex, StringRef ModulePath,
-                      uint64_t ModuleId);
+    Error
+    readSummary(ModuleSummaryIndex &CombinedIndex, StringRef ModulePath,
+                uint64_t ModuleId,
+                std::function<bool(GlobalValue::GUID)> IsPrevailing = nullptr);
   };
 
   struct BitcodeFileContents {
@@ -171,7 +175,7 @@ typedef llvm::function_ref<Optional<std::string>(StringRef)>
   Expected<std::unique_ptr<Module>> parseBitcodeFile(
       MemoryBufferRef Buffer, LLVMContext &Context,
       DataLayoutCallbackTy DataLayoutCallback = [](StringRef) {
-        return None;
+        return std::nullopt;
       });
 
   /// Returns LTO information for the specified bitcode file.

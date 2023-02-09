@@ -8,9 +8,8 @@ from lldbsuite.test import lldbutil
 
 class TestAArch64AdrpAdd(TestBase):
 
-    mydir = TestBase.compute_mydir(__file__)
-
     @no_debug_info_test
+    @skipIfLLVMTargetMissing("AArch64")
     def test_arm64(self):
         src_dir = self.getSourceDir()
         yaml_path = os.path.join(src_dir, "a.out-arm64.yaml")
@@ -27,6 +26,7 @@ class TestAArch64AdrpAdd(TestBase):
                 self.disassemble_check_for_hi_and_foo(target, f, binaryname)
 
     @no_debug_info_test
+    @skipIfLLVMTargetMissing("AArch64")
     def test_arm64_32(self):
         src_dir = self.getSourceDir()
         yaml_path = os.path.join(src_dir, "a.out-arm64_32.yaml")

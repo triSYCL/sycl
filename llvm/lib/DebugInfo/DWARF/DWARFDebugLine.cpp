@@ -12,12 +12,12 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/Dwarf.h"
+#include "llvm/DebugInfo/DWARF/DWARFDataExtractor.h"
+#include "llvm/DebugInfo/DWARF/DWARFDie.h"
 #include "llvm/DebugInfo/DWARF/DWARFFormValue.h"
-#include "llvm/DebugInfo/DWARF/DWARFRelocMap.h"
 #include "llvm/Support/Errc.h"
 #include "llvm/Support/Format.h"
 #include "llvm/Support/FormatVariadic.h"
-#include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cassert>
@@ -81,7 +81,7 @@ bool DWARFDebugLine::Prologue::hasFileAtIndex(uint64_t FileIndex) const {
 
 Optional<uint64_t> DWARFDebugLine::Prologue::getLastValidFileIndex() const {
   if (FileNames.empty())
-    return None;
+    return std::nullopt;
   uint16_t DwarfVersion = getVersion();
   assert(DwarfVersion != 0 &&
          "line table prologue has no dwarf version information");
@@ -323,21 +323,21 @@ parseV5DirFileTables(const DWARFDataExtractor &DebugLineData,
         FileEntry.Source = Value;
         break;
       case DW_LNCT_directory_index:
-        FileEntry.DirIdx = Value.getAsUnsignedConstant().getValue();
+        FileEntry.DirIdx = Value.getAsUnsignedConstant().value();
         break;
       case DW_LNCT_timestamp:
-        FileEntry.ModTime = Value.getAsUnsignedConstant().getValue();
+        FileEntry.ModTime = Value.getAsUnsignedConstant().value();
         break;
       case DW_LNCT_size:
-        FileEntry.Length = Value.getAsUnsignedConstant().getValue();
+        FileEntry.Length = Value.getAsUnsignedConstant().value();
         break;
       case DW_LNCT_MD5:
-        if (!Value.getAsBlock() || Value.getAsBlock().getValue().size() != 16)
+        if (!Value.getAsBlock() || Value.getAsBlock().value().size() != 16)
           return createStringError(
               errc::invalid_argument,
               "failed to parse file entry because the MD5 hash is invalid");
-        std::uninitialized_copy_n(Value.getAsBlock().getValue().begin(), 16,
-                                  FileEntry.Checksum.Bytes.begin());
+        std::uninitialized_copy_n(Value.getAsBlock().value().begin(), 16,
+                                  FileEntry.Checksum.begin());
         break;
       default:
         break;
@@ -597,6 +597,10 @@ Expected<const DWARFDebugLine::LineTable *> DWARFDebugLine::getOrParseLineTable(
   return LT;
 }
 
+void DWARFDebugLine::clearLineTable(uint64_t Offset) {
+  LineTableMap.erase(Offset);
+}
+
 static StringRef getOpcodeName(uint8_t Opcode, uint8_t OpcodeBase) {
   assert(Opcode != 0);
   if (Opcode < OpcodeBase)
@@ -718,7 +722,7 @@ static Optional<T> parseULEB128(DWARFDataExtractor &Data,
   T Value = Data.getULEB128(Cursor);
   if (Cursor)
     return Value;
-  return None;
+  return std::nullopt;
 }
 
 Error DWARFDebugLine::LineTable::parse(
@@ -1329,11 +1333,11 @@ bool DWARFDebugLine::LineTable::lookupAddressRangeImpl(
 Optional<StringRef> DWARFDebugLine::LineTable::getSourceByIndex(uint64_t FileIndex,
                                                                 FileLineInfoKind Kind) const {
   if (Kind == FileLineInfoKind::None || !Prologue.hasFileAtIndex(FileIndex))
-    return None;
+    return std::nullopt;
   const FileNameEntry &Entry = Prologue.getFileNameEntry(FileIndex);
-  if (Optional<const char *> source = Entry.Source.getAsCString())
-    return StringRef(*source);
-  return None;
+  if (auto E = dwarf::toString(Entry.Source))
+    return StringRef(*E);
+  return std::nullopt;
 }
 
 static bool isPathAbsoluteOnWindowsOrPosix(const Twine &Path) {
@@ -1350,10 +1354,10 @@ bool DWARFDebugLine::Prologue::getFileNameByIndex(
   if (Kind == FileLineInfoKind::None || !hasFileAtIndex(FileIndex))
     return false;
   const FileNameEntry &Entry = getFileNameEntry(FileIndex);
-  Optional<const char *> Name = Entry.Name.getAsCString();
-  if (!Name)
+  auto E = dwarf::toString(Entry.Name);
+  if (!E)
     return false;
-  StringRef FileName = *Name;
+  StringRef FileName = *E;
   if (Kind == FileLineInfoKind::RawValue ||
       isPathAbsoluteOnWindowsOrPosix(FileName)) {
     Result = std::string(FileName);
@@ -1372,17 +1376,18 @@ bool DWARFDebugLine::Prologue::getFileNameByIndex(
     // relative names.
     if ((Entry.DirIdx != 0 || Kind != FileLineInfoKind::RelativeFilePath) &&
         Entry.DirIdx < IncludeDirectories.size())
-      IncludeDir = IncludeDirectories[Entry.DirIdx].getAsCString().getValue();
+      IncludeDir = dwarf::toStringRef(IncludeDirectories[Entry.DirIdx]);
   } else {
     if (0 < Entry.DirIdx && Entry.DirIdx <= IncludeDirectories.size())
-      IncludeDir =
-          IncludeDirectories[Entry.DirIdx - 1].getAsCString().getValue();
+      IncludeDir = dwarf::toStringRef(IncludeDirectories[Entry.DirIdx - 1]);
   }
 
-  // For absolute paths only, include the compilation directory of compile unit.
-  // We know that FileName is not absolute, the only way to have an absolute
-  // path at this point would be if IncludeDir is absolute.
-  if (Kind == FileLineInfoKind::AbsoluteFilePath && !CompDir.empty() &&
+  // For absolute paths only, include the compilation directory of compile unit,
+  // unless v5 DirIdx == 0 (IncludeDir indicates the compilation directory). We
+  // know that FileName is not absolute, the only way to have an absolute path
+  // at this point would be if IncludeDir is absolute.
+  if (Kind == FileLineInfoKind::AbsoluteFilePath &&
+      (getVersion() < 5 || Entry.DirIdx != 0) && !CompDir.empty() &&
       !isPathAbsoluteOnWindowsOrPosix(IncludeDir))
     sys::path::append(FilePath, Style, CompDir);
 
@@ -1412,6 +1417,24 @@ bool DWARFDebugLine::LineTable::getFileLineInfoForAddress(
   Result.Discriminator = Row.Discriminator;
   Result.Source = getSourceByIndex(Row.File, Kind);
   return true;
+}
+
+bool DWARFDebugLine::LineTable::getDirectoryForEntry(
+    const FileNameEntry &Entry, std::string &Directory) const {
+  if (Prologue.getVersion() >= 5) {
+    if (Entry.DirIdx < Prologue.IncludeDirectories.size()) {
+      Directory =
+          dwarf::toString(Prologue.IncludeDirectories[Entry.DirIdx], "");
+      return true;
+    }
+    return false;
+  }
+  if (0 < Entry.DirIdx && Entry.DirIdx <= Prologue.IncludeDirectories.size()) {
+    Directory =
+        dwarf::toString(Prologue.IncludeDirectories[Entry.DirIdx - 1], "");
+    return true;
+  }
+  return false;
 }
 
 // We want to supply the Unit associated with a .debug_line[.dwo] table when

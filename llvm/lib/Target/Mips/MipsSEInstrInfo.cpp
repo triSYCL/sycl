@@ -18,9 +18,9 @@
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/CodeGen/MachineInstrBuilder.h"
 #include "llvm/CodeGen/MachineRegisterInfo.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MathExtras.h"
-#include "llvm/Support/TargetRegistry.h"
 
 using namespace llvm;
 
@@ -228,7 +228,7 @@ MipsSEInstrInfo::isCopyInstrImpl(const MachineInstr &MI) const {
   // from copyPhysReg function.
   if (isReadOrWriteToDSPReg(MI, isDSPControlWrite)) {
     if (!MI.getOperand(1).isImm() || MI.getOperand(1).getImm() != (1 << 4))
-      return None;
+      return std::nullopt;
     else if (isDSPControlWrite) {
       return DestSourcePair{MI.getOperand(2), MI.getOperand(0)};
 
@@ -238,7 +238,7 @@ MipsSEInstrInfo::isCopyInstrImpl(const MachineInstr &MI) const {
   } else if (MI.isMoveReg() || isORCopyInst(MI)) {
     return DestSourcePair{MI.getOperand(0), MI.getOperand(1)};
   }
-  return None;
+  return std::nullopt;
 }
 
 void MipsSEInstrInfo::

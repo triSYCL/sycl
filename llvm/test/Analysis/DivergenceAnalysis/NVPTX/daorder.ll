@@ -1,4 +1,3 @@
-; RUN: opt %s -enable-new-pm=0 -analyze -divergence -use-gpu-divergence-analysis | FileCheck %s
 ; RUN: opt %s -passes='print<divergence>' -disable-output 2>&1 | FileCheck %s
 
 target datalayout = "e-i64:64-v16:16-v32:32-n16:32:64"
@@ -45,4 +44,4 @@ declare i32 @llvm.nvvm.read.ptx.sreg.tid.z()
 declare i32 @llvm.nvvm.read.ptx.sreg.laneid()
 
 !nvvm.annotations = !{!0}
-!0 = !{i32 (i32)* @daorder, !"kernel", i32 1}
+!0 = !{ptr @daorder, !"kernel", i32 1}

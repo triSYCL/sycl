@@ -68,7 +68,7 @@ entry:
 
 ; CHECK: selecti64_fcc
 ; CHECK: mov %i3, %i0
-; CHECK: fcmps %f1, %f3
+; CHECK: fcmps %fcc0, %f1, %f3
 ; CHECK: movul %fcc0, %i2, %i0
 ; CHECK: restore
 define i64 @selecti64_fcc(float %x, float %y, i64 %a, i64 %b) {
@@ -112,9 +112,9 @@ entry:
 }
 
 ; CHECK-LABEL: setcc_resultty
-; CHECK-DAG:       srax %i0, 63, %o0
+; CHECK-DAG:       mov 0, %o0
 ; CHECK-DAG:       mov %i0, %o1
-; CHECK-DAG:       mov 0, %o2
+; CHECK-DAG:       mov %o0, %o2
 ; CHECK-DAG:       mov 32, %o3
 ; CHECK-DAG:       call __multi3
 ; CHECK:       cmp

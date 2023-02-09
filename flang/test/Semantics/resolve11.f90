@@ -1,11 +1,10 @@
-! RUN: %S/test_errors.sh %s %t %flang_fc1
-! REQUIRES: shell
+! RUN: %python %S/test_errors.py %s %flang_fc1
 module m
   public i
   integer, private :: j
   !ERROR: The accessibility of 'i' has already been specified as PUBLIC
   private i
-  !The accessibility of 'j' has already been specified as PRIVATE
+  !WARNING: The accessibility of 'j' has already been specified as PRIVATE
   private j
 end
 

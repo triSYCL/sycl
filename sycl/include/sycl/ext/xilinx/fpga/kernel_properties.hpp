@@ -16,18 +16,17 @@
 #ifndef SYCL_XILINX_FPGA_KERNEL_PROPERTIES_HPP
 #define SYCL_XILINX_FPGA_KERNEL_PROPERTIES_HPP
 
-#include "sycl/ext/xilinx/literals/cstr.hpp"
-#include "CL/sycl/detail/pi.h"
-#include <boost/core/demangle.hpp>
+#include <sycl/ext/xilinx/literals/cstr.hpp>
+#include <sycl/detail/defines_elementary.hpp>
+#include <sycl/detail/pi.h>
 #include <cstddef>
 #include <iostream>
 #include <regex>
 #include <tuple>
 #include <type_traits>
 
-__SYCL_INLINE_NAMESPACE(cl) {
-
-namespace sycl::ext::xilinx {
+namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 
 namespace detail {
 template <typename KernelType, typename Functor, typename propType,
@@ -40,15 +39,16 @@ struct KernelDecorator<KernelType, Ret (Functor::*)(Args...) const,
                        cstr<CharT, CharPack...>, propPayload...> {
   const KernelType kernel;
   KernelDecorator(KernelType &kernel) : kernel{kernel} {}
+#ifdef __SYCL_SPIR_DEVICE__
   __SYCL_DEVICE_ANNOTATE("xilinx_kernel_property",
                          StrPacker<cstr<CharT, CharPack...>>{}.Str,
                          std::make_tuple(propPayload...))
+#endif
   Ret operator()(Args... args) const { return kernel(args...); }
 };
 
 } // namespace detail
-
-} // namespace sycl::ext::xilinx
-} // __SYCL_INLINE_NAMESPACE(cl)
+}
+}  // namespace sycl
 
 #endif // SYCL_XILINX_FPGA_KERNEL_PROPERTIES_HPP

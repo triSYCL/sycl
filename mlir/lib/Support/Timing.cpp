@@ -50,7 +50,7 @@ public:
   llvm::sys::SmartRWMutex<true> identifierMutex;
 
   /// A thread local cache of identifiers to reduce lock contention.
-  ThreadLocalCache<llvm::StringMap<llvm::StringMapEntry<llvm::NoneType> *>>
+  ThreadLocalCache<llvm::StringMap<llvm::StringMapEntry<std::nullopt_t> *>>
       localIdentifierCache;
 
   TimingManagerImpl() : identifiers(identifierAllocator) {}
@@ -60,12 +60,12 @@ public:
 
 TimingManager::TimingManager() : impl(std::make_unique<TimingManagerImpl>()) {}
 
-TimingManager::~TimingManager() {}
+TimingManager::~TimingManager() = default;
 
 /// Get the root timer of this timing manager.
 Timer TimingManager::getRootTimer() {
   auto rt = rootTimer();
-  return rt.hasValue() ? Timer(*this, rt.getValue()) : Timer();
+  return rt ? Timer(*this, *rt) : Timer();
 }
 
 /// Get the root timer of this timing manager wrapped in a `TimingScope`.
@@ -196,9 +196,9 @@ public:
   TimerImpl *nest(const void *id, function_ref<std::string()> nameBuilder) {
     auto tid = llvm::get_threadid();
     if (tid == threadId)
-      return nestTail(children[id], std::move(nameBuilder));
+      return nestTail(children[id], nameBuilder);
     std::unique_lock<std::mutex> lock(asyncMutex);
-    return nestTail(asyncChildren[tid][id], std::move(nameBuilder));
+    return nestTail(asyncChildren[tid][id], nameBuilder);
   }
 
   /// Tail-called from `nest()`.
@@ -511,7 +511,7 @@ void DefaultTimingManager::dumpAsTree(raw_ostream &os) {
 Optional<void *> DefaultTimingManager::rootTimer() {
   if (impl->enabled)
     return impl->rootTimer.get();
-  return llvm::None;
+  return std::nullopt;
 }
 
 void DefaultTimingManager::startTimer(void *handle) {
@@ -524,7 +524,7 @@ void DefaultTimingManager::stopTimer(void *handle) {
 
 void *DefaultTimingManager::nestTimer(void *handle, const void *id,
                                       function_ref<std::string()> nameBuilder) {
-  return static_cast<TimerImpl *>(handle)->nest(id, std::move(nameBuilder));
+  return static_cast<TimerImpl *>(handle)->nest(id, nameBuilder);
 }
 
 void DefaultTimingManager::hideTimer(void *handle) {
@@ -549,7 +549,7 @@ struct DefaultTimingManagerOptions {
           clEnumValN(DisplayMode::Tree, "tree",
                      "display the results ina with a nested tree view"))};
 };
-} // end anonymous namespace
+} // namespace
 
 static llvm::ManagedStatic<DefaultTimingManagerOptions> options;
 

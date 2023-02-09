@@ -13,16 +13,18 @@
 //===----------------------------------------------------------------------===//
 
 #include "mlir/Dialect/Tosa/IR/TosaOps.h"
-#include "mlir/Dialect/StandardOps/IR/Ops.h"
+#include "mlir/Dialect/Quant/QuantOps.h"
 #include "mlir/Dialect/Tensor/IR/Tensor.h"
 #include "mlir/Dialect/Tosa/Utils/QuantUtils.h"
 #include "mlir/Dialect/Tosa/Utils/ShapeUtils.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/DialectImplementation.h"
 #include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
-#include "mlir/Transforms/FoldUtils.h"
+#include "mlir/IR/TypeUtilities.h"
 #include "mlir/Transforms/InliningUtils.h"
-#include "mlir/Transforms/RegionUtils.h"
+#include "llvm/ADT/DenseMap.h"
+#include "llvm/ADT/TypeSwitch.h"
 
 using namespace mlir;
 using namespace mlir::tosa;
@@ -30,10 +32,10 @@ using namespace mlir::tosa;
 #include "mlir/Dialect/Tosa/IR/TosaOpsDialect.cpp.inc"
 
 //===----------------------------------------------------------------------===//
-// Tosa dialect structs and interface includes.
+// Tosa dialect interface includes.
 //===----------------------------------------------------------------------===//
+
 #include "mlir/Dialect/Tosa/IR/TosaInterfaces.cpp.inc"
-#include "mlir/Dialect/Tosa/IR/TosaStructs.cpp.inc"
 
 namespace {
 //===----------------------------------------------------------------------===//
@@ -59,29 +61,14 @@ struct TosaInlinerInterface : public DialectInlinerInterface {
             isa<tosa::WhileOp>(dest->getParentOp()));
   }
 };
-} // end anonymous namespace
+} // namespace
 
 //===----------------------------------------------------------------------===//
 // TOSA control flow support.
 //===----------------------------------------------------------------------===//
 
 /// Returns the while loop body.
-Region &tosa::WhileOp::getLoopBody() { return body(); }
-
-bool tosa::WhileOp::isDefinedOutsideOfLoop(Value value) {
-  return !body().isAncestor(value.getParentRegion());
-}
-
-LogicalResult WhileOp::moveOutOfLoop(ArrayRef<mlir::Operation *> ops) {
-  if (ops.empty())
-    return success();
-
-  Operation *tosaWhileOp = this->getOperation();
-  for (auto *op : ops)
-    op->moveBefore(tosaWhileOp);
-
-  return success();
-}
+Region &tosa::WhileOp::getLoopBody() { return getBody(); }
 
 //===----------------------------------------------------------------------===//
 // Tosa dialect initialization.
@@ -91,6 +78,10 @@ void TosaDialect::initialize() {
   addOperations<
 #define GET_OP_LIST
 #include "mlir/Dialect/Tosa/IR/TosaOps.cpp.inc"
+      >();
+  addAttributes<
+#define GET_ATTRDEF_LIST
+#include "mlir/Dialect/Tosa/IR/TosaAttributes.cpp.inc"
       >();
   addInterfaces<TosaInlinerInterface>();
 }
@@ -105,151 +96,26 @@ Operation *TosaDialect::materializeConstant(OpBuilder &builder, Attribute value,
 }
 
 //===----------------------------------------------------------------------===//
-// Operator Canonicalizers.
-//===----------------------------------------------------------------------===//
-
-struct ConcatOptimization : public OpRewritePattern<tosa::ConcatOp> {
-  using OpRewritePattern<tosa::ConcatOp>::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(tosa::ConcatOp op,
-                                PatternRewriter &rewriter) const override {
-    if (op.input1().size() != 1)
-      return failure();
-    if (op.input1().front().getType() != op.getType()) {
-      rewriter
-          .replaceOpWithNewOp<tensor::CastOp>(op, op.getType(),
-                                              op.input1().front())
-          .getResult();
-      return success();
-    }
-
-    rewriter.replaceOp(op, op.input1().front());
-    return success();
-  }
-};
-
-void ConcatOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
-                                           MLIRContext *context) {
-  results.insert<ConcatOptimization>(context);
-}
-
-struct ReshapeReshapeOptimization : public OpRewritePattern<tosa::ReshapeOp> {
-  using OpRewritePattern<tosa::ReshapeOp>::OpRewritePattern;
-
-  LogicalResult matchAndRewrite(tosa::ReshapeOp op,
-                                PatternRewriter &rewriter) const override {
-    Value input = op.input1();
-    Operation *definingOp = input.getDefiningOp();
-    if (!definingOp)
-      return failure();
-
-    if (tosa::ReshapeOp reshapeOp = dyn_cast<tosa::ReshapeOp>(definingOp)) {
-      rewriter.replaceOpWithNewOp<tosa::ReshapeOp>(
-          op, op.getType(), reshapeOp.input1(), op.new_shape());
-      return success();
-    }
-
-    return failure();
-  }
-};
-
-void ReshapeOp::getCanonicalizationPatterns(OwningRewritePatternList &results,
-                                            MLIRContext *context) {
-  results.insert<ReshapeReshapeOptimization>(context);
-}
-
-//===----------------------------------------------------------------------===//
-// Operator Folders.
-//===----------------------------------------------------------------------===//
-
-OpFoldResult CastOp::fold(ArrayRef<Attribute> operands) {
-  if (input().getType() == getType())
-    return input();
-  return {};
-}
-
-OpFoldResult ConstOp::fold(ArrayRef<Attribute> operands) {
-  assert(operands.empty() && "constant has no operands");
-  return valueAttr();
-}
-
-#define ReduceFolder(OP)                                                       \
-  OpFoldResult OP::fold(ArrayRef<Attribute> operands) {                        \
-    ShapedType inputTy = input().getType().cast<ShapedType>();                 \
-    if (!inputTy.hasRank())                                                    \
-      return {};                                                               \
-    if (inputTy.getDimSize(axis()) == 1)                                       \
-      return input();                                                          \
-    return {};                                                                 \
-  }
-
-ReduceFolder(ReduceAllOp) ReduceFolder(ReduceAnyOp) ReduceFolder(ReduceMaxOp)
-    ReduceFolder(ReduceMinOp) ReduceFolder(ReduceProdOp)
-        ReduceFolder(ReduceSumOp)
-#undef ReduceFolder
-
-            OpFoldResult ReshapeOp::fold(ArrayRef<Attribute> operands) {
-  auto inputTy = input1().getType().dyn_cast<RankedTensorType>();
-  auto outputTy = getType().dyn_cast<RankedTensorType>();
-
-  if (!inputTy || !outputTy || inputTy != outputTy)
-    return {};
-  return input1();
-}
-
-OpFoldResult SliceOp::fold(ArrayRef<Attribute> operands) {
-  auto inputTy = input().getType().dyn_cast<RankedTensorType>();
-  auto outputTy = getType().dyn_cast<RankedTensorType>();
-
-  if (!inputTy || !outputTy || inputTy != outputTy)
-    return {};
-  if (inputTy.hasStaticShape())
-    return input();
-
-  return {};
-}
-
-OpFoldResult TileOp::fold(ArrayRef<Attribute> operands) {
-  bool allOnes = true;
-  for (Attribute val : multiples().getValue()) {
-    allOnes = allOnes && val.cast<IntegerAttr>().getValue().getSExtValue() == 1;
-  }
-
-  if (allOnes && input1().getType() == getType())
-    return input1();
-  return {};
-}
-
-OpFoldResult TransposeOp::fold(ArrayRef<Attribute> operands) {
-  if (!operands[1])
-    return {};
-
-  DenseIntElementsAttr perms = operands[1].cast<DenseIntElementsAttr>();
-
-  bool isRange = true;
-  for (auto it : llvm::enumerate(perms)) {
-    isRange = isRange &&
-              it.value().getSExtValue() == static_cast<int64_t>(it.index());
-  }
-
-  if (isRange && input1().getType() == getType())
-    return input1();
-  return {};
-}
-
-//===----------------------------------------------------------------------===//
 // TOSA Operator Verifiers.
 //===----------------------------------------------------------------------===//
 
 template <typename T>
 static LogicalResult verifyConvOp(T op) {
   // All TOSA conv ops have an input() and weight().
-  auto inputType = op.input().getType().template dyn_cast<RankedTensorType>();
-  auto weightType = op.weight().getType().template dyn_cast<RankedTensorType>();
+  auto inputType =
+      op.getInput().getType().template dyn_cast<RankedTensorType>();
+  auto weightType =
+      op.getWeight().getType().template dyn_cast<RankedTensorType>();
 
   // Must be ranked tensor types
-  if (!inputType || !weightType)
+  if (!inputType) {
+    op.emitOpError("expect a ranked tensor for input, got ") << op.getInput();
     return failure();
+  }
+  if (!weightType) {
+    op.emitOpError("expect a ranked tensor for weight, got ") << op.getWeight();
+    return failure();
+  }
 
   auto inputEType = inputType.getElementType();
   auto weightEType = weightType.getElementType();
@@ -258,16 +124,43 @@ static LogicalResult verifyConvOp(T op) {
   bool weightIsQuant = !weightEType.template isa<FloatType>();
 
   // Either both must be quantized or both unquantized.
-  if (inputIsQuant != weightIsQuant)
+  if (inputIsQuant != weightIsQuant) {
+    op.emitOpError(
+        "expect both input and weight to be float or not together, got ")
+        << inputEType << " and " << weightEType;
     return failure();
+  }
 
   // Quantized type must have constructed the quantizationattr, and unquantized
   // types should not have a quantizationattr.
-  if ((inputIsQuant && !op.quantization_info()) ||
-      (!inputIsQuant && op.quantization_info()))
+  if ((inputIsQuant && !op.getQuantizationInfo()) ||
+      (!inputIsQuant && op.getQuantizationInfo())) {
+    op.emitOpError("quantizationattr is required for quantized type, and not "
+                   "allowed for float type");
     return failure();
+  }
 
   return success();
+}
+
+LogicalResult tosa::AvgPool2dOp::verify() {
+  auto inputETy = getInput().getType().cast<ShapedType>().getElementType();
+  auto resultETy = getType().cast<ShapedType>().getElementType();
+
+  if (auto quantType = inputETy.dyn_cast<mlir::quant::UniformQuantizedType>())
+    inputETy = quantType.getStorageType();
+
+  if (auto quantType = resultETy.dyn_cast<mlir::quant::UniformQuantizedType>())
+    resultETy = quantType.getStorageType();
+
+  if (inputETy.isF32() && resultETy.isF32())
+    return success();
+  if (inputETy.isInteger(8) && resultETy.isInteger(8))
+    return success();
+  if (inputETy.isInteger(16) && resultETy.isInteger(16))
+    return success();
+
+  return emitOpError("input/output element types are incompatible.");
 }
 
 //===----------------------------------------------------------------------===//
@@ -298,15 +191,15 @@ static void buildConvOpWithQuantInfo(OpBuilder &builder, OperationState &result,
 }
 
 /// Handles tosa.transpose_conv2d which has outpad and output shape attributes.
-static void
-buildTransConvOpWithQuantInfo(OpBuilder &builder, OperationState &result,
-                              Type outputType, Value input, Value weight,
-                              Value bias, ArrayAttr outpad, ArrayAttr stride,
-                              ArrayAttr dilation, ArrayAttr outputShape) {
+static void buildTransConvOpWithQuantInfo(OpBuilder &builder,
+                                          OperationState &result,
+                                          Type outputType, Value input,
+                                          Value weight, Value bias,
+                                          ArrayAttr outpad, ArrayAttr stride,
+                                          ArrayAttr outputShape) {
   result.addOperands({input, weight, bias});
   result.addAttribute("out_pad", outpad);
   result.addAttribute("stride", stride);
-  result.addAttribute("dilation", dilation);
   result.addAttribute("out_shape", outputShape);
   auto quantAttr = ::buildConvOpQuantizationAttr(builder, input, weight);
 
@@ -349,8 +242,8 @@ static void buildMatMulOpWithQuantInfo(OpBuilder &builder,
   if (quantAttr) {
     result.addAttribute("quantization_info", quantAttr);
 
-    auto inputType = a.getType().dyn_cast<RankedTensorType>();
-    assert(inputType && "Input must be a ranked tensor type!");
+    auto inputType = a.getType().dyn_cast<ShapedType>();
+    assert(inputType && "Input must be a shaped tensor type!");
 
     auto inputQType = inputType.getElementType()
                           .dyn_cast<mlir::quant::UniformQuantizedType>();
@@ -358,17 +251,15 @@ static void buildMatMulOpWithQuantInfo(OpBuilder &builder,
 
     unsigned inputBits = inputQType.getStorageTypeIntegralWidth();
 
-    auto outputShapedType = outputType.dyn_cast<RankedTensorType>();
-    assert(outputShapedType && "Output must be a ranked tensor type");
-
-    auto outputShape = outputShapedType.getShape();
+    auto outputShapedType = outputType.dyn_cast<ShapedType>();
+    assert(outputShapedType && "Output must be a shaped type");
 
     IntegerType accElementType;
     if (inputBits == 16)
       accElementType = builder.getIntegerType(48);
     else
       accElementType = builder.getI32Type();
-    auto accType = RankedTensorType::get(outputShape, accElementType);
+    auto accType = outputShapedType.clone(accElementType);
     result.addTypes(accType);
   } else {
     result.addTypes(outputType);
@@ -408,11 +299,25 @@ static void buildUnaryOpWithQuantInfo(OpBuilder &builder,
 
 /// This builder is called on TOSA pad operator that needs to create its own
 /// OptionalAttr quantization_attr parameter to scale the padding values
-/// correctly.
+/// correctly. No pad_const is interpreted as zero-padding.
 static void buildPadOpWithQuantInfo(OpBuilder &builder, OperationState &result,
                                     Type outputType, Value input,
                                     Value paddings) {
   result.addOperands({input, paddings});
+  auto quantAttr = buildPadOpQuantizationAttr(builder, input);
+  if (quantAttr)
+    result.addAttribute("quantization_info", quantAttr);
+  result.types.push_back(outputType);
+}
+
+/// This builder is called on TOSA pad operator when an explicit pad_const
+/// value is passed in. It also optionally constructs quantization_attr.
+static void buildExplicitValuePadOpWithQuantInfo(OpBuilder &builder,
+                                                 OperationState &result,
+                                                 Type outputType, Value input,
+                                                 Value paddings,
+                                                 Value padConst) {
+  result.addOperands({input, paddings, padConst});
   auto quantAttr = buildPadOpQuantizationAttr(builder, input);
   if (quantAttr)
     result.addAttribute("quantization_info", quantAttr);
@@ -429,10 +334,42 @@ static void getI64Values(ArrayAttr arrayAttr, SmallVector<int64_t> &values) {
   }
 }
 
-static void getF64Values(ArrayAttr arrayAttr, SmallVector<double> &values) {
-  for (auto it : arrayAttr) {
-    values.push_back(it.cast<FloatAttr>().getValueAsDouble());
+static LogicalResult resolveBroadcastShape(const ValueShapeRange &operands,
+                                           SmallVector<int64_t> &outShape) {
+  int64_t outRank = 0;
+  for (int i = 0, e = operands.size(); i != e; ++i) {
+    auto shape = operands.getShape(i);
+    if (!shape.hasRank()) {
+      // TODO(jennik): Update function to have better case handling for invalid
+      // operands and for ranked tensors.
+      return failure();
+    }
+    outRank = std::max<int64_t>(outRank, shape.getRank());
   }
+
+  outShape.resize(outRank, 1);
+
+  for (int i = 0, e = operands.size(); i != e; ++i) {
+    auto shape = operands.getShape(i);
+    auto rankDiff = outShape.size() - shape.getRank();
+
+    for (size_t i = 0, e = shape.getRank(); i < e; ++i) {
+      auto dim1 = outShape[i + rankDiff];
+      auto dim2 = shape.getDimSize(i);
+      auto resolvedDim = dim1;
+
+      if (dim1 == 1) {
+        resolvedDim = dim2;
+      } else if (dim2 == 1) {
+        resolvedDim = dim1;
+      } else if (dim1 != dim2) {
+        return failure();
+      }
+      outShape[i + rankDiff] = resolvedDim;
+    }
+  }
+
+  return success();
 }
 
 LogicalResult tosa::ArgMaxOp::inferReturnTypeComponents(
@@ -476,13 +413,13 @@ LogicalResult tosa::ConcatOp::inferReturnTypeComponents(
 
     // Copy the Operand's rank.
     if (!hasRankedInput)
-      outputShape.resize(operandShape.getRank(), ShapedType::kDynamicSize);
+      outputShape.resize(operandShape.getRank(), ShapedType::kDynamic);
 
     // Copy shapes until the dim is non-dynamic.
     for (int i = 0, s = operandShape.getRank(); i < s; i++) {
       if (i == axis || operandShape.isDynamicDim(i))
         continue;
-      if (outputShape[i] == ShapedType::kDynamicSize)
+      if (outputShape[i] == ShapedType::kDynamic)
         outputShape[i] = operandShape.getDimSize(i);
       if (outputShape[i] != operandShape.getDimSize(i))
         return failure();
@@ -497,14 +434,14 @@ LogicalResult tosa::ConcatOp::inferReturnTypeComponents(
   }
 
   // Determine the dimension size along the concatenation axis.
-  int concatDimSize = 0;
+  int64_t concatDimSize = 0;
   for (auto operand : operands) {
     ShapeAdaptor operandShape = operands.getShape(operand);
 
     // We need to know the length of the concatenation axis of all inputs to
     // determine the dimension size of the output shape.
     if (!operandShape.hasRank() || operandShape.isDynamicDim(axis)) {
-      concatDimSize = ShapedType::kDynamicSize;
+      concatDimSize = ShapedType::kDynamic;
       break;
     }
 
@@ -517,6 +454,27 @@ LogicalResult tosa::ConcatOp::inferReturnTypeComponents(
   return success();
 }
 
+LogicalResult tosa::EqualOp::inferReturnTypeComponents(
+    MLIRContext *context, ::llvm::Optional<Location> location,
+    ValueShapeRange operands, DictionaryAttr attributes, RegionRange regions,
+    SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
+  llvm::SmallVector<int64_t> outShape;
+  if (resolveBroadcastShape(operands, outShape).failed()) {
+    inferredReturnShapes.push_back(ShapedTypeComponents());
+    return success();
+  }
+
+  inferredReturnShapes.push_back(
+      ShapedTypeComponents(outShape, IntegerType::get(context, /*width=*/1)));
+  return success();
+}
+
+bool tosa::EqualOp::isCompatibleReturnTypes(TypeRange l, TypeRange r) {
+  if (l.size() != r.size() || l.size() != 1)
+    return false;
+  return succeeded(verifyCompatibleShape(l[0], r[0]));
+}
+
 LogicalResult tosa::FullyConnectedOp::inferReturnTypeComponents(
     MLIRContext *context, ::llvm::Optional<Location> location,
     ValueShapeRange operands, DictionaryAttr attributes, RegionRange regions,
@@ -527,7 +485,7 @@ LogicalResult tosa::FullyConnectedOp::inferReturnTypeComponents(
 
   // All shapes are dynamic.
   SmallVector<int64_t> outShape;
-  outShape.resize(2, ShapedType::kDynamicSize);
+  outShape.resize(2, ShapedType::kDynamic);
 
   if (inputShape.hasRank()) {
     outShape[0] = inputShape.getDimSize(0);
@@ -538,7 +496,7 @@ LogicalResult tosa::FullyConnectedOp::inferReturnTypeComponents(
   }
 
   if (biasShape.hasRank()) {
-    outShape[1] = outShape[1] == ShapedType::kDynamicSize
+    outShape[1] = outShape[1] == ShapedType::kDynamic
                       ? biasShape.getDimSize(0)
                       : outShape[1];
   }
@@ -546,6 +504,8 @@ LogicalResult tosa::FullyConnectedOp::inferReturnTypeComponents(
   inferredReturnShapes.push_back(ShapedTypeComponents(outShape));
   return success();
 }
+
+LogicalResult FullyConnectedOp::verify() { return verifyConvOp(*this); }
 
 LogicalResult tosa::MatMulOp::inferReturnTypeComponents(
     MLIRContext *context, ::llvm::Optional<Location> location,
@@ -556,7 +516,7 @@ LogicalResult tosa::MatMulOp::inferReturnTypeComponents(
 
   // All shapes are dynamic.
   SmallVector<int64_t> outShape;
-  outShape.resize(3, ShapedType::kDynamicSize);
+  outShape.resize(3, ShapedType::kDynamic);
 
   if (lhsShape.hasRank()) {
     outShape[0] = lhsShape.getDimSize(0);
@@ -564,7 +524,7 @@ LogicalResult tosa::MatMulOp::inferReturnTypeComponents(
   }
 
   if (rhsShape.hasRank()) {
-    outShape[0] = outShape[0] == ShapedType::kDynamicSize
+    outShape[0] = outShape[0] == ShapedType::kDynamic
                       ? rhsShape.getDimSize(0)
                       : outShape[0];
     outShape[2] = rhsShape.getDimSize(2);
@@ -597,7 +557,7 @@ LogicalResult tosa::PadOp::inferReturnTypeComponents(
       return success();
     }
 
-    outputShape.resize(paddingShape.getDimSize(0), ShapedType::kDynamicSize);
+    outputShape.resize(paddingShape.getDimSize(0), ShapedType::kDynamic);
     inferredReturnShapes.push_back(ShapedTypeComponents(outputShape));
     return success();
   }
@@ -605,7 +565,7 @@ LogicalResult tosa::PadOp::inferReturnTypeComponents(
   DenseIntElementsAttr paddings;
   // If the paddings value is not a constant, all dimensions must be dynamic.
   if (!matchPattern(operands[1], m_Constant(&paddings))) {
-    outputShape.resize(inputShape.getRank(), ShapedType::kDynamicSize);
+    outputShape.resize(inputShape.getRank(), ShapedType::kDynamic);
     inferredReturnShapes.push_back(ShapedTypeComponents(outputShape));
     return success();
   }
@@ -618,7 +578,7 @@ LogicalResult tosa::PadOp::inferReturnTypeComponents(
   outputShape.reserve(inputShape.getRank());
   for (int i = 0, s = inputShape.getRank(); i < s; i++) {
     if (inputShape.isDynamicDim(i)) {
-      outputShape.push_back(ShapedType::kDynamicSize);
+      outputShape.push_back(ShapedType::kDynamic);
       continue;
     }
 
@@ -630,18 +590,25 @@ LogicalResult tosa::PadOp::inferReturnTypeComponents(
   return success();
 }
 
+static SmallVector<int64_t> convertToMlirShape(ArrayRef<int64_t> shape) {
+  return to_vector(llvm::map_range(shape, [](int64_t dim) {
+    return dim == -1 ? ShapedType::kDynamic : dim;
+  }));
+}
+
 LogicalResult tosa::SliceOp::inferReturnTypeComponents(
     MLIRContext *context, ::llvm::Optional<Location> location,
     ValueShapeRange operands, DictionaryAttr attributes, RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
-  ArrayAttr sizes = SliceOpAdaptor(operands, attributes).size();
+  ArrayAttr sizes = SliceOpAdaptor(operands, attributes).getSize();
   SmallVector<int64_t> outputShape;
   outputShape.reserve(sizes.size());
   for (auto val : sizes) {
     outputShape.push_back(val.cast<IntegerAttr>().getValue().getSExtValue());
   }
 
-  inferredReturnShapes.push_back(ShapedTypeComponents(outputShape));
+  inferredReturnShapes.push_back(ShapedTypeComponents(
+    convertToMlirShape(outputShape)));
   return success();
 }
 
@@ -666,11 +633,11 @@ LogicalResult tosa::TileOp::inferReturnTypeComponents(
     ValueShapeRange operands, DictionaryAttr attributes, RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
   TileOpAdaptor adaptor(operands, attributes);
-  ArrayAttr multiples = adaptor.multiples();
+  ArrayAttr multiples = adaptor.getMultiples();
   ShapeAdaptor inputShape = operands.getShape(0);
   SmallVector<int64_t> outputShape;
   if (!inputShape.hasRank()) {
-    outputShape.resize(multiples.size(), ShapedType::kDynamicSize);
+    outputShape.resize(multiples.size(), ShapedType::kDynamic);
     inferredReturnShapes.push_back(ShapedTypeComponents(outputShape));
     return success();
   }
@@ -685,8 +652,8 @@ LogicalResult tosa::TileOp::inferReturnTypeComponents(
   // Any non dynamic dimension can be multiplied to a known size.
   outputShape.reserve(multiples.size());
   for (int i = 0, s = inputShape.getRank(); i < s; i++) {
-    int dim = inputShape.getDimSize(i);
-    if (dim != ShapedType::kDynamicSize)
+    int64_t dim = inputShape.getDimSize(i);
+    if (dim != ShapedType::kDynamic)
       dim *= multipleValues[i];
     outputShape.push_back(dim);
   }
@@ -702,9 +669,10 @@ LogicalResult tosa::ReshapeOp::inferReturnTypeComponents(
   ReshapeOpAdaptor adaptor(operands, attributes);
   ShapeAdaptor inputShape = operands.getShape(0);
 
-  ArrayAttr newShape = adaptor.new_shape();
+  ArrayAttr newShape = adaptor.getNewShape();
   llvm::SmallVector<int64_t> newShapeValue;
   getI64Values(newShape, newShapeValue);
+  newShapeValue = convertToMlirShape(newShapeValue);
 
   // We cannot infer from the total number of elements so we must take the
   // shape attribute as exact.
@@ -719,14 +687,14 @@ LogicalResult tosa::ReshapeOp::inferReturnTypeComponents(
   int64_t numElements = inputShape.getNumElements();
   int64_t staticMul = 1;
   for (auto val : newShapeValue) {
-    if (val != ShapedType::kDynamicSize) {
+    if (!ShapedType::isDynamic(val)) {
       staticMul *= val;
     }
   }
 
   // Determine the length of the dynamic dimension.
   for (auto &val : newShapeValue) {
-    if (val == ShapedType::kDynamicSize)
+    if (ShapedType::isDynamic(val))
       val = numElements / staticMul;
   }
 
@@ -743,17 +711,23 @@ LogicalResult tosa::TransposeOp::inferReturnTypeComponents(
 
   // If input rank and permutation length is unknown, the output rank is
   // unknown.
-  if (!inputShape.hasRank() &&
-      (!permsShape.hasRank() || permsShape.isDynamicDim(0))) {
+  if (!inputShape.hasRank() || !permsShape.hasRank() ||
+      permsShape.isDynamicDim(0)) {
     inferredReturnShapes.push_back(ShapedTypeComponents());
     return success();
+  }
+
+  // This would imply the number of permutations does not match the rank of the
+  // input which is illegal.
+  if (permsShape.getDimSize(0) != inputShape.getRank()) {
+    return failure();
   }
 
   // Without the input dims we cannot determine the output dim sizes but we
   // can determine the output rank.
   SmallVector<int64_t> outputShape;
   if (!inputShape.hasRank()) {
-    outputShape.resize(permsShape.getDimSize(0), ShapedType::kDynamicSize);
+    outputShape.resize(permsShape.getDimSize(0), ShapedType::kDynamic);
     inferredReturnShapes.push_back(ShapedTypeComponents(outputShape));
     return success();
   }
@@ -781,7 +755,7 @@ LogicalResult tosa::TransposeOp::inferReturnTypeComponents(
     return success();
   }
 
-  outputShape.resize(inputShape.getRank(), ShapedType::kDynamicSize);
+  outputShape.resize(inputShape.getRank(), ShapedType::kDynamic);
   // If the permuations are a constant we can directly determine the output
   // shape.
   if (ShapeAdaptor permShape = operands.getValueAsShape(1)) {
@@ -800,7 +774,7 @@ LogicalResult tosa::GatherOp::inferReturnTypeComponents(
     ValueShapeRange operands, DictionaryAttr attributes, RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
   llvm::SmallVector<int64_t> outputShape;
-  outputShape.resize(3, ShapedType::kDynamicSize);
+  outputShape.resize(3, ShapedType::kDynamic);
 
   ShapeAdaptor valuesShape = operands.getShape(0);
   if (valuesShape.hasRank()) {
@@ -810,9 +784,9 @@ LogicalResult tosa::GatherOp::inferReturnTypeComponents(
 
   ShapeAdaptor indicesShape = operands.getShape(1);
   if (indicesShape.hasRank()) {
-    if (outputShape[0] == ShapedType::kDynamicSize)
+    if (outputShape[0] == ShapedType::kDynamic)
       outputShape[0] = indicesShape.getDimSize(0);
-    if (outputShape[1] == ShapedType::kDynamicSize)
+    if (outputShape[1] == ShapedType::kDynamic)
       outputShape[1] = indicesShape.getDimSize(1);
   }
 
@@ -826,66 +800,38 @@ LogicalResult tosa::ResizeOp::inferReturnTypeComponents(
     SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
   ResizeOpAdaptor adaptor(operands, attributes);
   llvm::SmallVector<int64_t, 4> outputShape;
-  outputShape.resize(4, ShapedType::kDynamicSize);
+  outputShape.resize(4, ShapedType::kDynamic);
 
-  int32_t inHeight = ShapedType::kDynamicSize;
-  int32_t inWidth = ShapedType::kDynamicSize;
+  ShapeAdaptor inputShape = operands.getShape(adaptor.getInput());
+  if (!inputShape.hasRank())
+    return failure();
 
-  ShapeAdaptor inputShape = operands.getShape(adaptor.input());
-  if (inputShape.hasRank()) {
-    outputShape[0] = inputShape.getDimSize(0);
-    outputShape[3] = inputShape.getDimSize(3);
+  outputShape[0] = inputShape.getDimSize(0);
+  outputShape[3] = inputShape.getDimSize(3);
+  int64_t inputHeight = inputShape.getDimSize(1);
+  int64_t inputWidth = inputShape.getDimSize(2);
 
-    inHeight = inputShape.getDimSize(1);
-    inWidth = inputShape.getDimSize(2);
-  }
+  if ((inputHeight == ShapedType::kDynamic) ||
+      (inputWidth == ShapedType::kDynamic))
+    return failure();
 
-  int32_t shift = adaptor.shift().getValue().getSExtValue();
-  llvm::SmallVector<int64_t> newShape;
-  getI64Values(adaptor.output_size(), newShape);
-  outputShape[1] = newShape[0];
-  outputShape[2] = newShape[1];
-
-  llvm::SmallVector<int64_t> strideInt;
+  llvm::SmallVector<int64_t> scaleInt;
   llvm::SmallVector<int64_t> offsetInt;
-  llvm::SmallVector<double> strideFp;
-  llvm::SmallVector<double> offsetFp;
-  getI64Values(adaptor.offset(), offsetInt);
-  getF64Values(adaptor.offset_fp(), offsetFp);
-  getI64Values(adaptor.stride(), strideInt);
-  getF64Values(adaptor.stride_fp(), strideFp);
+  llvm::SmallVector<int64_t> borderInt;
+  getI64Values(adaptor.getScale(), scaleInt);
+  getI64Values(adaptor.getOffset(), offsetInt);
+  getI64Values(adaptor.getBorder(), borderInt);
 
-  // If we have a 0 zero in integers we know that the resize indexing needs to
-  // be performed in floating point. Use the floating point varient to compute
-  // the resize shape.
-  bool fpMode = strideInt[0] == 0;
+  // Compute the output shape based on attributes: scale, offset, and border.
+  outputShape[1] =
+      (((inputHeight - 1) * scaleInt[0] - offsetInt[0] + borderInt[0]) /
+       scaleInt[1]) +
+      1;
 
-  // We can compute the output shape if attribute specifies unknown dimensions
-  // based on the offset and stride. If we perfectly line up to the last index
-  // we need to round up the size to include it.
-  if (outputShape[1] == ShapedType::kDynamicSize && inHeight >= 0 && fpMode) {
-    float sizeFp = (inHeight - offsetFp[0] - 1) / strideFp[0];
-    float round = std::floor(sizeFp) == sizeFp ? 1 : 0;
-    outputShape[1] = std::ceil(sizeFp) + round;
-  }
-
-  if (outputShape[2] == ShapedType::kDynamicSize && inWidth >= 0 && fpMode) {
-    float sizeFp = (inWidth - offsetFp[1] - 1) / strideFp[1];
-    float round = std::floor(sizeFp) == sizeFp ? 1 : 0;
-    outputShape[2] = std::ceil(sizeFp) + round;
-  }
-
-  if (outputShape[1] == ShapedType::kDynamicSize && inHeight >= 0 && !fpMode) {
-    int64_t size = (inHeight - 1);
-    size = ((size << shift) - offsetInt[0]) / strideInt[0];
-    outputShape[1] = size + 1;
-  }
-
-  if (outputShape[2] == ShapedType::kDynamicSize && inWidth >= 0 && !fpMode) {
-    int64_t size = (inWidth - 1);
-    size = ((size << shift) - offsetInt[1]) / strideInt[1];
-    outputShape[2] = size + 1;
-  }
+  outputShape[2] =
+      (((inputWidth - 1) * scaleInt[2] - offsetInt[1] + borderInt[1]) /
+       scaleInt[3]) +
+      1;
 
   inferredReturnShapes.push_back(ShapedTypeComponents(outputShape));
   return success();
@@ -896,7 +842,7 @@ LogicalResult tosa::ScatterOp::inferReturnTypeComponents(
     ValueShapeRange operands, DictionaryAttr attributes, RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
   llvm::SmallVector<int64_t> outputShape;
-  outputShape.resize(3, ShapedType::kDynamicSize);
+  outputShape.resize(3, ShapedType::kDynamic);
 
   ShapeAdaptor valuesInShape = operands.getShape(0);
   if (valuesInShape.hasRank()) {
@@ -907,15 +853,15 @@ LogicalResult tosa::ScatterOp::inferReturnTypeComponents(
 
   ShapeAdaptor indicesShape = operands.getShape(1);
   if (indicesShape.hasRank()) {
-    if (outputShape[0] == ShapedType::kDynamicSize)
+    if (outputShape[0] == ShapedType::kDynamic)
       outputShape[0] = indicesShape.getDimSize(0);
   }
 
   ShapeAdaptor inputShape = operands.getShape(2);
   if (inputShape.hasRank()) {
-    if (outputShape[0] == ShapedType::kDynamicSize)
+    if (outputShape[0] == ShapedType::kDynamic)
       outputShape[0] = inputShape.getDimSize(0);
-    if (outputShape[2] == ShapedType::kDynamicSize)
+    if (outputShape[2] == ShapedType::kDynamic)
       outputShape[2] = inputShape.getDimSize(2);
   }
 
@@ -958,42 +904,6 @@ REDUCE_SHAPE_INFER(tosa::ReduceProdOp)
 REDUCE_SHAPE_INFER(tosa::ReduceSumOp)
 #undef REDUCE_SHAPE_INFER
 
-static LogicalResult resolveBroadcastShape(const ValueShapeRange &operands,
-                                           SmallVector<int64_t> &outShape) {
-  int64_t outRank = 0;
-  for (int i = 0, e = operands.size(); i != e; ++i) {
-    auto shape = operands.getShape(i);
-    if (!shape.hasRank()) {
-      return failure();
-    }
-    outRank = std::max<int64_t>(outRank, shape.getRank());
-  }
-
-  outShape.resize(outRank, 1);
-
-  for (int i = 0, e = operands.size(); i != e; ++i) {
-    auto shape = operands.getShape(i);
-    auto rankDiff = outShape.size() - shape.getRank();
-
-    for (size_t i = 0, e = shape.getRank(); i < e; ++i) {
-      auto dim1 = outShape[i + rankDiff];
-      auto dim2 = shape.getDimSize(i);
-      auto resolvedDim = dim1;
-
-      if (dim1 == 1) {
-        resolvedDim = dim2;
-      } else if (dim2 == 1) {
-        resolvedDim = dim1;
-      } else if (dim1 != dim2) {
-        return failure();
-      }
-      outShape[i + rankDiff] = resolvedDim;
-    }
-  }
-
-  return success();
-}
-
 static LogicalResult NAryInferReturnTypes(
     const ValueShapeRange &operands,
     SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
@@ -1027,7 +937,6 @@ NARY_SHAPE_INFER(tosa::CeilOp)
 NARY_SHAPE_INFER(tosa::ClampOp)
 NARY_SHAPE_INFER(tosa::ClzOp)
 NARY_SHAPE_INFER(tosa::DivOp)
-NARY_SHAPE_INFER(tosa::EqualOp)
 NARY_SHAPE_INFER(tosa::ExpOp)
 NARY_SHAPE_INFER(tosa::FloorOp)
 NARY_SHAPE_INFER(tosa::GreaterEqualOp)
@@ -1046,7 +955,6 @@ NARY_SHAPE_INFER(tosa::MulOp)
 NARY_SHAPE_INFER(tosa::NegateOp)
 NARY_SHAPE_INFER(tosa::PowOp)
 NARY_SHAPE_INFER(tosa::ReciprocalOp)
-NARY_SHAPE_INFER(tosa::ReluNOp)
 NARY_SHAPE_INFER(tosa::RescaleOp)
 NARY_SHAPE_INFER(tosa::ReverseOp)
 NARY_SHAPE_INFER(tosa::RsqrtOp)
@@ -1061,7 +969,7 @@ static LogicalResult poolingInferReturnTypes(
     SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
   ShapeAdaptor inputShape = operands.getShape(0);
   llvm::SmallVector<int64_t> outputShape;
-  outputShape.resize(4, -1);
+  outputShape.resize(4, ShapedType::kDynamic);
 
   // We only know the rank if the input type is unranked.
   if (!inputShape) {
@@ -1073,8 +981,8 @@ static LogicalResult poolingInferReturnTypes(
   outputShape[0] = inputShape.getDimSize(0);
   outputShape[3] = inputShape.getDimSize(3);
 
-  int32_t height = inputShape.getDimSize(1);
-  int32_t width = inputShape.getDimSize(2);
+  int64_t height = inputShape.getDimSize(1);
+  int64_t width = inputShape.getDimSize(2);
 
   llvm::SmallVector<int64_t> kernel;
   llvm::SmallVector<int64_t> stride;
@@ -1084,13 +992,13 @@ static LogicalResult poolingInferReturnTypes(
   getI64Values(attributes.get("stride").cast<ArrayAttr>(), stride);
   getI64Values(attributes.get("pad").cast<ArrayAttr>(), pad);
 
-  if (height != -1) {
-    int32_t padded = height + pad[0] + pad[1] - kernel[0];
+  if (!ShapedType::isDynamic(height)) {
+    int64_t padded = height + pad[0] + pad[1] - kernel[0];
     outputShape[1] = padded / stride[0] + 1;
   }
 
-  if (width != -1) {
-    int32_t padded = width + pad[2] + pad[3] - kernel[1];
+  if (!ShapedType::isDynamic(width)) {
+    int64_t padded = width + pad[2] + pad[3] - kernel[1];
     outputShape[2] = padded / stride[1] + 1;
   }
 
@@ -1102,17 +1010,17 @@ LogicalResult Conv2DOp::inferReturnTypeComponents(
     MLIRContext *context, ::llvm::Optional<Location> location,
     ValueShapeRange operands, DictionaryAttr attributes, RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
-  llvm::SmallVector<int64_t> outputShape(4, ShapedType::kDynamicSize);
+  llvm::SmallVector<int64_t> outputShape(4, ShapedType::kDynamic);
   Conv2DOp::Adaptor adaptor(operands.getValues(), attributes);
 
-  int32_t inputWidth = ShapedType::kDynamicSize;
-  int32_t inputHeight = ShapedType::kDynamicSize;
-  int32_t weightWidth = ShapedType::kDynamicSize;
-  int32_t weightHeight = ShapedType::kDynamicSize;
+  int64_t inputWidth = ShapedType::kDynamic;
+  int64_t inputHeight = ShapedType::kDynamic;
+  int64_t weightWidth = ShapedType::kDynamic;
+  int64_t weightHeight = ShapedType::kDynamic;
 
   // Input shape describes input width/height and batch.
 
-  ShapeAdaptor inputShape = operands.getShape(adaptor.input());
+  ShapeAdaptor inputShape = operands.getShape(adaptor.getInput());
   if (inputShape.hasRank()) {
     outputShape[0] = inputShape.getDimSize(0);
     inputHeight = inputShape.getDimSize(1);
@@ -1120,7 +1028,7 @@ LogicalResult Conv2DOp::inferReturnTypeComponents(
   }
 
   // Weight shapes describes the filter width/height and the output channels.
-  ShapeAdaptor weightShape = operands.getShape(adaptor.weight());
+  ShapeAdaptor weightShape = operands.getShape(adaptor.getWeight());
   if (weightShape.hasRank()) {
     outputShape[3] = weightShape.getDimSize(0);
     weightHeight = weightShape.getDimSize(1);
@@ -1128,7 +1036,7 @@ LogicalResult Conv2DOp::inferReturnTypeComponents(
   }
 
   // Bias shape can describe the output channels.
-  ShapeAdaptor biasShape = operands.getShape(adaptor.bias());
+  ShapeAdaptor biasShape = operands.getShape(adaptor.getBias());
   if (biasShape.hasRank()) {
     outputShape[3] = ShapedType::isDynamic(outputShape[3])
                          ? biasShape.getDimSize(0)
@@ -1139,23 +1047,23 @@ LogicalResult Conv2DOp::inferReturnTypeComponents(
   llvm::SmallVector<int64_t> padding;
   llvm::SmallVector<int64_t> stride;
 
-  getI64Values(adaptor.dilation(), dilation);
-  getI64Values(adaptor.pad(), padding);
-  getI64Values(adaptor.stride(), stride);
+  getI64Values(adaptor.getDilation(), dilation);
+  getI64Values(adaptor.getPad(), padding);
+  getI64Values(adaptor.getStride(), stride);
 
   if (!ShapedType::isDynamic(inputHeight) &&
       !ShapedType::isDynamic(weightHeight)) {
-    int32_t inputSize = inputHeight + padding[0] + padding[1];
-    int32_t filterSize = (weightHeight - 1) * dilation[0] + 1;
-    int32_t unstridedResult = inputSize - filterSize + 1;
+    int64_t inputSize = inputHeight + padding[0] + padding[1];
+    int64_t filterSize = (weightHeight - 1) * dilation[0] + 1;
+    int64_t unstridedResult = inputSize - filterSize + 1;
     outputShape[1] = (unstridedResult - 1) / stride[0] + 1;
   }
 
   if (!ShapedType::isDynamic(inputWidth) &&
       !ShapedType::isDynamic(weightWidth)) {
-    int32_t inputSize = inputWidth + padding[2] + padding[3];
-    int32_t filterSize = (weightWidth - 1) * dilation[1] + 1;
-    int32_t unstridedResult = inputSize - filterSize + 1;
+    int64_t inputSize = inputWidth + padding[2] + padding[3];
+    int64_t filterSize = (weightWidth - 1) * dilation[1] + 1;
+    int64_t unstridedResult = inputSize - filterSize + 1;
     outputShape[2] = (unstridedResult - 1) / stride[1] + 1;
   }
 
@@ -1163,74 +1071,75 @@ LogicalResult Conv2DOp::inferReturnTypeComponents(
   return success();
 }
 
+LogicalResult Conv2DOp::verify() { return verifyConvOp(*this); }
+
 LogicalResult Conv3DOp::inferReturnTypeComponents(
     MLIRContext *context, ::llvm::Optional<Location> location,
     ValueShapeRange operands, DictionaryAttr attributes, RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
-  llvm::SmallVector<int64_t> outputShape(5, ShapedType::kDynamicSize);
-  Conv2DOp::Adaptor adaptor(operands.getValues(), attributes);
+  llvm::SmallVector<int64_t> outputShape(5, ShapedType::kDynamic);
+  Conv3DOp::Adaptor adaptor(operands.getValues(), attributes);
 
-  int32_t inputWidth = ShapedType::kDynamicSize;
-  int32_t inputHeight = ShapedType::kDynamicSize;
-  int32_t inputDepth = ShapedType::kDynamicSize;
+  int64_t inputWidth = ShapedType::kDynamic;
+  int64_t inputHeight = ShapedType::kDynamic;
+  int64_t inputDepth = ShapedType::kDynamic;
 
-  int32_t weightWidth = ShapedType::kDynamicSize;
-  int32_t weightHeight = ShapedType::kDynamicSize;
-  int32_t weightDepth = ShapedType::kDynamicSize;
+  int64_t weightWidth = ShapedType::kDynamic;
+  int64_t weightHeight = ShapedType::kDynamic;
+  int64_t weightDepth = ShapedType::kDynamic;
 
   // Input shape describes input width/height and batch.
-  ShapeAdaptor inputShape = operands.getShape(adaptor.input());
+  ShapeAdaptor inputShape = operands.getShape(adaptor.getInput());
   if (inputShape.hasRank()) {
     outputShape[0] = inputShape.getDimSize(0);
-    inputHeight = inputShape.getDimSize(1);
-    inputWidth = inputShape.getDimSize(2);
-    inputDepth = inputShape.getDimSize(3);
+    inputDepth = inputShape.getDimSize(1);
+    inputHeight = inputShape.getDimSize(2);
+    inputWidth = inputShape.getDimSize(3);
   }
 
   // Weight shapes describes the filter width/height and the output channels.
-  ShapeAdaptor weightShape = operands.getShape(adaptor.weight());
+  ShapeAdaptor weightShape = operands.getShape(adaptor.getWeight());
   if (weightShape.hasRank()) {
     outputShape[4] = weightShape.getDimSize(0);
-    weightHeight = weightShape.getDimSize(1);
-    weightWidth = weightShape.getDimSize(2);
-    weightDepth = weightShape.getDimSize(3);
+    weightDepth = weightShape.getDimSize(1);
+    weightHeight = weightShape.getDimSize(2);
+    weightWidth = weightShape.getDimSize(3);
   }
 
   // Bias shape can describe the output channels.
-  ShapeAdaptor biasShape = operands.getShape(adaptor.bias());
-  if (biasShape.hasRank()) {
-    outputShape[4] =
-        (outputShape[4] == -1) ? biasShape.getDimSize(0) : outputShape[4];
+  ShapeAdaptor biasShape = operands.getShape(adaptor.getBias());
+  if (biasShape.hasRank() && ShapedType::isDynamic(outputShape[4])) {
+    outputShape[4] = biasShape.getDimSize(0);
   }
 
   llvm::SmallVector<int64_t> dilation;
-  llvm::SmallVector<int64_t> padding;
+  llvm::SmallVector<int64_t> pad;
   llvm::SmallVector<int64_t> stride;
 
-  getI64Values(adaptor.dilation(), dilation);
-  getI64Values(adaptor.pad(), padding);
-  getI64Values(adaptor.stride(), stride);
+  getI64Values(adaptor.getDilation(), dilation);
+  getI64Values(adaptor.getPad(), pad);
+  getI64Values(adaptor.getStride(), stride);
 
-  if (!ShapedType::isDynamic(inputHeight) &&
-      !ShapedType::isDynamic(weightHeight)) {
-    int32_t inputSize = inputHeight + padding[0] + padding[1];
-    int32_t filterSize = (weightHeight - 1) * dilation[0] + 1;
+  if (!ShapedType::isDynamic(inputDepth) &&
+      !ShapedType::isDynamic(weightDepth)) {
+    int32_t inputSize = inputDepth + pad[0] + pad[1];
+    int32_t filterSize = (weightDepth - 1) * dilation[0] + 1;
     int32_t unstridedResult = inputSize - filterSize + 1;
     outputShape[1] = (unstridedResult - 1) / stride[0] + 1;
   }
 
-  if (!ShapedType::isDynamic(inputWidth) &&
-      !ShapedType::isDynamic(weightWidth)) {
-    int32_t inputSize = inputWidth + padding[2] + padding[3];
-    int32_t filterSize = (weightWidth - 1) * dilation[1] + 1;
+  if (!ShapedType::isDynamic(inputHeight) &&
+      !ShapedType::isDynamic(weightHeight)) {
+    int32_t inputSize = inputHeight + pad[2] + pad[3];
+    int32_t filterSize = (weightHeight - 1) * dilation[1] + 1;
     int32_t unstridedResult = inputSize - filterSize + 1;
     outputShape[2] = (unstridedResult - 1) / stride[1] + 1;
   }
 
-  if (!ShapedType::isDynamic(inputDepth) &&
-      !ShapedType::isDynamic(weightDepth)) {
-    int32_t inputSize = inputDepth + padding[4] + padding[5];
-    int32_t filterSize = (weightDepth - 1) * dilation[2] + 1;
+  if (!ShapedType::isDynamic(inputWidth) &&
+      !ShapedType::isDynamic(weightWidth)) {
+    int32_t inputSize = inputWidth + pad[4] + pad[5];
+    int32_t filterSize = (weightWidth - 1) * dilation[2] + 1;
     int32_t unstridedResult = inputSize - filterSize + 1;
     outputShape[3] = (unstridedResult - 1) / stride[2] + 1;
   }
@@ -1238,6 +1147,8 @@ LogicalResult Conv3DOp::inferReturnTypeComponents(
   inferredReturnShapes.push_back(ShapedTypeComponents(outputShape));
   return success();
 }
+
+LogicalResult Conv3DOp::verify() { return verifyConvOp(*this); }
 
 LogicalResult AvgPool2dOp::inferReturnTypeComponents(
     MLIRContext *context, ::llvm::Optional<Location> location,
@@ -1257,19 +1168,19 @@ LogicalResult DepthwiseConv2DOp::inferReturnTypeComponents(
     MLIRContext *context, ::llvm::Optional<Location> location,
     ValueShapeRange operands, DictionaryAttr attributes, RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
-  llvm::SmallVector<int64_t> outputShape(4, ShapedType::kDynamicSize);
+  llvm::SmallVector<int64_t> outputShape(4, ShapedType::kDynamic);
   DepthwiseConv2DOp::Adaptor adaptor(operands.getValues(), attributes);
 
-  int32_t inputWidth = ShapedType::kDynamicSize;
-  int32_t inputHeight = ShapedType::kDynamicSize;
-  int32_t inputChannels = ShapedType::kDynamicSize;
+  int64_t inputWidth = ShapedType::kDynamic;
+  int64_t inputHeight = ShapedType::kDynamic;
+  int64_t inputChannels = ShapedType::kDynamic;
 
-  int32_t weightWidth = ShapedType::kDynamicSize;
-  int32_t weightHeight = ShapedType::kDynamicSize;
-  int32_t depthChannels = ShapedType::kDynamicSize;
+  int64_t weightWidth = ShapedType::kDynamic;
+  int64_t weightHeight = ShapedType::kDynamic;
+  int64_t depthChannels = ShapedType::kDynamic;
 
   // Input shape describes input width/height and batch.
-  ShapeAdaptor inputShape = operands.getShape(adaptor.input());
+  ShapeAdaptor inputShape = operands.getShape(adaptor.getInput());
   if (inputShape.hasRank()) {
     outputShape[0] = inputShape.getDimSize(0);
     inputHeight = inputShape.getDimSize(1);
@@ -1278,7 +1189,7 @@ LogicalResult DepthwiseConv2DOp::inferReturnTypeComponents(
   }
 
   // Weight shapes describes the filter width/height and the output channels.
-  ShapeAdaptor weightShape = operands.getShape(adaptor.weight());
+  ShapeAdaptor weightShape = operands.getShape(adaptor.getWeight());
   if (weightShape.hasRank()) {
     weightHeight = weightShape.getDimSize(0);
     weightWidth = weightShape.getDimSize(1);
@@ -1296,7 +1207,7 @@ LogicalResult DepthwiseConv2DOp::inferReturnTypeComponents(
   }
 
   // Bias shape can describe the output channels.
-  ShapeAdaptor biasShape = operands.getShape(adaptor.bias());
+  ShapeAdaptor biasShape = operands.getShape(adaptor.getBias());
   if (biasShape.hasRank()) {
     outputShape[3] = ShapedType::isDynamic(outputShape[3])
                          ? biasShape.getDimSize(0)
@@ -1307,23 +1218,23 @@ LogicalResult DepthwiseConv2DOp::inferReturnTypeComponents(
   llvm::SmallVector<int64_t> padding;
   llvm::SmallVector<int64_t> stride;
 
-  getI64Values(adaptor.dilation(), dilation);
-  getI64Values(adaptor.pad(), padding);
-  getI64Values(adaptor.stride(), stride);
+  getI64Values(adaptor.getDilation(), dilation);
+  getI64Values(adaptor.getPad(), padding);
+  getI64Values(adaptor.getStride(), stride);
 
   if (!ShapedType::isDynamic(inputHeight) &&
       !ShapedType::isDynamic(weightHeight)) {
-    int32_t inputSize = inputHeight + padding[0] + padding[1];
-    int32_t filterSize = (weightHeight - 1) * dilation[0] + 1;
-    int32_t unstridedResult = inputSize - filterSize + 1;
+    int64_t inputSize = inputHeight + padding[0] + padding[1];
+    int64_t filterSize = (weightHeight - 1) * dilation[0] + 1;
+    int64_t unstridedResult = inputSize - filterSize + 1;
     outputShape[1] = (unstridedResult - 1) / stride[0] + 1;
   }
 
   if (!ShapedType::isDynamic(inputWidth) &&
       !ShapedType::isDynamic(weightWidth)) {
-    int32_t inputSize = inputWidth + padding[2] + padding[3];
-    int32_t filterSize = (weightWidth - 1) * dilation[1] + 1;
-    int32_t unstridedResult = inputSize - filterSize + 1;
+    int64_t inputSize = inputWidth + padding[2] + padding[3];
+    int64_t filterSize = (weightWidth - 1) * dilation[1] + 1;
+    int64_t unstridedResult = inputSize - filterSize + 1;
     outputShape[2] = (unstridedResult - 1) / stride[1] + 1;
   }
 
@@ -1331,21 +1242,24 @@ LogicalResult DepthwiseConv2DOp::inferReturnTypeComponents(
   return success();
 }
 
+LogicalResult DepthwiseConv2DOp::verify() { return verifyConvOp(*this); }
+
 LogicalResult TransposeConv2DOp::inferReturnTypeComponents(
     MLIRContext *context, ::llvm::Optional<Location> location,
     ValueShapeRange operands, DictionaryAttr attributes, RegionRange regions,
     SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
   TransposeConv2DOp::Adaptor adaptor(operands.getValues(), attributes);
   llvm::SmallVector<int64_t> outputShape;
-  getI64Values(adaptor.out_shape(), outputShape);
+  getI64Values(adaptor.getOutShape(), outputShape);
+  outputShape = convertToMlirShape(outputShape);
 
-  int32_t inputWidth = ShapedType::kDynamicSize;
-  int32_t inputHeight = ShapedType::kDynamicSize;
-  int32_t weightWidth = ShapedType::kDynamicSize;
-  int32_t weightHeight = ShapedType::kDynamicSize;
+  int64_t inputWidth = ShapedType::kDynamic;
+  int64_t inputHeight = ShapedType::kDynamic;
+  int64_t weightWidth = ShapedType::kDynamic;
+  int64_t weightHeight = ShapedType::kDynamic;
 
   // Input shape describes input width/height and batch.
-  ShapeAdaptor inputShape = operands.getShape(adaptor.input());
+  ShapeAdaptor inputShape = operands.getShape(adaptor.getInput());
   if (inputShape.hasRank()) {
     outputShape[0] = ShapedType::isDynamic(outputShape[0])
                          ? inputShape.getDimSize(0)
@@ -1355,7 +1269,7 @@ LogicalResult TransposeConv2DOp::inferReturnTypeComponents(
   }
 
   // Weight shapes describes the filter width/height and the output channels.
-  ShapeAdaptor weightShape = operands.getShape(adaptor.input());
+  ShapeAdaptor weightShape = operands.getShape(adaptor.getFilter());
   if (weightShape.hasRank()) {
     outputShape[3] = ShapedType::isDynamic(outputShape[3])
                          ? weightShape.getDimSize(0)
@@ -1365,34 +1279,33 @@ LogicalResult TransposeConv2DOp::inferReturnTypeComponents(
   }
 
   // Bias shape can describe the output channels.
-  ShapeAdaptor biasShape = operands.getShape(adaptor.input());
+  ShapeAdaptor biasShape = operands.getShape(adaptor.getInput());
   if (biasShape.hasRank()) {
     outputShape[3] = ShapedType::isDynamic(outputShape[3])
                          ? biasShape.getDimSize(0)
                          : outputShape[3];
   }
 
-  llvm::SmallVector<int64_t> dilation;
   llvm::SmallVector<int64_t> padding;
   llvm::SmallVector<int64_t> stride;
 
-  getI64Values(adaptor.dilation(), dilation);
-  getI64Values(adaptor.out_pad(), padding);
-  getI64Values(adaptor.stride(), stride);
+  getI64Values(adaptor.getOutPad(), padding);
+  getI64Values(adaptor.getStride(), stride);
 
   if (!ShapedType::isDynamic(inputHeight) &&
       !ShapedType::isDynamic(weightHeight)) {
-    int32_t dilated = (weightHeight - 1) * dilation[0] + 1;
-    int32_t calculateSize =
-        (inputHeight - 1) * stride[0] - padding[0] + dilated;
-    outputShape[1] = outputShape[1] == -1 ? calculateSize : outputShape[1];
+    int64_t calculateSize =
+        (inputHeight - 1) * stride[0] - padding[0] - padding[1] + weightHeight;
+    outputShape[1] =
+        ShapedType::isDynamic(outputShape[1]) ? calculateSize : outputShape[1];
   }
 
   if (!ShapedType::isDynamic(inputWidth) &&
       !ShapedType::isDynamic(weightWidth)) {
-    int32_t dilated = (weightWidth - 1) * dilation[1] + 1;
-    int32_t calculateSize = (inputWidth - 1) * stride[1] - padding[1] + dilated;
-    outputShape[2] = outputShape[2] == -1 ? calculateSize : outputShape[2];
+    int64_t calculateSize =
+        (inputWidth - 1) * stride[1] - padding[2] - padding[3] + weightWidth;
+    outputShape[2] =
+        ShapedType::isDynamic(outputShape[2]) ? calculateSize : outputShape[2];
   }
 
   inferredReturnShapes.push_back(ShapedTypeComponents(outputShape));
@@ -1425,7 +1338,7 @@ LogicalResult IfOp::inferReturnTypeComponents(
     if (resultKnowledge.size() != yieldOp.getNumOperands())
       return failure();
 
-    for (auto it : llvm::enumerate(yieldOp.getOperands())) {
+    for (const auto &it : llvm::enumerate(yieldOp.getOperands())) {
       int32_t index = it.index();
       auto meet = ValueKnowledge::meet(
           resultKnowledge[index],
@@ -1437,15 +1350,61 @@ LogicalResult IfOp::inferReturnTypeComponents(
   }
 
   for (const ValueKnowledge &result : resultKnowledge) {
-    if (result.hasRank) {
-      inferredReturnShapes.push_back(ShapedTypeComponents(result.sizes));
-    } else {
-      inferredReturnShapes.push_back(ShapedTypeComponents());
-    }
+    inferredReturnShapes.push_back(result.getShapedTypeComponents());
   }
 
   return success();
 }
+
+LogicalResult WhileOp::inferReturnTypeComponents(
+    MLIRContext *context, ::llvm::Optional<Location> location,
+    ValueShapeRange operands, DictionaryAttr attributes, RegionRange regions,
+    SmallVectorImpl<ShapedTypeComponents> &inferredReturnShapes) {
+  llvm::SmallVector<tosa::YieldOp> yieldOps;
+  for (auto &block : *regions[1])
+    if (auto returnOp = dyn_cast<tosa::YieldOp>(block.getTerminator()))
+      yieldOps.push_back(returnOp);
+
+  // TOSA's while must have a tosa.yield as its terminator. If not found this
+  // tosa.while is invalid.
+  if (yieldOps.empty())
+    return failure();
+
+  // Get the initial type information from the operand types.
+  llvm::SmallVector<ValueKnowledge> resultKnowledge;
+  resultKnowledge.reserve(yieldOps.front().getNumOperands());
+  for (auto operand : yieldOps.front().getOperands()) {
+    resultKnowledge.push_back(
+        ValueKnowledge::getKnowledgeFromType(operand.getType()));
+  }
+
+  for (auto yieldOp : yieldOps) {
+    if (resultKnowledge.size() != yieldOp.getNumOperands())
+      return failure();
+
+    for (const auto &it : llvm::enumerate(yieldOp.getOperands())) {
+      int32_t index = it.index();
+      if (auto meet = ValueKnowledge::meet(
+              resultKnowledge[index],
+              ValueKnowledge::getKnowledgeFromType(it.value().getType()))) {
+        resultKnowledge[index] = meet;
+      }
+    }
+  }
+
+  for (const ValueKnowledge &result : resultKnowledge) {
+    inferredReturnShapes.push_back(result.getShapedTypeComponents());
+  }
+
+  return success();
+}
+
+//===----------------------------------------------------------------------===//
+// TOSA Attribute Definitions.
+//===----------------------------------------------------------------------===//
+
+#define GET_ATTRDEF_CLASSES
+#include "mlir/Dialect/Tosa/IR/TosaAttributes.cpp.inc"
 
 //===----------------------------------------------------------------------===//
 // TOSA Operator Definitions.

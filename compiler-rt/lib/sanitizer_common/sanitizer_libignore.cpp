@@ -8,7 +8,7 @@
 
 #include "sanitizer_platform.h"
 
-#if SANITIZER_FREEBSD || SANITIZER_LINUX || SANITIZER_MAC || \
+#if SANITIZER_FREEBSD || SANITIZER_LINUX || SANITIZER_APPLE || \
     SANITIZER_NETBSD
 
 #include "sanitizer_libignore.h"
@@ -24,7 +24,7 @@ LibIgnore::LibIgnore(LinkerInitialized) {
 void LibIgnore::AddIgnoredLibrary(const char *name_templ) {
   Lock lock(&mutex_);
   if (count_ >= kMaxLibs) {
-    Report("%s: too many ignored libraries (max: %lu)\n", SanitizerToolName,
+    Report("%s: too many ignored libraries (max: %zu)\n", SanitizerToolName,
            kMaxLibs);
     Die();
   }
@@ -125,5 +125,5 @@ void LibIgnore::OnLibraryUnloaded() {
 
 } // namespace __sanitizer
 
-#endif  // SANITIZER_FREEBSD || SANITIZER_LINUX || SANITIZER_MAC ||
+#endif  // SANITIZER_FREEBSD || SANITIZER_LINUX || SANITIZER_APPLE ||
         // SANITIZER_NETBSD

@@ -14,7 +14,7 @@ using namespace llvm;
 using namespace codeview;
 
 #define CV_ENUM_CLASS_ENT(enum_class, enum)                                    \
-  { #enum, std::underlying_type < enum_class > ::type(enum_class::enum) }
+  { #enum, std::underlying_type_t<enum_class>(enum_class::enum) }
 
 #define CV_ENUM_ENT(ns, enum)                                                  \
   { #enum, ns::enum }
@@ -104,7 +104,7 @@ static const EnumEntry<codeview::SourceLanguage> SourceLanguages[] = {
     CV_ENUM_ENT(SourceLanguage, ILAsm),   CV_ENUM_ENT(SourceLanguage, Java),
     CV_ENUM_ENT(SourceLanguage, JScript), CV_ENUM_ENT(SourceLanguage, MSIL),
     CV_ENUM_ENT(SourceLanguage, HLSL),    CV_ENUM_ENT(SourceLanguage, D),
-    CV_ENUM_ENT(SourceLanguage, Swift),
+    CV_ENUM_ENT(SourceLanguage, Swift),   CV_ENUM_ENT(SourceLanguage, Rust),
 };
 
 static const EnumEntry<uint32_t> CompileSym2FlagNames[] = {

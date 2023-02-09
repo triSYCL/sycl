@@ -1,5 +1,4 @@
-! RUN: %S/test_errors.sh %s %t %flang_fc1
-! REQUIRES: shell
+! RUN: %python %S/test_errors.py %s %flang_fc1
 ! 15.4.3.4.5 Restrictions on generic declarations
 ! Specific procedures of generic interfaces must be distinguishable.
 
@@ -98,7 +97,6 @@ module m7
     end subroutine
   end interface
 end
-    
 
 ! Two procedures that differ only by attributes are not distinguishable
 module m8
@@ -469,7 +467,7 @@ module m20
   end interface
 end module
 
-subroutine s1()
+subroutine subr1()
   use m20
   interface operator(.not.)
     !ERROR: Procedure 'f' from module 'm20' is already specified in generic 'OPERATOR(.NOT.)'
@@ -479,4 +477,30 @@ subroutine s1()
     !ERROR: Procedure 'f' from module 'm20' is already specified in generic 'OPERATOR(+)'
     procedure f
   end interface
-end subroutine s1
+end subroutine subr1
+
+! Extensions for distinguishable allocatable arguments; these should not
+! elicit errors from f18
+module m21
+  type :: t
+  end type
+  interface int1
+    procedure s1a, s1b ! only one is polymorphic
+  end interface
+  interface int2
+    procedure s2a, s2b ! only one is unlimited polymorphic
+  end interface
+ contains
+  subroutine s1a(x)
+    type(t), allocatable :: x
+  end subroutine
+  subroutine s1b(x)
+    class(t), allocatable :: x
+  end subroutine
+  subroutine s2a(x)
+    class(t), allocatable :: x
+  end subroutine
+  subroutine s2b(x)
+    class(*), allocatable :: x
+  end subroutine
+end module

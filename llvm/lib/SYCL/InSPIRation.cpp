@@ -39,6 +39,8 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
 
+#include "llvm/SYCL/SYCLUtils.h"
+
 using namespace llvm;
 
 // Put the code in an anonymous namespace to avoid polluting the global
@@ -65,12 +67,7 @@ static const std::regex matchReqdWorkGroupSize{
 static const std::regex matchSomeNaturalInteger{R"(\d+)"};
 
 /// Transform the SYCL kernel functions into v++ SPIR-compatible kernels
-struct InSPIRation : public ModulePass {
-
-  static char ID; // Pass identification, replacement for typeid
-
-  InSPIRation() : ModulePass(ID) {}
-
+struct InSPIRationState {
   /// This function currently works by checking for certain prefixes, and
   /// removing them from the mangled name, this currently is used for
   /// get_global_id etc. (as we forcefully prefix it with __spir_ocl_), and
@@ -120,19 +117,6 @@ struct InSPIRation : public ModulePass {
       if (F->getName().startswith(Elem.first))
         return F->setName(Elem.second +
                           F->getName().drop_front(Elem.first.size()));
-  }
-
-  bool doInitialization(Module &M) override {
-    // LLVM_DEBUG(dbgs() << "Enter: " << M.getModuleIdentifier() << "\n\n");
-
-    // Do not change the code
-    return false;
-  }
-
-  bool doFinalization(Module &M) override {
-    // LLVM_DEBUG(dbgs() << "Exit: " << M.getModuleIdentifier() << "\n\n");
-    // Do not change the code
-    return false;
   }
 
   /// Do transforms on a SPIR function called by a SPIR kernel
@@ -241,12 +225,6 @@ struct InSPIRation : public ModulePass {
   /// Set the output Triple to SPIR
   void setSPIRTriple(Module &M) { M.setTargetTriple("spir64"); }
 
-  /// Test if a function is a SPIR kernel
-  bool isKernel(const Function &F) {
-    return F.getCallingConv() == CallingConv::SPIR_KERNEL ||
-           F.hasFnAttribute("fpga.top.func");
-  }
-
   /// Test if a function is a non-intrinsic SPIR function, indicating that it is
   /// a user created function that the SYCL compiler has transitively generated
   /// or one that comes from an existing library of SPIR functions (HLS SPIR
@@ -255,22 +233,6 @@ struct InSPIRation : public ModulePass {
     if (!F.isIntrinsic())
       return true;
     return false;
-  }
-
-  /// This function gives llvm::function arguments with no name
-  /// a default name e.g. arg_0, arg_1..
-  ///
-  /// This is because if your arguments have no name v++ will commit seppuku
-  /// when generating XML. Perhaps it's possible to move this to the Clang
-  /// Frontend by generating the name from the accessor/capture the arguments
-  /// come from, but I believe it requires a special compiler invocation option
-  /// to keep arg names from the frontend in the LLVM bitcode.
-  void giveNameToArguments(Function &F) {
-    int Counter = 0;
-    for (auto &Arg : F.args()) {
-      if (!Arg.hasName())
-        Arg.setName("arg_" + Twine{Counter++});
-    }
   }
 
   // Hopeful list/probably impractical asks for v++:
@@ -290,16 +252,16 @@ struct InSPIRation : public ModulePass {
   /// However, it should be run prior to KernelPropGen as that
   /// pass relies on the kernel names generated here for now to fuel the driver
   /// script.
-  bool runOnModule(Module &M) override {
+  bool runOnModule(Module &M) {
     // funcCount is for naming new name for each function called in kernel
     int FuncCount = 0;
 
     std::vector<Function *> Declarations;
     for (auto &F : M.functions()) {
-      if (isKernel(F)) {
+      if (sycl::isKernelFunc(&F)) {
         kernelSPIRify(F);
         applyKernelProperties(F);
-        giveNameToArguments(F);
+        sycl::giveNameToArguments(F);
 
         /// \todo Possible: We don't modify declarations right now as this
         /// will destroy the names of SPIR/CL intrinsics as they aren't
@@ -335,7 +297,7 @@ struct InSPIRation : public ModulePass {
         //
         // It doesn't require application to the SPIR intrinsics as we're
         // linking against the HLS SPIR library, which is already conformant.
-        giveNameToArguments(F);
+        sycl::giveNameToArguments(F);
       } else if (isTransitiveNonIntrinsicFunc(F) && F.isDeclaration()) {
         // push back intrinsics to make sure we handle naming after changing the
         // name of all functions to sycl_func.
@@ -395,15 +357,36 @@ struct InSPIRation : public ModulePass {
   }
 };
 
-} // namespace
-
-namespace llvm {
-void initializeInSPIRationPass(PassRegistry &Registry);
+void runInSPIRation(Module &M) {
+  InSPIRationState S;
+  S.runOnModule(M);
 }
 
-INITIALIZE_PASS(InSPIRation, "inSPIRation",
+} // namespace
+
+PreservedAnalyses InSPIRationPass::run(Module &M, ModuleAnalysisManager &AM) {
+  runInSPIRation(M);
+  return PreservedAnalyses::none();
+}
+
+struct InSPIRationLegacy : public ModulePass {
+
+  static char ID; // Pass identification, replacement for typeid
+
+  InSPIRationLegacy() : ModulePass(ID) {}
+  bool runOnModule(Module &M) override {
+    runInSPIRation(M);
+    return true;
+  }
+};
+
+namespace llvm {
+  void initializeInSPIRationLegacyPass(PassRegistry & Registry);
+}
+
+INITIALIZE_PASS(InSPIRationLegacy, "inSPIRation",
                 "pass to make functions and kernels SPIR-compatible", false,
                 false)
-ModulePass *llvm::createInSPIRationPass() { return new InSPIRation(); }
+ModulePass *llvm::createInSPIRationLegacyPass() { return new InSPIRationLegacy(); }
 
-char InSPIRation::ID = 0;
+char InSPIRationLegacy::ID = 0;

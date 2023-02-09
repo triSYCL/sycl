@@ -12,6 +12,7 @@
 
 #include "Plugins/ExpressionParser/Clang/ClangUtil.h"
 #include "Plugins/TypeSystem/Clang/TypeSystemClang.h"
+#include "lldb/Core/Debugger.h"
 #include "lldb/Core/PluginManager.h"
 #include "lldb/Core/ValueObject.h"
 #include "lldb/DataFormatters/DataVisualization.h"
@@ -47,19 +48,6 @@ void ObjCLanguage::Initialize() {
 void ObjCLanguage::Terminate() {
   PluginManager::UnregisterPlugin(CreateInstance);
 }
-
-lldb_private::ConstString ObjCLanguage::GetPluginNameStatic() {
-  static ConstString g_name("objc");
-  return g_name;
-}
-
-// PluginInterface protocol
-
-lldb_private::ConstString ObjCLanguage::GetPluginName() {
-  return GetPluginNameStatic();
-}
-
-uint32_t ObjCLanguage::GetPluginVersion() { return 1; }
 
 // Static Functions
 
@@ -297,12 +285,12 @@ static void LoadObjCFormatters(TypeCategoryImplSP objc_category_sp) {
 
   lldb::TypeSummaryImplSP ObjC_BOOL_summary(new CXXFunctionSummaryFormat(
       objc_flags, lldb_private::formatters::ObjCBOOLSummaryProvider, ""));
-  objc_category_sp->GetTypeSummariesContainer()->Add(ConstString("BOOL"),
-                                                     ObjC_BOOL_summary);
-  objc_category_sp->GetTypeSummariesContainer()->Add(ConstString("BOOL &"),
-                                                     ObjC_BOOL_summary);
-  objc_category_sp->GetTypeSummariesContainer()->Add(ConstString("BOOL *"),
-                                                     ObjC_BOOL_summary);
+  objc_category_sp->AddTypeSummary("BOOL", eFormatterMatchExact,
+                                   ObjC_BOOL_summary);
+  objc_category_sp->AddTypeSummary("BOOL &", eFormatterMatchExact,
+                                   ObjC_BOOL_summary);
+  objc_category_sp->AddTypeSummary("BOOL *", eFormatterMatchExact,
+                                   ObjC_BOOL_summary);
 
   // we need to skip pointers here since we are special casing a SEL* when
   // retrieving its value
@@ -934,7 +922,8 @@ lldb::TypeCategoryImplSP ObjCLanguage::GetFormatters() {
   static TypeCategoryImplSP g_category;
 
   llvm::call_once(g_initialize, [this]() -> void {
-    DataVisualization::Categories::GetCategory(GetPluginName(), g_category);
+    DataVisualization::Categories::GetCategory(ConstString(GetPluginName()),
+                                               g_category);
     if (g_category) {
       LoadCoreMediaFormatters(g_category);
       LoadObjCFormatters(g_category);
@@ -943,10 +932,10 @@ lldb::TypeCategoryImplSP ObjCLanguage::GetFormatters() {
   return g_category;
 }
 
-std::vector<ConstString>
+std::vector<FormattersMatchCandidate>
 ObjCLanguage::GetPossibleFormattersMatches(ValueObject &valobj,
                                            lldb::DynamicValueType use_dynamic) {
-  std::vector<ConstString> result;
+  std::vector<FormattersMatchCandidate> result;
 
   if (use_dynamic == lldb::eNoDynamicValues)
     return result;
@@ -971,7 +960,10 @@ ObjCLanguage::GetPossibleFormattersMatches(ValueObject &valobj,
       if (!objc_class_sp)
         break;
       if (ConstString name = objc_class_sp->GetClassName())
-        result.push_back(name);
+        result.push_back(
+            {name, valobj.GetTargetSP()->GetDebugger().GetScriptInterpreter(),
+             TypeImpl(objc_class_sp->GetType()),
+             FormattersMatchCandidate::Flags{}});
     } while (false);
   }
 

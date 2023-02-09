@@ -196,7 +196,7 @@ MATCHER(Failed, "") { return !arg.Success(); }
 
 template <typename InfoT>
 testing::Matcher<const detail::ErrorHolder &> Failed() {
-  return MakeMatcher(new detail::ErrorMatchesMono<InfoT>(None));
+  return MakeMatcher(new detail::ErrorMatchesMono<InfoT>(std::nullopt));
 }
 
 template <typename InfoT, typename M>
@@ -207,7 +207,7 @@ testing::Matcher<const detail::ErrorHolder &> Failed(M Matcher) {
 
 template <typename... M>
 testing::Matcher<const detail::ErrorHolder &> FailedWithMessage(M... Matcher) {
-  static_assert(sizeof...(M) > 0, "");
+  static_assert(sizeof...(M) > 0);
   return MakeMatcher(
       new detail::ErrorMessageMatches(testing::ElementsAre(Matcher...)));
 }

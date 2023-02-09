@@ -150,12 +150,16 @@ void LLVMToSPIRVDbgTran::finalizeDebugValue(
   SPIRVExtInst *DV = static_cast<SPIRVExtInst *>(V);
   SPIRVBasicBlock *BB = DV->getBasicBlock();
   Value *Val = DbgValue->getVariableLocationOp(0);
-
+  DIExpression *Expr = DbgValue->getExpression();
+  if (DbgValue->getNumVariableLocationOps() > 1) {
+    Val = UndefValue::get(Val->getType());
+    Expr = DIExpression::get(M->getContext(), {});
+  }
   using namespace SPIRVDebug::Operand::DebugValue;
   SPIRVWordVec Ops(MinOperandCount);
   Ops[DebugLocalVarIdx] = transDbgEntry(DbgValue->getVariable())->getId();
   Ops[ValueIdx] = SPIRVWriter->transValue(Val, BB)->getId();
-  Ops[ExpressionIdx] = transDbgEntry(DbgValue->getExpression())->getId();
+  Ops[ExpressionIdx] = transDbgEntry(Expr)->getId();
   DV->setArguments(Ops);
 }
 
@@ -527,9 +531,9 @@ SPIRVEntry *LLVMToSPIRVDbgTran::transDbgPointerType(const DIDerivedType *PT) {
   SPIRVEntry *Base = transDbgEntry(PT->getBaseType());
   Ops[BaseTypeIdx] = Base->getId();
   Ops[StorageClassIdx] = ~0U; // all ones denote no address space
-  Optional<unsigned> AS = PT->getDWARFAddressSpace();
-  if (AS.hasValue()) {
-    SPIRAddressSpace SPIRAS = static_cast<SPIRAddressSpace>(AS.getValue());
+  std::optional<unsigned> AS = PT->getDWARFAddressSpace();
+  if (AS.has_value()) {
+    SPIRAddressSpace SPIRAS = static_cast<SPIRAddressSpace>(AS.value());
     Ops[StorageClassIdx] = SPIRSPIRVAddrSpaceMap::map(SPIRAS);
   }
   Ops[FlagsIdx] = transDebugFlags(PT);
@@ -557,6 +561,7 @@ SPIRVEntry *LLVMToSPIRVDbgTran::transDbgArrayType(const DICompositeType *AT) {
   // For N-dimensianal arrays AR.getNumElements() == N
   const unsigned N = AR.size();
   Ops.resize(ComponentCountIdx + N);
+  SPIRVWordVec LowerBounds(N);
   for (unsigned I = 0; I < N; ++I) {
     DISubrange *SR = cast<DISubrange>(AR[I]);
     ConstantInt *Count = SR->getCount().get<ConstantInt *>();
@@ -569,9 +574,23 @@ SPIRVEntry *LLVMToSPIRVDbgTran::transDbgArrayType(const DICompositeType *AT) {
       Ops[ComponentCountIdx + I] =
           SPIRVWriter->transValue(Count, nullptr)->getId();
     } else {
-      Ops[ComponentCountIdx + I] = getDebugInfoNoneId();
+      if (auto *UpperBound = dyn_cast<MDNode>(SR->getRawUpperBound()))
+        Ops[ComponentCountIdx + I] = transDbgEntry(UpperBound)->getId();
+      else
+        Ops[ComponentCountIdx + I] = getDebugInfoNoneId();
+    }
+    if (auto *RawLB = SR->getRawLowerBound()) {
+      if (auto *DIExprLB = dyn_cast<MDNode>(RawLB))
+        LowerBounds[I] = transDbgEntry(DIExprLB)->getId();
+      else {
+        ConstantInt *ConstIntLB = SR->getLowerBound().get<ConstantInt *>();
+        LowerBounds[I] = SPIRVWriter->transValue(ConstIntLB, nullptr)->getId();
+      }
+    } else {
+      LowerBounds[I] = getDebugInfoNoneId();
     }
   }
+  Ops.insert(Ops.end(), LowerBounds.begin(), LowerBounds.end());
   return BM->addDebugInfo(SPIRVDebug::TypeArray, getVoidTy(), Ops);
 }
 
@@ -967,7 +986,7 @@ SPIRVExtInst *LLVMToSPIRVDbgTran::getSource(const T *DIEntry) {
   Ops[FileIdx] = BM->getString(FileName)->getId();
   DIFile *F = DIEntry ? DIEntry->getFile() : nullptr;
   if (F && F->getRawChecksum()) {
-    auto CheckSum = F->getChecksum().getValue();
+    auto CheckSum = F->getChecksum().value();
     Ops[TextIdx] = BM->getString("//__" + CheckSum.getKindAsString().str() +
                                  ":" + CheckSum.Value.str())
                        ->getId();
@@ -1014,9 +1033,10 @@ SPIRVEntry *LLVMToSPIRVDbgTran::transDbgExpression(const DIExpression *Expr) {
     SPIRVDebug::ExpressionOpCode OC =
         SPIRV::DbgExpressionOpCodeMap::map(DWARFOpCode);
     if (OpCountMap.find(OC) == OpCountMap.end())
-      report_fatal_error("unknown opcode found in DIExpression");
+      report_fatal_error(llvm::Twine("unknown opcode found in DIExpression"));
     if (OC > SPIRVDebug::Fragment && !BM->allowExtraDIExpressions())
-      report_fatal_error("unsupported opcode found in DIExpression");
+      report_fatal_error(
+          llvm::Twine("unsupported opcode found in DIExpression"));
 
     unsigned OpCount = OpCountMap[OC];
     SPIRVWordVec Op(OpCount);

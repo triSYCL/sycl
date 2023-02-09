@@ -10,7 +10,7 @@
 #include "AMDGPUTargetMachine.h"
 #include "llvm/CodeGen/TargetSubtargetInfo.h"
 #include "llvm/MC/MCTargetOptions.h"
-#include "llvm/Support/TargetRegistry.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "llvm/Target/TargetMachine.h"
 #include "gtest/gtest.h"
@@ -38,8 +38,9 @@ createTargetMachine(std::string TStr, StringRef CPU, StringRef FS) {
     return nullptr;
 
   TargetOptions Options;
-  return std::unique_ptr<GCNTargetMachine>(static_cast<GCNTargetMachine *>(
-      T->createTargetMachine(TStr, CPU, FS, Options, None, None)));
+  return std::unique_ptr<GCNTargetMachine>(
+      static_cast<GCNTargetMachine *>(T->createTargetMachine(
+          TStr, CPU, FS, Options, std::nullopt, std::nullopt)));
 }
 
 TEST(AMDGPUDwarfRegMappingTests, TestWave64DwarfRegMapping) {

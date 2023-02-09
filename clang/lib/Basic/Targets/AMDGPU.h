@@ -20,6 +20,7 @@
 #include "llvm/ADT/Triple.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/TargetParser.h"
+#include <optional>
 
 namespace clang {
 namespace targets {
@@ -95,17 +96,18 @@ public:
 
   void adjust(DiagnosticsEngine &Diags, LangOptions &Opts) override;
 
-  uint64_t getPointerWidthV(unsigned AddrSpace) const override {
+  uint64_t getPointerWidthV(LangAS AS) const override {
     if (isR600(getTriple()))
       return 32;
+    unsigned TargetAS = getTargetAddressSpace(AS);
 
-    if (AddrSpace == Private || AddrSpace == Local)
+    if (TargetAS == Private || TargetAS == Local)
       return 32;
 
     return 64;
   }
 
-  uint64_t getPointerAlignV(unsigned AddrSpace) const override {
+  uint64_t getPointerAlignV(LangAS AddrSpace) const override {
     return getPointerWidthV(AddrSpace);
   }
 
@@ -118,7 +120,7 @@ public:
   ArrayRef<const char *> getGCCRegNames() const override;
 
   ArrayRef<TargetInfo::GCCRegAlias> getGCCRegAliases() const override {
-    return None;
+    return std::nullopt;
   }
 
   /// Accepted register names: (n, m is unsigned integer, n < m)
@@ -328,6 +330,8 @@ public:
     case OCLTK_Queue:
     case OCLTK_ReserveID:
       return LangAS::opencl_global;
+    case OCLTK_Event:
+      return LangAS::opencl_private;
 
     default:
       return TargetInfo::getOpenCLTypeAddrSpace(TK);
@@ -353,6 +357,8 @@ public:
 
   LangAS getCUDABuiltinAddressSpace(unsigned AS) const override {
     switch (AS) {
+    case 0:
+      return LangAS::Default;
     case 1:
       return LangAS::cuda_device;
     case 3:
@@ -368,6 +374,17 @@ public:
     return getLangASFromTargetAS(Constant);
   }
 
+  const llvm::omp::GV &getGridValue() const override {
+    switch (WavefrontSize) {
+    case 32:
+      return llvm::omp::getAMDGPUGridValues<32>();
+    case 64:
+      return llvm::omp::getAMDGPUGridValues<64>();
+    default:
+      llvm_unreachable("getGridValue not implemented for this wavesize");
+    }
+  }
+
   /// \returns Target specific vtbl ptr address space.
   unsigned getVtblPtrAddressSpace() const override {
     return static_cast<unsigned>(Constant);
@@ -379,7 +396,7 @@ public:
   ///
   /// \returns Otherwise return None and no conversion will be emitted in the
   /// DWARF.
-  Optional<unsigned>
+  std::optional<unsigned>
   getDWARFAddressSpace(unsigned AddressSpace) const override {
     const unsigned DWARF_Private = 1;
     const unsigned DWARF_Local = 2;
@@ -388,7 +405,7 @@ public:
     } else if (AddressSpace == Local) {
       return DWARF_Local;
     } else {
-      return None;
+      return std::nullopt;
     }
   }
 
@@ -398,6 +415,7 @@ public:
       return CCCR_Warning;
     case CC_C:
     case CC_OpenCLKernel:
+    case CC_AMDGPUKernelCall:
       return CCCR_OK;
     }
   }
@@ -413,7 +431,7 @@ public:
 
   void setAuxTarget(const TargetInfo *Aux) override;
 
-  bool hasExtIntType() const override { return true; }
+  bool hasBitIntType() const override { return true; }
 
   // Record offload arch features since they are needed for defining the
   // pre-defined macros.
@@ -421,23 +439,23 @@ public:
                             DiagnosticsEngine &Diags) override {
     auto TargetIDFeatures =
         getAllPossibleTargetIDFeatures(getTriple(), getArchNameAMDGCN(GPUKind));
-    llvm::for_each(Features, [&](const auto &F) {
+    for (const auto &F : Features) {
       assert(F.front() == '+' || F.front() == '-');
       if (F == "+wavefrontsize64")
         WavefrontSize = 64;
       bool IsOn = F.front() == '+';
       StringRef Name = StringRef(F).drop_front();
-      if (llvm::find(TargetIDFeatures, Name) == TargetIDFeatures.end())
-        return;
+      if (!llvm::is_contained(TargetIDFeatures, Name))
+        continue;
       assert(OffloadArchFeatures.find(Name) == OffloadArchFeatures.end());
       OffloadArchFeatures[Name] = IsOn;
-    });
+    }
     return true;
   }
 
   Optional<std::string> getTargetID() const override {
     if (!isAMDGCN(getTriple()))
-      return llvm::None;
+      return std::nullopt;
     // When -target-cpu is not set, we assume generic code that it is valid
     // for all GPU and use an empty string as target ID to represent that.
     if (GPUKind == llvm::AMDGPU::GK_NONE)

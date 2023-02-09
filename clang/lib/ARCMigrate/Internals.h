@@ -74,7 +74,7 @@ public:
 
   bool clearDiagnostic(ArrayRef<unsigned> IDs, SourceRange range);
   bool clearAllDiagnostics(SourceRange range) {
-    return clearDiagnostic(None, range);
+    return clearDiagnostic(std::nullopt, range);
   }
   bool clearDiagnostic(unsigned ID1, unsigned ID2, SourceRange range) {
     unsigned IDs[] = { ID1, ID2 };
@@ -154,13 +154,11 @@ public:
   std::vector<SourceLocation> &ARCMTMacroLocs;
   Optional<bool> EnableCFBridgeFns;
 
-  MigrationPass(ASTContext &Ctx, LangOptions::GCMode OrigGCMode,
-                Sema &sema, TransformActions &TA,
-                const CapturedDiagList &capturedDiags,
+  MigrationPass(ASTContext &Ctx, LangOptions::GCMode OrigGCMode, Sema &sema,
+                TransformActions &TA, const CapturedDiagList &capturedDiags,
                 std::vector<SourceLocation> &ARCMTMacroLocs)
-    : Ctx(Ctx), OrigGCMode(OrigGCMode), MigOptions(),
-      SemaRef(sema), TA(TA), CapturedDiags(capturedDiags),
-      ARCMTMacroLocs(ARCMTMacroLocs) { }
+      : Ctx(Ctx), OrigGCMode(OrigGCMode), SemaRef(sema), TA(TA),
+        CapturedDiags(capturedDiags), ARCMTMacroLocs(ARCMTMacroLocs) {}
 
   const CapturedDiagList &getDiags() const { return CapturedDiags; }
 

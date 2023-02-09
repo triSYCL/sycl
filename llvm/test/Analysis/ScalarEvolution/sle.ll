@@ -1,4 +1,3 @@
-; RUN: opt -analyze -enable-new-pm=0 -scalar-evolution < %s | FileCheck %s
 ; RUN: opt -disable-output "-passes=print<scalar-evolution>" < %s 2>&1 | FileCheck %s
 
 ; ScalarEvolution should be able to use nsw information to prove that
@@ -6,7 +5,7 @@
 
 ; CHECK: @le
 ; CHECK: Loop %for.body: backedge-taken count is %n
-; CHECK: Loop %for.body: max backedge-taken count is 9223372036854775807
+; CHECK: Loop %for.body: constant max backedge-taken count is 9223372036854775807
 
 define void @le(i64 %n, double* nocapture %p) nounwind {
 entry:

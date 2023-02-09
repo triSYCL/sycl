@@ -1,4 +1,4 @@
-//===- PrepareSyclChessOpt.cpp                               ---------------===//
+//===- PrepareSyclChessOptLegacy.cpp                               ---------------===//
 //
 //                     The LLVM Compiler Infrastructure
 //
@@ -27,11 +27,11 @@ using namespace llvm;
 
 namespace {
 
-struct PrepareSyclChessOpt : public ModulePass {
+struct PrepareSyclChessOptLegacy : public ModulePass {
 
   static char ID; // Pass identification, replacement for typeid
 
-  PrepareSyclChessOpt() : ModulePass(ID) {}
+  PrepareSyclChessOptLegacy() : ModulePass(ID) {}
 
   /// Make non-kernel functions and global variables private.
   /// Because only kernels are externally visible.
@@ -162,11 +162,18 @@ struct PrepareSyclChessOpt : public ModulePass {
 }
 
 namespace llvm {
-void initializePrepareSyclChessOptPass(PassRegistry &Registry);
+
+PreservedAnalyses PrepareSyclChessOptPass::run(Module &M, ModuleAnalysisManager &AM) {
+  PrepareSyclChessOptLegacy pass;
+  pass.runOnModule(M);
+  return PreservedAnalyses::none();
 }
 
-INITIALIZE_PASS(PrepareSyclChessOpt, "preparechess",
-  "prepare SYCL chess device code to optimizations", false, false)
-ModulePass *llvm::createPrepareSyclChessOptPass() {return new PrepareSyclChessOpt();}
+void initializePrepareSyclChessOptLegacyPass(PassRegistry &Registry);
+}
 
-char PrepareSyclChessOpt::ID = 0;
+INITIALIZE_PASS(PrepareSyclChessOptLegacy, "preparechess",
+  "prepare SYCL chess device code to optimizations", false, false)
+ModulePass *llvm::createPrepareSyclChessOptLegacyPass() {return new PrepareSyclChessOptLegacy();}
+
+char PrepareSyclChessOptLegacy::ID = 0;

@@ -14,12 +14,16 @@
 #ifndef LLVM_PREPARE_SYCL_OPT_H
 #define LLVM_PREPARE_SYCL_OPT_H
 
-#include "llvm/IR/Module.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
 
 namespace llvm {
 
-ModulePass *createPrepareSyclChessOptPass();
+struct PrepareSyclChessOptPass : PassInfoMixin<PrepareSyclChessOptPass> {
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
+};
+
+ModulePass *createPrepareSyclChessOptLegacyPass();
 
 }
 

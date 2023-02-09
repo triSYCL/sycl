@@ -1,5 +1,4 @@
-! RUN: %S/test_errors.sh %s %t %flang_fc1
-! REQUIRES: shell
+! RUN: %python %S/test_errors.py %s %flang_fc1
 ! Check for semantic errors in DEALLOCATE statements
 
 Module share
@@ -58,7 +57,8 @@ Deallocate(x%p)
 
 !ERROR: STAT may not be duplicated in a DEALLOCATE statement
 Deallocate(x, stat=s, stat=s)
-!ERROR: STAT variable 'const_s' must be definable
+!ERROR: STAT variable 'const_s' is not definable
+!BECAUSE: '13_4' is not a variable or pointer
 Deallocate(x, stat=const_s)
 !ERROR: ERRMSG may not be duplicated in a DEALLOCATE statement
 Deallocate(x, errmsg=ee, errmsg=ee)

@@ -14,13 +14,12 @@
 // constants, emits correct specialization constats map file and can properly
 // translate the resulting bitcode to SPIR-V.
 
-#include <CL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 const static sycl::specialization_id<int> SpecConst42{42};
 const static sycl::specialization_id<int> SecondValue{42};
 const static sycl::specialization_id<int> ConstantId{42};
 const static sycl::specialization_id<int> Val23{42};
-
 
 int main() {
   sycl::queue queue;

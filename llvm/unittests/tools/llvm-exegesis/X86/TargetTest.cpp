@@ -12,7 +12,7 @@
 #include <memory>
 
 #include "MCTargetDesc/X86MCTargetDesc.h"
-#include "llvm/Support/TargetRegistry.h"
+#include "llvm/MC/TargetRegistry.h"
 #include "llvm/Support/TargetSelect.h"
 #include "gmock/gmock.h"
 #include "gtest/gtest.h"
@@ -105,7 +105,8 @@ constexpr const char kTriple[] = "x86_64-unknown-linux";
 
 class X86TargetTest : public ::testing::Test {
 protected:
-  X86TargetTest(const char *Features) : State(kTriple, "core2", Features) {}
+  X86TargetTest(const char *Features)
+      : State(cantFail(LLVMState::Create(kTriple, "core2", Features))) {}
 
   static void SetUpTestCase() {
     LLVMInitializeX86TargetInfo();

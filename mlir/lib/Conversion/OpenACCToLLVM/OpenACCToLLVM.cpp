@@ -6,12 +6,18 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "../PassDetail.h"
-#include "mlir/Conversion/LLVMCommon/Pattern.h"
 #include "mlir/Conversion/OpenACCToLLVM/ConvertOpenACCToLLVM.h"
+
+#include "mlir/Conversion/LLVMCommon/Pattern.h"
 #include "mlir/Dialect/LLVMIR/LLVMDialect.h"
 #include "mlir/Dialect/OpenACC/OpenACC.h"
 #include "mlir/IR/Builders.h"
+#include "mlir/Pass/Pass.h"
+
+namespace mlir {
+#define GEN_PASS_DEF_CONVERTOPENACCTOLLVM
+#include "mlir/Conversion/Passes.h.inc"
+} // namespace mlir
 
 using namespace mlir;
 
@@ -79,7 +85,7 @@ class LegalizeDataOpForLLVMTranslation : public ConvertOpToLLVMPattern<Op> {
   using ConvertOpToLLVMPattern<Op>::ConvertOpToLLVMPattern;
 
   LogicalResult
-  matchAndRewrite(Op op, ArrayRef<Value> operands,
+  matchAndRewrite(Op op, typename Op::Adaptor adaptor,
                   ConversionPatternRewriter &builder) const override {
     Location loc = op.getLoc();
     TypeConverter *converter = ConvertToLLVMPattern::getTypeConverter();
@@ -87,8 +93,8 @@ class LegalizeDataOpForLLVMTranslation : public ConvertOpToLLVMPattern<Op> {
     unsigned numDataOperand = op.getNumDataOperands();
 
     // Keep the non data operands without modification.
-    auto nonDataOperands =
-        operands.take_front(operands.size() - numDataOperand);
+    auto nonDataOperands = adaptor.getOperands().take_front(
+        adaptor.getOperands().size() - numDataOperand);
     SmallVector<Value> convertedOperands;
     convertedOperands.append(nonDataOperands.begin(), nonDataOperands.end());
 
@@ -138,7 +144,7 @@ class LegalizeDataOpForLLVMTranslation : public ConvertOpToLLVMPattern<Op> {
 } // namespace
 
 void mlir::populateOpenACCToLLVMConversionPatterns(
-    LLVMTypeConverter &converter, OwningRewritePatternList &patterns) {
+    LLVMTypeConverter &converter, RewritePatternSet &patterns) {
   patterns.add<LegalizeDataOpForLLVMTranslation<acc::DataOp>>(converter);
   patterns.add<LegalizeDataOpForLLVMTranslation<acc::EnterDataOp>>(converter);
   patterns.add<LegalizeDataOpForLLVMTranslation<acc::ExitDataOp>>(converter);
@@ -148,7 +154,7 @@ void mlir::populateOpenACCToLLVMConversionPatterns(
 
 namespace {
 struct ConvertOpenACCToLLVMPass
-    : public ConvertOpenACCToLLVMBase<ConvertOpenACCToLLVMPass> {
+    : public impl::ConvertOpenACCToLLVMBase<ConvertOpenACCToLLVMPass> {
   void runOnOperation() override;
 };
 } // namespace
@@ -177,56 +183,56 @@ void ConvertOpenACCToLLVMPass::runOnOperation() {
 
   target.addDynamicallyLegalOp<acc::DataOp>(
       [allDataOperandsAreConverted](acc::DataOp op) {
-        return allDataOperandsAreConverted(op.copyOperands()) &&
-               allDataOperandsAreConverted(op.copyinOperands()) &&
-               allDataOperandsAreConverted(op.copyinReadonlyOperands()) &&
-               allDataOperandsAreConverted(op.copyoutOperands()) &&
-               allDataOperandsAreConverted(op.copyoutZeroOperands()) &&
-               allDataOperandsAreConverted(op.createOperands()) &&
-               allDataOperandsAreConverted(op.createZeroOperands()) &&
-               allDataOperandsAreConverted(op.noCreateOperands()) &&
-               allDataOperandsAreConverted(op.presentOperands()) &&
-               allDataOperandsAreConverted(op.deviceptrOperands()) &&
-               allDataOperandsAreConverted(op.attachOperands());
+        return allDataOperandsAreConverted(op.getCopyOperands()) &&
+               allDataOperandsAreConverted(op.getCopyinOperands()) &&
+               allDataOperandsAreConverted(op.getCopyinReadonlyOperands()) &&
+               allDataOperandsAreConverted(op.getCopyoutOperands()) &&
+               allDataOperandsAreConverted(op.getCopyoutZeroOperands()) &&
+               allDataOperandsAreConverted(op.getCreateOperands()) &&
+               allDataOperandsAreConverted(op.getCreateZeroOperands()) &&
+               allDataOperandsAreConverted(op.getNoCreateOperands()) &&
+               allDataOperandsAreConverted(op.getPresentOperands()) &&
+               allDataOperandsAreConverted(op.getDeviceptrOperands()) &&
+               allDataOperandsAreConverted(op.getAttachOperands());
       });
 
   target.addDynamicallyLegalOp<acc::EnterDataOp>(
       [allDataOperandsAreConverted](acc::EnterDataOp op) {
-        return allDataOperandsAreConverted(op.copyinOperands()) &&
-               allDataOperandsAreConverted(op.createOperands()) &&
-               allDataOperandsAreConverted(op.createZeroOperands()) &&
-               allDataOperandsAreConverted(op.attachOperands());
+        return allDataOperandsAreConverted(op.getCopyinOperands()) &&
+               allDataOperandsAreConverted(op.getCreateOperands()) &&
+               allDataOperandsAreConverted(op.getCreateZeroOperands()) &&
+               allDataOperandsAreConverted(op.getAttachOperands());
       });
 
   target.addDynamicallyLegalOp<acc::ExitDataOp>(
       [allDataOperandsAreConverted](acc::ExitDataOp op) {
-        return allDataOperandsAreConverted(op.copyoutOperands()) &&
-               allDataOperandsAreConverted(op.deleteOperands()) &&
-               allDataOperandsAreConverted(op.detachOperands());
+        return allDataOperandsAreConverted(op.getCopyoutOperands()) &&
+               allDataOperandsAreConverted(op.getDeleteOperands()) &&
+               allDataOperandsAreConverted(op.getDetachOperands());
       });
 
   target.addDynamicallyLegalOp<acc::ParallelOp>(
       [allDataOperandsAreConverted](acc::ParallelOp op) {
-        return allDataOperandsAreConverted(op.reductionOperands()) &&
-               allDataOperandsAreConverted(op.copyOperands()) &&
-               allDataOperandsAreConverted(op.copyinOperands()) &&
-               allDataOperandsAreConverted(op.copyinReadonlyOperands()) &&
-               allDataOperandsAreConverted(op.copyoutOperands()) &&
-               allDataOperandsAreConverted(op.copyoutZeroOperands()) &&
-               allDataOperandsAreConverted(op.createOperands()) &&
-               allDataOperandsAreConverted(op.createZeroOperands()) &&
-               allDataOperandsAreConverted(op.noCreateOperands()) &&
-               allDataOperandsAreConverted(op.presentOperands()) &&
-               allDataOperandsAreConverted(op.devicePtrOperands()) &&
-               allDataOperandsAreConverted(op.attachOperands()) &&
-               allDataOperandsAreConverted(op.gangPrivateOperands()) &&
-               allDataOperandsAreConverted(op.gangFirstPrivateOperands());
+        return allDataOperandsAreConverted(op.getReductionOperands()) &&
+               allDataOperandsAreConverted(op.getCopyOperands()) &&
+               allDataOperandsAreConverted(op.getCopyinOperands()) &&
+               allDataOperandsAreConverted(op.getCopyinReadonlyOperands()) &&
+               allDataOperandsAreConverted(op.getCopyoutOperands()) &&
+               allDataOperandsAreConverted(op.getCopyoutZeroOperands()) &&
+               allDataOperandsAreConverted(op.getCreateOperands()) &&
+               allDataOperandsAreConverted(op.getCreateZeroOperands()) &&
+               allDataOperandsAreConverted(op.getNoCreateOperands()) &&
+               allDataOperandsAreConverted(op.getPresentOperands()) &&
+               allDataOperandsAreConverted(op.getDevicePtrOperands()) &&
+               allDataOperandsAreConverted(op.getAttachOperands()) &&
+               allDataOperandsAreConverted(op.getGangPrivateOperands()) &&
+               allDataOperandsAreConverted(op.getGangFirstPrivateOperands());
       });
 
   target.addDynamicallyLegalOp<acc::UpdateOp>(
       [allDataOperandsAreConverted](acc::UpdateOp op) {
-        return allDataOperandsAreConverted(op.hostOperands()) &&
-               allDataOperandsAreConverted(op.deviceOperands());
+        return allDataOperandsAreConverted(op.getHostOperands()) &&
+               allDataOperandsAreConverted(op.getDeviceOperands());
       });
 
   if (failed(applyPartialConversion(op, target, std::move(patterns))))

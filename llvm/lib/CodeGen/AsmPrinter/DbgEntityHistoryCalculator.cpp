@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/CodeGen/DbgEntityHistoryCalculator.h"
-#include "llvm/ADT/BitVector.h"
 #include "llvm/ADT/Optional.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallSet.h"
@@ -27,6 +26,7 @@
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
 #include <map>
+#include <optional>
 #include <utility>
 
 using namespace llvm;
@@ -111,20 +111,20 @@ void DbgValueHistoryMap::Entry::endEntry(EntryIndex Index) {
 /// range in Ranges. EndMI can be nullptr to indicate that the range is
 /// unbounded. Assumes Ranges is ordered and disjoint. Returns true and points
 /// to the first intersecting scope range if one exists.
-static Optional<ArrayRef<InsnRange>::iterator>
+static std::optional<ArrayRef<InsnRange>::iterator>
 intersects(const MachineInstr *StartMI, const MachineInstr *EndMI,
            const ArrayRef<InsnRange> &Ranges,
            const InstructionOrdering &Ordering) {
   for (auto RangesI = Ranges.begin(), RangesE = Ranges.end();
        RangesI != RangesE; ++RangesI) {
     if (EndMI && Ordering.isBefore(EndMI, RangesI->first))
-      return None;
+      return std::nullopt;
     if (EndMI && !Ordering.isBefore(RangesI->second, EndMI))
       return RangesI;
     if (Ordering.isBefore(StartMI, RangesI->second))
       return RangesI;
   }
-  return None;
+  return std::nullopt;
 }
 
 void DbgValueHistoryMap::trimLocationRanges(
@@ -204,7 +204,7 @@ void DbgValueHistoryMap::trimLocationRanges(
       if (auto R = intersects(StartMI, EndMI, ScopeRanges, Ordering)) {
         // Adjust ScopeRanges to exclude ranges which subsequent location ranges
         // cannot possibly intersect.
-        ScopeRanges = ArrayRef<InsnRange>(R.getValue(), ScopeRanges.end());
+        ScopeRanges = ArrayRef<InsnRange>(*R, ScopeRanges.end());
       } else {
         // If the location range does not intersect any scope range then the
         // DBG_VALUE which opened this location range is usless, mark it for
@@ -252,8 +252,8 @@ void DbgValueHistoryMap::trimLocationRanges(
 
     // Now actually remove the entries. Iterate backwards so that our remaining
     // ToRemove indices are valid after each erase.
-    for (auto Itr = ToRemove.rbegin(), End = ToRemove.rend(); Itr != End; ++Itr)
-      HistoryMapEntries.erase(HistoryMapEntries.begin() + *Itr);
+    for (EntryIndex Idx : llvm::reverse(ToRemove))
+      HistoryMapEntries.erase(HistoryMapEntries.begin() + Idx);
   }
 }
 
@@ -341,11 +341,11 @@ static void clobberRegEntries(InlinedEntity Var, unsigned RegNo,
     if (Entry.getInstr()->hasDebugOperandForReg(RegNo)) {
       IndicesToErase.push_back(Index);
       Entry.endEntry(ClobberIndex);
-      for (auto &MO : Entry.getInstr()->debug_operands())
+      for (const auto &MO : Entry.getInstr()->debug_operands())
         if (MO.isReg() && MO.getReg() && MO.getReg() != RegNo)
           MaybeRemovedRegisters.insert(MO.getReg());
     } else {
-      for (auto &MO : Entry.getInstr()->debug_operands())
+      for (const auto &MO : Entry.getInstr()->debug_operands())
         if (MO.isReg() && MO.getReg())
           KeepRegisters.insert(MO.getReg());
     }

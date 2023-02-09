@@ -1,5 +1,4 @@
-! RUN: %S/test_errors.sh %s %t %flang_fc1
-! REQUIRES: shell
+! RUN: %python %S/test_errors.py %s %flang_fc1
 
 !Tests for SELECT RANK Construct(R1148)
 program select_rank
@@ -146,11 +145,13 @@ contains
     Rank(2)
       print *, "Now it's rank 2 "
     RANK (*)
-      print *, "Going for a other rank"
+      print *, "Going for another rank"
+      !ERROR: 'kind=' argument must be a constant scalar integer whose value is a supported kind for the intrinsic result type
       j = INT(0, KIND=MERGE(KIND(0), -1, RANK(x) == 1))
     !ERROR: Not more than one of the selectors of SELECT RANK statement may be '*'
     RANK (*)
       print *, "This is Wrong"
+      !ERROR: 'kind=' argument must be a constant scalar integer whose value is a supported kind for the intrinsic result type
       j = INT(0, KIND=MERGE(KIND(0), -1, RANK(x) == 1))
     END SELECT
    end subroutine
@@ -238,7 +239,7 @@ contains
         RANK(1.0)
     !ERROR: Must be a constant value
         RANK(RANK(x))
-    !ERROR: Must have INTEGER type, but is CHARACTER(1)
+    !ERROR: Must have INTEGER type, but is CHARACTER(KIND=1,LEN=6_8)
         RANK("STRING")
     END SELECT
    end subroutine

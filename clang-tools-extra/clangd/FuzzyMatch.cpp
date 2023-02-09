@@ -91,14 +91,14 @@ FuzzyMatcher::FuzzyMatcher(llvm::StringRef Pattern)
 
 llvm::Optional<float> FuzzyMatcher::match(llvm::StringRef Word) {
   if (!(WordContainsPattern = init(Word)))
-    return llvm::None;
+    return std::nullopt;
   if (!PatN)
     return 1;
   buildGraph();
   auto Best = std::max(Scores[PatN][WordN][Miss].Score,
                        Scores[PatN][WordN][Match].Score);
   if (isAwful(Best))
-    return llvm::None;
+    return std::nullopt;
   float Score =
       ScoreScale * std::min(PerfectBonus * PatN, std::max<int>(0, Best));
   // If the pattern is as long as the word, we have an exact string match,
@@ -320,8 +320,9 @@ llvm::SmallString<256> FuzzyMatcher::dumpLast(llvm::raw_ostream &OS) const {
   if (!WordContainsPattern) {
     OS << "Substring check failed.\n";
     return Result;
-  } else if (isAwful(std::max(Scores[PatN][WordN][Match].Score,
-                              Scores[PatN][WordN][Miss].Score))) {
+  }
+  if (isAwful(std::max(Scores[PatN][WordN][Match].Score,
+                       Scores[PatN][WordN][Miss].Score))) {
     OS << "Substring check passed, but all matches are forbidden\n";
   }
   if (!(PatTypeSet & 1 << Upper))

@@ -12,6 +12,7 @@
 
 // These tests fail on previously released dylibs, investigation needed.
 // XFAIL: use_system_cxx_lib && target={{.+}}-apple-macosx10.{{9|10|11|12|13|14|15}}
+// XFAIL: use_system_cxx_lib && target={{.+}}-apple-macosx{{11.0|12.0}}
 
 #include <exception>
 #include <stdlib.h>
@@ -41,7 +42,7 @@ struct Stop<R (*)(Args...)> {
 
 static void forced_unwind() {
   _Unwind_Exception* exc = new _Unwind_Exception;
-  exc->exception_class = 0;
+  memset(&exc->exception_class, 0, sizeof(exc->exception_class));
   exc->exception_cleanup = 0;
   _Unwind_ForcedUnwind(exc, Stop<_Unwind_Stop_Fn>::stop, 0);
   abort();

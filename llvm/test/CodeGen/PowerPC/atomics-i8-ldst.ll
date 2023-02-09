@@ -26,30 +26,29 @@ define dso_local signext i8 @ld_0_int8_t_uint8_t(i64 %ptr) {
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %0 = inttoptr i64 %ptr to i8*
-  %1 = load atomic i8, i8* %0 monotonic, align 1
+  %0 = inttoptr i64 %ptr to ptr
+  %1 = load atomic i8, ptr %0 monotonic, align 1
   ret i8 %1
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local signext i8 @ld_align16_int8_t_uint8_t(i8* nocapture readonly %ptr) {
+define dso_local signext i8 @ld_align16_int8_t_uint8_t(ptr nocapture readonly %ptr) {
 ; CHECK-LABEL: ld_align16_int8_t_uint8_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    lbz r3, 8(r3)
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 8
-  %0 = load atomic i8, i8* %add.ptr monotonic, align 1
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 8
+  %0 = load atomic i8, ptr %add.ptr monotonic, align 1
   ret i8 %0
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local signext i8 @ld_align32_int8_t_uint8_t(i8* nocapture readonly %ptr) {
+define dso_local signext i8 @ld_align32_int8_t_uint8_t(ptr nocapture readonly %ptr) {
 ; CHECK-P10-LABEL: ld_align32_int8_t_uint8_t:
 ; CHECK-P10:       # %bb.0: # %entry
-; CHECK-P10-NEXT:    pli r4, 99999000
-; CHECK-P10-NEXT:    lbzx r3, r3, r4
+; CHECK-P10-NEXT:    plbz r3, 99999000(r3), 0
 ; CHECK-P10-NEXT:    extsb r3, r3
 ; CHECK-P10-NEXT:    blr
 ;
@@ -61,13 +60,13 @@ define dso_local signext i8 @ld_align32_int8_t_uint8_t(i8* nocapture readonly %p
 ; CHECK-PREP10-NEXT:    extsb r3, r3
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 99999000
-  %0 = load atomic i8, i8* %add.ptr monotonic, align 1
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 99999000
+  %0 = load atomic i8, ptr %add.ptr monotonic, align 1
   ret i8 %0
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local signext i8 @ld_align64_int8_t_uint8_t(i8* nocapture readonly %ptr) {
+define dso_local signext i8 @ld_align64_int8_t_uint8_t(ptr nocapture readonly %ptr) {
 ; CHECK-P10-LABEL: ld_align64_int8_t_uint8_t:
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    pli r4, 244140625
@@ -85,21 +84,21 @@ define dso_local signext i8 @ld_align64_int8_t_uint8_t(i8* nocapture readonly %p
 ; CHECK-PREP10-NEXT:    extsb r3, r3
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 1000000000000
-  %0 = load atomic i8, i8* %add.ptr monotonic, align 1
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 1000000000000
+  %0 = load atomic i8, ptr %add.ptr monotonic, align 1
   ret i8 %0
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local signext i8 @ld_reg_int8_t_uint8_t(i8* nocapture readonly %ptr, i64 %off) {
+define dso_local signext i8 @ld_reg_int8_t_uint8_t(ptr nocapture readonly %ptr, i64 %off) {
 ; CHECK-LABEL: ld_reg_int8_t_uint8_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    lbzx r3, r3, r4
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 %off
-  %0 = load atomic i8, i8* %add.ptr monotonic, align 1
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 %off
+  %0 = load atomic i8, ptr %add.ptr monotonic, align 1
   ret i8 %0
 }
 
@@ -114,8 +113,8 @@ define dso_local signext i8 @ld_or_int8_t_uint8_t(i64 %ptr, i8 zeroext %off) {
 entry:
   %conv = zext i8 %off to i64
   %or = or i64 %conv, %ptr
-  %0 = inttoptr i64 %or to i8*
-  %1 = load atomic i8, i8* %0 monotonic, align 1
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i8, ptr %0 monotonic, align 1
   ret i8 %1
 }
 
@@ -129,8 +128,8 @@ define dso_local signext i8 @ld_not_disjoint16_int8_t_uint8_t(i64 %ptr) {
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 6
-  %0 = inttoptr i64 %or to i8*
-  %1 = load atomic i8, i8* %0 monotonic, align 1
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i8, ptr %0 monotonic, align 1
   ret i8 %1
 }
 
@@ -145,8 +144,8 @@ define dso_local signext i8 @ld_disjoint_align16_int8_t_uint8_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -4096
   %or = or i64 %and, 24
-  %0 = inttoptr i64 %or to i8*
-  %1 = load atomic i8, i8* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i8, ptr %0 monotonic, align 8
   ret i8 %1
 }
 
@@ -161,8 +160,8 @@ define dso_local signext i8 @ld_not_disjoint32_int8_t_uint8_t(i64 %ptr) {
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 99999
-  %0 = inttoptr i64 %or to i8*
-  %1 = load atomic i8, i8* %0 monotonic, align 1
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i8, ptr %0 monotonic, align 1
   ret i8 %1
 }
 
@@ -172,8 +171,7 @@ define dso_local signext i8 @ld_disjoint_align32_int8_t_uint8_t(i64 %ptr) {
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    lis r4, -15264
 ; CHECK-P10-NEXT:    and r3, r3, r4
-; CHECK-P10-NEXT:    pli r4, 999990000
-; CHECK-P10-NEXT:    lbzx r3, r3, r4
+; CHECK-P10-NEXT:    plbz r3, 999990000(r3), 0
 ; CHECK-P10-NEXT:    extsb r3, r3
 ; CHECK-P10-NEXT:    blr
 ;
@@ -199,8 +197,8 @@ define dso_local signext i8 @ld_disjoint_align32_int8_t_uint8_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -1000341504
   %or = or i64 %and, 999990000
-  %0 = inttoptr i64 %or to i8*
-  %1 = load atomic i8, i8* %0 monotonic, align 16
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i8, ptr %0 monotonic, align 16
   ret i8 %1
 }
 
@@ -228,8 +226,8 @@ define dso_local signext i8 @ld_not_disjoint64_int8_t_uint8_t(i64 %ptr) {
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %or = or i64 %ptr, 1000000000001
-  %0 = inttoptr i64 %or to i8*
-  %1 = load atomic i8, i8* %0 monotonic, align 1
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i8, ptr %0 monotonic, align 1
   ret i8 %1
 }
 
@@ -256,8 +254,8 @@ define dso_local signext i8 @ld_disjoint_align64_int8_t_uint8_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -1099511627776
   %or = or i64 %and, 1000000000000
-  %0 = inttoptr i64 %or to i8*
-  %1 = load atomic i8, i8* %0 monotonic, align 4096
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i8, ptr %0 monotonic, align 4096
   ret i8 %1
 }
 
@@ -269,7 +267,7 @@ define dso_local signext i8 @ld_cst_align16_int8_t_uint8_t() {
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %0 = load atomic i8, i8* inttoptr (i64 4080 to i8*) monotonic, align 16
+  %0 = load atomic i8, ptr inttoptr (i64 4080 to ptr) monotonic, align 16
   ret i8 %0
 }
 
@@ -282,7 +280,7 @@ define dso_local signext i8 @ld_cst_align32_int8_t_uint8_t() {
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %0 = load atomic i8, i8* inttoptr (i64 9999900 to i8*) monotonic, align 4
+  %0 = load atomic i8, ptr inttoptr (i64 9999900 to ptr) monotonic, align 4
   ret i8 %0
 }
 
@@ -305,7 +303,7 @@ define dso_local signext i8 @ld_cst_align64_int8_t_uint8_t() {
 ; CHECK-PREP10-NEXT:    extsb r3, r3
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %0 = load atomic i8, i8* inttoptr (i64 1000000000000 to i8*) monotonic, align 4096
+  %0 = load atomic i8, ptr inttoptr (i64 1000000000000 to ptr) monotonic, align 4096
   ret i8 %0
 }
 
@@ -317,33 +315,31 @@ define dso_local signext i8 @ld_0_int8_t_uint16_t(i64 %ptr) {
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %0 = inttoptr i64 %ptr to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
+  %0 = inttoptr i64 %ptr to ptr
+  %1 = load atomic i16, ptr %0 monotonic, align 2
   %conv = trunc i16 %1 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local signext i8 @ld_align16_int8_t_uint16_t(i8* nocapture readonly %ptr) {
+define dso_local signext i8 @ld_align16_int8_t_uint16_t(ptr nocapture readonly %ptr) {
 ; CHECK-LABEL: ld_align16_int8_t_uint16_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    lhz r3, 8(r3)
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 8
-  %0 = bitcast i8* %add.ptr to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
-  %conv = trunc i16 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 8
+  %0 = load atomic i16, ptr %add.ptr monotonic, align 2
+  %conv = trunc i16 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local signext i8 @ld_align32_int8_t_uint16_t(i8* nocapture readonly %ptr) {
+define dso_local signext i8 @ld_align32_int8_t_uint16_t(ptr nocapture readonly %ptr) {
 ; CHECK-P10-LABEL: ld_align32_int8_t_uint16_t:
 ; CHECK-P10:       # %bb.0: # %entry
-; CHECK-P10-NEXT:    pli r4, 99999000
-; CHECK-P10-NEXT:    lhzx r3, r3, r4
+; CHECK-P10-NEXT:    plhz r3, 99999000(r3), 0
 ; CHECK-P10-NEXT:    extsb r3, r3
 ; CHECK-P10-NEXT:    blr
 ;
@@ -355,15 +351,14 @@ define dso_local signext i8 @ld_align32_int8_t_uint16_t(i8* nocapture readonly %
 ; CHECK-PREP10-NEXT:    extsb r3, r3
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 99999000
-  %0 = bitcast i8* %add.ptr to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
-  %conv = trunc i16 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 99999000
+  %0 = load atomic i16, ptr %add.ptr monotonic, align 2
+  %conv = trunc i16 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local signext i8 @ld_align64_int8_t_uint16_t(i8* nocapture readonly %ptr) {
+define dso_local signext i8 @ld_align64_int8_t_uint16_t(ptr nocapture readonly %ptr) {
 ; CHECK-P10-LABEL: ld_align64_int8_t_uint16_t:
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    pli r4, 244140625
@@ -381,25 +376,23 @@ define dso_local signext i8 @ld_align64_int8_t_uint16_t(i8* nocapture readonly %
 ; CHECK-PREP10-NEXT:    extsb r3, r3
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 1000000000000
-  %0 = bitcast i8* %add.ptr to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
-  %conv = trunc i16 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 1000000000000
+  %0 = load atomic i16, ptr %add.ptr monotonic, align 2
+  %conv = trunc i16 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local signext i8 @ld_reg_int8_t_uint16_t(i8* nocapture readonly %ptr, i64 %off) {
+define dso_local signext i8 @ld_reg_int8_t_uint16_t(ptr nocapture readonly %ptr, i64 %off) {
 ; CHECK-LABEL: ld_reg_int8_t_uint16_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    lhzx r3, r3, r4
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 %off
-  %0 = bitcast i8* %add.ptr to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
-  %conv = trunc i16 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 %off
+  %0 = load atomic i16, ptr %add.ptr monotonic, align 2
+  %conv = trunc i16 %0 to i8
   ret i8 %conv
 }
 
@@ -414,8 +407,8 @@ define dso_local signext i8 @ld_or_int8_t_uint16_t(i64 %ptr, i8 zeroext %off) {
 entry:
   %conv = zext i8 %off to i64
   %or = or i64 %conv, %ptr
-  %0 = inttoptr i64 %or to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i16, ptr %0 monotonic, align 2
   %conv1 = trunc i16 %1 to i8
   ret i8 %conv1
 }
@@ -430,8 +423,8 @@ define dso_local signext i8 @ld_not_disjoint16_int8_t_uint16_t(i64 %ptr) {
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 6
-  %0 = inttoptr i64 %or to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i16, ptr %0 monotonic, align 2
   %conv = trunc i16 %1 to i8
   ret i8 %conv
 }
@@ -447,8 +440,8 @@ define dso_local signext i8 @ld_disjoint_align16_int8_t_uint16_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -4096
   %or = or i64 %and, 24
-  %0 = inttoptr i64 %or to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i16, ptr %0 monotonic, align 8
   %conv = trunc i16 %1 to i8
   ret i8 %conv
 }
@@ -464,8 +457,8 @@ define dso_local signext i8 @ld_not_disjoint32_int8_t_uint16_t(i64 %ptr) {
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 99999
-  %0 = inttoptr i64 %or to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i16, ptr %0 monotonic, align 2
   %conv = trunc i16 %1 to i8
   ret i8 %conv
 }
@@ -476,8 +469,7 @@ define dso_local signext i8 @ld_disjoint_align32_int8_t_uint16_t(i64 %ptr) {
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    lis r4, -15264
 ; CHECK-P10-NEXT:    and r3, r3, r4
-; CHECK-P10-NEXT:    pli r4, 999990000
-; CHECK-P10-NEXT:    lhzx r3, r3, r4
+; CHECK-P10-NEXT:    plhz r3, 999990000(r3), 0
 ; CHECK-P10-NEXT:    extsb r3, r3
 ; CHECK-P10-NEXT:    blr
 ;
@@ -503,8 +495,8 @@ define dso_local signext i8 @ld_disjoint_align32_int8_t_uint16_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -1000341504
   %or = or i64 %and, 999990000
-  %0 = inttoptr i64 %or to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 16
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i16, ptr %0 monotonic, align 16
   %conv = trunc i16 %1 to i8
   ret i8 %conv
 }
@@ -533,8 +525,8 @@ define dso_local signext i8 @ld_not_disjoint64_int8_t_uint16_t(i64 %ptr) {
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %or = or i64 %ptr, 1000000000001
-  %0 = inttoptr i64 %or to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i16, ptr %0 monotonic, align 2
   %conv = trunc i16 %1 to i8
   ret i8 %conv
 }
@@ -562,8 +554,8 @@ define dso_local signext i8 @ld_disjoint_align64_int8_t_uint16_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -1099511627776
   %or = or i64 %and, 1000000000000
-  %0 = inttoptr i64 %or to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 4096
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i16, ptr %0 monotonic, align 4096
   %conv = trunc i16 %1 to i8
   ret i8 %conv
 }
@@ -576,7 +568,7 @@ define dso_local signext i8 @ld_cst_align16_int8_t_uint16_t() {
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %0 = load atomic i16, i16* inttoptr (i64 4080 to i16*) monotonic, align 16
+  %0 = load atomic i16, ptr inttoptr (i64 4080 to ptr) monotonic, align 16
   %conv = trunc i16 %0 to i8
   ret i8 %conv
 }
@@ -590,7 +582,7 @@ define dso_local signext i8 @ld_cst_align32_int8_t_uint16_t() {
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %0 = load atomic i16, i16* inttoptr (i64 9999900 to i16*) monotonic, align 4
+  %0 = load atomic i16, ptr inttoptr (i64 9999900 to ptr) monotonic, align 4
   %conv = trunc i16 %0 to i8
   ret i8 %conv
 }
@@ -614,7 +606,7 @@ define dso_local signext i8 @ld_cst_align64_int8_t_uint16_t() {
 ; CHECK-PREP10-NEXT:    extsb r3, r3
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %0 = load atomic i16, i16* inttoptr (i64 1000000000000 to i16*) monotonic, align 4096
+  %0 = load atomic i16, ptr inttoptr (i64 1000000000000 to ptr) monotonic, align 4096
   %conv = trunc i16 %0 to i8
   ret i8 %conv
 }
@@ -627,33 +619,31 @@ define dso_local signext i8 @ld_0_int8_t_uint32_t(i64 %ptr) {
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %0 = inttoptr i64 %ptr to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
+  %0 = inttoptr i64 %ptr to ptr
+  %1 = load atomic i32, ptr %0 monotonic, align 4
   %conv = trunc i32 %1 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local signext i8 @ld_align16_int8_t_uint32_t(i8* nocapture readonly %ptr) {
+define dso_local signext i8 @ld_align16_int8_t_uint32_t(ptr nocapture readonly %ptr) {
 ; CHECK-LABEL: ld_align16_int8_t_uint32_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    lwz r3, 8(r3)
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 8
-  %0 = bitcast i8* %add.ptr to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
-  %conv = trunc i32 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 8
+  %0 = load atomic i32, ptr %add.ptr monotonic, align 4
+  %conv = trunc i32 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local signext i8 @ld_align32_int8_t_uint32_t(i8* nocapture readonly %ptr) {
+define dso_local signext i8 @ld_align32_int8_t_uint32_t(ptr nocapture readonly %ptr) {
 ; CHECK-P10-LABEL: ld_align32_int8_t_uint32_t:
 ; CHECK-P10:       # %bb.0: # %entry
-; CHECK-P10-NEXT:    pli r4, 99999000
-; CHECK-P10-NEXT:    lwzx r3, r3, r4
+; CHECK-P10-NEXT:    plwz r3, 99999000(r3), 0
 ; CHECK-P10-NEXT:    extsb r3, r3
 ; CHECK-P10-NEXT:    blr
 ;
@@ -665,15 +655,14 @@ define dso_local signext i8 @ld_align32_int8_t_uint32_t(i8* nocapture readonly %
 ; CHECK-PREP10-NEXT:    extsb r3, r3
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 99999000
-  %0 = bitcast i8* %add.ptr to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
-  %conv = trunc i32 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 99999000
+  %0 = load atomic i32, ptr %add.ptr monotonic, align 4
+  %conv = trunc i32 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local signext i8 @ld_align64_int8_t_uint32_t(i8* nocapture readonly %ptr) {
+define dso_local signext i8 @ld_align64_int8_t_uint32_t(ptr nocapture readonly %ptr) {
 ; CHECK-P10-LABEL: ld_align64_int8_t_uint32_t:
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    pli r4, 244140625
@@ -691,25 +680,23 @@ define dso_local signext i8 @ld_align64_int8_t_uint32_t(i8* nocapture readonly %
 ; CHECK-PREP10-NEXT:    extsb r3, r3
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 1000000000000
-  %0 = bitcast i8* %add.ptr to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
-  %conv = trunc i32 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 1000000000000
+  %0 = load atomic i32, ptr %add.ptr monotonic, align 4
+  %conv = trunc i32 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local signext i8 @ld_reg_int8_t_uint32_t(i8* nocapture readonly %ptr, i64 %off) {
+define dso_local signext i8 @ld_reg_int8_t_uint32_t(ptr nocapture readonly %ptr, i64 %off) {
 ; CHECK-LABEL: ld_reg_int8_t_uint32_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    lwzx r3, r3, r4
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 %off
-  %0 = bitcast i8* %add.ptr to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
-  %conv = trunc i32 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 %off
+  %0 = load atomic i32, ptr %add.ptr monotonic, align 4
+  %conv = trunc i32 %0 to i8
   ret i8 %conv
 }
 
@@ -724,8 +711,8 @@ define dso_local signext i8 @ld_or_int8_t_uint32_t(i64 %ptr, i8 zeroext %off) {
 entry:
   %conv = zext i8 %off to i64
   %or = or i64 %conv, %ptr
-  %0 = inttoptr i64 %or to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i32, ptr %0 monotonic, align 4
   %conv1 = trunc i32 %1 to i8
   ret i8 %conv1
 }
@@ -740,8 +727,8 @@ define dso_local signext i8 @ld_not_disjoint16_int8_t_uint32_t(i64 %ptr) {
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 6
-  %0 = inttoptr i64 %or to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i32, ptr %0 monotonic, align 4
   %conv = trunc i32 %1 to i8
   ret i8 %conv
 }
@@ -757,8 +744,8 @@ define dso_local signext i8 @ld_disjoint_align16_int8_t_uint32_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -4096
   %or = or i64 %and, 24
-  %0 = inttoptr i64 %or to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i32, ptr %0 monotonic, align 8
   %conv = trunc i32 %1 to i8
   ret i8 %conv
 }
@@ -774,8 +761,8 @@ define dso_local signext i8 @ld_not_disjoint32_int8_t_uint32_t(i64 %ptr) {
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 99999
-  %0 = inttoptr i64 %or to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i32, ptr %0 monotonic, align 4
   %conv = trunc i32 %1 to i8
   ret i8 %conv
 }
@@ -786,8 +773,7 @@ define dso_local signext i8 @ld_disjoint_align32_int8_t_uint32_t(i64 %ptr) {
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    lis r4, -15264
 ; CHECK-P10-NEXT:    and r3, r3, r4
-; CHECK-P10-NEXT:    pli r4, 999990000
-; CHECK-P10-NEXT:    lwzx r3, r3, r4
+; CHECK-P10-NEXT:    plwz r3, 999990000(r3), 0
 ; CHECK-P10-NEXT:    extsb r3, r3
 ; CHECK-P10-NEXT:    blr
 ;
@@ -813,8 +799,8 @@ define dso_local signext i8 @ld_disjoint_align32_int8_t_uint32_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -1000341504
   %or = or i64 %and, 999990000
-  %0 = inttoptr i64 %or to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 16
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i32, ptr %0 monotonic, align 16
   %conv = trunc i32 %1 to i8
   ret i8 %conv
 }
@@ -843,8 +829,8 @@ define dso_local signext i8 @ld_not_disjoint64_int8_t_uint32_t(i64 %ptr) {
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %or = or i64 %ptr, 1000000000001
-  %0 = inttoptr i64 %or to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i32, ptr %0 monotonic, align 4
   %conv = trunc i32 %1 to i8
   ret i8 %conv
 }
@@ -872,8 +858,8 @@ define dso_local signext i8 @ld_disjoint_align64_int8_t_uint32_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -1099511627776
   %or = or i64 %and, 1000000000000
-  %0 = inttoptr i64 %or to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4096
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i32, ptr %0 monotonic, align 4096
   %conv = trunc i32 %1 to i8
   ret i8 %conv
 }
@@ -886,7 +872,7 @@ define dso_local signext i8 @ld_cst_align16_int8_t_uint32_t() {
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %0 = load atomic i32, i32* inttoptr (i64 4080 to i32*) monotonic, align 16
+  %0 = load atomic i32, ptr inttoptr (i64 4080 to ptr) monotonic, align 16
   %conv = trunc i32 %0 to i8
   ret i8 %conv
 }
@@ -900,7 +886,7 @@ define dso_local signext i8 @ld_cst_align32_int8_t_uint32_t() {
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %0 = load atomic i32, i32* inttoptr (i64 9999900 to i32*) monotonic, align 4
+  %0 = load atomic i32, ptr inttoptr (i64 9999900 to ptr) monotonic, align 4
   %conv = trunc i32 %0 to i8
   ret i8 %conv
 }
@@ -924,7 +910,7 @@ define dso_local signext i8 @ld_cst_align64_int8_t_uint32_t() {
 ; CHECK-PREP10-NEXT:    extsb r3, r3
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %0 = load atomic i32, i32* inttoptr (i64 1000000000000 to i32*) monotonic, align 4096
+  %0 = load atomic i32, ptr inttoptr (i64 1000000000000 to ptr) monotonic, align 4096
   %conv = trunc i32 %0 to i8
   ret i8 %conv
 }
@@ -937,33 +923,31 @@ define dso_local signext i8 @ld_0_int8_t_uint64_t(i64 %ptr) {
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %0 = inttoptr i64 %ptr to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
+  %0 = inttoptr i64 %ptr to ptr
+  %1 = load atomic i64, ptr %0 monotonic, align 8
   %conv = trunc i64 %1 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local signext i8 @ld_align16_int8_t_uint64_t(i8* nocapture readonly %ptr) {
+define dso_local signext i8 @ld_align16_int8_t_uint64_t(ptr nocapture readonly %ptr) {
 ; CHECK-LABEL: ld_align16_int8_t_uint64_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    ld r3, 8(r3)
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 8
-  %0 = bitcast i8* %add.ptr to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
-  %conv = trunc i64 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 8
+  %0 = load atomic i64, ptr %add.ptr monotonic, align 8
+  %conv = trunc i64 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local signext i8 @ld_align32_int8_t_uint64_t(i8* nocapture readonly %ptr) {
+define dso_local signext i8 @ld_align32_int8_t_uint64_t(ptr nocapture readonly %ptr) {
 ; CHECK-P10-LABEL: ld_align32_int8_t_uint64_t:
 ; CHECK-P10:       # %bb.0: # %entry
-; CHECK-P10-NEXT:    pli r4, 99999000
-; CHECK-P10-NEXT:    ldx r3, r3, r4
+; CHECK-P10-NEXT:    pld r3, 99999000(r3), 0
 ; CHECK-P10-NEXT:    extsb r3, r3
 ; CHECK-P10-NEXT:    blr
 ;
@@ -975,15 +959,14 @@ define dso_local signext i8 @ld_align32_int8_t_uint64_t(i8* nocapture readonly %
 ; CHECK-PREP10-NEXT:    extsb r3, r3
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 99999000
-  %0 = bitcast i8* %add.ptr to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
-  %conv = trunc i64 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 99999000
+  %0 = load atomic i64, ptr %add.ptr monotonic, align 8
+  %conv = trunc i64 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local signext i8 @ld_align64_int8_t_uint64_t(i8* nocapture readonly %ptr) {
+define dso_local signext i8 @ld_align64_int8_t_uint64_t(ptr nocapture readonly %ptr) {
 ; CHECK-P10-LABEL: ld_align64_int8_t_uint64_t:
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    pli r4, 244140625
@@ -1001,25 +984,23 @@ define dso_local signext i8 @ld_align64_int8_t_uint64_t(i8* nocapture readonly %
 ; CHECK-PREP10-NEXT:    extsb r3, r3
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 1000000000000
-  %0 = bitcast i8* %add.ptr to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
-  %conv = trunc i64 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 1000000000000
+  %0 = load atomic i64, ptr %add.ptr monotonic, align 8
+  %conv = trunc i64 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local signext i8 @ld_reg_int8_t_uint64_t(i8* nocapture readonly %ptr, i64 %off) {
+define dso_local signext i8 @ld_reg_int8_t_uint64_t(ptr nocapture readonly %ptr, i64 %off) {
 ; CHECK-LABEL: ld_reg_int8_t_uint64_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    ldx r3, r3, r4
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 %off
-  %0 = bitcast i8* %add.ptr to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
-  %conv = trunc i64 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 %off
+  %0 = load atomic i64, ptr %add.ptr monotonic, align 8
+  %conv = trunc i64 %0 to i8
   ret i8 %conv
 }
 
@@ -1034,8 +1015,8 @@ define dso_local signext i8 @ld_or_int8_t_uint64_t(i64 %ptr, i8 zeroext %off) {
 entry:
   %conv = zext i8 %off to i64
   %or = or i64 %conv, %ptr
-  %0 = inttoptr i64 %or to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i64, ptr %0 monotonic, align 8
   %conv1 = trunc i64 %1 to i8
   ret i8 %conv1
 }
@@ -1050,8 +1031,8 @@ define dso_local signext i8 @ld_not_disjoint16_int8_t_uint64_t(i64 %ptr) {
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 6
-  %0 = inttoptr i64 %or to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i64, ptr %0 monotonic, align 8
   %conv = trunc i64 %1 to i8
   ret i8 %conv
 }
@@ -1067,8 +1048,8 @@ define dso_local signext i8 @ld_disjoint_align16_int8_t_uint64_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -4096
   %or = or i64 %and, 24
-  %0 = inttoptr i64 %or to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i64, ptr %0 monotonic, align 8
   %conv = trunc i64 %1 to i8
   ret i8 %conv
 }
@@ -1084,8 +1065,8 @@ define dso_local signext i8 @ld_not_disjoint32_int8_t_uint64_t(i64 %ptr) {
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 99999
-  %0 = inttoptr i64 %or to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i64, ptr %0 monotonic, align 8
   %conv = trunc i64 %1 to i8
   ret i8 %conv
 }
@@ -1096,8 +1077,7 @@ define dso_local signext i8 @ld_disjoint_align32_int8_t_uint64_t(i64 %ptr) {
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    lis r4, -15264
 ; CHECK-P10-NEXT:    and r3, r3, r4
-; CHECK-P10-NEXT:    pli r4, 999990000
-; CHECK-P10-NEXT:    ldx r3, r3, r4
+; CHECK-P10-NEXT:    pld r3, 999990000(r3), 0
 ; CHECK-P10-NEXT:    extsb r3, r3
 ; CHECK-P10-NEXT:    blr
 ;
@@ -1123,8 +1103,8 @@ define dso_local signext i8 @ld_disjoint_align32_int8_t_uint64_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -1000341504
   %or = or i64 %and, 999990000
-  %0 = inttoptr i64 %or to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 16
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i64, ptr %0 monotonic, align 16
   %conv = trunc i64 %1 to i8
   ret i8 %conv
 }
@@ -1153,8 +1133,8 @@ define dso_local signext i8 @ld_not_disjoint64_int8_t_uint64_t(i64 %ptr) {
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %or = or i64 %ptr, 1000000000001
-  %0 = inttoptr i64 %or to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i64, ptr %0 monotonic, align 8
   %conv = trunc i64 %1 to i8
   ret i8 %conv
 }
@@ -1182,8 +1162,8 @@ define dso_local signext i8 @ld_disjoint_align64_int8_t_uint64_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -1099511627776
   %or = or i64 %and, 1000000000000
-  %0 = inttoptr i64 %or to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 4096
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i64, ptr %0 monotonic, align 4096
   %conv = trunc i64 %1 to i8
   ret i8 %conv
 }
@@ -1196,7 +1176,7 @@ define dso_local signext i8 @ld_cst_align16_int8_t_uint64_t() {
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %0 = load atomic i64, i64* inttoptr (i64 4080 to i64*) monotonic, align 16
+  %0 = load atomic i64, ptr inttoptr (i64 4080 to ptr) monotonic, align 16
   %conv = trunc i64 %0 to i8
   ret i8 %conv
 }
@@ -1210,7 +1190,7 @@ define dso_local signext i8 @ld_cst_align32_int8_t_uint64_t() {
 ; CHECK-NEXT:    extsb r3, r3
 ; CHECK-NEXT:    blr
 entry:
-  %0 = load atomic i64, i64* inttoptr (i64 9999900 to i64*) monotonic, align 8
+  %0 = load atomic i64, ptr inttoptr (i64 9999900 to ptr) monotonic, align 8
   %conv = trunc i64 %0 to i8
   ret i8 %conv
 }
@@ -1234,7 +1214,7 @@ define dso_local signext i8 @ld_cst_align64_int8_t_uint64_t() {
 ; CHECK-PREP10-NEXT:    extsb r3, r3
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %0 = load atomic i64, i64* inttoptr (i64 1000000000000 to i64*) monotonic, align 4096
+  %0 = load atomic i64, ptr inttoptr (i64 1000000000000 to ptr) monotonic, align 4096
   %conv = trunc i64 %0 to i8
   ret i8 %conv
 }
@@ -1244,33 +1224,30 @@ define dso_local zeroext i8 @ld_0_uint8_t_uint8_t(i64 %ptr) {
 ; CHECK-LABEL: ld_0_uint8_t_uint8_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    lbz r3, 0(r3)
-; CHECK-NEXT:    clrldi r3, r3, 32
 ; CHECK-NEXT:    blr
 entry:
-  %0 = inttoptr i64 %ptr to i8*
-  %1 = load atomic i8, i8* %0 monotonic, align 1
+  %0 = inttoptr i64 %ptr to ptr
+  %1 = load atomic i8, ptr %0 monotonic, align 1
   ret i8 %1
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local zeroext i8 @ld_align16_uint8_t_uint8_t(i8* nocapture readonly %ptr) {
+define dso_local zeroext i8 @ld_align16_uint8_t_uint8_t(ptr nocapture readonly %ptr) {
 ; CHECK-LABEL: ld_align16_uint8_t_uint8_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    lbz r3, 8(r3)
-; CHECK-NEXT:    clrldi r3, r3, 32
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 8
-  %0 = load atomic i8, i8* %add.ptr monotonic, align 1
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 8
+  %0 = load atomic i8, ptr %add.ptr monotonic, align 1
   ret i8 %0
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local zeroext i8 @ld_align32_uint8_t_uint8_t(i8* nocapture readonly %ptr) {
+define dso_local zeroext i8 @ld_align32_uint8_t_uint8_t(ptr nocapture readonly %ptr) {
 ; CHECK-P10-LABEL: ld_align32_uint8_t_uint8_t:
 ; CHECK-P10:       # %bb.0: # %entry
-; CHECK-P10-NEXT:    pli r4, 99999000
-; CHECK-P10-NEXT:    lbzx r3, r3, r4
+; CHECK-P10-NEXT:    plbz r3, 99999000(r3), 0
 ; CHECK-P10-NEXT:    clrldi r3, r3, 32
 ; CHECK-P10-NEXT:    blr
 ;
@@ -1279,22 +1256,20 @@ define dso_local zeroext i8 @ld_align32_uint8_t_uint8_t(i8* nocapture readonly %
 ; CHECK-PREP10-NEXT:    lis r4, 1525
 ; CHECK-PREP10-NEXT:    ori r4, r4, 56600
 ; CHECK-PREP10-NEXT:    lbzx r3, r3, r4
-; CHECK-PREP10-NEXT:    clrldi r3, r3, 32
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 99999000
-  %0 = load atomic i8, i8* %add.ptr monotonic, align 1
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 99999000
+  %0 = load atomic i8, ptr %add.ptr monotonic, align 1
   ret i8 %0
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local zeroext i8 @ld_align64_uint8_t_uint8_t(i8* nocapture readonly %ptr) {
+define dso_local zeroext i8 @ld_align64_uint8_t_uint8_t(ptr nocapture readonly %ptr) {
 ; CHECK-P10-LABEL: ld_align64_uint8_t_uint8_t:
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    pli r4, 244140625
 ; CHECK-P10-NEXT:    rldic r4, r4, 12, 24
 ; CHECK-P10-NEXT:    lbzx r3, r3, r4
-; CHECK-P10-NEXT:    clrldi r3, r3, 32
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-PREP10-LABEL: ld_align64_uint8_t_uint8_t:
@@ -1303,24 +1278,22 @@ define dso_local zeroext i8 @ld_align64_uint8_t_uint8_t(i8* nocapture readonly %
 ; CHECK-PREP10-NEXT:    ori r4, r4, 19025
 ; CHECK-PREP10-NEXT:    rldic r4, r4, 12, 24
 ; CHECK-PREP10-NEXT:    lbzx r3, r3, r4
-; CHECK-PREP10-NEXT:    clrldi r3, r3, 32
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 1000000000000
-  %0 = load atomic i8, i8* %add.ptr monotonic, align 1
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 1000000000000
+  %0 = load atomic i8, ptr %add.ptr monotonic, align 1
   ret i8 %0
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local zeroext i8 @ld_reg_uint8_t_uint8_t(i8* nocapture readonly %ptr, i64 %off) {
+define dso_local zeroext i8 @ld_reg_uint8_t_uint8_t(ptr nocapture readonly %ptr, i64 %off) {
 ; CHECK-LABEL: ld_reg_uint8_t_uint8_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    lbzx r3, r3, r4
-; CHECK-NEXT:    clrldi r3, r3, 32
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 %off
-  %0 = load atomic i8, i8* %add.ptr monotonic, align 1
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 %off
+  %0 = load atomic i8, ptr %add.ptr monotonic, align 1
   ret i8 %0
 }
 
@@ -1330,13 +1303,12 @@ define dso_local zeroext i8 @ld_or_uint8_t_uint8_t(i64 %ptr, i8 zeroext %off) {
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    or r3, r4, r3
 ; CHECK-NEXT:    lbz r3, 0(r3)
-; CHECK-NEXT:    clrldi r3, r3, 32
 ; CHECK-NEXT:    blr
 entry:
   %conv = zext i8 %off to i64
   %or = or i64 %conv, %ptr
-  %0 = inttoptr i64 %or to i8*
-  %1 = load atomic i8, i8* %0 monotonic, align 1
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i8, ptr %0 monotonic, align 1
   ret i8 %1
 }
 
@@ -1346,12 +1318,11 @@ define dso_local zeroext i8 @ld_not_disjoint16_uint8_t_uint8_t(i64 %ptr) {
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    ori r3, r3, 6
 ; CHECK-NEXT:    lbz r3, 0(r3)
-; CHECK-NEXT:    clrldi r3, r3, 32
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 6
-  %0 = inttoptr i64 %or to i8*
-  %1 = load atomic i8, i8* %0 monotonic, align 1
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i8, ptr %0 monotonic, align 1
   ret i8 %1
 }
 
@@ -1361,13 +1332,12 @@ define dso_local zeroext i8 @ld_disjoint_align16_uint8_t_uint8_t(i64 %ptr) {
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    rldicr r3, r3, 0, 51
 ; CHECK-NEXT:    lbz r3, 24(r3)
-; CHECK-NEXT:    clrldi r3, r3, 32
 ; CHECK-NEXT:    blr
 entry:
   %and = and i64 %ptr, -4096
   %or = or i64 %and, 24
-  %0 = inttoptr i64 %or to i8*
-  %1 = load atomic i8, i8* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i8, ptr %0 monotonic, align 8
   ret i8 %1
 }
 
@@ -1378,12 +1348,11 @@ define dso_local zeroext i8 @ld_not_disjoint32_uint8_t_uint8_t(i64 %ptr) {
 ; CHECK-NEXT:    ori r3, r3, 34463
 ; CHECK-NEXT:    oris r3, r3, 1
 ; CHECK-NEXT:    lbz r3, 0(r3)
-; CHECK-NEXT:    clrldi r3, r3, 32
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 99999
-  %0 = inttoptr i64 %or to i8*
-  %1 = load atomic i8, i8* %0 monotonic, align 1
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i8, ptr %0 monotonic, align 1
   ret i8 %1
 }
 
@@ -1393,8 +1362,7 @@ define dso_local zeroext i8 @ld_disjoint_align32_uint8_t_uint8_t(i64 %ptr) {
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    lis r4, -15264
 ; CHECK-P10-NEXT:    and r3, r3, r4
-; CHECK-P10-NEXT:    pli r4, 999990000
-; CHECK-P10-NEXT:    lbzx r3, r3, r4
+; CHECK-P10-NEXT:    plbz r3, 999990000(r3), 0
 ; CHECK-P10-NEXT:    clrldi r3, r3, 32
 ; CHECK-P10-NEXT:    blr
 ;
@@ -1405,7 +1373,6 @@ define dso_local zeroext i8 @ld_disjoint_align32_uint8_t_uint8_t(i64 %ptr) {
 ; CHECK-P9-NEXT:    lis r4, 15258
 ; CHECK-P9-NEXT:    ori r4, r4, 41712
 ; CHECK-P9-NEXT:    lbzx r3, r3, r4
-; CHECK-P9-NEXT:    clrldi r3, r3, 32
 ; CHECK-P9-NEXT:    blr
 ;
 ; CHECK-P8-LABEL: ld_disjoint_align32_uint8_t_uint8_t:
@@ -1415,13 +1382,12 @@ define dso_local zeroext i8 @ld_disjoint_align32_uint8_t_uint8_t(i64 %ptr) {
 ; CHECK-P8-NEXT:    and r3, r3, r4
 ; CHECK-P8-NEXT:    ori r4, r5, 41712
 ; CHECK-P8-NEXT:    lbzx r3, r3, r4
-; CHECK-P8-NEXT:    clrldi r3, r3, 32
 ; CHECK-P8-NEXT:    blr
 entry:
   %and = and i64 %ptr, -1000341504
   %or = or i64 %and, 999990000
-  %0 = inttoptr i64 %or to i8*
-  %1 = load atomic i8, i8* %0 monotonic, align 16
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i8, ptr %0 monotonic, align 16
   ret i8 %1
 }
 
@@ -1434,7 +1400,6 @@ define dso_local zeroext i8 @ld_not_disjoint64_uint8_t_uint8_t(i64 %ptr) {
 ; CHECK-P10-NEXT:    rldimi r5, r4, 32, 0
 ; CHECK-P10-NEXT:    or r3, r3, r5
 ; CHECK-P10-NEXT:    lbz r3, 0(r3)
-; CHECK-P10-NEXT:    clrldi r3, r3, 32
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-PREP10-LABEL: ld_not_disjoint64_uint8_t_uint8_t:
@@ -1445,12 +1410,11 @@ define dso_local zeroext i8 @ld_not_disjoint64_uint8_t_uint8_t(i64 %ptr) {
 ; CHECK-PREP10-NEXT:    ori r4, r4, 4097
 ; CHECK-PREP10-NEXT:    or r3, r3, r4
 ; CHECK-PREP10-NEXT:    lbz r3, 0(r3)
-; CHECK-PREP10-NEXT:    clrldi r3, r3, 32
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %or = or i64 %ptr, 1000000000001
-  %0 = inttoptr i64 %or to i8*
-  %1 = load atomic i8, i8* %0 monotonic, align 1
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i8, ptr %0 monotonic, align 1
   ret i8 %1
 }
 
@@ -1462,7 +1426,6 @@ define dso_local zeroext i8 @ld_disjoint_align64_uint8_t_uint8_t(i64 %ptr) {
 ; CHECK-P10-NEXT:    rldicr r3, r3, 0, 23
 ; CHECK-P10-NEXT:    rldic r4, r4, 12, 24
 ; CHECK-P10-NEXT:    lbzx r3, r3, r4
-; CHECK-P10-NEXT:    clrldi r3, r3, 32
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-PREP10-LABEL: ld_disjoint_align64_uint8_t_uint8_t:
@@ -1472,13 +1435,12 @@ define dso_local zeroext i8 @ld_disjoint_align64_uint8_t_uint8_t(i64 %ptr) {
 ; CHECK-PREP10-NEXT:    ori r4, r4, 19025
 ; CHECK-PREP10-NEXT:    rldic r4, r4, 12, 24
 ; CHECK-PREP10-NEXT:    lbzx r3, r3, r4
-; CHECK-PREP10-NEXT:    clrldi r3, r3, 32
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %and = and i64 %ptr, -1099511627776
   %or = or i64 %and, 1000000000000
-  %0 = inttoptr i64 %or to i8*
-  %1 = load atomic i8, i8* %0 monotonic, align 4096
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i8, ptr %0 monotonic, align 4096
   ret i8 %1
 }
 
@@ -1487,10 +1449,9 @@ define dso_local zeroext i8 @ld_cst_align16_uint8_t_uint8_t() {
 ; CHECK-LABEL: ld_cst_align16_uint8_t_uint8_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    lbz r3, 4080(0)
-; CHECK-NEXT:    clrldi r3, r3, 32
 ; CHECK-NEXT:    blr
 entry:
-  %0 = load atomic i8, i8* inttoptr (i64 4080 to i8*) monotonic, align 16
+  %0 = load atomic i8, ptr inttoptr (i64 4080 to ptr) monotonic, align 16
   ret i8 %0
 }
 
@@ -1500,10 +1461,9 @@ define dso_local zeroext i8 @ld_cst_align32_uint8_t_uint8_t() {
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    lis r3, 153
 ; CHECK-NEXT:    lbz r3, -27108(r3)
-; CHECK-NEXT:    clrldi r3, r3, 32
 ; CHECK-NEXT:    blr
 entry:
-  %0 = load atomic i8, i8* inttoptr (i64 9999900 to i8*) monotonic, align 4
+  %0 = load atomic i8, ptr inttoptr (i64 9999900 to ptr) monotonic, align 4
   ret i8 %0
 }
 
@@ -1514,7 +1474,6 @@ define dso_local zeroext i8 @ld_cst_align64_uint8_t_uint8_t() {
 ; CHECK-P10-NEXT:    pli r3, 244140625
 ; CHECK-P10-NEXT:    rldic r3, r3, 12, 24
 ; CHECK-P10-NEXT:    lbz r3, 0(r3)
-; CHECK-P10-NEXT:    clrldi r3, r3, 32
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-PREP10-LABEL: ld_cst_align64_uint8_t_uint8_t:
@@ -1523,10 +1482,9 @@ define dso_local zeroext i8 @ld_cst_align64_uint8_t_uint8_t() {
 ; CHECK-PREP10-NEXT:    ori r3, r3, 19025
 ; CHECK-PREP10-NEXT:    rldic r3, r3, 12, 24
 ; CHECK-PREP10-NEXT:    lbz r3, 0(r3)
-; CHECK-PREP10-NEXT:    clrldi r3, r3, 32
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %0 = load atomic i8, i8* inttoptr (i64 1000000000000 to i8*) monotonic, align 4096
+  %0 = load atomic i8, ptr inttoptr (i64 1000000000000 to ptr) monotonic, align 4096
   ret i8 %0
 }
 
@@ -1538,33 +1496,31 @@ define dso_local zeroext i8 @ld_0_uint8_t_uint16_t(i64 %ptr) {
 ; CHECK-NEXT:    clrldi r3, r3, 56
 ; CHECK-NEXT:    blr
 entry:
-  %0 = inttoptr i64 %ptr to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
+  %0 = inttoptr i64 %ptr to ptr
+  %1 = load atomic i16, ptr %0 monotonic, align 2
   %conv = trunc i16 %1 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local zeroext i8 @ld_align16_uint8_t_uint16_t(i8* nocapture readonly %ptr) {
+define dso_local zeroext i8 @ld_align16_uint8_t_uint16_t(ptr nocapture readonly %ptr) {
 ; CHECK-LABEL: ld_align16_uint8_t_uint16_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    lhz r3, 8(r3)
 ; CHECK-NEXT:    clrldi r3, r3, 56
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 8
-  %0 = bitcast i8* %add.ptr to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
-  %conv = trunc i16 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 8
+  %0 = load atomic i16, ptr %add.ptr monotonic, align 2
+  %conv = trunc i16 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local zeroext i8 @ld_align32_uint8_t_uint16_t(i8* nocapture readonly %ptr) {
+define dso_local zeroext i8 @ld_align32_uint8_t_uint16_t(ptr nocapture readonly %ptr) {
 ; CHECK-P10-LABEL: ld_align32_uint8_t_uint16_t:
 ; CHECK-P10:       # %bb.0: # %entry
-; CHECK-P10-NEXT:    pli r4, 99999000
-; CHECK-P10-NEXT:    lhzx r3, r3, r4
+; CHECK-P10-NEXT:    plhz r3, 99999000(r3), 0
 ; CHECK-P10-NEXT:    clrldi r3, r3, 56
 ; CHECK-P10-NEXT:    blr
 ;
@@ -1576,15 +1532,14 @@ define dso_local zeroext i8 @ld_align32_uint8_t_uint16_t(i8* nocapture readonly 
 ; CHECK-PREP10-NEXT:    clrldi r3, r3, 56
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 99999000
-  %0 = bitcast i8* %add.ptr to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
-  %conv = trunc i16 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 99999000
+  %0 = load atomic i16, ptr %add.ptr monotonic, align 2
+  %conv = trunc i16 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local zeroext i8 @ld_align64_uint8_t_uint16_t(i8* nocapture readonly %ptr) {
+define dso_local zeroext i8 @ld_align64_uint8_t_uint16_t(ptr nocapture readonly %ptr) {
 ; CHECK-P10-LABEL: ld_align64_uint8_t_uint16_t:
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    pli r4, 244140625
@@ -1602,25 +1557,23 @@ define dso_local zeroext i8 @ld_align64_uint8_t_uint16_t(i8* nocapture readonly 
 ; CHECK-PREP10-NEXT:    clrldi r3, r3, 56
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 1000000000000
-  %0 = bitcast i8* %add.ptr to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
-  %conv = trunc i16 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 1000000000000
+  %0 = load atomic i16, ptr %add.ptr monotonic, align 2
+  %conv = trunc i16 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local zeroext i8 @ld_reg_uint8_t_uint16_t(i8* nocapture readonly %ptr, i64 %off) {
+define dso_local zeroext i8 @ld_reg_uint8_t_uint16_t(ptr nocapture readonly %ptr, i64 %off) {
 ; CHECK-LABEL: ld_reg_uint8_t_uint16_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    lhzx r3, r3, r4
 ; CHECK-NEXT:    clrldi r3, r3, 56
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 %off
-  %0 = bitcast i8* %add.ptr to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
-  %conv = trunc i16 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 %off
+  %0 = load atomic i16, ptr %add.ptr monotonic, align 2
+  %conv = trunc i16 %0 to i8
   ret i8 %conv
 }
 
@@ -1635,8 +1588,8 @@ define dso_local zeroext i8 @ld_or_uint8_t_uint16_t(i64 %ptr, i8 zeroext %off) {
 entry:
   %conv = zext i8 %off to i64
   %or = or i64 %conv, %ptr
-  %0 = inttoptr i64 %or to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i16, ptr %0 monotonic, align 2
   %conv1 = trunc i16 %1 to i8
   ret i8 %conv1
 }
@@ -1651,8 +1604,8 @@ define dso_local zeroext i8 @ld_not_disjoint16_uint8_t_uint16_t(i64 %ptr) {
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 6
-  %0 = inttoptr i64 %or to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i16, ptr %0 monotonic, align 2
   %conv = trunc i16 %1 to i8
   ret i8 %conv
 }
@@ -1668,8 +1621,8 @@ define dso_local zeroext i8 @ld_disjoint_align16_uint8_t_uint16_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -4096
   %or = or i64 %and, 24
-  %0 = inttoptr i64 %or to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i16, ptr %0 monotonic, align 8
   %conv = trunc i16 %1 to i8
   ret i8 %conv
 }
@@ -1685,8 +1638,8 @@ define dso_local zeroext i8 @ld_not_disjoint32_uint8_t_uint16_t(i64 %ptr) {
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 99999
-  %0 = inttoptr i64 %or to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i16, ptr %0 monotonic, align 2
   %conv = trunc i16 %1 to i8
   ret i8 %conv
 }
@@ -1697,8 +1650,7 @@ define dso_local zeroext i8 @ld_disjoint_align32_uint8_t_uint16_t(i64 %ptr) {
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    lis r4, -15264
 ; CHECK-P10-NEXT:    and r3, r3, r4
-; CHECK-P10-NEXT:    pli r4, 999990000
-; CHECK-P10-NEXT:    lhzx r3, r3, r4
+; CHECK-P10-NEXT:    plhz r3, 999990000(r3), 0
 ; CHECK-P10-NEXT:    clrldi r3, r3, 56
 ; CHECK-P10-NEXT:    blr
 ;
@@ -1724,8 +1676,8 @@ define dso_local zeroext i8 @ld_disjoint_align32_uint8_t_uint16_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -1000341504
   %or = or i64 %and, 999990000
-  %0 = inttoptr i64 %or to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 16
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i16, ptr %0 monotonic, align 16
   %conv = trunc i16 %1 to i8
   ret i8 %conv
 }
@@ -1754,8 +1706,8 @@ define dso_local zeroext i8 @ld_not_disjoint64_uint8_t_uint16_t(i64 %ptr) {
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %or = or i64 %ptr, 1000000000001
-  %0 = inttoptr i64 %or to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 2
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i16, ptr %0 monotonic, align 2
   %conv = trunc i16 %1 to i8
   ret i8 %conv
 }
@@ -1783,8 +1735,8 @@ define dso_local zeroext i8 @ld_disjoint_align64_uint8_t_uint16_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -1099511627776
   %or = or i64 %and, 1000000000000
-  %0 = inttoptr i64 %or to i16*
-  %1 = load atomic i16, i16* %0 monotonic, align 4096
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i16, ptr %0 monotonic, align 4096
   %conv = trunc i16 %1 to i8
   ret i8 %conv
 }
@@ -1797,7 +1749,7 @@ define dso_local zeroext i8 @ld_cst_align16_uint8_t_uint16_t() {
 ; CHECK-NEXT:    clrldi r3, r3, 56
 ; CHECK-NEXT:    blr
 entry:
-  %0 = load atomic i16, i16* inttoptr (i64 4080 to i16*) monotonic, align 16
+  %0 = load atomic i16, ptr inttoptr (i64 4080 to ptr) monotonic, align 16
   %conv = trunc i16 %0 to i8
   ret i8 %conv
 }
@@ -1811,7 +1763,7 @@ define dso_local zeroext i8 @ld_cst_align32_uint8_t_uint16_t() {
 ; CHECK-NEXT:    clrldi r3, r3, 56
 ; CHECK-NEXT:    blr
 entry:
-  %0 = load atomic i16, i16* inttoptr (i64 9999900 to i16*) monotonic, align 4
+  %0 = load atomic i16, ptr inttoptr (i64 9999900 to ptr) monotonic, align 4
   %conv = trunc i16 %0 to i8
   ret i8 %conv
 }
@@ -1835,7 +1787,7 @@ define dso_local zeroext i8 @ld_cst_align64_uint8_t_uint16_t() {
 ; CHECK-PREP10-NEXT:    clrldi r3, r3, 56
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %0 = load atomic i16, i16* inttoptr (i64 1000000000000 to i16*) monotonic, align 4096
+  %0 = load atomic i16, ptr inttoptr (i64 1000000000000 to ptr) monotonic, align 4096
   %conv = trunc i16 %0 to i8
   ret i8 %conv
 }
@@ -1848,33 +1800,31 @@ define dso_local zeroext i8 @ld_0_uint8_t_uint32_t(i64 %ptr) {
 ; CHECK-NEXT:    clrldi r3, r3, 56
 ; CHECK-NEXT:    blr
 entry:
-  %0 = inttoptr i64 %ptr to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
+  %0 = inttoptr i64 %ptr to ptr
+  %1 = load atomic i32, ptr %0 monotonic, align 4
   %conv = trunc i32 %1 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local zeroext i8 @ld_align16_uint8_t_uint32_t(i8* nocapture readonly %ptr) {
+define dso_local zeroext i8 @ld_align16_uint8_t_uint32_t(ptr nocapture readonly %ptr) {
 ; CHECK-LABEL: ld_align16_uint8_t_uint32_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    lwz r3, 8(r3)
 ; CHECK-NEXT:    clrldi r3, r3, 56
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 8
-  %0 = bitcast i8* %add.ptr to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
-  %conv = trunc i32 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 8
+  %0 = load atomic i32, ptr %add.ptr monotonic, align 4
+  %conv = trunc i32 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local zeroext i8 @ld_align32_uint8_t_uint32_t(i8* nocapture readonly %ptr) {
+define dso_local zeroext i8 @ld_align32_uint8_t_uint32_t(ptr nocapture readonly %ptr) {
 ; CHECK-P10-LABEL: ld_align32_uint8_t_uint32_t:
 ; CHECK-P10:       # %bb.0: # %entry
-; CHECK-P10-NEXT:    pli r4, 99999000
-; CHECK-P10-NEXT:    lwzx r3, r3, r4
+; CHECK-P10-NEXT:    plwz r3, 99999000(r3), 0
 ; CHECK-P10-NEXT:    clrldi r3, r3, 56
 ; CHECK-P10-NEXT:    blr
 ;
@@ -1886,15 +1836,14 @@ define dso_local zeroext i8 @ld_align32_uint8_t_uint32_t(i8* nocapture readonly 
 ; CHECK-PREP10-NEXT:    clrldi r3, r3, 56
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 99999000
-  %0 = bitcast i8* %add.ptr to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
-  %conv = trunc i32 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 99999000
+  %0 = load atomic i32, ptr %add.ptr monotonic, align 4
+  %conv = trunc i32 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local zeroext i8 @ld_align64_uint8_t_uint32_t(i8* nocapture readonly %ptr) {
+define dso_local zeroext i8 @ld_align64_uint8_t_uint32_t(ptr nocapture readonly %ptr) {
 ; CHECK-P10-LABEL: ld_align64_uint8_t_uint32_t:
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    pli r4, 244140625
@@ -1912,25 +1861,23 @@ define dso_local zeroext i8 @ld_align64_uint8_t_uint32_t(i8* nocapture readonly 
 ; CHECK-PREP10-NEXT:    clrldi r3, r3, 56
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 1000000000000
-  %0 = bitcast i8* %add.ptr to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
-  %conv = trunc i32 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 1000000000000
+  %0 = load atomic i32, ptr %add.ptr monotonic, align 4
+  %conv = trunc i32 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local zeroext i8 @ld_reg_uint8_t_uint32_t(i8* nocapture readonly %ptr, i64 %off) {
+define dso_local zeroext i8 @ld_reg_uint8_t_uint32_t(ptr nocapture readonly %ptr, i64 %off) {
 ; CHECK-LABEL: ld_reg_uint8_t_uint32_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    lwzx r3, r3, r4
 ; CHECK-NEXT:    clrldi r3, r3, 56
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 %off
-  %0 = bitcast i8* %add.ptr to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
-  %conv = trunc i32 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 %off
+  %0 = load atomic i32, ptr %add.ptr monotonic, align 4
+  %conv = trunc i32 %0 to i8
   ret i8 %conv
 }
 
@@ -1945,8 +1892,8 @@ define dso_local zeroext i8 @ld_or_uint8_t_uint32_t(i64 %ptr, i8 zeroext %off) {
 entry:
   %conv = zext i8 %off to i64
   %or = or i64 %conv, %ptr
-  %0 = inttoptr i64 %or to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i32, ptr %0 monotonic, align 4
   %conv1 = trunc i32 %1 to i8
   ret i8 %conv1
 }
@@ -1961,8 +1908,8 @@ define dso_local zeroext i8 @ld_not_disjoint16_uint8_t_uint32_t(i64 %ptr) {
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 6
-  %0 = inttoptr i64 %or to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i32, ptr %0 monotonic, align 4
   %conv = trunc i32 %1 to i8
   ret i8 %conv
 }
@@ -1978,8 +1925,8 @@ define dso_local zeroext i8 @ld_disjoint_align16_uint8_t_uint32_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -4096
   %or = or i64 %and, 24
-  %0 = inttoptr i64 %or to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i32, ptr %0 monotonic, align 8
   %conv = trunc i32 %1 to i8
   ret i8 %conv
 }
@@ -1995,8 +1942,8 @@ define dso_local zeroext i8 @ld_not_disjoint32_uint8_t_uint32_t(i64 %ptr) {
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 99999
-  %0 = inttoptr i64 %or to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i32, ptr %0 monotonic, align 4
   %conv = trunc i32 %1 to i8
   ret i8 %conv
 }
@@ -2007,8 +1954,7 @@ define dso_local zeroext i8 @ld_disjoint_align32_uint8_t_uint32_t(i64 %ptr) {
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    lis r4, -15264
 ; CHECK-P10-NEXT:    and r3, r3, r4
-; CHECK-P10-NEXT:    pli r4, 999990000
-; CHECK-P10-NEXT:    lwzx r3, r3, r4
+; CHECK-P10-NEXT:    plwz r3, 999990000(r3), 0
 ; CHECK-P10-NEXT:    clrldi r3, r3, 56
 ; CHECK-P10-NEXT:    blr
 ;
@@ -2034,8 +1980,8 @@ define dso_local zeroext i8 @ld_disjoint_align32_uint8_t_uint32_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -1000341504
   %or = or i64 %and, 999990000
-  %0 = inttoptr i64 %or to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 16
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i32, ptr %0 monotonic, align 16
   %conv = trunc i32 %1 to i8
   ret i8 %conv
 }
@@ -2064,8 +2010,8 @@ define dso_local zeroext i8 @ld_not_disjoint64_uint8_t_uint32_t(i64 %ptr) {
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %or = or i64 %ptr, 1000000000001
-  %0 = inttoptr i64 %or to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i32, ptr %0 monotonic, align 4
   %conv = trunc i32 %1 to i8
   ret i8 %conv
 }
@@ -2093,8 +2039,8 @@ define dso_local zeroext i8 @ld_disjoint_align64_uint8_t_uint32_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -1099511627776
   %or = or i64 %and, 1000000000000
-  %0 = inttoptr i64 %or to i32*
-  %1 = load atomic i32, i32* %0 monotonic, align 4096
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i32, ptr %0 monotonic, align 4096
   %conv = trunc i32 %1 to i8
   ret i8 %conv
 }
@@ -2107,7 +2053,7 @@ define dso_local zeroext i8 @ld_cst_align16_uint8_t_uint32_t() {
 ; CHECK-NEXT:    clrldi r3, r3, 56
 ; CHECK-NEXT:    blr
 entry:
-  %0 = load atomic i32, i32* inttoptr (i64 4080 to i32*) monotonic, align 16
+  %0 = load atomic i32, ptr inttoptr (i64 4080 to ptr) monotonic, align 16
   %conv = trunc i32 %0 to i8
   ret i8 %conv
 }
@@ -2121,7 +2067,7 @@ define dso_local zeroext i8 @ld_cst_align32_uint8_t_uint32_t() {
 ; CHECK-NEXT:    clrldi r3, r3, 56
 ; CHECK-NEXT:    blr
 entry:
-  %0 = load atomic i32, i32* inttoptr (i64 9999900 to i32*) monotonic, align 4
+  %0 = load atomic i32, ptr inttoptr (i64 9999900 to ptr) monotonic, align 4
   %conv = trunc i32 %0 to i8
   ret i8 %conv
 }
@@ -2145,7 +2091,7 @@ define dso_local zeroext i8 @ld_cst_align64_uint8_t_uint32_t() {
 ; CHECK-PREP10-NEXT:    clrldi r3, r3, 56
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %0 = load atomic i32, i32* inttoptr (i64 1000000000000 to i32*) monotonic, align 4096
+  %0 = load atomic i32, ptr inttoptr (i64 1000000000000 to ptr) monotonic, align 4096
   %conv = trunc i32 %0 to i8
   ret i8 %conv
 }
@@ -2158,33 +2104,31 @@ define dso_local zeroext i8 @ld_0_uint8_t_uint64_t(i64 %ptr) {
 ; CHECK-NEXT:    clrldi r3, r3, 56
 ; CHECK-NEXT:    blr
 entry:
-  %0 = inttoptr i64 %ptr to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
+  %0 = inttoptr i64 %ptr to ptr
+  %1 = load atomic i64, ptr %0 monotonic, align 8
   %conv = trunc i64 %1 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local zeroext i8 @ld_align16_uint8_t_uint64_t(i8* nocapture readonly %ptr) {
+define dso_local zeroext i8 @ld_align16_uint8_t_uint64_t(ptr nocapture readonly %ptr) {
 ; CHECK-LABEL: ld_align16_uint8_t_uint64_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    ld r3, 8(r3)
 ; CHECK-NEXT:    clrldi r3, r3, 56
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 8
-  %0 = bitcast i8* %add.ptr to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
-  %conv = trunc i64 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 8
+  %0 = load atomic i64, ptr %add.ptr monotonic, align 8
+  %conv = trunc i64 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local zeroext i8 @ld_align32_uint8_t_uint64_t(i8* nocapture readonly %ptr) {
+define dso_local zeroext i8 @ld_align32_uint8_t_uint64_t(ptr nocapture readonly %ptr) {
 ; CHECK-P10-LABEL: ld_align32_uint8_t_uint64_t:
 ; CHECK-P10:       # %bb.0: # %entry
-; CHECK-P10-NEXT:    pli r4, 99999000
-; CHECK-P10-NEXT:    ldx r3, r3, r4
+; CHECK-P10-NEXT:    pld r3, 99999000(r3), 0
 ; CHECK-P10-NEXT:    clrldi r3, r3, 56
 ; CHECK-P10-NEXT:    blr
 ;
@@ -2196,15 +2140,14 @@ define dso_local zeroext i8 @ld_align32_uint8_t_uint64_t(i8* nocapture readonly 
 ; CHECK-PREP10-NEXT:    clrldi r3, r3, 56
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 99999000
-  %0 = bitcast i8* %add.ptr to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
-  %conv = trunc i64 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 99999000
+  %0 = load atomic i64, ptr %add.ptr monotonic, align 8
+  %conv = trunc i64 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local zeroext i8 @ld_align64_uint8_t_uint64_t(i8* nocapture readonly %ptr) {
+define dso_local zeroext i8 @ld_align64_uint8_t_uint64_t(ptr nocapture readonly %ptr) {
 ; CHECK-P10-LABEL: ld_align64_uint8_t_uint64_t:
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    pli r4, 244140625
@@ -2222,25 +2165,23 @@ define dso_local zeroext i8 @ld_align64_uint8_t_uint64_t(i8* nocapture readonly 
 ; CHECK-PREP10-NEXT:    clrldi r3, r3, 56
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 1000000000000
-  %0 = bitcast i8* %add.ptr to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
-  %conv = trunc i64 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 1000000000000
+  %0 = load atomic i64, ptr %add.ptr monotonic, align 8
+  %conv = trunc i64 %0 to i8
   ret i8 %conv
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local zeroext i8 @ld_reg_uint8_t_uint64_t(i8* nocapture readonly %ptr, i64 %off) {
+define dso_local zeroext i8 @ld_reg_uint8_t_uint64_t(ptr nocapture readonly %ptr, i64 %off) {
 ; CHECK-LABEL: ld_reg_uint8_t_uint64_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    ldx r3, r3, r4
 ; CHECK-NEXT:    clrldi r3, r3, 56
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 %off
-  %0 = bitcast i8* %add.ptr to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
-  %conv = trunc i64 %1 to i8
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 %off
+  %0 = load atomic i64, ptr %add.ptr monotonic, align 8
+  %conv = trunc i64 %0 to i8
   ret i8 %conv
 }
 
@@ -2255,8 +2196,8 @@ define dso_local zeroext i8 @ld_or_uint8_t_uint64_t(i64 %ptr, i8 zeroext %off) {
 entry:
   %conv = zext i8 %off to i64
   %or = or i64 %conv, %ptr
-  %0 = inttoptr i64 %or to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i64, ptr %0 monotonic, align 8
   %conv1 = trunc i64 %1 to i8
   ret i8 %conv1
 }
@@ -2271,8 +2212,8 @@ define dso_local zeroext i8 @ld_not_disjoint16_uint8_t_uint64_t(i64 %ptr) {
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 6
-  %0 = inttoptr i64 %or to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i64, ptr %0 monotonic, align 8
   %conv = trunc i64 %1 to i8
   ret i8 %conv
 }
@@ -2288,8 +2229,8 @@ define dso_local zeroext i8 @ld_disjoint_align16_uint8_t_uint64_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -4096
   %or = or i64 %and, 24
-  %0 = inttoptr i64 %or to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i64, ptr %0 monotonic, align 8
   %conv = trunc i64 %1 to i8
   ret i8 %conv
 }
@@ -2305,8 +2246,8 @@ define dso_local zeroext i8 @ld_not_disjoint32_uint8_t_uint64_t(i64 %ptr) {
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 99999
-  %0 = inttoptr i64 %or to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i64, ptr %0 monotonic, align 8
   %conv = trunc i64 %1 to i8
   ret i8 %conv
 }
@@ -2317,8 +2258,7 @@ define dso_local zeroext i8 @ld_disjoint_align32_uint8_t_uint64_t(i64 %ptr) {
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    lis r4, -15264
 ; CHECK-P10-NEXT:    and r3, r3, r4
-; CHECK-P10-NEXT:    pli r4, 999990000
-; CHECK-P10-NEXT:    ldx r3, r3, r4
+; CHECK-P10-NEXT:    pld r3, 999990000(r3), 0
 ; CHECK-P10-NEXT:    clrldi r3, r3, 56
 ; CHECK-P10-NEXT:    blr
 ;
@@ -2344,8 +2284,8 @@ define dso_local zeroext i8 @ld_disjoint_align32_uint8_t_uint64_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -1000341504
   %or = or i64 %and, 999990000
-  %0 = inttoptr i64 %or to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 16
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i64, ptr %0 monotonic, align 16
   %conv = trunc i64 %1 to i8
   ret i8 %conv
 }
@@ -2374,8 +2314,8 @@ define dso_local zeroext i8 @ld_not_disjoint64_uint8_t_uint64_t(i64 %ptr) {
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %or = or i64 %ptr, 1000000000001
-  %0 = inttoptr i64 %or to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i64, ptr %0 monotonic, align 8
   %conv = trunc i64 %1 to i8
   ret i8 %conv
 }
@@ -2403,8 +2343,8 @@ define dso_local zeroext i8 @ld_disjoint_align64_uint8_t_uint64_t(i64 %ptr) {
 entry:
   %and = and i64 %ptr, -1099511627776
   %or = or i64 %and, 1000000000000
-  %0 = inttoptr i64 %or to i64*
-  %1 = load atomic i64, i64* %0 monotonic, align 4096
+  %0 = inttoptr i64 %or to ptr
+  %1 = load atomic i64, ptr %0 monotonic, align 4096
   %conv = trunc i64 %1 to i8
   ret i8 %conv
 }
@@ -2417,7 +2357,7 @@ define dso_local zeroext i8 @ld_cst_align16_uint8_t_uint64_t() {
 ; CHECK-NEXT:    clrldi r3, r3, 56
 ; CHECK-NEXT:    blr
 entry:
-  %0 = load atomic i64, i64* inttoptr (i64 4080 to i64*) monotonic, align 16
+  %0 = load atomic i64, ptr inttoptr (i64 4080 to ptr) monotonic, align 16
   %conv = trunc i64 %0 to i8
   ret i8 %conv
 }
@@ -2431,7 +2371,7 @@ define dso_local zeroext i8 @ld_cst_align32_uint8_t_uint64_t() {
 ; CHECK-NEXT:    clrldi r3, r3, 56
 ; CHECK-NEXT:    blr
 entry:
-  %0 = load atomic i64, i64* inttoptr (i64 9999900 to i64*) monotonic, align 8
+  %0 = load atomic i64, ptr inttoptr (i64 9999900 to ptr) monotonic, align 8
   %conv = trunc i64 %0 to i8
   ret i8 %conv
 }
@@ -2455,7 +2395,7 @@ define dso_local zeroext i8 @ld_cst_align64_uint8_t_uint64_t() {
 ; CHECK-PREP10-NEXT:    clrldi r3, r3, 56
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %0 = load atomic i64, i64* inttoptr (i64 1000000000000 to i64*) monotonic, align 4096
+  %0 = load atomic i64, ptr inttoptr (i64 1000000000000 to ptr) monotonic, align 4096
   %conv = trunc i64 %0 to i8
   ret i8 %conv
 }
@@ -2467,29 +2407,28 @@ define dso_local void @st_0_uint8_t_uint8_t(i64 %ptr, i8 zeroext %str) {
 ; CHECK-NEXT:    stb r4, 0(r3)
 ; CHECK-NEXT:    blr
 entry:
-  %0 = inttoptr i64 %ptr to i8*
-  store atomic i8 %str, i8* %0 monotonic, align 1
+  %0 = inttoptr i64 %ptr to ptr
+  store atomic i8 %str, ptr %0 monotonic, align 1
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align16_uint8_t_uint8_t(i8* nocapture %ptr, i8 zeroext %str) {
+define dso_local void @st_align16_uint8_t_uint8_t(ptr nocapture %ptr, i8 zeroext %str) {
 ; CHECK-LABEL: st_align16_uint8_t_uint8_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    stb r4, 8(r3)
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 8
-  store atomic i8 %str, i8* %add.ptr monotonic, align 1
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 8
+  store atomic i8 %str, ptr %add.ptr monotonic, align 1
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align32_uint8_t_uint8_t(i8* nocapture %ptr, i8 zeroext %str) {
+define dso_local void @st_align32_uint8_t_uint8_t(ptr nocapture %ptr, i8 zeroext %str) {
 ; CHECK-P10-LABEL: st_align32_uint8_t_uint8_t:
 ; CHECK-P10:       # %bb.0: # %entry
-; CHECK-P10-NEXT:    pli r5, 99999000
-; CHECK-P10-NEXT:    stbx r4, r3, r5
+; CHECK-P10-NEXT:    pstb r4, 99999000(r3), 0
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-PREP10-LABEL: st_align32_uint8_t_uint8_t:
@@ -2499,13 +2438,13 @@ define dso_local void @st_align32_uint8_t_uint8_t(i8* nocapture %ptr, i8 zeroext
 ; CHECK-PREP10-NEXT:    stbx r4, r3, r5
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 99999000
-  store atomic i8 %str, i8* %add.ptr monotonic, align 1
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 99999000
+  store atomic i8 %str, ptr %add.ptr monotonic, align 1
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align64_uint8_t_uint8_t(i8* nocapture %ptr, i8 zeroext %str) {
+define dso_local void @st_align64_uint8_t_uint8_t(ptr nocapture %ptr, i8 zeroext %str) {
 ; CHECK-P10-LABEL: st_align64_uint8_t_uint8_t:
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    pli r5, 244140625
@@ -2521,20 +2460,20 @@ define dso_local void @st_align64_uint8_t_uint8_t(i8* nocapture %ptr, i8 zeroext
 ; CHECK-PREP10-NEXT:    stbx r4, r3, r5
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 1000000000000
-  store atomic i8 %str, i8* %add.ptr monotonic, align 1
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 1000000000000
+  store atomic i8 %str, ptr %add.ptr monotonic, align 1
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_reg_uint8_t_uint8_t(i8* nocapture %ptr, i64 %off, i8 zeroext %str) {
+define dso_local void @st_reg_uint8_t_uint8_t(ptr nocapture %ptr, i64 %off, i8 zeroext %str) {
 ; CHECK-LABEL: st_reg_uint8_t_uint8_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    stbx r5, r3, r4
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 %off
-  store atomic i8 %str, i8* %add.ptr monotonic, align 1
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 %off
+  store atomic i8 %str, ptr %add.ptr monotonic, align 1
   ret void
 }
 
@@ -2548,8 +2487,8 @@ define dso_local void @st_or1_uint8_t_uint8_t(i64 %ptr, i8 zeroext %off, i8 zero
 entry:
   %conv = zext i8 %off to i64
   %or = or i64 %conv, %ptr
-  %0 = inttoptr i64 %or to i8*
-  store atomic i8 %str, i8* %0 monotonic, align 1
+  %0 = inttoptr i64 %or to ptr
+  store atomic i8 %str, ptr %0 monotonic, align 1
   ret void
 }
 
@@ -2562,8 +2501,8 @@ define dso_local void @st_not_disjoint16_uint8_t_uint8_t(i64 %ptr, i8 zeroext %s
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 6
-  %0 = inttoptr i64 %or to i8*
-  store atomic i8 %str, i8* %0 monotonic, align 1
+  %0 = inttoptr i64 %or to ptr
+  store atomic i8 %str, ptr %0 monotonic, align 1
   ret void
 }
 
@@ -2577,8 +2516,8 @@ define dso_local void @st_disjoint_align16_uint8_t_uint8_t(i64 %ptr, i8 zeroext 
 entry:
   %and = and i64 %ptr, -4096
   %or = or i64 %and, 24
-  %0 = inttoptr i64 %or to i8*
-  store atomic i8 %str, i8* %0 monotonic, align 8
+  %0 = inttoptr i64 %or to ptr
+  store atomic i8 %str, ptr %0 monotonic, align 8
   ret void
 }
 
@@ -2592,8 +2531,8 @@ define dso_local void @st_not_disjoint32_uint8_t_uint8_t(i64 %ptr, i8 zeroext %s
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 99999
-  %0 = inttoptr i64 %or to i8*
-  store atomic i8 %str, i8* %0 monotonic, align 1
+  %0 = inttoptr i64 %or to ptr
+  store atomic i8 %str, ptr %0 monotonic, align 1
   ret void
 }
 
@@ -2603,8 +2542,7 @@ define dso_local void @st_disjoint_align32_uint8_t_uint8_t(i64 %ptr, i8 zeroext 
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    lis r5, -15264
 ; CHECK-P10-NEXT:    and r3, r3, r5
-; CHECK-P10-NEXT:    pli r5, 999990000
-; CHECK-P10-NEXT:    stbx r4, r3, r5
+; CHECK-P10-NEXT:    pstb r4, 999990000(r3), 0
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-P9-LABEL: st_disjoint_align32_uint8_t_uint8_t:
@@ -2627,8 +2565,8 @@ define dso_local void @st_disjoint_align32_uint8_t_uint8_t(i64 %ptr, i8 zeroext 
 entry:
   %and = and i64 %ptr, -1000341504
   %or = or i64 %and, 999990000
-  %0 = inttoptr i64 %or to i8*
-  store atomic i8 %str, i8* %0 monotonic, align 16
+  %0 = inttoptr i64 %or to ptr
+  store atomic i8 %str, ptr %0 monotonic, align 16
   ret void
 }
 
@@ -2654,8 +2592,8 @@ define dso_local void @st_not_disjoint64_uint8_t_uint8_t(i64 %ptr, i8 zeroext %s
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %or = or i64 %ptr, 1000000000001
-  %0 = inttoptr i64 %or to i8*
-  store atomic i8 %str, i8* %0 monotonic, align 1
+  %0 = inttoptr i64 %or to ptr
+  store atomic i8 %str, ptr %0 monotonic, align 1
   ret void
 }
 
@@ -2680,8 +2618,8 @@ define dso_local void @st_disjoint_align64_uint8_t_uint8_t(i64 %ptr, i8 zeroext 
 entry:
   %and = and i64 %ptr, -1099511627776
   %or = or i64 %and, 1000000000000
-  %0 = inttoptr i64 %or to i8*
-  store atomic i8 %str, i8* %0 monotonic, align 4096
+  %0 = inttoptr i64 %or to ptr
+  store atomic i8 %str, ptr %0 monotonic, align 4096
   ret void
 }
 
@@ -2692,7 +2630,7 @@ define dso_local void @st_cst_align16_uint8_t_uint8_t(i8 zeroext %str) {
 ; CHECK-NEXT:    stb r3, 4080(0)
 ; CHECK-NEXT:    blr
 entry:
-  store atomic i8 %str, i8* inttoptr (i64 4080 to i8*) monotonic, align 16
+  store atomic i8 %str, ptr inttoptr (i64 4080 to ptr) monotonic, align 16
   ret void
 }
 
@@ -2704,7 +2642,7 @@ define dso_local void @st_cst_align32_uint8_t_uint8_t(i8 zeroext %str) {
 ; CHECK-NEXT:    stb r3, -27108(r4)
 ; CHECK-NEXT:    blr
 entry:
-  store atomic i8 %str, i8* inttoptr (i64 9999900 to i8*) monotonic, align 4
+  store atomic i8 %str, ptr inttoptr (i64 9999900 to ptr) monotonic, align 4
   ret void
 }
 
@@ -2725,7 +2663,7 @@ define dso_local void @st_cst_align64_uint8_t_uint8_t(i8 zeroext %str) {
 ; CHECK-PREP10-NEXT:    stb r3, 0(r4)
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  store atomic i8 %str, i8* inttoptr (i64 1000000000000 to i8*) monotonic, align 4096
+  store atomic i8 %str, ptr inttoptr (i64 1000000000000 to ptr) monotonic, align 4096
   ret void
 }
 
@@ -2736,32 +2674,30 @@ define dso_local void @st_0_uint8_t_uint16_t(i64 %ptr, i8 zeroext %str) {
 ; CHECK-NEXT:    sth r4, 0(r3)
 ; CHECK-NEXT:    blr
 entry:
-  %0 = inttoptr i64 %ptr to i16*
+  %0 = inttoptr i64 %ptr to ptr
   %conv = zext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 2
+  store atomic i16 %conv, ptr %0 monotonic, align 2
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align16_uint8_t_uint16_t(i8* nocapture %ptr, i8 zeroext %str) {
+define dso_local void @st_align16_uint8_t_uint16_t(ptr nocapture %ptr, i8 zeroext %str) {
 ; CHECK-LABEL: st_align16_uint8_t_uint16_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    sth r4, 8(r3)
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 8
-  %0 = bitcast i8* %add.ptr to i16*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 8
   %conv = zext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 2
+  store atomic i16 %conv, ptr %add.ptr monotonic, align 2
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align32_uint8_t_uint16_t(i8* nocapture %ptr, i8 zeroext %str) {
+define dso_local void @st_align32_uint8_t_uint16_t(ptr nocapture %ptr, i8 zeroext %str) {
 ; CHECK-P10-LABEL: st_align32_uint8_t_uint16_t:
 ; CHECK-P10:       # %bb.0: # %entry
-; CHECK-P10-NEXT:    pli r5, 99999000
-; CHECK-P10-NEXT:    sthx r4, r3, r5
+; CHECK-P10-NEXT:    psth r4, 99999000(r3), 0
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-PREP10-LABEL: st_align32_uint8_t_uint16_t:
@@ -2771,15 +2707,14 @@ define dso_local void @st_align32_uint8_t_uint16_t(i8* nocapture %ptr, i8 zeroex
 ; CHECK-PREP10-NEXT:    sthx r4, r3, r5
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 99999000
-  %0 = bitcast i8* %add.ptr to i16*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 99999000
   %conv = zext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 2
+  store atomic i16 %conv, ptr %add.ptr monotonic, align 2
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align64_uint8_t_uint16_t(i8* nocapture %ptr, i8 zeroext %str) {
+define dso_local void @st_align64_uint8_t_uint16_t(ptr nocapture %ptr, i8 zeroext %str) {
 ; CHECK-P10-LABEL: st_align64_uint8_t_uint16_t:
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    pli r5, 244140625
@@ -2795,24 +2730,22 @@ define dso_local void @st_align64_uint8_t_uint16_t(i8* nocapture %ptr, i8 zeroex
 ; CHECK-PREP10-NEXT:    sthx r4, r3, r5
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 1000000000000
-  %0 = bitcast i8* %add.ptr to i16*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 1000000000000
   %conv = zext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 2
+  store atomic i16 %conv, ptr %add.ptr monotonic, align 2
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_reg_uint8_t_uint16_t(i8* nocapture %ptr, i64 %off, i8 zeroext %str) {
+define dso_local void @st_reg_uint8_t_uint16_t(ptr nocapture %ptr, i64 %off, i8 zeroext %str) {
 ; CHECK-LABEL: st_reg_uint8_t_uint16_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    sthx r5, r3, r4
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 %off
-  %0 = bitcast i8* %add.ptr to i16*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 %off
   %conv = zext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 2
+  store atomic i16 %conv, ptr %add.ptr monotonic, align 2
   ret void
 }
 
@@ -2826,9 +2759,9 @@ define dso_local void @st_or1_uint8_t_uint16_t(i64 %ptr, i8 zeroext %off, i8 zer
 entry:
   %conv = zext i8 %off to i64
   %or = or i64 %conv, %ptr
-  %0 = inttoptr i64 %or to i16*
+  %0 = inttoptr i64 %or to ptr
   %conv1 = zext i8 %str to i16
-  store atomic i16 %conv1, i16* %0 monotonic, align 2
+  store atomic i16 %conv1, ptr %0 monotonic, align 2
   ret void
 }
 
@@ -2841,9 +2774,9 @@ define dso_local void @st_not_disjoint16_uint8_t_uint16_t(i64 %ptr, i8 zeroext %
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 6
-  %0 = inttoptr i64 %or to i16*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 2
+  store atomic i16 %conv, ptr %0 monotonic, align 2
   ret void
 }
 
@@ -2857,9 +2790,9 @@ define dso_local void @st_disjoint_align16_uint8_t_uint16_t(i64 %ptr, i8 zeroext
 entry:
   %and = and i64 %ptr, -4096
   %or = or i64 %and, 24
-  %0 = inttoptr i64 %or to i16*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 8
+  store atomic i16 %conv, ptr %0 monotonic, align 8
   ret void
 }
 
@@ -2873,9 +2806,9 @@ define dso_local void @st_not_disjoint32_uint8_t_uint16_t(i64 %ptr, i8 zeroext %
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 99999
-  %0 = inttoptr i64 %or to i16*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 2
+  store atomic i16 %conv, ptr %0 monotonic, align 2
   ret void
 }
 
@@ -2885,8 +2818,7 @@ define dso_local void @st_disjoint_align32_uint8_t_uint16_t(i64 %ptr, i8 zeroext
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    lis r5, -15264
 ; CHECK-P10-NEXT:    and r3, r3, r5
-; CHECK-P10-NEXT:    pli r5, 999990000
-; CHECK-P10-NEXT:    sthx r4, r3, r5
+; CHECK-P10-NEXT:    psth r4, 999990000(r3), 0
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-P9-LABEL: st_disjoint_align32_uint8_t_uint16_t:
@@ -2909,9 +2841,9 @@ define dso_local void @st_disjoint_align32_uint8_t_uint16_t(i64 %ptr, i8 zeroext
 entry:
   %and = and i64 %ptr, -1000341504
   %or = or i64 %and, 999990000
-  %0 = inttoptr i64 %or to i16*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 16
+  store atomic i16 %conv, ptr %0 monotonic, align 16
   ret void
 }
 
@@ -2937,9 +2869,9 @@ define dso_local void @st_not_disjoint64_uint8_t_uint16_t(i64 %ptr, i8 zeroext %
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %or = or i64 %ptr, 1000000000001
-  %0 = inttoptr i64 %or to i16*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 2
+  store atomic i16 %conv, ptr %0 monotonic, align 2
   ret void
 }
 
@@ -2964,9 +2896,9 @@ define dso_local void @st_disjoint_align64_uint8_t_uint16_t(i64 %ptr, i8 zeroext
 entry:
   %and = and i64 %ptr, -1099511627776
   %or = or i64 %and, 1000000000000
-  %0 = inttoptr i64 %or to i16*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 4096
+  store atomic i16 %conv, ptr %0 monotonic, align 4096
   ret void
 }
 
@@ -2978,7 +2910,7 @@ define dso_local void @st_cst_align16_uint8_t_uint16_t(i8 zeroext %str) {
 ; CHECK-NEXT:    blr
 entry:
   %conv = zext i8 %str to i16
-  store atomic i16 %conv, i16* inttoptr (i64 4080 to i16*) monotonic, align 16
+  store atomic i16 %conv, ptr inttoptr (i64 4080 to ptr) monotonic, align 16
   ret void
 }
 
@@ -2991,7 +2923,7 @@ define dso_local void @st_cst_align32_uint8_t_uint16_t(i8 zeroext %str) {
 ; CHECK-NEXT:    blr
 entry:
   %conv = zext i8 %str to i16
-  store atomic i16 %conv, i16* inttoptr (i64 9999900 to i16*) monotonic, align 4
+  store atomic i16 %conv, ptr inttoptr (i64 9999900 to ptr) monotonic, align 4
   ret void
 }
 
@@ -3013,7 +2945,7 @@ define dso_local void @st_cst_align64_uint8_t_uint16_t(i8 zeroext %str) {
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %conv = zext i8 %str to i16
-  store atomic i16 %conv, i16* inttoptr (i64 1000000000000 to i16*) monotonic, align 4096
+  store atomic i16 %conv, ptr inttoptr (i64 1000000000000 to ptr) monotonic, align 4096
   ret void
 }
 
@@ -3024,32 +2956,30 @@ define dso_local void @st_0_uint8_t_uint32_t(i64 %ptr, i8 zeroext %str) {
 ; CHECK-NEXT:    stw r4, 0(r3)
 ; CHECK-NEXT:    blr
 entry:
-  %0 = inttoptr i64 %ptr to i32*
+  %0 = inttoptr i64 %ptr to ptr
   %conv = zext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4
+  store atomic i32 %conv, ptr %0 monotonic, align 4
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align16_uint8_t_uint32_t(i8* nocapture %ptr, i8 zeroext %str) {
+define dso_local void @st_align16_uint8_t_uint32_t(ptr nocapture %ptr, i8 zeroext %str) {
 ; CHECK-LABEL: st_align16_uint8_t_uint32_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    stw r4, 8(r3)
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 8
-  %0 = bitcast i8* %add.ptr to i32*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 8
   %conv = zext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4
+  store atomic i32 %conv, ptr %add.ptr monotonic, align 4
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align32_uint8_t_uint32_t(i8* nocapture %ptr, i8 zeroext %str) {
+define dso_local void @st_align32_uint8_t_uint32_t(ptr nocapture %ptr, i8 zeroext %str) {
 ; CHECK-P10-LABEL: st_align32_uint8_t_uint32_t:
 ; CHECK-P10:       # %bb.0: # %entry
-; CHECK-P10-NEXT:    pli r5, 99999000
-; CHECK-P10-NEXT:    stwx r4, r3, r5
+; CHECK-P10-NEXT:    pstw r4, 99999000(r3), 0
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-PREP10-LABEL: st_align32_uint8_t_uint32_t:
@@ -3059,15 +2989,14 @@ define dso_local void @st_align32_uint8_t_uint32_t(i8* nocapture %ptr, i8 zeroex
 ; CHECK-PREP10-NEXT:    stwx r4, r3, r5
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 99999000
-  %0 = bitcast i8* %add.ptr to i32*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 99999000
   %conv = zext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4
+  store atomic i32 %conv, ptr %add.ptr monotonic, align 4
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align64_uint8_t_uint32_t(i8* nocapture %ptr, i8 zeroext %str) {
+define dso_local void @st_align64_uint8_t_uint32_t(ptr nocapture %ptr, i8 zeroext %str) {
 ; CHECK-P10-LABEL: st_align64_uint8_t_uint32_t:
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    pli r5, 244140625
@@ -3083,24 +3012,22 @@ define dso_local void @st_align64_uint8_t_uint32_t(i8* nocapture %ptr, i8 zeroex
 ; CHECK-PREP10-NEXT:    stwx r4, r3, r5
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 1000000000000
-  %0 = bitcast i8* %add.ptr to i32*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 1000000000000
   %conv = zext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4
+  store atomic i32 %conv, ptr %add.ptr monotonic, align 4
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_reg_uint8_t_uint32_t(i8* nocapture %ptr, i64 %off, i8 zeroext %str) {
+define dso_local void @st_reg_uint8_t_uint32_t(ptr nocapture %ptr, i64 %off, i8 zeroext %str) {
 ; CHECK-LABEL: st_reg_uint8_t_uint32_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    stwx r5, r3, r4
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 %off
-  %0 = bitcast i8* %add.ptr to i32*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 %off
   %conv = zext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4
+  store atomic i32 %conv, ptr %add.ptr monotonic, align 4
   ret void
 }
 
@@ -3114,9 +3041,9 @@ define dso_local void @st_or1_uint8_t_uint32_t(i64 %ptr, i8 zeroext %off, i8 zer
 entry:
   %conv = zext i8 %off to i64
   %or = or i64 %conv, %ptr
-  %0 = inttoptr i64 %or to i32*
+  %0 = inttoptr i64 %or to ptr
   %conv1 = zext i8 %str to i32
-  store atomic i32 %conv1, i32* %0 monotonic, align 4
+  store atomic i32 %conv1, ptr %0 monotonic, align 4
   ret void
 }
 
@@ -3129,9 +3056,9 @@ define dso_local void @st_not_disjoint16_uint8_t_uint32_t(i64 %ptr, i8 zeroext %
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 6
-  %0 = inttoptr i64 %or to i32*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4
+  store atomic i32 %conv, ptr %0 monotonic, align 4
   ret void
 }
 
@@ -3145,9 +3072,9 @@ define dso_local void @st_disjoint_align16_uint8_t_uint32_t(i64 %ptr, i8 zeroext
 entry:
   %and = and i64 %ptr, -4096
   %or = or i64 %and, 24
-  %0 = inttoptr i64 %or to i32*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 8
+  store atomic i32 %conv, ptr %0 monotonic, align 8
   ret void
 }
 
@@ -3161,9 +3088,9 @@ define dso_local void @st_not_disjoint32_uint8_t_uint32_t(i64 %ptr, i8 zeroext %
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 99999
-  %0 = inttoptr i64 %or to i32*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4
+  store atomic i32 %conv, ptr %0 monotonic, align 4
   ret void
 }
 
@@ -3173,8 +3100,7 @@ define dso_local void @st_disjoint_align32_uint8_t_uint32_t(i64 %ptr, i8 zeroext
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    lis r5, -15264
 ; CHECK-P10-NEXT:    and r3, r3, r5
-; CHECK-P10-NEXT:    pli r5, 999990000
-; CHECK-P10-NEXT:    stwx r4, r3, r5
+; CHECK-P10-NEXT:    pstw r4, 999990000(r3), 0
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-P9-LABEL: st_disjoint_align32_uint8_t_uint32_t:
@@ -3197,9 +3123,9 @@ define dso_local void @st_disjoint_align32_uint8_t_uint32_t(i64 %ptr, i8 zeroext
 entry:
   %and = and i64 %ptr, -1000341504
   %or = or i64 %and, 999990000
-  %0 = inttoptr i64 %or to i32*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 16
+  store atomic i32 %conv, ptr %0 monotonic, align 16
   ret void
 }
 
@@ -3225,9 +3151,9 @@ define dso_local void @st_not_disjoint64_uint8_t_uint32_t(i64 %ptr, i8 zeroext %
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %or = or i64 %ptr, 1000000000001
-  %0 = inttoptr i64 %or to i32*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4
+  store atomic i32 %conv, ptr %0 monotonic, align 4
   ret void
 }
 
@@ -3252,9 +3178,9 @@ define dso_local void @st_disjoint_align64_uint8_t_uint32_t(i64 %ptr, i8 zeroext
 entry:
   %and = and i64 %ptr, -1099511627776
   %or = or i64 %and, 1000000000000
-  %0 = inttoptr i64 %or to i32*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4096
+  store atomic i32 %conv, ptr %0 monotonic, align 4096
   ret void
 }
 
@@ -3266,7 +3192,7 @@ define dso_local void @st_cst_align16_uint8_t_uint32_t(i8 zeroext %str) {
 ; CHECK-NEXT:    blr
 entry:
   %conv = zext i8 %str to i32
-  store atomic i32 %conv, i32* inttoptr (i64 4080 to i32*) monotonic, align 16
+  store atomic i32 %conv, ptr inttoptr (i64 4080 to ptr) monotonic, align 16
   ret void
 }
 
@@ -3279,7 +3205,7 @@ define dso_local void @st_cst_align32_uint8_t_uint32_t(i8 zeroext %str) {
 ; CHECK-NEXT:    blr
 entry:
   %conv = zext i8 %str to i32
-  store atomic i32 %conv, i32* inttoptr (i64 9999900 to i32*) monotonic, align 4
+  store atomic i32 %conv, ptr inttoptr (i64 9999900 to ptr) monotonic, align 4
   ret void
 }
 
@@ -3301,7 +3227,7 @@ define dso_local void @st_cst_align64_uint8_t_uint32_t(i8 zeroext %str) {
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %conv = zext i8 %str to i32
-  store atomic i32 %conv, i32* inttoptr (i64 1000000000000 to i32*) monotonic, align 4096
+  store atomic i32 %conv, ptr inttoptr (i64 1000000000000 to ptr) monotonic, align 4096
   ret void
 }
 
@@ -3312,32 +3238,30 @@ define dso_local void @st_0_uint8_t_uint64_t(i64 %ptr, i8 zeroext %str) {
 ; CHECK-NEXT:    std r4, 0(r3)
 ; CHECK-NEXT:    blr
 entry:
-  %0 = inttoptr i64 %ptr to i64*
+  %0 = inttoptr i64 %ptr to ptr
   %conv = zext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %0 monotonic, align 8
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align16_uint8_t_uint64_t(i8* nocapture %ptr, i8 zeroext %str) {
+define dso_local void @st_align16_uint8_t_uint64_t(ptr nocapture %ptr, i8 zeroext %str) {
 ; CHECK-LABEL: st_align16_uint8_t_uint64_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    std r4, 8(r3)
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 8
-  %0 = bitcast i8* %add.ptr to i64*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 8
   %conv = zext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %add.ptr monotonic, align 8
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align32_uint8_t_uint64_t(i8* nocapture %ptr, i8 zeroext %str) {
+define dso_local void @st_align32_uint8_t_uint64_t(ptr nocapture %ptr, i8 zeroext %str) {
 ; CHECK-P10-LABEL: st_align32_uint8_t_uint64_t:
 ; CHECK-P10:       # %bb.0: # %entry
-; CHECK-P10-NEXT:    pli r5, 99999000
-; CHECK-P10-NEXT:    stdx r4, r3, r5
+; CHECK-P10-NEXT:    pstd r4, 99999000(r3), 0
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-PREP10-LABEL: st_align32_uint8_t_uint64_t:
@@ -3347,15 +3271,14 @@ define dso_local void @st_align32_uint8_t_uint64_t(i8* nocapture %ptr, i8 zeroex
 ; CHECK-PREP10-NEXT:    stdx r4, r3, r5
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 99999000
-  %0 = bitcast i8* %add.ptr to i64*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 99999000
   %conv = zext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %add.ptr monotonic, align 8
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align64_uint8_t_uint64_t(i8* nocapture %ptr, i8 zeroext %str) {
+define dso_local void @st_align64_uint8_t_uint64_t(ptr nocapture %ptr, i8 zeroext %str) {
 ; CHECK-P10-LABEL: st_align64_uint8_t_uint64_t:
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    pli r5, 244140625
@@ -3371,24 +3294,22 @@ define dso_local void @st_align64_uint8_t_uint64_t(i8* nocapture %ptr, i8 zeroex
 ; CHECK-PREP10-NEXT:    stdx r4, r3, r5
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 1000000000000
-  %0 = bitcast i8* %add.ptr to i64*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 1000000000000
   %conv = zext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %add.ptr monotonic, align 8
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_reg_uint8_t_uint64_t(i8* nocapture %ptr, i64 %off, i8 zeroext %str) {
+define dso_local void @st_reg_uint8_t_uint64_t(ptr nocapture %ptr, i64 %off, i8 zeroext %str) {
 ; CHECK-LABEL: st_reg_uint8_t_uint64_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    stdx r5, r3, r4
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 %off
-  %0 = bitcast i8* %add.ptr to i64*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 %off
   %conv = zext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %add.ptr monotonic, align 8
   ret void
 }
 
@@ -3402,9 +3323,9 @@ define dso_local void @st_or1_uint8_t_uint64_t(i64 %ptr, i8 zeroext %off, i8 zer
 entry:
   %conv = zext i8 %off to i64
   %or = or i64 %conv, %ptr
-  %0 = inttoptr i64 %or to i64*
+  %0 = inttoptr i64 %or to ptr
   %conv1 = zext i8 %str to i64
-  store atomic i64 %conv1, i64* %0 monotonic, align 8
+  store atomic i64 %conv1, ptr %0 monotonic, align 8
   ret void
 }
 
@@ -3417,9 +3338,9 @@ define dso_local void @st_not_disjoint16_uint8_t_uint64_t(i64 %ptr, i8 zeroext %
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 6
-  %0 = inttoptr i64 %or to i64*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %0 monotonic, align 8
   ret void
 }
 
@@ -3433,9 +3354,9 @@ define dso_local void @st_disjoint_align16_uint8_t_uint64_t(i64 %ptr, i8 zeroext
 entry:
   %and = and i64 %ptr, -4096
   %or = or i64 %and, 24
-  %0 = inttoptr i64 %or to i64*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %0 monotonic, align 8
   ret void
 }
 
@@ -3449,9 +3370,9 @@ define dso_local void @st_not_disjoint32_uint8_t_uint64_t(i64 %ptr, i8 zeroext %
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 99999
-  %0 = inttoptr i64 %or to i64*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %0 monotonic, align 8
   ret void
 }
 
@@ -3461,8 +3382,7 @@ define dso_local void @st_disjoint_align32_uint8_t_uint64_t(i64 %ptr, i8 zeroext
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    lis r5, -15264
 ; CHECK-P10-NEXT:    and r3, r3, r5
-; CHECK-P10-NEXT:    pli r5, 999990000
-; CHECK-P10-NEXT:    stdx r4, r3, r5
+; CHECK-P10-NEXT:    pstd r4, 999990000(r3), 0
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-P9-LABEL: st_disjoint_align32_uint8_t_uint64_t:
@@ -3485,9 +3405,9 @@ define dso_local void @st_disjoint_align32_uint8_t_uint64_t(i64 %ptr, i8 zeroext
 entry:
   %and = and i64 %ptr, -1000341504
   %or = or i64 %and, 999990000
-  %0 = inttoptr i64 %or to i64*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 16
+  store atomic i64 %conv, ptr %0 monotonic, align 16
   ret void
 }
 
@@ -3513,9 +3433,9 @@ define dso_local void @st_not_disjoint64_uint8_t_uint64_t(i64 %ptr, i8 zeroext %
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %or = or i64 %ptr, 1000000000001
-  %0 = inttoptr i64 %or to i64*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %0 monotonic, align 8
   ret void
 }
 
@@ -3540,9 +3460,9 @@ define dso_local void @st_disjoint_align64_uint8_t_uint64_t(i64 %ptr, i8 zeroext
 entry:
   %and = and i64 %ptr, -1099511627776
   %or = or i64 %and, 1000000000000
-  %0 = inttoptr i64 %or to i64*
+  %0 = inttoptr i64 %or to ptr
   %conv = zext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 4096
+  store atomic i64 %conv, ptr %0 monotonic, align 4096
   ret void
 }
 
@@ -3554,7 +3474,7 @@ define dso_local void @st_cst_align16_uint8_t_uint64_t(i8 zeroext %str) {
 ; CHECK-NEXT:    blr
 entry:
   %conv = zext i8 %str to i64
-  store atomic i64 %conv, i64* inttoptr (i64 4080 to i64*) monotonic, align 16
+  store atomic i64 %conv, ptr inttoptr (i64 4080 to ptr) monotonic, align 16
   ret void
 }
 
@@ -3567,7 +3487,7 @@ define dso_local void @st_cst_align32_uint8_t_uint64_t(i8 zeroext %str) {
 ; CHECK-NEXT:    blr
 entry:
   %conv = zext i8 %str to i64
-  store atomic i64 %conv, i64* inttoptr (i64 9999900 to i64*) monotonic, align 8
+  store atomic i64 %conv, ptr inttoptr (i64 9999900 to ptr) monotonic, align 8
   ret void
 }
 
@@ -3589,7 +3509,7 @@ define dso_local void @st_cst_align64_uint8_t_uint64_t(i8 zeroext %str) {
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %conv = zext i8 %str to i64
-  store atomic i64 %conv, i64* inttoptr (i64 1000000000000 to i64*) monotonic, align 4096
+  store atomic i64 %conv, ptr inttoptr (i64 1000000000000 to ptr) monotonic, align 4096
   ret void
 }
 
@@ -3600,32 +3520,30 @@ define dso_local void @st_0_int8_t_uint16_t(i64 %ptr, i8 signext %str) {
 ; CHECK-NEXT:    sth r4, 0(r3)
 ; CHECK-NEXT:    blr
 entry:
-  %0 = inttoptr i64 %ptr to i16*
+  %0 = inttoptr i64 %ptr to ptr
   %conv = sext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 2
+  store atomic i16 %conv, ptr %0 monotonic, align 2
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align16_int8_t_uint16_t(i8* nocapture %ptr, i8 signext %str) {
+define dso_local void @st_align16_int8_t_uint16_t(ptr nocapture %ptr, i8 signext %str) {
 ; CHECK-LABEL: st_align16_int8_t_uint16_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    sth r4, 8(r3)
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 8
-  %0 = bitcast i8* %add.ptr to i16*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 8
   %conv = sext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 2
+  store atomic i16 %conv, ptr %add.ptr monotonic, align 2
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align32_int8_t_uint16_t(i8* nocapture %ptr, i8 signext %str) {
+define dso_local void @st_align32_int8_t_uint16_t(ptr nocapture %ptr, i8 signext %str) {
 ; CHECK-P10-LABEL: st_align32_int8_t_uint16_t:
 ; CHECK-P10:       # %bb.0: # %entry
-; CHECK-P10-NEXT:    pli r5, 99999000
-; CHECK-P10-NEXT:    sthx r4, r3, r5
+; CHECK-P10-NEXT:    psth r4, 99999000(r3), 0
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-PREP10-LABEL: st_align32_int8_t_uint16_t:
@@ -3635,15 +3553,14 @@ define dso_local void @st_align32_int8_t_uint16_t(i8* nocapture %ptr, i8 signext
 ; CHECK-PREP10-NEXT:    sthx r4, r3, r5
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 99999000
-  %0 = bitcast i8* %add.ptr to i16*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 99999000
   %conv = sext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 2
+  store atomic i16 %conv, ptr %add.ptr monotonic, align 2
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align64_int8_t_uint16_t(i8* nocapture %ptr, i8 signext %str) {
+define dso_local void @st_align64_int8_t_uint16_t(ptr nocapture %ptr, i8 signext %str) {
 ; CHECK-P10-LABEL: st_align64_int8_t_uint16_t:
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    pli r5, 244140625
@@ -3659,24 +3576,22 @@ define dso_local void @st_align64_int8_t_uint16_t(i8* nocapture %ptr, i8 signext
 ; CHECK-PREP10-NEXT:    sthx r4, r3, r5
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 1000000000000
-  %0 = bitcast i8* %add.ptr to i16*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 1000000000000
   %conv = sext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 2
+  store atomic i16 %conv, ptr %add.ptr monotonic, align 2
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_reg_int8_t_uint16_t(i8* nocapture %ptr, i64 %off, i8 signext %str) {
+define dso_local void @st_reg_int8_t_uint16_t(ptr nocapture %ptr, i64 %off, i8 signext %str) {
 ; CHECK-LABEL: st_reg_int8_t_uint16_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    sthx r5, r3, r4
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 %off
-  %0 = bitcast i8* %add.ptr to i16*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 %off
   %conv = sext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 2
+  store atomic i16 %conv, ptr %add.ptr monotonic, align 2
   ret void
 }
 
@@ -3690,9 +3605,9 @@ define dso_local void @st_or1_int8_t_uint16_t(i64 %ptr, i8 zeroext %off, i8 sign
 entry:
   %conv = zext i8 %off to i64
   %or = or i64 %conv, %ptr
-  %0 = inttoptr i64 %or to i16*
+  %0 = inttoptr i64 %or to ptr
   %conv1 = sext i8 %str to i16
-  store atomic i16 %conv1, i16* %0 monotonic, align 2
+  store atomic i16 %conv1, ptr %0 monotonic, align 2
   ret void
 }
 
@@ -3705,9 +3620,9 @@ define dso_local void @st_not_disjoint16_int8_t_uint16_t(i64 %ptr, i8 signext %s
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 6
-  %0 = inttoptr i64 %or to i16*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 2
+  store atomic i16 %conv, ptr %0 monotonic, align 2
   ret void
 }
 
@@ -3721,9 +3636,9 @@ define dso_local void @st_disjoint_align16_int8_t_uint16_t(i64 %ptr, i8 signext 
 entry:
   %and = and i64 %ptr, -4096
   %or = or i64 %and, 24
-  %0 = inttoptr i64 %or to i16*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 8
+  store atomic i16 %conv, ptr %0 monotonic, align 8
   ret void
 }
 
@@ -3737,9 +3652,9 @@ define dso_local void @st_not_disjoint32_int8_t_uint16_t(i64 %ptr, i8 signext %s
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 99999
-  %0 = inttoptr i64 %or to i16*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 2
+  store atomic i16 %conv, ptr %0 monotonic, align 2
   ret void
 }
 
@@ -3749,8 +3664,7 @@ define dso_local void @st_disjoint_align32_int8_t_uint16_t(i64 %ptr, i8 signext 
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    lis r5, -15264
 ; CHECK-P10-NEXT:    and r3, r3, r5
-; CHECK-P10-NEXT:    pli r5, 999990000
-; CHECK-P10-NEXT:    sthx r4, r3, r5
+; CHECK-P10-NEXT:    psth r4, 999990000(r3), 0
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-P9-LABEL: st_disjoint_align32_int8_t_uint16_t:
@@ -3773,9 +3687,9 @@ define dso_local void @st_disjoint_align32_int8_t_uint16_t(i64 %ptr, i8 signext 
 entry:
   %and = and i64 %ptr, -1000341504
   %or = or i64 %and, 999990000
-  %0 = inttoptr i64 %or to i16*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 16
+  store atomic i16 %conv, ptr %0 monotonic, align 16
   ret void
 }
 
@@ -3801,9 +3715,9 @@ define dso_local void @st_not_disjoint64_int8_t_uint16_t(i64 %ptr, i8 signext %s
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %or = or i64 %ptr, 1000000000001
-  %0 = inttoptr i64 %or to i16*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 2
+  store atomic i16 %conv, ptr %0 monotonic, align 2
   ret void
 }
 
@@ -3828,9 +3742,9 @@ define dso_local void @st_disjoint_align64_int8_t_uint16_t(i64 %ptr, i8 signext 
 entry:
   %and = and i64 %ptr, -1099511627776
   %or = or i64 %and, 1000000000000
-  %0 = inttoptr i64 %or to i16*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i16
-  store atomic i16 %conv, i16* %0 monotonic, align 4096
+  store atomic i16 %conv, ptr %0 monotonic, align 4096
   ret void
 }
 
@@ -3842,7 +3756,7 @@ define dso_local void @st_cst_align16_int8_t_uint16_t(i8 signext %str) {
 ; CHECK-NEXT:    blr
 entry:
   %conv = sext i8 %str to i16
-  store atomic i16 %conv, i16* inttoptr (i64 4080 to i16*) monotonic, align 16
+  store atomic i16 %conv, ptr inttoptr (i64 4080 to ptr) monotonic, align 16
   ret void
 }
 
@@ -3855,7 +3769,7 @@ define dso_local void @st_cst_align32_int8_t_uint16_t(i8 signext %str) {
 ; CHECK-NEXT:    blr
 entry:
   %conv = sext i8 %str to i16
-  store atomic i16 %conv, i16* inttoptr (i64 9999900 to i16*) monotonic, align 4
+  store atomic i16 %conv, ptr inttoptr (i64 9999900 to ptr) monotonic, align 4
   ret void
 }
 
@@ -3877,7 +3791,7 @@ define dso_local void @st_cst_align64_int8_t_uint16_t(i8 signext %str) {
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %conv = sext i8 %str to i16
-  store atomic i16 %conv, i16* inttoptr (i64 1000000000000 to i16*) monotonic, align 4096
+  store atomic i16 %conv, ptr inttoptr (i64 1000000000000 to ptr) monotonic, align 4096
   ret void
 }
 
@@ -3888,32 +3802,30 @@ define dso_local void @st_0_int8_t_uint32_t(i64 %ptr, i8 signext %str) {
 ; CHECK-NEXT:    stw r4, 0(r3)
 ; CHECK-NEXT:    blr
 entry:
-  %0 = inttoptr i64 %ptr to i32*
+  %0 = inttoptr i64 %ptr to ptr
   %conv = sext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4
+  store atomic i32 %conv, ptr %0 monotonic, align 4
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align16_int8_t_uint32_t(i8* nocapture %ptr, i8 signext %str) {
+define dso_local void @st_align16_int8_t_uint32_t(ptr nocapture %ptr, i8 signext %str) {
 ; CHECK-LABEL: st_align16_int8_t_uint32_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    stw r4, 8(r3)
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 8
-  %0 = bitcast i8* %add.ptr to i32*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 8
   %conv = sext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4
+  store atomic i32 %conv, ptr %add.ptr monotonic, align 4
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align32_int8_t_uint32_t(i8* nocapture %ptr, i8 signext %str) {
+define dso_local void @st_align32_int8_t_uint32_t(ptr nocapture %ptr, i8 signext %str) {
 ; CHECK-P10-LABEL: st_align32_int8_t_uint32_t:
 ; CHECK-P10:       # %bb.0: # %entry
-; CHECK-P10-NEXT:    pli r5, 99999000
-; CHECK-P10-NEXT:    stwx r4, r3, r5
+; CHECK-P10-NEXT:    pstw r4, 99999000(r3), 0
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-PREP10-LABEL: st_align32_int8_t_uint32_t:
@@ -3923,15 +3835,14 @@ define dso_local void @st_align32_int8_t_uint32_t(i8* nocapture %ptr, i8 signext
 ; CHECK-PREP10-NEXT:    stwx r4, r3, r5
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 99999000
-  %0 = bitcast i8* %add.ptr to i32*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 99999000
   %conv = sext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4
+  store atomic i32 %conv, ptr %add.ptr monotonic, align 4
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align64_int8_t_uint32_t(i8* nocapture %ptr, i8 signext %str) {
+define dso_local void @st_align64_int8_t_uint32_t(ptr nocapture %ptr, i8 signext %str) {
 ; CHECK-P10-LABEL: st_align64_int8_t_uint32_t:
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    pli r5, 244140625
@@ -3947,24 +3858,22 @@ define dso_local void @st_align64_int8_t_uint32_t(i8* nocapture %ptr, i8 signext
 ; CHECK-PREP10-NEXT:    stwx r4, r3, r5
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 1000000000000
-  %0 = bitcast i8* %add.ptr to i32*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 1000000000000
   %conv = sext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4
+  store atomic i32 %conv, ptr %add.ptr monotonic, align 4
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_reg_int8_t_uint32_t(i8* nocapture %ptr, i64 %off, i8 signext %str) {
+define dso_local void @st_reg_int8_t_uint32_t(ptr nocapture %ptr, i64 %off, i8 signext %str) {
 ; CHECK-LABEL: st_reg_int8_t_uint32_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    stwx r5, r3, r4
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 %off
-  %0 = bitcast i8* %add.ptr to i32*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 %off
   %conv = sext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4
+  store atomic i32 %conv, ptr %add.ptr monotonic, align 4
   ret void
 }
 
@@ -3978,9 +3887,9 @@ define dso_local void @st_or1_int8_t_uint32_t(i64 %ptr, i8 zeroext %off, i8 sign
 entry:
   %conv = zext i8 %off to i64
   %or = or i64 %conv, %ptr
-  %0 = inttoptr i64 %or to i32*
+  %0 = inttoptr i64 %or to ptr
   %conv1 = sext i8 %str to i32
-  store atomic i32 %conv1, i32* %0 monotonic, align 4
+  store atomic i32 %conv1, ptr %0 monotonic, align 4
   ret void
 }
 
@@ -3993,9 +3902,9 @@ define dso_local void @st_not_disjoint16_int8_t_uint32_t(i64 %ptr, i8 signext %s
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 6
-  %0 = inttoptr i64 %or to i32*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4
+  store atomic i32 %conv, ptr %0 monotonic, align 4
   ret void
 }
 
@@ -4009,9 +3918,9 @@ define dso_local void @st_disjoint_align16_int8_t_uint32_t(i64 %ptr, i8 signext 
 entry:
   %and = and i64 %ptr, -4096
   %or = or i64 %and, 24
-  %0 = inttoptr i64 %or to i32*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 8
+  store atomic i32 %conv, ptr %0 monotonic, align 8
   ret void
 }
 
@@ -4025,9 +3934,9 @@ define dso_local void @st_not_disjoint32_int8_t_uint32_t(i64 %ptr, i8 signext %s
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 99999
-  %0 = inttoptr i64 %or to i32*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4
+  store atomic i32 %conv, ptr %0 monotonic, align 4
   ret void
 }
 
@@ -4037,8 +3946,7 @@ define dso_local void @st_disjoint_align32_int8_t_uint32_t(i64 %ptr, i8 signext 
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    lis r5, -15264
 ; CHECK-P10-NEXT:    and r3, r3, r5
-; CHECK-P10-NEXT:    pli r5, 999990000
-; CHECK-P10-NEXT:    stwx r4, r3, r5
+; CHECK-P10-NEXT:    pstw r4, 999990000(r3), 0
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-P9-LABEL: st_disjoint_align32_int8_t_uint32_t:
@@ -4061,9 +3969,9 @@ define dso_local void @st_disjoint_align32_int8_t_uint32_t(i64 %ptr, i8 signext 
 entry:
   %and = and i64 %ptr, -1000341504
   %or = or i64 %and, 999990000
-  %0 = inttoptr i64 %or to i32*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 16
+  store atomic i32 %conv, ptr %0 monotonic, align 16
   ret void
 }
 
@@ -4089,9 +3997,9 @@ define dso_local void @st_not_disjoint64_int8_t_uint32_t(i64 %ptr, i8 signext %s
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %or = or i64 %ptr, 1000000000001
-  %0 = inttoptr i64 %or to i32*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4
+  store atomic i32 %conv, ptr %0 monotonic, align 4
   ret void
 }
 
@@ -4116,9 +4024,9 @@ define dso_local void @st_disjoint_align64_int8_t_uint32_t(i64 %ptr, i8 signext 
 entry:
   %and = and i64 %ptr, -1099511627776
   %or = or i64 %and, 1000000000000
-  %0 = inttoptr i64 %or to i32*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i32
-  store atomic i32 %conv, i32* %0 monotonic, align 4096
+  store atomic i32 %conv, ptr %0 monotonic, align 4096
   ret void
 }
 
@@ -4130,7 +4038,7 @@ define dso_local void @st_cst_align16_int8_t_uint32_t(i8 signext %str) {
 ; CHECK-NEXT:    blr
 entry:
   %conv = sext i8 %str to i32
-  store atomic i32 %conv, i32* inttoptr (i64 4080 to i32*) monotonic, align 16
+  store atomic i32 %conv, ptr inttoptr (i64 4080 to ptr) monotonic, align 16
   ret void
 }
 
@@ -4143,7 +4051,7 @@ define dso_local void @st_cst_align32_int8_t_uint32_t(i8 signext %str) {
 ; CHECK-NEXT:    blr
 entry:
   %conv = sext i8 %str to i32
-  store atomic i32 %conv, i32* inttoptr (i64 9999900 to i32*) monotonic, align 4
+  store atomic i32 %conv, ptr inttoptr (i64 9999900 to ptr) monotonic, align 4
   ret void
 }
 
@@ -4165,7 +4073,7 @@ define dso_local void @st_cst_align64_int8_t_uint32_t(i8 signext %str) {
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %conv = sext i8 %str to i32
-  store atomic i32 %conv, i32* inttoptr (i64 1000000000000 to i32*) monotonic, align 4096
+  store atomic i32 %conv, ptr inttoptr (i64 1000000000000 to ptr) monotonic, align 4096
   ret void
 }
 
@@ -4176,32 +4084,30 @@ define dso_local void @st_0_int8_t_uint64_t(i64 %ptr, i8 signext %str) {
 ; CHECK-NEXT:    std r4, 0(r3)
 ; CHECK-NEXT:    blr
 entry:
-  %0 = inttoptr i64 %ptr to i64*
+  %0 = inttoptr i64 %ptr to ptr
   %conv = sext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %0 monotonic, align 8
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align16_int8_t_uint64_t(i8* nocapture %ptr, i8 signext %str) {
+define dso_local void @st_align16_int8_t_uint64_t(ptr nocapture %ptr, i8 signext %str) {
 ; CHECK-LABEL: st_align16_int8_t_uint64_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    std r4, 8(r3)
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 8
-  %0 = bitcast i8* %add.ptr to i64*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 8
   %conv = sext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %add.ptr monotonic, align 8
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align32_int8_t_uint64_t(i8* nocapture %ptr, i8 signext %str) {
+define dso_local void @st_align32_int8_t_uint64_t(ptr nocapture %ptr, i8 signext %str) {
 ; CHECK-P10-LABEL: st_align32_int8_t_uint64_t:
 ; CHECK-P10:       # %bb.0: # %entry
-; CHECK-P10-NEXT:    pli r5, 99999000
-; CHECK-P10-NEXT:    stdx r4, r3, r5
+; CHECK-P10-NEXT:    pstd r4, 99999000(r3), 0
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-PREP10-LABEL: st_align32_int8_t_uint64_t:
@@ -4211,15 +4117,14 @@ define dso_local void @st_align32_int8_t_uint64_t(i8* nocapture %ptr, i8 signext
 ; CHECK-PREP10-NEXT:    stdx r4, r3, r5
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 99999000
-  %0 = bitcast i8* %add.ptr to i64*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 99999000
   %conv = sext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %add.ptr monotonic, align 8
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_align64_int8_t_uint64_t(i8* nocapture %ptr, i8 signext %str) {
+define dso_local void @st_align64_int8_t_uint64_t(ptr nocapture %ptr, i8 signext %str) {
 ; CHECK-P10-LABEL: st_align64_int8_t_uint64_t:
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    pli r5, 244140625
@@ -4235,24 +4140,22 @@ define dso_local void @st_align64_int8_t_uint64_t(i8* nocapture %ptr, i8 signext
 ; CHECK-PREP10-NEXT:    stdx r4, r3, r5
 ; CHECK-PREP10-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 1000000000000
-  %0 = bitcast i8* %add.ptr to i64*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 1000000000000
   %conv = sext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %add.ptr monotonic, align 8
   ret void
 }
 
 ; Function Attrs: nofree norecurse nounwind uwtable willreturn
-define dso_local void @st_reg_int8_t_uint64_t(i8* nocapture %ptr, i64 %off, i8 signext %str) {
+define dso_local void @st_reg_int8_t_uint64_t(ptr nocapture %ptr, i64 %off, i8 signext %str) {
 ; CHECK-LABEL: st_reg_int8_t_uint64_t:
 ; CHECK:       # %bb.0: # %entry
 ; CHECK-NEXT:    stdx r5, r3, r4
 ; CHECK-NEXT:    blr
 entry:
-  %add.ptr = getelementptr inbounds i8, i8* %ptr, i64 %off
-  %0 = bitcast i8* %add.ptr to i64*
+  %add.ptr = getelementptr inbounds i8, ptr %ptr, i64 %off
   %conv = sext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %add.ptr monotonic, align 8
   ret void
 }
 
@@ -4266,9 +4169,9 @@ define dso_local void @st_or1_int8_t_uint64_t(i64 %ptr, i8 zeroext %off, i8 sign
 entry:
   %conv = zext i8 %off to i64
   %or = or i64 %conv, %ptr
-  %0 = inttoptr i64 %or to i64*
+  %0 = inttoptr i64 %or to ptr
   %conv1 = sext i8 %str to i64
-  store atomic i64 %conv1, i64* %0 monotonic, align 8
+  store atomic i64 %conv1, ptr %0 monotonic, align 8
   ret void
 }
 
@@ -4281,9 +4184,9 @@ define dso_local void @st_not_disjoint16_int8_t_uint64_t(i64 %ptr, i8 signext %s
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 6
-  %0 = inttoptr i64 %or to i64*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %0 monotonic, align 8
   ret void
 }
 
@@ -4297,9 +4200,9 @@ define dso_local void @st_disjoint_align16_int8_t_uint64_t(i64 %ptr, i8 signext 
 entry:
   %and = and i64 %ptr, -4096
   %or = or i64 %and, 24
-  %0 = inttoptr i64 %or to i64*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %0 monotonic, align 8
   ret void
 }
 
@@ -4313,9 +4216,9 @@ define dso_local void @st_not_disjoint32_int8_t_uint64_t(i64 %ptr, i8 signext %s
 ; CHECK-NEXT:    blr
 entry:
   %or = or i64 %ptr, 99999
-  %0 = inttoptr i64 %or to i64*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %0 monotonic, align 8
   ret void
 }
 
@@ -4325,8 +4228,7 @@ define dso_local void @st_disjoint_align32_int8_t_uint64_t(i64 %ptr, i8 signext 
 ; CHECK-P10:       # %bb.0: # %entry
 ; CHECK-P10-NEXT:    lis r5, -15264
 ; CHECK-P10-NEXT:    and r3, r3, r5
-; CHECK-P10-NEXT:    pli r5, 999990000
-; CHECK-P10-NEXT:    stdx r4, r3, r5
+; CHECK-P10-NEXT:    pstd r4, 999990000(r3), 0
 ; CHECK-P10-NEXT:    blr
 ;
 ; CHECK-P9-LABEL: st_disjoint_align32_int8_t_uint64_t:
@@ -4349,9 +4251,9 @@ define dso_local void @st_disjoint_align32_int8_t_uint64_t(i64 %ptr, i8 signext 
 entry:
   %and = and i64 %ptr, -1000341504
   %or = or i64 %and, 999990000
-  %0 = inttoptr i64 %or to i64*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 16
+  store atomic i64 %conv, ptr %0 monotonic, align 16
   ret void
 }
 
@@ -4377,9 +4279,9 @@ define dso_local void @st_not_disjoint64_int8_t_uint64_t(i64 %ptr, i8 signext %s
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %or = or i64 %ptr, 1000000000001
-  %0 = inttoptr i64 %or to i64*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 8
+  store atomic i64 %conv, ptr %0 monotonic, align 8
   ret void
 }
 
@@ -4404,9 +4306,9 @@ define dso_local void @st_disjoint_align64_int8_t_uint64_t(i64 %ptr, i8 signext 
 entry:
   %and = and i64 %ptr, -1099511627776
   %or = or i64 %and, 1000000000000
-  %0 = inttoptr i64 %or to i64*
+  %0 = inttoptr i64 %or to ptr
   %conv = sext i8 %str to i64
-  store atomic i64 %conv, i64* %0 monotonic, align 4096
+  store atomic i64 %conv, ptr %0 monotonic, align 4096
   ret void
 }
 
@@ -4418,7 +4320,7 @@ define dso_local void @st_cst_align16_int8_t_uint64_t(i8 signext %str) {
 ; CHECK-NEXT:    blr
 entry:
   %conv = sext i8 %str to i64
-  store atomic i64 %conv, i64* inttoptr (i64 4080 to i64*) monotonic, align 16
+  store atomic i64 %conv, ptr inttoptr (i64 4080 to ptr) monotonic, align 16
   ret void
 }
 
@@ -4431,7 +4333,7 @@ define dso_local void @st_cst_align32_int8_t_uint64_t(i8 signext %str) {
 ; CHECK-NEXT:    blr
 entry:
   %conv = sext i8 %str to i64
-  store atomic i64 %conv, i64* inttoptr (i64 9999900 to i64*) monotonic, align 8
+  store atomic i64 %conv, ptr inttoptr (i64 9999900 to ptr) monotonic, align 8
   ret void
 }
 
@@ -4453,6 +4355,6 @@ define dso_local void @st_cst_align64_int8_t_uint64_t(i8 signext %str) {
 ; CHECK-PREP10-NEXT:    blr
 entry:
   %conv = sext i8 %str to i64
-  store atomic i64 %conv, i64* inttoptr (i64 1000000000000 to i64*) monotonic, align 4096
+  store atomic i64 %conv, ptr inttoptr (i64 1000000000000 to ptr) monotonic, align 4096
   ret void
 }

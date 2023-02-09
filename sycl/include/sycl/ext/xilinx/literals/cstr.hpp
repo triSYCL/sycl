@@ -18,11 +18,10 @@
 #define SYCL_DETAIL_CSTR_HPP
 
 #include <algorithm>
+#include <sycl/detail/defines_elementary.hpp>
 
-__SYCL_INLINE_NAMESPACE(cl) {
-
-namespace sycl::ext::xilinx {
-
+namespace sycl {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace detail {
 
 #ifdef __clang__
@@ -82,6 +81,8 @@ struct concat<cstr<CharT, Sep...>, cstr<CharT, P1...>, cstr<CharT, P2...>,
 template <typename... Ts> using concat_t = typename concat<Ts...>::type;
 } // namespace detail
 
+namespace ext::xilinx {
+
 inline namespace literals {
 /// We are using a compiler extention here and we don't want any warning about
 /// it so we suppress that warning.
@@ -96,9 +97,7 @@ operator"" _cstr() noexcept {
 }
 #pragma clang diagnostic pop
 } // namespace literals
-} // namespace sycl::ext::xilinx
 
-namespace sycl::ext::xilinx {
 /// Define some bases for number manipulation.
 /// Base*::size is used to get the size of the base(2, 10, 16).
 /// Base*::at<N> is used to get the didgit that represent the value N.
@@ -134,7 +133,8 @@ template <auto N, typename Base> struct StrNumber<false, number<N, Base>> {
 };
 #endif
 
-} // namespace sycl::ext::xilinx
-} // __SYCL_INLINE_NAMESPACE(cl)
+} // namespace ext::xilinx
+}
+} // namespace sycl
 
 #endif

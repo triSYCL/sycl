@@ -1,5 +1,4 @@
-; RUN: opt -loop-accesses -analyze -enable-new-pm=0 %s
-; RUN: opt -passes='print-access-info' -disable-output < %s
+; RUN: opt -passes='print<access-info>' -disable-output < %s
 
 ; This regression test is defending against a use of the wrong interface
 ; of TypeSize (implicit conversion to a scalar). This issue cropped up

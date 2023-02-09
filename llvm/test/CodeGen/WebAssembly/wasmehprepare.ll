@@ -1,15 +1,16 @@
 ; RUN: opt < %s -winehprepare -demote-catchswitch-only -wasmehprepare -S | FileCheck %s
+; RUN: opt < %s -winehprepare -demote-catchswitch-only -wasmehprepare -S --mattr=+atomics,+bulk-memory | FileCheck %s
 
 target datalayout = "e-m:e-p:32:32-i64:64-n32:64-S128"
 target triple = "wasm32-unknown-unknown"
 
-; CHECK: @__wasm_lpad_context = external global { i32, i8*, i32 }
+; CHECK: @__wasm_lpad_context = external thread_local global { i32, i8*, i32 }
 
 @_ZTIi = external constant i8*
 %struct.Temp = type { i8 }
 
 ; A single 'catch (int)' clause.
-; A wasm.catch.exn() call, wasm.lsda() call, and personality call to generate a
+; A wasm.catch() call, wasm.lsda() call, and personality call to generate a
 ; selector should all be genereated after the catchpad.
 ;
 ; void foo();
@@ -37,7 +38,7 @@ catch.start:                                      ; preds = %catch.dispatch
   br i1 %matches, label %catch, label %rethrow
 ; CHECK: catch.start:
 ; CHECK-NEXT:   %[[CATCHPAD:.*]] = catchpad
-; CHECK-NEXT:   %[[EXN:.*]] = call i8* @llvm.wasm.catch.exn(i32 0)
+; CHECK-NEXT:   %[[EXN:.*]] = call i8* @llvm.wasm.catch(i32 0)
 ; CHECK-NEXT:   call void @llvm.wasm.landingpad.index(token %[[CATCHPAD]], i32 0)
 ; CHECK-NEXT:   store i32 0, i32* getelementptr inbounds ({ i32, i8*, i32 }, { i32, i8*, i32 }* @__wasm_lpad_context, i32 0, i32 0)
 ; CHECK-NEXT:   %[[LSDA:.*]] = call i8* @llvm.wasm.lsda()
@@ -62,10 +63,10 @@ try.cont:                                         ; preds = %entry, %catch
 }
 
 ; Two try-catches.
-; For the catchpad with a single 'catch (...)', only a wasm.catch.exn() call
-; should be generated after the catchpad; wasm.landingpad.index() and
-; personality call should NOT be generated. For the other catchpad, the argument
-; of wasm.landingpad.index() should be not 1 but 0.
+; For the catchpad with a single 'catch (...)', only a wasm.catch() call should
+; be generated after the catchpad; wasm.landingpad.index() and personality call
+; should NOT be generated. For the other catchpad, the argument of
+; wasm.landingpad.index() should be not 1 but 0.
 ;
 ; void foo();
 ; void test1() {

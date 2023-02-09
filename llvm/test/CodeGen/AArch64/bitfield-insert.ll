@@ -10,9 +10,9 @@ define [1 x i64] @from_clang([1 x i64] %f.coerce, i32 %n) nounwind readnone {
 ; CHECK-LABEL: from_clang:
 ; CHECK:       // %bb.0: // %entry
 ; CHECK-NEXT:    mov w8, #135
+; CHECK-NEXT:    and x9, x0, #0xffffff00
 ; CHECK-NEXT:    and w8, w0, w8
 ; CHECK-NEXT:    bfi w8, w1, #3, #4
-; CHECK-NEXT:    and x9, x0, #0xffffff00
 ; CHECK-NEXT:    orr x0, x8, x9
 ; CHECK-NEXT:    ret
 entry:
@@ -96,8 +96,8 @@ define void @test_32bit_masked(i32 *%existing, i32 *%new) {
 ; CHECK-LABEL: test_32bit_masked:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    ldr w8, [x0]
-; CHECK-NEXT:    ldr w9, [x1]
 ; CHECK-NEXT:    mov w10, #135
+; CHECK-NEXT:    ldr w9, [x1]
 ; CHECK-NEXT:    and w8, w8, w10
 ; CHECK-NEXT:    bfi w8, w9, #3, #4
 ; CHECK-NEXT:    str w8, [x0]
@@ -142,8 +142,8 @@ define void @test_32bit_complexmask(i32 *%existing, i32 *%new) {
 ; CHECK-LABEL: test_32bit_complexmask:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    ldr w8, [x0]
-; CHECK-NEXT:    ldr w9, [x1]
 ; CHECK-NEXT:    mov w10, #647
+; CHECK-NEXT:    ldr w9, [x1]
 ; CHECK-NEXT:    and w8, w8, w10
 ; CHECK-NEXT:    bfi w8, w9, #3, #4
 ; CHECK-NEXT:    str w8, [x0]
@@ -166,8 +166,8 @@ define void @test_32bit_badmask(i32 *%existing, i32 *%new) {
 ; CHECK-LABEL: test_32bit_badmask:
 ; CHECK:       // %bb.0:
 ; CHECK-NEXT:    ldr w8, [x0]
-; CHECK-NEXT:    ldr w9, [x1]
 ; CHECK-NEXT:    mov w10, #135
+; CHECK-NEXT:    ldr w9, [x1]
 ; CHECK-NEXT:    mov w11, #632
 ; CHECK-NEXT:    and w8, w8, w10
 ; CHECK-NEXT:    and w9, w11, w9, lsl #3
@@ -191,13 +191,13 @@ define void @test_32bit_badmask(i32 *%existing, i32 *%new) {
 define void @test_64bit_badmask(i64 *%existing, i64 *%new) {
 ; CHECK-LABEL: test_64bit_badmask:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    ldr x8, [x0]
-; CHECK-NEXT:    ldr x9, [x1]
-; CHECK-NEXT:    mov w10, #135
-; CHECK-NEXT:    and x8, x8, x10
-; CHECK-NEXT:    lsl w9, w9, #3
-; CHECK-NEXT:    mov w10, #664
-; CHECK-NEXT:    and x9, x9, x10
+; CHECK-NEXT:    ldr x9, [x0]
+; CHECK-NEXT:    mov w8, #135
+; CHECK-NEXT:    ldr x10, [x1]
+; CHECK-NEXT:    mov w11, #664
+; CHECK-NEXT:    and x8, x9, x8
+; CHECK-NEXT:    lsl w10, w10, #3
+; CHECK-NEXT:    and x9, x10, x11
 ; CHECK-NEXT:    orr x8, x8, x9
 ; CHECK-NEXT:    str x8, [x0]
 ; CHECK-NEXT:    ret
@@ -269,8 +269,7 @@ define i32 @test_nouseful_bits(i8 %a, i32 %b) {
 ; CHECK-NEXT:    lsl w8, w8, #8
 ; CHECK-NEXT:    mov w9, w8
 ; CHECK-NEXT:    bfxil w9, w0, #0, #8
-; CHECK-NEXT:    bfi w8, w9, #16, #16
-; CHECK-NEXT:    mov w0, w8
+; CHECK-NEXT:    orr w0, w8, w9, lsl #16
 ; CHECK-NEXT:    ret
   %conv = zext i8 %a to i32     ;   0  0  0  A
   %shl = shl i32 %b, 8          ;   B2 B1 B0 0
@@ -380,8 +379,8 @@ define i32 @test_or_and_and2(i32 %a, i32 %b) {
 ; CHECK-LABEL: test_or_and_and2:
 ; CHECK:       // %bb.0: // %entry
 ; CHECK-NEXT:    lsr w8, w0, #4
-; CHECK-NEXT:    bfi w1, w8, #4, #12
 ; CHECK-NEXT:    mov w0, w1
+; CHECK-NEXT:    bfi w0, w8, #4, #12
 ; CHECK-NEXT:    ret
 entry:
   %and = and i32 %a, 65520   ; 0x0000fff0
@@ -528,10 +527,10 @@ define i32 @test7(i32 %a) {
 define i64 @test8(i64 %a) {
 ; CHECK-LABEL: test8:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    mov x9, #2035482624
-; CHECK-NEXT:    and x8, x0, #0xff000000000000ff
-; CHECK-NEXT:    movk x9, #36694, lsl #32
-; CHECK-NEXT:    orr x0, x8, x9
+; CHECK-NEXT:    mov x8, #2035482624
+; CHECK-NEXT:    and x9, x0, #0xff000000000000ff
+; CHECK-NEXT:    movk x8, #36694, lsl #32
+; CHECK-NEXT:    orr x0, x9, x8
 ; CHECK-NEXT:    ret
   %1 = and i64 %a, -72057594037927681 ; 0xff000000000000ff
   %2 = or i64 %1, 157601565442048     ; 0x00008f5679530000
@@ -545,8 +544,8 @@ define i64 @test8(i64 %a) {
 define i32 @test9(i64 %b, i32 %e) {
 ; CHECK-LABEL: test9:
 ; CHECK:       // %bb.0:
-; CHECK-NEXT:    lsr x0, x0, #12
 ; CHECK-NEXT:    lsr w8, w1, #23
+; CHECK-NEXT:    lsr x0, x0, #12
 ; CHECK-NEXT:    bfi w0, w8, #23, #9
 ; CHECK-NEXT:    // kill: def $w0 killed $w0 killed $x0
 ; CHECK-NEXT:    ret
@@ -580,9 +579,8 @@ define <2 x i32> @test_complex_type(<2 x i32>* %addr, i64 %in, i64* %bf ) {
 define i64 @test_truncated_shift(i64 %x, i64 %y) {
 ; CHECK-LABEL: test_truncated_shift:
 ; CHECK:       // %bb.0: // %entry
-; CHECK-NEXT:    lsl w8, w1, #25
-; CHECK-NEXT:    lsr x8, x8, #25
-; CHECK-NEXT:    bfi x0, x8, #25, #5
+; CHECK-NEXT:    // kill: def $w1 killed $w1 killed $x1 def $x1
+; CHECK-NEXT:    bfi x0, x1, #25, #5
 ; CHECK-NEXT:    ret
 entry:
   %and = and i64 %x, -1040187393
@@ -590,4 +588,153 @@ entry:
   %and5 = and i64 %shl4, 1040187392
   %or = or i64 %and5, %and
   ret i64 %or
+}
+
+define i64 @test_and_extended_shift_with_imm(i64 %0) {
+; CHECK-LABEL: test_and_extended_shift_with_imm:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    // kill: def $w0 killed $w0 killed $x0 def $x0
+; CHECK-NEXT:    ubfiz x0, x0, #7, #8
+; CHECK-NEXT:    ret
+  %2 = shl i64 %0, 7
+  %3 = and i64 %2, 32640  ; #0x7f80
+  ret i64 %3
+}
+
+; orr with left-shifted operand is better than bfi, since it improves data
+; dependency, and orr has a smaller latency and higher throughput than bfm on
+; some AArch64 processors (for the rest, orr is at least as good as bfm)
+;
+; ubfx x8, x0, #8, #7
+; and x9, x0, #0x7f
+; orr x0, x9, x8, lsl #7
+define i64 @test_orr_not_bfxil_i64(i64 %0) {
+; CHECK-LABEL: test_orr_not_bfxil_i64:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    ubfx x8, x0, #8, #7
+; CHECK-NEXT:    and x9, x0, #0x7f
+; CHECK-NEXT:    orr x0, x9, x8, lsl #7
+; CHECK-NEXT:    ret
+  %2 = and i64 %0, 127
+  %3 = lshr i64 %0, 1
+  %4 = and i64 %3, 16256  ; 0x3f80
+  %5 = or i64 %4, %2
+  ret i64 %5
+}
+
+; The 32-bit test for `test_orr_not_bfxil_i64`.
+define i32 @test_orr_not_bfxil_i32(i32 %0) {
+; CHECK-LABEL: test_orr_not_bfxil_i32:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    ubfx w8, w0, #8, #7
+; CHECK-NEXT:    and w9, w0, #0x7f
+; CHECK-NEXT:    orr w0, w9, w8, lsl #7
+; CHECK-NEXT:    ret
+  %2 = and i32 %0, 127
+  %3 = lshr i32 %0, 1
+  %4 = and i32 %3, 16256  ; 0x3f80
+  %5 = or i32 %4, %2
+  ret i32 %5
+}
+
+; For or operation, one operand is a left shift of another operand.
+; So orr with a left-shifted operand is generated (not bfi).
+define i64 @test_orr_not_bfi_i64(i64 %0) {
+; CHECK-LABEL: test_orr_not_bfi_i64:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    and x8, x0, #0xff
+; CHECK-NEXT:    orr x0, x8, x8, lsl #8
+; CHECK-NEXT:    ret
+  %2 = and i64 %0, 255
+  %3 = shl i64 %2, 8
+  %4 = or i64 %2, %3
+  ret i64 %4
+}
+
+; bfi is better than orr, since it would simplify away two instructions
+; (%mask and %bit-field-pos-op).
+define i32 @test_bfi_not_orr_i32(i32 %0, i32 %1) {
+; CHECK-LABEL: test_bfi_not_orr_i32:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    and w8, w1, #0xff
+; CHECK-NEXT:    bfi w8, w0, #8, #8
+; CHECK-NEXT:    mov w0, w8
+; CHECK-NEXT:    ret
+  %bfi_dst = and i32 %1, 255
+  %mask = and i32 %0, 255
+  %bit-field-pos-op = shl i32 %mask, 8
+  %or_res = or i32 %bit-field-pos-op, %bfi_dst
+  ret i32 %or_res
+}
+
+; orr is generated (not bfi), since both simplify away one instruction (%3)
+; while orr has shorter latency and higher throughput.
+define i32 @test_orr_not_bfi_i32(i32 %0) {
+; CHECK-LABEL: test_orr_not_bfi_i32:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    and w8, w0, #0xff
+; CHECK-NEXT:    orr w0, w8, w8, lsl #8
+; CHECK-NEXT:    ret
+  %2 = and i32 %0, 255
+  %3 = shl i32 %2, 8
+  %4 = or i32 %2, %3
+  ret i32 %4
+}
+
+; bfxil is better than orr, since it would simplify away two instructions
+; (%mask and %bit-field-extract-op).
+define i64 @test_bfxil_not_orr_i64(i64 %0, i64 %1) {
+; CHECK-LABEL: test_bfxil_not_orr_i64:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    and x0, x0, #0xff000
+; CHECK-NEXT:    bfxil x0, x1, #12, #8
+; CHECK-NEXT:    ret
+  %shifted-mask = and i64 %1, 1044480
+  %bfi-dst = and i64 %0, 1044480
+  %bit-field-extract-op = lshr i64 %shifted-mask, 12
+  %or_res = or i64 %bit-field-extract-op, %bfi-dst
+  ret i64 %or_res
+}
+
+; orr is generated (not bfxil), since one operand is the right shift of another
+; operand.
+define i64 @orr_not_bfxil_test2_i64(i64 %0) {
+; CHECK-LABEL: orr_not_bfxil_test2_i64:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    and x8, x0, #0xff000
+; CHECK-NEXT:    orr x0, x8, x8, lsr #12
+; CHECK-NEXT:    ret
+  %2 = and i64 %0, 1044480 ; 0xff000
+  %3 = lshr i64 %2, 12
+  %4 = or i64 %2, %3
+  ret i64 %4
+}
+
+; bfxil simplifies away two instructions (that computes %shifted-mask and
+; %bit-field-extract-op respectively), so it's better than orr (which
+; simplifies away at most one shift).
+define i32 @test_bfxil_not_orr_i32(i32 %0, i32 %1) {
+; CHECK-LABEL: test_bfxil_not_orr_i32:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    and w0, w0, #0xff000
+; CHECK-NEXT:    bfxil w0, w1, #12, #8
+; CHECK-NEXT:    ret
+  %shifted-mask = and i32 %1, 1044480
+  %bfxil-dst = and i32 %0, 1044480
+  %bit-field-extract-op = lshr i32 %shifted-mask, 12
+  %or_res = or i32 %bit-field-extract-op, %bfxil-dst
+  ret i32 %or_res
+}
+
+; one operand is the shift of another operand, so orr is generated (not bfxil).
+define i32 @orr_not_bfxil_test2_i32(i32 %0) {
+; CHECK-LABEL: orr_not_bfxil_test2_i32:
+; CHECK:       // %bb.0:
+; CHECK-NEXT:    and w8, w0, #0xff000
+; CHECK-NEXT:    orr w0, w8, w8, lsr #12
+; CHECK-NEXT:    ret
+  %2 = and i32 %0, 1044480  ; 0xff000
+  %3 = lshr i32 %2, 12
+  %4 = or i32 %2, %3
+  ret i32 %4
 }

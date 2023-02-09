@@ -1,14 +1,24 @@
 ; RUN: llc < %s -mtriple=x86_64-unknown-linux | FileCheck --check-prefix=NO-ADDRSIG %s
 ; RUN: llc < %s -mtriple=x86_64-unknown-linux -addrsig | FileCheck %s
+; RUN: llc %s -filetype=obj -mtriple=x86_64-unknown-linux -addrsig -o %t
+; RUN: llvm-readobj --addrsig %t | FileCheck %s --check-prefix=SYM
 
 ; NO-ADDRSIG-NOT: .addrsig
+
+; SYM:      Addrsig [
+; SYM-NEXT:   Sym: f1
+; SYM-NEXT:   Sym: metadata_f2
+; SYM-NEXT:   Sym: g1
+; SYM-NEXT:   Sym: a1
+; SYM-NEXT:   Sym: i1
+; SYM-NEXT: ]
 
 ; CHECK: .addrsig
 
 ; CHECK: .addrsig_sym f1
-define void @f1() {
-  %f1 = bitcast void()* @f1 to i8*
-  %f2 = bitcast void()* @f2 to i8*
+define void()* @f1() {
+  %f1 = bitcast void()* ()* @f1 to i8*
+  %f2 = bitcast void()* ()* @f2 to i8*
   %f3 = bitcast void()* @f3 to i8*
   %g1 = bitcast i32* @g1 to i8*
   %g2 = bitcast i32* @g2 to i8*
@@ -27,14 +37,15 @@ define void @f1() {
 
 declare void @f4(i8*) unnamed_addr
 
-; CHECK-NOT: .addrsig_sym metadata_f1
+;; f1 is unreferenced, so this directive does not emit an entry.
+; CHECK: .addrsig_sym metadata_f1
 declare void @metadata_f1()
 
 ; CHECK: .addrsig_sym metadata_f2
 declare void @metadata_f2()
 
 ; CHECK-NOT: .addrsig_sym f2
-define internal void @f2() local_unnamed_addr {
+define internal void()* @f2() local_unnamed_addr {
   unreachable
 }
 
@@ -63,9 +74,9 @@ declare void @f3() unnamed_addr
 @a2 = internal local_unnamed_addr alias i32, i32* @g2
 
 ; CHECK: .addrsig_sym i1
-@i1 = ifunc void(), void()* @f1
+@i1 = ifunc void(), void()* ()* @f1
 ; CHECK-NOT: .addrsig_sym i2
-@i2 = internal local_unnamed_addr ifunc void(), void()* @f2
+@i2 = internal local_unnamed_addr ifunc void(), void()* ()* @f2
 
 declare void @llvm.dbg.value(metadata, metadata, metadata)
 

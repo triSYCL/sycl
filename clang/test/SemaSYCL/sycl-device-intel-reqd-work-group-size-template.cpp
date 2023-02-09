@@ -1,6 +1,6 @@
 // RUN: %clang_cc1 -fsycl-is-device -fsyntax-only -ast-dump -verify -pedantic %s | FileCheck %s
 
-// Test that checks template parameter support for 'intel::reqd_work_group_size' attribute on sycl device.
+// Test that checks template parameter support for 'sycl::reqd_work_group_size' attribute on sycl device.
 
 // Test that checks wrong function template instantiation and ensures that the type
 // is checked properly when instantiating from the template definition.
@@ -84,3 +84,18 @@ int check() {
 // CHECK-NEXT: SubstNonTypeTemplateParmExpr {{.*}}
 // CHECK-NEXT: NonTypeTemplateParmDecl {{.*}}
 // CHECK-NEXT: IntegerLiteral{{.*}}8{{$}}
+
+// No diagnostic is emitted because the arguments match. Duplicate attribute is silently ignored.
+[[sycl::reqd_work_group_size(4, 4, 4)]] [[sycl::reqd_work_group_size(4, 4, 4)]] void func4() {}
+// CHECK: FunctionDecl {{.*}} {{.*}} func4 'void ()'
+// CHECK:       ReqdWorkGroupSizeAttr
+// CHECK-NEXT:  ConstantExpr{{.*}}'int'
+// CHECK-NEXT:  value: Int 4
+// CHECK-NEXT:  IntegerLiteral{{.*}}4{{$}}
+// CHECK-NEXT:  ConstantExpr{{.*}}'int'
+// CHECK-NEXT:  value: Int 4
+// CHECK-NEXT:  IntegerLiteral{{.*}}4{{$}}
+// CHECK-NEXT:  ConstantExpr{{.*}}'int'
+// CHECK-NEXT:  value: Int 4
+// CHECK-NEXT:  IntegerLiteral{{.*}}4{{$}}
+// CHECK-NOT:   ReqdWorkGroupSizeAttr

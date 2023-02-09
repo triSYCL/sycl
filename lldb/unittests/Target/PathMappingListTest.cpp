@@ -40,7 +40,8 @@ static void TestPathMappings(const PathMappingList &map,
         map.RemapPath(ConstString(match.original.GetPath()), actual_remapped));
     EXPECT_EQ(FileSpec(actual_remapped.GetStringRef()), match.remapped);
     FileSpec unmapped_spec;
-    EXPECT_TRUE(map.ReverseRemapPath(match.remapped, unmapped_spec));
+    EXPECT_TRUE(
+        map.ReverseRemapPath(match.remapped, unmapped_spec).has_value());
     std::string unmapped_path = unmapped_spec.GetPath();
     EXPECT_EQ(unmapped_path, orig_normalized);
   }
@@ -66,16 +67,16 @@ TEST(PathMappingListTest, RelativeTests) {
 #endif
   };
   PathMappingList map;
-  map.Append(ConstString("."), ConstString("/tmp"), false);
+  map.Append(".", "/tmp", false);
   TestPathMappings(map, matches, fails);
   PathMappingList map2;
-  map2.Append(ConstString(""), ConstString("/tmp"), false);
+  map2.Append("", "/tmp", false);
   TestPathMappings(map, matches, fails);
 }
 
 TEST(PathMappingListTest, AbsoluteTests) {
   PathMappingList map;
-  map.Append(ConstString("/old"), ConstString("/new"), false);
+  map.Append("/old", "/new", false);
   Matches matches[] = {
     {"/old", "/new"},
     {"/old/", "/new"},
@@ -97,7 +98,7 @@ TEST(PathMappingListTest, AbsoluteTests) {
 
 TEST(PathMappingListTest, RemapRoot) {
   PathMappingList map;
-  map.Append(ConstString("/"), ConstString("/new"), false);
+  map.Append("/", "/new", false);
   Matches matches[] = {
     {"/old", "/new/old"},
     {"/old/", "/new/old"},
@@ -118,7 +119,7 @@ TEST(PathMappingListTest, RemapRoot) {
 #ifndef _WIN32
 TEST(PathMappingListTest, CrossPlatformTests) {
   PathMappingList map;
-  map.Append(ConstString(R"(C:\old)"), ConstString("/new"), false);
+  map.Append(R"(C:\old)", "/new", false);
   Matches matches[] = {
     {R"(C:\old)", llvm::sys::path::Style::windows, "/new"},
     {R"(C:\old\)", llvm::sys::path::Style::windows, "/new"},

@@ -52,7 +52,7 @@ class EffectOpInterfaceBase<string name, string baseEffect>
         Collects all of the operation's effects into `effects`.
       }],
       "void", "getEffects",
-         (ins "::mlir::SmallVectorImpl<::mlir::SideEffects::EffectInstance<"
+         (ins "::llvm::SmallVectorImpl<::mlir::SideEffects::EffectInstance<"
               # baseEffect # ">> &":$effects)
     >,
   ];
@@ -92,13 +92,6 @@ class EffectOpInterfaceBase<string name, string baseEffect>
       SmallVector<::mlir::SideEffects::EffectInstance<}] # baseEffect # [{>, 4> effects;
       getEffects(effects);
       return effects.empty();
-    }
-
-    /// Returns true if the given operation has no effects for this interface.
-    static bool hasNoEffect(Operation *op) {
-      if (auto interface = dyn_cast<}] # name # [{>(op))
-        return interface.hasNoEffect();
-      return op->hasTrait<::mlir::OpTrait::HasRecursiveSideEffects>();
     }
 
     /// Collect all of the effect instances that operate on the provided value

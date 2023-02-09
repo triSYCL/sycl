@@ -6,16 +6,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "CL/sycl/detail/defines.hpp"
+#include <sycl/detail/defines.hpp>
+#include <sycl/detail/defines_elementary.hpp>
 
-#ifndef SYCL_XILINX_FPGA_PARALLEL_INVOKE_HPP
-#define SYCL_XILINX_FPGA_PARALLEL_INVOKE_HPP
+#ifndef SYCL_XILINX_FPGA_STATIC_UNROLL_HPP
+#define SYCL_XILINX_FPGA_STATIC_UNROLL_HPP
 
-__SYCL_INLINE_NAMESPACE(cl) {
 
 namespace sycl {
-
-namespace ext::xilinx {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace detail {
 
 ///
@@ -99,12 +98,13 @@ void inline normalized_static_full_unrolling(auto &LoopStep) {
                                          Offset, Increment>(LoopStep);
   }
 }
-} // namespace detail
 
+} // namespace detail
+namespace ext::xilinx {
 ///
 ///@brief Build a partially unrolled loop
 ///
-///@tparam UnrollFactor How many iterations are explicited in loop body
+///@tparam unroll_factor How many iterations are explicited in loop body
 ///@tparam Increment by how many is incremented the loop variable between
 ///        each iteration
 ///
@@ -120,21 +120,21 @@ void inline normalized_static_full_unrolling(auto &LoopStep) {
 /// }
 /// \endcode
 ///
-/// Except that there are UnrollFactor less iterations and the loop body
-/// contains UnrollFactor successive call to LoopStep (with I incremented
+/// Except that there are unroll_factor less iterations and the loop body
+/// contains unroll_factor successive call to LoopStep (with I incremented
 /// accordingly).
-template <int UnrollFactor = 1, int Increment = 1>
+template <int unroll_factor = 1, int Increment = 1>
 inline void partial_static_unroll(auto &LoopStep, auto &LoopCondition,
                                   int StartIdx, int Bound) {
 
-  static_assert(UnrollFactor >= 1, "Static unrolling requires a strictly "
+  static_assert(unroll_factor >= 1, "Static unrolling requires a strictly "
                                    "positive unfold factor. For full "
                                    "static unrolling use "
                                    "full_static_unroll");
   static_assert(Increment != 0, "static_unroll increment cannot be zero");
-  constexpr int newIncrement = UnrollFactor * Increment;
+  constexpr int newIncrement = unroll_factor * Increment;
   for (int i = StartIdx; LoopCondition(i, Bound); i += newIncrement) {
-    detail::normalized_partial_static_unroll<0, UnrollFactor, Increment>(
+    detail::normalized_partial_static_unroll<0, unroll_factor, Increment>(
         LoopStep, LoopCondition, i, Bound);
   }
 }
@@ -166,7 +166,7 @@ inline void static_full_unrolling(auto &Functor) {
       Functor);
 }
 } // namespace ext::xilinx
+}
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)
 
 #endif

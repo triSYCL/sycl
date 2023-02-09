@@ -30,21 +30,20 @@ static constexpr unsigned maxFreeID = 1 << 20;
 
 /// Returns an unsed symbol in `module` for `oldSymbolName` by trying numeric
 /// suffix in `lastUsedID`.
-static SmallString<64> renameSymbol(StringRef oldSymName, unsigned &lastUsedID,
-                                    spirv::ModuleOp module) {
+static StringAttr renameSymbol(StringRef oldSymName, unsigned &lastUsedID,
+                               spirv::ModuleOp module) {
   SmallString<64> newSymName(oldSymName);
   newSymName.push_back('_');
 
-  while (lastUsedID < maxFreeID) {
-    std::string possible = (newSymName + llvm::utostr(++lastUsedID)).str();
+  MLIRContext *ctx = module->getContext();
 
-    if (!SymbolTable::lookupSymbolIn(module, possible)) {
-      newSymName += llvm::utostr(lastUsedID);
-      break;
-    }
+  while (lastUsedID < maxFreeID) {
+    auto possible = StringAttr::get(ctx, newSymName + Twine(++lastUsedID));
+    if (!SymbolTable::lookupSymbolIn(module, possible))
+      return possible;
   }
 
-  return newSymName;
+  return StringAttr::get(ctx, newSymName);
 }
 
 /// Checks if a symbol with the same name as `op` already exists in `source`.
@@ -57,7 +56,7 @@ static LogicalResult updateSymbolAndAllUses(SymbolOpInterface op,
     return success();
 
   StringRef oldSymName = op.getName();
-  SmallString<64> newSymName = renameSymbol(oldSymName, lastUsedID, target);
+  StringAttr newSymName = renameSymbol(oldSymName, lastUsedID, target);
 
   if (failed(SymbolTable::replaceAllSymbolUses(op, newSymName, target)))
     return op.emitError("unable to update all symbol uses for ")
@@ -77,7 +76,7 @@ static LogicalResult updateSymbolAndAllUses(SymbolOpInterface op,
 static llvm::hash_code computeHash(SymbolOpInterface symbolOp) {
   auto range =
       llvm::make_filter_range(symbolOp->getAttrs(), [](NamedAttribute attr) {
-        return attr.first != SymbolTable::getSymbolAttrName();
+        return attr.getName() != SymbolTable::getSymbolAttrName();
       });
 
   return llvm::hash_combine(
@@ -95,16 +94,16 @@ OwningOpRef<spirv::ModuleOp> combine(ArrayRef<spirv::ModuleOp> inputModules,
     return nullptr;
 
   spirv::ModuleOp firstModule = inputModules.front();
-  auto addressingModel = firstModule.addressing_model();
-  auto memoryModel = firstModule.memory_model();
-  auto vceTriple = firstModule.vce_triple();
+  auto addressingModel = firstModule.getAddressingModel();
+  auto memoryModel = firstModule.getMemoryModel();
+  auto vceTriple = firstModule.getVceTriple();
 
   // First check whether there are conflicts between addressing/memory model.
   // Return early if so.
   for (auto module : inputModules) {
-    if (module.addressing_model() != addressingModel ||
-        module.memory_model() != memoryModel ||
-        module.vce_triple() != vceTriple) {
+    if (module.getAddressingModel() != addressingModel ||
+        module.getMemoryModel() != memoryModel ||
+        module.getVceTriple() != vceTriple) {
       module.emitError("input modules differ in addressing model, memory "
                        "model, and/or VCE triple");
       return nullptr;
@@ -127,13 +126,13 @@ OwningOpRef<spirv::ModuleOp> combine(ArrayRef<spirv::ModuleOp> inputModules,
   unsigned lastUsedID = 0;
 
   for (auto inputModule : inputModules) {
-    spirv::ModuleOp moduleClone = inputModule.clone();
+    OwningOpRef<spirv::ModuleOp> moduleClone = inputModule.clone();
 
     // In the combined module, rename all symbols that conflict with symbols
     // from the current input module. This renaming applies to all ops except
-    // for spv.funcs. This way, if the conflicting op in the input module is
-    // non-spv.func, we rename that symbol instead and maintain the spv.func in
-    // the combined module name as it is.
+    // for spirv.funcs. This way, if the conflicting op in the input module is
+    // non-spirv.func, we rename that symbol instead and maintain the spirv.func
+    // in the combined module name as it is.
     for (auto &op : *combinedModule.getBody()) {
       auto symbolOp = dyn_cast<SymbolOpInterface>(op);
       if (!symbolOp)
@@ -142,7 +141,7 @@ OwningOpRef<spirv::ModuleOp> combine(ArrayRef<spirv::ModuleOp> inputModules,
       StringRef oldSymName = symbolOp.getName();
 
       if (!isa<FuncOp>(op) &&
-          failed(updateSymbolAndAllUses(symbolOp, combinedModule, moduleClone,
+          failed(updateSymbolAndAllUses(symbolOp, combinedModule, *moduleClone,
                                         lastUsedID)))
         return nullptr;
 
@@ -170,15 +169,15 @@ OwningOpRef<spirv::ModuleOp> combine(ArrayRef<spirv::ModuleOp> inputModules,
     }
 
     // In the current input module, rename all symbols that conflict with
-    // symbols from the combined module. This includes renaming spv.funcs.
-    for (auto &op : *moduleClone.getBody()) {
+    // symbols from the combined module. This includes renaming spirv.funcs.
+    for (auto &op : *moduleClone->getBody()) {
       auto symbolOp = dyn_cast<SymbolOpInterface>(op);
       if (!symbolOp)
         continue;
 
       StringRef oldSymName = symbolOp.getName();
 
-      if (failed(updateSymbolAndAllUses(symbolOp, moduleClone, combinedModule,
+      if (failed(updateSymbolAndAllUses(symbolOp, *moduleClone, combinedModule,
                                         lastUsedID)))
         return nullptr;
 
@@ -204,7 +203,7 @@ OwningOpRef<spirv::ModuleOp> combine(ArrayRef<spirv::ModuleOp> inputModules,
     }
 
     // Clone all the module's ops to the combined module.
-    for (auto &op : *moduleClone.getBody())
+    for (auto &op : *moduleClone->getBody())
       combinedModuleBuilder.insert(op.clone());
   }
 
@@ -234,7 +233,7 @@ OwningOpRef<spirv::ModuleOp> combine(ArrayRef<spirv::ModuleOp> inputModules,
     SymbolOpInterface replacementSymOp = result.first->second;
 
     if (failed(SymbolTable::replaceAllSymbolUses(
-            symbolOp, replacementSymOp.getName(), combinedModule))) {
+            symbolOp, replacementSymOp.getNameAttr(), combinedModule))) {
       symbolOp.emitError("unable to update all symbol uses for ")
           << symbolOp.getName() << " to " << replacementSymOp.getName();
       return nullptr;

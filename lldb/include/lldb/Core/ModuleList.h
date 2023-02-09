@@ -60,6 +60,16 @@ public:
   bool SetClangModulesCachePath(const FileSpec &path);
   bool GetEnableExternalLookup() const;
   bool SetEnableExternalLookup(bool new_value);
+  bool GetEnableBackgroundLookup() const;
+  bool GetEnableLLDBIndexCache() const;
+  bool SetEnableLLDBIndexCache(bool new_value);
+  uint64_t GetLLDBIndexCacheMaxByteSize();
+  uint64_t GetLLDBIndexCacheMaxPercent();
+  uint64_t GetLLDBIndexCacheExpirationDays();
+  FileSpec GetLLDBIndexCachePath() const;
+  bool SetLLDBIndexCachePath(const FileSpec &path);
+
+  bool GetLoadSymbolOnDemand();
 
   PathMappingList GetSymlinkMappings() const;
 };
@@ -159,7 +169,7 @@ public:
   ///     ModulesDidLoad may be deferred when adding multiple Modules
   ///     to the Target, but it must be called at the end,
   ///     before resuming execution.
-  bool AppendIfNeeded(const lldb::ModuleSP &module_sp, bool notify = true);
+  bool AppendIfNeeded(const lldb::ModuleSP &new_module, bool notify = true);
 
   void Append(const ModuleList &module_list);
 
@@ -448,12 +458,27 @@ public:
   static void FindSharedModules(const ModuleSpec &module_spec,
                                 ModuleList &matching_module_list);
 
+  static lldb::ModuleSP FindSharedModule(const UUID &uuid);
+
   static size_t RemoveOrphanSharedModules(bool mandatory);
 
   static bool RemoveSharedModuleIfOrphaned(const Module *module_ptr);
 
+  /// Applies 'callback' to each module in this ModuleList.
+  /// If 'callback' returns false, iteration terminates.
+  /// The 'module_sp' passed to 'callback' is guaranteed to
+  /// be non-null.
+  ///
+  /// This function is thread-safe.
   void ForEach(std::function<bool(const lldb::ModuleSP &module_sp)> const
                    &callback) const;
+
+  /// Returns true if 'callback' returns true for one of the modules
+  /// in this ModuleList.
+  ///
+  /// This function is thread-safe.
+  bool AnyOf(
+      std::function<bool(lldb_private::Module &module)> const &callback) const;
 
 protected:
   // Class typedefs.

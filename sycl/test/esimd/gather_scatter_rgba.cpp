@@ -1,51 +1,37 @@
-// RUN: %clangxx -fsycl -fsyntax-only -Wno-unused-command-line-argument %s 2>&1 | FileCheck %s --implicit-check-not="warning:" --implicit-check-not="error:"
+// RUN: %clangxx -fsycl -fsycl-device-only -fsyntax-only -Xclang -verify %s
 
-// This test checks compilation of ESIMD slm gather_rgba/scatter_rgba APIs.
-// Those which are deprecated must produce deprecation messages.
+// This test checks that device compiler can:
+// - successfully compile gather_rgba/scatter_rgba APIs
+// - emit an error if some of the restrictions on template parameters are
+//   violated
 
-#include <CL/sycl.hpp>
 #include <limits>
-#include <sycl/ext/intel/experimental/esimd.hpp>
+#include <sycl/ext/intel/esimd.hpp>
+#include <sycl/sycl.hpp>
 #include <utility>
 
-using namespace sycl::ext::intel::experimental::esimd;
-using namespace cl::sycl;
+using namespace sycl::ext::intel::esimd;
+using namespace sycl;
 
-void kernel(accessor<int, 1, access::mode::read_write,
-                     access::target::global_buffer> &buf) SYCL_ESIMD_FUNCTION {
-  simd<uint32_t, 32> offsets(0, 1);
+void kernel(int *ptr) SYCL_ESIMD_FUNCTION {
+  simd<uint32_t, 32> offsets(0, sizeof(int) * 4);
   simd<int, 32 * 4> v1(0, 1);
 
-  // CHECK: gather_scatter_rgba.cpp:21{{.*}}warning: 'ESIMD_ABGR_ENABLE' is deprecated
-  // CHECK: sycl/ext/intel/experimental/esimd/common.hpp{{.*}}note:
-  auto v0 = gather_rgba<int, 32, ESIMD_ABGR_ENABLE>(buf.get_pointer(), offsets);
-  // CHECK: gather_scatter_rgba.cpp:24{{.*}}warning: 'ESIMD_ABGR_ENABLE' is deprecated
-  // CHECK: sycl/ext/intel/experimental/esimd/common.hpp{{.*}}note:
-  v0 = gather_rgba<int, 32, ChannelMaskType::ESIMD_ABGR_ENABLE>(
-      buf.get_pointer(), offsets);
-  v0 =
-      gather_rgba<int, 32, rgba_channel_mask::ABGR>(buf.get_pointer(), offsets);
+  auto v0 = gather_rgba<rgba_channel_mask::ABGR>(ptr, offsets);
 
   v0 = v0 + v1;
 
-  // CHECK: gather_scatter_rgba.cpp:33{{.*}}warning: 'ESIMD_ABGR_ENABLE' is deprecated
-  // CHECK: sycl/ext/intel/experimental/esimd/common.hpp{{.*}}note:
-  scatter_rgba<int, 32, ESIMD_ABGR_ENABLE>(buf.get_pointer(), v0, offsets);
-  // CHECK: gather_scatter_rgba.cpp:36{{.*}}warning: 'ESIMD_ABGR_ENABLE' is deprecated
-  // CHECK: sycl/ext/intel/experimental/esimd/common.hpp{{.*}}note:
-  scatter_rgba<int, 32, ChannelMaskType::ESIMD_ABGR_ENABLE>(buf.get_pointer(),
-                                                            v0, offsets);
-  scatter_rgba<int, 32, rgba_channel_mask::ABGR>(buf.get_pointer(), v0,
-                                                 offsets);
+  scatter_rgba<rgba_channel_mask::ABGR>(ptr, offsets, v0);
 }
 
-// A "border" between host and device compilations
-// CHECK-LABEL: 4 warnings generated
-// CHECK: gather_scatter_rgba.cpp:21{{.*}}warning: 'ESIMD_ABGR_ENABLE' is deprecated
-// CHECK: sycl/ext/intel/experimental/esimd/common.hpp{{.*}}note:
-// CHECK: gather_scatter_rgba.cpp:24{{.*}}warning: 'ESIMD_ABGR_ENABLE' is deprecated
-// CHECK: sycl/ext/intel/experimental/esimd/common.hpp{{.*}}note:
-// CHECK: gather_scatter_rgba.cpp:33{{.*}}warning: 'ESIMD_ABGR_ENABLE' is deprecated
-// CHECK: sycl/ext/intel/experimental/esimd/common.hpp{{.*}}note:
-// CHECK: gather_scatter_rgba.cpp:36{{.*}}warning: 'ESIMD_ABGR_ENABLE' is deprecated
-// CHECK: sycl/ext/intel/experimental/esimd/common.hpp{{.*}}note:
+constexpr int AGR_N_CHANNELS = 3;
+
+void kernel1(int *ptr, simd<int, 32 * AGR_N_CHANNELS> v) SYCL_ESIMD_FUNCTION {
+  simd<uint32_t, 32> offsets(0, sizeof(int) * 4);
+  // only 1, 2, 3, 4-element masks covering consequitive channels starting from
+  // R are supported
+  // expected-error-re@* {{static assertion failed{{.*}}rgba_channel_mask{{.*}}ABGR{{.*}}BGR{{.*}}GR{{.*}}R{{.*}}}}
+  // expected-note@* {{in instantiation }}
+  // expected-note@+1 {{in instantiation }}
+  scatter_rgba<rgba_channel_mask::AGR>(ptr, offsets, v);
+}

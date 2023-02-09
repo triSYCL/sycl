@@ -20,8 +20,10 @@
 #include "llvm/IR/PassManager.h"
 #include "llvm/Passes/OptimizationLevel.h"
 #include "llvm/Support/Error.h"
+#include "llvm/Support/PGOOptions.h"
 #include "llvm/Support/raw_ostream.h"
 #include "llvm/Transforms/IPO/Inliner.h"
+#include "llvm/Transforms/IPO/ModuleInliner.h"
 #include "llvm/Transforms/Instrumentation.h"
 #include "llvm/Transforms/Scalar/LoopPassManager.h"
 #include <vector>
@@ -31,49 +33,6 @@ class StringRef;
 class AAManager;
 class TargetMachine;
 class ModuleSummaryIndex;
-
-/// A struct capturing PGO tunables.
-struct PGOOptions {
-  enum PGOAction { NoAction, IRInstr, IRUse, SampleUse };
-  enum CSPGOAction { NoCSAction, CSIRInstr, CSIRUse };
-  PGOOptions(std::string ProfileFile = "", std::string CSProfileGenFile = "",
-             std::string ProfileRemappingFile = "", PGOAction Action = NoAction,
-             CSPGOAction CSAction = NoCSAction,
-             bool DebugInfoForProfiling = false,
-             bool PseudoProbeForProfiling = false)
-      : ProfileFile(ProfileFile), CSProfileGenFile(CSProfileGenFile),
-        ProfileRemappingFile(ProfileRemappingFile), Action(Action),
-        CSAction(CSAction), DebugInfoForProfiling(DebugInfoForProfiling ||
-                                                  (Action == SampleUse &&
-                                                   !PseudoProbeForProfiling)),
-        PseudoProbeForProfiling(PseudoProbeForProfiling) {
-    // Note, we do allow ProfileFile.empty() for Action=IRUse LTO can
-    // callback with IRUse action without ProfileFile.
-
-    // If there is a CSAction, PGOAction cannot be IRInstr or SampleUse.
-    assert(this->CSAction == NoCSAction ||
-           (this->Action != IRInstr && this->Action != SampleUse));
-
-    // For CSIRInstr, CSProfileGenFile also needs to be nonempty.
-    assert(this->CSAction != CSIRInstr || !this->CSProfileGenFile.empty());
-
-    // If CSAction is CSIRUse, PGOAction needs to be IRUse as they share
-    // a profile.
-    assert(this->CSAction != CSIRUse || this->Action == IRUse);
-
-    // If neither Action nor CSAction, DebugInfoForProfiling or
-    // PseudoProbeForProfiling needs to be true.
-    assert(this->Action != NoAction || this->CSAction != NoCSAction ||
-           this->DebugInfoForProfiling || this->PseudoProbeForProfiling);
-  }
-  std::string ProfileFile;
-  std::string CSProfileGenFile;
-  std::string ProfileRemappingFile;
-  PGOAction Action;
-  CSPGOAction CSAction;
-  bool DebugInfoForProfiling;
-  bool PseudoProbeForProfiling;
-};
 
 /// Tunable parameters for passes in the default pipelines.
 class PipelineTuningOptions {
@@ -115,6 +74,18 @@ public:
   /// Tuning option to enable/disable function merging. Its default value is
   /// false.
   bool MergeFunctions;
+
+  /// Tuning option to override the default inliner threshold.
+  int InlinerThreshold;
+
+  // Experimental option to eagerly invalidate more analyses. This has the
+  // potential to decrease max memory usage in exchange for more compile time.
+  // This may affect codegen due to either passes using analyses only when
+  // cached, or invalidating and recalculating an analysis that was
+  // stale/imprecise but still valid. Currently this invalidates all function
+  // analyses after various module->function or cgscc->function adaptors in the
+  // default pipelines.
+  bool EagerlyInvalidateAnalyses;
 };
 
 /// This class provides access to building LLVM's passes.
@@ -145,7 +116,7 @@ public:
 
   explicit PassBuilder(TargetMachine *TM = nullptr,
                        PipelineTuningOptions PTO = PipelineTuningOptions(),
-                       Optional<PGOOptions> PGOOpt = None,
+                       Optional<PGOOptions> PGOOpt = std::nullopt,
                        PassInstrumentationCallbacks *PIC = nullptr);
 
   /// Cross register the analysis managers through their proxies.
@@ -229,6 +200,11 @@ public:
   ModuleInlinerWrapperPass buildInlinerPipeline(OptimizationLevel Level,
                                                 ThinOrFullLTOPhase Phase);
 
+  /// Construct the module pipeline that performs inlining with
+  /// module inliner pass.
+  ModulePassManager buildModuleInlinerPipeline(OptimizationLevel Level,
+                                               ThinOrFullLTOPhase Phase);
+
   /// Construct the core LLVM module optimization pipeline.
   ///
   /// This pipeline focuses on optimizing the execution speed of the IR. It
@@ -242,8 +218,9 @@ public:
   /// only intended for use when attempting to optimize code. If frontends
   /// require some transformations for semantic reasons, they should explicitly
   /// build them.
-  ModulePassManager buildModuleOptimizationPipeline(OptimizationLevel Level,
-                                                    bool LTOPreLink = false);
+  ModulePassManager
+  buildModuleOptimizationPipeline(OptimizationLevel Level,
+                                  ThinOrFullLTOPhase LTOPhase);
 
   /// Build a per-module default optimization pipeline.
   ///
@@ -400,12 +377,6 @@ public:
   /// returns false.
   Error parseAAPipeline(AAManager &AA, StringRef PipelineText);
 
-  /// Returns true if the pass name is the name of an alias analysis pass.
-  bool isAAPassName(StringRef PassName);
-
-  /// Returns true if the pass name is the name of a (non-alias) analysis pass.
-  bool isAnalysisPassName(StringRef PassName);
-
   /// Print pass names.
   void printPassNames(raw_ostream &OS);
 
@@ -497,11 +468,38 @@ public:
 
   /// Register a callback for a default optimizer pipeline extension point
   ///
+  /// This extension point allows adding optimizations before the function
+  /// optimization pipeline.
+  void registerOptimizerEarlyEPCallback(
+      const std::function<void(ModulePassManager &, OptimizationLevel)> &C) {
+    OptimizerEarlyEPCallbacks.push_back(C);
+  }
+
+  /// Register a callback for a default optimizer pipeline extension point
+  ///
   /// This extension point allows adding optimizations at the very end of the
   /// function optimization pipeline.
   void registerOptimizerLastEPCallback(
       const std::function<void(ModulePassManager &, OptimizationLevel)> &C) {
     OptimizerLastEPCallbacks.push_back(C);
+  }
+
+  /// Register a callback for a default optimizer pipeline extension point
+  ///
+  /// This extension point allows adding optimizations at the start of the full
+  /// LTO pipeline.
+  void registerFullLinkTimeOptimizationEarlyEPCallback(
+      const std::function<void(ModulePassManager &, OptimizationLevel)> &C) {
+    FullLinkTimeOptimizationEarlyEPCallbacks.push_back(C);
+  }
+
+  /// Register a callback for a default optimizer pipeline extension point
+  ///
+  /// This extension point allows adding optimizations at the end of the full
+  /// LTO pipeline.
+  void registerFullLinkTimeOptimizationLastEPCallback(
+      const std::function<void(ModulePassManager &, OptimizationLevel)> &C) {
+    FullLinkTimeOptimizationLastEPCallbacks.push_back(C);
   }
 
   /// Register a callback for parsing an AliasAnalysis Name to populate
@@ -609,7 +607,8 @@ private:
 
   void addPGOInstrPasses(ModulePassManager &MPM, OptimizationLevel Level,
                          bool RunProfileGen, bool IsCS, std::string ProfileFile,
-                         std::string ProfileRemappingFile);
+                         std::string ProfileRemappingFile,
+                         ThinOrFullLTOPhase LTOPhase);
   void invokePeepholeEPCallbacks(FunctionPassManager &, OptimizationLevel);
 
   // Extension Point callbacks
@@ -625,9 +624,15 @@ private:
       CGSCCOptimizerLateEPCallbacks;
   SmallVector<std::function<void(FunctionPassManager &, OptimizationLevel)>, 2>
       VectorizerStartEPCallbacks;
+  // Module callbacks
+  SmallVector<std::function<void(ModulePassManager &, OptimizationLevel)>, 2>
+      OptimizerEarlyEPCallbacks;
   SmallVector<std::function<void(ModulePassManager &, OptimizationLevel)>, 2>
       OptimizerLastEPCallbacks;
-  // Module callbacks
+  SmallVector<std::function<void(ModulePassManager &, OptimizationLevel)>, 2>
+      FullLinkTimeOptimizationEarlyEPCallbacks;
+  SmallVector<std::function<void(ModulePassManager &, OptimizationLevel)>, 2>
+      FullLinkTimeOptimizationLastEPCallbacks;
   SmallVector<std::function<void(ModulePassManager &, OptimizationLevel)>, 2>
       PipelineStartEPCallbacks;
   SmallVector<std::function<void(ModulePassManager &, OptimizationLevel)>, 2>

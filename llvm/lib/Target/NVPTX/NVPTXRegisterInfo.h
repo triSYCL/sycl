@@ -38,11 +38,12 @@ public:
 
   BitVector getReservedRegs(const MachineFunction &MF) const override;
 
-  void eliminateFrameIndex(MachineBasicBlock::iterator MI, int SPAdj,
+  bool eliminateFrameIndex(MachineBasicBlock::iterator MI, int SPAdj,
                            unsigned FIOperandNum,
                            RegScavenger *RS = nullptr) const override;
 
   Register getFrameRegister(const MachineFunction &MF) const override;
+  Register getFrameLocalRegister(const MachineFunction &MF) const;
 
   ManagedStringPool *getStrPool() const {
     return const_cast<ManagedStringPool *>(&ManagedStrPool);

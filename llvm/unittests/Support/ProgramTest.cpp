@@ -12,6 +12,7 @@
 #include "llvm/Support/ConvertUTF.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
+#include "llvm/Support/Signals.h"
 #include "gtest/gtest.h"
 #include <stdlib.h>
 #include <thread>
@@ -94,7 +95,9 @@ protected:
     };
 
     while (*EnvP != nullptr) {
-      EnvTable.emplace_back(prepareEnvVar(*EnvP));
+      auto S = prepareEnvVar(*EnvP);
+      if (!StringRef(S).startswith("GTEST_"))
+        EnvTable.emplace_back(S);
       ++EnvP;
     }
   }
@@ -110,17 +113,26 @@ protected:
 };
 
 #ifdef _WIN32
+void checkSeparators(StringRef Path) {
+  char UndesiredSeparator = sys::path::get_separator()[0] == '/' ? '\\' : '/';
+  ASSERT_EQ(Path.find(UndesiredSeparator), StringRef::npos);
+}
+
 TEST_F(ProgramEnvTest, CreateProcessLongPath) {
   if (getenv("LLVM_PROGRAM_TEST_LONG_PATH"))
     exit(0);
 
   // getMainExecutable returns an absolute path; prepend the long-path prefix.
-  std::string MyAbsExe =
-      sys::fs::getMainExecutable(TestMainArgv0, &ProgramTestStringArg1);
+  SmallString<128> MyAbsExe(
+      sys::fs::getMainExecutable(TestMainArgv0, &ProgramTestStringArg1));
+  checkSeparators(MyAbsExe);
+  // Force a path with backslashes, when we are going to prepend the \\?\
+  // prefix.
+  sys::path::native(MyAbsExe, sys::path::Style::windows_backslash);
   std::string MyExe;
   if (!StringRef(MyAbsExe).startswith("\\\\?\\"))
     MyExe.append("\\\\?\\");
-  MyExe.append(MyAbsExe);
+  MyExe.append(std::string(MyAbsExe.begin(), MyAbsExe.end()));
 
   StringRef ArgV[] = {MyExe,
                       "--gtest_filter=ProgramEnvTest.CreateProcessLongPath"};
@@ -139,7 +151,8 @@ TEST_F(ProgramEnvTest, CreateProcessLongPath) {
 
   std::string Error;
   bool ExecutionFailed;
-  Optional<StringRef> Redirects[] = {None, LongPath.str(), None};
+  std::optional<StringRef> Redirects[] = {std::nullopt, LongPath.str(),
+                                          std::nullopt};
   int RC = ExecuteAndWait(MyExe, ArgV, getEnviron(), Redirects,
     /*secondsToWait=*/ 10, /*memoryLimit=*/ 0, &Error,
     &ExecutionFailed);
@@ -182,7 +195,7 @@ TEST_F(ProgramEnvTest, CreateProcessTrailingSlash) {
 #else
   StringRef nul("/dev/null");
 #endif
-  Optional<StringRef> redirects[] = { nul, nul, None };
+  std::optional<StringRef> redirects[] = {nul, nul, std::nullopt};
   int rc = ExecuteAndWait(my_exe, argv, getEnviron(), redirects,
                           /*secondsToWait=*/ 10, /*memoryLimit=*/ 0, &error,
                           &ExecutionFailed);
@@ -276,10 +289,10 @@ TEST(ProgramTest, TestExecuteNegative) {
   {
     std::string Error;
     bool ExecutionFailed;
-    int RetCode = ExecuteAndWait(Executable, argv, llvm::None, {}, 0, 0, &Error,
-                                 &ExecutionFailed);
-    ASSERT_TRUE(RetCode < 0) << "On error ExecuteAndWait should return 0 or "
-                                "positive value indicating the result code";
+    int RetCode = ExecuteAndWait(Executable, argv, std::nullopt, {}, 0, 0,
+                                 &Error, &ExecutionFailed);
+    ASSERT_LT(RetCode, 0) << "On error ExecuteAndWait should return 0 or "
+                             "positive value indicating the result code";
     ASSERT_TRUE(ExecutionFailed);
     ASSERT_FALSE(Error.empty());
   }
@@ -287,8 +300,8 @@ TEST(ProgramTest, TestExecuteNegative) {
   {
     std::string Error;
     bool ExecutionFailed;
-    ProcessInfo PI = ExecuteNoWait(Executable, argv, llvm::None, {}, 0, &Error,
-                                   &ExecutionFailed);
+    ProcessInfo PI = ExecuteNoWait(Executable, argv, std::nullopt, {}, 0,
+                                   &Error, &ExecutionFailed);
     ASSERT_EQ(PI.Pid, ProcessInfo::InvalidPid)
         << "On error ExecuteNoWait should return an invalid ProcessInfo";
     ASSERT_TRUE(ExecutionFailed);
@@ -355,7 +368,7 @@ TEST_F(ProgramEnvTest, TestExecuteAndWaitStatistics) {
 
   std::string Error;
   bool ExecutionFailed;
-  Optional<ProcessStatistics> ProcStat;
+  std::optional<ProcessStatistics> ProcStat;
   int RetCode = ExecuteAndWait(Executable, argv, getEnviron(), {}, 0, 0, &Error,
                                &ExecutionFailed, &ProcStat);
   ASSERT_EQ(0, RetCode);
@@ -415,6 +428,30 @@ TEST_F(ProgramEnvTest, TestLockFile) {
   ASSERT_EQ(0, WaitResult.ReturnCode);
   ASSERT_EQ(WaitResult.Pid, PI2.Pid);
   sys::fs::remove(LockedFile);
+}
+
+TEST_F(ProgramEnvTest, TestExecuteWithNoStacktraceHandler) {
+  using namespace llvm::sys;
+
+  if (getenv("LLVM_PROGRAM_TEST_NO_STACKTRACE_HANDLER")) {
+    sys::PrintStackTrace(errs());
+    exit(0);
+  }
+
+  std::string Executable =
+      sys::fs::getMainExecutable(TestMainArgv0, &ProgramTestStringArg1);
+  StringRef argv[] = {
+      Executable,
+      "--gtest_filter=ProgramEnvTest.TestExecuteWithNoStacktraceHandler"};
+
+  addEnvVar("LLVM_PROGRAM_TEST_NO_STACKTRACE_HANDLER=1");
+
+  std::string Error;
+  bool ExecutionFailed;
+  int RetCode = ExecuteAndWait(Executable, argv, getEnviron(), {}, 0, 0, &Error,
+                               &ExecutionFailed);
+  EXPECT_FALSE(ExecutionFailed) << Error;
+  ASSERT_EQ(0, RetCode);
 }
 
 } // end anonymous namespace

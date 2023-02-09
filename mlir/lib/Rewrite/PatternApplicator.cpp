@@ -28,14 +28,14 @@ PatternApplicator::PatternApplicator(
     bytecode->initializeMutableState(*mutableByteCodeState);
   }
 }
-PatternApplicator::~PatternApplicator() {}
+PatternApplicator::~PatternApplicator() = default;
 
 #ifndef NDEBUG
 /// Log a message for a pattern that is impossible to match.
 static void logImpossibleToMatch(const Pattern &pattern) {
-    llvm::dbgs() << "Ignoring pattern '" << pattern.getRootKind()
-                 << "' because it is impossible to match or cannot lead "
-                    "to legal IR (by cost model)\n";
+  llvm::dbgs() << "Ignoring pattern '" << pattern.getRootKind()
+               << "' because it is impossible to match or cannot lead "
+                  "to legal IR (by cost model)\n";
 }
 
 /// Log IR after pattern application.
@@ -53,7 +53,7 @@ void PatternApplicator::applyCostModel(CostModel model) {
   // Apply the cost model to the bytecode patterns first, and then the native
   // patterns.
   if (const PDLByteCode *bytecode = frozenPatternList.getPDLByteCode()) {
-    for (auto it : llvm::enumerate(bytecode->getPatterns()))
+    for (const auto &it : llvm::enumerate(bytecode->getPatterns()))
       mutableByteCodeState->updatePatternBenefit(it.index(), model(it.value()));
   }
 
@@ -191,20 +191,21 @@ LogicalResult PatternApplicator::matchAndRewrite(
     Operation *dumpRootOp = getDumpRootOp(op);
 #endif
     if (pdlMatch) {
-      bytecode->rewrite(rewriter, *pdlMatch, *mutableByteCodeState);
-      result = success(!onSuccess || succeeded(onSuccess(*bestPattern)));
+      result = bytecode->rewrite(rewriter, *pdlMatch, *mutableByteCodeState);
     } else {
+      LLVM_DEBUG(llvm::dbgs() << "Trying to match \""
+                              << bestPattern->getDebugName() << "\"\n");
+
       const auto *pattern = static_cast<const RewritePattern *>(bestPattern);
-
-      LLVM_DEBUG(llvm::dbgs()
-                 << "Trying to match \"" << pattern->getDebugName() << "\"\n");
       result = pattern->matchAndRewrite(op, rewriter);
-      LLVM_DEBUG(llvm::dbgs() << "\"" << pattern->getDebugName() << "\" result "
-                              << succeeded(result) << "\n");
 
-      if (succeeded(result) && onSuccess && failed(onSuccess(*pattern)))
-        result = failure();
+      LLVM_DEBUG(llvm::dbgs() << "\"" << bestPattern->getDebugName()
+                              << "\" result " << succeeded(result) << "\n");
     }
+
+    // Process the result of the pattern application.
+    if (succeeded(result) && onSuccess && failed(onSuccess(*bestPattern)))
+      result = failure();
     if (succeeded(result)) {
       LLVM_DEBUG(logSucessfulPatternApplication(dumpRootOp));
       break;

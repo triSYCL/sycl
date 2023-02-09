@@ -362,7 +362,8 @@ public:
   ObjCDictionaryElement getKeyValueElement(unsigned Index) const {
     assert((Index < NumElements) && "Arg access out of range!");
     const KeyValuePair &KV = getTrailingObjects<KeyValuePair>()[Index];
-    ObjCDictionaryElement Result = { KV.Key, KV.Value, SourceLocation(), None };
+    ObjCDictionaryElement Result = {KV.Key, KV.Value, SourceLocation(),
+                                    std::nullopt};
     if (HasPackExpansions) {
       const ExpansionData &Expansion =
           getTrailingObjects<ExpansionData>()[Index];
@@ -1706,7 +1707,7 @@ public:
 
   /// This may be '*', in which case this should fold to true.
   bool hasVersion() const { return !VersionToCheck.empty(); }
-  VersionTuple getVersion() { return VersionToCheck; }
+  VersionTuple getVersion() const { return VersionToCheck; }
 
   child_range children() {
     return child_range(child_iterator(), child_iterator());

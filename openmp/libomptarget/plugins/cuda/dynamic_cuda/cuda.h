@@ -22,11 +22,16 @@ typedef struct CUmod_st *CUmodule;
 typedef struct CUctx_st *CUcontext;
 typedef struct CUfunc_st *CUfunction;
 typedef struct CUstream_st *CUstream;
+typedef struct CUevent_st *CUevent;
+
+#define CU_DEVICE_INVALID ((CUdevice)-2)
 
 typedef enum cudaError_enum {
   CUDA_SUCCESS = 0,
   CUDA_ERROR_INVALID_VALUE = 1,
+  CUDA_ERROR_NO_DEVICE = 100,
   CUDA_ERROR_INVALID_HANDLE = 400,
+  CUDA_ERROR_TOO_MANY_PEERS = 711,
 } CUresult;
 
 typedef enum CUstream_flags_enum {
@@ -195,6 +200,13 @@ typedef enum CUcomputeMode_enum {
   CU_COMPUTEMODE_EXCLUSIVE_PROCESS = 3,
 } CUcompute_mode;
 
+typedef enum CUevent_flags_enum {
+  CU_EVENT_DEFAULT = 0x0,
+  CU_EVENT_BLOCKING_SYNC = 0x1,
+  CU_EVENT_DISABLE_TIMING = 0x2,
+  CU_EVENT_INTERPROCESS = 0x4
+} CUevent_flags;
+
 CUresult cuCtxGetDevice(CUdevice *);
 CUresult cuDeviceGet(CUdevice *, int);
 CUresult cuDeviceGetAttribute(int *, CUdevice_attribute, CUdevice);
@@ -247,5 +259,11 @@ CUresult cuMemcpyPeerAsync(CUdeviceptr, CUcontext, CUdeviceptr, CUcontext,
 
 CUresult cuCtxGetLimit(size_t *, CUlimit);
 CUresult cuCtxSetLimit(CUlimit, size_t);
+
+CUresult cuEventCreate(CUevent *, unsigned int);
+CUresult cuEventRecord(CUevent, CUstream);
+CUresult cuStreamWaitEvent(CUstream, CUevent, unsigned int);
+CUresult cuEventSynchronize(CUevent);
+CUresult cuEventDestroy(CUevent);
 
 #endif

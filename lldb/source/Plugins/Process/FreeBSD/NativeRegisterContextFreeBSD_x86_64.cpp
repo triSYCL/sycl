@@ -434,7 +434,7 @@ NativeRegisterContextFreeBSD_x86_64::ReadRegister(const RegisterInfo *reg_info,
     return error;
   }
 
-  RegSetKind set = opt_set.getValue();
+  RegSetKind set = opt_set.value();
   error = ReadRegisterSet(set);
   if (error.Fail())
     return error;
@@ -500,7 +500,7 @@ Status NativeRegisterContextFreeBSD_x86_64::WriteRegister(
     return error;
   }
 
-  RegSetKind set = opt_set.getValue();
+  RegSetKind set = opt_set.value();
   error = ReadRegisterSet(set);
   if (error.Fail())
     return error;
@@ -537,7 +537,7 @@ Status NativeRegisterContextFreeBSD_x86_64::WriteRegister(
 }
 
 Status NativeRegisterContextFreeBSD_x86_64::ReadAllRegisterValues(
-    lldb::DataBufferSP &data_sp) {
+    lldb::WritableDataBufferSP &data_sp) {
   Status error;
 
   data_sp.reset(new DataBufferHeap(REG_CONTEXT_SIZE, 0));
@@ -571,7 +571,7 @@ Status NativeRegisterContextFreeBSD_x86_64::WriteAllRegisterValues(
     return error;
   }
 
-  uint8_t *src = data_sp->GetBytes();
+  const uint8_t *src = data_sp->GetBytes();
   if (src == nullptr) {
     error.SetErrorStringWithFormat("NativeRegisterContextFreeBSD_x86_64::%s "
                                    "DataBuffer::GetBytes() returned a null "

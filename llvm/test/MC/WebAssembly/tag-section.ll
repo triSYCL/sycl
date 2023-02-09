@@ -1,17 +1,17 @@
-; RUN: llc -filetype=obj -exception-model=wasm -mattr=+exception-handling %s -o - | obj2yaml | FileCheck %s
-; RUN: llc -filetype=obj -exception-model=wasm -mattr=+exception-handling %s -o - | llvm-readobj -S - | FileCheck -check-prefix=SEC %s
+; RUN: llc -filetype=obj -wasm-enable-eh -exception-model=wasm -mattr=+exception-handling %s -o - | obj2yaml | FileCheck %s
+; RUN: llc -filetype=obj -wasm-enable-eh -exception-model=wasm -mattr=+exception-handling %s -o - | llvm-readobj -S - | FileCheck -check-prefix=SEC %s
 
 target triple = "wasm32-unknown-unknown"
 
-declare void @llvm.wasm.throw(i32, i8*)
+declare void @llvm.wasm.throw(i32, ptr)
 
-define i32 @test_throw0(i8* %p) {
-  call void @llvm.wasm.throw(i32 0, i8* %p)
+define i32 @test_throw0(ptr %p) {
+  call void @llvm.wasm.throw(i32 0, ptr %p)
   ret i32 0
 }
 
-define i32 @test_throw1(i8* %p) {
-  call void @llvm.wasm.throw(i32 0, i8* %p)
+define i32 @test_throw1(ptr %p) {
+  call void @llvm.wasm.throw(i32 0, ptr %p)
   ret i32 1
 }
 
@@ -29,10 +29,7 @@ define i32 @test_throw1(i8* %p) {
 ; CHECK-NEXT:         ReturnTypes:      []
 
 ; CHECK:        - Type:            TAG
-; CHECK-NEXT:     Tags:
-; CHECK-NEXT:       - Index:           0
-; CHECK-NEXT:         Attribute:       0
-; CHECK-NEXT:         SigIndex:        1
+; CHECK-NEXT:     TagTypes:        [ 1 ]
 
 ; CHECK-NEXT:   - Type:            CODE
 ; CHECK-NEXT:     Relocations:

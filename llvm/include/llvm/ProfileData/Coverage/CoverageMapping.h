@@ -195,11 +195,11 @@ public:
   ArrayRef<CounterExpression> getExpressions() const { return Expressions; }
 
   /// Return a counter that represents the expression that adds LHS and RHS.
-  Counter add(Counter LHS, Counter RHS);
+  Counter add(Counter LHS, Counter RHS, bool Simplify = true);
 
   /// Return a counter that represents the expression that subtracts RHS from
   /// LHS.
-  Counter subtract(Counter LHS, Counter RHS);
+  Counter subtract(Counter LHS, Counter RHS, bool Simplify = true);
 };
 
 using LineColPair = std::pair<unsigned, unsigned>;
@@ -323,7 +323,7 @@ class CounterMappingContext {
 
 public:
   CounterMappingContext(ArrayRef<CounterExpression> Expressions,
-                        ArrayRef<uint64_t> CounterValues = None)
+                        ArrayRef<uint64_t> CounterValues = std::nullopt)
       : Expressions(Expressions), CounterValues(CounterValues) {}
 
   void setCounts(ArrayRef<uint64_t> Counts) { CounterValues = Counts; }
@@ -605,7 +605,8 @@ public:
   /// Ignores non-instrumented object files unless all are not instrumented.
   static Expected<std::unique_ptr<CoverageMapping>>
   load(ArrayRef<StringRef> ObjectFilenames, StringRef ProfileFilename,
-       ArrayRef<StringRef> Arches = None, StringRef CompilationDir = "");
+       ArrayRef<StringRef> Arches = std::nullopt,
+       StringRef CompilationDir = "");
 
   /// The number of functions that couldn't have their profiles mapped.
   ///
@@ -693,15 +694,16 @@ public:
 /// An iterator over the \c LineCoverageStats objects for lines described by
 /// a \c CoverageData instance.
 class LineCoverageIterator
-    : public iterator_facade_base<
-          LineCoverageIterator, std::forward_iterator_tag, LineCoverageStats> {
+    : public iterator_facade_base<LineCoverageIterator,
+                                  std::forward_iterator_tag,
+                                  const LineCoverageStats> {
 public:
   LineCoverageIterator(const CoverageData &CD)
       : LineCoverageIterator(CD, CD.begin()->Line) {}
 
   LineCoverageIterator(const CoverageData &CD, unsigned Line)
       : CD(CD), WrappedSegment(nullptr), Next(CD.begin()), Ended(false),
-        Line(Line), Segments(), Stats() {
+        Line(Line) {
     this->operator++();
   }
 
@@ -710,8 +712,6 @@ public:
   }
 
   const LineCoverageStats &operator*() const { return Stats; }
-
-  LineCoverageStats &operator*() { return Stats; }
 
   LineCoverageIterator &operator++();
 

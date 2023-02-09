@@ -84,12 +84,12 @@ Optional<unsigned> MCRegisterInfo::getLLVMRegNum(unsigned RegNum,
   unsigned Size = isEH ? EHDwarf2LRegsSize : Dwarf2LRegsSize;
 
   if (!M)
-    return None;
+    return std::nullopt;
   DwarfLLVMRegPair Key = { RegNum, 0 };
   const DwarfLLVMRegPair *I = std::lower_bound(M, M+Size, Key);
   if (I != M + Size && I->FromReg == RegNum)
     return I->ToReg;
-  return None;
+  return std::nullopt;
 }
 
 int MCRegisterInfo::getDwarfRegNumFromDwarfEHRegNum(unsigned RegNum) const {
@@ -121,4 +121,15 @@ int MCRegisterInfo::getCodeViewRegNum(MCRegister RegNum) const {
                                                            ? getName(RegNum)
                                                            : Twine(RegNum)));
   return I->second;
+}
+
+bool MCRegisterInfo::regsOverlap(MCRegister RegA, MCRegister RegB) const {
+  // Regunits are numerically ordered. Find a common unit.
+  MCRegUnitIterator RUA(RegA, this);
+  MCRegUnitIterator RUB(RegB, this);
+  do {
+    if (*RUA == *RUB)
+      return true;
+  } while (*RUA < *RUB ? (++RUA).isValid() : (++RUB).isValid());
+  return false;
 }

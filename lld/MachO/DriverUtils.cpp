@@ -13,12 +13,10 @@
 #include "Target.h"
 
 #include "lld/Common/Args.h"
-#include "lld/Common/ErrorHandler.h"
-#include "lld/Common/Memory.h"
+#include "lld/Common/CommonLinkerContext.h"
 #include "lld/Common/Reproduce.h"
 #include "llvm/ADT/CachedHashString.h"
 #include "llvm/ADT/DenseMap.h"
-#include "llvm/Bitcode/BitcodeReader.h"
 #include "llvm/LTO/LTO.h"
 #include "llvm/Option/Arg.h"
 #include "llvm/Option/ArgList.h"
@@ -83,12 +81,13 @@ InputArgList MachOOptTable::parse(ArrayRef<const char *> argv) {
 
   // Expand response files (arguments in the form of @<filename>)
   // and then parse the argument again.
-  cl::ExpandResponseFiles(saver, cl::TokenizeGNUCommandLine, vec);
+  cl::ExpandResponseFiles(saver(), cl::TokenizeGNUCommandLine, vec);
   InputArgList args = ParseArgs(vec, missingIndex, missingCount);
 
   // Handle -fatal_warnings early since it converts missing argument warnings
   // to errors.
   errorHandler().fatalWarnings = args.hasArg(OPT_fatal_warnings);
+  errorHandler().suppressWarnings = args.hasArg(OPT_w);
 
   if (missingCount)
     error(Twine(args.getArgString(missingIndex)) + ": missing argument");
@@ -145,12 +144,13 @@ std::string macho::createResponseFile(const InputArgList &args) {
       os << "-o " << quote(path::filename(arg->getValue())) << "\n";
       break;
     case OPT_filelist:
-      if (Optional<MemoryBufferRef> buffer = readFile(arg->getValue()))
+      if (std::optional<MemoryBufferRef> buffer = readFile(arg->getValue()))
         for (StringRef path : args::getLines(*buffer))
           os << quote(rewriteInputPath(path)) << "\n";
       break;
     case OPT_force_load:
     case OPT_weak_library:
+    case OPT_load_hidden:
       os << arg->getSpelling() << " "
          << quote(rewriteInputPath(arg->getValue())) << "\n";
       break;
@@ -184,20 +184,20 @@ static void searchedDylib(const Twine &path, bool found) {
     depTracker->logFileNotFound(path);
 }
 
-Optional<std::string> macho::resolveDylibPath(StringRef dylibPath) {
+std::optional<StringRef> macho::resolveDylibPath(StringRef dylibPath) {
   // TODO: if a tbd and dylib are both present, we should check to make sure
   // they are consistent.
-  bool dylibExists = fs::exists(dylibPath);
-  searchedDylib(dylibPath, dylibExists);
-  if (dylibExists)
-    return std::string(dylibPath);
-
   SmallString<261> tbdPath = dylibPath;
   path::replace_extension(tbdPath, ".tbd");
   bool tbdExists = fs::exists(tbdPath);
   searchedDylib(tbdPath, tbdExists);
   if (tbdExists)
-    return std::string(tbdPath);
+    return saver().save(tbdPath.str());
+
+  bool dylibExists = fs::exists(dylibPath);
+  searchedDylib(dylibPath, dylibExists);
+  if (dylibExists)
+    return saver().save(dylibPath);
   return {};
 }
 
@@ -206,11 +206,14 @@ Optional<std::string> macho::resolveDylibPath(StringRef dylibPath) {
 static DenseMap<CachedHashStringRef, DylibFile *> loadedDylibs;
 
 DylibFile *macho::loadDylib(MemoryBufferRef mbref, DylibFile *umbrella,
-                            bool isBundleLoader) {
+                            bool isBundleLoader, bool explicitlyLinked) {
   CachedHashStringRef path(mbref.getBufferIdentifier());
   DylibFile *&file = loadedDylibs[path];
-  if (file)
+  if (file) {
+    if (explicitlyLinked)
+      file->setExplicitlyLinked();
     return file;
+  }
 
   DylibFile *newFile;
   file_magic magic = identify_magic(mbref.getBuffer());
@@ -221,7 +224,8 @@ DylibFile *macho::loadDylib(MemoryBufferRef mbref, DylibFile *umbrella,
             ": " + toString(result.takeError()));
       return nullptr;
     }
-    file = make<DylibFile>(**result, umbrella, isBundleLoader);
+    file =
+        make<DylibFile>(**result, umbrella, isBundleLoader, explicitlyLinked);
 
     // parseReexports() can recursively call loadDylib(). That's fine since
     // we wrote the DylibFile we just loaded to the loadDylib cache via the
@@ -236,7 +240,7 @@ DylibFile *macho::loadDylib(MemoryBufferRef mbref, DylibFile *umbrella,
            magic == file_magic::macho_dynamically_linked_shared_lib_stub ||
            magic == file_magic::macho_executable ||
            magic == file_magic::macho_bundle);
-    file = make<DylibFile>(mbref, umbrella, isBundleLoader);
+    file = make<DylibFile>(mbref, umbrella, isBundleLoader, explicitlyLinked);
 
     // parseLoadCommands() can also recursively call loadDylib(). See comment
     // in previous block for why this means we must copy `file` here.
@@ -247,7 +251,9 @@ DylibFile *macho::loadDylib(MemoryBufferRef mbref, DylibFile *umbrella,
   return newFile;
 }
 
-Optional<StringRef>
+void macho::resetLoadedDylibs() { loadedDylibs.clear(); }
+
+std::optional<StringRef>
 macho::findPathCombination(const Twine &name,
                            const std::vector<StringRef> &roots,
                            ArrayRef<StringRef> extensions) {
@@ -260,7 +266,7 @@ macho::findPathCombination(const Twine &name,
       bool exists = fs::exists(location);
       searchedDylib(location, exists);
       if (exists)
-        return saver.save(location.str());
+        return saver().save(location.str());
     }
   }
   return {};
@@ -270,35 +276,11 @@ StringRef macho::rerootPath(StringRef path) {
   if (!path::is_absolute(path, path::Style::posix) || path.endswith(".o"))
     return path;
 
-  if (Optional<StringRef> rerootedPath =
+  if (std::optional<StringRef> rerootedPath =
           findPathCombination(path, config->systemLibraryRoots))
     return *rerootedPath;
 
   return path;
-}
-
-Optional<InputFile *> macho::loadArchiveMember(MemoryBufferRef mb,
-                                               uint32_t modTime,
-                                               StringRef archiveName,
-                                               bool objCOnly,
-                                               uint64_t offsetInArchive) {
-  if (config->zeroModTime)
-    modTime = 0;
-
-  switch (identify_magic(mb.getBuffer())) {
-  case file_magic::macho_object:
-    if (!objCOnly || hasObjCSection(mb))
-      return make<ObjFile>(mb, modTime, archiveName);
-    return None;
-  case file_magic::bitcode:
-    if (!objCOnly || check(isBitcodeContainingObjCCategory(mb)))
-      return make<BitcodeFile>(mb, archiveName, offsetInArchive);
-    return None;
-  default:
-    error(archiveName + ": archive member " + mb.getBufferIdentifier() +
-          " has unhandled file type");
-    return None;
-  }
 }
 
 uint32_t macho::getModTime(StringRef path) {

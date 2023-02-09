@@ -14,6 +14,7 @@
 #ifndef LLVM_CLANG_BASIC_OPENMPKINDS_H
 #define LLVM_CLANG_BASIC_OPENMPKINDS_H
 
+#include "clang/Basic/LangOptions.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Frontend/OpenMP/OMPConstants.h"
 
@@ -130,6 +131,20 @@ enum OpenMPAtomicDefaultMemOrderClauseKind {
   OMPC_ATOMIC_DEFAULT_MEM_ORDER_unknown
 };
 
+/// OpenMP attributes for 'at' clause.
+enum OpenMPAtClauseKind {
+#define OPENMP_AT_KIND(Name) OMPC_AT_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_AT_unknown
+};
+
+/// OpenMP attributes for 'severity' clause.
+enum OpenMPSeverityClauseKind {
+#define OPENMP_SEVERITY_KIND(Name) OMPC_SEVERITY_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_SEVERITY_unknown
+};
+
 /// OpenMP device type for 'device_type' clause.
 enum OpenMPDeviceType {
 #define OPENMP_DEVICE_TYPE_KIND(Name) \
@@ -166,8 +181,44 @@ enum OpenMPReductionClauseModifier {
   OMPC_REDUCTION_unknown,
 };
 
+/// OpenMP adjust-op kinds for 'adjust_args' clause.
+enum OpenMPAdjustArgsOpKind {
+#define OPENMP_ADJUST_ARGS_KIND(Name) OMPC_ADJUST_ARGS_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_ADJUST_ARGS_unknown,
+};
+
+/// OpenMP bindings for the 'bind' clause.
+enum OpenMPBindClauseKind {
+#define OPENMP_BIND_KIND(Name) OMPC_BIND_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_BIND_unknown
+};
+
+enum OpenMPGrainsizeClauseModifier {
+#define OPENMP_GRAINSIZE_MODIFIER(Name) OMPC_GRAINSIZE_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_GRAINSIZE_unknown
+};
+
+enum OpenMPNumTasksClauseModifier {
+#define OPENMP_NUMTASKS_MODIFIER(Name) OMPC_NUMTASKS_##Name,
+#include "clang/Basic/OpenMPKinds.def"
+  OMPC_NUMTASKS_unknown
+};
+
+/// Contains 'interop' data for 'append_args' and 'init' clauses.
+class Expr;
+struct OMPInteropInfo final {
+  OMPInteropInfo(bool IsTarget = false, bool IsTargetSync = false)
+      : IsTarget(IsTarget), IsTargetSync(IsTargetSync) {}
+  bool IsTarget;
+  bool IsTargetSync;
+  llvm::SmallVector<Expr *, 4> PreferTypes;
+};
+
 unsigned getOpenMPSimpleClauseType(OpenMPClauseKind Kind, llvm::StringRef Str,
-                                   unsigned OpenMPVersion);
+                                   const LangOptions &LangOpts);
 const char *getOpenMPSimpleClauseTypeName(OpenMPClauseKind Kind, unsigned Type);
 
 /// Checks if the specified directive is a directive with an associated
@@ -244,6 +295,13 @@ bool isOpenMPDistributeDirective(OpenMPDirectiveKind DKind);
 /// \return true - the directive has distribute on the outermost nest.
 /// otherwise - false.
 bool isOpenMPNestingDistributeDirective(OpenMPDirectiveKind DKind);
+
+/// Checks if the specified directive constitutes a 'loop' directive in the
+/// outermost nest.  For example, 'omp teams loop' or 'omp loop'.
+/// \param DKind Specified directive.
+/// \return true - the directive has loop on the outermost nest.
+/// otherwise - false.
+bool isOpenMPGenericLoopDirective(OpenMPDirectiveKind DKind);
 
 /// Checks if the specified clause is one of private clauses like
 /// 'private', 'firstprivate', 'reduction' etc..

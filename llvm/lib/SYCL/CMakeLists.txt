@@ -7,10 +7,11 @@ add_llvm_component_library(LLVMSYCL
   PrepareSyclChessOpt.cpp
   LowerSYCLMetaData.cpp
   VXXIRDowngrader.cpp
+  SYCLUtils.cpp
 
   ADDITIONAL_HEADER_DIRS
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/SYCL
 
   LINK_COMPONENTS
-  Passes Core Support TransformUtils Demangle Analysis
+  Core Support TransformUtils Demangle Analysis
 )

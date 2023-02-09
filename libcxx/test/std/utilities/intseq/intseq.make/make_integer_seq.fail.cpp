@@ -14,7 +14,7 @@
 // UNSUPPORTED: c++03, c++11
 
 // This test hangs during recursive template instantiation with libstdc++
-// UNSUPPORTED: libstdc++
+// UNSUPPORTED: stdlib=libstdc++
 
 #include <utility>
 #include <type_traits>
@@ -31,7 +31,7 @@ int main(int, char**)
 #if TEST_HAS_BUILTIN(__make_integer_seq) && !defined(_LIBCPP_TESTING_FALLBACK_MAKE_INTEGER_SEQUENCE)
   MakeSeqT i; // expected-error@*:* {{integer sequences must have non-negative sequence length}}
 #else
-  MakeSeqT i; // expected-error@*:* {{static_assert failed "std::make_integer_sequence must have a non-negative sequence length"}}
+  MakeSeqT i; // expected-error-re@*:* {{{{(static_assert|static assertion)}} failed{{.*}}std::make_integer_sequence must have a non-negative sequence length}}
 #endif
 
   return 0;

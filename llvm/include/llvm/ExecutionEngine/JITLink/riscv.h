@@ -37,11 +37,32 @@ enum EdgeKind_riscv : Edge::Kind {
   ///
   R_RISCV_64,
 
+  /// PC-relative branch pointer value relocation
+  ///
+  /// Fixup expression:
+  ///   Fixup <- (Target - Fixup + Addend)
+  ///
+  R_RISCV_BRANCH,
+
+  /// High 20 bits of PC-relative jump pointer value relocation
+  ///
+  /// Fixup expression:
+  ///   Fixup <- Target - Fixup + Addend
+  ///
+  R_RISCV_JAL,
+
   /// High 20 bits of 32-bit pointer value relocation
   ///
   /// Fixup expression
   ///   Fixup <- (Target + Addend + 0x800) >> 12
   R_RISCV_HI20,
+
+  /// Low 12 bits of 32-bit pointer value relocation, used by S type instruction
+  /// format
+  ///
+  /// Fixup expression
+  ///   Fixup <- (Target + Addend) & 0xFFF
+  R_RISCV_LO12_S,
 
   /// Low 12 bits of 32-bit pointer value relocation
   ///
@@ -70,8 +91,103 @@ enum EdgeKind_riscv : Edge::Kind {
   ///
   /// Fixup expression:
   ///   Fixup <- (Target - Fixup + Addend)
-  R_RISCV_CALL
+  R_RISCV_CALL,
 
+  /// 32 bits PC relative relocation
+  ///
+  /// Fixup expression:
+  ///   Fixup <- (Target - Fixup + Addend)
+  R_RISCV_32_PCREL,
+
+  /// PC relative GOT offset
+  ///
+  /// Fixup expression:
+  ///   Fixup <- (GOT - Fixup + Addend) >> 12
+  R_RISCV_GOT_HI20,
+
+  /// PC relative call by PLT
+  ///
+  /// Fixup expression:
+  ///   Fixup <- (Target - Fixup + Addend)
+  R_RISCV_CALL_PLT,
+
+  /// 64 bits label addition
+  ///
+  /// Fixup expression:
+  ///   Fixup <- (Target - *{8}Fixup + Addend)
+  R_RISCV_ADD64,
+
+  /// 32 bits label addition
+  ///
+  /// Fixup expression:
+  ///   Fixup <- (Target - *{4}Fixup + Addend)
+  R_RISCV_ADD32,
+
+  /// 16 bits label addition
+  ///
+  /// Fixup expression
+  ///   Fixup <- (Target - *{2}Fixup + Addend)
+  R_RISCV_ADD16,
+
+  /// 8 bits label addition
+  ///
+  /// Fixup expression
+  ///   Fixup <- (Target - *{1}Fixup + Addend)
+  R_RISCV_ADD8,
+
+  /// 64 bits label subtraction
+  ///
+  /// Fixup expression
+  ///   Fixup <- (Target - *{8}Fixup - Addend)
+  R_RISCV_SUB64,
+
+  /// 32 bits label subtraction
+  ///
+  /// Fixup expression
+  ///   Fixup <- (Target - *{4}Fixup - Addend)
+  R_RISCV_SUB32,
+
+  /// 16 bits label subtraction
+  ///
+  /// Fixup expression
+  ///   Fixup <- (Target - *{2}Fixup - Addend)
+  R_RISCV_SUB16,
+
+  /// 8 bits label subtraction
+  ///
+  /// Fixup expression
+  ///   Fixup <- (Target - *{1}Fixup - Addend)
+  R_RISCV_SUB8,
+
+  /// 6 bits label subtraction
+  ///
+  /// Fixup expression
+  ///   Fixup <- (Target - *{1}Fixup - Addend)
+  R_RISCV_SUB6,
+
+  /// Local label assignment
+  ///
+  /// Fixup expression:
+  ///   Fixup <- (Target + Addend)
+  R_RISCV_SET6,
+
+  /// Local label assignment
+  ///
+  /// Fixup expression:
+  ///   Fixup <- (Target + Addend)
+  R_RISCV_SET8,
+
+  /// Local label assignment
+  ///
+  /// Fixup expression:
+  ///   Fixup <- (Target + Addend)
+  R_RISCV_SET16,
+
+  /// Local label assignment
+  ///
+  /// Fixup expression:
+  ///   Fixup <- (Target + Addend)
+  R_RISCV_SET32,
 };
 
 /// Returns a string name for the given riscv edge. For debugging purposes

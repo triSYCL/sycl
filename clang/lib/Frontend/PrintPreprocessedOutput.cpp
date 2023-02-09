@@ -96,6 +96,7 @@ private:
   bool UseLineDirectives;
   bool IsFirstFileEntered;
   bool MinimizeWhitespace;
+  bool DirectivesOnly;
 
   Token PrevTok;
   Token PrevPrevTok;
@@ -103,12 +104,13 @@ private:
 public:
   PrintPPOutputPPCallbacks(Preprocessor &pp, raw_ostream &os, bool lineMarkers,
                            bool defines, bool DumpIncludeDirectives,
-                           bool UseLineDirectives, bool MinimizeWhitespace)
+                           bool UseLineDirectives, bool MinimizeWhitespace,
+                           bool DirectivesOnly)
       : PP(pp), SM(PP.getSourceManager()), ConcatInfo(PP), OS(os),
         DisableLineMarkers(lineMarkers), DumpDefines(defines),
         DumpIncludeDirectives(DumpIncludeDirectives),
         UseLineDirectives(UseLineDirectives),
-        MinimizeWhitespace(MinimizeWhitespace) {
+        MinimizeWhitespace(MinimizeWhitespace), DirectivesOnly(DirectivesOnly) {
     CurLine = 0;
     CurFilename += "<uninit>";
     EmittedTokensOnThisLine = false;
@@ -143,9 +145,9 @@ public:
                    FileID PrevFID) override;
   void InclusionDirective(SourceLocation HashLoc, const Token &IncludeTok,
                           StringRef FileName, bool IsAngled,
-                          CharSourceRange FilenameRange, const FileEntry *File,
-                          StringRef SearchPath, StringRef RelativePath,
-                          const Module *Imported,
+                          CharSourceRange FilenameRange,
+                          Optional<FileEntryRef> File, StringRef SearchPath,
+                          StringRef RelativePath, const Module *Imported,
                           SrcMgr::CharacteristicKind FileType) override;
   void Ident(SourceLocation Loc, StringRef str) override;
   void PragmaMessage(SourceLocation Loc, StringRef Namespace,
@@ -155,7 +157,7 @@ public:
   void PragmaDiagnosticPop(SourceLocation Loc, StringRef Namespace) override;
   void PragmaDiagnostic(SourceLocation Loc, StringRef Namespace,
                         diag::Severity Map, StringRef Str) override;
-  void PragmaWarning(SourceLocation Loc, StringRef WarningSpec,
+  void PragmaWarning(SourceLocation Loc, PragmaWarningSpecifier WarningSpec,
                      ArrayRef<int> Ids) override;
   void PragmaWarningPush(SourceLocation Loc, int Level) override;
   void PragmaWarningPop(SourceLocation Loc) override;
@@ -182,25 +184,24 @@ public:
   /// implicitly when at the beginning of the file.
   ///
   /// @param Tok                 Token where to move to.
-  /// @param RequiresStartOfLine Whether the next line depends on being in the
+  /// @param RequireStartOfLine  Whether the next line depends on being in the
   ///                            first column, such as a directive.
   ///
   /// @return Whether column adjustments are necessary.
   bool MoveToLine(const Token &Tok, bool RequireStartOfLine) {
     PresumedLoc PLoc = SM.getPresumedLoc(Tok.getLocation());
-    if (PLoc.isInvalid())
-      return false;
-    bool IsFirstInFile = Tok.isAtStartOfLine() && PLoc.getLine() == 1;
-    return MoveToLine(PLoc.getLine(), RequireStartOfLine) || IsFirstInFile;
+    unsigned TargetLine = PLoc.isValid() ? PLoc.getLine() : CurLine;
+    bool IsFirstInFile =
+        Tok.isAtStartOfLine() && PLoc.isValid() && PLoc.getLine() == 1;
+    return MoveToLine(TargetLine, RequireStartOfLine) || IsFirstInFile;
   }
 
   /// Move to the line of the provided source location. Returns true if a new
   /// line was inserted.
   bool MoveToLine(SourceLocation Loc, bool RequireStartOfLine) {
     PresumedLoc PLoc = SM.getPresumedLoc(Loc);
-    if (PLoc.isInvalid())
-      return false;
-    return MoveToLine(PLoc.getLine(), RequireStartOfLine);
+    unsigned TargetLine = PLoc.isValid() ? PLoc.getLine() : CurLine;
+    return MoveToLine(TargetLine, RequireStartOfLine);
   }
   bool MoveToLine(unsigned LineNo, bool RequireStartOfLine);
 
@@ -293,7 +294,7 @@ bool PrintPPOutputPPCallbacks::MoveToLine(unsigned LineNo,
       WriteLineInfo(LineNo, nullptr, 0);
     }
     StartedNewLine = true;
-  } else if (!StartedNewLine) {
+  } else if (EmittedTokensOnThisLine) {
     // If we are not on the correct line and don't need to be line-correct,
     // at least ensure we start on a new line.
     OS << '\n';
@@ -393,7 +394,7 @@ void PrintPPOutputPPCallbacks::InclusionDirective(
     StringRef FileName,
     bool IsAngled,
     CharSourceRange FilenameRange,
-    const FileEntry *File,
+    Optional<FileEntryRef> File,
     StringRef SearchPath,
     StringRef RelativePath,
     const Module *Imported,
@@ -468,12 +469,21 @@ void PrintPPOutputPPCallbacks::Ident(SourceLocation Loc, StringRef S) {
 void PrintPPOutputPPCallbacks::MacroDefined(const Token &MacroNameTok,
                                             const MacroDirective *MD) {
   const MacroInfo *MI = MD->getMacroInfo();
-  // Only print out macro definitions in -dD mode.
-  if (!DumpDefines ||
+  // Print out macro definitions in -dD mode and when we have -fdirectives-only
+  // for C++20 header units.
+  if ((!DumpDefines && !DirectivesOnly) ||
       // Ignore __FILE__ etc.
-      MI->isBuiltinMacro()) return;
+      MI->isBuiltinMacro())
+    return;
 
-  MoveToLine(MI->getDefinitionLoc(), /*RequireStartOfLine=*/true);
+  SourceLocation DefLoc = MI->getDefinitionLoc();
+  if (DirectivesOnly && !MI->isUsed()) {
+    SourceManager &SM = PP.getSourceManager();
+    if (SM.isWrittenInBuiltinFile(DefLoc) ||
+        SM.isWrittenInCommandLineFile(DefLoc))
+      return;
+  }
+  MoveToLine(DefLoc, /*RequireStartOfLine=*/true);
   PrintMacroDefinition(*MacroNameTok.getIdentifierInfo(), *MI, PP, OS);
   setEmittedDirectiveOnThisLine();
 }
@@ -481,8 +491,10 @@ void PrintPPOutputPPCallbacks::MacroDefined(const Token &MacroNameTok,
 void PrintPPOutputPPCallbacks::MacroUndefined(const Token &MacroNameTok,
                                               const MacroDefinition &MD,
                                               const MacroDirective *Undef) {
-  // Only print out macro definitions in -dD mode.
-  if (!DumpDefines) return;
+  // Print out macro definitions in -dD mode and when we have -fdirectives-only
+  // for C++20 header units.
+  if (!DumpDefines && !DirectivesOnly)
+    return;
 
   MoveToLine(MacroNameTok.getLocation(), /*RequireStartOfLine=*/true);
   OS << "#undef " << MacroNameTok.getIdentifierInfo()->getName();
@@ -580,10 +592,24 @@ void PrintPPOutputPPCallbacks::PragmaDiagnostic(SourceLocation Loc,
 }
 
 void PrintPPOutputPPCallbacks::PragmaWarning(SourceLocation Loc,
-                                             StringRef WarningSpec,
+                                             PragmaWarningSpecifier WarningSpec,
                                              ArrayRef<int> Ids) {
   MoveToLine(Loc, /*RequireStartOfLine=*/true);
-  OS << "#pragma warning(" << WarningSpec << ':';
+
+  OS << "#pragma warning(";
+  switch(WarningSpec) {
+    case PWS_Default:  OS << "default"; break;
+    case PWS_Disable:  OS << "disable"; break;
+    case PWS_Error:    OS << "error"; break;
+    case PWS_Once:     OS << "once"; break;
+    case PWS_Suppress: OS << "suppress"; break;
+    case PWS_Level1:   OS << '1'; break;
+    case PWS_Level2:   OS << '2'; break;
+    case PWS_Level3:   OS << '3'; break;
+    case PWS_Level4:   OS << '4'; break;
+  }
+  OS << ':';
+
   for (ArrayRef<int>::iterator I = Ids.begin(), E = Ids.end(); I != E; ++I)
     OS << ' ' << *I;
   OS << ')';
@@ -686,7 +712,7 @@ void PrintPPOutputPPCallbacks::HandleWhitespaceBeforeTok(const Token &Tok,
     // - The whitespace is necessary to keep the tokens apart and there is not
     //   already a newline between them
     if (RequireSpace || (!MinimizeWhitespace && Tok.hasLeadingSpace()) ||
-        ((EmittedTokensOnThisLine || EmittedTokensOnThisLine) &&
+        ((EmittedTokensOnThisLine || EmittedDirectiveOnThisLine) &&
          AvoidConcat(PrevPrevTok, PrevTok, Tok)))
       OS << ' ';
   }
@@ -780,7 +806,7 @@ static void PrintPreprocessedTokens(Preprocessor &PP, Token &Tok,
 
   bool IsStartOfLine = false;
   char Buffer[256];
-  while (1) {
+  while (true) {
     // Two lines joined with line continuation ('\' as last character on the
     // line) must be emitted as one line even though Tok.getLine() returns two
     // different values. In this situation Tok.isAtStartOfLine() is false even
@@ -851,7 +877,7 @@ static void PrintPreprocessedTokens(Preprocessor &PP, Token &Tok,
     } else if (Tok.isLiteral() && !Tok.needsCleaning() &&
                Tok.getLiteralData()) {
       OS.write(Tok.getLiteralData(), Tok.getLength());
-    } else if (Tok.getLength() < llvm::array_lengthof(Buffer)) {
+    } else if (Tok.getLength() < std::size(Buffer)) {
       const char *TokPtr = Buffer;
       unsigned Len = PP.getSpelling(Tok, TokPtr);
       OS.write(TokPtr, Len);
@@ -946,7 +972,7 @@ void clang::DoPrintPreprocessedInput(Preprocessor &PP, raw_ostream *OS,
   PrintPPOutputPPCallbacks *Callbacks = new PrintPPOutputPPCallbacks(
       PP, *OS, !Opts.ShowLineMarkers, Opts.ShowMacros,
       Opts.ShowIncludeDirectives, Opts.UseLineDirectives,
-      Opts.MinimizeWhitespace);
+      Opts.MinimizeWhitespace, Opts.DirectivesOnly);
 
   // Expand macros in pragmas with -fms-extensions.  The assumption is that
   // the majority of pragmas in such a file will be Microsoft pragmas.
@@ -982,6 +1008,8 @@ void clang::DoPrintPreprocessedInput(Preprocessor &PP, raw_ostream *OS,
 
   // After we have configured the preprocessor, enter the main file.
   PP.EnterMainSourceFile();
+  if (Opts.DirectivesOnly)
+    PP.SetMacroExpansionOnlyInDirectives();
 
   // Consume all of the tokens that come from the predefines buffer.  Those
   // should not be emitted into the output and are guaranteed to be at the

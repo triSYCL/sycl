@@ -320,6 +320,7 @@
 // PPC:#define __NATURAL_ALIGNMENT__ 1
 // PPC:#define __POINTER_WIDTH__ 32
 // PPC:#define __POWERPC__ 1
+// PPC-NOT:#define __PPC 1
 // PPC:#define __PPC__ 1
 // PPC:#define __PTRDIFF_TYPE__ long int
 // PPC:#define __PTRDIFF_WIDTH__ 32
@@ -384,6 +385,7 @@
 // PPC:#define __WCHAR_WIDTH__ 32
 // PPC:#define __WINT_TYPE__ int
 // PPC:#define __WINT_WIDTH__ 32
+// PPC-NOT:#define __powerpc 1
 // PPC:#define __ppc__ 1
 
 // RUN: %clang_cc1 -E -dM -ffreestanding -triple=powerpc-ibm-aix7.1.0.0 -fno-signed-char < /dev/null | FileCheck -match-full-lines -check-prefix PPC-AIX %s
@@ -517,6 +519,7 @@
 // PPC-AIX-NOT:#define __NATURAL_ALIGNMENT__ 1
 // PPC-AIX:#define __POINTER_WIDTH__ 32
 // PPC-AIX:#define __POWERPC__ 1
+// PPC-AIX:#define __PPC 1
 // PPC-AIX:#define __PPC__ 1
 // PPC-AIX:#define __PTRDIFF_TYPE__ long int
 // PPC-AIX:#define __PTRDIFF_WIDTH__ 32
@@ -584,6 +587,7 @@
 // PPC-AIX:#define __WCHAR_WIDTH__ 16
 // PPC-AIX:#define __WINT_TYPE__ int
 // PPC-AIX:#define __WINT_WIDTH__ 32
+// PPC-AIX:#define __powerpc 1
 // PPC-AIX:#define __powerpc__ 1
 // PPC-AIX:#define __ppc__ 1
 
@@ -1167,3 +1171,6 @@
 // PPC-DARWIN:#define __WINT_WIDTH__ 32
 // PPC-DARWIN:#define __powerpc__ 1
 // PPC-DARWIN:#define __ppc__ 1
+
+// RUN: %clang_cc1 -E -dM -triple=powerpc-unknown-openbsd -x c++ < /dev/null | FileCheck -match-full-lines -check-prefix PPC-OPENBSD-CXX %s
+// PPC-OPENBSD-CXX: #define __STDCPP_DEFAULT_NEW_ALIGNMENT__ 16UL

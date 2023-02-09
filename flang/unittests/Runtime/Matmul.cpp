@@ -1,4 +1,4 @@
-//===-- flang/unittests/RuntimeGTest/Matmul.cpp---- -------------*- C++ -*-===//
+//===-- flang/unittests/Runtime/Matmul.cpp--------- -------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,13 +6,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-#include "../../runtime/matmul.h"
+#include "flang/Runtime/matmul.h"
 #include "gtest/gtest.h"
 #include "tools.h"
-#include "../../runtime/allocatable.h"
-#include "../../runtime/cpp-type.h"
-#include "../../runtime/descriptor.h"
-#include "../../runtime/type-code.h"
+#include "flang/Runtime/allocatable.h"
+#include "flang/Runtime/cpp-type.h"
+#include "flang/Runtime/descriptor.h"
+#include "flang/Runtime/type-code.h"
 
 using namespace Fortran::runtime;
 using Fortran::common::TypeCategory;

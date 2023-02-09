@@ -4,6 +4,7 @@ set(LLVM_OPTIONAL_SOURCES
   ConvertFromLLVMIR.cpp
   ConvertToLLVMIR.cpp
   DebugTranslation.cpp
+  DebugImporter.cpp
   ModuleTranslation.cpp
   TypeToLLVM.cpp
   TypeFromLLVM.cpp
@@ -27,11 +28,10 @@ add_mlir_translation_library(MLIRTargetLLVMIRExport
   TransformUtils
 
   LINK_LIBS PUBLIC
-  MLIRLLVMIR
-  MLIROpenACC
-  MLIROpenMP
+  MLIRDLTIDialect
+  MLIRLLVMDialect
   MLIRLLVMIRTransforms
-  MLIRTranslation
+  MLIRTranslateLib
   )
 
 add_mlir_translation_library(MLIRToLLVMIRTranslationRegistration
@@ -51,6 +51,7 @@ add_mlir_translation_library(MLIRToLLVMIRTranslationRegistration
 
 add_mlir_translation_library(MLIRTargetLLVMIRImport
   ConvertFromLLVMIR.cpp
+  DebugImporter.cpp
   TypeFromLLVM.cpp
 
   ADDITIONAL_HEADER_DIRS
@@ -61,6 +62,7 @@ add_mlir_translation_library(MLIRTargetLLVMIRImport
   IRReader
 
   LINK_LIBS PUBLIC
-  MLIRLLVMIR
-  MLIRTranslation
+  MLIRDLTIDialect
+  MLIRLLVMDialect
+  MLIRTranslateLib
   )

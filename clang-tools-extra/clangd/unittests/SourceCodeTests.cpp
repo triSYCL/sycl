@@ -15,7 +15,6 @@
 #include "clang/Basic/TokenKinds.h"
 #include "clang/Format/Format.h"
 #include "llvm/Support/Error.h"
-#include "llvm/Support/raw_os_ostream.h"
 #include "llvm/Testing/Support/Annotations.h"
 #include "llvm/Testing/Support/Error.h"
 #include "gmock/gmock.h"
@@ -34,7 +33,7 @@ MATCHER_P2(Pos, Line, Col, "") {
   return arg.line == int(Line) && arg.character == int(Col);
 }
 
-MATCHER_P(MacroName, Name, "") { return arg.Name == Name; }
+MATCHER_P(macroName, Name, "") { return arg.Name == Name; }
 
 /// A helper to make tests easier to read.
 Position position(int Line, int Character) {
@@ -315,6 +314,16 @@ TEST(SourceCodeTests, SourceLocationInMainFile) {
   }
 }
 
+TEST(SourceCodeTests, isReservedName) {
+  EXPECT_FALSE(isReservedName(""));
+  EXPECT_FALSE(isReservedName("_"));
+  EXPECT_FALSE(isReservedName("foo"));
+  EXPECT_FALSE(isReservedName("_foo"));
+  EXPECT_TRUE(isReservedName("__foo"));
+  EXPECT_TRUE(isReservedName("_Foo"));
+  EXPECT_FALSE(isReservedName("foo__bar")) << "FIXME";
+}
+
 TEST(SourceCodeTests, CollectIdentifiers) {
   auto Style = format::getLLVMStyle();
   auto IDs = collectIdentifiers(R"cpp(
@@ -367,7 +376,7 @@ protected:
   SpelledWord word(const char *Text) {
     auto Result = tryWord(Text);
     EXPECT_TRUE(Result) << Text;
-    return Result.getValueOr(SpelledWord());
+    return Result.value_or(SpelledWord());
   }
 
   void noWord(const char *Text) { EXPECT_FALSE(tryWord(Text)) << Text; }
@@ -532,7 +541,7 @@ TEST(SourceCodeTests, GetMacros) {
   ASSERT_TRUE(Id);
   auto Result = locateMacroAt(*Id, AST.getPreprocessor());
   ASSERT_TRUE(Result);
-  EXPECT_THAT(*Result, MacroName("MACRO"));
+  EXPECT_THAT(*Result, macroName("MACRO"));
 }
 
 TEST(SourceCodeTests, WorksAtBeginOfFile) {
@@ -546,7 +555,7 @@ TEST(SourceCodeTests, WorksAtBeginOfFile) {
   ASSERT_TRUE(Id);
   auto Result = locateMacroAt(*Id, AST.getPreprocessor());
   ASSERT_TRUE(Result);
-  EXPECT_THAT(*Result, MacroName("MACRO"));
+  EXPECT_THAT(*Result, macroName("MACRO"));
 }
 
 TEST(SourceCodeTests, IsInsideMainFile) {
@@ -943,6 +952,44 @@ TEST(ApplyEditsTest, WrongRangeLength) {
   EXPECT_THAT_ERROR(applyChange(Code, Change),
                     FailedWithMessage("Change's rangeLength (10) doesn't match "
                                       "the computed range length (2)."));
+}
+
+// Test that we correct observed buggy edits from Neovim.
+TEST(ApplyEditsTets, BuggyNeovimEdits) {
+  TextDocumentContentChangeEvent Change;
+  Change.range.emplace();
+
+  // https://github.com/neovim/neovim/issues/17085
+  // Adding a blank line after a (missing) newline
+  std::string Code = "a";
+  Change.range->start.line = 1;
+  Change.range->start.character = 0;
+  Change.range->end.line = 1;
+  Change.range->start.character = 0;
+  Change.rangeLength = 0;
+  Change.text = "\n";
+  EXPECT_THAT_ERROR(applyChange(Code, Change), llvm::Succeeded());
+  EXPECT_EQ(Code, "a\n\n");
+
+  // https://github.com/neovim/neovim/issues/17085#issuecomment-1269162264
+  // Replacing the (missing) newline with \n\n in an empty file.
+  Code = "";
+  Change.range->start.line = 0;
+  Change.range->start.character = 0;
+  Change.range->end.line = 1;
+  Change.range->end.character = 0;
+  Change.rangeLength = 1;
+  Change.text = "\n\n";
+
+  EXPECT_THAT_ERROR(applyChange(Code, Change), llvm::Succeeded());
+  EXPECT_EQ(Code, "\n\n");
+
+  // We do not apply the heuristic fixes if the rangeLength doesn't match.
+  Code = "";
+  Change.rangeLength = 0;
+  EXPECT_THAT_ERROR(applyChange(Code, Change),
+                    FailedWithMessage("Change's rangeLength (0) doesn't match "
+                                      "the computed range length (1)."));
 }
 
 TEST(ApplyEditsTest, EndBeforeStart) {

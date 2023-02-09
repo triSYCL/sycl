@@ -22,9 +22,13 @@
 ; CHECK-NEXT: Profile summary info
 ; CHECK-NEXT: Create Garbage Collector Module Metadata
 ; CHECK-NEXT: Machine Branch Probability Analysis
+; CHECK-NEXT: Default Regalloc Eviction Advisor
+; CHECK-NEXT: Default Regalloc Priority Advisor
 ; CHECK-NEXT:   ModulePass Manager
 ; CHECK-NEXT:     Pre-ISel Intrinsic Lowering
 ; CHECK-NEXT:     FunctionPass Manager
+; CHECK-NEXT:       Expand large div/rem
+; CHECK-NEXT:       Expand large fp convert
 ; CHECK-NEXT:       Expand Atomic instructions
 ; CHECK-NEXT:       Lower AMX intrinsics
 ; CHECK-NEXT:       Lower AMX type for load/store
@@ -59,6 +63,8 @@
 ; CHECK-NEXT:       Expand vector predication intrinsics
 ; CHECK-NEXT:       Scalarize Masked Memory Intrinsics
 ; CHECK-NEXT:       Expand reduction intrinsics
+; CHECK-NEXT:       Natural Loop Information
+; CHECK-NEXT:       TLS Variable Hoist
 ; CHECK-NEXT:       Interleaved Access Pass
 ; CHECK-NEXT:       X86 Partial Reduction
 ; CHECK-NEXT:       Expand indirectbr instructions
@@ -104,6 +110,7 @@
 ; CHECK-NEXT:       Machine Block Frequency Analysis
 ; CHECK-NEXT:       Machine Common Subexpression Elimination
 ; CHECK-NEXT:       MachinePostDominator Tree Construction
+; CHECK-NEXT:       Machine Cycle Info Analysis
 ; CHECK-NEXT:       Machine code sinking
 ; CHECK-NEXT:       Peephole Optimizations
 ; CHECK-NEXT:       Remove dead machine instructions
@@ -116,7 +123,7 @@
 ; CHECK-NEXT:       X86 speculative load hardening
 ; CHECK-NEXT:       MachineDominator Tree Construction
 ; CHECK-NEXT:       X86 EFLAGS copy lowering
-; CHECK-NEXT:       X86 WinAlloca Expander
+; CHECK-NEXT:       X86 DynAlloca Expander
 ; CHECK-NEXT:       MachineDominator Tree Construction
 ; CHECK-NEXT:       Machine Natural Loop Construction
 ; CHECK-NEXT:       Tile Register Pre-configure
@@ -142,7 +149,9 @@
 ; CHECK-NEXT:       Machine Optimization Remark Emitter
 ; CHECK-NEXT:       Greedy Register Allocator
 ; CHECK-NEXT:       Tile Register Configure
+; CHECK-NEXT:       Greedy Register Allocator
 ; CHECK-NEXT:       Virtual Register Rewriter
+; CHECK-NEXT:       Register Allocation Pass Scoring
 ; CHECK-NEXT:       Stack Slot Coloring
 ; CHECK-NEXT:       Machine Copy Propagation Pass
 ; CHECK-NEXT:       Machine Loop Invariant Code Motion
@@ -161,12 +170,14 @@
 ; CHECK-NEXT:       Machine Optimization Remark Emitter
 ; CHECK-NEXT:       Shrink Wrapping analysis
 ; CHECK-NEXT:       Prologue/Epilogue Insertion & Frame Finalization
+; CHECK-NEXT:       Machine Late Instructions Cleanup Pass
 ; CHECK-NEXT:       Control Flow Optimizer
 ; CHECK-NEXT:       Lazy Machine Block Frequency Analysis
 ; CHECK-NEXT:       Tail Duplication
 ; CHECK-NEXT:       Machine Copy Propagation Pass
 ; CHECK-NEXT:       Post-RA pseudo instruction expansion pass
 ; CHECK-NEXT:       X86 pseudo instruction expansion pass
+; CHECK-NEXT:       Insert KCFI indirect call checks
 ; CHECK-NEXT:       MachineDominator Tree Construction
 ; CHECK-NEXT:       Machine Natural Loop Construction
 ; CHECK-NEXT:       Post RA top-down list latency scheduler
@@ -198,8 +209,11 @@
 ; CHECK-NEXT:       Live DEBUG_VALUE analysis
 ; CHECK-NEXT:       X86 Speculative Execution Side Effect Suppression
 ; CHECK-NEXT:       X86 Indirect Thunks
+; CHECK-NEXT:       X86 Return Thunks
 ; CHECK-NEXT:       Check CFA info and insert CFI instructions if needed
 ; CHECK-NEXT:       X86 Load Value Injection (LVI) Ret-Hardening
+; CHECK-NEXT:       Pseudo Probe Inserter
+; CHECK-NEXT:       Unpack machine instruction bundles
 ; CHECK-NEXT:       Lazy Machine Block Frequency Analysis
 ; CHECK-NEXT:       Machine Optimization Remark Emitter
 ; CHECK-NEXT:       X86 Assembly Printer

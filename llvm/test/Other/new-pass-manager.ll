@@ -8,6 +8,9 @@
 ; RUN: opt -disable-output -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
 ; RUN:     -passes=no-op-module %s 2>&1 \
 ; RUN:     | FileCheck %s --check-prefix=CHECK-MODULE-PASS
+; RUN: opt -disable-output -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
+; RUN:     -p no-op-module %s 2>&1 \
+; RUN:     | FileCheck %s --check-prefix=CHECK-MODULE-PASS
 ; CHECK-MODULE-PASS: Running pass: NoOpModulePass
 
 ; RUN: opt -disable-output -disable-verify -verify-cfg-preserved=1 -debug-pass-manager \
@@ -340,6 +343,7 @@
 ; CHECK-REPEAT-LOOP-PASS-NEXT: Running analysis: LoopAnalysis
 ; CHECK-REPEAT-LOOP-PASS-NEXT: Running analysis: DominatorTreeAnalysis
 ; CHECK-REPEAT-LOOP-PASS-NEXT: Running analysis: AssumptionAnalysis
+; CHECK-REPEAT-LOOP-PASS-NEXT: Running analysis: TargetIRAnalysis
 ; CHECK-REPEAT-LOOP-PASS-NEXT: Invalidating analysis: PreservedCFGCheckerAnalysis on foo
 ; CHECK-REPEAT-LOOP-PASS-NEXT: Running pass: LCSSAPass
 ; CHECK-REPEAT-LOOP-PASS-NEXT: Running analysis: PreservedCFGCheckerAnalysis on foo
@@ -350,7 +354,6 @@
 ; CHECK-REPEAT-LOOP-PASS-NEXT: Running analysis: TypeBasedAA
 ; CHECK-REPEAT-LOOP-PASS-NEXT: Running analysis: OuterAnalysisManagerProxy
 ; CHECK-REPEAT-LOOP-PASS-NEXT: Running analysis: ScalarEvolutionAnalysis
-; CHECK-REPEAT-LOOP-PASS-NEXT: Running analysis: TargetIRAnalysis
 ; CHECK-REPEAT-LOOP-PASS-NEXT: Running analysis: InnerAnalysisManagerProxy<{{.*}}>
 ; CHECK-REPEAT-LOOP-PASS-NEXT: Running pass: RepeatedPass
 ; CHECK-REPEAT-LOOP-PASS-NEXT: Running pass: NoOpLoopPass

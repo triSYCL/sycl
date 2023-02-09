@@ -15,23 +15,24 @@
 
 #pragma once
 
-#include <CL/sycl/detail/stl_type_traits.hpp>
-#include <CL/sycl/detail/sycl_fe_intrins.hpp>
-#include <CL/sycl/exception.hpp>
+#include <sycl/detail/stl_type_traits.hpp>
+#include <sycl/detail/sycl_fe_intrins.hpp>
+#include <sycl/exception.hpp>
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
-class program;
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 
-namespace ext {
-namespace oneapi {
-namespace experimental {
+namespace ext::oneapi::experimental {
 
 class spec_const_error : public compile_program_error {
   using compile_program_error::compile_program_error;
 };
 
-template <typename T, typename ID = T> class spec_constant {
+template <typename T, typename ID = T>
+class __SYCL2020_DEPRECATED(
+    "Specialization constats extension is deprecated, use SYCL 2020"
+    " specialization constants instead")
+    __SYCL_TYPE(spec_constant) spec_constant {
 public:
   spec_constant() {}
 
@@ -44,11 +45,10 @@ private:
 #else
   char padding[sizeof(T)];
 #endif // __SYCL_DEVICE_ONLY__
-  friend class cl::sycl::program;
 
 public:
   template <typename V = T>
-  typename sycl::detail::enable_if_t<std::is_arithmetic<V>::value, V>
+  typename std::enable_if_t<std::is_arithmetic<V>::value, V>
   get() const { // explicit access.
 #ifdef __SYCL_DEVICE_ONLY__
     const char *TName = __builtin_sycl_unique_stable_name(ID);
@@ -59,9 +59,8 @@ public:
   }
 
   template <typename V = T>
-  typename sycl::detail::enable_if_t<std::is_class<V>::value &&
-                                         std::is_pod<V>::value,
-                                     V>
+  typename std::enable_if_t<std::is_class<V>::value && std::is_pod<V>::value,
+                            V>
   get() const { // explicit access.
 #ifdef __SYCL_DEVICE_ONLY__
     const char *TName = __builtin_sycl_unique_stable_name(ID);
@@ -76,12 +75,7 @@ public:
   }
 };
 
-} // namespace experimental
-} // namespace oneapi
-} // namespace ext
+} // namespace ext::oneapi::experimental
 
-namespace __SYCL2020_DEPRECATED("use 'ext::oneapi' instead") ONEAPI {
-  using namespace ext::oneapi;
-}
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)

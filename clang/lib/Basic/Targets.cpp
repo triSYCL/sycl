@@ -19,9 +19,12 @@
 #include "Targets/ARM.h"
 #include "Targets/AVR.h"
 #include "Targets/BPF.h"
+#include "Targets/CSKY.h"
+#include "Targets/DirectX.h"
 #include "Targets/Hexagon.h"
 #include "Targets/Lanai.h"
 #include "Targets/Le64.h"
+#include "Targets/LoongArch.h"
 #include "Targets/M68k.h"
 #include "Targets/MSP430.h"
 #include "Targets/Mips.h"
@@ -79,9 +82,10 @@ void defineCPUMacros(MacroBuilder &Builder, StringRef CPUName, bool Tuning) {
 
 void addCygMingDefines(const LangOptions &Opts, MacroBuilder &Builder) {
   // Mingw and cygwin define __declspec(a) to __attribute__((a)).  Clang
-  // supports __declspec natively under -fms-extensions, but we define a no-op
-  // __declspec macro anyway for pre-processor compatibility.
-  if (Opts.MicrosoftExt)
+  // supports __declspec natively under -fdeclspec (also enabled with
+  // -fms-extensions), but we define a no-op __declspec macro anyway for
+  // pre-processor compatibility.
+  if (Opts.DeclSpecKeyword)
     Builder.defineMacro("__declspec", "__declspec");
   else
     Builder.defineMacro("__declspec(a)", "__attribute__((a))");
@@ -591,28 +595,28 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
       return new NaClTargetInfo<X86_64TargetInfo>(Triple, Opts);
     case llvm::Triple::PS4:
       return new PS4OSTargetInfo<X86_64TargetInfo>(Triple, Opts);
+    case llvm::Triple::PS5:
+      return new PS5OSTargetInfo<X86_64TargetInfo>(Triple, Opts);
     default:
       return new X86_64TargetInfo(Triple, Opts);
     }
 
   case llvm::Triple::aie32: {
     // Triple example: aie32-xilinx-unknown-sycldevice
-    if (Triple.getVendor() == llvm::Triple::Xilinx
-      && Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
+    if (Triple.getVendor() == llvm::Triple::Xilinx) {
        switch (os) {
        case llvm::Triple::Linux:
-         return new LinuxTargetInfo<SPIR32SYCLDeviceTargetInfo>(Triple, Opts);
+         return new LinuxTargetInfo<SPIR32TargetInfo>(Triple, Opts);
        default:
-         return new SPIR32SYCLDeviceTargetInfo(Triple, Opts);
+         return new SPIR32TargetInfo(Triple, Opts);
        }
      }
     return nullptr;
   }
 
   case llvm::Triple::fpga32: {
-    // Triple example: fpga32-xilinx-unknown-sycldevice
-    if (Triple.getVendor() == llvm::Triple::Xilinx &&
-        Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
+    // Triple example: fpga32-xilinx-unknown
+    if (Triple.getVendor() == llvm::Triple::Xilinx) {
       switch (Triple.getSubArch()) {
       case llvm::Triple::FPGASubArch_hls_hw:
       case llvm::Triple::FPGASubArch_hls_hw_emu:
@@ -627,9 +631,9 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
       default:
         switch (os) {
         case llvm::Triple::Linux:
-          return new LinuxTargetInfo<SPIR32SYCLDeviceTargetInfo>(Triple, Opts);
+          return new LinuxTargetInfo<SPIR32TargetInfo>(Triple, Opts);
         default:
-          return new SPIR32SYCLDeviceTargetInfo(Triple, Opts);
+          return new SPIR32TargetInfo(Triple, Opts);
         }
       }
     }
@@ -637,9 +641,8 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
   }
 
   case llvm::Triple::fpga64: {
-    // Triple example: fpga64-xilinx-unknown-sycldevice
-    if (Triple.getVendor() == llvm::Triple::Xilinx &&
-        Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
+    // Triple example: fpga64-xilinx-unknown
+    if (Triple.getVendor() == llvm::Triple::Xilinx) {
       switch (Triple.getSubArch()) {
       case llvm::Triple::FPGASubArch_hls_hw:
       case llvm::Triple::FPGASubArch_hls_hw_emu:
@@ -654,55 +657,72 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
       default:
         switch (os) {
         case llvm::Triple::Linux:
-          return new LinuxTargetInfo<SPIR64SYCLDeviceTargetInfo>(Triple, Opts);
+          return new LinuxTargetInfo<SPIR64TargetInfo>(Triple, Opts);
         default:
-          return new SPIR64SYCLDeviceTargetInfo(Triple, Opts);
+          return new SPIR64TargetInfo(Triple, Opts);
         }
       }
     }
     return nullptr;
   }
 
+  case llvm::Triple::vitis_ip:
+    // Triple example: vitis_ip-xilinx-unknown
+    return new LinuxTargetInfo<XilinxHLS64TargetInfo>(Triple, Opts);
+
   case llvm::Triple::spir: {
-    if (Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
-      llvm::Triple HT(Opts.HostTriple);
-      switch (HT.getOS()) {
-      case llvm::Triple::Win32:
-        switch (HT.getEnvironment()) {
-        default: // Assume MSVC for unknown environments
-        case llvm::Triple::MSVC:
-          assert(HT.getArch() == llvm::Triple::x86 &&
-                 "Unsupported host architecture");
-          return new MicrosoftX86_32SPIRTargetInfo(Triple, Opts);
-        }
-      case llvm::Triple::Linux:
-        return new LinuxTargetInfo<SPIR32SYCLDeviceTargetInfo>(Triple, Opts);
-      default:
-        return new SPIR32SYCLDeviceTargetInfo(Triple, Opts);
+    llvm::Triple HT(Opts.HostTriple);
+    switch (HT.getOS()) {
+    case llvm::Triple::Win32:
+      switch (HT.getEnvironment()) {
+      default: // Assume MSVC for unknown environments
+      case llvm::Triple::MSVC:
+        assert(HT.getArch() == llvm::Triple::x86 &&
+               "Unsupported host architecture");
+        return new MicrosoftX86_32SPIRTargetInfo(Triple, Opts);
       }
+    case llvm::Triple::Linux:
+      return new LinuxTargetInfo<SPIR32TargetInfo>(Triple, Opts);
+    default:
+      return new SPIR32TargetInfo(Triple, Opts);
     }
-    return new SPIR32TargetInfo(Triple, Opts);
   }
 
   case llvm::Triple::spir64: {
-    if (Triple.getEnvironment() == llvm::Triple::SYCLDevice) {
-      llvm::Triple HT(Opts.HostTriple);
-      switch (HT.getOS()) {
-      case llvm::Triple::Win32:
-        switch (HT.getEnvironment()) {
-        default: // Assume MSVC for unknown environments
-        case llvm::Triple::MSVC:
-          assert(HT.getArch() == llvm::Triple::x86_64 &&
-                 "Unsupported host architecture");
-          return new MicrosoftX86_64_SPIR64TargetInfo(Triple, Opts);
-        }
-      case llvm::Triple::Linux:
-        return new LinuxTargetInfo<SPIR64SYCLDeviceTargetInfo>(Triple, Opts);
-      default:
-        return new SPIR64SYCLDeviceTargetInfo(Triple, Opts);
+    llvm::Triple HT(Opts.HostTriple);
+    bool IsFPGASubArch = Triple.getSubArch() == llvm::Triple::SPIRSubArch_fpga;
+
+    switch (HT.getOS()) {
+    case llvm::Triple::Win32:
+      switch (HT.getEnvironment()) {
+      default: // Assume MSVC for unknown environments
+      case llvm::Triple::MSVC:
+        assert(HT.getArch() == llvm::Triple::x86_64 &&
+               "Unsupported host architecture");
+        return new MicrosoftX86_64_SPIR64TargetInfo(Triple, Opts);
       }
+    case llvm::Triple::Linux:
+      if (IsFPGASubArch)
+        return new LinuxTargetInfo<SPIR64FPGATargetInfo>(Triple, Opts);
+      return new LinuxTargetInfo<SPIR64TargetInfo>(Triple, Opts);
+    default:
+      if (IsFPGASubArch)
+        return new SPIR64FPGATargetInfo(Triple, Opts);
+      return new SPIR64TargetInfo(Triple, Opts);
     }
-    return new SPIR64TargetInfo(Triple, Opts);
+  }
+
+  case llvm::Triple::spirv32: {
+    if (os != llvm::Triple::UnknownOS ||
+        Triple.getEnvironment() != llvm::Triple::UnknownEnvironment)
+      return nullptr;
+    return new SPIRV32TargetInfo(Triple, Opts);
+  }
+  case llvm::Triple::spirv64: {
+    if (os != llvm::Triple::UnknownOS ||
+        Triple.getEnvironment() != llvm::Triple::UnknownEnvironment)
+      return nullptr;
+    return new SPIRV64TargetInfo(Triple, Opts);
   }
 
   case llvm::Triple::wasm32:
@@ -736,6 +756,8 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
         return nullptr;
     }
 
+  case llvm::Triple::dxil:
+    return new DirectXTargetInfo(Triple,Opts);
   case llvm::Triple::renderscript32:
     return new LinuxTargetInfo<RenderScript32TargetInfo>(Triple, Opts);
   case llvm::Triple::renderscript64:
@@ -743,6 +765,28 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
 
   case llvm::Triple::ve:
     return new LinuxTargetInfo<VETargetInfo>(Triple, Opts);
+
+  case llvm::Triple::csky:
+    switch (os) {
+    case llvm::Triple::Linux:
+      return new LinuxTargetInfo<CSKYTargetInfo>(Triple, Opts);
+    default:
+      return new CSKYTargetInfo(Triple, Opts);
+    }
+  case llvm::Triple::loongarch32:
+    switch (os) {
+    case llvm::Triple::Linux:
+      return new LinuxTargetInfo<LoongArch32TargetInfo>(Triple, Opts);
+    default:
+      return new LoongArch32TargetInfo(Triple, Opts);
+    }
+  case llvm::Triple::loongarch64:
+    switch (os) {
+    case llvm::Triple::Linux:
+      return new LinuxTargetInfo<LoongArch64TargetInfo>(Triple, Opts);
+    default:
+      return new LoongArch64TargetInfo(Triple, Opts);
+    }
   }
 }
 } // namespace targets
@@ -818,6 +862,10 @@ TargetInfo::CreateTargetInfo(DiagnosticsEngine &Diags,
   Target->setCommandLineOpenCLOpts();
   Target->setMaxAtomicWidth();
 
+  if (!Opts->DarwinTargetVariantTriple.empty())
+    Target->DarwinTargetVariantTriple =
+        llvm::Triple(Opts->DarwinTargetVariantTriple);
+
   if (!Target->validateTarget(Diags))
     return nullptr;
 
@@ -844,7 +892,7 @@ bool TargetInfo::validateOpenCLTarget(const LangOptions &Opts,
 
   // Validate that feature macros are set properly for OpenCL C 3.0.
   // In other cases assume that target is always valid.
-  if (Opts.OpenCLCPlusPlus || Opts.OpenCLVersion < 300)
+  if (Opts.getOpenCLCompatibleVersion() < 300)
     return true;
 
   return OpenCLOptions::diagnoseUnsupportedFeatureDependencies(*this, Diags) &&

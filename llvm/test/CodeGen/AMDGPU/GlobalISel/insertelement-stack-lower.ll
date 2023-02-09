@@ -4,7 +4,7 @@
 ; Check lowering of some large insertelement that use the stack
 ; instead of register indexing.
 
-define amdgpu_kernel void @v_insert_v64i32_varidx(<64 x i32> addrspace(1)* %out.ptr, <64 x i32> addrspace(1)* %ptr, i32 %val, i32 %idx) #0 {
+define amdgpu_kernel void @v_insert_v64i32_varidx(ptr addrspace(1) %out.ptr, ptr addrspace(1) %ptr, i32 %val, i32 %idx) #0 {
 ; GCN-LABEL: v_insert_v64i32_varidx:
 ; GCN:       ; %bb.0:
 ; GCN-NEXT:    s_load_dwordx4 s[20:23], s[4:5], 0x0
@@ -143,9 +143,9 @@ define amdgpu_kernel void @v_insert_v64i32_varidx(<64 x i32> addrspace(1)* %out.
 ; GCN-NEXT:    v_mov_b32_e32 v0, s48
 ; GCN-NEXT:    buffer_store_dword v0, off, s[0:3], 0 offset:496
 ; GCN-NEXT:    v_mov_b32_e32 v0, s49
-; GCN-NEXT:    s_and_b32 s4, s25, 63
 ; GCN-NEXT:    buffer_store_dword v0, off, s[0:3], 0 offset:500
 ; GCN-NEXT:    v_mov_b32_e32 v0, s50
+; GCN-NEXT:    s_and_b32 s4, s25, 63
 ; GCN-NEXT:    buffer_store_dword v0, off, s[0:3], 0 offset:504
 ; GCN-NEXT:    v_mov_b32_e32 v0, s51
 ; GCN-NEXT:    s_lshl_b32 s4, s4, 2
@@ -251,10 +251,10 @@ define amdgpu_kernel void @v_insert_v64i32_varidx(<64 x i32> addrspace(1)* %out.
 ; GCN-NEXT:    s_waitcnt vmcnt(15)
 ; GCN-NEXT:    global_store_dwordx4 v64, v[60:63], s[20:21] offset:240
 ; GCN-NEXT:    s_endpgm
-  %vec = load <64 x i32>, <64 x i32> addrspace(1)* %ptr
+  %vec = load <64 x i32>, ptr addrspace(1) %ptr
   %insert = insertelement <64 x i32> %vec, i32 %val, i32 %idx
-  store <64 x i32> %insert, <64 x i32> addrspace(1)* %out.ptr
+  store <64 x i32> %insert, ptr addrspace(1) %out.ptr
   ret void
 }
 
-attributes #0 = { "amdgpu-waves-per-eu"="1,10" }
+attributes #0 = { "amdgpu-flat-work-group-size"="1,256" "amdgpu-waves-per-eu"="1,10" }

@@ -46,7 +46,7 @@ public:
     return Parent.getBottomFrame();
   }
 
-  // Acces objects from the walker context.
+  // Access objects from the walker context.
   Expr::EvalStatus &getEvalStatus() const override {
     return Parent.getEvalStatus();
   }
@@ -81,7 +81,7 @@ public:
   void deallocate(Block *B);
 
   /// Delegates source mapping to the mapper.
-  SourceInfo getSource(Function *F, CodePtr PC) const override {
+  SourceInfo getSource(const Function *F, CodePtr PC) const override {
     return M ? M->getSource(F, PC) : F->getSource(PC);
   }
 

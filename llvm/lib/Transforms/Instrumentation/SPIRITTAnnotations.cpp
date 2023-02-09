@@ -12,12 +12,14 @@
 
 #include "llvm/Transforms/Instrumentation/SPIRITTAnnotations.h"
 
+#include "llvm/IR/Constants.h"
 #include "llvm/IR/Function.h"
 #include "llvm/IR/InstIterator.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/IR/Type.h"
 #include "llvm/InitializePasses.h"
+#include "llvm/Pass.h"
 
 /** Following functions are used for ITT instrumentation:
  * * * * * * * * * * *
@@ -244,7 +246,10 @@ PreservedAnalyses SPIRITTAnnotationsPass::run(Module &M,
       SPIRV_GROUP_FMAX,      SPIRV_GROUP_UMAX, SPIRV_GROUP_SMAX};
 
   for (Function &F : M) {
-    if (F.isDeclaration())
+    // Do not annotate:
+    // - declarations
+    // - ESIMD functions (TODO: consider enabling instrumentation)
+    if (F.isDeclaration() || F.getMetadata("sycl_explicit_simd"))
       continue;
 
     // Work item start/finish annotations are only for SPIR kernels

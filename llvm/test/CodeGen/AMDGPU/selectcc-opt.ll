@@ -33,6 +33,7 @@ ENDIF:
 
 ; EG-LABEL: {{^}}test_b:
 ; EG: SET{{[GTEQN]+}}_DX10
+; EG-NEXT: 0(0.000000e+00), 0(0.000000e+00)
 ; EG-NEXT: PRED_
 ; EG-NEXT: ALU clause starting
 define amdgpu_kernel void @test_b(i32 addrspace(1)* %out, float %in) {
@@ -68,7 +69,7 @@ entry:
 }
 
 ; FUNC-LABEL: {{^}}selectcc_bool:
-; SI: v_cmp_ne_u32
+; SI: s_cmp_lg_u32
 ; SI: v_cndmask_b32_e64
 ; SI-NOT: cmp
 ; SI-NOT: cndmask

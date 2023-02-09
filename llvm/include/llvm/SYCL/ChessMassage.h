@@ -15,12 +15,16 @@
 #ifndef LLVM_SYCL_CHESS_MASSAGE_H
 #define LLVM_SYCL_CHESS_MASSAGE_H
 
-#include "llvm/IR/Module.h"
+#include "llvm/IR/PassManager.h"
 #include "llvm/Pass.h"
 
 namespace llvm {
 
-ModulePass *createChessMassagePass();
+struct ChessMassagePass : PassInfoMixin<ChessMassagePass> {
+  PreservedAnalyses run(Module &M, ModuleAnalysisManager &AM);
+};
+
+ModulePass *createChessMassageLegacyPass();
 
 }
 

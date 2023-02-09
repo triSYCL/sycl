@@ -9,12 +9,14 @@
 #ifndef MLIR_DIALECT_LINALG_ANALYSIS_DEPENDENCEANALYSIS_H_
 #define MLIR_DIALECT_LINALG_ANALYSIS_DEPENDENCEANALYSIS_H_
 
-#include "mlir/Dialect/Linalg/IR/LinalgOps.h"
+#include "mlir/Dialect/Linalg/IR/Linalg.h"
 #include "mlir/IR/Builders.h"
 #include "mlir/IR/OpDefinition.h"
 
 namespace mlir {
+namespace func {
 class FuncOp;
+} // namespace func
 
 namespace linalg {
 
@@ -78,10 +80,10 @@ public:
     static Optional<AffineMap> getIndexingMap(OpView opView) {
       auto owner = dyn_cast<LinalgOp>(getOwner(opView));
       if (!owner)
-        return llvm::None;
+        return std::nullopt;
       if (OpOperand *operand = opView.dyn_cast<OpOperand *>())
-        return owner.getTiedIndexingMap(operand);
-      return owner.getTiedIndexingMap(owner.getOutputOperand(
+        return owner.getMatchingIndexingMap(operand);
+      return owner.getMatchingIndexingMap(owner.getDpsInitOperand(
           opView.get<Value>().cast<OpResult>().getResultNumber()));
     }
     // Return the operand number if the `opView` is an OpOperand *. Otherwise
@@ -89,14 +91,14 @@ public:
     static Optional<unsigned> getOperandNumber(OpView opView) {
       if (OpOperand *operand = opView.dyn_cast<OpOperand *>())
         return operand->getOperandNumber();
-      return llvm::None;
+      return std::nullopt;
     }
     // Return the result number if the `opView` is an OpResult. Otherwise return
     // llvm::None.
     static Optional<unsigned> getResultNumber(OpView opView) {
       if (OpResult result = opView.dyn_cast<Value>().cast<OpResult>())
         return result.getResultNumber();
-      return llvm::None;
+      return std::nullopt;
     }
 
     // Return the owner of the dependent OpView.
@@ -155,7 +157,8 @@ public:
   static StringRef getDependenceTypeStr(DependenceType depType);
 
   // Builds a linalg dependence graph for the ops of type LinalgOp under `f`.
-  static LinalgDependenceGraph buildDependenceGraph(Aliases &aliases, FuncOp f);
+  static LinalgDependenceGraph buildDependenceGraph(Aliases &aliases,
+                                                    func::FuncOp f);
   LinalgDependenceGraph(Aliases &aliases, ArrayRef<LinalgOp> ops);
 
   /// Returns the X such that op -> X is a dependence of type dt.

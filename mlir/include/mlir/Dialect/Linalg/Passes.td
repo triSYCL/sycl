@@ -11,38 +11,20 @@
 
 include "mlir/Pass/PassBase.td"
 
-def ConvertElementwiseToLinalg : FunctionPass<"convert-elementwise-to-linalg"> {
+def ConvertElementwiseToLinalg : Pass<"convert-elementwise-to-linalg", ""> {
   let summary = "Convert ElementwiseMappable ops to linalg";
   let description = [{
     Convert ops with the `ElementwiseMappable` trait to linalg parallel loops.
 
-    This pass only converts ops that operate on ranked tensors.
+    This pass only converts ops that operate on ranked tensors. It can be
+    run on op which contains linalg ops (most commonly a
+    FunctionOpInterface op).
   }];
   let constructor = "mlir::createConvertElementwiseToLinalgPass()";
   let dependentDialects = ["linalg::LinalgDialect", "memref::MemRefDialect"];
 }
 
-def LinalgComprehensiveModuleBufferize :
-    Pass<"linalg-comprehensive-module-bufferize", "ModuleOp"> {
-  let summary = "Bufferize (tensor into memref) for a Module.";
-  let description = [{
-    This pass implements a cross-dialect bufferization approach and performs an
-    analysis to determine which op operands and results may be bufferized in the
-    same buffers. The analysis is performed on topologically sorted CallOp and
-    FuncOp within a module. It provides analyses and bufferization across
-    function boundaries. Within a function boundary, the analysis is performed
-    on SSA use-def chains starting from function operands that are annotated
-    with the 'inplaceable' attribute.
-  }];
-  let options = [
-    Option<"testAnalysisOnly", "test-analysis-only", "bool",
-            /*default=*/"false",
-           "Only runs inplaceability analysis (for testing purposes only)">
-  ];
-  let constructor = "mlir::createLinalgComprehensiveModuleBufferizePass()";
-}
-
-def LinalgFoldUnitExtentDims : FunctionPass<"linalg-fold-unit-extent-dims"> {
+def LinalgFoldUnitExtentDims : Pass<"linalg-fold-unit-extent-dims", ""> {
   let summary = "Remove unit-extent dimension in Linalg ops on tensors";
   let constructor = "mlir::createLinalgFoldUnitExtentDimsPass()";
   let options = [
@@ -59,43 +41,18 @@ def LinalgFoldUnitExtentDims : FunctionPass<"linalg-fold-unit-extent-dims"> {
 def LinalgElementwiseOpFusion : Pass<"linalg-fuse-elementwise-ops"> {
   let summary = "Fuse elementwise operations on tensors";
   let constructor = "mlir::createLinalgElementwiseOpFusionPass()";
-  let options = [
-    Option<"allowFoldingUnitDimReshapes", "allow-folding-unit-dim-reshapes",
-           "bool", /*default=*/"false",
-           "Allow fusing linalg.tensor_reshape ops that performs unit "
-           "dimension collapsing">
-  ];
   let dependentDialects = [
     "AffineDialect", "linalg::LinalgDialect", "memref::MemRefDialect"
   ];
 }
 
-def LinalgFoldReshapeOpsByLinearization :
-  Pass<"linalg-fold-reshape-ops-by-linearization"> {
-  let summary = "Fold TensorReshapeOps with generic/indexed generic ops by "
-                "linearization";
-  let constructor = "mlir::createFoldReshapeOpsByLinearizationPass()";
-  let options = [
-    Option<"allowFoldingUnitDimReshapes", "allow-folding-unit-dim-reshapes",
-           "bool", /*default=*/"false",
-           "Allow fusing linalg.tensor_reshape ops that performs unit "
-           "dimension collapsing">
-  ];
-  let dependentDialects = ["AffineDialect", "memref::MemRefDialect"];
+def LinalgNamedOpConversion: Pass<"linalg-named-op-conversion"> {
+  let summary = "Convert from one named linalg op to another.";
+  let constructor = "mlir::createLinalgNamedOpConversionPass()";
+  let dependentDialects = ["linalg::LinalgDialect", "tensor::TensorDialect"];
 }
 
-def LinalgLowerTiledLoopsToSCF
-    : FunctionPass<"convert-linalg-tiled-loops-to-scf"> {
-  let summary = "Lower linalg tiled loops to SCF loops and parallel loops";
-  let constructor = "mlir::createConvertLinalgTiledLoopsToSCFPass()";
-  let dependentDialects = [
-    "linalg::LinalgDialect",
-    "scf::SCFDialect",
-    "AffineDialect"
-  ];
-}
-
-def LinalgInlineScalarOperands : FunctionPass<"linalg-inline-scalar-operands"> {
+def LinalgInlineScalarOperands : Pass<"linalg-inline-scalar-operands", "func::FuncOp"> {
   let summary = "Inline scalar operands into linalg generic ops";
   let constructor = "mlir::createLinalgInlineScalarOperandsPass()";
   let dependentDialects = [
@@ -103,7 +60,7 @@ def LinalgInlineScalarOperands : FunctionPass<"linalg-inline-scalar-operands"> {
   ];
 }
 
-def LinalgLowerToAffineLoops : FunctionPass<"convert-linalg-to-affine-loops"> {
+def LinalgLowerToAffineLoops : Pass<"convert-linalg-to-affine-loops", "func::FuncOp"> {
   let summary = "Lower the operations from the linalg dialect into affine "
                 "loops";
   let constructor = "mlir::createConvertLinalgToAffineLoopsPass()";
@@ -111,7 +68,7 @@ def LinalgLowerToAffineLoops : FunctionPass<"convert-linalg-to-affine-loops"> {
     "AffineDialect", "linalg::LinalgDialect", "memref::MemRefDialect"];
 }
 
-def LinalgLowerToLoops : FunctionPass<"convert-linalg-to-loops"> {
+def LinalgLowerToLoops : Pass<"convert-linalg-to-loops", "func::FuncOp"> {
   let summary = "Lower the operations from the linalg dialect into loops";
   let constructor = "mlir::createConvertLinalgToLoopsPass()";
   let dependentDialects = [
@@ -122,7 +79,7 @@ def LinalgLowerToLoops : FunctionPass<"convert-linalg-to-loops"> {
 }
 
 def LinalgLowerToParallelLoops
-    : FunctionPass<"convert-linalg-to-parallel-loops"> {
+    : Pass<"convert-linalg-to-parallel-loops", "func::FuncOp"> {
   let summary = "Lower the operations from the linalg dialect into parallel "
                 "loops";
   let constructor = "mlir::createConvertLinalgToParallelLoopsPass()";
@@ -134,91 +91,30 @@ def LinalgLowerToParallelLoops
   ];
 }
 
-def LinalgBufferize : Pass<"linalg-bufferize", "FuncOp"> {
+def LinalgBufferize : Pass<"linalg-bufferize", "func::FuncOp"> {
   let summary = "Bufferize the linalg dialect";
   let constructor = "mlir::createLinalgBufferizePass()";
   let dependentDialects = [
-    "linalg::LinalgDialect",
     "AffineDialect",
-    "memref::MemRefDialect"
-  ];
-}
-
-def LinalgPromotion : FunctionPass<"linalg-promote-subviews"> {
-  let summary = "Promote subview ops to local buffers";
-  let constructor = "mlir::createLinalgPromotionPass()";
-  let options = [
-    Option<"dynamicBuffers", "test-promote-dynamic", "bool",
-           /*default=*/"false", "Test generation of dynamic promoted buffers">,
-    Option<"useAlloca", "test-use-alloca", "bool",
-           /*default=*/"false", "Test generation of alloca'ed buffers.">
-  ];
-  let dependentDialects = ["linalg::LinalgDialect"];
-}
-
-def LinalgTiling : FunctionPass<"linalg-tile"> {
-  let summary = "Tile operations in the linalg dialect";
-  let constructor = "mlir::createLinalgTilingPass()";
-  let dependentDialects = [
-    "AffineDialect",
+    "bufferization::BufferizationDialect",
     "linalg::LinalgDialect",
     "memref::MemRefDialect",
-    "scf::SCFDialect"
-  ];
-  let options = [
-    ListOption<"tileSizes", "linalg-tile-sizes", "int64_t", "Tile sizes",
-               "llvm::cl::ZeroOrMore, llvm::cl::MiscFlags::CommaSeparated">
   ];
 }
 
-def LinalgTilingToParallelLoops
-    : FunctionPass<"linalg-tile-to-parallel-loops"> {
-  let summary = "Tile operations in the linalg dialect to parallel loops";
-  let constructor = "mlir::createLinalgTilingToParallelLoopsPass()";
-  let options = [
-    ListOption<"tileSizes", "linalg-tile-sizes", "int64_t", "Tile sizes",
-               "llvm::cl::ZeroOrMore, llvm::cl::MiscFlags::CommaSeparated">
-  ];
-  let dependentDialects = [
-    "AffineDialect",
-    "linalg::LinalgDialect",
-    "memref::MemRefDialect",
-    "scf::SCFDialect"
-  ];
-}
-
-def LinalgTilingToTiledLoops
-    : FunctionPass<"linalg-tile-to-tiled-loop"> {
-  let summary = "Tile operations in the linalg dialect to linalg.tiled_loop";
-  let constructor = "mlir::createLinalgTilingToTiledLoopPass()";
-  let options = [
-    ListOption<"tileSizes", "linalg-tile-sizes", "int64_t", "Tile sizes",
-               "llvm::cl::ZeroOrMore, llvm::cl::MiscFlags::CommaSeparated">,
-    ListOption<"distributionTypes", "linalg-distribution-types", "std::string",
-               "DistributionTypes",
-               "llvm::cl::ZeroOrMore, llvm::cl::MiscFlags::CommaSeparated">
-  ];
-  let dependentDialects = [
-    "AffineDialect",
-    "linalg::LinalgDialect",
-    "memref::MemRefDialect",
-    "scf::SCFDialect"
-  ];
-}
-
-def LinalgGeneralization : FunctionPass<"linalg-generalize-named-ops"> {
+def LinalgGeneralization : Pass<"linalg-generalize-named-ops", "func::FuncOp"> {
   let summary = "Convert named ops into generic ops";
   let constructor = "mlir::createLinalgGeneralizationPass()";
   let dependentDialects = ["linalg::LinalgDialect"];
 }
 
-def LinalgDetensorize : FunctionPass<"linalg-detensorize"> {
+def LinalgDetensorize : Pass<"linalg-detensorize", ""> {
   let summary = "Detensorize linalg ops";
   let constructor = "mlir::createLinalgDetensorizePass()";
   let dependentDialects = [];
 
   let description = [{
-    Detensoring is the process through which a tensor value is convereted to one
+    Detensoring is the process through which a tensor value is converted to one
     or potentially more primitive value(s). During this process, operations with
     such detensored operands are also converted to an equivalent form that works
     on primitives.
@@ -237,7 +133,17 @@ def LinalgDetensorize : FunctionPass<"linalg-detensorize"> {
     In addition to detensoring individual ops, this pass detensors internal
     control flow inside a function. All blocks except for the entry block are
     detensored by converting their arguments whenever possible.
+
+    This can be run on any FunctionOpInterface op and must not be
+    run on others. This is because it performs specific legalization of the
+    blocks that make up the body, which it assumes has is a FunctionOpInterface.
   }];
+  let options = [
+    Option<"aggressiveMode", "aggressive-mode", "bool", /*default=*/"false",
+           "Detensorize all ops that qualify for detensoring along with branch"
+           " operands and basic-block arguments.">
+
+  ];
 }
 
 #endif // MLIR_DIALECT_LINALG_PASSES

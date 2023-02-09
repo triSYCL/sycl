@@ -108,19 +108,18 @@ void HexagonMCELFStreamer::HexagonMCEmitCommonSymbol(MCSymbol *Symbol,
     MCSection &Section = *getAssembler().getContext().getELFSection(
         SectionName, ELF::SHT_NOBITS, ELF::SHF_WRITE | ELF::SHF_ALLOC);
     MCSectionSubPair P = getCurrentSection();
-    SwitchSection(&Section);
+    switchSection(&Section);
 
     if (ELFSymbol->isUndefined()) {
-      emitValueToAlignment(ByteAlignment, 0, 1, 0);
+      emitValueToAlignment(Align(ByteAlignment), 0, 1, 0);
       emitLabel(Symbol);
       emitZeros(Size);
     }
 
     // Update the maximum alignment of the section if necessary.
-    if (Align(ByteAlignment) > Section.getAlignment())
-      Section.setAlignment(Align(ByteAlignment));
+    Section.ensureMinAlignment(Align(ByteAlignment));
 
-    SwitchSection(P.first, P.second);
+    switchSection(P.first, P.second);
   } else {
     if (ELFSymbol->declareCommon(Size, ByteAlignment))
       report_fatal_error("Symbol: " + Symbol->getName() +

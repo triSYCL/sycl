@@ -7,7 +7,6 @@
 //===----------------------------------------------------------------------===//
 
 // <numeric>
-// UNSUPPORTED: clang-8
 
 // Became constexpr in C++20
 // template <InputIterator Iter1, InputIterator Iter2, MoveConstructible T,
@@ -78,7 +77,7 @@ test_use_move()
 // don't have the support yet. In these cases omit the constexpr test.
 // FIXME Remove constexpr string workaround introduced in D90569
 #if TEST_STD_VER > 17 && \
-	(!defined(__cpp_lib_constexpr_string) || __cpp_lib_constexpr_string < 201907L)
+    (!defined(__cpp_lib_constexpr_string) || __cpp_lib_constexpr_string < 201907L)
 void
 #else
 TEST_CONSTEXPR_CXX20 void
@@ -155,8 +154,8 @@ test()
     // don't have the support yet. In these cases omit the constexpr test.
     // FIXME Remove constexpr string workaround introduced in D90569
 #if TEST_STD_VER > 17 && \
-	(!defined(__cpp_lib_constexpr_string) || __cpp_lib_constexpr_string < 201907L)
-	if (!std::is_constant_evaluated())
+    (!defined(__cpp_lib_constexpr_string) || __cpp_lib_constexpr_string < 201907L)
+    if (!std::is_constant_evaluated())
 #endif
     test_string();
 

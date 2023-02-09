@@ -9,13 +9,13 @@
 #include "llvm/DebugInfo/DWARF/DWARFDebugLoc.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/Dwarf.h"
-#include "llvm/DebugInfo/DWARF/DWARFContext.h"
+#include "llvm/DebugInfo/DIContext.h"
+#include "llvm/DebugInfo/DWARF/DWARFAddressRange.h"
 #include "llvm/DebugInfo/DWARF/DWARFExpression.h"
-#include "llvm/DebugInfo/DWARF/DWARFRelocMap.h"
+#include "llvm/DebugInfo/DWARF/DWARFFormValue.h"
+#include "llvm/DebugInfo/DWARF/DWARFLocationExpression.h"
 #include "llvm/DebugInfo/DWARF/DWARFUnit.h"
-#include "llvm/Support/Compiler.h"
 #include "llvm/Support/Format.h"
-#include "llvm/Support/WithColor.h"
 #include "llvm/Support/raw_ostream.h"
 #include <algorithm>
 #include <cinttypes>
@@ -23,6 +23,10 @@
 
 using namespace llvm;
 using object::SectionedAddress;
+
+namespace llvm {
+class DWARFObject;
+}
 
 namespace {
 class DWARFLocationInterpreter {
@@ -41,21 +45,19 @@ public:
 } // namespace
 
 static Error createResolverError(uint32_t Index, unsigned Kind) {
-  return createStringError(errc::invalid_argument,
-                           "Unable to resolve indirect address %u for: %s",
-                           Index, dwarf::LocListEncodingString(Kind).data());
+  return make_error<ResolverError>(Index, (dwarf::LoclistEntries)Kind);
 }
 
 Expected<Optional<DWARFLocationExpression>>
 DWARFLocationInterpreter::Interpret(const DWARFLocationEntry &E) {
   switch (E.Kind) {
   case dwarf::DW_LLE_end_of_list:
-    return None;
+    return std::nullopt;
   case dwarf::DW_LLE_base_addressx: {
     Base = LookupAddr(E.Value0);
     if (!Base)
       return createResolverError(E.Value0, E.Kind);
-    return None;
+    return std::nullopt;
   }
   case dwarf::DW_LLE_startx_endx: {
     Optional<SectionedAddress> LowPC = LookupAddr(E.Value0);
@@ -90,10 +92,10 @@ DWARFLocationInterpreter::Interpret(const DWARFLocationEntry &E) {
     return DWARFLocationExpression{Range, E.Loc};
   }
   case dwarf::DW_LLE_default_location:
-    return DWARFLocationExpression{None, E.Loc};
+    return DWARFLocationExpression{std::nullopt, E.Loc};
   case dwarf::DW_LLE_base_address:
     Base = SectionedAddress{E.Value0, E.SectionIndex};
-    return None;
+    return std::nullopt;
   case dwarf::DW_LLE_start_end:
     return DWARFLocationExpression{
         DWARFAddressRange{E.Value0, E.Value1, E.SectionIndex}, E.Loc};
@@ -128,7 +130,7 @@ bool DWARFLocationTable::dumpLocationList(uint64_t *Offset, raw_ostream &OS,
       BaseAddr, [U](uint32_t Index) -> Optional<SectionedAddress> {
         if (U)
           return U->getAddrOffsetSectionItem(Index);
-        return None;
+        return std::nullopt;
       });
   OS << format("0x%8.8" PRIx64 ": ", *Offset);
   Error E = visitLocationList(Offset, [&](const DWARFLocationEntry &E) {
@@ -185,7 +187,7 @@ Error DWARFLocationTable::visitAbsoluteLocationList(
 void DWARFDebugLoc::dump(raw_ostream &OS, const MCRegisterInfo *MRI,
                          const DWARFObject &Obj, DIDumpOptions DumpOpts,
                          Optional<uint64_t> DumpOffset) const {
-  auto BaseAddr = None;
+  auto BaseAddr = std::nullopt;
   unsigned Indent = 12;
   if (DumpOffset) {
     dumpLocationList(&*DumpOffset, OS, BaseAddr, MRI, Obj, nullptr, DumpOpts,
@@ -399,8 +401,15 @@ void DWARFDebugLoclists::dumpRange(uint64_t StartOffset, uint64_t Size,
     OS << Separator;
     Separator = "\n";
 
-    CanContinue = dumpLocationList(&Offset, OS, /*BaseAddr=*/None, MRI, Obj,
-                                   nullptr, DumpOpts, /*Indent=*/12);
+    CanContinue = dumpLocationList(&Offset, OS, /*BaseAddr=*/std::nullopt, MRI,
+                                   Obj, nullptr, DumpOpts, /*Indent=*/12);
     OS << '\n';
   }
 }
+
+void llvm::ResolverError::log(raw_ostream &OS) const {
+  OS << format("unable to resolve indirect address %u for: %s", Index,
+               dwarf::LocListEncodingString(Kind).data());
+}
+
+char llvm::ResolverError::ID;

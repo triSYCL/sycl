@@ -12,7 +12,6 @@
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/DebugInfo/DWARF/DWARFDataExtractor.h"
 #include "llvm/DebugInfo/DWARF/DWARFUnit.h"
-#include "llvm/Support/Errc.h"
 #include "llvm/Support/Error.h"
 #include <cstdint>
 
@@ -117,7 +116,7 @@ public:
   }
 
   Error parseMacinfo(DWARFDataExtractor MacroData) {
-    return parseImpl(None, None, MacroData, /*IsMacro=*/false);
+    return parseImpl(std::nullopt, std::nullopt, MacroData, /*IsMacro=*/false);
   }
 
   /// Return whether the section has any entries.

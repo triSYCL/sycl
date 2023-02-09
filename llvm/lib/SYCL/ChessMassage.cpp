@@ -46,11 +46,11 @@ cl::opt<std::string> KernelUnmergedProperties("sycl-kernel-unmerged-prop-out",
                                               cl::ReallyHidden);
 
 /// IR conversion/downgrader pass for ACAP chess-clang
-struct ChessMassage : public ModulePass {
+struct ChessMassageLegacy : public ModulePass {
 
   static char ID; // Pass identification, replacement for typeid
 
-  ChessMassage() : ModulePass(ID) {}
+  ChessMassageLegacy() : ModulePass(ID) {}
 
   GlobalNumberState GNS;
 
@@ -180,13 +180,20 @@ struct ChessMassage : public ModulePass {
 }
 
 namespace llvm {
-void initializeChessMassagePass(PassRegistry &Registry);
+
+PreservedAnalyses ChessMassagePass::run(Module &M, ModuleAnalysisManager &AM) {
+  ChessMassageLegacy pass;
+  pass.runOnModule(M);
+  return PreservedAnalyses::none();
+}
+
+void initializeChessMassageLegacyPass(PassRegistry &Registry);
 }
 
 /// TODO: split this pass into the kernel merging part and the downgrading part
-INITIALIZE_PASS(ChessMassage, "ChessMassage",
+INITIALIZE_PASS(ChessMassageLegacy, "ChessMassage",
   "pass that downgrades modern LLVM IR to something compatible with current "
   "chess-clang backend LLVM IR", false, false)
-ModulePass *llvm::createChessMassagePass() {return new ChessMassage();}
+ModulePass *llvm::createChessMassageLegacyPass() {return new ChessMassageLegacy();}
 
-char ChessMassage::ID = 0;
+char ChessMassageLegacy::ID = 0;

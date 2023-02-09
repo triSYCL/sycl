@@ -12,9 +12,8 @@
 #include "support/Trace.h"
 #include "clang/Driver/Driver.h"
 #include "clang/Driver/Options.h"
-#include "clang/Driver/ToolChain.h"
 #include "clang/Frontend/CompilerInvocation.h"
-#include "clang/Tooling/ArgumentsAdjusters.h"
+#include "clang/Tooling/CompilationDatabase.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SmallVector.h"
@@ -29,6 +28,7 @@
 #include "llvm/Support/Path.h"
 #include "llvm/Support/Program.h"
 #include <iterator>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -42,34 +42,34 @@ llvm::Optional<std::string> queryXcrun(llvm::ArrayRef<llvm::StringRef> Argv) {
   auto Xcrun = llvm::sys::findProgramByName("xcrun");
   if (!Xcrun) {
     log("Couldn't find xcrun. Hopefully you have a non-apple toolchain...");
-    return llvm::None;
+    return std::nullopt;
   }
   llvm::SmallString<64> OutFile;
   llvm::sys::fs::createTemporaryFile("clangd-xcrun", "", OutFile);
   llvm::FileRemover OutRemover(OutFile);
-  llvm::Optional<llvm::StringRef> Redirects[3] = {
-      /*stdin=*/{""}, /*stdout=*/{OutFile}, /*stderr=*/{""}};
+  std::optional<llvm::StringRef> Redirects[3] = {
+      /*stdin=*/{""}, /*stdout=*/{OutFile.str()}, /*stderr=*/{""}};
   vlog("Invoking {0} to find clang installation", *Xcrun);
   int Ret = llvm::sys::ExecuteAndWait(*Xcrun, Argv,
-                                      /*Env=*/llvm::None, Redirects,
+                                      /*Env=*/std::nullopt, Redirects,
                                       /*SecondsToWait=*/10);
   if (Ret != 0) {
     log("xcrun exists but failed with code {0}. "
         "If you have a non-apple toolchain, this is OK. "
         "Otherwise, try xcode-select --install.",
         Ret);
-    return llvm::None;
+    return std::nullopt;
   }
 
   auto Buf = llvm::MemoryBuffer::getFile(OutFile);
   if (!Buf) {
     log("Can't read xcrun output: {0}", Buf.getError().message());
-    return llvm::None;
+    return std::nullopt;
   }
   StringRef Path = Buf->get()->getBuffer().trim();
   if (Path.empty()) {
     log("xcrun produced no output");
-    return llvm::None;
+    return std::nullopt;
   }
   return Path.str();
 }
@@ -118,16 +118,15 @@ std::string detectClangPath() {
 
 // On mac, /usr/bin/clang sets SDKROOT and then invokes the real clang.
 // The effect of this is to set -isysroot correctly. We do the same.
-const llvm::Optional<std::string> detectSysroot() {
+llvm::Optional<std::string> detectSysroot() {
 #ifndef __APPLE__
-  return llvm::None;
+  return std::nullopt;
 #endif
 
   // SDKROOT overridden in environment, respect it. Driver will set isysroot.
   if (::getenv("SDKROOT"))
-    return llvm::None;
+    return std::nullopt;
   return queryXcrun({"xcrun", "--show-sdk-path"});
-  return llvm::None;
 }
 
 std::string detectStandardResourceDir() {
@@ -196,31 +195,39 @@ CommandMangler CommandMangler::detect() {
 
 CommandMangler CommandMangler::forTests() { return CommandMangler(); }
 
-void CommandMangler::adjust(std::vector<std::string> &Cmd,
-                            llvm::StringRef File) const {
+void CommandMangler::operator()(tooling::CompileCommand &Command,
+                                llvm::StringRef File) const {
+  std::vector<std::string> &Cmd = Command.CommandLine;
   trace::Span S("AdjustCompileFlags");
+  // Most of the modifications below assumes the Cmd starts with a driver name.
+  // We might consider injecting a generic driver name like "cc" or "c++", but
+  // a Cmd missing the driver is probably rare enough in practice and errnous.
+  if (Cmd.empty())
+    return;
   auto &OptTable = clang::driver::getDriverOptTable();
   // OriginalArgs needs to outlive ArgList.
   llvm::SmallVector<const char *, 16> OriginalArgs;
   OriginalArgs.reserve(Cmd.size());
   for (const auto &S : Cmd)
     OriginalArgs.push_back(S.c_str());
-  bool IsCLMode =
-      !OriginalArgs.empty() &&
-      driver::IsClangCL(driver::getDriverMode(
-          OriginalArgs[0], llvm::makeArrayRef(OriginalArgs).slice(1)));
+  bool IsCLMode = driver::IsClangCL(driver::getDriverMode(
+      OriginalArgs[0], llvm::makeArrayRef(OriginalArgs).slice(1)));
   // ParseArgs propagates missig arg/opt counts on error, but preserves
   // everything it could parse in ArgList. So we just ignore those counts.
   unsigned IgnoredCount;
   // Drop the executable name, as ParseArgs doesn't expect it. This means
   // indices are actually of by one between ArgList and OriginalArgs.
-  auto ArgList = OptTable.ParseArgs(
+  llvm::opt::InputArgList ArgList;
+  ArgList = OptTable.ParseArgs(
       llvm::makeArrayRef(OriginalArgs).drop_front(), IgnoredCount, IgnoredCount,
       /*FlagsToInclude=*/
-      IsCLMode ? (driver::options::CLOption | driver::options::CoreOption)
+      IsCLMode ? (driver::options::CLOption | driver::options::CoreOption |
+                  driver::options::CLDXCOption)
                : /*everything*/ 0,
       /*FlagsToExclude=*/driver::options::NoDriverOption |
-          (IsCLMode ? 0 : driver::options::CLOption));
+          (IsCLMode
+               ? 0
+               : (driver::options::CLOption | driver::options::CLDXCOption)));
 
   llvm::SmallVector<unsigned, 1> IndicesToDrop;
   // Having multiple architecture options (e.g. when building fat binaries)
@@ -238,16 +245,38 @@ void CommandMangler::adjust(std::vector<std::string> &Cmd,
   if (ArchOptCount < 2)
     IndicesToDrop.clear();
 
+  // In some cases people may try to reuse the command from another file, e.g.
+  //   { File: "foo.h", CommandLine: "clang foo.cpp" }.
+  // We assume the intent is to parse foo.h the same way as foo.cpp, or as if
+  // it were being included from foo.cpp.
+  //
+  // We're going to rewrite the command to refer to foo.h, and this may change
+  // its semantics (e.g. by parsing the file as C). If we do this, we should
+  // use transferCompileCommand to adjust the argv.
+  // In practice only the extension of the file matters, so do this only when
+  // it differs.
+  llvm::StringRef FileExtension = llvm::sys::path::extension(File);
+  llvm::Optional<std::string> TransferFrom;
+  auto SawInput = [&](llvm::StringRef Input) {
+    if (llvm::sys::path::extension(Input) != FileExtension)
+      TransferFrom.emplace(Input);
+  };
+
   // Strip all the inputs and `--`. We'll put the input for the requested file
   // explicitly at the end of the flags. This ensures modifications done in the
   // following steps apply in more cases (like setting -x, which only affects
   // inputs that come after it).
-  for (auto *Input : ArgList.filtered(driver::options::OPT_INPUT))
+  for (auto *Input : ArgList.filtered(driver::options::OPT_INPUT)) {
+    SawInput(Input->getValue(0));
     IndicesToDrop.push_back(Input->getIndex());
+  }
   // Anything after `--` is also treated as input, drop them as well.
   if (auto *DashDash =
           ArgList.getLastArgNoClaim(driver::options::OPT__DASH_DASH)) {
-    Cmd.resize(DashDash->getIndex() + 1); // +1 to account for Cmd[0].
+    auto DashDashIndex = DashDash->getIndex() + 1; // +1 accounts for Cmd[0]
+    for (unsigned I = DashDashIndex; I < Cmd.size(); ++I)
+      SawInput(Cmd[I]);
+    Cmd.resize(DashDashIndex);
   }
   llvm::sort(IndicesToDrop);
   llvm::for_each(llvm::reverse(IndicesToDrop),
@@ -259,8 +288,30 @@ void CommandMangler::adjust(std::vector<std::string> &Cmd,
   Cmd.push_back("--");
   Cmd.push_back(File.str());
 
+  if (TransferFrom) {
+    tooling::CompileCommand TransferCmd;
+    TransferCmd.Filename = std::move(*TransferFrom);
+    TransferCmd.CommandLine = std::move(Cmd);
+    TransferCmd = transferCompileCommand(std::move(TransferCmd), File);
+    Cmd = std::move(TransferCmd.CommandLine);
+    assert(Cmd.size() >= 2 && Cmd.back() == File &&
+           Cmd[Cmd.size() - 2] == "--" &&
+           "TransferCommand should produce a command ending in -- filename");
+  }
+
   for (auto &Edit : Config::current().CompileFlags.Edits)
     Edit(Cmd);
+
+  // The system include extractor needs to run:
+  //  - AFTER transferCompileCommand(), because the -x flag it adds may be
+  //    necessary for the system include extractor to identify the file type
+  //  - AFTER applying CompileFlags.Edits, because the name of the compiler
+  //    that needs to be invoked may come from the CompileFlags->Compiler key
+  //  - BEFORE resolveDriver() because that can mess up the driver path,
+  //    e.g. changing gcc to /path/to/clang/bin/gcc
+  if (SystemIncludeExtractor) {
+    SystemIncludeExtractor(Command, File);
+  }
 
   // Check whether the flag exists, either as -flag or -flag=*
   auto Has = [&](llvm::StringRef Flag) {
@@ -299,16 +350,6 @@ void CommandMangler::adjust(std::vector<std::string> &Cmd,
               return resolveDriver(Cmd.front(), FollowSymlink, ClangPath);
             });
   }
-}
-
-CommandMangler::operator clang::tooling::ArgumentsAdjuster() && {
-  // ArgumentsAdjuster is a std::function and so must be copyable.
-  return [Mangler = std::make_shared<CommandMangler>(std::move(*this))](
-             const std::vector<std::string> &Args, llvm::StringRef File) {
-    auto Result = Args;
-    Mangler->adjust(Result, File);
-    return Result;
-  };
 }
 
 // ArgStripper implementation
@@ -387,6 +428,8 @@ unsigned char getModes(const llvm::opt::Option &Opt) {
   if (!Opt.hasFlag(driver::options::NoDriverOption)) {
     if (Opt.hasFlag(driver::options::CLOption)) {
       Result |= DM_CL;
+    } else if (Opt.hasFlag(driver::options::CLDXCOption)) {
+      Result |= DM_CL;
     } else {
       Result |= DM_GCC;
       if (Opt.hasFlag(driver::options::CoreOption)) {
@@ -427,12 +470,25 @@ llvm::ArrayRef<ArgStripper::Rule> ArgStripper::rulesFor(llvm::StringRef Arg) {
 #define PREFIX(NAME, VALUE) static const char *const NAME[] = VALUE;
 #define OPTION(PREFIX, NAME, ID, KIND, GROUP, ALIAS, ALIASARGS, FLAGS, PARAM,  \
                HELP, METAVAR, VALUES)                                          \
-  if (DriverID::OPT_##ALIAS != DriverID::OPT_INVALID && ALIASARGS == nullptr)  \
-    AddAlias(DriverID::OPT_##ID, DriverID::OPT_##ALIAS);                       \
   Prefixes[DriverID::OPT_##ID] = PREFIX;
 #include "clang/Driver/Options.inc"
 #undef OPTION
 #undef PREFIX
+
+    struct {
+      DriverID ID;
+      DriverID AliasID;
+      const void *AliasArgs;
+    } AliasTable[] = {
+#define OPTION(PREFIX, NAME, ID, KIND, GROUP, ALIAS, ALIASARGS, FLAGS, PARAM,  \
+               HELP, METAVAR, VALUES)                                          \
+  {DriverID::OPT_##ID, DriverID::OPT_##ALIAS, ALIASARGS},
+#include "clang/Driver/Options.inc"
+#undef OPTION
+    };
+    for (auto &E : AliasTable)
+      if (E.AliasID != DriverID::OPT_INVALID && E.AliasArgs == nullptr)
+        AddAlias(E.ID, E.AliasID);
 
     auto Result = std::make_unique<TableTy>();
     // Iterate over distinct options (represented by the canonical alias).

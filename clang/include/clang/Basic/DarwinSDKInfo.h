@@ -6,8 +6,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-#ifndef LLVM_CLANG_BASIC_DARWIN_SDK_INFO_H
-#define LLVM_CLANG_BASIC_DARWIN_SDK_INFO_H
+#ifndef LLVM_CLANG_BASIC_DARWINSDKINFO_H
+#define LLVM_CLANG_BASIC_DARWINSDKINFO_H
 
 #include "clang/Basic/LLVM.h"
 #include "llvm/ADT/DenseMap.h"
@@ -57,6 +57,20 @@ public:
                        llvm::Triple::MacOSX, llvm::Triple::UnknownEnvironment);
     }
 
+    /// Returns the os-environment mapping pair that's used to represent the
+    /// iOS -> watchOS version mapping.
+    static inline constexpr OSEnvPair iOStoWatchOSPair() {
+      return OSEnvPair(llvm::Triple::IOS, llvm::Triple::UnknownEnvironment,
+                       llvm::Triple::WatchOS, llvm::Triple::UnknownEnvironment);
+    }
+
+    /// Returns the os-environment mapping pair that's used to represent the
+    /// iOS -> tvOS version mapping.
+    static inline constexpr OSEnvPair iOStoTvOSPair() {
+      return OSEnvPair(llvm::Triple::IOS, llvm::Triple::UnknownEnvironment,
+                       llvm::Triple::TvOS, llvm::Triple::UnknownEnvironment);
+    }
+
   private:
     StorageType Value;
 
@@ -86,9 +100,9 @@ public:
     /// Returns the mapped key, or the appropriate Minimum / MaximumValue if
     /// they key is outside of the mapping bounds. If they key isn't mapped, but
     /// within the minimum and maximum bounds, None is returned.
-    Optional<VersionTuple> map(const VersionTuple &Key,
-                               const VersionTuple &MinimumValue,
-                               Optional<VersionTuple> MaximumValue) const;
+    std::optional<VersionTuple>
+    map(const VersionTuple &Key, const VersionTuple &MinimumValue,
+        std::optional<VersionTuple> MaximumValue) const;
 
     static Optional<RelatedTargetVersionMapping>
     parseJSON(const llvm::json::Object &Obj,
@@ -128,11 +142,10 @@ public:
     auto Mapping = VersionMappings.find(Kind.Value);
     if (Mapping == VersionMappings.end())
       return nullptr;
-    return Mapping->getSecond().hasValue() ? Mapping->getSecond().getPointer()
-                                           : nullptr;
+    return Mapping->getSecond() ? &*Mapping->getSecond() : nullptr;
   }
 
-  static Optional<DarwinSDKInfo>
+  static std::optional<DarwinSDKInfo>
   parseDarwinSDKSettingsJSON(const llvm::json::Object *Obj);
 
 private:
@@ -149,9 +162,9 @@ private:
 ///
 /// \returns an error if the SDKSettings.json file is invalid, None if the
 /// SDK has no SDKSettings.json, or a valid \c DarwinSDKInfo otherwise.
-Expected<Optional<DarwinSDKInfo>> parseDarwinSDKInfo(llvm::vfs::FileSystem &VFS,
-                                                     StringRef SDKRootPath);
+Expected<std::optional<DarwinSDKInfo>>
+parseDarwinSDKInfo(llvm::vfs::FileSystem &VFS, StringRef SDKRootPath);
 
 } // end namespace clang
 
-#endif // LLVM_CLANG_BASIC_DARWIN_SDK_INFO_H
+#endif // LLVM_CLANG_BASIC_DARWINSDKINFO_H

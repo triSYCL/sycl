@@ -36,8 +36,9 @@ void constructLLVMForeachCommand(Compilation &C, const JobAction &JA,
                                  std::unique_ptr<Command> InputCommand,
                                  const InputInfoList &InputFiles,
                                  const InputInfo &Output, const Tool *T,
-                                 StringRef Increment, StringRef Ext);
-
+                                 StringRef Increment, StringRef Ext = "out",
+                                 StringRef ParallelJobs = "");
+bool shouldDoPerObjectFileLinking(const Compilation &C);
 // Runs llvm-spirv to convert spirv to bc, llvm-link, which links multiple LLVM
 // bitcode. Converts generated bc back to spirv using llvm-spirv, wraps with
 // offloading information. Finally compiles to object using llc
@@ -53,11 +54,6 @@ public:
                     const char *LinkingOutput) const override;
 
 private:
-  /// \return llvm-spirv output file name.
-  const char *constructLLVMSpirvCommand(Compilation &C, const JobAction &JA,
-                                       const InputInfo &Output,
-                                       llvm::StringRef OutputFilePrefix,
-                                       bool isBc, const char *InputFile) const;
   /// \return llvm-link output file name.
   const char *constructLLVMLinkCommand(Compilation &C, const JobAction &JA,
                              const InputInfo &Output,
@@ -109,6 +105,23 @@ public:
                     const char *LinkingOutput) const override;
 };
 
+StringRef resolveGenDevice(StringRef DeviceName);
+SmallString<64> getGenDeviceMacro(StringRef DeviceName);
+
+// // Prefix for GPU specific targets used for -fsycl-targets
+constexpr char IntelGPU[] = "intel_gpu_";
+constexpr char NvidiaGPU[] = "nvidia_gpu_";
+constexpr char AmdGPU[] = "amd_gpu_";
+
+template <auto GPUArh> llvm::Optional<StringRef> isGPUTarget(StringRef Target) {
+  // Handle target specifications that resemble '(intel, nvidia, amd)_gpu_*'
+  // here.
+  if (Target.startswith(GPUArh)) {
+    return resolveGenDevice(Target);
+  }
+  return llvm::None;
+}
+
 } // end namespace gen
 
 namespace x86_64 {
@@ -150,17 +163,21 @@ public:
                          Action::OffloadKind DeviceOffloadKind) const override;
   void AddImpliedTargetArgs(const llvm::Triple &Triple,
                             const llvm::opt::ArgList &Args,
-                            llvm::opt::ArgStringList &CmdArgs) const;
+                            llvm::opt::ArgStringList &CmdArgs,
+                            const JobAction &JA) const;
   void TranslateBackendTargetArgs(const llvm::Triple &Triple,
                                   const llvm::opt::ArgList &Args,
-                                  llvm::opt::ArgStringList &CmdArgs) const;
+                                  llvm::opt::ArgStringList &CmdArgs,
+                                  StringRef Device = "") const;
   void TranslateLinkerTargetArgs(const llvm::Triple &Triple,
                                  const llvm::opt::ArgList &Args,
                                  llvm::opt::ArgStringList &CmdArgs) const;
 
   bool useIntegratedAs() const override { return true; }
   bool isPICDefault() const override { return false; }
-  bool isPIEDefault() const override { return false; }
+  bool isPIEDefault(const llvm::opt::ArgList &Args) const override {\
+    return false;
+  }
   bool isPICDefaultForced() const override { return false; }
 
   void addClangWarningOptions(llvm::opt::ArgStringList &CC1Args) const override;
@@ -174,9 +191,7 @@ public:
       const llvm::opt::ArgList &Args,
       llvm::opt::ArgStringList &CC1Args) const override;
 
-
   const ToolChain &HostTC;
-  const SYCLInstallationDetector SYCLInstallation;
 
 protected:
   Tool *buildBackendCompiler() const override;
@@ -184,8 +199,13 @@ protected:
 
 private:
   void TranslateTargetOpt(const llvm::opt::ArgList &Args,
-      llvm::opt::ArgStringList &CmdArgs, llvm::opt::OptSpecifier Opt,
-      llvm::opt::OptSpecifier Opt_EQ) const;
+                          llvm::opt::ArgStringList &CmdArgs,
+                          llvm::opt::OptSpecifier Opt,
+                          llvm::opt::OptSpecifier Opt_EQ,
+                          StringRef Device) const;
+  void TranslateGPUTargetOpt(const llvm::opt::ArgList &Args,
+                             llvm::opt::ArgStringList &CmdArgs,
+                             llvm::opt::OptSpecifier Opt_EQ) const;
 };
 
 } // end namespace toolchains

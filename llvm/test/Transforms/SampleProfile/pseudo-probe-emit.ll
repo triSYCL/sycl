@@ -1,10 +1,10 @@
 ; REQUIRES: x86_64-linux
 ; RUN: opt < %s -passes=pseudo-probe -function-sections -S -o %t
 ; RUN: FileCheck %s < %t --check-prefix=CHECK-IL
-; RUN: llc %t -pseudo-probe-for-profiling -stop-after=pseudo-probe-inserter -o - | FileCheck %s --check-prefix=CHECK-MIR
-; RUN: llc %t -pseudo-probe-for-profiling -function-sections -filetype=asm -o %t1
+; RUN: llc %t -stop-after=pseudo-probe-inserter -o - | FileCheck %s --check-prefix=CHECK-MIR
+; RUN: llc %t -function-sections -filetype=asm -o %t1
 ; RUN: FileCheck %s < %t1 --check-prefix=CHECK-ASM
-; RUN: llc %t -pseudo-probe-for-profiling -function-sections -filetype=obj -o %t2
+; RUN: llc %t -function-sections -filetype=obj -o %t2
 ; RUN: llvm-objdump --section-headers  %t2 | FileCheck %s --check-prefix=CHECK-OBJ
 ; RUN: llvm-mc %t1 -filetype=obj -o %t3
 ; RUN: llvm-objdump --section-headers  %t3 | FileCheck %s --check-prefix=CHECK-OBJ
@@ -18,25 +18,25 @@ bb0:
   %cmp = icmp eq i32 %x, 0
 ; CHECK-IL: call void @llvm.pseudoprobe(i64 [[#GUID:]], i64 1, i32 0, i64 -1), !dbg ![[#FAKELINE:]]
 ; CHECK-MIR: PSEUDO_PROBE [[#GUID:]], 1, 0, 0
-; CHECK-ASM: .pseudoprobe	[[#GUID:]] 1 0 0
+; CHECK-ASM: .pseudoprobe	[[#GUID:]] 1 0 0 foo
   br i1 %cmp, label %bb1, label %bb2
 
 bb1:
 ; CHECK-IL: call void @llvm.pseudoprobe(i64 [[#GUID:]], i64 2, i32 0, i64 -1), !dbg ![[#FAKELINE]]
 ; CHECK-MIR: PSEUDO_PROBE [[#GUID]], 3, 0, 0
 ; CHECK-MIR: PSEUDO_PROBE [[#GUID]], 4, 0, 0
-; CHECK-ASM: .pseudoprobe	[[#GUID]] 3 0 0
-; CHECK-ASM: .pseudoprobe	[[#GUID]] 4 0 0
-  store i32 6, i32* @a, align 4
+; CHECK-ASM: .pseudoprobe	[[#GUID]] 3 0 0 foo
+; CHECK-ASM: .pseudoprobe	[[#GUID]] 4 0 0 foo
+  store i32 6, ptr @a, align 4
   br label %bb3
 
 bb2:
 ; CHECK-IL: call void @llvm.pseudoprobe(i64 [[#GUID:]], i64 3, i32 0, i64 -1), !dbg ![[#FAKELINE]]
 ; CHECK-MIR: PSEUDO_PROBE [[#GUID]], 2, 0, 0
 ; CHECK-MIR: PSEUDO_PROBE [[#GUID]], 4, 0, 0
-; CHECK-ASM: .pseudoprobe	[[#GUID]] 2 0 0
-; CHECK-ASM: .pseudoprobe	[[#GUID]] 4 0 0
-  store i32 8, i32* @a, align 4
+; CHECK-ASM: .pseudoprobe	[[#GUID]] 2 0 0 foo
+; CHECK-ASM: .pseudoprobe	[[#GUID]] 4 0 0 foo
+  store i32 8, ptr @a, align 4
   br label %bb3
 
 bb3:
@@ -44,25 +44,28 @@ bb3:
   ret void, !dbg !12
 }
 
-declare void @bar(i32 %x) 
+declare void @bar(i32 %x)
 
-define internal void @foo2(void (i32)* %f) !dbg !4 {
+define internal void @foo2(ptr %f) !dbg !4 {
 entry:
 ; CHECK-IL: call void @llvm.pseudoprobe(i64 [[#GUID2:]], i64 1, i32 0, i64 -1)
 ; CHECK-MIR: PSEUDO_PROBE [[#GUID2:]], 1, 0, 0
-; CHECK-ASM: .pseudoprobe	[[#GUID2:]] 1 0 0
+; CHECK-ASM: .pseudoprobe	[[#GUID2:]] 1 0 0 foo2
 ; Check pseudo_probe metadata attached to the indirect call instruction.
 ; CHECK-IL: call void %f(i32 1), !dbg ![[#PROBE0:]]
 ; CHECK-MIR: PSEUDO_PROBE [[#GUID2]], 2, 1, 0
-; CHECK-ASM: .pseudoprobe	[[#GUID2]] 2 1 0
+; CHECK-ASM: .pseudoprobe	[[#GUID2]] 2 1 0 foo2
   call void %f(i32 1), !dbg !13
 ; Check pseudo_probe metadata attached to the direct call instruction.
 ; CHECK-IL: call void @bar(i32 1), !dbg ![[#PROBE1:]]
 ; CHECK-MIR: PSEUDO_PROBE	[[#GUID2]], 3, 2, 0
-; CHECK-ASM: .pseudoprobe	[[#GUID2]] 3 2 0
+; CHECK-ASM: .pseudoprobe	[[#GUID2]] 3 2 0 foo2
   call void @bar(i32 1)
   ret void
 }
+
+; CHECK-IL: Function Attrs: nocallback nofree nosync nounwind willreturn memory(inaccessiblemem: readwrite)
+; CHECK-IL-NEXT: declare void @llvm.pseudoprobe(i64, i64, i32, i64)
 
 ; CHECK-IL: ![[#FOO:]] = distinct !DISubprogram(name: "foo"
 ; CHECK-IL: ![[#FAKELINE]] = !DILocation(line: 0, scope: ![[#FOO]])
@@ -89,7 +92,8 @@ entry:
 ; CHECK-ASM-NEXT: .ascii	"foo2"
 
 ; CHECK-OBJ-COUNT-2: .pseudo_probe_desc
-; CHECK-OBJ-COUNT-2: .pseudo_probe
+; CHECK-OBJ: .pseudo_probe
+; CHECK-OBJ-NOT: .rela.pseudo_probe
 
 !llvm.dbg.cu = !{!0}
 !llvm.module.flags = !{!9, !10}

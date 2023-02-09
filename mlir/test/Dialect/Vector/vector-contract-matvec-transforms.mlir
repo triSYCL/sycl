@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -test-vector-contraction-conversion=vector-outerproduct=1 | FileCheck %s
+// RUN: mlir-opt %s -test-vector-contraction-lowering=vector-outerproduct=1 | FileCheck %s
 
 #matvec_accesses = [
   affine_map<(i, j) -> (i, j)>,
@@ -12,7 +12,7 @@
 #matvecmax_trait = {
   indexing_maps = #matvec_accesses,
   iterator_types = ["parallel", "reduction"],
-  kind = #vector.kind<max>
+  kind = #vector.kind<maxf>
 }
 
 #mattransvec_accesses = [
@@ -71,7 +71,7 @@
 // CHECK: %[[T9:.*]] = vector.outerproduct %[[T7]], %[[T8]], %[[T6]] {kind = #vector.kind<add>} : vector<2xf32>, f32
 // CHECK: memref.store %[[T9]], %[[C]][] : memref<vector<2xf32>>
 // CHECK: return
-func @matvec2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>>,
+func.func @matvec2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>>,
                                                 %arg2: memref<vector<2xf32>>) {
   %A = memref.load %arg0[] : memref<vector<2x2xf32>>
   %x = memref.load %arg1[] : memref<vector<2xf32>>
@@ -91,13 +91,13 @@ func @matvec2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>>,
 // CHECK: %[[T3:.*]] = vector.transpose %[[T0]], [1, 0] : vector<2x2xf32> to vector<2x2xf32>
 // CHECK: %[[T4:.*]] = vector.extract %[[T3]][0] : vector<2x2xf32>
 // CHECK: %[[T5:.*]] = vector.extract %[[T1]][0] : vector<2xf32>
-// CHECK: %[[T6:.*]] = vector.outerproduct %[[T4]], %[[T5]], %[[T2]] {kind = #vector.kind<max>} : vector<2xf32>, f32
+// CHECK: %[[T6:.*]] = vector.outerproduct %[[T4]], %[[T5]], %[[T2]] {kind = #vector.kind<maxf>} : vector<2xf32>, f32
 // CHECK: %[[T7:.*]] = vector.extract %[[T3]][1] : vector<2x2xf32>
 // CHECK: %[[T8:.*]] = vector.extract %[[T1]][1] : vector<2xf32>
-// CHECK: %[[T9:.*]] = vector.outerproduct %[[T7]], %[[T8]], %[[T6]] {kind = #vector.kind<max>} : vector<2xf32>, f32
+// CHECK: %[[T9:.*]] = vector.outerproduct %[[T7]], %[[T8]], %[[T6]] {kind = #vector.kind<maxf>} : vector<2xf32>, f32
 // CHECK: memref.store %[[T9]], %[[C]][] : memref<vector<2xf32>>
 // CHECK: return
-func @matvecmax2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>>,
+func.func @matvecmax2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>>,
                                                    %arg2: memref<vector<2xf32>>) {
   %A = memref.load %arg0[] : memref<vector<2x2xf32>>
   %x = memref.load %arg1[] : memref<vector<2xf32>>
@@ -122,7 +122,7 @@ func @matvecmax2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>>,
 // CHECK: %[[T8:.*]] = vector.outerproduct %[[T6]], %[[T7]], %[[T5]] {kind = #vector.kind<add>} : vector<2xf32>, f32
 // CHECK: memref.store %[[T8]], %[[C]][] : memref<vector<2xf32>>
 // CHECK: return
-func @mattransvec2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>>,
+func.func @mattransvec2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>>,
                                                      %arg2: memref<vector<2xf32>>) {
   %A = memref.load %arg0[] : memref<vector<2x2xf32>>
   %x = memref.load %arg1[] : memref<vector<2xf32>>
@@ -148,7 +148,7 @@ func @mattransvec2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>
 // CHECK: %[[T9:.*]] = vector.outerproduct %[[T7]], %[[T8]], %[[T6]] {kind = #vector.kind<add>} : vector<2xf32>, f32
 // CHECK: memref.store %[[T9]], %[[C]][] : memref<vector<2xf32>>
 // CHECK: return
-func @vecmat2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>>,
+func.func @vecmat2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>>,
                                                 %arg2: memref<vector<2xf32>>) {
   %A = memref.load %arg0[] : memref<vector<2x2xf32>>
   %x = memref.load %arg1[] : memref<vector<2xf32>>
@@ -173,7 +173,7 @@ func @vecmat2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>>,
 // CHECK: %[[T8:.*]] = vector.outerproduct %[[T6]], %[[T7]], %[[T5]] {kind = #vector.kind<add>} : vector<2xf32>, f32
 // CHECK: memref.store %[[T8]], %[[C]][] : memref<vector<2xf32>>
 // CHECK: return
-func @vecmattrans2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>>,
+func.func @vecmattrans2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>>,
                                                      %arg2: memref<vector<2xf32>>) {
   %A = memref.load %arg0[] : memref<vector<2x2xf32>>
   %x = memref.load %arg1[] : memref<vector<2xf32>>
@@ -198,7 +198,7 @@ func @vecmattrans2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>
 // CHECK: %[[T8:.*]] = vector.outerproduct %[[T6]], %[[T7]], %[[T5]] {kind = #vector.kind<add>} : vector<2xf32>, f32
 // CHECK: memref.store %[[T8]], %[[C]][] : memref<vector<2xf32>>
 // CHECK: return
-func @redpar_vecmattrans2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>>,
+func.func @redpar_vecmattrans2x2(%arg0: memref<vector<2x2xf32>>, %arg1: memref<vector<2xf32>>,
                                                      %arg2: memref<vector<2xf32>>) {
   %A = memref.load %arg0[] : memref<vector<2x2xf32>>
   %x = memref.load %arg1[] : memref<vector<2xf32>>

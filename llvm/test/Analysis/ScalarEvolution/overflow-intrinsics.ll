@@ -1,4 +1,3 @@
-; RUN: opt -analyze -enable-new-pm=0 -scalar-evolution < %s | FileCheck %s
 ; RUN: opt -disable-output "-passes=print<scalar-evolution>" < %s 2>&1 | FileCheck %s
 
 target datalayout = "e-m:e-i64:64-f80:128-n8:16:32:64-S128"
@@ -32,7 +31,7 @@ cont:                                             ; preds = %for.body
   %tmp2 = extractvalue { i32, i1 } %tmp0, 0
   %cmp = icmp slt i32 %tmp2, 16
   br i1 %cmp, label %for.body, label %for.cond.cleanup
-; CHECK: Loop %for.body: max backedge-taken count is 15
+; CHECK: Loop %for.body: constant max backedge-taken count is 15
 }
 
 define void @f_sadd_1(i8* %a) {
@@ -67,7 +66,7 @@ cont:                                             ; preds = %for.body
   %tmp2 = extractvalue { i32, i1 } %tmp0, 0
   %cmp = icmp slt i32 %tmp2, 16
   br i1 %cmp, label %for.body, label %for.cond.cleanup
-; CHECK: Loop %for.body: max backedge-taken count is 15
+; CHECK: Loop %for.body: constant max backedge-taken count is 15
 }
 
 define void @f_sadd_2(i8* %a, i1* %c) {
@@ -217,7 +216,7 @@ cont:                                             ; preds = %for.body
   %tmp2 = extractvalue { i32, i1 } %tmp0, 0
   %cmp = icmp slt i32 %tmp2, 16
   br i1 %cmp, label %for.body, label %for.cond.cleanup
-; CHECK: Loop %for.body: max backedge-taken count is 15
+; CHECK: Loop %for.body: constant max backedge-taken count is 15
 }
 
 define void @f_ssub(i8* nocapture %a) {
@@ -248,7 +247,7 @@ cont:                                             ; preds = %for.body
   %tmp2 = extractvalue { i32, i1 } %tmp0, 0
   %cmp = icmp sgt i32 %tmp2, -1
   br i1 %cmp, label %for.body, label %for.cond.cleanup
-; CHECK: Loop %for.body: max backedge-taken count is 15
+; CHECK: Loop %for.body: constant max backedge-taken count is 15
 }
 
 define void @f_usub(i8* nocapture %a) {
@@ -279,7 +278,7 @@ cont:                                             ; preds = %for.body
   %tmp2 = extractvalue { i32, i1 } %tmp0, 0
   %cmp = icmp sgt i32 %tmp2, -1
   br i1 %cmp, label %for.body, label %for.cond.cleanup
-; CHECK: Loop %for.body: max backedge-taken count is 15
+; CHECK: Loop %for.body: constant max backedge-taken count is 15
 }
 
 define i32 @f_smul(i32 %val_a, i32 %val_b) {

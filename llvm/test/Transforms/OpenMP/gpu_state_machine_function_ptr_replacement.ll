@@ -30,9 +30,9 @@
 ; CHECK-DAG:   icmp eq void (i16, i32)* %worker.work_fn.addr_cast, bitcast (i8* @__omp_outlined__2_wrapper.ID to void (i16, i32)*)
 
 
-; CHECK-DAG:   call void @__kmpc_parallel_51(%struct.ident_t* noundef @1, i32 %{{.*}}, i32 noundef 1, i32 noundef -1, i32 noundef -1, i8* noundef bitcast (void (i32*, i32*)* @__omp_outlined__1 to i8*), i8* noundef @__omp_outlined__1_wrapper.ID, i8** noundef %{{.*}}, i64 noundef 0)
-; CHECK-DAG:   call void @__kmpc_parallel_51(%struct.ident_t* noundef @1, i32 %{{.*}}, i32 noundef 1, i32 noundef -1, i32 noundef -1, i8* noundef bitcast (void (i32*, i32*)* @__omp_outlined__2 to i8*), i8* noundef @__omp_outlined__2_wrapper.ID, i8** noundef %{{.*}}, i64 noundef 0)
-; CHECK-DAG:   call void @__kmpc_parallel_51(%struct.ident_t* noundef @2, i32 %{{.*}}, i32 noundef 1, i32 noundef -1, i32 noundef -1, i8* noundef bitcast (void (i32*, i32*)* @__omp_outlined__3 to i8*), i8* noundef bitcast (void (i16, i32)* @__omp_outlined__3_wrapper to i8*), i8** noundef %{{.*}}, i64 noundef 0)
+; CHECK-DAG:   call void @__kmpc_parallel_51(%struct.ident_t* @1, i32 %{{.*}}, i32 1, i32 -1, i32 -1, i8* bitcast (void (i32*, i32*)* @__omp_outlined__1 to i8*), i8* @__omp_outlined__1_wrapper.ID, i8** %{{.*}}, i64 0)
+; CHECK-DAG:   call void @__kmpc_parallel_51(%struct.ident_t* @1, i32 %{{.*}}, i32 1, i32 -1, i32 -1, i8* bitcast (void (i32*, i32*)* @__omp_outlined__2 to i8*), i8* @__omp_outlined__2_wrapper.ID, i8** %{{.*}}, i64 0)
+; CHECK-DAG:   call void @__kmpc_parallel_51(%struct.ident_t* @2, i32 %{{.*}}, i32 1, i32 -1, i32 -1, i8* bitcast (void (i32*, i32*)* @__omp_outlined__3 to i8*), i8* bitcast (void (i16, i32)* @__omp_outlined__3_wrapper to i8*), i8** %{{.*}}, i64 0)
 
 
 %struct.ident_t = type { i32, i32, i32, i32, i8* }
@@ -48,7 +48,7 @@ entry:
   %.zero.addr = alloca i32, align 4
   %.threadid_temp. = alloca i32, align 4
   store i32 0, i32* %.zero.addr, align 4
-  %0 = call i32 @__kmpc_target_init(%struct.ident_t* @1, i1 false, i1 true, i1 true)
+  %0 = call i32 @__kmpc_target_init(%struct.ident_t* @1, i8 1, i1 true, i1 true)
   %exec_user_code = icmp eq i32 %0, -1
   br i1 %exec_user_code, label %user_code.entry, label %worker.exit
 
@@ -56,14 +56,17 @@ user_code.entry:                                  ; preds = %entry
   %1 = call i32 @__kmpc_global_thread_num(%struct.ident_t* @1)
   store i32 %1, i32* %.threadid_temp., align 4
   call void @__omp_outlined__(i32* %.threadid_temp., i32* %.zero.addr)
-  call void @__kmpc_target_deinit(%struct.ident_t* @1, i1 false, i1 true)
+  call void @__kmpc_target_deinit(%struct.ident_t* @1, i8 1, i1 true)
   ret void
 
 worker.exit:                                      ; preds = %entry
   ret void
 }
 
-declare i32 @__kmpc_target_init(%struct.ident_t*, i1, i1, i1)
+define weak i32 @__kmpc_target_init(%struct.ident_t*, i8, i1, i1) {
+  ret i32 0
+}
+
 declare void @unknown()
 
 define internal void @__omp_outlined__(i32* noalias %.global_tid., i32* noalias %.bound_tid.) {
@@ -146,7 +149,7 @@ entry:
 
 declare i32 @__kmpc_global_thread_num(%struct.ident_t*)
 
-declare void @__kmpc_target_deinit(%struct.ident_t*, i1, i1)
+declare void @__kmpc_target_deinit(%struct.ident_t*, i8, i1)
 
 define internal void @__omp_outlined__3(i32* noalias %.global_tid., i32* noalias %.bound_tid.) {
 entry:

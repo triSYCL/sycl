@@ -14,14 +14,12 @@
 #define LLVM_REMARKS_YAML_REMARK_PARSER_H
 
 #include "llvm/ADT/Optional.h"
-#include "llvm/ADT/SmallVector.h"
 #include "llvm/Remarks/Remark.h"
 #include "llvm/Remarks/RemarkParser.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/MemoryBuffer.h"
 #include "llvm/Support/SourceMgr.h"
 #include "llvm/Support/YAMLParser.h"
-#include "llvm/Support/YAMLTraits.h"
 #include "llvm/Support/raw_ostream.h"
 #include <string>
 
@@ -109,10 +107,9 @@ protected:
   Expected<StringRef> parseStr(yaml::KeyValueNode &Node) override;
 };
 
-Expected<std::unique_ptr<YAMLRemarkParser>>
-createYAMLParserFromMeta(StringRef Buf,
-                         Optional<ParsedStringTable> StrTab = None,
-                         Optional<StringRef> ExternalFilePrependPath = None);
+Expected<std::unique_ptr<YAMLRemarkParser>> createYAMLParserFromMeta(
+    StringRef Buf, Optional<ParsedStringTable> StrTab = std::nullopt,
+    Optional<StringRef> ExternalFilePrependPath = std::nullopt);
 
 } // end namespace remarks
 } // end namespace llvm

@@ -19,7 +19,7 @@ int8 i64;
 
 atomic_int gn;
 void f(atomic_int *i, const atomic_int *ci,
-       atomic_intptr_t *p, atomic_float *f, atomic_double *d, atomic_half *h, // expected-error {{unknown type name 'atomic_half'}}
+       atomic_intptr_t *p, atomic_float *f, atomic_double *d, atomic_half *h,
        int *I, const int *CI,
        intptr_t *P, float *D, struct S *s1, struct S *s2,
        global atomic_int *i_g, local atomic_int *i_l, private atomic_int *i_p,
@@ -82,7 +82,7 @@ void f(atomic_int *i, const atomic_int *ci,
   __opencl_atomic_load(ci, memory_order_acquire, memory_scope_work_group);
 
   __opencl_atomic_init(&gn, 456);
-  __opencl_atomic_init(&gn, (void*)0); // expected-warning{{incompatible pointer to integer conversion passing '__generic void *' to parameter of type 'int'}}
+  __opencl_atomic_init(&gn, (void*)0); // expected-error{{incompatible pointer to integer conversion passing '__generic void *' to parameter of type 'int'}}
 }
 
 void memory_checks(atomic_int *Ap, int *p, int val) {

@@ -80,7 +80,7 @@ make -j`nproc`
 
 # install libmetal
 sudo cp lib/libmetal.* /usr/local/lib
-sudo cp lib/include/metal /usr/local/include
+sudo cp -r lib/include/metal /usr/local/include
 
 # go to openamp's directory
 cd ../../../../openamp/src/open-amp

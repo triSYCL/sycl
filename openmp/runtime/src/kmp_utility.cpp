@@ -129,7 +129,7 @@ void __kmp_query_cpuid(kmp_cpuinfo_t *p) {
 
   p->initialized = 1;
 
-  p->sse2 = 1; // Assume SSE2 by default.
+  p->flags.sse2 = 1; // Assume SSE2 by default.
 
   __kmp_x86_cpuid(0, 0, &buf);
 
@@ -169,7 +169,7 @@ void __kmp_query_cpuid(kmp_cpuinfo_t *p) {
       data[i] = (t & 0xff);
     }
 
-    p->sse2 = (buf.edx >> 26) & 1;
+    p->flags.sse2 = (buf.edx >> 26) & 1;
 
 #ifdef KMP_DEBUG
 
@@ -247,15 +247,21 @@ void __kmp_query_cpuid(kmp_cpuinfo_t *p) {
                 i, buf.eax, buf.ebx, buf.ecx, buf.edx));
     }
 #endif
-#if KMP_USE_ADAPTIVE_LOCKS
-    p->rtm = 0;
+    p->flags.rtm = 0;
+    p->flags.hybrid = 0;
     if (max_arg > 7) {
       /* RTM bit CPUID.07:EBX, bit 11 */
+      /* HYRBID bit CPUID.07:EDX, bit 15 */
       __kmp_x86_cpuid(7, 0, &buf);
-      p->rtm = (buf.ebx >> 11) & 1;
-      KA_TRACE(trace_level, (" RTM"));
+      p->flags.rtm = (buf.ebx >> 11) & 1;
+      p->flags.hybrid = (buf.edx >> 15) & 1;
+      if (p->flags.rtm) {
+        KA_TRACE(trace_level, (" RTM"));
+      }
+      if (p->flags.hybrid) {
+        KA_TRACE(trace_level, (" HYBRID"));
+      }
     }
-#endif
   }
 
   { // Parse CPU brand string for frequency, saving the string for later.
@@ -364,7 +370,7 @@ void __kmp_expand_file_name(char *result, size_t rlen, char *pattern) {
         case 'I':
         case 'i': {
           pid_t id = getpid();
-#if KMP_ARCH_X86_64 && defined(__MINGW32__)
+#if (KMP_ARCH_X86_64 || KMP_ARCH_AARCH64) && defined(__MINGW32__)
           snp_result = KMP_SNPRINTF(pos, end - pos + 1, "%0*lld", width, id);
 #else
           snp_result = KMP_SNPRINTF(pos, end - pos + 1, "%0*d", width, id);

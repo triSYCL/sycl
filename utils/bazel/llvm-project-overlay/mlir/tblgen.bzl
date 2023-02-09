@@ -169,6 +169,10 @@ def _gentbl_rule_impl(ctx):
         inputs = trans_srcs,
         executable = ctx.executable.tblgen,
         arguments = [args],
+        # Make sure action_env settings are honored so the env is the same as
+        # when the tool was built. Important for locating shared libraries with
+        # a custom LD_LIBRARY_PATH.
+        use_default_shell_env = True,
         mnemonic = "TdGenerate",
     )
 
@@ -385,6 +389,7 @@ def gentbl_cc_library(
         deps = [],
         strip_include_prefix = None,
         test = False,
+        copts = None,
         **kwargs):
     """Create multiple TableGen generated files using the same tool and input.
 
@@ -402,6 +407,7 @@ def gentbl_cc_library(
       deps: See gentbl_rule.deps
       strip_include_prefix: attribute to pass through to cc_library.
       test: whether to create a shell test that invokes the tool too.
+      copts: list of copts to pass to cc_library.
       **kwargs: Extra keyword arguments to pass to all generated rules.
     """
 
@@ -425,5 +431,6 @@ def gentbl_cc_library(
         hdrs = [":" + filegroup_name] if strip_include_prefix else [],
         strip_include_prefix = strip_include_prefix,
         textual_hdrs = [":" + filegroup_name],
+        copts = copts,
         **kwargs
     )

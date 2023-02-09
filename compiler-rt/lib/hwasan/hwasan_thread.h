@@ -28,11 +28,16 @@ class Thread {
 
   void Init(uptr stack_buffer_start, uptr stack_buffer_size,
             const InitState *state = nullptr);
-  void InitRandomState();
+
   void InitStackAndTls(const InitState *state = nullptr);
 
   // Must be called from the thread itself.
   void InitStackRingBuffer(uptr stack_buffer_start, uptr stack_buffer_size);
+
+  inline void EnsureRandomStateInited() {
+    if (UNLIKELY(!random_state_inited_))
+      InitRandomState();
+  }
 
   void Destroy();
 
@@ -56,7 +61,7 @@ class Thread {
   void DisableTagging() { tagging_disabled_++; }
   void EnableTagging() { tagging_disabled_--; }
 
-  u64 unique_id() const { return unique_id_; }
+  u32 unique_id() const { return unique_id_; }
   void Announce() {
     if (announced_) return;
     announced_ = true;
@@ -70,6 +75,7 @@ class Thread {
   // via mmap() and *must* be valid in zero-initialized state.
   void ClearShadowForThreadStackAndTLS();
   void Print(const char *prefix);
+  void InitRandomState();
   uptr vfork_spill_;
   uptr stack_top_;
   uptr stack_bottom_;
@@ -83,11 +89,13 @@ class Thread {
   HeapAllocationsRingBuffer *heap_allocations_;
   StackAllocationsRingBuffer *stack_allocations_;
 
-  u64 unique_id_;  // counting from zero.
+  u32 unique_id_;  // counting from zero.
 
   u32 tagging_disabled_;  // if non-zero, malloc uses zero tag in this thread.
 
   bool announced_;
+
+  bool random_state_inited_;  // Whether InitRandomState() has been called.
 
   friend struct ThreadListHead;
 };

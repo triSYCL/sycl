@@ -25,66 +25,8 @@
 
 namespace mlir {
 
+class ShapedTypeComponents;
 using ReifiedRankedShapedTypeDims = SmallVector<SmallVector<Value>>;
-
-/// ShapedTypeComponents that represents the components of a ShapedType.
-/// The components consist of
-///  - A ranked or unranked shape with the dimension specification match those
-///    of ShapeType's getShape() (e.g., dynamic dimension represented using
-///    ShapedType::kDynamicSize)
-///  - A element type, may be unset (nullptr)
-///  - A attribute, may be unset (nullptr)
-/// Used by ShapedType type inferences.
-class ShapedTypeComponents {
-  /// Internal storage type for shape.
-  using ShapeStorageT = SmallVector<int64_t, 3>;
-
-public:
-  /// Default construction is an unranked shape.
-  ShapedTypeComponents() : elementType(nullptr), attr(nullptr), ranked(false){};
-  ShapedTypeComponents(Type elementType)
-      : elementType(elementType), attr(nullptr), ranked(false) {}
-  ShapedTypeComponents(ShapedType shapedType) : attr(nullptr) {
-    ranked = shapedType.hasRank();
-    elementType = shapedType.getElementType();
-    if (ranked)
-      dims = llvm::to_vector<4>(shapedType.getShape());
-  }
-  template <typename Arg, typename = typename std::enable_if_t<
-                              std::is_constructible<ShapeStorageT, Arg>::value>>
-  ShapedTypeComponents(Arg &&arg, Type elementType = nullptr,
-                       Attribute attr = nullptr)
-      : dims(std::forward<Arg>(arg)), elementType(elementType), attr(attr),
-        ranked(true) {}
-  ShapedTypeComponents(ArrayRef<int64_t> vec, Type elementType = nullptr,
-                       Attribute attr = nullptr)
-      : dims(vec.begin(), vec.end()), elementType(elementType), attr(attr),
-        ranked(true) {}
-
-  /// Return the dimensions of the shape.
-  /// Requires: shape is ranked.
-  ArrayRef<int64_t> getDims() const {
-    assert(ranked && "requires ranked shape");
-    return dims;
-  }
-
-  /// Return whether the shape has a rank.
-  bool hasRank() const { return ranked; };
-
-  /// Return the element type component.
-  Type getElementType() const { return elementType; };
-
-  /// Return the raw attribute component.
-  Attribute getAttribute() const { return attr; };
-
-private:
-  friend class ShapeAdaptor;
-
-  ShapeStorageT dims;
-  Type elementType;
-  Attribute attr;
-  bool ranked;
-};
 
 /// Adaptor class to abstract the differences between whether value is from
 /// a ShapedType or ShapedTypeComponents or DenseIntElementsAttribute.
@@ -137,7 +79,7 @@ public:
   int64_t getNumElements() const;
 
   /// Returns whether valid (non-null) shape.
-  operator bool() const { return !val.isNull(); }
+  explicit operator bool() const { return !val.isNull(); }
 
   /// Dumps textual repesentation to stderr.
   void dump() const;
@@ -146,6 +88,71 @@ private:
   // Union storing either ShapedTypeComponents, ShapedType (stored as Type and
   // casted), or DenseIntElementsAttribute (stored as Atrtribute).
   PointerUnion<ShapedTypeComponents *, Type, Attribute> val = nullptr;
+};
+
+/// ShapedTypeComponents that represents the components of a ShapedType.
+/// The components consist of
+///  - A ranked or unranked shape with the dimension specification match those
+///    of ShapeType's getShape() (e.g., dynamic dimension represented using
+///    ShapedType::kDynamic)
+///  - A element type, may be unset (nullptr)
+///  - A attribute, may be unset (nullptr)
+/// Used by ShapedType type inferences.
+class ShapedTypeComponents {
+  /// Internal storage type for shape.
+  using ShapeStorageT = SmallVector<int64_t, 3>;
+
+public:
+  /// Default construction is an unranked shape.
+  ShapedTypeComponents() : elementType(nullptr), attr(nullptr){};
+  ShapedTypeComponents(Type elementType)
+      : elementType(elementType), attr(nullptr), ranked(false) {}
+  ShapedTypeComponents(ShapedType shapedType) : attr(nullptr) {
+    ranked = shapedType.hasRank();
+    elementType = shapedType.getElementType();
+    if (ranked)
+      dims = llvm::to_vector<4>(shapedType.getShape());
+  }
+  ShapedTypeComponents(ShapeAdaptor adaptor) : attr(nullptr) {
+    ranked = adaptor.hasRank();
+    elementType = adaptor.getElementType();
+    if (ranked)
+      adaptor.getDims(*this);
+  }
+  template <typename Arg, typename = std::enable_if_t<
+                              std::is_constructible<ShapeStorageT, Arg>::value>>
+  ShapedTypeComponents(Arg &&arg, Type elementType = nullptr,
+                       Attribute attr = nullptr)
+      : dims(std::forward<Arg>(arg)), elementType(elementType), attr(attr),
+        ranked(true) {}
+  ShapedTypeComponents(ArrayRef<int64_t> vec, Type elementType = nullptr,
+                       Attribute attr = nullptr)
+      : dims(vec.begin(), vec.end()), elementType(elementType), attr(attr),
+        ranked(true) {}
+
+  /// Return the dimensions of the shape.
+  /// Requires: shape is ranked.
+  ArrayRef<int64_t> getDims() const {
+    assert(ranked && "requires ranked shape");
+    return dims;
+  }
+
+  /// Return whether the shape has a rank.
+  bool hasRank() const { return ranked; };
+
+  /// Return the element type component.
+  Type getElementType() const { return elementType; };
+
+  /// Return the raw attribute component.
+  Attribute getAttribute() const { return attr; };
+
+private:
+  friend class ShapeAdaptor;
+
+  ShapeStorageT dims;
+  Type elementType;
+  Attribute attr;
+  bool ranked{false};
 };
 
 /// Range of values and shapes (corresponding effectively to Shapes dialect's
@@ -165,10 +172,7 @@ public:
   ValueShapeRange(const std::initializer_list<Value> &values)
       : ValueShapeRange(ValueRange(values)) {}
 
-  ValueShapeRange(const ValueShapeRange &other) : RangeBaseT(other) {
-    operandShape = other.operandShape;
-    valueToShape = other.valueToShape;
-  }
+  ValueShapeRange(const ValueShapeRange &) = default;
 
   /// Sets the Value to ShapeAdaptor mapping function and returns this.
   ValueShapeRange &setValueToShapeMapping(ValueShapeMapFn fn) {
@@ -246,10 +250,24 @@ LogicalResult verifyInferredResultTypes(Operation *op);
 } // namespace detail
 
 namespace OpTrait {
+template <typename ConcreteType>
+class InferTensorType;
+} // namespace OpTrait
+} // namespace mlir
+
+/// Include the generated interface declarations.
+#include "mlir/Interfaces/InferTypeOpInterface.h.inc"
+
+namespace mlir {
+namespace OpTrait {
 
 /// Tensor type inference trait that constructs a tensor from the inferred
 /// shape and elemental types.
-/// Requires: Op implements functions of InferShapedTypeOpInterface.
+/// Requires: Op implements InferShapedTypeOpInterface and InferTypeOpInterface.
+///   Less strict is possible (e.g., implements inferReturnTypeComponents and
+///   these always populates all element types and shapes or fails, but this\
+///   trait is currently only used where the interfaces are, so keep it
+///   restricted for now).
 template <typename ConcreteType>
 class InferTensorType : public TraitBase<ConcreteType, InferTensorType> {
 public:
@@ -258,6 +276,12 @@ public:
                    ValueRange operands, DictionaryAttr attributes,
                    RegionRange regions,
                    SmallVectorImpl<Type> &inferredReturnTypes) {
+    static_assert(
+        ConcreteType::template hasTrait<InferShapedTypeOpInterface::Trait>(),
+        "requires InferShapedTypeOpInterface to ensure succesful invocation");
+    static_assert(
+        ConcreteType::template hasTrait<InferTypeOpInterface::Trait>(),
+        "requires InferTypeOpInterface to ensure succesful invocation");
     return ::mlir::detail::inferReturnTensorTypes(
         ConcreteType::inferReturnTypeComponents, context, location, operands,
         attributes, regions, inferredReturnTypes);
@@ -266,8 +290,5 @@ public:
 
 } // namespace OpTrait
 } // namespace mlir
-
-/// Include the generated interface declarations.
-#include "mlir/Interfaces/InferTypeOpInterface.h.inc"
 
 #endif // MLIR_INTERFACES_INFERTYPEOPINTERFACE_H_

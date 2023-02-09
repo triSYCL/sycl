@@ -21,10 +21,8 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/LLVMContext.h"
-#include "llvm/IR/Module.h"
 #include "llvm/IR/Value.h"
 #include "llvm/Support/Casting.h"
-#include "llvm/Support/MathExtras.h"
 #include "llvm/Support/TypeSize.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cassert>
@@ -64,6 +62,44 @@ bool Type::isOpaquePointerTy() const {
   if (auto *PTy = dyn_cast<PointerType>(this))
     return PTy->isOpaque();
   return false;
+}
+
+const fltSemantics &Type::getFltSemantics() const {
+  switch (getTypeID()) {
+  case HalfTyID: return APFloat::IEEEhalf();
+  case BFloatTyID: return APFloat::BFloat();
+  case FloatTyID: return APFloat::IEEEsingle();
+  case DoubleTyID: return APFloat::IEEEdouble();
+  case X86_FP80TyID: return APFloat::x87DoubleExtended();
+  case FP128TyID: return APFloat::IEEEquad();
+  case PPC_FP128TyID: return APFloat::PPCDoubleDouble();
+  default: llvm_unreachable("Invalid floating type");
+  }
+}
+
+bool Type::isIEEE() const {
+  return APFloat::getZero(getFltSemantics()).isIEEE();
+}
+
+Type *Type::getFloatingPointTy(LLVMContext &C, const fltSemantics &S) {
+  Type *Ty;
+  if (&S == &APFloat::IEEEhalf())
+    Ty = Type::getHalfTy(C);
+  else if (&S == &APFloat::BFloat())
+    Ty = Type::getBFloatTy(C);
+  else if (&S == &APFloat::IEEEsingle())
+    Ty = Type::getFloatTy(C);
+  else if (&S == &APFloat::IEEEdouble())
+    Ty = Type::getDoubleTy(C);
+  else if (&S == &APFloat::x87DoubleExtended())
+    Ty = Type::getX86_FP80Ty(C);
+  else if (&S == &APFloat::IEEEquad())
+    Ty = Type::getFP128Ty(C);
+  else {
+    assert(&S == &APFloat::PPCDoubleDouble() && "Unknown FP format");
+    Ty = Type::getPPC_FP128Ty(C);
+  }
+  return Ty;
 }
 
 bool Type::canLosslesslyBitCastTo(Type *Ty) const {
@@ -296,9 +332,7 @@ IntegerType *IntegerType::get(LLVMContext &C, unsigned NumBits) {
   return Entry;
 }
 
-APInt IntegerType::getMask() const {
-  return APInt::getAllOnesValue(getBitWidth());
-}
+APInt IntegerType::getMask() const { return APInt::getAllOnes(getBitWidth()); }
 
 //===----------------------------------------------------------------------===//
 //                       FunctionType Implementation
@@ -351,7 +385,7 @@ FunctionType *FunctionType::get(Type *ReturnType,
 }
 
 FunctionType *FunctionType::get(Type *Result, bool isVarArg) {
-  return get(Result, None, isVarArg);
+  return get(Result, std::nullopt, isVarArg);
 }
 
 bool FunctionType::isValidReturnType(Type *RetTy) {
@@ -484,7 +518,7 @@ StructType *StructType::create(LLVMContext &Context, StringRef Name) {
 }
 
 StructType *StructType::get(LLVMContext &Context, bool isPacked) {
-  return get(Context, None, isPacked);
+  return get(Context, std::nullopt, isPacked);
 }
 
 StructType *StructType::create(LLVMContext &Context, ArrayRef<Type*> Elements,
@@ -640,7 +674,7 @@ VectorType *VectorType::get(Type *ElementType, ElementCount EC) {
 
 bool VectorType::isValidElementType(Type *ElemTy) {
   return ElemTy->isIntegerTy() || ElemTy->isFloatingPointTy() ||
-         ElemTy->isPointerTy();
+         ElemTy->isPointerTy() || ElemTy->getTypeID() == TypedPointerTyID;
 }
 
 //===----------------------------------------------------------------------===//
@@ -696,8 +730,8 @@ PointerType *PointerType::get(Type *EltTy, unsigned AddressSpace) {
 
   LLVMContextImpl *CImpl = EltTy->getContext().pImpl;
 
-  // Create opaque pointer for pointer to opaque pointer.
-  if (CImpl->ForceOpaquePointers || EltTy->isOpaquePointerTy())
+  // Automatically convert typed pointers to opaque pointers.
+  if (CImpl->getOpaquePointers())
     return get(EltTy->getContext(), AddressSpace);
 
   // Since AddressSpace #0 is the common case, we special case it.
@@ -711,6 +745,8 @@ PointerType *PointerType::get(Type *EltTy, unsigned AddressSpace) {
 
 PointerType *PointerType::get(LLVMContext &C, unsigned AddressSpace) {
   LLVMContextImpl *CImpl = C.pImpl;
+  assert(CImpl->getOpaquePointers() &&
+         "Can only create opaque pointers in opaque pointer mode");
 
   // Since AddressSpace #0 is the common case, we special case it.
   PointerType *&Entry =

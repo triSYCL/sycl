@@ -22,6 +22,7 @@
 #include "llvm/IR/Function.h"
 #include "llvm/IR/Instructions.h"
 #include "llvm/Support/FormatVariadic.h"
+#include "llvm/SYCL/SYCLUtils.h"
 
 namespace llvm {
 class KernelProperties {
@@ -29,28 +30,33 @@ class KernelProperties {
   // currently, retrieve annotation for DDR bank assignment to kernel arguments
 public:
   // In HLS, array-like arguments are grouped together in bundles.
-  // One bundle corresponds to one memory controller, and this is 
+  // One bundle corresponds to one memory controller, and this is
   // the bundle that can be associated to a specific DDR Bank/HBM.
   //
   // As of now, all arguments sharing the same memory bank share the 
   // same bundle.
+
   struct MAXIBundle {
-    // Represents one m_axi bundle and its associated memory bank.
-    // This structure should evolve once we provide support for other 
-    // m_axi memory such as HBM.
+    // Represents one m_axi bundle and its associated memory bank ID and Type.
+    Optional<unsigned> TargetId; // Associated bank ID
     std::string BundleName; // Vitis bundle name
-    unsigned TargetId; // Associated DDR bank ID
+    sycl::MemoryType MemType;
+    bool isDefaultBundle() const {
+      return MemType == sycl::MemoryType::unspecified;
+    }
   };
+
 private:
   
-  SmallDenseMap<unsigned, StringMap<unsigned>, 4> BundlesByIDName;
+  // BundlesBySpec[MemType][MemID] contains the index of the 
+  // Bundle of the bank MemType:MemID in Bundles
+  std::array<SmallDenseMap<unsigned, unsigned, 4>, 4> BundlesBySpec;
   SmallDenseMap<Argument *, unsigned, 16> BundleForArgument;
   StringMap<unsigned> BundlesByName;
   SmallVector<MAXIBundle, 8> Bundles;
 
 public:
-  static bool isArgBuffer(Argument* Arg, bool SyclHLSFlow);
-  KernelProperties(Function &F, bool SyclHlsFlow);
+  KernelProperties(Function &F);
   KernelProperties(KernelProperties &) = delete;
 
   MAXIBundle const * getArgumentMAXIBundle(Argument *Arg);

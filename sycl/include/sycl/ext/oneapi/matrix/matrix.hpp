@@ -7,20 +7,28 @@
 // ===--------------------------------------------------------------------=== //
 /// Currently, this is the compilation command line needed to invoke AMX unit of
 /// Sapphire Rapids CPU: clang++ -fsycl -march=sapphirerapids
-/// fsycl-targets="spir64_x86_64-uknown-linux-sycldevice" -O2 main.cpp
+/// fsycl-targets="spir64_x86_64-unknown-linux" -O2 main.cpp
 ///
 ///
 // ===--------------------------------------------------------------------=== //
 
 #pragma once
 
-#include <CL/sycl/feature_test.hpp>
+#ifndef SYCL_EXT_ONEAPI_MATRIX_VERSION
+#define SYCL_EXT_ONEAPI_MATRIX_VERSION 1
+#endif // SYCL_EXT_ONEAPI_MATRIX_VERSION
 
-#if (SYCL_EXT_ONEAPI_MATRIX == 1)
-#if defined(__AMXTILE__) && defined(__AMXINT8__) && defined(__AMXBF16__)
-#include <sycl/ext/oneapi/matrix/matrix-aot-amx.hpp>
-#endif
-#endif
-#if (SYCL_EXT_ONEAPI_MATRIX == 2)
+#if (SYCL_EXT_ONEAPI_MATRIX_VERSION == 1)
 #include <sycl/ext/oneapi/matrix/matrix-jit.hpp>
-#endif
+#include <sycl/ext/oneapi/matrix/static-query.hpp>
+#endif // SYCL_EXT_ONEAPI_MATRIX_VERSION
+#if (SYCL_EXT_ONEAPI_MATRIX_VERSION == 2)
+#include <sycl/ext/oneapi/matrix/matrix-jit-use.hpp>
+#include <sycl/ext/oneapi/matrix/static-query-use.hpp>
+#endif // SYCL_EXT_ONEAPI_MATRIX_VERSION
+#if (SYCL_EXT_ONEAPI_MATRIX_VERSION == 3)
+#include <sycl/ext/oneapi/matrix/matrix-tensorcores-legacy.hpp>
+#endif // SYCL_EXT_ONEAPI_MATRIX_VERSION
+#if (SYCL_EXT_ONEAPI_MATRIX_VERSION == 4)
+#include <sycl/ext/oneapi/matrix/matrix-unified.hpp>
+#endif // SYCL_EXT_ONEAPI_MATRIX_VERSION

@@ -73,11 +73,8 @@ RefCountBug::RefCountBug(CheckerNameRef Checker, RefCountBugKind BT)
 
 static bool isNumericLiteralExpression(const Expr *E) {
   // FIXME: This set of cases was copied from SemaExprObjC.
-  return isa<IntegerLiteral>(E) ||
-         isa<CharacterLiteral>(E) ||
-         isa<FloatingLiteral>(E) ||
-         isa<ObjCBoolLiteralExpr>(E) ||
-         isa<CXXBoolLiteralExpr>(E);
+  return isa<IntegerLiteral, CharacterLiteral, FloatingLiteral,
+             ObjCBoolLiteralExpr, CXXBoolLiteralExpr>(E);
 }
 
 /// If type represents a pointer to CXXRecordDecl,
@@ -174,7 +171,7 @@ static Optional<unsigned> findArgIdxOfSymbol(ProgramStateRef CurrSt,
                                              SymbolRef &Sym,
                                              Optional<CallEventRef<>> CE) {
   if (!CE)
-    return None;
+    return std::nullopt;
 
   for (unsigned Idx = 0; Idx < (*CE)->getNumArgs(); Idx++)
     if (const MemRegion *MR = (*CE)->getArgSVal(Idx).getAsRegion())
@@ -182,25 +179,25 @@ static Optional<unsigned> findArgIdxOfSymbol(ProgramStateRef CurrSt,
         if (CurrSt->getSVal(MR, TR->getValueType()).getAsSymbol() == Sym)
           return Idx;
 
-  return None;
+  return std::nullopt;
 }
 
 static Optional<std::string> findMetaClassAlloc(const Expr *Callee) {
   if (const auto *ME = dyn_cast<MemberExpr>(Callee)) {
     if (ME->getMemberDecl()->getNameAsString() != "alloc")
-      return None;
+      return std::nullopt;
     const Expr *This = ME->getBase()->IgnoreParenImpCasts();
     if (const auto *DRE = dyn_cast<DeclRefExpr>(This)) {
       const ValueDecl *VD = DRE->getDecl();
       if (VD->getNameAsString() != "metaClass")
-        return None;
+        return std::nullopt;
 
       if (const auto *RD = dyn_cast<CXXRecordDecl>(VD->getDeclContext()))
         return RD->getNameAsString();
 
     }
   }
-  return None;
+  return std::nullopt;
 }
 
 static std::string findAllocatedObjectName(const Stmt *S, QualType QT) {
@@ -264,14 +261,12 @@ static void generateDiagnosticsForCallLike(ProgramStateRef CurrSt,
   }
 
   if (CurrV.getObjKind() == ObjKind::CF) {
-    os << "a Core Foundation object of type '"
-       << Sym->getType().getAsString() << "' with a ";
+    os << "a Core Foundation object of type '" << Sym->getType() << "' with a ";
   } else if (CurrV.getObjKind() == ObjKind::OS) {
     os << "an OSObject of type '" << findAllocatedObjectName(S, Sym->getType())
        << "' with a ";
   } else if (CurrV.getObjKind() == ObjKind::Generalized) {
-    os << "an object of type '" << Sym->getType().getAsString()
-       << "' with a ";
+    os << "an object of type '" << Sym->getType() << "' with a ";
   } else {
     assert(CurrV.getObjKind() == ObjKind::ObjC);
     QualType T = Sym->getType();
@@ -279,8 +274,7 @@ static void generateDiagnosticsForCallLike(ProgramStateRef CurrSt,
       os << "an Objective-C object with a ";
     } else {
       const ObjCObjectPointerType *PT = cast<ObjCObjectPointerType>(T);
-      os << "an instance of " << PT->getPointeeType().getAsString()
-         << " with a ";
+      os << "an instance of " << PT->getPointeeType() << " with a ";
     }
   }
 
@@ -613,7 +607,7 @@ static Optional<std::string> describeRegion(const MemRegion *MR) {
     return std::string(VR->getDecl()->getName());
   // Once we support more storage locations for bindings,
   // this would need to be improved.
-  return None;
+  return std::nullopt;
 }
 
 using Bindings = llvm::SmallVector<std::pair<const MemRegion *, SVal>, 4>;
@@ -975,7 +969,7 @@ void RefLeakReport::findBindingToReport(CheckerContext &Ctx,
     // Let's pick one of them at random (if there is something to pick from).
     AllocBindingToReport = AllVarBindings[0].first;
 
-    // Because 'AllocBindingToReport' is not the the same as
+    // Because 'AllocBindingToReport' is not the same as
     // 'AllocFirstBinding', we need to explain how the leaking object
     // got from one to another.
     //

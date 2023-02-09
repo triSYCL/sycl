@@ -9,11 +9,12 @@
 #include "llvm/DebugInfo/CodeView/LazyRandomTypeCollection.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/None.h"
-#include "llvm/ADT/StringExtras.h"
+#include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/DebugInfo/CodeView/CodeView.h"
 #include "llvm/DebugInfo/CodeView/CodeViewError.h"
 #include "llvm/DebugInfo/CodeView/RecordName.h"
-#include "llvm/DebugInfo/CodeView/TypeRecord.h"
+#include "llvm/DebugInfo/CodeView/RecordSerialization.h"
 #include "llvm/Support/BinaryStreamReader.h"
 #include "llvm/Support/Endian.h"
 #include "llvm/Support/Error.h"
@@ -99,11 +100,11 @@ CVType LazyRandomTypeCollection::getType(TypeIndex Index) {
 
 Optional<CVType> LazyRandomTypeCollection::tryGetType(TypeIndex Index) {
   if (Index.isSimple())
-    return None;
+    return std::nullopt;
 
   if (auto EC = ensureTypeExists(Index)) {
     consumeError(std::move(EC));
-    return None;
+    return std::nullopt;
   }
 
   assert(contains(Index));
@@ -205,7 +206,7 @@ Optional<TypeIndex> LazyRandomTypeCollection::getFirst() {
   TypeIndex TI = TypeIndex::fromArrayIndex(0);
   if (auto EC = ensureTypeExists(TI)) {
     consumeError(std::move(EC));
-    return None;
+    return std::nullopt;
   }
   return TI;
 }
@@ -216,7 +217,7 @@ Optional<TypeIndex> LazyRandomTypeCollection::getNext(TypeIndex Prev) {
   // record exists, and if anything goes wrong, we must be at the end.
   if (auto EC = ensureTypeExists(Prev + 1)) {
     consumeError(std::move(EC));
-    return None;
+    return std::nullopt;
   }
 
   return Prev + 1;

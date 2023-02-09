@@ -10,8 +10,6 @@ from lldbsuite.test import lldbutil
 
 class ExprCommandWithFixits(TestBase):
 
-    mydir = TestBase.compute_mydir(__file__)
-
     def test_with_dummy_target(self):
         """Test calling expressions in the dummy target with errors that can be fixed by the FixIts."""
 
@@ -47,12 +45,13 @@ class ExprCommandWithFixits(TestBase):
 
         # Try with one error in a top-level expression.
         # The Fix-It changes "ptr.m" to "ptr->m".
-        expr = "struct X { int m; }; X x; X *ptr = &x; int m = ptr.m;"
+        expr = "struct MyTy { int m; }; MyTy x; MyTy *ptr = &x; int m = ptr.m;"
         value = frame.EvaluateExpression(expr, top_level_options)
-        # A successfully parsed top-level expression will yield an error
-        # that there is 'no value'. If a parsing error would have happened we
-        # would get a different error kind, so let's check the error kind here.
-        self.assertEquals(value.GetError().GetCString(), "error: No value")
+        # A successfully parsed top-level expression will yield an
+        # unknown error . If a parsing error would have happened we
+        # would get a different error kind, so let's check the error
+        # kind here.
+        self.assertEquals(value.GetError().GetCString(), "unknown error")
 
         # Try with two errors:
         two_error_expression = "my_pointer.second->a"
@@ -81,6 +80,22 @@ class ExprCommandWithFixits(TestBase):
         self.assertTrue(
             error_string.find("my_pointer->second.a") != -1,
             "Fix was right")
+
+    def test_with_target_error_applies_fixit(self):
+        """ Check that applying a Fix-it which fails to execute correctly still 
+         prints that the Fix-it was applied. """
+        self.build()
+        (target, process, self.thread, bkpt) = lldbutil.run_to_source_breakpoint(self,
+                                        'Stop here to evaluate expressions',
+                                         lldb.SBFileSpec("main.cpp"))
+        # Enable fix-its as they were intentionally disabled by TestBase.setUp.
+        self.runCmd("settings set target.auto-apply-fixits true")
+        ret_val = lldb.SBCommandReturnObject()
+        result = self.dbg.GetCommandInterpreter().HandleCommand("expression null_pointer.first", ret_val)
+        self.assertEqual(result, lldb.eReturnStatusFailed, ret_val.GetError())
+
+        self.assertIn("Fix-it applied, fixed expression was:", ret_val.GetError())
+        self.assertIn("null_pointer->first", ret_val.GetError())
 
     # The final function call runs into SIGILL on aarch64-linux.
     @expectedFailureAll(archs=["aarch64"], oslist=["freebsd", "linux"],
@@ -156,7 +171,7 @@ class ExprCommandWithFixits(TestBase):
         multiple_runs_options.SetRetriesWithFixIts(2)
         value = frame.EvaluateExpression(two_runs_expr, multiple_runs_options)
         # This error signals success for top level expressions.
-        self.assertEquals(value.GetError().GetCString(), "error: No value")
+        self.assertEquals(value.GetError().GetCString(), "unknown error")
 
         # Test that the code above compiles to the right thing.
         self.expect_expr("test_X(1)", result_type="int", result_value="123")

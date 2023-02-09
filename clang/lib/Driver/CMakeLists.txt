@@ -1,14 +1,24 @@
 set(LLVM_LINK_COMPONENTS
   BinaryFormat
+  BitWriter
+  Core
+  IRReader
+  MC
+  Object
   Option
   ProfileData
   Support
+  WindowsDriver
   )
 
 if(WIN32)
   # MSVCToolChain.cpp uses version.dll.
   set(system_libs version)
 endif()
+
+# This must be in sync with llvm/sycl/CMakeLists.txt.
+SET_SOURCE_FILES_PROPERTIES( ToolChains/MSVC.cpp ToolChains/Clang.cpp
+  PROPERTIES COMPILE_DEFINITIONS SYCL_MAJOR_VERSION="6" )
 
 add_clang_library(clangDriver
   Action.cpp
@@ -18,6 +28,7 @@ add_clang_library(clangDriver
   DriverOptions.cpp
   Job.cpp
   Multilib.cpp
+  OffloadBundler.cpp
   OptionUtils.cpp
   Phases.cpp
   SanitizerArgs.cpp
@@ -25,6 +36,8 @@ add_clang_library(clangDriver
   ToolChain.cpp
   ToolChains/Arch/AArch64.cpp
   ToolChains/Arch/ARM.cpp
+  ToolChains/Arch/CSKY.cpp
+  ToolChains/Arch/LoongArch.cpp
   ToolChains/Arch/M68k.cpp
   ToolChains/Arch/Mips.cpp
   ToolChains/Arch/PPC.cpp
@@ -45,6 +58,7 @@ add_clang_library(clangDriver
   ToolChains/CommonArgs.cpp
   ToolChains/Contiki.cpp
   ToolChains/CrossWindows.cpp
+  ToolChains/CSKYToolChain.cpp
   ToolChains/Cuda.cpp
   ToolChains/Darwin.cpp
   ToolChains/DragonFly.cpp
@@ -53,8 +67,11 @@ add_clang_library(clangDriver
   ToolChains/Fuchsia.cpp
   ToolChains/Gnu.cpp
   ToolChains/Haiku.cpp
-  ToolChains/HIP.cpp
+  ToolChains/HIPUtility.cpp
+  ToolChains/HIPAMD.cpp
+  ToolChains/HIPSPV.cpp
   ToolChains/Hexagon.cpp
+  ToolChains/HLSL.cpp
   ToolChains/Hurd.cpp
   ToolChains/Linux.cpp
   ToolChains/MipsLinux.cpp
@@ -70,12 +87,14 @@ add_clang_library(clangDriver
   ToolChains/RISCVToolchain.cpp
   ToolChains/SYCL.cpp
   ToolChains/Solaris.cpp
+  ToolChains/SPIRV.cpp
   ToolChains/TCE.cpp
   ToolChains/VEToolchain.cpp
   ToolChains/WebAssembly.cpp
   ToolChains/XCore.cpp
   ToolChains/VXX.cpp
   ToolChains/PPCLinux.cpp
+  ToolChains/PPCFreeBSD.cpp
   ToolChains/InterfaceStubs.cpp
   ToolChains/ZOS.cpp
   Types.cpp

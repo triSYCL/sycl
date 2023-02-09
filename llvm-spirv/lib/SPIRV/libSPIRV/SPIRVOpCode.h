@@ -141,7 +141,9 @@ inline bool isAccessChainOpCode(Op OpCode) {
 inline bool hasExecScope(Op OpCode) {
   unsigned OC = OpCode;
   return (OpGroupWaitEvents <= OC && OC <= OpGroupSMax) ||
-         (OpGroupReserveReadPipePackets <= OC && OC <= OpGroupCommitWritePipe);
+         (OpGroupReserveReadPipePackets <= OC &&
+          OC <= OpGroupCommitWritePipe) ||
+         (OC == OpGroupNonUniformRotateKHR);
 }
 
 inline bool hasGroupOperation(Op OpCode) {
@@ -174,7 +176,8 @@ inline bool isGroupOpCode(Op OpCode) {
 
 inline bool isGroupNonUniformOpcode(Op OpCode) {
   unsigned OC = OpCode;
-  return OpGroupNonUniformElect <= OC && OC <= OpGroupNonUniformQuadSwap;
+  return (OpGroupNonUniformElect <= OC && OC <= OpGroupNonUniformQuadSwap) ||
+         (OC == OpGroupNonUniformRotateKHR);
 }
 
 inline bool isMediaBlockINTELOpcode(Op OpCode) {
@@ -215,7 +218,8 @@ inline bool isTypeOpCode(Op OpCode) {
   unsigned OC = OpCode;
   return (OpTypeVoid <= OC && OC <= OpTypePipe) || OC == OpTypePipeStorage ||
          isSubgroupAvcINTELTypeOpCode(OpCode) || OC == OpTypeVmeImageINTEL ||
-         isVCOpCode(OpCode) || OC == internal::OpTypeTokenINTEL;
+         isVCOpCode(OpCode) || OC == internal::OpTypeTokenINTEL ||
+         OC == internal::OpTypeJointMatrixINTEL;
 }
 
 inline bool isSpecConstantOpCode(Op OpCode) {
@@ -226,7 +230,7 @@ inline bool isSpecConstantOpCode(Op OpCode) {
 inline bool isConstantOpCode(Op OpCode) {
   unsigned OC = OpCode;
   return (OpConstantTrue <= OC && OC <= OpSpecConstantOp) || OC == OpUndef ||
-         OC == OpConstantPipeStorage || OC == OpConstFunctionPointerINTEL;
+         OC == OpConstantPipeStorage || OC == OpConstantFunctionPointerINTEL;
 }
 
 inline bool isModuleScopeAllowedOpCode(Op OpCode) {
@@ -241,6 +245,11 @@ inline bool isIntelSubgroupOpCode(Op OpCode) {
 
 inline bool isEventOpCode(Op OpCode) {
   return OpRetainEvent <= OpCode && OpCode <= OpCaptureEventProfilingInfo;
+}
+
+inline bool isSplitBarrierINTELOpCode(Op OpCode) {
+  return OpCode == OpControlBarrierArriveINTEL ||
+         OpCode == OpControlBarrierWaitINTEL;
 }
 
 } // namespace SPIRV

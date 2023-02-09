@@ -11,7 +11,6 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Transforms/Utils/ModuleUtils.h"
-#include "llvm/Analysis/TargetLibraryInfo.h"
 #include "llvm/Analysis/VectorUtils.h"
 #include "llvm/IR/DerivedTypes.h"
 #include "llvm/IR/Function.h"
@@ -22,7 +21,7 @@ using namespace llvm;
 
 #define DEBUG_TYPE "moduleutils"
 
-static void appendToGlobalArray(const char *Array, Module &M, Function *F,
+static void appendToGlobalArray(StringRef ArrayName, Module &M, Function *F,
                                 int Priority, Constant *Data) {
   IRBuilder<> IRB(M.getContext());
   FunctionType *FnTy = FunctionType::get(IRB.getVoidTy(), false);
@@ -31,8 +30,10 @@ static void appendToGlobalArray(const char *Array, Module &M, Function *F,
   // to the list.
   SmallVector<Constant *, 16> CurrentCtors;
   StructType *EltTy = StructType::get(
-      IRB.getInt32Ty(), PointerType::getUnqual(FnTy), IRB.getInt8PtrTy());
-  if (GlobalVariable *GVCtor = M.getNamedGlobal(Array)) {
+      IRB.getInt32Ty(), PointerType::get(FnTy, F->getAddressSpace()),
+      IRB.getInt8PtrTy());
+
+  if (GlobalVariable *GVCtor = M.getNamedGlobal(ArrayName)) {
     if (Constant *Init = GVCtor->getInitializer()) {
       unsigned n = Init->getNumOperands();
       CurrentCtors.reserve(n + 1);
@@ -60,7 +61,7 @@ static void appendToGlobalArray(const char *Array, Module &M, Function *F,
   // Create the new global variable and replace all uses of
   // the old global variable with the new one.
   (void)new GlobalVariable(M, NewInit->getType(), false,
-                           GlobalValue::AppendingLinkage, NewInit, Array);
+                           GlobalValue::AppendingLinkage, NewInit, ArrayName);
 }
 
 void llvm::appendToGlobalCtors(Module &M, Function *F, int Priority, Constant *Data) {
@@ -124,8 +125,9 @@ llvm::declareSanitizerInitFunction(Module &M, StringRef InitName,
 Function *llvm::createSanitizerCtor(Module &M, StringRef CtorName) {
   Function *Ctor = Function::createWithDefaultAttr(
       FunctionType::get(Type::getVoidTy(M.getContext()), false),
-      GlobalValue::InternalLinkage, 0, CtorName, &M);
-  Ctor->addAttribute(AttributeList::FunctionIndex, Attribute::NoUnwind);
+      GlobalValue::InternalLinkage, M.getDataLayout().getProgramAddressSpace(),
+      CtorName, &M);
+  Ctor->addFnAttr(Attribute::NoUnwind);
   BasicBlock *CtorBB = BasicBlock::Create(M.getContext(), "", Ctor);
   ReturnInst::Create(M.getContext(), CtorBB);
   // Ensure Ctor cannot be discarded, even if in a comdat.
@@ -165,7 +167,7 @@ llvm::getOrCreateSanitizerCtorAndInitFunctions(
   if (Function *Ctor = M.getFunction(CtorName))
     // FIXME: Sink this logic into the module, similar to the handling of
     // globals. This will make moving to a concurrent model much easier.
-    if (Ctor->arg_size() == 0 ||
+    if (Ctor->arg_empty() ||
         Ctor->getReturnType() == Type::getVoidTy(M.getContext()))
       return {Ctor, declareSanitizerInitFunction(M, InitName, InitArgTypes)};
 
@@ -178,66 +180,30 @@ llvm::getOrCreateSanitizerCtorAndInitFunctions(
 }
 
 void llvm::filterDeadComdatFunctions(
-    Module &M, SmallVectorImpl<Function *> &DeadComdatFunctions) {
-  // Build a map from the comdat to the number of entries in that comdat we
-  // think are dead. If this fully covers the comdat group, then the entire
-  // group is dead. If we find another entry in the comdat group though, we'll
-  // have to preserve the whole group.
-  SmallDenseMap<Comdat *, int, 16> ComdatEntriesCovered;
+    SmallVectorImpl<Function *> &DeadComdatFunctions) {
+  SmallPtrSet<Function *, 32> MaybeDeadFunctions;
+  SmallPtrSet<Comdat *, 32> MaybeDeadComdats;
   for (Function *F : DeadComdatFunctions) {
+    MaybeDeadFunctions.insert(F);
+    if (Comdat *C = F->getComdat())
+      MaybeDeadComdats.insert(C);
+  }
+
+  // Find comdats for which all users are dead now.
+  SmallPtrSet<Comdat *, 32> DeadComdats;
+  for (Comdat *C : MaybeDeadComdats) {
+    auto IsUserDead = [&](GlobalObject *GO) {
+      auto *F = dyn_cast<Function>(GO);
+      return F && MaybeDeadFunctions.contains(F);
+    };
+    if (all_of(C->getUsers(), IsUserDead))
+      DeadComdats.insert(C);
+  }
+
+  // Only keep functions which have no comdat or a dead comdat.
+  erase_if(DeadComdatFunctions, [&](Function *F) {
     Comdat *C = F->getComdat();
-    assert(C && "Expected all input GVs to be in a comdat!");
-    ComdatEntriesCovered[C] += 1;
-  }
-
-  auto CheckComdat = [&](Comdat &C) {
-    auto CI = ComdatEntriesCovered.find(&C);
-    if (CI == ComdatEntriesCovered.end())
-      return;
-
-    // If this could have been covered by a dead entry, just subtract one to
-    // account for it.
-    if (CI->second > 0) {
-      CI->second -= 1;
-      return;
-    }
-
-    // If we've already accounted for all the entries that were dead, the
-    // entire comdat is alive so remove it from the map.
-    ComdatEntriesCovered.erase(CI);
-  };
-
-  auto CheckAllComdats = [&] {
-    for (Function &F : M.functions())
-      if (Comdat *C = F.getComdat()) {
-        CheckComdat(*C);
-        if (ComdatEntriesCovered.empty())
-          return;
-      }
-    for (GlobalVariable &GV : M.globals())
-      if (Comdat *C = GV.getComdat()) {
-        CheckComdat(*C);
-        if (ComdatEntriesCovered.empty())
-          return;
-      }
-    for (GlobalAlias &GA : M.aliases())
-      if (Comdat *C = GA.getComdat()) {
-        CheckComdat(*C);
-        if (ComdatEntriesCovered.empty())
-          return;
-      }
-  };
-  CheckAllComdats();
-
-  if (ComdatEntriesCovered.empty()) {
-    DeadComdatFunctions.clear();
-    return;
-  }
-
-  // Remove the entries that were not covering.
-  erase_if(DeadComdatFunctions, [&](GlobalValue *GV) {
-    return ComdatEntriesCovered.find(GV->getComdat()) ==
-           ComdatEntriesCovered.end();
+    return C && !DeadComdats.contains(C);
   });
 }
 
@@ -273,8 +239,8 @@ std::string llvm::getUniqueModuleId(Module *M) {
   return ("." + Str).str();
 }
 
-void VFABI::setVectorVariantNames(
-    CallInst *CI, const SmallVector<std::string, 8> &VariantMappings) {
+void VFABI::setVectorVariantNames(CallInst *CI,
+                                  ArrayRef<std::string> VariantMappings) {
   if (VariantMappings.empty())
     return;
 
@@ -291,13 +257,34 @@ void VFABI::setVectorVariantNames(
   for (const std::string &VariantMapping : VariantMappings) {
     LLVM_DEBUG(dbgs() << "VFABI: adding mapping '" << VariantMapping << "'\n");
     Optional<VFInfo> VI = VFABI::tryDemangleForVFABI(VariantMapping, *M);
-    assert(VI.hasValue() && "Cannot add an invalid VFABI name.");
-    assert(M->getNamedValue(VI.getValue().VectorName) &&
+    assert(VI && "Cannot add an invalid VFABI name.");
+    assert(M->getNamedValue(VI.value().VectorName) &&
            "Cannot add variant to attribute: "
            "vector function declaration is missing.");
   }
 #endif
-  CI->addAttribute(
-      AttributeList::FunctionIndex,
+  CI->addFnAttr(
       Attribute::get(M->getContext(), MappingsAttrName, Buffer.str()));
+}
+
+void llvm::embedBufferInModule(Module &M, MemoryBufferRef Buf,
+                               StringRef SectionName, Align Alignment) {
+  // Embed the memory buffer into the module.
+  Constant *ModuleConstant = ConstantDataArray::get(
+      M.getContext(), makeArrayRef(Buf.getBufferStart(), Buf.getBufferSize()));
+  GlobalVariable *GV = new GlobalVariable(
+      M, ModuleConstant->getType(), true, GlobalValue::PrivateLinkage,
+      ModuleConstant, "llvm.embedded.object");
+  GV->setSection(SectionName);
+  GV->setAlignment(Alignment);
+
+  LLVMContext &Ctx = M.getContext();
+  NamedMDNode *MD = M.getOrInsertNamedMetadata("llvm.embedded.objects");
+  Metadata *MDVals[] = {ConstantAsMetadata::get(GV),
+                        MDString::get(Ctx, SectionName)};
+
+  MD->addOperand(llvm::MDNode::get(Ctx, MDVals));
+  GV->setMetadata(LLVMContext::MD_exclude, llvm::MDNode::get(Ctx, {}));
+
+  appendToCompilerUsed(M, GV);
 }

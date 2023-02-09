@@ -1,4 +1,4 @@
-//===-- flang/unittests/RuntimeGTest/ListInputTest.cpp ----------*- C++ -*-===//
+//===-- flang/unittests/Runtime/ListInputTest.cpp ---------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -7,9 +7,9 @@
 //===----------------------------------------------------------------------===//
 
 #include "CrashHandlerFixture.h"
-#include "../../runtime/descriptor.h"
-#include "../../runtime/io-api.h"
 #include "../../runtime/io-error.h"
+#include "flang/Runtime/descriptor.h"
+#include "flang/Runtime/io-api.h"
 
 using namespace Fortran::runtime;
 using namespace Fortran::runtime::io;

@@ -636,6 +636,19 @@ define <16 x i16> @shuffle_combine_packusdw_pshufb(<8 x i32> %a0, <8 x i32> %a1)
 }
 declare <16 x i16> @llvm.x86.avx2.packusdw(<8 x i32>, <8 x i32>) nounwind readnone
 
+define <8 x i16> @shuffle_combine_packusdw_permq_extract(<8 x i32> %a0) {
+; CHECK-LABEL: shuffle_combine_packusdw_permq_extract:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vpackusdw %ymm0, %ymm0, %ymm0
+; CHECK-NEXT:    vpermq {{.*#+}} ymm0 = ymm0[0,2,2,3]
+; CHECK-NEXT:    # kill: def $xmm0 killed $xmm0 killed $ymm0
+; CHECK-NEXT:    vzeroupper
+; CHECK-NEXT:    ret{{[l|q]}}
+  %1 = tail call <16 x i16> @llvm.x86.avx2.packusdw(<8 x i32> %a0, <8 x i32> poison)
+  %2 = shufflevector <16 x i16> %1, <16 x i16> poison, <8 x i32> <i32 0, i32 1, i32 2, i32 3, i32 8, i32 9, i32 10, i32 11>
+  ret <8 x i16> %2
+}
+
 define <32 x i8> @shuffle_combine_packuswb_pshufb(<16 x i16> %a0, <16 x i16> %a1) {
 ; CHECK-LABEL: shuffle_combine_packuswb_pshufb:
 ; CHECK:       # %bb.0:
@@ -778,7 +791,7 @@ define <32 x i8> @constant_fold_pshufb_256() {
   ret <32 x i8> %1
 }
 
-define i32 @broadcast_v2i64_multiuse(i64* %p0) {
+define i32 @broadcast_v2i64_multiuse(ptr %p0) {
 ; X86-LABEL: broadcast_v2i64_multiuse:
 ; X86:       # %bb.0: # %entry
 ; X86-NEXT:    movl {{[0-9]+}}(%esp), %eax
@@ -792,7 +805,7 @@ define i32 @broadcast_v2i64_multiuse(i64* %p0) {
 ; X64-NEXT:    addl %eax, %eax
 ; X64-NEXT:    retq
 entry:
-  %tmp = load i64, i64* %p0, align 8
+  %tmp = load i64, ptr %p0, align 8
   %tmp1 = trunc i64 %tmp to i32
   %tmp2 = insertelement <2 x i64> undef, i64 %tmp, i32 0
   %tmp3 = shufflevector <2 x i64> %tmp2, <2 x i64> undef, <2 x i32> zeroinitializer
@@ -843,6 +856,19 @@ entry:
   ret <8 x float> %shuf2
 }
 
+define <32 x i8> @PR52122(<32 x i8> %0, <32 x i8> %1) {
+; CHECK-LABEL: PR52122:
+; CHECK:       # %bb.0:
+; CHECK-NEXT:    vpshufb {{.*#+}} ymm1 = zero,zero,ymm1[4],zero,zero,zero,ymm1[5],zero,zero,zero,ymm1[6],zero,zero,zero,ymm1[7],zero,zero,zero,ymm1[20],zero,zero,zero,ymm1[21],zero,zero,zero,ymm1[22],zero,zero,zero,ymm1[23],zero
+; CHECK-NEXT:    vpshufb {{.*#+}} ymm0 = ymm0[2,4],zero,zero,zero,ymm0[5],zero,zero,ymm0[3,6],zero,zero,zero,ymm0[7],zero,zero,ymm0[18,20],zero,zero,zero,ymm0[21],zero,zero,ymm0[19,22],zero,zero,zero,ymm0[23],zero,zero
+; CHECK-NEXT:    vpor %ymm1, %ymm0, %ymm0
+; CHECK-NEXT:    ret{{[l|q]}}
+  %3 = shufflevector <32 x i8> %0, <32 x i8> <i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 poison, i8 poison, i8 poison, i8 poison, i8 poison, i8 poison, i8 poison, i8 poison, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 0, i8 poison, i8 poison, i8 poison, i8 poison, i8 poison, i8 poison, i8 poison, i8 poison>, <32 x i32> <i32 0, i32 32, i32 1, i32 33, i32 2, i32 34, i32 3, i32 35, i32 4, i32 36, i32 5, i32 37, i32 6, i32 38, i32 7, i32 39, i32 16, i32 48, i32 17, i32 49, i32 18, i32 50, i32 19, i32 51, i32 20, i32 52, i32 21, i32 53, i32 22, i32 54, i32 23, i32 55>
+  %4 = shufflevector <32 x i8> %3, <32 x i8> %1, <32 x i32> <i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 4, i32 36, i32 5, i32 37, i32 6, i32 38, i32 7, i32 39, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 undef, i32 20, i32 52, i32 21, i32 53, i32 22, i32 54, i32 23, i32 55>
+  %5 = shufflevector <32 x i8> %4, <32 x i8> %3, <32 x i32> <i32 8, i32 40, i32 9, i32 41, i32 10, i32 42, i32 11, i32 43, i32 12, i32 44, i32 13, i32 45, i32 14, i32 46, i32 15, i32 47, i32 24, i32 56, i32 25, i32 57, i32 26, i32 58, i32 27, i32 59, i32 28, i32 60, i32 29, i32 61, i32 30, i32 62, i32 31, i32 63>
+  ret <32 x i8> %5
+}
+
 define void @packss_zext_v8i1() {
 ; X86-LABEL: packss_zext_v8i1:
 ; X86:       # %bb.0:
@@ -865,6 +891,6 @@ define void @packss_zext_v8i1() {
   %tmp6 = sext <16 x i16> %tmp4 to <16 x i32>
   %tmp10 = shufflevector <16 x i32> %tmp6, <16 x i32> undef, <8 x i32> <i32 4, i32 5, i32 6, i32 7, i32 12, i32 13, i32 14, i32 15>
   %tmp11 = tail call <16 x i16> @llvm.x86.avx2.packssdw(<8 x i32> undef, <8 x i32> %tmp10)
-  store <16 x i16> %tmp11, <16 x i16>* undef, align 2
+  store <16 x i16> %tmp11, ptr undef, align 2
   ret void
 }

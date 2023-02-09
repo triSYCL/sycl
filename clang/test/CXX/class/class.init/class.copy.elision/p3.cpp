@@ -11,7 +11,7 @@ struct A1 {
 };
 A1 test1() {
   A1 a;
-  return a; // expected-error {{call to deleted constructor of 'test_delete_function::A1'}}
+  return a; // expected-error {{call to deleted constructor of 'A1'}}
 }
 
 struct A2 {
@@ -34,7 +34,7 @@ struct B1 {
 };
 B1 test3() {
   C c;
-  return c; // expected-error {{conversion function from 'test_delete_function::C' to 'test_delete_function::B1' invokes a deleted function}}
+  return c; // expected-error {{conversion function from 'C' to 'B1' invokes a deleted function}}
 }
 
 struct B2 {
@@ -75,7 +75,7 @@ struct B1 {
   B1(B1 &&) = delete; // expected-note {{'B1' has been explicitly marked deleted here}}
 };
 B1 test3(B1 &&b) {
-  return b; // expected-error {{call to deleted constructor of 'test_implicitly_movable_rvalue_ref::B1'}}
+  return b; // expected-error {{call to deleted constructor of 'B1'}}
 }
 
 struct B2 {
@@ -96,13 +96,15 @@ void func();
 
 struct A1 {
   A1(const A1 &);
-  A1(A1 &&) = delete; // expected-note 2{{'A1' has been explicitly marked deleted here}}
+  A1(A1 &&) = delete;
+  // expected-note@-1 2{{'A1' has been explicitly marked deleted here}}
+  // cxx11_2b-note@-2 3{{'A1' has been explicitly marked deleted here}}
 };
 void test1() {
   try {
     func();
   } catch (A1 a) {
-    throw a; // expected-error {{call to deleted constructor of 'test_throw_parameter::A1'}}
+    throw a; // expected-error {{call to deleted constructor of 'A1'}}
   }
 }
 
@@ -123,8 +125,24 @@ void test2() {
 void test3(A1 a) try {
   func();
 } catch (...) {
-  throw a; // expected-error {{call to deleted constructor of 'test_throw_parameter::A1'}}
+  throw a; // expected-error {{call to deleted constructor of 'A1'}}
 }
+
+#if __cplusplus >= 201103L
+namespace PR54341 {
+void test4(A1 a) {
+  void f(decltype((throw a, 0)));
+  // expected-error@-1 {{call to deleted constructor of 'A1'}}
+
+  void g(int = decltype(throw a, 0){});
+  // expected-error@-1 {{call to deleted constructor of 'A1'}}
+}
+
+void test5(A1 a, int = decltype(throw a, 0){}) {}
+// expected-error@-1 {{call to deleted constructor of 'A1'}}
+} // namespace PR54341
+#endif
+
 } // namespace test_throw_parameter
 
 // During the first overload resolution, the selected function no
@@ -158,7 +176,7 @@ struct B1 {
 };
 C test3() {
   B1 b;
-  return b; // expected-error {{conversion function from 'test_non_ctor_conversion::B1' to 'test_non_ctor_conversion::C' invokes a deleted function}}
+  return b; // expected-error {{conversion function from 'B1' to 'C' invokes a deleted function}}
 }
 
 struct B2 {
@@ -256,20 +274,20 @@ NeedValue test_3_1() {
   // not rvalue reference
   // same type
   B1 b;
-  return b; // cxx11_2b-error {{call to deleted constructor of 'test_ctor_param_rvalue_ref::B1'}}
+  return b; // cxx11_2b-error {{call to deleted constructor of 'B1'}}
 }
 class DerivedB1 : public B1 {};
 B1 test_3_2() {
   // rvalue reference
   // not same type
   DerivedB1 b;
-  return b; // expected-error {{call to deleted constructor of 'test_ctor_param_rvalue_ref::B1'}}
+  return b; // expected-error {{call to deleted constructor of 'B1'}}
 }
 NeedValue test_3_3() {
   // not rvalue reference
   // not same type
   DerivedB1 b;
-  return b; // cxx11_2b-error {{call to deleted constructor of 'test_ctor_param_rvalue_ref::B1'}}
+  return b; // cxx11_2b-error {{call to deleted constructor of 'B1'}}
 }
 
 struct B2 {
@@ -518,3 +536,37 @@ template <class T> X<T> test_dependent_invalid_decl() {
 template X<int> test_dependent_invalid_decl<int>(); // expected-note {{requested here}}
 
 } // namespace test_auto_variables
+
+namespace PR51708 {
+
+class a1;                  // expected-note 4 {{forward declaration of 'PR51708::a1'}}
+template <class> class A2; // expected-note 4 {{template is declared here}}
+using a2 = A2<int>;
+
+template <class b> b f() {
+  // expected-error@-1 {{incomplete result type 'PR51708::a1' in function definition}}
+  // expected-error@-2 {{implicit instantiation of undefined template 'PR51708::A2<int>}}
+
+  b d;
+  // expected-error@-1 {{variable has incomplete type 'PR51708::a1'}}
+  // expected-error@-2 {{implicit instantiation of undefined template 'PR51708::A2<int>}}
+
+  return d;
+}
+template a1 f<a1>(); // expected-note-re {{in instantiation {{.*}} requested here}}
+template a2 f<a2>(); // expected-note-re {{in instantiation {{.*}} requested here}}
+
+template <class b> b g() {
+  // expected-error@-1 {{incomplete result type 'PR51708::a1' in function definition}}
+  // expected-error@-2 {{implicit instantiation of undefined template 'PR51708::A2<int>}}
+
+  b d __attribute__((aligned(1)));
+  // expected-error@-1 {{variable has incomplete type 'PR51708::a1'}}
+  // expected-error@-2 {{implicit instantiation of undefined template 'PR51708::A2<int>}}
+
+  return d;
+}
+template a1 g<a1>(); // expected-note-re {{in instantiation {{.*}} requested here}}
+template a2 g<a2>(); // expected-note-re {{in instantiation {{.*}} requested here}}
+
+} // namespace PR51708

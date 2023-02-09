@@ -24,14 +24,13 @@ class HostInfoMacOSX : public HostInfoPosix {
 public:
   static llvm::VersionTuple GetOSVersion();
   static llvm::VersionTuple GetMacCatalystVersion();
-  static bool GetOSBuildString(std::string &s);
-  static bool GetOSKernelDescription(std::string &s);
+  static llvm::Optional<std::string> GetOSBuildString();
   static FileSpec GetProgramFileSpec();
   static FileSpec GetXcodeContentsDirectory();
   static FileSpec GetXcodeDeveloperDirectory();
 
   /// Query xcrun to find an Xcode SDK directory.
-  static llvm::StringRef GetXcodeSDKPath(XcodeSDK sdk);
+  static llvm::Expected<llvm::StringRef> GetXcodeSDKPath(XcodeSDK sdk);
 
   /// Shared cache utilities
   static SharedCacheImageInfo

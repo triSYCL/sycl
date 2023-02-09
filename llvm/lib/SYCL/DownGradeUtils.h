@@ -24,17 +24,17 @@
 namespace llvm {
 
 inline void removeAttributes(Module &M, ArrayRef<Attribute::AttrKind> Kinds) {
-  for (auto &F : M.functions())
+  for (llvm::Function &F : M.functions())
     for (auto Kind : Kinds) {
-      F.removeAttribute(AttributeList::FunctionIndex, Kind);
-      F.removeAttribute(AttributeList::ReturnIndex, Kind);
+      F.removeFnAttr(Kind);
+      F.removeRetAttr(Kind);
       for (auto &P : F.args())
         P.removeAttr(Kind);
-      for (User *U : F.users())
+      for (User* U : F.users())
         if (CallBase *CB = dyn_cast<CallBase>(U)) {
-          CB->removeAttribute(AttributeList::FunctionIndex, Kind);
-          CB->removeAttribute(AttributeList::ReturnIndex, Kind);
-          for (unsigned int i = 0; i < CB->getNumArgOperands(); ++i) {
+          CB->removeAttributeAtIndex(AttributeList::FunctionIndex, Kind);
+          CB->removeAttributeAtIndex(AttributeList::ReturnIndex, Kind);
+          for (unsigned int i = 0; i < CB->arg_size(); ++i) {
             CB->removeParamAttr(i, Kind);
           }
         }

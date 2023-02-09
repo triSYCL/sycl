@@ -1,10 +1,10 @@
-! RUN: %S/test_errors.sh %s %t %flang_fc1
-! REQUIRES: shell
+! RUN: %python %S/test_errors.py %s %flang_fc1
 ! Confirm enforcement of constraints and restrictions in 7.5.7.3
 ! and C733, C734 and C779, C780, C782, C783, C784, and C785.
 
 module m
   !ERROR: An ABSTRACT derived type must be extensible
+  !PORTABILITY: A derived type with the BIND attribute is empty
   type, abstract, bind(c) :: badAbstract1
   end type
   !ERROR: An ABSTRACT derived type must be extensible
@@ -45,6 +45,7 @@ module m
   end type
   type, extends(intermediate) :: concrete2  ! ensure no false missing binding error
   end type
+  !WARNING: A derived type with the BIND attribute is empty
   type, bind(c) :: inextensible1
   end type
   !ERROR: The parent type is not extensible

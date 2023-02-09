@@ -1,6 +1,8 @@
 add_llvm_component_library(LLVMPasses
+  OptimizationLevel.cpp
   PassBuilder.cpp
   PassBuilderBindings.cpp
+  PassBuilderPipelines.cpp
   PassPlugin.cpp
   StandardInstrumentations.cpp
 
@@ -18,9 +20,11 @@ add_llvm_component_library(LLVMPasses
   Coroutines
   IPO
   InstCombine
+  IRPrinter
   ObjCARC
   Scalar
   Support
+  SYCL
   SYCLLowerIR
   Target
   TransformUtils

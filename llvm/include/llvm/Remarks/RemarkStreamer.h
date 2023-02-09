@@ -34,10 +34,12 @@
 #include "llvm/Remarks/RemarkSerializer.h"
 #include "llvm/Support/Error.h"
 #include "llvm/Support/Regex.h"
-#include "llvm/Support/raw_ostream.h"
 #include <memory>
 
 namespace llvm {
+
+class raw_ostream;
+
 namespace remarks {
 class RemarkStreamer final {
   /// The regex used to filter remarks based on the passes that emit them.
@@ -49,11 +51,11 @@ class RemarkStreamer final {
 
 public:
   RemarkStreamer(std::unique_ptr<remarks::RemarkSerializer> RemarkSerializer,
-                 Optional<StringRef> Filename = None);
+                 Optional<StringRef> Filename = std::nullopt);
 
   /// Return the filename that the remark diagnostics are emitted to.
   Optional<StringRef> getFilename() const {
-    return Filename ? Optional<StringRef>(*Filename) : None;
+    return Filename ? Optional<StringRef>(*Filename) : std::nullopt;
   }
   /// Return stream that the remark diagnostics are emitted to.
   raw_ostream &getStream() { return RemarkSerializer->OS; }

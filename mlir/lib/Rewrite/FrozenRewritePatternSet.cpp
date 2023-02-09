@@ -16,9 +16,11 @@
 
 using namespace mlir;
 
-static LogicalResult convertPDLToPDLInterp(ModuleOp pdlModule) {
+static LogicalResult
+convertPDLToPDLInterp(ModuleOp pdlModule,
+                      DenseMap<Operation *, PDLPatternConfigSet *> &configMap) {
   // Skip the conversion if the module doesn't contain pdl.
-  if (llvm::empty(pdlModule.getOps<pdl::PatternOp>()))
+  if (pdlModule.getOps<pdl::PatternOp>().empty())
     return success();
 
   // Simplify the provided PDL module. Note that we can't use the canonicalizer
@@ -37,7 +39,7 @@ static LogicalResult convertPDLToPDLInterp(ModuleOp pdlModule) {
   // mode.
   pdlPipeline.enableVerifier(false);
 #endif
-  pdlPipeline.addPass(createPDLToPDLInterpPass());
+  pdlPipeline.addPass(createPDLToPDLInterpPass(configMap));
   if (failed(pdlPipeline.run(pdlModule)))
     return failure();
 
@@ -66,19 +68,17 @@ FrozenRewritePatternSet::FrozenRewritePatternSet(
   // Functor used to walk all of the operations registered in the context. This
   // is useful for patterns that get applied to multiple operations, such as
   // interface and trait based patterns.
-  std::vector<AbstractOperation *> abstractOps;
-  auto addToOpsWhen = [&](std::unique_ptr<RewritePattern> &pattern,
-                          function_ref<bool(AbstractOperation *)> callbackFn) {
-    if (abstractOps.empty())
-      abstractOps = pattern->getContext()->getRegisteredOperations();
-    for (AbstractOperation *absOp : abstractOps) {
-      if (callbackFn(absOp)) {
-        OperationName opName(absOp);
-        impl->nativeOpSpecificPatternMap[opName].push_back(pattern.get());
-      }
-    }
-    impl->nativeOpSpecificPatternList.push_back(std::move(pattern));
-  };
+  std::vector<RegisteredOperationName> opInfos;
+  auto addToOpsWhen =
+      [&](std::unique_ptr<RewritePattern> &pattern,
+          function_ref<bool(RegisteredOperationName)> callbackFn) {
+        if (opInfos.empty())
+          opInfos = pattern->getContext()->getRegisteredOperations();
+        for (RegisteredOperationName info : opInfos)
+          if (callbackFn(info))
+            impl->nativeOpSpecificPatternMap[info].push_back(pattern.get());
+        impl->nativeOpSpecificPatternList.push_back(std::move(pattern));
+      };
 
   for (std::unique_ptr<RewritePattern> &pat : patterns.getNativePatterns()) {
     // Don't add patterns that haven't been enabled by the user.
@@ -106,14 +106,14 @@ FrozenRewritePatternSet::FrozenRewritePatternSet(
       continue;
     }
     if (Optional<TypeID> interfaceID = pat->getRootInterfaceID()) {
-      addToOpsWhen(pat, [&](AbstractOperation *absOp) {
-        return absOp->hasInterface(*interfaceID);
+      addToOpsWhen(pat, [&](RegisteredOperationName info) {
+        return info.hasInterface(*interfaceID);
       });
       continue;
     }
     if (Optional<TypeID> traitID = pat->getRootTraitID()) {
-      addToOpsWhen(pat, [&](AbstractOperation *absOp) {
-        return absOp->hasTrait(*traitID);
+      addToOpsWhen(pat, [&](RegisteredOperationName info) {
+        return info.hasTrait(*traitID);
       });
       continue;
     }
@@ -125,14 +125,17 @@ FrozenRewritePatternSet::FrozenRewritePatternSet(
   ModuleOp pdlModule = pdlPatterns.getModule();
   if (!pdlModule)
     return;
-  if (failed(convertPDLToPDLInterp(pdlModule)))
+  DenseMap<Operation *, PDLPatternConfigSet *> configMap =
+      pdlPatterns.takeConfigMap();
+  if (failed(convertPDLToPDLInterp(pdlModule, configMap)))
     llvm::report_fatal_error(
         "failed to lower PDL pattern module to the PDL Interpreter");
 
   // Generate the pdl bytecode.
   impl->pdlByteCode = std::make_unique<detail::PDLByteCode>(
-      pdlModule, pdlPatterns.takeConstraintFunctions(),
+      pdlModule, pdlPatterns.takeConfigs(), configMap,
+      pdlPatterns.takeConstraintFunctions(),
       pdlPatterns.takeRewriteFunctions());
 }
 
-FrozenRewritePatternSet::~FrozenRewritePatternSet() {}
+FrozenRewritePatternSet::~FrozenRewritePatternSet() = default;

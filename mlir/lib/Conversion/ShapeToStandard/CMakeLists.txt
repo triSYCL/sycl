@@ -17,10 +17,11 @@ add_mlir_conversion_library(MLIRShapeToStandard
   Core
 
   LINK_LIBS PUBLIC
+  MLIRArithDialect
   MLIRIR
-  MLIRShape
-  MLIRTensor
+  MLIRShapeDialect
+  MLIRTensorDialect
   MLIRPass
-  MLIRSCF
+  MLIRSCFDialect
   MLIRTransforms
   )

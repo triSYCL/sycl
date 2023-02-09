@@ -19,7 +19,7 @@
 
 #include "WebAssemblyFrameLowering.h"
 #include "MCTargetDesc/WebAssemblyMCTargetDesc.h"
-#include "Utils/WebAssemblyUtilities.h"
+#include "Utils/WebAssemblyTypeUtilities.h"
 #include "WebAssembly.h"
 #include "WebAssemblyInstrInfo.h"
 #include "WebAssemblyMachineFunctionInfo.h"
@@ -62,9 +62,8 @@ WebAssemblyFrameLowering::getLocalForStackObject(MachineFunction &MF,
   // If not allocated in the object address space, this object will be in
   // linear memory.
   const AllocaInst *AI = MFI.getObjectAllocation(FrameIndex);
-  if (!AI ||
-      !WebAssembly::isWasmVarAddressSpace(AI->getType()->getAddressSpace()))
-    return None;
+  if (!AI || !WebAssembly::isWasmVarAddressSpace(AI->getAddressSpace()))
+    return std::nullopt;
 
   // Otherwise, allocate this object in the named value stack, outside of linear
   // memory.

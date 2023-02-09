@@ -1,13 +1,15 @@
-// RUN: mlir-opt %s \
-// RUN:   --sparsification --sparse-tensor-conversion \
-// RUN:   --convert-vector-to-scf --convert-scf-to-std \
-// RUN:   --func-bufferize --tensor-constant-bufferize --tensor-bufferize \
-// RUN:   --std-bufferize --finalizing-bufferize  \
-// RUN:   --convert-vector-to-llvm --convert-memref-to-llvm --convert-std-to-llvm | \
-// RUN: mlir-cpu-runner \
-// RUN:  -e entry -entry-point-result=void  \
-// RUN:  -shared-libs=%mlir_integration_test_dir/libmlir_c_runner_utils%shlibext | \
-// RUN: FileCheck %s
+// DEFINE: %{option} = enable-runtime-library=true
+// DEFINE: %{command} = mlir-opt %s --sparse-compiler=%{option} | \
+// DEFINE: mlir-cpu-runner \
+// DEFINE:  -e entry -entry-point-result=void  \
+// DEFINE:  -shared-libs=%mlir_lib_dir/libmlir_c_runner_utils%shlibext | \
+// DEFINE: FileCheck %s
+//
+// RUN: %{command}
+//
+// Do the same run, but now with direct IR generation.
+// REDEFINE: %{option} = enable-runtime-library=false
+// RUN: %{command}
 
 #CSR = #sparse_tensor.encoding<{ dimLevelType = [ "dense", "compressed" ] }>
 
@@ -28,13 +30,12 @@ module {
   //
   // A kernel that scales a sparse matrix A by a factor of 2.0.
   //
-  func @sparse_scale(%argx: tensor<8x8xf32, #CSR>
-                     {linalg.inplaceable = true}) -> tensor<8x8xf32, #CSR> {
-    %c = constant 2.0 : f32
+  func.func @sparse_scale(%argx: tensor<8x8xf32, #CSR>) -> tensor<8x8xf32, #CSR> {
+    %c = arith.constant 2.0 : f32
     %0 = linalg.generic #trait_scale
       outs(%argx: tensor<8x8xf32, #CSR>) {
         ^bb(%x: f32):
-          %1 = mulf %x, %c : f32
+          %1 = arith.mulf %x, %c : f32
           linalg.yield %1 : f32
     } -> tensor<8x8xf32, #CSR>
     return %0 : tensor<8x8xf32, #CSR>
@@ -45,12 +46,12 @@ module {
   // and then calls the sparse scaling kernel with the sparse tensor
   // as input argument.
   //
-  func @entry() {
-    %c0 = constant 0 : index
-    %f0 = constant 0.0 : f32
+  func.func @entry() {
+    %c0 = arith.constant 0 : index
+    %f0 = arith.constant 0.0 : f32
 
     // Initialize a dense tensor.
-    %0 = constant dense<[
+    %0 = arith.constant dense<[
        [1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0],
        [0.0, 2.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
        [0.0, 0.0, 3.0, 0.0, 0.0, 0.0, 0.0, 0.0],
@@ -73,6 +74,9 @@ module {
     %m = sparse_tensor.values %2 : tensor<8x8xf32, #CSR> to memref<?xf32>
     %v = vector.transfer_read %m[%c0], %f0: memref<?xf32>, vector<16xf32>
     vector.print %v : vector<16xf32>
+
+    // Release the resources.
+    bufferization.dealloc_tensor %1 : tensor<8x8xf32, #CSR>
 
     return
   }

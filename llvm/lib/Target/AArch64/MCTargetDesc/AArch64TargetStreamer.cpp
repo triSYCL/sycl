@@ -76,10 +76,10 @@ void AArch64TargetStreamer::emitNoteSection(unsigned Flags) {
     return;
   }
   MCSection *Cur = OutStreamer.getCurrentSectionOnly();
-  OutStreamer.SwitchSection(Nt);
+  OutStreamer.switchSection(Nt);
 
   // Emit the note header.
-  OutStreamer.emitValueToAlignment(Align(8).value());
+  OutStreamer.emitValueToAlignment(Align(8));
   OutStreamer.emitIntValue(4, 4);     // data size for "GNU\0"
   OutStreamer.emitIntValue(4 * 4, 4); // Elf_Prop size
   OutStreamer.emitIntValue(ELF::NT_GNU_PROPERTY_TYPE_0, 4);
@@ -92,7 +92,7 @@ void AArch64TargetStreamer::emitNoteSection(unsigned Flags) {
   OutStreamer.emitIntValue(0, 4);     // pad
 
   OutStreamer.endSection(Nt);
-  OutStreamer.SwitchSection(Cur);
+  OutStreamer.switchSection(Cur);
 }
 
 void AArch64TargetStreamer::emitInst(uint32_t Inst) {
@@ -101,8 +101,8 @@ void AArch64TargetStreamer::emitInst(uint32_t Inst) {
   // We can't just use EmitIntValue here, as that will swap the
   // endianness on big-endian systems (instructions are always
   // little-endian).
-  for (unsigned I = 0; I < 4; ++I) {
-    Buffer[I] = uint8_t(Inst);
+  for (char &C : Buffer) {
+    C = uint8_t(Inst);
     Inst >>= 8;
   }
 
@@ -118,4 +118,8 @@ llvm::createAArch64ObjectTargetStreamer(MCStreamer &S,
   if (TT.isOSBinFormatCOFF())
     return new AArch64TargetWinCOFFStreamer(S);
   return nullptr;
+}
+
+MCTargetStreamer *llvm::createAArch64NullTargetStreamer(MCStreamer &S) {
+  return new AArch64TargetStreamer(S);
 }

@@ -8,17 +8,14 @@
 
 #pragma once
 
-#include <CL/sycl/access/access.hpp>
-#include <CL/sycl/accessor.hpp>
+#include <sycl/access/access.hpp>
+#include <sycl/accessor.hpp>
 #include <sycl/ext/oneapi/atomic_enums.hpp>
 #include <sycl/ext/oneapi/atomic_ref.hpp>
 
-__SYCL_INLINE_NAMESPACE(cl) {
 namespace sycl {
-namespace ext {
-namespace oneapi {
-
-#if __cplusplus > 201402L
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
+namespace ext::oneapi {
 
 template <memory_order> struct order_tag_t {
   explicit order_tag_t() = default;
@@ -38,11 +35,9 @@ inline constexpr scope_tag_t<memory_scope::work_group> work_group_scope{};
 inline constexpr scope_tag_t<memory_scope::device> device_scope{};
 inline constexpr scope_tag_t<memory_scope::system> system_scope{};
 
-#endif
-
 template <typename DataT, int Dimensions, memory_order DefaultOrder,
           memory_scope DefaultScope,
-          access::target AccessTarget = access::target::global_buffer,
+          access::target AccessTarget = access::target::device,
           access::placeholder IsPlaceholder = access::placeholder::false_t>
 class atomic_accessor
     : public accessor<DataT, Dimensions, access::mode::read_write, AccessTarget,
@@ -57,7 +52,8 @@ private:
   using AccessorT::getQualifiedPtr;
 
   // Prevent non-atomic access to atomic accessor
-  multi_ptr<DataT, AccessorT::AS> get_pointer() const = delete;
+  multi_ptr<DataT, AccessorT::AS, access::decorated::legacy>
+  get_pointer() const = delete;
 
 protected:
   using AccessorT::AdjustedDim;
@@ -68,8 +64,6 @@ public:
       atomic_ref<DataT, DefaultOrder, DefaultScope, AccessorT::AS>;
 
   using AccessorT::AccessorT;
-
-#if __cplusplus > 201402L
 
   template <typename T = DataT, int Dims = Dimensions, typename AllocatorT,
             memory_order Order, memory_scope Scope>
@@ -84,53 +78,41 @@ public:
                   scope_tag_t<Scope>, const property_list &PropertyList = {})
       : atomic_accessor(BufferRef, CommandGroupHandler, PropertyList) {}
 
-#endif
-
   // Override subscript operators and conversions to wrap in an atomic_ref
   template <int Dims = Dimensions>
-  operator typename detail::enable_if_t<Dims == 0, reference>() const {
+  operator typename std::enable_if_t<Dims == 0, reference>() const {
     const size_t LinearIndex = getLinearIndex(id<AdjustedDim>());
     return reference(getQualifiedPtr()[LinearIndex]);
   }
 
   template <int Dims = Dimensions>
-  typename detail::enable_if_t<(Dims > 0), reference>
+  typename std::enable_if_t<(Dims > 0), reference>
   operator[](id<Dimensions> Index) const {
     const size_t LinearIndex = getLinearIndex(Index);
     return reference(getQualifiedPtr()[LinearIndex]);
   }
 
   template <int Dims = Dimensions>
-  typename detail::enable_if_t<Dims == 1, reference>
+  typename std::enable_if_t<Dims == 1, reference>
   operator[](size_t Index) const {
     const size_t LinearIndex = getLinearIndex(id<AdjustedDim>(Index));
     return reference(getQualifiedPtr()[LinearIndex]);
   }
 };
 
-#if __cplusplus > 201402L
-
 template <typename DataT, int Dimensions, typename AllocatorT,
           memory_order Order, memory_scope Scope>
 atomic_accessor(buffer<DataT, Dimensions, AllocatorT>, order_tag_t<Order>,
                 scope_tag_t<Scope>, property_list = {})
-    -> atomic_accessor<DataT, Dimensions, Order, Scope, target::global_buffer,
+    -> atomic_accessor<DataT, Dimensions, Order, Scope, target::device,
                        access::placeholder::true_t>;
 
 template <typename DataT, int Dimensions, typename AllocatorT,
           memory_order Order, memory_scope Scope>
 atomic_accessor(buffer<DataT, Dimensions, AllocatorT>, handler,
                 order_tag_t<Order>, scope_tag_t<Scope>, property_list = {})
-    -> atomic_accessor<DataT, Dimensions, Order, Scope, target::global_buffer,
+    -> atomic_accessor<DataT, Dimensions, Order, Scope, target::device,
                        access::placeholder::false_t>;
-
-#endif
-
-} // namespace oneapi
-} // namespace ext
-
-namespace __SYCL2020_DEPRECATED("use 'ext::oneapi' instead") ONEAPI {
-  using namespace ext::oneapi;
-}
+} // namespace ext::oneapi
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)

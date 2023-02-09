@@ -51,7 +51,7 @@ protected:
   const std::map<options::ID, const StringRef> OptionsDefault;
 
   Tool *buildLinker() const override;
-  const StringRef getOptionDefault(options::ID OptID) const {
+  StringRef getOptionDefault(options::ID OptID) const {
     auto opt = OptionsDefault.find(OptID);
     assert(opt != OptionsDefault.end() && "No Default for Option");
     return opt->second;
@@ -67,7 +67,9 @@ public:
   bool useIntegratedAs() const override { return true; }
   bool isCrossCompiling() const override { return true; }
   bool isPICDefault() const override { return false; }
-  bool isPIEDefault() const override { return false; }
+  bool isPIEDefault(const llvm::opt::ArgList &Args) const override {
+    return false;
+  }
   bool isPICDefaultForced() const override { return false; }
   bool SupportsProfiling() const override { return false; }
 
@@ -111,9 +113,9 @@ protected:
 
   /// The struct type returned by getParsedTargetID.
   struct ParsedTargetIDType {
-    Optional<std::string> OptionalTargetID;
-    Optional<std::string> OptionalGPUArch;
-    Optional<llvm::StringMap<bool>> OptionalFeatures;
+    std::optional<std::string> OptionalTargetID;
+    std::optional<std::string> OptionalGPUArch;
+    std::optional<llvm::StringMap<bool>> OptionalFeatures;
   };
 
   /// Get target ID, GPU arch, and target ID features if the target ID is
@@ -140,7 +142,9 @@ public:
   // Returns a list of device library names shared by different languages
   llvm::SmallVector<std::string, 12>
   getCommonDeviceLibNames(const llvm::opt::ArgList &DriverArgs,
-                          const std::string &GPUArch) const;
+                          const std::string &GPUArch,
+                          const Action::OffloadKind DeviceOffloadingKind,
+                          bool isOpenMP = false) const;
 };
 
 } // end namespace toolchains

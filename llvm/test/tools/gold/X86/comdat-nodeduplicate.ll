@@ -35,8 +35,9 @@
 ; RUN: opt --module-summary %t/b.ll -o %t/b.bc
 ; RUN: opt --module-summary %t/c.ll -o %t/c.bc
 
+;; gold from binutils>=2.27 discards b.bc:__profc_foo even in the absence of --gc-sections.
 ; RUN: %gold -m elf_x86_64 -plugin %llvmshlibdir/LLVMgold%shlibext \
-; RUN:   -u foo %t/a.bc --start-lib %t/b.bc %t/c.bc --end-lib -o %t/abc
+; RUN:   -u foo %t/a.bc --start-lib %t/b.bc %t/c.bc --end-lib -o %t/abc --gc-sections
 ; RUN: llvm-readelf -x .data %t/abc | FileCheck %s --check-prefix=DATA
 
 ;--- a.ll
@@ -45,14 +46,14 @@ target triple = "x86_64-unknown-linux-gnu"
 
 $__profc_foo = comdat nodeduplicate
 @__profc_foo = private global i64 1, comdat, align 8
-@__profd_foo = private global i64* @__profc_foo, comdat($__profc_foo), align 8
+@__profd_foo = private global ptr @__profc_foo, comdat($__profc_foo), align 8
 
 declare void @b()
 
 define i64 @foo() {
-  %v = load i64, i64* @__profc_foo
+  %v = load i64, ptr @__profc_foo
   %inc = add i64 1, %v
-  store i64 %inc, i64* @__profc_foo
+  store i64 %inc, ptr @__profc_foo
   ret i64 %inc
 }
 
@@ -67,12 +68,12 @@ target triple = "x86_64-unknown-linux-gnu"
 
 $__profc_foo = comdat nodeduplicate
 @__profc_foo = weak hidden global i64 2, comdat, align 8
-@__profd_foo = private global i64* @__profc_foo, comdat($__profc_foo)
+@__profd_foo = private global ptr @__profc_foo, comdat($__profc_foo)
 
 define weak i64 @foo() {
-  %v = load i64, i64* @__profc_foo
+  %v = load i64, ptr @__profc_foo
   %inc = add i64 1, %v
-  store i64 %inc, i64* @__profc_foo
+  store i64 %inc, ptr @__profc_foo
   ret i64 %inc
 }
 
@@ -86,12 +87,12 @@ target triple = "x86_64-unknown-linux-gnu"
 
 $__profc_foo = comdat nodeduplicate
 @__profc_foo = weak hidden global i64 3, comdat, align 8
-@__profd_foo = private global i64* @__profc_foo, comdat($__profc_foo)
+@__profd_foo = private global ptr @__profc_foo, comdat($__profc_foo)
 
 define weak i64 @foo() {
-  %v = load i64, i64* @__profc_foo
+  %v = load i64, ptr @__profc_foo
   %inc = add i64 1, %v
-  store i64 %inc, i64* @__profc_foo
+  store i64 %inc, ptr @__profc_foo
   ret i64 %inc
 }
 

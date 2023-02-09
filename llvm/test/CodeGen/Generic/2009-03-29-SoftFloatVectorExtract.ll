@@ -1,3 +1,4 @@
+; XFAIL: target={{.*}}-aix{{.*}}
 ; RUN: llc < %s
 ; PR3899
 

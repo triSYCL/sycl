@@ -83,8 +83,7 @@ AsanThread *AsanThread::Create(thread_callback_t start_routine, void *arg,
   thread->start_routine_ = start_routine;
   thread->arg_ = arg;
   AsanThreadContext::CreateThreadContextArgs args = {thread, stack};
-  asanThreadRegistry().CreateThread(*reinterpret_cast<uptr *>(thread), detached,
-                                    parent_tid, &args);
+  asanThreadRegistry().CreateThread(0, detached, parent_tid, &args);
 
   return thread;
 }
@@ -254,7 +253,7 @@ void AsanThread::Init(const InitOptions *options) {
   int local = 0;
   VReport(1, "T%d: stack [%p,%p) size 0x%zx; local=%p\n", tid(),
           (void *)stack_bottom_, (void *)stack_top_, stack_top_ - stack_bottom_,
-          &local);
+          (void *)&local);
 }
 
 // Fuchsia doesn't use ThreadStart.
@@ -306,7 +305,7 @@ void AsanThread::SetThreadStackAndTls(const InitOptions *options) {
   uptr stack_size = 0;
   GetThreadStackAndTls(tid() == kMainTid, &stack_bottom_, &stack_size,
                        &tls_begin_, &tls_size);
-  stack_top_ = RoundDownTo(stack_bottom_ + stack_size, SHADOW_GRANULARITY);
+  stack_top_ = RoundDownTo(stack_bottom_ + stack_size, ASAN_SHADOW_GRANULARITY);
   tls_end_ = tls_begin_ + tls_size;
   dtls_ = DTLS_Get();
 
@@ -322,11 +321,9 @@ void AsanThread::ClearShadowForThreadStackAndTLS() {
   if (stack_top_ != stack_bottom_)
     PoisonShadow(stack_bottom_, stack_top_ - stack_bottom_, 0);
   if (tls_begin_ != tls_end_) {
-    uptr tls_begin_aligned = RoundDownTo(tls_begin_, SHADOW_GRANULARITY);
-    uptr tls_end_aligned = RoundUpTo(tls_end_, SHADOW_GRANULARITY);
-    FastPoisonShadowPartialRightRedzone(tls_begin_aligned,
-                                        tls_end_ - tls_begin_aligned,
-                                        tls_end_aligned - tls_end_, 0);
+    uptr tls_begin_aligned = RoundDownTo(tls_begin_, ASAN_SHADOW_GRANULARITY);
+    uptr tls_end_aligned = RoundUpTo(tls_end_, ASAN_SHADOW_GRANULARITY);
+    FastPoisonShadow(tls_begin_aligned, tls_end_aligned - tls_begin_aligned, 0);
   }
 }
 
@@ -347,27 +344,27 @@ bool AsanThread::GetStackFrameAccessByAddr(uptr addr,
     return true;
   }
   uptr aligned_addr = RoundDownTo(addr, SANITIZER_WORDSIZE / 8);  // align addr.
-  uptr mem_ptr = RoundDownTo(aligned_addr, SHADOW_GRANULARITY);
+  uptr mem_ptr = RoundDownTo(aligned_addr, ASAN_SHADOW_GRANULARITY);
   u8 *shadow_ptr = (u8*)MemToShadow(aligned_addr);
   u8 *shadow_bottom = (u8*)MemToShadow(bottom);
 
   while (shadow_ptr >= shadow_bottom &&
          *shadow_ptr != kAsanStackLeftRedzoneMagic) {
     shadow_ptr--;
-    mem_ptr -= SHADOW_GRANULARITY;
+    mem_ptr -= ASAN_SHADOW_GRANULARITY;
   }
 
   while (shadow_ptr >= shadow_bottom &&
          *shadow_ptr == kAsanStackLeftRedzoneMagic) {
     shadow_ptr--;
-    mem_ptr -= SHADOW_GRANULARITY;
+    mem_ptr -= ASAN_SHADOW_GRANULARITY;
   }
 
   if (shadow_ptr < shadow_bottom) {
     return false;
   }
 
-  uptr* ptr = (uptr*)(mem_ptr + SHADOW_GRANULARITY);
+  uptr *ptr = (uptr *)(mem_ptr + ASAN_SHADOW_GRANULARITY);
   CHECK(ptr[0] == kCurrentStackFrameMagic);
   access->offset = addr - (uptr)ptr;
   access->frame_pc = ptr[2];
@@ -443,7 +440,7 @@ AsanThread *GetCurrentThread() {
 
 void SetCurrentThread(AsanThread *t) {
   CHECK(t->context());
-  VReport(2, "SetCurrentThread: %p for thread %p\n", t->context(),
+  VReport(2, "SetCurrentThread: %p for thread %p\n", (void *)t->context(),
           (void *)GetThreadSelf());
   // Make sure we do not reset the current AsanThread.
   CHECK_EQ(0, AsanTSDGet());
@@ -481,6 +478,17 @@ __asan::AsanThread *GetAsanThreadByOsIDLocked(tid_t os_id) {
 
 // --- Implementation of LSan-specific functions --- {{{1
 namespace __lsan {
+void LockThreadRegistry() { __asan::asanThreadRegistry().Lock(); }
+
+void UnlockThreadRegistry() { __asan::asanThreadRegistry().Unlock(); }
+
+ThreadRegistry *GetThreadRegistryLocked() {
+  __asan::asanThreadRegistry().CheckLocked();
+  return &__asan::asanThreadRegistry();
+}
+
+void EnsureMainThreadIDIsCorrect() { __asan::EnsureMainThreadIDIsCorrect(); }
+
 bool GetThreadRangesLocked(tid_t os_id, uptr *stack_begin, uptr *stack_end,
                            uptr *tls_begin, uptr *tls_end, uptr *cache_begin,
                            uptr *cache_end, DTLS **dtls) {
@@ -510,22 +518,6 @@ void ForEachExtraStackRange(tid_t os_id, RangeIteratorCallback callback,
   fake_stack->ForEachFakeFrame(callback, arg);
 }
 
-void LockThreadRegistry() {
-  __asan::asanThreadRegistry().Lock();
-}
-
-void UnlockThreadRegistry() {
-  __asan::asanThreadRegistry().Unlock();
-}
-
-ThreadRegistry *GetThreadRegistryLocked() {
-  __asan::asanThreadRegistry().CheckLocked();
-  return &__asan::asanThreadRegistry();
-}
-
-void EnsureMainThreadIDIsCorrect() {
-  __asan::EnsureMainThreadIDIsCorrect();
-}
 } // namespace __lsan
 
 // ---------------------- Interface ---------------- {{{1

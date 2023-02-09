@@ -50,7 +50,6 @@ cl::opt<UncheckedLdStMode> ClUncheckedLdSt(
 
 static cl::opt<bool>
     ClFirstSlot("stack-tagging-first-slot-opt", cl::Hidden, cl::init(true),
-                cl::ZeroOrMore,
                 cl::desc("Apply first slot optimization for stack tagging "
                          "(eliminate ADDG Rt, Rn, 0, 0)."));
 
@@ -176,27 +175,26 @@ bool AArch64StackTaggingPreRA::mayUseUncheckedLoadStore() {
 }
 
 void AArch64StackTaggingPreRA::uncheckUsesOf(unsigned TaggedReg, int FI) {
-  for (auto UI = MRI->use_instr_begin(TaggedReg), E = MRI->use_instr_end();
-       UI != E;) {
-    MachineInstr *UseI = &*(UI++);
-    if (isUncheckedLoadOrStoreOpcode(UseI->getOpcode())) {
+  for (MachineInstr &UseI :
+       llvm::make_early_inc_range(MRI->use_instructions(TaggedReg))) {
+    if (isUncheckedLoadOrStoreOpcode(UseI.getOpcode())) {
       // FI operand is always the one before the immediate offset.
-      unsigned OpIdx = TII->getLoadStoreImmIdx(UseI->getOpcode()) - 1;
-      if (UseI->getOperand(OpIdx).isReg() &&
-          UseI->getOperand(OpIdx).getReg() == TaggedReg) {
-        UseI->getOperand(OpIdx).ChangeToFrameIndex(FI);
-        UseI->getOperand(OpIdx).setTargetFlags(AArch64II::MO_TAGGED);
+      unsigned OpIdx = TII->getLoadStoreImmIdx(UseI.getOpcode()) - 1;
+      if (UseI.getOperand(OpIdx).isReg() &&
+          UseI.getOperand(OpIdx).getReg() == TaggedReg) {
+        UseI.getOperand(OpIdx).ChangeToFrameIndex(FI);
+        UseI.getOperand(OpIdx).setTargetFlags(AArch64II::MO_TAGGED);
       }
-    } else if (UseI->isCopy() &&
-               Register::isVirtualRegister(UseI->getOperand(0).getReg())) {
-      uncheckUsesOf(UseI->getOperand(0).getReg(), FI);
+    } else if (UseI.isCopy() &&
+               Register::isVirtualRegister(UseI.getOperand(0).getReg())) {
+      uncheckUsesOf(UseI.getOperand(0).getReg(), FI);
     }
   }
 }
 
 void AArch64StackTaggingPreRA::uncheckLoadsAndStores() {
   for (auto *I : ReTags) {
-    unsigned TaggedReg = I->getOperand(0).getReg();
+    Register TaggedReg = I->getOperand(0).getReg();
     int FI = I->getOperand(1).getIndex();
     uncheckUsesOf(TaggedReg, FI);
   }
@@ -257,7 +255,7 @@ Optional<int> AArch64StackTaggingPreRA::findFirstSlotCandidate() {
   // - Any other instruction may benefit from being pinned to offset 0.
   LLVM_DEBUG(dbgs() << "AArch64StackTaggingPreRA::findFirstSlotCandidate\n");
   if (!ClFirstSlot)
-    return None;
+    return std::nullopt;
 
   DenseMap<SlotWithTag, int> RetagScore;
   SlotWithTag MaxScoreST{-1, -1};
@@ -276,8 +274,7 @@ Optional<int> AArch64StackTaggingPreRA::findFirstSlotCandidate() {
     WorkList.push_back(RetagReg);
 
     while (!WorkList.empty()) {
-      Register UseReg = WorkList.back();
-      WorkList.pop_back();
+      Register UseReg = WorkList.pop_back_val();
       for (auto &UseI : MRI->use_instructions(UseReg)) {
         unsigned Opcode = UseI.getOpcode();
         if (Opcode == AArch64::STGOffset || Opcode == AArch64::ST2GOffset ||
@@ -308,7 +305,7 @@ Optional<int> AArch64StackTaggingPreRA::findFirstSlotCandidate() {
   }
 
   if (MaxScoreST.FI < 0)
-    return None;
+    return std::nullopt;
 
   // If FI's tag is already 0, we are done.
   if (MaxScoreST.Tag == 0)

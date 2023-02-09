@@ -2,9 +2,6 @@
 Test SBProcess APIs, including ReadMemory(), WriteMemory(), and others.
 """
 
-from __future__ import print_function
-
-
 import lldb
 from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
@@ -12,8 +9,6 @@ from lldbsuite.test.lldbutil import get_stopped_thread, state_type_to_str
 
 
 class ProcessAPITestCase(TestBase):
-
-    mydir = TestBase.compute_mydir(__file__)
 
     def setUp(self):
         # Call super's setUp().
@@ -23,7 +18,6 @@ class ProcessAPITestCase(TestBase):
             "main.cpp",
             "// Set break point at this line and check variable 'my_char'.")
 
-    @skipIfReproducer # SBProcess::ReadMemory is not instrumented.
     def test_read_memory(self):
         """Test Python SBProcess.ReadMemory() API."""
         self.build()
@@ -121,7 +115,6 @@ class ProcessAPITestCase(TestBase):
             self.fail(
                 "Result from SBProcess.ReadUnsignedFromMemory() does not match our expected output")
 
-    @skipIfReproducer # SBProcess::WriteMemory is not instrumented.
     def test_write_memory(self):
         """Test Python SBProcess.WriteMemory() API."""
         self.build()
@@ -180,7 +173,6 @@ class ProcessAPITestCase(TestBase):
             exe=False,
             startstr=b'a')
 
-    @skipIfReproducer # SBProcess::WriteMemory is not instrumented.
     def test_access_my_int(self):
         """Test access 'my_int' using Python SBProcess.GetByteOrder() and other APIs."""
         self.build()
@@ -323,6 +315,7 @@ class ProcessAPITestCase(TestBase):
             print("Number of supported hardware watchpoints: %d" % num)
 
     @no_debug_info_test
+    @skipIfRemote
     def test_get_process_info(self):
         """Test SBProcess::GetProcessInfo() API with a locally launched process."""
         self.build()

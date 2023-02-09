@@ -34,12 +34,7 @@ static bool isValidRegUseOf(const MachineOperand &MO, MCRegister PhysReg,
                             const TargetRegisterInfo *TRI) {
   if (!isValidRegUse(MO))
     return false;
-  if (MO.getReg() == PhysReg)
-    return true;
-  for (MCRegAliasIterator R(PhysReg, TRI, false); R.isValid(); ++R)
-    if (MO.getReg() == *R)
-      return true;
-  return false;
+  return TRI->regsOverlap(MO.getReg(), PhysReg);
 }
 
 static bool isValidRegDef(const MachineOperand &MO) {
@@ -50,12 +45,7 @@ static bool isValidRegDefOf(const MachineOperand &MO, MCRegister PhysReg,
                             const TargetRegisterInfo *TRI) {
   if (!isValidRegDef(MO))
     return false;
-  if (MO.getReg() == PhysReg)
-    return true;
-  for (MCRegAliasIterator R(PhysReg, TRI, false); R.isValid(); ++R)
-    if (MO.getReg() == *R)
-      return true;
-  return false;
+  return TRI->regsOverlap(MO.getReg(), PhysReg);
 }
 
 void ReachingDefAnalysis::enterBasicBlock(MachineBasicBlock *MBB) {
@@ -397,8 +387,7 @@ void ReachingDefAnalysis::getGlobalUses(MachineInstr *MI, MCRegister PhysReg,
     SmallVector<MachineBasicBlock *, 4> ToVisit(MBB->successors());
     SmallPtrSet<MachineBasicBlock*, 4>Visited;
     while (!ToVisit.empty()) {
-      MachineBasicBlock *MBB = ToVisit.back();
-      ToVisit.pop_back();
+      MachineBasicBlock *MBB = ToVisit.pop_back_val();
       if (Visited.count(MBB) || !MBB->isLiveIn(PhysReg))
         continue;
       if (getLiveInUses(MBB, PhysReg, Uses))
@@ -646,7 +635,7 @@ ReachingDefAnalysis::isSafeToRemove(MachineInstr *MI, InstSet &Visited,
     SmallPtrSet<MachineInstr*, 4> Uses;
     getGlobalUses(MI, MO.getReg(), Uses);
 
-    for (auto I : Uses) {
+    for (auto *I : Uses) {
       if (Ignore.count(I) || ToRemove.count(I))
         continue;
       if (!isSafeToRemove(I, Visited, ToRemove, Ignore))

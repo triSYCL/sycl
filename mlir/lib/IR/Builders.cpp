@@ -19,10 +19,6 @@
 
 using namespace mlir;
 
-Identifier Builder::getIdentifier(const Twine &str) {
-  return Identifier::get(str, context);
-}
-
 //===----------------------------------------------------------------------===//
 // Locations.
 //===----------------------------------------------------------------------===//
@@ -36,6 +32,14 @@ Location Builder::getFusedLoc(ArrayRef<Location> locs, Attribute metadata) {
 //===----------------------------------------------------------------------===//
 // Types.
 //===----------------------------------------------------------------------===//
+
+FloatType Builder::getFloat8E5M2Type() {
+  return FloatType::getFloat8E5M2(context);
+}
+
+FloatType Builder::getFloat8E4M3FNType() {
+  return FloatType::getFloat8E4M3FN(context);
+}
 
 FloatType Builder::getBF16Type() { return FloatType::getBF16(context); }
 
@@ -53,7 +57,13 @@ IndexType Builder::getIndexType() { return IndexType::get(context); }
 
 IntegerType Builder::getI1Type() { return IntegerType::get(context, 1); }
 
+IntegerType Builder::getI2Type() { return IntegerType::get(context, 2); }
+
+IntegerType Builder::getI4Type() { return IntegerType::get(context, 4); }
+
 IntegerType Builder::getI8Type() { return IntegerType::get(context, 8); }
+
+IntegerType Builder::getI16Type() { return IntegerType::get(context, 16); }
 
 IntegerType Builder::getI32Type() { return IntegerType::get(context, 32); }
 
@@ -83,7 +93,7 @@ NoneType Builder::getNoneType() { return NoneType::get(context); }
 //===----------------------------------------------------------------------===//
 
 NamedAttribute Builder::getNamedAttr(StringRef name, Attribute val) {
-  return NamedAttribute(getIdentifier(name), val);
+  return NamedAttribute(getStringAttr(name), val);
 }
 
 UnitAttr Builder::getUnitAttr() { return UnitAttr::get(context); }
@@ -126,6 +136,34 @@ DenseIntElementsAttr Builder::getIndexVectorAttr(ArrayRef<int64_t> values) {
   return DenseIntElementsAttr::get(
       VectorType::get(static_cast<int64_t>(values.size()), getIndexType()),
       values);
+}
+
+DenseBoolArrayAttr Builder::getDenseBoolArrayAttr(ArrayRef<bool> values) {
+  return DenseBoolArrayAttr::get(context, values);
+}
+
+DenseI8ArrayAttr Builder::getDenseI8ArrayAttr(ArrayRef<int8_t> values) {
+  return DenseI8ArrayAttr::get(context, values);
+}
+
+DenseI16ArrayAttr Builder::getDenseI16ArrayAttr(ArrayRef<int16_t> values) {
+  return DenseI16ArrayAttr::get(context, values);
+}
+
+DenseI32ArrayAttr Builder::getDenseI32ArrayAttr(ArrayRef<int32_t> values) {
+  return DenseI32ArrayAttr::get(context, values);
+}
+
+DenseI64ArrayAttr Builder::getDenseI64ArrayAttr(ArrayRef<int64_t> values) {
+  return DenseI64ArrayAttr::get(context, values);
+}
+
+DenseF32ArrayAttr Builder::getDenseF32ArrayAttr(ArrayRef<float> values) {
+  return DenseF32ArrayAttr::get(context, values);
+}
+
+DenseF64ArrayAttr Builder::getDenseF64ArrayAttr(ArrayRef<double> values) {
+  return DenseF64ArrayAttr::get(context, values);
 }
 
 DenseIntElementsAttr Builder::getI32TensorAttr(ArrayRef<int32_t> values) {
@@ -208,21 +246,6 @@ StringAttr Builder::getStringAttr(const Twine &bytes) {
 
 ArrayAttr Builder::getArrayAttr(ArrayRef<Attribute> value) {
   return ArrayAttr::get(context, value);
-}
-
-FlatSymbolRefAttr Builder::getSymbolRefAttr(Operation *value) {
-  auto symName =
-      value->getAttrOfType<StringAttr>(SymbolTable::getSymbolAttrName());
-  assert(symName && "value does not have a valid symbol name");
-  return getSymbolRefAttr(symName.getValue());
-}
-FlatSymbolRefAttr Builder::getSymbolRefAttr(StringRef value) {
-  return SymbolRefAttr::get(getContext(), value);
-}
-SymbolRefAttr
-Builder::getSymbolRefAttr(StringRef value,
-                          ArrayRef<FlatSymbolRefAttr> nestedReferences) {
-  return SymbolRefAttr::get(getContext(), value, nestedReferences);
 }
 
 ArrayAttr Builder::getBoolArrayAttr(ArrayRef<bool> values) {
@@ -357,7 +380,7 @@ AffineMap Builder::getShiftedAffineMap(AffineMap map, int64_t shift) {
 // OpBuilder
 //===----------------------------------------------------------------------===//
 
-OpBuilder::Listener::~Listener() {}
+OpBuilder::Listener::~Listener() = default;
 
 /// Insert the given operation at the current insertion point and return it.
 Operation *OpBuilder::insert(Operation *op) {
@@ -369,12 +392,10 @@ Operation *OpBuilder::insert(Operation *op) {
   return op;
 }
 
-/// Add new block with 'argTypes' arguments and set the insertion point to the
-/// end of it. The block is inserted at the provided insertion point of
-/// 'parent'.
 Block *OpBuilder::createBlock(Region *parent, Region::iterator insertPt,
                               TypeRange argTypes, ArrayRef<Location> locs) {
   assert(parent && "expected valid parent region");
+  assert(argTypes.size() == locs.size() && "argument location mismatch");
   if (insertPt == Region::iterator())
     insertPt = parent->end();
 
@@ -398,8 +419,19 @@ Block *OpBuilder::createBlock(Block *insertBefore, TypeRange argTypes,
 }
 
 /// Create an operation given the fields represented as an OperationState.
-Operation *OpBuilder::createOperation(const OperationState &state) {
+Operation *OpBuilder::create(const OperationState &state) {
   return insert(Operation::create(state));
+}
+
+/// Creates an operation with the given fields.
+Operation *OpBuilder::create(Location loc, StringAttr opName,
+                             ValueRange operands, TypeRange types,
+                             ArrayRef<NamedAttribute> attributes,
+                             BlockRange successors,
+                             MutableArrayRef<std::unique_ptr<Region>> regions) {
+  OperationState state(loc, opName, operands, types, attributes, successors,
+                       regions);
+  return create(state);
 }
 
 /// Attempts to fold the given operation and places new results within
@@ -407,9 +439,11 @@ Operation *OpBuilder::createOperation(const OperationState &state) {
 /// Note: This function does not erase the operation on a successful fold.
 LogicalResult OpBuilder::tryFold(Operation *op,
                                  SmallVectorImpl<Value> &results) {
-  results.reserve(op->getNumResults());
+  ResultRange opResults = op->getResults();
+
+  results.reserve(opResults.size());
   auto cleanupFailure = [&] {
-    results.assign(op->result_begin(), op->result_end());
+    results.assign(opResults.begin(), opResults.end());
     return failure();
   };
 
@@ -420,7 +454,7 @@ LogicalResult OpBuilder::tryFold(Operation *op,
   // Check to see if any operands to the operation is constant and whether
   // the operation knows how to constant fold itself.
   SmallVector<Attribute, 4> constOperands(op->getNumOperands());
-  for (unsigned i = 0, e = op->getNumOperands(); i != e; ++i)
+  for (unsigned i = 0, e = constOperands.size(); i != e; ++i)
     matchPattern(op->getOperand(i), m_Constant(&constOperands[i]));
 
   // Try to fold the operation.
@@ -434,9 +468,14 @@ LogicalResult OpBuilder::tryFold(Operation *op,
 
   // Populate the results with the folded results.
   Dialect *dialect = op->getDialect();
-  for (auto &it : llvm::enumerate(foldResults)) {
+  for (auto it : llvm::zip(foldResults, opResults.getTypes())) {
+    Type expectedType = std::get<1>(it);
+
     // Normal values get pushed back directly.
-    if (auto value = it.value().dyn_cast<Value>()) {
+    if (auto value = std::get<0>(it).dyn_cast<Value>()) {
+      if (value.getType() != expectedType)
+        return cleanupFailure();
+
       results.push_back(value);
       continue;
     }
@@ -446,9 +485,9 @@ LogicalResult OpBuilder::tryFold(Operation *op,
       return cleanupFailure();
 
     // Ask the dialect to materialize a constant operation for this value.
-    Attribute attr = it.value().get<Attribute>();
-    auto *constOp = dialect->materializeConstant(
-        cstBuilder, attr, op->getResult(it.index()).getType(), op->getLoc());
+    Attribute attr = std::get<0>(it).get<Attribute>();
+    auto *constOp = dialect->materializeConstant(cstBuilder, attr, expectedType,
+                                                 op->getLoc());
     if (!constOp) {
       // Erase any generated constants.
       for (Operation *cst : generatedConstants)

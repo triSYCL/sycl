@@ -51,7 +51,7 @@ void ShapeAdaptor::getDims(SmallVectorImpl<int64_t> &res) const {
     auto dattr = attr.cast<DenseIntElementsAttr>();
     res.clear();
     res.reserve(dattr.size());
-    for (auto it : dattr.getIntValues())
+    for (auto it : dattr.getValues<APInt>())
       res.push_back(it.getSExtValue());
   } else {
     auto vals = val.get<ShapedTypeComponents *>()->getDims();
@@ -71,7 +71,7 @@ int64_t ShapeAdaptor::getDimSize(int index) const {
     return t.cast<ShapedType>().getDimSize(index);
   if (auto attr = val.dyn_cast<Attribute>())
     return attr.cast<DenseIntElementsAttr>()
-        .getValue<APInt>({static_cast<uint64_t>(index)})
+        .getValues<APInt>()[index]
         .getSExtValue();
   auto *stc = val.get<ShapedTypeComponents *>();
   return stc->getDims()[index];
@@ -94,16 +94,13 @@ bool ShapeAdaptor::hasStaticShape() const {
     return t.cast<ShapedType>().hasStaticShape();
   if (auto attr = val.dyn_cast<Attribute>()) {
     auto dattr = attr.cast<DenseIntElementsAttr>();
-    for (auto index : dattr.getIntValues())
+    for (auto index : dattr.getValues<APInt>())
       if (ShapedType::isDynamic(index.getSExtValue()))
         return false;
     return true;
   }
   auto *stc = val.get<ShapedTypeComponents *>();
-  for (int64_t dim : stc->getDims())
-    if (ShapedType::isDynamic(dim))
-      return false;
-  return true;
+  return llvm::none_of(stc->getDims(), ShapedType::isDynamic);
 }
 
 int64_t ShapeAdaptor::getNumElements() const {
@@ -115,7 +112,7 @@ int64_t ShapeAdaptor::getNumElements() const {
   if (auto attr = val.dyn_cast<Attribute>()) {
     auto dattr = attr.cast<DenseIntElementsAttr>();
     int64_t num = 1;
-    for (auto index : dattr.getIntValues()) {
+    for (auto index : dattr.getValues<APInt>()) {
       num *= index.getZExtValue();
       assert(num >= 0 && "integer overflow in element count computation");
     }
@@ -189,8 +186,10 @@ LogicalResult mlir::detail::inferReturnTensorTypes(
   if (failed(componentTypeFn(context, location, operands, attributes, regions,
                              retComponents)))
     return failure();
-  for (auto shapeAndType : retComponents) {
+  for (const auto &shapeAndType : retComponents) {
     assert(shapeAndType.getAttribute() == nullptr && "attribute not supported");
+    assert(shapeAndType.getElementType() &&
+           "element type required to construct tensor");
     if (shapeAndType.hasRank())
       inferredReturnTypes.push_back(RankedTensorType::get(
           shapeAndType.getDims(), shapeAndType.getElementType()));
@@ -202,17 +201,9 @@ LogicalResult mlir::detail::inferReturnTensorTypes(
 }
 
 LogicalResult mlir::detail::verifyInferredResultTypes(Operation *op) {
-  SmallVector<Type, 4> inferredReturnTypes;
+  SmallVector<Type, 4> inferredReturnTypes(op->getResultTypes());
   auto retTypeFn = cast<InferTypeOpInterface>(op);
-  if (failed(retTypeFn.inferReturnTypes(
-          op->getContext(), op->getLoc(), op->getOperands(),
-          op->getAttrDictionary(), op->getRegions(), inferredReturnTypes)))
-    return failure();
-  if (!retTypeFn.isCompatibleReturnTypes(inferredReturnTypes,
-                                         op->getResultTypes()))
-    return op->emitOpError("inferred type(s) ")
-           << inferredReturnTypes
-           << " are incompatible with return type(s) of operation "
-           << op->getResultTypes();
-  return success();
+  return retTypeFn.refineReturnTypes(op->getContext(), op->getLoc(),
+                                     op->getOperands(), op->getAttrDictionary(),
+                                     op->getRegions(), inferredReturnTypes);
 }

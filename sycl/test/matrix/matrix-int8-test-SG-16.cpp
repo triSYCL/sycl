@@ -1,7 +1,6 @@
-// RUN: %clangxx -march=sapphirerapids -fsycl -O2 %s -o %t.out
-#include <CL/sycl.hpp>
-#if (SYCL_EXT_ONEAPI_MATRIX == 2)
+// RUN: %clangxx -fsycl -O2 %s -o %t.out
 #include <iostream>
+#include <sycl/sycl.hpp>
 
 using namespace sycl;
 using namespace sycl::ext::oneapi::experimental::matrix;
@@ -75,7 +74,7 @@ void matrix_multiply(big_matrix<T1, NUM_ROWS_C, NUM_COLS_C> &C, big_matrix<T2, N
            for (int k = 0; k < K / TK; k += 1) {
              joint_matrix_load(
                  sg, sub_a, accA.get_pointer() + (sg_startx * TM) * K + k * TK,
-                 K, matrix_layout::packed_a);
+                 K, matrix_layout::row_major);
              // Assuming B data is already in VNNI format.
              joint_matrix_load(sg, sub_b,
                                accB.get_pointer() + (k * TK / 4) * (N * 4) +
@@ -165,4 +164,3 @@ int main() {
     std::cout << "\n";
   }
 }
-#endif // (SYCL_EXT_ONEAPI_MATRIX == 2)

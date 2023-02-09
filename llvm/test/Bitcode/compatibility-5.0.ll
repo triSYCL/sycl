@@ -256,19 +256,19 @@ declare void @g.f1()
 
 ; IFunc -- Linkage
 @ifunc.external = external ifunc void (), i8* ()* @ifunc_resolver
-; CHECK: @ifunc.external = ifunc void (), i8* ()* @ifunc_resolver
+; CHECK: @ifunc.external = ifunc void (), bitcast (i8* ()* @ifunc_resolver to void ()* ()*)
 @ifunc.private = private ifunc void (), i8* ()* @ifunc_resolver
-; CHECK: @ifunc.private = private ifunc void (), i8* ()* @ifunc_resolver
+; CHECK: @ifunc.private = private ifunc void (), bitcast (i8* ()* @ifunc_resolver to void ()* ()*)
 @ifunc.internal = internal ifunc void (), i8* ()* @ifunc_resolver
-; CHECK: @ifunc.internal = internal ifunc void (), i8* ()* @ifunc_resolver
+; CHECK: @ifunc.internal = internal ifunc void (), bitcast (i8* ()* @ifunc_resolver to void ()* ()*)
 
 ; IFunc -- Visibility
 @ifunc.default = default ifunc void (), i8* ()* @ifunc_resolver
-; CHECK: @ifunc.default = ifunc void (), i8* ()* @ifunc_resolver
+; CHECK: @ifunc.default = ifunc void (), bitcast (i8* ()* @ifunc_resolver to void ()* ()*)
 @ifunc.hidden = hidden ifunc void (), i8* ()* @ifunc_resolver
-; CHECK: @ifunc.hidden = hidden ifunc void (), i8* ()* @ifunc_resolver
+; CHECK: @ifunc.hidden = hidden ifunc void (), bitcast (i8* ()* @ifunc_resolver to void ()* ()*)
 @ifunc.protected = protected ifunc void (), i8* ()* @ifunc_resolver
-; CHECK: @ifunc.protected = protected ifunc void (), i8* ()* @ifunc_resolver
+; CHECK: @ifunc.protected = protected ifunc void (), bitcast (i8* ()* @ifunc_resolver to void ()* ()*)
 
 define i8* @ifunc_resolver() {
 entry:
@@ -1649,8 +1649,8 @@ define i8** @constexpr() {
 ; CHECK: attributes #16 = { nounwind }
 ; CHECK: attributes #17 = { noinline optnone }
 ; CHECK: attributes #18 = { optsize }
-; CHECK: attributes #19 = { readnone }
-; CHECK: attributes #20 = { readonly }
+; CHECK: attributes #19 = { memory(none) }
+; CHECK: attributes #20 = { memory(read) }
 ; CHECK: attributes #21 = { returns_twice }
 ; CHECK: attributes #22 = { safestack }
 ; CHECK: attributes #23 = { sanitize_address }
@@ -1663,16 +1663,16 @@ define i8** @constexpr() {
 ; CHECK: attributes #30 = { uwtable }
 ; CHECK: attributes #31 = { "cpu"="cortex-a8" }
 ; CHECK: attributes #32 = { norecurse }
-; CHECK: attributes #33 = { inaccessiblememonly }
-; CHECK: attributes #34 = { inaccessiblemem_or_argmemonly }
-; CHECK: attributes #35 = { nofree nosync nounwind readnone willreturn }
-; CHECK: attributes #36 = { nofree nosync  nounwind willreturn }
-; CHECK: attributes #37 = { argmemonly nounwind readonly }
-; CHECK: attributes #38 = { argmemonly nounwind }
-; CHECK: attributes #39 = { nounwind readonly }
-; CHECK: attributes #40 = { writeonly }
+; CHECK: attributes #33 = { memory(inaccessiblemem: readwrite) }
+; CHECK: attributes #34 = { memory(argmem: readwrite, inaccessiblemem: readwrite) }
+; CHECK: attributes #35 = { nocallback nofree nosync nounwind willreturn memory(none) }
+; CHECK: attributes #36 = { nocallback nofree nosync nounwind willreturn }
+; CHECK: attributes #37 = { nounwind memory(argmem: read) }
+; CHECK: attributes #38 = { nounwind memory(argmem: readwrite) }
+; CHECK: attributes #39 = { nounwind memory(read) }
+; CHECK: attributes #40 = { memory(write) }
 ; CHECK: attributes #41 = { speculatable }
-; CHECK: attributes #42 = { inaccessiblemem_or_argmemonly nofree nosync nounwind willreturn }
+; CHECK: attributes #42 = { nocallback nofree nosync nounwind willreturn memory(argmem: readwrite, inaccessiblemem: readwrite) }
 ; CHECK: attributes #43 = { builtin }
 
 ;; Metadata

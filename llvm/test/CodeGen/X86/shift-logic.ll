@@ -4,10 +4,10 @@
 define i8 @shl_and(i8 %x, i8 %y) nounwind {
 ; CHECK-LABEL: shl_and:
 ; CHECK:       # %bb.0:
-; CHECK-NEXT:    movl %edi, %eax
-; CHECK-NEXT:    shlb $2, %sil
-; CHECK-NEXT:    shlb $5, %al
-; CHECK-NEXT:    andb %sil, %al
+; CHECK-NEXT:    # kill: def $esi killed $esi def $rsi
+; CHECK-NEXT:    leal (,%rsi,4), %eax
+; CHECK-NEXT:    shlb $5, %dil
+; CHECK-NEXT:    andb %dil, %al
 ; CHECK-NEXT:    # kill: def $al killed $al killed $eax
 ; CHECK-NEXT:    retq
   %sh0 = shl i8 %x, 3
@@ -172,7 +172,7 @@ define i32 @ashr_overshift_xor(i32 %x, i32 %y) nounwind {
   ret i32 %sh1
 }
 
-define i32 @lshr_or_extra_use(i32 %x, i32 %y, i32* %p) nounwind {
+define i32 @lshr_or_extra_use(i32 %x, i32 %y, ptr %p) nounwind {
 ; CHECK-LABEL: lshr_or_extra_use:
 ; CHECK:       # %bb.0:
 ; CHECK-NEXT:    movl %edi, %eax
@@ -183,7 +183,7 @@ define i32 @lshr_or_extra_use(i32 %x, i32 %y, i32* %p) nounwind {
 ; CHECK-NEXT:    retq
   %sh0 = lshr i32 %x, 5
   %r = or i32 %sh0, %y
-  store i32 %r, i32* %p
+  store i32 %r, ptr %p
   %sh1 = lshr i32 %r, 7
   ret i32 %sh1
 }

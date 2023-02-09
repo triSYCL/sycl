@@ -12,8 +12,9 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/BinaryFormat/Dwarf.h"
+#include "llvm/DebugInfo/DIContext.h"
+#include "llvm/DebugInfo/DWARF/DWARFDataExtractor.h"
 #include "llvm/MC/MCRegisterInfo.h"
-#include "llvm/Support/Casting.h"
 #include "llvm/Support/Compiler.h"
 #include "llvm/Support/DataExtractor.h"
 #include "llvm/Support/Errc.h"
@@ -24,6 +25,7 @@
 #include <cassert>
 #include <cinttypes>
 #include <cstdint>
+#include <optional>
 
 using namespace llvm;
 using namespace dwarf;
@@ -48,15 +50,15 @@ UnwindLocation UnwindLocation::createUndefined() { return {Undefined}; }
 UnwindLocation UnwindLocation::createSame() { return {Same}; }
 
 UnwindLocation UnwindLocation::createIsConstant(int32_t Value) {
-  return {Constant, InvalidRegisterNumber, Value, None, false};
+  return {Constant, InvalidRegisterNumber, Value, std::nullopt, false};
 }
 
 UnwindLocation UnwindLocation::createIsCFAPlusOffset(int32_t Offset) {
-  return {CFAPlusOffset, InvalidRegisterNumber, Offset, None, false};
+  return {CFAPlusOffset, InvalidRegisterNumber, Offset, std::nullopt, false};
 }
 
 UnwindLocation UnwindLocation::createAtCFAPlusOffset(int32_t Offset) {
-  return {CFAPlusOffset, InvalidRegisterNumber, Offset, None, true};
+  return {CFAPlusOffset, InvalidRegisterNumber, Offset, std::nullopt, true};
 }
 
 UnwindLocation
@@ -1050,7 +1052,7 @@ Error DWARFDebugFrame::parse(DWARFDataExtractor Data) {
     if (Length == 0) {
       auto Cie = std::make_unique<CIE>(
           IsDWARF64, StartOffset, 0, 0, SmallString<8>(), 0, 0, 0, 0, 0,
-          SmallString<8>(), 0, 0, None, None, Arch);
+          SmallString<8>(), 0, 0, std::nullopt, std::nullopt, Arch);
       CIEs[StartOffset] = Cie.get();
       Entries.push_back(std::move(Cie));
       break;
@@ -1090,7 +1092,7 @@ Error DWARFDebugFrame::parse(DWARFDataExtractor Data) {
       Optional<uint64_t> Personality;
       Optional<uint32_t> PersonalityEncoding;
       if (IsEH) {
-        Optional<uint64_t> AugmentationLength;
+        std::optional<uint64_t> AugmentationLength;
         uint64_t StartAugmentationOffset;
         uint64_t EndAugmentationOffset;
 
@@ -1100,8 +1102,8 @@ Error DWARFDebugFrame::parse(DWARFDataExtractor Data) {
           default:
             return createStringError(
                 errc::invalid_argument,
-                "unknown augmentation character in entry at 0x%" PRIx64,
-                StartOffset);
+                "unknown augmentation character %c in entry at 0x%" PRIx64,
+                AugmentationString[i], StartOffset);
           case 'L':
             LSDAPointerEncoding = Data.getU8(&Offset);
             break;
@@ -1137,10 +1139,14 @@ Error DWARFDebugFrame::parse(DWARFDataExtractor Data) {
             // B-Key is used for signing functions associated with this
             // augmentation string
             break;
+            // This stack frame contains MTE tagged data, so needs to be
+            // untagged on unwind.
+          case 'G':
+            break;
           }
         }
 
-        if (AugmentationLength.hasValue()) {
+        if (AugmentationLength) {
           if (Offset != EndAugmentationOffset)
             return createStringError(errc::invalid_argument,
                                      "parsing augmentation data at 0x%" PRIx64

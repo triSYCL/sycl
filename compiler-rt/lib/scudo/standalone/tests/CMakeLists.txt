@@ -7,6 +7,7 @@ set_target_properties(ScudoUnitTests PROPERTIES
 set(SCUDO_UNITTEST_CFLAGS
   ${COMPILER_RT_UNITTEST_CFLAGS}
   ${COMPILER_RT_GTEST_CFLAGS}
+  ${SANITIZER_TEST_CXX_CFLAGS}
   -I${COMPILER_RT_SOURCE_DIR}/include
   -I${COMPILER_RT_SOURCE_DIR}/lib
   -I${COMPILER_RT_SOURCE_DIR}/lib/scudo/standalone
@@ -16,9 +17,6 @@ set(SCUDO_UNITTEST_CFLAGS
   # Extra flags for the C++ tests
   # TODO(kostyak): find a way to make -fsized-deallocation work
   -Wno-mismatched-new-delete)
-
-# Too many existing bugs, needs cleanup.
-append_list_if(COMPILER_RT_HAS_WNO_FORMAT -Wno-format SCUDO_UNITTEST_CFLAGS)
 
 if(COMPILER_RT_DEBUG)
   list(APPEND SCUDO_UNITTEST_CFLAGS -DSCUDO_DEBUG=1)
@@ -36,13 +34,16 @@ endif()
 set(SCUDO_TEST_ARCH ${SCUDO_STANDALONE_SUPPORTED_ARCH})
 
 # gtests requires c++
-set(LINK_FLAGS ${COMPILER_RT_UNITTEST_LINK_FLAGS})
-foreach(lib ${SANITIZER_TEST_CXX_LIBRARIES})
-  list(APPEND LINK_FLAGS -l${lib})
-endforeach()
-list(APPEND LINK_FLAGS -pthread)
+set(SCUDO_UNITTEST_LINK_FLAGS
+  ${COMPILER_RT_UNITTEST_LINK_FLAGS}
+  ${COMPILER_RT_UNWINDER_LINK_LIBS}
+  ${SANITIZER_TEST_CXX_LIBRARIES})
+list(APPEND SCUDO_UNITTEST_LINK_FLAGS -pthread -no-pie)
 # Linking against libatomic is required with some compilers
-list(APPEND LINK_FLAGS -latomic)
+check_library_exists(atomic __atomic_load_8 "" COMPILER_RT_HAS_LIBATOMIC)
+if (COMPILER_RT_HAS_LIBATOMIC)
+  list(APPEND SCUDO_UNITTEST_LINK_FLAGS -latomic)
+endif()
 
 set(SCUDO_TEST_HEADERS
   scudo_unit_test.h
@@ -73,10 +74,10 @@ macro(add_scudo_unittest testname)
         "${testname}-${arch}-Test" ${arch}
         SOURCES ${TEST_SOURCES} ${COMPILER_RT_GTEST_SOURCE}
         COMPILE_DEPS ${SCUDO_TEST_HEADERS}
-        DEPS gtest scudo_standalone
+        DEPS llvm_gtest scudo_standalone
         RUNTIME ${RUNTIME}
         CFLAGS ${SCUDO_UNITTEST_CFLAGS}
-        LINK_FLAGS ${LINK_FLAGS})
+        LINK_FLAGS ${SCUDO_UNITTEST_LINK_FLAGS})
     endforeach()
   endif()
 endmacro()

@@ -2,10 +2,10 @@
 # RUN: llvm-mc -filetype=obj -triple=i686-pc-linux %s -o %t.o
 # RUN: llvm-readobj -r %t.o | FileCheck %s --check-prefix=OBJ
 # RUN: ld.lld %t.o -o %t -pie
-# RUN: llvm-objdump -s --section=.foobar --section=.got -r -d -t \
+# RUN: llvm-objdump --no-print-imm-hex -s --section=.foobar --section=.got -r -d -t \
 # RUN:   --dynamic-reloc %t | FileCheck %s --check-prefixes=CHECK,REL
 # RUN: ld.lld %t.o -o %t-rela -pie -z rela
-# RUN: llvm-objdump -s --section=.foobar --section=.got -r -d -t \
+# RUN: llvm-objdump --no-print-imm-hex -s --section=.foobar --section=.got -r -d -t \
 # RUN:   --dynamic-reloc %t-rela | FileCheck %s --check-prefixes=CHECK,RELA
 
 # Unlike bfd and gold we accept this.
@@ -23,6 +23,7 @@
 # RELA: 00002188 g       .foobar	00000000 _start
 
 # CHECK-LABEL: DYNAMIC RELOCATION RECORDS
+# CHECK-NEXT:  OFFSET TYPE           VALUE
 # REL-NEXT:  00002182 R_386_RELATIVE *ABS*{{$}}
 # REL-NEXT:  000031f0 R_386_RELATIVE *ABS*{{$}}
 # RELA-NEXT: 0000218a R_386_RELATIVE *ABS*+0x31f8{{$}}

@@ -24,6 +24,8 @@ AST_MATCHER(Decl, isFromStdNamespaceOrSystemHeader) {
   if (const auto *D = Node.getDeclContext()->getEnclosingNamespaceContext())
     if (D->isStdNamespace())
       return true;
+  if (Node.getLocation().isInvalid())
+    return false;
   return Node.getASTContext().getSourceManager().isInSystemHeader(
       Node.getLocation());
 }
@@ -58,7 +60,7 @@ void ArgumentCommentCheck::storeOptions(ClangTidyOptions::OptionMap &Opts) {
 
 void ArgumentCommentCheck::registerMatchers(MatchFinder *Finder) {
   Finder->addMatcher(
-      callExpr(unless(cxxOperatorCallExpr()),
+      callExpr(unless(cxxOperatorCallExpr()), unless(userDefinedLiteral()),
                // NewCallback's arguments relate to the pointed function,
                // don't check them against NewCallback's parameter names.
                // FIXME: Make this configurable.

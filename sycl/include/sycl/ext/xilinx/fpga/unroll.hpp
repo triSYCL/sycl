@@ -9,41 +9,43 @@
 #ifndef SYCL_XILINX_FPGA_UNROLL_HPP
 #define SYCL_XILINX_FPGA_UNROLL_HPP
 
-#include "CL/sycl/detail/defines.hpp"
+#include <utility>
+#include <sycl/detail/defines.hpp>
+#include <sycl/detail/defines_elementary.hpp>
 
-__SYCL_INLINE_NAMESPACE(cl) {
 
 namespace sycl {
-namespace ext::xilinx {
+__SYCL_INLINE_VER_NAMESPACE(_V1) {
 namespace detail {
-template <unsigned int UnrollFactor> struct ConstrainedUnrolling {
+template <unsigned int unroll_factor> struct ConstrainedUnrolling {
   static_assert(
-      UnrollFactor > 1,
+      unroll_factor > 1,
       "Constrained unrolling factor should be strictly greater than one");
-  static constexpr unsigned int UnrollingFactor = UnrollFactor;
+  static constexpr unsigned int UnrollingFactor = unroll_factor;
   static constexpr bool FullUnroll = false;
 };
 } // namespace detail
 
-template <unsigned int UnrollFactor>
-struct CheckedFixedUnrolling
-    : public detail::ConstrainedUnrolling<UnrollFactor> {
+namespace ext::xilinx {
+template <unsigned int unroll_factor>
+struct checked_fixed_unrolling
+    : public detail::ConstrainedUnrolling<unroll_factor> {
   static constexpr bool checked = true;
 };
 
-template <unsigned int UnrollFactor>
-struct UncheckedFixedUnrolling
-    : public detail::ConstrainedUnrolling<UnrollFactor> {
+template <unsigned int unroll_factor>
+struct unchecked_fixed_unrolling
+    : public detail::ConstrainedUnrolling<unroll_factor> {
   static constexpr bool checked = false;
 };
 
-struct FullUnrolling {
+struct full_unrolling {
   static constexpr bool FullUnroll = true;
   static constexpr unsigned int UnrollingFactor = 0;
   static constexpr bool checked = false;
 };
 
-struct NoUnrolling {
+struct no_unrolling {
   static constexpr bool FullUnroll = false;
   static constexpr unsigned int UnrollingFactor = 1;
   static constexpr bool checked = false;
@@ -54,21 +56,24 @@ struct NoUnrolling {
   unroll a loop
 
  \tparam UnrollType determines the type of unrolling to perform. Can be
- (Un)CheckedFixedUnrolling<>, FullUnrolling or NoUnrolling
+ (Un)checked_fixed_unrolling<>, full_unrolling or no_unrolling
 
  \tparam T type of the functor to execute
 */
-template <typename UnrollType = FullUnrolling, typename T>
-__SYCL_ALWAYS_INLINE void unroll(T &&functor) {
+template <typename UnrollType = full_unrolling>
+struct unroll {
+  template<typename T>
+  __SYCL_ALWAYS_INLINE unroll(T functor) {
   __SYCL_DEVICE_ANNOTATE("xilinx_unroll", UnrollType::UnrollingFactor,
-                        UnrollType::checked)
+                         UnrollType::checked)
   int annotationAnchor;
   (void)annotationAnchor;
-  std::forward<T>(functor)();
-}
+  functor();
+  }
+};
 
 } // namespace ext::xilinx
+}
 } // namespace sycl
-} // __SYCL_INLINE_NAMESPACE(cl)
 
 #endif

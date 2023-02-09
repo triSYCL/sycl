@@ -14,9 +14,13 @@
 ; CHECK-NEXT: Profile summary info
 ; CHECK-NEXT: Create Garbage Collector Module Metadata
 ; CHECK-NEXT: Machine Branch Probability Analysis
+; CHECK-NEXT: Default Regalloc Eviction Advisor
+; CHECK-NEXT: Default Regalloc Priority Advisor
 ; CHECK-NEXT:   ModulePass Manager
 ; CHECK-NEXT:     Pre-ISel Intrinsic Lowering
 ; CHECK-NEXT:     FunctionPass Manager
+; CHECK-NEXT:       Expand large div/rem
+; CHECK-NEXT:       Expand large fp convert
 ; CHECK-NEXT:       Convert i1 constants to i32/i64 if they are returned
 ; CHECK-NEXT:       Expand Atomic instructions
 ; CHECK-NEXT:     PPC Lower MASS Entries
@@ -64,6 +68,7 @@
 ; CHECK-NEXT:       Scalarize Masked Memory Intrinsics
 ; CHECK-NEXT:       Expand reduction intrinsics
 ; CHECK-NEXT:       Natural Loop Information
+; CHECK-NEXT:       TLS Variable Hoist
 ; CHECK-NEXT:       CodeGen Prepare
 ; CHECK-NEXT:       Dominator Tree Construction
 ; CHECK-NEXT:       Exception handling preparation
@@ -90,6 +95,9 @@
 ; CHECK-NEXT:       PowerPC CTR Loops Verify
 ; CHECK-NEXT:       PowerPC VSX Copy Legalization
 ; CHECK-NEXT:       Finalize ISel and expand pseudo-instructions
+; CHECK-NEXT:       MachineDominator Tree Construction
+; CHECK-NEXT:       Machine Natural Loop Construction
+; CHECK-NEXT:       PowerPC CTR loops generation
 ; CHECK-NEXT:       Lazy Machine Block Frequency Analysis
 ; CHECK-NEXT:       Early Tail Duplication
 ; CHECK-NEXT:       Optimize machine instruction PHIs
@@ -109,6 +117,7 @@
 ; CHECK-NEXT:       Machine Block Frequency Analysis
 ; CHECK-NEXT:       Machine Common Subexpression Elimination
 ; CHECK-NEXT:       MachinePostDominator Tree Construction
+; CHECK-NEXT:       Machine Cycle Info Analysis
 ; CHECK-NEXT:       Machine code sinking
 ; CHECK-NEXT:       Peephole Optimizations
 ; CHECK-NEXT:       Remove dead machine instructions
@@ -159,6 +168,7 @@
 ; CHECK-NEXT:       Machine Optimization Remark Emitter
 ; CHECK-NEXT:       Greedy Register Allocator
 ; CHECK-NEXT:       Virtual Register Rewriter
+; CHECK-NEXT:       Register Allocation Pass Scoring
 ; CHECK-NEXT:       Stack Slot Coloring
 ; CHECK-NEXT:       Machine Copy Propagation Pass
 ; CHECK-NEXT:       Machine Loop Invariant Code Motion
@@ -172,6 +182,7 @@
 ; CHECK-NEXT:       Machine Optimization Remark Emitter
 ; CHECK-NEXT:       Shrink Wrapping analysis
 ; CHECK-NEXT:       Prologue/Epilogue Insertion & Frame Finalization
+; CHECK-NEXT:       Machine Late Instructions Cleanup Pass
 ; CHECK-NEXT:       Control Flow Optimizer
 ; CHECK-NEXT:       Lazy Machine Block Frequency Analysis
 ; CHECK-NEXT:       Tail Duplication

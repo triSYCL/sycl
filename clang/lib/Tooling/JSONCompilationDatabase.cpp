@@ -135,15 +135,12 @@ class CommandLineArgumentParser {
 std::vector<std::string> unescapeCommandLine(JSONCommandLineSyntax Syntax,
                                              StringRef EscapedCommandLine) {
   if (Syntax == JSONCommandLineSyntax::AutoDetect) {
+#ifdef _WIN32
+    // Assume Windows command line parsing on Win32
+    Syntax = JSONCommandLineSyntax::Windows;
+#else
     Syntax = JSONCommandLineSyntax::Gnu;
-    llvm::Triple Triple(llvm::sys::getProcessTriple());
-    if (Triple.getOS() == llvm::Triple::OSType::Win32) {
-      // Assume Windows command line parsing on Win32 unless the triple
-      // explicitly tells us otherwise.
-      if (!Triple.hasEnvironment() ||
-          Triple.getEnvironment() == llvm::Triple::EnvironmentType::MSVC)
-        Syntax = JSONCommandLineSyntax::Windows;
-    }
+#endif
   }
 
   if (Syntax == JSONCommandLineSyntax::Windows) {
@@ -422,14 +419,13 @@ bool JSONCompilationDatabase::parse(std::string &ErrorMessage) {
     SmallString<128> NativeFilePath;
     if (llvm::sys::path::is_relative(FileName)) {
       SmallString<8> DirectoryStorage;
-      SmallString<128> AbsolutePath(
-          Directory->getValue(DirectoryStorage));
+      SmallString<128> AbsolutePath(Directory->getValue(DirectoryStorage));
       llvm::sys::path::append(AbsolutePath, FileName);
-      llvm::sys::path::remove_dots(AbsolutePath, /*remove_dot_dot=*/ true);
       llvm::sys::path::native(AbsolutePath, NativeFilePath);
     } else {
       llvm::sys::path::native(FileName, NativeFilePath);
     }
+    llvm::sys::path::remove_dots(NativeFilePath, /*remove_dot_dot=*/true);
     auto Cmd = CompileCommandRef(Directory, File, *Command, Output);
     IndexByFile[NativeFilePath].push_back(Cmd);
     AllCommands.push_back(Cmd);

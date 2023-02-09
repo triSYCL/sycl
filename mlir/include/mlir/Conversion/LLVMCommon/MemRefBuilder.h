@@ -43,6 +43,10 @@ public:
   static MemRefDescriptor fromStaticShape(OpBuilder &builder, Location loc,
                                           LLVMTypeConverter &typeConverter,
                                           MemRefType type, Value memory);
+  static MemRefDescriptor fromStaticShape(OpBuilder &builder, Location loc,
+                                          LLVMTypeConverter &typeConverter,
+                                          MemRefType type, Value memory,
+                                          Value alignedMemory);
 
   /// Builds IR extracting the allocated pointer from the descriptor.
   Value allocatedPtr(OpBuilder &builder, Location loc);
@@ -78,6 +82,9 @@ public:
   void setStride(OpBuilder &builder, Location loc, unsigned pos, Value stride);
   void setConstantStride(OpBuilder &builder, Location loc, unsigned pos,
                          uint64_t stride);
+
+  /// Returns the type of array element in this descriptor.
+  Type getIndexType() { return indexType; };
 
   /// Returns the (LLVM) pointer type this descriptor contains.
   LLVM::LLVMPointerType getElementPtrType();
@@ -219,11 +226,11 @@ public:
                            LLVM::LLVMPointerType elemPtrPtrType);
   /// Builds IR extracting the size[index] from the descriptor.
   static Value size(OpBuilder &builder, Location loc,
-                    LLVMTypeConverter typeConverter, Value sizeBasePtr,
+                    LLVMTypeConverter &typeConverter, Value sizeBasePtr,
                     Value index);
   /// Builds IR inserting the size[index] into the descriptor.
   static void setSize(OpBuilder &builder, Location loc,
-                      LLVMTypeConverter typeConverter, Value sizeBasePtr,
+                      LLVMTypeConverter &typeConverter, Value sizeBasePtr,
                       Value index, Value size);
 
   /// Builds IR extracting the pointer to the first element of the stride array.
@@ -232,14 +239,14 @@ public:
                              Value sizeBasePtr, Value rank);
   /// Builds IR extracting the stride[index] from the descriptor.
   static Value stride(OpBuilder &builder, Location loc,
-                      LLVMTypeConverter typeConverter, Value strideBasePtr,
+                      LLVMTypeConverter &typeConverter, Value strideBasePtr,
                       Value index, Value stride);
   /// Builds IR inserting the stride[index] into the descriptor.
   static void setStride(OpBuilder &builder, Location loc,
-                        LLVMTypeConverter typeConverter, Value strideBasePtr,
+                        LLVMTypeConverter &typeConverter, Value strideBasePtr,
                         Value index, Value stride);
 };
 
 } // namespace mlir
 
-#endif // MLIR_CONVERSION_LLVMCOMMON_MEMREFBUILDER_H_
+#endif // MLIR_CONVERSION_LLVMCOMMON_MEMREFBUILDER_H

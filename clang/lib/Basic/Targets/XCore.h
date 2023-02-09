@@ -61,7 +61,7 @@ public:
   }
 
   ArrayRef<TargetInfo::GCCRegAlias> getGCCRegAliases() const override {
-    return None;
+    return std::nullopt;
   }
 
   bool validateAsmConstraint(const char *&Name,
@@ -76,7 +76,7 @@ public:
 
   bool allowsLargerPreferedTypeAlignment() const override { return false; }
 
-  bool hasExtIntType() const override { return true; }
+  bool hasBitIntType() const override { return true; }
 };
 } // namespace targets
 } // namespace clang

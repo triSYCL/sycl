@@ -1,10 +1,9 @@
-; RUN: opt -analyze -enable-new-pm=0 -scalar-evolution < %s | FileCheck %s
 ; RUN: opt -disable-output "-passes=print<scalar-evolution>" < %s 2>&1 | FileCheck %s
 
 ; CHECK: Printing analysis 'Scalar Evolution Analysis' for function 'f':
 
 ; CHECK: Loop %loop: <multiple exits> Unpredictable backedge-taken count.
-; CHECK: Loop %loop: max backedge-taken count is 0
+; CHECK: Loop %loop: constant max backedge-taken count is 0
 ; CHECK: Loop %loop: Unpredictable predicated backedge-taken count.
 
 

@@ -1,3 +1,4 @@
+// UNSUPPORTED: -zos, target={{.*}}-aix{{.*}}
 // REQUIRES: asserts
 
 // Modules:

@@ -2,9 +2,6 @@
 Test that expr will time out and allow other threads to run if it blocks.
 """
 
-from __future__ import print_function
-
-
 import lldb
 from lldbsuite.test.decorators import *
 from lldbsuite.test.lldbtest import *
@@ -13,10 +10,7 @@ from lldbsuite.test import lldbutil
 
 class ExprDoesntDeadlockTestCase(TestBase):
 
-    mydir = TestBase.compute_mydir(__file__)
-
     @add_test_categories(["basic_process"])
-    @skipIfReproducer # Timeouts are not currently modeled.
     def test_with_run_command(self):
         """Test that expr will time out and allow other threads to run if it blocks."""
         self.build()

@@ -29,7 +29,7 @@ M68kTargetInfo::M68kTargetInfo(const llvm::Triple &Triple,
                                const TargetOptions &)
     : TargetInfo(Triple) {
 
-  std::string Layout = "";
+  std::string Layout;
 
   // M68k is Big Endian
   Layout += "E";
@@ -37,8 +37,8 @@ M68kTargetInfo::M68kTargetInfo(const llvm::Triple &Triple,
   // FIXME how to wire it with the used object format?
   Layout += "-m:e";
 
-  // M68k pointers are always 32 bit wide even for 16 bit cpus
-  Layout += "-p:32:32";
+  // M68k pointers are always 32 bit wide even for 16-bit CPUs
+  Layout += "-p:32:16:32";
 
   // M68k integer data types
   Layout += "-i8:8:8-i16:16:16-i32:16:32";
@@ -117,7 +117,7 @@ void M68kTargetInfo::getTargetDefines(const LangOptions &Opts,
 
 ArrayRef<Builtin::Info> M68kTargetInfo::getTargetBuiltins() const {
   // FIXME: Implement.
-  return None;
+  return std::nullopt;
 }
 
 bool M68kTargetInfo::hasFeature(StringRef Feature) const {
@@ -136,7 +136,7 @@ ArrayRef<const char *> M68kTargetInfo::getGCCRegNames() const {
 
 ArrayRef<TargetInfo::GCCRegAlias> M68kTargetInfo::getGCCRegAliases() const {
   // No aliases.
-  return None;
+  return std::nullopt;
 }
 
 bool M68kTargetInfo::validateAsmConstraint(
@@ -209,7 +209,7 @@ M68kTargetInfo::handleAsmEscapedChar(char EscChar) const {
     C = 'd';
     break;
   default:
-    return llvm::None;
+    return std::nullopt;
   }
 
   return std::string(1, C);

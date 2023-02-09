@@ -7,10 +7,10 @@
 //===----------------------------------------------------------------------===//
 
 #include "derived.h"
-#include "descriptor.h"
 #include "stat.h"
 #include "terminator.h"
 #include "type-info.h"
+#include "flang/Runtime/descriptor.h"
 
 namespace Fortran::runtime {
 
@@ -188,8 +188,10 @@ void Finalize(
       SubscriptValue extent[maxRank];
       const typeInfo::Value *bounds{comp.bounds()};
       for (int dim{0}; dim < comp.rank(); ++dim) {
-        extent[dim] = bounds[2 * dim].GetValue(&descriptor).value_or(0) -
-            bounds[2 * dim + 1].GetValue(&descriptor).value_or(0) + 1;
+        SubscriptValue lb{bounds[2 * dim].GetValue(&descriptor).value_or(0)};
+        SubscriptValue ub{
+            bounds[2 * dim + 1].GetValue(&descriptor).value_or(0)};
+        extent[dim] = ub >= lb ? ub - lb + 1 : 0;
       }
       StaticDescriptor<maxRank, true, 0> staticDescriptor;
       Descriptor &compDesc{staticDescriptor.descriptor()};
@@ -208,8 +210,9 @@ void Finalize(
 }
 
 // The order of finalization follows Fortran 2018 7.5.6.2, with
-// elementwise deallocation of non-parent components (and their consequent
-// finalizations) taking place before parent component finalization.
+// elementwise finalization of non-parent components taking place
+// before parent component finalization, and with all finalization
+// preceding any deallocation.
 void Destroy(const Descriptor &descriptor, bool finalize,
     const typeInfo::DerivedType &derived) {
   if (derived.noDestructionNeeded() || !descriptor.IsAllocated()) {

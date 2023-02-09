@@ -15,15 +15,14 @@
 #define LLVM_SUPPORT_ERRORHANDLING_H
 
 #include "llvm/Support/Compiler.h"
-#include <string>
 
 namespace llvm {
-class StringRef;
+  class StringRef;
   class Twine;
 
   /// An error handler callback.
   typedef void (*fatal_error_handler_t)(void *user_data,
-                                        const std::string& reason,
+                                        const char *reason,
                                         bool gen_crash_diag);
 
   /// install_fatal_error_handler - Installs a new error handler to be used
@@ -68,9 +67,8 @@ class StringRef;
 /// standard error, followed by a newline.
 /// After the error handler is called this function will call abort(), it
 /// does not return.
+/// NOTE: The std::string variant was removed to avoid a <string> dependency.
 [[noreturn]] void report_fatal_error(const char *reason,
-                                     bool gen_crash_diag = true);
-[[noreturn]] void report_fatal_error(const std::string &reason,
                                      bool gen_crash_diag = true);
 [[noreturn]] void report_fatal_error(StringRef reason,
                                      bool gen_crash_diag = true);
@@ -126,19 +124,34 @@ llvm_unreachable_internal(const char *msg = nullptr, const char *file = nullptr,
 
 /// Marks that the current location is not supposed to be reachable.
 /// In !NDEBUG builds, prints the message and location info to stderr.
-/// In NDEBUG builds, becomes an optimizer hint that the current location
-/// is not supposed to be reachable.  On compilers that don't support
-/// such hints, prints a reduced message instead and aborts the program.
+/// In NDEBUG builds, if the platform does not support a builtin unreachable
+/// then we call an internal LLVM runtime function. Otherwise the behavior is
+/// controlled by the CMake flag
+///   -DLLVM_UNREACHABLE_OPTIMIZE
+/// * When "ON" (default) llvm_unreachable() becomes an optimizer hint
+///   that the current location is not supposed to be reachable: the hint
+///   turns such code path into undefined behavior.  On compilers that don't
+///   support such hints, prints a reduced message instead and aborts the
+///   program.
+/// * When "OFF", a builtin_trap is emitted instead of an
+//    optimizer hint or printing a reduced message.
 ///
-/// Use this instead of assert(0).  It conveys intent more clearly and
-/// allows compilers to omit some unnecessary code.
+/// Use this instead of assert(0). It conveys intent more clearly, suppresses
+/// diagnostics for unreachable code paths, and allows compilers to omit
+/// unnecessary code.
 #ifndef NDEBUG
 #define llvm_unreachable(msg) \
   ::llvm::llvm_unreachable_internal(msg, __FILE__, __LINE__)
-#elif defined(LLVM_BUILTIN_UNREACHABLE)
+#elif !defined(LLVM_BUILTIN_UNREACHABLE)
+#define llvm_unreachable(msg) ::llvm::llvm_unreachable_internal()
+#elif LLVM_UNREACHABLE_OPTIMIZE
 #define llvm_unreachable(msg) LLVM_BUILTIN_UNREACHABLE
 #else
-#define llvm_unreachable(msg) ::llvm::llvm_unreachable_internal()
+#define llvm_unreachable(msg)                                                  \
+  do {                                                                         \
+    LLVM_BUILTIN_TRAP;                                                         \
+    LLVM_BUILTIN_UNREACHABLE;                                                  \
+  } while (false)
 #endif
 
 #endif

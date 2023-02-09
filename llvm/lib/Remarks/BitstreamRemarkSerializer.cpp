@@ -12,13 +12,14 @@
 //===----------------------------------------------------------------------===//
 
 #include "llvm/Remarks/BitstreamRemarkSerializer.h"
+#include "llvm/Remarks/Remark.h"
 
 using namespace llvm;
 using namespace llvm::remarks;
 
 BitstreamRemarkSerializerHelper::BitstreamRemarkSerializerHelper(
     BitstreamRemarkContainerType ContainerType)
-    : Encoded(), R(), Bitstream(Encoded), ContainerType(ContainerType) {}
+    : Bitstream(Encoded), ContainerType(ContainerType) {}
 
 static void push(SmallVectorImpl<uint64_t> &R, StringRef Str) {
   append_range(R, Str);
@@ -244,19 +245,19 @@ void BitstreamRemarkSerializerHelper::emitMetaBlock(
 
   switch (ContainerType) {
   case BitstreamRemarkContainerType::SeparateRemarksMeta:
-    assert(StrTab != None && *StrTab != nullptr);
+    assert(StrTab != std::nullopt && *StrTab != nullptr);
     emitMetaStrTab(**StrTab);
-    assert(Filename != None);
+    assert(Filename != std::nullopt);
     emitMetaExternalFile(*Filename);
     break;
   case BitstreamRemarkContainerType::SeparateRemarksFile:
-    assert(RemarkVersion != None);
+    assert(RemarkVersion != std::nullopt);
     emitMetaRemarkVersion(*RemarkVersion);
     break;
   case BitstreamRemarkContainerType::Standalone:
-    assert(RemarkVersion != None);
+    assert(RemarkVersion != std::nullopt);
     emitMetaRemarkVersion(*RemarkVersion);
-    assert(StrTab != None && *StrTab != nullptr);
+    assert(StrTab != std::nullopt && *StrTab != nullptr);
     emitMetaStrTab(**StrTab);
     break;
   }
@@ -296,7 +297,7 @@ void BitstreamRemarkSerializerHelper::emitRemarkBlock(const Remark &Remark,
     R.clear();
     unsigned Key = StrTab.add(Arg.Key).first;
     unsigned Val = StrTab.add(Arg.Val).first;
-    bool HasDebugLoc = Arg.Loc != None;
+    bool HasDebugLoc = Arg.Loc != std::nullopt;
     R.push_back(HasDebugLoc ? RECORD_REMARK_ARG_WITH_DEBUGLOC
                             : RECORD_REMARK_ARG_WITHOUT_DEBUGLOC);
     R.push_back(Key);
@@ -352,7 +353,7 @@ void BitstreamRemarkSerializer::emit(const Remark &Remark) {
         Helper.ContainerType == BitstreamRemarkContainerType::Standalone;
     BitstreamMetaSerializer MetaSerializer(
         OS, Helper,
-        IsStandalone ? &*StrTab : Optional<const StringTable *>(None));
+        IsStandalone ? &*StrTab : Optional<const StringTable *>(std::nullopt));
     MetaSerializer.emit();
     DidSetUp = true;
   }

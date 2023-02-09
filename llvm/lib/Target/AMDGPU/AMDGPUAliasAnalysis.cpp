@@ -10,6 +10,7 @@
 //===----------------------------------------------------------------------===//
 
 #include "AMDGPUAliasAnalysis.h"
+#include "AMDGPU.h"
 #include "llvm/Analysis/ValueTracking.h"
 #include "llvm/IR/Instructions.h"
 
@@ -35,6 +36,10 @@ ImmutablePass *llvm::createAMDGPUAAWrapperPass() {
 
 ImmutablePass *llvm::createAMDGPUExternalAAWrapperPass() {
   return new AMDGPUExternalAAWrapper();
+}
+
+AMDGPUAAWrapperPass::AMDGPUAAWrapperPass() : ImmutablePass(ID) {
+  initializeAMDGPUAAWrapperPassPass(*PassRegistry::getPassRegistry());
 }
 
 void AMDGPUAAWrapperPass::getAnalysisUsage(AnalysisUsage &AU) const {
@@ -94,7 +99,7 @@ AliasResult AMDGPUAAResult::alias(const MemoryLocation &LocA,
         getUnderlyingObject(A.Ptr->stripPointerCastsForAliasAnalysis());
     if (const LoadInst *LI = dyn_cast<LoadInst>(ObjA)) {
       // If a generic pointer is loaded from the constant address space, it
-      // could only be a GLOBAL or CONSTANT one as that address space is soley
+      // could only be a GLOBAL or CONSTANT one as that address space is solely
       // prepared on the host side, where only GLOBAL or CONSTANT variables are
       // visible. Note that this even holds for regular functions.
       if (LI->getPointerAddressSpace() == AMDGPUAS::CONSTANT_ADDRESS)
@@ -119,54 +124,19 @@ AliasResult AMDGPUAAResult::alias(const MemoryLocation &LocA,
   return AAResultBase::alias(LocA, LocB, AAQI);
 }
 
-bool AMDGPUAAResult::pointsToConstantMemory(const MemoryLocation &Loc,
-                                            AAQueryInfo &AAQI, bool OrLocal) {
+ModRefInfo AMDGPUAAResult::getModRefInfoMask(const MemoryLocation &Loc,
+                                             AAQueryInfo &AAQI,
+                                             bool IgnoreLocals) {
   unsigned AS = Loc.Ptr->getType()->getPointerAddressSpace();
   if (AS == AMDGPUAS::CONSTANT_ADDRESS ||
       AS == AMDGPUAS::CONSTANT_ADDRESS_32BIT)
-    return true;
+    return ModRefInfo::NoModRef;
 
   const Value *Base = getUnderlyingObject(Loc.Ptr);
   AS = Base->getType()->getPointerAddressSpace();
   if (AS == AMDGPUAS::CONSTANT_ADDRESS ||
       AS == AMDGPUAS::CONSTANT_ADDRESS_32BIT)
-    return true;
+    return ModRefInfo::NoModRef;
 
-  if (const GlobalVariable *GV = dyn_cast<GlobalVariable>(Base)) {
-    if (GV->isConstant())
-      return true;
-  } else if (const Argument *Arg = dyn_cast<Argument>(Base)) {
-    const Function *F = Arg->getParent();
-
-    // Only assume constant memory for arguments on kernels.
-    switch (F->getCallingConv()) {
-    default:
-      return AAResultBase::pointsToConstantMemory(Loc, AAQI, OrLocal);
-    case CallingConv::AMDGPU_LS:
-    case CallingConv::AMDGPU_HS:
-    case CallingConv::AMDGPU_ES:
-    case CallingConv::AMDGPU_GS:
-    case CallingConv::AMDGPU_VS:
-    case CallingConv::AMDGPU_PS:
-    case CallingConv::AMDGPU_CS:
-    case CallingConv::AMDGPU_KERNEL:
-    case CallingConv::SPIR_KERNEL:
-      break;
-    }
-
-    unsigned ArgNo = Arg->getArgNo();
-    /* On an argument, ReadOnly attribute indicates that the function does
-       not write through this pointer argument, even though it may write
-       to the memory that the pointer points to.
-       On an argument, ReadNone attribute indicates that the function does
-       not dereference that pointer argument, even though it may read or write
-       the memory that the pointer points to if accessed through other pointers.
-     */
-    if (F->hasParamAttribute(ArgNo, Attribute::NoAlias) &&
-        (F->hasParamAttribute(ArgNo, Attribute::ReadNone) ||
-         F->hasParamAttribute(ArgNo, Attribute::ReadOnly))) {
-      return true;
-    }
-  }
-  return AAResultBase::pointsToConstantMemory(Loc, AAQI, OrLocal);
+  return AAResultBase::getModRefInfoMask(Loc, AAQI, IgnoreLocals);
 }

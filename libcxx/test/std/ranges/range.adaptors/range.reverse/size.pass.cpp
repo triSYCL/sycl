@@ -7,14 +7,14 @@
 //===----------------------------------------------------------------------===//
 
 // UNSUPPORTED: c++03, c++11, c++14, c++17
-// UNSUPPORTED: libcpp-no-concepts
-// UNSUPPORTED: libcpp-has-no-incomplete-ranges
 
 // constexpr auto size() requires sized_range<V>;
 // constexpr auto size() const requires sized_range<const V>;
 
 #include <ranges>
+
 #include <cassert>
+#include <utility>
 
 #include "test_macros.h"
 #include "types.h"

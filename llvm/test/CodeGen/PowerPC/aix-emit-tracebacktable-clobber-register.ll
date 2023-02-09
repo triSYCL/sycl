@@ -11,17 +11,17 @@ entry:
   %fvalue = alloca float, align 4
   %taken = alloca i32, align 4
   %data = alloca i32, align 4
-  store float 1.000000e+00, float* %fvalue, align 4
-  %0 = load float, float* %fvalue, align 4
+  store float 1.000000e+00, ptr %fvalue, align 4
+  %0 = load float, ptr %fvalue, align 4
   %1 = call float asm "fneg $0,$1\0A\09", "=b,b,~{f31},~{f30},~{f29},~{f28},~{f27}"(float %0)
-  store float %1, float* %fvalue, align 4
-  store i32 123, i32* %data, align 4
-  %2 = load i32, i32* %data, align 4
+  store float %1, ptr %fvalue, align 4
+  store i32 123, ptr %data, align 4
+  %2 = load i32, ptr %data, align 4
   %3 = call i32 asm "cntlzw $0, $1\0A\09", "=b,b,~{r31},~{r30},~{r29},~{r28}"(i32 %2)
-  store i32 %3, i32* %taken, align 4
-  %4 = load i32, i32* %taken, align 4
+  store i32 %3, ptr %taken, align 4
+  %4 = load i32, ptr %taken, align 4
   %conv = sitofp i32 %4 to float
-  %5 = load float, float* %fvalue, align 4
+  %5 = load float, ptr %fvalue, align 4
   %add = fadd float %conv, %5
   ret float %add
 }
@@ -30,9 +30,9 @@ define <4 x i32> @foov() #0 {
 entry:
   %taken = alloca <4 x i32>, align 16
   %data = alloca <4 x i32>, align 16
-  store <4 x i32> <i32 123, i32 0, i32 0, i32 0>, <4 x i32>* %data, align 16
+  store <4 x i32> <i32 123, i32 0, i32 0, i32 0>, ptr %data, align 16
   call void asm sideeffect "", "~{v31},~{v30},~{v29},~{v28}"() 
-  %0 = load <4 x i32>, <4 x i32>* %taken, align 16
+  %0 = load <4 x i32>, ptr %taken, align 16
   ret <4 x i32> %0
 }
 
@@ -44,7 +44,7 @@ entry:
 ; COMMON-NEXT:                                        # -HasControlledStorage, -IsTOCless
 ; COMMON-NEXT:                                        # +IsFloatingPointPresent
 ; COMMON-NEXT:                                        # -IsFloatingPointOperationLogOrAbortEnabled
-; COMMON-NEXT:  .byte   0x60                            # -IsInterruptHandler, +IsFunctionNamePresent, +IsAllocaUsed
+; COMMON-NEXT:  .byte   0x40                            # -IsInterruptHandler, +IsFunctionNamePresent, -IsAllocaUsed
 ; COMMON-NEXT:                                        # OnConditionDirective = 0, -IsCRSaved, -IsLRSaved
 ; COMMON-NEXT:  .byte   0x85                            # +IsBackChainStored, -IsFixup, NumOfFPRsSaved = 5
 ; COMMON-NEXT:  .byte   0x04                            # -HasExtensionTable, -HasVectorInfo, NumOfGPRsSaved = 4
@@ -54,7 +54,6 @@ entry:
 ; CHECK-FUNC-NEXT:  .vbyte  4, L..bar0-.bar[PR]             # Function size
 ; COMMON-NEXT:  .vbyte  2, 0x0003                       # Function name len = 3
 ; COMMON-NEXT:  .byte   "bar"                           # Function Name
-; COMMON-NEXT:  .byte   0x1f                            # AllocaUsed
 ; COMMON-NEXT:                                        # -- End function
 
 ; COMMON:     L..foov0:
@@ -90,8 +89,8 @@ entry:
 ; COMMON-NEXT:  .align  2
 ; COMMON-NEXT:  .vbyte  4, 0
 ; COMMON-NEXT:  .vbyte  4, 0
-; CHECK-ASM-NEXT:  .csect .text[PR],2
-; CHECK-FUNC-NEXT:  .csect .foov[PR],2
+; CHECK-ASM-NEXT:   .csect .text[PR],5
+; CHECK-FUNC-NEXT:  .csect .foov[PR],5
 ; COMMON-NEXT:                                         # -- End function
 ; COMMON:       .toc
 ; COMMON:      L..C2:

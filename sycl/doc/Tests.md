@@ -12,11 +12,11 @@ compilation flow is also yet to be integrated, so when you're running
 check-all your testing SYCL with another target like an Intel CPU usually!
 Integration with the full test suite is something we aim for eventually however.
 
-For now we have a test directory called `xocc_tests`, which contains tests that
+For now we have a test directory called `vitis`, which contains tests that
 have been tested and shown to either run or not run. Test's that aren't quite
 working yet are in the `issue_related` directory.
 
-## Test Directories of xocc_tests
+## Test Directories of vitis
 
 All the tests in the `simple_tests` directory are small unit tests with the
 intention of testing that certain functionality works for the Xilinx tool chain.

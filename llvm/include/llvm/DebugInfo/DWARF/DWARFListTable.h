@@ -14,7 +14,6 @@
 #include "llvm/DebugInfo/DWARF/DWARFDataExtractor.h"
 #include "llvm/Support/Errc.h"
 #include "llvm/Support/Error.h"
-#include "llvm/Support/Format.h"
 #include "llvm/Support/raw_ostream.h"
 #include <cstdint>
 #include <map>
@@ -115,7 +114,7 @@ public:
             DIDumpOptions DumpOpts = {}) const;
   Optional<uint64_t> getOffsetEntry(DataExtractor Data, uint32_t Index) const {
     if (Index >= HeaderData.OffsetEntryCount)
-      return None;
+      return std::nullopt;
 
     return getOffsetEntry(Data, getHeaderOffset() + getHeaderSize(Format), Format, Index);
   }

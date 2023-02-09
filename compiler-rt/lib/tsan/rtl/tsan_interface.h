@@ -72,6 +72,13 @@ SANITIZER_INTERFACE_ATTRIBUTE void __tsan_vptr_read(void **vptr_p);
 SANITIZER_INTERFACE_ATTRIBUTE
 void __tsan_vptr_update(void **vptr_p, void *new_val);
 
+SANITIZER_INTERFACE_ATTRIBUTE
+void *__tsan_memcpy(void *dest, const void *src, uptr count);
+SANITIZER_INTERFACE_ATTRIBUTE
+void *__tsan_memset(void *dest, int ch, uptr count);
+SANITIZER_INTERFACE_ATTRIBUTE
+void *__tsan_memmove(void *dest, const void *src, uptr count);
+
 SANITIZER_INTERFACE_ATTRIBUTE void __tsan_func_entry(void *call_pc);
 SANITIZER_INTERFACE_ATTRIBUTE void __tsan_func_exit();
 
@@ -416,12 +423,6 @@ void __tsan_go_atomic32_compare_exchange(ThreadState *thr, uptr cpc, uptr pc,
 SANITIZER_INTERFACE_ATTRIBUTE
 void __tsan_go_atomic64_compare_exchange(ThreadState *thr, uptr cpc, uptr pc,
                                          u8 *a);
-
-SANITIZER_INTERFACE_ATTRIBUTE
-void __tsan_on_initialize();
-
-SANITIZER_INTERFACE_ATTRIBUTE
-int __tsan_on_finalize(int failed);
 
 }  // extern "C"
 

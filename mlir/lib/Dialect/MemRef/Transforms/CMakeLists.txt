@@ -1,5 +1,11 @@
 add_mlir_dialect_library(MLIRMemRefTransforms
-  FoldSubViewOps.cpp
+  ComposeSubView.cpp
+  ExpandOps.cpp
+  ExpandStridedMetadata.cpp
+  EmulateWideInt.cpp
+  FoldMemRefAliasOps.cpp
+  MultiBuffer.cpp
+  NormalizeMemRefs.cpp
   ResolveShapedTypeResultDims.cpp
 
   ADDITIONAL_HEADER_DIRS
@@ -9,13 +15,17 @@ add_mlir_dialect_library(MLIRMemRefTransforms
   MLIRMemRefPassIncGen
 
   LINK_LIBS PUBLIC
-  MLIRAffine
+  MLIRAffineDialect
+  MLIRAffineUtils
+  MLIRArithDialect
+  MLIRArithTransforms
+  MLIRFuncDialect
   MLIRInferTypeOpInterface
-  MLIRMemRef
+  MLIRLoopLikeInterface
+  MLIRMemRefDialect
   MLIRPass
-  MLIRStandard
-  MLIRTensor
+  MLIRTensorDialect
   MLIRTransforms
-  MLIRVector
+  MLIRVectorDialect
 )
 
