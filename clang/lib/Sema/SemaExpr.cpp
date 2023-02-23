@@ -250,7 +250,7 @@ bool Sema::DiagnoseUseOfDecl(NamedDecl *D, ArrayRef<SourceLocation> Locs,
             << Sema::KernelGlobalVariable;
       // ESIMD globals cannot be used in a SYCL context.
       else if (IsRuntimeEvaluated && IsEsimdPrivateGlobal &&
-               VD->hasGlobalStorage() && !LangOpts.SYCLAllowMutableGlobal)
+               VD->hasGlobalStorage())
         SYCLDiagIfDeviceCode(*Locs.begin(),
                              diag::err_esimd_global_in_sycl_context,
                              Sema::DeviceDiagnosticReason::Sycl);

@@ -169,8 +169,8 @@ struct ChessMassageLegacy : public ModulePass {
     // doesn't know how to handle it.
     llvm::removeMetadata(M, "llvm.linker.options");
 
-    llvm::removeAttributes(
-        M, {Attribute::MustProgress, Attribute::ByVal, Attribute::StructRet});
+    llvm::removeAttributes(M, {Attribute::MustProgress, Attribute::ByVal,
+                               Attribute::StructRet, Attribute::Memory});
 
     // The module probably changed
     return true;

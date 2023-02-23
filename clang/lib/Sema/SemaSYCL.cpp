@@ -5281,8 +5281,13 @@ void SYCLIntegrationHeader::emit(raw_ostream &O) {
   O << "// This is auto-generated SYCL integration header.\n";
   O << "\n";
 
-  O << "#include <sycl/detail/defines_elementary.hpp>\n";
-  O << "#include <sycl/detail/kernel_desc.hpp>\n";
+  if (IsAIE) {
+    O << "#include <triSYCL/detail/kernel_desc.hpp>\n";
+  }
+  else {
+    O << "#include <sycl/detail/defines_elementary.hpp>\n";
+    O << "#include <sycl/detail/kernel_desc.hpp>\n";
+  }
 
   O << "\n";
 
@@ -5355,8 +5360,8 @@ void SYCLIntegrationHeader::emit(raw_ostream &O) {
   if (IsAIE) {
     O << "namespace trisycl {\n";
   } else {
-  O << "namespace sycl {\n";
-  O << "__SYCL_INLINE_VER_NAMESPACE(_V1) {\n";
+    O << "namespace sycl {\n";
+    O << "__SYCL_INLINE_VER_NAMESPACE(_V1) {\n";
   }
   O << "namespace detail {\n";
 

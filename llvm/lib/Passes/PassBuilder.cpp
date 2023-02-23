@@ -84,6 +84,8 @@
 #include "llvm/SYCL/KernelPropGen.h"
 #include "llvm/SYCL/LowerSYCLMetaData.h"
 #include "llvm/SYCL/PrepareSYCLOpt.h"
+#include "llvm/SYCL/PrepareSyclChessOpt.h"
+#include "llvm/SYCL/ChessMassage.h"
 #include "llvm/SYCL/VXXIRDowngrader.h"
 #include "llvm/SYCLLowerIR/ESIMD/ESIMDVerifier.h"
 #include "llvm/SYCLLowerIR/ESIMD/LowerESIMD.h"

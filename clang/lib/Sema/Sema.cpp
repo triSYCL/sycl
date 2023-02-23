@@ -1735,7 +1735,8 @@ public:
   }
 
   void visitUsedDecl(SourceLocation Loc, Decl *D) {
-    if (S.LangOpts.SYCLIsDevice && ShouldEmitRootNode) {
+    if (S.LangOpts.SYCLIsDevice && !S.getLangOpts().SYCLAllowMutableGlobal &&
+        ShouldEmitRootNode) {
       if (auto *VD = dyn_cast<VarDecl>(D)) {
         if (!S.checkAllowedSYCLInitializer(VD) &&
             !S.isTypeDecoratedWithDeclAttribute<SYCLGlobalVariableAllowedAttr>(

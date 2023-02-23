@@ -5648,7 +5648,7 @@ class OffloadingActionBuilder final {
           types::ID PostLinkOutType = shouldOutputTables
                                           ? types::TY_Tempfiletable
                                           : FullDeviceLinkAction->getType();
-          auto createPostLinkAction = [&]() {
+          auto createPostLinkAction = [&]() -> Action* {
             // For SPIR-V targets, force TY_Tempfiletable.
             auto TypedPostLinkAction = C.MakeAction<SYCLPostLinkJobAction>(
                 FullDeviceLinkAction, PostLinkOutType, types::TY_Tempfiletable);
@@ -5678,7 +5678,9 @@ class OffloadingActionBuilder final {
 
           Action *ExtractIRFilesAction = createExtractIRFilesAction();
 
-        if (isXilinxFPGA)
+        if (TT.isXilinxAIE())
+          WrapperInputs.assign(1, FullLinkObject);
+        else if (isXilinxFPGA)
           WrapperInputs.push_back(PostLinkAction);
         else
           if (isNVPTX || isAMDGCN) {

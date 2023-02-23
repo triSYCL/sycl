@@ -275,7 +275,7 @@ For a a simple program that should compile and run correctly
 you can use the templated model:
 ```cpp
 #include <iostream>
-#include <SYCL/sycl.hpp>
+#include <sycl/sycl.hpp>
 
 using namespace sycl::vendor::xilinx;
 

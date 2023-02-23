@@ -24,5 +24,5 @@ int main() {
       th.log("test3");
     });
   });
-  d.wait_all();
+  d.wait();
 }

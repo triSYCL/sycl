@@ -25,6 +25,8 @@ set -e
 set -x
 # export SHELLOPTS
 
+echo $0 $@
+
 if [[ -z "$1" ]]; then
   usage 1 "no Cardano bin directory containing xchesscc"
 fi
@@ -65,11 +67,6 @@ export CARDANO_BIN_PATH_DIR="$1"
 if [[ ! -d "$CARDANO_BIN_PATH_DIR" ]]; then
   usage 7 "path to Cardano bin directory is not a valid directory"
 else
-  export UNWAPPED_XCHESSCC="$CARDANO_BIN_PATH_DIR/unwrapped/lnx64.o/xchesscc"
-  if [[ ! -f "$UNWAPPED_XCHESSCC" ]]; then
-    usage 8 "could not find Cardanos xchesscc in $CARDANO_BIN_PATH_DIR"
-  fi
-
   export CARDANO_LIB_DIR="$CARDANO_BIN_PATH_DIR/../data/cervino/lib/"
   if [[ ! -d "$CARDANO_LIB_DIR" ]]; then
     usage 9 "cardano lib directory not found"
@@ -91,22 +88,7 @@ if [[ ! -d "$CLANG_TEMPORARY_DIR" ]]; then
   usage 12 "the path given for the temporary directory is an invalid directory"
 fi
 
-xchesscc_wrapper() {
-# Push chess scripts to the front of the path, they're placed inside of a
-# chesswrapper folder so we don't have to add the bin to the path. Doing that
-# may run the risk of breaking chess tools in weird ways (e.g. finding the
-# incorrect assembler).
-  CHESSCC=$(realpath $CARDANO_BIN_PATH_DIR/../tps/lnx64/target/bin/LNa64bin)
-  echo $CHESSCC
-  export PATH=$DRIVER_PATH_DIR/chesswrappers:$CHESSCC:$PATH
-  CARDANO=$(realpath $CARDANO_BIN_PATH_DIR/../)
-  export RDI_DATADIR=$CARDANO/data
-  export LD_LIBRARY_PATH=$CARDANO/lib/lnx64.o:$CARDANO_BIN_PATH_DIR/../lnx64/tools/dot/lib:$LD_LIBRARY_PATH
-  $UNWAPPED_XCHESSCC $@
-}
-
-export XCHESSCC=xchesscc_wrapper
-export -f xchesscc_wrapper
+export XCHESSCC=$DRIVER_PATH_DIR/chesswrappers/xchesscc_wrapper
 
 # Weirdly the +w argument of the chesscc compiler doesn't dump any of the
 # output files into the work directory you supply... it seems to just dump a
