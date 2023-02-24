@@ -4,7 +4,7 @@
 // RUN: %clangxx %EXTRA_COMPILE_FLAGS-fsycl -std=c++20 -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
-#include <sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <iostream>
 
 

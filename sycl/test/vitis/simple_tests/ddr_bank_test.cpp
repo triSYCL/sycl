@@ -5,7 +5,7 @@
 // RUN: %run_if_not_cpu FileCheck --input-file=%t.check %s
 // RUN: %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
-#include <sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <sycl/ext/xilinx/fpga.hpp>
 
 int main() {
