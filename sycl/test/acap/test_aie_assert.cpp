@@ -35,20 +35,7 @@ template <typename AIE, int X, int Y> struct prog : acap::aie::tile<AIE, X, Y> {
   };
 
   void run() {
-    if constexpr (X == 0) {
-      // data_type t;
-      // for (int i = 0; i < arr_size; i++)
-      //   t.arr[i] = -i;
-      // t::template cascade_write<data_type>(t);
-      char buff[48];
-      std::memset(&buff[0], 0, sizeof(buff));
-      acap_intr::cstream_write48(&buff[0]);
-      acap_intr::cstream_write48(&buff[0]);
-      acap_intr::cstream_write48(&buff[0]);
-      acap_intr::cstream_write48(&buff[0]);
-    } else {
-      assert(false && "test assert");
-    }
+    assert(false && "test assert");
   }
 
   void postrun() {
