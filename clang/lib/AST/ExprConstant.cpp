@@ -43,7 +43,9 @@
 #include "clang/AST/CXXInheritance.h"
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/CurrentSourceLocExprScope.h"
+#include "clang/AST/DeclCXX.h"
 #include "clang/AST/Expr.h"
+#include "clang/AST/ExprCXX.h"
 #include "clang/AST/OSLog.h"
 #include "clang/AST/OptionalDiagnostic.h"
 #include "clang/AST/RecordLayout.h"
@@ -940,6 +942,8 @@ namespace {
     /// later on (such as a use of an undefined global).
     bool CheckingPotentialConstantExpression = false;
 
+    /// TODO: add doc.
+    bool AccessingStaticConstantDataMember = false;
     /// Whether we're checking for an expression that has undefined behavior.
     /// If so, we will produce warnings if we encounter an operation that is
     /// always undefined.
@@ -8472,6 +8476,10 @@ bool LValueExprEvaluator::VisitMemberExpr(const MemberExpr *E) {
   // Handle static member functions.
   if (const CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(E->getMemberDecl())) {
     if (MD->isStatic()) {
+      llvm::SaveAndRestore<bool> StaticMember(
+          Info.AccessingStaticConstantDataMember);
+      if(Info.InConstantContext)
+        Info.AccessingStaticConstantDataMember = true;
       VisitIgnoredBaseExpression(E->getBase());
       return Success(MD);
     }
@@ -8753,6 +8761,9 @@ public:
     if (Info.checkingPotentialConstantExpression())
       return false;
     if (!Info.CurrentCall->This) {
+      if (Info.AccessingStaticConstantDataMember) {
+        return Success(E);
+      }
       if (Info.getLangOpts().CPlusPlus11)
         Info.FFDiag(E, diag::note_constexpr_this) << E->isImplicit();
       else
