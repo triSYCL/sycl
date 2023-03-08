@@ -590,8 +590,9 @@ bool UnwrappedLineParser::parseLevel(const FormatToken *OpeningBrace,
       [[fallthrough]];
     }
     case tok::kw_case:
-      if (Style.isVerilog() ||
+      if (Style.isProto() || Style.isVerilog() ||
           (Style.isJavaScript() && Line->MustBeDeclaration)) {
+        // Proto: there are no switch/case statements
         // Verilog: Case labels don't have this word. We handle case
         // labels including default in TokenAnnotator.
         // JavaScript: A 'case: string' style field declaration.
@@ -834,6 +835,11 @@ bool UnwrappedLineParser::mightFitOnOneLine(
       Length -= ColumnLimit;
     }
     Length -= OpeningBrace->TokenText.size() + 1;
+  }
+
+  if (const auto *FirstToken = Line.First; FirstToken->is(tok::r_brace)) {
+    assert(!OpeningBrace || OpeningBrace->is(TT_ControlStatementLBrace));
+    Length -= FirstToken->TokenText.size() + 1;
   }
 
   Index = 0;
@@ -1615,7 +1621,11 @@ void UnwrappedLineParser::parseStructuralElement(
     // e.g. "default void f() {}" in a Java interface.
     break;
   case tok::kw_case:
-    // In Verilog switch is called case.
+    // Proto: there are no switch/case statements.
+    if (Style.isProto()) {
+      nextToken();
+      return;
+    }
     if (Style.isVerilog()) {
       parseBlock();
       addUnwrappedLine();
@@ -1813,9 +1823,6 @@ void UnwrappedLineParser::parseStructuralElement(
         break;
       }
       break;
-    case tok::kw_concept:
-      parseConcept();
-      return;
     case tok::kw_requires: {
       if (Style.isCpp()) {
         bool ParsedClause = parseRequires();
@@ -2098,6 +2105,11 @@ void UnwrappedLineParser::parseStructuralElement(
       parseNew();
       break;
     case tok::kw_case:
+      // Proto: there are no switch/case statements.
+      if (Style.isProto()) {
+        nextToken();
+        return;
+      }
       // In Verilog switch is called case.
       if (Style.isVerilog()) {
         parseBlock();
@@ -2729,6 +2741,14 @@ bool UnwrappedLineParser::handleCppAttributes() {
   return false;
 }
 
+/// Returns whether \c Tok begins a block.
+bool UnwrappedLineParser::isBlockBegin(const FormatToken &Tok) const {
+  // FIXME: rename the function or make
+  // Tok.isOneOf(tok::l_brace, TT_MacroBlockBegin) work.
+  return Style.isVerilog() ? Keywords.isVerilogBegin(Tok)
+                           : Tok.is(tok::l_brace);
+}
+
 FormatToken *UnwrappedLineParser::parseIfThenElse(IfStmtKind *IfKind,
                                                   bool KeepBraces) {
   assert(FormatTok->is(tok::kw_if) && "'if' expected");
@@ -2754,7 +2774,7 @@ FormatToken *UnwrappedLineParser::parseIfThenElse(IfStmtKind *IfKind,
   FormatToken *IfLeftBrace = nullptr;
   IfStmtKind IfBlockKind = IfStmtKind::NotIf;
 
-  if (Keywords.isBlockBegin(*FormatTok, Style)) {
+  if (isBlockBegin(*FormatTok)) {
     FormatTok->setFinalizedType(TT_ControlStatementLBrace);
     IfLeftBrace = FormatTok;
     CompoundStatementIndenter Indenter(this, Style, Line->Level);
@@ -2787,7 +2807,7 @@ FormatToken *UnwrappedLineParser::parseIfThenElse(IfStmtKind *IfKind,
     }
     nextToken();
     handleAttributes();
-    if (Keywords.isBlockBegin(*FormatTok, Style)) {
+    if (isBlockBegin(*FormatTok)) {
       const bool FollowedByIf = Tokens->peekNextToken()->is(tok::kw_if);
       FormatTok->setFinalizedType(TT_ElseLBrace);
       ElseLeftBrace = FormatTok;
@@ -3059,7 +3079,7 @@ void UnwrappedLineParser::parseNew() {
 void UnwrappedLineParser::parseLoopBody(bool KeepBraces, bool WrapRightBrace) {
   keepAncestorBraces();
 
-  if (Keywords.isBlockBegin(*FormatTok, Style)) {
+  if (isBlockBegin(*FormatTok)) {
     if (!KeepBraces)
       FormatTok->setFinalizedType(TT_ControlStatementLBrace);
     FormatToken *LeftBrace = FormatTok;
@@ -3264,26 +3284,6 @@ void UnwrappedLineParser::parseAccessSpecifier() {
   }
 }
 
-/// \brief Parses a concept definition.
-/// \pre The current token has to be the concept keyword.
-///
-/// Returns if either the concept has been completely parsed, or if it detects
-/// that the concept definition is incorrect.
-void UnwrappedLineParser::parseConcept() {
-  assert(FormatTok->is(tok::kw_concept) && "'concept' expected");
-  nextToken();
-  if (!FormatTok->is(tok::identifier))
-    return;
-  nextToken();
-  if (!FormatTok->is(tok::equal))
-    return;
-  nextToken();
-  parseConstraintExpression();
-  if (FormatTok->is(tok::semi))
-    nextToken();
-  addUnwrappedLine();
-}
-
 /// \brief Parses a requires, decides if it is a clause or an expression.
 /// \pre The current token has to be the requires keyword.
 /// \returns true if it parsed a clause.
@@ -3450,6 +3450,8 @@ void UnwrappedLineParser::parseRequiresClause(FormatToken *RequiresToken) {
                                       ? TT_RequiresClauseInARequiresExpression
                                       : TT_RequiresClause);
 
+  // NOTE: parseConstraintExpression is only ever called from this function.
+  // It could be inlined into here.
   parseConstraintExpression();
 
   if (!InRequiresExpression)
@@ -3483,9 +3485,8 @@ void UnwrappedLineParser::parseRequiresExpression(FormatToken *RequiresToken) {
 
 /// \brief Parses a constraint expression.
 ///
-/// This is either the definition of a concept, or the body of a requires
-/// clause. It returns, when the parsing is complete, or the expression is
-/// incorrect.
+/// This is the body of a requires clause. It returns, when the parsing is
+/// complete, or the expression is incorrect.
 void UnwrappedLineParser::parseConstraintExpression() {
   // The special handling for lambdas is needed since tryToParseLambda() eats a
   // token and if a requires expression is the last part of a requires clause
@@ -3552,7 +3553,6 @@ void UnwrappedLineParser::parseConstraintExpression() {
     case tok::minus:
     case tok::star:
     case tok::slash:
-    case tok::kw_decltype:
       LambdaNextTimeAllowed = true;
       // Just eat them.
       nextToken();

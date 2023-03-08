@@ -113,7 +113,7 @@ void collectUserSpecifiedBanks(
 
 /// Check if the argument has a user specified DDR bank corresponding to it in
 /// UserSpecifiedDDRBank
-Optional<sycl::MemBankSpec> getUserSpecifiedBank(
+std::optional<sycl::MemBankSpec> getUserSpecifiedBank(
     Argument *Arg,
     SmallDenseMap<llvm::AllocaInst *, sycl::MemBankSpec, 16> &UserSpecifiedBanks) {
   for (User *U : Arg->users()) {
@@ -142,7 +142,7 @@ private:
             BB->getTerminator()->getMetadata(LLVMContext::MD_loop)->op_begin(),
             BB->getTerminator()->getMetadata(LLVMContext::MD_loop)->op_end());
       else
-        ResultMD.push_back(MDNode::getTemporary(Ctx, None).get());
+        ResultMD.push_back(MDNode::getTemporary(Ctx, std::nullopt).get());
 
       ResultMD.push_back(Annotation);
       MDNode *MDN = MDNode::getDistinct(Ctx, ResultMD);
@@ -515,7 +515,7 @@ public:
       collectUserSpecifiedBanks(F, UserSpecifiedBanks);
 
       for (Argument &A : F.args()) {
-        if (Optional<sycl::MemBankSpec> Bank =
+        if (std::optional<sycl::MemBankSpec> Bank =
                 getUserSpecifiedBank(&A, UserSpecifiedBanks)) {
           sycl::annotateMemoryBank(&A, *Bank);
         }
