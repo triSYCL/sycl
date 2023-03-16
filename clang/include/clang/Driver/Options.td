@@ -6465,6 +6465,9 @@ def fsycl_allow_variadic_func : Flag<["-"], "fsycl-allow-variadic-func">,
 def fsycl_use_vxx_names : Flag<["-"], "fsycl-use-vxx-names">,
   HelpText<"Allow virtual functions and types in SYCL device.">,
   MarshallingInfoFlag<TargetOpts<"SYCLUseVXXNames">>;
+def fsycl_use_aie2_lib : Flag<["-"], "fsycl-use-aie2-lib">,
+  HelpText<"Allow virtual functions and types in SYCL device.">,
+  MarshallingInfoFlag<TargetOpts<"SYCLUseAIE2Lib">>;
 def fdeclare_opencl_builtins : Flag<["-"], "fdeclare-opencl-builtins">,
   HelpText<"Add OpenCL builtin function declarations (experimental)">;
 def fdeclare_spirv_builtins

@@ -85,6 +85,9 @@ public:
   /// backend
   bool SYCLUseVXXNames : 1;
 
+  /// \brief generate code targeting the version2 of the acap/aie lib
+  bool SYCLUseAIE2Lib : 1;
+
   /// \brief Enumeration value for AMDGPU code object version, which is the
   /// code object version times 100.
   enum CodeObjectVersionKind {

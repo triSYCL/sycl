@@ -68,4 +68,7 @@ DECL_PREFIX void cstream_write48(const char* in_buffer) DECL_POSTFIX
 
 }
 
+#undef DECL_PREFIX
+#undef DECL_POSTFIX
+
 #endif

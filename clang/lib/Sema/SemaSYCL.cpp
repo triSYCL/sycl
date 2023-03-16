@@ -5278,11 +5278,15 @@ static void OutputStableNameInChars(raw_ostream &O, StringRef Name) {
 
 void SYCLIntegrationHeader::emit(raw_ostream &O) {
   bool IsAIE = S.getASTContext().getTargetInfo().getTriple().isXilinxAIE();
+  std::string AIENamespaceName =
+      S.getASTContext().getTargetInfo().getTargetOpts().SYCLUseAIE2Lib
+          ? "aie"
+          : "trisycl";
   O << "// This is auto-generated SYCL integration header.\n";
   O << "\n";
 
   if (IsAIE) {
-    O << "#include <triSYCL/detail/kernel_desc.hpp>\n";
+    O << "#include <" << AIENamespaceName << "/detail/kernel_desc.hpp>\n";
   }
   else {
     O << "#include <sycl/detail/defines_elementary.hpp>\n";
@@ -5339,7 +5343,7 @@ void SYCLIntegrationHeader::emit(raw_ostream &O) {
     O << "// Specialization constants IDs:\n";
     for (const auto &P : llvm::make_range(SpecConsts.begin(), End)) {
       if (IsAIE)
-        O << "template <> struct trisycl::detail::SpecConstantInfo<";
+        O << "template <> struct " << AIENamespaceName << "::detail::SpecConstantInfo<";
       else
         O << "template <> struct sycl::detail::SpecConstantInfo<";
       O << P.first.getAsString(Policy);
@@ -5358,7 +5362,7 @@ void SYCLIntegrationHeader::emit(raw_ostream &O) {
   O << "\n";
 
   if (IsAIE) {
-    O << "namespace trisycl {\n";
+    O << "namespace " << AIENamespaceName << " {\n";
   } else {
     O << "namespace sycl {\n";
     O << "__SYCL_INLINE_VER_NAMESPACE(_V1) {\n";

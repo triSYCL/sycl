@@ -8480,7 +8480,7 @@ bool LValueExprEvaluator::VisitMemberExpr(const MemberExpr *E) {
           Info.AccessingStaticConstantDataMember);
       if(Info.InConstantContext)
         Info.AccessingStaticConstantDataMember = true;
-      VisitIgnoredBaseExpression(E->getBase());
+      // VisitIgnoredBaseExpression(E->getBase());
       return Success(MD);
     }
   }
