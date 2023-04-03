@@ -31,9 +31,9 @@
 #pragma clang diagnostic ignored "-Wgnu-include-next"
 #endif
 
+#include <CL/cl.h>
 #include <sycl/detail/pi.h>
 #include <sycl/detail/pi.hpp>
-#include <CL/cl.h>
 
 #include <array>
 #include <atomic>
@@ -73,8 +73,8 @@
 #pragma clang diagnostic pop
 #endif
 
-// Most of the functions in the API exist but do not have an implementation, so most
-// parameters are not used and it is expected
+// Most of the functions in the API exist but do not have an implementation, so
+// most parameters are not used and it is expected
 #if defined(__clang__)
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wunused-parameter"
@@ -83,7 +83,7 @@
 
 #endif
 
-/// Base class for _pi_* objects that need ref-counting 
+/// Base class for _pi_* objects that need ref-counting
 template <typename base> class ref_counted_base {
   std::atomic<uint32_t> refCount_;
 
@@ -352,8 +352,7 @@ template <typename T> class no_destroy {
   } s;
 
 public:
-  template<typename ... Ts>
-  no_destroy(Ts&&... ts) {
+  template <typename... Ts> no_destroy(Ts &&...ts) {
     new (&s.data) T(std::forward<Ts>(ts)...);
   }
   operator T &() { return get(); }
@@ -407,7 +406,8 @@ public:
   unsigned get_num_device() { return devices_.size(); }
   ref_counted_ref<_pi_device> get_device(unsigned idx) { return devices_[idx]; }
   /// Add a device if it inst't already in the list
-  template <typename... Ts> ref_counted_ref<_pi_device> make_device(Ts &&...ts) {
+  template <typename... Ts>
+  ref_counted_ref<_pi_device> make_device(Ts &&...ts) {
     auto new_dev = REPRODUCE_CALL(xrt::device, std::forward<Ts>(ts)...);
     auto bdf = new_dev.template get_info<xrt::info::device::bdf>();
     for (ref_counted_ref<_pi_device> dev : devices_)
@@ -505,8 +505,7 @@ struct _pi_queue : ref_counted_base<_pi_queue> {
       : context_{context}, device_{device} {}
   /// iterator over all events in the list, it is safe to modify the provided
   /// list node in func.
-  template<typename T>
-  void for_each_events(T func);
+  template <typename T> void for_each_events(T func);
 };
 
 using pfn_notify = void (*)(pi_event event, pi_int32 eventCommandStatus,
@@ -526,7 +525,8 @@ public:
 template <typename T> void _pi_queue::for_each_events(T func) {
   _pi_event *curr = event_list.next;
   while (curr) {
-    /// Make sure we are not affected by changes to the node made by the function
+    /// Make sure we are not affected by changes to the node made by the
+    /// function
     _pi_event *next = curr->next;
     func(curr);
     curr = next;
@@ -571,9 +571,9 @@ struct _pi_kernel : ref_counted_base<_pi_kernel> {
   }
 };
 
-void wait_on_events(const _pi_event* const* e, int count) {
+void wait_on_events(const _pi_event *const *e, int count) {
   for (int i = 0; i < count; i++)
-    const_cast<_pi_event*>(e[i])->wait();
+    const_cast<_pi_event *>(e[i])->wait();
 }
 
 // -------------------------------------------------------------
@@ -668,11 +668,10 @@ void assertion(bool Condition, const char *Message) {
   std::terminate();
 }
 
-}
-}
-}
-}
-
+} // namespace pi
+} // namespace detail
+} // __SYCL_INLINE_VER_NAMESPACE(_V1)
+} // namespace sycl
 
 /// Obtains the XRT platform.
 pi_result xrt_piPlatformsGet(uint32_t num_entries, pi_platform *platforms,
@@ -1332,6 +1331,22 @@ pi_result xrt_piQueueCreate(pi_context context, pi_device device,
   return PI_SUCCESS;
 }
 
+pi_result xrt_piextQueueCreate(pi_context Context, pi_device Device,
+                               pi_queue_properties *Properties,
+                               pi_queue *Queue) {
+  assert(Properties);
+  // Expect flags mask to be passed first.
+  assert(Properties[0] == PI_QUEUE_FLAGS);
+  if (Properties[0] != PI_QUEUE_FLAGS)
+    return PI_ERROR_INVALID_VALUE;
+  pi_queue_properties Flags = Properties[1];
+  // Extra data isn't supported yet.
+  assert(Properties[2] == 0);
+  if (Properties[2] != 0)
+    return PI_ERROR_INVALID_VALUE;
+  return xrt_piQueueCreate(Context, Device, Flags, Queue);
+}
+
 pi_result xrt_piQueueGetInfo(pi_queue command_queue, pi_queue_info param_name,
                              size_t param_value_size, void *param_value,
                              size_t *param_value_size_ret) {
@@ -1489,18 +1504,18 @@ pi_result xrt_piEnqueueKernelLaunch(
   struct _pi_event_kernel_launch : _pi_event {
     ref_counted_ref<_pi_kernel> kernel;
     bool done_flag = false;
-    _pi_event_kernel_launch(_pi_queue* q, ref_counted_ref<_pi_kernel> k) : _pi_event(q), kernel(k) {}
+    _pi_event_kernel_launch(_pi_queue *q, ref_counted_ref<_pi_kernel> k)
+        : _pi_event(q), kernel(k) {}
     virtual void wait() override {
       if (done_flag)
         return;
       REPRODUCE_MEMCALL(kernel->run_, wait);
       done_flag = true;
     }
-    virtual bool is_done() override {
-      return done_flag;
-    }
+    virtual bool is_done() override { return done_flag; }
   };
-  *event = make_ref_counted<_pi_event_kernel_launch>(command_queue, kernel).give_externally();
+  *event = make_ref_counted<_pi_event_kernel_launch>(command_queue, kernel)
+               .give_externally();
 
   REPRODUCE_MEMCALL(kernel->run_, start);
 
@@ -1621,7 +1636,7 @@ pi_result xrt_piProgramCreateWithBinary(
     *program = make_ref_counted<_pi_program>(context, std::move(xclbin))
                    .give_externally();
     return PI_SUCCESS;
-  } catch (const std::system_error& err) {
+  } catch (const std::system_error &err) {
     sycl::detail::pi::log()
         << "XRT error:" << err.code() << ":" << err.what() << std::endl;
     return PI_ERROR_UNKNOWN;
@@ -2136,9 +2151,55 @@ pi_result xrt_piextUSMGetMemAllocInfo(pi_context context, const void *ptr,
   sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
-pi_result xrt_piTearDown(void *) {
-  return PI_SUCCESS;
+pi_result xrt_piextEnqueueDeviceGlobalVariableWrite(
+    pi_queue queue, pi_program program, const char *name,
+    pi_bool blocking_write, size_t count, size_t offset, const void *src,
+    pi_uint32 num_events_in_wait_list, const pi_event *event_wait_list,
+    pi_event *event) {
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
+
+pi_result xrt_piextEnqueueDeviceGlobalVariableRead(
+    pi_queue queue, pi_program program, const char *name, pi_bool blocking_read,
+    size_t count, size_t offset, void *dst, pi_uint32 num_events_in_wait_list,
+    const pi_event *event_wait_list, pi_event *event) {
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+}
+
+// TODO: Implement this. Remember to return true for
+//       PI_EXT_ONEAPI_CONTEXT_INFO_USM_FILL2D_SUPPORT when it is implemented.
+pi_result xrt_piextUSMEnqueueFill2D(pi_queue, void *, size_t, size_t,
+                                    const void *, size_t, size_t, pi_uint32,
+                                    const pi_event *, pi_event *) {
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  return {};
+}
+
+// TODO: Implement this. Remember to return true for
+//       PI_EXT_ONEAPI_CONTEXT_INFO_USM_MEMSET2D_SUPPORT when it is implemented.
+pi_result xrt_piextUSMEnqueueMemset2D(pi_queue, void *, size_t, int, size_t,
+                                      size_t, pi_uint32, const pi_event *,
+                                      pi_event *) {
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  return {};
+}
+
+pi_result xrt_piextUSMEnqueueMemcpy2D(pi_queue queue, pi_bool blocking,
+                                      void *dst_ptr, size_t dst_pitch,
+                                      const void *src_ptr, size_t src_pitch,
+                                      size_t width, size_t height,
+                                      pi_uint32 num_events_in_wait_list,
+                                      const pi_event *event_wait_list,
+                                      pi_event *event) {
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+}
+
+pi_result xrt_piGetDeviceAndHostTimer(pi_device Device, uint64_t *DeviceTime,
+                                      uint64_t *HostTime) {
+  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+}
+
+pi_result xrt_piTearDown(void *) { return PI_SUCCESS; }
 
 template <typename, auto func> struct xrt_pi_call_wrapper;
 
@@ -2177,8 +2238,8 @@ pi_result piPluginInit(pi_plugin *PluginInit) {
 
 // Forward calls to Xilinx RT (XRT).
 #define _PI_CL(pi_api, xrt_api)                                                \
-  (PluginInit->PiFunctionTable).pi_api = (decltype(                            \
-      &::pi_api))xrt_pi_call_wrapper<decltype(&xrt_api), &xrt_api>::call;
+  (PluginInit->PiFunctionTable).pi_api = (decltype(&::pi_api))                 \
+      xrt_pi_call_wrapper<decltype(&xrt_api), &xrt_api>::call;
 
   // Platform
   _PI_CL(piPlatformsGet, xrt_piPlatformsGet)
@@ -2207,6 +2268,7 @@ pi_result piPluginInit(pi_plugin *PluginInit) {
          xrt_piextContextCreateWithNativeHandle)
   // Queue
   _PI_CL(piQueueCreate, xrt_piQueueCreate)
+  _PI_CL(piextQueueCreate, xrt_piextQueueCreate)
   _PI_CL(piQueueGetInfo, xrt_piQueueGetInfo)
   _PI_CL(piQueueFinish, xrt_piQueueFinish)
   _PI_CL(piQueueFlush, xrt_piQueueFlush)
@@ -2297,6 +2359,17 @@ pi_result piPluginInit(pi_plugin *PluginInit) {
   _PI_CL(piextUSMEnqueuePrefetch, xrt_piextUSMEnqueuePrefetch)
   _PI_CL(piextUSMEnqueueMemAdvise, xrt_piextUSMEnqueueMemAdvise)
   _PI_CL(piextUSMGetMemAllocInfo, xrt_piextUSMGetMemAllocInfo)
+  _PI_CL(piextUSMEnqueueFill2D, xrt_piextUSMEnqueueFill2D)
+  _PI_CL(piextUSMEnqueueMemset2D, xrt_piextUSMEnqueueMemset2D)
+  _PI_CL(piextUSMEnqueueMemcpy2D, xrt_piextUSMEnqueueMemcpy2D)
+
+  // Device global variable
+  _PI_CL(piextEnqueueDeviceGlobalVariableWrite,
+         xrt_piextEnqueueDeviceGlobalVariableWrite)
+  _PI_CL(piextEnqueueDeviceGlobalVariableRead,
+         xrt_piextEnqueueDeviceGlobalVariableRead)
+
+  _PI_CL(piGetDeviceAndHostTimer, xrt_piGetDeviceAndHostTimer)
 
   _PI_CL(piextKernelSetArgMemObj, xrt_piextKernelSetArgMemObj)
   _PI_CL(piextKernelSetArgSampler, xrt_piextKernelSetArgSampler)

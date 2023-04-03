@@ -73,10 +73,10 @@ int main() {
   sycl::buffer<int> c { N };
 
   {
-    auto a_b = b.get_access<sycl::access::mode::discard_write>();
+    sycl::host_accessor a_b{b, sycl::write_only};
     // Initialize buffer with increasing numbers starting at 0
     std::iota(&a_b[0], &a_b[a_b.size()], 0);
-    auto a_c = c.get_access<sycl::access::mode::discard_write>();
+    sycl::host_accessor a_c{c, sycl::write_only};
     // Initialize buffer with increasing numbers starting at 0
     std::iota(&a_c[0], &a_c[a_c.size()], 1);
   }
@@ -108,9 +108,9 @@ int main() {
   });
 
   {
-    auto a_a = a.get_access<sycl::access::mode::read>();
-    auto a_b = b.get_access<sycl::access::mode::read>();
-    auto a_c = c.get_access<sycl::access::mode::read>();
+    sycl::host_accessor a_a{a, sycl::read_only};
+    sycl::host_accessor a_b{b, sycl::read_only};
+    sycl::host_accessor a_c{c, sycl::read_only};
 
     for (unsigned int i = 0 ; i < a.size(); ++i)
       assert(a_a[i] == a_b[i] + a_c[i]);

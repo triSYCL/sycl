@@ -58,7 +58,7 @@ int main() {
   buffer<int> ob(range<1>{1});
 
   q.submit([&](handler &cgh) {
-    auto wb = ob.get_access<access::mode::write>(cgh);
+    sycl::accessor wb{ob, cgh, sycl::write_only};
 
     cgh.single_task<kernel_1>([=] {
       wb[0] = 1;
@@ -66,13 +66,13 @@ int main() {
   });
 
   {
-    auto rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob, sycl::read_only};
     assert(rb[0] == 1 && "kernel execution or assignment error");
     printf("%d \n", rb[0]);
   }
 
   q.submit([&](handler &cgh) {
-    auto wb = ob.get_access<access::mode::write>(cgh);
+    sycl::accessor wb{ob, cgh, sycl::write_only};
 
     cgh.single_task<class kernel_2>([=] {
       wb[0] += 2;
@@ -80,13 +80,13 @@ int main() {
   });
 
   {
-    auto rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob, sycl::read_only};
     assert(rb[0] == 3 && "kernel execution or assignment error");
     printf("%d \n", rb[0]);
   }
 
   q.submit([&](handler &cgh) {
-    auto wb = ob.get_access<access::mode::write>(cgh);
+    sycl::accessor wb{ob, cgh, sycl::write_only};
 
     cgh.single_task<second_namespace::second_kernel<char>>([=] {
       wb[0] += 3;
@@ -94,13 +94,13 @@ int main() {
   });
 
   {
-    auto rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob, sycl::read_only};
     assert(rb[0] == 6 && "kernel execution or assignment error");
     printf("%d \n", rb[0]);
   }
 
   q.submit([&](handler &cgh) {
-    auto wb = ob.get_access<access::mode::write>(cgh);
+    sycl::accessor wb{ob, cgh, sycl::write_only};
 
     // note: in the integration header specialization of this kernel it removes
     // the keyword struct from the struct X declaration, it works as it by
@@ -112,33 +112,33 @@ int main() {
   });
 
   {
-    auto rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob, sycl::read_only};
     assert(rb[0] == 10 && "kernel execution or assignment error");
     printf("%d \n", rb[0]);
   }
 
   q.submit([&](handler &cgh) {
-    auto wb = ob.get_access<access::mode::write>(cgh);
+    sycl::accessor wb{ob, cgh, sycl::write_only};
     cgh.single_task<fourth_kernel<template_arg_ns::namespaced_arg<1>>>([=] {
       wb[0] += 5;
     });
   });
 
   {
-    auto rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob, sycl::read_only};
     assert(rb[0] == 15 && "kernel execution or assignment error");
     printf("%d \n", rb[0]);
   }
 
   q.submit([&](handler &cgh) {
-    auto wb = ob.get_access<access::mode::write>(cgh);
+    sycl::accessor wb{ob, cgh, sycl::write_only};
     cgh.single_task<nm1::sixth_kernel<nm1::nm2::fifth_kernel<10>>>([=] {
       wb[0] += 6;
     });
   });
 
   {
-    auto rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob, sycl::read_only};
     assert(rb[0] == 21 && "kernel execution or assignment error");
     printf("%d \n", rb[0]);
   }

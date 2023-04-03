@@ -47,7 +47,7 @@ int main() {
   buffer<unsigned int> ob(range<1>{2});
   
   q.submit([&](handler &cgh) {
-    auto wb = ob.get_access<access::mode::write>(cgh);
+    sycl::accessor wb{ob, cgh, sycl::write_only};
     cgh.single_task<class add>([=] {
 #ifdef __SYCL_SPIR_DEVICE__
       wb[0] = 1;
@@ -63,7 +63,7 @@ int main() {
     });
   });
 
-   auto rb = ob.get_access<access::mode::read>();
+   sycl::host_accessor rb{ob, sycl::read_only};
        
    if (rb[0] == 1)   
       std::cout << "__SYCL_SPIR_DEVICE__ defined on device \n";

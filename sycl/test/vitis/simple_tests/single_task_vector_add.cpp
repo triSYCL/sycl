@@ -25,13 +25,13 @@ int main(int argc, char *argv[]) {
   buffer<Type> c { N };
 
   {
-    auto a_b = b.get_access<access::mode::discard_write>();
+    sycl::host_accessor a_b{b, sycl::write_only};
     // Initialize buffer with increasing numbers starting at 0
     std::iota(&a_b[0], &a_b[a_b.size()], 0);
   }
 
   {
-    auto a_c = c.get_access<access::mode::discard_write>();
+    sycl::host_accessor a_c{c, sycl::write_only};
     // Initialize buffer with increasing numbers starting at 5
     std::iota(&a_c[0], &a_c[a_c.size()], 5);
   }
@@ -44,9 +44,9 @@ int main(int argc, char *argv[]) {
   // Launch a kernel to do the summation
   q.submit([&] (handler &cgh) {
       // Get access to the data
-      auto a_a = a.get_access<access::mode::write>(cgh);
-      auto a_b = b.get_access<access::mode::read>(cgh);
-      auto a_c = c.get_access<access::mode::read>(cgh);
+      sycl::accessor a_a{a, cgh, sycl::write_only};
+      sycl::accessor a_b{b, cgh, sycl::read_only};
+      sycl::accessor a_c{c, cgh, sycl::read_only};
 
       // A typical FPGA-style pipelined kernel
       cgh.single_task<class add>([=] () {
@@ -60,7 +60,7 @@ int main(int argc, char *argv[]) {
     });
 
   // Verify the result
-  auto a_a = a.get_access<access::mode::read>();
+  sycl::host_accessor a_a{a, sycl::read_only};
   for (unsigned int i = 0 ; i < a.size(); ++i) {
     assert(a_a[i] == 5 + 2*i && "invalid result from kernel");
   }
