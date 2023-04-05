@@ -946,7 +946,7 @@ python3 $DPCPP_HOME/llvm/buildbot/configure.py --xrt --cuda --hip \
   --shared-libs --cmake-opt="-DCMAKE_EXPORT_COMPILE_COMMANDS=1"
 ```
 Use `--build-type=Debug` for a debug build.
-`
+
 For more control, see [section Build](#build).
 
 # Usage
