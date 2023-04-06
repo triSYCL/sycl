@@ -23,7 +23,7 @@
 
 */
 
-#include <sycl/sycl.hpp
+#include <sycl/sycl.hpp>
 #include <sycl/ext/xilinx/fpga.hpp>
 #include <iostream>
 #include <iterator>
@@ -89,8 +89,8 @@ int main(int argc, char* argv[]) {
   std::cout << "Launching Kernel... \n";
 
   auto event = q.submit([&](handler &cgh) {
-    auto pixel_rb = ib.get_access<access::mode::read>(cgh);
-    auto pixel_wb = ob.get_access<access::mode::write>(cgh);
+    sycl::accessor pixel_rb{ib, cgh, sycl::read_only};
+    sycl::accessor pixel_wb{ob, cgh, sycl::write_only};
 
     printf("pixel_rb size in submit: %zu \n", pixel_rb.get_size());
     printf("pixel_rb count in submit: %zu \n", pixel_rb.size());
@@ -150,7 +150,7 @@ int main(int argc, char* argv[]) {
   // a buffer access or a wait MUST be used before querying the event when
   // using Intel SYCL runtime at the moment as get_profiling_info is not a
   // blocking event in the SYCL specification at the moment(change in progress).
-  auto pixel_rb = ob.get_access<access::mode::read>();
+  sycl::host_accessor pixel_rb{ob, sycl::read_only};
 
   std::cout << "Getting Result... \n";
   auto nstimeend = event.get_profiling_info<info::event_profiling::command_end>();
@@ -160,7 +160,7 @@ int main(int argc, char* argv[]) {
 
   std::cout << "Calculating Output energy.... \n";
 
-  cv::Mat output(height, width, CV_8UC1, pixel_rb.get_pointer());
+  cv::Mat output(height, width, CV_8UC1, (void*)pixel_rb.get_pointer());
 
   short oMax = 0;
   oMax = *std::max_element(output.begin<uchar>(), output.end<uchar>(),

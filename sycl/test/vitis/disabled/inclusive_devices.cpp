@@ -6,7 +6,7 @@ int main() {
     sycl::queue { [&](sycl::device dev) {
       return (device_name == dev.template get_info<sycl::info::device::name>()) - 1;
     } }.submit([&](auto& h) {
-      auto a = sycl::accessor { v, h };
+      sycl::accessor a{ v, h };
       h.parallel_for(a.size(), [=](int i) { work(i, a); });
     });
   };

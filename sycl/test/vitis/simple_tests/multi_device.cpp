@@ -22,7 +22,7 @@ template<typename Selector> void test_device(Selector s) {
   // Submitting command group(work) to queue
   Queue.submit([&](sycl::handler &cgh) {
     // Getting write only access to the buffer on a device
-    auto Accessor = Buffer.get_access<sycl::access::mode::write>(cgh);
+    sycl::accessor Accessor{Buffer, cgh, sycl::write_only};
     // Executing kernel
     cgh.single_task<FillBuffer<Selector>>([=] {
                                              for (std::size_t i = 0 ; i < size ; ++i) {
@@ -33,7 +33,7 @@ template<typename Selector> void test_device(Selector s) {
 
   // Getting read only access to the buffer on the host.
   // Implicit barrier waiting for queue to complete the work.
-  const auto HostAccessor = Buffer.get_access<sycl::access::mode::read>();
+  const sycl::host_accessor HostAccessor{Buffer, sycl::read_only};
 
   // Check the results
   bool MismatchFound = false;

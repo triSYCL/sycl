@@ -298,6 +298,7 @@ class VitisCompilationDriver:
         self.ok = True
         self.vitis_clang_bin = self.vitisexec.clang_bin
         self.cmd_number = 0
+        self.dont_execute_vxx = arguments.only_print_vxx_cmds or ('SYCL_VXX_DONT_USE_VXX' in environ)
 
     def _dump_cmd(self, stem, args):
         cmdline = " ".join(map(str, args))
@@ -451,7 +452,8 @@ class VitisCompilationDriver:
             spir_linked = self._link_spir(assembled, prepared_lib)
             final = self._next_passes(spir_linked)
             try:
-                shutil.copy2(final, self.outpath)
+                if not self.dont_execute_vxx:
+                    shutil.copy2(final, self.outpath)
             except FileNotFoundError:
                 print(
                     f"Output {self.xclbin} was not properly produced by previous commands")
@@ -466,7 +468,6 @@ class VXXCompilationDriver(VitisCompilationDriver):
         # TODO: XILINX_PLATFORM should be passed by clang driver instead
         self.xilinx_platform = environ['XILINX_PLATFORM']
         self.extra_comp_args = []
-        self.dont_execute_vxx = arguments.only_print_vxx_cmds or ('SYCL_VXX_DONT_USE_VXX' in environ)
         if arguments.vitis_comp_argfile is not None and exists(arguments.vitis_comp_argfile):
             with arguments.vitis_comp_argfile.open("r") as f:
                 content = f.read().strip()

@@ -289,6 +289,8 @@ std::vector<std::pair<std::string, backend>> findPlugins() {
                           "conjunction with SYCL_DEVICE_FILTER");
   } else if (!FilterList && !OdsTargetList) {
     PluginNames.emplace_back(__SYCL_OPENCL_PLUGIN_NAME, backend::opencl);
+    PluginNames.emplace_back(__SYCL_UNIFIED_RUNTIME_PLUGIN_NAME,
+                             backend::ext_oneapi_unified_runtime);
     PluginNames.emplace_back(__SYCL_LEVEL_ZERO_PLUGIN_NAME,
                              backend::ext_oneapi_level_zero);
     PluginNames.emplace_back(__SYCL_CUDA_PLUGIN_NAME, backend::ext_oneapi_cuda);
@@ -344,6 +346,10 @@ std::vector<std::pair<std::string, backend>> findPlugins() {
     if (list.backendCompatible(backend::opencl)) {
       PluginNames.emplace_back(__SYCL_OPENCL_PLUGIN_NAME, backend::opencl);
     }
+    if (list.backendCompatible(backend::ext_oneapi_unified_runtime)) {
+      PluginNames.emplace_back(__SYCL_UNIFIED_RUNTIME_PLUGIN_NAME,
+                               backend::ext_oneapi_unified_runtime);
+    }
     if (list.backendCompatible(backend::ext_oneapi_level_zero)) {
       PluginNames.emplace_back(__SYCL_LEVEL_ZERO_PLUGIN_NAME,
                                backend::ext_oneapi_level_zero);
@@ -369,12 +375,12 @@ std::vector<std::pair<std::string, backend>> findPlugins() {
 // Load the Plugin by calling the OS dependent library loading call.
 // Return the handle to the Library.
 void *loadPlugin(const std::string &PluginPath) {
-  return loadOsLibrary(PluginPath);
+  return loadOsPluginLibrary(PluginPath);
 }
 
 // Unload the given plugin by calling teh OS-specific library unloading call.
 // \param Library OS-specific library handle created when loading.
-int unloadPlugin(void *Library) { return unloadOsLibrary(Library); }
+int unloadPlugin(void *Library) { return unloadOsPluginLibrary(Library); }
 
 // Binds all the PI Interface APIs to Plugin Library Function Addresses.
 // TODO: Remove the 'OclPtr' extension to PI_API.
@@ -656,7 +662,7 @@ RT::PiDeviceBinaryType getBinaryImageFormat(const unsigned char *ImgData,
               {PI_DEVICE_BINARY_TYPE_NATIVE, 0x43544E49}};
 
   if (ImgSize >= sizeof(Fmts[0].Magic)) {
-    std::remove_const_t<decltype(Fmts[0].Magic)> Hdr = 0;
+    detail::remove_const_t<decltype(Fmts[0].Magic)> Hdr = 0;
     std::copy(ImgData, ImgData + sizeof(Hdr), reinterpret_cast<char *>(&Hdr));
 
     // Check headers for direct formats.

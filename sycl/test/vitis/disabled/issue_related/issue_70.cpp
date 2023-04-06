@@ -44,7 +44,7 @@ auto main() -> int {
   auto s_buf = sycl::buffer<std::size_t, 3>{sycl::range<3>{42, 42, 42}};
 
   q.submit([&](sycl::handler &cgh) {
-    auto s = s_buf.get_access<sycl::access::mode::read_write>(cgh);
+    sycl::accessor s{s_buf, cgh, sycl::read_write};
 
     cgh.single_task<burst_test>([=] { loop(s); });
   });
