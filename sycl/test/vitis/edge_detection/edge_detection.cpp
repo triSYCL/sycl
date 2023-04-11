@@ -8,6 +8,8 @@
 // RUN: %run_if_sw_emu %ACC_RUN_PLACEHOLDER %t.out %S/data/input/lola.bmp
 // RUN: %run_if_sw_emu %ACC_RUN_PLACEHOLDER %t.out %S/data/input/vase.bmp
 
+// ./build-release/bin/clang++ -g -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw sycl/test/vitis/edge_detection/edge_detection.cpp -o edge_detection `pkg-config --libs --cflags opencv4`
+
 /*
   Attempt at translating SDAccel Examples edge_detection example to SYCL
 
