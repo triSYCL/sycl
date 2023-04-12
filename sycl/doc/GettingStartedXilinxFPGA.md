@@ -1112,7 +1112,7 @@ environment variable, among others. Thus, to run an example on the
 AMD/Xilinx FPGA shown by the previous `sycl-ls`, the environment
 variable can be set with:
 ```bash
->- export ONEAPI_DEVICE_SELECTOR=opencl:acc:0
+>- export ONEAPI_DEVICE_SELECTOR=xrt:fpga
 ```
 Beware that setting this variable also change the view from `sycl-ls` itself.
 
