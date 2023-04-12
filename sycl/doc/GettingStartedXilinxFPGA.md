@@ -1234,7 +1234,7 @@ To run a SYCL translation of
 https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
 
 ```bash
-cd $DPCPP_HOME/llvm/sycl/test/on-device/vitis/edge_detection
+cd $DPCPP_HOME/llvm/sycl/test/vitis/edge_detection
 # Instruct the compiler and runtime to use real FPGA hardware execution
 $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
     -fsycl-targets=fpga64_hls_hw edge_detection.cpp \
