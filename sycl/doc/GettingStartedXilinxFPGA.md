@@ -305,7 +305,7 @@ export XILINX_VITIS=/opt/xilinx/Vitis/2022.2
 ./build.sh
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
-sudo apt install --reinstall ./Release/xrt_202220.2.14.0_22.04-amd64-xrt.deb
+sudo apt install --reinstall ./Release/xrt_202320.2.16.0_22.04-amd64-xrt.deb
 ```
 
 It will install the user-mode XRT runtime and at least compile and
@@ -325,7 +325,7 @@ cd Debug
 make package
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
-sudo apt install --reinstall ./xrt_202220.2.14.0_22.04-amd64-xrt.deb
+sudo apt install --reinstall ./xrt_202320.2.16.0_22.04-amd64-xrt.deb
 ```
 
 If you also want a debug and verbose version which traces all the
