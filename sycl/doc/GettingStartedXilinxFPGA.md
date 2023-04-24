@@ -4,7 +4,7 @@
 1. [Table of content](#Table-of-content)
 1. [Introduction](#Introduction)
     1. [What's new?](#Whats-new)
-1. [Installation](Installation)
+1. [Installation](#Installation)
     1. [Installing the Alveo U200 board](#Installing-the-Alveo-U200-board)
         1. [Use a modern BIOS](#Use-a-modern-BIOS)
     1. [Install Vitis 2022.2](#Install-Vitis-20222)
