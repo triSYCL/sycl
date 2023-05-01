@@ -120,6 +120,15 @@ add_lit_testsuite(check-acap "Running the ACAP regression tests"
   )
 set_target_properties(check-acap PROPERTIES FOLDER "SYCL tests")
 
+add_lit_testsuite(check-aie "Running the AIE regression tests"
+  ${CMAKE_CURRENT_BINARY_DIR}
+  ARGS ${RT_TEST_ARGS}
+  PARAMS "ACAP=aie"
+  DEPENDS ${SYCL_TEST_DEPS}
+  EXCLUDE_FROM_CHECK_ALL
+  )
+set_target_properties(check-aie PROPERTIES FOLDER "SYCL tests")
+
 add_custom_target(check-sycl)
 add_dependencies(check-sycl check-sycl-spirv)
 set_target_properties(check-sycl PROPERTIES FOLDER "SYCL tests")

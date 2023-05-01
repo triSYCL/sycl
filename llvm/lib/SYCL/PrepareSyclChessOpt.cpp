@@ -143,7 +143,25 @@ struct PrepareSyclChessOptLegacy : public ModulePass {
     GV->setLinkage(llvm::GlobalValue::ExternalLinkage);
   }
 
+  void makeAllMemoryOperationVolatile(Module &M) {
+    for (Function &F : M.getFunctionList())
+      for (BasicBlock &BB : F)
+        for (Instruction &I : BB) {
+          // if (auto* LI = dyn_cast<LoadInst>(&I))
+          //   LI->setVolatile(true);
+          if (auto* SI = dyn_cast<StoreInst>(&I))
+            SI->setVolatile(true);
+          // if (auto* MTI = dyn_cast<MemTransferInst>(&I))
+          //   MTI->setVolatile(ConstantInt::getFalse(M.getContext()));
+          // if (auto* MSI = dyn_cast<MemSetInst>(&I))
+          //   MSI->setVolatile(ConstantInt::getFalse(M.getContext()));
+        }
+  }
+
   bool runOnModule(Module &M) override {
+
+    /// Make everything volatile
+    // makeAllMemoryOperationVolatile(M);
     /// Mark invisible globals as private
     turnNonKernelsIntoPrivate(M);
     /// Prevent the function merger from merging kernels

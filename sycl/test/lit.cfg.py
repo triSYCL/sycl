@@ -219,12 +219,31 @@ else:
 if acap == "off":
     config.excludes += ['acap']
 else:
-    if acap == "only":
-        config.excludes += ['abi', 'basic_tests', 'CMakeLists.txt', 'extensions', 'gdb', 'invoke_simd', 'matrix', 'optional_kernel_features', 'scheduler', 'type_traits', 'vitis', 'check_device_code', 'esimd', 'fpga_tests', 'kernel_param', 'multi_ptr', 'regression', 'tools', 'Unit', 'warnings']
-    config.available_features.add("acap")
-    make_sh_path = os.environ["ACAP_MAKE_SH"]
-    lit_config.note(f"using acap make.sh: {make_sh_path}")
-    config.substitutions.append( ('%acap_clang', f"{make_sh_path} {config.clang}++"))
+    config.excludes += ['abi', 'basic_tests', 'CMakeLists.txt', 'extensions', 'gdb', 'invoke_simd', 'matrix', 'optional_kernel_features', 'scheduler', 'type_traits', 'vitis', 'check_device_code', 'esimd', 'fpga_tests', 'kernel_param', 'multi_ptr', 'regression', 'tools', 'Unit', 'warnings']
+    if acap == "aie":
+        make_sh_path = os.environ["AIE_MAKE_SH"]
+        lit_config.note(f"using aie make.sh: {make_sh_path}")
+        config.available_features.add("aie")
+        config.excludes += ['acap']
+        config.substitutions.append( ('%aie_clang', f"{make_sh_path} {config.clang}++"))
+    else:
+        make_sh_path = os.environ["ACAP_MAKE_SH"]
+        lit_config.note(f"using acap make.sh: {make_sh_path}")
+        config.available_features.add("acap")
+        config.excludes += ['aie']
+        config.substitutions.append( ('%acap_clang', f"{make_sh_path} {config.clang}++"))
+        add_acap_result="echo"
+        if "ACAP_COLLECT_TEST_BIN_PATH" in os.environ:
+            ACAP_COLLECT_TEST_BIN_PATH = os.environ["ACAP_COLLECT_TEST_BIN_PATH"]
+            lit_config.note(f"collecting results into: {ACAP_COLLECT_TEST_BIN_PATH}")
+            subprocess.run(["rm", "-rf", f"{ACAP_COLLECT_TEST_BIN_PATH}"])
+            subprocess.run(["mkdir", f"{ACAP_COLLECT_TEST_BIN_PATH}"])
+            add_acap_result = f"cp --target-directory={ACAP_COLLECT_TEST_BIN_PATH} "
+            config.substitutions.append( ('%add_acap_result', add_acap_result))
+    if "AIE_RUN_ON_DEVICE_SH" in os.environ:
+        run_on_device = os.environ["AIE_RUN_ON_DEVICE_SH"]
+        config.substitutions.append( ('%run_on_device', run_on_device))
+        lit_config.note(f"using aie run_on_device.sh: {run_on_device}")
     llvm_config.with_environment('ACAP_MAKE_IN_PARALLEL', '1')
     required_env = ['HOME', 'USER', 'XILINXD_LICENSE_FILE', 'LM_LICENSE_FILE', 'RDI_INTERNAL_ALLOW_PARTIAL_DATA', 'AIE_ROOT', 'CHESSROOT']
     has_error=False
@@ -235,14 +254,6 @@ else:
     if has_error:
         lit_config.error("Can't configure tests for ACAP")
     llvm_config.with_system_environment(required_env)
-    add_acap_result="echo"
-    if "ACAP_COLLECT_TEST_BIN_PATH" in os.environ:
-        ACAP_COLLECT_TEST_BIN_PATH = os.environ["ACAP_COLLECT_TEST_BIN_PATH"]
-        lit_config.note(f"collecting results into: {ACAP_COLLECT_TEST_BIN_PATH}")
-        subprocess.run(["rm", "-rf", f"{ACAP_COLLECT_TEST_BIN_PATH}"])
-        subprocess.run(["mkdir", f"{ACAP_COLLECT_TEST_BIN_PATH}"])
-        add_acap_result = f"cp --target-directory={ACAP_COLLECT_TEST_BIN_PATH} "
-    config.substitutions.append( ('%add_acap_result', add_acap_result))
 
 # Set timeout for test = 10 mins
 try:
