@@ -138,9 +138,14 @@ source "$KERNELPROP"
 source "$UNMERGED_PROP"
 
 # Compile all our kernels into a .o file.
-$XCHESSCC +P $(nproc) -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c -Oz \
-  -o "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
-  "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
+# AIE_TOOLS_BIN
+if [[ -z "${AIE_TOOLS_BIN}" ]]; then
+  $XCHESSCC +P $(nproc) -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c -Oz \
+    -o "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
+    "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
+else
+  $AIE_TOOLS_BIN/llc --mtriple=aie -O2 --march=aie --function-sections --filetype=obj -o "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
+fi
 
 # The following code will edit the linker script based on the kernel to optimize memory usage.
 # Calculate the sum of the sizes of the data sections inside the .o file containing all kernels.

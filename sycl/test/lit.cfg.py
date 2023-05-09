@@ -220,7 +220,7 @@ if acap == "off":
     config.excludes += ['acap']
 else:
     config.excludes += ['abi', 'basic_tests', 'CMakeLists.txt', 'extensions', 'gdb', 'invoke_simd', 'matrix', 'optional_kernel_features', 'scheduler', 'type_traits', 'vitis', 'check_device_code', 'esimd', 'fpga_tests', 'kernel_param', 'multi_ptr', 'regression', 'tools', 'Unit', 'warnings']
-    if acap == "aie":
+    if "aie" in acap:
         make_sh_path = os.environ["AIE_MAKE_SH"]
         lit_config.note(f"using aie make.sh: {make_sh_path}")
         config.available_features.add("aie")
@@ -244,6 +244,11 @@ else:
         run_on_device = os.environ["AIE_RUN_ON_DEVICE_SH"]
         config.substitutions.append( ('%run_on_device', run_on_device))
         lit_config.note(f"using aie run_on_device.sh: {run_on_device}")
+    if acap == "aie_no_device":
+        config.available_features.add("no_device")
+        config.substitutions.append( ('%if_run_on_device', "true "))
+    else:
+        config.substitutions.append( ('%if_run_on_device', " "))
     llvm_config.with_environment('ACAP_MAKE_IN_PARALLEL', '1')
     required_env = ['HOME', 'USER', 'XILINXD_LICENSE_FILE', 'LM_LICENSE_FILE', 'RDI_INTERNAL_ALLOW_PARTIAL_DATA', 'AIE_ROOT', 'CHESSROOT']
     has_error=False
