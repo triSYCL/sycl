@@ -10,14 +10,16 @@
 int main() {
   aie::device<2, 2> dev;
   aie::queue q(dev);
-  q.submit_uniform([&](auto &ht) {
-    ht.single_task([=](auto &dt) mutable {
+  q.submit_uniform([&](auto& ht) {
+    ht.single_task([=](auto& dt) mutable {
       assert(false);
+      // clang-format off
 // CHECK-DAG: aie(0, 0) at assert.cpp:13: {{.*}} : Assertion `false' failed
 // CHECK-DAG: aie(1, 0) at assert.cpp:13: {{.*}} : Assertion `false' failed
 // CHECK-DAG: aie(0, 1) at assert.cpp:13: {{.*}} : Assertion `false' failed
 // CHECK-DAG: aie(1, 1) at assert.cpp:13: {{.*}} : Assertion `false' failed
 // CHECK-NOT: Assertion `false' failed
+      // clang-format on
     });
   });
 }

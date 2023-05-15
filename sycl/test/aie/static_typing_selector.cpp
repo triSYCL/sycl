@@ -27,19 +27,19 @@ int main() {
             return aie::select<A11>();
         }
       },
-      [](auto &ht) {
-        ht.single_task([](auto &dt) {
+      [](auto& ht) {
+        ht.single_task([](auto& dt) {
           if constexpr (dt.x() == 0) {
             if constexpr (dt.y() == 0) {
-              static_assert(std::is_same_v<decltype(dt.mem()), A00 &>, "");
+              static_assert(std::is_same_v<decltype(dt.mem()), A00&>, "");
             } else {
-              static_assert(std::is_same_v<decltype(dt.mem()), A01 &>, "");
+              static_assert(std::is_same_v<decltype(dt.mem()), A01&>, "");
             }
           } else {
             if constexpr (dt.y() == 0) {
-              static_assert(std::is_same_v<decltype(dt.mem()), A10 &>, "");
+              static_assert(std::is_same_v<decltype(dt.mem()), A10&>, "");
             } else {
-              static_assert(std::is_same_v<decltype(dt.mem()), A11 &>, "");
+              static_assert(std::is_same_v<decltype(dt.mem()), A11&>, "");
             }
           }
         });

@@ -25,39 +25,55 @@ int main() {
             return aie::select<A11>();
         }
       },
-      [](auto &ht) {
-        ht.single_task([](auto &dt) {
+      [](auto& ht) {
+        ht.single_task([](auto& dt) {
           if constexpr (dt.x() == 0) {
             if constexpr (dt.y() == 0) {
-              static_assert(std::is_same_v<decltype(dt.mem()), A00 &>, "");
-              static_assert(std::is_same_v<decltype(dt.mem_south()), aie::detail::out_of_bounds &>, "");
-              static_assert(std::is_same_v<decltype(dt.mem_north()), A01 &>, "");
-              static_assert(std::is_same_v<decltype(dt.mem_west()), aie::detail::out_of_bounds &>, "");
-              static_assert(std::is_same_v<decltype(dt.mem_east()), A00 &>, "");
-              static_assert(dt.get_pos().get_parity() == aie::hw::parity::east, "");
+              static_assert(std::is_same_v<decltype(dt.mem()), A00&>, "");
+              static_assert(std::is_same_v<decltype(dt.mem_south()),
+                                           aie::detail::out_of_bounds&>,
+                            "");
+              static_assert(std::is_same_v<decltype(dt.mem_north()), A01&>, "");
+              static_assert(std::is_same_v<decltype(dt.mem_west()),
+                                           aie::detail::out_of_bounds&>,
+                            "");
+              static_assert(std::is_same_v<decltype(dt.mem_east()), A00&>, "");
+              static_assert(dt.get_pos().get_parity() == aie::hw::parity::east,
+                            "");
             } else {
-              static_assert(std::is_same_v<decltype(dt.mem()), A01 &>, "");
-              static_assert(std::is_same_v<decltype(dt.mem_south()), A00 &>, "");
-              static_assert(std::is_same_v<decltype(dt.mem_north()), aie::detail::out_of_bounds &>, "");
-              static_assert(std::is_same_v<decltype(dt.mem_west()), A01 &>, "");
-              static_assert(std::is_same_v<decltype(dt.mem_east()), A11 &>, "");
-              static_assert(dt.get_pos().get_parity() == aie::hw::parity::west, "");
+              static_assert(std::is_same_v<decltype(dt.mem()), A01&>, "");
+              static_assert(std::is_same_v<decltype(dt.mem_south()), A00&>, "");
+              static_assert(std::is_same_v<decltype(dt.mem_north()),
+                                           aie::detail::out_of_bounds&>,
+                            "");
+              static_assert(std::is_same_v<decltype(dt.mem_west()), A01&>, "");
+              static_assert(std::is_same_v<decltype(dt.mem_east()), A11&>, "");
+              static_assert(dt.get_pos().get_parity() == aie::hw::parity::west,
+                            "");
             }
           } else {
             if constexpr (dt.y() == 0) {
-              static_assert(std::is_same_v<decltype(dt.mem()), A10 &>, "");
-              static_assert(std::is_same_v<decltype(dt.mem_south()), aie::detail::out_of_bounds &>, "");
-              static_assert(std::is_same_v<decltype(dt.mem_north()), A11 &>, "");
-              static_assert(std::is_same_v<decltype(dt.mem_west()), A00 &>, "");
-              static_assert(std::is_same_v<decltype(dt.mem_east()), A10 &>, "");
-              static_assert(dt.get_pos().get_parity() == aie::hw::parity::east, "");
+              static_assert(std::is_same_v<decltype(dt.mem()), A10&>, "");
+              static_assert(std::is_same_v<decltype(dt.mem_south()),
+                                           aie::detail::out_of_bounds&>,
+                            "");
+              static_assert(std::is_same_v<decltype(dt.mem_north()), A11&>, "");
+              static_assert(std::is_same_v<decltype(dt.mem_west()), A00&>, "");
+              static_assert(std::is_same_v<decltype(dt.mem_east()), A10&>, "");
+              static_assert(dt.get_pos().get_parity() == aie::hw::parity::east,
+                            "");
             } else {
-              static_assert(std::is_same_v<decltype(dt.mem()), A11 &>, "");
-              static_assert(std::is_same_v<decltype(dt.mem_south()), A10 &>, "");
-              static_assert(std::is_same_v<decltype(dt.mem_north()), aie::detail::out_of_bounds &>, "");
-              static_assert(std::is_same_v<decltype(dt.mem_west()), A11 &>, "");
-              static_assert(std::is_same_v<decltype(dt.mem_east()), aie::detail::out_of_bounds &>, "");
-              static_assert(dt.get_pos().get_parity() == aie::hw::parity::west, "");
+              static_assert(std::is_same_v<decltype(dt.mem()), A11&>, "");
+              static_assert(std::is_same_v<decltype(dt.mem_south()), A10&>, "");
+              static_assert(std::is_same_v<decltype(dt.mem_north()),
+                                           aie::detail::out_of_bounds&>,
+                            "");
+              static_assert(std::is_same_v<decltype(dt.mem_west()), A11&>, "");
+              static_assert(std::is_same_v<decltype(dt.mem_east()),
+                                           aie::detail::out_of_bounds&>,
+                            "");
+              static_assert(dt.get_pos().get_parity() == aie::hw::parity::west,
+                            "");
             }
           }
         });

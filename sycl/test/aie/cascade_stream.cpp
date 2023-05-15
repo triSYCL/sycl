@@ -12,9 +12,9 @@ int main() {
   std::size_t size = 10;
   buff.resize(size);
   aie::queue q(dev);
-  q.submit_uniform([&](auto &ht) {
+  q.submit_uniform([&](auto& ht) {
     aie::accessor acc{ht, buff};
-    ht.single_task([=](auto &dt) mutable {
+    ht.single_task([=](auto& dt) mutable {
       if constexpr (dt.x() == 0) {
         for (int i = 0; i < size; i++) {
           acc[i] = i;
