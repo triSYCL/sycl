@@ -10,14 +10,14 @@ int counter = 0;
 
 struct counter_service {
   struct data_type {};
-  template <typename Parent> struct add_to_dev_handle {
-  private:
-    auto* get() { return static_cast<Parent*>(this)->dt(); }
 
-  public:
+  /// I am not sure it is really simpler by using add_to_api_base than without
+  template <typename Parent>
+  struct add_to_service_api : aie::add_to_api_base<add_to_service_api<Parent>> {
+    using base = aie::add_to_api_base<add_to_service_api<Parent>>;
     uint32_t get_counter() {
       data_type data{};
-      return get()->perform_service(data);
+      return base::tile().perform_service(data);
     }
   };
   static uint32_t act_on_data(int x, int y, aie::device_mem_handle h,
@@ -28,14 +28,14 @@ struct counter_service {
 
 struct nothing_service {
   struct data_type {};
-  template <typename Parent> struct add_to_dev_handle {
+  template <typename Parent> struct add_to_service_api {
   private:
-    auto* get() { return static_cast<Parent*>(this)->dt(); }
+    auto& tile() { return *static_cast<Parent*>(this)->dt(); }
 
   public:
     void nothing() {
       data_type data{};
-      return get()->perform_service(data);
+      return tile().perform_service(data);
     }
   };
   static void act_on_data(int x, int y, aie::device_mem_handle h, data_type d) {
