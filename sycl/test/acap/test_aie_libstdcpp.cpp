@@ -10,7 +10,7 @@
 #include <sycl/sycl.hpp>
 
 #include "triSYCL/vendor/Xilinx/graphics.hpp"
-#include "triSYCL/vendor/Xilinx/acap/aie/rpc.hpp"
+#include "triSYCL/vendor/Xilinx/acap/aie/service.hpp"
 #include "triSYCL/vendor/Xilinx/acap/aie/log.hpp"
 
 #include "triSYCL/vendor/Xilinx/acap/aie/device_libstdcpp.hpp"

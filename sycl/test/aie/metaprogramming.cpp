@@ -35,20 +35,20 @@ int main() {
   static_assert(tseq::get_index<B> == 1, "");
   static_assert(tseq::get_index<C> == 2, "");
 
-  using rpc = aie::detail::rpcs_info<A, B, C>;
+  using service = aie::detail::service_list_info<A, B, C>;
 
-  static_assert(std::is_same_v<rpc::data_seq, aie::detail::type_seq<A::data_type, B::data_type, C::data_type>>, "");
-  static_assert(std::is_same_v<rpc::ret_seq, aie::detail::type_seq<uint32_t, uint32_t, bool>>, "");
+  static_assert(std::is_same_v<service::data_seq, aie::detail::type_seq<A::data_type, B::data_type, C::data_type>>, "");
+  static_assert(std::is_same_v<service::ret_seq, aie::detail::type_seq<uint32_t, uint32_t, bool>>, "");
 
-  rpc::for_any(0, [&]<typename T>(){
+  service::for_any(0, [&]<typename T>(){
     static_assert(std::is_same_v<T, A> || std::is_same_v<T, B> || std::is_same_v<T, C>, "");
     assert((std::is_same_v<T, A>));
   });
-  rpc::for_any(1, [&]<typename T>(){
+  service::for_any(1, [&]<typename T>(){
     static_assert(std::is_same_v<T, A> || std::is_same_v<T, B> || std::is_same_v<T, C>, "");
     assert((std::is_same_v<T, B>));
   });
-  rpc::for_any(2, [&]<typename T>(){
+  service::for_any(2, [&]<typename T>(){
     static_assert(std::is_same_v<T, A> || std::is_same_v<T, B> || std::is_same_v<T, C>, "");
     assert((std::is_same_v<T, C>));
   });
