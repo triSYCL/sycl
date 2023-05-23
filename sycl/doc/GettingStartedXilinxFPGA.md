@@ -9,7 +9,7 @@
         1. [Use a modern BIOS](#Use-a-modern-BIOS)
     1. [Install Vitis 2022.2](#Install-Vitis-20222)
     1. [Boot on a specific kernel](#Boot-on-a-specific-kernel)
-    1. [Installing the AMD/Xilinx XRT runtime](#Installing-the-AMDXilinx-XRT-runtime)
+    1. [Installing the AMD XRT runtime](#Installing-the-AMDXilinx-XRT-runtime)
     1. [Install the target platform for the FPGA board](#Install-the-target-platform-for-the-FPGA-board)
         1. [Flash and test the board](#Flash-and-test-the-board)
     1. [Compile the SYCL compiler](#Compile-the-SYCL-compiler)
@@ -21,19 +21,19 @@
         1. [Running the test suite](#Running-the-test-suite)
         1. [Running a bigger example on real FPGA](#Running-a-bigger-example-on-real-FPGA)
     1. [Cleaning up some buffer allocation](#Cleaning-up-some-buffer-allocation)
-    1. [Xilinx FPGA extension](#Xilinx-FPGA-extension)
+    1. [AMD FPGA extension](#AMD-FPGA-extension)
         1. [Pipelining](#Pipelining)
         1. [Dataflow decorators](#Dataflow-decorators)
         1. [Loop unrolling](#Loop-unrolling)
         1. [Pinning allocators to specific memory banks](#Pinning-allocators-to-specific-memory-banks)
         1. [Array partitioning](#Array-partitioning)
         1. [Multiple annotations](#Multiple-annotations)
-    1. [AMD/Xilinx Macros](#AMDXilinx-Macros)
+    1. [AMD Macros](#AMDXilinx-Macros)
     1. [Known issues](#known-issues)
       1. [xsim](#xsim)
       1. [Shared library](#shared-lib)
 1. [Implementation](#Implementation)
-    1. [AMD/Xilinx FPGA SYCL compiler architecture](#AMDXilinx-FPGA-SYCL-compiler-architecture)
+    1. [AMD FPGA SYCL compiler architecture](#AMDXilinx-FPGA-SYCL-compiler-architecture)
     1. [Extra Notes](#Extra-Notes)
     1. [Debugging the SYCL implementation](#Debugging-the-SYCL-implementation)
         1. [Debugging the driver and intermediate steps](#Debugging-the-driver-and-intermediate-steps)
@@ -53,7 +53,7 @@ This document is about the normal SYCL single-source compilation flow.
 There is also another document about the [C++20 non-single source Vitis
 IP mode compilation flow](GettingStartedXilinxFPGAIPBlockDesign.md).
 
-We assume you have an AMD/Xilinx FPGA U200 Alveo board but it might work
+We assume you have an AMD FPGA U200 Alveo board but it might work
 with another board too.
 
 We assume that you have some modern Ubuntu like 22.04 version
@@ -109,7 +109,7 @@ some adaptations.
 
 - 2022/02/21:
   - provide `parallel_for` emulation with loop-nest in `single_task` for
-    AMD/Xilinx FPGA LLVM IR HLS workflow;
+    AMD FPGA LLVM IR HLS workflow;
   - updated for latest Alveo DFX platforms like the
     `xilinx_u200_gen3x16_xdma_1_202110_1`;
   - remove some FPGA-specific optimizations breaking HLS compilation
@@ -129,7 +129,7 @@ some adaptations.
   we lack resources to maintain both.
 
 - 2021/06/24: there is a new HLS target along the OpenCL/SPIR compiler
-  flow for AMD/Xilinx FPGA. The HLS target relies on direct LLVM IR
+  flow for AMD FPGA. The HLS target relies on direct LLVM IR
   feeding and allows finer control by using HLS extensions.
 
 # Installation
@@ -178,7 +178,7 @@ generating some FPGA configuration bitstream.
 
 For this, download from
 https://www.xilinx.com/support/download/index.html/content/xilinx/en/downloadNav/vitis.html
-the "AMD/Xilinx Unified Installer 2022.2 SFD"
+the "AMD Unified Installer 2022.2 SFD"
 somewhere you have enough storage.
 
 Create a `/opt/xilinx` with the right access mode so you can work in
@@ -215,7 +215,7 @@ To avoid this, follow the recipe from
 https://support.xilinx.com/s/article/76960 after downloading the patch:
 
 ```bash
-# The patching script assume working in the top AMD/Xilinx tool directory
+# The patching script assume working in the top AMD tool directory
 cd /opt/xilinx
 unzip ..../y2k22_patch-1.2.zip
 python y2k22_patch/patch.py
@@ -277,7 +277,7 @@ sudo update-grub
 ```
 
 
-## Installing the AMD/Xilinx XRT runtime
+## Installing the AMD XRT runtime
 
 First be careful that `LD_LIBRARY_PATH` does not have the XRT
 libraries in it because it might mess up with the unit tests linking
@@ -290,7 +290,7 @@ in the build process.
 > https://github.com/Xilinx/XRT/pull/6269
 
 ```bash
-# Get the latest AMD/Xilinx runtime
+# Get the latest AMD runtime
 # Use either ssh
 git clone git@github.com:Xilinx/XRT.git
 # or https according to your usual method
@@ -301,7 +301,7 @@ sudo ../src/runtime_src/tools/scripts/xrtdeps.sh
 # Setup the Vitis location so the Microblaze GCC can be used to
 # compile the ERT XRT runtime
 export XILINX_VITIS=/opt/xilinx/Vitis/2022.2
-# Compile the AMD/Xilinx runtime
+# Compile the AMD runtime
 ./build.sh
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
@@ -309,7 +309,7 @@ sudo apt install --reinstall ./Release/xrt_202320.2.16.0_22.04-amd64-xrt.deb
 ```
 
 It will install the user-mode XRT runtime and at least compile and
-install the AMD/Xilinx device driver modules for the current running
+install the AMD device driver modules for the current running
 kernel, even if it fails for the other kernels installed on the
 machine. If you do not plan to run on a real FPGA board but only use
 software or hardware emulation instead, it does not matter if the
@@ -416,7 +416,7 @@ sudo apt install ./xilinx-u200-gen3x16-xdma-1-202110-1-dev_1-3221508_all.deb
 
 from where they have been downloaded or adapt the paths to them.
 
-> :warning: Some packages have been shipped by AMD/Xilinx with a broken
+> :warning: Some packages have been shipped by AMD with a broken
 > manifest, which might lead to some warning every time you use APT
 > related package management commands, like:
 >
@@ -961,7 +961,7 @@ DPCPP_HOME=~/sycl_workspace
 XILINX_VERSION=2022.2
 # The target platform for the FPGA board model
 export XILINX_PLATFORM=xilinx_u200_gen3x16_xdma_1_202110_1
-# Where all the AMD/Xilinx tools are
+# Where all the AMD tools are
 XILINX_ROOT=/opt/xilinx
 # Where the SYCL compiler binaries are:
 SYCL_BIN_DIR=$DPCPP_HOME/llvm/build/bin
@@ -998,8 +998,8 @@ provided:
 
 - a new HLS device compiler flow is now developed, that aims at
   compiling kernels to LLVM bitcode similar to what is produced by the
-  open source AMD/Xilinx HLS front-end. This way, anything supported by
-  AMD/Xilinx HLS C++ should be supported at some point in the future;
+  open source AMD HLS front-end. This way, anything supported by
+  AMD HLS C++ should be supported at some point in the future;
 
 - the SPIR flow device compiler, the first to have been supported by
   the tool, aiming at using OpenCL C-like features. But it is
@@ -1025,7 +1025,7 @@ Only one `fpga64_*` architecture is allowed in the `--sycl-targets`
 option.
 
 The SYCL HLS compilation flow does not support software emulation because
-of internal AMD/Xilinx issue https://jira.xilinx.com/browse/CR-1099885
+of internal AMD issue https://jira.xilinx.com/browse/CR-1099885
 But as SYCL allows also execution on a CPU device, it can replace the
 backend software emulation.
 
@@ -1048,7 +1048,7 @@ variable: which can take 3 values according to the required emulation:
   since the code is already executable on CPU as plain single-source
   C++, but makes sense for HLS C/C++ or OpenCL.
 
-When running a SYCL program on AMD/Xilinx FPGA, the runtime takes care
+When running a SYCL program on AMD FPGA, the runtime takes care
 of this variable according to the compilation option, so it is not
 necessary to set it.
 
@@ -1109,7 +1109,7 @@ The examples provided here often rely on the SYCL default selector
 whose behavior can be influenced by the
 [`ONEAPI_DEVICE_SELECTOR`](EnvironmentVariables.md#oneapi_device_selector)
 environment variable, among others. Thus, to run an example on the
-AMD/Xilinx FPGA shown by the previous `sycl-ls`, the environment
+AMD FPGA shown by the previous `sycl-ls`, the environment
 variable can be set with:
 ```bash
 >- export ONEAPI_DEVICE_SELECTOR=xrt:fpga
@@ -1121,7 +1121,7 @@ Beware that setting this variable also change the view from `sycl-ls` itself.
 
 See section [Picking the right device](#picking-the-right-device) to
 set correctly the `ONEAPI_DEVICE_SELECTOR` environment variable to select
-the right AMD/Xilinx FPGA device first.
+the right AMD FPGA device first.
 
 To run an example from the provided examples
 
@@ -1155,7 +1155,7 @@ Note that only the flag `-fsycl-targets` is changed across the previous examples
 ### Looking at the FPGA layout with Vivado
 
 SYCL for Vitis can generate a lot of files, report files, log
-files... including Xilinx `.xpr` projects which can be used by Vivado
+files... including AMD `.xpr` projects which can be used by Vivado
 for inspection, for example to look at the physical layout of the FPGA.
 
 For this, you need to compile with an environment variable stating
@@ -1296,7 +1296,7 @@ sudo rmmod xocl
 sudo modprobe xocl
 ```
 
-## Xilinx FPGA extension
+## AMD FPGA extension
 
 In order to give user more control over how is implemented the kernel on hardware,
 a few SYCL extensions are provided as a replacement of Vitis HLS `HLS` pragmas.
@@ -1497,7 +1497,7 @@ for (int i = 0; i < a.get_size(); i++)
 
 This loop will be pipelined with default settings and unrolled by a factor of 8
 
-## AMD/Xilinx Macros
+## AMD Macros
 
 ``__SYCL_XILINX_SW_EMU_MODE__`` will be defined when compiling device code in sw_emu mode
 
@@ -1508,7 +1508,7 @@ This loop will be pipelined with default settings and unrolled by a factor of 8
 when compiling host code none of the ``__SYCL_XILINX_*_MODE__`` macros will be defined.
 
 ``__SYCL_HAS_XILINX_DEVICE__`` will be defined on the host if one of
-the specified targets is an AMD/Xilinx device or on a Xilinx device
+the specified targets is an AMD device or on an AMD device
 
 ## Known issues
 
@@ -1556,29 +1556,29 @@ extern "C" void run(sycl::buffer<int> &v) {
 
 # Implementation
 
-## AMD/Xilinx FPGA SYCL compiler architecture
+## AMD FPGA SYCL compiler architecture
 
-[Architecture of the AMD/Xilinx SYCL
+[Architecture of the AMD SYCL
 compiler](Xilinx_sycl_compiler_architecture.rst) describes the
 compiler architecture.
 
-This document aims to cover the key differences of compiling SYCL for AMD/Xilinx
+This document aims to cover the key differences of compiling SYCL for AMD
 FPGAs. Things like building the compiler and library remain the same but other
-things like the compiler invocation for AMD/Xilinx FPGA compilation is a little
+things like the compiler invocation for AMD FPGA compilation is a little
 different. As a general rule of thumb we're trying to keep things as close as we
 can to the Intel implementation, but in some areas were still working on that.
 
-One of the significant differences of compilation for AMD/Xilinx FPGAs
-over the ordinary compiler directive is that AMD/Xilinx devices
+One of the significant differences of compilation for AMD FPGAs
+over the ordinary compiler directive is that AMD devices
 require offline compilation of SYCL kernels to binary before being
 wrapped into the end fat binary. The offline compilation of these
-kernels is done by AMD/Xilinx's `v++` compiler rather than the SYCL
+kernels is done by AMD's `v++` compiler rather than the SYCL
 device compiler itself in this case. The device compiler's job is to
 compile SYCL kernels to a format edible by `v++`, then take the output
 of `v++` and wrap it into the fat binary as normal.
 
 The current Intel SYCL implementation revolves around SPIR-V while
-AMD/Xilinx's `v++` compiler can only ingest plain LLVM IR 6.x or LLVM IR
+AMD's `v++` compiler can only ingest plain LLVM IR 6.x or LLVM IR
 6.x with a SPIR-df flavor as an intermediate representation. SPIR-df
 is some LLVM IR with some SPIR decorations. It is similar to the
 SPIR-2.0 provisional specification but does not requires the LLVM IR
@@ -1619,7 +1619,7 @@ Informing you of where those files are kept (`/tmp/EXECNAME-e5ece1pxk5rz43` in t
 
 ### Debugging the SYCL runtime
 
-There is 2 supported backends targeting Xilinx/AMD FPGA the XRT backend and the OpenCL backend.
+There is 2 supported backends targeting AMD FPGA the XRT backend and the OpenCL backend.
 if you are using the default device selector the xrt backend selected by:
 ```bash
 export ONEAPI_DEVICE_SELECTOR=xrt:*
