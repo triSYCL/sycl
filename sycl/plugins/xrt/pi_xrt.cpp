@@ -35,23 +35,20 @@
 #include <sycl/detail/pi.h>
 #include <sycl/detail/pi.hpp>
 
-#include <array>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <functional>
-#include <iterator>
 #include <limits>
 #include <mutex>
 #include <numeric>
-#include <optional>
 #include <ostream>
 #include <stdint.h>
 #include <string>
-#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -499,26 +496,68 @@ struct _pi_mem : ref_counted_base<_pi_mem> {
 struct _pi_queue : ref_counted_base<_pi_queue> {
   ref_counted_ref<_pi_context> context_;
   ref_counted_ref<_pi_device> device_;
+  pi_queue_properties properties;
   intr_list_node<_pi_event> event_list;
 
-  _pi_queue(_pi_context *context, _pi_device *device)
-      : context_{context}, device_{device} {}
+  _pi_queue(_pi_context *context, _pi_device *device, pi_queue_properties prop)
+      : context_{context}, device_{device}, properties(prop) {}
   /// iterator over all events in the list, it is safe to modify the provided
   /// list node in func.
   template <typename T> void for_each_events(T func);
 };
 
+pi_uint64 get_ns_time() {
+  auto time = std::chrono::high_resolution_clock::now().time_since_epoch();
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(time).count();
+}
+
 using pfn_notify = void (*)(pi_event event, pi_int32 eventCommandStatus,
                             void *userData);
 
 struct _pi_event : ref_counted_base<_pi_event>, intr_list_node<_pi_event> {
+private:
+  static constexpr pi_uint64 invalid_time = std::numeric_limits<pi_uint64>::max();
+  _pi_event_status status;
+  pi_uint64 start_time = invalid_time;
+  pi_uint64 submit_time = invalid_time;
+  pi_uint64 completed_time = invalid_time;
+
 protected:
-  _pi_event(_pi_queue *q) { q->event_list.insert_next(this); }
+  _pi_event(ref_counted_ref<_pi_queue> q) : _pi_event() {
+    q->event_list.insert_next(this);
+  }
 
 public:
-  _pi_event() {}
+  void set_status(_pi_event_status s) {
+    status = s;
+    // clang-format off
+    switch (status) {
+      case PI_EVENT_COMPLETE: completed_time = get_ns_time(); break;
+      case PI_EVENT_RUNNING: start_time = get_ns_time(); break;
+      case PI_EVENT_SUBMITTED: submit_time = get_ns_time(); break;
+      case PI_EVENT_QUEUED: break;
+    }
+    // clang-format on
+  }
+  _pi_event_status get_status() const { return status; }
+
+  pi_uint64 get_start_time() const {
+    assert(start_time != invalid_time && "has not started");
+    return start_time;
+  }
+  pi_uint64 get_submit_time() const {
+    assert(submit_time != invalid_time && "has been submitted");
+    return submit_time;
+  }
+  pi_uint64 get_completed_time() const {
+    assert(completed_time != invalid_time && "has been completed");
+    return completed_time;
+  }
+  _pi_event() {
+    set_status(PI_EVENT_SUBMITTED);
+  }
   virtual void wait() {}
-  virtual bool is_done() { return true; }
+  virtual bool is_done() { return status == PI_EVENT_COMPLETE; }
   virtual ~_pi_event() {}
 };
 
@@ -1325,9 +1364,23 @@ pi_result xrt_piQueueCreate(pi_context context, pi_device device,
                             pi_queue_properties properties, pi_queue *queue) {
   assert_valid_obj(context);
   assert_valid_obj(device);
-  // TODO(XRT): : properties not handled
+  if (properties) {
+    if (properties & PI_QUEUE_FLAG_PROFILING_ENABLE)
+      std::cerr
+          << "warning: support for profiling is only partial. pi_xrt is fully "
+             "synchronous so it will detect when an event is completed only "
+             "when the user waits for the event. If the user waits on the event "
+             "just after starting it, the profiling information is reliable. "
+             "but if the user uses wait for an event that was already finished "
+             "some time ago, pi_xrt will notice it is finished at the time of "
+             "the wait not at the prior 'real' time the event was completed"
+          << std::endl;
+    if (properties & ~PI_QUEUE_FLAG_PROFILING_ENABLE)
+      std::cerr << "warning: queue created with unhandled properties"
+                << std::endl;
+  }
 
-  *queue = make_ref_counted<_pi_queue>(context, device).give_externally();
+  *queue = make_ref_counted<_pi_queue>(context, device, properties).give_externally();
   return PI_SUCCESS;
 }
 
@@ -1398,13 +1451,16 @@ pi_result xrt_piEnqueueMemBufferWrite(pi_queue command_queue, pi_mem buffer,
   assert(ptr && size);
   assert(event);
   wait_on_events(event_wait_list, num_events_in_wait_list);
-  *event = make_ref_counted<_pi_event>().give_externally();
+  ref_counted_ref<_pi_event> new_event = make_ref_counted<_pi_event>();
+  *event = new_event.give_externally();
 
-  buffer->run_when_mapped(command_queue->device_->get_native(), [=] {
+  buffer->run_when_mapped(command_queue->device_->get_native(), [=] () mutable {
+    new_event->set_status(PI_EVENT_RUNNING);
     void *adjusted_ptr = ((char *)buffer->mem.mapped_ptr) + offset;
     REPRODUCE_ADD_BUFFER(ptr, size);
     REPRODUCE_CALL((void)std::memcpy, adjusted_ptr, ptr, size);
     REPRODUCE_MEMCALL(buffer->get_native(), sync, XCL_BO_SYNC_BO_TO_DEVICE);
+    new_event->set_status(PI_EVENT_COMPLETE);
   });
 
   return PI_SUCCESS;
@@ -1425,10 +1481,12 @@ pi_result xrt_piEnqueueMemBufferRead(pi_queue command_queue, pi_mem buffer,
   *event = make_ref_counted<_pi_event>().give_externally();
 
   assert(buffer->is_mapped(command_queue->device_->get_native()));
+  (*event)->set_status(PI_EVENT_RUNNING);
   REPRODUCE_MEMCALL(buffer->get_native(), sync, XCL_BO_SYNC_BO_FROM_DEVICE);
   void *adjusted_ptr = ((char *)buffer->mem.mapped_ptr) + offset;
   REPRODUCE_ADD_BUFFER(ptr, size);
   REPRODUCE_CALL((void)std::memcpy, ptr, adjusted_ptr, size);
+  (*event)->set_status(PI_EVENT_COMPLETE);
   return PI_SUCCESS;
 }
 
@@ -1510,6 +1568,7 @@ pi_result xrt_piEnqueueKernelLaunch(
       if (done_flag)
         return;
       REPRODUCE_MEMCALL(kernel->run_, wait);
+      this->set_status(PI_EVENT_COMPLETE);
       done_flag = true;
     }
     virtual bool is_done() override { return done_flag; }
@@ -1517,6 +1576,7 @@ pi_result xrt_piEnqueueKernelLaunch(
   *event = make_ref_counted<_pi_event_kernel_launch>(command_queue, kernel)
                .give_externally();
 
+  (*event)->set_status(PI_EVENT_RUNNING);
   REPRODUCE_MEMCALL(kernel->run_, start);
 
   return PI_SUCCESS;
@@ -1852,7 +1912,23 @@ pi_result xrt_piEventGetProfilingInfo(pi_event event,
                                       size_t param_value_size,
                                       void *param_value,
                                       size_t *param_value_size_ret) {
-  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+  assert_valid_obj(event);
+  assert(param_value);
+
+  switch (param_name) {
+  case PI_PROFILING_INFO_COMMAND_QUEUED:
+  case PI_PROFILING_INFO_COMMAND_SUBMIT:
+    return getInfo<pi_uint64>(param_value_size, param_value,
+                              param_value_size_ret, event->get_submit_time());
+  case PI_PROFILING_INFO_COMMAND_START:
+    return getInfo<pi_uint64>(param_value_size, param_value,
+                              param_value_size_ret, event->get_start_time());
+  case PI_PROFILING_INFO_COMMAND_END:
+    return getInfo<pi_uint64>(param_value_size, param_value,
+                              param_value_size_ret, event->get_completed_time());
+  default:
+    __SYCL_PI_HANDLE_UNKNOWN_PARAM_NAME(param_name);
+  }
 }
 
 pi_result xrt_piEventSetCallback(pi_event, pi_int32, pfn_notify, void *) {
@@ -2194,9 +2270,17 @@ pi_result xrt_piextUSMEnqueueMemcpy2D(pi_queue queue, pi_bool blocking,
   sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
 }
 
-pi_result xrt_piGetDeviceAndHostTimer(pi_device Device, uint64_t *DeviceTime,
-                                      uint64_t *HostTime) {
-  sycl::detail::pi::unimplemented(__PRETTY_FUNCTION__);
+pi_result xrt_piGetDeviceAndHostTimer(pi_device device, uint64_t *device_time,
+                                      uint64_t *host_time) {
+  assert_valid_obj(device);
+
+  if (device_time) {
+    *device_time = get_ns_time();
+  }
+  if (host_time) {
+    *host_time = get_ns_time();
+  }
+  return PI_SUCCESS;
 }
 
 pi_result xrt_piTearDown(void *) { return PI_SUCCESS; }
