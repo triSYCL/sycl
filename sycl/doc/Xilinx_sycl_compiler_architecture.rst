@@ -1,5 +1,5 @@
 ========================================
-Architecture of the Xilinx SYCL compiler
+Architecture of the AMD SYCL compiler
 ========================================
 
 .. section-numbering::
