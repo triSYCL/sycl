@@ -17,7 +17,7 @@ class Location;
 namespace fir {
 class FirOpBuilder;
 class RecordType;
-}
+} // namespace fir
 
 namespace fir::runtime {
 
@@ -36,6 +36,12 @@ void genDerivedTypeDestroy(fir::FirOpBuilder &builder, mlir::Location loc,
 void genNullifyDerivedType(fir::FirOpBuilder &builder, mlir::Location loc,
                            mlir::Value box, fir::RecordType derivedType,
                            unsigned rank = 0);
+
+mlir::Value genSameTypeAs(fir::FirOpBuilder &builder, mlir::Location loc,
+                          mlir::Value a, mlir::Value b);
+
+mlir::Value genExtendsTypeOf(fir::FirOpBuilder &builder, mlir::Location loc,
+                             mlir::Value a, mlir::Value b);
 
 } // namespace fir::runtime
 #endif // FORTRAN_OPTIMIZER_BUILDER_RUNTIME_DERIVED_H

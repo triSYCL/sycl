@@ -14,6 +14,7 @@
 #include "flang/Optimizer/Builder/Todo.h"
 #include "mlir/IR/BuiltinTypes.h"
 #include "llvm/Support/Debug.h"
+#include <optional>
 
 #define DEBUG_TYPE "flang-lower-symbol-map"
 
@@ -26,6 +27,7 @@ void Fortran::lower::SymMap::addSymbol(Fortran::semantics::SymbolRef sym,
             [&](const fir::CharArrayBoxValue &v) { makeSym(sym, v, force); },
             [&](const fir::BoxValue &v) { makeSym(sym, v, force); },
             [&](const fir::MutableBoxValue &v) { makeSym(sym, v, force); },
+            [&](const fir::PolymorphicValue &v) { makeSym(sym, v, force); },
             [](auto) {
               llvm::report_fatal_error("value not added to symbol table");
             });
@@ -90,8 +92,9 @@ Fortran::lower::SymMap::lookupImpliedDo(Fortran::lower::SymMap::AcDoVar var) {
   return {};
 }
 
-llvm::Optional<fir::FortranVariableOpInterface>
-Fortran::lower::SymMap::lookupVariableDefinition(semantics::SymbolRef sym) {
+std::optional<fir::FortranVariableOpInterface>
+Fortran::lower::SymMap::lookupVariableDefinition(semantics::SymbolRef symRef) {
+  Fortran::semantics::SymbolRef sym = symRef.get().GetUltimate();
   for (auto jmap = symbolMapStack.rbegin(), jend = symbolMapStack.rend();
        jmap != jend; ++jmap) {
     auto iter = jmap->find(&*sym);
@@ -100,10 +103,10 @@ Fortran::lower::SymMap::lookupVariableDefinition(semantics::SymbolRef sym) {
               std::get_if<fir::FortranVariableOpInterface>(&iter->second))
         return *varDef;
       else
-        return llvm::None;
+        return std::nullopt;
     }
   }
-  return llvm::None;
+  return std::nullopt;
 }
 
 llvm::raw_ostream &

@@ -318,6 +318,12 @@ class RegisterClass<string namespace, list<ValueType> regTypes, int alignment,
 
   // Target-specific flags. This becomes the TSFlags field in TargetRegisterClass.
   bits<8> TSFlags = 0;
+
+  // If set then consider this register class to be the base class for registers in
+  // its MemberList.  The base class for registers present in multiple base register
+  // classes will be resolved in the order defined by this value, with lower values
+  // taking precedence over higher ones.  Ties are resolved by enumeration order.
+  int BaseClassOrder = ?;
 }
 
 // The memberList in a RegisterClass is a dag of set operations. TableGen
@@ -1426,6 +1432,14 @@ def ICALL_BRANCH_FUNNEL : StandardPseudoInstruction {
   let AsmString = "";
   let hasSideEffects = true;
 }
+def MEMBARRIER : StandardPseudoInstruction {
+  let OutOperandList = (outs);
+  let InOperandList = (ins);
+  let AsmString = "";
+  let hasSideEffects = true;
+  let Size = 0;
+  let isMeta = true;
+}
 
 // Generic opcodes used in GlobalISel.
 include "llvm/Target/GenericOpcodes.td"
@@ -1479,6 +1493,16 @@ class AsmParser {
   // to matching the parsed instruction, so to allow more detailed error
   // messages.
   bit ReportMultipleNearMisses = false;
+
+  // OperandParserMethod - If non-empty, this is the name of a custom
+  // member function of the AsmParser class to call for every instruction
+  // operand to be parsed.
+  string OperandParserMethod = "";
+
+  // CallCustomParserForAllOperands - Set to true if the custom parser
+  // method shall be called for all operands as opposed to only those
+  // that have their own specified custom parsers.
+  bit CallCustomParserForAllOperands = false;
 }
 def DefaultAsmParser : AsmParser;
 

@@ -57,7 +57,7 @@ int main()
     cgh.copy(v.data(), acc);
   });
 
-  auto acc_r = b.get_access<access::mode::read>();
+  sycl::host_accessor acc_r{b, sycl::read_only};
 
   for (int i = 0; i < nElems / 2; ++i) {
     assert(acc_r[i] == i);

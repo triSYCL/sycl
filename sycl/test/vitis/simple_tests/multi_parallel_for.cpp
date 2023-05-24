@@ -22,7 +22,7 @@ void gen_nd_range(range<Dimensions> k_range, queue q) {
   buffer<unsigned int> a(k_range.size());
 
   q.submit([&](handler &cgh) {
-    auto acc = a.get_access<access::mode::write>(cgh);
+    sycl::accessor acc{a, cgh, sycl::write_only};
 
     cgh.parallel_for<kernel_name>(k_range, [=](item<Dimensions> index) {
             unsigned int range = index.get_range()[0];
@@ -33,7 +33,7 @@ void gen_nd_range(range<Dimensions> k_range, queue q) {
         });
   });
 
-  auto acc_r = a.get_access<access::mode::read>();
+  sycl::host_accessor acc_r{a, sycl::read_only};
 
   for (unsigned int i = 0; i < k_range.size(); ++i) {
     //  std::cout << acc_r[i] << " == " << k_range.size() + i << std::endl;

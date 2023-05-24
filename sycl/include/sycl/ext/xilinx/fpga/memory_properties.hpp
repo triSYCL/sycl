@@ -47,6 +47,18 @@ struct hbm_bank {
     }
   };
 };
+
+struct plram_bank {
+  template <unsigned A> struct instance {
+    template <int B> constexpr bool operator==(const instance<B> &) const {
+      return A == B;
+    }
+    template <int B> constexpr bool operator!=(const instance<B> &) const {
+      return A != B;
+    }
+  };
+};
+
 } // namespace property
 
 template <typename... Ts>
@@ -57,6 +69,9 @@ template <int A> inline constexpr property::ddr_bank::instance<A> ddr_bank;
 
 template <int A> inline constexpr property::hbm_bank::instance<A> hbm_bank;
 
+
+template <int A> inline constexpr property::plram_bank::instance<A> plram_bank;
+
 } // namespace xilinx
 
 namespace oneapi {
@@ -65,6 +80,9 @@ struct is_compile_time_property<xilinx::property::ddr_bank> : std::true_type {};
 
 template <>
 struct is_compile_time_property<xilinx::property::hbm_bank> : std::true_type {};
+
+template <>
+struct is_compile_time_property<xilinx::property::plram_bank> : std::true_type {};
 } // namespace oneapi
 } // namespace ext
 
@@ -75,6 +93,10 @@ struct IsCompileTimePropertyInstance<ext::xilinx::property::ddr_bank::instance<I
 
 template <int I>
 struct IsCompileTimePropertyInstance<ext::xilinx::property::hbm_bank::instance<I>>
+    : std::true_type {};
+
+    template <int I>
+struct IsCompileTimePropertyInstance<ext::xilinx::property::plram_bank::instance<I>>
     : std::true_type {};
 } // namespace detail
 

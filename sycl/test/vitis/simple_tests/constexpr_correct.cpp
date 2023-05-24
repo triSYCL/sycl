@@ -33,7 +33,7 @@ int main() {
   buffer<int> ob(range<1>{3});
 
   q.submit([&](handler &cgh) {
-      auto wb = ob.get_access<access::mode::write>(cgh);
+      sycl::accessor wb{ob, cgh, sycl::write_only};
 
       cgh.single_task<class constexpr_carryover>([=] {
         wb[0] = host_to_device;
@@ -44,7 +44,7 @@ int main() {
 
   q.wait();
 
-  auto rb = ob.get_access<access::mode::read>();
+  sycl::host_accessor rb{ob, sycl::read_only};
 
   printf("host host_to_device after: %d \n", rb[0]);
   printf("host try_capture after: %d \n", rb[1]);

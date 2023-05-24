@@ -6,8 +6,8 @@
 ; CHECK-SAME:  %[[ARG3:[a-zA-Z0-9]+]]
 ; CHECK-SAME:  %[[ARG4:[a-zA-Z0-9]+]]
 define void @integer_arith(i32 %arg1, i32 %arg2, i64 %arg3, i64 %arg4) {
-  ; CHECK-DAG:  %[[C1:[0-9]+]] = llvm.mlir.constant(-7 : i32) : i32
-  ; CHECK-DAG:  %[[C2:[0-9]+]] = llvm.mlir.constant(42 : i32) : i32
+  ; CHECK:  %[[C1:[0-9]+]] = llvm.mlir.constant(-7 : i32) : i32
+  ; CHECK:  %[[C2:[0-9]+]] = llvm.mlir.constant(42 : i32) : i32
   ; CHECK:  llvm.add %[[ARG1]], %[[C1]] : i32
   %1 = add i32 %arg1, -7
   ; CHECK:  llvm.add %[[C2]], %[[ARG2]] : i32
@@ -75,13 +75,13 @@ define i1 @integer_compare(i32 %arg1, i32 %arg2, <4 x i64> %arg3, <4 x i64> %arg
 ; CHECK-SAME:  %[[ARG3:[a-zA-Z0-9]+]]
 ; CHECK-SAME:  %[[ARG4:[a-zA-Z0-9]+]]
 define void @fp_arith(float %arg1, float %arg2, double %arg3, double %arg4) {
-  ; CHECK:  %[[C1:[0-9]+]] = llvm.mlir.constant(3.030000e+01 : f64) : f64
-  ; CHECK:  %[[C2:[0-9]+]] = llvm.mlir.constant(3.030000e+01 : f32) : f32
-  ; CHECK:  llvm.fadd %[[C2]], %[[ARG1]] : f32
+  ; CHECK:  %[[C1:[0-9]+]] = llvm.mlir.constant(3.030000e+01 : f32) : f32
+  ; CHECK:  %[[C2:[0-9]+]] = llvm.mlir.constant(3.030000e+01 : f64) : f64
+  ; CHECK:  llvm.fadd %[[C1]], %[[ARG1]] : f32
   %1 = fadd float 0x403E4CCCC0000000, %arg1
   ; CHECK:  llvm.fadd %[[ARG1]], %[[ARG2]] : f32
   %2 = fadd float %arg1, %arg2
-  ; CHECK:  llvm.fadd %[[C1]], %[[ARG3]] : f64
+  ; CHECK:  llvm.fadd %[[C2]], %[[ARG3]] : f64
   %3 = fadd double 3.030000e+01, %arg3
   ; CHECK:  llvm.fsub %[[ARG1]], %[[ARG2]] : f32
   %4 = fsub float %arg1, %arg2
@@ -181,16 +181,16 @@ define void @integer_extension_and_truncation(i32 %arg1) {
 ; CHECK-LABEL: @pointer_casts
 ; CHECK-SAME:  %[[ARG1:[a-zA-Z0-9]+]]
 ; CHECK-SAME:  %[[ARG2:[a-zA-Z0-9]+]]
-define i32* @pointer_casts(double* %arg1, i64 %arg2) {
-  ; CHECK:  %[[NULL:[0-9]+]] = llvm.mlir.null : !llvm.ptr<i32>
-  ; CHECK:  llvm.ptrtoint %[[ARG1]] : !llvm.ptr<f64> to i64
-  ; CHECK:  llvm.inttoptr %[[ARG2]] : i64 to !llvm.ptr<i64>
-  ; CHECK:  llvm.bitcast %[[ARG1]] : !llvm.ptr<f64> to !llvm.ptr<i32>
-  ; CHECK:  llvm.return %[[NULL]] : !llvm.ptr<i32>
-  %1 = ptrtoint double* %arg1 to i64
-  %2 = inttoptr i64 %arg2 to i64*
-  %3 = bitcast double* %arg1 to i32*
-  ret i32* bitcast (double* null to i32*)
+define ptr @pointer_casts(ptr %arg1, i64 %arg2) {
+  ; CHECK:  %[[NULL:[0-9]+]] = llvm.mlir.null : !llvm.ptr
+  ; CHECK:  llvm.ptrtoint %[[ARG1]] : !llvm.ptr to i64
+  ; CHECK:  llvm.inttoptr %[[ARG2]] : i64 to !llvm.ptr
+  ; CHECK:  llvm.bitcast %[[ARG1]] : !llvm.ptr to !llvm.ptr
+  ; CHECK:  llvm.return %[[NULL]] : !llvm.ptr
+  %1 = ptrtoint ptr %arg1 to i64
+  %2 = inttoptr i64 %arg2 to ptr
+  %3 = bitcast ptr %arg1 to ptr
+  ret ptr null
 }
 
 ; // -----
@@ -212,8 +212,8 @@ define ptr addrspace(2) @addrspace_casts(ptr addrspace(1) %arg1) {
 ; CHECK-SAME:  %[[ARG3:[a-zA-Z0-9]+]]
 ; CHECK-SAME:  %[[ARG4:[a-zA-Z0-9]+]]
 define void @integer_arith(i32 %arg1, i32 %arg2, i64 %arg3, i64 %arg4) {
-  ; CHECK-DAG:  %[[C1:[0-9]+]] = llvm.mlir.constant(-7 : i32) : i32
-  ; CHECK-DAG:  %[[C2:[0-9]+]] = llvm.mlir.constant(42 : i32) : i32
+  ; CHECK:  %[[C1:[0-9]+]] = llvm.mlir.constant(-7 : i32) : i32
+  ; CHECK:  %[[C2:[0-9]+]] = llvm.mlir.constant(42 : i32) : i32
   ; CHECK:  llvm.add %[[ARG1]], %[[C1]] : i32
   ; CHECK:  llvm.add %[[C2]], %[[ARG2]] : i32
   ; CHECK:  llvm.sub %[[ARG3]], %[[ARG4]] : i64
@@ -250,11 +250,11 @@ define void @integer_arith(i32 %arg1, i32 %arg2, i64 %arg3, i64 %arg4) {
 ; CHECK-LABEL: @extract_element
 ; CHECK-SAME:  %[[VEC:[a-zA-Z0-9]+]]
 ; CHECK-SAME:  %[[IDX:[a-zA-Z0-9]+]]
-define half @extract_element(<4 x half>* %vec, i32 %idx) {
-  ; CHECK:  %[[V1:.+]] = llvm.load %[[VEC]] : !llvm.ptr<vector<4xf16>>
+define half @extract_element(ptr %vec, i32 %idx) {
+  ; CHECK:  %[[V1:.+]] = llvm.load %[[VEC]] : !llvm.ptr -> vector<4xf16>
   ; CHECK:  %[[V2:.+]] = llvm.extractelement %[[V1]][%[[IDX]] : i32] : vector<4xf16>
   ; CHECK:  llvm.return %[[V2]]
-  %1 = load <4 x half>, <4 x half>* %vec
+  %1 = load <4 x half>, ptr %vec
   %2 = extractelement <4 x half> %1, i32 %idx
   ret half %2
 }
@@ -265,11 +265,11 @@ define half @extract_element(<4 x half>* %vec, i32 %idx) {
 ; CHECK-SAME:  %[[VEC:[a-zA-Z0-9]+]]
 ; CHECK-SAME:  %[[VAL:[a-zA-Z0-9]+]]
 ; CHECK-SAME:  %[[IDX:[a-zA-Z0-9]+]]
-define <4 x half> @insert_element(<4 x half>* %vec, half %val, i32 %idx) {
-  ; CHECK:  %[[V1:.+]] = llvm.load %[[VEC]] : !llvm.ptr<vector<4xf16>>
+define <4 x half> @insert_element(ptr %vec, half %val, i32 %idx) {
+  ; CHECK:  %[[V1:.+]] = llvm.load %[[VEC]] : !llvm.ptr -> vector<4xf16>
   ; CHECK:  %[[V2:.+]] = llvm.insertelement %[[VAL]], %[[V1]][%[[IDX]] : i32] : vector<4xf16>
   ; CHECK:  llvm.return %[[V2]]
-  %1 = load <4 x half>, <4 x half>* %vec
+  %1 = load <4 x half>, ptr %vec
   %2 = insertelement <4 x half> %1, half %val, i32 %idx
   ret <4 x half> %2
 }
@@ -336,26 +336,26 @@ define <4 x half> @shuffle_vec(<4 x half> %arg1, <4 x half> %arg2) {
 
 ; CHECK-LABEL: @alloca
 ; CHECK-SAME:  %[[SIZE:[a-zA-Z0-9]+]]
-define double* @alloca(i64 %size) {
+define ptr @alloca(i64 %size) {
   ; CHECK:  %[[C1:[0-9]+]] = llvm.mlir.constant(1 : i32) : i32
-  ; CHECK:  llvm.alloca %[[C1]] x f64 {alignment = 8 : i64} : (i32) -> !llvm.ptr<f64>
-  ; CHECK:  llvm.alloca %[[SIZE]] x i32 {alignment = 8 : i64} : (i64) -> !llvm.ptr<i32>
-  ; CHECK:  llvm.alloca %[[SIZE]] x i32 {alignment = 4 : i64} : (i64) -> !llvm.ptr<i32, 3>
+  ; CHECK:  llvm.alloca %[[C1]] x f64 {alignment = 8 : i64} : (i32) -> !llvm.ptr
+  ; CHECK:  llvm.alloca %[[SIZE]] x i32 {alignment = 8 : i64} : (i64) -> !llvm.ptr
+  ; CHECK:  llvm.alloca %[[SIZE]] x i32 {alignment = 4 : i64} : (i64) -> !llvm.ptr<3>
   %1 = alloca double
   %2 = alloca i32, i64 %size, align 8
   %3 = alloca i32, i64 %size, addrspace(3)
-  ret double* %1
+  ret ptr %1
 }
 
 ; // -----
 
 ; CHECK-LABEL: @load_store
 ; CHECK-SAME:  %[[PTR:[a-zA-Z0-9]+]]
-define void @load_store(double* %ptr) {
-  ; CHECK:  %[[V1:[0-9]+]] = llvm.load %[[PTR]] : !llvm.ptr<f64>
-  ; CHECK:  llvm.store %[[V1]], %[[PTR]] : !llvm.ptr<f64>
-  %1 = load double, double* %ptr
-  store double %1, double* %ptr
+define void @load_store(ptr %ptr) {
+  ; CHECK:  %[[V1:[0-9]+]] = llvm.load %[[PTR]] : !llvm.ptr -> f64
+  ; CHECK:  llvm.store %[[V1]], %[[PTR]] : f64, !llvm.ptr
+  %1 = load double, ptr %ptr
+  store double %1, ptr %ptr
   ret void
 }
 
@@ -366,33 +366,33 @@ define void @load_store(double* %ptr) {
 ; CHECK-SAME:  %[[VAL1:[a-zA-Z0-9]+]]
 ; CHECK-SAME:  %[[PTR2:[a-zA-Z0-9]+]]
 ; CHECK-SAME:  %[[VAL2:[a-zA-Z0-9]+]]
-define void @atomic_rmw(i32* %ptr1, i32 %val1, float* %ptr2, float %val2) {
+define void @atomic_rmw(ptr %ptr1, i32 %val1, ptr %ptr2, float %val2) {
   ; CHECK:  llvm.atomicrmw xchg %[[PTR1]], %[[VAL1]] acquire  : i32
-  %1 = atomicrmw xchg i32* %ptr1, i32 %val1 acquire
+  %1 = atomicrmw xchg ptr %ptr1, i32 %val1 acquire
   ; CHECK:  llvm.atomicrmw add %[[PTR1]], %[[VAL1]] release  : i32
-  %2 = atomicrmw add i32* %ptr1, i32 %val1 release
+  %2 = atomicrmw add ptr %ptr1, i32 %val1 release
   ; CHECK:  llvm.atomicrmw sub %[[PTR1]], %[[VAL1]] acq_rel  : i32
-  %3 = atomicrmw sub i32* %ptr1, i32 %val1 acq_rel
+  %3 = atomicrmw sub ptr %ptr1, i32 %val1 acq_rel
   ; CHECK:  llvm.atomicrmw _and %[[PTR1]], %[[VAL1]] seq_cst  : i32
-  %4 = atomicrmw and i32* %ptr1, i32 %val1 seq_cst
+  %4 = atomicrmw and ptr %ptr1, i32 %val1 seq_cst
   ; CHECK:  llvm.atomicrmw nand %[[PTR1]], %[[VAL1]] acquire  : i32
-  %5 = atomicrmw nand i32* %ptr1, i32 %val1 acquire
+  %5 = atomicrmw nand ptr %ptr1, i32 %val1 acquire
   ; CHECK:  llvm.atomicrmw _or %[[PTR1]], %[[VAL1]] acquire  : i32
-  %6 = atomicrmw or i32* %ptr1, i32 %val1 acquire
+  %6 = atomicrmw or ptr %ptr1, i32 %val1 acquire
   ; CHECK:  llvm.atomicrmw _xor %[[PTR1]], %[[VAL1]] acquire  : i32
-  %7 = atomicrmw xor i32* %ptr1, i32 %val1 acquire
+  %7 = atomicrmw xor ptr %ptr1, i32 %val1 acquire
   ; CHECK:  llvm.atomicrmw max %[[PTR1]], %[[VAL1]] acquire  : i32
-  %8 = atomicrmw max i32* %ptr1, i32 %val1 acquire
+  %8 = atomicrmw max ptr %ptr1, i32 %val1 acquire
   ; CHECK:  llvm.atomicrmw min %[[PTR1]], %[[VAL1]] acquire  : i32
-  %9 = atomicrmw min i32* %ptr1, i32 %val1 acquire
+  %9 = atomicrmw min ptr %ptr1, i32 %val1 acquire
   ; CHECK:  llvm.atomicrmw umax %[[PTR1]], %[[VAL1]] acquire  : i32
-  %10 = atomicrmw umax i32* %ptr1, i32 %val1 acquire
+  %10 = atomicrmw umax ptr %ptr1, i32 %val1 acquire
   ; CHECK:  llvm.atomicrmw umin %[[PTR1]], %[[VAL1]] acquire  : i32
-  %11 = atomicrmw umin i32* %ptr1, i32 %val1 acquire
+  %11 = atomicrmw umin ptr %ptr1, i32 %val1 acquire
   ; CHECK:  llvm.atomicrmw fadd %[[PTR2]], %[[VAL2]] acquire  : f32
-  %12 = atomicrmw fadd float* %ptr2, float %val2 acquire
+  %12 = atomicrmw fadd ptr %ptr2, float %val2 acquire
   ; CHECK:  llvm.atomicrmw fsub %[[PTR2]], %[[VAL2]] acquire  : f32
-  %13 = atomicrmw fsub float* %ptr2, float %val2 acquire
+  %13 = atomicrmw fsub ptr %ptr2, float %val2 acquire
   ret void
 }
 
@@ -402,11 +402,61 @@ define void @atomic_rmw(i32* %ptr1, i32 %val1, float* %ptr2, float %val2) {
 ; CHECK-SAME:  %[[PTR1:[a-zA-Z0-9]+]]
 ; CHECK-SAME:  %[[VAL1:[a-zA-Z0-9]+]]
 ; CHECK-SAME:  %[[VAL2:[a-zA-Z0-9]+]]
-define void @atomic_cmpxchg(i32* %ptr1, i32 %val1, i32 %val2) {
+define void @atomic_cmpxchg(ptr %ptr1, i32 %val1, i32 %val2) {
   ; CHECK:  llvm.cmpxchg %[[PTR1]], %[[VAL1]], %[[VAL2]] seq_cst seq_cst : i32
-  %1 = cmpxchg i32* %ptr1, i32 %val1, i32 %val2 seq_cst seq_cst
+  %1 = cmpxchg ptr %ptr1, i32 %val1, i32 %val2 seq_cst seq_cst
   ; CHECK:  llvm.cmpxchg %[[PTR1]], %[[VAL1]], %[[VAL2]] monotonic seq_cst : i32
-  %2 = cmpxchg i32* %ptr1, i32 %val1, i32 %val2 monotonic seq_cst
+  %2 = cmpxchg ptr %ptr1, i32 %val1, i32 %val2 monotonic seq_cst
+  ret void
+}
+
+; // -----
+
+; CHECK: llvm.func @fn(i32) -> f32
+declare float @fn(i32)
+
+; CHECK-LABEL: @call_fn
+; CHECK-SAME:  %[[ARG1:[a-zA-Z0-9]+]]
+define float @call_fn(i32 %arg1) {
+  ; CHECK:  llvm.call @fn(%[[ARG1]])
+  %1 = call float @fn(i32 %arg1)
+  ret float %1
+}
+
+; // -----
+
+; CHECK-LABEL: @call_fn_ptr
+; CHECK-SAME:  %[[PTR:[a-zA-Z0-9]+]]
+define void @call_fn_ptr(ptr %fn) {
+  ; CHECK:  %[[C0:[0-9]+]] = llvm.mlir.constant(0 : i16) : i16
+  ; CHECK:  llvm.call %[[PTR]](%[[C0]])
+  call void %fn(i16 0)
+  ret void
+}
+
+; // -----
+
+; CHECK-LABEL: @gep_static_idx
+; CHECK-SAME:  %[[PTR:[a-zA-Z0-9]+]]
+define void @gep_static_idx(ptr %ptr) {
+  ; CHECK: %[[IDX:.+]] = llvm.mlir.constant(7 : i32)
+  ; CHECK: llvm.getelementptr inbounds %[[PTR]][%[[IDX]]] : (!llvm.ptr, i32) -> !llvm.ptr
+  %1 = getelementptr inbounds float, ptr %ptr, i32 7
+  ret void
+}
+
+; // -----
+
+%sub_struct = type { i32, i8 }
+%my_struct = type { %sub_struct, [4 x i32] }
+
+; CHECK-LABEL: @gep_dynamic_idx
+; CHECK-SAME:  %[[PTR:[a-zA-Z0-9]+]]
+; CHECK-SAME:  %[[IDX:[a-zA-Z0-9]+]]
+define void @gep_dynamic_idx(ptr %ptr, i32 %idx) {
+  ; CHECK: %[[C0:.+]] = llvm.mlir.constant(0 : i32)
+  ; CHECK: llvm.getelementptr %[[PTR]][%[[C0]], 1, %[[IDX]]]
+  %1 = getelementptr %my_struct, ptr %ptr, i32 0, i32 1, i32 %idx
   ret void
 }
 

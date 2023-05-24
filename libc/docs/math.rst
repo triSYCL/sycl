@@ -1,3 +1,5 @@
+.. _math:
+
 ==============
 Math Functions
 ==============
@@ -9,6 +11,11 @@ Math Functions
     <style> .green {color:green} </style>
 
 .. role:: green
+
+.. toctree::
+  :hidden:
+
+  math/log.rst
 
 
 .. contents:: Table of Contents
@@ -134,7 +141,7 @@ fma            :green:`XA`      :green:`XA`
 hypot          :green:`XA`      :green:`XA`
 lgamma
 log            :green:`XA`
-log10          :green:`XA`
+log10          :green:`XA`      :green:`XA`
 log1p          :green:`XA`
 log2           :green:`XA`
 pow
@@ -166,7 +173,7 @@ expm1          :green:`XA`
 fma            :green:`XA`      :green:`XA`
 hypot          :green:`XA`      :green:`XA`
 log            :green:`XA`
-log10          :green:`XA`
+log10          :green:`XA`      :green:`XA`
 log1p          :green:`XA`
 log2           :green:`XA`
 sin            :green:`XA`      large
@@ -254,6 +261,11 @@ Performance
 +--------------+-----------+-------------------+-----------+-------------------+-------------------------------------+------------+-------------------------+--------------+---------------+
 | tanhf        |        13 |                55 |        57 |               123 | :math:`[-10, 10]`                   | Ryzen 1700 | Ubuntu 22.04 LTS x86_64 | Clang 14.0.0 | FMA           |
 +--------------+-----------+-------------------+-----------+-------------------+-------------------------------------+------------+-------------------------+--------------+---------------+
+
+Algorithms + Implementation Details
+===================================
+
+* :doc:`math/log`
 
 References
 ==========

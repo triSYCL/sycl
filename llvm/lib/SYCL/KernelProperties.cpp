@@ -54,6 +54,9 @@ KernelProperties::KernelProperties(Function &F) {
             case sycl::MemoryType::hbm:
             Prefix = "hb";
             break;
+            case sycl::MemoryType::plram:
+            Prefix = "pl";
+            break;
             default:
             llvm_unreachable("Default type should not appear here");
           }

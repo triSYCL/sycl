@@ -79,6 +79,10 @@ namespace llvm {
   /// matching during instruction selection.
   FunctionPass *createCodeGenPreparePass();
 
+  /// This pass implements generation of target-specific intrinsics to support
+  /// handling of complex number arithmetic
+  FunctionPass *createComplexDeinterleavingPass(const TargetMachine *TM);
+
   /// AtomicExpandID -- Lowers atomic operations in terms of either cmpxchg
   /// load-linked/store-conditional loops.
   extern char &AtomicExpandID;
@@ -330,6 +334,10 @@ namespace llvm {
 
   MachineFunctionPass *createMachineCopyPropagationPass(bool UseCopyInstr);
 
+  /// MachineLateInstrsCleanup - This pass removes redundant identical
+  /// instructions after register allocation and rematerialization.
+  extern char &MachineLateInstrsCleanupID;
+
   /// PeepholeOptimizer - This pass performs peephole optimizations -
   /// like extension and comparison eliminations.
   extern char &PeepholeOptimizerID;
@@ -405,6 +413,10 @@ namespace llvm {
   /// the intrinsic for later emission to the StackMap.
   extern char &StackMapLivenessID;
 
+  // MachineSanitizerBinaryMetadata - appends/finalizes sanitizer binary
+  // metadata after llvm SanitizerBinaryMetadata pass.
+  extern char &MachineSanitizerBinaryMetadataID;
+
   /// RemoveRedundantDebugValues pass.
   extern char &RemoveRedundantDebugValuesID;
 
@@ -437,6 +449,10 @@ namespace llvm {
   /// constant initializer into the load, which may result in an overflowing
   /// evaluation.
   ModulePass *createPreISelIntrinsicLoweringPass();
+
+  /// This pass lowers the \@llvm.fpbuiltin.{operation} intrinsics to
+  /// matching library function calls based on call site attributes.
+  FunctionPass *createFPBuiltinFnSelectionPass();
 
   /// GlobalMerge - This pass merges internal (by default) globals into structs
   /// to enable reuse of a base pointer by indexed addressing modes.
@@ -490,6 +506,9 @@ namespace llvm {
   // Expands large div/rem instructions.
   FunctionPass *createExpandLargeDivRemPass();
 
+  // Expands large div/rem instructions.
+  FunctionPass *createExpandLargeFpConvertPass();
+
   // This pass expands memcmp() to load/stores.
   FunctionPass *createExpandMemCmpPass();
 
@@ -520,7 +539,7 @@ namespace llvm {
   FunctionPass *createPseudoProbeInserter();
 
   /// Create IR Type Promotion pass. \see TypePromotion.cpp
-  FunctionPass *createTypePromotionPass();
+  FunctionPass *createTypePromotionLegacyPass();
 
   /// Add Flow Sensitive Discriminators. PassNum specifies the
   /// sequence number of this pass (starting from 1).

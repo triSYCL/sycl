@@ -20,7 +20,6 @@
 #include "clang/Basic/SourceLocation.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseSet.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/SetVector.h"
@@ -33,6 +32,7 @@
 #include <cstdint>
 #include <ctime>
 #include <iterator>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -159,7 +159,8 @@ public:
   /// eventually be exposed, for use in "private" modules.
   std::string ExportAsModule;
 
-  /// Does this Module scope describe part of the purview of a named C++ module?
+  /// Does this Module scope describe part of the purview of a standard named
+  /// C++ module?
   bool isModulePurview() const {
     return Kind == ModuleInterfaceUnit || Kind == ModulePartitionInterface ||
            Kind == ModulePartitionImplementation ||
@@ -184,7 +185,7 @@ private:
 
   /// The AST file if this is a top-level module which has a
   /// corresponding serialized AST file, or null otherwise.
-  Optional<FileEntryRef> ASTFile;
+  OptionalFileEntryRef ASTFile;
 
   /// The top-level headers associated with this module.
   llvm::SmallSetVector<const FileEntry *, 2> TopHeaders;
@@ -239,8 +240,8 @@ public:
     std::string FileName;
     bool IsUmbrella = false;
     bool HasBuiltinHeader = false;
-    Optional<off_t> Size;
-    Optional<time_t> ModTime;
+    std::optional<off_t> Size;
+    std::optional<time_t> ModTime;
   };
 
   /// Headers that are mentioned in the module map file but that we have not
@@ -609,7 +610,7 @@ public:
   }
 
   /// Set the serialized AST file for the top-level module of this module.
-  void setASTFile(Optional<FileEntryRef> File) {
+  void setASTFile(OptionalFileEntryRef File) {
     assert((!getASTFile() || getASTFile() == File) && "file path changed");
     getTopLevelModule()->ASTFile = File;
   }

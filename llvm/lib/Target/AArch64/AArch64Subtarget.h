@@ -64,10 +64,12 @@ public:
     CortexA78,
     CortexA78C,
     CortexA710,
+    CortexA715,
     CortexR82,
     CortexX1,
     CortexX1C,
     CortexX2,
+    CortexX3,
     ExynosM3,
     Falkor,
     Kryo,
@@ -155,9 +157,8 @@ private:
 public:
   /// This constructor initializes the data members to match that
   /// of the specified triple.
-  AArch64Subtarget(const Triple &TT, const std::string &CPU,
-                   const std::string &TuneCPU, const std::string &FS,
-                   const TargetMachine &TM, bool LittleEndian,
+  AArch64Subtarget(const Triple &TT, StringRef CPU, StringRef TuneCPU,
+                   StringRef FS, const TargetMachine &TM, bool LittleEndian,
                    unsigned MinSVEVectorSizeInBitsOverride = 0,
                    unsigned MaxSVEVectorSizeInBitsOverride = 0,
                    bool StreamingSVEModeDisabled = true);
@@ -359,16 +360,20 @@ public:
 
   void mirFileLoaded(MachineFunction &MF) const override;
 
+  bool hasSVEorSME() const { return hasSVE() || hasSME(); }
+
   // Return the known range for the bit length of SVE data registers. A value
   // of 0 means nothing is known about that particular limit beyong what's
   // implied by the architecture.
   unsigned getMaxSVEVectorSizeInBits() const {
-    assert(HasSVE && "Tried to get SVE vector length without SVE support!");
+    assert(hasSVEorSME() &&
+           "Tried to get SVE vector length without SVE support!");
     return MaxSVEVectorSizeInBits;
   }
 
   unsigned getMinSVEVectorSizeInBits() const {
-    assert(HasSVE && "Tried to get SVE vector length without SVE support!");
+    assert(hasSVEorSME() &&
+           "Tried to get SVE vector length without SVE support!");
     return MinSVEVectorSizeInBits;
   }
 

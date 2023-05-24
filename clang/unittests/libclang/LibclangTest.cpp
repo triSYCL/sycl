@@ -19,6 +19,7 @@
 #include <functional>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #define DEBUG_TYPE "libclang-test"
 
@@ -517,7 +518,7 @@ TEST_F(LibclangReparseTest, ReparseWithModule) {
   std::string ModulesCache = std::string("-fmodules-cache-path=") + TestDir;
   const char *Args[] = { "-fmodules", ModulesCache.c_str(),
                          "-I", TestDir.c_str() };
-  int NumArgs = sizeof(Args) / sizeof(Args[0]);
+  int NumArgs = std::size(Args);
   ClangTU = clang_parseTranslationUnit(Index, MName.c_str(), Args, NumArgs,
                                        nullptr, 0, TUFlags);
   EXPECT_EQ(1U, clang_getNumDiagnostics(ClangTU));
@@ -557,7 +558,7 @@ TEST_F(LibclangReparseTest, clang_parseTranslationUnit2FullArgv) {
 
   EXPECT_EQ(CXError_Success,
             clang_parseTranslationUnit2FullArgv(Index, Filename.c_str(), Argv,
-                                                sizeof(Argv) / sizeof(Argv[0]),
+                                                std::size(Argv),
                                                 nullptr, 0, TUFlags, &ClangTU));
   EXPECT_EQ(0U, clang_getNumDiagnostics(ClangTU));
   DisplayDiagnostics();
@@ -706,7 +707,7 @@ TEST_F(LibclangSerializationTest, TokenKindsAreCorrectAfterLoading) {
   const char *Argv[] = {"-xc++-header", "-std=c++11"};
 
   ClangTU = clang_parseTranslationUnit(Index, HeaderName.c_str(), Argv,
-                                       sizeof(Argv) / sizeof(Argv[0]), nullptr,
+                                       std::size(Argv), nullptr,
                                        0, TUFlags);
 
   auto CheckTokenKinds = [=]() {
@@ -934,7 +935,7 @@ void Class1::fun() {}
   ClangTU = clang_parseTranslationUnit(Index, fileName.c_str(), Args, 1,
                                        nullptr, 0, TUFlags);
 
-  llvm::Optional<CXCursor> typeRefCsr;
+  std::optional<CXCursor> typeRefCsr;
   Traverse([&](CXCursor cursor, CXCursor parent) -> CXChildVisitResult {
     if (cursor.kind == CXCursor_TypeRef) {
       typeRefCsr.emplace(cursor);

@@ -35,10 +35,12 @@
 #include "llvm/Support/Debug.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Target/TargetOptions.h"
+#include <optional>
 
 using namespace llvm;
 
 #define DEBUG_TYPE "arm-isel"
+#define PASS_NAME "ARM Instruction Selection"
 
 static cl::opt<bool>
 DisableShifterOp("disable-shifter-op", cl::Hidden,
@@ -57,8 +59,12 @@ class ARMDAGToDAGISel : public SelectionDAGISel {
   const ARMSubtarget *Subtarget;
 
 public:
+  static char ID;
+
+  ARMDAGToDAGISel() = delete;
+
   explicit ARMDAGToDAGISel(ARMBaseTargetMachine &tm, CodeGenOpt::Level OptLevel)
-      : SelectionDAGISel(tm, OptLevel) {}
+      : SelectionDAGISel(ID, tm, OptLevel) {}
 
   bool runOnMachineFunction(MachineFunction &MF) override {
     // Reset the subtarget each time through.
@@ -66,8 +72,6 @@ public:
     SelectionDAGISel::runOnMachineFunction(MF);
     return true;
   }
-
-  StringRef getPassName() const override { return "ARM Instruction Selection"; }
 
   void PreprocessISelDAG() override;
 
@@ -358,6 +362,10 @@ private:
   void replaceDAGValue(const SDValue &N, SDValue M);
 };
 }
+
+char ARMDAGToDAGISel::ID = 0;
+
+INITIALIZE_PASS(ARMDAGToDAGISel, DEBUG_TYPE, PASS_NAME, false, false)
 
 /// isInt32Immediate - This method tests to see if the node is a 32-bit constant
 /// operand. If so Imm will receive the 32-bit value.
@@ -2632,7 +2640,7 @@ void ARMDAGToDAGISel::SelectMVE_LongShift(SDNode *N, uint16_t Opcode,
   Ops.push_back(getAL(CurDAG, Loc));
   Ops.push_back(CurDAG->getRegister(0, MVT::i32));
 
-  CurDAG->SelectNodeTo(N, Opcode, N->getVTList(), makeArrayRef(Ops));
+  CurDAG->SelectNodeTo(N, Opcode, N->getVTList(), ArrayRef(Ops));
 }
 
 void ARMDAGToDAGISel::SelectMVE_VADCSBC(SDNode *N, uint16_t OpcodeWithCarry,
@@ -2666,7 +2674,7 @@ void ARMDAGToDAGISel::SelectMVE_VADCSBC(SDNode *N, uint16_t OpcodeWithCarry,
   else
     AddEmptyMVEPredicateToOps(Ops, Loc, N->getValueType(0));
 
-  CurDAG->SelectNodeTo(N, Opcode, N->getVTList(), makeArrayRef(Ops));
+  CurDAG->SelectNodeTo(N, Opcode, N->getVTList(), ArrayRef(Ops));
 }
 
 void ARMDAGToDAGISel::SelectMVE_VSHLC(SDNode *N, bool Predicated) {
@@ -2685,7 +2693,7 @@ void ARMDAGToDAGISel::SelectMVE_VSHLC(SDNode *N, bool Predicated) {
   else
     AddEmptyMVEPredicateToOps(Ops, Loc);
 
-  CurDAG->SelectNodeTo(N, ARM::MVE_VSHLC, N->getVTList(), makeArrayRef(Ops));
+  CurDAG->SelectNodeTo(N, ARM::MVE_VSHLC, N->getVTList(), ArrayRef(Ops));
 }
 
 static bool SDValueToConstBool(SDValue SDVal) {
@@ -2747,7 +2755,7 @@ void ARMDAGToDAGISel::SelectBaseMVE_VMLLDAV(SDNode *N, bool Predicated,
   else
     AddEmptyMVEPredicateToOps(Ops, Loc);
 
-  CurDAG->SelectNodeTo(N, Opcode, N->getVTList(), makeArrayRef(Ops));
+  CurDAG->SelectNodeTo(N, Opcode, N->getVTList(), ArrayRef(Ops));
 }
 
 void ARMDAGToDAGISel::SelectMVE_VMLLDAV(SDNode *N, bool Predicated,
@@ -2875,7 +2883,7 @@ void ARMDAGToDAGISel::SelectMVE_VxDUP(SDNode *N, const uint16_t *Opcodes,
   else
     AddEmptyMVEPredicateToOps(Ops, Loc, N->getValueType(0));
 
-  CurDAG->SelectNodeTo(N, Opcode, N->getVTList(), makeArrayRef(Ops));
+  CurDAG->SelectNodeTo(N, Opcode, N->getVTList(), ArrayRef(Ops));
 }
 
 void ARMDAGToDAGISel::SelectCDE_CXxD(SDNode *N, uint16_t Opcode,
@@ -3530,12 +3538,12 @@ void ARMDAGToDAGISel::SelectCMP_SWAP(SDNode *N) {
   CurDAG->RemoveDeadNode(N);
 }
 
-static Optional<std::pair<unsigned, unsigned>>
+static std::optional<std::pair<unsigned, unsigned>>
 getContiguousRangeOfSetBits(const APInt &A) {
   unsigned FirstOne = A.getBitWidth() - A.countLeadingZeros() - 1;
   unsigned LastOne = A.countTrailingZeros();
   if (A.countPopulation() != (FirstOne - LastOne + 1))
-    return Optional<std::pair<unsigned,unsigned>>();
+    return std::nullopt;
   return std::make_pair(FirstOne, LastOne);
 }
 

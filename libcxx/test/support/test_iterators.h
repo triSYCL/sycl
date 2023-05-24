@@ -18,6 +18,7 @@
 #include <utility>
 
 #include "test_macros.h"
+#include "type_algorithms.h"
 
 
 // This iterator meets C++20's Cpp17OutputIterator requirements, as described
@@ -696,6 +697,33 @@ cpp20_output_iterator(It) -> cpp20_output_iterator<It>;
 
 static_assert(std::output_iterator<cpp20_output_iterator<int*>, int>);
 
+#  if TEST_STD_VER >= 20
+
+// An `input_iterator` that can be used in a `std::ranges::common_range`
+template <class Base>
+struct common_input_iterator {
+  Base it_;
+
+  using value_type       = std::iter_value_t<Base>;
+  using difference_type  = std::intptr_t;
+  using iterator_concept = std::input_iterator_tag;
+
+  constexpr common_input_iterator() = default;
+  constexpr explicit common_input_iterator(Base it) : it_(it) {}
+
+  constexpr common_input_iterator& operator++() {
+    ++it_;
+    return *this;
+  }
+  constexpr void operator++(int) { ++it_; }
+
+  constexpr decltype(auto) operator*() const { return *it_; }
+
+  friend constexpr bool operator==(common_input_iterator const&, common_input_iterator const&) = default;
+};
+
+#  endif // TEST_STD_VER >= 20
+
 // Iterator adaptor that counts the number of times the iterator has had a successor/predecessor
 // operation called. Has two recorders:
 // * `stride_count`, which records the total number of calls to an op++, op--, op+=, or op-=.
@@ -1296,6 +1324,23 @@ struct ProxyRange {
 template <std::ranges::input_range R>
   requires std::ranges::viewable_range<R&&>
 ProxyRange(R&&) -> ProxyRange<std::views::all_t<R&&>>;
+
+namespace meta {
+template <class Ptr>
+using random_access_iterator_list = type_list<Ptr, contiguous_iterator<Ptr>, random_access_iterator<Ptr>>;
+
+template <class Ptr>
+using bidirectional_iterator_list =
+    concatenate_t<random_access_iterator_list<Ptr>, type_list<bidirectional_iterator<Ptr>>>;
+
+template <class Ptr>
+using forward_iterator_list = concatenate_t<bidirectional_iterator_list<Ptr>, type_list<forward_iterator<Ptr>>>;
+
+template <class Ptr>
+using cpp20_input_iterator_list =
+    concatenate_t<forward_iterator_list<Ptr>, type_list<cpp20_input_iterator<Ptr>, cpp17_input_iterator<Ptr>>>;
+
+} // namespace meta
 
 #endif // TEST_STD_VER > 17
 

@@ -142,7 +142,9 @@ void AArch64Subtarget::initializeProperties() {
     MaxBytesForLoopAlignment = 8;
     break;
   case CortexA710:
+  case CortexA715:
   case CortexX2:
+  case CortexX3:
     PrefFunctionLogAlignment = 4;
     VScaleForTuning = 1;
     PrefLoopLogAlignment = 5;
@@ -170,6 +172,15 @@ void AArch64Subtarget::initializeProperties() {
     PrefetchDistance = 280;
     MinPrefetchStride = 2048;
     MaxPrefetchIterationsAhead = 3;
+    switch (ARMProcFamily) {
+    case AppleA14:
+    case AppleA15:
+    case AppleA16:
+      MaxInterleaveFactor = 4;
+      break;
+    default:
+      break;
+    }
     break;
   case ExynosM3:
     MaxInterleaveFactor = 4;
@@ -273,9 +284,8 @@ void AArch64Subtarget::initializeProperties() {
   }
 }
 
-AArch64Subtarget::AArch64Subtarget(const Triple &TT, const std::string &CPU,
-                                   const std::string &TuneCPU,
-                                   const std::string &FS,
+AArch64Subtarget::AArch64Subtarget(const Triple &TT, StringRef CPU,
+                                   StringRef TuneCPU, StringRef FS,
                                    const TargetMachine &TM, bool LittleEndian,
                                    unsigned MinSVEVectorSizeInBitsOverride,
                                    unsigned MaxSVEVectorSizeInBitsOverride,
@@ -310,10 +320,16 @@ AArch64Subtarget::AArch64Subtarget(const Triple &TT, const std::string &CPU,
   auto TRI = getRegisterInfo();
   StringSet<> ReservedRegNames;
   ReservedRegNames.insert(ReservedRegsForRA.begin(), ReservedRegsForRA.end());
-  for (unsigned i = 0; i < 31; ++i) {
+  for (unsigned i = 0; i < 29; ++i) {
     if (ReservedRegNames.count(TRI->getName(AArch64::X0 + i)))
       ReserveXRegisterForRA.set(i);
   }
+  // X30 is named LR, so we can't use TRI->getName to check X30.
+  if (ReservedRegNames.count("X30") || ReservedRegNames.count("LR"))
+    ReserveXRegisterForRA.set(30);
+  // X29 is named FP, so we can't use TRI->getName to check X29.
+  if (ReservedRegNames.count("X29") || ReservedRegNames.count("FP"))
+    ReserveXRegisterForRA.set(29);
 }
 
 const CallLowering *AArch64Subtarget::getCallLowering() const {
@@ -451,8 +467,8 @@ bool AArch64Subtarget::useAA() const { return UseAA; }
 
 bool AArch64Subtarget::forceStreamingCompatibleSVE() const {
   if (ForceStreamingCompatibleSVE) {
-    assert((hasSVE() || hasSME()) && "Expected SVE to be available");
-    return hasSVE() || hasSME();
+    assert(hasSVEorSME() && "Expected SVE to be available");
+    return hasSVEorSME();
   }
   return false;
 }

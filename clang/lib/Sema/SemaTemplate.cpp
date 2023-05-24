@@ -39,6 +39,7 @@
 #include "llvm/ADT/StringExtras.h"
 
 #include <iterator>
+#include <optional>
 using namespace clang;
 using namespace sema;
 
@@ -109,7 +110,7 @@ NamedDecl *Sema::getAsTemplateNameDecl(NamedDecl *D,
     return D;
   }
 
-  if (CXXRecordDecl *Record = dyn_cast<CXXRecordDecl>(D)) {
+  if (const auto *Record = dyn_cast<CXXRecordDecl>(D)) {
     // C++ [temp.local]p1:
     //   Like normal (non-template) classes, class templates have an
     //   injected-class-name (Clause 9). The injected-class-name
@@ -126,8 +127,7 @@ NamedDecl *Sema::getAsTemplateNameDecl(NamedDecl *D,
       if (Record->getDescribedClassTemplate())
         return Record->getDescribedClassTemplate();
 
-      if (ClassTemplateSpecializationDecl *Spec
-            = dyn_cast<ClassTemplateSpecializationDecl>(Record))
+      if (const auto *Spec = dyn_cast<ClassTemplateSpecializationDecl>(Record))
         return Spec->getSpecializedTemplate();
     }
 
@@ -817,7 +817,7 @@ bool Sema::DiagnoseUninstantiableTemplate(SourceLocation PointOfInstantiation,
   if (!Complain || (PatternDef && PatternDef->isInvalidDecl()))
     return true;
 
-  llvm::Optional<unsigned> Note;
+  std::optional<unsigned> Note;
   QualType InstantiationTy;
   if (TagDecl *TD = dyn_cast<TagDecl>(Instantiation))
     InstantiationTy = Context.getTypeDeclType(TD);
@@ -942,7 +942,7 @@ static TemplateArgumentLoc translateTemplateArgument(Sema &SemaRef,
     TemplateName Template = Arg.getAsTemplate().get();
     TemplateArgument TArg;
     if (Arg.getEllipsisLoc().isValid())
-      TArg = TemplateArgument(Template, Optional<unsigned int>());
+      TArg = TemplateArgument(Template, std::optional<unsigned int>());
     else
       TArg = Template;
     return TemplateArgumentLoc(
@@ -1208,7 +1208,7 @@ static ExprResult formImmediatelyDeclaredConstraint(
                             ImmediatelyDeclaredConstraint.get(), BO_LAnd,
                             EllipsisLoc, /*RHS=*/nullptr,
                             /*RParenLoc=*/SourceLocation(),
-                            /*NumExpansions=*/None);
+                            /*NumExpansions=*/std::nullopt);
 }
 
 /// Attach a type-constraint to a template parameter.
@@ -1707,6 +1707,18 @@ class ConstraintRefersToContainingTemplateChecker
           Result = true;
   }
 
+  void CheckNonTypeTemplateParmDecl(NonTypeTemplateParmDecl *D) {
+    assert(D->getDepth() <= TemplateDepth &&
+           "Nothing should reference a value below the actual template depth, "
+           "depth is likely wrong");
+    if (D->getDepth() != TemplateDepth)
+      Result = true;
+
+    // Necessary because the type of the NTTP might be what refers to the parent
+    // constriant.
+    TransformType(D->getType());
+  }
+
 public:
   using inherited = TreeTransform<ConstraintRefersToContainingTemplateChecker>;
 
@@ -1742,6 +1754,8 @@ public:
     // unreachable should catch future instances/cases.
     if (auto *TD = dyn_cast<TypedefNameDecl>(D))
       TransformType(TD->getUnderlyingType());
+    else if (auto *NTTPD = dyn_cast<NonTypeTemplateParmDecl>(D))
+      CheckNonTypeTemplateParmDecl(NTTPD);
     else if (auto *VD = dyn_cast<ValueDecl>(D))
       TransformType(VD->getType());
     else if (auto *TD = dyn_cast<TemplateDecl>(D))
@@ -1786,8 +1800,7 @@ Sema::ActOnTemplateParameterList(unsigned Depth,
 
   return TemplateParameterList::Create(
       Context, TemplateLoc, LAngleLoc,
-      llvm::makeArrayRef(Params.data(), Params.size()),
-      RAngleLoc, RequiresClause);
+      llvm::ArrayRef(Params.data(), Params.size()), RAngleLoc, RequiresClause);
 }
 
 static void SetNestedNameSpecifier(Sema &S, TagDecl *T,
@@ -2066,8 +2079,8 @@ DeclResult Sema::CheckClassTemplate(
   SetNestedNameSpecifier(*this, NewClass, SS);
   if (NumOuterTemplateParamLists > 0)
     NewClass->setTemplateParameterListsInfo(
-        Context, llvm::makeArrayRef(OuterTemplateParamLists,
-                                    NumOuterTemplateParamLists));
+        Context,
+        llvm::ArrayRef(OuterTemplateParamLists, NumOuterTemplateParamLists));
 
   // Add alignment attributes if necessary; these attributes are checked when
   // the ASTContext lays out the structure.
@@ -2365,8 +2378,9 @@ private:
           /*Depth*/ 0, Depth1IndexAdjustment + TTP->getIndex(),
           TTP->getIdentifier(), TTP->wasDeclaredWithTypename(),
           TTP->isParameterPack(), TTP->hasTypeConstraint(),
-          TTP->isExpandedParameterPack() ?
-          llvm::Optional<unsigned>(TTP->getNumExpansionParameters()) : None);
+          TTP->isExpandedParameterPack()
+              ? std::optional<unsigned>(TTP->getNumExpansionParameters())
+              : std::nullopt);
       if (const auto *TC = TTP->getTypeConstraint())
         SemaRef.SubstTypeConstraint(NewTTP, TC, Args,
                                     /*EvaluateConstraint*/ true);
@@ -2619,7 +2633,7 @@ void Sema::DeclareImplicitDeductionGuides(TemplateDecl *Template,
   //    additional function template derived as above from a hypothetical
   //    constructor C().
   if (!AddedAny)
-    Transform.buildSimpleDeductionGuide(None);
+    Transform.buildSimpleDeductionGuide(std::nullopt);
 
   //    -- An additional function template derived as above from a hypothetical
   //    constructor C(C), called the copy deduction candidate.
@@ -3495,7 +3509,7 @@ TemplateParameterList *Sema::MatchTemplateParametersToScopeSpecifier(
 
       // Fabricate an empty template parameter list for the invented header.
       return TemplateParameterList::Create(Context, SourceLocation(),
-                                           SourceLocation(), None,
+                                           SourceLocation(), std::nullopt,
                                            SourceLocation(), nullptr);
     }
 
@@ -3854,8 +3868,8 @@ QualType Sema::CheckTemplateIdType(TemplateName Name,
 
     // Only substitute for the innermost template argument list.
     MultiLevelTemplateArgumentList TemplateArgLists;
-    TemplateArgLists.addOuterTemplateArguments(Template, SugaredConverted,
-                                               /*Final=*/true);
+    TemplateArgLists.addOuterTemplateArguments(Template, CanonicalConverted,
+                                               /*Final=*/false);
     TemplateArgLists.addOuterRetainedLevels(
         AliasTemplate->getTemplateParameters()->getDepth());
 
@@ -4861,13 +4875,13 @@ Sema::CheckConceptTemplateId(const CXXScopeSpec &SS,
 
   auto *CSD = ImplicitConceptSpecializationDecl::Create(
       Context, NamedConcept->getDeclContext(), NamedConcept->getLocation(),
-      SugaredConverted);
+      CanonicalConverted);
   ConstraintSatisfaction Satisfaction;
   bool AreArgsDependent =
       TemplateSpecializationType::anyDependentTemplateArguments(
-          *TemplateArgs, SugaredConverted);
-  MultiLevelTemplateArgumentList MLTAL(NamedConcept, SugaredConverted,
-                                       /*Final=*/true);
+          *TemplateArgs, CanonicalConverted);
+  MultiLevelTemplateArgumentList MLTAL(NamedConcept, CanonicalConverted,
+                                       /*Final=*/false);
   LocalInstantiationScope Scope(*this);
 
   EnterExpressionEvaluationContext EECtx{
@@ -5281,7 +5295,7 @@ static TypeSourceInfo *SubstDefaultTemplateArgument(
     MultiLevelTemplateArgumentList TemplateArgLists(Template, SugaredConverted,
                                                     /*Final=*/true);
     for (unsigned i = 0, e = Param->getDepth(); i != e; ++i)
-      TemplateArgLists.addOuterTemplateArguments(None);
+      TemplateArgLists.addOuterTemplateArguments(std::nullopt);
 
     bool ForLambdaCallOperator = false;
     if (const auto *Rec = dyn_cast<CXXRecordDecl>(Template->getDeclContext()))
@@ -5333,7 +5347,7 @@ static ExprResult SubstDefaultTemplateArgument(
   MultiLevelTemplateArgumentList TemplateArgLists(Template, SugaredConverted,
                                                   /*Final=*/true);
   for (unsigned i = 0, e = Param->getDepth(); i != e; ++i)
-    TemplateArgLists.addOuterTemplateArguments(None);
+    TemplateArgLists.addOuterTemplateArguments(std::nullopt);
 
   Sema::ContextRAII SavedContext(SemaRef, Template->getDeclContext());
   EnterExpressionEvaluationContext ConstantEvaluated(
@@ -5382,7 +5396,7 @@ static TemplateName SubstDefaultTemplateArgument(
   MultiLevelTemplateArgumentList TemplateArgLists(Template, SugaredConverted,
                                                   /*Final=*/true);
   for (unsigned i = 0, e = Param->getDepth(); i != e; ++i)
-    TemplateArgLists.addOuterTemplateArguments(None);
+    TemplateArgLists.addOuterTemplateArguments(std::nullopt);
 
   Sema::ContextRAII SavedContext(SemaRef, Template->getDeclContext());
   // Substitute into the nested-name-specifier first,
@@ -5848,7 +5862,7 @@ bool Sema::CheckTemplateArgumentList(
        Param != ParamEnd; /* increment in loop */) {
     // If we have an expanded parameter pack, make sure we don't have too
     // many arguments.
-    if (Optional<unsigned> Expansions = getExpandedPackSize(*Param)) {
+    if (std::optional<unsigned> Expansions = getExpandedPackSize(*Param)) {
       if (*Expansions == SugaredArgumentPack.size()) {
         // We're done with this parameter pack. Pack up its arguments and add
         // them to the list.
@@ -5968,8 +5982,12 @@ bool Sema::CheckTemplateArgumentList(
       // A non-expanded parameter pack before the end of the parameter list
       // only occurs for an ill-formed template parameter list, unless we've
       // got a partial argument list for a function template, so just bail out.
-      if (Param + 1 != ParamEnd)
+      if (Param + 1 != ParamEnd) {
+        assert(
+            (Template->getMostRecentDecl()->getKind() != Decl::Kind::Concept) &&
+            "Concept templates must have parameter packs at the end.");
         return true;
+      }
 
       SugaredConverted.push_back(
           TemplateArgument::CreatePackCopy(Context, SugaredArgumentPack));
@@ -6099,7 +6117,7 @@ bool Sema::CheckTemplateArgumentList(
 
   if (!PartialTemplateArgs) {
     TemplateArgumentList StackTemplateArgs(TemplateArgumentList::OnStack,
-                                           SugaredConverted);
+                                           CanonicalConverted);
     // Setup the context/ThisScope for the case where we are needing to
     // re-instantiate constraints outside of normal instantiation.
     DeclContext *NewContext = Template->getDeclContext();
@@ -6119,7 +6137,7 @@ bool Sema::CheckTemplateArgumentList(
     CXXThisScopeRAII(*this, RD, ThisQuals, RD != nullptr);
 
     MultiLevelTemplateArgumentList MLTAL = getTemplateInstantiationArgs(
-        Template, /*Final=*/true, &StackTemplateArgs,
+        Template, /*Final=*/false, &StackTemplateArgs,
         /*RelativeToPrimary=*/true,
         /*Pattern=*/nullptr,
         /*ForConceptInstantiation=*/true);
@@ -8909,17 +8927,33 @@ Decl *Sema::ActOnConceptDefinition(Scope *S,
     return nullptr;
   }
 
-  if (TemplateParameterLists.front()->size() == 0) {
+  TemplateParameterList *Params = TemplateParameterLists.front();
+
+  if (Params->size() == 0) {
     Diag(NameLoc, diag::err_concept_no_parameters);
     return nullptr;
+  }
+
+  // Ensure that the parameter pack, if present, is the last parameter in the
+  // template.
+  for (TemplateParameterList::const_iterator ParamIt = Params->begin(),
+                                             ParamEnd = Params->end();
+       ParamIt != ParamEnd; ++ParamIt) {
+    Decl const *Param = *ParamIt;
+    if (Param->isParameterPack()) {
+      if (++ParamIt == ParamEnd)
+        break;
+      Diag(Param->getLocation(),
+           diag::err_template_param_pack_must_be_last_template_parameter);
+      return nullptr;
+    }
   }
 
   if (DiagnoseUnexpandedParameterPack(ConstraintExpr))
     return nullptr;
 
-  ConceptDecl *NewDecl = ConceptDecl::Create(Context, DC, NameLoc, Name,
-                                             TemplateParameterLists.front(),
-                                             ConstraintExpr);
+  ConceptDecl *NewDecl =
+      ConceptDecl::Create(Context, DC, NameLoc, Name, Params, ConstraintExpr);
 
   if (NewDecl->hasAssociatedConstraints()) {
     // C++2a [temp.concept]p4:
@@ -10147,13 +10181,11 @@ Sema::ActOnExplicitInstantiation(Scope *S, SourceLocation ExternLoc,
 
   bool Owned = false;
   bool IsDependent = false;
-  Decl *TagD = ActOnTag(S, TagSpec, Sema::TUK_Reference,
-                        KWLoc, SS, Name, NameLoc, Attr, AS_none,
-                        /*ModulePrivateLoc=*/SourceLocation(),
-                        MultiTemplateParamsArg(), Owned, IsDependent,
-                        SourceLocation(), false, TypeResult(),
-                        /*IsTypeSpecifier*/false,
-                        /*IsTemplateParamOrArg*/false);
+  Decl *TagD = ActOnTag(S, TagSpec, Sema::TUK_Reference, KWLoc, SS, Name,
+               NameLoc, Attr, AS_none, /*ModulePrivateLoc=*/SourceLocation(),
+               MultiTemplateParamsArg(), Owned, IsDependent, SourceLocation(),
+               false, TypeResult(), /*IsTypeSpecifier*/ false,
+               /*IsTemplateParamOrArg*/ false, /*OOK=*/OOK_Outside).get();
   assert(!IsDependent && "explicit instantiation of dependent name not yet handled");
 
   if (!TagD)

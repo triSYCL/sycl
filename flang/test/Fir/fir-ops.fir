@@ -322,8 +322,8 @@ func.func @bar_select_rank(%arg : i32, %arg2 : i32) -> i32 {
 }
 
 // CHECK-LABEL: func @bar_select_type(
-// CHECK-SAME: [[VAL_101:%.*]]: !fir.box<!fir.type<name(param1:i32){fld:!fir.char<1>}>>) -> i32 {
-func.func @bar_select_type(%arg : !fir.box<!fir.type<name(param1:i32){fld:!fir.char<1>}>>) -> i32 {
+// CHECK-SAME: [[VAL_101:%.*]]: !fir.class<!fir.type<name(param1:i32){fld:!fir.char<1>}>>) -> i32 {
+func.func @bar_select_type(%arg : !fir.class<!fir.type<name(param1:i32){fld:!fir.char<1>}>>) -> i32 {
 
 // CHECK: [[VAL_102:%.*]] = arith.constant 1 : i32
 // CHECK: [[VAL_103:%.*]] = arith.constant 2 : i32
@@ -334,8 +334,8 @@ func.func @bar_select_type(%arg : !fir.box<!fir.type<name(param1:i32){fld:!fir.c
   %2 = arith.constant 3 : i32
   %3 = arith.constant 4 : i32
 
-// CHECK: fir.select_type [[VAL_101]] : !fir.box<!fir.type<name(param1:i32){fld:!fir.char<1>}>> [#fir.instance<!fir.int<4>>, ^bb1([[VAL_102]] : i32), #fir.instance<!fir.int<8>>, ^bb2([[VAL_104]] : i32), #fir.subsumed<!fir.int<2>>, ^bb3([[VAL_104]] : i32), #fir.instance<!fir.int<1>>, ^bb4([[VAL_103]] : i32), unit, ^bb5]
-  fir.select_type %arg : !fir.box<!fir.type<name(param1:i32){fld:!fir.char<1>}>> [ #fir.instance<!fir.int<4>>,^bb1(%0:i32), #fir.instance<!fir.int<8>>,^bb2(%2:i32), #fir.subsumed<!fir.int<2>>,^bb3(%2:i32), #fir.instance<!fir.int<1>>,^bb4(%1:i32), unit,^bb5 ]
+// CHECK: fir.select_type [[VAL_101]] : !fir.class<!fir.type<name(param1:i32){fld:!fir.char<1>}>> [#fir.type_is<!fir.int<4>>, ^bb1([[VAL_102]] : i32), #fir.type_is<!fir.int<8>>, ^bb2([[VAL_104]] : i32), #fir.class_is<!fir.int<2>>, ^bb3([[VAL_104]] : i32), #fir.type_is<!fir.int<1>>, ^bb4([[VAL_103]] : i32), unit, ^bb5]
+  fir.select_type %arg : !fir.class<!fir.type<name(param1:i32){fld:!fir.char<1>}>> [ #fir.type_is<!fir.int<4>>,^bb1(%0:i32), #fir.type_is<!fir.int<8>>,^bb2(%2:i32), #fir.class_is<!fir.int<2>>,^bb3(%2:i32), #fir.type_is<!fir.int<1>>,^bb4(%1:i32), unit,^bb5 ]
 
 // CHECK: ^bb1([[VAL_106:%.*]]: i32):
 // CHECK: return [[VAL_106]] : i32
@@ -821,7 +821,8 @@ func.func private @dispatch(%arg0: !fir.class<!fir.type<dispatch_derived1{a:i32,
 }
 
 
-// CHECK-LABEL: func.func @embox_tdesc
+// CHECK-LABEL: func.func @embox_tdesc(
+// CHECK-SAME: %[[ARG0:.*]]: !fir.class<!fir.array<10x!fir.type<derived_poly{a:i32,b:i32}>>>
 func.func @embox_tdesc(%arg0: !fir.class<!fir.array<10x!fir.type<derived_poly{a:i32,b:i32}>>>) {
   %0 = fir.alloca i32
   %c1_i32 = arith.constant 1 : i32
@@ -837,10 +838,8 @@ func.func @embox_tdesc(%arg0: !fir.class<!fir.array<10x!fir.type<derived_poly{a:
     %c1_i64 = arith.constant 1 : i64
     %11 = arith.subi %10, %c1_i64 : i64
     %12 = fir.coordinate_of %arg0, %11 : (!fir.class<!fir.array<10x!fir.type<derived_poly{a:i32,b:i32}>>>, i64) -> !fir.ref<!fir.type<derived_poly{a:i32,b:i32}>>
-    %tdesc = fir.box_tdesc %arg0 : (!fir.class<!fir.array<10x!fir.type<derived_poly{a:i32,b:i32}>>>) -> (!fir.tdesc<!fir.type<derived_poly{a:i32,b:i32}>>)
-    // CHECK: %[[TDESC:.*]] = fir.box_tdesc %{{.*}} : (!fir.class<!fir.array<10x!fir.type<derived_poly{a:i32,b:i32}>>>) -> !fir.tdesc<!fir.type<derived_poly{a:i32,b:i32}>> 
-    %13 = fir.embox %12 tdesc %tdesc : (!fir.ref<!fir.type<derived_poly{a:i32,b:i32}>>, !fir.tdesc<!fir.type<derived_poly{a:i32,b:i32}>>) -> !fir.class<!fir.type<derived_poly{a:i32,b:i32}>>
-    // CHECK: %{{.*}} = fir.embox %{{.*}} tdesc %[[TDESC]] : (!fir.ref<!fir.type<derived_poly{a:i32,b:i32}>>, !fir.tdesc<!fir.type<derived_poly{a:i32,b:i32}>>) -> !fir.class<!fir.type<derived_poly{a:i32,b:i32}>>
+    %13 = fir.embox %12 source_box %arg0 : (!fir.ref<!fir.type<derived_poly{a:i32,b:i32}>>, !fir.class<!fir.array<10x!fir.type<derived_poly{a:i32,b:i32}>>>) -> !fir.class<!fir.type<derived_poly{a:i32,b:i32}>>
+    // CHECK: %{{.*}} = fir.embox %{{.*}} source_box %[[ARG0]] : (!fir.ref<!fir.type<derived_poly{a:i32,b:i32}>>, !fir.class<!fir.array<10x!fir.type<derived_poly{a:i32,b:i32}>>>) -> !fir.class<!fir.type<derived_poly{a:i32,b:i32}>>
     %14 = arith.addi %arg2, %c1 : index
     %15 = fir.convert %c1 : (index) -> i32
     %16 = fir.load %0 : !fir.ref<i32>
@@ -882,3 +881,12 @@ func.func @test_fortran_var_attrs() {
   // CHECK: fir.alloca f32 {fortran_attrs = #fir.var_attrs<volatile>}
   // CHECK: fir.alloca !fir.box<!fir.ptr<!fir.array<?xf32>>> {fortran_attrs = #fir.var_attrs<contiguous, pointer, volatile>}
 }
+
+func.func @test_box_typecode(%a: !fir.class<none>) {
+  %0 = fir.box_typecode %a : (!fir.class<none>) -> i32
+  return
+}
+
+// CHECK-LABEL: func.func @test_box_typecode(
+// CHECK-SAME: %[[A:.*]]: !fir.class<none>)
+// CHECK: %{{.*}} = fir.box_typecode %[[A]] : (!fir.class<none>) -> i32

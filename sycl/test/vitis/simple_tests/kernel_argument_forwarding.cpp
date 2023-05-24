@@ -3,7 +3,7 @@
 // RUN: %clangxx %EXTRA_COMPILE_FLAGS-fsycl -fsycl-targets=%sycl_triple -std=c++20 %s -o %t.out > %t.check 2>&1
 // RUN: %run_if_not_cpu FileCheck --input-file=%t.check %s
 
-#include <sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <sycl/ext/xilinx/fpga.hpp>
 #include <array>
 #include <iostream>
@@ -21,7 +21,7 @@ int main() {
   sycl::range<1> NumOfWorkItems{Buffer.size()};
 
   Queue.submit([&](sycl::handler &cgh) {
-    auto Accessor = Buffer.get_access<sycl::access_mode::write>(cgh);
+    sycl::accessor Accessor{Buffer, cgh, sycl::write_only};
     cgh.single_task<class FirstKernel>(kernel_param(
         [=] {
           // CHECK-DAG:  {{.*}}v++ {{.*}}FirstKernel{{.*}} --kernel_frequency 200
@@ -31,7 +31,7 @@ int main() {
   });
 
   Queue.submit([&](sycl::handler &cgh) {
-    auto Accessor = Buffer.get_access<sycl::access_mode::write>(cgh);
+    sycl::accessor Accessor{Buffer, cgh, sycl::write_only};
     cgh.single_task<class SecondKernel>(kernel_param(
         [=] {
           // CHECK-DAG: {{.*}}v++ {{.*}}SecondKernel{{.*}} --kernel_frequency 300
@@ -42,7 +42,7 @@ int main() {
   });
 
   Queue.submit([&](sycl::handler &cgh) {
-    auto Accessor = Buffer.get_access<sycl::access_mode::write>(cgh);
+    sycl::accessor Accessor{Buffer, cgh, sycl::write_only};
     cgh.single_task<class ThirdKernel>("--kernel_frequency 300"_vitis_option([=] {
       // CHECK-DAG:  {{.*}}v++ {{.*}}ThirdKernel{{.*}} --kernel_frequency 300
       Accessor[0] = 0;

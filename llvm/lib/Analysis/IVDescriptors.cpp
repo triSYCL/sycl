@@ -1111,9 +1111,13 @@ Value *RecurrenceDescriptor::getRecurrenceIdentity(RecurKind K, Type *Tp,
     return ConstantInt::get(Tp,
                             APInt::getSignedMinValue(Tp->getIntegerBitWidth()));
   case RecurKind::FMin:
-    return ConstantFP::getInfinity(Tp, true);
+    assert((FMF.noNaNs() && FMF.noSignedZeros()) &&
+           "nnan, nsz is expected to be set for FP min reduction.");
+    return ConstantFP::getInfinity(Tp, false /*Negative*/);
   case RecurKind::FMax:
-    return ConstantFP::getInfinity(Tp, false);
+    assert((FMF.noNaNs() && FMF.noSignedZeros()) &&
+           "nnan, nsz is expected to be set for FP max reduction.");
+    return ConstantFP::getInfinity(Tp, true /*Negative*/);
   case RecurKind::SelectICmp:
   case RecurKind::SelectFCmp:
     return getRecurrenceStartValue();
@@ -1581,7 +1585,7 @@ bool InductionDescriptor::isInductionPHI(
   if (TySize.isZero() || TySize.isScalable())
     return false;
 
-  int64_t Size = static_cast<int64_t>(TySize.getFixedSize());
+  int64_t Size = static_cast<int64_t>(TySize.getFixedValue());
   int64_t CVSize = CV->getSExtValue();
   if (CVSize % Size)
     return false;

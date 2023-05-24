@@ -31,7 +31,7 @@ int main() {
       buffer<sycl::cl_float2, 1> BufR(&r, range<1>(1));
 
       q.submit([&](handler &cgh) {
-        auto AccR = BufR.get_access<access::mode::write>(cgh);
+        sycl::accessor AccR{BufR, cgh, sycl::write_only};
         cgh.single_task<class fminF2F2>([=] {
           AccR[0] = sycl::fmin(sycl::cl_float2{0.5f, 3.4f},
                                    sycl::cl_float2{2.3f, 0.4f});
@@ -51,7 +51,7 @@ int main() {
     {
       buffer<sycl::cl_float2, 1> BufR(&r, range<1>(1));
       q.submit([&](handler &cgh) {
-        auto AccR = BufR.get_access<access::mode::write>(cgh);
+        sycl::accessor AccR{BufR, cgh, sycl::write_only};
         cgh.single_task<class nexpF2>([=] {
           AccR[0] = sycl::native::exp(sycl::cl_float2{1.0f, 2.0f});
         });
@@ -70,7 +70,7 @@ int main() {
     {
       buffer<sycl::cl_float2, 1> BufR(&r, range<1>(1));
       q.submit([&](handler &cgh) {
-        auto AccR = BufR.get_access<access::mode::write>(cgh);
+        sycl::accessor AccR{BufR, cgh, sycl::write_only};
         cgh.single_task<class fabsF2>([=] {
           AccR[0] = sycl::fabs(sycl::cl_float2{-1.0f, 2.0f});
         });
@@ -89,7 +89,7 @@ int main() {
     {
       buffer<sycl::cl_float2, 1> BufR(&r, range<1>(1));
       q.submit([&](handler &cgh) {
-        auto AccR = BufR.get_access<access::mode::write>(cgh);
+        sycl::accessor AccR{BufR, cgh, sycl::write_only};
         cgh.single_task<class floorF2>([=] {
           AccR[0] = sycl::floor(sycl::cl_float2{1.4f, 2.8f});
         });
@@ -108,7 +108,7 @@ int main() {
     {
       buffer<sycl::cl_float2, 1> BufR(&r, range<1>(1));
       q.submit([&](handler &cgh) {
-        auto AccR = BufR.get_access<access::mode::write>(cgh);
+        sycl::accessor AccR{BufR, cgh, sycl::write_only};
         cgh.single_task<class ceilF2>([=] {
           AccR[0] = sycl::ceil(sycl::cl_float2{1.4f, 2.8f});
         });

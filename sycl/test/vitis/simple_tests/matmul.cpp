@@ -79,12 +79,9 @@ int main() {
   sycl::buffer<int, 2> gold(sycl::range<2>{columns, rows});
   sycl::buffer<int, 2> C(sycl::range<2>{columns, rows});
   {
-    sycl::accessor A_rw =
-        A.get_access<sycl::access::mode::read_write>();
-    sycl::accessor B_rw =
-        B.get_access<sycl::access::mode::read_write>();
-    sycl::accessor G_rw =
-        gold.get_access<sycl::access::mode::read_write>();
+    sycl::host_accessor A_rw{A, sycl::read_write};
+    sycl::host_accessor B_rw{B, sycl::read_write};
+    sycl::host_accessor G_rw{gold, sycl::read_write};
     for (size_t i = 0; i < A_rw.get_range()[0]; i++)
       for (size_t j = 0; j < A_rw.get_range()[1]; j++) {
         A_rw[{i, j}] = gen_random();
@@ -103,21 +100,20 @@ int main() {
   // Submitting command group(work) to queue
   Queue.submit([&](sycl::handler &cgh) {
     // Getting write only access to the buffer on a device
-    auto C_w = C.get_access<sycl::access::mode::read_write>(cgh);
-    auto A_r = A.get_access<sycl::access::mode::read>(cgh);
-    auto B_r = B.get_access<sycl::access::mode::read>(cgh);
+    sycl::accessor C_w{C, cgh, sycl::read_write};
+    sycl::accessor A_r{A, cgh, sycl::read_only};
+    sycl::accessor B_r{B, cgh, sycl::read_only};
     // Executing kernel
     cgh.single_task<class S>([=] {
       matmul(C_w, A_r, B_r);
     });
   });
 
-  verify(gold.get_access<sycl::access::mode::read>(),
-         C.get_access<sycl::access::mode::read>());
+  verify(sycl::host_accessor{gold,sycl::read_only},
+         sycl::host_accessor{C,sycl::read_only});
 
   {
-    sycl::accessor C_rw =
-        C.get_access<sycl::access::mode::read_write>();
+    sycl::host_accessor C_rw{C, sycl::read_write};
     for (size_t k = 0; k < A.get_range()[0]; k++)
       for (size_t j = 0; j < A.get_range()[0]; j++)
         C_rw[{k, j}] = 0;
@@ -126,9 +122,9 @@ int main() {
   // Submitting command group(work) to queue
   Queue.submit([&](sycl::handler &cgh) {
     // Getting write only access to the buffer on a device
-    auto C_w = C.get_access<sycl::access::mode::read_write>(cgh);
-    auto A_r = A.get_access<sycl::access::mode::read>(cgh);
-    auto B_r = B.get_access<sycl::access::mode::read>(cgh);
+    sycl::accessor C_w{C, cgh, sycl::read_write};
+    sycl::accessor A_r{A, cgh, sycl::read_only};
+    sycl::accessor B_r{B, cgh, sycl::read_only};
     // Executing kernel
     cgh.parallel_for<class S2>(A_r.get_range(), [=](sycl::id<2> idx) {
       C_w[idx] = 0;
@@ -138,8 +134,8 @@ int main() {
     });
   });
 
-  verify(gold.get_access<sycl::access::mode::read>(),
-         C.get_access<sycl::access::mode::read>());
+  verify(sycl::host_accessor{gold,sycl::read_only},
+         sycl::host_accessor{C,sycl::read_only});
 
   printf("TEST PASSED\n\n");
 

@@ -34,9 +34,7 @@ createNewFirBox(fir::FirOpBuilder &builder, mlir::Location loc,
   mlir::Value shape;
   if (!extents.empty()) {
     if (lbounds.empty()) {
-      auto shapeType =
-          fir::ShapeType::get(builder.getContext(), extents.size());
-      shape = builder.create<fir::ShapeOp>(loc, shapeType, extents);
+      shape = builder.create<fir::ShapeOp>(loc, extents);
     } else {
       llvm::SmallVector<mlir::Value> shapeShiftBounds;
       for (auto [lb, extent] : llvm::zip(lbounds, extents)) {
@@ -192,8 +190,9 @@ private:
 class MutablePropertyWriter {
 public:
   MutablePropertyWriter(fir::FirOpBuilder &builder, mlir::Location loc,
-                        const fir::MutableBoxValue &box)
-      : builder{builder}, loc{loc}, box{box} {}
+                        const fir::MutableBoxValue &box,
+                        mlir::Value typeSourceBox = {})
+      : builder{builder}, loc{loc}, box{box}, typeSourceBox{typeSourceBox} {}
   /// Update MutableBoxValue with new address, shape and length parameters.
   /// Extents and lbounds must all have index type.
   /// lbounds can be empty in which case all ones is assumed.
@@ -234,7 +233,8 @@ public:
       // this is just like NULLIFY and the dynamic type must be set to the
       // declared type, not retain the previous dynamic type.
       auto deallocatedBox = fir::factory::createUnallocatedBox(
-          builder, loc, box.getBoxTy(), box.nonDeferredLenParams());
+          builder, loc, box.getBoxTy(), box.nonDeferredLenParams(),
+          typeSourceBox);
       builder.create<fir::StoreOp>(loc, deallocatedBox, box.getAddr());
     }
   }
@@ -313,14 +313,14 @@ private:
   fir::FirOpBuilder &builder;
   mlir::Location loc;
   fir::MutableBoxValue box;
+  mlir::Value typeSourceBox;
 };
 
 } // namespace
 
-mlir::Value
-fir::factory::createUnallocatedBox(fir::FirOpBuilder &builder,
-                                   mlir::Location loc, mlir::Type boxType,
-                                   mlir::ValueRange nonDeferredParams) {
+mlir::Value fir::factory::createUnallocatedBox(
+    fir::FirOpBuilder &builder, mlir::Location loc, mlir::Type boxType,
+    mlir::ValueRange nonDeferredParams, mlir::Value typeSourceBox) {
   auto baseAddrType = boxType.dyn_cast<fir::BaseBoxType>().getEleTy();
   if (!fir::isa_ref_type(baseAddrType))
     baseAddrType = builder.getRefType(baseAddrType);
@@ -336,7 +336,7 @@ fir::factory::createUnallocatedBox(fir::FirOpBuilder &builder,
     auto zero = builder.createIntegerConstant(loc, builder.getIndexType(), 0);
     llvm::SmallVector<mlir::Value> extents(seqTy.getDimension(), zero);
     shape = builder.createShape(
-        loc, fir::ArrayBoxValue{nullAddr, extents, /*lbounds=*/llvm::None});
+        loc, fir::ArrayBoxValue{nullAddr, extents, /*lbounds=*/std::nullopt});
   }
   // Provide dummy length parameters if they are dynamic. If a length parameter
   // is deferred. It is set to zero here and will be set on allocation.
@@ -354,19 +354,23 @@ fir::factory::createUnallocatedBox(fir::FirOpBuilder &builder,
   }
   mlir::Value emptySlice;
   return builder.create<fir::EmboxOp>(loc, boxType, nullAddr, shape, emptySlice,
-                                      lenParams);
+                                      lenParams, typeSourceBox);
 }
 
-fir::MutableBoxValue
-fir::factory::createTempMutableBox(fir::FirOpBuilder &builder,
-                                   mlir::Location loc, mlir::Type type,
-                                   llvm::StringRef name) {
-  auto boxType = fir::BoxType::get(fir::HeapType::get(type));
+fir::MutableBoxValue fir::factory::createTempMutableBox(
+    fir::FirOpBuilder &builder, mlir::Location loc, mlir::Type type,
+    llvm::StringRef name, mlir::Value typeSourceBox) {
+  mlir::Type boxType;
+  if (typeSourceBox)
+    boxType = fir::ClassType::get(fir::HeapType::get(type));
+  else
+    boxType = fir::BoxType::get(fir::HeapType::get(type));
   auto boxAddr = builder.createTemporary(loc, boxType, name);
   auto box =
       fir::MutableBoxValue(boxAddr, /*nonDeferredParams=*/mlir::ValueRange(),
                            /*mutableProperties=*/{});
-  MutablePropertyWriter{builder, loc, box}.setUnallocatedStatus();
+  MutablePropertyWriter{builder, loc, box, typeSourceBox}
+      .setUnallocatedStatus();
   return box;
 }
 
@@ -418,17 +422,13 @@ fir::factory::genMutableBoxRead(fir::FirOpBuilder &builder, mlir::Location loc,
       return fir::CharArrayBoxValue{addr, len, extents, lbounds};
     return fir::CharBoxValue{addr, len};
   }
-  mlir::Value tdesc;
-  if (box.isPolymorphic()) {
-    auto loadedBox = builder.create<fir::LoadOp>(loc, box.getAddr());
-    mlir::Type tdescType =
-        fir::TypeDescType::get(mlir::NoneType::get(builder.getContext()));
-    tdesc = builder.create<fir::BoxTypeDescOp>(loc, tdescType, loadedBox);
-  }
-  if (rank)
-    return fir::ArrayBoxValue{addr, extents, lbounds, tdesc};
+  mlir::Value sourceBox;
   if (box.isPolymorphic())
-    return fir::PolymorphicValue(addr, tdesc);
+    sourceBox = builder.create<fir::LoadOp>(loc, box.getAddr());
+  if (rank)
+    return fir::ArrayBoxValue{addr, extents, lbounds, sourceBox};
+  if (box.isPolymorphic())
+    return fir::PolymorphicValue(addr, sourceBox);
   return addr;
 }
 
@@ -478,25 +478,26 @@ void fir::factory::associateMutableBox(fir::FirOpBuilder &builder,
   MutablePropertyWriter writer(builder, loc, box);
   source.match(
       [&](const fir::PolymorphicValue &p) {
-        mlir::Value tdesc;
+        mlir::Value sourceBox;
         if (auto polyBox = source.getBoxOf<fir::PolymorphicValue>())
-          tdesc = polyBox->getTdesc();
-        writer.updateMutableBox(p.getAddr(), /*lbounds=*/llvm::None,
-                                /*extents=*/llvm::None, /*lengths=*/llvm::None,
-                                tdesc);
+          sourceBox = polyBox->getSourceBox();
+        writer.updateMutableBox(p.getAddr(), /*lbounds=*/std::nullopt,
+                                /*extents=*/std::nullopt,
+                                /*lengths=*/std::nullopt, sourceBox);
       },
       [&](const fir::UnboxedValue &addr) {
-        writer.updateMutableBox(addr, /*lbounds=*/llvm::None,
-                                /*extents=*/llvm::None, /*lengths=*/llvm::None);
+        writer.updateMutableBox(addr, /*lbounds=*/std::nullopt,
+                                /*extents=*/std::nullopt,
+                                /*lengths=*/std::nullopt);
       },
       [&](const fir::CharBoxValue &ch) {
-        writer.updateMutableBox(ch.getAddr(), /*lbounds=*/llvm::None,
-                                /*extents=*/llvm::None, {ch.getLen()});
+        writer.updateMutableBox(ch.getAddr(), /*lbounds=*/std::nullopt,
+                                /*extents=*/std::nullopt, {ch.getLen()});
       },
       [&](const fir::ArrayBoxValue &arr) {
         writer.updateMutableBox(arr.getAddr(),
                                 lbounds.empty() ? arr.getLBounds() : lbounds,
-                                arr.getExtents(), /*lengths=*/llvm::None);
+                                arr.getExtents(), /*lengths=*/std::nullopt);
       },
       [&](const fir::CharArrayBoxValue &arr) {
         writer.updateMutableBox(arr.getAddr(),
@@ -586,11 +587,11 @@ void fir::factory::associateMutableBoxWithRemap(
   source.match(
       [&](const fir::PolymorphicValue &p) {
         writer.updateMutableBox(cast(p.getAddr()), lbounds, extents,
-                                /*lengths=*/llvm::None);
+                                /*lengths=*/std::nullopt);
       },
       [&](const fir::UnboxedValue &addr) {
         writer.updateMutableBox(cast(addr), lbounds, extents,
-                                /*lengths=*/llvm::None);
+                                /*lengths=*/std::nullopt);
       },
       [&](const fir::CharBoxValue &ch) {
         writer.updateMutableBox(cast(ch.getAddr()), lbounds, extents,
@@ -598,7 +599,7 @@ void fir::factory::associateMutableBoxWithRemap(
       },
       [&](const fir::ArrayBoxValue &arr) {
         writer.updateMutableBox(cast(arr.getAddr()), lbounds, extents,
-                                /*lengths=*/llvm::None);
+                                /*lengths=*/std::nullopt);
       },
       [&](const fir::CharArrayBoxValue &arr) {
         writer.updateMutableBox(cast(arr.getAddr()), lbounds, extents,
@@ -658,7 +659,8 @@ void fir::factory::disassociateMutableBox(fir::FirOpBuilder &builder,
     // same as its declared type.
     auto boxTy = box.getBoxTy().dyn_cast<fir::BaseBoxType>();
     auto eleTy = fir::dyn_cast_ptrOrBoxEleTy(boxTy.getEleTy());
-    if (auto recTy = eleTy.dyn_cast<fir::RecordType>())
+    mlir::Type derivedType = fir::getDerivedType(eleTy);
+    if (auto recTy = derivedType.dyn_cast<fir::RecordType>())
       fir::runtime::genNullifyDerivedType(builder, loc, box.getAddr(), recTy,
                                           box.rank());
     return;
@@ -704,7 +706,7 @@ static mlir::Value allocateAndInitNewStorage(fir::FirOpBuilder &builder,
     // information is available at compile time and could be reflected here
     // somehow.
     mlir::Value irBox = createNewFirBox(builder, loc, box, newStorage,
-                                        llvm::None, extents, lengths);
+                                        std::nullopt, extents, lengths);
     fir::runtime::genDerivedTypeInitialize(builder, loc, irBox);
   }
   return newStorage;
@@ -809,28 +811,29 @@ fir::factory::MutableBoxReallocation fir::factory::genReallocIfNeeded(
               TODO(loc, "automatic allocation of derived type allocatable with "
                         "length parameters");
             }
-            auto ifOp =
-                builder
-                    .genIfOp(loc, {addrType}, mustReallocate,
-                             /*withElseRegion=*/true)
-                    .genThen([&]() {
-                      // If shape or length mismatch, allocate new storage.
-                      // When rhs is a scalar, keep the previous shape
-                      auto extents = shape.empty()
-                                         ? mlir::ValueRange(previousExtents)
-                                         : shape;
-                      auto heap = allocateAndInitNewStorage(
-                          builder, loc, box, extents, lengthParams,
-                          ".auto.alloc");
-                      if (storageHandler)
-                        storageHandler(getExtValForStorage(heap));
-                      builder.create<fir::ResultOp>(loc, heap);
-                    })
-                    .genElse([&]() {
-                      if (storageHandler)
-                        storageHandler(getExtValForStorage(addr));
-                      builder.create<fir::ResultOp>(loc, addr);
-                    });
+            auto ifOp = builder
+                            .genIfOp(loc, {addrType}, mustReallocate,
+                                     /*withElseRegion=*/true)
+                            .genThen([&]() {
+                              // If shape or length mismatch, allocate new
+                              // storage. When rhs is a scalar, keep the
+                              // previous shape
+                              auto extents =
+                                  shape.empty()
+                                      ? mlir::ValueRange(previousExtents)
+                                      : shape;
+                              auto heap = allocateAndInitNewStorage(
+                                  builder, loc, box, extents, lengthParams,
+                                  ".auto.alloc");
+                              if (storageHandler)
+                                storageHandler(getExtValForStorage(heap));
+                              builder.create<fir::ResultOp>(loc, heap);
+                            })
+                            .genElse([&]() {
+                              if (storageHandler)
+                                storageHandler(getExtValForStorage(addr));
+                              builder.create<fir::ResultOp>(loc, addr);
+                            });
             ifOp.end();
             auto newAddr = ifOp.getResults()[0];
             builder.create<fir::ResultOp>(

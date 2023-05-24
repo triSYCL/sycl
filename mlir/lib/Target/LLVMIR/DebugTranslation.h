@@ -61,6 +61,7 @@ private:
   llvm::DIFile *translateFile(StringRef fileName);
 
   /// Translate the given attribute to the corresponding llvm debug metadata.
+  llvm::DIType *translateImpl(DIVoidResultTypeAttr attr);
   llvm::DIBasicType *translateImpl(DIBasicTypeAttr attr);
   llvm::DICompileUnit *translateImpl(DICompileUnitAttr attr);
   llvm::DICompositeType *translateImpl(DICompositeTypeAttr attr);
@@ -77,7 +78,8 @@ private:
 
   /// A mapping between mlir location+scope and the corresponding llvm debug
   /// metadata.
-  DenseMap<std::pair<Location, llvm::DILocalScope *>, const llvm::DILocation *>
+  DenseMap<std::tuple<Location, llvm::DILocalScope *, const llvm::DILocation *>,
+           const llvm::DILocation *>
       locationToLoc;
 
   /// A mapping between debug attribute and the corresponding llvm debug

@@ -54,7 +54,7 @@ def AlternativesOp : TransformDialectOp<"alternatives",
     remaining alternatives. Note that the payload IR outside of the given scope
     is not necessarily in the valid state, or even accessible to the
     transformation.
-    
+
     The changes to the IR within the scope performed by transforms in the failed
     alternative region are reverted before attempting the next region.
     Practically, this is achieved by cloning the scope. Therefore it is advised
@@ -88,8 +88,8 @@ def AlternativesOp : TransformDialectOp<"alternatives",
     ```
   }];
 
-  let arguments = (ins Optional<TransformTypeInterface>:$scope);
-  let results = (outs Variadic<TransformTypeInterface>:$results);
+  let arguments = (ins Optional<TransformHandleTypeInterface>:$scope);
+  let results = (outs Variadic<TransformHandleTypeInterface>:$results);
   let regions = (region VariadicRegion<SizedRegion<1>>:$alternatives);
 
   let assemblyFormat =
@@ -102,14 +102,14 @@ def CastOp : TransformDialectOp<"cast",
     [TransformOpInterface, TransformEachOpTrait,
      DeclareOpInterfaceMethods<CastOpInterface>,
      DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
-  let arguments = (ins TransformTypeInterface:$input);
-  let results = (outs TransformTypeInterface:$output);
+  let arguments = (ins TransformHandleTypeInterface:$input);
+  let results = (outs TransformHandleTypeInterface:$output);
   let assemblyFormat = "$input attr-dict `:` type($input) `to` type($output)";
 
   let extraClassDeclaration = [{
     ::mlir::DiagnosedSilenceableFailure applyToOne(
       ::mlir::Operation *target,
-      ::llvm::SmallVectorImpl<::mlir::Operation *> &results,
+      ::mlir::transform::ApplyToEachResultList &results,
       ::mlir::transform::TransformState &state);
   }];
 }
@@ -143,10 +143,10 @@ def ForeachOp : TransformDialectOp<"foreach",
     merged and mapped to the same resulting handle.
   }];
 
-  let arguments = (ins TransformTypeInterface:$target);
-  let results = (outs Variadic<TransformTypeInterface>:$results);
+  let arguments = (ins TransformHandleTypeInterface:$target);
+  let results = (outs Variadic<TransformHandleTypeInterface>:$results);
   let regions = (region SizedRegion<1>:$body);
-  let assemblyFormat = 
+  let assemblyFormat =
     "$target `:` type($target) (`->` type($results)^)? $body attr-dict";
   let hasVerifier = 1;
 
@@ -183,10 +183,31 @@ def GetClosestIsolatedParentOp : TransformDialectOp<"get_closest_isolated_parent
     on the further transformation applied to the handle produced here.
   }];
 
-  let arguments = (ins TransformTypeInterface:$target);
-  let results = (outs TransformTypeInterface:$parent);
+  let arguments = (ins TransformHandleTypeInterface:$target);
+  let results = (outs TransformHandleTypeInterface:$parent);
   let assemblyFormat =
     "$target attr-dict `:` functional-type(operands, results)";
+}
+
+def GetConsumersOfResult : TransformDialectOp<"get_consumers_of_result",
+    [DeclareOpInterfaceMethods<TransformOpInterface>,
+     NavigationTransformOpTrait, MemoryEffectsOpInterface]> {
+  let summary = "Get handle to the consumers of this operation's result number";
+  let description = [{
+    The handle defined by this Transform op corresponds to all operations that
+    consume the SSA value defined by the `target` and `result_number`
+    arguments.
+    This operation applies to a single payload operation, otherwise it 
+    definitely fails.
+    The return handle points to the consuming operations operations, which can
+    be empty.
+  }];
+
+  let arguments = (ins TransformHandleTypeInterface:$target,
+                       I64Attr:$result_number);
+  let results = (outs TransformHandleTypeInterface:$consumers);
+  let assemblyFormat = "$target `[` $result_number `]` attr-dict `:` "
+                       "functional-type(operands, results)";
 }
 
 def GetProducerOfOperand : TransformDialectOp<"get_producer_of_operand",
@@ -202,15 +223,15 @@ def GetProducerOfOperand : TransformDialectOp<"get_producer_of_operand",
     computational operations, which can be empty.
   }];
 
-  let arguments = (ins TransformTypeInterface:$target,
+  let arguments = (ins TransformHandleTypeInterface:$target,
                        I64Attr:$operand_number);
-  let results = (outs TransformTypeInterface:$parent);
+  let results = (outs TransformHandleTypeInterface:$parent);
   let assemblyFormat = "$target `[` $operand_number `]` attr-dict `:` "
                        "functional-type(operands, results)";
 }
 
 def MergeHandlesOp : TransformDialectOp<"merge_handles",
-    [DeclareOpInterfaceMethods<TransformOpInterface>,
+    [DeclareOpInterfaceMethods<TransformOpInterface, ["allowsRepeatedHandleOperands"]>,
      DeclareOpInterfaceMethods<MemoryEffectsOpInterface>,
      SameOperandsAndResultType]> {
   let summary = "Merges handles into one pointing to the union of payload ops";
@@ -225,9 +246,9 @@ def MergeHandlesOp : TransformDialectOp<"merge_handles",
     same or different handles. Consumes the operands and produces a new handle.
   }];
 
-  let arguments = (ins Variadic<TransformTypeInterface>:$handles,
+  let arguments = (ins Variadic<TransformHandleTypeInterface>:$handles,
                        UnitAttr:$deduplicate);
-  let results = (outs TransformTypeInterface:$result);
+  let results = (outs TransformHandleTypeInterface:$result);
   let assemblyFormat = "($deduplicate^)? $handles attr-dict `:` type($result)";
   let hasFolder = 1;
 }
@@ -238,7 +259,7 @@ def SplitHandlesOp : TransformDialectOp<"split_handles",
      DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
   let summary = "Splits handles from a union of payload ops to a list";
   let description = [{
-    Creates `num_result_handles` transform IR handles extracted from the 
+    Creates `num_result_handles` transform IR handles extracted from the
     `handle` operand. The resulting Payload IR operation handles are listed
     in the same order as the operations appear in the source `handle`.
     This is useful for ensuring a statically known number of operations are
@@ -246,15 +267,20 @@ def SplitHandlesOp : TransformDialectOp<"split_handles",
     that can be further manipulated in isolation.
 
     This operation succeeds and returns `num_result_handles` if the statically
-    specified `num_result_handles` corresponds to the dynamic number of 
+    specified `num_result_handles` corresponds to the dynamic number of
     operations contained in the source `handle`. Otherwise it silently fails.
   }];
 
-  let arguments = (ins TransformTypeInterface:$handle,
+  let arguments = (ins TransformHandleTypeInterface:$handle,
                        I64Attr:$num_result_handles);
-  let results = (outs Variadic<TransformTypeInterface>:$results);
+  let results = (outs Variadic<TransformHandleTypeInterface>:$results);
+
+  let builders = [
+    OpBuilder<(ins "Value":$handle, "int64_t":$numResultHandles)>
+  ];
+
   let assemblyFormat = [{
-    $handle `in` `[` $num_result_handles `]` 
+    $handle `in` `[` $num_result_handles `]`
     attr-dict `:` functional-type(operands, results)
   }];
 }
@@ -281,10 +307,10 @@ def PDLMatchOp : TransformDialectOp<"pdl_match",
   }];
 
   let arguments = (ins
-    Arg<TransformTypeInterface, "Payload IR scope to match within">:$root, 
+    Arg<TransformHandleTypeInterface, "Payload IR scope to match within">:$root,
     SymbolRefAttr:$pattern_name);
   let results = (outs
-    Res<TransformTypeInterface, "Handle to the matched Payload IR ops">:$matched);
+    Res<TransformHandleTypeInterface, "Handle to the matched Payload IR ops">:$matched);
 
   let assemblyFormat = "$pattern_name `in` $root attr-dict `:` "
                        "functional-type(operands, results)";
@@ -302,9 +328,15 @@ def PrintOp : TransformDialectOp<"print",
     This op is useful for printf-style debugging.
   }];
 
-  let arguments = (ins Optional<TransformTypeInterface>:$target,
+  let arguments = (ins Optional<TransformHandleTypeInterface>:$target,
                        OptionalAttr<StrAttr>:$name);
   let results = (outs);
+
+  let builders = [
+    OpBuilder<(ins CArg<"StringRef", "StringRef()">:$name)>,
+    OpBuilder<(ins "Value":$target, CArg<"StringRef", "StringRef()">:$name)>
+  ];
+
   let assemblyFormat = "$target attr-dict (`:` type($target)^)?";
 }
 
@@ -324,7 +356,7 @@ def ReplicateOp : TransformDialectOp<"replicate",
 
     This transformation is useful to "align" the sizes of payload IR lists
     before a transformation that expects, e.g., identically-sized lists. For
-    example, a transformation may be parameterized by same notional per-target 
+    example, a transformation may be parameterized by same notional per-target
     size computed at runtime and supplied as another handle, the replication
     allows this size to be computed only once and used for every target instead
     of replicating the computation itself.
@@ -338,9 +370,9 @@ def ReplicateOp : TransformDialectOp<"replicate",
     MergeHandlesOp can be used to construct arbitrary lists with repetitions.
   }];
 
-  let arguments = (ins TransformTypeInterface:$pattern,
-                       Variadic<TransformTypeInterface>:$handles);
-  let results = (outs Variadic<TransformTypeInterface>:$replicated);
+  let arguments = (ins TransformHandleTypeInterface:$pattern,
+                       Variadic<TransformHandleTypeInterface>:$handles);
+  let results = (outs Variadic<TransformHandleTypeInterface>:$replicated);
   let assemblyFormat = "`num` `(` $pattern `)` $handles attr-dict `:` "
                        "type($pattern) `,` type($handles)";
 }
@@ -378,16 +410,34 @@ def SequenceOp : TransformDialectOp<"sequence",
     IR, typically the root operation of the pass interpreting the transform
     dialect. Operand omission is only allowed for sequences not contained in
     another sequence.
+
+    The body of the sequence terminates with an implicit or explicit
+    `transform.yield` op. The operands of the terminator are returned as the
+    results of the sequence op.
   }];
 
   let arguments = (ins FailurePropagationMode:$failure_propagation_mode,
-                       Optional<TransformTypeInterface>:$root);
-  let results = (outs Variadic<TransformTypeInterface>:$results);
+                       Optional<TransformHandleTypeInterface>:$root);
+  let results = (outs Variadic<TransformHandleTypeInterface>:$results);
   let regions = (region SizedRegion<1>:$body);
 
   let assemblyFormat =
     "($root^ `:` type($root))? (`->` type($results)^)? `failures` `(` "
     "$failure_propagation_mode `)` attr-dict-with-keyword regions";
+
+  let builders = [
+    // Build a sequence with a root.
+    OpBuilder<(ins
+        "::mlir::TypeRange":$resultTypes,
+        "::mlir::transform::FailurePropagationMode":$failure_propagation_mode,
+        "::mlir::Value":$root, "SequenceBodyBuilderFn":$bodyBuilder)>,
+
+    // Build a sequence without a root but a certain bbArg type.
+    OpBuilder<(ins
+        "::mlir::TypeRange":$resultTypes,
+        "::mlir::transform::FailurePropagationMode":$failure_propagation_mode,
+        "::mlir::Type":$bbArgType, "SequenceBodyBuilderFn":$bodyBuilder)>
+  ];
 
   let extraClassDeclaration = [{
     /// Allow the dialect prefix to be omitted.
@@ -438,7 +488,7 @@ def WithPDLPatternsOp : TransformDialectOp<"with_pdl_patterns",
   }];
 
   let arguments = (ins
-    Arg<Optional<TransformTypeInterface>, "Root operation of the Payload IR",
+    Arg<Optional<TransformHandleTypeInterface>, "Root operation of the Payload IR",
         [TransformMappingRead]>:$root);
   let regions = (region SizedRegion<1>:$body);
   let assemblyFormat = "($root^ `:` type($root))? attr-dict-with-keyword regions";
@@ -459,8 +509,8 @@ def YieldOp : TransformDialectOp<"yield", [Terminator]> {
     any transformation on the payload IR and is used for flow purposes only.
   }];
 
-  let arguments = (ins 
-    Arg<Variadic<TransformTypeInterface>, "Operation handles yielded back to the parent",
+  let arguments = (ins
+    Arg<Variadic<TransformHandleTypeInterface>, "Operation handles yielded back to the parent",
         [TransformMappingRead]>:$operands);
   let assemblyFormat = "operands attr-dict (`:` type($operands)^)?";
 

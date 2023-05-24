@@ -126,47 +126,6 @@ private:
   }
 };
 
-template <> class SYCLConfig<SYCL_BE> {
-  using BaseT = SYCLConfigBase<SYCL_BE>;
-
-public:
-  static backend *get() {
-    static bool Initialized = false;
-    static backend *BackendPtr = nullptr;
-
-    // Configuration parameters are processed only once, like reading a string
-    // from environment and converting it into a typed object.
-    if (Initialized)
-      return BackendPtr;
-
-    const char *ValStr = BaseT::getRawValue();
-    const std::array<std::pair<std::string, backend>, 7> SyclBeMap = {
-        {{"PI_OPENCL", backend::opencl},
-         {"PI_LEVEL_ZERO", backend::ext_oneapi_level_zero},
-         {"PI_LEVEL0", backend::ext_oneapi_level_zero}, // for backward
-                                                        // compatibility
-         {"PI_CUDA", backend::ext_oneapi_cuda},
-         {"PI_ESIMD_EMULATOR", backend::ext_intel_esimd_emulator},
-         {"PI_HIP", backend::ext_oneapi_hip},
-         {"PI_XRT", backend::xrt}}};
-    if (ValStr) {
-      auto It = std::find_if(
-          std::begin(SyclBeMap), std::end(SyclBeMap),
-          [&ValStr](const std::pair<std::string, backend> &element) {
-            return element.first == ValStr;
-          });
-      if (It == SyclBeMap.end())
-        pi::die("Invalid backend. "
-                "Valid values are "
-                "PI_OPENCL/PI_LEVEL_ZERO/PI_CUDA/PI_ESIMD_EMULATOR/PI_HIP/PI_XRT");
-      static backend Backend = It->second;
-      BackendPtr = &Backend;
-    }
-    Initialized = true;
-    return BackendPtr;
-  }
-};
-
 template <> class SYCLConfig<SYCL_PI_TRACE> {
   using BaseT = SYCLConfigBase<SYCL_PI_TRACE>;
 
@@ -278,7 +237,7 @@ getSyclDeviceTypeMap();
 
 // Array is used by SYCL_DEVICE_FILTER and SYCL_DEVICE_ALLOWLIST and
 // ONEAPI_DEVICE_SELECTOR
-const std::array<std::pair<std::string, backend>, 8> &getSyclBeMap();
+const std::array<std::pair<std::string, backend>, 9> &getSyclBeMap();
 
 // ---------------------------------------
 // ONEAPI_DEVICE_SELECTOR support
@@ -328,25 +287,13 @@ public:
     if (ValStr) {
 
       std::cerr
-          << "\nWARNING: The enviroment variable SYCL_DEVICE_FITLER"
+          << "\nWARNING: The enviroment variable SYCL_DEVICE_FILTER"
              " is deprecated. Please use ONEAPI_DEVICE_SELECTOR instead.\n"
              "For more details, please refer to:\n"
              "https://github.com/intel/llvm/blob/sycl/sycl/doc/"
              "EnvironmentVariables.md#oneapi_device_selector\n\n";
 
       FilterList = &GlobalHandler::instance().getDeviceFilterList(ValStr);
-    }
-
-    // TODO: remove the following code when we remove the support for legacy
-    // env vars.
-    // Emit the deprecation warning message if SYCL_BE or SYCL_DEVICE_TYPE is
-    // set.
-    if (SYCLConfig<SYCL_BE>::get() || getenv("SYCL_DEVICE_TYPE")) {
-      std::cerr << "\nWARNING: The legacy environment variables SYCL_BE and "
-                   "SYCL_DEVICE_TYPE are deprecated. Please use "
-                   "SYCL_DEVICE_FILTER instead. For details, please refer to "
-                   "https://github.com/intel/llvm/blob/sycl/sycl/doc/"
-                   "EnvironmentVariables.md\n\n";
     }
 
     // As mentioned above, configuration parameters are processed only once.
@@ -629,6 +576,34 @@ private:
     if (ResetCache)
       Val = parseValue();
     return Val;
+  }
+};
+
+template <> class SYCLConfig<SYCL_ENABLE_FUSION_CACHING> {
+  using BaseT = SYCLConfigBase<SYCL_ENABLE_FUSION_CACHING>;
+
+public:
+  static bool get() {
+    constexpr bool DefaultValue = true;
+
+    const char *ValStr = getCachedValue();
+
+    if (!ValStr)
+      return DefaultValue;
+
+    return ValStr[0] == '1';
+  }
+
+  static void reset() { (void)getCachedValue(/*ResetCache=*/true); }
+
+  static const char *getName() { return BaseT::MConfigName; }
+
+private:
+  static const char *getCachedValue(bool ResetCache = false) {
+    static const char *ValStr = BaseT::getRawValue();
+    if (ResetCache)
+      ValStr = BaseT::getRawValue();
+    return ValStr;
   }
 };
 

@@ -23,6 +23,7 @@
 #include "clang/Driver/Options.h"
 #include "clang/Driver/Tool.h"
 #include "clang/Driver/ToolChain.h"
+#include "llvm/ADT/StringSet.h"
 #include "llvm/ADT/Twine.h"
 #include "llvm/Option/ArgList.h"
 #include "llvm/Support/CodeGen.h"
@@ -84,7 +85,7 @@ void tools::gcc::Common::ConstructJob(Compilation &C, const JobAction &JA,
 
   RenderExtraToolArgs(JA, CmdArgs);
 
-  // If using a driver driver, force the arch.
+  // If using a driver, force the arch.
   if (getToolChain().getTriple().isOSDarwin()) {
     CmdArgs.push_back("-arch");
     CmdArgs.push_back(
@@ -331,8 +332,8 @@ static bool getStaticPIE(const ArgList &Args, const ToolChain &TC) {
   if (HasStaticPIE && Args.hasArg(options::OPT_nopie)) {
     const Driver &D = TC.getDriver();
     const llvm::opt::OptTable &Opts = D.getOpts();
-    const char *StaticPIEName = Opts.getOptionName(options::OPT_static_pie);
-    const char *NoPIEName = Opts.getOptionName(options::OPT_nopie);
+    StringRef StaticPIEName = Opts.getOptionName(options::OPT_static_pie);
+    StringRef NoPIEName = Opts.getOptionName(options::OPT_nopie);
     D.Diag(diag::err_drv_cannot_mix_options) << StaticPIEName << NoPIEName;
   }
   return HasStaticPIE;
@@ -349,7 +350,11 @@ void tools::gnutools::Linker::constructLLVMARCommand(
     Compilation &C, const JobAction &JA, const InputInfo &Output,
     const InputInfoList &Input, const ArgList &Args) const {
   ArgStringList CmdArgs;
-  CmdArgs.push_back("cr");
+  // Use 'cqL' to create the archive.  This allows for any fat archives that
+  // are passed on the command line to be added via contents instead of the
+  // full archive.  Any usage of the generated archive will then have full
+  // access to resolve any dependencies.
+  CmdArgs.push_back("cqL");
   const char *OutputFilename = Output.getFilename();
   if (llvm::sys::fs::exists(OutputFilename)) {
     C.getDriver().Diag(clang::diag::warn_drv_existing_archive_append)
@@ -372,7 +377,7 @@ void tools::gnutools::Linker::constructLLVMARCommand(
   llvm::sys::path::append(LLVMARPath, "llvm-ar");
   const char *Exec = C.getArgs().MakeArgString(LLVMARPath);
   C.addCommand(std::make_unique<Command>(
-      JA, *this, ResponseFileSupport::None(), Exec, CmdArgs, None));
+      JA, *this, ResponseFileSupport::None(), Exec, CmdArgs, std::nullopt));
 }
 
 void tools::gnutools::StaticLibTool::ConstructJob(
@@ -847,7 +852,7 @@ void tools::gnutools::Assembler::ConstructJob(Compilation &C,
             Args.MakeArgString("--compress-debug-sections=" + Twine(Value)));
       } else {
         D.Diag(diag::err_drv_unsupported_option_argument)
-            << A->getOption().getName() << Value;
+            << A->getSpelling() << Value;
       }
     }
   }
@@ -1741,7 +1746,8 @@ static void findCSKYMultilibs(const Driver &D, const llvm::Triple &TargetTriple,
   FilterNonExistent NonExistent(Path, "/crtbegin.o", D.getVFS());
 
   tools::csky::FloatABI TheFloatABI = tools::csky::getCSKYFloatABI(D, Args);
-  llvm::Optional<llvm::StringRef> Res = tools::csky::getCSKYArchName(D, Args, TargetTriple);
+  std::optional<llvm::StringRef> Res =
+      tools::csky::getCSKYArchName(D, Args, TargetTriple);
 
   if (!Res)
     return;
@@ -2253,7 +2259,7 @@ void Generic_GCC::GCCInstallationDetector::print(raw_ostream &OS) const {
 
 bool Generic_GCC::GCCInstallationDetector::getBiarchSibling(Multilib &M) const {
   if (BiarchSibling) {
-    M = BiarchSibling.value();
+    M = *BiarchSibling;
     return true;
   }
   return false;
@@ -3009,6 +3015,7 @@ bool Generic_GCC::IsIntegratedAssemblerDefault() const {
   switch (getTriple().getArch()) {
   case llvm::Triple::aarch64:
   case llvm::Triple::aarch64_be:
+  case llvm::Triple::amdgcn:
   case llvm::Triple::arm:
   case llvm::Triple::armeb:
   case llvm::Triple::avr:
@@ -3029,6 +3036,7 @@ bool Generic_GCC::IsIntegratedAssemblerDefault() const {
   case llvm::Triple::ppcle:
   case llvm::Triple::ppc64:
   case llvm::Triple::ppc64le:
+  case llvm::Triple::r600:
   case llvm::Triple::riscv32:
   case llvm::Triple::riscv64:
   case llvm::Triple::sparc:

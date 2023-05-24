@@ -13,8 +13,8 @@
 
 #include <functional>
 #include <initializer_list>
-#include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <string>
 #include <utility>
@@ -241,7 +241,7 @@ public:
     // Check that the type actually belongs to this TypeSystemClang.
     assert(qt->getAsTagDecl() == nullptr ||
            &qt->getAsTagDecl()->getASTContext() == &getASTContext());
-    return CompilerType(this, qt.getAsOpaquePtr());
+    return CompilerType(weak_from_this(), qt.getAsOpaquePtr());
   }
 
   CompilerType GetTypeForDecl(clang::NamedDecl *decl);
@@ -271,9 +271,10 @@ public:
         clang::NamedDecl *named_decl = *result.begin();
         if (const RecordDeclType *record_decl =
                 llvm::dyn_cast<RecordDeclType>(named_decl))
-          compiler_type.SetCompilerType(
-              this, clang::QualType(record_decl->getTypeForDecl(), 0)
-                        .getAsOpaquePtr());
+          compiler_type =
+              CompilerType(weak_from_this(),
+                           clang::QualType(record_decl->getTypeForDecl(), 0)
+                               .getAsOpaquePtr());
       }
     }
 
@@ -303,8 +304,16 @@ public:
   static clang::AccessSpecifier
   UnifyAccessSpecifiers(clang::AccessSpecifier lhs, clang::AccessSpecifier rhs);
 
-  static uint32_t GetNumBaseClasses(const clang::CXXRecordDecl *cxx_record_decl,
-                                    bool omit_empty_base_classes);
+  uint32_t GetNumBaseClasses(const clang::CXXRecordDecl *cxx_record_decl,
+                             bool omit_empty_base_classes);
+
+  uint32_t GetIndexForRecordChild(const clang::RecordDecl *record_decl,
+                                  clang::NamedDecl *canonical_decl,
+                                  bool omit_empty_base_classes);
+
+  uint32_t GetIndexForRecordBase(const clang::RecordDecl *record_decl,
+                                 const clang::CXXBaseSpecifier *base_spec,
+                                 bool omit_empty_base_classes);
 
   /// Synthesize a clang::Module and return its ID or a default-constructed ID.
   OptionalClangModuleID GetOrCreateClangModule(llvm::StringRef name,
@@ -374,7 +383,9 @@ public:
 
   bool FieldIsBitfield(clang::FieldDecl *field, uint32_t &bitfield_bit_size);
 
-  static bool RecordHasFields(const clang::RecordDecl *record_decl);
+  bool RecordHasFields(const clang::RecordDecl *record_decl);
+
+  bool BaseSpecifierIsEmpty(const clang::CXXBaseSpecifier *b);
 
   CompilerType CreateObjCClass(llvm::StringRef name,
                                clang::DeclContext *decl_ctx,
@@ -635,16 +646,18 @@ public:
 
   bool SupportsLanguage(lldb::LanguageType language) override;
 
-  static llvm::Optional<std::string> GetCXXClassName(const CompilerType &type);
+  static std::optional<std::string> GetCXXClassName(const CompilerType &type);
 
   // Type Completion
 
   bool GetCompleteType(lldb::opaque_compiler_type_t type) override;
 
+  bool IsForcefullyCompleted(lldb::opaque_compiler_type_t type) override;
+
   // Accessors
 
   ConstString GetTypeName(lldb::opaque_compiler_type_t type,
-                          bool BaseOnly) override;
+                          bool base_only) override;
 
   ConstString GetDisplayTypeName(lldb::opaque_compiler_type_t type) override;
 
@@ -728,23 +741,22 @@ public:
 
   const llvm::fltSemantics &GetFloatTypeSemantics(size_t byte_size) override;
 
-  llvm::Optional<uint64_t> GetByteSize(lldb::opaque_compiler_type_t type,
-                       ExecutionContextScope *exe_scope) {
-    if (llvm::Optional<uint64_t> bit_size = GetBitSize(type, exe_scope))
+  std::optional<uint64_t> GetByteSize(lldb::opaque_compiler_type_t type,
+                                      ExecutionContextScope *exe_scope) {
+    if (std::optional<uint64_t> bit_size = GetBitSize(type, exe_scope))
       return (*bit_size + 7) / 8;
-    return llvm::None;
+    return std::nullopt;
   }
 
-  llvm::Optional<uint64_t>
-  GetBitSize(lldb::opaque_compiler_type_t type,
-             ExecutionContextScope *exe_scope) override;
+  std::optional<uint64_t> GetBitSize(lldb::opaque_compiler_type_t type,
+                                     ExecutionContextScope *exe_scope) override;
 
   lldb::Encoding GetEncoding(lldb::opaque_compiler_type_t type,
                              uint64_t &count) override;
 
   lldb::Format GetFormat(lldb::opaque_compiler_type_t type) override;
 
-  llvm::Optional<size_t>
+  std::optional<size_t>
   GetTypeBitAlign(lldb::opaque_compiler_type_t type,
                   ExecutionContextScope *exe_scope) override;
 
@@ -814,6 +826,8 @@ public:
                                 const char *name, bool omit_empty_base_classes,
                                 std::vector<uint32_t> &child_indexes) override;
 
+  bool IsTemplateType(lldb::opaque_compiler_type_t type) override;
+
   size_t GetNumTemplateArguments(lldb::opaque_compiler_type_t type,
                                  bool expand_pack) override;
 
@@ -822,7 +836,7 @@ public:
                           bool expand_pack) override;
   CompilerType GetTypeTemplateArgument(lldb::opaque_compiler_type_t type,
                                        size_t idx, bool expand_pack) override;
-  llvm::Optional<CompilerType::IntegralTemplateArgument>
+  std::optional<CompilerType::IntegralTemplateArgument>
   GetIntegralTemplateArgument(lldb::opaque_compiler_type_t type, size_t idx,
                               bool expand_pack) override;
 
@@ -1045,13 +1059,22 @@ public:
     return m_source_manager_up.get();
   }
 
+  /// Complete a type from debug info, or mark it as forcefully completed if
+  /// there is no definition of the type in the current Module. Call this
+  /// function in contexts where the usual C++ rules require a type to be
+  /// complete (base class, member, etc.).
+  static void RequireCompleteType(CompilerType type);
+
+  bool SetDeclIsForcefullyCompleted(const clang::TagDecl *td);
+
 private:
   /// Returns the PrintingPolicy used when generating the internal type names.
   /// These type names are mostly used for the formatter selection.
   clang::PrintingPolicy GetTypePrintingPolicy();
   /// Returns the internal type name for the given NamedDecl using the
   /// type printing policy.
-  std::string GetTypeNameForDecl(const clang::NamedDecl *named_decl);
+  std::string GetTypeNameForDecl(const clang::NamedDecl *named_decl,
+                                 bool qualified = true);
 
   const clang::ClassTemplateSpecializationDecl *
   GetAsTemplateSpecialization(lldb::opaque_compiler_type_t type);
@@ -1136,12 +1159,12 @@ public:
   };
 
   /// Alias for requesting the default scratch TypeSystemClang in GetForTarget.
-  // This isn't constexpr as gtest/llvm::Optional comparison logic is trying
+  // This isn't constexpr as gtest/std::optional comparison logic is trying
   // to get the address of this for pretty-printing.
-  static const llvm::NoneType DefaultAST;
+  static const std::nullopt_t DefaultAST;
 
   /// Infers the appropriate sub-AST from Clang's LangOptions.
-  static llvm::Optional<IsolatedASTKind>
+  static std::optional<IsolatedASTKind>
   InferIsolatedASTKindFromLangOpts(const clang::LangOptions &l) {
     // If modules are activated we want the dedicated C++ module AST.
     // See IsolatedASTKind::CppModules for more info.
@@ -1159,9 +1182,9 @@ public:
   /// this parameter is false, this function returns a nullptr.
   /// \return The scratch type system of the target or a nullptr in case an
   ///         error occurred.
-  static TypeSystemClang *
+  static lldb::TypeSystemClangSP
   GetForTarget(Target &target,
-               llvm::Optional<IsolatedASTKind> ast_kind = DefaultAST,
+               std::optional<IsolatedASTKind> ast_kind = DefaultAST,
                bool create_on_demand = true);
 
   /// Returns the scratch TypeSystemClang for the given target. The returned
@@ -1171,8 +1194,8 @@ public:
   /// \param lang_opts The LangOptions of a clang ASTContext that the caller
   ///                  wants to export type information from. This is used to
   ///                  find the best matching sub-AST that will be returned.
-  static TypeSystemClang *GetForTarget(Target &target,
-                                       const clang::LangOptions &lang_opts) {
+  static lldb::TypeSystemClangSP
+  GetForTarget(Target &target, const clang::LangOptions &lang_opts) {
     return GetForTarget(target, InferIsolatedASTKindFromLangOpts(lang_opts));
   }
 
@@ -1231,7 +1254,7 @@ private:
   /// Map from IsolatedASTKind to their actual TypeSystemClang instance.
   /// This map is lazily filled with sub-ASTs and should be accessed via
   /// `GetSubAST` (which lazily fills this map).
-  std::unordered_map<IsolatedASTKey, std::unique_ptr<TypeSystemClang>>
+  llvm::DenseMap<IsolatedASTKey, std::shared_ptr<TypeSystemClang>>
       m_isolated_asts;
 };
 

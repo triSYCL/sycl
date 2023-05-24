@@ -38,6 +38,7 @@
 #include "llvm/Support/SHA1.h"
 #include <algorithm>
 #include <cstring>
+#include <optional>
 using namespace clang;
 
 const Expr *Expr::getBestDynamicClassTypeExpr() const {
@@ -645,12 +646,16 @@ std::string SYCLUniqueStableNameExpr::ComputeName(ASTContext &Context) const {
 static llvm::Optional<unsigned>
 UniqueStableNameDiscriminator(ASTContext &, const NamedDecl *ND) {
   if (const auto *RD = dyn_cast<CXXRecordDecl>(ND))
-    return RD->getDeviceLambdaManglingNumber();
-  return llvm::None;
+    if (RD->isLambda())
+      return RD->getDeviceLambdaManglingNumber();
+  return std::nullopt;
 }
 
 /// Compute a unique name that is consumable by sycl_vxx
-std::string SYCLUniqueStableNameExpr::computeUniqueSYCLVXXName(StringRef Demangle) {
+std::string SYCLUniqueStableNameExpr::computeUniqueSYCLVXXName(StringRef Demangle, ASTContext& ctx) {
+  if (!ctx.getTargetInfo().getTargetOpts().SYCLUseVXXNames)
+    return Demangle.str();
+
   /// VXX has a maximum of 64 characters for the name of the kernel function
   /// plus the name of one parameter.
   /// Those characters need to be used wisely to prevent name collisions.
@@ -735,7 +740,7 @@ std::string SYCLUniqueStableNameExpr::ComputeName(ASTContext &Context,
   llvm::raw_string_ostream Out(Buffer);
   Ctx->mangleTypeName(Ty, Out);
 
-  return computeUniqueSYCLVXXName(Out.str());
+  return computeUniqueSYCLVXXName(Out.str(), Context);
 }
 
 SYCLUniqueStableIdExpr::SYCLUniqueStableIdExpr(EmptyShell Empty,
@@ -3780,6 +3785,7 @@ bool Expr::HasSideEffects(const ASTContext &Ctx,
   case ShuffleVectorExprClass:
   case ConvertVectorExprClass:
   case AsTypeExprClass:
+  case CXXParenListInitExprClass:
     // These have a side-effect if any subexpression does.
     break;
 
@@ -4669,7 +4675,8 @@ DesignatedInitUpdateExpr::DesignatedInitUpdateExpr(const ASTContext &C,
            OK_Ordinary) {
   BaseAndUpdaterExprs[0] = baseExpr;
 
-  InitListExpr *ILE = new (C) InitListExpr(C, lBraceLoc, None, rBraceLoc);
+  InitListExpr *ILE =
+      new (C) InitListExpr(C, lBraceLoc, std::nullopt, rBraceLoc);
   ILE->setType(baseExpr->getType());
   BaseAndUpdaterExprs[1] = ILE;
 

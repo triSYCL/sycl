@@ -23,6 +23,7 @@
 #include "llvm/IR/IntrinsicsRISCV.h"
 #include "llvm/IR/PatternMatch.h"
 #include "llvm/Transforms/Utils/Local.h"
+#include <optional>
 
 using namespace llvm;
 using namespace PatternMatch;
@@ -93,7 +94,7 @@ bool RISCVGatherScatterLowering::isLegalTypeAndAlignment(Type *DataType,
     return false;
 
   MaybeAlign MA = cast<ConstantInt>(AlignOp)->getMaybeAlignValue();
-  if (MA && MA->value() < DL->getTypeStoreSize(ScalarType).getFixedSize())
+  if (MA && MA->value() < DL->getTypeStoreSize(ScalarType).getFixedValue())
     return false;
 
   // FIXME: Let the backend type legalize by splitting/widening?
@@ -346,7 +347,7 @@ RISCVGatherScatterLowering::determineBaseAndStride(GetElementPtrInst *GEP,
   if (Ops[0]->getType()->isVectorTy())
     return std::make_pair(nullptr, nullptr);
 
-  Optional<unsigned> VecOperand;
+  std::optional<unsigned> VecOperand;
   unsigned TypeScale = 0;
 
   // Look for a vector operand and scale.
@@ -364,7 +365,7 @@ RISCVGatherScatterLowering::determineBaseAndStride(GetElementPtrInst *GEP,
     if (TS.isScalable())
       return std::make_pair(nullptr, nullptr);
 
-    TypeScale = TS.getFixedSize();
+    TypeScale = TS.getFixedValue();
   }
 
   // We need to find a vector index to simplify.
@@ -391,7 +392,7 @@ RISCVGatherScatterLowering::determineBaseAndStride(GetElementPtrInst *GEP,
     Ops[*VecOperand] = Start;
     Type *SourceTy = GEP->getSourceElementType();
     Value *BasePtr =
-      Builder.CreateGEP(SourceTy, Ops[0], makeArrayRef(Ops).drop_front());
+        Builder.CreateGEP(SourceTy, Ops[0], ArrayRef(Ops).drop_front());
 
     // Convert stride to pointer size if needed.
     Type *IntPtrTy = DL->getIntPtrType(BasePtr->getType());
@@ -427,7 +428,7 @@ RISCVGatherScatterLowering::determineBaseAndStride(GetElementPtrInst *GEP,
   Ops[*VecOperand] = BasePhi;
   Type *SourceTy = GEP->getSourceElementType();
   Value *BasePtr =
-      Builder.CreateGEP(SourceTy, Ops[0], makeArrayRef(Ops).drop_front());
+      Builder.CreateGEP(SourceTy, Ops[0], ArrayRef(Ops).drop_front());
 
   // Final adjustments to stride should go in the start block.
   Builder.SetInsertPoint(

@@ -1,4 +1,4 @@
-import("//llvm/utils/unittest/unittest.gni")
+import("//third-party/unittest/unittest.gni")
 
 unittest("FormatTests") {
   configs += [ "//llvm/utils/gn/build:clang_code" ]
@@ -14,6 +14,7 @@ unittest("FormatTests") {
     "BracesInserterTest.cpp",
     "BracesRemoverTest.cpp",
     "CleanupTest.cpp",
+    "ConfigParseTest.cpp",
     "DefinitionBlockSeparatorTest.cpp",
     "FormatTest.cpp",
     "FormatTestCSharp.cpp",
@@ -28,6 +29,7 @@ unittest("FormatTests") {
     "FormatTestTableGen.cpp",
     "FormatTestTextProto.cpp",
     "FormatTestVerilog.cpp",
+    "IntegerLiteralSeparatorTest.cpp",
     "MacroCallReconstructorTest.cpp",
     "MacroExpanderTest.cpp",
     "NamespaceEndCommentsFixerTest.cpp",

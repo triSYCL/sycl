@@ -14,6 +14,7 @@
 #include "mlir/Dialect/SCF/IR/SCF.h"
 #include "llvm/ADT/MapVector.h"
 #include "llvm/ADT/StringSet.h"
+#include <optional>
 
 namespace mlir {
 class AffineExpr;
@@ -42,10 +43,10 @@ bool hasOnlyScalarElementwiseOp(Region &r);
 bool isElementwise(LinalgOp op);
 
 /// Check if iterator type has "parallel" semantics.
-bool isParallelIterator(StringRef iteratorType);
+bool isParallelIterator(utils::IteratorType iteratorType);
 
 /// Check if iterator type  has "reduction" semantics.
-bool isReductionIterator(StringRef iteratorType);
+bool isReductionIterator(utils::IteratorType iteratorType);
 
 /// Helper function that creates a memref::DimOp or tensor::DimOp depending on
 /// the type of `source`.
@@ -134,8 +135,12 @@ GenericOp makeMemRefCopyOp(OpBuilder &b, Location loc, Value from, Value to);
 /// and offset is 0. Strictly speaking the offset 0 is not required in general,
 /// but non-zero offsets are not handled by SPIR-V backend at this point (and
 /// potentially cannot be handled).
-Optional<SmallVector<ReassociationIndices>>
+std::optional<SmallVector<ReassociationIndices>>
 getReassociationMapForFoldingUnitDims(ArrayRef<OpFoldResult> mixedSizes);
+
+/// Return the identity numeric value associated to the give op. Return
+/// std::nullopt if there is no known neutral element.
+std::optional<Attribute> getNeutralElement(Operation *op);
 
 //===----------------------------------------------------------------------===//
 // Fusion / Tiling utilities
@@ -218,8 +223,8 @@ computeSliceParameters(OpBuilder &builder, Location loc, Value valueToTile,
 /// number of values in `ivs`.
 ///
 /// Some of the `valuesToTile` won't be affected by tiling. For these values,
-/// llvm::None will be returned.
-SmallVector<Optional<SliceParameters>>
+/// std::nullopt will be returned.
+SmallVector<std::optional<SliceParameters>>
 computeAllSliceParameters(OpBuilder &builder, Location loc, LinalgOp linalgOp,
                           ValueRange valuesToTile, ArrayRef<OpFoldResult> ivs,
                           ArrayRef<OpFoldResult> tileSizes,
@@ -392,7 +397,7 @@ public:
   LogicalResult
   tileRootOp(OpBuilder &b, ArrayRef<int64_t> tileSizes,
              ArrayRef<int64_t> tileInterchange,
-             Optional<LinalgLoopDistributionOptions> tileDistribution);
+             std::optional<LinalgLoopDistributionOptions> tileDistribution);
 
   /// Fuse the producer of `consumerOpOperand` into the tile loop nest. Returns
   /// the fused producer or fails if fusion is not possible.
@@ -462,7 +467,7 @@ struct RegionMatcher {
   ///     linalg.yield %0: <scalar-type>
   /// }
   /// ```
-  static Optional<BinaryOpKind> matchAsScalarBinaryOp(GenericOp op);
+  static std::optional<BinaryOpKind> matchAsScalarBinaryOp(GenericOp op);
 };
 
 //===----------------------------------------------------------------------===//
@@ -476,7 +481,8 @@ struct RegionMatcher {
 template <typename LoopTy>
 struct GenerateLoopNest {
   static void doit(OpBuilder &b, Location loc, ArrayRef<Range> loopRanges,
-                   LinalgOp linalgOp, ArrayRef<StringRef> iteratorTypes,
+                   LinalgOp linalgOp,
+                   ArrayRef<utils::IteratorType> iteratorTypes,
                    function_ref<scf::ValueVector(OpBuilder &, Location,
                                                  ValueRange, ValueRange)>
                        bodyBuilderFn,

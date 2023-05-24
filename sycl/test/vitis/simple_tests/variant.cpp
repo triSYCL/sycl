@@ -87,15 +87,15 @@ int main() {
   sycl::queue Queue;
 
   Queue.submit([&](sycl::handler &cgh) {
-    auto AIn = In.get_access<sycl::access::mode::read>(cgh);
-    auto AOut = Out.get_access<sycl::access::mode::write>(cgh);
+    sycl::accessor AIn{In, cgh, sycl::read_only};
+    sycl::accessor AOut{Out, cgh, sycl::write_only};
     cgh.single_task<class Kernel>([=] {
       for (unsigned i = 0; i < AIn.size(); i++)
         dev_visit([&](auto V) { AOut[{i}] = V; }, AIn[{i}]);
     });
   });
   {
-    auto AOut = Out.get_access<sycl::access::mode::read>();
+    sycl::host_accessor AOut{Out, sycl::read_only};
     dev_visit([&](auto V) { assert(V.i == 2 && (int)V.f == 1); }, AOut[{0}]);
     dev_visit([&](auto V) { assert(V.i == 1 && (int)V.f == 2); }, AOut[{1}]);
   }

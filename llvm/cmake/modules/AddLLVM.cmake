@@ -103,7 +103,13 @@ function(add_llvm_symbol_exports target_name export_file)
     # FIXME: Don't write the "local:" line on OpenBSD.
     # in the export file, also add a linker script to version LLVM symbols (form: LLVM_N.M)
     add_custom_command(OUTPUT ${native_export_file}
-      COMMAND "${Python3_EXECUTABLE}" ${LLVM_MAIN_SRC_DIR}/utils/add_llvm_symbol_exports.py ${LLVM_VERSION_MAJOR} ${export_file} ${native_export_file}
+      COMMAND "${Python3_EXECUTABLE}" "-c"
+      "import sys; \
+       lines = ['    ' + l.rstrip() for l in sys.stdin] + ['  local: *;']; \
+       print('LLVM_${LLVM_VERSION_MAJOR} {'); \
+       print('  global:') if len(lines) > 1 else None; \
+       print(';\\n'.join(lines) + '\\n};')"
+      < ${export_file} > ${native_export_file}
       DEPENDS ${export_file}
       VERBATIM
       COMMENT "Creating export file for ${target_name}")
@@ -219,6 +225,7 @@ if (NOT DEFINED LLVM_LINKER_DETECTED AND NOT WIN32)
   else()
     if("${stdout}" MATCHES "^mold")
       set(LLVM_LINKER_DETECTED YES CACHE INTERNAL "")
+      set(LLVM_LINKER_IS_MOLD YES CACHE INTERNAL "")
       message(STATUS "Linker detection: mold")
     elseif("${stdout}" MATCHES "GNU gold")
       set(LLVM_LINKER_DETECTED YES CACHE INTERNAL "")
@@ -1119,7 +1126,8 @@ function(process_llvm_pass_plugins)
           message(FATAL_ERROR "LLVM_INSTALL_PACKAGE_DIR must be defined and writable. GEN_CONFIG should only be passe when building LLVM proper.")
       endif()
       # LLVM_INSTALL_PACKAGE_DIR might be absolute, so don't reuse below.
-      set(llvm_cmake_builddir "${LLVM_LIBRARY_DIR}/cmake/llvm")
+      string(REPLACE "${CMAKE_CFG_INTDIR}" "." llvm_cmake_builddir "${LLVM_LIBRARY_DIR}")
+      set(llvm_cmake_builddir "${llvm_cmake_builddir}/cmake/llvm")
       file(WRITE
           "${llvm_cmake_builddir}/LLVMConfigExtensions.cmake"
           "set(LLVM_STATIC_EXTENSIONS ${LLVM_STATIC_EXTENSIONS})")
@@ -2388,4 +2396,32 @@ function(find_first_existing_vc_file path out_var)
       set(${out_var} "${git_dir}/logs/HEAD" PARENT_SCOPE)
     endif()
   endif()
+endfunction()
+
+function(setup_host_tool tool_name setting_name exe_var_name target_var_name)
+  set(${setting_name}_DEFAULT "${tool_name}")
+
+  if(LLVM_USE_HOST_TOOLS AND LLVM_NATIVE_TOOL_DIR)
+    if(EXISTS "${LLVM_NATIVE_TOOL_DIR}/${tool_name}${LLVM_HOST_EXECUTABLE_SUFFIX}")
+      set(${setting_name}_DEFAULT "${LLVM_NATIVE_TOOL_DIR}/${tool_name}${LLVM_HOST_EXECUTABLE_SUFFIX}")
+    endif()
+  endif()
+
+  set(${setting_name} "${${setting_name}_DEFAULT}" CACHE
+    STRING "Host ${tool_name} executable. Saves building if cross-compiling.")
+
+  if(LLVM_USE_HOST_TOOLS)
+    if(NOT ${setting_name} STREQUAL "${tool_name}")
+      set(exe_name ${${setting_name}})
+      set(target_name ${${setting_name}})
+    else()
+      build_native_tool(${tool_name} exe_name DEPENDS ${tool_name})
+      set(target_name ${exe_name})
+    endif()
+  else()
+    set(exe_name $<TARGET_FILE:${tool_name}>)
+    set(target_name ${tool_name})
+  endif()
+  set(${exe_var_name} "${exe_name}" CACHE STRING "")
+  set(${target_var_name} "${target_name}" CACHE STRING "")
 endfunction()

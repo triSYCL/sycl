@@ -35,6 +35,19 @@ see the `releases page <https://llvm.org/releases/>`_.
 What's New in Libc++ 16.0.0?
 ============================
 
+The main focus of the libc++ team has been to implement new C++20 and C++23
+features.
+
+The C++20 format library has improved but it not yet considered stable. The
+main improvements are additional formatters for the chrono calendar types. Work
+on formatting ranges has started.
+
+The C++20 ranges library has been completed and is no longer experimental. Some
+``views`` have not been implemented yet. Work on C++23 ranges has started.
+
+The C++20 spaceship operator has been added to more types, the work is still
+ongoing.
+
 Implemented Papers
 ------------------
 - P2499R0 - ``string_view`` range constructor should be ``explicit``
@@ -46,6 +59,15 @@ Implemented Papers
   ``from_chars`` for Integral Types in ``<charconv>`` Header
 - P0220R1 - Adopt Library Fundamentals V1 TS Components for C++17
 - P0482R6 - char8_t: A type for UTF-8 characters and strings
+- P2438R2 - ``std::string::substr() &&``
+- P0600R1 - ``nodiscard`` in the library
+- P0339R6 - ``polymorphic_allocator<>`` as a vocabulary type
+- P1169R4 - ``static operator()``
+- P0415R1 - ``constexpr`` for ``std::complex``
+- P1208R6 - ``std::source_location``
+- P0323R12 - ``std::expected``
+- P1035R7 - Input Range Adaptors
+- P2325R3 - Views should not be required to be default constructible
 
 Improvements and New Features
 -----------------------------
@@ -53,6 +75,7 @@ Improvements and New Features
   now provided when implementations in the global namespace are provided by
   the C library.
 - Implemented ``<memory_resource>`` header from C++17
+- `D122780 <https://reviews.llvm.org/D122780>`_ Improved the performance of std::sort
 
 Deprecations and Removals
 -------------------------
@@ -63,9 +86,9 @@ Deprecations and Removals
   includes are removed based on the language version used. Incidental transitive
   inclusions of the following headers have been removed:
 
-  - C++20: ``chrono``
+  - C++11, C++14, C++17, and C++20: ``chrono``
   - C++2b: ``algorithm``, ``array``, ``atomic``, ``bit``, ``chrono``,
-    ``climits``, ``cmath``, ``compare``, ``concepts``, ``cstdarg`, ``cstddef``,
+    ``climits``, ``cmath``, ``compare``, ``concepts``, ``cstdarg``, ``cstddef``,
     ``cstdint``, ``cstdlib``, ``cstring``, ``ctime``, ``exception``,
     ``functional``, ``initializer_list``, ``iosfwd``, ``iterator``, ``limits``,
     ``memory``, ``new``, ``numeric``, ``optional``, ``ratio``, ``stdexcept``,
@@ -78,7 +101,7 @@ Deprecations and Removals
   incidental transitive includes more aggressively, in particular regardless
   of the language version in use.
 
-- The legacy testing system for libc++, libc++abi and libunwind has been removed.
+- The legacy testing system for libc++, libc++abi, and libunwind has been removed.
   All known clients have been migrated to the new configuration system, but please
   reach out to the libc++ developers if you find something missing in the new
   configuration system.
@@ -96,8 +119,17 @@ Deprecations and Removals
   Please migrate to ``<memory_resource>`` instead. Per libc++'s TS deprecation policy,
   ``<experimental/memory_resource>`` will be removed in LLVM 18.
 
+- The ``_LIBCPP_DEBUG`` macro is not honored anymore, and it is an error to try to use it. Please migrate to
+  ``_LIBCPP_ENABLE_DEBUG_MODE`` instead.
+
 Upcoming Deprecations and Removals
 ----------------------------------
+- The base template for ``std::char_traits`` has been marked as deprecated and will be removed in LLVM 18. If
+  you are using ``std::char_traits`` with types other than ``char``, ``wchar_t``, ``char8_t``, ``char16_t``,
+  ``char32_t`` or a custom character type for which you specialized ``std::char_traits``, your code will stop
+  working when we remove the base template. The Standard does not mandate that a base template is provided,
+  and such a base template is bound to be incorrect for some types, which could currently cause unexpected
+  behavior while going undetected.
 
 API Changes
 -----------
@@ -125,6 +157,11 @@ ABI Affecting Changes
 
   This ABI break only affects users that compile with ``-ffreestanding``, and only for ``atomic<T>`` where ``T``
   is a non-builtin type that could be lockfree on the platform. See https://llvm.org/D133377 for more details.
+
+- When building libc++ against newlib/picolibc, the type of ``regex_type_traits::char_class_type`` was changed to
+  ``uint16_t`` since all values of ``ctype_base::mask`` are taken. This is technically an ABI break, but including
+  ``<regex> `` has triggered a ``static_assert`` failure since libc++ 14, so it is unlikely that this causes
+  problems for existing users.
 
 Build System Changes
 --------------------

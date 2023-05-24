@@ -5,7 +5,7 @@
 // RUN: %clangxx %EXTRA_COMPILE_FLAGS-std=c++20 -fsycl -fsycl-targets=%sycl_triple %s -o %t.dir/exec.out
 // RUN: %run_if_not_cpu %ACC_RUN_PLACEHOLDER %t.dir/exec.out
 
-#include <sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <sycl/ext/intel/fpga_extensions.hpp>
 
 using namespace sycl;

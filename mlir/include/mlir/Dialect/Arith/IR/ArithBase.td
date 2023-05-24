@@ -24,6 +24,7 @@ def Arith_Dialect : Dialect {
 
   let hasConstantMaterializer = 1;
   let useDefaultAttributePrinterParser = 1;
+  let useFoldAPI = kEmitFoldAdaptorFolder;
 }
 
 // The predicate indicates the type of the comparison to perform:
@@ -119,6 +120,11 @@ def FastMathFlags : I32BitEnumAttr<
   let cppNamespace = "::mlir::arith";
   let genSpecializedAttr = 0;
   let printBitEnumPrimaryGroups = 1;
+}
+
+def Arith_FastMathAttr :
+    EnumAttr<Arith_Dialect, FastMathFlags, "fastmath"> {
+  let assemblyFormat = "`<` $value `>`";
 }
 
 #endif // ARITH_BASE

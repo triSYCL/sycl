@@ -22,6 +22,7 @@
 #include "llvm/ADT/ScopeExit.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/Support/TypeSize.h"
+#include <optional>
 
 using namespace mlir;
 using namespace mlir::LLVM;
@@ -184,20 +185,6 @@ LLVMArrayType::getPreferredAlignment(const DataLayout &dataLayout,
 }
 
 //===----------------------------------------------------------------------===//
-// SubElementTypeInterface
-
-void LLVMArrayType::walkImmediateSubElements(
-    function_ref<void(Attribute)> walkAttrsFn,
-    function_ref<void(Type)> walkTypesFn) const {
-  walkTypesFn(getElementType());
-}
-
-Type LLVMArrayType::replaceImmediateSubElements(
-    ArrayRef<Attribute> replAttrs, ArrayRef<Type> replTypes) const {
-  return get(replTypes.front(), getNumElements());
-}
-
-//===----------------------------------------------------------------------===//
 // Function type.
 //===----------------------------------------------------------------------===//
 
@@ -248,22 +235,6 @@ LLVMFunctionType::verify(function_ref<InFlightDiagnostic()> emitError,
 }
 
 //===----------------------------------------------------------------------===//
-// SubElementTypeInterface
-
-void LLVMFunctionType::walkImmediateSubElements(
-    function_ref<void(Attribute)> walkAttrsFn,
-    function_ref<void(Type)> walkTypesFn) const {
-  walkTypesFn(getReturnType());
-  for (Type type : getParams())
-    walkTypesFn(type);
-}
-
-Type LLVMFunctionType::replaceImmediateSubElements(
-    ArrayRef<Attribute> replAttrs, ArrayRef<Type> replTypes) const {
-  return get(replTypes.front(), replTypes.drop_front(), isVarArg());
-}
-
-//===----------------------------------------------------------------------===//
 // LLVMPointerType
 //===----------------------------------------------------------------------===//
 
@@ -296,20 +267,20 @@ LLVMPointerType::verify(function_ref<InFlightDiagnostic()> emitError,
 constexpr const static unsigned kDefaultPointerSizeBits = 64;
 constexpr const static unsigned kDefaultPointerAlignment = 8;
 
-Optional<unsigned> mlir::LLVM::extractPointerSpecValue(Attribute attr,
-                                                       PtrDLEntryPos pos) {
+std::optional<unsigned> mlir::LLVM::extractPointerSpecValue(Attribute attr,
+                                                            PtrDLEntryPos pos) {
   auto spec = attr.cast<DenseIntElementsAttr>();
   auto idx = static_cast<unsigned>(pos);
   if (idx >= spec.size())
-    return None;
+    return std::nullopt;
   return spec.getValues<unsigned>()[idx];
 }
 
 /// Returns the part of the data layout entry that corresponds to `pos` for the
 /// given `type` by interpreting the list of entries `params`. For the pointer
 /// type in the default address space, returns the default value if the entries
-/// do not provide a custom one, for other address spaces returns None.
-static Optional<unsigned>
+/// do not provide a custom one, for other address spaces returns std::nullopt.
+static std::optional<unsigned>
 getPointerDataLayoutEntry(DataLayoutEntryListRef params, LLVMPointerType type,
                           PtrDLEntryPos pos) {
   // First, look for the entry for the pointer in the current address space.
@@ -335,13 +306,13 @@ getPointerDataLayoutEntry(DataLayoutEntryListRef params, LLVMPointerType type,
                                       : kDefaultPointerAlignment;
   }
 
-  return llvm::None;
+  return std::nullopt;
 }
 
 unsigned
 LLVMPointerType::getTypeSizeInBits(const DataLayout &dataLayout,
                                    DataLayoutEntryListRef params) const {
-  if (Optional<unsigned> size =
+  if (std::optional<unsigned> size =
           getPointerDataLayoutEntry(params, *this, PtrDLEntryPos::Size))
     return *size;
 
@@ -354,7 +325,7 @@ LLVMPointerType::getTypeSizeInBits(const DataLayout &dataLayout,
 
 unsigned LLVMPointerType::getABIAlignment(const DataLayout &dataLayout,
                                           DataLayoutEntryListRef params) const {
-  if (Optional<unsigned> alignment =
+  if (std::optional<unsigned> alignment =
           getPointerDataLayoutEntry(params, *this, PtrDLEntryPos::Abi))
     return *alignment;
 
@@ -366,7 +337,7 @@ unsigned LLVMPointerType::getABIAlignment(const DataLayout &dataLayout,
 unsigned
 LLVMPointerType::getPreferredAlignment(const DataLayout &dataLayout,
                                        DataLayoutEntryListRef params) const {
-  if (Optional<unsigned> alignment =
+  if (std::optional<unsigned> alignment =
           getPointerDataLayoutEntry(params, *this, PtrDLEntryPos::Preferred))
     return *alignment;
 
@@ -437,20 +408,6 @@ LogicalResult LLVMPointerType::verifyEntries(DataLayoutEntryListRef entries,
     }
   }
   return success();
-}
-
-//===----------------------------------------------------------------------===//
-// SubElementTypeInterface
-
-void LLVMPointerType::walkImmediateSubElements(
-    function_ref<void(Attribute)> walkAttrsFn,
-    function_ref<void(Type)> walkTypesFn) const {
-  walkTypesFn(getElementType());
-}
-
-Type LLVMPointerType::replaceImmediateSubElements(
-    ArrayRef<Attribute> replAttrs, ArrayRef<Type> replTypes) const {
-  return get(getContext(), replTypes.front(), getAddressSpace());
 }
 
 //===----------------------------------------------------------------------===//
@@ -574,7 +531,7 @@ namespace {
 enum class StructDLEntryPos { Abi = 0, Preferred = 1 };
 } // namespace
 
-static Optional<unsigned>
+static std::optional<unsigned>
 getStructDataLayoutEntry(DataLayoutEntryListRef params, LLVMStructType type,
                          StructDLEntryPos pos) {
   const auto *currentEntry =
@@ -582,7 +539,7 @@ getStructDataLayoutEntry(DataLayoutEntryListRef params, LLVMStructType type,
         return entry.isTypeEntry();
       });
   if (currentEntry == params.end())
-    return llvm::None;
+    return std::nullopt;
 
   auto attr = currentEntry->getValue().cast<DenseIntElementsAttr>();
   if (pos == StructDLEntryPos::Preferred &&
@@ -611,7 +568,7 @@ static unsigned calculateStructAlignment(const DataLayout &dataLayout,
   }
 
   // Entries are only allowed to be stricter than the required alignment
-  if (Optional<unsigned> entryResult =
+  if (std::optional<unsigned> entryResult =
           getStructDataLayoutEntry(params, type, pos))
     return std::max(*entryResult / kBitsInByte, structAlignment);
 
@@ -749,17 +706,6 @@ LLVMFixedVectorType::verify(function_ref<InFlightDiagnostic()> emitError,
       emitError, elementType, numElements);
 }
 
-void LLVMFixedVectorType::walkImmediateSubElements(
-    function_ref<void(Attribute)> walkAttrsFn,
-    function_ref<void(Type)> walkTypesFn) const {
-  walkTypesFn(getElementType());
-}
-
-Type LLVMFixedVectorType::replaceImmediateSubElements(
-    ArrayRef<Attribute> replAttrs, ArrayRef<Type> replTypes) const {
-  return get(replTypes[0], getNumElements());
-}
-
 //===----------------------------------------------------------------------===//
 // LLVMScalableVectorType.
 //===----------------------------------------------------------------------===//
@@ -790,17 +736,6 @@ LLVMScalableVectorType::verify(function_ref<InFlightDiagnostic()> emitError,
                                Type elementType, unsigned numElements) {
   return verifyVectorConstructionInvariants<LLVMScalableVectorType>(
       emitError, elementType, numElements);
-}
-
-void LLVMScalableVectorType::walkImmediateSubElements(
-    function_ref<void(Attribute)> walkAttrsFn,
-    function_ref<void(Type)> walkTypesFn) const {
-  walkTypesFn(getElementType());
-}
-
-Type LLVMScalableVectorType::replaceImmediateSubElements(
-    ArrayRef<Attribute> replAttrs, ArrayRef<Type> replTypes) const {
-  return get(replTypes[0], getMinNumElements());
 }
 
 //===----------------------------------------------------------------------===//
@@ -1039,7 +974,7 @@ llvm::TypeSize mlir::LLVM::getPrimitiveTypeSizeInBits(Type type) {
       .Case<LLVMFixedVectorType>([](LLVMFixedVectorType t) {
         llvm::TypeSize elementSize =
             getPrimitiveTypeSizeInBits(t.getElementType());
-        return llvm::TypeSize(elementSize.getFixedSize() * t.getNumElements(),
+        return llvm::TypeSize(elementSize.getFixedValue() * t.getNumElements(),
                               elementSize.isScalable());
       })
       .Case<VectorType>([](VectorType t) {
@@ -1047,7 +982,7 @@ llvm::TypeSize mlir::LLVM::getPrimitiveTypeSizeInBits(Type type) {
                "unexpected incompatible with LLVM vector type");
         llvm::TypeSize elementSize =
             getPrimitiveTypeSizeInBits(t.getElementType());
-        return llvm::TypeSize(elementSize.getFixedSize() * t.getNumElements(),
+        return llvm::TypeSize(elementSize.getFixedValue() * t.getNumElements(),
                               elementSize.isScalable());
       })
       .Default([](Type ty) {

@@ -88,7 +88,7 @@ def SPIRV_BitcastOp : SPIRV_Op<"Bitcast", [Pure]> {
   let assemblyFormat = [{
     $operand attr-dict `:` type($operand) `to` type($result)
   }];
-  let hasCanonicalizer = 1;
+  let hasFolder = 1;
 }
 
 // -----
@@ -436,10 +436,6 @@ def SPIRV_GenericCastToPtrExplicitOp : SPIRV_Op<"GenericCastToPtrExplicit", [Pur
     Workgroup, CrossWorkgroup, or Function.
 
     <!-- End of AutoGen section -->
-
-    ```
-    [TODO]
-    ```mlir
 
     #### Example:
 

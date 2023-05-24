@@ -396,17 +396,10 @@ static const MemoryMapParams Linux_I386_MemoryMapParams = {
 
 // x86_64 Linux
 static const MemoryMapParams Linux_X86_64_MemoryMapParams = {
-#ifdef MSAN_LINUX_X86_64_OLD_MAPPING
-    0x400000000000, // AndMask
-    0,              // XorMask (not used)
-    0,              // ShadowBase (not used)
-    0x200000000000, // OriginBase
-#else
     0,              // AndMask (not used)
     0x500000000000, // XorMask
     0,              // ShadowBase (not used)
     0x100000000000, // OriginBase
-#endif
 };
 
 // mips64 Linux
@@ -435,10 +428,10 @@ static const MemoryMapParams Linux_S390X_MemoryMapParams = {
 
 // aarch64 Linux
 static const MemoryMapParams Linux_AArch64_MemoryMapParams = {
-    0,             // AndMask (not used)
-    0x06000000000, // XorMask
-    0,             // ShadowBase (not used)
-    0x01000000000, // OriginBase
+    0,               // AndMask (not used)
+    0x0B00000000000, // XorMask
+    0,               // ShadowBase (not used)
+    0x0200000000000, // OriginBase
 };
 
 // aarch64 FreeBSD
@@ -1540,7 +1533,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
   Type *getShadowTyNoVec(Type *ty) {
     if (VectorType *vt = dyn_cast<VectorType>(ty))
       return IntegerType::get(*MS.C,
-                              vt->getPrimitiveSizeInBits().getFixedSize());
+                              vt->getPrimitiveSizeInBits().getFixedValue());
     return ty;
   }
 
@@ -1906,7 +1899,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
             // argument shadow to the underlying memory.
             // Figure out maximal valid memcpy alignment.
             const Align ArgAlign = DL.getValueOrABITypeAlignment(
-                MaybeAlign(FArg.getParamAlignment()), FArg.getParamByValType());
+                FArg.getParamAlign(), FArg.getParamByValType());
             Value *CpShadowPtr, *CpOriginPtr;
             std::tie(CpShadowPtr, CpOriginPtr) =
                 getShadowOriginPtr(V, EntryIRB, EntryIRB.getInt8Ty(), ArgAlign,
@@ -2073,7 +2066,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
         (int)AtomicOrderingCABI::seq_cst;
 
     return ConstantDataVector::get(IRB.getContext(),
-                                   makeArrayRef(OrderingTable, NumOrderings));
+                                   ArrayRef(OrderingTable, NumOrderings));
   }
 
   AtomicOrdering addAcquireOrdering(AtomicOrdering a) {
@@ -2108,7 +2101,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
         (int)AtomicOrderingCABI::seq_cst;
 
     return ConstantDataVector::get(IRB.getContext(),
-                                   makeArrayRef(OrderingTable, NumOrderings));
+                                   ArrayRef(OrderingTable, NumOrderings));
   }
 
   // ------------------- Visitors.
@@ -2965,7 +2958,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
     Value *Op = I.getArgOperand(0);
     Type *OpType = Op->getType();
     Function *BswapFunc = Intrinsic::getDeclaration(
-        F.getParent(), Intrinsic::bswap, makeArrayRef(&OpType, 1));
+        F.getParent(), Intrinsic::bswap, ArrayRef(&OpType, 1));
     setShadow(&I, IRB.CreateCall(BswapFunc, getShadow(Op)));
     setOrigin(&I, getOrigin(Op));
   }
@@ -4074,12 +4067,9 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
       // will become a non-readonly function after it is instrumented by us. To
       // prevent this code from being optimized out, mark that function
       // non-readonly in advance.
+      // TODO: We can likely do better than dropping memory() completely here.
       AttributeMask B;
-      B.addAttribute(Attribute::ReadOnly)
-          .addAttribute(Attribute::ReadNone)
-          .addAttribute(Attribute::WriteOnly)
-          .addAttribute(Attribute::ArgMemOnly)
-          .addAttribute(Attribute::Speculatable);
+      B.addAttribute(Attribute::Memory).addAttribute(Attribute::Speculatable);
 
       Call->removeFnAttrs(B);
       if (Function *Func = Call->getCalledFunction()) {
@@ -4131,7 +4121,7 @@ struct MemorySanitizerVisitor : public InstVisitor<MemorySanitizerVisitor> {
           if (ArgOffset + Size > kParamTLSSize)
             break;
           const MaybeAlign ParamAlignment(CB.getParamAlign(i));
-          MaybeAlign Alignment = llvm::None;
+          MaybeAlign Alignment = std::nullopt;
           if (ParamAlignment)
             Alignment = std::min(*ParamAlignment, kShadowTLSAlignment);
           Value *AShadowPtr, *AOriginPtr;
@@ -5769,13 +5759,9 @@ bool MemorySanitizer::sanitizeFunction(Function &F, TargetLibraryInfo &TLI) {
 
   MemorySanitizerVisitor Visitor(F, *this, TLI);
 
-  // Clear out readonly/readnone attributes.
+  // Clear out memory attributes.
   AttributeMask B;
-  B.addAttribute(Attribute::ReadOnly)
-      .addAttribute(Attribute::ReadNone)
-      .addAttribute(Attribute::WriteOnly)
-      .addAttribute(Attribute::ArgMemOnly)
-      .addAttribute(Attribute::Speculatable);
+  B.addAttribute(Attribute::Memory).addAttribute(Attribute::Speculatable);
   F.removeFnAttrs(B);
 
   return Visitor.runOnFunction();

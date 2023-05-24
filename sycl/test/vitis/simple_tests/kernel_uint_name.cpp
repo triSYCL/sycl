@@ -38,13 +38,13 @@ auto main() -> int
 
     queue.submit([&](sycl::handler& cgh)
     {
-        auto acc = buf.get_access<sycl::access::mode::read_write>(cgh);
+        sycl::accessor acc{buf, cgh, sycl::read_write};
 
         auto kernel = foo<42>{acc};
         cgh.single_task<foo<42>>(kernel);
     });
 
-    auto rb = buf.get_access<sycl::access::mode::read>();
+    sycl::host_accessor rb{buf, sycl::read_only};
 
     for (int i = 0; i < buf.size(); ++i) {
       assert(rb[i] == 42 && " execution of kernel is invalid");

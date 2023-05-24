@@ -31,6 +31,7 @@
 #include "llvm/Support/Debug.h"
 
 #include <set>
+#include <optional>
 
 #define DEBUG_TYPE "linalg-fusion"
 
@@ -156,16 +157,16 @@ static LinalgOp fuse(OpBuilder &b, LinalgOp producer,
       continue;
     unsigned rank = tensorType.getRank();
     SmallVector<int64_t, 4> staticOffsetsVector(
-        rank, ShapedType::kDynamicStrideOrOffset);
-    SmallVector<int64_t, 4> staticSizesVector(rank, ShapedType::kDynamicSize);
+        rank, ShapedType::kDynamic);
+    SmallVector<int64_t, 4> staticSizesVector(rank, ShapedType::kDynamic);
     SmallVector<int64_t, 4> staticStridesVector(
-        rank, ShapedType::kDynamicStrideOrOffset);
+        rank, ShapedType::kDynamic);
     resultTypes.push_back(tensor::ExtractSliceOp::inferResultType(
         tensorType, staticOffsetsVector, staticSizesVector,
         staticStridesVector));
   }
 
-  Operation *clonedOp = producer.clone(b, loc, resultTypes, clonedShapes);
+  Operation *clonedOp = clone(b, producer, resultTypes, clonedShapes);
 
   // Shift all IndexOp results by the tile offset.
   SmallVector<OpFoldResult> allIvs = llvm::to_vector(
@@ -298,7 +299,7 @@ findFusableProducer(OpOperand &consumerOpOperand,
                                        << elem.getIndexingValue() << " and "
                                        << elem.getDependentValue() << "\n");
                Value v = elem.getIndexingValue();
-               Optional<unsigned> operandNum =
+               std::optional<unsigned> operandNum =
                    elem.getIndexingOpViewOperandNum();
                return isa<LinalgOp>(elem.getDependentOp()) &&
                       v == consumerOpOperand.get() && operandNum &&
@@ -333,8 +334,8 @@ findFusableProducer(OpOperand &consumerOpOperand,
 FailureOr<FusionInfo>
 mlir::linalg::fuseProducerOfBuffer(OpBuilder &b, OpOperand &consumerOpOperand,
                                    const LinalgDependenceGraph &graph) {
-  Optional<LinalgDependenceGraph::LinalgDependenceGraphElem> fusableDependence =
-      findFusableProducer(consumerOpOperand, graph);
+  std::optional<LinalgDependenceGraph::LinalgDependenceGraphElem>
+      fusableDependence = findFusableProducer(consumerOpOperand, graph);
   if (!fusableDependence)
     return failure();
 
@@ -347,7 +348,7 @@ mlir::linalg::fuseProducerOfBuffer(OpBuilder &b, OpOperand &consumerOpOperand,
       fusableDependence->getDependentValue().getParentBlock())
     return failure();
 
-  Optional<AffineMap> producerMap =
+  std::optional<AffineMap> producerMap =
       fusableDependence->getDependentOpViewIndexingMap();
   if (!producerMap)
     return failure();

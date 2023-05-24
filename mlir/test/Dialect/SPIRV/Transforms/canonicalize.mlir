@@ -1,4 +1,4 @@
-// RUN: mlir-opt %s -split-input-file -pass-pipeline='func.func(canonicalize)' | FileCheck %s
+// RUN: mlir-opt %s -split-input-file -pass-pipeline='builtin.module(func.func(canonicalize{test-convergence}))' | FileCheck %s
 
 //===----------------------------------------------------------------------===//
 // spirv.AccessChain
@@ -82,6 +82,30 @@ func.func @convert_bitcast_multi_use(%arg0 : vector<2xf32>, %arg1 : !spirv.ptr<i
   %1 = spirv.Bitcast %0 : i64 to f64
   spirv.Store "Uniform" %arg1, %0 : i64
   spirv.ReturnValue %1 : f64
+}
+
+// -----
+
+// CHECK-LABEL: @convert_bitcast_roundtip
+// CHECK-SAME:    %[[ARG:.+]]: i64
+func.func @convert_bitcast_roundtip(%arg0 : i64) -> i64 {
+  // CHECK: spirv.ReturnValue %[[ARG]]
+  %0 = spirv.Bitcast %arg0 : i64 to f64
+  %1 = spirv.Bitcast %0 : f64 to i64
+  spirv.ReturnValue %1 : i64
+}
+
+// -----
+
+// CHECK-LABEL: @convert_bitcast_chained_roundtip
+// CHECK-SAME:    %[[ARG:.+]]: i64
+func.func @convert_bitcast_chained_roundtip(%arg0 : i64) -> i64 {
+  // CHECK: spirv.ReturnValue %[[ARG]]
+  %0 = spirv.Bitcast %arg0 : i64 to f64
+  %1 = spirv.Bitcast %0 : f64 to vector<2xi32>
+  %2 = spirv.Bitcast %1 : vector<2xi32> to vector<2xf32>
+  %3 = spirv.Bitcast %2 : vector<2xf32> to i64
+  spirv.ReturnValue %3 : i64
 }
 
 // -----
@@ -444,6 +468,22 @@ func.func @convert_logical_not_to_not_equal(%arg0: vector<3xi64>, %arg1: vector<
   %2 = spirv.IEqual %arg0, %arg1 : vector<3xi64>
   %3 = spirv.LogicalNot %2 : vector<3xi1>
   spirv.ReturnValue %3 : vector<3xi1>
+}
+
+
+// -----
+
+//===----------------------------------------------------------------------===//
+// spirv.LogicalNotEqual
+//===----------------------------------------------------------------------===//
+
+// CHECK-LABEL: @convert_logical_not_equal_false
+// CHECK-SAME: %[[ARG:.+]]: vector<4xi1>
+func.func @convert_logical_not_equal_false(%arg: vector<4xi1>) -> vector<4xi1> {
+  %cst = spirv.Constant dense<false> : vector<4xi1>
+  // CHECK: spirv.ReturnValue %[[ARG]] : vector<4xi1>
+  %0 = spirv.LogicalNotEqual %arg, %cst : vector<4xi1>
+  spirv.ReturnValue %0 : vector<4xi1>
 }
 
 // -----

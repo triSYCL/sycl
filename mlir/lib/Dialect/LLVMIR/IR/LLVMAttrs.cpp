@@ -17,6 +17,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/ADT/TypeSwitch.h"
 #include "llvm/BinaryFormat/Dwarf.h"
+#include <optional>
 
 using namespace mlir;
 using namespace mlir::LLVM;
@@ -41,10 +42,11 @@ void LLVMDialect::registerAttributes() {
 //===----------------------------------------------------------------------===//
 
 bool DINodeAttr::classof(Attribute attr) {
-  return llvm::isa<DIBasicTypeAttr, DICompileUnitAttr, DICompositeTypeAttr,
-                   DIDerivedTypeAttr, DIFileAttr, DILexicalBlockAttr,
-                   DILexicalBlockFileAttr, DILocalVariableAttr,
-                   DISubprogramAttr, DISubroutineTypeAttr>(attr);
+  return llvm::isa<DIVoidResultTypeAttr, DIBasicTypeAttr, DICompileUnitAttr,
+                   DICompositeTypeAttr, DIDerivedTypeAttr, DIFileAttr,
+                   DILexicalBlockAttr, DILexicalBlockFileAttr,
+                   DILocalVariableAttr, DISubprogramAttr, DISubrangeAttr,
+                   DISubroutineTypeAttr>(attr);
 }
 
 //===----------------------------------------------------------------------===//
@@ -52,8 +54,9 @@ bool DINodeAttr::classof(Attribute attr) {
 //===----------------------------------------------------------------------===//
 
 bool DIScopeAttr::classof(Attribute attr) {
-  return llvm::isa<DICompileUnitAttr, DIFileAttr, DILexicalBlockAttr,
-                   DILexicalBlockFileAttr, DISubprogramAttr>(attr);
+  return llvm::isa<DICompileUnitAttr, DICompositeTypeAttr, DIFileAttr,
+                   DILexicalBlockAttr, DILexicalBlockFileAttr,
+                   DISubprogramAttr>(attr);
 }
 
 //===----------------------------------------------------------------------===//
@@ -61,170 +64,25 @@ bool DIScopeAttr::classof(Attribute attr) {
 //===----------------------------------------------------------------------===//
 
 bool DITypeAttr::classof(Attribute attr) {
-  return llvm::isa<DIBasicTypeAttr, DISubroutineTypeAttr>(attr);
-}
-
-//===----------------------------------------------------------------------===//
-// DICompileUnitAttr
-//===----------------------------------------------------------------------===//
-
-void DICompileUnitAttr::walkImmediateSubElements(
-    function_ref<void(Attribute)> walkAttrsFn,
-    function_ref<void(Type)> walkTypesFn) const {
-  walkAttrsFn(getFile());
-  walkAttrsFn(getProducer());
-}
-
-Attribute
-DICompileUnitAttr::replaceImmediateSubElements(ArrayRef<Attribute> replAttrs,
-                                               ArrayRef<Type> replTypes) const {
-  return get(getContext(), getSourceLanguage(), replAttrs[0].cast<DIFileAttr>(),
-             replAttrs[1].cast<StringAttr>(), getIsOptimized(),
-             getEmissionKind());
-}
-
-//===----------------------------------------------------------------------===//
-// DICompositeTypeAttr
-//===----------------------------------------------------------------------===//
-
-void DICompositeTypeAttr::walkImmediateSubElements(
-    function_ref<void(Attribute)> walkAttrsFn,
-    function_ref<void(Type)> walkTypesFn) const {
-  walkAttrsFn(getName());
-  walkAttrsFn(getFile());
-  walkAttrsFn(getScope());
-  for (DINodeAttr element : getElements())
-    walkAttrsFn(element);
-}
-
-Attribute DICompositeTypeAttr::replaceImmediateSubElements(
-    ArrayRef<Attribute> replAttrs, ArrayRef<Type> replTypes) const {
-  ArrayRef<Attribute> elements = replAttrs.drop_front(3);
-  return get(
-      getContext(), getTag(), replAttrs[0].cast<StringAttr>(),
-      cast_or_null<DIFileAttr>(replAttrs[1]), getLine(),
-      cast_or_null<DIScopeAttr>(replAttrs[2]), getSizeInBits(),
-      getAlignInBits(),
-      ArrayRef<DINodeAttr>(static_cast<const DINodeAttr *>(elements.data()),
-                           elements.size()));
-}
-
-//===----------------------------------------------------------------------===//
-// DIDerivedTypeAttr
-//===----------------------------------------------------------------------===//
-
-void DIDerivedTypeAttr::walkImmediateSubElements(
-    function_ref<void(Attribute)> walkAttrsFn,
-    function_ref<void(Type)> walkTypesFn) const {
-  walkAttrsFn(getName());
-  walkAttrsFn(getBaseType());
-}
-
-Attribute
-DIDerivedTypeAttr::replaceImmediateSubElements(ArrayRef<Attribute> replAttrs,
-                                               ArrayRef<Type> replTypes) const {
-  return get(getContext(), getTag(), replAttrs[0].cast<StringAttr>(),
-             replAttrs[1].cast<DITypeAttr>(), getSizeInBits(), getAlignInBits(),
-             getOffsetInBits());
-}
-
-//===----------------------------------------------------------------------===//
-// DILexicalBlockAttr
-//===----------------------------------------------------------------------===//
-
-void DILexicalBlockAttr::walkImmediateSubElements(
-    function_ref<void(Attribute)> walkAttrsFn,
-    function_ref<void(Type)> walkTypesFn) const {
-  walkAttrsFn(getScope());
-  walkAttrsFn(getFile());
-}
-
-Attribute DILexicalBlockAttr::replaceImmediateSubElements(
-    ArrayRef<Attribute> replAttrs, ArrayRef<Type> replTypes) const {
-  return get(replAttrs[0].cast<DIScopeAttr>(), replAttrs[1].cast<DIFileAttr>(),
-             getLine(), getColumn());
-}
-
-//===----------------------------------------------------------------------===//
-// DILexicalBlockFileAttr
-//===----------------------------------------------------------------------===//
-
-void DILexicalBlockFileAttr::walkImmediateSubElements(
-    function_ref<void(Attribute)> walkAttrsFn,
-    function_ref<void(Type)> walkTypesFn) const {
-  walkAttrsFn(getScope());
-  walkAttrsFn(getFile());
-}
-
-Attribute DILexicalBlockFileAttr::replaceImmediateSubElements(
-    ArrayRef<Attribute> replAttrs, ArrayRef<Type> replTypes) const {
-  return get(replAttrs[0].cast<DIScopeAttr>(), replAttrs[1].cast<DIFileAttr>(),
-             getDescriminator());
-}
-
-//===----------------------------------------------------------------------===//
-// DILocalVariableAttr
-//===----------------------------------------------------------------------===//
-
-void DILocalVariableAttr::walkImmediateSubElements(
-    function_ref<void(Attribute)> walkAttrsFn,
-    function_ref<void(Type)> walkTypesFn) const {
-  walkAttrsFn(getScope());
-  walkAttrsFn(getName());
-  walkAttrsFn(getFile());
-  walkAttrsFn(getType());
-}
-
-Attribute DILocalVariableAttr::replaceImmediateSubElements(
-    ArrayRef<Attribute> replAttrs, ArrayRef<Type> replTypes) const {
-  return get(getContext(), replAttrs[0].cast<DIScopeAttr>(),
-             replAttrs[1].cast<StringAttr>(), replAttrs[2].cast<DIFileAttr>(),
-             getLine(), getArg(), getAlignInBits(),
-             replAttrs[3].cast<DITypeAttr>());
-}
-
-//===----------------------------------------------------------------------===//
-// DISubprogramAttr
-//===----------------------------------------------------------------------===//
-
-void DISubprogramAttr::walkImmediateSubElements(
-    function_ref<void(Attribute)> walkAttrsFn,
-    function_ref<void(Type)> walkTypesFn) const {
-  walkAttrsFn(getCompileUnit());
-  walkAttrsFn(getScope());
-  walkAttrsFn(getName());
-  walkAttrsFn(getLinkageName());
-  walkAttrsFn(getFile());
-  walkAttrsFn(getType());
-}
-
-Attribute
-DISubprogramAttr::replaceImmediateSubElements(ArrayRef<Attribute> replAttrs,
-                                              ArrayRef<Type> replTypes) const {
-  return get(getContext(), replAttrs[0].cast<DICompileUnitAttr>(),
-             replAttrs[1].cast<DIScopeAttr>(), replAttrs[2].cast<StringAttr>(),
-             replAttrs[3].cast<StringAttr>(), replAttrs[4].cast<DIFileAttr>(),
-             getLine(), getScopeLine(), getSubprogramFlags(),
-             replAttrs[5].cast<DISubroutineTypeAttr>());
+  return llvm::isa<DIVoidResultTypeAttr, DIBasicTypeAttr, DICompositeTypeAttr,
+                   DIDerivedTypeAttr, DISubroutineTypeAttr>(attr);
 }
 
 //===----------------------------------------------------------------------===//
 // DISubroutineTypeAttr
 //===----------------------------------------------------------------------===//
 
-void DISubroutineTypeAttr::walkImmediateSubElements(
-    function_ref<void(Attribute)> walkAttrsFn,
-    function_ref<void(Type)> walkTypesFn) const {
-  for (DITypeAttr type : getTypes())
-    walkAttrsFn(type);
-}
-
-Attribute DISubroutineTypeAttr::replaceImmediateSubElements(
-    ArrayRef<Attribute> replAttrs, ArrayRef<Type> replTypes) const {
-  return get(
-      getContext(), getCallingConvention(),
-      ArrayRef<DITypeAttr>(static_cast<const DITypeAttr *>(replAttrs.data()),
-                           replAttrs.size()));
+LogicalResult
+DISubroutineTypeAttr::verify(function_ref<InFlightDiagnostic()> emitError,
+                             unsigned int callingConventions,
+                             ArrayRef<DITypeAttr> types) {
+  ArrayRef<DITypeAttr> argumentTypes =
+      types.empty() ? types : types.drop_front();
+  if (llvm::any_of(argumentTypes, [](DITypeAttr type) {
+        return type.isa<DIVoidResultTypeAttr>();
+      }))
+    return emitError() << "expected subroutine to have non-void argument types";
+  return success();
 }
 
 //===----------------------------------------------------------------------===//
@@ -235,8 +93,8 @@ LoopOptionsAttrBuilder::LoopOptionsAttrBuilder(LoopOptionsAttr attr)
     : options(attr.getOptions().begin(), attr.getOptions().end()) {}
 
 template <typename T>
-LoopOptionsAttrBuilder &LoopOptionsAttrBuilder::setOption(LoopOptionCase tag,
-                                                          Optional<T> value) {
+LoopOptionsAttrBuilder &
+LoopOptionsAttrBuilder::setOption(LoopOptionCase tag, std::optional<T> value) {
   auto option = llvm::find_if(
       options, [tag](auto option) { return option.first == tag; });
   if (option != options.end()) {
@@ -251,35 +109,35 @@ LoopOptionsAttrBuilder &LoopOptionsAttrBuilder::setOption(LoopOptionCase tag,
 }
 
 LoopOptionsAttrBuilder &
-LoopOptionsAttrBuilder::setDisableLICM(Optional<bool> value) {
+LoopOptionsAttrBuilder::setDisableLICM(std::optional<bool> value) {
   return setOption(LoopOptionCase::disable_licm, value);
 }
 
 /// Set the `interleave_count` option to the provided value. If no value
 /// is provided the option is deleted.
 LoopOptionsAttrBuilder &
-LoopOptionsAttrBuilder::setInterleaveCount(Optional<uint64_t> count) {
+LoopOptionsAttrBuilder::setInterleaveCount(std::optional<uint64_t> count) {
   return setOption(LoopOptionCase::interleave_count, count);
 }
 
 /// Set the `disable_unroll` option to the provided value. If no value
 /// is provided the option is deleted.
 LoopOptionsAttrBuilder &
-LoopOptionsAttrBuilder::setDisableUnroll(Optional<bool> value) {
+LoopOptionsAttrBuilder::setDisableUnroll(std::optional<bool> value) {
   return setOption(LoopOptionCase::disable_unroll, value);
 }
 
 /// Set the `disable_pipeline` option to the provided value. If no value
 /// is provided the option is deleted.
 LoopOptionsAttrBuilder &
-LoopOptionsAttrBuilder::setDisablePipeline(Optional<bool> value) {
+LoopOptionsAttrBuilder::setDisablePipeline(std::optional<bool> value) {
   return setOption(LoopOptionCase::disable_pipeline, value);
 }
 
 /// Set the `pipeline_initiation_interval` option to the provided value.
 /// If no value is provided the option is deleted.
 LoopOptionsAttrBuilder &LoopOptionsAttrBuilder::setPipelineInitiationInterval(
-    Optional<uint64_t> count) {
+    std::optional<uint64_t> count) {
   return setOption(LoopOptionCase::pipeline_initiation_interval, count);
 }
 
@@ -288,7 +146,7 @@ LoopOptionsAttrBuilder &LoopOptionsAttrBuilder::setPipelineInitiationInterval(
 //===----------------------------------------------------------------------===//
 
 template <typename T>
-static Optional<T>
+static std::optional<T>
 getOption(ArrayRef<std::pair<LoopOptionCase, int64_t>> options,
           LoopOptionCase option) {
   auto it =
@@ -300,15 +158,15 @@ getOption(ArrayRef<std::pair<LoopOptionCase, int64_t>> options,
   return static_cast<T>(it->second);
 }
 
-Optional<bool> LoopOptionsAttr::disableUnroll() {
+std::optional<bool> LoopOptionsAttr::disableUnroll() {
   return getOption<bool>(getOptions(), LoopOptionCase::disable_unroll);
 }
 
-Optional<bool> LoopOptionsAttr::disableLICM() {
+std::optional<bool> LoopOptionsAttr::disableLICM() {
   return getOption<bool>(getOptions(), LoopOptionCase::disable_licm);
 }
 
-Optional<int64_t> LoopOptionsAttr::interleaveCount() {
+std::optional<int64_t> LoopOptionsAttr::interleaveCount() {
   return getOption<int64_t>(getOptions(), LoopOptionCase::interleave_count);
 }
 

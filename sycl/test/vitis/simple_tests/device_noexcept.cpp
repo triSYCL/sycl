@@ -41,7 +41,7 @@ int main() {
   buffer<int> ob(range<1>{1});
 
   q.submit([&](handler &cgh) {
-      auto wb = ob.get_access<access::mode::write>(cgh);
+      sycl::accessor wb{ob, cgh, sycl::write_only};
       cgh.single_task<exceptions_on_device>([=] {
         invoke([&]() noexcept {
             wb[0] += return_v();

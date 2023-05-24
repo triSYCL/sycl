@@ -279,6 +279,181 @@ func.func @maxu() -> index {
   return %0 : index
 }
 
+// CHECK-LABEL: @mins
+func.func @mins() -> index {
+  %lhs = index.constant -4
+  %rhs = index.constant 2
+  // CHECK: %[[A:.*]] = index.constant -4
+  %0 = index.mins %lhs, %rhs
+  // CHECK: return %[[A]]
+  return %0 : index
+}
+
+// CHECK-LABEL: @mins_nofold
+func.func @mins_nofold() -> index {
+  %lhs = index.constant 1
+  %rhs = index.constant 0x100000000
+  // 32-bit result differs from 64-bit.
+  // CHECK: index.mins
+  %0 = index.mins %lhs, %rhs
+  return %0 : index
+}
+
+// CHECK-LABEL: @mins_nofold_2
+func.func @mins_nofold_2() -> index {
+  %lhs = index.constant 0x7fffffff
+  %rhs = index.constant 0x80000000
+  // 32-bit result differs from 64-bit.
+  // CHECK: index.mins
+  %0 = index.mins %lhs, %rhs
+  return %0 : index
+}
+
+// CHECK-LABEL: @minu
+func.func @minu() -> index {
+  %lhs = index.constant -1
+  %rhs = index.constant 1
+  // CHECK: %[[A:.*]] = index.constant 1
+  %0 = index.minu %lhs, %rhs
+  // CHECK: return %[[A]]
+  return %0 : index
+}
+
+// CHECK-LABEL: @shl
+func.func @shl() -> index {
+  %lhs = index.constant 128
+  %rhs = index.constant 2
+  // CHECK: %[[A:.*]] = index.constant 512
+  %0 = index.shl %lhs, %rhs
+  // CHECK: return %[[A]]
+  return %0 : index
+}
+
+// CHECK-LABEL: @shl_32
+func.func @shl_32() -> index {
+  %lhs = index.constant 1
+  %rhs = index.constant 32
+  // CHECK: index.shl
+  %0 = index.shl %lhs, %rhs
+  return %0 : index
+}
+
+// CHECK-LABEL: @shl_edge
+func.func @shl_edge() -> index {
+  %lhs = index.constant 4000000000
+  %rhs = index.constant 31
+  // CHECK: %[[A:.*]] = index.constant 858{{[0-9]+}}
+  %0 = index.shl %lhs, %rhs
+  // CHECK: return %[[A]]
+  return %0 : index
+}
+
+// CHECK-LABEL: @shrs
+func.func @shrs() -> index {
+  %lhs = index.constant 128
+  %rhs = index.constant 2
+  // CHECK: %[[A:.*]] = index.constant 32
+  %0 = index.shrs %lhs, %rhs
+  // CHECK: return %[[A]]
+  return %0 : index
+}
+
+// CHECK-LABEL: @shrs_32
+func.func @shrs_32() -> index {
+  %lhs = index.constant 4000000000000
+  %rhs = index.constant 32
+  // CHECK: index.shrs
+  %0 = index.shrs %lhs, %rhs
+  return %0 : index
+}
+
+// CHECK-LABEL: @shrs_nofold
+func.func @shrs_nofold() -> index {
+  %lhs = index.constant 0x100000000
+  %rhs = index.constant 1
+  // CHECK: index.shrs
+  %0 = index.shrs %lhs, %rhs
+  return %0 : index
+}
+
+// CHECK-LABEL: @shrs_edge
+func.func @shrs_edge() -> index {
+  %lhs = index.constant 0x10000000000
+  %rhs = index.constant 3
+  // CHECK: %[[A:.*]] = index.constant 137{{[0-9]+}}
+  %0 = index.shrs %lhs, %rhs
+  // CHECK: return %[[A]]
+  return %0 : index
+}
+
+// CHECK-LABEL: @shru
+func.func @shru() -> index {
+  %lhs = index.constant 128
+  %rhs = index.constant 2
+  // CHECK: %[[A:.*]] = index.constant 32
+  %0 = index.shru %lhs, %rhs
+  // CHECK: return %[[A]]
+  return %0 : index
+}
+
+// CHECK-LABEL: @shru_32
+func.func @shru_32() -> index {
+  %lhs = index.constant 4000000000000
+  %rhs = index.constant 32
+  // CHECK: index.shru
+  %0 = index.shru %lhs, %rhs
+  return %0 : index
+}
+
+// CHECK-LABEL: @shru_nofold
+func.func @shru_nofold() -> index {
+  %lhs = index.constant 0x100000000
+  %rhs = index.constant 1
+  // CHECK: index.shru
+  %0 = index.shru %lhs, %rhs
+  return %0 : index
+}
+
+// CHECK-LABEL: @shru_edge
+func.func @shru_edge() -> index {
+  %lhs = index.constant 0x10000000000
+  %rhs = index.constant 3
+  // CHECK: %[[A:.*]] = index.constant 137{{[0-9]+}}
+  %0 = index.shru %lhs, %rhs
+  // CHECK: return %[[A]]
+  return %0 : index
+}
+
+// CHECK-LABEL: @and
+func.func @and() -> index {
+  %lhs = index.constant 5
+  %rhs = index.constant 1
+  // CHECK: %[[A:.*]] = index.constant 1
+  %0 = index.and %lhs, %rhs
+  // CHECK: return %[[A]]
+  return %0 : index
+}
+
+// CHECK-LABEL: @or
+func.func @or() -> index {
+  %lhs = index.constant 5
+  %rhs = index.constant 2
+  // CHECK: %[[A:.*]] = index.constant 7
+  %0 = index.or %lhs, %rhs
+  // CHECK: return %[[A]]
+  return %0 : index
+}
+
+// CHECK-LABEL: @xor
+func.func @xor() -> index {
+  %lhs = index.constant 5
+  %rhs = index.constant 1
+  // CHECK: %[[A:.*]] = index.constant 4
+  %0 = index.xor %lhs, %rhs
+  // CHECK: return %[[A]]
+  return %0 : index
+}
+
 // CHECK-LABEL: @cmp
 func.func @cmp() -> (i1, i1, i1, i1) {
   %a = index.constant 0

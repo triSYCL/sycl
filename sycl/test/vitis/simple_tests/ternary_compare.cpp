@@ -31,7 +31,7 @@ auto main() -> int {
 
   auto s_buf = sycl::buffer<std::size_t, 3>{sycl::range<3>{5, 5, 5}};
   {
-    auto s_w = s_buf.get_access<access::mode::write>();
+    sycl::host_accessor s_w{s_buf, sycl::write_only};
     for (unsigned int i = 0; i < s_w.get_range()[0]; ++i)
       for (unsigned int j = 0; j < s_w.get_range()[1]; ++j)
         for (unsigned int k = 0; k < s_w.get_range()[2]; ++k)
@@ -39,7 +39,7 @@ auto main() -> int {
   }
 
   q.submit([&](sycl::handler &cgh) {
-    auto s = s_buf.get_access<sycl::access::mode::read_write>(cgh);
+    sycl::accessor s{s_buf, cgh, sycl::read_write};
     cgh.single_task<kernel>([=] {
       // a little bit unusual but trying to keep inline with the original
       // contrived example!
@@ -52,7 +52,7 @@ auto main() -> int {
     });
   });
 
-  auto s_s = s_buf.get_access<access::mode::read>();
+  sycl::host_accessor s_s{s_buf, sycl::read_only};
   for (unsigned int i = 0; i < s_s.get_range()[0]; ++i)
     for (unsigned int j = 0; j < s_s.get_range()[1]; ++j)
       for (unsigned int k = 0; k < s_s.get_range()[2]; ++k)

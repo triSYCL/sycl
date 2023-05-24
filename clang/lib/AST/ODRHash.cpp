@@ -172,8 +172,14 @@ void ODRHash::AddTemplateArgument(TemplateArgument TA) {
       AddDecl(TA.getAsDecl());
       break;
     case TemplateArgument::NullPtr:
-    case TemplateArgument::Integral:
+      ID.AddPointer(nullptr);
       break;
+    case TemplateArgument::Integral: {
+      // There are integrals (e.g.: _BitInt(128)) that cannot be represented as
+      // any builtin integral type, so we use the hash of APSInt instead.
+      TA.getAsIntegral().Profile(ID);
+      break;
+    }
     case TemplateArgument::Template:
     case TemplateArgument::TemplateExpansion:
       AddTemplateName(TA.getAsTemplateOrTemplatePattern());
@@ -335,6 +341,15 @@ public:
     AddStmt(D->getInClassInitializer());
 
     Inherited::VisitFieldDecl(D);
+  }
+
+  void VisitObjCPropertyDecl(const ObjCPropertyDecl *D) {
+    ID.AddInteger(D->getPropertyAttributes());
+    ID.AddInteger(D->getPropertyImplementation());
+    AddQualType(D->getType());
+    AddDecl(D);
+
+    Inherited::VisitObjCPropertyDecl(D);
   }
 
   void VisitFunctionDecl(const FunctionDecl *D) {
@@ -522,6 +537,7 @@ bool ODRHash::isSubDeclToBeProcessed(const Decl *D, const DeclContext *Parent) {
     case Decl::Typedef:
     case Decl::Var:
     case Decl::ObjCMethod:
+    case Decl::ObjCProperty:
       return true;
   }
 }

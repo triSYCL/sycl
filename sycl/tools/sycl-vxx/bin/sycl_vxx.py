@@ -42,85 +42,87 @@ import tempfile
 # and some more control-flow optimizations than strictly necessary.
 # Some more minimization is probably possible
 OptimizationPipeline = [
-"-lower-sycl-metadata",
-"-preparesycl",
-"-loop-unroll",
-"-lower-expect",
-"-simplifycfg",
-"-sroa",
-"-early-cse",
-"-annotation2metadata",
-"-callsite-splitting",
-"-ipsccp",
-"-called-value-propagation",
-"-globalopt",
-"-mem2reg",
-"-deadargelim",
-"-simplifycfg",
-"-inline",
-"-function-attrs",
-"-sroa",
-"-early-cse",
-"-speculative-execution",
-"-jump-threading",
-"-correlated-propagation",
-"-simplifycfg",
-"-libcalls-shrinkwrap",
-"-tailcallelim",
-"-simplifycfg",
-"-reassociate",
-"-loop-simplify",
-"-lcssa",
-"-licm",
-"-loop-rotate",
-"-licm",
-"-simple-loop-unswitch",
-"-simplifycfg",
-"-loop-simplify",
-"-lcssa",
-"-indvars",
-"-loop-deletion",
-"-loop-unroll",
-"-sroa",
-"-mldst-motion",
-"-gvn",
-"-sccp",
-"-bdce",
-"-jump-threading",
-"-correlated-propagation",
-"-adce",
-"-dse",
-"-loop-simplify",
-"-lcssa",
-"-simplifycfg",
-"-elim-avail-extern",
-"-rpo-function-attrs",
-"-globalopt",
-"-globaldce",
-"-float2int",
-"-lower-constant-intrinsics",
-"-loop-simplify",
-"-lcssa",
-"-loop-rotate",
-"-loop-simplify",
-"-loop-load-elim",
-"-simplifycfg",
-"-loop-simplify",
-"-lcssa",
-"-loop-unroll",
-"-loop-simplify",
-"-lcssa",
-"-licm",
-"-alignment-from-assumptions",
-"-strip-dead-prototypes",
-"-globaldce",
-"-constmerge",
-"-loop-simplify",
-"-lcssa",
-"-loop-sink",
-"-instsimplify",
-"-div-rem-pairs",
-"-simplifycfg",
+"-passes="
+"lower-sycl-metadata,"
+"preparesycl,"
+"loop-unroll,"
+"lower-expect,"
+"simplifycfg,"
+"sroa,"
+"early-cse,"
+"annotation2metadata,"
+"callsite-splitting,"
+"ipsccp,"
+"called-value-propagation,"
+"globalopt,"
+"mem2reg,"
+"deadargelim,"
+"simplifycfg,"
+"inline,"
+"function-attrs,"
+"sroa,"
+"early-cse,"
+"speculative-execution,"
+"jump-threading,"
+"correlated-propagation,"
+"simplifycfg,"
+"libcalls-shrinkwrap,"
+"tailcallelim,"
+"simplifycfg,"
+"reassociate,"
+"loop-simplify,"
+"lcssa,"
+"function(loop-mssa(licm)),"
+"loop-rotate,"
+"function(loop-mssa(licm)),"
+"simple-loop-unswitch,"
+"simplifycfg,"
+"loop-simplify,"
+"lcssa,"
+"indvars,"
+"loop-deletion,"
+"loop-unroll,"
+"sroa,"
+"mldst-motion,"
+"gvn,"
+"sccp,"
+"bdce,"
+"jump-threading,"
+"correlated-propagation,"
+"adce,"
+"dse,"
+"loop-simplify,"
+"lcssa,"
+"simplifycfg,"
+"elim-avail-extern,"
+"rpo-function-attrs,"
+"globalopt,"
+"globaldce,"
+"float2int,"
+"lower-constant-intrinsics,"
+"loop-simplify,"
+"lcssa,"
+"loop-rotate,"
+"loop-simplify,"
+"loop-load-elim,"
+"simplifycfg,"
+"loop-simplify,"
+"lcssa,"
+"loop-unroll,"
+"loop-simplify,"
+"lcssa,"
+"function(loop-mssa(licm)),"
+"alignment-from-assumptions,"
+"strip-dead-prototypes,"
+"globaldce,"
+"constmerge,"
+"loop-simplify,"
+"lcssa,"
+"loop-sink,"
+"instsimplify,"
+"div-rem-pairs,"
+"simplifycfg,"
+"inSPIRation"
 ]
 
 class TmpDirManager:
@@ -296,6 +298,7 @@ class VitisCompilationDriver:
         self.ok = True
         self.vitis_clang_bin = self.vitisexec.clang_bin
         self.cmd_number = 0
+        self.dont_execute_vxx = arguments.only_print_vxx_cmds or ('SYCL_VXX_DONT_USE_VXX' in environ)
 
     def _dump_cmd(self, stem, args):
         cmdline = " ".join(map(str, args))
@@ -346,15 +349,12 @@ class VitisCompilationDriver:
            ]
         opt_options.extend(OptimizationPipeline)
         opt_options.extend(self.vitis_version.get_correct_opt_args())
-        opt_options.extend(["-inSPIRation", "-o", f"{prepared_bc}"])
+        opt_options.extend(["-o", f"{prepared_bc}"])
 
         opt = self.clang_path / "opt"
         args = [opt, *opt_options, inputs]
         self._dump_cmd("run_preparation", args)
-        proc = subprocess.run(args, check=True, capture_output=True)
-        if bytes("SYCL_VXX_UNSUPPORTED_SPIR_BUILTINS", "ascii") in proc.stderr:
-            print("Unsupported SPIR builtins found : stopping compilation")
-            self.ok = False
+        subprocess.run(args, check=True)
         return prepared_bc
 
     @subprocess_error_handler("Error when preparing HLS SPIR library")
@@ -397,13 +397,10 @@ class VitisCompilationDriver:
 
         opt_options = [
             "--lower-mem-intr-to-llvm-type", "--lower-mem-intr-full-unroll", "--lower-delayed-sycl-metadata",
-            "-lower-sycl-metadata", "-globaldce",
-            "--sycl-prepare-after-O3", "-S", "-preparesycl", "-loop-unroll", "--unroll-only-when-forced",
-            "-kernelPropGen",
-            "--sycl-kernel-propgen-output",
+            "--sycl-prepare-after-O3", "--unroll-only-when-forced", "-S",
+            "-passes=lower-sycl-metadata,globaldce,preparesycl,loop-unroll,kernelPropGen,globaldce",
+            "-strip-debug", "--sycl-kernel-propgen-output",
             f"{kernel_prop}",
-            "-globaldce",
-            "-strip-debug",
             inputs,
             "-o", prepared_kernels
         ]
@@ -413,7 +410,7 @@ class VitisCompilationDriver:
         subprocess.run(args, check=True)
         with kernel_prop.open('r') as kp_fp:
             self.kernel_properties = json.load(kp_fp)
-        opt_options = ["-S", "-vxxIRDowngrader"]
+        opt_options = ["-S", "-passes=vxxIRDowngrader"]
         downgraded_ir = (
             self.tmpdir / f"{self.outstem}_kernels-linked.opt.ll")
         args = [
@@ -455,7 +452,8 @@ class VitisCompilationDriver:
             spir_linked = self._link_spir(assembled, prepared_lib)
             final = self._next_passes(spir_linked)
             try:
-                shutil.copy2(final, self.outpath)
+                if not self.dont_execute_vxx:
+                    shutil.copy2(final, self.outpath)
             except FileNotFoundError:
                 print(
                     f"Output {self.xclbin} was not properly produced by previous commands")
@@ -517,8 +515,9 @@ class VXXCompilationDriver(VitisCompilationDriver):
     def _compile_kernel(self, outname, command):
         """Execute a kernel compilation command"""
         if self.ok:
-            with CSema():
-                _run_in_isolated_proctree(command, check=True)
+            if not self.dont_execute_vxx:
+                with CSema():
+                    _run_in_isolated_proctree(command, check=True)
         return outname
 
     @subprocess_error_handler("Vitis linkage stage failed")
@@ -582,8 +581,9 @@ class VXXCompilationDriver(VitisCompilationDriver):
         command.extend(self.extra_link_args)
         command.extend(kernels)
         self._dump_cmd("vxxlink", command)
-        with CSema():
-            _run_in_isolated_proctree(command, check=True)
+        if not self.dont_execute_vxx:
+            with CSema():
+                _run_in_isolated_proctree(command, check=True)
         return xclbin
 
     @subprocess_error_handler("Vitis compilation stage failed")
@@ -712,6 +712,11 @@ def parse_args(args=sys.argv[1:]):
         help="The temporary directory where we'll put some intermediate files",
         required=True,
         type=Path)
+    parser.add_argument(
+        "-only_print_vxx_cmds",
+        help="Print comands instead of executing them",
+        required=False,
+        type=bool)
 
     parser.add_argument("-o", help="output file name", required=True, type=Path)
     parser.add_argument("inputs", nargs="+")

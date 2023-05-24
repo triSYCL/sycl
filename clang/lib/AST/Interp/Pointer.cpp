@@ -16,6 +16,9 @@ using namespace clang::interp;
 
 Pointer::Pointer(Block *Pointee) : Pointer(Pointee, 0, 0) {}
 
+Pointer::Pointer(Block *Pointee, unsigned BaseAndOffset)
+    : Pointer(Pointee, BaseAndOffset, BaseAndOffset) {}
+
 Pointer::Pointer(const Pointer &P) : Pointer(P.Pointee, P.Base, P.Offset) {}
 
 Pointer::Pointer(Pointer &&P)
@@ -202,5 +205,5 @@ bool Pointer::hasSameBase(const Pointer &A, const Pointer &B) {
 }
 
 bool Pointer::hasSameArray(const Pointer &A, const Pointer &B) {
-  return A.Base == B.Base && A.getFieldDesc()->IsArray;
+  return hasSameBase(A, B) && A.Base == B.Base && A.getFieldDesc()->IsArray;
 }

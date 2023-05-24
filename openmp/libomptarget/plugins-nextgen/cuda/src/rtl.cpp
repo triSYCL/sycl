@@ -24,6 +24,7 @@
 #include "llvm/BinaryFormat/ELF.h"
 #include "llvm/Frontend/OpenMP/OMPConstants.h"
 #include "llvm/Frontend/OpenMP/OMPGridValues.h"
+#include "llvm/Support/Error.h"
 
 namespace llvm {
 namespace omp {
@@ -34,8 +35,6 @@ namespace plugin {
 struct CUDAKernelTy;
 struct CUDADeviceTy;
 struct CUDAPluginTy;
-struct CUDAStreamManagerTy;
-struct CUDAEventManagerTy;
 
 /// Class implementing the CUDA kernel functionalities which derives from the
 /// generic kernel class.
@@ -97,7 +96,7 @@ public:
 
   /// Create a new stream and save the reference. The reference must be empty
   /// before calling to this function.
-  Error create() override {
+  Error create(GenericDeviceTy &Device) override {
     if (Stream)
       return Plugin::error("Creating an existing stream");
 
@@ -110,7 +109,7 @@ public:
 
   /// Destroy the referenced stream and invalidate the reference. The reference
   /// must be to a valid stream before calling to this function.
-  Error destroy() override {
+  Error destroy(GenericDeviceTy &Device) override {
     if (!Stream)
       return Plugin::error("Destroying an invalid stream");
 
@@ -140,7 +139,7 @@ public:
 
   /// Create a new event and save the reference. The reference must be empty
   /// before calling to this function.
-  Error create() override {
+  Error create(GenericDeviceTy &Device) override {
     if (Event)
       return Plugin::error("Creating an existing event");
 
@@ -153,7 +152,7 @@ public:
 
   /// Destroy the referenced event and invalidate the reference. The reference
   /// must be to a valid event before calling to this function.
-  Error destroy() override {
+  Error destroy(GenericDeviceTy &Device) override {
     if (!Event)
       return Plugin::error("Destroying an invalid event");
 
@@ -260,11 +259,11 @@ struct CUDADeviceTy : public GenericDeviceTy {
       return Err;
 
     // Initialize stream pool.
-    if (auto Err = CUDAStreamManager.init())
+    if (auto Err = CUDAStreamManager.init(OMPX_InitialNumStreams))
       return Err;
 
     // Initialize event pool.
-    if (auto Err = CUDAEventManager.init())
+    if (auto Err = CUDAEventManager.init(OMPX_InitialNumEvents))
       return Err;
 
     // Query attributes to determine number of threads/block and blocks/grid.
@@ -278,6 +277,14 @@ struct CUDADeviceTy : public GenericDeviceTy {
 
     if (auto Err = getDeviceAttr(CU_DEVICE_ATTRIBUTE_WARP_SIZE,
                                  GridValues.GV_Warp_Size))
+      return Err;
+
+    if (auto Err = getDeviceAttr(CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR,
+                                 ComputeCapability.Major))
+      return Err;
+
+    if (auto Err = getDeviceAttr(CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR,
+                                 ComputeCapability.Minor))
       return Err;
 
     return Plugin::success();
@@ -342,33 +349,14 @@ struct CUDADeviceTy : public GenericDeviceTy {
     DP("Entry point " DPxMOD " maps to %s (" DPxMOD ")\n", DPxPTR(&KernelEntry),
        KernelEntry.name, DPxPTR(Func));
 
-    // Create a metadata object for the exec mode global (auto-generated).
-    StaticGlobalTy<llvm::omp::OMPTgtExecModeFlags> ExecModeGlobal(
-        KernelEntry.name, "_exec_mode");
-
-    // Retrieve execution mode for the kernel. This may fail since some kernels
-    // may not have a execution mode.
-    GenericGlobalHandlerTy &GHandler = Plugin::get().getGlobalHandler();
-    if (auto Err = GHandler.readGlobalFromImage(*this, Image, ExecModeGlobal)) {
-      // In some cases the execution mode is not included, so use the default.
-      ExecModeGlobal.setValue(llvm::omp::OMP_TGT_EXEC_MODE_GENERIC);
-      // Consume the error since it is acceptable to fail.
-      [[maybe_unused]] std::string ErrStr = toString(std::move(Err));
-
-      DP("Failed to read execution mode for '%s': %s\n"
-         "Using default GENERIC (1) execution mode\n",
-         KernelEntry.name, ErrStr.data());
-    }
-
-    // Check that the retrieved execution mode is valid.
-    if (!GenericKernelTy::isValidExecutionMode(ExecModeGlobal.getValue()))
-      return Plugin::error("Invalid execution mode %d for '%s'",
-                           ExecModeGlobal.getValue(), KernelEntry.name);
+    Expected<OMPTgtExecModeFlags> ExecModeOrErr =
+        getExecutionModeForKernel(KernelEntry.name, Image);
+    if (!ExecModeOrErr)
+      return ExecModeOrErr.takeError();
 
     // Allocate and initialize the CUDA kernel.
     CUDAKernelTy *CUDAKernel = Plugin::get().allocate<CUDAKernelTy>();
-    new (CUDAKernel)
-        CUDAKernelTy(KernelEntry.name, ExecModeGlobal.getValue(), Func);
+    new (CUDAKernel) CUDAKernelTy(KernelEntry.name, ExecModeOrErr.get(), Func);
 
     return CUDAKernel;
   }
@@ -383,7 +371,7 @@ struct CUDADeviceTy : public GenericDeviceTy {
   CUstream getStream(AsyncInfoWrapperTy &AsyncInfoWrapper) {
     CUstream &Stream = AsyncInfoWrapper.getQueueAs<CUstream>();
     if (!Stream)
-      Stream = CUDAStreamManager.getStream();
+      Stream = CUDAStreamManager.getResource();
     return Stream;
   }
 
@@ -482,10 +470,28 @@ struct CUDADeviceTy : public GenericDeviceTy {
     // Once the stream is synchronized, return it to stream pool and reset
     // AsyncInfo. This is to make sure the synchronization only works for its
     // own tasks.
-    CUDAStreamManager.returnStream(Stream);
+    CUDAStreamManager.returnResource(Stream);
     AsyncInfo.Queue = nullptr;
 
     return Plugin::check(Res, "Error in cuStreamSynchronize: %s");
+  }
+
+  /// Query for the completion of the pending operations on the async info.
+  Error queryAsyncImpl(__tgt_async_info &AsyncInfo) override {
+    CUstream Stream = reinterpret_cast<CUstream>(AsyncInfo.Queue);
+    CUresult Res = cuStreamQuery(Stream);
+
+    // Not ready streams must be considered as successful operations.
+    if (Res == CUDA_ERROR_NOT_READY)
+      return Plugin::success();
+
+    // Once the stream is synchronized and the operations completed (or an error
+    // occurs), return it to stream pool and reset AsyncInfo. This is to make
+    // sure the synchronization only works for its own tasks.
+    CUDAStreamManager.returnResource(Stream);
+    AsyncInfo.Queue = nullptr;
+
+    return Plugin::check(Res, "Error in cuStreamQuery: %s");
   }
 
   /// Submit data to the device (host to device transfer).
@@ -553,14 +559,14 @@ struct CUDADeviceTy : public GenericDeviceTy {
   /// Create an event.
   Error createEventImpl(void **EventPtrStorage) override {
     CUevent *Event = reinterpret_cast<CUevent *>(EventPtrStorage);
-    *Event = CUDAEventManager.getEvent();
+    *Event = CUDAEventManager.getResource();
     return Plugin::success();
   }
 
   /// Destroy a previously created event.
   Error destroyEventImpl(void *EventPtr) override {
     CUevent Event = reinterpret_cast<CUevent>(EventPtr);
-    CUDAEventManager.returnEvent(Event);
+    CUDAEventManager.returnResource(Event);
     return Plugin::success();
   }
 
@@ -778,9 +784,14 @@ struct CUDADeviceTy : public GenericDeviceTy {
     return Plugin::check(Res, "Error in cuDeviceGetAttribute: %s");
   }
 
+  /// See GenericDeviceTy::getComputeUnitKind().
+  std::string getComputeUnitKind() const override {
+    return ComputeCapability.str();
+  }
+
 private:
-  using CUDAStreamManagerTy = GenericStreamManagerTy<CUDAStreamRef>;
-  using CUDAEventManagerTy = GenericEventManagerTy<CUDAEventRef>;
+  using CUDAStreamManagerTy = GenericDeviceResourceManagerTy<CUDAStreamRef>;
+  using CUDAEventManagerTy = GenericDeviceResourceManagerTy<CUDAEventRef>;
 
   /// Stream manager for CUDA streams.
   CUDAStreamManagerTy CUDAStreamManager;
@@ -794,6 +805,15 @@ private:
 
   /// The CUDA device handler.
   CUdevice Device = CU_DEVICE_INVALID;
+
+  /// The compute capability of the corresponding CUDA device.
+  struct ComputeCapabilityTy {
+    uint32_t Major;
+    uint32_t Minor;
+    std::string str() const {
+      return "sm_" + std::to_string(Major * 10 + Minor);
+    }
+  } ComputeCapability;
 };
 
 Error CUDAKernelTy::launchImpl(GenericDeviceTy &GenericDevice,
@@ -848,57 +868,53 @@ public:
 
 /// Class implementing the CUDA-specific functionalities of the plugin.
 struct CUDAPluginTy final : public GenericPluginTy {
-  /// Create a CUDA plugin and initialize the CUDA driver.
-  CUDAPluginTy() : GenericPluginTy() {
-    CUresult Res = cuInit(0);
-    if (Res == CUDA_ERROR_INVALID_HANDLE) {
-      // Cannot call cuGetErrorString if dlsym failed.
-      DP("Failed to load CUDA shared library\n");
-      return;
-    }
-
-    if (Res == CUDA_ERROR_NO_DEVICE) {
-      // Do not initialize if there are no devices.
-      DP("There are no devices supporting CUDA.\n");
-      return;
-    }
-
-    if (auto Err = Plugin::check(Res, "Error in cuInit: %s")) {
-      REPORT("%s\n", toString(std::move(Err)).data());
-      return;
-    }
-
-    // Get the number of devices.
-    int NumDevices;
-    Res = cuDeviceGetCount(&NumDevices);
-    if (auto Err = Plugin::check(Res, "Error in cuDeviceGetCount: %s")) {
-      REPORT("%s\n", toString(std::move(Err)).data());
-      return;
-    }
-
-    // Do not initialize if there are no devices.
-    if (NumDevices == 0) {
-      DP("There are no devices supporting CUDA.\n");
-      return;
-    }
-
-    // Initialize the generic plugin structure.
-    GenericPluginTy::init(NumDevices, new CUDAGlobalHandlerTy());
-  }
+  /// Create a CUDA plugin.
+  CUDAPluginTy() : GenericPluginTy(getTripleArch()) {}
 
   /// This class should not be copied.
   CUDAPluginTy(const CUDAPluginTy &) = delete;
   CUDAPluginTy(CUDAPluginTy &&) = delete;
 
-  ~CUDAPluginTy() {}
+  /// Initialize the plugin and return the number of devices.
+  Expected<int32_t> initImpl() override {
+    CUresult Res = cuInit(0);
+    if (Res == CUDA_ERROR_INVALID_HANDLE) {
+      // Cannot call cuGetErrorString if dlsym failed.
+      DP("Failed to load CUDA shared library\n");
+      return 0;
+    }
+
+    if (Res == CUDA_ERROR_NO_DEVICE) {
+      // Do not initialize if there are no devices.
+      DP("There are no devices supporting CUDA.\n");
+      return 0;
+    }
+
+    if (auto Err = Plugin::check(Res, "Error in cuInit: %s"))
+      return std::move(Err);
+
+    // Get the number of devices.
+    int NumDevices;
+    Res = cuDeviceGetCount(&NumDevices);
+    if (auto Err = Plugin::check(Res, "Error in cuDeviceGetCount: %s"))
+      return std::move(Err);
+
+    // Do not initialize if there are no devices.
+    if (NumDevices == 0)
+      DP("There are no devices supporting CUDA.\n");
+
+    return NumDevices;
+  }
+
+  /// Deinitialize the plugin.
+  Error deinitImpl() override { return Plugin::success(); }
 
   /// Get the ELF code for recognizing the compatible image binary.
   uint16_t getMagicElfBits() const override { return ELF::EM_CUDA; }
 
-  /// Create a CUDA device with a specific id.
-  CUDADeviceTy &createDevice(int32_t DeviceId) override {
-    CUDADeviceTy *Device = new CUDADeviceTy(DeviceId, getNumDevices());
-    return *Device;
+  Triple::ArchType getTripleArch() const override {
+    // TODO: I think we can drop the support for 32-bit NVPTX devices.
+    return Triple::nvptx64;
   }
 
   /// Check whether the image is compatible with the available CUDA devices.
@@ -1002,32 +1018,14 @@ Error CUDADeviceTy::dataExchangeImpl(const void *SrcPtr,
   return Plugin::check(Res, "Error in cuMemcpyDtoDAsync: %s");
 }
 
-Error Plugin::init() {
-  // Call the getter to intialize the CUDA plugin.
-  get();
-  return Plugin::success();
+GenericPluginTy *Plugin::createPlugin() { return new CUDAPluginTy(); }
+
+GenericDeviceTy *Plugin::createDevice(int32_t DeviceId, int32_t NumDevices) {
+  return new CUDADeviceTy(DeviceId, NumDevices);
 }
 
-Error Plugin::deinit() {
-  // The CUDA plugin and the CUDA driver should already be deinitialized
-  // at this point. So do nothing for this plugin.
-  if (Plugin::isActive())
-    return Plugin::error("CUDA plugin is not deinitialized");
-
-  return Plugin::success();
-}
-
-GenericPluginTy &Plugin::get() {
-  // The CUDA plugin instance is built the first time that Plugin::get() is
-  // called thanks to the following static variable. The ideal implementation
-  // would initialize the plugin in Plugin::init() (__tgt_rtl_plugin_init) and
-  // destroy it in Plugin::deinit() (__tgt_rtl_plugin_deinit). However, at the
-  // time Plugin::deinit() is called, the CUDA driver is already shut down. That
-  // is caused by the fact that __tgt_rtl_plugin_deinit is called from a dtor
-  // in libomptarget. Thus, this is a workaround until that aspect is fixed.
-  static CUDAPluginTy CUDAPlugin;
-  assert(Plugin::isActive() && "Plugin is not active");
-  return CUDAPlugin;
+GenericGlobalHandlerTy *Plugin::createGlobalHandler() {
+  return new CUDAGlobalHandlerTy();
 }
 
 template <typename... ArgsTy>

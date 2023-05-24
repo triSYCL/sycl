@@ -25,6 +25,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+#include "lld/Common/CommonLinkerContext.h"
 #include "lld/Common/Driver.h"
 #include "lld/Common/ErrorHandler.h"
 #include "lld/Common/Memory.h"
@@ -41,6 +42,7 @@
 #include "llvm/Support/PluginLoader.h"
 #include "llvm/Support/Process.h"
 #include <cstdlib>
+#include <optional>
 
 using namespace lld;
 using namespace llvm;
@@ -89,7 +91,9 @@ static bool isPETarget(std::vector<const char *> &v) {
   SmallVector<const char *, 256> expandedArgs(v.data(), v.data() + v.size());
   BumpPtrAllocator a;
   StringSaver saver(a);
-  cl::ExpandResponseFiles(saver, getDefaultQuotingStyle(), expandedArgs);
+  cl::ExpansionContext ECtx(saver.getAllocator(), getDefaultQuotingStyle());
+  if (Error Err = ECtx.expandResponseFiles(expandedArgs))
+    die(toString(std::move(Err)));
   for (auto it = expandedArgs.begin(); it + 1 != expandedArgs.end(); ++it) {
     if (StringRef(*it) != "-m")
       continue;
@@ -226,7 +230,7 @@ int lld_main(int argc, char **argv) {
     return lldMain(argc, const_cast<const char **>(argv), llvm::outs(),
                    llvm::errs());
 
-  Optional<int> mainRet;
+  std::optional<int> mainRet;
   CrashRecoveryContext::Enable();
 
   for (unsigned i = inTestVerbosity(); i > 0; --i) {

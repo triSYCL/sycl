@@ -9,8 +9,10 @@
 #include <detail/backend_impl.hpp>
 #include <detail/event_impl.hpp>
 #include <detail/queue_impl.hpp>
+#include <sycl/detail/common.hpp>
 #include <sycl/event.hpp>
 #include <sycl/exception_list.hpp>
+#include <sycl/ext/codeplay/experimental/fusion_properties.hpp>
 #include <sycl/handler.hpp>
 #include <sycl/queue.hpp>
 #include <sycl/stl.hpp>
@@ -186,15 +188,16 @@ template <typename PropertyT> PropertyT queue::get_property() const {
   return impl->get_property<PropertyT>();
 }
 
-template __SYCL_EXPORT bool
-queue::has_property<property::queue::enable_profiling>() const noexcept;
-template __SYCL_EXPORT property::queue::enable_profiling
-queue::get_property<property::queue::enable_profiling>() const;
+#define __SYCL_MANUALLY_DEFINED_PROP(NS_QUALIFIER, PROP_NAME)                  \
+  template __SYCL_EXPORT bool queue::has_property<NS_QUALIFIER::PROP_NAME>()   \
+      const noexcept;                                                          \
+  template __SYCL_EXPORT NS_QUALIFIER::PROP_NAME                               \
+  queue::get_property<NS_QUALIFIER::PROP_NAME>() const;
 
-template __SYCL_EXPORT bool
-queue::has_property<property::queue::in_order>() const;
-template __SYCL_EXPORT property::queue::in_order
-queue::get_property<property::queue::in_order>() const;
+#define __SYCL_DATA_LESS_PROP(NS_QUALIFIER, PROP_NAME, ENUM_VAL)               \
+  __SYCL_MANUALLY_DEFINED_PROP(NS_QUALIFIER, PROP_NAME)
+
+#include <sycl/properties/queue_properties.def>
 
 bool queue::is_in_order() const {
   return impl->has_property<property::queue::in_order>();
@@ -202,15 +205,41 @@ bool queue::is_in_order() const {
 
 backend queue::get_backend() const noexcept { return getImplBackend(impl); }
 
+bool queue::ext_oneapi_empty() const { return impl->ext_oneapi_empty(); }
+
 pi_native_handle queue::getNative() const { return impl->getNative(); }
 
 buffer<detail::AssertHappened, 1> &queue::getAssertHappenedBuffer() {
   return impl->getAssertHappenedBuffer();
 }
 
+event queue::memcpyToDeviceGlobal(void *DeviceGlobalPtr, const void *Src,
+                                  bool IsDeviceImageScope, size_t NumBytes,
+                                  size_t Offset,
+                                  const std::vector<event> &DepEvents) {
+  return impl->memcpyToDeviceGlobal(impl, DeviceGlobalPtr, Src,
+                                    IsDeviceImageScope, NumBytes, Offset,
+                                    DepEvents);
+}
+
+event queue::memcpyFromDeviceGlobal(void *Dest, const void *DeviceGlobalPtr,
+                                    bool IsDeviceImageScope, size_t NumBytes,
+                                    size_t Offset,
+                                    const std::vector<event> &DepEvents) {
+  return impl->memcpyFromDeviceGlobal(impl, Dest, DeviceGlobalPtr,
+                                      IsDeviceImageScope, NumBytes, Offset,
+                                      DepEvents);
+}
+
 bool queue::device_has(aspect Aspect) const {
   // avoid creating sycl object from impl
   return impl->getDeviceImplPtr()->has(Aspect);
 }
+
+bool queue::ext_codeplay_supports_fusion() const {
+  return impl->has_property<
+      ext::codeplay::experimental::property::queue::enable_fusion>();
+}
+
 } // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl

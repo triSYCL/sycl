@@ -305,6 +305,7 @@ public:
 
   /// This returns the SDNode that contains this Use.
   SDNode *getUser() { return User; }
+  const SDNode *getUser() const { return User; }
 
   /// Get the next SDUse in the use list.
   SDUse *getNext() const { return Next; }
@@ -757,6 +758,7 @@ public:
 
     use_iterator() = default;
     use_iterator(const use_iterator &I) = default;
+    use_iterator &operator=(const use_iterator &) = default;
 
     bool operator==(const use_iterator &x) const { return Op == x.Op; }
     bool operator!=(const use_iterator &x) const {
@@ -925,7 +927,7 @@ public:
 
   op_iterator op_begin() const { return OperandList; }
   op_iterator op_end() const { return OperandList+NumOperands; }
-  ArrayRef<SDUse> ops() const { return makeArrayRef(op_begin(), op_end()); }
+  ArrayRef<SDUse> ops() const { return ArrayRef(op_begin(), op_end()); }
 
   /// Iterator for directly iterating over the operand SDValue's.
   struct value_op_iterator
@@ -1289,8 +1291,6 @@ public:
   /// Returns alignment and volatility of the memory access
   Align getOriginalAlign() const { return MMO->getBaseAlign(); }
   Align getAlign() const { return MMO->getAlign(); }
-  // FIXME: Remove once transition to getAlign is over.
-  unsigned getAlignment() const { return MMO->getAlign().value(); }
 
   /// Return the SubclassData value, without HasDebugValue. This contains an
   /// encoding of the volatile flag, as well as bits used by subclasses. This
@@ -1535,7 +1535,7 @@ protected:
 public:
   ArrayRef<int> getMask() const {
     EVT VT = getValueType(0);
-    return makeArrayRef(Mask, VT.getVectorNumElements());
+    return ArrayRef(Mask, VT.getVectorNumElements());
   }
 
   int getMaskElt(unsigned Idx) const {
@@ -2103,7 +2103,7 @@ public:
   /// If this BuildVector is constant and represents the numerical series
   /// "<a, a+n, a+2n, a+3n, ...>" where a is integer and n is a non-zero integer,
   /// the value "<a,n>" is returned.
-  Optional<std::pair<APInt, APInt>> isConstantSequence() const;
+  std::optional<std::pair<APInt, APInt>> isConstantSequence() const;
 
   /// Recast bit data \p SrcBitElements to \p DstEltSizeInBits wide elements.
   /// Undef elements are treated as zero, and entirely undefined elements are
@@ -2931,10 +2931,10 @@ public:
     if (NumMemRefs == 0)
       return {};
     if (NumMemRefs == 1)
-      return makeArrayRef(MemRefs.getAddrOfPtr1(), 1);
+      return ArrayRef(MemRefs.getAddrOfPtr1(), 1);
 
     // Otherwise we have an actual array.
-    return makeArrayRef(MemRefs.get<MachineMemOperand **>(), NumMemRefs);
+    return ArrayRef(MemRefs.get<MachineMemOperand **>(), NumMemRefs);
   }
   mmo_iterator memoperands_begin() const { return memoperands().begin(); }
   mmo_iterator memoperands_end() const { return memoperands().end(); }

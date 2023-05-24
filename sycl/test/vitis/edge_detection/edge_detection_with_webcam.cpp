@@ -61,8 +61,8 @@ int main(int argc, char *argv[]) {
       break;
 
     auto event = q.submit([&](handler &cgh) {
-      auto pixel_rb = ib.get_access<access::mode::read>(cgh);
-      auto pixel_wb = ob.get_access<access::mode::write>(cgh);
+      sycl::accessor pixel_rb{ib, cgh, sycl::read_only};
+      sycl::accessor pixel_wb{ob, cgh, sycl::write_only};
 
       cgh.single_task<xilinx::reqd_work_group_size<1, 1, 1, krnl_sobel>>([=] {
         xilinx::partition_array<char, 9, xilinx::partition::complete<1>> gX{
@@ -93,7 +93,7 @@ int main(int argc, char *argv[]) {
       });
     });
 
-    auto pixel_rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor pixel_rb{ob, sycl::read_only};
 
     cv::Mat output(height, width, CV_8UC1, pixel_rb.get_pointer());
 

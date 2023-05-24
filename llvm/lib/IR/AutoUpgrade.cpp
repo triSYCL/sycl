@@ -605,6 +605,21 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
                                         F->arg_begin()->getType());
       return true;
     }
+    if (Name == "aarch64.sve.bfdot.lane") {
+      NewFn = Intrinsic::getDeclaration(F->getParent(),
+                                        Intrinsic::aarch64_sve_bfdot_lane_v2);
+      return true;
+    }
+    if (Name == "aarch64.sve.bfmlalb.lane") {
+      NewFn = Intrinsic::getDeclaration(F->getParent(),
+                                        Intrinsic::aarch64_sve_bfmlalb_lane_v2);
+      return true;
+    }
+    if (Name == "aarch64.sve.bfmlalt.lane") {
+      NewFn = Intrinsic::getDeclaration(F->getParent(),
+                                        Intrinsic::aarch64_sve_bfmlalt_lane_v2);
+      return true;
+    }
     static const Regex LdRegex("^aarch64\\.sve\\.ld[234](.nxv[a-z0-9]+|$)");
     if (LdRegex.match(Name)) {
       Type *ScalarTy =
@@ -893,6 +908,13 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
     }
     break;
   }
+  case 'f':
+    if (Name.startswith("flt.rounds")) {
+      rename(F);
+      NewFn = Intrinsic::getDeclaration(F->getParent(), Intrinsic::get_rounding);
+      return true;
+    }
+    break;
   case 'i':
   case 'l': {
     bool IsLifetimeStart = Name.startswith("lifetime.start");
@@ -1078,9 +1100,9 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
       }
     } else if (Name.startswith("ptr.annotation.") && F->arg_size() == 4) {
       rename(F);
-      NewFn = Intrinsic::getDeclaration(F->getParent(),
-                                        Intrinsic::ptr_annotation,
-                                        F->arg_begin()->getType());
+      NewFn = Intrinsic::getDeclaration(
+          F->getParent(), Intrinsic::ptr_annotation,
+          {F->arg_begin()->getType(), F->getArg(1)->getType()});
       return true;
     }
     break;
@@ -1095,8 +1117,9 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
   case 'v': {
     if (Name == "var.annotation" && F->arg_size() == 4) {
       rename(F);
-      NewFn = Intrinsic::getDeclaration(F->getParent(),
-                                        Intrinsic::var_annotation);
+      NewFn = Intrinsic::getDeclaration(
+          F->getParent(), Intrinsic::var_annotation,
+          {{F->arg_begin()->getType(), F->getArg(1)->getType()}});
       return true;
     }
     break;
@@ -1140,7 +1163,7 @@ static bool UpgradeIntrinsicFunction1(Function *F, Function *&NewFn) {
 
   // Remangle our intrinsic since we upgrade the mangling
   auto Result = llvm::Intrinsic::remangleIntrinsicFunction(F);
-  if (Result != None) {
+  if (Result != std::nullopt) {
     NewFn = *Result;
     return true;
   }
@@ -1223,7 +1246,7 @@ static Value *UpgradeX86PSLLDQIntrinsics(IRBuilder<> &Builder,
         Idxs[l + i] = Idx + l;
       }
 
-    Res = Builder.CreateShuffleVector(Res, Op, makeArrayRef(Idxs, NumElts));
+    Res = Builder.CreateShuffleVector(Res, Op, ArrayRef(Idxs, NumElts));
   }
 
   // Bitcast back to a 64-bit element type.
@@ -1257,7 +1280,7 @@ static Value *UpgradeX86PSRLDQIntrinsics(IRBuilder<> &Builder, Value *Op,
         Idxs[l + i] = Idx + l;
       }
 
-    Res = Builder.CreateShuffleVector(Op, Res, makeArrayRef(Idxs, NumElts));
+    Res = Builder.CreateShuffleVector(Op, Res, ArrayRef(Idxs, NumElts));
   }
 
   // Bitcast back to a 64-bit element type.
@@ -1277,8 +1300,8 @@ static Value *getX86MaskVec(IRBuilder<> &Builder, Value *Mask,
     int Indices[4];
     for (unsigned i = 0; i != NumElts; ++i)
       Indices[i] = i;
-    Mask = Builder.CreateShuffleVector(
-        Mask, Mask, makeArrayRef(Indices, NumElts), "extract");
+    Mask = Builder.CreateShuffleVector(Mask, Mask, ArrayRef(Indices, NumElts),
+                                       "extract");
   }
 
   return Mask;
@@ -1352,9 +1375,8 @@ static Value *UpgradeX86ALIGNIntrinsics(IRBuilder<> &Builder, Value *Op0,
     }
   }
 
-  Value *Align = Builder.CreateShuffleVector(Op1, Op0,
-                                             makeArrayRef(Indices, NumElts),
-                                             "palignr");
+  Value *Align = Builder.CreateShuffleVector(
+      Op1, Op0, ArrayRef(Indices, NumElts), "palignr");
 
   return EmitX86Select(Builder, Mask, Align, Passthru);
 }
@@ -1544,7 +1566,7 @@ static Value *UpgradeMaskedStore(IRBuilder<> &Builder,
                               llvm::PointerType::getUnqual(Data->getType()));
   const Align Alignment =
       Aligned
-          ? Align(Data->getType()->getPrimitiveSizeInBits().getFixedSize() / 8)
+          ? Align(Data->getType()->getPrimitiveSizeInBits().getFixedValue() / 8)
           : Align(1);
 
   // If the mask is all ones just emit a regular store.
@@ -1566,8 +1588,9 @@ static Value *UpgradeMaskedLoad(IRBuilder<> &Builder,
   Ptr = Builder.CreateBitCast(Ptr, llvm::PointerType::getUnqual(ValTy));
   const Align Alignment =
       Aligned
-          ? Align(Passthru->getType()->getPrimitiveSizeInBits().getFixedSize() /
-                  8)
+          ? Align(
+                Passthru->getType()->getPrimitiveSizeInBits().getFixedValue() /
+                8)
           : Align(1);
 
   // If the mask is all ones just emit a regular store.
@@ -2049,12 +2072,16 @@ static Value *UpgradeARMIntrinsicCall(StringRef Name, CallBase *CI, Function *F,
 /// Upgrade a call to an old intrinsic. All argument and return casting must be
 /// provided to seamlessly integrate with existing context.
 void llvm::UpgradeIntrinsicCall(CallBase *CI, Function *NewFn) {
-  Function *F = CI->getCalledFunction();
+  // Note dyn_cast to Function is not quite the same as getCalledFunction, which
+  // checks the callee's function type matches. It's likely we need to handle
+  // type changes here.
+  Function *F = dyn_cast<Function>(CI->getCalledOperand());
+  if (!F)
+    return;
+
   LLVMContext &C = CI->getContext();
   IRBuilder<> Builder(C);
   Builder.SetInsertPoint(CI->getParent(), CI->getIterator());
-
-  assert(F && "Intrinsic call is not direct?");
 
   if (!NewFn) {
     // Get the Function's name.
@@ -2116,7 +2143,7 @@ void llvm::UpgradeIntrinsicCall(CallBase *CI, Function *NewFn) {
                                         "cast");
       StoreInst *SI = Builder.CreateAlignedStore(
           Arg1, BC,
-          Align(Arg1->getType()->getPrimitiveSizeInBits().getFixedSize() / 8));
+          Align(Arg1->getType()->getPrimitiveSizeInBits().getFixedValue() / 8));
       SI->setMetadata(M->getMDKindID("nontemporal"), Node);
 
       // Remove intrinsic.
@@ -2256,14 +2283,13 @@ void llvm::UpgradeIntrinsicCall(CallBase *CI, Function *NewFn) {
 
       // First extract half of each vector. This gives better codegen than
       // doing it in a single shuffle.
-      LHS = Builder.CreateShuffleVector(LHS, LHS,
-                                        makeArrayRef(Indices, NumElts / 2));
-      RHS = Builder.CreateShuffleVector(RHS, RHS,
-                                        makeArrayRef(Indices, NumElts / 2));
+      LHS =
+          Builder.CreateShuffleVector(LHS, LHS, ArrayRef(Indices, NumElts / 2));
+      RHS =
+          Builder.CreateShuffleVector(RHS, RHS, ArrayRef(Indices, NumElts / 2));
       // Concat the vectors.
       // NOTE: Operands have to be swapped to match intrinsic definition.
-      Rep = Builder.CreateShuffleVector(RHS, LHS,
-                                        makeArrayRef(Indices, NumElts));
+      Rep = Builder.CreateShuffleVector(RHS, LHS, ArrayRef(Indices, NumElts));
       Rep = Builder.CreateBitCast(Rep, CI->getType());
     } else if (IsX86 && Name == "avx512.kand.w") {
       Value *LHS = getX86MaskVec(Builder, CI->getArgOperand(0), 16);
@@ -3457,7 +3483,7 @@ void llvm::UpgradeIntrinsicCall(CallBase *CI, Function *NewFn) {
           Ptr, PointerType::getUnqual(CI->getType()), "cast");
       LoadInst *LI = Builder.CreateAlignedLoad(
           CI->getType(), BC,
-          Align(CI->getType()->getPrimitiveSizeInBits().getFixedSize() / 8));
+          Align(CI->getType()->getPrimitiveSizeInBits().getFixedValue() / 8));
       LI->setMetadata(M->getMDKindID("nontemporal"), Node);
       Rep = LI;
     } else if (IsX86 && (Name.startswith("fma.vfmadd.") ||
@@ -3916,21 +3942,29 @@ void llvm::UpgradeIntrinsicCall(CallBase *CI, Function *NewFn) {
     }
 
     // This must be an upgrade from a named to a literal struct.
-    auto *OldST = cast<StructType>(CI->getType());
-    assert(OldST != NewFn->getReturnType() && "Return type must have changed");
-    assert(OldST->getNumElements() ==
-               cast<StructType>(NewFn->getReturnType())->getNumElements() &&
-           "Must have same number of elements");
+    if (auto *OldST = dyn_cast<StructType>(CI->getType())) {
+      assert(OldST != NewFn->getReturnType() &&
+             "Return type must have changed");
+      assert(OldST->getNumElements() ==
+                 cast<StructType>(NewFn->getReturnType())->getNumElements() &&
+             "Must have same number of elements");
 
-    SmallVector<Value *> Args(CI->args());
-    Value *NewCI = Builder.CreateCall(NewFn, Args);
-    Value *Res = PoisonValue::get(OldST);
-    for (unsigned Idx = 0; Idx < OldST->getNumElements(); ++Idx) {
-      Value *Elem = Builder.CreateExtractValue(NewCI, Idx);
-      Res = Builder.CreateInsertValue(Res, Elem, Idx);
+      SmallVector<Value *> Args(CI->args());
+      Value *NewCI = Builder.CreateCall(NewFn, Args);
+      Value *Res = PoisonValue::get(OldST);
+      for (unsigned Idx = 0; Idx < OldST->getNumElements(); ++Idx) {
+        Value *Elem = Builder.CreateExtractValue(NewCI, Idx);
+        Res = Builder.CreateInsertValue(Res, Elem, Idx);
+      }
+      CI->replaceAllUsesWith(Res);
+      CI->eraseFromParent();
+      return;
     }
-    CI->replaceAllUsesWith(Res);
-    CI->eraseFromParent();
+
+    // We're probably about to produce something invalid. Let the verifier catch
+    // it instead of dying here.
+    CI->setCalledOperand(
+        ConstantExpr::getPointerCast(NewFn, CI->getCalledOperand()->getType()));
     return;
   };
   CallInst *NewCall = nullptr;
@@ -3947,6 +3981,16 @@ void llvm::UpgradeIntrinsicCall(CallBase *CI, Function *NewFn) {
   case Intrinsic::arm_neon_vst3lane:
   case Intrinsic::arm_neon_vst4lane: {
     SmallVector<Value *, 4> Args(CI->args());
+    NewCall = Builder.CreateCall(NewFn, Args);
+    break;
+  }
+  case Intrinsic::aarch64_sve_bfmlalb_lane_v2:
+  case Intrinsic::aarch64_sve_bfmlalt_lane_v2:
+  case Intrinsic::aarch64_sve_bfdot_lane_v2: {
+    LLVMContext &Ctx = F->getParent()->getContext();
+    SmallVector<Value *, 4> Args(CI->args());
+    Args[3] = ConstantInt::get(Type::getInt32Ty(Ctx),
+                               cast<ConstantInt>(Args[3])->getZExtValue());
     NewCall = Builder.CreateCall(NewFn, Args);
     break;
   }
@@ -4116,13 +4160,17 @@ void llvm::UpgradeIntrinsicCall(CallBase *CI, Function *NewFn) {
 
   case Intrinsic::var_annotation:
     // Upgrade from versions that lacked the annotation attribute argument.
-    assert(CI->arg_size() == 4 &&
-           "Before LLVM 12.0 this intrinsic took four arguments");
+    if (CI->arg_size() != 4) {
+      DefaultCase();
+      return;
+    }
     // Create a new call with an added null annotation attribute argument.
     NewCall = Builder.CreateCall(
         NewFn,
         {CI->getArgOperand(0), CI->getArgOperand(1), CI->getArgOperand(2),
          CI->getArgOperand(3), Constant::getNullValue(Builder.getInt8PtrTy())});
+    NewCall->takeName(CI);
+    CI->replaceAllUsesWith(NewCall);
     CI->eraseFromParent();
     return;
 

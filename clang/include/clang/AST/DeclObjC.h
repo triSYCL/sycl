@@ -27,7 +27,6 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/MapVector.h"
-#include "llvm/ADT/None.h"
 #include "llvm/ADT/PointerIntPair.h"
 #include "llvm/ADT/STLExtras.h"
 #include "llvm/ADT/StringRef.h"
@@ -374,8 +373,7 @@ public:
   // ArrayRef access to formal parameters.  This should eventually
   // replace the iterator interface above.
   ArrayRef<ParmVarDecl*> parameters() const {
-    return llvm::makeArrayRef(const_cast<ParmVarDecl**>(getParams()),
-                              NumParams);
+    return llvm::ArrayRef(const_cast<ParmVarDecl **>(getParams()), NumParams);
   }
 
   ParmVarDecl *getParamDecl(unsigned Idx) {
@@ -389,9 +387,8 @@ public:
   /// Sets the method's parameters and selector source locations.
   /// If the method is implicit (not coming from source) \p SelLocs is
   /// ignored.
-  void setMethodParams(ASTContext &C,
-                       ArrayRef<ParmVarDecl*> Params,
-                       ArrayRef<SourceLocation> SelLocs = llvm::None);
+  void setMethodParams(ASTContext &C, ArrayRef<ParmVarDecl *> Params,
+                       ArrayRef<SourceLocation> SelLocs = std::nullopt);
 
   // Iterator access to parameter types.
   struct GetTypeFn {
@@ -2229,6 +2226,13 @@ public:
 
   /// Starts the definition of this Objective-C protocol.
   void startDefinition();
+
+  /// Starts the definition without sharing it with other redeclarations.
+  /// Such definition shouldn't be used for anything but only to compare if
+  /// a duplicate is compatible with previous definition or if it is
+  /// a distinct duplicate.
+  void startDuplicateDefinitionForComparison();
+  void mergeDuplicateDefinitionWithCommon(const ObjCProtocolDecl *Definition);
 
   /// Produce a name to be used for protocol's metadata. It comes either via
   /// objc_runtime_name attribute or protocol name.

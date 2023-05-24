@@ -6,28 +6,27 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// One-Shot Analysis analyzes function bodies. Function boundaries (FuncOp
-// bbArgs, CallOps, ReturnOps) are treated as "unknown" ops.
-// ModuleBufferization.cpp is an extension of One-Shot Analysis for simple
-// call graphs.
+// One-Shot Analysis analyzes function bodies. By default, function boundaries
+// (FuncOp bbArgs, CallOps, ReturnOps) are treated as "unknown" ops.
+// OneShotModuleBufferization.cpp is an extension of One-Shot Analysis for
+// simple call graphs without loops.
 //
-// One-Shot Bufferize consists of two phases.
+// One-Shot Bufferize consists of three phases.
 //
-// 1. Analyze ops to decide which OpResults can bufferize inplace, i.e., without
-//    inserting buffer copies. The analysis queries op bufferization semantics
-//    via `BufferizableOpInterface`.
-// 2. Bufferize ops by calling `BufferizableOpInterface::bufferize`. This
-//    function does not generate buffer copies for OpResults that were decided
-//    to bufferize inplace during the analysis phase.
+// 1. Analyze ops to decide which OpOperands can bufferize inplace, i.e.,
+//    without inserting buffer copies. The analysis queries op bufferization
+//    semantics via `BufferizableOpInterface`.
+// 2. Insert copies for OpOperands that were decided to bufferize out-of-place
+//    in tensor land during `TensorCopyInsertion`.
+// 3. Bufferize ops by calling `BufferizableOpInterface::bufferize`.
 //
-// This file contains only the analysis. The actual bufferization is implemented
-// via `bufferizeOp` (Bufferize.h). For convenience, this file also contains a
-// helper function `runOneShotBufferize` that analyzes an op (and its nested
-// ops) and then bufferizes it.
+// This file contains only the analysis. For convenience, this file also
+// contains a helper function `runOneShotBufferize` that analyzes an op (and its
+// nested ops) and then bufferizes it.
 //
 // Inplace bufferization decisions are passed from the analysis to the
-// bufferization phase via `AnalysisState` and `BufferizationAliasInfo`.
-// They can be printed for debugging purposes with `testAnalysisOnly`.
+// `TensorCopyInsertion` phase via `AnalysisState`. They can be printed for
+// debugging purposes with `testAnalysisOnly`.
 //
 // Ops that do not implement `BufferizableOpInterface` can be analyzed but are
 // treated conservatively. E.g., the analysis has to assume that their tensor
@@ -42,11 +41,12 @@
 #include "mlir/Dialect/Bufferization/Transforms/OneShotAnalysis.h"
 
 #include <random>
+#include <optional>
 
 #include "mlir/Dialect/Bufferization/IR/BufferizableOpInterface.h"
 #include "mlir/Dialect/Bufferization/IR/Bufferization.h"
 #include "mlir/Dialect/Bufferization/Transforms/Bufferize.h"
-#include "mlir/Dialect/Bufferization/Transforms/TensorCopyInsertion.h"
+#include "mlir/Dialect/Bufferization/Transforms/Transforms.h"
 #include "mlir/Dialect/Func/IR/FuncOps.h"
 #include "mlir/Dialect/MemRef/IR/MemRef.h"
 #include "mlir/IR/AsmState.h"
@@ -56,6 +56,8 @@
 #include "mlir/Interfaces/ControlFlowInterfaces.h"
 #include "llvm/ADT/DenseSet.h"
 #include "llvm/ADT/SetVector.h"
+
+MLIR_DEFINE_EXPLICIT_TYPE_ID(mlir::bufferization::OneShotAnalysisState)
 
 // Run mlir-opt with `-debug-only="one-shot-analysis"` for detailed debug
 // output.
@@ -68,33 +70,30 @@ static bool isaTensor(Type t) { return t.isa<TensorType>(); }
 
 //===----------------------------------------------------------------------===//
 // Bufferization-specific attribute manipulation.
-// These are for testing and debugging only. Bufferization information is
-// stored in BufferizationAliasInfo. When run with `testAnalysisOnly`, the IR
-// is annotated with the results of the analysis (copied from
-// BufferizationAliasInfo), so that they can be checked in tests.
+// These are for testing and debugging only. Bufferization information is stored
+// in BufferizationAliasInfo. When run with `testAnalysisOnly`, the IR is
+// annotated with the results of the analysis, so that they can be checked in
+// tests.
 //===----------------------------------------------------------------------===//
 
-/// Attribute marker to specify op results that can be bufferized inPlace.
-constexpr StringLiteral kInPlaceResultsAttrName = "__inplace_operands_attr__";
+/// Attribute marker to specify op operands that bufferize in-place.
+constexpr StringLiteral kInPlaceOperandsAttrName = "__inplace_operands_attr__";
 
 /// Mark whether OpOperand will be bufferized inplace.
 static void setInPlaceOpOperand(OpOperand &opOperand, bool inPlace) {
   Operation *op = opOperand.getOwner();
-  auto attr =
-      op->getAttr(kInPlaceResultsAttrName).dyn_cast_or_null<ArrayAttr>();
   SmallVector<StringRef> inPlaceVector;
-  if (attr) {
-    inPlaceVector = SmallVector<StringRef>(
-        llvm::to_vector<4>(attr.getAsValueRange<StringAttr>()));
+  if (auto attr = op->getAttr(kInPlaceOperandsAttrName)) {
+    inPlaceVector = SmallVector<StringRef>(llvm::to_vector<4>(
+        attr.cast<ArrayAttr>().getAsValueRange<StringAttr>()));
   } else {
     inPlaceVector = SmallVector<StringRef>(op->getNumOperands(), "none");
     for (OpOperand &opOperand : op->getOpOperands())
       if (opOperand.get().getType().isa<TensorType>())
         inPlaceVector[opOperand.getOperandNumber()] = "false";
   }
-
   inPlaceVector[opOperand.getOperandNumber()] = inPlace ? "true" : "false";
-  op->setAttr(kInPlaceResultsAttrName,
+  op->setAttr(kInPlaceOperandsAttrName,
               OpBuilder(op).getStrArrayAttr(inPlaceVector));
 }
 
@@ -145,15 +144,19 @@ bool BufferizationAliasInfo::isInPlace(OpOperand &operand) const {
 /// Set the inPlace bufferization spec to true.
 void BufferizationAliasInfo::bufferizeInPlace(OpOperand &operand,
                                               AnalysisState &state) {
+  if (inplaceBufferized.contains(&operand))
+    return;
   markInPlace(operand);
   for (OpResult result : state.getAliasingOpResult(operand))
     aliasInfo.unionSets(result, operand.get());
+  ++statNumTensorInPlace;
 }
 
 /// Set the inPlace bufferization spec to false.
 void BufferizationAliasInfo::bufferizeOutOfPlace(OpOperand &operand) {
   assert(!inplaceBufferized.contains(&operand) &&
          "OpOperand was already decided to bufferize inplace");
+  ++statNumTensorOutOfPlace;
 }
 
 /// Apply `fun` to all the members of the equivalence class of `v`.
@@ -193,21 +196,17 @@ BufferizationAliasInfo::getAliases(Value v) const {
 
 OneShotAnalysisState::OneShotAnalysisState(
     Operation *op, const OneShotBufferizationOptions &options)
-    : AnalysisState(options), aliasInfo(op) {
+    : AnalysisState(options, TypeID::get<OneShotAnalysisState>()),
+      aliasInfo(op) {
   // Set up alias sets for OpResults that must bufferize in-place. This should
   // be done before making any other bufferization decisions.
   op->walk([&](BufferizableOpInterface bufferizableOp) {
     if (!options.isOpAllowed(bufferizableOp))
       return WalkResult::skip();
-    for (OpOperand &opOperand : bufferizableOp->getOpOperands()) {
+    for (OpOperand &opOperand : bufferizableOp->getOpOperands())
       if (opOperand.get().getType().isa<TensorType>())
-        if (bufferizableOp.mustBufferizeInPlace(opOperand, *this)) {
-          for (OpResult opResult :
-               bufferizableOp.getAliasingOpResult(opOperand, *this))
-            aliasInfo.unionAliasSets(opOperand.get(), opResult);
-          aliasInfo.markInPlace(opOperand);
-        }
-    }
+        if (bufferizableOp.mustBufferizeInPlace(opOperand, *this))
+          aliasInfo.bufferizeInPlace(opOperand, *this);
     return WalkResult::advance();
   });
 }
@@ -325,6 +324,8 @@ bool OneShotAnalysisState::isWritable(Value value) const {
   return false;
 }
 
+OneShotAnalysisState::Extension::~Extension() = default;
+
 //===----------------------------------------------------------------------===//
 // Bufferization-specific alias analysis.
 //===----------------------------------------------------------------------===//
@@ -353,31 +354,6 @@ static bool happensBefore(Operation *a, Operation *b,
       return true;
   } while ((a = a->getParentOp()));
   return false;
-}
-
-static Region *
-getEnclosingRepetitiveRegion(Operation *op,
-                             const BufferizationOptions &options) {
-  while (Region *region = op->getParentRegion()) {
-    op = region->getParentOp();
-    if (auto bufferizableOp = options.dynCastBufferizableOp(op))
-      if (bufferizableOp.isRepetitiveRegion(region->getRegionNumber()))
-        return region;
-  }
-  return nullptr;
-}
-
-static Region *
-getEnclosingRepetitiveRegion(Value value, const BufferizationOptions &options) {
-  Region *region = value.getParentRegion();
-  while (region) {
-    Operation *op = region->getParentOp();
-    if (auto bufferizableOp = options.dynCastBufferizableOp(op))
-      if (bufferizableOp.isRepetitiveRegion(region->getRegionNumber()))
-        return region;
-    region = op->getParentRegion();
-  }
-  return nullptr;
 }
 
 /// Return `true` if the given tensor value is a memory write. Most values are
@@ -479,7 +455,7 @@ bool canUseOpDominance(const DenseSet<OpOperand *> &usesRead,
                        const DenseSet<OpOperand *> &usesWrite,
                        const AnalysisState &state) {
   const BufferizationOptions &options = state.getOptions();
-  Optional<Region *> commonEnclosingRegion = None;
+  std::optional<Region *> commonEnclosingRegion;
 
   // In case of a write, take the region in which the write takes place.
   for (OpOperand *uWrite : usesWrite) {
@@ -803,6 +779,23 @@ static bool wouldCreateReadAfterWriteInterference(
                                        aliasInfo);
 }
 
+/// Annotate IR with details about the detected non-writability conflict.
+static void annotateNonWritableTensor(Value value) {
+  static int64_t counter = 0;
+  OpBuilder b(value.getContext());
+  std::string id = "W_" + std::to_string(counter++);
+  if (auto opResult = value.dyn_cast<OpResult>()) {
+    std::string attr = id + "[NOT-WRITABLE: result " +
+                       std::to_string(opResult.getResultNumber()) + "]";
+    opResult.getDefiningOp()->setAttr(attr, b.getUnitAttr());
+  } else {
+    auto bbArg = value.cast<BlockArgument>();
+    std::string attr = id + "[NOT-WRITABLE: bbArg " +
+                       std::to_string(bbArg.getArgNumber()) + "]";
+    bbArg.getOwner()->getParentOp()->setAttr(attr, b.getUnitAttr());
+  }
+}
+
 /// Check the reverse SSA use-def chain (following aliasing OpOperands) for
 /// non-writable tensor values. Stop searching when an out-of-place bufferized
 /// OpOperand was found (or when the OpOperand was not bufferized yet).
@@ -816,8 +809,11 @@ hasPrecedingAliasingNonWritableTensor(Value value, OpOperand *currentOpOperand,
   worklist.push_back(value);
   while (!worklist.empty()) {
     Value nextVal = worklist.pop_back_val();
-    if (!state.isWritable(nextVal))
+    if (!state.isWritable(nextVal)) {
+      if (state.getOptions().printConflicts)
+        annotateNonWritableTensor(nextVal);
       return true;
+    }
 
     // If `nextVal` is not a BlockArgument: End of use-def chain reached.
     auto opResult = nextVal.dyn_cast<OpResult>();
@@ -932,8 +928,7 @@ static LogicalResult inPlaceAnalysis(SmallVector<Operation *> &ops,
   };
 
   OneShotBufferizationOptions::AnalysisHeuristic heuristic =
-      static_cast<const OneShotBufferizationOptions &>(state.getOptions())
-          .analysisHeuristic;
+      state.getOptions().analysisHeuristic;
   if (heuristic == OneShotBufferizationOptions::AnalysisHeuristic::BottomUp) {
     // Default: Walk ops in reverse for better interference analysis.
     for (Operation *op : reverse(ops))
@@ -1052,19 +1047,29 @@ checkAliasInfoConsistency(Operation *op, const DominanceInfo &domInfo,
 static void
 annotateOpsWithBufferizationMarkers(Operation *op,
                                     const BufferizationAliasInfo &aliasInfo,
-                                    AnalysisState &state) {
-  op->walk([&](Operation *op) {
-    if (auto bufferizableOp = state.getOptions().dynCastBufferizableOp(op))
-      for (OpOperand &opOperand : op->getOpOperands())
+                                    const BufferizationOptions &options) {
+  // Add __inplace_operands_attr__.
+  op->walk([&](BufferizableOpInterface bufferizableOp) {
+    if (options.isOpAllowed(bufferizableOp.getOperation()))
+      for (OpOperand &opOperand : bufferizableOp->getOpOperands())
         if (opOperand.get().getType().isa<TensorType>())
           setInPlaceOpOperand(opOperand, aliasInfo.isInPlace(opOperand));
   });
 }
 
-/// Assert that IR is in destination-passing style. I.e., every value that is
-/// returned or yielded from a block is:
-/// * aliasing a bbArg of that block or a parent block, or
-/// * aliasing an OpResult of a op in a parent block.
+/// Assert that every allocation can be deallocated in the same block. I.e.,
+/// every value that is returned or yielded from a block is:
+/// * guaranteed to be aliasing a bbArg of that block or a parent block, or
+/// * guaranteed to be aliasing an OpResult of a op in a parent block.
+///
+/// In that case, buffer deallocation is simple: Every allocated buffer can be
+/// deallocated in the same block. Otherwise, the buffer deallocation pass must
+/// be run.
+///
+/// Note: The current implementation checks for equivalent values instead of
+/// aliasing values, which is stricter than needed. We can currently not check
+/// for aliasing values because the analysis is a maybe-alias analysis and we
+/// need a must-alias analysis here.
 ///
 /// Example:
 /// ```
@@ -1076,23 +1081,19 @@ annotateOpsWithBufferizationMarkers(Operation *op,
 ///   scf.yield %t : tensor<?xf32>
 /// }
 /// ```
-/// In the above example, the first scf.yield op satifies destination-passing
-/// style because the yielded value %0 is defined in the parent block. The
-/// second scf.yield op does not satisfy destination-passing style because the
-/// yielded value %t is defined in the same block as the scf.yield op.
-// TODO: The current implementation checks for equivalent values instead of
-// aliasing values, which is stricter than needed. We can currently not check
-// for aliasing values because the analysis is a maybe-alias analysis and we
-// need a must-alias analysis here.
-static LogicalResult
-assertDestinationPassingStyle(Operation *op, AnalysisState &state,
-                              BufferizationAliasInfo &aliasInfo,
-                              SmallVector<Operation *> &newOps) {
+///
+/// In the above example, the second scf.yield op is problematic because the
+/// yielded value %t is defined in the same block as the scf.yield op and
+/// and bufferizes to a new allocation.
+// TODO: Remove buffer deallocation from One-Shot Bufferize and fix the buffer
+// deallocation pass.
+static LogicalResult assertNoAllocsReturned(Operation *op,
+                                            const BufferizationOptions &options,
+                                            BufferizationAliasInfo &aliasInfo) {
   LogicalResult status = success();
   DominanceInfo domInfo(op);
   op->walk([&](Operation *returnOp) {
-    if (!isRegionReturnLike(returnOp) ||
-        !state.getOptions().isOpAllowed(returnOp))
+    if (!isRegionReturnLike(returnOp) || !options.isOpAllowed(returnOp))
       return WalkResult::advance();
 
     for (OpOperand &returnValOperand : returnOp->getOpOperands()) {
@@ -1118,11 +1119,12 @@ assertDestinationPassingStyle(Operation *op, AnalysisState &state,
             foundEquivValue = true;
       });
 
+      // Note: Returning/yielding buffer allocations is allowed only if
+      // `allowReturnAllocs` is set.
       if (!foundEquivValue)
-        status =
-            returnOp->emitError()
-            << "operand #" << returnValOperand.getOperandNumber()
-            << " of ReturnLike op does not satisfy destination passing style";
+        status = returnOp->emitError()
+                 << "operand #" << returnValOperand.getOperandNumber()
+                 << " may return/yield a new buffer allocation";
     }
 
     return WalkResult::advance();
@@ -1132,16 +1134,11 @@ assertDestinationPassingStyle(Operation *op, AnalysisState &state,
 }
 
 LogicalResult bufferization::analyzeOp(Operation *op,
-                                       OneShotAnalysisState &state) {
+                                       OneShotAnalysisState &state,
+                                       BufferizationStatistics *statistics) {
   DominanceInfo domInfo(op);
   BufferizationAliasInfo &aliasInfo = state.getAliasInfo();
-  const auto &options =
-      static_cast<const OneShotBufferizationOptions &>(state.getOptions());
-
-  // Catch incorrect API usage.
-  assert((state.hasDialectState(func::FuncDialect::getDialectNamespace()) ||
-          !options.bufferizeFunctionBoundaries) &&
-         "must use ModuleBufferize to bufferize function boundaries");
+  const OneShotBufferizationOptions &options = state.getOptions();
 
   if (failed(checkAliasInfoConsistency(op, domInfo, state, aliasInfo)))
     return failure();
@@ -1150,14 +1147,17 @@ LogicalResult bufferization::analyzeOp(Operation *op,
   if (failed(inPlaceAnalysis(op, aliasInfo, state, domInfo,
                              options.analysisFuzzerSeed)))
     return failure();
+
+  if (statistics) {
+    statistics->numTensorInPlace = aliasInfo.getStatNumTensorInPlace();
+    statistics->numTensorOutOfPlace = aliasInfo.getStatNumTensorOutOfPlace();
+  }
+
   equivalenceAnalysis(op, aliasInfo, state);
 
   bool failedAnalysis = false;
-  if (!options.allowReturnAllocs) {
-    SmallVector<Operation *> newOps;
-    failedAnalysis |=
-        failed(assertDestinationPassingStyle(op, state, aliasInfo, newOps));
-  }
+  if (!options.allowReturnAllocs)
+    failedAnalysis |= failed(assertNoAllocsReturned(op, options, aliasInfo));
 
   // Gather some extra analysis data.
   state.gatherYieldedTensors(op);
@@ -1174,23 +1174,24 @@ LogicalResult bufferization::analyzeOp(Operation *op,
 
   // Annotate operations if we only want to report the analysis.
   if (options.testAnalysisOnly)
-    annotateOpsWithBufferizationMarkers(op, aliasInfo, state);
+    annotateOpsWithBufferizationMarkers(op, aliasInfo, options);
 
   return success(!failedAnalysis);
 }
 
 LogicalResult
 bufferization::runOneShotBufferize(Operation *op,
-                                   const OneShotBufferizationOptions &options) {
+                                   const OneShotBufferizationOptions &options,
+                                   BufferizationStatistics *statistics) {
   assert(!(options.copyBeforeWrite && options.testAnalysisOnly) &&
          "invalid combination of bufferization flags");
   if (!options.copyBeforeWrite) {
     // If a buffer is copied before every write, no analysis is needed.
-    OneShotAnalysisState state(op, options);
-    if (failed(insertTensorCopies(op, options)))
+    if (failed(insertTensorCopies(op, options, statistics)))
       return failure();
   }
   if (options.testAnalysisOnly)
     return success();
-  return bufferizeOp(op, options, /*copyBeforeWrite=*/options.copyBeforeWrite);
+  return bufferizeOp(op, options, /*copyBeforeWrite=*/options.copyBeforeWrite,
+                     /*opFilter=*/nullptr, statistics);
 }

@@ -33,7 +33,7 @@ int main(int argc, char* argv[]) {
   buffer<float, 1> test_buffer{range<1>{13}};
 
   q.submit([&](handler &cgh) {
-    auto wb = test_buffer.get_access<access::mode::write>(cgh);
+    sycl::accessor wb{test_buffer, cgh, sycl::write_only};
 
     cgh.single_task<math_mangle>([=] {
       wb[0] = sycl::sqrt(10.0f);
@@ -55,7 +55,7 @@ int main(int argc, char* argv[]) {
   });
 });
 
-  auto rb = test_buffer.get_access<access::mode::read>();
+  sycl::host_accessor rb{test_buffer, sycl::read_only};
 
   printf("sqrt: %f \n", rb[0]);
   assert(CloseEnough(rb[0], 3.162278));

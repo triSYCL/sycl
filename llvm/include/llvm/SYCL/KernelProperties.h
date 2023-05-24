@@ -38,7 +38,7 @@ public:
 
   struct MAXIBundle {
     // Represents one m_axi bundle and its associated memory bank ID and Type.
-    Optional<unsigned> TargetId; // Associated bank ID
+    std::optional<unsigned> TargetId; // Associated bank ID
     std::string BundleName; // Vitis bundle name
     sycl::MemoryType MemType;
     bool isDefaultBundle() const {
@@ -50,7 +50,7 @@ private:
   
   // BundlesBySpec[MemType][MemID] contains the index of the 
   // Bundle of the bank MemType:MemID in Bundles
-  std::array<SmallDenseMap<unsigned, unsigned, 4>, 3> BundlesBySpec;
+  std::array<SmallDenseMap<unsigned, unsigned, 4>, 4> BundlesBySpec;
   SmallDenseMap<Argument *, unsigned, 16> BundleForArgument;
   StringMap<unsigned> BundlesByName;
   SmallVector<MAXIBundle, 8> Bundles;

@@ -27,6 +27,7 @@
 #include "llvm/Support/PrettyStackTrace.h"
 #include <atomic>
 #include <memory>
+#include <optional>
 #include <vector>
 
 namespace lld::elf {
@@ -153,7 +154,7 @@ struct Config {
   llvm::StringRef mapFile;
   llvm::StringRef outputFile;
   llvm::StringRef optRemarksFilename;
-  llvm::Optional<uint64_t> optRemarksHotnessThreshold = 0;
+  std::optional<uint64_t> optRemarksHotnessThreshold = 0;
   llvm::StringRef optRemarksPasses;
   llvm::StringRef optRemarksFormat;
   llvm::StringRef optStatsFilename;
@@ -310,7 +311,7 @@ struct Config {
   SeparateSegmentKind zSeparate;
   ELFKind ekind = ELFNoneKind;
   uint16_t emachine = llvm::ELF::EM_NONE;
-  llvm::Optional<uint64_t> imageBase;
+  std::optional<uint64_t> imageBase;
   uint64_t commonPageSize;
   uint64_t maxPageSize;
   uint64_t mipsGotSize;
@@ -449,7 +450,7 @@ LLVM_LIBRARY_VISIBILITY extern Ctx ctx;
 // The first two elements of versionDefinitions represent VER_NDX_LOCAL and
 // VER_NDX_GLOBAL. This helper returns other elements.
 static inline ArrayRef<VersionDefinition> namedVersionDefs() {
-  return llvm::makeArrayRef(config->versionDefinitions).slice(2);
+  return llvm::ArrayRef(config->versionDefinitions).slice(2);
 }
 
 void errorOrWarn(const Twine &msg);

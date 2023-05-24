@@ -21,7 +21,7 @@ using namespace llvm;
 TestRunner::TestRunner(StringRef TestName,
                        const std::vector<std::string> &TestArgs,
                        std::unique_ptr<ReducerWorkItem> Program,
-                       std::unique_ptr<TargetMachine> TM, const char *ToolName,
+                       std::unique_ptr<TargetMachine> TM, StringRef ToolName,
                        StringRef OutputName, bool InputIsBitcode,
                        bool OutputBitcode)
     : TestName(TestName), ToolName(ToolName), TestArgs(TestArgs),
@@ -31,9 +31,13 @@ TestRunner::TestRunner(StringRef TestName,
   assert(this->Program && "Initialized with null program?");
 }
 
+static constexpr std::array<std::optional<StringRef>, 3> DefaultRedirects = {
+    StringRef()};
+static constexpr std::array<std::optional<StringRef>, 3> NullRedirects;
+
 /// Runs the interestingness test, passes file to be tested as first argument
 /// and other specified test arguments after that.
-int TestRunner::run(StringRef Filename) {
+int TestRunner::run(StringRef Filename) const {
   std::vector<StringRef> ProgramArgs;
   ProgramArgs.push_back(TestName);
 
@@ -43,21 +47,17 @@ int TestRunner::run(StringRef Filename) {
   ProgramArgs.push_back(Filename);
 
   std::string ErrMsg;
-  SmallVector<Optional<StringRef>, 3> Redirects;
-  Optional<StringRef> Empty = StringRef();
-  if (!Verbose) {
-    for (int i = 0; i < 3; ++i)
-      Redirects.push_back(Empty);
-  }
+
   int Result =
-      sys::ExecuteAndWait(TestName, ProgramArgs, /*Env=*/None, Redirects,
+      sys::ExecuteAndWait(TestName, ProgramArgs, /*Env=*/std::nullopt,
+                          Verbose ? DefaultRedirects : NullRedirects,
                           /*SecondsToWait=*/0, /*MemoryLimit=*/0, &ErrMsg);
 
   if (Result < 0) {
     Error E = make_error<StringError>("Error running interesting-ness test: " +
                                           ErrMsg,
                                       inconvertibleErrorCode());
-    errs() << toString(std::move(E));
+    errs() << toString(std::move(E)) << '\n';
     exit(1);
   }
 
@@ -69,7 +69,7 @@ void TestRunner::setProgram(std::unique_ptr<ReducerWorkItem> P) {
   Program = std::move(P);
 }
 
-void writeBitcode(ReducerWorkItem &M, raw_ostream &OutStream) {
+void writeBitcode(const ReducerWorkItem &M, raw_ostream &OutStream) {
   if (M.LTOInfo && M.LTOInfo->IsThinLTO && M.LTOInfo->EnableSplitLTOUnit) {
     PassBuilder PB;
     LoopAnalysisManager LAM;
@@ -97,7 +97,9 @@ void writeBitcode(ReducerWorkItem &M, raw_ostream &OutStream) {
 
 void TestRunner::writeOutput(StringRef Message) {
   std::error_code EC;
-  raw_fd_ostream Out(OutputFilename, EC);
+  raw_fd_ostream Out(OutputFilename, EC,
+                     EmitBitcode && !Program->isMIR() ? sys::fs::OF_None
+                                                      : sys::fs::OF_Text);
   if (EC) {
     errs() << "Error opening output file: " << EC.message() << "!\n";
     exit(1);

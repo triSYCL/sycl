@@ -22,14 +22,14 @@ int main(int argc, char *argv[]){
   buffer<int, 1> a{{N}};
 
   {
-    auto a_w = a.get_access<access::mode::write>();
+    sycl::host_accessor a_w{a, sycl::write_only};
     for (int i = 0; i < N; ++i) {
       a_w[i] = i;
     }
   }
 
   auto event = q.submit([&](handler &cgh) {
-      auto a_rw = a.get_access<access::mode::read_write>(cgh);
+      sycl::accessor a_rw{a, cgh, sycl::read_write};
 
       cgh.single_task<class array_add>([=] {
           // Will not work for hw_emu, this will break compilation
@@ -59,7 +59,7 @@ int main(int argc, char *argv[]){
   q.wait();
 
   {
-    auto a_r = a.get_access<access::mode::read>();
+    sycl::host_accessor a_r{a, sycl::read_only};
     for (int i = 0; i < N; ++i)
       std::cout << a_r[i] << "\n";
   }

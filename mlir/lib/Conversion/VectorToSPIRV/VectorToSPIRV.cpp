@@ -19,9 +19,11 @@
 #include "mlir/Dialect/Vector/IR/VectorOps.h"
 #include "mlir/IR/BuiltinAttributes.h"
 #include "mlir/IR/BuiltinTypes.h"
+#include "mlir/IR/Matchers.h"
 #include "mlir/Transforms/DialectConversion.h"
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/STLExtras.h"
+#include "llvm/Support/FormatVariadic.h"
 #include <numeric>
 
 using namespace mlir;
@@ -30,6 +32,13 @@ using namespace mlir;
 /// attribute.
 static uint64_t getFirstIntValue(ArrayAttr attr) {
   return (*attr.getAsValueRange<IntegerAttr>().begin()).getZExtValue();
+}
+
+/// Returns the number of bits for the given scalar/vector type.
+static int getNumBits(Type type) {
+  if (auto vectorType = type.dyn_cast<VectorType>())
+    return vectorType.cast<ShapedType>().getSizeInBits();
+  return type.getIntOrFloatBitWidth();
 }
 
 namespace {
@@ -45,12 +54,24 @@ struct VectorBitcastConvert final
     if (!dstType)
       return failure();
 
-    if (dstType == adaptor.getSource().getType())
+    if (dstType == adaptor.getSource().getType()) {
       rewriter.replaceOp(bitcastOp, adaptor.getSource());
-    else
-      rewriter.replaceOpWithNewOp<spirv::BitcastOp>(bitcastOp, dstType,
-                                                    adaptor.getSource());
+      return success();
+    }
 
+    // Check that the source and destination type have the same bitwidth.
+    // Depending on the target environment, we may need to emulate certain
+    // types, which can cause issue with bitcast.
+    Type srcType = adaptor.getSource().getType();
+    if (getNumBits(dstType) != getNumBits(srcType)) {
+      return rewriter.notifyMatchFailure(
+          bitcastOp,
+          llvm::formatv("different source ({0}) and target ({1}) bitwidth",
+                        srcType, dstType));
+    }
+
+    rewriter.replaceOpWithNewOp<spirv::BitcastOp>(bitcastOp, dstType,
+                                                  adaptor.getSource());
     return success();
   }
 };
@@ -191,19 +212,23 @@ struct VectorExtractElementOpConvert final
   LogicalResult
   matchAndRewrite(vector::ExtractElementOp extractOp, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    Type vectorType =
-        getTypeConverter()->convertType(adaptor.getVector().getType());
-    if (!vectorType)
+    Type resultType = getTypeConverter()->convertType(extractOp.getType());
+    if (!resultType)
       return failure();
 
-    if (vectorType.isa<spirv::ScalarType>()) {
+    if (adaptor.getVector().getType().isa<spirv::ScalarType>()) {
       rewriter.replaceOp(extractOp, adaptor.getVector());
       return success();
     }
 
-    rewriter.replaceOpWithNewOp<spirv::VectorExtractDynamicOp>(
-        extractOp, extractOp.getType(), adaptor.getVector(),
-        extractOp.getPosition());
+    APInt cstPos;
+    if (matchPattern(adaptor.getPosition(), m_ConstantInt(&cstPos)))
+      rewriter.replaceOpWithNewOp<spirv::CompositeExtractOp>(
+          extractOp, resultType, adaptor.getVector(),
+          rewriter.getI32ArrayAttr({static_cast<int>(cstPos.getSExtValue())}));
+    else
+      rewriter.replaceOpWithNewOp<spirv::VectorExtractDynamicOp>(
+          extractOp, resultType, adaptor.getVector(), adaptor.getPosition());
     return success();
   }
 };
@@ -224,9 +249,15 @@ struct VectorInsertElementOpConvert final
       return success();
     }
 
-    rewriter.replaceOpWithNewOp<spirv::VectorInsertDynamicOp>(
-        insertOp, vectorType, insertOp.getDest(), adaptor.getSource(),
-        insertOp.getPosition());
+    APInt cstPos;
+    if (matchPattern(adaptor.getPosition(), m_ConstantInt(&cstPos)))
+      rewriter.replaceOpWithNewOp<spirv::CompositeInsertOp>(
+          insertOp, adaptor.getSource(), adaptor.getDest(),
+          cstPos.getSExtValue());
+    else
+      rewriter.replaceOpWithNewOp<spirv::VectorInsertDynamicOp>(
+          insertOp, vectorType, insertOp.getDest(), adaptor.getSource(),
+          adaptor.getPosition());
     return success();
   }
 };
@@ -304,7 +335,7 @@ struct VectorReductionPattern final
 
     // Reduce them.
     Value result = values.front();
-    for (Value next : llvm::makeArrayRef(values).drop_front()) {
+    for (Value next : llvm::ArrayRef(values).drop_front()) {
       switch (reduceOp.getKind()) {
 
 #define INT_AND_FLOAT_CASE(kind, iop, fop)                                     \

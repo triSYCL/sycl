@@ -16,6 +16,7 @@
 #include "mlir/Pass/Pass.h"
 
 #include "llvm/ADT/STLExtras.h"
+#include <optional>
 
 namespace mlir {
 #define GEN_PASS_DEF_CONVERTAMDGPUTOROCDL
@@ -203,7 +204,7 @@ struct RawBufferOpLowering : public ConvertOpToLLVMPattern<GpuOp> {
       size_t i = pair.index();
       Value index = pair.value();
       Value strideOp;
-      if (ShapedType::isDynamicStrideOrOffset(strides[i])) {
+      if (ShapedType::isDynamic(strides[i])) {
         strideOp = rewriter.create<LLVM::MulOp>(
             loc, memrefDescriptor.stride(rewriter, loc, i), byteWidthConst);
       } else {
@@ -226,7 +227,7 @@ struct RawBufferOpLowering : public ConvertOpToLLVMPattern<GpuOp> {
     Value sgprOffset = adaptor.getSgprOffset();
     if (!sgprOffset)
       sgprOffset = createI32Constant(rewriter, loc, 0);
-    if (ShapedType::isDynamicStrideOrOffset(offset))
+    if (ShapedType::isDynamic(offset))
       sgprOffset = rewriter.create<LLVM::AddOp>(
           loc, memrefDescriptor.offset(rewriter, loc), sgprOffset);
     else if (offset > 0)
@@ -311,7 +312,8 @@ static Value mfmaConcatIfNeeded(ConversionPatternRewriter &rewriter,
 /// Return the `rocdl` intrinsic corresponding to a MFMA operation `mfma`
 /// if one exists. This includes checking to ensure the intrinsic is supported
 /// on the architecture you are compiling for.
-static Optional<StringRef> mfmaOpToIntrinsic(MFMAOp mfma, Chipset chipset) {
+static std::optional<StringRef> mfmaOpToIntrinsic(MFMAOp mfma,
+                                                  Chipset chipset) {
   uint32_t m = mfma.getM(), n = mfma.getN(), k = mfma.getK(),
            b = mfma.getBlocks();
   Type sourceElem = mfma.getSourceA().getType();
@@ -402,7 +404,7 @@ static Optional<StringRef> mfmaOpToIntrinsic(MFMAOp mfma, Chipset chipset) {
     if (m == 4 && n == 4 && k == 4 && b == 4)
       return ROCDL::mfma_f64_4x4x4f64::getOperationName();
   }
-  return None;
+  return std::nullopt;
 }
 
 namespace {
@@ -427,7 +429,7 @@ struct MFMAOpLowering : public ConvertOpToLLVMPattern<MFMAOp> {
       getBlgpField |=
           op.getNegateA() | (op.getNegateB() << 1) | (op.getNegateC() << 2);
     }
-    Optional<StringRef> maybeIntrinsic = mfmaOpToIntrinsic(op, chipset);
+    std::optional<StringRef> maybeIntrinsic = mfmaOpToIntrinsic(op, chipset);
     if (!maybeIntrinsic.has_value())
       return op.emitOpError("no intrinsic matching MFMA size on given chipset");
     OperationState loweredOp(loc, *maybeIntrinsic);

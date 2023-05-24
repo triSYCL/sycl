@@ -14,6 +14,7 @@
 #include "clang/Tooling/DependencyScanning/DependencyScanningWorker.h"
 #include "llvm/Support/BLAKE3.h"
 #include "llvm/Support/StringSaver.h"
+#include <optional>
 
 using namespace clang;
 using namespace tooling;
@@ -130,22 +131,22 @@ ModuleDepCollector::makeInvocationForModuleBuildWithoutOutputs(
 
   auto DepModuleMapFiles = collectModuleMapFiles(Deps.ClangModuleDeps);
   for (StringRef ModuleMapFile : Deps.ModuleMapFileDeps) {
+    // TODO: Track these as `FileEntryRef` to simplify the equality check below.
+    auto ModuleMapEntry = ScanInstance.getFileManager().getFile(ModuleMapFile);
+    assert(ModuleMapEntry && "module map file entry not found");
+
     // Don't report module maps describing eagerly-loaded dependency. This
     // information will be deserialized from the PCM.
     // TODO: Verify this works fine when modulemap for module A is eagerly
     // loaded from A.pcm, and module map passed on the command line contains
     // definition of a submodule: "explicit module A.Private { ... }".
-    if (EagerLoadModules && DepModuleMapFiles.contains(ModuleMapFile))
+    if (EagerLoadModules && DepModuleMapFiles.contains(*ModuleMapEntry))
       continue;
-
-    // TODO: Track these as `FileEntryRef` to simplify the equality check below.
-    auto ModuleMapEntry = ScanInstance.getFileManager().getFile(ModuleMapFile);
-    assert(ModuleMapEntry && "module map file entry not found");
 
     // Don't report module map file of the current module unless it also
     // describes a dependency (for symmetry).
     if (*ModuleMapEntry == *CurrentModuleMapEntry &&
-        !DepModuleMapFiles.contains(ModuleMapFile))
+        !DepModuleMapFiles.contains(*ModuleMapEntry))
       continue;
 
     CI.getFrontendOpts().ModuleMapFiles.emplace_back(ModuleMapFile);
@@ -181,13 +182,16 @@ ModuleDepCollector::makeInvocationForModuleBuildWithoutOutputs(
   return CI;
 }
 
-llvm::StringSet<> ModuleDepCollector::collectModuleMapFiles(
+llvm::DenseSet<const FileEntry *> ModuleDepCollector::collectModuleMapFiles(
     ArrayRef<ModuleID> ClangModuleDeps) const {
-  llvm::StringSet<> ModuleMapFiles;
+  llvm::DenseSet<const FileEntry *> ModuleMapFiles;
   for (const ModuleID &MID : ClangModuleDeps) {
     ModuleDeps *MD = ModuleDepsByID.lookup(MID);
     assert(MD && "Inconsistent dependency info");
-    ModuleMapFiles.insert(MD->ClangModuleMapFile);
+    // TODO: Track ClangModuleMapFile as `FileEntryRef`.
+    auto FE = ScanInstance.getFileManager().getFile(MD->ClangModuleMapFile);
+    assert(FE && "Missing module map file that was previously found");
+    ModuleMapFiles.insert(*FE);
   }
   return ModuleMapFiles;
 }
@@ -234,7 +238,7 @@ void ModuleDepCollector::applyDiscoveredDependencies(CompilerInvocation &CI) {
   if (llvm::any_of(CI.getFrontendOpts().Inputs, needsModules)) {
     Preprocessor &PP = ScanInstance.getPreprocessor();
     if (Module *CurrentModule = PP.getCurrentModuleImplementation())
-      if (Optional<FileEntryRef> CurrentModuleMap =
+      if (OptionalFileEntryRef CurrentModuleMap =
               PP.getHeaderSearchInfo()
                   .getModuleMap()
                   .getModuleMapFileForUniquing(CurrentModule))
@@ -324,14 +328,14 @@ void ModuleDepCollectorPP::FileChanged(SourceLocation Loc,
   // Dependency generation really does want to go all the way to the
   // file entry for a source location to find out what is depended on.
   // We do not want #line markers to affect dependency generation!
-  if (Optional<StringRef> Filename =
+  if (std::optional<StringRef> Filename =
           SM.getNonBuiltinFilenameForID(SM.getFileID(SM.getExpansionLoc(Loc))))
     MDC.addFileDep(llvm::sys::path::remove_leading_dotslash(*Filename));
 }
 
 void ModuleDepCollectorPP::InclusionDirective(
     SourceLocation HashLoc, const Token &IncludeTok, StringRef FileName,
-    bool IsAngled, CharSourceRange FilenameRange, Optional<FileEntryRef> File,
+    bool IsAngled, CharSourceRange FilenameRange, OptionalFileEntryRef File,
     StringRef SearchPath, StringRef RelativePath, const Module *Imported,
     SrcMgr::CharacteristicKind FileType) {
   if (!File && !Imported) {
@@ -416,7 +420,7 @@ ModuleID ModuleDepCollectorPP::handleTopLevelModule(const Module *M) {
   ModuleMap &ModMapInfo =
       MDC.ScanInstance.getPreprocessor().getHeaderSearchInfo().getModuleMap();
 
-  Optional<FileEntryRef> ModuleMap = ModMapInfo.getModuleMapFileForUniquing(M);
+  OptionalFileEntryRef ModuleMap = ModMapInfo.getModuleMapFileForUniquing(M);
 
   if (ModuleMap) {
     SmallString<128> Path = ModuleMap->getNameAsRequested();
@@ -447,10 +451,10 @@ ModuleID ModuleDepCollectorPP::handleTopLevelModule(const Module *M) {
   addAllAffectingClangModules(M, MD, SeenDeps);
 
   MDC.ScanInstance.getASTReader()->visitTopLevelModuleMaps(
-      *MF, [&](const FileEntry *FE) {
-        if (FE->getName().endswith("__inferred_module.map"))
+      *MF, [&](FileEntryRef FE) {
+        if (FE.getNameAsRequested().endswith("__inferred_module.map"))
           return;
-        MD.ModuleMapFileDeps.emplace_back(FE->getName());
+        MD.ModuleMapFileDeps.emplace_back(FE.getNameAsRequested());
       });
 
   CompilerInvocation CI = MDC.makeInvocationForModuleBuildWithoutOutputs(
@@ -577,23 +581,25 @@ bool ModuleDepCollector::isPrebuiltModule(const Module *M) {
   return true;
 }
 
-static StringRef makeAbsolute(CompilerInstance &CI, StringRef Path,
-                              SmallVectorImpl<char> &Storage) {
-  if (llvm::sys::path::is_absolute(Path))
+static StringRef makeAbsoluteAndPreferred(CompilerInstance &CI, StringRef Path,
+                                          SmallVectorImpl<char> &Storage) {
+  if (llvm::sys::path::is_absolute(Path) &&
+      !llvm::sys::path::is_style_windows(llvm::sys::path::Style::native))
     return Path;
   Storage.assign(Path.begin(), Path.end());
   CI.getFileManager().makeAbsolutePath(Storage);
+  llvm::sys::path::make_preferred(Storage);
   return StringRef(Storage.data(), Storage.size());
 }
 
 void ModuleDepCollector::addFileDep(StringRef Path) {
   llvm::SmallString<256> Storage;
-  Path = makeAbsolute(ScanInstance, Path, Storage);
+  Path = makeAbsoluteAndPreferred(ScanInstance, Path, Storage);
   FileDeps.push_back(std::string(Path));
 }
 
 void ModuleDepCollector::addFileDep(ModuleDeps &MD, StringRef Path) {
   llvm::SmallString<256> Storage;
-  Path = makeAbsolute(ScanInstance, Path, Storage);
+  Path = makeAbsoluteAndPreferred(ScanInstance, Path, Storage);
   MD.FileDeps.insert(Path);
 }

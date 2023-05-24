@@ -516,6 +516,10 @@ We add a new IR phase to the device compiler which does the following:
   aspects that come from references to types in the
   `sycl_types_that_use_aspects` list.
 
+* If a function has the `!sycl_declared_aspects` metadata, creates (or augments)
+  the function's `!sycl_used_aspects` metadata with aspects from the
+  `!sycl_declared_aspects` list.
+
 * Propagates each function's `!sycl_used_aspects` metadata up the static call
   graph so that each function lists the aspects used by that function and by
   any functions it calls.
@@ -901,14 +905,22 @@ the supported aspects and sub-group sizes.  For example:
 ```
 intel_gpu_12_0_0:
   aspects: [1, 2, 3]
+  may_support_other_aspects: false
   sub-group-sizes: [8, 16]
 intel_gpu_icl:
   aspects: [2, 3]
+  may_support_other_aspects: false
   sub-group-sizes: [8, 16]
 x86_64_avx512:
   aspects: [1, 2, 3, 9, 11]
+  may_support_other_aspects: false
   sub-group-sizes: [8, 32]
 ```
+
+The device entries have an optional `may_support_other_aspects` sub-key
+specifying if a given target may be supported by devices that support aspects
+not in the `aspects` list. This is used by the [DeviceAspectTraitDesign.md][10]
+design.
 
 The values of the aspects in this configuration file can be the numerical
 values from the `enum class aspect` enumeration or the enum identifier itself.
@@ -921,6 +933,8 @@ to select an alternate configuration file.
 
 **TODO**:
 * Define location of the default device configuration file.
+
+[10]: <DeviceAspectTraitDesign.md>
 
 #### New features in clang compilation driver and tools
 

@@ -45,7 +45,6 @@
 #include "llvm/ADT/ArrayRef.h"
 #include "llvm/ADT/DenseMap.h"
 #include "llvm/ADT/FoldingSet.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallBitVector.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
@@ -54,6 +53,7 @@
 #include "llvm/Support/ErrorHandling.h"
 #include <algorithm>
 #include <cassert>
+#include <optional>
 #include <tuple>
 #include <type_traits>
 #include <utility>
@@ -719,7 +719,7 @@ private:
     // FIXME: What if we encounter multiple packs with different numbers of
     // pre-expanded expansions? (This should already have been diagnosed
     // during substitution.)
-    if (Optional<unsigned> ExpandedPackExpansions =
+    if (std::optional<unsigned> ExpandedPackExpansions =
             getExpandedPackSize(TemplateParams->getParam(Index)))
       FixedNumExpansions = ExpandedPackExpansions;
 
@@ -916,7 +916,7 @@ public:
             new (S.Context) TemplateArgument[Pack.New.size()];
         std::copy(Pack.New.begin(), Pack.New.end(), ArgumentPack);
         NewPack = DeducedTemplateArgument(
-            TemplateArgument(llvm::makeArrayRef(ArgumentPack, Pack.New.size())),
+            TemplateArgument(llvm::ArrayRef(ArgumentPack, Pack.New.size())),
             // FIXME: This is wrong, it's possible that some pack elements are
             // deduced from an array bound and others are not:
             //   template<typename ...T, T ...V> void g(const T (&...p)[V]);
@@ -961,7 +961,7 @@ public:
 
       // If we have a pre-expanded pack and we didn't deduce enough elements
       // for it, fail deduction.
-      if (Optional<unsigned> Expansions = getExpandedPackSize(Param)) {
+      if (std::optional<unsigned> Expansions = getExpandedPackSize(Param)) {
         if (*Expansions != PackElements) {
           Info.Param = makeTemplateParameter(Param);
           Info.FirstArg = Result;
@@ -983,7 +983,7 @@ private:
   unsigned PackElements = 0;
   bool IsPartiallyExpanded = false;
   /// The number of expansions, if we have a fully-expanded pack in this scope.
-  Optional<unsigned> FixedNumExpansions;
+  std::optional<unsigned> FixedNumExpansions;
 
   SmallVector<DeducedPack, 2> Packs;
 };
@@ -1108,7 +1108,7 @@ DeduceTemplateArguments(Sema &S,
       // If the parameter type contains an explicitly-specified pack that we
       // could not expand, skip the number of parameters notionally created
       // by the expansion.
-      Optional<unsigned> NumExpansions = Expansion->getNumExpansions();
+      std::optional<unsigned> NumExpansions = Expansion->getNumExpansions();
       if (NumExpansions && !PackScope.isPartiallyExpanded()) {
         for (unsigned I = 0; I != *NumExpansions && ArgIdx < NumArgs;
              ++I, ++ArgIdx)
@@ -1128,9 +1128,7 @@ DeduceTemplateArguments(Sema &S,
   // During partial ordering, if Ai was originally a function parameter pack:
   // - if P does not contain a function parameter type corresponding to Ai then
   //   Ai is ignored;
-  bool ClangABICompat15 = S.Context.getLangOpts().getClangABICompat() <=
-                          LangOptions::ClangABI::Ver15;
-  if (!ClangABICompat15 && PartialOrdering && ArgIdx + 1 == NumArgs &&
+  if (PartialOrdering && ArgIdx + 1 == NumArgs &&
       isa<PackExpansionType>(Args[ArgIdx]))
     return Sema::TDK_Success;
 
@@ -2083,7 +2081,7 @@ static Sema::TemplateDeductionResult DeduceTemplateArgumentsByTypeMatch(
             const auto *ACM = dyn_cast<ConstantMatrixType>(A);
             const auto *ADM = dyn_cast<DependentSizedMatrixType>(A);
             if (!ParamExpr->isValueDependent()) {
-              Optional<llvm::APSInt> ParamConst =
+              std::optional<llvm::APSInt> ParamConst =
                   ParamExpr->getIntegerConstantExpr(S.Context);
               if (!ParamConst)
                 return Sema::TDK_NonDeducedMismatch;
@@ -2095,7 +2093,7 @@ static Sema::TemplateDeductionResult DeduceTemplateArgumentsByTypeMatch(
               }
 
               Expr *ArgExpr = (ADM->*GetArgDimensionExpr)();
-              if (Optional<llvm::APSInt> ArgConst =
+              if (std::optional<llvm::APSInt> ArgConst =
                       ArgExpr->getIntegerConstantExpr(S.Context))
                 if (*ArgConst == *ParamConst)
                   return Sema::TDK_Success;
@@ -2466,9 +2464,6 @@ static bool isSameTemplateArg(ASTContext &Context,
   if (X.getKind() != Y.getKind())
     return false;
 
-  bool ClangABICompat15 =
-      Context.getLangOpts().getClangABICompat() <= LangOptions::ClangABI::Ver15;
-
   switch (X.getKind()) {
     case TemplateArgument::Null:
       llvm_unreachable("Comparing NULL template argument");
@@ -2500,45 +2495,33 @@ static bool isSameTemplateArg(ASTContext &Context,
       return XID == YID;
     }
 
-    case TemplateArgument::Pack:
-      if (ClangABICompat15) {
-        if (X.pack_size() != Y.pack_size())
+    case TemplateArgument::Pack: {
+      unsigned PackIterationSize = X.pack_size();
+      if (X.pack_size() != Y.pack_size()) {
+        if (!PartialOrdering)
           return false;
 
-        for (TemplateArgument::pack_iterator XP = X.pack_begin(),
-                                             XPEnd = X.pack_end(),
-                                             YP = Y.pack_begin();
-             XP != XPEnd; ++XP, ++YP)
-          if (!isSameTemplateArg(Context, *XP, *YP, PartialOrdering,
-                                 PackExpansionMatchesPack))
-            return false;
-      } else {
-        unsigned PackIterationSize = X.pack_size();
-        if (X.pack_size() != Y.pack_size()) {
-          if (!PartialOrdering)
-            return false;
+        // C++0x [temp.deduct.type]p9:
+        // During partial ordering, if Ai was originally a pack expansion:
+        // - if P does not contain a template argument corresponding to Ai
+        //   then Ai is ignored;
+        bool XHasMoreArg = X.pack_size() > Y.pack_size();
+        if (!(XHasMoreArg && X.pack_elements().back().isPackExpansion()) &&
+            !(!XHasMoreArg && Y.pack_elements().back().isPackExpansion()))
+          return false;
 
-          // C++0x [temp.deduct.type]p9:
-          // During partial ordering, if Ai was originally a pack expansion:
-          // - if P does not contain a template argument corresponding to Ai
-          //   then Ai is ignored;
-          bool XHasMoreArg = X.pack_size() > Y.pack_size();
-          if (!(XHasMoreArg && X.pack_elements().back().isPackExpansion()) &&
-              !(!XHasMoreArg && Y.pack_elements().back().isPackExpansion()))
-            return false;
-
-          if (XHasMoreArg)
-            PackIterationSize = Y.pack_size();
-        }
-
-        ArrayRef<TemplateArgument> XP = X.pack_elements();
-        ArrayRef<TemplateArgument> YP = Y.pack_elements();
-        for (unsigned i = 0; i < PackIterationSize; ++i)
-          if (!isSameTemplateArg(Context, XP[i], YP[i], PartialOrdering,
-                                 PackExpansionMatchesPack))
-            return false;
+        if (XHasMoreArg)
+          PackIterationSize = Y.pack_size();
       }
+
+      ArrayRef<TemplateArgument> XP = X.pack_elements();
+      ArrayRef<TemplateArgument> YP = Y.pack_elements();
+      for (unsigned i = 0; i < PackIterationSize; ++i)
+        if (!isSameTemplateArg(Context, XP[i], YP[i], PartialOrdering,
+                               PackExpansionMatchesPack))
+          return false;
       return true;
+    }
   }
 
   llvm_unreachable("Invalid TemplateArgument Kind!");
@@ -2886,10 +2869,10 @@ CheckDeducedArgumentConstraints(Sema &S, TemplateDeclT *Template,
 
   bool NeedsReplacement = DeducedArgsNeedReplacement(Template);
   TemplateArgumentList DeducedTAL{TemplateArgumentList::OnStack,
-                                  SugaredDeducedArgs};
+                                  CanonicalDeducedArgs};
 
   MultiLevelTemplateArgumentList MLTAL = S.getTemplateInstantiationArgs(
-      Template, /*Final=*/true,
+      Template, /*Final=*/false,
       /*InnerMost=*/NeedsReplacement ? nullptr : &DeducedTAL,
       /*RelativeToPrimary=*/true, /*Pattern=*/
       nullptr, /*ForConstraintInstantiation=*/true);
@@ -2899,7 +2882,7 @@ CheckDeducedArgumentConstraints(Sema &S, TemplateDeclT *Template,
   // not class-scope explicit specialization, so replace with Deduced Args
   // instead of adding to inner-most.
   if (NeedsReplacement)
-    MLTAL.replaceInnermostTemplateArguments(SugaredDeducedArgs);
+    MLTAL.replaceInnermostTemplateArguments(CanonicalDeducedArgs);
 
   if (S.CheckConstraintSatisfaction(Template, AssociatedConstraints, MLTAL,
                                     Info.getLocation(),
@@ -3283,7 +3266,7 @@ Sema::TemplateDeductionResult Sema::SubstituteExplicitTemplateArguments(
       auto *Param = TemplateParams->getParam(CanonicalBuilder.size() - 1);
       // If this is a fully-saturated fixed-size pack, it should be
       // fully-substituted, not partially-substituted.
-      Optional<unsigned> Expansions = getExpandedPackSize(Param);
+      std::optional<unsigned> Expansions = getExpandedPackSize(Param);
       if (!Expansions || Arg.pack_size() < *Expansions) {
         PartiallySubstitutedPackIndex = CanonicalBuilder.size() - 1;
         CurrentInstantiationScope->SetPartiallySubstitutedPack(
@@ -4200,7 +4183,8 @@ Sema::TemplateDeductionResult Sema::DeduceTemplateArguments(
       // If the parameter type contains an explicitly-specified pack that we
       // could not expand, skip the number of parameters notionally created
       // by the expansion.
-      Optional<unsigned> NumExpansions = ParamExpansion->getNumExpansions();
+      std::optional<unsigned> NumExpansions =
+          ParamExpansion->getNumExpansions();
       if (NumExpansions && !PackScope.isPartiallyExpanded()) {
         for (unsigned I = 0; I != *NumExpansions && ArgIdx < Args.size();
              ++I, ++ArgIdx) {
@@ -4672,8 +4656,8 @@ static bool CheckDeducedPlaceholderConstraints(Sema &S, const AutoType &Type,
                                   /*PartialTemplateArgs=*/false,
                                   SugaredConverted, CanonicalConverted))
     return true;
-  MultiLevelTemplateArgumentList MLTAL(Concept, SugaredConverted,
-                                       /*Final=*/true);
+  MultiLevelTemplateArgumentList MLTAL(Concept, CanonicalConverted,
+                                       /*Final=*/false);
   if (S.CheckConstraintSatisfaction(Concept, {Concept->getConstraintExpr()},
                                     MLTAL, TypeLoc.getLocalSourceRange(),
                                     Satisfaction))
@@ -5245,34 +5229,30 @@ FunctionTemplateDecl *Sema::getMoreSpecializedTemplate(
 
   // This a speculative fix for CWG1432 (Similar to the fix for CWG1395) that
   // there is no wording or even resolution for this issue.
-  bool ClangABICompat15 =
-      Context.getLangOpts().getClangABICompat() <= LangOptions::ClangABI::Ver15;
-  if (!ClangABICompat15) {
-    for (int i = 0, e = std::min(NumParams1, NumParams2); i < e; ++i) {
-      QualType T1 = FD1->getParamDecl(i)->getType().getCanonicalType();
-      QualType T2 = FD2->getParamDecl(i)->getType().getCanonicalType();
-      auto *TST1 = dyn_cast<TemplateSpecializationType>(T1);
-      auto *TST2 = dyn_cast<TemplateSpecializationType>(T2);
-      if (!TST1 || !TST2)
-        continue;
-      const TemplateArgument &TA1 = TST1->template_arguments().back();
-      if (TA1.getKind() == TemplateArgument::Pack) {
-        assert(TST1->template_arguments().size() ==
-               TST2->template_arguments().size());
-        const TemplateArgument &TA2 = TST2->template_arguments().back();
-        assert(TA2.getKind() == TemplateArgument::Pack);
-        unsigned PackSize1 = TA1.pack_size();
-        unsigned PackSize2 = TA2.pack_size();
-        bool IsPackExpansion1 =
-            PackSize1 && TA1.pack_elements().back().isPackExpansion();
-        bool IsPackExpansion2 =
-            PackSize2 && TA2.pack_elements().back().isPackExpansion();
-        if (PackSize1 != PackSize2 && IsPackExpansion1 != IsPackExpansion2) {
-          if (PackSize1 > PackSize2 && IsPackExpansion1)
-            return FT2;
-          if (PackSize1 < PackSize2 && IsPackExpansion2)
-            return FT1;
-        }
+  for (int i = 0, e = std::min(NumParams1, NumParams2); i < e; ++i) {
+    QualType T1 = FD1->getParamDecl(i)->getType().getCanonicalType();
+    QualType T2 = FD2->getParamDecl(i)->getType().getCanonicalType();
+    auto *TST1 = dyn_cast<TemplateSpecializationType>(T1);
+    auto *TST2 = dyn_cast<TemplateSpecializationType>(T2);
+    if (!TST1 || !TST2)
+      continue;
+    const TemplateArgument &TA1 = TST1->template_arguments().back();
+    if (TA1.getKind() == TemplateArgument::Pack) {
+      assert(TST1->template_arguments().size() ==
+             TST2->template_arguments().size());
+      const TemplateArgument &TA2 = TST2->template_arguments().back();
+      assert(TA2.getKind() == TemplateArgument::Pack);
+      unsigned PackSize1 = TA1.pack_size();
+      unsigned PackSize2 = TA2.pack_size();
+      bool IsPackExpansion1 =
+          PackSize1 && TA1.pack_elements().back().isPackExpansion();
+      bool IsPackExpansion2 =
+          PackSize2 && TA2.pack_elements().back().isPackExpansion();
+      if (PackSize1 != PackSize2 && IsPackExpansion1 != IsPackExpansion2) {
+        if (PackSize1 > PackSize2 && IsPackExpansion1)
+          return FT2;
+        if (PackSize1 < PackSize2 && IsPackExpansion2)
+          return FT1;
       }
     }
   }
@@ -5512,12 +5492,12 @@ namespace {
 // specialized than primary" check.
 struct GetP2 {
   template <typename T1, typename T2,
-            std::enable_if_t<std::is_same<T1, T2>::value, bool> = true>
+            std::enable_if_t<std::is_same_v<T1, T2>, bool> = true>
   T2 *operator()(T1 *, T2 *P2) {
     return P2;
   }
   template <typename T1, typename T2,
-            std::enable_if_t<!std::is_same<T1, T2>::value, bool> = true>
+            std::enable_if_t<!std::is_same_v<T1, T2>, bool> = true>
   T1 *operator()(T1 *, T2 *) {
     return nullptr;
   }
@@ -5529,7 +5509,7 @@ struct TemplateArgumentListAreEqual {
   TemplateArgumentListAreEqual(ASTContext &Ctx) : Ctx(Ctx) {}
 
   template <typename T1, typename T2,
-            std::enable_if_t<std::is_same<T1, T2>::value, bool> = true>
+            std::enable_if_t<std::is_same_v<T1, T2>, bool> = true>
   bool operator()(T1 *PS1, T2 *PS2) {
     ArrayRef<TemplateArgument> Args1 = PS1->getTemplateArgs().asArray(),
                                Args2 = PS2->getTemplateArgs().asArray();
@@ -5548,7 +5528,7 @@ struct TemplateArgumentListAreEqual {
   }
 
   template <typename T1, typename T2,
-            std::enable_if_t<!std::is_same<T1, T2>::value, bool> = true>
+            std::enable_if_t<!std::is_same_v<T1, T2>, bool> = true>
   bool operator()(T1 *Spec, T2 *Primary) {
     ArrayRef<TemplateArgument> Args1 = Spec->getTemplateArgs().asArray(),
                                Args2 = Primary->getInjectedTemplateArgs();
@@ -5597,7 +5577,7 @@ static TemplateLikeDecl *
 getMoreSpecialized(Sema &S, QualType T1, QualType T2, TemplateLikeDecl *P1,
                    PrimaryDel *P2, TemplateDeductionInfo &Info) {
   constexpr bool IsMoreSpecialThanPrimaryCheck =
-      !std::is_same<TemplateLikeDecl, PrimaryDel>::value;
+      !std::is_same_v<TemplateLikeDecl, PrimaryDel>;
 
   bool Better1 = isAtLeastAsSpecializedAs(S, T1, T2, P2, Info);
   if (IsMoreSpecialThanPrimaryCheck && !Better1)
@@ -5618,29 +5598,25 @@ getMoreSpecialized(Sema &S, QualType T1, QualType T2, TemplateLikeDecl *P1,
 
   // This a speculative fix for CWG1432 (Similar to the fix for CWG1395) that
   // there is no wording or even resolution for this issue.
-  bool ClangABICompat15 = S.Context.getLangOpts().getClangABICompat() <=
-                          LangOptions::ClangABI::Ver15;
-  if (!ClangABICompat15) {
-    auto *TST1 = cast<TemplateSpecializationType>(T1);
-    auto *TST2 = cast<TemplateSpecializationType>(T2);
-    const TemplateArgument &TA1 = TST1->template_arguments().back();
-    if (TA1.getKind() == TemplateArgument::Pack) {
-      assert(TST1->template_arguments().size() ==
-             TST2->template_arguments().size());
-      const TemplateArgument &TA2 = TST2->template_arguments().back();
-      assert(TA2.getKind() == TemplateArgument::Pack);
-      unsigned PackSize1 = TA1.pack_size();
-      unsigned PackSize2 = TA2.pack_size();
-      bool IsPackExpansion1 =
-          PackSize1 && TA1.pack_elements().back().isPackExpansion();
-      bool IsPackExpansion2 =
-          PackSize2 && TA2.pack_elements().back().isPackExpansion();
-      if (PackSize1 != PackSize2 && IsPackExpansion1 != IsPackExpansion2) {
-        if (PackSize1 > PackSize2 && IsPackExpansion1)
-          return GetP2()(P1, P2);
-        if (PackSize1 < PackSize2 && IsPackExpansion2)
-          return P1;
-      }
+  auto *TST1 = cast<TemplateSpecializationType>(T1);
+  auto *TST2 = cast<TemplateSpecializationType>(T2);
+  const TemplateArgument &TA1 = TST1->template_arguments().back();
+  if (TA1.getKind() == TemplateArgument::Pack) {
+    assert(TST1->template_arguments().size() ==
+           TST2->template_arguments().size());
+    const TemplateArgument &TA2 = TST2->template_arguments().back();
+    assert(TA2.getKind() == TemplateArgument::Pack);
+    unsigned PackSize1 = TA1.pack_size();
+    unsigned PackSize2 = TA2.pack_size();
+    bool IsPackExpansion1 =
+        PackSize1 && TA1.pack_elements().back().isPackExpansion();
+    bool IsPackExpansion2 =
+        PackSize2 && TA2.pack_elements().back().isPackExpansion();
+    if (PackSize1 != PackSize2 && IsPackExpansion1 != IsPackExpansion2) {
+      if (PackSize1 > PackSize2 && IsPackExpansion1)
+        return GetP2()(P1, P2);
+      if (PackSize1 < PackSize2 && IsPackExpansion2)
+        return P1;
     }
   }
 

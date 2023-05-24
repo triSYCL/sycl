@@ -179,6 +179,7 @@ namespace {
     }
 
     bool HandleTopLevelDecl(DeclGroupRef DG) override {
+      // FIXME: Why not return false and abort parsing?
       if (Diags.hasErrorOccurred())
         return true;
 
@@ -318,8 +319,7 @@ namespace {
         return;
 
       // No VTable usage is legal in SYCL, so don't bother marking them used.
-      if (!Ctx->getLangOpts().SYCLAllowVirtual &&
-          Ctx->getLangOpts().SYCLIsDevice)
+      if (Ctx->getLangOpts().SYCLIsDevice)
         return;
 
       Builder->EmitVTable(RD);

@@ -1,4 +1,4 @@
-# SYCL for Vitis 2022.1: experimental melting pot with Intel oneAPI DPC++ SYCL and triSYCL for AMD/Xilinx FPGA
+# SYCL for Vitis 2022.2: experimental melting pot with Intel oneAPI DPC++ SYCL and triSYCL for AMD FPGA
 
 This project is about assessing the viability of unifying 2 of the
 current open-source implementations of the SYCL standard
@@ -28,33 +28,33 @@ There are mostly 2 public branches:
 modern C++-based DSEL (Domain Specific Embedded Language) aimed at
 facilitating the programming of heterogeneous accelerators.
 
-## triSYCL for AMD/Xilinx FPGA with AMD/Xilinx Vitis v++
+## triSYCL for AMD FPGA with AMD Vitis v++
 
 Some LLVM passes and some C++ SYCL runtime from
 https://github.com/triSYCL/triSYCL are merged-in with a new Clang
-driver and scripts to use AMD/Xilinx Vitis
+driver and scripts to use AMD Vitis
 [v++](https://docs.xilinx.com/r/en-US/ug1393-vitis-application-acceleration/Vitis-Compiler-Command)
-as a back-end for AMD/Xilinx FPGA using the open-source runtime and
+as a back-end for AMD FPGA using the open-source runtime and
 device-driver https://github.com/Xilinx/XRT
 
 ## Intel oneAPI DPC++ SYCL compiler and runtime libraries using Clang/LLVM technology
 
 This is a fork of the Intel SYCL upstreaming effort
 ([https://github.com/intel/llvm/tree/sycl](https://github.com/intel/llvm/tree/sycl))
-with some alterations made to allow SYCL compilation for AMD/Xilinx
+with some alterations made to allow SYCL compilation for AMD
 FPGA. However, the alterations made shouldn't affect previous targets
 supported by the Intel tool, so in theory it should be possible to use
 different accelerators from different vendors at the same time,
-including for example an Intel FPGA and an AMD/Xilinx FPGA.
+including for example an Intel FPGA and an AMD FPGA.
 
 ## SYCL Related Documentation
 
-- AMD/Xilinx FPGA get started guide for the SYCL compiler
+- AMD FPGA get started guide for the SYCL compiler
   [GettingStartedXilinxFPGA.md](sycl/doc/GettingStartedXilinxFPGA.md)
 - The unchanged get started guide for the SYCL compiler
   [GetStartedGuide.md](sycl/doc/GetStartedGuide.md)
 
-- AMD/Xilinx FPGA Tests Documentation
+- AMD FPGA Tests Documentation
   - [Tests.md](sycl/doc/Tests.md) covers a few details about the the
     additional [vitis](sycl/test/vitis) directory we added
     to the [sycl/test](sycl/test) directory among some other small
@@ -70,7 +70,7 @@ running with the Intel OpenCL runtime or other back-ends.
 
 This fork of the project can be compiled the same way and used in
 conjunction with the normal compiler commands as demonstrated.
-However, the software requirements for AMD/Xilinx FPGA compilation and
+However, the software requirements for AMD FPGA compilation and
 the compiler invocation are not the same and are documented elsewhere.
 
 

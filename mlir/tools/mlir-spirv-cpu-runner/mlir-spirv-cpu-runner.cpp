@@ -74,7 +74,8 @@ convertMLIRModule(Operation *op, llvm::LLVMContext &context) {
   return mainModule;
 }
 
-static LogicalResult runMLIRPasses(Operation *module) {
+static LogicalResult runMLIRPasses(Operation *module,
+                                   JitRunnerOptions &options) {
   PassManager passManager(module->getContext(),
                           module->getName().getStringRef());
   applyPassManagerCLOptions(passManager);
@@ -82,8 +83,8 @@ static LogicalResult runMLIRPasses(Operation *module) {
   passManager.addPass(createConvertGPUToSPIRVPass(/*mapMemorySpace=*/true));
 
   OpPassManager &nestedPM = passManager.nest<spirv::ModuleOp>();
-  nestedPM.addPass(spirv::createLowerABIAttributesPass());
-  nestedPM.addPass(spirv::createUpdateVersionCapabilityExtensionPass());
+  nestedPM.addPass(spirv::createSPIRVLowerABIAttributesPass());
+  nestedPM.addPass(spirv::createSPIRVUpdateVCEPass());
   passManager.addPass(createLowerHostCodeToLLVMPass());
   passManager.addPass(createConvertSPIRVToLLVMPass());
   return passManager.run(module);

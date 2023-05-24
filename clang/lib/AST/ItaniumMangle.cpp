@@ -35,6 +35,7 @@
 #include "llvm/ADT/StringExtras.h"
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/raw_ostream.h"
+#include <optional>
 
 using namespace clang;
 
@@ -118,9 +119,9 @@ public:
   void mangleDynamicAtExitDestructor(const VarDecl *D,
                                      raw_ostream &Out) override;
   void mangleDynamicStermFinalizer(const VarDecl *D, raw_ostream &Out) override;
-  void mangleSEHFilterExpression(const NamedDecl *EnclosingDecl,
+  void mangleSEHFilterExpression(GlobalDecl EnclosingDecl,
                                  raw_ostream &Out) override;
-  void mangleSEHFinallyBlock(const NamedDecl *EnclosingDecl,
+  void mangleSEHFinallyBlock(GlobalDecl EnclosingDecl,
                              raw_ostream &Out) override;
   void mangleItaniumThreadLocalInit(const VarDecl *D, raw_ostream &) override;
   void mangleItaniumThreadLocalWrapper(const VarDecl *D,
@@ -602,9 +603,9 @@ NamespaceDecl *ItaniumMangleContextImpl::getStdNamespace() {
   if (!StdNamespace) {
     StdNamespace = NamespaceDecl::Create(
         getASTContext(), getASTContext().getTranslationUnitDecl(),
-        /*Inline*/ false, SourceLocation(), SourceLocation(),
+        /*Inline=*/false, SourceLocation(), SourceLocation(),
         &getASTContext().Idents.get("std"),
-        /*PrevDecl*/ nullptr);
+        /*PrevDecl=*/nullptr, /*Nested=*/false);
     StdNamespace->setImplicit();
   }
   return StdNamespace;
@@ -1553,7 +1554,7 @@ void CXXNameMangler::mangleUnqualifiedName(
     // <lambda-sig> ::= <template-param-decl>* <parameter-type>+
     //     # Parameter types or 'v' for 'void'.
     if (const CXXRecordDecl *Record = dyn_cast<CXXRecordDecl>(TD)) {
-      llvm::Optional<unsigned> DeviceNumber =
+      std::optional<unsigned> DeviceNumber =
           Context.getDiscriminatorOverride()(Context.getASTContext(), Record);
 
       // If we have a device-number via the discriminator, use that to mangle
@@ -2002,7 +2003,7 @@ void CXXNameMangler::mangleLambda(const CXXRecordDecl *Lambda) {
   // if the host-side CXX ABI has different numbering for lambda. In such case,
   // if the mangle context is that device-side one, use the device-side lambda
   // mangling number for this lambda.
-  llvm::Optional<unsigned> DeviceNumber =
+  std::optional<unsigned> DeviceNumber =
       Context.getDiscriminatorOverride()(Context.getASTContext(), Lambda);
   unsigned Number =
       DeviceNumber ? *DeviceNumber : Lambda->getLambdaManglingNumber();
@@ -3050,7 +3051,11 @@ void CXXNameMangler::mangleType(const BuiltinType *T) {
     break;
   }
   case BuiltinType::BFloat16: {
-    const TargetInfo *TI = &getASTContext().getTargetInfo();
+    const TargetInfo *TI = ((getASTContext().getLangOpts().OpenMP &&
+                             getASTContext().getLangOpts().OpenMPIsDevice) ||
+                            getASTContext().getLangOpts().SYCLIsDevice)
+                               ? getASTContext().getAuxTargetInfo()
+                               : &getASTContext().getTargetInfo();
     Out << TI->getBFloat16Mangling();
     break;
   }
@@ -4257,6 +4262,7 @@ recurse:
   case Expr::OMPArrayShapingExprClass:
   case Expr::OMPIteratorExprClass:
   case Expr::CXXInheritedCtorInitExprClass:
+  case Expr::CXXParenListInitExprClass:
     llvm_unreachable("unexpected statement kind");
 
   case Expr::ConstantExprClass:
@@ -6451,23 +6457,25 @@ void ItaniumMangleContextImpl::mangleDynamicStermFinalizer(const VarDecl *D,
 }
 
 void ItaniumMangleContextImpl::mangleSEHFilterExpression(
-    const NamedDecl *EnclosingDecl, raw_ostream &Out) {
+    GlobalDecl EnclosingDecl, raw_ostream &Out) {
   CXXNameMangler Mangler(*this, Out);
   Mangler.getStream() << "__filt_";
-  if (shouldMangleDeclName(EnclosingDecl))
+  auto *EnclosingFD = cast<FunctionDecl>(EnclosingDecl.getDecl());
+  if (shouldMangleDeclName(EnclosingFD))
     Mangler.mangle(EnclosingDecl);
   else
-    Mangler.getStream() << EnclosingDecl->getName();
+    Mangler.getStream() << EnclosingFD->getName();
 }
 
 void ItaniumMangleContextImpl::mangleSEHFinallyBlock(
-    const NamedDecl *EnclosingDecl, raw_ostream &Out) {
+    GlobalDecl EnclosingDecl, raw_ostream &Out) {
   CXXNameMangler Mangler(*this, Out);
   Mangler.getStream() << "__fin_";
-  if (shouldMangleDeclName(EnclosingDecl))
+  auto *EnclosingFD = cast<FunctionDecl>(EnclosingDecl.getDecl());
+  if (shouldMangleDeclName(EnclosingFD))
     Mangler.mangle(EnclosingDecl);
   else
-    Mangler.getStream() << EnclosingDecl->getName();
+    Mangler.getStream() << EnclosingFD->getName();
 }
 
 void ItaniumMangleContextImpl::mangleItaniumThreadLocalInit(const VarDecl *D,
@@ -6578,8 +6586,8 @@ ItaniumMangleContext *ItaniumMangleContext::create(ASTContext &Context,
                                                    bool IsAux) {
   return new ItaniumMangleContextImpl(
       Context, Diags,
-      [](ASTContext &, const NamedDecl *) -> llvm::Optional<unsigned> {
-        return llvm::None;
+      [](ASTContext &, const NamedDecl *) -> std::optional<unsigned> {
+        return std::nullopt;
       },
       IsAux);
 }

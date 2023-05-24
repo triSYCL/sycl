@@ -45,6 +45,7 @@
 #include <algorithm>
 #include <iterator>
 #include <list>
+#include <optional>
 #include <set>
 #include <utility>
 #include <vector>
@@ -529,7 +530,7 @@ void LookupResult::resolveKind() {
       continue;
     }
 
-    llvm::Optional<unsigned> ExistingI;
+    std::optional<unsigned> ExistingI;
 
     // Redeclarations of types via typedef can occur both within a scope
     // and, through using declarations and directives, across scopes. There is
@@ -992,11 +993,9 @@ bool Sema::LookupBuiltin(LookupResult &R) {
 
       // If this is a builtin on this (or all) targets, create the decl.
       if (unsigned BuiltinID = II->getBuiltinID()) {
-        // In C++, C2x, and OpenCL (spec v1.2 s6.9.f), we don't have any
-        // predefined library functions like 'malloc'. Instead, we'll just
-        // error.
-        if ((getLangOpts().CPlusPlus || getLangOpts().OpenCL ||
-             getLangOpts().C2x) &&
+        // In C++ and OpenCL (spec v1.2 s6.9.f), we don't have any predefined
+        // library functions like 'malloc'. Instead, we'll just error.
+        if ((getLangOpts().CPlusPlus || getLangOpts().OpenCL) &&
             Context.BuiltinInfo.isPredefinedLibFunction(BuiltinID))
           return false;
 
@@ -1232,9 +1231,8 @@ static bool LookupDirect(Sema &S, LookupResult &R, const DeclContext *DC) {
     FunctionProtoType::ExtProtoInfo EPI = ConvProto->getExtProtoInfo();
     EPI.ExtInfo = EPI.ExtInfo.withCallingConv(CC_C);
     EPI.ExceptionSpec = EST_None;
-    QualType ExpectedType
-      = R.getSema().Context.getFunctionType(R.getLookupName().getCXXNameType(),
-                                            None, EPI);
+    QualType ExpectedType = R.getSema().Context.getFunctionType(
+        R.getLookupName().getCXXNameType(), std::nullopt, EPI);
 
     // Perform template argument deduction against the type that we would
     // expect the function to have.
@@ -1677,10 +1675,8 @@ hasAcceptableDefaultArgument(Sema &S, const ParmDecl *D,
   if (!D->hasDefaultArgument())
     return false;
 
-  llvm::SmallDenseSet<const ParmDecl *, 4> Visited;
-  while (D && !Visited.count(D)) {
-    Visited.insert(D);
-
+  llvm::SmallPtrSet<const ParmDecl *, 4> Visited;
+  while (D && Visited.insert(D).second) {
     auto &DefaultArg = D->getDefaultArgStorage();
     if (!DefaultArg.isInherited() && S.isAcceptable(D, Kind))
       return true;
@@ -2154,6 +2150,22 @@ bool LookupResult::isAvailableForLookup(Sema &SemaRef, NamedDecl *ND) {
   // reachability of the template decl.
   if (auto *DeductionGuide = ND->getDeclName().getCXXDeductionGuideTemplate())
     return SemaRef.hasReachableDefinition(DeductionGuide);
+
+  // FIXME: The lookup for allocation function is a standalone process.
+  // (We can find the logics in Sema::FindAllocationFunctions)
+  //
+  // Such structure makes it a problem when we instantiate a template
+  // declaration using placement allocation function if the placement
+  // allocation function is invisible.
+  // (See https://github.com/llvm/llvm-project/issues/59601)
+  //
+  // Here we workaround it by making the placement allocation functions
+  // always acceptable. The downside is that we can't diagnose the direct
+  // use of the invisible placement allocation functions. (Although such uses
+  // should be rare).
+  if (auto *FD = dyn_cast<FunctionDecl>(ND);
+      FD && FD->isReservedGlobalPlacementOperator())
+    return true;
 
   auto *DC = ND->getDeclContext();
   // If ND is not visible and it is at namespace scope, it shouldn't be found
@@ -3525,27 +3537,27 @@ Sema::SpecialMemberOverloadResult Sema::LookupSpecialMember(CXXRecordDecl *RD,
     if (CXXMethodDecl *M = dyn_cast<CXXMethodDecl>(Cand->getUnderlyingDecl())) {
       if (SM == CXXCopyAssignment || SM == CXXMoveAssignment)
         AddMethodCandidate(M, Cand, RD, ThisTy, Classification,
-                           llvm::makeArrayRef(&Arg, NumArgs), OCS, true);
+                           llvm::ArrayRef(&Arg, NumArgs), OCS, true);
       else if (CtorInfo)
         AddOverloadCandidate(CtorInfo.Constructor, CtorInfo.FoundDecl,
-                             llvm::makeArrayRef(&Arg, NumArgs), OCS,
+                             llvm::ArrayRef(&Arg, NumArgs), OCS,
                              /*SuppressUserConversions*/ true);
       else
-        AddOverloadCandidate(M, Cand, llvm::makeArrayRef(&Arg, NumArgs), OCS,
+        AddOverloadCandidate(M, Cand, llvm::ArrayRef(&Arg, NumArgs), OCS,
                              /*SuppressUserConversions*/ true);
     } else if (FunctionTemplateDecl *Tmpl =
                  dyn_cast<FunctionTemplateDecl>(Cand->getUnderlyingDecl())) {
       if (SM == CXXCopyAssignment || SM == CXXMoveAssignment)
-        AddMethodTemplateCandidate(
-            Tmpl, Cand, RD, nullptr, ThisTy, Classification,
-            llvm::makeArrayRef(&Arg, NumArgs), OCS, true);
+        AddMethodTemplateCandidate(Tmpl, Cand, RD, nullptr, ThisTy,
+                                   Classification,
+                                   llvm::ArrayRef(&Arg, NumArgs), OCS, true);
       else if (CtorInfo)
-        AddTemplateOverloadCandidate(
-            CtorInfo.ConstructorTmpl, CtorInfo.FoundDecl, nullptr,
-            llvm::makeArrayRef(&Arg, NumArgs), OCS, true);
+        AddTemplateOverloadCandidate(CtorInfo.ConstructorTmpl,
+                                     CtorInfo.FoundDecl, nullptr,
+                                     llvm::ArrayRef(&Arg, NumArgs), OCS, true);
       else
-        AddTemplateOverloadCandidate(
-            Tmpl, Cand, nullptr, llvm::makeArrayRef(&Arg, NumArgs), OCS, true);
+        AddTemplateOverloadCandidate(Tmpl, Cand, nullptr,
+                                     llvm::ArrayRef(&Arg, NumArgs), OCS, true);
     } else {
       assert(isa<UsingDecl>(Cand.getDecl()) &&
              "illegal Kind of operator = Decl");
@@ -4988,9 +5000,9 @@ void TypoCorrectionConsumer::NamespaceSpecifierSet::addNameSpecifier(
   if (NNS && !CurNameSpecifierIdentifiers.empty()) {
     SmallVector<const IdentifierInfo*, 4> NewNameSpecifierIdentifiers;
     getNestedNameSpecifierIdentifiers(NNS, NewNameSpecifierIdentifiers);
-    NumSpecifiers = llvm::ComputeEditDistance(
-        llvm::makeArrayRef(CurNameSpecifierIdentifiers),
-        llvm::makeArrayRef(NewNameSpecifierIdentifiers));
+    NumSpecifiers =
+        llvm::ComputeEditDistance(llvm::ArrayRef(CurNameSpecifierIdentifiers),
+                                  llvm::ArrayRef(NewNameSpecifierIdentifiers));
   }
 
   SpecifierInfo SI = {Ctx, NNS, NumSpecifiers};

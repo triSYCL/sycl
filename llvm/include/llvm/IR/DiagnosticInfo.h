@@ -16,7 +16,6 @@
 
 #include "llvm-c/Types.h"
 #include "llvm/ADT/ArrayRef.h"
-#include "llvm/ADT/Optional.h"
 #include "llvm/ADT/SmallVector.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/ADT/Twine.h"
@@ -29,6 +28,7 @@
 #include <cstdint>
 #include <functional>
 #include <iterator>
+#include <optional>
 #include <string>
 
 namespace llvm {
@@ -86,6 +86,7 @@ enum DiagnosticKind {
   DK_SrcMgr,
   DK_DontCall,
   DK_MisExpect,
+  DK_AspectMismatch,
   DK_FirstPluginKind // Must be last value to work with
                      // getNextAvailablePluginDiagnosticKind
 };
@@ -479,8 +480,8 @@ public:
   StringRef getPassName() const { return PassName; }
   StringRef getRemarkName() const { return RemarkName; }
   std::string getMsg() const;
-  Optional<uint64_t> getHotness() const { return Hotness; }
-  void setHotness(Optional<uint64_t> H) { Hotness = H; }
+  std::optional<uint64_t> getHotness() const { return Hotness; }
+  void setHotness(std::optional<uint64_t> H) { Hotness = H; }
 
   bool isVerbose() const { return IsVerbose; }
 
@@ -521,7 +522,7 @@ protected:
 
   /// If profile information is available, this is the number of times the
   /// corresponding code was executed in a profile instrumentation run.
-  Optional<uint64_t> Hotness;
+  std::optional<uint64_t> Hotness;
 
   /// Arguments collected via the streaming interface.
   SmallVector<Argument, 4> Args;
@@ -1114,6 +1115,40 @@ public:
   void print(DiagnosticPrinter &DP) const override;
   static bool classof(const DiagnosticInfo *DI) {
     return DI->getKind() == DK_DontCall;
+  }
+};
+
+void diagnoseAspectsMismatch(const Function *F,
+                             const SmallVector<Function *, 8> &CallChain,
+                             StringRef Aspect, bool FromDeviceHasAttribute);
+
+// Diagnostic information for SYCL aspects usage mismatch.
+class DiagnosticInfoAspectsMismatch : public DiagnosticInfo {
+  StringRef FunctionName;
+  unsigned LocCookie;
+  llvm::SmallVector<std::pair<StringRef, unsigned>, 8> CallChain;
+  StringRef Aspect;
+  bool FromDeviceHasAttribute;
+
+public:
+  DiagnosticInfoAspectsMismatch(
+      StringRef FunctionName, unsigned LocCookie,
+      const llvm::SmallVector<std::pair<StringRef, unsigned>, 8> &CallChain,
+      StringRef Aspect, bool FromDeviceHasAttribute)
+      : DiagnosticInfo(DK_AspectMismatch, DiagnosticSeverity::DS_Warning),
+        FunctionName(FunctionName), LocCookie(LocCookie), CallChain(CallChain),
+        Aspect(Aspect), FromDeviceHasAttribute(FromDeviceHasAttribute) {}
+  StringRef getFunctionName() const { return FunctionName; }
+  unsigned getLocCookie() const { return LocCookie; }
+  const llvm::SmallVector<std::pair<StringRef, unsigned>, 8> &
+  getCallChain() const {
+    return CallChain;
+  }
+  StringRef getAspect() const { return Aspect; }
+  bool isFromDeviceHasAttribute() const { return FromDeviceHasAttribute; }
+  void print(DiagnosticPrinter &DP) const override;
+  static bool classof(const DiagnosticInfo *DI) {
+    return DI->getKind() == DK_AspectMismatch;
   }
 };
 
