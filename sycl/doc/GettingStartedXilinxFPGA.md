@@ -63,6 +63,13 @@ some adaptations.
 
 ## What's new?
 
+- 2023/05/24:
+  - add partial profilling support to `pi_xrt`;
+  - clarify `sycl/test/vitis/edge_detection/edge_detection.cpp` test;
+  - fix `ONEAPI_DEVICE_SELECTOR` usage syntax;
+  - fix documentation for Vitis 2022.2;
+  - update to new test layout.
+
 - 2022/12/21:
   - support for Vitis 2022.2 and oneAPI from up-stream;
   - update documentation to Vitis 2022.2;
