@@ -955,16 +955,18 @@ For more control, see [section Build](#build).
 The typical environment is setup with something like
 
 ```bash
-# The place where SYCL has been compiled:
-DPCPP_HOME=~/sycl_workspace
+# The place where SYCL has been compiled (to update to the real location):
+export DPCPP_HOME=~/sycl_workspace
+# Most of the export here are optional but useful when using in a
+# subshell or through tmux.
 # The version of Vitis you want to use
-XILINX_VERSION=2022.2
+export XILINX_VERSION=2022.2
 # The target platform for the FPGA board model
 export XILINX_PLATFORM=xilinx_u200_gen3x16_xdma_1_202110_1
 # Where all the AMD tools are
-XILINX_ROOT=/opt/xilinx
+export XILINX_ROOT=/opt/xilinx
 # Where the SYCL compiler binaries are:
-SYCL_BIN_DIR=$DPCPP_HOME/llvm/build/bin
+export SYCL_BIN_DIR=$DPCPP_HOME/llvm/build/bin
 export XILINX_XRT=$XILINX_ROOT/xrt
 export XILINX_VITIS=$XILINX_ROOT/Vitis/$XILINX_VERSION
 export XILINX_HLS=$XILINX_ROOT/Vitis_HLS/$XILINX_VERSION
