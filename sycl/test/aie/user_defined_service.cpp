@@ -20,7 +20,7 @@ struct counter_service {
       return base::tile().perform_service(data);
     }
   };
-  static uint32_t act_on_data(int x, int y, aie::device_mem_handle h,
+  uint32_t act_on_data(int x, int y, aie::device_mem_handle h,
                               data_type d) {
     return counter++;
   }
@@ -38,7 +38,7 @@ struct nothing_service {
       return tile().perform_service(data);
     }
   };
-  static void act_on_data(int x, int y, aie::device_mem_handle h, data_type d) {
+  void act_on_data(int x, int y, aie::device_mem_handle h, data_type d) {
   }
 };
 

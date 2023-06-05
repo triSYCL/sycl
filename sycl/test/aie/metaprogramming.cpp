@@ -4,37 +4,49 @@
 
 #include "aie.hpp"
 
-int main() {
-  struct A {
-    struct data_type {};
-    static uint32_t act_on_data(bool x, int y, int, data_type) { return 0; }
-  };
-  struct B {
-    struct data_type {};
-    static uint32_t act_on_data(bool x, int y, int, data_type) { return 0; }
-  };
-  struct C {
-    struct data_type {};
-    static bool act_on_data(bool x, int y, int, data_type) { return 0; }
-  };
+struct A {
+  struct data_type {};
+  template <typename Parent> struct add_to_service_api {};
+  uint32_t act_on_data(bool x, int y, aie::device_mem_handle, data_type) {
+    return 0;
+  }
+};
+struct B {
+  struct data_type {};
+  template <typename Parent> struct add_to_service_api {};
+  uint32_t act_on_data(bool x, int y, aie::device_mem_handle, data_type) {
+    return 0;
+  }
+};
+struct C {
+  struct data_type {};
+  template <typename Parent> struct add_to_service_api {};
+  bool act_on_data(bool x, int y, aie::device_mem_handle, data_type) {
+    return 0;
+  }
+};
 
+int main() {
   struct D {};
 
   using tseq = aie::detail::type_seq<A, B, C>;
 
   static_assert(
-      std::is_same_v<aie::detail::func_info_t<A::act_on_data>::ret_type,
+      std::is_same_v<aie::detail::memfunc_info_t<&A::act_on_data>::ret_type,
                      uint32_t>,
       "");
   static_assert(
-      std::is_same_v<aie::detail::func_info_t<A::act_on_data>::args,
-                     aie::detail::type_seq<bool, int, int, A::data_type>>,
+      std::is_same_v<aie::detail::memfunc_info_t<&A::act_on_data>::args,
+                     aie::detail::type_seq<bool, int, aie::device_mem_handle,
+                                           A::data_type>>,
       "");
   static_assert(
       std::is_same_v<
-          aie::detail::func_info_t<A::act_on_data>::args::get_type<0>, bool>,
+          aie::detail::memfunc_info_t<&A::act_on_data>::args::get_type<0>,
+          bool>,
       "");
-  static_assert(aie::detail::func_info_t<A::act_on_data>::args::size == 4, "");
+  static_assert(aie::detail::memfunc_info_t<&A::act_on_data>::args::size == 4,
+                "");
 
   static_assert(std::is_same_v<tseq::get_type<0>, A>, "");
   static_assert(std::is_same_v<tseq::get_type<1>, B>, "");
