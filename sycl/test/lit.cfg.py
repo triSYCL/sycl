@@ -39,7 +39,7 @@ config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
 # Propagate some variables from the host environment.
 llvm_config.with_system_environment(['PATH', 'OCL_ICD_FILENAMES', 'SYCL_DEVICE_ALLOWLIST', 'SYCL_CONFIG_FILE_NAME', 'SYCL_PI_TRACE', 'XILINX_XRT'])
 
-acap=lit_config.params.get('ACAP', "off")
+aie=lit_config.params.get('AIE', "off")
 vitis=lit_config.params.get('VITIS', "off")
 
 # Propagate extra environment variables
@@ -216,11 +216,11 @@ else:
     config.substitutions.append( ('%run_if_sw_emu', run_if_sw_emu) )
     config.substitutions.append( ('%run_if_not_cpu', run_if_not_cpu) )
 
-if acap == "off":
-    config.excludes += ['acap']
+if aie == "off":
+    config.excludes += ['aie', 'acap']
 else:
     config.excludes += ['abi', 'basic_tests', 'CMakeLists.txt', 'extensions', 'gdb', 'invoke_simd', 'matrix', 'optional_kernel_features', 'scheduler', 'type_traits', 'vitis', 'check_device_code', 'esimd', 'fpga_tests', 'kernel_param', 'multi_ptr', 'regression', 'tools', 'Unit', 'warnings']
-    if "aie" in acap:
+    if "aie" in aie:
         make_sh_path = os.environ["AIE_MAKE_SH"]
         lit_config.note(f"using aie make.sh: {make_sh_path}")
         config.available_features.add("aie")
@@ -244,7 +244,7 @@ else:
         run_on_device = os.environ["AIE_RUN_ON_DEVICE_SH"]
         config.substitutions.append( ('%run_on_device', run_on_device))
         lit_config.note(f"using aie run_on_device.sh: {run_on_device}")
-    if acap == "aie_no_device":
+    if aie == "aie_no_device":
         config.available_features.add("no_device")
         config.substitutions.append( ('%if_run_on_device', "true "))
     else:
@@ -257,7 +257,7 @@ else:
             lit_config.note("missing environnement variable: {}".format(env))
             has_error=True
     if has_error:
-        lit_config.error("Can't configure tests for ACAP")
+        lit_config.error("Can't configure tests for AIE or ACAP")
     llvm_config.with_system_environment(required_env)
 
 # Set timeout for test = 10 mins

@@ -45,7 +45,7 @@ namespace {
 cl::opt<std::string> KernelUnmergedProperties("sycl-kernel-unmerged-prop-out",
                                               cl::ReallyHidden);
 
-/// IR conversion/downgrader pass for ACAP chess-clang
+/// IR conversion/downgrader pass for AIE chess-clang
 struct ChessMassageLegacy : public ModulePass {
 
   static char ID; // Pass identification, replacement for typeid

@@ -55,8 +55,8 @@ including for example an Intel FPGA and an AMD/Xilinx FPGA.
   [GetStartedGuide.md](sycl/doc/GetStartedGuide.md)
 - Xilinx FPGA get started guide for the SYCL compiler
   [XilinxFPGACompilation.md](sycl/doc/GettingStartedXilinxFPGA.md)
-- Xilinx ACAP get started guide for the SYCL compiler
-  [GettingStartedACAP.md](sycl/doc/GettingStartedACAP.md)
+- Xilinx AIE/ACAP get started guide for the SYCL compiler
+  [GettingStartedAIE.md](sycl/doc/GettingStartedAIE.md)
 - Xilinx FPGA Tests Documentation - [Tests.md](sycl/doc/Tests.md)
 - AMD/Xilinx FPGA Tests Documentation
   - [Tests.md](sycl/doc/Tests.md) covers a few details about the the

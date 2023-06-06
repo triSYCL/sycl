@@ -7,7 +7,7 @@
 //
 //===----------------------------------------------------------------------===//
 //
-// Prepare SYCL ACAP device code for optimizations
+// Prepare SYCL AIE device code for optimizations
 //
 // ===---------------------------------------------------------------------===//
 

@@ -1,4 +1,4 @@
-//==-- acap-intrinsic.cpp - collection of intrisics for the acap target ----==//
+//==-- aie-intrinsic.cpp - collection of intrisics for the aie target ----==//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -6,10 +6,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-#define __ACAP_RT__
-#include "acap-intrinsic.h"
+#define __AIE_RT__
+#include "aie-intrinsic.h"
 
-namespace acap_intr {
+namespace aie_intr {
 
 // All the functions called here are intrinsic. They do not have symbols but are
 // just a function-like representation of AIE instruction, so they should not be

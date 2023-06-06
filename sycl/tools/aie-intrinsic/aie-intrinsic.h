@@ -1,12 +1,12 @@
-#ifndef __ACAP_INTRINSIC_HPP__
-#define __ACAP_INTRINSIC_HPP__
+#ifndef __AIE_INTRINSIC_HPP__
+#define __AIE_INTRINSIC_HPP__
 
 /// __SYCL_DEVICE_ONLY__ means we are on device code in SYCL
-/// __ACAP_RT__ means we are compiling the device library in chess
-/// neither __SYCL_DEVICE_ONLY__ nor __ACAP_RT__ means we are compiling for the
+/// __AIE_RT__ means we are compiling the device library in chess
+/// neither __SYCL_DEVICE_ONLY__ nor __AIE_RT__ means we are compiling for the
 /// host.
 
-#if defined(__SYCL_DEVICE_ONLY__) || defined(__ACAP_RT__)
+#if defined(__SYCL_DEVICE_ONLY__) || defined(__AIE_RT__)
 /// When compiling for device the definition is in the library
 #define DECL_POSTFIX ;
 #if defined(__SYCL_DEVICE_ONLY__)
@@ -32,7 +32,7 @@
 
 #include <stdint.h>
 
-namespace acap_intr {
+namespace aie_intr {
 
 DECL_PREFIX __attribute__((const)) int get_coreid(void) DECL_POSTFIX
 

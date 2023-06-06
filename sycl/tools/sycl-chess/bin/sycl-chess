@@ -202,14 +202,14 @@ chess_kernel_compile () {
       -o "$SOURCE_TEMPORARY_DIR/$0.elf.o_east" \
       "$SOURCE_TEMPORARY_DIR/$0.main.o" \
       "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
-      "$SYCL_LIB_PATH/acap-intrinsic.o" &
+      "$SYCL_LIB_PATH/aie-intrinsic.o" &
 
     $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f \
       +l$SOURCE_TEMPORARY_DIR/linker_script_west.bcf -Oz \
       -o "$SOURCE_TEMPORARY_DIR/$0.elf.o_west" \
       "$SOURCE_TEMPORARY_DIR/$0.main.o" \
       "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
-      "$SYCL_LIB_PATH/acap-intrinsic.o" &
+      "$SYCL_LIB_PATH/aie-intrinsic.o" &
     wait
 }
 

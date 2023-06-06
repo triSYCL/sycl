@@ -3,37 +3,43 @@
 This is document is not complete. The compiler and library implementation are experimental, so it will likely
 change rapidly or get outdated.
 
+The recent work has mostly focused on the more recent AIE++ library so a large part of this documentation is now outdated.
+
 ## Requirements
   * Recent Linux distribution
   * Vitis 2021.2 which includes CHESS for AIE
 
-# Xilinx ACAP Compilation
+# Xilinx AIE Compilation
 
 This document aims to cover the key differences of compiling SYCL for Xilinx
-ACAP using the WIP device compiler based on the upstream Intel SYCL compiler.
+AIE using the WIP device compiler based on the upstream Intel SYCL compiler.
 
 The main future goal of this SYCL device compiler and SYCL runtime is to target 
-the ACAP PL and APUs, not just the PS and AI Engine cores. The ideal goal is
-for all of the various ACAP components to be usable seamlessly in a single
+the AIE PL and APUs, not just the PS and AI Engine cores. The ideal goal is
+for all of the various AIE components to be usable seamlessly in a single
 source SYCL application. This however is a long term goal. For now we support 
 Xilinx FPGAs and AI Engine Cores separately and in an experimental WIP fashion.
 
-## The SYCL Runtime for ACAP
+## The SYCL Runtime for AIE
 
-The SYCL runtime for ACAP is currently not the SYCL library compiled and 
+The SYCL runtime for AIE is currently not the SYCL library compiled and 
 packaged with the device compiler in this project. The library packaged with 
 this project is currently a modified (for Xilinx FPGA) variation of the Intel 
 upstream implementation. It's currently only aimed at targeting Intel GPUs, 
 Intel FPGAs, Intel CPUs, Nvidia GPUs, AMD GPUs and Xilinx FPGAs.
 
-The runtime you'll require for now is the ACAP++ library for AI Engine found 
-here: https://gitenterprise.xilinx.com/gauthier/acappp/tree/Merging
+There is 2 libraries using the same compiler:
+ - ACAP++ see API in [test](../test/acap/test_aie_mandelbrot.cpp)
+ - AIE++ see API in [test](../test/aie/mandelbrot.cpp)
+None of them are available for now. 
 
 The ACAP++ library is usable as a standalone SYCL runtime library without the
 device compiler and defaults to a multi-threaded CPU application (all kernels are 
 executed on the host). This makes it superb for debugging your applications 
 before trying to target your application on a more complex heterogeneous 
-architecture like ACAP.
+architecture like AIE.
+
+The AIE++ library for now only targets AIE hardware.
 
 ## The SYCL Device Compiler
 
@@ -59,11 +65,8 @@ by the SYCL runtime.
 chroot into an ARM to compile for ARM without cross-compilation (see https://confluence.xilinx.com/display/XRLABS/Running+SYCL+on+Tenzing+Versal+boards#RunningSYCLonTenzingVersalboards-Usingthemfromanx86machine).
 
 ``` bash
-# go to your home.
-cd /home/gauthier
-
-# git clone the repository with libxaiengine
-git clone https://gitenterprise.xilinx.com/embeddedsw/embeddedsw.git
+# git clone the repository with dependencies of libxaiengine
+git clone https://github.com/Xilinx/embeddedsw.git
 # go to libmetal's directory
 cd embeddedsw/ThirdParty/sw_services/libmetal/src/libmetal
 
@@ -91,17 +94,21 @@ cmake ..
 make -j`nproc`
 sudo make install
 
-cd ../../../../../../XilinxProcessorIPLib/drivers/aienginev2
+cd ../../../../../../..
+
+git clone https://github.com/Xilinx/aie-rt.git
+
+cd aie-rt/driver/src
 
 # -D__AIELINUX__ is to have an actual hardware backend not just a fake one.
 # -g is to be able to debug the library
 make -f Makefile.Linux CFLAGS="-D__AIELINUX__ -g" -j`nproc`
 
-sudo cp libxaiengine.so.2.1 /usr/local/lib
-sudo ln -sf libxaiengine.so.2.1 /usr/local/lib/libxaiengine.so.2
-sudo ln -sf libxaiengine.so.2 /usr/local/lib/libxaiengine.so
+# Adjust verions numbers based on what was inside the git
+sudo cp libxaiengine.so.3.0 /usr/local/lib
+sudo ln -sf libxaiengine.so.3.0 /usr/local/lib/libxaiengine.so.3
+sudo ln -sf libxaiengine.so.3 /usr/local/lib/libxaiengine.so
 sudo cp -r ../include/* /usr/local/include
-
 ```
 
 
@@ -140,12 +147,13 @@ This environnement should be in addition to the normal Vitis one.
 
 Here is an example of a full environement setup script
 ```bash
+WORKDIR=$HOME
 XILINX_ROOT=/proj/xbuilds/2021.2_qualified_latest/installs/lin64
 VITIS_VERSION=2021.2
 HLS_NAME=Vitis_HLS
 AIE_NAME=aietools
 
-export XILINX_XRT=/storage/gauthier/XRT/build/Debug/opt/xilinx/xrt
+export XILINX_XRT=$WORKDIR/XRT/build/Debug/opt/xilinx/xrt
 PRIORITY_PATH=$PATH
 export XPTI_TRACE_ENABLE=1
 export SYCL_PI_TRACE=1
@@ -162,10 +170,10 @@ source "$XILINX_ROOT/$HLS_NAME/$VITIS_VERSION/settings64.sh" &> /dev/null
 source "$XILINX_XRT/xrt/setup.sh" &> /dev/null
 TMP_PATH=$(echo $PATH | sed -e 's,$PRIORITY_PATH,,g')
 export PATH=$PRIORITY_PATH:$TMP_PATH
-export EMCONFIG_PATH=/storage/gauthier/
+export EMCONFIG_PATH=$WORKDIR/
 export LD_LIBRARY_PATH="$LIBRARY_PATH:$LD_LIBRARY_PATH"
 export PLATFORM_REPO_PATHS=/opt/xilinx/platforms/xilinx_u200_xdma_201830_2
-export TMP="/storage/gauthier/tmp"
+export TMP="$WORKDIR/tmp"
 
 export XILINXD_LICENSE_FILE=2100@aiengine-eng
 export LM_LICENSE_FILE=2100@aiengine-eng
@@ -177,7 +185,7 @@ source $AIE_ROOT/scripts/cardano_env.sh
 export CHESSROOT=$AIE_ROOT/tps/lnx64/
 ```
 
-## Several flavors for compiling a basic ACAP++ Hello World
+## Several flavors for compiling a basic AIE++ Hello World
 
 So for these examples we will compile the [hello_world.cpp](sycl/test/acap_tests/hello_world.cpp) 
 test. It's a 1 processing element (AI Engine core) kernel that prints some 
@@ -197,7 +205,7 @@ cross-compilation.
 In all of the following commands we assume you're running the latest
 version of Ubuntu Debian.
 
-### Compiling a basic ACAP Hello World for native CPU execution
+### Compiling a basic AIE Hello World for native CPU execution
 
 The following compilation command will compile the hello_world.cpp example for 
 your native CPU. What is meant by native in this case, is whatever architecture 
@@ -206,7 +214,7 @@ binary that executes on an x86 CPU. All kernels will also execute on the CPU,
 no device offloading or compilation is done.
 
 ```bash
-  $SYCL_BIN_DIR/clang++ -std=c++20 hello_world.cpp -I/ACAP++/acappp/include \
+  $SYCL_BIN_DIR/clang++ -std=c++20 hello_world.cpp -I/AIE++/acappp/include \
     `pkg-config gtkmm-3.0 --cflags` `pkg-config gtkmm-3.0 --libs`
 ```
 ### Cross-compilation for ARM CPU execution
@@ -215,7 +223,7 @@ The following compilation command will compile the hello_world.cpp example for
 ARM CPU. The general idea of the compilation commands is that you're compiling 
 your binary on an Linux x86 host for an Linux ARM64 (aarch64) target.
  
-In this case the assumption is that the ARM target is the ACAP PS which is an 
+In this case the assumption is that the ARM target is the AIE PS which is an 
 Cortex-A72 CPU, but in theory it could be whatever `-mcpu` target the Clang 
 compiler supports. 
  
@@ -223,17 +231,17 @@ compiler supports.
   $ISYCL_BIN_DIR/clang++ -std=c++20 -target aarch64-linux-gnu -mcpu=cortex-a72 \
     --sysroot /net/xsjsycl41/srv/Ubuntu-19.04/arm64-root-server-rw-tmp \
     `pkg-config gtkmm-3.0 --cflags` `pkg-config gtkmm-3.0 --libs` \
-    -I/ACAP++/acappp/include  hello_world.cpp
+    -I/AIE++/acappp/include  hello_world.cpp
 ```
 
-### Cross-compilation for ACAP PS/AI Engine execution
+### Cross-compilation for AIE PS/AI Engine execution
 
 This is the only compilation command that requires the SYCL device compiler. 
 As the intent is to compile all of the kernels for the device to be offloaded, 
 and the rest for the host.
 
-From a SYCL perspective the ACAP PS is the host device that will offload to
-the other elements of the ACAP architecture. The device in this case is the ACAP 
+From a SYCL perspective the AIE PS is the host device that will offload to
+the other elements of the AIE architecture. The device in this case is the AIE 
 AI Engine cores.
 
 Create a script called make.sh containing
@@ -243,11 +251,11 @@ SYCL_TARGET=aie32-xilinx-unknown-sycldevice
 CC=$1
 
 DIRNAME=$(dirname $CC)
-INCLUDE=$(realpath $DIRNAME/../include/sycl/acap-intrinsic.h)
+INCLUDE=$(realpath $DIRNAME/../include/sycl/aie-intrinsic.h)
 
 # Edit based on environnement.
-ACAP_RT_PATH=/storage/gauthier/acap
-ACAP_RT_BUILD_PATH=/storage/gauthier/acap
+AIE_RT_PATH=$WORKDIR/acap
+AIE_RT_BUILD_PATH=$WORKDIR/acap
 ROOT="/srv/Ubuntu-21.04/arm64-root-server-rw"
 
 shift 1
@@ -255,7 +263,7 @@ $CC -std=c++2a -Xclang -fforce-enable-int128 \
   -Xclang -aux-triple -Xclang aarch64-linux-gnu -g \
   -target aarch64-linux-gnu -mcpu=cortex-a72 -fsycl -nolibsycl \
   -DTRISYCL_XAIE_DEBUG -DTRISYCL_DEBUG -DBOOST_LOG_DYN_LINK --sysroot $ROOT \
-  -fsycl-unnamed-lambda -I$ACAP_RT_BUILD_PATH_deps/experimental_mdspan-src/include/ \
+  -fsycl-unnamed-lambda -I$AIE_RT_BUILD_PATH_deps/experimental_mdspan-src/include/ \
   -fsycl-targets=aie32-xilinx-unknown-sycldevice -Wl,-Bdynamic -ftemplate-backtrace-limit=0 \
   -lrt -Wl,-rpath=$ROOT/usr/lib/aarch64-linux-gnu/ -fsycl-mutable-global -Xclang -fsycl-allow-func-ptr \
   -Wl,$ROOT/usr/lib/aarch64-linux-gnu/libpthread.so.0 -ffast-math \
@@ -263,7 +271,7 @@ $CC -std=c++2a -Xclang -fforce-enable-int128 \
   -Wl,$ROOT/usr/lib/aarch64-linux-gnu/lapack/liblapack.so.3 \
   `pkg-config gtkmm-3.0 --libs --cflags` `pkg-config opencv4 --libs --cflags` \
   -L$ROOT/usr/lib/aarch64-linux-gnu/ -Xsycl-target-frontend -fno-exceptions \
-  -lxaiengine -lboost_thread -lboost_log -lboost_log_setup -lboost_context -lboost_fiber -I$ACAP_RT_PATH/include $@
+  -lxaiengine -lboost_thread -lboost_log -lboost_log_setup -lboost_context -lboost_fiber -I$AIE_RT_PATH/include $@
 ```
 Then to compile using:
 ```bash

@@ -1309,12 +1309,12 @@ def SYCLType: InheritableAttr {
                             "specialization_id", "kernel_handler", "buffer_location",
                             "no_alias", "accessor_property_list", "group",
                             "private_memory", "aspect", "annotated_ptr", "annotated_arg",
-                            "stream", "sampler", "acap_accessor"],
+                            "stream", "sampler", "aie_accessor"],
                            ["accessor", "local_accessor", "spec_constant",
                             "specialization_id", "kernel_handler", "buffer_location",
                             "no_alias", "accessor_property_list", "group",
                             "private_memory", "aspect", "annotated_ptr", "annotated_arg",
-                            "stream", "sampler", "acap_accessor"]>];
+                            "stream", "sampler", "aie_accessor"]>];
   // Only used internally by SYCL implementation
   let Documentation = [InternalOnly];
 }

@@ -53,5 +53,6 @@ done
 # Has to be invoked with exec, which means it never returns to this script
 # so this has to be the final invocation.
 exec $CHESSROOT/target/bin/LNa64bin/chess-clang "${ArgsArr[@]}"
+
 # to generate llvm IR from chess
-# exec $CHESSROOT/target/bin/LNa64bin/chess-clang "${ArgsArr[@]}" -S -emit-llvm -o /storage/gauthier/tmp/chess-out.ll
+# exec $CHESSROOT/target/bin/LNa64bin/chess-clang "${ArgsArr[@]}" -S -emit-llvm -o /storage/$USER/tmp/chess-out.ll

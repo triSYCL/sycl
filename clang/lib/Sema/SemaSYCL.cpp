@@ -88,7 +88,7 @@ static bool isSyclType(QualType Ty, SYCLTypeAttr::SYCLType TypeName) {
 }
 
 static bool isAcapAccessorType(QualType Ty) {
-  return isSyclType(Ty, SYCLTypeAttr::acap_accessor);
+  return isSyclType(Ty, SYCLTypeAttr::aie_accessor);
 }
 
 static bool isSyclAccessorType(QualType Ty) {
