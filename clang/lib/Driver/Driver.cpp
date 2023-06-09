@@ -5713,9 +5713,6 @@ class OffloadingActionBuilder final {
                                           ? types::TY_Tempfiletable
                                           : FullDeviceLinkAction->getType();
           auto createPostLinkAction = [&]() -> Action* {
-          // types::ID PostLinkOutType =
-          //     shouldOutputTables ? types::TY_Tempfiletable : types::TY_LLVM_BC;
-          // auto createPostLinkAction = [&]() {
             // For SPIR-V targets, force TY_Tempfiletable.
             auto TypedPostLinkAction = C.MakeAction<SYCLPostLinkJobAction>(
                 FullDeviceLinkAction, PostLinkOutType, types::TY_Tempfiletable);

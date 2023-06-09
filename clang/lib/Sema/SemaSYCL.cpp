@@ -87,7 +87,7 @@ static bool isSyclType(QualType Ty, SYCLTypeAttr::SYCLType TypeName) {
   return false;
 }
 
-static bool isAcapAccessorType(QualType Ty) {
+static bool isAieAccessorType(QualType Ty) {
   return isSyclType(Ty, SYCLTypeAttr::aie_accessor);
 }
 
@@ -1266,9 +1266,9 @@ class KernelObjVisitor {
       if (isSyclSpecialType(BaseTy, SemaRef))
         (void)std::initializer_list<int>{
             (Handlers.handleSyclSpecialType(Owner, Base, BaseTy), 0)...};
-      else if (isAcapAccessorType(BaseTy))
+      else if (isAieAccessorType(BaseTy))
         (void)std::initializer_list<int>{
-            (Handlers.handleAcapAccessorType(Owner, Base, BaseTy), 0)...};
+            (Handlers.handleAieAccessorType(Owner, Base, BaseTy), 0)...};
       // For all other bases, visit the record
       visitRecord(Owner, Base, BaseTy->getAsCXXRecordDecl(), BaseTy,
                   Handlers...);
@@ -1345,8 +1345,8 @@ class KernelObjVisitor {
                   QualType FieldTy, HandlerTys &... Handlers) {
     if (isSyclSpecialType(FieldTy, SemaRef))
       KF_FOR_EACH(handleSyclSpecialType, Field, FieldTy);
-    else if (isAcapAccessorType(FieldTy))
-      KF_FOR_EACH(handleAcapAccessorType, Field, FieldTy);
+    else if (isAieAccessorType(FieldTy))
+      KF_FOR_EACH(handleAieAccessorType, Field, FieldTy);
     else if (isSyclType(FieldTy, SYCLTypeAttr::spec_constant))
       KF_FOR_EACH(handleSyclSpecConstantType, Field, FieldTy);
     else if (FieldTy->isStructureOrClassType()) {
@@ -1409,11 +1409,11 @@ public:
   // Mark these virtual so that we can use override in the implementer classes,
   // despite virtual dispatch never being used.
 
-  virtual bool handleAcapAccessorType(const CXXRecordDecl *,
+  virtual bool handleAieAccessorType(const CXXRecordDecl *,
                                       const CXXBaseSpecifier &, QualType) {
     return true;
   }
-  virtual bool handleAcapAccessorType(FieldDecl *FD, QualType FieldTy) {
+  virtual bool handleAieAccessorType(FieldDecl *FD, QualType FieldTy) {
     return true;
   }
 
@@ -3822,7 +3822,7 @@ public:
     return true;
   }
 
-  bool handleAcapAccessorType(const CXXRecordDecl *RD,
+  bool handleAieAccessorType(const CXXRecordDecl *RD,
                               const CXXBaseSpecifier &BC,
                               QualType FieldTy) final {
     Header.addParamDesc(SYCLIntegrationHeader::kind_accessor, 0,
@@ -3831,7 +3831,7 @@ public:
     return true;
   }
 
-  bool handleAcapAccessorType(FieldDecl *FD, QualType FieldTy) final {
+  bool handleAieAccessorType(FieldDecl *FD, QualType FieldTy) final {
     Header.addParamDesc(SYCLIntegrationHeader::kind_accessor, 0,
                         CurOffset + offsetOf(FD, FieldTy));
     return true;
@@ -4379,16 +4379,16 @@ void Sema::ConstructOpenCLKernel(FunctionDecl *KernelCallerFunc,
     if (!getLangOpts().OptRecordFile.empty())
       opt_report.handleSyclKernelHandlerType();
   }
-  /// The Acap runtime has different code pattern form intel's runtime,
-  /// This is the way we generate inclusion headers for the Acap runtime.
+  /// The Aie runtime has different code pattern form intel's runtime,
+  /// This is the way we generate inclusion headers for the Aie runtime.
   if (getASTContext().getTargetInfo().getTriple().isXilinxAIE()) {
     auto *MD = cast<CXXMethodDecl>(KernelObj->getDeclContext());
-    CXXRecordDecl *AcapKernelObj = MD->getTemplateSpecializationArgs()
+    CXXRecordDecl *AieKernelObj = MD->getTemplateSpecializationArgs()
                                        ->get(0)
                                        .getAsType()
                                        ->getAsCXXRecordDecl();
-    Visitor.VisitRecordBases(AcapKernelObj, int_header);
-    Visitor.VisitRecordFields(AcapKernelObj, int_header);
+    Visitor.VisitRecordBases(AieKernelObj, int_header);
+    Visitor.VisitRecordFields(AieKernelObj, int_header);
   }
 }
 
