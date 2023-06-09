@@ -8,41 +8,38 @@
 // RUN: %run_if_sw_emu %ACC_RUN_PLACEHOLDER %t.out %S/data/input/lola.bmp
 // RUN: %run_if_sw_emu %ACC_RUN_PLACEHOLDER %t.out %S/data/input/vase.bmp
 
+// ./build-release/bin/clang++ -g -std=c++20 -fsycl -fsycl-targets=fpga64_hls_hw sycl/test/vitis/edge_detection/edge_detection.cpp -o edge_detection `pkg-config --libs --cflags opencv4`
+
 /*
-  Attempt at translating SDAccel Examples edge_detection example to SYCL
+  First attempt at translating SDAccel Examples edge_detection example to SYCL
+  https://github.com/Xilinx/SDAccel_Examples/tree/master/vision/edge_detection
+  For now there is no implementation of the original code using internal line
+  buffers.
 
-  Intel compile example command (use intel_selector from device_selectors.hpp):
-  $ISYCL_BIN_DIR/clang++ -std=c++2a -fsycl edge_detection.cpp -o \
-    edge_detection -lOpenCL `pkg-config --libs opencv`
+  Compile command for AMD FPGA:
+  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl \
+    -fsycl-targets=fpga64_hls_hw edge_detection.cpp \
+    -o edge_detection `pkg-config --libs --cflags opencv4`
 
-  compile command:
-  $ISYCL_BIN_DIR/clang++ -std=c++2a -fsycl \
-    -fsycl-targets=fpga64-xilinx-unknown-sycldevice edge_detection.cpp \
-    -o edge_detection -lOpenCL `pkg-config --libs opencv` \
-    -I/opt/xilinx/xrt/include/
-
+  Compile command for default selector and target (typically OpenCL CPU
+  implementation):
+  $SYCL_BIN_DIR/clang++ -std=c++20 -fsycl edge_detection.cpp \
+    -o edge_detection `pkg-config --libs --cflags opencv4`
 */
 
-#include <sycl.hpp>
+#include <sycl/sycl.hpp>
 #include <sycl/ext/xilinx/fpga.hpp>
-#include <iostream>
-#include <iterator>
-#include <string>
-#include <fstream>
 #include <algorithm>
+#include <cmath>
 #include <cstdlib>
+#include <fstream>
+#include <iostream>
 
 // OpenCV Includes
 #include <opencv2/opencv.hpp>
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/highgui/highgui.hpp>
-
-
-using namespace sycl;
-using namespace sycl::ext;
-
-class krnl_sobel;
 
 int main(int argc, char* argv[]) {
   if (argc != 2) {
@@ -63,23 +60,22 @@ int main(int argc, char* argv[]) {
   const size_t width = input.cols;
   const size_t area = height * width;
 
-  queue q {property::queue::enable_profiling()};
+  sycl::queue q {sycl::property::queue::enable_profiling()};
 
   // may need to modify this to be different if input.isContinuous
-  buffer<uchar> ib{input.begin<uchar>(), input.end<uchar>()};
-  buffer<uchar> ob{range<1>{area}};
+  sycl::buffer ib {input.begin<uchar>(), input.end<uchar>()};
+  sycl::buffer<uchar> ob { area };
 
   std::cout << "Calculating Max Energy... \n";
 
-  short iMax = 0;
-  iMax = *std::max_element(input.begin<uchar>(), input.end<uchar>(),
-                            [](auto i, auto j){ return i < j; });
+  auto iMax = *std::max_element(input.begin<uchar>(), input.end<uchar>(),
+                                [](auto i, auto j) { return i < j; });
 
-  std::cout << "inputBits = " << ceil(log2(iMax)) << " coefMax = 2 \n";
-  std::cout << "Max Energy = " << ceil(log2((long long)iMax * 2 * 3 * 3)) + 1
+  std::cout << "inputBits = " << std::ceil(std::log2(iMax)) << " coefMax = 2 \n";
+  std::cout << "Max Energy = " << std::ceil(std::log2((long long)iMax * 2 * 3 * 3)) + 1
             << " Bits \n";
-  std::cout << "Image Dimensions: " << input.size() << "\n";
-  std::cout << "Used Size: " << height << "x" << width << " = " << area << "\n";
+  std::cout << "Image Dimensions: " << input.size() << std::endl;
+  std::cout << "Used Size: " << height << "x" << width << " = " << area << std::endl;
 
   // mapping the enqueueTask call to a single_task, interested in seeing if a
   // parallel_for without a fixed 1-1-1 mapping is workable on an FPGA though..
@@ -88,24 +84,26 @@ int main(int argc, char* argv[]) {
   // FPGA deal with it?
   std::cout << "Launching Kernel... \n";
 
-  auto event = q.submit([&](handler &cgh) {
-    auto pixel_rb = ib.get_access<access::mode::read>(cgh);
-    auto pixel_wb = ob.get_access<access::mode::write>(cgh);
+  auto event = q.submit([&](sycl::handler &cgh) {
+    sycl::accessor pixel_rb{ib, cgh, sycl::read_only};
+    sycl::accessor pixel_wb{ob, cgh, sycl::write_only};
 
-    printf("pixel_rb size in submit: %zu \n", pixel_rb.get_size());
-    printf("pixel_rb count in submit: %zu \n", pixel_rb.size());
+    std::cout << "pixel_rb size in submit: " << pixel_rb.get_size() << std::endl;
+    std::cout << "pixel_rb count in submit: " << pixel_rb.size() << std::endl;
 
-    cgh.single_task<krnl_sobel>(
+    cgh.single_task<class krnl_sobel>(
     // The reqd_work_group_size is already actually applied internally for single
     // tasks but this showcases it's usage none the less, as it can be applied
     // to parallel_fors with local sizes
      [=] {
       // Partition completely the following arrays along their first dimension
-      auto gX = xilinx::partition_array<char, 9,
-                xilinx::partition::complete<1>>({-1, 0, 1, -2, 0, 2, -1, 0, 1});
+      auto gX = sycl::ext::xilinx::partition_array<
+          char, 9, sycl::ext::xilinx::partition::complete<1>>(
+          {-1, 0, 1, -2, 0, 2, -1, 0, 1});
 
-      auto gY = xilinx::partition_array<char, 9,
-                xilinx::partition::complete<1>>({1, 2, 1, 0, 0, 0, -1, -2, -1});
+      auto gY = sycl::ext::xilinx::partition_array<
+          char, 9, sycl::ext::xilinx::partition::complete<1>>(
+          {1, 2, 1, 0, 0, 0, -1, -2, -1});
 
       int magX, magY, gI, pIndex;
 
@@ -127,7 +125,7 @@ int main(int argc, char* argv[]) {
         for (size_t y = 1; y < height - 1; ++y) {
           magX = 0; magY = 0;
 
-          xilinx::pipeline([&] {
+          sycl::ext::xilinx::pipeline([&] {
             for(size_t k = 0; k < 3; ++k) {
               for(size_t l = 0; l < 3; ++l) {
                 gI = k * 3 + l;
@@ -150,23 +148,24 @@ int main(int argc, char* argv[]) {
   // a buffer access or a wait MUST be used before querying the event when
   // using Intel SYCL runtime at the moment as get_profiling_info is not a
   // blocking event in the SYCL specification at the moment(change in progress).
-  auto pixel_rb = ob.get_access<access::mode::read>();
+  sycl::host_accessor pixel_rb{ob, sycl::read_only};
 
   std::cout << "Getting Result... \n";
-  auto nstimeend = event.get_profiling_info<info::event_profiling::command_end>();
-  auto nstimestart = event.get_profiling_info<info::event_profiling::command_start>();
-  auto duration = nstimeend-nstimestart;
+  auto nstimeend =
+      event.get_profiling_info<sycl::info::event_profiling::command_end>();
+  auto nstimestart =
+      event.get_profiling_info<sycl::info::event_profiling::command_start>();
+  auto duration = nstimeend - nstimestart;
   std::cout << "Kernel Duration: " << duration << " ns \n";
 
   std::cout << "Calculating Output energy.... \n";
 
-  cv::Mat output(height, width, CV_8UC1, pixel_rb.get_pointer());
+  cv::Mat output(height, width, CV_8UC1, (void*)pixel_rb.get_pointer());
 
-  short oMax = 0;
-  oMax = *std::max_element(output.begin<uchar>(), output.end<uchar>(),
-                            [=](auto i, auto j){ return i < j; });
+  auto oMax = *std::max_element(output.begin<uchar>(), output.end<uchar>(),
+                                [=](auto i, auto j) { return i < j; });
 
-  std::cout << "outputBits = " << ceil(log2(oMax)) << "\n";
+  std::cout << "outputBits = " << std::ceil(std::log2(oMax)) << std::endl;
 
   cv::imwrite("input.bmp", input);
   cv::imwrite("output.bmp", output);

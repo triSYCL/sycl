@@ -38,7 +38,7 @@ public:
 
   struct MAXIBundle {
     // Represents one m_axi bundle and its associated memory bank ID and Type.
-    Optional<unsigned> TargetId; // Associated bank ID
+    std::optional<unsigned> TargetId; // Associated bank ID
     std::string BundleName; // Vitis bundle name
     sycl::MemoryType MemType;
     bool isDefaultBundle() const {

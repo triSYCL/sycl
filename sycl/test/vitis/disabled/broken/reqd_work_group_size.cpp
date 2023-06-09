@@ -81,7 +81,7 @@ int main() {
   range<3> k_range {8,8,8};
   buffer<unsigned int> ob(range<1>{1});
 
-  auto wb = ob.get_access<access::mode::write>();
+  sycl::host_accessor wb{ob, sycl::write_only};
   wb[0] = 0;
 
   std::cout << "reqd_work_group_size_test begin (xilinx fail, intel pass) \n";
@@ -96,13 +96,13 @@ int main() {
     // reqd_work_group_size attribute, so we are trying to stick to that in this
     // case.
     q.submit([&](handler &cgh) {
-      auto wb = ob.get_access<access::mode::write>(cgh);
+      sycl::accessor wb{ob, cgh, sycl::write_only};
       cgh.parallel_for<
           xilinx::reqd_work_group_size<4, 4, 4, reqd_work_group_size_test>>(
           k_range, [=](item<3> index) { wb[0] = 1; });
     });
 
-    auto rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob, sycl::read_only};
 
     if (q.get_context().get_platform().get_info<info::platform::vendor>()
         =="Xilinx") {
@@ -118,13 +118,13 @@ int main() {
     // Valid and probably main use case for Xilinx FPGAs that allows the kernel
     // to be optimized.
     q.submit([&](handler &cgh) {
-      auto wb = ob.get_access<access::mode::write>(cgh);
+      sycl::accessor wb{ob, cgh, sycl::write_only};
       cgh.single_task<
           xilinx::reqd_work_group_size<1, 1, 1, reqd_work_group_size_test2>>(
           [=] { wb[0] = 2; });
     });
 
-    auto rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob, sycl::read_only};
     assert(rb[0] == 2);
   }
 
@@ -136,13 +136,13 @@ int main() {
     // An invalid use case reqd_work_group_size is bigger than the global range
     // and the local range
     q.submit([&](handler &cgh) {
-      auto wb = ob.get_access<access::mode::write>(cgh);
+      sycl::accessor wb{ob, cgh, sycl::write_only};
       cgh.parallel_for<
           xilinx::reqd_work_group_size<24, 24, 24, reqd_work_group_size_test3>>(
             ndr, [=](nd_item<3> index) { wb[0] = 3; });
     });
 
-    auto rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob, sycl::read_only};
     if (q.get_context().get_platform().get_info<info::platform::vendor>()
         =="Xilinx") {
       assert(rb[0] == 2); // should still be 2
@@ -158,13 +158,13 @@ int main() {
     // random template inside of the xilinx namespace. As it's 4, 4, 4 the same
     // as nd_range's local it shouldn't break.
     q.submit([&](handler &cgh) {
-      auto wb = ob.get_access<access::mode::write>(cgh);
+      sycl::accessor wb{ob, cgh, sycl::write_only};
       cgh.parallel_for<xilinx::reqd_work_group_size<
           4, 4, 4, conflict_test<30, reqd_work_group_size_test4>>>(
           ndr, [=](nd_item<3> index) { wb[0] = 4; });
     });
 
-    auto rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob, sycl::read_only};
     assert(rb[0] == 4);
   }
 
@@ -175,14 +175,14 @@ int main() {
     // size and run. If the secondary reqd_work_group_size is chosen incorrectly
     // this should emit a run-time error.
     q.submit([&](handler &cgh) {
-      auto wb = ob.get_access<access::mode::write>(cgh);
+      sycl::accessor wb{ob, cgh, sycl::write_only};
       cgh.parallel_for<xilinx::reqd_work_group_size<4, 4, 4,
                         xilinx::reqd_work_group_size<5, 5, 5,
                           reqd_work_group_size_test5>>>(
         ndr, [=](nd_item<3> index) { wb[0] = 5; });
     });
 
-    auto rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob, sycl::read_only};
     assert(rb[0] == 5);
   }
 
@@ -194,14 +194,14 @@ int main() {
     // It should be possible to restrict it via constraints on the template
     // property.
     q.submit([&](handler &cgh) {
-      auto wb = ob.get_access<access::mode::write>(cgh);
+      sycl::accessor wb{ob, cgh, sycl::write_only};
       cgh.parallel_for<xilinx::reqd_work_group_size<4, 4, 4, int>>(
           ndr, [=](nd_item<3> index) {
             wb[0] = 6;
           });
     });
 
-    auto rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob, sycl::read_only};
     assert(rb[0] == 6);
   }
 
@@ -211,7 +211,7 @@ int main() {
     // breaks as you are specifying an incorrect workgroup size. It is larger
     // than the nd_range's maximum local size
     q.submit([&](handler &cgh) {
-      auto wb = ob.get_access<access::mode::write>(cgh);
+      sycl::accessor wb{ob, cgh, sycl::write_only};
       cgh.parallel_for<
           xilinx::reqd_work_group_size<8, 8, 8, reqd_work_group_size_test6>>(
           ndr, [=](nd_item<3> index) {
@@ -219,7 +219,7 @@ int main() {
           });
     });
 
-    auto rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob, sycl::read_only};
     if (q.get_context().get_platform().get_info<info::platform::vendor>()
         =="Xilinx") {
       assert(rb[0] == 6); // should still be 6
@@ -242,7 +242,7 @@ int main() {
     user specified via the nd_range.
     */
     q.submit([&](handler &cgh) {
-    auto wb = ob.get_access<access::mode::write>(cgh);
+    sycl::accessor wb{ob, cgh, sycl::write_only};
     cgh.parallel_for<
         xilinx::reqd_work_group_size<2, 2, 2, reqd_work_group_size_test7>>(
         ndr, [=](nd_item<3> index) {
@@ -250,7 +250,7 @@ int main() {
         });
     });
 
-    auto rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob, sycl::read_only};
     if (q.get_context().get_platform().get_info<info::platform::vendor>()
         =="Xilinx") {
       assert(rb[0] == 6); // should still be 6
@@ -266,7 +266,7 @@ int main() {
     // legal and the one test in here that is intended to give an "interesting"
     // output result for the moment.
     q.submit([&](handler &cgh) {
-      auto wb = ob2.get_access<access::mode::write>(cgh);
+      sycl::accessor wb{ob2, cgh, sycl::write_only};
       cgh.parallel_for<
           xilinx::reqd_work_group_size<4, 4, 4, reqd_work_group_size_test8>>(
           ndr, [=](nd_item<3> index) {
@@ -274,7 +274,7 @@ int main() {
           });
     });
 
-    auto rb = ob2.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob2, sycl::read_only};
     unsigned int sum = 0;
     for (size_t i = 0; i != ob2.size(); ++i) {
       sum += rb[i];
@@ -290,7 +290,7 @@ int main() {
     // a single_task
     range<1> single_range{1};
     q.submit([&](handler &cgh) {
-      auto wb = ob.get_access<access::mode::write>(cgh);
+      sycl::accessor wb{ob, cgh, sycl::write_only};
       cgh.parallel_for<
           xilinx::reqd_work_group_size<1, 1, 1, reqd_work_group_size_test9>>(
           single_range, [=](item<1> index) {
@@ -298,7 +298,7 @@ int main() {
           });
     });
 
-    auto rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob, sycl::read_only};
     assert(rb[0] == 9);
   }
 
@@ -309,12 +309,12 @@ int main() {
     // to the kernel name inside of the handler anyway. So this should be the
     // same as if a user explicitlyapplied the property to the name.
     q.submit([&](handler &cgh) {
-      auto wb = ob.get_access<access::mode::write>(cgh);
+      sycl::accessor wb{ob, cgh, sycl::write_only};
       cgh.single_task<reqd_work_group_size_test10>(
           [=] { wb[0] = 10; });
     });
 
-    auto rb = ob.get_access<access::mode::read>();
+    sycl::host_accessor rb{ob, sycl::read_only};
     assert(rb[0] == 10);
   }
 

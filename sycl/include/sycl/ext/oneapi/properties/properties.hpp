@@ -77,10 +77,11 @@ template <typename... Ts> struct RuntimePropertyStorage<std::tuple<Ts...>> {
 };
 template <typename T, typename... Ts>
 struct RuntimePropertyStorage<std::tuple<T, Ts...>>
-    : std::conditional_t<IsRuntimeProperty<T>::value,
-                         PrependTuple<T, typename RuntimePropertyStorage<
-                                             std::tuple<Ts...>>::type>,
-                         RuntimePropertyStorage<std::tuple<Ts...>>> {};
+    : sycl::detail::conditional_t<
+          IsRuntimeProperty<T>::value,
+          PrependTuple<
+              T, typename RuntimePropertyStorage<std::tuple<Ts...>>::type>,
+          RuntimePropertyStorage<std::tuple<Ts...>>> {};
 
 // Helper class to extract a subset of elements from a tuple.
 // NOTES: This assumes no duplicate properties and that all properties in the
@@ -231,12 +232,5 @@ struct is_device_copyable<
     std::enable_if_t<!std::is_trivially_copyable<
         ext::oneapi::experimental::properties<PropertiesT>>::value>>
     : is_device_copyable<PropertiesT> {};
-template <typename PropertiesT>
-struct is_device_copyable<
-    const ext::oneapi::experimental::properties<PropertiesT>,
-    std::enable_if_t<!std::is_trivially_copyable<
-        const ext::oneapi::experimental::properties<PropertiesT>>::value>>
-    : is_device_copyable<PropertiesT> {};
-
 } // __SYCL_INLINE_VER_NAMESPACE(_V1)
 } // namespace sycl

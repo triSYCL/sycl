@@ -58,9 +58,9 @@ int main(int argc, char* argv[]) {
   // the barrier requirement, but that's not quite implemented yet in the SYCL
   // runtime
   auto event = q.submit([&](handler &cgh) {
-    auto wh_rb = whb.get_access<access::mode::read>(cgh);
-    auto pixel_rb = ib.get_access<access::mode::read>(cgh);
-    auto pixel_wb = ob.get_access<access::mode::write>(cgh);
+    sycl::accessor wh_rb{whb, cgh, sycl::read_only};
+    sycl::accessor pixel_rb{ib, cgh, sycl::read_only};
+    sycl::accessor pixel_wb{ob, cgh, sycl::write_only};
 
     cgh.single_task<class median_filter>([=] {
       printf("single_task 1 launched");
@@ -70,7 +70,7 @@ int main(int argc, char* argv[]) {
   });
 
   // .get_access is a blocking event
-  auto rb = ob.get_access<access::mode::read>();
+  sycl::host_accessor rb{ob, sycl::read_only};
 
   bool match = true;
   if (argc == 3) {

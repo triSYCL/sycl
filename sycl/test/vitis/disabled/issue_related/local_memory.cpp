@@ -41,7 +41,7 @@ int main() {
   // This test only really funcitonally shows that it's not using global memory
   // in place of local memory...but it could also be implemented via private..
   q.submit([&](handler &cgh) {
-    auto acc_g = a.get_access<access::mode::write>(cgh);
+    sycl::accessor acc_g{a, cgh, sycl::write_only};
     accessor<int, 1, access::mode::read_write, access::target::local>
         local_mem(range<1>(sz / 2), cgh);
 
@@ -54,7 +54,7 @@ int main() {
 
   q.wait();
 
-  auto acc_r = a.get_access<access::mode::read>();
+  sycl::host_accessor acc_r{a, sycl::read_only};
 
   for (unsigned int i = 0; i < sz; ++i) {
     std::cout << acc_r[i] << "\n";

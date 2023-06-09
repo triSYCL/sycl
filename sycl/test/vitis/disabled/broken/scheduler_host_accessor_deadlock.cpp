@@ -39,25 +39,25 @@ int main() {
   sycl::buffer<int, 1> ob(arr, 1);
 //{
   q.submit([&](handler &cgh) {
-    auto wb = ob.get_access<access::mode::read_write>(cgh);
+    sycl::accessor wb{ob, cgh, sycl::read_write};
     cgh.single_task<k1>([=] {
       wb[0] += 1;
     });
   });
 
-  auto rb = ob.get_access<access::mode::read>();
+  sycl::host_accessor rb{ob, sycl::read_only};
   std::cout << rb[0] << "\n";
 //}
 
 //{
   q.submit([&](handler &cgh) {
-    auto wb = ob.get_access<access::mode::read_write>(cgh);
+    sycl::accessor wb{ob, cgh, sycl::read_write};
     cgh.single_task<k2>([=] {
       wb[0] += 1;
     });
   });
 
-  auto rb2 = ob.get_access<access::mode::read>();
+  sycl::host_accessor rb2{ob, sycl::read_only};
   std::cout << rb2[0] << "\n";
 //}
 

@@ -99,14 +99,14 @@ public:
   }
 
   template <int Dims, bool WithOffset>
-  static std::enable_if_t<WithOffset, item<Dims, WithOffset>>
+  static detail::enable_if_t<WithOffset, item<Dims, WithOffset>>
   createItem(const range<Dims> &Extent, const id<Dims> &Index,
              const id<Dims> &Offset) {
     return item<Dims, WithOffset>(Extent, Index, Offset);
   }
 
   template <int Dims, bool WithOffset>
-  static std::enable_if_t<!WithOffset, item<Dims, WithOffset>>
+  static detail::enable_if_t<!WithOffset, item<Dims, WithOffset>>
   createItem(const range<Dims> &Extent, const id<Dims> &Index) {
     return item<Dims, WithOffset>(Extent, Index);
   }
@@ -157,7 +157,8 @@ public:
   }
 
   template <int Dims, bool WithOffset>
-  static std::enable_if_t<WithOffset, const item<Dims, WithOffset>> getItem() {
+  static detail::enable_if_t<WithOffset, const item<Dims, WithOffset>>
+  getItem() {
     static_assert(is_valid_dimensions<Dims>::value, "invalid dimensions");
     id<Dims> GlobalId{__device_builtin::initGlobalInvocationId<Dims, id<Dims>>()};
     range<Dims> GlobalSize{__device_builtin::initGlobalSize<Dims, range<Dims>>()};
@@ -166,7 +167,8 @@ public:
   }
 
   template <int Dims, bool WithOffset>
-  static std::enable_if_t<!WithOffset, const item<Dims, WithOffset>> getItem() {
+  static detail::enable_if_t<!WithOffset, const item<Dims, WithOffset>>
+  getItem() {
     static_assert(is_valid_dimensions<Dims>::value, "invalid dimensions");
     id<Dims> GlobalId{__device_builtin::initGlobalInvocationId<Dims, id<Dims>>()};
     range<Dims> GlobalSize{__device_builtin::initGlobalSize<Dims, range<Dims>>()};
@@ -252,6 +254,16 @@ getSPIRVMemorySemanticsMask(const access::fence_space AccessSpace,
                  __spv::MemorySemanticsMask::SequentiallyConsistent |
                  __spv::MemorySemanticsMask::CrossWorkgroupMemory |
                  LocalScopeMask);
+}
+
+// To ensure loop unrolling is done when processing dimensions.
+template <size_t... Inds, class F>
+void dim_loop_impl(std::integer_sequence<size_t, Inds...>, F &&f) {
+  (f(Inds), ...);
+}
+
+template <size_t count, class F> void dim_loop(F &&f) {
+  dim_loop_impl(std::make_index_sequence<count>{}, std::forward<F>(f));
 }
 
 } // namespace detail

@@ -13,5 +13,5 @@ add_llvm_component_library(LLVMSYCL
   ${LLVM_MAIN_INCLUDE_DIR}/llvm/SYCL
 
   LINK_COMPONENTS
-  Core Support TransformUtils Demangle Analysis
+  Core Support TransformUtils Demangle Analysis TargetParser
 )

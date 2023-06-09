@@ -441,6 +441,7 @@ static void checkSYCLType(Sema &S, QualType Ty, SourceRange Loc,
   if (Ty->isSpecificBuiltinType(BuiltinType::Int128) ||
       Ty->isSpecificBuiltinType(BuiltinType::UInt128) ||
       Ty->isSpecificBuiltinType(BuiltinType::LongDouble) ||
+      Ty->isSpecificBuiltinType(BuiltinType::BFloat16) ||
       (Ty->isSpecificBuiltinType(BuiltinType::Float128) &&
        !S.Context.getTargetInfo().hasFloat128Type())) {
     S.SYCLDiagIfDeviceCode(Loc.getBegin(), diag::err_type_unsupported)
@@ -538,7 +539,7 @@ static void collectSYCLAttributes(Sema &S, FunctionDecl *FD,
     llvm::copy_if(FD->getAttrs(), std::back_inserter(Attrs), [](Attr *A) {
       // FIXME: Make this list self-adapt as new SYCL attributes are added.
       return isa<IntelReqdSubGroupSizeAttr, IntelNamedSubGroupSizeAttr,
-                 ReqdWorkGroupSizeAttr, WorkGroupSizeHintAttr,
+                 SYCLReqdWorkGroupSizeAttr, SYCLWorkGroupSizeHintAttr,
                  SYCLIntelKernelArgsRestrictAttr, SYCLIntelNumSimdWorkItemsAttr,
                  SYCLIntelSchedulerTargetFmaxMhzAttr,
                  SYCLIntelMaxWorkGroupSizeAttr, SYCLIntelMaxGlobalWorkDimAttr,
@@ -1007,28 +1008,6 @@ static QualType GetSYCLKernelObjectType(const FunctionDecl *KernelCaller) {
 
   // SYCL 1.2.1
   return KernelParamTy.getUnqualifiedType();
-}
-
-static CXXMethodDecl *getOperatorParens(const CXXRecordDecl *Rec) {
-  for (auto *MD : Rec->methods()) {
-    if (MD->getOverloadedOperator() == OO_Call)
-      return MD;
-  }
-  return nullptr;
-}
-
-// Fetch the associated call operator of the kernel object
-// (of either the lambda or the function object).
-static CXXMethodDecl *
-GetCallOperatorOfKernelObject(const CXXRecordDecl *KernelObjType) {
-  CXXMethodDecl *CallOperator = nullptr;
-  if (!KernelObjType)
-    return CallOperator;
-  if (KernelObjType->isLambda())
-    CallOperator = KernelObjType->getLambdaCallOperator();
-  else
-    CallOperator = getOperatorParens(KernelObjType);
-  return CallOperator;
 }
 
 /// Creates a kernel parameter descriptor
@@ -2110,6 +2089,8 @@ class SyclKernelPointerHandler : public SyclKernelFieldHandler {
         const_cast<DeclContext *>(RD->getDeclContext()), SourceLocation(),
         SourceLocation(), getModifiedName(RD->getIdentifier()));
     ModifiedRD->startDefinition();
+    if (RD->hasAttrs())
+      ModifiedRD->setAttrs(RD->getAttrs());
     ModifiedRecords.push_back(ModifiedRD);
   }
 
@@ -2124,6 +2105,8 @@ class SyclKernelPointerHandler : public SyclKernelFieldHandler {
         Ctx.getTrivialTypeSourceInfo(FieldTy, SourceLocation()), /*BW=*/nullptr,
         /*Mutable=*/false, ICIS_NoInit);
     Field->setAccess(FD->getAccess());
+    if (FD->hasAttrs())
+      Field->setAttrs(FD->getAttrs());
     // Add generated field to generated record.
     ModifiedRecords.back()->addDecl(Field);
   }
@@ -2975,6 +2958,14 @@ public:
   }
 };
 
+static CXXMethodDecl *getOperatorParens(const CXXRecordDecl *Rec) {
+  for (auto *MD : Rec->methods()) {
+    if (MD->getOverloadedOperator() == OO_Call)
+      return MD;
+  }
+  return nullptr;
+}
+
 static bool isESIMDKernelType(const CXXRecordDecl *KernelObjType) {
   const CXXMethodDecl *OpParens = getOperatorParens(KernelObjType);
   return (OpParens != nullptr) && OpParens->hasAttr<SYCLSimdAttr>();
@@ -3063,10 +3054,13 @@ class SyclKernelBodyCreator : public SyclKernelFieldHandler {
 
     // Fetch the kernel object and the associated call operator
     // (of either the lambda or the function object).
-    const CXXRecordDecl *KernelObj =
+    CXXRecordDecl *KernelObj =
         GetSYCLKernelObjectType(KernelCallerFunc)->getAsCXXRecordDecl();
-    CXXMethodDecl *WGLambdaFn = GetCallOperatorOfKernelObject(KernelObj);
-
+    CXXMethodDecl *WGLambdaFn = nullptr;
+    if (KernelObj->isLambda())
+      WGLambdaFn = KernelObj->getLambdaCallOperator();
+    else
+      WGLambdaFn = getOperatorParens(KernelObj);
     assert(WGLambdaFn && "non callable object is passed as kernel obj");
     // Mark the function that it "works" in a work group scope:
     // NOTE: In case of parallel_for_work_item the marker call itself is
@@ -3183,8 +3177,8 @@ class SyclKernelBodyCreator : public SyclKernelFieldHandler {
                    InitializationKind InitKind) {
     InitializedEntity Entity = InitializedEntity::InitializeBase(
         SemaRef.Context, &BS, /*IsInheritedVirtualBase*/ false, &VarEntity);
-    InitializationSequence InitSeq(SemaRef, Entity, InitKind, None);
-    ExprResult Init = InitSeq.Perform(SemaRef, Entity, InitKind, None);
+    InitializationSequence InitSeq(SemaRef, Entity, InitKind, std::nullopt);
+    ExprResult Init = InitSeq.Perform(SemaRef, Entity, InitKind, std::nullopt);
 
     InitListExpr *ParentILE = CollectionInitExprs.back();
     ParentILE->updateInit(SemaRef.getASTContext(), ParentILE->getNumInits(),
@@ -3385,7 +3379,7 @@ class SyclKernelBodyCreator : public SyclKernelFieldHandler {
 
   // Default inits the type, then calls the init-method in the body.
   bool handleSpecialType(FieldDecl *FD, QualType Ty) {
-    addFieldInit(FD, Ty, None,
+    addFieldInit(FD, Ty, std::nullopt,
                  InitializationKind::CreateDefault(KernelCallerSrcLoc));
 
     addFieldMemberExpr(FD, Ty);
@@ -3436,8 +3430,8 @@ class SyclKernelBodyCreator : public SyclKernelFieldHandler {
         InitializedEntity::InitializeVariable(KernelHandlerClone);
     InitializationKind InitKind =
         InitializationKind::CreateDefault(KernelCallerSrcLoc);
-    InitializationSequence InitSeq(SemaRef, VarEntity, InitKind, None);
-    ExprResult Init = InitSeq.Perform(SemaRef, VarEntity, InitKind, None);
+    InitializationSequence InitSeq(SemaRef, VarEntity, InitKind, std::nullopt);
+    ExprResult Init = InitSeq.Perform(SemaRef, VarEntity, InitKind, std::nullopt);
     KernelHandlerClone->setInit(
         SemaRef.MaybeCreateExprWithCleanups(Init.get()));
     KernelHandlerClone->setInitStyle(VarDecl::CallInit);
@@ -3723,7 +3717,7 @@ public:
 static bool IsSYCLUnnamedKernel(Sema &SemaRef, const FunctionDecl *FD) {
   if (!SemaRef.getLangOpts().SYCLUnnamedLambda)
     return false;
-  const QualType FunctorTy = GetSYCLKernelObjectType(FD);
+  QualType FunctorTy = GetSYCLKernelObjectType(FD);
   QualType TmplArgTy = calculateKernelNameType(SemaRef.Context, FD);
   return SemaRef.Context.hasSameType(FunctorTy, TmplArgTy);
 }
@@ -4164,7 +4158,7 @@ void Sema::CheckSYCLKernelCall(FunctionDecl *KernelFunc,
   const CXXRecordDecl *KernelObj =
       GetSYCLKernelObjectType(KernelFunc)->getAsCXXRecordDecl();
 
-  if (!GetCallOperatorOfKernelObject(KernelObj)) {
+  if (!KernelObj) {
     Diag(Args[0]->getExprLoc(), diag::err_sycl_kernel_not_function_object);
     KernelFunc->setInvalidDecl();
     return;
@@ -4553,12 +4547,12 @@ static void PropagateAndDiagnoseDeviceAttr(
     }
     break;
   }
-  case attr::Kind::ReqdWorkGroupSize: {
-    auto *RWGSA = cast<ReqdWorkGroupSizeAttr>(A);
-    if (auto *Existing = SYCLKernel->getAttr<ReqdWorkGroupSizeAttr>()) {
-      if (*Existing->getXDimVal() != *RWGSA->getXDimVal() ||
-          *Existing->getYDimVal() != *RWGSA->getYDimVal() ||
-          *Existing->getZDimVal() != *RWGSA->getZDimVal()) {
+  case attr::Kind::SYCLReqdWorkGroupSize: {
+    auto *RWGSA = cast<SYCLReqdWorkGroupSizeAttr>(A);
+    if (auto *Existing = SYCLKernel->getAttr<SYCLReqdWorkGroupSizeAttr>()) {
+      if (S.AnyWorkGroupSizesDiffer(Existing->getXDim(), Existing->getYDim(),
+                                    Existing->getZDim(), RWGSA->getXDim(),
+                                    RWGSA->getYDim(), RWGSA->getZDim())) {
         S.Diag(SYCLKernel->getLocation(),
                diag::err_conflicting_sycl_kernel_attributes);
         S.Diag(Existing->getLocation(), diag::note_conflicting_attribute);
@@ -4567,9 +4561,9 @@ static void PropagateAndDiagnoseDeviceAttr(
       }
     } else if (auto *Existing =
                    SYCLKernel->getAttr<SYCLIntelMaxWorkGroupSizeAttr>()) {
-      if (*Existing->getXDimVal() < *RWGSA->getXDimVal() ||
-          *Existing->getYDimVal() < *RWGSA->getYDimVal() ||
-          *Existing->getZDimVal() < *RWGSA->getZDimVal()) {
+      if (S.CheckMaxAllowedWorkGroupSize(
+              RWGSA->getXDim(), RWGSA->getYDim(), RWGSA->getZDim(),
+              Existing->getXDim(), Existing->getYDim(), Existing->getZDim())) {
         S.Diag(SYCLKernel->getLocation(),
                diag::err_conflicting_sycl_kernel_attributes);
         S.Diag(Existing->getLocation(), diag::note_conflicting_attribute);
@@ -4583,12 +4577,12 @@ static void PropagateAndDiagnoseDeviceAttr(
     }
     break;
   }
-  case attr::Kind::WorkGroupSizeHint: {
-    auto *WGSH = cast<WorkGroupSizeHintAttr>(A);
-    if (auto *Existing = SYCLKernel->getAttr<WorkGroupSizeHintAttr>()) {
-      if (Existing->getXDimVal() != WGSH->getXDimVal() ||
-          Existing->getYDimVal() != WGSH->getYDimVal() ||
-          Existing->getZDimVal() != WGSH->getZDimVal()) {
+  case attr::Kind::SYCLWorkGroupSizeHint: {
+    auto *WGSH = cast<SYCLWorkGroupSizeHintAttr>(A);
+    if (auto *Existing = SYCLKernel->getAttr<SYCLWorkGroupSizeHintAttr>()) {
+      if (S.AnyWorkGroupSizesDiffer(Existing->getXDim(), Existing->getYDim(),
+                                    Existing->getZDim(), WGSH->getXDim(),
+                                    WGSH->getYDim(), WGSH->getZDim())) {
         S.Diag(SYCLKernel->getLocation(),
                diag::err_conflicting_sycl_kernel_attributes);
         S.Diag(Existing->getLocation(), diag::note_conflicting_attribute);
@@ -4601,10 +4595,10 @@ static void PropagateAndDiagnoseDeviceAttr(
   }
   case attr::Kind::SYCLIntelMaxWorkGroupSize: {
     auto *SIMWGSA = cast<SYCLIntelMaxWorkGroupSizeAttr>(A);
-    if (auto *Existing = SYCLKernel->getAttr<ReqdWorkGroupSizeAttr>()) {
-      if (*Existing->getXDimVal() > *SIMWGSA->getXDimVal() ||
-          *Existing->getYDimVal() > *SIMWGSA->getYDimVal() ||
-          *Existing->getZDimVal() > *SIMWGSA->getZDimVal()) {
+    if (auto *Existing = SYCLKernel->getAttr<SYCLReqdWorkGroupSizeAttr>()) {
+      if (S.CheckMaxAllowedWorkGroupSize(
+              Existing->getXDim(), Existing->getYDim(), Existing->getZDim(),
+              SIMWGSA->getXDim(), SIMWGSA->getYDim(), SIMWGSA->getZDim())) {
         S.Diag(SYCLKernel->getLocation(),
                diag::err_conflicting_sycl_kernel_attributes);
         S.Diag(Existing->getLocation(), diag::note_conflicting_attribute);
@@ -4845,6 +4839,10 @@ void Sema::finalizeSYCLDelayedAnalysis(const FunctionDecl *Caller,
   if (Callee->hasAttr<SYCLDeviceAttr>() || Callee->hasAttr<SYCLKernelAttr>())
     return;
 
+  // If Callee has a CUDA device attribute, no diagnostic needed.
+  if (getLangOpts().CUDA && Callee->hasAttr<CUDADeviceAttr>())
+    return;
+
   // Diagnose if this is an undefined function and it is not a builtin.
   // Currently, there is an exception of "__failed_assertion" in libstdc++-11,
   // this undefined function is used to trigger a compiling error.
@@ -4983,7 +4981,7 @@ class SYCLFwdDeclEmitter
     D->print(OS, Policy);
 
     if (const auto *ED = dyn_cast<EnumDecl>(D)) {
-      QualType T = ED->getIntegerType();
+      QualType T = ED->getIntegerType().getCanonicalType();
       // Backup since getIntegerType() returns null for enum forward
       // declaration with no fixed underlying type
       if (T.isNull())
@@ -5384,6 +5382,24 @@ void SYCLIntegrationHeader::emit(raw_ostream &O) {
     O << "\n";
   }
 
+  // Generate declaration of variable of type __sycl_host_pipe_registration
+  // whose sole purpose is to run its constructor before the application's
+  // main() function.
+  if (NeedToEmitHostPipeRegistration) {
+    O << "namespace {\n";
+
+    O << "class __sycl_host_pipe_registration {\n";
+    O << "public:\n";
+    O << "  __sycl_host_pipe_registration() noexcept;\n";
+    O << "};\n";
+    O << "__sycl_host_pipe_registration __sycl_host_pipe_registrar;\n";
+
+    O << "} // namespace\n";
+
+    O << "\n";
+  }
+
+
   O << "// names of all kernels defined in the corresponding source\n";
   O << "static constexpr\n";
   O << "const char* const kernel_names[] = {\n";
@@ -5575,6 +5591,7 @@ void SYCLIntegrationFooter::addVarDecl(const VarDecl *VD) {
     return;
   // Step 1: ensure that this is of the correct type template specialization.
   if (!isSyclType(VD->getType(), SYCLTypeAttr::specialization_id) &&
+      !isSyclType(VD->getType(), SYCLTypeAttr::host_pipe) &&
       !S.isTypeDecoratedWithDeclAttribute<SYCLDeviceGlobalAttr>(
           VD->getType())) {
     // Handle the case where this could be a deduced type, such as a deduction
@@ -5589,9 +5606,12 @@ void SYCLIntegrationFooter::addVarDecl(const VarDecl *VD) {
   // Note that isLocalVarDeclorParm excludes thread-local and static-local
   // intentionally, as there is no way to 'spell' one of those in the
   // specialization. We just don't generate the specialization for those, and
-  // let an error happen during host compilation.
-  if (!VD->hasGlobalStorage() || VD->isLocalVarDeclOrParm())
+  // let an error happen during host compilation. To avoid multiple entries for
+  // redeclarations, variables with external storage are omitted.
+  if (VD->hasLocalStorage() || VD->isLocalVarDeclOrParm() ||
+      VD->hasExternalStorage())
     return;
+
   // Step 3: Add to collection.
   GlobalVars.push_back(VD);
 }
@@ -5744,6 +5764,7 @@ bool SYCLIntegrationFooter::emit(raw_ostream &OS) {
   llvm::SmallSet<const VarDecl *, 8> Visited;
   bool EmittedFirstSpecConstant = false;
   bool DeviceGlobalsEmitted = false;
+  bool HostPipesEmitted = false;
 
   // Used to uniquely name the 'shim's as we generate the names in each
   // anonymous namespace.
@@ -5751,12 +5772,15 @@ bool SYCLIntegrationFooter::emit(raw_ostream &OS) {
 
   std::string DeviceGlobalsBuf;
   llvm::raw_string_ostream DeviceGlobOS(DeviceGlobalsBuf);
+  std::string HostPipesBuf;
+  llvm::raw_string_ostream HostPipesOS(HostPipesBuf);
   for (const VarDecl *VD : GlobalVars) {
     VD = VD->getCanonicalDecl();
 
-    // Skip if this isn't a SpecIdType or DeviceGlobal.  This can happen if it
-    // was a deduced type.
+    // Skip if this isn't a SpecIdType, DeviceGlobal, or HostPipe.  This 
+    // can happen if it was a deduced type.
     if (!isSyclType(VD->getType(), SYCLTypeAttr::specialization_id) &&
+        !isSyclType(VD->getType(), SYCLTypeAttr::host_pipe) && 
         !S.isTypeDecoratedWithDeclAttribute<SYCLDeviceGlobalAttr>(
             VD->getType()))
       continue;
@@ -5767,7 +5791,7 @@ bool SYCLIntegrationFooter::emit(raw_ostream &OS) {
 
     // We only want to emit the #includes if we have a variable that needs
     // them, so emit this one on the first time through the loop.
-    if (!EmittedFirstSpecConstant && !DeviceGlobalsEmitted)
+    if (!EmittedFirstSpecConstant && !DeviceGlobalsEmitted && !HostPipesEmitted)
       OS << "#include <sycl/detail/defines_elementary.hpp>\n";
 
     Visited.insert(VD);
@@ -5787,6 +5811,20 @@ bool SYCLIntegrationFooter::emit(raw_ostream &OS) {
       DeviceGlobOS << SYCLUniqueStableIdExpr::ComputeName(S.getASTContext(),
                                                           VD);
       DeviceGlobOS << "\");\n";
+    } else if (isSyclType(VD->getType(), SYCLTypeAttr::host_pipe)) {
+      HostPipesEmitted = true;
+      HostPipesOS << "host_pipe_map::add(";
+      HostPipesOS << "(void *)&";
+      if (VD->isInAnonymousNamespace()) {
+        HostPipesOS << TopShim;
+      } else {
+        HostPipesOS << "::";
+        VD->getNameForDiagnostic(HostPipesOS, Policy, true);
+      }
+      HostPipesOS << ", \"";
+      HostPipesOS << SYCLUniqueStableIdExpr::ComputeName(S.getASTContext(),
+                                                         VD);
+      HostPipesOS << "\");\n";
     } else {
       EmittedFirstSpecConstant = true;
       OS << "namespace sycl {\n";
@@ -5830,5 +5868,21 @@ bool SYCLIntegrationFooter::emit(raw_ostream &OS) {
 
     S.getSyclIntegrationHeader().addDeviceGlobalRegistration();
   }
+
+  if (HostPipesEmitted) {
+    OS << "#include <sycl/detail/host_pipe_map.hpp>\n";
+    HostPipesOS.flush();
+    OS << "namespace sycl::detail {\n";
+    OS << "namespace {\n";
+    OS << "__sycl_host_pipe_registration::__sycl_host_pipe_"
+          "registration() noexcept {\n";
+    OS << HostPipesBuf;
+    OS << "}\n";
+    OS << "} // namespace (unnamed)\n";
+    OS << "} // namespace sycl::detail\n";
+
+    S.getSyclIntegrationHeader().addHostPipeRegistration();
+  }
+
   return true;
 }
