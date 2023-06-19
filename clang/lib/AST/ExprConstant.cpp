@@ -936,8 +936,11 @@ namespace {
     /// later on (such as a use of an undefined global).
     bool CheckingPotentialConstantExpression = false;
 
-    /// TODO: add doc.
+    /// This is set to true when evaluating the call to a static member
+    /// function. Because calls to static member function can be performed even
+    /// if the object is not a constant expression.
     bool AccessingStaticConstantDataMember = false;
+
     /// Whether we're checking for an expression that has undefined behavior.
     /// If so, we will produce warnings if we encounter an operation that is
     /// always undefined.
@@ -8478,11 +8481,15 @@ bool LValueExprEvaluator::VisitMemberExpr(const MemberExpr *E) {
   // Handle static member functions.
   if (const CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(E->getMemberDecl())) {
     if (MD->isStatic()) {
+      /// These changes here is a easy not quite correct hack to get static
+      /// member function to be constexpr even whet the object they are applied
+      /// on is not constexpr
       llvm::SaveAndRestore<bool> StaticMember(
           Info.AccessingStaticConstantDataMember);
-      if(Info.InConstantContext)
+      if (Info.InConstantContext)
         Info.AccessingStaticConstantDataMember = true;
       // VisitIgnoredBaseExpression(E->getBase());
+
       return Success(MD);
     }
   }
