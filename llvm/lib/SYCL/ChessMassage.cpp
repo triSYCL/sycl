@@ -56,7 +56,7 @@ struct ChessMassageLegacy : public ModulePass {
 
   /// For the kernel merging process, kernels need to be treated specially.
   /// The function merger pass doesn't merge functions with different attributes
-  /// that it doesn't know about. So preparechess adds a unique attribute to
+  /// that it doesn't know about. So prepare-chess adds a unique attribute to
   /// each kernel to prevent kernel function from being merged by the function
   /// merger. This function cleans up this annotations. The function merger
   /// should not be run after this pass.
@@ -191,7 +191,7 @@ void initializeChessMassageLegacyPass(PassRegistry &Registry);
 }
 
 /// TODO: split this pass into the kernel merging part and the downgrading part
-INITIALIZE_PASS(ChessMassageLegacy, "ChessMassage",
+INITIALIZE_PASS(ChessMassageLegacy, "chess-massage",
   "pass that downgrades modern LLVM IR to something compatible with current "
   "chess-clang backend LLVM IR", false, false)
 ModulePass *llvm::createChessMassageLegacyPass() {return new ChessMassageLegacy();}

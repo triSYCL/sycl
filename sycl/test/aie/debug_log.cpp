@@ -11,9 +11,7 @@ int main() {
   aie::queue q(dev);
   q.submit([](auto& ht) {
     ht.single_task([](auto& dt) {
-#ifdef __SYCL_DEVICE_ONLY__
-      aie::detail::debug_log("abcdefghijklmnopqrstuvwxyz\n");
-#endif
+      dt.service().logln("abcdefghijklmnopqrstuvwxyz");
       // CHECK: abcdefghijklmnopqrstuvwxyz
     });
   });

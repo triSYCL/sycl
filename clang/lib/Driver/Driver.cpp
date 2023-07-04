@@ -797,7 +797,7 @@ Driver::OpenMPRuntimeKind Driver::getOpenMPRuntime(const ArgList &Args) const {
 static bool isValidSYCLTriple(llvm::Triple T) {
   // NVPTX is valid for SYCL.
   if (T.isNVPTX() || T.getArch() == llvm::Triple::fpga64 ||
-      T.getArch() == llvm::Triple::aie32)
+      T.getArch() == llvm::Triple::aie1_32)
     return true;
 
   // AMDGCN is valid for SYCL
@@ -9626,7 +9626,7 @@ const ToolChain &Driver::getOffloadingDeviceToolChain(const ArgList &Args,
             TC = std::make_unique<toolchains::VXXToolChain>(
               *this, Target, HostTC, Args);
             break;
-          case llvm::Triple::aie32:
+          case llvm::Triple::aie1_32:
             TC = std::make_unique<toolchains::ChessToolChain>(
               *this, Target, HostTC, Args);
             break;

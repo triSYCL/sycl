@@ -1,13 +1,13 @@
 ## Disclaimer
 
-This is document is not complete. The compiler and library implementation are experimental, so it will likely
+This document is incomplete. The compiler and library implementation are experimental, so it will likely
 change rapidly or get outdated.
 
 The recent work has mostly focused on the more recent AIE++ library so a large part of this documentation is now outdated.
 
 ## Requirements
   * Recent Linux distribution
-  * Vitis 2021.2 which includes CHESS for AIE
+  * Vitis 2022.2 which includes CHESS for AIE
 
 # Xilinx AIE Compilation
 
@@ -246,7 +246,7 @@ AI Engine cores.
 
 Create a script called make.sh containing
 ```bash
-SYCL_TARGET=aie32-xilinx-unknown-sycldevice
+SYCL_TARGET=aie1_32-xilinx-unknown-sycldevice
 
 CC=$1
 
@@ -264,7 +264,7 @@ $CC -std=c++2a -Xclang -fforce-enable-int128 \
   -target aarch64-linux-gnu -mcpu=cortex-a72 -fsycl -nolibsycl \
   -DTRISYCL_XAIE_DEBUG -DTRISYCL_DEBUG -DBOOST_LOG_DYN_LINK --sysroot $ROOT \
   -fsycl-unnamed-lambda -I$AIE_RT_BUILD_PATH_deps/experimental_mdspan-src/include/ \
-  -fsycl-targets=aie32-xilinx-unknown-sycldevice -Wl,-Bdynamic -ftemplate-backtrace-limit=0 \
+  -fsycl-targets=aie1_32-xilinx-unknown-sycldevice -Wl,-Bdynamic -ftemplate-backtrace-limit=0 \
   -lrt -Wl,-rpath=$ROOT/usr/lib/aarch64-linux-gnu/ -fsycl-mutable-global -Xclang -fsycl-allow-func-ptr \
   -Wl,$ROOT/usr/lib/aarch64-linux-gnu/libpthread.so.0 -ffast-math \
   -Wl,$ROOT/usr/lib/aarch64-linux-gnu/blas/libblas.so.3.9.0 \

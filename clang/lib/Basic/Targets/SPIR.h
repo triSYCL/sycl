@@ -181,6 +181,8 @@ public:
   }
 
   void setAddressSpaceMap(bool DefaultIsGeneric) {
+    /// This call is only useful for SIPR usecases so if we are using
+    /// AIEAddrSpaceMap, we do nothing.
     if (AddrSpaceMap == &AIEAddrSpaceMap)
       return;
     AddrSpaceMap = DefaultIsGeneric ? &SPIRDefIsGenMap : &SPIRDefIsPrivMap;

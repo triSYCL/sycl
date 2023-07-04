@@ -100,14 +100,14 @@ KERNELPROP="${SOURCE_TEMPORARY_DIR}KernelProperties_${SOURCE_FILE_NAME}.bash"
 UNMERGED_PROP=$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}.bash
 
 # The kernel merging process:
-#  -preparechess  will setup metadata to prevent kernels from being merged by mergefunc and
+#  -prepare-chess  will setup metadata to prevent kernels from being merged by mergefunc and
 #                 set the linkage of non-kernel to private such that they can be discard when unused.
-#  -mergefunc     will merge identical functions except kernels because of preparechess changes.
+#  -mergefunc     will merge identical functions except kernels because of prepare-chess changes.
 #                 This makes spotting identical kernels much easier.
-#  -ChessMassage  will reorder kernels to be clustered by mergeability,
+#  -chess-massage  will reorder kernels to be clustered by mergeability,
 #                 generate an ordered list of kernels before the merge and
 #                 mark mergeable/redundant kernels as private.
-#  -globaldce     will eliminate kernels marked private by ChessMassage because they are unreachable.
+#  -globaldce     will eliminate kernels marked private by chess-massage because they are unreachable.
 #  -kernelPropGen will generate and ordered list of kernels after the merge
 #  and finally this script will compile each unique kernel via chess and duplicate the output for equivalent kernels.
 #  since the addresses of data is not the same for east tiles and west tiles east and west tiles a generally not merged.
@@ -117,7 +117,7 @@ UNMERGED_PROP=$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}
 
 cp $INPUT_FILE_NAME $INPUT_FILE_NAME.saved.bc
 
-$OPT -S -passes='preparechess,default<Oz>,mergefunc,ChessMassage,globaldce,kernelPropGen' -disable-loop-unrolling \
+$OPT -S -passes='prepare-chess,default<Oz>,mergefunc,chess-massage,globaldce,kernelPropGen' -disable-loop-unrolling \
   "$INPUT_FILE_NAME" --sycl-kernel-propgen-output $KERNELPROP \
   --sycl-kernel-unmerged-prop-out $UNMERGED_PROP -o \
   "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
@@ -129,7 +129,7 @@ $OPT -S -passes='preparechess,default<Oz>,mergefunc,ChessMassage,globaldce,kerne
 
 source "$KERNELPROP"
 
-# Retrieve the unmerged kernel list from ChessMassage. This is used to identify
+# Retrieve the unmerged kernel list from chess-massage. This is used to identify
 # how functions are merged. Some brief description of idea as below
 # The original unmerged list is as:
 #   func1 - func2 - func3 - func4 - func5 - ...

@@ -159,7 +159,6 @@ struct PrepareSyclChessOptLegacy : public ModulePass {
   }
 
   bool runOnModule(Module &M) override {
-
     /// Make everything volatile
     // makeAllMemoryOperationVolatile(M);
     /// Mark invisible globals as private
@@ -190,7 +189,7 @@ PreservedAnalyses PrepareSyclChessOptPass::run(Module &M, ModuleAnalysisManager 
 void initializePrepareSyclChessOptLegacyPass(PassRegistry &Registry);
 }
 
-INITIALIZE_PASS(PrepareSyclChessOptLegacy, "preparechess",
+INITIALIZE_PASS(PrepareSyclChessOptLegacy, "prepare-chess",
   "prepare SYCL chess device code to optimizations", false, false)
 ModulePass *llvm::createPrepareSyclChessOptLegacyPass() {return new PrepareSyclChessOptLegacy();}
 

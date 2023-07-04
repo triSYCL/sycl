@@ -6538,7 +6538,7 @@ def fsycl_use_vxx_names : Flag<["-"], "fsycl-use-vxx-names">,
   MarshallingInfoFlag<TargetOpts<"SYCLUseVXXNames">>;
 def fsycl_use_aie2_lib : Flag<["-"], "fsycl-use-aie2-lib">,
   HelpText<"Enable compiller support for the aie++ library instead of the acap++ library">,
-  MarshallingInfoFlag<TargetOpts<"SYCLUseAIE2Lib">>;
+  MarshallingInfoFlag<TargetOpts<"SYCLUseAIEppLib">>;
 def fdeclare_opencl_builtins : Flag<["-"], "fdeclare-opencl-builtins">,
   HelpText<"Add OpenCL builtin function declarations (experimental)">;
 def fdeclare_spirv_builtins

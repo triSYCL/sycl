@@ -601,8 +601,8 @@ TargetInfo *AllocateTarget(const llvm::Triple &Triple,
       return new X86_64TargetInfo(Triple, Opts);
     }
 
-  case llvm::Triple::aie32: {
-    // Triple example: aie32-xilinx-unknown-sycldevice
+  case llvm::Triple::aie1_32: {
+    // Triple example: aie1_32-xilinx-unknown-sycldevice
     if (Triple.getVendor() == llvm::Triple::Xilinx) {
        switch (os) {
        case llvm::Triple::Linux:

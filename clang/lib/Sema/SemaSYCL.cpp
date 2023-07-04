@@ -2533,6 +2533,9 @@ public:
     ASTContext &Ctx = SemaRef.getASTContext();
     FunctionProtoType::ExtProtoInfo Info(CC_OpenCLKernel);
 
+    /// aie++/acap++ and SYCL have different runtimes with different
+    /// expectations of kernel function. here we generate the code specifically
+    /// for the aie++/acap++ runtimes
     if (Ctx.getTargetInfo().getTriple().isXilinxAIE()) {
       Params.clear();
 
@@ -4379,8 +4382,8 @@ void Sema::ConstructOpenCLKernel(FunctionDecl *KernelCallerFunc,
     if (!getLangOpts().OptRecordFile.empty())
       opt_report.handleSyclKernelHandlerType();
   }
-  /// The Aie runtime has different code pattern form intel's runtime,
-  /// This is the way we generate inclusion headers for the Aie runtime.
+  /// The AIE runtime has different code patterns from Intel's runtime,
+  /// This is the way we generate inclusion headers for the AIE runtime.
   if (getASTContext().getTargetInfo().getTriple().isXilinxAIE()) {
     auto *MD = cast<CXXMethodDecl>(KernelObj->getDeclContext());
     CXXRecordDecl *AieKernelObj = MD->getTemplateSpecializationArgs()
@@ -5276,7 +5279,7 @@ static void OutputStableNameInChars(raw_ostream &O, StringRef Name) {
 
 void SYCLIntegrationHeader::emit(raw_ostream &O) {
   bool IsAIE = S.getASTContext().getTargetInfo().getTriple().isXilinxAIE();
-  bool IsAIEpp = S.getASTContext().getTargetInfo().getTargetOpts().SYCLUseAIE2Lib;
+  bool IsAIEpp = S.getASTContext().getTargetInfo().getTargetOpts().SYCLUseAIEppLib;
   O << "// This is auto-generated SYCL integration header.\n";
   O << "\n";
 
