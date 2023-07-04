@@ -4968,9 +4968,12 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   Arg *SYCLStdArg = Args.getLastArg(options::OPT_sycl_std_EQ);
 
-  if (RawTriple.isXilinxFPGA()) {
+  if (RawTriple.isXilinxSYCLDevice()) {
     /// -O3 to generate all the necessary information for proper optimization.
-    CmdArgs.push_back("-O3");
+    if (RawTriple.isXilinxAIE())
+      CmdArgs.push_back("-Oz");
+    else
+      CmdArgs.push_back("-O3");
     /// Use -disable-llvm-passes because we want sycl_vxx and v++ to have full
     /// control over the IR, so we disable any optimization that could run
     /// before them.

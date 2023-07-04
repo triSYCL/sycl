@@ -16,17 +16,17 @@ auto constexpr g = 9.81;
 auto constexpr alpha = K * g;
 auto constexpr damping = 0.999;
 
-auto constexpr image_size = 4;
+auto constexpr image_size = 20;
 auto constexpr zoom = 5;
 /// Add a drop almost between tile (1,1) and (2,2)
 auto constexpr x_drop = image_size * 1 - image_size / 2 - 1;
 auto constexpr y_drop = image_size * 1 - image_size / 2 - 1;
-auto constexpr drop_value = 100.0;
-auto constexpr drop_radius = 5.0;
+auto constexpr drop_value = 200.0;
+auto constexpr drop_radius = 10.0;
 
 /** Time-step interval between each display.
     Use 1 to display all the frames, 2 for half the frame and so on. */
-auto constexpr display_time_step = 1;
+auto constexpr display_time_step = 50;
 
 auto epsilon = 0.01;
 
@@ -59,9 +59,9 @@ constexpr auto shoal_factor = [](auto x, auto y) constexpr {
 /// Add a square harbor in the water
 constexpr auto is_harbor = [](auto x, auto y) constexpr -> bool {
   /// The square harbor center coordinates
-  auto constexpr x_harbor = image_size * 3 - image_size / 3;
+  auto constexpr x_harbor = image_size * 2 - image_size / 3;
   auto constexpr y_harbor = image_size * 2 - image_size / 3;
-  auto constexpr length_harbor = image_size;
+  auto constexpr length_harbor = image_size + image_size / 2;
 
   // A square centered on the harbor center
   auto harbor =
@@ -73,8 +73,7 @@ constexpr auto is_harbor = [](auto x, auto y) constexpr -> bool {
                     y < y_harbor - image_size
                     // Add some 4-pixel holes every image_size/2
                     && (y / 4) % (image_size / 8);
-  return false;
-  // return harbor || breakwater;
+  return harbor || breakwater;
 };
 
 void initialize_space(auto& dt) {
@@ -82,16 +81,12 @@ void initialize_space(auto& dt) {
   for (int j = 0; j < image_size; ++j)
     for (int i = 0; i < image_size; ++i) {
       m.u[j][i] = m.v[j][i] = 0;
-      // m.side[j][i] = K * (!is_harbor(i + (image_size - 1) * dt.x(),
-      //                                j + (image_size - 1) * dt.y()));
-      m.side[j][i] = K;
+      m.side[j][i] = K * (!is_harbor(i + (image_size - 1) * dt.x(),
+                                     j + (image_size - 1) * dt.y()));
       m.depth[j][i] = 1.0;
-      // m.depth[j][i] = 2600.0 * shoal_factor(i + (image_size - 1) * dt.x(),
-      //                                       j + (image_size - 1) * dt.y());
       // Add a drop using the global coordinate taking into account the halo
       m.w[j][i] = add_a_drop(i + (image_size - 1) * dt.x(),
                              j + (image_size - 1) * dt.y());
-      // m.w[j][i] = add_a_drop(i, j);
     }
 }
 
@@ -190,7 +185,7 @@ void compute(auto& dt) {
 
 int main(int argc, char** argv) {
   aie::ext::application<data_type> a;
-  aie::device<1, 1> dev;
+  aie::device<4, 4> dev;
   aie::queue q(dev);
 
   struct tile_data {
@@ -201,26 +196,18 @@ int main(int argc, char** argv) {
     data_type depth[image_size][image_size]; //< Average depth
   };
 
-  a.start(argc, argv, dev.sizeX, dev.sizeY, image_size, image_size, 30)
+  a.start(argc, argv, dev.sizeX, dev.sizeY, image_size, image_size, 2)
       .get_image_grid()
       .get_palette()
       .set(aie::ext::palette::rainbow, 150, 2, 127);
   q.submit_uniform<tile_data>(
       [](auto& ht) {
         ht.single_task([](auto& dt) {
-          auto m = dt.mem();
-          double arr[16] = {92.0, 96.0, 92.0, 80.0, 96.0, 100.0, 96.0, 84.0, 92.0, 96.0, 92.0, 80.0, 80.0, 84.0, 80.0, 68.0};
-          __builtin_memcpy(m.w, arr, sizeof(arr));
-          // initialize_space(dt);
-          display(dt);
-          do {
-            // compute(dt);
-            // for (int j = 0; j < image_size; ++j)
-            //   for (int i = 0; i < image_size; ++i) {
-            //     m.w[j][i] = 96;
-            //     // curr += 0.05;
-            //   }
-          } while (!display(dt));
+          initialize_space(dt);
+          while (!display(dt)) {
+            for (int i = 0; i < display_time_step; i++)
+              compute(dt);
+          }
         });
       },
       aie::add_service(a.get_service()));
