@@ -109,7 +109,7 @@ public:
     fpga32,         // 32-bit Xilinx FPGA
     fpga64,         // 64-bit Xilinx FPGA
     vitis_ip,       // Vitis ip block design for Xilinx FPGA
-    aie1_32,          // AMD/Xilinx AI Engine 32-bit
+    aie1_32,        // AMD/Xilinx AI Engine 32-bit
     ve,             // NEC SX-Aurora Vector Engine
     LastArchType = ve
   };

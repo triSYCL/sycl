@@ -6536,8 +6536,8 @@ def fsycl_allow_variadic_func : Flag<["-"], "fsycl-allow-variadic-func">,
 def fsycl_use_vxx_names : Flag<["-"], "fsycl-use-vxx-names">,
   HelpText<"Use the kernel name generator that works with V++">,
   MarshallingInfoFlag<TargetOpts<"SYCLUseVXXNames">>;
-def fsycl_use_aie2_lib : Flag<["-"], "fsycl-use-aie2-lib">,
-  HelpText<"Enable compiller support for the aie++ library instead of the acap++ library">,
+def fsycl_use_aiepp_lib : Flag<["-"], "fsycl-use-aiepp-lib">,
+  HelpText<"Enable compiler support for the aie++ library instead of the acap++ library">,
   MarshallingInfoFlag<TargetOpts<"SYCLUseAIEppLib">>;
 def fdeclare_opencl_builtins : Flag<["-"], "fdeclare-opencl-builtins">,
   HelpText<"Add OpenCL builtin function declarations (experimental)">;

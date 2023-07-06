@@ -26,8 +26,8 @@ namespace targets {
 
 /// Nullary address space map hack for AIE
 /// \TODO: Either a less hacky implementation, like having an AIE target/target
-///   info rather than using the SPIR target
-///   OR AIE has some of it's own address spaces so perhaps this can be
+///   info rather than using the SPIR target,
+///   or AIE has some of its own address spaces, so perhaps this can be
 ///   used for that. However, it's advisable to move towards AIE having its own
 ///  target info.
 static const unsigned AIEAddrSpaceMap[] = {
@@ -181,7 +181,7 @@ public:
   }
 
   void setAddressSpaceMap(bool DefaultIsGeneric) {
-    /// This call is only useful for SIPR usecases so if we are using
+    /// This call is only useful for SPIR use-cases so if we are using
     /// AIEAddrSpaceMap, we do nothing.
     if (AddrSpaceMap == &AIEAddrSpaceMap)
       return;
@@ -243,7 +243,7 @@ public:
     PtrDiffType = IntPtrType = TargetInfo::SignedInt;
     if (Triple.isXilinxAIE())
       /// This is only a part of the datalayout used by chess because chess's
-      /// datalayout contains bitwidth that are not multiple of bytes
+      /// datalayout contains bit-widths that are not multiple of bytes
       resetDataLayout(
           "e-i8:8:8-i16:16:16-i32:32:32-i64:32:32-f32:32:32-f64:32:32-p:32:32:"
           "32:32:8");

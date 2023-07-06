@@ -117,7 +117,7 @@ UNMERGED_PROP=$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}
 
 cp $INPUT_FILE_NAME $INPUT_FILE_NAME.saved.bc
 
-$OPT -S -passes='prepare-chess,default<Oz>,mergefunc,chess-massage,globaldce,kernelPropGen' -disable-loop-unrolling \
+$OPT -S -passes='default<Oz>,prepare-chess,default<Oz>,mergefunc,chess-massage,globaldce,kernelPropGen' -disable-loop-unrolling \
   "$INPUT_FILE_NAME" --sycl-kernel-propgen-output $KERNELPROP \
   --sycl-kernel-unmerged-prop-out $UNMERGED_PROP -o \
   "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"

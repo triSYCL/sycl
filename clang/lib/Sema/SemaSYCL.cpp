@@ -1115,7 +1115,7 @@ constructKernelName(Sema &S, const FunctionDecl *KernelCallerFunc,
 // Language AS Spaces are set to the default 0 for our targets. But they still
 // pose a problem when we're trying to spit out our types as strings.
 //
-// An alternative fix to this is to just put the address space modificaiton
+// An alternative fix to this is to just put the address space modification
 // section of the code in buildArgTys inside of an if (AIEngine) block or to
 // create a temporary copy we can rip the address space qualifier off of.
 //
@@ -1410,9 +1410,10 @@ public:
   // despite virtual dispatch never being used.
 
   virtual bool handleAieAccessorType(const CXXRecordDecl *,
-                                      const CXXBaseSpecifier &, QualType) {
+                                     const CXXBaseSpecifier &, QualType) {
     return true;
   }
+  
   virtual bool handleAieAccessorType(FieldDecl *FD, QualType FieldTy) {
     return true;
   }
@@ -2551,6 +2552,10 @@ public:
     QualType FuncType = Ctx.getFunctionType(Ctx.VoidTy, ArgTys, Info);
     KernelDecl->setType(FuncType);
     KernelDecl->setParams(Params);
+
+    /// aie++/acap++ and SYCL have different runtimes with different
+    /// expectations of kernel function. here we generate the code specifically
+    /// for the aie++/acap++ runtimes
     if (Ctx.getTargetInfo().getTriple().isXilinxAIE()) {
       std::pair<DeclaratorDecl *, DeclaratorDecl *> P{
           OldDecl->param_begin()[0], KernelDecl->param_begin()[0]};
@@ -3825,15 +3830,17 @@ public:
     return true;
   }
 
+  /// Add an entry for this accessor the the inclusion header
   bool handleAieAccessorType(const CXXRecordDecl *RD,
-                              const CXXBaseSpecifier &BC,
-                              QualType FieldTy) final {
+                             const CXXBaseSpecifier &BC,
+                             QualType FieldTy) final {
     Header.addParamDesc(SYCLIntegrationHeader::kind_accessor, 0,
                         CurOffset +
                             offsetOf(RD, BC.getType()->getAsCXXRecordDecl()));
     return true;
   }
 
+  /// Add an entry for this accessor the the inclusion header
   bool handleAieAccessorType(FieldDecl *FD, QualType FieldTy) final {
     Header.addParamDesc(SYCLIntegrationHeader::kind_accessor, 0,
                         CurOffset + offsetOf(FD, FieldTy));

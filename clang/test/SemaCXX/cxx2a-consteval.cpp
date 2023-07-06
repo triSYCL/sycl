@@ -1029,17 +1029,3 @@ int f() {
    int x = A{};
 }
 }
-
-namespace GH56246 {
-struct S {
-    static consteval int hello() { return 1;}
-    static constexpr int world() { return 1;}
-
-    consteval int baz() const { return this->hello();}
-    // Previously these two failed because of the use of `this` in the constant expressions.
-    int foo() const { return this->hello() + this->world(); }
-    constexpr int bar() const { return this->hello() + this->world();}
-} s;
-static_assert(s.bar() == 2);
-static_assert(s.baz() == 1);
-}

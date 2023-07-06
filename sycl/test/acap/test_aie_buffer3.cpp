@@ -12,7 +12,6 @@
 using namespace sycl::vendor::xilinx;
 
 int main() {
-  // Define an AIE CGRA with all the tiles of a VC1902
   acap::aie::device<acap::aie::layout::size<1,1>> d;
   // 1 buffer per tile
   sycl::buffer<int> in1[d.x_size][d.y_size];

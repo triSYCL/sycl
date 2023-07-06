@@ -3,9 +3,9 @@ add_llvm_component_library(LLVMSYCL
   InSPIRation.cpp
   KernelProperties.cpp
   KernelPropGen.cpp
+  LowerSYCLMetaData.cpp
   PrepareSYCLOpt.cpp
   PrepareSyclChessOpt.cpp
-  LowerSYCLMetaData.cpp
   VXXIRDowngrader.cpp
   SYCLUtils.cpp
 

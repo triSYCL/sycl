@@ -22,7 +22,7 @@ int main() {
         }
       } else {
         for (int i = 0; i < size; i++) {
-          acc[i] = dt.template cascade_read<int>();
+          dt.cascade_read_into(acc[i]);
         }
       }
     });

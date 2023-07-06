@@ -4969,7 +4969,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
   Arg *SYCLStdArg = Args.getLastArg(options::OPT_sycl_std_EQ);
 
   if (RawTriple.isXilinxSYCLDevice()) {
-    /// -O3 to generate all the necessary information for proper optimization.
+    /// -O3 or -Oz to generate all the necessary information for proper
+    /// optimization.
     if (RawTriple.isXilinxAIE())
       CmdArgs.push_back("-Oz");
     else

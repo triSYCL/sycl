@@ -9,7 +9,6 @@
 using namespace sycl::vendor::xilinx;
 
 int main() {
-  // Define an AIE CGRA with all the tiles of a VC1902
   // acap::aie::device<acap::aie::layout::vc1902> d;
   acap::aie::device<acap::aie::layout::size<1, 1>> d;
   //  Submit some work on each tile, which is SYCL sub-device

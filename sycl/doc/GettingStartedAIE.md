@@ -28,7 +28,7 @@ this project is currently a modified (for Xilinx FPGA) variation of the Intel
 upstream implementation. It's currently only aimed at targeting Intel GPUs, 
 Intel FPGAs, Intel CPUs, Nvidia GPUs, AMD GPUs and Xilinx FPGAs.
 
-There is 2 libraries using the same compiler:
+There are 2 libraries using the same compiler:
  - ACAP++ see API in [test](../test/acap/test_aie_mandelbrot.cpp)
  - AIE++ see API in [test](../test/aie/mandelbrot.cpp)
 None of them are available for now. 
@@ -197,19 +197,18 @@ Although in the two cases where we're only compiling for CPU it's not strictly
 required, provided the C++ compiler you use is fairly up-to-date and supports 
 C++ 20, the commands should work.
 
-The directory `/net/xsjsycl41/srv/Ubuntu-20.10/arm64-root-server-rw-tmp` we 
-make reference to in the cross-compilation commands is an Ubuntu-19.04 arm64 
+The directory `/net/xsjsycl41/srv/Ubuntu-22.04/arm64-root-server-rw-tmp` we  reference to in the cross-compilation commands is an Ubuntu-22.04 arm64 
 (AKA aarch64) image setup to contain all of the required libraries we need for 
 cross-compilation.
 
 In all of the following commands we assume you're running the latest
-version of Ubuntu Debian.
+version of Ubuntu or Debian.
 
 ### Compiling a basic AIE Hello World for native CPU execution
 
-The following compilation command will compile the hello_world.cpp example for 
+The following compilation command will compile the `hello_world.cpp` example for 
 your native CPU. What is meant by native in this case, is whatever architecture 
-you're compiling on. So compiling on x86, will result in a hello_world 
+you're compiling on. So compiling on x86, will result in a `hello_world`
 binary that executes on an x86 CPU. All kernels will also execute on the CPU,
 no device offloading or compilation is done.
 
@@ -219,7 +218,7 @@ no device offloading or compilation is done.
 ```
 ### Cross-compilation for ARM CPU execution
 
-The following compilation command will compile the hello_world.cpp example for 
+The following compilation command will compile the `hello_world.cpp` example for 
 ARM CPU. The general idea of the compilation commands is that you're compiling 
 your binary on an Linux x86 host for an Linux ARM64 (aarch64) target.
  
@@ -237,14 +236,14 @@ compiler supports.
 ### Cross-compilation for AIE PS/AI Engine execution
 
 This is the only compilation command that requires the SYCL device compiler. 
-As the intent is to compile all of the kernels for the device to be offloaded, 
+As the intent is to compile all of the kernels to be offloaded for the device, 
 and the rest for the host.
 
 From a SYCL perspective the AIE PS is the host device that will offload to
 the other elements of the AIE architecture. The device in this case is the AIE 
 AI Engine cores.
 
-Create a script called make.sh containing
+Create a script called `make.sh` containing
 ```bash
 SYCL_TARGET=aie1_32-xilinx-unknown-sycldevice
 
@@ -256,7 +255,8 @@ INCLUDE=$(realpath $DIRNAME/../include/sycl/aie-intrinsic.h)
 # Edit based on environnement.
 AIE_RT_PATH=$WORKDIR/acap
 AIE_RT_BUILD_PATH=$WORKDIR/acap
-ROOT="/srv/Ubuntu-21.04/arm64-root-server-rw"
+# Location of an Ubuntu root directory
+ROOT="/srv/Ubuntu-22.04/arm64-root-server-rw"
 
 shift 1
 $CC -std=c++2a -Xclang -fforce-enable-int128 \
@@ -287,9 +287,11 @@ you can use the templated model:
 
 using namespace sycl::vendor::xilinx;
 
+// X and Y are the coordinates of the tile in the architecture
 template <typename AIE, int X, int Y>
 struct prog : acap::aie::tile<AIE, X, Y> {
   void run() {
+    // Some computation
   }
 };
 

@@ -8481,10 +8481,9 @@ bool LValueExprEvaluator::VisitMemberExpr(const MemberExpr *E) {
   // Handle static member functions.
   if (const CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(E->getMemberDecl())) {
     if (MD->isStatic()) {
-      /// These changes here is a easy not quite correct hack to get static
+      /// These changes here are an easy but not quite correct hack to allow static
       /// member function to be constexpr even when the object they are applied
       /// on is not constexpr
-      /// 
       llvm::SaveAndRestore<bool> StaticMember(
           Info.AccessingStaticConstantDataMember);
       if (Info.InConstantContext)
