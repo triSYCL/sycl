@@ -23,14 +23,14 @@ int main() {
       []<int X, int Y>() {
         if constexpr (X == 0) {
           if constexpr (Y == 0)
-            return aie::select<mem_tile_00>();
+            return aie::tile_storage<mem_tile_00>();
           else
-            return aie::select<mem_tile_01>();
+            return aie::tile_storage<mem_tile_01>();
         } else {
           if constexpr (Y == 0)
-            return aie::select<mem_tile_10>();
+            return aie::tile_storage<mem_tile_10>();
           else
-            return aie::select<mem_tile_11>();
+            return aie::tile_storage<mem_tile_11>();
         }
       },
       [](auto& ht) {

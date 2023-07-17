@@ -25,7 +25,7 @@ int main(int argc, char **argv) {
       .set(aie::ext::palette::rainbow, 100, 2, 0);
   q.submit(
       []<int X, int Y>() {
-        return aie::select<std::uint8_t[image_size][image_size]>();
+        return aie::tile_storage<std::uint8_t[image_size][image_size]>();
       },
       [](auto& ht) {
         ht.single_task([](auto& dt) {
@@ -53,5 +53,5 @@ int main(int argc, char **argv) {
           } while (!dt.service().update_image(&plane[0][0], 0, 255));
         });
       },
-      aie::add_service(a.get_service()));
+      aie::add_service(a.service()));
 }

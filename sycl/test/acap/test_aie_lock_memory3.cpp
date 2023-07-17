@@ -38,7 +38,7 @@ struct tile<AIE, 0, 0> : acap::aie::tile<AIE, 0, 0> {
 
   void run() {
     auto &m = t::mem_east();
-    auto lock = t::get_lock(acap::hw::dir::east, 0);
+    auto lock = t::get_lock(acap::dir::east, 0);
     lock.acquire();
     m.v = 0.;
     lock.release_with_value(false);
@@ -60,7 +60,7 @@ struct tile<AIE, 1, 0> : acap::aie::tile<AIE, 1, 0> {
 
   void run() {
     auto &m = t::mem_west();
-    auto lock = t::get_lock(acap::hw::dir::west, 0);
+    auto lock = t::get_lock(acap::dir::west, 0);
     while (!a.is_done()) {
       lock.acquire_with_value(true);
       a.update_tile_data_image(t::x, t::y, &m.v, -1.f, 1.f);

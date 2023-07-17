@@ -8,8 +8,6 @@
 // CHECK-MERGING-COUNT-3: Linking Kernel
 // CHECK-MERGING-NOT: Linking Kernel
 
-#define TISYCL_DEVICE_ALLOCATOR_DEBUG
-
 #include <sycl/sycl.hpp>
 
 /// Example of using neighbor memory tiles
@@ -18,7 +16,6 @@
 #include <iostream>
 #include <vector>
 
-using namespace sycl::vendor::xilinx;
 using namespace sycl::vendor::xilinx;
 using namespace trisycl::vendor::xilinx;
 

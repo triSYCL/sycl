@@ -4,7 +4,6 @@
 // RUN: %add_acap_result %s.bin
 // RUN: rm %s.bin
 
-#define TRISYCL_DEVICE_ALLOCATOR_DEBUG
 #define TRISYCL_DEVICE_STREAM_DEBUG
 
 /// Example of using neighbor memory tiles
@@ -20,7 +19,6 @@
 #include <iostream>
 #include <vector>
 
-using namespace sycl::vendor::xilinx;
 using namespace sycl::vendor::xilinx;
 using namespace trisycl::vendor::xilinx;
 

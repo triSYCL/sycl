@@ -19,7 +19,6 @@
 #include <vector>
 
 using namespace sycl::vendor::xilinx;
-using namespace sycl::vendor::xilinx;
 using namespace trisycl::vendor::xilinx;
 
 /// A memory tile has to inherit from acap::aie::memory<AIE, X, Y>

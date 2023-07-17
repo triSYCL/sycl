@@ -17,14 +17,14 @@ int main() {
       []<int X, int Y>() {
         if constexpr (X == 0) {
           if constexpr (Y == 0)
-            return aie::select<A00>();
+            return aie::tile_storage<A00>();
           else
-            return aie::select<A01>();
+            return aie::tile_storage<A01>();
         } else {
           if constexpr (Y == 0)
-            return aie::select<A10>();
+            return aie::tile_storage<A10>();
           else
-            return aie::select<A11>();
+            return aie::tile_storage<A11>();
         }
       },
       [](auto& ht) {

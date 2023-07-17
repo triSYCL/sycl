@@ -78,8 +78,11 @@ struct ChessMassageLegacy : public ModulePass {
     std::vector<Function *> Funcs;
     DenseMap<std::pair<Function*, Function*>, int> FuncCompareCache;
 
-     /// Return the result of the comparison of 2 functions
-     /// with some caching because comparison is costly
+    /// Return the result of the comparison of 2 functions
+    /// with some caching because comparison is costly
+    /// Sorting algorithm can compare the same 2 elements more then once.
+    /// especially since we cannot make any assumption about the std::sort
+    /// implementation.
     auto CompareFunc = [&](Function *LHS, Function *RHS) {
       auto Lookup = FuncCompareCache.find({LHS, RHS});
       int Compare = 0;

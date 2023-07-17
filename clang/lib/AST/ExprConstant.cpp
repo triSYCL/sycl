@@ -936,11 +936,6 @@ namespace {
     /// later on (such as a use of an undefined global).
     bool CheckingPotentialConstantExpression = false;
 
-    /// This is set to true when evaluating the call to a static member
-    /// function. Because calls to static member function can be performed even
-    /// if the object is not a constant expression.
-    bool AccessingStaticConstantDataMember = false;
-
     /// Whether we're checking for an expression that has undefined behavior.
     /// If so, we will produce warnings if we encounter an operation that is
     /// always undefined.
@@ -8481,13 +8476,12 @@ bool LValueExprEvaluator::VisitMemberExpr(const MemberExpr *E) {
   // Handle static member functions.
   if (const CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(E->getMemberDecl())) {
     if (MD->isStatic()) {
-      /// These changes here are an easy but not quite correct hack to allow static
-      /// member function to be constexpr even when the object they are applied
-      /// on is not constexpr
-      llvm::SaveAndRestore<bool> StaticMember(
-          Info.AccessingStaticConstantDataMember);
-      if (Info.InConstantContext)
-        Info.AccessingStaticConstantDataMember = true;
+      /// These changes here are an easy but not quite correct hack to allow
+      /// static member function to be constexpr even when the object they are
+      /// applied on is not constexpr. This weird hack is used until p1169r4 is
+      /// properly implemented in clang and merged into this repo.
+      /// This is not correct because the expression `E->getBase()` might have
+      /// side-effect that would not be executed.
       // VisitIgnoredBaseExpression(E->getBase());
 
       return Success(MD);
@@ -8770,9 +8764,6 @@ public:
     if (Info.checkingPotentialConstantExpression())
       return false;
     if (!Info.CurrentCall->This) {
-      if (Info.AccessingStaticConstantDataMember) {
-        return Success(E);
-      }
       if (Info.getLangOpts().CPlusPlus11)
         Info.FFDiag(E, diag::note_constexpr_this) << E->isImplicit();
       else

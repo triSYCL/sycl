@@ -11,7 +11,7 @@ int main() {
   aie::device<2, 2> dev;
   aie::queue q(dev);
   q.submit_uniform([&](auto& ht) {
-    ht.single_task([=](auto& dt) mutable {
+    ht.single_task([=](auto& dt) {
       assert(false);
       // clang-format off
 // CHECK-DAG: aie(0, 0) at assert.cpp:13: {{.*}} : Assertion `false' failed

@@ -2538,6 +2538,15 @@ public:
     /// expectations of kernel function. here we generate the code specifically
     /// for the aie++/acap++ runtimes
     if (Ctx.getTargetInfo().getTriple().isXilinxAIE()) {
+      /// The original code handles kernel creation for OpenCL-style kernels.
+      /// where everything inside the lambda capture will be turned into
+      /// parameters of the kernel. In our case we will create a kernel that
+      /// takes a single pointer to le the lambda object. The runtime handle
+      /// the rest. so we reused the same class and gave it a different behavior
+      /// when targeting AIE. but still has the same goal, generate the kernel
+      /// function that we will actually generate from the lambda's operator().
+      /// This comment can easily become outdated, so dont hesitate to disregard
+      /// it.
       Params.clear();
 
       QualType Ty = OldDecl->getParamDecl(0)->getType();

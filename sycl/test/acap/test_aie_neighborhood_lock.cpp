@@ -18,23 +18,23 @@ template <typename AIE, int X, int Y> struct tile : acap::aie::tile<AIE, X, Y> {
     // Wait for notification from the host
     this->get_lock(0).acquire_with_value(true);
     // Send notification to tile (1,0)
-    this->get_lock(acap::hw::dir::east, 1).release_with_value(true);
+    this->get_lock(acap::dir::east, 1).release_with_value(true);
   }
 };
 
 template <typename AIE> struct tile<AIE, 1, 0> : acap::aie::tile<AIE, 1, 0> {
   void operator()() {
     // Wait for notification from tile (0,0)
-    this->get_lock(acap::hw::dir::west, 1).acquire_with_value(true);
+    this->get_lock(acap::dir::west, 1).acquire_with_value(true);
     // Send notification to tile (1,1)
-    this->get_lock(acap::hw::dir::north, 2).release_with_value(true);
+    this->get_lock(acap::dir::north, 2).release_with_value(true);
   }
 };
 
 template <typename AIE> struct tile<AIE, 0, 1> : acap::aie::tile<AIE, 0, 1> {
   void operator()() {
     // Wait for notification from tile (1,1)
-    this->get_lock(acap::hw::dir::east, 3).acquire_with_value(true);
+    this->get_lock(acap::dir::east, 3).acquire_with_value(true);
     // Send notification to the host
     this->get_lock(4).release_with_value(true);
   }
@@ -45,7 +45,7 @@ template <typename AIE> struct tile<AIE, 1, 1> : acap::aie::tile<AIE, 1, 1> {
     // Wait for notification from tile (1,0)
     this->get_lock(2).acquire_with_value(true);
     // Send notification to tile (0,1)
-    this->get_lock(acap::hw::dir::west, 3).release_with_value(true);
+    this->get_lock(acap::dir::west, 3).release_with_value(true);
   }
 };
 

@@ -50,5 +50,5 @@ int main(int argc, char **argv) {
           } while (!dt.service().update_image(&plane[0][0], 0, 255));
         });
       },
-      aie::add_service(a.get_service()));
+      aie::add_service(a.service()));
 }

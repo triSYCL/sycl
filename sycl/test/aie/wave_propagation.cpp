@@ -121,21 +121,21 @@ void compute(auto& dt) {
 
   // Transfer first column of u to next memory module to the West
   if constexpr (dt.y() & 1) {
-    if constexpr (dt.has_neighbor(aie::hw::dir::east)) {
+    if constexpr (dt.has_neighbor(aie::dir::east)) {
       auto& east = dt.mem_east();
       for (int j = 0; j < image_size; ++j)
         m.u[j][image_size - 1] = east.u[j][0];
     }
   }
   if constexpr (!(dt.y() & 1)) {
-    if constexpr (dt.has_neighbor(aie::hw::dir::west)) {
+    if constexpr (dt.has_neighbor(aie::dir::west)) {
       auto& west = dt.mem_west();
       for (int j = 0; j < image_size; ++j)
         west.u[j][image_size - 1] = m.u[j][0];
     }
   }
 
-  if constexpr (dt.has_neighbor(aie::hw::dir::south)) {
+  if constexpr (dt.has_neighbor(aie::dir::south)) {
     auto& below = dt.mem_south();
     for (int i = 0; i < image_size; ++i)
       below.v[image_size - 1][i] = m.v[0][i];
@@ -156,7 +156,7 @@ void compute(auto& dt) {
 
   dt.full_barrier();
 
-  if constexpr (dt.has_neighbor(aie::hw::dir::north)) {
+  if constexpr (dt.has_neighbor(aie::dir::north)) {
     auto& above = dt.mem_north();
     for (int i = 0; i < image_size; ++i)
       above.w[0][i] = m.w[image_size - 1][i];
@@ -166,14 +166,14 @@ void compute(auto& dt) {
 
   // Transfer last line of w to next memory module on the East
   if constexpr (dt.y() & 1) {
-    if constexpr (dt.has_neighbor(aie::hw::dir::east)) {
+    if constexpr (dt.has_neighbor(aie::dir::east)) {
       auto& east = dt.mem_east();
       for (int j = 0; j < image_size; ++j)
         east.w[j][0] = m.w[j][image_size - 1];
     }
   }
   if constexpr (!(dt.y() & 1)) {
-    if constexpr (dt.has_neighbor(aie::hw::dir::west)) {
+    if constexpr (dt.has_neighbor(aie::dir::west)) {
       auto& west = dt.mem_west();
       for (int j = 0; j < image_size; ++j)
         m.w[j][0] = west.w[j][image_size - 1];
@@ -210,5 +210,5 @@ int main(int argc, char** argv) {
           }
         });
       },
-      aie::add_service(a.get_service()));
+      aie::add_service(a.service()));
 }
