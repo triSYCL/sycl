@@ -31,7 +31,7 @@ template <typename AIE, int X, int Y> struct prog : acap::aie::tile<AIE, X, Y> {
   }
   void run() {
 #ifdef __SYCL_DEVICE_ONLY__
-    __builtin_memset(&t::mem().arr, 0xff, sizeof(t::mem().arr));
+    std::memset(&t::mem().arr, 0xff, sizeof(t::mem().arr));
     for (int i = 0; i < count; i++)
       t::mem().arr[i] = (uint32_t)acap::heap::malloc(16 + i * 8);
     for (int i = 0; i < count; i++)

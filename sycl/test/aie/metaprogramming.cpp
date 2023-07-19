@@ -1,7 +1,7 @@
 // REQUIRES: aie
 
 // RUN: %aie_clang %s -o %t.bin
-
+// Exercise some implementation details
 #include "aie.hpp"
 
 struct A {

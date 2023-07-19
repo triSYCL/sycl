@@ -2265,6 +2265,7 @@ public:
 // A type to Create and own the FunctionDecl for the kernel.
 class SyclKernelDeclCreator : public SyclKernelFieldHandler {
   FunctionDecl *KernelDecl;
+  // Store the original kernel used to generate the new one when targeting AIE
   FunctionDecl *OldDecl;
   llvm::SmallVector<ParmVarDecl *, 8> Params;
   Sema::ContextRAII FuncContext;
@@ -2535,17 +2536,17 @@ public:
     FunctionProtoType::ExtProtoInfo Info(CC_OpenCLKernel);
 
     /// aie++/acap++ and SYCL have different runtimes with different
-    /// expectations of kernel function. here we generate the code specifically
+    /// expectations for kernel functions. Here we generate the code specifically
     /// for the aie++/acap++ runtimes
     if (Ctx.getTargetInfo().getTriple().isXilinxAIE()) {
-      /// The original code handles kernel creation for OpenCL-style kernels.
+      /// The original code handles kernel creation for OpenCL-style kernels,
       /// where everything inside the lambda capture will be turned into
       /// parameters of the kernel. In our case we will create a kernel that
-      /// takes a single pointer to le the lambda object. The runtime handle
-      /// the rest. so we reused the same class and gave it a different behavior
-      /// when targeting AIE. but still has the same goal, generate the kernel
+      /// takes a single pointer to the lambda object. The runtime handles
+      /// the rest. So we reused the same class and gave it a different behavior
+      /// when targeting AIE. But this still has the same goal, to generate the kernel
       /// function that we will actually generate from the lambda's operator().
-      /// This comment can easily become outdated, so dont hesitate to disregard
+      /// This comment can easily become outdated, so do not hesitate to disregard
       /// it.
       Params.clear();
 
@@ -2563,7 +2564,7 @@ public:
     KernelDecl->setParams(Params);
 
     /// aie++/acap++ and SYCL have different runtimes with different
-    /// expectations of kernel function. here we generate the code specifically
+    /// expectations for kernel functions. Here we generate the code specifically
     /// for the aie++/acap++ runtimes
     if (Ctx.getTargetInfo().getTriple().isXilinxAIE()) {
       std::pair<DeclaratorDecl *, DeclaratorDecl *> P{

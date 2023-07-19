@@ -239,8 +239,8 @@ This is the only compilation command that requires the SYCL device compiler.
 As the intent is to compile all of the kernels to be offloaded for the device, 
 and the rest for the host.
 
-From a SYCL perspective the AIE PS is the host device that will offload to
-the other elements of the AIE architecture. The device in this case is the AIE 
+From a SYCL perspective the ACAP PS is the host device that will offload to
+the other elements of the ACAP AIE architecture. The device in this case is the ACAP AIE 
 AI Engine cores.
 
 Create a script called `make.sh` containing

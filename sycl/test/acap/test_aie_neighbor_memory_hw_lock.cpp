@@ -63,7 +63,7 @@ template <typename AIE, int X, int Y> struct prog : acap::aie::tile<AIE, X, Y> {
     /// uninitialized data easier.
     /// If any data has an id of 0 it means a there is a synchronization issue.
     /// This means pointers will be 0xffffffff and ints will be -1.
-    __builtin_memset(&out, 0xff, sizeof(out));
+    std::memset(&out, 0xff, sizeof(out));
 
     t::get_lock(0).acquire();
     out[idx_self] = {t::mem().x, t::mem().y, (int32_t)(std::uintptr_t)&t::mem(), t::mem().id};
