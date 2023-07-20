@@ -1,5 +1,4 @@
 // REQUIRES: aie
-// XFAIL: !no_device
 
 // RUN: %aie_clang %s -o %t.bin
 // RUN: %if_run_on_device %run_on_device %t.bin > %t.check 2>&1
@@ -14,13 +13,12 @@ int main() {
     ht.single_task([=](auto& dt) {
       assert(false);
       // clang-format off
-// CHECK-DAG: aie(0, 0) at assert.cpp:13: {{.*}} : Assertion `false' failed
-// CHECK-DAG: aie(1, 0) at assert.cpp:13: {{.*}} : Assertion `false' failed
-// CHECK-DAG: aie(0, 1) at assert.cpp:13: {{.*}} : Assertion `false' failed
-// CHECK-DAG: aie(1, 1) at assert.cpp:13: {{.*}} : Assertion `false' failed
-// CHECK-NOT: Assertion `false' failed
+// CHECK-DAG: (0, 0): aie(0, 0) at 
+// CHECK-DAG: (0, 1): aie(0, 1) at
+// CHECK-DAG: (1, 0): aie(1, 0) at
+// CHECK-DAG: (1, 1): aie(1, 1) at
       // clang-format on
     });
   });
 }
-// CHECK: exit_code=0
+// CHECK: exit_code=134
