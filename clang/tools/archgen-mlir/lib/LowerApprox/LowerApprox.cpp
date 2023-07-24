@@ -5,6 +5,12 @@
 // SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
 //
 //===----------------------------------------------------------------------===//
+//
+// This pass does the core job of ArchGenMLIR, replace mathematical expressions
+// written in the Approx dialect into so approximation of those expression in
+// some mix of dialects including FixedPt, Arith...
+//
+//===----------------------------------------------------------------------===//
 
 #ifndef ARCHGEN_SOLLYA_LIB_PATH
 #error "unable to find sollya"
@@ -167,7 +173,7 @@ struct LowerApprox {
           /// We are going to start editing so set where we want to write
           rewriter.setInsertionPoint(op);
 
-          /// get the fixe point input to the expression
+          /// get the fix point input to the expression
           mlir::Value variable = op->getOperand(0);
           fixedpt::FixedPtType oldType =
               op->getOperand(0).getType().cast<fixedpt::FixedPtType>();

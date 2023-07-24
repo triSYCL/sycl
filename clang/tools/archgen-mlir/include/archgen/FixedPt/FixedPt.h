@@ -1,4 +1,4 @@
-//===- FuncOps.h - Func Dialect Operations ----------------------*- C++ -*-===//
+//===- FixedPt.h - Func Dialect Operations ----------------------*- C++ -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -33,7 +33,7 @@ namespace fixedpt {
 constexpr fixedpt::RoundingMode incompatibleRounding =
     static_cast<fixedpt::RoundingMode>(std::numeric_limits<uint32_t>::max());
 
-/// Find a common rounding mode for m1 and m2. if there is none return
+/// Find a common rounding mode for m1 and m2. If there is none, return
 /// incompatibleRounding
 fixedpt::RoundingMode getCommonRoundingMod(fixedpt::RoundingMode m1,
                                            fixedpt::RoundingMode m2);

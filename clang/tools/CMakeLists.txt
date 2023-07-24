@@ -59,7 +59,7 @@ add_clang_subdirectory(nvptx-arch)
 
 if ("mlir" IN_LIST LLVM_ENABLE_PROJECTS)
   if (CLANG_BUILT_STANDALONE)
-    message(WARNING "archgen-mlir doesnt support being build as standalone so it was not enabled")
+    message(WARNING "archgen-mlir does not support being built as standalone so it was not enabled")
   else()
     add_clang_subdirectory(archgen-mlir)
   endif()

@@ -23,7 +23,7 @@ def FixedPt_Dialect : Dialect {
   let hasConstantMaterializer = 1;
 }
 
-// Base class for Func dialect ops.
+// Base class for FixedPt dialect ops.
 class FixedPt_Type<string name, string typeMnemonic, list<Trait> traits = []>
     : TypeDef<FixedPt_Dialect, name, traits> {
   let mnemonic = typeMnemonic;

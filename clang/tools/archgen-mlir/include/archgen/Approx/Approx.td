@@ -1,4 +1,4 @@
-//===- FuncOps.td - Func operation definitions -------------*- tablegen -*-===//
+//===- Approx.td - Func operation definitions --------------*- tablegen -*-===//
 //
 // Part of the LLVM Project, under the Apache License v2.0 with LLVM Exceptions.
 // See https://llvm.org/LICENSE.txt for license information.
@@ -22,7 +22,7 @@ def Approx_Dialect : Dialect {
   let hasConstantMaterializer = 1;
 }
 
-// Base class for Func dialect ops.
+// Base class for Approx dialect ops.
 class Approx_Op<string mnemonic, list<Trait> traits = []> :
     Op<Approx_Dialect, mnemonic, traits # [Pure]>;
 
@@ -34,6 +34,7 @@ class Approx_Type<string name, string typeMnemonic, list<Trait> traits = []>
 /// A TypeAttr for ToBeFolded types.
 def ToBeFoldedType
     : Approx_Type<"toBeFolded", "toBeFolded"> {
+  let summary = "Type used inside approx expressions";
 }
 
 def ApproxAuto: I32EnumAttrCase<"auto_select", 0>;
@@ -49,6 +50,7 @@ def ApproxKindAttr: I32EnumAttr<"ApproxMode", "describes Approx modes",
 }
 
 def Approx_GenericOp : Approx_Op<"generic"> {
+  let summary = "Some mathematical function know to the backend";
   let arguments = (ins
     Variadic<ToBeFoldedType>: $inputs,
     StrAttr: $action
@@ -61,6 +63,7 @@ def Approx_GenericOp : Approx_Op<"generic"> {
 }
 
 def Approx_EvaluateOp : Approx_Op<"evaluate"> {
+  let summary = "Evaluate some expression from some format";
   let arguments = (ins
     ToBeFoldedType: $input,
     ApproxKindAttr: $approx_mode
@@ -70,6 +73,7 @@ def Approx_EvaluateOp : Approx_Op<"evaluate"> {
 }
 
 def Approx_VariableOp : Approx_Op<"variable"> {
+  let summary = "The free variable of an expression";
   let arguments = (ins
     FixedPtType: $input
   );
@@ -81,6 +85,7 @@ def Approx_VariableOp : Approx_Op<"variable"> {
 }
 
 def Approx_ParameterOp : Approx_Op<"parameter"> {
+  let summary = "Used for a hack to represent parameters before cleanups";
   let arguments = (ins
     AnyInteger: $input
   );
@@ -89,6 +94,7 @@ def Approx_ParameterOp : Approx_Op<"parameter"> {
 }
 
 def Approx_ConstantOp : Approx_Op<"constant", [ConstantLike]> {
+  let summary = "A constant";
   let arguments = (ins
     FixedPtAttr: $valueAttr
   );

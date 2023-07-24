@@ -32,11 +32,11 @@ struct ApproxInlinerInterface : public mlir::DialectInlinerInterface {
     return true;
   }
   bool isLegalToInline(mlir::Operation *, mlir::Region *, bool,
-                       mlir::BlockAndValueMapping &) const final {
+                       mlir::IRMapping &) const final {
     return true;
   }
   bool isLegalToInline(mlir::Region *, mlir::Region *, bool,
-                       mlir::BlockAndValueMapping &) const final {
+                       mlir::IRMapping &) const final {
     return true;
   }
 };

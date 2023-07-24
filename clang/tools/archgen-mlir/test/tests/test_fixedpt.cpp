@@ -8,7 +8,7 @@
 #include <iostream>
 #include "Inputs/fixedpt.h"
 
-/// Divition to prevent executing div by 0
+/// Disable division to prevent executing div by 0
 struct noDivRAII {
   static inline bool noDiv = false;
   noDivRAII() {noDiv = true;}

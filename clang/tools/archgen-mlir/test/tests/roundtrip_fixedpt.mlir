@@ -2,10 +2,10 @@
 // RUN: archgen-opt %s -o %t1.generic.mlir -mlir-print-op-generic
 // RUN: archgen-opt %t1.generic.mlir -o %t2.generic.mlir -mlir-print-op-generic
 // RUN: diff %t1.generic.mlir %t2.generic.mlir
-// RUN: archgen-opt %s -o %t1.costum.mlir
-// RUN: archgen-opt %t1.costum.mlir -o %t2.costum.mlir
-// RUN: diff %t1.costum.mlir %t2.costum.mlir
-// RUN: archgen-opt --convert-fixedpt-to-arith %t1.costum.mlir
+// RUN: archgen-opt %s -o %t1.custom.mlir
+// RUN: archgen-opt %t1.custom.mlir -o %t2.custom.mlir
+// RUN: diff %t1.custom.mlir %t2.custom.mlir
+// RUN: archgen-opt --convert-fixedpt-to-arith %t1.custom.mlir
 
 "builtin.module"() ({
   "func.func"() ({

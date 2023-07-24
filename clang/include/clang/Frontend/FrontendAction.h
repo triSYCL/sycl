@@ -285,7 +285,7 @@ public:
   /// \return The action type. By default we use CmdlineAfterMainAction.
   virtual ActionType getActionType() { return CmdlineAfterMainAction; }
 
-  /// Iff the Action is of ReplaceAndReuseAction the main action to replace will
+  /// Iff the Action is of type ReplaceAndReuseAction the main action to replace will
   /// be given via this function
   virtual void takeMainActionToReplace(std::unique_ptr<FrontendAction> Old) = 0;
 };

@@ -1,10 +1,10 @@
-// This tests that the format can roundtrip not what the format is.
+// This tests that the generic and pertty format can roundtriped not what the format is.
 // RUN: archgen-opt %s -o %t1.generic.mlir -mlir-print-op-generic
 // RUN: archgen-opt %t1.generic.mlir -o %t2.generic.mlir -mlir-print-op-generic
 // RUN: diff %t1.generic.mlir %t2.generic.mlir
-// RUN: archgen-opt %s -o %t1.costum.mlir
-// RUN: archgen-opt %t1.costum.mlir -o %t2.costum.mlir
-// RUN: diff %t1.costum.mlir %t2.costum.mlir
+// RUN: archgen-opt %s -o %t1.custom.mlir
+// RUN: archgen-opt %t1.custom.mlir -o %t2.custom.mlir
+// RUN: diff %t1.custom.mlir %t2.custom.mlir
 
 module {
   func.func public @_ZN10archgenlib6detail12evaluateImplINS_11FixedNumberINS_11FixedFormatILi2ELin1EjEEEENS_5AddOpINS_5SinOpINS_8VariableINS2_INS3_ILi4ELin5EiEEEELm0EEEEENS_4PiOpEEEJSA_EEET_DpT1_(%arg0: !fixedpt.fixedPt<4, -5, s>) -> !fixedpt.fixedPt<2, -1, u> {
