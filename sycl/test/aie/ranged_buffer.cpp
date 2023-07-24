@@ -16,9 +16,7 @@ int main() {
     assert(buff[i] == i);
   aie::queue q(dev);
   q.submit_uniform([&](auto& ht) {
-    aie::accessor acc = aie::buffer_range(ht, buff)
-                            .read_range(0, buff.size())
-                            .write_range(0, buff.size());
+    aie::accessor acc(ht, buff);
     ht.single_task([=](auto& dt) {
       for (int i = 0; i < size; i++) {
         acc[i] *= 2;

@@ -18,10 +18,13 @@ int main() {
   aie::queue q(dev);
   q.submit_uniform([&](auto& ht) {
     int half_size = buff.size() / 2;
+    /// access in read the first 5 elements and in write the last 5 elements
     aie::accessor acc = aie::buffer_range(ht, buff)
                             .read_range(0, half_size)
                             .write_range(half_size, buff.size());
     ht.single_task([=](auto& dt) {
+      /// The accessor on device is the union of the read and write range (plus
+      /// what is between them), so the accessor has the full buffer
       for (int i = 0; i < acc.size() / 2; i++) {
         acc[i + half_size] = acc[i] + half_size;
       }

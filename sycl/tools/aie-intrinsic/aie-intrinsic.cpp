@@ -9,10 +9,10 @@
 #define __AIE_RT__
 #include "aie-intrinsic.h"
 
-namespace aie_intr {
+namespace aie::intrinsics {
 
-// All the functions called here are intrinsic. They do not have symbols but are
-// just a function-like representation of AIE instruction, so they should not be
+// All the functions called here are just intrinsics. They do not have symbols but are
+// just a function-like representation of an AIE instruction, so they should not be
 // able to collide with another symbol
 
 int get_coreid() { return ::get_coreid(); }

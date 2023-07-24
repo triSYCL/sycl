@@ -2,15 +2,15 @@
 #define __AIE_INTRINSIC_HPP__
 
 /// __SYCL_DEVICE_ONLY__ means we are on device code in SYCL
-/// __AIE_RT__ means we are compiling the device library in chess
-/// neither __SYCL_DEVICE_ONLY__ nor __AIE_RT__ means we are compiling for the
+/// __AIE_RT__ means we are compiling the device library in Chess.
+/// Neither __SYCL_DEVICE_ONLY__ nor __AIE_RT__ mean we are compiling for the
 /// host.
 
 #if defined(__SYCL_DEVICE_ONLY__) || defined(__AIE_RT__)
 /// When compiling for device the definition is in the library
 #define DECL_POSTFIX ;
 #if defined(__SYCL_DEVICE_ONLY__)
-/// When compiling for SYCL we need to mark function external or the compiler
+/// When compiling for SYCL device we need to mark function external or the compiler
 /// will complain about undefined function.
 #define DECL_PREFIX SYCL_EXTERNAL
 #else
@@ -19,7 +19,7 @@
 #else
 #include <cassert>
 /// When compiling for the host the functions need to compile because they will
-/// be compiled even they will not be executed.
+/// be compiled even if they are not be executed by the host.
 #define DECL_POSTFIX                                                           \
   {                                                                            \
     bool b = false;                                                            \
@@ -32,19 +32,24 @@
 
 #include <stdint.h>
 
-namespace aie_intr {
+namespace aie::intrinsics {
 
+/// get a bit-packed x and y coordinate of the tile.
 DECL_PREFIX __attribute__((const)) int get_coreid(void) DECL_POSTFIX
 
 DECL_PREFIX void memory_fence(void) DECL_POSTFIX
 DECL_PREFIX void separator_scheduler(void) DECL_POSTFIX
 
+/// interact with hardware locks
 DECL_PREFIX void acquire(unsigned id, unsigned val) DECL_POSTFIX
 DECL_PREFIX void release(unsigned id, unsigned val) DECL_POSTFIX
 DECL_PREFIX void acquire(unsigned id) DECL_POSTFIX
 DECL_PREFIX void release(unsigned id) DECL_POSTFIX
 
+/// uses the DONE instruction in AIE. this instruction has a hardware but so it
+/// is not used anymore.
 DECL_PREFIX void core_done() DECL_POSTFIX
+/// This is a software replacement of the DONE instruction
 DECL_PREFIX void soft_done() DECL_POSTFIX
 
 DECL_PREFIX void nop5() DECL_POSTFIX

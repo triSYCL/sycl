@@ -17,10 +17,12 @@ int main() {
   }
   aie::queue q(dev);
   q.submit_uniform([&](auto& ht) {
+    /// only access the last five elements of the buffer in read and write.
     aie::accessor acc = aie::buffer_range(ht, buff)
                             .read_range(5, buff.size())
                             .write_range(5, buff.size());
     ht.single_task([=](auto& dt) {
+      /// The accessor on device is only on the last 5 elements
       for (int i = 0; i < acc.size(); i++) {
         acc[i] = i + 5;
       }

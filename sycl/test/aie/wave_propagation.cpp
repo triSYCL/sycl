@@ -184,7 +184,6 @@ void compute(auto& dt) {
 }
 
 int main(int argc, char** argv) {
-  aie::ext::application<data_type> a;
   aie::device<4, 4> dev;
   aie::queue q(dev);
 
@@ -196,10 +195,9 @@ int main(int argc, char** argv) {
     data_type depth[image_size][image_size]; //< Average depth
   };
 
-  a.start(argc, argv, dev.sizeX, dev.sizeY, image_size, image_size, 2)
-      .get_image_grid()
-      .get_palette()
-      .set(aie::ext::palette::rainbow, 150, 2, 127);
+  aie::ext::graphic_application<data_type> a(argc, argv, dev.sizeX, dev.sizeY,
+                                             image_size, image_size, 2);
+  a.get_image_grid().get_palette().set(aie::ext::palette::rainbow, 150, 2, 127);
   q.submit_uniform<tile_data>(
       [](auto& ht) {
         ht.single_task([](auto& dt) {
