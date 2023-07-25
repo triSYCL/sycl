@@ -10,7 +10,8 @@
 int main() {
   constexpr std::size_t size = 10;
   aie::device<1, 1> dev;
-  aie::buffer<int> buff(10, 0);
+  // Create a buffer of 10 elements initialized to 0
+  aie::buffer<int> buff(10);
   std::iota(buff.begin(), buff.begin() + 5, 0);
   for (int i = 0; i < size; i++) {
     std::cout << "buff[" << i << "]=" << buff[i] << std::endl;

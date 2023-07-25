@@ -10,7 +10,8 @@
 int main() {
   constexpr std::size_t size = 10;
   aie::device<1, 1> dev;
-  aie::buffer<int> buff(10, 0);
+  // Create a buffer of 10 elements initialized to 0
+  aie::buffer<int> buff(10);
   aie::queue q(dev);
   q.submit_uniform([&](auto& ht) {
     int half_size = buff.size() / 2;
