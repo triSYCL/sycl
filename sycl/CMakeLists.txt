@@ -337,6 +337,7 @@ endif()
 # SYCL toolchain builds all components: compiler, libraries, headers, etc.
 add_custom_target(sycl-compiler
   DEPENDS append-file
+          aie-intrinsic
           clang
           clang-offload-wrapper
           clang-offload-bundler
@@ -349,6 +350,7 @@ add_custom_target(sycl-compiler
           llvm-no-spir-kernel
           llvm-spirv
           llvm-link
+          sycl-chess
           sycl-vxx
           opt
           llvm-objcopy

@@ -1,10 +1,12 @@
 add_llvm_component_library(LLVMSYCL
-  VXXIRDowngrader.cpp
+  ChessMassage.cpp
   InSPIRation.cpp
   KernelProperties.cpp
   KernelPropGen.cpp
-  PrepareSYCLOpt.cpp
   LowerSYCLMetaData.cpp
+  PrepareSYCLOpt.cpp
+  PrepareSyclChessOpt.cpp
+  VXXIRDowngrader.cpp
   SYCLUtils.cpp
 
   ADDITIONAL_HEADER_DIRS

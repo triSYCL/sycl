@@ -261,6 +261,25 @@ struct KernelPropGenState {
     J.objectEnd();
   }
 
+  void GenerateChessPropertyScript(Module &M, llvm::raw_fd_ostream& O) {
+
+    llvm::SmallString<512> kernelNames;
+    for (auto &F : M.functions()) {
+      if (sycl::isKernelFunc(&F)) {
+        // Revert the linkage back to original, which was changed by
+        // ChessMassage for function merge
+        F.setLinkage(GlobalValue::WeakODRLinkage);
+        kernelNames += (" \"" + F.getName() + "\" \n").str();
+      }
+    }
+
+    // Output our list of kernel names as a bash array we can iterate over
+    if (!kernelNames.empty()) {
+       O << "# array of kernel names found in the current module\n";
+       O << "declare -a KERNEL_NAME_ARRAY=(" << kernelNames.str() << ")\n\n";
+    }
+  }
+
   /// Visit all the functions of the module
   bool runOnModule(Module &M) {
     llvm::raw_fd_ostream O(getWriteStreamId(KernelPropGenOutput),
@@ -268,7 +287,11 @@ struct KernelPropGenState {
 
     if (O.has_error())
       return false;
-    generateProperties(M, O);
+    auto T = llvm::Triple(M.getTargetTriple());
+    if (T.isXilinxAIE())
+      GenerateChessPropertyScript(M, O);
+    else
+      generateProperties(M, O);
 
     // The module probably changed
     return true;

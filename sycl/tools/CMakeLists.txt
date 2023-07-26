@@ -1,3 +1,16 @@
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
+if ("aie" IN_LIST SYCL_ENABLE_PLUGINS)
+  add_subdirectory( aie-intrinsic )
+  add_subdirectory( sycl-chess )
+endif()
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_CXX_EXTENSIONS OFF)
+
 add_subdirectory( sycl-vxx )
 
 function(link_llvm_libs target)

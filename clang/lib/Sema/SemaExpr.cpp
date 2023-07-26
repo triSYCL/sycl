@@ -225,7 +225,7 @@ bool Sema::DiagnoseUseOfDecl(NamedDecl *D, ArrayRef<SourceLocation> Locs,
                              bool AvoidPartialAvailabilityChecks,
                              ObjCInterfaceDecl *ClassReceiver,
                              bool SkipTrailingRequiresClause) {
-  if (getLangOpts().SYCLIsDevice) {
+  if (getLangOpts().SYCLIsDevice && !getLangOpts().SYCLAllowMutableGlobal) {
     if (auto VD = dyn_cast<VarDecl>(D)) {
       bool IsConst = VD->getType().isConstant(Context);
       bool IsRuntimeEvaluated =

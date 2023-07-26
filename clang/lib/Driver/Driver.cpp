@@ -12,6 +12,7 @@
 #include "ToolChains/AVR.h"
 #include "ToolChains/Ananas.h"
 #include "ToolChains/BareMetal.h"
+#include "ToolChains/Chess.h"
 #include "ToolChains/CSKYToolChain.h"
 #include "ToolChains/Clang.h"
 #include "ToolChains/CloudABI.h"
@@ -795,7 +796,8 @@ Driver::OpenMPRuntimeKind Driver::getOpenMPRuntime(const ArgList &Args) const {
 
 static bool isValidSYCLTriple(llvm::Triple T) {
   // NVPTX is valid for SYCL.
-  if (T.isNVPTX() || T.getArch() == llvm::Triple::fpga64)
+  if (T.isNVPTX() || T.getArch() == llvm::Triple::fpga64 ||
+      T.getArch() == llvm::Triple::aie1_32)
     return true;
 
   // AMDGCN is valid for SYCL
@@ -5707,9 +5709,10 @@ class OffloadingActionBuilder final {
 
           // post link is not optional - even if not splitting, always need to
           // process specialization constants
-          types::ID PostLinkOutType =
-              shouldOutputTables ? types::TY_Tempfiletable : types::TY_LLVM_BC;
-          auto createPostLinkAction = [&]() {
+          types::ID PostLinkOutType = shouldOutputTables
+                                          ? types::TY_Tempfiletable
+                                          : FullDeviceLinkAction->getType();
+          auto createPostLinkAction = [&]() -> Action* {
             // For SPIR-V targets, force TY_Tempfiletable.
             auto TypedPostLinkAction = C.MakeAction<SYCLPostLinkJobAction>(
                 FullDeviceLinkAction, PostLinkOutType, types::TY_Tempfiletable);
@@ -5739,7 +5742,9 @@ class OffloadingActionBuilder final {
 
           Action *ExtractIRFilesAction = createExtractIRFilesAction();
 
-        if (isXilinxFPGA)
+        if (TT.isXilinxAIE())
+          WrapperInputs.assign(1, FullLinkObject);
+        else if (isXilinxFPGA)
           WrapperInputs.push_back(PostLinkAction);
         else
           if (isNVPTX || isAMDGCN) {
@@ -9619,6 +9624,10 @@ const ToolChain &Driver::getOffloadingDeviceToolChain(const ArgList &Args,
           case llvm::Triple::fpga32:
           case llvm::Triple::fpga64:
             TC = std::make_unique<toolchains::VXXToolChain>(
+              *this, Target, HostTC, Args);
+            break;
+          case llvm::Triple::aie1_32:
+            TC = std::make_unique<toolchains::ChessToolChain>(
               *this, Target, HostTC, Args);
             break;
           case llvm::Triple::nvptx:

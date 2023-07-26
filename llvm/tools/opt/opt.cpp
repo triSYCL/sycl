@@ -471,8 +471,10 @@ int main(int argc, char **argv) {
   // (e.g. initializeTransformUtils(Registry) etc. above)
   initializeInSPIRationLegacyPass(Registry);
   initializeKernelPropGenLegacyPass(Registry);
+  initializeChessMassageLegacyPass(Registry);
   initializeVXXIRDowngraderLegacyPass(Registry);
   initializePrepareSYCLOptLegacyPass(Registry);
+  initializePrepareSyclChessOptLegacyPass(Registry);
   initializeLowerSYCLMetaDataPass(Registry);
   initializeHardwareLoopsPass(Registry);
   initializeReplaceWithVeclibLegacyPass(Registry);

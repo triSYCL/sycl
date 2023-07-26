@@ -430,8 +430,10 @@ void initializeWriteBitcodePassPass(PassRegistry&);
 void initializeXRayInstrumentationPass(PassRegistry&);
 void initializeInSPIRationLegacyPass(PassRegistry&);
 void initializeKernelPropGenLegacyPass(PassRegistry&);
+void initializeChessMassageLegacyPass(PassRegistry&);
 void initializeVXXIRDowngraderLegacyPass(PassRegistry&);
 void initializePrepareSYCLOptLegacyPass(PassRegistry&);
+void initializePrepareSyclChessOptLegacyPass(PassRegistry&);
 void initializeLowerSYCLMetaDataPass(PassRegistry&);
 
 } // end namespace llvm

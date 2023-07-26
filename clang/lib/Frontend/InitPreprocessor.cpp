@@ -1346,9 +1346,11 @@ static void InitializePredefinedMacros(const TargetInfo &TI,
   // be a good long term solution, it will probably cause some conflicts when
   // compiling for multiple targets, what if I want to compile for both an Intel
   // and Xilinx platform? Will they mesh well on the host?
-  if (TI.getTriple().isXilinxFPGA())
+  if (TI.getTriple().isXilinxSYCLDevice())
     Builder.defineMacro("__SYCL_HAS_XILINX_DEVICE__");
 
+  if (TI.getTriple().isXilinxAIE())
+    Builder.defineMacro("__SYCL_XILINX_AIE__");
   if (TI.getTriple().getArch() == llvm::Triple::vitis_ip)
     Builder.defineMacro(
         "__VITIS_KERNEL",

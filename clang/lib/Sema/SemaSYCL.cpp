@@ -26,6 +26,7 @@
 #include "llvm/ADT/APSInt.h"
 #include "llvm/ADT/SmallPtrSet.h"
 #include "llvm/ADT/SmallVector.h"
+#include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/Path.h"
 #include "llvm/Support/raw_ostream.h"
@@ -84,6 +85,10 @@ static bool isSyclType(QualType Ty, SYCLTypeAttr::SYCLType TypeName) {
         return Attr->getType() == TypeName;
 
   return false;
+}
+
+static bool isAieAccessorType(QualType Ty) {
+  return isSyclType(Ty, SYCLTypeAttr::aie_accessor);
 }
 
 static bool isSyclAccessorType(QualType Ty) {
@@ -899,10 +904,13 @@ public:
     auto Ref = dyn_cast<DeclaratorDecl>(DRE->getDecl());
     if (Ref && Ref == MappingPair.first) {
       auto NewDecl = MappingPair.second;
-      return DeclRefExpr::Create(
-          SemaRef.getASTContext(), DRE->getQualifierLoc(),
-          DRE->getTemplateKeywordLoc(), NewDecl, false, DRE->getNameInfo(),
-          NewDecl->getType(), DRE->getValueKind());
+      auto Ty = NewDecl->getType()->isReferenceType()
+                    ? NewDecl->getType()->getPointeeType()
+                    : NewDecl->getType();
+      return DeclRefExpr::Create(SemaRef.getASTContext(),
+                                 DRE->getQualifierLoc(),
+                                 DRE->getTemplateKeywordLoc(), NewDecl, false,
+                                 DRE->getNameInfo(), Ty, DRE->getValueKind());
     }
     return DRE;
   }
@@ -1038,6 +1046,43 @@ static QualType calculateKernelNameType(ASTContext &Ctx,
   return TAL->get(0).getAsType().getCanonicalType();
 }
 
+// First pass at a name gen function currently just inefficiently rips all
+// illegal function name characters from the type to make the name.
+// e.g:
+// ::prog< ::trisycl::vendor::xilinx::acap::aie::array<
+//    ::trisycl::vendor::xilinx::acap::aie::layout::size<2, 2>,
+//      ::prog, ::trisycl::vendor::xilinx::acap::aie::memory>, 1, 1>
+// ->
+// progtrisyclvendorxilinxacapaiearraytrisyclvendorxilinxacapaielayoutsize2_2_...
+//
+// TODO Come up with a better naming convention, the problem is it needs to be:
+// 1) a) An unmangled function name so it can link to the main file
+//      OR
+//    b) something the main file can be mangled to without it being some form of
+//       template instantiation as that would require some forward declaration
+//       of the template inside of main (maybe possible as it's somewhat similar
+//       to the header generation route)
+// 2) Something the main file for the specific tile can be named with so it's
+//    possible for the script to identify and link against
+static std::string AIENameGen(std::string S) {
+  // Delete all <, >, :: and white space and replace all commas with underscores
+  // to make sure tile naming isn't off in cases like the following where
+  // several position numbers are similar: Tile 11, 1 vs Tile 1, 11
+  // If we just remove all commas we get 111 for both names, if we replace with
+  // an underscore we get: 1_11, 11_1.
+  for(StringRef s : { "::", "<", ">", ",", " " } )
+    for (auto Pos = S.find(s.str()); Pos != StringRef::npos; Pos = S.find(s.str(), Pos))
+      (s == ",") ? S.replace(Pos, s.size(), "_") : S.erase(Pos, s.size());
+
+  // Append the user id string. This solves conflicts between users.
+  // But the conflicts between applications within same user still remain,
+  // which is hopefully easy to work through.
+  S.append("_");
+  S.append(getenv("USER"));
+
+  return S;
+}
+
 // Gets a name for the OpenCL kernel function, calculated from the first
 // template argument of the kernel caller function.
 static std::pair<std::string, std::string>
@@ -1049,12 +1094,40 @@ constructKernelName(Sema &S, const FunctionDecl *KernelCallerFunc,
   SmallString<256> Result;
   llvm::raw_svector_ostream Out(Result);
 
-  MC.mangleTypeName(KernelNameType, Out);
+  // Tile kernel name can't be a mangled type name as it'll make linking
+  // difficult, but it has to be unique so it doesn't clash with other kernels
+  // inside the module.
+  if (S.getASTContext().getTargetInfo().getTriple().isXilinxAIE())
+     Out << AIENameGen(KernelNameType.getAsString());
+  else
+    MC.mangleTypeName(KernelNameType, Out);
 
   return {
       SYCLUniqueStableNameExpr::computeUniqueSYCLVXXName(
           std::string(Out.str()), S.getASTContext()),
       SYCLUniqueStableNameExpr::ComputeName(S.getASTContext(), KernelNameType)};
+}
+
+// Just rips the __global address space from a string as these are appended to
+// Pointers inside of buildArgTys and we don't want them in our AI Engine main
+//
+// They currently degrade to no address space inside our LLVM IR because all
+// Language AS Spaces are set to the default 0 for our targets. But they still
+// pose a problem when we're trying to spit out our types as strings.
+//
+// An alternative fix to this is to just put the address space modification
+// section of the code in buildArgTys inside of an if (AIEngine) block or to
+// create a temporary copy we can rip the address space qualifier off of.
+//
+// For now this keeps the change local to the generation of our main file,
+// prevents conflicts and is easy to understand.
+static std::string RemoveGlobalFromType(std::string S) {
+  const char S1[] = "__global ";
+
+  for (auto Pos = S.find(S1); Pos != StringRef::npos; Pos = S.find(S1, Pos))
+    S.erase(Pos, sizeof(S1) - 1);
+
+  return S;
 }
 
 static bool isDefaultSPIRArch(ASTContext &Context) {
@@ -1193,10 +1266,12 @@ class KernelObjVisitor {
       if (isSyclSpecialType(BaseTy, SemaRef))
         (void)std::initializer_list<int>{
             (Handlers.handleSyclSpecialType(Owner, Base, BaseTy), 0)...};
-      else
-        // For all other bases, visit the record
-        visitRecord(Owner, Base, BaseTy->getAsCXXRecordDecl(), BaseTy,
-                    Handlers...);
+      else if (isAieAccessorType(BaseTy))
+        (void)std::initializer_list<int>{
+            (Handlers.handleAieAccessorType(Owner, Base, BaseTy), 0)...};
+      // For all other bases, visit the record
+      visitRecord(Owner, Base, BaseTy->getAsCXXRecordDecl(), BaseTy,
+                  Handlers...);
     }
   }
 
@@ -1270,6 +1345,8 @@ class KernelObjVisitor {
                   QualType FieldTy, HandlerTys &... Handlers) {
     if (isSyclSpecialType(FieldTy, SemaRef))
       KF_FOR_EACH(handleSyclSpecialType, Field, FieldTy);
+    else if (isAieAccessorType(FieldTy))
+      KF_FOR_EACH(handleAieAccessorType, Field, FieldTy);
     else if (isSyclType(FieldTy, SYCLTypeAttr::spec_constant))
       KF_FOR_EACH(handleSyclSpecConstantType, Field, FieldTy);
     else if (FieldTy->isStructureOrClassType()) {
@@ -1331,6 +1408,15 @@ public:
   static constexpr const bool VisitInsideSimpleContainersWithPointer = false;
   // Mark these virtual so that we can use override in the implementer classes,
   // despite virtual dispatch never being used.
+
+  virtual bool handleAieAccessorType(const CXXRecordDecl *,
+                                     const CXXBaseSpecifier &, QualType) {
+    return true;
+  }
+  
+  virtual bool handleAieAccessorType(FieldDecl *FD, QualType FieldTy) {
+    return true;
+  }
 
   // SYCL special class can be a base class or a field decl, so both must be
   // handled.
@@ -2179,6 +2265,8 @@ public:
 // A type to Create and own the FunctionDecl for the kernel.
 class SyclKernelDeclCreator : public SyclKernelFieldHandler {
   FunctionDecl *KernelDecl;
+  // Store the original kernel used to generate the new one when targeting AIE
+  FunctionDecl *OldDecl;
   llvm::SmallVector<ParmVarDecl *, 8> Params;
   Sema::ContextRAII FuncContext;
   // Holds the last handled field's first parameter. This doesn't store an
@@ -2435,7 +2523,7 @@ public:
       : SyclKernelFieldHandler(S),
         KernelDecl(
             createKernelDecl(S.getASTContext(), Loc, IsInline, IsSIMDKernel)),
-        FuncContext(SemaRef, KernelDecl) {
+        OldDecl(SYCLKernel), FuncContext(SemaRef, KernelDecl) {
     S.addSyclOpenCLKernel(SYCLKernel, KernelDecl);
 
     if (const auto *AddIRAttrFunc =
@@ -2447,6 +2535,25 @@ public:
     ASTContext &Ctx = SemaRef.getASTContext();
     FunctionProtoType::ExtProtoInfo Info(CC_OpenCLKernel);
 
+    /// aie++/acap++ and SYCL have different runtimes with different
+    /// expectations for kernel functions. Here we generate the code specifically
+    /// for the aie++/acap++ runtimes
+    if (Ctx.getTargetInfo().getTriple().isXilinxAIE()) {
+      /// The original code handles kernel creation for OpenCL-style kernels,
+      /// where everything inside the lambda capture will be turned into
+      /// parameters of the kernel. In our case we will create a kernel that
+      /// takes a single pointer to the lambda object. The runtime handles
+      /// the rest. So we reused the same class and gave it a different behavior
+      /// when targeting AIE. But this still has the same goal, to generate the kernel
+      /// function that we will actually generate from the lambda's operator().
+      /// This comment can easily become outdated, so do not hesitate to disregard
+      /// it.
+      Params.clear();
+
+      QualType Ty = OldDecl->getParamDecl(0)->getType();
+      addParam({Ty, &Ctx.Idents.get("_arg_"), Ctx.getTrivialTypeSourceInfo(Ty)},
+               Ty);
+    }
     SmallVector<QualType, 8> ArgTys;
     std::transform(std::begin(Params), std::end(Params),
                    std::back_inserter(ArgTys),
@@ -2455,6 +2562,21 @@ public:
     QualType FuncType = Ctx.getFunctionType(Ctx.VoidTy, ArgTys, Info);
     KernelDecl->setType(FuncType);
     KernelDecl->setParams(Params);
+
+    /// aie++/acap++ and SYCL have different runtimes with different
+    /// expectations for kernel functions. Here we generate the code specifically
+    /// for the aie++/acap++ runtimes
+    if (Ctx.getTargetInfo().getTriple().isXilinxAIE()) {
+      std::pair<DeclaratorDecl *, DeclaratorDecl *> P{
+          OldDecl->param_begin()[0], KernelDecl->param_begin()[0]};
+      KernelBodyTransform KBT(P, SemaRef);
+      Stmt *NewBody = KBT.TransformStmt(OldDecl->getBody()).get();
+      KernelDecl->setBody(NewBody);
+      if (OldDecl->hasAttr<AnnotateAttr>()) {
+        auto* AA = OldDecl->getAttr<AnnotateAttr>();
+        KernelDecl->addAttr(AA->clone(Ctx));
+      }
+    }
 
     // Make sure that this is marked as a kernel so that the code-gen can make
     // decisions based on that. We cannot add this earlier, otherwise the call
@@ -3718,6 +3840,23 @@ public:
     return true;
   }
 
+  /// Add an entry for this accessor the the inclusion header
+  bool handleAieAccessorType(const CXXRecordDecl *RD,
+                             const CXXBaseSpecifier &BC,
+                             QualType FieldTy) final {
+    Header.addParamDesc(SYCLIntegrationHeader::kind_accessor, 0,
+                        CurOffset +
+                            offsetOf(RD, BC.getType()->getAsCXXRecordDecl()));
+    return true;
+  }
+
+  /// Add an entry for this accessor the the inclusion header
+  bool handleAieAccessorType(FieldDecl *FD, QualType FieldTy) final {
+    Header.addParamDesc(SYCLIntegrationHeader::kind_accessor, 0,
+                        CurOffset + offsetOf(FD, FieldTy));
+    return true;
+  }
+
   bool handleSyclSpecConstantType(FieldDecl *FD, QualType FieldTy) final {
     const TemplateArgumentList &TemplateArgs =
         cast<ClassTemplateSpecializationDecl>(FieldTy->getAsRecordDecl())
@@ -4259,6 +4398,17 @@ void Sema::ConstructOpenCLKernel(FunctionDecl *KernelCallerFunc,
 
     if (!getLangOpts().OptRecordFile.empty())
       opt_report.handleSyclKernelHandlerType();
+  }
+  /// The AIE runtime has different code patterns from Intel's runtime,
+  /// This is the way we generate inclusion headers for the AIE runtime.
+  if (getASTContext().getTargetInfo().getTriple().isXilinxAIE()) {
+    auto *MD = cast<CXXMethodDecl>(KernelObj->getDeclContext());
+    CXXRecordDecl *AieKernelObj = MD->getTemplateSpecializationArgs()
+                                       ->get(0)
+                                       .getAsType()
+                                       ->getAsCXXRecordDecl();
+    Visitor.VisitRecordBases(AieKernelObj, int_header);
+    Visitor.VisitRecordFields(AieKernelObj, int_header);
   }
 }
 
@@ -5145,11 +5295,18 @@ static void OutputStableNameInChars(raw_ostream &O, StringRef Name) {
 }
 
 void SYCLIntegrationHeader::emit(raw_ostream &O) {
+  bool IsAIE = S.getASTContext().getTargetInfo().getTriple().isXilinxAIE();
+  bool IsAIEpp = S.getASTContext().getTargetInfo().getTargetOpts().SYCLUseAIEppLib;
   O << "// This is auto-generated SYCL integration header.\n";
   O << "\n";
 
-  O << "#include <sycl/detail/defines_elementary.hpp>\n";
-  O << "#include <sycl/detail/kernel_desc.hpp>\n";
+  if (IsAIE) {
+    O << "#include <" << (IsAIEpp ? "aie" : "triSYCL") << "/detail/kernel_desc.hpp>\n";
+  }
+  else {
+    O << "#include <sycl/detail/defines_elementary.hpp>\n";
+    O << "#include <sycl/detail/kernel_desc.hpp>\n";
+  }
 
   O << "\n";
 
@@ -5200,9 +5357,11 @@ void SYCLIntegrationHeader::emit(raw_ostream &O) {
 
     O << "// Specialization constants IDs:\n";
     for (const auto &P : llvm::make_range(SpecConsts.begin(), End)) {
-      O << "template <> struct sycl::detail::SpecConstantInfo<";
-      SYCLKernelNameTypePrinter Printer(O, Policy);
-      Printer.Visit(P.first);
+      if (IsAIE)
+        O << "template <> struct " << (IsAIEpp ? "aie" : "trisycl") << "::detail::SpecConstantInfo<";
+      else
+        O << "template <> struct sycl::detail::SpecConstantInfo<";
+      O << P.first.getAsString(Policy);
       O << "> {\n";
       O << "  static constexpr const char* getName() {\n";
       O << "    return \"" << P.second << "\";\n";
@@ -5217,8 +5376,12 @@ void SYCLIntegrationHeader::emit(raw_ostream &O) {
       FwdDeclEmitter.Visit(K.NameType);
   O << "\n";
 
-  O << "namespace sycl {\n";
-  O << "__SYCL_INLINE_VER_NAMESPACE(_V1) {\n";
+  if (IsAIE) {
+    O << "namespace " << (IsAIEpp ? "aie" : "trisycl") << " {\n";
+  } else {
+    O << "namespace sycl {\n";
+    O << "__SYCL_INLINE_VER_NAMESPACE(_V1) {\n";
+  }
   O << "namespace detail {\n";
 
   // Generate declaration of variable of type __sycl_device_global_registration
@@ -5380,7 +5543,8 @@ void SYCLIntegrationHeader::emit(raw_ostream &O) {
   }
   O << "\n";
   O << "} // namespace detail\n";
-  O << "} // __SYCL_INLINE_VER_NAMESPACE(_V1)\n";
+  if (!IsAIE)
+    O << "} // __SYCL_INLINE_VER_NAMESPACE(_V1)\n";
   O << "} // namespace sycl\n";
   O << "\n";
 }

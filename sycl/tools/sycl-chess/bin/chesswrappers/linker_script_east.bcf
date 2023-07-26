@@ -1,0 +1,44 @@
+// ME Tile has access to 128 KBs of memory (32 KiBs are its own), partitioned
+// into 4 32 KiB blocks
+//
+// The max program size is 16 KiBs (so the AIE ELF text sections cannot be larger)
+//
+// Addresses in Hex:
+// 0x00020000 – 0x00027FFF = 32 KiBs of memory, South Memory
+// 0x00028000 – 0x0002FFFF = 32 KiBs of memory, West Memory
+// 0x00030000 – 0x00037FFF = 32 KiBs of memory, North Memory
+// 0x00038000 – 0x0003FFFF = 32 KiBs of memory, East Memory
+//
+// Decimal Conversion:
+// 131072 – 163839 = 32768 bytes of memory, South Memory
+// 163840 – 196607 = 32768 bytes of memory, West Memory
+// 196608 – 229375 = 32768 bytes of memory, North Memory
+// 229376 – 262143 = 32768 bytes of memory, East Memory
+//
+// /!\ Any change to the linker script need to be reflected in the runtime's hardware.hpp
+
+_entry_point _main_init
+_symbol      _main _after _main_init
+_symbol      _main_init 0
+
+//PM
+_reserved   DMb            0x00000   0x20000
+
+//South-------------------------------------------------
+_reserved   DMb                        0x20000   0x08000
+
+
+//West-------------------------------------------------
+_reserved   DMb                        0x28000   0x08000
+
+
+//North-------------------------------------------------
+_reserved   DMb                        0x30000   0x08000
+
+
+//East-------------------------------------------------
+_stack DM_stack                        0x38000   0x01000
+// This is the space used by the runtime for various purposes
+// CALCULATED_SIZE_MINUS_GLOBALS will be replaced by the correct value before use
+_reserved   DMb                        0x39000   0x0CALCULATED_SIZE_MINUS_GLOBALS
+

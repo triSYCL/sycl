@@ -1,0 +1,300 @@
+#!/bin/bash
+#
+# TODO: A lovely 💞 description when this is working to a reasonable level of
+# stability
+#
+# This script is used in clang/lib/Driver/ToolChains/Chess.cpp look there for example of use.
+# 
+# Arguments:
+# $1 == Cardano's bin directory where the Xilinx wrapper scripts to Chess tools
+#       (xchess*) reside amongst other things
+# $2 == path to the clang driver that's executing the shell script (e.g.
+#        your compiled Clang's build/bin)
+# $3 == The name of the source file without file extensions or temporary
+#       manglings, mostly used to generate some intermediate file names
+# $4 == The initial input file name, currently a .o file that's actually a .bc
+#       file in disguise
+# $5 == The systems temporary directory where we'll deposit some intermediate
+#       files
+# $6 == The name we wish to give our final output .xcl binary, important that it
+#       is consistent with what the driver expects it to be.
+
+usage() { echo sycl-chess: error: $2 >&2; exit $1; }
+
+set -e
+set -x
+# export SHELLOPTS
+
+echo $0 $@
+
+if [[ -z "$1" ]]; then
+  usage 1 "no Cardano bin directory containing xchesscc"
+fi
+
+if [[ -z "$2" ]]; then
+  usage 2 "no driver path specified"
+fi
+
+if [[ -z "$3" ]]; then
+  usage 3 "no source file name"
+fi
+
+if [[ -z "$4" ]]; then
+  usage 4 "no input file name"
+fi
+
+if [[ -z "$5" ]]; then
+  usage 5 "no temporary directory specified"
+fi
+
+if [[ -z "$6" ]]; then
+  usage 6 "no final output file specified"
+fi
+
+# Setup Clang/LLVM related env variables
+export DRIVER_PATH_DIR="$(realpath $2)"
+if [[ ! -d "$DRIVER_PATH_DIR" ]]; then
+  usage 10 "path to driver directory is not a valid directory"
+else
+  export OPT="$DRIVER_PATH_DIR/opt"
+  if [[ ! -f "$OPT" ]]; then
+    usage 11 "no llvm opt executable found in $DRIVER_PATH_DIR"
+  fi
+fi
+
+# Setup Cardano related env variables
+export CARDANO_BIN_PATH_DIR="$1"
+if [[ ! -d "$CARDANO_BIN_PATH_DIR" ]]; then
+  usage 7 "path to Cardano bin directory is not a valid directory"
+else
+  export CARDANO_LIB_DIR="$CARDANO_BIN_PATH_DIR/../data/cervino/lib/"
+  if [[ ! -d "$CARDANO_LIB_DIR" ]]; then
+    usage 9 "cardano lib directory not found"
+  fi
+fi
+
+export SYCL_LIB_PATH="$(realpath $DRIVER_PATH_DIR/../lib)"
+
+# excluding file extension e.g. .cpp
+export SOURCE_FILE_NAME="$3"
+# input file name including extensions and path
+export INPUT_FILE_NAME="$4"
+# Should point to whatever Clang has decided is the temporary directory
+export CLANG_TEMPORARY_DIR="$5"
+# output file name including extensions and path
+export OUTPUT_FILE_NAME="$6"
+
+if [[ ! -d "$CLANG_TEMPORARY_DIR" ]]; then
+  usage 12 "the path given for the temporary directory is an invalid directory"
+fi
+
+export XCHESSCC=$DRIVER_PATH_DIR/chesswrappers/xchesscc_wrapper
+
+# Weirdly the +w argument of the chesscc compiler doesn't dump any of the
+# output files into the work directory you supply... it seems to just dump a
+# ton of other temporary files there! Useful for debugging perhaps, but not
+# useful to keep a sane temporary directory when compiling for 400 tiles
+export SOURCE_TEMPORARY_DIR="$(mktemp -d $5/sycl-chess.XXXXXX.${SOURCE_FILE_NAME}/)"
+
+KERNELPROP="${SOURCE_TEMPORARY_DIR}KernelProperties_${SOURCE_FILE_NAME}.bash"
+UNMERGED_PROP=$SOURCE_TEMPORARY_DIR/KernelUnmergedProperties_${SOURCE_FILE_NAME}.bash
+
+# The kernel merging process:
+#  -prepare-chess  will setup metadata to prevent kernels from being merged by mergefunc and
+#                 set the linkage of non-kernel to private such that they can be discard when unused.
+#  -mergefunc     will merge identical functions except kernels because of prepare-chess changes.
+#                 This makes spotting identical kernels much easier.
+#  -chess-massage  will reorder kernels to be clustered by mergeability,
+#                 generate an ordered list of kernels before the merge and
+#                 mark mergeable/redundant kernels as private.
+#  -globaldce     will eliminate kernels marked private by chess-massage because they are unreachable.
+#  -kernelPropGen will generate and ordered list of kernels after the merge
+#  and finally this script will compile each unique kernel via chess and duplicate the output for equivalent kernels.
+#  since the addresses of data is not the same for east tiles and west tiles east and west tiles a generally not merged.
+
+# We use vxxIRDowngrader because some of the transfromation it does are needed.
+# but most aren't so using a new better addapted passe would be better.
+
+cp $INPUT_FILE_NAME $INPUT_FILE_NAME.saved.bc
+
+$OPT -S -passes='default<Oz>,prepare-chess,default<Oz>,mergefunc,chess-massage,globaldce,kernelPropGen' -disable-loop-unrolling \
+  "$INPUT_FILE_NAME" --sycl-kernel-propgen-output $KERNELPROP \
+  --sycl-kernel-unmerged-prop-out $UNMERGED_PROP -o \
+  "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
+
+# Our bash file containing kernel property environment variables is placed in
+# the systems temporary directory (or wherever the Clang driver is told is the
+# temporary directory) and is postfixed with the source files name. It's
+# generated by the kernelPropertiesGen OPT pass.
+
+source "$KERNELPROP"
+
+# Retrieve the unmerged kernel list from chess-massage. This is used to identify
+# how functions are merged. Some brief description of idea as below
+# The original unmerged list is as:
+#   func1 - func2 - func3 - func4 - func5 - ...
+# The merged one looks like:
+#   func1 - func4 - ...
+source "$UNMERGED_PROP"
+
+# Compile all our kernels into a .o file.
+# AIE_TOOLS_BIN
+if [[ -z "${AIE_TOOLS_BIN}" ]]; then
+  $XCHESSCC +P $(nproc) -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c \
+    -o "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
+    "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
+else
+  $AIE_TOOLS_BIN/llc --mtriple=aie -O2 --march=aie --function-sections --filetype=obj -o "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernels-optimized.ll"
+fi
+
+# The following code will edit the linker script based on the kernel to optimize memory usage.
+# Calculate the sum of the sizes of the data sections inside the .o file containing all kernels.
+SIZE_OF_VARIABLE_SECTION_STR=$(objdump --headers $SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o \
+ | grep --extended-regexp "data|bss" | sed --regexp-extended 's/00+/0x/' | awk --non-decimal-data --field-separator=' ' '{ printf "%d\n",$3 }' | awk '{sum+=$1;} END{print sum;}')
+echo $SIZE_OF_VARIABLE_SECTION_STR
+declare -i SIZE_OF_VARIABLE_SECTION=$(($SIZE_OF_VARIABLE_SECTION_STR))
+# 7000 in hexa is 0x8000(size of the tile's memory) - 0x1000(fixed size dedicated to the stack)
+# 6fdc is 0x7000 - 0x24 because the linker alway insert a 0x24 byte section of data even without anything in the .o files
+declare -i TOTAL_SIZE=$((16#6edc))
+declare -i TOTAL_SIZE_MINUS_GLOBAL_VARIABLES=TOTAL_SIZE-SIZE_OF_VARIABLE_SECTION
+SCRIPT_REPLACEMENT=$(printf "%x\n" $((TOTAL_SIZE_MINUS_GLOBAL_VARIABLES)))
+cat $DRIVER_PATH_DIR/chesswrappers/linker_script_east.bcf | sed "s/CALCULATED_SIZE_MINUS_GLOBALS/$SCRIPT_REPLACEMENT/g" > $SOURCE_TEMPORARY_DIR/linker_script_east.bcf
+cat $DRIVER_PATH_DIR/chesswrappers/linker_script_west.bcf | sed "s/CALCULATED_SIZE_MINUS_GLOBALS/$SCRIPT_REPLACEMENT/g" > $SOURCE_TEMPORARY_DIR/linker_script_west.bcf
+echo "$TOTAL_SIZE_MINUS_GLOBAL_VARIABLES" > $SOURCE_TEMPORARY_DIR/REMAINING_SIZES
+
+# A function we can fork into child processes to achieve some form of
+# parallelism at a higher level than chess itself provides with it's own
+# paralleism via +P.
+# This is the reason everything is lazily exported as we invoke this via xargs
+# and wish to import/inject this scripts environment into its subprocess
+# invocations
+#
+# This is the biggest slowdown in the compilation pipeline right now.
+# TODO: The next simplest speedup is to swap to Peano which is several times
+# quicker after that if it's still slow or if we do not wish to/cannot swap to
+# Peano eventually working out duplicate kernels and removing them is the next
+# step. Even if usual templated kernel code is unlikely to have 400
+# variations, if it does, then may the implementer fall upon the sword of their
+# own making!
+chess_kernel_compile () {
+    set -e
+    set -x
+    echo "Linking Kernel: $0"
+    echo "Tile Main File: $SOURCE_TEMPORARY_DIR/$0.cpp"
+
+    # TODO: Look into the fact that SemaSYCL generates the main files twice
+    # once pre-linker phase and once after. This is probably normal behaviour
+    # but we do not want to be unable to clean up those files and it may result
+    # in some unusual behaviour longterm
+
+    echo "extern \"C\" void $0(); int main(void) { $0(); done(); }" > $SOURCE_TEMPORARY_DIR/$0.cpp
+
+    $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f -c \
+      -o "$SOURCE_TEMPORARY_DIR/$0.main.o" "$SOURCE_TEMPORARY_DIR/$0.cpp"
+
+    # TODO: the runtime often only uses on of these images
+    # sometimes knows at compile time which one.
+    # so we could sometimes only compile one of them instead of both. 
+
+    # link the same kernel for west tiles and east tiles
+    $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f \
+      +l$SOURCE_TEMPORARY_DIR/linker_script_east.bcf \
+      -o "$SOURCE_TEMPORARY_DIR/$0.elf.o_east" \
+      "$SOURCE_TEMPORARY_DIR/$0.main.o" \
+      "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
+      "$SYCL_LIB_PATH/aie-intrinsic.o" &
+
+    $XCHESSCC -p me -C Release_LLVM -P $CARDANO_LIB_DIR -d -f \
+      +l$SOURCE_TEMPORARY_DIR/linker_script_west.bcf \
+      -o "$SOURCE_TEMPORARY_DIR/$0.elf.o_west" \
+      "$SOURCE_TEMPORARY_DIR/$0.main.o" \
+      "$SOURCE_TEMPORARY_DIR/${SOURCE_FILE_NAME}_kernel_module.o" \
+      "$SYCL_LIB_PATH/aie-intrinsic.o" &
+    wait
+}
+
+# export the bash function so xargs can use it
+export -f chess_kernel_compile
+
+# For the number of arguments in KERNEL_NAME_ARRAY, invoke xargs for each
+# and only consume 1 argument per invocation. This is passed in as the $0'th
+# variable. We invoke xargs for the maximum number of cores available on the
+# system.
+if [[ ! ${#KERNEL_NAME_ARRAY[@]} -eq 0 ]]; then
+  echo "Building ${#KERNEL_NAME_ARRAY[@]} Kernels..."
+  echo "${KERNEL_NAME_ARRAY[@]}" | xargs -n1 -P$(nproc) \
+    bash -c 'chess_kernel_compile "$@"'
+fi
+
+echo $REMAINING_SIZES
+
+# Wait on all our spawned compilations to complete
+wait
+
+# Cat all the metadata and images into a file (essentially defining our own
+# temporary packing format). This is perhaps not robust but it does the job for
+# the moment.
+# This is not parallelized in the compilation function as we want the file to be
+# sequential or at least in the basic order defined in the loop. We do not want
+# data races making the file format non-deterministic.
+if [[ ! ${#KERNEL_NAME_ARRAY_UNMERGED[@]} -eq 0 ]]; then
+  LINKER_LIST=""
+  # This merged_index is index to KERNEL_NAME_ARRAY[]. It points to the kernel
+  # that duplicate kernels are merged into. In below example, kernel1 and
+  # kernel2 are merged into kernel0.
+  #   unmerged: kernel0 - kernel1 - kernel2 - kernel3
+  #   merged:   kernel0 - kernel3
+  # While iterating on the unmerged kernel list below, if the corresponding ELF
+  # doesn't exist, it means the kernel has been merged, hence the other kernel
+  # pointed by merged_index is used instead. When the ELF exists, merged_index
+  # increments to update and point to correct merged kernel.
+  merged_index=-1;
+  for index in "${KERNEL_NAME_ARRAY_UNMERGED[@]}"; do
+    if [[ -n "$index" ]]; then
+      # Search for the corresponding elf file. If the file doesn't exist,
+      # that means the kernel has been merged into previous matched one.
+      # This is valid because all in KERNEL_NAME_ARRAY* are identically sorted
+      # with hash values.
+      ELF="$SOURCE_TEMPORARY_DIR/${index}.elf.o"
+
+      # both ${ELF}_east and ${ELF}_west are always created at the same time
+      # so checking for one of them check that both are here.
+      if [ ! -f "${ELF}_east" ]; then
+        ELF="$SOURCE_TEMPORARY_DIR/${KERNEL_NAME_ARRAY[$merged_index]}.elf.o"
+      else
+        set +e
+        ((merged_index++))
+        set -e
+      fi
+
+      for POSTFIX in _east _west; do
+        # Name of ELF binary and kernel function that we will synch with
+        # integration header to retrieve our binary, it will be packaged as part
+        # of the final image data.
+        # The name is also used by the Offload Wrapper to identify the image to
+        # wrap into the host binary after its loaded into memory.
+        echo "${index}$POSTFIX" >> "$OUTPUT_FILE_NAME"
+
+        # The size in decimal of the memory section that was reserved for the runtime.
+        cat $SOURCE_TEMPORARY_DIR/REMAINING_SIZES >> "$OUTPUT_FILE_NAME"
+
+        # Size of file in bytes
+        echo "`ls -lrt "${ELF}$POSTFIX" | nawk '{print $5}'`" >> "$OUTPUT_FILE_NAME"
+        cat ${ELF}$POSTFIX >> "$OUTPUT_FILE_NAME"
+      done
+    fi
+  done
+fi
+# Dump a copy of the file containing all of the AIE binaries into another file
+# so that we can introspect and in theory skip the AOC stage above, if
+# we want to, by altering the script a little to comment out the compilation
+# steps and inverting the copy, to copy the aie_images file to the output file.
+# Useful for debugging the host <-> device side mapping and or offloading
+# stages. Dumped in the basic temporary directory clang passes because we
+# flatline all of the directory we use to output intermediate files.
+cp "$OUTPUT_FILE_NAME" "$CLANG_TEMPORARY_DIR/aie_images-$USER"
+
+# Delete all temporary files generated by Chess and other tools, the clang
+# compiler doesn't know what we generate in here so it has to be manually
+# tracked and removed
+# rm -rf $SOURCE_TEMPORARY_DIR

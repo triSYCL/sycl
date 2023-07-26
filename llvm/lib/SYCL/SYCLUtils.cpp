@@ -73,7 +73,8 @@ void replaceFunction(Module &M, StringRef OldN, StringRef NewN) {
 /// Test if a function is a kernel
 bool isKernelFunc(const Function *F) {
   return F->getCallingConv() == CallingConv::SPIR_KERNEL ||
-         F->hasFnAttribute("fpga.top.func");
+         F->hasFnAttribute("fpga.top.func") ||
+         F->hasFnAttribute("chess_sycl_kernel");
 }
 
 bool isArgBuffer(Argument *Arg) {

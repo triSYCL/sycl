@@ -7796,7 +7796,7 @@ NamedDecl *Sema::ActOnVariableDeclarator(
       NewVD->setTSCSpec(TSCS);
   }
 
-  if (getLangOpts().SYCLIsDevice) {
+  if (getLangOpts().SYCLIsDevice && !getLangOpts().SYCLAllowMutableGlobal) {
     // device_global array is not allowed.
     if (const ArrayType *AT = getASTContext().getAsArrayType(NewVD->getType()))
       if (isTypeDecoratedWithDeclAttribute<SYCLDeviceGlobalAttr>(

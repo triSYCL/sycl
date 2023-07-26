@@ -43,6 +43,7 @@ config.test_exec_root = os.path.join(config.sycl_obj_root, 'test')
 # Propagate some variables from the host environment.
 llvm_config.with_system_environment(['PATH', 'OCL_ICD_FILENAMES', 'SYCL_DEVICE_ALLOWLIST', 'SYCL_CONFIG_FILE_NAME', 'SYCL_PI_TRACE', 'XILINX_XRT'])
 
+aie=lit_config.params.get('AIE', "off")
 vitis=lit_config.params.get('VITIS', "off")
 
 config.substitutions.append(('%python', '"%s"' % (sys.executable)))
@@ -228,6 +229,50 @@ else:
     config.substitutions.append( ('%run_if_hw_emu', run_if_hw_emu) )
     config.substitutions.append( ('%run_if_sw_emu', run_if_sw_emu) )
     config.substitutions.append( ('%run_if_not_cpu', run_if_not_cpu) )
+
+if aie == "off":
+    config.excludes += ['aie', 'acap']
+else:
+    config.excludes += ['abi', 'basic_tests', 'CMakeLists.txt', 'extensions', 'gdb', 'invoke_simd', 'matrix', 'optional_kernel_features', 'scheduler', 'type_traits', 'vitis', 'check_device_code', 'esimd', 'fpga_tests', 'kernel_param', 'multi_ptr', 'regression', 'tools', 'Unit', 'warnings']
+    if "aie" in aie:
+        make_sh_path = os.environ["AIE_MAKE_SH"]
+        lit_config.note(f"using aie make.sh: {make_sh_path}")
+        config.available_features.add("aie")
+        config.excludes += ['acap']
+        config.substitutions.append( ('%aie_clang', f"{make_sh_path} {config.clang}++"))
+    else:
+        make_sh_path = os.environ["ACAP_MAKE_SH"]
+        lit_config.note(f"using acap make.sh: {make_sh_path}")
+        config.available_features.add("acap")
+        config.excludes += ['aie']
+        config.substitutions.append( ('%acap_clang', f"{make_sh_path} {config.clang}++"))
+        add_acap_result="echo"
+        if "ACAP_COLLECT_TEST_BIN_PATH" in os.environ:
+            ACAP_COLLECT_TEST_BIN_PATH = os.environ["ACAP_COLLECT_TEST_BIN_PATH"]
+            lit_config.note(f"collecting results into: {ACAP_COLLECT_TEST_BIN_PATH}")
+            subprocess.run(["rm", "-rf", f"{ACAP_COLLECT_TEST_BIN_PATH}"])
+            subprocess.run(["mkdir", f"{ACAP_COLLECT_TEST_BIN_PATH}"])
+            add_acap_result = f"cp --target-directory={ACAP_COLLECT_TEST_BIN_PATH} "
+            config.substitutions.append( ('%add_acap_result', add_acap_result))
+    if "AIE_RUN_ON_DEVICE_SH" in os.environ:
+        run_on_device = os.environ["AIE_RUN_ON_DEVICE_SH"]
+        config.substitutions.append( ('%run_on_device', run_on_device))
+        lit_config.note(f"using aie run_on_device.sh: {run_on_device}")
+    if aie == "aie_no_device":
+        config.available_features.add("no_device")
+        config.substitutions.append( ('%if_run_on_device', "true "))
+    else:
+        config.substitutions.append( ('%if_run_on_device', " "))
+    llvm_config.with_environment('ACAP_MAKE_IN_PARALLEL', '1')
+    required_env = ['HOME', 'USER', 'XILINXD_LICENSE_FILE', 'LM_LICENSE_FILE', 'RDI_INTERNAL_ALLOW_PARTIAL_DATA', 'AIE_ROOT', 'CHESSROOT']
+    has_error=False
+    for env in required_env:
+        if env not in os.environ:
+            lit_config.note("missing environnement variable: {}".format(env))
+            has_error=True
+    if has_error:
+        lit_config.error("Can't configure tests for AIE or ACAP")
+    llvm_config.with_system_environment(required_env)
 
 # Set timeout for test = 10 mins
 try:
