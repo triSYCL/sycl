@@ -658,7 +658,7 @@ public:
       Visitor.Emit(FD, state.GetOrCreateFunc(FD));
   }
 
-  /// This is transformation fixes function parameters. it is not generic, it
+  /// This transformation fixes the function parameters. It is not generic, it
   /// exist only because we do not generate parameter properly.
   /// This is why it is not a pass.
   void rewriteParameters() {
@@ -767,7 +767,7 @@ public:
     llvm::verifyModule(*MLIRLLVMModule, &llvm::errs(), &brokenDebugInto);
 
     /// We do not want our metadata to collide with the metadata from the main
-    /// llvm module. so we remove all metadata in our current module.
+    /// llvm module. So, we remove all metadata in our current module.
     MLIRLLVMModule->getOrInsertModuleFlagsMetadata()->clearOperands();
     llvm::StripDebugInfo(*MLIRLLVMModule);
 
