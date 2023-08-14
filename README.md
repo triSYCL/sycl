@@ -70,6 +70,69 @@ conjunction with the normal compiler commands as demonstrated.
 However, the software requirements for AMD FPGA compilation and
 the compiler invocation are not the same and are documented elsewhere.
 
+## ArchGenMLIR
+
+The trisycl project also contains part of the ArchGenMLIR tool. ArchGenMLIR is a tool 
+to automatically generate approximations for mathematical fixed-point functions.
+It is in 2 parts, the compiler plugin part in this repo and the library part in the marto repo.
+It also depends on flopoco.
+
+Here is how to set it up:
+```bash
+# install sollya
+sudo apt install libsollya
+
+# install flopoco
+git clone https://gitlab.com/flopoco/flopoco.git
+cd flopoco
+mkdir -p build-release
+cd build-release
+cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=1 -DCMAKE_BUILD_TYPE="Release"
+make -j`nproc`
+cd ..
+cmake --install build-release --prefix install
+
+FLOPOCO_PATH=`pwd`/install
+
+cd ..
+
+git clone git@github.com:Ralender/sycl.git
+cd sycl
+git checkout ArchGenMLIR
+python3 ./buildbot/configure.py \
+-o build-release \
+--shared-libs \
+--cmake-gen Ninja \
+-t Release \
+--cmake-opt="-DCMAKE_C_COMPILER=/usr/bin/clang" \
+--cmake-opt="-DCMAKE_CXX_COMPILER=/usr/bin/clang++" \
+--cmake-opt=-DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+--cmake-opt=-DCMAKE_PREFIX_PATH=$FLOPOCO_PATH \
+--llvm-external-projects=mlir,compiler-rt
+
+# compiler clang++ and ArchGenMLIR
+ninja -C build-release archgen
+# run ArchGenMLIR test
+ninja -C build-release check-archgen
+
+COMPILER_PATH=`pwd`/build-release
+
+cd ..
+git clone git@github.com:lforg37/marto.git
+cd marto
+git checkout leaf_disambiguation
+mkdir build-release
+cd build-release
+cmake .. -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
+-DCMAKE_CXX_COMPILER=$COMPILER_PATH/bin/clang++ \
+-DCMAKE_BUILD_TYPE="Release" -DBUILD_TESTING=ON \
+-DARCHGEN_MLIR_PLUGIN_PATH=$COMPILER_PATH/lib/ArchGenMLIRPlugin.so
+cd ..
+make -C build-release/ test_expr_mlir
+./build-release/archgenlib/examples/test_expr_mlir
+```
+
+test_expr will test a every input of the function and validate the outputs approximation is within expected range.
 
 ## License
 See [LICENSE.txt](llvm/LICENSE.TXT) for details.

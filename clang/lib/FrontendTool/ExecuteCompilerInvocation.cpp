@@ -184,6 +184,19 @@ CreateFrontendAction(CompilerInstance &CI) {
     Act = std::make_unique<ASTMergeAction>(std::move(Act),
                                             FEOpts.ASTMergeFiles);
 
+  /// Find the plugin of type ReplaceAndReuseAction (if it does exist) and call
+  /// takeMainActionToReplace on them.
+  for (const FrontendPluginRegistry::entry &Plugin :
+       FrontendPluginRegistry::entries()) {
+    std::unique_ptr<PluginASTAction> P = Plugin.instantiate();
+    PluginASTAction::ActionType ActionType = P->getActionType();
+    if (ActionType == PluginASTAction::ActionType::ReplaceAndReuseAction) {
+      P->takeMainActionToReplace(std::move(Act));
+      Act = std::move(P);
+      break;
+    }
+  }
+
   return Act;
 }
 

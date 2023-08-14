@@ -170,6 +170,7 @@ public:
   inline unsigned getScale() const { return Sema.getScale(); }
   int getLsbWeight() const { return Sema.getLsbWeight(); }
   int getMsbWeight() const { return Sema.getMsbWeight(); }
+  int getMaxPosWeight() const {return Sema.getMsbWeight() - (Sema.isSigned() ? 1 : 0); }
   inline bool isSaturated() const { return Sema.isSaturated(); }
   inline bool isSigned() const { return Sema.isSigned(); }
   inline bool hasPadding() const { return Sema.hasUnsignedPadding(); }

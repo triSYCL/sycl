@@ -1,0 +1,14 @@
+add_mlir_dialect_library(ArchGenMLIRApprox
+EXCLUDE_FROM_LIBMLIR
+Approx.cpp
+
+ADDITIONAL_HEADER_DIRS
+
+DEPENDS
+ArchGenMLIRFixedPt
+ArchGenMLIRApproxIncGen
+
+LINK_LIBS PUBLIC
+ArchGenMLIRFixedPt
+MLIRIR
+)
