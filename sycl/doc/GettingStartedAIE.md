@@ -6,61 +6,66 @@ change rapidly or get outdated.
 The recent work has mostly focused on the more recent AIE++ library so a large part of this documentation is now outdated.
 
 ## Requirements
-  * Recent Linux distribution
-  * Vitis 2022.2 which includes CHESS for AIE
 
-# Xilinx AIE Compilation
+- Recent Linux distribution;
+- Vitis 2022.2 which includes CHESS for AIE.
 
-This document aims to cover the key differences of compiling SYCL for Xilinx
+# AMD AIE Compilation
+
+This document aims to cover the key differences of compiling SYCL for AMD
 AIE using the WIP device compiler based on the upstream Intel SYCL compiler.
 
-The main future goal of this SYCL device compiler and SYCL runtime is to target 
+The main future goal of this SYCL device compiler and SYCL runtime is to target
 the AIE PL and APUs, not just the PS and AI Engine cores. The ideal goal is
 for all of the various AIE components to be usable seamlessly in a single
-source SYCL application. This however is a long term goal. For now we support 
-Xilinx FPGAs and AI Engine Cores separately and in an experimental WIP fashion.
+source SYCL application. This however is a long term goal. For now we support
+AMD FPGAs and AI Engine Cores separately and in an experimental WIP fashion.
 
 ## The SYCL Runtime for AIE
 
-The SYCL runtime for AIE is currently not the SYCL library compiled and 
-packaged with the device compiler in this project. The library packaged with 
-this project is currently a modified (for Xilinx FPGA) variation of the Intel 
-upstream implementation. It's currently only aimed at targeting Intel GPUs, 
-Intel FPGAs, Intel CPUs, Nvidia GPUs, AMD GPUs and Xilinx FPGAs.
+The SYCL runtime for AIE is currently not the SYCL library compiled and
+packaged with the device compiler in this project. The library packaged with
+this project is currently a modified (for AMD FPGA) variation of the Intel
+upstream implementation. It's currently only aimed at targeting Intel GPUs,
+Intel FPGAs, Intel CPUs, Nvidia GPUs, AMD GPUs and AMD FPGAs.
 
 There are 2 libraries using the same compiler:
- - ACAP++ see API in [test](../test/acap/test_aie_mandelbrot.cpp)
- - AIE++ see API in [test](../test/aie/mandelbrot.cpp)
-None of them are available for now. 
+
+- ACAP++, see API in [test](../test/acap/test_aie_mandelbrot.cpp);
+- AIE++, see API in [test](../test/aie/mandelbrot.cpp)
+
+which are available from [triSYCL](https://github.com/triSYCL/triSYCL).
 
 The ACAP++ library is usable as a standalone SYCL runtime library without the
-device compiler and defaults to a multi-threaded CPU application (all kernels are 
-executed on the host). This makes it superb for debugging your applications 
-before trying to target your application on a more complex heterogeneous 
+device compiler and defaults to a multi-threaded CPU application (all kernels are
+executed on the host). This makes it superb for debugging your applications
+before trying to target your application on a more complex heterogeneous
 architecture like AIE.
 
-The AIE++ library for now only targets AIE hardware.
+The AIE++ library for now only targets AIE hardware as the CPU
+implementation is a work-in-progress.
 
 ## The SYCL Device Compiler
 
 To compile this compiler follow the [Get Started With SYCL Compiler](sycl/doc/GetStartedWithSYCLCompiler.md)
-guide. There is currently no unusual differences in the environment or 
-compilation arguments required like there is for Xilinx FPGA. However, you can 
+guide. There is currently no unusual differences in the environment or
+compilation arguments required like there is for AMD FPGA. However, you can
 equally use the compilation steps for FPGA if you wish.
 
 For some information on what the device compiler actually does please look at
 the following documentation:
-- [SYCL Compiler and Runtime Design](sycl/doc/CompilerAndRuntimeDesign.md)
-- [SYCL Compiler for Xilinx FPGA](sycl/doc/Xilinx_sycl_compiler_architecture.rst)
 
-The AI Engine compilation flow is slightly different when it comes down to the 
+- [SYCL Compiler and Runtime Design](design/CompilerAndRuntimeDesign.md)
+- [SYCL Compiler for AMD FPGA](Xilinx_sycl_compiler_architecture.rst)
+
+The AI Engine compilation flow is slightly different when it comes down to the
 nitty gritty details. However, the basic concepts still apply.
 
 But in essence, the device compiler is what will compile your SYCL kernels for a
 particular device target and package it into the final binary for consumption
 by the SYCL runtime.
 
-## Xilinx AIEngine Library
+## AMD AIEngine Library
 
 chroot into an ARM to compile for ARM without cross-compilation (see https://confluence.xilinx.com/display/XRLABS/Running+SYCL+on+Tenzing+Versal+boards#RunningSYCLonTenzingVersalboards-Usingthemfromanx86machine).
 
@@ -114,15 +119,15 @@ sudo cp -r ../include/* /usr/local/include
 
 ## AIE SDF and Chess compilers
 
-To use the SYCL device compiler you will need an installation of the Xilinx 
+To use the SYCL device compiler you will need an installation of the AMD
 Vitis framework that contains AIE development environment.
 
 While we do not really use AIE ADF tools, we make use of the tools it
-relies on for our AI Engine kernel compilation. In this case the `xchesscc` 
-compiler which compiles our kernels to an ELF binary loadable by the AI Engine 
-using Synopsis's `chess` compiler toolchain.
+relies on for our AI Engine kernel compilation. In this case the `xchesscc`
+compiler which compiles our kernels to an ELF binary loadable by the AI Engine
+using Synopsis's `chess` compiler tool-chain.
 
-The following environment setup recipe is specifically for Xilinx Internal use
+The following environment setup recipe is specifically for AMD Internal use
 and should be modified before this project is open sourced:
 
 ```bash
@@ -187,18 +192,18 @@ export CHESSROOT=$AIE_ROOT/tps/lnx64/
 
 ## Several flavors for compiling a basic AIE++ Hello World
 
-So for these examples we will compile the [hello_world.cpp](sycl/test/acap_tests/hello_world.cpp) 
-test. It's a 1 processing element (AI Engine core) kernel that prints some 
+So for these examples we will compile the [hello_world.cpp](sycl/test/acap_tests/hello_world.cpp)
+test. It's a 1 processing element (AI Engine core) kernel that prints some
 output.
 
 In the following examples we assume the environment variable *SYCL_BIN_DIR* is
-setup to point the build/bin directory of the compiled SYCL device compiler. 
-Although in the two cases where we're only compiling for CPU it's not strictly 
-required, provided the C++ compiler you use is fairly up-to-date and supports 
+setup to point the build/bin directory of the compiled SYCL device compiler.
+Although in the two cases where we're only compiling for CPU it's not strictly
+required, provided the C++ compiler you use is fairly up-to-date and supports
 C++ 20, the commands should work.
 
-The directory `/net/xsjsycl41/srv/Ubuntu-22.04/arm64-root-server-rw-tmp` we  reference to in the cross-compilation commands is an Ubuntu-22.04 arm64 
-(AKA aarch64) image setup to contain all of the required libraries we need for 
+The directory `/net/xsjsycl41/srv/Ubuntu-22.04/arm64-root-server-rw-tmp` we  reference to in the cross-compilation commands is an Ubuntu-22.04 arm64
+(AKA aarch64) image setup to contain all of the required libraries we need for
 cross-compilation.
 
 In all of the following commands we assume you're running the latest
@@ -206,8 +211,8 @@ version of Ubuntu or Debian.
 
 ### Compiling a basic AIE Hello World for native CPU execution
 
-The following compilation command will compile the `hello_world.cpp` example for 
-your native CPU. What is meant by native in this case, is whatever architecture 
+The following compilation command will compile the `hello_world.cpp` example for
+your native CPU. What is meant by native in this case, is whatever architecture
 you're compiling on. So compiling on x86, will result in a `hello_world`
 binary that executes on an x86 CPU. All kernels will also execute on the CPU,
 no device offloading or compilation is done.
@@ -218,14 +223,14 @@ no device offloading or compilation is done.
 ```
 ### Cross-compilation for ARM CPU execution
 
-The following compilation command will compile the `hello_world.cpp` example for 
-ARM CPU. The general idea of the compilation commands is that you're compiling 
+The following compilation command will compile the `hello_world.cpp` example for
+ARM CPU. The general idea of the compilation commands is that you're compiling
 your binary on an Linux x86 host for an Linux ARM64 (aarch64) target.
- 
-In this case the assumption is that the ARM target is the AIE PS which is an 
-Cortex-A72 CPU, but in theory it could be whatever `-mcpu` target the Clang 
-compiler supports. 
- 
+
+In this case the assumption is that the ARM target is the AIE PS which is an
+Cortex-A72 CPU, but in theory it could be whatever `-mcpu` target the Clang
+compiler supports.
+
 ```bash
   $ISYCL_BIN_DIR/clang++ -std=c++20 -target aarch64-linux-gnu -mcpu=cortex-a72 \
     --sysroot /net/xsjsycl41/srv/Ubuntu-19.04/arm64-root-server-rw-tmp \
@@ -235,12 +240,12 @@ compiler supports.
 
 ### Cross-compilation for AIE PS/AI Engine execution
 
-This is the only compilation command that requires the SYCL device compiler. 
-As the intent is to compile all of the kernels to be offloaded for the device, 
+This is the only compilation command that requires the SYCL device compiler.
+As the intent is to compile all of the kernels to be offloaded for the device,
 and the rest for the host.
 
 From a SYCL perspective the ACAP PS is the host device that will offload to
-the other elements of the ACAP AIE architecture. The device in this case is the ACAP AIE 
+the other elements of the ACAP AIE architecture. The device in this case is the ACAP AIE
 AI Engine cores.
 
 Create a script called `make.sh` containing
@@ -279,7 +284,7 @@ Then to compile using:
 ./make.sh /path/to/clang++ my_file.cpp
 ```
 
-For a a simple program that should compile and run correctly 
+For a a simple program that should compile and run correctly
 you can use the templated model:
 ```cpp
 #include <iostream>
