@@ -334,10 +334,18 @@ if (SYCL_ENABLE_XPTI_TRACING)
   set(XPTIFW_LIBS xpti xptifw)
 endif()
 
+set(AIE_PARTS
+    aie-intrinsic)
+
+if ("aie" IN_LIST SYCL_ENABLE_PLUGINS)
+  set(AIE_PARTS
+      ${AIE_PARTS}
+      sycl-chess)
+endif()
+
 # SYCL toolchain builds all components: compiler, libraries, headers, etc.
 add_custom_target(sycl-compiler
   DEPENDS append-file
-          aie-intrinsic
           clang
           clang-offload-wrapper
           clang-offload-bundler
@@ -350,13 +358,13 @@ add_custom_target(sycl-compiler
           llvm-no-spir-kernel
           llvm-spirv
           llvm-link
-          sycl-chess
           sycl-vxx
           opt
           llvm-objcopy
           spirv-to-ir-wrapper
           sycl-post-link
           opencl-aot
+          ${AIE_PARTS}
 )
 
 add_custom_target( sycl-runtime-libraries
