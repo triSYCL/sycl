@@ -9,8 +9,19 @@ The SYCL compilation workflow is composed by 2 parts, the Host and the Device pr
 
 .. figure:: images/AMD_FPGA_SYCL_compile_architecture.svg
    :width: 100%
-   :alt: Low-level compilation workflow in SYCL
+   :alt: Low-level compilation workflow in SYCL  more focused on the resource files.
    :name: Figure 1
+
+   **Figure 1:** Architecture of AMD FPGA SYCL compiler focused on the
+   resource files.
+
+.. figure:: images/AMD_FPGA_SYCL_compile_tool_flow.svg
+   :width: 100%
+   :alt: Low-level compilation workflow in SYCL more focused on the tools.
+   :name: Figure 2
+
+   **Figure 2:** Architecture of AMD FPGA SYCL compilation flow more
+   focused on the tools used.
 
 
 Device compilation
