@@ -72,10 +72,10 @@ the compiler invocation are not the same and are documented elsewhere.
 
 ## ArchGenMLIR
 
-The trisycl project also contains part of the ArchGenMLIR tool. ArchGenMLIR is a tool 
+The triSYCL project also contains parts of the ArchGenMLIR tool. ArchGenMLIR is a tool 
 to automatically generate approximations for mathematical fixed-point functions.
-It is in 2 parts, the compiler plugin part in this repo and the library part in the marto repo.
-It also depends on flopoco.
+It is in 2 parts, the compiler plugin part in this repository and the library part in the `marto` repository.
+It also depends on the FloPoCo project.
 
 Here is how to set it up:
 ```bash
@@ -132,7 +132,7 @@ make -C build-release/ test_expr_mlir
 ./build-release/archgenlib/examples/test_expr_mlir
 ```
 
-test_expr will test a every input of the function and validate the outputs approximation is within expected range.
+`test_expr` will test a every input of the function and validate that outputs approximation is within expected range.
 
 ## License
 See [LICENSE.txt](llvm/LICENSE.TXT) for details.
