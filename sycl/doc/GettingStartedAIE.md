@@ -56,7 +56,7 @@ For some information on what the device compiler actually does please look at
 the following documentation:
 
 - [SYCL Compiler and Runtime Design](design/CompilerAndRuntimeDesign.md)
-- [SYCL Compiler for AMD FPGA](Xilinx_sycl_compiler_architecture.rst)
+- [SYCL Compiler for AMD FPGA](design/AMD_SYCL_compiler_architecture.rst)
 
 The AI Engine compilation flow is slightly different when it comes down to the
 nitty gritty details. However, the basic concepts still apply.

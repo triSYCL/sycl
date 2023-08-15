@@ -1568,7 +1568,7 @@ extern "C" void run(sycl::buffer<int> &v) {
 ## AMD FPGA SYCL compiler architecture
 
 [Architecture of the AMD SYCL
-compiler](Xilinx_sycl_compiler_architecture.rst) describes the
+compiler](design/AMD_SYCL_compiler_architecture.rst) describes the
 compiler architecture.
 
 This document aims to cover the key differences of compiling SYCL for AMD
