@@ -50,12 +50,12 @@ including for example an Intel FPGA and an AMD FPGA.
 ## SYCL Related Documentation
 
 - AMD FPGA get started guide for the SYCL compiler
-  [GettingStartedXilinxFPGA.md](sycl/doc/GettingStartedXilinxFPGA.md)
+  [AMDGettingStartedFPGA.md](sycl/doc/AMDGettingStartedFPGA.md)
 - The unchanged get started guide for the SYCL compiler
   [GetStartedGuide.md](sycl/doc/GetStartedGuide.md)
-- Xilinx AIE/ACAP get started guide for the SYCL compiler
-  [GettingStartedAIE.md](sycl/doc/GettingStartedAIE.md)
-- Xilinx FPGA Tests Documentation - [Tests.md](sycl/doc/Tests.md)
+- AMD AIE/ACAP get started guide for the SYCL compiler
+  [AMDGettingStartedAIE.md](sycl/doc/AMDGettingStartedAIE.md)
+- AMD FPGA Tests Documentation - [AMDtestsFPGA.md](sycl/doc/AMDtestsFPGA.md)
 
 The [Build DPC++ toolchain](sycl/doc/GetStartedGuide.md#build-dpc-toolchain) from the
 Intel oneAPI DPC++ SYCL project is a good starting point to get to
