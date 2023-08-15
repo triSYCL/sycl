@@ -17,14 +17,6 @@ executable, these two compilation flows are completely different.
    **Figure 1:** Architecture of AMD FPGA SYCL compiler focused on the
    resource files.
 
-.. figure:: images/AMD_FPGA_SYCL_compile_tool_flow.svg
-   :width: 100%
-   :alt: Low-level compilation workflow in SYCL more focused on the tools.
-   :name: Figure 2
-
-   **Figure 2:** Architecture of AMD FPGA SYCL compilation flow more
-   focused on the tools used.
-
 
 Device compilation
 ==================
@@ -84,3 +76,12 @@ The executable
     executable. This hides to the developer the handling of host and
     device programs to make the development on hardware accelerator such
     as FPGAs much easier.
+
+
+.. figure:: images/AMD_FPGA_SYCL_compile_tool_flow.svg
+   :width: 100%
+   :alt: Low-level compilation workflow in SYCL more focused on the tools.
+   :name: Figure 2
+
+   **Figure 2:** Architecture of AMD FPGA SYCL compilation flow more
+   focused on the tools used.
