@@ -297,22 +297,25 @@ in the build process.
 > https://github.com/Xilinx/XRT/pull/6269
 
 ```bash
-# Get the latest AMD runtime
+# Get the latest AMD runtime with its submodules
 # Use either ssh
-git clone git@github.com:Xilinx/XRT.git
+git clone --recurse-submodules git@github.com:Xilinx/XRT.git
 # or https according to your usual method
-git clone https://github.com/Xilinx/XRT.git
+git clone --recurse-submodules https://github.com/Xilinx/XRT.git
 cd XRT/build
 # Install the required packages
 sudo ../src/runtime_src/tools/scripts/xrtdeps.sh
 # Setup the Vitis location so the Microblaze GCC can be used to
 # compile the ERT XRT runtime
 export XILINX_VITIS=/opt/xilinx/Vitis/2022.2
-# Compile the AMD runtime
-./build.sh
+
+# Compile the AMD runtime, use option to survive to some warning with
+# modern OS and compilers
+./build.sh -disable-werror
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
 sudo apt install --reinstall ./Release/xrt_202320.2.16.0_22.04-amd64-xrt.deb
+sudo apt install --reinstall ./Release/xrt_202320.2.16.0_23.04-amd64-xbflash2.deb
 ```
 
 It will install the user-mode XRT runtime and at least compile and
@@ -332,7 +335,8 @@ cd Debug
 make package
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
-sudo apt install --reinstall ./xrt_202320.2.16.0_22.04-amd64-xrt.deb
+sudo apt install --reinstall ./xrt_202320.2.16.0_23.04-amd64-xrt.deb
+sudo apt install --reinstall ./xrt_202320.2.16.0_23.04-amd64-xbflash2.deb
 ```
 
 If you also want a debug and verbose version which traces all the
