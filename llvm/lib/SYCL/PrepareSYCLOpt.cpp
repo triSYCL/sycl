@@ -322,7 +322,7 @@ namespace llvm {
 void initializePrepareSYCLOptLegacyPass(PassRegistry &Registry);
 }
 
-INITIALIZE_PASS(PrepareSYCLOptLegacy, "preparesycl",
+INITIALIZE_PASS(PrepareSYCLOptLegacy, "prepare-sycl",
                 "prepare SYCL device code to optimizations", false, false)
 ModulePass *llvm::createPrepareSYCLOptLegacyPass() { return new PrepareSYCLOptLegacy(); }
 

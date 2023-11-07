@@ -743,7 +743,8 @@ void tools::gnutools::Linker::ConstructJob(Compilation &C, const JobAction &JA,
       AddRunTimeLibs(ToolChain, D, CmdArgs, Args);
 
       if (Args.hasArg(options::OPT_fsycl) &&
-          !Args.hasArg(options::OPT_nolibsycl)) {
+          !Args.hasArg(options::OPT_nolibsycl) &&
+          !Args.hasArg(options::OPT_fsycl_header_only_library)) {
         CmdArgs.push_back("-lsycl");
         CmdArgs.push_back("-lsycl-devicelib-host");
         // Use of -fintelfpga implies -lOpenCL.

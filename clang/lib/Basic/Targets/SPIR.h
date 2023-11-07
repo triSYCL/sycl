@@ -24,6 +24,36 @@
 namespace clang {
 namespace targets {
 
+/// Nullary address space map hack for AIE
+/// \TODO: Either a less hacky implementation, like having an AIE target/target
+///   info rather than using the SPIR target,
+///   or AIE has some of its own address spaces, so perhaps this can be
+///   used for that. However, it's advisable to move towards AIE having its own
+///  target info.
+static const unsigned AIEAddrSpaceMap[] = {
+    0, // Default
+    0, // opencl_global
+    0, // opencl_local
+    0, // opencl_constant
+    0, // opencl_private
+    0, // opencl_generic
+    0, // opencl_global_device
+    0, // opencl_global_host
+    0, // cuda_device
+    0, // cuda_constant
+    0, // cuda_shared
+    // SYCL address space values for this map are dummy
+    0, // sycl_global
+    0, // sycl_global_device
+    0, // sycl_global_host
+    0, // sycl_local
+    0, // sycl_private
+    0, // ptr32_sptr
+    0, // ptr32_uptr
+    0, // ptr64
+    0  // hlsl_groupshared
+};
+
 // Used by both the SPIR and SPIR-V targets.
 static const unsigned SPIRDefIsPrivMap[] = {
     0, // Default
@@ -87,12 +117,14 @@ class LLVM_LIBRARY_VISIBILITY BaseSPIRTargetInfo : public TargetInfo {
 protected:
   BaseSPIRTargetInfo(const llvm::Triple &Triple, const TargetOptions &)
       : TargetInfo(Triple) {
-    assert((Triple.isSPIR() || Triple.isSPIRV()) &&
+    assert((Triple.isSPIR() || Triple.isSPIRV() || Triple.isXilinxAIE()) &&
            "Invalid architecture for SPIR or SPIR-V.");
     TLSSupported = false;
     VLASupported = false;
     LongWidth = LongAlign = 64;
     AddrSpaceMap = &SPIRDefIsPrivMap;
+    if (Triple.isXilinxAIE())
+      AddrSpaceMap = &AIEAddrSpaceMap;
     UseAddrSpaceMapMangling = true;
     HasLegalHalfType = true;
     HasFloat16 = true;
@@ -149,6 +181,10 @@ public:
   }
 
   void setAddressSpaceMap(bool DefaultIsGeneric) {
+    /// This call is only useful for SPIR use-cases so if we are using
+    /// AIEAddrSpaceMap, we do nothing.
+    if (AddrSpaceMap == &AIEAddrSpaceMap)
+      return;
     AddrSpaceMap = DefaultIsGeneric ? &SPIRDefIsGenMap : &SPIRDefIsPrivMap;
   }
 
@@ -184,7 +220,8 @@ class LLVM_LIBRARY_VISIBILITY SPIRTargetInfo : public BaseSPIRTargetInfo {
 public:
   SPIRTargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
       : BaseSPIRTargetInfo(Triple, Opts) {
-    assert(Triple.isSPIR() && "Invalid architecture for SPIR.");
+    assert((Triple.isSPIR() || Triple.isXilinxAIE()) &&
+           "Invalid architecture for SPIR.");
   }
 
   void getTargetDefines(const LangOptions &Opts,
@@ -199,12 +236,18 @@ class LLVM_LIBRARY_VISIBILITY SPIR32TargetInfo : public SPIRTargetInfo {
 public:
   SPIR32TargetInfo(const llvm::Triple &Triple, const TargetOptions &Opts)
       : SPIRTargetInfo(Triple, Opts) {
-    assert(Triple.getArch() == llvm::Triple::spir &&
+    assert((Triple.getArch() == llvm::Triple::spir || Triple.isXilinxAIE()) &&
            "Invalid architecture for 32-bit SPIR.");
     PointerWidth = PointerAlign = 32;
     SizeType = TargetInfo::UnsignedInt;
     PtrDiffType = IntPtrType = TargetInfo::SignedInt;
-    if (Triple.isXilinxFPGA())
+    if (Triple.isXilinxAIE())
+      /// This is only a part of the datalayout used by chess because chess's
+      /// datalayout contains bit-widths that are not multiple of bytes
+      resetDataLayout(
+          "e-i8:8:8-i16:16:16-i32:32:32-i64:32:32-f32:32:32-f64:32:32-p:32:32:"
+          "32:32:8");
+    else if (Triple.isXilinxFPGA())
       resetDataLayout(
           "e-m:e-p:32:32-i64:64-i128:128-i256:256-i512:512-i1024:1024-i2048:"
           "2048-i4096:4096-n8:16:32:64-S128-v16:16-v24:32-v32:32-v48:64-v96:"
@@ -229,6 +272,7 @@ public:
     SizeType = TargetInfo::UnsignedLong;
     PtrDiffType = IntPtrType = TargetInfo::SignedLong;
 
+    assert(!Triple.isXilinxAIE() && "there is no 64bit aie targets");
     if (Triple.isXilinxFPGA())
       resetDataLayout(
           "e-m:e-i64:64-i128:128-i256:256-i512:512-i1024:1024-i2048:2048-i4096:"

@@ -95,6 +95,9 @@ def do_configure(args):
     if args.xrt:
         sycl_enabled_plugins.append("xrt")
 
+    if args.aie:
+        sycl_enabled_plugins.append("aie")
+
     if args.werror or args.ci_defaults:
         sycl_werror = 'ON'
         xpti_enable_werror = 'ON'
@@ -231,6 +234,7 @@ def main():
                         metavar="BUILD_TYPE", default="Release", help="build type: Debug, Release")
     parser.add_argument("--cuda", action='store_true', help="switch from OpenCL to CUDA")
     parser.add_argument("--xrt", action='store_true', help="switch from OpenCL to XRT")
+    parser.add_argument("--aie", action='store_true', help="add compiler support for building AMD AIE application")
     parser.add_argument("--hip", action='store_true', help="switch from OpenCL to HIP")
     parser.add_argument("--hip-platform", type=str, choices=['AMD', 'NVIDIA'], default='AMD', help="choose hardware platform for HIP backend")
     parser.add_argument("--host-target", default='X86',

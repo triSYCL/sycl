@@ -227,7 +227,7 @@ struct VXXIRDowngrader {
   void convertPoisonToZero(Module &M) {
     /// We are iterating over every poison value that is stored by this module.
     for (auto &PV : M.getContext().pImpl->PVConstants) {
-      Type* Ty = PV.second->getType();
+      Type *Ty = PV.second->getType();
       /// Here we can get poison values that are unreachable by "normal" IR
       /// traversal because we are traversing through the module's
       /// implementation. So we do some basic sanity checks to make sure that we
@@ -327,6 +327,9 @@ struct VXXIRDowngrader {
   /// Traverse the IR in the module and warn about IR constructs unsupported by
   /// the backend.
   void warnForIssues(Module &M) {
+    /// AIE cores do not have the same restriction as FPGA.
+    if (!Triple(M.getTargetTriple()).isXilinxFPGA())
+      return;
     WarnVisitor Visitor;
     Visitor.visit(M);
     Visitor.emit();
@@ -347,13 +350,16 @@ struct VXXIRDowngrader {
     removeMetaDataValues(M);
     /// __assert_fail doesn't exist on device and takes its arguments in
     /// addressspace 0 causing addresspace cast.
-    removeFunction(M, "__assert_fail");
+    if (Triple(M.getTargetTriple()).isXilinxFPGA())
+      removeFunction(M, "__assert_fail");
 
     convertPoisonToZero(M);
-    if (Triple(M.getTargetTriple()).getArch() == llvm::Triple::fpga64)
-      M.setTargetTriple("fpga64-xilinx-none");
-    else
-      M.setTargetTriple("fpga32-xilinx-none");
+    if (Triple(M.getTargetTriple()).isXilinxFPGA()) {
+      if (Triple(M.getTargetTriple()).getArch() == llvm::Triple::fpga64)
+        M.setTargetTriple("fpga64-xilinx-none");
+      else
+        M.setTargetTriple("fpga32-xilinx-none");
+    }
     // The module probably changed
 
     CleanerVisitor CV{};

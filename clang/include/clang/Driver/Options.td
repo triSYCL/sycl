@@ -2986,6 +2986,14 @@ def fsycl_link_EQ : Joined<["-"], "fsycl-link=">,
 def fsycl_link : Flag<["-"], "fsycl-link">, Alias<fsycl_link_EQ>,
   AliasArgs<["early"]>, Flags<[CC1Option, CoreOption]>,
   HelpText<"Generate partially linked device object to be used with the host link">;
+def fsycl_header_only_library : Flag<["-"], "fsycl-header-only-library">,
+  Group<f_Group>, Flags<[CC1Option, NoArgumentUnused]>,
+  HelpText<"Tells the SYCL host compilation not to implicitly add -lsycl and "
+           "look for a SYCL library as we will use a header only runtime "
+           "library.">;
+def fsycl_mutable_global : Flag<["-"], "fsycl-mutable-global">,
+  Flags<[CC1Option, CoreOption]>, HelpText<"Allow mutable global variables in SYCL device code">,
+  MarshallingInfoFlag<LangOpts<"SYCLAllowMutableGlobal">>;
 defm sycl_unnamed_lambda
     : BoolFOption<
           "sycl-unnamed-lambda", LangOpts<"SYCLUnnamedLambda">,
@@ -6526,8 +6534,11 @@ def fsycl_allow_variadic_func : Flag<["-"], "fsycl-allow-variadic-func">,
   HelpText<"Allow variadic functions in SYCL device.">,
   MarshallingInfoFlag<LangOpts<"SYCLAllowVariadicFunc">>;
 def fsycl_use_vxx_names : Flag<["-"], "fsycl-use-vxx-names">,
-  HelpText<"Allow virtual functions and types in SYCL device.">,
+  HelpText<"Use the kernel name generator that works with AMD Vitis V++">,
   MarshallingInfoFlag<TargetOpts<"SYCLUseVXXNames">>;
+def fsycl_use_aiepp_lib : Flag<["-"], "fsycl-use-aiepp-lib">,
+  HelpText<"Enable compiler support for the AMD aie++ library instead of the AMD acap++ library">,
+  MarshallingInfoFlag<TargetOpts<"SYCLUseAIEppLib">>;
 def fdeclare_opencl_builtins : Flag<["-"], "fdeclare-opencl-builtins">,
   HelpText<"Add OpenCL builtin function declarations (experimental)">;
 def fdeclare_spirv_builtins

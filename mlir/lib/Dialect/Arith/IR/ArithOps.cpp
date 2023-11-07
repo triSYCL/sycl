@@ -32,15 +32,15 @@ using namespace mlir::arith;
 static IntegerAttr addIntegerAttrs(PatternRewriter &builder, Value res,
                                    Attribute lhs, Attribute rhs) {
   return builder.getIntegerAttr(res.getType(),
-                                lhs.cast<IntegerAttr>().getInt() +
-                                    rhs.cast<IntegerAttr>().getInt());
+                                lhs.cast<IntegerAttr>().getValue() +
+                                    rhs.cast<IntegerAttr>().getValue());
 }
 
 static IntegerAttr subIntegerAttrs(PatternRewriter &builder, Value res,
                                    Attribute lhs, Attribute rhs) {
   return builder.getIntegerAttr(res.getType(),
-                                lhs.cast<IntegerAttr>().getInt() -
-                                    rhs.cast<IntegerAttr>().getInt());
+                                lhs.cast<IntegerAttr>().getValue() -
+                                    rhs.cast<IntegerAttr>().getValue());
 }
 
 /// Invert an integer comparison predicate.
@@ -1452,7 +1452,7 @@ OpFoldResult arith::IndexCastOp::fold(FoldAdaptor adaptor) {
   // A little hack because we go through int. Otherwise, the size of the
   // constant might need to change.
   if (auto value = adaptor.getIn().dyn_cast_or_null<IntegerAttr>())
-    return IntegerAttr::get(getType(), value.getInt());
+    return IntegerAttr::get(getType(), value.getValue());
 
   return {};
 }

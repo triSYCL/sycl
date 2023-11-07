@@ -36,9 +36,12 @@ APFixedPoint APFixedPoint::convert(const FixedPointSemantics &DstSema,
   if (Overflow)
     *Overflow = false;
 
-  if (RelativeUpscale > 0)
+  if (RelativeUpscale > 0) {
     NewVal = NewVal.extend(NewVal.getBitWidth() + RelativeUpscale);
-  NewVal = NewVal.relativeShl(RelativeUpscale);
+    NewVal <<= RelativeUpscale;
+  } else {
+    NewVal >>= std::min<int>(NewVal.getBitWidth(), -RelativeUpscale);
+  }
 
   auto Mask = APInt::getBitsSetFrom(
       NewVal.getBitWidth(),

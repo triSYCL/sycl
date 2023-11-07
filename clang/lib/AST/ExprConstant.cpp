@@ -43,7 +43,9 @@
 #include "clang/AST/CXXInheritance.h"
 #include "clang/AST/CharUnits.h"
 #include "clang/AST/CurrentSourceLocExprScope.h"
+#include "clang/AST/DeclCXX.h"
 #include "clang/AST/Expr.h"
+#include "clang/AST/ExprCXX.h"
 #include "clang/AST/OSLog.h"
 #include "clang/AST/OptionalDiagnostic.h"
 #include "clang/AST/RecordLayout.h"
@@ -8474,7 +8476,14 @@ bool LValueExprEvaluator::VisitMemberExpr(const MemberExpr *E) {
   // Handle static member functions.
   if (const CXXMethodDecl *MD = dyn_cast<CXXMethodDecl>(E->getMemberDecl())) {
     if (MD->isStatic()) {
-      VisitIgnoredBaseExpression(E->getBase());
+      /// These changes here are an easy but not quite correct hack to allow
+      /// static member function to be constexpr even when the object they are
+      /// applied on is not constexpr. This weird hack is used until p1169r4 is
+      /// properly implemented in clang and merged into this repo.
+      /// This is not correct because the expression `E->getBase()` might have
+      /// side-effect that would not be executed.
+      // VisitIgnoredBaseExpression(E->getBase());
+
       return Success(MD);
     }
   }

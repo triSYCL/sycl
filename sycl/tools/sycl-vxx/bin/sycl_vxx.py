@@ -44,7 +44,7 @@ import tempfile
 OptimizationPipeline = [
 "-passes="
 "lower-sycl-metadata,"
-"preparesycl,"
+"prepare-sycl,"
 "loop-unroll,"
 "lower-expect,"
 "simplifycfg,"
@@ -398,7 +398,7 @@ class VitisCompilationDriver:
         opt_options = [
             "--lower-mem-intr-to-llvm-type", "--lower-mem-intr-full-unroll", "--lower-delayed-sycl-metadata",
             "--sycl-prepare-after-O3", "--unroll-only-when-forced", "-S",
-            "-passes=lower-sycl-metadata,globaldce,preparesycl,loop-unroll,kernelPropGen,globaldce",
+            "-passes=lower-sycl-metadata,globaldce,prepare-sycl,loop-unroll,kernelPropGen,globaldce",
             "-strip-debug", "--sycl-kernel-propgen-output",
             f"{kernel_prop}",
             inputs,

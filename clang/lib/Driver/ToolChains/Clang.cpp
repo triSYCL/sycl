@@ -4211,7 +4211,7 @@ static void renderDebugOptions(const ToolChain &TC, const Driver &D,
   /// The VXX backend currently doesn't deal properly with some debug metadata.
   /// and there is currently no support for any debugability of device code.
   /// so we disable emition of debug info for device code.
-  if (T.isXilinxFPGA())
+  if (T.isXilinxSYCLDevice())
     return;
 
   if (Args.hasFlag(options::OPT_fdebug_info_for_profiling,
@@ -4968,9 +4968,13 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
 
   Arg *SYCLStdArg = Args.getLastArg(options::OPT_sycl_std_EQ);
 
-  if (RawTriple.isXilinxFPGA()) {
-    /// -O3 to generate all the necessary information for proper optimization.
-    CmdArgs.push_back("-O3");
+  if (RawTriple.isXilinxSYCLDevice()) {
+    /// -O3 or -Oz to generate all the necessary information for proper
+    /// optimization.
+    if (RawTriple.isXilinxAIE())
+      CmdArgs.push_back("-Oz");
+    else
+      CmdArgs.push_back("-O3");
     /// Use -disable-llvm-passes because we want sycl_vxx and v++ to have full
     /// control over the IR, so we disable any optimization that could run
     /// before them.
@@ -5112,6 +5116,13 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       CmdArgs.push_back("-D__SYCL_HAS_XILINX_DEVICE__");
       CmdArgs.push_back("-fsycl-use-vxx-names");
     }
+    if (!IsSYCLOffloadDevice &&
+        llvm::any_of(
+            llvm::make_range(C.getOffloadToolChains<Action::OFK_SYCL>()),
+            [](const auto &Elem) {
+              return Elem.second->getTriple().isXilinxAIE();
+            }))
+      CmdArgs.push_back("-D__SYCL_XILINX_AIE__");
     if (SYCLStdArg) {
       // Use of -sycl-std=1.2.1 is deprecated. Emit a diagnostic stating so.
       // TODO: remove support at next approprate major release.
@@ -5126,6 +5137,8 @@ void Clang::ConstructJob(Compilation &C, const JobAction &JA,
       // Ensure the default version in SYCL mode is 2020.
       CmdArgs.push_back("-sycl-std=2020");
     }
+    if (Args.hasArg(options::OPT_fsycl_mutable_global))
+      CmdArgs.push_back("-fsycl-mutable-global");
 
     bool DisableSYCLForceInlineKernelLambda = false;
     if (Arg *A = Args.getLastArg(options::OPT_O_Group))

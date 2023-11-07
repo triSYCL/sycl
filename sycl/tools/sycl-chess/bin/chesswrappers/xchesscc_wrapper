@@ -1,0 +1,19 @@
+#!/bin/bash
+#
+# This file is licensed under the Apache License v2.0 with LLVM Exceptions.
+# See https://llvm.org/LICENSE.txt for license information.
+# SPDX-License-Identifier: Apache-2.0 WITH LLVM-exception
+#
+# (c) Copyright 2021 Xilinx Inc.
+
+set -x
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
+CHESS_PATH=$(dirname $(realpath $(which xchesscc)))
+export LD_LIBRARY_PATH=$AIE_ROOT/lib/lnx64.o:$AIE_ROOT/lnx64/tools/dot/lib:$LD_LIBRARY_PATH
+export PATH=$DIR:$AIE_ROOT/bin/unwrapped/lnx64.o:$AIE_ROOT/tps/lnx64/target/bin/LNa64bin
+export RDI_DATADIR=$AIE_ROOT/data
+
+UNWRAPPED_XCHESSCC="$CHESS_PATH/unwrapped/lnx64.o/xchesscc"
+
+echo $UNWRAPPED_XCHESSCC -Y clang=$DIR/chess-clang $@
+$UNWRAPPED_XCHESSCC -Y clang=$DIR/chess-clang $@
