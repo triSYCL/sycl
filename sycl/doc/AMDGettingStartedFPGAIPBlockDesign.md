@@ -1,5 +1,4 @@
-Getting started with Vitis IP block design with an AMD/Xilinx FPGA
-===================================================================================
+# Getting started with Vitis IP block design with an AMD FPGA
 
 Disclaimer: nothing here is supported and this is all about a research
 project.
@@ -97,4 +96,4 @@ when making a block design.
 
 ### Further Reading
 
-See documentation about the SYCL flow [here](GettingStartedXilinxFPGA.md).
+See documentation about the SYCL flow [here](AMDGettingStartedFPGA.md).

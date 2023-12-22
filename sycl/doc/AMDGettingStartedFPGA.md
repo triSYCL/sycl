@@ -9,7 +9,7 @@
         1. [Use a modern BIOS](#Use-a-modern-BIOS)
     1. [Install Vitis 2022.2](#Install-Vitis-20222)
     1. [Boot on a specific kernel](#Boot-on-a-specific-kernel)
-    1. [Installing the AMD XRT runtime](#Installing-the-AMDXilinx-XRT-runtime)
+    1. [Installing the AMD XRT runtime](#Installing-the-AMD-XRT-runtime)
     1. [Install the target platform for the FPGA board](#Install-the-target-platform-for-the-FPGA-board)
         1. [Flash and test the board](#Flash-and-test-the-board)
     1. [Compile the SYCL compiler](#Compile-the-SYCL-compiler)
@@ -28,12 +28,12 @@
         1. [Pinning allocators to specific memory banks](#Pinning-allocators-to-specific-memory-banks)
         1. [Array partitioning](#Array-partitioning)
         1. [Multiple annotations](#Multiple-annotations)
-    1. [AMD Macros](#AMDXilinx-Macros)
+    1. [AMD Macros](#AMD-Macros)
     1. [Known issues](#known-issues)
       1. [xsim](#xsim)
       1. [Shared library](#shared-lib)
 1. [Implementation](#Implementation)
-    1. [AMD FPGA SYCL compiler architecture](#AMDXilinx-FPGA-SYCL-compiler-architecture)
+    1. [AMD FPGA SYCL compiler architecture](#AMD-FPGA-SYCL-compiler-architecture)
     1. [Extra Notes](#Extra-Notes)
     1. [Debugging the SYCL implementation](#Debugging-the-SYCL-implementation)
         1. [Debugging the driver and intermediate steps](#Debugging-the-driver-and-intermediate-steps)
@@ -51,7 +51,7 @@ project.
 
 This document is about the normal SYCL single-source compilation flow.
 There is also another document about the [C++20 non-single source Vitis
-IP mode compilation flow](GettingStartedXilinxFPGAIPBlockDesign.md).
+IP mode compilation flow](AMDGettingStartedFPGAIPBlockDesign.md).
 
 We assume you have an AMD FPGA U200 Alveo board but it might work
 with another board too.
@@ -297,22 +297,28 @@ in the build process.
 > https://github.com/Xilinx/XRT/pull/6269
 
 ```bash
-# Get the latest AMD runtime
+# Get the latest AMD runtime with its submodules
 # Use either ssh
-git clone git@github.com:Xilinx/XRT.git
+git clone --recurse-submodules git@github.com:Xilinx/XRT.git
 # or https according to your usual method
-git clone https://github.com/Xilinx/XRT.git
+git clone --recurse-submodules https://github.com/Xilinx/XRT.git
 cd XRT/build
-# Install the required packages
+# If you need to clean the build from a previous compilation, try:
+#  git clean -f -d -x .
+# Install the required packages, which might fail because of liberal assumptions
 sudo ../src/runtime_src/tools/scripts/xrtdeps.sh
 # Setup the Vitis location so the Microblaze GCC can be used to
 # compile the ERT XRT runtime
 export XILINX_VITIS=/opt/xilinx/Vitis/2022.2
-# Compile the AMD runtime
-./build.sh
+# If you want ccache to be used to amortize on several compilations
+#  PATH="/usr/lib/ccache:$PATH"
+# Compile the AMD runtime, use option to survive to some warning if any
+# on some modern OS and compilers
+./build.sh -disable-werror
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
-sudo apt install --reinstall ./Release/xrt_202320.2.16.0_22.04-amd64-xrt.deb
+udo apt install --reinstall ./Release/xrt_202410.2.17.0_23.10-amd64-xrt.deb
+sudo apt install --reinstall ./Release/xrt_202410.2.17.0_23.10-amd64-xbflash2.deb
 ```
 
 It will install the user-mode XRT runtime and at least compile and
@@ -332,7 +338,8 @@ cd Debug
 make package
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
-sudo apt install --reinstall ./xrt_202320.2.16.0_22.04-amd64-xrt.deb
+sudo apt install --reinstall ./xrt_202320.2.16.0_23.04-amd64-xrt.deb
+sudo apt install --reinstall ./xrt_202320.2.16.0_23.04-amd64-xbflash2.deb
 ```
 
 If you also want a debug and verbose version which traces all the
@@ -1568,7 +1575,7 @@ extern "C" void run(sycl::buffer<int> &v) {
 ## AMD FPGA SYCL compiler architecture
 
 [Architecture of the AMD SYCL
-compiler](Xilinx_sycl_compiler_architecture.rst) describes the
+compiler](design/AMD_FPGA_SYCL_compiler_architecture.rst) describes the
 compiler architecture.
 
 This document aims to cover the key differences of compiling SYCL for AMD
