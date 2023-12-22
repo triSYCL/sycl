@@ -1,4 +1,4 @@
-# SYCL for Vitis 2022.2: experimental melting pot with Intel oneAPI DPC++ SYCL and triSYCL for AMD FPGA and AIE CGRA
+# SYCL for Vitis: experimental melting pot with Intel oneAPI DPC++ SYCL and triSYCL for AMD FPGA and AIE CGRA
 
 This project is about assessing the viability of unifying 2 of the
 current open-source implementations of the SYCL standard
@@ -43,7 +43,8 @@ device-driver https://github.com/Xilinx/XRT
 The triSYCL project also contains part of the ArchGenMLIR
 tool. ArchGenMLIR is a tool to automatically generate approximations
 for mathematical fixed-point functions to optimize hardware usage for
-low precision computations. This was presented at the following conference:
+low precision computations. The similar pre-MLIR ArchGen was presented
+at the following conference:
 
 >  Luc FORGET, Gauthier HARNISCH, Ronan KERYELL and Florent DE
 >  DINECHIN. « A single-source C++ 20 HLS ﬂow for function evaluation
