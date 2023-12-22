@@ -11,9 +11,13 @@ add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/include/sycl/aie-intrinsic.h
                    COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/aie-intrinsic.h ${CMAKE_BINARY_DIR}/include/sycl/aie-intrinsic.h
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/aie-intrinsic.h)
 
-add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/lib/aie-intrinsic.o
+if ("aie" IN_LIST SYCL_ENABLE_PLUGINS)
+  add_custom_command(OUTPUT ${CMAKE_BINARY_DIR}/lib/aie-intrinsic.o
                    COMMAND xchesscc -p me -C Release_LLVM -d -f -c -o ${CMAKE_BINARY_DIR}/lib/aie-intrinsic.o ${CMAKE_CURRENT_SOURCE_DIR}/aie-intrinsic.cpp
                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/aie-intrinsic.cpp ${CMAKE_CURRENT_SOURCE_DIR}/aie-intrinsic.h
                    COMMENT "Built AIE intrinsics library")
+  add_custom_target(aie-intrinsic ALL DEPENDS ${CMAKE_BINARY_DIR}/include/sycl/aie-intrinsic.h ${CMAKE_BINARY_DIR}/lib/aie-intrinsic.o)
+else()
+  add_custom_target(aie-intrinsic ALL DEPENDS ${CMAKE_BINARY_DIR}/include/sycl/aie-intrinsic.h)
+endif()
 
-add_custom_target(aie-intrinsic ALL DEPENDS ${CMAKE_BINARY_DIR}/include/sycl/aie-intrinsic.h ${CMAKE_BINARY_DIR}/lib/aie-intrinsic.o)
