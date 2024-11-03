@@ -317,7 +317,7 @@ export XILINX_VITIS=/opt/xilinx/Vitis/2022.2
 ./build.sh -disable-werror
 # Install the runtime into /opt/xilinx/xrt and compile/install
 # the Linux kernel drivers (adapt to the real name if different)
-udo apt install --reinstall ./Release/xrt_202410.2.17.0_23.10-amd64-xrt.deb
+sudo apt install --reinstall ./Release/xrt_202410.2.17.0_23.10-amd64-xrt.deb
 sudo apt install --reinstall ./Release/xrt_202410.2.17.0_23.10-amd64-xbflash2.deb
 ```
 
