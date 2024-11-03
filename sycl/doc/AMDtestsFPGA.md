@@ -43,7 +43,7 @@ in more complex examples!
 These tests should all be executable in conjunction with the AMD Vitis and
 Vivado tool chains alongside an installation of the XRT runtime. A more
 comprehensive setup explanation can be found in
-[XilinxFPGACompilation.md](XilinxFPGACompilation.md)
+[AMDGettingStartedFPGA.md](AMDGettingStartedFPGA.md)
 
 Most of the tests in this folder are executable using either AMD or Intel
 OpenCL supporting hardware based on the following two compiler commands (just
