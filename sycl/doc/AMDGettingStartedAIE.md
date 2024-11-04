@@ -218,7 +218,7 @@ binary that executes on an x86 CPU. All kernels will also execute on the CPU,
 no device offloading or compilation is done.
 
 ```bash
-  $SYCL_BIN_DIR/clang++ -std=c++20 hello_world.cpp -I/AIE++/acappp/include \
+  $SYCL_BIN_DIR/clang++ -std=c++20 hello_world.cpp -I.../AIE++/acappp/include \
     `pkg-config gtkmm-3.0 --cflags` `pkg-config gtkmm-3.0 --libs`
 ```
 ### Cross-compilation for ARM CPU execution
@@ -233,7 +233,7 @@ compiler supports.
 
 ```bash
   $ISYCL_BIN_DIR/clang++ -std=c++20 -target aarch64-linux-gnu -mcpu=cortex-a72 \
-    --sysroot /net/xsjsycl41/srv/Ubuntu-19.04/arm64-root-server-rw-tmp \
+    --sysroot /net/xsjsycl41/srv/Ubuntu-22.04/arm64-root-server-rw-tmp \
     `pkg-config gtkmm-3.0 --cflags` `pkg-config gtkmm-3.0 --libs` \
     -I/AIE++/acappp/include  hello_world.cpp
 ```

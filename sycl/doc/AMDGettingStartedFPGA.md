@@ -63,6 +63,8 @@ some adaptations.
 
 ## What's new?
 
+- 2024/11/04:
+  - this project is not longer maintained;
 - 2023/05/24:
   - add partial profilling support to `pi_xrt`;
   - clarify `sycl/test/vitis/edge_detection/edge_detection.cpp` test;
