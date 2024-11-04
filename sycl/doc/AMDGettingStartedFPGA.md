@@ -63,6 +63,8 @@ some adaptations.
 
 ## What's new?
 
+- 2024/11/04:
+  - this project is not longer maintained;
 - 2023/05/24:
   - add partial profilling support to `pi_xrt`;
   - clarify `sycl/test/vitis/edge_detection/edge_detection.cpp` test;
@@ -947,7 +949,7 @@ git clone --branch sycl/unified/master git@github.com:triSYCL/sycl.git llvm
 # Use --xrt is to enable the optional XRT plugin. This is a replacement for the OpenCL plugin
 # because XRT offers more control and expressiveness on the hardware
 python3 $DPCPP_HOME/llvm/buildbot/configure.py --xrt
-python3 $DPCPP_HOME/llvm/buildbot/compile.py
+python3 $DPCPP_HOME/llvm/buildbot/compile.py --verbose
 ```
 
 These scripts have many options which can be displayed when using the
