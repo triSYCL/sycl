@@ -12,16 +12,6 @@ modern C++23 and heterogeneous computing involving FPGA, CGRA, GPU, DSP,
 other accelerators or just CPU from various vendors at the same time
 in the same program.
 
-There are mostly 2 public branches:
-
-- https://github.com/triSYCL/sycl/tree/sycl/unified/next is where we
-  are doing our latest developments and where you can get the latest
-  features for the latest platforms and OS. This is where you should
-  open your pull-requests;
-- https://github.com/triSYCL/sycl/tree/sycl/unified/master is the more
-  stable and older version.
-
-
 ## What is SYCL
 
 [SYCL](https://www.khronos.org/sycl/) is a single-source
