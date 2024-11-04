@@ -949,7 +949,7 @@ git clone --branch sycl/unified/master git@github.com:triSYCL/sycl.git llvm
 # Use --xrt is to enable the optional XRT plugin. This is a replacement for the OpenCL plugin
 # because XRT offers more control and expressiveness on the hardware
 python3 $DPCPP_HOME/llvm/buildbot/configure.py --xrt
-python3 $DPCPP_HOME/llvm/buildbot/compile.py
+python3 $DPCPP_HOME/llvm/buildbot/compile.py --verbose
 ```
 
 These scripts have many options which can be displayed when using the

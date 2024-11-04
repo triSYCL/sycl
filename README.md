@@ -12,6 +12,17 @@ modern C++23 and heterogeneous computing involving FPGA, CGRA, GPU, DSP,
 other accelerators or just CPU from various vendors at the same time
 in the same program.
 
+Note: this project is no longer maintained:
+
+> On the FPGA side, AMD Vitis tools rely on old LLVM versions with typed pointer
+> implementation while modern LLVM is now using opaque pointer, making the task
+> even more difficult for this project.
+
+> Some of the AIE ideas developed in this project are going on in the
+> [MLIR AIE](https://github.com/Xilinx/mlir-aie) and
+> [MLIR AIR](https://github.com/Xilinx/mlir-air) projects with a new MLIR C++
+> front-end based on [ClangIR](https://llvm.github.io/clangir).
+
 ## What is SYCL
 
 [SYCL](https://www.khronos.org/sycl/) is a single-source
